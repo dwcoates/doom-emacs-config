@@ -8354,25 +8354,6 @@ describe("the context usage the vendor states, mapped field by field", () => {
   });
 });
 
-describe("the account's usage", () => {
-  it("is never sampled: no session states an account-usage figure of its own", async () => {
-    // Arrange
-    const h = harness();
-
-    // Act
-    const seen = await pushedUpdates(
-      h,
-      (update) => (update.case === "accountUsage" ? update.value : undefined),
-      async () => {
-        await started(h);
-      },
-    );
-
-    // Assert
-    expect(seen).toEqual([]);
-  });
-});
-
 describe("mcp server health, arm by arm", () => {
   /** The health arm the engine pushed for one declared server. */
   async function healthFor(status: McpServerStatusLike["status"]): Promise<string | undefined> {

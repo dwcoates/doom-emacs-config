@@ -2039,12 +2039,6 @@ func networkResumeOutcomeUpdate() *conversationv1.SessionUpdate {
 	}}
 }
 
-func accountUsageUpdate() *conversationv1.SessionUpdate {
-	return &conversationv1.SessionUpdate{Update: &conversationv1.SessionUpdate_AccountUsage{
-		AccountUsage: &conversationv1.SessionAccountUsage{ObservedAtMs: 1700000000000},
-	}}
-}
-
 func rateLimitStatusUpdate() *conversationv1.SessionUpdate {
 	return &conversationv1.SessionUpdate{Update: &conversationv1.SessionUpdate_RateLimitStatus{
 		RateLimitStatus: &conversationv1.SessionRateLimitStatus{

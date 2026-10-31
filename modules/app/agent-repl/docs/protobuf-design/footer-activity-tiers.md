@@ -914,6 +914,29 @@ unchanged.
   - A row stored with `no_allowance=1` reloads as unobserved and re-resolves
     on the account's next sample.
 
+### 9. The account is never sampled, and entry 8's billing mode is retired (2026-10-30)
+
+- **Decided by** the owner: the shim stops sampling the account's usage, and
+  the five-hour window is no longer drawn.
+  - The vendor's experimental usage verb cost each idle session's CLI about
+    18 CPU-seconds every five minutes.
+  - The plan has no five-hour window to draw.
+- **What changed, on the wire** (record:
+  `docs/protobuf-design/retire-account-usage.md`):
+  - `conversation.v1.SessionUpdate.account_usage` (tag 6) is retired and
+    reserved, with every message only it used.
+  - `frontend.v1.FooterActivityEnduring.seat_spend` (tag 5) is retired, with
+    `FooterActivityEnduringSeatSpend` and `FooterMoney`. Entry 8's per-seat
+    line had no source but a sample.
+  - `frontend.v1.FooterActivityEnduringUsage.session` (tag 1) and `.sample`
+    (tag 3) are retired, with `FooterAllowanceSample` and its arms.
+- **What changed, in the systems:**
+  - The daemon figures every window from the vendor's rate-limit events; the
+    enduring line is `usage` or `unobserved`.
+  - wsm layout 91 drops the session window, seat, sample-stamp and
+    `no_allowance` columns from `account_usage`.
+  - The webapp draws weekly then overage, and no seat line.
+
 ## Sweep
 
 - Nothing in `footer.proto` is left unreferenced after the change.

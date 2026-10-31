@@ -73,6 +73,15 @@ func Statusless(window *conversationv1.SessionRateLimitType) *conversationv1.Ses
 	return &conversationv1.SessionRateLimitStatus{RateLimitType: window}
 }
 
+// Figured states the window's figures on STATUS: the vendor's utilization
+// percentage and its reset instant in unix millis, the two fields an event
+// carries when it figures its window. It answers STATUS for chaining.
+func Figured(status *conversationv1.SessionRateLimitStatus, utilizationPercent float64, resetsAtMs int64) *conversationv1.SessionRateLimitStatus {
+	status.UtilizationPercent = &utilizationPercent
+	status.ResetsAtMs = &resetsAtMs
+	return status
+}
+
 // Update wraps STATUS as the session update the shim pushes.
 func Update(status *conversationv1.SessionRateLimitStatus) *conversationv1.SessionUpdate {
 	return &conversationv1.SessionUpdate{Update: &conversationv1.SessionUpdate_RateLimitStatus{RateLimitStatus: status}}

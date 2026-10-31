@@ -432,10 +432,9 @@ function rateLimitOverage(
 /**
  * The vendor's rate-limit event, typed.
  *
- * STREAM-ONLY (landing 4): this is the live `rate_limit_event` the SDK pushes,
- * and it is a different fact from `account_usage`, which is the sampled answer
- * to the vendor's usage verb. Two facts, two arms — folding one into the other
- * would make a live status and a sample indistinguishable.
+ * STREAM-ONLY (landing 4): this is the live `rate_limit_event` the SDK pushes.
+ * The account's usage is never sampled, so this event is the only source of a
+ * window's figures and verdict.
  *
  * EVERY OPTIONAL FIELD IS ABSENT WHEN THE VENDOR OMITTED IT. The conversions are
  * the two the proto names: seconds→millis, fraction→percent.

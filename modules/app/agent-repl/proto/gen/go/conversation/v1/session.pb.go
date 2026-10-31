@@ -1023,7 +1023,6 @@ type SessionUpdate struct {
 	//	*SessionUpdate_ModelChanged
 	//	*SessionUpdate_FastMode
 	//	*SessionUpdate_McpServer
-	//	*SessionUpdate_AccountUsage
 	//	*SessionUpdate_PermissionModeChanged
 	//	*SessionUpdate_RateLimitStatus
 	//	*SessionUpdate_Diagnostics
@@ -1124,15 +1123,6 @@ func (x *SessionUpdate) GetMcpServer() *SessionMcpServer {
 	if x != nil {
 		if x, ok := x.Update.(*SessionUpdate_McpServer); ok {
 			return x.McpServer
-		}
-	}
-	return nil
-}
-
-func (x *SessionUpdate) GetAccountUsage() *SessionAccountUsage {
-	if x != nil {
-		if x, ok := x.Update.(*SessionUpdate_AccountUsage); ok {
-			return x.AccountUsage
 		}
 	}
 	return nil
@@ -1332,11 +1322,6 @@ type SessionUpdate_McpServer struct {
 	McpServer *SessionMcpServer `protobuf:"bytes,5,opt,name=mcp_server,json=mcpServer,proto3,oneof"`
 }
 
-type SessionUpdate_AccountUsage struct {
-	// The account's usage allowance was observed.
-	AccountUsage *SessionAccountUsage `protobuf:"bytes,6,opt,name=account_usage,json=accountUsage,proto3,oneof"`
-}
-
 type SessionUpdate_PermissionModeChanged struct {
 	// The session's permission mode changed — by SetSessionPermissionMode, or by a
 	// standing permission grant that set it. Stated here even when the
@@ -1512,8 +1497,6 @@ func (*SessionUpdate_ModelChanged) isSessionUpdate_Update() {}
 func (*SessionUpdate_FastMode) isSessionUpdate_Update() {}
 
 func (*SessionUpdate_McpServer) isSessionUpdate_Update() {}
-
-func (*SessionUpdate_AccountUsage) isSessionUpdate_Update() {}
 
 func (*SessionUpdate_PermissionModeChanged) isSessionUpdate_Update() {}
 
@@ -4932,1007 +4915,6 @@ func (x *SessionMcpServerFailed) GetError() string {
 	return ""
 }
 
-// What the account's usage looked like when sampled. LIVE, whenever the
-// shim observes it — not pinned to a turn boundary.
-//
-// THE OUTCOME IS BY BILLING MODE (owner ruling, 2026-10-06): an account billed
-// by allowance windows (a Pro or Max subscription) reads `available`; an
-// account billed by a monthly per-seat spend allotment reads `seat_spend`;
-// never both. The shim picks `seat_spend` exactly when the subscription type
-// is enterprise AND the vendor reports a monthly limit with no five-hour
-// window; anything else that reports windows is `available`.
-type SessionAccountUsage struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// When it was sampled, in unix millis.
-	ObservedAtMs int64 `protobuf:"varint,1,opt,name=observed_at_ms,json=observedAtMs,proto3" json:"observed_at_ms,omitempty"`
-	// THE ARM IS THE BILLING MODE, or why no figure could be read.
-	//
-	// Types that are valid to be assigned to Outcome:
-	//
-	//	*SessionAccountUsage_Available
-	//	*SessionAccountUsage_Unavailable
-	//	*SessionAccountUsage_SeatSpend
-	Outcome isSessionAccountUsage_Outcome `protobuf_oneof:"outcome"`
-	// The account's plan as the vendor names it. UNSET when the vendor named
-	// none (an API key or third-party provider session, or a failed sample).
-	// SET WITH ITS ONEOF UNASSIGNED when the vendor named a plan this schema
-	// revision does not.
-	SubscriptionType *SessionSubscriptionType `protobuf:"bytes,6,opt,name=subscription_type,json=subscriptionType,proto3,oneof" json:"subscription_type,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
-}
-
-func (x *SessionAccountUsage) Reset() {
-	*x = SessionAccountUsage{}
-	mi := &file_conversation_v1_session_proto_msgTypes[66]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *SessionAccountUsage) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*SessionAccountUsage) ProtoMessage() {}
-
-func (x *SessionAccountUsage) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_session_proto_msgTypes[66]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use SessionAccountUsage.ProtoReflect.Descriptor instead.
-func (*SessionAccountUsage) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_session_proto_rawDescGZIP(), []int{66}
-}
-
-func (x *SessionAccountUsage) GetObservedAtMs() int64 {
-	if x != nil {
-		return x.ObservedAtMs
-	}
-	return 0
-}
-
-func (x *SessionAccountUsage) GetOutcome() isSessionAccountUsage_Outcome {
-	if x != nil {
-		return x.Outcome
-	}
-	return nil
-}
-
-func (x *SessionAccountUsage) GetAvailable() *SessionAccountUsageAvailable {
-	if x != nil {
-		if x, ok := x.Outcome.(*SessionAccountUsage_Available); ok {
-			return x.Available
-		}
-	}
-	return nil
-}
-
-func (x *SessionAccountUsage) GetUnavailable() *SessionAccountUsageUnavailable {
-	if x != nil {
-		if x, ok := x.Outcome.(*SessionAccountUsage_Unavailable); ok {
-			return x.Unavailable
-		}
-	}
-	return nil
-}
-
-func (x *SessionAccountUsage) GetSeatSpend() *SessionAccountUsageSeatSpend {
-	if x != nil {
-		if x, ok := x.Outcome.(*SessionAccountUsage_SeatSpend); ok {
-			return x.SeatSpend
-		}
-	}
-	return nil
-}
-
-func (x *SessionAccountUsage) GetSubscriptionType() *SessionSubscriptionType {
-	if x != nil {
-		return x.SubscriptionType
-	}
-	return nil
-}
-
-type isSessionAccountUsage_Outcome interface {
-	isSessionAccountUsage_Outcome()
-}
-
-type SessionAccountUsage_Available struct {
-	// The account's allowance windows were read (subscription billing).
-	Available *SessionAccountUsageAvailable `protobuf:"bytes,3,opt,name=available,proto3,oneof"`
-}
-
-type SessionAccountUsage_Unavailable struct {
-	// No figure could be read.
-	Unavailable *SessionAccountUsageUnavailable `protobuf:"bytes,4,opt,name=unavailable,proto3,oneof"`
-}
-
-type SessionAccountUsage_SeatSpend struct {
-	// The account is billed by a monthly per-seat spend allotment.
-	SeatSpend *SessionAccountUsageSeatSpend `protobuf:"bytes,5,opt,name=seat_spend,json=seatSpend,proto3,oneof"`
-}
-
-func (*SessionAccountUsage_Available) isSessionAccountUsage_Outcome() {}
-
-func (*SessionAccountUsage_Unavailable) isSessionAccountUsage_Outcome() {}
-
-func (*SessionAccountUsage_SeatSpend) isSessionAccountUsage_Outcome() {}
-
-// The account's plan (the SDK's `subscription_type`). THE ARM IS THE PLAN.
-type SessionSubscriptionType struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Types that are valid to be assigned to Plan:
-	//
-	//	*SessionSubscriptionType_Pro
-	//	*SessionSubscriptionType_Max
-	//	*SessionSubscriptionType_Team
-	//	*SessionSubscriptionType_Enterprise
-	Plan          isSessionSubscriptionType_Plan `protobuf_oneof:"plan"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *SessionSubscriptionType) Reset() {
-	*x = SessionSubscriptionType{}
-	mi := &file_conversation_v1_session_proto_msgTypes[67]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *SessionSubscriptionType) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*SessionSubscriptionType) ProtoMessage() {}
-
-func (x *SessionSubscriptionType) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_session_proto_msgTypes[67]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use SessionSubscriptionType.ProtoReflect.Descriptor instead.
-func (*SessionSubscriptionType) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_session_proto_rawDescGZIP(), []int{67}
-}
-
-func (x *SessionSubscriptionType) GetPlan() isSessionSubscriptionType_Plan {
-	if x != nil {
-		return x.Plan
-	}
-	return nil
-}
-
-func (x *SessionSubscriptionType) GetPro() *SessionSubscriptionTypePro {
-	if x != nil {
-		if x, ok := x.Plan.(*SessionSubscriptionType_Pro); ok {
-			return x.Pro
-		}
-	}
-	return nil
-}
-
-func (x *SessionSubscriptionType) GetMax() *SessionSubscriptionTypeMax {
-	if x != nil {
-		if x, ok := x.Plan.(*SessionSubscriptionType_Max); ok {
-			return x.Max
-		}
-	}
-	return nil
-}
-
-func (x *SessionSubscriptionType) GetTeam() *SessionSubscriptionTypeTeam {
-	if x != nil {
-		if x, ok := x.Plan.(*SessionSubscriptionType_Team); ok {
-			return x.Team
-		}
-	}
-	return nil
-}
-
-func (x *SessionSubscriptionType) GetEnterprise() *SessionSubscriptionTypeEnterprise {
-	if x != nil {
-		if x, ok := x.Plan.(*SessionSubscriptionType_Enterprise); ok {
-			return x.Enterprise
-		}
-	}
-	return nil
-}
-
-type isSessionSubscriptionType_Plan interface {
-	isSessionSubscriptionType_Plan()
-}
-
-type SessionSubscriptionType_Pro struct {
-	Pro *SessionSubscriptionTypePro `protobuf:"bytes,1,opt,name=pro,proto3,oneof"`
-}
-
-type SessionSubscriptionType_Max struct {
-	Max *SessionSubscriptionTypeMax `protobuf:"bytes,2,opt,name=max,proto3,oneof"`
-}
-
-type SessionSubscriptionType_Team struct {
-	Team *SessionSubscriptionTypeTeam `protobuf:"bytes,3,opt,name=team,proto3,oneof"`
-}
-
-type SessionSubscriptionType_Enterprise struct {
-	Enterprise *SessionSubscriptionTypeEnterprise `protobuf:"bytes,4,opt,name=enterprise,proto3,oneof"`
-}
-
-func (*SessionSubscriptionType_Pro) isSessionSubscriptionType_Plan() {}
-
-func (*SessionSubscriptionType_Max) isSessionSubscriptionType_Plan() {}
-
-func (*SessionSubscriptionType_Team) isSessionSubscriptionType_Plan() {}
-
-func (*SessionSubscriptionType_Enterprise) isSessionSubscriptionType_Plan() {}
-
-// A Claude Pro subscription.
-type SessionSubscriptionTypePro struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *SessionSubscriptionTypePro) Reset() {
-	*x = SessionSubscriptionTypePro{}
-	mi := &file_conversation_v1_session_proto_msgTypes[68]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *SessionSubscriptionTypePro) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*SessionSubscriptionTypePro) ProtoMessage() {}
-
-func (x *SessionSubscriptionTypePro) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_session_proto_msgTypes[68]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use SessionSubscriptionTypePro.ProtoReflect.Descriptor instead.
-func (*SessionSubscriptionTypePro) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_session_proto_rawDescGZIP(), []int{68}
-}
-
-// A Claude Max subscription.
-type SessionSubscriptionTypeMax struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *SessionSubscriptionTypeMax) Reset() {
-	*x = SessionSubscriptionTypeMax{}
-	mi := &file_conversation_v1_session_proto_msgTypes[69]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *SessionSubscriptionTypeMax) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*SessionSubscriptionTypeMax) ProtoMessage() {}
-
-func (x *SessionSubscriptionTypeMax) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_session_proto_msgTypes[69]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use SessionSubscriptionTypeMax.ProtoReflect.Descriptor instead.
-func (*SessionSubscriptionTypeMax) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_session_proto_rawDescGZIP(), []int{69}
-}
-
-// A Claude Team subscription.
-type SessionSubscriptionTypeTeam struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *SessionSubscriptionTypeTeam) Reset() {
-	*x = SessionSubscriptionTypeTeam{}
-	mi := &file_conversation_v1_session_proto_msgTypes[70]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *SessionSubscriptionTypeTeam) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*SessionSubscriptionTypeTeam) ProtoMessage() {}
-
-func (x *SessionSubscriptionTypeTeam) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_session_proto_msgTypes[70]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use SessionSubscriptionTypeTeam.ProtoReflect.Descriptor instead.
-func (*SessionSubscriptionTypeTeam) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_session_proto_rawDescGZIP(), []int{70}
-}
-
-// A Claude Enterprise seat.
-type SessionSubscriptionTypeEnterprise struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *SessionSubscriptionTypeEnterprise) Reset() {
-	*x = SessionSubscriptionTypeEnterprise{}
-	mi := &file_conversation_v1_session_proto_msgTypes[71]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *SessionSubscriptionTypeEnterprise) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*SessionSubscriptionTypeEnterprise) ProtoMessage() {}
-
-func (x *SessionSubscriptionTypeEnterprise) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_session_proto_msgTypes[71]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use SessionSubscriptionTypeEnterprise.ProtoReflect.Descriptor instead.
-func (*SessionSubscriptionTypeEnterprise) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_session_proto_rawDescGZIP(), []int{71}
-}
-
-// The account's seat spend for the current month: what has been spent
-// against the seat's monthly allotment. The vendor states no billing-period
-// reset, so none is carried.
-type SessionAccountUsageSeatSpend struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The seat's monthly allotment (the vendor's extra_usage.monthly_limit).
-	Allotment *SessionMoney `protobuf:"bytes,1,opt,name=allotment,proto3" json:"allotment,omitempty"`
-	// Month-to-date spend (the vendor's extra_usage.used_credits), in the
-	// allotment's currency. UNSET while the vendor has reported no spend
-	// figure.
-	Spent         *SessionMoney `protobuf:"bytes,2,opt,name=spent,proto3,oneof" json:"spent,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *SessionAccountUsageSeatSpend) Reset() {
-	*x = SessionAccountUsageSeatSpend{}
-	mi := &file_conversation_v1_session_proto_msgTypes[72]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *SessionAccountUsageSeatSpend) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*SessionAccountUsageSeatSpend) ProtoMessage() {}
-
-func (x *SessionAccountUsageSeatSpend) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_session_proto_msgTypes[72]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use SessionAccountUsageSeatSpend.ProtoReflect.Descriptor instead.
-func (*SessionAccountUsageSeatSpend) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_session_proto_rawDescGZIP(), []int{72}
-}
-
-func (x *SessionAccountUsageSeatSpend) GetAllotment() *SessionMoney {
-	if x != nil {
-		return x.Allotment
-	}
-	return nil
-}
-
-func (x *SessionAccountUsageSeatSpend) GetSpent() *SessionMoney {
-	if x != nil {
-		return x.Spent
-	}
-	return nil
-}
-
-// An amount of money as the vendor states it.
-type SessionMoney struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The amount in minor units of the currency (cents for USD).
-	AmountMinor int64 `protobuf:"varint,1,opt,name=amount_minor,json=amountMinor,proto3" json:"amount_minor,omitempty"`
-	// The ISO 4217 currency code, verbatim (e.g. "USD").
-	Currency      string `protobuf:"bytes,2,opt,name=currency,proto3" json:"currency,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *SessionMoney) Reset() {
-	*x = SessionMoney{}
-	mi := &file_conversation_v1_session_proto_msgTypes[73]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *SessionMoney) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*SessionMoney) ProtoMessage() {}
-
-func (x *SessionMoney) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_session_proto_msgTypes[73]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use SessionMoney.ProtoReflect.Descriptor instead.
-func (*SessionMoney) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_session_proto_rawDescGZIP(), []int{73}
-}
-
-func (x *SessionMoney) GetAmountMinor() int64 {
-	if x != nil {
-		return x.AmountMinor
-	}
-	return 0
-}
-
-func (x *SessionMoney) GetCurrency() string {
-	if x != nil {
-		return x.Currency
-	}
-	return ""
-}
-
-// The allowance windows were read.
-type SessionAccountUsageAvailable struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The rolling five-hour window.
-	FiveHour *SessionUsageWindow `protobuf:"bytes,1,opt,name=five_hour,json=fiveHour,proto3" json:"five_hour,omitempty"`
-	// THE LONGER WINDOWS, each UNSET when the account has no such allowance or
-	// the vendor reported none for it.
-	//
-	// SEPARATE FIELDS RATHER THAN A LIST, because a consumer draws a NAMED
-	// window ("weekly", "weekly on Opus") and a list keyed by a vendor string
-	// would put the naming back in the consumer's hands. A window the vendor
-	// adds later is a compiler-surfaced gap rather than an entry silently
-	// dropped.
-	//
-	// The rolling seven-day allowance across everything.
-	SevenDay *SessionUsageWindow `protobuf:"bytes,2,opt,name=seven_day,json=sevenDay,proto3,oneof" json:"seven_day,omitempty"`
-	// The rolling seven-day allowance for OAuth-app traffic, which is metered
-	// apart from the account's own.
-	SevenDayOauthApps *SessionUsageWindow `protobuf:"bytes,3,opt,name=seven_day_oauth_apps,json=sevenDayOauthApps,proto3,oneof" json:"seven_day_oauth_apps,omitempty"`
-	// The rolling seven-day allowance for the Opus model family. EXHAUSTIBLE ON
-	// ITS OWN: this can run out while the overall weekly window has room, which
-	// is otherwise a refusal with no visible cause.
-	SevenDayOpus *SessionUsageWindow `protobuf:"bytes,4,opt,name=seven_day_opus,json=sevenDayOpus,proto3,oneof" json:"seven_day_opus,omitempty"`
-	// The rolling seven-day allowance for the Sonnet model family.
-	SevenDaySonnet *SessionUsageWindow `protobuf:"bytes,5,opt,name=seven_day_sonnet,json=sevenDaySonnet,proto3,oneof" json:"seven_day_sonnet,omitempty"`
-	// Allowances scoped to one model each, for models the vendor meters
-	// individually. Empty when it meters none that way.
-	ModelScoped   []*SessionModelUsageWindow `protobuf:"bytes,6,rep,name=model_scoped,json=modelScoped,proto3" json:"model_scoped,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *SessionAccountUsageAvailable) Reset() {
-	*x = SessionAccountUsageAvailable{}
-	mi := &file_conversation_v1_session_proto_msgTypes[74]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *SessionAccountUsageAvailable) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*SessionAccountUsageAvailable) ProtoMessage() {}
-
-func (x *SessionAccountUsageAvailable) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_session_proto_msgTypes[74]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use SessionAccountUsageAvailable.ProtoReflect.Descriptor instead.
-func (*SessionAccountUsageAvailable) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_session_proto_rawDescGZIP(), []int{74}
-}
-
-func (x *SessionAccountUsageAvailable) GetFiveHour() *SessionUsageWindow {
-	if x != nil {
-		return x.FiveHour
-	}
-	return nil
-}
-
-func (x *SessionAccountUsageAvailable) GetSevenDay() *SessionUsageWindow {
-	if x != nil {
-		return x.SevenDay
-	}
-	return nil
-}
-
-func (x *SessionAccountUsageAvailable) GetSevenDayOauthApps() *SessionUsageWindow {
-	if x != nil {
-		return x.SevenDayOauthApps
-	}
-	return nil
-}
-
-func (x *SessionAccountUsageAvailable) GetSevenDayOpus() *SessionUsageWindow {
-	if x != nil {
-		return x.SevenDayOpus
-	}
-	return nil
-}
-
-func (x *SessionAccountUsageAvailable) GetSevenDaySonnet() *SessionUsageWindow {
-	if x != nil {
-		return x.SevenDaySonnet
-	}
-	return nil
-}
-
-func (x *SessionAccountUsageAvailable) GetModelScoped() []*SessionModelUsageWindow {
-	if x != nil {
-		return x.ModelScoped
-	}
-	return nil
-}
-
-// One allowance window that applies to a single model.
-type SessionModelUsageWindow struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Which model the window meters.
-	Model *AgentModel `protobuf:"bytes,1,opt,name=model,proto3" json:"model,omitempty"`
-	// The window's figures.
-	Window        *SessionUsageWindow `protobuf:"bytes,2,opt,name=window,proto3" json:"window,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *SessionModelUsageWindow) Reset() {
-	*x = SessionModelUsageWindow{}
-	mi := &file_conversation_v1_session_proto_msgTypes[75]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *SessionModelUsageWindow) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*SessionModelUsageWindow) ProtoMessage() {}
-
-func (x *SessionModelUsageWindow) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_session_proto_msgTypes[75]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use SessionModelUsageWindow.ProtoReflect.Descriptor instead.
-func (*SessionModelUsageWindow) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_session_proto_rawDescGZIP(), []int{75}
-}
-
-func (x *SessionModelUsageWindow) GetModel() *AgentModel {
-	if x != nil {
-		return x.Model
-	}
-	return nil
-}
-
-func (x *SessionModelUsageWindow) GetWindow() *SessionUsageWindow {
-	if x != nil {
-		return x.Window
-	}
-	return nil
-}
-
-// One allowance window's figures.
-type SessionUsageWindow struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// How much of the window is used, 0–100.
-	UtilizationPercent float64 `protobuf:"fixed64,1,opt,name=utilization_percent,json=utilizationPercent,proto3" json:"utilization_percent,omitempty"`
-	// When the window resets, in unix millis.
-	ResetsAtMs    int64 `protobuf:"varint,2,opt,name=resets_at_ms,json=resetsAtMs,proto3" json:"resets_at_ms,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *SessionUsageWindow) Reset() {
-	*x = SessionUsageWindow{}
-	mi := &file_conversation_v1_session_proto_msgTypes[76]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *SessionUsageWindow) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*SessionUsageWindow) ProtoMessage() {}
-
-func (x *SessionUsageWindow) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_session_proto_msgTypes[76]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use SessionUsageWindow.ProtoReflect.Descriptor instead.
-func (*SessionUsageWindow) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_session_proto_rawDescGZIP(), []int{76}
-}
-
-func (x *SessionUsageWindow) GetUtilizationPercent() float64 {
-	if x != nil {
-		return x.UtilizationPercent
-	}
-	return 0
-}
-
-func (x *SessionUsageWindow) GetResetsAtMs() int64 {
-	if x != nil {
-		return x.ResetsAtMs
-	}
-	return 0
-}
-
-// Why no figure could be read. THE ARM IS THE REASON.
-type SessionAccountUsageUnavailable struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Types that are valid to be assigned to Reason:
-	//
-	//	*SessionAccountUsageUnavailable_ServiceUnavailable
-	//	*SessionAccountUsageUnavailable_WindowUnavailable
-	//	*SessionAccountUsageUnavailable_UtilizationUnavailable
-	//	*SessionAccountUsageUnavailable_SamplingFailure
-	Reason        isSessionAccountUsageUnavailable_Reason `protobuf_oneof:"reason"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *SessionAccountUsageUnavailable) Reset() {
-	*x = SessionAccountUsageUnavailable{}
-	mi := &file_conversation_v1_session_proto_msgTypes[77]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *SessionAccountUsageUnavailable) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*SessionAccountUsageUnavailable) ProtoMessage() {}
-
-func (x *SessionAccountUsageUnavailable) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_session_proto_msgTypes[77]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use SessionAccountUsageUnavailable.ProtoReflect.Descriptor instead.
-func (*SessionAccountUsageUnavailable) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_session_proto_rawDescGZIP(), []int{77}
-}
-
-func (x *SessionAccountUsageUnavailable) GetReason() isSessionAccountUsageUnavailable_Reason {
-	if x != nil {
-		return x.Reason
-	}
-	return nil
-}
-
-func (x *SessionAccountUsageUnavailable) GetServiceUnavailable() *SessionUsageServiceUnavailable {
-	if x != nil {
-		if x, ok := x.Reason.(*SessionAccountUsageUnavailable_ServiceUnavailable); ok {
-			return x.ServiceUnavailable
-		}
-	}
-	return nil
-}
-
-func (x *SessionAccountUsageUnavailable) GetWindowUnavailable() *SessionUsageWindowUnavailable {
-	if x != nil {
-		if x, ok := x.Reason.(*SessionAccountUsageUnavailable_WindowUnavailable); ok {
-			return x.WindowUnavailable
-		}
-	}
-	return nil
-}
-
-func (x *SessionAccountUsageUnavailable) GetUtilizationUnavailable() *SessionUsageUtilizationUnavailable {
-	if x != nil {
-		if x, ok := x.Reason.(*SessionAccountUsageUnavailable_UtilizationUnavailable); ok {
-			return x.UtilizationUnavailable
-		}
-	}
-	return nil
-}
-
-func (x *SessionAccountUsageUnavailable) GetSamplingFailure() *SessionUsageSamplingFailure {
-	if x != nil {
-		if x, ok := x.Reason.(*SessionAccountUsageUnavailable_SamplingFailure); ok {
-			return x.SamplingFailure
-		}
-	}
-	return nil
-}
-
-type isSessionAccountUsageUnavailable_Reason interface {
-	isSessionAccountUsageUnavailable_Reason()
-}
-
-type SessionAccountUsageUnavailable_ServiceUnavailable struct {
-	// The usage service did not answer.
-	ServiceUnavailable *SessionUsageServiceUnavailable `protobuf:"bytes,1,opt,name=service_unavailable,json=serviceUnavailable,proto3,oneof"`
-}
-
-type SessionAccountUsageUnavailable_WindowUnavailable struct {
-	// The service answered without a five-hour window.
-	WindowUnavailable *SessionUsageWindowUnavailable `protobuf:"bytes,2,opt,name=window_unavailable,json=windowUnavailable,proto3,oneof"`
-}
-
-type SessionAccountUsageUnavailable_UtilizationUnavailable struct {
-	// The window carried no utilization figure.
-	UtilizationUnavailable *SessionUsageUtilizationUnavailable `protobuf:"bytes,3,opt,name=utilization_unavailable,json=utilizationUnavailable,proto3,oneof"`
-}
-
-type SessionAccountUsageUnavailable_SamplingFailure struct {
-	// The shim's own sampling failed.
-	SamplingFailure *SessionUsageSamplingFailure `protobuf:"bytes,4,opt,name=sampling_failure,json=samplingFailure,proto3,oneof"`
-}
-
-func (*SessionAccountUsageUnavailable_ServiceUnavailable) isSessionAccountUsageUnavailable_Reason() {}
-
-func (*SessionAccountUsageUnavailable_WindowUnavailable) isSessionAccountUsageUnavailable_Reason() {}
-
-func (*SessionAccountUsageUnavailable_UtilizationUnavailable) isSessionAccountUsageUnavailable_Reason() {
-}
-
-func (*SessionAccountUsageUnavailable_SamplingFailure) isSessionAccountUsageUnavailable_Reason() {}
-
-// The usage service did not answer.
-type SessionUsageServiceUnavailable struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *SessionUsageServiceUnavailable) Reset() {
-	*x = SessionUsageServiceUnavailable{}
-	mi := &file_conversation_v1_session_proto_msgTypes[78]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *SessionUsageServiceUnavailable) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*SessionUsageServiceUnavailable) ProtoMessage() {}
-
-func (x *SessionUsageServiceUnavailable) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_session_proto_msgTypes[78]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use SessionUsageServiceUnavailable.ProtoReflect.Descriptor instead.
-func (*SessionUsageServiceUnavailable) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_session_proto_rawDescGZIP(), []int{78}
-}
-
-// The service answered without a five-hour window.
-type SessionUsageWindowUnavailable struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *SessionUsageWindowUnavailable) Reset() {
-	*x = SessionUsageWindowUnavailable{}
-	mi := &file_conversation_v1_session_proto_msgTypes[79]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *SessionUsageWindowUnavailable) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*SessionUsageWindowUnavailable) ProtoMessage() {}
-
-func (x *SessionUsageWindowUnavailable) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_session_proto_msgTypes[79]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use SessionUsageWindowUnavailable.ProtoReflect.Descriptor instead.
-func (*SessionUsageWindowUnavailable) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_session_proto_rawDescGZIP(), []int{79}
-}
-
-// The window carried no utilization figure.
-type SessionUsageUtilizationUnavailable struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *SessionUsageUtilizationUnavailable) Reset() {
-	*x = SessionUsageUtilizationUnavailable{}
-	mi := &file_conversation_v1_session_proto_msgTypes[80]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *SessionUsageUtilizationUnavailable) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*SessionUsageUtilizationUnavailable) ProtoMessage() {}
-
-func (x *SessionUsageUtilizationUnavailable) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_session_proto_msgTypes[80]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use SessionUsageUtilizationUnavailable.ProtoReflect.Descriptor instead.
-func (*SessionUsageUtilizationUnavailable) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_session_proto_rawDescGZIP(), []int{80}
-}
-
-// The shim's own sampling failed.
-type SessionUsageSamplingFailure struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The cause, verbatim.
-	Cause         string `protobuf:"bytes,1,opt,name=cause,proto3" json:"cause,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *SessionUsageSamplingFailure) Reset() {
-	*x = SessionUsageSamplingFailure{}
-	mi := &file_conversation_v1_session_proto_msgTypes[81]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *SessionUsageSamplingFailure) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*SessionUsageSamplingFailure) ProtoMessage() {}
-
-func (x *SessionUsageSamplingFailure) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_session_proto_msgTypes[81]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use SessionUsageSamplingFailure.ProtoReflect.Descriptor instead.
-func (*SessionUsageSamplingFailure) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_session_proto_rawDescGZIP(), []int{81}
-}
-
-func (x *SessionUsageSamplingFailure) GetCause() string {
-	if x != nil {
-		return x.Cause
-	}
-	return ""
-}
-
 // The shim's account of its own health at the instant it was asked. A
 // SYNTHETIC fact — the shim reporting on itself at the daemon's cadence —
 // which is why it is pulled rather than mixed into the standing stream of
@@ -5966,7 +4948,7 @@ type SessionDiagnostics struct {
 
 func (x *SessionDiagnostics) Reset() {
 	*x = SessionDiagnostics{}
-	mi := &file_conversation_v1_session_proto_msgTypes[82]
+	mi := &file_conversation_v1_session_proto_msgTypes[66]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5978,7 +4960,7 @@ func (x *SessionDiagnostics) String() string {
 func (*SessionDiagnostics) ProtoMessage() {}
 
 func (x *SessionDiagnostics) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_session_proto_msgTypes[82]
+	mi := &file_conversation_v1_session_proto_msgTypes[66]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5991,7 +4973,7 @@ func (x *SessionDiagnostics) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionDiagnostics.ProtoReflect.Descriptor instead.
 func (*SessionDiagnostics) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_session_proto_rawDescGZIP(), []int{82}
+	return file_conversation_v1_session_proto_rawDescGZIP(), []int{66}
 }
 
 func (x *SessionDiagnostics) GetHealth() isSessionDiagnostics_Health {
@@ -6058,7 +5040,7 @@ type SessionHealthy struct {
 
 func (x *SessionHealthy) Reset() {
 	*x = SessionHealthy{}
-	mi := &file_conversation_v1_session_proto_msgTypes[83]
+	mi := &file_conversation_v1_session_proto_msgTypes[67]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6070,7 +5052,7 @@ func (x *SessionHealthy) String() string {
 func (*SessionHealthy) ProtoMessage() {}
 
 func (x *SessionHealthy) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_session_proto_msgTypes[83]
+	mi := &file_conversation_v1_session_proto_msgTypes[67]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6083,7 +5065,7 @@ func (x *SessionHealthy) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionHealthy.ProtoReflect.Descriptor instead.
 func (*SessionHealthy) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_session_proto_rawDescGZIP(), []int{83}
+	return file_conversation_v1_session_proto_rawDescGZIP(), []int{67}
 }
 
 // Something is wrong with the shim itself.
@@ -6097,7 +5079,7 @@ type SessionUnhealthy struct {
 
 func (x *SessionUnhealthy) Reset() {
 	*x = SessionUnhealthy{}
-	mi := &file_conversation_v1_session_proto_msgTypes[84]
+	mi := &file_conversation_v1_session_proto_msgTypes[68]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6109,7 +5091,7 @@ func (x *SessionUnhealthy) String() string {
 func (*SessionUnhealthy) ProtoMessage() {}
 
 func (x *SessionUnhealthy) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_session_proto_msgTypes[84]
+	mi := &file_conversation_v1_session_proto_msgTypes[68]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6122,7 +5104,7 @@ func (x *SessionUnhealthy) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionUnhealthy.ProtoReflect.Descriptor instead.
 func (*SessionUnhealthy) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_session_proto_rawDescGZIP(), []int{84}
+	return file_conversation_v1_session_proto_rawDescGZIP(), []int{68}
 }
 
 func (x *SessionUnhealthy) GetFaults() []*SessionFault {
@@ -6155,7 +5137,7 @@ type SessionFault struct {
 
 func (x *SessionFault) Reset() {
 	*x = SessionFault{}
-	mi := &file_conversation_v1_session_proto_msgTypes[85]
+	mi := &file_conversation_v1_session_proto_msgTypes[69]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6167,7 +5149,7 @@ func (x *SessionFault) String() string {
 func (*SessionFault) ProtoMessage() {}
 
 func (x *SessionFault) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_session_proto_msgTypes[85]
+	mi := &file_conversation_v1_session_proto_msgTypes[69]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6180,7 +5162,7 @@ func (x *SessionFault) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionFault.ProtoReflect.Descriptor instead.
 func (*SessionFault) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_session_proto_rawDescGZIP(), []int{85}
+	return file_conversation_v1_session_proto_rawDescGZIP(), []int{69}
 }
 
 func (x *SessionFault) GetComponent() string {
@@ -6318,7 +5300,7 @@ type SessionFaultStoreUnreachable struct {
 
 func (x *SessionFaultStoreUnreachable) Reset() {
 	*x = SessionFaultStoreUnreachable{}
-	mi := &file_conversation_v1_session_proto_msgTypes[86]
+	mi := &file_conversation_v1_session_proto_msgTypes[70]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6330,7 +5312,7 @@ func (x *SessionFaultStoreUnreachable) String() string {
 func (*SessionFaultStoreUnreachable) ProtoMessage() {}
 
 func (x *SessionFaultStoreUnreachable) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_session_proto_msgTypes[86]
+	mi := &file_conversation_v1_session_proto_msgTypes[70]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6343,7 +5325,7 @@ func (x *SessionFaultStoreUnreachable) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionFaultStoreUnreachable.ProtoReflect.Descriptor instead.
 func (*SessionFaultStoreUnreachable) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_session_proto_rawDescGZIP(), []int{86}
+	return file_conversation_v1_session_proto_rawDescGZIP(), []int{70}
 }
 
 type SessionFaultConverterDefect struct {
@@ -6354,7 +5336,7 @@ type SessionFaultConverterDefect struct {
 
 func (x *SessionFaultConverterDefect) Reset() {
 	*x = SessionFaultConverterDefect{}
-	mi := &file_conversation_v1_session_proto_msgTypes[87]
+	mi := &file_conversation_v1_session_proto_msgTypes[71]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6366,7 +5348,7 @@ func (x *SessionFaultConverterDefect) String() string {
 func (*SessionFaultConverterDefect) ProtoMessage() {}
 
 func (x *SessionFaultConverterDefect) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_session_proto_msgTypes[87]
+	mi := &file_conversation_v1_session_proto_msgTypes[71]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6379,7 +5361,7 @@ func (x *SessionFaultConverterDefect) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionFaultConverterDefect.ProtoReflect.Descriptor instead.
 func (*SessionFaultConverterDefect) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_session_proto_rawDescGZIP(), []int{87}
+	return file_conversation_v1_session_proto_rawDescGZIP(), []int{71}
 }
 
 type SessionFaultLogSinkPoisoned struct {
@@ -6390,7 +5372,7 @@ type SessionFaultLogSinkPoisoned struct {
 
 func (x *SessionFaultLogSinkPoisoned) Reset() {
 	*x = SessionFaultLogSinkPoisoned{}
-	mi := &file_conversation_v1_session_proto_msgTypes[88]
+	mi := &file_conversation_v1_session_proto_msgTypes[72]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6402,7 +5384,7 @@ func (x *SessionFaultLogSinkPoisoned) String() string {
 func (*SessionFaultLogSinkPoisoned) ProtoMessage() {}
 
 func (x *SessionFaultLogSinkPoisoned) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_session_proto_msgTypes[88]
+	mi := &file_conversation_v1_session_proto_msgTypes[72]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6415,7 +5397,7 @@ func (x *SessionFaultLogSinkPoisoned) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionFaultLogSinkPoisoned.ProtoReflect.Descriptor instead.
 func (*SessionFaultLogSinkPoisoned) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_session_proto_rawDescGZIP(), []int{88}
+	return file_conversation_v1_session_proto_rawDescGZIP(), []int{72}
 }
 
 type SessionFaultKeepaliveFailed struct {
@@ -6426,7 +5408,7 @@ type SessionFaultKeepaliveFailed struct {
 
 func (x *SessionFaultKeepaliveFailed) Reset() {
 	*x = SessionFaultKeepaliveFailed{}
-	mi := &file_conversation_v1_session_proto_msgTypes[89]
+	mi := &file_conversation_v1_session_proto_msgTypes[73]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6438,7 +5420,7 @@ func (x *SessionFaultKeepaliveFailed) String() string {
 func (*SessionFaultKeepaliveFailed) ProtoMessage() {}
 
 func (x *SessionFaultKeepaliveFailed) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_session_proto_msgTypes[89]
+	mi := &file_conversation_v1_session_proto_msgTypes[73]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6451,7 +5433,7 @@ func (x *SessionFaultKeepaliveFailed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionFaultKeepaliveFailed.ProtoReflect.Descriptor instead.
 func (*SessionFaultKeepaliveFailed) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_session_proto_rawDescGZIP(), []int{89}
+	return file_conversation_v1_session_proto_rawDescGZIP(), []int{73}
 }
 
 type SessionFaultVendorQueryFailed struct {
@@ -6462,7 +5444,7 @@ type SessionFaultVendorQueryFailed struct {
 
 func (x *SessionFaultVendorQueryFailed) Reset() {
 	*x = SessionFaultVendorQueryFailed{}
-	mi := &file_conversation_v1_session_proto_msgTypes[90]
+	mi := &file_conversation_v1_session_proto_msgTypes[74]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6474,7 +5456,7 @@ func (x *SessionFaultVendorQueryFailed) String() string {
 func (*SessionFaultVendorQueryFailed) ProtoMessage() {}
 
 func (x *SessionFaultVendorQueryFailed) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_session_proto_msgTypes[90]
+	mi := &file_conversation_v1_session_proto_msgTypes[74]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6487,7 +5469,7 @@ func (x *SessionFaultVendorQueryFailed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionFaultVendorQueryFailed.ProtoReflect.Descriptor instead.
 func (*SessionFaultVendorQueryFailed) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_session_proto_rawDescGZIP(), []int{90}
+	return file_conversation_v1_session_proto_rawDescGZIP(), []int{74}
 }
 
 // The network is unreachable from this machine.
@@ -6499,7 +5481,7 @@ type SessionFaultNetworkUnreachable struct {
 
 func (x *SessionFaultNetworkUnreachable) Reset() {
 	*x = SessionFaultNetworkUnreachable{}
-	mi := &file_conversation_v1_session_proto_msgTypes[91]
+	mi := &file_conversation_v1_session_proto_msgTypes[75]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6511,7 +5493,7 @@ func (x *SessionFaultNetworkUnreachable) String() string {
 func (*SessionFaultNetworkUnreachable) ProtoMessage() {}
 
 func (x *SessionFaultNetworkUnreachable) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_session_proto_msgTypes[91]
+	mi := &file_conversation_v1_session_proto_msgTypes[75]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6524,7 +5506,7 @@ func (x *SessionFaultNetworkUnreachable) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionFaultNetworkUnreachable.ProtoReflect.Descriptor instead.
 func (*SessionFaultNetworkUnreachable) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_session_proto_rawDescGZIP(), []int{91}
+	return file_conversation_v1_session_proto_rawDescGZIP(), []int{75}
 }
 
 // A window during which one component of the shim was degraded. THE ARM IS
@@ -6548,7 +5530,7 @@ type SessionDegradedWindow struct {
 
 func (x *SessionDegradedWindow) Reset() {
 	*x = SessionDegradedWindow{}
-	mi := &file_conversation_v1_session_proto_msgTypes[92]
+	mi := &file_conversation_v1_session_proto_msgTypes[76]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6560,7 +5542,7 @@ func (x *SessionDegradedWindow) String() string {
 func (*SessionDegradedWindow) ProtoMessage() {}
 
 func (x *SessionDegradedWindow) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_session_proto_msgTypes[92]
+	mi := &file_conversation_v1_session_proto_msgTypes[76]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6573,7 +5555,7 @@ func (x *SessionDegradedWindow) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionDegradedWindow.ProtoReflect.Descriptor instead.
 func (*SessionDegradedWindow) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_session_proto_rawDescGZIP(), []int{92}
+	return file_conversation_v1_session_proto_rawDescGZIP(), []int{76}
 }
 
 func (x *SessionDegradedWindow) GetComponent() string {
@@ -6649,7 +5631,7 @@ type SessionDegradedOpen struct {
 
 func (x *SessionDegradedOpen) Reset() {
 	*x = SessionDegradedOpen{}
-	mi := &file_conversation_v1_session_proto_msgTypes[93]
+	mi := &file_conversation_v1_session_proto_msgTypes[77]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6661,7 +5643,7 @@ func (x *SessionDegradedOpen) String() string {
 func (*SessionDegradedOpen) ProtoMessage() {}
 
 func (x *SessionDegradedOpen) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_session_proto_msgTypes[93]
+	mi := &file_conversation_v1_session_proto_msgTypes[77]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6674,7 +5656,7 @@ func (x *SessionDegradedOpen) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionDegradedOpen.ProtoReflect.Descriptor instead.
 func (*SessionDegradedOpen) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_session_proto_rawDescGZIP(), []int{93}
+	return file_conversation_v1_session_proto_rawDescGZIP(), []int{77}
 }
 
 // The window closed.
@@ -6691,7 +5673,7 @@ type SessionDegradedClosed struct {
 
 func (x *SessionDegradedClosed) Reset() {
 	*x = SessionDegradedClosed{}
-	mi := &file_conversation_v1_session_proto_msgTypes[94]
+	mi := &file_conversation_v1_session_proto_msgTypes[78]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6703,7 +5685,7 @@ func (x *SessionDegradedClosed) String() string {
 func (*SessionDegradedClosed) ProtoMessage() {}
 
 func (x *SessionDegradedClosed) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_session_proto_msgTypes[94]
+	mi := &file_conversation_v1_session_proto_msgTypes[78]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6716,7 +5698,7 @@ func (x *SessionDegradedClosed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionDegradedClosed.ProtoReflect.Descriptor instead.
 func (*SessionDegradedClosed) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_session_proto_rawDescGZIP(), []int{94}
+	return file_conversation_v1_session_proto_rawDescGZIP(), []int{78}
 }
 
 func (x *SessionDegradedClosed) GetEndedAtMs() int64 {
@@ -6747,7 +5729,7 @@ type SessionKilled struct {
 
 func (x *SessionKilled) Reset() {
 	*x = SessionKilled{}
-	mi := &file_conversation_v1_session_proto_msgTypes[95]
+	mi := &file_conversation_v1_session_proto_msgTypes[79]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6759,7 +5741,7 @@ func (x *SessionKilled) String() string {
 func (*SessionKilled) ProtoMessage() {}
 
 func (x *SessionKilled) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_session_proto_msgTypes[95]
+	mi := &file_conversation_v1_session_proto_msgTypes[79]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6772,7 +5754,7 @@ func (x *SessionKilled) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionKilled.ProtoReflect.Descriptor instead.
 func (*SessionKilled) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_session_proto_rawDescGZIP(), []int{95}
+	return file_conversation_v1_session_proto_rawDescGZIP(), []int{79}
 }
 
 func (x *SessionKilled) GetHow() isSessionKilled_How {
@@ -6829,7 +5811,7 @@ type SessionKilledIdle struct {
 
 func (x *SessionKilledIdle) Reset() {
 	*x = SessionKilledIdle{}
-	mi := &file_conversation_v1_session_proto_msgTypes[96]
+	mi := &file_conversation_v1_session_proto_msgTypes[80]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6841,7 +5823,7 @@ func (x *SessionKilledIdle) String() string {
 func (*SessionKilledIdle) ProtoMessage() {}
 
 func (x *SessionKilledIdle) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_session_proto_msgTypes[96]
+	mi := &file_conversation_v1_session_proto_msgTypes[80]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6854,7 +5836,7 @@ func (x *SessionKilledIdle) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionKilledIdle.ProtoReflect.Descriptor instead.
 func (*SessionKilledIdle) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_session_proto_rawDescGZIP(), []int{96}
+	return file_conversation_v1_session_proto_rawDescGZIP(), []int{80}
 }
 
 // Killed by force.
@@ -6872,7 +5854,7 @@ type SessionKilledForced struct {
 
 func (x *SessionKilledForced) Reset() {
 	*x = SessionKilledForced{}
-	mi := &file_conversation_v1_session_proto_msgTypes[97]
+	mi := &file_conversation_v1_session_proto_msgTypes[81]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6884,7 +5866,7 @@ func (x *SessionKilledForced) String() string {
 func (*SessionKilledForced) ProtoMessage() {}
 
 func (x *SessionKilledForced) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_session_proto_msgTypes[97]
+	mi := &file_conversation_v1_session_proto_msgTypes[81]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6897,7 +5879,7 @@ func (x *SessionKilledForced) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionKilledForced.ProtoReflect.Descriptor instead.
 func (*SessionKilledForced) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_session_proto_rawDescGZIP(), []int{97}
+	return file_conversation_v1_session_proto_rawDescGZIP(), []int{81}
 }
 
 func (x *SessionKilledForced) GetInterruptedTurn() *TurnId {
@@ -6935,7 +5917,7 @@ type SessionLive struct {
 
 func (x *SessionLive) Reset() {
 	*x = SessionLive{}
-	mi := &file_conversation_v1_session_proto_msgTypes[98]
+	mi := &file_conversation_v1_session_proto_msgTypes[82]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6947,7 +5929,7 @@ func (x *SessionLive) String() string {
 func (*SessionLive) ProtoMessage() {}
 
 func (x *SessionLive) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_session_proto_msgTypes[98]
+	mi := &file_conversation_v1_session_proto_msgTypes[82]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6960,7 +5942,7 @@ func (x *SessionLive) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionLive.ProtoReflect.Descriptor instead.
 func (*SessionLive) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_session_proto_rawDescGZIP(), []int{98}
+	return file_conversation_v1_session_proto_rawDescGZIP(), []int{82}
 }
 
 func (x *SessionLive) GetTurnInFlight() *TurnId {
@@ -7037,7 +6019,7 @@ type SessionContextUsage struct {
 
 func (x *SessionContextUsage) Reset() {
 	*x = SessionContextUsage{}
-	mi := &file_conversation_v1_session_proto_msgTypes[99]
+	mi := &file_conversation_v1_session_proto_msgTypes[83]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7049,7 +6031,7 @@ func (x *SessionContextUsage) String() string {
 func (*SessionContextUsage) ProtoMessage() {}
 
 func (x *SessionContextUsage) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_session_proto_msgTypes[99]
+	mi := &file_conversation_v1_session_proto_msgTypes[83]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7062,7 +6044,7 @@ func (x *SessionContextUsage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionContextUsage.ProtoReflect.Descriptor instead.
 func (*SessionContextUsage) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_session_proto_rawDescGZIP(), []int{99}
+	return file_conversation_v1_session_proto_rawDescGZIP(), []int{83}
 }
 
 func (x *SessionContextUsage) GetTotalTokens() int64 {
@@ -7209,7 +6191,7 @@ type SessionContextCategory struct {
 
 func (x *SessionContextCategory) Reset() {
 	*x = SessionContextCategory{}
-	mi := &file_conversation_v1_session_proto_msgTypes[100]
+	mi := &file_conversation_v1_session_proto_msgTypes[84]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7221,7 +6203,7 @@ func (x *SessionContextCategory) String() string {
 func (*SessionContextCategory) ProtoMessage() {}
 
 func (x *SessionContextCategory) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_session_proto_msgTypes[100]
+	mi := &file_conversation_v1_session_proto_msgTypes[84]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7234,7 +6216,7 @@ func (x *SessionContextCategory) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionContextCategory.ProtoReflect.Descriptor instead.
 func (*SessionContextCategory) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_session_proto_rawDescGZIP(), []int{100}
+	return file_conversation_v1_session_proto_rawDescGZIP(), []int{84}
 }
 
 func (x *SessionContextCategory) GetLabel() string {
@@ -7279,7 +6261,7 @@ type SessionContextMemoryFile struct {
 
 func (x *SessionContextMemoryFile) Reset() {
 	*x = SessionContextMemoryFile{}
-	mi := &file_conversation_v1_session_proto_msgTypes[101]
+	mi := &file_conversation_v1_session_proto_msgTypes[85]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7291,7 +6273,7 @@ func (x *SessionContextMemoryFile) String() string {
 func (*SessionContextMemoryFile) ProtoMessage() {}
 
 func (x *SessionContextMemoryFile) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_session_proto_msgTypes[101]
+	mi := &file_conversation_v1_session_proto_msgTypes[85]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7304,7 +6286,7 @@ func (x *SessionContextMemoryFile) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionContextMemoryFile.ProtoReflect.Descriptor instead.
 func (*SessionContextMemoryFile) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_session_proto_rawDescGZIP(), []int{101}
+	return file_conversation_v1_session_proto_rawDescGZIP(), []int{85}
 }
 
 func (x *SessionContextMemoryFile) GetPath() string {
@@ -7344,7 +6326,7 @@ type SessionContextMcpTool struct {
 
 func (x *SessionContextMcpTool) Reset() {
 	*x = SessionContextMcpTool{}
-	mi := &file_conversation_v1_session_proto_msgTypes[102]
+	mi := &file_conversation_v1_session_proto_msgTypes[86]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7356,7 +6338,7 @@ func (x *SessionContextMcpTool) String() string {
 func (*SessionContextMcpTool) ProtoMessage() {}
 
 func (x *SessionContextMcpTool) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_session_proto_msgTypes[102]
+	mi := &file_conversation_v1_session_proto_msgTypes[86]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7369,7 +6351,7 @@ func (x *SessionContextMcpTool) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionContextMcpTool.ProtoReflect.Descriptor instead.
 func (*SessionContextMcpTool) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_session_proto_rawDescGZIP(), []int{102}
+	return file_conversation_v1_session_proto_rawDescGZIP(), []int{86}
 }
 
 func (x *SessionContextMcpTool) GetName() string {
@@ -7412,7 +6394,7 @@ type SessionContextDeferredBuiltinTool struct {
 
 func (x *SessionContextDeferredBuiltinTool) Reset() {
 	*x = SessionContextDeferredBuiltinTool{}
-	mi := &file_conversation_v1_session_proto_msgTypes[103]
+	mi := &file_conversation_v1_session_proto_msgTypes[87]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7424,7 +6406,7 @@ func (x *SessionContextDeferredBuiltinTool) String() string {
 func (*SessionContextDeferredBuiltinTool) ProtoMessage() {}
 
 func (x *SessionContextDeferredBuiltinTool) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_session_proto_msgTypes[103]
+	mi := &file_conversation_v1_session_proto_msgTypes[87]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7437,7 +6419,7 @@ func (x *SessionContextDeferredBuiltinTool) ProtoReflect() protoreflect.Message 
 
 // Deprecated: Use SessionContextDeferredBuiltinTool.ProtoReflect.Descriptor instead.
 func (*SessionContextDeferredBuiltinTool) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_session_proto_rawDescGZIP(), []int{103}
+	return file_conversation_v1_session_proto_rawDescGZIP(), []int{87}
 }
 
 func (x *SessionContextDeferredBuiltinTool) GetName() string {
@@ -7472,7 +6454,7 @@ type SessionContextSystemTool struct {
 
 func (x *SessionContextSystemTool) Reset() {
 	*x = SessionContextSystemTool{}
-	mi := &file_conversation_v1_session_proto_msgTypes[104]
+	mi := &file_conversation_v1_session_proto_msgTypes[88]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7484,7 +6466,7 @@ func (x *SessionContextSystemTool) String() string {
 func (*SessionContextSystemTool) ProtoMessage() {}
 
 func (x *SessionContextSystemTool) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_session_proto_msgTypes[104]
+	mi := &file_conversation_v1_session_proto_msgTypes[88]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7497,7 +6479,7 @@ func (x *SessionContextSystemTool) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionContextSystemTool.ProtoReflect.Descriptor instead.
 func (*SessionContextSystemTool) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_session_proto_rawDescGZIP(), []int{104}
+	return file_conversation_v1_session_proto_rawDescGZIP(), []int{88}
 }
 
 func (x *SessionContextSystemTool) GetName() string {
@@ -7525,7 +6507,7 @@ type SessionContextSystemPromptSection struct {
 
 func (x *SessionContextSystemPromptSection) Reset() {
 	*x = SessionContextSystemPromptSection{}
-	mi := &file_conversation_v1_session_proto_msgTypes[105]
+	mi := &file_conversation_v1_session_proto_msgTypes[89]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7537,7 +6519,7 @@ func (x *SessionContextSystemPromptSection) String() string {
 func (*SessionContextSystemPromptSection) ProtoMessage() {}
 
 func (x *SessionContextSystemPromptSection) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_session_proto_msgTypes[105]
+	mi := &file_conversation_v1_session_proto_msgTypes[89]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7550,7 +6532,7 @@ func (x *SessionContextSystemPromptSection) ProtoReflect() protoreflect.Message 
 
 // Deprecated: Use SessionContextSystemPromptSection.ProtoReflect.Descriptor instead.
 func (*SessionContextSystemPromptSection) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_session_proto_rawDescGZIP(), []int{105}
+	return file_conversation_v1_session_proto_rawDescGZIP(), []int{89}
 }
 
 func (x *SessionContextSystemPromptSection) GetName() string {
@@ -7581,7 +6563,7 @@ type SessionContextAgent struct {
 
 func (x *SessionContextAgent) Reset() {
 	*x = SessionContextAgent{}
-	mi := &file_conversation_v1_session_proto_msgTypes[106]
+	mi := &file_conversation_v1_session_proto_msgTypes[90]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7593,7 +6575,7 @@ func (x *SessionContextAgent) String() string {
 func (*SessionContextAgent) ProtoMessage() {}
 
 func (x *SessionContextAgent) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_session_proto_msgTypes[106]
+	mi := &file_conversation_v1_session_proto_msgTypes[90]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7606,7 +6588,7 @@ func (x *SessionContextAgent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionContextAgent.ProtoReflect.Descriptor instead.
 func (*SessionContextAgent) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_session_proto_rawDescGZIP(), []int{106}
+	return file_conversation_v1_session_proto_rawDescGZIP(), []int{90}
 }
 
 func (x *SessionContextAgent) GetAgentType() string {
@@ -7642,7 +6624,7 @@ type SessionContextSlashCommands struct {
 
 func (x *SessionContextSlashCommands) Reset() {
 	*x = SessionContextSlashCommands{}
-	mi := &file_conversation_v1_session_proto_msgTypes[107]
+	mi := &file_conversation_v1_session_proto_msgTypes[91]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7654,7 +6636,7 @@ func (x *SessionContextSlashCommands) String() string {
 func (*SessionContextSlashCommands) ProtoMessage() {}
 
 func (x *SessionContextSlashCommands) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_session_proto_msgTypes[107]
+	mi := &file_conversation_v1_session_proto_msgTypes[91]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7667,7 +6649,7 @@ func (x *SessionContextSlashCommands) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionContextSlashCommands.ProtoReflect.Descriptor instead.
 func (*SessionContextSlashCommands) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_session_proto_rawDescGZIP(), []int{107}
+	return file_conversation_v1_session_proto_rawDescGZIP(), []int{91}
 }
 
 func (x *SessionContextSlashCommands) GetTotalCommands() int64 {
@@ -7704,7 +6686,7 @@ type SessionContextSkills struct {
 
 func (x *SessionContextSkills) Reset() {
 	*x = SessionContextSkills{}
-	mi := &file_conversation_v1_session_proto_msgTypes[108]
+	mi := &file_conversation_v1_session_proto_msgTypes[92]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7716,7 +6698,7 @@ func (x *SessionContextSkills) String() string {
 func (*SessionContextSkills) ProtoMessage() {}
 
 func (x *SessionContextSkills) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_session_proto_msgTypes[108]
+	mi := &file_conversation_v1_session_proto_msgTypes[92]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7729,7 +6711,7 @@ func (x *SessionContextSkills) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionContextSkills.ProtoReflect.Descriptor instead.
 func (*SessionContextSkills) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_session_proto_rawDescGZIP(), []int{108}
+	return file_conversation_v1_session_proto_rawDescGZIP(), []int{92}
 }
 
 func (x *SessionContextSkills) GetTotalSkills() int64 {
@@ -7773,7 +6755,7 @@ type SessionContextSkillFrontmatter struct {
 
 func (x *SessionContextSkillFrontmatter) Reset() {
 	*x = SessionContextSkillFrontmatter{}
-	mi := &file_conversation_v1_session_proto_msgTypes[109]
+	mi := &file_conversation_v1_session_proto_msgTypes[93]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7785,7 +6767,7 @@ func (x *SessionContextSkillFrontmatter) String() string {
 func (*SessionContextSkillFrontmatter) ProtoMessage() {}
 
 func (x *SessionContextSkillFrontmatter) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_session_proto_msgTypes[109]
+	mi := &file_conversation_v1_session_proto_msgTypes[93]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7798,7 +6780,7 @@ func (x *SessionContextSkillFrontmatter) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionContextSkillFrontmatter.ProtoReflect.Descriptor instead.
 func (*SessionContextSkillFrontmatter) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_session_proto_rawDescGZIP(), []int{109}
+	return file_conversation_v1_session_proto_rawDescGZIP(), []int{93}
 }
 
 func (x *SessionContextSkillFrontmatter) GetName() string {
@@ -7843,7 +6825,7 @@ type SessionContextMessageBreakdown struct {
 
 func (x *SessionContextMessageBreakdown) Reset() {
 	*x = SessionContextMessageBreakdown{}
-	mi := &file_conversation_v1_session_proto_msgTypes[110]
+	mi := &file_conversation_v1_session_proto_msgTypes[94]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7855,7 +6837,7 @@ func (x *SessionContextMessageBreakdown) String() string {
 func (*SessionContextMessageBreakdown) ProtoMessage() {}
 
 func (x *SessionContextMessageBreakdown) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_session_proto_msgTypes[110]
+	mi := &file_conversation_v1_session_proto_msgTypes[94]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7868,7 +6850,7 @@ func (x *SessionContextMessageBreakdown) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionContextMessageBreakdown.ProtoReflect.Descriptor instead.
 func (*SessionContextMessageBreakdown) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_session_proto_rawDescGZIP(), []int{110}
+	return file_conversation_v1_session_proto_rawDescGZIP(), []int{94}
 }
 
 func (x *SessionContextMessageBreakdown) GetToolCallTokens() int64 {
@@ -7946,7 +6928,7 @@ type SessionContextToolCallsByType struct {
 
 func (x *SessionContextToolCallsByType) Reset() {
 	*x = SessionContextToolCallsByType{}
-	mi := &file_conversation_v1_session_proto_msgTypes[111]
+	mi := &file_conversation_v1_session_proto_msgTypes[95]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7958,7 +6940,7 @@ func (x *SessionContextToolCallsByType) String() string {
 func (*SessionContextToolCallsByType) ProtoMessage() {}
 
 func (x *SessionContextToolCallsByType) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_session_proto_msgTypes[111]
+	mi := &file_conversation_v1_session_proto_msgTypes[95]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7971,7 +6953,7 @@ func (x *SessionContextToolCallsByType) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionContextToolCallsByType.ProtoReflect.Descriptor instead.
 func (*SessionContextToolCallsByType) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_session_proto_rawDescGZIP(), []int{111}
+	return file_conversation_v1_session_proto_rawDescGZIP(), []int{95}
 }
 
 func (x *SessionContextToolCallsByType) GetName() string {
@@ -8006,7 +6988,7 @@ type SessionContextAttachmentsByType struct {
 
 func (x *SessionContextAttachmentsByType) Reset() {
 	*x = SessionContextAttachmentsByType{}
-	mi := &file_conversation_v1_session_proto_msgTypes[112]
+	mi := &file_conversation_v1_session_proto_msgTypes[96]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8018,7 +7000,7 @@ func (x *SessionContextAttachmentsByType) String() string {
 func (*SessionContextAttachmentsByType) ProtoMessage() {}
 
 func (x *SessionContextAttachmentsByType) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_session_proto_msgTypes[112]
+	mi := &file_conversation_v1_session_proto_msgTypes[96]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8031,7 +7013,7 @@ func (x *SessionContextAttachmentsByType) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionContextAttachmentsByType.ProtoReflect.Descriptor instead.
 func (*SessionContextAttachmentsByType) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_session_proto_rawDescGZIP(), []int{112}
+	return file_conversation_v1_session_proto_rawDescGZIP(), []int{96}
 }
 
 func (x *SessionContextAttachmentsByType) GetName() string {
@@ -8061,7 +7043,7 @@ type SessionContextApiUsage struct {
 
 func (x *SessionContextApiUsage) Reset() {
 	*x = SessionContextApiUsage{}
-	mi := &file_conversation_v1_session_proto_msgTypes[113]
+	mi := &file_conversation_v1_session_proto_msgTypes[97]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8073,7 +7055,7 @@ func (x *SessionContextApiUsage) String() string {
 func (*SessionContextApiUsage) ProtoMessage() {}
 
 func (x *SessionContextApiUsage) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_session_proto_msgTypes[113]
+	mi := &file_conversation_v1_session_proto_msgTypes[97]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8086,7 +7068,7 @@ func (x *SessionContextApiUsage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionContextApiUsage.ProtoReflect.Descriptor instead.
 func (*SessionContextApiUsage) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_session_proto_rawDescGZIP(), []int{113}
+	return file_conversation_v1_session_proto_rawDescGZIP(), []int{97}
 }
 
 func (x *SessionContextApiUsage) GetInputTokens() int64 {
@@ -8152,7 +7134,7 @@ type LockHolderFailure struct {
 
 func (x *LockHolderFailure) Reset() {
 	*x = LockHolderFailure{}
-	mi := &file_conversation_v1_session_proto_msgTypes[114]
+	mi := &file_conversation_v1_session_proto_msgTypes[98]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8164,7 +7146,7 @@ func (x *LockHolderFailure) String() string {
 func (*LockHolderFailure) ProtoMessage() {}
 
 func (x *LockHolderFailure) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_session_proto_msgTypes[114]
+	mi := &file_conversation_v1_session_proto_msgTypes[98]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8177,7 +7159,7 @@ func (x *LockHolderFailure) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LockHolderFailure.ProtoReflect.Descriptor instead.
 func (*LockHolderFailure) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_session_proto_rawDescGZIP(), []int{114}
+	return file_conversation_v1_session_proto_rawDescGZIP(), []int{98}
 }
 
 func (x *LockHolderFailure) GetBinary() string {
@@ -8291,7 +7273,7 @@ type LockHolderSpawnFailed struct {
 
 func (x *LockHolderSpawnFailed) Reset() {
 	*x = LockHolderSpawnFailed{}
-	mi := &file_conversation_v1_session_proto_msgTypes[115]
+	mi := &file_conversation_v1_session_proto_msgTypes[99]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8303,7 +7285,7 @@ func (x *LockHolderSpawnFailed) String() string {
 func (*LockHolderSpawnFailed) ProtoMessage() {}
 
 func (x *LockHolderSpawnFailed) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_session_proto_msgTypes[115]
+	mi := &file_conversation_v1_session_proto_msgTypes[99]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8316,7 +7298,7 @@ func (x *LockHolderSpawnFailed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LockHolderSpawnFailed.ProtoReflect.Descriptor instead.
 func (*LockHolderSpawnFailed) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_session_proto_rawDescGZIP(), []int{115}
+	return file_conversation_v1_session_proto_rawDescGZIP(), []int{99}
 }
 
 func (x *LockHolderSpawnFailed) GetOsError() string {
@@ -8338,7 +7320,7 @@ type LockHolderExited struct {
 
 func (x *LockHolderExited) Reset() {
 	*x = LockHolderExited{}
-	mi := &file_conversation_v1_session_proto_msgTypes[116]
+	mi := &file_conversation_v1_session_proto_msgTypes[100]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8350,7 +7332,7 @@ func (x *LockHolderExited) String() string {
 func (*LockHolderExited) ProtoMessage() {}
 
 func (x *LockHolderExited) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_session_proto_msgTypes[116]
+	mi := &file_conversation_v1_session_proto_msgTypes[100]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8363,7 +7345,7 @@ func (x *LockHolderExited) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LockHolderExited.ProtoReflect.Descriptor instead.
 func (*LockHolderExited) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_session_proto_rawDescGZIP(), []int{116}
+	return file_conversation_v1_session_proto_rawDescGZIP(), []int{100}
 }
 
 func (x *LockHolderExited) GetCode() int32 {
@@ -8392,7 +7374,7 @@ type LockHolderSignaled struct {
 
 func (x *LockHolderSignaled) Reset() {
 	*x = LockHolderSignaled{}
-	mi := &file_conversation_v1_session_proto_msgTypes[117]
+	mi := &file_conversation_v1_session_proto_msgTypes[101]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8404,7 +7386,7 @@ func (x *LockHolderSignaled) String() string {
 func (*LockHolderSignaled) ProtoMessage() {}
 
 func (x *LockHolderSignaled) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_session_proto_msgTypes[117]
+	mi := &file_conversation_v1_session_proto_msgTypes[101]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8417,7 +7399,7 @@ func (x *LockHolderSignaled) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LockHolderSignaled.ProtoReflect.Descriptor instead.
 func (*LockHolderSignaled) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_session_proto_rawDescGZIP(), []int{117}
+	return file_conversation_v1_session_proto_rawDescGZIP(), []int{101}
 }
 
 func (x *LockHolderSignaled) GetSignal() string {
@@ -8444,7 +7426,7 @@ type LockHolderMisanswered struct {
 
 func (x *LockHolderMisanswered) Reset() {
 	*x = LockHolderMisanswered{}
-	mi := &file_conversation_v1_session_proto_msgTypes[118]
+	mi := &file_conversation_v1_session_proto_msgTypes[102]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8456,7 +7438,7 @@ func (x *LockHolderMisanswered) String() string {
 func (*LockHolderMisanswered) ProtoMessage() {}
 
 func (x *LockHolderMisanswered) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_session_proto_msgTypes[118]
+	mi := &file_conversation_v1_session_proto_msgTypes[102]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8469,7 +7451,7 @@ func (x *LockHolderMisanswered) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LockHolderMisanswered.ProtoReflect.Descriptor instead.
 func (*LockHolderMisanswered) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_session_proto_rawDescGZIP(), []int{118}
+	return file_conversation_v1_session_proto_rawDescGZIP(), []int{102}
 }
 
 func (x *LockHolderMisanswered) GetLine() string {
@@ -8489,7 +7471,7 @@ type LockHolderSilent struct {
 
 func (x *LockHolderSilent) Reset() {
 	*x = LockHolderSilent{}
-	mi := &file_conversation_v1_session_proto_msgTypes[119]
+	mi := &file_conversation_v1_session_proto_msgTypes[103]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8501,7 +7483,7 @@ func (x *LockHolderSilent) String() string {
 func (*LockHolderSilent) ProtoMessage() {}
 
 func (x *LockHolderSilent) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_session_proto_msgTypes[119]
+	mi := &file_conversation_v1_session_proto_msgTypes[103]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8514,7 +7496,7 @@ func (x *LockHolderSilent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LockHolderSilent.ProtoReflect.Descriptor instead.
 func (*LockHolderSilent) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_session_proto_rawDescGZIP(), []int{119}
+	return file_conversation_v1_session_proto_rawDescGZIP(), []int{103}
 }
 
 func (x *LockHolderSilent) GetTimeoutMs() uint32 {
@@ -8576,7 +7558,7 @@ const file_conversation_v1_session_proto_rawDesc = "" +
 	"\x10SessionColdClear\"\x83\x01\n" +
 	"\x12SessionColdCompact\x121\n" +
 	"\x05model\x18\x01 \x01(\v2\x1b.conversation.v1.AgentModelR\x05model\x12:\n" +
-	"\x05scope\x18\x02 \x01(\x0e2$.conversation.v1.SessionCompactScopeR\x05scope\"\x98\x0f\n" +
+	"\x05scope\x18\x02 \x01(\x0e2$.conversation.v1.SessionCompactScopeR\x05scope\"\xe0\x0e\n" +
 	"\rSessionUpdate\x12T\n" +
 	"\x10identity_rotated\x18\x01 \x01(\v2'.conversation.v1.SessionIdentityRotatedH\x00R\x0fidentityRotated\x12B\n" +
 	"\n" +
@@ -8584,8 +7566,7 @@ const file_conversation_v1_session_proto_rawDesc = "" +
 	"\rmodel_changed\x18\x03 \x01(\v2$.conversation.v1.SessionModelChangedH\x00R\fmodelChanged\x12?\n" +
 	"\tfast_mode\x18\x04 \x01(\v2 .conversation.v1.SessionFastModeH\x00R\bfastMode\x12B\n" +
 	"\n" +
-	"mcp_server\x18\x05 \x01(\v2!.conversation.v1.SessionMcpServerH\x00R\tmcpServer\x12K\n" +
-	"\raccount_usage\x18\x06 \x01(\v2$.conversation.v1.SessionAccountUsageH\x00R\faccountUsage\x12g\n" +
+	"mcp_server\x18\x05 \x01(\v2!.conversation.v1.SessionMcpServerH\x00R\tmcpServer\x12g\n" +
 	"\x17permission_mode_changed\x18\a \x01(\v2-.conversation.v1.SessionPermissionModeChangedH\x00R\x15permissionModeChanged\x12U\n" +
 	"\x11rate_limit_status\x18\x1c \x01(\v2'.conversation.v1.SessionRateLimitStatusH\x00R\x0frateLimitStatus\x12G\n" +
 	"\vdiagnostics\x18\x19 \x01(\v2#.conversation.v1.SessionDiagnosticsH\x00R\vdiagnostics\x12K\n" +
@@ -8607,7 +7588,7 @@ const file_conversation_v1_session_proto_rawDesc = "" +
 	"\x0eskills_changed\x18' \x01(\v2%.conversation.v1.SessionSkillsChangedH\x00R\rskillsChanged\x12N\n" +
 	"\x0ejoin_withdrawn\x18( \x01(\v2%.conversation.v1.SessionJoinWithdrawnH\x00R\rjoinWithdrawn\x12Q\n" +
 	"\x0fvendor_activity\x18) \x01(\v2&.conversation.v1.SessionVendorActivityH\x00R\x0evendorActivityB\b\n" +
-	"\x06update\"p\n" +
+	"\x06updateJ\x04\b\x06\x10\aR\raccount_usage\"p\n" +
 	"\x14SessionJoinWithdrawn\x12+\n" +
 	"\x04turn\x18\x01 \x01(\v2\x17.conversation.v1.TurnIdR\x04turn\x12+\n" +
 	"\x04into\x18\x02 \x01(\v2\x17.conversation.v1.TurnIdR\x04into\",\n" +
@@ -8787,65 +7768,7 @@ const file_conversation_v1_session_proto_rawDesc = "" +
 	"\x18SessionMcpServerDisabled\"\x1b\n" +
 	"\x19SessionMcpServerConnected\".\n" +
 	"\x16SessionMcpServerFailed\x12\x14\n" +
-	"\x05error\x18\x01 \x01(\tR\x05error\"\xb2\x03\n" +
-	"\x13SessionAccountUsage\x12$\n" +
-	"\x0eobserved_at_ms\x18\x01 \x01(\x03R\fobservedAtMs\x12M\n" +
-	"\tavailable\x18\x03 \x01(\v2-.conversation.v1.SessionAccountUsageAvailableH\x00R\tavailable\x12S\n" +
-	"\vunavailable\x18\x04 \x01(\v2/.conversation.v1.SessionAccountUsageUnavailableH\x00R\vunavailable\x12N\n" +
-	"\n" +
-	"seat_spend\x18\x05 \x01(\v2-.conversation.v1.SessionAccountUsageSeatSpendH\x00R\tseatSpend\x12Z\n" +
-	"\x11subscription_type\x18\x06 \x01(\v2(.conversation.v1.SessionSubscriptionTypeH\x01R\x10subscriptionType\x88\x01\x01B\t\n" +
-	"\aoutcomeB\x14\n" +
-	"\x12_subscription_typeJ\x04\b\x02\x10\x03\"\xbd\x02\n" +
-	"\x17SessionSubscriptionType\x12?\n" +
-	"\x03pro\x18\x01 \x01(\v2+.conversation.v1.SessionSubscriptionTypeProH\x00R\x03pro\x12?\n" +
-	"\x03max\x18\x02 \x01(\v2+.conversation.v1.SessionSubscriptionTypeMaxH\x00R\x03max\x12B\n" +
-	"\x04team\x18\x03 \x01(\v2,.conversation.v1.SessionSubscriptionTypeTeamH\x00R\x04team\x12T\n" +
-	"\n" +
-	"enterprise\x18\x04 \x01(\v22.conversation.v1.SessionSubscriptionTypeEnterpriseH\x00R\n" +
-	"enterpriseB\x06\n" +
-	"\x04plan\"\x1c\n" +
-	"\x1aSessionSubscriptionTypePro\"\x1c\n" +
-	"\x1aSessionSubscriptionTypeMax\"\x1d\n" +
-	"\x1bSessionSubscriptionTypeTeam\"#\n" +
-	"!SessionSubscriptionTypeEnterprise\"\x9f\x01\n" +
-	"\x1cSessionAccountUsageSeatSpend\x12;\n" +
-	"\tallotment\x18\x01 \x01(\v2\x1d.conversation.v1.SessionMoneyR\tallotment\x128\n" +
-	"\x05spent\x18\x02 \x01(\v2\x1d.conversation.v1.SessionMoneyH\x00R\x05spent\x88\x01\x01B\b\n" +
-	"\x06_spent\"M\n" +
-	"\fSessionMoney\x12!\n" +
-	"\famount_minor\x18\x01 \x01(\x03R\vamountMinor\x12\x1a\n" +
-	"\bcurrency\x18\x02 \x01(\tR\bcurrency\"\xc2\x04\n" +
-	"\x1cSessionAccountUsageAvailable\x12@\n" +
-	"\tfive_hour\x18\x01 \x01(\v2#.conversation.v1.SessionUsageWindowR\bfiveHour\x12E\n" +
-	"\tseven_day\x18\x02 \x01(\v2#.conversation.v1.SessionUsageWindowH\x00R\bsevenDay\x88\x01\x01\x12Y\n" +
-	"\x14seven_day_oauth_apps\x18\x03 \x01(\v2#.conversation.v1.SessionUsageWindowH\x01R\x11sevenDayOauthApps\x88\x01\x01\x12N\n" +
-	"\x0eseven_day_opus\x18\x04 \x01(\v2#.conversation.v1.SessionUsageWindowH\x02R\fsevenDayOpus\x88\x01\x01\x12R\n" +
-	"\x10seven_day_sonnet\x18\x05 \x01(\v2#.conversation.v1.SessionUsageWindowH\x03R\x0esevenDaySonnet\x88\x01\x01\x12K\n" +
-	"\fmodel_scoped\x18\x06 \x03(\v2(.conversation.v1.SessionModelUsageWindowR\vmodelScopedB\f\n" +
-	"\n" +
-	"_seven_dayB\x17\n" +
-	"\x15_seven_day_oauth_appsB\x11\n" +
-	"\x0f_seven_day_opusB\x13\n" +
-	"\x11_seven_day_sonnet\"\x89\x01\n" +
-	"\x17SessionModelUsageWindow\x121\n" +
-	"\x05model\x18\x01 \x01(\v2\x1b.conversation.v1.AgentModelR\x05model\x12;\n" +
-	"\x06window\x18\x02 \x01(\v2#.conversation.v1.SessionUsageWindowR\x06window\"g\n" +
-	"\x12SessionUsageWindow\x12/\n" +
-	"\x13utilization_percent\x18\x01 \x01(\x01R\x12utilizationPercent\x12 \n" +
-	"\fresets_at_ms\x18\x02 \x01(\x03R\n" +
-	"resetsAtMs\"\xba\x03\n" +
-	"\x1eSessionAccountUsageUnavailable\x12b\n" +
-	"\x13service_unavailable\x18\x01 \x01(\v2/.conversation.v1.SessionUsageServiceUnavailableH\x00R\x12serviceUnavailable\x12_\n" +
-	"\x12window_unavailable\x18\x02 \x01(\v2..conversation.v1.SessionUsageWindowUnavailableH\x00R\x11windowUnavailable\x12n\n" +
-	"\x17utilization_unavailable\x18\x03 \x01(\v23.conversation.v1.SessionUsageUtilizationUnavailableH\x00R\x16utilizationUnavailable\x12Y\n" +
-	"\x10sampling_failure\x18\x04 \x01(\v2,.conversation.v1.SessionUsageSamplingFailureH\x00R\x0fsamplingFailureB\b\n" +
-	"\x06reason\" \n" +
-	"\x1eSessionUsageServiceUnavailable\"\x1f\n" +
-	"\x1dSessionUsageWindowUnavailable\"$\n" +
-	"\"SessionUsageUtilizationUnavailable\"3\n" +
-	"\x1bSessionUsageSamplingFailure\x12\x14\n" +
-	"\x05cause\x18\x01 \x01(\tR\x05cause\"\x90\x02\n" +
+	"\x05error\x18\x01 \x01(\tR\x05error\"\x90\x02\n" +
 	"\x12SessionDiagnostics\x12;\n" +
 	"\ahealthy\x18\x01 \x01(\v2\x1f.conversation.v1.SessionHealthyH\x00R\ahealthy\x12A\n" +
 	"\tunhealthy\x18\x02 \x01(\v2!.conversation.v1.SessionUnhealthyH\x00R\tunhealthy\x12Q\n" +
@@ -9051,7 +7974,7 @@ func file_conversation_v1_session_proto_rawDescGZIP() []byte {
 }
 
 var file_conversation_v1_session_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_conversation_v1_session_proto_msgTypes = make([]protoimpl.MessageInfo, 120)
+var file_conversation_v1_session_proto_msgTypes = make([]protoimpl.MessageInfo, 104)
 var file_conversation_v1_session_proto_goTypes = []any{
 	(SessionCompactScope)(0),                              // 0: conversation.v1.SessionCompactScope
 	(SessionCompactionPhase)(0),                           // 1: conversation.v1.SessionCompactionPhase
@@ -9122,234 +8045,195 @@ var file_conversation_v1_session_proto_goTypes = []any{
 	(*SessionMcpServerDisabled)(nil),                      // 66: conversation.v1.SessionMcpServerDisabled
 	(*SessionMcpServerConnected)(nil),                     // 67: conversation.v1.SessionMcpServerConnected
 	(*SessionMcpServerFailed)(nil),                        // 68: conversation.v1.SessionMcpServerFailed
-	(*SessionAccountUsage)(nil),                           // 69: conversation.v1.SessionAccountUsage
-	(*SessionSubscriptionType)(nil),                       // 70: conversation.v1.SessionSubscriptionType
-	(*SessionSubscriptionTypePro)(nil),                    // 71: conversation.v1.SessionSubscriptionTypePro
-	(*SessionSubscriptionTypeMax)(nil),                    // 72: conversation.v1.SessionSubscriptionTypeMax
-	(*SessionSubscriptionTypeTeam)(nil),                   // 73: conversation.v1.SessionSubscriptionTypeTeam
-	(*SessionSubscriptionTypeEnterprise)(nil),             // 74: conversation.v1.SessionSubscriptionTypeEnterprise
-	(*SessionAccountUsageSeatSpend)(nil),                  // 75: conversation.v1.SessionAccountUsageSeatSpend
-	(*SessionMoney)(nil),                                  // 76: conversation.v1.SessionMoney
-	(*SessionAccountUsageAvailable)(nil),                  // 77: conversation.v1.SessionAccountUsageAvailable
-	(*SessionModelUsageWindow)(nil),                       // 78: conversation.v1.SessionModelUsageWindow
-	(*SessionUsageWindow)(nil),                            // 79: conversation.v1.SessionUsageWindow
-	(*SessionAccountUsageUnavailable)(nil),                // 80: conversation.v1.SessionAccountUsageUnavailable
-	(*SessionUsageServiceUnavailable)(nil),                // 81: conversation.v1.SessionUsageServiceUnavailable
-	(*SessionUsageWindowUnavailable)(nil),                 // 82: conversation.v1.SessionUsageWindowUnavailable
-	(*SessionUsageUtilizationUnavailable)(nil),            // 83: conversation.v1.SessionUsageUtilizationUnavailable
-	(*SessionUsageSamplingFailure)(nil),                   // 84: conversation.v1.SessionUsageSamplingFailure
-	(*SessionDiagnostics)(nil),                            // 85: conversation.v1.SessionDiagnostics
-	(*SessionHealthy)(nil),                                // 86: conversation.v1.SessionHealthy
-	(*SessionUnhealthy)(nil),                              // 87: conversation.v1.SessionUnhealthy
-	(*SessionFault)(nil),                                  // 88: conversation.v1.SessionFault
-	(*SessionFaultStoreUnreachable)(nil),                  // 89: conversation.v1.SessionFaultStoreUnreachable
-	(*SessionFaultConverterDefect)(nil),                   // 90: conversation.v1.SessionFaultConverterDefect
-	(*SessionFaultLogSinkPoisoned)(nil),                   // 91: conversation.v1.SessionFaultLogSinkPoisoned
-	(*SessionFaultKeepaliveFailed)(nil),                   // 92: conversation.v1.SessionFaultKeepaliveFailed
-	(*SessionFaultVendorQueryFailed)(nil),                 // 93: conversation.v1.SessionFaultVendorQueryFailed
-	(*SessionFaultNetworkUnreachable)(nil),                // 94: conversation.v1.SessionFaultNetworkUnreachable
-	(*SessionDegradedWindow)(nil),                         // 95: conversation.v1.SessionDegradedWindow
-	(*SessionDegradedOpen)(nil),                           // 96: conversation.v1.SessionDegradedOpen
-	(*SessionDegradedClosed)(nil),                         // 97: conversation.v1.SessionDegradedClosed
-	(*SessionKilled)(nil),                                 // 98: conversation.v1.SessionKilled
-	(*SessionKilledIdle)(nil),                             // 99: conversation.v1.SessionKilledIdle
-	(*SessionKilledForced)(nil),                           // 100: conversation.v1.SessionKilledForced
-	(*SessionLive)(nil),                                   // 101: conversation.v1.SessionLive
-	(*SessionContextUsage)(nil),                           // 102: conversation.v1.SessionContextUsage
-	(*SessionContextCategory)(nil),                        // 103: conversation.v1.SessionContextCategory
-	(*SessionContextMemoryFile)(nil),                      // 104: conversation.v1.SessionContextMemoryFile
-	(*SessionContextMcpTool)(nil),                         // 105: conversation.v1.SessionContextMcpTool
-	(*SessionContextDeferredBuiltinTool)(nil),             // 106: conversation.v1.SessionContextDeferredBuiltinTool
-	(*SessionContextSystemTool)(nil),                      // 107: conversation.v1.SessionContextSystemTool
-	(*SessionContextSystemPromptSection)(nil),             // 108: conversation.v1.SessionContextSystemPromptSection
-	(*SessionContextAgent)(nil),                           // 109: conversation.v1.SessionContextAgent
-	(*SessionContextSlashCommands)(nil),                   // 110: conversation.v1.SessionContextSlashCommands
-	(*SessionContextSkills)(nil),                          // 111: conversation.v1.SessionContextSkills
-	(*SessionContextSkillFrontmatter)(nil),                // 112: conversation.v1.SessionContextSkillFrontmatter
-	(*SessionContextMessageBreakdown)(nil),                // 113: conversation.v1.SessionContextMessageBreakdown
-	(*SessionContextToolCallsByType)(nil),                 // 114: conversation.v1.SessionContextToolCallsByType
-	(*SessionContextAttachmentsByType)(nil),               // 115: conversation.v1.SessionContextAttachmentsByType
-	(*SessionContextApiUsage)(nil),                        // 116: conversation.v1.SessionContextApiUsage
-	(*LockHolderFailure)(nil),                             // 117: conversation.v1.LockHolderFailure
-	(*LockHolderSpawnFailed)(nil),                         // 118: conversation.v1.LockHolderSpawnFailed
-	(*LockHolderExited)(nil),                              // 119: conversation.v1.LockHolderExited
-	(*LockHolderSignaled)(nil),                            // 120: conversation.v1.LockHolderSignaled
-	(*LockHolderMisanswered)(nil),                         // 121: conversation.v1.LockHolderMisanswered
-	(*LockHolderSilent)(nil),                              // 122: conversation.v1.LockHolderSilent
-	(*AgentModel)(nil),                                    // 123: conversation.v1.AgentModel
-	(*AgentPermissionMode)(nil),                           // 124: conversation.v1.AgentPermissionMode
-	(*ModelOption)(nil),                                   // 125: conversation.v1.ModelOption
-	(*TurnId)(nil),                                        // 126: conversation.v1.TurnId
-	(*AgentDetachedWork)(nil),                             // 127: conversation.v1.AgentDetachedWork
-	(*AgentId)(nil),                                       // 128: conversation.v1.AgentId
-	(*AgentPermission)(nil),                               // 129: conversation.v1.AgentPermission
-	(*AgentQuestion)(nil),                                 // 130: conversation.v1.AgentQuestion
-	(*SessionCommandCatalog)(nil),                         // 131: conversation.v1.SessionCommandCatalog
-	(*DetachedWorkId)(nil),                                // 132: conversation.v1.DetachedWorkId
-	(*CompactionId)(nil),                                  // 133: conversation.v1.CompactionId
-	(AgentEffortLevel)(0),                                 // 134: conversation.v1.AgentEffortLevel
+	(*SessionDiagnostics)(nil),                            // 69: conversation.v1.SessionDiagnostics
+	(*SessionHealthy)(nil),                                // 70: conversation.v1.SessionHealthy
+	(*SessionUnhealthy)(nil),                              // 71: conversation.v1.SessionUnhealthy
+	(*SessionFault)(nil),                                  // 72: conversation.v1.SessionFault
+	(*SessionFaultStoreUnreachable)(nil),                  // 73: conversation.v1.SessionFaultStoreUnreachable
+	(*SessionFaultConverterDefect)(nil),                   // 74: conversation.v1.SessionFaultConverterDefect
+	(*SessionFaultLogSinkPoisoned)(nil),                   // 75: conversation.v1.SessionFaultLogSinkPoisoned
+	(*SessionFaultKeepaliveFailed)(nil),                   // 76: conversation.v1.SessionFaultKeepaliveFailed
+	(*SessionFaultVendorQueryFailed)(nil),                 // 77: conversation.v1.SessionFaultVendorQueryFailed
+	(*SessionFaultNetworkUnreachable)(nil),                // 78: conversation.v1.SessionFaultNetworkUnreachable
+	(*SessionDegradedWindow)(nil),                         // 79: conversation.v1.SessionDegradedWindow
+	(*SessionDegradedOpen)(nil),                           // 80: conversation.v1.SessionDegradedOpen
+	(*SessionDegradedClosed)(nil),                         // 81: conversation.v1.SessionDegradedClosed
+	(*SessionKilled)(nil),                                 // 82: conversation.v1.SessionKilled
+	(*SessionKilledIdle)(nil),                             // 83: conversation.v1.SessionKilledIdle
+	(*SessionKilledForced)(nil),                           // 84: conversation.v1.SessionKilledForced
+	(*SessionLive)(nil),                                   // 85: conversation.v1.SessionLive
+	(*SessionContextUsage)(nil),                           // 86: conversation.v1.SessionContextUsage
+	(*SessionContextCategory)(nil),                        // 87: conversation.v1.SessionContextCategory
+	(*SessionContextMemoryFile)(nil),                      // 88: conversation.v1.SessionContextMemoryFile
+	(*SessionContextMcpTool)(nil),                         // 89: conversation.v1.SessionContextMcpTool
+	(*SessionContextDeferredBuiltinTool)(nil),             // 90: conversation.v1.SessionContextDeferredBuiltinTool
+	(*SessionContextSystemTool)(nil),                      // 91: conversation.v1.SessionContextSystemTool
+	(*SessionContextSystemPromptSection)(nil),             // 92: conversation.v1.SessionContextSystemPromptSection
+	(*SessionContextAgent)(nil),                           // 93: conversation.v1.SessionContextAgent
+	(*SessionContextSlashCommands)(nil),                   // 94: conversation.v1.SessionContextSlashCommands
+	(*SessionContextSkills)(nil),                          // 95: conversation.v1.SessionContextSkills
+	(*SessionContextSkillFrontmatter)(nil),                // 96: conversation.v1.SessionContextSkillFrontmatter
+	(*SessionContextMessageBreakdown)(nil),                // 97: conversation.v1.SessionContextMessageBreakdown
+	(*SessionContextToolCallsByType)(nil),                 // 98: conversation.v1.SessionContextToolCallsByType
+	(*SessionContextAttachmentsByType)(nil),               // 99: conversation.v1.SessionContextAttachmentsByType
+	(*SessionContextApiUsage)(nil),                        // 100: conversation.v1.SessionContextApiUsage
+	(*LockHolderFailure)(nil),                             // 101: conversation.v1.LockHolderFailure
+	(*LockHolderSpawnFailed)(nil),                         // 102: conversation.v1.LockHolderSpawnFailed
+	(*LockHolderExited)(nil),                              // 103: conversation.v1.LockHolderExited
+	(*LockHolderSignaled)(nil),                            // 104: conversation.v1.LockHolderSignaled
+	(*LockHolderMisanswered)(nil),                         // 105: conversation.v1.LockHolderMisanswered
+	(*LockHolderSilent)(nil),                              // 106: conversation.v1.LockHolderSilent
+	(*AgentModel)(nil),                                    // 107: conversation.v1.AgentModel
+	(*AgentPermissionMode)(nil),                           // 108: conversation.v1.AgentPermissionMode
+	(*ModelOption)(nil),                                   // 109: conversation.v1.ModelOption
+	(*TurnId)(nil),                                        // 110: conversation.v1.TurnId
+	(*AgentDetachedWork)(nil),                             // 111: conversation.v1.AgentDetachedWork
+	(*AgentId)(nil),                                       // 112: conversation.v1.AgentId
+	(*AgentPermission)(nil),                               // 113: conversation.v1.AgentPermission
+	(*AgentQuestion)(nil),                                 // 114: conversation.v1.AgentQuestion
+	(*SessionCommandCatalog)(nil),                         // 115: conversation.v1.SessionCommandCatalog
+	(*DetachedWorkId)(nil),                                // 116: conversation.v1.DetachedWorkId
+	(*CompactionId)(nil),                                  // 117: conversation.v1.CompactionId
+	(AgentEffortLevel)(0),                                 // 118: conversation.v1.AgentEffortLevel
 }
 var file_conversation_v1_session_proto_depIdxs = []int32{
 	5,   // 0: conversation.v1.SessionStarted.runtime:type_name -> conversation.v1.SessionRuntime
-	123, // 1: conversation.v1.SessionStarted.effective_model:type_name -> conversation.v1.AgentModel
-	124, // 2: conversation.v1.SessionStarted.permission_mode:type_name -> conversation.v1.AgentPermissionMode
-	125, // 3: conversation.v1.SessionStarted.model_catalog:type_name -> conversation.v1.ModelOption
-	126, // 4: conversation.v1.SessionStarted.turn_in_flight:type_name -> conversation.v1.TurnId
-	126, // 5: conversation.v1.SessionStarted.turns_waiting:type_name -> conversation.v1.TurnId
-	127, // 6: conversation.v1.SessionStarted.live_work:type_name -> conversation.v1.AgentDetachedWork
+	107, // 1: conversation.v1.SessionStarted.effective_model:type_name -> conversation.v1.AgentModel
+	108, // 2: conversation.v1.SessionStarted.permission_mode:type_name -> conversation.v1.AgentPermissionMode
+	109, // 3: conversation.v1.SessionStarted.model_catalog:type_name -> conversation.v1.ModelOption
+	110, // 4: conversation.v1.SessionStarted.turn_in_flight:type_name -> conversation.v1.TurnId
+	110, // 5: conversation.v1.SessionStarted.turns_waiting:type_name -> conversation.v1.TurnId
+	111, // 6: conversation.v1.SessionStarted.live_work:type_name -> conversation.v1.AgentDetachedWork
 	4,   // 7: conversation.v1.SessionStarted.open_asks:type_name -> conversation.v1.SessionOpenAsk
 	54,  // 8: conversation.v1.SessionStarted.vendor_activity:type_name -> conversation.v1.SessionVendorActivity
 	2,   // 9: conversation.v1.SessionStarted.contract:type_name -> conversation.v1.SessionContract
-	128, // 10: conversation.v1.SessionOpenAsk.agent:type_name -> conversation.v1.AgentId
-	129, // 11: conversation.v1.SessionOpenAsk.permission:type_name -> conversation.v1.AgentPermission
-	130, // 12: conversation.v1.SessionOpenAsk.question:type_name -> conversation.v1.AgentQuestion
-	123, // 13: conversation.v1.SessionCold.requested_model:type_name -> conversation.v1.AgentModel
+	112, // 10: conversation.v1.SessionOpenAsk.agent:type_name -> conversation.v1.AgentId
+	113, // 11: conversation.v1.SessionOpenAsk.permission:type_name -> conversation.v1.AgentPermission
+	114, // 12: conversation.v1.SessionOpenAsk.question:type_name -> conversation.v1.AgentQuestion
+	107, // 13: conversation.v1.SessionCold.requested_model:type_name -> conversation.v1.AgentModel
 	7,   // 14: conversation.v1.SessionCold.lapsed:type_name -> conversation.v1.SessionColdLapsed
 	8,   // 15: conversation.v1.SessionCold.model_switch:type_name -> conversation.v1.SessionColdModelSwitch
 	10,  // 16: conversation.v1.SessionColdRemediation.pay:type_name -> conversation.v1.SessionColdPay
 	11,  // 17: conversation.v1.SessionColdRemediation.clear:type_name -> conversation.v1.SessionColdClear
 	12,  // 18: conversation.v1.SessionColdRemediation.compact:type_name -> conversation.v1.SessionColdCompact
-	123, // 19: conversation.v1.SessionColdCompact.model:type_name -> conversation.v1.AgentModel
+	107, // 19: conversation.v1.SessionColdCompact.model:type_name -> conversation.v1.AgentModel
 	0,   // 20: conversation.v1.SessionColdCompact.scope:type_name -> conversation.v1.SessionCompactScope
 	48,  // 21: conversation.v1.SessionUpdate.identity_rotated:type_name -> conversation.v1.SessionIdentityRotated
 	49,  // 22: conversation.v1.SessionUpdate.query_died:type_name -> conversation.v1.SessionQueryDied
 	57,  // 23: conversation.v1.SessionUpdate.model_changed:type_name -> conversation.v1.SessionModelChanged
 	59,  // 24: conversation.v1.SessionUpdate.fast_mode:type_name -> conversation.v1.SessionFastMode
 	63,  // 25: conversation.v1.SessionUpdate.mcp_server:type_name -> conversation.v1.SessionMcpServer
-	69,  // 26: conversation.v1.SessionUpdate.account_usage:type_name -> conversation.v1.SessionAccountUsage
-	52,  // 27: conversation.v1.SessionUpdate.permission_mode_changed:type_name -> conversation.v1.SessionPermissionModeChanged
-	36,  // 28: conversation.v1.SessionUpdate.rate_limit_status:type_name -> conversation.v1.SessionRateLimitStatus
-	85,  // 29: conversation.v1.SessionUpdate.diagnostics:type_name -> conversation.v1.SessionDiagnostics
-	102, // 30: conversation.v1.SessionUpdate.context_usage:type_name -> conversation.v1.SessionContextUsage
-	35,  // 31: conversation.v1.SessionUpdate.compacting:type_name -> conversation.v1.SessionCompacting
-	34,  // 32: conversation.v1.SessionUpdate.title:type_name -> conversation.v1.SessionTitle
-	32,  // 33: conversation.v1.SessionUpdate.compaction_progress:type_name -> conversation.v1.SessionCompactionProgress
-	26,  // 34: conversation.v1.SessionUpdate.network_resume_waits:type_name -> conversation.v1.SessionNetworkResumeWaits
-	28,  // 35: conversation.v1.SessionUpdate.network_resume_outcome:type_name -> conversation.v1.SessionNetworkResumeOutcome
-	58,  // 36: conversation.v1.SessionUpdate.effort_changed:type_name -> conversation.v1.SessionEffortChanged
-	53,  // 37: conversation.v1.SessionUpdate.live_work:type_name -> conversation.v1.SessionLiveWork
-	131, // 38: conversation.v1.SessionUpdate.command_catalog:type_name -> conversation.v1.SessionCommandCatalog
-	23,  // 39: conversation.v1.SessionUpdate.cache_lapse:type_name -> conversation.v1.SessionCacheLapse
-	19,  // 40: conversation.v1.SessionUpdate.rollback_settled:type_name -> conversation.v1.SessionRollbackSettled
-	16,  // 41: conversation.v1.SessionUpdate.vendor_error_retry:type_name -> conversation.v1.SessionVendorErrorRetry
-	15,  // 42: conversation.v1.SessionUpdate.skills_changed:type_name -> conversation.v1.SessionSkillsChanged
-	14,  // 43: conversation.v1.SessionUpdate.join_withdrawn:type_name -> conversation.v1.SessionJoinWithdrawn
-	54,  // 44: conversation.v1.SessionUpdate.vendor_activity:type_name -> conversation.v1.SessionVendorActivity
-	126, // 45: conversation.v1.SessionJoinWithdrawn.turn:type_name -> conversation.v1.TurnId
-	126, // 46: conversation.v1.SessionJoinWithdrawn.into:type_name -> conversation.v1.TurnId
-	18,  // 47: conversation.v1.SessionVendorErrorRetry.scheduled:type_name -> conversation.v1.SessionVendorErrorRetryScheduled
-	17,  // 48: conversation.v1.SessionVendorErrorRetry.attempting:type_name -> conversation.v1.SessionVendorErrorRetryAttempting
-	126, // 49: conversation.v1.SessionRollbackSettled.dropped_turns:type_name -> conversation.v1.TurnId
-	20,  // 50: conversation.v1.SessionRollbackSettled.resumed_at_cut:type_name -> conversation.v1.SessionRollbackResumedAtCut
-	21,  // 51: conversation.v1.SessionRollbackSettled.refused:type_name -> conversation.v1.SessionRollbackRefused
-	22,  // 52: conversation.v1.SessionRollbackSettled.failed:type_name -> conversation.v1.SessionRollbackFailed
-	24,  // 53: conversation.v1.SessionCacheLapse.gated:type_name -> conversation.v1.SessionCacheLapseGated
-	25,  // 54: conversation.v1.SessionCacheLapse.ungated:type_name -> conversation.v1.SessionCacheLapseUngated
-	27,  // 55: conversation.v1.SessionNetworkResumeWaits.waits:type_name -> conversation.v1.SessionNetworkResumeWait
-	132, // 56: conversation.v1.SessionNetworkResumeWait.work:type_name -> conversation.v1.DetachedWorkId
-	132, // 57: conversation.v1.SessionNetworkResumeOutcome.work:type_name -> conversation.v1.DetachedWorkId
-	29,  // 58: conversation.v1.SessionNetworkResumeOutcome.resumed:type_name -> conversation.v1.SessionNetworkResumeResumed
-	30,  // 59: conversation.v1.SessionNetworkResumeOutcome.gave_up:type_name -> conversation.v1.SessionNetworkResumeGaveUp
-	31,  // 60: conversation.v1.SessionNetworkResumeOutcome.abandoned:type_name -> conversation.v1.SessionNetworkResumeAbandoned
-	1,   // 61: conversation.v1.SessionCompactionProgress.phase:type_name -> conversation.v1.SessionCompactionPhase
-	33,  // 62: conversation.v1.SessionCompactionProgress.spend:type_name -> conversation.v1.SessionCompactionSpend
-	123, // 63: conversation.v1.SessionCompactionSpend.model:type_name -> conversation.v1.AgentModel
-	133, // 64: conversation.v1.SessionCompacting.compaction:type_name -> conversation.v1.CompactionId
-	37,  // 65: conversation.v1.SessionRateLimitStatus.allowed:type_name -> conversation.v1.SessionRateLimitAllowed
-	38,  // 66: conversation.v1.SessionRateLimitStatus.allowed_warning:type_name -> conversation.v1.SessionRateLimitAllowedWarning
-	39,  // 67: conversation.v1.SessionRateLimitStatus.rejected:type_name -> conversation.v1.SessionRateLimitRejected
-	40,  // 68: conversation.v1.SessionRateLimitStatus.rate_limit_type:type_name -> conversation.v1.SessionRateLimitType
-	47,  // 69: conversation.v1.SessionRateLimitStatus.overage:type_name -> conversation.v1.SessionRateLimitOverage
-	41,  // 70: conversation.v1.SessionRateLimitType.five_hour:type_name -> conversation.v1.SessionRateLimitWindowFiveHour
-	42,  // 71: conversation.v1.SessionRateLimitType.seven_day:type_name -> conversation.v1.SessionRateLimitWindowSevenDay
-	43,  // 72: conversation.v1.SessionRateLimitType.seven_day_opus:type_name -> conversation.v1.SessionRateLimitWindowSevenDayOpus
-	44,  // 73: conversation.v1.SessionRateLimitType.seven_day_sonnet:type_name -> conversation.v1.SessionRateLimitWindowSevenDaySonnet
-	45,  // 74: conversation.v1.SessionRateLimitType.seven_day_overage_included:type_name -> conversation.v1.SessionRateLimitWindowSevenDayOverageIncluded
-	46,  // 75: conversation.v1.SessionRateLimitType.overage:type_name -> conversation.v1.SessionRateLimitWindowOverage
-	37,  // 76: conversation.v1.SessionRateLimitOverage.allowed:type_name -> conversation.v1.SessionRateLimitAllowed
-	38,  // 77: conversation.v1.SessionRateLimitOverage.allowed_warning:type_name -> conversation.v1.SessionRateLimitAllowedWarning
-	39,  // 78: conversation.v1.SessionRateLimitOverage.rejected:type_name -> conversation.v1.SessionRateLimitRejected
-	50,  // 79: conversation.v1.SessionQueryDied.unexpected_eof:type_name -> conversation.v1.SessionQueryUnexpectedEof
-	51,  // 80: conversation.v1.SessionQueryDied.iterator_failure:type_name -> conversation.v1.SessionQueryIteratorFailure
-	124, // 81: conversation.v1.SessionPermissionModeChanged.permission_mode:type_name -> conversation.v1.AgentPermissionMode
-	132, // 82: conversation.v1.SessionLiveWork.live_work:type_name -> conversation.v1.DetachedWorkId
-	55,  // 83: conversation.v1.SessionVendorActivity.idle:type_name -> conversation.v1.SessionVendorActivityIdle
-	56,  // 84: conversation.v1.SessionVendorActivity.busy:type_name -> conversation.v1.SessionVendorActivityBusy
-	123, // 85: conversation.v1.SessionModelChanged.effective_model:type_name -> conversation.v1.AgentModel
-	134, // 86: conversation.v1.SessionEffortChanged.effective_effort:type_name -> conversation.v1.AgentEffortLevel
-	61,  // 87: conversation.v1.SessionFastMode.on:type_name -> conversation.v1.SessionFastModeOn
-	62,  // 88: conversation.v1.SessionFastMode.off:type_name -> conversation.v1.SessionFastModeOff
-	60,  // 89: conversation.v1.SessionFastMode.cooldown:type_name -> conversation.v1.SessionFastModeCooldown
-	67,  // 90: conversation.v1.SessionMcpServer.connected:type_name -> conversation.v1.SessionMcpServerConnected
-	68,  // 91: conversation.v1.SessionMcpServer.failed:type_name -> conversation.v1.SessionMcpServerFailed
-	64,  // 92: conversation.v1.SessionMcpServer.needs_auth:type_name -> conversation.v1.SessionMcpServerNeedsAuth
-	65,  // 93: conversation.v1.SessionMcpServer.pending:type_name -> conversation.v1.SessionMcpServerPending
-	66,  // 94: conversation.v1.SessionMcpServer.disabled:type_name -> conversation.v1.SessionMcpServerDisabled
-	77,  // 95: conversation.v1.SessionAccountUsage.available:type_name -> conversation.v1.SessionAccountUsageAvailable
-	80,  // 96: conversation.v1.SessionAccountUsage.unavailable:type_name -> conversation.v1.SessionAccountUsageUnavailable
-	75,  // 97: conversation.v1.SessionAccountUsage.seat_spend:type_name -> conversation.v1.SessionAccountUsageSeatSpend
-	70,  // 98: conversation.v1.SessionAccountUsage.subscription_type:type_name -> conversation.v1.SessionSubscriptionType
-	71,  // 99: conversation.v1.SessionSubscriptionType.pro:type_name -> conversation.v1.SessionSubscriptionTypePro
-	72,  // 100: conversation.v1.SessionSubscriptionType.max:type_name -> conversation.v1.SessionSubscriptionTypeMax
-	73,  // 101: conversation.v1.SessionSubscriptionType.team:type_name -> conversation.v1.SessionSubscriptionTypeTeam
-	74,  // 102: conversation.v1.SessionSubscriptionType.enterprise:type_name -> conversation.v1.SessionSubscriptionTypeEnterprise
-	76,  // 103: conversation.v1.SessionAccountUsageSeatSpend.allotment:type_name -> conversation.v1.SessionMoney
-	76,  // 104: conversation.v1.SessionAccountUsageSeatSpend.spent:type_name -> conversation.v1.SessionMoney
-	79,  // 105: conversation.v1.SessionAccountUsageAvailable.five_hour:type_name -> conversation.v1.SessionUsageWindow
-	79,  // 106: conversation.v1.SessionAccountUsageAvailable.seven_day:type_name -> conversation.v1.SessionUsageWindow
-	79,  // 107: conversation.v1.SessionAccountUsageAvailable.seven_day_oauth_apps:type_name -> conversation.v1.SessionUsageWindow
-	79,  // 108: conversation.v1.SessionAccountUsageAvailable.seven_day_opus:type_name -> conversation.v1.SessionUsageWindow
-	79,  // 109: conversation.v1.SessionAccountUsageAvailable.seven_day_sonnet:type_name -> conversation.v1.SessionUsageWindow
-	78,  // 110: conversation.v1.SessionAccountUsageAvailable.model_scoped:type_name -> conversation.v1.SessionModelUsageWindow
-	123, // 111: conversation.v1.SessionModelUsageWindow.model:type_name -> conversation.v1.AgentModel
-	79,  // 112: conversation.v1.SessionModelUsageWindow.window:type_name -> conversation.v1.SessionUsageWindow
-	81,  // 113: conversation.v1.SessionAccountUsageUnavailable.service_unavailable:type_name -> conversation.v1.SessionUsageServiceUnavailable
-	82,  // 114: conversation.v1.SessionAccountUsageUnavailable.window_unavailable:type_name -> conversation.v1.SessionUsageWindowUnavailable
-	83,  // 115: conversation.v1.SessionAccountUsageUnavailable.utilization_unavailable:type_name -> conversation.v1.SessionUsageUtilizationUnavailable
-	84,  // 116: conversation.v1.SessionAccountUsageUnavailable.sampling_failure:type_name -> conversation.v1.SessionUsageSamplingFailure
-	86,  // 117: conversation.v1.SessionDiagnostics.healthy:type_name -> conversation.v1.SessionHealthy
-	87,  // 118: conversation.v1.SessionDiagnostics.unhealthy:type_name -> conversation.v1.SessionUnhealthy
-	95,  // 119: conversation.v1.SessionDiagnostics.degraded_windows:type_name -> conversation.v1.SessionDegradedWindow
-	88,  // 120: conversation.v1.SessionUnhealthy.faults:type_name -> conversation.v1.SessionFault
-	89,  // 121: conversation.v1.SessionFault.store_unreachable:type_name -> conversation.v1.SessionFaultStoreUnreachable
-	90,  // 122: conversation.v1.SessionFault.converter_defect:type_name -> conversation.v1.SessionFaultConverterDefect
-	91,  // 123: conversation.v1.SessionFault.log_sink_poisoned:type_name -> conversation.v1.SessionFaultLogSinkPoisoned
-	92,  // 124: conversation.v1.SessionFault.keepalive_failed:type_name -> conversation.v1.SessionFaultKeepaliveFailed
-	93,  // 125: conversation.v1.SessionFault.vendor_query_failed:type_name -> conversation.v1.SessionFaultVendorQueryFailed
-	94,  // 126: conversation.v1.SessionFault.network_unreachable:type_name -> conversation.v1.SessionFaultNetworkUnreachable
-	96,  // 127: conversation.v1.SessionDegradedWindow.open:type_name -> conversation.v1.SessionDegradedOpen
-	97,  // 128: conversation.v1.SessionDegradedWindow.closed:type_name -> conversation.v1.SessionDegradedClosed
-	99,  // 129: conversation.v1.SessionKilled.idle:type_name -> conversation.v1.SessionKilledIdle
-	100, // 130: conversation.v1.SessionKilled.forced:type_name -> conversation.v1.SessionKilledForced
-	126, // 131: conversation.v1.SessionKilledForced.interrupted_turn:type_name -> conversation.v1.TurnId
-	132, // 132: conversation.v1.SessionKilledForced.stopped_work:type_name -> conversation.v1.DetachedWorkId
-	126, // 133: conversation.v1.SessionLive.turn_in_flight:type_name -> conversation.v1.TurnId
-	132, // 134: conversation.v1.SessionLive.live_work:type_name -> conversation.v1.DetachedWorkId
-	54,  // 135: conversation.v1.SessionLive.vendor_activity:type_name -> conversation.v1.SessionVendorActivity
-	103, // 136: conversation.v1.SessionContextUsage.categories:type_name -> conversation.v1.SessionContextCategory
-	104, // 137: conversation.v1.SessionContextUsage.memory_files:type_name -> conversation.v1.SessionContextMemoryFile
-	105, // 138: conversation.v1.SessionContextUsage.mcp_tools:type_name -> conversation.v1.SessionContextMcpTool
-	106, // 139: conversation.v1.SessionContextUsage.deferred_builtin_tools:type_name -> conversation.v1.SessionContextDeferredBuiltinTool
-	107, // 140: conversation.v1.SessionContextUsage.system_tools:type_name -> conversation.v1.SessionContextSystemTool
-	108, // 141: conversation.v1.SessionContextUsage.system_prompt_sections:type_name -> conversation.v1.SessionContextSystemPromptSection
-	109, // 142: conversation.v1.SessionContextUsage.agents:type_name -> conversation.v1.SessionContextAgent
-	110, // 143: conversation.v1.SessionContextUsage.slash_commands:type_name -> conversation.v1.SessionContextSlashCommands
-	111, // 144: conversation.v1.SessionContextUsage.skills:type_name -> conversation.v1.SessionContextSkills
-	113, // 145: conversation.v1.SessionContextUsage.message_breakdown:type_name -> conversation.v1.SessionContextMessageBreakdown
-	116, // 146: conversation.v1.SessionContextUsage.api_usage:type_name -> conversation.v1.SessionContextApiUsage
-	112, // 147: conversation.v1.SessionContextSkills.skill_frontmatter:type_name -> conversation.v1.SessionContextSkillFrontmatter
-	114, // 148: conversation.v1.SessionContextMessageBreakdown.tool_calls_by_type:type_name -> conversation.v1.SessionContextToolCallsByType
-	115, // 149: conversation.v1.SessionContextMessageBreakdown.attachments_by_type:type_name -> conversation.v1.SessionContextAttachmentsByType
-	118, // 150: conversation.v1.LockHolderFailure.spawn_failed:type_name -> conversation.v1.LockHolderSpawnFailed
-	119, // 151: conversation.v1.LockHolderFailure.exited:type_name -> conversation.v1.LockHolderExited
-	120, // 152: conversation.v1.LockHolderFailure.signaled:type_name -> conversation.v1.LockHolderSignaled
-	121, // 153: conversation.v1.LockHolderFailure.misanswered:type_name -> conversation.v1.LockHolderMisanswered
-	122, // 154: conversation.v1.LockHolderFailure.silent:type_name -> conversation.v1.LockHolderSilent
-	155, // [155:155] is the sub-list for method output_type
-	155, // [155:155] is the sub-list for method input_type
-	155, // [155:155] is the sub-list for extension type_name
-	155, // [155:155] is the sub-list for extension extendee
-	0,   // [0:155] is the sub-list for field type_name
+	52,  // 26: conversation.v1.SessionUpdate.permission_mode_changed:type_name -> conversation.v1.SessionPermissionModeChanged
+	36,  // 27: conversation.v1.SessionUpdate.rate_limit_status:type_name -> conversation.v1.SessionRateLimitStatus
+	69,  // 28: conversation.v1.SessionUpdate.diagnostics:type_name -> conversation.v1.SessionDiagnostics
+	86,  // 29: conversation.v1.SessionUpdate.context_usage:type_name -> conversation.v1.SessionContextUsage
+	35,  // 30: conversation.v1.SessionUpdate.compacting:type_name -> conversation.v1.SessionCompacting
+	34,  // 31: conversation.v1.SessionUpdate.title:type_name -> conversation.v1.SessionTitle
+	32,  // 32: conversation.v1.SessionUpdate.compaction_progress:type_name -> conversation.v1.SessionCompactionProgress
+	26,  // 33: conversation.v1.SessionUpdate.network_resume_waits:type_name -> conversation.v1.SessionNetworkResumeWaits
+	28,  // 34: conversation.v1.SessionUpdate.network_resume_outcome:type_name -> conversation.v1.SessionNetworkResumeOutcome
+	58,  // 35: conversation.v1.SessionUpdate.effort_changed:type_name -> conversation.v1.SessionEffortChanged
+	53,  // 36: conversation.v1.SessionUpdate.live_work:type_name -> conversation.v1.SessionLiveWork
+	115, // 37: conversation.v1.SessionUpdate.command_catalog:type_name -> conversation.v1.SessionCommandCatalog
+	23,  // 38: conversation.v1.SessionUpdate.cache_lapse:type_name -> conversation.v1.SessionCacheLapse
+	19,  // 39: conversation.v1.SessionUpdate.rollback_settled:type_name -> conversation.v1.SessionRollbackSettled
+	16,  // 40: conversation.v1.SessionUpdate.vendor_error_retry:type_name -> conversation.v1.SessionVendorErrorRetry
+	15,  // 41: conversation.v1.SessionUpdate.skills_changed:type_name -> conversation.v1.SessionSkillsChanged
+	14,  // 42: conversation.v1.SessionUpdate.join_withdrawn:type_name -> conversation.v1.SessionJoinWithdrawn
+	54,  // 43: conversation.v1.SessionUpdate.vendor_activity:type_name -> conversation.v1.SessionVendorActivity
+	110, // 44: conversation.v1.SessionJoinWithdrawn.turn:type_name -> conversation.v1.TurnId
+	110, // 45: conversation.v1.SessionJoinWithdrawn.into:type_name -> conversation.v1.TurnId
+	18,  // 46: conversation.v1.SessionVendorErrorRetry.scheduled:type_name -> conversation.v1.SessionVendorErrorRetryScheduled
+	17,  // 47: conversation.v1.SessionVendorErrorRetry.attempting:type_name -> conversation.v1.SessionVendorErrorRetryAttempting
+	110, // 48: conversation.v1.SessionRollbackSettled.dropped_turns:type_name -> conversation.v1.TurnId
+	20,  // 49: conversation.v1.SessionRollbackSettled.resumed_at_cut:type_name -> conversation.v1.SessionRollbackResumedAtCut
+	21,  // 50: conversation.v1.SessionRollbackSettled.refused:type_name -> conversation.v1.SessionRollbackRefused
+	22,  // 51: conversation.v1.SessionRollbackSettled.failed:type_name -> conversation.v1.SessionRollbackFailed
+	24,  // 52: conversation.v1.SessionCacheLapse.gated:type_name -> conversation.v1.SessionCacheLapseGated
+	25,  // 53: conversation.v1.SessionCacheLapse.ungated:type_name -> conversation.v1.SessionCacheLapseUngated
+	27,  // 54: conversation.v1.SessionNetworkResumeWaits.waits:type_name -> conversation.v1.SessionNetworkResumeWait
+	116, // 55: conversation.v1.SessionNetworkResumeWait.work:type_name -> conversation.v1.DetachedWorkId
+	116, // 56: conversation.v1.SessionNetworkResumeOutcome.work:type_name -> conversation.v1.DetachedWorkId
+	29,  // 57: conversation.v1.SessionNetworkResumeOutcome.resumed:type_name -> conversation.v1.SessionNetworkResumeResumed
+	30,  // 58: conversation.v1.SessionNetworkResumeOutcome.gave_up:type_name -> conversation.v1.SessionNetworkResumeGaveUp
+	31,  // 59: conversation.v1.SessionNetworkResumeOutcome.abandoned:type_name -> conversation.v1.SessionNetworkResumeAbandoned
+	1,   // 60: conversation.v1.SessionCompactionProgress.phase:type_name -> conversation.v1.SessionCompactionPhase
+	33,  // 61: conversation.v1.SessionCompactionProgress.spend:type_name -> conversation.v1.SessionCompactionSpend
+	107, // 62: conversation.v1.SessionCompactionSpend.model:type_name -> conversation.v1.AgentModel
+	117, // 63: conversation.v1.SessionCompacting.compaction:type_name -> conversation.v1.CompactionId
+	37,  // 64: conversation.v1.SessionRateLimitStatus.allowed:type_name -> conversation.v1.SessionRateLimitAllowed
+	38,  // 65: conversation.v1.SessionRateLimitStatus.allowed_warning:type_name -> conversation.v1.SessionRateLimitAllowedWarning
+	39,  // 66: conversation.v1.SessionRateLimitStatus.rejected:type_name -> conversation.v1.SessionRateLimitRejected
+	40,  // 67: conversation.v1.SessionRateLimitStatus.rate_limit_type:type_name -> conversation.v1.SessionRateLimitType
+	47,  // 68: conversation.v1.SessionRateLimitStatus.overage:type_name -> conversation.v1.SessionRateLimitOverage
+	41,  // 69: conversation.v1.SessionRateLimitType.five_hour:type_name -> conversation.v1.SessionRateLimitWindowFiveHour
+	42,  // 70: conversation.v1.SessionRateLimitType.seven_day:type_name -> conversation.v1.SessionRateLimitWindowSevenDay
+	43,  // 71: conversation.v1.SessionRateLimitType.seven_day_opus:type_name -> conversation.v1.SessionRateLimitWindowSevenDayOpus
+	44,  // 72: conversation.v1.SessionRateLimitType.seven_day_sonnet:type_name -> conversation.v1.SessionRateLimitWindowSevenDaySonnet
+	45,  // 73: conversation.v1.SessionRateLimitType.seven_day_overage_included:type_name -> conversation.v1.SessionRateLimitWindowSevenDayOverageIncluded
+	46,  // 74: conversation.v1.SessionRateLimitType.overage:type_name -> conversation.v1.SessionRateLimitWindowOverage
+	37,  // 75: conversation.v1.SessionRateLimitOverage.allowed:type_name -> conversation.v1.SessionRateLimitAllowed
+	38,  // 76: conversation.v1.SessionRateLimitOverage.allowed_warning:type_name -> conversation.v1.SessionRateLimitAllowedWarning
+	39,  // 77: conversation.v1.SessionRateLimitOverage.rejected:type_name -> conversation.v1.SessionRateLimitRejected
+	50,  // 78: conversation.v1.SessionQueryDied.unexpected_eof:type_name -> conversation.v1.SessionQueryUnexpectedEof
+	51,  // 79: conversation.v1.SessionQueryDied.iterator_failure:type_name -> conversation.v1.SessionQueryIteratorFailure
+	108, // 80: conversation.v1.SessionPermissionModeChanged.permission_mode:type_name -> conversation.v1.AgentPermissionMode
+	116, // 81: conversation.v1.SessionLiveWork.live_work:type_name -> conversation.v1.DetachedWorkId
+	55,  // 82: conversation.v1.SessionVendorActivity.idle:type_name -> conversation.v1.SessionVendorActivityIdle
+	56,  // 83: conversation.v1.SessionVendorActivity.busy:type_name -> conversation.v1.SessionVendorActivityBusy
+	107, // 84: conversation.v1.SessionModelChanged.effective_model:type_name -> conversation.v1.AgentModel
+	118, // 85: conversation.v1.SessionEffortChanged.effective_effort:type_name -> conversation.v1.AgentEffortLevel
+	61,  // 86: conversation.v1.SessionFastMode.on:type_name -> conversation.v1.SessionFastModeOn
+	62,  // 87: conversation.v1.SessionFastMode.off:type_name -> conversation.v1.SessionFastModeOff
+	60,  // 88: conversation.v1.SessionFastMode.cooldown:type_name -> conversation.v1.SessionFastModeCooldown
+	67,  // 89: conversation.v1.SessionMcpServer.connected:type_name -> conversation.v1.SessionMcpServerConnected
+	68,  // 90: conversation.v1.SessionMcpServer.failed:type_name -> conversation.v1.SessionMcpServerFailed
+	64,  // 91: conversation.v1.SessionMcpServer.needs_auth:type_name -> conversation.v1.SessionMcpServerNeedsAuth
+	65,  // 92: conversation.v1.SessionMcpServer.pending:type_name -> conversation.v1.SessionMcpServerPending
+	66,  // 93: conversation.v1.SessionMcpServer.disabled:type_name -> conversation.v1.SessionMcpServerDisabled
+	70,  // 94: conversation.v1.SessionDiagnostics.healthy:type_name -> conversation.v1.SessionHealthy
+	71,  // 95: conversation.v1.SessionDiagnostics.unhealthy:type_name -> conversation.v1.SessionUnhealthy
+	79,  // 96: conversation.v1.SessionDiagnostics.degraded_windows:type_name -> conversation.v1.SessionDegradedWindow
+	72,  // 97: conversation.v1.SessionUnhealthy.faults:type_name -> conversation.v1.SessionFault
+	73,  // 98: conversation.v1.SessionFault.store_unreachable:type_name -> conversation.v1.SessionFaultStoreUnreachable
+	74,  // 99: conversation.v1.SessionFault.converter_defect:type_name -> conversation.v1.SessionFaultConverterDefect
+	75,  // 100: conversation.v1.SessionFault.log_sink_poisoned:type_name -> conversation.v1.SessionFaultLogSinkPoisoned
+	76,  // 101: conversation.v1.SessionFault.keepalive_failed:type_name -> conversation.v1.SessionFaultKeepaliveFailed
+	77,  // 102: conversation.v1.SessionFault.vendor_query_failed:type_name -> conversation.v1.SessionFaultVendorQueryFailed
+	78,  // 103: conversation.v1.SessionFault.network_unreachable:type_name -> conversation.v1.SessionFaultNetworkUnreachable
+	80,  // 104: conversation.v1.SessionDegradedWindow.open:type_name -> conversation.v1.SessionDegradedOpen
+	81,  // 105: conversation.v1.SessionDegradedWindow.closed:type_name -> conversation.v1.SessionDegradedClosed
+	83,  // 106: conversation.v1.SessionKilled.idle:type_name -> conversation.v1.SessionKilledIdle
+	84,  // 107: conversation.v1.SessionKilled.forced:type_name -> conversation.v1.SessionKilledForced
+	110, // 108: conversation.v1.SessionKilledForced.interrupted_turn:type_name -> conversation.v1.TurnId
+	116, // 109: conversation.v1.SessionKilledForced.stopped_work:type_name -> conversation.v1.DetachedWorkId
+	110, // 110: conversation.v1.SessionLive.turn_in_flight:type_name -> conversation.v1.TurnId
+	116, // 111: conversation.v1.SessionLive.live_work:type_name -> conversation.v1.DetachedWorkId
+	54,  // 112: conversation.v1.SessionLive.vendor_activity:type_name -> conversation.v1.SessionVendorActivity
+	87,  // 113: conversation.v1.SessionContextUsage.categories:type_name -> conversation.v1.SessionContextCategory
+	88,  // 114: conversation.v1.SessionContextUsage.memory_files:type_name -> conversation.v1.SessionContextMemoryFile
+	89,  // 115: conversation.v1.SessionContextUsage.mcp_tools:type_name -> conversation.v1.SessionContextMcpTool
+	90,  // 116: conversation.v1.SessionContextUsage.deferred_builtin_tools:type_name -> conversation.v1.SessionContextDeferredBuiltinTool
+	91,  // 117: conversation.v1.SessionContextUsage.system_tools:type_name -> conversation.v1.SessionContextSystemTool
+	92,  // 118: conversation.v1.SessionContextUsage.system_prompt_sections:type_name -> conversation.v1.SessionContextSystemPromptSection
+	93,  // 119: conversation.v1.SessionContextUsage.agents:type_name -> conversation.v1.SessionContextAgent
+	94,  // 120: conversation.v1.SessionContextUsage.slash_commands:type_name -> conversation.v1.SessionContextSlashCommands
+	95,  // 121: conversation.v1.SessionContextUsage.skills:type_name -> conversation.v1.SessionContextSkills
+	97,  // 122: conversation.v1.SessionContextUsage.message_breakdown:type_name -> conversation.v1.SessionContextMessageBreakdown
+	100, // 123: conversation.v1.SessionContextUsage.api_usage:type_name -> conversation.v1.SessionContextApiUsage
+	96,  // 124: conversation.v1.SessionContextSkills.skill_frontmatter:type_name -> conversation.v1.SessionContextSkillFrontmatter
+	98,  // 125: conversation.v1.SessionContextMessageBreakdown.tool_calls_by_type:type_name -> conversation.v1.SessionContextToolCallsByType
+	99,  // 126: conversation.v1.SessionContextMessageBreakdown.attachments_by_type:type_name -> conversation.v1.SessionContextAttachmentsByType
+	102, // 127: conversation.v1.LockHolderFailure.spawn_failed:type_name -> conversation.v1.LockHolderSpawnFailed
+	103, // 128: conversation.v1.LockHolderFailure.exited:type_name -> conversation.v1.LockHolderExited
+	104, // 129: conversation.v1.LockHolderFailure.signaled:type_name -> conversation.v1.LockHolderSignaled
+	105, // 130: conversation.v1.LockHolderFailure.misanswered:type_name -> conversation.v1.LockHolderMisanswered
+	106, // 131: conversation.v1.LockHolderFailure.silent:type_name -> conversation.v1.LockHolderSilent
+	132, // [132:132] is the sub-list for method output_type
+	132, // [132:132] is the sub-list for method input_type
+	132, // [132:132] is the sub-list for extension type_name
+	132, // [132:132] is the sub-list for extension extendee
+	0,   // [0:132] is the sub-list for field type_name
 }
 
 func init() { file_conversation_v1_session_proto_init() }
@@ -9384,7 +8268,6 @@ func file_conversation_v1_session_proto_init() {
 		(*SessionUpdate_ModelChanged)(nil),
 		(*SessionUpdate_FastMode)(nil),
 		(*SessionUpdate_McpServer)(nil),
-		(*SessionUpdate_AccountUsage)(nil),
 		(*SessionUpdate_PermissionModeChanged)(nil),
 		(*SessionUpdate_RateLimitStatus)(nil),
 		(*SessionUpdate_Diagnostics)(nil),
@@ -9460,29 +8343,10 @@ func file_conversation_v1_session_proto_init() {
 		(*SessionMcpServer_Disabled)(nil),
 	}
 	file_conversation_v1_session_proto_msgTypes[66].OneofWrappers = []any{
-		(*SessionAccountUsage_Available)(nil),
-		(*SessionAccountUsage_Unavailable)(nil),
-		(*SessionAccountUsage_SeatSpend)(nil),
-	}
-	file_conversation_v1_session_proto_msgTypes[67].OneofWrappers = []any{
-		(*SessionSubscriptionType_Pro)(nil),
-		(*SessionSubscriptionType_Max)(nil),
-		(*SessionSubscriptionType_Team)(nil),
-		(*SessionSubscriptionType_Enterprise)(nil),
-	}
-	file_conversation_v1_session_proto_msgTypes[72].OneofWrappers = []any{}
-	file_conversation_v1_session_proto_msgTypes[74].OneofWrappers = []any{}
-	file_conversation_v1_session_proto_msgTypes[77].OneofWrappers = []any{
-		(*SessionAccountUsageUnavailable_ServiceUnavailable)(nil),
-		(*SessionAccountUsageUnavailable_WindowUnavailable)(nil),
-		(*SessionAccountUsageUnavailable_UtilizationUnavailable)(nil),
-		(*SessionAccountUsageUnavailable_SamplingFailure)(nil),
-	}
-	file_conversation_v1_session_proto_msgTypes[82].OneofWrappers = []any{
 		(*SessionDiagnostics_Healthy)(nil),
 		(*SessionDiagnostics_Unhealthy)(nil),
 	}
-	file_conversation_v1_session_proto_msgTypes[85].OneofWrappers = []any{
+	file_conversation_v1_session_proto_msgTypes[69].OneofWrappers = []any{
 		(*SessionFault_StoreUnreachable)(nil),
 		(*SessionFault_ConverterDefect)(nil),
 		(*SessionFault_LogSinkPoisoned)(nil),
@@ -9490,20 +8354,20 @@ func file_conversation_v1_session_proto_init() {
 		(*SessionFault_VendorQueryFailed)(nil),
 		(*SessionFault_NetworkUnreachable)(nil),
 	}
-	file_conversation_v1_session_proto_msgTypes[92].OneofWrappers = []any{
+	file_conversation_v1_session_proto_msgTypes[76].OneofWrappers = []any{
 		(*SessionDegradedWindow_Open)(nil),
 		(*SessionDegradedWindow_Closed)(nil),
 	}
-	file_conversation_v1_session_proto_msgTypes[95].OneofWrappers = []any{
+	file_conversation_v1_session_proto_msgTypes[79].OneofWrappers = []any{
 		(*SessionKilled_Idle)(nil),
 		(*SessionKilled_Forced)(nil),
 	}
-	file_conversation_v1_session_proto_msgTypes[97].OneofWrappers = []any{}
-	file_conversation_v1_session_proto_msgTypes[98].OneofWrappers = []any{}
-	file_conversation_v1_session_proto_msgTypes[99].OneofWrappers = []any{}
-	file_conversation_v1_session_proto_msgTypes[100].OneofWrappers = []any{}
-	file_conversation_v1_session_proto_msgTypes[102].OneofWrappers = []any{}
-	file_conversation_v1_session_proto_msgTypes[114].OneofWrappers = []any{
+	file_conversation_v1_session_proto_msgTypes[81].OneofWrappers = []any{}
+	file_conversation_v1_session_proto_msgTypes[82].OneofWrappers = []any{}
+	file_conversation_v1_session_proto_msgTypes[83].OneofWrappers = []any{}
+	file_conversation_v1_session_proto_msgTypes[84].OneofWrappers = []any{}
+	file_conversation_v1_session_proto_msgTypes[86].OneofWrappers = []any{}
+	file_conversation_v1_session_proto_msgTypes[98].OneofWrappers = []any{
 		(*LockHolderFailure_SpawnFailed)(nil),
 		(*LockHolderFailure_Exited)(nil),
 		(*LockHolderFailure_Signaled)(nil),
@@ -9516,7 +8380,7 @@ func file_conversation_v1_session_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_conversation_v1_session_proto_rawDesc), len(file_conversation_v1_session_proto_rawDesc)),
 			NumEnums:      3,
-			NumMessages:   120,
+			NumMessages:   104,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

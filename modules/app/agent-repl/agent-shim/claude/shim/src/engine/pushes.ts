@@ -3,7 +3,7 @@
  *
  * RESPONSIBILITY. One standing stream per consumer, fed by every session-level
  * fact: the vendor's own (`identity_rotated`, `query_died`, `model_changed`,
- * `permission_mode_changed`, `fast_mode`, `mcp_server`, `account_usage`,
+ * `permission_mode_changed`, `fast_mode`, `mcp_server`,
  * `context_budget_warning`, `compacting`) and the shim's own about itself
  * (`diagnostics`, `context_usage`, `network_resume_waits`,
  * `network_resume_outcome`).
@@ -18,7 +18,7 @@
  *
  * THEN THE CURRENT VIEW, THEN CHANGES ONLY. A joining subscriber also gets the
  * current `context_usage`, `model_changed`, `permission_mode_changed`,
- * `fast_mode`, `account_usage`, `title` and `network_resume_waits` — a
+ * `fast_mode`, `title` and `network_resume_waits` — a
  * consumer that attached late is not entitled to a blank session — and after
  * that, an arm is pushed only when its value actually CHANGED. A periodic push
  * of an unchanged view is indistinguishable from a change at the consumer and
@@ -38,7 +38,7 @@ const LOGGER = bindLog({ component: "shim-engine-pushes", operation: "shim.engin
 /**
  * How many undelivered facts one subscriber may hold.
  *
- * Session facts are rare — a mode change, a usage sample, an mcp health flip —
+ * Session facts are rare — a mode change, a title, an mcp health flip —
  * so a subscriber this far behind is not slow, it is gone. The overflow is
  * reported as a degraded window rather than silently dropped, because a
  * consumer that missed a `query_died` and was never told it missed one is worse
@@ -137,18 +137,6 @@ export class SessionPushes {
   // session is in, not an event, and a consumer that attached after the vendor
   // last stated it would otherwise draw the toggle from nothing.
   //
-  // `accountUsage` is the same kind of level, and it was the one missing here.
-  // The session PROBES it once at StartSession (session.ts, the `void
-  // pushAccountUsage()` beside the keepalive cadence), while the daemon opens
-  // its standing WatchSession only AFTER StartSession has answered — so that
-  // first sample was fanned out to nobody and the footer held no allowance
-  // figure at all until a turn closed and reprobed. MEASURED in a headless run
-  // of the real editor: the sample went out at 37.494 to the bring-up's stream,
-  // the daemon's own watch opened at 37.503, and the footer's first sighting of
-  // any account usage was the turn-close reprobe 41ms later. The dedup above
-  // suppresses nothing real: every sample carries its own `observed_at_ms`, so
-  // two samples are never byte-identical.
-  //
   // `title` is a level too, and the most consequential one to miss: the vendor
   // states it on the FILE plane and the shim reads it at the session's start,
   // which is BEFORE the daemon's standing WatchSession exists — so without a
@@ -189,7 +177,6 @@ export class SessionPushes {
     "modelChanged",
     "permissionModeChanged",
     "fastMode",
-    "accountUsage",
     "title",
     "networkResumeWaits",
     "effortChanged",

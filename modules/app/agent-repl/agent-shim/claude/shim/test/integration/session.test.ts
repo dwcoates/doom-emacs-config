@@ -666,10 +666,8 @@ describe("identity rotation", () => {
 
 describe("session facts with no message behind them", () => {
   test("!rate-limit produces a rate_limit_status arm with its typed status", async () => {
-    // LANDING 4: the vendor's `rate_limit_event` is its OWN arm now, not an
-    // account-usage sample. The two say different things — one is the window's
-    // verdict on this request, the other is the account's standing utilization —
-    // and folding the event into account_usage lost the verdict.
+    // The vendor's `rate_limit_event` is its own arm: the window's verdict on
+    // this request, with the window's figures when the vendor states them.
     const shim = await spawnShim();
     await shim.clients.h1.startSession(freshSession());
     const watch = watchSession(shim);
@@ -766,7 +764,6 @@ describe("session facts with no message behind them", () => {
       "modelChanged",
       "fastMode",
       "mcpServer",
-      "accountUsage",
       "permissionModeChanged",
       "rateLimitStatus",
       "diagnostics",

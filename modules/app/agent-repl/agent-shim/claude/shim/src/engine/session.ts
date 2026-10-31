@@ -1435,7 +1435,6 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   const OWNED_ARMS = new Set([
     "diagnostics",
     "contextUsage",
-    "accountUsage",
     "mcpServer",
     "modelChanged",
     "permissionModeChanged",

@@ -158,11 +158,6 @@ func TestAgentReplSessionLogContextNamesEveryFact(t *testing.T) {
 	}
 }
 
-// sessionColumns answers agent_repl_session's declared columns, in order.
-func sessionColumns(t *testing.T, path string) string {
-	t.Helper()
-	return rawScalar[string](t, path, `SELECT group_concat(name, ',') FROM (SELECT name FROM pragma_table_info('agent_repl_session') ORDER BY cid)`)
-}
 
 func TestTheMigrationDropsTheSessionsTrafficColumns(t *testing.T) {
 	// Arrange: a layout-25 file, whose session table still counts traffic.
@@ -178,7 +173,7 @@ func TestTheMigrationDropsTheSessionsTrafficColumns(t *testing.T) {
 	}
 
 	// Assert
-	if got := sessionColumns(t, path); got != "id,started_at,began" {
+	if got := tableColumns(t, path, "agent_repl_session"); got != "id,started_at,began" {
 		t.Fatalf("agent_repl_session columns after the migration = %q, want id,started_at,began", got)
 	}
 }
@@ -224,7 +219,7 @@ func TestAMigratedSessionTableMatchesAFreshOne(t *testing.T) {
 	}
 
 	// Act
-	got, want := sessionColumns(t, migrated), sessionColumns(t, fresh)
+	got, want := tableColumns(t, migrated, "agent_repl_session"), tableColumns(t, fresh, "agent_repl_session")
 
 	// Assert
 	if got != want {

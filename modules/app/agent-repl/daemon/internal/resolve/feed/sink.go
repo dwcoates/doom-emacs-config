@@ -514,8 +514,6 @@ func sessionUpdateArm(update *conversationv1.SessionUpdate) string {
 		return "fast_mode"
 	case *conversationv1.SessionUpdate_McpServer:
 		return "mcp_server"
-	case *conversationv1.SessionUpdate_AccountUsage:
-		return "account_usage"
 	case *conversationv1.SessionUpdate_PermissionModeChanged:
 		return "permission_mode_changed"
 	case *conversationv1.SessionUpdate_Diagnostics:

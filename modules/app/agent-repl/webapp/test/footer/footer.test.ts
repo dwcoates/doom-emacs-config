@@ -1962,7 +1962,7 @@ describe("mountFooter: the transient's expiry", () => {
       pushView(
         transientView("fmt", NOW + 10_000, {
           usage: {
-            session: {
+            overage: {
               newsworthy: false,
               utilization: 0.1,
               resetsAtS: 2n ** 62n,

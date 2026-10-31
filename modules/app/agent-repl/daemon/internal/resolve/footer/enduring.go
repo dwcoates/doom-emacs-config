@@ -11,17 +11,12 @@ import (
 // It is ONE line: the account's usage allowances. Being always true, it
 // carries no age (owner ruling, 2026-09-30).
 
-// enduring composes the enduring line BY THE ACCOUNT'S BILLING MODE (owner
-// ruling, 2026-10-06): a per-seat account's spend, a subscription's
-// allowances, or the unobserved arm before anything has been observed.
+// enduring composes the enduring line: the account's allowances, or the
+// unobserved arm before any figure has been observed.
 //
 // THE LINE IS THE ACCOUNT'S (account.go), and it is NEVER EMPTY: each arm is
 // drawn in words.
 func (r *resolver) enduring(s *wsState) *frontendv1.FooterActivityEnduring {
-	if seat := s.usage.seat; seat != nil {
-		return &frontendv1.FooterActivityEnduring{Line: &frontendv1.FooterActivityEnduring_SeatSpend{
-			SeatSpend: enduringSeatSpend(seat)}}
-	}
 	if usage := r.enduringUsage(s); usage != nil {
 		return &frontendv1.FooterActivityEnduring{Line: &frontendv1.FooterActivityEnduring_Usage{Usage: usage}}
 	}
@@ -37,20 +32,16 @@ func (r *resolver) enduring(s *wsState) *frontendv1.FooterActivityEnduring {
 //
 // A window the vendor never reported (a weekly allowance the account does not
 // have, an overage window most accounts never see) is drawn ABSENT rather than
-// synthesized. An unreadable sample leaves the figures on hand standing and
-// never opens the line by itself; its outcome stays visible in the logs
-// (`logUnreadableSample`).
+// synthesized.
 func (r *resolver) enduringUsage(s *wsState) *frontendv1.FooterActivityEnduringUsage {
 	nowS := r.opts.clock.Now().Unix()
 	rate := &s.usage.rate
-	session := r.allowance(&rate.session, nowS)
 	weekly := r.weeklyAllowance(rate, nowS)
 	overage := r.allowance(&rate.overage, nowS)
-	if session == nil && weekly == nil && overage == nil {
+	if weekly == nil && overage == nil {
 		return nil
 	}
 	return &frontendv1.FooterActivityEnduringUsage{
-		Session: session,
 		Weekly:  weekly,
 		Overage: overage,
 	}
@@ -97,28 +88,4 @@ func (r *resolver) allowance(w *allowanceWindow, nowS int64) *frontendv1.FooterA
 		allowance.Status = &frontendv1.FooterAllowance_Rejected{Rejected: &frontendv1.FooterAllowanceRejected{}}
 	}
 	return allowance
-}
-
-// enduringSeatSpend is a per-seat account's spend as the footer draws it. The
-// utilization, which drives the drawn spend's percent gradient, is
-// spent/allotment and is set exactly when the spend is. A zero allotment has
-// no ratio: any spend against it is drawn full (1), and none drawn empty (0).
-func enduringSeatSpend(seat *seatSpend) *frontendv1.FooterActivityEnduringSeatSpend {
-	out := &frontendv1.FooterActivityEnduringSeatSpend{
-		Allotment: &frontendv1.FooterMoney{AmountMinor: seat.allotmentMinor, Currency: seat.currency},
-	}
-	if seat.spentMinor == nil {
-		return out
-	}
-	spent := *seat.spentMinor
-	out.Spent = &frontendv1.FooterMoney{AmountMinor: spent, Currency: seat.currency}
-	var utilization float64
-	switch {
-	case seat.allotmentMinor > 0:
-		utilization = float64(spent) / float64(seat.allotmentMinor)
-	case spent > 0:
-		utilization = 1
-	}
-	out.Utilization = &utilization
-	return out
 }

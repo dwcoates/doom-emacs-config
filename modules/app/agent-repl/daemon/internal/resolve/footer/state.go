@@ -34,25 +34,17 @@ type standing struct {
 	compaction string
 }
 
-// allowanceWindow is ONE drawn allowance's evidence, assembled from two
-// different vendor facts:
+// allowanceWindow is ONE drawn allowance's evidence, read off the vendor's
+// rate-limit events (SessionUpdate.rate_limit_status), its only source: the
+// account's usage is never sampled.
 //
-//   - the FIGURES (utilization, reset) come from SessionUpdate.account_usage,
-//     the sampled account usage, which is complete from its first sample;
-//   - the VERDICT (the typed status arm) comes from
-//     SessionUpdate.rate_limit_status, the vendor's rate-limit event, and
-//     stays UNSET until an event for this window has been seen. An unset
-//     status oneof is legal and means "no vendor verdict observed yet" — it
-//     is never defaulted to "allowed".
-//
-// THE DRAWN FIGURE IS THE NEWEST SAMPLE'S, across every session on the
-// account. A rate-limit event's utilization is never drawn for a window a
-// sample figures (session, weekly): SessionRateLimitStatus carries no instant,
-// so it cannot be ordered against the samples, and an event one workspace's
-// shim relayed late overwrote the newer sample another's had filed — the
-// footer's figure went down and back up. The shim answers every event with a
-// fresh sample instead. The overage window, which no sample figures, is the
-// one an event still figures (`observeEventFigures`).
+//   - the FIGURES (utilization, reset) are the event's when it states a
+//     utilization; the last event to state one is drawn
+//     (`observeEventFigures`);
+//   - the VERDICT (the typed status arm) is the event's status, and stays
+//     UNSET until an event with a status for this window has been seen. An
+//     unset status oneof is legal and means "no vendor verdict observed
+//     yet" — it is never defaulted to "allowed".
 type allowanceWindow struct {
 	// figured reports whether any figure has been observed for this window.
 	figured bool
@@ -60,10 +52,6 @@ type allowanceWindow struct {
 	utilization float64
 	// resetsAtS is the drawn reset, epoch SECONDS.
 	resetsAtS int64
-	// sampledAtMs is SessionAccountUsage.observed_at_ms of the newest usage
-	// SAMPLE filed for this window, 0 before any sample (and always 0 on the
-	// overage window, which only events figure).
-	sampledAtMs int64
 	// verdict is the status arm of the last rate-limit event for this window,
 	// VerdictNone until one with a status has been seen.
 	verdict wsm.AllowanceVerdict
@@ -100,53 +88,30 @@ func (w *allowanceWindow) observeVerdict(verdict wsm.AllowanceVerdict, resetsAtM
 	}
 }
 
-// observeSampledFigures files a figure sighting read off a usage SAMPLE,
-// which carries its own observation instant, and reports whether it was
-// filed.
-//
-// A sample OLDER than the newest sample already on hand is refused. That
-// comparison is sound across every session on the account: each stamp is
-// SessionAccountUsage.observed_at_ms, taken by a shim on this one machine
-// when it asked for the sample, so all of them are one wall clock.
-func (w *allowanceWindow) observeSampledFigures(utilizationPercent float64, resetsAtMs, observedAtMs int64) bool {
-	if w.sampledAtMs != 0 && observedAtMs < w.sampledAtMs {
-		return false
-	}
-	w.sampledAtMs = observedAtMs
-	w.fileFigures(utilizationPercent, resetsAtMs)
-	return true
-}
-
-// observeEventFigures files a figure sighting read off a rate-limit EVENT for
-// a window no sample figures (overage). With the event its only source, the
-// last to arrive is drawn.
+// observeEventFigures files a figure sighting read off a rate-limit EVENT.
+// The event carries no instant to order it by, so the last to arrive is
+// drawn. The vendor reports utilization as a percentage and resets in millis;
+// the contract carries a 0..1 fraction and epoch seconds, so the conversion
+// is the daemon's and never the client's.
 func (w *allowanceWindow) observeEventFigures(utilizationPercent float64, resetsAtMs int64) {
-	w.fileFigures(utilizationPercent, resetsAtMs)
-}
-
-// fileFigures draws the sighting it is given. The vendor reports utilization
-// as a percentage and resets in millis; the contract carries a 0..1 fraction
-// and epoch seconds, so the conversion is the daemon's and never the client's.
-func (w *allowanceWindow) fileFigures(utilizationPercent float64, resetsAtMs int64) {
 	w.figured = true
 	w.utilization = utilizationPercent / 100
 	w.resetsAtS = resetsAtMs / 1000
 }
 
-// rateState is the drawn allowances, ONE PER VENDOR WINDOW: the five-hour
-// session allowance, the account-wide seven-day one, the seven-day ones the
-// vendor meters per model family, and the vendor's own overage window. No
-// window's figure or verdict is ever filed under another's.
+// rateState is the drawn allowances, ONE PER VENDOR WINDOW: the
+// account-wide seven-day one, the seven-day ones the vendor meters per model
+// family, and the vendor's own overage window. No window's figure or verdict
+// is ever filed under another's. The five-hour window is not drawn (owner
+// ruling, 2026-10-30), so it has no slot.
 type rateState struct {
-	// session is the rolling five-hour allowance.
-	session allowanceWindow
 	// weekly is the account-wide seven-day allowance.
 	weekly allowanceWindow
 	// weeklyOpus is the seven-day allowance for the Opus model family.
 	weeklyOpus allowanceWindow
 	// weeklySonnet is the seven-day allowance for the Sonnet model family.
 	weeklySonnet allowanceWindow
-	// overage is the allowance the vendor bills beyond the two above. It
+	// overage is the allowance the vendor bills beyond the weekly ones. It
 	// stays unfigured — and so draws absent — on the accounts that never
 	// report an overage window at all.
 	overage allowanceWindow

@@ -1793,11 +1793,15 @@ export function allowance(
   };
 }
 
-/** The enduring figures of a usage line whose two allowances carry the given verdicts. */
+/**
+ * The enduring figures of a usage line whose two allowances carry the given
+ * verdicts: the weekly window first, then the overage one, which carries the
+ * verdict under test.
+ */
 export const enduringUsage = (
-  session?: FooterAllowanceArm,
+  overage?: FooterAllowanceArm,
   weekly?: FooterAllowanceArm,
-): object => ({ usage: { session: allowance(session), weekly: { overall: allowance(weekly ?? "allowed")  }} });
+): object => ({ usage: { weekly: { overall: allowance(weekly) }, overage: allowance(overage) } });
 
 /** Every SALIENT kind arm, with a complete payload for each. */
 export const FOOTER_SALIENT_KINDS: Record<string, object> = {

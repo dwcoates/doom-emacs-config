@@ -202,19 +202,6 @@ function allowance(
   };
 }
 
-/** An amount in USD cents. */
-function usd(amountMinor: bigint): Record<string, unknown> {
-  return { amountMinor, currency: "USD" };
-}
-
-/** A seat with a $12,000 allotment and, when given, its spend and utilization. */
-function seatSpend(spentMinor?: bigint, utilization?: number): Record<string, unknown> {
-  return {
-    allotment: usd(1_200_000n),
-    ...(spentMinor === undefined ? {} : { spent: usd(spentMinor), utilization }),
-  };
-}
-
 // ---- the tier walk ------------------------------------------------------------
 
 describe("drawFooterStatusActivity: the tier the daemon resolved", () => {
@@ -1201,44 +1188,6 @@ describe("the enduring line", () => {
     ).toBe(ENDURING_UNOBSERVED_TEXT);
   });
 
-  it("draws a seat's spend against its allotment in dollars", () => {
-    expect(
-      enduringCell({ seatSpend: seatSpend(22_388n, 0.0187) }).querySelector(".footer-activity-enduring")
-        ?.textContent,
-    ).toBe("$223.88\u00a0of $12,000 this month");
-  });
-
-  it("draws a seat whose spend is not yet seen against its allotment", () => {
-    expect(
-      enduringCell({ seatSpend: seatSpend() }).querySelector(".footer-activity-enduring")
-        ?.textContent,
-    ).toBe("spend not yet seen\u00a0of $12,000 this month");
-  });
-
-  it("colors a seat's spend by its utilization through the percent gradient", () => {
-    const spent = enduringCell({ seatSpend: seatSpend(1_080_000n, 0.9) }).querySelector<HTMLElement>(
-      '[data-datum="spent"]',
-    );
-    expect(spent?.style.color).toBe(paintedAs(90));
-  });
-
-  it("colors nothing of a seat's line but its spend", () => {
-    const line = enduringCell({ seatSpend: seatSpend(1_080_000n, 0.9) }).querySelector<HTMLElement>(
-      ".footer-activity-enduring",
-    );
-    expect(line?.style.color).toBe("");
-  });
-
-  it("refuses a seat's spend drawn with no utilization", () => {
-    expect(() => enduringCell({ seatSpend: { allotment: usd(1_200_000n), spent: usd(1n) } })).toThrow(MalformedView);
-  });
-
-  it("refuses a seat's money in a currency the runtime cannot name", () => {
-    expect(() =>
-      enduringCell({ seatSpend: { allotment: { amountMinor: 100n, currency: "NOT A CODE" } } }),
-    ).toThrow(MalformedView);
-  });
-
   it.each(UNPINNED_ARMS)(
     "never draws an empty %s cell on an account never observed",
     (arm) => {
@@ -1246,39 +1195,30 @@ describe("the enduring line", () => {
     },
   );
 
-  it.each(UNPINNED_ARMS)(
-    "never draws an empty %s cell on a seat whose spend is not yet seen",
-    (arm) => {
-      expect(
-        drawCell(arm, unpinnedInit(undefined, { seatSpend: seatSpend() })).cell.textContent,
-      ).not.toBe("");
-    },
-  );
-
   it("draws an allowance whose reset has passed as reset since last seen", () => {
     const cell = enduringCell({
-      usage: { session: allowance(0.97, true, -60_000, "rejected") },
+      usage: { overage: allowance(0.97, true, -60_000, "rejected") },
     });
-    expect(cell.querySelector('[data-allowance="session"]')?.textContent).toBe(
-      "session reset since last seen",
+    expect(cell.querySelector('[data-allowance="overage"]')?.textContent).toBe(
+      "overage reset since last seen",
     );
   });
 
   it("draws no percentage for an allowance whose reset has passed", () => {
     const cell = enduringCell({
-      usage: { session: allowance(0.97, true, -60_000) },
+      usage: { overage: allowance(0.97, true, -60_000) },
     });
     expect(
-      cell.querySelector('[data-allowance="session"] [data-datum="percent"]'),
+      cell.querySelector('[data-allowance="overage"] [data-datum="percent"]'),
     ).toBeNull();
   });
 
   it("drops the verdict of an allowance whose reset has passed", () => {
     const cell = enduringCell({
-      usage: { session: allowance(0.97, true, -60_000, "rejected") },
+      usage: { overage: allowance(0.97, true, -60_000, "rejected") },
     });
-    const session = cell.querySelector<HTMLElement>('[data-allowance="session"]');
-    expect([session?.className, session?.hasAttribute("data-arm"), session?.title]).toEqual([
+    const overage = cell.querySelector<HTMLElement>('[data-allowance="overage"]');
+    expect([overage?.className, overage?.hasAttribute("data-arm"), overage?.title]).toEqual([
       "footer-allowance",
       false,
       "",
@@ -1287,32 +1227,31 @@ describe("the enduring line", () => {
 
   it("lapses an allowance when the clock passes its reset", () => {
     const cell = enduringCell({
-      usage: { session: allowance(0.4, false, 60_000) },
+      usage: { overage: allowance(0.4, false, 60_000) },
     });
     vi.advanceTimersByTime(60_000);
-    const session = cell.querySelector('[data-allowance="session"]');
-    expect([session?.getAttribute("data-lapsed"), session?.textContent]).toEqual([
+    const overage = cell.querySelector('[data-allowance="overage"]');
+    expect([overage?.getAttribute("data-lapsed"), overage?.textContent]).toEqual([
       "true",
-      "session reset since last seen",
+      "overage reset since last seen",
     ]);
   });
 
-  it("draws the session and weekly allowances as percentages", () => {
+  it("draws the weekly and overage allowances as percentages", () => {
     const cell = enduringCell({
       usage: {
-        session: allowance(0.72, true, 3_900_000, "allowedWarning"),
         weekly: { overall: allowance(0.31, false, 259_200_000, "allowed") },
+        overage: allowance(0.72, true, 3_900_000, "allowedWarning"),
       },
     });
     expect(cell.querySelector(".footer-activity-enduring")?.textContent).toBe(
-      `session 72% · resets in 1h 5m${FOOTER_RATE_SEPARATOR_GAP}|${FOOTER_RATE_SEPARATOR_GAP}weekly 31% · resets in 3d`,
+      `weekly 31% · resets in 3d${FOOTER_RATE_SEPARATOR_GAP}|${FOOTER_RATE_SEPARATOR_GAP}overage 72% · resets in 1h 5m`,
     );
   });
 
-  it("draws the overage window beside the two when the vendor reported one", () => {
+  it("draws the overage window beside the weekly one when the vendor reported one", () => {
     const cell = enduringCell({
       usage: {
-        session: allowance(0.4, false, 3_900_000),
         weekly: { overall: allowance(0.3, false, 259_200_000) },
         overage: allowance(0.1, false, 7_200_000),
       },
@@ -1334,10 +1273,10 @@ describe("the enduring line", () => {
   });
   it("colours an allowance's percent by how full it is", () => {
     const cell = enduringCell({
-      usage: { session: allowance(0.85, true, 60_000) },
+      usage: { overage: allowance(0.85, true, 60_000) },
     });
     const percent = cell.querySelector<HTMLElement>(
-      '[data-allowance="session"] [data-datum="percent"]',
+      '[data-allowance="overage"] [data-datum="percent"]',
     );
     expect(percent?.textContent).toBe("85%");
     expect(percent?.style.color).toBe(paintedAs(85));
@@ -1345,32 +1284,32 @@ describe("the enduring line", () => {
 
   it("emphasizes the newsworthy allowance", () => {
     const cell = enduringCell({
-      usage: { session: allowance(0.85, true, 60_000) },
+      usage: { overage: allowance(0.85, true, 60_000) },
     });
     expect(
       cell
-        .querySelector('[data-allowance="session"]')
+        .querySelector('[data-allowance="overage"]')
         ?.getAttribute("data-newsworthy"),
     ).toBe("true");
   });
 
   it("leaves an allowance that is not newsworthy unemphasized", () => {
     const cell = enduringCell({
-      usage: { session: allowance(0.2, false, 60_000) },
+      usage: { overage: allowance(0.2, false, 60_000) },
     });
     expect(
       cell
-        .querySelector('[data-allowance="session"]')
+        .querySelector('[data-allowance="overage"]')
         ?.hasAttribute("data-newsworthy"),
     ).toBe(false);
   });
 
-  it("keeps session left of the separator and weekly right of it when only weekly is newsworthy", () => {
+  it("keeps weekly left of the separator and overage right of it when only overage is newsworthy", () => {
     // Arrange
     const cell = enduringCell({
       usage: {
-        session: allowance(0.31, false, 60_000),
-        weekly: { overall: allowance(0.91, true, 60_000) },
+        weekly: { overall: allowance(0.31, false, 60_000) },
+        overage: allowance(0.91, true, 60_000),
       },
     });
 
@@ -1381,14 +1320,14 @@ describe("the enduring line", () => {
     );
 
     // Assert
-    expect(drawn).toEqual(["session", "|", "weekly"]);
+    expect(drawn).toEqual(["weekly", "|", "overage"]);
   });
 
   it("draws one blue-classed separator between two allowances", () => {
     const cell = enduringCell({
       usage: {
-        session: allowance(0.31, false, 60_000),
         weekly: { overall: allowance(0.2, false, 60_000) },
+        overage: allowance(0.31, false, 60_000),
       },
     });
     const separators = [
@@ -1399,7 +1338,7 @@ describe("the enduring line", () => {
 
   it("draws no separator beside a single allowance", () => {
     const cell = enduringCell({
-      usage: { session: allowance(0.31, false, 60_000) },
+      usage: { overage: allowance(0.31, false, 60_000) },
     });
     expect(cell.querySelector(".footer-rate-separator")).toBeNull();
   });
@@ -1407,8 +1346,8 @@ describe("the enduring line", () => {
   it("keeps the gaps around the separator in the line's own color", () => {
     const cell = enduringCell({
       usage: {
-        session: allowance(0.31, false, 60_000),
         weekly: { overall: allowance(0.2, false, 60_000) },
+        overage: allowance(0.31, false, 60_000),
       },
     });
     const separator = cell.querySelector(".footer-rate-separator");
@@ -1421,8 +1360,8 @@ describe("the enduring line", () => {
   it("spaces the separator with exactly three spaces on each side", () => {
     const cell = enduringCell({
       usage: {
-        session: allowance(0.31, false, 60_000),
         weekly: { overall: allowance(0.2, false, 60_000) },
+        overage: allowance(0.31, false, 60_000),
       },
     });
     const separator = cell.querySelector(".footer-rate-separator");
@@ -1461,8 +1400,8 @@ describe("the enduring line", () => {
     const teardown = installStylesheet();
     const cell = enduringCell({
       usage: {
-        session: allowance(0.31, false, 60_000),
         weekly: { overall: allowance(0.2, false, 60_000) },
+        overage: allowance(0.31, false, 60_000),
       },
     });
     document.body.replaceChildren(cell);
@@ -1478,19 +1417,18 @@ describe("the enduring line", () => {
 
   it("ticks an allowance's reset countdown on the shared clock", () => {
     const cell = enduringCell({
-      usage: { session: allowance(0.2, false, 3_600_000) },
+      usage: { overage: allowance(0.2, false, 3_600_000) },
     });
     vi.advanceTimersByTime(60_000);
     expect(
-      cell.querySelector('[data-allowance="session"] [data-countdown]')
+      cell.querySelector('[data-allowance="overage"] [data-countdown]')
         ?.textContent,
     ).toBe(" · resets in 59m");
   });
 
   it.each([
-    ["usage", { usage: { session: allowance(0.2, false, 60_000) } }],
+    ["usage", { usage: { overage: allowance(0.2, false, 60_000) } }],
     ["unobserved", {}],
-    ["seatSpend", { seatSpend: seatSpend() }],
   ] as const)("stamps the %s line on the enduring line", (line, figures) => {
     expect(
       enduringCell(figures)
@@ -1501,7 +1439,7 @@ describe("the enduring line", () => {
 
   it("draws no reading age beside the usage figures", () => {
     const cell = enduringCell({
-      usage: { session: allowance(0.41, false, 60_000) },
+      usage: { overage: allowance(0.41, false, 60_000) },
     });
     expect(cell.querySelector("[data-age]")).toBeNull();
   });
@@ -1526,11 +1464,11 @@ describe("the enduring line", () => {
     expect(enduringCell({}).querySelector(".footer-activity-age")).toBeNull();
   });
 
-  /** An enduring line whose SESSION allowance stands at ARM. */
+  /** An enduring line whose OVERAGE allowance stands at ARM. */
   const armCell = (arm: string): Element | null =>
     enduringCell({
-      usage: { session: allowance(0.5, true, 60_000, arm) },
-    }).querySelector('[data-allowance="session"]');
+      usage: { overage: allowance(0.5, true, 60_000, arm) },
+    }).querySelector('[data-allowance="overage"]');
 
   it.each(FOOTER_ALLOWANCE_STATUS_CASES)(
     "carries the %s arm on the allowance",
@@ -1548,20 +1486,20 @@ describe("the enduring line", () => {
 
   it("paints no verdict colour before the vendor has given one", () => {
     const cell = enduringCell({
-      usage: { session: allowance(0.5, true, 60_000) },
+      usage: { overage: allowance(0.5, true, 60_000) },
     });
-    expect(cell.querySelector('[data-allowance="session"]')?.className).toBe(
+    expect(cell.querySelector('[data-allowance="overage"]')?.className).toBe(
       "footer-allowance footer-allowance-newsworthy",
     );
   });
 
   it("marks no arm on an allowance with no vendor verdict yet", () => {
     const cell = enduringCell({
-      usage: { session: allowance(0.5, true, 60_000) },
+      usage: { overage: allowance(0.5, true, 60_000) },
     });
     expect(
       cell
-        .querySelector('[data-allowance="session"]')
+        .querySelector('[data-allowance="overage"]')
         ?.hasAttribute("data-arm"),
     ).toBe(false);
   });
@@ -1590,10 +1528,10 @@ describe("enduringUsage", () => {
     const activity = activityOf(
       "idle",
       unpinnedInit(undefined, {
-        usage: { session: allowance(0.1, false, 1000) },
+        usage: { overage: allowance(0.1, false, 1000) },
       }),
     );
-    expect(enduringUsage(activity, "p")?.session?.utilization).toBe(0.1);
+    expect(enduringUsage(activity, "p")?.overage?.utilization).toBe(0.1);
   });
 
   it("says nothing of a pinned cell", () => {
@@ -1755,23 +1693,20 @@ describe("drawFooterWeeklyAllowance", () => {
 });
 
 describe("orderedAllowances", () => {
-  // The order is session, weekly, overage, whichever windows are newsworthy
-  // (owner ruling, 2026-10-08). Every row but the first is a case that once
-  // drew a newsworthy window ahead of the others.
+  // The order is weekly, overage, whichever windows are newsworthy (owner
+  // ruling, 2026-10-08). Every row but the first is a case that once drew a
+  // newsworthy window ahead of the others.
   it.each([
-    { name: "nothing is newsworthy", session: false, weekly: false, overage: false },
-    { name: "only weekly is newsworthy", session: false, weekly: true, overage: false },
-    { name: "only overage is newsworthy", session: false, weekly: false, overage: true },
-    { name: "weekly and overage are newsworthy", session: false, weekly: true, overage: true },
-    { name: "session and overage are newsworthy", session: true, weekly: false, overage: true },
-    { name: "every window is newsworthy", session: true, weekly: true, overage: true },
-  ])("keeps session, weekly, overage when $name", ({ session, weekly, overage }) => {
+    { name: "nothing is newsworthy", weekly: false, overage: false },
+    { name: "only weekly is newsworthy", weekly: true, overage: false },
+    { name: "only overage is newsworthy", weekly: false, overage: true },
+    { name: "both are newsworthy", weekly: true, overage: true },
+  ])("keeps weekly, overage when $name", ({ weekly, overage }) => {
     // Arrange
     const activity = activityOf(
       "idle",
       unpinnedInit(undefined, {
         usage: {
-          session: allowance(session ? 0.9 : 0.1, session, 1000),
           weekly: { overall: allowance(weekly ? 0.9 : 0.1, weekly, 1000) },
           overage: allowance(overage ? 0.9 : 0.1, overage, 1000),
         },
@@ -1784,7 +1719,7 @@ describe("orderedAllowances", () => {
     const labels = orderedAllowances(usage).map((a) => a.label);
 
     // Assert
-    expect(labels).toEqual(["session", "weekly", "overage"]);
+    expect(labels).toEqual(["weekly", "overage"]);
   });
 
   // THE STRIP AND THE SHEET SHARE ONE DRAWING: every cell the strip draws is
@@ -1796,9 +1731,8 @@ describe("orderedAllowances", () => {
       "idle",
       unpinnedInit(undefined, {
         usage: {
-          session: allowance(0.4, false, 1000, "allowed"),
           weekly: { overall: allowance(0.5, false, 1000), models: { sonnet: allowance(0.2, false, 1000) } },
-          overage: allowance(0.1, false, 1000),
+          overage: allowance(0.1, false, 1000, "allowed"),
         },
       }),
     );
@@ -1814,27 +1748,6 @@ describe("orderedAllowances", () => {
 
     // Assert
     expect(strip).toEqual(shared);
-  });
-
-  it("keeps weekly before overage when session is absent and only overage is newsworthy", () => {
-    // Arrange
-    const activity = activityOf(
-      "idle",
-      unpinnedInit(undefined, {
-        usage: {
-          weekly: { overall: allowance(0.1, false, 1000) },
-          overage: allowance(0.9, true, 1000),
-        },
-      }),
-    );
-    const usage = enduringUsage(activity, "p");
-    if (usage === undefined) throw new Error("no usage");
-
-    // Act
-    const labels = orderedAllowances(usage).map((a) => a.label);
-
-    // Assert
-    expect(labels).toEqual(["weekly", "overage"]);
   });
 });
 

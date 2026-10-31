@@ -10,25 +10,60 @@ import (
 	"agent-repld/internal/dlog"
 )
 
-// accountUsageDDL is the layout-24 addition: the last usage figures the daemon
-// read for each ACCOUNT ROOT (a Claude config dir), so a restarted daemon
-// draws every workspace's usage line at once instead of an empty cell until a
-// session speaks (owner ruling, 2026-10-06: the usage is the account's, and
-// the activity cell is never empty).
+// accountUsageDDL is the last usage figures the daemon read for each ACCOUNT
+// ROOT (a Claude config dir), as a fresh file declares the table, so a
+// restarted daemon draws every workspace's usage line at once instead of an
+// empty cell until a session speaks (owner ruling, 2026-10-06: the usage is
+// the account's, and the activity cell is never empty).
 //
 // ONE ROW PER ACCOUNT ROOT, keyed by its path, because the usage belongs to
-// the account and not to any workspace. Each window's four columns are NULL
-// together when the window was never figured — a figure nobody reported is
-// never invented on reload — and a row whose window is half NULL is a corrupt
-// record (DecodeError).
+// the account and not to any workspace. Each window's three figure columns
+// (utilization, reset, verdict) are NULL together when the window was never
+// figured -- a figure nobody reported is never invented on reload -- and a row
+// whose window is half NULL is a corrupt record (DecodeError). The verdict's
+// own reset is NULL on its own when unknown.
 //
-// observed_at is when the daemon last filed evidence for the account (unix
-// nanos); each window's sampled_at_ms is the shim's own stamp on the newest
-// sample filed for it (0 when only a rate-limit event figured it), which is
-// what keeps an older sample from overwriting a newer one across a restart.
+// Every figure comes from a vendor rate-limit event: the account's usage is
+// never sampled, so there is no per-seat spend, no five-hour window and no
+// sample stamp to keep. observed_at is when the daemon last filed evidence for
+// the account (unix nanos).
 //
-// A new table, so the step is additive: the build before it never names it.
+// A FILE OLDER THAN LAYOUT 91 REACHES THIS SHAPE BY STEPS: layout 24 created
+// the table (accountUsageLayout24DDL), layouts 25 and 72 added columns
+// (accountUsageSeatDDL, accountUsageWindowsDDL), and layout 91 dropped the
+// ones nothing produces (accountUsageDropUnproducedDDL). The columns are
+// declared here in the order those steps leave them, and
+// TestAMigratedAccountUsageTableMatchesAFreshOne keeps the two routes to one
+// shape.
 const accountUsageDDL = `
+CREATE TABLE account_usage (
+  config_dir    TEXT PRIMARY KEY,
+  observed_at   INTEGER NOT NULL,
+  weekly_utilization   REAL,
+  weekly_resets_at_s   INTEGER,
+  weekly_verdict       TEXT,
+  overage_utilization  REAL,
+  overage_resets_at_s  INTEGER,
+  overage_verdict      TEXT,
+  weekly_opus_utilization REAL,
+  weekly_opus_resets_at_s INTEGER,
+  weekly_opus_verdict TEXT,
+  weekly_sonnet_utilization REAL,
+  weekly_sonnet_resets_at_s INTEGER,
+  weekly_sonnet_verdict TEXT,
+  weekly_verdict_resets_at_s INTEGER,
+  weekly_opus_verdict_resets_at_s INTEGER,
+  weekly_sonnet_verdict_resets_at_s INTEGER,
+  overage_verdict_resets_at_s INTEGER
+);
+`
+
+// accountUsageLayout24DDL is the layout-24 step exactly as it shipped: the
+// table with the five-hour session window, the sample stamps and the
+// no_allowance flag. Layout 91 drops what nothing produces
+// (accountUsageDropUnproducedDDL); the text is kept because a file older
+// than layout 24 still migrates through it.
+const accountUsageLayout24DDL = `
 CREATE TABLE account_usage (
   config_dir    TEXT PRIMARY KEY,
   observed_at   INTEGER NOT NULL,
@@ -94,6 +129,33 @@ ALTER TABLE account_usage ADD COLUMN weekly_sonnet_verdict_resets_at_s INTEGER;
 ALTER TABLE account_usage ADD COLUMN overage_verdict_resets_at_s INTEGER;
 `
 
+// accountUsageDropUnproducedDDL is the layout-91 step: the columns nothing
+// produces leave the table. The account's usage is never sampled (2026-10-30),
+// so no per-seat spend, no sample stamp and no five-hour figure is ever read,
+// and the owner ruled the five-hour window gone: it is neither drawn nor
+// restored. no_allowance has been written 0 and never read since layout 25.
+//
+// The step is BREAKING: the build before it names every one of these columns
+// in its upsert, and no_allowance is NOT NULL with no default, so that build's
+// writes fail once they are gone. Dropping them loses nothing this build
+// reads.
+const accountUsageDropUnproducedDDL = `
+ALTER TABLE account_usage DROP COLUMN no_allowance;
+ALTER TABLE account_usage DROP COLUMN session_utilization;
+ALTER TABLE account_usage DROP COLUMN session_resets_at_s;
+ALTER TABLE account_usage DROP COLUMN session_sampled_at_ms;
+ALTER TABLE account_usage DROP COLUMN session_verdict;
+ALTER TABLE account_usage DROP COLUMN session_verdict_resets_at_s;
+ALTER TABLE account_usage DROP COLUMN weekly_sampled_at_ms;
+ALTER TABLE account_usage DROP COLUMN overage_sampled_at_ms;
+ALTER TABLE account_usage DROP COLUMN weekly_opus_sampled_at_ms;
+ALTER TABLE account_usage DROP COLUMN weekly_sonnet_sampled_at_ms;
+ALTER TABLE account_usage DROP COLUMN seat_allotment_minor;
+ALTER TABLE account_usage DROP COLUMN seat_spent_minor;
+ALTER TABLE account_usage DROP COLUMN seat_currency;
+ALTER TABLE account_usage DROP COLUMN seat_sampled_at_ms;
+`
+
 // AllowanceVerdict is the vendor's last verdict on one allowance window, as
 // the account_usage row stores it. Empty is "no verdict observed yet".
 type AllowanceVerdict string
@@ -121,9 +183,6 @@ type AllowanceFigures struct {
 	Utilization float64
 	// ResetsAtS is when the window resets, epoch seconds.
 	ResetsAtS int64
-	// SampledAtMs is the shim's stamp on the newest usage sample filed for
-	// the window, 0 when only a rate-limit event figured it.
-	SampledAtMs int64
 	// Verdict is the vendor's last verdict on the window.
 	Verdict AllowanceVerdict
 	// VerdictResetsAtS is the reset, epoch seconds, of the window instance
@@ -131,38 +190,19 @@ type AllowanceFigures struct {
 	VerdictResetsAtS int64
 }
 
-// SeatSpend is a per-seat account's month-to-date spend against its monthly
-// allotment, in minor units of one currency.
-type SeatSpend struct {
-	// AllotmentMinor is the seat's monthly allotment.
-	AllotmentMinor int64
-	// SpentMinor is the month-to-date spend, nil while the vendor has
-	// reported none.
-	SpentMinor *int64
-	// Currency is the ISO 4217 code both amounts are in.
-	Currency string
-	// SampledAtMs is the shim's stamp on the sample that read it.
-	SampledAtMs int64
-}
-
 // AccountUsage is the last usage evidence the daemon read for one account
-// root. THE BILLING MODE IS ONE OF TWO: allowance windows (a subscription) or
-// a seat's spend (Seat set); never both, which validate refuses.
+// root: the allowance windows the vendor's rate-limit events figured.
 type AccountUsage struct {
 	// ConfigDir is the account root's path.
 	ConfigDir string
 	// ObservedAt is when the daemon last filed evidence for the account.
 	ObservedAt time.Time
-	// Session, Weekly, WeeklyOpus, WeeklySonnet and Overage are the figured
-	// windows, nil when a window was never figured.
-	Session      *AllowanceFigures
+	// Weekly, WeeklyOpus, WeeklySonnet and Overage are the figured windows,
+	// nil when a window was never figured.
 	Weekly       *AllowanceFigures
 	WeeklyOpus   *AllowanceFigures
 	WeeklySonnet *AllowanceFigures
 	Overage      *AllowanceFigures
-	// Seat is a per-seat account's spend, nil when the account is not known
-	// to be billed per seat.
-	Seat *SeatSpend
 }
 
 // SetAccountUsage records an account root's usage evidence, replacing what
@@ -178,7 +218,7 @@ type AccountUsage struct {
 // evidence the successor had filed by the time it became the writer.
 func (s *store) SetAccountUsage(ctx context.Context, usage AccountUsage) error {
 	const op = "daemon.wsm.set_account_usage"
-	fields := dlog.Context{"config_dir": usage.ConfigDir, "seat": usage.Seat != nil}
+	fields := dlog.Context{"config_dir": usage.ConfigDir}
 	if err := usage.validate(); err != nil {
 		s.log.Error(op, "refused account usage that cannot be stored", withError(fields, err))
 		return err
@@ -215,7 +255,7 @@ func (s *store) writeHeldUsageLocked(ctx context.Context) {
 	s.heldUsage = nil
 	s.heldMu.Unlock()
 	for _, usage := range held {
-		fields := dlog.Context{"config_dir": usage.ConfigDir, "seat": usage.Seat != nil, "held": true}
+		fields := dlog.Context{"config_dir": usage.ConfigDir, "held": true}
 		if err := s.writeAccountUsage(ctx, op, fields, usage); err == nil {
 			s.log.Info(op, "wrote the account's usage held while this handle was read-only", fields)
 		}
@@ -223,29 +263,25 @@ func (s *store) writeHeldUsageLocked(ctx context.Context) {
 }
 
 // accountUsageWindowNames is every allowance window the row stores, in
-// column order: each contributes the five columns windowColumns names. The
+// column order: each contributes the four columns windowColumns names. The
 // one list the upsert, the select, validation and decoding all walk, so no
 // window can be written without being read.
-var accountUsageWindowNames = []string{"session", "weekly", "weekly_opus", "weekly_sonnet", "overage"}
+var accountUsageWindowNames = []string{"weekly", "weekly_opus", "weekly_sonnet", "overage"}
 
 // windowColumns is one window's columns, in the order windowArgs and
 // storedWindow.dest lay them out.
 func windowColumns(name string) []string {
-	return []string{
-		name + "_utilization", name + "_resets_at_s", name + "_sampled_at_ms",
-		name + "_verdict", name + "_verdict_resets_at_s",
-	}
+	return []string{name + "_utilization", name + "_resets_at_s", name + "_verdict", name + "_verdict_resets_at_s"}
 }
 
 // accountUsageColumns is every column the row's upsert writes and its
-// select reads, in order. no_allowance is retired (layout 25): it is written
-// 0 and never read, so the select starts after it.
+// select reads, in order.
 func accountUsageColumns() []string {
-	cols := []string{"config_dir", "observed_at", "no_allowance"}
+	cols := []string{"config_dir", "observed_at"}
 	for _, name := range accountUsageWindowNames {
 		cols = append(cols, windowColumns(name)...)
 	}
-	return append(cols, "seat_allotment_minor", "seat_spent_minor", "seat_currency", "seat_sampled_at_ms")
+	return cols
 }
 
 // accountUsageUpsert is the row's insert-or-replace, built from
@@ -265,30 +301,22 @@ func accountUsageUpsert() string {
 }
 
 // accountUsageSelect is the select of every stored root, built from
-// accountUsageColumns without the retired no_allowance.
+// accountUsageColumns.
 func accountUsageSelect() string {
-	var cols []string
-	for _, col := range accountUsageColumns() {
-		if col != "no_allowance" {
-			cols = append(cols, col)
-		}
-	}
-	return "SELECT " + strings.Join(cols, ", ") + " FROM account_usage ORDER BY config_dir"
+	return "SELECT " + strings.Join(accountUsageColumns(), ", ") + " FROM account_usage ORDER BY config_dir"
 }
 
 // windows is the usage's windows in accountUsageWindowNames order.
 func (u *AccountUsage) windows() []**AllowanceFigures {
-	return []**AllowanceFigures{&u.Session, &u.Weekly, &u.WeeklyOpus, &u.WeeklySonnet, &u.Overage}
+	return []**AllowanceFigures{&u.Weekly, &u.WeeklyOpus, &u.WeeklySonnet, &u.Overage}
 }
 
 // writeAccountUsage is the row's upsert, through the package's one writer.
 func (s *store) writeAccountUsage(ctx context.Context, op string, fields dlog.Context, usage AccountUsage) error {
-	// no_allowance is retired (layout 25) and always written 0.
-	args := []any{usage.ConfigDir, usage.ObservedAt.UnixNano(), 0}
+	args := []any{usage.ConfigDir, usage.ObservedAt.UnixNano()}
 	for _, w := range usage.windows() {
 		args = append(args, windowArgs(*w)...)
 	}
-	args = append(args, seatArgs(usage.Seat)...)
 	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx, accountUsageUpsert(), args...)
 		return err
@@ -305,51 +333,20 @@ func (u AccountUsage) validate() error {
 			return fmt.Errorf("wsm: invalid allowance verdict %q", (*w).Verdict)
 		}
 	}
-	if u.Seat != nil {
-		if u.figured() {
-			return fmt.Errorf("wsm: account usage carries both allowance windows and a seat's spend")
-		}
-		if u.Seat.Currency == "" {
-			return fmt.Errorf("wsm: a seat's spend names no currency")
-		}
-	}
 	return nil
 }
 
-// figured reports whether any allowance window is stored.
-func (u *AccountUsage) figured() bool {
-	for _, w := range u.windows() {
-		if *w != nil {
-			return true
-		}
-	}
-	return false
-}
-
-// seatArgs is the seat's four columns, all NULL when the account is not
-// billed per seat; the spend alone is NULL while none has been reported.
-func seatArgs(seat *SeatSpend) []any {
-	if seat == nil {
-		return []any{nil, nil, nil, nil}
-	}
-	var spent any
-	if seat.SpentMinor != nil {
-		spent = *seat.SpentMinor
-	}
-	return []any{seat.AllotmentMinor, spent, seat.Currency, seat.SampledAtMs}
-}
-
-// windowArgs is one window's five columns, all NULL for an unfigured window.
+// windowArgs is one window's four columns, all NULL for an unfigured window.
 // An unknown verdict reset (0) is stored NULL.
 func windowArgs(w *AllowanceFigures) []any {
 	if w == nil {
-		return []any{nil, nil, nil, nil, nil}
+		return []any{nil, nil, nil, nil}
 	}
 	var verdictResetsAtS any
 	if w.VerdictResetsAtS != 0 {
 		verdictResetsAtS = w.VerdictResetsAtS
 	}
-	return []any{w.Utilization, w.ResetsAtS, w.SampledAtMs, string(w.Verdict), verdictResetsAtS}
+	return []any{w.Utilization, w.ResetsAtS, string(w.Verdict), verdictResetsAtS}
 }
 
 // AccountUsages loads every account root's usage evidence, all-or-nothing,
@@ -368,13 +365,11 @@ func (s *store) AccountUsages(ctx context.Context) ([]AccountUsage, error) {
 				usage    AccountUsage
 				observed int64
 				windows  = make([]storedWindow, len(accountUsageWindowNames))
-				seat     storedSeat
 			)
 			dest := []any{&usage.ConfigDir, &observed}
 			for i := range windows {
 				dest = append(dest, windows[i].dest()...)
 			}
-			dest = append(dest, seat.dest()...)
 			if err := rows.Scan(dest...); err != nil {
 				return err
 			}
@@ -387,11 +382,8 @@ func (s *store) AccountUsages(ctx context.Context) ([]AccountUsage, error) {
 				}
 				*decoded[i] = figures
 			}
-			if usage.Seat, err = seat.decode(); err != nil {
-				return &DecodeError{Table: "account_usage", Row: usage.ConfigDir, Field: "seat", Err: err}
-			}
 			if err := usage.validate(); err != nil {
-				return &DecodeError{Table: "account_usage", Row: usage.ConfigDir, Field: "billing_mode", Err: err}
+				return &DecodeError{Table: "account_usage", Row: usage.ConfigDir, Field: "config_dir", Err: err}
 			}
 			out = append(out, usage)
 		}
@@ -400,26 +392,25 @@ func (s *store) AccountUsages(ctx context.Context) ([]AccountUsage, error) {
 	return out, err
 }
 
-// storedWindow is one window's five nullable columns as scanned.
+// storedWindow is one window's four nullable columns as scanned.
 type storedWindow struct {
 	utilization      sql.NullFloat64
 	resetsAtS        sql.NullInt64
-	sampledAtMs      sql.NullInt64
 	verdict          sql.NullString
 	verdictResetsAtS sql.NullInt64
 }
 
 // dest is the scan destinations, in column order.
 func (w *storedWindow) dest() []any {
-	return []any{&w.utilization, &w.resetsAtS, &w.sampledAtMs, &w.verdict, &w.verdictResetsAtS}
+	return []any{&w.utilization, &w.resetsAtS, &w.verdict, &w.verdictResetsAtS}
 }
 
-// decode is the window's figures, nil when its four figure columns are
+// decode is the window's figures, nil when its three figure columns are
 // NULL. The verdict reset is NULL on its own when unknown (a row the build
 // before layout 72 wrote), and set with no figures it is a corrupt record.
 func (w *storedWindow) decode() (*AllowanceFigures, error) {
 	set := 0
-	for _, valid := range []bool{w.utilization.Valid, w.resetsAtS.Valid, w.sampledAtMs.Valid, w.verdict.Valid} {
+	for _, valid := range []bool{w.utilization.Valid, w.resetsAtS.Valid, w.verdict.Valid} {
 		if valid {
 			set++
 		}
@@ -430,9 +421,9 @@ func (w *storedWindow) decode() (*AllowanceFigures, error) {
 			return nil, fmt.Errorf("a verdict reset is stored for a window with no figures")
 		}
 		return nil, nil
-	case 4:
+	case 3:
 	default:
-		return nil, fmt.Errorf("a window's columns are all set or all NULL, not %d of 4", set)
+		return nil, fmt.Errorf("a window's columns are all set or all NULL, not %d of 3", set)
 	}
 	verdict := AllowanceVerdict(w.verdict.String)
 	if !verdict.valid() {
@@ -441,53 +432,7 @@ func (w *storedWindow) decode() (*AllowanceFigures, error) {
 	return &AllowanceFigures{
 		Utilization:      w.utilization.Float64,
 		ResetsAtS:        w.resetsAtS.Int64,
-		SampledAtMs:      w.sampledAtMs.Int64,
 		Verdict:          verdict,
 		VerdictResetsAtS: w.verdictResetsAtS.Int64,
 	}, nil
-}
-
-// storedSeat is the seat's four nullable columns as scanned.
-type storedSeat struct {
-	allotmentMinor sql.NullInt64
-	spentMinor     sql.NullInt64
-	currency       sql.NullString
-	sampledAtMs    sql.NullInt64
-}
-
-// dest is the scan destinations, in column order.
-func (w *storedSeat) dest() []any {
-	return []any{&w.allotmentMinor, &w.spentMinor, &w.currency, &w.sampledAtMs}
-}
-
-// decode is the seat's spend, nil when the account is not billed per seat.
-// The allotment, currency and stamp are set or NULL together; a spend with
-// no allotment is a corrupt record.
-func (w *storedSeat) decode() (*SeatSpend, error) {
-	set := 0
-	for _, valid := range []bool{w.allotmentMinor.Valid, w.currency.Valid, w.sampledAtMs.Valid} {
-		if valid {
-			set++
-		}
-	}
-	switch set {
-	case 0:
-		if w.spentMinor.Valid {
-			return nil, fmt.Errorf("a seat's spend is stored with no allotment")
-		}
-		return nil, nil
-	case 3:
-	default:
-		return nil, fmt.Errorf("a seat's allotment, currency and stamp are all set or all NULL, not %d of 3", set)
-	}
-	seat := &SeatSpend{
-		AllotmentMinor: w.allotmentMinor.Int64,
-		Currency:       w.currency.String,
-		SampledAtMs:    w.sampledAtMs.Int64,
-	}
-	if w.spentMinor.Valid {
-		spent := w.spentMinor.Int64
-		seat.SpentMinor = &spent
-	}
-	return seat, nil
 }

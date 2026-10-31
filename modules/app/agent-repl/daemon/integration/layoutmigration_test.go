@@ -225,6 +225,24 @@ var layout3Undo = map[int][]string{
 	88: {`DROP TABLE cold_gate`},
 	89: {`DROP TABLE account_model_catalogs`, `DROP TABLE workspace_selections`},
 	90: {`ALTER TABLE workspaces DROP COLUMN cache_cold_turn_at`},
+	// Layout 91 dropped the account usage's unproduced columns; restoring
+	// them is what lets the layout-72, -25 and -24 inverses drop them again.
+	91: {
+		`ALTER TABLE account_usage ADD COLUMN no_allowance INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE account_usage ADD COLUMN session_utilization REAL`,
+		`ALTER TABLE account_usage ADD COLUMN session_resets_at_s INTEGER`,
+		`ALTER TABLE account_usage ADD COLUMN session_sampled_at_ms INTEGER`,
+		`ALTER TABLE account_usage ADD COLUMN session_verdict TEXT`,
+		`ALTER TABLE account_usage ADD COLUMN session_verdict_resets_at_s INTEGER`,
+		`ALTER TABLE account_usage ADD COLUMN weekly_sampled_at_ms INTEGER`,
+		`ALTER TABLE account_usage ADD COLUMN overage_sampled_at_ms INTEGER`,
+		`ALTER TABLE account_usage ADD COLUMN weekly_opus_sampled_at_ms INTEGER`,
+		`ALTER TABLE account_usage ADD COLUMN weekly_sonnet_sampled_at_ms INTEGER`,
+		`ALTER TABLE account_usage ADD COLUMN seat_allotment_minor INTEGER`,
+		`ALTER TABLE account_usage ADD COLUMN seat_spent_minor INTEGER`,
+		`ALTER TABLE account_usage ADD COLUMN seat_currency TEXT`,
+		`ALTER TABLE account_usage ADD COLUMN seat_sampled_at_ms INTEGER`,
+	},
 }
 
 // demoteToLayout3 takes a stopped daemon's state database back to layout 3 by

@@ -34,7 +34,6 @@
  */
 import type {
   FooterActivityEnduring,
-  FooterActivityEnduringSeatSpend,
   FooterActivityEnduringUsage,
   FooterActivityTransient,
   FooterActivityTransientApiRestored,
@@ -102,7 +101,6 @@ import type {
   FooterStatusPermissionSalient,
   FooterStatusQuestionActivity,
   FooterStatusQuestionSalient,
-  FooterMoney,
 } from "../../../proto/gen/ts/frontend/v1/footer_pb";
 import { formatAge, formatCountdown } from "../duration.js";
 import type { Ticker } from "../clock.js";
@@ -694,11 +692,9 @@ export function drawGivesUpCountdown(
 // ---- the enduring tier ------------------------------------------------------
 
 /**
- * THE ENDURING LINE: the account's usage BY BILLING MODE (owner ruling,
- * 2026-10-06). A subscription's allowances read "session 41% · resets in
- * 2h 5m | weekly 12% · resets in 3d"; a per-seat account's spend reads
- * "$223.88 of $12,000 this month". It is always true while it stands, so it
- * carries no age.
+ * THE ENDURING LINE: the account's usage. Its allowances read "weekly 12% ·
+ * resets in 3d | overage 4% · resets in 2h 5m". It is always true while it
+ * stands, so it carries no age.
  *
  * IT IS NEVER EMPTY (owner ruling, 2026-10-06): an account never observed
  * reads "usage not yet seen for this account".
@@ -727,9 +723,6 @@ export function drawFooterActivityEnduring(
     case "unobserved":
       line.textContent = ENDURING_UNOBSERVED_TEXT;
       break;
-    case "seatSpend":
-      line.append(...drawFooterActivityEnduringSeatSpend(chosen.value, `${path}.seat_spend`));
-      break;
     default: {
       const other: { case: string } = chosen;
       return unreachableArm(`${path}.line`, other.case);
@@ -740,77 +733,6 @@ export function drawFooterActivityEnduring(
 
 /** The enduring line before anything is known of the account's usage. */
 export const ENDURING_UNOBSERVED_TEXT = "usage not yet seen for this account";
-
-/**
- * The space between a seat's spent figure and "of": a NO-BREAK space, because
- * the enduring line is an inline flex box and an ordinary space leading the
- * text item after the figure is collapsed away (the same reason
- * `FOOTER_RATE_SEPARATOR_GAP` is one).
- */
-export const SEAT_SPEND_GAP = "\u00a0";
-
-/** What a seat's spend reads before the vendor has reported one. */
-export const SEAT_SPEND_UNSEEN_TEXT = "spend not yet seen";
-
-/**
- * A per-seat account's spend: "$223.88 of $12,000 this month", or "spend not
- * yet seen of $12,000 this month" before the vendor reports one. The vendor
- * states no billing-period reset, so none is drawn.
- *
- * THE SPENT FIGURE WEARS THE PERCENT GRADIENT, driven by spent/allotment
- * (`utilization`) through the one path every footer percentage takes
- * (`paintPressure`); the allotment and the words stay the line's color.
- */
-export function drawFooterActivityEnduringSeatSpend(
-  u: FooterActivityEnduringSeatSpend,
-  path: string,
-): (HTMLElement | string)[] {
-  const allotment = formatMoney(requireMessage(u.allotment, `${path}.allotment`), `${path}.allotment`);
-  // REGRESSION (2026-10-08): the line read "$223.88of $12,000". The enduring
-  // line is an inline flex box, where this tail is an anonymous flex item and
-  // its leading ordinary space is collapsed away; the no-break space survives.
-  const tail = `${SEAT_SPEND_GAP}of ${allotment} this month`;
-  if (u.spent === undefined) {
-    if (u.utilization !== undefined) {
-      throw new MalformedView(`${path}.utilization`, "a utilization is set with no spend");
-    }
-    return [`${SEAT_SPEND_UNSEEN_TEXT}${tail}`];
-  }
-  if (u.utilization === undefined) {
-    throw new MalformedView(`${path}.utilization`, "a spend is set with no utilization");
-  }
-  const spent = document.createElement("span");
-  spent.className = "footer-seat-spent";
-  spent.setAttribute("data-datum", "spent");
-  spent.textContent = formatMoney(u.spent, `${path}.spent`);
-  paintPressure(spent, u.utilization);
-  return [spent, tail];
-}
-
-/**
- * An amount of money as the footer draws it: dollars (or the currency's own
- * major unit), with the minor digits only when the amount has any, so
- * 1_200_000 USD cents reads "$12,000" and 22_388 reads "$223.88". A currency
- * code the runtime cannot name is refused at PATH, never drawn.
- */
-export function formatMoney(m: FooterMoney, path: string): string {
-  let digits: number;
-  try {
-    digits = new Intl.NumberFormat("en-US", { style: "currency", currency: m.currency })
-      .resolvedOptions().maximumFractionDigits ?? 0;
-  } catch (err) {
-    throw new MalformedView(`${path}.currency`, `${JSON.stringify(m.currency)} is not a currency: ${String(err)}`);
-  }
-  const scale = 10n ** BigInt(digits);
-  const whole = m.amountMinor % scale === 0n;
-  const amount = Number(m.amountMinor) / Number(scale);
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: m.currency,
-    minimumFractionDigits: whole ? 0 : digits,
-    maximumFractionDigits: whole ? 0 : digits,
-  }).format(amount);
-}
 
 /**
  * The usage line: EVERY window the vendor figured, in the fixed order of
@@ -893,8 +815,7 @@ export function drawFooterPercent(fraction: number): HTMLElement {
 /**
  * Color a footer figure by how full it is: a 0..1 fraction on the wire, as
  * the whole percent it would be drawn, through `pressurePercentColor`. THE ONE
- * GRADIENT PATH for every footer figure that says how full something is: an
- * allowance's percentage and a seat's spend alike.
+ * GRADIENT PATH for every footer figure that says how full something is.
  */
 export function paintPressure(figure: HTMLElement, fraction: number): void {
   figure.style.color = pressurePercentColor(Math.round(fraction * 100));
@@ -902,7 +823,7 @@ export function paintPressure(figure: HTMLElement, fraction: number): void {
 
 /**
  * One drawable allowance, under the label the strip and the sheet both use:
- * a single window (session, overage) or the weekly element, which carries
+ * a single window (overage) or the weekly element, which carries
  * the per-model weekly windows beside the account-wide one.
  */
 export type LabelledAllowance =
@@ -910,12 +831,11 @@ export type LabelledAllowance =
   | { readonly kind: "weekly"; readonly label: "weekly"; readonly value: FooterWeeklyAllowance };
 
 /**
- * The windows the producer figured, ALWAYS in the one fixed order session,
- * weekly, overage (owner ruling, 2026-10-08): which window stands left of the
- * blue "|" and which right never changes. Nothing about a window's figure —
+ * The windows the producer figured, ALWAYS in the one fixed order weekly,
+ * overage (owner ruling, 2026-10-08): which window stands left of the blue
+ * "|" and which right never changes. Nothing about a window's figure —
  * newsworthiness, status, a reset — reorders the line; `newsworthy` only
- * emphasizes. (The line once drew the newsworthy window first, so the weekly
- * figure jumped left of the session's the moment it crossed the threshold.)
+ * emphasizes.
  * The strip and the tokens sheet draw exactly this list, each entry through
  * `drawLabelledAllowance`.
  */
@@ -923,8 +843,6 @@ export function orderedAllowances(
   u: FooterActivityEnduringUsage,
 ): LabelledAllowance[] {
   const present: LabelledAllowance[] = [];
-  if (u.session !== undefined)
-    present.push({ kind: "single", label: "session", value: u.session });
   if (u.weekly !== undefined)
     present.push({ kind: "weekly", label: "weekly", value: u.weekly });
   if (u.overage !== undefined)
@@ -1309,7 +1227,7 @@ export function drawFooterStatusActivityWakeup(
 }
 
 /**
- * One allowance: "session 72% · resets in 1h 5m".
+ * One allowance: "overage 72% · resets in 1h 5m".
  *
  * `utilization` is 0..1 on the wire and a PERCENTAGE on screen — display
  * formatting of one shipped figure, not a derivation of a second one — and
@@ -1319,14 +1237,14 @@ export function drawFooterStatusActivityWakeup(
  * is (`drawFooterPercent`); the label and the reset countdown are plain text.
  * The vendor's verdict rides as `data-arm` and its sentence as the title.
  *
- * AN UNSET STATUS IS LEGAL AND MEANS "NO VERDICT YET": the figures are sampled
- * from the account's usage before the vendor's own rate-limit event arrives,
- * so an allowance with no arm draws untitled, and gains the title and the
- * `data-arm` on the push that carries one.
+ * AN UNSET STATUS IS LEGAL AND MEANS "NO VERDICT YET": the vendor's event
+ * stated no status, or the verdict lapsed with its window, so an allowance
+ * with no arm draws untitled, and gains the title and the `data-arm` on the
+ * push that carries one.
  *
  * A FIGURE IS TRUE ONLY UNTIL ITS RESET (footer.proto `resets_at_s`). The
  * figures are the last ones read, possibly before a daemon restart, so once
- * the clock passes the reset the allowance draws "session reset since last
+ * the clock passes the reset the allowance draws "overage reset since last
  * seen" with NO percentage and no verdict, marked `data-lapsed`, until a newer
  * push carries a fresh figure.
  */
