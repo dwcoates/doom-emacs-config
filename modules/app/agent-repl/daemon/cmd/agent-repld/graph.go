@@ -1717,7 +1717,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			Memory:           memoryPopups,
 			Chat:             chatService,
 			Revisions: revision.New(revision.Deps{
-				Shims: fleet, Feed: feedResolver, PromptsDir: paths.PromptsDir, Life: ctx, Log: log,
+				Shims: fleet, Feed: feedResolver, Status: footerResolver, PromptsDir: paths.PromptsDir, Life: ctx, Log: log,
 			}),
 			LoudFaults:        loudFaults.Topic(),
 			Focus:             focus,

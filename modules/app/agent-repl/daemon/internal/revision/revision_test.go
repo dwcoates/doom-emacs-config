@@ -64,6 +64,24 @@ func (f *fakeFeed) lastState() *frontendv1.FeedResponseRevision {
 	return f.states[len(f.states)-1]
 }
 
+// fakeStatus records every updating fact a lane set.
+type fakeStatus struct {
+	mu  sync.Mutex
+	set []bool
+}
+
+func (f *fakeStatus) SetUpdating(_ ids.WorkspaceID, updating bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.set = append(f.set, updating)
+}
+
+func (f *fakeStatus) facts() []bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]bool(nil), f.set...)
+}
+
 // fakeShim answers ReviseResponse through ANSWER, recording every request.
 type fakeShim struct {
 	shimclient.Client
@@ -103,6 +121,7 @@ func succeeded(*shimv1.ReviseResponseRequest) (*shimv1.ReviseResponseResponse, e
 type harness struct {
 	reviser  *Reviser
 	feed     *fakeFeed
+	status   *fakeStatus
 	shim     *fakeShim
 	log      *dlog.TestLogger
 	finished chan struct{}
@@ -112,9 +131,9 @@ func newHarness(t *testing.T, shim *fakeShim, promptsDir string) *harness {
 	t.Helper()
 	f := &fakeFeed{responses: map[string]feed.RevisableResponse{"row-1": {Unit: "msg_1:0", Markdown: "1 🔎 the original"}}}
 	log := dlog.NewTestLogger()
-	h := &harness{feed: f, shim: shim, log: log, finished: make(chan struct{}, 8)}
+	h := &harness{feed: f, status: &fakeStatus{}, shim: shim, log: log, finished: make(chan struct{}, 8)}
 	shims := fakeShims{shim: shim}
-	h.reviser = New(Deps{Shims: shims, Feed: f, PromptsDir: promptsDir, Life: context.Background(), Log: log})
+	h.reviser = New(Deps{Shims: shims, Feed: f, Status: h.status, PromptsDir: promptsDir, Life: context.Background(), Log: log})
 	h.reviser.done = func() { h.finished <- struct{}{} }
 	return h
 }
@@ -153,6 +172,71 @@ func TestReviseRefusesARowThatIsNoFinalResponseMarkingNothing(t *testing.T) {
 	}
 	if len(h.feed.states) != 0 {
 		t.Fatalf("a refused revision set states %v", h.feed.states)
+	}
+	if facts := h.status.facts(); len(facts) != 0 {
+		t.Fatalf("a refused revision set updating %v", facts)
+	}
+}
+
+func TestReviseRaisesUpdatingBeforeItReturns(t *testing.T) {
+	// Arrange.
+	release := make(chan struct{})
+	shim := &fakeShim{answer: func(req *shimv1.ReviseResponseRequest) (*shimv1.ReviseResponseResponse, error) {
+		<-release
+		return succeeded(req)
+	}}
+	h := newHarness(t, shim, repoPromptsDir)
+
+	// Act.
+	err := h.reviser.Revise(ws, ask("word", "what does this mean"))
+
+	// Assert.
+	if facts := h.status.facts(); err != nil || len(facts) != 1 || !facts[0] {
+		t.Fatalf("Revise() = %v, updating facts %v, want [true]", err, facts)
+	}
+	close(release)
+	<-h.finished
+}
+
+func TestALaneLowersUpdatingOnceItsLastRevisionEnds(t *testing.T) {
+	// Arrange: the second revision queues behind the first.
+	release := make(chan struct{})
+	shim := &fakeShim{}
+	shim.answer = func(req *shimv1.ReviseResponseRequest) (*shimv1.ReviseResponseResponse, error) {
+		if len(shim.asked()) == 1 {
+			<-release
+		}
+		return succeeded(req)
+	}
+	h := newHarness(t, shim, repoPromptsDir)
+	if err := h.reviser.Revise(ws, ask("word", "first")); err != nil {
+		t.Fatalf("Revise() = %v", err)
+	}
+	if err := h.reviser.Revise(ws, ask("word", "second")); err != nil {
+		t.Fatalf("Revise() = %v", err)
+	}
+
+	// Act.
+	close(release)
+	<-h.finished
+	<-h.finished
+
+	// Assert: one raise for the lane, one lower when it drained.
+	if facts := h.status.facts(); len(facts) != 2 || !facts[0] || facts[1] {
+		t.Fatalf("updating facts %v, want [true false]", facts)
+	}
+}
+
+func TestAFailedRevisionLowersUpdating(t *testing.T) {
+	// Arrange: the workspace has no live session.
+	h := newHarness(t, nil, repoPromptsDir)
+
+	// Act.
+	h.reviseAndWait(t, ask("word", "what does this mean"))
+
+	// Assert.
+	if facts := h.status.facts(); len(facts) != 2 || !facts[0] || facts[1] {
+		t.Fatalf("updating facts %v, want [true false]", facts)
 	}
 }
 

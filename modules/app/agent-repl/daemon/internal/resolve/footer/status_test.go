@@ -512,6 +512,67 @@ func TestATurnOutranksBackground(t *testing.T) {
 	}
 }
 
+// A FINAL RESPONSE BEING UPDATED (owner request, 2026-10-30) reads
+// `updating`, on the thinking rung, beneath a turn in flight.
+
+func TestARevisionInFlightReadsUpdating(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+
+	// Act
+	h.r.SetUpdating(testWS, true)
+
+	// Assert
+	if got := h.status(t); got != "updating" {
+		t.Fatalf("status = %q, want updating", got)
+	}
+}
+
+func TestTheUpdatingCellIsUnpinnedWhenNothingSalientStands(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+
+	// Act
+	h.r.SetUpdating(testWS, true)
+
+	// Assert
+	if h.view(t).GetStrip().GetStatus().GetUpdating().GetActivity().GetUnpinned() == nil {
+		t.Fatalf("updating activity = %+v, want the unpinned tier", h.view(t).GetStrip().GetStatus().GetUpdating().GetActivity())
+	}
+}
+
+func TestATurnOutranksUpdating(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.SetUpdating(testWS, true)
+
+	// Act
+	h.r.SetTurn(testWS, &TurnStarted{At: instant})
+
+	// Assert
+	if got := h.status(t); got != "working" {
+		t.Fatalf("status = %q, want working", got)
+	}
+}
+
+func TestLoweringUpdatingReturnsTheStripToIdle(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.SetUpdating(testWS, true)
+
+	// Act
+	h.r.SetUpdating(testWS, false)
+
+	// Assert
+	if got := h.status(t); got != "idle" {
+		t.Fatalf("status = %q, want idle", got)
+	}
+}
+
 // A DEAD QUERY IS AGENT-REPL'S FAULT, NOT A BLOCK (owner rulings, 2026-09-28
 // and 2026-10-06): the turn it cut raises `agent_repl_fault · turn_died` from
 // its close, and the next prompt restarts a dead query.

@@ -17,6 +17,11 @@
 // WHERE A REVISION STANDS is the feed's: Revise marks the response pending
 // before it returns, a failure marks it failed with the cause, and the page
 // line ends the pending state when the revised prose lands.
+//
+// THE WORKSPACE READS `updating` WHILE ITS LANE RUNS (owner request,
+// 2026-10-30): the lane raises the status fact when it starts and lowers it
+// when it drains, both under the lane's own lock, so a lane started just as
+// another drained can never have its raise undone by the old lane's lower.
 package revision
 
 import (
@@ -61,10 +66,18 @@ type Feed interface {
 	SetResponseRevision(ws ids.WorkspaceID, row *frontendv1.FeedId, state *frontendv1.FeedResponseRevision) bool
 }
 
+// Status is the workspace status's side of a revision: whether one runs.
+type Status interface {
+	// SetUpdating raises (true) or lowers (false) the fact that a final
+	// response of the workspace is being updated.
+	SetUpdating(ws ids.WorkspaceID, updating bool)
+}
+
 // Deps is what a Reviser needs.
 type Deps struct {
-	Shims Shims
-	Feed  Feed
+	Shims  Shims
+	Feed   Feed
+	Status Status
 	// PromptsDir holds the brief, read at use time.
 	PromptsDir string
 	// Life bounds every revision: the daemon's lifetime.
@@ -115,6 +128,9 @@ func (r *Reviser) Revise(ws ids.WorkspaceID, ask Ask) error {
 	queued := r.lanes[ws]
 	r.lanes[ws] = append(queued, ask)
 	start := len(queued) == 0
+	if start {
+		r.deps.Status.SetUpdating(ws, true)
+	}
 	r.mu.Unlock()
 	r.deps.Log.Info(opRevise, "a revision of a final response was asked for", dlog.Context{
 		"workspace": string(ws), "row": ask.Row.GetValue(), "words": len(ask.Words), "queued_ahead": len(queued),
@@ -136,6 +152,7 @@ func (r *Reviser) drain(ws ids.WorkspaceID) {
 		rest := r.lanes[ws][1:]
 		if len(rest) == 0 {
 			delete(r.lanes, ws)
+			r.deps.Status.SetUpdating(ws, false)
 		} else {
 			r.lanes[ws] = rest
 		}

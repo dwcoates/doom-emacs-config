@@ -297,6 +297,17 @@ func (r *resolver) loadingActivity(s *wsState) *frontendv1.FooterStatusLoadingAc
 	return &frontendv1.FooterStatusLoadingActivity{Tier: &frontendv1.FooterStatusLoadingActivity_Unpinned{Unpinned: r.unpinned(s)}}
 }
 
+// updatingActivity resolves the cell while a final response is updating: the
+// bubble being updated is the update's own line, so only the shared salient
+// lines can stand.
+func (r *resolver) updatingActivity(s *wsState) *frontendv1.FooterStatusUpdatingActivity {
+	if line, ok := r.sharedSalient(s); ok {
+		return &frontendv1.FooterStatusUpdatingActivity{Tier: &frontendv1.FooterStatusUpdatingActivity_Salient{
+			Salient: fillShared(&frontendv1.FooterStatusUpdatingSalient{}, line)}}
+	}
+	return &frontendv1.FooterStatusUpdatingActivity{Tier: &frontendv1.FooterStatusUpdatingActivity_Unpinned{Unpinned: r.unpinned(s)}}
+}
+
 // waitingSalient is the one salient line a waiting status stands on. It is
 // composed BY THE SAME DECISION that picks the waiting step (status.go
 // waiting, wakeup), so the kind that explains the step always exists and ranks

@@ -180,6 +180,19 @@ func TestRowIsThinkingOnceTheTurnProducesActivity(t *testing.T) {
 	}
 }
 
+func TestRowIsThinkingWhileAFinalResponseIsUpdating(t *testing.T) {
+	// Arrange: the reviser tells only the footer, as the daemon wires it.
+	r := live(t, arrange(t))
+
+	// Act.
+	r.Resolver.(*fanned).footer.SetUpdating(theWS, true)
+
+	// Assert.
+	if got := statusName(onlyRow(t, r)); got != "thinking" {
+		t.Fatalf("status = %q, want thinking", got)
+	}
+}
+
 func TestRowIsClearingWhileAClearRuns(t *testing.T) {
 	// Arrange.
 	r := live(t, arrange(t))

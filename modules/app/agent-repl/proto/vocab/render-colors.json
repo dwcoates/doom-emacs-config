@@ -389,6 +389,7 @@
     "network_fault": "blue",
     "closing": "blue",
     "loading": "red",
+    "updating": "red",
     "merge_failed": "green",
     "merged": "green",
     "turn_failed": "turquoise",

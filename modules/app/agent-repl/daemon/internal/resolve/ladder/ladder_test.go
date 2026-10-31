@@ -178,6 +178,19 @@ func TestFooterClaimPlacesEveryFooterArm(t *testing.T) {
 	}
 }
 
+func TestFooterClaimPlacesUpdatingOnThinking(t *testing.T) {
+	// Arrange
+	status := &frontendv1.FooterStatus{Status: &frontendv1.FooterStatus_Updating{Updating: &frontendv1.FooterStatusUpdating{}}}
+
+	// Act
+	claim, _ := FooterClaim(status)
+
+	// Assert
+	if claim != Thinking {
+		t.Fatalf("FooterClaim(updating) = %q, want thinking", claim)
+	}
+}
+
 func TestFooterClaimPlacesTheWakeupFallbackOnIdle(t *testing.T) {
 	// Arrange
 	status := &frontendv1.FooterStatus{Status: &frontendv1.FooterStatus_Waiting{

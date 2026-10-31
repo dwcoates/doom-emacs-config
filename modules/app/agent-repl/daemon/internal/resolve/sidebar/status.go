@@ -143,7 +143,7 @@ func projectArm(status *frontendv1.FooterStatus, log dlog.Logger) string {
 		default:
 			return "thinking"
 		}
-	case *frontendv1.FooterStatus_Loading:
+	case *frontendv1.FooterStatus_Loading, *frontendv1.FooterStatus_Updating:
 		return "thinking"
 	default:
 		log.Error("daemon.sidebar.project_arm", "the footer drew a status the roster has no projection for",
