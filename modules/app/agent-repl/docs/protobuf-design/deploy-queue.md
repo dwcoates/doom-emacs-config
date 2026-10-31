@@ -303,7 +303,7 @@ origin) is the next repository to be described this way, and is deferred.
 - **Scripts only.** A prompt hook is a turn of a deploy's owner, and an empty
   queue has none, so the field is not a `repoconfig.v1.DeployHookEntry` and
   carries no `runs_for`.
-- **The debt is durable.** `wsm`'s `merge_queue_repos.drain_owed` (layout 92)
+- **The debt is durable.** `wsm`'s `merge_queue_repos.drain_owed` (layout 94)
   is set in the write that admits a merge (`AdmitMerge`) and cleared only once
   every script succeeded. A landing's own rollout replaces the daemon right
   after the landing, so a debt held in memory would be lost on exactly the
