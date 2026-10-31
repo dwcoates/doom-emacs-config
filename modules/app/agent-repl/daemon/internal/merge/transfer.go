@@ -189,6 +189,13 @@ func (o *orchestrator) suspendFor(ctx context.Context, ws ids.WorkspaceID, why s
 	o.takenAway[ws] = why
 	wait := o.requested[ws]
 	delete(o.requested, ws)
+	// A MERGE REMEDIATING OUT OF LINE MOVES WITH THE WORKSPACE: the wait on
+	// its fixing turn is withdrawn here, never left to fail when the session
+	// leaves, which would put the merge back in line with its fix still
+	// running (2026-10-31: a deploy's handover returned one mid-fix). Its
+	// take-back -- the successor's, or this daemon's own -- arms it again
+	// (recoverRemediating).
+	o.forgetRemediationLocked(ws)
 	r, running := o.runsByWorkspace[ws]
 	mark, terminal := o.terminals[ws]
 	// AN ABANDONED RUN IS ENDING (dequeue): no suspension takes it, and it
