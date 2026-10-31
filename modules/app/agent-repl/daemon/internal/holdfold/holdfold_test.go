@@ -107,22 +107,57 @@ func prompt(turn ids.TurnID) wsm.HeldPrompt {
 	return wsm.HeldPrompt{Turn: turn, Said: said(textBlock("words of " + string(turn)))}
 }
 
-func TestAhead(t *testing.T) {
-	standing := []wsm.HeldPrompt{prompt("a"), prompt("b"), prompt("c")}
+// unseen answers H as a prompt of an origin drawn nowhere: the brief asking a
+// workspace to file itself into a subsection.
+func unseen(h wsm.HeldPrompt) wsm.HeldPrompt {
+	h.Origin = "PROMPT_ORIGIN_SUBSECTION_PLACEMENT"
+	return h
+}
+
+func TestSeen(t *testing.T) {
 	tests := []struct {
-		name     string
-		turn     ids.TurnID
-		want     ids.TurnID
-		wantSeen bool
+		name string
+		hold wsm.HeldPrompt
+		want bool
 	}{
-		{name: "the entry before it in queue order", turn: "c", want: "b", wantSeen: true},
-		{name: "nothing ahead of the first entry", turn: "a", wantSeen: false},
-		{name: "nothing ahead of an entry that does not stand", turn: "gone", wantSeen: false},
+		{name: "the user's prompt is seen", hold: wsm.HeldPrompt{Origin: "PROMPT_ORIGIN_USER_SENT"}, want: true},
+		{name: "an agent's prompt is seen", hold: sentBy(prompt("a"), "ws-sender"), want: true},
+		{name: "a subsection placement brief is not", hold: unseen(prompt("a")), want: false},
+		{name: "a workspace notice is not", hold: wsm.HeldPrompt{Origin: "PROMPT_ORIGIN_WORKSPACE_NOTICE"}, want: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Act
-			got, ok := Ahead(standing, tt.turn)
+			got := Seen(tt.hold)
+			// Assert
+			if got != tt.want {
+				t.Fatalf("Seen = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAhead(t *testing.T) {
+	standing := []wsm.HeldPrompt{prompt("a"), prompt("b"), prompt("c")}
+	withUnseen := []wsm.HeldPrompt{unseen(prompt("u0")), prompt("a"), unseen(prompt("u1")), prompt("b"), unseen(prompt("u2"))}
+	tests := []struct {
+		name     string
+		standing []wsm.HeldPrompt
+		turn     ids.TurnID
+		want     ids.TurnID
+		wantSeen bool
+	}{
+		{name: "the entry before it in queue order", standing: standing, turn: "c", want: "b", wantSeen: true},
+		{name: "nothing ahead of the first entry", standing: standing, turn: "a", wantSeen: false},
+		{name: "nothing ahead of an entry that does not stand", standing: standing, turn: "gone", wantSeen: false},
+		{name: "an unseen entry between two is passed over", standing: withUnseen, turn: "b", want: "a", wantSeen: true},
+		{name: "nothing ahead when only an unseen entry is", standing: withUnseen, turn: "a", wantSeen: false},
+		{name: "nothing ahead of an unseen entry", standing: withUnseen, turn: "u2", wantSeen: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got, ok := Ahead(tt.standing, tt.turn)
 
 			// Assert
 			if ok != tt.wantSeen || (ok && got.Turn != tt.want) {

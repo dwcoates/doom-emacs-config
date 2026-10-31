@@ -12,7 +12,6 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/holdfold"
 	"agent-repld/internal/ids"
-	"agent-repld/internal/promptorigin"
 	"agent-repld/internal/wsm"
 )
 
@@ -53,7 +52,7 @@ func heldPrompt(h wsm.HeldPrompt, editing bool, start ShimStart, draw DrawBody, 
 	}
 	// A PROMPT DRAWN NOWHERE (promptorigin.Unseen: a merge queue notice) has
 	// no card either while it waits: the daemon's word to the agent alone.
-	if promptorigin.UnseenNamed(h.Origin) {
+	if !holdfold.Seen(h) {
 		log.Debug("daemon.holds.convert", "a held prompt of an origin drawn nowhere was skipped: the tray draws no card for it",
 			dlog.Context{"turn_id": string(h.Turn), "origin": h.Origin})
 		return nil

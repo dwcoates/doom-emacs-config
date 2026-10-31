@@ -474,3 +474,52 @@ func TestFoldedSaidLeavesBothInputsUntouched(t *testing.T) {
 		t.Fatalf("inputs = %q, %q, want them unchanged", saidText(into), saidText(from))
 	}
 }
+
+// THE FOLD PASSES OVER A PROMPT DRAWN NOWHERE (holdfold.Ahead), as the tray's
+// button does: the entry the user saw above is the one folded into.
+func TestFoldPassesOverAPromptDrawnNowhere(t *testing.T) {
+	// Arrange: t1, then the placement brief, then t2.
+	h := newHarness(t)
+	queuedPrompts(t, h, [2]string{"t1", "first words"})
+	if _, err := h.q.Submit(context.Background(), placementSubmission("brief")); err != nil {
+		t.Fatalf("Submit brief: %v", err)
+	}
+	h.q.waitForClassifications()
+	queuedPrompts(t, h, [2]string{"t2", "second words"})
+
+	// Act
+	fold(t, h, "t2", "t1")
+
+	// Assert
+	if got := saidText(h.db.hold("t1").Said); got != "first words\n\nsecond words" {
+		t.Fatalf("t1 = %q, want both prompts' words", got)
+	}
+	if brief := h.db.hold("brief"); brief.Tombstone != nil || brief.Coalesced {
+		t.Fatalf("brief = %+v, want it standing as it was", brief)
+	}
+}
+
+func TestFoldIntoAPromptDrawnNowhereIsRefused(t *testing.T) {
+	// Arrange: t1, then the placement brief, then t2.
+	h := newHarness(t)
+	queuedPrompts(t, h, [2]string{"t1", "first words"})
+	if _, err := h.q.Submit(context.Background(), placementSubmission("brief")); err != nil {
+		t.Fatalf("Submit brief: %v", err)
+	}
+	h.q.waitForClassifications()
+	queuedPrompts(t, h, [2]string{"t2", "second words"})
+
+	// Act
+	err := h.q.Fold(context.Background(), theWorkspace, "t2", "brief")
+
+	// Assert
+	var moved *AboveMovedError
+	if !errors.As(err, &moved) || moved.Current != "t1" {
+		t.Fatalf("Fold = %v, want above_moved naming t1", err)
+	}
+	for _, turn := range []string{"t1", "brief", "t2"} {
+		if held := h.db.hold(idsTurn(turn)); held.Tombstone != nil || held.Coalesced {
+			t.Fatalf("%s = %+v, want every entry standing as it was", turn, held)
+		}
+	}
+}

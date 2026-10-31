@@ -16,6 +16,7 @@ import (
 
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/promptorigin"
 	"agent-repld/internal/sessioncommand"
 	"agent-repld/internal/wsm"
 )
@@ -90,18 +91,34 @@ func SameAuthor(a, b *wsm.WorkspaceID) bool {
 	return *a == *b
 }
 
-// Ahead answers the standing hold directly ahead of TURN in STANDING, which is
-// in queue order (queued_at, then the turn id). False when TURN is first, or
-// does not stand at all: nothing is ahead of it to fold into.
+// Seen reports whether a hold stands in the line the user sees. A prompt of an
+// origin drawn nowhere (promptorigin.Unseen: a subscription's notice, the brief
+// asking a workspace to file itself into a subsection) has no card while it
+// waits, so it stands outside that line: no prompt is judged against it,
+// folded into it, or offered a fold into it. Folded in, the user's words would
+// run under the unseen prompt's origin, drawn nowhere, and the tray would draw
+// a fold into a card it never showed.
+func Seen(h wsm.HeldPrompt) bool {
+	return !promptorigin.UnseenNamed(h.Origin)
+}
+
+// Ahead answers the seen standing hold directly ahead of TURN in STANDING,
+// which is in queue order (queued_at, then the turn id), passing over every
+// hold that is not Seen. False when no seen hold stands ahead of TURN, or when
+// TURN does not stand or is not seen itself: nothing is ahead of it to fold
+// into.
 func Ahead(standing []wsm.HeldPrompt, turn ids.TurnID) (wsm.HeldPrompt, bool) {
+	var prev *wsm.HeldPrompt
 	for i, h := range standing {
-		if h.Turn != turn {
-			continue
+		if h.Turn == turn {
+			if prev == nil || !Seen(h) {
+				return wsm.HeldPrompt{}, false
+			}
+			return *prev, true
 		}
-		if i == 0 {
-			return wsm.HeldPrompt{}, false
+		if Seen(h) {
+			prev = &standing[i]
 		}
-		return standing[i-1], true
 	}
 	return wsm.HeldPrompt{}, false
 }

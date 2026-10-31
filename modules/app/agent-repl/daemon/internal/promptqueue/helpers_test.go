@@ -1708,7 +1708,7 @@ type harness struct {
 	reviveCauses []shimlife.StartCause
 	// settingsStarts are the instants SettingsStarted was told of.
 	settingsStarts []time.Time
-	log          *dlog.TestSurfaces
+	log            *dlog.TestSurfaces
 
 	// noSession, when set, makes the client resolver report no session.
 	revivals   int
@@ -1803,9 +1803,9 @@ func newHarness(t *testing.T) *harness {
 		},
 		SettingsStarted: func(_ ids.WorkspaceID, at time.Time) { h.settingsStarts = append(h.settingsStarts, at) },
 		Watcher:         func(ids.WorkspaceID) (Watcher, bool) { return h.watcher, !h.noSession && !h.noWatcher },
-		SessionStarted: func(ids.WorkspaceID) bool { return !h.noSession && !h.notStarted },
-		SessionAbsent:  func(ids.WorkspaceID) bool { return h.sessionAbsent },
-		StandingDown:   h.standingDown.Load,
+		SessionStarted:  func(ids.WorkspaceID) bool { return !h.noSession && !h.notStarted },
+		SessionAbsent:   func(ids.WorkspaceID) bool { return h.sessionAbsent },
+		StandingDown:    h.standingDown.Load,
 		ColdGate: func(ids.WorkspaceID) (string, bool) {
 			return h.coldGate, h.coldGate != ""
 		},

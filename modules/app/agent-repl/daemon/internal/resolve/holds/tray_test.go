@@ -1,6 +1,7 @@
 package holds_test
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/resolve/holds"
+	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
 
@@ -942,6 +944,19 @@ func TestTrayOffersFoldAbove(t *testing.T) {
 			},
 			want: []string{"", "t1"},
 		},
+		{
+			name: "an entry drawn nowhere between two prompts is skipped: the fold names the drawn one",
+			holds: []wsm.HeldPrompt{
+				hold("t1", "first"),
+				func() wsm.HeldPrompt {
+					h := queuedSecond("t2", "file yourself into a subsection")
+					h.Origin = conversationv1.PromptOrigin_PROMPT_ORIGIN_SUBSECTION_PLACEMENT.String()
+					return h
+				}(),
+				func() wsm.HeldPrompt { h := hold("t3", "third"); h.QueuedAt = queuedAt.Add(2 * time.Second); return h }(),
+			},
+			want: []string{"", "t1"},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -986,5 +1001,26 @@ func TestTrayDrawsNoCardForAPromptDrawnNowhere(t *testing.T) {
 	if _, ok := dlog.FindRecord(surfaces.Records(), dlog.RecordQuery{Level: "debug", Operation: "daemon.holds.convert",
 		Message: "a held prompt of an origin drawn nowhere was skipped: the tray draws no card for it"}); !ok {
 		t.Fatalf("no record of the skipped notice: %+v", surfaces.Records())
+	}
+}
+
+// THE TRAY ASKS holdfold.Seen whether a hold has a card, the reading the
+// queue's fold and classifier share: no file of the tray reads a hold's
+// origin as unseen by hand.
+func TestTrayAsksHoldfoldWhetherAHoldIsSeen(t *testing.T) {
+	// Arrange
+	handRolled := regexp.MustCompile(`Unseen(Named)?\([A-Za-z_.\[\]]*\.Origin\)`)
+
+	// Act
+	var found []string
+	for _, file := range sourcescan.Production(t) {
+		if handRolled.Match(file.Source) {
+			found = append(found, file.Name)
+		}
+	}
+
+	// Assert
+	if len(found) > 0 {
+		t.Fatalf("these files read a hold as unseen by hand instead of holdfold.Seen: %v", found)
 	}
 }

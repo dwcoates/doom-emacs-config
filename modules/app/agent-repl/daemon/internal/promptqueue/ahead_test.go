@@ -8,8 +8,11 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
+	conversationv1 "agentrepl/proto/conversation/v1"
+
 	"agent-repld/internal/classifier"
 	"agent-repld/internal/holdfold"
+	"agent-repld/internal/ids"
 	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
@@ -294,5 +297,101 @@ func TestTheQueueAsksHoldfoldWhetherTwoPromptsShareAnAuthor(t *testing.T) {
 	// Assert
 	if len(found) > 0 {
 		t.Fatalf("these files compare senders by hand instead of holdfold.SameAuthor: %v", found)
+	}
+}
+
+// placementSubmission is the daemon's brief asking the workspace to file
+// itself into a subsection: a prompt of an origin drawn nowhere.
+func placementSubmission(turn ids.TurnID) Submission {
+	sub := submission(turn, "file yourself into a subsection")
+	sub.Origin = conversationv1.PromptOrigin_PROMPT_ORIGIN_SUBSECTION_PLACEMENT
+	return sub
+}
+
+// A PROMPT DRAWN NOWHERE STANDS OUTSIDE THE LINE (holdfold.Seen): the user's
+// next prompt is never judged against it nor folded into it (2026-10-31: a
+// prompt coalesced into the placement brief, so its words ran under the
+// brief's origin, drawn nowhere, and the tray drew a fold into no card).
+func TestAPromptIsNeverJudgedAgainstOrFoldedIntoAnUnseenPrompt(t *testing.T) {
+	tests := []struct {
+		name string
+		// seenAhead submits a user's prompt before the brief when set.
+		seenAhead  bool
+		wantJudged string
+		wantInto   ids.TurnID
+	}{
+		{name: "with only the brief held, the prompt is judged against the running turn", wantJudged: "the running work"},
+		{name: "with a seen prompt ahead of the brief, the prompt folds into the seen one", seenAhead: true, wantJudged: "an earlier question", wantInto: "older"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			running(t, h, "running-turn", "the running work")
+			h.judge.verdict = classifier.Verdict{Route: classifier.RouteQueue, Reason: "independent"}
+			if tt.seenAhead {
+				if _, err := h.q.Submit(context.Background(), submission("older", "an earlier question")); err != nil {
+					t.Fatalf("Submit: %v", err)
+				}
+				h.q.waitForClassifications()
+			}
+			if _, err := h.q.Submit(context.Background(), placementSubmission("brief")); err != nil {
+				t.Fatalf("Submit brief: %v", err)
+			}
+			h.q.waitForClassifications()
+			h.judge.mu.Lock()
+			h.judge.asked = nil
+			h.judge.mu.Unlock()
+			route := classifier.RouteQueue
+			if tt.wantInto != "" {
+				route = classifier.RouteInterrupt
+			}
+			h.judge.verdict = classifier.Verdict{Route: route, Reason: "scripted"}
+
+			// Act
+			if _, err := h.q.Submit(context.Background(), submission("later", "do it the other way")); err != nil {
+				t.Fatalf("Submit: %v", err)
+			}
+			h.q.waitForClassifications()
+
+			// Assert: judged against what the user saw ahead, the brief untouched.
+			h.judge.mu.Lock()
+			asked := append([][2]string(nil), h.judge.asked...)
+			h.judge.mu.Unlock()
+			if len(asked) != 1 || asked[0][0] != tt.wantJudged {
+				t.Fatalf("judged against = %v, want %q", asked, tt.wantJudged)
+			}
+			brief, found, err := h.db.HeldPromptByTurn(context.Background(), "brief")
+			if err != nil || !found || brief.Tombstone != nil || brief.Coalesced || saidText(brief.Said) != "file yourself into a subsection" {
+				t.Fatalf("brief = (%+v, %v, %v), want it standing as it was", brief, found, err)
+			}
+			if tt.wantInto == "" {
+				return
+			}
+			into, _, err := h.db.HeldPromptByTurn(context.Background(), tt.wantInto)
+			if err != nil || !into.Coalesced || saidText(into.Said) != "an earlier question\n\ndo it the other way" {
+				t.Fatalf("into = (%+v, %v), want the seen prompt carrying both", into, err)
+			}
+		})
+	}
+}
+
+// THE QUEUE ASKS holdfold.Seen whether a hold stands in the line the user
+// sees: no file of the queue reads a hold's origin as unseen by hand.
+func TestTheQueueAsksHoldfoldWhetherAHoldIsSeen(t *testing.T) {
+	// Arrange
+	handRolled := regexp.MustCompile(`Unseen(Named)?\([A-Za-z_.\[\]]*\.Origin\)`)
+
+	// Act
+	var found []string
+	for _, file := range sourcescan.Production(t) {
+		if handRolled.Match(file.Source) {
+			found = append(found, file.Name)
+		}
+	}
+
+	// Assert
+	if len(found) > 0 {
+		t.Fatalf("these files read a hold as unseen by hand instead of holdfold.Seen: %v", found)
 	}
 }

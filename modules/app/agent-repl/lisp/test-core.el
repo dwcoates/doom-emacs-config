@@ -472,6 +472,12 @@ Each result is `(RELATIVE-FILE OWNER FORM)'."
     ("input.el" agent-repl-send-held-now
      "agent-repl: send now: %s"
      "tells the user why the daemon refused to send their held prompt now")
+    ("input.el" agent-repl--input-send-if-unchanged
+     "agent-repl: the composer changed before it could be sent; nothing was sent"
+     "tells the user C-RET did not send a composer edited after the press")
+    ("input.el" agent-repl--input-send-if-unchanged
+     "agent-repl: no held prompt to send now"
+     "tells the user C-RET found neither a held prompt nor text to send")
     ("keybindings.el" agent-repl-reload-config "[agent-repl] Reloaded %s"
      "confirms the interactive source reload")
     ("magit.el" agent-repl-magit-copy-commit-link

@@ -11,8 +11,8 @@ import (
 	"agent-repld/internal/classifier"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/resolve/footer"
-	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/shimlife"
+	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
 
