@@ -370,7 +370,7 @@ export function drawRosterRow(
   ws.appendChild(detail);
   // The hover wiring listens on the panel too, so the pointer can travel from
   // the row into it without it closing.
-  installHoverPanel(ws, line, detail, sc, workspace.id);
+  installHoverPanel(ws, line, duration, detail, sc, workspace.id);
 
   appendRowKids(ws, children, familyPath, (child, childPath) => drawRosterFamily(child, sc, childPath, place));
   return ws;
@@ -889,17 +889,19 @@ export function drawStatusMark(arm: RosterStatusCase, path: string, markers: Row
  * 2026-10-06).
  *
  * THE POINTER'S TRIGGER IS THE ROW'S WHOLE LINE, in every section alike: the
- * open workspaces section, Hidden and Recently Merged (owner request,
- * 2026-10-31, which retired the duration field as the trigger of 2026-10-14).
- * The panel opens once the pointer has rested anywhere on the line for
- * `HOVER_OPEN_DELAY_MS`, and the pointer leaving the line for anywhere but
- * the panel closes it.
+ * open workspaces section, Hidden and Recently Merged (owner requests,
+ * 2026-10-31, which retired the duration field as the only trigger of
+ * 2026-10-14). The panel opens once the pointer has rested anywhere on the
+ * line for `HOVER_OPEN_DELAY_MS`, at once when it reaches the duration
+ * field, and the pointer leaving the line for anywhere but the panel closes
+ * it.
  *
  * The keyboard gets the same panel through `focusin`/`focusout`.
  */
 function installHoverPanel(
   ws: HTMLElement,
   line: HTMLElement,
+  duration: HTMLElement,
   detail: HTMLElement,
   sc: SidebarContext,
   workspaceId: string,
@@ -911,6 +913,12 @@ function installHoverPanel(
   });
   line.addEventListener("mouseleave", () => {
     hover.leave(workspaceId, "line");
+  });
+  duration.addEventListener("mouseenter", () => {
+    hover.enter(workspaceId, "duration");
+  });
+  duration.addEventListener("mouseleave", () => {
+    hover.leave(workspaceId, "duration");
   });
   detail.addEventListener("mouseenter", () => {
     hover.enter(workspaceId, "panel");

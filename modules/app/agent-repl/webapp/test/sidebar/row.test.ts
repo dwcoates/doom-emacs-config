@@ -96,6 +96,16 @@ function hoverIn(drawn: HTMLElement): void {
   vi.advanceTimersByTime(HOVER_OPEN_DELAY_MS);
 }
 
+/** The row's duration field, which opens the panel at once (owner request, 2026-10-31). */
+const durationOf = (drawn: HTMLElement): HTMLElement =>
+  lineOf(drawn).querySelector(":scope > [data-when]") as HTMLElement;
+
+/** Bring the pointer onto the row's duration, by way of its line. */
+function hoverDuration(drawn: HTMLElement): void {
+  lineOf(drawn).dispatchEvent(new MouseEvent("mouseenter"));
+  durationOf(drawn).dispatchEvent(new MouseEvent("mouseenter"));
+}
+
 function hoverOut(drawn: HTMLElement): void {
   lineOf(drawn).dispatchEvent(new MouseEvent("mouseleave"));
 }
@@ -1701,6 +1711,26 @@ describe("the detail panel opens on hover", () => {
     expect(drawn.classList.contains("open")).toBe(true);
   });
 
+  it("opens at once when the pointer reaches the duration", () => {
+    // ARRANGE
+    const drawn = drawRosterRow(row({ id: "ws-1" }), sidebarContext(), "R");
+    // ACT
+    hoverDuration(drawn);
+    // ASSERT
+    expect(drawn.classList.contains("open")).toBe(true);
+  });
+
+  it("stays open while the pointer moves from the duration to the rest of the line", () => {
+    // ARRANGE
+    const drawn = drawRosterRow(row({ id: "ws-1" }), sidebarContext(), "R");
+    hoverDuration(drawn);
+    // ACT
+    durationOf(drawn).dispatchEvent(new MouseEvent("mouseleave"));
+    vi.runAllTimers();
+    // ASSERT
+    expect(drawn.classList.contains("open")).toBe(true);
+  });
+
   it("opens a running turn's row like any other", () => {
     // ARRANGE
     const drawn = drawRosterRow(
@@ -1819,6 +1849,15 @@ describe("the detail panel opens on hover", () => {
       const drawn = bandRow();
       // ACT
       hoverIn(drawn);
+      // ASSERT
+      expect(drawn.classList.contains("open")).toBe(true);
+    });
+
+    it("opens at once when the pointer reaches the duration", () => {
+      // ARRANGE
+      const drawn = bandRow();
+      // ACT
+      hoverDuration(drawn);
       // ASSERT
       expect(drawn.classList.contains("open")).toBe(true);
     });
