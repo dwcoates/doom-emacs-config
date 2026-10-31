@@ -469,22 +469,32 @@ JSON; every reader of a host answer parses it here."
   (json-parse-string raw :object-type 'plist :array-type 'list
                      :null-object nil :false-object nil))
 
+(defun agent-repl--webview-answered (raw prefix scope-of central predates)
+  "Record RAW, one of Emacs's web views' answers to a call, and its notes.
+The one shape every view's answer takes (webapp/src/host/answers.ts): the
+call, its outcome and its notes are recorded under the scope SCOPE-OF answers
+for the parsed answer, as PREFIX.answer; a view that lacks the call
+\(`unknown-call') is handed to PREDATES with the call's name; an answer that
+cannot be read is recorded at ERROR under CENTRAL as PREFIX.answer-unreadable."
+  (condition-case err
+      (let* ((answer (agent-repl-webhost-parse-answer raw))
+             (scope (funcall scope-of answer))
+             (op (plist-get answer :op)))
+        (agent-repl--log scope "%s.answer op=%s id=%s outcome=%s"
+                         prefix op (plist-get answer :id) (plist-get answer :outcome))
+        (when (equal (plist-get answer :outcome) "unknown-call")
+          (funcall predates op))
+        (dolist (note (plist-get answer :notes))
+          (agent-repl--webhost-record-note scope op note)))
+    (error
+     (agent-repl--error central "%s.answer-unreadable raw=%S error=%S" prefix raw err))))
+
 (defun agent-repl--webhost-answered (raw)
   "Record the host's RAW answer to a call, and every note it carries.
 The xwidget `javascript-callback' handler calls this BY SYMBOL: see
 `agent-repl--frontend-webview-read-script' for why a closure would crash."
-  (condition-case err
-      (let* ((answer (agent-repl-webhost-parse-answer raw))
-             (scope (agent-repl--webhost-answer-ws answer)))
-        (agent-repl--log scope "elisp.webhost.answer op=%s id=%s outcome=%s"
-                         (plist-get answer :op) (plist-get answer :id) (plist-get answer :outcome))
-        (when (equal (plist-get answer :outcome) "unknown-call")
-          (agent-repl--webhost-predates-call (plist-get answer :op)))
-        (dolist (note (plist-get answer :notes))
-          (agent-repl--webhost-record-note scope (plist-get answer :op) note)))
-    (error
-     (agent-repl--error agent-repl--webhost-central
-                        "elisp.webhost.answer-unreadable raw=%S error=%S" raw err))))
+  (agent-repl--webview-answered raw "elisp.webhost" #'agent-repl--webhost-answer-ws
+                                agent-repl--webhost-central #'agent-repl--webhost-predates-call))
 
 (defun agent-repl--webhost-call (method &rest args)
   "Call the host's METHOD with ARGS; non-nil when the call was sent.

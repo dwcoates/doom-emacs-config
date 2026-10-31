@@ -202,6 +202,55 @@ which restores a known prior handler rather than keeping the current one."
   (should (= 2 (agent-repl-test-wh--count-in-source "webhost.el" "(xwidget-put xw 'callback")))
   (should (= 0 (agent-repl-test-wh--count-in-source "sidebar-view.el" "(xwidget-put xw 'callback"))))
 
+(defmacro agent-repl-test-wh--with-answer-records (&rest body)
+  "Run BODY binding `records' to every answer record, as (LEVEL SCOPE TEXT), newest first."
+  (declare (indent 0))
+  `(let ((records nil))
+     (cl-letf (((symbol-function 'agent-repl--log)
+                (lambda (scope fmt &rest args) (push (list 'log scope (apply #'format fmt args)) records)))
+               ((symbol-function 'agent-repl--warn)
+                (lambda (scope fmt &rest args) (push (list 'warn scope (apply #'format fmt args)) records)))
+               ((symbol-function 'agent-repl--error)
+                (lambda (scope fmt &rest args) (push (list 'error scope (apply #'format fmt args)) records))))
+       ,@body)))
+
+(ert-deftest agent-repl-test-wh-a-view-answer-is-recorded-under-its-scope-and-prefix ()
+  "An answer is recorded as PREFIX.answer under the scope its answer names."
+  (agent-repl-test-wh--with-answer-records
+    (agent-repl--webview-answered "{\"op\":\"show\",\"id\":\"id-a\",\"outcome\":\"shown\",\"notes\":[]}"
+                                  "elisp.view" (lambda (answer) (plist-get answer :id)) 'central #'ignore)
+    (should (equal records '((log "id-a" "elisp.view.answer op=show id=id-a outcome=shown"))))))
+
+(ert-deftest agent-repl-test-wh-a-view-that-lacks-a-call-is-handed-to-its-predates ()
+  "An `unknown-call' answer hands the call's name to the view's own handler."
+  (agent-repl-test-wh--with-answer-records
+    (let ((handed nil))
+      (agent-repl--webview-answered "{\"op\":\"focusMoved\",\"id\":null,\"outcome\":\"unknown-call\",\"notes\":[]}"
+                                    "elisp.view" (lambda (_a) 'central) 'central (lambda (op) (push op handed)))
+      (should (equal handed '("focusMoved"))))))
+
+(ert-deftest agent-repl-test-wh-a-view-answer-s-notes-are-recorded-at-their-levels ()
+  "Every note an answer carries is recorded at its own level, under the answer's scope."
+  (agent-repl-test-wh--with-answer-records
+    (agent-repl--webview-answered
+     "{\"op\":\"show\",\"id\":null,\"outcome\":\"shown\",\"notes\":[{\"level\":\"warn\",\"text\":\"odd\"}]}"
+     "elisp.view" (lambda (_a) 'central) 'central #'ignore)
+    (should (member '(warn central "elisp.webhost.note op=show note=odd") records))))
+
+(ert-deftest agent-repl-test-wh-an-unreadable-view-answer-is-recorded-at-error-under-central ()
+  "An answer that is not JSON is recorded at error, as PREFIX.answer-unreadable, under the central scope."
+  (agent-repl-test-wh--with-answer-records
+    (agent-repl--webview-answered "not json" "elisp.view" (lambda (_a) 'nobody) 'central #'ignore)
+    (should (equal (car (car records)) 'error))
+    (should (eq (nth 1 (car records)) 'central))
+    (should (string-prefix-p "elisp.view.answer-unreadable raw=\"not json\"" (nth 2 (car records))))))
+
+(ert-deftest agent-repl-test-wh-both-views-record-answers-through-the-shared-helper ()
+  "The host and the sidebar record their answers through the one helper."
+  (should (= 1 (agent-repl-test-wh--count-in-source "webhost.el" "(agent-repl--webview-answered raw \"elisp.webhost\"")))
+  (should (= 1 (agent-repl-test-wh--count-in-source "sidebar-view.el" "(agent-repl--webview-answered raw \"elisp.sidebar-view\"")))
+  (should (= 0 (agent-repl-test-wh--count-in-source "sidebar-view.el" "(agent-repl-webhost-parse-answer raw)"))))
+
 (defmacro agent-repl-test-wh--with-made-view (live &rest body)
   "Run BODY with web view creation stubbed: a fresh buffer, an xwidget when LIVE.
 Binds `killed' to the buffers the kill function was handed."

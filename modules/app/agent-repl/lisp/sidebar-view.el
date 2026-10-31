@@ -48,8 +48,7 @@
 (declare-function agent-repl--frontend-webview-navigate-widget "frontend" (xwidget uri))
 (declare-function agent-repl--frontend-kill-webview "frontend" (buf))
 (declare-function agent-repl-webhost-origin "webhost" (conn))
-(declare-function agent-repl-webhost-parse-answer "webhost" (raw))
-(declare-function agent-repl--webhost-record-note "webhost" (scope op note))
+(declare-function agent-repl--webview-answered "webhost" (raw prefix scope-of central predates))
 (declare-function agent-repl--webview-script "webhost" (global pending method args))
 (declare-function agent-repl--webview-strayed-uri "webhost" (own-url uri))
 (declare-function agent-repl--webview-make-hidden "webhost" (url name refuse-kill kill what))
@@ -248,18 +247,9 @@ Called BY SYMBOL from the read channel.  A page that lacks the call was
 loaded from an older build: it is reloaded once on its own URL, and a page
 that still lacks it after that is a daemon serving an older webapp than this
 elisp, an ERROR no reload heals."
-  (condition-case err
-      (let* ((answer (agent-repl-webhost-parse-answer raw))
-             (op (plist-get answer :op)))
-        (agent-repl--log agent-repl--sidebar-view-central "elisp.sidebar-view.answer op=%s id=%s outcome=%s"
-                         op (plist-get answer :id) (plist-get answer :outcome))
-        (when (equal (plist-get answer :outcome) "unknown-call")
-          (agent-repl--sidebar-view-predates-call op))
-        (dolist (note (plist-get answer :notes))
-          (agent-repl--webhost-record-note agent-repl--sidebar-view-central op note)))
-    (error
-     (agent-repl--error agent-repl--sidebar-view-central
-                        "elisp.sidebar-view.answer-unreadable raw=%S error=%S" raw err))))
+  (agent-repl--webview-answered raw "elisp.sidebar-view"
+                                (lambda (_answer) agent-repl--sidebar-view-central)
+                                agent-repl--sidebar-view-central #'agent-repl--sidebar-view-predates-call))
 
 (defun agent-repl--sidebar-view-predates-call (op)
   "The sidebar page has no OP: reload it on its own URL, once per URL."
