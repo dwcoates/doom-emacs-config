@@ -6,21 +6,26 @@
 ;; 30 seconds, and every full collection marks every live page: the main-thread
 ;; stalls that put a switch's slow tail at 140-230ms (switch bench,
 ;; 2026-10-17) grow with the pages held.  So a page is held only while its
-;; workspace needs it, by its STATUS (owner ruling, 2026-10-29, which
-;; supersedes the looked-at clock of 2026-10-17, 2026-10-18 and 2026-10-26):
+;; workspace needs it, by its STATUS and its LAST TURN'S END (owner rulings,
+;; 2026-10-29 and 2026-10-30, which supersede the looked-at clock of
+;; 2026-10-17, 2026-10-18 and 2026-10-26):
 ;;
 ;;   - WORKING (a turn running in front or behind, a permission or question
 ;;     ask, a vendor retry): always held, and loaded in the background the
 ;;     moment the workspace starts working;
-;;   - IDLE (ready, done, interrupted, no session): held until an hour has
-;;     passed since its last prompt, read as its last turn's end or its
-;;     page's load, whichever is later.  A page loaded only because the user
-;;     switched to it is unloaded the moment they switch away, unless the
-;;     workspace started working while they were there: a prompt they sent;
-;;   - MERGING, FAULTED (every blue and turquoise status), COLD-GATED,
-;;     TRANSITIONAL (opening, closing, waiting) and MERGED: held only while
-;;     shown, so unloaded the moment the workspace enters the status, or the
-;;     moment the user switches away;
+;;   - FINISHED WITHIN THE HOLD: every other workspace whose last turn ended
+;;     less than `agent-repl-page-unload-after' ago is held, IDLE, MERGING,
+;;     FAULTED or TRANSITIONAL alike.  THE HOLD IS THE SIDEBAR'S FADE: the
+;;     name fades from its status tone to its grey over the same window
+;;     (proto/vocab/page-hold.json, read by both), so a name fully faded is
+;;     a page that may be unloaded.  The window runs from the turn's end
+;;     only: loading or showing the page never restarts it;
+;;   - past the hold, IDLE (ready, done, interrupted, no session) and every
+;;     other status are held only while shown, so unloaded the moment the
+;;     user switches away;
+;;   - COLD-GATED and MERGED are held only while shown whenever their last
+;;     turn ended: a cold gate holds its page back by design, and a merged
+;;     workspace is ending;
 ;;   - a HIDDEN workspace (one the user hid) holds no page while the user is
 ;;     not looking at it;
 ;;   - a FOLDED workspace (in a repository section or subsection the user
@@ -104,13 +109,24 @@
   "Unloading the workspace pages nobody looks at."
   :group 'agent-repl)
 
-(defcustom agent-repl-page-unload-after 3600
-  "Seconds an IDLE workspace's page is held after its last prompt.
-An hour (owner ruling, 2026-10-29), counted from the end of the last
-prompt's turn only: showing or loading the page never restarts it (owner
-ruling, 2026-10-29)."
-  :type 'integer
-  :group 'agent-repl-page-unload)
+(defconst agent-repl-page-unload-after
+  ;; `proto/' sits at the module root; this file lives in `lisp/'.
+  (let ((path (expand-file-name "../proto/vocab/page-hold.json"
+                                (file-name-directory (or load-file-name buffer-file-name)))))
+    (with-temp-buffer
+      (insert-file-contents path)
+      (let ((seconds (gethash "hold_seconds" (json-parse-buffer))))
+        (unless (natnump seconds)
+          (error "page-unload: page-hold.json hold_seconds is %S, not a count" seconds))
+        seconds)))
+  "Seconds a finished workspace\='s page is held after its last turn ended.
+THE ONE HOLD (owner ruling, 2026-10-30): read from
+proto/vocab/page-hold.json, the file the sidebar\='s name fade reads its
+length from (webapp/src/sidebar/name-tint.ts), so the fade shows how near
+the page is to its unload.  Counted from the end of the last turn only:
+showing or loading the page never restarts it (owner ruling, 2026-10-29).
+Not a user option, since a value set here alone would part the hold from
+the fade.")
 
 (defcustom agent-repl-page-unload-leave-grace 15
   "Seconds a page is kept after the user switches away from it.
@@ -130,6 +146,9 @@ back within it keeps the page; leaving again starts it afresh."
   '(:agent-repl-central "a page-unload pass spans workspaces")
   "The log scope of a pass's own records.")
 
+(defconst agent-repl-page-unload--unheld-buckets '(cold-gated merged)
+  "The buckets held only while shown however recently their last turn ended.")
+
 (defconst agent-repl-page-unload-buckets
   '((working :submitting :thinking :clearing :compacting :permission :question
              :idle-async :api-retrying)
@@ -141,9 +160,10 @@ back within it keeps the page; leaving again starts it afresh."
     (transitional :init :inactive :closing :waiting)
     (merged :merged))
   "Every roster status arm, by how its workspace's page is held.
-`working' is always held; `idle' is held for `agent-repl-page-unload-after'
-past its last prompt; every other bucket is held only while shown (owner
-ruling, 2026-10-29).")
+`working' is always held; every other bucket but
+`agent-repl-page-unload--unheld-buckets' is held for
+`agent-repl-page-unload-after' past its last turn\='s end, and only while
+shown after it (owner rulings, 2026-10-29 and 2026-10-30).")
 
 (defvar agent-repl-page-unload--clock #'float-time
   "Answers the current time in seconds.  Tests bind it.")
@@ -307,11 +327,25 @@ stood; nothing holds the page back any more.  Non-nil if loaded."
     t))
 
 (defun agent-repl-page-unload--idle-since (ws)
-  "When WS's idle hold began: the end of its last prompt's turn, 0 for none.
+  "When WS's hold began: the end of its last turn, 0 for none.
 NEVER THE PAGE'S LOAD OR SHOW (owner ruling, 2026-10-29): switching to a
-workspace without prompting it leaves the hour running from its last
-prompt, so a page loaded for a look is held only what is left of it."
+workspace without prompting it leaves the hold running from its last
+turn, so a page loaded for a look is held only what is left of it."
   (/ (or (agent-repl-roster-last-turn-ended-ms ws) 0) 1000.0))
+
+(defun agent-repl-page-unload--hold-ends (ws now)
+  "When WS's hold after its last turn ends, or nil when none holds it at NOW.
+Nil for a working workspace (held by its status), a hidden one, one with
+no roster row, one in `agent-repl-page-unload--unheld-buckets', and one
+whose hold has ended."
+  (let ((bucket (agent-repl-page-unload--ws-bucket ws))
+        (ends (+ (agent-repl-page-unload--idle-since ws) agent-repl-page-unload-after)))
+    (and bucket
+         (not (eq bucket 'working))
+         (not (memq bucket agent-repl-page-unload--unheld-buckets))
+         (not (agent-repl-page-unload--withheld-p ws))
+         (< now ends)
+         ends)))
 
 (defun agent-repl-page-unload--reason (ws now)
   "Why WS's held page should be unloaded at NOW, or nil when it is held.
@@ -329,11 +363,13 @@ working on its own, and either way it is held as working."
      ((agent-repl-page-unload--leave-ends ws now) nil)
      ((agent-repl-page-unload--withheld-p ws) 'hidden)
      ((memq bucket '(nil working)) nil)
+     ;; A PAGE IS HELD THE HOLD AFTER ITS LAST TURN ENDED however it was
+     ;; loaded, while its name fades in the sidebar.
+     ((agent-repl-page-unload--hold-ends ws now) nil)
      ((not (eq bucket 'idle)) bucket)
-     ;; AN IDLE PAGE IS HELD THE HOUR AFTER ITS LAST PROMPT however it was
-     ;; loaded; one loaded only for a look says so when it goes.
-     ((> (- now (agent-repl-page-unload--idle-since ws)) agent-repl-page-unload-after)
-      (if (agent-repl--ws-get ws :page-visit) 'visited 'idle)))))
+     ;; An idle page loaded only for a look says so when it goes.
+     ((agent-repl--ws-get ws :page-visit) 'visited)
+     (t 'idle))))
 
 (defun agent-repl-page-unload--holdable-p (ws)
   "The page of WS, when it is one a pass may unload, else nil.
@@ -438,9 +474,9 @@ before anyone switches to it (owner ruling, 2026-10-29)."
 (defun agent-repl-page-unload-residency (ws)
   "What Emacs holds of WS\='s page now, as a `PageResidency' plist.
 Not loaded, or loaded with the rule that lets it go: held while working
-(or with no status yet), unloaded at the idle hold\='s end for an idle
-page within the hour after its last prompt, and unloaded on the switch
-away for everything else (`agent-repl-page-unload--reason').  The daemon
+(or with no status yet), unloaded at the hold\='s end for a page within
+the hold after its last turn (`agent-repl-page-unload--hold-ends'), and
+unloaded on the switch away for everything else (`agent-repl-page-unload--reason').  The daemon
 serves it on the rail\='s workspace memory hover
 \(endpoint_report_page_residency.proto)."
   (if (not (agent-repl-webhost-has-page-p ws))
@@ -452,14 +488,11 @@ serves it on the rail\='s workspace memory hover
                           ((and (memq bucket '(nil working))
                                 (not (agent-repl-page-unload--withheld-p ws)))
                            (list :arm :held :value nil))
-                          ((and (eq bucket 'idle)
-                                (not (agent-repl-page-unload--withheld-p ws))
-                                (<= (- (agent-repl-page-unload--now) (agent-repl-page-unload--idle-since ws))
-                                    agent-repl-page-unload-after))
+                          ((agent-repl-page-unload--hold-ends ws (agent-repl-page-unload--now))
                            (list :arm :at
                                  :value (list :unix-ms
-                                              (round (* 1000 (+ (agent-repl-page-unload--idle-since ws)
-                                                                agent-repl-page-unload-after))))))
+                                              (round (* 1000 (agent-repl-page-unload--hold-ends
+                                                              ws (agent-repl-page-unload--now)))))))
                           ;; A PAGE IN ITS GRACE after the switch away goes
                           ;; when the grace ends.
                           ((agent-repl-page-unload--leave-ends ws (agent-repl-page-unload--now))

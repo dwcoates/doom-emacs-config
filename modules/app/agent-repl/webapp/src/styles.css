@@ -6624,12 +6624,12 @@ bubble-body.bubble-body { display: block; }
 #ws-sidebar .ws.tone-yellow { --name-tone: var(--async); }
 #ws-sidebar .ws.tone-green { --name-tone: var(--ok); }
 /* A TURN RUNNING HOLDS THE NAME AT ITS TONE, a turn ended FADES it from the
-   tone to the name's resting grey over ten minutes (src/sidebar/name-tint.ts
-   sets the delay to minus the time since the turn ended). The resting grey is
-   whichever `--name-rest` the name's own state declares above. A viewed name
-   never fades: it draws at the viewed grey at once. A breathing name's loop
-   is declared after and wins. */
-#ws-sidebar { --name-fade: 600s; }
+   tone to the name's resting grey over the page hold (src/sidebar/name-tint.ts
+   sets `--name-fade` from proto/vocab/page-hold.json, the window Emacs holds
+   the page for, and the delay to minus the time since the turn ended). The
+   resting grey is whichever `--name-rest` the name's own state declares
+   above. A viewed name never fades: it draws at the viewed grey at once. A
+   breathing name's loop is declared after and wins. */
 #ws-sidebar .row .name.tinted {
   --name-rest: var(--name-tone);
   --name-dark: color-mix(in srgb, var(--name-tone) 74%, var(--bg));

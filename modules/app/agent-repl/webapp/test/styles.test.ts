@@ -6434,14 +6434,14 @@ describe("the workspace name's status tint (owner request, 2026-10-29)", () => {
     expect(decls).toMatch(/color:\s*var\(--name-tone\)/);
   });
 
-  it("fades a fading name from its tone to its resting grey over ten minutes, from minus the time since the turn ended", () => {
+  it("fades a fading name from its tone to its resting grey over the page hold, from minus the time since the turn ended", () => {
     // Arrange / Act
     const decls = ruleFor("#ws-sidebar .row .name.fading");
     const keyframes = keyframesOf("name-fade");
 
     // Assert
     expect(decls).toMatch(/animation:\s*name-fade var\(--name-fade\) linear var\(--name-fade-delay, 0s\) 1 both/);
-    expect(stylesheet).toMatch(/#ws-sidebar \{ --name-fade: 600s; \}/);
+    expect(stylesheet).not.toMatch(/--name-fade:/);
     expect(keyframes.replace(/\s+/g, " ")).toMatch(/0%, 50% \{ color: var\(--name-tone\); \}.*100% \{ color: var\(--name-rest\); \}/);
   });
 
