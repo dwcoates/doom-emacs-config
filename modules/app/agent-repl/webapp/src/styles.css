@@ -1467,11 +1467,12 @@ html.sb-dragging * { -webkit-user-select: none; user-select: none; }
      held just under. */
   --merged-group-head-font-size: 0.68rem;
 }
-/* A REPOSITORY'S GROUP inside Deploys, a queue's or a merged one: its
-   label only, with no fold toggle (the repository section above is the one place a repository folds),
-   drawn as a quieter repository header, indented to the band's label. */
-#ws-sidebar .merged-group-head,
-#ws-sidebar .sb-merged-label {
+/* A REPOSITORY'S GROUP inside Deploys (owner request, 2026-10-31;
+   src/sidebar/deploys-fold.ts): its label and its "(K today, last D ago)",
+   with no fold toggle drawn, as a quieter repository header, indented to the
+   band's label. A click on the header folds or opens the group, and a
+   double click pauses or resumes its queue. */
+#ws-sidebar .merged-group-head {
   height: var(--merged-group-head-h);
   line-height: var(--merged-group-head-h);
   padding: 0 0.7rem 0 1.75rem;
@@ -1507,63 +1508,39 @@ html.sb-dragging * { -webkit-user-select: none; user-select: none; }
 #ws-sidebar .merged-group-head::before { flex: 0 0 0.65rem; }
 #ws-sidebar .merged-group-head::after { flex: 1 1 0; min-width: 0.65rem; }
 #ws-sidebar .merged-group-head > .sb-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+#ws-sidebar .merged-group-head { cursor: pointer; user-select: none; }
+/* A FOLDED GROUP shows its header alone: its queue and its merged rows are
+   drawn as nothing until it opens. */
+#ws-sidebar .merged-group.folded > .rows { display: none; }
 /* A REPOSITORY'S TITLE UNDER "RECENTLY DEPLOYED" IS PURPLE (owner request,
    2026-10-30), the title only: the flanking rules keep --border. */
 #ws-sidebar .merged-group-head > .sb-label { color: var(--blocked); }
-/* A QUEUE GROUP'S "(N)", the merges in its line, and the "Recently Merged"
-   heading's "(K today)" read as every section count does: plain, a step
-   smaller than the label, in the muted grey, with no capitals. */
-#ws-sidebar .merged-group-head .sb-count,
-#ws-sidebar .sb-merged-label .sb-count {
+/* A GROUP'S "(K today, last D ago)" reads as every section count does:
+   plain, a step smaller than the label, in the muted grey, with no
+   capitals. */
+#ws-sidebar .merged-group-head .sb-count {
   flex: 0 0 auto;
   font-size: 0.85em;
   color: var(--muted);
   text-transform: none;
   letter-spacing: normal;
 }
-/* The "(K today)" stands off "Recently Deployed" by the gap a group header's
-   flex row puts between its name and its count (owner request, 2026-10-27). */
-#ws-sidebar .sb-merged-label .sb-count { margin-left: 0.4rem; }
 /* A PAUSED QUEUE IS DRAWN ON ITS OWN REPOSITORY (owner request, 2026-10-27;
    frontend.v1.RosterRepoMergeQueue.paused): the repository's name in the
-   error red, a click on it resuming the queue, and its merge glyphs in the
-   amber a paused merge bubble is framed in. The "Deploys" header keeps
-   its purple, and a repository's name is never purple. */
-#ws-sidebar .mq-group[data-paused] > .mq-group-head { color: var(--err); cursor: pointer; }
-#ws-sidebar .mq-group[data-paused] .sb-mq-glyph { color: var(--merge-paused); }
+   error red, a double click on it resuming the queue, and its merge glyphs
+   in the amber a paused merge bubble is framed in. The "Deploys" header
+   keeps its purple. */
+#ws-sidebar .merged-group[data-paused] > .merged-group-head,
+#ws-sidebar .merged-group[data-paused] > .merged-group-head > .sb-label { color: var(--err); }
+#ws-sidebar .merged-group[data-paused] .sb-mq-glyph { color: var(--merge-paused); }
 /* A HEAD NOTHING OF WHOSE WORK RUNS draws its live stage as a still grey dot
    rather than the breathing purple one (owner request, 2026-10-27;
    frontend.v1.RosterMergeQueueHeadMerging.suspended). */
 #ws-sidebar .sb-mq-head[data-suspended] .sb-mq-stage[data-state="live"] { color: var(--muted); }
 #ws-sidebar .sb-mq-head[data-suspended] .sb-mq-stage[data-state="live"] .sb-mq-stage-glyph { color: var(--muted); animation: none; }
-/* THE QUEUES ARE RULED OFF FROM "RECENTLY MERGED" (owner request,
-   2026-10-27) by a grey rule inset to the repository rules' span, never the
-   full width the rules between the rail's sections take. */
-#ws-sidebar .sb-merge-queues:has(~ .merged-group:not([hidden]))::after {
-  content: "";
-  display: block;
-  height: 1px;
-  margin: 0.35rem 0.7rem 0.3rem;
-  background: var(--border);
-}
-/* THE DEPLOYS SECTION'S CONTENTS STAND OFF what is above them (owner
-   request, 2026-10-27): the queues from the "Deploys" header, and "Recently
-   Deployed" from the rule above it (the rule's bottom margin), each by
-   0.3rem. */
-#ws-sidebar .sb-merge-queues { padding-top: 0.3rem; }
-/* THE "RECENTLY MERGED" HEADING over the merged groups, below the queues:
-   drawn as a group header is (the rule above), set out to the left of the
-   groups and in the section's purple, so it rides with the first merged row
-   in the band fit. It is left out while
-   every group under it is (its repository collapsed). */
-#ws-sidebar .sb-merged-label { padding-left: 1.1rem; color: var(--blocked); }
-/* "RECENTLY DEPLOYED" SHOWS ITS ROWS ONLY WHILE ASKED FOR (owner request,
-   2026-10-27; src/sidebar/recently-deployed.ts): a click on the heading,
-   which draws no chevron, shows or hides them, and the groups under a
-   collapsed heading are not drawn. */
-#ws-sidebar .sb-merged-label { cursor: pointer; }
-#ws-sidebar .sb-merged-label[data-collapsed] ~ .merged-group { display: none; }
-#ws-sidebar .sb-merged-label:not(:has(~ .merged-group:not([hidden]))) { display: none; }
+/* THE DEPLOYS SECTION'S GROUPS STAND OFF its header (owner request,
+   2026-10-27) by 0.3rem. */
+#ws-sidebar .merged-section > .rows > .merged-group:first-child { margin-top: 0.3rem; }
 /* The LINE BOX is pinned, not the row height. Setting `height` drew every
    merged row taller than the content inside it, so the section stood taller
    than the entries it holds — ten merges reached about twelve rows' worth of

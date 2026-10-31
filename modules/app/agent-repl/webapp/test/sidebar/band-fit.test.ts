@@ -13,8 +13,8 @@
  */
 import { describe, expect, it } from "vitest";
 import { drawWorkspaceRoster } from "../../src/sidebar/roster.js";
-import { createRecentlyDeployed } from "../../src/sidebar/recently-deployed.js";
-import { MERGE_QUEUES_CLASS } from "../../src/sidebar/merge-queue-view.js";
+import { createDeploysFold } from "../../src/sidebar/deploys-fold.js";
+import { MERGE_QUEUE_CLASS } from "../../src/sidebar/merge-queue-view.js";
 import {
   BAND_LINES_ATTRIBUTE,
   BAND_MORE_ATTRIBUTE,
@@ -24,7 +24,7 @@ import {
   fitBands,
   installBandFit,
   mergedTodayLines,
-  recentlyDeployedFloorLines,
+  deploysFloorLines,
   paintBandMore,
   regionLines,
   regionStops,
@@ -63,14 +63,13 @@ interface Drawing {
   /** How many of the merged rows, the first ones, landed today. */
   today?: number;
   folded?: { open?: boolean; hidden?: boolean; merged?: boolean };
-  /** Whether "Recently Deployed" shows its rows (recently-deployed.ts); shown unless said. */
+  /** Whether the Deploys group, idle and so folded by itself, was opened by hand (deploys-fold.ts); opened unless said. */
   expanded?: boolean;
 }
 
 /** A rail drawn as DRAWING says. */
 function drawn({ open = 0, hidden = 0, merged = 0, today = 0, folded = {}, expanded = true }: Drawing): { scroller: HTMLElement; pane: HTMLElement } {
-  const recently = createRecentlyDeployed(document, () => undefined);
-  if (expanded) recently.toggle();
+  const folds = createDeploysFold(document, () => undefined);
   const openRows = Array.from({ length: open }, (_, i) => row({ id: `o-${i}` }));
   const hiddenRows = Array.from({ length: hidden }, (_, i) => row({ id: `h-${i}` }));
   const mergedRows = Array.from({ length: merged }, (_, i) =>
@@ -91,10 +90,12 @@ function drawn({ open = 0, hidden = 0, merged = 0, today = 0, folded = {}, expan
         hidden: hiddenSection(hiddenRows, hidden, folded.hidden ?? false),
         merged: mergedSection(mergedRows, folded.merged ?? false),
       }),
-      sidebarContext(undefined, undefined, undefined, undefined, undefined, recently),
+      sidebarContext(undefined, undefined, undefined, undefined, undefined, folds),
     ),
   );
   document.body.replaceChildren(scroller);
+  const group = scroller.querySelector<HTMLElement>(".merged-group");
+  if (expanded && group !== null) folds.toggle(group);
   const pane = scroller.querySelector(".sb-pane") as HTMLElement;
   return { scroller, pane };
 }
@@ -120,17 +121,16 @@ function region(pane: HTMLElement, cls: SectionClass): HTMLElement | null {
 
 /**
  * Lay one section's rows region out: its lines ROW px each, as tall as its
- * height says, else capped by its max-height. A collapsed "Recently Deployed"
- * heading is a line, and the merged rows under it are drawn as none, as the
+ * height says, else capped by its max-height. A folded Deploys group's
+ * header is a line, and the merged rows under it are drawn as none, as the
  * stylesheet draws them.
  */
 function layRegion(pane: HTMLElement, cls: SectionClass): void {
   const section = pane.querySelector<HTMLElement>(`:scope > .${cls}`);
   const rows = region(pane, cls);
   if (section === null || rows === null) return;
-  const collapsed = rows.querySelector(".sb-merged-label[data-collapsed]") !== null;
-  const lines = [...rows.querySelectorAll<HTMLElement>(".row, .sb-merged-label[data-collapsed]")].filter(
-    (line) => !(collapsed && line.closest(".merged-group") !== null),
+  const lines = [...rows.querySelectorAll<HTMLElement>(".row, .merged-group.folded > .merged-group-head")].filter(
+    (line) => !(line.matches(".row") && line.closest(".merged-group.folded") !== null),
   );
   const full = lines.length * ROW;
   const height = (): number => {
@@ -235,7 +235,7 @@ describe("allocateSectionLines", () => {
     { name: "every merge the room a whole Hidden Workspaces leaves", room: 12 * ROW, s: sections(0, 1, 20, 9), want: { open: 0, hidden: 1, merged: 11 } },
     { name: "a short rail's Hidden Workspaces shrunk first", room: 5 * ROW, s: sections(10, 10, 10, 10), want: { open: 0, hidden: 2, merged: 3 } },
     { name: "a short rail's Hidden Workspaces shrunk away before Deploys gives a line", room: 2 * ROW, s: sections(10, 10, 10, 10), want: { open: 0, hidden: 0, merged: 2 } },
-    { name: "an expanded Recently Deployed's floor taken from Hidden Workspaces' share", room: 20 * ROW, s: sections(40, 40, 40, 0, 4), want: { open: 14, hidden: 2, merged: 4 } },
+    { name: "an open Deploys group's floor taken from Hidden Workspaces' share", room: 20 * ROW, s: sections(40, 40, 40, 0, 4), want: { open: 14, hidden: 2, merged: 4 } },
     { name: "a floor of the whole share taken from Hidden Workspaces entirely", room: 20 * ROW, s: sections(40, 40, 40, 0, 6), want: { open: 14, hidden: 0, merged: 6 } },
     { name: "a floor beyond the share taken from the Open section", room: 20 * ROW, s: sections(40, 40, 40, 0, 8), want: { open: 12, hidden: 0, merged: 8 } },
     { name: "a floor shrunk only in a rail too short for it", room: 5 * ROW, s: sections(10, 10, 10, 0, 6), want: { open: 0, hidden: 0, merged: 5 } },
@@ -332,22 +332,22 @@ describe("regionLines", () => {
 
 
   it.each([
-    { name: "counts the collapsed Recently Deployed heading as a line", collapsed: true, want: ["sb-merged-label", "row"] },
-    { name: "counts the expanded Recently Deployed heading as no line", collapsed: false, want: ["row"] },
-  ])("$name", ({ collapsed, want }) => {
-    // Arrange
+    { name: "counts a folded Deploys group's header as a line", folded: true, want: ["merged-group-head", "row"] },
+    { name: "counts an open Deploys group's header as no line", folded: false, want: ["row"] },
+  ])("$name", ({ folded, want }) => {
+    // Arrange: the row stays measured, so only the header's selection differs.
     const box = document.createElement("div");
-    box.innerHTML = `<div class="sb-merged-label"${collapsed ? ' data-collapsed=""' : ""}></div><div class="row"></div>`;
-    for (const el of box.querySelectorAll<HTMLElement>(".sb-merged-label, .row")) el.getBoundingClientRect = () => rect(0, ROW);
+    box.innerHTML = `<div class="merged-group${folded ? " folded" : ""}"><div class="merged-group-head"></div></div><div class="row"></div>`;
+    for (const el of box.querySelectorAll<HTMLElement>(".merged-group-head, .row")) el.getBoundingClientRect = () => rect(0, ROW);
     // Act / Assert
     expect(regionLines(box).map((el) => el.className)).toEqual(want);
   });
 
-  it("counts a queue group's header as no line", () => {
+  it("counts an open queued group's header as no line", () => {
     // Arrange
     const box = document.createElement("div");
-    box.innerHTML = '<div class="sb-merge-queues"><div class="mq-group"><div class="merged-group-head mq-group-head"></div><div class="rows sb-merge-queue"><div class="sb-mq-head"></div></div></div></div>';
-    for (const el of box.querySelectorAll<HTMLElement>(".mq-group-head, .sb-mq-head")) el.getBoundingClientRect = () => rect(0, ROW);
+    box.innerHTML = '<div class="merged-group"><div class="merged-group-head"></div><div class="rows"><div class="rows sb-merge-queue"><div class="sb-mq-head"></div></div></div></div>';
+    for (const el of box.querySelectorAll<HTMLElement>(".merged-group-head, .sb-mq-head")) el.getBoundingClientRect = () => rect(0, ROW);
     // Act / Assert
     expect(regionLines(box).map((el) => el.className)).toEqual(["sb-mq-head"]);
   });
@@ -362,11 +362,11 @@ describe("regionLines", () => {
   });
 });
 
-describe("recentlyDeployedFloorLines", () => {
+describe("deploysFloorLines", () => {
   /** A queue line, then a merged line per merged row, as a Deploys region draws them. */
   function deploysLines(merged: number): HTMLElement[] {
     const queues = document.createElement("div");
-    queues.className = MERGE_QUEUES_CLASS;
+    queues.className = MERGE_QUEUE_CLASS;
     const head = document.createElement("div");
     head.className = "sb-mq-head";
     queues.appendChild(head);
@@ -387,7 +387,7 @@ describe("recentlyDeployedFloorLines", () => {
     { name: "no line while no merged row is drawn", merged: 0, want: 0 },
   ])("keeps $name", ({ merged, want }) => {
     // Arrange / Act
-    const got = recentlyDeployedFloorLines(deploysLines(merged));
+    const got = deploysFloorLines(deploysLines(merged));
     // Assert
     expect(got).toBe(want);
   });
@@ -424,7 +424,7 @@ describe("mergedTodayLines", () => {
   ])("reaches $name", ({ queued, at, want }) => {
     // Arrange: the queues' lines stand above the merged rows.
     const queues = document.createElement("div");
-    queues.className = MERGE_QUEUES_CLASS;
+    queues.className = MERGE_QUEUE_CLASS;
     const queueLines = Array.from({ length: queued }, () => {
       const line = document.createElement("div");
       line.className = "sb-mq-waiting";
@@ -437,13 +437,15 @@ describe("mergedTodayLines", () => {
     expect(got).toBe(want);
   });
 
-  it("reaches the collapsed Recently Deployed heading below the queues", () => {
-    // Arrange: a collapsed heading draws no merged row, and is a line of its own.
-    const heading = document.createElement("div");
-    heading.className = "sb-merged-label";
-    heading.setAttribute("data-collapsed", "");
+  it("reaches a folded Deploys group's header", () => {
+    // Arrange: a folded group draws no merged row, and its header is a line of its own.
+    const group = document.createElement("div");
+    group.className = "merged-group folded";
+    const head = document.createElement("div");
+    head.className = "merged-group-head";
+    group.appendChild(head);
     // Act / Assert
-    expect(mergedTodayLines([heading], NOW)).toBe(1);
+    expect(mergedTodayLines([head], NOW)).toBe(1);
   });
 
   it("reads a nested family row's instant off the row it hangs under", () => {
@@ -578,7 +580,7 @@ describe("paintBandMore", () => {
 describe("fitBands", () => {
   it("lengthens the Open section until the bands keep their six-line share", () => {
     // Arrange — room for twenty lines below 100px of other content; a
-    // collapsed Recently Deployed is its heading's one line.
+    // folded Deploys group is its header's one line.
     const rail = drawn({ open: 30, hidden: 10, merged: 10, today: 10, expanded: false });
     laidOut(rail, 500, 100);
     // Act
@@ -587,7 +589,7 @@ describe("fitBands", () => {
     expect([...maxHeights(rail.pane), heights(rail.pane)[2]]).toEqual(["280px", "", "", "100px"]);
   });
 
-  it("keeps an expanded Recently Deployed's five rows, Hidden Workspaces the share's last line", () => {
+  it("keeps an open Deploys group's five rows, Hidden Workspaces the share's last line", () => {
     // Arrange — room for twenty lines below 100px of other content.
     const rail = drawn({ open: 30, hidden: 10, merged: 10, today: 10 });
     laidOut(rail, 500, 100);
@@ -597,7 +599,7 @@ describe("fitBands", () => {
     expect([...maxHeights(rail.pane), heights(rail.pane)[2]]).toEqual(["280px", "100px", "", "20px"]);
   });
 
-  it("takes an expanded Recently Deployed's five rows from the Open section once Hidden Workspaces has none", () => {
+  it("takes an open Deploys group's five rows from the Open section once Hidden Workspaces has none", () => {
     // Arrange — room for twenty lines, nothing hidden.
     const rail = drawn({ open: 30, merged: 10 });
     laidOut(rail, 500, 100);
@@ -647,7 +649,7 @@ describe("fitBands", () => {
     expect([...heights(rail.pane), ...maxHeights(rail.pane)]).toEqual(["", "", "", "", "", ""]);
   });
 
-  it("stretches no collapsed Recently Deployed over a folded Hidden Workspaces", () => {
+  it("stretches no folded Deploys group over a folded Hidden Workspaces", () => {
     // Arrange — the Open section capped, room for half a line more.
     const rail = drawn({ open: 30, hidden: 3, merged: 4, expanded: false, folded: { hidden: true } });
     laidOut(rail, 510, 100);
@@ -794,7 +796,7 @@ describe("fitBands", () => {
     expect(SECTIONS.map((cls) => band(rail.pane, cls).getAttribute(BAND_LINES_ATTRIBUTE))).toEqual(["14", "5", "1"]);
   });
 
-  it("gives a collapsed Recently Deployed only its heading's line while the Open section scrolls", () => {
+  it("gives a folded Deploys group only its header's line while the Open section scrolls", () => {
     // Arrange — room for twenty lines, no merge today.
     const rail = drawn({ open: 30, hidden: 2, merged: 10, expanded: false });
     laidOut(rail, 500, 100);
@@ -932,7 +934,7 @@ describe("fitBands", () => {
   });
 
   it("refuses a fit that moves its own room", () => {
-    // Arrange — the pane's other content grows a pixel whenever Recently Merged is capped.
+    // Arrange — the pane's other content grows a pixel whenever Deploys is capped.
     const rail = drawn({ merged: 10, folded: { hidden: true } });
     laidOut(rail, 200, () => ((region(rail.pane, "merged-section") as HTMLElement).style.height === "" ? 100 : 101));
     // Act / Assert

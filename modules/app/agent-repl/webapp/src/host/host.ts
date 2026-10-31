@@ -68,7 +68,7 @@ export interface HostEnv {
   /**
    * The webhost document's own focus-left signal, which `focusMoved` fires as
    * well as telling every page, so the webhost's sidebar lets go of what it
-   * raised (recently-deployed.ts); the document's own when omitted.
+   * raised (deploys-fold.ts); the document's own when omitted.
    */
   readonly focusLeft?: FocusLeftSource;
 }

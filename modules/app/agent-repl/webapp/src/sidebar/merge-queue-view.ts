@@ -1,17 +1,15 @@
 /**
- * merge-queue-view — THE MERGE QUEUES the Deploys section draws directly
- * under its header, above its recently deployed groups (owner requests,
- * 2026-10-24 to 2026-10-31).
+ * merge-queue-view — A REPOSITORY'S MERGE QUEUE, drawn in its group in the
+ * Deploys section above the repository's recent deploys (owner requests,
+ * 2026-10-24 to 2026-10-31; frontend.v1.RosterMergedRepoGroupQueued).
  *
- * ONE GROUP PER REPOSITORY WHOSE LINE HOLDS A MERGE
- * (`frontend.v1.RosterMergedSection.queues`): the repository's label and the
- * merges in its line, "(N)", over its queue, in the repository sections'
- * order. The section's own "Deploys" label is always the purple of a
- * merge in progress; a PAUSE IS DRAWN ON ITS OWN REPOSITORY (owner request,
- * 2026-10-27): the label in the error red, the queue's merge glyphs in the
- * amber a paused merge bubble is framed in, and the head's clock stopped at
- * the pause. The label's hover says who paused it and when, and a click on it
- * resumes the queue.
+ * The section's own "Deploys" label is always the purple of a merge in
+ * progress; a PAUSE IS DRAWN ON ITS OWN REPOSITORY (owner request,
+ * 2026-10-27): the group's label in the error red, the queue's merge glyphs
+ * in the amber a paused merge bubble is framed in, and the head's clock
+ * stopped at the pause. The label's hover says who paused it and when. A
+ * DOUBLE CLICK ON THE LABEL PAUSES A RUNNING QUEUE OR RESUMES A PAUSED ONE
+ * (owner request, 2026-10-31), a single click being the group's fold.
  *
  * A QUEUE IS DRAWN AS A SMALL MERGE BUBBLE AND ITS LINE (owner request,
  * 2026-10-25): the merge at the head as a card -- who it is credited to, the
@@ -24,7 +22,7 @@
  * drag gesture (`drag.ts`).
  */
 import { create } from "@bufbuild/protobuf";
-import type { WorkspaceRef } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
+import type { RepositoryRef, WorkspaceRef } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import {
   UpdateMergeQueueResponseSchema,
   type UpdateMergeQueueMoveTo,
@@ -32,7 +30,6 @@ import {
 import type {
   RosterMergeQueueHead,
   RosterMergeQueuePaused,
-  RosterMergeQueueRepoGroup,
   RosterMergeQueueStage,
   RosterMergeQueueSubject,
   RosterMergeQueueRemediating,
@@ -68,56 +65,52 @@ export const MERGE_QUEUE_PAUSED_ATTRIBUTE = "data-paused";
 /** The attribute the head's card carries, valueless, while nothing of its merge's work runs. */
 export const MERGE_QUEUE_SUSPENDED_ATTRIBUTE = "data-suspended";
 
-/** The class of a queue group's "(N)", the merges in its line. */
-export const MERGE_QUEUE_COUNT_CLASS = "sb-count";
-
-/** The class of the box the section's queue groups are drawn in, above its merged groups. */
-export const MERGE_QUEUES_CLASS = "sb-merge-queues";
-
-/** The class of one repository's queue group, and of its header. */
-export const MERGE_QUEUE_GROUP_CLASS = "mq-group";
-export const MERGE_QUEUE_GROUP_HEAD_CLASS = "mq-group-head";
-
 /** The class of a queue group's body: its head's card and its waiting merges. */
 export const MERGE_QUEUE_CLASS = "sb-merge-queue";
 
 /**
- * One repository's queue group: its label header (HEADER, drawn by the
- * caller's group-header drawer so it reads as the merged groups' do) with
- * the merges in its line, over its queue. While the queue is paused the
- * header says who paused it on hover and resumes it on a click.
+ * A queued group's line as its fold reads it (`deploys-fold.ts`): the
+ * workspaces at its head, remediating and waiting, in order. A change to it
+ * is a change to the queue, which drops a fold chosen by hand.
  */
-export function drawRosterMergeQueueRepoGroup(
-  u: RosterMergeQueueRepoGroup,
+export function queueLine(u: RosterRepoMergeQueue): string {
+  const subjects = [
+    ...(u.head === undefined ? [] : [u.head.subject]),
+    ...u.remediating.map((r) => r.subject),
+    ...u.waiting.map((w) => w.subject),
+  ];
+  return subjects.map((subject) => subject?.workspace?.id ?? "").join(" ");
+}
+
+/**
+ * Make HEAD, the header of a queued GROUP, the queue's control: a double
+ * click pauses a running queue or resumes a paused one, and a paused queue
+ * marks its group so the stylesheet draws the pause. The hover's words are
+ * `queueHoverText`'s.
+ */
+export function drawQueuedGroupHead(
+  group: HTMLElement,
+  head: HTMLElement,
+  queue: RosterRepoMergeQueue,
+  key: RepositoryRef,
   sc: SidebarContext,
   path: string,
-  header: (path: string) => HTMLElement,
-): HTMLElement {
-  const key = requireMessage(requireMessage(u.key, `${path}.key`).repository, `${path}.key.repository`);
-  const queue = requireMessage(u.queue, `${path}.queue`);
-  const group = document.createElement("div");
-  group.className = MERGE_QUEUE_GROUP_CLASS;
-  group.setAttribute("data-repository", key.id);
-  const head = header(`${path}.header`);
-  head.classList.add(MERGE_QUEUE_GROUP_HEAD_CLASS);
-  const count = document.createElement("span");
-  count.className = MERGE_QUEUE_COUNT_CLASS;
-  count.textContent = `(${requireMessage(u.count, `${path}.count`).workspaces})`;
-  head.appendChild(count);
-  group.appendChild(head);
-  if (queue.paused !== undefined) {
-    const paused = queue.paused;
-    group.setAttribute(MERGE_QUEUE_PAUSED_ATTRIBUTE, paused.hard ? "hard" : "pause");
-    tickPaint(sc, (nowMs) => {
-      head.title = pausedText(paused, nowMs, `${path}.queue.paused`);
-    });
-    head.addEventListener("click", (event) => {
-      event.preventDefault();
-      void resumeQueue(head, sc, key);
-    });
-  }
-  group.appendChild(drawRosterMergeQueue(queue, sc, `${path}.queue`));
-  return group;
+): void {
+  if (queue.paused !== undefined) group.setAttribute(MERGE_QUEUE_PAUSED_ATTRIBUTE, queue.paused.hard ? "hard" : "pause");
+  head.addEventListener("dblclick", (event) => {
+    event.preventDefault();
+    void switchQueue(head, sc, key, queue.paused === undefined ? "pause" : "resume");
+  });
+  log.debug("drew a queued Deploys group", {
+    operation: "sidebar.merge-queue.group",
+    context: { repository: key.id, path, paused: queue.paused !== undefined },
+  });
+}
+
+/** The hover a queued group's header adds: what a double click does, and a pause's record. */
+export function queueHoverText(u: RosterRepoMergeQueue, nowMs: number, path: string): string {
+  if (u.paused === undefined) return "Double-click to pause the queue.";
+  return pausedText(u.paused, nowMs, `${path}.paused`);
 }
 
 /**
@@ -143,22 +136,26 @@ export function pausedText(u: RosterMergeQueuePaused, nowMs: number, path: strin
       }
     }
   }
-  return `${text}. Click to resume.`;
+  return `${text}. Double-click to resume.`;
 }
 
-/** Ask the daemon to resume REPOSITORY's queue, drawing a refusal at CONTROL. */
-function resumeQueue(control: HTMLElement, sc: SidebarContext, repository: { id: string; dir: string }): Promise<boolean> {
-  log.info("resuming a merge queue from the sidebar", {
-    operation: "sidebar.merge-queue.resume",
+/** What a double click on a queued group's header asks of its queue. */
+type QueueSwitch = "pause" | "resume";
+
+/** Ask the daemon to pause or resume REPOSITORY's queue, as TO says, drawing a refusal at CONTROL. */
+function switchQueue(control: HTMLElement, sc: SidebarContext, repository: RepositoryRef, to: QueueSwitch): Promise<boolean> {
+  log.info(to === "pause" ? "pausing a merge queue from the sidebar" : "resuming a merge queue from the sidebar", {
+    operation: `sidebar.merge-queue.${to}`,
     context: { repository: repository.id },
   });
+  const scope = { repository: { id: repository.id, dir: repository.dir } };
   return fireVerb(control, {
     sc,
     rpc: "UpdateMergeQueue",
     // The webapp acts on the queue for the user alone, and says so.
     call: (client) =>
       client.updateMergeQueue({
-        action: { case: "resume", value: { repository: { id: repository.id, dir: repository.dir } } },
+        action: to === "pause" ? { case: "pause", value: scope } : { case: "resume", value: scope },
         requester: userRequester(),
       }),
     schema: UpdateMergeQueueResponseSchema,
@@ -224,7 +221,7 @@ export function queueDrag(
   const workspace = refs.get(item);
   if (workspace === undefined) throw new Error("invariant: every waiting merge drawn names its workspace");
   const section = body.closest<HTMLElement>(".repo");
-  const scroller = body.parentElement?.closest<HTMLElement>(".rows") ?? null;
+  const scroller = section?.querySelector<HTMLElement>(":scope > .rows") ?? null;
   if (section === null || scroller === null) throw new Error("invariant: a queue is drawn inside the Deploys section's rows");
   const waiting = (): HTMLElement[] => [...body.children].filter((el): el is HTMLElement => refs.has(el as HTMLElement));
   return {

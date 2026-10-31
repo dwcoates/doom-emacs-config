@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { createRecentlyDeployed } from "../../src/sidebar/recently-deployed.js";
+import { createDeploysFold, DEPLOYS_GROUP_CLASS, DEPLOYS_REPOSITORY_ATTRIBUTE } from "../../src/sidebar/deploys-fold.js";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -1016,7 +1016,7 @@ describe("the row click in the hidden section", () => {
 
 describe("returnFromBand", () => {
   const ws = create(WorkspaceRefSchema, { id: "ws-1" });
-  function band(answer: boolean, calls: string[], collapsesRecentlyDeployed = false): BandReturn {
+  function band(answer: boolean, calls: string[], resetsDeploysFolds = false): BandReturn {
     return {
       label: "Test",
       operation: "sidebar.row.test-band",
@@ -1025,27 +1025,30 @@ describe("returnFromBand", () => {
         calls.push(`back:${workspace.id}`);
         return Promise.resolve(answer);
       },
-      collapsesRecentlyDeployed,
+      resetsDeploysFolds,
     };
   }
 
   it.each([
-    { name: "collapses Recently Deployed once a reopen from it succeeds", collapses: true, answer: true, want: false },
-    { name: "leaves Recently Deployed shown when the reopen was refused", collapses: true, answer: false, want: true },
-    { name: "leaves Recently Deployed shown after a return from another band", collapses: false, answer: true, want: true },
-  ])("$name", async ({ collapses, answer, want }) => {
-    // Arrange
-    const recently = createRecentlyDeployed(document, () => undefined);
-    recently.toggle();
-    const sc = sidebarContext(appContext({ selectInEditor: () => SELECT_OK }), undefined, undefined, undefined, undefined, recently);
+    { name: "lets the Deploys groups fold by their activity once a reopen from one succeeds", resets: true, answer: true, want: true },
+    { name: "keeps the hand's fold when the reopen was refused", resets: true, answer: false, want: false },
+    { name: "keeps the hand's fold after a return from another band", resets: false, answer: true, want: false },
+  ])("$name", async ({ resets, answer, want }) => {
+    // Arrange: an idle group the hand opened.
+    const group = document.createElement("div");
+    group.className = DEPLOYS_GROUP_CLASS;
+    group.setAttribute(DEPLOYS_REPOSITORY_ATTRIBUTE, "r1");
+    const folds = createDeploysFold(document, () => undefined);
+    folds.toggle(group);
+    const sc = sidebarContext(appContext({ selectInEditor: () => SELECT_OK }), undefined, undefined, undefined, undefined, folds);
     // Act
-    await returnFromBand(band(answer, [], collapses), document.createElement("div"), sc, ws);
+    await returnFromBand(band(answer, [], resets), document.createElement("div"), sc, ws);
     // Assert
-    expect(recently.expanded()).toBe(want);
+    expect(folds.folded(group)).toBe(want);
   });
 
-  it("collapses Recently Deployed on a reopen from each merged return, never on a hidden one's", () => {
-    expect([BAND_RETURNS.merged.map((r) => r.collapsesRecentlyDeployed), BAND_RETURNS.hidden.map((r) => r.collapsesRecentlyDeployed)]).toEqual([
+  it("resets the Deploys folds on a reopen from each merged return, never on a hidden one's", () => {
+    expect([BAND_RETURNS.merged.map((r) => r.resetsDeploysFolds), BAND_RETURNS.hidden.map((r) => r.resetsDeploysFolds)]).toEqual([
       [true, true],
       [false],
     ]);

@@ -1113,10 +1113,11 @@ export interface BandReturn {
   /** The verb that brings the workspace back; answers whether it did. */
   bringBack: (line: HTMLElement, sc: SidebarContext, workspace: WorkspaceRef) => Promise<boolean>;
   /**
-   * Whether bringing it back collapses the "Recently Deployed" rows it was
-   * drawn in (owner request, 2026-10-27; recently-deployed.ts).
+   * Whether bringing it back lets every Deploys group fold by its activity
+   * again, the group it was drawn in included (owner request, 2026-10-27;
+   * deploys-fold.ts).
    */
-  collapsesRecentlyDeployed: boolean;
+  resetsDeploysFolds: boolean;
 }
 
 export const BAND_RETURNS: Readonly<Record<Exclude<RowPlace, "grouping">, readonly BandReturn[]>> = {
@@ -1125,7 +1126,7 @@ export const BAND_RETURNS: Readonly<Record<Exclude<RowPlace, "grouping">, readon
       label: "Show",
       operation: "sidebar.row.show",
       message: "showing a hidden workspace from the rail",
-      collapsesRecentlyDeployed: false,
+      resetsDeploysFolds: false,
       bringBack: (line, sc, workspace) =>
         runVerb(line, {
           sc,
@@ -1141,14 +1142,14 @@ export const BAND_RETURNS: Readonly<Record<Exclude<RowPlace, "grouping">, readon
       label: "Reopen",
       operation: "sidebar.row.reopen",
       message: "reopening a merged workspace from the rail",
-      collapsesRecentlyDeployed: true,
+      resetsDeploysFolds: true,
       bringBack: (line, sc, workspace) => runOpenWorkspace(line, sc, buildOpenWorkspaceRequest(workspace)),
     },
     {
       label: "Reopen and revert the merge",
       operation: "sidebar.row.revert-merge",
       message: "reopening a merged workspace to revert its merge from the rail",
-      collapsesRecentlyDeployed: true,
+      resetsDeploysFolds: true,
       bringBack: (line, sc, workspace) => runOpenWorkspace(line, sc, buildRevertMergeRequest(workspace)),
     },
   ],
@@ -1224,7 +1225,7 @@ export async function returnFromBand(
   });
   const back = await band.bringBack(line, sc, workspace);
   if (!back) return;
-  if (band.collapsesRecentlyDeployed) sc.recentlyDeployed.collapse("a workspace was reopened from Recently Deployed");
+  if (band.resetsDeploysFolds) sc.deploysFold.reset("a workspace was reopened from a Deploys group");
   await selectWorkspace(line, sc, workspace);
 }
 

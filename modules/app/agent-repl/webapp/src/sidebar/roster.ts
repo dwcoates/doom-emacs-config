@@ -4,10 +4,10 @@
  * 2026-10-15). Nothing is re-grouped, re-sorted or counted here.
  *
  * THE DEPLOYS SECTION has no key of its own (the roster carries exactly
- * one), so its fold identity is fixed. It draws every repository's merge
- * queue (`merge-queue-view.ts`), and below them its recently merged
- * workspaces in one group per repository, a merged group following its
- * REPOSITORY'S fold: a collapsed repository's group is not drawn here.
+ * one), so its fold identity is fixed. It draws one group per repository:
+ * its merge queue while one is active (`merge-queue-view.ts`) and its
+ * recently merged workspaces, the group folding on this page by its
+ * activity (`deploys-fold.ts`).
  *
  * THE VIEW IS THE DAEMON'S. Every section's fold is drawn from the push,
  * painted at once on a gesture and asked of the daemon (`view-change.ts`), so
@@ -87,8 +87,8 @@ import {
   type RosterSectionFold,
 } from "./section-fold.js";
 import { openScope, type DrawScope } from "./scope.js";
-import { RECENTLY_DEPLOYED_LABEL_CLASS } from "./recently-deployed.js";
-import { drawRosterMergeQueueRepoGroup, MERGE_QUEUES_CLASS } from "./merge-queue-view.js";
+import { DEPLOYS_GROUP_CLASS, DEPLOYS_LINE_ATTRIBUTE, DEPLOYS_REPOSITORY_ATTRIBUTE } from "./deploys-fold.js";
+import { drawQueuedGroupHead, drawRosterMergeQueue, queueHoverText, queueLine } from "./merge-queue-view.js";
 import { foldViewKey } from "./view.js";
 import {
   drawRosterRowDetailCommits,
@@ -683,23 +683,17 @@ export function drawRosterRepoKey(u: RosterRepoKey, path: string): RepositoryRef
 
 /**
  * The Deploys section (owner request, 2026-10-26; renamed from Merge Queue
- * 2026-10-27), drawn directly under the Open section and above Hidden:
- * every repository's merge queue (`merge-queue-view.ts`), then, under a
- * "Recently Deployed" heading, the settled merges hoisted out of every
- * grouping, in one group per repository.
+ * 2026-10-27), drawn directly under the Open section and above Hidden: ONE
+ * GROUP PER REPOSITORY (owner request, 2026-10-31), each its repository's
+ * queue while one is active (`merge-queue-view.ts`) above the settled merges
+ * hoisted out of every grouping.
  *
- * ITS HEADER COUNTS NOTHING (owner request, 2026-10-27): each queue group
- * counts the merges in its own line, and the "Recently Deployed" heading
- * counts today's merges, "(K today)", with the commits they brought in on its
+ * ITS HEADER COUNTS NOTHING: each group's header carries its repository's
+ * "(K today, last D ago)", with the commits today's merges brought in on its
  * hover. Its label is always the purple of a merge in progress; a paused
- * queue is drawn on its own group (`merge-queue-view.ts`).
+ * queue is drawn on its own group.
  *
- * THE SECTION ALWAYS DRAWS. Its queues stand directly under its header,
- * with no heading of their own (owner request, 2026-10-31; the "Deploy
- * Queue" heading is retired): with no deploy going on, "Recently Deployed"
- * stands first.
- *
- * EVERY MERGE THE DAEMON SENDS IS DRAWN (a week of them); once the section is
+ * EVERY MERGE THE DAEMON SENDS IS DRAWN (a day of them); once the section is
  * laid out, `fitBands` (band-fit.ts) sizes its scrolling viewport against the
  * Open section's and the Hidden Workspaces band's, its queues and its merges
  * of today claiming room first.
@@ -709,17 +703,9 @@ export function drawRosterMergedSection(
   sc: SidebarContext,
   path: string,
 ): HTMLElement {
-  const queues = u.queues.map((group, index) =>
-    drawRosterMergeQueueRepoGroup(group, sc, `${path}.queues[${index}]`, (headerPath) =>
-      drawRosterMergedRepoGroupHeader(requireMessage(group.header, headerPath), headerPath),
-    ),
-  );
-  const mergedLabel = drawSectionLabel(requireMessage(u.mergedLabel, `${path}.merged_label`), `${path}.merged_label`);
   const drawnNow = { left: MERGED_DRAWN_AT_ONCE };
-  const groups = u.groups.map((group, index) =>
-    drawRosterMergedRepoGroup(group, sc, `${path}.groups[${index}]`, drawnNow),
-  );
-  const section = drawHeadedBox(
+  const groups = u.groups.map((group, index) => drawRosterMergedRepoGroup(group, sc, `${path}.groups[${index}]`, drawnNow));
+  return drawHeadedBox(
     u,
     sc,
     path,
@@ -733,44 +719,11 @@ export function drawRosterMergedSection(
     () => {
       const region = document.createElement("div");
       region.className = "rows";
-      const box = document.createElement("div");
-      box.className = MERGE_QUEUES_CLASS;
-      box.append(...queues);
-      region.appendChild(box);
-      if (groups.length > 0) {
-        const merges = groups.flatMap((g) => g.shownMerges);
-        const heading = drawDeploysHeading(MERGED_LABEL_CLASS, mergedLabel, drawMergedTodayCount(merges, sc));
-        tickMergedTodayCommits(heading, merges, sc);
-        // THE ROWS ARE SHOWN ONLY WHILE ASKED FOR (recently-deployed.ts): a
-        // click on the heading, which draws no chevron, asks the other.
-        heading.addEventListener("click", () => sc.recentlyDeployed.toggle());
-        sc.recentlyDeployed.paint(heading);
-        region.appendChild(heading);
-      }
-      for (const group of groups) region.appendChild(group.element);
+      region.append(...groups);
       return region;
     },
   );
-  return section;
 }
-
-/**
- * The Deploys section's "Recently Deployed" heading: a CLASS_NAME box
- * holding its drawn LABEL and whatever follows it (its "(K today)").
- */
-export function drawDeploysHeading(className: string, label: HTMLElement, ...after: HTMLElement[]): HTMLElement {
-  const heading = document.createElement("div");
-  heading.className = className;
-  heading.append(label, ...after);
-  return heading;
-}
-
-/**
- * The class of the "Recently Deployed" heading over the merged groups, below
- * the queues. The stylesheet hides it while every group under it is left out
- * (its repository collapsed).
- */
-export const MERGED_LABEL_CLASS = RECENTLY_DEPLOYED_LABEL_CLASS;
 
 /**
  * How many of the band's rows are drawn with the band; every later one is a
@@ -781,16 +734,16 @@ export const MERGED_LABEL_CLASS = RECENTLY_DEPLOYED_LABEL_CLASS;
 export const MERGED_DRAWN_AT_ONCE = BAND_FLOOR * 4;
 
 /** The class of one repository's group inside the band, and of its header. */
-export const MERGED_GROUP_CLASS = "merged-group";
+export const MERGED_GROUP_CLASS = DEPLOYS_GROUP_CLASS;
 export const MERGED_GROUP_HEAD_CLASS = "merged-group-head";
+
+/** The class of a group's body: its queue and its merged rows, which a folded group hides. */
+export const MERGED_GROUP_BODY_CLASS = "rows";
 
 /** The attribute a merged row states its merged instant (epoch ms) on (`band-fit.ts` reads it). */
 export { MERGED_AT_ATTRIBUTE };
 
-/** The attribute a group states whether its repository is collapsed on. */
-export const MERGED_REPOSITORY_COLLAPSED_ATTRIBUTE = "data-repository-collapsed";
-
-/** One merged row's facts the band's header counts. */
+/** One merged row's facts a group's header counts. */
 export interface MergedRowFacts {
   /** When the merge landed (epoch ms). */
   atMs: number;
@@ -798,21 +751,17 @@ export interface MergedRowFacts {
   commits: number | undefined;
 }
 
-/** One drawn merged group, and the facts of its rows while it is shown. */
-export interface DrawnMergedRepoGroup {
-  element: HTMLElement;
-  /** Every row's facts when the wire shows the group; none when it does not. */
-  shownMerges: MergedRowFacts[];
-}
-
 /**
- * One repository's merged workspaces inside the band: its label header and its
- * rows, most recently merged first.
+ * One repository's group inside the band: its header, then its body, which is
+ * its queue while one is active and below it its merged rows, most recently
+ * merged first.
  *
- * THE GROUP HAS NO FOLD OF ITS OWN. It is drawn while its repository is
- * expanded and left out while it is collapsed, and it is tracked under the
- * REPOSITORY SECTION'S fold key, so a fold gesture on the repository section
- * moves the group on the same paint, not a push later.
+ * THE GROUP FOLDS ON THIS PAGE (`deploys-fold.ts`): open while its queue is
+ * active and folded while it is idle, unless the header was clicked since.
+ * A queued group states its queue's line (`DEPLOYS_LINE_ATTRIBUTE`), so a
+ * change to the line drops the hand's choice. A double click on the header
+ * pauses a running queue or resumes a paused one
+ * (`merge-queue-view.ts`).
  *
  * Each row carries its merged instant (`data-merged-at`), the one the row
  * already draws. A merged row is always on the `when.merged` arm; one that is
@@ -823,7 +772,7 @@ export function drawRosterMergedRepoGroup(
   sc: SidebarContext,
   path: string,
   drawnNow: { left: number },
-): DrawnMergedRepoGroup {
+): HTMLElement {
   const key = drawRosterRepoKey(requireMessage(u.key, `${path}.key`), `${path}.key`);
   const rows = requireMessage(u.mergedRows, `${path}.merged_rows`);
   const merges = rows.rows.map((merged, i): MergedRowFacts => {
@@ -838,13 +787,34 @@ export function drawRosterMergedRepoGroup(
       commits: commits === undefined ? undefined : drawRosterRowDetailCommits(commits, `${rowPath}.detail.commits`),
     };
   });
-  const wireCollapsed = drawRosterMergedRepoGroupDrawn(u.drawn, `${path}.drawn`);
+  const activity = requireCase(u.activity, `${path}.activity`);
   const group = document.createElement("div");
   group.className = MERGED_GROUP_CLASS;
-  group.setAttribute("data-repository", key.id);
-  group.appendChild(drawRosterMergedRepoGroupHeader(requireMessage(u.header, `${path}.header`), `${path}.header`));
-  const region = document.createElement("div");
-  region.className = "rows";
+  group.setAttribute(DEPLOYS_REPOSITORY_ATTRIBUTE, key.id);
+  const head = drawRosterMergedRepoGroupHeader(requireMessage(u.header, `${path}.header`), `${path}.header`);
+  head.appendChild(drawMergedTodayCount(merges, sc));
+  group.appendChild(head);
+  const body = document.createElement("div");
+  body.className = MERGED_GROUP_BODY_CLASS;
+  switch (activity.case) {
+    case "queued": {
+      const queuePath = `${path}.activity.queued.queue`;
+      const queue = requireMessage(activity.value.queue, queuePath);
+      group.setAttribute(DEPLOYS_LINE_ATTRIBUTE, queueLine(queue));
+      drawQueuedGroupHead(group, head, queue, key, sc, queuePath);
+      tickGroupHover(head, merges, sc, (nowMs) => queueHoverText(queue, nowMs, queuePath));
+      body.appendChild(drawRosterMergeQueue(queue, sc, queuePath));
+      break;
+    }
+    case "idle":
+      head.addEventListener("dblclick", () => idleGroupDoubleClicked(key));
+      tickGroupHover(head, merges, sc, null);
+      break;
+    default: {
+      const other: { case: string } = activity;
+      return unreachableArm(`${path}.activity`, other.case);
+    }
+  }
   rows.rows.forEach((row, i) => {
     const rowPath = `${path}.merged_rows.rows[${i}]`;
     const stamp = (drawn: HTMLElement): void => drawn.setAttribute(MERGED_AT_ATTRIBUTE, String(merges[i].atMs));
@@ -852,35 +822,26 @@ export function drawRosterMergedRepoGroup(
       drawnNow.left -= 1;
       const drawn = drawRosterFamily(row, sc, rowPath, "merged");
       stamp(drawn);
-      region.appendChild(drawn);
+      body.appendChild(drawn);
       return;
     }
-    drawRosterRowWhenShown(region, row, sc, rowPath, "merged", stamp);
+    drawRosterRowWhenShown(body, row, sc, rowPath, "merged", stamp);
   });
-  group.appendChild(region);
-  const collapsed = sc.view.track(foldViewKey(repoFoldKey(key.id)), wireCollapsed, (folded) =>
-    paintMergedRepoGroup(group, folded),
-  );
-  paintMergedRepoGroup(group, collapsed);
-  return { element: group, shownMerges: wireCollapsed ? [] : merges };
+  group.appendChild(body);
+  head.addEventListener("click", () => sc.deploysFold.toggle(group));
+  sc.deploysFold.paint(group);
+  return group;
 }
 
-/** Whether a merged group's repository is collapsed. EVERY arm is named; unset is malformed. */
-export function drawRosterMergedRepoGroupDrawn(drawn: RosterMergedRepoGroup["drawn"], path: string): boolean {
-  const arm = requireCase(drawn, path);
-  switch (arm.case) {
-    case "shown":
-      return false;
-    case "repositoryCollapsed":
-      return true;
-    default: {
-      const other: { case: string } = arm;
-      return unreachableArm(path, other.case);
-    }
-  }
+/** A double click on an idle group's header: it has no queue to pause or resume. */
+function idleGroupDoubleClicked(key: RepositoryRef): void {
+  log.debug("a double click on an idle Deploys group pauses nothing: it has no active queue", {
+    operation: "sidebar.merge-queue.pause",
+    context: { repository: key.id },
+  });
 }
 
-/** A merged group's header: the repository's label, and nothing to toggle. */
+/** A group's header: the repository's label, which a click folds or opens. */
 export function drawRosterMergedRepoGroupHeader(u: RosterMergedRepoGroupHeader, path: string): HTMLElement {
   const head = document.createElement("div");
   head.className = MERGED_GROUP_HEAD_CLASS;
@@ -888,41 +849,36 @@ export function drawRosterMergedRepoGroupHeader(u: RosterMergedRepoGroupHeader, 
   return head;
 }
 
-/** Say on a merged group whether its repository is collapsed: a collapsed one is not drawn. */
-export function paintMergedRepoGroup(group: HTMLElement, collapsed: boolean): void {
-  group.hidden = collapsed;
-  group.setAttribute(MERGED_REPOSITORY_COLLAPSED_ATTRIBUTE, collapsed ? "true" : "false");
-}
-
-/** The class of the "Recently Deployed" heading's today count. */
+/** The class of a group header's today count. */
 export const MERGED_TODAY_COUNT_CLASS = "sb-today-count";
 
 /**
- * The "Recently Deployed" heading's "(K today)": how many of its merges landed
- * TODAY (local date), counted over every row of its SHOWN groups the daemon
- * sent, including those scrolled out of view (owner requests, 2026-10-11 and
- * 2026-10-27), and how long ago the latest of them landed
- * (`mergedTodayCountText`). The shared ticker repaints it, so the age counts
- * up and the count drops at midnight together with the green names.
+ * A group header's "(K today, last D ago)": how many of its merges landed
+ * TODAY (local date), counted over every row the daemon sent, including those
+ * scrolled out of view or folded away, and how long ago the latest of them
+ * landed (`mergedTodayCountText`). The shared ticker repaints it, so the age
+ * counts up and the count drops at midnight together with the green names.
  */
 export function drawMergedTodayCount(merges: MergedRowFacts[], sc: SidebarContext): HTMLElement {
   const count = document.createElement("span");
   count.className = `sb-count ${MERGED_TODAY_COUNT_CLASS}`;
   tickPaint(sc, (nowMs) => {
-    count.textContent = mergedTodayCountText(todaysMerges(merges, nowMs), nowMs);
+    count.textContent = mergedTodayCountText(merges, nowMs);
   });
   return count;
 }
 
 /**
- * The today count's words for TODAY's merges at NOW_MS: "(K today)", and, once
- * any landed, "(K today, last D ago)" with D the latest one's age in at most
- * two units (`formatAge`: `1h 5m`, `5m 30s`; owner request, 2026-10-27).
+ * The today count's words for MERGES at NOW_MS: "(K today, last D ago)",
+ * K counting the merges of NOW_MS's local date and D the latest merge's age
+ * in at most two units (`formatAge`: `1h 5m`, `5m 30s`; owner request,
+ * 2026-10-27), or "(K today)" while the group has no merge at all.
  */
-export function mergedTodayCountText(today: MergedRowFacts[], nowMs: number): string {
-  if (today.length === 0) return "(0 today)";
-  const last = Math.max(...today.map((m) => m.atMs));
-  return `(${today.length} today, last ${formatAge(nowMs - last)} ago)`;
+export function mergedTodayCountText(merges: MergedRowFacts[], nowMs: number): string {
+  const today = todaysMerges(merges, nowMs).length;
+  if (merges.length === 0) return `(${today} today)`;
+  const last = Math.max(...merges.map((m) => m.atMs));
+  return `(${today} today, last ${formatAge(nowMs - last)} ago)`;
 }
 
 /**
@@ -935,13 +891,20 @@ export function todaysMerges(merges: MergedRowFacts[], nowMs: number): MergedRow
 }
 
 /**
- * Paint the "Recently Deployed" heading's hover now and on every tick: the
- * commits today's merges brought in, summed (owner request, 2026-10-14). The
- * ticker drops a merge from the sum at midnight.
+ * Paint a group HEADER's hover now and on every tick: the commits today's
+ * merges brought in, summed (owner request, 2026-10-14), then, for a queued
+ * group, QUEUE's words (`queueHoverText`). The ticker drops a merge from the
+ * sum at midnight.
  */
-function tickMergedTodayCommits(header: HTMLElement, merges: MergedRowFacts[], sc: SidebarContext): void {
+function tickGroupHover(
+  header: HTMLElement,
+  merges: MergedRowFacts[],
+  sc: SidebarContext,
+  queue: ((nowMs: number) => string) | null,
+): void {
   tickPaint(sc, (nowMs) => {
-    header.title = mergedTodayCommitsText(todaysMerges(merges, nowMs));
+    const commits = mergedTodayCommitsText(todaysMerges(merges, nowMs));
+    header.title = queue === null ? commits : `${commits}\n${queue(nowMs)}`;
   });
 }
 
