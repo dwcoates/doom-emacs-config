@@ -858,13 +858,14 @@ Rulings already binding; code swaps to the generated arms when it lands:
 
 ## FooterAllowance sourcing (project lead ruling, supersedes the landing-4 adaptation)
 
-- No shim produces `SessionUpdate.account_usage` any more (2026-10-30): the
-  account's usage is never sampled. FIGURES (utilization, resets_at) come
-  from the rate-limit event's own: seven_day → `weekly.overall`,
+- The account's usage is never sampled (2026-10-30), and the
+  `conversation.v1.SessionUpdate.account_usage` arm is retired with it (tag 6
+  reserved). FIGURES (utilization, resets_at) come from the rate-limit
+  event's own: seven_day → `weekly.overall`,
   seven_day_opus → `weekly.models.opus`, seven_day_sonnet →
   `weekly.models.sonnet`, overage → `overage`. The five-hour window is not
-  drawn (owner ruling, 2026-10-30), and a kept five-hour figure is not
-  restored.
+  drawn (owner ruling, 2026-10-30) and has no slot in the footer's state or
+  the store's `account_usage` row (layout 91 dropped its columns).
 - The VERDICT (`FooterAllowance.status` arm) comes from
   `SessionUpdate.rate_limit_status`, matched by window, EACH VENDOR WINDOW
   ITS OWN: seven_day → `weekly.overall`;
@@ -881,15 +882,11 @@ Rulings already binding; code swaps to the generated arms when it lands:
   by a later verdict on the same window, a session start or a new turn.
 - An allowance draws as soon as an event figures it, with that event's
   verdict.
-- A per-seat sample (`SessionAccountUsage.seat_spend`) draws the seat's
-  spend instead (`FooterActivityEnduring.seat_spend`) and clears the windows;
-  a subscription sample ends the seat mode. While the account is per seat a
-  rate-limit event files no window (owner ruling, 2026-10-06: the line is by
-  billing mode, never both).
-- A rate-limit event carrying a utilization for the same window that is
-  NEWER than the last sample wins for the figure.
-- Footer remediation owed: replace the "both windows from rate_limit_status"
-  rule with the above (tests per bullet).
+- An event carries no instant, so the last event to state a window's
+  utilization is the figure drawn.
+- There is no per-seat billing mode: only a sample ever measured a seat's
+  spend, so `frontend.v1.FooterActivityEnduring.seat_spend` is retired, and
+  the enduring line is `usage` or `unobserved`.
 
 ## Merge orchestrator rulings (project lead, on its report)
 

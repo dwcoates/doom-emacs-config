@@ -1003,10 +1003,10 @@ docs. File-per-area grouping is given in section E.
 
 ### Usage / accounting (`accounting_e2e_test.go`)
 
-58. **AccountUsage** — `account-usage` — `accountInfo`/`usage_EXPERIMENTAL`
-    controls, per the coverage report's explicit note that
-    `usageaccounting_e2e_test.go`'s `!usage-subagent` is a DIFFERENT,
-    narrower fixture and does not cover this golden.
+58. **AccountUsage** — RETIRED (2026-10-30): the account's usage is never
+    sampled, and `conversation.v1.SessionUpdate.account_usage` is retired;
+    the allowances are drawn from rate-limit events
+    (`sessionfacts_e2e_test.go`).
 59. **ContextUsage** — `context-usage` — context-usage push, per
     `shim.md` §"Simple reads the shim now PUSHES on the session stream
     (context usage, diagnostics) — no pull rpcs remain."

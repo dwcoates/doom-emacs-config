@@ -3000,7 +3000,7 @@ tiers, and the tier is defined by WHAT ENDS the line:
 | --- | --- | --- |
 | **salient** | the condition it describes stops being true — never a timer | escalating faults (a severed link, a failed bring-up, an impaired daemon); anything waiting on the user (a gated call, a question batch, the cold gate, the agent's `PushNotification` message, which ends at the next prompt); an act in progress with its own end signal (a compaction running, an interrupt, a refused close, a deploy, a pending wakeup, a retry until the response lands); the dead-query line (ends at the next prompt) |
 | **transient** | its 10 s display window lapses, or a newer transient replaces it | task-tracker moves; hook starts; injected context; a concluded compaction; every non-blocking error or warning (non-escalating faults, daemon Warn/Error records); session changes; a finished deploy; network-resume edges; a detached run finishing while the session is `background` |
-| **enduring** | never — it is always true, so the cell is never empty | the ACCOUNT's usage BY BILLING MODE: a subscription's weekly windows, or a per-seat account's month-to-date spend (`seat_spend`, "$223.88 of $12,000 this month"); `unobserved` until anything is read, drawn in words, fed by the vendor's rate-limit events, which stand no salient line of their own (owner rulings, 2026-10-01 and 2026-10-06) |
+| **enduring** | never — it is always true, so the cell is never empty | the ACCOUNT's usage: its weekly windows and overage; `unobserved` until anything is read, drawn in words, fed by the vendor's rate-limit events, which stand no salient line of their own (owner rulings, 2026-10-01 and 2026-10-06) |
 
 **PRECEDENCE IS BY TIER, ALWAYS:** salient, then transient, then enduring. A
 transient never covers a salient line; it covers only the enduring line, and
@@ -3033,20 +3033,14 @@ has no shape for it, the daemon composes nothing of the kind, and the webapp
 holds nothing back for it.
 
 **THE ENDURING LINE IS THE USAGE, AND ONLY ITS PERCENTAGES ARE COLORED.**
-The line is chosen by the account's BILLING MODE, never by which account it
-is (owner ruling, 2026-10-06). A subscription draws the 5-hour and weekly
-allowances (and overage when present). A per-seat account (the shim's
-signal: an enterprise plan whose usage answer reports a monthly limit and no
-five-hour window) draws its month-to-date spend against the seat's allotment,
-"$223.88 of $12,000 this month", or "spend not yet seen of $12,000 this
-month" before the vendor reports a spend; the spend wears the same percent
-gradient as a percentage, driven by spent/allotment. Never both. An account
-never observed reads "usage not yet seen for this account". The line is
+The line draws the weekly allowances (and overage when present) the vendor's
+rate-limit events have figured. An account with no figure reads "usage not
+yet seen for this account". The line is
 never empty (owner ruling, 2026-10-06). An
 allowance whose reset the client's clock has passed reads "<label> reset
 since last seen", with no percentage. Only each `<number>%` wears
 the percent gradient; labels and reset countdowns stay the line's color. The
-windows ALWAYS stand in one fixed order, session, weekly, overage, left to
+windows ALWAYS stand in one fixed order, weekly, overage, left to
 right, whatever their figures say (owner ruling, 2026-10-08;
 `orderedAllowances`, `webapp/src/footer/activity.ts`): which window sits on
 which side of the blue "|" never changes. The
@@ -3057,9 +3051,10 @@ matter. The context window's fill is not an enduring line (owner ruling,
 **THE USAGE IS THE ACCOUNT'S, AND IT OUTLIVES THE DAEMON** (owner ruling,
 2026-10-06). The footer keeps one usage record per account root (Claude
 config dir), and every workspace bound to the root (`footer.SetAccount`, from
-`publishAccount`) draws it, so the figures one workspace's shim samples are
+`publishAccount`) draws it, so the figures one workspace's shim relays are
 drawn by every workspace on the account at once. Each change is kept in the
-state store's `account_usage` table (layout 24, the seat's spend layout 25) and read back at boot, so a
+state store's `account_usage` table (created at layout 24; layout 91 dropped
+the columns nothing produces) and read back at boot, so a
 restarted daemon draws the last figures before any session speaks. THE
 ACCOUNT'S USAGE IS NEVER SAMPLED (2026-10-30): a per-session sample of the
 vendor's experimental usage verb cost each idle session's CLI about 18
