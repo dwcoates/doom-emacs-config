@@ -1269,8 +1269,13 @@ func TestAdoptWebWorkspaceRefusesParticipantNotExpectedForAClientNotOpenAtAnnoun
 	// Arrange: only the HOST stream is open when the handover fires, so the
 	// manifest's ExpectedWeb is false (internal/rollout/handover.go: the
 	// snapshot is taken at announcement) — no web participant was ever
-	// expected for this workspace.
-	selfRepo, d := drainSelfRepoDaemon(t)
+	// expected for this workspace. THE SUCCESSOR'S ADOPTION IS HELD FOR THE
+	// PARTICIPANTS (adoptAwaitsParticipantsEnv): the refusal is the answer
+	// of a rendezvous still open, which a live successor closes on its own
+	// within milliseconds of arming -- without the seam the web call raced
+	// it and, under load, reached an adopted workspace and was served
+	// (2026-10-31: two of one merge's gates failed here).
+	selfRepo, d := drainSelfRepoDaemon(t, adoptAwaitsParticipantsEnv)
 	// The sweep covers every test; the declared records are evidence of the adoption refusal the test provokes.
 	d.ExpectWarnings("daemon.rollout.adopt_web")
 	f := drainOpenWorkspace(t, d)
