@@ -70,7 +70,7 @@ func newEmacsScenario(t *testing.T, options ...EmacsWorldOption) *emacsScenario 
 }
 
 // addProjectWorkspace registers DIR through `agent-repl-add-project-workspace'
-// (`SPC TAB C-n') and returns the name Emacs's registry ended up holding.
+// (`SPC TAB p') and returns the name Emacs's registry ended up holding.
 //
 // The name is READ BACK rather than predicted: the DAEMON mints the identity
 // and Emacs echoes it, so a test that composed the name itself would be

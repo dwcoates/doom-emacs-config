@@ -338,13 +338,14 @@ func emHO40AwaitSectionLabel(t *testing.T, e *Emacs, dir string) string {
 func emHO40Create(t *testing.T, e *Emacs, label string) {
 	t.Helper()
 	e.Eval(`(cl-letf (((symbol-function 'completing-read)
-                        (lambda (&rest _) ` + elispString(label) + `))
+                        (lambda (prompt &rest _)
+                          (if (string-prefix-p "Model" prompt) "" ` + elispString(label) + `)))
                        ((symbol-function 'read-string)
                         (lambda (prompt &rest _)
                           (cond ((string-prefix-p "Initial prompt" prompt) ` + elispString(emHO40Prompt) + `)
                                 ((string-prefix-p "Name" prompt) ` + elispString(emHO40TriggerName) + `)
                                 (t "")))))
-                 (agent-repl-create-workspace)
+                 (agent-repl-create-workspace-in-repository)
                  t)`)
 }
 
@@ -610,11 +611,14 @@ func TestEmacsRestartKeepsTheSelectedWorkspace(t *testing.T) {
 	// Assert: and the panel is still the buffer on screen, which is what the
 	// user actually loses when the selection moves — the frame ended on the
 	// other workspace's magit buffer.
+	// The webview buffer's name is Emacs's to compose: a workspace name is
+	// sanitized into it (a main checkout's "main (repo)" among them).
+	webview := decodeString(e.Eval(`(agent-repl--frontend-webview-buffer-name ` + elispString(first) + `)`))
 	e.AwaitEval("the panel's webview to still be the buffer on screen",
 		`(mapcar (lambda (w) (buffer-name (window-buffer w))) (window-list))`,
 		func(raw json.RawMessage) bool {
 			for _, name := range decodeStrings(raw) {
-				if name == "*agent-frontend-"+first+"*" {
+				if name == webview {
 					return true
 				}
 			}

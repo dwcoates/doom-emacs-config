@@ -350,8 +350,10 @@ func (w *DoomWorld) register(t *testing.T, box sandbox, name string) doomWorkspa
 	return w.land(t, ws, before)
 }
 
-// create makes a workspace through `agent-repl-create-workspace', answering
-// its prompts with their first candidate and "hello", the fake answering
+// create makes a workspace through `agent-repl-create-workspace-in-repository'
+// (`SPC TAB C-n', the one creation that picks its repository: `SPC TAB n' is
+// fixed to agent-repl's own repository), answering the repository picker with
+// its first candidate, the model blank and the prompt "hello", the fake answering
 // with ref ws-NAME at a fresh directory, and returns it once it has landed.
 func (w *DoomWorld) create(t *testing.T, box sandbox, name string) doomWorkspace {
 	t.Helper()
@@ -361,10 +363,11 @@ func (w *DoomWorld) create(t *testing.T, box sandbox, name string) doomWorkspace
 	created, _ := json.Marshal(map[string]any{"success": map[string]any{"workspace": map[string]any{"id": ws.ID, "dir": dir}}})
 	w.Fake.Script("CreateWorkspace", created)
 	w.Emacs.Eval(`(cl-letf (((symbol-function 'completing-read)
-                              (lambda (_prompt candidates &rest _) (car (append candidates nil))))
+                              (lambda (prompt candidates &rest _)
+                                (if (string-prefix-p "Model" prompt) "" (car (append candidates nil)))))
                              ((symbol-function 'read-string)
                               (lambda (prompt &rest _) (if (string-prefix-p "Initial prompt" prompt) "hello" ""))))
-                     (call-interactively #'agent-repl-create-workspace)
+                     (call-interactively #'agent-repl-create-workspace-in-repository)
                      t)`)
 	return w.land(t, ws, before)
 }
