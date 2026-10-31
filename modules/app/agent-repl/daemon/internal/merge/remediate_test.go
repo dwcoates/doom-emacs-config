@@ -6,9 +6,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
-	"path/filepath"
 	"slices"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -16,6 +14,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/resolve/sidebar"
+	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
 
@@ -633,17 +632,11 @@ func TestEveryWriteThatMovesTheChainsEntriesHoldsTheLineLock(t *testing.T) {
 		"YieldMergeHead":        nil,
 		"RemoveMergeQueueEntry": {"terminal.go"},
 	}
-	files, err := filepath.Glob("*.go")
-	if err != nil {
-		t.Fatalf("listing the package's files: %v", err)
-	}
 	fset := token.NewFileSet()
 	seen := map[string]int{}
-	for _, file := range files {
-		if strings.HasSuffix(file, "_test.go") {
-			continue
-		}
-		parsed, err := parser.ParseFile(fset, file, nil, 0)
+	for _, source := range sourcescan.Production(t) {
+		file := source.Name
+		parsed, err := parser.ParseFile(fset, file, source.Source, 0)
 		if err != nil {
 			t.Fatalf("parsing %s: %v", file, err)
 		}
