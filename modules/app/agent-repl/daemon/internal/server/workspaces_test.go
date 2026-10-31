@@ -2108,6 +2108,73 @@ func TestCreateWorkspaceMapsASlackOriginToTheSpec(t *testing.T) {
 	}
 }
 
+// TestCreateWorkspaceCarriesTheContextWorkspacesSelection pins that a
+// one-shot naming a context workspace carries the bubble that workspace's
+// feed has selected as the request arrives: its kind, row and text, or none
+// when nothing is selected.
+func TestCreateWorkspaceCarriesTheContextWorkspacesSelection(t *testing.T) {
+	tests := []struct {
+		name  string
+		click string
+		want  *workspace.ContextSelection
+	}{
+		{name: "nothing selected carries none", click: "", want: nil},
+		{name: "a final response", click: "final-1",
+			want: &workspace.ContextSelection{Kind: workspace.ContextSelectionResponse, Row: "final-1", Markdown: "the answer"}},
+		{name: "a rollback prompt", click: "prompt-1",
+			want: &workspace.ContextSelection{Kind: workspace.ContextSelectionPrompt, Row: "prompt-1", Markdown: "the ask"}},
+		{name: "any other bubble", click: "interim-1",
+			want: &workspace.ContextSelection{Kind: workspace.ContextSelectionBubble, Row: "interim-1", Markdown: "meanwhile"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			repoRef := registeredRepoRef(h)
+			h.Verbs.createRec = wsm.Workspace{ID: "ws-created", Dir: "/tmp/ws", Name: "minted"}
+			h.Feed.finals = feedIDs("final-1")
+			h.Feed.prompts = feedIDs("prompt-1")
+			h.Feed.markdown = map[string]string{"final-1": "the answer", "prompt-1": "the ask", "interim-1": "meanwhile"}
+			if tt.click != "" {
+				clickRow(t, h, tt.click)
+			}
+
+			// Act.
+			resp, err := h.Client.CreateWorkspace(context.Background(), connect.NewRequest(oneShotCreate(repoRef, ref())))
+
+			// Assert.
+			if err != nil || resp.Msg.GetSuccess() == nil {
+				t.Fatalf("CreateWorkspace = (%v, %v), want success", resp, err)
+			}
+			got := h.Verbs.createSpecs[0].ContextSelection
+			if (got == nil) != (tt.want == nil) || (got != nil && *got != *tt.want) {
+				t.Fatalf("context selection = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCreateWorkspaceCarriesNoSelectionWithoutAContextWorkspace(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	repoRef := registeredRepoRef(h)
+	h.Verbs.createRec = wsm.Workspace{ID: "ws-created", Dir: "/tmp/ws", Name: "minted"}
+	h.Feed.finals = feedIDs("final-1")
+	h.Feed.markdown = map[string]string{"final-1": "the answer"}
+	clickRow(t, h, "final-1")
+
+	// Act.
+	resp, err := h.Client.CreateWorkspace(context.Background(), connect.NewRequest(oneShotCreate(repoRef, nil)))
+
+	// Assert.
+	if err != nil || resp.Msg.GetSuccess() == nil {
+		t.Fatalf("CreateWorkspace = (%v, %v), want success", resp, err)
+	}
+	if got := h.Verbs.createSpecs[0].ContextSelection; got != nil {
+		t.Fatalf("context selection = %+v, want none", got)
+	}
+}
+
 func TestCreateWorkspaceNamesAnUnknownContextWorkspace(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)

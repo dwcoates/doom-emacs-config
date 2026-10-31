@@ -70,6 +70,12 @@ type CreateSpec struct {
 	// corresponds to. It is no parent and no fork source; nothing of it is
 	// carried into the one-shot but its identity.
 	ContextWorkspace *ids.WorkspaceID
+	// ContextSelection, set only beside ContextWorkspace, is the bubble the
+	// context workspace's feed had selected when the create was asked for:
+	// the one-shot's first message quotes it after the context note, as the
+	// part of that workspace's view the commission most likely cites. Nil when
+	// nothing was selected.
+	ContextSelection *ContextSelection
 	// BaseRef is the base a MERGE WORKSPACE is cut from (its branch), set only
 	// with MergeOf. Every other workspace is cut from its source's tip: the
 	// parent's branch for a child, the repository's default branch otherwise

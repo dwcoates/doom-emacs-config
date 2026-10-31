@@ -328,7 +328,11 @@ export type CreateWorkspaceOneShot = Message<"agentrepl.v1.CreateWorkspaceOneSho
    * own words. PRESENT = the daemon opens the commission with a note naming
    * this workspace — its name, worktree and branch — as the one the cited
    * issue corresponds to, so the agent investigates that workspace's logs and
-   * records rather than its own. The context workspace is neither the
+   * records rather than its own. When this workspace's feed has a bubble
+   * selected as the request arrives, the daemon also quotes that bubble —
+   * its kind, feed row id and text — after the note, as the part of the
+   * workspace's view the commission most likely cites; the daemon holds the
+   * selection, so the request carries nothing more. The context workspace is neither the
    * one-shot's owner nor its context origin: nothing of its conversation or
    * worktree is carried over by naming it here.
    *

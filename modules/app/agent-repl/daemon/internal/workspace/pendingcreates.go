@@ -549,6 +549,7 @@ func createKey(spec CreateSpec) string {
 	}
 	key := struct {
 		RepoDir, Parent, OwnerNotice, ContextWorkspace, ForkFrom, Landing string
+		ContextSelection                                                  *heldSelection
 		FromOrigin, OneShot                                               bool
 		Name, Model, Priority, PermissionMode, Consent, Prompt            string
 		SlackThread                                                       string
@@ -558,7 +559,8 @@ func createKey(spec CreateSpec) string {
 		RepoDir:     filepath.Clean(spec.RepoDir), Parent: ids.Optional(spec.Parent), OwnerNotice: strings.TrimSpace(spec.OwnerNotice),
 		Landing:          landingKey(spec.Landing),
 		ContextWorkspace: ids.Optional(spec.ContextWorkspace), ForkFrom: ids.Optional(spec.ForkFrom),
-		FromOrigin: spec.FromOrigin, OneShot: spec.OneShot,
+		ContextSelection: heldSelectionOf(spec.ContextSelection),
+		FromOrigin:       spec.FromOrigin, OneShot: spec.OneShot,
 		Name: strings.TrimSpace(spec.Name), Model: spec.Model, Priority: priority,
 		PermissionMode: spec.PermissionMode, Consent: spec.ConsentedUngatedMode,
 		Prompt:    strings.TrimSpace(spec.InitialPrompt),
@@ -589,28 +591,55 @@ func hookBytes(hooks []*repoconfigv1.DeployHook) []string {
 // field of CreateSpec a held create can carry is here; a merge workspace is
 // never held, so MergeOf and MergeName are not.
 type heldSpec struct {
-	RepoDir              string   `json:"repo_dir"`
-	InitialPrompt        string   `json:"initial_prompt,omitempty"`
-	OneShot              bool     `json:"one_shot,omitempty"`
-	FromOrigin           bool     `json:"from_origin,omitempty"`
-	ContextWorkspace     string   `json:"context_workspace,omitempty"`
-	BaseRef              string   `json:"base_ref,omitempty"`
-	Parent               string   `json:"parent,omitempty"`
-	ForkFrom             string   `json:"fork_from,omitempty"`
-	Requester            string   `json:"requester,omitempty"`
-	OwnerNotice          string   `json:"owner_notice,omitempty"`
-	ConsentedUngatedMode string   `json:"consented_ungated_mode,omitempty"`
-	PreDeploy            []string `json:"pre_deploy,omitempty"`
-	PostDeploy           []string `json:"post_deploy,omitempty"`
-	Name                 string   `json:"name,omitempty"`
-	Model                string   `json:"model,omitempty"`
-	PermissionMode       string   `json:"permission_mode,omitempty"`
-	Priority             *int     `json:"priority,omitempty"`
-	SlackThread          string   `json:"slack_thread,omitempty"`
+	RepoDir          string `json:"repo_dir"`
+	InitialPrompt    string `json:"initial_prompt,omitempty"`
+	OneShot          bool   `json:"one_shot,omitempty"`
+	FromOrigin       bool   `json:"from_origin,omitempty"`
+	ContextWorkspace string `json:"context_workspace,omitempty"`
+	// ContextSelection is the context workspace's selected bubble, absent
+	// when nothing was selected.
+	ContextSelection     *heldSelection `json:"context_selection,omitempty"`
+	BaseRef              string         `json:"base_ref,omitempty"`
+	Parent               string         `json:"parent,omitempty"`
+	ForkFrom             string         `json:"fork_from,omitempty"`
+	Requester            string         `json:"requester,omitempty"`
+	OwnerNotice          string         `json:"owner_notice,omitempty"`
+	ConsentedUngatedMode string         `json:"consented_ungated_mode,omitempty"`
+	PreDeploy            []string       `json:"pre_deploy,omitempty"`
+	PostDeploy           []string       `json:"post_deploy,omitempty"`
+	Name                 string         `json:"name,omitempty"`
+	Model                string         `json:"model,omitempty"`
+	PermissionMode       string         `json:"permission_mode,omitempty"`
+	Priority             *int           `json:"priority,omitempty"`
+	SlackThread          string         `json:"slack_thread,omitempty"`
 	// Landing is the explicit landing target, absent for the relationship's
 	// default; a held row written before landing targets existed has none,
 	// which is what its create meant.
 	Landing *heldLanding `json:"landing,omitempty"`
+}
+
+// heldSelection is a held create's context selection (ContextSelection).
+type heldSelection struct {
+	Kind     string `json:"kind"`
+	Row      string `json:"row"`
+	Markdown string `json:"markdown"`
+}
+
+// heldSelectionOf is SELECTED as a held row stores it, nil for none.
+func heldSelectionOf(selected *ContextSelection) *heldSelection {
+	if selected == nil {
+		return nil
+	}
+	return &heldSelection{Kind: string(selected.Kind), Row: selected.Row, Markdown: selected.Markdown}
+}
+
+// contextSelectionOf reads a held row's context selection back, nil for
+// none.
+func contextSelectionOf(held *heldSelection) *ContextSelection {
+	if held == nil {
+		return nil
+	}
+	return &ContextSelection{Kind: ContextSelectionKind(held.Kind), Row: held.Row, Markdown: held.Markdown}
 }
 
 // heldLanding is a held create's explicit landing target.
@@ -636,7 +665,8 @@ func encodeHeldSpec(spec CreateSpec) (string, error) {
 	}
 	held := heldSpec{
 		RepoDir: spec.RepoDir, InitialPrompt: spec.InitialPrompt, OneShot: spec.OneShot, FromOrigin: spec.FromOrigin,
-		ContextWorkspace: ids.Optional(spec.ContextWorkspace), BaseRef: spec.BaseRef, Parent: ids.Optional(spec.Parent),
+		ContextWorkspace: ids.Optional(spec.ContextWorkspace), ContextSelection: heldSelectionOf(spec.ContextSelection),
+		BaseRef: spec.BaseRef, Parent: ids.Optional(spec.Parent),
 		ForkFrom: ids.Optional(spec.ForkFrom), Requester: ids.Optional(spec.Requester), OwnerNotice: spec.OwnerNotice,
 		ConsentedUngatedMode: spec.ConsentedUngatedMode, PreDeploy: hookBytes(spec.DeployHooks.PreDeploy),
 		PostDeploy: hookBytes(spec.DeployHooks.PostDeploy), Name: spec.Name, Model: spec.Model, PermissionMode: spec.PermissionMode,
@@ -672,7 +702,8 @@ func decodeHeldSpec(encoded string) (CreateSpec, error) {
 	}
 	spec := CreateSpec{
 		RepoDir: held.RepoDir, InitialPrompt: held.InitialPrompt, OneShot: held.OneShot, FromOrigin: held.FromOrigin,
-		ContextWorkspace: optionalID(held.ContextWorkspace), BaseRef: held.BaseRef, Parent: optionalID(held.Parent),
+		ContextWorkspace: optionalID(held.ContextWorkspace), ContextSelection: contextSelectionOf(held.ContextSelection),
+		BaseRef: held.BaseRef, Parent: optionalID(held.Parent),
 		ForkFrom: optionalID(held.ForkFrom), Requester: optionalID(held.Requester), OwnerNotice: held.OwnerNotice,
 		ConsentedUngatedMode: held.ConsentedUngatedMode, DeployHooks: wsm.DeployHooks{PreDeploy: pre, PostDeploy: post},
 		Name: held.Name, Model: held.Model, PermissionMode: held.PermissionMode, SlackThread: held.SlackThread,

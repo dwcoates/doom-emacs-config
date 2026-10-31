@@ -373,6 +373,9 @@ func TestDistinctRequestsAreDistinctCreates(t *testing.T) {
 		{name: "an owner does not", change: func(s *CreateSpec) { s.Parent = ptr(ids.WorkspaceID("owner")) }},
 		{name: "a fork source does not", change: func(s *CreateSpec) { s.ForkFrom = ptr(ids.WorkspaceID("source")) }},
 		{name: "a context workspace does not", change: func(s *CreateSpec) { s.ContextWorkspace = ptr(ids.WorkspaceID("ctx")) }},
+		{name: "a context selection does not", change: func(s *CreateSpec) {
+			s.ContextSelection = &ContextSelection{Kind: ContextSelectionResponse, Row: "r", Markdown: "m"}
+		}},
 		{name: "one-shot does not", change: func(s *CreateSpec) { s.OneShot = true }},
 		{name: "cut from origin does not", change: func(s *CreateSpec) { s.FromOrigin, s.Landing = true, &wsm.LandingChoice{} }},
 		{name: "an explicit landing on the primary branch does not", change: func(s *CreateSpec) { s.Landing = &wsm.LandingChoice{} }},
@@ -409,7 +412,8 @@ func TestAHeldRequestSurvivesItsEncoding(t *testing.T) {
 	spec := CreateSpec{
 		RepoDir: "/r", InitialPrompt: "fix it", OneShot: true, FromOrigin: true, Landing: &wsm.LandingChoice{},
 		ContextWorkspace: ptr(ids.WorkspaceID("ctx")), Parent: ptr(ids.WorkspaceID("owner")),
-		ForkFrom: ptr(ids.WorkspaceID("source")), Requester: ptr(ids.WorkspaceID("asker")),
+		ContextSelection: &ContextSelection{Kind: ContextSelectionBubble, Row: "row-1", Markdown: "the text"},
+		ForkFrom:         ptr(ids.WorkspaceID("source")), Requester: ptr(ids.WorkspaceID("asker")),
 		OwnerNotice: "land it", ConsentedUngatedMode: "bypassPermissions", Name: "n", Model: "opus",
 		PermissionMode: "bypassPermissions", Priority: &p2,
 		DeployHooks: wsm.DeployHooks{PreDeploy: []*repoconfigv1.DeployHook{{}}},
@@ -426,7 +430,8 @@ func TestAHeldRequestSurvivesItsEncoding(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if createKey(decoded) != createKey(spec) || *decoded.Requester != *spec.Requester || *decoded.Priority != p2 || decoded.Landing == nil || decoded.Landing.Into != nil {
+	if createKey(decoded) != createKey(spec) || *decoded.Requester != *spec.Requester || *decoded.Priority != p2 || decoded.Landing == nil || decoded.Landing.Into != nil ||
+		decoded.ContextSelection == nil || *decoded.ContextSelection != *spec.ContextSelection {
 		t.Fatalf("decoded %+v, want the request encoded", decoded)
 	}
 }
