@@ -30,12 +30,12 @@
 //   │   │ summary …  │                      │
 //   │   └────────────┘                      │
 //   │   ● closed-row  (grey dot)      5d    │  inactive arm · RosterRowClosed
-//   │ ▾ Merge Queue                (2)      │  RosterMergedSection
-//   │     repo-name                         │    RosterMergeQueueRepoGroup
-//   │       ⟳ head-row  rebasing 3/7        │      RosterMergeQueueHead
+//   │ ▾ Deploys                             │  RosterMergedSection
+//   │     repo-name (3 today, last 4m ago)  │    RosterMergedRepoGroup → header
+//   │       ⟳ head-row  rebasing 3/7        │      queued arm: RosterMergeQueueHead
 //   │       2 waiting-row                   │      RosterMergeQueueWaiting
-//   │     Recently Merged                   │    RosterMergedSection.merged_label
-//   │     repo-name                         │    RosterMergedRepoGroup
+//   │       ✓ merged-row              4m    │      RosterMergedRows → RosterRow
+//   │     other-repo (0 today, last 1d ago) │    RosterMergedRepoGroup (idle, folded)
 //   └───────────────────────────────────────┘
 //
 // A repo section and the merge-queue section share one header shape
@@ -811,9 +811,9 @@ message RosterOpenSection {
   // `merge_queue_paused` (6) are RETIRED and reserved: they drew a toggle on
   // the section's header line between the repository sections' workspaces
   // and their merge queues, and colored it while a queue was paused. The
-  // merge queues are drawn in the merge queue section instead
-  // (RosterMergedSection.queues, owner request 2026-10-26), whose header
-  // carries the pause (RosterMergedSection.merge_queue_paused).
+  // merge queues are drawn in the Deploys section instead, each in its
+  // repository's group (RosterMergedRepoGroupQueued), which carries its own
+  // pause (RosterRepoMergeQueue.paused).
   reserved 4, 5, 6;
   reserved "workspaces", "merge_queues", "merge_queue_paused";
 }
@@ -859,8 +859,8 @@ message RosterRepoSection {
   // `workspaces` (10) and `merge_queue` (11), the `shows` oneof, are RETIRED
   // and reserved: the section's body was its entries or, while the retired
   // toggle stood (RosterOpenSection), its merge queue. The body is always
-  // its entries, and the queue is drawn in the merge queue section
-  // (RosterMergedSection.queues, owner request 2026-10-26).
+  // its entries, and the queue is drawn in the repository's Deploys group
+  // (RosterMergedRepoGroupQueued).
   reserved 10, 11;
   reserved "workspaces", "merge_queue";
   // WHETHER THE SECTION IS FOLDED. DAEMON-HELD (UpdateSidebarView), because two
@@ -882,7 +882,7 @@ message RosterRepoSection {
   RosterRepoDivergence divergence = 6;
 }
 
-// ONE REPOSITORY'S MERGE QUEUE as the merge queue section draws it (owner
+// ONE REPOSITORY'S MERGE QUEUE as its Deploys group draws it (owner
 // requests, 2026-10-25 and 2026-10-26): a small merge bubble for the merge at
 // the head of the line,
 // then every merge waiting behind it, in the order it will run -- the same
@@ -895,8 +895,8 @@ message RosterRepoSection {
 // workspaces view (RosterRow.async_merging). A hidden merge workspace is never
 // named, drawn or selected here.
 //
-// A queue whose line holds no merge is not drawn
-// (RosterMergedSection.queues), paused or not.
+// A queue whose line holds no merge and that remediates nothing is not drawn:
+// its repository's group is idle (RosterMergedRepoGroupIdle), paused or not.
 message RosterRepoMergeQueue {
   // Tag 1 (`rows`, every merge in line drawn as a workspace row) is RETIRED:
   // the queue is drawn as its head and its waiting merges.
@@ -1322,56 +1322,44 @@ message RosterRepoKey {
   workspace.v1.RepositoryRef repository = 1;
 }
 
-// The recently-merged section: header and one group per repository. It has
-// no key of its own — the roster carries exactly one, so its fold identity is
+// The Deploys section: header and one group per repository. It has no key
+// of its own — the roster carries exactly one, so its fold identity is
 // fixed. It holds EVERY MERGE OF THE LAST 24 HOURS (owner request,
 // 2026-10-31; it was the 100 most recent merges): an older merge is drawn in
 // no section, and leaves the band in the push the daemon makes the instant it
 // ages out.
 //
-//   ▾ Recently Merged            (2)        RosterMergedSection
-//     repo-a                                  RosterMergedRepoGroup → header
-//       ✓ merged-row               3m           RosterRow
-//     repo-b                                  RosterMergedRepoGroup → header
-//       ✓ merged-row               1d           RosterRow
+//   ▾ Deploys                                RosterMergedSection
+//     repo-a (2 today, last 3m ago)            RosterMergedRepoGroup → header
+//       ⟳ head-row      rebasing 3/7             queued → RosterRepoMergeQueue
+//       2 waiting-row                            RosterMergeQueueWaiting
+//       ✓ merged-row               3m            merged_rows → RosterRow
+//     repo-b (0 today, last 1d ago)            RosterMergedRepoGroup (idle)
 //
-// THE REPOSITORY FOLD IS THE ONLY FOLD A GROUP HAS. A group draws no fold
-// toggle of its own: collapsing a repository's section
-// (RosterRepoSection.fold) takes that repository's group out of this band,
-// and expanding it puts the group back. The band's own fold still folds the
-// whole band.
+// EACH REPOSITORY IS ONE GROUP (owner request, 2026-10-31): its queue, while
+// one is active, stands above its recent deploys under one header naming the
+// repository.
 message RosterMergedSection {
   // The section's label, "Deploys" (owner request, 2026-10-27; it was "Merge
   // Queue"), drawn in the purple of a merge in progress whatever its queues
   // stand at. The section is drawn directly under the Open section, above
-  // the Hidden section (owner request, 2026-10-27). It carries NO COUNT (its `count`
-  // is unset): each queue group counts its own line
-  // (RosterMergeQueueRepoGroup.count, owner request 2026-10-27).
+  // the Hidden section (owner request, 2026-10-27). It carries NO COUNT (its
+  // `count` is unset): each group's header carries its own deploy summary.
   RosterSectionHeader header = 1;
   reserved 2;
   reserved "rows";
-  // One group per repository that has at least one merged workspace, in the
-  // repository sections' order (by repository name, then id). A repository
-  // with no merged workspace has no group. Rows are FLAT within a group, most
-  // recently merged first: a settled merge has no family left to draw.
-  //
-  // A COLLAPSED REPOSITORY'S GROUP STILL RIDES THE WIRE, on the
-  // RosterMergedRepoGroupRepositoryCollapsed arm, so every reader that walks
-  // the roster's rows (the merge-queue verb's lookups, the editor's
-  // workspace switcher) still sees every merged workspace; only the sidebar
-  // leaves the group undrawn.
+  // One group per repository whose queue is active
+  // (RosterMergedRepoGroup.queued) or that has at least one merged workspace,
+  // in the repository sections' order (by repository name, then id). A
+  // repository with neither has no group. A group is drawn whichever way its
+  // repository section is folded: it folds by itself, from its own activity.
   repeated RosterMergedRepoGroup groups = 5;
-  // THE MERGE QUEUES, drawn at the top of the section above the merged
-  // groups (owner request, 2026-10-26): one group per repository whose line
-  // holds a merge, in the repository sections' order. A repository whose
-  // line is empty is not listed, paused or not. A queue group does NOT
-  // follow its repository's fold: a merge in flight is drawn whichever way
-  // its repository is folded.
-  repeated RosterMergeQueueRepoGroup queues = 6;
-  // The heading drawn over the merged groups, below the queues, while any
-  // group is drawn: "Recently Deployed" (owner request, 2026-10-27; it was
-  // "Recently Merged"). Always set.
-  RosterLabel merged_label = 7;
+  // Tags 6 (`queues`, every queue listed above the merged groups) and 7
+  // (`merged_label`, the "Recently Deployed" heading over the merged groups)
+  // are RETIRED (owner request, 2026-10-31): a repository's queue is drawn in
+  // that repository's group, and each group's header names its repository.
+  reserved 6, 7;
+  reserved "queues", "merged_label";
   // Tag 9 (`queue_label`, the "Deploy Queue" heading over the queues) is
   // RETIRED (owner request, 2026-10-31): the queues stand directly under the
   // section's header, with no heading of their own.
@@ -1390,75 +1378,76 @@ message RosterMergedSection {
   oneof fold {
     // The merged rows are shown.
     RosterMergedSectionExpanded expanded = 3;
-    // The merged rows are hidden; the header and its count stay.
+    // The merged rows are hidden; the header stays.
     RosterMergedSectionCollapsed collapsed = 4;
   }
 }
 
-// ONE REPOSITORY'S MERGE QUEUE inside the merge queue section: the
-// repository's label over its queue.
-message RosterMergeQueueRepoGroup {
-  // The repository's stable identity, the same key its RosterRepoSection
-  // carries.
-  RosterRepoKey key = 1;
-  // The group's header box: the repository's label, with no fold toggle.
-  RosterMergedRepoGroupHeader header = 2;
-  // The repository's queue.
-  RosterRepoMergeQueue queue = 3;
-  // THE MERGES IN LINE on this queue, the head and every merge waiting
-  // behind it, drawn as "(N)" beside the repository's label (owner request,
-  // 2026-10-27). Always set.
-  RosterSectionCount count = 4;
-}
-
-// An expanded recently-merged band. DELIBERATELY EMPTY: the arm is the fact.
+// An expanded Deploys band. DELIBERATELY EMPTY: the arm is the fact.
 message RosterMergedSectionExpanded {}
 
-// A collapsed recently-merged band. DELIBERATELY EMPTY: the arm is the fact.
+// A collapsed Deploys band. DELIBERATELY EMPTY: the arm is the fact.
 message RosterMergedSectionCollapsed {}
 
-// One repository's merged workspaces inside the recently-merged band.
+// ONE REPOSITORY inside the Deploys band: its header, its queue while one is
+// active, and its merged workspaces of the last 24 hours.
+//
+// THE GROUP FOLDS BY ITSELF, FROM ITS ACTIVITY (owner request, 2026-10-31):
+// a queued group is drawn open and an idle one folded. A click on the
+// header folds or opens it on that page alone, and the activity rule takes
+// over again the moment the queue changes or the user leaves the rail. The
+// fold is the page's own, never the daemon's: it is a glance at the rail,
+// shared with no other page and kept across no restart. A double click on
+// the header pauses a running queue or resumes a paused one.
 message RosterMergedRepoGroup {
   // The repository's stable identity, the same key its RosterRepoSection
-  // carries. A client holding an in-flight fold of that repository section
-  // applies it to this group too, so the group leaves or returns with the
-  // section on the gesture, not a push later.
+  // carries, and the repository a pause or a resume names.
   RosterRepoKey key = 1;
-  // The group's header box: the repository's label, with no fold toggle.
+  // The group's header box: the repository's label. The page draws the
+  // group's "(K today, last D ago)" beside it from the merged rows' instants,
+  // because the summary ticks with the clock.
   RosterMergedRepoGroupHeader header = 2;
   // `rows` (field 3) is RETIRED and reserved, as RosterRepoSection's is.
   reserved 3;
   reserved "rows";
-  // The repository's merged workspaces, most recently merged first.
+  // Tags 4 and 5 (the `drawn` oneof: `shown`, `repository_collapsed`) are
+  // RETIRED: a group no longer follows its repository section's fold, so a
+  // merge in flight and the deploys under it are drawn whichever way the
+  // repository is folded.
+  reserved 4, 5;
+  reserved "shown", "repository_collapsed";
+  // The repository's merged workspaces of the last 24 hours, most recently
+  // merged first. FLAT: a settled merge has no family left to draw. Empty
+  // when the repository has an active queue and nothing merged.
   RosterMergedRows merged_rows = 6;
-  // WHETHER THE SIDEBAR DRAWS THE GROUP, resolved from the repository's own
-  // fold (the same daemon-held fact as RosterRepoSection.fold, resolved in the
-  // same render, so the two never disagree). Never unset on the wire.
-  oneof drawn {
-    // The repository is expanded: the group is drawn under the band.
-    RosterMergedRepoGroupShown shown = 4;
-    // The repository is collapsed: the group is not drawn, and its rows are
-    // neither counted by the band's header nor drawn by the band. Its
-    // workspaces are off the Emacs tab bar, as every workspace of a collapsed
-    // repository is.
-    RosterMergedRepoGroupRepositoryCollapsed repository_collapsed = 5;
+  // WHETHER THE REPOSITORY'S QUEUE IS ACTIVE: its line holds a merge or a
+  // merge remediates out of line. The arm decides the group's default fold
+  // (queued open, idle folded). Never unset on the wire.
+  oneof activity {
+    // The queue is active: it is drawn above the merged rows.
+    RosterMergedRepoGroupQueued queued = 7;
+    // No queue is active: the group carries only its merged rows.
+    RosterMergedRepoGroupIdle idle = 8;
   }
 }
 
-// A merged or queue group's header: the repository's label, and nothing to
-// toggle.
+// A group's header: the repository's label, which a click folds or opens and
+// a double click pauses or resumes the queue from.
 message RosterMergedRepoGroupHeader {
   // The repository's display name, as its RosterRepoSection's header draws it.
   RosterLabel label = 1;
 }
 
-// A shown merged group: its repository is expanded. DELIBERATELY EMPTY: the
-// arm is the fact.
-message RosterMergedRepoGroupShown {}
+// A group whose repository's queue is active.
+message RosterMergedRepoGroupQueued {
+  // The repository's queue: its head, its remediating merges, the merges
+  // waiting, and its pause.
+  RosterRepoMergeQueue queue = 1;
+}
 
-// An undrawn merged group: its repository's section is collapsed.
-// DELIBERATELY EMPTY: the arm is the fact.
-message RosterMergedRepoGroupRepositoryCollapsed {}
+// A group whose repository has no active queue. DELIBERATELY EMPTY: the arm
+// is the fact. A paused queue that holds nothing is idle too.
+message RosterMergedRepoGroupIdle {}
 
 // The hidden-workspaces section: header and rows. It has no key of its own --
 // the roster carries exactly one, so its fold identity is fixed.
