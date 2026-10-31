@@ -79,6 +79,12 @@ func (i installer) file(staged, live string, stamps map[string]string) error {
 	if err := i.copyInto(staged, live); err != nil {
 		return err
 	}
+	return i.stamps(stamps)
+}
+
+// stamps installs the staged build stamps over the live ones (named relative
+// to each directory), leaving the artifact they describe as it stands.
+func (i installer) stamps(stamps map[string]string) error {
 	for from, to := range stamps {
 		if err := i.copyInto(from, to); err != nil {
 			if errors.Is(err, fs.ErrNotExist) {

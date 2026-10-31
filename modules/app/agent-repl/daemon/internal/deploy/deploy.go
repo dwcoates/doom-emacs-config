@@ -762,6 +762,9 @@ func (d *Deployer) install(s Staged, fresh builds, nonce string, prev *previous)
 		writes []string
 		// tree is a directory artifact; bundle is the shim bundle.
 		tree, bundle bool
+		// restamp installs only the stamps beside the artifact; nil for an
+		// artifact whose stamps live inside it (the webapp's tree).
+		restamp func() error
 	}
 	// livePaths lists an artifact's live path and the live side of its stamps.
 	livePaths := func(artifact string, stamps map[string]string) []string {
@@ -772,18 +775,19 @@ func (d *Deployer) install(s Staged, fresh builds, nonce string, prev *previous)
 		sort.Strings(out[1:])
 		return out
 	}
-	cacheBin := func(name string) (func() error, []string) {
+	cacheBin := func(name string) (func() error, []string, func() error) {
 		stamps := stampsBeside(filepath.Dir(s.CacheBin(name)), live.CacheBin, name+".")
 		return func() error {
-			return in.file(s.CacheBin(name), live.CacheBinPath(name), stamps)
-		}, livePaths(live.CacheBinPath(name), stamps)
+				return in.file(s.CacheBin(name), live.CacheBinPath(name), stamps)
+			}, livePaths(live.CacheBinPath(name), stamps),
+			func() error { return in.stamps(stamps) }
 	}
 	shimStamps := stampsBeside(filepath.Dir(s.ShimMain()), filepath.Dir(live.ShimMain()), "")
 	daemonStamps := stampsBeside(filepath.Dir(s.DaemonBin()), filepath.Dir(live.DaemonBin()), "")
-	storeInstall, storeWrites := cacheBin(buildreport.ServiceStore)
-	sidecarInstall, sidecarWrites := cacheBin(buildreport.ServiceSidecar)
-	zettelInstall, zettelWrites := cacheBin(buildreport.ServiceZettel)
-	lockInstall, lockWrites := cacheBin(sessionlock.HolderBinary)
+	storeInstall, storeWrites, storeRestamp := cacheBin(buildreport.ServiceStore)
+	sidecarInstall, sidecarWrites, sidecarRestamp := cacheBin(buildreport.ServiceSidecar)
+	zettelInstall, zettelWrites, zettelRestamp := cacheBin(buildreport.ServiceZettel)
+	lockInstall, lockWrites, lockRestamp := cacheBin(sessionlock.HolderBinary)
 	artifacts := []artifact{
 		{component: ComponentShim, name: "shim", fresh: fresh.shim, installed: d.deps.Bundle.Build, install: func() error {
 			// THE BUNDLE IS REPLACED ONLY WHILE NO SPAWN HOLDS IT: a spawn
@@ -791,31 +795,45 @@ func (d *Deployer) install(s Staged, fresh builds, nonce string, prev *previous)
 			return d.deps.Bundle.Replace(func() error {
 				return in.file(s.ShimMain(), live.ShimMain(), shimStamps)
 			})
-		}, writes: livePaths(live.ShimMain(), shimStamps), bundle: true},
+		}, writes: livePaths(live.ShimMain(), shimStamps), bundle: true,
+			restamp: func() error { return in.stamps(shimStamps) }},
 		{component: ComponentWebapp, name: "webapp", fresh: fresh.webapp, installed: func() (string, error) { return buildid.Webapp(live.WebappDist()) }, install: func() error {
 			return in.dir(s.WebappDist(), live.WebappDist())
 		}, writes: []string{live.WebappDist()}, tree: true},
 		{component: ComponentDaemon, name: "daemon", fresh: fresh.daemon, installed: func() (string, error) { return buildid.File(live.DaemonBin()) }, install: func() error {
 			return in.file(s.DaemonBin(), live.DaemonBin(), daemonStamps)
-		}, writes: livePaths(live.DaemonBin(), daemonStamps)},
+		}, writes: livePaths(live.DaemonBin(), daemonStamps),
+			restamp: func() error { return in.stamps(daemonStamps) }},
 		{component: ComponentStore, name: buildreport.ServiceStore, fresh: fresh.store, installed: func() (string, error) {
 			return buildid.File(live.CacheBinPath(buildreport.ServiceStore))
-		}, install: storeInstall, writes: storeWrites},
+		}, install: storeInstall, writes: storeWrites, restamp: storeRestamp},
 		{component: ComponentSidecar, name: buildreport.ServiceSidecar, fresh: fresh.sidecar, installed: func() (string, error) {
 			return buildid.File(live.CacheBinPath(buildreport.ServiceSidecar))
-		}, install: sidecarInstall, writes: sidecarWrites},
+		}, install: sidecarInstall, writes: sidecarWrites, restamp: sidecarRestamp},
 		{component: ComponentZettel, name: buildreport.ServiceZettel, fresh: fresh.zettel, installed: func() (string, error) {
 			return buildid.File(live.CacheBinPath(buildreport.ServiceZettel))
-		}, install: zettelInstall, writes: zettelWrites},
+		}, install: zettelInstall, writes: zettelWrites, restamp: zettelRestamp},
 		{component: ComponentShim, name: sessionlock.HolderBinary, fresh: fresh.lock, installed: func() (string, error) {
 			return buildid.File(live.CacheBinPath(sessionlock.HolderBinary))
-		}, install: lockInstall, writes: lockWrites},
+		}, install: lockInstall, writes: lockWrites, restamp: lockRestamp},
 	}
 	for _, a := range artifacts {
 		fields := dlog.Context{"artifact": a.name, "fresh": a.fresh}
 		installed, err := a.installed()
 		if err == nil && installed == a.fresh {
-			d.log.Debug(opInstall, "the installed artifact is already the fresh build", fields)
+			// THE STAMPS STILL MOVE TO THE FRESH SOURCE. A change outside what
+			// the artifact compiles from (a proto the store never imports)
+			// builds the very same bytes, and leaving the stamps on the older
+			// source tree had the readiness report call a current store stale
+			// (owner's report, 2026-10-30): the stamps say what source the
+			// standing bytes are the build of, and that is now this source.
+			if a.restamp != nil {
+				if err := a.restamp(); err != nil {
+					d.log.Error(opInstall, "could not move the unchanged artifact's stamps to the fresh source", dlog.WithCause(fields, err))
+					return &InstallFailed{Component: a.component, Detail: err.Error()}
+				}
+			}
+			d.log.Debug(opInstall, "the installed artifact is already the fresh build; its stamps now name the fresh source", fields)
 			continue
 		}
 		if err != nil {

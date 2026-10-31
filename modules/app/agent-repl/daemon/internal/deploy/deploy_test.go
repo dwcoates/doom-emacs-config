@@ -103,6 +103,24 @@ func TestADeployInstallsOnlyWhatDiffers(t *testing.T) {
 	}
 }
 
+func TestADeployMovesAnUnchangedArtifactsStampsToTheFreshSource(t *testing.T) {
+	// Arrange: the store is already the fresh build, stamped from older source.
+	h := newHarness(t)
+	writeFile(t, h.live.CacheBinPath(buildreport.ServiceStore), theFresh.store)
+	stamp := filepath.Join(h.live.CacheBin, ".shim-store.source-tree")
+	writeFile(t, stamp, "tree-the-older-source")
+
+	// Act
+	if _, err := h.d.Deploy(context.Background(), false); err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
+
+	// Assert
+	if got := readFile(t, stamp); got != "tree-"+theFresh.store {
+		t.Fatalf("store source stamp = %q, want the fresh source's %q", got, "tree-"+theFresh.store)
+	}
+}
+
 func TestServiceStalenessIsTheReportedBuildAgainstTheFreshOne(t *testing.T) {
 	tests := []struct {
 		name      string
