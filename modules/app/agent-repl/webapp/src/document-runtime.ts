@@ -6,7 +6,7 @@
  * their own source (`ClientLogRequest.source`), and both make their text
  * copyable and selectable. Done here once, so the two cannot drift.
  */
-import { codeOfCopyControl } from "./code-block.js";
+import { codeOfBlockControl } from "./code-block.js";
 import { boundCopyText, installCopyControls } from "./copy-control.js";
 import { installCopyChords, installCopyFallback } from "./copy.js";
 import type { LevelWindow } from "../../agent-shim/logging/ts/level-window.js";
@@ -39,7 +39,7 @@ export function installForwardingLogger(
 export function installTextAffordances(doc: Document): () => void {
   const removeCopy = installCopyFallback(doc);
   const removeChords = installCopyChords(doc);
-  const removeCodeCopy = installCopyControls(doc, { code: codeOfCopyControl, prompt: boundCopyText, response: boundCopyText });
+  const removeCodeCopy = installCopyControls(doc, { code: codeOfBlockControl, prompt: boundCopyText, response: boundCopyText });
   const removeGuard = installSelectionClickGuard(doc);
   return () => {
     removeCopy();

@@ -62,7 +62,7 @@ import { drawCommandPanel } from "./panels/panels.js";
 import { liveUnshownAnimationsEnv, pauseAnimationsWhileUnshown } from "./host/unshown-animations.js";
 import { mountSidebar } from "./sidebar/sidebar.js";
 import { mountTopbar } from "./topbar/topbar.js";
-import { installNavigationGuard, installProseLinkRouting } from "./link.js";
+import { installNavigationGuard, installProseLinkRouting, installRunControlRouting } from "./link.js";
 import { installLinkHoverPopup } from "./link-hover.js";
 import { bootFailed } from "./failure/sink.js";
 import { createLocalFailures, type LocalFailures } from "./failure/local.js";
@@ -394,6 +394,9 @@ export async function boot(): Promise<void> {
     // exactly as the structured links do. Hung here, at the feed/markdown seam,
     // once — every markdown-bearing surface lives inside `feedScroll`.
     installProseLinkRouting(ctx, shell.feedScroll);
+    // A SHELL CODE BLOCK'S RUN CONTROL runs its command in the editor's
+    // terminal popup (link.ts, installRunControlRouting), hung at the same seam.
+    installRunControlRouting(ctx, shell.feedScroll);
     installLinkHoverPopup(shell.feedScroll);
     // A DOUBLE CLICK ON A BUBBLE EXPANDS IT over the whole webapp (bubble/overlay.ts).
     mountBubbleOverlay(document, shell.feedScroll);

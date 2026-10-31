@@ -3004,17 +3004,18 @@ html[data-page-unshown] {
 /* THE ONE COPY CONTROL (src/copy-control.ts, owner requests 2026-10-20): a
    small muted icon that copies a piece of the feed. Once it copied, the check
    mark replaces the copy icon for a moment (`data-copied`). Each kind's rule
-   below places it. */
+   below places it. A shell block's run control (src/run-control.ts) wears the
+   same look, beside it. */
 /* The control's size: its padding, and its square box `--copy-control-box` on
    a side, the icon filling the box inside the padding. A code block's control
    is sized from its own text (`1em` of icon); a bubble's is one line tall
    (`.bubble-copy` below). */
-.copy-control {
+.copy-control, .run-control {
   font-size: calc(0.85rem * var(--feed-text-scale));
   --copy-control-pad: 3px;
   --copy-control-box: calc(1em + 2 * var(--copy-control-pad));
 }
-.copy-control {
+.copy-control, .run-control {
   display: inline-flex;
   padding: var(--copy-control-pad);
   border: none;
@@ -3024,9 +3025,9 @@ html[data-page-unshown] {
   opacity: var(--copy-control-rest, 0.7);
   cursor: pointer;
 }
-.copy-control:hover { opacity: 1; background: color-mix(in srgb, var(--fg) 8%, transparent); }
+.copy-control:hover, .run-control:hover { opacity: 1; background: color-mix(in srgb, var(--fg) 8%, transparent); }
 .copy-control[data-copied] { opacity: 1; color: var(--ok); }
-.copy-control svg {
+.copy-control svg, .run-control svg {
   width: calc(var(--copy-control-box) - 2 * var(--copy-control-pad));
   height: calc(var(--copy-control-box) - 2 * var(--copy-control-pad));
   fill: none;
@@ -3040,6 +3041,9 @@ html[data-page-unshown] {
 /* A code block's copy control floats right ahead of the code, so the code's
    first lines wrap around it rather than running under it. */
 .md pre.md-code > .md-code-copy { float: right; margin: -0.3em -0.5em 0.2em 0.6em; }
+/* A SHELL BLOCK'S RUN CONTROL (src/run-control.ts) floats right after the
+   copy control, so it sits just left of it, sharing its look. */
+.md pre.md-code > .md-code-run { float: right; margin: -0.3em 0 0.2em 0.2em; }
 /* A BUBBLE'S COPY CONTROL (src/bubble/copy-room.ts) copies its whole text: a
    prompt's, on every prompt bubble, folded or opened, selected or not (owner
    request, 2026-10-24), and the turn's final response's (owner request,

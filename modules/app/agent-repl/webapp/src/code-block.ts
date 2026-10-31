@@ -8,10 +8,15 @@
  *
  * EVERY CODE BLOCK CARRIES A COPY CONTROL (owner request, 2026-10-20): the one
  * copy control (copy-control.ts) of kind `code`, floated at the block's top
- * right, which copies the block's code (`codeOfCopyControl`).
+ * right, which copies the block's code (`codeOfBlockControl`).
+ *
+ * A SHELL BLOCK ALSO CARRIES A RUN CONTROL (owner request, 2026-10-30): the
+ * one run control (run-control.ts), floated right after the copy control so
+ * it sits left of it, which runs the block's code in the editor's terminal.
  */
 import { copyControlHtml, type CopiedText } from "./copy-control.js";
 import { escapeHtml, highlightCode } from "./highlight.js";
+import { isShellLang, RUN_CONTROL_HTML } from "./run-control.js";
 
 /** The class a code block's copy control wears, which places it in the block. */
 export const CODE_COPY_CLASS = "md-code-copy";
@@ -22,24 +27,26 @@ const COPY_CONTROL_HTML = copyControlHtml("code", CODE_COPY_CLASS, "Copy code");
 /**
  * BODY as the one code block: escaped, highlighted when LANG is a known
  * language (hljs escapes its own output), inside `pre.md-code`, with the copy
- * control ahead of the code.
+ * control, and a shell block's run control, ahead of the code.
  */
 export function codeBlockHtml(body: string, lang: string): string {
   const html = highlightCode(body, lang);
   const langClass = lang === "" ? "" : ` lang-${escapeHtml(lang)}`;
-  return `<pre class="md-code">${COPY_CONTROL_HTML}<code class="hljs${langClass}">${html}</code></pre>`;
+  const run = isShellLang(lang) ? RUN_CONTROL_HTML : "";
+  return `<pre class="md-code">${COPY_CONTROL_HTML}${run}<code class="hljs${langClass}">${html}</code></pre>`;
 }
 
 /**
- * The code CONTROL copies: the text of the code element of the block it sits
- * in, logged with the block's language ("" for none). A code copy control is
- * only ever drawn inside a code block ahead of its code (`codeBlockHtml`), so
- * a control outside one is a bug, and throws.
+ * The code a block's CONTROL acts on (its copy control copies it, its run
+ * control runs it): the text of the code element of the block it sits in,
+ * with the block's language ("" for none). A code block's control is only
+ * ever drawn inside a code block ahead of its code (`codeBlockHtml`), so a
+ * control outside one is a bug, and throws.
  */
-export function codeOfCopyControl(control: Element): CopiedText {
+export function codeOfBlockControl(control: Element): CopiedText {
   const code = control.closest("pre.md-code")?.querySelector(":scope > code");
   if (code === null || code === undefined) {
-    throw new Error("a code block's copy control sits outside a code block's pre.md-code > code");
+    throw new Error("a code block's control sits outside a code block's pre.md-code > code");
   }
   const langClass = [...code.classList].find((name) => name.startsWith("lang-"));
   return { text: code.textContent ?? "", context: { lang: langClass?.slice("lang-".length) ?? "" } };
