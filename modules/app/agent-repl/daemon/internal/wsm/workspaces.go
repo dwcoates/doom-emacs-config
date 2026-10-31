@@ -1016,18 +1016,20 @@ func expandFoldsHolding(ctx context.Context, tx *sql.Tx, id WorkspaceID) (expand
 
 // expandSubsectionHolding expands, within TX, the subsection workspace ID's
 // family sits in (rootSubsectionColumn), answering whether it was collapsed.
-// It is the ONE statement of that expansion: a selection (expandFoldsHolding)
-// and a workspace's work (ExpandSubsectionHolding) both go through it.
+// A selection (expandFoldsHolding) and a workspace's work
+// (ExpandSubsectionHolding) both go through it, and it expands through the
+// one expansion of a subsection (expandSubsection).
 func expandSubsectionHolding(ctx context.Context, tx *sql.Tx, id WorkspaceID) (bool, error) {
-	res, err := tx.ExecContext(ctx, `UPDATE subsections SET folded = 0 WHERE folded = 1 AND id = (SELECT `+rootSubsectionColumn+` FROM workspaces WHERE id = ?)`, id)
-	if err != nil {
+	// The outer SELECT always answers one row, NULL for an unknown
+	// workspace as for one in no subsection: neither has a fold to expand.
+	var sub sql.NullString
+	if err := tx.QueryRowContext(ctx, `SELECT (SELECT `+rootSubsectionColumn+` FROM workspaces WHERE id = ?)`, id).Scan(&sub); err != nil {
 		return false, fmt.Errorf("wsm: expand the subsection of %s: %w", id, err)
 	}
-	expanded, err := touchedRow(res)
-	if err != nil {
-		return false, fmt.Errorf("wsm: expand the subsection of %s: %w", id, err)
+	if !sub.Valid {
+		return false, nil
 	}
-	return expanded, nil
+	return expandSubsection(ctx, tx, SubsectionID(sub.String))
 }
 
 // ExpandSubsectionHolding expands the subsection workspace ID's family sits
