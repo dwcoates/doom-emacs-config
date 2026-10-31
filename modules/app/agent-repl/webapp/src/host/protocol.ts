@@ -159,6 +159,19 @@ interface HeldIngressMessage {
 }
 
 /**
+ * host -> page: a notice from the editor's composer (a refused or unanswered
+ * send, a held-prompt edit beginning, the count of prompts waiting for the
+ * daemon). The composer has no mode line; the footer draws the notice as a
+ * transient line (footer/editor-notice.ts). Never replayed on hello: a
+ * transient is over once its window passes.
+ */
+interface EditorNoticeMessage {
+  readonly channel: typeof HOST_CHANNEL;
+  readonly kind: "editorNotice";
+  readonly text: string;
+}
+
+/**
  * host -> page: the page's restyle turn is now (host/restyle-turn.ts): it runs
  * the work it asked the turn for, then says `restyled`.
  */
@@ -171,6 +184,7 @@ interface RestyleGrantedMessage {
 export type HostToPage =
   | RestyleGrantedMessage
   | HeldIngressMessage
+  | EditorNoticeMessage
   | LogLevelMessage
   | PresenceMessage
   | DismissDigestMessage
@@ -311,6 +325,10 @@ export function parseHostToPage(data: unknown): HostToPage | null {
         ? { channel: HOST_CHANNEL, kind: "heldIngress", entries }
         : null;
     }
+    case "editorNotice":
+      return typeof data.text === "string" && data.text !== ""
+        ? { channel: HOST_CHANNEL, kind: "editorNotice", text: data.text }
+        : null;
     case "webhostFailures": {
       if (!Array.isArray(data.failures)) return null;
       const failures = data.failures.map(parseWebhostFailure);

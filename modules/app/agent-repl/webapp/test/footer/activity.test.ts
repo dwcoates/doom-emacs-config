@@ -22,6 +22,7 @@ import {
   salientKind,
   type FooterActivity,
 } from "../../src/footer/activity.js";
+import { TRANSIENT_WINDOW_MS, type EditorNotice } from "../../src/footer/editor-notice.js";
 import { footerStatusActivity } from "../../src/footer/strip.js";
 import ACTIVITY_SOURCE from "../../src/footer/activity.ts?raw";
 import { cascadedValue, installStylesheet } from "../stylesheet.js";
@@ -147,20 +148,24 @@ interface Drawn {
 }
 
 /** Draw ACTIVITY's cell, recording the expiry re-renders it asks for. */
-function draw(activity: FooterActivity): Drawn {
+function draw(activity: FooterActivity, editorNotice: EditorNotice | null = null): Drawn {
   const scheduled: number[] = [];
   const h = harness();
   const cell = drawFooterStatusActivity(
     activity,
-    { ctx: h.ctx, expiry: { schedule: (atMs) => scheduled.push(atMs) } },
+    { ctx: h.ctx, expiry: { schedule: (atMs) => scheduled.push(atMs) }, editorNotice },
     "FooterStatus.activity",
   );
   return { cell, scheduled };
 }
 
 /** Draw STATUSCASE's cell carrying INIT. */
-function drawCell(statusCase: string, init: Record<string, unknown>): Drawn {
-  return draw(activityOf(statusCase, init));
+function drawCell(
+  statusCase: string,
+  init: Record<string, unknown>,
+  editorNotice: EditorNotice | null = null,
+): Drawn {
+  return draw(activityOf(statusCase, init), editorNotice);
 }
 
 /** The idle cell's salient line of KINDCASE. */
@@ -1689,6 +1694,55 @@ describe("drawFooterWeeklyAllowance", () => {
     expect(() =>
       enduringCell({ usage: { weekly: { overall: allowance(0.4, false, WEEK), models: {} } } }),
     ).toThrow(MalformedView);
+  });
+});
+
+// ---- the editor's composer notice ---------------------------------------------
+
+describe("the editor's composer notice joins the transient tier", () => {
+  it("draws the notice verbatim as a transient line", () => {
+    // Arrange / Act
+    const { cell } = drawCell("idle", unpinnedInit(), { text: "send: no daemon connection", atMs: NOW });
+
+    // Assert
+    expect(cell.getAttribute("data-tier")).toBe("transient");
+    expect(cell.querySelector(".footer-activity-editor-notice")?.textContent).toBe("send: no daemon connection");
+  });
+
+  it("schedules the one re-render one transient window after the notice", () => {
+    // Arrange / Act
+    const { scheduled } = drawCell("idle", unpinnedInit(), { text: "n", atMs: NOW });
+
+    // Assert
+    expect(scheduled).toEqual([NOW + TRANSIENT_WINDOW_MS]);
+  });
+
+  it("draws the enduring line once the notice's window has passed", () => {
+    // Arrange / Act
+    const { cell } = drawCell("idle", unpinnedInit(), { text: "gone", atMs: NOW - TRANSIENT_WINDOW_MS });
+
+    // Assert
+    expect(cell.getAttribute("data-tier")).toBe("enduring");
+  });
+
+  it("gives way to a newer daemon transient", () => {
+    // Arrange / Act
+    const { cell } = drawCell(
+      "idle",
+      unpinnedInit(transientInit("hook", { name: "newer" }, { atMs: BigInt(NOW) })),
+      { text: "older notice", atMs: NOW - 1 },
+    );
+
+    // Assert
+    expect(cell.querySelector(".footer-activity-hook")?.textContent).toBe("newer");
+  });
+
+  it("is outranked by a standing salient line", () => {
+    // Arrange / Act
+    const { cell } = drawCell("idle", salientInit("idle", "queryDied", { text: "x" }), { text: "notice", atMs: NOW });
+
+    // Assert
+    expect(cell.getAttribute("data-tier")).toBe("salient");
   });
 });
 

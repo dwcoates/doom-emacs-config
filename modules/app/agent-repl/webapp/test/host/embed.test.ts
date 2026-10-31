@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 // A workspace page's side of the host protocol. See src/host/embed.ts.
 import { createEditorIngressView, type EditorIngressView } from "../../src/held/editor-ingress.js";
+import { createEditorNotices, type EditorNotices } from "../../src/footer/editor-notice.js";
 import { LevelWindow } from "../../../agent-shim/logging/ts/level-window.js";
 import { levelApplyShapeOf } from "./level-apply-shape.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -24,6 +25,7 @@ let levelWindow: LevelWindow;
 let clock: number;
 let webhostFailures: WebhostFailureView;
 let editorIngress: EditorIngressView;
+let editorNotices: EditorNotices;
 let focusLeft: FocusLeftSource;
 let restyleTurns: RestyleTurnsSource;
 let webhostPresses: WebhostPressSource;
@@ -83,6 +85,7 @@ beforeEach(() => {
   presence = createPresence(pageDoc, true);
   webhostFailures = createWebhostFailureView();
   editorIngress = createEditorIngressView();
+  editorNotices = createEditorNotices();
   focusLeft = createFocusLeft(pageWin, presence);
   restyleTurns = createRestyleTurns();
   webhostPresses = createWebhostPresses();
@@ -94,7 +97,7 @@ beforeEach(() => {
   focusLeft.onLeft((why) => leftFor.push(why));
   clock = 1_000_000;
   levelWindow = new LevelWindow({ level: "info", untilMs: null }, () => clock);
-  link = connectToHost({ doc: pageDoc, win: pageWin, presence, webhostFailures, levelWindow, editorIngress, focusLeft, webhostPresses, restyleTurns });
+  link = connectToHost({ doc: pageDoc, win: pageWin, presence, webhostFailures, levelWindow, editorIngress, editorNotices, focusLeft, webhostPresses, restyleTurns });
 });
 
 afterEach(() => {
@@ -113,7 +116,7 @@ describe("joining", () => {
     const alone = createPresence(document, false);
 
     // Act
-    const none = connectToHost({ doc: document, win: window, presence: alone, webhostFailures, levelWindow, editorIngress, focusLeft, webhostPresses, restyleTurns });
+    const none = connectToHost({ doc: document, win: window, presence: alone, webhostFailures, levelWindow, editorIngress, editorNotices, focusLeft, webhostPresses, restyleTurns });
 
 
     // Assert
@@ -265,7 +268,7 @@ describe("a bubble expanded over the webapp", () => {
     if (!open) pageDoc.documentElement.setAttribute("data-bubble-overlay", "response");
     link?.dispose();
     received = [];
-    link = connectToHost({ doc: pageDoc, win: pageWin, presence, webhostFailures, levelWindow, editorIngress, focusLeft, webhostPresses, restyleTurns });
+    link = connectToHost({ doc: pageDoc, win: pageWin, presence, webhostFailures, levelWindow, editorIngress, editorNotices, focusLeft, webhostPresses, restyleTurns });
     await delivered();
     received = [];
 
@@ -379,7 +382,7 @@ describe("reported facts", () => {
     received = [];
 
     // Act
-    link = connectToHost({ doc: pageDoc, win: pageWin, presence, webhostFailures, levelWindow, editorIngress, focusLeft, webhostPresses, restyleTurns });
+    link = connectToHost({ doc: pageDoc, win: pageWin, presence, webhostFailures, levelWindow, editorIngress, editorNotices, focusLeft, webhostPresses, restyleTurns });
 
     // Assert
     await delivered();
@@ -506,6 +509,22 @@ describe("the webhost's sidebar", () => {
 
     // Assert
     expect(webhostFailures.standing()).toEqual([failure]);
+  });
+});
+
+describe("the editor's composer notice", () => {
+  it("hands the notice to the footer's notices, stamped with its arrival", () => {
+    // Arrange
+    const before = Date.now();
+
+    // Act
+    fromHost({ channel: HOST_CHANNEL, kind: "editorNotice", text: "send: no daemon connection" });
+
+    // Assert
+    const notice = editorNotices.current();
+    expect(notice?.text).toBe("send: no daemon connection");
+    expect(notice?.atMs).toBeGreaterThanOrEqual(before);
+    expect(notice?.atMs).toBeLessThanOrEqual(Date.now());
   });
 });
 

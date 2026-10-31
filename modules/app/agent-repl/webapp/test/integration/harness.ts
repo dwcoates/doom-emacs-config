@@ -63,6 +63,7 @@ import { mountFeed, type FeedHandle } from "../../src/feed/feed";
 import { installProseLinkRouting } from "../../src/link";
 import { createRowRenderers } from "../../src/feed/renderers";
 import { mountFooter, type FooterHandle } from "../../src/footer/footer";
+import { createEditorNotices } from "../../src/footer/editor-notice";
 import { installResponseUsageHover } from "../../src/feed/response-usage";
 import { pageFocusLeft } from "../../src/focus-left";
 import { mountTopbar } from "../../src/topbar/topbar";
@@ -670,6 +671,7 @@ async function mountApp(
   const footer = mountFooter(shell.footer, ctx, {
     selectDetachedWork: (id: FeedId) => feed.selectDetachedWork(id),
     presence: pagePresence(),
+    editorNotices: createEditorNotices(),
   });
   handles.push(footer);
   // A HOVERED RESPONSE'S USAGE IS READ IN THE FOOTER, as main.ts wires it.

@@ -64,7 +64,7 @@ interface Drawn {
 /** Draw a strip, recording every panel the user's clicks would open. */
 function drawStrip(init: StripInit = {}, selection: FooterPanel | null = null, h = harness()): Drawn {
   const selected: FooterPanel[] = [];
-  const row = drawFooterStrip(strip(init), { ctx: h.ctx, stops: createStopControls(h.ctx, () => undefined), expiry: IGNORED_EXPIRY,
+  const row = drawFooterStrip(strip(init), { ctx: h.ctx, stops: createStopControls(h.ctx, () => undefined), expiry: IGNORED_EXPIRY, editorNotice: null,
     selection,
     onSelect: (panel) => selected.push(panel),
   });
@@ -157,7 +157,7 @@ describe("drawFooterStatus: every arm the contract declares", () => {
     });
     const h = harness();
     expect(() =>
-      drawFooterStrip(bare, { ctx: h.ctx, stops: createStopControls(h.ctx, () => undefined), expiry: IGNORED_EXPIRY, selection: null, onSelect: () => {} }),
+      drawFooterStrip(bare, { ctx: h.ctx, stops: createStopControls(h.ctx, () => undefined), expiry: IGNORED_EXPIRY, editorNotice: null, selection: null, onSelect: () => {} }),
     ).toThrow(MalformedView);
   });
 });
@@ -512,7 +512,7 @@ describe("drawFooterTokensCell", () => {
   it("refuses a verdict badge whose oneof sets no arm", () => {
     const h = harness();
     expect(() =>
-      drawFooterStrip(strip({ tokens: { input: { text: "x" }, verdict: {} } }), { ctx: h.ctx, stops: createStopControls(h.ctx, () => undefined), expiry: IGNORED_EXPIRY,
+      drawFooterStrip(strip({ tokens: { input: { text: "x" }, verdict: {} } }), { ctx: h.ctx, stops: createStopControls(h.ctx, () => undefined), expiry: IGNORED_EXPIRY, editorNotice: null,
         selection: null,
         onSelect: () => {},
       }),
@@ -543,7 +543,7 @@ describe("drawFooterTokensCell", () => {
   it("refuses a heat outside the gradient", () => {
     const h = harness();
     expect(() =>
-      drawFooterStrip(strip({ tokens: { input: { text: "x", heat: { position: 1.5 } } } }), { ctx: h.ctx, stops: createStopControls(h.ctx, () => undefined), expiry: IGNORED_EXPIRY,
+      drawFooterStrip(strip({ tokens: { input: { text: "x", heat: { position: 1.5 } } } }), { ctx: h.ctx, stops: createStopControls(h.ctx, () => undefined), expiry: IGNORED_EXPIRY, editorNotice: null,
         selection: null,
         onSelect: () => {},
       }),
@@ -834,7 +834,7 @@ describe("an arm this build has no case for", () => {
     };
     // ACT / ASSERT
     expect(() =>
-      drawFooterStrip(view, { ctx: h.ctx, stops: createStopControls(h.ctx, () => undefined), expiry: IGNORED_EXPIRY, selection: null, onSelect: () => {} }),
+      drawFooterStrip(view, { ctx: h.ctx, stops: createStopControls(h.ctx, () => undefined), expiry: IGNORED_EXPIRY, editorNotice: null, selection: null, onSelect: () => {} }),
     ).toThrow(MalformedView);
   });
 
@@ -847,7 +847,7 @@ describe("an arm this build has no case for", () => {
       view.tokens as unknown as { verdict: { verdict: { case: string; value: unknown } } }
     ).verdict.verdict = { case: "unaudited", value: {} };
     expect(() =>
-      drawFooterStrip(view, { ctx: h.ctx, stops: createStopControls(h.ctx, () => undefined), expiry: IGNORED_EXPIRY, selection: null, onSelect: () => {} }),
+      drawFooterStrip(view, { ctx: h.ctx, stops: createStopControls(h.ctx, () => undefined), expiry: IGNORED_EXPIRY, editorNotice: null, selection: null, onSelect: () => {} }),
     ).toThrow(MalformedView);
   });
 });
@@ -901,7 +901,7 @@ describe("drawClientDisconnectedStrip: the one strip this client composes", () =
     const h = harness();
     const row = drawClientDisconnectedStrip("daemon unreachable", "AnswerColdGate: unavailable", {
       strip: strip({}),
-      deps: { ctx: h.ctx, selection: null, onSelect: () => {}, stops: createStopControls(h.ctx, () => undefined), expiry: IGNORED_EXPIRY },
+      deps: { ctx: h.ctx, selection: null, onSelect: () => {}, stops: createStopControls(h.ctx, () => undefined), expiry: IGNORED_EXPIRY, editorNotice: null },
     });
     expect(row.querySelector(".footer-chips")).toBeNull();
   });
@@ -910,7 +910,7 @@ describe("drawClientDisconnectedStrip: the one strip this client composes", () =
     const h = harness();
     const row = drawClientDisconnectedStrip("daemon unreachable", "AnswerColdGate: unavailable", {
       strip: strip({ liveWork: { shells: { count: 1 } } }),
-      deps: { ctx: h.ctx, selection: null, onSelect: () => {}, stops: createStopControls(h.ctx, () => undefined), expiry: IGNORED_EXPIRY },
+      deps: { ctx: h.ctx, selection: null, onSelect: () => {}, stops: createStopControls(h.ctx, () => undefined), expiry: IGNORED_EXPIRY, editorNotice: null },
     });
     expect(row.querySelector('.footer-chips [data-chip="shells"]')).not.toBeNull();
   });
@@ -919,7 +919,7 @@ describe("drawClientDisconnectedStrip: the one strip this client composes", () =
     const h = harness();
     const row = drawClientDisconnectedStrip("daemon unreachable", "AnswerColdGate: unavailable", {
       strip: strip({ tokens: { input: { text: "12.3k in" } } }),
-      deps: { ctx: h.ctx, selection: null, onSelect: () => {}, stops: createStopControls(h.ctx, () => undefined), expiry: IGNORED_EXPIRY },
+      deps: { ctx: h.ctx, selection: null, onSelect: () => {}, stops: createStopControls(h.ctx, () => undefined), expiry: IGNORED_EXPIRY, editorNotice: null },
     });
     expect(row.querySelector(".footer-tokens")?.textContent).toContain("12.3k in");
   });

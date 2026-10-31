@@ -22,6 +22,7 @@ describe("parseHostToPage", () => {
     ["logLevel closing a window", { channel: HOST_CHANNEL, kind: "logLevel", level: "info", untilMs: null }],
     ["webhostFailures with none", { channel: HOST_CHANNEL, kind: "webhostFailures", failures: [] }],
     ["heldIngress with none", { channel: HOST_CHANNEL, kind: "heldIngress", entries: [] }],
+    ["editorNotice", { channel: HOST_CHANNEL, kind: "editorNotice", text: "send: no daemon connection" }],
     [
       "heldIngress with an entry",
       {
@@ -72,6 +73,8 @@ describe("parseHostToPage", () => {
       { channel: HOST_CHANNEL, kind: "webhostFailures", failures: [{ arm: "bootFailed", headline: "h", evidence: [["only"]] }] },
     ],
     ["heldIngress without a list", { channel: HOST_CHANNEL, kind: "heldIngress", entries: {} }],
+    ["an editorNotice with no text", { channel: HOST_CHANNEL, kind: "editorNotice", text: "" }],
+    ["an editorNotice whose text is no string", { channel: HOST_CHANNEL, kind: "editorNotice", text: 3 }],
     ["heldIngress with an entry with no key", { channel: HOST_CHANNEL, kind: "heldIngress", entries: [{ key: "", queuedAt: "2026-10-20T15:18:02Z", said: {} }] }],
     ["heldIngress with an entry whose queuedAt is no instant", { channel: HOST_CHANNEL, kind: "heldIngress", entries: [{ key: "k", queuedAt: "yesterday", said: {} }] }],
     ["heldIngress with an entry whose said is no object", { channel: HOST_CHANNEL, kind: "heldIngress", entries: [{ key: "k", queuedAt: "2026-10-20T15:18:02Z", said: "hi" }] }],
