@@ -14,6 +14,7 @@ import (
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/gitclient"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/landedbranch"
 	"agent-repld/internal/promptqueue"
 	"agent-repld/internal/resolve/footer"
 	"agent-repld/internal/wsm"
@@ -552,6 +553,12 @@ func (r *run) closeLanded(ctx context.Context, log dlog.Logger, closes ids.Works
 	// next reads the removal off this record (owner SOP, 2026-10-06).
 	log.Info(op, "stopped the merged workspace's session and removed its worktree", dlog.Context{
 		"workspace": string(closes), "worktree": dir, "force": true})
+	// THE LANDED BRANCH GOES WITH ITS WORKTREE, verified against what the
+	// target checkout now holds (landedbranch.Retire): a branch left behind
+	// refuses every later create of the same name. Retire records its own
+	// outcome and failure; a branch it cannot judge is kept.
+	_, _ = landedbranch.Retire(ctx, r.git, log, op, job.Layout.TargetDir, job.Layout.SourceBranch, "HEAD",
+		dlog.Context{"workspace": string(closes)})
 }
 
 // cleanupLanded removes the worktree a landed async merge asked to clean up
