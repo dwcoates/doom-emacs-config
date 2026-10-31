@@ -2183,16 +2183,13 @@ exercised on the selected tab instead."
                 ((symbol-function 'agent-repl--ws-display-state)
                  (lambda (_ws) arm)))
         ;; Act
-        (cl-flet ((visible (line)
-                    (apply #'string
-                           (cl-loop for i below (length line)
-                                    unless (get-text-property i 'invisible line)
-                                    collect (aref line i)))))
+        (progn
           (let ((thinking (agent-repl-workspace-tabline-formatted)))
             (setq arm :done)
             (let ((done (agent-repl-workspace-tabline-formatted)))
               ;; Assert: the visible characters are identical, the string is not.
-              (should (equal (visible thinking) (visible done)))
+              (should (equal (agent-repl-test-status--visible thinking)
+                             (agent-repl-test-status--visible done)))
               (should-not (equal thinking done)))))))))
 
 (ert-deftest agent-repl-test-workspace-tabline-formatted-selected-tab-shows-arm-change ()
