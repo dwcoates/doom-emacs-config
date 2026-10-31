@@ -24,24 +24,12 @@
  * push the change causes.
  */
 import { createControl, type Control } from "../control.js";
-import {
-  UpdateRemoteControlModeResponseSchema,
-  type UpdateRemoteControlModeResponse,
-} from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_remote_control_mode_pb";
+import { UpdateRemoteControlModeResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_remote_control_mode_pb";
 import type { TopbarRemoteControl } from "../../../proto/gen/ts/frontend/v1/topbar_pb";
-import { whileInFlight } from "../feed/cards/controls.js";
 import { log } from "../log.js";
-import { guardMalformed } from "../rpc/guard.js";
-import { isMalformedView } from "../rpc/malformed.js";
-import {
-  clearRefusals,
-  drawTransportRefusal,
-  drawTypedRefusal,
-  drawUnreadableRefusal,
-  type SentenceTable,
-} from "../rpc/refuse.js";
+import type { SentenceTable } from "../rpc/refuse.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
-import { callUnary } from "../rpc/unary.js";
+import { sendChipToggle } from "./chip-toggle.js";
 import type { TopbarContext } from "./context.js";
 import { drawDiscGlyph, type DiscGlyph } from "./disc-glyph.js";
 
@@ -142,65 +130,21 @@ async function toggleRemoteControlMode(
     operation: "topbar.remote-control-toggle",
     context: { mode: drawn },
   });
-  // CLEARED BEFORE THE CALL: a refusal standing beside the chip the reader just
-  // clicked again reads as the answer to the NEW click.
-  clearRefusals(chip);
-  chip.setAttribute("data-settling", "");
-  let answered: Awaited<ReturnType<typeof whileInFlight<UpdateRemoteControlModeResponse>>>;
-  try {
-    answered = await whileInFlight([button], () =>
-      callUnary(
-        tc.ctx,
-        "UpdateRemoteControlMode",
-        (client) =>
-          client.updateRemoteControlMode({
-            workspace: tc.ctx.workspace,
-            action: { case: "toggle", value: {} },
-          }),
-        UpdateRemoteControlModeResponseSchema,
-      ),
-    );
-  } finally {
-    chip.removeAttribute("data-settling");
-  }
-  if ("failed" in answered) {
-    if (isMalformedView(answered.failed)) {
-      await guardMalformed(tc.ctx, "topbar.remote-control-toggle", Promise.reject(answered.failed));
-      return;
-    }
-    drawTransportRefusal(chip, answered.failed);
-    return;
-  }
-  // THE BUTTON COMES BACK ON EVERY ANSWER. A toggle stays a legitimate click
-  // after it lands, and the redraw that would replace this chip is the push of
-  // a CHANGED mode, which an answer does not promise.
-  button.disabled = false;
-  try {
-    const result = requireCase(answered.value.result, "UpdateRemoteControlModeResponse.result");
-    switch (result.case) {
-      case "success":
-        log.info("remote control was toggled", {
-          operation: "topbar.remote-control-toggled",
-          context: { on: result.value.on },
-        });
-        return;
-      case "error":
-        drawTypedRefusal(
-          chip,
-          "UpdateRemoteControlModeError.cause",
-          "UpdateRemoteControlMode",
-          result.value.cause,
-          UPDATE_REMOTE_CONTROL_MODE_CAUSES,
-        );
-        return;
-      default: {
-        const other: { case: string } = result;
-        return unreachableArm("UpdateRemoteControlModeResponse.result", other.case);
-      }
-    }
-  } catch (err) {
-    if (!drawUnreadableRefusal(tc.ctx, chip, "topbar.remote-control-malformed-answer", err)) {
-      throw err;
-    }
-  }
+  await sendChipToggle(tc, chip, button, {
+    rpc: "UpdateRemoteControlMode",
+    operation: "topbar.remote-control",
+    send: (client) =>
+      client.updateRemoteControlMode({
+        workspace: tc.ctx.workspace,
+        action: { case: "toggle", value: {} },
+      }),
+    schema: UpdateRemoteControlModeResponseSchema,
+    causes: UPDATE_REMOTE_CONTROL_MODE_CAUSES,
+    onSuccess: (success) => {
+      log.info("remote control was toggled", {
+        operation: "topbar.remote-control-toggled",
+        context: { on: success.on },
+      });
+    },
+  });
 }

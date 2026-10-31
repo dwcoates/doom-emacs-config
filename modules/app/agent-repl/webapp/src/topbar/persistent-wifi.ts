@@ -22,24 +22,12 @@
  * the chip redraws from the push the change causes.
  */
 import { createControl, type Control } from "../control.js";
-import {
-  UpdatePersistentWifiModeResponseSchema,
-  type UpdatePersistentWifiModeResponse,
-} from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_persistent_wifi_mode_pb";
+import { UpdatePersistentWifiModeResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_persistent_wifi_mode_pb";
 import type { TopbarPersistentWifi } from "../../../proto/gen/ts/frontend/v1/topbar_pb";
-import { whileInFlight } from "../feed/cards/controls.js";
 import { log } from "../log.js";
-import { guardMalformed } from "../rpc/guard.js";
-import { isMalformedView } from "../rpc/malformed.js";
-import {
-  clearRefusals,
-  drawTransportRefusal,
-  drawTypedRefusal,
-  drawUnreadableRefusal,
-  type SentenceTable,
-} from "../rpc/refuse.js";
+import type { SentenceTable } from "../rpc/refuse.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
-import { callUnary } from "../rpc/unary.js";
+import { sendChipToggle } from "./chip-toggle.js";
 import type { TopbarContext } from "./context.js";
 import { drawDiscGlyph, type DiscGlyph } from "./disc-glyph.js";
 
@@ -154,72 +142,26 @@ export async function togglePersistentWifiMode(
     operation: "topbar.persistent-wifi-toggle",
     context: drawn,
   });
-  // CLEARED BEFORE THE CALL: a refusal standing beside the chip the reader just
-  // clicked again reads as the answer to the NEW click.
-  clearRefusals(chip);
-  chip.setAttribute("data-settling", "");
-  let answered: Awaited<ReturnType<typeof whileInFlight<UpdatePersistentWifiModeResponse>>>;
-  try {
-    answered = await whileInFlight([button], () =>
-      callUnary(
-        tc.ctx,
-        "UpdatePersistentWifiMode",
-        (client) => client.updatePersistentWifiMode({ action: { case: "toggle", value: {} } }),
-        UpdatePersistentWifiModeResponseSchema,
-      ),
-    );
-  } finally {
-    chip.removeAttribute("data-settling");
-  }
-  if ("failed" in answered) {
-    if (isMalformedView(answered.failed)) {
-      await guardMalformed(tc.ctx, "topbar.persistent-wifi-toggle", Promise.reject(answered.failed));
-      return;
-    }
-    drawTransportRefusal(chip, answered.failed);
-    return;
-  }
-  // THE BUTTON COMES BACK ON EVERY ANSWER. A toggle stays a legitimate click
-  // after it lands, and the redraw that would replace this chip is the push of
-  // a CHANGED standing, which an answer does not promise.
-  button.disabled = false;
-  try {
-    const result = requireCase(answered.value.result, "UpdatePersistentWifiModeResponse.result");
-    switch (result.case) {
-      case "success": {
-        const success = result.value;
-        const state = requireMessage(success.state, "UpdatePersistentWifiModeSuccess.state");
-        log.info("persistent wifi mode was toggled", {
-          operation: "topbar.persistent-wifi-toggled",
-          context: {
-            mode: state.mode.case ?? "unknown",
-            wifi: state.wifi.case ?? "unknown",
-            hotspot: stepOutcomeArm(success.hotspot, "hotspot", "UpdatePersistentWifiModeHotspot"),
-            energyMode: stepOutcomeArm(success.energyMode, "energyMode", "UpdatePersistentWifiModeEnergyMode"),
-            display: stepOutcomeArm(success.display, "display", "UpdatePersistentWifiModeDisplay"),
-          },
-        });
-        return;
-      }
-      case "error":
-        drawTypedRefusal(
-          chip,
-          "UpdatePersistentWifiModeError.cause",
-          "UpdatePersistentWifiMode",
-          result.value.cause,
-          UPDATE_PERSISTENT_WIFI_MODE_CAUSES,
-        );
-        return;
-      default: {
-        const other: { case: string } = result;
-        return unreachableArm("UpdatePersistentWifiModeResponse.result", other.case);
-      }
-    }
-  } catch (err) {
-    if (!drawUnreadableRefusal(tc.ctx, chip, "topbar.persistent-wifi-malformed-answer", err)) {
-      throw err;
-    }
-  }
+  await sendChipToggle(tc, chip, button, {
+    rpc: "UpdatePersistentWifiMode",
+    operation: "topbar.persistent-wifi",
+    send: (client) => client.updatePersistentWifiMode({ action: { case: "toggle", value: {} } }),
+    schema: UpdatePersistentWifiModeResponseSchema,
+    causes: UPDATE_PERSISTENT_WIFI_MODE_CAUSES,
+    onSuccess: (success) => {
+      const state = requireMessage(success.state, "UpdatePersistentWifiModeSuccess.state");
+      log.info("persistent wifi mode was toggled", {
+        operation: "topbar.persistent-wifi-toggled",
+        context: {
+          mode: state.mode.case ?? "unknown",
+          wifi: state.wifi.case ?? "unknown",
+          hotspot: stepOutcomeArm(success.hotspot, "hotspot", "UpdatePersistentWifiModeHotspot"),
+          energyMode: stepOutcomeArm(success.energyMode, "energyMode", "UpdatePersistentWifiModeEnergyMode"),
+          display: stepOutcomeArm(success.display, "display", "UpdatePersistentWifiModeDisplay"),
+        },
+      });
+    },
+  });
 }
 
 /**
