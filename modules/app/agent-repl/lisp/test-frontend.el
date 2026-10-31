@@ -2865,8 +2865,7 @@ page was asked."
   "The copy's decision is recorded."
   (agent-repl-test--with-composer-copy "entropy"
     (let ((logged nil))
-      (cl-letf (((symbol-function 'agent-repl--log)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+      (cl-letf (((symbol-function 'agent-repl--log) (agent-repl-test--record-into logged)))
         ;; Act
         (agent-repl-frontend-copy-held))
       ;; Assert

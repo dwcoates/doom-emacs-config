@@ -1675,7 +1675,7 @@ opens are OpenTabs streams."
                  (sort (list "evaluate" "host" "transferred" "reloadWebapp"
                              "openInEditor" "openCommitLog" "ending" "notificationClicked" "selection"
                              "finalResponseClicked" "selectRequested" "loadPageRequested" "composeEntry"
-                             "chatTextHighlighted" "transferWithdrawn")
+                             "chatTextHighlighted" "transferWithdrawn" "responseTextHighlighted")
                        #'string<))))
 
 (ert-deftest agent-repl-test-wire-host-host-ending-decodes-to-its-arm ()

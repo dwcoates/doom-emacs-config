@@ -892,11 +892,15 @@ and the system clipboard through `kill-new'."
           (agent-repl--frontend-copy-fall-through
            keys held 'agent-repl-frontend-composer-copy-mode))))))
 
-(defvar agent-repl-frontend-composer-copy-mode-map
-  (let ((map (make-sparse-keymap)))
-    (define-key map (kbd "s-c") #'agent-repl-frontend-copy-held)
-    map)
+(defun agent-repl--frontend-fill-composer-copy-map (map)
+  "Bind Command-c (`s-c') in MAP to the held-highlight copy."
+  (define-key map (kbd "s-c") #'agent-repl-frontend-copy-held))
+
+(defvar agent-repl-frontend-composer-copy-mode-map (make-sparse-keymap)
   "Keymap of `agent-repl-frontend-composer-copy-mode': Command-c.")
+
+(agent-repl-refill-keymap agent-repl-frontend-composer-copy-mode-map
+                          #'agent-repl--frontend-fill-composer-copy-map)
 
 (define-minor-mode agent-repl-frontend-composer-copy-mode
   "Give the composer Command-c (`s-c') for the webview's held highlight.
