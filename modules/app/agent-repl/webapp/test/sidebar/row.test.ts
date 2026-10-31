@@ -2204,6 +2204,36 @@ describe("the row's display mode", () => {
       expect(drawn.querySelector(":scope > .row > .name")?.classList.contains("tinted")).toBe(true);
     });
 
+    it.each([
+      ["holds a sync-merging row's name at the merge's purple", "merging", false],
+      ["holds a sync merge's own turn's name at the merge's purple", "thinking", false],
+      ["holds a viewed sync-merging row's name at the merge's purple", "mergeQueued", true],
+    ] as const)("%s", (_name, status, viewed) => {
+      // Arrange, Act.
+      const drawn = drawRosterRow(
+        row({ id: "ws-1", status: { case: status, value: {} }, viewed, when: { case: "syncMerging", value: { startedAtMs: 1n } } }),
+        sidebarContext(),
+        "R",
+      );
+      const name = drawn.querySelector<HTMLElement>(":scope > .row > .name")!;
+
+      // Assert.
+      expect([name.classList.contains("tinted"), name.classList.contains("tone-purple"), name.classList.contains("fading")]).toEqual([true, true, false]);
+    });
+
+    it("leaves an async-merging row's name off the merge's purple", () => {
+      // Arrange, Act.
+      const drawn = drawRosterRow(
+        row({ id: "ws-1", status: { case: "done", value: {} }, asyncMerging: true, when: { case: "noTurnRunning", value: { lastTurnEndedAtMs: 1n } } }),
+        sidebarContext(),
+        "R",
+      );
+      const name = drawn.querySelector<HTMLElement>(":scope > .row > .name")!;
+
+      // Assert.
+      expect([name.classList.contains("tone-purple"), name.classList.contains("fading")]).toEqual([false, true]);
+    });
+
     it("starts an ended turn's name fading from the time the turn ended", () => {
       // Arrange, Act.
       const drawn = drawRosterRow(row({ id: "ws-1", status: { case: "done", value: {} }, when: { case: "noTurnRunning", value: { lastTurnEndedAtMs: 1n } } }), sidebarContext(), "R");

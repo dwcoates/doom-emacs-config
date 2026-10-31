@@ -6410,17 +6410,28 @@ describe("the workspace name's status tint (owner request, 2026-10-29)", () => {
   const ruleFor = (selector: string): string =>
     rulesOf(stylesheet).find((r) => r.selectors.includes(selector) && /--name-|animation:|color:/.test(r.declarations))
       ?.declarations ?? "";
-
-  it.each([
+  // Each tone class and the color its name is tinted with, for the row's
+  // class and for a class on the name itself alike.
+  const NAME_TONES = [
     ["tone-blue", "--init"],
     ["tone-purple", "--blocked"],
     ["tone-red", "--err"],
     ["tone-turquoise", "--turquoise"],
     ["tone-yellow", "--async"],
     ["tone-green", "--ok"],
-  ])("names the %s row's tone color %s for its name", (tone, token) => {
+  ] as const;
+
+  it.each(NAME_TONES)("names the %s row's tone color %s for its name", (tone, token) => {
     // Arrange / Act
     const decls = ruleFor(`#ws-sidebar .ws.${tone}`);
+
+    // Assert
+    expect(decls).toMatch(new RegExp(`--name-tone:\\s*var\\(${token}\\)`));
+  });
+
+  it.each(NAME_TONES)("names a name's own %s class its tone color %s", (tone, token) => {
+    // Arrange / Act
+    const decls = ruleFor(`#ws-sidebar .row .name.${tone}`);
 
     // Assert
     expect(decls).toMatch(new RegExp(`--name-tone:\\s*var\\(${token}\\)`));

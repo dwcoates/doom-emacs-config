@@ -19,9 +19,17 @@
  * grey at once. The fade is a CSS animation, and an animation outranks the
  * `.viewed` class's color, so a fading name would otherwise stay in its tone
  * for the rest of the window however long the user looked at it.
+ *
+ * A SYNC MERGE HOLDS THE NAME AT THE MERGE'S PURPLE (owner request,
+ * 2026-10-31): while the row's when-column counts a sync merge
+ * (`frontend.v1.RosterRowWhen.sync_merging`), the name wears the merge arm's
+ * own vocabulary color steadily, whatever the row's arm (the merge's own
+ * turns included) and whether or not the row was viewed. An ASYNC merge never
+ * reaches that column (`frontend.v1.RosterRowAsyncMerging` leaves the row its
+ * turn clock), so its name keeps its turn's tint.
  */
 import pageHold from "../../../proto/vocab/page-hold.json";
-import { toneClass } from "../vocab.js";
+import { rosterStatusColor, toneClass } from "../vocab.js";
 
 /** The class of a name held at its status tone (a turn is running). */
 export const NAME_STEADY_CLASS = "tinted";
@@ -35,7 +43,10 @@ export const NAME_FADE_MS = pageHold.hold_seconds * 1000;
 export const NAME_FADE_DELAY_PROPERTY = "--name-fade-delay";
 
 /** What a name draws of its status tone. */
-export type NameTint = { kind: "steady" } | { kind: "fading"; elapsedMs: number };
+export type NameTint =
+  | { kind: "steady" }
+  | { kind: "fading"; elapsedMs: number }
+  | { kind: "syncMerging"; tone: string };
 
 /**
  * The tint a row's name wears, or null for none. `shown` is the case of the
@@ -50,6 +61,7 @@ export function nameTint(
   viewed: boolean,
   nowMs: number,
 ): NameTint | null {
+  if (shown === "syncMerging") return { kind: "syncMerging", tone: toneClass(rosterStatusColor("merging")) };
   if (tone === toneClass("none")) return null;
   if (viewed) return null;
   if (shown === "turnRunning") return { kind: "steady" };
@@ -64,6 +76,11 @@ export function applyNameTint(label: HTMLElement, tint: NameTint | null): void {
   if (tint === null) return;
   if (tint.kind === "steady") {
     label.classList.add(NAME_STEADY_CLASS);
+    return;
+  }
+  if (tint.kind === "syncMerging") {
+    // The tone class on the name outranks the row's (src/styles.css).
+    label.classList.add(NAME_STEADY_CLASS, tint.tone);
     return;
   }
   label.classList.add(NAME_FADING_CLASS);
