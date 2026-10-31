@@ -193,6 +193,9 @@ func (o *orchestrator) extendOnce(ctx context.Context, repo wsm.RepoKey) bool {
 		return false
 	}
 	defer o.leaveAdmission()
+	line := o.lineLock(repo)
+	line.Lock()
+	defer line.Unlock()
 	stored, err := o.deps.DB.MergeQueue(ctx, repo)
 	if err != nil {
 		o.deps.Log.Global().Error(op, "could not read the queue to extend its chain", dlog.Context{"repo": string(repo), "error": err.Error()})

@@ -3,6 +3,8 @@ package merge
 import (
 	"context"
 	"errors"
+	"slices"
+	"sync"
 	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -189,8 +191,18 @@ func (o *orchestrator) waitThenReturn(ctx context.Context, ws ids.WorkspaceID, r
 
 // returnRemediated puts the remediating merge WS back in REPO's line, next
 // after the merge being worked on.
+//
+// THE RETURN IS ORDERED WITH EVERY TAKING-UP OF A MERGE (lineLock). Read
+// between the pump's look at its front and that front's admission, the return
+// stood ahead of a merge the pump was already starting as the head, and the
+// chain then stood behind an entry it held no run for (2026-10-31,
+// TestTwoMergesOfARepositoryAlternateTheTestTurnAndTheirGatesNeverOverlap).
 func (o *orchestrator) returnRemediated(ctx context.Context, ws ids.WorkspaceID, repo wsm.RepoKey) error {
-	if err := o.deps.DB.ReturnRemediatedMerge(ctx, repo, ws); err != nil {
+	line := o.lineLock(repo)
+	line.Lock()
+	err := o.deps.DB.ReturnRemediatedMerge(ctx, repo, ws, o.workedOn(repo))
+	line.Unlock()
+	if err != nil {
 		return err
 	}
 	o.mu.Lock()
@@ -203,6 +215,35 @@ func (o *orchestrator) returnRemediated(ctx context.Context, ws ids.WorkspaceID,
 	}
 	o.kick(repo)
 	return nil
+}
+
+// lineLock answers REPO's line lock (orchestrator.lines).
+func (o *orchestrator) lineLock(repo wsm.RepoKey) *sync.Mutex {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	line, ok := o.lines[repo]
+	if !ok {
+		line = &sync.Mutex{}
+		o.lines[repo] = line
+	}
+	return line
+}
+
+// workedOn answers the merges of REPO this orchestrator has taken up: its
+// running head and every member of its chain.
+func (o *orchestrator) workedOn(repo wsm.RepoKey) []ids.WorkspaceID {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	var out []ids.WorkspaceID
+	if head := o.running[repo]; head != nil {
+		out = append(out, head.ws)
+	}
+	for _, member := range o.chains[repo] {
+		if !slices.Contains(out, member.ws) {
+			out = append(out, member.ws)
+		}
+	}
+	return out
 }
 
 // isRemediating reports whether WS's merge remediates out of line. The caller

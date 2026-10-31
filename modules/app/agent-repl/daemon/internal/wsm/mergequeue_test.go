@@ -2241,7 +2241,7 @@ func TestReturnRemediatedMergePutsItAheadOfTheWaitingBehindTheWorkedOn(t *testin
 	s, repo, failed, next, waiting := stepAsideFixture(t)
 
 	// Act
-	if err := s.ReturnRemediatedMerge(context.Background(), repo, failed); err != nil {
+	if err := s.ReturnRemediatedMerge(context.Background(), repo, failed, nil); err != nil {
 		t.Fatalf("ReturnRemediatedMerge: %v", err)
 	}
 
@@ -2277,7 +2277,7 @@ func TestReturnRemediatedMergeWithNobodyWaitingStandsBehindTheWorkedOn(t *testin
 	}
 
 	// Act
-	if err := s.ReturnRemediatedMerge(ctx, repo, failed.ID); err != nil {
+	if err := s.ReturnRemediatedMerge(ctx, repo, failed.ID, nil); err != nil {
 		t.Fatalf("ReturnRemediatedMerge: %v", err)
 	}
 
@@ -2291,6 +2291,38 @@ func TestReturnRemediatedMergeWithNobodyWaitingStandsBehindTheWorkedOn(t *testin
 	}
 }
 
+func TestReturnRemediatedMergeStandsBehindAMergeNamedWorkedOnThatStillWaits(t *testing.T) {
+	// Arrange: the failed head stepped aside; the merge behind it is being
+	// taken up (named worked on) but its admission is not written yet.
+	s, _ := testStore(t)
+	ctx := context.Background()
+	repo := RepoKey(t.TempDir())
+	failed, next, last := testWorkspace(t, s), testWorkspace(t, s), testWorkspace(t, s)
+	queued(t, s, repo, failed.ID, instant)
+	queued(t, s, repo, next.ID, instant.Add(time.Minute))
+	queued(t, s, repo, last.ID, instant.Add(2*time.Minute))
+	if err := s.AdmitMerge(ctx, repo, failed.ID); err != nil {
+		t.Fatalf("AdmitMerge: %v", err)
+	}
+	if err := s.StepAsideMerge(ctx, repo, failed.ID); err != nil {
+		t.Fatalf("StepAsideMerge: %v", err)
+	}
+
+	// Act
+	if err := s.ReturnRemediatedMerge(ctx, repo, failed.ID, []WorkspaceID{next.ID}); err != nil {
+		t.Fatalf("ReturnRemediatedMerge: %v", err)
+	}
+
+	// Assert
+	got, err := s.MergeQueue(ctx, repo)
+	if err != nil {
+		t.Fatalf("MergeQueue: %v", err)
+	}
+	if len(got) != 3 || got[0].Workspace != next.ID || got[1].Workspace != failed.ID || got[2].Workspace != last.ID {
+		t.Fatalf("queue = %+v, want the merge being worked on, the returned merge, then the one waiting", got)
+	}
+}
+
 func TestReturnRemediatedMergeRefusesAMergeNotRemediating(t *testing.T) {
 	// Arrange
 	s, _ := testStore(t)
@@ -2299,7 +2331,7 @@ func TestReturnRemediatedMergeRefusesAMergeNotRemediating(t *testing.T) {
 	queued(t, s, repo, ws.ID, instant)
 
 	// Act
-	err := s.ReturnRemediatedMerge(context.Background(), repo, ws.ID)
+	err := s.ReturnRemediatedMerge(context.Background(), repo, ws.ID, nil)
 
 	// Assert
 	if err == nil {

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"agent-repld/internal/dlog"
@@ -754,7 +755,12 @@ func (s *store) StepAsideMerge(ctx context.Context, repo RepoKey, id WorkspaceID
 // 2026-10-31). With no merge waiting it stays at the back, which is then the
 // first place after whatever runs. Anything but a remediating entry is a
 // refusal.
-func (s *store) ReturnRemediatedMerge(ctx context.Context, repo RepoKey, id WorkspaceID) error {
+//
+// WORKED ON IS THE CALLER'S WORD, not the entries' states: a merge the
+// orchestrator has taken up (its chain's member joining behind the head) is
+// still waiting in the store until its admission is written, and the return
+// that read it as waiting stood ahead of a merge already being worked on.
+func (s *store) ReturnRemediatedMerge(ctx context.Context, repo RepoKey, id WorkspaceID, workedOn []WorkspaceID) error {
 	const op = "daemon.wsm.return_remediated_merge"
 	key, err := normalizeRepoKey(repo)
 	if err != nil {
@@ -778,8 +784,16 @@ func (s *store) ReturnRemediatedMerge(ctx context.Context, repo RepoKey, id Work
 			int(MergeAdmitted), back, key, id); err != nil {
 			return err
 		}
+		query := `SELECT min(seq) FROM merge_queue WHERE repo_key = ? AND state = ?`
+		args := []any{key, int(MergeQueued)}
+		if len(workedOn) > 0 {
+			query += ` AND workspace_id NOT IN (?` + strings.Repeat(`, ?`, len(workedOn)-1) + `)`
+			for _, ws := range workedOn {
+				args = append(args, ws)
+			}
+		}
 		var waiting sql.NullInt64
-		if err := tx.QueryRowContext(ctx, `SELECT min(seq) FROM merge_queue WHERE repo_key = ? AND state = ?`, key, int(MergeQueued)).Scan(&waiting); err != nil {
+		if err := tx.QueryRowContext(ctx, query, args...).Scan(&waiting); err != nil {
 			return err
 		}
 		if !waiting.Valid {
