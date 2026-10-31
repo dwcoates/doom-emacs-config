@@ -2,6 +2,7 @@ package ramdisk
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,7 +20,7 @@ type fakeWorkspaces struct {
 	gitErr      error
 	gitBound    time.Duration
 	dispatched  [][]string
-	onDispatch  func()
+	printed     string
 	dispatchErr error
 }
 
@@ -30,19 +31,9 @@ func (f *fakeWorkspaces) git(bound time.Duration, name string, args ...string) (
 	return f.porcelain, f.gitErr
 }
 
-// setPorcelain changes what git lists, as another run's create would.
-func (f *fakeWorkspaces) setPorcelain(porcelain string) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.porcelain = porcelain
-}
-
-func (f *fakeWorkspaces) dispatch(args []string) error {
+func (f *fakeWorkspaces) dispatch(args []string) ([]byte, error) {
 	f.dispatched = append(f.dispatched, args)
-	if f.onDispatch != nil {
-		f.onDispatch()
-	}
-	return f.dispatchErr
+	return []byte(f.printed), f.dispatchErr
 }
 
 // newInvestigation answers an Investigation over f whose state root has a
@@ -117,34 +108,6 @@ func TestEnsureInvestigationListsWorktreesWithinTheGitBound(t *testing.T) {
 	}
 }
 
-func TestEnsureInvestigationLeavesAnOpenWorktreeAlone(t *testing.T) {
-	// Arrange
-	f := &fakeWorkspaces{porcelain: mainOnly + "\nworktree /wt/ramdisk-leak-investigation-xnh\nHEAD 123\nbranch refs/heads/ramdisk-leak-investigation-xnh\n"}
-	m := newManager(t, &fakeHost{})
-
-	// Act
-	out, err := m.EnsureInvestigation(newInvestigation(t, f), leakTrouble)
-
-	// Assert
-	if err != nil || len(f.dispatched) != 0 || !strings.Contains(out.Existing, "/wt/ramdisk-leak-investigation-xnh") {
-		t.Fatalf("EnsureInvestigation = %+v, %v with %d dispatches; want the open worktree named and none dispatched", out, err, len(f.dispatched))
-	}
-}
-
-func TestEnsureInvestigationRecognizesAPrefixedBranch(t *testing.T) {
-	// Arrange
-	f := &fakeWorkspaces{porcelain: mainOnly + "\nworktree /wt/x\nHEAD 123\nbranch refs/heads/DWC/ramdisk-leak-investigation-xnh\n"}
-	m := newManager(t, &fakeHost{})
-
-	// Act
-	out, err := m.EnsureInvestigation(newInvestigation(t, f), leakTrouble)
-
-	// Assert
-	if err != nil || len(f.dispatched) != 0 || out.Existing == "" {
-		t.Fatalf("EnsureInvestigation = %+v, %v with %d dispatches; want the prefixed branch taken as open", out, err, len(f.dispatched))
-	}
-}
-
 func TestEnsureInvestigationFailsWithoutADaemon(t *testing.T) {
 	// Arrange
 	f := &fakeWorkspaces{porcelain: mainOnly}
@@ -191,35 +154,82 @@ func TestEnsureInvestigationFailsWithoutAMainWorktree(t *testing.T) {
 	}
 }
 
-func TestEnsureInvestigationTakesAConcurrentRunsCreateAsOpen(t *testing.T) {
-	// Arrange: another run's create made the worktree, so this one is refused.
-	f := &fakeWorkspaces{porcelain: mainOnly, dispatchErr: errors.New("worktree_creation_failed")}
-	f.onDispatch = func() {
-		f.setPorcelain(mainOnly + "\nworktree /wt/ramdisk-leak-investigation\nHEAD 123\nbranch refs/heads/ramdisk-leak-investigation\n")
+// heldAnswer is the agent CLI's printed answer to a create the daemon refused
+// as name_held.
+const heldAnswer = `{"error":{"nameHeld":{"branch":"ramdisk-leak-investigation","workspace":{"id":"ws-inv","dir":"/wt/ramdisk-leak-investigation"},"open":%s}}}`
+
+// TestEnsureInvestigationTakesTheDaemonsNameHeldAsAlreadyThere covers the one
+// dedup the runner has: the daemon refusing the name as name_held, in the
+// same step as the create, read as "the investigation is already there".
+func TestEnsureInvestigationTakesTheDaemonsNameHeldAsAlreadyThere(t *testing.T) {
+	cases := []struct {
+		name string
+		open string
+		want string
+	}{
+		{name: "an open investigation", open: "true", want: "the workspace ws-inv at /wt/ramdisk-leak-investigation holds the name ramdisk-leak-investigation (open)"},
+		{name: "a closed investigation that never landed", open: "false", want: "the workspace ws-inv at /wt/ramdisk-leak-investigation holds the name ramdisk-leak-investigation (closed, not landed)"},
 	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			f := &fakeWorkspaces{porcelain: mainOnly, printed: fmt.Sprintf(heldAnswer, tc.open), dispatchErr: errors.New("exit status 6")}
+			m := newManager(t, &fakeHost{})
+
+			// Act
+			out, err := m.EnsureInvestigation(newInvestigation(t, f), leakTrouble)
+
+			// Assert
+			if err != nil || out.Existing != tc.want || len(f.dispatched) != 1 {
+				t.Fatalf("EnsureInvestigation = %+v, %v with %d dispatches; want %q after one create", out, err, len(f.dispatched), tc.want)
+			}
+		})
+	}
+}
+
+// TestEnsureInvestigationIgnoresAWorktreeOnTheInvestigationsBranch covers the
+// stale branch: a worktree or branch of the investigation's name is no longer
+// read as an open investigation, so the create is always asked, and only the
+// daemon decides.
+func TestEnsureInvestigationIgnoresAWorktreeOnTheInvestigationsBranch(t *testing.T) {
+	// Arrange
+	f := &fakeWorkspaces{porcelain: mainOnly + "\nworktree /wt/ramdisk-leak-investigation\nHEAD 123\nbranch refs/heads/ramdisk-leak-investigation\n"}
 	m := newManager(t, &fakeHost{})
 
 	// Act
 	out, err := m.EnsureInvestigation(newInvestigation(t, f), leakTrouble)
 
 	// Assert
-	if err != nil || !strings.Contains(out.Existing, "/wt/ramdisk-leak-investigation") {
-		t.Fatalf("EnsureInvestigation = %+v, %v; want the other run's investigation named open", out, err)
+	if err != nil || out.Existing != "" || len(f.dispatched) != 1 {
+		t.Fatalf("EnsureInvestigation = %+v, %v with %d dispatches; want the create asked", out, err, len(f.dispatched))
 	}
 }
 
-func TestEnsureInvestigationSurfacesARelistFailureBesideTheDispatchFailure(t *testing.T) {
-	// Arrange
-	f := &fakeWorkspaces{porcelain: mainOnly, dispatchErr: errors.New("worktree_creation_failed")}
-	f.onDispatch = func() { f.gitErr = errors.New("git worktree list did not answer within 300ms") }
-	m := newManager(t, &fakeHost{})
+// TestEnsureInvestigationSurfacesAnyOtherRefusal covers a refused create
+// whose arm is not name_held: it is the dispatch's failure, with what the
+// CLI printed.
+func TestEnsureInvestigationSurfacesAnyOtherRefusal(t *testing.T) {
+	cases := []struct {
+		name    string
+		printed string
+	}{
+		{name: "another arm", printed: `{"error":{"worktreeCreationFailed":{"detail":"fatal"}}}`},
+		{name: "an answer that is no JSON", printed: "agent-repld workspace create: the daemon failed the call"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			f := &fakeWorkspaces{porcelain: mainOnly, printed: tc.printed, dispatchErr: errors.New("exit status 6: " + tc.printed)}
+			m := newManager(t, &fakeHost{})
 
-	// Act
-	_, err := m.EnsureInvestigation(newInvestigation(t, f), leakTrouble)
+			// Act
+			out, err := m.EnsureInvestigation(newInvestigation(t, f), leakTrouble)
 
-	// Assert
-	if err == nil || !strings.Contains(err.Error(), "worktree_creation_failed") || !strings.Contains(err.Error(), "did not answer within 300ms") {
-		t.Fatalf("EnsureInvestigation = %v, want both the dispatch's and the relisting's failures", err)
+			// Assert
+			if err == nil || out.Existing != "" || !strings.Contains(err.Error(), "dispatch the investigation workspace's create: exit status 6") {
+				t.Fatalf("EnsureInvestigation = %+v, %v; want the dispatch's failure", out, err)
+			}
+		})
 	}
 }
 
@@ -291,7 +301,7 @@ func TestScriptDispatchRunsTheCLIWithItsArguments(t *testing.T) {
 	dispatch := ScriptDispatch(script(t, `printf '%s|' "$@" >"`+got+`"`), 10*time.Second)
 
 	// Act
-	err := dispatch([]string{"workspace", "create", "-prompt", "two words"})
+	_, err := dispatch([]string{"workspace", "create", "-prompt", "two words"})
 
 	// Assert
 	raw, readErr := os.ReadFile(got)
@@ -305,7 +315,7 @@ func TestScriptDispatchNamesAMissingScript(t *testing.T) {
 	dispatch := ScriptDispatch(filepath.Join(t.TempDir(), "absent.sh"), 10*time.Second)
 
 	// Act
-	err := dispatch(nil)
+	_, err := dispatch(nil)
 
 	// Assert
 	if err == nil || !strings.Contains(err.Error(), "the agent CLI is missing") {
@@ -318,7 +328,7 @@ func TestScriptDispatchReportsAFailingScriptsOutput(t *testing.T) {
 	dispatch := ScriptDispatch(script(t, `echo "source_ws invariant" >&2; exit 2`), 10*time.Second)
 
 	// Act
-	err := dispatch(nil)
+	_, err := dispatch(nil)
 
 	// Assert
 	if err == nil || !strings.Contains(err.Error(), "source_ws invariant") {
@@ -331,7 +341,7 @@ func TestScriptDispatchFailsAScriptThatOutlivesItsBound(t *testing.T) {
 	dispatch := ScriptDispatch(script(t, `exec sleep 10`), 100*time.Millisecond)
 
 	// Act
-	err := dispatch(nil)
+	_, err := dispatch(nil)
 
 	// Assert
 	if err == nil || !strings.Contains(err.Error(), "did not answer within 100ms") {
@@ -361,5 +371,22 @@ func TestWriteBlock(t *testing.T) {
 				t.Fatalf("block = %q, want %q", b.String(), tc.want)
 			}
 		})
+	}
+}
+
+func TestScriptDispatchAnswersTheCLIsStdoutBesideARefusal(t *testing.T) {
+	// Arrange: the CLI prints the answer on stdout and its verdict on stderr,
+	// and exits refused.
+	dispatch := ScriptDispatch(script(t, `echo '{"error":{}}'; echo "the daemon refused" >&2; exit 6`), 10*time.Second)
+
+	// Act
+	printed, err := dispatch(nil)
+
+	// Assert
+	if strings.TrimSpace(string(printed)) != `{"error":{}}` {
+		t.Fatalf("printed = %q, want stdout alone", printed)
+	}
+	if err == nil || !strings.Contains(err.Error(), "the daemon refused") {
+		t.Fatalf("dispatch = %v, want the refusal with the CLI's stderr", err)
 	}
 }
