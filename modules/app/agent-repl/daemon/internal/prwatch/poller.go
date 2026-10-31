@@ -9,8 +9,8 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
 
-	"agent-repld/internal/clock"
 	"agent-repld/internal/briefprompt"
+	"agent-repld/internal/clock"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ghclient"
 	"agent-repld/internal/ids"

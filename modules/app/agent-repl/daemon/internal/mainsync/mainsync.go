@@ -36,8 +36,8 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
-	"agent-repld/internal/clock"
 	"agent-repld/internal/briefprompt"
+	"agent-repld/internal/clock"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/gitclient"
 	"agent-repld/internal/ids"
