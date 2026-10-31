@@ -333,6 +333,17 @@ func (c *controller) hibernate(ctx context.Context, log dlog.Logger, ws ids.Work
 		c.publishHost(ws)
 	}()
 
+	// A DELIVERY UNDER WAY IS ENGAGEMENT. The gate read the session free
+	// before the lease was taken, and a submission may have decided in
+	// between: it read no lease and stood its shim call. The lease is taken
+	// now, and the queue reads it under the lock Delivering answers under, so
+	// a delivery not seen here is held against the lease, and one seen here
+	// defers the stand-down to the turn it starts.
+	if c.deps.Delivering(ws) {
+		log.Info(why.op, "a prompt is being delivered to the shim; deferring the hibernation", fields)
+		return hibernateDeferred
+	}
+
 	directive, cancelDirective := context.WithTimeout(ctx, c.deps.StandBound)
 	answer, err := c.deps.Stand.Hibernate(directive, ws)
 	cancelDirective()

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"testing"
 	"time"
 
@@ -212,6 +213,73 @@ func TestSweepDefersASessionAPromptIsReviving(t *testing.T) {
 	}
 	if len(hibernated) != 0 || len(h.stand.hibernated) != 0 {
 		t.Fatalf("hibernated = %v (directives %v), want the reviving session deferred", hibernated, h.stand.hibernated)
+	}
+}
+
+// TestSweepDefersASessionAPromptIsBeingDeliveredTo pins the stand-down's half
+// of the delivery race: a submission that read no lease before the stand-down
+// took one stands its shim call, and the stand-down, asking AFTER it holds
+// the lease, sees it and defers. No directive goes out, and the lease is
+// released for the prompts held against it.
+func TestSweepDefersASessionAPromptIsBeingDeliveredTo(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws := h.workspace(t, instant.Add(-2*time.Hour))
+	var leaseHeldWhenAsked []bool
+	h.delivering = func(asked ids.WorkspaceID) bool {
+		_, held, err := h.db.Lease(context.Background(), asked)
+		if err != nil {
+			t.Errorf("reading the lease while asked: %v", err)
+		}
+		leaseHeldWhenAsked = append(leaseHeldWhenAsked, held)
+		return true
+	}
+
+	// Act
+	hibernated, err := h.c.Sweep(context.Background(), instant)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	_, leaseAfter, err := h.db.Lease(context.Background(), ws)
+	if err != nil {
+		t.Fatalf("reading the lease after: %v", err)
+	}
+	got := []any{len(hibernated), len(h.stand.hibernated), leaseHeldWhenAsked, leaseAfter}
+	want := []any{0, 0, []bool{true}, false}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("(hibernated, directives, lease held when asked, lease held after) = %v, want %v", got, want)
+	}
+	var logged bool
+	for _, r := range h.log.Records() {
+		if r.Level == "info" && r.Operation == opSweep && r.Context["workspace"] == string(ws) &&
+			r.Message == "a prompt is being delivered to the shim; deferring the hibernation" {
+			logged = true
+		}
+	}
+	if !logged {
+		t.Fatalf("no info record of the deferral under %s naming %s; want it logged", opSweep, ws)
+	}
+}
+
+// TestSweepHibernatesWithNoDeliveryUnderWay pins that the delivery check
+// passes a session nothing is being delivered to.
+func TestSweepHibernatesWithNoDeliveryUnderWay(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws := h.workspace(t, instant.Add(-2*time.Hour))
+	h.delivering = func(ids.WorkspaceID) bool { return false }
+
+	// Act
+	hibernated, err := h.c.Sweep(context.Background(), instant)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	if len(hibernated) != 1 || hibernated[0] != ws {
+		t.Fatalf("hibernated = %v, want %v", hibernated, ws)
 	}
 }
 

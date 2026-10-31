@@ -131,6 +131,12 @@ type Deps struct {
 	// revival reads that session as idle and stands it down under the prompt
 	// (see Sweep).
 	Reviving func(ws ids.WorkspaceID) bool
+	// Delivering reports whether the prompt queue has a delivery to the
+	// workspace's shim under way. REQUIRED: a stand-down asks it after taking
+	// its hibernation lease, and the queue reads the lease under the lock this
+	// answers under, so a prompt is never sent to the shim the stand-down
+	// hibernates (see hibernate).
+	Delivering func(ws ids.WorkspaceID) bool
 	// Announcer publishes the WatchDaemon pushes: the standing drain schedule,
 	// its cancellation, and the shutdown announcement.
 	Announcer Announcer
@@ -364,6 +370,9 @@ func New(deps Deps) (Controller, error) {
 	}
 	if deps.Reviving == nil {
 		return nil, errors.New("drain: a revival answer is required")
+	}
+	if deps.Delivering == nil {
+		return nil, errors.New("drain: a delivery answer is required")
 	}
 	if deps.Announcer == nil {
 		return nil, errors.New("drain: an announcer is required")

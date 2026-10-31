@@ -1529,3 +1529,60 @@ func TestSubmitRefusesASenderThatDisagreesWithTheOrigin(t *testing.T) {
 		})
 	}
 }
+
+// TestSubmitReadsTheLeaseUnderTheDeliveryLock pins the submission's half of
+// the stand-down race: the lease is read with the delivery lock held, so a
+// hibernation lease taken before a stand-down asks Delivering is either read
+// here or follows a shim call Delivering sees. Read before the lock, a prompt
+// went to a shim the stand-down had just hibernated (2026-10-31).
+func TestSubmitReadsTheLeaseUnderTheDeliveryLock(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	var lockFreeAtRead []bool
+	h.db.leaseHook = func() { lockFreeAtRead = append(lockFreeAtRead, lockFree(h)) }
+
+	// Act
+	if _, err := h.q.Submit(context.Background(), submission("t1", "go")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+
+	// Assert
+	if len(lockFreeAtRead) == 0 || lockFreeAtRead[0] {
+		t.Fatalf("delivery lock free at each lease read = %v, want the first read under the lock", lockFreeAtRead)
+	}
+}
+
+// TestDeliveringAnswersAShimCallStanding pins Delivering: true while a
+// submission's StartTurn stands, false once it has settled.
+func TestDeliveringAnswersAShimCallStanding(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	var during []bool
+	h.sender.startHook = func() { during = append(during, h.q.Delivering(theWorkspace)) }
+
+	// Act
+	if _, err := h.q.Submit(context.Background(), submission("t1", "go")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	after := h.q.Delivering(theWorkspace)
+
+	// Assert
+	if got, want := []any{during, after}, []any{[]bool{true}, false}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("(Delivering during the call, after it) = %v, want %v", got, want)
+	}
+}
+
+// TestDeliveringAnswersFalseWithNothingDelivered pins that a workspace no
+// submission has reached has no delivery under way.
+func TestDeliveringAnswersFalseWithNothingDelivered(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	got := h.q.Delivering(theWorkspace)
+
+	// Assert
+	if got {
+		t.Fatal("Delivering = true, want false with no shim call standing")
+	}
+}

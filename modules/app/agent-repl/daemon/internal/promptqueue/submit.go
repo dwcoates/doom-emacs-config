@@ -38,6 +38,22 @@ func (q *queue) Submit(ctx context.Context, sub Submission) (Disposition, error)
 		return Disposition{}, fmt.Errorf("submit to %q: %w", sub.WS, err)
 	}
 
+	// THE DISPATCH DECISION IS TAKEN UNDER THE WORKSPACE'S DELIVERY LOCK, the
+	// same lock a turn end, a lease change and the bounce registry decide
+	// under. Without it a submission could start a turn in the instant after
+	// the registry judged the workspace free and before the bounce began.
+	//
+	// THE LEASE IS READ UNDER IT TOO. A stand-down takes its hibernation
+	// lease and then asks, under this lock, whether a delivery is under way
+	// (Delivering), so a submission either reads the lease and is held, or
+	// stands its shim call before the stand-down looks and the stand-down
+	// defers. Read before the lock, the lease could be taken in between: the
+	// prompt went to a shim the stand-down had just hibernated and was
+	// refused `query_dead` (e2e TestKeepAliveAnswerAfterVendorTurnNeverServed,
+	// 2026-10-31).
+	d := q.lockDelivery(sub.WS)
+	defer d.unlock()
+
 	disposition, handled, err := q.applyLeasePolicy(ctx, sub, log)
 	if handled || err != nil {
 		return disposition, err
@@ -61,12 +77,6 @@ func (q *queue) Submit(ctx context.Context, sub Submission) (Disposition, error)
 		}
 	}
 
-	// THE DISPATCH DECISION IS TAKEN UNDER THE WORKSPACE'S DELIVERY LOCK, the
-	// same lock a turn end, a lease change and the bounce registry decide
-	// under. Without it a submission could start a turn in the instant after
-	// the registry judged the workspace free and before the bounce began.
-	d := q.lockDelivery(sub.WS)
-	defer d.unlock()
 	if q.isDraining(sub.WS) {
 		log.Info(opSubmit, "the workspace is draining for a bounce; the submission is held for the new shim", nil)
 		return q.hold(ctx, sub, "", &leaseHold{kind: wsm.HoldBuildRefresh}, log)
@@ -815,6 +825,16 @@ func (q *queue) noteBringUp(ws ids.WorkspaceID, delta int, log dlog.Logger) {
 // between the two the session is never both free and unclaimed.
 func (q *queue) Reviving(ws ids.WorkspaceID) bool {
 	return q.isReviving(ws)
+}
+
+// Delivering is Queue.Delivering. It answers under the delivery lock, so it
+// waits out a dispatch decision being taken and sees the shim call that
+// decision stood.
+func (q *queue) Delivering(ws ids.WorkspaceID) bool {
+	d := q.lockDelivery(ws)
+	defer d.unlock()
+	_, standing := q.standingCall(ws)
+	return standing
 }
 
 // isReviving reports whether a bring-up for a workspace is running or about to

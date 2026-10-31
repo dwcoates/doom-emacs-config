@@ -771,6 +771,18 @@ type Service interface {
 	Queue
 	TurnStops
 	HeldRollback
+	StandDownGuard
+}
+
+// StandDownGuard is the part of the queue a stand-down asks before it
+// hibernates a session.
+type StandDownGuard interface {
+	// Delivering reports whether a shim call of this queue's stands on the
+	// workspace: a prompt already decided and on its way to the shim. A
+	// stand-down asks it AFTER taking its hibernation lease, and Submit reads
+	// the lease under the same delivery lock, so a submission is either held
+	// against the lease or seen here, never sent to a hibernated shim.
+	Delivering(ws ids.WorkspaceID) bool
 }
 
 // HeldRollback is the stop key's take-back of a held prompt: the one part of
