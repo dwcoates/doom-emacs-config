@@ -1640,7 +1640,7 @@ workspace from the working directory, so no source tag rides it."
     (cl-letf (((symbol-function 'agent-repl-webhost-show-editor-notice)
                (lambda (ws text) (push (list ws text) sent) t))
               ((symbol-function 'agent-repl--info)
-               (lambda (_ws fmt &rest args) (push (apply #'format fmt args) infos))))
+               (agent-repl-test--record-into infos)))
       ;; Act.
       (agent-repl--input-notify "ws" "send: no daemon connection")
       ;; Assert.
@@ -1653,7 +1653,7 @@ workspace from the working directory, so no source tag rides it."
   (let ((infos nil))
     (cl-letf (((symbol-function 'agent-repl-webhost-show-editor-notice) (lambda (_ws _text) nil))
               ((symbol-function 'agent-repl--info)
-               (lambda (_ws fmt &rest args) (push (apply #'format fmt args) infos))))
+               (agent-repl-test--record-into infos)))
       ;; Act.
       (agent-repl--input-notify "ws" "refused: merge in flight")
       ;; Assert.
