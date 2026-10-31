@@ -635,7 +635,13 @@ func TestHandoverTransfersAFreeWorkspaceThroughTheAdoptionRendezvous(t *testing.
 	t.Parallel()
 	// Arrange: an ordinary, idle workspace whose host+web streams are open at
 	// the moment the handover is announced, so it is an expected participant.
-	selfRepo, d := drainSelfRepoDaemon(t)
+	// THE SUCCESSOR'S ADOPTION IS HELD FOR THE PARTICIPANTS
+	// (adoptAwaitsParticipantsEnv): the test reads the not_yet_adopted gap,
+	// which a live successor closes on its own within milliseconds of the
+	// manifest -- without the seam the read raced it and lost under load
+	// (2026-10-31: two queue merges' gates failed here, the successor having
+	// adopted the running shim before the early prompt arrived).
+	selfRepo, d := drainSelfRepoDaemon(t, adoptAwaitsParticipantsEnv)
 	// The sweep covers every test; the declared records are evidence of a refusal the test provokes.
 	d.ExpectWarnings("daemon.refusal.unlanded_arm.standing")
 	f := drainOpenWorkspace(t, d)
