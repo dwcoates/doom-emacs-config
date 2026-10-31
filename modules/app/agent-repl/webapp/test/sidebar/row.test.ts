@@ -2213,6 +2213,15 @@ describe("the row's display mode", () => {
       expect([name.classList.contains("fading"), name.style.getPropertyValue("--name-fade-delay")]).toEqual([true, expect.stringMatching(/^-\d+ms$/)]);
     });
 
+    it("draws a viewed row's name at the viewed grey rather than fading it", () => {
+      // Arrange, Act.
+      const drawn = drawRosterRow(row({ id: "ws-1", status: { case: "done", value: {} }, viewed: true, when: { case: "noTurnRunning", value: { lastTurnEndedAtMs: 1n } } }), sidebarContext(), "R");
+      const name = drawn.querySelector<HTMLElement>(":scope > .row > .name")!;
+
+      // Assert.
+      expect([name.classList.contains("viewed"), name.classList.contains("fading"), name.style.getPropertyValue("--name-fade-delay")]).toEqual([true, false, ""]);
+    });
+
     it("paints an unviewed row's name in the repository headers' ink", () => {
       // Arrange, Act.
       const drawn = drawRosterRow(row({ id: "ws-1", status: { case: "done", value: {} } }), sidebarContext(), "R");

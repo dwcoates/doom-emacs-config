@@ -18,7 +18,18 @@ describe("nameTint", () => {
     { name: "tints nothing on a row with no tone", shown: "turnRunning", ended: undefined, tone: "tone-none", want: null },
   ])("$name", ({ shown, ended, tone, want }) => {
     // Arrange / Act
-    const got = nameTint(shown, ended, tone, 10_000);
+    const got = nameTint(shown, ended, tone, false, 10_000);
+
+    // Assert
+    expect(got).toEqual(want);
+  });
+
+  it.each([
+    { name: "stops a viewed row's ended-turn fade so it draws at rest", shown: "noTurnRunning", ended: 9_000, tone: "tone-green", want: null },
+    { name: "tints nothing on a viewed row with no ended turn", shown: "noTurnRunning", ended: undefined, tone: "tone-green", want: null },
+  ])("$name", ({ shown, ended, tone, want }) => {
+    // Arrange / Act
+    const got = nameTint(shown, ended, tone, true, 10_000);
 
     // Assert
     expect(got).toEqual(want);
