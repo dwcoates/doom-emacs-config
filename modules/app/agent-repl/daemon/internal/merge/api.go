@@ -57,7 +57,16 @@ const (
 	BriefConflictResolve = "merge-conflict-resolve"
 	// BriefTestFailureResolve is the test-failure-resolution agent's brief.
 	BriefTestFailureResolve = "merge-test-failure-resolve"
+	// BriefFixCommit asks a fixing turn that ended with uncommitted changes
+	// to commit them before the merge goes on.
+	BriefFixCommit = "merge-fix-commit"
 )
+
+// MaxCommitPrompts bounds how many times a fixing turn that ended with
+// uncommitted changes is prompted to commit them. A worktree still dirty after
+// the last prompt fails the merge: the agent was asked and did not, and the
+// merge never rebases over work it would lose.
+const MaxCommitPrompts = 2
 
 // EscalationFile is the file the test-fix agent writes in the worktree it
 // fixes to end the fixing attempts without a passing suite, and EscalationMarker is the

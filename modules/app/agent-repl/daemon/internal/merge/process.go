@@ -1029,20 +1029,84 @@ func (r *run) fixSettled(ctx context.Context, round tabRound, n, attempt int, su
 		why = line
 	}
 	if why != "" {
-		r.settleAgentic()
-		r.publish(fixingKey(n), fixingTab(round.settled(r.o.nowMS(), why), attempt))
-		r.settleTesting(why)
-		r.closeTab(ctx, round, "failed")
-		r.o.log(ctx, r.ws).Info(op, "the fixing attempt gave up; the merge fails", dlog.Context{
-			"workspace": string(r.ws), "attempt": attempt, "why": why})
-		out := failedIn(footer.FailedTests, why)
-		return &out, nil
+		return r.fixGaveUp(ctx, round, n, attempt, why), nil
+	}
+	// A FIXING TURN NEVER HANDS THE MERGE BACK WITH UNCOMMITTED WORK: the
+	// rebase that follows refuses a dirty worktree, which once failed a whole
+	// merge whose fix was committed 32 s later (2026-10-31). The merge keeps
+	// its place and prompts the workspace to commit instead.
+	if gaveUp, err := r.requireCommitted(ctx, round, n, attempt, targetBranch); err != nil || gaveUp != nil {
+		return gaveUp, err
 	}
 	r.settleAgentic()
 	r.publish(fixingKey(n), fixingTab(round.settled(r.o.nowMS(), ""), attempt))
 	r.publishTesting(false)
 	r.closeTab(ctx, round, "succeeded")
 	return nil, nil
+}
+
+// requireCommitted holds a fixing attempt whose turn ended until its worktree
+// is clean: each time it is not, the workspace's session is prompted to commit
+// (BriefFixCommit) while the merge keeps its place, up to MaxCommitPrompts
+// times. It answers nil once the worktree is clean, and the failed outcome
+// when it is still dirty after the last prompt.
+func (r *run) requireCommitted(ctx context.Context, round tabRound, n, attempt int, targetBranch string) (*outcome, error) {
+	const op = "daemon.merge.fixes"
+	dir := r.subject.dir
+	for prompt := 1; ; prompt++ {
+		clean, err := r.git.IsClean(ctx, dir)
+		if err != nil {
+			return nil, fmt.Errorf("merge: reading whether %s is clean after the fixing turn: %w", dir, err)
+		}
+		fields := dlog.Context{"workspace": string(r.ws), "lease": string(r.lease.ID), "attempt": attempt, "worktree": dir}
+		if clean {
+			if prompt > 1 {
+				fields["prompts"] = prompt - 1
+				r.o.log(ctx, r.ws).Info(op, "the fixing attempt's changes are committed; the merge goes on", fields)
+			}
+			return nil, nil
+		}
+		if prompt > MaxCommitPrompts {
+			why := fmt.Sprintf("the fixing attempt left uncommitted changes in %s after %d prompts to commit them", dir, MaxCommitPrompts)
+			return r.fixGaveUp(ctx, round, n, attempt, why), nil
+		}
+		fields["prompt"], fields["of"] = prompt, MaxCommitPrompts
+		r.o.log(ctx, r.ws).Info(op, "the fixing turn ended with uncommitted changes; the workspace is prompted to commit them and the merge keeps its place", fields)
+		text, err := r.o.deps.Briefs(BriefFixCommit, map[string]string{
+			"source_branch": r.subject.branch,
+			"worktree_dir":  dir,
+			"target_branch": r.briefTarget(targetBranch),
+			"prompt":        fmt.Sprintf("%d", prompt),
+			"max_prompts":   fmt.Sprintf("%d", MaxCommitPrompts),
+		})
+		if err != nil {
+			return nil, fmt.Errorf("merge: composing the commit brief: %w", err)
+		}
+		turn := wsm.NewTurnID()
+		if err := r.checkpoint(ctx, TabFixes, func(d *progressDoc) { d.Turn = string(turn) }); err != nil {
+			return nil, err
+		}
+		if _, err := r.o.submitThen(ctx, r.ws, turn, text, fixOrigin, nil); err != nil {
+			return nil, err
+		}
+		if err := stillWanted(ctx); err != nil {
+			return nil, err
+		}
+	}
+}
+
+// fixGaveUp settles a fixing attempt that ended the merge, for WHY: its
+// fixing sub-subtab and the tests tab settle failed, the round closes failed,
+// and the merge fails in its tests.
+func (r *run) fixGaveUp(ctx context.Context, round tabRound, n, attempt int, why string) *outcome {
+	r.settleAgentic()
+	r.publish(fixingKey(n), fixingTab(round.settled(r.o.nowMS(), why), attempt))
+	r.settleTesting(why)
+	r.closeTab(ctx, round, "failed")
+	r.o.log(ctx, r.ws).Info("daemon.merge.fixes", "the fixing attempt gave up; the merge fails", dlog.Context{
+		"workspace": string(r.ws), "attempt": attempt, "why": why})
+	out := failedIn(footer.FailedTests, why)
+	return &out
 }
 
 // resumeFix goes on with a fixing attempt a restart interrupted: the merge
