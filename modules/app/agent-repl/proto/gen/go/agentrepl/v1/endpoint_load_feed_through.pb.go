@@ -560,7 +560,14 @@ func (x *LoadFeedThroughTransferringAway) GetAddress() string {
 }
 
 type LoadFeedThroughNotYetAdopted struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The `127.0.0.1:<port>` of the daemon that serves this workspace until the
+	// joining daemon adopts it: the handover's incumbent. A client views and
+	// acts on the workspace there in the meantime, and the incumbent's later
+	// `transferred` push re-homes it. UNSET when no live daemon serves the
+	// workspace (a takeover after the incumbent died), in which case the client
+	// waits for the adoption.
+	Address       *string `protobuf:"bytes,1,opt,name=address,proto3,oneof" json:"address,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -593,6 +600,13 @@ func (x *LoadFeedThroughNotYetAdopted) ProtoReflect() protoreflect.Message {
 // Deprecated: Use LoadFeedThroughNotYetAdopted.ProtoReflect.Descriptor instead.
 func (*LoadFeedThroughNotYetAdopted) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_load_feed_through_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *LoadFeedThroughNotYetAdopted) GetAddress() string {
+	if x != nil && x.Address != nil {
+		return *x.Address
+	}
+	return ""
 }
 
 type LoadFeedThroughTargetUndecodable struct {
@@ -743,8 +757,11 @@ const file_agentrepl_v1_endpoint_load_feed_through_proto_rawDesc = "" +
 	"#LoadFeedThroughWorkspaceRefMismatch\x12!\n" +
 	"\fregistry_dir\x18\x01 \x01(\tR\vregistryDir\";\n" +
 	"\x1fLoadFeedThroughTransferringAway\x12\x18\n" +
-	"\aaddress\x18\x01 \x01(\tR\aaddress\"\x1e\n" +
-	"\x1cLoadFeedThroughNotYetAdopted\"\"\n" +
+	"\aaddress\x18\x01 \x01(\tR\aaddress\"I\n" +
+	"\x1cLoadFeedThroughNotYetAdopted\x12\x1d\n" +
+	"\aaddress\x18\x01 \x01(\tH\x00R\aaddress\x88\x01\x01B\n" +
+	"\n" +
+	"\b_address\"\"\n" +
 	" LoadFeedThroughTargetUndecodable\"\x19\n" +
 	"\x17LoadFeedThroughNotFound\";\n" +
 	"!LoadFeedThroughHistoryUnavailable\x12\x16\n" +
@@ -822,6 +839,7 @@ func file_agentrepl_v1_endpoint_load_feed_through_proto_init() {
 		(*LoadFeedThroughError_NotFound)(nil),
 		(*LoadFeedThroughError_HistoryUnavailable)(nil),
 	}
+	file_agentrepl_v1_endpoint_load_feed_through_proto_msgTypes[7].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

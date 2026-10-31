@@ -181,6 +181,12 @@ type Controller interface {
 	// registration): it is owned here from that moment, so no standing a
 	// rollout derives ever answers it not_yet_adopted on its own daemon.
 	Created(ws ids.WorkspaceID)
+	// IncumbentAddress answers the address of the daemon that serves the
+	// workspaces this joining daemon has not adopted yet, which is
+	// `not_yet_adopted{address}`'s only field. It is empty once the incumbent
+	// has exited (the takeover is done, or the incumbent died), and on a
+	// daemon that never joined: then nothing but this daemon serves.
+	IncumbentAddress() string
 	// Reconcile reads the intent manifest against the kernel locks actually
 	// held and answers one disposition PER SESSION. PRESERVED, ROLLED, DIED
 	// and UNKNOWN are never collapsed and never counted.
@@ -265,6 +271,11 @@ type Deps struct {
 	// SelfAddress is this daemon's own `127.0.0.1:<port>`, handed to the
 	// successor as --joining and never inferred by it.
 	SelfAddress string
+	// IncumbentAddress is the `127.0.0.1:<port>` of the daemon this one joins
+	// (its --joining value), empty for a daemon that boots as the incumbent.
+	// It is what a not_yet_adopted refusal names while the incumbent still
+	// serves the workspace (Controller.IncumbentAddress).
+	IncumbentAddress string
 	// Instance identifies this daemon process for serving ownership.
 	Instance ids.InstanceID
 	// StateDir is the state root; the successor reports its address in it.

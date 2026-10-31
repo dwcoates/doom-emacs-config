@@ -606,7 +606,14 @@ func (x *GetFeedPageTransferringAway) GetAddress() string {
 }
 
 type GetFeedPageNotYetAdopted struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The `127.0.0.1:<port>` of the daemon that serves this workspace until the
+	// joining daemon adopts it: the handover's incumbent. A client views and
+	// acts on the workspace there in the meantime, and the incumbent's later
+	// `transferred` push re-homes it. UNSET when no live daemon serves the
+	// workspace (a takeover after the incumbent died), in which case the client
+	// waits for the adoption.
+	Address       *string `protobuf:"bytes,1,opt,name=address,proto3,oneof" json:"address,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -639,6 +646,13 @@ func (x *GetFeedPageNotYetAdopted) ProtoReflect() protoreflect.Message {
 // Deprecated: Use GetFeedPageNotYetAdopted.ProtoReflect.Descriptor instead.
 func (*GetFeedPageNotYetAdopted) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_get_feed_page_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *GetFeedPageNotYetAdopted) GetAddress() string {
+	if x != nil && x.Address != nil {
+		return *x.Address
+	}
+	return ""
 }
 
 type GetFeedPageFeedUndecodable struct {
@@ -746,8 +760,11 @@ const file_agentrepl_v1_endpoint_get_feed_page_proto_rawDesc = "" +
 	"\x1fGetFeedPageWorkspaceRefMismatch\x12!\n" +
 	"\fregistry_dir\x18\x01 \x01(\tR\vregistryDir\"7\n" +
 	"\x1bGetFeedPageTransferringAway\x12\x18\n" +
-	"\aaddress\x18\x01 \x01(\tR\aaddress\"\x1a\n" +
-	"\x18GetFeedPageNotYetAdopted\"\x1c\n" +
+	"\aaddress\x18\x01 \x01(\tR\aaddress\"E\n" +
+	"\x18GetFeedPageNotYetAdopted\x12\x1d\n" +
+	"\aaddress\x18\x01 \x01(\tH\x00R\aaddress\x88\x01\x01B\n" +
+	"\n" +
+	"\b_address\"\x1c\n" +
 	"\x1aGetFeedPageFeedUndecodable\"\x1f\n" +
 	"\x1dGetFeedPageFeedNotInWorkspaceB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
@@ -823,6 +840,7 @@ func file_agentrepl_v1_endpoint_get_feed_page_proto_init() {
 		(*GetFeedPageError_FeedUndecodable)(nil),
 		(*GetFeedPageError_FeedNotInWorkspace)(nil),
 	}
+	file_agentrepl_v1_endpoint_get_feed_page_proto_msgTypes[8].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

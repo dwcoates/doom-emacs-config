@@ -113,6 +113,12 @@ type Deps struct {
 	// SEAM ADDITION (recorded in the report): workspace.Ownership reports the
 	// STANDING but carries no address, and the arm has nowhere else to get one.
 	SuccessorAddress func() string
+	// IncumbentAddress answers the address of the daemon that serves a
+	// workspace this joining daemon has not adopted yet, which is
+	// `not_yet_adopted{address}`'s only field: the client views and acts on
+	// the workspace there until the adoption re-homes it. It answers the empty
+	// string when no other daemon serves it, and the arm then names none.
+	IncumbentAddress func() string
 	// Creates admits every create this surface is asked for, and refuses one
 	// while the daemon stands down (creategate).
 	Creates *creategate.Gate
@@ -515,6 +521,8 @@ func New(deps Deps) (Server, error) {
 		return nil, missing("an ownership source")
 	case deps.SuccessorAddress == nil:
 		return nil, missing("a successor address source")
+	case deps.IncumbentAddress == nil:
+		return nil, missing("an incumbent address source")
 	case deps.Creates == nil:
 		return nil, missing("the create gate")
 	case deps.Feed == nil:

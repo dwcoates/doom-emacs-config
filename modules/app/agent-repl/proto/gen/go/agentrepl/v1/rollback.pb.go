@@ -439,7 +439,14 @@ func (x *RollBackTransferringAway) GetAddress() string {
 
 // A joining daemon has not finished adopting this workspace yet.
 type RollBackNotYetAdopted struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The `127.0.0.1:<port>` of the daemon that serves this workspace until the
+	// joining daemon adopts it: the handover's incumbent. A client views and
+	// acts on the workspace there in the meantime, and the incumbent's later
+	// `transferred` push re-homes it. UNSET when no live daemon serves the
+	// workspace (a takeover after the incumbent died), in which case the client
+	// waits for the adoption.
+	Address       *string `protobuf:"bytes,1,opt,name=address,proto3,oneof" json:"address,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -472,6 +479,13 @@ func (x *RollBackNotYetAdopted) ProtoReflect() protoreflect.Message {
 // Deprecated: Use RollBackNotYetAdopted.ProtoReflect.Descriptor instead.
 func (*RollBackNotYetAdopted) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_rollback_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *RollBackNotYetAdopted) GetAddress() string {
+	if x != nil && x.Address != nil {
+		return *x.Address
+	}
+	return ""
 }
 
 // The plan no longer describes what would happen.
@@ -731,8 +745,11 @@ const file_agentrepl_v1_rollback_proto_rawDesc = "" +
 	"\x1cRollBackWorkspaceRefMismatch\x12!\n" +
 	"\fregistry_dir\x18\x01 \x01(\tR\vregistryDir\"4\n" +
 	"\x18RollBackTransferringAway\x12\x18\n" +
-	"\aaddress\x18\x01 \x01(\tR\aaddress\"\x17\n" +
-	"\x15RollBackNotYetAdopted\"\x13\n" +
+	"\aaddress\x18\x01 \x01(\tR\aaddress\"B\n" +
+	"\x15RollBackNotYetAdopted\x12\x1d\n" +
+	"\aaddress\x18\x01 \x01(\tH\x00R\aaddress\x88\x01\x01B\n" +
+	"\n" +
+	"\b_address\"\x13\n" +
 	"\x11RollBackPlanStale\"\x13\n" +
 	"\x11RollBackNoSession\"\x1b\n" +
 	"\x19RollBackPromptNotRecorded\"\x15\n" +
@@ -803,6 +820,7 @@ func file_agentrepl_v1_rollback_proto_init() {
 		(*RollBackError_UnseenPrompt)(nil),
 		(*RollBackError_FilesNotRestorable)(nil),
 	}
+	file_agentrepl_v1_rollback_proto_msgTypes[5].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

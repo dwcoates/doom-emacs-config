@@ -78,6 +78,7 @@
 (declare-function agent-repl-link-primary "daemon-link" ())
 (declare-function agent-repl-link-live "daemon-link" ())
 (declare-function agent-repl-link-successor "daemon-link" ())
+(declare-function agent-repl-link-serving-conn "daemon-link" (address))
 (declare-function agent-repl-link-departing-p "daemon-link" (live &optional ended-planned-on))
 (defvar agent-repl-link-down-planned)
 (defvar agent-repl-link-promote-functions)
@@ -472,6 +473,41 @@ allows for as long as the takeover lasts."
   :type 'number
   :group 'agent-repl)
 
+(defvar agent-repl-host--reselect-on-reattach nil
+  "The workspace whose selection a handover refused, or nil.
+Its `not_yet_adopted' named the daemon that serves it, so WS is re-attached
+there, and the selection is sent again when that walk finishes
+\(`agent-repl-host--reattached').")
+
+(defun agent-repl-host-serving-address (arm-plist)
+  "Return the daemon address ARM-PLIST\='s `not_yet_adopted' names, or nil.
+The arm names the daemon that serves the workspace until the joining
+daemon adopts it; nil when it names none, or is another arm."
+  (and (eq (plist-get arm-plist :arm) :not-yet-adopted)
+       (let ((address (plist-get (plist-get arm-plist :value) :address)))
+         (and (stringp address) (not (string-empty-p address)) address))))
+
+(defun agent-repl-host-view-where-served (ws address trigger)
+  "Re-attach WS to the daemon at ADDRESS, which serves it during a handover.
+A joining daemon refused WS `not_yet_adopted' and named ADDRESS as the
+daemon serving it meanwhile, so WS is registered there (idempotent by
+dir) and its stream, page and calls follow: viewing WS never waits for the
+handover.  The incumbent\='s own `transferred' push, later, re-homes WS onto
+the successor through the adopt walk.  TRIGGER is recorded.  Answers
+non-nil when a walk was started, nil when WS already stands there."
+  (let ((conn (agent-repl-link-serving-conn address))
+        (current (agent-repl-host-conn ws)))
+    (if (and current (agent-repl-connect-connection-alive-p current)
+             (equal address (agent-repl-connect-connection-address current)))
+        (progn
+          (agent-repl--info ws "elisp.host.served-here-already ws=%s address=%S trigger=%s"
+                            ws address trigger)
+          nil)
+      (agent-repl--info ws "elisp.host.view-where-served ws=%s address=%S trigger=%s"
+                        ws address trigger)
+      (agent-repl-host--reattach ws conn :register trigger)
+      t)))
+
 (defun agent-repl-host--on-refused (ws op value)
   "Report a daemon-authored refusal VALUE of OP for WS, or route the handover.
 THE SLUG NAMES THE RPC (`elisp.host.<op>-refused'), so a reader can ask
@@ -485,7 +521,16 @@ one place the handover walk lives."
      ((memq keyword agent-repl-host--handover-arms)
       (agent-repl--info ws (format "elisp.host.%s-handover-refusal ws=%%s arm=%%S fields=%%S" op)
                         ws keyword (plist-get arm :value))
-      (if (eq keyword :not-yet-adopted)
+      ;; A SELECTION A HANDOVER REFUSED IS STILL THE USER\='S: it is sent
+      ;; again once WS stands on the daemon that serves it.  Marked BEFORE
+      ;; the routing below, whose walk may finish at once.
+      (when (and (equal op "select") (agent-repl-host-serving-address arm))
+        (setq agent-repl-host--reselect-on-reattach ws))
+      ;; A `not_yet_adopted' NAMING THE DAEMON THAT SERVES WS is routed at
+      ;; once: WS is viewed there, so nothing waits on the takeover.  One
+      ;; naming none is the takeover still settling, retried after a pause.
+      (if (and (eq keyword :not-yet-adopted)
+               (not (agent-repl-host-serving-address arm)))
           (run-at-time agent-repl-host-handover-retry-delay nil
                        #'agent-repl-host-handle-refusal ws arm)
         (agent-repl-host-handle-refusal ws arm)))
@@ -1552,7 +1597,18 @@ opened, so no workspace ever holds two, and the subscribe is what moves
   (agent-repl-host--put ws :detached nil)
   (agent-repl--info ws "elisp.host.reattached ws=%s address=%S trigger=%s"
                     ws (agent-repl-connect-connection-address new) trigger)
-  (run-hook-with-args 'agent-repl-host-reattached-functions ws))
+  (run-hook-with-args 'agent-repl-host-reattached-functions ws)
+  (agent-repl-host--reselect-after-reattach ws))
+
+(defun agent-repl-host--reselect-after-reattach (ws)
+  "Send WS\='s selection again when a handover refused it and WS now stands.
+See `agent-repl-host--reselect-on-reattach'."
+  (when (equal ws agent-repl-host--reselect-on-reattach)
+    (setq agent-repl-host--reselect-on-reattach nil)
+    (agent-repl--info ws "elisp.host.reselect-where-served ws=%s address=%S"
+                      ws (let ((conn (agent-repl-host-conn ws)))
+                           (and conn (agent-repl-connect-connection-address conn))))
+    (agent-repl-host-select ws)))
 
 (defun agent-repl-host--register-onto (ws new token trigger on-settled)
   "The `:register' claim of reattach TOKEN: register WS\='s dir on NEW.
@@ -1980,11 +2036,20 @@ through here, so a repeated refusal cannot recurse into a loop."
                                  ws address)
                (agent-repl-host--adopt-on-acceptance ws))))))
       (:not-yet-adopted
-       (agent-repl--info ws "elisp.host.not-yet-adopted ws=%s" ws)
-       (let ((new (agent-repl-link-successor)))
-         (if new
-             (agent-repl-host--reattach ws new :adopt "not-yet-adopted")
-           (agent-repl-host--adopt-on-acceptance ws))))
+       (let ((address (agent-repl-host-serving-address arm-plist)))
+         (agent-repl--info ws "elisp.host.not-yet-adopted ws=%s serving=%S" ws address)
+         (cond
+          ;; THE REFUSAL NAMES WHERE WS IS SERVED: it is viewed there.
+          (address
+           (unless (agent-repl-host-view-where-served ws address "not-yet-adopted")
+             ;; WS ALREADY STANDS THERE, so the daemon that refused is the
+             ;; one named: nothing is sent again, or it would be refused
+             ;; again.  The incumbent's `transferred' push moves WS on.
+             (when (equal ws agent-repl-host--reselect-on-reattach)
+               (setq agent-repl-host--reselect-on-reattach nil))))
+          ((agent-repl-link-successor)
+           (agent-repl-host--reattach ws (agent-repl-link-successor) :adopt "not-yet-adopted"))
+          (t (agent-repl-host--adopt-on-acceptance ws)))))
       (_
        (agent-repl--error ws "elisp.host.unknown-refusal-arm ws=%s arm=%S" ws arm)))))
 

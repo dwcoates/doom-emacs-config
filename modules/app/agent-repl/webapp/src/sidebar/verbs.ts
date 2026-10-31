@@ -83,7 +83,7 @@ import type { WorkspaceHasOpenChildren, WorkspaceParentNotOpen } from "../../../
 import { hasOpenChildrenSentence, mergeHasOpenChildrenSentence, parentNotOpenSentence } from "../rpc/family-refusal.js";
 import type { RefusalCause } from "../rpc/refusal.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
-import { callUnary } from "../rpc/unary.js";
+import { callUnary, type UnaryContext } from "../rpc/unary.js";
 import type { SidebarContext } from "./context.js";
 import { childrenMatching } from "../dom.js";
 
@@ -488,19 +488,39 @@ export async function runVerb<Res extends VerbResponse>(
   clearRefusal(control);
   setDisabled(control, true);
   try {
-    const response = await callUnary(
+    let response = await callUnary(
       spec.sc.ctx,
       spec.rpc,
       (client) => spec.call(client),
       spec.schema,
     );
-    const result = requireCase(response.result, `${spec.rpc}Response.result`);
+    let result = requireCase(response.result, `${spec.rpc}Response.result`);
+    // A WORKSPACE A HANDOVER HAS NOT MOVED YET is served by the daemon the
+    // refusal names, so the verb is asked of that daemon instead: viewing and
+    // acting on a workspace never waits for the handover to finish.
+    const served = result.case === "error" ? servedElsewhere(spec, refusalCause(spec.rpc, result.value)) : null;
+    if (served !== null) {
+      response = await callUnary(served, spec.rpc, (client) => spec.call(client), spec.schema);
+      result = requireCase(response.result, `${spec.rpc}Response.result`);
+    }
     if (result.case === "success") {
       spec.took?.(response);
       if (spec.outlivesPush === true) setDisabled(control, false);
       return true;
     }
     const cause = refusalCause(spec.rpc, result.value);
+    // A HANDOVER IS A LIFECYCLE STATE, NEVER A ROW ERROR. With no daemon
+    // named (none serves it meanwhile), or the named one not serving it
+    // either, the handover's own affordances say what is happening and the
+    // control is simply ready again.
+    if (cause.case === "notYetAdopted") {
+      log.info(`${spec.rpc} waits on a handover: no daemon serves the workspace yet`, {
+        operation: "sidebar.verbs.handover",
+        context: { rpc: spec.rpc, retried_at_incumbent: served !== null },
+      });
+      setDisabled(control, false);
+      return false;
+    }
     const expected = spec.expectedArms?.[cause.case];
     if (expected !== undefined) {
       log.info(`${spec.rpc} was answered ${cause.case}`, {
@@ -803,6 +823,27 @@ export function restartWorkspaceRefusal(cause: CauseOf<RestartWorkspaceError>): 
     default:
       return unreachableArm("RestartWorkspaceError.cause", cause.case);
   }
+}
+
+/**
+ * The context a verb refused `not_yet_adopted` is asked again on: the daemon
+ * the arm names as still serving the workspace, or null when the arm names
+ * none or this page cannot dial another daemon (a workspace page; only the
+ * web view host's context has `clientAt`).
+ */
+export function servedElsewhere<Res extends VerbResponse>(
+  spec: VerbCall<Res>,
+  cause: RefusalCause & { case: string },
+): UnaryContext | null {
+  if (cause.case !== "notYetAdopted") return null;
+  const address = (cause.value as { address?: string } | undefined)?.address;
+  const ctx = spec.sc.ctx;
+  if (address === undefined || address === "" || ctx.clientAt === undefined) return null;
+  log.info(`${spec.rpc} goes to the daemon that still serves the workspace`, {
+    operation: "sidebar.verbs.served-elsewhere",
+    context: { rpc: spec.rpc, address },
+  });
+  return { client: ctx.clientAt(address), failures: ctx.failures, isQuiesced: () => ctx.isQuiesced() };
 }
 
 /** The refusal, drawn as the NEXT SIBLING of the control that made the call. */

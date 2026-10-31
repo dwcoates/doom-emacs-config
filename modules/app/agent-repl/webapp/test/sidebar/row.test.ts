@@ -1394,7 +1394,7 @@ describe("the row click", () => {
           create(SelectInEditorResponseSchema, {
             result: {
               case: "error",
-              value: { cause: { case: "notYetAdopted", value: {} } },
+              value: { cause: { case: "unknownWorkspace", value: {} } },
             },
           }),
       }),
@@ -1402,7 +1402,7 @@ describe("the row click", () => {
     const drawn = drawRosterRow(row({ id: "ws-1" }), sc, "R");
     await click(drawn.querySelector("[data-select]") as Element);
     expect(drawn.querySelector(":scope > .sb-refusal")?.getAttribute("data-arm")).toBe(
-      "notYetAdopted",
+      "unknownWorkspace",
     );
   });
 });

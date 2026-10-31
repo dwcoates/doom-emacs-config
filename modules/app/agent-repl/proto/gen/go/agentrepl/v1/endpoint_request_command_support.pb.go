@@ -493,7 +493,14 @@ func (x *RequestCommandSupportTransferringAway) GetAddress() string {
 }
 
 type RequestCommandSupportNotYetAdopted struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The `127.0.0.1:<port>` of the daemon that serves this workspace until the
+	// joining daemon adopts it: the handover's incumbent. A client views and
+	// acts on the workspace there in the meantime, and the incumbent's later
+	// `transferred` push re-homes it. UNSET when no live daemon serves the
+	// workspace (a takeover after the incumbent died), in which case the client
+	// waits for the adoption.
+	Address       *string `protobuf:"bytes,1,opt,name=address,proto3,oneof" json:"address,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -526,6 +533,13 @@ func (x *RequestCommandSupportNotYetAdopted) ProtoReflect() protoreflect.Message
 // Deprecated: Use RequestCommandSupportNotYetAdopted.ProtoReflect.Descriptor instead.
 func (*RequestCommandSupportNotYetAdopted) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_request_command_support_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *RequestCommandSupportNotYetAdopted) GetAddress() string {
+	if x != nil && x.Address != nil {
+		return *x.Address
+	}
+	return ""
 }
 
 type RequestCommandSupportBlankCommand struct {
@@ -635,8 +649,11 @@ const file_agentrepl_v1_endpoint_request_command_support_proto_rawDesc = "" +
 	")RequestCommandSupportWorkspaceRefMismatch\x12!\n" +
 	"\fregistry_dir\x18\x01 \x01(\tR\vregistryDir\"A\n" +
 	"%RequestCommandSupportTransferringAway\x12\x18\n" +
-	"\aaddress\x18\x01 \x01(\tR\aaddress\"$\n" +
-	"\"RequestCommandSupportNotYetAdopted\"#\n" +
+	"\aaddress\x18\x01 \x01(\tR\aaddress\"O\n" +
+	"\"RequestCommandSupportNotYetAdopted\x12\x1d\n" +
+	"\aaddress\x18\x01 \x01(\tH\x00R\aaddress\x88\x01\x01B\n" +
+	"\n" +
+	"\b_address\"#\n" +
 	"!RequestCommandSupportBlankCommand\"7\n" +
 	"!RequestCommandSupportBriefMissing\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04nameB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
@@ -702,6 +719,7 @@ func file_agentrepl_v1_endpoint_request_command_support_proto_init() {
 		(*RequestCommandSupportError_BlankCommand)(nil),
 		(*RequestCommandSupportError_BriefMissing)(nil),
 	}
+	file_agentrepl_v1_endpoint_request_command_support_proto_msgTypes[7].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

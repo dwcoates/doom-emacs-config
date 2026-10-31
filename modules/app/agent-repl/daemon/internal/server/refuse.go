@@ -220,6 +220,15 @@ func (s *server) fill(r refusal) refusal {
 	if _, ok := r.Fields["address"]; !ok && r.Arm == workspace.ArmTransferringAway {
 		r.Fields["address"] = s.deps.SuccessorAddress()
 	}
+	// THE DAEMON THAT SERVES THE WORKSPACE MEANWHILE rides not_yet_adopted, so
+	// a client views and acts on it there rather than waiting out the
+	// handover. The field is optional: with no live incumbent it stays unset,
+	// and the client waits for the adoption.
+	if _, ok := r.Fields["address"]; !ok && r.Arm == workspace.ArmNotYetAdopted {
+		if incumbent := s.deps.IncumbentAddress(); incumbent != "" {
+			r.Fields["address"] = incumbent
+		}
+	}
 	if _, ok := r.Fields["text"]; !ok {
 		r.Fields["text"] = r.Reason
 	}

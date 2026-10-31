@@ -1308,7 +1308,14 @@ func (x *PlanRollbackTransferringAway) GetAddress() string {
 
 // A joining daemon has not finished adopting this workspace yet.
 type PlanRollbackNotYetAdopted struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The `127.0.0.1:<port>` of the daemon that serves this workspace until the
+	// joining daemon adopts it: the handover's incumbent. A client views and
+	// acts on the workspace there in the meantime, and the incumbent's later
+	// `transferred` push re-homes it. UNSET when no live daemon serves the
+	// workspace (a takeover after the incumbent died), in which case the client
+	// waits for the adoption.
+	Address       *string `protobuf:"bytes,1,opt,name=address,proto3,oneof" json:"address,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1341,6 +1348,13 @@ func (x *PlanRollbackNotYetAdopted) ProtoReflect() protoreflect.Message {
 // Deprecated: Use PlanRollbackNotYetAdopted.ProtoReflect.Descriptor instead.
 func (*PlanRollbackNotYetAdopted) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_plan_rollback_proto_rawDescGZIP(), []int{21}
+}
+
+func (x *PlanRollbackNotYetAdopted) GetAddress() string {
+	if x != nil && x.Address != nil {
+		return *x.Address
+	}
+	return ""
 }
 
 // The named prompt is not one a rollback can reach: it was rolled back
@@ -1459,8 +1473,11 @@ const file_agentrepl_v1_endpoint_plan_rollback_proto_rawDesc = "" +
 	" PlanRollbackWorkspaceRefMismatch\x12!\n" +
 	"\fregistry_dir\x18\x01 \x01(\tR\vregistryDir\"8\n" +
 	"\x1cPlanRollbackTransferringAway\x12\x18\n" +
-	"\aaddress\x18\x01 \x01(\tR\aaddress\"\x1b\n" +
-	"\x19PlanRollbackNotYetAdopted\"M\n" +
+	"\aaddress\x18\x01 \x01(\tR\aaddress\"F\n" +
+	"\x19PlanRollbackNotYetAdopted\x12\x1d\n" +
+	"\aaddress\x18\x01 \x01(\tH\x00R\aaddress\x88\x01\x01B\n" +
+	"\n" +
+	"\b_address\"M\n" +
 	"\x1ePlanRollbackPromptNotReachable\x12+\n" +
 	"\x06prompt\x18\x01 \x01(\v2\x13.frontend.v1.FeedIdR\x06promptB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
@@ -1574,6 +1591,7 @@ func file_agentrepl_v1_endpoint_plan_rollback_proto_init() {
 		(*PlanRollbackError_NotYetAdopted)(nil),
 		(*PlanRollbackError_PromptNotReachable)(nil),
 	}
+	file_agentrepl_v1_endpoint_plan_rollback_proto_msgTypes[21].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

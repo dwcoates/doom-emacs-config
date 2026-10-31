@@ -40,7 +40,7 @@ var anyCheck = regexp.MustCompile(`\(agent-repl-wire--check-keys\b`)
 // the test until it is counted here and its decoder is checked by hand (or,
 // better, written with a literal list).
 var computed = map[string]int{
-	"wire-common.el": 2,
+	"wire-common.el": 3,
 	"wire-host.el":   16,
 	"wire-roster.el": 13,
 	"wire-verbs.el":  1,

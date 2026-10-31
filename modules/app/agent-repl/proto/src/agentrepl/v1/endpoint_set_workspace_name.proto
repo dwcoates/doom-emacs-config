@@ -101,7 +101,15 @@ message SetWorkspaceNameTransferringAway {
 
 // A joining daemon has not finished adopting this workspace yet.
 // DELIBERATELY EMPTY.
-message SetWorkspaceNameNotYetAdopted {}
+message SetWorkspaceNameNotYetAdopted {
+  // The `127.0.0.1:<port>` of the daemon that serves this workspace until the
+  // joining daemon adopts it: the handover's incumbent. A client views and
+  // acts on the workspace there in the meantime, and the incumbent's later
+  // `transferred` push re-homes it. UNSET when no live daemon serves the
+  // workspace (a takeover after the incumbent died), in which case the client
+  // waits for the adoption.
+  optional string address = 1;
+}
 
 // A name that breaks the naming rule, refused before anything is recorded.
 // The rule and its two component kinds are the ones a supplied create name

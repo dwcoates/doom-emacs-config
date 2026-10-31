@@ -34,7 +34,7 @@ import { beginPage, endPageAtPagehide, stopAtPageTeardown } from "../page-teardo
 import { createAgentReplClient, type AgentReplClient } from "../rpc/client.js";
 import { createDaemonContext } from "../rpc/context.js";
 import { createPageTransport } from "../rpc/transport.js";
-import type { DaemonOrigin } from "../rpc/daemon-origin.js";
+import { webhostOriginAt, type DaemonOrigin } from "../rpc/daemon-origin.js";
 import { readWebappBuild } from "../webapp-build.js";
 import { mountWebhostSidebar } from "../sidebar/sidebar.js";
 import type { Host } from "./host.js";
@@ -59,6 +59,8 @@ export interface WebhostSidebarStartDeps {
   level?: LevelWindow;
   /** The daemon the sidebar dials (`Host.setDaemon` moves it); the webhost's own origin when absent. */
   daemon?: DaemonOrigin;
+  /** A client for the daemon at an address; one on that daemon's host origin when absent. */
+  clientAt?: (address: string) => AgentReplClient;
   /** The webapp build the webhost was loaded from; read off its own entry script when absent. */
   webappBuild?: () => string;
   /**
@@ -130,6 +132,11 @@ export function startWebhostSidebar(
       // THE ORIGIN THE TRANSPORT READS: the context reopens every standing
       // stream when it moves (rpc/daemon-origin.ts).
       daemon: deps.daemon,
+      // A WORKSPACE A HANDOVER HAS NOT MOVED YET is acted on at the daemon
+      // that still serves it, which a not_yet_adopted refusal names.
+      clientAt:
+        deps.clientAt ??
+        ((address) => createAgentReplClient(createPageTransport(webhostOriginAt(address), "webhost", connectionId))),
     });
     // An unloaded webhost stops at once: its requests, and its census.
     const unwatch = endPageAtPagehide(win);

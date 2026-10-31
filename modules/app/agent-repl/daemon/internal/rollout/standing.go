@@ -116,6 +116,21 @@ func (c *controller) SuccessorAddress() string {
 	return c.successor
 }
 
+// IncumbentAddress implements Controller.
+//
+// THE INCUMBENT SERVES WHAT THIS DAEMON HAS NOT ADOPTED for exactly as long as
+// this daemon is joining: joining mode ends when the incumbent's exit hands
+// over the boot claim (takeOverOnClaim), and from then no other daemon serves
+// anything, so the arm names none and a client waits for the adoption.
+func (c *controller) IncumbentAddress() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.joiningMode {
+		return ""
+	}
+	return c.deps.IncumbentAddress
+}
+
 // recordTransfer marks a workspace as handed to the successor at the address
 // the announcement named. It is called once per workspace, at the moment the
 // transfer notice is pushed: from then on this daemon serves nothing for it.

@@ -112,6 +112,28 @@ does not write to the durable sink."
                      "X" (agent-repl-test-wire-common--parse "{\"other\":\"x\"}"))))
                  '("X" other "unknown field"))))
 
+(ert-deftest agent-repl-test-wire-common-not-yet-adopted-decodes-the-serving-address ()
+  "The shared `not_yet_adopted' arm decodes the daemon that serves the workspace."
+  (should (equal (agent-repl-test-wire-common--decode
+                  (lambda (v) (agent-repl-wire-decode-not-yet-adopted "X" v))
+                  "{\"address\":\"127.0.0.1:6666\"}")
+                 '(:address "127.0.0.1:6666"))))
+
+(ert-deftest agent-repl-test-wire-common-not-yet-adopted-decodes-no-address-as-nil ()
+  "An arm naming no serving daemon decodes its address as nil, never \"\"."
+  (should (equal (agent-repl-test-wire-common--decode
+                  (lambda (v) (agent-repl-wire-decode-not-yet-adopted "X" v))
+                  "{}")
+                 '(:address nil))))
+
+(ert-deftest agent-repl-test-wire-common-not-yet-adopted-refuses-an-unknown-field ()
+  "A field the arm does not declare is a breach, never ignored."
+  (should (equal (agent-repl-test-wire-common--breach
+                  (lambda ()
+                    (agent-repl-wire-decode-not-yet-adopted
+                     "X" (agent-repl-test-wire-common--parse "{\"other\":\"x\"}"))))
+                 '("X" other "unknown field"))))
+
 (ert-deftest agent-repl-test-wire-common-workspace-ref-decodes-both-halves ()
   "A WorkspaceRef decodes its opaque id and its display dir."
   (let ((decoded (agent-repl-test-wire-common--decode

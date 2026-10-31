@@ -707,7 +707,14 @@ func (x *ForgetWorkspaceTransferringAway) GetAddress() string {
 }
 
 type ForgetWorkspaceNotYetAdopted struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The `127.0.0.1:<port>` of the daemon that serves this workspace until the
+	// joining daemon adopts it: the handover's incumbent. A client views and
+	// acts on the workspace there in the meantime, and the incumbent's later
+	// `transferred` push re-homes it. UNSET when no live daemon serves the
+	// workspace (a takeover after the incumbent died), in which case the client
+	// waits for the adoption.
+	Address       *string `protobuf:"bytes,1,opt,name=address,proto3,oneof" json:"address,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -740,6 +747,13 @@ func (x *ForgetWorkspaceNotYetAdopted) ProtoReflect() protoreflect.Message {
 // Deprecated: Use ForgetWorkspaceNotYetAdopted.ProtoReflect.Descriptor instead.
 func (*ForgetWorkspaceNotYetAdopted) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_forget_workspace_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *ForgetWorkspaceNotYetAdopted) GetAddress() string {
+	if x != nil && x.Address != nil {
+		return *x.Address
+	}
+	return ""
 }
 
 type ForgetWorkspaceMainWorktree struct {
@@ -823,8 +837,11 @@ const file_agentrepl_v1_endpoint_forget_workspace_proto_rawDesc = "" +
 	"#ForgetWorkspaceWorkspaceRefMismatch\x12!\n" +
 	"\fregistry_dir\x18\x01 \x01(\tR\vregistryDir\";\n" +
 	"\x1fForgetWorkspaceTransferringAway\x12\x18\n" +
-	"\aaddress\x18\x01 \x01(\tR\aaddress\"\x1e\n" +
-	"\x1cForgetWorkspaceNotYetAdopted\"H\n" +
+	"\aaddress\x18\x01 \x01(\tR\aaddress\"I\n" +
+	"\x1cForgetWorkspaceNotYetAdopted\x12\x1d\n" +
+	"\aaddress\x18\x01 \x01(\tH\x00R\aaddress\x88\x01\x01B\n" +
+	"\n" +
+	"\b_address\"H\n" +
 	"\x1bForgetWorkspaceMainWorktree\x12)\n" +
 	"\x10other_workspaces\x18\x01 \x01(\rR\x0fotherWorkspacesB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
@@ -894,6 +911,7 @@ func file_agentrepl_v1_endpoint_forget_workspace_proto_init() {
 		(*ForgetWorkspaceError_NotYetAdopted)(nil),
 		(*ForgetWorkspaceError_MainWorktree)(nil),
 	}
+	file_agentrepl_v1_endpoint_forget_workspace_proto_msgTypes[10].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

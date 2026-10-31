@@ -536,7 +536,14 @@ func (x *SetWorkspaceNameTransferringAway) GetAddress() string {
 // A joining daemon has not finished adopting this workspace yet.
 // DELIBERATELY EMPTY.
 type SetWorkspaceNameNotYetAdopted struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The `127.0.0.1:<port>` of the daemon that serves this workspace until the
+	// joining daemon adopts it: the handover's incumbent. A client views and
+	// acts on the workspace there in the meantime, and the incumbent's later
+	// `transferred` push re-homes it. UNSET when no live daemon serves the
+	// workspace (a takeover after the incumbent died), in which case the client
+	// waits for the adoption.
+	Address       *string `protobuf:"bytes,1,opt,name=address,proto3,oneof" json:"address,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -569,6 +576,13 @@ func (x *SetWorkspaceNameNotYetAdopted) ProtoReflect() protoreflect.Message {
 // Deprecated: Use SetWorkspaceNameNotYetAdopted.ProtoReflect.Descriptor instead.
 func (*SetWorkspaceNameNotYetAdopted) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_set_workspace_name_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *SetWorkspaceNameNotYetAdopted) GetAddress() string {
+	if x != nil && x.Address != nil {
+		return *x.Address
+	}
+	return ""
 }
 
 // A name that breaks the naming rule, refused before anything is recorded.
@@ -926,8 +940,11 @@ const file_agentrepl_v1_endpoint_set_workspace_name_proto_rawDesc = "" +
 	"$SetWorkspaceNameWorkspaceRefMismatch\x12!\n" +
 	"\fregistry_dir\x18\x01 \x01(\tR\vregistryDir\"<\n" +
 	" SetWorkspaceNameTransferringAway\x12\x18\n" +
-	"\aaddress\x18\x01 \x01(\tR\aaddress\"\x1f\n" +
-	"\x1dSetWorkspaceNameNotYetAdopted\"\xe7\x01\n" +
+	"\aaddress\x18\x01 \x01(\tR\aaddress\"J\n" +
+	"\x1dSetWorkspaceNameNotYetAdopted\x12\x1d\n" +
+	"\aaddress\x18\x01 \x01(\tH\x00R\aaddress\x88\x01\x01B\n" +
+	"\n" +
+	"\b_address\"\xe7\x01\n" +
 	"\x1bSetWorkspaceNameInvalidName\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1c\n" +
 	"\tcomponent\x18\x02 \x01(\tR\tcomponent\x12C\n" +
@@ -1010,6 +1027,7 @@ func file_agentrepl_v1_endpoint_set_workspace_name_proto_init() {
 		(*SetWorkspaceNameError_InvalidName)(nil),
 		(*SetWorkspaceNameError_NameTaken)(nil),
 	}
+	file_agentrepl_v1_endpoint_set_workspace_name_proto_msgTypes[7].OneofWrappers = []any{}
 	file_agentrepl_v1_endpoint_set_workspace_name_proto_msgTypes[8].OneofWrappers = []any{
 		(*SetWorkspaceNameInvalidName_Slug)(nil),
 		(*SetWorkspaceNameInvalidName_Prefix)(nil),

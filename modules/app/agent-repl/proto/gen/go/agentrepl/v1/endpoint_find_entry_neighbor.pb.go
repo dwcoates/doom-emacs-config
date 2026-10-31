@@ -825,7 +825,14 @@ func (x *FindEntryNeighborTransferringAway) GetAddress() string {
 
 // A joining daemon has not finished adopting this workspace yet.
 type FindEntryNeighborNotYetAdopted struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The `127.0.0.1:<port>` of the daemon that serves this workspace until the
+	// joining daemon adopts it: the handover's incumbent. A client views and
+	// acts on the workspace there in the meantime, and the incumbent's later
+	// `transferred` push re-homes it. UNSET when no live daemon serves the
+	// workspace (a takeover after the incumbent died), in which case the client
+	// waits for the adoption.
+	Address       *string `protobuf:"bytes,1,opt,name=address,proto3,oneof" json:"address,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -858,6 +865,13 @@ func (x *FindEntryNeighborNotYetAdopted) ProtoReflect() protoreflect.Message {
 // Deprecated: Use FindEntryNeighborNotYetAdopted.ProtoReflect.Descriptor instead.
 func (*FindEntryNeighborNotYetAdopted) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_find_entry_neighbor_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *FindEntryNeighborNotYetAdopted) GetAddress() string {
+	if x != nil && x.Address != nil {
+		return *x.Address
+	}
+	return ""
 }
 
 var File_agentrepl_v1_endpoint_find_entry_neighbor_proto protoreflect.FileDescriptor
@@ -899,8 +913,11 @@ const file_agentrepl_v1_endpoint_find_entry_neighbor_proto_rawDesc = "" +
 	"%FindEntryNeighborWorkspaceRefMismatch\x12!\n" +
 	"\fregistry_dir\x18\x01 \x01(\tR\vregistryDir\"=\n" +
 	"!FindEntryNeighborTransferringAway\x12\x18\n" +
-	"\aaddress\x18\x01 \x01(\tR\aaddress\" \n" +
-	"\x1eFindEntryNeighborNotYetAdoptedB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"\aaddress\x18\x01 \x01(\tR\aaddress\"K\n" +
+	"\x1eFindEntryNeighborNotYetAdopted\x12\x1d\n" +
+	"\aaddress\x18\x01 \x01(\tH\x00R\aaddress\x88\x01\x01B\n" +
+	"\n" +
+	"\b_addressB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_endpoint_find_entry_neighbor_proto_rawDescOnce sync.Once
@@ -977,6 +994,7 @@ func file_agentrepl_v1_endpoint_find_entry_neighbor_proto_init() {
 		(*FindEntryNeighborError_TransferringAway)(nil),
 		(*FindEntryNeighborError_NotYetAdopted)(nil),
 	}
+	file_agentrepl_v1_endpoint_find_entry_neighbor_proto_msgTypes[13].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

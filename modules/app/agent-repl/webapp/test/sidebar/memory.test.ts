@@ -255,10 +255,14 @@ describe("the version hover", () => {
 });
 
 describe("an open row's memory", () => {
-  function rowWith(answer: () => ReturnType<typeof create<typeof GetWorkspaceMemoryResponseSchema>>) {
+  function rowWith(
+    answer: () => ReturnType<typeof create<typeof GetWorkspaceMemoryResponseSchema>>,
+    incumbent?: () => ReturnType<typeof create<typeof GetWorkspaceMemoryResponseSchema>>,
+  ) {
     const ticker = fakeTicker();
     const sent: GetWorkspaceMemoryRequest[] = [];
-    const ctx = appContext(
+    const dialed: string[] = [];
+    const own = appContext(
       {
         getWorkspaceMemory: (request) => {
           sent.push(request);
@@ -267,13 +271,23 @@ describe("an open row's memory", () => {
       },
       ticker,
     );
+    const ctx =
+      incumbent === undefined
+        ? own
+        : {
+            ...own,
+            clientAt: (address: string) => {
+              dialed.push(address);
+              return appContext({ getWorkspaceMemory: incumbent }, ticker).client;
+            },
+          };
     const disposers: Array<() => void> = [];
     const sc = { ctx, onDispose: (fn: () => void) => disposers.push(fn) } as unknown as SidebarContext;
     const ws = document.createElement("div");
     const detail = document.createElement("div");
     ws.appendChild(detail);
     addRowMemory(sc, ws, detail, create(WorkspaceRefSchema, { id: "ws-1", dir: "/w" }));
-    return { ws, detail, ticker, sent, dispose: () => disposers.forEach((fn) => fn()) };
+    return { ws, detail, ticker, sent, dialed, dispose: () => disposers.forEach((fn) => fn()) };
   }
 
   const notRunning = () =>
@@ -318,12 +332,53 @@ describe("an open row's memory", () => {
 
   it("states a refusal in the shared wording", async () => {
     const { ws, detail } = rowWith(() =>
-      create(GetWorkspaceMemoryResponseSchema, { result: { case: "error", value: { cause: { case: "notYetAdopted", value: {} } } } }),
+      create(GetWorkspaceMemoryResponseSchema, { result: { case: "error", value: { cause: { case: "unknownWorkspace", value: {} } } } }),
     );
 
     showRowMemory(ws, true);
     await settle();
 
-    expect(detail.querySelector(".memory")?.textContent).toBe("the daemon has not finished adopting this workspace yet");
+    expect(detail.querySelector(".memory")?.textContent).toBe("the daemon does not know this workspace");
+  });
+
+  const notYetAdopted = (address?: string) => () =>
+    create(GetWorkspaceMemoryResponseSchema, {
+      result: { case: "error", value: { cause: { case: "notYetAdopted", value: address === undefined ? {} : { address } } } },
+    });
+
+  it("says the workspace is moving when no daemon serves it meanwhile", async () => {
+    const { ws, detail } = rowWith(notYetAdopted());
+
+    showRowMemory(ws, true);
+    await settle();
+
+    expect(detail.querySelector(".memory")?.textContent).toBe("moving to the new daemon");
+  });
+
+  it("asks the daemon a handover refusal names", async () => {
+    const { ws, dialed } = rowWith(notYetAdopted("127.0.0.1:6666"), notRunning);
+
+    showRowMemory(ws, true);
+    await settle();
+
+    expect(dialed).toEqual(["127.0.0.1:6666"]);
+  });
+
+  it("draws the named daemon's answer", async () => {
+    const { ws, detail } = rowWith(notYetAdopted("127.0.0.1:6666"), notRunning);
+
+    showRowMemory(ws, true);
+    await settle();
+
+    expect(detail.querySelector(".memory dd")?.textContent).toBe("not running");
+  });
+
+  it("asks the named daemon once when it refuses the same way", async () => {
+    const { ws, detail, dialed } = rowWith(notYetAdopted("127.0.0.1:6666"), notYetAdopted("127.0.0.1:5555"));
+
+    showRowMemory(ws, true);
+    await settle();
+
+    expect([dialed, detail.querySelector(".memory")?.textContent]).toEqual([["127.0.0.1:6666"], "moving to the new daemon"]);
   });
 });

@@ -504,7 +504,14 @@ func (x *SendLoginInputTransferringAway) GetAddress() string {
 }
 
 type SendLoginInputNotYetAdopted struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The `127.0.0.1:<port>` of the daemon that serves this workspace until the
+	// joining daemon adopts it: the handover's incumbent. A client views and
+	// acts on the workspace there in the meantime, and the incumbent's later
+	// `transferred` push re-homes it. UNSET when no live daemon serves the
+	// workspace (a takeover after the incumbent died), in which case the client
+	// waits for the adoption.
+	Address       *string `protobuf:"bytes,1,opt,name=address,proto3,oneof" json:"address,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -537,6 +544,13 @@ func (x *SendLoginInputNotYetAdopted) ProtoReflect() protoreflect.Message {
 // Deprecated: Use SendLoginInputNotYetAdopted.ProtoReflect.Descriptor instead.
 func (*SendLoginInputNotYetAdopted) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_send_login_input_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *SendLoginInputNotYetAdopted) GetAddress() string {
+	if x != nil && x.Address != nil {
+		return *x.Address
+	}
+	return ""
 }
 
 type SendLoginInputNoLoginOpen struct {
@@ -603,8 +617,11 @@ const file_agentrepl_v1_endpoint_send_login_input_proto_rawDesc = "" +
 	"\"SendLoginInputWorkspaceRefMismatch\x12!\n" +
 	"\fregistry_dir\x18\x01 \x01(\tR\vregistryDir\":\n" +
 	"\x1eSendLoginInputTransferringAway\x12\x18\n" +
-	"\aaddress\x18\x01 \x01(\tR\aaddress\"\x1d\n" +
-	"\x1bSendLoginInputNotYetAdopted\"\x1b\n" +
+	"\aaddress\x18\x01 \x01(\tR\aaddress\"H\n" +
+	"\x1bSendLoginInputNotYetAdopted\x12\x1d\n" +
+	"\aaddress\x18\x01 \x01(\tH\x00R\aaddress\x88\x01\x01B\n" +
+	"\n" +
+	"\b_address\"\x1b\n" +
 	"\x19SendLoginInputNoLoginOpenB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
@@ -673,6 +690,7 @@ func file_agentrepl_v1_endpoint_send_login_input_proto_init() {
 		(*SendLoginInputError_NotYetAdopted)(nil),
 		(*SendLoginInputError_NoLoginOpen)(nil),
 	}
+	file_agentrepl_v1_endpoint_send_login_input_proto_msgTypes[7].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

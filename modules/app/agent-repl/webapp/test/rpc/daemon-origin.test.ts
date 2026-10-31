@@ -2,7 +2,7 @@
 // src/rpc/daemon-origin.ts.
 import { describe, expect, it } from "vitest";
 
-import { createDaemonOrigin, isDaemonOrigin } from "../../src/rpc/daemon-origin.js";
+import { createDaemonOrigin, isDaemonOrigin, webhostOriginAt } from "../../src/rpc/daemon-origin.js";
 
 describe("createDaemonOrigin", () => {
   it("answers the origin it started at", () => {
@@ -101,5 +101,15 @@ describe("isDaemonOrigin", () => {
     ["not a string", 61048, false],
   ])("%s", (_name, value, want) => {
     expect(isDaemonOrigin(value)).toBe(want);
+  });
+});
+
+describe("webhostOriginAt", () => {
+  it("names the host origin on the daemon's port", () => {
+    expect(webhostOriginAt("127.0.0.1:6666")).toBe("http://host.localhost:6666");
+  });
+
+  it("throws on an address with no port", () => {
+    expect(() => webhostOriginAt("127.0.0.1")).toThrow(/no port/);
   });
 });

@@ -141,7 +141,15 @@ message FinishWorkspaceTransferringAway {
   string address = 1;
 }
 // The workspace is still being adopted. Empty: retry once adopted.
-message FinishWorkspaceNotYetAdopted {}
+message FinishWorkspaceNotYetAdopted {
+  // The `127.0.0.1:<port>` of the daemon that serves this workspace until the
+  // joining daemon adopts it: the handover's incumbent. A client views and
+  // acts on the workspace there in the meantime, and the incumbent's later
+  // `transferred` push re-homes it. UNSET when no live daemon serves the
+  // workspace (a takeover after the incumbent died), in which case the client
+  // waits for the adoption.
+  optional string address = 1;
+}
 // No layout facts are recorded for the workspace. Empty.
 message FinishWorkspaceNoLayoutFacts {}
 // The workspace's session is deleted. Empty.

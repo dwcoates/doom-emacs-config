@@ -543,7 +543,14 @@ func (x *KillWorkspaceTransferringAway) GetAddress() string {
 }
 
 type KillWorkspaceNotYetAdopted struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The `127.0.0.1:<port>` of the daemon that serves this workspace until the
+	// joining daemon adopts it: the handover's incumbent. A client views and
+	// acts on the workspace there in the meantime, and the incumbent's later
+	// `transferred` push re-homes it. UNSET when no live daemon serves the
+	// workspace (a takeover after the incumbent died), in which case the client
+	// waits for the adoption.
+	Address       *string `protobuf:"bytes,1,opt,name=address,proto3,oneof" json:"address,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -578,6 +585,13 @@ func (*KillWorkspaceNotYetAdopted) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_kill_workspace_proto_rawDescGZIP(), []int{8}
 }
 
+func (x *KillWorkspaceNotYetAdopted) GetAddress() string {
+	if x != nil && x.Address != nil {
+		return *x.Address
+	}
+	return ""
+}
+
 var File_agentrepl_v1_endpoint_kill_workspace_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_kill_workspace_proto_rawDesc = "" +
@@ -606,8 +620,11 @@ const file_agentrepl_v1_endpoint_kill_workspace_proto_rawDesc = "" +
 	"!KillWorkspaceWorkspaceRefMismatch\x12!\n" +
 	"\fregistry_dir\x18\x01 \x01(\tR\vregistryDir\"9\n" +
 	"\x1dKillWorkspaceTransferringAway\x12\x18\n" +
-	"\aaddress\x18\x01 \x01(\tR\aaddress\"\x1c\n" +
-	"\x1aKillWorkspaceNotYetAdoptedB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"\aaddress\x18\x01 \x01(\tR\aaddress\"G\n" +
+	"\x1aKillWorkspaceNotYetAdopted\x12\x1d\n" +
+	"\aaddress\x18\x01 \x01(\tH\x00R\aaddress\x88\x01\x01B\n" +
+	"\n" +
+	"\b_addressB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_endpoint_kill_workspace_proto_rawDescOnce sync.Once
@@ -671,6 +688,7 @@ func file_agentrepl_v1_endpoint_kill_workspace_proto_init() {
 		(*KillWorkspaceError_NotYetAdopted)(nil),
 		(*KillWorkspaceError_HasOpenChildren)(nil),
 	}
+	file_agentrepl_v1_endpoint_kill_workspace_proto_msgTypes[8].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

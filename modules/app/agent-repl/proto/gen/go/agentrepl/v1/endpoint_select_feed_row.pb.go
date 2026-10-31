@@ -1287,7 +1287,14 @@ func (x *SelectFeedRowTransferringAway) GetAddress() string {
 
 // A joining daemon has not finished adopting this workspace yet.
 type SelectFeedRowNotYetAdopted struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The `127.0.0.1:<port>` of the daemon that serves this workspace until the
+	// joining daemon adopts it: the handover's incumbent. A client views and
+	// acts on the workspace there in the meantime, and the incumbent's later
+	// `transferred` push re-homes it. UNSET when no live daemon serves the
+	// workspace (a takeover after the incumbent died), in which case the client
+	// waits for the adoption.
+	Address       *string `protobuf:"bytes,1,opt,name=address,proto3,oneof" json:"address,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1320,6 +1327,13 @@ func (x *SelectFeedRowNotYetAdopted) ProtoReflect() protoreflect.Message {
 // Deprecated: Use SelectFeedRowNotYetAdopted.ProtoReflect.Descriptor instead.
 func (*SelectFeedRowNotYetAdopted) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_select_feed_row_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *SelectFeedRowNotYetAdopted) GetAddress() string {
+	if x != nil && x.Address != nil {
+		return *x.Address
+	}
+	return ""
 }
 
 var File_agentrepl_v1_endpoint_select_feed_row_proto protoreflect.FileDescriptor
@@ -1380,8 +1394,11 @@ const file_agentrepl_v1_endpoint_select_feed_row_proto_rawDesc = "" +
 	"!SelectFeedRowWorkspaceRefMismatch\x12!\n" +
 	"\fregistry_dir\x18\x01 \x01(\tR\vregistryDir\"9\n" +
 	"\x1dSelectFeedRowTransferringAway\x12\x18\n" +
-	"\aaddress\x18\x01 \x01(\tR\aaddress\"\x1c\n" +
-	"\x1aSelectFeedRowNotYetAdopted*\x8d\x01\n" +
+	"\aaddress\x18\x01 \x01(\tR\aaddress\"G\n" +
+	"\x1aSelectFeedRowNotYetAdopted\x12\x1d\n" +
+	"\aaddress\x18\x01 \x01(\tH\x00R\aaddress\x88\x01\x01B\n" +
+	"\n" +
+	"\b_address*\x8d\x01\n" +
 	"\x16SelectFeedRowDirection\x12)\n" +
 	"%SELECT_FEED_ROW_DIRECTION_UNSPECIFIED\x10\x00\x12#\n" +
 	"\x1fSELECT_FEED_ROW_DIRECTION_OLDER\x10\x01\x12#\n" +
@@ -1490,6 +1507,7 @@ func file_agentrepl_v1_endpoint_select_feed_row_proto_init() {
 		(*SelectFeedRowError_NotYetAdopted)(nil),
 		(*SelectFeedRowError_NotSelectable)(nil),
 	}
+	file_agentrepl_v1_endpoint_select_feed_row_proto_msgTypes[18].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

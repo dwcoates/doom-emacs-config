@@ -2027,7 +2027,14 @@ func (x *SubmitPromptTransferringAway) GetAddress() string {
 }
 
 type SubmitPromptNotYetAdopted struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The `127.0.0.1:<port>` of the daemon that serves this workspace until the
+	// joining daemon adopts it: the handover's incumbent. A client views and
+	// acts on the workspace there in the meantime, and the incumbent's later
+	// `transferred` push re-homes it. UNSET when no live daemon serves the
+	// workspace (a takeover after the incumbent died), in which case the client
+	// waits for the adoption.
+	Address       *string `protobuf:"bytes,1,opt,name=address,proto3,oneof" json:"address,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2060,6 +2067,13 @@ func (x *SubmitPromptNotYetAdopted) ProtoReflect() protoreflect.Message {
 // Deprecated: Use SubmitPromptNotYetAdopted.ProtoReflect.Descriptor instead.
 func (*SubmitPromptNotYetAdopted) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescGZIP(), []int{26}
+}
+
+func (x *SubmitPromptNotYetAdopted) GetAddress() string {
+	if x != nil && x.Address != nil {
+		return *x.Address
+	}
+	return ""
 }
 
 type SubmitPromptFeedNotInWorkspace struct {
@@ -2271,8 +2285,11 @@ const file_agentrepl_v1_endpoint_submit_prompt_proto_rawDesc = "" +
 	" SubmitPromptWorkspaceRefMismatch\x12!\n" +
 	"\fregistry_dir\x18\x01 \x01(\tR\vregistryDir\"8\n" +
 	"\x1cSubmitPromptTransferringAway\x12\x18\n" +
-	"\aaddress\x18\x01 \x01(\tR\aaddress\"\x1b\n" +
-	"\x19SubmitPromptNotYetAdopted\" \n" +
+	"\aaddress\x18\x01 \x01(\tR\aaddress\"F\n" +
+	"\x19SubmitPromptNotYetAdopted\x12\x1d\n" +
+	"\aaddress\x18\x01 \x01(\tH\x00R\aaddress\x88\x01\x01B\n" +
+	"\n" +
+	"\b_address\" \n" +
 	"\x1eSubmitPromptFeedNotInWorkspace\"\x1d\n" +
 	"\x1bSubmitPromptFeedUndecodable\"\x17\n" +
 	"\x15SubmitPromptNoSession*c\n" +
@@ -2439,6 +2456,7 @@ func file_agentrepl_v1_endpoint_submit_prompt_proto_init() {
 		(*SubmitPromptBubbleRefused_NotDeliverable)(nil),
 		(*SubmitPromptBubbleRefused_AgentBusy)(nil),
 	}
+	file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[26].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

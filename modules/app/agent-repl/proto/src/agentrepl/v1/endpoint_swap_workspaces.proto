@@ -84,7 +84,15 @@ message SwapWorkspacesTransferringAway {
 }
 // Adoption of a named workspace is still in progress; the caller retries once
 // the roster shows it adopted.
-message SwapWorkspacesNotYetAdopted {}
+message SwapWorkspacesNotYetAdopted {
+  // The `127.0.0.1:<port>` of the daemon that serves this workspace until the
+  // joining daemon adopts it: the handover's incumbent. A client views and
+  // acts on the workspace there in the meantime, and the incumbent's later
+  // `transferred` push re-homes it. UNSET when no live daemon serves the
+  // workspace (a takeover after the incumbent died), in which case the client
+  // waits for the adoption.
+  optional string address = 1;
+}
 // The two workspaces belong to different repositories. DELIBERATELY EMPTY:
 // the arm is the fact, and the request already names both workspaces.
 message SwapWorkspacesOtherRepository {}

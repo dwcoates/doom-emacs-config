@@ -1904,6 +1904,10 @@ func (f *fakeSidebar) Revision() uint64 { return f.revision }
 // harness is one running surface over real Connect handlers.
 type harness struct {
 	t *testing.T
+	// IncumbentAddress is what the surface's IncumbentAddress dependency
+	// answers: the daemon serving what a joining daemon has not adopted, or
+	// empty when none does.
+	IncumbentAddress string
 	// Deps is the COMPLETE dependency set the surface was built from, so a
 	// test of one missing dependency strips exactly that one (withoutDep).
 	Deps      Deps
@@ -2025,7 +2029,8 @@ func newHarness(t *testing.T, opts ...option) *harness {
 	}
 
 	h := &harness{
-		t: t,
+		t:                t,
+		IncumbentAddress: "127.0.0.1:8888",
 		DB: &fakeDB{workspaces: map[ids.WorkspaceID]wsm.Workspace{
 			testWorkspaceID: {ID: testWorkspaceID, Dir: testWorkspaceDir, Name: "test"},
 		}},
@@ -2100,6 +2105,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		Login:             h.Login,
 		Ownership:         h.Ownership,
 		SuccessorAddress:  func() string { return "127.0.0.1:9999" },
+		IncumbentAddress:  func() string { return h.IncumbentAddress },
 		Creates:           h.Creates,
 		Feed:              h.Feed,
 		Images:            h.Images,

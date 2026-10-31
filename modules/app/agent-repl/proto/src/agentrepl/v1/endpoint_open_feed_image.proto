@@ -101,7 +101,15 @@ message OpenFeedImageTransferringAway {
   string address = 1;
 }
 // A joining daemon has not finished adopting this workspace yet.
-message OpenFeedImageNotYetAdopted {}
+message OpenFeedImageNotYetAdopted {
+  // The `127.0.0.1:<port>` of the daemon that serves this workspace until the
+  // joining daemon adopts it: the handover's incumbent. A client views and
+  // acts on the workspace there in the meantime, and the incumbent's later
+  // `transferred` push re-homes it. UNSET when no live daemon serves the
+  // workspace (a takeover after the incumbent died), in which case the client
+  // waits for the adoption.
+  optional string address = 1;
+}
 // The composer's image has no source the daemon can serve.
 message OpenFeedImageUnservable {
   // The daemon's account of why, for a human and for logs; never switched on.

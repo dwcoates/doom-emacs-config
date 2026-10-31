@@ -217,10 +217,23 @@ async function fetchOverview(ctx: DaemonContext, panel: HTMLElement): Promise<vo
   }
 }
 
-/** Ask for WORKSPACE's memory and draw it into BLOCK. */
-async function fetchWorkspace(ctx: DaemonContext, workspace: WorkspaceRef, block: HTMLElement): Promise<void> {
+/**
+ * Ask for WORKSPACE's memory and draw it into BLOCK. AT names the daemon that
+ * still serves the workspace during a handover, once a `not_yet_adopted`
+ * refusal has named it; the page's own daemon is asked otherwise.
+ */
+async function fetchWorkspace(
+  ctx: DaemonContext,
+  workspace: WorkspaceRef,
+  block: HTMLElement,
+  at: string | null = null,
+): Promise<void> {
+  const unary =
+    at === null || ctx.clientAt === undefined
+      ? ctx
+      : { client: ctx.clientAt(at), failures: ctx.failures, isQuiesced: () => ctx.isQuiesced() };
   const resp = await callUnary(
-    ctx,
+    unary,
     "GetWorkspaceMemory",
     (client: AgentReplClient) => client.getWorkspaceMemory({ workspace }),
     GetWorkspaceMemoryResponseSchema,
@@ -234,6 +247,25 @@ async function fetchWorkspace(ctx: DaemonContext, workspace: WorkspaceRef, block
     }
     case "error": {
       const cause = requireCase(result.value.cause, "GetWorkspaceMemoryError.cause");
+      // A HANDOVER IS NEVER DRAWN AS A FAILURE. The daemon still serving the
+      // workspace is asked instead, once; with none named, or this one not
+      // serving it either, the panel says the workspace is moving.
+      if (cause.case === "notYetAdopted") {
+        const address = cause.value.address;
+        if (at === null && address !== undefined && address !== "" && ctx.clientAt !== undefined) {
+          log.info("a workspace's memory is asked of the daemon that still serves it", {
+            operation: "sidebar.memory.served-elsewhere",
+            context: { workspace: workspace.id, address },
+          });
+          return fetchWorkspace(ctx, workspace, block, address);
+        }
+        log.info("a workspace's memory waits on a handover", {
+          operation: "sidebar.memory.handover",
+          context: { workspace: workspace.id },
+        });
+        fillNote(block, "moving to the new daemon");
+        return;
+      }
       const sentence = refusalSentence("GetWorkspaceMemory", cause);
       if (sentence === undefined) {
         unreachableArm("GetWorkspaceMemoryError.cause", String(cause.case));

@@ -69,6 +69,7 @@
 (declare-function agent-repl-connect-close "connect" (conn))
 (declare-function agent-repl-connect-connection-address "connect" (conn))
 (declare-function agent-repl-connect-connection-alive-p "connect" (conn))
+(declare-function agent-repl-connect-connection-streams "connect" (conn))
 (declare-function agent-repl-connect-failure-message "connect" (detail))
 (declare-function agent-repl-rpc-watch-daemon "rpc" (conn on-push on-close &optional on-open))
 (declare-function agent-repl-mutation-progress-handle "mutation-progress" (progress))
@@ -211,6 +212,13 @@ onto a daemon that has not proven it is listening.")
 (defvar agent-repl-link--pending-successor-stream nil
   "The unaccepted `WatchDaemon' stream on `agent-repl-link--pending-successor'.")
 
+(defvar agent-repl-link--serving-conns (make-hash-table :test #'equal)
+  "Address -> connection to a daemon serving workspaces the link does not.
+During a rolling handover the incumbent still serves the workspaces the
+joining daemon has not adopted, and a `not_yet_adopted' refusal names it,
+so those workspaces are viewed there (`agent-repl-link-serving-conn').
+An entry with no stream left on it is dropped at the next lookup.")
+
 (defvar agent-repl-link-drain nil
   "The standing drain schedule, or nil when none is armed.
 Shape: `(:at-ms N :reason (:arm KEYWORD :value VALUE))', decoded verbatim
@@ -350,6 +358,39 @@ remembers.  Nil while the link is down: the caller waits on
 connection is closed is never answered."
   (let ((primary agent-repl-link--primary))
     (and primary (agent-repl-connect-connection-alive-p primary) primary)))
+
+(defun agent-repl-link-serving-conn (address)
+  "Return a connection to the daemon at ADDRESS, which serves a workspace now.
+ADDRESS is the one a `not_yet_adopted' refusal names: the handover\='s
+incumbent, still serving what the joining daemon has not adopted.  The
+live primary or the accepted successor when either stands at ADDRESS;
+otherwise a connection kept for ADDRESS, made on first use.  A
+connection is only an address and its streams (`agent-repl-connect-open'),
+so keeping one costs nothing, and one whose streams all ended (its daemon
+exited, its workspaces re-homed) is dropped here rather than reused."
+  (let ((primary (agent-repl-link-live))
+        (successor (agent-repl-link-successor)))
+    (cond
+     ((and primary (equal address (agent-repl-connect-connection-address primary)))
+      primary)
+     ((and successor (agent-repl-connect-connection-alive-p successor)
+           (equal address (agent-repl-connect-connection-address successor)))
+      successor)
+     (t
+      (maphash (lambda (kept conn)
+                 (unless (or (equal kept address)
+                             (and (agent-repl-connect-connection-alive-p conn)
+                                  (agent-repl-connect-connection-streams conn)))
+                   (remhash kept agent-repl-link--serving-conns)
+                   (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces")
+                                     "elisp.link.serving-conn-dropped address=%S" kept)))
+               agent-repl-link--serving-conns)
+      (let ((kept (gethash address agent-repl-link--serving-conns)))
+        (if (and kept (agent-repl-connect-connection-alive-p kept))
+            kept
+          (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces")
+                            "elisp.link.serving-conn-opened address=%S" address)
+          (puthash address (agent-repl-connect-open address) agent-repl-link--serving-conns)))))))
 
 ;;;; ---- Connecting ----
 

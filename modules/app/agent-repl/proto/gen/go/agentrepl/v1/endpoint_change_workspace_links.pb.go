@@ -833,7 +833,14 @@ func (x *ChangeWorkspaceLinksTransferringAway) GetAddress() string {
 // A joining daemon has not finished adopting this workspace yet.
 // DELIBERATELY EMPTY.
 type ChangeWorkspaceLinksNotYetAdopted struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The `127.0.0.1:<port>` of the daemon that serves this workspace until the
+	// joining daemon adopts it: the handover's incumbent. A client views and
+	// acts on the workspace there in the meantime, and the incumbent's later
+	// `transferred` push re-homes it. UNSET when no live daemon serves the
+	// workspace (a takeover after the incumbent died), in which case the client
+	// waits for the adoption.
+	Address       *string `protobuf:"bytes,1,opt,name=address,proto3,oneof" json:"address,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -866,6 +873,13 @@ func (x *ChangeWorkspaceLinksNotYetAdopted) ProtoReflect() protoreflect.Message 
 // Deprecated: Use ChangeWorkspaceLinksNotYetAdopted.ProtoReflect.Descriptor instead.
 func (*ChangeWorkspaceLinksNotYetAdopted) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_change_workspace_links_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *ChangeWorkspaceLinksNotYetAdopted) GetAddress() string {
+	if x != nil && x.Address != nil {
+		return *x.Address
+	}
+	return ""
 }
 
 // The url is not one the external browser opens.
@@ -1123,8 +1137,11 @@ const file_agentrepl_v1_endpoint_change_workspace_links_proto_rawDesc = "" +
 	"(ChangeWorkspaceLinksWorkspaceRefMismatch\x12!\n" +
 	"\fregistry_dir\x18\x01 \x01(\tR\vregistryDir\"@\n" +
 	"$ChangeWorkspaceLinksTransferringAway\x12\x18\n" +
-	"\aaddress\x18\x01 \x01(\tR\aaddress\"#\n" +
-	"!ChangeWorkspaceLinksNotYetAdopted\"K\n" +
+	"\aaddress\x18\x01 \x01(\tR\aaddress\"N\n" +
+	"!ChangeWorkspaceLinksNotYetAdopted\x12\x1d\n" +
+	"\aaddress\x18\x01 \x01(\tH\x00R\aaddress\x88\x01\x01B\n" +
+	"\n" +
+	"\b_address\"K\n" +
 	"\x1fChangeWorkspaceLinksInvalidLink\x12\x10\n" +
 	"\x03url\x18\x01 \x01(\tR\x03url\x12\x16\n" +
 	"\x06reason\x18\x02 \x01(\tR\x06reason\"P\n" +
@@ -1222,6 +1239,7 @@ func file_agentrepl_v1_endpoint_change_workspace_links_proto_init() {
 		(*ChangeWorkspaceLinksError_UnknownLink)(nil),
 		(*ChangeWorkspaceLinksError_TooManyShown)(nil),
 	}
+	file_agentrepl_v1_endpoint_change_workspace_links_proto_msgTypes[11].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

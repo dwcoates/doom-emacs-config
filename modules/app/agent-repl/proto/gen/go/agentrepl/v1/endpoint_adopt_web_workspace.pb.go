@@ -665,7 +665,14 @@ func (x *AdoptWebWorkspaceTransferringAway) GetAddress() string {
 }
 
 type AdoptWebWorkspaceNotYetAdopted struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The `127.0.0.1:<port>` of the daemon that serves this workspace until the
+	// joining daemon adopts it: the handover's incumbent. A client views and
+	// acts on the workspace there in the meantime, and the incumbent's later
+	// `transferred` push re-homes it. UNSET when no live daemon serves the
+	// workspace (a takeover after the incumbent died), in which case the client
+	// waits for the adoption.
+	Address       *string `protobuf:"bytes,1,opt,name=address,proto3,oneof" json:"address,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -698,6 +705,13 @@ func (x *AdoptWebWorkspaceNotYetAdopted) ProtoReflect() protoreflect.Message {
 // Deprecated: Use AdoptWebWorkspaceNotYetAdopted.ProtoReflect.Descriptor instead.
 func (*AdoptWebWorkspaceNotYetAdopted) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_adopt_web_workspace_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *AdoptWebWorkspaceNotYetAdopted) GetAddress() string {
+	if x != nil && x.Address != nil {
+		return *x.Address
+	}
+	return ""
 }
 
 // THE PLAIN BOOT'S ANSWER, and every page's ordinary one: no handover is in
@@ -859,8 +873,11 @@ const file_agentrepl_v1_endpoint_adopt_web_workspace_proto_rawDesc = "" +
 	"%AdoptWebWorkspaceWorkspaceRefMismatch\x12!\n" +
 	"\fregistry_dir\x18\x01 \x01(\tR\vregistryDir\"=\n" +
 	"!AdoptWebWorkspaceTransferringAway\x12\x18\n" +
-	"\aaddress\x18\x01 \x01(\tR\aaddress\" \n" +
-	"\x1eAdoptWebWorkspaceNotYetAdopted\"Z\n" +
+	"\aaddress\x18\x01 \x01(\tR\aaddress\"K\n" +
+	"\x1eAdoptWebWorkspaceNotYetAdopted\x12\x1d\n" +
+	"\aaddress\x18\x01 \x01(\tH\x00R\aaddress\x88\x01\x01B\n" +
+	"\n" +
+	"\b_address\"Z\n" +
 	"$AdoptWebWorkspaceNoTransferAnnounced\x122\n" +
 	"\x04page\x18\x01 \x01(\v2\x1e.agentrepl.v1.WebWorkspacePageR\x04page\")\n" +
 	"'AdoptWebWorkspaceParticipantNotExpected\"#\n" +
@@ -940,6 +957,7 @@ func file_agentrepl_v1_endpoint_adopt_web_workspace_proto_init() {
 		(*AdoptWebWorkspaceError_ParticipantNotExpected)(nil),
 		(*AdoptWebWorkspaceError_TransferDeferred)(nil),
 	}
+	file_agentrepl_v1_endpoint_adopt_web_workspace_proto_msgTypes[10].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

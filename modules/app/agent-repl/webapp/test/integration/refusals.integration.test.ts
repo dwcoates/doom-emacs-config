@@ -768,17 +768,47 @@ async function provoke(testCase: RefusalSite, arm: string): Promise<Harness> {
   return h;
 }
 
+/**
+ * The sites whose verb the sidebar runs (`sidebar/verbs.ts` runVerb): a
+ * `not_yet_adopted` there is a HANDOVER, routed to the daemon that serves the
+ * workspace (or waited out), and never drawn as a refusal at the control.
+ */
+const SIDEBAR_VERB_RPCS: ReadonlySet<string> = new Set([
+  "closeWorkspace",
+  "killWorkspace",
+  "nukeWorkspace",
+  "finishWorkspace",
+  "restartWorkspace",
+  "openWorkspace",
+  "setWorkspacePriority",
+  "selectInEditor",
+  "arrangeSidebar",
+  "setWorkspaceName",
+]);
+
+/** The arms SITE's control draws: every one, but a handover at a sidebar verb. */
+function drawnArms(rpc: string, arms: readonly string[]): string[] {
+  return arms.filter((arm) => !(arm === "notYetAdopted" && SIDEBAR_VERB_RPCS.has(rpc)));
+}
+
 describe.each(REFUSAL_SITES)("$name's typed refusals", (testCase) => {
   it("declares the four cross-cutting arms on its error", () => {
     // Assert: read off the descriptor, so a dropped arm fails here.
     expect(refusalArmsOf(testCase.rpc)).toEqual(expect.arrayContaining([...CROSS_CUTTING_ARMS]));
   });
 
-  it.each(CROSS_CUTTING_ARMS)("draws the %s arm at its call site", async (arm) => {
+  it.each(drawnArms(testCase.rpc, CROSS_CUTTING_ARMS))("draws the %s arm at its call site", async (arm) => {
     // Arrange / Act
     harness = await provoke(testCase, arm);
     // Assert
     expect(harness.$(`${testCase.site} .refusal[data-arm="${arm}"]`)).not.toBeNull();
+  });
+
+  it.runIf(SIDEBAR_VERB_RPCS.has(testCase.rpc))("draws nothing at its call site for a handover", async () => {
+    // Arrange / Act
+    harness = await provoke(testCase, "notYetAdopted");
+    // Assert
+    expect(harness.refusalArms()).toEqual([]);
   });
 
   it("draws the registry dir the ref-mismatch arm carries", async () => {
@@ -1001,7 +1031,7 @@ describe("the new-subsection popup", () => {
     ]);
   });
 
-  it.each(refusalArmsOf("arrangeSidebar"))("draws the %s arm at the popup", async (arm) => {
+  it.each(drawnArms("arrangeSidebar", refusalArmsOf("arrangeSidebar")))("draws the %s arm at the popup", async (arm) => {
     // Arrange
     await openPopup(arm);
     // Act
@@ -1059,7 +1089,7 @@ describe("the workspace rename popup", () => {
     expect([request.workspace?.id, request.name, harness.$("[data-workspace-popup]")]).toEqual([WORKSPACE_ID, "better-name", null]);
   });
 
-  it.each(refusalArmsOf("setWorkspaceName"))("draws the %s arm at the popup", async (arm) => {
+  it.each(drawnArms("setWorkspaceName", refusalArmsOf("setWorkspaceName")))("draws the %s arm at the popup", async (arm) => {
     // Arrange
     await openPopup(arm);
     // Act

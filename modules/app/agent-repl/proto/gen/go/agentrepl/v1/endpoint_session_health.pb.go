@@ -1606,7 +1606,14 @@ func (x *SessionHealthTransferringAway) GetAddress() string {
 }
 
 type SessionHealthNotYetAdopted struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The `127.0.0.1:<port>` of the daemon that serves this workspace until the
+	// joining daemon adopts it: the handover's incumbent. A client views and
+	// acts on the workspace there in the meantime, and the incumbent's later
+	// `transferred` push re-homes it. UNSET when no live daemon serves the
+	// workspace (a takeover after the incumbent died), in which case the client
+	// waits for the adoption.
+	Address       *string `protobuf:"bytes,1,opt,name=address,proto3,oneof" json:"address,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1639,6 +1646,13 @@ func (x *SessionHealthNotYetAdopted) ProtoReflect() protoreflect.Message {
 // Deprecated: Use SessionHealthNotYetAdopted.ProtoReflect.Descriptor instead.
 func (*SessionHealthNotYetAdopted) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_session_health_proto_rawDescGZIP(), []int{24}
+}
+
+func (x *SessionHealthNotYetAdopted) GetAddress() string {
+	if x != nil && x.Address != nil {
+		return *x.Address
+	}
+	return ""
 }
 
 // The session's vendor failed to start for a reason the shim labeled
@@ -1911,8 +1925,11 @@ const file_agentrepl_v1_endpoint_session_health_proto_rawDesc = "" +
 	"!SessionHealthWorkspaceRefMismatch\x12!\n" +
 	"\fregistry_dir\x18\x01 \x01(\tR\vregistryDir\"9\n" +
 	"\x1dSessionHealthTransferringAway\x12\x18\n" +
-	"\aaddress\x18\x01 \x01(\tR\aaddress\"\x1c\n" +
-	"\x1aSessionHealthNotYetAdopted\"\x8a\x01\n" +
+	"\aaddress\x18\x01 \x01(\tR\aaddress\"G\n" +
+	"\x1aSessionHealthNotYetAdopted\x12\x1d\n" +
+	"\aaddress\x18\x01 \x01(\tH\x00R\aaddress\x88\x01\x01B\n" +
+	"\n" +
+	"\b_address\"\x8a\x01\n" +
 	"\x1fSessionFaultVendorStartRetrying\x12'\n" +
 	"\x0ffailed_attempts\x18\x01 \x01(\rR\x0efailedAttempts\x12\x14\n" +
 	"\x05cause\x18\x02 \x01(\tR\x05cause\x12(\n" +
@@ -2042,6 +2059,7 @@ func file_agentrepl_v1_endpoint_session_health_proto_init() {
 		(*SessionHealthError_TransferringAway)(nil),
 		(*SessionHealthError_NotYetAdopted)(nil),
 	}
+	file_agentrepl_v1_endpoint_session_health_proto_msgTypes[24].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

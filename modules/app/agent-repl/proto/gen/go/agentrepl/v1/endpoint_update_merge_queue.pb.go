@@ -1148,7 +1148,14 @@ func (x *UpdateMergeQueueTransferringAway) GetAddress() string {
 }
 
 type UpdateMergeQueueNotYetAdopted struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The `127.0.0.1:<port>` of the daemon that serves this workspace until the
+	// joining daemon adopts it: the handover's incumbent. A client views and
+	// acts on the workspace there in the meantime, and the incumbent's later
+	// `transferred` push re-homes it. UNSET when no live daemon serves the
+	// workspace (a takeover after the incumbent died), in which case the client
+	// waits for the adoption.
+	Address       *string `protobuf:"bytes,1,opt,name=address,proto3,oneof" json:"address,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1181,6 +1188,13 @@ func (x *UpdateMergeQueueNotYetAdopted) ProtoReflect() protoreflect.Message {
 // Deprecated: Use UpdateMergeQueueNotYetAdopted.ProtoReflect.Descriptor instead.
 func (*UpdateMergeQueueNotYetAdopted) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_update_merge_queue_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *UpdateMergeQueueNotYetAdopted) GetAddress() string {
+	if x != nil && x.Address != nil {
+		return *x.Address
+	}
+	return ""
 }
 
 type UpdateMergeQueueAlreadyPaused struct {
@@ -1465,8 +1479,11 @@ const file_agentrepl_v1_endpoint_update_merge_queue_proto_rawDesc = "" +
 	"$UpdateMergeQueueWorkspaceRefMismatch\x12!\n" +
 	"\fregistry_dir\x18\x01 \x01(\tR\vregistryDir\"<\n" +
 	" UpdateMergeQueueTransferringAway\x12\x18\n" +
-	"\aaddress\x18\x01 \x01(\tR\aaddress\"\x1f\n" +
-	"\x1dUpdateMergeQueueNotYetAdopted\"\x1f\n" +
+	"\aaddress\x18\x01 \x01(\tR\aaddress\"J\n" +
+	"\x1dUpdateMergeQueueNotYetAdopted\x12\x1d\n" +
+	"\aaddress\x18\x01 \x01(\tH\x00R\aaddress\x88\x01\x01B\n" +
+	"\n" +
+	"\b_address\"\x1f\n" +
 	"\x1dUpdateMergeQueueAlreadyPaused\"\x1b\n" +
 	"\x19UpdateMergeQueueNotPaused\"#\n" +
 	"!UpdateMergeQueueNoSuchQueuedMerge\"#\n" +
@@ -1589,6 +1606,7 @@ func file_agentrepl_v1_endpoint_update_merge_queue_proto_init() {
 		(*UpdateMergeQueueError_RacingAlreadyDisabled)(nil),
 		(*UpdateMergeQueueError_RacingNotDisabled)(nil),
 	}
+	file_agentrepl_v1_endpoint_update_merge_queue_proto_msgTypes[15].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

@@ -705,7 +705,14 @@ func (x *RetryVendorErrorTransferringAway) GetAddress() string {
 }
 
 type RetryVendorErrorNotYetAdopted struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The `127.0.0.1:<port>` of the daemon that serves this workspace until the
+	// joining daemon adopts it: the handover's incumbent. A client views and
+	// acts on the workspace there in the meantime, and the incumbent's later
+	// `transferred` push re-homes it. UNSET when no live daemon serves the
+	// workspace (a takeover after the incumbent died), in which case the client
+	// waits for the adoption.
+	Address       *string `protobuf:"bytes,1,opt,name=address,proto3,oneof" json:"address,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -738,6 +745,13 @@ func (x *RetryVendorErrorNotYetAdopted) ProtoReflect() protoreflect.Message {
 // Deprecated: Use RetryVendorErrorNotYetAdopted.ProtoReflect.Descriptor instead.
 func (*RetryVendorErrorNotYetAdopted) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_retry_vendor_error_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *RetryVendorErrorNotYetAdopted) GetAddress() string {
+	if x != nil && x.Address != nil {
+		return *x.Address
+	}
+	return ""
 }
 
 type RetryVendorErrorNoSession struct {
@@ -811,8 +825,11 @@ const file_agentrepl_v1_endpoint_retry_vendor_error_proto_rawDesc = "" +
 	"$RetryVendorErrorWorkspaceRefMismatch\x12!\n" +
 	"\fregistry_dir\x18\x01 \x01(\tR\vregistryDir\"<\n" +
 	" RetryVendorErrorTransferringAway\x12\x18\n" +
-	"\aaddress\x18\x01 \x01(\tR\aaddress\"\x1f\n" +
-	"\x1dRetryVendorErrorNotYetAdopted\"\x1b\n" +
+	"\aaddress\x18\x01 \x01(\tR\aaddress\"J\n" +
+	"\x1dRetryVendorErrorNotYetAdopted\x12\x1d\n" +
+	"\aaddress\x18\x01 \x01(\tH\x00R\aaddress\x88\x01\x01B\n" +
+	"\n" +
+	"\b_address\"\x1b\n" +
 	"\x19RetryVendorErrorNoSessionB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
@@ -886,6 +903,7 @@ func file_agentrepl_v1_endpoint_retry_vendor_error_proto_init() {
 		(*RetryVendorErrorError_NotYetAdopted)(nil),
 		(*RetryVendorErrorError_NoSession)(nil),
 	}
+	file_agentrepl_v1_endpoint_retry_vendor_error_proto_msgTypes[11].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

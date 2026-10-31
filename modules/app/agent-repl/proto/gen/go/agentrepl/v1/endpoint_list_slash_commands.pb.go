@@ -585,7 +585,14 @@ func (x *ListSlashCommandsTransferringAway) GetAddress() string {
 
 // A joining daemon has not finished adopting this workspace yet.
 type ListSlashCommandsNotYetAdopted struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The `127.0.0.1:<port>` of the daemon that serves this workspace until the
+	// joining daemon adopts it: the handover's incumbent. A client views and
+	// acts on the workspace there in the meantime, and the incumbent's later
+	// `transferred` push re-homes it. UNSET when no live daemon serves the
+	// workspace (a takeover after the incumbent died), in which case the client
+	// waits for the adoption.
+	Address       *string `protobuf:"bytes,1,opt,name=address,proto3,oneof" json:"address,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -620,6 +627,13 @@ func (*ListSlashCommandsNotYetAdopted) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_list_slash_commands_proto_rawDescGZIP(), []int{9}
 }
 
+func (x *ListSlashCommandsNotYetAdopted) GetAddress() string {
+	if x != nil && x.Address != nil {
+		return *x.Address
+	}
+	return ""
+}
+
 var File_agentrepl_v1_endpoint_list_slash_commands_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_list_slash_commands_proto_rawDesc = "" +
@@ -648,8 +662,11 @@ const file_agentrepl_v1_endpoint_list_slash_commands_proto_rawDesc = "" +
 	"%ListSlashCommandsWorkspaceRefMismatch\x12!\n" +
 	"\fregistry_dir\x18\x01 \x01(\tR\vregistryDir\"=\n" +
 	"!ListSlashCommandsTransferringAway\x12\x18\n" +
-	"\aaddress\x18\x01 \x01(\tR\aaddress\" \n" +
-	"\x1eListSlashCommandsNotYetAdoptedB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"\aaddress\x18\x01 \x01(\tR\aaddress\"K\n" +
+	"\x1eListSlashCommandsNotYetAdopted\x12\x1d\n" +
+	"\aaddress\x18\x01 \x01(\tH\x00R\aaddress\x88\x01\x01B\n" +
+	"\n" +
+	"\b_addressB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_endpoint_list_slash_commands_proto_rawDescOnce sync.Once
@@ -715,6 +732,7 @@ func file_agentrepl_v1_endpoint_list_slash_commands_proto_init() {
 		(*ListSlashCommandsError_TransferringAway)(nil),
 		(*ListSlashCommandsError_NotYetAdopted)(nil),
 	}
+	file_agentrepl_v1_endpoint_list_slash_commands_proto_msgTypes[9].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

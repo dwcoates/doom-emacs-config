@@ -685,7 +685,7 @@ that outcome answering the editor\='s close is a contract breach."
                     (agent-repl-test-wire-verbs--parse
                      "{\"error\":{\"notYetAdopted\":{}}}"))
                    '(:arm :error
-                     :value (:cause (:arm :not-yet-adopted :value nil)))))))
+                     :value (:cause (:arm :not-yet-adopted :value (:address nil))))))))
 
 
 ;;;; ---- SetWorkspaceHidden ----------------------------------------------
@@ -965,7 +965,7 @@ and the registry dir."
   (agent-repl-test-wire-verbs--with-common
     (should (equal (agent-repl-wire-decode-swap-workspaces-error
                     (agent-repl-test-wire-verbs--parse "{\"notYetAdopted\":{}}"))
-                   '(:cause (:arm :not-yet-adopted :value nil))))))
+                   '(:cause (:arm :not-yet-adopted :value (:address nil)))))))
 
 (ert-deftest agent-repl-test-wire-verbs-swap-error-unset-cause-is-a-breach ()
   "SwapWorkspacesError with no arm set is a breach."
@@ -1058,7 +1058,7 @@ and the registry dir."
   (agent-repl-test-wire-verbs--with-common
     (should (equal (agent-repl-wire-decode-move-workspace-error
                     (agent-repl-test-wire-verbs--parse "{\"notYetAdopted\":{}}"))
-                   '(:cause (:arm :not-yet-adopted :value nil))))))
+                   '(:cause (:arm :not-yet-adopted :value (:address nil)))))))
 
 (ert-deftest agent-repl-test-wire-verbs-move-error-other-repository-arm ()
   "MoveWorkspaceError's `other_repository' arm decodes empty."
@@ -2423,7 +2423,7 @@ carries."
   (agent-repl-test-wire-verbs--with-common
     (should (equal (agent-repl-wire-decode-open-workspace-error
                     (agent-repl-test-wire-verbs--parse "{\"notYetAdopted\":{}}"))
-                   '(:cause (:arm :not-yet-adopted :value nil))))))
+                   '(:cause (:arm :not-yet-adopted :value (:address nil)))))))
 
 (ert-deftest agent-repl-test-wire-verbs-open-error-session-deleted-arm ()
   "OpenWorkspaceError's `session_deleted' arm decodes with everything it
@@ -2606,7 +2606,7 @@ carries."
   (agent-repl-test-wire-verbs--with-common
     (should (equal (agent-repl-wire-decode-close-workspace-error
                     (agent-repl-test-wire-verbs--parse "{\"notYetAdopted\":{}}"))
-                   '(:cause (:arm :not-yet-adopted :value nil))))))
+                   '(:cause (:arm :not-yet-adopted :value (:address nil)))))))
 
 (ert-deftest agent-repl-test-wire-verbs-close-error-unset-cause-is-a-breach ()
   "CloseWorkspaceError with no arm set says nothing actionable, so it is a
@@ -2661,7 +2661,7 @@ carries."
   (agent-repl-test-wire-verbs--with-common
     (should (equal (agent-repl-wire-decode-kill-workspace-error
                     (agent-repl-test-wire-verbs--parse "{\"notYetAdopted\":{}}"))
-                   '(:cause (:arm :not-yet-adopted :value nil))))))
+                   '(:cause (:arm :not-yet-adopted :value (:address nil)))))))
 
 (ert-deftest agent-repl-test-wire-verbs-kill-error-unset-cause-is-a-breach ()
   "KillWorkspaceError with no arm set says nothing actionable, so it is a
@@ -2716,7 +2716,7 @@ carries."
   (agent-repl-test-wire-verbs--with-common
     (should (equal (agent-repl-wire-decode-nuke-workspace-error
                     (agent-repl-test-wire-verbs--parse "{\"notYetAdopted\":{}}"))
-                   '(:cause (:arm :not-yet-adopted :value nil))))))
+                   '(:cause (:arm :not-yet-adopted :value (:address nil)))))))
 
 (ert-deftest agent-repl-test-wire-verbs-nuke-error-git-failed-arm ()
   "NukeWorkspaceError's `git_failed' arm decodes with everything it carries."
@@ -2829,7 +2829,7 @@ carries."
   (agent-repl-test-wire-verbs--with-common
     (should (equal (agent-repl-wire-decode-finish-workspace-error
                     (agent-repl-test-wire-verbs--parse "{\"notYetAdopted\":{}}"))
-                   '(:cause (:arm :not-yet-adopted :value nil))))))
+                   '(:cause (:arm :not-yet-adopted :value (:address nil)))))))
 
 (ert-deftest agent-repl-test-wire-verbs-finish-error-no-layout-facts-arm ()
   "FinishWorkspaceError's `no_layout_facts' arm decodes with everything it
@@ -2996,7 +2996,7 @@ carries."
   (agent-repl-test-wire-verbs--with-common
     (should (equal (agent-repl-wire-decode-restart-workspace-error
                     (agent-repl-test-wire-verbs--parse "{\"notYetAdopted\":{}}"))
-                   '(:cause (:arm :not-yet-adopted :value nil))))))
+                   '(:cause (:arm :not-yet-adopted :value (:address nil)))))))
 
 (ert-deftest agent-repl-test-wire-verbs-restart-error-no-session-arm-is-retired ()
   "The retired `no_session' arm is refused: every restart is immediate, so a
@@ -3066,7 +3066,7 @@ carries."
   (agent-repl-test-wire-verbs--with-common
     (should (equal (agent-repl-wire-decode-set-workspace-priority-error
                     (agent-repl-test-wire-verbs--parse "{\"notYetAdopted\":{}}"))
-                   '(:cause (:arm :not-yet-adopted :value nil))))))
+                   '(:cause (:arm :not-yet-adopted :value (:address nil)))))))
 
 (ert-deftest agent-repl-test-wire-verbs-set-priority-error-unset-cause-is-a-breach ()
   "SetWorkspacePriorityError with no arm set says nothing actionable, so it is
@@ -3129,7 +3129,7 @@ carries."
   (agent-repl-test-wire-verbs--with-common
     (should (equal (agent-repl-wire-decode-submit-prompt-error
                     (agent-repl-test-wire-verbs--parse "{\"notYetAdopted\":{}}"))
-                   '(:reason (:arm :not-yet-adopted :value nil))))))
+                   '(:reason (:arm :not-yet-adopted :value (:address nil)))))))
 
 (ert-deftest agent-repl-test-wire-verbs-submit-success-command-acted-arm ()
   "SubmitPromptSuccess's `command_acted' arm decodes as the answer it is:
@@ -3397,7 +3397,7 @@ carries."
   (agent-repl-test-wire-verbs--with-common
     (should (equal (agent-repl-wire-decode-update-merge-queue-error
                     (agent-repl-test-wire-verbs--parse "{\"notYetAdopted\":{}}"))
-                   '(:cause (:arm :not-yet-adopted :value nil))))))
+                   '(:cause (:arm :not-yet-adopted :value (:address nil)))))))
 
 (ert-deftest agent-repl-test-wire-verbs-merge-queue-error-already-paused-arm ()
   "UpdateMergeQueueError's `already_paused' arm decodes with everything it
@@ -3491,7 +3491,7 @@ carries."
   (agent-repl-test-wire-verbs--with-common
     (should (equal (agent-repl-wire-decode-session-health-error
                     (agent-repl-test-wire-verbs--parse "{\"notYetAdopted\":{}}"))
-                   '(:cause (:arm :not-yet-adopted :value nil))))))
+                   '(:cause (:arm :not-yet-adopted :value (:address nil)))))))
 
 (ert-deftest agent-repl-test-wire-verbs-session-health-error-unset-cause-is-a-breach ()
   "SessionHealthError with no arm set says nothing actionable, so it is a
@@ -4138,7 +4138,7 @@ Emacs encodes two of them and refuses the FeedId-bearing `detached' and
                     ("{\"error\":{\"notDrawn\":{\"src\":\"/x\"}}}"
                      :not-drawn (:src "/x"))
                     ("{\"error\":{\"notYetAdopted\":{}}}"
-                     :not-yet-adopted nil)))
+                     :not-yet-adopted (:address nil))))
       (let ((cause (plist-get (plist-get (agent-repl-wire-decode-open-feed-image-response
                                           (json-parse-string (nth 0 case) :object-type 'alist))
                                          :value)
@@ -4349,7 +4349,7 @@ click on a linked label), `entry' (a click on a prompt's entry) and
     (should (equal (agent-repl-wire-decode-select-feed-row-response
                     (agent-repl-test-wire-verbs--parse
                      "{\"error\":{\"notYetAdopted\":{}}}"))
-                   '(:arm :error :value (:cause (:arm :not-yet-adopted :value nil)))))))
+                   '(:arm :error :value (:cause (:arm :not-yet-adopted :value (:address nil))))))))
 
 (ert-deftest agent-repl-test-wire-verbs-select-feed-row-error-cause-arms-pinned ()
   "SelectFeedRowError's cause oneof has exactly the arms this codec decodes."
@@ -4630,7 +4630,7 @@ click on a linked label), `entry' (a click on a prompt's entry) and
                      (:arm :workspace-ref-mismatch :value (:registry-dir "/w/real")))
                     ("{\"transferringAway\":{\"address\":\"127.0.0.1:9\"}}"
                      (:arm :transferring-away :value (:address "127.0.0.1:9")))
-                    ("{\"notYetAdopted\":{}}" (:arm :not-yet-adopted :value nil))
+                    ("{\"notYetAdopted\":{}}" (:arm :not-yet-adopted :value (:address nil)))
                     ("{\"promptNotReachable\":{\"prompt\":{\"value\":\"row|p1\"}}}"
                      (:arm :prompt-not-reachable :value (:prompt (:value "row|p1"))))))
       (should (equal (agent-repl-wire-decode-plan-rollback-response
@@ -4706,7 +4706,7 @@ click on a linked label), `entry' (a click on a prompt's entry) and
                      (:arm :workspace-ref-mismatch :value (:registry-dir "/w/real")))
                     ("{\"transferringAway\":{\"address\":\"127.0.0.1:9\"}}"
                      (:arm :transferring-away :value (:address "127.0.0.1:9")))
-                    ("{\"notYetAdopted\":{}}" (:arm :not-yet-adopted :value nil))))
+                    ("{\"notYetAdopted\":{}}" (:arm :not-yet-adopted :value (:address nil)))))
       (should (equal (agent-repl-wire-decode-list-rollback-prompts-response
                       (agent-repl-test-wire-verbs--parse
                        (concat "{\"error\":" (car case) "}")))
@@ -4835,7 +4835,7 @@ click on a linked label), `entry' (a click on a prompt's entry) and
                      (:arm :workspace-ref-mismatch :value (:registry-dir "/w/real")))
                     ("{\"transferringAway\":{\"address\":\"127.0.0.1:9\"}}"
                      (:arm :transferring-away :value (:address "127.0.0.1:9")))
-                    ("{\"notYetAdopted\":{}}" (:arm :not-yet-adopted :value nil))
+                    ("{\"notYetAdopted\":{}}" (:arm :not-yet-adopted :value (:address nil)))
                     ("{\"planStale\":{}}" (:arm :plan-stale :value nil))
                     ("{\"noSession\":{}}" (:arm :no-session :value nil))
                     ("{\"promptNotRecorded\":{}}" (:arm :prompt-not-recorded :value nil))
@@ -4939,7 +4939,6 @@ encoder reads: the common codec owns the real encoding.")
   "Every empty refusal arm decodes by its own keyword (one table, one contract)."
   (agent-repl-test-wire-verbs--with-common
     (dolist (case '(("unknownWorkspace" . :unknown-workspace)
-                    ("notYetAdopted" . :not-yet-adopted)
                     ("noSuchHold" . :no-such-hold)
                     ("notHeld" . :not-held)
                     ("alreadyDelivered" . :already-delivered)
@@ -4950,6 +4949,14 @@ encoder reads: the common codec owns the real encoding.")
                       (agent-repl-test-wire-verbs--parse
                        (format "{\"error\":{\"%s\":{}}}" (car case))))
                      (list :arm :error :value (list :cause (list :arm (cdr case) :value nil))))))))
+
+(ert-deftest agent-repl-test-wire-verbs-edit-held-prompt-not-yet-adopted-names-the-serving-daemon ()
+  "The `not_yet_adopted' refusal decodes the daemon that serves the workspace."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-edit-held-prompt-response
+                    (agent-repl-test-wire-verbs--parse
+                     "{\"error\":{\"notYetAdopted\":{\"address\":\"127.0.0.1:6666\"}}}"))
+                   '(:arm :error :value (:cause (:arm :not-yet-adopted :value (:address "127.0.0.1:6666"))))))))
 
 (ert-deftest agent-repl-test-wire-verbs-edit-held-prompt-being-edited-requires-the-turn ()
   "A being-edited refusal with no editing turn is a contract breach."
