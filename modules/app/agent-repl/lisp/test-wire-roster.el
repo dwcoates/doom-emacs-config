@@ -1322,9 +1322,8 @@ A hand-rolled list decoder would skip the shared helper and fail here."
   (should (equal (agent-repl-test-wire-roster--decode
                   #'agent-repl-wire-decode-roster-merged-section
                   (concat "{\"header\":{\"label\":{\"text\":\"Deploys\"}},"
-                          "\"groups\":[],\"mergedLabel\":{\"text\":\"Recently Deployed\"},\"collapsed\":{}}"))
+                          "\"groups\":[],\"collapsed\":{}}"))
                  '(:header (:label (:text "Deploys")) :groups nil
-                   :queues nil :merged-label (:text "Recently Deployed")
                    :fold (:arm :collapsed :value nil)))))
 
 (ert-deftest agent-repl-test-wire-roster-merged-section-header-refuses-a-count ()
@@ -1358,7 +1357,7 @@ A hand-rolled list decoder would skip the shared helper and fail here."
           "\"open\":{\"label\":{\"text\":\"Open\"},\"collapsed\":{}},"
           "\"hidden\":{\"header\":{\"label\":{\"text\":\"Hidden\"},\"count\":{\"workspaces\":0}},"
           "\"hiddenRows\":{\"rows\":[]},\"expanded\":{}},"
-          "\"closed\":{\"rows\":[]},\"appSwitcher\":{\"title\":{\"text\":\"Workspaces\"},\"shown\":{\"workspaces\":{}},\"options\":[]},\"threads\":{\"newThread\":{\"label\":\"New thread\"},\"rows\":[]},\"recentlyMerged\":{\"mergedLabel\":{\"text\":\"Recently Deployed\"},\"header\":{\"label\":{\"text\":\"Deploys\"}},"
+          "\"closed\":{\"rows\":[]},\"appSwitcher\":{\"title\":{\"text\":\"Workspaces\"},\"shown\":{\"workspaces\":{}},\"options\":[]},\"threads\":{\"newThread\":{\"label\":\"New thread\"},\"rows\":[]},\"recentlyMerged\":{\"header\":{\"label\":{\"text\":\"Deploys\"}},"
           "\"groups\":[],\"collapsed\":{}},"
           "\"current\":{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/1\"}}}")
   "A whole roster: the repository sections, the open, hidden and merged sections, and current.")
@@ -1380,8 +1379,6 @@ A hand-rolled list decoder would skip the shared helper and fail here."
                             :fold (:arm :expanded :value nil))
                    :recently-merged (:header (:label (:text "Deploys"))
                                      :groups nil
-                                     :queues nil
-                                     :merged-label (:text "Recently Deployed")
                                      :fold (:arm :collapsed :value nil))
                    :closed (:rows nil)
                    :current (:workspace (:id "ws-1" :dir "/w/1"))
@@ -1476,7 +1473,7 @@ A hand-rolled list decoder would skip the shared helper and fail here."
                              (concat "{\"repository\":{\"sections\":[],\"openCount\":{}},"
                                      "\"open\":{\"label\":{},\"expanded\":{}},"
                                      "\"hidden\":{\"header\":{\"label\":{},\"count\":{}},\"hiddenRows\":{},\"expanded\":{}},"
-                                     "\"closed\":{\"rows\":[]},\"appSwitcher\":{\"title\":{\"text\":\"Workspaces\"},\"shown\":{\"workspaces\":{}},\"options\":[]},\"threads\":{\"newThread\":{\"label\":\"New thread\"},\"rows\":[]},\"recentlyMerged\":{\"mergedLabel\":{\"text\":\"Recently Deployed\"},\"header\":{\"label\":{}},"
+                                     "\"closed\":{\"rows\":[]},\"appSwitcher\":{\"title\":{\"text\":\"Workspaces\"},\"shown\":{\"workspaces\":{}},\"options\":[]},\"threads\":{\"newThread\":{\"label\":\"New thread\"},\"rows\":[]},\"recentlyMerged\":{\"header\":{\"label\":{}},"
                                      "\"groups\":[],\"collapsed\":{}}}"))
                             :current)
                  nil)))
@@ -1487,7 +1484,7 @@ A hand-rolled list decoder would skip the shared helper and fail here."
                   #'agent-repl-wire-decode-workspace-roster
                   (concat "{\"open\":{\"label\":{},\"expanded\":{}},"
                           "\"hidden\":{\"header\":{\"label\":{},\"count\":{}},\"hiddenRows\":{},\"expanded\":{}},"
-                          "\"closed\":{\"rows\":[]},\"appSwitcher\":{\"title\":{\"text\":\"Workspaces\"},\"shown\":{\"workspaces\":{}},\"options\":[]},\"threads\":{\"newThread\":{\"label\":\"New thread\"},\"rows\":[]},\"recentlyMerged\":{\"mergedLabel\":{\"text\":\"Recently Deployed\"},\"header\":{\"label\":{}},\"groups\":[]}}"))
+                          "\"closed\":{\"rows\":[]},\"appSwitcher\":{\"title\":{\"text\":\"Workspaces\"},\"shown\":{\"workspaces\":{}},\"options\":[]},\"threads\":{\"newThread\":{\"label\":\"New thread\"},\"rows\":[]},\"recentlyMerged\":{\"header\":{\"label\":{}},\"groups\":[]}}"))
                  '("WorkspaceRoster" repository "required message field is absent"))))
 
 (ert-deftest agent-repl-test-wire-roster-without-recently-merged-is-a-breach ()
@@ -1503,7 +1500,7 @@ A hand-rolled list decoder would skip the shared helper and fail here."
   (should (equal (agent-repl-test-wire-roster--breach
                   #'agent-repl-wire-decode-workspace-roster
                   (concat "{\"repository\":{\"sections\":[],\"openCount\":{}},\"open\":{\"label\":{},\"expanded\":{}},"
-                          "\"closed\":{\"rows\":[]},\"appSwitcher\":{\"title\":{\"text\":\"Workspaces\"},\"shown\":{\"workspaces\":{}},\"options\":[]},\"threads\":{\"newThread\":{\"label\":\"New thread\"},\"rows\":[]},\"recentlyMerged\":{\"mergedLabel\":{\"text\":\"Recently Deployed\"},\"header\":{\"label\":{}},\"groups\":[],\"collapsed\":{}}}"))
+                          "\"closed\":{\"rows\":[]},\"appSwitcher\":{\"title\":{\"text\":\"Workspaces\"},\"shown\":{\"workspaces\":{}},\"options\":[]},\"threads\":{\"newThread\":{\"label\":\"New thread\"},\"rows\":[]},\"recentlyMerged\":{\"header\":{\"label\":{}},\"groups\":[],\"collapsed\":{}}}"))
                  '("WorkspaceRoster" hidden "required message field is absent"))))
 
 (ert-deftest agent-repl-test-wire-roster-decodes-a-collapsed-hidden-section ()
@@ -1536,7 +1533,7 @@ A hand-rolled list decoder would skip the shared helper and fail here."
                   #'agent-repl-wire-decode-workspace-roster
                   (concat "{\"repository\":{\"sections\":[],\"openCount\":{}},\"open\":{\"label\":{},\"expanded\":{}},"
                           "\"hidden\":{\"header\":{\"label\":{},\"count\":{}},\"hiddenRows\":{},\"expanded\":{}},"
-                          "\"closed\":{\"rows\":[]},\"appSwitcher\":{\"title\":{\"text\":\"Workspaces\"},\"shown\":{\"workspaces\":{}},\"options\":[]},\"threads\":{\"newThread\":{\"label\":\"New thread\"},\"rows\":[]},\"recentlyMerged\":{\"mergedLabel\":{\"text\":\"Recently Deployed\"},\"header\":{\"label\":{}},\"groups\":[]},"
+                          "\"closed\":{\"rows\":[]},\"appSwitcher\":{\"title\":{\"text\":\"Workspaces\"},\"shown\":{\"workspaces\":{}},\"options\":[]},\"threads\":{\"newThread\":{\"label\":\"New thread\"},\"rows\":[]},\"recentlyMerged\":{\"header\":{\"label\":{}},\"groups\":[]},"
                           "\"hibernating\":{}}"))
                  '("WorkspaceRoster" hibernating "unknown field"))))
 
@@ -1547,14 +1544,14 @@ A hand-rolled list decoder would skip the shared helper and fail here."
   "An empty hidden section, expanded, as a JSON member.")
 
 (defconst agent-repl-test-wire-roster--merged-json
-  "\"closed\":{\"rows\":[]},\"appSwitcher\":{\"title\":{\"text\":\"Workspaces\"},\"shown\":{\"workspaces\":{}},\"options\":[]},\"threads\":{\"newThread\":{\"label\":\"New thread\"},\"rows\":[]},\"recentlyMerged\":{\"mergedLabel\":{\"text\":\"Recently Deployed\"},\"header\":{\"label\":{}},\"groups\":[],\"collapsed\":{}}"
+  "\"closed\":{\"rows\":[]},\"appSwitcher\":{\"title\":{\"text\":\"Workspaces\"},\"shown\":{\"workspaces\":{}},\"options\":[]},\"threads\":{\"newThread\":{\"label\":\"New thread\"},\"rows\":[]},\"recentlyMerged\":{\"header\":{\"label\":{}},\"groups\":[],\"collapsed\":{}}"
   "A merged band, collapsed, as a JSON member.")
 
 (ert-deftest agent-repl-test-wire-roster-decodes-the-merged-band-fold ()
   "The merged band's fold is the daemon's view state, decoded as its arm."
   (should (equal (plist-get (agent-repl-test-wire-roster--decode
                              #'agent-repl-wire-decode-roster-merged-section
-                             "{\"header\":{\"label\":{}},\"groups\":[],\"mergedLabel\":{},\"expanded\":{}}")
+                             "{\"header\":{\"label\":{}},\"groups\":[],\"expanded\":{}}")
                             :fold)
                  '(:arm :expanded :value nil))))
 
@@ -1562,43 +1559,54 @@ A hand-rolled list decoder would skip the shared helper and fail here."
   "The merged band's fold is never unset on the wire."
   (should (equal (agent-repl-test-wire-roster--breach
                   #'agent-repl-wire-decode-roster-merged-section
-                  "{\"header\":{\"label\":{}},\"groups\":[],\"mergedLabel\":{}}")
+                  "{\"header\":{\"label\":{}},\"groups\":[]}")
                  '("RosterMergedSection" fold "oneof is unset"))))
 
 ;;;; ---- The recently-merged band's repository groups ----
+
+;;;; ---- The Deploys band's repository groups ----
 
 (defconst agent-repl-test-wire-roster--merged-group-json
   (concat "{\"key\":{\"repository\":{\"id\":\"r1\",\"dir\":\"/r1\"}},"
           "\"header\":{\"label\":{\"text\":\"alpha\"}},"
           "\"mergedRows\":{\"rows\":[]},%s}")
-  "A `RosterMergedRepoGroup' with its `drawn' arm left as a %s hole.")
+  "A `RosterMergedRepoGroup' with its `activity' arm left as a %s hole.")
 
-(ert-deftest agent-repl-test-wire-roster-decodes-a-shown-merged-group ()
+(ert-deftest agent-repl-test-wire-roster-decodes-an-idle-merged-group ()
   "A group carries its repository key, its label header, its rows and its arm."
   (should (equal (agent-repl-test-wire-roster--decode
                   #'agent-repl-wire-decode-roster-merged-repo-group
-                  (format agent-repl-test-wire-roster--merged-group-json "\"shown\":{}"))
+                  (format agent-repl-test-wire-roster--merged-group-json "\"idle\":{}"))
                  '(:key (:repository (:id "r1" :dir "/r1"))
                    :header (:label (:text "alpha"))
                    :merged-rows (:rows nil)
-                   :drawn (:arm :shown :value nil)))))
+                   :activity (:arm :idle :value nil)))))
 
-(ert-deftest agent-repl-test-wire-roster-decodes-a-collapsed-repositorys-merged-group ()
-  "A collapsed repository's group decodes onto its own arm."
-  (should (equal (plist-get (agent-repl-test-wire-roster--decode
-                             #'agent-repl-wire-decode-roster-merged-repo-group
-                             (format agent-repl-test-wire-roster--merged-group-json
-                                     "\"repositoryCollapsed\":{}"))
-                            :drawn)
-                 '(:arm :repository-collapsed :value nil))))
+(ert-deftest agent-repl-test-wire-roster-decodes-a-queued-merged-group ()
+  "A queued group's arm carries the repository's queue."
+  (should (equal (plist-get (plist-get (plist-get (agent-repl-test-wire-roster--decode
+                                                   #'agent-repl-wire-decode-roster-merged-repo-group
+                                                   (format agent-repl-test-wire-roster--merged-group-json
+                                                           "\"queued\":{\"queue\":{}}"))
+                                                  :activity)
+                                       :value)
+                            :queue)
+                 (agent-repl-test-wire-roster--decode
+                  #'agent-repl-wire-decode-roster-repo-merge-queue "{}"))))
+
+(ert-deftest agent-repl-test-wire-roster-a-queued-group-without-its-queue-is-a-breach ()
+  "A queued group always carries its queue."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-merged-repo-group-queued "{}")
+                 '("RosterMergedRepoGroupQueued" queue "required message field is absent"))))
 
 (ert-deftest agent-repl-test-wire-roster-a-merged-group-without-its-arm-is-a-breach ()
-  "A group's `drawn' arm is never unset on the wire."
+  "A group's `activity' arm is never unset on the wire."
   (should (equal (agent-repl-test-wire-roster--breach
                   #'agent-repl-wire-decode-roster-merged-repo-group
                   (concat "{\"key\":{\"repository\":{\"id\":\"r1\",\"dir\":\"/r1\"}},"
                           "\"header\":{\"label\":{\"text\":\"alpha\"}},\"mergedRows\":{\"rows\":[]}}"))
-                 '("RosterMergedRepoGroup" drawn "oneof is unset"))))
+                 '("RosterMergedRepoGroup" activity "oneof is unset"))))
 
 (ert-deftest agent-repl-test-wire-roster-a-merged-group-header-refuses-a-fold ()
   "A group's header has no fold of its own: a fold on it is an unknown field."
@@ -1612,15 +1620,15 @@ A hand-rolled list decoder would skip the shared helper and fail here."
   (let ((decoded (agent-repl-test-wire-roster--decode
                   #'agent-repl-wire-decode-roster-merged-section
                   (concat "{\"header\":{\"label\":{}},\"groups\":["
-                          (format agent-repl-test-wire-roster--merged-group-json "\"shown\":{}") ","
+                          (format agent-repl-test-wire-roster--merged-group-json "\"idle\":{}") ","
                           (replace-regexp-in-string
                            "alpha" "beta"
-                           (format agent-repl-test-wire-roster--merged-group-json "\"repositoryCollapsed\":{}"))
-                          "],\"mergedLabel\":{},\"expanded\":{}}"))))
+                           (format agent-repl-test-wire-roster--merged-group-json "\"queued\":{\"queue\":{}}"))
+                          "],\"expanded\":{}}"))))
     (should (equal (mapcar (lambda (g) (list (plist-get (plist-get (plist-get g :header) :label) :text)
-                                             (plist-get (plist-get g :drawn) :arm)))
+                                             (plist-get (plist-get g :activity) :arm)))
                            (plist-get decoded :groups))
-                   '(("alpha" :shown) ("beta" :repository-collapsed))))))
+                   '(("alpha" :idle) ("beta" :queued))))))
 
 ;;;; ---- The rpc ----
 
@@ -1789,18 +1797,20 @@ A hand-rolled list decoder would skip the shared helper and fail here."
 (defun agent-repl-test-wire-roster--merged-section-with (members)
   "Return a merge queue section JSON carrying MEMBERS, JSON members or \"\"."
   (concat "{\"header\":{\"label\":{\"text\":\"Deploys\"}},"
-          "\"groups\":[],\"mergedLabel\":{\"text\":\"Recently Deployed\"},\"expanded\":{}" members "}"))
+          "\"groups\":[],\"expanded\":{}" members "}"))
 
-(ert-deftest agent-repl-test-wire-roster-merged-section-decodes-its-merge-queues ()
-  "A queue group carries its repository's key and label, and its queue's head, waiting and pause."
+(ert-deftest agent-repl-test-wire-roster-merged-section-decodes-a-groups-queue ()
+  "A queued group carries its repository's key and label, and its queue's head, waiting and pause."
   (let* ((group (car (plist-get
                       (agent-repl-test-wire-roster--decode
                        #'agent-repl-wire-decode-roster-merged-section
-                       (agent-repl-test-wire-roster--merged-section-with
-                        (format ",\"queues\":[{\"key\":{\"repository\":{\"id\":\"r1\",\"dir\":\"/src\"}},\"header\":{\"label\":{\"text\":\"doom\"}},\"queue\":{\"head\":{\"subject\":%s,\"stages\":[{\"label\":\"queue\",\"round\":1,\"live\":{\"startedAtMs\":\"5\"}}],\"merging\":{\"step\":\"testing\",\"suspended\":{}}},\"waiting\":[{\"subject\":%s,\"queuedAtMs\":\"9\",\"placedAtFront\":true}],\"paused\":{\"pausedAtMs\":\"7\",\"by\":{\"workspace\":{\"name\":\"doom\"}},\"hard\":true}},\"count\":{\"workspaces\":2}}]"
-                                agent-repl-test-wire-roster--subject agent-repl-test-wire-roster--subject)))
-                      :queues)))
-         (queue (plist-get group :queue))
+                       (concat
+                        "{\"header\":{\"label\":{\"text\":\"Deploys\"}},\"expanded\":{}"
+                        (format ",\"groups\":[{\"key\":{\"repository\":{\"id\":\"r1\",\"dir\":\"/src\"}},\"header\":{\"label\":{\"text\":\"doom\"}},\"mergedRows\":{\"rows\":[]},\"queued\":{\"queue\":{\"head\":{\"subject\":%s,\"stages\":[{\"label\":\"queue\",\"round\":1,\"live\":{\"startedAtMs\":\"5\"}}],\"merging\":{\"step\":\"testing\",\"suspended\":{}}},\"waiting\":[{\"subject\":%s,\"queuedAtMs\":\"9\",\"placedAtFront\":true}],\"paused\":{\"pausedAtMs\":\"7\",\"by\":{\"workspace\":{\"name\":\"doom\"}},\"hard\":true}}}}]"
+                                agent-repl-test-wire-roster--subject agent-repl-test-wire-roster--subject)
+                        "}"))
+                      :groups)))
+         (queue (plist-get (plist-get (plist-get group :activity) :value) :queue))
          (head (plist-get queue :head)))
     (should (equal (list (plist-get (plist-get group :key) :repository)
                          (plist-get (plist-get group :header) :label)
@@ -1812,20 +1822,25 @@ A hand-rolled list decoder would skip the shared helper and fail here."
                          (plist-get head :standing)
                          (plist-get (car (plist-get queue :waiting)) :queued-at-ms)
                          (plist-get (car (plist-get queue :waiting)) :placed-at-front)
-                         (plist-get queue :paused)
-                         (plist-get group :count))
+                         (plist-get queue :paused))
                    '((:id "r1" :dir "/src") (:text "doom") "one" :async "b1" "queue" (:started-at-ms 5)
                      (:arm :merging :value (:step "testing" :suspended t)) 9 t
-                     (:paused-at-ms 7 :by (:arm :workspace :value "doom") :hard t)
-                     (:workspaces 2))))))
+                     (:paused-at-ms 7 :by (:arm :workspace :value "doom") :hard t))))))
 
-(ert-deftest agent-repl-test-wire-roster-merged-section-decodes-its-merged-label ()
-  "The merge queue section carries the heading over its merged groups."
-  (should (equal (plist-get (agent-repl-test-wire-roster--decode
-                             #'agent-repl-wire-decode-roster-merged-section
-                             (agent-repl-test-wire-roster--merged-section-with ""))
-                            :merged-label)
-                 '(:text "Recently Deployed"))))
+(ert-deftest agent-repl-test-wire-roster-merged-section-with-the-retired-merged-label-is-a-breach ()
+  "Tag 7, the merged groups' heading, is retired: a section carrying it is an unknown field."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-merged-section
+                  (agent-repl-test-wire-roster--merged-section-with
+                   ",\"mergedLabel\":{\"text\":\"Recently Deployed\"}"))
+                 '("RosterMergedSection" mergedLabel "unknown field"))))
+
+(ert-deftest agent-repl-test-wire-roster-merged-section-with-the-retired-queues-is-a-breach ()
+  "Tag 6, the section-wide queue list, is retired: a section carrying it is an unknown field."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-merged-section
+                  (agent-repl-test-wire-roster--merged-section-with ",\"queues\":[]"))
+                 '("RosterMergedSection" queues "unknown field"))))
 
 (ert-deftest agent-repl-test-wire-roster-merged-section-with-the-retired-queue-label-is-a-breach ()
   "Tag 9, the queues' heading, is retired: a section carrying it is an unknown field."
@@ -1834,14 +1849,6 @@ A hand-rolled list decoder would skip the shared helper and fail here."
                   (agent-repl-test-wire-roster--merged-section-with
                    ",\"queueLabel\":{\"text\":\"Deploy Queue\"}"))
                  '("RosterMergedSection" queueLabel "unknown field"))))
-
-(ert-deftest agent-repl-test-wire-roster-merged-section-without-its-merged-label-is-a-breach ()
-  "The merged groups' heading is a required message on the section."
-  (should (equal (agent-repl-test-wire-roster--breach
-                  #'agent-repl-wire-decode-roster-merged-section
-                  (replace-regexp-in-string "\"mergedLabel\":{\"text\":\"Recently Deployed\"}," ""
-                                            (agent-repl-test-wire-roster--merged-section-with "") t t))
-                 '("RosterMergedSection" mergedLabel "required message field is absent"))))
 
 (ert-deftest agent-repl-test-wire-roster-merged-section-refuses-the-retired-paused-marker ()
   "The section-wide paused marker is retired; it is refused as an unknown field."
@@ -1869,20 +1876,6 @@ A hand-rolled list decoder would skip the shared helper and fail here."
   (should (equal (agent-repl-test-wire-roster--breach
                   #'agent-repl-wire-decode-roster-merge-queue-pauser "{}")
                  '("RosterMergeQueuePauser" asker "oneof is unset"))))
-
-(ert-deftest agent-repl-test-wire-roster-a-queue-group-without-its-count-is-a-breach ()
-  "A queue group always counts its line."
-  (should (equal (agent-repl-test-wire-roster--breach
-                  #'agent-repl-wire-decode-roster-merge-queue-repo-group
-                  "{\"key\":{\"repository\":{\"id\":\"r1\",\"dir\":\"/src\"}},\"header\":{\"label\":{\"text\":\"doom\"}},\"queue\":{}}")
-                 '("RosterMergeQueueRepoGroup" count "required message field is absent"))))
-
-(ert-deftest agent-repl-test-wire-roster-a-queue-group-refuses-an-unknown-field ()
-  "An unknown key on a queue group is refused at the group."
-  (should (equal (agent-repl-test-wire-roster--breach
-                  #'agent-repl-wire-decode-roster-merge-queue-repo-group
-                  "{\"key\":{\"repository\":{\"id\":\"r1\"}},\"header\":{\"label\":{}},\"queue\":{},\"rows\":[]}")
-                 '("RosterMergeQueueRepoGroup" rows "unknown field"))))
 
 (ert-deftest agent-repl-test-wire-roster-an-empty-merge-queue-decodes-to-nothing ()
   "A queue with no head and nothing waiting decodes to no head, none waiting,

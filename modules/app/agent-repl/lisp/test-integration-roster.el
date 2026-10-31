@@ -99,14 +99,15 @@ OVERRIDES replaces top-level entries (notably `current')."
      (hidden . ((header . ((label . ((text . "Hidden"))) (count . ((workspaces . 0)))))
                 (rows . ((rows . [])))
                 (expanded . ())))
-     (recentlyMerged . ((mergedLabel . ((text . "Recently Deployed"))) (header . ((label . ((text . "merge queue")))))
+     (recentlyMerged . ((header . ((label . ((text . "merge queue")))))
                          (groups . [])
                          (collapsed . ()))))))
 
 (defun agent-repl-itest-roster--merged-group (rows arm)
   "Return a RosterMergedRepoGroup protojson alist of the fixture repository.
-ROWS is a vector of RosterRow alists; ARM is the `drawn' arm's key symbol,
-`shown' or `repositoryCollapsed'."
+ROWS is a vector of RosterRow alists, which `agent-repl-itest--listed'
+lists as the group's `mergedRows'; ARM is the `activity' arm's key
+symbol, `idle'."
   `((key . ((repository . ((id . "repo-itest")
                            (dir . ,agent-repl-itest-roster--repo-dir)))))
     (header . ((label . ((text . "itest-repo")))))
@@ -157,7 +158,7 @@ order apart from declaration order."
     (hidden . ((header . ((label . ((text . "Hidden"))) (count . ((workspaces . 0)))))
                (rows . ((rows . [])))
                (expanded . ())))
-    (recentlyMerged . ((mergedLabel . ((text . "Recently Deployed"))) (header . ((label . ((text . "merge queue")))))
+    (recentlyMerged . ((header . ((label . ((text . "merge queue")))))
                         (groups . [])
                         (collapsed . ())))))
 
@@ -744,10 +745,9 @@ in the Open section), so only the repo section's row is on the bar."
          daemon (agent-repl-itest-roster--roster
                  (list (agent-repl-itest-roster--row "ws-repo" "ws-repo" 'ready))
                  `(recentlyMerged
-                   . ((mergedLabel . ((text . "Recently Deployed")))
-                      (header . ((label . ((text . "merge queue")))))
+                   . ((header . ((label . ((text . "merge queue")))))
                       (groups . ,(vector (agent-repl-itest-roster--merged-group
-                                          (vector merged-row) 'shown)))
+                                          (vector merged-row) 'idle)))
                       (collapsed . ())))))
         ;; Assert.
         (agent-repl-itest--wait-until
@@ -1628,7 +1628,7 @@ pinned directly."
                             (detail . nil)
                             (closed . ((closed . :false))))]))))])))
           (open . ((label . ((text . "Open"))) (expanded . ())))
-          (recentlyMerged . ((mergedLabel . ((text . "Recently Deployed"))) (header . ((label . ((text . "merge queue")))))
+          (recentlyMerged . ((header . ((label . ((text . "merge queue")))))
                              (groups . [])))))))
    :type 'agent-repl-wire-error))
 

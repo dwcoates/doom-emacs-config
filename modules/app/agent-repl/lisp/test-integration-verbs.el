@@ -1680,7 +1680,7 @@ rest of this suite already asserts against."
     (hidden . ((header . ((label . ((text . "Hidden"))) (count . ((workspaces . 0)))))
                (rows . ((rows . [])))
                (expanded . ())))
-    (recentlyMerged . ((mergedLabel . ((text . "Recently Deployed"))) (header . ((label . ((text . "merge queue")))))
+    (recentlyMerged . ((header . ((label . ((text . "merge queue")))))
                         (groups . [])
                         (collapsed . ())))))
 

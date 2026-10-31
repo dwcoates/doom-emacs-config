@@ -624,7 +624,7 @@ band's, in one group."
                                  :groups (and merged
                                               (list (list :header (list :label (list :text "repo"))
                                                           :merged-rows (agent-repl-test--merged-rows merged)
-                                                          :drawn '(:arm :shown :value nil)))))
+                                                          :activity '(:arm :idle :value nil)))))
           :closed (agent-repl-test--closed-rows closed)
           :current nil)))
 
