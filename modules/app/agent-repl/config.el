@@ -437,6 +437,10 @@ returning the SHA string (or the sentinel \"unknown\" when undetermined)."
 (agent-repl--load-module "conversations")
 (agent-repl--load-module "keybindings")
 (agent-repl--load-module "magit")
+;; WHY: terminal.el answers the `run_in_terminal' host push arm (a shell code
+;; block's run control) through Doom's vterm popup.  host.el resolves its
+;; entry point at call time, so it only has to load before a push arrives.
+(agent-repl--load-module "terminal")
 (agent-repl--load-module "emoji")
 (agent-repl--load-module "prevent-select")
 (agent-repl--load-module "close-panels-on-open")

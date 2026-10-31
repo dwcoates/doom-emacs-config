@@ -58,7 +58,9 @@ import {
   type OpenInEditorError,
   type OpenInEditorUnknownMergeTestLog,
 } from "../../proto/gen/ts/agentrepl/v1/endpoint_open_in_editor_pb";
+import { codeOfBlockControl } from "./code-block.js";
 import { isFileLinkHref } from "./href.js";
+import { RUN_CONTROL_CLASS } from "./run-control.js";
 import type {
   FeedId,
   FeedMergeTestLog,
@@ -238,11 +240,15 @@ export function renderMergeCommitLink(
   return anchor;
 }
 
-/** What an editor link opens: a workspace file, a merge's test log, or a commit in its branch's log. */
+/**
+ * What an editor link opens: a workspace file, a merge's test log, a commit in
+ * its branch's log, or a shell command in the terminal popup.
+ */
 export type EditorTarget =
   | { case: "workspaceFile"; value: { path: string; line?: number } }
   | { case: "mergeTestLog"; value: FeedMergeTestLogToken }
   | { case: "commitLog"; value: { repositoryDir: string; branch: string; commit: string } }
+  | { case: "terminalCommand"; value: { command: string } }
   | {
       case: "feedLink";
       value: { href: string; sourceRow: FeedId; onUnresolved: { case: "report" | "webFallback"; value: Record<string, never> } };
@@ -281,6 +287,8 @@ function editorTargetContext(target: EditorTarget): Record<string, unknown> {
       };
     case "feedLink":
       return { target: target.case, href: target.value.href, sourceRow: target.value.sourceRow.value };
+    case "terminalCommand":
+      return { target: target.case, characters: target.value.command.length };
     default: {
       const other: { case: string } = target;
       return unreachableArm("OpenInEditorRequest.target", other.case);
@@ -320,6 +328,30 @@ export function installProseLinkRouting(ctx: AppContext, root: HTMLElement): () 
     root.removeEventListener("click", onClick, true);
     root.removeEventListener("auxclick", onClick, true);
   };
+}
+
+/**
+ * Route a click on a shell code block's RUN CONTROL (run-control.ts) through
+ * OpenInEditor's `terminal_command` target: the block's code, verbatim, which
+ * Emacs runs in its terminal popup.
+ *
+ * ONE DELEGATED INTERCEPTOR over ROOT, as for prose links: code blocks are
+ * markdown injected as innerHTML and redrawn on every streamed delta, so no
+ * control carries a handler of its own. It runs in CAPTURE, ahead of a
+ * bubble's own click affordances. A refusal is drawn beside the block.
+ */
+export function installRunControlRouting(ctx: AppContext, root: HTMLElement): () => void {
+  const onClick = (event: MouseEvent): void => {
+    if (!(event.target instanceof Element)) return;
+    const control = event.target.closest(`.${RUN_CONTROL_CLASS}`);
+    if (!(control instanceof HTMLElement) || !claimsClick(event)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const { text } = codeOfBlockControl(control);
+    void openInEditor(ctx, control, { case: "terminalCommand", value: { command: text } });
+  };
+  root.addEventListener("click", onClick, true);
+  return () => root.removeEventListener("click", onClick, true);
 }
 
 /**

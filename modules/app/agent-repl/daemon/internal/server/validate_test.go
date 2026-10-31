@@ -705,6 +705,22 @@ func TestEachRequestValidatorNamesTheFieldItRefusesWithTargetsAndSources(t *test
 			field: "commit_log.commit",
 		},
 		{
+			name: "open in editor of an empty terminal command",
+			check: func() *connect.Error {
+				return validateOpenInEditorRequest(&agentreplv1.OpenInEditorRequest{Workspace: ref(),
+					Target: &agentreplv1.OpenInEditorRequest_TerminalCommand{TerminalCommand: &agentreplv1.OpenInEditorTerminalCommand{}}})
+			},
+			field: "terminal_command.command",
+		},
+		{
+			name: "open in editor of a whitespace-only terminal command",
+			check: func() *connect.Error {
+				return validateOpenInEditorRequest(&agentreplv1.OpenInEditorRequest{Workspace: ref(),
+					Target: &agentreplv1.OpenInEditorRequest_TerminalCommand{TerminalCommand: &agentreplv1.OpenInEditorTerminalCommand{Command: " \n\t"}}})
+			},
+			field: "terminal_command.command",
+		},
+		{
 			name:  "finish with no workspace",
 			check: func() *connect.Error { return validateFinishWorkspaceRequest(&agentreplv1.FinishWorkspaceRequest{}) },
 			field: "workspace",
@@ -824,6 +840,13 @@ func TestEachRequestValidatorAcceptsAWellFormedRequestWithTargetsAndSources(t *t
 			check: func() *connect.Error {
 				return validateOpenInEditorRequest(&agentreplv1.OpenInEditorRequest{Workspace: ref(),
 					Target: &agentreplv1.OpenInEditorRequest_CommitLog{CommitLog: &agentreplv1.OpenInEditorCommitLog{RepositoryDir: "/repo", Branch: "master", Commit: "abc"}}})
+			},
+		},
+		{
+			name: "open in editor of a terminal command",
+			check: func() *connect.Error {
+				return validateOpenInEditorRequest(&agentreplv1.OpenInEditorRequest{Workspace: ref(),
+					Target: &agentreplv1.OpenInEditorRequest_TerminalCommand{TerminalCommand: &agentreplv1.OpenInEditorTerminalCommand{Command: "ls -la"}}})
 			},
 		},
 		{

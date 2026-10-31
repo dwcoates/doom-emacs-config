@@ -32,6 +32,7 @@ import {
   editorTargetAnchor,
   installNavigationGuard,
   installProseLinkRouting,
+  installRunControlRouting,
   openExternalRefusal,
   openInEditorRefusal,
   renderEditorLink,
@@ -41,6 +42,8 @@ import {
   renderMergeTestLogLink,
 } from "../src/link.js";
 import { renderMarkdown } from "../src/markdown.js";
+import { codeBlockHtml } from "../src/code-block.js";
+import { CODE_RUN_CLASS } from "../src/run-control.js";
 import { createAgentReplClient } from "../src/rpc/client.js";
 import { MalformedView } from "../src/rpc/malformed.js";
 import { type AppContext } from "../src/rpc/context.js";
@@ -1208,5 +1211,87 @@ describe("installNavigationGuard: an outward link no surface routed", () => {
     await settle();
     off();
     expect([event.defaultPrevented, external.length]).toEqual([false, 0]);
+  });
+});
+
+describe("installRunControlRouting", () => {
+  /** Shell code blocks drawn under a root the routing is installed on. */
+  function blocks(ctx: AppContext, html: string): { root: HTMLElement; off: () => void } {
+    const root = document.createElement("div");
+    root.innerHTML = html;
+    document.body.appendChild(root);
+    return { root, off: installRunControlRouting(ctx, root) };
+  }
+
+  function commandOf(req: OpenInEditorRequest): string {
+    if (req.target.case !== "terminalCommand") throw new Error(`expected a terminalCommand target, got ${String(req.target.case)}`);
+    return req.target.value.command;
+  }
+
+  afterEach(() => {
+    document.body.innerHTML = "";
+  });
+
+  it("sends the clicked block's command as a terminal_command target", async () => {
+    // Arrange
+    const { ctx, editor } = harness();
+    const { root, off } = blocks(ctx, codeBlockHtml("echo first", "bash") + codeBlockHtml("make -C proto all", "sh"));
+    // Act
+    const event = click(root.querySelectorAll<HTMLElement>(`.${CODE_RUN_CLASS}`)[1]!);
+    await settle();
+    // Assert
+    expect([editor.map(commandOf), event.defaultPrevented]).toEqual([["make -C proto all"], true]);
+    off();
+  });
+
+  it("leaves a modified click alone", async () => {
+    // Arrange
+    const { ctx, editor } = harness();
+    const { root, off } = blocks(ctx, codeBlockHtml("ls", "bash"));
+    // Act
+    root.querySelector<HTMLElement>(`.${CODE_RUN_CLASS}`)!.dispatchEvent(
+      new MouseEvent("click", { bubbles: true, cancelable: true, button: 0, metaKey: true }),
+    );
+    await settle();
+    // Assert
+    expect(editor).toEqual([]);
+    off();
+  });
+
+  it("leaves a click on the block's code alone", async () => {
+    // Arrange
+    const { ctx, editor } = harness();
+    const { root, off } = blocks(ctx, codeBlockHtml("ls", "bash"));
+    // Act
+    click(root.querySelector<HTMLElement>("code")!);
+    await settle();
+    // Assert
+    expect(editor).toEqual([]);
+    off();
+  });
+
+  it("draws a refused run beside the block", async () => {
+    // Arrange
+    const { ctx } = harness("error", "invalidUrl", "unknownWorkspace");
+    const { root, off } = blocks(ctx, codeBlockHtml("ls", "bash"));
+    const control = root.querySelector<HTMLElement>(`.${CODE_RUN_CLASS}`)!;
+    // Act
+    click(control);
+    await settle();
+    // Assert
+    expect(control.parentElement?.querySelector(".refusal")?.getAttribute("data-arm")).toBe("unknownWorkspace");
+    off();
+  });
+
+  it("stops routing once uninstalled", async () => {
+    // Arrange
+    const { ctx, editor } = harness();
+    const { root, off } = blocks(ctx, codeBlockHtml("ls", "bash"));
+    off();
+    // Act
+    click(root.querySelector<HTMLElement>(`.${CODE_RUN_CLASS}`)!);
+    await settle();
+    // Assert
+    expect(editor).toEqual([]);
   });
 });

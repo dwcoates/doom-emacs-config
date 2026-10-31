@@ -1175,6 +1175,11 @@ func (v *fakeVerbs) OpenCommitLogInEditor(_ context.Context, _ ids.WorkspaceID, 
 	return nil
 }
 
+func (v *fakeVerbs) RunInTerminal(_ context.Context, _ ids.WorkspaceID, target *agentreplv1.OpenInEditorTerminalCommand) error {
+	v.editorOpens = append(v.editorOpens, "terminal:"+target.GetCommand())
+	return nil
+}
+
 func (v *fakeVerbs) OpenDaemonFileInEditor(_ context.Context, _ ids.WorkspaceID, path string) error {
 	v.editorOpens = append(v.editorOpens, "daemon:"+path)
 	return nil

@@ -71,6 +71,7 @@
   (load (expand-file-name "test-panels.el" dir) nil t)
   (load (expand-file-name "test-persistent-wifi.el" dir) nil t)
   (load (expand-file-name "test-popup.el" dir) nil t)
+  (load (expand-file-name "test-terminal.el" dir) nil t)
   (load (expand-file-name "test-prevent-select.el" dir) nil t)
   (load (expand-file-name "test-prompt-entries.el" dir) nil t)
   (load (expand-file-name "test-prompt-queue.el" dir) nil t)

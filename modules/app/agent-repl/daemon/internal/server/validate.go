@@ -1575,6 +1575,10 @@ func validateOpenInEditorRequest(req *agentreplv1.OpenInEditorRequest) *connect.
 		case target.CommitLog.GetCommit() == "":
 			return invalid("commit_log.commit", "a commit is required")
 		}
+	case *agentreplv1.OpenInEditorRequest_TerminalCommand:
+		if strings.TrimSpace(target.TerminalCommand.GetCommand()) == "" {
+			return invalid("terminal_command.command", "a command is required")
+		}
 	default:
 		return invalid("target", "a target arm is required")
 	}

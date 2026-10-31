@@ -424,6 +424,12 @@ I will NEVER ask a rhetorical question -- if I ask 'why does X happen?' or 'is Y
 - Code longer than one statement is NEVER inlined; it is always relayed in a fenced markdown code block.
   - Fenced means triple backticks WITH a language specification (```protobuf, ```go, ```elisp, ```python, …).
   - Single-backtick inline code stays reserved for single tokens and single statements per the section above.
+- A shell command for the user to run is always its own fenced block, opened with ```bash (or ```shell).
+  - The fence names the shell so the reader's feed draws the block's run control, which runs it in the editor's terminal.
+  - The block holds exactly ONE runnable command: the whole block pasted into a terminal at once runs correctly and completely.
+    - Never a sequence the user must copy and paste piece by piece, and never a block whose lines must be run separately.
+    - Several steps are joined into that one command (`&&`, a subshell, a heredoc) rather than split across blocks or lines meant to be pasted one by one.
+  - Nothing that is not shell goes in such a block: no prompts (`$ `), no output, no placeholders the user must edit before it runs.
 - Inside a TLDR tree, the fenced block is attached beneath its owning bullet.
   - The block is the one sanctioned multi-line content a bullet may carry.
   - Never decorate the block's lines with tree connectors (│, ├──) — the block renders clean, as-is.

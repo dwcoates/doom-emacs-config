@@ -401,6 +401,7 @@ A hand-rolled copy of either would drift from the shared shape and fail here."
                       (list "{\"openInEditor\":{\"path\":\"/w/a.el\"}}" :open-in-editor)
                       (list "{\"openCommitLog\":{\"repositoryDir\":\"/r\",\"branch\":\"master\",\"commit\":\"abc\"}}"
                             :open-commit-log)
+                      (list "{\"runInTerminal\":{\"command\":\"ls\"}}" :run-in-terminal)
                       (list "{\"selection\":{\"none\":{}}}" :selection)
                       (list "{\"evaluate\":{\"token\":{\"value\":\"t-1\"},\"text\":\"(+ 1 2)\"}}" :evaluate)
                       (list "{\"finalResponseClicked\":{}}" :final-response-clicked)
@@ -504,6 +505,22 @@ A hand-rolled copy of either would drift from the shared shape and fail here."
                   #'agent-repl-wire-decode-open-in-editor-commit-log
                   "{\"repositoryDir\":\"/r\",\"branch\":\"master\",\"commit\":\"abc\",\"line\":3}")
                  '("OpenInEditorCommitLog" line "unknown field"))))
+
+;;;; ---- OpenInEditorTerminalCommand ----
+
+(ert-deftest agent-repl-test-wire-host-terminal-command-carries-its-command ()
+  "A relayed run click decodes its command."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-open-in-editor-terminal-command
+                  "{\"command\":\"ls -la\"}")
+                 '(:command "ls -la"))))
+
+(ert-deftest agent-repl-test-wire-host-terminal-command-refuses-an-unknown-field ()
+  "An unknown key on the relayed run click is refused."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-open-in-editor-terminal-command
+                  "{\"command\":\"ls\",\"cwd\":\"/w\"}")
+                 '("OpenInEditorTerminalCommand" cwd "unknown field"))))
 
 ;;;; ---- HostEvaluate and AnswerEditorEvaluation ----
 
@@ -1673,7 +1690,7 @@ opens are OpenTabs streams."
                         "WatchHostWorkspaceResponse")
                        #'string<)
                  (sort (list "evaluate" "host" "transferred" "reloadWebapp"
-                             "openInEditor" "openCommitLog" "ending" "notificationClicked" "selection"
+                             "openInEditor" "openCommitLog" "runInTerminal" "ending" "notificationClicked" "selection"
                              "finalResponseClicked" "selectRequested" "loadPageRequested" "composeEntry"
                              "chatTextHighlighted" "transferWithdrawn" "responseTextHighlighted")
                        #'string<))))

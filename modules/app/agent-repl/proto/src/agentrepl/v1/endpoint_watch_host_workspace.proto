@@ -131,6 +131,13 @@ message WatchHostWorkspaceResponse {
     // never for a cleared one. An event, not state: never replayed to a late
     // subscriber, because a highlight belongs to the moment it was made.
     HostWorkspaceResponseTextHighlighted response_text_highlighted = 18;
+    // A HOST-RAISED CLICK on a shell code block's run control, relayed
+    // verbatim from OpenInEditor's `terminal_command` target: open the
+    // terminal popup, run the command in it, and close the popup once the
+    // command exits. A fact, not a command, exactly as `open_in_editor` is.
+    // An event, never replayed to a late subscriber: a click belongs to the
+    // moment it was made.
+    OpenInEditorTerminalCommand run_in_terminal = 19;
   }
   // Retired: desktop notifications are posted by the daemon and never cross
   // this stream, and the tab blink is drawn from the roster's attention

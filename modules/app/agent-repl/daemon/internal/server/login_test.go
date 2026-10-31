@@ -289,6 +289,39 @@ func TestOpenCommitLogRelaysOntoTheHostStream(t *testing.T) {
 	}
 }
 
+func TestOpenInEditorRunsATerminalCommandThroughTheVerb(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	_, err := h.Client.OpenInEditor(context.Background(), connect.NewRequest(&agentreplv1.OpenInEditorRequest{Workspace: ref(),
+		Target: &agentreplv1.OpenInEditorRequest_TerminalCommand{TerminalCommand: &agentreplv1.OpenInEditorTerminalCommand{Command: "ls -la"}}}))
+
+	// Assert.
+	if err != nil || len(h.Verbs.editorOpens) != 1 || h.Verbs.editorOpens[0] != "terminal:ls -la" {
+		t.Fatalf("OpenInEditor = %v, opens %v, want the command relayed", err, h.Verbs.editorOpens)
+	}
+}
+
+// TestRunInTerminalRelaysOntoTheHostStream pins the relay face's push: the
+// command travels verbatim as the run_in_terminal arm.
+func TestRunInTerminalRelaysOntoTheHostStream(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stream := dialHostStream(t, h, ctx)
+
+	// Act.
+	h.Server.Relay().RunInTerminal(testWorkspaceID, &agentreplv1.OpenInEditorTerminalCommand{Command: "ls -la"})
+	push := receiveHostEvent(t, stream)
+
+	// Assert.
+	if got := push.GetRunInTerminal().GetCommand(); got != "ls -la" {
+		t.Fatalf("run_in_terminal = %q, want ls -la", got)
+	}
+}
+
 func TestOpenInEditorOpensAMergeTestLogByItsToken(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)

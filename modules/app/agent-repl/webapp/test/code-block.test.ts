@@ -3,9 +3,10 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import { CODE_COPY_CLASS, codeBlockHtml, codeOfCopyControl } from "../src/code-block.js";
+import { CODE_COPY_CLASS, codeBlockHtml, codeOfBlockControl } from "../src/code-block.js";
 import { boundCopyText, COPY_CONTROL_CLASS, COPY_KIND_ATTRIBUTE, installCopyControls } from "../src/copy-control.js";
 import { renderMarkdown } from "../src/markdown.js";
+import { CODE_RUN_CLASS } from "../src/run-control.js";
 import { codeUnder } from "./files-under.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -30,7 +31,7 @@ function drawn(body: string, lang = ""): HTMLElement {
 /** Install the copy controls with the code resolver, recording what each copy wrote. */
 function installRecording(): string[] {
   const written: string[] = [];
-  teardown = installCopyControls(document, { code: codeOfCopyControl, prompt: boundCopyText, response: boundCopyText }, (text) => {
+  teardown = installCopyControls(document, { code: codeOfBlockControl, prompt: boundCopyText, response: boundCopyText }, (text) => {
     written.push(text);
     return true;
   });
@@ -76,6 +77,33 @@ describe("codeBlockHtml", () => {
     ]);
   });
 
+  it("draws a shell block's run control right after its copy control, ahead of the code", () => {
+    // Arrange
+    document.body.innerHTML = codeBlockHtml("ls -la", "bash");
+    // Act
+    const children = [...(document.querySelector("pre.md-code")?.children ?? [])];
+    // Assert
+    expect(children.map((child) => `${child.localName}.${child.classList[child.classList.length - 1]}`)).toEqual([
+      `ar-button.${CODE_COPY_CLASS}`,
+      `ar-button.${CODE_RUN_CLASS}`,
+      "code.lang-bash",
+    ]);
+  });
+
+  it("draws no run control for a block that is not a shell command", () => {
+    // Arrange
+    document.body.innerHTML = codeBlockHtml("fmt.Println()", "go");
+    // Act / Assert
+    expect(document.querySelector(`.${CODE_RUN_CLASS}`)).toBeNull();
+  });
+
+  it("adds no text to a shell block: its text is its command alone", () => {
+    // Arrange
+    document.body.innerHTML = codeBlockHtml("ls -la", "bash");
+    // Act / Assert
+    expect(document.querySelector("pre.md-code")?.textContent).toBe("ls -la");
+  });
+
   it("labels the copy control on hover and for assistive technology", () => {
     // Arrange
     const control = drawn("x");
@@ -110,19 +138,19 @@ describe("codeBlockHtml", () => {
   });
 });
 
-describe("codeOfCopyControl", () => {
+describe("codeOfBlockControl", () => {
   it("answers the code of the block the control sits in", () => {
     // Arrange
     const control = drawn("line one\nline two");
     // Act / Assert
-    expect(codeOfCopyControl(control)).toEqual({ text: "line one\nline two", context: { lang: "" } });
+    expect(codeOfBlockControl(control)).toEqual({ text: "line one\nline two", context: { lang: "" } });
   });
 
   it("answers the highlighted code's text, not its markup, and its language", () => {
     // Arrange
     const control = drawn("const a = 1;", "typescript");
     // Act / Assert
-    expect(codeOfCopyControl(control)).toEqual({ text: "const a = 1;", context: { lang: "typescript" } });
+    expect(codeOfBlockControl(control)).toEqual({ text: "const a = 1;", context: { lang: "typescript" } });
   });
 
   it("throws for a control outside a code block", () => {
@@ -130,7 +158,7 @@ describe("codeOfCopyControl", () => {
     const stray = document.createElement("ar-button");
     document.body.append(stray);
     // Act / Assert
-    expect(() => codeOfCopyControl(stray)).toThrow("outside a code block");
+    expect(() => codeOfBlockControl(stray)).toThrow("outside a code block");
   });
 });
 

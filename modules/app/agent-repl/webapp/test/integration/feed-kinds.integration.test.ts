@@ -304,7 +304,7 @@ describe("arm coverage", () => {
   });
 
   it("covers every OpenInEditor target", () => {
-    assertCoversOneof(OpenInEditorRequestSchema, "target", ["workspaceFile", "mergeTestLog", "feedLink", "commitLog"]);
+    assertCoversOneof(OpenInEditorRequestSchema, "target", ["workspaceFile", "mergeTestLog", "feedLink", "commitLog", "terminalCommand"]);
   });
 
   it("covers every feed command panel arm", () => {

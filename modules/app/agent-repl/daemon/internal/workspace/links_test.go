@@ -758,3 +758,44 @@ func TestTheShippedLinkUnresolvedBriefHandsTheFixToAChild(t *testing.T) {
 	// Assert.
 	assertBriefHandsTheFixToAChild(t, body)
 }
+
+func TestRunInTerminal(t *testing.T) {
+	tests := []struct {
+		name      string
+		workspace string
+		wantErr   bool
+	}{
+		{name: "the command is relayed verbatim", workspace: "w1"},
+		{name: "an unknown workspace is refused", workspace: "w9", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			f.workspace("w1", t.TempDir())
+			target := &agentreplv1.OpenInEditorTerminalCommand{Command: "make -C proto all"}
+
+			// Act.
+			err := f.verbs.RunInTerminal(context.Background(), ids.WorkspaceID(tt.workspace), target)
+
+			// Assert.
+			if tt.wantErr {
+				if err == nil || len(f.host.terminalRuns) != 0 {
+					t.Fatalf("RunInTerminal = %v with runs %+v, want a refusal and nothing relayed", err, f.host.terminalRuns)
+				}
+				return
+			}
+			if err != nil || len(f.host.terminalRuns) != 1 || f.host.terminalRuns[0] != target {
+				t.Fatalf("RunInTerminal = %v with runs %+v, want the command relayed", err, f.host.terminalRuns)
+			}
+			for _, rec := range f.log.logger.Records() {
+				if rec.Level == dlog.LevelInfo && rec.Operation == opOpenInEditor &&
+					rec.Message == "relayed a shell code block's command to the editor's terminal" &&
+					rec.Context["characters"] == len("make -C proto all") {
+					return
+				}
+			}
+			t.Fatalf("records = %+v, want an INFO naming the command's length", f.log.logger.Records())
+		})
+	}
+}

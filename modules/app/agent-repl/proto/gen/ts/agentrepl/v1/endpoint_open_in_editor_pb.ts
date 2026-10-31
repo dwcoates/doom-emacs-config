@@ -2,7 +2,7 @@
 // section. The webview's shared link component calls this for the
 // affordances that open something in the editor — the plan bubble's edit
 // button, a findings row's location, a worktree divider's path, a merge's
-// test log, a landed merge's commit — and the
+// test log, a landed merge's commit, a shell code block's run control — and the
 // daemon RELAYS the click as the workspace's WatchHostWorkspace push arm
 // `open_in_editor`, which Emacs answers with its ONE shared editor-popup
 // subroutine (a file at a line, or dired for a directory). No daemon→Emacs
@@ -26,7 +26,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_open_in_editor.proto.
  */
 export const file_agentrepl_v1_endpoint_open_in_editor: GenFile = /*@__PURE__*/
-  fileDesc("CiphZ2VudHJlcGwvdjEvZW5kcG9pbnRfb3Blbl9pbl9lZGl0b3IucHJvdG8SDGFnZW50cmVwbC52MSLbAgoTT3BlbkluRWRpdG9yUmVxdWVzdBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmEkEKDndvcmtzcGFjZV9maWxlGAQgASgLMicuYWdlbnRyZXBsLnYxLk9wZW5JbkVkaXRvcldvcmtzcGFjZUZpbGVIABI8Cg5tZXJnZV90ZXN0X2xvZxgFIAEoCzIiLmZyb250ZW5kLnYxLkZlZWRNZXJnZVRlc3RMb2dUb2tlbkgAEjcKCWZlZWRfbGluaxgGIAEoCzIiLmFnZW50cmVwbC52MS5PcGVuSW5FZGl0b3JGZWVkTGlua0gAEjkKCmNvbW1pdF9sb2cYByABKAsyIy5hZ2VudHJlcGwudjEuT3BlbkluRWRpdG9yQ29tbWl0TG9nSABCCAoGdGFyZ2V0SgQIAhADSgQIAxAEUgRwYXRoUgRsaW5lIk8KFU9wZW5JbkVkaXRvckNvbW1pdExvZxIWCg5yZXBvc2l0b3J5X2RpchgBIAEoCRIOCgZicmFuY2gYAiABKAkSDgoGY29tbWl0GAMgASgJIkUKGU9wZW5JbkVkaXRvcldvcmtzcGFjZUZpbGUSDAoEcGF0aBgBIAEoCRIRCgRsaW5lGAIgASgNSACIAQFCBwoFX2xpbmUiiAEKFE9wZW5JbkVkaXRvclJlc3BvbnNlEjQKB3N1Y2Nlc3MYASABKAsyIS5hZ2VudHJlcGwudjEuT3BlbkluRWRpdG9yU3VjY2Vzc0gAEjAKBWVycm9yGAIgASgLMh8uYWdlbnRyZXBsLnYxLk9wZW5JbkVkaXRvckVycm9ySABCCAoGcmVzdWx0IhUKE09wZW5JbkVkaXRvclN1Y2Nlc3MirAQKEU9wZW5JbkVkaXRvckVycm9yEkcKEXVua25vd25fd29ya3NwYWNlGAEgASgLMiouYWdlbnRyZXBsLnYxLk9wZW5JbkVkaXRvclVua25vd25Xb3Jrc3BhY2VIABJQChZ3b3Jrc3BhY2VfcmVmX21pc21hdGNoGAIgASgLMi4uYWdlbnRyZXBsLnYxLk9wZW5JbkVkaXRvcldvcmtzcGFjZVJlZk1pc21hdGNoSAASRwoRdHJhbnNmZXJyaW5nX2F3YXkYAyABKAsyKi5hZ2VudHJlcGwudjEuT3BlbkluRWRpdG9yVHJhbnNmZXJyaW5nQXdheUgAEkIKD25vdF95ZXRfYWRvcHRlZBgEIAEoCzInLmFnZW50cmVwbC52MS5PcGVuSW5FZGl0b3JOb3RZZXRBZG9wdGVkSAASUAoWcGF0aF9lc2NhcGVzX3dvcmtzcGFjZRgFIAEoCzIuLmFnZW50cmVwbC52MS5PcGVuSW5FZGl0b3JQYXRoRXNjYXBlc1dvcmtzcGFjZUgAEk8KFnVua25vd25fbWVyZ2VfdGVzdF9sb2cYBiABKAsyLS5hZ2VudHJlcGwudjEuT3BlbkluRWRpdG9yVW5rbm93bk1lcmdlVGVzdExvZ0gAEkMKD2xpbmtfdW5yZXNvbHZlZBgHIAEoCzIoLmFnZW50cmVwbC52MS5PcGVuSW5FZGl0b3JMaW5rVW5yZXNvbHZlZEgAQgcKBWNhdXNlIh4KHE9wZW5JbkVkaXRvclVua25vd25Xb3Jrc3BhY2UiOAogT3BlbkluRWRpdG9yV29ya3NwYWNlUmVmTWlzbWF0Y2gSFAoMcmVnaXN0cnlfZGlyGAEgASgJIi8KHE9wZW5JbkVkaXRvclRyYW5zZmVycmluZ0F3YXkSDwoHYWRkcmVzcxgBIAEoCSIbChlPcGVuSW5FZGl0b3JOb3RZZXRBZG9wdGVkIiIKIE9wZW5JbkVkaXRvclBhdGhFc2NhcGVzV29ya3NwYWNlIpcCCh9PcGVuSW5FZGl0b3JVbmtub3duTWVyZ2VUZXN0TG9nEksKCW1hbGZvcm1lZBgBIAEoCzI2LmFnZW50cmVwbC52MS5PcGVuSW5FZGl0b3JVbmtub3duTWVyZ2VUZXN0TG9nTWFsZm9ybWVkSAASUwoObm90X2RyYXduX2hlcmUYAiABKAsyOS5hZ2VudHJlcGwudjEuT3BlbkluRWRpdG9yVW5rbm93bk1lcmdlVGVzdExvZ05vdERyYXduSGVyZUgAEkgKCGFnZWRfb3V0GAMgASgLMjQuYWdlbnRyZXBsLnYxLk9wZW5JbkVkaXRvclVua25vd25NZXJnZVRlc3RMb2dBZ2VkT3V0SABCCAoGcmVhc29uIioKKE9wZW5JbkVkaXRvclVua25vd25NZXJnZVRlc3RMb2dNYWxmb3JtZWQiLQorT3BlbkluRWRpdG9yVW5rbm93bk1lcmdlVGVzdExvZ05vdERyYXduSGVyZSIoCiZPcGVuSW5FZGl0b3JVbmtub3duTWVyZ2VUZXN0TG9nQWdlZE91dCLhAQoUT3BlbkluRWRpdG9yRmVlZExpbmsSDAoEaHJlZhgBIAEoCRInCgpzb3VyY2Vfcm93GAIgASgLMhMuZnJvbnRlbmQudjEuRmVlZElkEjoKBnJlcG9ydBgDIAEoCzIoLmFnZW50cmVwbC52MS5PcGVuSW5FZGl0b3JGZWVkTGlua1JlcG9ydEgAEkUKDHdlYl9mYWxsYmFjaxgEIAEoCzItLmFnZW50cmVwbC52MS5PcGVuSW5FZGl0b3JGZWVkTGlua1dlYkZhbGxiYWNrSABCDwoNb25fdW5yZXNvbHZlZCIcChpPcGVuSW5FZGl0b3JGZWVkTGlua1JlcG9ydCIhCh9PcGVuSW5FZGl0b3JGZWVkTGlua1dlYkZhbGxiYWNrIioKGk9wZW5JbkVkaXRvckxpbmtVbnJlc29sdmVkEgwKBGhyZWYYASABKAlCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_frontend_v1_feed, file_workspace_v1_workspace]);
+  fileDesc("CiphZ2VudHJlcGwvdjEvZW5kcG9pbnRfb3Blbl9pbl9lZGl0b3IucHJvdG8SDGFnZW50cmVwbC52MSKiAwoTT3BlbkluRWRpdG9yUmVxdWVzdBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmEkEKDndvcmtzcGFjZV9maWxlGAQgASgLMicuYWdlbnRyZXBsLnYxLk9wZW5JbkVkaXRvcldvcmtzcGFjZUZpbGVIABI8Cg5tZXJnZV90ZXN0X2xvZxgFIAEoCzIiLmZyb250ZW5kLnYxLkZlZWRNZXJnZVRlc3RMb2dUb2tlbkgAEjcKCWZlZWRfbGluaxgGIAEoCzIiLmFnZW50cmVwbC52MS5PcGVuSW5FZGl0b3JGZWVkTGlua0gAEjkKCmNvbW1pdF9sb2cYByABKAsyIy5hZ2VudHJlcGwudjEuT3BlbkluRWRpdG9yQ29tbWl0TG9nSAASRQoQdGVybWluYWxfY29tbWFuZBgIIAEoCzIpLmFnZW50cmVwbC52MS5PcGVuSW5FZGl0b3JUZXJtaW5hbENvbW1hbmRIAEIICgZ0YXJnZXRKBAgCEANKBAgDEARSBHBhdGhSBGxpbmUiLgobT3BlbkluRWRpdG9yVGVybWluYWxDb21tYW5kEg8KB2NvbW1hbmQYASABKAkiTwoVT3BlbkluRWRpdG9yQ29tbWl0TG9nEhYKDnJlcG9zaXRvcnlfZGlyGAEgASgJEg4KBmJyYW5jaBgCIAEoCRIOCgZjb21taXQYAyABKAkiRQoZT3BlbkluRWRpdG9yV29ya3NwYWNlRmlsZRIMCgRwYXRoGAEgASgJEhEKBGxpbmUYAiABKA1IAIgBAUIHCgVfbGluZSKIAQoUT3BlbkluRWRpdG9yUmVzcG9uc2USNAoHc3VjY2VzcxgBIAEoCzIhLmFnZW50cmVwbC52MS5PcGVuSW5FZGl0b3JTdWNjZXNzSAASMAoFZXJyb3IYAiABKAsyHy5hZ2VudHJlcGwudjEuT3BlbkluRWRpdG9yRXJyb3JIAEIICgZyZXN1bHQiFQoTT3BlbkluRWRpdG9yU3VjY2VzcyKsBAoRT3BlbkluRWRpdG9yRXJyb3ISRwoRdW5rbm93bl93b3Jrc3BhY2UYASABKAsyKi5hZ2VudHJlcGwudjEuT3BlbkluRWRpdG9yVW5rbm93bldvcmtzcGFjZUgAElAKFndvcmtzcGFjZV9yZWZfbWlzbWF0Y2gYAiABKAsyLi5hZ2VudHJlcGwudjEuT3BlbkluRWRpdG9yV29ya3NwYWNlUmVmTWlzbWF0Y2hIABJHChF0cmFuc2ZlcnJpbmdfYXdheRgDIAEoCzIqLmFnZW50cmVwbC52MS5PcGVuSW5FZGl0b3JUcmFuc2ZlcnJpbmdBd2F5SAASQgoPbm90X3lldF9hZG9wdGVkGAQgASgLMicuYWdlbnRyZXBsLnYxLk9wZW5JbkVkaXRvck5vdFlldEFkb3B0ZWRIABJQChZwYXRoX2VzY2FwZXNfd29ya3NwYWNlGAUgASgLMi4uYWdlbnRyZXBsLnYxLk9wZW5JbkVkaXRvclBhdGhFc2NhcGVzV29ya3NwYWNlSAASTwoWdW5rbm93bl9tZXJnZV90ZXN0X2xvZxgGIAEoCzItLmFnZW50cmVwbC52MS5PcGVuSW5FZGl0b3JVbmtub3duTWVyZ2VUZXN0TG9nSAASQwoPbGlua191bnJlc29sdmVkGAcgASgLMiguYWdlbnRyZXBsLnYxLk9wZW5JbkVkaXRvckxpbmtVbnJlc29sdmVkSABCBwoFY2F1c2UiHgocT3BlbkluRWRpdG9yVW5rbm93bldvcmtzcGFjZSI4CiBPcGVuSW5FZGl0b3JXb3Jrc3BhY2VSZWZNaXNtYXRjaBIUCgxyZWdpc3RyeV9kaXIYASABKAkiLwocT3BlbkluRWRpdG9yVHJhbnNmZXJyaW5nQXdheRIPCgdhZGRyZXNzGAEgASgJIhsKGU9wZW5JbkVkaXRvck5vdFlldEFkb3B0ZWQiIgogT3BlbkluRWRpdG9yUGF0aEVzY2FwZXNXb3Jrc3BhY2UilwIKH09wZW5JbkVkaXRvclVua25vd25NZXJnZVRlc3RMb2cSSwoJbWFsZm9ybWVkGAEgASgLMjYuYWdlbnRyZXBsLnYxLk9wZW5JbkVkaXRvclVua25vd25NZXJnZVRlc3RMb2dNYWxmb3JtZWRIABJTCg5ub3RfZHJhd25faGVyZRgCIAEoCzI5LmFnZW50cmVwbC52MS5PcGVuSW5FZGl0b3JVbmtub3duTWVyZ2VUZXN0TG9nTm90RHJhd25IZXJlSAASSAoIYWdlZF9vdXQYAyABKAsyNC5hZ2VudHJlcGwudjEuT3BlbkluRWRpdG9yVW5rbm93bk1lcmdlVGVzdExvZ0FnZWRPdXRIAEIICgZyZWFzb24iKgooT3BlbkluRWRpdG9yVW5rbm93bk1lcmdlVGVzdExvZ01hbGZvcm1lZCItCitPcGVuSW5FZGl0b3JVbmtub3duTWVyZ2VUZXN0TG9nTm90RHJhd25IZXJlIigKJk9wZW5JbkVkaXRvclVua25vd25NZXJnZVRlc3RMb2dBZ2VkT3V0IuEBChRPcGVuSW5FZGl0b3JGZWVkTGluaxIMCgRocmVmGAEgASgJEicKCnNvdXJjZV9yb3cYAiABKAsyEy5mcm9udGVuZC52MS5GZWVkSWQSOgoGcmVwb3J0GAMgASgLMiguYWdlbnRyZXBsLnYxLk9wZW5JbkVkaXRvckZlZWRMaW5rUmVwb3J0SAASRQoMd2ViX2ZhbGxiYWNrGAQgASgLMi0uYWdlbnRyZXBsLnYxLk9wZW5JbkVkaXRvckZlZWRMaW5rV2ViRmFsbGJhY2tIAEIPCg1vbl91bnJlc29sdmVkIhwKGk9wZW5JbkVkaXRvckZlZWRMaW5rUmVwb3J0IiEKH09wZW5JbkVkaXRvckZlZWRMaW5rV2ViRmFsbGJhY2siKgoaT3BlbkluRWRpdG9yTGlua1VucmVzb2x2ZWQSDAoEaHJlZhgBIAEoCUIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_frontend_v1_feed, file_workspace_v1_workspace]);
 
 /**
  * @generated from message agentrepl.v1.OpenInEditorRequest
@@ -82,6 +82,17 @@ export type OpenInEditorRequest = Message<"agentrepl.v1.OpenInEditorRequest"> & 
      */
     value: OpenInEditorCommitLog;
     case: "commitLog";
+  } | {
+    /**
+     * A shell code block's run control, clicked: Emacs opens its terminal
+     * popup (the one `SPC o t` toggles), runs the command in it, and closes
+     * the popup once the command exits. Relayed verbatim as the host push
+     * arm `run_in_terminal`.
+     *
+     * @generated from field: agentrepl.v1.OpenInEditorTerminalCommand terminal_command = 8;
+     */
+    value: OpenInEditorTerminalCommand;
+    case: "terminalCommand";
   } | { case: undefined; value?: undefined };
 };
 
@@ -91,6 +102,28 @@ export type OpenInEditorRequest = Message<"agentrepl.v1.OpenInEditorRequest"> & 
  */
 export const OpenInEditorRequestSchema: GenMessage<OpenInEditorRequest> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_open_in_editor, 0);
+
+/**
+ * A shell command to run in the editor's terminal popup.
+ *
+ * @generated from message agentrepl.v1.OpenInEditorTerminalCommand
+ */
+export type OpenInEditorTerminalCommand = Message<"agentrepl.v1.OpenInEditorTerminalCommand"> & {
+  /**
+   * The code block's text, verbatim: one command a terminal runs whole. A
+   * blank one is Connect InvalidArgument.
+   *
+   * @generated from field: string command = 1;
+   */
+  command: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.OpenInEditorTerminalCommand.
+ * Use `create(OpenInEditorTerminalCommandSchema)` to create a new message.
+ */
+export const OpenInEditorTerminalCommandSchema: GenMessage<OpenInEditorTerminalCommand> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_open_in_editor, 1);
 
 /**
  * A branch's log, opened with one commit selected. Every field is echoed
@@ -127,7 +160,7 @@ export type OpenInEditorCommitLog = Message<"agentrepl.v1.OpenInEditorCommitLog"
  * Use `create(OpenInEditorCommitLogSchema)` to create a new message.
  */
 export const OpenInEditorCommitLogSchema: GenMessage<OpenInEditorCommitLog> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_in_editor, 1);
+  messageDesc(file_agentrepl_v1_endpoint_open_in_editor, 2);
 
 /**
  * A file or directory inside the workspace's worktree.
@@ -156,7 +189,7 @@ export type OpenInEditorWorkspaceFile = Message<"agentrepl.v1.OpenInEditorWorksp
  * Use `create(OpenInEditorWorkspaceFileSchema)` to create a new message.
  */
 export const OpenInEditorWorkspaceFileSchema: GenMessage<OpenInEditorWorkspaceFile> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_in_editor, 2);
+  messageDesc(file_agentrepl_v1_endpoint_open_in_editor, 3);
 
 /**
  * THE ARM IS THE OUTCOME.
@@ -187,7 +220,7 @@ export type OpenInEditorResponse = Message<"agentrepl.v1.OpenInEditorResponse"> 
  * Use `create(OpenInEditorResponseSchema)` to create a new message.
  */
 export const OpenInEditorResponseSchema: GenMessage<OpenInEditorResponse> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_in_editor, 3);
+  messageDesc(file_agentrepl_v1_endpoint_open_in_editor, 4);
 
 /**
  * Relayed to the workspace's host stream. Empty: nothing else is owed.
@@ -202,7 +235,7 @@ export type OpenInEditorSuccess = Message<"agentrepl.v1.OpenInEditorSuccess"> & 
  * Use `create(OpenInEditorSuccessSchema)` to create a new message.
  */
 export const OpenInEditorSuccessSchema: GenMessage<OpenInEditorSuccess> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_in_editor, 4);
+  messageDesc(file_agentrepl_v1_endpoint_open_in_editor, 5);
 
 /**
  * Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
@@ -282,7 +315,7 @@ export type OpenInEditorError = Message<"agentrepl.v1.OpenInEditorError"> & {
  * Use `create(OpenInEditorErrorSchema)` to create a new message.
  */
 export const OpenInEditorErrorSchema: GenMessage<OpenInEditorError> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_in_editor, 5);
+  messageDesc(file_agentrepl_v1_endpoint_open_in_editor, 6);
 
 /**
  * @generated from message agentrepl.v1.OpenInEditorUnknownWorkspace
@@ -295,7 +328,7 @@ export type OpenInEditorUnknownWorkspace = Message<"agentrepl.v1.OpenInEditorUnk
  * Use `create(OpenInEditorUnknownWorkspaceSchema)` to create a new message.
  */
 export const OpenInEditorUnknownWorkspaceSchema: GenMessage<OpenInEditorUnknownWorkspace> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_in_editor, 6);
+  messageDesc(file_agentrepl_v1_endpoint_open_in_editor, 7);
 
 /**
  * @generated from message agentrepl.v1.OpenInEditorWorkspaceRefMismatch
@@ -314,7 +347,7 @@ export type OpenInEditorWorkspaceRefMismatch = Message<"agentrepl.v1.OpenInEdito
  * Use `create(OpenInEditorWorkspaceRefMismatchSchema)` to create a new message.
  */
 export const OpenInEditorWorkspaceRefMismatchSchema: GenMessage<OpenInEditorWorkspaceRefMismatch> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_in_editor, 7);
+  messageDesc(file_agentrepl_v1_endpoint_open_in_editor, 8);
 
 /**
  * @generated from message agentrepl.v1.OpenInEditorTransferringAway
@@ -333,7 +366,7 @@ export type OpenInEditorTransferringAway = Message<"agentrepl.v1.OpenInEditorTra
  * Use `create(OpenInEditorTransferringAwaySchema)` to create a new message.
  */
 export const OpenInEditorTransferringAwaySchema: GenMessage<OpenInEditorTransferringAway> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_in_editor, 8);
+  messageDesc(file_agentrepl_v1_endpoint_open_in_editor, 9);
 
 /**
  * @generated from message agentrepl.v1.OpenInEditorNotYetAdopted
@@ -346,7 +379,7 @@ export type OpenInEditorNotYetAdopted = Message<"agentrepl.v1.OpenInEditorNotYet
  * Use `create(OpenInEditorNotYetAdoptedSchema)` to create a new message.
  */
 export const OpenInEditorNotYetAdoptedSchema: GenMessage<OpenInEditorNotYetAdopted> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_in_editor, 9);
+  messageDesc(file_agentrepl_v1_endpoint_open_in_editor, 10);
 
 /**
  * @generated from message agentrepl.v1.OpenInEditorPathEscapesWorkspace
@@ -359,7 +392,7 @@ export type OpenInEditorPathEscapesWorkspace = Message<"agentrepl.v1.OpenInEdito
  * Use `create(OpenInEditorPathEscapesWorkspaceSchema)` to create a new message.
  */
 export const OpenInEditorPathEscapesWorkspaceSchema: GenMessage<OpenInEditorPathEscapesWorkspace> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_in_editor, 10);
+  messageDesc(file_agentrepl_v1_endpoint_open_in_editor, 11);
 
 /**
  * Why a merge test log token was refused. Exactly one is set.
@@ -405,7 +438,7 @@ export type OpenInEditorUnknownMergeTestLog = Message<"agentrepl.v1.OpenInEditor
  * Use `create(OpenInEditorUnknownMergeTestLogSchema)` to create a new message.
  */
 export const OpenInEditorUnknownMergeTestLogSchema: GenMessage<OpenInEditorUnknownMergeTestLog> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_in_editor, 11);
+  messageDesc(file_agentrepl_v1_endpoint_open_in_editor, 12);
 
 /**
  * The token is not one the daemon mints.
@@ -420,7 +453,7 @@ export type OpenInEditorUnknownMergeTestLogMalformed = Message<"agentrepl.v1.Ope
  * Use `create(OpenInEditorUnknownMergeTestLogMalformedSchema)` to create a new message.
  */
 export const OpenInEditorUnknownMergeTestLogMalformedSchema: GenMessage<OpenInEditorUnknownMergeTestLogMalformed> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_in_editor, 12);
+  messageDesc(file_agentrepl_v1_endpoint_open_in_editor, 13);
 
 /**
  * The token names a merge this workspace's feed draws no bubble for.
@@ -435,7 +468,7 @@ export type OpenInEditorUnknownMergeTestLogNotDrawnHere = Message<"agentrepl.v1.
  * Use `create(OpenInEditorUnknownMergeTestLogNotDrawnHereSchema)` to create a new message.
  */
 export const OpenInEditorUnknownMergeTestLogNotDrawnHereSchema: GenMessage<OpenInEditorUnknownMergeTestLogNotDrawnHere> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_in_editor, 13);
+  messageDesc(file_agentrepl_v1_endpoint_open_in_editor, 14);
 
 /**
  * The log retention pass removed the log.
@@ -450,7 +483,7 @@ export type OpenInEditorUnknownMergeTestLogAgedOut = Message<"agentrepl.v1.OpenI
  * Use `create(OpenInEditorUnknownMergeTestLogAgedOutSchema)` to create a new message.
  */
 export const OpenInEditorUnknownMergeTestLogAgedOutSchema: GenMessage<OpenInEditorUnknownMergeTestLogAgedOut> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_in_editor, 14);
+  messageDesc(file_agentrepl_v1_endpoint_open_in_editor, 15);
 
 /**
  * A non-web link clicked in a prompt or response bubble.
@@ -525,7 +558,7 @@ export type OpenInEditorFeedLink = Message<"agentrepl.v1.OpenInEditorFeedLink"> 
  * Use `create(OpenInEditorFeedLinkSchema)` to create a new message.
  */
 export const OpenInEditorFeedLinkSchema: GenMessage<OpenInEditorFeedLink> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_in_editor, 15);
+  messageDesc(file_agentrepl_v1_endpoint_open_in_editor, 16);
 
 /**
  * Report an unresolved link to the user and the agent.
@@ -540,7 +573,7 @@ export type OpenInEditorFeedLinkReport = Message<"agentrepl.v1.OpenInEditorFeedL
  * Use `create(OpenInEditorFeedLinkReportSchema)` to create a new message.
  */
 export const OpenInEditorFeedLinkReportSchema: GenMessage<OpenInEditorFeedLinkReport> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_in_editor, 16);
+  messageDesc(file_agentrepl_v1_endpoint_open_in_editor, 17);
 
 /**
  * Resolve silently; the client falls back to the web.
@@ -555,7 +588,7 @@ export type OpenInEditorFeedLinkWebFallback = Message<"agentrepl.v1.OpenInEditor
  * Use `create(OpenInEditorFeedLinkWebFallbackSchema)` to create a new message.
  */
 export const OpenInEditorFeedLinkWebFallbackSchema: GenMessage<OpenInEditorFeedLinkWebFallback> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_in_editor, 17);
+  messageDesc(file_agentrepl_v1_endpoint_open_in_editor, 18);
 
 /**
  * The feed link resolved to no file.
@@ -576,5 +609,5 @@ export type OpenInEditorLinkUnresolved = Message<"agentrepl.v1.OpenInEditorLinkU
  * Use `create(OpenInEditorLinkUnresolvedSchema)` to create a new message.
  */
 export const OpenInEditorLinkUnresolvedSchema: GenMessage<OpenInEditorLinkUnresolved> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_in_editor, 18);
+  messageDesc(file_agentrepl_v1_endpoint_open_in_editor, 19);
 

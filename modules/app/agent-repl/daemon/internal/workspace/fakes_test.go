@@ -2260,7 +2260,9 @@ type fakeHost struct {
 	editorOpens []editorOpen
 	// commitLogOpens records every relayed open_commit_log target.
 	commitLogOpens []*agentreplv1.OpenInEditorCommitLog
-	reloads        []ids.WorkspaceID
+	// terminalRuns records every relayed run_in_terminal command.
+	terminalRuns []*agentreplv1.OpenInEditorTerminalCommand
+	reloads      []ids.WorkspaceID
 	// hostPublishes records every host-state republish the verbs asked for.
 	hostPublishes []ids.WorkspaceID
 	// tailReturns records every feed return-to-tail the verbs asked for.
@@ -2287,6 +2289,10 @@ func (h *fakeHost) OpenInEditor(ws ids.WorkspaceID, path string, line *uint32) {
 
 func (h *fakeHost) OpenCommitLog(_ ids.WorkspaceID, target *agentreplv1.OpenInEditorCommitLog) {
 	h.commitLogOpens = append(h.commitLogOpens, target)
+}
+
+func (h *fakeHost) RunInTerminal(_ ids.WorkspaceID, target *agentreplv1.OpenInEditorTerminalCommand) {
+	h.terminalRuns = append(h.terminalRuns, target)
 }
 
 func (h *fakeHost) ReloadWebapp(ws ids.WorkspaceID) { h.reloads = append(h.reloads, ws) }

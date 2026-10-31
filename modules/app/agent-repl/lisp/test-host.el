@@ -2902,6 +2902,19 @@ connection BEFORE the answer lands, which is the order a promotion makes."
         (should (equal opened '("ws-1" "/repo" "master" "abc123")))
         (should (agent-repl-test-host--logged-p :info "elisp.host.open-commit-log"))))))
 
+(ert-deftest agent-repl-test-host-run-in-terminal-runs-the-command ()
+  "The run click hands its command to the terminal popup, for its workspace."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    (let ((ran nil))
+      (cl-letf (((symbol-function 'agent-repl-terminal-run)
+                 (lambda (&rest args) (setq ran args))))
+        ;; Act
+        (agent-repl-test-host--push "ws-1" (list :arm :run-in-terminal :value (list :command "ls -la")))
+        ;; Assert
+        (should (equal ran '("ws-1" "ls -la")))))))
+
 ;;;; ---- The evaluation push ----
 
 (defun agent-repl-test-host--evaluation-call ()

@@ -104,6 +104,7 @@
 (declare-function agent-repl-frontend-reload-webapp "frontend" (ws build))
 (declare-function agent-repl-popup-open "popup" (path &optional line))
 (declare-function agent-repl-magit-log-commit "magit" (ws dir branch commit))
+(declare-function agent-repl-terminal-run "terminal" (ws command))
 
 ;;;; ---- State ----
 
@@ -1333,6 +1334,7 @@ re-create bookkeeping for a workspace whose tab is gone (measured
     (:reload-webapp (agent-repl-host--reload-webapp ws value))
     (:open-in-editor (agent-repl-host--open-in-editor ws value))
     (:open-commit-log (agent-repl-host--open-commit-log ws value))
+    (:run-in-terminal (agent-repl-host--run-in-terminal ws value))
 
     (:evaluate (agent-repl-host--evaluate ws value))
     (:ending (agent-repl-host--note-ending ws stream))
@@ -2020,6 +2022,12 @@ The click on a landed merge's commit; a fact, not a command, exactly as
     (agent-repl--info ws "elisp.host.open-commit-log ws=%s dir=%S branch=%S commit=%S"
                       ws dir branch commit)
     (agent-repl-magit-log-commit ws dir branch commit)))
+
+(defun agent-repl-host--run-in-terminal (ws target)
+  "Run TARGET's command in the terminal popup, for WS.
+The click on a shell code block's run control; a fact, not a command,
+exactly as `agent-repl-host--open-in-editor' is."
+  (agent-repl-terminal-run ws (plist-get target :command)))
 
 ;;;; ---- Editor evaluation ----
 
