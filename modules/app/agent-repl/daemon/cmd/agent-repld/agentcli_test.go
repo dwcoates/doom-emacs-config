@@ -48,6 +48,8 @@ type cliClient struct {
 	arrange     *agentreplv1.ArrangeSidebarResponse
 	// registered answers RegisterRepository, a new repository's success when nil.
 	registered *agentreplv1.RegisterRepositoryResponse
+	// remote answers UpdateRemoteControlMode, a success when nil.
+	remote *agentreplv1.UpdateRemoteControlModeResponse
 }
 
 func (c *cliClient) RegisterRepository(_ context.Context, req *connect.Request[agentreplv1.RegisterRepositoryRequest]) (*connect.Response[agentreplv1.RegisterRepositoryResponse], error) {
@@ -624,6 +626,134 @@ func TestSetNameSendsTheRename(t *testing.T) {
 				t.Errorf("request = %v, want %s renamed better-name", req, tt.wantID)
 			}
 		})
+	}
+}
+
+func (c *cliClient) UpdateRemoteControlMode(_ context.Context, req *connect.Request[agentreplv1.UpdateRemoteControlModeRequest]) (*connect.Response[agentreplv1.UpdateRemoteControlModeResponse], error) {
+	if err := c.record(req.Msg); err != nil {
+		return nil, err
+	}
+	if c.remote != nil {
+		return connect.NewResponse(c.remote), nil
+	}
+	return connect.NewResponse(&agentreplv1.UpdateRemoteControlModeResponse{Result: &agentreplv1.UpdateRemoteControlModeResponse_Success{
+		Success: &agentreplv1.UpdateRemoteControlModeSuccess{On: req.Msg.GetOn() != nil}}}), nil
+}
+
+func TestSetRemoteControlSendsTheModeForTheNamedWorkspace(t *testing.T) {
+	tests := []struct {
+		name   string
+		ws     string
+		mode   string
+		wantID string
+		wantOn bool
+	}{
+		{name: "another workspace by its name, on", ws: "peer", mode: "on", wantID: "ws-peer", wantOn: true},
+		{name: "another workspace by its directory, off", ws: "/wt/peer", mode: "off", wantID: "ws-peer"},
+		{name: "the calling workspace, as here", ws: "here", mode: "on", wantID: "ws-caller", wantOn: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newCLIFixture()
+
+			// Act
+			code := f.run(workspaceNoun, "set", tt.ws, "-remote-control", tt.mode)
+
+			// Assert
+			if code != exitSuccess {
+				t.Fatalf("exit %d, stderr %q", code, f.errOut.String())
+			}
+			req := only[*agentreplv1.UpdateRemoteControlModeRequest](t, f)
+			if req.GetWorkspace().GetId() != tt.wantID || (req.GetOn() != nil) != tt.wantOn || (req.GetOff() != nil) == tt.wantOn {
+				t.Errorf("request = %v, want %s turned %s", req, tt.wantID, tt.mode)
+			}
+			if !strings.Contains(f.out.String(), `"success"`) {
+				t.Errorf("printed %q, want the daemon's success", f.out.String())
+			}
+		})
+	}
+}
+
+func TestSetRemoteControlRefusesAModeItDoesNotKnow(t *testing.T) {
+	tests := []struct {
+		name string
+		mode string
+	}{
+		{name: "a toggle, which is the editor's", mode: "toggle"},
+		{name: "a misspelling", mode: "yes"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newCLIFixture()
+
+			// Act
+			code := f.run(workspaceNoun, "set", "peer", "-remote-control", tt.mode)
+
+			// Assert
+			if code != exitFailure || len(f.client.requests) != 0 || !strings.Contains(f.errOut.String(), "-remote-control is on or off") {
+				t.Fatalf("exit %d, requests %v, stderr %q; want a usage failure and nothing sent", code, f.client.requests, f.errOut.String())
+			}
+		})
+	}
+}
+
+func TestSetRemoteControlFailsOnAWorkspaceTheRosterLacks(t *testing.T) {
+	// Arrange
+	f := newCLIFixture()
+
+	// Act
+	code := f.run(workspaceNoun, "set", "nobody", "-remote-control", "on")
+
+	// Assert
+	if code != exitFailure || len(f.client.requests) != 0 || !strings.Contains(f.errOut.String(), `no workspace named "nobody"`) {
+		t.Fatalf("exit %d, requests %v, stderr %q; want the unknown name and nothing sent", code, f.client.requests, f.errOut.String())
+	}
+}
+
+func TestSetRemoteControlPrintsTheDaemonsTypedRefusal(t *testing.T) {
+	tests := []struct {
+		name  string
+		cause *agentreplv1.UpdateRemoteControlModeError
+		want  string
+	}{
+		{name: "a workspace the daemon does not know", cause: &agentreplv1.UpdateRemoteControlModeError{
+			Cause: &agentreplv1.UpdateRemoteControlModeError_UnknownWorkspace{UnknownWorkspace: &agentreplv1.UpdateRemoteControlModeUnknownWorkspace{}}}, want: `"unknownWorkspace"`},
+		{name: "the vendor's refusal with its detail", cause: &agentreplv1.UpdateRemoteControlModeError{
+			Cause: &agentreplv1.UpdateRemoteControlModeError_VendorRefused{VendorRefused: &agentreplv1.UpdateRemoteControlModeVendorRefused{Detail: "disabled by policy"}}}, want: "disabled by policy"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newCLIFixture()
+			f.client.remote = &agentreplv1.UpdateRemoteControlModeResponse{Result: &agentreplv1.UpdateRemoteControlModeResponse_Error{Error: tt.cause}}
+
+			// Act
+			code := f.run(workspaceNoun, "set", "peer", "-remote-control", "on")
+
+			// Assert
+			if code != exitRefused || !strings.Contains(f.out.String(), tt.want) {
+				t.Fatalf("exit %d, printed %q; want exit %d and %s printed", code, f.out.String(), exitRefused, tt.want)
+			}
+		})
+	}
+}
+
+func TestSetRemoteControlDryRunSendsNothing(t *testing.T) {
+	// Arrange: the dry run's interceptor stops the change as errDryRun.
+	f := newCLIFixture()
+	f.client.err = errDryRun
+
+	// Act
+	code := f.run(workspaceNoun, "set", "peer", "-remote-control", "on", "-dry-run")
+
+	// Assert
+	if code != exitSuccess || f.dialOptions != 1 {
+		t.Fatalf("exit %d, dial options %d; want success with the dry run's interceptor installed", code, f.dialOptions)
+	}
+	if f.out.Len() != 0 {
+		t.Errorf("printed %q, want no answer from a request that was never sent", f.out.String())
 	}
 }
 

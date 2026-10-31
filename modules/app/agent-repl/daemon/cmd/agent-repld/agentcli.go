@@ -150,7 +150,7 @@ var cliNouns = map[string]map[string]cliCommand{
 		"create":           {usage: "create -repository here|DIR -relationship child|peer [-parent WS] [-lands-into WS|main] [-origin-master] [-owner-notice TEXT] -context fresh|fork [-fork WS] [-one-shot] [-prompt TEXT] [-name NAME] [-model M] [-priority p05|p1|p2|p3] [-pre-deploy-prompt TEXT] [-pre-deploy-script PATH:SECONDS] [-post-deploy-prompt TEXT] [-post-deploy-script PATH:SECONDS] [-slack-thread URL] [-as-user]", run: workspaceCreate},
 		"async-merge":      {usage: "async-merge -name NAME -branch BRANCH (-maker WS | -maker-subagent ID) -context-fork WS -target primary|maker -placement back|front|behind=MERGE [-instruction TEXT] [-close-after WS] [-cleanup-worktree] [-compact-after] [-pre-deploy-prompt TEXT] [-pre-deploy-script PATH:SECONDS] [-post-deploy-prompt TEXT] [-post-deploy-script PATH:SECONDS] [-version-part minor|patch -changelog-line TEXT]", run: workspaceAsyncMerge},
 		"prompt":           {usage: "prompt [-as-user] WS TEXT", run: workspacePrompt},
-		"set":              {usage: "set WS [-hidden|-shown] [-priority p05|p1|p2|p3|none] [-parent WS|-top-level] [-lands-into WS|main] [-one-shot|-not-one-shot] [-await WS|-not-awaiting] [-name NAME] [-as-user]", run: workspaceSet},
+		"set":              {usage: "set WS [-hidden|-shown] [-priority p05|p1|p2|p3|none] [-parent WS|-top-level] [-lands-into WS|main] [-one-shot|-not-one-shot] [-await WS|-not-awaiting] [-name NAME] [-remote-control on|off] [-as-user]", run: workspaceSet},
 		"link":             {usage: "link WS (-url URL -label TEXT -owned|-reference | -remove URL | -show URL [-show URL]... | -clear)", run: workspaceLink},
 		"finished":         {usage: "finished WS -placement back|front|behind=MERGE [-version-part minor|patch -changelog-line TEXT] [-as-user]", run: workspaceFinished},
 		"open":             {usage: "open WS", run: workspaceOpen},
@@ -864,6 +864,7 @@ func workspaceSet(c *cliCall, args []string) int {
 	await := fs.String("await", "", "mark the workspace awaiting this workspace")
 	notAwaiting := fs.Bool("not-awaiting", false, "clear what the workspace awaits")
 	name := fs.String("name", "", "rename the workspace: its name only, never its branch or directory")
+	remoteControl := fs.String("remote-control", "", "on or off: whether the workspace's session is reachable from claude.ai")
 	asUser := fs.Bool("as-user", false, "the user asks, not the calling workspace")
 	ref, rest, ok := c.workspaceArg(fs, stateDir, args)
 	if !ok {
@@ -921,6 +922,16 @@ func workspaceSet(c *cliCall, args []string) int {
 	if *name != "" {
 		calls = append(calls, func() int {
 			resp, err := c.client.SetWorkspaceName(c.ctx, connect.NewRequest(&agentreplv1.SetWorkspaceNameRequest{Workspace: ref, Name: *name}))
+			return answer(c, resp, err)
+		})
+	}
+	if *remoteControl != "" {
+		req, err := remoteControlRequest(ref, *remoteControl)
+		if err != nil {
+			return c.usageFailed("%v", err)
+		}
+		calls = append(calls, func() int {
+			resp, err := c.client.UpdateRemoteControlMode(c.ctx, connect.NewRequest(req))
 			return answer(c, resp, err)
 		})
 	}
@@ -1035,6 +1046,22 @@ func linkRequest(ref *workspacev1.WorkspaceRef, set linkSet, remove string, show
 		req.Change = &agentreplv1.ChangeWorkspaceLinksRequest_Clear{Clear: &agentreplv1.ChangeWorkspaceLinksClear{}}
 	}
 	return req, ""
+}
+
+// remoteControlRequest reads a -remote-control flag into the request that
+// turns workspace REF's remote control on or off. An agent names the mode it
+// wants, never a toggle, so the answer is the same whatever the mode was.
+func remoteControlRequest(ref *workspacev1.WorkspaceRef, text string) (*agentreplv1.UpdateRemoteControlModeRequest, error) {
+	req := &agentreplv1.UpdateRemoteControlModeRequest{Workspace: ref}
+	switch text {
+	case "on":
+		req.Action = &agentreplv1.UpdateRemoteControlModeRequest_On{On: &agentreplv1.UpdateRemoteControlModeOn{}}
+	case "off":
+		req.Action = &agentreplv1.UpdateRemoteControlModeRequest_Off{Off: &agentreplv1.UpdateRemoteControlModeOff{}}
+	default:
+		return nil, fmt.Errorf("-remote-control is on or off, not %q", text)
+	}
+	return req, nil
 }
 
 // priorityOf reads a -priority flag: a level, or none to clear it.
