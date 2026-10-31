@@ -186,7 +186,11 @@ type ChangeWorkspaceLinksSet struct {
 	// line breaks. Any other label is refused (`invalid_label`), so every label
 	// the menu draws fits it. A blank label is a malformed request (Connect
 	// InvalidArgument).
-	Label         string `protobuf:"bytes,2,opt,name=label,proto3" json:"label,omitempty"`
+	Label string `protobuf:"bytes,2,opt,name=label,proto3" json:"label,omitempty"`
+	// Whether the workspace's work made what the link points at. REQUIRED: an
+	// unset ownership is a malformed request (Connect InvalidArgument), so
+	// every stored link says which it is. A relabel sets it anew.
+	Ownership     *WorkspaceLinkOwnership `protobuf:"bytes,3,opt,name=ownership,proto3" json:"ownership,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -233,6 +237,13 @@ func (x *ChangeWorkspaceLinksSet) GetLabel() string {
 		return x.Label
 	}
 	return ""
+}
+
+func (x *ChangeWorkspaceLinksSet) GetOwnership() *WorkspaceLinkOwnership {
+	if x != nil {
+		return x.Ownership
+	}
+	return nil
 }
 
 // Remove one stored link. A url the workspace does not hold is refused
@@ -1082,10 +1093,11 @@ const file_agentrepl_v1_endpoint_change_workspace_links_proto_rawDesc = "" +
 	"\x06remove\x18\x03 \x01(\v2(.agentrepl.v1.ChangeWorkspaceLinksRemoveH\x00R\x06remove\x12<\n" +
 	"\x04show\x18\x04 \x01(\v2&.agentrepl.v1.ChangeWorkspaceLinksShowH\x00R\x04show\x12?\n" +
 	"\x05clear\x18\x05 \x01(\v2'.agentrepl.v1.ChangeWorkspaceLinksClearH\x00R\x05clearB\b\n" +
-	"\x06change\"A\n" +
+	"\x06change\"\x85\x01\n" +
 	"\x17ChangeWorkspaceLinksSet\x12\x10\n" +
 	"\x03url\x18\x01 \x01(\tR\x03url\x12\x14\n" +
-	"\x05label\x18\x02 \x01(\tR\x05label\".\n" +
+	"\x05label\x18\x02 \x01(\tR\x05label\x12B\n" +
+	"\townership\x18\x03 \x01(\v2$.agentrepl.v1.WorkspaceLinkOwnershipR\townership\".\n" +
 	"\x1aChangeWorkspaceLinksRemove\x12\x10\n" +
 	"\x03url\x18\x01 \x01(\tR\x03url\".\n" +
 	"\x18ChangeWorkspaceLinksShow\x12\x12\n" +
@@ -1156,7 +1168,8 @@ var file_agentrepl_v1_endpoint_change_workspace_links_proto_goTypes = []any{
 	(*ChangeWorkspaceLinksUnknownLink)(nil),          // 14: agentrepl.v1.ChangeWorkspaceLinksUnknownLink
 	(*ChangeWorkspaceLinksTooManyShown)(nil),         // 15: agentrepl.v1.ChangeWorkspaceLinksTooManyShown
 	(*v1.WorkspaceRef)(nil),                          // 16: workspace.v1.WorkspaceRef
-	(*WorkspaceLinks)(nil),                           // 17: agentrepl.v1.WorkspaceLinks
+	(*WorkspaceLinkOwnership)(nil),                   // 17: agentrepl.v1.WorkspaceLinkOwnership
+	(*WorkspaceLinks)(nil),                           // 18: agentrepl.v1.WorkspaceLinks
 }
 var file_agentrepl_v1_endpoint_change_workspace_links_proto_depIdxs = []int32{
 	16, // 0: agentrepl.v1.ChangeWorkspaceLinksRequest.workspace:type_name -> workspace.v1.WorkspaceRef
@@ -1164,22 +1177,23 @@ var file_agentrepl_v1_endpoint_change_workspace_links_proto_depIdxs = []int32{
 	2,  // 2: agentrepl.v1.ChangeWorkspaceLinksRequest.remove:type_name -> agentrepl.v1.ChangeWorkspaceLinksRemove
 	3,  // 3: agentrepl.v1.ChangeWorkspaceLinksRequest.show:type_name -> agentrepl.v1.ChangeWorkspaceLinksShow
 	4,  // 4: agentrepl.v1.ChangeWorkspaceLinksRequest.clear:type_name -> agentrepl.v1.ChangeWorkspaceLinksClear
-	6,  // 5: agentrepl.v1.ChangeWorkspaceLinksResponse.success:type_name -> agentrepl.v1.ChangeWorkspaceLinksSuccess
-	7,  // 6: agentrepl.v1.ChangeWorkspaceLinksResponse.error:type_name -> agentrepl.v1.ChangeWorkspaceLinksError
-	17, // 7: agentrepl.v1.ChangeWorkspaceLinksSuccess.links:type_name -> agentrepl.v1.WorkspaceLinks
-	8,  // 8: agentrepl.v1.ChangeWorkspaceLinksError.unknown_workspace:type_name -> agentrepl.v1.ChangeWorkspaceLinksUnknownWorkspace
-	9,  // 9: agentrepl.v1.ChangeWorkspaceLinksError.workspace_ref_mismatch:type_name -> agentrepl.v1.ChangeWorkspaceLinksWorkspaceRefMismatch
-	10, // 10: agentrepl.v1.ChangeWorkspaceLinksError.transferring_away:type_name -> agentrepl.v1.ChangeWorkspaceLinksTransferringAway
-	11, // 11: agentrepl.v1.ChangeWorkspaceLinksError.not_yet_adopted:type_name -> agentrepl.v1.ChangeWorkspaceLinksNotYetAdopted
-	12, // 12: agentrepl.v1.ChangeWorkspaceLinksError.invalid_link:type_name -> agentrepl.v1.ChangeWorkspaceLinksInvalidLink
-	13, // 13: agentrepl.v1.ChangeWorkspaceLinksError.invalid_label:type_name -> agentrepl.v1.ChangeWorkspaceLinksInvalidLabel
-	14, // 14: agentrepl.v1.ChangeWorkspaceLinksError.unknown_link:type_name -> agentrepl.v1.ChangeWorkspaceLinksUnknownLink
-	15, // 15: agentrepl.v1.ChangeWorkspaceLinksError.too_many_shown:type_name -> agentrepl.v1.ChangeWorkspaceLinksTooManyShown
-	16, // [16:16] is the sub-list for method output_type
-	16, // [16:16] is the sub-list for method input_type
-	16, // [16:16] is the sub-list for extension type_name
-	16, // [16:16] is the sub-list for extension extendee
-	0,  // [0:16] is the sub-list for field type_name
+	17, // 5: agentrepl.v1.ChangeWorkspaceLinksSet.ownership:type_name -> agentrepl.v1.WorkspaceLinkOwnership
+	6,  // 6: agentrepl.v1.ChangeWorkspaceLinksResponse.success:type_name -> agentrepl.v1.ChangeWorkspaceLinksSuccess
+	7,  // 7: agentrepl.v1.ChangeWorkspaceLinksResponse.error:type_name -> agentrepl.v1.ChangeWorkspaceLinksError
+	18, // 8: agentrepl.v1.ChangeWorkspaceLinksSuccess.links:type_name -> agentrepl.v1.WorkspaceLinks
+	8,  // 9: agentrepl.v1.ChangeWorkspaceLinksError.unknown_workspace:type_name -> agentrepl.v1.ChangeWorkspaceLinksUnknownWorkspace
+	9,  // 10: agentrepl.v1.ChangeWorkspaceLinksError.workspace_ref_mismatch:type_name -> agentrepl.v1.ChangeWorkspaceLinksWorkspaceRefMismatch
+	10, // 11: agentrepl.v1.ChangeWorkspaceLinksError.transferring_away:type_name -> agentrepl.v1.ChangeWorkspaceLinksTransferringAway
+	11, // 12: agentrepl.v1.ChangeWorkspaceLinksError.not_yet_adopted:type_name -> agentrepl.v1.ChangeWorkspaceLinksNotYetAdopted
+	12, // 13: agentrepl.v1.ChangeWorkspaceLinksError.invalid_link:type_name -> agentrepl.v1.ChangeWorkspaceLinksInvalidLink
+	13, // 14: agentrepl.v1.ChangeWorkspaceLinksError.invalid_label:type_name -> agentrepl.v1.ChangeWorkspaceLinksInvalidLabel
+	14, // 15: agentrepl.v1.ChangeWorkspaceLinksError.unknown_link:type_name -> agentrepl.v1.ChangeWorkspaceLinksUnknownLink
+	15, // 16: agentrepl.v1.ChangeWorkspaceLinksError.too_many_shown:type_name -> agentrepl.v1.ChangeWorkspaceLinksTooManyShown
+	17, // [17:17] is the sub-list for method output_type
+	17, // [17:17] is the sub-list for method input_type
+	17, // [17:17] is the sub-list for extension type_name
+	17, // [17:17] is the sub-list for extension extendee
+	0,  // [0:17] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_change_workspace_links_proto_init() }

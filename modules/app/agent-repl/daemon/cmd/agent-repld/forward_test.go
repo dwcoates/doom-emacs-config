@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"reflect"
 	"slices"
@@ -506,6 +507,11 @@ func TestEveryEarlyRegistryRepublishGoesThroughTheForwarder(t *testing.T) {
 type mergeVerbs struct {
 	workspace.Verbs
 	interrupted []ids.WorkspaceID
+	ended       []merge.DetachedOutcome
+}
+
+func (v *mergeVerbs) MergeEnded(_ context.Context, _ ids.WorkspaceID, out merge.DetachedOutcome) {
+	v.ended = append(v.ended, out)
 }
 
 func (v *mergeVerbs) ClaimMergeName(_ context.Context, _, name string) (string, func(), bool, error) {
@@ -591,6 +597,35 @@ func TestVerbsForwarderMergeReachesTheBoundVerbs(t *testing.T) {
 	if claimErr != nil || branch != "agent/fix" || taken || interruptErr != nil || !running || len(target.interrupted) != 1 {
 		t.Fatalf("claim = %q, %v, %v; interrupt = %v, %v (%v); want both carried to the verbs", branch, taken, claimErr, running, interruptErr, target.interrupted)
 	}
+}
+
+func TestVerbsForwarderCarriesAMergeEndToTheBoundVerbs(t *testing.T) {
+	// Arrange.
+	f := &verbsForwarder{}
+	target := &mergeVerbs{}
+	f.bind(target)
+
+	// Act.
+	f.MergeEnded(context.Background(), "ws-1", merge.DetachedOutcome{Kind: merge.DetachedLanded})
+
+	// Assert.
+	if len(target.ended) != 1 || target.ended[0].Kind != merge.DetachedLanded {
+		t.Fatalf("ended = %+v, want the landed end carried to the verbs", target.ended)
+	}
+}
+
+func TestVerbsForwarderMergeEndBeforeTheVerbsFailsHard(t *testing.T) {
+	// Arrange.
+	f := &verbsForwarder{}
+	defer func() {
+		// Assert.
+		if r := recover(); r == nil || !strings.Contains(fmt.Sprint(r), "a merge ended before the workspace verbs existed") {
+			t.Fatalf("recover() = %v, want the wiring defect", r)
+		}
+	}()
+
+	// Act.
+	f.MergeEnded(context.Background(), "ws-1", merge.DetachedOutcome{})
 }
 
 // TestEveryForwardedVerbsReadGoesThroughBound pins the shared shape: a method

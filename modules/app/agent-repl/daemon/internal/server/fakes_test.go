@@ -712,9 +712,15 @@ func (f *fakeVerbs) linkChange(change string) ([]wsm.WorkspaceLink, error) {
 	return f.links, nil
 }
 
-func (f *fakeVerbs) SetLink(_ context.Context, _ ids.WorkspaceID, url, label string) ([]wsm.WorkspaceLink, error) {
-	return f.linkChange("set " + url + " " + label)
+func (f *fakeVerbs) SetLink(_ context.Context, _ ids.WorkspaceID, url, label string, owned bool) ([]wsm.WorkspaceLink, error) {
+	ownership := "reference"
+	if owned {
+		ownership = "owned"
+	}
+	return f.linkChange("set " + url + " " + label + " " + ownership)
 }
+
+func (f *fakeVerbs) MergeEnded(context.Context, ids.WorkspaceID, merge.DetachedOutcome) {}
 
 func (f *fakeVerbs) RemoveLink(_ context.Context, _ ids.WorkspaceID, url string) ([]wsm.WorkspaceLink, error) {
 	return f.linkChange("remove " + url)

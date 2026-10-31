@@ -34,6 +34,7 @@ import (
 	"agent-repld/internal/protoarm"
 	"agent-repld/internal/resolve/feed"
 	"agent-repld/internal/stateroot"
+	"agent-repld/internal/workspace"
 )
 
 // THE AGENT API'S COMMANDS: six nouns over the serving daemon's rpcs.
@@ -144,11 +145,11 @@ type cliCommand struct {
 // cliNouns are every noun's subcommands.
 var cliNouns = map[string]map[string]cliCommand{
 	workspaceNoun: {
-		"create":      {usage: "create -repository here|DIR -relationship child|peer [-parent WS] [-lands-into WS|main] [-origin-master] [-owner-notice TEXT] -context fresh|fork [-fork WS] [-one-shot] [-prompt TEXT] [-name NAME] [-model M] [-priority p05|p1|p2|p3] [-pre-deploy-prompt TEXT] [-pre-deploy-script PATH:SECONDS] [-post-deploy-prompt TEXT] [-post-deploy-script PATH:SECONDS] [-as-user]", run: workspaceCreate},
+		"create":      {usage: "create -repository here|DIR -relationship child|peer [-parent WS] [-lands-into WS|main] [-origin-master] [-owner-notice TEXT] -context fresh|fork [-fork WS] [-one-shot] [-prompt TEXT] [-name NAME] [-model M] [-priority p05|p1|p2|p3] [-pre-deploy-prompt TEXT] [-pre-deploy-script PATH:SECONDS] [-post-deploy-prompt TEXT] [-post-deploy-script PATH:SECONDS] [-slack-thread URL] [-as-user]", run: workspaceCreate},
 		"async-merge": {usage: "async-merge -name NAME -branch BRANCH (-maker WS | -maker-subagent ID) -context-fork WS -target primary|maker -placement back|front|behind=MERGE [-instruction TEXT] [-close-after WS] [-cleanup-worktree] [-compact-after] [-pre-deploy-prompt TEXT] [-pre-deploy-script PATH:SECONDS] [-post-deploy-prompt TEXT] [-post-deploy-script PATH:SECONDS] [-version-part minor|patch -changelog-line TEXT]", run: workspaceAsyncMerge},
 		"prompt":      {usage: "prompt [-as-user] WS TEXT", run: workspacePrompt},
 		"set":         {usage: "set WS [-hidden|-shown] [-priority p05|p1|p2|p3|none] [-parent WS|-top-level] [-lands-into WS|main] [-one-shot|-not-one-shot] [-await WS|-not-awaiting] [-name NAME] [-as-user]", run: workspaceSet},
-		"link":        {usage: "link WS (-url URL -label TEXT | -remove URL | -show URL [-show URL]... | -clear)", run: workspaceLink},
+		"link":        {usage: "link WS (-url URL -label TEXT -owned|-reference | -remove URL | -show URL [-show URL]... | -clear)", run: workspaceLink},
 		"finished":    {usage: "finished WS -placement back|front|behind=MERGE [-version-part minor|patch -changelog-line TEXT] [-as-user]", run: workspaceFinished},
 		"open":        {usage: "open WS", run: workspaceOpen},
 		"close":       {usage: "close WS [-as-user]", run: workspaceClose},
@@ -579,6 +580,7 @@ func workspaceCreate(c *cliCall, args []string) int {
 	model := fs.String("model", "", "the session's model; unset is the daemon's")
 	priority := fs.String("priority", "", "p05, p1, p2 or p3; unset is unprioritized")
 	pre, post := hookFlags(fs)
+	slackThread := fs.String("slack-thread", "", "the link of the Slack message the workspace acts on; the daemon posts into its thread when work begins and when a finish's deploy ends")
 	asUser := fs.Bool("as-user", false, "the user asks, not the calling workspace")
 	positionals, ok := c.parse(fs, args)
 	if !ok {
@@ -660,6 +662,9 @@ func workspaceCreate(c *cliCall, args []string) int {
 			return c.usageFailed("-priority is p05, p1, p2 or p3, not %q", *priority)
 		}
 		req.Priority = level
+	}
+	if *slackThread != "" {
+		req.SlackOrigin = &agentreplv1.CreateWorkspaceSlackOrigin{ThreadUrl: *slackThread}
 	}
 	resp, err := c.client.CreateWorkspace(c.ctx, connect.NewRequest(req))
 	// A DAEMON HANDING OVER CREATES NOTHING NEW: it names its successor, and
@@ -955,13 +960,16 @@ func workspaceSet(c *cliCall, args []string) int {
 }
 
 // workspaceLink changes one of a workspace's links, the topbar summary's
-// menu: store or relabel one (-url with -label), remove one (-remove), name
+// menu: store or relabel one (-url with -label, and -owned or -reference),
+// remove one (-remove), name
 // exactly the ones the menu shows (-show, repeated), or clear them (-clear).
 // The answer carries every link and whether the menu is full.
 func workspaceLink(c *cliCall, args []string) int {
 	fs, stateDir := c.flags()
 	url := fs.String("url", "", "the link to store or relabel")
 	label := fs.String("label", "", "the link's label: two to eight words, one sentence")
+	owned := fs.Bool("owned", false, "the workspace's work made what the link points at (a pull request it opened)")
+	reference := fs.Bool("reference", false, "the link points at something apart from the workspace's work (the thread or ticket it came from)")
 	remove := fs.String("remove", "", "the url of the link to remove")
 	var show []string
 	fs.Var(repeatedFlag{values: &show, noun: "url"}, "show", "a url the menu shows; repeat it for each, at most five")
@@ -970,7 +978,7 @@ func workspaceLink(c *cliCall, args []string) int {
 	if !ok {
 		return exitFailure
 	}
-	req, problem := linkRequest(ref, *url, *label, *remove, show, *clear)
+	req, problem := linkRequest(ref, linkSet{url: *url, label: *label, owned: *owned, reference: *reference}, *remove, show, *clear)
 	if len(rest) != 0 || problem != "" {
 		if problem == "" {
 			problem = "nothing is positional"
@@ -981,12 +989,21 @@ func workspaceLink(c *cliCall, args []string) int {
 	return answer(c, resp, err)
 }
 
+// linkSet is workspaceLink's set flags.
+type linkSet struct {
+	url, label       string
+	owned, reference bool
+}
+
+// given reports whether any set flag was named.
+func (s linkSet) given() bool { return s.url != "" || s.label != "" || s.owned || s.reference }
+
 // linkRequest reads workspaceLink's flags into the request for REF, or names
-// why they do not make one: exactly one change, and a set names both its url
-// and its label.
-func linkRequest(ref *workspacev1.WorkspaceRef, url, label, remove string, show []string, clear bool) (*agentreplv1.ChangeWorkspaceLinksRequest, string) {
+// why they do not make one: exactly one change, and a set names its url, its
+// label, and exactly one of -owned and -reference.
+func linkRequest(ref *workspacev1.WorkspaceRef, set linkSet, remove string, show []string, clear bool) (*agentreplv1.ChangeWorkspaceLinksRequest, string) {
 	changes := 0
-	for _, given := range []bool{url != "" || label != "", remove != "", len(show) > 0, clear} {
+	for _, given := range []bool{set.given(), remove != "", len(show) > 0, clear} {
 		if given {
 			changes++
 		}
@@ -996,11 +1013,14 @@ func linkRequest(ref *workspacev1.WorkspaceRef, url, label, remove string, show 
 	}
 	req := &agentreplv1.ChangeWorkspaceLinksRequest{Workspace: ref}
 	switch {
-	case url != "" || label != "":
-		if url == "" || label == "" {
+	case set.given():
+		if set.url == "" || set.label == "" {
 			return nil, "a set names both -url and -label"
 		}
-		req.Change = &agentreplv1.ChangeWorkspaceLinksRequest_Set{Set: &agentreplv1.ChangeWorkspaceLinksSet{Url: url, Label: label}}
+		if set.owned == set.reference {
+			return nil, "a set names exactly one of -owned (the workspace's work made it) and -reference (it only points at it)"
+		}
+		req.Change = &agentreplv1.ChangeWorkspaceLinksRequest_Set{Set: &agentreplv1.ChangeWorkspaceLinksSet{Url: set.url, Label: set.label, Ownership: workspace.LinkOwnershipView(set.owned)}}
 	case remove != "":
 		req.Change = &agentreplv1.ChangeWorkspaceLinksRequest_Remove{Remove: &agentreplv1.ChangeWorkspaceLinksRemove{Url: remove}}
 	case len(show) > 0:

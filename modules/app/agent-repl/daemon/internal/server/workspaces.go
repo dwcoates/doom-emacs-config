@@ -123,9 +123,10 @@ func (s *server) CreateWorkspace(
 	}
 
 	spec := workspace.CreateSpec{
-		RepoDir:   repository.Dir,
-		Requester: requesterID(req.Msg.GetRequester()),
-		ForkFrom:  forkSourceID(req.Msg.GetContextOrigin()),
+		RepoDir:     repository.Dir,
+		Requester:   requesterID(req.Msg.GetRequester()),
+		ForkFrom:    forkSourceID(req.Msg.GetContextOrigin()),
+		SlackThread: req.Msg.GetSlackOrigin().GetThreadUrl(),
 	}
 	if standard := req.Msg.GetStandard(); standard != nil {
 		spec.InitialPrompt = s.saidText(s.log, "standard.initial_prompt", standard.GetInitialPrompt())
@@ -1137,7 +1138,7 @@ func (s *server) ChangeWorkspaceLinks(
 	var err error
 	switch change := req.Msg.GetChange().(type) {
 	case *agentreplv1.ChangeWorkspaceLinksRequest_Set:
-		links, err = s.deps.Verbs.SetLink(ctx, ws, change.Set.GetUrl(), change.Set.GetLabel())
+		links, err = s.deps.Verbs.SetLink(ctx, ws, change.Set.GetUrl(), change.Set.GetLabel(), change.Set.GetOwnership().GetOwned() != nil)
 	case *agentreplv1.ChangeWorkspaceLinksRequest_Remove:
 		links, err = s.deps.Verbs.RemoveLink(ctx, ws, change.Remove.GetUrl())
 	case *agentreplv1.ChangeWorkspaceLinksRequest_Show:

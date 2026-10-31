@@ -236,10 +236,21 @@ func (v *verbs) RunCreate(ctx context.Context, ticket *CreateTicket) (wsm.Worksp
 	return result.created, result.err
 }
 
-// attemptCreate is one run of the create, under a create-gate ticket. A
+// attemptCreate is one run of the create. A workspace created for a Slack
+// message then takes its thread up (adoptSlackOrigin), once the create-gate
+// ticket is released, so a slow post never holds a stand-down back.
+func (v *verbs) attemptCreate(ctx context.Context, spec CreateSpec) (wsm.Workspace, error) {
+	created, err := v.attemptHeldCreate(ctx, spec)
+	if err == nil {
+		v.adoptSlackOrigin(ctx, created, spec.SlackThread)
+	}
+	return created, err
+}
+
+// attemptHeldCreate is one run of the create, under a create-gate ticket. A
 // failure is reported to the repository's main worktree; a create held for
 // the network is not a failure and is not reported.
-func (v *verbs) attemptCreate(ctx context.Context, spec CreateSpec) (wsm.Workspace, error) {
+func (v *verbs) attemptHeldCreate(ctx context.Context, spec CreateSpec) (wsm.Workspace, error) {
 	ctx, release, err := v.deps.Creates.Hold(ctx)
 	if err != nil {
 		v.deps.Log.Global().Info(opCreate, "the daemon stood down before the create could start; nothing was named or built", dlog.Context{
@@ -540,9 +551,11 @@ func createKey(spec CreateSpec) string {
 		RepoDir, Parent, OwnerNotice, ContextWorkspace, ForkFrom, Landing string
 		FromOrigin, OneShot                                               bool
 		Name, Model, Priority, PermissionMode, Consent, Prompt            string
+		SlackThread                                                       string
 		PreDeploy, PostDeploy                                             []string
 	}{
-		RepoDir: filepath.Clean(spec.RepoDir), Parent: ids.Optional(spec.Parent), OwnerNotice: strings.TrimSpace(spec.OwnerNotice),
+		SlackThread: spec.SlackThread,
+		RepoDir:     filepath.Clean(spec.RepoDir), Parent: ids.Optional(spec.Parent), OwnerNotice: strings.TrimSpace(spec.OwnerNotice),
 		Landing:          landingKey(spec.Landing),
 		ContextWorkspace: ids.Optional(spec.ContextWorkspace), ForkFrom: ids.Optional(spec.ForkFrom),
 		FromOrigin: spec.FromOrigin, OneShot: spec.OneShot,
@@ -593,6 +606,7 @@ type heldSpec struct {
 	Model                string   `json:"model,omitempty"`
 	PermissionMode       string   `json:"permission_mode,omitempty"`
 	Priority             *int     `json:"priority,omitempty"`
+	SlackThread          string   `json:"slack_thread,omitempty"`
 	// Landing is the explicit landing target, absent for the relationship's
 	// default; a held row written before landing targets existed has none,
 	// which is what its create meant.
@@ -626,6 +640,7 @@ func encodeHeldSpec(spec CreateSpec) (string, error) {
 		ForkFrom: ids.Optional(spec.ForkFrom), Requester: ids.Optional(spec.Requester), OwnerNotice: spec.OwnerNotice,
 		ConsentedUngatedMode: spec.ConsentedUngatedMode, PreDeploy: hookBytes(spec.DeployHooks.PreDeploy),
 		PostDeploy: hookBytes(spec.DeployHooks.PostDeploy), Name: spec.Name, Model: spec.Model, PermissionMode: spec.PermissionMode,
+		SlackThread: spec.SlackThread,
 	}
 	if spec.Priority != nil {
 		p := int(*spec.Priority)
@@ -660,7 +675,7 @@ func decodeHeldSpec(encoded string) (CreateSpec, error) {
 		ContextWorkspace: optionalID(held.ContextWorkspace), BaseRef: held.BaseRef, Parent: optionalID(held.Parent),
 		ForkFrom: optionalID(held.ForkFrom), Requester: optionalID(held.Requester), OwnerNotice: held.OwnerNotice,
 		ConsentedUngatedMode: held.ConsentedUngatedMode, DeployHooks: wsm.DeployHooks{PreDeploy: pre, PostDeploy: post},
-		Name: held.Name, Model: held.Model, PermissionMode: held.PermissionMode,
+		Name: held.Name, Model: held.Model, PermissionMode: held.PermissionMode, SlackThread: held.SlackThread,
 	}
 	if held.Priority != nil {
 		p := wsm.Priority(*held.Priority)

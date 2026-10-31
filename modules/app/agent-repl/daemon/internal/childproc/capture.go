@@ -85,3 +85,30 @@ func readAll(f *os.File) (string, error) {
 	}
 	return string(b), nil
 }
+
+// Run runs cmd to its end with both streams captured in files
+// (CaptureOutput), calling started once it is running when started is not nil,
+// and answers what it wrote. runErr is cmd's own start or wait error, exactly
+// as exec.Cmd.Run answers it: cmd.Process is nil after Run when the start was
+// what failed. err is a failure to capture or read the output, after which
+// neither stream can be trusted and both are empty. Every child whose whole
+// output is its answer runs through here; TestEveryCapturedRunGoesThroughRun
+// holds the daemon to it.
+func Run(cmd *exec.Cmd, started func()) (stdout, stderr string, runErr, err error) {
+	capture, err := CaptureOutput(cmd)
+	if err != nil {
+		return "", "", nil, err
+	}
+	runErr = cmd.Start()
+	if runErr == nil {
+		if started != nil {
+			started()
+		}
+		runErr = cmd.Wait()
+	}
+	stdout, stderr, err = capture.Finish()
+	if err != nil {
+		return "", "", runErr, err
+	}
+	return stdout, stderr, runErr, nil
+}

@@ -406,6 +406,13 @@ func TestEachRequestValidatorNamesTheFieldItRefusesWithTargetsAndSources(t *test
 			field: "set.label",
 		},
 		{
+			name: "change links with a set saying no ownership",
+			check: func() *connect.Error {
+				return validateChangeWorkspaceLinksRequest(&agentreplv1.ChangeWorkspaceLinksRequest{Workspace: ref(), Change: &agentreplv1.ChangeWorkspaceLinksRequest_Set{Set: &agentreplv1.ChangeWorkspaceLinksSet{Url: "https://x", Label: "The doc"}}})
+			},
+			field: "set.ownership",
+		},
+		{
 			name: "change links with a removal of a blank url",
 			check: func() *connect.Error {
 				return validateChangeWorkspaceLinksRequest(&agentreplv1.ChangeWorkspaceLinksRequest{Workspace: ref(), Change: &agentreplv1.ChangeWorkspaceLinksRequest_Remove{Remove: &agentreplv1.ChangeWorkspaceLinksRemove{}}})
@@ -578,6 +585,16 @@ func TestEachRequestValidatorNamesTheFieldItRefusesWithTargetsAndSources(t *test
 			req.Model = strPtr("opus")
 			return validateCreateWorkspaceRequest(req)
 		}, field: "model"},
+		{name: "an async merge naming a slack origin", check: func() *connect.Error {
+			req := validAsyncMerge(nil)
+			req.SlackOrigin = &agentreplv1.CreateWorkspaceSlackOrigin{ThreadUrl: "https://w.slack.com/archives/C1/p1730000000123456"}
+			return validateCreateWorkspaceRequest(req)
+		}, field: "slack_origin"},
+		{name: "create with a slack origin that links no message", check: func() *connect.Error {
+			return validateCreateWorkspaceRequest(validCreate(func(r *agentreplv1.CreateWorkspaceRequest) {
+				r.SlackOrigin = &agentreplv1.CreateWorkspaceSlackOrigin{ThreadUrl: "https://w.slack.com/archives/C1"}
+			}))
+		}, field: "slack_origin.thread_url"},
 		{name: "an async merge with no name", check: func() *connect.Error {
 			return validateCreateWorkspaceRequest(validAsyncMerge(func(a *agentreplv1.CreateWorkspaceAsyncMerge) { a.Name = " " }))
 		}, field: "async_merge.name"},

@@ -245,6 +245,18 @@ func (f *verbsForwarder) ClaimMergeName(ctx context.Context, repoDir, name strin
 	return verbs.ClaimMergeName(ctx, repoDir, name)
 }
 
+// MergeEnded is the merge orchestrator's end observer (merge.EndObserver),
+// read out of the verbs, which are built after the orchestrator. An end told
+// before they are bound is a wiring defect, since the verbs are bound before
+// any merge can run, so it fails hard.
+func (f *verbsForwarder) MergeEnded(ctx context.Context, ws ids.WorkspaceID, out merge.DetachedOutcome) {
+	verbs, err := f.bound("a merge ended")
+	if err != nil {
+		panic(err)
+	}
+	verbs.MergeEnded(ctx, ws, out)
+}
+
 // interruptTurn is the merge orchestrator's turn stop (merge.InterruptTurnFunc):
 // the user's own turn interrupt, confirmed, so the agent's detached work stops
 // with it. It reads the verbs out of the forwarder when it runs.

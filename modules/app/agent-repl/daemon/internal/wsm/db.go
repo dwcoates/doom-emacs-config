@@ -611,9 +611,10 @@ type DB interface {
 	// WorkspaceLinks answers every link a workspace holds, most recently set
 	// first (workspacelinks.go).
 	WorkspaceLinks(ctx context.Context, id WorkspaceID) ([]WorkspaceLink, error)
-	// SetWorkspaceLink stores a link under its label, or relabels a stored
-	// one, answering every link the workspace then holds.
-	SetWorkspaceLink(ctx context.Context, id WorkspaceID, url, label string) ([]WorkspaceLink, error)
+	// SetWorkspaceLink stores a link under its label and ownership, or
+	// relabels a stored one and sets its ownership anew, answering every link
+	// the workspace then holds.
+	SetWorkspaceLink(ctx context.Context, id WorkspaceID, url, label string, owned bool) ([]WorkspaceLink, error)
 	// RemoveWorkspaceLink removes a stored link, answering the rest; a url
 	// the workspace does not hold is an *UnknownLinkError.
 	RemoveWorkspaceLink(ctx context.Context, id WorkspaceID, url string) ([]WorkspaceLink, error)
@@ -623,6 +624,12 @@ type DB interface {
 	ShowWorkspaceLinks(ctx context.Context, id WorkspaceID, urls []string) ([]WorkspaceLink, error)
 	// ClearWorkspaceLinks removes every link a workspace holds.
 	ClearWorkspaceLinks(ctx context.Context, id WorkspaceID) error
+	// SetWorkspaceSlackOrigin records the Slack thread a workspace was
+	// created for, once (slackorigin.go).
+	SetWorkspaceSlackOrigin(ctx context.Context, id WorkspaceID, url string) error
+	// WorkspaceSlackOrigin answers the Slack thread a workspace was created
+	// for, false when it was created for none.
+	WorkspaceSlackOrigin(ctx context.Context, id WorkspaceID) (string, bool, error)
 	// PutQueuedCreate holds a create until the network is restored, or
 	// replaces the held create of the same request key (queuedcreates.go).
 	PutQueuedCreate(ctx context.Context, q QueuedCreate) error

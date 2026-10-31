@@ -10,6 +10,14 @@
 // chooses which links the menu shows (ChangeWorkspaceLinksShow), most relevant
 // first to the developer working with the agent and to the stakeholders the
 // developer reports the work to.
+//
+// OWNED OR REFERENCED. Every link says whether the workspace's work MADE the
+// thing it points at (a pull request it opened, a doc it wrote) or only
+// points at something that exists apart from it (the thread it was asked in,
+// a ticket, a dashboard). The daemon reads the owned links, and only those,
+// when it tells the Slack thread a workspace was created for that the work is
+// done, so the thread is shown what the work produced and nothing it was
+// merely shown.
 
 syntax = "proto3";
 
@@ -39,7 +47,30 @@ message WorkspaceLink {
   string label = 2;
   // Whether the summary's menu shows this link.
   WorkspaceLinkPlacement placement = 3;
+  // Whether the workspace's work made what the link points at.
+  WorkspaceLinkOwnership ownership = 4;
 }
+
+// Whether a workspace's work made what a link points at. THE ARM IS THE
+// OWNERSHIP. A link stored before links carried ownership reads `reference`.
+message WorkspaceLinkOwnership {
+  oneof ownership {
+    // The workspace's work made it: a pull request it opened, a branch it
+    // pushed, a doc or a ticket it wrote. The Slack thread a workspace was
+    // created for is shown every owned link when the work is done.
+    WorkspaceLinkOwned owned = 1;
+    // It exists apart from the workspace's work, which only points at it: the
+    // thread or ticket the task came from, a design doc it read, a dashboard.
+    WorkspaceLinkReference reference = 2;
+  }
+}
+
+// The workspace's work made it. DELIBERATELY EMPTY: the arm is the ownership.
+message WorkspaceLinkOwned {}
+
+// The workspace's work only points at it. DELIBERATELY EMPTY: the arm is the
+// ownership.
+message WorkspaceLinkReference {}
 
 // Whether the summary's menu shows a link. THE ARM IS THE PLACEMENT.
 message WorkspaceLinkPlacement {

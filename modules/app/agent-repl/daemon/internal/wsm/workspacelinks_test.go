@@ -22,6 +22,10 @@ func setLink(url, label string) linkStep {
 	return linkStep{set: &WorkspaceLink{URL: url, Label: label}}
 }
 
+func setOwnedLink(url, label string) linkStep {
+	return linkStep{set: &WorkspaceLink{URL: url, Label: label, Owned: true}}
+}
+
 // applyLinkSteps runs STEPS against WS, failing on any error, and answers the
 // links the last step answered (a clear answers a fresh read).
 func applyLinkSteps(t *testing.T, s *store, ws WorkspaceID, steps []linkStep) []WorkspaceLink {
@@ -32,7 +36,7 @@ func applyLinkSteps(t *testing.T, s *store, ws WorkspaceID, steps []linkStep) []
 	for _, step := range steps {
 		switch {
 		case step.set != nil:
-			got, err = s.SetWorkspaceLink(ctx, ws, step.set.URL, step.set.Label)
+			got, err = s.SetWorkspaceLink(ctx, ws, step.set.URL, step.set.Label, step.set.Owned)
 		case step.remove != "":
 			got, err = s.RemoveWorkspaceLink(ctx, ws, step.remove)
 		case step.show != nil:
@@ -83,6 +87,10 @@ func TestWorkspaceLinksChanges(t *testing.T) {
 			steps: append(slices.Clone(five[:3]), linkStep{show: []string{linkURL(1)}}),
 			want: []WorkspaceLink{{URL: linkURL(3), Label: "three a"}, {URL: linkURL(2), Label: "two a"},
 				{URL: linkURL(1), Label: "one a", Shown: true}}},
+		{name: "an owned set is read back owned", steps: []linkStep{setOwnedLink(linkURL(1), "one a")},
+			want: []WorkspaceLink{{URL: linkURL(1), Label: "one a", Shown: true, Owned: true}}},
+		{name: "a relabel sets the ownership anew", steps: []linkStep{setOwnedLink(linkURL(1), "one a"), setLink(linkURL(1), "one b")},
+			want: []WorkspaceLink{{URL: linkURL(1), Label: "one b", Shown: true}}},
 		{name: "a clear leaves none", steps: append(slices.Clone(five[:2]), linkStep{clear: true}), want: nil},
 		{name: "clearing a workspace with none is no change", steps: []linkStep{{clear: true}}, want: nil},
 	}
@@ -178,12 +186,12 @@ func TestWorkspaceLinksRefusals(t *testing.T) {
 			}, isDefect: true, errorOp: "daemon.wsm.show_workspace_links"},
 		{name: "a set with no label is a defect",
 			act: func(s *store, ws WorkspaceID) error {
-				_, err := s.SetWorkspaceLink(context.Background(), ws, linkURL(2), "")
+				_, err := s.SetWorkspaceLink(context.Background(), ws, linkURL(2), "", false)
 				return err
 			}, isDefect: true, errorOp: "daemon.wsm.set_workspace_link"},
 		{name: "a set on an unknown workspace is not found",
 			act: func(s *store, _ WorkspaceID) error {
-				_, err := s.SetWorkspaceLink(context.Background(), WorkspaceID("absent"), linkURL(2), "two a")
+				_, err := s.SetWorkspaceLink(context.Background(), WorkspaceID("absent"), linkURL(2), "two a", false)
 				return err
 			}, notFound: true},
 		{name: "a clear on an unknown workspace is not found",

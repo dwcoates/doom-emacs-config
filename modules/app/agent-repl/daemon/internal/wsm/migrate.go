@@ -192,6 +192,8 @@ var migrations = []migration{
 	{To: 89, Name: "selections", Kind: MigrationAdditive, DDL: selectionsDDL},
 	{To: 90, Name: "cache_cold", Kind: MigrationAdditive, DDL: cacheColdDDL},
 	{To: 91, Name: "account_usage_drop_unproduced", Kind: MigrationBreaking, DDL: accountUsageDropUnproducedDDL},
+	{To: 92, Name: "link_ownership", Kind: MigrationAdditive, DDL: linkOwnershipDDL},
+	{To: 93, Name: "workspace_slack_origins", Kind: MigrationAdditive, DDL: slackOriginsDDL},
 }
 
 // mergeQueueLookupIndexesDDL keys the two lookups every workspace read makes

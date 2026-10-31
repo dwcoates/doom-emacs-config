@@ -15,6 +15,7 @@ import (
 
 	"agent-repld/internal/prompthandler"
 	"agent-repld/internal/promptorigin"
+	"agent-repld/internal/slackpost"
 )
 
 // THE VALIDATION INVARIANT (ARCHITECTURE.md "Cross-cutting conventions"): one
@@ -549,6 +550,14 @@ func validateCreateWorkspaceRequest(req *agentreplv1.CreateWorkspaceRequest) *co
 		}
 		if req.AllowUngated != nil {
 			return invalid("allow_ungated", "an async merge's workspace is gated as its maker is")
+		}
+		if req.SlackOrigin != nil {
+			return invalid("slack_origin", "an async merge's workspace is the queue's, and no Slack message started it")
+		}
+	}
+	if req.SlackOrigin != nil {
+		if _, err := slackpost.ParseThread(req.GetSlackOrigin().GetThreadUrl()); err != nil {
+			return invalid("slack_origin.thread_url", err.Error())
 		}
 	}
 	if req.Priority != nil {
@@ -1383,6 +1392,9 @@ func validateChangeWorkspaceLinksRequest(req *agentreplv1.ChangeWorkspaceLinksRe
 		}
 		if strings.TrimSpace(change.Set.GetLabel()) == "" {
 			return invalid("set.label", "a set names its label")
+		}
+		if change.Set.GetOwnership().GetOwnership() == nil {
+			return invalid("set.ownership", "a set says whether the workspace's work made what the link points at (owned or reference)")
 		}
 		return nil
 	case *agentreplv1.ChangeWorkspaceLinksRequest_Remove:

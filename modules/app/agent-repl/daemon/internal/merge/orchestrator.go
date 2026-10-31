@@ -421,6 +421,7 @@ func (d Deps) validate() error {
 	check(d.TurnInFlight != nil, "TurnInFlight")
 	check(d.Rollout != nil, "Rollout")
 	check(d.QueueEvents != nil, "QueueEvents")
+	check(d.Ends != nil, "Ends")
 	check(d.Log != nil, "Log")
 	check(d.StateDir != "", "StateDir")
 	check(d.HookRunner != nil, "HookRunner")
