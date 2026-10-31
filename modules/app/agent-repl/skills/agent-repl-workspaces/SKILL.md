@@ -105,11 +105,15 @@ one repository, except the move below):
 | coordinated work in a different repository (`-repository DIR`) | `child -parent here` | its main (default) | `fresh` | situational |
 | separate work in a different repository | `peer` | its main | `fresh` | situational |
 
-- A CHILD WHOSE CONTEXT IS NOT FORKED FROM ITS PARENT is its parent's to
-  arbitrate and land: give `-owner-notice` a plain-English note telling the
-  parent what is coming and why. The parent is told with the daemon's
-  addendum, and only the parent (or the user) finishes it
-  (`workspace finished`). Such a child is never a one-shot.
+- A ONE-SHOT ALWAYS LANDS ITSELF, whatever its context: a one-shot child,
+  fresh or forked, still nests under its parent and is followed by it, and
+  lands its own work. It takes no notice.
+- A CHILD THAT IS NOT A ONE-SHOT AND WHOSE CONTEXT IS NOT FORKED FROM ITS
+  PARENT is its parent's to arbitrate and land: give `-owner-notice` a
+  plain-English note telling the parent what is coming and why. The parent
+  is told with the daemon's addendum, and only the parent (or the user)
+  finishes it (`workspace finished`). Marking it a one-shot later makes it
+  land itself; unmarking it hands its landing back to the parent.
 - A child forked from its parent has the parent's whole context and lands
   itself; it takes no notice. A peer never takes a notice.
 - `-one-shot -prompt TEXT` makes a workspace that finishes its commission
@@ -309,8 +313,8 @@ creating workspaces there with `-repository DIR`.
 - **ONE-SHOT.** When to mark this workspace a one-shot is the metaprompt's
   rule ("One-shot workspaces"). The verb is `workspace set here -one-shot`,
   and its answer carries the daemon's completion directive: follow it when the
-  work is done. A child its parent lands cannot be marked, and neither can a
-  repository's main workspace (refused `main_workspace`); what a main
+  work is done. A repository's main workspace cannot be marked (refused
+  `main_workspace`); what a main
   workspace told to one-shot itself does instead is the metaprompt's rule
   ("A repository's main workspace is never a one-shot").
 - **BACK FROM A ONE-SHOT.** A workspace that keeps the mark would finish
