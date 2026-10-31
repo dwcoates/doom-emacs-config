@@ -2599,9 +2599,10 @@ func (c harnessConfig) Load(string) (*repoconfigv1.DeployConfig, error) {
 
 // hookRun is one script hook the fake runner ran.
 type hookRun struct {
-	dir  string
-	argv []string
-	env  []string
+	dir     string
+	argv    []string
+	env     []string
+	timeout time.Duration
 }
 
 // harnessSelfAddress is the address the harness's daemon serves on.
@@ -2619,7 +2620,9 @@ type fakeHookRunner struct {
 	exits    map[string]int
 	timeouts map[string]bool
 	lines    map[string][]string
-	err      error
+	// outputs is each script's whole output (scriptrunner.Run.Output).
+	outputs map[string]string
+	err     error
 	// holds parks the next run of a script for one calling workspace, keyed
 	// by holdKey, until its release or the run's end.
 	holds holdSet
@@ -2647,9 +2650,9 @@ func callingWorkspace(env []string) string {
 
 func (f *fakeHookRunner) RunLinesWith(ctx context.Context, dir string, argv []string, opts scriptrunner.Options, onLine func(string)) (scriptrunner.Run, error) {
 	f.mu.Lock()
-	f.runs = append(f.runs, hookRun{dir: dir, argv: argv, env: opts.Env})
+	f.runs = append(f.runs, hookRun{dir: dir, argv: argv, env: opts.Env, timeout: opts.Timeout})
 	script := argv[len(argv)-1]
-	exit, timedOut, lines, err := f.exits[script], f.timeouts[script], f.lines[script], f.err
+	exit, timedOut, lines, output, err := f.exits[script], f.timeouts[script], f.lines[script], f.outputs[script], f.err
 	f.mu.Unlock()
 	if hold, held := f.holds.claim(holdKey(script, callingWorkspace(opts.Env))); held && !hold.park(ctx) {
 		return scriptrunner.Run{}, context.Cause(ctx)
@@ -2674,9 +2677,9 @@ func (f *fakeHookRunner) RunLinesWith(ctx context.Context, dir string, argv []st
 		}
 	}
 	if timedOut {
-		return scriptrunner.Run{ExitCode: -1, TimedOut: true}, nil
+		return scriptrunner.Run{ExitCode: -1, TimedOut: true, Output: output}, nil
 	}
-	return scriptrunner.Run{ExitCode: exit}, nil
+	return scriptrunner.Run{ExitCode: exit, Output: output}, nil
 }
 
 // ran answers the script hooks run so far.
@@ -2768,7 +2771,7 @@ func newHarness(t *testing.T) *harness {
 		timings:  &fakeTimings{},
 	}
 	h.detached = &fakeDetached{h: h}
-	h.hooks = &fakeHookRunner{h: h, exits: map[string]int{}, timeouts: map[string]bool{}, lines: map[string][]string{}}
+	h.hooks = &fakeHookRunner{h: h, exits: map[string]int{}, timeouts: map[string]bool{}, lines: map[string][]string{}, outputs: map[string]string{}}
 	h.events = &fakeQueueEvents{}
 	h.ends = &fakeEnds{}
 	h.names = &fakeNames{}

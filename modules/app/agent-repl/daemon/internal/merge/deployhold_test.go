@@ -3,6 +3,7 @@ package merge
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -13,6 +14,7 @@ import (
 
 	"agent-repld/internal/deployconfig"
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/scriptrunner"
 	"agent-repld/internal/wsm"
 )
 
@@ -224,5 +226,111 @@ func TestAReleaseReadsTheDeployHooksScope(t *testing.T) {
 	// Assert
 	if err != nil || release.Kind != ReleaseScriptRan {
 		t.Fatalf("ReleaseDeploys = (%+v, %v), want an any-target deploy hook run", release, err)
+	}
+}
+
+func TestOwnerlessRunFailureNamesHowTheScriptEnded(t *testing.T) {
+	script := deployconfig.ScriptHook("bin/x.sh", 7).GetScript()
+	tests := []struct {
+		name string
+		ran  ownerlessRun
+		want string
+	}{
+		{name: "an exit of zero", ran: ownerlessRun{run: scriptrunner.Run{ExitCode: 0}}, want: ""},
+		{name: "a script that could not be run", ran: ownerlessRun{err: errors.New("no bash")}, want: "no bash"},
+		{name: "a script killed at its timeout", ran: ownerlessRun{run: scriptrunner.Run{ExitCode: -1, TimedOut: true}}, want: "it ran past its 7s timeout"},
+		{name: "a non-zero exit", ran: ownerlessRun{run: scriptrunner.Run{ExitCode: 3}}, want: "it exited 3"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := tt.ran.failure(script)
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("failure = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRunOwnerlessScriptRunsTheScriptFromTheRepositoryBoundedByItsTimeout(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	script := deployconfig.ScriptHook("bin/x.sh", 7).GetScript()
+
+	// Act
+	h.o.runOwnerlessScript(context.Background(), h.repoRoot, script, []string{"A=b"}, filepath.Join(t.TempDir(), "x.log"))
+
+	// Assert
+	runs := h.hooks.ran()
+	want := hookRun{dir: h.repoRoot, argv: []string{"bash", filepath.Join(h.repoRoot, "bin/x.sh")}, env: []string{"A=b"}, timeout: 7 * time.Second}
+	if len(runs) != 1 || runs[0].dir != want.dir || !slices.Equal(runs[0].argv, want.argv) || !slices.Equal(runs[0].env, want.env) || runs[0].timeout != want.timeout {
+		t.Fatalf("runs = %+v, want one %+v", runs, want)
+	}
+}
+
+func TestRunOwnerlessScriptKeepsTheScriptsWholeOutput(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	script := deployconfig.ScriptHook("bin/x.sh", 7).GetScript()
+	h.hooks.outputs[filepath.Join(h.repoRoot, "bin/x.sh")] = "one\ntwo\n"
+	path := filepath.Join(t.TempDir(), "x.log")
+
+	// Act
+	ran := h.o.runOwnerlessScript(context.Background(), h.repoRoot, script, nil, path)
+
+	// Assert
+	body, err := os.ReadFile(path)
+	if ran.logErr != nil || err != nil || string(body) != "one\ntwo\n" {
+		t.Fatalf("log = %q, %v (log error %v), want the script's whole output", body, err, ran.logErr)
+	}
+}
+
+func TestRunOwnerlessScriptReportsALogThatCannotBeWritten(t *testing.T) {
+	// Arrange: the log's directory is a file.
+	h := newHarness(t)
+	script := deployconfig.ScriptHook("bin/x.sh", 7).GetScript()
+	blocker := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(blocker, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	ran := h.o.runOwnerlessScript(context.Background(), h.repoRoot, script, nil, filepath.Join(blocker, "x.log"))
+
+	// Assert
+	if ran.logErr == nil || ran.err != nil || ran.failure(script) != "" {
+		t.Fatalf("run = %+v, want a script that ran and a log error", ran)
+	}
+}
+
+func TestEveryOwnerlessScriptRunsThroughRunOwnerlessScript(t *testing.T) {
+	// Arrange: a deploy's own hooks run in deploy.go with their owner; every
+	// other script run is runOwnerlessScript's.
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := map[string]int{}
+
+	// Act
+	for _, entry := range entries {
+		name := entry.Name()
+		if !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		raw, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n := strings.Count(string(raw), "HookRunner.RunLinesWith("); n > 0 {
+			calls[name] = n
+		}
+	}
+
+	// Assert
+	if len(calls) != 2 || calls["deploy.go"] != 1 || calls["deployhold.go"] != 1 {
+		t.Fatalf("HookRunner.RunLinesWith is called in %v, want once in deploy.go (a deploy's own hooks) and once in deployhold.go (runOwnerlessScript)", calls)
 	}
 }
