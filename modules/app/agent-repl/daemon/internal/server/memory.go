@@ -75,6 +75,14 @@ func (s *server) ReportPageResidency(
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("%s: %w", rpc, err))
 	}
 	subject.Log.Debug(opMemory, "recorded the page's residency", dlog.Context{"loaded": req.Msg.GetResidency().GetLoaded() != nil})
+	// EMACS HOLDING NO PAGE IS NO SEVERED HOP (owner ruling, 2026-10-31:
+	// severed means actually severed). Its statement is the truth about the
+	// web hop: an unload announcement that went to another daemon during a
+	// handover left this one reading the page's end as a cut, blue, until a
+	// turn proved otherwise. The statement is re-made at every link-up.
+	if req.Msg.GetResidency().GetNotLoaded() != nil {
+		s.awaitPage(subject.Record.ID, subject.Log, "Emacs holds no page for the workspace; its web hop is awaited until a page connects again")
+	}
 	resp.Result = &agentreplv1.ReportPageResidencyResponse_Success{Success: &agentreplv1.ReportPageResidencySuccess{}}
 	return connect.NewResponse(resp), nil
 }

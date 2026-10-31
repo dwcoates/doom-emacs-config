@@ -1436,3 +1436,72 @@ func TestAMovingWorkspacesPageUnloadStatesNoHop(t *testing.T) {
 		t.Fatalf("no participant record naming the move among %v", log.at("INFO"))
 	}
 }
+
+// TestEmacsHoldingNoPageMendsABrokenWebHop is the owner's ruling
+// (2026-10-31): severed means actually severed. A page whose stream ended
+// unannounced reads as a broken hop until Emacs states it holds no page for
+// the workspace, which is the truth about the hop and is known with no turn.
+func TestEmacsHoldingNoPageMendsABrokenWebHop(t *testing.T) {
+	// Arrange: the page connected and went away with no report to this daemon.
+	h := newHarness(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	openHostStream(t, h, ctx)
+	h.Footer.AwaitEdge(t) // the host open
+	webCtx, closePage := context.WithCancel(ctx)
+	openWebStream(t, h, webCtx)
+	h.Footer.AwaitEdge(t) // the web open
+	closePage()
+	h.Footer.AwaitEdge(t) // the hop breaks
+
+	// Act
+	reportResidency(t, h, residencyNotLoaded())
+	edge := h.Footer.AwaitEdge(t)
+
+	// Assert
+	if !edge.Host || !edge.Web {
+		t.Fatalf("footer participant edge = %+v, want the web hop awaited once Emacs holds no page", edge)
+	}
+}
+
+// reportResidency sends Emacs's page residency, failing the test unless it
+// answers success.
+func reportResidency(t *testing.T, h *harness, residency *agentreplv1.PageResidency) {
+	t.Helper()
+	resp, err := h.Client.ReportPageResidency(context.Background(), connect.NewRequest(&agentreplv1.ReportPageResidencyRequest{
+		Workspace: ref(), Residency: residency,
+	}))
+	if err != nil || resp.Msg.GetSuccess() == nil {
+		t.Fatalf("ReportPageResidency = (%v, %v), want success", resp, err)
+	}
+}
+
+// TestEmacsHoldingALoadedPageLeavesABrokenWebHopBroken pins the other half:
+// a loaded page whose stream is gone is a real cut, which only a page
+// connecting again mends. The loaded statement publishes no edge, so the
+// first edge after it is the not-loaded statement's.
+func TestEmacsHoldingALoadedPageLeavesABrokenWebHopBroken(t *testing.T) {
+	// Arrange: the page connected and went away unannounced.
+	h := newHarness(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	openHostStream(t, h, ctx)
+	h.Footer.AwaitEdge(t) // the host open
+	webCtx, closePage := context.WithCancel(ctx)
+	openWebStream(t, h, webCtx)
+	h.Footer.AwaitEdge(t) // the web open
+	closePage()
+	h.Footer.AwaitEdge(t) // the hop breaks
+
+	// Act
+	reportResidency(t, h, &agentreplv1.PageResidency{State: &agentreplv1.PageResidency_Loaded{Loaded: &agentreplv1.PageResidencyLoaded{
+		Release: &agentreplv1.PageResidencyRelease{When: &agentreplv1.PageResidencyRelease_Held{Held: &agentreplv1.PageResidencyReleaseHeld{}}},
+	}}})
+	reportResidency(t, h, residencyNotLoaded())
+	edge := h.Footer.AwaitEdge(t)
+
+	// Assert
+	if !edge.Web {
+		t.Fatalf("first edge after a loaded statement = %+v, want the not-loaded statement's: a loaded page published an edge", edge)
+	}
+}

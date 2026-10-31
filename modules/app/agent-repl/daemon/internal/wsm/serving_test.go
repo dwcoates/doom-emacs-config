@@ -292,3 +292,36 @@ func TestServingWritesRefuseAnEmptyInstanceThroughRequireInstance(t *testing.T) 
 		t.Fatalf("%v refuse an empty instance inline; use requireInstance", offenders)
 	}
 }
+
+func TestClaimServingRecordsTakingAnotherInstancesRow(t *testing.T) {
+	tests := []struct {
+		name       string
+		holder     func(claimer InstanceID) InstanceID
+		wantRecord bool
+	}{
+		{name: "a row another instance holds", holder: func(InstanceID) InstanceID { return NewInstanceID() }, wantRecord: true},
+		{name: "a row the claimer already holds", holder: func(claimer InstanceID) InstanceID { return claimer }, wantRecord: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, log := testStore(t)
+			ws := testWorkspace(t, s)
+			claimer := NewInstanceID()
+			if err := s.ClaimServing(context.Background(), ws.ID, tt.holder(claimer)); err != nil {
+				t.Fatalf("ClaimServing: %v", err)
+			}
+
+			// Act
+			if err := s.ClaimServing(context.Background(), ws.ID, claimer); err != nil {
+				t.Fatalf("ClaimServing: %v", err)
+			}
+
+			// Assert
+			_, recorded := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "info", Operation: "daemon.wsm.claim_serving", Message: "took the workspace's serving ownership from another instance"})
+			if recorded != tt.wantRecord {
+				t.Fatalf("take-over recorded = %v, want %v", recorded, tt.wantRecord)
+			}
+		})
+	}
+}

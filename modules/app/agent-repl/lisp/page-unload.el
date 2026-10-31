@@ -102,6 +102,7 @@
 (declare-function agent-repl--error "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl-roster-status-for-ws "roster" (ws))
 (declare-function agent-repl-host-report-page-residency "host" (ws residency on-reported))
+(defvar agent-repl-host-reattached-functions)
 (declare-function agent-repl-roster-last-turn-ended-ms "roster" (ws))
 (defvar agent-repl-link-up-functions)
 (defvar agent-repl-roster-update-functions)
@@ -554,7 +555,18 @@ reports them all again."
   "Apply the statuses a roster push changed, without waiting for the next pass."
   (agent-repl-page-unload-pass))
 
+(defun agent-repl-page-unload-on-reattached (ws)
+  "Report WS\='s residency to the daemon WS just re-attached to.
+THE RESIDENCY IS EACH DAEMON\='S TO HOLD, and a re-attach is no link-up: a
+handover moves one workspace between daemons, and the report the last one
+took never reached its successor, which read the page Emacs unloaded as a
+severed hop until a turn proved otherwise (2026-10-31).  The last report is
+forgotten and the residency is reported at once."
+  (agent-repl--ws-put ws :page-residency-reported nil)
+  (agent-repl-page-unload--report ws))
+
 (add-hook 'agent-repl-link-up-functions #'agent-repl-page-unload-start)
+(add-hook 'agent-repl-host-reattached-functions #'agent-repl-page-unload-on-reattached)
 (add-hook 'agent-repl-roster-update-functions #'agent-repl-page-unload-on-roster-update)
 
 (defun agent-repl-page-unload-report-pageless ()

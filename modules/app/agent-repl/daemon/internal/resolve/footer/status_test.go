@@ -2123,3 +2123,55 @@ func TestStatusWordsNamesTheArmAndItsSubstatus(t *testing.T) {
 		})
 	}
 }
+
+// downHop brings the workspace to a serving link with its web hop down.
+func downHop(h *harness) {
+	h.r.SetParticipants(testWS, true, false)
+	h.r.OnLink(testWS, shimclient.LinkConnected)
+}
+
+func TestATurnOverADownHopIsNotSevered(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	downHop(h)
+
+	// Act
+	h.r.SetTurn(testWS, &TurnStarted{At: instant})
+
+	// Assert
+	if got := h.status(t); got != "working" {
+		t.Fatalf("status = %q, want working: a turn crossing the link proves the route is not severed", got)
+	}
+}
+
+func TestATurnThatEndedOverADownHopLeavesItNotSevered(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	downHop(h)
+	h.r.SetTurn(testWS, &TurnStarted{At: instant})
+
+	// Act
+	h.r.SetTurnEnded(testWS, wsm.CloseCompleted)
+
+	// Assert
+	if got := h.status(t); got == "agent_repl_fault" {
+		t.Fatalf("status = %q after a turn answered over the hop, want a connected status", got)
+	}
+}
+
+func TestANewHopDownAfterServedWorkIsSeveredAgain(t *testing.T) {
+	// Arrange: work proved one hop-down wrong, then every hop came up.
+	h := newHarness(t)
+	downHop(h)
+	h.r.SetTurn(testWS, &TurnStarted{At: instant})
+	h.r.SetTurnEnded(testWS, wsm.CloseCompleted)
+	h.r.SetParticipants(testWS, true, true)
+
+	// Act
+	h.r.SetParticipants(testWS, true, false)
+
+	// Assert
+	if got := h.status(t); got != "agent_repl_fault" {
+		t.Fatalf("status = %q, want severed: a new hop-down starts with no proof of work over it", got)
+	}
+}

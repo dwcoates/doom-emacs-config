@@ -416,6 +416,10 @@ type wsState struct {
 	// edge; neither is ever inferred from silence.
 	hostStream bool
 	webStream  bool
+	// servedOverBrokenHop reports that a turn started or ended while one
+	// client hop was down: the workspace demonstrably does work, so the hop's
+	// `severed` claim does not stand (status.go). Reset on each new hop-down.
+	servedOverBrokenHop bool
 	// degraded reports an open degraded window on the last diagnostics push.
 	degraded bool
 	// stateUnreported reports a shim this daemon took back after a failed

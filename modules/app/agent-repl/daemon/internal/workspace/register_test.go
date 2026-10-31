@@ -1435,3 +1435,72 @@ func TestEnsureMainWorktreesSurfacesARenameThatFailed(t *testing.T) {
 		t.Fatalf("EnsureMainWorktrees = %v, want the rename's failure recorded at ERROR", err)
 	}
 }
+
+// claimsOf answers how many serving claims were recorded for WS.
+func claimsOf(f *fixture, ws ids.WorkspaceID) int {
+	n := 0
+	for _, c := range f.db.claims {
+		if c.ws == ws {
+			n++
+		}
+	}
+	return n
+}
+
+// TestReRegisteringAWorkspaceClaimsServingByItsStanding is the 2026-10-31
+// split: a daemon that handed a workspace to its successor kept re-claiming it
+// as Emacs re-registered it there, and both daemons served it. A
+// re-registration claims serving unless the workspace was handed away; a
+// standing that cannot be read claims, as before.
+func TestReRegisteringAWorkspaceClaimsServingByItsStanding(t *testing.T) {
+	tests := []struct {
+		name      string
+		standing  Standing
+		err       error
+		wantClaim bool
+	}{
+		{name: "an owned workspace is claimed", standing: StandingOwned, wantClaim: true},
+		{name: "a workspace handed to the successor is not", standing: StandingTransferringAway, wantClaim: false},
+		{name: "an unreadable standing is claimed", err: errors.New("standing unreadable"), wantClaim: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			dir := worktreeDir(t)
+			record, err := f.verbs.Register(context.Background(), dir, wsm.RegisterFacts{})
+			if err != nil {
+				t.Fatalf("first Register: %v", err)
+			}
+			before := claimsOf(f, record.ID)
+			f.owner.standing, f.owner.err = tt.standing, tt.err
+
+			// Act.
+			if _, err := f.verbs.Register(context.Background(), dir, wsm.RegisterFacts{}); err != nil {
+				t.Fatalf("re-Register: %v", err)
+			}
+
+			// Assert.
+			if got := claimsOf(f, record.ID) > before; got != tt.wantClaim {
+				t.Fatalf("re-registration claimed serving = %v, want %v", got, tt.wantClaim)
+			}
+		})
+	}
+}
+
+func TestANewWorkspaceRegisteredDuringAHandoverIsClaimed(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.owner.standing = StandingTransferringAway
+
+	// Act.
+	record, err := f.verbs.Register(context.Background(), worktreeDir(t), wsm.RegisterFacts{})
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	if claimsOf(f, record.ID) == 0 {
+		t.Fatalf("a workspace this registration minted claimed no serving ownership")
+	}
+}

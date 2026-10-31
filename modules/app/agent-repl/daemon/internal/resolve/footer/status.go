@@ -179,8 +179,13 @@ func (r *resolver) agentReplFault(s *wsState, log dlog.Logger) *frontendv1.Foote
 		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "case s.link == shimclient.LinkDead"})
 		arm.Substatus = &frontendv1.FooterStatusAgentReplFault_StartFailed{
 			StartFailed: &frontendv1.FooterSubStatusAgentReplFaultStartFailed{}}
-	case s.hostStream != s.webStream:
+	case s.hostStream != s.webStream && s.turn == nil && !s.servedOverBrokenHop:
 		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "case s.hostStream != s.webStream"})
+		// SEVERED MEANS ACTUALLY SEVERED (owner ruling, 2026-10-31: a
+		// workspace that answered a prompt over a down hop stayed blue, "an
+		// invariant violation"). A turn in flight, or one that started or
+		// ended since the hop went down, proves the route reaches a reader,
+		// so the claim does not stand.
 		// A HOP IS DOWN. The daemon-to-shim link serves, but one of the two
 		// client streams does not while the other does, so the workspace is
 		// not connected (daemon.md invariant 11) and the footer says so

@@ -714,8 +714,17 @@ func (r *resolver) OnTurnRunningAtAttach(ws ids.WorkspaceID, turn ids.TurnID, st
 func (s *wsState) endTurn(at time.Time) {
 	if s.turn != nil {
 		s.lastTurn = &turnSpan{startedAt: s.turn.At, endedAt: at}
+		s.noteServed()
 	}
 	s.turn = nil
+}
+
+// noteServed records a turn's edge crossing the link while a client hop is
+// down: proof the hop is not severed (status.go).
+func (s *wsState) noteServed() {
+	if s.hostStream != s.webStream {
+		s.servedOverBrokenHop = true
+	}
 }
 
 func (r *resolver) applyTurnStarted(ws ids.WorkspaceID, s *wsState, turn *TurnStarted) {
@@ -723,6 +732,7 @@ func (r *resolver) applyTurnStarted(ws ids.WorkspaceID, s *wsState, turn *TurnSt
 	if turn == nil {
 		return
 	}
+	s.noteServed()
 	r.heardFromVendor(ws, s)
 	s.turnEverRan = true
 	// A NEW TURN ENDS THE LAST ONE'S CLOCK, as its reset ends the last one's
@@ -1592,7 +1602,12 @@ func contextCutArm(cut *conversationv1.ContextCut) string {
 func (r *resolver) SetParticipants(ws ids.WorkspaceID, host, web bool) {
 	r.mutate(ws, "daemon.footer.set_participants", "the footer took the participant streams' liveness",
 		dlog.Context{"host_stream": host, "web_stream": web}, func(s *wsState) {
+			wasDown := s.hostStream != s.webStream
 			s.hostStream = host
 			s.webStream = web
+			// A NEW HOP-DOWN starts with no evidence of work over it.
+			if !wasDown && host != web {
+				s.servedOverBrokenHop = false
+			}
 		})
 }

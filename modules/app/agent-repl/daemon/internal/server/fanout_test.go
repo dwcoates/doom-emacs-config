@@ -67,7 +67,7 @@ func TestFanOutAdmit(t *testing.T) {
 			}, at: start, want: true},
 		{name: "the window frees the cap once it passes", recipient: fanOutWorkspace("later"),
 			arrange: func(t *testing.T, f *fanOut) { sendToStrangers(t, f, sender, fanOutCap, start) },
-			at: start.Add(fanOutWindow), want: true},
+			at:      start.Add(fanOutWindow), want: true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
