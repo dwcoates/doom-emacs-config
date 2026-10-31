@@ -203,9 +203,6 @@ type run struct {
 	headMS atomic.Int64
 
 	mu sync.Mutex
-	// headFailed is set once the run's tests failed while it headed its
-	// queue, and widens the chain behind it while it fixes (windowFor).
-	headFailed bool
 	// rounds counts each tab kind's opened rounds, which is what makes a second
 	// pass a second tab.
 	rounds map[string]int
@@ -1034,6 +1031,13 @@ func (r *run) submit(ctx context.Context, turn ids.TurnID, text string, origin c
 // submit sends one merge prompt to WS's session as TURN and waits for that
 // turn to end.
 func (o *orchestrator) submit(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID, text string, origin conversationv1.PromptOrigin) (wsm.TurnClose, error) {
+	return o.submitThen(ctx, ws, turn, text, origin, nil)
+}
+
+// submitThen is submit, calling SUBMITTED (when not nil) once the queue took
+// the prompt: the hand-off is whole by then, so a suspension that follows
+// leaves the turn living on in the session.
+func (o *orchestrator) submitThen(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID, text string, origin conversationv1.PromptOrigin, submitted func()) (wsm.TurnClose, error) {
 	// THE HAND-OFF IS WHOLE. A merge stopped mid-step (a race to land it
 	// lost, a pause, the daemon's exit) lets its turn live on in the session
 	// and reattaches to it on resume, so the delivery it began is never cut
@@ -1046,6 +1050,9 @@ func (o *orchestrator) submit(ctx context.Context, ws ids.WorkspaceID, turn ids.
 	}
 	if disposition.RefusedArm != "" {
 		return wsm.CloseFailed, fmt.Errorf("merge: the queue refused a merge prompt: %s", disposition.RefusedArm)
+	}
+	if submitted != nil {
+		submitted()
 	}
 	return o.deps.AwaitTurnEnd(ctx, ws, turn)
 }

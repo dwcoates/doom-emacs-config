@@ -17,6 +17,7 @@ import {
 import {
   RosterMergeQueueHeadSchema,
   RosterMergeQueuePausedSchema,
+  RosterMergeQueueRemediatingSchema,
   RosterMergeQueueRepoGroupSchema,
   RosterMergeQueueStageSchema,
   RosterRepoMergeQueueSchema,
@@ -37,6 +38,7 @@ import {
   MERGE_QUEUE_GROUP_HEAD_CLASS,
   MERGE_QUEUE_HEAD_CLASS,
   MERGE_QUEUE_PAUSED_ATTRIBUTE,
+  MERGE_QUEUE_REMEDIATING_CLASS,
   MERGE_QUEUE_SUSPENDED_ATTRIBUTE,
   MERGE_QUEUE_WAITING_CLASS,
   pausedText,
@@ -235,6 +237,54 @@ describe("drawRosterMergeQueue", () => {
   it("refuses a queue with no head as a malformed view", () => {
     const { sc } = daemon();
     expect(() => drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, {}), sc, "queue")).toThrow(MalformedView);
+  });
+
+  it("draws a merge remediating out of line between the head and the waiting merges", () => {
+    const { sc } = daemon();
+    const body = drawRosterMergeQueue(
+      create(RosterRepoMergeQueueSchema, {
+        head: mergingHead("w1"),
+        remediating: [create(RosterMergeQueueRemediatingSchema, { subject: queueSubject("w2"), sinceMs: BigInt(NOW) })],
+        waiting: [waitingMerge("w3")],
+      }),
+      sc,
+      "queue",
+    );
+    expect([...body.children].map((el) => el.className.split(" ")[0])).toEqual([
+      MERGE_QUEUE_HEAD_CLASS,
+      MERGE_QUEUE_REMEDIATING_CLASS,
+      MERGE_QUEUE_WAITING_CLASS,
+    ]);
+  });
+
+  it("draws a queue whose line is empty while a merge remediates, with no head", () => {
+    const { sc } = daemon();
+    const body = drawRosterMergeQueue(
+      create(RosterRepoMergeQueueSchema, {
+        remediating: [create(RosterMergeQueueRemediatingSchema, { subject: queueSubject("w2"), sinceMs: BigInt(NOW) })],
+      }),
+      sc,
+      "queue",
+    );
+    expect([body.querySelector(`.${MERGE_QUEUE_HEAD_CLASS}`), body.querySelectorAll(`.${MERGE_QUEUE_REMEDIATING_CLASS}`).length]).toEqual([null, 1]);
+  });
+
+  it("says a remediating merge is remediating and ticks its clock from when it stepped aside", () => {
+    const ticker = fakeTicker(NOW);
+    const sc = sidebarContext(appContext({}, ticker));
+    const body = drawRosterMergeQueue(
+      create(RosterRepoMergeQueueSchema, {
+        head: mergingHead("w1"),
+        remediating: [create(RosterMergeQueueRemediatingSchema, { subject: queueSubject("w2"), sinceMs: BigInt(NOW - 4_000) })],
+      }),
+      sc,
+      "queue",
+    );
+    const card = body.querySelector(`.${MERGE_QUEUE_REMEDIATING_CLASS}`);
+    expect([card?.querySelector(".sb-mq-detail")?.textContent, card?.querySelector(".sb-mq-clock")?.textContent]).toEqual([
+      "remediating",
+      formatTickedElapsed(4_000),
+    ]);
   });
 
   it("numbers no waiting merge: each opens with the same bullet, then its name", () => {

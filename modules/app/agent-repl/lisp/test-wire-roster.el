@@ -1894,10 +1894,11 @@ A hand-rolled list decoder would skip the shared helper and fail here."
                  '("RosterMergeQueueRepoGroup" rows "unknown field"))))
 
 (ert-deftest agent-repl-test-wire-roster-an-empty-merge-queue-decodes-to-nothing ()
-  "A queue with no head and nothing waiting decodes to no head, none waiting, not paused."
+  "A queue with no head and nothing waiting decodes to no head, none waiting,
+not paused, nothing remediating."
   (should (equal (agent-repl-test-wire-roster--decode
                   #'agent-repl-wire-decode-roster-repo-merge-queue "{}")
-                 '(:head nil :waiting nil :paused nil))))
+                 '(:head nil :waiting nil :paused nil :remediating nil))))
 
 (ert-deftest agent-repl-test-wire-roster-a-merge-queue-head-refuses-the-retired-failed-arm ()
   "The failed head is retired; its arm is refused as an unknown field."
@@ -1926,6 +1927,18 @@ A hand-rolled list decoder would skip the shared helper and fail here."
                            agent-repl-test-wire-roster--subject))
                   :head-since-ms)
                  7)))
+
+(ert-deftest agent-repl-test-wire-roster-a-merge-queue-decodes-its-remediating-merges ()
+  "A queue carries the merges remediating out of line, each with when it
+stepped aside."
+  (should (equal (mapcar (lambda (m) (plist-get m :since-ms))
+                         (plist-get
+                          (agent-repl-test-wire-roster--decode
+                           #'agent-repl-wire-decode-roster-repo-merge-queue
+                           (format "{\"remediating\":[{\"subject\":%s,\"sinceMs\":\"9\"}]}"
+                                   agent-repl-test-wire-roster--subject))
+                          :remediating))
+                 '(9))))
 
 (ert-deftest agent-repl-test-wire-roster-every-merge-queue-stage-state-decodes ()
   "A stage decodes each of its three states with its span."

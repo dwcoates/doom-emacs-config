@@ -35,7 +35,7 @@ export const RECENTLY_DEPLOYED_COLLAPSED_ATTRIBUTE = "data-collapsed";
 export const RECENTLY_DEPLOYED_FLOOR = 5;
 
 /** What a workspace outside "Recently Deployed" is drawn as, which a click on collapses it. */
-const OTHER_WORKSPACE_SELECTOR = "[data-roster-row], .sb-mq-head, .sb-mq-waiting";
+const OTHER_WORKSPACE_SELECTOR = "[data-roster-row], .sb-mq-head, .sb-mq-remediating, .sb-mq-waiting";
 
 /** The class of one repository's merged group, inside which a click is the rows' own. */
 const MERGED_GROUP_SELECTOR = ".merged-group";

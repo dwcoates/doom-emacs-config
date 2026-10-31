@@ -141,10 +141,14 @@ Either kind:
   - CRITICAL: hard-stop ONLY when the user asks to stop the queue's work now.
 - `merge-queue disable-racing` and `merge-queue enable-racing`: on AC power the
   top two merges race at the tests; disabled, every queue works its head alone.
-- A head whose tests FAIL keeps its place while it fixes them, but lets the
-  merge behind it rebase and run its own tests meanwhile, on any power source
-  and with racing disabled; whichever passes on the target's tip first lands,
-  and a head the merge behind overtakes resumes right behind it.
+- A head whose WHOLE test suite finishes with any failure STEPS ASIDE: the
+  next merge in line takes the head at once, and the failed merge fixes its
+  failures out of line (`merge-queue status` lists it `remediating`; the
+  sidebar draws it under the head). Once its fixing turn ends it goes back
+  in line next after the merge being worked on, never evicting it, and
+  reruns its whole suite when it heads the queue. It still has one fixing
+  attempt: a second failing suite fails it out. A head with nobody behind it
+  fixes in place.
 - `merge-queue subscribe -detail every_change|deploys|advances|depletes
   [-repository here|DIR]` has this workspace told as the queue changes (to land
   after it drains, to report a landing) instead of polling it;

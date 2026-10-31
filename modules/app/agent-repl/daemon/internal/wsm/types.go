@@ -1105,6 +1105,12 @@ const (
 	// turn's end does not lose the request, and it is in nobody's line and on
 	// no client until it is queued.
 	MergeRequested
+	// MergeRemediating is a merge that headed its queue, finished its test
+	// suite with failures, and STEPPED ASIDE to fix them (owner ruling,
+	// 2026-10-31): out of line while its fixing turn runs, holding its lease
+	// and its progress record, and put back in line -- at the first waiting
+	// place, never ahead of a merge being worked on -- once that turn ends.
+	MergeRemediating
 )
 
 // MergeMove is which way a one-place move takes a waiting merge in its queue

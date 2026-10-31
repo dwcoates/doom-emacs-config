@@ -500,6 +500,12 @@ type DB interface {
 	// YieldMergeHead records a race to land the head lost: winner takes the
 	// head's place at the front and loser waits right behind it.
 	YieldMergeHead(ctx context.Context, repo RepoKey, loser, winner WorkspaceID) error
+	// StepAsideMerge takes the admitted merge out of its line to fix its
+	// failing tests (MergeRemediating).
+	StepAsideMerge(ctx context.Context, repo RepoKey, id WorkspaceID) error
+	// ReturnRemediatedMerge puts a remediating merge back in line, admitted,
+	// at the first waiting place.
+	ReturnRemediatedMerge(ctx context.Context, repo RepoKey, id WorkspaceID) error
 	// MoveMerge moves a waiting merge one place up or down its queue, past
 	// the nearest waiting merge on that side, answering whether it moved.
 	MoveMerge(ctx context.Context, repo RepoKey, id WorkspaceID, move MergeMove) (bool, error)

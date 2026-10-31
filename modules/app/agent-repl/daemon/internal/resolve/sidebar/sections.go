@@ -98,22 +98,26 @@ func (r *resolver) repositoryView(rc rowContext, log dlog.Logger) *frontendv1.Ro
 // repoQueue is one repository's merge queue as the merge queue section draws
 // it: the merges in line front first, and the pause.
 type repoQueue struct {
-	line  []QueueEntry
-	pause *wsm.MergeQueuePause
+	line        []QueueEntry
+	remediating []QueueEntry
+	pause       *wsm.MergeQueuePause
 }
 
 // listed reports whether the merge queue section lists Q: its line holds a
-// merge (owner request, 2026-10-27: a repository leaves the section as soon
-// as its line empties). A paused queue holding nothing is not listed either.
+// merge, or a merge remediates out of line (owner request, 2026-10-27: a
+// repository leaves the section as soon as its line empties and nothing
+// remediates). A paused queue holding nothing is not listed either.
 func (q repoQueue) listed() bool {
-	return len(q.line) > 0
+	return len(q.line) > 0 || len(q.remediating) > 0
 }
 
 // drawMergeQueue composes one repository's merge queue: the merge at the
 // front of the line as its head, every merge behind the front as waiting,
 // and the pause. EVERY MERGE IS CREDITED AS THE ROSTER CREDITS IT
 // (QueueEntry.Credited), so a hidden merge workspace is never named here.
-// Q is listed (repoQueue.listed), so its line holds a merge.
+// Q is listed (repoQueue.listed), so its line holds a merge or a merge
+// remediates: the head is drawn only while the line holds one. The merges
+// remediating out of line are the second spot, under the head.
 func (r *resolver) drawMergeQueue(q repoQueue, log dlog.Logger) *frontendv1.RosterRepoMergeQueue {
 	const op = "daemon.sidebar.merge_queue"
 	out := &frontendv1.RosterRepoMergeQueue{Paused: drawMergeQueuePause(q.pause)}
@@ -127,6 +131,17 @@ func (r *resolver) drawMergeQueue(q repoQueue, log dlog.Logger) *frontendv1.Rost
 			return nil, false
 		}
 		return queueSubject(credited, entry), true
+	}
+	for _, entry := range q.remediating {
+		sub, ok := subject(entry)
+		if !ok {
+			continue
+		}
+		out.Remediating = append(out.Remediating, &frontendv1.RosterMergeQueueRemediating{
+			Subject: sub, SinceMs: entry.RemediatingSince.UnixMilli()})
+	}
+	if len(q.line) == 0 {
+		return out
 	}
 	front := q.line[0]
 	if sub, ok := subject(front); ok {
@@ -280,6 +295,20 @@ func (r *resolver) repoQueues(log dlog.Logger) map[ids.RepoID]repoQueue {
 			claim(key, ws.Repo, entry.Workspace)
 			rq := out[ws.Repo]
 			rq.line = append(rq.line, entry)
+			rq.pause = q.pause
+			out[ws.Repo] = rq
+		}
+		for _, entry := range q.remediating {
+			ws, ok := byID[entry.Workspace]
+			if !ok {
+				log.Error(op, "a merge remediating out of line names a workspace the registry does not carry, so it is not drawn", dlog.Context{
+					"repo": string(key), "workspace_id": string(entry.Workspace),
+					"invariant_violation": "a merge queue entry references a registered workspace"})
+				continue
+			}
+			claim(key, ws.Repo, entry.Workspace)
+			rq := out[ws.Repo]
+			rq.remediating = append(rq.remediating, entry)
 			rq.pause = q.pause
 			out[ws.Repo] = rq
 		}
@@ -475,7 +504,7 @@ func (r *resolver) mergedSection(merged []wsm.Workspace, rc rowContext, log dlog
 			Key:    repoKey(repo),
 			Header: repoGroupHeader(repo),
 			Queue:  r.drawMergeQueue(q, log.With(dlog.Context{"repo_id": string(repo.ID)})),
-			Count:  &frontendv1.RosterSectionCount{Workspaces: uint32(len(q.line))},
+			Count:  &frontendv1.RosterSectionCount{Workspaces: uint32(len(q.line) + len(q.remediating))},
 		})
 	}
 	for repo := range queues {

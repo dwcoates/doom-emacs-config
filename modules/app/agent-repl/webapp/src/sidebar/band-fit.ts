@@ -94,6 +94,7 @@ import { log } from "../log.js";
 import { railScrollKept } from "../scroll.js";
 import {
   MERGE_QUEUE_HEAD_CLASS,
+  MERGE_QUEUE_REMEDIATING_CLASS,
   MERGE_QUEUE_WAITING_CLASS,
   MERGE_QUEUES_CLASS,
 } from "./merge-queue-view.js";
@@ -152,6 +153,7 @@ const LINE_SELECTOR = [
   ".sb-subsection.folded > .sb-subsection-head",
   `.sb-subsection[${EMPTY_SUBSECTION_ATTRIBUTE}] > .sb-subsection-head`,
   `.${MERGE_QUEUE_HEAD_CLASS}`,
+  `.${MERGE_QUEUE_REMEDIATING_CLASS}`,
   `.${MERGE_QUEUE_WAITING_CLASS}`,
   `.${RECENTLY_DEPLOYED_LABEL_CLASS}[${RECENTLY_DEPLOYED_COLLAPSED_ATTRIBUTE}]`,
 ].join(", ");

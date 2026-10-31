@@ -585,6 +585,7 @@ func (o *orchestrator) dequeue(ctx context.Context, ws ids.WorkspaceID, cause Ab
 	// waiting one, or its lease would outlive its entry (dropPendingResume).
 	doc, pending := o.resumes[ws]
 	delete(o.resumes, ws)
+	o.forgetRemediationLocked(ws)
 	o.mu.Unlock()
 	if pending {
 		return o.dropPendingResume(ctx, ws, doc, cause)
@@ -990,18 +991,31 @@ func (o *orchestrator) settleLeavingQueueTab(ctx context.Context, repo wsm.RepoK
 	return nil
 }
 
-// inLine answers a repository's stored queue less its REQUESTED merges, with
-// the positions renumbered over what is left.
+// inLine answers a repository's stored queue less its REQUESTED merges and the
+// merges REMEDIATING out of line (remediate.go), with the positions renumbered
+// over what is left.
 func inLine(stored []wsm.MergeQueueEntry) []wsm.MergeQueueEntry {
 	entries := make([]wsm.MergeQueueEntry, 0, len(stored))
 	for _, entry := range stored {
-		if entry.State == wsm.MergeRequested {
+		if entry.State == wsm.MergeRequested || entry.State == wsm.MergeRemediating {
 			continue
 		}
 		entry.Position = len(entries) + 1
 		entries = append(entries, entry)
 	}
 	return entries
+}
+
+// outOfLine answers the merges of a repository's stored queue remediating out
+// of line (remediate.go), in the order they stepped aside.
+func outOfLine(stored []wsm.MergeQueueEntry) []wsm.MergeQueueEntry {
+	var out []wsm.MergeQueueEntry
+	for _, entry := range stored {
+		if entry.State == wsm.MergeRemediating {
+			out = append(out, entry)
+		}
+	}
+	return out
 }
 
 // bubbleLabel is a queued merge's head line, read off what it merges. A label
@@ -1482,9 +1496,11 @@ func (o *orchestrator) resumeIn(ctx context.Context, repo wsm.RepoKey) (ids.Work
 	}
 	defer o.mu.Unlock()
 	// A RESUME WITH NO ADMITTED QUEUE ENTRY is answered as before: its run
-	// reads the entry it lands and ends on the missing one, loudly.
+	// reads the entry it lands and ends on the missing one, loudly. A merge
+	// remediating out of line is no such resume: it waits for its fixing
+	// turn, then returns admitted (remediate.go).
 	for ws, doc := range o.resumes {
-		if doc.Repo == string(repo) {
+		if doc.Repo == string(repo) && !o.isRemediatingLocked(ws) {
 			return ws, true, nil
 		}
 	}

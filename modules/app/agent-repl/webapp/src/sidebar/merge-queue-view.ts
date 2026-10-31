@@ -35,6 +35,7 @@ import type {
   RosterMergeQueueRepoGroup,
   RosterMergeQueueStage,
   RosterMergeQueueSubject,
+  RosterMergeQueueRemediating,
   RosterMergeQueueWaiting,
   RosterRepoMergeQueue,
 } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
@@ -177,15 +178,26 @@ export const MERGE_QUEUE_HEAD_CLASS = "sb-mq-head";
 /** The class of a waiting merge's line. Each is one line of the band fit. */
 export const MERGE_QUEUE_WAITING_CLASS = "sb-mq-waiting";
 
+/** The class of a remediating merge's card, the queue's second spot. Each is one line of the band fit. */
+export const MERGE_QUEUE_REMEDIATING_CLASS = "sb-mq-remediating";
+
 /**
- * A queue group's body: the head's card, then each waiting merge, front
- * first. A listed queue always has its head. A press on a waiting merge drags
- * it among the waiting (`queueDrag`).
+ * A queue group's body: the head's card, then each merge remediating out of
+ * line (the second spot), then each waiting merge, front first. A listed
+ * queue has its head unless its line is empty and a merge remediates. A
+ * press on a waiting merge drags it among the waiting (`queueDrag`).
  */
 export function drawRosterMergeQueue(u: RosterRepoMergeQueue, sc: SidebarContext, path: string): HTMLElement {
   const body = document.createElement("div");
   body.className = `rows ${MERGE_QUEUE_CLASS}`;
-  body.appendChild(drawRosterMergeQueueHead(requireMessage(u.head, `${path}.head`), u.paused, sc, `${path}.head`));
+  // A HEAD IS ABSENT ONLY WHILE THE LINE IS EMPTY AND A MERGE REMEDIATES
+  // (frontend.v1.RosterRepoMergeQueue.head); anywhere else it is required.
+  if (u.head !== undefined || u.remediating.length === 0) {
+    body.appendChild(drawRosterMergeQueueHead(requireMessage(u.head, `${path}.head`), u.paused, sc, `${path}.head`));
+  }
+  u.remediating.forEach((remediating, index) => {
+    body.appendChild(drawRosterMergeQueueRemediating(remediating, sc, `${path}.remediating[${index}]`));
+  });
   const refs = new Map<HTMLElement, WorkspaceRef>();
   u.waiting.forEach((waiting, index) => {
     const waitingPath = `${path}.waiting[${index}]`;
@@ -389,6 +401,31 @@ export function drawRosterMergeQueueStage(u: RosterMergeQueueStage, path: string
 
 /** The class of the bullet a waiting merge's line opens with. */
 export const MERGE_QUEUE_BULLET_CLASS = "sb-mq-bullet";
+
+/**
+ * THE SECOND SPOT (owner ruling, 2026-10-31): one merge that headed the
+ * queue, finished its test suite with failures and stepped aside to fix them
+ * out of line. Drawn under the head as a smaller, quieter card than the
+ * head's -- the merge glyph, its name, how long it has remediated -- and
+ * above the merges waiting, with a "remediating" line beneath. A click
+ * reveals its merge bubble, as the head's does.
+ */
+export function drawRosterMergeQueueRemediating(u: RosterMergeQueueRemediating, sc: SidebarContext, path: string): HTMLElement {
+  const subject = requireMessage(u.subject, `${path}.subject`);
+  const card = drawSubjectControl(subject, sc, MERGE_QUEUE_REMEDIATING_CLASS, `${path}.subject`);
+  const line = document.createElement("div");
+  line.className = "sb-mq-head-line";
+  const glyph = document.createElement("span");
+  glyph.className = "sb-mq-glyph";
+  glyph.setAttribute("aria-hidden", "true");
+  glyph.textContent = MERGE_GLYPH;
+  line.append(glyph, drawSubjectName(subject, `${path}.subject`), drawClock(sc, msOf(u.sinceMs, `${path}.since_ms`)));
+  const detail = document.createElement("div");
+  detail.className = "sb-mq-detail";
+  detail.textContent = "remediating";
+  card.append(line, detail);
+  return card;
+}
 
 /**
  * One merge waiting behind the head, indented under the head's name: a bullet

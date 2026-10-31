@@ -903,16 +903,32 @@ message RosterRepoMergeQueue {
   reserved 1;
   reserved "rows";
   // The merge at the head: the merge at the front of the line. A queue is
-  // listed only while its line holds a merge, so a listed queue ALWAYS
-  // carries its head; an unset head there is malformed. (A failed merge no
-  // longer stands at the head of an empty line, owner request 2026-10-27:
-  // a repository leaves the section as soon as its line empties.)
+  // listed while its line holds a merge or a merge remediates out of line,
+  // so a listed queue carries its head unless its line is empty and
+  // `remediating` is not; an unset head anywhere else is malformed. (A failed
+  // merge no longer stands at the head of an empty line, owner request
+  // 2026-10-27: a repository leaves the section as soon as its line empties
+  // and nothing remediates.)
   optional RosterMergeQueueHead head = 2;
   // Every merge waiting behind the head, in the order it will run.
   repeated RosterMergeQueueWaiting waiting = 3;
   // PRESENT while the queue is paused: merges still join it, but nothing
   // runs until it is resumed.
   optional RosterMergeQueuePaused paused = 4;
+  // THE SECOND SPOT (owner ruling, 2026-10-31): every merge that headed the
+  // queue, finished its test suite with failures and stepped aside to fix
+  // them out of line, oldest first. It is in no place in line until its
+  // fixing turn ends, when it returns next after the merge being worked on.
+  // Drawn under the head, less prominent than it and more than the merges
+  // waiting.
+  repeated RosterMergeQueueRemediating remediating = 5;
+}
+
+// One merge remediating its failing tests out of line.
+message RosterMergeQueueRemediating {
+  RosterMergeQueueSubject subject = 1;
+  // When it stepped aside, epoch ms: its clock ticks from here.
+  int64 since_ms = 2;
 }
 
 // The queue is paused: when, by whom, and whether the pause was a hard stop.

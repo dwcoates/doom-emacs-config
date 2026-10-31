@@ -178,6 +178,9 @@ type orchestrator struct {
 	// keyed by workspace: the admission pump runs each from its record, ahead
 	// of anything waiting in its repository's line (Recover, startResumed).
 	resumes map[ids.WorkspaceID]progressDoc
+	// remediating are the merges remediating out of line, each with the wait
+	// on its fixing turn (remediate.go). Guarded by mu.
+	remediating map[ids.WorkspaceID]*remediation
 	// takenAway are the workspaces a suspension took the merges of
 	// (suspendFor), keyed to that suspension: a handover moved them to
 	// another daemon, or a pause, a restart, a race or the power is holding
@@ -337,6 +340,7 @@ func newOrchestrator(deps Deps) (*orchestrator, error) {
 		heads:              newHeadBook(),
 		picks:              map[ids.WorkspaceID]*pick{},
 		resumes:            map[ids.WorkspaceID]progressDoc{},
+		remediating:        map[ids.WorkspaceID]*remediation{},
 		takenAway:          map[ids.WorkspaceID]suspension{},
 		abandonsAtTakeBack: map[ids.WorkspaceID]AbandonCause{},
 		offers:             map[ids.WorkspaceID]bool{},

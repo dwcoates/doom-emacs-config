@@ -745,6 +745,60 @@ func (f *fakeDB) YieldMergeHead(_ context.Context, repo wsm.RepoKey, loser, winn
 	return nil
 }
 
+// StepAsideMerge takes the admitted entry out of line to the back, as
+// remediating, as the durable queue does.
+func (f *fakeDB) StepAsideMerge(_ context.Context, repo wsm.RepoKey, id ids.WorkspaceID) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	queue := f.queues[repo]
+	for i, entry := range queue {
+		if entry.Workspace != id {
+			continue
+		}
+		if entry.State != wsm.MergeAdmitted {
+			return fmt.Errorf("step aside %s while %s, not admitted", id, entry.State)
+		}
+		entry.State = wsm.MergeRemediating
+		f.queues[repo] = append(append(queue[:i:i], queue[i+1:]...), entry)
+		f.renumber(repo)
+		return nil
+	}
+	return fmt.Errorf("step aside %s: %w", id, wsm.ErrNotFound)
+}
+
+// ReturnRemediatedMerge puts the remediating entry back, admitted, at the
+// first waiting place, as the durable queue does.
+func (f *fakeDB) ReturnRemediatedMerge(_ context.Context, repo wsm.RepoKey, id ids.WorkspaceID) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	queue := f.queues[repo]
+	at := -1
+	for i, entry := range queue {
+		if entry.Workspace == id {
+			at = i
+		}
+	}
+	if at < 0 {
+		return fmt.Errorf("return %s: %w", id, wsm.ErrNotFound)
+	}
+	if queue[at].State != wsm.MergeRemediating {
+		return fmt.Errorf("return %s while %s, not remediating", id, queue[at].State)
+	}
+	entry := queue[at]
+	entry.State, entry.Source.Front = wsm.MergeAdmitted, true
+	rest := append(queue[:at:at], queue[at+1:]...)
+	place := len(rest)
+	for i, e := range rest {
+		if e.State == wsm.MergeQueued {
+			place = i
+			break
+		}
+	}
+	f.queues[repo] = append(rest[:place:place], append([]wsm.MergeQueueEntry{entry}, rest[place:]...)...)
+	f.renumber(repo)
+	return nil
+}
+
 func (f *fakeDB) SweepOrphanedMergeState(context.Context, time.Time) (wsm.OrphanedMergeState, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -858,7 +912,7 @@ func (f *fakeDB) DropAdmittedMerge(_ context.Context, repo wsm.RepoKey, id ids.W
 	}
 	at := -1
 	for i, entry := range f.queues[repo] {
-		if entry.Workspace == id && entry.State == wsm.MergeAdmitted {
+		if entry.Workspace == id && (entry.State == wsm.MergeAdmitted || entry.State == wsm.MergeRemediating) {
 			at = i
 		}
 	}

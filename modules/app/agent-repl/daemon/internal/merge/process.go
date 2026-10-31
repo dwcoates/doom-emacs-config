@@ -897,7 +897,14 @@ func (r *run) testAndFix(ctx context.Context, tip, targetBranch string, fromAtte
 			out := r.fixesExhausted(ctx, verdict.result.ArchivePath, nil)
 			return "", &out, nil
 		}
-		if gaveUp, err := r.fix(ctx, attempt+1, verdict.result, targetBranch); err != nil || gaveUp != nil {
+		// THE WHOLE SUITE RAN AND FAILED: a head with a merge in line behind it
+		// steps aside to fix out of line, so that merge takes the head
+		// (remediate.go); otherwise it fixes in place.
+		var aside func()
+		if r.o.stepsAside(ctx, r) {
+			aside = func() { r.o.goStepAside(r) }
+		}
+		if gaveUp, err := r.fixThen(ctx, attempt+1, verdict.result, targetBranch, aside); err != nil || gaveUp != nil {
 			return "", gaveUp, err
 		}
 		r.fixesUsed = attempt + 1
@@ -922,12 +929,24 @@ func (r *run) fixesExhausted(ctx context.Context, archive string, extra dlog.Con
 // branch in its worktree: fixing attempt x of MaxFixAttempts. It answers the
 // failed outcome when the agent escalated or changed the merge machinery.
 func (r *run) fix(ctx context.Context, attempt int, failing GateResult, targetBranch string) (*outcome, error) {
-	return r.promptFix(ctx, attempt, failedSuites(failing.Suites), failing.ArchivePath, failing.Tail, targetBranch)
+	return r.fixThen(ctx, attempt, failing, targetBranch, nil)
+}
+
+// fixThen is fix, calling SUBMITTED (when not nil) once the fixing prompt is
+// handed off to the session: the moment a head steps aside (remediate.go).
+func (r *run) fixThen(ctx context.Context, attempt int, failing GateResult, targetBranch string, submitted func()) (*outcome, error) {
+	return r.promptFixThen(ctx, attempt, failedSuites(failing.Suites), failing.ArchivePath, failing.Tail, targetBranch, submitted)
 }
 
 // promptFix submits fixing attempt x's brief in a new fixes round, drawn as
 // the sub-subtab of the run it follows, and reads its end.
 func (r *run) promptFix(ctx context.Context, attempt int, suites []string, archive, tail, targetBranch string) (*outcome, error) {
+	return r.promptFixThen(ctx, attempt, suites, archive, tail, targetBranch, nil)
+}
+
+// promptFixThen is promptFix, calling SUBMITTED (when not nil) once the brief
+// is handed off to the session.
+func (r *run) promptFixThen(ctx context.Context, attempt int, suites []string, archive, tail, targetBranch string, submitted func()) (*outcome, error) {
 	n := r.testsRound()
 	round := r.openTab(ctx, TabFixes)
 	r.drawFixing(ctx, round, n, attempt, suites)
@@ -955,7 +974,7 @@ func (r *run) promptFix(ctx context.Context, attempt int, suites []string, archi
 	}); err != nil {
 		return nil, err
 	}
-	close, err := r.submit(ctx, turn, text, conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_TEST_REPAIR)
+	close, err := r.o.submitThen(ctx, r.ws, turn, text, fixOrigin, submitted)
 	if err != nil {
 		return nil, err
 	}
