@@ -47,6 +47,9 @@ const theWorkspace ids.WorkspaceID = "ws-1"
 // only what the queue actually calls: anything else panics loudly rather than
 // quietly answering a zero value.
 type fakeDB struct {
+	// unaccepted are the turns whose submission the store holds an unaccepted
+	// claim for: CloseOrphans leaves them orphaned and owes them nothing.
+	unaccepted map[ids.TurnID]bool
 	wsm.DB
 
 	mu sync.Mutex
@@ -487,19 +490,32 @@ func (d *fakeDB) OpenTurns(_ context.Context, id ids.WorkspaceID) ([]wsm.Turn, e
 	return out, nil
 }
 
-func (d *fakeDB) CloseOrphans(_ context.Context, id ids.WorkspaceID, at time.Time) (wsm.OrphanReport, error) {
+func (d *fakeDB) CloseOrphans(_ context.Context, id ids.WorkspaceID, at time.Time, cut wsm.OrphanCut) (wsm.OrphanReport, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if d.orphansErr != nil {
 		return wsm.OrphanReport{}, d.orphansErr
 	}
 	d.orphaned = append(d.orphaned, id)
-	report := wsm.OrphanReport{At: at}
+	report := wsm.OrphanReport{At: at, How: map[ids.TurnID]wsm.TurnClose{}}
 	for _, t := range d.turns {
 		if t.Workspace == id && t.Close == nil {
-			how := wsm.CloseOrphaned
+			how := wsm.CloseKilled
+			if d.unaccepted[t.ID] {
+				how = wsm.CloseOrphaned
+			}
 			t.Close = &how
 			report.Turns = append(report.Turns, t.ID)
+			report.How[t.ID] = how
+			if cut == wsm.ResumeCut && !d.unaccepted[t.ID] {
+				if d.owed == nil {
+					d.owed = map[ids.WorkspaceID]map[ids.TurnID]bool{}
+				}
+				if d.owed[id] == nil {
+					d.owed[id] = map[ids.TurnID]bool{}
+				}
+				d.owed[id][t.ID] = true
+			}
 		}
 	}
 	return report, nil

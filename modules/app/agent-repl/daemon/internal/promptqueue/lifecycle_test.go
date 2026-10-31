@@ -795,13 +795,14 @@ func TestRestoreHoldsRecordsAnOrphanTheStandDownOwedAtInfo(t *testing.T) {
 }
 
 func TestRestoreHoldsRecordsAnOrphanNobodyOwesAtWarn(t *testing.T) {
-	// Arrange
+	// Arrange: a turn whose submission was never accepted is owed nothing.
 	h := newHarness(t)
 	if err := h.db.PutTurn(context.Background(), wsm.Turn{
 		ID: "running-turn", Workspace: theWorkspace, Text: "work", StartedAt: instant,
 	}); err != nil {
 		t.Fatalf("PutTurn: %v", err)
 	}
+	h.db.unaccepted = map[ids.TurnID]bool{"running-turn": true}
 	h.noSession = true
 
 	// Act

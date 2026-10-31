@@ -111,7 +111,7 @@ func (v *verbs) kill(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID) e
 	}
 
 	at := v.now()
-	report, err := v.deps.Queue.CloseOrphans(ctx, ws, at)
+	report, err := v.deps.Queue.CloseOrphans(ctx, ws, at, wsm.LeaveCut)
 	if err != nil {
 		log.Error(opKill, "could not close the orphaned turns", dlog.Context{"cause": err.Error()})
 		return fmt.Errorf("kill %q: close orphans: %w", ws, err)

@@ -214,7 +214,7 @@ var closePaths = []closePath{
 	{
 		name: "a boot or a teardown closes the workspace's orphans",
 		live: func(t *testing.T, w *doorWorld) {
-			if _, err := w.h.q.CloseOrphans(context.Background(), w.ws, time.UnixMilli(1_700_000_100_000)); err != nil {
+			if _, err := w.h.q.CloseOrphans(context.Background(), w.ws, time.UnixMilli(1_700_000_100_000), wsm.ResumeCut); err != nil {
 				t.Fatalf("CloseOrphans: %v", err)
 			}
 		},

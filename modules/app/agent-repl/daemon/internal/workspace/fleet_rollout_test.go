@@ -18,6 +18,7 @@ import (
 	"agent-repld/internal/ids"
 	"agent-repld/internal/sessionwatcher"
 	"agent-repld/internal/shimclient"
+	"agent-repld/internal/shimlife"
 	"agent-repld/internal/shimsocket"
 	"agent-repld/internal/wsm"
 	"fmt"
@@ -1773,6 +1774,56 @@ func TestKillSessionNoStandDownOrderedOwesNothing(t *testing.T) {
 	// Assert
 	if got := f.db.owedTurns(ws); len(got) != 0 {
 		t.Fatalf("owed = %v, want nothing owed for a kill no stand-down ordered", got)
+	}
+}
+
+func TestKillSessionTheDaemonOrdersOwesTheRunningTurn(t *testing.T) {
+	tests := []struct {
+		name   string
+		reason shimlife.StandDownReason
+	}{
+		{name: "a forced handover", reason: shimlife.StandDownHandover},
+		{name: "a replacement", reason: shimlife.StandDownReplaced},
+		{name: "a rebind", reason: shimlife.StandDownRebind},
+		{name: "a shutdown", reason: shimlife.StandDownShutdown},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: no daemon-wide stand-down; the kill carries its reason.
+			f := newFleetFixture(t)
+			ws := f.workspace("w1").ID
+			turn := ids.TurnID("t-running")
+			f.watcher.turn = &turn
+			f.fleet.remember(ws, &live{client: f.client, watcher: f.watcher, sessionStarted: true})
+
+			// Act
+			_ = f.fleet.KillSession(shimlife.WithStandDown(context.Background(), tc.reason), ws, true)
+
+			// Assert
+			if got := f.db.owedTurns(ws); len(got) != 1 || got[0] != turn {
+				t.Fatalf("owed = %v, want the running turn %q owed", got, turn)
+			}
+		})
+	}
+}
+
+func TestKillSessionTheUserOrdersOwesNothingEvenDuringAStandDown(t *testing.T) {
+	// Arrange
+	f := newFleetFixture(t)
+	ws := f.workspace("w1").ID
+	turn := ids.TurnID("t-running")
+	f.watcher.turn = &turn
+	f.fleet.remember(ws, &live{client: f.client, watcher: f.watcher, sessionStarted: true})
+	f.supervisor.mu.Lock()
+	f.supervisor.standingDown = true
+	f.supervisor.mu.Unlock()
+
+	// Act
+	_ = f.fleet.KillSession(shimlife.WithStandDown(context.Background(), shimlife.StandDownKill), ws, true)
+
+	// Assert
+	if got := f.db.owedTurns(ws); len(got) != 0 {
+		t.Fatalf("owed = %v, want nothing owed for the user's own kill", got)
 	}
 }
 

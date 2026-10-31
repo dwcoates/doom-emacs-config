@@ -281,6 +281,11 @@ func (q *queue) OnTurnAdopted(ws ids.WorkspaceID, turn ids.TurnID) {
 // no daemon was watching, so each durable row is closed as orphaned -- the
 // close written for a turn that had no terminal when the daemon reconciled.
 //
+// THESE TURNS WERE NOT CUT, AND ARE OWED NOTHING. The shim stayed up across the
+// handover and ran each turn to its own end; only the watching was missing. A
+// "continue" here would prompt a workspace whose work already finished, the
+// spurious post-bounce prompt the owner ruled out (2026-10-30).
+//
 // IT TAKES NO DELIVERY LOCK AND DELIVERS NOTHING. None of these turns was the
 // adopted session's turn in flight, so nothing waits behind them, and the
 // watcher may tell this from inside a bring-up the lock's holder is running.
@@ -707,18 +712,19 @@ func (q *queue) reconcileTurns(ctx context.Context, ws ids.WorkspaceID, global d
 		})
 		return
 	}
-	report, err := q.CloseOrphans(ctx, ws, q.deps.Now())
+	report, err := q.CloseOrphans(ctx, ws, q.deps.Now(), wsm.ResumeCut)
 	if err != nil {
 		global.Error(opRestore, "could not close a dead session's in-flight turns", dlog.Context{
 			"workspace": string(ws), "cause": err.Error(),
 		})
 		return
 	}
-	// A TURN THE DAEMON'S OWN STAND-DOWN CUT IS NO CASUALTY. A forced stop can
-	// take a shim down before it writes the turn's terminal, so the turn ends
-	// here as an orphan; when the stand-down recorded it as owed, the cut was
-	// ordered and the work is resumed when the session serves
-	// (restartredrive.go). Only an orphan nobody owes is a turn lost.
+	// A TURN CUT UNDER ITS SESSION IS NO CASUALTY. A forced stop or a crash
+	// can take a shim down before it writes the turn's terminal, so the turn
+	// ends here: closed as killed (drawn "interrupted") and owed its
+	// resumption in the same transaction (wsm store.CloseOrphans), which the
+	// next serving session pays (restartredrive.go). The check below confirms
+	// that debt was recorded; an orphan nobody owes is a turn lost.
 	if q.allOwed(ctx, ws, report.Turns, global) {
 		global.Info(opRestore, "closed the in-flight turns the daemon's own stand-down cut; their work is resumed when the session serves", dlog.Context{
 			"workspace": string(ws), "orphans": len(report.Turns),

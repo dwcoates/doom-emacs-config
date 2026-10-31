@@ -244,6 +244,15 @@ func (v *verbs) forceEndTurn(ctx context.Context, log dlog.Logger, ws ids.Worksp
 		log.Debug(opRestart, "no shim to force-end the turn through", nil)
 		return
 	}
+	// THE CUT IS OWED ITS RESUMPTION (owner ruling, 2026-10-30): a restart
+	// ends the turn as interrupted, and the relaunched session continues it
+	// (promptqueue/restartredrive.go). It is recorded before the kill, so a
+	// kill that fails and leaves the forced bounce to end the turn owes it too.
+	if err := v.deps.DB.OweResumption(ctx, ws, *running.Turn, v.now()); err != nil {
+		log.Error(opRestart, "could not record the resumption the restart owes the turn it cuts; the turn will not be continued", dlog.Context{
+			"turn": string(*running.Turn), "cause": err.Error(),
+		})
+	}
 	stopCtx, cancel := context.WithTimeout(ctx, v.restartStopBound)
 	defer cancel()
 	if err := shim.KillTurn(stopCtx, *running.Turn, true, nil); err != nil {

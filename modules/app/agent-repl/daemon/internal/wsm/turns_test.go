@@ -8,6 +8,7 @@ import (
 	"go/token"
 	"io/fs"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -313,7 +314,7 @@ func TestCloseOrphansClosesEveryTerminallessTurn(t *testing.T) {
 	second := openTurn(t, s, ws.ID)
 
 	// Act
-	report, err := s.CloseOrphans(context.Background(), ws.ID, instant)
+	report, err := s.CloseOrphans(context.Background(), ws.ID, instant, ResumeCut)
 
 	// Assert
 	if err != nil {
@@ -323,9 +324,55 @@ func TestCloseOrphansClosesEveryTerminallessTurn(t *testing.T) {
 		t.Fatalf("closed %d turns, want 2", len(report.Turns))
 	}
 	for _, turn := range []TurnID{first, second} {
-		if kind := scalar[int](t, s, `SELECT close_kind FROM turns WHERE id = ?`, turn); kind != int(CloseOrphaned) {
-			t.Fatalf("turn %q close kind = %d, want %d", turn, kind, int(CloseOrphaned))
+		if kind := scalar[int](t, s, `SELECT close_kind FROM turns WHERE id = ?`, turn); kind != int(CloseKilled) {
+			t.Fatalf("turn %q close kind = %d, want %d: a cut turn is interrupted, not lost", turn, kind, int(CloseKilled))
 		}
+	}
+}
+
+func TestCloseOrphansOwesEveryCutTurnItsResumption(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	first := openTurn(t, s, ws.ID)
+	second := openTurn(t, s, ws.ID)
+
+	// Act
+	if _, err := s.CloseOrphans(context.Background(), ws.ID, instant, ResumeCut); err != nil {
+		t.Fatalf("CloseOrphans: %v", err)
+	}
+
+	// Assert
+	owed, err := s.OwedTurns(context.Background(), ws.ID)
+	if err != nil {
+		t.Fatalf("OwedTurns: %v", err)
+	}
+	slices.Sort(owed)
+	want := []TurnID{first, second}
+	slices.Sort(want)
+	if !slices.Equal(owed, want) {
+		t.Fatalf("owed turns = %v, want every cut turn %v", owed, want)
+	}
+}
+
+func TestCloseOrphansTheUserOrderedOwesNothing(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	openTurn(t, s, ws.ID)
+
+	// Act
+	if _, err := s.CloseOrphans(context.Background(), ws.ID, instant, LeaveCut); err != nil {
+		t.Fatalf("CloseOrphans: %v", err)
+	}
+
+	// Assert
+	owed, err := s.OwedTurns(context.Background(), ws.ID)
+	if err != nil {
+		t.Fatalf("OwedTurns: %v", err)
+	}
+	if len(owed) != 0 {
+		t.Fatalf("owed turns = %v, want none for the user's own kill", owed)
 	}
 }
 
@@ -340,7 +387,7 @@ func TestCloseOrphansStampsEngagement(t *testing.T) {
 	at := instant.Add(time.Hour)
 
 	// Act
-	if _, err := s.CloseOrphans(context.Background(), ws.ID, at); err != nil {
+	if _, err := s.CloseOrphans(context.Background(), ws.ID, at, ResumeCut); err != nil {
 		t.Fatalf("CloseOrphans: %v", err)
 	}
 
@@ -362,7 +409,7 @@ func TestCloseOrphansLeavesHoldsStanding(t *testing.T) {
 	standingHold(t, s, ws.ID)
 
 	// Act
-	if _, err := s.CloseOrphans(context.Background(), ws.ID, instant); err != nil {
+	if _, err := s.CloseOrphans(context.Background(), ws.ID, instant, ResumeCut); err != nil {
 		t.Fatalf("CloseOrphans: %v", err)
 	}
 
@@ -389,7 +436,7 @@ func TestCloseOrphansIsOneTransaction(t *testing.T) {
 	corrupt(t, s, `UPDATE turns SET close_kind = ? WHERE id = ?`, int(CloseCompleted), broken)
 
 	// Act
-	report, err := s.CloseOrphans(context.Background(), ws.ID, instant.Add(time.Hour))
+	report, err := s.CloseOrphans(context.Background(), ws.ID, instant.Add(time.Hour), ResumeCut)
 
 	// Assert
 	var refusal *DecodeError
@@ -424,7 +471,7 @@ func TestCloseOrphansReportsNothingWhenEveryTurnIsClosed(t *testing.T) {
 	}
 
 	// Act
-	report, err := s.CloseOrphans(context.Background(), ws.ID, instant)
+	report, err := s.CloseOrphans(context.Background(), ws.ID, instant, ResumeCut)
 
 	// Assert
 	if err != nil {
@@ -1195,6 +1242,30 @@ func TestClaimIdempotencyKeyStampsTheTerminalEvidence(t *testing.T) {
 	}
 }
 
+func TestCloseOrphansOwesNothingForATurnItsRetryReDrives(t *testing.T) {
+	// Arrange: the turn's submission was never accepted.
+	ctx := context.Background()
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	first := NewTurnID()
+	arrangeClaim(t, s, ws.ID, "key-1", first, arrangeUnaccepted)
+	arrangeTurnRow(t, s, ws.ID, first, nil)
+
+	// Act
+	if _, err := s.CloseOrphans(ctx, ws.ID, instant, ResumeCut); err != nil {
+		t.Fatalf("CloseOrphans: %v", err)
+	}
+
+	// Assert
+	owed, err := s.OwedTurns(ctx, ws.ID)
+	if err != nil {
+		t.Fatalf("OwedTurns: %v", err)
+	}
+	if len(owed) != 0 {
+		t.Fatalf("owed turns = %v, want none: the retry re-drives an unaccepted turn", owed)
+	}
+}
+
 // TestClaimIdempotencyKeyReopensATurnTheBootClosedAsOrphaned pins the boot's
 // orphan close against the re-drive: the turn the claim is bound to reads open
 // again once the retry claims it, so the re-driven turn is an open turn.
@@ -1206,7 +1277,7 @@ func TestClaimIdempotencyKeyReopensATurnTheBootClosedAsOrphaned(t *testing.T) {
 	first := NewTurnID()
 	arrangeClaim(t, s, ws.ID, "key-1", first, arrangeUnaccepted)
 	arrangeTurnRow(t, s, ws.ID, first, nil)
-	if _, err := s.CloseOrphans(ctx, ws.ID, instant); err != nil {
+	if _, err := s.CloseOrphans(ctx, ws.ID, instant, ResumeCut); err != nil {
 		t.Fatalf("CloseOrphans: %v", err)
 	}
 

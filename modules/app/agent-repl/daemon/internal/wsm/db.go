@@ -382,7 +382,7 @@ type DB interface {
 
 	// CloseOrphans closes every turn without a terminal in one transaction and
 	// reports what it closed.
-	CloseOrphans(ctx context.Context, id WorkspaceID, at time.Time) (OrphanReport, error)
+	CloseOrphans(ctx context.Context, id WorkspaceID, at time.Time, cut OrphanCut) (OrphanReport, error)
 
 	// CreateTask records a new user task.
 	CreateTask(ctx context.Context, title string) (Task, error)

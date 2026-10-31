@@ -1792,7 +1792,7 @@ func (q *fakeQueue) ClaimDisplacedTurn(ctx context.Context, _ ids.WorkspaceID, t
 
 // CloseOrphans is never reached by the merge orchestrator; answering it
 // loudly keeps a new caller from passing silently.
-func (q *fakeQueue) CloseOrphans(context.Context, ids.WorkspaceID, time.Time) (wsm.OrphanReport, error) {
+func (q *fakeQueue) CloseOrphans(context.Context, ids.WorkspaceID, time.Time, wsm.OrphanCut) (wsm.OrphanReport, error) {
 	return wsm.OrphanReport{}, errors.New("fakeQueue: the merge orchestrator never closes orphans")
 }
 
