@@ -116,10 +116,16 @@ func (o *orchestrator) chainPosition(r *run) chainPlace {
 			continue
 		}
 		place.rank = i
+		// EVERY SPECULATIVE MEMBER STANDS ON THE TARGET, not on the merge
+		// ahead (race.go): its base is the target's tip as last read, first in
+		// its chain too. A member first because the merge ahead LEFT (a head
+		// that stepped aside, was dequeued or lost a race) waits for its
+		// promotion on that same tip, so its gate is not cut for a base that
+		// never moved (2026-10-31: every step aside cut the next merge's
+		// running tests and ran them again from the start).
+		place.base = o.targetTipLocked(r.repo)
 		if i > 0 {
-			// THE MERGE BEHIND THE HEAD STANDS ON THE TARGET, not on the head
-			// (race.go): its base is the target's tip as last read.
-			place.base, place.ahead = o.targetTipLocked(r.repo), o.chains[r.repo][i-1].ws
+			place.ahead = o.chains[r.repo][i-1].ws
 		}
 		return place
 	}
@@ -672,7 +678,13 @@ func (r *run) speculativeGate(ctx context.Context, place chainPlace, targetBranc
 	}
 	attempt := r.fixesUsed + 1
 	r.briefAhead = place.ahead
-	if gaveUp, err := r.fix(ctx, attempt, verdict.result, targetBranch); err != nil || gaveUp != nil {
+	// A RUN PROMOTED WHILE ITS GATE RAN IS THE HEAD NOW: its whole suite
+	// failed at the head, so it steps aside as a head does (remediate.go).
+	var aside func()
+	if r.o.stepsAside(ctx, r) {
+		aside = func() { r.o.goStepAside(r) }
+	}
+	if gaveUp, err := r.fixThen(ctx, attempt, verdict.result, targetBranch, aside); err != nil || gaveUp != nil {
 		return gaveUp, err
 	}
 	r.fixesUsed = attempt
