@@ -197,6 +197,9 @@ type run struct {
 	queueRound tabRound
 
 	mu sync.Mutex
+	// headFailed is set once the run's tests failed while it headed its
+	// queue, and widens the chain behind it while it fixes (windowFor).
+	headFailed bool
 	// rounds counts each tab kind's opened rounds, which is what makes a second
 	// pass a second tab.
 	rounds map[string]int
