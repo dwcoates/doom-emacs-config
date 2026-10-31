@@ -32,3 +32,20 @@ note must name that workspace as the one the cited issue corresponds to.
   statement of fact about agent-repl workspaces rather than repository policy.
   Every client that decodes `CreateWorkspaceError` (`lisp/wire-verbs.el`,
   `webapp/src/sidebar/create.ts`) learns the new arm.
+
+### The context workspace's selected bubble (comment-only change, 2026-10-30)
+
+- **What:** when the context workspace's feed has a bubble selected as the
+  create request arrives, the daemon quotes it after the context note: its
+  kind, its `frontend.v1.FeedId` value and its text, through the brief
+  `prompts/workspace-oneshot-context-selection.md` and `replyquote.Fenced`.
+  `agentrepl.v1.CreateWorkspaceOneShot.context`'s comment says so. No field
+  is added.
+- **Why no field:** the daemon is the only holder of a workspace's feed
+  selection (`SelectFeedRow`), so a field would only let a client send a copy
+  that could disagree with it. Emacs holds the kind and the text alone, never
+  the row.
+- **When it is read:** once, as the request arrives, before the create
+  detaches. A held create's durable row stores the selection with the rest of
+  its spec, so a create resumed after a restart quotes what was selected when
+  it was asked for.
