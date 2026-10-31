@@ -784,7 +784,7 @@ func (f *fakeDB) StepAsideMerge(_ context.Context, repo wsm.RepoKey, id ids.Work
 
 // ReturnRemediatedMerge puts the remediating entry back, admitted, at the
 // first waiting place, as the durable queue does.
-func (f *fakeDB) ReturnRemediatedMerge(_ context.Context, repo wsm.RepoKey, id ids.WorkspaceID) error {
+func (f *fakeDB) ReturnRemediatedMerge(_ context.Context, repo wsm.RepoKey, id ids.WorkspaceID, workedOn []ids.WorkspaceID) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	queue := f.queues[repo]
@@ -805,7 +805,7 @@ func (f *fakeDB) ReturnRemediatedMerge(_ context.Context, repo wsm.RepoKey, id i
 	rest := append(queue[:at:at], queue[at+1:]...)
 	place := len(rest)
 	for i, e := range rest {
-		if e.State == wsm.MergeQueued {
+		if e.State == wsm.MergeQueued && !slices.Contains(workedOn, e.Workspace) {
 			place = i
 			break
 		}

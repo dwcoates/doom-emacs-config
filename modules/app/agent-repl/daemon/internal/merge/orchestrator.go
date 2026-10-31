@@ -194,6 +194,11 @@ type orchestrator struct {
 	abandonsAtTakeBack map[ids.WorkspaceID]AbandonCause
 	// pumping guards one admission pump per repository.
 	pumping map[wsm.RepoKey]bool
+	// lines serializes, per repository, every decision that reads its line
+	// and acts on the order it read: the pump admitting its front
+	// (admitFront), a merge joining the chain behind the head (extendOnce),
+	// and a remediated merge returning (returnRemediated). See lineLock.
+	lines map[wsm.RepoKey]*sync.Mutex
 	// headLeases are the merge leases admitFront took for the heads it
 	// admitted, handed to start: the lease goes first and the admission
 	// after, so an admitted head always has its run's lease.
@@ -350,6 +355,7 @@ func newOrchestrator(deps Deps) (*orchestrator, error) {
 		offers:             map[ids.WorkspaceID]bool{},
 		repoOf:             map[ids.WorkspaceID]wsm.RepoKey{},
 		pumping:            map[wsm.RepoKey]bool{},
+		lines:              map[wsm.RepoKey]*sync.Mutex{},
 		headLeases:         map[ids.WorkspaceID]wsm.Lease{},
 		leaseWaits:         map[ids.WorkspaceID]wsm.RepoKey{},
 		events:             newQueueEvents(),

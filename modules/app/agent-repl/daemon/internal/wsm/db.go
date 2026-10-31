@@ -507,8 +507,9 @@ type DB interface {
 	// failing tests (MergeRemediating).
 	StepAsideMerge(ctx context.Context, repo RepoKey, id WorkspaceID) error
 	// ReturnRemediatedMerge puts a remediating merge back in line, admitted,
-	// at the first waiting place.
-	ReturnRemediatedMerge(ctx context.Context, repo RepoKey, id WorkspaceID) error
+	// at the first waiting place: behind every merge the caller names as
+	// being worked on, waiting in line or not.
+	ReturnRemediatedMerge(ctx context.Context, repo RepoKey, id WorkspaceID, workedOn []WorkspaceID) error
 	// MoveMerge moves a waiting merge one place up or down its queue, past
 	// the nearest waiting merge on that side, answering whether it moved.
 	MoveMerge(ctx context.Context, repo RepoKey, id WorkspaceID, move MergeMove) (bool, error)

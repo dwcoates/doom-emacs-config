@@ -1251,6 +1251,9 @@ func (o *orchestrator) admitFront(ctx context.Context, repo wsm.RepoKey) (ids.Wo
 		return "", nil, false, nil
 	}
 	defer o.leaveAdmission()
+	line := o.lineLock(repo)
+	line.Lock()
+	defer line.Unlock()
 	o.mu.Lock()
 	busy := o.running[repo] != nil
 	o.mu.Unlock()
