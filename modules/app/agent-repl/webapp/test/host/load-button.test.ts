@@ -12,6 +12,7 @@ import {
 import { WorkspaceRefSchema } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import { createTicker } from "../../src/clock.js";
 import { createAgentReplClient } from "../../src/rpc/client.js";
+import { CONTROL_SELECTOR, type Control } from "../../src/control.js";
 import {
   LOAD_BUTTON_LABEL,
   WEBHOST_LOAD_ID,
@@ -58,8 +59,8 @@ afterEach(() => {
 });
 
 /** The button drawn. */
-function button(): HTMLButtonElement {
-  const found = el.querySelector<HTMLButtonElement>("button");
+function button(): Control {
+  const found = el.querySelector<Control>(CONTROL_SELECTOR);
   if (found === null) throw new Error("no load button");
   return found;
 }

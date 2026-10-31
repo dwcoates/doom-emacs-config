@@ -98,11 +98,11 @@ html.agent-repl-host .webhost-load-button {
   cursor: pointer;
   opacity: 0.8;
 }
-html.agent-repl-host .webhost-load-button:hover:not(:disabled) {
+html.agent-repl-host .webhost-load-button:hover:not([aria-disabled="true"]) {
   opacity: 1;
   border-color: var(--muted);
 }
-html.agent-repl-host .webhost-load-button:disabled {
+html.agent-repl-host .webhost-load-button[aria-disabled="true"] {
   cursor: default;
   opacity: 0.5;
 }

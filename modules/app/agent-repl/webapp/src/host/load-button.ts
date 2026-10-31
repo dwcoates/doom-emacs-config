@@ -16,6 +16,7 @@
  * click again.
  */
 import { LoadPageInEditorResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_load_page_in_editor_pb";
+import { createControl } from "../control.js";
 import { log } from "../log.js";
 import { requireCase } from "../rpc/strict.js";
 import { callUnary } from "../rpc/unary.js";
@@ -51,8 +52,8 @@ export function createWebhostLoadButton(env: WebhostLoadButtonEnv): WebhostLoadB
   el.id = WEBHOST_LOAD_ID;
   el.setAttribute("data-component", "load-button");
   el.hidden = true;
-  const button = doc.createElement("button");
-  button.type = "button";
+  // THE ONE CONTROL (control.ts), as every clickable thing in the webapp is.
+  const button = createControl(doc);
   button.className = "webhost-load-button";
   button.textContent = LOAD_BUTTON_LABEL;
   el.append(button);
