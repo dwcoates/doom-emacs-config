@@ -1727,7 +1727,7 @@ describe("queryFactory hands the mocked vendor the per-task stop declaration", (
     // Arrange: the describe block's mocked fake seam.
     // Act.
     await factory(true, env, cwd)({
-      profile: { kind: "agent" },
+      profile: { kind: "agent", standing: "linked_workspace" },
       binding: { kind: "fresh", sessionId: "session-1" },
       workspaceName: "parser-fix",
       permissionMode: "default",
