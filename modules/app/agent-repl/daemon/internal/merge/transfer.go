@@ -392,6 +392,14 @@ func (o *orchestrator) AdoptWorkspace(ctx context.Context, ws ids.WorkspaceID) e
 	return nil
 }
 
+// holds reports whether this daemon already holds a workspace's merges.
+func (o *orchestrator) holds(ws ids.WorkspaceID) bool {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	_, held := o.repoOf[ws]
+	return held
+}
+
 // movedAway reports whether a workspace's merges were handed to another
 // daemon, which this one then admits nothing of.
 func (o *orchestrator) movedAway(ws ids.WorkspaceID) bool {
@@ -423,7 +431,32 @@ func (o *orchestrator) ReviewQueues(ctx context.Context) error {
 		repos = append(repos, string(repo))
 	}
 	sort.Strings(repos)
+	// A MERGE NO HANDOVER GAVE THIS DAEMON IS TAKEN HERE. A workspace with no
+	// session and no serving row of the outgoing daemon's (a hidden merge
+	// workspace) is never transferred, so its merge ran on there until that
+	// daemon's exit suspended it "for the next boot" -- and a successor runs
+	// no boot. Its admitted entry then held the queue's head with nothing to
+	// resume it (2026-10-30, land-relationship-backfill: the queue stood
+	// still until a bounce). Every entry this daemon does not hold yet is
+	// recovered as a boot recovers it.
 	for _, repo := range repos {
+		takenUp := false
+		for _, entry := range queues[wsm.RepoKey(repo)] {
+			if o.holds(entry.Workspace) {
+				continue
+			}
+			o.deps.Log.Global().Info(op, "takes up a merge no handover gave this daemon", dlog.Context{
+				"workspace": string(entry.Workspace), "repo": repo, "state": entry.State.String()})
+			if err := o.recoverEntry(ctx, wsm.RepoKey(repo), entry); err != nil {
+				return err
+			}
+			takenUp = true
+		}
+		if takenUp {
+			if err := o.republishQueue(ctx, wsm.RepoKey(repo)); err != nil {
+				return err
+			}
+		}
 		o.kick(wsm.RepoKey(repo))
 	}
 	o.deps.Log.Global().Info(op, "offered every merge queue to this daemon's pump", dlog.Context{"repos": repos})
