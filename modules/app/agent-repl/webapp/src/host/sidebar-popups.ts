@@ -32,7 +32,7 @@
  */
 import { pageMutationObserver, queryAll } from "../dom.js";
 import { log } from "../log.js";
-import { popupScrollKept } from "../scroll.js";
+import { scrollKept } from "../scroll.js";
 import { clampBeside, type Rect } from "../topbar/clamp.js";
 
 /** The channel both documents open, on the host origin. */
@@ -171,7 +171,7 @@ export function installPopupLayer(env: PopupLayerEnv): PopupLayer {
     if (drawn === null) return;
     [drawn, ...queryAll<HTMLElement>(drawn, "*")].forEach((el, i) => {
       const top = tops[i];
-      if (top !== undefined && top > 0) popupScrollKept(el, top);
+      if (top !== undefined && top > 0) scrollKept(el, top);
     });
   };
 

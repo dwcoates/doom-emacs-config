@@ -90,7 +90,7 @@
 import { sameLocalDate, type Ticker } from "../clock.js";
 import { computedPx, queryAll } from "../dom.js";
 import { log } from "../log.js";
-import { railScrollKept } from "../scroll.js";
+import { scrollKept } from "../scroll.js";
 import {
   MERGE_QUEUE_HEAD_CLASS,
   MERGE_QUEUE_REMEDIATING_CLASS,
@@ -407,7 +407,7 @@ function sizeBand(band: Band, stops: BandStops, lines: number, stretch: number |
 function restoreScroll(band: Band, top: number): void {
   const found = band.region.scrollTop;
   if (found === top) return;
-  railScrollKept(band.region, top);
+  scrollKept(band.region, top);
   paintBandMore(band.region);
   log.debug("the band fit put a section's viewport back where it stood", {
     operation: "sidebar.band-fit.scroll-kept",

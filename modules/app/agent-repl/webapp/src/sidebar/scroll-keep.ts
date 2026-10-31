@@ -21,7 +21,7 @@
  * returning from Chat finds the workspace sections where they were left.
  */
 import { log } from "../log.js";
-import { railScrollKept } from "../scroll.js";
+import { scrollKept } from "../scroll.js";
 import { sectionRegions } from "./band-fit.js";
 
 /** A viewport of the rail, by the name its position is kept under. */
@@ -56,7 +56,7 @@ export function createRailScrollKeep(): RailScrollKeep {
         if (kept === undefined) continue;
         const found = region.scrollTop;
         if (found === kept) continue;
-        railScrollKept(region, kept);
+        scrollKept(region, kept);
         const to = region.scrollTop;
         log.info("the rail's redraw moved a section; it is back where the reader left it", {
           operation: "sidebar.scroll-kept",

@@ -1970,29 +1970,21 @@ export function selectionRowScroll(region: { scrollTop: number }, delta: number)
 }
 
 /**
- * THE RAIL WAS REDRAWN OR REFITTED: put a section's viewport back at TOP,
- * where it stood before (owner request 2026-10-27). A draw that rebuilds a
- * section brings a new viewport that starts at its top
- * (src/sidebar/scroll-keep.ts), and the band fit lets every viewport shrink to
- * its rows while it measures them, clamping its scroll
- * (src/sidebar/band-fit.ts), and a Deploys group letting its older deploys
- * go above the viewport pulls what was below them up
- * (src/sidebar/deploys-more.ts). This undoes what the draw, the fit or the
- * collapse did, so it is no move of its own: the viewport stays where the
- * reader left it.
+ * A DRAWING THAT STARTS AT ITS TOP WAS DRAWN AGAIN: put its scroller back at
+ * TOP, where it stood before, so it is no move of its own. Two drawings do:
+ *
+ * - THE RAIL, REDRAWN OR REFITTED (owner request 2026-10-27). A draw that
+ *   rebuilds a section brings a new viewport that starts at its top
+ *   (src/sidebar/scroll-keep.ts), and the band fit lets every viewport shrink
+ *   to its rows while it measures them, clamping its scroll
+ *   (src/sidebar/band-fit.ts), and a Deploys group letting its older deploys
+ *   go above the viewport pulls what was below them up
+ *   (src/sidebar/deploys-more.ts). The viewport stays where the reader left it.
+ * - A SIDEBAR POPUP, DRAWN AGAIN OVER THE FEED (owner request 2026-10-31). The
+ *   host draws the copy anew each time the sidebar hands it the panel
+ *   (src/host/sidebar-popups.ts), and a fresh copy starts at its top.
  */
-export function railScrollKept(region: { scrollTop: number }, top: number): void {
-  region.scrollTop = top;
-}
-
-/**
- * A SIDEBAR POPUP WAS DRAWN AGAIN OVER THE FEED: put one of its scrollers back
- * at TOP, where the reader left it (owner request 2026-10-31). The host draws
- * the copy anew each time the sidebar hands it the panel (host/sidebar-popups.ts),
- * and a fresh copy starts at its top; this undoes that, so it is no move of
- * its own.
- */
-export function popupScrollKept(region: { scrollTop: number }, top: number): void {
+export function scrollKept(region: { scrollTop: number }, top: number): void {
   region.scrollTop = top;
 }
 
