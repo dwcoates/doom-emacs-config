@@ -367,10 +367,10 @@ memory; under it the merge queue's overlapping runs, 13 slots each on a
   ("waiting for CPU") until the load drops. It errs low: the peak of the
   last three reads, a one-core margin, and two cores per seat, counted again
   for seats taken in the last three seconds, since units were measured using
-  up to 2.25 cores per seat. The FIRST seat is the exception: while the tests hold no
-  seat and took none in the last three seconds, one is allowed whenever the
-  host is under the cap at all, since one unit cannot overshoot it by more
-  than itself; at 35% the margin and the seat's cost alone left tests waiting
+  up to 2.25 cores per seat. The FIRST unit is the exception: while the tests hold no
+  seat and took none in the last three seconds, `cores.FirstUnitSeats` (the
+  widest unit's width, 2) are allowed whenever the host is under the cap at
+  all, since one unit cannot overshoot it by more than itself; at 35% the margin and the seat's cost alone left tests waiting
   whenever the rest of the host used over 16% (2026-10-30). It admits and never pauses: a running unit runs
   to its end. One run governs at a time (`seats.Pool.Exclusive`, the pool's
   governor role) and the next takes over when it exits. A held-back unit says

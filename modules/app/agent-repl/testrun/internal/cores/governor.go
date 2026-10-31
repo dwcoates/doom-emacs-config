@@ -56,6 +56,10 @@ const (
 	CapPercent = 35
 	// MarginCores is how many of the cap's cores are never handed out.
 	MarginCores = 1.0
+	// FirstUnitSeats is how many seats the first unit is allowed while the
+	// tests hold none: the widest unit's width (roster's Slots, asserted by
+	// roster_test.go).
+	FirstUnitSeats = 2
 	// SeatCost is how many cores a seat is assumed to cost.
 	SeatCost = 2.0
 	// Tick is how often the governor reads the host's load.
@@ -73,9 +77,12 @@ const (
 // taken too recently to show in the reads are counted, at SeatCost cores a
 // seat.
 //
-// THE FIRST SEAT IS NEVER STARVED by the margin and the seat cost: when the
-// tests hold no seat and took none too recently to show, one seat is allowed
-// while the host is under the cap at all. The margin and SeatCost exist so
+// THE FIRST UNIT IS NEVER STARVED by the margin and the seat cost: when the
+// tests hold no seat and took none too recently to show, FirstUnitSeats seats
+// are allowed while the host is under the cap at all, enough for the widest
+// unit to start. One seat was not: a two-seat unit (daemon integration) then
+// never started, and every unit behind it in the run waited with it
+// (2026-10-30). The margin and SeatCost exist so
 // that SEVERAL seats handed out together cannot overshoot the cap; one unit
 // cannot overshoot it by more than itself. Without this, the 35% cap
 // (2026-10-30) left 2.6 cores on sixteen once the margin and one seat's cost
@@ -85,13 +92,14 @@ const (
 func Allowance(numCPU int, peakBusyCores float64, rampSeats, heldSeats int) int {
 	capCores := float64(numCPU) * CapPercent / 100
 	headroom := capCores - MarginCores - peakBusyCores - SeatCost*float64(rampSeats)
+	allow := 0
 	if headroom >= SeatCost {
-		return int(math.Floor(headroom / SeatCost))
+		allow = int(math.Floor(headroom / SeatCost))
 	}
 	if heldSeats == 0 && rampSeats == 0 && peakBusyCores < capCores {
-		return 1
+		allow = max(allow, FirstUnitSeats)
 	}
-	return 0
+	return allow
 }
 
 // StateFile is the file the governor states the host's CPU in for every
