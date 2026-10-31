@@ -15,7 +15,7 @@
  * dropped by `forgetWithin` when its section's drawing is thrown away), so a
  * thrown-away row can never be acted on.
  *
- * WHERE THE POINTER IS, ACROSS A REDRAW. A row's trigger and panel report their
+ * WHERE THE POINTER IS, ACROSS A REDRAW. A row's line and panel report their
  * own `mouseenter`/`mouseleave`. A row drawn under a resting pointer never
  * saw the pointer arrive, so it will not see it leave either; the rail's host
  * reports every pointer move and its own `mouseleave` through `pointerAt`,
@@ -26,11 +26,12 @@
  * THE RAIL LOSING THE USER CLOSES EVERY PANEL (`transients.ts`): the page's
  * focus gone, the page hidden or the selection moved `dismiss`es them, and no
  * panel opens again until the user is back in the rail (`resume`). Until then
- * neither a pointer the rail still finds on a trigger (a redraw under it, a
+ * neither a pointer the rail still finds on a line (a redraw under it, a
  * row WebKit re-hovers) nor the focus WebKit hands back to the line it left
  * reopens one.
  */
 import { log } from "../log.js";
+import { createKeyedTimers } from "../timers.js";
 import type { Dropdowns } from "./dropdowns.js";
 import { paintRowDetail } from "./row.js";
 
@@ -40,15 +41,24 @@ import { paintRowDetail } from "./row.js";
  * appears. There should be no chevron. Hovering the workspace should have the
  * same effect as opening the chevron currently does."
  *
- * It opens THE MOMENT the pointer reaches the trigger, the row's duration
- * field (owner request, 2026-10-14, which retired the three-second intent
- * delay of 2026-10-13). The trigger is a few characters wide, so a pointer
- * crossing the rail on its way elsewhere rarely passes over one.
+ * THE TRIGGER IS THE ROW'S WHOLE LINE, and the panel opens once the pointer
+ * has rested on it for `HOVER_OPEN_DELAY_MS` (owner requests, 2026-10-31,
+ * which retired the duration field as the only trigger of 2026-10-14: a
+ * trigger a few characters wide made the panel "finnicky", opening for some
+ * hovers and not others). The delay keeps a pointer crossing the rail on its
+ * way elsewhere from opening a panel for every row it passes.
  *
- * One delay remains, and it is travel: `HOVER_CLOSE_GRACE_MS`. The panel
- * stands beside the row's line rather than touching the duration, so the
- * pointer is briefly over neither on its way in, and a close on the bare
- * `mouseleave` would snatch the panel away as it is being reached for.
+ * THE DURATION FIELD STILL OPENS IT AT ONCE (owner request, 2026-10-31): the
+ * pointer reaching the duration, which lies inside the line, opens the panel
+ * with no delay.
+ */
+export const HOVER_OPEN_DELAY_MS = 2000;
+
+/**
+ * The other delay is travel: `HOVER_CLOSE_GRACE_MS`. The panel stands beside
+ * the row's line rather than touching it, so the pointer is briefly over
+ * neither on its way in, and a close on the bare `mouseleave` would snatch the
+ * panel away as it is being reached for.
  */
 export const HOVER_CLOSE_GRACE_MS = 120;
 
@@ -56,16 +66,14 @@ export const HOVER_CLOSE_GRACE_MS = 120;
 export interface DrawnRow {
   /** The row's box, which carries the `.open` class. */
   ws: HTMLElement;
-  /** The row's line: keyboard focus inside it holds the panel open. */
+  /** The row's line: the pointer's trigger, and keyboard focus inside it holds the panel open. */
   line: HTMLElement;
-  /** The row's duration field: the pointer's trigger. */
-  trigger: HTMLElement;
   /** The detail panel. */
   detail: HTMLElement;
 }
 
 /** Which part of a row the pointer is over. */
-type HoverPart = "trigger" | "panel";
+type HoverPart = "line" | "duration" | "panel";
 
 export interface RowHover {
   /** The drawing under ROOT was thrown away: its row copies are gone, every other stays. */
@@ -84,7 +92,7 @@ export interface RowHover {
   pointerAt(target: EventTarget | null): void;
   /** The rail lost the user, for WHY: close every open panel, and open none until `resume`. */
   dismiss(why: string): void;
-  /** The user is back in the rail: open the panel of the trigger the pointer rests on. */
+  /** The user is back in the rail: open the panel of the row the pointer rests on, at once on its duration, after the delay elsewhere on its line. */
   resume(): void;
   /** Cancel every timer: the rail is gone. */
   dispose(): void;
@@ -92,26 +100,28 @@ export interface RowHover {
 
 /** Where the pointer is over one workspace's row. */
 interface Pointer {
-  trigger: boolean;
+  line: boolean;
+  /** The duration field, which lies inside the line. */
+  duration: boolean;
   panel: boolean;
 }
 
 export function createRowHover(dropdowns: Dropdowns, openDetails: Set<string>): RowHover {
   let copies = new Map<string, DrawnRow[]>();
   const pointers = new Map<string, Pointer>();
-  const closeTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  const closeTimers = createKeyedTimers<string>();
+  const openTimers = createKeyedTimers<string>();
   /** Set by `dismiss`, cleared by `resume`: no panel opens while it stands. */
   let suspended = false;
 
-  const cancelClose = (id: string): void => {
-    const close = closeTimers.get(id);
-    if (close !== undefined) clearTimeout(close);
-    closeTimers.delete(id);
+  const cancelTimers = (): void => {
+    closeTimers.cancelAll();
+    openTimers.cancelAll();
   };
 
   const pointerOver = (id: string): boolean => {
     const at = pointers.get(id);
-    return at !== undefined && (at.trigger || at.panel);
+    return at !== undefined && (at.line || at.panel);
   };
 
   const focusedIn = (id: string): boolean => {
@@ -135,7 +145,8 @@ export function createRowHover(dropdowns: Dropdowns, openDetails: Set<string>): 
   };
 
   function setOpen(id: string, open: boolean, via: string): void {
-    cancelClose(id);
+    closeTimers.cancel(id);
+    openTimers.cancel(id);
     if (openDetails.has(id) === open) return;
     log.debug("toggling a row's detail panel", {
       operation: "sidebar.row.detail-toggle",
@@ -151,26 +162,30 @@ export function createRowHover(dropdowns: Dropdowns, openDetails: Set<string>): 
   }
 
   const scheduleClose = (id: string): void => {
-    cancelClose(id);
-    closeTimers.set(
-      id,
-      setTimeout(() => {
-        closeTimers.delete(id);
-        if (pointerOver(id) || focusedIn(id)) return;
-        setOpen(id, false, "leave");
-      }, HOVER_CLOSE_GRACE_MS),
-    );
+    closeTimers.start(id, HOVER_CLOSE_GRACE_MS, () => {
+      if (pointerOver(id) || focusedIn(id)) return;
+      setOpen(id, false, "leave");
+    });
   };
 
-  /** Whether NODE is inside the trigger or the panel of a drawn copy of ID's row. */
+  // Every path that takes the pointer off the line (`leave`, `pointerAt`) or
+  // stops the rail answering it (`dismiss`, `dispose`) cancels this timer, so
+  // it fires only for a pointer still resting on the line.
+  const scheduleOpen = (id: string): void => {
+    openTimers.start(id, HOVER_OPEN_DELAY_MS, () => {
+      setOpen(id, true, "hover");
+    });
+  };
+
+  /** Whether NODE is inside the line or the panel of a drawn copy of ID's row. */
   const within = (id: string, node: Node | null): boolean =>
     node !== null &&
-    (copies.get(id) ?? []).some((row) => row.trigger.contains(node) || row.detail.contains(node));
+    (copies.get(id) ?? []).some((row) => row.line.contains(node) || row.detail.contains(node));
 
   return {
     forgetWithin(root: Node): void {
       for (const [id, rows] of [...copies]) {
-        const kept = rows.filter((row) => !root.contains(row.trigger));
+        const kept = rows.filter((row) => !root.contains(row.line));
         if (kept.length === 0) copies.delete(id);
         else copies.set(id, kept);
       }
@@ -183,17 +198,22 @@ export function createRowHover(dropdowns: Dropdowns, openDetails: Set<string>): 
       if (openDetails.has(id)) register(id, row);
     },
     enter(id: string, part: HoverPart): void {
-      const at = pointers.get(id) ?? { trigger: false, panel: false };
+      const at = pointers.get(id) ?? { line: false, duration: false, panel: false };
       at[part] = true;
       pointers.set(id, at);
-      if (part === "panel") cancelClose(id);
-      else if (!suspended) setOpen(id, true, "hover");
+      closeTimers.cancel(id);
+      if (part === "duration" && !suspended) setOpen(id, true, "hover");
+      if (part === "line" && !suspended && !openDetails.has(id)) scheduleOpen(id);
     },
     leave(id: string, part: HoverPart): void {
       const at = pointers.get(id);
       if (at === undefined || !at[part]) return;
       at[part] = false;
-      if (!at.trigger && !at.panel) pointers.delete(id);
+      // The duration lies inside the line: the pointer leaving it is still on
+      // the row, unless the line reports its own leave.
+      if (part === "duration") return;
+      if (!at.line && !at.panel) pointers.delete(id);
+      if (part === "line") openTimers.cancel(id);
       scheduleClose(id);
     },
     focusIn(id: string): void {
@@ -216,20 +236,24 @@ export function createRowHover(dropdowns: Dropdowns, openDetails: Set<string>): 
           context: { workspace: id, left_rail: node === null },
         });
         pointers.delete(id);
+        openTimers.cancel(id);
         scheduleClose(id);
       }
     },
     dismiss(why: string): void {
       suspended = true;
-      for (const id of [...closeTimers.keys()]) cancelClose(id);
+      cancelTimers();
       for (const id of [...openDetails]) setOpen(id, false, why);
     },
     resume(): void {
       suspended = false;
-      for (const [id, at] of pointers) if (at.trigger) setOpen(id, true, "hover");
+      for (const [id, at] of pointers) {
+        if (at.duration) setOpen(id, true, "hover");
+        else if (at.line && !openDetails.has(id)) scheduleOpen(id);
+      }
     },
     dispose(): void {
-      for (const id of [...closeTimers.keys()]) cancelClose(id);
+      cancelTimers();
       pointers.clear();
       copies = new Map();
     },

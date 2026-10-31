@@ -196,16 +196,21 @@ describe("the sections", () => {
     // Arrange
     const drawn = drawWorkspaceRoster(roster({ repos: [repoSection({ id: "repo-1" })] }), sidebarContext());
     // Act
-    const pads = inRail(drawn, (rail) =>
-      [".repo-section > .repo-head", ".open-section > .repo-head"].map((selector) => {
-        const header = rail.querySelector(selector) as HTMLElement;
-        return [cascadedValue(header, "padding-top"), cascadedValue(header, "padding-bottom")];
-      }),
-    );
+    const pads = inRail(drawn, (rail) => {
+      const header = rail.querySelector(".repo-section > .repo-head") as HTMLElement;
+      return [
+        cascadedValue(header, "padding-top"),
+        cascadedValue(header, "padding-bottom"),
+        cascadedValue(rail, "--repo-head-pad-top"),
+        cascadedValue(rail, "--repo-head-pad-bottom"),
+      ];
+    });
     // Assert
     expect(pads).toEqual([
-      ["0.315rem", "0.175rem"],
-      ["0.45rem", "0.25rem"],
+      "calc(var(--repo-head-pad-top) * 0.7)",
+      "calc(var(--repo-head-pad-bottom) * 0.7)",
+      "0.45rem",
+      "0.25rem",
     ]);
   });
 
@@ -1664,9 +1669,9 @@ describe("the Merge Queue section's queues", () => {
   });
 
   it.each([
-    { cls: "merged-section", above: "calc(var(--rule-gap) - 3.3px)", below: "calc(var(--rule-gap) - 3.6px)" },
-    { cls: "hidden-section", above: "calc(var(--rule-gap) - 0.8px)", below: "calc(var(--rule-gap) - 2.6px)" },
-  ])("stands the rule over the $cls off the text on both sides by the rule gap", ({ cls, above, below }) => {
+    { cls: "merged-section", lead: "--merged-rule-lead", above: "calc(var(--rule-gap) - 3.3px)", below: "calc(var(--rule-gap) - 3.6px)" },
+    { cls: "hidden-section", lead: "--hidden-rule-lead", above: "calc(var(--rule-gap) - 0.8px)", below: "calc(var(--rule-gap) - 2.6px)" },
+  ])("stands the rule over the $cls off the text on both sides by the rule gap", ({ cls, lead, above, below }) => {
     const drawn = drawWorkspaceRoster(
       roster({ hidden: hiddenSection([HIDDEN_ROW]), merged: mergedSection([merged("m1")], false) }),
       sidebarContext(),
@@ -1674,8 +1679,13 @@ describe("the Merge Queue section's queues", () => {
     const section = pane(drawn).querySelector<HTMLElement>(`.${cls}`)!;
     const head = section.querySelector<HTMLElement>(":scope > .repo-head")!;
     expect(
-      inRail(drawn, () => [cascadedValue(section, "margin-top"), cascadedValue(section, "padding-top"), cascadedValue(head, "padding-top")]),
-    ).toEqual([above, "0px", below]);
+      inRail(drawn, (rail) => [
+        cascadedValue(section, "margin-top"),
+        cascadedValue(rail, lead),
+        cascadedValue(section, "padding-top"),
+        cascadedValue(head, "padding-top"),
+      ]),
+    ).toEqual([`var(${lead})`, above, "0px", below]);
   });
 
   it("draws each repository's queue under its label, in the wire's order", () => {

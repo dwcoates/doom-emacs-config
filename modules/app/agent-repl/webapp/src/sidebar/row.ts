@@ -611,7 +611,6 @@ export function drawRosterRowAttention(u: RosterRowAttention, path: string): HTM
   const marker = document.createElement("span");
   marker.className = "sb-attn";
   marker.setAttribute("data-attention", "");
-  marker.title = "unseen notification";
   return marker;
 }
 
@@ -871,7 +870,6 @@ export function drawStatusMark(arm: RosterStatusCase, path: string, markers: Row
   const dot = document.createElement("span");
   dot.className = `st ${mark.toneClass}`;
   dot.setAttribute("data-glyph", mark.glyph);
-  dot.title = arm;
   // The picture is bundled markup from images/glyphs/, never data off the wire.
   if (mark.image !== "") dot.innerHTML = mark.image;
   if (mark.glyph !== "dot") dot.classList.add("st-glyph");
@@ -880,7 +878,7 @@ export function drawStatusMark(arm: RosterStatusCase, path: string, markers: Row
 }
 
 /**
- * Wire a drawn row's duration field, panel and line to the page's hover gesture
+ * Wire a drawn row's line and panel to the page's hover gesture
  * (`row-hover.ts`), which owns the timers and the openness so a redraw can
  * neither drop a gesture in flight nor leave a thrown-away row acting.
  *
@@ -890,31 +888,37 @@ export function drawStatusMark(arm: RosterStatusCase, path: string, markers: Row
  * page that opened it, never the daemon's view state (owner ruling,
  * 2026-10-06).
  *
- * THE POINTER'S TRIGGER IS THE ROW'S DURATION FIELD, in every section alike:
- * the open workspaces section, Hidden and Recently Merged (owner request,
- * 2026-10-14, which retired the name as the trigger after 2026-10-13 had
- * retired the status dot). Hovering the rest of the row, the name and the dot
- * included, opens nothing, and the pointer leaving the duration for the row
- * closes the panel as it does for anywhere else. The panel opens the moment
- * the pointer reaches the duration (owner request, 2026-10-14).
+ * THE POINTER'S TRIGGER IS THE ROW'S WHOLE LINE, in every section alike: the
+ * open workspaces section, Hidden and Recently Merged (owner requests,
+ * 2026-10-31, which retired the duration field as the only trigger of
+ * 2026-10-14). The panel opens once the pointer has rested anywhere on the
+ * line for `HOVER_OPEN_DELAY_MS`, at once when it reaches the duration
+ * field, and the pointer leaving the line for anywhere but the panel closes
+ * it.
  *
  * The keyboard gets the same panel through `focusin`/`focusout`.
  */
 function installHoverPanel(
   ws: HTMLElement,
   line: HTMLElement,
-  trigger: HTMLElement,
+  duration: HTMLElement,
   detail: HTMLElement,
   sc: SidebarContext,
   workspaceId: string,
 ): void {
   const hover = sc.rowHover;
-  hover.drawn(workspaceId, { ws, line, trigger, detail });
-  trigger.addEventListener("mouseenter", () => {
-    hover.enter(workspaceId, "trigger");
+  hover.drawn(workspaceId, { ws, line, detail });
+  line.addEventListener("mouseenter", () => {
+    hover.enter(workspaceId, "line");
   });
-  trigger.addEventListener("mouseleave", () => {
-    hover.leave(workspaceId, "trigger");
+  line.addEventListener("mouseleave", () => {
+    hover.leave(workspaceId, "line");
+  });
+  duration.addEventListener("mouseenter", () => {
+    hover.enter(workspaceId, "duration");
+  });
+  duration.addEventListener("mouseleave", () => {
+    hover.leave(workspaceId, "duration");
   });
   detail.addEventListener("mouseenter", () => {
     hover.enter(workspaceId, "panel");

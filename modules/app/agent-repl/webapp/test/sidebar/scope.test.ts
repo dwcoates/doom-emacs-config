@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 // One drawn section's registrations, torn down together. See src/sidebar/scope.ts.
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, onTestFinished, vi } from "vitest";
 import type { Dropdown } from "../../src/sidebar/dropdowns.js";
+import { HOVER_OPEN_DELAY_MS } from "../../src/sidebar/row-hover.js";
 import { openScope } from "../../src/sidebar/scope.js";
 import { sidebarContext } from "./harness.js";
 
@@ -149,15 +150,18 @@ describe("openScope", () => {
     const scope = openScope(rail);
     const ws = document.createElement("div");
     const line = document.createElement("div");
-    const trigger = document.createElement("span");
     const detail = document.createElement("div");
-    line.appendChild(trigger);
     ws.append(line, detail);
-    rail.rowHover.drawn("ws-1", { ws, line, trigger, detail });
+    rail.rowHover.drawn("ws-1", { ws, line, detail });
+    vi.useFakeTimers();
+    onTestFinished(() => {
+      vi.useRealTimers();
+    });
 
     // Act
     scope.dispose(ws);
-    rail.rowHover.enter("ws-1", "trigger");
+    rail.rowHover.enter("ws-1", "line");
+    vi.advanceTimersByTime(HOVER_OPEN_DELAY_MS);
 
     // Assert
     expect(ws.classList.contains("open")).toBe(false);

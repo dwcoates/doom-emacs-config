@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi, type M
 import { createDropdowns, type Dropdowns } from "../../src/sidebar/dropdowns.js";
 import {
   HOVER_CLOSE_GRACE_MS,
+  HOVER_OPEN_DELAY_MS,
   createRowHover,
   type DrawnRow,
   type RowHover,
@@ -16,13 +17,12 @@ import { openRow, row, sidebarContext } from "./harness.js";
 function drawnRow(): DrawnRow {
   const ws = document.createElement("div");
   const line = document.createElement("div");
-  const trigger = document.createElement("span");
   const control = document.createElement("button");
-  line.append(trigger, control);
+  line.append(control);
   const detail = document.createElement("div");
   ws.append(line, detail);
   document.body.appendChild(ws);
-  return { ws, line, trigger, detail };
+  return { ws, line, detail };
 }
 
 const isOpen = (copy: DrawnRow): boolean => copy.ws.classList.contains("open");
@@ -75,9 +75,10 @@ describe("the row hover gesture", () => {
     return draw(id);
   }
 
-  /** Bring the pointer onto ID's trigger. */
+  /** Bring the pointer onto ID's line and let it rest there for the open delay. */
   function openByHover(id: string): void {
-    hover.enter(id, "trigger");
+    hover.enter(id, "line");
+    vi.advanceTimersByTime(HOVER_OPEN_DELAY_MS);
   }
 
   describe("forgetting a thrown-away drawing", () => {
@@ -104,7 +105,7 @@ describe("the row hover gesture", () => {
   });
 
   describe("opening", () => {
-    it("opens every drawn copy the moment the pointer reaches the trigger", () => {
+    it("opens every drawn copy once the pointer has rested on the line for the open delay", () => {
       // ARRANGE
       const a = draw("ws-1");
       const b = draw("ws-1");
@@ -123,22 +124,126 @@ describe("the row hover gesture", () => {
       expect([...openDetails]).toEqual(["ws-1"]);
     });
 
-    it("opens without arming any timer", () => {
+    it("does not open before the pointer has rested on the line for the open delay", () => {
       // ARRANGE
       const a = draw("ws-1");
       // ACT
-      hover.enter("ws-1", "trigger");
+      hover.enter("ws-1", "line");
+      vi.advanceTimersByTime(HOVER_OPEN_DELAY_MS - 1);
+      // ASSERT
+      expect(isOpen(a)).toBe(false);
+    });
+
+    it("opens at once for a pointer reaching the duration, leaving no timer", () => {
+      // ARRANGE
+      const a = draw("ws-1");
+      hover.enter("ws-1", "line");
+      // ACT
+      hover.enter("ws-1", "duration");
       // ASSERT
       expect([isOpen(a), vi.getTimerCount()]).toEqual([true, 0]);
     });
 
-    it("cancels a pending close when the pointer comes back to the trigger", () => {
+    it("says it opened on hover when the pointer reached the duration, in the canonical log", async () => {
+      // ARRANGE
+      const capture = captureLogRecords("debug");
+      draw("ws-1");
+      hover.enter("ws-1", "line");
+      // ACT
+      hover.enter("ws-1", "duration");
+      // ASSERT
+      const record = await forwardedRecord(capture, "sidebar.row.detail-toggle");
+      expect(record.context).toMatchObject({ workspace: "ws-1", open: true, via: "hover" });
+    });
+
+    it("keeps the panel open while the pointer moves from the duration to the rest of the line", () => {
+      // ARRANGE
+      const a = draw("ws-1");
+      hover.enter("ws-1", "line");
+      hover.enter("ws-1", "duration");
+      // ACT
+      hover.leave("ws-1", "duration");
+      vi.runAllTimers();
+      // ASSERT
+      expect(isOpen(a)).toBe(true);
+    });
+
+    it("closes once the pointer leaves the line by way of the duration and the grace has run out", () => {
+      // ARRANGE
+      const a = draw("ws-1");
+      hover.enter("ws-1", "line");
+      hover.enter("ws-1", "duration");
+      // ACT
+      hover.leave("ws-1", "duration");
+      hover.leave("ws-1", "line");
+      vi.advanceTimersByTime(HOVER_CLOSE_GRACE_MS);
+      // ASSERT
+      expect(isOpen(a)).toBe(false);
+    });
+
+    it("opens nothing for a pointer reaching the duration after a dismiss", () => {
+      // ARRANGE
+      const a = draw("ws-1");
+      hover.dismiss("the page lost focus");
+      // ACT
+      hover.enter("ws-1", "line");
+      hover.enter("ws-1", "duration");
+      vi.runAllTimers();
+      // ASSERT
+      expect(isOpen(a)).toBe(false);
+    });
+
+    it("opens nothing for a pointer that leaves the line before the open delay", () => {
+      // ARRANGE
+      const a = draw("ws-1");
+      hover.enter("ws-1", "line");
+      // ACT
+      hover.leave("ws-1", "line");
+      vi.runAllTimers();
+      // ASSERT
+      expect([isOpen(a), vi.getTimerCount()]).toEqual([false, 0]);
+    });
+
+    it("opens nothing for a pointer the rail finds gone before the open delay", () => {
+      // ARRANGE
+      const a = draw("ws-1");
+      hover.enter("ws-1", "line");
+      // ACT
+      hover.pointerAt(null);
+      vi.runAllTimers();
+      // ASSERT
+      expect(isOpen(a)).toBe(false);
+    });
+
+    it("opens the fresh copy when the delay a redraw interrupted runs out", () => {
+      // ARRANGE
+      const old = draw("ws-1");
+      hover.enter("ws-1", "line");
+      const fresh = redraw("ws-1", old);
+      // ACT
+      vi.advanceTimersByTime(HOVER_OPEN_DELAY_MS);
+      // ASSERT
+      expect([isOpen(old), isOpen(fresh)]).toEqual([false, true]);
+    });
+
+    it("arms no open timer for a pointer coming back to the line of an open panel", () => {
+      // ARRANGE
+      draw("ws-1");
+      openByHover("ws-1");
+      hover.leave("ws-1", "line");
+      // ACT
+      hover.enter("ws-1", "line");
+      // ASSERT
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it("cancels a pending close when the pointer comes back to the line", () => {
       // ARRANGE
       const a = draw("ws-1");
       openByHover("ws-1");
-      hover.leave("ws-1", "trigger");
+      hover.leave("ws-1", "line");
       // ACT
-      hover.enter("ws-1", "trigger");
+      hover.enter("ws-1", "line");
       vi.runAllTimers();
       // ASSERT
       expect(isOpen(a)).toBe(true);
@@ -149,7 +254,7 @@ describe("the row hover gesture", () => {
       const capture = captureLogRecords("debug");
       draw("ws-1");
       // ACT
-      hover.enter("ws-1", "trigger");
+      openByHover("ws-1");
       // ASSERT
       const record = await forwardedRecord(capture, "sidebar.row.detail-toggle");
       expect(record.context).toMatchObject({ workspace: "ws-1", open: true, via: "hover" });
@@ -168,7 +273,7 @@ describe("the row hover gesture", () => {
     it("keeps open the row a redraw drew under a resting pointer", () => {
       // ARRANGE
       const old = draw("ws-1");
-      hover.enter("ws-1", "trigger");
+      openByHover("ws-1");
       // ACT
       const fresh = redraw("ws-1", old);
       // ASSERT
@@ -180,7 +285,7 @@ describe("the row hover gesture", () => {
       const old = draw("ws-1");
       const fresh = redraw("ws-1", old);
       // ACT
-      hover.enter("ws-1", "trigger");
+      openByHover("ws-1");
       // ASSERT
       expect([isOpen(old), isOpen(fresh)]).toEqual([false, true]);
     });
@@ -188,9 +293,9 @@ describe("the row hover gesture", () => {
 
   describe("the pointer leaving a row that never saw it go", () => {
     it("closes a panel a redraw drew open once the pointer leaves the rail", () => {
-      // ARRANGE: the pointer rests on the trigger and a push redraws the row.
+      // ARRANGE: the pointer rests on the line and a push redraws the row.
       const old = draw("ws-1");
-      hover.enter("ws-1", "trigger");
+      openByHover("ws-1");
       const fresh = redraw("ws-1", old);
       // ACT: the pointer leaves for Emacs; the fresh row never saw it arrive.
       hover.pointerAt(null);
@@ -203,7 +308,7 @@ describe("the row hover gesture", () => {
     it("does not resurface the panel on the next push", () => {
       // ARRANGE
       const old = draw("ws-1");
-      hover.enter("ws-1", "trigger");
+      openByHover("ws-1");
       const fresh = redraw("ws-1", old);
       hover.pointerAt(null);
       vi.runAllTimers();
@@ -225,13 +330,13 @@ describe("the row hover gesture", () => {
       expect(isOpen(fresh)).toBe(false);
     });
 
-    it("keeps the panel open while the pointer is over the fresh copy's trigger", () => {
+    it("keeps the panel open while the pointer is over the fresh copy's line", () => {
       // ARRANGE
       const old = draw("ws-1");
       openByHover("ws-1");
       const fresh = redraw("ws-1", old);
       // ACT
-      hover.pointerAt(fresh.trigger);
+      hover.pointerAt(fresh.line);
       vi.advanceTimersByTime(HOVER_CLOSE_GRACE_MS * 10);
       // ASSERT
       expect(isOpen(fresh)).toBe(true);
@@ -253,7 +358,7 @@ describe("the row hover gesture", () => {
       // ARRANGE
       const capture = captureLogRecords("debug");
       const old = draw("ws-1");
-      hover.enter("ws-1", "trigger");
+      hover.enter("ws-1", "line");
       redraw("ws-1", old);
       // ACT
       hover.pointerAt(null);
@@ -276,12 +381,12 @@ describe("the row hover gesture", () => {
   });
 
   describe("closing", () => {
-    it("closes once the pointer has left the trigger and the grace has run out", () => {
+    it("closes once the pointer has left the line and the grace has run out", () => {
       // ARRANGE
       const a = draw("ws-1");
       openByHover("ws-1");
       // ACT
-      hover.leave("ws-1", "trigger");
+      hover.leave("ws-1", "line");
       vi.advanceTimersByTime(HOVER_CLOSE_GRACE_MS);
       // ASSERT
       expect(isOpen(a)).toBe(false);
@@ -292,7 +397,7 @@ describe("the row hover gesture", () => {
       // ARRANGE
       const a = draw("ws-1");
       openByHover("ws-1");
-      hover.leave("ws-1", "trigger");
+      hover.leave("ws-1", "line");
       // ACT
       hover.enter("ws-1", "panel");
       vi.advanceTimersByTime(HOVER_CLOSE_GRACE_MS * 10);
@@ -304,7 +409,7 @@ describe("the row hover gesture", () => {
       // ARRANGE
       const old = draw("ws-1");
       openByHover("ws-1");
-      hover.leave("ws-1", "trigger");
+      hover.leave("ws-1", "line");
       // ACT
       const fresh = redraw("ws-1", old);
       vi.advanceTimersByTime(HOVER_CLOSE_GRACE_MS);
@@ -334,12 +439,12 @@ describe("the row hover gesture", () => {
       expect([isOpen(a), isOpen(b), openDetails.has("ws-1")]).toEqual([false, false, false]);
     });
 
-    it("stays dismissed while the pointer rests on the trigger", () => {
+    it("stays dismissed while the pointer rests on the line", () => {
       // ARRANGE
       const a = draw("ws-1");
       openByHover("ws-1");
-      hover.leave("ws-1", "trigger");
-      hover.enter("ws-1", "trigger");
+      hover.leave("ws-1", "line");
+      hover.enter("ws-1", "line");
       // ACT
       dropdowns.dismissOutside(document.body);
       vi.runAllTimers();
@@ -362,12 +467,23 @@ describe("the row hover gesture", () => {
       // ARRANGE
       const a = draw("ws-1");
       openByHover("ws-1");
-      hover.leave("ws-1", "trigger");
+      hover.leave("ws-1", "line");
       // ACT
       hover.dispose();
       vi.runAllTimers();
       // ASSERT
       expect(isOpen(a)).toBe(true);
+    });
+
+    it("cancels a pending open on dispose", () => {
+      // ARRANGE
+      const a = draw("ws-1");
+      hover.enter("ws-1", "line");
+      // ACT
+      hover.dispose();
+      vi.runAllTimers();
+      // ASSERT
+      expect(isOpen(a)).toBe(false);
     });
   });
 
@@ -379,6 +495,16 @@ describe("the row hover gesture", () => {
       hover.focusIn("ws-1");
       // ASSERT
       expect(isOpen(a)).toBe(true);
+    });
+
+    it("opens at once on focus while a hover's open is pending, leaving no timer", () => {
+      // ARRANGE
+      const a = draw("ws-1");
+      hover.enter("ws-1", "line");
+      // ACT
+      hover.focusIn("ws-1");
+      // ASSERT
+      expect([isOpen(a), vi.getTimerCount()]).toEqual([true, 0]);
     });
 
     it("stays open while the focus moves between the line's own controls", () => {
@@ -409,7 +535,7 @@ describe("the row hover gesture", () => {
       (a.line.querySelector("button") as HTMLElement).focus();
       openByHover("ws-1");
       // ACT
-      hover.leave("ws-1", "trigger");
+      hover.leave("ws-1", "line");
       vi.advanceTimersByTime(HOVER_CLOSE_GRACE_MS * 10);
       // ASSERT
       expect(isOpen(a)).toBe(true);
@@ -473,7 +599,7 @@ describe("the row hover gesture", () => {
       // ARRANGE
       draw("ws-1");
       openByHover("ws-1");
-      hover.leave("ws-1", "trigger");
+      hover.leave("ws-1", "line");
       hover.dismiss("the page lost focus");
       const debug = spyOnDebug();
       // ACT
@@ -482,7 +608,7 @@ describe("the row hover gesture", () => {
       expect(debug).not.toHaveBeenCalled();
     });
 
-    it("opens no panel for a pointer arriving on a trigger after a dismiss", () => {
+    it("opens no panel for a pointer arriving on a line after a dismiss", () => {
       // ARRANGE
       const a = draw("ws-1");
       hover.dismiss("the page lost focus");
@@ -502,18 +628,54 @@ describe("the row hover gesture", () => {
       expect(isOpen(a)).toBe(false);
     });
 
-    it("opens the panel of the trigger the pointer rests on when the user is back", () => {
+    it("opens the panel of the line the pointer rests on once the user is back for the open delay", () => {
       // ARRANGE
       const a = draw("ws-1");
       hover.dismiss("the page lost focus");
       openByHover("ws-1");
       // ACT
       hover.resume();
+      vi.advanceTimersByTime(HOVER_OPEN_DELAY_MS);
       // ASSERT
       expect(isOpen(a)).toBe(true);
     });
 
-    it("opens no panel on resume for a pointer that is on no trigger", () => {
+    it("does not open the panel of the resting line before the user is back for the open delay", () => {
+      // ARRANGE
+      const a = draw("ws-1");
+      hover.dismiss("the page lost focus");
+      openByHover("ws-1");
+      // ACT
+      hover.resume();
+      vi.advanceTimersByTime(HOVER_OPEN_DELAY_MS - 1);
+      // ASSERT
+      expect(isOpen(a)).toBe(false);
+    });
+
+    it("opens at once the panel of the duration the pointer rests on when the user is back", () => {
+      // ARRANGE
+      const a = draw("ws-1");
+      hover.dismiss("the page lost focus");
+      hover.enter("ws-1", "line");
+      hover.enter("ws-1", "duration");
+      // ACT
+      hover.resume();
+      // ASSERT
+      expect(isOpen(a)).toBe(true);
+    });
+
+    it("cancels an open already pending", () => {
+      // ARRANGE
+      const a = draw("ws-1");
+      hover.enter("ws-1", "line");
+      // ACT
+      hover.dismiss("the page lost focus");
+      vi.runAllTimers();
+      // ASSERT
+      expect(isOpen(a)).toBe(false);
+    });
+
+    it("opens no panel on resume for a pointer that is on no line", () => {
       // ARRANGE
       const a = draw("ws-1");
       openByHover("ws-1");
@@ -560,7 +722,7 @@ describe("the rows that report to the gesture", () => {
     expect(drawn.mock.calls.map(([id]) => id)).toEqual(["ws-1", "ws-2"]);
   });
 
-  it("hands the gesture the row's own duration field, line and panel", () => {
+  it("hands the gesture the row's own line and panel", () => {
     // ARRANGE
     const sc = sidebarContext();
     const drawn = vi.spyOn(sc.rowHover, "drawn");
@@ -571,7 +733,6 @@ describe("the rows that report to the gesture", () => {
     expect(copy).toEqual({
       ws,
       line: ws.querySelector(":scope > .row"),
-      trigger: ws.querySelector(":scope > .row > [data-when]"),
       detail: ws.querySelector(":scope > .detail"),
     });
   });

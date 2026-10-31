@@ -25,7 +25,7 @@ import { WorkspaceRefSchema } from "../../../proto/gen/ts/workspace/v1/workspace
 import { createRailSearch } from "../../src/sidebar/search.js";
 import { createAppSwitcher } from "../../src/sidebar/threads.js";
 import { createDropdowns } from "../../src/sidebar/dropdowns.js";
-import { HOVER_CLOSE_GRACE_MS } from "../../src/sidebar/row-hover.js";
+import { HOVER_CLOSE_GRACE_MS, HOVER_OPEN_DELAY_MS } from "../../src/sidebar/row-hover.js";
 import { HOVER_SUSPENDED_CLASS } from "../../src/sidebar/transients.js";
 import { captureLogRecords, forwardedRecord, type LogCapture } from "../log-capture.js";
 import type { PhasedAnimation } from "../../src/sidebar/wall-phase.js";
@@ -1252,7 +1252,7 @@ describe("the rail reports where the pointer is to the row hover gesture", () =>
     vi.useRealTimers();
   });
 
-  /** Mount a rail of one row, with the pointer on its duration field, which opened the panel. */
+  /** Mount a rail of one row, with the pointer resting on its line, which opened the panel. */
   async function mountHovered(): Promise<{ host: HTMLElement; ws: HTMLElement }> {
     const host = document.createElement("div");
     mounted.push(
@@ -1263,11 +1263,12 @@ describe("the rail reports where the pointer is to the row hover gesture", () =>
     await settle();
     vi.useFakeTimers();
     const ws = host.querySelector(".sb-pane [data-roster-row='ws-1']") as HTMLElement;
-    (ws.querySelector(":scope > .row > [data-when]") as HTMLElement).dispatchEvent(new MouseEvent("mouseenter"));
+    (ws.querySelector(":scope > .row") as HTMLElement).dispatchEvent(new MouseEvent("mouseenter"));
+    vi.advanceTimersByTime(HOVER_OPEN_DELAY_MS);
     return { host, ws };
   }
 
-  it("closes the panel when the pointer leaves the rail without the duration field seeing it go", async () => {
+  it("closes the panel when the pointer leaves the rail without the line seeing it go", async () => {
     // ARRANGE
     const { host, ws } = await mountHovered();
     // ACT
@@ -1277,7 +1278,7 @@ describe("the rail reports where the pointer is to the row hover gesture", () =>
     expect(ws.classList.contains("open")).toBe(false);
   });
 
-  it("closes the panel when the pointer moves elsewhere in the rail without the duration field seeing it go", async () => {
+  it("closes the panel when the pointer moves elsewhere in the rail without the line seeing it go", async () => {
     // ARRANGE
     const { host, ws } = await mountHovered();
     // ACT
@@ -1287,7 +1288,7 @@ describe("the rail reports where the pointer is to the row hover gesture", () =>
     expect(ws.classList.contains("open")).toBe(false);
   });
 
-  it("keeps the panel open while the pointer moves over the duration field", async () => {
+  it("keeps the panel open while the pointer moves over the line", async () => {
     // ARRANGE
     const { ws } = await mountHovered();
     // ACT
