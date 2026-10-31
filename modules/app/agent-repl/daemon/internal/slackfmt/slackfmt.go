@@ -32,6 +32,8 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+
+	"agent-repld/internal/textline"
 )
 
 // linkLabelAtom is one atom of a Markdown link label: any character that is not
@@ -140,10 +142,7 @@ func PullNumber(url string) (string, bool) {
 // splitLines splits MD as Python's str.splitlines does for "\n" and "\r\n":
 // no trailing empty line for a body ending in a newline.
 func splitLines(md string) []string {
-	if md == "" {
-		return nil
-	}
-	lines := strings.Split(strings.TrimSuffix(md, "\n"), "\n")
+	lines := textline.Lines(md)
 	for i, line := range lines {
 		lines[i] = strings.TrimSuffix(line, "\r")
 	}
