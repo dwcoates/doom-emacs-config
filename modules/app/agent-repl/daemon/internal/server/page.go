@@ -206,7 +206,7 @@ func (s *server) WatchPage(
 	}
 
 	s.acceptStream(ctx, rpc)
-	s.log.Debug(rpc, "attached a page's one standing stream",
+	s.log.Info(rpc, "attached a page's one standing stream",
 		dlog.Context{"page": page.id})
 	if err := out.Send(&agentreplv1.WatchPageResponse{
 		Frame: &agentreplv1.WatchPageResponse_Attached{Attached: &agentreplv1.PageAttached{}},
@@ -227,12 +227,12 @@ func (s *server) WatchPage(
 				s.drainPageForExit(rpc, page, ctx, out)
 				return nil
 			}
-			s.log.Debug(rpc, "the page's stream ended on cancellation",
+			s.log.Info(rpc, "the page's stream ended on cancellation",
 				dlog.Context{"page": page.id})
 			return nil
 		case msg := <-page.out:
 			if err := out.Send(msg); err != nil {
-				s.log.Debug(rpc, "the page's client went away",
+				s.log.Info(rpc, "the page's client went away",
 					dlog.Context{"page": page.id, "cause": err.Error()})
 				return nil
 			}
