@@ -70,7 +70,7 @@ func emGHIWorld(t *testing.T, options ...EmacsWorldOption) (*EmacsWorld, *Emacs)
 }
 
 // emGHIRegister registers a scripted-fake-git worktree through the ORDINARY
-// command (`SPC TAB C-n`) and answers the workspace name Emacs recorded.
+// command (`SPC TAB p`) and answers the workspace name Emacs recorded.
 //
 // The daemon mints the identity; Emacs only echoes it, so the ref's presence
 // is asserted here rather than assumed by every caller.

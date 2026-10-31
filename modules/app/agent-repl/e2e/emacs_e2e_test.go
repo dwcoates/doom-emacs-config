@@ -393,7 +393,7 @@ func TestEmacsProofOfLife(t *testing.T) {
 	e.ArtifactPaths = append(e.ArtifactPaths, filepath.Join(repository.Dir, ".claude"))
 
 	// 2. Register the directory through the ORDINARY command the user runs
-	//    (SPC TAB C-n). The DAEMON mints the identity; Emacs echoes it.
+	//    (SPC TAB p). The DAEMON mints the identity; Emacs echoes it.
 	e.Eval(`(agent-repl-add-project-workspace ` + elispString(repository.Dir) + `)`)
 
 	// Only entries carrying :project-dir are workspaces: persp-mode's own

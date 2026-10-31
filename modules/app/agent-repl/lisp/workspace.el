@@ -98,6 +98,7 @@
 (declare-function safe-persp-name "ext:persp-mode" (p))
 (declare-function persp-rename "ext:persp-mode" (new-name &optional persp phash))
 (declare-function persp-add-new "ext:persp-mode" (name))
+(declare-function doom-project-root "ext:doom-lib-projects" (&optional dir))
 (declare-function set-persp-parameter "ext:persp-mode" (parameter value &optional persp))
 (declare-function persp-kill "ext:persp-mode" (name))
 (declare-function magit-status "ext:magit" (&optional directory cache))
@@ -2513,6 +2514,25 @@ magit status when it has none."
                        "ws-switch-project-display: dir=%s branch=magit-status" dir)
       (agent-repl--magit-status-same-window dir)))))
 
+(defun agent-repl--ws-doom-project-name (orig &optional dir)
+  "Answer an agent-repl workspace\='s name as its project\='s name.
+Around advice on `doom-project-name\' (ORIG, called with DIR otherwise).
+
+A PERSPECTIVE IS NAMED FOR ITS WORKSPACE.  Doom names the perspective a
+project switch makes after `doom-project-name\' (via
+`+workspaces-switch-to-project-h\'), and that defaults to the
+directory\='s basename -- which was a workspace\='s name only by
+coincidence.  A repository\='s main checkout is named
+\"main (<repository>)\" (daemon wsm.MainWorkspaceName), so switching to
+it made a perspective named for the bare directory, the current
+workspace read as that name, and every verb on the current workspace
+missed it (the panel opened for a workspace with no ref).  A directory
+that holds a live workspace answers that workspace\='s name; any other
+directory keeps whatever `projectile-project-name-function\' names it."
+  (let ((root (and (fboundp 'doom-project-root) (doom-project-root dir))))
+    (or (and root (agent-repl--ws-name-for-dir root))
+        (funcall orig dir))))
+
 (defun agent-repl--ws-install-persp-policy ()
   "Install agent-repl's persp-mode policy into persp-mode's own variables.
 
@@ -2528,6 +2548,9 @@ the product."
   ;; for a plain project with nothing open.  See the function's docstring.
   (setq +workspaces-switch-project-function
         #'agent-repl--ws-switch-project-display)
+  ;; The perspective a project switch makes is named for the workspace at
+  ;; that directory.  See `agent-repl--ws-doom-project-name'.
+  (advice-add 'doom-project-name :around #'agent-repl--ws-doom-project-name)
   ;; A PROJECT SWITCH ALWAYS MAKES ITS OWN WORKSPACE, AND NEVER RECYCLES THE
   ;; ONE IT LEAVES.  This is the second half of the fact the line above is the
   ;; first half of: the panel is a webview buffer and is deliberately not a

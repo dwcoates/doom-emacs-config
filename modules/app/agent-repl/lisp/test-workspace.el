@@ -1718,6 +1718,29 @@ gated push would then drop the very repaint this exists for."
     (should (equal (cadr record)
                    "ws-persp-identity: rejected reason=nil-perspective"))))
 
+;;;; ---- Tests: --ws-doom-project-name ----
+
+(ert-deftest agent-repl-test-doom-project-name-answers-the-workspace-at-the-root ()
+  "A project root holding a live workspace is named for that workspace."
+  (agent-repl-test--with-clean-state
+    ;; Arrange.
+    (cl-letf (((symbol-function 'doom-project-root) (lambda (&optional _dir) "/tmp/repo/"))
+              ((symbol-function 'agent-repl--ws-name-for-dir)
+               (lambda (dir) (and (equal dir "/tmp/repo/") "main (repo)"))))
+      ;; Act + Assert.
+      (should (equal (agent-repl--ws-doom-project-name (lambda (&optional _dir) "repo") "/tmp/repo/")
+                     "main (repo)")))))
+
+(ert-deftest agent-repl-test-doom-project-name-defers-for-a-plain-project ()
+  "A project root holding no workspace keeps the configured name."
+  (agent-repl-test--with-clean-state
+    ;; Arrange.
+    (cl-letf (((symbol-function 'doom-project-root) (lambda (&optional _dir) "/tmp/plain/"))
+              ((symbol-function 'agent-repl--ws-name-for-dir) (lambda (_dir) nil)))
+      ;; Act + Assert.
+      (should (equal (agent-repl--ws-doom-project-name (lambda (&optional _dir) "plain") "/tmp/plain/")
+                     "plain")))))
+
 ;;;; ---- Tests: --ws-switch-project-display ----
 
 (ert-deftest agent-repl-test-switch-project-display-workspace-keeps-its-panel ()

@@ -11,7 +11,7 @@
 // calls "the strongest case in the list", so each verb is reached the way a
 // user reaches it:
 //
-//   - `SPC TAB C-n' (register) and `SPC TAB n' (create) PROMPT for their
+//   - `SPC TAB p' (register) and `SPC TAB C-n' (create) PROMPT for their
 //     arguments, so they are asserted with `LeaderBinding' — a lookup — and
 //     then invoked as commands with their argument collection satisfied the
 //     standard ERT way, by binding the readers for the duration of the one
@@ -125,10 +125,10 @@ func newEmacsWorkspaceFixture(t *testing.T, box sandbox) *emacsWorkspaceFixture 
 
 	repo := harness.NewRepoAt(t, filepath.Join(box.Scratch(), "repo"))
 
-	// `SPC TAB C-n' prompts for the directory (`read-directory-name'), so
+	// `SPC TAB p' prompts for the directory (`read-directory-name'), so
 	// the binding is ASSERTED and the command is invoked with its argument.
-	if want, got := "agent-repl-add-project-workspace", e.LeaderBinding("TAB C-n"); got != want {
-		t.Fatalf("SPC TAB C-n resolves to %q, want %q", got, want)
+	if want, got := "agent-repl-add-project-workspace", e.LeaderBinding("TAB p"); got != want {
+		t.Fatalf("SPC TAB p resolves to %q, want %q", got, want)
 	}
 	e.Eval(`(agent-repl-add-project-workspace ` + elispString(repo.Dir) + `)`)
 
@@ -366,8 +366,11 @@ func TestEmacsCreateWorkspaceAppearsOnTheRoster(t *testing.T) {
 	f := newEmacsWorkspaceFixture(t, box)
 	e := f.Emacs
 
-	if want, got := "agent-repl-create-workspace", e.LeaderBinding("TAB n"); got != want {
-		t.Fatalf("SPC TAB n resolves to %q, want %q", got, want)
+	// `SPC TAB C-n' is the creation that picks its repository (`SPC TAB n'
+	// is fixed to agent-repl's own repository, which no sandbox repository
+	// is).
+	if want, got := "agent-repl-create-workspace-in-repository", e.LeaderBinding("TAB C-n"); got != want {
+		t.Fatalf("SPC TAB C-n resolves to %q, want %q", got, want)
 	}
 
 	before := len(f.rosterTabOrder())
@@ -378,12 +381,12 @@ func TestEmacsCreateWorkspaceAppearsOnTheRoster(t *testing.T) {
 	// initial prompt — blank name and blank base ref are the documented
 	// "daemon mints one" and "default branch" cases.
 	e.Eval(`(cl-letf (((symbol-function 'completing-read)
-                        (lambda (_prompt candidates &rest _)
-                          (car (append candidates nil))))
+                        (lambda (prompt candidates &rest _)
+                          (if (string-prefix-p "Model" prompt) "" (car (append candidates nil)))))
                        ((symbol-function 'read-string)
                         (lambda (prompt &rest _)
                           (if (string-prefix-p "Initial prompt" prompt) "hello" ""))))
-               (call-interactively #'agent-repl-create-workspace)
+               (call-interactively #'agent-repl-create-workspace-in-repository)
                t)`)
 
 	e.AwaitEvalFor(emacsVerbBound, "the created workspace's row to reach the roster table",
@@ -422,7 +425,7 @@ func containsString(xs []string, want string) bool {
 // #8 — RegisterAnExistingDirectory
 // ---------------------------------------------------------------------------
 
-// TestEmacsRegisterAnExistingDirectory is scenario 8: `SPC TAB C-n' hands the
+// TestEmacsRegisterAnExistingDirectory is scenario 8: `SPC TAB p' hands the
 // daemon a DIRECTORY and the daemon MINTS the identity.
 //
 // The claim that matters is the second half: `agent-repl-host--by-name' holds
