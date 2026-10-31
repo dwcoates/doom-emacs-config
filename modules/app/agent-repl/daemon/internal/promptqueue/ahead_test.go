@@ -375,3 +375,23 @@ func TestAPromptIsNeverJudgedAgainstOrFoldedIntoAnUnseenPrompt(t *testing.T) {
 		})
 	}
 }
+
+// THE QUEUE ASKS holdfold.Seen whether a hold stands in the line the user
+// sees: no file of the queue reads a hold's origin as unseen by hand.
+func TestTheQueueAsksHoldfoldWhetherAHoldIsSeen(t *testing.T) {
+	// Arrange
+	handRolled := regexp.MustCompile(`Unseen(Named)?\([A-Za-z_.\[\]]*\.Origin\)`)
+
+	// Act
+	var found []string
+	for _, file := range sourcescan.Production(t) {
+		if handRolled.Match(file.Source) {
+			found = append(found, file.Name)
+		}
+	}
+
+	// Assert
+	if len(found) > 0 {
+		t.Fatalf("these files read a hold as unseen by hand instead of holdfold.Seen: %v", found)
+	}
+}
