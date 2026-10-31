@@ -91,6 +91,9 @@ func (o *orchestrator) stepsAside(ctx context.Context, r *run) bool {
 // waits for the very run that asked for it. A step that fails is recorded at
 // ERROR; the merge then fixes at the head as before.
 func (o *orchestrator) stepAside(r *run) {
+	if o.onStepAside != nil {
+		o.onStepAside(r.ws)
+	}
 	ctx := context.Background()
 	log := o.log(ctx, r.ws)
 	fields := dlog.Context{"workspace": string(r.ws), "repo": string(r.repo)}
@@ -112,7 +115,20 @@ func (o *orchestrator) stepAside(r *run) {
 
 // goStepAside runs stepAside for R on its own goroutine, counted among the
 // orchestrator's live work so a drain waits for it.
+//
+// THE RUN IS CUT HERE, AT ONCE, BEFORE IT WAITS FOR ITS FIXING TURN. It is
+// called the moment the fixing prompt is handed off, from the run's own
+// goroutine, with no git in flight: the run is marked suspended and its
+// context cut before it can read the turn's end. Left to the goroutine, a
+// fixing turn that ended first let the run go on at the head -- gate again,
+// even land -- while the store already held it remediating (2026-10-31:
+// TestARemediatedMergeReturnsAndLandsAfterTheMergeAtTheHead under load).
 func (o *orchestrator) goStepAside(r *run) {
+	o.mu.Lock()
+	o.takenAway[r.ws] = suspendStepAside
+	r.suspendLocked(suspendStepAside)
+	o.mu.Unlock()
+	r.cancel(suspendStepAside.cause)
 	o.live.Add(1)
 	go func() {
 		defer o.live.Done()
