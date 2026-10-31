@@ -462,8 +462,8 @@ export function drawSubmitRefusal(root: HTMLElement, arm: string, text: string):
  * are this endpoint's own, and each says which state made the words unsendable
  * so the user knows what to wait for before resubmitting.
  *
- * `slash_command_from_agent` and `unknown_sender` are not worded: they refuse
- * only an agent's prompt, and every prompt this composer sends is the user's,
+ * `slash_command_from_agent`, `unknown_sender` and `fan_out_refused` are not
+ * worded: they refuse only an agent's prompt, and every prompt this composer sends is the user's,
  * so one reaching here is a breach.
  */
 export function submitPromptRefusal(reason: SubmitPromptReason): string {
