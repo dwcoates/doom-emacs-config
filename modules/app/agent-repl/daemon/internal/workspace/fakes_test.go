@@ -1852,6 +1852,11 @@ type fakeRollout struct {
 	done chan struct{}
 	// hold, when set, keeps every bounce from finishing until it is closed.
 	hold chan struct{}
+	// registered, when set, is the decision of a registry that REGISTERED
+	// the bounce behind work in flight: BounceShim answers it and keeps the
+	// completion for fireRegistered, the freeness edge, to call.
+	registered *bounce.Decision
+	pending    func(error)
 }
 
 type rolloutCall struct {
@@ -1865,10 +1870,16 @@ type rolloutCall struct {
 func (r *fakeRollout) BounceShim(ctx context.Context, ws ids.WorkspaceID, reason rollout.RelaunchReason, force bool, done func(error)) (bounce.Decision, error) {
 	r.mu.Lock()
 	r.relaunches = append(r.relaunches, rolloutCall{WS: ws, Reason: reason, Force: force})
-	err, refused, hold := r.relaunchErr, r.refuseErr, r.hold
+	err, refused, hold, registered := r.relaunchErr, r.refuseErr, r.hold, r.registered
+	if registered != nil {
+		r.pending = done
+	}
 	r.mu.Unlock()
 	if refused != nil {
 		return bounce.Decision{}, refused
+	}
+	if registered != nil {
+		return *registered, nil
 	}
 	go func() {
 		if hold != nil {
@@ -1882,6 +1893,20 @@ func (r *fakeRollout) BounceShim(ctx context.Context, ws ids.WorkspaceID, reason
 		}
 	}()
 	return bounce.Decision{Now: true, Forced: force}, nil
+}
+
+// fireRegistered runs the registered bounce's completion with err, as the
+// registry does on the freeness edge that ends the work it waited on.
+func (r *fakeRollout) fireRegistered(t *testing.T, err error) {
+	t.Helper()
+	r.mu.Lock()
+	done := r.pending
+	r.pending = nil
+	r.mu.Unlock()
+	if done == nil {
+		t.Fatal("no registered bounce to fire")
+	}
+	done(err)
 }
 
 // CheckStaleness records the mount's staleness check as a build-stale call,

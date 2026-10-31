@@ -434,6 +434,11 @@ type Verbs interface {
 	// the bounce is done. A workspace with no session is restarted by the
 	// bounce bringing one up.
 	Restart(ctx context.Context, ws ids.WorkspaceID) error
+	// RestartWhenIdle restarts the workspace once it is idle, interrupting
+	// nothing: at once (answering the outcome) when nothing is in flight,
+	// otherwise SCHEDULED with the bounce registry, which runs it when the
+	// running turn and the detached work end.
+	RestartWhenIdle(ctx context.Context, ws ids.WorkspaceID) (IdleRestart, error)
 	// Status answers the workspace's status as an agent reads it, open or
 	// closed (agentrepl.v1.WorkspaceStatus). An unregistered workspace is
 	// refused as unknown_workspace.

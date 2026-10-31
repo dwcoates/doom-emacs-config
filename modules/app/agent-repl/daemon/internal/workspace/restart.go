@@ -77,7 +77,7 @@ func (v *verbs) Restart(ctx context.Context, ws ids.WorkspaceID) error {
 	defer v.resumeMerges(ctx, log, ws)
 	v.forceEndTurn(ctx, log, ws)
 	outcome := make(chan error, 1)
-	if err := v.bounceShim(ctx, log, ws, true, func(err error) { outcome <- err }); err != nil {
+	if _, err := v.bounceShim(ctx, log, ws, true, func(err error) { outcome <- err }); err != nil {
 		return err
 	}
 	// THE ANSWER IS THE OUTCOME (owner ruling, 2026-10-08: "i expect it to
@@ -87,6 +87,12 @@ func (v *verbs) Restart(ctx context.Context, ws ids.WorkspaceID) error {
 	// `relaunch_failed` arm, which the editor surfaces. Measured 2026-10-08
 	// 18:55:03, workspace `doom`: the answer said "under way", the relaunch
 	// then failed on a merge's lease, and nothing told the user.
+	return awaitRestart(ctx, log, ws, outcome)
+}
+
+// awaitRestart waits for a started restart's outcome and answers it, or the
+// caller's end when the caller leaves first.
+func awaitRestart(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, outcome <-chan error) error {
 	select {
 	case err := <-outcome:
 		return restartAnswer(ws, err)
@@ -96,6 +102,62 @@ func (v *verbs) Restart(ctx context.Context, ws ids.WorkspaceID) error {
 		})
 		return fmt.Errorf("restart %q: the caller left before the restart finished: %w", ws, ctx.Err())
 	}
+}
+
+// IdleRestart is what RestartWhenIdle did: ran the restart at once, or
+// SCHEDULED it behind the work in flight it names.
+type IdleRestart struct {
+	// Scheduled reports that the restart was registered behind work in
+	// flight; false means it ran at once and finished.
+	Scheduled bool
+	// TurnInFlight, DetachedWork and AlreadyPending are what a scheduled
+	// restart waits on, as the bounce registry read it when it decided.
+	TurnInFlight   bool
+	DetachedWork   int
+	AlreadyPending bool
+}
+
+// RestartWhenIdle restarts a workspace ONCE IT IS IDLE
+// (endpoint_restart_workspace.proto `when_idle`): it brings a workspace that
+// is not stuck up to date with a changed harness, which the shim assembles at
+// session start, without cutting the turn it runs.
+//
+// IT INTERRUPTS NOTHING. It asks the bounce registry for an UNFORCED bounce,
+// the registry's freeness gate: an idle workspace is bounced at once, and the
+// answer waits for that bounce's outcome as Restart's does; a busy one is
+// REGISTERED, and the registry runs it on the daemon's own freeness edges (the
+// running turn's end, the last detached item's end), never by polling. A
+// merge holding the workspace's lease defers it behind the lease's release. So
+// none of Restart's preliminaries runs: no vendor-start run is ended, no turn
+// force-ended, no merge suspended.
+//
+// A WORKSPACE WITH NO SHIM UP is idle, and is started at once, as Restart
+// starts one.
+func (v *verbs) RestartWhenIdle(ctx context.Context, ws ids.WorkspaceID) (IdleRestart, error) {
+	_, log, err := v.owned(ctx, "RestartWorkspace", ws)
+	if err != nil {
+		return IdleRestart{}, err
+	}
+	if _, up := v.deps.Shim(ws); !up {
+		return IdleRestart{}, v.startForRestart(ctx, log, ws)
+	}
+	outcome := make(chan error, 1)
+	decision, err := v.bounceShim(ctx, log, ws, false, func(err error) { outcome <- err })
+	if err != nil {
+		return IdleRestart{}, err
+	}
+	if decision.Now {
+		return IdleRestart{}, awaitRestart(ctx, log, ws, outcome)
+	}
+	log.Info(opRestart, "scheduled the restart for when the workspace falls idle; it runs when its work in flight ends", dlog.Context{
+		"turn_in_flight": decision.TurnInFlight, "detached_work": decision.DetachedWork, "already_pending": decision.AlreadyPending,
+	})
+	return IdleRestart{
+		Scheduled:      true,
+		TurnInFlight:   decision.TurnInFlight,
+		DetachedWork:   decision.DetachedWork,
+		AlreadyPending: decision.AlreadyPending,
+	}, nil
 }
 
 // startForRestart starts the session of a workspace a restart found with no
@@ -153,7 +215,7 @@ func relaunchFailed(ws ids.WorkspaceID, detail string) *Refusal {
 // account switch (SelectAccount), which bounces at the workspace's freeness
 // rather than over its work. finished, when set, is told the bounce's outcome
 // after the completion's own record and reload.
-func (v *verbs) bounceShim(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, force bool, finished func(error)) error {
+func (v *verbs) bounceShim(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, force bool, finished func(error)) (bounce.Decision, error) {
 	// THE BOUNCE RUNS ON A CONTEXT DETACHED FROM THE REQUEST: it outlives the
 	// rpc. Its completion is what the reload and the record below hang off.
 	detached := context.WithoutCancel(ctx)
@@ -169,16 +231,16 @@ func (v *verbs) bounceShim(ctx context.Context, log dlog.Logger, ws ids.Workspac
 		// transport answers `transferring_away` naming it, so the caller asks
 		// there.
 		log.Info(opRestart, "the workspace is moving to another daemon; the restart is refused so it is asked of that daemon", dlog.Context{"force": force})
-		return fmt.Errorf("restart %q: %w", ws, err)
+		return bounce.Decision{}, fmt.Errorf("restart %q: %w", ws, err)
 	}
 	if err != nil {
 		log.Error(opRestart, "the bounce registry refused the restart", dlog.Context{"force": force, "cause": err.Error()})
-		return fmt.Errorf("restart %q: %w", ws, err)
+		return bounce.Decision{}, fmt.Errorf("restart %q: %w", ws, err)
 	}
-	log.Info(opRestart, "accepted the restart; the bounce is running", dlog.Context{
+	log.Info(opRestart, "accepted the restart", dlog.Context{
 		"force": force, "now": decision.Now, "turn_in_flight": decision.TurnInFlight, "detached_work": decision.DetachedWork,
 	})
-	return nil
+	return decision, nil
 }
 
 // finishRestart is the restart's completion: the webapp reload that follows a
