@@ -1410,11 +1410,14 @@ html.sb-dragging * { -webkit-user-select: none; user-select: none; }
    (owner request, 2026-10-11), and so is the open workspaces section's header
    above the repository sections (owner request, 2026-10-13). The purple is THE
    ONE PURPLE, the purple status --blocked (owner ruling, 2026-10-17). The rows
-   under any of them keep their own colours. THE SPACE ONLY FOLLOWS THE RULE
-   (owner request, 2026-10-27): the section above runs right down to it. */
+   under any of them keep their own colours. THE RULE STANDS OFF BOTH SIDES
+   ALIKE (owner request, 2026-10-31; until then the section above ran right
+   down to it and 0.4rem followed it): 0.2rem above it, from the last line of
+   the section above, and 0.2rem below it, to the header below. */
 #ws-sidebar .repo.hidden-section,
 #ws-sidebar .repo.merged-section {
-  padding-top: 0.4rem;
+  margin-top: 0.2rem;
+  padding-top: 0.2rem;
   border-top: 1px solid color-mix(in srgb, var(--muted) 30%, transparent);
 }
 /* EACH SECTION'S ROWS SCROLL once the rail is out of room (owner requests,

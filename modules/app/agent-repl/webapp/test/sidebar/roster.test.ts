@@ -1730,13 +1730,13 @@ describe("the Merge Queue section's queues", () => {
     expect(inRail(drawn, () => [cascadedValue(count, "margin-left"), cascadedValue(group, "gap")])).toEqual(["0.4rem", "0.4rem"]);
   });
 
-  it.each(["merged-section", "hidden-section"])("draws no space above the rule over the %s, only below it", (cls) => {
+  it.each(["merged-section", "hidden-section"])("draws 0.2rem above the rule over the %s, and 0.2rem below it", (cls) => {
     const drawn = drawWorkspaceRoster(
       roster({ hidden: hiddenSection([HIDDEN_ROW]), merged: mergedSection([merged("m1")], false) }),
       sidebarContext(),
     );
     const section = pane(drawn).querySelector<HTMLElement>(`.${cls}`)!;
-    expect(inRail(drawn, () => [cascadedValue(section, "margin-top"), cascadedValue(section, "padding-top")])).toEqual(["0", "0.4rem"]);
+    expect(inRail(drawn, () => [cascadedValue(section, "margin-top"), cascadedValue(section, "padding-top")])).toEqual(["0.2rem", "0.2rem"]);
   });
 
   it("draws the queues above the Recently Deployed heading and its groups", () => {
