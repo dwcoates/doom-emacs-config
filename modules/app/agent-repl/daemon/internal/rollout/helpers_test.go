@@ -23,6 +23,7 @@ import (
 	"agent-repld/internal/restarttiming"
 	"agent-repld/internal/restarttiming/restarttimingtest"
 	"agent-repld/internal/sessionlock"
+	"agent-repld/internal/sessionwatcher"
 	"agent-repld/internal/shimclient"
 	"agent-repld/internal/wsm"
 )
@@ -649,6 +650,11 @@ type fakeFleet struct {
 	stoodDown []ids.WorkspaceID
 	// factsAwaited records every AwaitFacts.
 	factsAwaited []ids.WorkspaceID
+	// watchPointers is what WatchPointers answers, per workspace; a
+	// workspace with none was never watched.
+	watchPointers map[ids.WorkspaceID]sessionwatcher.Pointers
+	// resumedFrom records every ResumeWatchesFrom, with its pointers.
+	resumedFrom map[ids.WorkspaceID]sessionwatcher.Pointers
 
 	installs  []ids.WorkspaceID
 	adoptions []ids.WorkspaceID
@@ -670,6 +676,7 @@ func newFakeFleet(order *steps) *fakeFleet {
 		handOverErr:   make(map[ids.WorkspaceID]error),
 		factsErr:      make(map[ids.WorkspaceID]error),
 		coldGates:     make(map[ids.WorkspaceID]*conversationv1.SessionCold),
+		watchPointers: make(map[ids.WorkspaceID]sessionwatcher.Pointers),
 		order:         order,
 
 		parkedAdoptions: make(map[ids.WorkspaceID]*conversationv1.SessionCold),
@@ -684,6 +691,33 @@ func (f *fakeFleet) AwaitFacts(_ context.Context, ws ids.WorkspaceID) error {
 	defer f.mu.Unlock()
 	f.factsAwaited = append(f.factsAwaited, ws)
 	return f.factsErr[ws]
+}
+
+// WatchPointers answers the scripted pointers.
+func (f *fakeFleet) WatchPointers(ws ids.WorkspaceID) (sessionwatcher.Pointers, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	from, ok := f.watchPointers[ws]
+	return from, ok
+}
+
+// ResumeWatchesFrom records the pointers the next watcher would resume from.
+func (f *fakeFleet) ResumeWatchesFrom(ws ids.WorkspaceID, from sessionwatcher.Pointers) {
+	f.order.record("resume_watches_from")
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.resumedFrom == nil {
+		f.resumedFrom = map[ids.WorkspaceID]sessionwatcher.Pointers{}
+	}
+	f.resumedFrom[ws] = from
+}
+
+// ResumedFrom answers the pointers ResumeWatchesFrom recorded for ws.
+func (f *fakeFleet) ResumedFrom(ws ids.WorkspaceID) (sessionwatcher.Pointers, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	from, ok := f.resumedFrom[ws]
+	return from, ok
 }
 
 // ColdGateStanding answers the scripted standing gate.

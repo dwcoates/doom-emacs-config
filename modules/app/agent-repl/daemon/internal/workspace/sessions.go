@@ -402,6 +402,11 @@ type Fleet struct {
 	// last watcher: the next watcher replays the selected transcript's first
 	// page. See opening.go.
 	selected map[ids.WorkspaceID]bool
+	// carried is, per workspace, the pointers a handover's incumbent was
+	// served (rollout.CarriedPointers): the next watcher here catches up from
+	// them, since it replaces a watcher that served the same conversation in
+	// another daemon. Spent by the watcher that starts. See opening.go.
+	carried map[ids.WorkspaceID]sessionwatcher.Pointers
 	// reapedAt is, per workspace, when the last shim THIS DAEMON HELD for it
 	// was concluded gone (shimclient.ExitInfo.At). Nothing that shim wrote can
 	// be later, so a transcript last written at or before it has no writer
@@ -621,6 +626,7 @@ func NewFleet(deps FleetDeps) (*Fleet, error) {
 		startSlots:     startSlotsOf(deps.StartSlots),
 		startsUnderWay: map[ids.WorkspaceID]bool{},
 		watched:        map[ids.WorkspaceID]sessionwatcher.Watcher{},
+		carried:        map[ids.WorkspaceID]sessionwatcher.Pointers{},
 		selected:       map[ids.WorkspaceID]bool{},
 	}, nil
 }

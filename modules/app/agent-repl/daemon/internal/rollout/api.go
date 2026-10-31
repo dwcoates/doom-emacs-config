@@ -39,6 +39,7 @@ import (
 	"agent-repld/internal/ids"
 	"agent-repld/internal/restarttiming"
 	"agent-repld/internal/sessionlock"
+	"agent-repld/internal/sessionwatcher"
 	"agent-repld/internal/shimclient"
 	"agent-repld/internal/wsm"
 )
@@ -662,6 +663,13 @@ type ShimFleet interface {
 	// ColdGateStanding answers the facts of a cold gate standing on the
 	// workspace, false when none stands: the carry takes it across.
 	ColdGateStanding(ws ids.WorkspaceID) (*conversationv1.SessionCold, bool)
+	// WatchPointers answers the newest pointer each of the workspace's watches
+	// was served, false when this daemon never watched it: the carry takes
+	// them across, so the successor's watches catch up from them.
+	WatchPointers(ws ids.WorkspaceID) (sessionwatcher.Pointers, bool)
+	// ResumeWatchesFrom has the workspace's next watcher catch up from FROM,
+	// the pointers its incumbent was served, rather than open tail_only.
+	ResumeWatchesFrom(ws ids.WorkspaceID, from sessionwatcher.Pointers)
 	// AdoptParked dials a running shim parked at its cold gate, holds it with
 	// no watcher, and raises the carried gate on this daemon.
 	AdoptParked(ctx context.Context, ws ids.WorkspaceID, cold *conversationv1.SessionCold) (shimclient.Client, error)

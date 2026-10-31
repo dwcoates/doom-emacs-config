@@ -18,6 +18,7 @@ import (
 	"agent-repld/internal/bounce"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/sessionwatcher"
 )
 
 // opCarry is the operation the handover carry records under.
@@ -82,6 +83,73 @@ type Carry struct {
 	// written before it existed, which leaves the successor on the
 	// announcement's snapshot.
 	Participants *CarriedParticipants `json:"participants,omitempty"`
+	// Pointers is the newest pointer each of the incumbent's watches was
+	// served when the move was sealed. Nil when the incumbent never watched
+	// the workspace, or predates the field.
+	Pointers *CarriedPointers `json:"pointers,omitempty"`
+}
+
+// CarriedPointers is the incumbent's watch pointers, each a protojson
+// HistoryPointer.
+//
+// A HANDOVER LOST WHAT THE SHIM WROTE WHILE NO DAEMON WATCHED IT. The
+// successor had never watched the workspace, so it opened every watch
+// tail_only, and an entry written between the incumbent's watches closing and
+// the successor's opening reached nobody. When that entry was a turn's end,
+// the snapshot the successor reconciled against (the shim's re-announcement)
+// had been taken just before it, so the turn stayed open for good, and a merge
+// waiting for the workspace to be free waited on it forever (2026-10-31,
+// github-event-subscriptions: the turn ended 47ms after the snapshot). The
+// successor replaces a watcher that served the same conversation, so it
+// catches up from that watcher's pointers. A pointer read at the seal may be
+// older than the last entry the incumbent was served; an entry delivered to
+// both is absorbed by its identity, and a gap is what this closes.
+type CarriedPointers struct {
+	Main   json.RawMessage            `json:"main,omitempty"`
+	Agents map[string]json.RawMessage `json:"agents,omitempty"`
+}
+
+// carryPointers encodes FROM for the carry.
+func carryPointers(from sessionwatcher.Pointers) (*CarriedPointers, error) {
+	out := &CarriedPointers{Agents: make(map[string]json.RawMessage, len(from.Agents))}
+	if from.Main != nil {
+		raw, err := protojson.Marshal(from.Main)
+		if err != nil {
+			return nil, fmt.Errorf("encode the main watch's pointer: %w", err)
+		}
+		out.Main = raw
+	}
+	for id, ptr := range from.Agents {
+		if ptr == nil {
+			continue
+		}
+		raw, err := protojson.Marshal(ptr)
+		if err != nil {
+			return nil, fmt.Errorf("encode the pointer of agent %q: %w", id, err)
+		}
+		out.Agents[id] = raw
+	}
+	return out, nil
+}
+
+// decode answers the carried pointers as a watcher's.
+func (p *CarriedPointers) decode() (sessionwatcher.Pointers, error) {
+	out := sessionwatcher.Pointers{Agents: make(map[string]*conversationv1.HistoryPointer, len(p.Agents))}
+	if len(p.Main) > 0 {
+		ptr := &conversationv1.HistoryPointer{}
+		if err := protojson.Unmarshal(p.Main, ptr); err != nil {
+			return sessionwatcher.Pointers{}, fmt.Errorf("decode the main watch's pointer: %w", err)
+		}
+		out.Main = ptr
+	}
+	for id, raw := range p.Agents {
+		ptr := &conversationv1.HistoryPointer{}
+		if err := protojson.Unmarshal(raw, ptr); err != nil {
+			return sessionwatcher.Pointers{}, fmt.Errorf("decode the pointer of agent %q: %w", id, err)
+		}
+		out.Agents[id] = ptr
+	}
+	return out, nil
 }
 
 // CarriedParticipants is the stream occupancy a move was sealed with.
@@ -151,6 +219,7 @@ func (c *controller) writeCarry(carry Carry) error {
 		"cold_gate": len(carry.ColdGate) > 0, "replacements": len(carry.Replacements),
 		"participants_host": carry.Participants != nil && carry.Participants.Host,
 		"participants_web":  carry.Participants != nil && carry.Participants.Web,
+		"pointers":          carry.Pointers != nil,
 	}))
 	return nil
 }
@@ -291,6 +360,14 @@ func (c *controller) seal(ctx context.Context, ws ids.WorkspaceID, fields dlog.C
 		_, held := c.deps.Shims.Client(ws)
 		carry.ColdGateShim = &held
 		move.parked = true
+	}
+	if from, watched := c.deps.Shims.WatchPointers(ws); watched {
+		pointers, err := carryPointers(from)
+		if err != nil {
+			c.log.Error(opTransfer, "could not encode the watch pointers for the carry; the seal is put back", dlog.WithCause(fields, err))
+			return nil, errors.Join(fmt.Errorf("rollout: carry the watch pointers of %q: %w", ws, err), c.unseal(ctx, ws, move, fields))
+		}
+		carry.Pointers = pointers
 	}
 	if err := c.writeCarry(carry); err != nil {
 		return nil, errors.Join(err, c.unseal(ctx, ws, move, fields))

@@ -16,6 +16,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/sessionlock"
+	"agent-repld/internal/sessionwatcher"
 	"agent-repld/internal/wsm"
 )
 
@@ -1350,5 +1351,101 @@ func TestAFreshBootStatesACarriedColdGateItCouldNotRaise(t *testing.T) {
 	}
 	if !hasRecord(h, opCarry, "error", "could not raise the carried cold gate over the adopted shim") {
 		t.Fatalf("records = %+v, want the failed raise at ERROR", records(h.log, opCarry))
+	}
+}
+
+// carriedPointers are the incumbent's watch pointers in these scenarios.
+var carriedPointers = sessionwatcher.Pointers{
+	Main:   &conversationv1.HistoryPointer{Value: "ptr-main-41"},
+	Agents: map[string]*conversationv1.HistoryPointer{"agent-a": {Value: "ptr-agent-a-7"}},
+}
+
+func TestASealCarriesTheIncumbentsWatchPointers(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	h.fleet.watchPointers[ws] = carriedPointers
+
+	// Act
+	handOverUntilWindow(t, h)
+
+	// Assert
+	carried := sealedCarry(t, h, ws).Pointers
+	if carried == nil {
+		t.Fatalf("the carry holds no watch pointers, want the incumbent's")
+	}
+	got, err := carried.decode()
+	if err != nil || got.Main.GetValue() != "ptr-main-41" || got.Agents["agent-a"].GetValue() != "ptr-agent-a-7" {
+		t.Fatalf("carried pointers = (%+v, %v), want the incumbent's main and agent pointers", got, err)
+	}
+}
+
+func TestASealOfAWorkspaceNeverWatchedCarriesNoPointers(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+
+	// Act
+	handOverUntilWindow(t, h)
+
+	// Assert
+	if got := sealedCarry(t, h, ws).Pointers; got != nil {
+		t.Fatalf("carried pointers = %+v, want none: this daemon never watched the workspace", got)
+	}
+}
+
+func TestAnAdoptionResumesItsWatchesFromTheCarriedPointers(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	pointers, err := carryPointers(carriedPointers)
+	if err != nil {
+		t.Fatalf("carryPointers: %v", err)
+	}
+	carryFor(t, h, ws, Carry{MidWork: true, ShimBuild: "installed-build", Pointers: pointers})
+
+	// Act
+	arm(t, h, ws, Participants{})
+
+	// Assert
+	got, resumed := h.fleet.ResumedFrom(ws)
+	if !resumed || got.Main.GetValue() != "ptr-main-41" || got.Agents["agent-a"].GetValue() != "ptr-agent-a-7" {
+		t.Fatalf("resumed from = (%+v, %v), want the carried pointers", got, resumed)
+	}
+}
+
+func TestAnAdoptionResumesItsWatchesBeforeItDialsTheShim(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	pointers, err := carryPointers(carriedPointers)
+	if err != nil {
+		t.Fatalf("carryPointers: %v", err)
+	}
+	carryFor(t, h, ws, Carry{MidWork: true, ShimBuild: "installed-build", Pointers: pointers})
+
+	// Act
+	arm(t, h, ws, Participants{})
+
+	// Assert
+	taken := h.order.Taken()
+	resumed, adopted := indexOf(taken, "resume_watches_from"), indexOf(taken, "adopt")
+	if resumed < 0 || adopted < 0 || resumed > adopted {
+		t.Fatalf("steps = %v, want the carried pointers handed over before the shim is dialed", taken)
+	}
+}
+
+func TestAnAdoptionWithNoCarriedPointersResumesNothing(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	carryFor(t, h, ws, Carry{MidWork: true, ShimBuild: "installed-build"})
+
+	// Act
+	arm(t, h, ws, Participants{})
+
+	// Assert
+	if got, resumed := h.fleet.ResumedFrom(ws); resumed {
+		t.Fatalf("resumed from %+v, want nothing: the incumbent carried no pointers", got)
 	}
 }
