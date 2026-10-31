@@ -3,16 +3,14 @@ package workspace
 import (
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"regexp"
-	"strings"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	shimv1 "agentrepl/proto/shim/v1"
 
 	"agent-repld/internal/promptqueue"
+	"agent-repld/internal/sourcescan"
 )
 
 func TestUpdateAgentArmNamesEveryLandedKind(t *testing.T) {
@@ -434,24 +432,16 @@ func TestRefusedNoSession(t *testing.T) {
 // to refusedNoSession: a hand-rolled arm comparison is where the checks drift.
 func TestNoCallerHandRollsTheNoSessionCheck(t *testing.T) {
 	// Arrange.
-	files, err := filepath.Glob("*.go")
-	if err != nil {
-		t.Fatalf("glob: %v", err)
-	}
 	pattern := regexp.MustCompile(`\.Arm\s*[!=]=\s*ArmShimNoSession`)
 
 	// Act.
 	var offenders []string
-	for _, f := range files {
-		if strings.HasSuffix(f, "_test.go") || f == "shimarms.go" {
+	for _, f := range sourcescan.Production(t) {
+		if f.Name == "shimarms.go" {
 			continue
 		}
-		src, err := os.ReadFile(f)
-		if err != nil {
-			t.Fatalf("read %s: %v", f, err)
-		}
-		if pattern.Match(src) {
-			offenders = append(offenders, f)
+		if pattern.Match(f.Source) {
+			offenders = append(offenders, f.Name)
 		}
 	}
 
