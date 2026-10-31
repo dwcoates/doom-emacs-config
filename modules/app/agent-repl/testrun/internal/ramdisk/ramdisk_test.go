@@ -49,6 +49,10 @@ type fakeHost struct {
 	procsErr error
 	// procsRead counts the process table's reads.
 	procsRead int
+	// mountedAt is where `diskutil mount` mounted the attached disk
+	// (/dev/disk9), until it is detached; `hdiutil info` lists it there, as
+	// the real one does.
+	mountedAt string
 	// late, by call, is the channel a watched probe answers once it missed
 	// its bound; a call not in it answers as run does.
 	late map[string]chan Late
@@ -73,6 +77,9 @@ func (h *fakeHost) run(name string, args ...string) (string, error) {
 	case strings.HasPrefix(call, "diskutil mount nobrowse"):
 		_, err := os.Stat(filepath.Join(h.volumes, "artr-4242", ".fseventsd", "no_log"))
 		h.noLogAtMount = err == nil
+		h.mountedAt = args[3]
+	case call == "hdiutil detach /dev/disk9" || call == "hdiutil detach -force /dev/disk9":
+		h.mountedAt = ""
 	case strings.HasPrefix(call, "hdiutil attach"):
 		h.attached = true
 		if h.attachOut != "" {
@@ -83,6 +90,8 @@ func (h *fakeHost) run(name string, args ...string) (string, error) {
 		return "   Device Identifier:         disk10s1\n   Mount Point: /Volumes/x\n", nil
 	case strings.HasPrefix(call, "hdiutil info") && h.attached && (h.infoAfterAttach != "" || h.infoErrAfterAttach != nil):
 		return h.infoAfterAttach, h.infoErrAfterAttach
+	case strings.HasPrefix(call, "hdiutil info") && h.mountedAt != "":
+		return h.info + ramBlock("/dev/disk9", h.mountedAt), nil
 	case strings.HasPrefix(call, "hdiutil info"):
 		return h.info, nil
 	case strings.HasPrefix(call, "lsof"):
@@ -379,11 +388,7 @@ func TestReleaseKeepsTheDiskWhenWhatRunsOutOfItCannotBeKilled(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "ps failed") {
 		t.Fatalf("Release = %v, want the failed kill reported", err)
 	}
-	for _, call := range h.calls[before:] {
-		if strings.HasPrefix(call, "hdiutil detach") {
-			t.Fatalf("Release detached (%q) under processes it could not kill", call)
-		}
-	}
+	noDetach(t, h.calls[before:])
 	if _, statErr := os.Stat(filepath.Join(m.Registry, "4242.lock")); statErr != nil {
 		t.Fatalf("the record is gone (stat err = %v), want it kept for the next run's Reclaim", statErr)
 	}
@@ -574,11 +579,12 @@ func TestReclaimLeavesARecordWhoseRunIsMidCreation(t *testing.T) {
 
 func TestReclaimTakesDownADeadRunsRAMDisk(t *testing.T) {
 	// Arrange
-	h := &fakeHost{info: attachedInfo}
+	h := &fakeHost{}
 	m := newManager(t, h)
 	var killedUnder string
 	m.Reap = func(ms reap.Members) (reap.Result, error) { killedUnder = ms.Dirs[0]; return killedN(2), nil }
 	mount := filepath.Join(t.TempDir(), "artr-7")
+	h.info = ramInfo("/dev/disk7=" + mount)
 	record := deadRecord(t, m, "7", "/dev/disk7", mount)
 
 	// Act
@@ -646,10 +652,8 @@ func TestReclaimLeavesADeviceAnotherRunNowHoldsAttached(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Reclaim: %v", err)
 			}
-			for _, call := range h.calls {
-				if strings.HasPrefix(call, "hdiutil detach") {
-					t.Fatalf("calls = %v, want the reused device left attached", h.calls)
-				}
+			if !slices.Equal(h.calls, []string{"hdiutil info"}) {
+				t.Fatalf("calls = %v, want only the images listed and the reused device left attached", h.calls)
 			}
 			if len(done) != 1 || done[0].Pid != 7 || done[0].Attached {
 				t.Fatalf("reclaimed = %+v, want pid 7's record reclaimed with no disk of its own attached", done)
@@ -697,11 +701,7 @@ func TestReclaimAfterARebootRemovesOnlyTheRecord(t *testing.T) {
 	if err != nil || len(done) != 1 || done[0].Attached {
 		t.Fatalf("Reclaim = %+v, %v; want the record reclaimed with nothing detached", done, err)
 	}
-	for _, call := range h.calls {
-		if strings.HasPrefix(call, "hdiutil detach") {
-			t.Fatalf("detached %q, a device that is no longer a RAM disk", call)
-		}
-	}
+	noDetach(t, h.calls)
 	if _, statErr := os.Stat(record); !os.IsNotExist(statErr) {
 		t.Fatalf("the stale record survives (stat err = %v)", statErr)
 	}
@@ -783,25 +783,26 @@ func TestSizeFromEnv(t *testing.T) {
 	}
 }
 
-func TestIsAttachedRAMDisk(t *testing.T) {
+func TestDescribeDevice(t *testing.T) {
 	tests := []struct {
 		name   string
 		info   string
 		device string
-		want   bool
+		want   string
 	}{
-		{name: "a listed RAM disk", info: attachedInfo, device: "/dev/disk7", want: true},
-		{name: "another device", info: attachedInfo, device: "/dev/disk70", want: false},
-		{name: "a file-backed image", info: strings.Replace(attachedInfo, "ram://2048", "/Users/x/a.dmg", 1), device: "/dev/disk7", want: false},
+		{name: "an unmounted RAM disk", info: attachedInfo, device: "/dev/disk7", want: "a device of the RAM disk /dev/disk7, mounted nowhere"},
+		{name: "a mounted RAM disk's volume", info: ramInfo("/dev/disk4=/private/tmp/artr-35768"), device: "/dev/disk4s1", want: "a device of the RAM disk /dev/disk4, mounted at /private/tmp/artr-35768"},
+		{name: "another device", info: attachedInfo, device: "/dev/disk70", want: "no RAM disk's device"},
+		{name: "a file-backed image", info: strings.Replace(attachedInfo, "ram://2048", "/Users/x/a.dmg", 1), device: "/dev/disk7", want: "no RAM disk's device"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			// Act
-			got := isAttachedRAMDisk(tc.info, tc.device)
+			got := describeDevice(tc.info, tc.device)
 
 			// Assert
 			if got != tc.want {
-				t.Fatalf("isAttachedRAMDisk = %v, want %v", got, tc.want)
+				t.Fatalf("describeDevice = %q, want %q", got, tc.want)
 			}
 		})
 	}
@@ -860,13 +861,19 @@ func ramInfo(disks ...string) string {
 	b.WriteString("framework : 1\n")
 	for _, d := range disks {
 		device, mount, _ := strings.Cut(d, "=")
-		b.WriteString("================================================\nimage-path      : ram://32768\n")
-		b.WriteString(device + "\tGUID_partition_scheme\t\n")
-		if mount != "" {
-			b.WriteString(device + "s1\t41504653-0000-11AA-AA11-00306543ECAC\t" + mount + "\n")
-		}
+		b.WriteString(ramBlock(device, mount))
 	}
 	return b.String()
+}
+
+// ramBlock is one RAM disk's block in `hdiutil info`: its whole disk device,
+// and its volume's device mounted at mount when mount is not empty.
+func ramBlock(device, mount string) string {
+	block := "================================================\nimage-path      : ram://32768\n" + device + "\tGUID_partition_scheme\t\n"
+	if mount != "" {
+		block += device + "s1\t41504653-0000-11AA-AA11-00306543ECAC\t" + mount + "\n"
+	}
+	return block
 }
 
 func TestAcquireDetachesWhatAKilledAttachLeft(t *testing.T) {
@@ -895,11 +902,7 @@ func TestAcquireLeavesTheDisksListedBeforeAFailedAttachAttached(t *testing.T) {
 	m.Acquire(16) //nolint:errcheck // the calls are the subject
 
 	// Assert
-	for _, call := range h.calls {
-		if strings.HasPrefix(call, "hdiutil detach") {
-			t.Fatalf("called %q, want the disk attached before the failed attach left alone", call)
-		}
-	}
+	noDetach(t, h.calls)
 }
 
 func TestAcquireNamesAFailedListingAfterAFailedAttach(t *testing.T) {
@@ -1895,11 +1898,12 @@ func TestReleaseReapsTheRunsSessionAndWhatRunsOutOfTheVolume(t *testing.T) {
 
 func TestReclaimReapsTheDeadRunsRecordedSession(t *testing.T) {
 	// Arrange
-	h := &fakeHost{info: attachedInfo}
+	h := &fakeHost{}
 	m := newManager(t, h)
 	var got reap.Members
 	m.Reap = func(ms reap.Members) (reap.Result, error) { got = ms; return reap.Result{}, nil }
 	mount := filepath.Join(t.TempDir(), "artr-7")
+	h.info = ramInfo("/dev/disk7=" + mount)
 	path := deadRecord(t, m, "7", "/dev/disk7", mount)
 	if err := os.WriteFile(path, []byte("device=/dev/disk7\nmount="+mount+"\nsession=7\nsince=1760400000\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -1918,9 +1922,10 @@ func TestReclaimReapsTheDeadRunsRecordedSession(t *testing.T) {
 
 func TestReclaimRunTakesDownTheDeadRunnersDisk(t *testing.T) {
 	// Arrange
-	h := &fakeHost{info: attachedInfo}
+	h := &fakeHost{}
 	m := newManager(t, h)
 	mount := filepath.Join(t.TempDir(), "artr-7")
+	h.info = ramInfo("/dev/disk7=" + mount)
 	record := deadRecord(t, m, "7", "/dev/disk7", mount)
 	log := m.Log.(*fakeLog)
 
@@ -1957,10 +1962,12 @@ func TestReclaimRunAnswersFalseForARunWithNoRecord(t *testing.T) {
 
 func TestReclaimRunKeepsTheRecordWhenTheReapFails(t *testing.T) {
 	// Arrange
-	h := &fakeHost{info: attachedInfo}
+	h := &fakeHost{}
 	m := newManager(t, h)
 	m.Reap = func(reap.Members) (reap.Result, error) { return reap.Result{}, errors.New("a member did not exit") }
-	record := deadRecord(t, m, "7", "/dev/disk7", filepath.Join(t.TempDir(), "artr-7"))
+	mount := filepath.Join(t.TempDir(), "artr-7")
+	h.info = ramInfo("/dev/disk7=" + mount)
+	record := deadRecord(t, m, "7", "/dev/disk7", mount)
 	log := m.Log.(*fakeLog)
 
 	// Act
@@ -1993,5 +2000,377 @@ func TestTheInvestigationTakesNoRegistryLock(t *testing.T) {
 	// Act / Assert
 	if strings.Contains(string(src), "lockRegistry()") {
 		t.Fatal("investigation.go takes the registry lock; the daemon's refusal of a second create is the deduplication")
+	}
+}
+
+// noDetach fails t when any call detached a disk.
+func noDetach(t *testing.T, calls []string) {
+	t.Helper()
+	if got := detaches(calls); len(got) > 0 {
+		t.Fatalf("detached %q; want nothing detached", got)
+	}
+}
+
+// detaches answers every detach among calls.
+func detaches(calls []string) []string {
+	var got []string
+	for _, call := range calls {
+		if strings.HasPrefix(call, "hdiutil detach") {
+			got = append(got, call)
+		}
+	}
+	return got
+}
+
+func TestReclaimLeavesADeviceALiveRunReusedUntouched(t *testing.T) {
+	// Arrange: dead run 7 recorded /dev/disk4, its disk is gone, and macOS
+	// gave /dev/disk4 to live run 35768's disk (2026-10-30, artr-31920).
+	h := &fakeHost{info: ramInfo("/dev/disk4=/private/tmp/artr-35768")}
+	m := newManager(t, h)
+	mount := filepath.Join(t.TempDir(), "artr-7")
+	record := deadRecord(t, m, "7", "/dev/disk4", mount)
+	log := m.Log.(*fakeLog)
+
+	// Act
+	ok, err := m.ReclaimRun(7)
+
+	// Assert
+	if err != nil || !ok {
+		t.Fatalf("ReclaimRun = %v, %v; want the dead record retired", ok, err)
+	}
+	noDetach(t, h.calls)
+	if _, statErr := os.Stat(record); !os.IsNotExist(statErr) {
+		t.Fatalf("the dead record survives (stat err = %v)", statErr)
+	}
+	want := "INFO retired the RAM disk record of dead run pid 7: no RAM disk was mounted at " + mount + ", so nothing was detached (the record named /dev/disk4, which was not touched: it is now a device of the RAM disk /dev/disk4, mounted at /private/tmp/artr-35768)"
+	if !slices.Contains(log.snapshot(), want) {
+		t.Fatalf("log = %q, want %q", log.snapshot(), want)
+	}
+}
+
+func TestReclaimRetiresAnUnmountedDeadEntryWithoutDetaching(t *testing.T) {
+	// Arrange: the recorded device is an attached RAM disk, mounted nowhere,
+	// so nothing says it is still the dead run's.
+	h := &fakeHost{info: attachedInfo}
+	m := newManager(t, h)
+	mount := filepath.Join(t.TempDir(), "artr-7")
+	record := deadRecord(t, m, "7", "/dev/disk7", mount)
+
+	// Act
+	done, err := m.Reclaim()
+
+	// Assert
+	if err != nil || len(done) != 1 || done[0].Attached || done[0].Device != "" || done[0].Recorded != "/dev/disk7" {
+		t.Fatalf("Reclaim = %+v, %v; want the record of /dev/disk7 retired with nothing detached", done, err)
+	}
+	noDetach(t, h.calls)
+	if _, statErr := os.Stat(record); !os.IsNotExist(statErr) {
+		t.Fatalf("the dead record survives (stat err = %v)", statErr)
+	}
+}
+
+func TestReclaimDetachesTheDiskMountedAtTheDeadRunsMountNotItsRecordedDevice(t *testing.T) {
+	// Arrange: dead run 7's disk is mounted at its mount point under
+	// /dev/disk6, and its record's /dev/disk4 is a live run's.
+	mount := filepath.Join(t.TempDir(), "artr-7")
+	h := &fakeHost{info: ramInfo("/dev/disk4=/private/tmp/artr-35768", "/dev/disk6="+mount)}
+	m := newManager(t, h)
+	deadRecord(t, m, "7", "/dev/disk4", mount)
+	log := m.Log.(*fakeLog)
+
+	// Act
+	ok, err := m.ReclaimRun(7)
+
+	// Assert
+	if err != nil || !ok {
+		t.Fatalf("ReclaimRun = %v, %v; want the dead run's disk reclaimed", ok, err)
+	}
+	if got := detaches(h.calls); !slices.Equal(got, []string{"hdiutil detach -force /dev/disk6"}) {
+		t.Fatalf("detaches = %q, want only the disk mounted at %s", got, mount)
+	}
+	want := "INFO reclaimed the RAM disk /dev/disk6 at " + mount + " left by dead run pid 7: the disk mounted there was detached (the record named /dev/disk4, which was not touched: it is now a device of the RAM disk /dev/disk4, mounted at /private/tmp/artr-35768; killed 0 leftover processes)"
+	if !slices.Contains(log.snapshot(), want) {
+		t.Fatalf("log = %q, want %q", log.snapshot(), want)
+	}
+}
+
+func TestReclaimFindsTheMountUnderItsResolvedSpelling(t *testing.T) {
+	// Arrange: the record names /tmp/artr-7, and hdiutil lists the volume at
+	// /private/tmp/artr-7, as macOS spells it.
+	real := t.TempDir()
+	link := filepath.Join(t.TempDir(), "tmp")
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := filepath.EvalSymlinks(real)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := &fakeHost{info: ramInfo("/dev/disk6=" + filepath.Join(resolved, "artr-7"))}
+	m := newManager(t, h)
+	deadRecord(t, m, "7", "/dev/disk6", filepath.Join(link, "artr-7"))
+
+	// Act
+	done, err := m.Reclaim()
+
+	// Assert
+	if err != nil || len(done) != 1 || !done[0].Attached {
+		t.Fatalf("Reclaim = %+v, %v; want the disk found by its resolved mount", done, err)
+	}
+	if got := detaches(h.calls); !slices.Equal(got, []string{"hdiutil detach -force /dev/disk6"}) {
+		t.Fatalf("detaches = %q, want /dev/disk6", got)
+	}
+}
+
+func TestReclaimKeepsAnEntryWhoseMountHoldsAVolumeNoRAMDiskLists(t *testing.T) {
+	// Arrange
+	h := &fakeHost{info: "framework : 1\n"}
+	m := newManager(t, h)
+	mount := filepath.Join(t.TempDir(), "artr-7")
+	if err := os.MkdirAll(filepath.Join(mount, "data"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	m.Mounted = func(d string) (bool, error) { return d == mount, nil }
+	record := deadRecord(t, m, "7", "/dev/disk7", mount)
+	log := m.Log.(*fakeLog)
+
+	// Act
+	ok, err := m.ReclaimRun(7)
+
+	// Assert
+	if err == nil || ok || !strings.Contains(err.Error(), "a volume is mounted at "+mount+" that no RAM disk image lists") {
+		t.Fatalf("ReclaimRun = %v, %v; want the foreign volume refused", ok, err)
+	}
+	noDetach(t, h.calls)
+	for _, path := range []string{record, filepath.Join(mount, "data")} {
+		if _, statErr := os.Stat(path); statErr != nil {
+			t.Fatalf("%s was touched: %v", path, statErr)
+		}
+	}
+	if !log.has("ERROR reclaim the RAM disk of dead run pid 7: a volume is mounted at " + mount) {
+		t.Fatalf("log = %q, want the refusal at ERROR", log.snapshot())
+	}
+}
+
+func TestReclaimKeepsAnEntryWhoseMountTwoRAMDisksList(t *testing.T) {
+	// Arrange
+	mount := filepath.Join(t.TempDir(), "artr-7")
+	h := &fakeHost{info: ramInfo("/dev/disk6="+mount, "/dev/disk8="+mount)}
+	m := newManager(t, h)
+	record := deadRecord(t, m, "7", "/dev/disk6", mount)
+
+	// Act
+	_, err := m.Reclaim()
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "lists 2 RAM disks (/dev/disk6, /dev/disk8) mounted at "+mount) {
+		t.Fatalf("Reclaim error = %v, want the two disks named", err)
+	}
+	noDetach(t, h.calls)
+	if _, statErr := os.Stat(record); statErr != nil {
+		t.Fatalf("the record is gone: %v", statErr)
+	}
+}
+
+func TestReclaimKeepsAnEntryWhoseMountCannotBeTold(t *testing.T) {
+	// Arrange
+	h := &fakeHost{info: "framework : 1\n"}
+	m := newManager(t, h)
+	m.Mounted = func(string) (bool, error) { return false, errors.New("stat failed") }
+	mount := filepath.Join(t.TempDir(), "artr-7")
+	record := deadRecord(t, m, "7", "/dev/disk7", mount)
+
+	// Act
+	_, err := m.Reclaim()
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "tell whether a volume is mounted at "+mount+": stat failed") {
+		t.Fatalf("Reclaim error = %v, want the failed mount check", err)
+	}
+	if _, statErr := os.Stat(record); statErr != nil {
+		t.Fatalf("the record is gone: %v", statErr)
+	}
+}
+
+func TestReclaimRetiresAnEntryWhoseMountPointIsGone(t *testing.T) {
+	// Arrange: the real mount check fails on a missing directory.
+	h := &fakeHost{info: "framework : 1\n"}
+	m := newManager(t, h)
+	m.Mounted = IsMountPoint
+	record := deadRecord(t, m, "7", "/dev/disk7", filepath.Join(t.TempDir(), "artr-7"))
+
+	// Act
+	done, err := m.Reclaim()
+
+	// Assert
+	if err != nil || len(done) != 1 || done[0].Attached {
+		t.Fatalf("Reclaim = %+v, %v; want the record retired", done, err)
+	}
+	if _, statErr := os.Stat(record); !os.IsNotExist(statErr) {
+		t.Fatalf("the dead record survives (stat err = %v)", statErr)
+	}
+}
+
+func TestReclaimKeepsAnEntryWhenTheImagesCannotBeListed(t *testing.T) {
+	// Arrange
+	h := &fakeHost{fail: map[string]bool{"hdiutil info": true}}
+	m := newManager(t, h)
+	mount := filepath.Join(t.TempDir(), "artr-7")
+	record := deadRecord(t, m, "7", "/dev/disk7", mount)
+
+	// Act
+	_, err := m.Reclaim()
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "list the attached images to find the disk mounted at "+mount) {
+		t.Fatalf("Reclaim error = %v, want the failed listing", err)
+	}
+	noDetach(t, h.calls)
+	if _, statErr := os.Stat(record); statErr != nil {
+		t.Fatalf("the record is gone: %v", statErr)
+	}
+}
+
+func TestReleaseOfADiskAlreadyGoneDetachesNothing(t *testing.T) {
+	// Arrange: the run's disk vanished, and its number may be another's.
+	h := &fakeHost{}
+	m := newManager(t, h)
+	v, err := m.Acquire(16)
+	if err != nil {
+		t.Fatalf("Acquire: %v", err)
+	}
+	h.mountedAt = ""
+	h.info = ramInfo("/dev/disk9=/private/tmp/artr-35768")
+	h.calls = nil
+
+	// Act
+	err = v.Release()
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "the RAM disk /dev/disk9 was already gone from "+h.mount+" before its release, so nothing was detached") {
+		t.Fatalf("Release = %v, want the gone disk answered", err)
+	}
+	noDetach(t, h.calls)
+	for _, path := range []string{h.mount, filepath.Join(m.Registry, "4242.lock")} {
+		if _, statErr := os.Stat(path); !os.IsNotExist(statErr) {
+			t.Fatalf("%s survives the release of a gone disk (stat err = %v)", path, statErr)
+		}
+	}
+}
+
+func TestReleaseRefusesADiskMountedThereThatIsNotItsOwn(t *testing.T) {
+	// Arrange
+	h := &fakeHost{}
+	m := newManager(t, h)
+	v, err := m.Acquire(16)
+	if err != nil {
+		t.Fatalf("Acquire: %v", err)
+	}
+	h.mountedAt = ""
+	h.info = ramInfo("/dev/disk6=" + h.mount)
+	h.calls = nil
+
+	// Act
+	err = v.Release()
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "the RAM disk mounted at "+h.mount+" is /dev/disk6, not this run's /dev/disk9") {
+		t.Fatalf("Release = %v, want the other disk refused", err)
+	}
+	noDetach(t, h.calls)
+	if _, statErr := os.Stat(filepath.Join(m.Registry, "4242.lock")); statErr != nil {
+		t.Fatalf("the record is gone: %v", statErr)
+	}
+}
+
+func TestReleaseKeepsTheDiskWhenTheImagesCannotBeListed(t *testing.T) {
+	// Arrange
+	h := &fakeHost{}
+	m := newManager(t, h)
+	v, err := m.Acquire(16)
+	if err != nil {
+		t.Fatalf("Acquire: %v", err)
+	}
+	h.fail = map[string]bool{"hdiutil info": true}
+	h.calls = nil
+
+	// Act
+	err = v.Release()
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "list the attached images to find the RAM disk mounted at "+h.mount) {
+		t.Fatalf("Release = %v, want the failed listing", err)
+	}
+	noDetach(t, h.calls)
+	if _, statErr := os.Stat(filepath.Join(m.Registry, "4242.lock")); statErr != nil {
+		t.Fatalf("the record is gone: %v", statErr)
+	}
+}
+
+func TestReleaseFindsItsDiskByItsMount(t *testing.T) {
+	// Arrange
+	h := &fakeHost{}
+	m := newManager(t, h)
+	v, err := m.Acquire(16)
+	if err != nil {
+		t.Fatalf("Acquire: %v", err)
+	}
+	h.calls = nil
+
+	// Act
+	if err := v.Release(); err != nil {
+		t.Fatalf("Release: %v", err)
+	}
+
+	// Assert
+	if !slices.Equal(h.calls[:1], []string{"hdiutil info"}) || !slices.Equal(detaches(h.calls), []string{"hdiutil detach /dev/disk9"}) {
+		t.Fatalf("calls = %q, want the images listed, then /dev/disk9 detached", h.calls)
+	}
+}
+
+func TestDetaches(t *testing.T) {
+	tests := []struct {
+		name  string
+		calls []string
+		want  []string
+	}{
+		{name: "no call", calls: nil, want: nil},
+		{name: "no detach", calls: []string{"hdiutil info", "diskutil list"}, want: nil},
+		{name: "plain and forced detaches in order", calls: []string{"hdiutil info", "hdiutil detach /dev/disk9", "lsof", "hdiutil detach -force /dev/disk9"}, want: []string{"hdiutil detach /dev/disk9", "hdiutil detach -force /dev/disk9"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got := detaches(tc.calls)
+
+			// Assert
+			if !slices.Equal(got, tc.want) {
+				t.Fatalf("detaches = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestNoHandRolledDetachChecksRemain(t *testing.T) {
+	// Arrange
+	// The needle is split so this test's own source never matches it.
+	needle := `strings.HasPrefix(call, "hdiutil ` + `detach")`
+	var hand []string
+	for _, file := range []string{"ramdisk_test.go", "leak_test.go"} {
+		raw, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Act
+		for i, line := range strings.Split(string(raw), "\n") {
+			if strings.Contains(line, needle) {
+				hand = append(hand, fmt.Sprintf("%s:%d", file, i+1))
+			}
+		}
+	}
+
+	// Assert: detaches is the one reader of the detaches among calls.
+	if len(hand) != 1 {
+		t.Fatalf("hdiutil detach checks at %v, want only detaches's own", hand)
 	}
 }

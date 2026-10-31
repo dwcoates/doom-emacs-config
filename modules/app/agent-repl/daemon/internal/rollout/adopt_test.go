@@ -1304,6 +1304,40 @@ func TestAWorkspaceWhoseHandoverNeverFinishedIsOwnedAfterTheTakeover(t *testing.
 	}
 }
 
+func TestAWorkspaceMidAdoptionAtTheTakeoverIsOwnedAtOnce(t *testing.T) {
+	// Arrange: a carry look claimed FIRST for a headless adoption, which is
+	// still in flight when the incumbent exits.
+	h := newHarness(t)
+	first, _ := joinedWithOneOfTwo(t, h)
+	h.c.mu.Lock()
+	if h.c.adopting == nil {
+		h.c.adopting = map[ids.WorkspaceID]bool{}
+	}
+	h.c.adopting[first] = true
+	h.c.mu.Unlock()
+
+	// Act
+	h.c.adoptStragglers(nil)
+	h.c.stragglerAdoptions.Wait()
+
+	// Assert
+	if standing := h.c.Standing(first); standing != StandingOwned {
+		t.Fatalf("standing = %v, want the workspace mid-adoption owned once the incumbent is gone", standing)
+	}
+	var said, startedBeside bool
+	for _, rec := range levelRecords(records(h.log, opAdopt), "info") {
+		switch rec.Message {
+		case "workspaces still mid-adoption at the takeover are owned from now; their own adoptions finish them":
+			said = true
+		case "adopting the workspaces whose handover never finished":
+			startedBeside = true
+		}
+	}
+	if !said || startedBeside {
+		t.Fatalf("adopt INFO records = %+v, want the mid-adoption ownership said and no straggler adoption started beside it", levelRecords(records(h.log, opAdopt), "info"))
+	}
+}
+
 func TestTheTakeoverDoesNotWaitForEveryRendezvous(t *testing.T) {
 	// Arrange: the one handed-over workspace is never adopted.
 	h := newHarness(t)
