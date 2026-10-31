@@ -1191,6 +1191,24 @@ the editor situation that caused it."
 (defvar agent-repl-link-reconnect-interval-seconds)
 (defvar agent-repl-link-reconnect-max-interval-seconds)
 
+(defvar agent-repl-itest-composer--notices nil
+  "Notices the composer handed its page, newest first, as (WS TEXT).")
+
+(defmacro agent-repl-itest-composer--recording-notices (&rest body)
+  "Run BODY recording each notice the composer hands its page.
+The composer has no mode line: a notice goes to the page through the web
+view host (`agent-repl-webhost-show-editor-notice'), whose footer draws it
+as a transient line.  The page is the one stand-in here."
+  (declare (indent 0))
+  `(let ((agent-repl-itest-composer--notices nil))
+     (cl-letf (((symbol-function 'agent-repl-webhost-show-editor-notice)
+                (lambda (ws text) (push (list ws text) agent-repl-itest-composer--notices) t)))
+       ,@body)))
+
+(defun agent-repl-itest-composer--notice (ws)
+  "Return the newest notice WS's composer handed its page, or \"\" for none."
+  (or (cadr (assoc ws agent-repl-itest-composer--notices)) ""))
+
 ;; audit-2 #32
 (ert-deftest agent-repl-itest-composer-no-session-refusal-keeps-everything ()
   "A `no_session' refusal keeps the text, the attachments and the posthooks.
@@ -1337,11 +1355,12 @@ the edge the composer re-counts on."
           (agent-repl-itest-composer--kill-buffer agent-repl-itest-composer--ws buf))))))
 ;; audit-2 #34
 (ert-deftest agent-repl-itest-composer-open-gate-draws-no-badge ()
-  "The `open' gate draws NO badge at all.
+  "The `open' gate hands the page NO notice at all.
 The other half of the badge's contract: a badge drawn unconditionally
 would tell every user of every open composer that their prompts go to a
 resolution agent that does not exist."
   ;; Arrange.
+  (agent-repl-itest-composer--recording-notices
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-composer--with-composer daemon 'open ref
       (ignore ref)
@@ -1357,15 +1376,17 @@ resolution agent that does not exist."
                               agent-repl-itest-composer--ws)
                              "")))
           (agent-repl-itest-composer--kill-buffer
-           agent-repl-itest-composer--ws buf))))))
+           agent-repl-itest-composer--ws buf)))))))
 
 ;; audit-2 #35
-(ert-deftest agent-repl-itest-composer-merging-refusal-flashes-the-mode-line ()
-  "A `merging' refusal FLASHES \"refused: merge in flight\" in the mode line.
-fanout §10: \"`message' + a mode-line flash 'refused: merge in flight'\".
-The echo area line is transient and the composer keeps the text, so the
-flash beside the kept text is what tells the user why nothing happened."
+(ert-deftest agent-repl-itest-composer-merging-refusal-flashes-a-page-notice ()
+  "A `merging' refusal hands the page \"refused: merge in flight\".
+fanout §10: \"`message' + a flash 'refused: merge in flight'\"; the flash is
+an editor notice the page's footer draws as a transient line, since the
+composer has no mode line.  The composer keeps the text, so the notice is
+what tells the user why nothing happened."
   ;; Arrange.
+  (agent-repl-itest-composer--recording-notices
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest--script daemon "SubmitPrompt" '((error . ((merging . ())))))
     (agent-repl-itest-composer--with-composer daemon 'open ref
@@ -1384,13 +1405,13 @@ flash beside the kept text is what tells the user why nothing happened."
                   (regexp-quote "refused: merge in flight")
                   (or (agent-repl-itest-composer--notice
                        agent-repl-itest-composer--ws) "")))
-               nil "the refusal flash in the composer mode line")
+               nil "the refusal notice handed to the page")
               (should (string-match-p
                        (regexp-quote "refused: merge in flight")
                        (agent-repl-itest-composer--notice
                         agent-repl-itest-composer--ws))))
           (agent-repl-itest-composer--kill-buffer
-           agent-repl-itest-composer--ws buf))))))
+           agent-repl-itest-composer--ws buf)))))))
 
 ;; audit-2 #36
 (ert-deftest agent-repl-itest-composer-send-without-a-host-ref-refuses-before-send ()
