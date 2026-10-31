@@ -10,6 +10,7 @@ import (
 
 	"agent-repld/internal/account"
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
 	"agent-repld/internal/resolve/topbar"
 	"agent-repld/internal/wsm"
 )
@@ -293,6 +294,21 @@ func (v *verbs) admit(ctx context.Context, log dlog.Logger, record wsm.Workspace
 	// incumbent's; a workspace nobody claimed is transferred by nobody. A
 	// closed workspace is served by nobody (MarkClosed releases the claim), so
 	// one born closed claims nothing.
+	//
+	// A WORKSPACE THIS DAEMON HANDED TO ITS SUCCESSOR IS NOT CLAIMED BACK HERE.
+	// The claim is unconditional, and during the 13:55 handover on 2026-10-31
+	// Emacs, pointed at this daemon by the successor's not_yet_adopted, kept
+	// re-registering workspaces the successor had already adopted: each
+	// registration wrote this daemon back into the serving row, the expired
+	// adoption window's take-back then "claimed" a row it already held, and
+	// both daemons served the same workspaces. Taking a workspace back is the
+	// take-back's own arbitrated claim (rollout reclaim), never a registration.
+	if !record.Closed && !created && v.handedOver(ctx, log, record.ID) {
+		log.Info(opRegister, "the workspace was handed to the successor; its registration here claims no serving ownership", dlog.Context{
+			"workspace": string(record.ID), "instance": string(v.deps.Instance),
+		})
+		return nil
+	}
 	if !record.Closed {
 		if err := v.deps.DB.ClaimServing(ctx, record.ID, v.deps.Instance); err != nil {
 			log.Error(opRegister, "could not claim the workspace's serving ownership", dlog.Context{
@@ -303,6 +319,23 @@ func (v *verbs) admit(ctx context.Context, log dlog.Logger, record wsm.Workspace
 	}
 
 	return nil
+}
+
+// handedOver reports whether this daemon has handed WS to its successor. A
+// standing that cannot be read is recorded and answered false: the claim
+// then stands as it always did.
+func (v *verbs) handedOver(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID) bool {
+	if v.deps.Ownership == nil {
+		return false
+	}
+	standing, err := v.deps.Ownership.Standing(ctx, ws)
+	if err != nil {
+		log.Error(opRegister, "could not read whether the workspace was handed to a successor; its serving is claimed", dlog.Context{
+			"workspace": string(ws), "cause": err.Error(),
+		})
+		return false
+	}
+	return standing == StandingTransferringAway
 }
 
 // repositoryOfWorktree answers the main worktree of the repository the
