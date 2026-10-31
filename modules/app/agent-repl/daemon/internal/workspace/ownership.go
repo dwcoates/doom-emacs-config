@@ -41,3 +41,6 @@ func (o *ownership) Standing(_ context.Context, ws ids.WorkspaceID) (Standing, e
 		return StandingOwned, fmt.Errorf("workspace: the rollout reported an unrecognized standing %d for %q", int(standing), ws)
 	}
 }
+
+// Created hands the creation to the rollout, which owns the standing.
+func (o *ownership) Created(ws ids.WorkspaceID) { o.rollout.Created(ws) }

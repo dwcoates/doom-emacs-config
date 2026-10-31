@@ -862,6 +862,11 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		// surface, by its cause or reason.
 		ShimLife:       p.Metrics,
 		NetworkChanged: networkWatch.Changed,
+		// THE SERVING STANDING is read late-bound: ownership is built with
+		// the merge orchestrator, below, and no bring-up runs before it is.
+		Standing: func(ctx context.Context, ws ids.WorkspaceID) (workspace.Standing, error) {
+			return ownership.Standing(ctx, ws)
+		},
 		// A WORKSPACE WITH NO RECORDED BOOK takes the one its shim persisted.
 		PersistedBook: func(dir string) (string, bool, error) { return shimidentity.Book(p.Layout.ShimDir(), dir) },
 		StartSlots:    startSlots,

@@ -64,6 +64,37 @@ func TestRegisterIsIdempotentByDirectory(t *testing.T) {
 	}
 }
 
+// TestRegisterTellsTheOwnershipOnlyOfAWorkspaceItCreated covers the
+// creation half of the 2026-10-30 stranding: a workspace is owned by the
+// daemon that minted it, and only a minting registration says so. A
+// re-registration (an editor announcing a workspace it already had) must not,
+// or a successor would claim a manifested workspace before adopting it.
+func TestRegisterTellsTheOwnershipOnlyOfAWorkspaceItCreated(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	dir := worktreeDir(t)
+
+	// Act.
+	first, err := f.verbs.Register(context.Background(), dir, wsm.RegisterFacts{})
+	if err != nil {
+		t.Fatalf("first Register: %v", err)
+	}
+	mintedByFirst := slices.Clone(f.owner.created)
+	if _, err := f.verbs.Register(context.Background(), dir, wsm.RegisterFacts{}); err != nil {
+		t.Fatalf("second Register: %v", err)
+	}
+
+	// Assert. The first registration minted the repository's main worktree
+	// (born closed) and the workspace itself, both by this daemon; the
+	// second minted nothing.
+	if len(mintedByFirst) != 2 || mintedByFirst[1] != first.ID {
+		t.Fatalf("first Register told created %v, want [<main worktree> %s]", mintedByFirst, first.ID)
+	}
+	if !slices.Equal(f.owner.created, mintedByFirst) {
+		t.Fatalf("a re-registration told created %v, want nothing beyond %v", f.owner.created, mintedByFirst)
+	}
+}
+
 // TestRegisterDerivesTheRepositoryFromGitsMainWorktree covers what a
 // repository IS to the contract: RepositoryRef.dir is "the repository's
 // normalized main-worktree directory", and it is what a top-level workspace's

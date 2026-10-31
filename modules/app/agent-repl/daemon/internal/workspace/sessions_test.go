@@ -637,6 +637,10 @@ type fleetFixture struct {
 	// networkChanged, when set, is the channel the fleet's network-change
 	// signal answers; unset, it answers a fresh channel that never fires.
 	networkChanged chan struct{}
+	// standing and standingErr are the serving standing the fleet reads at
+	// bring-up (FleetDeps.Standing); zero is owned.
+	standing    Standing
+	standingErr error
 	// vendorStarts is every vendor-start state the roster was told, in order.
 	vendorStarts []sidebar.VendorStart
 	// steps are the bring-up steps the fleet reported, in order.
@@ -811,6 +815,9 @@ func newFleetFixtureBoundedAt(t *testing.T, adoptBound time.Duration) *fleetFixt
 				return f.networkChanged
 			}
 			return make(chan struct{})
+		},
+		Standing: func(context.Context, ids.WorkspaceID) (Standing, error) {
+			return f.standing, f.standingErr
 		},
 		DB: f.db, Instance: fixtureInstance, Accounts: f.accounts, Supervisor: f.supervisor, ShimBundle: f.bundle,
 		Feed: f.feed, Footer: f.footer, Topbar: stubTopbar{coldGates: &f.topbarGates, picked: &f.picked, warnings: &f.topbarWarnings, window: &f.topbarWindow}, Log: f.log,
@@ -1013,6 +1020,19 @@ func TestNewFleetRefusesMissingCollaborators(t *testing.T) {
 				SessionsUp: func(ids.WorkspaceID) {}, VendorStarts: func(ids.WorkspaceID, sidebar.VendorStart) {},
 				Steps: func(ids.WorkspaceID, opentabs.Step) {}, Restarts: &restarttimingtest.Recorder{},
 				ChatSystemPrompt: func() (string, error) { return "", nil },
+			},
+		},
+		{
+			name: "no serving standing",
+			deps: FleetDeps{
+				DB: newFakeDB(), StoreHistory: &fakeStoreHistory{}, Instance: fixtureInstance, Accounts: &fakeAccounts{}, Supervisor: &fakeSupervisor{},
+				PersistedBook: func(string) (string, bool, error) { return "", false, nil },
+				SocketPath:    func(ids.WorkspaceID) string { return "" }, ShimBundle: &fakeBundle{build: "b"},
+				Log: dlog.NewTestSurfaces(), LockDir: "/run", BringUps: func(ids.WorkspaceID, bool) {},
+				SessionsUp: func(ids.WorkspaceID) {}, VendorStarts: func(ids.WorkspaceID, sidebar.VendorStart) {},
+				Steps: func(ids.WorkspaceID, opentabs.Step) {}, Restarts: &restarttimingtest.Recorder{}, ShimLife: &fakeShimLife{},
+				ChatSystemPrompt: func() (string, error) { return "", nil },
+				NetworkChanged:   func() <-chan struct{} { return nil },
 			},
 		},
 		{

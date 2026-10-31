@@ -54,6 +54,10 @@ type controller struct {
 	rendezvous map[ids.WorkspaceID]*entry
 	// owned is every workspace this joining daemon has finished adopting.
 	owned map[ids.WorkspaceID]bool
+	// created is every workspace THIS daemon minted (Created). A workspace
+	// is born owned by the daemon that created it: it can be in no
+	// predecessor's manifest, so no adoption of it is ever coming.
+	created map[ids.WorkspaceID]bool
 	// joining is the set of workspaces the manifest named, so the daemon.addr
 	// write happens exactly when the last one is owned.
 	joining map[ids.WorkspaceID]bool

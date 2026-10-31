@@ -939,6 +939,9 @@ const (
 type Ownership interface {
 	// Standing reports whether this daemon serves the workspace.
 	Standing(ctx context.Context, ws ids.WorkspaceID) (Standing, error)
+	// Created records that this daemon minted the workspace, which makes it
+	// owned here from its creation, whatever rollout is in flight.
+	Created(ws ids.WorkspaceID)
 }
 
 // Cards is what the daemon SERVED for the asks the answer verbs echo against.

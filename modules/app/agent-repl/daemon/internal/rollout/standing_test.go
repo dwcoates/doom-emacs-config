@@ -156,3 +156,126 @@ func TestServesIntakeOnlyWhileNeitherJoiningNorHandingOver(t *testing.T) {
 		})
 	}
 }
+
+// TestStandingOnAJoiningSuccessorDerivesFromTheManifestAndItsOwnCreates
+// covers the 2026-10-30 17:41-17:54 stranding: a successor answered
+// not_yet_adopted for workspaces it had created itself. Each case is one way
+// a joining daemon comes to know a workspace.
+func TestStandingOnAJoiningSuccessorDerivesFromTheManifestAndItsOwnCreates(t *testing.T) {
+	manifested := ids.WorkspaceID("ws-manifested")
+	created := ids.WorkspaceID("ws-created-here")
+	unknown := ids.WorkspaceID("ws-unknown")
+	tests := []struct {
+		name         string
+		manifestSeen bool
+		ws           ids.WorkspaceID
+		createIt     bool
+		adoptIt      bool
+		want         Standing
+	}{
+		{name: "a workspace it created while joining is owned", manifestSeen: true, ws: created, createIt: true, want: StandingOwned},
+		{name: "a workspace it created before the manifest was read is owned", ws: created, createIt: true, want: StandingOwned},
+		{name: "a manifested workspace is not yet adopted until it is adopted", manifestSeen: true, ws: manifested, want: StandingNotYetAdopted},
+		{name: "a manifested workspace is owned once adopted", manifestSeen: true, ws: manifested, adoptIt: true, want: StandingOwned},
+		{name: "a workspace the read manifest does not name is not yet adopted while joining", manifestSeen: true, ws: unknown, want: StandingNotYetAdopted},
+		{name: "an unknown workspace before the manifest is read is not yet adopted", ws: unknown, want: StandingNotYetAdopted},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.c.mu.Lock()
+			h.c.enterJoiningLocked()
+			h.c.manifestSeen = tc.manifestSeen
+			h.c.joining = map[ids.WorkspaceID]bool{manifested: true}
+			h.c.owned = map[ids.WorkspaceID]bool{manifested: tc.adoptIt}
+			h.c.mu.Unlock()
+			if tc.createIt {
+				h.c.Created(tc.ws)
+			}
+
+			// Act
+			standing := h.c.Standing(tc.ws)
+
+			// Assert
+			if standing != tc.want {
+				t.Fatalf("Standing(%s) = %v, want %v", tc.ws, standing, tc.want)
+			}
+		})
+	}
+}
+
+// TestCreatedRecordsTheOwnedTransitionOnce covers the canonical record a
+// creation leaves: one serving_standing transition, not one per call.
+func TestCreatedRecordsTheOwnedTransitionOnce(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws := ids.WorkspaceID("ws-created-here")
+
+	// Act
+	h.c.Created(ws)
+	h.c.Created(ws)
+
+	// Assert
+	var transitions int
+	for _, rec := range records(h.log, opJoin) {
+		if rec.Context["workspace"] == string(ws) && rec.Context["created_here"] == true {
+			transitions++
+		}
+	}
+	if transitions != 1 {
+		t.Fatalf("created_here transitions = %d, want 1", transitions)
+	}
+}
+
+// TestStandingOnAnOutgoingDaemonPointsTheSuccessorsCreatesToTheSuccessor
+// covers the outgoing half of the stranding: once a handover fixed its
+// served set, a workspace outside it (the successor created it) is the
+// successor's, and every rpc here is pointed there.
+func TestStandingOnAnOutgoingDaemonPointsTheSuccessorsCreatesToTheSuccessor(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.workspace(t)
+	if err := runHandover(t, h, 1); err != nil {
+		t.Fatalf("Handover: %v", err)
+	}
+	minted := ids.WorkspaceID("ws-the-successor-created")
+
+	// Act
+	standing := h.c.Standing(minted)
+
+	// Assert
+	if standing != StandingTransferringAway {
+		t.Fatalf("Standing = %v for a workspace outside the handover's served set, want transferring_away", standing)
+	}
+	if got := h.c.SuccessorAddress(); got != "127.0.0.1:7788" {
+		t.Fatalf("SuccessorAddress = %q, want the successor's address", got)
+	}
+}
+
+// TestFixServedRecordsTheServedSet covers the handover's canonical record of
+// the set it fixed.
+func TestFixServedRecordsTheServedSet(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.workspace(t)
+
+	// Act
+	if err := runHandover(t, h, 1); err != nil {
+		t.Fatalf("Handover: %v", err)
+	}
+
+	// Assert
+	var found bool
+	for _, rec := range levelRecords(records(h.log, opHandover), "info") {
+		if rec.Message == "fixed the handover's served set; any other workspace is the successor's" {
+			found = true
+			if rec.Context["served"] != 1 {
+				t.Fatalf("served = %v, want 1", rec.Context["served"])
+			}
+		}
+	}
+	if !found {
+		t.Fatal("no record of the fixed served set")
+	}
+}

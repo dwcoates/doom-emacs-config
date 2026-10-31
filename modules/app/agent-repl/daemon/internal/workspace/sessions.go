@@ -193,6 +193,10 @@ type FleetDeps struct {
 	// Deliveries holds a fork's PARENT's turn sequence while the fork is made
 	// (forking.go): the prompt queue's Exclusively.
 	Deliveries DeliveryExclusion
+	// Standing reads a workspace's serving standing (Ownership.Standing) at
+	// bring-up: a daemon never brings up or adopts the shim of a workspace it
+	// handed over or never had in its served set. Required.
+	Standing func(ctx context.Context, ws ids.WorkspaceID) (Standing, error)
 	// ChatSystemPrompt reads a zettel chat thread's system prompt at use time
 	// (the corpus's chat-thread-system.md), which every thread's StartSession
 	// carries in its chat profile (sessionProfile). Required.
@@ -548,6 +552,8 @@ func NewFleet(deps FleetDeps) (*Fleet, error) {
 		return nil, fmt.Errorf("workspace: the session fleet needs the chat system prompt; every chat thread's session starts under it")
 	case deps.NetworkChanged == nil:
 		return nil, fmt.Errorf("workspace: the session fleet needs the network-change signal; a vendor start the network failed is retried at a reconnect by it")
+	case deps.Standing == nil:
+		return nil, fmt.Errorf("workspace: the session fleet needs the serving standing; a workspace this daemon does not serve is never brought up by it")
 	}
 	probe := deps.Probe
 	if probe == nil {
@@ -1981,6 +1987,26 @@ func (f *Fleet) bringUpClient(ctx context.Context, log dlog.Logger, ws ids.Works
 		})
 		return nil, pathNone, fmt.Errorf("%w: %w", shimclient.ErrStandingDown,
 			refuse(log, "OpenWorkspace", ArmSpawnFailed, shimclient.ErrStandingDown.Error(), false))
+	}
+	// A DAEMON BRINGS UP ONLY WHAT IT SERVES (2026-10-30 17:49:27: the
+	// outgoing daemon of a long handover took a prompt for a workspace its
+	// SUCCESSOR had created, revived it, and adopted the successor's shim).
+	// A workspace transferred away, or outside the served set a handover
+	// fixed, is the successor's: its lock and socket are not this daemon's to
+	// probe, adopt or spawn on.
+	standing, err := f.deps.Standing(ctx, ws)
+	if err != nil {
+		log.Error(opBringUp, "could not read the serving standing; nothing is brought up", dlog.Context{
+			"workspace": string(ws), "cause": err.Error(),
+		})
+		return nil, pathNone, fmt.Errorf("start session for %q: serving standing: %w", ws, err)
+	}
+	if standing == StandingTransferringAway {
+		log.Info(opBringUp, "no shim is brought up: the workspace is the successor's, not this daemon's", dlog.Context{
+			"workspace": string(ws), "socket": udsPath, "standing": "transferring_away",
+		})
+		return nil, pathNone, refuse(log, "OpenWorkspace", ArmTransferringAway,
+			fmt.Sprintf("workspace %q is served by the successor daemon", ws), false)
 	}
 	lockPath := f.deps.LockDir
 	state, err := f.probe(lockPath, dir)

@@ -2637,15 +2637,19 @@ func (b *fakeBrowser) Open(_ context.Context, url, accountEmail string) error {
 	return nil
 }
 
-// fakeOwnership answers one standing for every workspace.
+// fakeOwnership answers one standing for every workspace, and records each
+// workspace a registration told it was created here.
 type fakeOwnership struct {
 	standing Standing
 	err      error
+	created  []ids.WorkspaceID
 }
 
 func (o *fakeOwnership) Standing(context.Context, ids.WorkspaceID) (Standing, error) {
 	return o.standing, o.err
 }
+
+func (o *fakeOwnership) Created(ws ids.WorkspaceID) { o.created = append(o.created, ws) }
 
 // fakeCards is the served-card store the answer verbs echo against.
 type fakeCards struct {
