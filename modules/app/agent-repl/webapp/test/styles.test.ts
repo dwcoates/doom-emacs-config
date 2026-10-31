@@ -5144,14 +5144,15 @@ describe("the repository header's add control", () => {
     // Arrange / Act
     const head = declarationsOf("#ws-sidebar .repo-head") ?? "";
     const row = declarationsOf("#ws-sidebar .row") ?? "";
-    const right = (decl: string): string | undefined => {
-      const parts = /padding:\s*([^;]+)/.exec(decl)?.[1].trim().split(/\s+/) ?? [];
-      return parts.length >= 2 ? parts[1] : undefined;
-    };
+    // The header states its sides as longhands (jsdom drops a block's padding
+    // longhands after a var() one), the row as the shorthand's second value.
+    const headRight = /padding-right:\s*([^;]+);/.exec(head)?.[1].trim();
+    const rowParts = /padding:\s*([^;]+)/.exec(row)?.[1].trim().split(/\s+/) ?? [];
+    const rowRight = rowParts.length >= 2 ? rowParts[1] : undefined;
 
     // Assert
-    expect(right(head)).toBeDefined();
-    expect(right(head)).toBe(right(row));
+    expect(headRight).toBeDefined();
+    expect(headRight).toBe(rowRight);
   });
 });
 
