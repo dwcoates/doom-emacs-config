@@ -1345,3 +1345,4 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 - 2026-10-31 e2e-emacs-master-drift (landed off the merge queue): Switching to a repository's main workspace no longer leaves Emacs on a stray perspective named for the bare directory, and the Emacs end-to-end suite, skipped while Docker was down, passes again against the new key bindings.
 - 2026-10-31 step-aside-cuts-the-run-at-once (landed off the merge queue): A merge stepping aside to fix its tests is stopped at once, so it can no longer rerun its tests or land while it is out of line.
 - 2026-10-31 handover-carries-watch-pointers (landed off the merge queue): A daemon handover no longer loses what a workspace's agent writes during the handover, so a turn that ends at that moment is no longer left open forever.
+- 2026-10-31 return-ordered-with-admission (landed off the merge queue): A merge returning from fixing its tests can no longer slip ahead of the merge that just took the head of the queue.
