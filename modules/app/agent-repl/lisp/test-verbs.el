@@ -499,8 +499,7 @@ just restart instantly\" -- this replaces the earlier \"under way\" notice."
     ;; Arrange / Act
     (agent-repl-verb-restart "ws-one")
     ;; Assert: the log's own records echo in batch; nothing else is said.
-    (should-not (cl-remove-if (lambda (m) (string-match-p "\\[agent-repl\\] elisp\\." m))
-                              agent-repl-test-verbs--messages))))
+    (should-not (agent-repl-test--said agent-repl-test-verbs--messages))))
 
 (ert-deftest agent-repl-verbs-restart-relaunch-failed-is-said-as-a-failure ()
   "A relaunch that failed is said in the echo area as the restart failing."

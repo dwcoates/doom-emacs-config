@@ -2207,8 +2207,7 @@ This replaces the exact \"agent-repl: restart under way\" pin."
            (lambda () (cl-some (lambda (m) (string-match-p "elisp\\.verbs\\.restart-done" m)) messages))
            nil "the restart's done record")
           ;; Assert.
-          (should-not (cl-remove-if (lambda (m) (string-match-p "\\[agent-repl\\] elisp\\." m))
-                                    messages)))))))
+          (should-not (agent-repl-test--said messages)))))))
 
 ;;;; ---- #58: admin-verb refusal arms and their op-named slugs
 

@@ -704,6 +704,53 @@ signatures this looks for."
     ;; Assert
     (should-not offenders)))
 
+;;;; ---- agent-repl-test--said ------------------------------------------
+
+(ert-deftest agent-repl-test-helpers-said-drops-an-echoed-record ()
+  "A record the logger built is the log's echo, not something the user was told."
+  ;; Arrange
+  (let ((record (agent-repl--build-log-text nil "elisp.verbs.send op=%s" '("restart"))))
+    ;; Act / Assert
+    (should-not (agent-repl-test--said (list record)))))
+
+(ert-deftest agent-repl-test-helpers-said-drops-an-echoed-warning ()
+  "A warning's level follows the prefix, so its echo is dropped too."
+  ;; Arrange
+  (let ((record (agent-repl--build-log-text nil "WARNING: elisp.verbs.%s" '("refused"))))
+    ;; Act / Assert
+    (should-not (agent-repl-test--said (list record)))))
+
+(ert-deftest agent-repl-test-helpers-said-keeps-what-the-user-was-told ()
+  "A message the user reads is kept, even one naming agent-repl."
+  ;; Act / Assert
+  (should (equal (agent-repl-test--said '("agent-repl: remote control on for ws-one"
+                                          "[agent-repl] ws-one is already tab 2"))
+                 '("agent-repl: remote control on for ws-one"
+                   "[agent-repl] ws-one is already tab 2"))))
+
+(ert-deftest agent-repl-test-helpers-said-keeps-the-order ()
+  "What the user was told keeps the order it was recorded in."
+  ;; Arrange
+  (let ((record (agent-repl--build-log-text nil "elisp.verbs.send" nil)))
+    ;; Act / Assert
+    (should (equal (agent-repl-test--said (list "second" record "first"))
+                   '("second" "first")))))
+
+(ert-deftest agent-repl-test-helpers-no-suite-hand-rolls-the-said-filter ()
+  "Every suite that strips the log's echoes from recorded messages uses the one filter."
+  ;; Arrange
+  (let ((dir agent-repl-test-helpers--dir)
+        (hand-rolled nil))
+    ;; Act
+    (dolist (file (directory-files dir t "\\`test-.*\\.el\\'"))
+      (unless (member (file-name-nondirectory file) '("test-helpers.el" "test-test-helpers.el"))
+        (with-temp-buffer
+          (insert-file-contents file)
+          (when (re-search-forward "(string-match-p \"[^\"]*\\[agent-repl[^\"]*\" m)" nil t)
+            (push (file-name-nondirectory file) hand-rolled)))))
+    ;; Assert
+    (should-not hand-rolled)))
+
 (provide 'test-test-helpers)
 
 ;;; test-test-helpers.el ends here
@@ -841,4 +888,3 @@ A list: the reporter's return, the reports seen, the outcome, the held."
                 (push (file-name-nondirectory file) hand-rolled)))))))
     ;; Assert
     (should-not hand-rolled)))
-
