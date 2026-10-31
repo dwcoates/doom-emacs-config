@@ -212,7 +212,7 @@ already hold `[killed]`), and this workspace's merge and restart stop waiting.
 | tier | ends when | kinds |
 | --- | --- | --- |
 | salient | the condition it describes stops being true; never a timer | every existing status-bound kind (fault under `disconnected` and `blocked`, start failed, a compaction RUNNING, retrying until a response lands, wakeup, gated call, question lead, cold gate cost, interrupting, blocked on user, authenticating, merging commit, close blocked, deploy update); the dead-query line (ends at the next prompt); the agent's push notification (ends at the next prompt); the context-budget warning and "compaction failed — ..." (end when a cut shrinks the context) |
-| transient | its 10 s window lapses, or a newer transient replaces it | tool-call starts (`Bash: npm test`); task-tracker moves (`write tests · 3/7`); `submitting`, which states the delivery as it happens (held behind a turn, the held queue's size, classifying, interjecting, delivered); a concluded compaction; non-escalating faults; daemon Warn and Error records; session changes; a finished deploy; network-resume edges; a detached run finishing while the status is `background` |
+| transient | its 5 s window (`frontend.v1.FooterTransientWindow`; 10 s until 2026-10-31) lapses, or a newer transient replaces it | tool-call starts (`Bash: npm test`); task-tracker moves (`write tests · 3/7`); `submitting`, which states the delivery as it happens (held behind a turn, the held queue's size, classifying, interjecting, delivered); a concluded compaction; non-escalating faults; daemon Warn and Error records; session changes; a finished deploy; network-resume edges; a detached run finishing while the status is `background` |
 | quiet | the next feed item surfaces | the quiet-stretch line (`✅ Bash finished — handling result...`, `❌ Read failed — handling failure...`, `✅ Prompt delivered — awaiting response...`), legal under `working` and `background` |
 | enduring | never | ONE line: `usage`, or `unobserved` before any figure is read |
 
@@ -226,7 +226,7 @@ already hold `[killed]`), and this workspace's merge and restart stop waiting.
   the notification until the owner dropped its line on 2026-10-01.)
 - Within transient: the newest wins, so submitting a prompt replaces any
   standing transient.
-- The 10 s window is never changed by what arrives next: the next event may
+- The window (5 s since 2026-10-31) is never changed by what arrives next: the next event may
   never come, or come much later. A newer transient replacing an older one is
   a separate, orthogonal end.
 
