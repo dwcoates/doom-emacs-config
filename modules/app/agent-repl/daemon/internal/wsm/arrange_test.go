@@ -1491,6 +1491,68 @@ func TestPlacingAFamilyKeepsAClosedMembersOneShotMark(t *testing.T) {
 	}
 }
 
+func TestPlacingTheMainWorkspacesFamilyKeepsItsChildsOneShotMark(t *testing.T) {
+	// Arrange -- the main workspace's family is never drawn in the one-shot
+	// subsection, so dragging it moves no one out of it: its one-shot child
+	// must still finish unattended.
+	s, _ := testStore(t)
+	repoDir := arrangeRepo(t, "repo")
+	main := registerOpenMain(t, s, repoDir)
+	child := registerChild(t, s, repoDir, "child", main.ID)
+	markOneShot(t, s, child)
+
+	// Act -- the child's row dragged, which places its family's root, main.
+	mustPlace(t, s, child.ID, nil, AtEnd{})
+
+	// Assert
+	if !oneShotOf(t, s, child.ID) {
+		t.Error("the main workspace's child lost its one-shot mark")
+	}
+}
+
+func TestIsMainWorkspace(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	repoDir := arrangeRepo(t, "repo")
+	main := registerOpenMain(t, s, repoDir)
+	linked := registerChild(t, s, repoDir, "linked", main.ID)
+	tests := []struct {
+		name    string
+		id      WorkspaceID
+		want    bool
+		wantErr error
+	}{
+		{name: "the repository's main worktree is its main workspace", id: main.ID, want: true},
+		{name: "a linked worktree is not", id: linked.ID, want: false},
+		{name: "an unknown workspace is ErrNotFound", id: "absent", wantErr: ErrNotFound},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			var got bool
+			err := s.write(context.Background(), "test.is_main_workspace", nil, func(ctx context.Context, tx *sql.Tx) error {
+				var err error
+				got, err = isMainWorkspace(ctx, tx, tt.id)
+				return err
+			})
+
+			// Assert
+			if tt.wantErr != nil {
+				if !errors.Is(err, tt.wantErr) {
+					t.Fatalf("err = %v, want %v", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("isMainWorkspace: %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("isMainWorkspace = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestARefusedPlacementClearsNoOneShotMark(t *testing.T) {
 	// Arrange
 	s, _ := testStore(t)
@@ -1508,4 +1570,17 @@ func TestARefusedPlacementClearsNoOneShotMark(t *testing.T) {
 	if !oneShotOf(t, s, ws.ID) {
 		t.Error("a refused placement cleared the one-shot mark")
 	}
+}
+
+// registerOpenMain registers repoDir's main worktree as an OPEN workspace, so
+// a workspace can be registered as its child (registerMain's is closed).
+func registerOpenMain(t *testing.T, s *store, repoDir string) Workspace {
+	t.Helper()
+	ws, _, err := s.RegisterWorkspace(context.Background(), repoDir, RegisterFacts{
+		Branch: "master", ParentBranch: "master", RepoDir: repoDir, DefaultBranch: "master",
+	})
+	if err != nil {
+		t.Fatalf("RegisterWorkspace(main worktree %s): %v", repoDir, err)
+	}
+	return ws
 }

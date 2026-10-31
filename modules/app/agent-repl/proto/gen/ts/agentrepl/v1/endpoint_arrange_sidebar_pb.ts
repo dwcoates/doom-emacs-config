@@ -369,7 +369,10 @@ export const ArrangeMoveRepositorySchema: GenMessage<ArrangeMoveRepository> = /*
  * A closed member keeps its mark: a finished one-shot is still one, and its
  * mark draws the family nowhere. A family enters the one-shot subsection by a
  * mark (SetWorkspaceOneShot), never by a placement. A placement that sets
- * keep_one_shot clears no mark.
+ * keep_one_shot clears no mark, and neither does a placement of a
+ * repository's MAIN workspace's family: that family is never in the one-shot
+ * subsection, and its marks are its one-shot children's, which still finish
+ * unattended wherever they are drawn.
  *
  * @generated from message agentrepl.v1.ArrangePlaceWorkspace
  */

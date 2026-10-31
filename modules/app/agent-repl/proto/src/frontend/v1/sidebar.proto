@@ -1192,6 +1192,13 @@ message RosterSubsectionNamed {
 // ALWAYS the last entry of its repository's section, after every named
 // subsection and every unsectioned row.
 //
+// THE MAIN WORKSPACE'S FAMILY IS NEVER A MEMBER. A repository's main
+// workspace (the one on its main checkout) is never itself a one-shot, so
+// any mark in its family is a child's: that child stays nested under the
+// main workspace as an ordinary child wherever the main workspace stands, and
+// the marks bring nothing into this subsection. The child is still a one-shot
+// in every other respect (its completion directive, its unattended landing).
+//
 // A member keeps the place it was arranged in underneath: once its family
 // holds no mark, it is drawn there again, or among the repository's
 // unsectioned rows when that subsection was deleted meanwhile.
@@ -1200,7 +1207,8 @@ message RosterSubsectionNamed {
 // renamed, moved, deleted, a destination or an anchor. A workspace enters it
 // by its mark (SetWorkspaceOneShot), and leaves it by its family's marks
 // being cleared, which an ArrangeSidebar placement of the family elsewhere
-// does. It never collapses (RosterSubsectionNeverCollapses).
+// does, except the main workspace's family, whose placement keeps its
+// children's marks. It never collapses (RosterSubsectionNeverCollapses).
 message RosterSubsectionOneShot {}
 
 // A subsection's stable identity, echoed back as agentrepl.v1.SubsectionRef.

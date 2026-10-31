@@ -540,6 +540,21 @@ func TestTheOneShotSubsection(t *testing.T) {
 			want: []string{"parent", "[later:]"},
 		},
 		{
+			name: "the main workspace's one-shot child stays nested under it, out of the one-shot subsection",
+			workspaces: []wsm.Workspace{
+				mainWorkspace(placed(workspace("w-m", "main"), 1)), childOf(marked(placed(workspace("w-k", "child"), 2)), workspace("w-m", "main")), placed(workspace("w-b", "bystander"), 3),
+			},
+			want: []string{"main", "bystander", "[later:]"},
+		},
+		{
+			name: "a non-main family with a one-shot still enters the subsection beside a main family's one-shot child",
+			workspaces: []wsm.Workspace{
+				mainWorkspace(placed(workspace("w-m", "main"), 1)), childOf(marked(placed(workspace("w-k", "child"), 2)), workspace("w-m", "main")),
+				placed(workspace("w-p", "parent"), 3), childOf(marked(placed(workspace("w-q", "other"), 4)), workspace("w-p", "parent")),
+			},
+			want: []string{"main", "[later:]", "<one-shot: parent>"},
+		},
+		{
 			name:       "a hidden member's mark draws its family nowhere",
 			workspaces: []wsm.Workspace{placed(workspace("w1", "one"), 1), marked(placed(hiddenWorkspace("w-h", "hidden"), 2))},
 			want:       []string{"one", "[later:]"},
@@ -560,6 +575,28 @@ func TestTheOneShotSubsection(t *testing.T) {
 				t.Fatalf("entries = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestTheMainWorkspacesOneShotChildIsDrawnNestedUnderIt(t *testing.T) {
+	// Arrange
+	r, _ := newResolver(t)
+	reg := registry(
+		mainWorkspace(placed(workspace("w-m", "main"), 1)),
+		childOf(marked(placed(workspace("w-k", "child"), 2)), workspace("w-m", "main")),
+	)
+
+	// Act
+	r.SetRegistry(reg)
+
+	// Assert
+	section := latest(t, r).GetRepository().GetSections()[0]
+	entries := section.GetEntries()
+	if len(entries) != 1 || entries[0].GetRow() == nil {
+		t.Fatalf("entries = %v, want the main workspace's row alone", entryShape(section))
+	}
+	if got := rowNames(innerRows(entries[0].GetRow().GetChildren())); !equal(got, []string{"child"}) {
+		t.Fatalf("main's children = %v, want [child]", got)
 	}
 }
 
@@ -628,4 +665,11 @@ func TestArrangedListsTheOneShotSubsectionLast(t *testing.T) {
 	if shape, want := arrangedShape(got[0]), []string{"[sub-later: w2]", "<one-shot: w1>"}; !equal(shape, want) {
 		t.Fatalf("entries = %v, want %v", shape, want)
 	}
+}
+
+// mainWorkspace makes WS its repository's main workspace: the worktree whose
+// directory is the repository's (wsm.IsMainWorktree).
+func mainWorkspace(ws wsm.Workspace) wsm.Workspace {
+	ws.Dir = repo.Dir
+	return ws
 }

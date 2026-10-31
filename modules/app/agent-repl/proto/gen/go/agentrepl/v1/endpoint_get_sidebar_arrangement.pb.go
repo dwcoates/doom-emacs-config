@@ -286,7 +286,9 @@ func (*ArrangedEntry_Subsection) isArrangedEntry_Entry() {}
 func (*ArrangedEntry_OneShot) isArrangedEntry_Entry() {}
 
 // The repository's ONE-SHOT subsection (frontend.v1.RosterSubsectionOneShot):
-// every family holding an open workspace marked one-shot. It is derived from
+// every family holding an open workspace marked one-shot, except the
+// repository's MAIN workspace's family, whose one-shot children stay nested
+// under it where it stands. It is derived from
 // the marks, so it is listed only while it has families, and always as the
 // repository's last entry. It has no SubsectionRef, so ArrangeSidebar can
 // neither name it as a destination or anchor nor rename, move or delete it.

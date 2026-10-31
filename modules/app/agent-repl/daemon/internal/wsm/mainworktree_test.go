@@ -46,11 +46,12 @@ func TestMainWorkspaceName(t *testing.T) {
 }
 
 // TestNoSiteHandRollsTheMainWorktreeRule pins that the registry and the
-// workspace verbs ask IsMainWorktree rather than comparing a directory with a
-// repository directory themselves.
+// workspace verbs ask IsMainWorktree (or isMainWorkspace, its in-transaction
+// reading) rather than comparing a directory with a repository directory
+// themselves, in Go or in SQL.
 func TestNoSiteHandRollsTheMainWorktreeRule(t *testing.T) {
 	// Arrange
-	handRolled := regexp.MustCompile(`(==|!=)\s*repoDir\b|\brepoDir\s*(==|!=)`)
+	handRolled := regexp.MustCompile(`(==|!=)\s*repoDir\b|\brepoDir\s*(==|!=)|\bdir\s*=\s*repositories\.dir\b`)
 	var offenders []string
 
 	// Act
