@@ -22,7 +22,7 @@ describe("FOOTER_STATUS_CASES: the arm set is the schema's", () => {
     expect([...FOOTER_STATUS_CASES].sort()).toEqual([...SCHEMA_ARMS].sort());
   });
 
-  it("names the eighteen arms the contract carries", () => {
+  it("names the nineteen arms the contract carries", () => {
     expect([...FOOTER_STATUS_CASES].sort()).toEqual(
       [
         "agentReplFault",
@@ -42,6 +42,7 @@ describe("FOOTER_STATUS_CASES: the arm set is the schema's", () => {
         "starting",
         "working",
         "turnFailed",
+        "updating",
         "waiting",
       ].sort(),
     );

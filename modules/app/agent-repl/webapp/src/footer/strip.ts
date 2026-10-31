@@ -401,6 +401,9 @@ function statusParts(
         substatusRequired: false,
       };
     }
+    case "updating":
+    // A FINAL RESPONSE BEING UPDATED declares no substatus oneof either: the
+    // shimmering bubble shows which response, so the cell merges.
     case "starting":
       // A BOOTING SESSION declares no substatus oneof (owner ruling,
       // 2026-10-13: booting is an expected step, never a fault), so the cell

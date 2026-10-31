@@ -362,6 +362,19 @@ describe("drawFooterSubStatus: the word is the arm, lowercase, with spaces", () 
     expect([cell?.textContent, cell?.classList.contains("tone-green")]).toEqual(["merged", true]);
   });
 
+  // A FINAL RESPONSE BEING UPDATED (owner request, 2026-10-30) reads
+  // "updating" in the working red, never "working".
+  it("words a final response being updated 'updating' in tone-red", () => {
+    const { row } = drawStrip({ status: status("updating", {}) });
+    const cell = row.querySelector(".footer-status");
+    expect([cell?.textContent, cell?.classList.contains("tone-red")]).toEqual(["updating", true]);
+  });
+
+  it("MERGES the cell for the updating arm, which declares no substatus oneof", () => {
+    const { row } = drawStrip({ status: status("updating", {}) });
+    expect(row.querySelector(".footer-substatus")).toBeNull();
+  });
+
   // A GATE NAMES ITSELF (owner ruling, 2026-10-08): the status word is the
   // gate's kind, in the same green as done, never "waiting" and never red.
   it.each(["permission", "question"])("words a %s gate as its own kind in tone-green", (arm) => {

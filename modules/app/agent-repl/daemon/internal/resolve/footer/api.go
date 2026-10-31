@@ -426,6 +426,11 @@ type Resolver interface {
 	// SetBringingUp. On a route never seen it is the bring-up window
 	// (ladder.AwaitingBringUp): `agent_repl_fault · starting`.
 	SetBringingUp(ws ids.WorkspaceID, bringingUp bool)
+	// SetUpdating raises (true) or lowers (false) the fact that a final
+	// response of the workspace is being rewritten from words highlighted in
+	// it (revision.Reviser): the strip reads `updating`, on the thinking rung,
+	// while no turn runs.
+	SetUpdating(ws ids.WorkspaceID, updating bool)
 	// Status answers the status the workspace's strip shows. It is THE
 	// workspace status: the roster row and the tab bar project it
 	// (resolve/sidebar), so no surface resolves a status of its own. Each

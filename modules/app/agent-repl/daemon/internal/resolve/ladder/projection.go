@@ -95,7 +95,7 @@ func FooterClaim(status *frontendv1.FooterStatus) (Claim, bool) {
 		return Waiting, true
 	case *frontendv1.FooterStatus_Permission, *frontendv1.FooterStatus_Question:
 		return Waiting, true
-	case *frontendv1.FooterStatus_Working, *frontendv1.FooterStatus_Loading:
+	case *frontendv1.FooterStatus_Working, *frontendv1.FooterStatus_Loading, *frontendv1.FooterStatus_Updating:
 		return Thinking, true
 	case *frontendv1.FooterStatus_Interrupted, *frontendv1.FooterStatus_Background,
 		*frontendv1.FooterStatus_Idle, *frontendv1.FooterStatus_TurnFailed:

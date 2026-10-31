@@ -364,6 +364,15 @@ message FooterStatus {
     // as the roster's `init` arm, and ranks directly beneath
     // `agent_repl_fault`.
     FooterStatusStarting starting = 20;
+    // A FINAL RESPONSE IS BEING UPDATED: the user sent a prompt while words
+    // of a settled final response were highlighted, and the daemon is
+    // rewriting that response on a side query rather than running a turn.
+    // RED, the same coarse claim as a working turn (the roster draws it
+    // `thinking`), and the status word reads "updating" rather than
+    // "working". It stands from the moment the revision is asked for until
+    // the workspace's last queued revision has its outcome. A turn in flight
+    // outranks it: `working` is drawn while both run.
+    FooterStatusUpdating updating = 21;
   }
   // Tag 12 (`merge_conflict`) is retired; see the note in the oneof.
   reserved 12;
@@ -1777,6 +1786,44 @@ message FooterStatusClosingSalient {
   // the vendor's allowance figures (owner ruling, 2026-10-01).
   reserved 4;
   reserved "rate_limit";
+}
+
+// A final response is being rewritten from words highlighted in it. It
+// declares no substatus oneof: the response's own bubble shows which response
+// is updating, so the status cell merges with the substatus cell.
+message FooterStatusUpdating {
+  // The activity cell. ALWAYS SET.
+  FooterStatusUpdatingActivity activity = 1;
+}
+// The activity cell while a response is updating: the salient line, or the
+// transient over the enduring line.
+message FooterStatusUpdatingActivity {
+  // WHICH TIER the daemon resolved. Exactly one is set, and a push with
+  // neither is malformed.
+  oneof tier {
+    // A condition that blocks the user stands.
+    FooterStatusUpdatingSalient salient = 1;
+    // Nothing salient stands: the newest transient over the enduring line.
+    FooterActivityTransientOverEnduring unpinned = 2;
+  }
+}
+// The salient kinds legal while a response is updating. An update has no line
+// of its own (the bubble being updated shows it), so only the
+// status-independent kinds can stand: a deploy's progress and the push
+// notification, in that order.
+message FooterStatusUpdatingSalient {
+  // When this line began standing; the client ticks the relative age.
+  FooterStatusActivityAt at = 1;
+  // The one salient line.
+  oneof kind {
+    // A DEPLOY'S PROGRESS. STATUS-INDEPENDENT: every status arm's salient
+    // oneof carries it. See FooterStatusActivityUpdate.
+    FooterStatusActivityUpdate update = 2;
+    // THE AGENT'S PUSH NOTIFICATION, standing until the next prompt is
+    // submitted. STATUS-INDEPENDENT: every status arm's salient oneof carries
+    // it.
+    FooterStatusActivityNotification notification = 3;
+  }
 }
 
 // MOMENTARY: context is being injected (memory, skills).

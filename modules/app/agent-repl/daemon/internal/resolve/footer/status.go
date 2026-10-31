@@ -27,7 +27,8 @@ import (
 //     being SPENT (it outranks the whole waiting rung, because the gate it
 //     answers is not lifted until the re-open lands, and drawing the question
 //     over the answer is what made a minute-long compaction look like a dead
-//     button — owner's report, 2026-09-14), then the turn itself;
+//     button — owner's report, 2026-09-14), then the turn itself, then a
+//     final response being `updating` (owner request, 2026-10-30);
 //   - waiting on the user: interrupting (`waiting`), then a permission gate
 //     (`permission`), then a question gate (`question`), then a cold gate
 //     (`waiting`);
@@ -91,7 +92,10 @@ func (r *resolver) rung(claim ladder.Claim, s *wsState, log dlog.Logger) *fronte
 		if arm := r.coldGateAnswer(s, log); arm != nil {
 			return arm
 		}
-		return r.thinking(s, log)
+		if arm := r.thinking(s, log); arm != nil {
+			return arm
+		}
+		return r.updating(s)
 	default:
 		log.Error("daemon.footer.status_rung", "the ladder asked the footer for a rung it has no drawing for",
 			dlog.Context{
@@ -731,6 +735,17 @@ func (r *resolver) thinking(s *wsState, log dlog.Logger) *frontendv1.FooterStatu
 	return &frontendv1.FooterStatus{Status: &frontendv1.FooterStatus_Working{Working: arm}}
 }
 
+// updating resolves a final response being rewritten from words highlighted
+// in it, or nil when none is. It sits beneath the turn on the thinking rung:
+// a turn in flight is drawn `working` whatever revision runs beside it.
+func (r *resolver) updating(s *wsState) *frontendv1.FooterStatus {
+	if !s.updating {
+		return nil
+	}
+	return &frontendv1.FooterStatus{Status: &frontendv1.FooterStatus_Updating{
+		Updating: &frontendv1.FooterStatusUpdating{Activity: r.updatingActivity(s)}}}
+}
+
 // background resolves detached work running, or correspondence awaited from
 // another workspace, while the main thread is free.
 //
@@ -828,6 +843,8 @@ func statusName(status *frontendv1.FooterStatus) string {
 		return "closing"
 	case *frontendv1.FooterStatus_Loading:
 		return "loading"
+	case *frontendv1.FooterStatus_Updating:
+		return "updating"
 	case *frontendv1.FooterStatus_MergeFailed:
 		return "merge_failed"
 	case *frontendv1.FooterStatus_Merged:

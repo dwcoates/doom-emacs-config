@@ -61,7 +61,8 @@
 //     cold gate (footer `waiting`, roster `cold_gate`) or an interrupt
 //     landing (`waiting`). GREEN, the same green as
 //     idle (owner ruling, 2026-10-08): a gate is never drawn as working.
-//  11. thinking         a turn is in flight, a context cut included.
+//  11. thinking         a turn is in flight, a context cut included, or a
+//     final response is being updated from words highlighted in it.
 //  12. idle             the foreground is free: a turn end (read or not, a
 //     failed one included), detached work running, a wakeup pending, or
 //     nothing at all.

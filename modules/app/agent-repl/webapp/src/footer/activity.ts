@@ -91,6 +91,8 @@ import type {
   FooterStatusInterruptedSalient,
   FooterStatusLoadingActivity,
   FooterStatusLoadingSalient,
+  FooterStatusUpdatingActivity,
+  FooterStatusUpdatingSalient,
   FooterStatusMergingActivity,
   FooterStatusMergingSalient,
   FooterStatusWorkingActivity,
@@ -156,7 +158,8 @@ export type FooterActivity =
   | FooterStatusStartingActivity
   | FooterStatusNetworkFaultActivity
   | FooterStatusClosingActivity
-  | FooterStatusLoadingActivity;
+  | FooterStatusLoadingActivity
+  | FooterStatusUpdatingActivity;
 
 /** Every per-status salient line, as one type to walk. */
 export type FooterSalient =
@@ -173,7 +176,8 @@ export type FooterSalient =
   | FooterStatusStartingSalient
   | FooterStatusNetworkFaultSalient
   | FooterStatusClosingSalient
-  | FooterStatusLoadingSalient;
+  | FooterStatusLoadingSalient
+  | FooterStatusUpdatingSalient;
 
 /** The tier the daemon resolved for a cell. */
 export type ActivityTier =

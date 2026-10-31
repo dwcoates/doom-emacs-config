@@ -195,7 +195,7 @@ export function drawFeedResponse(u: FeedResponse, rc: RowContext): HTMLElement {
   if (result.case === "error") hooks.push("response-cut-short");
 
   // WHERE A REVISION OF THIS RESPONSE STANDS is read before anything is
-  // drawn too (FeedResponse.revision): pending turns its border purple, failed says
+  // drawn too (FeedResponse.revision): pending makes it shimmer, failed says
   // why under the prose.
   const revision = readResponseRevision(u.revision, `${path}.revision`);
   if (revision.pending) hooks.push(RESPONSE_REVISING_CLASS);

@@ -244,6 +244,7 @@ func TestActivityOfProjectsEveryFooterArm(t *testing.T) {
 		{name: "interrupted", status: &frontendv1.FooterStatus{Status: &frontendv1.FooterStatus_Interrupted{Interrupted: &frontendv1.FooterStatusInterrupted{}}}, want: "idle"},
 		{name: "background work only", status: &frontendv1.FooterStatus{Status: &frontendv1.FooterStatus_Background{Background: &frontendv1.FooterStatusBackground{}}}, want: "idle"},
 		{name: "a merge that failed", status: &frontendv1.FooterStatus{Status: &frontendv1.FooterStatus_MergeFailed{MergeFailed: &frontendv1.FooterStatusMergeFailed{}}}, want: "idle"},
+		{name: "a final response updating", status: &frontendv1.FooterStatus{Status: &frontendv1.FooterStatus_Updating{Updating: &frontendv1.FooterStatusUpdating{}}}, want: "turn_running"},
 		{name: "a turn working", status: &frontendv1.FooterStatus{Status: &frontendv1.FooterStatus_Working{Working: &frontendv1.FooterStatusWorking{}}}, want: "turn_running"},
 		{name: "a turn being interrupted", status: &frontendv1.FooterStatus{Status: &frontendv1.FooterStatus_Waiting{Waiting: &frontendv1.FooterStatusWaiting{
 			Substatus: &frontendv1.FooterStatusWaiting_Interrupting{Interrupting: &frontendv1.FooterSubStatusWaitingInterrupting{}}}}}, want: "turn_running"},

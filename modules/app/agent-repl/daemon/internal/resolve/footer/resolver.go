@@ -787,6 +787,13 @@ func (r *resolver) SetBringingUp(ws ids.WorkspaceID, bringingUp bool) {
 		dlog.Context{"bringing_up": bringingUp}, func(s *wsState) { s.bringingUp = bringingUp })
 }
 
+// SetUpdating raises, or lowers, the fact that a final response is being
+// rewritten from words highlighted in it.
+func (r *resolver) SetUpdating(ws ids.WorkspaceID, updating bool) {
+	r.mutate(ws, "daemon.footer.set_updating", "the footer took whether a final response is being updated",
+		dlog.Context{"updating": updating}, func(s *wsState) { s.updating = updating })
+}
+
 // SetParked installs, or lifts with wsm.ParkNone, the daemon's park. Both
 // parks draw alike here: an idle status, never a dead link.
 func (r *resolver) SetParked(ws ids.WorkspaceID, park wsm.Park) {

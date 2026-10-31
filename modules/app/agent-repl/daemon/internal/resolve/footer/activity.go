@@ -290,11 +290,14 @@ func (r *resolver) closingActivity(s *wsState) *frontendv1.FooterStatusClosingAc
 // item is the `context_injected` transient the same injection raised, so only
 // the shared salient lines can stand.
 func (r *resolver) loadingActivity(s *wsState) *frontendv1.FooterStatusLoadingActivity {
-	if line, ok := r.sharedSalient(s); ok {
-		return &frontendv1.FooterStatusLoadingActivity{Tier: &frontendv1.FooterStatusLoadingActivity_Salient{
-			Salient: fillShared(&frontendv1.FooterStatusLoadingSalient{}, line)}}
-	}
-	return &frontendv1.FooterStatusLoadingActivity{Tier: &frontendv1.FooterStatusLoadingActivity_Unpinned{Unpinned: r.unpinned(s)}}
+	return sharedOrUnpinned(r, s, &frontendv1.FooterStatusLoadingActivity{}, &frontendv1.FooterStatusLoadingSalient{})
+}
+
+// updatingActivity resolves the cell while a final response is updating: the
+// bubble being updated is the update's own line, so only the shared salient
+// lines can stand.
+func (r *resolver) updatingActivity(s *wsState) *frontendv1.FooterStatusUpdatingActivity {
+	return sharedOrUnpinned(r, s, &frontendv1.FooterStatusUpdatingActivity{}, &frontendv1.FooterStatusUpdatingSalient{})
 }
 
 // waitingSalient is the one salient line a waiting status stands on. It is

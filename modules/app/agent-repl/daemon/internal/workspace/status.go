@@ -182,7 +182,7 @@ func ActivityOf(status *frontendv1.FooterStatus) (*agentreplv1.WorkspaceStatusAc
 		*frontendv1.FooterStatus_TurnFailed, *frontendv1.FooterStatus_Background, *frontendv1.FooterStatus_MergeFailed,
 		*frontendv1.FooterStatus_Closing:
 		return idle, true
-	case *frontendv1.FooterStatus_Working:
+	case *frontendv1.FooterStatus_Working, *frontendv1.FooterStatus_Updating:
 		return running, true
 	case *frontendv1.FooterStatus_Waiting:
 		switch arm.Waiting.GetSubstatus().(type) {

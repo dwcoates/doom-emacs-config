@@ -438,3 +438,65 @@ func TestAColdGatesRunningPhaseAnnouncesNothing(t *testing.T) {
 		t.Fatalf("transient = %+v, want no outcome while the compaction runs", got)
 	}
 }
+
+// ---- the shared-or-unpinned cell (sharedOrUnpinned) -----------------------
+
+func TestACellWithNoKindOfItsOwnStandsTheSharedLine(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.OnActivity(testWS, mainAgent, notificationFrame("the agent needs you"))
+
+	// Act
+	got := sharedOrUnpinned(h.r, h.r.states[testWS], &frontendv1.FooterStatusUpdatingActivity{}, &frontendv1.FooterStatusUpdatingSalient{})
+
+	// Assert
+	if got.GetSalient().GetNotification().GetText() != "the agent needs you" {
+		t.Fatalf("activity = %+v, want the notification salient", got)
+	}
+}
+
+func TestACellWithNoKindOfItsOwnIsUnpinnedWithNoSharedLine(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+
+	// Act
+	got := sharedOrUnpinned(h.r, h.r.states[testWS], &frontendv1.FooterStatusLoadingActivity{}, &frontendv1.FooterStatusLoadingSalient{})
+
+	// Assert
+	if got.GetUnpinned() == nil {
+		t.Fatalf("activity = %+v, want the unpinned tier", got)
+	}
+}
+
+func TestACellLackingTheUnpinnedTierPanics(t *testing.T) {
+	// Arrange: the waiting cell holds its salient line alone.
+	h := newHarness(t)
+	connected(h)
+	defer func() {
+		if recover() == nil {
+			t.Fatal("sharedOrUnpinned took a cell with no unpinned tier")
+		}
+	}()
+
+	// Act
+	sharedOrUnpinned(h.r, h.r.states[testWS], &frontendv1.FooterStatusWaitingActivity{}, &frontendv1.FooterStatusWaitingSalient{})
+}
+
+func TestTheLoadingAndUpdatingCellsShareOneShape(t *testing.T) {
+	// Arrange: a notification stands, so both cells must take it alike.
+	h := newHarness(t)
+	connected(h)
+	h.r.OnActivity(testWS, mainAgent, notificationFrame("the agent needs you"))
+	s := h.r.states[testWS]
+
+	// Act
+	loading := h.r.loadingActivity(s).GetSalient().GetNotification().GetText()
+	updating := h.r.updatingActivity(s).GetSalient().GetNotification().GetText()
+
+	// Assert
+	if loading != "the agent needs you" || updating != loading {
+		t.Fatalf("loading cell %q, updating cell %q, want both the notification", loading, updating)
+	}
+}
