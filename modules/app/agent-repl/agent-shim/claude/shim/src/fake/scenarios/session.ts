@@ -4,10 +4,8 @@
  * # Most SessionUpdate arms are ANSWERS, not messages
  *
  * `sdk.d.ts` declares no `model_changed`, no `permission_mode_changed`, no
- * `fast_mode`, no `mcp_server` and no `account_usage` system message. Those
- * arms are produced by the shim
- * from CONTROL ANSWERS (`mcpServerStatus`, the account-usage probe,
- * `getContextUsage`) and from fields that ride other messages
+ * `fast_mode` and no `mcp_server` system message. Those arms are produced by
+ * the shim from CONTROL ANSWERS (`mcpServerStatus`, `getContextUsage`) and from fields that ride other messages
  * (`status.permissionMode`, `result.fast_mode_state`, `init.fast_mode_state`).
  *
  * So the scenarios here do two different things. Where a message exists, they
@@ -276,7 +274,7 @@ const RATE_LIMIT = scenario({
   prompt: "!rate-limit",
   emits: "a `rate_limit_event` in the corpus's shape — allowed_warning on the overage window with a threshold",
   writes: "the assistant line, the prompt line and the turn record",
-  arms: "SessionAccountUsage from the rate-limit event, plus the usage-warning synthesized notice",
+  arms: "SessionRateLimitStatus from the rate-limit event, plus the usage-warning synthesized notice",
   run(ctx) {
     ctx.log.debug({ turn: ctx.turn, branch: "rate-limit" }, "fake rate-limit-event turn");
     ctx.emit({

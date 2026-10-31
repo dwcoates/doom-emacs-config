@@ -23,9 +23,9 @@ import { cwdSlug, projectDir } from "../../src/engine/vendor-paths.js";
 /**
  * The harness's fixed clock, in epoch millis.
  *
- * Exported because a fixture stated as an OFFSET from the fake's own now (the
- * account-usage reset instants) can only be asserted against the clock the
- * fake was handed.
+ * Exported because a fixture stated as an OFFSET from the fake's own now (a
+ * rate-limit window's reset instant) can only be asserted against the clock
+ * the fake was handed.
  */
 export const HARNESS_NOW_MS = 1_800_000_000_000;
 

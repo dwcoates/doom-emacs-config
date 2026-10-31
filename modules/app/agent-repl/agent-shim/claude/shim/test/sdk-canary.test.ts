@@ -196,8 +196,6 @@ const PERMISSION_RESULT = declarationBody(SDK_DTS, "PermissionResult");
 const PERMISSION_UPDATE = declarationBody(SDK_DTS, "PermissionUpdate");
 const CAN_USE_TOOL = declarationBody(SDK_DTS, "CanUseTool");
 const CONTEXT_USAGE = declarationBody(SDK_DTS, "SDKControlGetContextUsageResponse");
-const GET_USAGE = declarationBody(SDK_DTS, "SDKControlGetUsageResponse");
-
 // ---------------------------------------------------------------- the pin
 
 describe("the pin", () => {
@@ -555,55 +553,6 @@ describe("SDKControlGetContextUsageResponse — every field SessionContextUsage 
     // for themselves. Pinned so its disappearance is a noticed non-event rather
     // than an unnoticed one.
     expect(hasTopLevelKey(CONTEXT_USAGE, "gridRows")).toBe(true);
-  });
-});
-
-// ---------------------------------------------------------------- usage windows
-
-/** The plan rate-limit windows the account_usage arm reports. */
-const USAGE_WINDOWS = [
-  "five_hour",
-  "seven_day",
-  "seven_day_oauth_apps",
-  "seven_day_opus",
-  "seven_day_sonnet",
-  "model_scoped",
-  "extra_usage",
-] as const;
-
-describe("SDKControlGetUsageResponse", () => {
-  for (const window of USAGE_WINDOWS) {
-    it(`declares the ${window} rate-limit window`, () => {
-      expect(hasKeyAtAnyDepth(GET_USAGE, window)).toBe(true);
-    });
-  }
-
-  it("declares the session cost and usage totals", () => {
-    expect(hasTopLevelKey(GET_USAGE, "session")).toBe(true);
-  });
-
-  it("declares the per-model usage breakdown on the session totals", () => {
-    expect(GET_USAGE).toMatch(/model_usage: Record<string, coreTypes\.ModelUsage>;/);
-  });
-
-  it("declares subscription_type", () => {
-    expect(hasTopLevelKey(GET_USAGE, "subscription_type")).toBe(true);
-  });
-
-  it("declares rate_limits_available, the discriminator for plan limits applying at all", () => {
-    expect(hasTopLevelKey(GET_USAGE, "rate_limits_available")).toBe(true);
-  });
-
-  it("declares rate_limits", () => {
-    expect(hasTopLevelKey(GET_USAGE, "rate_limits")).toBe(true);
-  });
-
-  it("declares utilization on a window", () => {
-    expect(hasKeyAtAnyDepth(GET_USAGE, "utilization")).toBe(true);
-  });
-
-  it("declares resets_at on a window", () => {
-    expect(hasKeyAtAnyDepth(GET_USAGE, "resets_at")).toBe(true);
   });
 });
 

@@ -2,12 +2,11 @@
  * fake/catalogs.ts — the mocked vendor's answers to the shim's CONTROL verbs.
  *
  * These are not part of any turn: `supportedModels`, `supportedCommands`,
- * `supportedAgents`, `mcpServerStatus`, `getContextUsage`, the account-usage
- * probe, `accountInfo` and `initializationResult` are questions the shim asks
- * out of band, and the answers feed `SessionStarted` and half the
- * `SessionUpdate` arms. They live here rather than inside a scenario because
- * they are session facts, not turn events — a scenario can SWITCH between
- * prepared arms (see the account-usage family) but never authors one.
+ * `supportedAgents`, `mcpServerStatus`, `getContextUsage`, `accountInfo` and
+ * `initializationResult` are questions the shim asks out of band, and the
+ * answers feed `SessionStarted` and half the `SessionUpdate` arms. They live
+ * here rather than inside a scenario because they are session facts, not turn
+ * events — a scenario can SWITCH between prepared arms but never authors one.
  *
  * FULLNESS IS THE POINT. A context-usage answer with three fields set would
  * let a converter that ignores twelve of them pass; every optional field

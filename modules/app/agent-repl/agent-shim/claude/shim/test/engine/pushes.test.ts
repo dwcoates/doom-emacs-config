@@ -601,49 +601,39 @@ describe("the network-resume waiting set", () => {
   });
 });
 
-describe("account usage", () => {
-  function accountUsage(observedAtMs: bigint, utilizationPercent: number): conversationv1.SessionUpdate {
+describe("the session's effort", () => {
+  function effortChanged(level: conversationv1.AgentEffortLevel): conversationv1.SessionUpdate {
     return create(conversationv1.SessionUpdateSchema, {
       update: {
-        case: "accountUsage",
-        value: create(conversationv1.SessionAccountUsageSchema, {
-          observedAtMs,
-          subscriptionType: create(conversationv1.SessionSubscriptionTypeSchema, {
-            plan: { case: "max", value: create(conversationv1.SessionSubscriptionTypeMaxSchema, {}) },
-          }),
-          outcome: {
-            case: "available",
-            value: create(conversationv1.SessionAccountUsageAvailableSchema, {
-              fiveHour: create(conversationv1.SessionUsageWindowSchema, {
-                utilizationPercent,
-                resetsAtMs: 1_700_000_000_000n,
-              }),
-            }),
-          },
-        }),
+        case: "effortChanged",
+        value: create(conversationv1.SessionEffortChangedSchema, { effectiveEffort: level }),
       },
     });
   }
 
-  // THE DEFECT THIS PINS: the session probes the account's usage ONCE at
-  // StartSession, and the daemon opens its standing WatchSession only after
-  // StartSession has answered. With this arm unreplayed that first sample
-  // reached nobody, so the footer drew no allowance figure until a turn
-  // closed and reprobed — the whole of a fresh session's usage line, missing.
-  it("is replayed to a consumer that joins after the session probed it", async () => {
+  // THE DAEMON IS ALWAYS THAT CONSUMER: the effort is stated at the session's
+  // start, before the daemon's standing WatchSession is open.
+  it("is replayed to a consumer that joins after the vendor stated it", async () => {
     const pushes = new SessionPushes(() => 1, "test-build-sha");
-    pushes.push(accountUsage(1n, 41));
+    pushes.push(effortChanged(conversationv1.AgentEffortLevel.HIGH));
 
     const opening = await take(pushes.subscribe(), 2);
 
-    expect(opening[1]?.update.case).toBe("accountUsage");
+    expect(opening[1]?.update.case).toBe("effortChanged");
   });
 
-  it("goes out again for a later sample, which never repeats an instant", () => {
+  it("is dropped when the vendor restated the same level", () => {
     const pushes = new SessionPushes(() => 1, "test-build-sha");
-    pushes.push(accountUsage(1n, 41));
+    pushes.push(effortChanged(conversationv1.AgentEffortLevel.HIGH));
 
-    expect(pushes.push(accountUsage(2n, 41))).toBe(true);
+    expect(pushes.push(effortChanged(conversationv1.AgentEffortLevel.HIGH))).toBe(false);
+  });
+
+  it("goes out when the level changed", () => {
+    const pushes = new SessionPushes(() => 1, "test-build-sha");
+    pushes.push(effortChanged(conversationv1.AgentEffortLevel.HIGH));
+
+    expect(pushes.push(effortChanged(conversationv1.AgentEffortLevel.LOW))).toBe(true);
   });
 });
 
