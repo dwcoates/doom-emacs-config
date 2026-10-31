@@ -3349,8 +3349,13 @@ and its commit (or the open item). Test-performance lessons also go into the
 `UpdateMergeQueue.subscribe` (the `/agent-repl-merge-queue subscribe` verb) records a
 DURABLE subscription (wsm `merge_queue_subscriptions`): a restart or a
 handover keeps it, because a landing's own deploy restarts the daemon. It
-ends on unsubscribe and on the workspace's close, in the close's own
-transaction. Every queue change the orchestrator reports reaches
+ends on unsubscribe, on the workspace's close, in the close's own
+transaction, and on a DEPLETION of a queue in its scope: `mergenotice`
+ends every in-scope subscription (wsm `EndMergeQueueSubscription`, which
+deletes only the row as read, so one taken again since stands) before it
+submits the depletion's notice, whose `{{lifetime}}` then says it is the
+last. Each end is an INFO `daemon.mergenotice` record; an end that failed is
+an ERROR, and that notice says the subscription stands. Every queue change the orchestrator reports reaches
 `internal/mergenotice`, which tells each subscriber whose detail admits it
 ONCE, through the prompt handler as a deferred prompt of origin
 `PROMPT_ORIGIN_MERGE_QUEUE_NOTICE` (the handback's path); the feed draws no

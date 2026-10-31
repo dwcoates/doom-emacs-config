@@ -22,6 +22,12 @@ import (
 // it closed, and Forget's delete of the workspace row cascades to them, so no
 // close path -- whichever verb or landing it runs through -- can leave one
 // standing. A closed workspace cannot take one either (ErrSubscriberClosed).
+//
+// A SUBSCRIPTION ALSO ENDS WITH ITS QUEUE'S DEPLETION. The notifier ends every
+// subscription in the depleted queue's scope as it delivers the depletion
+// (internal/mergenotice), through EndMergeQueueSubscription, which ends the
+// subscription only as the notifier read it: one its subscriber took again
+// after the read is a new subscription, and stands.
 
 // mergeQueueSubscriptionsDDL is the layout-55 addition: one row per
 // subscription, keyed by its subscriber and its scope. The scope is the
@@ -182,6 +188,16 @@ func (s *store) SubscribeMergeQueue(ctx context.Context, sub MergeQueueSubscript
 func (s *store) UnsubscribeMergeQueue(ctx context.Context, subscriber WorkspaceID, repo RepoKey) (bool, error) {
 	return s.endSubscription(ctx, "daemon.wsm.unsubscribe_merge_queue", "refused a merge queue unsubscribe whose scope cannot be normalized",
 		dlog.Context{"subscriber": string(subscriber), "repo": string(repo)}, subscriber, repo, "")
+}
+
+// EndMergeQueueSubscription ends SUB as it was read: its subscriber's
+// subscription in its scope, only while it still holds SUB's detail and
+// SUB's SubscribedAt. It answers whether it ended one. A subscription the
+// subscriber took again since SUB was read is not SUB, and stands.
+func (s *store) EndMergeQueueSubscription(ctx context.Context, sub MergeQueueSubscription) (bool, error) {
+	return s.endSubscription(ctx, "daemon.wsm.end_merge_queue_subscription", "refused to end a merge queue subscription whose scope cannot be normalized",
+		dlog.Context{"subscriber": string(sub.Subscriber), "repo": string(sub.Repo), "detail": sub.Detail.String()},
+		sub.Subscriber, sub.Repo, ` AND detail = ? AND subscribed_at = ?`, int(sub.Detail), nanos(sub.SubscribedAt))
 }
 
 // endSubscription deletes SUBSCRIBER's subscription in scope REPO, narrowed by

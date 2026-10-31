@@ -568,6 +568,10 @@ type DB interface {
 	// UnsubscribeMergeQueue ends a subscriber's subscription in one scope,
 	// answering whether one stood there.
 	UnsubscribeMergeQueue(ctx context.Context, subscriber WorkspaceID, repo RepoKey) (bool, error)
+	// EndMergeQueueSubscription ends one subscription as it was read, only
+	// while its detail and SubscribedAt still stand, answering whether it
+	// ended one. The notifier ends a depleted queue's subscriptions with it.
+	EndMergeQueueSubscription(ctx context.Context, sub MergeQueueSubscription) (bool, error)
 	// MergeQueueSubscriptions loads every merge queue subscription.
 	MergeQueueSubscriptions(ctx context.Context) ([]MergeQueueSubscription, error)
 	// UntoldMergeNotice answers a subscriber's untold notice of one queue

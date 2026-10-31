@@ -25,6 +25,17 @@
 // lock decides a race between the supersession and the delivery, so every
 // change is told exactly once.
 //
+// A SUBSCRIPTION ENDS WITH ITS QUEUE'S DEPLETION, ON THE DEPLETION ITSELF. A
+// notice wakes its subscriber and costs it a full read of its context, so one
+// left standing after the work it watched has landed costs that at every
+// later change. Delivering a change that depleted a queue (a merge left and
+// none is in line, so nothing runs) ends every subscription in that queue's
+// scope, that repository's or every repository's, BEFORE the notice is
+// submitted, and the notice says it is the subscription's last. Every detail
+// admits a depletion, so every ended subscription is told. A subscription
+// ends only as it was read (wsm EndMergeQueueSubscription): one its
+// subscriber takes again after reading the last notice stands.
+//
 // THE ORCHESTRATOR NEVER WAITS ON A DELIVERY. QueueChanged only appends, so a
 // queue write is never held up by, and never re-enters through, the prompt
 // queue; the loop does the delivering. The loop outlives the daemon's merge
@@ -63,6 +74,9 @@ const Origin = conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_QUEUE_NOTICE
 // Subscriptions reads the merge queue subscriptions.
 type Subscriptions interface {
 	MergeQueueSubscriptions(ctx context.Context) ([]wsm.MergeQueueSubscription, error)
+	// EndMergeQueueSubscription ends one subscription as it was read,
+	// answering whether it ended it.
+	EndMergeQueueSubscription(ctx context.Context, sub wsm.MergeQueueSubscription) (bool, error)
 }
 
 // Untold reads and records each subscriber's untold notice per queue (wsm
@@ -145,9 +159,49 @@ func (s *Service) deliver(ctx context.Context, prompts prompthandler.Submitter, 
 		log.Error(op, "could not read the merge queue subscriptions; nobody is told of the change", dlog.WithCause(changeFields(change), err))
 		return
 	}
+	ended := s.endDepleted(ctx, subs, change)
 	for _, told := range Recipients(subs, change) {
-		s.notify(ctx, prompts, told, change)
+		s.notify(ctx, prompts, told, ended[told.Subscriber], change)
 	}
+}
+
+// endDepleted ends every subscription in the scope of a queue CHANGE
+// depleted, and answers each subscriber whose every subscription in that
+// scope it ended: that subscriber's notice is its last. A change that
+// depleted nothing ends nothing.
+func (s *Service) endDepleted(ctx context.Context, subs []wsm.MergeQueueSubscription, change merge.QueueChange) map[ids.WorkspaceID]bool {
+	if !change.Depleted {
+		return nil
+	}
+	log := s.deps.Log.Global()
+	ended := map[ids.WorkspaceID]bool{}
+	for _, sub := range subs {
+		if !InScope(sub, change) {
+			continue
+		}
+		fields := changeFields(change)
+		fields["subscriber"], fields["scope"], fields["detail"] = string(sub.Subscriber), string(sub.Repo), sub.Detail.String()
+		done, err := s.deps.Subscriptions.EndMergeQueueSubscription(ctx, sub)
+		switch {
+		case err != nil:
+			log.Error(op, "could not end a merge queue subscription as its queue depleted; it stands, and its notice does not say it ended", dlog.WithCause(fields, err))
+		case !done:
+			log.Info(op, "a merge queue subscription was taken again after the depletion was read; the new one stands", fields)
+		default:
+			log.Info(op, "ended a merge queue subscription as its queue depleted", fields)
+		}
+		if prior, seen := ended[sub.Subscriber]; !seen || prior {
+			ended[sub.Subscriber] = err == nil && done
+		}
+	}
+	return ended
+}
+
+// InScope reports whether SUB watches the queue CHANGE is about: its own
+// repository's, or every repository's. A deploy belongs to no one queue, so
+// every scope hears it.
+func InScope(sub wsm.MergeQueueSubscription, change merge.QueueChange) bool {
+	return change.Kind == merge.QueueChangeDeployed || sub.Repo == wsm.EveryRepository || sub.Repo == change.Queue.Repo
 }
 
 // Recipient is one subscriber a change is told to, at the detail of the
@@ -167,8 +221,7 @@ func Recipients(subs []wsm.MergeQueueSubscription, change merge.QueueChange) []R
 	var out []Recipient
 	at := map[ids.WorkspaceID]int{}
 	for _, sub := range subs {
-		// A deploy belongs to no one queue, so every scope hears it.
-		if change.Kind != merge.QueueChangeDeployed && sub.Repo != wsm.EveryRepository && sub.Repo != change.Queue.Repo {
+		if !InScope(sub, change) {
 			continue
 		}
 		if !Admits(sub.Detail, change) {
@@ -205,14 +258,15 @@ func Admits(detail wsm.MergeQueueDetail, change merge.QueueChange) bool {
 
 // notify composes and submits one notice of CHANGE to TOLD, saying first
 // every change of the subscriber's untold notice it supersedes, and records
-// it as the subscriber's untold notice of the queue.
-func (s *Service) notify(ctx context.Context, prompts prompthandler.Submitter, told Recipient, change merge.QueueChange) {
+// it as the subscriber's untold notice of the queue. ENDED says the change
+// ended the subscriber's subscription, so the notice is its last.
+func (s *Service) notify(ctx context.Context, prompts prompthandler.Submitter, told Recipient, ended bool, change merge.QueueChange) {
 	log := s.deps.Log.Global()
 	fields := changeFields(change)
-	fields["subscriber"], fields["detail"] = string(told.Subscriber), told.Detail.String()
+	fields["subscriber"], fields["detail"], fields["ended"] = string(told.Subscriber), told.Detail.String(), ended
 	sentences := append(s.carried(ctx, told.Subscriber, change.Queue.Repo), Sentence(change))
 	fields["changes"] = len(sentences)
-	turn, failure, err := s.submit(ctx, prompts, told, sentences, change)
+	turn, failure, err := s.submit(ctx, prompts, told, ended, sentences, change)
 	if err != nil {
 		log.Error(op, failure, dlog.WithCause(fields, err))
 	} else {
@@ -228,9 +282,9 @@ func (s *Service) notify(ctx context.Context, prompts prompthandler.Submitter, t
 // submit composes the notice of SENTENCES, the latest being CHANGE's, and
 // submits it to TOLD, answering the turn it was submitted as, or the record a
 // failure is written with and why.
-func (s *Service) submit(ctx context.Context, prompts prompthandler.Submitter, told Recipient, sentences []string, change merge.QueueChange) (ids.TurnID, string, error) {
+func (s *Service) submit(ctx context.Context, prompts prompthandler.Submitter, told Recipient, ended bool, sentences []string, change merge.QueueChange) (ids.TurnID, string, error) {
 	turn, err := briefprompt.Composer{Briefs: s.deps.Briefs, MintKey: s.deps.MintKey}.
-		Submit(ctx, prompts, told.Subscriber, BriefNotice, Values(told.Detail, sentences, change), "merge-queue-notice", Origin)
+		Submit(ctx, prompts, told.Subscriber, BriefNotice, Values(told.Detail, ended, sentences, change), "merge-queue-notice", Origin)
 	switch briefprompt.StepOf(err) {
 	case briefprompt.StepCompose:
 		return "", "could not compose a merge queue notice; the subscriber is not told of the change", err
@@ -258,9 +312,10 @@ func (s *Service) carried(ctx context.Context, subscriber ids.WorkspaceID, repo 
 
 // Values are the brief's placeholders for one notice of SENTENCES, oldest
 // first, the last being LATEST's: the latest change's headline, every change
-// stated in full, the queue as the latest change left it, and the detail the
-// subscriber asked for.
-func Values(detail wsm.MergeQueueDetail, sentences []string, latest merge.QueueChange) map[string]string {
+// stated in full, the queue as the latest change left it, the detail the
+// subscriber asked for, and the subscription's lifetime: ENDED says LATEST
+// ended it, so the notice is its last.
+func Values(detail wsm.MergeQueueDetail, ended bool, sentences []string, latest merge.QueueChange) map[string]string {
 	if len(sentences) == 0 {
 		panic("mergenotice: a notice was composed of no change")
 	}
@@ -269,11 +324,21 @@ func Values(detail wsm.MergeQueueDetail, sentences []string, latest merge.QueueC
 		queue = "A deploy is the daemon's own, not one queue's: no queue's line changed with it."
 	}
 	return map[string]string{
-		"label":  Headline(latest),
-		"change": untoldnotice.Sentences(sentences),
-		"queue":  queue,
-		"detail": detailWords(detail),
+		"label":    Headline(latest),
+		"change":   untoldnotice.Sentences(sentences),
+		"queue":    queue,
+		"detail":   detailWords(detail),
+		"lifetime": Lifetime(ended),
 	}
+}
+
+// Lifetime is a notice's closing word on its subscription: that it ended
+// with this notice, or when it will.
+func Lifetime(ended bool) string {
+	if ended {
+		return "The queue is empty with nothing running, so this subscription has ended: this is its last notice. To follow the queue's next work, subscribe again through `agent-repld merge-queue subscribe`."
+	}
+	return "This subscription ends on its own once a queue it watches is empty with nothing running, with a last notice saying so. To stop these notices sooner, unsubscribe through `agent-repld merge-queue unsubscribe`."
 }
 
 // Headline is a notice's first line: the queue and what happened to it.
