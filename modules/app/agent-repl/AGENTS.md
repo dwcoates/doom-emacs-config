@@ -1197,8 +1197,9 @@ runs from, so a handover's leftover incumbent or successor never outlives it.
 
 **Any change to build, deploy, bounce or daemon-request infrastructure updates
 `bin/agent-repl-runtime`, its harness (`bin/test-agent-repl-runtime.sh`), the
-`/agent-repl-runtime` skill and this section in the same commit.** Only
-the lead session runs `bounce`, `bounce --hard` or `deploy`; subagents never do.
+`/agent-repl-runtime` skill and this section in the same commit.** When
+an agent may run a deploy, a bounce or any other forced stop is that skill's
+rule (step 2): every forced stop is an emergency last resort.
 
 ## The agent API is agent-repld's CLI, and the skills say when to use it
 
