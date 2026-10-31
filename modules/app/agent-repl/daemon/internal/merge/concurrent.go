@@ -74,8 +74,8 @@ func (o *orchestrator) windowFor(head *run) int {
 	return window
 }
 
-// failedAtHead reports whether the run's tests failed while it headed its
-// queue (markFailedAtHead).
+// failedAtHead reports whether the run reached its fixing step while it headed
+// its queue (markFailedAtHead).
 func (r *run) failedAtHead() bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()

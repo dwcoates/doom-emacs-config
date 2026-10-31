@@ -897,7 +897,6 @@ func (r *run) testAndFix(ctx context.Context, tip, targetBranch string, fromAtte
 			out := r.fixesExhausted(ctx, verdict.result.ArchivePath, nil)
 			return "", &out, nil
 		}
-		r.o.markFailedAtHead(ctx, r)
 		if gaveUp, err := r.fix(ctx, attempt+1, verdict.result, targetBranch); err != nil || gaveUp != nil {
 			return "", gaveUp, err
 		}

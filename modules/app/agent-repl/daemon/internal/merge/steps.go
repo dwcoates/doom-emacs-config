@@ -41,6 +41,14 @@ func (r *run) setStep(ctx context.Context, step footer.MergeStep, apply func(*fo
 		r.stepAt = now
 	}
 	r.mu.Unlock()
+	// A HEAD AT ITS FIXING STEP LETS THE NEXT MERGE TEST (windowFor). Marked
+	// here, where every run enters a step, so a head that RESUMES fixing --
+	// taken back after losing a race to land, or after a restart -- widens
+	// the chain behind it as a fresh failure does (owner's report,
+	// 2026-10-30: a resumed fixing head held the next merge out).
+	if changed && step == footer.StepFixing {
+		r.o.markFailedAtHead(ctx, r)
+	}
 	if changed {
 		r.timeStep(left, leftAt, now)
 	}
