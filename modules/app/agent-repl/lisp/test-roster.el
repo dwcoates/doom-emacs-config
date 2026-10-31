@@ -850,6 +850,25 @@ naming its own row field, so no accessor hand-rolls a divergent read."
                                                :last-turn-ended '(:at-ms 42)))))))
     (should (equal (agent-repl-roster-last-turn-ended-ms "first") 42))))
 
+(ert-deftest agent-repl-test-roster-last-turn-boundary-ms-reads-the-row ()
+  "The newest turn start or end is the row's `last_turn_boundary'."
+  (agent-repl-test-roster--with-editor
+    (agent-repl-roster-apply
+     (agent-repl-test-roster--roster
+      :sections (list (agent-repl-test-roster--section
+                       "repo" (list (plist-put (agent-repl-test-roster--row "a" "first" :thinking)
+                                               :last-turn-boundary '(:at-ms 77)))))))
+    (should (equal (agent-repl-roster-last-turn-boundary-ms "first") 77))))
+
+(ert-deftest agent-repl-test-roster-last-turn-boundary-ms-nil-without-a-turn ()
+  "A row carrying no turn boundary answers nil."
+  (agent-repl-test-roster--with-editor
+    (agent-repl-roster-apply
+     (agent-repl-test-roster--roster
+      :sections (list (agent-repl-test-roster--section
+                       "repo" (list (agent-repl-test-roster--row "a" "first" :ready))))))
+    (should-not (agent-repl-roster-last-turn-boundary-ms "first"))))
+
 ;;; --- The last-finished ranking
 
 (defmacro agent-repl-test-roster--with-finishes (rows &rest body)
