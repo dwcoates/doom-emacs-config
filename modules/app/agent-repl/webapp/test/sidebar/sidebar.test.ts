@@ -41,6 +41,8 @@ import {
   appContext,
   fakeTicker,
   fakeTimers,
+  mergedBand,
+  mergedGroup,
   mergedSection,
   primaryPointer,
   settleOwedDragClick,
@@ -52,6 +54,7 @@ import {
 import { frameQueue, type FrameQueue } from "../frame-queue.js";
 import { fireIntersection } from "../intersection-observer.js";
 import { MERGED_DRAWN_AT_ONCE } from "../../src/sidebar/roster.js";
+import { DEPLOYS_PAGE_SIZE } from "../../src/sidebar/deploys-more.js";
 import { STAND_IN_ATTRIBUTE } from "../../src/sidebar/row.js";
 import type { FailureSink } from "../../src/failure/sink.js";
 import { recordingFailures } from "../failure-sink.js";
@@ -1501,12 +1504,19 @@ describe("mounting the rail: a roster its frame cannot draw", () => {
 });
 
 describe("mounting the rail: a merged row drawn when it comes into view", () => {
-  /** A rail whose open merged band holds one row past those drawn at once, the last named NAME. */
+  /**
+   * A rail whose open merged band holds one row past those drawn at once, the
+   * last named NAME. The rows are spread over groups of a group's first ten,
+   * so the one stand-in is that row's, never one in a group's hidden page.
+   */
   async function mountLong(name: string): Promise<{ host: HTMLElement; standIn: Element }> {
     const host = document.createElement("nav");
     const rows = Array.from({ length: MERGED_DRAWN_AT_ONCE }, (_, i) => row({ id: `ws-${i}`, name: "kept" }));
     rows.push(row({ id: "ws-late", name }));
-    mountSidebar(host, ctxFor([roster({ merged: mergedSection(rows, false) })]), {
+    const groups = Array.from({ length: Math.ceil(rows.length / DEPLOYS_PAGE_SIZE) }, (_, g) =>
+      mergedGroup({ id: `repo-${g}`, rows: rows.slice(g * DEPLOYS_PAGE_SIZE, (g + 1) * DEPLOYS_PAGE_SIZE) }),
+    );
+    mountSidebar(host, ctxFor([roster({ merged: mergedBand(groups, false) })]), {
       storage: null,
       timers: fakeTimers(),
     });

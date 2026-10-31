@@ -1628,7 +1628,6 @@ html.sb-dragging * { -webkit-user-select: none; user-select: none; }
   color: var(--muted);
   opacity: 0.8;
   cursor: pointer;
-  user-select: none;
 }
 #ws-sidebar:not(.sb-hover-suspended) .sb-deploys-more:hover { opacity: 1; }
 
