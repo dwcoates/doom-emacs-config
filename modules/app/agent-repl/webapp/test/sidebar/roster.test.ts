@@ -1609,10 +1609,32 @@ describe("the Merge Queue section's queues", () => {
     expect(drawn.querySelector(".repo-section .sb-merge-queue")).toBeNull();
   });
 
-  it("stands the first group off the Deploys header by 0.3rem", () => {
+  it("hangs the first group's name under the Deploys header by the inside gap alone", () => {
     const drawn = drawWorkspaceRoster(withQueues([queueGroup({ id: "a", queue: { head: mergingHead("w1") } })]), sidebarContext());
-    const group = mergedRegion(drawn).querySelector<HTMLElement>(`.${MERGED_GROUP_CLASS}`)!;
-    expect(inRail(drawn, () => cascadedValue(group, "margin-top"))).toBe("0.3rem");
+    const head = pane(drawn).querySelector<HTMLElement>(".merged-section > .repo-head")!;
+    const groupHead = mergedRegion(drawn).querySelector<HTMLElement>(".merged-group-head")!;
+    expect(inRail(drawn, () => [cascadedValue(head, "padding-bottom"), cascadedValue(groupHead, "padding-top")])).toEqual([
+      "0px",
+      "calc(var(--inside-rule-gap) - 3px)",
+    ]);
+  });
+
+  it("sets the inside rules' gap 40% under the gap of the rules between the sections", () => {
+    const drawn = drawWorkspaceRoster(withQueues([]), sidebarContext());
+    expect(inRail(drawn, (rail) => cascadedValue(rail, "--inside-rule-gap").replace(/\s+/g, ""))).toBe("calc(var(--rule-gap)*0.6)");
+  });
+
+  it.each([
+    { name: "draws a group under an open group's last row nearer by a row's reach below its baseline", folded: false, want: "-4.5px" },
+    { name: "draws a group under a folded group a pixel further", folded: true, want: "1px" },
+  ])("$name", ({ folded, want }) => {
+    const drawn = drawWorkspaceRoster(
+      withQueues([queueGroup({ id: "a", queue: { head: mergingHead("w1") } })], [mergedGroup({ id: "b", rows: [merged("m1")] })]),
+      sidebarContext(),
+    );
+    const [first, second] = [...mergedRegion(drawn).querySelectorAll<HTMLElement>(`.${MERGED_GROUP_CLASS}`)];
+    first.classList.toggle("folded", folded);
+    expect(inRail(drawn, () => cascadedValue(second, "margin-top"))).toBe(want);
   });
 
   it("draws the head's name just under its repository header's text size", () => {
@@ -1641,13 +1663,19 @@ describe("the Merge Queue section's queues", () => {
     expect([head.lastElementChild?.classList.contains(MERGED_TODAY_COUNT_CLASS), inRail(drawn, () => cascadedValue(head, "gap"))]).toEqual([true, "0.4rem"]);
   });
 
-  it.each(["merged-section", "hidden-section"])("draws 0.2rem above the rule over the %s, and 0.2rem below it", (cls) => {
+  it.each([
+    { cls: "merged-section", above: "calc(var(--rule-gap) - 3.3px)", below: "calc(var(--rule-gap) - 3.6px)" },
+    { cls: "hidden-section", above: "calc(var(--rule-gap) - 0.8px)", below: "calc(var(--rule-gap) - 2.6px)" },
+  ])("stands the rule over the $cls off the text on both sides by the rule gap", ({ cls, above, below }) => {
     const drawn = drawWorkspaceRoster(
       roster({ hidden: hiddenSection([HIDDEN_ROW]), merged: mergedSection([merged("m1")], false) }),
       sidebarContext(),
     );
     const section = pane(drawn).querySelector<HTMLElement>(`.${cls}`)!;
-    expect(inRail(drawn, () => [cascadedValue(section, "margin-top"), cascadedValue(section, "padding-top")])).toEqual(["0.2rem", "0.2rem"]);
+    const head = section.querySelector<HTMLElement>(":scope > .repo-head")!;
+    expect(
+      inRail(drawn, () => [cascadedValue(section, "margin-top"), cascadedValue(section, "padding-top"), cascadedValue(head, "padding-top")]),
+    ).toEqual([above, "0px", below]);
   });
 
   it("draws each repository's queue under its label, in the wire's order", () => {
