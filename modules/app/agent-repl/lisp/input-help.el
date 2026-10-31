@@ -1,14 +1,14 @@
-;;; input-help.el --- the composer's clickable help bar -*- lexical-binding: t; -*-
+;;; input-help.el --- agent-repl's key and feature help popups -*- lexical-binding: t; -*-
 
 ;;; Commentary:
 
-;; THE COMPOSER'S HEADER LINE ENDS IN ONE HELP BUTTON, on its far right.
-;; Clicking it drops a menu of topic groups (Composer, Feed, Workspaces,
-;; ...) at the click, each a submenu of topics, and picking one opens the
-;; shared agent-repl popup (popup.el) listing that topic's keys and the
-;; features that go with them.  The topics cover every binding agent-repl
-;; sets, not only the composer's.
-;; `agent-repl-input-help' opens the same popups from the keyboard.
+;; THE COMPOSER DRAWS NO HEADER LINE (owner request, 2026-10-31): its
+;; Settings and Help buttons are gone, and both stay reachable from the
+;; splash, which lists Help and carries the Settings button.
+;; `agent-repl-input-help' asks for a topic of agent-repl's help, grouped
+;; (Composer, Feed, Workspaces, ...), and opens the shared agent-repl popup
+;; (popup.el) listing that topic's keys and the features that go with them.
+;; The topics cover every binding agent-repl sets, not only the composer's.
 ;;
 ;; THE KEYS SHOWN ARE READ FROM THE LIVE KEYMAPS, never written down here.
 ;; A topic names COMMANDS; the popup asks the composer's mode map (with its
@@ -318,21 +318,11 @@ Every binding agent-repl sets is in a topic, or in
 binding form of the module and every one of its keymaps.")
 
 (defconst agent-repl-input-help-unlisted-commands
-  '((ignore . "the Help button's press, which only keeps a click from dragging the header line")
-    (agent-repl-input-help-click . "the Help button itself")
-    (agent-repl-settings . "the Settings buttons themselves, on the composer's bar and the splash")
-    (agent-repl-input-company-return . "RET in the completion popup, described under Writing prompts")
+  '((agent-repl-input-company-return . "RET in the completion popup, described under Writing prompts")
     (company-complete-selection . "TAB in the completion popup, described under Writing prompts")
     (isearch-backward . "C-r in a creation prompt's minibuffer, not the composer, described in USER-GUIDE.md")
     (agent-repl-verbs-name-minibuffer-exit . "RET in a creation's name minibuffer, not the composer, which checks the name with the daemon before it closes"))
   "Commands agent-repl binds that no help topic lists, each with why.")
-
-(defconst agent-repl-input-help-bar-background "#121212"
-  "The help bar's ground: the composer's own, `agent-repl-input-background'.
-The bar heads the composer, so the two are one color (owner request,
-2026-10-28), the webapp feed's dark `--bg'.  input.el loads after this
-file (config.el), so the value is spelled here and test-input-help.el
-pins it equal to the composer's.")
 
 (defconst agent-repl-input-help-button-background "#202020"
   "A help button's fill: a little darker than the sidebar's selected row.
@@ -342,16 +332,12 @@ that and the bar's ground, so it reads as a quieter cousin of the
 selection.  test-input-help.el checks it stays between the two, and
 webapp/test/styles.test.ts pins the selected row's color.")
 
-(agent-repl-defface 'agent-repl-input-help-bar
-  `((t :background ,agent-repl-input-help-bar-background))
-  "Face of the composer's help bar around and between its buttons.")
-
 (agent-repl-defface 'agent-repl-input-help-button
   `((t :foreground "#8b8e91" :background ,agent-repl-input-help-button-background
        :weight normal :box (:line-width (2 . -1) :style released-button)))
-  "Face of one help button in the composer's header line.
-Raised and filled a step above the bar's ground, with grey ink so the row
-stays quieter than the composer's own text.")
+  "Face of one raised button on the splash and the Settings page.
+Filled a step above the ground, with grey ink so it stays quieter than the
+surrounding text.")
 
 (agent-repl-defface 'agent-repl-input-help-title
   '((t :inherit bold :height 1.3))
@@ -369,56 +355,6 @@ stays quieter than the composer's own text.")
   '((t :inherit (shadow button)))
   "Face of a variable named in a composer help popup; clicking describes it.")
 
-;;;; ---- The header line ------------------------------------------------
-
-(defvar agent-repl-input-help-button-map (make-sparse-keymap)
-  "Keymap of the Help button in the composer's header line.")
-
-(defvar agent-repl-input-help-settings-button-map (make-sparse-keymap)
-  "Keymap of the Settings button in the composer's header line.")
-
-(defun agent-repl--input-help-fill-button-map (command)
-  "Return a fill binding a header-line button's click to COMMAND."
-  (lambda (map)
-    (define-key map [header-line mouse-1] command)
-    ;; A press on a button is not a header-line drag.
-    (define-key map [header-line down-mouse-1] #'ignore)))
-
-(agent-repl-refill-keymap agent-repl-input-help-button-map
-                          (agent-repl--input-help-fill-button-map #'agent-repl-input-help-click))
-(agent-repl-refill-keymap agent-repl-input-help-settings-button-map
-                          (agent-repl--input-help-fill-button-map #'agent-repl-settings))
-
-(defconst agent-repl-input-help--bar-buttons
-  '(("  Settings  " "mouse-1: change any key binding" agent-repl-input-help-settings-button-map)
-    ("  Help  " "mouse-1: composer keys and features" agent-repl-input-help-button-map))
-  "The bar's buttons, left to right: (LABEL HELP-ECHO KEYMAP-VARIABLE).")
-
-(defun agent-repl--input-help-button (label echo map)
-  "Return a header-line button LABEL, explained by ECHO, clicked through MAP."
-  (propertize label
-              'face 'agent-repl-input-help-button
-              'mouse-face 'mode-line-highlight
-              'pointer 'hand
-              'help-echo echo
-              'local-map map))
-
-(defun agent-repl--input-help-header-line-text ()
-  "Return the composer's header line: the bar, then its buttons at the right.
-Every column of it is this text: the bar's stretch reaches to the
-buttons, which end one column short of the window's right edge, so the
-bar's ground is `agent-repl-input-help-bar' whatever face a theme
-\(solaire's, say) remaps `header-line' to."
-  (let* ((gap (propertize " " 'face 'agent-repl-input-help-bar))
-         (buttons (mapconcat (pcase-lambda (`(,label ,echo ,map))
-                               (agent-repl--input-help-button label echo (symbol-value map)))
-                             agent-repl-input-help--bar-buttons gap))
-         (width (1+ (string-width buttons))))
-    (concat (propertize " " 'face 'agent-repl-input-help-bar
-                        'display `(space :align-to (- right ,width)))
-            buttons
-            gap)))
-
 ;;;; ---- The topic menu -------------------------------------------------
 
 (defun agent-repl--input-help-groups ()
@@ -430,50 +366,6 @@ bar's ground is `agent-repl-input-help-bar' whatever face a theme
             (setcdr group (append (cdr group) (list topic)))
           (push (list (plist-get topic :group) topic) groups))))
     (nreverse groups)))
-
-(defun agent-repl--input-help-menu ()
-  "Return the help button's menu: a submenu per group, an item per topic.
-Both in table order.  Choosing an item shows that topic
-\(`agent-repl-input-help-show')."
-  (let ((menu (make-sparse-keymap "agent-repl help")))
-    (pcase-dolist (`(,group . ,topics) (reverse (agent-repl--input-help-groups)))
-      (let ((submenu (make-sparse-keymap group)))
-        (dolist (topic (reverse topics))
-          (let ((id (plist-get topic :id)))
-            (define-key submenu (vector id)
-                        `(menu-item ,(plist-get topic :title)
-                                    ,(lambda () (interactive) (agent-repl-input-help-show id))))))
-        (define-key menu (vector (intern group)) `(menu-item ,group ,submenu))))
-    menu))
-
-;; EVERY COMPOSER'S HEADER LINE IS THIS ONE VARIABLE, never a copy of it.
-;; `header-line-format' holds the symbol, which redisplay reads afresh, so
-;; rebuilding the value on every load (the `setq' below, since `defvar'
-;; initializes once) updates every open composer by construction.  A
-;; symbol's string value keeps its text properties, the buttons, only when
-;; the symbol is risky.
-(defvar agent-repl-input-help-header-line nil
-  "The composer's header line, every composer's `header-line-format'.")
-(put 'agent-repl-input-help-header-line 'risky-local-variable t)
-(setq agent-repl-input-help-header-line (agent-repl--input-help-header-line-text))
-
-(defun agent-repl-input-help-install ()
-  "Make the current buffer's header line `agent-repl-input-help-header-line'."
-  (setq-local header-line-format 'agent-repl-input-help-header-line)
-  (force-mode-line-update))
-
-(defun agent-repl--input-help-install-in-composers ()
-  "Install the help header line in every open composer; return how many.
-A composer made before this file last loaded may hold any header line an
-older load gave it, so each load points every one at the variable."
-  (let ((count 0))
-    (dolist (buf (buffer-list))
-      (when (eq (buffer-local-value 'major-mode buf) 'agent-repl-input-mode)
-        (with-current-buffer buf (agent-repl-input-help-install))
-        (setq count (1+ count))))
-    (agent-repl--log agent-repl-input-help--log-scope
-                     "elisp.input-help.install-in-composers: composers=%d" count)
-    count))
 
 ;;;; ---- Finding a command's keys ---------------------------------------
 
@@ -790,13 +682,6 @@ Its lines wrap at word boundaries, each under its own column."
                      id (buffer-name buf))
     (agent-repl-popup-show buf)))
 
-(defun agent-repl-input-help-click (event)
-  "Drop the topic menu at the help button's click EVENT.
-Choosing a topic shows it; dismissing the menu does nothing."
-  (interactive "e")
-  (agent-repl--log agent-repl-input-help--log-scope "elisp.input-help.click: menu")
-  (popup-menu (agent-repl--input-help-menu) event))
-
 (defun agent-repl--input-help-choice (topic)
   "Return TOPIC's name in `agent-repl-input-help''s completion: GROUP: TITLE."
   (concat (plist-get topic :group) ": " (plist-get topic :title)))
@@ -813,8 +698,6 @@ Choosing a topic shows it; dismissing the menu does nothing."
                   (agent-repl--fatal agent-repl-input-help--log-scope
                                      "elisp.input-help: unknown choice=%S" choice))
               :id)))
-
-(agent-repl--input-help-install-in-composers)
 
 (provide 'input-help)
 

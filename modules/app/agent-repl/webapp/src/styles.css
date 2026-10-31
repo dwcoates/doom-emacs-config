@@ -638,8 +638,8 @@
     --turn-complete-border: #6b5a22;
     /* THE COMPOSER WEARS THE FEED'S GROUND (owner request, 2026-10-28,
        superseding the same day's sidebar ground), through the token itself,
-       so the two never drift. Emacs's input window and the help bar heading
-       it (agent-repl-input-background, lisp/input.el) wear this same color;
+       so the two never drift. Emacs's input window
+       (agent-repl-input-background, lisp/input.el) wears this same color;
        Emacs cannot read this sheet, so both suites pin the value. */
     --composer-bg: var(--bg);
     /* Both washes stay bright in the dark theme rather than being dimmed to

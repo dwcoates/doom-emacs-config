@@ -137,7 +137,6 @@
 (declare-function agent-repl-rpc-list-rollback-prompts-sync "agent-repl-rpc" (conn request &optional timeout))
 (declare-function agent-repl--format-summary-relative-time "agent-repl-prompt-summary" (sent-at &optional now))
 (declare-function agent-repl-input-attach-image "clipboard-image" (path media-type))
-(declare-function agent-repl-input-help-install "input-help" ())
 (declare-function agent-repl-held-edit-active-p "held-edit" (ws))
 (declare-function agent-repl-held-edit-commit "held-edit" (ws said snapshot))
 (declare-function agent-repl-held-edit-cancel "held-edit" (ws))
@@ -215,8 +214,7 @@ Pre-formatted once so the common case costs no formatting.")
   "The input buffer's background, a #rrggbb hex string.
 The webapp's dark `--composer-bg' (webapp/src/styles.css): the input
 window is the host-native composer, so the two wear one color, the
-feed's own `--bg' (owner request, 2026-10-28).  The help bar heading the
-composer wears it too (`agent-repl-input-help-bar-background')."
+feed's own `--bg' (owner request, 2026-10-28)."
   :type 'string
   :group 'agent-repl)
 
@@ -247,7 +245,6 @@ nothing, since the transient it raised lapses on its own."
 
 (define-derived-mode agent-repl-input-mode fundamental-mode "Agent Input"
   "Major mode for the host-native composer buffer."
-  (agent-repl-input-help-install)
   (agent-repl--set-buffer-background agent-repl-input-background)
   ;; THE COMPOSER HAS NO MODE LINE (owner ruling, 2026-10-31).  What it said
   ;; (a refused send, a held-prompt edit, the prompts waiting for the daemon)
@@ -255,6 +252,9 @@ nothing, since the transient it raised lapses on its own."
   ;; (`agent-repl--input-notify'), and the line it took is the composer's.
   ;; Buffer-local, so no other window loses its mode line.
   (setq-local mode-line-format nil)
+  ;; NOR A HEADER LINE (owner request, 2026-10-31): the Settings and Help
+  ;; buttons that filled it are reachable from the splash.
+  (setq-local header-line-format nil)
   ;; Widen the fill column so wrapped prose and `fill-paragraph' reflow to
   ;; 150 columns rather than the 70-column default.
   (setq-local fill-column 150)

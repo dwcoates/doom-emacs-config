@@ -1695,14 +1695,15 @@ workspace from the working directory, so no source tag rides it."
           (should (null sent)))
       (kill-buffer buffer))))
 
-(ert-deftest agent-repl-input-mode-header-line-is-the-help-buttons ()
-  "The composer's header line is input-help.el's row of help buttons."
+(ert-deftest agent-repl-input-mode-draws-no-header-line ()
+  "The composer draws no header line, so no Settings or Help line tops it."
   ;; Arrange.
   (with-temp-buffer
+    (setq-local header-line-format "stale")
     ;; Act.
     (agent-repl-input-mode)
     ;; Assert.
-    (should (eq header-line-format 'agent-repl-input-help-header-line))))
+    (should (null header-line-format))))
 
 (ert-deftest agent-repl-input-mode-enables-visual-line-mode ()
   "The composer turns on `visual-line-mode' so Evil moves by screen line."
