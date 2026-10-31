@@ -116,8 +116,13 @@
   (should (commandp 'agent-repl-create-oneshot)))
 
 (ert-deftest agent-repl-test-keybindings-oneshot-for-current-workspace-command-is-defined ()
-  "The SPC TAB C-o one-shot about the current workspace exists."
+  "The SPC TAB M-o one-shot about the current workspace exists."
   (should (commandp 'agent-repl-create-oneshot-for-current-workspace)))
+
+(ert-deftest agent-repl-test-keybindings-oneshot-with-model-commands-are-defined ()
+  "The SPC TAB C-o and SPC TAB C-S-o model-picking one-shots exist."
+  (should (commandp 'agent-repl-create-oneshot-with-model))
+  (should (commandp 'agent-repl-create-explanation-engine-oneshot-with-model)))
 
 (ert-deftest agent-repl-test-keybindings-explanation-engine-oneshot-command-is-defined ()
   "The SPC TAB O one-shot in the explanation-engine repository exists."
@@ -361,6 +366,21 @@ walked for KEY followed by its #\\='COMMAND."
   "`SPC TAB O\=' makes a one-shot in the explanation-engine repository."
   (should (eq (agent-repl-test-keybindings--leader-prefix-binding "TAB" "O")
               'agent-repl-create-explanation-engine-oneshot)))
+
+(ert-deftest agent-repl-test-keybindings-spc-tab-ctrl-o-is-the-oneshot-picking-a-model ()
+  "`SPC TAB C-o\=' is `SPC TAB o\=' asking for the model."
+  (should (eq (agent-repl-test-keybindings--leader-prefix-binding "TAB" "C-o")
+              'agent-repl-create-oneshot-with-model)))
+
+(ert-deftest agent-repl-test-keybindings-spc-tab-ctrl-shift-o-is-the-explanation-engine-oneshot-picking-a-model ()
+  "`SPC TAB C-S-o\=' is `SPC TAB O\=' asking for the model."
+  (should (eq (agent-repl-test-keybindings--leader-prefix-binding "TAB" "C-S-o")
+              'agent-repl-create-explanation-engine-oneshot-with-model)))
+
+(ert-deftest agent-repl-test-keybindings-spc-tab-meta-o-is-the-oneshot-fixing-the-current-workspace ()
+  "`SPC TAB M-o\=' makes a one-shot about the current workspace, moved off `SPC TAB C-o\='."
+  (should (eq (agent-repl-test-keybindings--leader-prefix-binding "TAB" "M-o")
+              'agent-repl-create-oneshot-for-current-workspace)))
 
 (ert-deftest agent-repl-test-keybindings-spc-tab-c-r-reopens-a-closed-workspace ()
   "`SPC TAB C-r\=' re-opens a closed workspace, moved off `SPC TAB O\='."

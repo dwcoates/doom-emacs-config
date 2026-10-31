@@ -136,8 +136,10 @@ the module."
        :desc "Fork into primary branch" "f" #'agent-repl-fork-workspace-into-primary
        :desc "Fork into primary branch, named (no prompt)" "F" #'agent-repl-fork-workspace-into-primary-static
        :desc "New one-shot workspace" "o" #'agent-repl-create-oneshot
-       :desc "New one-shot fixing the current workspace" "C-o" #'agent-repl-create-oneshot-for-current-workspace
+       :desc "New one-shot workspace (pick model)" "C-o" #'agent-repl-create-oneshot-with-model
+       :desc "New one-shot fixing the current workspace" "M-o" #'agent-repl-create-oneshot-for-current-workspace
        :desc "New one-shot in explanation-engine" "O" #'agent-repl-create-explanation-engine-oneshot
+       :desc "New one-shot in explanation-engine (pick model)" "C-S-o" #'agent-repl-create-explanation-engine-oneshot-with-model
        :desc "Re-open a closed workspace" "C-r" #'agent-repl-open-workspace
        :desc "Hide current workspace (off the tab bar)" "h" #'agent-repl-hide-workspace
        :desc "Show a hidden workspace and switch to it" "H" #'agent-repl-show-hidden-workspace

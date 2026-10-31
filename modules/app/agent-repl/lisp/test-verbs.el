@@ -2673,7 +2673,7 @@ Every prompt label the commission read is offered is pushed onto PROMPTS."
      ,@body))
 
 (ert-deftest agent-repl-verbs-oneshot-for-current-workspace-names-it-as-the-context ()
-  "`SPC TAB C-o\=' sends the current workspace\='s ref as the one-shot\='s context."
+  "`SPC TAB M-o\=' sends the current workspace\='s ref as the one-shot\='s context."
   (let (prompts)
     (agent-repl-test-verbs--with nil
       (agent-repl-test-verbs--with-oneshot-reads prompts
@@ -2799,8 +2799,48 @@ Every prompt label the commission read is offered is pushed onto PROMPTS."
                            (agent-repl-create-explanation-engine-oneshot
                             t nil agent-repl-verbs--explanation-engine-repository)))))))))
 
+(ert-deftest agent-repl-verbs-oneshot-with-model-is-the-agent-repl-oneshot-asking-for-the-model ()
+  "`SPC TAB C-o\=' is `SPC TAB o\=' with the model asked for."
+  ;; Arrange.
+  (let (calls)
+    (cl-letf (((symbol-function 'agent-repl-create-oneshot)
+               (lambda (&optional pick-model) (push pick-model calls))))
+      ;; Act.
+      (agent-repl-create-oneshot-with-model)
+      ;; Assert.
+      (should (equal calls '(t))))))
+
+(ert-deftest agent-repl-verbs-explanation-engine-oneshot-with-model-asks-for-the-model ()
+  "`SPC TAB C-S-o\=' is `SPC TAB O\=' with the model asked for."
+  ;; Arrange.
+  (let (calls)
+    (cl-letf (((symbol-function 'agent-repl-create-explanation-engine-oneshot)
+               (lambda (&optional pick-model) (push pick-model calls))))
+      ;; Act.
+      (agent-repl-create-explanation-engine-oneshot-with-model)
+      ;; Assert.
+      (should (equal calls '(t))))))
+
+(ert-deftest agent-repl-verbs-oneshot-with-model-sends-the-model-it-read ()
+  "`SPC TAB C-o\=' sends the model it read, through the real one-shot path."
+  ;; Arrange.
+  (let ((agent-repl-roster-view
+         (agent-repl-test-verbs--roster nil nil (agent-repl-test-verbs--agent-repl-sections)))
+        (order nil))
+    (agent-repl-test-verbs--with nil
+      (agent-repl-test-verbs--with-agent-repl-repo "/tmp/agent-repl-test/doom/.git"
+        (cl-letf (((symbol-function 'agent-repl-verbs--read-model)
+                   (lambda () (push 'model order) "sonnet"))
+                  ((symbol-function 'agent-repl-verbs--read-prompt)
+                   (lambda (_p &optional _history-file _unseeded) (push 'prompt order) "commission")))
+          ;; Act.
+          (agent-repl-create-oneshot-with-model)
+          ;; Assert.
+          (should (equal (sort order #'string<) '(model prompt)))
+          (should (equal (plist-get (agent-repl-test-verbs--request :create) :model) "sonnet")))))))
+
 (ert-deftest agent-repl-verbs-oneshot-for-current-workspace-lands-in-the-current-workspaces-repository ()
-  "`SPC TAB C-o\=' takes the current workspace\='s repository, not agent-repl\='s."
+  "`SPC TAB M-o\=' takes the current workspace\='s repository, not agent-repl\='s."
   ;; Arrange: agent-repl's repository is on the roster beside repo-one.
   (let ((agent-repl-roster-view
          (agent-repl-test-verbs--roster nil nil (agent-repl-test-verbs--agent-repl-sections))))
@@ -2814,7 +2854,7 @@ Every prompt label the commission read is offered is pushed onto PROMPTS."
                          (agent-repl-test-verbs--repo-ref))))))))
 
 (ert-deftest agent-repl-verbs-oneshot-repository-is-the-current-workspaces ()
-  "`SPC TAB C-o\=''s resolver takes the repository the current workspace sits in."
+  "`SPC TAB M-o\=''s resolver takes the repository the current workspace sits in."
   (agent-repl-test-verbs--with nil
     (cl-letf (((symbol-function 'agent-repl-verbs--section-of-ws)
                (lambda (&rest _) (agent-repl-test-verbs--repo-section))))
