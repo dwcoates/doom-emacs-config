@@ -394,10 +394,7 @@ func TestFooterAllowanceDrawnFromARateLimitEvent(t *testing.T) {
 	// The window resets in the FUTURE: a verdict about a window whose reset
 	// has passed is about a window that no longer exists, and is not drawn.
 	resetsAtMs := time.Now().Add(5 * time.Hour).UnixMilli()
-	status := ratelimittest.Allowed(ratelimittest.SevenDay())
-	utilization := 95.0
-	status.UtilizationPercent = &utilization
-	status.ResetsAtMs = &resetsAtMs
+	status := ratelimittest.Figured(ratelimittest.Allowed(ratelimittest.SevenDay()), 95, resetsAtMs)
 
 	// Act: an ALLOWED verdict, because a refusal blocks the session and moves
 	// the enduring line out of the idle cell.
@@ -1268,12 +1265,8 @@ func TestFooterTheEnduringLineStandsWithNoTransient(t *testing.T) {
 	footer := f.d.WatchFooter(f.ws)
 
 	// Act: an unremarkable weekly figure, on an allowed verdict.
-	resetsAtMs := time.Now().Add(7 * 24 * time.Hour).UnixMilli()
-	status := ratelimittest.Allowed(ratelimittest.SevenDay())
-	utilization := 12.0
-	status.UtilizationPercent = &utilization
-	status.ResetsAtMs = &resetsAtMs
-	f.shim.PushSessionUpdate(ratelimittest.Update(status))
+	f.shim.PushSessionUpdate(ratelimittest.Update(ratelimittest.Figured(
+		ratelimittest.Allowed(ratelimittest.SevenDay()), 12, time.Now().Add(7*24*time.Hour).UnixMilli())))
 
 	// Assert
 	got := awaitFooter(t, f, footer, "the enduring usage line", func(v *frontendv1.FooterView) bool {

@@ -13,16 +13,7 @@ import (
 
 // rateLimitStatus is one vendor rate-limit event for one window.
 func rateLimitStatus(window *conversationv1.SessionRateLimitType, utilization float64, resetsIn time.Duration) *conversationv1.SessionUpdate {
-	return &conversationv1.SessionUpdate{
-		Update: &conversationv1.SessionUpdate_RateLimitStatus{
-			RateLimitStatus: &conversationv1.SessionRateLimitStatus{
-				Status:             ratelimittest.Allowed(nil).Status,
-				UtilizationPercent: &utilization,
-				ResetsAtMs:         ptr(instant.Add(resetsIn).UnixMilli()),
-				RateLimitType:      window,
-			},
-		},
-	}
+	return ratelimittest.Update(ratelimittest.Figured(ratelimittest.Allowed(window), utilization, instant.Add(resetsIn).UnixMilli()))
 }
 
 // week is how far ahead a seven-day window's reset lies.

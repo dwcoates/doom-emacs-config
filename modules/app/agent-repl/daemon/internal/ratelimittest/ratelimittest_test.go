@@ -71,6 +71,58 @@ func TestStatuslessCarriesItsWindowAndNoVerdict(t *testing.T) {
 	}
 }
 
+func TestFiguredSetsTheFiguresAndKeepsTheVerdict(t *testing.T) {
+	// Arrange
+	status := Rejected(SevenDay())
+
+	// Act
+	got := Figured(status, 42, 1_700_000_000_000)
+
+	// Assert
+	if got != status || got.GetUtilizationPercent() != 42 || got.GetResetsAtMs() != 1_700_000_000_000 || got.GetRejected() == nil {
+		t.Fatalf("Figured = %+v, want the same status with 42%% resetting at 1700000000000 and its verdict kept", got)
+	}
+}
+
+// THE FIGURES HAVE ONE SPELLING in the daemon's tests, as the windows do: a
+// test file that sets an event's utilization by hand fails here.
+func TestNoTestHandRollsAnEventsFigures(t *testing.T) {
+	// Arrange
+	here, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("the working directory, which is this package's: %v", err)
+	}
+	root := filepath.Join(here, "..", "..")
+	var offenders []string
+
+	// Act
+	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || !strings.HasSuffix(path, "_test.go") || filepath.Dir(path) == here {
+			return nil
+		}
+		body, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		text := string(body)
+		if strings.Contains(text, "UtilizationPercent = &") || strings.Contains(text, "UtilizationPercent: &") {
+			offenders = append(offenders, path)
+		}
+		return nil
+	})
+
+	// Assert
+	if err != nil {
+		t.Fatalf("walk the daemon's tests: %v", err)
+	}
+	if len(offenders) != 0 {
+		t.Fatalf("test files set a rate-limit event's figures by hand instead of through ratelimittest.Figured: %v", offenders)
+	}
+}
+
 func TestUpdateWrapsTheStatus(t *testing.T) {
 	// Arrange
 	status := Rejected(FiveHour())
