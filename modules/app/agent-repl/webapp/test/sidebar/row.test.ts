@@ -13,7 +13,7 @@ import { RosterOpenRowRepositoryDividerSchema, RosterRowSchema, type RosterRowWh
 import { liveElapsedClock, liveElapsedReading } from "../../src/elapsed-clock.js";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import { heatColor } from "../../src/heat.js";
-import { HOVER_CLOSE_GRACE_MS } from "../../src/sidebar/row-hover.js";
+import { HOVER_CLOSE_GRACE_MS, HOVER_OPEN_DELAY_MS } from "../../src/sidebar/row-hover.js";
 import {
   BAND_RETURNS,
   drawBandChoices,
@@ -90,16 +90,14 @@ const nameOf = (drawn: HTMLElement): HTMLElement => lineOf(drawn).querySelector(
 const dotOf = (drawn: HTMLElement): HTMLElement =>
   lineOf(drawn).querySelector(".st") as HTMLElement;
 
-/** The row's duration field: every row's pointer trigger for the panel (owner request, 2026-10-14). */
-const durationOf = (drawn: HTMLElement): HTMLElement =>
-  lineOf(drawn).querySelector(":scope > [data-when]") as HTMLElement;
-
+/** Rest the pointer on the row's line, every row's trigger for the panel (owner request, 2026-10-31), for the open delay. */
 function hoverIn(drawn: HTMLElement): void {
-  durationOf(drawn).dispatchEvent(new MouseEvent("mouseenter"));
+  lineOf(drawn).dispatchEvent(new MouseEvent("mouseenter"));
+  vi.advanceTimersByTime(HOVER_OPEN_DELAY_MS);
 }
 
 function hoverOut(drawn: HTMLElement): void {
-  durationOf(drawn).dispatchEvent(new MouseEvent("mouseleave"));
+  lineOf(drawn).dispatchEvent(new MouseEvent("mouseleave"));
 }
 
 async function click(control: Element): Promise<void> {
@@ -1684,27 +1682,26 @@ describe("the detail panel opens on hover", () => {
     expect(drawn.classList.contains("open")).toBe(false);
   });
 
-  it("does not open when the pointer rests on the status dot", () => {
+  it("does not open before the pointer has rested on the line for the open delay", () => {
     // ARRANGE
     const drawn = drawRosterRow(row({ id: "ws-1" }), sidebarContext(), "R");
     // ACT
-    (lineOf(drawn).querySelector(".st") as HTMLElement).dispatchEvent(new MouseEvent("mouseenter"));
-    vi.runAllTimers();
+    lineOf(drawn).dispatchEvent(new MouseEvent("mouseenter"));
+    vi.advanceTimersByTime(HOVER_OPEN_DELAY_MS - 1);
     // ASSERT
     expect(drawn.classList.contains("open")).toBe(false);
   });
 
-  it("does not open when the pointer rests on the name", () => {
+  it("opens once the pointer has rested on the line for the open delay", () => {
     // ARRANGE
     const drawn = drawRosterRow(row({ id: "ws-1" }), sidebarContext(), "R");
     // ACT
-    (lineOf(drawn).querySelector(".name") as HTMLElement).dispatchEvent(new MouseEvent("mouseenter"));
-    vi.runAllTimers();
+    hoverIn(drawn);
     // ASSERT
-    expect(drawn.classList.contains("open")).toBe(false);
+    expect(drawn.classList.contains("open")).toBe(true);
   });
 
-  it("opens when the pointer reaches a running turn's duration", () => {
+  it("opens a running turn's row like any other", () => {
     // ARRANGE
     const drawn = drawRosterRow(
       row({ id: "ws-1", when: { case: "turnRunning", value: { startedAtMs: BigInt(NOW) } } }),
@@ -1714,36 +1711,27 @@ describe("the detail panel opens on hover", () => {
     // ACT
     hoverIn(drawn);
     // ASSERT
-    expect([durationOf(drawn).getAttribute("data-when"), drawn.classList.contains("open")]).toEqual(["turnRunning", true]);
+    expect(drawn.classList.contains("open")).toBe(true);
   });
 
-  it("opens the moment the pointer reaches the duration, arming no timer", () => {
+  it("opens nothing for a pointer that crosses the line within the open delay", () => {
     // ARRANGE
     const drawn = drawRosterRow(row({ id: "ws-1" }), sidebarContext(), "R");
-    const timers = vi.getTimerCount();
-    // ACT
-    hoverIn(drawn);
-    // ASSERT
-    expect([drawn.classList.contains("open"), vi.getTimerCount()]).toEqual([true, timers]);
-  });
-
-  it("does not open when the pointer rests on the row line itself", () => {
-    // ARRANGE
-    const drawn = drawRosterRow(row({ id: "ws-1" }), sidebarContext(), "R");
-    // ACT
+    // ACT: the pointer crosses the row on its way somewhere else.
     lineOf(drawn).dispatchEvent(new MouseEvent("mouseenter"));
+    vi.advanceTimersByTime(HOVER_OPEN_DELAY_MS - 1);
+    hoverOut(drawn);
     vi.runAllTimers();
     // ASSERT
     expect(drawn.classList.contains("open")).toBe(false);
   });
 
-  it("closes again after a pass-through once the grace has run out", () => {
+  it("opens nothing when the pointer rests on the panel alone", () => {
     // ARRANGE
     const drawn = drawRosterRow(row({ id: "ws-1" }), sidebarContext(), "R");
-    // ACT: the pointer crosses the duration on its way somewhere else.
-    hoverIn(drawn);
-    hoverOut(drawn);
-    vi.advanceTimersByTime(HOVER_CLOSE_GRACE_MS);
+    // ACT
+    panelOf(drawn).dispatchEvent(new MouseEvent("mouseenter"));
+    vi.runAllTimers();
     // ASSERT
     expect(drawn.classList.contains("open")).toBe(false);
   });
@@ -1795,6 +1783,27 @@ describe("the detail panel opens on hover", () => {
     expect(drawn.classList.contains("open")).toBe(false);
   });
 
+  it("opens only the child's panel for a pointer resting on a child row's line", () => {
+    // ARRANGE
+    const drawn = drawRosterFamily(openRow(row({ id: "ws-1", children: [row({ id: "ws-2" })] })), sidebarContext(), "R");
+    const child = drawn.querySelector("[data-roster-row='ws-2']") as HTMLElement;
+    // ACT
+    hoverIn(child);
+    // ASSERT
+    expect([drawn.classList.contains("open"), child.classList.contains("open")]).toEqual([false, true]);
+  });
+
+  it("carries no native tooltip on the name, the status dot or the attention marker", () => {
+    // ARRANGE
+    const drawn = drawRosterRow(row({ id: "ws-1", attention: true }), sidebarContext(), "R");
+    // ACT
+    const titled = [nameOf(drawn), dotOf(drawn), lineOf(drawn).querySelector(".sb-attn") as HTMLElement].map((el) =>
+      el.hasAttribute("title"),
+    );
+    // ASSERT
+    expect(titled).toEqual([false, false, false]);
+  });
+
   describe.each([
     {
       place: "merged" as const,
@@ -1802,10 +1811,10 @@ describe("the detail panel opens on hover", () => {
         row({ id: "ws-1", closed: true, status: { case: "merged", value: {} }, when: { case: "merged", value: { atMs: BigInt(NOW) } } }),
     },
     { place: "hidden" as const, make: () => row({ id: "ws-1", when: { case: "hidden", value: { atMs: BigInt(NOW) } } }) },
-  ])("on a $place row, whose duration is the trigger as everywhere", ({ place, make }) => {
+  ])("on a $place row, whose line is the trigger as everywhere", ({ place, make }) => {
     const bandRow = (): HTMLElement => drawRosterRow(make(), sidebarContext(), "R", place);
 
-    it("opens the moment the pointer reaches the duration", () => {
+    it("opens once the pointer has rested on the line for the open delay", () => {
       // ARRANGE
       const drawn = bandRow();
       // ACT
@@ -1814,23 +1823,13 @@ describe("the detail panel opens on hover", () => {
       expect(drawn.classList.contains("open")).toBe(true);
     });
 
-    it("closes once the pointer has left the duration and the grace has run out", () => {
+    it("closes once the pointer has left the line and the grace has run out", () => {
       // ARRANGE
       const drawn = bandRow();
       hoverIn(drawn);
       // ACT
       hoverOut(drawn);
       vi.advanceTimersByTime(HOVER_CLOSE_GRACE_MS);
-      // ASSERT
-      expect(drawn.classList.contains("open")).toBe(false);
-    });
-
-    it("does not open when the pointer rests on the row line itself", () => {
-      // ARRANGE
-      const drawn = bandRow();
-      // ACT
-      lineOf(drawn).dispatchEvent(new MouseEvent("mouseenter"));
-      vi.runAllTimers();
       // ASSERT
       expect(drawn.classList.contains("open")).toBe(false);
     });

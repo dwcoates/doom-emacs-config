@@ -1659,8 +1659,8 @@ html.sb-dragging * { -webkit-user-select: none; user-select: none; }
 /* THERE IS NO CHEVRON (owner ruling, 2026-09-14): "Hovering the workspace
    should have the same effect as opening the chevron currently does. No need
    for a chevron to show the dropdown on hover." The row opens its own panel
-   the moment the pointer reaches its duration; `row-hover.ts` owns the
-   gesture. */
+   once the pointer has rested on its line for a second; `row-hover.ts` owns
+   the gesture. */
 /* A generation is one --row-indent step, and the family guide is drawn
    where the generation's box once began, 1.55rem in from its parent's
    indent. */
