@@ -37,6 +37,18 @@ describe("nameTint", () => {
     // Assert
     expect(got).toEqual(want);
   });
+  it.each([
+    ["holds a sync merge's name at the merge's purple", "tone-purple", false],
+    ["holds a sync merge's own turn's name at the merge's purple over the row's tone", "tone-red", false],
+    ["holds a viewed sync merge's name at the merge's purple", "tone-purple", true],
+    ["holds a toneless sync merge's name at the merge's purple", "tone-none", false],
+  ] as const)("%s", (_name, tone, viewed) => {
+    // Arrange / Act
+    const got = nameTint("syncMerging", undefined, tone, viewed, 10_000);
+
+    // Assert
+    expect(got).toEqual({ kind: "syncMerging", tone: "tone-purple" });
+  });
 });
 
 describe("applyNameTint", () => {
@@ -85,6 +97,17 @@ describe("applyNameTint", () => {
 
     // Assert
     expect(label.style.getPropertyValue(NAME_FADE_PROPERTY)).toBe("");
+  });
+
+  it("marks a sync-merging name steady in its tone", () => {
+    // Arrange
+    const label = document.createElement("span");
+
+    // Act
+    applyNameTint(label, { kind: "syncMerging", tone: "tone-purple" });
+
+    // Assert
+    expect([label.classList.contains(NAME_STEADY_CLASS), label.classList.contains("tone-purple"), label.classList.contains(NAME_FADING_CLASS)]).toEqual([true, true, false]);
   });
 
   it("leaves an untinted name alone", () => {

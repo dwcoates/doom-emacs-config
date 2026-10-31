@@ -6616,13 +6616,15 @@ bubble-body.bubble-body { display: block; }
   color: color-mix(in srgb, var(--muted) 55%, transparent);
 }
 /* THE NAME'S STATUS TONE (owner request, 2026-10-29): the row's tone class
-   names the color a tinted name starts from (src/sidebar/name-tint.ts). */
-#ws-sidebar .ws.tone-blue { --name-tone: var(--init); }
-#ws-sidebar .ws.tone-purple { --name-tone: var(--blocked); }
-#ws-sidebar .ws.tone-red { --name-tone: var(--err); }
-#ws-sidebar .ws.tone-turquoise { --name-tone: var(--turquoise); }
-#ws-sidebar .ws.tone-yellow { --name-tone: var(--async); }
-#ws-sidebar .ws.tone-green { --name-tone: var(--ok); }
+   names the color a tinted name starts from (src/sidebar/name-tint.ts). A
+   tone class on the NAME itself outranks the row's: a sync merge holds the
+   name at the merge's purple whatever the row's arm. */
+#ws-sidebar .ws.tone-blue, #ws-sidebar .row .name.tone-blue { --name-tone: var(--init); }
+#ws-sidebar .ws.tone-purple, #ws-sidebar .row .name.tone-purple { --name-tone: var(--blocked); }
+#ws-sidebar .ws.tone-red, #ws-sidebar .row .name.tone-red { --name-tone: var(--err); }
+#ws-sidebar .ws.tone-turquoise, #ws-sidebar .row .name.tone-turquoise { --name-tone: var(--turquoise); }
+#ws-sidebar .ws.tone-yellow, #ws-sidebar .row .name.tone-yellow { --name-tone: var(--async); }
+#ws-sidebar .ws.tone-green, #ws-sidebar .row .name.tone-green { --name-tone: var(--ok); }
 /* A TURN RUNNING HOLDS THE NAME AT ITS TONE, a turn ended FADES it from the
    tone to the name's resting grey over the page hold (src/sidebar/name-tint.ts
    sets `--name-fade` from proto/vocab/page-hold.json, the window Emacs holds
