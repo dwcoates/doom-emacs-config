@@ -4,7 +4,8 @@
  * LEFT TIGHT, RIGHT TIGHT, AND THE TITLE IN WHAT IS BETWEEN THEM — the
  * account cell (its connectivity glyph, then its label) at the left edge, then
  * the model selector, the permission-mode picker, the context chip, the
- * persistent-wifi chip and the warning chip at the right edge.
+ * remote-control chip, the persistent-wifi chip and the warning chip at the
+ * right edge.
  *
  * THE RULE IS EQUAL CLEAR SPACE, NOT A SHARED MIDPOINT (owner ruling,
  * 2026-09-14, superseding the "true center" rule of 2026-09-13). The row is a
@@ -55,6 +56,7 @@ import { drawTopbarEffortSelector } from "./effort.js";
 import { drawTopbarModelSelector } from "./model.js";
 import { drawTopbarPermissionModePicker } from "./permission-mode.js";
 import { drawTopbarPersistentWifi } from "./persistent-wifi.js";
+import { drawTopbarRemoteControl } from "./remote-control.js";
 import { bindAccountReveal } from "./account.js";
 import { mountRevealLayer, type RevealGeometry } from "./reveal.js";
 import { bindAgentReplSessionReveal } from "./session.js";
@@ -256,8 +258,11 @@ export function drawTopbarView(u: TopbarView, tc: TopbarContext): HTMLElement {
     drawTopbarEffortSelector(u.effortSelector, tc),
     drawTopbarPermissionModePicker(u.permissionModePicker, tc),
     drawTopbarContextChip(requireMessage(u.context, "TopbarView.context"), tc),
-    // The machine's persistent-wifi chip sits between the context chip and
-    // the warning chip, on every strip alike.
+    // The workspace's remote-control chip sits IMMEDIATELY LEFT of the
+    // persistent-wifi chip (owner ruling, 2026-10-31), on every strip alike.
+    drawTopbarRemoteControl(requireMessage(u.remoteControl, "TopbarView.remoteControl"), tc),
+    // The machine's persistent-wifi chip sits between the remote-control chip
+    // and the warning chip, on every strip alike.
     drawTopbarPersistentWifi(requireMessage(u.persistentWifi, "TopbarView.persistentWifi"), tc),
   );
   // NOTHING IS DRAWN WHEN NOTHING IS WRONG: an empty warning list with no

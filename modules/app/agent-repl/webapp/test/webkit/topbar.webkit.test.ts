@@ -124,6 +124,7 @@ describe.each([1, 2])("the topbar in WebKit at %ix", (dpr) => {
       "topbar-effort",
       "topbar-mode",
       "topbar-context",
+      "topbar-remote-control",
       "topbar-wifi",
       "topbar-warnings",
     ]);
@@ -137,14 +138,14 @@ describe.each([1, 2])("the topbar in WebKit at %ix", (dpr) => {
     expect(spacings(m)[0]).toBeCloseTo(OLD_SPACING_PX * 0.7, 0);
   });
 
-  it("centers the wifi chip between the context chip and the warning chip", async () => {
+  it("centers the wifi chip between the remote-control chip and the warning chip", async () => {
     // Arrange
     const m = await rig.page.evaluate(() => window.topbarPage.drawStrip(true));
     const at = (name: string) => m.cells.find((c) => c.cell === name);
-    const [context, wifi, warnings] = [at("topbar-context"), at("topbar-wifi"), at("topbar-warnings")];
+    const [remote, wifi, warnings] = [at("topbar-remote-control"), at("topbar-wifi"), at("topbar-warnings")];
 
     // Act
-    const before = (wifi?.left ?? Number.NaN) - (context?.right ?? Number.NaN);
+    const before = (wifi?.left ?? Number.NaN) - (remote?.right ?? Number.NaN);
     const after = (warnings?.left ?? Number.NaN) - (wifi?.right ?? Number.NaN);
 
     // Assert

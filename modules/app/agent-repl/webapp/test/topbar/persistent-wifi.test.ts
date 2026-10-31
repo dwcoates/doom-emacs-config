@@ -18,7 +18,8 @@ import {
   type UpdatePersistentWifiModeResponse,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_persistent_wifi_mode_pb";
 import { MalformedView } from "../../src/rpc/malformed.js";
-import { DISC_RADIUS, drawTopbarPersistentWifi, stepOutcomeArm } from "../../src/topbar/persistent-wifi.js";
+import { DISC_RADIUS } from "../../src/topbar/disc-glyph.js";
+import { drawTopbarPersistentWifi, stepOutcomeArm } from "../../src/topbar/persistent-wifi.js";
 import { oneofArms } from "../arms.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 import { RecordingSink, appContext, topbarContext } from "./fixtures.js";
