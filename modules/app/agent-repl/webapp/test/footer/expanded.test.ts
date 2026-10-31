@@ -138,19 +138,17 @@ function drawTokensPanelWith(kind: FooterActivity): HTMLElement {
   return panel;
 }
 
-/** The rate-limit activity the sheet photographs: both windows figured. */
+/** The rate-limit activity the sheet photographs: the weekly window figured, and newsworthy. */
 function rateLimited(): FooterActivity {
   return unpinned({
-    session: { newsworthy: true, utilization: 0.82, resetsAtS: BigInt((NOW + 3_540_000) / 1000) },
-    weekly: { overall: { newsworthy: false, utilization: 0.63, resetsAtS: BigInt((NOW + 259_200_000) / 1000) } },
+    weekly: { overall: { newsworthy: true, utilization: 0.63, resetsAtS: BigInt((NOW + 259_200_000) / 1000) } },
   });
 }
 
 /** The same activity, with the overage window the vendor reported too. */
 function rateLimitedWithOverage(): FooterActivity {
   return unpinned({
-    session: { newsworthy: true, utilization: 0.82, resetsAtS: BigInt((NOW + 3_540_000) / 1000) },
-    weekly: { overall: { newsworthy: false, utilization: 0.63, resetsAtS: BigInt((NOW + 259_200_000) / 1000) } },
+    weekly: { overall: { newsworthy: true, utilization: 0.63, resetsAtS: BigInt((NOW + 259_200_000) / 1000) } },
     overage: { newsworthy: true, utilization: 0.91, resetsAtS: BigInt((NOW + 7_200_000) / 1000) },
   });
 }
@@ -192,15 +190,15 @@ describe("drawFooterUsageRows: what the strip could not fit", () => {
   it("carries the reset countdown of the newsworthy window", () => {
     const panel = drawTokensPanelWith(rateLimited());
     expect(
-      panel.querySelector('[data-usage-allowance="session"]')?.textContent,
-    ).toContain("resets in 59m");
+      panel.querySelector('[data-usage-allowance="weekly"]')?.textContent,
+    ).toContain("resets in 3d");
   });
 
   it("leads with the same window the strip leads with", () => {
     const panel = drawTokensPanelWith(rateLimited());
     expect(
       panel.querySelector("[data-usage-allowance]")?.getAttribute("data-usage-allowance"),
-    ).toBe("session");
+    ).toBe("weekly");
   });
 
   // THE OVERAGE WINDOW: one more allowance row of exactly the kind the other
@@ -227,8 +225,8 @@ describe("drawFooterUsageRows: what the strip could not fit", () => {
       [...panel.querySelectorAll("[data-usage-allowance]")].map((row) =>
         row.getAttribute("data-usage-allowance"),
       );
-    expect(labels(without)).toEqual(["session", "weekly"]);
-    expect(labels(with_)).toEqual(["session", "weekly", "overage"]);
+    expect(labels(without)).toEqual(["weekly"]);
+    expect(labels(with_)).toEqual(["weekly", "overage"]);
   });
 
   // A STANDING SALIENT LINE SHIPS NO ENDURING LINE, so there is no usage to
