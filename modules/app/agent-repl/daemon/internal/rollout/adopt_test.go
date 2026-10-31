@@ -2173,3 +2173,43 @@ func TestAStaleParticipantIsAnsweredByTheDaemonsAdoption(t *testing.T) {
 		t.Fatalf("adoptions = %v, want exactly the daemon's one", got)
 	}
 }
+
+// THE TEST-RUN SEAM holds the daemon's own adoption until the workspace's
+// participants call, and lets it go once they have.
+func TestTheParticipantSeamHoldsTheDaemonsAdoptionUntilEveryParticipantCalls(t *testing.T) {
+	// Arrange
+	adopted := make(chan ids.WorkspaceID, 4)
+	h := newHarness(t, func(d *Deps) {
+		d.AdoptAwaitsParticipants = true
+		inner := d.PublishViews
+		d.PublishViews = func(ctx context.Context, published ids.WorkspaceID) error {
+			err := inner(ctx, published)
+			adopted <- published
+			return err
+		}
+	})
+	ws, _ := h.workspace(t)
+	arm(t, h, ws, Participants{Host: true})
+	awaitRecord(t, h, opJoin, "the test-run seam holds the daemon's adoption until the workspace's participants call")
+	select {
+	case got := <-adopted:
+		t.Fatalf("adopted %q before its participant called", got)
+	default:
+	}
+
+	// Act
+	err := h.c.AdoptHost(context.Background(), ws)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("AdoptHost = %v, want the held adoption to complete", err)
+	}
+	select {
+	case got := <-adopted:
+		if got != ws {
+			t.Fatalf("adopted %q, want %q", got, ws)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the held adoption never ran after its participant called")
+	}
+}

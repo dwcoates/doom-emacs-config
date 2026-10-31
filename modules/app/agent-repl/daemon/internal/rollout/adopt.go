@@ -186,6 +186,9 @@ func (c *controller) adoptClaimed(ctx context.Context, claimed []ids.WorkspaceID
 // adoptOne adopts one claimed workspace, and on failure releases its claim and
 // hands it to the retry.
 func (c *controller) adoptOne(ctx context.Context, ws ids.WorkspaceID) {
+	if !c.awaitParticipantsForTest(ctx, ws) {
+		return
+	}
 	err := c.driveAdoption(ctx, ws, "daemon")
 	if err == nil {
 		return
@@ -205,6 +208,34 @@ func (c *controller) adoptOne(ctx context.Context, ws ids.WorkspaceID) {
 	// (`TestEmacsHandoverTransfersAtFreeness' under load, promotion at 32s and
 	// 42s against ~2s healthy).
 	go c.retryAdoption(ctx, ws)
+}
+
+// awaitParticipantsForTest is the Deps.AdoptAwaitsParticipants seam: with it
+// set, the daemon's adoption of a workspace that names participants waits for
+// every one of them to call. It answers false when the lifetime ended first.
+// Without the seam it returns at once.
+func (c *controller) awaitParticipantsForTest(ctx context.Context, ws ids.WorkspaceID) bool {
+	if !c.deps.AdoptAwaitsParticipants {
+		return true
+	}
+	c.mu.Lock()
+	e, armed := c.rendezvous[ws]
+	var called chan struct{}
+	if armed && e.expected.Count() > 0 {
+		called = e.called
+	}
+	c.mu.Unlock()
+	if called == nil {
+		return true
+	}
+	c.log.Info(opJoin, "the test-run seam holds the daemon's adoption until the workspace's participants call",
+		dlog.Context{"workspace": string(ws), "seam": EnvTestAdoptAwaitsParticipants})
+	select {
+	case <-called:
+		return true
+	case <-ctx.Done():
+		return false
+	}
 }
 
 // driveAdoption runs ONE adoption of an armed workspace on the daemon's behalf
@@ -331,6 +362,7 @@ func (c *controller) armSessions(outgoing ids.InstanceID, writtenAt time.Time, s
 		c.rendezvous[session.Workspace] = &entry{
 			outgoing: outgoing,
 			expected: expected,
+			called:   make(chan struct{}),
 			done:     make(chan struct{}),
 		}
 		c.joining[session.Workspace] = true
@@ -488,6 +520,7 @@ func (c *controller) rendezvousCall(ctx context.Context, ws ids.WorkspaceID, ope
 	}
 	before := dlog.Context{"host_called": e.hostCalled, "web_called": e.webCalled}
 	fill(e)
+	e.markCalled()
 	after := dlog.Context{"host_called": e.hostCalled, "web_called": e.webCalled}
 	// A PARTICIPANT NEVER RUNS THE ADOPTION AND NEVER HOLDS IT BACK. The
 	// daemon adopts every armed workspace itself (adoptClaimed); a call only

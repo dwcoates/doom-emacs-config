@@ -193,6 +193,9 @@ type entry struct {
 	// the handover hold, and the second's release met "lease not found"
 	// (e2e TestWebappLayerRestartHandover, 2026-09-24).
 	adopting bool
+	// called closes once every expected participant has called. Only the
+	// Deps.AdoptAwaitsParticipants test seam waits on it.
+	called chan struct{}
 	// done closes when the adoption completes. Every Adopt* call WAITS on it:
 	// the participants call concurrently and "all calls succeed together" is
 	// the rendezvous's whole meaning, so the caller that arrives first is not
@@ -236,6 +239,18 @@ func (e *entry) beginAdoption() {
 		e.done = make(chan struct{})
 		e.failed = nil
 	default:
+	}
+}
+
+// markCalled closes called once every expected participant has called.
+func (e *entry) markCalled() {
+	if e.called == nil || !e.satisfied() {
+		return
+	}
+	select {
+	case <-e.called:
+	default:
+		close(e.called)
 	}
 }
 

@@ -1465,7 +1465,7 @@ func drainOpenWorkspace(t *testing.T, d *harness.Daemon) *fixture {
 // whose gate fails opens a fixing attempt instead. Without the override the gate
 // runs the repository's own bin/test-all.sh, which a fake repository does not
 // have, and every landing died at exit 127.
-func drainSelfRepoDaemon(t *testing.T) (*harness.Repo, *harness.Daemon) {
+func drainSelfRepoDaemon(t *testing.T, extraEnv ...string) (*harness.Repo, *harness.Daemon) {
 	t.Helper()
 	selfRepo := harness.NewRepo(t)
 	script := harness.NewTestAllScript(t, selfRepo.Dir)
@@ -1474,7 +1474,7 @@ func drainSelfRepoDaemon(t *testing.T) (*harness.Repo, *harness.Daemon) {
 	selfRepo.DeploysAsAgentRepl()
 	d := harness.StartDaemon(t, harness.Opts{
 		DurableState: true,
-		ExtraEnv:     []string{harness.TestAllScriptEnv(script.Path)},
+		ExtraEnv:     append([]string{harness.TestAllScriptEnv(script.Path)}, extraEnv...),
 		// Every caller of this fixture drives a real self-reload handover
 		// (drainTriggerDeploy): a second real agent-repld boots and adopts
 		// every workspace within THIS daemon's one context, never a fresh one
@@ -1484,6 +1484,13 @@ func drainSelfRepoDaemon(t *testing.T) (*harness.Repo, *harness.Daemon) {
 	})
 	return selfRepo, d
 }
+
+// adoptAwaitsParticipantsEnv holds the successor's own adoption of each
+// workspace until its participants call (rollout.EnvTestAdoptAwaitsParticipants),
+// for a test that observes the transferred-but-not-adopted gap: in a live
+// daemon that gap closes as soon as the incumbent releases the workspace, so
+// only this seam holds it open long enough to look at.
+var adoptAwaitsParticipantsEnv = rollout.EnvTestAdoptAwaitsParticipants + "=1"
 
 // drainTriggerDeploy stages a deploy build that changes one component, then
 // lands one commit on the daemon's own checkout (selfRepo): the landing runs

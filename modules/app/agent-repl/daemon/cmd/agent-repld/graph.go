@@ -1116,6 +1116,13 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	if err != nil {
 		return nil, err
 	}
+	adoptAwaitsParticipants, err := resolveAdoptAwaitsParticipants(p.Contracts, os.Getenv(rollout.EnvTestAdoptAwaitsParticipants))
+	if err != nil {
+		log.Error(graphOperation, "the adoption participant seam was refused", dlog.Context{
+			"cause": err.Error(),
+		})
+		return nil, err
+	}
 	factsBound, err := resolveFactsBound(os.Getenv(envHandoverFactsBound))
 	if err != nil {
 		return nil, err
@@ -1133,35 +1140,36 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// which pay the landing reports it owes; both reach it through this.
 	detachedRef := &detachedForwarder{}
 	rolloutController, err := rollout.New(rollout.Deps{
-		Creates:          creates,
-		Restarts:         p.Metrics,
-		Reconnects:       p.Reconnects,
-		Reports:          detachedRef,
-		Merges:           mergeMover,
-		QueuedCreates:    queuedCreates,
-		HoldoutWarnEvery: holdoutWarnEvery,
-		FactsBound:       factsBound,
-		PublishHost:      relay.PublishHostWorkspace,
-		SelfExe:          selfExe,
-		SelfAddress:      p.Claim.Address(),
-		Instance:         p.Instance,
-		StateDir:         p.Layout.Dir(),
-		IntentManifest:   p.Layout.IntentManifest(),
-		DB:               p.DB,
-		Spawner:          rollout.NewProcessSpawner(selfExe, p.Layout.Dir(), p.Opts.inherited),
-		Announcer:        pushes,
-		Pusher:           pushes,
-		Participants:     pushes,
-		Quiesce:          intake.Quiesce,
-		DrainIntake:      intake.DrainIntake,
-		LeaseChanged:     queue.OnLeaseChanged,
-		Bounces:          queue,
-		Freeness:         fleet.Freeness(),
-		Shims:            fleet,
-		LockProbe:        fleet.ProbeLock,
-		StartSession:     fleet.Start,
-		BringingUp:       bringingUp,
-		PublishViews:     views.PublishViews,
+		Creates:                 creates,
+		Restarts:                p.Metrics,
+		Reconnects:              p.Reconnects,
+		Reports:                 detachedRef,
+		Merges:                  mergeMover,
+		QueuedCreates:           queuedCreates,
+		HoldoutWarnEvery:        holdoutWarnEvery,
+		FactsBound:              factsBound,
+		AdoptAwaitsParticipants: adoptAwaitsParticipants,
+		PublishHost:             relay.PublishHostWorkspace,
+		SelfExe:                 selfExe,
+		SelfAddress:             p.Claim.Address(),
+		Instance:                p.Instance,
+		StateDir:                p.Layout.Dir(),
+		IntentManifest:          p.Layout.IntentManifest(),
+		DB:                      p.DB,
+		Spawner:                 rollout.NewProcessSpawner(selfExe, p.Layout.Dir(), p.Opts.inherited),
+		Announcer:               pushes,
+		Pusher:                  pushes,
+		Participants:            pushes,
+		Quiesce:                 intake.Quiesce,
+		DrainIntake:             intake.DrainIntake,
+		LeaseChanged:            queue.OnLeaseChanged,
+		Bounces:                 queue,
+		Freeness:                fleet.Freeness(),
+		Shims:                   fleet,
+		LockProbe:               fleet.ProbeLock,
+		StartSession:            fleet.Start,
+		BringingUp:              bringingUp,
+		PublishViews:            views.PublishViews,
 		StateUnreported: func(ws ids.WorkspaceID, unreported bool) {
 			footerResolver.SetStateUnreported(ws, unreported)
 			sidebarResolver.SetStateUnreported(ws, unreported)
@@ -2187,6 +2195,23 @@ const envBootAdoptBound = "AGENT_REPL_BOOT_ADOPT_BOUND"
 // report a bound it never used.
 func resolveAdoptBound(value string) (time.Duration, error) {
 	return resolveDurationKnob(envBootAdoptBound, value, boot.DefaultAdoptBound)
+}
+
+// resolveAdoptAwaitsParticipants reads the rollout's test-run seam
+// (rollout.EnvTestAdoptAwaitsParticipants). Empty is unset; "1" sets it, and
+// only under a test run; any other value is a REFUSAL.
+func resolveAdoptAwaitsParticipants(contracts envc.Contracts, value string) (bool, error) {
+	switch value {
+	case "":
+		return false, nil
+	case "1":
+		if err := contracts.RequireTestRun(rollout.EnvTestAdoptAwaitsParticipants, "a live daemon never holds an adoption for its participants"); err != nil {
+			return false, fmt.Errorf("agent-repld: %w", err)
+		}
+		return true, nil
+	default:
+		return false, fmt.Errorf("agent-repld: %s=%q is not 1", rollout.EnvTestAdoptAwaitsParticipants, value)
+	}
 }
 
 // envHandoverFactsBound overrides rollout.DefaultFactsBound. It exists for

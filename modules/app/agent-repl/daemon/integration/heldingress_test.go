@@ -189,7 +189,7 @@ func TestDuringAHandoverOnlyTheServingDaemonIngestsAHeldPrompt(t *testing.T) {
 	t.Parallel()
 	// Arrange: a running turn, so the move carries it and the ingested prompt
 	// is held behind it on the successor.
-	selfRepo, d := drainSelfRepoDaemon(t)
+	selfRepo, d := drainSelfRepoDaemon(t, adoptAwaitsParticipantsEnv)
 	f := drainOpenWorkspace(t, d)
 	f.shim.ExpectStartSession()
 	f.shim.ExpectWatchSession()
