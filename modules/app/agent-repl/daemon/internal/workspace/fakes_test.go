@@ -1201,7 +1201,7 @@ func (d *fakeDB) HeldPrompts(_ context.Context, id ids.WorkspaceID) ([]wsm.HeldP
 	return d.held[id], nil
 }
 
-func (d *fakeDB) CloseOrphans(context.Context, ids.WorkspaceID, time.Time) (wsm.OrphanReport, error) {
+func (d *fakeDB) CloseOrphans(context.Context, ids.WorkspaceID, time.Time, wsm.OrphanCut) (wsm.OrphanReport, error) {
 	return d.orphanReport, nil
 }
 
@@ -1667,8 +1667,8 @@ func (q *fakeQueue) RollBack(ctx context.Context, ws ids.WorkspaceID, since time
 }
 
 // CloseOrphans is the queue's door, closing on the fixture's own store.
-func (q *fakeQueue) CloseOrphans(ctx context.Context, ws ids.WorkspaceID, at time.Time) (wsm.OrphanReport, error) {
-	return q.db.CloseOrphans(ctx, ws, at)
+func (q *fakeQueue) CloseOrphans(ctx context.Context, ws ids.WorkspaceID, at time.Time, cut wsm.OrphanCut) (wsm.OrphanReport, error) {
+	return q.db.CloseOrphans(ctx, ws, at, cut)
 }
 
 func newFakeQueue() *fakeQueue {

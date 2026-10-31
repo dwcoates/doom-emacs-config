@@ -419,6 +419,9 @@ type server struct {
 	// (response_text.go): while one is held, the next prompt revises the
 	// highlighted final response.
 	highlights responseHighlights
+	// fanOut bounds how many unrelated workspaces an agent prompts
+	// (fanout.go).
+	fanOut *fanOut
 	// rollbackPlans are the rollbacks planned and not yet performed, by the
 	// token PlanRollback minted (rollback.go). In memory: a daemon restart
 	// forgets them, and a token it never minted is refused as a stale plan.
@@ -615,6 +618,7 @@ func New(deps Deps) (Server, error) {
 		imageOverlayTopics:  make(map[ids.WorkspaceID]*publish.Topic[*frontendv1.FeedImageOverlay]),
 		composerReports:     make(map[ids.WorkspaceID]composerReport),
 		highlights:          responseHighlights{held: map[ids.WorkspaceID]responseHighlight{}},
+		fanOut:              newFanOut(),
 		composerUnanswered:  make(map[ids.WorkspaceID][]string),
 		composerEntryTopics: make(map[ids.WorkspaceID]*publish.Topic[*frontendv1.FeedComposerEntry]),
 		// The zoom starts at the persistence default; Prime seeds the stored

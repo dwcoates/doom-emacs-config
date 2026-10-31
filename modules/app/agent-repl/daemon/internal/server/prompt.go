@@ -56,12 +56,20 @@ func (s *server) SubmitPrompt(
 		}
 		return s.submitThreadQuestion(ctx, subject, req.Msg, resp)
 	}
-	sentBy, senderRefused, err := s.submitSender(ctx, subject, req.Msg.GetSentBy())
+	sentBy, senderRecord, senderRefused, err := s.submitSender(ctx, subject, req.Msg.GetSentBy())
 	if err != nil {
 		return nil, fail(subject.Log, rpc, err)
 	}
 	if senderRefused != nil {
 		return answer(resp, s.refuse(subject.Log, rpc, resp, *senderRefused))
+	}
+	// AN AGENT NEVER BROADCASTS TO THE FLEET (fanout.go): checked before
+	// anything is drawn or delivered, so a refused send wakes nobody.
+	if senderRecord != nil && !s.fanOut.admit(senderRecord, &subject.Record, req.Msg.GetAsUser(), s.now()) {
+		r := s.fanOutRefusal()
+		s.drawSent(sentPrompt{sentBy: sentBy, recipient: subject.Record.Name, key: req.Msg.GetIdempotencyKey(), said: req.Msg.GetSaid()},
+			feed.SentFate{Refused: &r.Reason})
+		return answer(resp, s.refuse(subject.Log, rpc, resp, r))
 	}
 	// EVERY ANSWER FROM HERE ON IS ALSO THE SENDER'S ROW, for a prompt an agent
 	// sent: refuse and accept draw how the send fared in the sender's feed.
@@ -231,12 +239,12 @@ func sentFateOf(d promptqueue.Disposition) feed.SentFate {
 // sender that is no other registered workspace is refused `unknown_sender`:
 // the recipient's feed heads the prompt with it, and no workspace is known to
 // have sent it.
-func (s *server) submitSender(ctx context.Context, subject resolved, ref *workspacev1.WorkspaceRef) (*ids.WorkspaceID, *refusal, error) {
+func (s *server) submitSender(ctx context.Context, subject resolved, ref *workspacev1.WorkspaceRef) (*ids.WorkspaceID, *wsm.Workspace, *refusal, error) {
 	if ref == nil {
-		return nil, nil, nil
+		return nil, nil, nil, nil
 	}
 	id := ids.WorkspaceID(ref.GetId())
-	_, err := s.deps.DB.Workspace(ctx, id)
+	record, err := s.deps.DB.Workspace(ctx, id)
 	switch {
 	case id == subject.Record.ID, errors.Is(err, wsm.ErrNotFound):
 		r := submitRefusal(s.fill(refusal{
@@ -244,13 +252,13 @@ func (s *server) submitSender(ctx context.Context, subject resolved, ref *worksp
 			Reason: fmt.Sprintf("workspace %s is no other registered workspace to have sent the prompt", id),
 			Fields: map[string]any{"sent_by": ref},
 		}))
-		return nil, &r, nil
+		return nil, nil, &r, nil
 	case err != nil:
 		subject.Log.Error(opSubmit, "could not read the workspace an agent-sent prompt names as its sender",
 			dlog.Context{"sent_by": string(id), "cause": err.Error()})
-		return nil, nil, fmt.Errorf("read sender %q: %w", id, err)
+		return nil, nil, nil, fmt.Errorf("read sender %q: %w", id, err)
 	}
-	return &id, nil, nil
+	return &id, &record, nil, nil
 }
 
 // encodeSubmitOutcome renders the handler's outcome as SubmitPromptSuccess.

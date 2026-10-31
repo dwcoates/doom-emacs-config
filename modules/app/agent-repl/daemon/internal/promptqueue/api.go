@@ -346,7 +346,7 @@ type Queue interface {
 	// that has no terminal, as orphaned, and draws each one's ending in the
 	// feed. It is THE DOOR for a boot's and a teardown's close (turnclose.go):
 	// no other production code closes a turn row.
-	CloseOrphans(ctx context.Context, ws ids.WorkspaceID, at time.Time) (wsm.OrphanReport, error)
+	CloseOrphans(ctx context.Context, ws ids.WorkspaceID, at time.Time, cut wsm.OrphanCut) (wsm.OrphanReport, error)
 	// ClaimDisplacedTurn takes a displaced turn's mark exclusively (the
 	// database arbitrates between the merge's release and the boot sweep) and
 	// reports whether this caller took it. A turn the claim closes — its

@@ -94,14 +94,14 @@ func TestCloseOrphansTellsTheFeedEveryTurnItClosed(t *testing.T) {
 	}
 
 	// Act
-	report, err := h.q.CloseOrphans(context.Background(), theWorkspace, time.UnixMilli(1))
+	report, err := h.q.CloseOrphans(context.Background(), theWorkspace, time.UnixMilli(1), wsm.ResumeCut)
 
 	// Assert
 	if err != nil || len(report.Turns) != 2 {
 		t.Fatalf("CloseOrphans = (%+v, %v), want both turns closed", report, err)
 	}
-	if got := h.feed.closedTells(); len(got) != 2 || got[0].how != wsm.CloseOrphaned || got[1].how != wsm.CloseOrphaned {
-		t.Fatalf("feed tells = %+v, want both turns told orphaned", got)
+	if got := h.feed.closedTells(); len(got) != 2 || got[0].how != wsm.CloseKilled || got[1].how != wsm.CloseKilled {
+		t.Fatalf("feed tells = %+v, want both turns told killed, which draws interrupted", got)
 	}
 }
 
@@ -112,7 +112,7 @@ func TestCloseOrphansThatFailsTellsTheFeedNothing(t *testing.T) {
 	h.db.orphansErr = errors.New("the store is down")
 
 	// Act
-	_, err := h.q.CloseOrphans(context.Background(), theWorkspace, time.UnixMilli(1))
+	_, err := h.q.CloseOrphans(context.Background(), theWorkspace, time.UnixMilli(1), wsm.ResumeCut)
 
 	// Assert
 	if err == nil {
@@ -181,7 +181,7 @@ func TestTheDoorRetiresARunningCutWhoseTurnItCloses(t *testing.T) {
 		close func(h *harness) error
 	}{
 		{name: "an orphan close", close: func(h *harness) error {
-			_, err := h.q.CloseOrphans(context.Background(), theWorkspace, time.UnixMilli(1))
+			_, err := h.q.CloseOrphans(context.Background(), theWorkspace, time.UnixMilli(1), wsm.ResumeCut)
 			return err
 		}},
 		{name: "a displaced claim", close: func(h *harness) error {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -682,6 +683,30 @@ func TestSubmitPromptRefusesASenderThatIsNoOtherWorkspace(t *testing.T) {
 				t.Fatalf("unknown_sender names %q, submits %d; want %q and nothing submitted", got, h.Prompts.submits, tt.sentBy.GetId())
 			}
 		})
+	}
+}
+
+func TestSubmitPromptRefusesASendPastTheFanOutCap(t *testing.T) {
+	// Arrange: the sender already prompted the cap's worth of strangers.
+	h := newHarness(t)
+	sentBy := registerSender(h)
+	srv := h.Server.(*server)
+	sender := h.DB.workspaces[senderWorkspaceID]
+	for i := range fanOutCap {
+		if !srv.fanOut.admit(&sender, &wsm.Workspace{ID: ids.WorkspaceID("stranger-" + strconv.Itoa(i))}, false, srv.now()) {
+			t.Fatalf("stranger %d refused, want admitted under the cap", i)
+		}
+	}
+
+	// Act
+	resp, err := submitAgentPrompt(h, conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT, sentBy)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("SubmitPrompt: %v", err)
+	}
+	if got := resp.Msg.GetError().GetFanOutRefused(); got.GetCap() != fanOutCap || h.Prompts.submits != 0 {
+		t.Fatalf("fan_out_refused = %v, submits %d; want the cap named and nothing submitted", got, h.Prompts.submits)
 	}
 }
 

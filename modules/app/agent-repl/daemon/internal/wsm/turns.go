@@ -555,7 +555,18 @@ func (s *store) AcceptIdempotencyKey(ctx context.Context, id WorkspaceID, key st
 // they are — holds survive a shutdown — and the session's engagement is stamped
 // in the same transaction, so a crash mid-teardown can never leave half the
 // bookkeeping done.
-func (s *store) CloseOrphans(ctx context.Context, id WorkspaceID, at time.Time) (OrphanReport, error) {
+//
+// A TURN STILL OPEN HERE WAS CUT, NOT LOST (owner ruling, 2026-10-30). It was
+// running when its session went away under it -- a bounce, a forced deploy, a
+// crash of the daemon, the user's kill -- and none of those is the work's own
+// failure. So each one closes as KILLED, which the feed draws "interrupted".
+// With ResumeCut it is also recorded owed a resumption in the SAME transaction
+// (owed_resumptions), which the workspace's next serving session pays with the
+// "continue" prompt and deletes (ClaimResumptions); the user's own kill passes
+// LeaveCut, since the user stopped that work on purpose. Closing it as orphaned drew a cut as a failed
+// turn and resumed nothing, and a workspace whose shim died before writing its
+// own interrupted terminal lost its work silently.
+func (s *store) CloseOrphans(ctx context.Context, id WorkspaceID, at time.Time, cut OrphanCut) (OrphanReport, error) {
 	var report OrphanReport
 	err := s.write(ctx, "daemon.wsm.close_orphans", dlog.Context{"workspace": string(id), "at": at}, func(ctx context.Context, tx *sql.Tx) error {
 		// Reading through the same all-or-nothing decoder is what makes a
@@ -565,23 +576,57 @@ func (s *store) CloseOrphans(ctx context.Context, id WorkspaceID, at time.Time) 
 			return err
 		}
 		closed := make([]TurnID, 0, len(open))
+		how := make(map[TurnID]TurnClose, len(open))
 		for _, t := range open {
-			if _, err := tx.ExecContext(ctx, `UPDATE turns SET closed_at = ?, close_kind = ? WHERE id = ?`,
-				nanos(at), int(CloseOrphaned), t.ID); err != nil {
+			// A TURN WHOSE SUBMISSION WAS NEVER ACCEPTED WAS NOT CUT: the vendor
+			// may never have seen its prompt, and the client's retry of that
+			// prompt is what re-drives it (ClaimIdempotencyKey reopens an
+			// orphaned close). It stays orphaned and owes nothing, so a
+			// "continue" never stands in for a prompt the conversation lacks.
+			unaccepted, err := hasUnacceptedClaim(ctx, tx, id, t.ID)
+			if err != nil {
 				return err
 			}
+			kind := CloseKilled
+			if unaccepted {
+				kind = CloseOrphaned
+			}
+			if _, err := tx.ExecContext(ctx, `UPDATE turns SET closed_at = ?, close_kind = ? WHERE id = ?`,
+				nanos(at), int(kind), t.ID); err != nil {
+				return err
+			}
+			if cut == ResumeCut && !unaccepted {
+				if _, err := tx.ExecContext(ctx,
+					`INSERT INTO owed_resumptions (turn_id, workspace_id, interrupted_at) VALUES (?, ?, ?)
+					 ON CONFLICT(turn_id) DO NOTHING`, t.ID, id, nanos(at)); err != nil {
+					return err
+				}
+			}
 			closed = append(closed, t.ID)
+			how[t.ID] = kind
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE sessions SET last_engagement_at = ? WHERE workspace_id = ?`, nanos(at), id); err != nil {
 			return err
 		}
-		report = OrphanReport{Turns: closed, At: at.UTC()}
+		report = OrphanReport{Turns: closed, How: how, At: at.UTC()}
 		return nil
 	})
 	if err != nil {
 		return OrphanReport{}, err
 	}
 	return report, nil
+}
+
+// hasUnacceptedClaim reports whether turn is bound to an idempotency claim the
+// prompt queue never accepted: a submission still waiting on its retry.
+func hasUnacceptedClaim(ctx context.Context, tx *sql.Tx, id WorkspaceID, turn TurnID) (bool, error) {
+	var n int
+	if err := tx.QueryRowContext(ctx,
+		`SELECT count(*) FROM idempotency_keys WHERE workspace_id = ? AND turn_id = ? AND accepted_at IS NULL`,
+		id, turn).Scan(&n); err != nil {
+		return false, err
+	}
+	return n > 0, nil
 }
 
 // AllDisplacedTurns loads every turn still marked displaced, all-or-nothing.

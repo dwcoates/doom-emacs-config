@@ -146,7 +146,7 @@ var cliNouns = map[string]map[string]cliCommand{
 	workspaceNoun: {
 		"create":      {usage: "create -repository here|DIR -relationship child|peer [-parent WS] [-lands-into WS|main] [-origin-master] [-owner-notice TEXT] -context fresh|fork [-fork WS] [-one-shot] [-prompt TEXT] [-name NAME] [-model M] [-priority p05|p1|p2|p3] [-pre-deploy-prompt TEXT] [-pre-deploy-script PATH:SECONDS] [-post-deploy-prompt TEXT] [-post-deploy-script PATH:SECONDS] [-as-user]", run: workspaceCreate},
 		"async-merge": {usage: "async-merge -name NAME -branch BRANCH (-maker WS | -maker-subagent ID) -context-fork WS -target primary|maker -placement back|front|behind=MERGE [-instruction TEXT] [-close-after WS] [-cleanup-worktree] [-compact-after] [-pre-deploy-prompt TEXT] [-pre-deploy-script PATH:SECONDS] [-post-deploy-prompt TEXT] [-post-deploy-script PATH:SECONDS] [-version-part minor|patch -changelog-line TEXT]", run: workspaceAsyncMerge},
-		"prompt":      {usage: "prompt WS TEXT", run: workspacePrompt},
+		"prompt":      {usage: "prompt [-as-user] WS TEXT", run: workspacePrompt},
 		"set":         {usage: "set WS [-hidden|-shown] [-priority p05|p1|p2|p3|none] [-parent WS|-top-level] [-lands-into WS|main] [-one-shot|-not-one-shot] [-await WS|-not-awaiting] [-name NAME] [-as-user]", run: workspaceSet},
 		"link":        {usage: "link WS (-url URL -label TEXT | -remove URL | -show URL [-show URL]... | -clear)", run: workspaceLink},
 		"finished":    {usage: "finished WS -placement back|front|behind=MERGE [-version-part minor|patch -changelog-line TEXT] [-as-user]", run: workspaceFinished},
@@ -816,6 +816,7 @@ func (c *cliCall) targetArgs(fs *flag.FlagSet, stateDir *string, args []string, 
 
 func workspacePrompt(c *cliCall, args []string) int {
 	fs, stateDir := c.flags()
+	asUser := fs.Bool("as-user", false, "the user explicitly asked for this send: lifts the fan-out cap")
 	ref, rest, ok := c.workspaceArg(fs, stateDir, args)
 	if !ok {
 		return exitFailure
@@ -835,7 +836,7 @@ func workspacePrompt(c *cliCall, args []string) int {
 		return exitFailure
 	}
 	resp, err := c.client.SubmitPrompt(c.ctx, connect.NewRequest(&agentreplv1.SubmitPromptRequest{Workspace: ref, Said: feed.SaidText(rest[0]),
-		IdempotencyKey: key, Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT, SentBy: sender}))
+		IdempotencyKey: key, Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT, SentBy: sender, AsUser: *asUser}))
 	return answer(c, resp, err)
 }
 

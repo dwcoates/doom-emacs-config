@@ -688,6 +688,20 @@ func TestPromptIsSentAsTheAgents(t *testing.T) {
 	}
 }
 
+func TestPromptAsUserSaysTheUserAsked(t *testing.T) {
+	// Arrange
+	f := newCLIFixture()
+
+	// Act
+	code := f.run(workspaceNoun, "prompt", "-as-user", "peer", "please rebase")
+
+	// Assert
+	req := only[*agentreplv1.SubmitPromptRequest](t, f)
+	if code != exitSuccess || !req.GetAsUser() {
+		t.Fatalf("exit %d, prompt %v; want the send marked as the user's", code, req)
+	}
+}
+
 func TestPromptNamesTheCallingWorkspaceAsItsSender(t *testing.T) {
 	// Arrange
 	f := newCLIFixture()

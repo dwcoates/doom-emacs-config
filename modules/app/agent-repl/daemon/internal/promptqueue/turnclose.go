@@ -64,17 +64,26 @@ func (q *queue) turnClosed(ws ids.WorkspaceID, turn ids.TurnID, close wsm.Record
 }
 
 // CloseOrphans closes, in one transaction, every turn of a workspace that has
-// no terminal, as orphaned, and draws each one's ending. See the Queue
-// interface.
-func (q *queue) CloseOrphans(ctx context.Context, ws ids.WorkspaceID, at time.Time) (wsm.OrphanReport, error) {
-	report, err := q.deps.DB.CloseOrphans(ctx, ws, at)
+// no terminal -- a turn cut under its session closes as killed and draws
+// "interrupted", one whose submission was never accepted stays orphaned (wsm
+// store.CloseOrphans) -- and draws each one's ending. See the Queue interface.
+func (q *queue) CloseOrphans(ctx context.Context, ws ids.WorkspaceID, at time.Time, cut wsm.OrphanCut) (wsm.OrphanReport, error) {
+	report, err := q.deps.DB.CloseOrphans(ctx, ws, at, cut)
 	if err != nil {
 		// NOTHING WAS CLOSED: the transaction is whole or nothing, so no
 		// ending is owed and none is drawn. The caller records the failure.
 		return wsm.OrphanReport{}, fmt.Errorf("close the orphaned turns of %q: %w", ws, err)
 	}
 	for _, turn := range report.Turns {
-		q.turnClosed(ws, turn, wsm.RecordedClose{How: wsm.CloseOrphaned, At: report.At}, q.workspaceLog(ctx, ws))
+		how, ok := report.How[turn]
+		if !ok {
+			how = wsm.CloseOrphaned
+			if log, err := q.logger(ctx, ws); err == nil {
+				log.Error(opTurnEnded, "the store closed a turn without saying how; its ending is drawn as orphaned",
+					dlog.Context{"turn": string(turn)})
+			}
+		}
+		q.turnClosed(ws, turn, wsm.RecordedClose{How: how, At: report.At}, q.workspaceLog(ctx, ws))
 	}
 	return report, nil
 }

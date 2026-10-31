@@ -378,7 +378,8 @@ func TestAPromptSentWhileABootsWatcherIsOpeningIsDelivered(t *testing.T) {
 // door: a turn running when the daemon and its shim both died is closed by the
 // successor's boot while no feed has seen it, and the successor's replay of
 // the conversation draws its ending from that recorded close, so it never
-// replays as running.
+// replays as running. A crash cut the turn, so the ending is "interrupted"
+// (owner ruling, 2026-10-30), never a failure.
 func TestATurnCutBeforeABootReplaysAsEnded(t *testing.T) {
 	t.Parallel()
 	// Arrange: a turn running when the daemon and its shim both die.
@@ -419,10 +420,10 @@ func TestATurnCutBeforeABootReplaysAsEnded(t *testing.T) {
 	f.host = successor.WatchHost(f.ws)
 	f.web = successor.WatchWeb(f.ws)
 
-	// Assert: the replayed feed ends the cut turn as dropped.
+	// Assert: the replayed feed ends the cut turn as interrupted.
 	f.openFeedOnceCarrying("the cut turn's replayed ending", func(p *frontendv1.FeedPage) bool {
 		for _, row := range p.GetSuccess().GetRows() {
-			if row.GetTurn().GetValue() == cut && row.GetTurnEnded().GetErrored().GetTurnFailed().GetStopReason() == "closed:orphaned" {
+			if row.GetTurn().GetValue() == cut && row.GetTurnEnded().GetInterrupted() != nil {
 				return true
 			}
 		}

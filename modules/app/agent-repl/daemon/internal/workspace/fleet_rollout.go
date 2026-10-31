@@ -258,15 +258,20 @@ func (f *Fleet) CaptureDisplaced(ctx context.Context, ws ids.WorkspaceID) (Displ
 	return Displaced{Turn: *inFlight, Text: record.Text}, true, nil
 }
 
-// oweCutTurn records the resumption a stand-down owes for the turn running on
-// ws, when this daemon's own stand-down is the one ending the session
-// (promptqueue/restartredrive.go). It is recorded HERE, before the kill, as well
-// as where the turn closes: a forced stop can take the shim down before it
-// writes the turn's interrupted terminal, and a turn with no terminal closes
-// only as orphaned at the next boot, which by itself would owe nothing. A
-// stop no stand-down ordered (the idle sweep's, a user's kill) owes nothing.
+// oweCutTurn records the resumption owed for the turn running on ws when
+// agent-repl ITSELF is ending the session (promptqueue/restartredrive.go): its
+// own stand-down, or any kill the daemon orders for a reason of its own (a
+// forced handover, a replacement, a rebind). It is recorded HERE, before the
+// kill, as well as where the turn closes: a forced stop can take the shim down
+// before it writes the turn's interrupted terminal.
+//
+// EVERY TURN AGENT-REPL CUTS IS RESUMED (owner ruling, 2026-10-30): the feed
+// draws it "interrupted" and the workspace's next serving session continues
+// it. Only the USER'S OWN KILL (StandDownKill) owes nothing: the user stopped
+// that work on purpose. A session with no turn running owes nothing either.
 func (f *Fleet) oweCutTurn(ctx context.Context, ws ids.WorkspaceID) {
-	if !f.deps.Supervisor.StandingDown() {
+	reason, stated := shimlife.StandDownOf(ctx)
+	if reason == shimlife.StandDownKill || (!stated && !f.deps.Supervisor.StandingDown()) {
 		return
 	}
 	watcher, ok := f.sessionWatcher(ws)

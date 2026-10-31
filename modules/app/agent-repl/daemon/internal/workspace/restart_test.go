@@ -50,6 +50,24 @@ func TestRestartForceEndsTheRunningTurnFirst(t *testing.T) {
 	}
 }
 
+func TestRestartOwesTheTurnItCutsItsResumption(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	turn := wsm.TurnID("t1")
+	f.running.Turn = &turn
+
+	// Act.
+	if err := f.verbs.Restart(context.Background(), "w1"); err != nil {
+		t.Fatalf("Restart: %v", err)
+	}
+
+	// Assert.
+	if got := f.db.owedTurns("w1"); len(got) != 1 || got[0] != turn {
+		t.Fatalf("owed = %v, want the cut turn %q owed its resumption", got, turn)
+	}
+}
+
 // TestRestartKillStatesNoCommand pins that a restart's kill states no HOW:
 // whether it is a user stop is not settled, so it relays none.
 func TestRestartKillStatesNoCommand(t *testing.T) {

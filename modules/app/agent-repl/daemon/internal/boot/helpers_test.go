@@ -128,8 +128,8 @@ func (q *fakeQueue) ReleaseReconnectHolds(ws wsm.WorkspaceID) {
 }
 
 // CloseOrphans is the queue's door, closing on the boot's own state client.
-func (q *fakeQueue) CloseOrphans(ctx context.Context, ws wsm.WorkspaceID, at time.Time) (wsm.OrphanReport, error) {
-	return q.db().CloseOrphans(ctx, ws, at)
+func (q *fakeQueue) CloseOrphans(ctx context.Context, ws wsm.WorkspaceID, at time.Time, cut wsm.OrphanCut) (wsm.OrphanReport, error) {
+	return q.db().CloseOrphans(ctx, ws, at, cut)
 }
 
 func (q *fakeQueue) RestoreHolds(context.Context) error {
@@ -641,7 +641,7 @@ type failingCloseOrphans struct {
 	err error
 }
 
-func (d failingCloseOrphans) CloseOrphans(context.Context, wsm.WorkspaceID, time.Time) (wsm.OrphanReport, error) {
+func (d failingCloseOrphans) CloseOrphans(context.Context, wsm.WorkspaceID, time.Time, wsm.OrphanCut) (wsm.OrphanReport, error) {
 	return wsm.OrphanReport{}, d.err
 }
 

@@ -962,11 +962,26 @@ const (
 
 // OrphanReport is what CloseOrphans closed, in one transaction.
 type OrphanReport struct {
-	// Turns are the turns closed as orphans.
+	// Turns are the turns closed (store.CloseOrphans).
 	Turns []TurnID
+	// How is each closed turn's close: killed for a turn cut under its
+	// session, orphaned for one whose submission was never accepted.
+	How map[TurnID]TurnClose
 	// At is the instant stamped on every close.
 	At time.Time
 }
+
+// OrphanCut says whether CloseOrphans owes the turns it closes a resumption.
+type OrphanCut int
+
+const (
+	// ResumeCut owes each closed turn its resumption: agent-repl, not the
+	// user, took the session away under it, and the next serving session
+	// continues it.
+	ResumeCut OrphanCut = iota
+	// LeaveCut owes nothing: the user ended the session (KillWorkspace).
+	LeaveCut
+)
 
 // Task is one user task.
 type Task struct {

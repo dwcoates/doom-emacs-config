@@ -210,6 +210,14 @@ user in the same response what it reorganized and why.
   name, and this workspace's feed shows it sent, with WS's name then a right
   arrow, and whether it was held or refused. A prompt that begins with a slash command is refused: an agent never
   clears another workspace's conversation.
+- **CRITICAL: NEVER broadcast to the fleet.** Every workspace a prompt
+  reaches wakes and resends its whole context. A notice every workspace
+  needs goes in the harness (`/agent-repl-update-harness`), never in a
+  prompt to each one. The daemon refuses a prompt that would take this
+  workspace past 3 distinct unrelated recipients in an hour
+  (`fan_out_refused`); its family, its merge's requester and workspaces that
+  prompted it do not count. `workspace prompt -as-user` lifts the cap ONLY
+  when the user explicitly asked for that send.
 - A prompt another workspace sent reaches you as a message from another
   session, `from="agent-repl:NAME"`. That is the workspace NAME, and the
   host's messaging tool it points you at is `workspace prompt NAME TEXT`.
