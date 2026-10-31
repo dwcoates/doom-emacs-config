@@ -3245,6 +3245,34 @@ describe("the working prose's right edge", () => {
     expect(cards).toMatch(/max-width:\s*var\(--agent-bubble-cap\)/);
   });
 
+  /** An unreadable row's placeholder, mounted as a feed row's body the way `feed-view.ts` draws it. */
+  function malformedRow(): HTMLElement {
+    const row = document.createElement("div");
+    row.className = "feed-item";
+    const placeholder = document.createElement("div");
+    placeholder.className = "row-malformed";
+    row.append(placeholder);
+    return row;
+  }
+
+  it.each([
+    ["max-width", "var(--agent-bubble-cap)"],
+    ["margin-left", "auto"],
+    ["margin-right", "auto"],
+  ])("bounds an unreadable row's placeholder by the stream through its %s", (property, expected) => {
+    // Arrange / Act
+    const value = inDocument(malformedRow(), (row) => cascadedValue(row.firstElementChild!, property));
+    // Assert
+    expect(value).toBe(expected);
+  });
+
+  it("outlines an unreadable row's placeholder with a solid line", () => {
+    // Arrange / Act -- jsdom leaves a `var()` border shorthand unexpanded, so the declaration is what is pinned.
+    const border = ownDeclarationsOf(".row-malformed") ?? "";
+    // Assert
+    expect(border).toMatch(/(?:^|[\s;])border:\s*1px solid var\(--err\)/);
+  });
+
   /** The `--bubble-scroll-gap` BUBBLE inherits or sets, mounted in the main column that declares it. */
   function scrollGapOf(bubble: HTMLElement): string {
     const column = document.createElement("div");

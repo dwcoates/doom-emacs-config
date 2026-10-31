@@ -2843,7 +2843,8 @@ html[data-page-unshown] {
    bubble is capped at. A permission request, the resolved card that replaces
    it, an AskUserQuestion Q&A (both `.tool-card`s since 2026-10-11), an
    unsupported-command or /status panel, a lone `.tool-card`, a consecutive-run `.feed-group`
-   wrapping one, and a thinking fold now all stop at the response's right
+   wrapping one, a thinking fold, and an unreadable row's placeholder
+   (`.row-malformed`) now all stop at the response's right
    edge — no card kind is allowed a wider or a narrower ceiling than the
    answer it sits beside, so the feed reads as one column rather than a stack
    of subtly different widths. Equal auto margins center each card in that
@@ -2858,7 +2859,8 @@ html[data-page-unshown] {
    are NOT centered — each fits its text and hugs its own rail (see below). */
 .feed-item > .tool-card,
 .feed-item > .feed-group,
-.feed-item > .thinking {
+.feed-item > .thinking,
+.feed-item > .row-malformed {
   max-width: var(--agent-bubble-cap);
   margin-left: auto;
   margin-right: auto;
@@ -6090,12 +6092,14 @@ bubble-body.bubble-body { display: block; }
 }
 
 /* A row this build could not draw. Compact and loud enough to be noticed
-   without displacing the rest of the feed, which goes on working. */
+   without displacing the rest of the feed, which goes on working. Its width
+   is the stream's (the feed-card rule above caps it), and its outline is a
+   solid line (owner request, 2026-10-31). */
 .row-malformed {
   font-family: var(--mono, ui-monospace, monospace);
   font-size: 0.75rem;
   color: var(--err);
-  border: 1px dashed var(--err);
+  border: 1px solid var(--err);
   border-radius: 4px;
   padding: 0.2rem 0.5rem;
 }
