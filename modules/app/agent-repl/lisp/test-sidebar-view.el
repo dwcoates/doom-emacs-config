@@ -317,7 +317,7 @@ Binds `made' to that buffer; it is killed afterwards."
     (agent-repl-sidebar-view-ensure (agent-repl-test-sv--conn "127.0.0.1:5"))
     (let ((warned nil))
       (cl-letf (((symbol-function 'agent-repl--warn)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) warned))))
+                 (agent-repl-test--record-into warned)))
         (with-current-buffer made (agent-repl--sidebar-view-refuse-kill)))
       (should (string-search "kill-refused" (car warned))))))
 

@@ -1985,6 +1985,17 @@ export function railScrollKept(region: { scrollTop: number }, top: number): void
   region.scrollTop = top;
 }
 
+/**
+ * A SIDEBAR POPUP WAS DRAWN AGAIN OVER THE FEED: put one of its scrollers back
+ * at TOP, where the reader left it (owner request 2026-10-31). The host draws
+ * the copy anew each time the sidebar hands it the panel (host/sidebar-popups.ts),
+ * and a fresh copy starts at its top; this undoes that, so it is no move of
+ * its own.
+ */
+export function popupScrollKept(region: { scrollTop: number }, top: number): void {
+  region.scrollTop = top;
+}
+
 /** The sub-feed bubble a merge tab's output is drawn in, which bounds `openAtNewest`. */
 const BUBBLE_FOLD_SELECTOR = ".bubble-fold";
 

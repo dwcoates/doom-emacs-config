@@ -30,7 +30,9 @@
  * and is drawn into the host verbatim: nothing in it comes from outside the
  * webapp's own DOM.
  */
+import { pageMutationObserver, queryAll } from "../dom.js";
 import { log } from "../log.js";
+import { popupScrollKept } from "../scroll.js";
 import { clampBeside, type Rect } from "../topbar/clamp.js";
 
 /** The channel both documents open, on the host origin. */
@@ -162,14 +164,14 @@ export function installPopupLayer(env: PopupLayerEnv): PopupLayer {
   /** The scroll offsets of the panel and every scroller in it, in drawn order. */
   const scrollTops = (): number[] => {
     const drawn = panel();
-    return drawn === null ? [] : [drawn, ...drawn.querySelectorAll<HTMLElement>("*")].map((el) => el.scrollTop);
+    return drawn === null ? [] : [drawn, ...queryAll<HTMLElement>(drawn, "*")].map((el) => el.scrollTop);
   };
   const restoreScrollTops = (tops: readonly number[]): void => {
     const drawn = panel();
     if (drawn === null) return;
-    [drawn, ...drawn.querySelectorAll<HTMLElement>("*")].forEach((el, i) => {
+    [drawn, ...queryAll<HTMLElement>(drawn, "*")].forEach((el, i) => {
       const top = tops[i];
-      if (top !== undefined && top > 0) el.scrollTop = top;
+      if (top !== undefined && top > 0) popupScrollKept(el, top);
     });
   };
 
@@ -277,12 +279,13 @@ export interface PopupMirror {
 /** What the mirror needs from its environment, injectable for tests. */
 export interface PopupMirrorEnv {
   readonly channel: PopupChannel;
-  /** Watch EL's subtree, calling FN on every change; a MutationObserver when omitted. Answers the stop. */
+  /** Watch EL's subtree, calling FN on every change; the page's own mutation observer when omitted. Answers the stop. */
   readonly watch?: (el: Element, fn: () => void) => () => void;
 }
 
 function observeSubtree(el: Element, fn: () => void): () => void {
-  const observer = new MutationObserver(fn);
+  // THE PAGE'S OWN OBSERVER (dom.ts), disconnected as the page hides.
+  const observer = pageMutationObserver(el.ownerDocument, fn);
   observer.observe(el, { subtree: true, childList: true, characterData: true, attributes: true });
   return () => observer.disconnect();
 }
