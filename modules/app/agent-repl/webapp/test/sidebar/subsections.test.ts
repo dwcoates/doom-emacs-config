@@ -1155,7 +1155,7 @@ describe("the one-shot subsection", () => {
     // Arrange
     const { sc } = marking(() =>
       create(SetWorkspaceOneShotResponseSchema, {
-        result: { case: "error", value: { cause: { case: "ownerLands", value: {} } } },
+        result: { case: "error", value: { cause: { case: "closed", value: {} } } },
       }),
     );
     const pane = mount(example(), sc);
@@ -1165,7 +1165,7 @@ describe("the one-shot subsection", () => {
     await drag(rowLine(pane, "a"), 5, 115);
 
     // Assert
-    expect([document.querySelector('.refusal[data-arm="ownerLands"]') !== null, sc.arrange.hold.holding()]).toEqual([true, false]);
+    expect([document.querySelector('.refusal[data-arm="closed"]') !== null, sc.arrange.hold.holding()]).toEqual([true, false]);
   });
 
   it("places a row dragged out of it where it was dropped, which clears the mark", async () => {
@@ -1222,7 +1222,6 @@ describe("setWorkspaceOneShotRefusal", () => {
   it.each([
     ["closed", "the workspace is closed"],
     ["noCreationJob", "a registered workspace cannot be a one-shot"],
-    ["ownerLands", "its owner lands this workspace, so it is never a one-shot"],
     ["requesterMayNotSet", "only the workspace, its owner or the user may mark it"],
   ])("words %s", (arm, text) => {
     expect(setWorkspaceOneShotRefusal({ case: arm, value: {} } as never)).toBe(text);

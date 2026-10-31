@@ -260,8 +260,6 @@ export function setWorkspaceOneShotRefusal(cause: NonNullable<SetWorkspaceOneSho
       return "the workspace is closed";
     case "noCreationJob":
       return "a registered workspace cannot be a one-shot";
-    case "ownerLands":
-      return "its owner lands this workspace, so it is never a one-shot";
     case "requesterMayNotSet":
       return "only the workspace, its owner or the user may mark it";
     default: {
