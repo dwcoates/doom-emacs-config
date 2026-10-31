@@ -23,6 +23,8 @@ syntax = "proto3";
 
 package agentrepl.v1;
 
+import "agentrepl/v1/pull_request.proto";
+
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 
 // Every link a workspace holds, and the standing of its summary menu.
@@ -57,7 +59,8 @@ message WorkspaceLinkOwnership {
   oneof ownership {
     // The workspace's work made it: a pull request it opened, a branch it
     // pushed, a doc or a ticket it wrote. The Slack thread a workspace was
-    // created for is shown every owned link when the work is done.
+    // created for is shown every owned link when the work is done, and the
+    // daemon follows an owned pull request for the workspace.
     WorkspaceLinkOwned owned = 1;
     // It exists apart from the workspace's work, which only points at it: the
     // thread or ticket the task came from, a design doc it read, a dashboard.
@@ -65,8 +68,14 @@ message WorkspaceLinkOwnership {
   }
 }
 
-// The workspace's work made it. DELIBERATELY EMPTY: the arm is the ownership.
-message WorkspaceLinkOwned {}
+// The workspace's work made it.
+message WorkspaceLinkOwned {
+  // Whether the daemon follows what the link points at: an owned GitHub pull
+  // request is followed for every activity kind (SubscribePullRequest's
+  // notices). Set on every answer; ignored on a request, where only the arm
+  // is read.
+  optional WorkspaceLinkOwnedFollow follow = 1;
+}
 
 // The workspace's work only points at it. DELIBERATELY EMPTY: the arm is the
 // ownership.
@@ -115,3 +124,40 @@ message WorkspaceLinksMenuFull {
   // shown.
   uint32 unshown = 2;
 }
+
+// ---- Follow: how the daemon follows an owned link ----
+
+// Whether the daemon follows an owned link. THE ARM IS THE STANDING.
+message WorkspaceLinkOwnedFollow {
+  oneof standing {
+    // The link is a GitHub pull request the workspace is subscribed to
+    // (PullRequestSubscriptionOriginOwnedLink).
+    WorkspaceLinkOwnedFollowFollowing following = 1;
+    // The pull request merged or closed, and its subscription ended.
+    WorkspaceLinkOwnedFollowEnded ended = 2;
+    // The subscription was ended by UnsubscribePullRequest while the link
+    // stayed owned. Setting the link owned again re-subscribes it.
+    WorkspaceLinkOwnedFollowUnsubscribed unsubscribed = 3;
+    // The url is no resource the daemon follows (not a github.com pull
+    // request), so owning it changes nothing the daemon does.
+    WorkspaceLinkOwnedFollowNotFollowable not_followable = 4;
+  }
+}
+
+// Followed.
+message WorkspaceLinkOwnedFollowFollowing {
+  // The subscription, with its health.
+  PullRequestSubscription subscription = 1;
+}
+
+// Ended with its pull request.
+message WorkspaceLinkOwnedFollowEnded {
+  // How the pull request ended: its merged or closed state.
+  PullRequestState state = 1;
+}
+
+// Unsubscribed by request. DELIBERATELY EMPTY: the arm is the standing.
+message WorkspaceLinkOwnedFollowUnsubscribed {}
+
+// Nothing to follow. DELIBERATELY EMPTY: the arm is the standing.
+message WorkspaceLinkOwnedFollowNotFollowable {}

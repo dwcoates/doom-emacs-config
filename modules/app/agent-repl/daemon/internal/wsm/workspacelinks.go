@@ -50,8 +50,31 @@ type WorkspaceLink struct {
 	// Shown is true while the menu shows the link.
 	Shown bool
 	// Owned is true when the workspace's work made what the link points at,
-	// false when it only references it.
+	// false when it only references it (agentrepl.v1.WorkspaceLinkOwnership).
 	Owned bool
+	// PullRequest is the GitHub pull request the url names; nil for any
+	// other url.
+	PullRequest *PullRequestKey
+	// Follow is the workspace's subscription to PullRequest, ended or not;
+	// nil when it holds none.
+	Follow *PullRequestSubscription
+}
+
+// LinkSet is one store or relabel of a link (SetWorkspaceLink).
+type LinkSet struct {
+	URL   string
+	Label string
+	// Owned is the link's ownership.
+	Owned bool
+	// PullRequest is the GitHub pull request the url names; nil for any
+	// other url.
+	PullRequest *PullRequestKey
+	// Subscribe is the subscription an owned pull request takes when the
+	// workspace holds none to it; nil leaves subscriptions untouched. Its
+	// subscriber and pull request are the link's. One whose Ended is set is
+	// recorded ended: the pull request had already merged or closed, so it is
+	// never followed and the link says how it ended.
+	Subscribe *PullRequestSubscription
 }
 
 // UnknownLinkError is a removal or a show naming a url the workspace does not
@@ -81,14 +104,22 @@ func (s *store) WorkspaceLinks(ctx context.Context, id WorkspaceID) ([]Workspace
 	return out, err
 }
 
-// SetWorkspaceLink stores URL under LABEL with its ownership, or relabels it
-// and sets its ownership anew when ID already holds it, making it the most
-// recently set either way. A new link is shown while fewer than
-// ShownLinkLimit are; a relabeled one keeps its placement. It answers every
+// SetWorkspaceLink stores SET's url under its label and ownership, or
+// relabels it when ID already holds it, making it the most recently set
+// either way. A new link is shown while fewer than ShownLinkLimit are; a
+// relabeled one keeps its placement. In the same transaction an owned pull
+// request takes SET.Subscribe when ID holds no subscription to it, and a link
+// no longer owned ends the subscription its ownership took. It answers every
 // link ID now holds, read in the same transaction.
-func (s *store) SetWorkspaceLink(ctx context.Context, id WorkspaceID, url, label string, owned bool) ([]WorkspaceLink, error) {
+func (s *store) SetWorkspaceLink(ctx context.Context, id WorkspaceID, set LinkSet) ([]WorkspaceLink, error) {
 	const op = "daemon.wsm.set_workspace_link"
-	fields := dlog.Context{"workspace": string(id), "url": url, "label": label, "owned": owned}
+	url, label := set.URL, set.Label
+	fields := dlog.Context{"workspace": string(id), "url": url, "label": label, "owned": set.Owned}
+	if set.Subscribe != nil && (!set.Owned || set.PullRequest == nil || set.Subscribe.PullRequest != *set.PullRequest || set.Subscribe.Subscriber != id) {
+		err := fmt.Errorf("wsm: link of %s: a subscription is taken only for the owned pull request the link names", id)
+		s.log.Error(op, "refused a link its caller should never have made", withError(fields, err))
+		return nil, err
+	}
 	if url == "" || label == "" {
 		err := fmt.Errorf("wsm: link of %s: a link names its url and its label", id)
 		s.log.Error(op, "refused a link its caller should never have made", withError(fields, err))
@@ -105,10 +136,17 @@ func (s *store) SetWorkspaceLink(ctx context.Context, id WorkspaceID, url, label
 			id).Scan(&next, &shown); err != nil {
 			return err
 		}
+		var owner, repo, number any
+		if pr := set.PullRequest; pr != nil {
+			owner, repo, number = pr.Owner, pr.Repo, pr.Number
+		}
 		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO workspace_links (workspace_id, url, label, set_seq, shown, owned) VALUES (?, ?, ?, ?, ?, ?)
+			`INSERT INTO workspace_links (workspace_id, url, label, set_seq, shown, owned, pr_owner, pr_repo, pr_number) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 			 ON CONFLICT(workspace_id, url) DO UPDATE SET label = excluded.label, set_seq = excluded.set_seq, owned = excluded.owned`,
-			id, url, label, next, shown < ShownLinkLimit, owned); err != nil {
+			id, url, label, next, shown < ShownLinkLimit, set.Owned, owner, repo, number); err != nil {
+			return err
+		}
+		if err := s.followLinkInTx(ctx, tx, id, set); err != nil {
 			return err
 		}
 		var err error
@@ -118,13 +156,17 @@ func (s *store) SetWorkspaceLink(ctx context.Context, id WorkspaceID, url, label
 	return out, err
 }
 
-// RemoveWorkspaceLink removes URL from ID's links, answering the links ID
-// still holds. A url ID does not hold is an *UnknownLinkError.
+// RemoveWorkspaceLink removes URL from ID's links, ending the subscription
+// its ownership took, and answers the links ID still holds. A url ID does not
+// hold is an *UnknownLinkError.
 func (s *store) RemoveWorkspaceLink(ctx context.Context, id WorkspaceID, url string) ([]WorkspaceLink, error) {
 	const op = "daemon.wsm.remove_workspace_link"
 	var out []WorkspaceLink
 	err := s.write(ctx, op, dlog.Context{"workspace": string(id), "url": url}, func(ctx context.Context, tx *sql.Tx) error {
 		if err := requireWorkspaceRow(ctx, tx, id); err != nil {
+			return err
+		}
+		if err := endOwnedFollowsInTx(ctx, tx, id, `AND url = ?`, url); err != nil {
 			return err
 		}
 		res, err := tx.ExecContext(ctx, `DELETE FROM workspace_links WHERE workspace_id = ? AND url = ?`, id, url)
@@ -191,6 +233,9 @@ func (s *store) ClearWorkspaceLinks(ctx context.Context, id WorkspaceID) error {
 		if err := requireWorkspaceRow(ctx, tx, id); err != nil {
 			return err
 		}
+		if err := endOwnedFollowsInTx(ctx, tx, id, ``); err != nil {
+			return err
+		}
 		_, err := tx.ExecContext(ctx, `DELETE FROM workspace_links WHERE workspace_id = ?`, id)
 		return err
 	})
@@ -204,14 +249,79 @@ func requireWorkspaceRow(ctx context.Context, tx *sql.Tx, id WorkspaceID) error 
 	return scanWorkspaceRow(ctx, tx, id, "id", &registered)
 }
 
-// linksOf reads ID's links, most recently set first.
+// followLinkInTx keeps SET's pull request's ownership subscription in step
+// with the link: taken when owned and none is held, ended when no longer
+// owned.
+func (s *store) followLinkInTx(ctx context.Context, tx *sql.Tx, id WorkspaceID, set LinkSet) error {
+	if set.PullRequest == nil {
+		return nil
+	}
+	if !set.Owned {
+		_, err := deletePullRequestSubscription(ctx, tx, id, *set.PullRequest, PullRequestOriginOwnedLink)
+		return err
+	}
+	if set.Subscribe == nil {
+		return nil
+	}
+	sub := *set.Subscribe
+	var ended, mergeSHA any
+	if sub.Ended != nil {
+		ended = "closed"
+		if sub.Ended.Merged {
+			ended, mergeSHA = "merged", sub.Ended.MergeSHA
+		}
+	}
+	_, err := tx.ExecContext(ctx,
+		`INSERT INTO pull_request_subscriptions (subscriber, owner, repo, number, events, origin, subscribed_at, told, ended, ended_merge_sha) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 ON CONFLICT(subscriber, owner, repo, number) DO NOTHING`,
+		id, sub.PullRequest.Owner, sub.PullRequest.Repo, sub.PullRequest.Number, int64(sub.Events), string(PullRequestOriginOwnedLink), nanos(sub.SubscribedAt), sub.Told, ended, mergeSHA)
+	return err
+}
+
+// endOwnedFollowsInTx ends the ownership subscriptions of ID's owned pull
+// request links that WHERE (an `AND ...` clause over workspace_links, with
+// ARGS) selects.
+func endOwnedFollowsInTx(ctx context.Context, tx *sql.Tx, id WorkspaceID, where string, args ...any) error {
+	_, err := tx.ExecContext(ctx, `DELETE FROM pull_request_subscriptions WHERE origin = ? AND subscriber = ? AND (owner, repo, number) IN (
+		SELECT pr_owner, pr_repo, pr_number FROM workspace_links WHERE workspace_id = ? AND owned = 1 AND pr_number IS NOT NULL `+where+`)`,
+		append([]any{string(PullRequestOriginOwnedLink), id, id}, args...)...)
+	return err
+}
+
+// linksOf reads ID's links, most recently set first, each owned pull request
+// with the workspace's subscription to it.
 func linksOf(ctx context.Context, q querier, id WorkspaceID) ([]WorkspaceLink, error) {
-	return listRows(ctx, q, `SELECT url, label, shown, owned FROM workspace_links WHERE workspace_id = ? ORDER BY set_seq DESC`,
+	links, err := listRows(ctx, q, `SELECT url, label, shown, owned, pr_owner, pr_repo, pr_number FROM workspace_links WHERE workspace_id = ? ORDER BY set_seq DESC`,
 		func(row interface{ Scan(...any) error }) (WorkspaceLink, error) {
-			var link WorkspaceLink
-			err := row.Scan(&link.URL, &link.Label, &link.Shown, &link.Owned)
+			var (
+				link        WorkspaceLink
+				owner, repo sql.NullString
+				number      sql.NullInt64
+			)
+			err := row.Scan(&link.URL, &link.Label, &link.Shown, &link.Owned, &owner, &repo, &number)
+			if number.Valid {
+				link.PullRequest = &PullRequestKey{Owner: owner.String, Repo: repo.String, Number: uint32(number.Int64)}
+			}
 			return link, err
 		}, id)
+	if err != nil {
+		return nil, err
+	}
+	for i := range links {
+		pr := links[i].PullRequest
+		if pr == nil {
+			continue
+		}
+		subs, err := listRows(ctx, q, `SELECT `+pullRequestColumns+` FROM pull_request_subscriptions WHERE subscriber = ? AND owner = ? AND repo = ? AND number = ?`,
+			scanPullRequestSubscription, id, pr.Owner, pr.Repo, pr.Number)
+		if err != nil {
+			return nil, err
+		}
+		if len(subs) == 1 {
+			links[i].Follow = &subs[0]
+		}
+	}
+	return links, nil
 }
 
 // hasRepeat reports whether any url appears twice.

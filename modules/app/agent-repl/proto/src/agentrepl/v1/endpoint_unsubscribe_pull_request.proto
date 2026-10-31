@@ -1,0 +1,60 @@
+// endpoint_unsubscribe_pull_request.proto — UnsubscribePullRequest: end one
+// workspace's subscription to a pull request. AGENT API section.
+//
+// NO AGENT CALLS IT AS A MATTER OF POLICY: the daemon ends a subscription
+// itself when the pull request merges or closes. It exists for programs, for
+// tests, and for the user. Ending a subscription taken for an owned link
+// leaves the link stored and owned, and the link then says it is no longer
+// followed (WorkspaceLinkOwnedFollowUnsubscribed).
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/pull_request.proto";
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message UnsubscribePullRequestRequest {
+  // The workspace whose subscription ends.
+  workspace.v1.WorkspaceRef subscriber = 1;
+  // The pull request it follows.
+  PullRequestRef pull_request = 2;
+}
+
+// THE ARM IS THE OUTCOME.
+message UnsubscribePullRequestResponse {
+  oneof result {
+    UnsubscribePullRequestSuccess success = 1;
+    UnsubscribePullRequestError error = 2;
+  }
+}
+
+// The request was served. Holding no such subscription is an answer, not a
+// failure: either way the subscriber now holds none.
+message UnsubscribePullRequestSuccess {
+  // THE ARM IS WHAT WAS FOUND.
+  oneof ended {
+    // The subscription ended.
+    UnsubscribePullRequestSuccessUnsubscribed unsubscribed = 1;
+    // There was no subscription to end.
+    UnsubscribePullRequestSuccessNotSubscribed not_subscribed = 2;
+  }
+}
+
+// Ended. DELIBERATELY EMPTY.
+message UnsubscribePullRequestSuccessUnsubscribed {}
+
+// None held. DELIBERATELY EMPTY.
+message UnsubscribePullRequestSuccessNotSubscribed {}
+
+message UnsubscribePullRequestError {
+  oneof cause {
+    // The subscriber is not in the daemon's registry.
+    UnsubscribePullRequestUnknownSubscriber unknown_subscriber = 1;
+  }
+}
+
+// The subscriber id is not in the daemon's registry. DELIBERATELY EMPTY.
+message UnsubscribePullRequestUnknownSubscriber {}

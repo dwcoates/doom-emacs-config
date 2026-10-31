@@ -180,3 +180,33 @@ func TestParseLeftRightCount(t *testing.T) {
 		})
 	}
 }
+
+func TestRemoteURLAnswersWhatGitPrints(t *testing.T) {
+	// Arrange.
+	git, _ := newTestClient(t)
+	fake := newFakeGit(t, ok("git@github.com:/dwcoates/doom-emacs-config.git\n"))
+
+	// Act.
+	got, err := git.RemoteURL(context.Background(), "/repo", "origin")
+
+	// Assert.
+	if err != nil || got != "git@github.com:/dwcoates/doom-emacs-config.git" {
+		t.Fatalf("RemoteURL = %q, %v; want the url without its newline", got, err)
+	}
+	fake.assertSubject(0, "remote", "get-url", "origin")
+}
+
+func TestRemoteURLOfAMissingRemoteIsGitsFailure(t *testing.T) {
+	// Arrange.
+	git, _ := newTestClient(t)
+	newFakeGit(t, fails(2, "error: No such remote 'origin'\n"))
+
+	// Act.
+	_, err := git.RemoteURL(context.Background(), "/repo", "origin")
+
+	// Assert.
+	var gitErr *Error
+	if !errors.As(err, &gitErr) || gitErr.ExitCode != 2 {
+		t.Fatalf("RemoteURL = %v, want git's exit-2 failure", err)
+	}
+}

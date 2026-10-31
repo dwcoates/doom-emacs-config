@@ -1006,3 +1006,31 @@ func (s *requestLoggingServer) ShowSidebarApp(
 ) (*connect.Response[agentreplv1.ShowSidebarAppResponse], error) {
 	return serveUnary(s, ctx, "ShowSidebarApp", req, s.server.ShowSidebarApp)
 }
+
+func (s *requestLoggingServer) SubscribePullRequest(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.SubscribePullRequestRequest],
+) (*connect.Response[agentreplv1.SubscribePullRequestResponse], error) {
+	return serveUnary(s, ctx, "SubscribePullRequest", req, s.server.SubscribePullRequest)
+}
+
+func (s *requestLoggingServer) UnsubscribePullRequest(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.UnsubscribePullRequestRequest],
+) (*connect.Response[agentreplv1.UnsubscribePullRequestResponse], error) {
+	return serveUnary(s, ctx, "UnsubscribePullRequest", req, s.server.UnsubscribePullRequest)
+}
+
+func (s *requestLoggingServer) ListPullRequestSubscriptions(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.ListPullRequestSubscriptionsRequest],
+) (*connect.Response[agentreplv1.ListPullRequestSubscriptionsResponse], error) {
+	return serveUnary(s, ctx, "ListPullRequestSubscriptions", req, s.server.ListPullRequestSubscriptions)
+}
+
+func (s *requestLoggingServer) CommentOnPullRequest(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.CommentOnPullRequestRequest],
+) (*connect.Response[agentreplv1.CommentOnPullRequestResponse], error) {
+	return serveUnary(s, ctx, "CommentOnPullRequest", req, s.server.CommentOnPullRequest)
+}

@@ -244,8 +244,12 @@ func TestLinksView(t *testing.T) {
 	shownArm := &agentreplv1.WorkspaceLinkPlacement{Placement: &agentreplv1.WorkspaceLinkPlacement_Shown{Shown: &agentreplv1.WorkspaceLinkPlacementShown{}}}
 	unshownArm := &agentreplv1.WorkspaceLinkPlacement{Placement: &agentreplv1.WorkspaceLinkPlacement_Unshown{Unshown: &agentreplv1.WorkspaceLinkPlacementUnshown{}}}
 	referenceArm := &agentreplv1.WorkspaceLinkOwnership{Ownership: &agentreplv1.WorkspaceLinkOwnership_Reference{Reference: &agentreplv1.WorkspaceLinkReference{}}}
-	ownedArm := &agentreplv1.WorkspaceLinkOwnership{Ownership: &agentreplv1.WorkspaceLinkOwnership_Owned{Owned: &agentreplv1.WorkspaceLinkOwned{}}}
-	pull := wsm.WorkspaceLink{URL: "https://github.com/a/b/pull/7", Label: "The fix itself", Shown: true, Owned: true}
+	// An owned link carries how the daemon follows it: this pull request is
+	// owned and holds no subscription.
+	ownedArm := &agentreplv1.WorkspaceLinkOwnership{Ownership: &agentreplv1.WorkspaceLinkOwnership_Owned{Owned: &agentreplv1.WorkspaceLinkOwned{
+		Follow: &agentreplv1.WorkspaceLinkOwnedFollow{Standing: &agentreplv1.WorkspaceLinkOwnedFollow_Unsubscribed{Unsubscribed: &agentreplv1.WorkspaceLinkOwnedFollowUnsubscribed{}}}}}}
+	pull := wsm.WorkspaceLink{URL: "https://github.com/a/b/pull/7", Label: "The fix itself", Shown: true, Owned: true,
+		PullRequest: &wsm.PullRequestKey{Owner: "a", Repo: "b", Number: 7}}
 	five := []wsm.WorkspaceLink{docLink, docLink, docLink, docLink, docLink}
 	tests := []struct {
 		name  string
@@ -286,6 +290,96 @@ func TestLinksView(t *testing.T) {
 			// Assert.
 			if !proto.Equal(got, tt.want) {
 				t.Fatalf("LinksView = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSetLinkFollowsAnOwnedPullRequest(t *testing.T) {
+	prURL := "https://github.com/ChessCom/explanation-engine/pull/42"
+	pr := wsm.PullRequestKey{Owner: "ChessCom", Repo: "explanation-engine", Number: 42}
+	tests := []struct {
+		name             string
+		url              string
+		owned            bool
+		held             bool
+		anchorErr        error
+		wantPR           bool
+		wantAnchor       bool
+		wantSub          bool
+		wantTold         string
+		wantUnreadRecord bool
+	}{
+		{name: "an owned pull request is anchored and subscribed", url: prURL, owned: true, wantPR: true, wantAnchor: true, wantSub: true, wantTold: "anchored"},
+		{name: "an owned pull request already followed reads nothing", url: prURL, owned: true, held: true, wantPR: true},
+		{name: "an owned pull request that cannot be read is subscribed unanchored", url: prURL, owned: true, anchorErr: errors.New("down"),
+			wantPR: true, wantAnchor: true, wantSub: true, wantUnreadRecord: true},
+		{name: "a referenced pull request names it and subscribes nothing", url: prURL, wantPR: true},
+		{name: "an owned link that is no pull request subscribes nothing", url: docLink.URL, owned: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			f.workspace("w1", t.TempDir())
+			f.anchors.err = tt.anchorErr
+			if tt.held {
+				f.db.prSubs = map[ids.WorkspaceID][]wsm.PullRequestSubscription{"w1": {{Subscriber: "w1", PullRequest: pr}}}
+			}
+
+			// Act.
+			_, err := f.verbs.SetLink(context.Background(), "w1", tt.url, "The pull request", tt.owned)
+
+			// Assert.
+			if err != nil || len(f.db.linkSets) != 1 {
+				t.Fatalf("SetLink = %v with %d sets, want one set written", err, len(f.db.linkSets))
+			}
+			set := f.db.linkSets[0]
+			if set.Owned != tt.owned || (set.PullRequest != nil) != tt.wantPR || (set.PullRequest != nil && *set.PullRequest != pr) {
+				t.Errorf("set = %+v, want owned %v naming the pull request %v", set, tt.owned, tt.wantPR)
+			}
+			if (len(f.anchors.asked) == 1) != tt.wantAnchor || (set.Subscribe != nil) != tt.wantSub {
+				t.Errorf("anchored %v, subscribe %+v; want anchored %v subscribing %v", f.anchors.asked, set.Subscribe, tt.wantAnchor, tt.wantSub)
+			}
+			if tt.wantSub && (set.Subscribe.Told != tt.wantTold || set.Subscribe.Origin != wsm.PullRequestOriginOwnedLink || set.Subscribe.Events != wsm.AllPullRequestEvents()) {
+				t.Errorf("subscription = %+v, want every event for the owned link, told %q", set.Subscribe, tt.wantTold)
+			}
+			_, recorded := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: opChangeLinks,
+				Message: "the owned pull request could not be read, so it is followed unanchored: its first successful read tells what is already on it"})
+			if recorded != tt.wantUnreadRecord {
+				t.Errorf("unread record %v, want %v", recorded, tt.wantUnreadRecord)
+			}
+		})
+	}
+}
+
+func TestLinksViewSaysHowAnOwnedLinkIsFollowed(t *testing.T) {
+	pr := &wsm.PullRequestKey{Owner: "o", Repo: "r", Number: 1}
+	tests := []struct {
+		name string
+		link wsm.WorkspaceLink
+		arm  string
+	}{
+		{name: "a reference", link: wsm.WorkspaceLink{URL: "u", PullRequest: pr}, arm: "reference"},
+		{name: "owned and followed", link: wsm.WorkspaceLink{URL: "u", Owned: true, PullRequest: pr,
+			Follow: &wsm.PullRequestSubscription{PullRequest: *pr, Events: wsm.AllPullRequestEvents(), Origin: wsm.PullRequestOriginOwnedLink}}, arm: "following"},
+		{name: "owned and ended", link: wsm.WorkspaceLink{URL: "u", Owned: true, PullRequest: pr,
+			Follow: &wsm.PullRequestSubscription{PullRequest: *pr, Ended: &wsm.PullRequestEnd{Merged: true}}}, arm: "ended"},
+		{name: "owned and unsubscribed", link: wsm.WorkspaceLink{URL: "u", Owned: true, PullRequest: pr}, arm: "unsubscribed"},
+		{name: "owned and no pull request", link: wsm.WorkspaceLink{URL: "u", Owned: true}, arm: "not_followable"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act.
+			rel := LinksView([]wsm.WorkspaceLink{tt.link}).GetLinks()[0].GetOwnership()
+
+			// Assert.
+			got := "reference"
+			if owned := rel.GetOwned(); owned != nil {
+				got = string(owned.GetFollow().ProtoReflect().WhichOneof(owned.GetFollow().ProtoReflect().Descriptor().Oneofs().ByName("standing")).Name())
+			}
+			if got != tt.arm {
+				t.Fatalf("ownership = %v, want %s", rel, tt.arm)
 			}
 		})
 	}

@@ -1259,7 +1259,9 @@ func (o *orchestrator) admitFront(ctx context.Context, repo wsm.RepoKey) (ids.Wo
 	line.Lock()
 	defer line.Unlock()
 	o.mu.Lock()
-	busy := o.running[repo] != nil
+	// A MAIN SYNC HOLDING THE TARGET admits nothing until it releases
+	// (synchold.go), and its release kicks this pump.
+	busy := o.running[repo] != nil || o.syncing[repo]
 	o.mu.Unlock()
 	if busy {
 		return "", nil, false, nil

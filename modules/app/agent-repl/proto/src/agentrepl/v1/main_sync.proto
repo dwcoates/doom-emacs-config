@@ -1,0 +1,85 @@
+// main_sync.proto — WHY THE DAEMON COULD NOT BRING A REPOSITORY'S MAIN
+// CHECKOUT UP TO ITS UPSTREAM, as it tells the repository's main workspace.
+//
+// MAIN SYNC IS THE DAEMON'S ALONE. Each sweep of the registered repositories
+// fetches every primary branch's upstream and counts the two against each
+// other. A branch that is behind and not ahead is fast-forwarded in the main
+// checkout (`git merge --ff-only`, never `git pull`, whose behavior follows
+// each user's own pull settings), between the main workspace's turns and
+// never while the repository's merge queue writes the branch. No workspace is
+// involved in a fetch that fails for want of a network: it is logged and
+// tried again on the next sweep.
+//
+// A WORKSPACE IS TOLD ONLY WHAT IT MUST REPAIR. When the fast-forward itself
+// fails in the index or the worktree, the daemon submits a MainSyncFailure to
+// the repository's main workspace as a deferred prompt of origin
+// conversation.v1.PromptOrigin.PROMPT_ORIGIN_MAIN_SYNC_REPAIR, asking it to
+// bring the branch to the upstream tip; a closed main workspace is reopened
+// to receive it. One failure is told once per upstream commit and cause: the
+// same failure found by the next sweep is logged, not told again, and a newer
+// upstream commit supersedes an untold notice.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// One failed fast-forward of a repository's main checkout.
+message MainSyncFailure {
+  // The repository.
+  workspace.v1.RepositoryRef repository = 1;
+  // The primary branch, by name (`master`, `main`).
+  string branch = 2;
+  // The upstream it tracks, by name (`origin/master`).
+  string upstream = 3;
+  // The commit the branch held when the fast-forward was tried.
+  string local_sha = 4;
+  // The upstream commit it was to move to.
+  string upstream_sha = 5;
+  // Why it could not.
+  MainSyncFailureCause cause = 6;
+}
+
+// Why a fast-forward failed. THE ARM IS THE CAUSE. A set wrapper whose oneof
+// is unassigned is a cause this schema revision does not name.
+message MainSyncFailureCause {
+  oneof cause {
+    // The branch holds commits the upstream lacks, so it cannot be
+    // fast-forwarded; the two must be reconciled.
+    MainSyncFailureDiverged diverged = 1;
+    // Changes in the main checkout's worktree or index touch files the
+    // fast-forward would change, and git refused rather than overwrite them.
+    // Nothing was changed.
+    MainSyncFailureLocalChanges local_changes = 2;
+    // git failed for another reason: a held index lock, a failing hook, a
+    // corrupt object.
+    MainSyncFailureGitFailed git_failed = 3;
+  }
+}
+
+// Diverged.
+message MainSyncFailureDiverged {
+  // Commits on the branch and not on the upstream; at least one.
+  uint32 ahead = 1;
+  // Commits on the upstream and not on the branch; at least one.
+  uint32 behind = 2;
+}
+
+// Local changes in the way.
+message MainSyncFailureLocalChanges {
+  // The paths git named, relative to the checkout's root.
+  repeated string paths = 1;
+}
+
+// git failed.
+message MainSyncFailureGitFailed {
+  // The git command, as run.
+  string command = 1;
+  // Its exit status.
+  int32 exit_status = 2;
+  // Its standard error, verbatim.
+  string stderr = 3;
+}

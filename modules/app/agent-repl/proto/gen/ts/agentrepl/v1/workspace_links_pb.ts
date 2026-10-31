@@ -25,13 +25,15 @@
 
 import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
+import type { PullRequestState, PullRequestSubscription } from "./pull_request_pb";
+import { file_agentrepl_v1_pull_request } from "./pull_request_pb";
 import type { Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file agentrepl/v1/workspace_links.proto.
  */
 export const file_agentrepl_v1_workspace_links: GenFile = /*@__PURE__*/
-  fileDesc("CiJhZ2VudHJlcGwvdjEvd29ya3NwYWNlX2xpbmtzLnByb3RvEgxhZ2VudHJlcGwudjEibAoOV29ya3NwYWNlTGlua3MSKgoFbGlua3MYASADKAsyGy5hZ2VudHJlcGwudjEuV29ya3NwYWNlTGluaxIuCgRtZW51GAIgASgLMiAuYWdlbnRyZXBsLnYxLldvcmtzcGFjZUxpbmtzTWVudSKdAQoNV29ya3NwYWNlTGluaxILCgN1cmwYASABKAkSDQoFbGFiZWwYAiABKAkSNwoJcGxhY2VtZW50GAMgASgLMiQuYWdlbnRyZXBsLnYxLldvcmtzcGFjZUxpbmtQbGFjZW1lbnQSNwoJb3duZXJzaGlwGAQgASgLMiQuYWdlbnRyZXBsLnYxLldvcmtzcGFjZUxpbmtPd25lcnNoaXAikwEKFldvcmtzcGFjZUxpbmtPd25lcnNoaXASMQoFb3duZWQYASABKAsyIC5hZ2VudHJlcGwudjEuV29ya3NwYWNlTGlua093bmVkSAASOQoJcmVmZXJlbmNlGAIgASgLMiQuYWdlbnRyZXBsLnYxLldvcmtzcGFjZUxpbmtSZWZlcmVuY2VIAEILCglvd25lcnNoaXAiFAoSV29ya3NwYWNlTGlua093bmVkIhgKFldvcmtzcGFjZUxpbmtSZWZlcmVuY2UioQEKFldvcmtzcGFjZUxpbmtQbGFjZW1lbnQSOgoFc2hvd24YASABKAsyKS5hZ2VudHJlcGwudjEuV29ya3NwYWNlTGlua1BsYWNlbWVudFNob3duSAASPgoHdW5zaG93bhgCIAEoCzIrLmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VMaW5rUGxhY2VtZW50VW5zaG93bkgAQgsKCXBsYWNlbWVudCIdChtXb3Jrc3BhY2VMaW5rUGxhY2VtZW50U2hvd24iHwodV29ya3NwYWNlTGlua1BsYWNlbWVudFVuc2hvd24ijAEKEldvcmtzcGFjZUxpbmtzTWVudRI0CgRyb29tGAEgASgLMiQuYWdlbnRyZXBsLnYxLldvcmtzcGFjZUxpbmtzTWVudVJvb21IABI0CgRmdWxsGAIgASgLMiQuYWdlbnRyZXBsLnYxLldvcmtzcGFjZUxpbmtzTWVudUZ1bGxIAEIKCghzdGFuZGluZyImChZXb3Jrc3BhY2VMaW5rc01lbnVSb29tEgwKBGZyZWUYASABKA0iOAoWV29ya3NwYWNlTGlua3NNZW51RnVsbBINCgVsaW1pdBgBIAEoDRIPCgd1bnNob3duGAIgASgNQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw");
+  fileDesc("CiJhZ2VudHJlcGwvdjEvd29ya3NwYWNlX2xpbmtzLnByb3RvEgxhZ2VudHJlcGwudjEibAoOV29ya3NwYWNlTGlua3MSKgoFbGlua3MYASADKAsyGy5hZ2VudHJlcGwudjEuV29ya3NwYWNlTGluaxIuCgRtZW51GAIgASgLMiAuYWdlbnRyZXBsLnYxLldvcmtzcGFjZUxpbmtzTWVudSKdAQoNV29ya3NwYWNlTGluaxILCgN1cmwYASABKAkSDQoFbGFiZWwYAiABKAkSNwoJcGxhY2VtZW50GAMgASgLMiQuYWdlbnRyZXBsLnYxLldvcmtzcGFjZUxpbmtQbGFjZW1lbnQSNwoJb3duZXJzaGlwGAQgASgLMiQuYWdlbnRyZXBsLnYxLldvcmtzcGFjZUxpbmtPd25lcnNoaXAikwEKFldvcmtzcGFjZUxpbmtPd25lcnNoaXASMQoFb3duZWQYASABKAsyIC5hZ2VudHJlcGwudjEuV29ya3NwYWNlTGlua093bmVkSAASOQoJcmVmZXJlbmNlGAIgASgLMiQuYWdlbnRyZXBsLnYxLldvcmtzcGFjZUxpbmtSZWZlcmVuY2VIAEILCglvd25lcnNoaXAiXAoSV29ya3NwYWNlTGlua093bmVkEjsKBmZvbGxvdxgBIAEoCzImLmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VMaW5rT3duZWRGb2xsb3dIAIgBAUIJCgdfZm9sbG93IhgKFldvcmtzcGFjZUxpbmtSZWZlcmVuY2UioQEKFldvcmtzcGFjZUxpbmtQbGFjZW1lbnQSOgoFc2hvd24YASABKAsyKS5hZ2VudHJlcGwudjEuV29ya3NwYWNlTGlua1BsYWNlbWVudFNob3duSAASPgoHdW5zaG93bhgCIAEoCzIrLmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VMaW5rUGxhY2VtZW50VW5zaG93bkgAQgsKCXBsYWNlbWVudCIdChtXb3Jrc3BhY2VMaW5rUGxhY2VtZW50U2hvd24iHwodV29ya3NwYWNlTGlua1BsYWNlbWVudFVuc2hvd24ijAEKEldvcmtzcGFjZUxpbmtzTWVudRI0CgRyb29tGAEgASgLMiQuYWdlbnRyZXBsLnYxLldvcmtzcGFjZUxpbmtzTWVudVJvb21IABI0CgRmdWxsGAIgASgLMiQuYWdlbnRyZXBsLnYxLldvcmtzcGFjZUxpbmtzTWVudUZ1bGxIAEIKCghzdGFuZGluZyImChZXb3Jrc3BhY2VMaW5rc01lbnVSb29tEgwKBGZyZWUYASABKA0iOAoWV29ya3NwYWNlTGlua3NNZW51RnVsbBINCgVsaW1pdBgBIAEoDRIPCgd1bnNob3duGAIgASgNIsUCChhXb3Jrc3BhY2VMaW5rT3duZWRGb2xsb3cSRAoJZm9sbG93aW5nGAEgASgLMi8uYWdlbnRyZXBsLnYxLldvcmtzcGFjZUxpbmtPd25lZEZvbGxvd0ZvbGxvd2luZ0gAEjwKBWVuZGVkGAIgASgLMisuYWdlbnRyZXBsLnYxLldvcmtzcGFjZUxpbmtPd25lZEZvbGxvd0VuZGVkSAASSgoMdW5zdWJzY3JpYmVkGAMgASgLMjIuYWdlbnRyZXBsLnYxLldvcmtzcGFjZUxpbmtPd25lZEZvbGxvd1Vuc3Vic2NyaWJlZEgAEk0KDm5vdF9mb2xsb3dhYmxlGAQgASgLMjMuYWdlbnRyZXBsLnYxLldvcmtzcGFjZUxpbmtPd25lZEZvbGxvd05vdEZvbGxvd2FibGVIAEIKCghzdGFuZGluZyJgCiFXb3Jrc3BhY2VMaW5rT3duZWRGb2xsb3dGb2xsb3dpbmcSOwoMc3Vic2NyaXB0aW9uGAEgASgLMiUuYWdlbnRyZXBsLnYxLlB1bGxSZXF1ZXN0U3Vic2NyaXB0aW9uIk4KHVdvcmtzcGFjZUxpbmtPd25lZEZvbGxvd0VuZGVkEi0KBXN0YXRlGAEgASgLMh4uYWdlbnRyZXBsLnYxLlB1bGxSZXF1ZXN0U3RhdGUiJgokV29ya3NwYWNlTGlua093bmVkRm9sbG93VW5zdWJzY3JpYmVkIicKJVdvcmtzcGFjZUxpbmtPd25lZEZvbGxvd05vdEZvbGxvd2FibGVCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_agentrepl_v1_pull_request]);
 
 /**
  * Every link a workspace holds, and the standing of its summary menu.
@@ -123,7 +125,8 @@ export type WorkspaceLinkOwnership = Message<"agentrepl.v1.WorkspaceLinkOwnershi
     /**
      * The workspace's work made it: a pull request it opened, a branch it
      * pushed, a doc or a ticket it wrote. The Slack thread a workspace was
-     * created for is shown every owned link when the work is done.
+     * created for is shown every owned link when the work is done, and the
+     * daemon follows an owned pull request for the workspace.
      *
      * @generated from field: agentrepl.v1.WorkspaceLinkOwned owned = 1;
      */
@@ -149,11 +152,20 @@ export const WorkspaceLinkOwnershipSchema: GenMessage<WorkspaceLinkOwnership> = 
   messageDesc(file_agentrepl_v1_workspace_links, 2);
 
 /**
- * The workspace's work made it. DELIBERATELY EMPTY: the arm is the ownership.
+ * The workspace's work made it.
  *
  * @generated from message agentrepl.v1.WorkspaceLinkOwned
  */
 export type WorkspaceLinkOwned = Message<"agentrepl.v1.WorkspaceLinkOwned"> & {
+  /**
+   * Whether the daemon follows what the link points at: an owned GitHub pull
+   * request is followed for every activity kind (SubscribePullRequest's
+   * notices). Set on every answer; ignored on a request, where only the arm
+   * is read.
+   *
+   * @generated from field: optional agentrepl.v1.WorkspaceLinkOwnedFollow follow = 1;
+   */
+  follow?: WorkspaceLinkOwnedFollow | undefined;
 };
 
 /**
@@ -331,4 +343,130 @@ export type WorkspaceLinksMenuFull = Message<"agentrepl.v1.WorkspaceLinksMenuFul
  */
 export const WorkspaceLinksMenuFullSchema: GenMessage<WorkspaceLinksMenuFull> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_workspace_links, 10);
+
+/**
+ * Whether the daemon follows an owned link. THE ARM IS THE STANDING.
+ *
+ * @generated from message agentrepl.v1.WorkspaceLinkOwnedFollow
+ */
+export type WorkspaceLinkOwnedFollow = Message<"agentrepl.v1.WorkspaceLinkOwnedFollow"> & {
+  /**
+   * @generated from oneof agentrepl.v1.WorkspaceLinkOwnedFollow.standing
+   */
+  standing: {
+    /**
+     * The link is a GitHub pull request the workspace is subscribed to
+     * (PullRequestSubscriptionOriginOwnedLink).
+     *
+     * @generated from field: agentrepl.v1.WorkspaceLinkOwnedFollowFollowing following = 1;
+     */
+    value: WorkspaceLinkOwnedFollowFollowing;
+    case: "following";
+  } | {
+    /**
+     * The pull request merged or closed, and its subscription ended.
+     *
+     * @generated from field: agentrepl.v1.WorkspaceLinkOwnedFollowEnded ended = 2;
+     */
+    value: WorkspaceLinkOwnedFollowEnded;
+    case: "ended";
+  } | {
+    /**
+     * The subscription was ended by UnsubscribePullRequest while the link
+     * stayed owned. Setting the link owned again re-subscribes it.
+     *
+     * @generated from field: agentrepl.v1.WorkspaceLinkOwnedFollowUnsubscribed unsubscribed = 3;
+     */
+    value: WorkspaceLinkOwnedFollowUnsubscribed;
+    case: "unsubscribed";
+  } | {
+    /**
+     * The url is no resource the daemon follows (not a github.com pull
+     * request), so owning it changes nothing the daemon does.
+     *
+     * @generated from field: agentrepl.v1.WorkspaceLinkOwnedFollowNotFollowable not_followable = 4;
+     */
+    value: WorkspaceLinkOwnedFollowNotFollowable;
+    case: "notFollowable";
+  } | { case: undefined; value?: undefined };
+};
+
+/**
+ * Describes the message agentrepl.v1.WorkspaceLinkOwnedFollow.
+ * Use `create(WorkspaceLinkOwnedFollowSchema)` to create a new message.
+ */
+export const WorkspaceLinkOwnedFollowSchema: GenMessage<WorkspaceLinkOwnedFollow> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_workspace_links, 11);
+
+/**
+ * Followed.
+ *
+ * @generated from message agentrepl.v1.WorkspaceLinkOwnedFollowFollowing
+ */
+export type WorkspaceLinkOwnedFollowFollowing = Message<"agentrepl.v1.WorkspaceLinkOwnedFollowFollowing"> & {
+  /**
+   * The subscription, with its health.
+   *
+   * @generated from field: agentrepl.v1.PullRequestSubscription subscription = 1;
+   */
+  subscription?: PullRequestSubscription | undefined;
+};
+
+/**
+ * Describes the message agentrepl.v1.WorkspaceLinkOwnedFollowFollowing.
+ * Use `create(WorkspaceLinkOwnedFollowFollowingSchema)` to create a new message.
+ */
+export const WorkspaceLinkOwnedFollowFollowingSchema: GenMessage<WorkspaceLinkOwnedFollowFollowing> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_workspace_links, 12);
+
+/**
+ * Ended with its pull request.
+ *
+ * @generated from message agentrepl.v1.WorkspaceLinkOwnedFollowEnded
+ */
+export type WorkspaceLinkOwnedFollowEnded = Message<"agentrepl.v1.WorkspaceLinkOwnedFollowEnded"> & {
+  /**
+   * How the pull request ended: its merged or closed state.
+   *
+   * @generated from field: agentrepl.v1.PullRequestState state = 1;
+   */
+  state?: PullRequestState | undefined;
+};
+
+/**
+ * Describes the message agentrepl.v1.WorkspaceLinkOwnedFollowEnded.
+ * Use `create(WorkspaceLinkOwnedFollowEndedSchema)` to create a new message.
+ */
+export const WorkspaceLinkOwnedFollowEndedSchema: GenMessage<WorkspaceLinkOwnedFollowEnded> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_workspace_links, 13);
+
+/**
+ * Unsubscribed by request. DELIBERATELY EMPTY: the arm is the standing.
+ *
+ * @generated from message agentrepl.v1.WorkspaceLinkOwnedFollowUnsubscribed
+ */
+export type WorkspaceLinkOwnedFollowUnsubscribed = Message<"agentrepl.v1.WorkspaceLinkOwnedFollowUnsubscribed"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.WorkspaceLinkOwnedFollowUnsubscribed.
+ * Use `create(WorkspaceLinkOwnedFollowUnsubscribedSchema)` to create a new message.
+ */
+export const WorkspaceLinkOwnedFollowUnsubscribedSchema: GenMessage<WorkspaceLinkOwnedFollowUnsubscribed> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_workspace_links, 14);
+
+/**
+ * Nothing to follow. DELIBERATELY EMPTY: the arm is the standing.
+ *
+ * @generated from message agentrepl.v1.WorkspaceLinkOwnedFollowNotFollowable
+ */
+export type WorkspaceLinkOwnedFollowNotFollowable = Message<"agentrepl.v1.WorkspaceLinkOwnedFollowNotFollowable"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.WorkspaceLinkOwnedFollowNotFollowable.
+ * Use `create(WorkspaceLinkOwnedFollowNotFollowableSchema)` to create a new message.
+ */
+export const WorkspaceLinkOwnedFollowNotFollowableSchema: GenMessage<WorkspaceLinkOwnedFollowNotFollowable> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_workspace_links, 15);
 

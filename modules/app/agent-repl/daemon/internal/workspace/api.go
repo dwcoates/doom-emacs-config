@@ -458,8 +458,9 @@ type Verbs interface {
 	// SetPriority sets or clears the roster priority badge.
 	SetPriority(ctx context.Context, ws ids.WorkspaceID, p *wsm.Priority) error
 	// SetLink stores a link under its label and ownership, or relabels a
-	// stored one (agentrepl.v1.ChangeWorkspaceLinksSet), answering every link
-	// the workspace then holds and republishing the summary's menu.
+	// stored one (agentrepl.v1.ChangeWorkspaceLinksSet), subscribing the
+	// workspace to an owned pull request, answering every link the workspace
+	// then holds and republishing the summary's menu.
 	SetLink(ctx context.Context, ws ids.WorkspaceID, url, label string, owned bool) ([]wsm.WorkspaceLink, error)
 	// MergeEnded is told how a merge run in WS left the queue for good
 	// (merge.EndObserver). A workspace created for a Slack message posts the
@@ -738,6 +739,9 @@ type Deps struct {
 	Topbar  topbar.Resolver
 	Sidebar sidebar.Resolver
 	Host    HostRelay
+	// PullRequests anchors the subscription an owned pull-request link takes
+	// (prwatch.Watcher.Anchor).
+	PullRequests PullRequestAnchor
 	// Banners raises the desktop banner an agent notification earns.
 	Banners Banners
 	// Sessions brings sessions up and down; injected so the verbs do not own

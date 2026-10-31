@@ -251,7 +251,8 @@ type isWorkspaceLinkOwnership_Ownership interface {
 type WorkspaceLinkOwnership_Owned struct {
 	// The workspace's work made it: a pull request it opened, a branch it
 	// pushed, a doc or a ticket it wrote. The Slack thread a workspace was
-	// created for is shown every owned link when the work is done.
+	// created for is shown every owned link when the work is done, and the
+	// daemon follows an owned pull request for the workspace.
 	Owned *WorkspaceLinkOwned `protobuf:"bytes,1,opt,name=owned,proto3,oneof"`
 }
 
@@ -265,9 +266,14 @@ func (*WorkspaceLinkOwnership_Owned) isWorkspaceLinkOwnership_Ownership() {}
 
 func (*WorkspaceLinkOwnership_Reference) isWorkspaceLinkOwnership_Ownership() {}
 
-// The workspace's work made it. DELIBERATELY EMPTY: the arm is the ownership.
+// The workspace's work made it.
 type WorkspaceLinkOwned struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Whether the daemon follows what the link points at: an owned GitHub pull
+	// request is followed for every activity kind (SubscribePullRequest's
+	// notices). Set on every answer; ignored on a request, where only the arm
+	// is read.
+	Follow        *WorkspaceLinkOwnedFollow `protobuf:"bytes,1,opt,name=follow,proto3,oneof" json:"follow,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -300,6 +306,13 @@ func (x *WorkspaceLinkOwned) ProtoReflect() protoreflect.Message {
 // Deprecated: Use WorkspaceLinkOwned.ProtoReflect.Descriptor instead.
 func (*WorkspaceLinkOwned) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_workspace_links_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *WorkspaceLinkOwned) GetFollow() *WorkspaceLinkOwnedFollow {
+	if x != nil {
+		return x.Follow
+	}
+	return nil
 }
 
 // The workspace's work only points at it. DELIBERATELY EMPTY: the arm is the
@@ -689,11 +702,299 @@ func (x *WorkspaceLinksMenuFull) GetUnshown() uint32 {
 	return 0
 }
 
+// Whether the daemon follows an owned link. THE ARM IS THE STANDING.
+type WorkspaceLinkOwnedFollow struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Standing:
+	//
+	//	*WorkspaceLinkOwnedFollow_Following
+	//	*WorkspaceLinkOwnedFollow_Ended
+	//	*WorkspaceLinkOwnedFollow_Unsubscribed
+	//	*WorkspaceLinkOwnedFollow_NotFollowable
+	Standing      isWorkspaceLinkOwnedFollow_Standing `protobuf_oneof:"standing"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WorkspaceLinkOwnedFollow) Reset() {
+	*x = WorkspaceLinkOwnedFollow{}
+	mi := &file_agentrepl_v1_workspace_links_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WorkspaceLinkOwnedFollow) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkspaceLinkOwnedFollow) ProtoMessage() {}
+
+func (x *WorkspaceLinkOwnedFollow) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_workspace_links_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkspaceLinkOwnedFollow.ProtoReflect.Descriptor instead.
+func (*WorkspaceLinkOwnedFollow) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_workspace_links_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *WorkspaceLinkOwnedFollow) GetStanding() isWorkspaceLinkOwnedFollow_Standing {
+	if x != nil {
+		return x.Standing
+	}
+	return nil
+}
+
+func (x *WorkspaceLinkOwnedFollow) GetFollowing() *WorkspaceLinkOwnedFollowFollowing {
+	if x != nil {
+		if x, ok := x.Standing.(*WorkspaceLinkOwnedFollow_Following); ok {
+			return x.Following
+		}
+	}
+	return nil
+}
+
+func (x *WorkspaceLinkOwnedFollow) GetEnded() *WorkspaceLinkOwnedFollowEnded {
+	if x != nil {
+		if x, ok := x.Standing.(*WorkspaceLinkOwnedFollow_Ended); ok {
+			return x.Ended
+		}
+	}
+	return nil
+}
+
+func (x *WorkspaceLinkOwnedFollow) GetUnsubscribed() *WorkspaceLinkOwnedFollowUnsubscribed {
+	if x != nil {
+		if x, ok := x.Standing.(*WorkspaceLinkOwnedFollow_Unsubscribed); ok {
+			return x.Unsubscribed
+		}
+	}
+	return nil
+}
+
+func (x *WorkspaceLinkOwnedFollow) GetNotFollowable() *WorkspaceLinkOwnedFollowNotFollowable {
+	if x != nil {
+		if x, ok := x.Standing.(*WorkspaceLinkOwnedFollow_NotFollowable); ok {
+			return x.NotFollowable
+		}
+	}
+	return nil
+}
+
+type isWorkspaceLinkOwnedFollow_Standing interface {
+	isWorkspaceLinkOwnedFollow_Standing()
+}
+
+type WorkspaceLinkOwnedFollow_Following struct {
+	// The link is a GitHub pull request the workspace is subscribed to
+	// (PullRequestSubscriptionOriginOwnedLink).
+	Following *WorkspaceLinkOwnedFollowFollowing `protobuf:"bytes,1,opt,name=following,proto3,oneof"`
+}
+
+type WorkspaceLinkOwnedFollow_Ended struct {
+	// The pull request merged or closed, and its subscription ended.
+	Ended *WorkspaceLinkOwnedFollowEnded `protobuf:"bytes,2,opt,name=ended,proto3,oneof"`
+}
+
+type WorkspaceLinkOwnedFollow_Unsubscribed struct {
+	// The subscription was ended by UnsubscribePullRequest while the link
+	// stayed owned. Setting the link owned again re-subscribes it.
+	Unsubscribed *WorkspaceLinkOwnedFollowUnsubscribed `protobuf:"bytes,3,opt,name=unsubscribed,proto3,oneof"`
+}
+
+type WorkspaceLinkOwnedFollow_NotFollowable struct {
+	// The url is no resource the daemon follows (not a github.com pull
+	// request), so owning it changes nothing the daemon does.
+	NotFollowable *WorkspaceLinkOwnedFollowNotFollowable `protobuf:"bytes,4,opt,name=not_followable,json=notFollowable,proto3,oneof"`
+}
+
+func (*WorkspaceLinkOwnedFollow_Following) isWorkspaceLinkOwnedFollow_Standing() {}
+
+func (*WorkspaceLinkOwnedFollow_Ended) isWorkspaceLinkOwnedFollow_Standing() {}
+
+func (*WorkspaceLinkOwnedFollow_Unsubscribed) isWorkspaceLinkOwnedFollow_Standing() {}
+
+func (*WorkspaceLinkOwnedFollow_NotFollowable) isWorkspaceLinkOwnedFollow_Standing() {}
+
+// Followed.
+type WorkspaceLinkOwnedFollowFollowing struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The subscription, with its health.
+	Subscription  *PullRequestSubscription `protobuf:"bytes,1,opt,name=subscription,proto3" json:"subscription,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WorkspaceLinkOwnedFollowFollowing) Reset() {
+	*x = WorkspaceLinkOwnedFollowFollowing{}
+	mi := &file_agentrepl_v1_workspace_links_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WorkspaceLinkOwnedFollowFollowing) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkspaceLinkOwnedFollowFollowing) ProtoMessage() {}
+
+func (x *WorkspaceLinkOwnedFollowFollowing) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_workspace_links_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkspaceLinkOwnedFollowFollowing.ProtoReflect.Descriptor instead.
+func (*WorkspaceLinkOwnedFollowFollowing) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_workspace_links_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *WorkspaceLinkOwnedFollowFollowing) GetSubscription() *PullRequestSubscription {
+	if x != nil {
+		return x.Subscription
+	}
+	return nil
+}
+
+// Ended with its pull request.
+type WorkspaceLinkOwnedFollowEnded struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// How the pull request ended: its merged or closed state.
+	State         *PullRequestState `protobuf:"bytes,1,opt,name=state,proto3" json:"state,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WorkspaceLinkOwnedFollowEnded) Reset() {
+	*x = WorkspaceLinkOwnedFollowEnded{}
+	mi := &file_agentrepl_v1_workspace_links_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WorkspaceLinkOwnedFollowEnded) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkspaceLinkOwnedFollowEnded) ProtoMessage() {}
+
+func (x *WorkspaceLinkOwnedFollowEnded) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_workspace_links_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkspaceLinkOwnedFollowEnded.ProtoReflect.Descriptor instead.
+func (*WorkspaceLinkOwnedFollowEnded) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_workspace_links_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *WorkspaceLinkOwnedFollowEnded) GetState() *PullRequestState {
+	if x != nil {
+		return x.State
+	}
+	return nil
+}
+
+// Unsubscribed by request. DELIBERATELY EMPTY: the arm is the standing.
+type WorkspaceLinkOwnedFollowUnsubscribed struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WorkspaceLinkOwnedFollowUnsubscribed) Reset() {
+	*x = WorkspaceLinkOwnedFollowUnsubscribed{}
+	mi := &file_agentrepl_v1_workspace_links_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WorkspaceLinkOwnedFollowUnsubscribed) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkspaceLinkOwnedFollowUnsubscribed) ProtoMessage() {}
+
+func (x *WorkspaceLinkOwnedFollowUnsubscribed) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_workspace_links_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkspaceLinkOwnedFollowUnsubscribed.ProtoReflect.Descriptor instead.
+func (*WorkspaceLinkOwnedFollowUnsubscribed) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_workspace_links_proto_rawDescGZIP(), []int{14}
+}
+
+// Nothing to follow. DELIBERATELY EMPTY: the arm is the standing.
+type WorkspaceLinkOwnedFollowNotFollowable struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WorkspaceLinkOwnedFollowNotFollowable) Reset() {
+	*x = WorkspaceLinkOwnedFollowNotFollowable{}
+	mi := &file_agentrepl_v1_workspace_links_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WorkspaceLinkOwnedFollowNotFollowable) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkspaceLinkOwnedFollowNotFollowable) ProtoMessage() {}
+
+func (x *WorkspaceLinkOwnedFollowNotFollowable) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_workspace_links_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkspaceLinkOwnedFollowNotFollowable.ProtoReflect.Descriptor instead.
+func (*WorkspaceLinkOwnedFollowNotFollowable) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_workspace_links_proto_rawDescGZIP(), []int{15}
+}
+
 var File_agentrepl_v1_workspace_links_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_workspace_links_proto_rawDesc = "" +
 	"\n" +
-	"\"agentrepl/v1/workspace_links.proto\x12\fagentrepl.v1\"y\n" +
+	"\"agentrepl/v1/workspace_links.proto\x12\fagentrepl.v1\x1a\x1fagentrepl/v1/pull_request.proto\"y\n" +
 	"\x0eWorkspaceLinks\x121\n" +
 	"\x05links\x18\x01 \x03(\v2\x1b.agentrepl.v1.WorkspaceLinkR\x05links\x124\n" +
 	"\x04menu\x18\x02 \x01(\v2 .agentrepl.v1.WorkspaceLinksMenuR\x04menu\"\xbf\x01\n" +
@@ -705,8 +1006,10 @@ const file_agentrepl_v1_workspace_links_proto_rawDesc = "" +
 	"\x16WorkspaceLinkOwnership\x128\n" +
 	"\x05owned\x18\x01 \x01(\v2 .agentrepl.v1.WorkspaceLinkOwnedH\x00R\x05owned\x12D\n" +
 	"\treference\x18\x02 \x01(\v2$.agentrepl.v1.WorkspaceLinkReferenceH\x00R\treferenceB\v\n" +
-	"\townership\"\x14\n" +
-	"\x12WorkspaceLinkOwned\"\x18\n" +
+	"\townership\"d\n" +
+	"\x12WorkspaceLinkOwned\x12C\n" +
+	"\x06follow\x18\x01 \x01(\v2&.agentrepl.v1.WorkspaceLinkOwnedFollowH\x00R\x06follow\x88\x01\x01B\t\n" +
+	"\a_follow\"\x18\n" +
 	"\x16WorkspaceLinkReference\"\xb1\x01\n" +
 	"\x16WorkspaceLinkPlacement\x12A\n" +
 	"\x05shown\x18\x01 \x01(\v2).agentrepl.v1.WorkspaceLinkPlacementShownH\x00R\x05shown\x12G\n" +
@@ -723,7 +1026,20 @@ const file_agentrepl_v1_workspace_links_proto_rawDesc = "" +
 	"\x04free\x18\x01 \x01(\rR\x04free\"H\n" +
 	"\x16WorkspaceLinksMenuFull\x12\x14\n" +
 	"\x05limit\x18\x01 \x01(\rR\x05limit\x12\x18\n" +
-	"\aunshown\x18\x02 \x01(\rR\aunshownB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"\aunshown\x18\x02 \x01(\rR\aunshown\"\xf4\x02\n" +
+	"\x18WorkspaceLinkOwnedFollow\x12O\n" +
+	"\tfollowing\x18\x01 \x01(\v2/.agentrepl.v1.WorkspaceLinkOwnedFollowFollowingH\x00R\tfollowing\x12C\n" +
+	"\x05ended\x18\x02 \x01(\v2+.agentrepl.v1.WorkspaceLinkOwnedFollowEndedH\x00R\x05ended\x12X\n" +
+	"\funsubscribed\x18\x03 \x01(\v22.agentrepl.v1.WorkspaceLinkOwnedFollowUnsubscribedH\x00R\funsubscribed\x12\\\n" +
+	"\x0enot_followable\x18\x04 \x01(\v23.agentrepl.v1.WorkspaceLinkOwnedFollowNotFollowableH\x00R\rnotFollowableB\n" +
+	"\n" +
+	"\bstanding\"n\n" +
+	"!WorkspaceLinkOwnedFollowFollowing\x12I\n" +
+	"\fsubscription\x18\x01 \x01(\v2%.agentrepl.v1.PullRequestSubscriptionR\fsubscription\"U\n" +
+	"\x1dWorkspaceLinkOwnedFollowEnded\x124\n" +
+	"\x05state\x18\x01 \x01(\v2\x1e.agentrepl.v1.PullRequestStateR\x05state\"&\n" +
+	"$WorkspaceLinkOwnedFollowUnsubscribed\"'\n" +
+	"%WorkspaceLinkOwnedFollowNotFollowableB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_workspace_links_proto_rawDescOnce sync.Once
@@ -737,19 +1053,26 @@ func file_agentrepl_v1_workspace_links_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_workspace_links_proto_rawDescData
 }
 
-var file_agentrepl_v1_workspace_links_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
+var file_agentrepl_v1_workspace_links_proto_msgTypes = make([]protoimpl.MessageInfo, 16)
 var file_agentrepl_v1_workspace_links_proto_goTypes = []any{
-	(*WorkspaceLinks)(nil),                // 0: agentrepl.v1.WorkspaceLinks
-	(*WorkspaceLink)(nil),                 // 1: agentrepl.v1.WorkspaceLink
-	(*WorkspaceLinkOwnership)(nil),        // 2: agentrepl.v1.WorkspaceLinkOwnership
-	(*WorkspaceLinkOwned)(nil),            // 3: agentrepl.v1.WorkspaceLinkOwned
-	(*WorkspaceLinkReference)(nil),        // 4: agentrepl.v1.WorkspaceLinkReference
-	(*WorkspaceLinkPlacement)(nil),        // 5: agentrepl.v1.WorkspaceLinkPlacement
-	(*WorkspaceLinkPlacementShown)(nil),   // 6: agentrepl.v1.WorkspaceLinkPlacementShown
-	(*WorkspaceLinkPlacementUnshown)(nil), // 7: agentrepl.v1.WorkspaceLinkPlacementUnshown
-	(*WorkspaceLinksMenu)(nil),            // 8: agentrepl.v1.WorkspaceLinksMenu
-	(*WorkspaceLinksMenuRoom)(nil),        // 9: agentrepl.v1.WorkspaceLinksMenuRoom
-	(*WorkspaceLinksMenuFull)(nil),        // 10: agentrepl.v1.WorkspaceLinksMenuFull
+	(*WorkspaceLinks)(nil),                        // 0: agentrepl.v1.WorkspaceLinks
+	(*WorkspaceLink)(nil),                         // 1: agentrepl.v1.WorkspaceLink
+	(*WorkspaceLinkOwnership)(nil),                // 2: agentrepl.v1.WorkspaceLinkOwnership
+	(*WorkspaceLinkOwned)(nil),                    // 3: agentrepl.v1.WorkspaceLinkOwned
+	(*WorkspaceLinkReference)(nil),                // 4: agentrepl.v1.WorkspaceLinkReference
+	(*WorkspaceLinkPlacement)(nil),                // 5: agentrepl.v1.WorkspaceLinkPlacement
+	(*WorkspaceLinkPlacementShown)(nil),           // 6: agentrepl.v1.WorkspaceLinkPlacementShown
+	(*WorkspaceLinkPlacementUnshown)(nil),         // 7: agentrepl.v1.WorkspaceLinkPlacementUnshown
+	(*WorkspaceLinksMenu)(nil),                    // 8: agentrepl.v1.WorkspaceLinksMenu
+	(*WorkspaceLinksMenuRoom)(nil),                // 9: agentrepl.v1.WorkspaceLinksMenuRoom
+	(*WorkspaceLinksMenuFull)(nil),                // 10: agentrepl.v1.WorkspaceLinksMenuFull
+	(*WorkspaceLinkOwnedFollow)(nil),              // 11: agentrepl.v1.WorkspaceLinkOwnedFollow
+	(*WorkspaceLinkOwnedFollowFollowing)(nil),     // 12: agentrepl.v1.WorkspaceLinkOwnedFollowFollowing
+	(*WorkspaceLinkOwnedFollowEnded)(nil),         // 13: agentrepl.v1.WorkspaceLinkOwnedFollowEnded
+	(*WorkspaceLinkOwnedFollowUnsubscribed)(nil),  // 14: agentrepl.v1.WorkspaceLinkOwnedFollowUnsubscribed
+	(*WorkspaceLinkOwnedFollowNotFollowable)(nil), // 15: agentrepl.v1.WorkspaceLinkOwnedFollowNotFollowable
+	(*PullRequestSubscription)(nil),               // 16: agentrepl.v1.PullRequestSubscription
+	(*PullRequestState)(nil),                      // 17: agentrepl.v1.PullRequestState
 }
 var file_agentrepl_v1_workspace_links_proto_depIdxs = []int32{
 	1,  // 0: agentrepl.v1.WorkspaceLinks.links:type_name -> agentrepl.v1.WorkspaceLink
@@ -758,15 +1081,22 @@ var file_agentrepl_v1_workspace_links_proto_depIdxs = []int32{
 	2,  // 3: agentrepl.v1.WorkspaceLink.ownership:type_name -> agentrepl.v1.WorkspaceLinkOwnership
 	3,  // 4: agentrepl.v1.WorkspaceLinkOwnership.owned:type_name -> agentrepl.v1.WorkspaceLinkOwned
 	4,  // 5: agentrepl.v1.WorkspaceLinkOwnership.reference:type_name -> agentrepl.v1.WorkspaceLinkReference
-	6,  // 6: agentrepl.v1.WorkspaceLinkPlacement.shown:type_name -> agentrepl.v1.WorkspaceLinkPlacementShown
-	7,  // 7: agentrepl.v1.WorkspaceLinkPlacement.unshown:type_name -> agentrepl.v1.WorkspaceLinkPlacementUnshown
-	9,  // 8: agentrepl.v1.WorkspaceLinksMenu.room:type_name -> agentrepl.v1.WorkspaceLinksMenuRoom
-	10, // 9: agentrepl.v1.WorkspaceLinksMenu.full:type_name -> agentrepl.v1.WorkspaceLinksMenuFull
-	10, // [10:10] is the sub-list for method output_type
-	10, // [10:10] is the sub-list for method input_type
-	10, // [10:10] is the sub-list for extension type_name
-	10, // [10:10] is the sub-list for extension extendee
-	0,  // [0:10] is the sub-list for field type_name
+	11, // 6: agentrepl.v1.WorkspaceLinkOwned.follow:type_name -> agentrepl.v1.WorkspaceLinkOwnedFollow
+	6,  // 7: agentrepl.v1.WorkspaceLinkPlacement.shown:type_name -> agentrepl.v1.WorkspaceLinkPlacementShown
+	7,  // 8: agentrepl.v1.WorkspaceLinkPlacement.unshown:type_name -> agentrepl.v1.WorkspaceLinkPlacementUnshown
+	9,  // 9: agentrepl.v1.WorkspaceLinksMenu.room:type_name -> agentrepl.v1.WorkspaceLinksMenuRoom
+	10, // 10: agentrepl.v1.WorkspaceLinksMenu.full:type_name -> agentrepl.v1.WorkspaceLinksMenuFull
+	12, // 11: agentrepl.v1.WorkspaceLinkOwnedFollow.following:type_name -> agentrepl.v1.WorkspaceLinkOwnedFollowFollowing
+	13, // 12: agentrepl.v1.WorkspaceLinkOwnedFollow.ended:type_name -> agentrepl.v1.WorkspaceLinkOwnedFollowEnded
+	14, // 13: agentrepl.v1.WorkspaceLinkOwnedFollow.unsubscribed:type_name -> agentrepl.v1.WorkspaceLinkOwnedFollowUnsubscribed
+	15, // 14: agentrepl.v1.WorkspaceLinkOwnedFollow.not_followable:type_name -> agentrepl.v1.WorkspaceLinkOwnedFollowNotFollowable
+	16, // 15: agentrepl.v1.WorkspaceLinkOwnedFollowFollowing.subscription:type_name -> agentrepl.v1.PullRequestSubscription
+	17, // 16: agentrepl.v1.WorkspaceLinkOwnedFollowEnded.state:type_name -> agentrepl.v1.PullRequestState
+	17, // [17:17] is the sub-list for method output_type
+	17, // [17:17] is the sub-list for method input_type
+	17, // [17:17] is the sub-list for extension type_name
+	17, // [17:17] is the sub-list for extension extendee
+	0,  // [0:17] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_workspace_links_proto_init() }
@@ -774,10 +1104,12 @@ func file_agentrepl_v1_workspace_links_proto_init() {
 	if File_agentrepl_v1_workspace_links_proto != nil {
 		return
 	}
+	file_agentrepl_v1_pull_request_proto_init()
 	file_agentrepl_v1_workspace_links_proto_msgTypes[2].OneofWrappers = []any{
 		(*WorkspaceLinkOwnership_Owned)(nil),
 		(*WorkspaceLinkOwnership_Reference)(nil),
 	}
+	file_agentrepl_v1_workspace_links_proto_msgTypes[3].OneofWrappers = []any{}
 	file_agentrepl_v1_workspace_links_proto_msgTypes[5].OneofWrappers = []any{
 		(*WorkspaceLinkPlacement_Shown)(nil),
 		(*WorkspaceLinkPlacement_Unshown)(nil),
@@ -786,13 +1118,19 @@ func file_agentrepl_v1_workspace_links_proto_init() {
 		(*WorkspaceLinksMenu_Room)(nil),
 		(*WorkspaceLinksMenu_Full)(nil),
 	}
+	file_agentrepl_v1_workspace_links_proto_msgTypes[11].OneofWrappers = []any{
+		(*WorkspaceLinkOwnedFollow_Following)(nil),
+		(*WorkspaceLinkOwnedFollow_Ended)(nil),
+		(*WorkspaceLinkOwnedFollow_Unsubscribed)(nil),
+		(*WorkspaceLinkOwnedFollow_NotFollowable)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_workspace_links_proto_rawDesc), len(file_agentrepl_v1_workspace_links_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   11,
+			NumMessages:   16,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

@@ -35,6 +35,7 @@ import (
 	"agent-repld/internal/editorinstance"
 	"agent-repld/internal/envc"
 	"agent-repld/internal/externalbrowser"
+	"agent-repld/internal/ghclient"
 	"agent-repld/internal/gitclient"
 	"agent-repld/internal/handover"
 	"agent-repld/internal/headless"
@@ -44,6 +45,7 @@ import (
 	"agent-repld/internal/imageorigin"
 	"agent-repld/internal/lockwatch"
 	"agent-repld/internal/login"
+	"agent-repld/internal/mainsync"
 	"agent-repld/internal/memorypopup"
 	"agent-repld/internal/merge"
 	"agent-repld/internal/mergenotice"
@@ -58,6 +60,7 @@ import (
 	"agent-repld/internal/prompthandler"
 	"agent-repld/internal/promptqueue"
 	"agent-repld/internal/prompts"
+	"agent-repld/internal/prwatch"
 	"agent-repld/internal/pullrefs"
 	"agent-repld/internal/repodivergence"
 	"agent-repld/internal/resolve/feed"
@@ -1409,6 +1412,28 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		return nil, fmt.Errorf("agent-repld: build the login manager: %w", err)
 	}
 
+	// THE PULL-REQUEST WATCHER reads every followed GitHub pull request on
+	// its cadence and tells each subscriber what changed, through the prompt
+	// handler the notice lifetime hands it. Only the serving daemon polls.
+	gh, err := ghclient.New(ghclient.Config{Log: log})
+	if err != nil {
+		return nil, fmt.Errorf("agent-repld: build the GitHub leaf: %w", err)
+	}
+	pullRequests, err := prwatch.New(prwatch.Deps{
+		Store:   p.DB,
+		GH:      gh,
+		Holds:   queue,
+		Briefs:  merge.BriefsFrom(paths.PromptsDir),
+		MintKey: prompthandler.MintKey,
+		Serves:  rolloutController.ServesIntake,
+		Clock:   clock.System{},
+		Every:   prwatch.DefaultEvery,
+		Log:     log,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("agent-repld: build the pull-request watcher: %w", err)
+	}
+
 	verbs, err := workspace.New(workspace.Deps{
 		Instance: p.Instance,
 		// A NUKED THREAD'S GRAPH is deleted through the chat service, which
@@ -1445,6 +1470,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Headless:          headlessClient,
 		Browser:           browser,
 		Slack:             slackpost.New(slackpost.Config{}),
+		PullRequests:      pullRequests,
 		PromptsDir:        paths.PromptsDir,
 		CheckoutRoot:      paths.Checkout,
 		HomeDir:           paths.Home,
@@ -1547,17 +1573,49 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	}
 
 	// THE REPOSITORY DIVERGENCE MEASURER fetches each registered repository's
-	// primary-branch upstream once now and every five minutes after, and hands
-	// each ahead/behind count to the roster, which draws it as the repository
-	// section's label hover. Background work: it takes no interactive lock.
+	// primary-branch upstream once now and every minute after, and hands each
+	// ahead/behind count to the roster, which draws it as the repository
+	// section's label hover, and to the main sync, which fast-forwards a main
+	// checkout its upstream moved ahead of. Background work: it takes no
+	// interactive lock.
+	// THE MAIN SYNC fast-forwards a registered repository's main checkout its
+	// upstream moved ahead of, and asks the main workspace to repair one that
+	// cannot be (internal/mainsync). It holds the repository's merge target
+	// and the main workspace's turn sequence while it writes.
+	mainSync, err := mainsync.New(mainsync.Deps{
+		Store:  p.DB,
+		Git:    git,
+		Target: mergeOrchestrator,
+		Turns:  queue,
+		Running: func(ctx context.Context, ws ids.WorkspaceID) (bool, error) {
+			status, err := verbs.Status(ctx, ws)
+			if err != nil {
+				return false, err
+			}
+			activity := status.GetStanding().GetOpen().GetActivity()
+			return activity.GetTurnRunning() != nil || activity.GetNeedsInput() != nil, nil
+		},
+		Open:    func(ctx context.Context, ws ids.WorkspaceID) error { return verbs.Open(ctx, ws, silentOpenProgress{}) },
+		Briefs:  merge.BriefsFrom(paths.PromptsDir),
+		MintKey: prompthandler.MintKey,
+		Serves:  rolloutController.ServesIntake,
+		Clock:   clock.System{},
+		Log:     log,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("agent-repld: build the main sync: %w", err)
+	}
 	divergence, err := repodivergence.New(repodivergence.Deps{
 		Git:      git,
 		Registry: p.DB,
-		Sink:     sidebarResolver.SetRepoDivergence,
-		Clock:    clock.System{},
-		Every:    repodivergence.DefaultEvery,
-		Timeout:  repodivergence.DefaultTimeout,
-		Log:      log,
+		Sink: func(repo ids.RepoID, measure repodivergence.Measure) {
+			sidebarResolver.SetRepoDivergence(repo, measure)
+			mainSync.Observe(repo, measure)
+		},
+		Clock:   clock.System{},
+		Every:   repodivergence.DefaultEvery,
+		Timeout: repodivergence.DefaultTimeout,
+		Log:     log,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("agent-repld: build the repository divergence measurer: %w", err)
@@ -1700,6 +1758,8 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			Queue:            queue,
 			HeldRollback:     queue,
 			Verbs:            verbs,
+			PullRequests:     pullRequests,
+			Remotes:          git,
 			Retarget:         retargeter,
 			Merge:            mergeOrchestrator,
 			Drain:            drainController,
@@ -1835,6 +1895,8 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 				func(ctx context.Context) { queueNotices.Run(ctx, handler) },
 				func(ctx context.Context) { derivedNotices.Run(ctx, handler) },
 				func(ctx context.Context) { followNotices.Run(ctx, handler) },
+				func(ctx context.Context) { pullRequests.Run(ctx, handler) },
+				func(ctx context.Context) { mainSync.Run(ctx, handler) },
 				selfCloses.Run,
 				subsectionUnfolds.Run)
 		}),
@@ -2430,3 +2492,9 @@ func freshBootSettle(joining bool, controller rollout.Controller) func(ctx conte
 	}
 	return controller.SettleBoot
 }
+
+// silentOpenProgress is the progress of an open nobody watches: the main
+// sync reopening a main workspace to tell it a failed fast-forward.
+type silentOpenProgress struct{}
+
+func (silentOpenProgress) Stage(workspace.OpenStage) {}

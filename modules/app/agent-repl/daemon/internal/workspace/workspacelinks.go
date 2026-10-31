@@ -13,6 +13,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/externalbrowser"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/prwatch"
 	"agent-repld/internal/resolve/topbar"
 	"agent-repld/internal/wsm"
 )
@@ -26,13 +27,22 @@ const (
 	maxLinkLabelWords = 8
 )
 
+// PullRequestAnchor reads a pull request to anchor the subscription an owned
+// link takes (prwatch.Watcher.Anchor).
+type PullRequestAnchor interface {
+	Anchor(ctx context.Context, subscriber ids.WorkspaceID, pr wsm.PullRequestKey, events wsm.PullRequestEvents, origin wsm.PullRequestOrigin) (wsm.PullRequestSubscription, *agentreplv1.PullRequestStatus, error)
+}
+
 // SetLink stores URL under LABEL on the workspace, owned or a reference, or
 // relabels it and sets its ownership anew when the workspace already holds it
-// (agentrepl.v1.ChangeWorkspaceLinksSet), and
-// republishes the topbar title that opens the shown links. A url the external
-// browser would refuse to open is refused invalid_link, and a label that is
-// not two to eight words in one sentence invalid_label, before anything is
-// written. It answers every link the workspace then holds.
+// (agentrepl.v1.ChangeWorkspaceLinksSet), and republishes the topbar title
+// that opens the shown links. An OWNED GitHub pull request the workspace
+// holds no subscription to is read and subscribed in the same write
+// (wsm.LinkSet.Subscribe); a read that fails subscribes it unanchored, so its
+// first successful read tells what is already on the pull request. A url the
+// external browser would refuse to open is refused invalid_link, and a label
+// that is not two to eight words in one sentence invalid_label, before
+// anything is written. It answers every link the workspace then holds.
 func (v *verbs) SetLink(ctx context.Context, ws ids.WorkspaceID, url, label string, owned bool) ([]wsm.WorkspaceLink, error) {
 	fields := dlog.Context{"url": url, "label": label, "owned": owned}
 	return v.changeLinks(ctx, ws, fields, "set a link", func(log dlog.Logger) ([]wsm.WorkspaceLink, error) {
@@ -46,8 +56,41 @@ func (v *verbs) SetLink(ctx context.Context, ws ids.WorkspaceID, url, label stri
 				fmt.Sprintf("%q is not a label the menu draws: %v", label, err), false,
 				map[string]any{"label": label, "reason": err.Error()})
 		}
-		return v.deps.DB.SetWorkspaceLink(ctx, ws, url, label, owned)
+		set := wsm.LinkSet{URL: url, Label: label, Owned: owned}
+		if pr, ok := prwatch.ParseURL(url); ok {
+			set.PullRequest = &pr
+			fields["pull_request"] = pr.String()
+			if owned {
+				sub, err := v.ownedSubscription(ctx, log, ws, pr, fields)
+				if err != nil {
+					return nil, err
+				}
+				set.Subscribe = sub
+			}
+		}
+		return v.deps.DB.SetWorkspaceLink(ctx, ws, set)
 	})
+}
+
+// ownedSubscription answers the subscription an owned link to PR takes: nil
+// when the workspace already holds one, so storing the link again reads
+// nothing.
+func (v *verbs) ownedSubscription(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, pr wsm.PullRequestKey, fields dlog.Context) (*wsm.PullRequestSubscription, error) {
+	held, err := v.deps.DB.WorkspacePullRequestSubscriptions(ctx, ws)
+	if err != nil {
+		return nil, err
+	}
+	for _, sub := range held {
+		if sub.PullRequest == pr {
+			return nil, nil
+		}
+	}
+	sub, _, err := v.deps.PullRequests.Anchor(ctx, ws, pr, wsm.AllPullRequestEvents(), wsm.PullRequestOriginOwnedLink)
+	if err != nil {
+		// The leaf recorded the failure; this records what it cost.
+		log.Info(opChangeLinks, "the owned pull request could not be read, so it is followed unanchored: its first successful read tells what is already on it", dlog.WithCause(fields, err))
+	}
+	return &sub, nil
 }
 
 // RemoveLink removes one stored link (agentrepl.v1.ChangeWorkspaceLinksRemove);
@@ -171,7 +214,7 @@ func LinksView(links []wsm.WorkspaceLink) *agentreplv1.WorkspaceLinks {
 		} else {
 			placement.Placement = &agentreplv1.WorkspaceLinkPlacement_Unshown{Unshown: &agentreplv1.WorkspaceLinkPlacementUnshown{}}
 		}
-		out.Links[i] = &agentreplv1.WorkspaceLink{Url: link.URL, Label: link.Label, Placement: placement, Ownership: LinkOwnershipView(link.Owned)}
+		out.Links[i] = &agentreplv1.WorkspaceLink{Url: link.URL, Label: link.Label, Placement: placement, Ownership: ownershipView(link)}
 	}
 	if shown < wsm.ShownLinkLimit {
 		out.Menu = &agentreplv1.WorkspaceLinksMenu{Standing: &agentreplv1.WorkspaceLinksMenu_Room{
@@ -181,4 +224,34 @@ func LinksView(links []wsm.WorkspaceLink) *agentreplv1.WorkspaceLinks {
 			Full: &agentreplv1.WorkspaceLinksMenuFull{Limit: wsm.ShownLinkLimit, Unshown: uint32(len(links)) - shown}}}
 	}
 	return out
+}
+
+// ownershipView renders whether the workspace's work made what LINK points
+// at, and for an owned link how the daemon follows it.
+func ownershipView(link wsm.WorkspaceLink) *agentreplv1.WorkspaceLinkOwnership {
+	view := LinkOwnershipView(link.Owned)
+	if owned := view.GetOwned(); owned != nil {
+		owned.Follow = followView(link)
+	}
+	return view
+}
+
+// followView renders how the daemon follows an owned LINK.
+func followView(link wsm.WorkspaceLink) *agentreplv1.WorkspaceLinkOwnedFollow {
+	follow := &agentreplv1.WorkspaceLinkOwnedFollow{}
+	switch sub := link.Follow; {
+	case link.PullRequest == nil:
+		follow.Standing = &agentreplv1.WorkspaceLinkOwnedFollow_NotFollowable{NotFollowable: &agentreplv1.WorkspaceLinkOwnedFollowNotFollowable{}}
+	case sub == nil:
+		follow.Standing = &agentreplv1.WorkspaceLinkOwnedFollow_Unsubscribed{Unsubscribed: &agentreplv1.WorkspaceLinkOwnedFollowUnsubscribed{}}
+	case sub.Ended != nil:
+		state := &agentreplv1.PullRequestState{State: &agentreplv1.PullRequestState_Closed{Closed: &agentreplv1.PullRequestStateClosed{}}}
+		if sub.Ended.Merged {
+			state.State = &agentreplv1.PullRequestState_Merged{Merged: &agentreplv1.PullRequestStateMerged{MergeCommitSha: sub.Ended.MergeSHA}}
+		}
+		follow.Standing = &agentreplv1.WorkspaceLinkOwnedFollow_Ended{Ended: &agentreplv1.WorkspaceLinkOwnedFollowEnded{State: state}}
+	default:
+		follow.Standing = &agentreplv1.WorkspaceLinkOwnedFollow_Following{Following: &agentreplv1.WorkspaceLinkOwnedFollowFollowing{Subscription: prwatch.SubscriptionProto(*sub)}}
+	}
+	return follow
 }

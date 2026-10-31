@@ -93,3 +93,16 @@ func TestTheRunsDaemonProgramLinksTheMockedGitAsThisHarnessDoes(t *testing.T) {
 		t.Fatalf("the run links %q, the harness %q", got, want)
 	}
 }
+
+func TestNoGitHubLinkNamesTheLeafsBinaryAndNoFile(t *testing.T) {
+	// Act
+	got := NoGitHubLink
+
+	// Assert
+	if got != "-X agent-repld/internal/ghclient.ghBinary=/dev/null/no-github-in-tests" {
+		t.Fatalf("NoGitHubLink = %q", got)
+	}
+	if _, err := os.Stat("/dev/null/no-github-in-tests"); err == nil {
+		t.Fatal("the unreachable gh path exists")
+	}
+}

@@ -213,6 +213,26 @@ A workspace keeps every link that bears on its task, such as its pull request, t
   - The thread itself is stored among the links as a reference.
 - The links are kept across restarts.
 
+### Pull requests a workspace owns
+
+- A pull request a workspace stores as owned (`-owned`) is followed by the daemon.
+  - Every comment, review, line comment, edit, deletion and finished check on it reaches the workspace's agent as a notice, within about 30 seconds.
+  - Your own comments reach the agent too, so commenting on the agent's pull request is a way to talk to it.
+  - The agent replies through the daemon (`agent-repld workspace pr-comment`), so it is never told its own reply.
+- The daemon stops following the pull request once it merges or closes.
+- `agent-repld workspace pr-subscriptions WS` lists what a workspace follows, and whether the daemon's reads of each pull request are working.
+- `agent-repld workspace pr-unsubscribe WS -pr URL` stops following one; agents never do this themselves.
+- The daemon reads GitHub as your `gh` login, so it needs `gh auth login` done once.
+
+### The main checkout follows its upstream
+
+- When a merge lands on a registered repository's main branch on GitHub, the daemon fast-forwards that repository's main checkout within about a minute.
+- It waits for the main workspace's running turn to end, and for the repository's merge queue to be empty, before it moves anything.
+- When the fast-forward cannot be made, the daemon asks the repository's main workspace to repair the checkout, reopening it if it is closed.
+  - Examples are a branch with its own commits, or local changes in the way.
+  - Each failure is asked about once.
+- A fetch that fails for lack of a network is only logged.
+
 ## Renaming a workspace
 
 A rename changes the workspace's name and nothing else.

@@ -32,9 +32,11 @@ import (
 	"agent-repld/internal/envc"
 	"agent-repld/internal/prompthandler"
 	"agent-repld/internal/protoarm"
+	"agent-repld/internal/prwatch"
 	"agent-repld/internal/resolve/feed"
 	"agent-repld/internal/stateroot"
 	"agent-repld/internal/workspace"
+	"agent-repld/internal/wsm"
 )
 
 // THE AGENT API'S COMMANDS: six nouns over the serving daemon's rpcs.
@@ -145,28 +147,32 @@ type cliCommand struct {
 // cliNouns are every noun's subcommands.
 var cliNouns = map[string]map[string]cliCommand{
 	workspaceNoun: {
-		"create":      {usage: "create -repository here|DIR -relationship child|peer [-parent WS] [-lands-into WS|main] [-origin-master] [-owner-notice TEXT] -context fresh|fork [-fork WS] [-one-shot] [-prompt TEXT] [-name NAME] [-model M] [-priority p05|p1|p2|p3] [-pre-deploy-prompt TEXT] [-pre-deploy-script PATH:SECONDS] [-post-deploy-prompt TEXT] [-post-deploy-script PATH:SECONDS] [-slack-thread URL] [-as-user]", run: workspaceCreate},
-		"async-merge": {usage: "async-merge -name NAME -branch BRANCH (-maker WS | -maker-subagent ID) -context-fork WS -target primary|maker -placement back|front|behind=MERGE [-instruction TEXT] [-close-after WS] [-cleanup-worktree] [-compact-after] [-pre-deploy-prompt TEXT] [-pre-deploy-script PATH:SECONDS] [-post-deploy-prompt TEXT] [-post-deploy-script PATH:SECONDS] [-version-part minor|patch -changelog-line TEXT]", run: workspaceAsyncMerge},
-		"prompt":      {usage: "prompt [-as-user] WS TEXT", run: workspacePrompt},
-		"set":         {usage: "set WS [-hidden|-shown] [-priority p05|p1|p2|p3|none] [-parent WS|-top-level] [-lands-into WS|main] [-one-shot|-not-one-shot] [-await WS|-not-awaiting] [-name NAME] [-as-user]", run: workspaceSet},
-		"link":        {usage: "link WS (-url URL -label TEXT -owned|-reference | -remove URL | -show URL [-show URL]... | -clear)", run: workspaceLink},
-		"finished":    {usage: "finished WS -placement back|front|behind=MERGE [-version-part minor|patch -changelog-line TEXT] [-as-user]", run: workspaceFinished},
-		"open":        {usage: "open WS", run: workspaceOpen},
-		"close":       {usage: "close WS [-as-user]", run: workspaceClose},
-		"kill":        {usage: "kill WS", run: workspaceKill},
-		"select":      {usage: "select WS", run: workspaceSelect},
-		"restart":     {usage: "restart WS", run: workspaceRestart},
-		"park":        {usage: "park WS|-all", run: workspacePark},
-		"interrupt":   {usage: "interrupt WS [-all-agents] [-confirm-agents]", run: workspaceInterrupt},
-		"compact":     {usage: "compact WS [-instructions TEXT] [-as-user]", run: workspaceCompact},
-		"status":      {usage: "status WS", run: workspaceStatus},
-		"list":        {usage: "list", run: workspaceList},
-		"find":        {usage: "find [-repository here|DIR] [-since WHEN] [-until WHEN] [-standing open|closed|landed] [-text TEXT] [-created-by WS] [-limit N|-all]", run: workspaceFind},
-		"subscribe":   {usage: "subscribe WS -events turn_started,turn_ended,needs_input,landed,closed", run: workspaceSubscribe},
-		"unsubscribe": {usage: "unsubscribe WS", run: workspaceUnsubscribe},
-		"gate":        {usage: "gate WS pay|clear|compact|compact-and-resume [-model M -scope all|prompts|responses]", run: workspaceGate},
-		"subsections": {usage: "subsections WS", run: workspaceSubsections},
-		"place":       {usage: "place WS... -subsection NAME|-new-subsection NAME", run: workspacePlace},
+		"create":           {usage: "create -repository here|DIR -relationship child|peer [-parent WS] [-lands-into WS|main] [-origin-master] [-owner-notice TEXT] -context fresh|fork [-fork WS] [-one-shot] [-prompt TEXT] [-name NAME] [-model M] [-priority p05|p1|p2|p3] [-pre-deploy-prompt TEXT] [-pre-deploy-script PATH:SECONDS] [-post-deploy-prompt TEXT] [-post-deploy-script PATH:SECONDS] [-slack-thread URL] [-as-user]", run: workspaceCreate},
+		"async-merge":      {usage: "async-merge -name NAME -branch BRANCH (-maker WS | -maker-subagent ID) -context-fork WS -target primary|maker -placement back|front|behind=MERGE [-instruction TEXT] [-close-after WS] [-cleanup-worktree] [-compact-after] [-pre-deploy-prompt TEXT] [-pre-deploy-script PATH:SECONDS] [-post-deploy-prompt TEXT] [-post-deploy-script PATH:SECONDS] [-version-part minor|patch -changelog-line TEXT]", run: workspaceAsyncMerge},
+		"prompt":           {usage: "prompt [-as-user] WS TEXT", run: workspacePrompt},
+		"set":              {usage: "set WS [-hidden|-shown] [-priority p05|p1|p2|p3|none] [-parent WS|-top-level] [-lands-into WS|main] [-one-shot|-not-one-shot] [-await WS|-not-awaiting] [-name NAME] [-as-user]", run: workspaceSet},
+		"link":             {usage: "link WS (-url URL -label TEXT -owned|-reference | -remove URL | -show URL [-show URL]... | -clear)", run: workspaceLink},
+		"finished":         {usage: "finished WS -placement back|front|behind=MERGE [-version-part minor|patch -changelog-line TEXT] [-as-user]", run: workspaceFinished},
+		"open":             {usage: "open WS", run: workspaceOpen},
+		"close":            {usage: "close WS [-as-user]", run: workspaceClose},
+		"kill":             {usage: "kill WS", run: workspaceKill},
+		"select":           {usage: "select WS", run: workspaceSelect},
+		"restart":          {usage: "restart WS", run: workspaceRestart},
+		"park":             {usage: "park WS|-all", run: workspacePark},
+		"interrupt":        {usage: "interrupt WS [-all-agents] [-confirm-agents]", run: workspaceInterrupt},
+		"compact":          {usage: "compact WS [-instructions TEXT] [-as-user]", run: workspaceCompact},
+		"status":           {usage: "status WS", run: workspaceStatus},
+		"list":             {usage: "list", run: workspaceList},
+		"find":             {usage: "find [-repository here|DIR] [-since WHEN] [-until WHEN] [-standing open|closed|landed] [-text TEXT] [-created-by WS] [-limit N|-all]", run: workspaceFind},
+		"subscribe":        {usage: "subscribe WS -events turn_started,turn_ended,needs_input,landed,closed", run: workspaceSubscribe},
+		"unsubscribe":      {usage: "unsubscribe WS", run: workspaceUnsubscribe},
+		"pr-subscribe":     {usage: "pr-subscribe WS -pr URL|#N|OWNER/REPO#N [-events comment,review,review_comment,state,checks]", run: workspacePullRequestSubscribe},
+		"pr-unsubscribe":   {usage: "pr-unsubscribe WS -pr URL|OWNER/REPO#N", run: workspacePullRequestUnsubscribe},
+		"pr-subscriptions": {usage: "pr-subscriptions WS", run: workspacePullRequestSubscriptions},
+		"pr-comment":       {usage: "pr-comment WS -pr URL|OWNER/REPO#N (-body TEXT | -body-file PATH) [-in-reply-to COMMENT_ID]", run: workspacePullRequestComment},
+		"gate":             {usage: "gate WS pay|clear|compact|compact-and-resume [-model M -scope all|prompts|responses]", run: workspaceGate},
+		"subsections":      {usage: "subsections WS", run: workspaceSubsections},
+		"place":            {usage: "place WS... -subsection NAME|-new-subsection NAME", run: workspacePlace},
 	},
 	mergeQueueNoun: {
 		"status":         {usage: "status [-repository here|DIR]", run: queueStatus},
@@ -968,7 +974,7 @@ func workspaceLink(c *cliCall, args []string) int {
 	fs, stateDir := c.flags()
 	url := fs.String("url", "", "the link to store or relabel")
 	label := fs.String("label", "", "the link's label: two to eight words, one sentence")
-	owned := fs.Bool("owned", false, "the workspace's work made what the link points at (a pull request it opened)")
+	owned := fs.Bool("owned", false, "the workspace's work made what the link points at (a pull request it opened): the daemon follows an owned pull request")
 	reference := fs.Bool("reference", false, "the link points at something apart from the workspace's work (the thread or ticket it came from)")
 	remove := fs.String("remove", "", "the url of the link to remove")
 	var show []string
@@ -1565,6 +1571,121 @@ func workspaceUnsubscribe(c *cliCall, args []string) int {
 		return exitFailure
 	}
 	resp, err := c.client.UnsubscribeWorkspace(c.ctx, connect.NewRequest(&agentreplv1.UnsubscribeWorkspaceRequest{Subscriber: subscriber, Followed: followed}))
+	return answer(c, resp, err)
+}
+
+// pullRequestEvents are the -events spellings of pr-subscribe.
+var pullRequestEvents = map[string]agentreplv1.PullRequestNoticeEvent{
+	"comment":        agentreplv1.PullRequestNoticeEvent_PULL_REQUEST_NOTICE_EVENT_COMMENT,
+	"review":         agentreplv1.PullRequestNoticeEvent_PULL_REQUEST_NOTICE_EVENT_REVIEW,
+	"review_comment": agentreplv1.PullRequestNoticeEvent_PULL_REQUEST_NOTICE_EVENT_REVIEW_COMMENT,
+	"state":          agentreplv1.PullRequestNoticeEvent_PULL_REQUEST_NOTICE_EVENT_STATE,
+	"checks":         agentreplv1.PullRequestNoticeEvent_PULL_REQUEST_NOTICE_EVENT_CHECKS,
+}
+
+// allPullRequestEvents is pr-subscribe's default: every activity kind.
+const allPullRequestEvents = "comment,review,review_comment,state,checks"
+
+// workspacePullRequestSubscribe subscribes WS's agent to a pull request: a
+// url, `#N` in WS's repository, or OWNER/REPO#N.
+func workspacePullRequestSubscribe(c *cliCall, args []string) int {
+	fs, stateDir := c.flags()
+	pr := fs.String("pr", "", "the pull request: a url, #N in the workspace's repository, or OWNER/REPO#N")
+	events := fs.String("events", allPullRequestEvents, "comma-separated: comment, review, review_comment, state, checks")
+	subscriber, rest, ok := c.workspaceArg(fs, stateDir, args)
+	if !ok || len(rest) != 0 {
+		return exitFailure
+	}
+	var wanted []agentreplv1.PullRequestNoticeEvent
+	for _, name := range strings.Split(*events, ",") {
+		event, ok := pullRequestEvents[strings.TrimSpace(name)]
+		if !ok {
+			return c.usageFailed("%q is no pull-request event", name)
+		}
+		wanted = append(wanted, event)
+	}
+	if strings.TrimSpace(*pr) == "" {
+		return c.usageFailed("-pr names the pull request")
+	}
+	req := &agentreplv1.SubscribePullRequestRequest{Subscriber: subscriber, Events: wanted,
+		PullRequest: &agentreplv1.SubscribePullRequestRequest_Text{Text: *pr}}
+	if key, err := wsm.ParsePullRequestKey(*pr); err == nil {
+		req.PullRequest = &agentreplv1.SubscribePullRequestRequest_Ref{Ref: prwatch.RefProto(key)}
+	}
+	resp, err := c.client.SubscribePullRequest(c.ctx, connect.NewRequest(req))
+	return answer(c, resp, err)
+}
+
+// pullRequestFlag reads a -pr naming a pull request exactly: a url or
+// OWNER/REPO#N.
+func pullRequestFlag(text string) (*agentreplv1.PullRequestRef, string) {
+	if key, ok := prwatch.ParseURL(text); ok {
+		return prwatch.RefProto(key), ""
+	}
+	if key, err := wsm.ParsePullRequestKey(text); err == nil {
+		return prwatch.RefProto(key), ""
+	}
+	return nil, fmt.Sprintf("-pr is a github.com pull request url or OWNER/REPO#N, not %q", text)
+}
+
+func workspacePullRequestUnsubscribe(c *cliCall, args []string) int {
+	fs, stateDir := c.flags()
+	pr := fs.String("pr", "", "the pull request: a url or OWNER/REPO#N")
+	subscriber, rest, ok := c.workspaceArg(fs, stateDir, args)
+	if !ok || len(rest) != 0 {
+		return exitFailure
+	}
+	ref, problem := pullRequestFlag(*pr)
+	if problem != "" {
+		return c.usageFailed("%s", problem)
+	}
+	resp, err := c.client.UnsubscribePullRequest(c.ctx, connect.NewRequest(&agentreplv1.UnsubscribePullRequestRequest{Subscriber: subscriber, PullRequest: ref}))
+	return answer(c, resp, err)
+}
+
+func workspacePullRequestSubscriptions(c *cliCall, args []string) int {
+	fs, stateDir := c.flags()
+	subscriber, rest, ok := c.workspaceArg(fs, stateDir, args)
+	if !ok || len(rest) != 0 {
+		return exitFailure
+	}
+	resp, err := c.client.ListPullRequestSubscriptions(c.ctx, connect.NewRequest(&agentreplv1.ListPullRequestSubscriptionsRequest{Subscriber: subscriber}))
+	return answer(c, resp, err)
+}
+
+// workspacePullRequestComment posts a comment on a pull request for WS,
+// through the daemon, so the comment is never told back to WS.
+func workspacePullRequestComment(c *cliCall, args []string) int {
+	fs, stateDir := c.flags()
+	pr := fs.String("pr", "", "the pull request: a url or OWNER/REPO#N")
+	body := fs.String("body", "", "the comment's markdown")
+	bodyFile := fs.String("body-file", "", "a file holding the comment's markdown")
+	inReplyTo := fs.Uint64("in-reply-to", 0, "a line comment's id: the comment is a reply in its thread")
+	ws, rest, ok := c.workspaceArg(fs, stateDir, args)
+	if !ok || len(rest) != 0 {
+		return exitFailure
+	}
+	ref, problem := pullRequestFlag(*pr)
+	if problem != "" {
+		return c.usageFailed("%s", problem)
+	}
+	if (*body == "") == (*bodyFile == "") {
+		return c.usageFailed("name exactly one of -body and -body-file")
+	}
+	markdown := *body
+	if *bodyFile != "" {
+		raw, err := os.ReadFile(*bodyFile)
+		if err != nil {
+			return c.usageFailed("read -body-file: %v", err)
+		}
+		markdown = string(raw)
+	}
+	req := &agentreplv1.CommentOnPullRequestRequest{Workspace: ws, PullRequest: ref,
+		Placement: &agentreplv1.CommentOnPullRequestRequest_Conversation{Conversation: &agentreplv1.CommentOnPullRequestConversation{Markdown: markdown}}}
+	if *inReplyTo != 0 {
+		req.Placement = &agentreplv1.CommentOnPullRequestRequest_Reply{Reply: &agentreplv1.CommentOnPullRequestReply{InReplyToCommentId: *inReplyTo, Markdown: markdown}}
+	}
+	resp, err := c.client.CommentOnPullRequest(c.ctx, connect.NewRequest(req))
 	return answer(c, resp, err)
 }
 

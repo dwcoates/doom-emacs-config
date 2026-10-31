@@ -1,0 +1,92 @@
+// endpoint_comment_on_pull_request.proto — CommentOnPullRequest: post a
+// comment on a pull request for a workspace, so the workspace is never told
+// its own words back. AGENT API section.
+//
+// WHY THE DAEMON POSTS. An agent posts under the user's own GitHub login, so
+// by author alone the daemon cannot tell an agent's reply from the user's
+// comment, and the user's comments must keep waking the agent: commenting on
+// the agent's pull request is how the user talks to it in public. So the
+// agent posts through the daemon, which records the created comment's id
+// against the workspace's subscription in the same transaction that answers,
+// and the poll never tells a subscriber an item recorded as its own. A reply
+// an agent posts any other way is told back to it as an ordinary comment.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/pull_request.proto";
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message CommentOnPullRequestRequest {
+  // The workspace the comment is posted for: the caller's own.
+  workspace.v1.WorkspaceRef workspace = 1;
+  // The pull request commented on.
+  PullRequestRef pull_request = 2;
+  // What is posted. THE ARM IS WHERE IT GOES. Unset is a malformed request
+  // (Connect InvalidArgument).
+  oneof placement {
+    // A conversation comment.
+    CommentOnPullRequestConversation conversation = 3;
+    // A reply in a review thread.
+    CommentOnPullRequestReply reply = 4;
+  }
+}
+
+// A conversation comment.
+message CommentOnPullRequestConversation {
+  // The markdown body. A blank body is a malformed request.
+  string markdown = 1;
+}
+
+// A reply in a review thread.
+message CommentOnPullRequestReply {
+  // Any line comment of the thread
+  // (PullRequestActivityReviewComment.comment_id); GitHub files the reply
+  // under the thread's first comment.
+  uint64 in_reply_to_comment_id = 1;
+  // The markdown body. A blank body is a malformed request.
+  string markdown = 2;
+}
+
+// THE ARM IS THE OUTCOME.
+message CommentOnPullRequestResponse {
+  oneof result {
+    CommentOnPullRequestSuccess success = 1;
+    CommentOnPullRequestError error = 2;
+  }
+}
+
+// Posted, and recorded as the workspace's own.
+message CommentOnPullRequestSuccess {
+  // GitHub's id for the created comment.
+  uint64 comment_id = 1;
+  // The created comment's web address.
+  string url = 2;
+}
+
+// Nothing was posted.
+message CommentOnPullRequestError {
+  oneof cause {
+    // The workspace is not in the daemon's registry.
+    CommentOnPullRequestUnknownWorkspace unknown_workspace = 1;
+    // `in_reply_to_comment_id` names no line comment of the pull request.
+    CommentOnPullRequestUnknownThread unknown_thread = 2;
+    // GitHub refused or could not take the post.
+    CommentOnPullRequestNotPosted not_posted = 3;
+  }
+}
+
+// The workspace id is not in the daemon's registry. DELIBERATELY EMPTY.
+message CommentOnPullRequestUnknownWorkspace {}
+
+// No such thread. DELIBERATELY EMPTY.
+message CommentOnPullRequestUnknownThread {}
+
+// The post failed.
+message CommentOnPullRequestNotPosted {
+  // Why.
+  PullRequestGitHubFailure cause = 1;
+}

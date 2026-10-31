@@ -11,6 +11,10 @@ syntax = "proto3";
 
 package agentrepl.v1;
 
+import "agentrepl/v1/endpoint_subscribe_pull_request.proto";
+import "agentrepl/v1/endpoint_unsubscribe_pull_request.proto";
+import "agentrepl/v1/endpoint_list_pull_request_subscriptions.proto";
+import "agentrepl/v1/endpoint_comment_on_pull_request.proto";
 import "agentrepl/v1/endpoint_adjust_feed_text_scale.proto";
 import "agentrepl/v1/endpoint_adopt_host_workspace.proto";
 import "agentrepl/v1/endpoint_adopt_web_workspace.proto";
@@ -683,6 +687,23 @@ service AgentRepl {
   // End a merge-queue subscription. See
   // endpoint_unsubscribe_merge_queue.proto.
   rpc UnsubscribeMergeQueue(UnsubscribeMergeQueueRequest) returns (UnsubscribeMergeQueueResponse);
+  // Tell one workspace's agent about a GitHub pull request's activity,
+  // answering with the pull request now. Agents are subscribed by owning a
+  // link instead (ChangeWorkspaceLinksSet.ownership). See
+  // endpoint_subscribe_pull_request.proto.
+  rpc SubscribePullRequest(SubscribePullRequestRequest) returns (SubscribePullRequestResponse);
+  // End a pull-request subscription. See
+  // endpoint_unsubscribe_pull_request.proto.
+  rpc UnsubscribePullRequest(UnsubscribePullRequestRequest) returns (UnsubscribePullRequestResponse);
+  // The pull requests one workspace follows. See
+  // endpoint_list_pull_request_subscriptions.proto.
+  rpc ListPullRequestSubscriptions(ListPullRequestSubscriptionsRequest) returns (ListPullRequestSubscriptionsResponse) {
+    // A READ: it changes nothing (`agent-repld -dry-run` lets it through).
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // Post a comment on a pull request for a workspace, recorded as its own so
+  // it is never told back to it. See endpoint_comment_on_pull_request.proto.
+  rpc CommentOnPullRequest(CommentOnPullRequestRequest) returns (CommentOnPullRequestResponse);
   // Run the named tests from one workspace's worktree, streaming what the run
   // reports; the daemon is the one runner of tests on the host. See
   // endpoint_run_tests.proto.

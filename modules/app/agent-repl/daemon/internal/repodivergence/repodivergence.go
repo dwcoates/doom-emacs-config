@@ -3,7 +3,7 @@
 // ahead/behind count the sidebar draws over a repository section's label
 // (frontend.v1.RosterRepoDivergence).
 //
-// ONE SWEEP AT STARTUP, THEN ONE EVERY FIVE MINUTES. A sweep walks every
+// ONE SWEEP AT STARTUP, THEN ONE EVERY MINUTE. A sweep walks every
 // registered repository in turn: it resolves the primary branch, probes its
 // upstream, fetches the upstream's remote (a count against a stale
 // remote-tracking ref would never move "behind"), and counts the two against
@@ -24,8 +24,11 @@ import (
 	"agent-repld/internal/wsm"
 )
 
-// DefaultEvery is the cadence between sweeps.
-const DefaultEvery = 5 * time.Minute
+// DefaultEvery is the cadence between sweeps: a minute, because the sweep's
+// outcome also drives the main checkout's sync (internal/mainsync), whose
+// latency the owner set at a minute (2026-10-30). A fetch that finds nothing
+// new costs one round trip to the remote, as an `ls-remote` probe would.
+const DefaultEvery = time.Minute
 
 // DefaultTimeout bounds one repository's measurement. A fetch from a remote
 // that never answers would otherwise stall every later repository's sweep.

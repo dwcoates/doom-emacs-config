@@ -131,6 +131,11 @@ func (f *fakeSurfaces) CentralClientLog(rec dlog.ClientRecord) error {
 
 // fakeDB answers the registry lookups the handlers make.
 type fakeDB struct {
+	// prSubs are the pull-request subscriptions recorded; prSubscribeErr
+	// and prReplaced answer SubscribePullRequest (pullrequests_test.go).
+	prSubs         []wsm.PullRequestSubscription
+	prSubscribeErr error
+	prReplaced     bool
 	// mergeQueues are the merge queues AllMergeQueues answers.
 	mergeQueues map[wsm.RepoKey][]wsm.MergeQueueEntry
 	wsm.DB
@@ -1928,25 +1933,29 @@ type harness struct {
 	DB        *fakeDB
 	Ownership *fakeOwnership
 	Verbs     *fakeVerbs
-	Creates   *creategate.Gate
-	Retarget  *fakeRetarget
-	Prompts   *fakePrompts
-	Chat      *fakeChat
-	Queue     *fakeQueue
-	Merge     *fakeMerge
-	Makers    *fakeMakers
-	Drain     *fakeDrain
-	Rollout   *fakeRollout
-	Deployer  *fakeDeployer
-	Health    *fakeHealth
-	Facts     *fakeSessionFacts
-	Login     *fakeLogin
-	Feed      *fakeFeed
-	Images    *fakeImageSources
-	Footer    *fakeFooter
-	Topbar    *fakeTopbar
-	Sidebar   *fakeSidebar
-	Memory    *fakeMemory
+	// PRs is the pull-request watcher (pullrequests_test.go); Remotes reads
+	// a workspace's origin.
+	PRs      *fakePullRequests
+	Remotes  *fakeRemotes
+	Creates  *creategate.Gate
+	Retarget *fakeRetarget
+	Prompts  *fakePrompts
+	Chat     *fakeChat
+	Queue    *fakeQueue
+	Merge    *fakeMerge
+	Makers   *fakeMakers
+	Drain    *fakeDrain
+	Rollout  *fakeRollout
+	Deployer *fakeDeployer
+	Health   *fakeHealth
+	Facts    *fakeSessionFacts
+	Login    *fakeLogin
+	Feed     *fakeFeed
+	Images   *fakeImageSources
+	Footer   *fakeFooter
+	Topbar   *fakeTopbar
+	Sidebar  *fakeSidebar
+	Memory   *fakeMemory
 	// LoudFaults is the standing loud faults every Emacs stream is told.
 	LoudFaults publish.Topic[*agentreplv1.DaemonFaultsStanding]
 	// Focus is Emacs's desktop focus, attached by an Emacs WatchDaemon stream.
@@ -2047,6 +2056,8 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		}},
 		Ownership:  &fakeOwnership{standing: workspace.StandingOwned},
 		Verbs:      &fakeVerbs{},
+		PRs:        &fakePullRequests{},
+		Remotes:    &fakeRemotes{},
 		Creates:    creategate.New(),
 		Retarget:   &fakeRetarget{},
 		Prompts:    &fakePrompts{},
@@ -2105,6 +2116,8 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		Queue:             h.Queue,
 		HeldRollback:      h.Queue,
 		Verbs:             h.Verbs,
+		PullRequests:      h.PRs,
+		Remotes:           h.Remotes,
 		Retarget:          h.Retarget,
 		Merge:             h.Merge,
 		Drain:             h.Drain,
