@@ -1004,6 +1004,10 @@ message RosterMergeQueueHead {
   // is RETIRED (2026-10-27): a queue whose line is empty is not listed.
   reserved 5;
   reserved "failed";
+  // WHEN THIS MERGE REACHED THE HEAD, epoch ms: the head's clock ticks from
+  // it, so a merge that waited hours in line reads zero as it takes the
+  // head slot (owner ruling, 2026-10-30). Never zero.
+  int64 head_since_ms = 6;
 }
 
 // The head waits at the front of the line.

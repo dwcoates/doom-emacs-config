@@ -106,6 +106,9 @@ type orchestrator struct {
 	// targetTips is each repository's target tip as a run last read it: the
 	// base the merge behind the head rebases onto (race.go). Guarded by mu.
 	targetTips map[wsm.RepoKey]string
+	// waitingHeads is when each queue's front, waiting unadmitted, reached
+	// the head: the head clock of a front with no run here (headSince).
+	waitingHeads map[wsm.RepoKey]waitingHead
 	// overtakings are the races to land being won by the merge behind the
 	// head, by repository (race.go). Guarded by mu.
 	overtakings map[wsm.RepoKey]*overtaking
@@ -318,6 +321,7 @@ func newOrchestrator(deps Deps) (*orchestrator, error) {
 		chains:             map[wsm.RepoKey][]*run{},
 		chainSignals:       map[wsm.RepoKey]chan struct{}{},
 		targetTips:         map[wsm.RepoKey]string{},
+		waitingHeads:       map[wsm.RepoKey]waitingHead{},
 		overtakings:        map[wsm.RepoKey]*overtaking{},
 		testTurns:          map[wsm.RepoKey]*turnLine{},
 		waitingPass:        map[wsm.RepoKey]bool{},

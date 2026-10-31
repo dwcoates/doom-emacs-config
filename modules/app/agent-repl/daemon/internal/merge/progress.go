@@ -49,6 +49,9 @@ type progressDoc struct {
 	// also the bubble head's clock origin once the run is admitted.
 	QueuedMS  int64 `json:"queued_ms"`
 	StartedMS int64 `json:"started_ms"`
+	// HeadMS is when the merge reached its queue's head, zero while it has
+	// not: a resumed head keeps its head clock (headSince).
+	HeadMS int64 `json:"head_ms,omitempty"`
 	// Subject is what the merge lands, resolved ONCE at admission: a resume
 	// never re-resolves it (a branch worktree the merge made would be made
 	// again).
@@ -344,6 +347,7 @@ func (r *run) checkpoint(ctx context.Context, step string, mutate func(*progress
 	sort.Slice(doc.Open, func(i, j int) bool {
 		return roundKey(doc.Open[i].Kind, doc.Open[i].N) < roundKey(doc.Open[j].Kind, doc.Open[j].N)
 	})
+	doc.HeadMS = r.headMS.Load()
 	doc.Facts = factsDoc{
 		Step: string(r.facts.Step), Replayed: r.facts.Replayed, Total: r.facts.Total,
 		Attempt: r.facts.Attempt, MaxAttempts: r.facts.MaxAttempts,
@@ -465,6 +469,7 @@ func (r *run) restoreFrom(doc progressDoc) {
 	}
 	r.facts = doc.footerFacts(r.o.deps.Now())
 	r.attempts = doc.TreeAttempts
+	r.headMS.Store(doc.HeadMS)
 	if doc.MachineryNoted {
 		r.machinery = map[string]bool{}
 		for _, path := range doc.Machinery {

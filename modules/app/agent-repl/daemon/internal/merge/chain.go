@@ -465,6 +465,7 @@ func (o *orchestrator) promote(repo wsm.RepoKey, entries []wsm.MergeQueueEntry) 
 	r := chain[0]
 	r.speculative = false
 	o.running[repo] = r
+	r.headMS.Store(o.nowMS())
 	o.signalChainLocked(repo)
 	o.mu.Unlock()
 	lease, base := r.leaseAndBase()

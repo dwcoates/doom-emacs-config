@@ -249,6 +249,9 @@ func (o *orchestrator) rosterLine(ctx context.Context, line []wsm.MergeQueueEntr
 			PlacedAtFront: entry.Source.Front,
 			Admitted:      entry.State != wsm.MergeQueued,
 		}
+		if i == 0 {
+			drawn.HeadSince = o.headSince(entry.Repo, entry.Workspace)
+		}
 		if lease, ok := o.leaseOf(entry.Workspace); ok {
 			drawn.Reveal = o.bubbleHeadID(entry.Workspace, lease)
 			if i == 0 {
@@ -262,6 +265,35 @@ func (o *orchestrator) rosterLine(ctx context.Context, line []wsm.MergeQueueEntr
 		out = append(out, drawn)
 	}
 	return out, nil
+}
+
+// waitingHead is a queue front, waiting unadmitted, and when it reached the head.
+type waitingHead struct {
+	ws    ids.WorkspaceID
+	since time.Time
+}
+
+// headSince answers when WS, the front of REPO's line, reached the head: the
+// roster's head clock (owner ruling, 2026-10-30), which reads zero as a merge
+// takes the head slot however long it waited in line. A running head's
+// moment is its run's (stamped as it took the slot, kept across a restart in
+// its progress record); a front waiting unadmitted is stamped the first time
+// it is drawn at the front.
+func (o *orchestrator) headSince(repo wsm.RepoKey, ws ids.WorkspaceID) time.Time {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if r := o.running[repo]; r != nil && r.ws == ws {
+		if ms := r.headMS.Load(); ms > 0 {
+			delete(o.waitingHeads, repo)
+			return time.UnixMilli(ms)
+		}
+	}
+	if w, ok := o.waitingHeads[repo]; ok && w.ws == ws {
+		return w.since
+	}
+	now := o.deps.Now()
+	o.waitingHeads[repo] = waitingHead{ws: ws, since: now}
+	return now
 }
 
 // bubbleHeadID is the row id of the head of the merge bubble the merge

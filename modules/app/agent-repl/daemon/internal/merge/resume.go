@@ -31,6 +31,9 @@ func (o *orchestrator) register(r *run) {
 	defer o.mu.Unlock()
 	if !r.speculative {
 		o.running[r.repo] = r
+		// A HEAD RESUMED keeps the head clock its record carries; a head
+		// admitted fresh reached the head now.
+		r.headMS.CompareAndSwap(0, o.nowMS())
 	}
 	// THE HEAD STANDS FIRST IN ITS CHAIN. A speculative run joined its chain
 	// when the chain made it (extendChain); a head admitted fresh or resumed

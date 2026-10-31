@@ -1573,3 +1573,21 @@ func TestTheOneShotSubsectionIsKeylessCountedAndNeverCollapses(t *testing.T) {
 		t.Errorf("fold = %v, want expanded and never collapsing", sub.GetFold())
 	}
 }
+
+func TestTheMergeQueueHeadCarriesWhenItReachedTheHead(t *testing.T) {
+	// Arrange: a front that waited in line long before it reached the head.
+	r, _ := newResolver(t)
+	line := inLine("w1")
+	line[0].QueuedAt = time.UnixMilli(1_700_000_000_000)
+	line[0].HeadSince = time.UnixMilli(1_700_000_900_000)
+	r.SetMergeQueue(theRepo, sidebar.MergeQueue{Workspaces: []ids.WorkspaceID{"w1"}, Line: line})
+
+	// Act.
+	r.SetRegistry(queueView(workspace("w1", "one")))
+
+	// Assert.
+	head := latest(t, r).GetRecentlyMerged().GetQueues()[0].GetQueue().GetHead()
+	if got := head.GetHeadSinceMs(); got != 1_700_000_900_000 {
+		t.Fatalf("head_since_ms = %d, want when it reached the head, 1700000900000", got)
+	}
+}

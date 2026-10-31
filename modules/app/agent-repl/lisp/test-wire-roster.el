@@ -1917,6 +1917,16 @@ A hand-rolled list decoder would skip the shared helper and fail here."
                   :standing)
                  '(:arm :waiting :value (:queued-at-ms 3)))))
 
+(ert-deftest agent-repl-test-wire-roster-a-merge-queue-head-decodes-when-it-reached-the-head ()
+  "A head carries when the merge reached the head."
+  (should (equal (plist-get
+                  (agent-repl-test-wire-roster--decode
+                   #'agent-repl-wire-decode-roster-merge-queue-head
+                   (format "{\"subject\":%s,\"headSinceMs\":\"7\",\"waiting\":{\"queuedAtMs\":\"3\"}}"
+                           agent-repl-test-wire-roster--subject))
+                  :head-since-ms)
+                 7)))
+
 (ert-deftest agent-repl-test-wire-roster-every-merge-queue-stage-state-decodes ()
   "A stage decodes each of its three states with its span."
   (should (equal (mapcar (lambda (json)

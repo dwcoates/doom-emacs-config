@@ -540,7 +540,7 @@ export function queueSubject(id: string, init: { name?: string; async?: boolean;
   });
 }
 
-/** A merge queue head being worked on, credited to ID, at STEP when given, with STAGES. */
+/** A merge queue head being worked on, credited to ID, at STEP when given, with STAGES, at the head since HEAD_SINCE_MS (NOW by default). */
 export function mergingHead(
   id: string,
   init: {
@@ -548,11 +548,13 @@ export function mergingHead(
     stages?: MessageInitShape<typeof RosterMergeQueueHeadSchema>["stages"];
     subject?: RosterMergeQueueSubject;
     suspended?: boolean;
+    headSinceMs?: bigint;
   } = {},
 ): RosterMergeQueueHead {
   return create(RosterMergeQueueHeadSchema, {
     subject: init.subject ?? queueSubject(id),
     stages: init.stages ?? [],
+    headSinceMs: init.headSinceMs ?? BigInt(NOW),
     standing: { case: "merging", value: { step: init.step, suspended: init.suspended === true ? {} : undefined } },
   });
 }
