@@ -2596,7 +2596,6 @@ export function roster(init?: {
     },
     recentlyMerged: {
       header: { label: { text: "deploys" } },
-      queueLabel: { text: "deploy queue" },
       mergedLabel: { text: "recently deployed" },
       groups: [
         {

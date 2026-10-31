@@ -4,8 +4,8 @@
  *
  * The rail never scrolls. Once it is out of room, the Open section lengthens
  * until Deploys and Hidden Workspaces below it are left three lines each, the
- * two sharing those six lines and Deploys claiming only its "Deploy Queue"
- * heading and today's merges, any room the Open section cannot use goes to
+ * two sharing those six lines and Deploys claiming only its queues and
+ * today's merges, any room the Open section cannot use goes to
  * Deploys' today's merges, then Hidden Workspaces, then older merges, the
  * lowest open section's viewport reaches the rail's foot, and each section
  * scrolls the rest. jsdom lays nothing out, so this draws a rail in
@@ -48,9 +48,8 @@ function mergedGroups(merged: number, today: number, groups: number): string {
   }).join("");
 }
 
-/** The Deploys band's queue box over no queue: its "Deploy Queue" heading alone, a line of its own. */
-const EMPTY_DEPLOY_QUEUE =
-  '<div class="sb-merge-queues"><div class="sb-deploy-queue-label" data-empty=""><span class="sb-label">Deploy Queue</span></div></div>';
+/** The Deploys band's queue box over no queue: empty. */
+const EMPTY_DEPLOY_QUEUE = '<div class="sb-merge-queues"></div>';
 
 /** The "Recently Deployed" heading over the Deploys band's merged groups, collapsed (recently-deployed.ts) unless EXPANDED. */
 function recentlyDeployed(expanded: boolean): string {
@@ -122,7 +121,7 @@ async function fit(page: Page, markup: string): Promise<Fitted> {
       const box = region.getBoundingClientRect();
       let whole = 0;
       let cut = 0;
-      for (const line of region.querySelectorAll(".row, .sb-deploy-queue-label[data-empty], .sb-merged-label[data-collapsed]")) {
+      for (const line of region.querySelectorAll(".row, .sb-merged-label[data-collapsed]")) {
         if (line.getBoundingClientRect().height === 0) continue;
         const r = line.getBoundingClientRect();
         if (r.top >= box.top - 0.5 && r.bottom <= box.bottom + 0.5) whole += 1;
@@ -220,14 +219,14 @@ describe("the band fit in WebKit", () => {
     await browser.close();
   });
 
-  it("shares six lines in a rail the Open section fills: Deploys' two headings, Hidden Workspaces four", async () => {
+  it("shares six lines in a rail the Open section fills: Deploys' one heading, Hidden Workspaces five", async () => {
     const got = await fit(page, rail(500, { live: 40, hidden: 20, merged: 20 }));
-    expect([got.hidden.whole, got.merged.whole]).toEqual([4, 2]);
+    expect([got.hidden.whole, got.merged.whole]).toEqual([5, 1]);
   });
 
-  it("keeps an expanded Recently Deployed's five rows under its two headings, taking Hidden Workspaces' lines", async () => {
+  it("keeps an expanded Recently Deployed's five rows under its heading, taking Hidden Workspaces' lines", async () => {
     const got = await fit(page, rail(500, { live: 40, hidden: 20, merged: 20, expanded: true }));
-    expect([got.hidden.whole, got.merged.whole, got.open.whole > 0]).toEqual([0, 6, true]);
+    expect([got.hidden.whole, got.merged.whole, got.open.whole > 0]).toEqual([1, 5, true]);
   });
 
   it("scrolls the Open section in a rail it fills", async () => {
@@ -250,19 +249,19 @@ describe("the band fit in WebKit", () => {
     expect(got.hidden.cut).toBeLessThanOrEqual(1);
   });
 
-  it("gives Hidden Workspaces five lines beside an empty Deploys' heading", async () => {
+  it("gives Hidden Workspaces all six lines beside an empty Deploys", async () => {
     const got = await fit(page, rail(500, { live: 40, hidden: 20, merged: 0 }));
-    expect([got.hidden.whole, got.merged.whole]).toEqual([5, 1]);
+    expect([got.hidden.whole, got.merged.whole]).toEqual([6, 0]);
   });
 
-  it("gives Hidden Workspaces four lines beside the heading and one merge today", async () => {
+  it("gives Hidden Workspaces five lines beside the heading of one merge today", async () => {
     const got = await fit(page, rail(500, { live: 40, hidden: 20, merged: 1 }));
-    expect([got.hidden.whole, got.merged.whole]).toEqual([4, 2]);
+    expect([got.hidden.whole, got.merged.whole]).toEqual([5, 1]);
   });
 
   it("shows no older merge while the Open section scrolls", async () => {
     const got = await fit(page, rail(500, { live: 40, hidden: 20, merged: 20, today: 0 }));
-    expect([got.hidden.whole, got.merged.whole]).toEqual([4, 2]);
+    expect([got.hidden.whole, got.merged.whole]).toEqual([5, 1]);
   });
 
   it("shrinks Hidden Workspaces before Deploys, at every short rail height", async () => {
@@ -281,7 +280,7 @@ describe("the band fit in WebKit", () => {
 
   it("shows an expanded Recently Deployed's five rows across several repository groups", async () => {
     const got = await fit(page, rail(500, { live: 40, hidden: 20, merged: 20, groups: 3, expanded: true }));
-    expect(got.merged.whole).toBe(6);
+    expect(got.merged.whole).toBe(5);
   });
 
   it("never leaves a group's header dangling at a viewport's foot", async () => {
@@ -301,7 +300,7 @@ describe("the band fit in WebKit", () => {
       false,
       4,
       false,
-      6,
+      5,
       false,
     ]);
   });
@@ -330,12 +329,14 @@ describe("the band fit in WebKit", () => {
 
   it("grows an expanded Recently Deployed's merges of today, not Hidden Workspaces, into the room a whole Open section leaves", async () => {
     const got = await fit(page, rail(880, { live: 2, hidden: 40, merged: 40, expanded: true }));
-    expect([got.merged.whole > 6, got.hidden.whole, got.railScrolls]).toEqual([true, 0, false]);
+    // Hidden Workspaces, the lowest section, keeps only the line at the
+    // rail's foot that no further merged row fits in.
+    expect([got.merged.whole > 6, got.hidden.whole, got.railScrolls]).toEqual([true, 1, false]);
   });
 
   it("grows Hidden Workspaces, not older merges, into the room a whole Open section leaves", async () => {
     const got = await fit(page, rail(880, { live: 2, hidden: 40, merged: 40, today: 0, expanded: true }));
-    expect([got.hidden.whole > 5, got.merged.whole, got.railScrolls]).toEqual([true, 6, false]);
+    expect([got.hidden.whole > 5, got.merged.whole, got.railScrolls]).toEqual([true, 5, false]);
   });
 
   it("grows older merges into the room a whole Open section and Hidden Workspaces leave", async () => {

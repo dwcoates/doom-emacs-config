@@ -1,7 +1,7 @@
 /**
- * merge-queue-view — THE MERGE QUEUES the Deploys section draws under its
- * "Deploy Queue" heading, above its recently deployed groups (owner
- * requests, 2026-10-24 to 2026-10-27).
+ * merge-queue-view — THE MERGE QUEUES the Deploys section draws directly
+ * under its header, above its recently deployed groups (owner requests,
+ * 2026-10-24 to 2026-10-31).
  *
  * ONE GROUP PER REPOSITORY WHOSE LINE HOLDS A MERGE
  * (`frontend.v1.RosterMergedSection.queues`): the repository's label and the
@@ -73,12 +73,6 @@ export const MERGE_QUEUE_COUNT_CLASS = "sb-count";
 
 /** The class of the box the section's queue groups are drawn in, above its merged groups. */
 export const MERGE_QUEUES_CLASS = "sb-merge-queues";
-
-/**
- * The class of the "Deploy Queue" heading at the top of `MERGE_QUEUES_CLASS`,
- * drawn only while a queue is listed under it (owner request, 2026-10-27).
- */
-export const DEPLOY_QUEUE_LABEL_CLASS = "sb-deploy-queue-label";
 
 /** The class of one repository's queue group, and of its header. */
 export const MERGE_QUEUE_GROUP_CLASS = "mq-group";

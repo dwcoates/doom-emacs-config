@@ -16,7 +16,7 @@
  *     to the other, Deploys taking the spare first, so a Deploys of one
  *     line today leaves Hidden Workspaces five.
  *   - Deploys claims its share only for the lines that reach its queues
- *     (its "Deploy Queue" heading at least) and TODAY's merges. An older
+ *     and TODAY's merges. An older
  *     merge has no claim against the Open section: it shows only in room the
  *     Open section and Hidden Workspaces cannot use.
  *   - NO ROOM IS LEFT UNUSED (owner request, 2026-10-19). Room the Open
@@ -60,11 +60,10 @@
  * repository's header, or the header of a subsection that is folded or empty
  * (a subsection with no rows to show draws its header alone, so it is a line
  * as a folded repository's header is), and in the Deploys section a queue's
- * head card, each merge waiting behind it, and the "Deploy Queue" heading
- * while it stands over no queue. A viewport of K lines is
+ * head card and each merge waiting behind it. A viewport of K lines is
  * exactly as tall as the first K lines are drawn, the header above a line (a
  * repository section's, a subsection's, a Deploys repository group's, the
- * "Deploy Queue" and "Recently Deployed" headings) riding with it, so no
+ * "Recently Deployed" heading) riding with it, so no
  * line is cut through but the lowest section's last. A folded section shows no
  * lines and takes no room.
  *
@@ -144,8 +143,7 @@ export const EMPTY_SUBSECTION_ATTRIBUTE = "data-empty";
 /**
  * What one line is: a row, a folded repository section's header, the
  * header of a subsection that is folded or empty, a queue's head card or
- * waiting merge, or the collapsed "Recently Deployed" heading. The "Deploy
- * Queue" heading is drawn only over a queue, and rides with its first card.
+ * waiting merge, or the collapsed "Recently Deployed" heading.
  */
 const LINE_SELECTOR = [
   ".row",

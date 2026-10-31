@@ -1535,14 +1535,14 @@ from it."
 
 (defun agent-repl-wire-decode-roster-merged-section (value)
   "Decode VALUE as `RosterMergedSection'.
-A plist `(:header :groups :queues :queue-label :merged-label :fold)'.
+A plist `(:header :groups :queues :merged-label :fold)'.
 The Deploys section has no key of its own — the roster carries
 exactly one.  Its queues sit in one `RosterMergeQueueRepoGroup' per
 repository holding a merge, and its merged rows in one
 `RosterMergedRepoGroup' per repository."
   (let ((object (agent-repl-wire--object "RosterMergedSection" value)))
     (agent-repl-wire--check-keys "RosterMergedSection" object
-                                 '(header groups queues queueLabel mergedLabel expanded collapsed))
+                                 '(header groups queues mergedLabel expanded collapsed))
     (agent-repl-wire--decoded
      "RosterMergedSection"
      (list :header (agent-repl-wire--decode-message
@@ -1554,9 +1554,6 @@ repository holding a merge, and its merged rows in one
            :queues (agent-repl-wire--decode-repeated
                     "RosterMergedSection" 'queues object
                     #'agent-repl-wire-decode-roster-merge-queue-repo-group)
-           :queue-label (agent-repl-wire--decode-message
-                         "RosterMergedSection" 'queueLabel object
-                         #'agent-repl-wire-decode-roster-label)
            :merged-label (agent-repl-wire--decode-message
                           "RosterMergedSection" 'mergedLabel object
                           #'agent-repl-wire-decode-roster-label)

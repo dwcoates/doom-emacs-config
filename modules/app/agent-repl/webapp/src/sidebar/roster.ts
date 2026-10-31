@@ -88,7 +88,7 @@ import {
 } from "./section-fold.js";
 import { openScope, type DrawScope } from "./scope.js";
 import { RECENTLY_DEPLOYED_LABEL_CLASS } from "./recently-deployed.js";
-import { DEPLOY_QUEUE_LABEL_CLASS, drawRosterMergeQueueRepoGroup, MERGE_QUEUES_CLASS } from "./merge-queue-view.js";
+import { drawRosterMergeQueueRepoGroup, MERGE_QUEUES_CLASS } from "./merge-queue-view.js";
 import { foldViewKey } from "./view.js";
 import {
   drawRosterRowDetailCommits,
@@ -683,10 +683,10 @@ export function drawRosterRepoKey(u: RosterRepoKey, path: string): RepositoryRef
 
 /**
  * The Deploys section (owner request, 2026-10-26; renamed from Merge Queue
- * 2026-10-27), drawn directly under the Open section and above Hidden: a
- * "Deploy Queue" heading over every repository's merge queue
- * (`merge-queue-view.ts`), then, under a "Recently Deployed" heading, the
- * settled merges hoisted out of every grouping, in one group per repository.
+ * 2026-10-27), drawn directly under the Open section and above Hidden:
+ * every repository's merge queue (`merge-queue-view.ts`), then, under a
+ * "Recently Deployed" heading, the settled merges hoisted out of every
+ * grouping, in one group per repository.
  *
  * ITS HEADER COUNTS NOTHING (owner request, 2026-10-27): each queue group
  * counts the merges in its own line, and the "Recently Deployed" heading
@@ -694,9 +694,10 @@ export function drawRosterRepoKey(u: RosterRepoKey, path: string): RepositoryRef
  * hover. Its label is always the purple of a merge in progress; a paused
  * queue is drawn on its own group (`merge-queue-view.ts`).
  *
- * THE SECTION ALWAYS DRAWS; its "Deploy Queue" heading draws only over a
- * queue (owner request, 2026-10-27): with no deploy going on, the heading is
- * left out and "Recently Deployed" stands first.
+ * THE SECTION ALWAYS DRAWS. Its queues stand directly under its header,
+ * with no heading of their own (owner request, 2026-10-31; the "Deploy
+ * Queue" heading is retired): with no deploy going on, "Recently Deployed"
+ * stands first.
  *
  * EVERY MERGE THE DAEMON SENDS IS DRAWN (a week of them); once the section is
  * laid out, `fitBands` (band-fit.ts) sizes its scrolling viewport against the
@@ -713,7 +714,6 @@ export function drawRosterMergedSection(
       drawRosterMergedRepoGroupHeader(requireMessage(group.header, headerPath), headerPath),
     ),
   );
-  const queueLabel = drawSectionLabel(requireMessage(u.queueLabel, `${path}.queue_label`), `${path}.queue_label`);
   const mergedLabel = drawSectionLabel(requireMessage(u.mergedLabel, `${path}.merged_label`), `${path}.merged_label`);
   const drawnNow = { left: MERGED_DRAWN_AT_ONCE };
   const groups = u.groups.map((group, index) =>
@@ -735,7 +735,7 @@ export function drawRosterMergedSection(
       region.className = "rows";
       const box = document.createElement("div");
       box.className = MERGE_QUEUES_CLASS;
-      if (queues.length > 0) box.append(drawDeploysHeading(DEPLOY_QUEUE_LABEL_CLASS, queueLabel), ...queues);
+      box.append(...queues);
       region.appendChild(box);
       if (groups.length > 0) {
         const merges = groups.flatMap((g) => g.shownMerges);
@@ -755,9 +755,8 @@ export function drawRosterMergedSection(
 }
 
 /**
- * One of the Deploys section's two headings, "Deploy Queue" and "Recently
- * Deployed": a CLASS_NAME box holding its drawn LABEL and whatever follows
- * it (the latter's "(K today)"). The stylesheet draws both alike.
+ * The Deploys section's "Recently Deployed" heading: a CLASS_NAME box
+ * holding its drawn LABEL and whatever follows it (its "(K today)").
  */
 export function drawDeploysHeading(className: string, label: HTMLElement, ...after: HTMLElement[]): HTMLElement {
   const heading = document.createElement("div");

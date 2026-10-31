@@ -330,14 +330,6 @@ describe("regionLines", () => {
     expect(regionLines(box).map((el) => el.className)).toEqual(["sb-mq-head", "sb-mq-waiting"]);
   });
 
-  it("counts the Deploy Queue heading as no line, as it rides with its first card", () => {
-    // Arrange
-    const box = document.createElement("div");
-    box.innerHTML = `<div class="sb-merge-queues"><div class="sb-deploy-queue-label"></div></div><div class="row"></div>`;
-    for (const el of box.querySelectorAll<HTMLElement>(".sb-deploy-queue-label, .row")) el.getBoundingClientRect = () => rect(0, ROW);
-    // Act / Assert
-    expect(regionLines(box).map((el) => el.className)).toEqual(["row"]);
-  });
 
   it.each([
     { name: "counts the collapsed Recently Deployed heading as a line", collapsed: true, want: ["sb-merged-label", "row"] },
