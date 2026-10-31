@@ -1699,6 +1699,9 @@ export const FOOTER_STATUS_SUBSTATUSES: Record<string, readonly string[]> = {
   networkFault: ["offline"],
   closing: ["blocked"],
   loading: ["memory", "invoked", "discovered", "listing"],
+  // A final response being updated (owner request, 2026-10-30): its own red
+  // arm, with no substatus.
+  updating: [],
   // A merge that STOPPED is its own arm: a failure, whose substatus is the
   // area it failed in, and a landing.
   mergeFailed: ["conflicts", "tests", "other", "hook"],
@@ -1864,6 +1867,7 @@ export const FOOTER_STATUS_SALIENTS: Record<string, readonly string[]> = {
   networkFault: ["offline", "update", ...SHARED_SALIENTS],
   closing: ["closeBlocked", "update", ...SHARED_SALIENTS],
   loading: ["update", ...SHARED_SALIENTS],
+  updating: ["update", ...SHARED_SALIENTS],
 };
 
 /**
