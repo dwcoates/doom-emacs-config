@@ -470,8 +470,8 @@ describe("the activity cell", () => {
   });
 
   it("draws an allowance with no verdict yet, figures and all", async () => {
-    // Arrange: UNSET is legal — no rate-limit event observed for the window
-    // yet, so the sampled figures stand with no verdict class.
+    // Arrange: UNSET is legal — the vendor's event stated no status for the
+    // window, so its figures stand with no verdict class.
     harness = await startHarness({
       arrange: (fake) =>
         fake.setFooter(
@@ -521,7 +521,7 @@ describe("the activity cell", () => {
     expect(harness.failureArms()).toEqual([]);
   });
 
-  it("draws both the session and the weekly allowance", async () => {
+  it("draws both the weekly and the overage allowance", async () => {
     // Arrange / Act
     await withFooter({
       status: "idle",
@@ -532,7 +532,7 @@ describe("the activity cell", () => {
     expect(harness.$$(".footer-activity [data-allowance]")).toHaveLength(2);
   });
 
-  it("marks the session allowance apart from the weekly one", async () => {
+  it("marks the overage allowance apart from the weekly one", async () => {
     // Arrange / Act
     await withFooter({
       status: "idle",
@@ -542,7 +542,7 @@ describe("the activity cell", () => {
     // Assert
     expect(
       harness.$$(".footer-activity [data-allowance]").map((el) => el.dataset.allowance),
-    ).toEqual(["session", "weekly"]);
+    ).toEqual(["weekly", "overage"]);
   });
 
   it("counts down the wakeup activity from its served instant", async () => {
@@ -1541,18 +1541,18 @@ describe("the usage line the strip cannot fit", () => {
    * READ at 1 s absolute, so at the harness epoch (10 s) they read "9s ago".
    */
   const FIGURED_RATE_LIMITED = {
-    session: {
-      newsworthy: true,
-      utilization: 0.82,
-      resetsAtS: 1_700n,
-      status: { case: "allowedWarning", value: {} },
-    },
     weekly: { overall: {
       newsworthy: false,
       utilization: 0.63,
       resetsAtS: 9_000n,
       status: { case: "allowed", value: {} },
     } },
+    overage: {
+      newsworthy: true,
+      utilization: 0.82,
+      resetsAtS: 1_700n,
+      status: { case: "allowedWarning", value: {} },
+    },
   };
 
   /** Boot with that line standing. */
@@ -1578,11 +1578,11 @@ describe("the usage line the strip cannot fit", () => {
     expect(harness.$(".footer-strip .footer-allowance-unread")).toBeNull();
   });
 
-  it("leads the strip's figures with the newsworthy window", async () => {
+  it("leads the strip's figures with the weekly window, whichever is newsworthy", async () => {
     // Arrange / Act
     await withFiguredRateLine();
     // Assert
-    expect(harness.$(".footer-rate-figures [data-allowance]")?.dataset.allowance).toBe("session");
+    expect(harness.$(".footer-rate-figures [data-allowance]")?.dataset.allowance).toBe("weekly");
   });
 
   it("titles the activity cell with the whole line", async () => {
