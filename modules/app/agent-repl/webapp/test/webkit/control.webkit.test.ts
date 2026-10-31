@@ -10,13 +10,9 @@
  * stylesheet, and holds their boxes equal: unstyled, author-flattened, and
  * native-drawn, enabled and disabled.
  */
-import path from "node:path";
-import { readFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
 import { webkit, type Browser } from "playwright-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-
-const here = path.dirname(fileURLToPath(import.meta.url));
+import { pageStylesheet } from "./stylesheets";
 
 /**
  * Each case: its name, the class both elements wear, the inline style both
@@ -40,7 +36,7 @@ describe("a control's box, in WebKit", () => {
   const boxes = new Map<string, { native: Box; control: Box }>();
 
   beforeAll(async () => {
-    const css = await readFile(path.join(here, "../../src/styles.css"), "utf8");
+    const css = await pageStylesheet();
     browser = await webkit.launch();
     const page = await browser.newPage();
     const rows = CASES.map(([, cls, style, nativeOnly, disabled], i) => {

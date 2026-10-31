@@ -15,11 +15,11 @@
  *   - once the drag ends, a row's text selects again.
  */
 import path from "node:path";
-import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { webkit, type Browser, type Page } from "playwright-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { bundlePage } from "./bundle";
+import { pageStylesheet } from "./stylesheets";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -64,7 +64,7 @@ describe("dragging a sidebar row in WebKit", () => {
 
   beforeAll(async () => {
     const [css, script] = await Promise.all([
-      readFile(path.join(here, "../../src/styles.css"), "utf8"),
+      pageStylesheet(),
       bundlePage(path.join(here, "sidebar-drag-page.ts"), "sidebarDragPage"),
     ]);
     browser = await webkit.launch();

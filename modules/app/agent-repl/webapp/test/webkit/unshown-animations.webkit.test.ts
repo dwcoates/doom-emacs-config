@@ -10,11 +10,11 @@
  * WebKit, the engine the Emacs web view runs.
  */
 import path from "node:path";
-import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { webkit, type Browser, type Page } from "playwright-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { bundlePage } from "./bundle";
+import { pageStylesheet } from "./stylesheets";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -116,7 +116,7 @@ describe("pausing a page the webhost does not show, in WebKit", () => {
   let footerWord: Read;
 
   beforeAll(async () => {
-    const css = `${await readFile(path.join(here, "../../src/styles.css"), "utf8")}\n${KEYFRAMES}`;
+    const css = `${await pageStylesheet()}\n${KEYFRAMES}`;
     const script = await bundlePage(path.join(here, "unshown-animations-page.ts"), "UnshownAnimations");
     browser = await webkit.launch();
     const page = await browser.newPage({ viewport: { width: 400, height: 400 } });

@@ -8,15 +8,11 @@
  * it, as the head shapes them, in real headless WebKit over the real
  * stylesheet, and measures every reading the reserve covers.
  */
-import path from "node:path";
-import { readFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
 import { webkit, type Browser, type Page } from "playwright-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { CLOCK_RESERVE_PROPERTY, ELAPSED_RESERVE_LABELS } from "../../src/elapsed-clock.js";
 import { reserveLabelsCss } from "../../src/width-reserve.js";
-
-const here = path.dirname(fileURLToPath(import.meta.url));
+import { pageStylesheet } from "./stylesheets";
 
 /** Readings of every shape the reserve covers, narrowest to widest. */
 const READINGS = ["0s", "9s", "59s", "1m", "5m 3s", "59m 59s", "1h", "23h 59m", "999h 59m"];
@@ -54,7 +50,7 @@ describe("a reserved clock in WebKit", () => {
   let measured: Measured[];
 
   beforeAll(async () => {
-    const css = await readFile(path.join(here, "../../src/styles.css"), "utf8");
+    const css = await pageStylesheet();
     browser = await webkit.launch();
     const page = await browser.newPage({ viewport: { width: 900, height: 400 } });
     await page.setContent('<!doctype html><html><head></head><body><div id="host" style="width:800px"></div></body></html>');

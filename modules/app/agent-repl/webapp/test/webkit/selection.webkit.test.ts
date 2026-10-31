@@ -14,11 +14,11 @@
  *   - a disabled control activates on none of them.
  */
 import path from "node:path";
-import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { webkit, type Browser, type Page } from "playwright-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { bundlePage } from "./bundle";
+import { pageStylesheet } from "./stylesheets";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -59,7 +59,7 @@ describe("selecting text in WebKit", () => {
 
   beforeAll(async () => {
     const [css, script] = await Promise.all([
-      readFile(path.join(here, "../../src/styles.css"), "utf8"),
+      pageStylesheet(),
       bundlePage(path.join(here, "selection-page.ts"), "selectionPage"),
     ]);
     browser = await webkit.launch();

@@ -11,14 +11,10 @@
  * `drawStatusMark` (src/sidebar/row.ts) shapes them, in real headless WebKit
  * over the real stylesheet, and measures them.
  */
-import path from "node:path";
-import { readFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
 import { webkit, type Browser, type Page } from "playwright-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { readGlyphPicture } from "../glyph-pictures";
-
-const here = path.dirname(fileURLToPath(import.meta.url));
+import { pageStylesheet } from "./stylesheets";
 
 /** One row's mark: its arm, glyph name and the picture drawn (none for a disc). */
 interface Mark {
@@ -73,7 +69,7 @@ describe("the rail's status marks in WebKit", () => {
   let page: Page;
 
   beforeAll(async () => {
-    const css = await readFile(path.join(here, "../../src/styles.css"), "utf8");
+    const css = await pageStylesheet();
     browser = await webkit.launch();
     page = await browser.newPage({ viewport: { width: 400, height: 400 } });
     await page.setContent(`<!doctype html><html><head></head><body><div id="ws-sidebar"></div></body></html>`);

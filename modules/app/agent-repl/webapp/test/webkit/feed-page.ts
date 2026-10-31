@@ -5,12 +5,8 @@
  * `#feed-scroll.scroll-zone` > `main#feed`), so a feed rule keyed on any of
  * them matches here as it does in the app.
  */
-import path from "node:path";
-import { readFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
 import { webkit, type Browser, type Page } from "playwright-core";
-
-const here = path.dirname(fileURLToPath(import.meta.url));
+import { pageStylesheet } from "./stylesheets";
 
 /** The page's markup: the feed column, with nothing in the feed. */
 export const FEED_SHELL = `<!doctype html><html><head></head><body>
@@ -38,7 +34,7 @@ export interface FeedPage {
 
 /** Launch WebKit and open the feed shell over the real stylesheet, then OPTS.styles. */
 export async function openFeedPage(opts: FeedPageOptions): Promise<FeedPage> {
-  const css = await readFile(path.join(here, "../../src/styles.css"), "utf8");
+  const css = await pageStylesheet();
   const browser = await webkit.launch();
   const page = await browser.newPage({
     viewport: { width: opts.width, height: opts.height },
