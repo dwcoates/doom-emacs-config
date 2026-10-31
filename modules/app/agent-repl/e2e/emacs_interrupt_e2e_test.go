@@ -223,6 +223,13 @@ func emGHIAwaitArmFor(t *testing.T, e *Emacs, bound time.Duration, ws, what, for
 var (
 	emGHIRunningArms = []string{":submitting", ":thinking", ":clearing", ":compacting", ":permission"}
 	emGHISettledArms = []string{":ready", ":done", ":interrupted", ":idle-async"}
+	// emGHIOpenTurnArms are the running arms of a turn the shim has OPENED:
+	// every running arm but `:submitting`, which a prompt also holds while
+	// it waits in the daemon's queue for the session to come up. A restart
+	// sent at `:submitting` can find the workspace free, restart it, and
+	// deliver the queued prompt to the new shim as a fresh turn, so a
+	// scenario about a restart MID-TURN waits for one of these.
+	emGHIOpenTurnArms = []string{":thinking", ":clearing", ":compacting", ":permission"}
 	// emGHISubmittableArms are the arms a submit waits for: a settled
 	// session, or `:none`, an open workspace with no shim, which the prompt
 	// starts.
@@ -269,7 +276,7 @@ func TestEmacsForcedRestartInterruptsTheTurn(t *testing.T) {
 	emGHISelect(t, e, dir, ws)
 	emGHIOpenPanel(t, e)
 	emGHISubmit(t, e, ws, emGHIParkedPrompt)
-	emGHIAwaitStatus(t, e, ws, "the turn to be running before the interrupt", emGHIRunningArms...)
+	emGHIAwaitStatus(t, e, ws, "the turn to be open on the shim before the interrupt", emGHIOpenTurnArms...)
 
 	// Act: `SPC o C-c`. The workspace is passed as the command's documented
 	// argument rather than by faking a key press that would then also have to
@@ -321,7 +328,7 @@ func TestEmacsRestartHoldsPromptsMeanwhile(t *testing.T) {
 	emGHISelect(t, e, dir, ws)
 	emGHIOpenPanel(t, e)
 	emGHISubmit(t, e, ws, emGHIGatedPrompt)
-	emGHIAwaitStatus(t, e, ws, "the turn to be running before the restart", emGHIRunningArms...)
+	emGHIAwaitStatus(t, e, ws, "the turn to be open on the shim before the restart", emGHIOpenTurnArms...)
 	// Armed AFTER the gated turn's own send, so the observers see only the
 	// deferral.
 	armSubmissionObserver(t, e)
