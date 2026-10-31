@@ -593,19 +593,7 @@ func TestAwaitOwnEnd(t *testing.T) {
 // bounded wait, so neither drifts into a hand-rolled copy.
 func TestASuspensionAwaitsEveryOwnEndThroughAwaitOwnEnd(t *testing.T) {
 	// Arrange.
-	var body string
-	for _, f := range sourcescan.Production(t) {
-		src := string(f.Source)
-		start := strings.Index(src, "\nfunc (o *orchestrator) suspendFor(")
-		if start < 0 {
-			continue
-		}
-		end := strings.Index(src[start+1:], "\nfunc ")
-		body = src[start : start+1+end]
-	}
-	if body == "" {
-		t.Fatal("suspendFor was not found")
-	}
+	body := orchestratorMethodBody(t, "suspendFor")
 
 	// Act.
 	calls := strings.Count(body, "o.awaitOwnEnd(")
@@ -614,5 +602,147 @@ func TestASuspensionAwaitsEveryOwnEndThroughAwaitOwnEnd(t *testing.T) {
 	// Assert.
 	if calls != 2 || handRolled != 0 {
 		t.Fatalf("suspendFor waits through awaitOwnEnd %d times with %d hand-rolled waits, want 2 and none", calls, handRolled)
+	}
+}
+
+// orchestratorMethodBody answers the production source of the orchestrator's
+// method NAME, from its declaration to the next one.
+func orchestratorMethodBody(t *testing.T, name string) string {
+	t.Helper()
+	decl := "\nfunc (o *orchestrator) " + name + "("
+	for _, f := range sourcescan.Production(t) {
+		src := string(f.Source)
+		start := strings.Index(src, decl)
+		if start < 0 {
+			continue
+		}
+		end := strings.Index(src[start+1:], "\nfunc ")
+		if end < 0 {
+			return src[start:]
+		}
+		return src[start : start+1+end]
+	}
+	t.Fatalf("%s was not found", name)
+	return ""
+}
+
+func TestOrchestratorMethodBodyAnswersOneMethodWhole(t *testing.T) {
+	// Arrange + Act.
+	body := orchestratorMethodBody(t, "forgetMoved")
+
+	// Assert.
+	if !strings.HasPrefix(body, "\nfunc (o *orchestrator) forgetMoved(") || strings.Count(body, "\nfunc ") != 1 || !strings.Contains(body, "delete(o.displaces, ws)") {
+		t.Fatalf("body = %q, want forgetMoved alone and whole", body)
+	}
+}
+
+// TestEverySuspensionCutsAndLetsGoThroughTheSharedHelpers holds every site
+// that cuts a suspended run and waits for it to let go to cutSuspended and
+// awaitLetGo, so no site drifts into a hand-rolled copy.
+func TestEverySuspensionCutsAndLetsGoThroughTheSharedHelpers(t *testing.T) {
+	cases := []struct {
+		method       string
+		cuts, letsGo int
+	}{
+		{method: "suspendFor", cuts: 1, letsGo: 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.method, func(t *testing.T) {
+			// Arrange.
+			body := orchestratorMethodBody(t, tc.method)
+
+			// Act.
+			cuts, letsGo := strings.Count(body, "o.cutSuspended("), strings.Count(body, "o.awaitLetGo(")
+			handRolled := strings.Count(body, "r.cancel(") + strings.Count(body, "case <-r.finished:\n\tcase <-time.After(")
+
+			// Assert.
+			if cuts != tc.cuts || letsGo != tc.letsGo || handRolled != 0 {
+				t.Fatalf("%s cuts %d, lets go %d, hand-rolls %d, want %d, %d and none", tc.method, cuts, letsGo, handRolled, tc.cuts, tc.letsGo)
+			}
+		})
+	}
+}
+
+// suspendedRun answers a run of the harness's merge, marked suspending for
+// WHY, and the cause its context was cut with.
+func suspendedRun(t *testing.T, h *harness, why suspension) (*run, func() error) {
+	t.Helper()
+	ctx, cancel := context.WithCancelCause(context.Background())
+	t.Cleanup(func() { cancel(nil) })
+	r := h.o.newRun(ctx, cancel, h.repoKey(), theWorkspace, 1)
+	h.o.mu.Lock()
+	r.suspendLocked(why)
+	h.o.mu.Unlock()
+	return r, func() error { return context.Cause(ctx) }
+}
+
+func TestCutSuspendedCutsTheRunWithItsSuspensionsCause(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	r, cause := suspendedRun(t, h, suspendPause)
+	fields := dlog.Context{"workspace": string(theWorkspace)}
+
+	// Act.
+	h.o.cutSuspended(h.logs.Global(), r, suspendPause, fields)
+
+	// Assert.
+	if err := cause(); !errors.Is(err, errPaused) {
+		t.Fatalf("the run was cut with %v, want the pause's cause", err)
+	}
+	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "info", Operation: suspendPause.op, Message: suspendPause.moved}); !ok {
+		t.Fatalf("no record of the move: %v", h.logs.Records())
+	}
+	if _, stepped := fields["step"]; !stepped {
+		t.Fatalf("fields = %v, want the run's step recorded", fields)
+	}
+}
+
+func TestAwaitLetGoWaitsForTheCutRunToFinish(t *testing.T) {
+	cases := []struct {
+		name    string
+		arrange func(h *harness, r *run, cancel context.CancelFunc)
+		wantErr bool
+		// forgets is whether the merge's memory is dropped.
+		forgets bool
+		// logs is the ERROR message the wait records, empty for none.
+		logs string
+	}{
+		{name: "a run that finished is let go and forgotten", arrange: func(h *harness, r *run, _ context.CancelFunc) { close(r.finished) }, forgets: true},
+		{name: "a run that outlives the bound refuses the suspension", arrange: func(h *harness, r *run, _ context.CancelFunc) { h.o.drainBound = time.Nanosecond },
+			wantErr: true, logs: "a suspended merge did not let go before the transfer's bound; the transfer is refused"},
+		{name: "a caller that left ends the wait", arrange: func(h *harness, r *run, cancel context.CancelFunc) { cancel() }, wantErr: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			r, _ := suspendedRun(t, h, suspendPause)
+			h.o.mu.Lock()
+			h.o.repoOf[theWorkspace] = h.repoKey()
+			h.o.mu.Unlock()
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			tc.arrange(h, r, cancel)
+
+			// Act.
+			err := h.o.awaitLetGo(ctx, h.logs.Global(), "daemon.merge.pause", r, dlog.Context{"workspace": string(theWorkspace)})
+
+			// Assert.
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("awaitLetGo = %v, want an error %v", err, tc.wantErr)
+			}
+			h.o.mu.Lock()
+			_, remembered := h.o.repoOf[theWorkspace]
+			h.o.mu.Unlock()
+			if remembered == tc.forgets {
+				t.Fatalf("merge remembered %v, want it forgotten %v", remembered, tc.forgets)
+			}
+			if tc.logs != "" {
+				record, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: "daemon.merge.pause", Message: tc.logs})
+				if !ok || record.Context["workspace"] != string(theWorkspace) || record.Context["error"] == nil {
+					t.Fatalf("ERROR record = %+v (found %v), want one naming the workspace and the error", record, ok)
+				}
+			}
+		})
 	}
 }
