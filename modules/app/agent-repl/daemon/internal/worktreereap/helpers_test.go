@@ -58,6 +58,14 @@ type fakeGit struct {
 	commonDir        map[string]string
 	commonErr        map[string]error
 	preserveErr      map[string]error
+	// branches are the local branches BranchExists answers present;
+	// branchHeads answers ResolveRef for a branch's ref (baseSHA otherwise);
+	// notInside are the commits IsAncestor answers NOT inside their
+	// descendant; ancestorErr fails IsAncestor.
+	branches    map[string]bool
+	branchHeads map[string]string
+	notInside   map[string]bool
+	ancestorErr error
 
 	// entered and release, when set, hold DefaultBranch until the test
 	// releases it: the rendezvous a concurrency test needs.
@@ -84,6 +92,9 @@ func newFakeGit() *fakeGit {
 		commonDir:        map[string]string{},
 		commonErr:        map[string]error{},
 		preserveErr:      map[string]error{},
+		branches:         map[string]bool{},
+		branchHeads:      map[string]string{},
+		notInside:        map[string]bool{},
 	}
 }
 
@@ -127,7 +138,22 @@ func (g *fakeGit) DefaultBranch(_ context.Context, repoDir string) (string, erro
 
 func (g *fakeGit) ResolveRef(_ context.Context, repoDir, ref string) (string, error) {
 	g.record("resolve_ref %s %s", repoDir, ref)
+	if head, ok := g.branchHeads[ref]; ok {
+		return head, nil
+	}
 	return baseSHA, nil
+}
+
+func (g *fakeGit) BranchExists(_ context.Context, _, branch string) (bool, error) {
+	return g.branches[branch], nil
+}
+
+func (g *fakeGit) IsAncestor(_ context.Context, _, ancestor, descendant string) (bool, error) {
+	g.record("is_ancestor %s %s", ancestor, descendant)
+	if g.ancestorErr != nil {
+		return false, g.ancestorErr
+	}
+	return !g.notInside[ancestor], nil
 }
 
 func (g *fakeGit) TreeOf(_ context.Context, dir, ref string) (string, error) {
