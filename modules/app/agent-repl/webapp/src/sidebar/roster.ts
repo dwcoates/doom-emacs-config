@@ -88,6 +88,7 @@ import {
 } from "./section-fold.js";
 import { openScope, type DrawScope } from "./scope.js";
 import { DEPLOYS_GROUP_CLASS, DEPLOYS_LINE_ATTRIBUTE, DEPLOYS_REPOSITORY_ATTRIBUTE } from "./deploys-fold.js";
+import { DEPLOYS_PAGE_CLASS, DEPLOYS_PAGE_SIZE, drawDeploysMoreArrow } from "./deploys-more.js";
 import { drawQueuedGroupHead, drawRosterMergeQueue, queueHoverText, queueLine } from "./merge-queue-view.js";
 import { foldViewKey } from "./view.js";
 import {
@@ -747,8 +748,12 @@ export interface MergedRowFacts {
 
 /**
  * One repository's group inside the band: its header, then its body, which is
- * its queue while one is active and below it its merged rows, most recently
- * merged first.
+ * its queue while one is active, a short rule, and below it its merged rows,
+ * most recently merged first.
+ *
+ * THE GROUP SHOWS ITS TEN MOST RECENT DEPLOYS (owner request, 2026-10-31;
+ * `deploys-more.ts`): every older one waits in a hidden page of ten, which
+ * the arrow under the group shows.
  *
  * THE GROUP FOLDS ON THIS PAGE (`deploys-fold.ts`): open while its queue is
  * active and folded while it is idle, unless the header was clicked since.
@@ -809,9 +814,24 @@ export function drawRosterMergedRepoGroup(
       return unreachableArm(`${path}.activity`, other.case);
     }
   }
+  if (activity.case === "queued" && rows.rows.length > 0) body.appendChild(drawDeploysSplit());
+  // AN OLDER DEPLOY WAITS IN ITS PAGE OF TEN (deploys-more.ts), drawn once
+  // it comes into view, as every row past the band's first is.
+  const pages: HTMLElement[] = [];
   rows.rows.forEach((row, i) => {
     const rowPath = `${path}.merged_rows.rows[${i}]`;
     const stamp = (drawn: HTMLElement): void => drawn.setAttribute(MERGED_AT_ATTRIBUTE, String(merges[i].atMs));
+    if (i >= DEPLOYS_PAGE_SIZE) {
+      const index = Math.floor(i / DEPLOYS_PAGE_SIZE) - 1;
+      if (index === pages.length) {
+        const page = document.createElement("div");
+        page.className = DEPLOYS_PAGE_CLASS;
+        pages.push(page);
+        body.appendChild(page);
+      }
+      drawRosterRowWhenShown(pages[index], row, sc, rowPath, "merged", stamp);
+      return;
+    }
     if (drawnNow.left > 0) {
       drawnNow.left -= 1;
       const drawn = drawRosterFamily(row, sc, rowPath, "merged");
@@ -821,10 +841,26 @@ export function drawRosterMergedRepoGroup(
     }
     drawRosterRowWhenShown(body, row, sc, rowPath, "merged", stamp);
   });
+  if (rows.rows.length > DEPLOYS_PAGE_SIZE) body.appendChild(drawDeploysMoreArrow(group, sc.deploysMore));
   group.appendChild(body);
   head.addEventListener("click", () => sc.deploysFold.toggle(group));
   sc.deploysFold.paint(group);
+  sc.deploysMore.paint(group);
   return group;
+}
+
+/** The class of the rule between a group's queue and its recent deploys. */
+export const DEPLOYS_SPLIT_CLASS = "sb-deploys-split";
+
+/**
+ * The short grey rule between a queued group's queue and its recent deploys
+ * (owner request, 2026-10-31): the group header's rules without the name.
+ */
+export function drawDeploysSplit(): HTMLElement {
+  const split = document.createElement("div");
+  split.className = DEPLOYS_SPLIT_CLASS;
+  split.setAttribute("aria-hidden", "true");
+  return split;
 }
 
 /** A double click on an idle group's header: it has no queue to pause or resume. */

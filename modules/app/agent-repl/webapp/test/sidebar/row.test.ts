@@ -17,7 +17,6 @@ import { HOVER_CLOSE_GRACE_MS, HOVER_OPEN_DELAY_MS } from "../../src/sidebar/row
 import {
   BAND_RETURNS,
   drawBandChoices,
-  MERGED_TODAY_CLASS,
   drawRosterRow,
   returnFromBand,
   type BandReturn,
@@ -2467,15 +2466,13 @@ describe("the row's drawn status is recorded", () => {
 });
 
 describe("a merge that landed today", () => {
-  const mergedRow = (atMs: number, sc = sidebarContext(), merged = true): HTMLElement =>
+  const mergedRow = (atMs: number, sc = sidebarContext()): HTMLElement =>
     drawRosterRow(
       row({ id: "ws-1", status: { case: "merged", value: {} }, when: { case: "merged", value: { atMs: BigInt(atMs) } } }),
       sc,
       "R",
-      merged ? "merged" : "grouping",
+      "merged",
     );
-  const hasGutter = (drawn: HTMLElement): boolean | undefined =>
-    drawn.querySelector(".row")?.classList.contains(MERGED_TODAY_CLASS);
 
   it.each([
     { name: "the same instant", at: () => NOW, now: () => NOW, want: true },
@@ -2487,36 +2484,20 @@ describe("a merge that landed today", () => {
     expect(mergedToday(at(), now())).toBe(want);
   });
 
-  it("marks the row with the gutter", () => {
-    expect(hasGutter(mergedRow(NOW - 60_000))).toBe(true);
-  });
-
-  it("leaves a merge from yesterday without the gutter", () => {
-    expect(hasGutter(mergedRow(startOfToday() - 1))).toBe(false);
-  });
-
-  it("drops the gutter once the shared ticker crosses midnight", () => {
-    // Arrange
-    const ticker = fakeTicker();
-    const drawn = mergedRow(NOW, sidebarContext(appContext({}, ticker)));
+  it("draws no gutter on the row", () => {
     // Act
-    ticker.tick(startOfTomorrow());
+    const drawn = mergedRow(NOW - 60_000);
     // Assert
-    expect(hasGutter(drawn)).toBe(false);
+    expect(drawn.querySelector(".row")?.classList.length).toBe(1);
   });
 
-  it("registers the gutter's tick as a teardown beside the age's", () => {
+  it("registers only the age's tick as a teardown", () => {
+    // Arrange
     const sc = sidebarContext();
+    // Act
     mergedRow(NOW, sc);
-    expect(sc.disposers.length).toBe(2);
-  });
-
-  it("is not marked on a row drawn outside the merged band", () => {
-    expect(hasGutter(mergedRow(NOW, sidebarContext(), false))).toBe(false);
-  });
-
-  it("leaves the name's own colour class untouched", () => {
-    expect(mergedRow(NOW).querySelector(".name")?.classList.contains(MERGED_TODAY_CLASS)).toBe(false);
+    // Assert
+    expect(sc.disposers.length).toBe(1);
   });
 });
 

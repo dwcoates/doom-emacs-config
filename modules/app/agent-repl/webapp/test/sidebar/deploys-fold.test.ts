@@ -12,11 +12,14 @@ import {
   DEPLOYS_REPOSITORY_ATTRIBUTE,
   automaticFold,
   createDeploysFold,
+  deploysGroupRepository,
   installDeploysFoldReset,
 } from "../../src/sidebar/deploys-fold.js";
 import { createFocusLeft, type FocusLeftSource } from "../../src/focus-left.js";
 import { createPresence } from "../../src/presence.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
+import foldSource from "../../src/sidebar/deploys-fold.ts?raw";
+import moreSource from "../../src/sidebar/deploys-more.ts?raw";
 
 /** A group of REPOSITORY, queued with LINE when one is given and idle otherwise. */
 function group(repository: string, line: string | null = null): HTMLElement {
@@ -198,5 +201,44 @@ describe("installDeploysFoldReset", () => {
     focus.left("the page lost focus");
     (el.querySelector('[data-roster-row="open"] .name') as HTMLElement).click();
     expect(folds.folded(g)).toBe(false);
+  });
+});
+
+describe("deploysGroupRepository", () => {
+  it("answers the repository a group names", () => {
+    expect(deploysGroupRepository(group("r1"), "op")).toBe("r1");
+  });
+
+  it.each([
+    { name: "a group naming no repository", value: null },
+    { name: "a group naming an empty repository", value: "" },
+  ])("refuses $name under the caller's operation", ({ value }) => {
+    // Arrange
+    const g = group("r1");
+    if (value === null) g.removeAttribute(DEPLOYS_REPOSITORY_ATTRIBUTE);
+    else g.setAttribute(DEPLOYS_REPOSITORY_ATTRIBUTE, value);
+    // Act + Assert
+    expect(() => deploysGroupRepository(g, "sidebar.test-op")).toThrow(/^sidebar\.test-op: a Deploys group carries no data-repository$/);
+  });
+
+  it("logs a refusal under the caller's operation with what it found", async () => {
+    // Arrange
+    const g = group("r1");
+    g.setAttribute(DEPLOYS_REPOSITORY_ATTRIBUTE, "");
+    const capture = captureLogRecords("error");
+    // Act
+    expect(() => deploysGroupRepository(g, "sidebar.test-op")).toThrow();
+    // Assert
+    const record = await forwardedRecord(capture, "sidebar.test-op");
+    expect(record.context).toMatchObject({ attribute: DEPLOYS_REPOSITORY_ATTRIBUTE, found: "" });
+  });
+
+  it.each([
+    { name: "the fold", source: foldSource },
+    { name: "the older deploys", source: moreSource },
+  ])("is the one read of a group's repository for $name", ({ source }) => {
+    const reads = source.match(/getAttribute\(DEPLOYS_REPOSITORY_ATTRIBUTE\)/g) ?? [];
+    const calls = source.match(/deploysGroupRepository\(group, "/g) ?? [];
+    expect([reads.length, calls.length]).toEqual([source === foldSource ? 1 : 0, 1]);
   });
 });

@@ -1975,8 +1975,11 @@ export function selectionRowScroll(region: { scrollTop: number }, delta: number)
  * section brings a new viewport that starts at its top
  * (src/sidebar/scroll-keep.ts), and the band fit lets every viewport shrink to
  * its rows while it measures them, clamping its scroll
- * (src/sidebar/band-fit.ts). This undoes what the draw or the fit did, so it
- * is no move of its own: the viewport stays where the reader left it.
+ * (src/sidebar/band-fit.ts), and a Deploys group letting its older deploys
+ * go above the viewport pulls what was below them up
+ * (src/sidebar/deploys-more.ts). This undoes what the draw, the fit or the
+ * collapse did, so it is no move of its own: the viewport stays where the
+ * reader left it.
  */
 export function railScrollKept(region: { scrollTop: number }, top: number): void {
   region.scrollTop = top;

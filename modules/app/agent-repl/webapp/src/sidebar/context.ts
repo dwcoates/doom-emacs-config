@@ -9,6 +9,7 @@
  * view state: it is transient to the page that opened it.
  */
 import type { DeploysFold } from "./deploys-fold.js";
+import type { DeploysMore } from "./deploys-more.js";
 import type { DrawnStatusLog } from "../drawn-status.js";
 import type { DaemonContext } from "../rpc/context.js";
 import type { ArrangeHold } from "./arrange.js";
@@ -69,6 +70,8 @@ export interface RailContext {
   arrange: ArrangeContext;
   /** Whether each Deploys group is folded, this page's own (`deploys-fold.ts`). */
   deploysFold: DeploysFold;
+  /** How many older deploys each Deploys group shows, this page's own (`deploys-more.ts`). */
+  deploysMore: DeploysMore;
 }
 
 /**

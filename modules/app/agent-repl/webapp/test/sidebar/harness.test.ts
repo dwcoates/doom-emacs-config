@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { swallowTheNextClick } from "../../src/sidebar/drag.js";
 import { codeOf } from "../source-text.js";
-import { drawnEntries, primaryPointer, settleOwedDragClick } from "./harness.js";
+import { drawnEntries, primaryPointer, scrollable, settleOwedDragClick } from "./harness.js";
 
 describe("primaryPointer", () => {
   it("dispatches a bubbling primary left-button pointer event at the height asked", () => {
@@ -95,5 +95,20 @@ describe("drawnEntries", () => {
 
     // Assert
     expect(handRolled).toEqual([]);
+  });
+});
+
+describe("scrollable", () => {
+  it.each([
+    { name: "keeps an offset inside its range", to: 40, want: 40 },
+    { name: "clamps an offset past the maximum", to: 140, want: 100 },
+    { name: "clamps a negative offset to the top", to: -5, want: 0 },
+  ])("$name", ({ to, want }) => {
+    // Arrange
+    const el = scrollable(document.createElement("div"), 100);
+    // Act
+    el.scrollTop = to;
+    // Assert
+    expect(el.scrollTop).toBe(want);
   });
 });

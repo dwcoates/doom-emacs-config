@@ -344,12 +344,6 @@ export function drawRosterRow(
   const when = requireMessage(u.when, `${path}.when`);
   const duration = drawRosterRowWhen(when, sc, `${path}.when`);
   line.appendChild(duration);
-  // A MERGE THAT LANDED TODAY CARRIES A GUTTER (owner request, 2026-10-11):
-  // the row draws an off-white bar while its merge is on today's local date,
-  // and drops it once the shared ticker crosses midnight.
-  if (merged && when.shown.case === "merged") {
-    tickMergedToday(line, sc, drawRosterRowWhenMerged(when.shown.value, `${path}.when.merged`));
-  }
   const target: VerbTarget = { sc, workspace, name, kind: "workspace" };
   line.appendChild(drawMenuControl(ws, target));
   ws.appendChild(line);
@@ -1280,21 +1274,11 @@ function tickCacheLapse(host: HTMLElement, sc: SidebarContext, lapsesAtMs: numbe
   });
 }
 
-/** Mark a merged ROW's gutter now and on every tick while its merge is today's. */
-function tickMergedToday(row: HTMLElement, sc: SidebarContext, mergedAtMs: number): void {
-  tickPaint(sc, (nowMs) => {
-    row.classList.toggle(MERGED_TODAY_CLASS, mergedToday(mergedAtMs, nowMs));
-  });
-}
-
 /** Run PAINT now and on every tick of the shared ticker, until the row's section is drawn anew. */
 export function tickPaint(sc: SidebarContext, paint: (nowMs: number) => void): void {
   paint(sc.ctx.ticker.now());
   sc.onDispose(sc.ctx.ticker.subscribe(paint));
 }
-
-/** The class a merged row carries while its merge landed today. */
-export const MERGED_TODAY_CLASS = "merged-today";
 
 /** Whether MERGED_AT_MS falls on the same LOCAL calendar date as NOW_MS. */
 export function mergedToday(mergedAtMs: number, nowMs: number): boolean {
