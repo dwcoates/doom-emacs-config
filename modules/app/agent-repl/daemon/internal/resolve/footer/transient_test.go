@@ -119,6 +119,29 @@ func TestATransientIsStampedWithItsEventInstantAndExpiry(t *testing.T) {
 	}
 }
 
+func TestTheDefaultTransientWindowIsTheProtosOneWindow(t *testing.T) {
+	cases := []struct {
+		name string
+		want time.Duration
+	}{
+		// The page reads the same proto value for an editor notice's expiry,
+		// so the daemon's default must be that value and nothing else.
+		{name: "equals frontend.v1.FooterTransientWindow", want: time.Duration(frontendv1.FooterTransientWindow_FOOTER_TRANSIENT_WINDOW_MS) * time.Millisecond},
+		{name: "is five seconds (owner ruling, 2026-10-31)", want: 5 * time.Second},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange, Act
+			got := DefaultTransientWindow
+
+			// Assert
+			if got != tc.want {
+				t.Fatalf("DefaultTransientWindow = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestTheTransientWindowIsInjectable(t *testing.T) {
 	// Arrange
 	h := newHarness(t, WithTransientWindow(3*time.Second))

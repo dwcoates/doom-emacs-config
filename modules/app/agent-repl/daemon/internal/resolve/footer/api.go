@@ -605,9 +605,11 @@ const (
 	// vendor").
 	DefaultVendorSilence = 45 * time.Second
 	// DefaultTransientWindow is how long a transient line is drawn before the
-	// enduring line beneath it shows again (owner ruling, 2026-09-28: "the
-	// window starts at 10 s").
-	DefaultTransientWindow = 10 * time.Second
+	// enduring line beneath it shows again: the ONE window the proto declares
+	// (frontend.v1.FooterTransientWindow, 5 s by the owner's ruling of
+	// 2026-10-31), which the page also reads for an editor notice, so the two
+	// can never disagree.
+	DefaultTransientWindow = time.Duration(frontendv1.FooterTransientWindow_FOOTER_TRANSIENT_WINDOW_MS) * time.Millisecond
 	// DefaultTokenAlarmThreshold is the uncached-input figure that trips the
 	// expensive-turn alarm.
 	DefaultTokenAlarmThreshold uint64 = 20_000
