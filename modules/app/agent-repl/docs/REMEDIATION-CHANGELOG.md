@@ -1335,3 +1335,4 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 - 2026-10-30 webapp-fan-out-agent-only (landed off the merge queue): The webapp's refusal coverage knows the fan-out refusal is an agent-only answer, so the merge gate passes again.
 - 2026-10-30 restart-test-resumes-first (landed off the merge queue): The merge gate's restart and editor-codec tests now expect a restart to continue the turn it cut and know the fan-out refusal is agent-only.
 - 2026-10-30 failing-head-lets-next-test (landed off the merge queue): A merge whose tests fail no longer blocks the queue while it fixes them: the merge behind it rebases and runs its own tests meanwhile, on battery and with racing disabled too, and lands first if it passes first.
+- 2026-10-30 resumed-fixing-head-widens (landed off the merge queue): A merge that resumes fixing its failed tests at the head (after another merge overtook it) now also lets the merge behind it test meanwhile.
