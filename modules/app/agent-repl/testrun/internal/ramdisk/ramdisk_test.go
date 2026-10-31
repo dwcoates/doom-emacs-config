@@ -388,11 +388,7 @@ func TestReleaseKeepsTheDiskWhenWhatRunsOutOfItCannotBeKilled(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "ps failed") {
 		t.Fatalf("Release = %v, want the failed kill reported", err)
 	}
-	for _, call := range h.calls[before:] {
-		if strings.HasPrefix(call, "hdiutil detach") {
-			t.Fatalf("Release detached (%q) under processes it could not kill", call)
-		}
-	}
+	noDetach(t, h.calls[before:])
 	if _, statErr := os.Stat(filepath.Join(m.Registry, "4242.lock")); statErr != nil {
 		t.Fatalf("the record is gone (stat err = %v), want it kept for the next run's Reclaim", statErr)
 	}
@@ -707,11 +703,7 @@ func TestReclaimAfterARebootRemovesOnlyTheRecord(t *testing.T) {
 	if err != nil || len(done) != 1 || done[0].Attached {
 		t.Fatalf("Reclaim = %+v, %v; want the record reclaimed with nothing detached", done, err)
 	}
-	for _, call := range h.calls {
-		if strings.HasPrefix(call, "hdiutil detach") {
-			t.Fatalf("detached %q, a device that is no longer a RAM disk", call)
-		}
-	}
+	noDetach(t, h.calls)
 	if _, statErr := os.Stat(record); !os.IsNotExist(statErr) {
 		t.Fatalf("the stale record survives (stat err = %v)", statErr)
 	}
@@ -912,11 +904,7 @@ func TestAcquireLeavesTheDisksListedBeforeAFailedAttachAttached(t *testing.T) {
 	m.Acquire(16) //nolint:errcheck // the calls are the subject
 
 	// Assert
-	for _, call := range h.calls {
-		if strings.HasPrefix(call, "hdiutil detach") {
-			t.Fatalf("called %q, want the disk attached before the failed attach left alone", call)
-		}
-	}
+	noDetach(t, h.calls)
 }
 
 func TestAcquireNamesAFailedListingAfterAFailedAttach(t *testing.T) {
@@ -2020,10 +2008,8 @@ func TestTheInvestigationTakesNoRegistryLock(t *testing.T) {
 // noDetach fails t when any call detached a disk.
 func noDetach(t *testing.T, calls []string) {
 	t.Helper()
-	for _, call := range calls {
-		if strings.HasPrefix(call, "hdiutil detach") {
-			t.Fatalf("detached %q; want nothing detached", call)
-		}
+	if got := detaches(calls); len(got) > 0 {
+		t.Fatalf("detached %q; want nothing detached", got)
 	}
 }
 
@@ -2341,5 +2327,52 @@ func TestReleaseFindsItsDiskByItsMount(t *testing.T) {
 	// Assert
 	if !slices.Equal(h.calls[:1], []string{"hdiutil info"}) || !slices.Equal(detaches(h.calls), []string{"hdiutil detach /dev/disk9"}) {
 		t.Fatalf("calls = %q, want the images listed, then /dev/disk9 detached", h.calls)
+	}
+}
+
+func TestDetaches(t *testing.T) {
+	tests := []struct {
+		name  string
+		calls []string
+		want  []string
+	}{
+		{name: "no call", calls: nil, want: nil},
+		{name: "no detach", calls: []string{"hdiutil info", "diskutil list"}, want: nil},
+		{name: "plain and forced detaches in order", calls: []string{"hdiutil info", "hdiutil detach /dev/disk9", "lsof", "hdiutil detach -force /dev/disk9"}, want: []string{"hdiutil detach /dev/disk9", "hdiutil detach -force /dev/disk9"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got := detaches(tc.calls)
+
+			// Assert
+			if !slices.Equal(got, tc.want) {
+				t.Fatalf("detaches = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestNoHandRolledDetachChecksRemain(t *testing.T) {
+	// Arrange
+	// The needle is split so this test's own source never matches it.
+	needle := `strings.HasPrefix(call, "hdiutil ` + `detach")`
+	var hand []string
+	for _, file := range []string{"ramdisk_test.go", "leak_test.go"} {
+		raw, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Act
+		for i, line := range strings.Split(string(raw), "\n") {
+			if strings.Contains(line, needle) {
+				hand = append(hand, fmt.Sprintf("%s:%d", file, i+1))
+			}
+		}
+	}
+
+	// Assert: detaches is the one reader of the detaches among calls.
+	if len(hand) != 1 {
+		t.Fatalf("hdiutil detach checks at %v, want only detaches's own", hand)
 	}
 }
