@@ -21,6 +21,7 @@ func landedRequester(t *testing.T, f *fixture) wsm.Workspace {
 	t.Helper()
 	ws := f.workspace("w1", t.TempDir())
 	ws.Landed = &wsm.Landing{Head: "sha-of-HEAD", At: landedAt}
+	ws.ParentBranch = "master"
 	f.db.with(ws)
 	return ws
 }
@@ -283,4 +284,62 @@ func TestRetireLandedRefusesAWorkspaceThisDaemonDoesNotServe(t *testing.T) {
 		t.Fatalf("RetireLanded = %v, want the transferring-away refusal", err)
 	}
 	assertNothingRetired(t, f, ws.ID)
+}
+
+// TestRetireLandedDeletesTheLandedBranch covers the branch going with the
+// retired requester's worktree (landedbranch.Retire): deleted once its tip is
+// inside the branch it landed into, kept when it holds anything that did not
+// land.
+func TestRetireLandedDeletesTheLandedBranch(t *testing.T) {
+	cases := []struct {
+		name        string
+		offParent   bool
+		wantDeleted bool
+		wantLevel   string
+		wantMessage string
+	}{
+		{
+			name:        "a branch inside its parent is deleted at its tip",
+			wantDeleted: true,
+			wantLevel:   dlog.LevelInfo,
+			wantMessage: "deleted the landed branch: its tip is inside the ref it landed into",
+		},
+		{
+			name:        "a branch holding commits its parent does not is kept",
+			offParent:   true,
+			wantLevel:   dlog.LevelDebug,
+			wantMessage: "kept the branch: it holds commits the ref it landed into does not",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+			ws := landedRequester(t, f)
+			f.git.existingBranches = map[string]bool{ws.Branch: true}
+			f.git.offPrimary = map[string]bool{"sha-of-refs/heads/" + ws.Branch: tc.offParent}
+
+			// Act
+			kept, err := f.verbs.RetireLanded(context.Background(), ws.ID)
+
+			// Assert
+			if err != nil || kept != "" {
+				t.Fatalf("RetireLanded = %q, %v; want a retirement", kept, err)
+			}
+			var want []string
+			if tc.wantDeleted {
+				want = []string{ws.Branch + "@sha-of-refs/heads/" + ws.Branch}
+			}
+			if len(f.git.deletedBranches) != len(want) || (len(want) == 1 && f.git.deletedBranches[0] != want[0]) {
+				t.Fatalf("deleted %v, want %v", f.git.deletedBranches, want)
+			}
+			record, ok := dlog.FindRecord(retireRecords(f, tc.wantLevel, ws.ID), dlog.RecordQuery{Message: tc.wantMessage})
+			if !ok {
+				t.Fatalf("no %s %s record %q: %+v", tc.wantLevel, opRetire, tc.wantMessage, f.log.logger.Records())
+			}
+			if record.Context["into"] != "master" || record.Context["branch"] != ws.Branch {
+				t.Fatalf("the record's context is %v, want branch %s into master", record.Context, ws.Branch)
+			}
+		})
+	}
 }

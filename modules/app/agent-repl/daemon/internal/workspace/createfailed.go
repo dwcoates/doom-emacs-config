@@ -99,12 +99,14 @@ func createHandedOver(err error) bool {
 
 // callerInputArms are the create refusals the caller's own input causes:
 // a supplied name that breaks the naming rule, a supplied name a pending
-// merge or a create in flight already holds, and a promptless one-shot. Each
+// merge, a create in flight or an unlanded workspace already holds, and a
+// promptless one-shot. Each
 // is answered to the caller, who corrects the input; none is a fault of the
 // daemon or the repository.
 var callerInputArms = map[string]bool{
 	ArmInvalidName:  true,
 	ArmNameReserved: true,
+	ArmNameHeld:     true,
 	ArmNoSlug:       true,
 }
 

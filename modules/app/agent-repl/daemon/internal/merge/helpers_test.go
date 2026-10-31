@@ -1218,6 +1218,10 @@ type fakeGit struct {
 	rebaseMet      map[int]bool
 	rebaseErr      error
 	rebaseCommands []string
+	// deletedBranches records DeleteBranchAt as BRANCH@HEAD; deleteBranchErr
+	// fails it.
+	deletedBranches []string
+	deleteBranchErr error
 	// worktrees answers ListWorktrees; addedWorktrees records AddWorktree.
 	worktrees      []gitclient.Worktree
 	addedWorktrees []string
@@ -1696,8 +1700,17 @@ func (g *fakeGit) MergeTree(context.Context, string, string, string) (gitclient.
 	return gitclient.MergeTreeOutcome{}, errors.New("merge fake git: MergeTree is not a merge operation")
 }
 
-func (g *fakeGit) DeleteBranchAt(context.Context, string, string, string) error {
-	return errors.New("merge fake git: DeleteBranchAt is not a merge operation")
+// DeleteBranchAt records a landed branch's deletion (landedbranch.Retire, at
+// the teardown) as BRANCH@HEAD, or fails with deleteBranchErr.
+func (g *fakeGit) DeleteBranchAt(_ context.Context, _, branch, head string) error {
+	g.record("delete_branch_at")
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.deleteBranchErr != nil {
+		return g.deleteBranchErr
+	}
+	g.deletedBranches = append(g.deletedBranches, branch+"@"+head)
+	return nil
 }
 
 // seen reports whether git was asked for something.

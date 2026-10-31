@@ -15,6 +15,7 @@ import (
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
+	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"google.golang.org/protobuf/proto"
 
@@ -946,5 +947,31 @@ func TestSetArmFillsTheInvalidNameArmAndItsRule(t *testing.T) {
 				t.Fatalf("setResponseError = %v, invalid_name = %+v; want the name, component and %s arm", ok, arm, tc.rule)
 			}
 		})
+	}
+}
+
+// TestSetResponseErrorCarriesTheNameHeldArmsWorkspaceAndStanding pins the
+// create's name_held arm on the wire: its branch, the holding workspace's ref
+// and whether it is open reach the client, which reads them as "the workspace
+// is already there".
+func TestSetResponseErrorCarriesTheNameHeldArmsWorkspaceAndStanding(t *testing.T) {
+	// Arrange.
+	resp := &agentreplv1.CreateWorkspaceResponse{}
+	fields := map[string]any{
+		"branch":    "ramdisk-leak-investigation",
+		"workspace": &workspacev1.WorkspaceRef{Id: "ws-inv", Dir: "/trees/inv"},
+		"open":      true,
+	}
+
+	// Act.
+	ok := setResponseError(resp, workspace.ArmNameHeld, fields)
+
+	// Assert.
+	held := resp.GetError().GetNameHeld()
+	if !ok || held == nil {
+		t.Fatalf("name_held was not set: ok=%v resp=%v", ok, resp)
+	}
+	if held.GetBranch() != "ramdisk-leak-investigation" || held.GetWorkspace().GetId() != "ws-inv" || !held.GetOpen() {
+		t.Fatalf("name_held = %v, want the branch, workspace ws-inv and open", held)
 	}
 }

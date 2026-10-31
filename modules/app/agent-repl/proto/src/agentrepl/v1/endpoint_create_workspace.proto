@@ -507,6 +507,11 @@ message CreateWorkspaceError {
     // workspace will be created under it when the merge starts
     // (agentrepl.v1.CreateWorkspaceAsyncMerge.name).
     CreateWorkspaceNameReserved name_reserved = 18;
+    // The supplied name is already the name or branch of a registered
+    // workspace that has not landed, open or closed. Checked under the same
+    // lock that claims a name, so two creates of one name can never both pass
+    // it: the second is answered with the first's workspace.
+    CreateWorkspaceNameHeld name_held = 47;
     // The supplied name breaks the naming rule, so it cannot be the
     // workspace's branch, worktree directory and tab label. Nothing was
     // claimed, built or created.
@@ -643,6 +648,20 @@ message CreateWorkspaceUnknownContextWorkspace {
 message CreateWorkspaceNameReserved {
   // The branch the supplied name resolves to.
   string branch = 1;
+}
+// A supplied name a registered workspace that has NOT LANDED already holds,
+// as its name or its branch. A landed workspace's name is free to use again:
+// its branch is deleted at its landing. A caller that creates a workspace of
+// a stable name to keep exactly one of it (the RAM disk investigation) reads
+// this arm as "it is already there", naming it by `workspace`.
+message CreateWorkspaceNameHeld {
+  // The branch the supplied name resolves to.
+  string branch = 1;
+  // The workspace holding the name.
+  workspace.v1.WorkspaceRef workspace = 2;
+  // Whether that workspace is open; false for a closed one that never
+  // landed, which is reopened rather than created again.
+  bool open = 3;
 }
 // A supplied name (CreateWorkspaceStandard.name) that breaks the naming rule.
 // The name is the workspace's branch, its worktree directory and its tab

@@ -2390,3 +2390,99 @@ func TestALandedWorkspaceHoldsItsStartsAcrossTheStopAndTheRemoval(t *testing.T) 
 			holds[0].at, stopAt, removeAt, holds[1].at)
 	}
 }
+
+// TestALandingDeletesItsMergedBranch covers the landed branch going with its
+// worktree (landedbranch.Retire, in closeLanded): judged against what the
+// target checkout holds after the landing, deleted at the tip it judged, and
+// kept when it holds anything that did not land or when git refuses.
+func TestALandingDeletesItsMergedBranch(t *testing.T) {
+	cases := []struct {
+		name        string
+		inside      bool
+		deleteErr   error
+		wantDeleted []string
+		wantLevel   string
+		wantMessage string
+	}{
+		{
+			name:        "a branch whose tip the target holds is deleted at that tip",
+			inside:      true,
+			wantDeleted: []string{"feature@feat1"},
+			wantLevel:   dlog.LevelInfo,
+			wantMessage: "deleted the landed branch: its tip is inside the ref it landed into",
+		},
+		{
+			name:        "a branch holding commits the target does not is kept",
+			inside:      false,
+			wantLevel:   dlog.LevelDebug,
+			wantMessage: "kept the branch: it holds commits the ref it landed into does not",
+		},
+		{
+			name:        "a deletion git refuses keeps the branch and is recorded",
+			inside:      true,
+			deleteErr:   errors.New("the branch moved"),
+			wantLevel:   dlog.LevelError,
+			wantMessage: "could not retire the landed branch: delete the branch at the judged head; the branch is kept",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: a landing merge whose branch exists at feat1.
+			h := newHarness(t)
+			h.emacsRepo()
+			h.landsCleanly("abc123def4567")
+			h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
+			h.gatePasses("daemon")
+			h.git.mu.Lock()
+			h.git.refs["refs/heads/feature"] = "feat1"
+			h.git.ancestry["feat1>HEAD"] = tc.inside
+			h.git.deleteBranchErr = tc.deleteErr
+			h.git.mu.Unlock()
+			enqueue(t, h)
+
+			// Act.
+			if err := h.admit(context.Background()); err != nil {
+				t.Fatalf("the merge failed: %v", err)
+			}
+
+			// Assert.
+			h.git.mu.Lock()
+			deleted := append([]string(nil), h.git.deletedBranches...)
+			h.git.mu.Unlock()
+			if len(deleted) != len(tc.wantDeleted) || (len(deleted) == 1 && deleted[0] != tc.wantDeleted[0]) {
+				t.Fatalf("deleted branches are %v, want %v", deleted, tc.wantDeleted)
+			}
+			record, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: tc.wantLevel, Operation: "daemon.merge.teardown", Message: tc.wantMessage})
+			if !ok {
+				t.Fatalf("no %s daemon.merge.teardown record %q: %+v", tc.wantLevel, tc.wantMessage, h.logs.Records())
+			}
+			if record.Context["branch"] != "feature" || record.Context["into"] != "HEAD" {
+				t.Fatalf("the record's context is %v, want branch feature into HEAD", record.Context)
+			}
+		})
+	}
+}
+
+// TestAFailedMergeKeepsItsBranch covers the other side: a merge that did not
+// land never deletes its branch.
+func TestAFailedMergeKeepsItsBranch(t *testing.T) {
+	// Arrange: a merge whose before-action fails.
+	h := newHarness(t)
+	h.emacsRepo()
+	h.configurePromptHooks([]string{"before"}, nil)
+	h.briefs["before"] = nil
+	h.turnCloses = []wsm.TurnClose{wsm.CloseFailed}
+	h.git.mu.Lock()
+	h.git.refs["refs/heads/feature"] = "feat1"
+	h.git.ancestry["feat1>HEAD"] = true
+	h.git.mu.Unlock()
+	enqueue(t, h)
+
+	// Act.
+	_ = h.admit(context.Background())
+
+	// Assert.
+	if h.git.seen("delete_branch_at") {
+		t.Fatal("a failed merge's branch was deleted")
+	}
+}

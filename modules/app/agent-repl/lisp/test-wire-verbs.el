@@ -2237,7 +2237,7 @@ and the temporary root it carries."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_create_workspace.pb.go" "CreateWorkspaceError")
                        #'string<)
-                 (sort (list "ungatedWithoutConsent" "noSlug" "briefMissing" "unknownRepository" "worktreeCreationFailed" "spawnFailed" "oneShotPolicyMissing" "namingFailed" "insideTemporaryDirectory" "unknownForkSource" "forkSourceHasNoConversation" "nameReserved" "invalidName" "unknownContextWorkspace" "unknownOwner" "ownerNoticeRequired" "ownerNoticeUnexpected" "oneShotOwnerLands" "unknownRequester" "asyncMergeUnknownBranch" "asyncMergeBranchOwned" "asyncMergeUnknownSubagent" "asyncMergeUnknownMaker" "asyncMergeContextNotMaker" "asyncMergeNameTaken" "asyncMergeUnknownCloseAfter" "opIdWithAsyncMerge" "versionIncrementRequired" "versionIncrementUnexpected" "asyncMergeRequesterQueued" "asyncMergeRequesterMerging" "asyncMergeRequesterSessionDeleted" "parentNotOpen" "originFetchFailed" "asyncMergeNoDeployConfig" "asyncMergeDeployConfigInvalid" "transferringAway" "standingDown" "placementBehindNotInLine" "unknownLandingTarget")
+                 (sort (list "ungatedWithoutConsent" "noSlug" "briefMissing" "unknownRepository" "worktreeCreationFailed" "spawnFailed" "oneShotPolicyMissing" "namingFailed" "insideTemporaryDirectory" "unknownForkSource" "forkSourceHasNoConversation" "nameReserved" "nameHeld" "invalidName" "unknownContextWorkspace" "unknownOwner" "ownerNoticeRequired" "ownerNoticeUnexpected" "oneShotOwnerLands" "unknownRequester" "asyncMergeUnknownBranch" "asyncMergeBranchOwned" "asyncMergeUnknownSubagent" "asyncMergeUnknownMaker" "asyncMergeContextNotMaker" "asyncMergeNameTaken" "asyncMergeUnknownCloseAfter" "opIdWithAsyncMerge" "versionIncrementRequired" "versionIncrementUnexpected" "asyncMergeRequesterQueued" "asyncMergeRequesterMerging" "asyncMergeRequesterSessionDeleted" "parentNotOpen" "originFetchFailed" "asyncMergeNoDeployConfig" "asyncMergeDeployConfigInvalid" "transferringAway" "standingDown" "placementBehindNotInLine" "unknownLandingTarget")
                        #'string<))))
 
 (ert-deftest agent-repl-test-wire-verbs-create-error-unknown-fork-source-arm ()
@@ -2364,6 +2364,16 @@ declares, so the codec's arm list cannot drift from it."
     (should (equal (agent-repl-wire-decode-create-workspace-error
                     (agent-repl-test-wire-verbs--parse "{\"standingDown\":{}}"))
                    '(:cause (:arm :standing-down :value nil))))))
+
+(ert-deftest agent-repl-test-wire-verbs-create-error-name-held-arm ()
+  "CreateWorkspaceError's `name_held' arm decodes the branch, the holding
+workspace's ref and whether it is open."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-create-workspace-error
+                    (agent-repl-test-wire-verbs--parse
+                     "{\"nameHeld\":{\"branch\":\"agent-1/fix\",\"workspace\":{\"id\":\"ws-2\",\"dir\":\"/w/two\"},\"open\":true}}"))
+                   '(:cause (:arm :name-held
+                             :value (:branch "agent-1/fix" :workspace (:id "ws-2" :dir "/w/two") :open t)))))))
 
 (ert-deftest agent-repl-test-wire-verbs-create-error-name-reserved-arm ()
   "CreateWorkspaceError's `name_reserved' arm decodes the branch the name resolves to."

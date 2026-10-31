@@ -9,6 +9,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/landedbranch"
 	"agent-repld/internal/wsm"
 )
 
@@ -36,8 +37,8 @@ const (
 // RetireLanded retires a REQUESTER WHOSE DETACHED MERGE LANDED (its
 // wsm.Landing) into the state an in-place merge leaves its requester in: its
 // session stopped, its worktree removed, and the workspace closed and stamped
-// merged at the instant its merge landed. Its branch is kept, as an in-place
-// merge keeps it.
+// merged at the instant its merge landed. Its branch is deleted once it is
+// verified inside the branch it landed into, as an in-place merge's is.
 //
 // It answers why it kept the workspace instead, empty when it retired it. It
 // keeps every workspace that might still hold something that did not land: one
@@ -127,7 +128,11 @@ func (v *verbs) RetireLanded(ctx context.Context, ws ids.WorkspaceID) (string, e
 		log.Error(opRetire, "could not stamp the retired requester merged; its worktree is gone and it stays closed", dlog.WithCause(fields, err))
 		return "", fmt.Errorf("retire %q: stamp merged: %w", ws, err)
 	}
-	log.Info(opRetire, "retired a requester whose detached merge landed: its session stopped, its worktree removed, its branch kept", fields)
+	log.Info(opRetire, "retired a requester whose detached merge landed: its session stopped, its worktree removed", fields)
+	// ITS LANDED BRANCH GOES WITH ITS WORKTREE, verified against the branch
+	// it landed into (landedbranch.Retire records every outcome itself): a
+	// branch left behind refuses every later create of the same name.
+	_, _ = landedbranch.Retire(ctx, v.deps.Git, log, opRetire, repoDir, record.Branch, record.ParentBranch, fields)
 	v.republishRegistry(ctx, log, opRetire)
 	return "", nil
 }

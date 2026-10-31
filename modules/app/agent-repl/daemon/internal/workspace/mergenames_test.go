@@ -6,6 +6,9 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
+
+	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
@@ -323,5 +326,110 @@ func TestCreateLeavesTheNameFreeAfterRefusingABadSuppliedName(t *testing.T) {
 	// Assert
 	if len(claimed) != 0 {
 		t.Fatalf("claimed = %+v, want no claim left by a refused name", claimed)
+	}
+}
+
+// TestCreateRefusesASuppliedNameAnUnlandedWorkspaceHolds covers the held-name
+// check inside the name claim (refuseHeldLocked): a standard create's
+// supplied name an unlanded workspace holds, as its name or its branch, open
+// or closed, is refused as name_held naming it, and nothing is built; a
+// landed workspace's name is free again.
+func TestCreateRefusesASuppliedNameAnUnlandedWorkspaceHolds(t *testing.T) {
+	merged := time.Unix(1_700_000_000, 0).UTC()
+	cases := []struct {
+		name      string
+		holder    wsm.Workspace
+		wantArm   string
+		wantOpen  bool
+		wantBuilt bool
+	}{
+		{
+			name:     "an open workspace of the name",
+			holder:   wsm.Workspace{ID: "ws-inv", Name: "ABC/ramdisk-leak-investigation", Branch: "ABC/ramdisk-leak-investigation", Repo: "repo-1"},
+			wantArm:  ArmNameHeld,
+			wantOpen: true,
+		},
+		{
+			name:    "a closed workspace that never landed",
+			holder:  wsm.Workspace{ID: "ws-inv", Name: "ABC/ramdisk-leak-investigation", Branch: "ABC/ramdisk-leak-investigation", Repo: "repo-1", Closed: true},
+			wantArm: ArmNameHeld,
+		},
+		{
+			name:     "a workspace renamed away whose branch still carries the name",
+			holder:   wsm.Workspace{ID: "ws-inv", Name: "ABC/renamed", Branch: "ABC/ramdisk-leak-investigation", Repo: "repo-1"},
+			wantArm:  ArmNameHeld,
+			wantOpen: true,
+		},
+		{
+			name:      "a landed workspace frees its name",
+			holder:    wsm.Workspace{ID: "ws-inv", Name: "ABC/ramdisk-leak-investigation", Branch: "ABC/ramdisk-leak-investigation", Repo: "repo-1", Closed: true, MergedAt: &merged},
+			wantBuilt: true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+			t.Setenv(PrefixEnv, "ABC")
+			t.Setenv(LegacyPrefixEnv, "")
+			holder := tc.holder
+			holder.Dir = t.TempDir()
+			f.db.with(holder)
+
+			// Act
+			_, err := f.verbs.Create(context.Background(), CreateSpec{RepoDir: mainWorktree(t, f), Name: "ramdisk-leak-investigation"})
+
+			// Assert
+			if tc.wantBuilt {
+				if refusal, ok := AsRefusal(err); ok && refusal.Arm == ArmNameHeld {
+					t.Fatalf("Create = %v, want a landed workspace's name free", err)
+				}
+				if len(f.git.created) != 1 || f.git.created[0].Branch != "ABC/ramdisk-leak-investigation" {
+					t.Fatalf("created = %+v, want the workspace built on the freed name", f.git.created)
+				}
+				return
+			}
+			refusal, ok := AsRefusal(err)
+			if !ok || refusal.Arm != tc.wantArm {
+				t.Fatalf("Create = %v, want the %s refusal", err, tc.wantArm)
+			}
+			ref, _ := refusal.Fields["workspace"].(*workspacev1.WorkspaceRef)
+			if refusal.Fields["branch"] != "ABC/ramdisk-leak-investigation" || ref == nil || ref.GetId() != "ws-inv" || refusal.Fields["open"] != tc.wantOpen {
+				t.Fatalf("refusal fields = %v, want the branch, workspace ws-inv and open %v", refusal.Fields, tc.wantOpen)
+			}
+			if len(f.git.created) != 0 {
+				t.Fatalf("created = %+v, want nothing built", f.git.created)
+			}
+		})
+	}
+}
+
+// TestCreateFailsLoudlyWhenTheHeldNameCheckCannotReadTheRegistry covers the
+// registry read under the name claim: a read that fails fails the create,
+// recorded at ERROR, and builds nothing.
+func TestCreateFailsLoudlyWhenTheHeldNameCheckCannotReadTheRegistry(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	t.Setenv(PrefixEnv, "ABC")
+	t.Setenv(LegacyPrefixEnv, "")
+	repoDir := mainWorktree(t, f)
+	f.db.listWorkspacesErr = errors.New("database is locked")
+
+	// Act
+	_, err := f.verbs.Create(context.Background(), CreateSpec{RepoDir: repoDir, Name: "ramdisk-leak-investigation"})
+
+	// Assert
+	if err == nil {
+		t.Fatal("Create = nil, want the failure")
+	}
+	if _, ok := AsRefusal(err); ok {
+		t.Fatalf("Create = %v, want a failure, not a refusal", err)
+	}
+	if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: opCreate,
+		Message: "could not read the registered workspaces to check the supplied name"}); !ok {
+		t.Fatalf("no ERROR %s record of the failed read: %+v", opCreate, f.log.logger.Records())
+	}
+	if len(f.git.created) != 0 {
+		t.Fatalf("created = %+v, want nothing built", f.git.created)
 	}
 }

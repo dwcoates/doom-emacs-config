@@ -110,6 +110,8 @@ type Git interface {
 	RemoveCleanWorktree(ctx context.Context, repoDir, worktreeDir string) error
 	RemoveWorktree(ctx context.Context, repoDir, worktreeDir string) error
 	CommonDir(ctx context.Context, dir string) (string, error)
+	BranchExists(ctx context.Context, repoDir, branch string) (bool, error)
+	IsAncestor(ctx context.Context, dir, ancestor, descendant string) (bool, error)
 	PreserveWorktree(ctx context.Context, repoDir, worktreeDir, ref, message string) (string, error)
 	DeleteBranchAt(ctx context.Context, repoDir, branch, head string) error
 }
@@ -228,7 +230,8 @@ type Report struct {
 	Forced []string
 	// Leftovers lists every leftover directory removed (leftovers.go).
 	Leftovers []string
-	// BranchesDeleted counts the branches deleted after their removal.
+	// BranchesDeleted counts the branches deleted: a removed worktree's, and
+	// a landed workspace's whose worktree was already gone (landedbranches.go).
 	BranchesDeleted int
 	// Pruned counts the repositories whose stale registrations were pruned.
 	Pruned int
@@ -458,6 +461,10 @@ func (s *repoSweep) run(ctx context.Context) {
 		return
 	}
 	s.sweepLeftovers(ctx, worktrees)
+	if ctx.Err() != nil {
+		return
+	}
+	s.sweepLandedBranches(ctx)
 	s.report.Repositories++
 }
 

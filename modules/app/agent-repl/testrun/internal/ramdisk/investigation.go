@@ -1,8 +1,9 @@
 package ramdisk
 
 import (
+	"bytes"
 	"context"
-	"errors"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,11 +13,10 @@ import (
 	"agentrepl/testrun/internal/command"
 )
 
-// InvestigationName is the investigation workspace's name: stable, so a run
-// can tell that one is already open. The daemon may prefix its branch
-// (AGENT_WORKSPACE_PREFIX), so a branch whose last path segment starts with it
-// is the investigation's. A second create of the same name is refused, since
-// the branch already exists, so two runs never open two investigations.
+// InvestigationName is the investigation workspace's name: stable, so the
+// daemon can tell that one is already there. A create of the name is refused
+// as `name_held` while a workspace that has not landed holds it, and is free
+// again once that workspace lands (its branch is deleted at its landing).
 const InvestigationName = "ramdisk-leak-investigation"
 
 // EnvDispatch overrides the agent CLI the investigation is created through:
@@ -46,8 +46,9 @@ type Investigation struct {
 	// Git runs git within a bound.
 	Git BoundedRunner
 	// Dispatch runs one agent CLI command (`agent-repld ARGS...`), within
-	// DispatchBound.
-	Dispatch func(args []string) error
+	// DispatchBound, and answers what it printed on stdout (the daemon's
+	// answer, as protojson) beside its failure.
+	Dispatch func(args []string) ([]byte, error)
 	// StateDir is the agent-repl state root: its daemon.addr says a daemon
 	// serves.
 	StateDir string
@@ -57,57 +58,84 @@ type Investigation struct {
 
 // InvestigationOutcome is what EnsureInvestigation did.
 type InvestigationOutcome struct {
-	// Existing names the investigation already open (its worktree); empty
-	// when one was created.
+	// Existing names the investigation already there (the workspace holding
+	// its name, and whether it is open); empty when one was created.
 	Existing string
 }
 
 // EnsureInvestigation opens the investigation workspace for t, unless one is
-// already open.
+// already there.
 //
-// OPEN MEANS A WORKTREE on a branch of the investigation's name (closed
-// workspaces keep their worktree too, so a closed, unmerged investigation also
-// counts: it is reopened, not duplicated).
-//
-// TWO RUNS NEVER OPEN TWO, STRUCTURALLY: the create names its branch, and the
-// daemon refuses a second create of a branch that exists. A run whose create
-// is refused reads the worktrees again, and a run that lost that race finds
-// the other's investigation open rather than reporting a failure.
+// THE DAEMON DECIDES WHETHER ONE IS THERE, IN THE SAME STEP AS THE CREATE: it
+// refuses the name as `name_held` while any workspace that has not landed
+// holds it (open, or closed and unmerged, which is reopened rather than
+// duplicated), checked under the lock that claims names. So two runs never
+// open two, and a branch its landed workspace left behind can neither block
+// the create nor pass for an open investigation. The runner checks nothing
+// itself before it asks.
 func (m Manager) EnsureInvestigation(inv Investigation, t *Trouble) (InvestigationOutcome, error) {
-	root, open, err := investigationWorktrees(inv)
+	root, err := mainWorktree(inv)
 	if err != nil {
 		return InvestigationOutcome{}, err
-	}
-	if open != "" {
-		return InvestigationOutcome{Existing: open}, nil
 	}
 	addr := filepath.Join(inv.StateDir, "daemon.addr")
 	if _, err := os.Stat(addr); err != nil {
 		return InvestigationOutcome{}, fmt.Errorf("no agent-repl daemon serves to create the investigation workspace (%w)", err)
 	}
-	dispatchErr := inv.Dispatch(createArgs(root, investigationPrompt(t, inv.RunLog)))
+	printed, dispatchErr := inv.Dispatch(createArgs(root, investigationPrompt(t, inv.RunLog)))
 	if dispatchErr == nil {
 		return InvestigationOutcome{}, nil
 	}
-	_, open, err = investigationWorktrees(inv)
-	if err == nil && open != "" {
-		return InvestigationOutcome{Existing: open}, nil
+	if held, ok := nameHeld(printed); ok {
+		return InvestigationOutcome{Existing: held}, nil
 	}
-	return InvestigationOutcome{}, errors.Join(fmt.Errorf("dispatch the investigation workspace's create: %w", dispatchErr), err)
+	return InvestigationOutcome{}, fmt.Errorf("dispatch the investigation workspace's create: %w", dispatchErr)
 }
 
-// investigationWorktrees reads the repository's worktrees within GitBound:
-// its main worktree, and the investigation's open worktree, if any.
-func investigationWorktrees(inv Investigation) (root, open string, err error) {
+// mainWorktree reads the repository's main worktree within GitBound: where
+// the investigation is cut.
+func mainWorktree(inv Investigation) (string, error) {
 	porcelain, err := inv.Git(GitBound, "git", "-C", inv.Module, "worktree", "list", "--porcelain")
 	if err != nil {
-		return "", "", fmt.Errorf("list the repository's worktrees: %w", err)
+		return "", fmt.Errorf("list the repository's worktrees: %w", err)
 	}
-	root, open = readWorktrees(porcelain)
+	root := readMainWorktree(porcelain)
 	if root == "" {
-		return "", "", fmt.Errorf("git worktree list named no main worktree for %s", inv.Module)
+		return "", fmt.Errorf("git worktree list named no main worktree for %s", inv.Module)
 	}
-	return root, open, nil
+	return root, nil
+}
+
+// createAnswer is the part of the daemon's CreateWorkspaceResponse, as the
+// agent CLI prints it (protojson), that says the name is already held
+// (agentrepl.v1.CreateWorkspaceError.name_held).
+type createAnswer struct {
+	Error struct {
+		NameHeld *struct {
+			Branch    string `json:"branch"`
+			Workspace struct {
+				ID  string `json:"id"`
+				Dir string `json:"dir"`
+			} `json:"workspace"`
+			Open bool `json:"open"`
+		} `json:"nameHeld"`
+	} `json:"error"`
+}
+
+// nameHeld reads PRINTED, a refused create's answer, for the name_held arm,
+// and describes the workspace holding the name for the log. Any other answer,
+// or one that is no JSON, is no held name.
+func nameHeld(printed []byte) (string, bool) {
+	var answer createAnswer
+	if err := json.Unmarshal(printed, &answer); err != nil || answer.Error.NameHeld == nil {
+		return "", false
+	}
+	held := answer.Error.NameHeld
+	standing := "closed, not landed"
+	if held.Open {
+		standing = "open"
+	}
+	return fmt.Sprintf("the workspace %s at %s holds the name %s (%s)", held.Workspace.ID, held.Workspace.Dir, held.Branch, standing), true
 }
 
 // createArgs is the agent CLI command that creates the investigation in the
@@ -120,28 +148,15 @@ func createArgs(root, prompt string) []string {
 		"-name", InvestigationName, "-prompt", prompt, "-as-user"}
 }
 
-// readWorktrees reads `git worktree list --porcelain`: the main worktree (the
-// first listed) and the worktree on a branch of the investigation's name, if
-// any, described for the log.
-func readWorktrees(porcelain string) (root, open string) {
-	var current string
+// readMainWorktree reads `git worktree list --porcelain` for the main
+// worktree, which git lists first.
+func readMainWorktree(porcelain string) string {
 	for _, line := range strings.Split(porcelain, "\n") {
 		if path, ok := strings.CutPrefix(line, "worktree "); ok {
-			current = path
-			if root == "" {
-				root = path
-			}
-			continue
-		}
-		branch, ok := strings.CutPrefix(line, "branch refs/heads/")
-		if !ok {
-			continue
-		}
-		if strings.HasPrefix(branch[strings.LastIndex(branch, "/")+1:], InvestigationName) && open == "" {
-			open = fmt.Sprintf("the worktree %s on branch %s", current, branch)
+			return path
 		}
 	}
-	return root, open
+	return ""
 }
 
 // investigationPrompt is the investigation workspace's commission: the
@@ -204,17 +219,22 @@ func writeBlock(b *strings.Builder, heading, body string) {
 }
 
 // ScriptDispatch is the real Investigation.Dispatch: it runs `<cli> ARGS...`
-// (the installed agent-repld front door), within bound. A missing CLI, a failure and a
-// timeout are each an error naming the command.
-func ScriptDispatch(cli string, bound time.Duration) func(args []string) error {
-	return func(args []string) error {
+// (the installed agent-repld front door), within bound, and answers what it
+// printed on stdout, which a refused create's arm is read from. A missing CLI,
+// a failure and a timeout are each an error naming the command, with
+// everything it printed.
+func ScriptDispatch(cli string, bound time.Duration) func(args []string) ([]byte, error) {
+	return func(args []string) ([]byte, error) {
 		if _, err := os.Stat(cli); err != nil {
-			return fmt.Errorf("the agent CLI is missing: %w", err)
+			return nil, fmt.Errorf("the agent CLI is missing: %w", err)
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), bound)
 		defer cancel()
 		cmd := command.Bounded(ctx, cli, args...)
-		out, err := cmd.CombinedOutput()
-		return command.Outcome(ctx, bound, command.Line(cli, args), "", out, err)
+		var stderr bytes.Buffer
+		cmd.Stderr = &stderr
+		out, err := cmd.Output()
+		printed := append(append([]byte(nil), out...), stderr.Bytes()...)
+		return out, command.Outcome(ctx, bound, command.Line(cli, args), "", printed, err)
 	}
 }
