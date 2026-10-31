@@ -4959,7 +4959,7 @@ ON-SUCCESS receives the success value; it defaults to ignoring it."
       (agent-repl-test-input--with-ask ask
         (insert text)
         (let ((sent nil) (posted nil))
-          (cl-letf (((symbol-function 'agent-repl-send-held-now) (lambda () (setq sent t)))
+          (cl-letf (((symbol-function 'agent-repl-send-held-now) (lambda (&optional _on-not-held) (setq sent t)))
                     ((symbol-function 'agent-repl-send-with-postfix) (lambda () (setq posted t))))
             (agent-repl-input-control-return))
           (should sent)
@@ -5039,6 +5039,94 @@ ON-SUCCESS receives the success value; it defaults to ignoring it."
           (cl-letf (((symbol-function 'message) (lambda (fmt &rest args) (push (apply #'format fmt args) said))))
             (agent-repl-send-held-now))
           (should-not (cl-some (lambda (m) (string-match-p "send now:" m)) said)))))))
+
+(defun agent-repl-test-input--control-return (text turn answer)
+  "Press `C-RET' over TEXT in the composer, with TURN last sent and ANSWER to its release.
+TURN nil means no prompt was sent from the composer.  Answer a plist:
+:requests the release requests, :sent the workspaces `agent-repl-send'
+was called for, :said the echo-area messages, :text the composer after."
+  (let ((sent nil) (said nil) out)
+    (agent-repl-test-input--with
+      (agent-repl-test-input--with-release answer
+        (with-current-buffer agent-repl-test-input--buffer
+          (insert text)
+          (when turn
+            (agent-repl--input-remember-sent-turn (agent-repl--ws-current-name) turn))
+          (cl-letf (((symbol-function 'agent-repl-send) (lambda (&optional ws) (push ws sent)))
+                    ((symbol-function 'agent-repl-host-standing-ask) #'ignore)
+                    ((symbol-function 'message)
+                     (lambda (fmt &rest args) (push (apply #'format fmt args) said))))
+            (agent-repl-input-control-return))
+          (setq out (list :requests agent-repl-test-input--release-requests
+                          :sent sent :said said :text (buffer-string)
+                          :ws (agent-repl--ws-current-name))))))
+    out))
+
+(ert-deftest agent-repl-test-input-control-return-with-text-and-a-held-prompt-sends-it-and-keeps-the-text ()
+  "Text in the composer and a held prompt: the held prompt goes now, the text stays."
+  (let ((got (agent-repl-test-input--control-return "half written" '(:value "t1") '(:success))))
+    (should (= (length (plist-get got :requests)) 1))
+    (should-not (plist-get got :sent))
+    (should (equal (plist-get got :text) "half written"))))
+
+(ert-deftest agent-repl-test-input-control-return-with-an-empty-composer-and-a-held-prompt-sends-it ()
+  "An empty composer and a held prompt: the held prompt goes now."
+  (let ((got (agent-repl-test-input--control-return "" '(:value "t1") '(:success))))
+    (should (= (length (plist-get got :requests)) 1))
+    (should-not (plist-get got :sent))))
+
+(ert-deftest agent-repl-test-input-control-return-with-text-and-no-held-prompt-sends-the-text ()
+  "Text in the composer and no held prompt: the text is sent as `RET' sends it."
+  (dolist (case '((nil (:success))
+                  ((:value "t1") (:error :cause (:arm :no-such-hold :value nil)))
+                  ((:value "t1") (:error :cause (:arm :already-delivered :value nil)))))
+    (pcase-let* ((`(,turn ,answer) case)
+                 (got (agent-repl-test-input--control-return "send me" turn answer)))
+      (should (equal (plist-get got :sent) (list (plist-get got :ws))))
+      (should-not (cl-some (lambda (m) (string-match-p "send now:" m)) (plist-get got :said))))))
+
+(ert-deftest agent-repl-test-input-control-return-with-nothing-typed-or-held-sends-nothing ()
+  "An empty composer and no held prompt: nothing is sent, and the echo area says so."
+  (dolist (case '((nil (:success))
+                  ((:value "t1") (:error :cause (:arm :already-delivered :value nil)))))
+    (pcase-let* ((`(,turn ,answer) case)
+                 (got (agent-repl-test-input--control-return "" turn answer)))
+      (should-not (plist-get got :sent))
+      (should (cl-some (lambda (m) (string-match-p "no held prompt to send now" m)) (plist-get got :said))))))
+
+(ert-deftest agent-repl-test-input-control-return-keeps-the-text-when-the-release-is-refused-otherwise ()
+  "A refusal that is not `no longer held' is said, and the composer's text is not sent."
+  (let ((got (agent-repl-test-input--control-return
+              "keep me" '(:value "t1") '(:error :cause (:arm :being-delivered :value nil)))))
+    (should-not (plist-get got :sent))
+    (should (equal (plist-get got :text) "keep me"))
+    (should (cl-some (lambda (m) (string-match-p "being delivered" m)) (plist-get got :said)))))
+
+(ert-deftest agent-repl-test-input-control-return-send-skips-a-composer-changed-since-the-press ()
+  "A composer edited between `C-RET' and the daemon's answer is not sent."
+  (agent-repl-test-input--with
+    (with-current-buffer agent-repl-test-input--buffer
+      (insert "first")
+      (let ((tick (buffer-chars-modified-tick)) (sent nil) (said nil) (logged nil))
+        (insert " and more")
+        (cl-letf (((symbol-function 'agent-repl-send) (lambda (&optional ws) (push ws sent)))
+                  ((symbol-function 'agent-repl--info) (agent-repl-test--record-into logged))
+                  ((symbol-function 'message)
+                   (lambda (fmt &rest args) (push (apply #'format fmt args) said))))
+          (agent-repl--input-send-if-unchanged "w" (current-buffer) tick))
+        (should-not sent)
+        (should (cl-some (lambda (m) (string-match-p "composer changed" m)) said))
+        (should (cl-some (lambda (m) (string-match-p "control-return-send ws=w outcome=composer-changed" m)) logged))))))
+
+(ert-deftest agent-repl-test-input-control-return-send-skips-a-composer-gone-since-the-press ()
+  "A composer killed between `C-RET' and the daemon's answer sends nothing."
+  (let ((buf (generate-new-buffer " *dead-composer*")) (sent nil) (logged nil))
+    (kill-buffer buf)
+    (cl-letf (((symbol-function 'agent-repl-send) (lambda (&optional ws) (push ws sent)))
+              ((symbol-function 'agent-repl--info) (agent-repl-test--record-into logged)))
+      (agent-repl--input-send-if-unchanged "w" buf 0))
+    (should-not sent)
+    (should (cl-some (lambda (m) (string-match-p "outcome=composer-gone" m)) logged))))
 
 (ert-deftest agent-repl-test-input-only-a-composer-send-is-remembered ()
   "A minted turn from the composer is remembered, one from a canned send is not."

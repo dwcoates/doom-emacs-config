@@ -2264,10 +2264,11 @@ Returns the submission's idempotency key, or nil when nothing was sent."
 ;; and durable precisely so a stored turn names the editor situation that
 ;; produced it.
 
-(defun agent-repl-send ()
-  "Submit the composer's contents (`PROMPT_ORIGIN_USER_SENT')."
+(defun agent-repl-send (&optional ws)
+  "Submit WS's composer contents (`PROMPT_ORIGIN_USER_SENT').
+WS defaults to the current workspace."
   (interactive)
-  (agent-repl--send :user-sent))
+  (agent-repl--send :user-sent nil ws))
 
 (defun agent-repl-send-and-hide ()
   "Submit the composer's contents and hide both panels."
@@ -2489,18 +2490,31 @@ typed and never one a canned command or a queue re-drive composed.")
     (:release-refused "the daemon will not send that prompt now")
     (arm (format "refused (%s)" arm))))
 
-(defun agent-repl-send-held-now ()
+(defconst agent-repl--input-not-held-arms '(:no-such-hold :already-delivered)
+  "The release refusals that say the prompt is no longer held.
+`C-RET' reads either one as no held prompt to send now, and sends the
+composer's text as `RET' would.")
+
+(defun agent-repl-send-held-now (&optional on-not-held)
   "Send now the composer's most recently sent held prompt.
 The composer is never read, cleared or altered: text standing in it stays
 where it is and is not sent.  The daemon answers `already delivered' or
-`no such hold' when the prompt is no longer held, said in the echo area."
+`no such hold' when the prompt is no longer held, said in the echo area.
+
+ON-NOT-HELD, when given, is called instead of saying so whenever there
+is no held prompt to send: none was sent from this composer, or the
+daemon answers one of `agent-repl--input-not-held-arms'."
   (interactive)
   (let* ((ws (agent-repl--ws-current-name))
          (turn (gethash ws agent-repl--input-last-sent-turns)))
-    (if (null turn)
-        (progn
-          (agent-repl--info ws "elisp.input.send-held-now ws=%s outcome=nothing-sent" ws)
-          (message "agent-repl: no prompt sent from this composer to send now"))
+    (cond
+     ((and (null turn) on-not-held)
+      (agent-repl--info ws "elisp.input.send-held-now ws=%s outcome=nothing-held" ws)
+      (funcall on-not-held))
+     ((null turn)
+      (agent-repl--info ws "elisp.input.send-held-now ws=%s outcome=nothing-sent" ws)
+      (message "agent-repl: no prompt sent from this composer to send now"))
+     (t
       (agent-repl--info ws "elisp.input.send-held-now ws=%s turn=%s" ws (plist-get turn :value))
       (agent-repl-verbs--send
        #'agent-repl-rpc-update-held-prompt (agent-repl-verbs--conn ws)
@@ -2513,24 +2527,54 @@ where it is and is not sent.  The daemon answers `already delivered' or
                            ws (plist-get turn :value)))
        :on-error
        (lambda (value)
-         (if (memq (plist-get (plist-get value :cause) :arm) agent-repl--input-handover-arms)
-             nil
-           (agent-repl--info ws "elisp.input.send-held-now-refused ws=%s turn=%s cause=%S"
-                             ws (plist-get turn :value) (plist-get value :cause))
-           (message "agent-repl: send now: %s" (agent-repl--input-release-refusal-text value))
-           t))))))
+         (let ((arm (plist-get (plist-get value :cause) :arm)))
+           (cond
+            ((memq arm agent-repl--input-handover-arms) nil)
+            ((and on-not-held (memq arm agent-repl--input-not-held-arms))
+             (agent-repl--info ws "elisp.input.send-held-now-not-held ws=%s turn=%s cause=%S"
+                               ws (plist-get turn :value) arm)
+             (funcall on-not-held)
+             t)
+            (t
+             (agent-repl--info ws "elisp.input.send-held-now-refused ws=%s turn=%s cause=%S"
+                               ws (plist-get turn :value) (plist-get value :cause))
+             (message "agent-repl: send now: %s" (agent-repl--input-release-refusal-text value))
+             t)))))))))
+
+(defun agent-repl--input-send-if-unchanged (ws buf tick)
+  "Send WS's composer BUF as `RET' would, when it still stands at TICK.
+TICK is BUF's `buffer-chars-modified-tick' when `C-RET' was pressed, so
+only the text the person saw is sent: a composer changed since, or gone,
+is left as it is and said so.  A blank composer sends nothing."
+  (cond
+   ((not (buffer-live-p buf))
+    (agent-repl--info ws "elisp.input.control-return-send ws=%s outcome=composer-gone" ws))
+   ((/= tick (buffer-chars-modified-tick buf))
+    (agent-repl--info ws "elisp.input.control-return-send ws=%s outcome=composer-changed" ws)
+    (message "agent-repl: the composer changed before it could be sent; nothing was sent"))
+   ((with-current-buffer buf (agent-repl--input-composer-blank-p))
+    (agent-repl--info ws "elisp.input.control-return-send ws=%s outcome=nothing-held-or-typed" ws)
+    (message "agent-repl: no held prompt to send now"))
+   (t
+    (agent-repl--info ws "elisp.input.control-return-send ws=%s outcome=sent" ws)
+    (agent-repl-send ws))))
 
 (defun agent-repl-input-control-return ()
-  "Confirm a standing multi-select from an empty composer, else send held now.
-`C-RET' finalizes the ticks a multi-select question was given by number;
-with no multi-select standing, or with text in the composer, it is
-`agent-repl-send-held-now' (the composer's text is untouched)."
+  "Confirm a standing multi-select, else send the held prompt or the composer.
+`C-RET' finalizes the ticks a multi-select question was given by number,
+from an empty composer.  Otherwise it is `agent-repl-send-held-now': with
+a held prompt standing, that prompt is sent now and the composer's text
+is untouched.  With none held, the composer's text is sent as `RET'
+sends it, and an empty composer sends nothing."
   (interactive)
   (let* ((ws (agent-repl--ws-current-name))
          (confirm (agent-repl--input-confirm-choice ws)))
     (if confirm
         (agent-repl--input-answer-choice ws confirm)
-      (agent-repl-send-held-now))))
+      (let ((buf (current-buffer))
+            (tick (buffer-chars-modified-tick)))
+        (agent-repl-send-held-now
+         (lambda () (agent-repl--input-send-if-unchanged ws buf tick)))))))
 
 ;;;; ---- Keybindings -----------------------------------------------------
 

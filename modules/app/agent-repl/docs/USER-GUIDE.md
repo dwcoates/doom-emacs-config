@@ -416,8 +416,11 @@ While the agent waits on a question or a permission card, type the choice's numb
 - **On a multi-select question, the number ticks or unticks that option.**
   - `C-RET` in the empty input window confirms the ticks.
 - **Otherwise `C-RET` is "Send now" for the prompt you last sent from the input window.**
-  - It releases that prompt if it is still held, and says so if it was already delivered.
-  - Text in the input window is not sent, cleared, or changed.
+  - It releases that prompt if it is still held.
+    - Text in the input window is not sent, cleared, or changed.
+  - With no held prompt to release, the text in the input window is sent as `RET` sends it.
+    - Text edited before the daemon answers is not sent, and the echo area says so.
+    - With the input window empty, nothing is sent.
 - **A number is typed as usual when it cannot be an answer.**
   - This covers text already in the input window, a number the card has no choice for, `0`, and no card waiting.
 - **Typed text is still an answer.**
