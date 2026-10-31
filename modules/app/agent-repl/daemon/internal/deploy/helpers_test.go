@@ -82,6 +82,7 @@ func (a artifacts) stageInto(t *testing.T, staging string) {
 	writeFile(t, filepath.Join(s.WebappDist(), "assets", "index-"+a.webappEntry+".js"), "bundle "+a.webappEntry)
 	writeFile(t, s.DaemonBin(), a.daemon)
 	writeFile(t, s.CacheBin(buildreport.ServiceStore), a.store)
+	writeFile(t, filepath.Join(filepath.Dir(s.CacheBin(buildreport.ServiceStore)), ".shim-store.source-tree"), "tree-"+a.store)
 	writeFile(t, s.CacheBin(buildreport.ServiceSidecar), a.sidecar)
 	writeFile(t, s.CacheBin(buildreport.ServiceZettel), a.zettel)
 	writeFile(t, s.CacheBin("shim-lock"), a.lock)

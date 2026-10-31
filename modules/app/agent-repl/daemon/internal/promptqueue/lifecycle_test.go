@@ -735,10 +735,12 @@ func TestOnTurnEndedTellsTheFooterTheTurnsClose(t *testing.T) {
 	cases := []struct {
 		name string
 		how  wsm.TurnClose
+		want wsm.TurnClose
 	}{
-		{name: "a completion", how: wsm.CloseCompleted},
-		{name: "a failure", how: wsm.CloseFailed},
-		{name: "the agent process dying", how: wsm.CloseAgentDied},
+		{name: "a completion", how: wsm.CloseCompleted, want: wsm.CloseCompleted},
+		{name: "a failure", how: wsm.CloseFailed, want: wsm.CloseFailed},
+		// A shim's death cut the turn: it reads interrupted (resumeShimCrash).
+		{name: "the agent process dying", how: wsm.CloseAgentDied, want: wsm.CloseKilled},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -751,8 +753,44 @@ func TestOnTurnEndedTellsTheFooterTheTurnsClose(t *testing.T) {
 			h.q.OnTurnEnded(theWorkspace, "running-turn", tc.how)
 
 			// Assert
-			if got := h.footer.turnEnds(); len(got) != 1 || got[0] != tc.how {
-				t.Fatalf("footer closes = %v, want exactly [%s]", got, tc.how)
+			if got := h.footer.turnEnds(); len(got) != 1 || got[0] != tc.want {
+				t.Fatalf("footer closes = %v, want exactly [%s]", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestOnTurnEndedForAShimDeath(t *testing.T) {
+	tests := []struct {
+		name      string
+		origin    conversationv1.PromptOrigin
+		wantClose wsm.TurnClose
+		wantOwed  bool
+	}{
+		{name: "an ordinary turn ends interrupted and is owed its resumption",
+			origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT, wantClose: wsm.CloseKilled, wantOwed: true},
+		{name: "a resumption that dies is not resumed again",
+			origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_RESUME_AFTER_RESTART, wantClose: wsm.CloseAgentDied, wantOwed: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			running(t, h, "running-turn", "the running work")
+			h.db.mu.Lock()
+			h.db.turns["running-turn"].Origin = tc.origin.String()
+			h.db.mu.Unlock()
+			h.watcher.idle()
+
+			// Act
+			h.q.OnTurnEnded(theWorkspace, "running-turn", wsm.CloseAgentDied)
+
+			// Assert
+			if got := h.db.closedTurns["running-turn"]; got != tc.wantClose {
+				t.Fatalf("durable close = %s, want %s", got, tc.wantClose)
+			}
+			if got := h.db.owed[theWorkspace]["running-turn"]; got != tc.wantOwed {
+				t.Fatalf("owed = %v, want %v", got, tc.wantOwed)
 			}
 		})
 	}

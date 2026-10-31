@@ -69,6 +69,7 @@ func (q *queue) OnTurnEnded(ws ids.WorkspaceID, turn ids.TurnID, how sessionwatc
 	if how.Failed() && len(folded) > 0 {
 		defer q.resubmitFolded(ws, turn, folded, log)
 	}
+	how = q.resumeShimCrash(ctx, ws, turn, how, log)
 
 	d := q.lockDelivery(ws)
 	defer d.unlock()
