@@ -1238,6 +1238,34 @@ func (s *server) SetSessionEffort(ctx context.Context, req *connect.Request[shim
 	}), nil
 }
 
+// FakeBridgeSessionID is the claude.ai session the fake's bridge answers when
+// asked for a new one: deterministic, so a test can assert the daemon kept it
+// and handed it back on the next shim's request.
+const FakeBridgeSessionID = "fakeshim-bridge-session"
+
+// SetSessionRemoteControl answers success in the state asked for: an on re-binds
+// the bridge session it names, or answers FakeBridgeSessionID; an off answers
+// none. The fake has no vendor to refuse it, so a test that needs a refusal
+// scripts one (`answer`).
+func (s *server) SetSessionRemoteControl(ctx context.Context, req *connect.Request[shimv1.SetSessionRemoteControlRequest]) (*connect.Response[shimv1.SetSessionRemoteControlResponse], error) {
+	if err := s.enter(ctx, RPCSetSessionRemoteControl, req.Msg); err != nil {
+		return nil, err
+	}
+	if resp, done, err := scripted[shimv1.SetSessionRemoteControlResponse, *shimv1.SetSessionRemoteControlResponse](s, RPCSetSessionRemoteControl); done {
+		return resp, err
+	}
+	success := &shimv1.SetSessionRemoteControlSuccess{Enabled: req.Msg.GetEnabled()}
+	if req.Msg.GetEnabled() {
+		success.BridgeSessionId = FakeBridgeSessionID
+		if reattach := req.Msg.GetReattachBridgeSessionId(); reattach != "" {
+			success.BridgeSessionId = reattach
+		}
+	}
+	return connect.NewResponse(&shimv1.SetSessionRemoteControlResponse{
+		Result: &shimv1.SetSessionRemoteControlResponse_Success{Success: success},
+	}), nil
+}
+
 func (s *server) SetSessionPermissionMode(ctx context.Context, req *connect.Request[shimv1.SetSessionPermissionModeRequest]) (*connect.Response[shimv1.SetSessionPermissionModeResponse], error) {
 	if err := s.enter(ctx, RPCSetSessionPermissionMode, req.Msg); err != nil {
 		return nil, err

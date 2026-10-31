@@ -13,6 +13,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/resolve/footer"
+	"agent-repld/internal/sessionwatcher"
 	"agent-repld/internal/wsm"
 )
 
@@ -419,13 +420,19 @@ func TestOnTurnsEndedUnobservedRecordsAFailedCloseAndClosesTheRest(t *testing.T)
 // THE ADOPTED TURN. A turn the vendor started on its own is recorded exactly as
 // a delivered turn is, so its end closes through the one door.
 
+// vendorStartedTurn is a turn the vendor started on its own, as the watcher
+// hands it over: its origin, and no words.
+var vendorStartedTurn = sessionwatcher.AdoptedTurn{
+	Turn: "vendor-turn", Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_VENDOR_STARTED,
+}
+
 // TestOnTurnAdoptedRecordsTheTurnsDurableRow covers the row: written open, with
 // the vendor-started origin.
 func TestOnTurnAdoptedRecordsTheTurnsDurableRow(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	// Act
-	h.q.OnTurnAdopted(theWorkspace, "vendor-turn")
+	h.q.OnTurnAdopted(theWorkspace, vendorStartedTurn)
 	// Assert
 	got, ok := h.db.turns["vendor-turn"]
 	if !ok {
@@ -442,7 +449,7 @@ func TestOnTurnAdoptedGivesTheFooterTheTurn(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	// Act
-	h.q.OnTurnAdopted(theWorkspace, "vendor-turn")
+	h.q.OnTurnAdopted(theWorkspace, vendorStartedTurn)
 	// Assert
 	turns := h.footer.startedTurns()
 	if len(turns) != 1 || turns[0] == nil || turns[0].Act != footer.ActPrompt {
@@ -456,7 +463,7 @@ func TestOnTurnAdoptedGivesTheRosterTheTurn(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	// Act
-	h.q.OnTurnAdopted(theWorkspace, "vendor-turn")
+	h.q.OnTurnAdopted(theWorkspace, vendorStartedTurn)
 	// Assert
 	turns := h.sidebar.rosterTurns()
 	if len(turns) != 1 || turns[0] == nil || turns[0].Act != footer.ActPrompt {
@@ -471,7 +478,7 @@ func TestOnTurnAdoptedIsRecordedAtInfo(t *testing.T) {
 	h := newHarness(t)
 	beforeRecords := len(h.log.Records())
 	// Act
-	h.q.OnTurnAdopted(theWorkspace, "vendor-turn")
+	h.q.OnTurnAdopted(theWorkspace, vendorStartedTurn)
 	// Assert
 	for _, record := range h.log.Records()[beforeRecords:] {
 		if record.Level == "info" && record.Operation == "daemon.promptqueue.turn_adopted" && record.Context["turn"] == "vendor-turn" {
@@ -489,7 +496,7 @@ func TestOnTurnAdoptedDeliversNothing(t *testing.T) {
 	running(t, h, "vendor-turn", "")
 	heldPrompt(t, h, "t1", classifier.Verdict{Route: classifier.RouteQueue, Reason: "independent"})
 	// Act
-	h.q.OnTurnAdopted(theWorkspace, "vendor-turn")
+	h.q.OnTurnAdopted(theWorkspace, vendorStartedTurn)
 	// Assert
 	if started := h.sender.started(); len(started) != 0 {
 		t.Fatalf("started = %v after the adoption, want nothing delivered", started)
@@ -504,7 +511,7 @@ func TestOnTurnAdoptedRecordsAFailedRowWriteAtError(t *testing.T) {
 	h.db.putTurnErr = errors.New("the store is down")
 	beforeRecords := len(h.log.Records())
 	// Act
-	h.q.OnTurnAdopted(theWorkspace, "vendor-turn")
+	h.q.OnTurnAdopted(theWorkspace, vendorStartedTurn)
 	// Assert
 	for _, record := range h.log.Records()[beforeRecords:] {
 		if record.Level == "error" && record.Operation == "daemon.promptqueue.turn_adopted" {
@@ -522,7 +529,7 @@ func TestOnTurnAdoptedStillGivesTheRosterTheTurnWhenTheRowWriteFails(t *testing.
 	h := newHarness(t)
 	h.db.putTurnErr = errors.New("the store is down")
 	// Act
-	h.q.OnTurnAdopted(theWorkspace, "vendor-turn")
+	h.q.OnTurnAdopted(theWorkspace, vendorStartedTurn)
 	// Assert
 	if turns := h.sidebar.rosterTurns(); len(turns) != 1 || turns[0] == nil {
 		t.Fatalf("roster turns = %v, want the adopted turn installed", turns)
@@ -885,5 +892,50 @@ func TestOnTurnEndedStillRaisesItsBannerWhenAnotherTurnAskedForAMerge(t *testing
 	// Assert
 	if got := h.banners.raised(); len(got) != 1 || got[0].Turn != "plain-turn" {
 		t.Fatalf("banners = %+v, want the plain turn's", got)
+	}
+}
+
+// TestOnTurnAdoptedRecordsARemoteControlTurnAsSaid covers a turn a claude.ai
+// prompt started: its row carries the remote-control origin and the words.
+func TestOnTurnAdoptedRecordsARemoteControlTurnAsSaid(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	adopted := sessionwatcher.AdoptedTurn{
+		Turn: "remote-turn", Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_REMOTE_CONTROL,
+		Said: &conversationv1.UserSaid{Content: &conversationv1.UserContent{Blocks: []*conversationv1.UserContentBlock{{
+			Block: &conversationv1.UserContentBlock_Text{Text: &conversationv1.TextBlock{Text: "fix the build"}},
+		}}}},
+	}
+
+	// Act
+	h.q.OnTurnAdopted(theWorkspace, adopted)
+
+	// Assert
+	got, ok := h.db.turns["remote-turn"]
+	if !ok || got.Origin != conversationv1.PromptOrigin_PROMPT_ORIGIN_REMOTE_CONTROL.String() || got.Text != "fix the build" {
+		t.Fatalf("row = %+v (written %v), want the remote-control origin and its words", got, ok)
+	}
+}
+
+func TestAdoptedOrigin(t *testing.T) {
+	tests := []struct {
+		name   string
+		origin conversationv1.PromptOrigin
+		want   conversationv1.PromptOrigin
+	}{
+		{"a vendor-started turn keeps its origin", conversationv1.PromptOrigin_PROMPT_ORIGIN_VENDOR_STARTED, conversationv1.PromptOrigin_PROMPT_ORIGIN_VENDOR_STARTED},
+		{"a remote-control turn keeps its origin", conversationv1.PromptOrigin_PROMPT_ORIGIN_REMOTE_CONTROL, conversationv1.PromptOrigin_PROMPT_ORIGIN_REMOTE_CONTROL},
+		{"an origin no adoption names reads as vendor-started", conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, conversationv1.PromptOrigin_PROMPT_ORIGIN_VENDOR_STARTED},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := adoptedOrigin(tt.origin)
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("adoptedOrigin(%s) = %s, want %s", tt.origin, got, tt.want)
+			}
+		})
 	}
 }

@@ -145,6 +145,7 @@ const (
 	RPCSetSessionModel          = "SetSessionModel"
 	RPCSetSessionPermissionMode = "SetSessionPermissionMode"
 	RPCSetSessionEffort         = "SetSessionEffort"
+	RPCSetSessionRemoteControl  = "SetSessionRemoteControl"
 	RPCHibernate                = "Hibernate"
 	RPCSendKeepalive            = "SendKeepalive"
 	RPCKillSession              = "KillSession"
@@ -818,6 +819,21 @@ func (s *ShimControl) ExpectSetSessionPermissionMode() *shimv1.SetSessionPermiss
 	s.t.Helper()
 	msg := &shimv1.SetSessionPermissionModeRequest{}
 	s.expect(RPCSetSessionPermissionMode, msg)
+	return msg
+}
+
+// FakeBridgeSessionID is the claude.ai session the fake shim's bridge answers
+// an on that re-binds nothing with (integration/fakeshim FakeBridgeSessionID,
+// which a test cannot import from a main package): a test asserts the daemon
+// kept it by seeing it handed back as the next on's re-bind.
+const FakeBridgeSessionID = "fakeshim-bridge-session"
+
+// ExpectSetSessionRemoteControl pops the next SetSessionRemoteControl: the
+// daemon put a workspace's remote-control mode in force on its shim.
+func (s *ShimControl) ExpectSetSessionRemoteControl() *shimv1.SetSessionRemoteControlRequest {
+	s.t.Helper()
+	msg := &shimv1.SetSessionRemoteControlRequest{}
+	s.expect(RPCSetSessionRemoteControl, msg)
 	return msg
 }
 

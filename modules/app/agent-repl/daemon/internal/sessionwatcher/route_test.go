@@ -2610,7 +2610,7 @@ func TestAnAdoptionIsHandedOverBeforeATurnEndOnTheSameFlush(t *testing.T) {
 	// Act.
 	got := h.routeNow(func(w *watcher) {
 		w.pendingTurnEnds = append(w.pendingTurnEnds, endedTurn{turn: "turn-v", how: wsm.CloseCompleted})
-		w.pendingAdoptions = append(w.pendingAdoptions, ids.TurnID("turn-v"))
+		w.pendingAdoptions = append(w.pendingAdoptions, AdoptedTurn{Turn: "turn-v", Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_VENDOR_STARTED})
 	})
 
 	// Assert.
@@ -3561,5 +3561,74 @@ func TestAWithdrawalOfATurnNeverHeldEndsNothing(t *testing.T) {
 	}
 	if turn := h.w.TurnInFlight(); turn == nil || *turn != "turn-1" {
 		t.Fatalf("turn in flight = %v, want turn-1 untouched", turn)
+	}
+}
+
+// remoteControlPrompt is the prompt row the shim adopts a claude.ai prompt's
+// turn with: a turn no queue delivered, and the words the user typed there.
+func remoteControlPrompt(turn, agent, text string) *shimv1.WatchAgentResponse {
+	prompt := vendorPrompt(turn, agent)
+	prompt.Origin = conversationv1.PromptOrigin_PROMPT_ORIGIN_REMOTE_CONTROL
+	prompt.Said = &conversationv1.UserSaid{Content: &conversationv1.UserContent{Blocks: []*conversationv1.UserContentBlock{{
+		Block: &conversationv1.UserContentBlock_Text{Text: &conversationv1.TextBlock{Text: text}},
+	}}}}
+	return &shimv1.WatchAgentResponse{Frame: &shimv1.WatchAgentResponse_Entry{
+		Entry: &conversationv1.HistoryEntryAt{
+			At:    &conversationv1.HistoryPointer{Value: "ptr-" + turn},
+			Entry: &conversationv1.HistoryEntry{Entry: &conversationv1.HistoryEntry_UserPrompt{UserPrompt: prompt}},
+		},
+	}}
+}
+
+func TestARemoteControlPromptStandsItsTurnInFlight(t *testing.T) {
+	// Arrange.
+	h := adoptionHarness(t)
+
+	// Act.
+	h.route(h.main, remoteControlPrompt("turn-r", "main-1", "fix the build"))
+
+	// Assert.
+	if turn := h.w.TurnInFlight(); turn == nil || *turn != "turn-r" {
+		t.Fatalf("turn in flight = %v, want turn-r", turn)
+	}
+}
+
+func TestARemoteControlPromptTellsEveryTurnOpenObserver(t *testing.T) {
+	// Arrange.
+	h := adoptionHarness(t)
+
+	// Act.
+	got := h.route(h.main, remoteControlPrompt("turn-r", "main-1", "fix the build"))
+
+	// Assert.
+	assertNames(t, got, []string{"footer.OnTurnOpened", "feed.OnTurnOpened", "feed.OnPrompt", "lifecycle.OnTurnAdopted"})
+}
+
+func TestARemoteControlAdoptionCarriesItsOriginAndWords(t *testing.T) {
+	// Arrange.
+	h := adoptionHarness(t)
+
+	// Act.
+	got := h.route(h.main, remoteControlPrompt("turn-r", "main-1", "fix the build"))
+
+	// Assert.
+	adopted := requireEvent(t, got, "lifecycle.OnTurnAdopted").adopted
+	if adopted == nil || adopted.Origin != conversationv1.PromptOrigin_PROMPT_ORIGIN_REMOTE_CONTROL ||
+		adopted.Said.GetContent().GetBlocks()[0].GetText().GetText() != "fix the build" {
+		t.Fatalf("adopted = %+v, want the remote-control origin and its words", adopted)
+	}
+}
+
+func TestAVendorStartedAdoptionCarriesItsOrigin(t *testing.T) {
+	// Arrange.
+	h := adoptionHarness(t)
+
+	// Act.
+	got := h.route(h.main, entryVendorPrompt("turn-v", "main-1"))
+
+	// Assert.
+	adopted := requireEvent(t, got, "lifecycle.OnTurnAdopted").adopted
+	if adopted == nil || adopted.Origin != conversationv1.PromptOrigin_PROMPT_ORIGIN_VENDOR_STARTED || adopted.Said != nil {
+		t.Fatalf("adopted = %+v, want the vendor-started origin and no words", adopted)
 	}
 }

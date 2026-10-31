@@ -15,7 +15,7 @@ func TestTheTurnEdgesAreToldWhereTheyHappen(t *testing.T) {
 		want []string
 	}{
 		{name: "a vendor-started turn the shim took is a start", act: func(_ *testing.T, h *harness) {
-			h.q.OnTurnAdopted(theWorkspace, "vendor-turn")
+			h.q.OnTurnAdopted(theWorkspace, vendorStartedTurn)
 		}, want: []string{"started:" + string(theWorkspace)}},
 		{name: "a turn closing is an end", act: func(t *testing.T, h *harness) {
 			running(t, h, "running-turn", "the running work")

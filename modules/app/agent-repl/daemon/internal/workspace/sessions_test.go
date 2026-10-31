@@ -62,6 +62,15 @@ type fakeClient struct {
 	efforts        []*shimv1.SetSessionEffortRequest
 	effortResponse *shimv1.SetSessionEffortResponse
 	effortErr      error
+	// remoteControls is every SetSessionRemoteControl asked;
+	// remoteControlResponse and remoteControlErr script the answer (a nil
+	// response confirms the state asked for, re-binding the bridge named or
+	// answering "bridge-new").
+	remoteControls        []*shimv1.SetSessionRemoteControlRequest
+	remoteControlResponse *shimv1.SetSessionRemoteControlResponse
+	remoteControlErr      error
+	// onRemoteControl, when set, runs as each SetSessionRemoteControl is asked.
+	onRemoteControl func()
 
 	// detached counts Detach calls: the link let go, the process left running.
 	detached int
@@ -322,6 +331,24 @@ func (c *fakeClient) SetSessionEffort(_ context.Context, req *shimv1.SetSessionE
 			EffortChanged: &conversationv1.SessionEffortChanged{EffectiveEffort: req.GetEffort()},
 		},
 	}}, nil
+}
+
+func (c *fakeClient) SetSessionRemoteControl(_ context.Context, req *shimv1.SetSessionRemoteControlRequest) (*shimv1.SetSessionRemoteControlResponse, error) {
+	c.remoteControls = append(c.remoteControls, req)
+	if c.onRemoteControl != nil {
+		c.onRemoteControl()
+	}
+	if c.remoteControlErr != nil || c.remoteControlResponse != nil {
+		return c.remoteControlResponse, c.remoteControlErr
+	}
+	success := &shimv1.SetSessionRemoteControlSuccess{Enabled: req.GetEnabled()}
+	if req.GetEnabled() {
+		success.BridgeSessionId = "bridge-new"
+		if req.ReattachBridgeSessionId != nil {
+			success.BridgeSessionId = req.GetReattachBridgeSessionId()
+		}
+	}
+	return &shimv1.SetSessionRemoteControlResponse{Result: &shimv1.SetSessionRemoteControlResponse_Success{Success: success}}, nil
 }
 
 func (c *fakeClient) Kill(_ context.Context, attr shimclient.KillAttribution) error {
@@ -665,11 +692,13 @@ type fleetFixture struct {
 	// topbarWarnings every warning line the fleet raised on the strip.
 	picked         conversationv1.AgentEffortLevel
 	topbarWarnings []string
-	log            *fakeSurfaces
-	watcher        *fakeWatcher
-	links          *recordingLinkSink
-	probeState     sessionlock.State
-	probeErr       error
+	// topbarRemote is every remote-control mode the fleet stated to the strip.
+	topbarRemote []bool
+	log          *fakeSurfaces
+	watcher      *fakeWatcher
+	links        *recordingLinkSink
+	probeState   sessionlock.State
+	probeErr     error
 	// socketState and socketErr script the shim-socket listener probe, which
 	// decides adopt-versus-spawn beside the lock.
 	socketState shimsocket.State
@@ -813,7 +842,7 @@ func newFleetFixtureBoundedAt(t *testing.T, adoptBound time.Duration) *fleetFixt
 			return make(chan struct{})
 		},
 		DB: f.db, Instance: fixtureInstance, Accounts: f.accounts, Supervisor: f.supervisor, ShimBundle: f.bundle,
-		Feed: f.feed, Footer: f.footer, Topbar: stubTopbar{coldGates: &f.topbarGates, picked: &f.picked, warnings: &f.topbarWarnings, window: &f.topbarWindow}, Log: f.log,
+		Feed: f.feed, Footer: f.footer, Topbar: stubTopbar{coldGates: &f.topbarGates, picked: &f.picked, warnings: &f.topbarWarnings, window: &f.topbarWindow, remoteControl: &f.topbarRemote}, Log: f.log,
 		Sinks: sessionwatcher.Sinks{
 			Lifecycle: &quietLifecycle{},
 			Footer:    footerLinkSink{rec: f.links},

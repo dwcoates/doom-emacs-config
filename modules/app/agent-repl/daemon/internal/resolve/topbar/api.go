@@ -84,6 +84,11 @@ type Naming struct {
 	// field of the session line. A daemon fact (the repo-under-root rule
 	// determines it), so it rides the naming rather than any vendor frame.
 	ConfigDir string
+	// RemoteControl is the workspace's effective remote-control mode
+	// (wsm.RemoteControl.On), which the remote-control chip draws. A daemon
+	// fact too, and riding the naming makes the chip as ready as the strip
+	// (remotecontrol.go).
+	RemoteControl bool
 }
 
 // DetachedUnmodeled is one live item of UNMODELED work running detached. It
@@ -164,6 +169,10 @@ type Resolver interface {
 	// (TopbarWorkspaceName), leaving the session line's config dir as it is.
 	// Its sole producer is the workspace verbs, on every SetWorkspaceName.
 	SetName(ws ids.WorkspaceID, name string)
+	// SetRemoteControl replaces the workspace's remote-control mode the chip
+	// draws (TopbarRemoteControl), leaving the rest of the naming as it is.
+	// Its sole producer is the fleet, on every UpdateRemoteControlMode.
+	SetRemoteControl(ws ids.WorkspaceID, on bool)
 	// SetSynthesizedTitle installs the daemon's OWN one-sentence workspace
 	// summary, shown in the title's FIRST precedence: above the vendor's
 	// ai-title and the workspace name. An empty text retracts it. Its sole

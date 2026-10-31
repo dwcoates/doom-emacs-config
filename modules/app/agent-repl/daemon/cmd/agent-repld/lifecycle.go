@@ -271,9 +271,10 @@ func (s *lifecycleSink) reportBuild(ws ids.WorkspaceID, build string) {
 }
 
 // OnTurnAdopted records, through the queue that owns the turn rows, a turn
-// the vendor started on its own.
-func (s *lifecycleSink) OnTurnAdopted(ws ids.WorkspaceID, turn ids.TurnID) {
-	s.queue.OnTurnAdopted(ws, turn)
+// the shim adopted: one the vendor started on its own, or one a claude.ai
+// prompt started.
+func (s *lifecycleSink) OnTurnAdopted(ws ids.WorkspaceID, adopted sessionwatcher.AdoptedTurn) {
+	s.queue.OnTurnAdopted(ws, adopted)
 }
 
 // OnTurnsEndedUnobserved closes, through the queue that owns the turn rows,

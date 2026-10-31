@@ -219,3 +219,22 @@ func TestEveryStoredOriginIsReadByNamed(t *testing.T) {
 		t.Fatalf("these files read a stored origin by hand instead of asking Named: %v", found)
 	}
 }
+
+func TestAdopted(t *testing.T) {
+	adopted := map[conversationv1.PromptOrigin]bool{
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_VENDOR_STARTED: true,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_REMOTE_CONTROL: true,
+	}
+	for value := range conversationv1.PromptOrigin_name {
+		origin := conversationv1.PromptOrigin(value)
+		t.Run(origin.String(), func(t *testing.T) {
+			// Act
+			got := Adopted(origin)
+
+			// Assert
+			if got != adopted[origin] {
+				t.Fatalf("Adopted(%s) = %v, want %v", origin, got, adopted[origin])
+			}
+		})
+	}
+}

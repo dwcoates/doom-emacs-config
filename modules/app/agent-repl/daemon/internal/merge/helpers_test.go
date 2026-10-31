@@ -1753,10 +1753,10 @@ func (q *fakeQueue) ReviveForSettings(context.Context, ids.WorkspaceID) error { 
 func (q *fakeQueue) SubmitSessionAct(context.Context, ids.WorkspaceID, promptqueue.Act) error {
 	return nil
 }
-func (q *fakeQueue) OnTurnEnded(ids.WorkspaceID, ids.TurnID, wsm.TurnClose) {}
-func (q *fakeQueue) OnTurnAdopted(ids.WorkspaceID, ids.TurnID)              {}
-func (q *fakeQueue) OnTurnsEndedUnobserved(ids.WorkspaceID, []ids.TurnID)   {}
-func (q *fakeQueue) Reviving(ids.WorkspaceID) bool                          { return false }
+func (q *fakeQueue) OnTurnEnded(ids.WorkspaceID, ids.TurnID, wsm.TurnClose)    {}
+func (q *fakeQueue) OnTurnAdopted(ids.WorkspaceID, sessionwatcher.AdoptedTurn) {}
+func (q *fakeQueue) OnTurnsEndedUnobserved(ids.WorkspaceID, []ids.TurnID)      {}
+func (q *fakeQueue) Reviving(ids.WorkspaceID) bool                             { return false }
 func (q *fakeQueue) OnLeaseChanged(ws ids.WorkspaceID) {
 	q.db.mu.Lock()
 	lease, held := q.db.leases[ws]

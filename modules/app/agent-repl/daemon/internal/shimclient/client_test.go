@@ -2396,3 +2396,27 @@ func TestNetworkChangedReachesTheShim(t *testing.T) {
 		t.Fatalf("no record under daemon.shimclient.network_changed: %+v", log.Records())
 	}
 }
+
+// TestSetSessionRemoteControlReachesTheShim pins that SetSessionRemoteControl
+// is a unary call on the shim's SetSessionRemoteControl verb, recorded under
+// its own operation.
+func TestSetSessionRemoteControlReachesTheShim(t *testing.T) {
+	// Arrange.
+	f, uds := startFakeShim(t, shortDir(t))
+	log := dlog.NewTestLogger()
+	c := newClient(log, ids.WorkspaceID("ws-1"), uds, defaultBackoff, nil, nil)
+
+	// Act.
+	_, err := c.SetSessionRemoteControl(context.Background(), &shimv1.SetSessionRemoteControlRequest{Enabled: true, Name: "main (doom)"})
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("SetSessionRemoteControl() error = %v", err)
+	}
+	if got := f.count("SetSessionRemoteControl"); got != 1 {
+		t.Fatalf("the shim saw %d SetSessionRemoteControl calls, want 1", got)
+	}
+	if !hasRecordAt(log, "debug", "daemon.shimclient.set_session_remote_control") {
+		t.Fatalf("no record under daemon.shimclient.set_session_remote_control: %+v", log.Records())
+	}
+}

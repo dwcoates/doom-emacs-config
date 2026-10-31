@@ -446,6 +446,51 @@ func TestValidateSetSessionEffortRequestAcceptsANamedLevel(t *testing.T) {
 	}
 }
 
+func TestValidateSetSessionRemoteControlRequestRefuses(t *testing.T) {
+	blank := " "
+	tests := []struct {
+		name  string
+		req   *shimv1.SetSessionRemoteControlRequest
+		field string
+	}{
+		{"a nil request", nil, "SetSessionRemoteControlRequest"},
+		{"an on naming no session", &shimv1.SetSessionRemoteControlRequest{Enabled: true, Name: " "}, "SetSessionRemoteControlRequest.name"},
+		{"an on re-binding a blank bridge session", &shimv1.SetSessionRemoteControlRequest{Enabled: true, Name: "main (doom)", ReattachBridgeSessionId: &blank}, "SetSessionRemoteControlRequest.reattach_bridge_session_id"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: the table. Act.
+			err := validateSetSessionRemoteControlRequest(tt.req)
+
+			// Assert.
+			assertInvalidField(t, err, tt.field)
+		})
+	}
+}
+
+func TestValidateSetSessionRemoteControlRequestAccepts(t *testing.T) {
+	bridge := "bridge-1"
+	tests := []struct {
+		name string
+		req  *shimv1.SetSessionRemoteControlRequest
+	}{
+		{"an on naming its session", &shimv1.SetSessionRemoteControlRequest{Enabled: true, Name: "main (doom)"}},
+		{"an on re-binding a bridge session", &shimv1.SetSessionRemoteControlRequest{Enabled: true, Name: "main (doom)", ReattachBridgeSessionId: &bridge}},
+		{"an off, which names nothing", &shimv1.SetSessionRemoteControlRequest{}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: the table. Act.
+			err := validateSetSessionRemoteControlRequest(tt.req)
+
+			// Assert.
+			if err != nil {
+				t.Errorf("err = %v, want nil", err)
+			}
+		})
+	}
+}
+
 // TestValidateSetSessionPermissionModeRequest asserts the mode a switch names
 // is required.
 func TestValidateSetSessionPermissionModeRequest(t *testing.T) {

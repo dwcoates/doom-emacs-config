@@ -455,6 +455,12 @@ type fakeVerbs struct {
 	setEffort    conversationv1.AgentEffortLevel
 	setEffortErr error
 
+	// remoteChanges is every UpdateRemoteControlMode change, answered with
+	// remoteOn and remoteErr.
+	remoteChanges []wsm.RemoteControlChange
+	remoteOn      bool
+	remoteErr     error
+
 	// retries counts every RetryVendorError, answered with retryResponse and
 	// retryErr.
 	retries       int
@@ -586,6 +592,11 @@ func (f *fakeVerbs) RunCreate(ctx context.Context, ticket *workspace.CreateTicke
 		return wsm.Workspace{}, &workspace.NetworkWaitError{ID: f.createHeld, Evidence: netstate.EvidenceFaultOpen}
 	}
 	return f.Create(ctx, spec)
+}
+
+func (f *fakeVerbs) UpdateRemoteControlMode(_ context.Context, ws ids.WorkspaceID, change wsm.RemoteControlChange) (bool, error) {
+	f.remoteChanges = append(f.remoteChanges, change)
+	return f.remoteOn, f.remoteErr
 }
 
 func (f *fakeVerbs) SetEffort(_ context.Context, _ ids.WorkspaceID, level conversationv1.AgentEffortLevel) error {

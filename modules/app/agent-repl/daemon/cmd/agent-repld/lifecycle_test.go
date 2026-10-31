@@ -102,8 +102,8 @@ type fakeFreeQueue struct {
 	adopted    []string
 }
 
-func (f *fakeFreeQueue) OnTurnAdopted(ws ids.WorkspaceID, turn ids.TurnID) {
-	f.adopted = append(f.adopted, string(ws)+"/"+string(turn))
+func (f *fakeFreeQueue) OnTurnAdopted(ws ids.WorkspaceID, adopted sessionwatcher.AdoptedTurn) {
+	f.adopted = append(f.adopted, string(ws)+"/"+string(adopted.Turn))
 }
 
 func (f *fakeFreeQueue) OnTurnsEndedUnobserved(ws ids.WorkspaceID, turns []ids.TurnID) {
@@ -500,7 +500,7 @@ func TestAVendorStartedTurnTheWatcherAdoptedReachesTheQueue(t *testing.T) {
 	sink := &lifecycleSink{queue: queue, log: dlog.NewTestLogger()}
 
 	// Act
-	sink.OnTurnAdopted("ws-1", "turn-v")
+	sink.OnTurnAdopted("ws-1", sessionwatcher.AdoptedTurn{Turn: "turn-v", Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_VENDOR_STARTED})
 
 	// Assert
 	if len(queue.adopted) != 1 || queue.adopted[0] != "ws-1/turn-v" {

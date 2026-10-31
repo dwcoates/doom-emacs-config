@@ -238,8 +238,12 @@ func causedByDaemonNotice(origin string) bool {
 	return promptorigin.UnseenNamed(origin) || origin == conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_COMPACT.String()
 }
 
-// OnTurnAdopted is the LifecycleSink's vendor-started turn: a turn the vendor
-// ran with no prompt through this queue, which the shim adopted. The queue owns
+// OnTurnAdopted is the LifecycleSink's adopted turn: a turn the vendor ran
+// with no prompt through this queue, which the shim adopted -- one the vendor
+// started on its own, or one a prompt typed on claude.ai started through the
+// Remote Control bridge. Its row carries the origin and the words its prompt
+// row stated, so the conversation's prompts read the claude.ai prompt as said
+// (RecentConversationPrompts). The queue owns
 // the turn rows and the roster's turn fact, so it records both exactly as it
 // does for a turn it delivered -- the durable row first, so the turn's end
 // closes it through the door and draws its ending, then the roster's thinking.
@@ -250,7 +254,8 @@ func causedByDaemonNotice(origin string) bool {
 // the watcher tells this before the same turn's OnTurnEnded on the same flush.
 // A failed durable write is recorded at ERROR, and the roster still takes the
 // turn: it is running whether or not its row was written.
-func (q *queue) OnTurnAdopted(ws ids.WorkspaceID, turn ids.TurnID) {
+func (q *queue) OnTurnAdopted(ws ids.WorkspaceID, adopted sessionwatcher.AdoptedTurn) {
+	turn := adopted.Turn
 	ctx := context.Background()
 	log, err := q.logger(ctx, ws)
 	if err != nil {
@@ -261,11 +266,12 @@ func (q *queue) OnTurnAdopted(ws ids.WorkspaceID, turn ids.TurnID) {
 	record := wsm.Turn{
 		ID:        turn,
 		Workspace: ws,
-		Origin:    conversationv1.PromptOrigin_PROMPT_ORIGIN_VENDOR_STARTED.String(),
+		Text:      saidText(adopted.Said),
+		Origin:    adoptedOrigin(adopted.Origin).String(),
 		StartedAt: at,
 	}
 	if err := q.recordTurn(ctx, record, log); err != nil {
-		log.Error(opTurnAdopted, "could not record the vendor-started turn; its close will find no row", dlog.Context{
+		log.Error(opTurnAdopted, "could not record the adopted turn; its close will find no row", dlog.Context{
 			"cause": err.Error(),
 		})
 	}
@@ -273,7 +279,18 @@ func (q *queue) OnTurnAdopted(ws ids.WorkspaceID, turn ids.TurnID) {
 	// the vendor is already answering, so there is no submitting window.
 	q.setTurn(ws, &footer.TurnStarted{At: at, Act: footer.ActPrompt})
 	q.ackTurn(ws)
-	log.Info(opTurnAdopted, "recorded a turn the vendor started on its own; what is held waits behind it", nil)
+	log.Info(opTurnAdopted, "recorded a turn the shim adopted; what is held waits behind it", dlog.Context{"origin": record.Origin})
+}
+
+// adoptedOrigin is the origin an adopted turn's row records: the one its
+// prompt row stated, and VENDOR_STARTED for a row that stated none an adoption
+// names (promptorigin.Adopted), so no row is ever recorded under an origin
+// that says a queue delivered it.
+func adoptedOrigin(origin conversationv1.PromptOrigin) conversationv1.PromptOrigin {
+	if promptorigin.Adopted(origin) {
+		return origin
+	}
+	return conversationv1.PromptOrigin_PROMPT_ORIGIN_VENDOR_STARTED
 }
 
 // OnTurnsEndedUnobserved is the LifecycleSink's adoption reconciliation: the

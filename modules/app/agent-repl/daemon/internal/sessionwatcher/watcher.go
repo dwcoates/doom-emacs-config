@@ -207,12 +207,13 @@ type watcher struct {
 	// last stated it (a rotation, a re-announced start), not yet handed to the
 	// lifecycle sink, which records it as what a later resume names.
 	pendingVendorSessionID string
-	// pendingAdoptions are the vendor-started turns this watcher stood in
-	// flight and has not yet handed to the lifecycle sink; flushTurnEnds hands
-	// them over ahead of the turn ends.
-	pendingAdoptions []ids.TurnID
-	// adopted is the turn in flight when a VENDOR_STARTED prompt row stood it
-	// there (adoptVendorTurnLocked), nil otherwise.
+	// pendingAdoptions are the adopted turns this watcher stood in flight and
+	// has not yet handed to the lifecycle sink; flushTurnEnds hands them over
+	// ahead of the turn ends.
+	pendingAdoptions []AdoptedTurn
+	// adopted is the turn in flight when an adopted turn's prompt row
+	// (promptorigin.Adopted) stood it there (adoptVendorTurnLocked), nil
+	// otherwise.
 	adopted *ids.TurnID
 	// turnAccepted records that the turn in flight is past its opening: the
 	// queue handed it over (OnTurnOpened), a row or the session's facts stood

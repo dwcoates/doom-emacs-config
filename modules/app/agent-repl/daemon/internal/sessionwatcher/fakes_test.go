@@ -501,6 +501,10 @@ func (c *fakeClient) SetSessionEffort(context.Context, *shimv1.SetSessionEffortR
 	panic("sessionwatcher must not call SetSessionEffort")
 }
 
+func (c *fakeClient) SetSessionRemoteControl(context.Context, *shimv1.SetSessionRemoteControlRequest) (*shimv1.SetSessionRemoteControlResponse, error) {
+	panic("sessionwatcher must not call SetSessionRemoteControl")
+}
+
 func (c *fakeClient) SetSessionPermissionMode(context.Context, *shimv1.SetSessionPermissionModeRequest) (*shimv1.SetSessionPermissionModeResponse, error) {
 	panic("sessionwatcher must not call SetSessionPermissionMode")
 }
@@ -634,6 +638,8 @@ type event struct {
 	boundary string
 	// place is the conversation place an entry-driven feed call carried.
 	place *conversationv1.ConversationPlace
+	// adopted is the adopted turn the lifecycle sink was handed whole.
+	adopted *AdoptedTurn
 }
 
 // name is the "sink.Method" spelling the assertions compare on.
@@ -1059,9 +1065,9 @@ func (s *lifecycleSink) OnTurnEnded(_ ids.WorkspaceID, turn ids.TurnID, how Turn
 	}
 }
 
-func (s *lifecycleSink) OnTurnAdopted(_ ids.WorkspaceID, turn ids.TurnID) {
-	held := turn
-	s.rec.emit(event{sink: "lifecycle", method: "OnTurnAdopted", turn: &held})
+func (s *lifecycleSink) OnTurnAdopted(_ ids.WorkspaceID, adopted AdoptedTurn) {
+	held := adopted.Turn
+	s.rec.emit(event{sink: "lifecycle", method: "OnTurnAdopted", turn: &held, adopted: &adopted})
 }
 
 func (s *lifecycleSink) OnTurnsEndedUnobserved(_ ids.WorkspaceID, turns []ids.TurnID) {

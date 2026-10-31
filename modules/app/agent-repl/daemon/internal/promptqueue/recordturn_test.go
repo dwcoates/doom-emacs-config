@@ -229,7 +229,7 @@ func TestEveryOpenedTurnIsHandedToTheFeed(t *testing.T) {
 			}
 		}},
 		{name: "an adopted vendor turn", turn: "vendor-turn", open: func(t *testing.T, h *harness) {
-			h.q.OnTurnAdopted(theWorkspace, "vendor-turn")
+			h.q.OnTurnAdopted(theWorkspace, vendorStartedTurn)
 		}},
 		{name: "a joining prompt", turn: "t1", open: func(t *testing.T, h *harness) {
 			sentToJoin(t, h)

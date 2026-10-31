@@ -1423,3 +1423,41 @@ func TestAPromptsTextIsDrawnWithItsEntries(t *testing.T) {
 		t.Fatalf("drawn text = %v, want the entry answering 3.1", blocks[0].GetText().GetProse())
 	}
 }
+
+// A PROMPT TYPED ON CLAUDE.AI IS THE USER'S WORDS: the shim adopted the turn it
+// started, and the feed draws it as any prompt the user said.
+func TestARemoteControlPromptIsDrawnAsTheUsersPrompt(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	h.promptWith("turn-r", conversationv1.PromptOrigin_PROMPT_ORIGIN_REMOTE_CONTROL, textBlock("fix the build"))
+
+	// Assert.
+	if got := h.userPromptRows(); len(got) != 1 {
+		t.Fatalf("user-prompt rows = %d, want one for a claude.ai prompt", len(got))
+	}
+}
+
+func TestTheAuthorLabelOfARemoteControlPromptIsYou(t *testing.T) {
+	// Arrange, Act.
+	got := AuthorLabel(conversationv1.PromptOrigin_PROMPT_ORIGIN_REMOTE_CONTROL)
+
+	// Assert.
+	if got != "You" {
+		t.Fatalf("author = %q, want You", got)
+	}
+}
+
+func TestARemoteControlPromptOpensItsTurn(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	h.promptWith("turn-r", conversationv1.PromptOrigin_PROMPT_ORIGIN_REMOTE_CONTROL, textBlock("fix the build"))
+
+	// Assert.
+	if turn := h.resolver.state(testWorkspace).turnInFlight; turn == nil || *turn != "turn-r" {
+		t.Fatalf("turn in flight = %v, want the claude.ai prompt's turn", turn)
+	}
+}

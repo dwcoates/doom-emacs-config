@@ -531,9 +531,17 @@ func (v *verbs) publishNaming(ctx context.Context, log dlog.Logger, record wsm.W
 		return err
 	}
 	v.publishEffortSettings(log, record, configDir)
+	// THE REMOTE-CONTROL MODE RIDES THE NAMING, so the strip that the naming
+	// completes already draws its chip (topbar remotecontrol.go).
+	remote, err := v.deps.DB.RemoteControl(ctx, record.ID)
+	if err != nil {
+		log.Error(opRegister, "could not read the workspace's remote-control mode for its topbar", dlog.WithCause(dlog.Context{"workspace": string(record.ID)}, err))
+		return fmt.Errorf("read the remote-control mode of %q: %w", record.ID, err)
+	}
 	v.deps.Topbar.SetNaming(record.ID, topbar.Naming{
-		Name:      record.Name,
-		ConfigDir: configDir,
+		Name:          record.Name,
+		ConfigDir:     configDir,
+		RemoteControl: remote.On,
 	})
 	// THE LINKS ARE DURABLE, so a restarted daemon's title opens the same
 	// links the workspace had.

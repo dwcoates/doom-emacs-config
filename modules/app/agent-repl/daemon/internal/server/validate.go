@@ -1467,6 +1467,23 @@ func validateUpdatePersistentWifiModeRequest(req *agentreplv1.UpdatePersistentWi
 	return nil
 }
 
+// validateUpdateRemoteControlModeRequest is UpdateRemoteControlModeRequest's
+// base function: a workspace, and one of the three action arms.
+func validateUpdateRemoteControlModeRequest(req *agentreplv1.UpdateRemoteControlModeRequest) *connect.Error {
+	if err := validateWorkspaceRef("workspace", req.GetWorkspace()); err != nil {
+		return err
+	}
+	switch req.GetAction().(type) {
+	case *agentreplv1.UpdateRemoteControlModeRequest_On,
+		*agentreplv1.UpdateRemoteControlModeRequest_Off,
+		*agentreplv1.UpdateRemoteControlModeRequest_Toggle:
+		return nil
+	case nil:
+		return invalid("action", "a remote-control action arm is required")
+	}
+	return invalid("action", "the remote-control action is not one this contract defines")
+}
+
 // validateDismissNewsDigestRequest refuses a dismiss naming no digest.
 func validateDismissNewsDigestRequest(req *agentreplv1.DismissNewsDigestRequest) *connect.Error {
 	if req.GetId().GetValue() == "" {

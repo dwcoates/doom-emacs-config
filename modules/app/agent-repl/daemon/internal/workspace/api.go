@@ -541,6 +541,11 @@ type Verbs interface {
 	// an effort change never puts a row in front of the reader, and the shim
 	// itself waits for the running turn to end.
 	SetEffort(ctx context.Context, ws ids.WorkspaceID, level conversationv1.AgentEffortLevel) error
+	// UpdateRemoteControlMode records the remote-control mode a change leaves
+	// on the workspace (a toggle resolved from the mode read at that moment)
+	// and answers it, putting it in force on the live shim, or starting a shim
+	// for an on with none. A vendor refusal still leaves the mode recorded.
+	UpdateRemoteControlMode(ctx context.Context, ws ids.WorkspaceID, change wsm.RemoteControlChange) (bool, error)
 	// SetDefaultModel makes a model the topbar's selector served the default
 	// of the LOGIN the workspace's session spends as: every new session on
 	// that account root starts under it. No running session changes.
@@ -1054,6 +1059,10 @@ type Sessions interface {
 	// SetEffort asks the workspace's shim for an effort level and, once it
 	// confirms, states the level in effect to the topbar.
 	SetEffort(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, level conversationv1.AgentEffortLevel) error
+	// SetRemoteControl records the remote-control mode a change leaves on the
+	// workspace, states it to the topbar, and puts it in force on the live
+	// shim; no shim holding a session is the no_session refusal.
+	SetRemoteControl(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, change wsm.RemoteControlChange) (bool, error)
 	// RetryVendorError asks the workspace's shim for its scheduled
 	// vendor-error retry now.
 	RetryVendorError(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID) (*shimv1.RetryVendorErrorNowResponse, error)

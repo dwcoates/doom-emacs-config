@@ -75,14 +75,16 @@ type Controller interface {
 	RetryWithheld(ws ids.WorkspaceID)
 	// CycleDown stands an idle session down after the keep-alive asked at
 	// BEAT (owner ruling, 2026-10-26; cycle.go): never under a turn or live
-	// detached work, never for the workspace the user is looking at, and
-	// never once a real turn has run since the beat. A busy one is stood down
-	// once it falls free. It returns at once.
+	// detached work, never for the workspace the user is looking at, never
+	// for one whose remote control is on (read at the attempt), and never
+	// once a real turn has run since the beat. A busy one is stood down once
+	// it falls free. It returns at once.
 	CycleDown(ws ids.WorkspaceID, beat time.Time)
 	// VisitDown stands down the shim a settings pick started at SINCE, on the
 	// user's switch away (owner request, 2026-10-29; cycle.go), under
 	// CycleDown's rules: never under a turn, never for the workspace in view,
-	// and never once a real turn has run since. It returns at once.
+	// never in remote control, and never once a real turn has run since. It
+	// returns at once.
 	VisitDown(ws ids.WorkspaceID, since time.Time)
 }
 

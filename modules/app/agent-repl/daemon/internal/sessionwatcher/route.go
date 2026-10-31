@@ -11,6 +11,7 @@ import (
 	"agent-repld/internal/contextcut"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/promptorigin"
 	"agent-repld/internal/wsm"
 )
 
@@ -697,12 +698,14 @@ func entryKind(entry *conversationv1.HistoryEntry) string {
 // re-serves rows it already served, and a re-served prompt row once stood a
 // finished turn back up in flight here while every other observer had closed it.
 //
-// THE ONE EXCEPTION IS A VENDOR-STARTED TURN. Its prompt row is the only
-// statement anywhere that the turn opened -- no queue delivered it, and the
-// shim writes the row as the turn's first, on the stream that then carries
-// every row of the turn -- so it opens the turn here, once: only on the main
-// watch, only live, and only for a turn this watcher has never had in hand, so
-// a re-served row stands nothing back up. See adoptVendorTurnLocked.
+// THE ONE EXCEPTION IS AN ADOPTED TURN (promptorigin.Adopted): one the vendor
+// started on its own, or one a prompt typed on claude.ai started through the
+// Remote Control bridge. Its prompt row is the only statement anywhere that
+// the turn opened -- no queue delivered it, and the shim writes the row as the
+// turn's first, on the stream that then carries every row of the turn -- so
+// it opens the turn here, once: only on the main watch, only live, and only
+// for a turn this watcher has never had in hand, so a re-served row stands
+// nothing back up. See adoptVendorTurnLocked.
 func (w *watcher) routePromptLocked(a *agentWatch, prompt *conversationv1.AgentPrompt, place *conversationv1.ConversationPlace) {
 	if a.id == nil {
 		w.adoptMainAgentLocked(prompt.GetAgent(), "live_prompt")
@@ -710,7 +713,7 @@ func (w *watcher) routePromptLocked(a *agentWatch, prompt *conversationv1.AgentP
 		// replayed against the turn the queue stated.
 		w.releaseHeldTerminalLocked()
 	}
-	if a.id == nil && prompt.GetOrigin() == conversationv1.PromptOrigin_PROMPT_ORIGIN_VENDOR_STARTED {
+	if a.id == nil && promptorigin.Adopted(prompt.GetOrigin()) {
 		w.adoptVendorTurnLocked(prompt)
 	}
 	// A FOLDED PROMPT'S ROW IS THE ONE STATEMENT THAT ITS JOIN LANDED: the
@@ -779,10 +782,11 @@ func (w *watcher) adoptVendorTurnLocked(prompt *conversationv1.AgentPrompt) {
 	}
 	w.sinks.Footer.OnTurnOpened(w.ws, turn)
 	w.sinks.Feed.OnTurnOpened(w.ws, turn)
-	w.pendingAdoptions = append(w.pendingAdoptions, turn)
-	w.log.Info("daemon.sessionwatcher.turn_adopted", "the vendor started a turn on its own; it is tracked as the turn in flight", dlog.Context{
+	w.pendingAdoptions = append(w.pendingAdoptions, AdoptedTurn{Turn: turn, Origin: prompt.GetOrigin(), Said: prompt.GetSaid()})
+	w.log.Info("daemon.sessionwatcher.turn_adopted", "the shim adopted a turn no queue delivered; it is tracked as the turn in flight", dlog.Context{
 		"turn_id":  string(turn),
 		"agent_id": prompt.GetAgent().GetValue(),
+		"origin":   prompt.GetOrigin().String(),
 		"behind":   behind,
 	})
 }

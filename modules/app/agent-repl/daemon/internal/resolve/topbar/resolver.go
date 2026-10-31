@@ -243,6 +243,7 @@ func (r *resolver) render(s *wsState) (*frontendv1.TopbarView, error) {
 		Account:              r.account(s),
 		PermissionModePicker: r.permissionModePicker(s),
 		PersistentWifi:       persistentWifiChip(r.persistentWifi),
+		RemoteControl:        remoteControlChip(s.naming.RemoteControl),
 	}, nil
 }
 
@@ -565,7 +566,7 @@ func (r *resolver) McpPanel(ws ids.WorkspaceID) *frontendv1.McpPanelView {
 // SetNaming installs the WSM-derived workspace name and session line.
 func (r *resolver) SetNaming(ws ids.WorkspaceID, naming Naming) {
 	r.mutate(ws, "daemon.topbar.set_naming", "the topbar took the workspace naming",
-		dlog.Context{"name": naming.Name, "config_dir": naming.ConfigDir},
+		dlog.Context{"name": naming.Name, "config_dir": naming.ConfigDir, "remote_control": naming.RemoteControl},
 		func(s *wsState) {
 			s.naming = naming
 			s.namingSet = true

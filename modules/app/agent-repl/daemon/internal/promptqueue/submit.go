@@ -827,18 +827,19 @@ func (q *queue) isReviving(ws ids.WorkspaceID) bool {
 	return s.reviving || s.bringUps > 0
 }
 
-// ReviveForSettings starts WS's shim for an effort pick (Queue).
+// ReviveForSettings starts WS's shim for a pick that holds no row: an effort
+// pick, or remote control turned on (Queue).
 func (q *queue) ReviveForSettings(ctx context.Context, ws ids.WorkspaceID) error {
 	log, err := q.logger(ctx, ws)
 	if err != nil {
 		return err
 	}
 	if _, shim := q.deps.Client(ws); shim {
-		log.Debug(opSubmit, "the shim is up; the effort pick needs no revival", nil)
+		log.Debug(opSubmit, "the shim is up; the settings pick needs no revival", nil)
 		return nil
 	}
 	if q.deps.Revive == nil {
-		refusalLevel(ctx, log, log.Warn)(opSubmit, "the workspace has no shim and no revival is wired for an effort pick", nil)
+		refusalLevel(ctx, log, log.Warn)(opSubmit, "the workspace has no shim and no revival is wired for a settings pick", nil)
 		return ErrNoSession
 	}
 	q.reviveInBackground(context.WithoutCancel(ctx), ws, revivalSettings, log)

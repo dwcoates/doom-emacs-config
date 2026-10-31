@@ -811,6 +811,9 @@ func (f *Fleet) Resume(ctx context.Context, ws ids.WorkspaceID, c shimclient.Cli
 		"fresh": src.Fresh, "vendor_session_id": started.GetVendorSessionId(), "shim_pid": c.PID(),
 	})
 	f.deps.SessionsUp(ws)
+	// A RELAUNCHED SHIM IS A NEW SHIM, with no bridge of its own: put it in
+	// remote control as every bring-up does (remotecontrol.go).
+	f.reapplyRemoteControl(ctx, log, ws, c)
 	return rollout.Resumed{}, nil
 }
 

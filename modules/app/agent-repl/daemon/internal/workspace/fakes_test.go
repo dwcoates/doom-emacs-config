@@ -57,6 +57,18 @@ var errFake = errors.New("workspace test: arranged failure")
 type fakeDB struct {
 	wsm.DB
 
+	// remoteMu guards remote, each workspace's remote-control standing (an
+	// absent one is off: the fake cannot tell a main worktree); remoteErr
+	// fails reading it, remoteSetErr recording a mode, and bridgeErr keeping
+	// a bridge session.
+	remoteMu sync.Mutex
+	remote   map[ids.WorkspaceID]wsm.RemoteControl
+	// remoteUnscripted is what a workspace with no scripted standing reads.
+	remoteUnscripted wsm.RemoteControl
+	remoteErr        error
+	remoteSetErr     error
+	bridgeErr        error
+
 	// queuedMu guards queued, the creates held for the network, by key;
 	// queuedPutErr fails holding one and queuedReadErr reading them.
 	queuedMu      sync.Mutex
@@ -2336,6 +2348,11 @@ type fakeSessions struct {
 	// efforts is every SetEffort asked of the fleet; effortErr its answer.
 	efforts   []effortCall
 	effortErr error
+	// remoteChanges is every SetRemoteControl asked of the fleet, answered
+	// with remoteOn and remoteErr.
+	remoteChanges []wsm.RemoteControlChange
+	remoteOn      bool
+	remoteErr     error
 	// retries is every RetryVendorError asked of the fleet, answered with
 	// retryResponse and retryErr.
 	retries       []ids.WorkspaceID
@@ -2983,6 +3000,8 @@ type fixture struct {
 	// order; an empty one is a clear.
 	topbarLinks [][]topbar.Link
 	topbarNames []string
+	// topbarNamings is every naming the topbar seam was handed, in order.
+	topbarNamings []topbar.Naming
 	// effortReads is every config root whose settings were read; the read
 	// answers effortSettings and effortErr.
 	effortReads    []string
@@ -3079,7 +3098,7 @@ func newFixture(t *testing.T) *fixture {
 			return rec
 		},
 		DB: f.db, Derived: f.derived, Git: f.git, Creates: f.creates, Accounts: f.account, PullOwners: f.pullOwners, Queue: f.queue, TurnStops: f.queue, Merge: f.merge,
-		Rollout: f.rollout, Feed: f.feed, Footer: f.footer, Topbar: stubTopbar{picked: &f.topbarPicked, parked: &f.topbarParked, coldGates: &f.topbarColdGates, accounts: &f.topbarAccounts, loginDefaults: &f.topbarLoginDefaults, effortSettings: &f.topbarEffortSettings, warnings: &f.topbarWarnings, links: &f.topbarLinks, names: &f.topbarNames}, Browser: f.browser,
+		Rollout: f.rollout, Feed: f.feed, Footer: f.footer, Topbar: stubTopbar{picked: &f.topbarPicked, parked: &f.topbarParked, coldGates: &f.topbarColdGates, accounts: &f.topbarAccounts, loginDefaults: &f.topbarLoginDefaults, effortSettings: &f.topbarEffortSettings, warnings: &f.topbarWarnings, links: &f.topbarLinks, names: &f.topbarNames, namings: &f.topbarNamings}, Browser: f.browser,
 		Sidebar: f.sidebar, Host: f.host, Banners: f.banners, Sessions: f.fleet, Threads: f.threads, ColdGateAnswers: &f.gateAnswers, SettingsVisits: f.ensureVisits(), Drain: &f.visitDrain,
 		Headless:   f.headless,
 		Health:     f.health,
@@ -3290,6 +3309,10 @@ type stubTopbar struct {
 	links *[][]topbar.Link
 	// names records every workspace name a rename installed, in order.
 	names *[]string
+	// remoteControl records every remote-control mode stated, in order.
+	remoteControl *[]bool
+	// namings records every naming installed, in order.
+	namings *[]topbar.Naming
 	// window is the context window the strip answers; nil answers none and
 	// nil-panics, as every seam a test did not wire does.
 	window *int64
@@ -3322,7 +3345,11 @@ func (f *fakeFooter) SetWorkspaceDir(ws ids.WorkspaceID, dir string) error {
 }
 
 func (stubTopbar) SetWorkspaceDir(ids.WorkspaceID, string) error { return nil }
-func (stubTopbar) SetNaming(ids.WorkspaceID, topbar.Naming)      {}
+func (s stubTopbar) SetNaming(_ ids.WorkspaceID, naming topbar.Naming) {
+	if s.namings != nil {
+		*s.namings = append(*s.namings, naming)
+	}
+}
 func (s stubTopbar) SetName(_ ids.WorkspaceID, name string) {
 	if s.names != nil {
 		*s.names = append(*s.names, name)
@@ -3888,4 +3915,88 @@ type fakeVisitDrain struct {
 // VisitDown records the ask.
 func (d *fakeVisitDrain) VisitDown(ws ids.WorkspaceID, since time.Time) {
 	d.visits = append(d.visits, visitDown{WS: ws, Since: since})
+}
+
+// RemoteControl answers the workspace's scripted standing, off when none was.
+func (d *fakeDB) RemoteControl(_ context.Context, id ids.WorkspaceID) (wsm.RemoteControl, error) {
+	d.remoteMu.Lock()
+	defer d.remoteMu.Unlock()
+	if d.remoteErr != nil {
+		return wsm.RemoteControl{}, d.remoteErr
+	}
+	if standing, ok := d.remote[id]; ok {
+		return standing, nil
+	}
+	return d.remoteUnscripted, nil
+}
+
+// SetRemoteControlMode records the mode CHANGE leaves, as wsm resolves it.
+func (d *fakeDB) SetRemoteControlMode(_ context.Context, id ids.WorkspaceID, change wsm.RemoteControlChange) (bool, error) {
+	d.remoteMu.Lock()
+	defer d.remoteMu.Unlock()
+	if d.remoteSetErr != nil {
+		return false, d.remoteSetErr
+	}
+	if d.remote == nil {
+		d.remote = map[ids.WorkspaceID]wsm.RemoteControl{}
+	}
+	standing := d.remote[id]
+	switch change {
+	case wsm.RemoteControlOn:
+		standing.On = true
+	case wsm.RemoteControlOff:
+		standing.On = false
+	case wsm.RemoteControlToggle:
+		standing.On = !standing.On
+	}
+	standing.Recorded = true
+	d.remote[id] = standing
+	return standing.On, nil
+}
+
+// SetRemoteControlBridgeSession keeps the bridge session, keeping the mode.
+func (d *fakeDB) SetRemoteControlBridgeSession(_ context.Context, id ids.WorkspaceID, bridge string) error {
+	d.remoteMu.Lock()
+	defer d.remoteMu.Unlock()
+	if d.bridgeErr != nil {
+		return d.bridgeErr
+	}
+	if d.remote == nil {
+		d.remote = map[ids.WorkspaceID]wsm.RemoteControl{}
+	}
+	standing := d.remote[id]
+	standing.BridgeSessionID = bridge
+	d.remote[id] = standing
+	return nil
+}
+
+// setRemote scripts the workspace's remote-control standing.
+func (d *fakeDB) setRemote(id ids.WorkspaceID, standing wsm.RemoteControl) {
+	d.remoteMu.Lock()
+	defer d.remoteMu.Unlock()
+	if d.remote == nil {
+		d.remote = map[ids.WorkspaceID]wsm.RemoteControl{}
+	}
+	d.remote[id] = standing
+}
+
+// remoteOf reads the workspace's remote-control standing back.
+func (d *fakeDB) remoteOf(id ids.WorkspaceID) wsm.RemoteControl {
+	d.remoteMu.Lock()
+	defer d.remoteMu.Unlock()
+	return d.remote[id]
+}
+
+// SetRemoteControl records the change asked of the fleet and answers
+// remoteOn and remoteErr.
+func (s *fakeSessions) SetRemoteControl(_ context.Context, _ dlog.Logger, ws ids.WorkspaceID, change wsm.RemoteControlChange) (bool, error) {
+	s.remoteChanges = append(s.remoteChanges, change)
+	return s.remoteOn, s.remoteErr
+}
+
+// SetRemoteControl records every mode the fleet stated to the strip.
+func (s stubTopbar) SetRemoteControl(_ ids.WorkspaceID, on bool) {
+	if s.remoteControl != nil {
+		*s.remoteControl = append(*s.remoteControl, on)
+	}
 }

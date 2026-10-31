@@ -2,6 +2,7 @@ package shimclient
 
 import (
 	"fmt"
+	"strings"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	shimv1 "agentrepl/proto/shim/v1"
@@ -154,6 +155,26 @@ func validateSetSessionEffortRequest(req *shimv1.SetSessionEffortRequest) error 
 	}
 	if req.GetEffort() == conversationv1.AgentEffortLevel_AGENT_EFFORT_LEVEL_UNSPECIFIED {
 		return invalid(m, m+".effort", "an effort change names its level")
+	}
+	return nil
+}
+
+// validateSetSessionRemoteControlRequest is SetSessionRemoteControlRequest's
+// base function. An on names the session claude.ai lists it under; an off
+// names nothing, and re-binds nothing.
+func validateSetSessionRemoteControlRequest(req *shimv1.SetSessionRemoteControlRequest) error {
+	const m = "SetSessionRemoteControlRequest"
+	if req == nil {
+		return invalid(m, m, "request is nil")
+	}
+	if !req.GetEnabled() {
+		return nil
+	}
+	if strings.TrimSpace(req.GetName()) == "" {
+		return invalid(m, m+".name", "a remote control turned on names the session claude.ai lists")
+	}
+	if req.ReattachBridgeSessionId != nil && strings.TrimSpace(req.GetReattachBridgeSessionId()) == "" {
+		return invalid(m, m+".reattach_bridge_session_id", "a re-bind names the bridge session it re-binds")
 	}
 	return nil
 }

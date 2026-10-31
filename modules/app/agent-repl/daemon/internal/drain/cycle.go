@@ -24,13 +24,14 @@ const opCycle = "daemon.drain.keepalive_cycle"
 // KillSession -- with the keep-alive cycle's own terminal, which every view
 // draws as the live idle session it stands in for (wsm.ParkKeepaliveCycle).
 //
-// THE SAME RULES AS EVERY STAND-DOWN, AND THREE OF ITS OWN. It never
+// THE SAME RULES AS EVERY STAND-DOWN, AND FOUR OF ITS OWN. It never
 // interrupts a turn or live detached work: a busy session stays PENDING and is
 // asked again on the daemon's own edges (RetryWithheld), never by a poll. And
 // it stands nothing down for the workspace the user is looking at, for a
-// hidden or closed one (the cache keeper's lapse owns those), or once a real
-// turn has run since the beat -- that turn is engagement, and the next beat
-// decides again.
+// hidden or closed one (the cache keeper's lapse owns those), for one whose
+// remote control is on (claude.ai reaches it only through its shim; owner
+// ruling, 2026-10-31), or once a real turn has run since the beat -- that turn
+// is engagement, and the next beat decides again.
 
 // THE SAME STAND-DOWN ENDS A SETTINGS VISIT (owner request, 2026-10-29). A
 // model, permission-mode or effort pick on a workspace with no shim starts
@@ -174,6 +175,22 @@ func (c *controller) cycleDown(ctx context.Context, ws ids.WorkspaceID, beat tim
 	}
 	if record.Closed {
 		log.Debug(op, "the workspace is closed; its cache's lapse stands it down", fields)
+		return withheldSettled
+	}
+	// A WORKSPACE IN REMOTE CONTROL KEEPS ITS SHIM UP (owner ruling,
+	// 2026-10-31): claude.ai reaches the session only through a shim that is
+	// up, so neither a keep-alive's park nor a settings visit's stand-down is
+	// taken, and so no pre-beat restore is ever owed. The mode is read HERE,
+	// at the attempt, so one turned off since the ask parks at the next beat
+	// as usual. The idle sweep's hibernation is not this path and still
+	// stands it down.
+	remote, err := c.deps.DB.RemoteControl(ctx, ws)
+	if err != nil {
+		log.Error(op, "could not read the workspace's remote-control mode; its stand-down is dropped", dlog.WithCause(fields, err))
+		return withheldSettled
+	}
+	if remote.On {
+		log.Info(op, "remote control is on; the shim stays up for claude.ai", dlog.Merge(fields, dlog.Context{"remote_control_recorded": remote.Recorded}))
 		return withheldSettled
 	}
 	visible, err := bringup.Visible(ctx, c.deps.DB, ws)

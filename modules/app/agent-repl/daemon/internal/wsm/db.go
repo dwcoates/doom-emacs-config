@@ -598,6 +598,16 @@ type DB interface {
 	PutWorkspacePermissionMode(ctx context.Context, id WorkspaceID, mode string) error
 	// PutWorkspaceEffort records the effort last picked on a workspace.
 	PutWorkspaceEffort(ctx context.Context, id WorkspaceID, level conversationv1.AgentEffortLevel) error
+	// RemoteControl answers a workspace's remote-control standing: its
+	// effective mode (recorded, else the main-worktree default) and the
+	// claude.ai session its last bridge answered (remotecontrol.go).
+	RemoteControl(ctx context.Context, id WorkspaceID) (RemoteControl, error)
+	// SetRemoteControlMode records the mode a change leaves on a workspace,
+	// a toggle resolved in the same transaction, and answers it.
+	SetRemoteControlMode(ctx context.Context, id WorkspaceID, change RemoteControlChange) (bool, error)
+	// SetRemoteControlBridgeSession records the claude.ai session a
+	// workspace's bridge answered, keeping its mode.
+	SetRemoteControlBridgeSession(ctx context.Context, id WorkspaceID, bridge string) error
 	// AccountModelCatalog answers the catalog an account root last served.
 	AccountModelCatalog(ctx context.Context, configDir string) (*conversationv1.ModelCatalog, bool, error)
 	// PutAccountModelCatalog records the catalog an account root served.

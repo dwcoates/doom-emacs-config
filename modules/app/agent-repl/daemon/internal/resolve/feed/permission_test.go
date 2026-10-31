@@ -646,3 +646,71 @@ func TestAnOpenPermissionsClockRunsFromItsStart(t *testing.T) {
 		t.Fatalf("clock = %+v, want running from 1000", clock)
 	}
 }
+
+// answerRemotely settles ask-1 as answered on claude.ai.
+func (h *harness) answerRemotely() {
+	h.t.Helper()
+	h.ask("ask-1", "unit-1", &conversationv1.AgentPermissionSuccess{
+		Decision: &conversationv1.AgentPermissionSuccess_AnsweredRemotely{AnsweredRemotely: &conversationv1.AgentPermissionAnsweredRemotely{}},
+	})
+}
+
+// openAsk draws a gated call as running and opens ask-1 on it.
+func (h *harness) openAsk() {
+	h.t.Helper()
+	h.send(activityOf("unit-1", &conversationv1.AgentBash{
+		Result: &conversationv1.AgentBash_Start{Start: &conversationv1.AgentBashStart{
+			Command:   &conversationv1.AgentBashCommand{Line: "git push"},
+			StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+		}},
+	}))
+	h.ask("ask-1", "unit-1", &conversationv1.AgentPermissionStart{
+		Prompt:    &conversationv1.AgentPermissionPrompt{Title: "Claude wants to run a command"},
+		StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+	})
+}
+
+func TestAnAskAnsweredOnClaudeAiIsSettled(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.openAsk()
+
+	// Act.
+	h.answerRemotely()
+
+	// Assert.
+	if card := h.permissionCard(); card.GetAnswered() == nil {
+		t.Fatalf("state = %T, want answered: the ask is no longer the reader's", card.GetState())
+	}
+}
+
+func TestAnAskAnsweredOnClaudeAiSaysSo(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.openAsk()
+
+	// Act.
+	h.answerRemotely()
+
+	// Assert.
+	label := h.permissionCard().GetAnswered().GetDeniedByUser().GetMarker().GetLabel().GetText()
+	if label != "answered on claude.ai" {
+		t.Fatalf("verdict = %q, want the neutral \"answered on claude.ai\"", label)
+	}
+}
+
+func TestAnAskAnsweredOnClaudeAiMarksNoCallDenied(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.openAsk()
+
+	// Act.
+	h.answerRemotely()
+
+	// Assert: the decision is not relayed, so the call's own card decides.
+	for _, row := range h.rows(rootFeed()) {
+		if card := row.GetActivity().GetSimpleToolCall(); card != nil && card.GetDenied() != nil {
+			t.Fatalf("the gated call's card reads denied for an ask answered on claude.ai: %v", card)
+		}
+	}
+}

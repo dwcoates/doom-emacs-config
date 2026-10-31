@@ -296,3 +296,85 @@ func TestAVisitStandDownSkipsASessionATurnEngagedSinceThePick(t *testing.T) {
 		t.Fatalf("kills = %+v, want none after a prompt ran since the pick", killed)
 	}
 }
+
+// A WORKSPACE IN REMOTE CONTROL KEEPS ITS SHIM UP (owner ruling, 2026-10-31):
+// neither a keep-alive's park nor a settings visit's stand-down is taken.
+func TestARemoteControlWorkspaceIsNotStoodDown(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(t *testing.T, h *harness) ids.WorkspaceID
+		ask     func(c *controller, ws ids.WorkspaceID)
+	}{
+		{name: "a main worktree's default after a keep-alive", arrange: func(t *testing.T, h *harness) ids.WorkspaceID {
+			return h.mainWorktree(t, instant)
+		}, ask: func(c *controller, ws ids.WorkspaceID) { c.CycleDown(ws, beatAfter) }},
+		{name: "a mode turned on after a keep-alive", arrange: func(t *testing.T, h *harness) ids.WorkspaceID {
+			return h.remoteControlOn(t)
+		}, ask: func(c *controller, ws ids.WorkspaceID) { c.CycleDown(ws, beatAfter) }},
+		{name: "a mode turned on on the switch away from a settings pick", arrange: func(t *testing.T, h *harness) ids.WorkspaceID {
+			return h.remoteControlOn(t)
+		}, ask: func(c *controller, ws ids.WorkspaceID) { c.VisitDown(ws, beatAfter) }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			ws := tt.arrange(t, h)
+
+			// Act
+			tt.ask(h.c, ws)
+
+			// Assert
+			if killed := h.stand.Killed(); len(killed) != 0 {
+				t.Fatalf("kills = %+v, want none for a workspace in remote control", killed)
+			}
+			if h.cyclePending(ws) {
+				t.Fatal("a stand-down kept for remote control stayed pending")
+			}
+		})
+	}
+}
+
+func TestARemoteControlSkipIsRecordedAtInfo(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws := h.remoteControlOn(t)
+
+	// Act
+	h.c.CycleDown(ws, beatAfter)
+
+	// Assert
+	for _, record := range records(h.log, opCycle) {
+		if record.Level == "info" && strings.Contains(record.Message, "remote control is on") {
+			return
+		}
+	}
+	t.Fatalf("records = %+v, want the remote-control skip at info", records(h.log, opCycle))
+}
+
+func TestAModeTurnedOffSinceIsParkedAtTheNextKeepalive(t *testing.T) {
+	// Arrange: the mode is read at the attempt, not when it was first on.
+	h := newHarness(t)
+	ws := h.mainWorktree(t, instant)
+	if _, err := h.db.SetRemoteControlMode(context.Background(), ws, wsm.RemoteControlOff); err != nil {
+		t.Fatalf("SetRemoteControlMode: %v", err)
+	}
+
+	// Act
+	h.c.CycleDown(ws, beatAfter)
+
+	// Assert
+	if term := h.terminal(t, ws); term == nil || term.Kind != wsm.TerminalKeepaliveCycle {
+		t.Fatalf("terminal = %+v, want the keep-alive cycle's park", term)
+	}
+}
+
+// remoteControlOn registers a workspace whose mode was turned on explicitly.
+func (h *harness) remoteControlOn(t *testing.T) ids.WorkspaceID {
+	t.Helper()
+	ws := h.workspace(t, instant)
+	if _, err := h.db.SetRemoteControlMode(context.Background(), ws, wsm.RemoteControlOn); err != nil {
+		t.Fatalf("SetRemoteControlMode: %v", err)
+	}
+	return ws
+}

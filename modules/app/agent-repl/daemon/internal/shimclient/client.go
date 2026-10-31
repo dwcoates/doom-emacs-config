@@ -1624,6 +1624,11 @@ func (c *client) SetSessionPermissionMode(ctx context.Context, req *shimv1.SetSe
 	return unary(ctx, c, "set_session_permission_mode", req, validateSetSessionPermissionModeRequest, c.rpc.SetSessionPermissionMode)
 }
 
+// SetSessionRemoteControl turns the session's Remote Control bridge on or off.
+func (c *client) SetSessionRemoteControl(ctx context.Context, req *shimv1.SetSessionRemoteControlRequest) (*shimv1.SetSessionRemoteControlResponse, error) {
+	return unary(ctx, c, "set_session_remote_control", req, validateSetSessionRemoteControlRequest, c.rpc.SetSessionRemoteControl)
+}
+
 // Hibernate stands the session down for the idle sweep.
 func (c *client) Hibernate(ctx context.Context, req *shimv1.HibernateRequest) (*shimv1.HibernateResponse, error) {
 	return unary(ctx, c, "hibernate", req, validateHibernateRequest, c.rpc.Hibernate)

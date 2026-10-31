@@ -111,7 +111,7 @@ daemon/
                    build-staleness bounce, asset origin, intent manifest, reload_webapp push
     workspace/     workspace verbs (create standard + one-shot, register, open, close, kill, nuke,
                    forget, restart{force}, select, priority), task verbs, cold gate answer,
-                   SetModel/SetDefaultModel/SetPermissionMode/SetEffort
+                   SetModel/SetDefaultModel/SetPermissionMode/SetEffort/UpdateRemoteControlMode
     health/        DaemonHealth / SessionHealth answers (unhealthy is an answer) + fault records
                    mapped onto the same internal paths as the rpcs
     heldingress/   the held-prompt ingress ($AGENT_REPL_STATE_DIR/held-prompts/held_*.json): prompts a
@@ -590,6 +590,14 @@ session-act path; ungated mode needs consent recorded at creation),
 `SetEffort` (NOT through the queue: straight to the shim's SetSessionEffort,
 which itself waits for the running turn, so no row ever stands for it; a new
 shim is put back at the picked level by `Fleet.sessionUp`),
+`UpdateRemoteControlMode` (the workspace's remote-control mode, kept in wsm
+`workspace_remote_control` (layout 91): unset is on for a repository's main
+worktree and off otherwise. Recorded first, then put in force on the live shim
+through SetSessionRemoteControl, or a shim started for an on with none; every
+bring-up (`Fleet.sessionUp`, and `Fleet.Resume` for a relaunch) puts an on back
+in force re-binding the kept claude.ai bridge session, and an adopted shim is
+sent nothing. While the mode is on, `drain.CycleDown`/`VisitDown` stand nothing
+down; the idle sweep still hibernates. See `internal/workspace/remotecontrol.go`),
 `Interrupt` (turn → KillTurn{force:confirm} with the confirm_required
 challenge when detached agents are live; detached → decode FeedId →
 UpdateAgent.stop / StopBash; all_agents → fan-wide), `AnswerPermission`,

@@ -399,14 +399,17 @@ type LifecycleSink interface {
 	// OnTurnEnded is what pops the prompt queue and releases a
 	// hold-for-turn-end.
 	OnTurnEnded(ws ids.WorkspaceID, turn ids.TurnID, how TurnClose)
-	// OnTurnAdopted is a turn the VENDOR started on its own (a subagent's
-	// hand-back arriving, a task notification), which the shim adopted and
-	// announced with a PromptOrigin.VENDOR_STARTED prompt row. It is the queue
-	// that owns the turn rows and the roster's turn fact, so the queue records
-	// it exactly as it records a turn it delivered, and a held prompt waits
-	// behind it. Told off the lock, like OnTurnEnded, and always BEFORE that
-	// turn's own OnTurnEnded.
-	OnTurnAdopted(ws ids.WorkspaceID, turn ids.TurnID)
+	// OnTurnAdopted is a turn no queue delivered, which the shim adopted and
+	// announced with its prompt row (promptorigin.Adopted): one the VENDOR
+	// started on its own (a subagent's hand-back arriving, a task
+	// notification; PromptOrigin.VENDOR_STARTED), or one a prompt typed on
+	// claude.ai started through the session's Remote Control bridge
+	// (PromptOrigin.REMOTE_CONTROL). It is the queue that owns the turn rows
+	// and the roster's turn fact, so the queue records it exactly as it
+	// records a turn it delivered, and a held prompt waits behind it. Told off
+	// the lock, like OnTurnEnded, and always BEFORE that turn's own
+	// OnTurnEnded.
+	OnTurnAdopted(ws ids.WorkspaceID, adopted AdoptedTurn)
 	// OnTurnsEndedUnobserved hands over the turns an adoption found open that
 	// the adopted shim's own facts say are no longer in flight: each ended
 	// while no daemon was watching. They were never this watcher's turn in
@@ -826,4 +829,15 @@ type OpenTurn struct {
 // Start builds and starts one workspace's watcher against its shim client.
 func Start(ctx context.Context, ws ids.WorkspaceID, client shimclient.Client, session Session, sinks Sinks, log dlog.Logger) (Watcher, error) {
 	return start(ctx, ws, client, session, sinks, log)
+}
+
+// AdoptedTurn is a turn the shim adopted, as its prompt row announced it.
+type AdoptedTurn struct {
+	// Turn is the turn the shim minted.
+	Turn ids.TurnID
+	// Origin is the prompt row's origin, one promptorigin.Adopted names.
+	Origin conversationv1.PromptOrigin
+	// Said is what the prompt row says: the claude.ai prompt's text for a
+	// REMOTE_CONTROL turn, nothing for a VENDOR_STARTED one.
+	Said *conversationv1.UserSaid
 }

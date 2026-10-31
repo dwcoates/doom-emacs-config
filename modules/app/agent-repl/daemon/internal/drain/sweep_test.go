@@ -1418,3 +1418,20 @@ func TestSweepReadsEverySessionAtOnce(t *testing.T) {
 		t.Fatalf("session reads: bulk = %d, single = %d; want one bulk read and no single reads", bulk, single)
 	}
 }
+
+// THE IDLE CUTOFF IS UNCHANGED BY REMOTE CONTROL (owner ruling, 2026-10-31): a
+// workspace whose shim stays up between keep-alives is still hibernated once
+// it has gone unengaged past the cutoff.
+func TestSweepHibernatesAnIdleSessionInRemoteControl(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws := h.mainWorktree(t, instant.Add(-2*time.Hour))
+
+	// Act
+	hibernated, err := h.c.Sweep(context.Background(), instant)
+
+	// Assert
+	if err != nil || len(hibernated) != 1 || hibernated[0] != ws {
+		t.Fatalf("Sweep = %v, %v; want [%s] hibernated", hibernated, err, ws)
+	}
+}
