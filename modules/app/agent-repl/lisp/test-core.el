@@ -492,6 +492,9 @@ Each result is `(RELATIVE-FILE OWNER FORM)'."
     ("status.el" agent-repl-tabbar-apply-row-count
      "agent-repl: tab-bar set to %d line%s on this frame"
      "confirms the interactive tab-bar layout command")
+    ("terminal.el" agent-repl-terminal-finished
+     "agent-repl: the command exited with status %s; SPC o t shows its output"
+     "tells the user the shell code block they ran failed, since its terminal popup closes on exit")
     ("threads.el" agent-repl-threads--create "[agent-repl] Starting a thread…"
      "tells the user their new-thread question was sent")
     ("threads.el" agent-repl-threads--create "[agent-repl] The thread was not started: the daemon could not be reached"
