@@ -149,6 +149,10 @@ type Client interface {
 	SetSessionEffort(ctx context.Context, req *shimv1.SetSessionEffortRequest) (*shimv1.SetSessionEffortResponse, error)
 	// SetSessionPermissionMode switches the session's permission mode.
 	SetSessionPermissionMode(ctx context.Context, req *shimv1.SetSessionPermissionModeRequest) (*shimv1.SetSessionPermissionModeResponse, error)
+	// SetSessionRemoteControl turns the session's Remote Control bridge
+	// (claude.ai) on or off, for every vendor process the shim opens from now
+	// on; an on answers the bridge's claude.ai session.
+	SetSessionRemoteControl(ctx context.Context, req *shimv1.SetSessionRemoteControlRequest) (*shimv1.SetSessionRemoteControlResponse, error)
 	// Hibernate stands the session down for the idle sweep. It is NOT used by
 	// the relaunch engine, which kills gracefully instead.
 	Hibernate(ctx context.Context, req *shimv1.HibernateRequest) (*shimv1.HibernateResponse, error)

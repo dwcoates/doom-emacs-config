@@ -2384,3 +2384,88 @@ describe("StartTurn of an agent's prompt", () => {
     expect(startTurnKind(response)).toBe("vendorRefused");
   });
 });
+
+describe("a session reached from claude.ai (Remote Control)", () => {
+  /** The denial a withdrawn ask is settled with when its turn was interrupted (engine/permission-gate.ts). */
+  const INTERRUPTED_ASK_TEXT = "the turn was interrupted before the ask was answered";
+
+  /** Every entry the store was handed that carries `needle` anywhere, on any arm. */
+  const stored = (shim: Awaited<ReturnType<typeof spawnShim>>, needle: string): storev1.StoreEntry[] =>
+    (shim.store?.writes() ?? [])
+      .flatMap((request) => request.batch?.entries ?? [])
+      .filter((entry) => toJsonString(storev1.StoreEntrySchema, entry).includes(needle));
+
+  /** A started session with its bridge on. */
+  async function bridged(): Promise<Awaited<ReturnType<typeof spawnShim>>> {
+    const shim = await spawnShim();
+    await shim.clients.h1.startSession(freshSession());
+    await shim.clients.h1.setSessionRemoteControl(
+      create(shimv1.SetSessionRemoteControlRequestSchema, { enabled: true, name: "parser-fix" }),
+    );
+    return shim;
+  }
+
+  /** Resolves once an entry carrying `needle` reached the store (the writer drains behind the turn). */
+  const landed = (shim: Awaited<ReturnType<typeof spawnShim>>, needle: string): Promise<storev1.StoreEntry> =>
+    shim.store?.entryLanded((entry) => toJsonString(storev1.StoreEntrySchema, entry).includes(needle)) ??
+    Promise.reject(new Error("this shim has no store"));
+
+  /** Resolves once a turn the shim adopted closed. */
+  const adoptedClosed = (shim: Awaited<ReturnType<typeof spawnShim>>): Promise<unknown> =>
+    shim.log.record((record) => record.message === "closed a turn" && String(record.context.turn_id).startsWith("adopted-"));
+
+  test("a prompt typed on claude.ai is adopted as REMOTE_CONTROL, saying what was typed", async () => {
+    const shim = await bridged();
+    const closed = adoptedClosed(shim);
+    turnStarted(await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!remote-prompt run the tests" })));
+    await closed;
+    await landed(shim, "PROMPT_ORIGIN_REMOTE_CONTROL");
+
+    const rows = stored(shim, "PROMPT_ORIGIN_REMOTE_CONTROL");
+    expect([rows.length, toJsonString(storev1.StoreEntrySchema, rows[0] ?? create(storev1.StoreEntrySchema, {})).includes("run the tests")]).toEqual([1, true]);
+  });
+
+  test("the echo of the shim's own prompt is dropped: no prompt row but its own", async () => {
+    const shim = await bridged();
+    const closed = adoptedClosed(shim);
+    turnStarted(await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!remote-prompt run the tests" })));
+    await closed;
+    await landed(shim, "PROMPT_ORIGIN_REMOTE_CONTROL");
+
+    const origins = (shim.store?.writes() ?? [])
+      .flatMap((request) => request.batch?.entries ?? [])
+      .map((entry) => toJsonString(storev1.StoreEntrySchema, entry))
+      .flatMap((json) => [...json.matchAll(/"origin":"(PROMPT_ORIGIN_[A-Z_]+)"/g)].map((match) => match[1]));
+    expect(origins).toEqual(["PROMPT_ORIGIN_USER_SENT", "PROMPT_ORIGIN_REMOTE_CONTROL"]);
+  });
+
+  test("a turn stopped on claude.ai ends, and the next StartTurn is accepted", async () => {
+    const shim = await bridged();
+    turnStarted(await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!remote-interrupt" })));
+    await turnClosed(shim, "t1");
+
+    const next = await shim.clients.h1.startTurn(startTurnRequest({ turn: "t2", text: "hello" }));
+
+    expect(next.result.case).toBe("success");
+  });
+
+  test("an ask answered on claude.ai is settled answered_remotely", async () => {
+    const shim = await bridged();
+    turnStarted(await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!perm-answered-remotely" })));
+    await turnClosed(shim, "t1");
+    await landed(shim, "answeredRemotely");
+
+    expect(stored(shim, "answeredRemotely")).toHaveLength(1);
+  });
+
+  test("an ask cut by a stop pressed on claude.ai is never settled answered_remotely", async () => {
+    const shim = await bridged();
+    turnStarted(await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!perm-remote-interrupt" })));
+    await turnClosed(shim, "t1");
+    // THE WRITER DRAINS IN ORDER: the interrupt's denial landing means every
+    // row before it did, so the absence of an answered_remotely is real.
+    await landed(shim, INTERRUPTED_ASK_TEXT);
+
+    expect(stored(shim, "answeredRemotely")).toEqual([]);
+  });
+});

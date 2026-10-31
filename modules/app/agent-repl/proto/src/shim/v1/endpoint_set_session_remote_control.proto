@@ -1,0 +1,65 @@
+// endpoint_set_session_remote_control.proto — SetSessionRemoteControl: turn
+// the session's Remote Control bridge on or off.
+//
+// THE BRIDGE IS THE VENDOR'S. The vendor binary the shim drives connects the
+// session to claude.ai itself (the SDK's `remote_control` control request), so
+// the session runs on this machine and claude.ai, or its mobile app, attaches
+// to it. Prompts typed there reach the vendor directly, past the daemon's
+// submit pipeline; the shim adopts the turns they start
+// (conversation.v1.PROMPT_ORIGIN_REMOTE_CONTROL).
+//
+// THE SETTING OUTLIVES THE VENDOR PROCESS, NOT THE SHIM. The shim holds the
+// request's state and puts it in force on every vendor process it opens for the
+// session from now on (a resume after a rollback or a compaction included), so
+// the daemon sends it once per shim: after StartSession, and on every change.
+//
+// THE SAME claude.ai SESSION ACROSS SHIMS. The bridge's session id the answer
+// states is the daemon's to keep; passed back as `reattach_bridge_session_id`
+// on the next shim's request, it re-binds that claude.ai session rather than
+// listing a new one.
+
+syntax = "proto3";
+
+package shim.v1;
+
+option go_package = "agentrepl/proto/shim/v1;shimv1";
+
+message SetSessionRemoteControlRequest {
+  // On or off.
+  bool enabled = 1;
+  // The name claude.ai lists the session under. Required when `enabled`: the
+  // workspace's name, as the sidebar draws it.
+  string name = 2;
+  // The bridge session a previous shim of this workspace answered, to re-bind
+  // rather than create. Ignored when not `enabled`.
+  optional string reattach_bridge_session_id = 3;
+}
+
+message SetSessionRemoteControlResponse {
+  oneof result {
+    SetSessionRemoteControlSuccess success = 1;
+    SetSessionRemoteControlFailure failure = 2;
+  }
+}
+
+// The bridge is in the requested state.
+message SetSessionRemoteControlSuccess {
+  // Whether the bridge is now on.
+  bool enabled = 1;
+  // The bridge's claude.ai session id. Set when `enabled`, empty otherwise.
+  string bridge_session_id = 2;
+}
+
+message SetSessionRemoteControlFailure {
+  oneof cause {
+    // The shim holds no session to bridge.
+    SetSessionRemoteControlNoSession no_session = 1;
+    // The vendor refused the request (Remote Control disabled by policy, the
+    // account not eligible, the bridge failing to connect).
+    SetSessionRemoteControlVendorRefused vendor_refused = 2;
+  }
+  // The cause, verbatim.
+  string detail = 3;
+}
+message SetSessionRemoteControlNoSession {}
+message SetSessionRemoteControlVendorRefused {}

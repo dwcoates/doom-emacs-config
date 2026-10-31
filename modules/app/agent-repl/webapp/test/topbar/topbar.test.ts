@@ -43,6 +43,7 @@ function view(overrides: Partial<TopbarView> = {}): TopbarView {
     },
     context: { text: "142.3k", breakdown: { sections: [] } },
     warnings: { warnings: [] },
+    remoteControl: { mode: { case: "off", value: {} }, tooltip: { text: "remote control off" } },
     persistentWifi: {
       wifi: { case: "joined", value: {} },
       mode: { case: "off", value: {} },
@@ -66,6 +67,7 @@ function sessionlessView(reason: string, context = "0"): TopbarView {
     connectivity: { tone: "none", glyph: "○", title: "no session" },
     context: { text: context, breakdown: { sections: [{ heading: { text: reason }, rows: [] }] } },
     warnings: { warnings: [{ line: { text: reason } }] },
+    remoteControl: { mode: { case: "off", value: {} }, tooltip: { text: "remote control off" } },
     persistentWifi: {
       wifi: { case: "joined", value: {} },
       mode: { case: "off", value: {} },
@@ -113,13 +115,36 @@ describe("drawTopbarView", () => {
     expect(openPanel(host)?.textContent).toBe("session abc");
   });
 
-  it("places the persistent-wifi chip between the context chip and the warning chip", () => {
+  it("places the warning chip immediately right of the persistent-wifi chip", () => {
     const { tc } = topbarContext();
     const row = drawTopbarView(view({ warnings: sessionlessView("parked").warnings }), tc);
     const right = [...(row.querySelector(".topbar-right")?.children ?? [])];
     const at = (cls: string): number => right.findIndex((el) => el.classList.contains(cls));
-    expect([at("topbar-wifi") === at("topbar-context") + 1, at("topbar-warnings") === at("topbar-wifi") + 1])
-      .toEqual([true, true]);
+    expect(at("topbar-warnings")).toBe(at("topbar-wifi") + 1);
+  });
+
+  it("places the remote-control chip immediately left of the persistent-wifi chip", () => {
+    const { tc } = topbarContext();
+    const right = [...(drawTopbarView(view(), tc).querySelector(".topbar-right")?.children ?? [])];
+    const at = (cls: string): number => right.findIndex((el) => el.classList.contains(cls));
+    expect(at("topbar-remote-control")).toBe(at("topbar-wifi") - 1);
+  });
+
+  it("places the remote-control chip right of the context chip", () => {
+    const { tc } = topbarContext();
+    const right = [...(drawTopbarView(view(), tc).querySelector(".topbar-right")?.children ?? [])];
+    const at = (cls: string): number => right.findIndex((el) => el.classList.contains(cls));
+    expect(at("topbar-remote-control")).toBe(at("topbar-context") + 1);
+  });
+
+  it("draws the remote-control chip for a workspace with no session", () => {
+    const { tc } = topbarContext();
+    expect(drawTopbarView(sessionlessView("parked"), tc).querySelector(".topbar-remote-control")).not.toBeNull();
+  });
+
+  it("refuses a view with no remote-control chip", () => {
+    const { tc } = topbarContext();
+    expect(() => drawTopbarView(view({ remoteControl: undefined }), tc)).toThrow(MalformedView);
   });
 
   it("refuses a view with no persistent-wifi chip", () => {
@@ -965,7 +990,7 @@ describe("the no-session cells", () => {
       declaration(".topbar-model[data-no-session],\n.topbar-effort[data-no-session],\n.topbar-effort[data-effort-unsupported],\n.topbar-mode[data-no-session]", "padding-block"),
     ).toBe(
       declaration(
-        ".topbar-model-button,\n.topbar-effort-button,\n.topbar-mode-button,\n.topbar-context-figure,\n.topbar-wifi-button,\n.topbar-warning-chip",
+        ".topbar-model-button,\n.topbar-effort-button,\n.topbar-mode-button,\n.topbar-context-figure,\n.topbar-remote-control-button,\n.topbar-wifi-button,\n.topbar-warning-chip",
         "padding-block",
       ),
     );
@@ -975,7 +1000,7 @@ describe("the no-session cells", () => {
   // `padding` shorthand would quietly win over it for that one cell.
   it.each([
     ".topbar-model[data-no-session],\n.topbar-effort[data-no-session],\n.topbar-effort[data-effort-unsupported],\n.topbar-mode[data-no-session]",
-    ".topbar-model-button,\n.topbar-effort-button,\n.topbar-mode-button,\n.topbar-context-figure,\n.topbar-wifi-button,\n.topbar-warning-chip",
+    ".topbar-model-button,\n.topbar-effort-button,\n.topbar-mode-button,\n.topbar-context-figure,\n.topbar-remote-control-button,\n.topbar-wifi-button,\n.topbar-warning-chip",
   ])("leaves the inline inset of %s to the group", (selector) => {
     expect(withoutBlockComments(ruleBody(selector))).not.toMatch(/(?:^|[;\s])padding(?:-inline)?(?:-left|-right)?\s*:/);
   });

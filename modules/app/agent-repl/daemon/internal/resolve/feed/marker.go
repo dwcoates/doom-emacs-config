@@ -30,6 +30,8 @@ const (
 	markerLabelInterrupted = "interrupted"
 	markerLabelPlanFailed  = "plan failed"
 	markerLabelDeniedByYou = "permission denied by you"
+	// markerLabelAnsweredRemotely is an ask answered on claude.ai.
+	markerLabelAnsweredRemotely = "answered on claude.ai"
 	// markerLabelCompactionFailed is a failed compaction's label.
 	markerLabelCompactionFailed = "compaction failed"
 	// compactionFailedType is a failed compaction's error type: the
@@ -57,6 +59,12 @@ func planFailedMarker(reason string) *frontendv1.FeedOutcomeMarker {
 // deniedByYouMarker is the user's denial's neutral marker.
 func deniedByYouMarker() *frontendv1.FeedOutcomeMarker {
 	return neutralMarker(markerLabelDeniedByYou, "")
+}
+
+// answeredRemotelyMarker is the neutral marker of an ask answered on
+// claude.ai: the user's own act, taken elsewhere.
+func answeredRemotelyMarker() *frontendv1.FeedOutcomeMarker {
+	return neutralMarker(markerLabelAnsweredRemotely, "")
 }
 
 // ending is everything a turn's ending marker is composed from.

@@ -122,6 +122,43 @@ message TopbarView {
   // the title is unset. ALWAYS SET: every workspace has a name, summarized or
   // not.
   TopbarWorkspaceName workspace_name = 15;
+  // The remote-control chip, immediately left of the persistent-wifi chip.
+  // ALWAYS SET: every workspace has a remote-control mode, on or off.
+  TopbarRemoteControl remote_control = 16;
+}
+
+// THE REMOTE-CONTROL CHIP: one phone glyph stating whether this workspace's
+// session is reachable from claude.ai (and its mobile app) through the
+// vendor's Remote Control bridge. Drawn as the persistent-wifi chip is: the
+// glyph is always black, and the mode arm paints the disc it sits on.
+//   mode:  on → a green disc; off → a white one.
+//
+// A STATUS AND A CONTROL: clicking the chip turns the mode over through
+// UpdateRemoteControlMode's `toggle` arm, the same endpoint and arm the
+// editor's toggle command sends. The chip draws nothing on success; it
+// redraws from the next push.
+//
+// THE MODE IS THE WORKSPACE'S, kept by the daemon: on by default for a
+// repository's main worktree, off by default for every other workspace, and
+// whatever the user last set otherwise. A workspace whose mode is on keeps its
+// shim up between keep-alives, until its idle cutoff hibernates it.
+message TopbarRemoteControl {
+  // Whether remote control is on for the workspace.
+  oneof mode {
+    TopbarRemoteControlModeOn on = 1;
+    TopbarRemoteControlModeOff off = 2;
+  }
+  // The hover text, composed by the daemon.
+  TopbarRemoteControlTooltip tooltip = 3;
+}
+// Remote control is on: the glyph sits on a green disc.
+message TopbarRemoteControlModeOn {}
+// Remote control is off: the glyph sits on a white disc.
+message TopbarRemoteControlModeOff {}
+// The chip's hover text.
+message TopbarRemoteControlTooltip {
+  // Drawn verbatim.
+  string text = 1;
 }
 
 // THE PERSISTENT-WIFI CHIP: one wifi glyph stating two facts about the

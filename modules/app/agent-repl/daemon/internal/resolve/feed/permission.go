@@ -89,7 +89,9 @@ func (r *resolver) drawPermission(s *wsState, agent *conversationv1.AgentId, p *
 		decisionArm(frame.Success)(answered)
 		card.State = &frontendv1.FeedPermission_Answered{Answered: answered}
 		// A DENIED CALL NEVER RAN, so its own card says denied rather than
-		// sitting running forever waiting on a tool that will not start.
+		// sitting running forever waiting on a tool that will not start. An
+		// ask answered on claude.ai marks nothing: its decision is not
+		// relayed, and the call's own card states whether it ran.
 		if denied, ok := frame.Success.GetDecision().(*conversationv1.AgentPermissionSuccess_Denied); ok {
 			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "denied, ok := frame.Success.GetDecision().(*conversationv1.AgentPermissionSuccess_Denied); ok"})
 			// The unit is joined by id: `gated_call` when the frame names one,
@@ -236,6 +238,8 @@ func decisionArm(success *conversationv1.AgentPermissionSuccess) permissionAnswe
 			}
 			return deniedUndecidableAnswer(text)
 		}
+	case *conversationv1.AgentPermissionSuccess_AnsweredRemotely:
+		return answeredRemotelyAnswer()
 	}
 	return deniedByPolicyAnswer("denied")
 }
@@ -270,6 +274,25 @@ func deniedByUserAnswer() permissionAnswer {
 	return func(a *frontendv1.FeedPermissionAnswered) {
 		a.Answer = &frontendv1.FeedPermissionAnswered_DeniedByUser{
 			DeniedByUser: &frontendv1.FeedPermissionDeniedByUser{Marker: deniedByYouMarker()},
+		}
+	}
+}
+
+// answeredRemotelyAnswer is an ask answered on claude.ai, through the
+// session's Remote Control bridge: SETTLED, and no longer the reader's to
+// answer here, but with no decision to draw, because the vendor relays none.
+//
+// IT RIDES THE NEUTRAL MARKER ARM. frontend.v1.FeedPermissionAnswered carries
+// no arm of its own for a remote answer (a contract gap, reported), and the
+// user's own refusal is the one arm whose badge is a daemon-worded neutral
+// marker rather than a verdict: drawn there, the card reads "answered on
+// claude.ai" in a muted badge, says nothing about which way, and marks no call
+// denied (drawPermission). An allowing arm would claim consent nobody saw, and
+// the policy arms draw red.
+func answeredRemotelyAnswer() permissionAnswer {
+	return func(a *frontendv1.FeedPermissionAnswered) {
+		a.Answer = &frontendv1.FeedPermissionAnswered_DeniedByUser{
+			DeniedByUser: &frontendv1.FeedPermissionDeniedByUser{Marker: answeredRemotelyMarker()},
 		}
 	}
 }

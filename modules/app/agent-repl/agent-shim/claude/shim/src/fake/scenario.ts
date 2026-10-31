@@ -403,6 +403,13 @@ export interface ScenarioContext {
    * a vendor turn answering it, ahead of that query's first send.
    */
   armStopOnRewind(): void;
+  /**
+   * A person types `text` on claude.ai through the session's Remote Control
+   * bridge: the vendor queues it itself, past the shim's input, and runs it as
+   * a turn of its own once the turn running now has ended. Answers the uuid
+   * it runs under, or absence when the bridge is off (nothing can arrive).
+   */
+  injectRemotePrompt(text: string): string | undefined;
 
   // -- logging -------------------------------------------------------------
   /** Log through `src/log.ts`. Every branch of every scenario logs. */

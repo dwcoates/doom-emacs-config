@@ -270,6 +270,12 @@ message AgentPermissionSuccess {
     AgentPermissionDenied denied = 2;
     // Tag 3 is RETIRED: the vendor declares permission prompts have NO park
     // deadline (vetting item 1), so an expiry arm had no producer.
+    // Answered on claude.ai, through the session's Remote Control bridge,
+    // before anyone answered here: the vendor withdrew its ask from this host
+    // (a control_cancel_request). The decision itself is not relayed, so this
+    // arm states only WHERE it was decided; the gated call's own outcome (it
+    // runs, or its result is the denial) says which way.
+    AgentPermissionAnsweredRemotely answered_remotely = 5;
   }
   // When the gate was decided, with the instant the ask was posed restated
   // (AgentActivitySettledAt.started_at), so the settled frame alone states how
@@ -279,6 +285,9 @@ message AgentPermissionSuccess {
   // measured against its own clock.
   optional AgentActivitySettledAt settled_at = 4;
 }
+
+// The ask was answered on claude.ai, not here.
+message AgentPermissionAnsweredRemotely {}
 
 // Consent was given. The set arm is its scope.
 message AgentPermissionAllowed {

@@ -253,8 +253,10 @@ type Act struct {
 
 // Queue is the delivery path's whole surface.
 type Queue interface {
-	// ReviveForSettings starts WS's shim for an effort pick, which holds no
-	// row (a model or permission-mode pick is held by SubmitSessionAct and
+	// ReviveForSettings starts WS's shim for a pick that holds no row -- an
+	// effort pick, or remote control turned on (workspace
+	// UpdateRemoteControlMode) -- (a model or permission-mode pick is held by
+	// SubmitSessionAct and
 	// starts it there). It returns at once; a shim already up is no change,
 	// and a revival in flight is joined. ErrNoSession when the queue has no
 	// revival wired.
@@ -333,10 +335,12 @@ type Queue interface {
 	// OnTurnEnded is the LifecycleSink's turn end: pop the queue and deliver
 	// the next prompt.
 	OnTurnEnded(ws ids.WorkspaceID, turn ids.TurnID, how sessionwatcher.TurnClose)
-	// OnTurnAdopted is the LifecycleSink's vendor-started turn: its durable
-	// row is recorded and the roster takes its turn fact, exactly as for a
-	// turn the queue delivered, so its end closes through the one door.
-	OnTurnAdopted(ws ids.WorkspaceID, turn ids.TurnID)
+	// OnTurnAdopted is the LifecycleSink's adopted turn (vendor-started, or
+	// started by a prompt typed on claude.ai): its durable row is recorded,
+	// under the origin and words its prompt row stated, and the roster takes
+	// its turn fact, exactly as for a turn the queue delivered, so its end
+	// closes through the one door.
+	OnTurnAdopted(ws ids.WorkspaceID, adopted sessionwatcher.AdoptedTurn)
 	// OnTurnsEndedUnobserved is the LifecycleSink's adoption reconciliation:
 	// each turn ended while no daemon was watching, so its durable row is
 	// closed as orphaned. Nothing is popped or delivered: none of them was the

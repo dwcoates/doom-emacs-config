@@ -283,6 +283,7 @@ structurally; see the commentary above."
        :desc "Register repository from file"       "."   #'agent-repl-register-repository
        :desc "Bind workspace to a conversation"    "c"   #'agent-repl-bind-conversation
        :desc "Toggle persistent wifi mode"         "w"   #'agent-repl-persistent-wifi-mode-toggle
+       :desc "Toggle remote control (claude.ai)"   "C"   #'agent-repl-remote-control-toggle
        (:prefix ("h" . "help")
         :desc "Copy workspace name" "y" #'agent-repl-copy-workspace-name)
        (:prefix ("e" . "explain")

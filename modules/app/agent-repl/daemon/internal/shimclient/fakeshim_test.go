@@ -275,6 +275,11 @@ func (f *fakeShim) SetSessionEffort(_ context.Context, _ *connect.Request[shimv1
 	return connect.NewResponse(&shimv1.SetSessionEffortResponse{}), nil
 }
 
+func (f *fakeShim) SetSessionRemoteControl(_ context.Context, _ *connect.Request[shimv1.SetSessionRemoteControlRequest]) (*connect.Response[shimv1.SetSessionRemoteControlResponse], error) {
+	f.record("SetSessionRemoteControl")
+	return connect.NewResponse(&shimv1.SetSessionRemoteControlResponse{}), nil
+}
+
 func (f *fakeShim) SetSessionPermissionMode(_ context.Context, _ *connect.Request[shimv1.SetSessionPermissionModeRequest]) (*connect.Response[shimv1.SetSessionPermissionModeResponse], error) {
 	f.record("SetSessionPermissionMode")
 	return connect.NewResponse(&shimv1.SetSessionPermissionModeResponse{}), nil

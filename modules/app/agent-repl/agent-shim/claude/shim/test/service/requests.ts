@@ -63,6 +63,10 @@ export function setSessionPermissionModeRequest(): shimv1.SetSessionPermissionMo
   return create(shimv1.SetSessionPermissionModeRequestSchema, { permissionMode: permissionMode() });
 }
 
+export function setSessionRemoteControlRequest(): shimv1.SetSessionRemoteControlRequest {
+  return create(shimv1.SetSessionRemoteControlRequestSchema, { enabled: true, name: "parser-fix" });
+}
+
 export function hibernateRequest(): shimv1.HibernateRequest {
   return create(shimv1.HibernateRequestSchema, {});
 }

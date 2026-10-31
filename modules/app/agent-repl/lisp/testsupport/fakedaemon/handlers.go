@@ -289,6 +289,10 @@ func (s *fakeServer) UpdatePersistentWifiMode(ctx context.Context, req *connect.
 	return handleUnary[v1.UpdatePersistentWifiModeRequest, v1.UpdatePersistentWifiModeResponse](ctx, s, "UpdatePersistentWifiMode", req.Msg)
 }
 
+func (s *fakeServer) UpdateRemoteControlMode(ctx context.Context, req *connect.Request[v1.UpdateRemoteControlModeRequest]) (*connect.Response[v1.UpdateRemoteControlModeResponse], error) {
+	return handleUnary[v1.UpdateRemoteControlModeRequest, v1.UpdateRemoteControlModeResponse](ctx, s, "UpdateRemoteControlMode", req.Msg)
+}
+
 func (s *fakeServer) RetryVendorError(ctx context.Context, req *connect.Request[v1.RetryVendorErrorRequest]) (*connect.Response[v1.RetryVendorErrorResponse], error) {
 	return handleUnary[v1.RetryVendorErrorRequest, v1.RetryVendorErrorResponse](ctx, s, "RetryVendorError", req.Msg)
 }

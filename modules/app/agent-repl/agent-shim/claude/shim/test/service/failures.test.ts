@@ -215,6 +215,56 @@ describe("setSessionEffortRefused", () => {
   });
 });
 
+describe("setSessionRemoteControlFailure", () => {
+  it.each([["noSession"], ["vendorRefused"]] as const)("states the %s arm", (kind) => {
+    // Arrange, Act.
+    const failure = failures.setSessionRemoteControlFailure({ kind }, "why");
+
+    // Assert.
+    expect(failure.cause.case).toBe(kind);
+  });
+
+  it("carries the detail", () => {
+    // Arrange, Act.
+    const failure = failures.setSessionRemoteControlFailure({ kind: "vendorRefused" }, "disabled by policy");
+
+    // Assert.
+    expect(failure.detail).toBe("disabled by policy");
+  });
+});
+
+describe("setSessionRemoteControlRefused", () => {
+  it("wraps the failure as the response's failure arm", () => {
+    // Arrange, Act.
+    const response = failures.setSessionRemoteControlRefused({ kind: "noSession" }, "no");
+
+    // Assert.
+    expect(response.result.case).toBe("failure");
+  });
+});
+
+describe("setSessionRemoteControlSucceeded", () => {
+  it("states an ON bridge with its claude.ai session id", () => {
+    // Arrange, Act.
+    const response = failures.setSessionRemoteControlSucceeded({ enabled: true, bridgeSessionId: "session_1" });
+
+    // Assert.
+    expect(response.result.case === "success" ? response.result.value : undefined).toEqual(
+      containing({ enabled: true, bridgeSessionId: "session_1" }),
+    );
+  });
+
+  it("states an OFF bridge with no session id", () => {
+    // Arrange, Act.
+    const response = failures.setSessionRemoteControlSucceeded({ enabled: false });
+
+    // Assert.
+    expect(response.result.case === "success" ? response.result.value : undefined).toEqual(
+      containing({ enabled: false, bridgeSessionId: "" }),
+    );
+  });
+});
+
 describe("hibernateError", () => {
   it.each([["turnInFlight"], ["noSession"]] as const)("states the %s arm", (kind) => {
     // Arrange, Act.

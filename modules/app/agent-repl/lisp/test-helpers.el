@@ -1051,6 +1051,21 @@ suites to it)."
       (other (error "Unknown page-unloading answer %S" other)))
     t))
 
+(defconst agent-repl-test--log-echo-regexp
+  "\\`[0-9][0-9]:[0-9][0-9]:[0-9][0-9]\\.[0-9][0-9][0-9] \\[agent-repl\\] "
+  "Matches a log record as the batch logger echoes it through `message'.
+The prefix is `agent-repl--build-log-text's: the record's time, then
+\"[agent-repl] \", at every level (a warning's level follows the prefix).")
+
+(defun agent-repl-test--said (messages)
+  "Return MESSAGES without the log records the batch logger echoed among them.
+In batch every log record is also a `message', so a suite that records
+`message' to read what the user was told reads the log's echoes too.  Order
+is kept.  THE ONE such filter every suite uses (test-test-helpers.el holds
+every suite to it)."
+  (cl-remove-if (lambda (m) (string-match-p agent-repl-test--log-echo-regexp m))
+                messages))
+
 (defmacro agent-repl-test--record-into (place)
   "A stand-in for a logging rung that records each record's text into PLACE.
 The lambda takes the rung's arguments (SCOPE FMT &rest ARGS), formats the

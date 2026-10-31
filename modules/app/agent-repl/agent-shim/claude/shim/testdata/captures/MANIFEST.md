@@ -378,6 +378,14 @@ the narrower/alternate state**:
   captures. No divergence found; no fake code change was needed.
 - `!md` — a webapp markdown-rendering demo, not a vendor shape at all; no
   capture could ground it.
+- `!remote-prompt`, `!remote-interrupt`, `!perm-answered-remotely`,
+  `!perm-remote-interrupt` — declared Remote Control shapes (2026-10-31): a
+  prompt typed on claude.ai that the vendor queues itself and echoes under
+  `--replay-user-messages`, a stop pressed there that ends the turn inside the
+  vendor, and an ask withdrawn from this host (`control_cancel_request`) when
+  claude.ai answered it or its turn was stopped. Read from the pinned CLI
+  binary (`src/fake/scenarios/remote.ts`); the capture harness has no bridge,
+  so no capture records a bridged session.
 
 **UNGROUNDED — declared taxonomy arm, unrecordable by a successful capture
 (the capture harness's own rule: "a failed run is never a golden")**:

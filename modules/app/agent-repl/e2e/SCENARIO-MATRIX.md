@@ -170,10 +170,12 @@ Two further limits, stated rather than hidden:
 | `!perm-allow-once` | grounded | — | — | — | ✓ | ✓ | answer-path | Both halves are pinned by its goldens (frames.json, feed.json); the `answer-path` seam is wired by TestPermissionAskAnsweredArms. | covered |
 | `!perm-allow-standing` | grounded | permission_e2e_test.go | — | — | ✓ | ✓ | answer-path | Go: TestPermissionAskAnsweredArms/AllowStanding asserts AllowedStanding()!=nil. | covered |
 | `!perm-allow-standing-mode` | grounded | — | cards.layer.test.ts | — | — | — | — | Go: TestPermissionModeChangedMidSession asserts exact topbar PermissionModePicker.Current.Mode==accept_edits. Web: cards.layer asserts [data-permission=allowStanding] selector. | covered |
+| `!perm-answered-remotely` | ungrounded | — | — | — | — | — | — | No counted e2e layer drives this scenario, and its halves are not both pinned with a wired seam. | uncovered |
 | `!perm-deny-policy` | grounded | — | cards.layer.test.ts | — | ✓ | ✓ | answer-path | Go: TestPermissionDeniedByPolicy asserts DeniedByPolicy()!=nil, sawOpen false. Web: cards.layer asserts a new tool-call row and zero refusalArms. | covered |
 | `!perm-deny-user` | grounded | — | — | — | ✓ | ✓ | answer-path | Both halves are pinned by its goldens (frames.json, feed.json); the `answer-path` seam is wired by TestPermissionAskAnsweredArms. | covered |
 | `!perm-hold` | grounded | daemonstop_e2e_test.go | cards.layer.test.ts | emacs_roster_e2e_test.go | — | — | — | Go: TestPermissionUndecidableParked asserts ask stays Open, no push while parked, then Interrupted. Web: cards.layer asserts [data-permission] buttons/.perm-waiting. Emacs: TestEmacsPermissionAskFiresTheAttentionMarker pins exact blink-schedule sequence. | covered |
 | `!perm-no-standing` | ungrounded | — | — | — | — | — | — | No counted e2e layer drives this scenario. | uncovered |
+| `!perm-remote-interrupt` | ungrounded | — | — | — | — | — | — | No counted e2e layer drives this scenario, and its halves are not both pinned with a wired seam. | uncovered |
 | `!perm-undecidable` | ungrounded | — | cards.layer.test.ts | — | ✓ | ✓ | answer-path | Both halves pinned, seam answer-path wired. | covered |
 | `!plan` | grounded | remainder_e2e_test.go | — | — | ✓ | ✓ | two-plane-episode | Go: TestPlanModeEnterExit asserts FeedPlan.Planned non-nil with non-empty Prose/Edit.Path. | covered |
 | `!push-config-off` | grounded | — | — | — | ✓ | ✓ | stream-tool-card | Both halves are pinned by its goldens (frames.json, feed.json); the `stream-tool-card` seam is wired by TestBashForegroundCompleted. | covered |
@@ -194,6 +196,8 @@ Two further limits, stated rather than hidden:
 | `!read-truncated` | ungrounded | — | — | — | ✓ | ✓ | stream-tool-card | Both halves are pinned by its goldens (frames.json, feed.json); the `stream-tool-card` seam is wired by TestBashForegroundCompleted. | covered |
 | `!refusal-fallback` | ungrounded | — | — | — | ✓ | ✓ | turn-failure | Both halves are pinned by its goldens (frames.json, feed.json); the `turn-failure` seam is wired by TestApiRateLimitedCarriesTheVendorWait. | covered |
 | `!refusal-no-fallback` | ungrounded | — | — | — | ✓ | ✓ | turn-failure | Both halves are pinned by its goldens (frames.json, feed.json); the `turn-failure` seam is wired by TestApiRateLimitedCarriesTheVendorWait. | covered |
+| `!remote-interrupt` | ungrounded | — | — | — | — | — | — | No counted e2e layer drives this scenario, and its halves are not both pinned with a wired seam. | uncovered |
+| `!remote-prompt` | ungrounded | — | — | — | — | — | — | No counted e2e layer drives this scenario, and its halves are not both pinned with a wired seam. | uncovered |
 | `!residue` | ungrounded | producerfaults_e2e_test.go | — | — | ✓ | ✓ | two-plane-episode | Go: TestResidueAttachmentsDrawNoRow asserts the specific negative the arms line demands — the turn's row set is exactly prompt + response + terminal, so neither `deferred_tools_delta` nor `agent_listing_delta` reached any conversation.v1 arm. | covered |
 | `!rotate` | grounded | identityrotation_e2e_test.go | — | — | ✓ | ✓ | clear-rotation | Go: TestClearRotatesIdentity/TestSecondRotateUnderRotatedIdentity assert exact new session-line value, distinct Cleared rows. | covered |
 | `!send-message` | grounded | — | — | — | ✓ | ✓ | stream-tool-card | Both halves are pinned by its goldens (frames.json, feed.json); the `stream-tool-card` seam is wired by TestBashForegroundCompleted. | covered |
@@ -245,8 +249,8 @@ wrong: the by-layer lines once read 33 and 5 where the table's columns held
 - Seam families: 18, each wired by its e2e test
 - Covered (at least one STRONG, specific-shape assertion in a counted layer, or both halves pinned with a wired seam): **146**
 - Weak (a counted layer drives the scenario but only asserts turn-completion or a non-specific field, never a named arm/shape): **0**
-- Uncovered (no counted layer drives the scenario, and its halves are not both pinned with a wired seam): **7**
-- Total canonical scenarios: 153
+- Uncovered (no counted layer drives the scenario, and its halves are not both pinned with a wired seam): **11**
+- Total canonical scenarios: 157
 
 By layer, scenarios with at least one hit:
 - Go e2e (non-emacs): 44 scenarios referenced across 27 files
@@ -267,8 +271,12 @@ each row's `Strongest assertion` cell, which is where a reader can act on it.
 <!-- BEGIN DERIVED: uncovered -->
 
 - `!bash-rereported`
+- `!perm-answered-remotely`
 - `!perm-no-standing`
+- `!perm-remote-interrupt`
 - `!rate-limit-five-hour`
+- `!remote-interrupt`
+- `!remote-prompt`
 - `!slash-shape-a`
 - `!subagent-network-failed`
 - `!subagent-resumed`
@@ -332,6 +340,7 @@ plan.
 | `!send-message-resumed` / `!send-message-refused` | No capture addresses a subagent (resume or refusal case). | Captures of a `SendMessage` call landing on an idle (resume) and a user-stopped (refusal) recipient. |
 | `!fail-execution` / `!fail-stop-hook` / `!fail-structured-output` | DECLARED-ONLY: each has a same-named capture, but that capture ended on a DIFFERENT terminal than the one the scenario declares (`success.interrupted`/`success.completed`/`success.completed` respectively, not the failure terminal). | A re-capture of each run engineered to actually reach its intended failure terminal, the same way `compaction-directed` was re-captured to actually compact. |
 | `e2e-fail-this-turn` (marker) | Producer-side failure marker; no capture reaches it by construction. | Not captureable — it's a synthetic gate for the daemon's merge-pipeline test, not a vendor shape. |
+| `!remote-prompt` / `!remote-interrupt` / `!perm-answered-remotely` / `!perm-remote-interrupt` | Modeled from the SDK's minified code. The 2026-10-31 spike watched each behavior on a live Remote Control bridge but recorded no capture. | A capture run against a live Remote Control bridge while a phone sends a prompt, answers an ask, and presses stop. |
 
 ## (e) Dead triggers
 

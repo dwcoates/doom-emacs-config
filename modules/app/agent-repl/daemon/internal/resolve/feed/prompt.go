@@ -436,6 +436,11 @@ func AuthorLabel(origin conversationv1.PromptOrigin) string {
 		// any other reader from naming the user as the author of a turn the
 		// vendor began on its own.
 		return "Vendor"
+	case conversationv1.PromptOrigin_PROMPT_ORIGIN_REMOTE_CONTROL:
+		// THE USER SAID IT, on claude.ai rather than here: the shim adopted
+		// the turn the prompt started (promptorigin.Adopted), and its row is
+		// drawn as any prompt the user typed is.
+		return "You"
 	}
 	return "You"
 }

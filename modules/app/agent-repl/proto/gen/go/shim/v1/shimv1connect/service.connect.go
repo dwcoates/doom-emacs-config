@@ -50,6 +50,9 @@ const (
 	// ShimSetSessionPermissionModeProcedure is the fully-qualified name of the Shim's
 	// SetSessionPermissionMode RPC.
 	ShimSetSessionPermissionModeProcedure = "/shim.v1.Shim/SetSessionPermissionMode"
+	// ShimSetSessionRemoteControlProcedure is the fully-qualified name of the Shim's
+	// SetSessionRemoteControl RPC.
+	ShimSetSessionRemoteControlProcedure = "/shim.v1.Shim/SetSessionRemoteControl"
 	// ShimHibernateProcedure is the fully-qualified name of the Shim's Hibernate RPC.
 	ShimHibernateProcedure = "/shim.v1.Shim/Hibernate"
 	// ShimSendKeepaliveProcedure is the fully-qualified name of the Shim's SendKeepalive RPC.
@@ -108,6 +111,7 @@ var (
 	shimSetSessionModelMethodDescriptor          = shimServiceDescriptor.Methods().ByName("SetSessionModel")
 	shimSetSessionEffortMethodDescriptor         = shimServiceDescriptor.Methods().ByName("SetSessionEffort")
 	shimSetSessionPermissionModeMethodDescriptor = shimServiceDescriptor.Methods().ByName("SetSessionPermissionMode")
+	shimSetSessionRemoteControlMethodDescriptor  = shimServiceDescriptor.Methods().ByName("SetSessionRemoteControl")
 	shimHibernateMethodDescriptor                = shimServiceDescriptor.Methods().ByName("Hibernate")
 	shimSendKeepaliveMethodDescriptor            = shimServiceDescriptor.Methods().ByName("SendKeepalive")
 	shimRetryVendorErrorNowMethodDescriptor      = shimServiceDescriptor.Methods().ByName("RetryVendorErrorNow")
@@ -155,6 +159,10 @@ type ShimClient interface {
 	SetSessionEffort(context.Context, *connect.Request[v1.SetSessionEffortRequest]) (*connect.Response[v1.SetSessionEffortResponse], error)
 	// Change the session's permission mode for every gate from now on.
 	SetSessionPermissionMode(context.Context, *connect.Request[v1.SetSessionPermissionModeRequest]) (*connect.Response[v1.SetSessionPermissionModeResponse], error)
+	// Turn the session's Remote Control bridge (claude.ai) on or off. Holds for
+	// every vendor process the shim opens from now on. See
+	// endpoint_set_session_remote_control.proto.
+	SetSessionRemoteControl(context.Context, *connect.Request[v1.SetSessionRemoteControlRequest]) (*connect.Response[v1.SetSessionRemoteControlResponse], error)
 	// The pre-hibernation directive: the shim compacts, then acks; the daemon
 	// stands the shim down only after the ack. See endpoint_hibernate.proto.
 	Hibernate(context.Context, *connect.Request[v1.HibernateRequest]) (*connect.Response[v1.HibernateResponse], error)
@@ -276,6 +284,12 @@ func NewShimClient(httpClient connect.HTTPClient, baseURL string, opts ...connec
 			httpClient,
 			baseURL+ShimSetSessionPermissionModeProcedure,
 			connect.WithSchema(shimSetSessionPermissionModeMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
+		setSessionRemoteControl: connect.NewClient[v1.SetSessionRemoteControlRequest, v1.SetSessionRemoteControlResponse](
+			httpClient,
+			baseURL+ShimSetSessionRemoteControlProcedure,
+			connect.WithSchema(shimSetSessionRemoteControlMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
 		hibernate: connect.NewClient[v1.HibernateRequest, v1.HibernateResponse](
@@ -426,6 +440,7 @@ type shimClient struct {
 	setSessionModel          *connect.Client[v1.SetSessionModelRequest, v1.SetSessionModelResponse]
 	setSessionEffort         *connect.Client[v1.SetSessionEffortRequest, v1.SetSessionEffortResponse]
 	setSessionPermissionMode *connect.Client[v1.SetSessionPermissionModeRequest, v1.SetSessionPermissionModeResponse]
+	setSessionRemoteControl  *connect.Client[v1.SetSessionRemoteControlRequest, v1.SetSessionRemoteControlResponse]
 	hibernate                *connect.Client[v1.HibernateRequest, v1.HibernateResponse]
 	sendKeepalive            *connect.Client[v1.SendKeepaliveRequest, v1.SendKeepaliveResponse]
 	retryVendorErrorNow      *connect.Client[v1.RetryVendorErrorNowRequest, v1.RetryVendorErrorNowResponse]
@@ -474,6 +489,11 @@ func (c *shimClient) SetSessionEffort(ctx context.Context, req *connect.Request[
 // SetSessionPermissionMode calls shim.v1.Shim.SetSessionPermissionMode.
 func (c *shimClient) SetSessionPermissionMode(ctx context.Context, req *connect.Request[v1.SetSessionPermissionModeRequest]) (*connect.Response[v1.SetSessionPermissionModeResponse], error) {
 	return c.setSessionPermissionMode.CallUnary(ctx, req)
+}
+
+// SetSessionRemoteControl calls shim.v1.Shim.SetSessionRemoteControl.
+func (c *shimClient) SetSessionRemoteControl(ctx context.Context, req *connect.Request[v1.SetSessionRemoteControlRequest]) (*connect.Response[v1.SetSessionRemoteControlResponse], error) {
+	return c.setSessionRemoteControl.CallUnary(ctx, req)
 }
 
 // Hibernate calls shim.v1.Shim.Hibernate.
@@ -613,6 +633,10 @@ type ShimHandler interface {
 	SetSessionEffort(context.Context, *connect.Request[v1.SetSessionEffortRequest]) (*connect.Response[v1.SetSessionEffortResponse], error)
 	// Change the session's permission mode for every gate from now on.
 	SetSessionPermissionMode(context.Context, *connect.Request[v1.SetSessionPermissionModeRequest]) (*connect.Response[v1.SetSessionPermissionModeResponse], error)
+	// Turn the session's Remote Control bridge (claude.ai) on or off. Holds for
+	// every vendor process the shim opens from now on. See
+	// endpoint_set_session_remote_control.proto.
+	SetSessionRemoteControl(context.Context, *connect.Request[v1.SetSessionRemoteControlRequest]) (*connect.Response[v1.SetSessionRemoteControlResponse], error)
 	// The pre-hibernation directive: the shim compacts, then acks; the daemon
 	// stands the shim down only after the ack. See endpoint_hibernate.proto.
 	Hibernate(context.Context, *connect.Request[v1.HibernateRequest]) (*connect.Response[v1.HibernateResponse], error)
@@ -730,6 +754,12 @@ func NewShimHandler(svc ShimHandler, opts ...connect.HandlerOption) (string, htt
 		ShimSetSessionPermissionModeProcedure,
 		svc.SetSessionPermissionMode,
 		connect.WithSchema(shimSetSessionPermissionModeMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
+	shimSetSessionRemoteControlHandler := connect.NewUnaryHandler(
+		ShimSetSessionRemoteControlProcedure,
+		svc.SetSessionRemoteControl,
+		connect.WithSchema(shimSetSessionRemoteControlMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
 	shimHibernateHandler := connect.NewUnaryHandler(
@@ -882,6 +912,8 @@ func NewShimHandler(svc ShimHandler, opts ...connect.HandlerOption) (string, htt
 			shimSetSessionEffortHandler.ServeHTTP(w, r)
 		case ShimSetSessionPermissionModeProcedure:
 			shimSetSessionPermissionModeHandler.ServeHTTP(w, r)
+		case ShimSetSessionRemoteControlProcedure:
+			shimSetSessionRemoteControlHandler.ServeHTTP(w, r)
 		case ShimHibernateProcedure:
 			shimHibernateHandler.ServeHTTP(w, r)
 		case ShimSendKeepaliveProcedure:
@@ -955,6 +987,10 @@ func (UnimplementedShimHandler) SetSessionEffort(context.Context, *connect.Reque
 
 func (UnimplementedShimHandler) SetSessionPermissionMode(context.Context, *connect.Request[v1.SetSessionPermissionModeRequest]) (*connect.Response[v1.SetSessionPermissionModeResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("shim.v1.Shim.SetSessionPermissionMode is not implemented"))
+}
+
+func (UnimplementedShimHandler) SetSessionRemoteControl(context.Context, *connect.Request[v1.SetSessionRemoteControlRequest]) (*connect.Response[v1.SetSessionRemoteControlResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("shim.v1.Shim.SetSessionRemoteControl is not implemented"))
 }
 
 func (UnimplementedShimHandler) Hibernate(context.Context, *connect.Request[v1.HibernateRequest]) (*connect.Response[v1.HibernateResponse], error) {

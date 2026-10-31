@@ -132,6 +132,7 @@
 (declare-function agent-repl-rpc-send-hidden-keepalives "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-update-sidebar-view "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-retry-vendor-error "agent-repl-rpc" (conn request &rest keys))
+(declare-function agent-repl-rpc-update-remote-control-mode "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-session-health "agent-repl-rpc" (conn request &rest keys))
 
 ;; Defined by roster.el.  Declared, never defined here.
@@ -985,6 +986,73 @@ shim did; a retry that was not scheduled is logged and says nothing."
        (agent-repl--info ws "elisp.verbs.retry-vendor-error ws=%s outcome=%S"
                          ws (plist-get outcome :arm))
        (when text (message "%s" text))))))
+
+;;;; ---- UpdateRemoteControlMode (`SPC j C') -----------------------------
+;;
+;; REMOTE CONTROL makes a workspace's session reachable from claude.ai and
+;; its mobile app through the vendor's Remote Control bridge.  The DAEMON
+;; owns the per-workspace mode (unset, it is on for a repository's main
+;; worktree and off otherwise) and resolves a toggle from the mode it reads
+;; at that moment, so the command sends the `toggle' arm and reports the
+;; mode the daemon says the request left.  The webapp's topbar chip is the
+;; same request.
+
+(defcustom agent-repl-remote-control-timeout-seconds 60
+  "Seconds `agent-repl-remote-control-toggle' waits for the daemon's answer.
+Turning the mode on for a workspace with no shim starts one, and a
+session bring-up can outlast an ordinary verb's deadline."
+  :type 'number
+  :group 'agent-repl)
+
+(defun agent-repl-verbs--remote-control-refusal-text (ws arm)
+  "Word the decoded UpdateRemoteControlMode refusal ARM for WS, or nil.
+Nil for the two handover arms, `transferring_away' and `not_yet_adopted',
+which are left to the generic refusal path and so to host.el's handover:
+they are a rollout's ordering, never a failure to show.  `vendor_refused'
+says the mode is recorded although the bridge did not come up."
+  (let ((v (plist-get arm :value)))
+    (pcase (plist-get arm :arm)
+      (:unknown-workspace
+       (format "remote control refused: the daemon does not know %s" ws))
+      (:workspace-ref-mismatch
+       (format "remote control refused: %s's identity is stale; the daemon registers it at %s"
+               ws (plist-get v :registry-dir)))
+      (:vendor-refused
+       (format "remote control for %s is recorded, but claude.ai refused the bridge: %s"
+               ws (plist-get v :detail)))
+      ((or :transferring-away :not-yet-adopted) nil)
+      (other (error "agent-repl-verbs: remote control refusal arm %S has no wording" other)))))
+
+(defun agent-repl-remote-control-toggle (&optional ws)
+  "Turn remote control over for WS, the current workspace by default.
+Remote control makes the workspace's session reachable from claude.ai and
+its mobile app.  The daemon reads the workspace's mode and turns it; the
+echo names the mode the request left, or why it was refused."
+  (interactive)
+  (let ((ws (or ws (agent-repl--ws-current-name))))
+    (when (or (null ws) (agent-repl--pseudo-workspace-name-p ws))
+      (agent-repl--info '(:agent-repl-central "the command found no workspace to address")
+                        "elisp.verbs.remote-control-no-workspace ws=%S" ws)
+      (user-error "agent-repl: no current workspace to turn remote control over for"))
+    (agent-repl-verbs--send
+     #'agent-repl-rpc-update-remote-control-mode (agent-repl-verbs--conn ws)
+     (list :workspace (agent-repl-verbs--ref ws) :action (list :arm :toggle :value nil))
+     :ws ws :op "remote-control"
+     :timeout agent-repl-remote-control-timeout-seconds
+     :on-success
+     (lambda (success)
+       (let ((on (plist-get success :on)))
+         (agent-repl--info ws "elisp.verbs.remote-control ws=%s on=%S" ws on)
+         (message "agent-repl: remote control %s for %s" (if on "on" "off") ws)))
+     :on-error
+     (lambda (value)
+       (let* ((arm (agent-repl-verbs--refusal-arm value))
+              (text (agent-repl-verbs--remote-control-refusal-text ws arm)))
+         (when text
+           (agent-repl--warn ws "elisp.verbs.remote-control-refused ws=%s arm=%S fields=%S"
+                             ws (plist-get arm :arm) (plist-get arm :value))
+           (message "agent-repl: %s" text)
+           t))))))
 
 (defun agent-repl-verbs--keepalive-outcome-text (outcome)
   "Return the words for one hidden workspace's decoded keep-alive OUTCOME."

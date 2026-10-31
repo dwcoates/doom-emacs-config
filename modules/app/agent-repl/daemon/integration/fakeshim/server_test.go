@@ -938,3 +938,67 @@ func TestAwaitSubscriberEndsWithItsContext(t *testing.T) {
 		t.Fatalf("awaitSubscriber = %v, want context.Canceled", err)
 	}
 }
+
+func TestSetSessionRemoteControlAnswers(t *testing.T) {
+	reattach := "bridge-earlier"
+	tests := []struct {
+		name        string
+		req         *shimv1.SetSessionRemoteControlRequest
+		wantEnabled bool
+		wantBridge  string
+	}{
+		{"an on with nothing to re-bind gets the fake's own bridge", &shimv1.SetSessionRemoteControlRequest{Enabled: true, Name: "main (doom)"}, true, FakeBridgeSessionID},
+		{"an on re-binds the bridge it names", &shimv1.SetSessionRemoteControlRequest{Enabled: true, Name: "main (doom)", ReattachBridgeSessionId: &reattach}, true, reattach},
+		{"an off answers no bridge", &shimv1.SetSessionRemoteControlRequest{}, false, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			srv := newServer(NewRecorder(), Profile{}, nil)
+
+			// Act
+			resp, err := srv.SetSessionRemoteControl(context.Background(), connect.NewRequest(tt.req))
+
+			// Assert
+			success := resp.Msg.GetSuccess()
+			if err != nil || success == nil || success.GetEnabled() != tt.wantEnabled || success.GetBridgeSessionId() != tt.wantBridge {
+				t.Fatalf("SetSessionRemoteControl = (%v, %v), want enabled %v bridge %q", resp.Msg, err, tt.wantEnabled, tt.wantBridge)
+			}
+		})
+	}
+}
+
+func TestSetSessionRemoteControlIsRecorded(t *testing.T) {
+	// Arrange
+	rec := NewRecorder()
+	srv := newServer(rec, Profile{}, nil)
+
+	// Act
+	if _, err := srv.SetSessionRemoteControl(context.Background(), connect.NewRequest(&shimv1.SetSessionRemoteControlRequest{})); err != nil {
+		t.Fatalf("SetSessionRemoteControl: %v", err)
+	}
+
+	// Assert
+	if got := rec.Count(RPCSetSessionRemoteControl); got != 1 {
+		t.Fatalf("recorded %d SetSessionRemoteControl calls, want 1", got)
+	}
+}
+
+func TestAScriptedRemoteControlRefusalIsAnswered(t *testing.T) {
+	// Arrange
+	srv := newServer(NewRecorder(), Profile{}, nil)
+	srv.queueAnswer(RPCSetSessionRemoteControl, &shimv1.SetSessionRemoteControlResponse{
+		Result: &shimv1.SetSessionRemoteControlResponse_Failure{Failure: &shimv1.SetSessionRemoteControlFailure{
+			Cause:  &shimv1.SetSessionRemoteControlFailure_VendorRefused{VendorRefused: &shimv1.SetSessionRemoteControlVendorRefused{}},
+			Detail: "remote control is disabled by policy",
+		}},
+	}, "")
+
+	// Act
+	resp, err := srv.SetSessionRemoteControl(context.Background(), connect.NewRequest(&shimv1.SetSessionRemoteControlRequest{Enabled: true, Name: "main (doom)"}))
+
+	// Assert
+	if err != nil || resp.Msg.GetFailure().GetVendorRefused() == nil {
+		t.Fatalf("SetSessionRemoteControl = (%v, %v), want the scripted vendor refusal", resp.Msg, err)
+	}
+}

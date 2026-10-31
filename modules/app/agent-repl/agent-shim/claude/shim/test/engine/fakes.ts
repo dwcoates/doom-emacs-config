@@ -22,6 +22,8 @@ import type {
   SlashCommandLike,
   AgentInfoLike,
   QueryLike,
+  RemoteControlAnswerLike,
+  RemoteControlOptionsLike,
   RewindFilesResultLike,
 } from "../../src/sdk/types.js";
 import type {
@@ -78,6 +80,18 @@ export class ScriptedQuery implements QueryLike {
   /** The uuids `cancelAsyncMessage` was asked to drop, in order. */
   readonly cancelledUuids: string[] = [];
   setPermissionModeRejects: Error | undefined;
+  /**
+   * What `enableRemoteControl(true, …)` answers: by default the reattach id
+   * asked for, else `bridge-1`, as the CLI re-binds the session it is handed.
+   */
+  remoteControlAnswer: ((options: RemoteControlOptionsLike | undefined) => RemoteControlAnswerLike) = (options) => ({
+    bridge_session_id: options?.reattachSessionId ?? "bridge-1",
+    session_url: "https://claude.ai/code/bridge",
+  });
+  /** When set, `enableRemoteControl` rejects with it. */
+  enableRemoteControlRejects: Error | undefined;
+  /** Every `enableRemoteControl` call, in order. */
+  readonly remoteControlCalls: { enabled: boolean; name?: string; options?: RemoteControlOptionsLike }[] = [];
   /**
    * `close()` records the call but leaves the stream standing.
    *
@@ -173,6 +187,16 @@ export class ScriptedQuery implements QueryLike {
     return this.cancelAsyncMessageRejects === undefined
       ? Promise.resolve(this.cancelAsyncMessageAnswer)
       : Promise.reject(this.cancelAsyncMessageRejects);
+  }
+  enableRemoteControl(enabled: boolean, name?: string, options?: RemoteControlOptionsLike): Promise<RemoteControlAnswerLike> {
+    this.calls.push(`enableRemoteControl:${String(enabled)}`);
+    this.remoteControlCalls.push({
+      enabled,
+      ...(name === undefined ? {} : { name }),
+      ...(options === undefined ? {} : { options }),
+    });
+    if (this.enableRemoteControlRejects !== undefined) return Promise.reject(this.enableRemoteControlRejects);
+    return Promise.resolve(enabled ? this.remoteControlAnswer(options) : {});
   }
   setModel(model?: string): Promise<void> {
     this.calls.push(`setModel:${model ?? ""}`);
