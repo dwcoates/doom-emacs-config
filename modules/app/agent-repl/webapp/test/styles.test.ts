@@ -4335,17 +4335,55 @@ describe("the persistent-wifi chip's paints (owner request, 2026-10-02)", () => 
 
   it("holds the pulse still under prefers-reduced-motion", () => {
     expect(stylesheet).toMatch(
-      /@media \(prefers-reduced-motion: reduce\) \{\s*\.topbar-wifi\[data-settling\] \{ animation: none;/,
+      /@media \(prefers-reduced-motion: reduce\) \{\s*\.topbar-remote-control\[data-settling\],\s*\.topbar-wifi\[data-settling\] \{ animation: none;/,
     );
+  });
+});
+
+/**
+ * The rule that names BOTH chips' hooks, one wifi hook and its remote-control
+ * twin, alone: the two chips share one look and feel (owner ruling,
+ * 2026-10-31), so each of the wifi chip's paint rules is the remote-control
+ * chip's too.
+ */
+function sharedChipRule(wifi: string): string | undefined {
+  const twin = wifi.replaceAll("topbar-wifi", "topbar-remote-control");
+  return rulesOf(stylesheet).find(
+    (rule) => rule.selectors.length === 2 && rule.selectors.includes(wifi) && rule.selectors.includes(twin),
+  )?.declarations;
+}
+
+describe("the remote-control chip's paints (owner ruling, 2026-10-31)", () => {
+  it("paints the glyph with the wifi chip's black", () => {
+    expect(sharedChipRule(".topbar-wifi") ?? "").toMatch(/color:\s*var\(--wifi-glyph\)/);
+  });
+
+  it("fills the disc white by default, as the wifi chip's", () => {
+    expect(sharedChipRule(".topbar-wifi-disc") ?? "").toMatch(/fill:\s*var\(--wifi-mode-off-disc\)/);
+  });
+
+  it("fills the disc green when the mode is on, as the wifi chip's", () => {
+    expect(sharedChipRule('.topbar-wifi[data-mode="on"] .topbar-wifi-disc') ?? "").toMatch(
+      /fill:\s*var\(--wifi-mode-on-disc\)/,
+    );
+  });
+
+  it("strokes the glyph at the wifi glyph's size and weight", () => {
+    expect(sharedChipRule(".topbar-wifi-glyph") ?? "").toMatch(/width:\s*16px;[\s\S]*stroke-width:\s*2\.25/);
+  });
+
+  it("pulses a chip whose toggle is settling with the wifi chip's pulse", () => {
+    expect(sharedChipRule(".topbar-wifi[data-settling]") ?? "").toMatch(/animation:\s*topbar-wifi-settling/);
+  });
+
+  it("takes the right group's quiet button box", () => {
+    expect(declarationsOf(".topbar-remote-control-button") ?? "").toMatch(/cursor:\s*pointer/);
   });
 });
 
 describe("the persistent-wifi glyph button", () => {
   it("carries the chip's color, which is the glyph's black", () => {
-    // Arrange / Act
-    const own = rulesOf(stylesheet).find((rule) => isOwnRule(rule, ".topbar-wifi-button"));
-    // Assert
-    expect(own?.declarations ?? "").toMatch(/color:\s*inherit/);
+    expect(sharedChipRule(".topbar-wifi-button") ?? "").toMatch(/color:\s*inherit/);
   });
 
   it("takes the right group's quiet button box", () => {

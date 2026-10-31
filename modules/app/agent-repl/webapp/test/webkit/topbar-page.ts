@@ -121,6 +121,7 @@ function stripView(session: boolean, summary: boolean) {
       : {}),
     context: { text: "142.3k", breakdown: { sections: [] } },
     warnings: { warnings: [{ line: { text: "something is wrong" } }] },
+    remoteControl: { mode: { case: "on", value: {} }, tooltip: { text: "remote control on" } },
     persistentWifi: {
       wifi: { case: "joined", value: {} },
       mode: { case: "on", value: {} },

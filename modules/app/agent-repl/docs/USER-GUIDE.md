@@ -680,6 +680,20 @@ The top bar's effort selector sits between the model selector and the permission
   - Switching causes token cache misses, as switching the model does; both selectors say so on hover.
 - **A model that takes no effort level shows a dash and offers no list.**
 
+## Reaching a workspace from claude.ai (remote control)
+
+The top bar's phone chip, just left of the wifi chip, makes the workspace's session reachable from claude.ai and the Claude mobile app. The session keeps running on this machine; claude.ai attaches to it.
+
+- **A green disc means on, a white disc means off.** Clicking the chip, or `SPC j C` in Emacs, turns it over. The chip pulses until the daemon answers.
+- **Main workspaces start on, every other workspace starts off.** Whatever you set is kept for that workspace, across restarts.
+- **While it is on, the workspace's session stays up between keep-alives.** It is not parked, so claude.ai always finds it. The workspace still hibernates once it has been idle for its cutoff, and is unreachable until something starts it again.
+- **What you do on claude.ai lands here.**
+  - A prompt typed there runs as a turn here and is drawn as a prompt you said.
+  - A permission answered there closes the card here, marked as answered on claude.ai.
+  - A stop there ends the turn here.
+- **Turning it on for a workspace with no session starts one.**
+- **If Claude refuses the bridge** (Remote Control is off for your account or blocked by policy), the mode is still kept, and the refusal shows on the warning strip.
+
 ## Zooming the feed text
 
 | Key (input window or page) | Effect |

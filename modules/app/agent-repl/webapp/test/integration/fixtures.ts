@@ -2398,6 +2398,10 @@ export function topbarView(init?: TopbarInit): TopbarView {
             },
     },
     warnings: { warnings: init?.warnings ?? [] },
+    remoteControl: {
+      mode: { case: "off", value: {} },
+      tooltip: { text: "remote control off: this session is not reachable from claude.ai" },
+    },
     persistentWifi: {
       wifi: { case: "joined", value: {} },
       mode: { case: "off", value: {} },

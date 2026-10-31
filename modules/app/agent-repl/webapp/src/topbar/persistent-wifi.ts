@@ -1,6 +1,6 @@
 /**
- * The persistent-wifi chip: one wifi glyph between the context chip and the
- * warning chip, stating two facts about the MACHINE the daemon runs on.
+ * The persistent-wifi chip: one wifi glyph between the remote-control chip and
+ * the warning chip, stating two facts about the MACHINE the daemon runs on.
  *
  * THE GLYPH IS ALWAYS BLACK AND THE MODE ARM PAINTS THE DISC (owner request,
  * 2026-10-02): on → a green disc; off or unassigned → a white one. The wifi arm
@@ -27,7 +27,6 @@ import {
   type UpdatePersistentWifiModeResponse,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_persistent_wifi_mode_pb";
 import type { TopbarPersistentWifi } from "../../../proto/gen/ts/frontend/v1/topbar_pb";
-import { SVG_NS } from "../dom.js";
 import { whileInFlight } from "../feed/cards/controls.js";
 import { log } from "../log.js";
 import { guardMalformed } from "../rpc/guard.js";
@@ -42,11 +41,13 @@ import {
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { callUnary } from "../rpc/unary.js";
 import type { TopbarContext } from "./context.js";
+import { drawDiscGlyph, type DiscGlyph } from "./disc-glyph.js";
 
 /**
  * The wifi glyph: three arcs and a dot, stroked in the current color, drawn
- * on a 24-unit grid centered on (12, 12). Every arc is symmetric about x = 12,
- * so the glyph's horizontal center IS the grid's.
+ * on a 24-unit grid centered on (12, 12) (src/topbar/disc-glyph.ts). Every
+ * arc is symmetric about x = 12, so the glyph's horizontal center IS the
+ * grid's.
  */
 const GLYPH_PATHS = [
   "M1.42 9a16 16 0 0 1 21.16 0",
@@ -55,40 +56,12 @@ const GLYPH_PATHS = [
   "M12 20h.01",
 ];
 
-/**
- * THE DISC IS DRAWN IN THE GLYPH'S OWN SVG, centered on the same (12, 12).
- * It used to be the chip's CSS background with a smaller svg centered inside
- * it by flexbox; the two then landed on the pixel grid separately, and WebKit
- * snaps an inline svg to whole pixels while it paints a background where
- * layout put it, so the glyph sat up to a pixel right of the disc's center
- * (measured in test/webkit/topbar.webkit.test.ts). One svg has one placement,
- * so the glyph and the disc cannot drift apart. The radius keeps the glyph
- * just inscribed: its farthest stroked corner is under 15 units from center.
- */
-export const DISC_RADIUS = 15;
-
-/** The viewBox: the disc's square, so the svg's box is the disc's. */
-const VIEW_BOX = `${12 - DISC_RADIUS} ${12 - DISC_RADIUS} ${2 * DISC_RADIUS} ${2 * DISC_RADIUS}`;
-
-/** The glyph element: the disc, then the arcs over it. */
-function drawGlyph(): SVGSVGElement {
-  const svg = document.createElementNS(SVG_NS, "svg");
-  svg.setAttribute("viewBox", VIEW_BOX);
-  svg.setAttribute("aria-hidden", "true");
-  svg.setAttribute("class", "topbar-wifi-glyph");
-  const disc = document.createElementNS(SVG_NS, "circle");
-  disc.setAttribute("class", "topbar-wifi-disc");
-  disc.setAttribute("cx", "12");
-  disc.setAttribute("cy", "12");
-  disc.setAttribute("r", String(DISC_RADIUS));
-  svg.append(disc);
-  for (const d of GLYPH_PATHS) {
-    const path = document.createElementNS(SVG_NS, "path");
-    path.setAttribute("d", d);
-    svg.append(path);
-  }
-  return svg;
-}
+/** The wifi glyph on its disc, drawn through the topbar's one disc drawing. */
+const WIFI_GLYPH: DiscGlyph = {
+  glyphClass: "topbar-wifi-glyph",
+  discClass: "topbar-wifi-disc",
+  paths: GLYPH_PATHS,
+};
 
 /** The wifi arm's attribute value; "unknown" is the unassigned oneof. */
 function wifiArm(u: TopbarPersistentWifi): string {
@@ -150,7 +123,7 @@ export function drawTopbarPersistentWifi(u: TopbarPersistentWifi, tc: TopbarCont
   const button = createControl();
   button.className = "topbar-wifi-button";
   button.setAttribute("aria-label", "toggle persistent wifi mode");
-  button.append(drawGlyph());
+  button.append(drawDiscGlyph(WIFI_GLYPH));
   button.addEventListener("click", () => {
     void togglePersistentWifiMode(tc, chip, button, { wifi, mode });
   });

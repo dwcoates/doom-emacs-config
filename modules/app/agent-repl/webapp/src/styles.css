@@ -531,7 +531,9 @@
   --topbar-right-chip-inset: 0.3rem;
   /* THE PERSISTENT-WIFI CHIP'S PAINTS (owner request, 2026-10-02): the glyph
      is black; the disc behind it is white when the mode is off and green when
-     it is on (green-500, a step brighter than `--ok`). */
+     it is on (green-500, a step brighter than `--ok`). The remote-control chip
+     wears the same three paints (owner ruling, 2026-10-31: the same look and
+     feel, another symbol). */
   --wifi-glyph: #000000;
   --wifi-mode-on-disc: #22c55e;
   --wifi-mode-off-disc: #ffffff;
@@ -8162,6 +8164,7 @@ html.webhost-gate #feed [data-row-kind="coldGate"]:has(.cold-gate[data-state="st
 .topbar-effort-button,
 .topbar-mode-button,
 .topbar-context-figure,
+.topbar-remote-control-button,
 .topbar-wifi-button,
 .topbar-warning-chip {
   background: transparent;
@@ -8194,6 +8197,7 @@ html.webhost-gate #feed [data-row-kind="coldGate"]:has(.cold-gate[data-state="st
 .topbar-effort-button:hover,
 .topbar-mode-button:hover,
 .topbar-context-figure:hover,
+.topbar-remote-control-button:hover,
 .topbar-wifi-button:hover,
 .topbar-warning-chip:hover {
   border-color: var(--border);
@@ -9042,14 +9046,18 @@ ar-button.merge-queue-move[aria-disabled="true"] {
   color: var(--muted);
   white-space: nowrap;
 }
-/* THE PERSISTENT-WIFI CHIP (src/topbar/persistent-wifi.ts). The glyph is
-   always black; the disc behind it is the mode arm: white when the mode is off
-   (or the daemon could not read it), green when on (owner request,
-   2026-10-02). The wifi arm is not painted: the tooltip, which the daemon
-   composes from both facts, carries it. The disc is a circle inside the
-   glyph's own svg, whose viewBox is the disc's square, so the svg's 16px box
-   IS the disc and the glyph inside it is centered by geometry rather than by
-   layout. */
+/* THE PERSISTENT-WIFI CHIP (src/topbar/persistent-wifi.ts) AND THE
+   REMOTE-CONTROL CHIP (src/topbar/remote-control.ts). The two share one look
+   and feel and differ only in their symbol (owner ruling, 2026-10-31), so every
+   rule below names both chips' hooks: a change to one chip's paint is a change
+   to the other's. The glyph is always black; the disc behind it is the mode
+   arm: white when the mode is off (or, for the wifi chip, the daemon could not
+   read it), green when on (owner request, 2026-10-02). The wifi arm is not
+   painted: the tooltip, which the daemon composes from both facts, carries it.
+   The disc is a circle inside the glyph's own svg, whose viewBox is the disc's
+   square (src/topbar/disc-glyph.ts), so the svg's 16px box IS the disc and the
+   glyph inside it is centered by geometry rather than by layout. */
+.topbar-remote-control,
 .topbar-wifi {
   display: inline-flex;
   align-items: center;
@@ -9059,11 +9067,13 @@ ar-button.merge-queue-move[aria-disabled="true"] {
 /* THE GLYPH IS THE CONTROL (owner request, 2026-10-02): a click turns the
    mode over. It takes the right group's quiet button box like its siblings,
    but keeps the chip's color, which is the glyph's black. */
+.topbar-remote-control-button,
 .topbar-wifi-button {
   display: inline-flex;
   align-items: center;
   color: inherit;
 }
+.topbar-remote-control-glyph,
 .topbar-wifi-glyph {
   display: block;
   width: 16px;
@@ -9074,17 +9084,21 @@ ar-button.merge-queue-move[aria-disabled="true"] {
   stroke-linecap: round;
   stroke-linejoin: round;
 }
+.topbar-remote-control-disc,
 .topbar-wifi-disc { stroke: none; fill: var(--wifi-mode-off-disc); }
+.topbar-remote-control[data-mode="on"] .topbar-remote-control-disc,
 .topbar-wifi[data-mode="on"] .topbar-wifi-disc { fill: var(--wifi-mode-on-disc); }
-/* A TOGGLE IN FLIGHT PULSES, subtly: turning the mode on runs the whole
-   change (hotspot, power settings, display) before the daemon answers, which
-   takes seconds. The attribute is set while the call stands and removed at
-   its answer. */
+/* A TOGGLE IN FLIGHT PULSES, subtly: turning the wifi mode on runs the whole
+   change (hotspot, power settings, display), and turning remote control on may
+   start a shim, before the daemon answers, which takes seconds. The attribute
+   is set while the call stands and removed at its answer. */
+.topbar-remote-control[data-settling],
 .topbar-wifi[data-settling] {
   animation: topbar-wifi-settling 1.4s ease-in-out infinite;
 }
 @keyframes topbar-wifi-settling { 50% { opacity: 0.55; } }
 @media (prefers-reduced-motion: reduce) {
+  .topbar-remote-control[data-settling],
   .topbar-wifi[data-settling] { animation: none; opacity: 0.7; }
 }
 
