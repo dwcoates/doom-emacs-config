@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+import { createSidebarNotices } from "../../src/sidebar/notices.js";
+import { createLocalFailures } from "../../src/failure/local.js";
 import { createFocusLeft, type FocusLeftSource } from "../../src/focus-left.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SELECTION_ANIMATIONS, SELECTION_NUMBER_RISE } from "../../src/sidebar/selection-fade.js";
@@ -20,7 +22,7 @@ import {
   type SidebarDeps,
   type WebhostSidebarDeps,
 } from "../../src/sidebar/sidebar.js";
-import { RosterColdGateSchema, RosterVersionSchema, type WorkspaceRoster } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
+import { RosterVersionSchema, type WorkspaceRoster } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import { WorkspaceRefSchema } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import { createRailSearch } from "../../src/sidebar/search.js";
 import { createAppSwitcher } from "../../src/sidebar/threads.js";
@@ -1091,26 +1093,35 @@ function twoRows(current: string): WorkspaceRoster {
   });
 }
 
-describe("the webhost's cold gates", () => {
-  it("hands every drawn roster's cold gates on", async () => {
+describe("the webhost's version notices", () => {
+  it("tints the version by the notices it is handed", async () => {
     // Arrange
     const host = document.createElement("nav");
-    const handed: string[][] = [];
-    const gated = twoRows("ws-1");
-    gated.coldGates = [
-      create(RosterColdGateSchema, { workspace: create(WorkspaceRefSchema, { id: "ws-2", dir: "/w/ws-2" }) }),
-    ];
+    const notices = createSidebarNotices();
+    notices.record("warn", JSON.stringify({ timestamp: "t", operation: "op", message: "careful" }));
 
     // Act
-    mountWebhostSidebar(host, ctxFor([gated]), {
+    mountWebhostSidebar(host, ctxFor([twoRows("ws-1")]), {
       storage: null,
       timers: fakeTimers(),
-      coldGates: (gates) => void handed.push(gates.map((g) => g.workspace?.id ?? "")),
+      notices: { failures: createLocalFailures(), notices },
     });
     await settle();
 
     // Assert
-    expect(handed).toEqual([["ws-2"]]);
+    expect(host.querySelector(".sb-version")?.classList.contains("notices-warn")).toBe(true);
+  });
+
+  it("leaves the version untinted without notices", async () => {
+    // Arrange
+    const host = document.createElement("nav");
+
+    // Act
+    mountWebhostSidebar(host, ctxFor([twoRows("ws-1")]), { storage: null, timers: fakeTimers() });
+    await settle();
+
+    // Assert
+    expect([...(host.querySelector(".sb-version")?.classList ?? [])].some((c) => c.startsWith("notices-"))).toBe(false);
   });
 });
 

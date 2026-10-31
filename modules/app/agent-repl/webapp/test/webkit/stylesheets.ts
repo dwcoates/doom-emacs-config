@@ -22,3 +22,15 @@ export async function webhostStylesheet(): Promise<string> {
   const [page, host] = await Promise.all([pageStylesheet(), readFile(path.join(here, "../../src/host/host.css"), "utf8")]);
   return `${page}\n${host}`;
 }
+
+/**
+ * The sidebar page's stylesheet: the workspace page's, which the sidebar page
+ * loads too, with its own (src/host/sidebar-page.css) after it.
+ */
+export async function sidebarPageStylesheet(): Promise<string> {
+  const [page, sidebar] = await Promise.all([
+    pageStylesheet(),
+    readFile(path.join(here, "../../src/host/sidebar-page.css"), "utf8"),
+  ]);
+  return `${page}\n${sidebar}`;
+}

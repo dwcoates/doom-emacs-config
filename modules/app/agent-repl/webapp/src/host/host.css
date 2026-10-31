@@ -25,25 +25,12 @@ html.agent-repl-host body::after {
   content: none;
 }
 
-/* The stack of workspace pages fills the window above the gate's band; the
-   sidebar floats over it. */
+/* The stack of workspace pages fills the window above the gate's band. The
+   sidebar is a web view of its own (host/sidebar-page.ts). */
 .webhost-frames {
   position: absolute;
   inset: 0;
   bottom: var(--webhost-gate-band, 0px);
-}
-
-/* THE ONE SIDEBAR (host/sidebar.ts), drawn over the sidebar column every page
-   keeps empty for it, so it sits exactly where a page's own sidebar would: the
-   page's stylesheet gives it its width, inset, rounding and shadow, and this
-   places it over the window instead of in a grid cell. It ends above the gate's
-   band, as a page's own sidebar ended above its docked gate. */
-html.agent-repl-host #ws-sidebar {
-  position: fixed;
-  top: 0;
-  left: 0;
-  bottom: var(--webhost-gate-band, 0px);
-  z-index: 1;
 }
 
 /* THE SHOWN WORKSPACE'S COLD GATE (host/gate.ts), a full-width band at the
@@ -51,7 +38,7 @@ html.agent-repl-host #ws-sidebar {
    composer's height Emacs told (--gate-dock-height; 18.4vh,
    `agent-repl-input-height-fraction`, only for a slot never told), growing to
    fit a selection such as the compact submenu and shrinking back, never
-   scrolling (owner, 2026-10-29). The pages and the sidebar end above it, so
+   scrolling (owner, 2026-10-29). The pages end above it, so
    it covers nothing. One pixel of lift keeps the card's bottom border on
    screen (owner, 2026-10-06). */
 html.agent-repl-host #webhost-gate {
@@ -72,8 +59,8 @@ html.agent-repl-host #webhost-gate[hidden] { display: none; }
 
 /* A HELD-BACK PAGE'S LOAD BUTTON (host/load-button.ts): a cold-gated
    workspace's page is not loaded on its show, and a subtle button stands at
-   the centre of where the page would be, right of the docked sidebar and
-   above the gate's band (owner request, 2026-10-30). */
+   the centre of where the page would be, above the gate's band (owner
+   request, 2026-10-30). */
 html.agent-repl-host #webhost-load {
   position: fixed;
   top: 0;
@@ -85,7 +72,6 @@ html.agent-repl-host #webhost-load {
   justify-content: center;
   background: var(--bg);
 }
-html.agent-repl-host #ws-sidebar:not([hidden]) ~ #webhost-load { left: 20vw; }
 html.agent-repl-host #webhost-load[hidden] { display: none; }
 html.agent-repl-host .webhost-load-button {
   font: inherit;

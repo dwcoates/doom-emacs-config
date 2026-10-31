@@ -61,6 +61,8 @@ export interface RuntimeLogContext {
   claude_session_id?: string;
   connection_id?: string;
   request_id?: string;
+  /** Which of Emacs's two web views wrote the record (host/document.ts); absent in a workspace page. */
+  webhost_document?: string;
 }
 
 export interface WebappLogRecord {
@@ -282,7 +284,8 @@ export function buildClientLogRecord(record: WebappLogRecord): ClientLogRecord {
   });
 }
 
-function defaultConsole(level: ClientLogLevel, line: string): void {
+/** Write LINE to the browser console at LEVEL: the console every logger writes to by default. */
+export function defaultConsole(level: ClientLogLevel, line: string): void {
   if (level === "error") console.error(line);
   else if (level === "warn") console.warn(line);
   else console.log(line);

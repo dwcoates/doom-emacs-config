@@ -52,6 +52,7 @@
 (declare-function agent-repl-webhost-set-log-level "webhost" (level until-ms))
 (declare-function agent-repl--frontend-webview-read-script "frontend" (buf script callback))
 (declare-function agent-repl-webhost-buffer "webhost" ())
+(declare-function agent-repl-sidebar-view-buffer "sidebar-view" ())
 (defvar agent-repl--global-log-scope)
 
 (defconst agent-repl-profiling-root-env "AGENT_REPL_PROFILE_ROOT"
@@ -234,12 +235,15 @@ The answer names SESSION and WS, so the callback needs no closure."
           session ws session ws))
 
 (defun agent-repl-profiling--page-buffers ()
-  "Answers (NAME . BUFFER) for the web view whose main thread is sampled.
+  "Answers (NAME . BUFFER) for each web view whose main thread is sampled.
 Every workspace's page lives in the one host web view (webhost.el) and
 shares its main thread, so the host is sampled once, under the name
-\"host\"; nil when there is no host."
-  (when-let ((buf (agent-repl-webhost-buffer)))
-    (list (cons "host" buf))))
+\"host\"; the sidebar is a web view of its own (sidebar-view.el), sampled
+under the name \"sidebar\".  Each is left out while it does not exist."
+  (let ((host (agent-repl-webhost-buffer))
+        (sidebar (agent-repl-sidebar-view-buffer)))
+    (append (and host (list (cons "host" host)))
+            (and sidebar (list (cons "sidebar" sidebar))))))
 
 (defun agent-repl-profiling--page-started (raw)
   "Records a page sampler's start answer RAW; a refusal is an error."

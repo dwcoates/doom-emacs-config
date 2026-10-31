@@ -7,7 +7,7 @@ import { levelApplyShapeOf } from "./level-apply-shape.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { CONVERSATION_DRAWN_ATTRIBUTE } from "../../src/feed/conversation-drawn.js";
-import { FOCUS_LEFT_EMACS, WEBHOST_SIDEBAR_CLASS, connectToHost, type HostLink } from "../../src/host/embed.js";
+import { FOCUS_LEFT_EMACS, connectToHost, type HostLink } from "../../src/host/embed.js";
 import { HOST_CHANNEL, type PageToHost } from "../../src/host/protocol.js";
 import { createPresence, type PresenceSource } from "../../src/presence.js";
 import { createFocusLeft, type FocusLeftSource } from "../../src/focus-left.js";
@@ -106,7 +106,6 @@ afterEach(() => {
   presence.dispose();
   pageDoc.documentElement.removeAttribute(CONVERSATION_DRAWN_ATTRIBUTE);
   pageDoc.documentElement.removeAttribute("style");
-  pageDoc.documentElement.classList.remove(WEBHOST_SIDEBAR_CLASS);
   pageDoc.body.replaceChildren();
 });
 
@@ -455,51 +454,7 @@ describe("reported facts", () => {
   });
 });
 
-describe("the webhost's sidebar", () => {
-  it("keeps the sidebar column for the webhost's sidebar while it is docked", () => {
-    // Act
-    fromHost({ channel: HOST_CHANNEL, kind: "sidebarDock", docked: true });
-
-    // Assert
-    expect(pageDoc.documentElement.classList.contains(WEBHOST_SIDEBAR_CLASS)).toBe(true);
-  });
-
-  it("gives the column back when the webhost undocks its sidebar", () => {
-    // Arrange
-    fromHost({ channel: HOST_CHANNEL, kind: "sidebarDock", docked: true });
-
-    // Act
-    fromHost({ channel: HOST_CHANNEL, kind: "sidebarDock", docked: false });
-
-    // Assert
-    expect(pageDoc.documentElement.classList.contains(WEBHOST_SIDEBAR_CLASS)).toBe(false);
-  });
-
-  it("records the dock at info when it changes", async () => {
-    // Act
-    fromHost({ channel: HOST_CHANNEL, kind: "sidebarDock", docked: true });
-
-    // Assert
-    capture.logger.flush();
-    await Promise.resolve();
-    const record = capture.sent.find((r) => r.operation === "page.webhost-sidebar-dock");
-    expect([record?.level.case, record?.context?.["docked"]]).toEqual(["info", true]);
-  });
-
-  it("records nothing when the webhost restates the dock", async () => {
-    // Arrange
-    fromHost({ channel: HOST_CHANNEL, kind: "sidebarDock", docked: true });
-    capture.logger.flush();
-    await Promise.resolve();
-    capture.sent.length = 0;
-
-    // Act
-    fromHost({ channel: HOST_CHANNEL, kind: "sidebarDock", docked: true });
-
-    // Assert
-    expect(await operations()).not.toContain("page.webhost-sidebar-dock");
-  });
-
+describe("the webhost's failures", () => {
   it("lists the webhost's failures for the warning chip", () => {
     // Arrange
     const failure = { arm: "daemonUnreachable", headline: "lost the connection", evidence: [["close", "1006"]] };

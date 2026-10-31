@@ -1,0 +1,98 @@
+/* The sidebar page (host/sidebar-page.ts): the workspaces rail filling a web
+   view of its own, in an Emacs window at the frame's left edge that runs the
+   frame's whole height. The page is the webapp's own bundle at `?sidebar=1`,
+   so the workspace page's stylesheet applies here too; these rules, under the
+   page's root class, put its page-level layout back to a plain full-window
+   box and make the rail fill it.
+
+   THE RAIL FILLS ITS WINDOW (owner, 2026-10-31): it no longer floats over a
+   feed, so it has no inset, rounding or lift of its own. The Emacs window's
+   edge is its edge. */
+html.agent-repl-sidebar,
+html.agent-repl-sidebar body {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--sidebar-bg);
+}
+
+html.agent-repl-sidebar body {
+  display: block;
+}
+
+/* The page's bottom-edge depth cue seats a feed under the composer; the rail
+   runs to the frame's bottom, with nothing under it. */
+html.agent-repl-sidebar body::after {
+  content: none;
+}
+
+html.agent-repl-sidebar #ws-sidebar {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+/* THE VERSION'S TINT (sidebar/notices.ts): what the sidebar recorded since it
+   started, in a subtle shade of the theme's own status colors, mixed most of
+   the way into the rail's ground as the untinted version is. */
+html.agent-repl-sidebar #ws-sidebar .sb-version {
+  cursor: pointer;
+}
+html.agent-repl-sidebar #ws-sidebar .sb-version.notices-ok {
+  color: color-mix(in srgb, var(--ok) 45%, var(--sidebar-bg));
+}
+html.agent-repl-sidebar #ws-sidebar .sb-version.notices-warn {
+  color: color-mix(in srgb, var(--async) 55%, var(--sidebar-bg));
+}
+html.agent-repl-sidebar #ws-sidebar .sb-version.notices-error {
+  color: color-mix(in srgb, var(--err) 55%, var(--sidebar-bg));
+}
+
+/* THE VERSION'S NOTICES: a detail panel under the version, as its memory
+   hover is, placed by `clampReveal` inside the sidebar's window. */
+html.agent-repl-sidebar #ws-sidebar .detail.sb-notices.open {
+  display: block;
+  position: fixed;
+  z-index: 41;
+  width: max-content;
+  min-width: 12rem;
+  max-width: calc(100vw - 1rem);
+  overflow-y: auto;
+  margin: 0;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.5rem 0.6rem;
+  font-size: 0.74rem;
+}
+html.agent-repl-sidebar #ws-sidebar .sb-notices h4 {
+  margin: 0.2rem 0 0.3rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+html.agent-repl-sidebar #ws-sidebar .sb-notices ul {
+  margin: 0 0 0.4rem;
+  padding: 0;
+  list-style: none;
+}
+html.agent-repl-sidebar #ws-sidebar .sb-notices li {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.5rem;
+  padding: 0.15rem 0;
+  overflow-wrap: anywhere;
+}
+html.agent-repl-sidebar #ws-sidebar .sb-notices li.error { color: var(--err); }
+html.agent-repl-sidebar #ws-sidebar .sb-notices li.warn { color: var(--async); }
+html.agent-repl-sidebar #ws-sidebar .sb-notices time {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+html.agent-repl-sidebar #ws-sidebar .sb-notices-none {
+  margin: 0;
+  color: var(--muted);
+}

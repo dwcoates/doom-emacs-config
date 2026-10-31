@@ -930,7 +930,6 @@ describe("hello", () => {
     // Assert
     expect(posted).toEqual([
       { channel: HOST_CHANNEL, kind: "presence", shown: true },
-      { channel: HOST_CHANNEL, kind: "sidebarDock", docked: false },
       { channel: HOST_CHANNEL, kind: "webhostFailures", failures: [] },
     ]);
   });
@@ -1309,37 +1308,6 @@ describe("the webhost's sidebar", () => {
     // Assert
     unsubscribe();
     expect(left).toEqual([FOCUS_LEFT_EMACS]);
-  });
-
-  it("tells every page when it docks the sidebar over it", () => {
-    // Arrange
-    pages(host, "a", "b");
-    const toA = postsTo("a");
-    const toB = postsTo("b");
-
-    // Act
-    host.setSidebarDocked(true);
-
-    // Assert
-    const dock = { channel: HOST_CHANNEL, kind: "sidebarDock", docked: true };
-    expect([toA, toB]).toEqual([[dock], [dock]]);
-  });
-
-  it("tells a page that says hello after the dock that the sidebar is docked", () => {
-    // Arrange
-    pages(host, "a");
-    host.setSidebarDocked(true);
-    const posted = postsTo("a");
-
-    // Act
-    fromPage("a", { channel: HOST_CHANNEL, kind: "hello" });
-
-    // Assert
-    expect(posted).toContainEqual({
-      channel: HOST_CHANNEL,
-      kind: "sidebarDock",
-      docked: true,
-    });
   });
 
   it("tells every page its own standing failures", () => {

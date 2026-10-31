@@ -1111,6 +1111,82 @@ The current tab's page, not shown here, is the nearest of all."
     ;; Assert
     (should-not (agent-repl-test-wh--sent "holdBack"))))
 
+;;;; ---- The sidebar's web view follows the host (sidebar-view.el) ----
+
+(defmacro agent-repl-test-wh--with-sidebar-told (&rest body)
+  "Run BODY with every call the host makes on the sidebar recorded in `told'.
+`told' holds (FUNCTION . ARGS), newest first."
+  (declare (indent 0))
+  `(let ((told nil))
+     (cl-letf (((symbol-function 'agent-repl-sidebar-view-mark-shown)
+                (lambda (&rest args) (push (cons 'mark-shown args) told)))
+               ((symbol-function 'agent-repl-sidebar-view-follow-daemon)
+                (lambda (&rest args) (push (cons 'follow-daemon args) told)))
+               ((symbol-function 'agent-repl-sidebar-view-set-log-level)
+                (lambda (&rest args) (push (cons 'set-log-level args) told)))
+               ((symbol-function 'agent-repl-sidebar-view-focus-moved)
+                (lambda (&rest args) (push (cons 'focus-moved args) told)))
+               ((symbol-function 'agent-repl-sidebar-view-navigate)
+                (lambda (&rest args) (push (cons 'navigate args) told)))
+               ((symbol-function 'agent-repl-sidebar-view-kill)
+                (lambda (&rest args) (push (cons 'kill args) told))))
+       ,@body)))
+
+(ert-deftest agent-repl-test-wh-showing-a-page-marks-its-row-in-the-sidebar ()
+  "The sidebar's highlight moves with the page the host shows."
+  (agent-repl-test-wh--with-host
+    (agent-repl-test-wh--with-sidebar-told
+      (agent-repl-webhost-show "alpha")
+      (should (equal told '((mark-shown "id-alpha")))))))
+
+(ert-deftest agent-repl-test-wh-showing-the-shown-page-marks-nothing-again ()
+  "A show of the page already shown leaves the sidebar alone too."
+  (agent-repl-test-wh--with-host
+    (agent-repl-test-wh--with-sidebar-told
+      (agent-repl-webhost-show "alpha")
+      (agent-repl-webhost-show "alpha")
+      (should (equal told '((mark-shown "id-alpha")))))))
+
+(ert-deftest agent-repl-test-wh-following-a-daemon-points-the-sidebar-at-it ()
+  "A handover points the sidebar at the daemon the host follows."
+  (agent-repl-test-wh--with-host
+    (agent-repl-test-wh--with-sidebar-told
+      (agent-repl-webhost-follow-daemon "alpha" (agent-repl-test-wh--conn "127.0.0.1:2"))
+      (should (equal told '((follow-daemon "http://host.localhost:2")))))))
+
+(ert-deftest agent-repl-test-wh-a-log-level-reaches-the-sidebar ()
+  "A log level window raises the sidebar with the host."
+  (agent-repl-test-wh--with-host
+    (agent-repl-test-wh--with-sidebar-told
+      (let ((agent-repl--webhost-log-level nil))
+        (agent-repl-webhost-set-log-level 'debug 1792000000000)
+        (should (equal told '((set-log-level debug 1792000000000))))))))
+
+(ert-deftest agent-repl-test-wh-a-focus-move-reaches-the-sidebar ()
+  "Emacs moving its focus is told to the sidebar as to the pages."
+  (agent-repl-test-wh--with-host
+    (agent-repl-test-wh--with-sidebar-told
+      (agent-repl-webhost-focus-moved)
+      (should (equal told '((focus-moved)))))))
+
+(ert-deftest agent-repl-test-wh-a-host-reload-reloads-the-sidebar-on-the-same-daemon ()
+  "The sidebar reloads with the host, onto the daemon the host reloads onto."
+  (agent-repl-test-wh--with-host
+    (agent-repl-test-wh--with-sidebar-told
+      (cl-letf (((symbol-function 'agent-repl--frontend-webview-navigate-widget) #'ignore))
+        (let ((conn (agent-repl-test-wh--conn "127.0.0.1:3")))
+          (agent-repl--webhost-navigate conn)
+          (should (equal told (list (list 'navigate conn)))))))))
+
+(ert-deftest agent-repl-test-wh-killing-the-host-kills-the-sidebar ()
+  "The sidebar goes with the host."
+  (agent-repl-test-wh--with-host
+    (agent-repl-test-wh--with-sidebar-told
+      (let ((agent-repl--webhost-buffer (generate-new-buffer " *wh-kill*")))
+        (cl-letf (((symbol-function 'agent-repl--frontend-kill-webview) #'kill-buffer))
+          (agent-repl-webhost-kill))
+        (should (equal told '((kill))))))))
+
 ;;;; ---- The log level window ----
 
 (ert-deftest agent-repl-test-wh-set-log-level-tells-the-host-the-window ()

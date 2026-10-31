@@ -4,15 +4,14 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import { HOST_ROOT_CLASS, WEBHOST_FRAMES_CLASS, startHost } from "../../src/host/main.js";
-import { WEBHOST_SIDEBAR_ID } from "../../src/host/sidebar.js";
 import { WEBHOST_GATE_ID } from "../../src/host/gate.js";
 import { WEBHOST_LOAD_ID } from "../../src/host/load-button.js";
 import type { Host } from "../../src/host/host.js";
 
 let started: Host | null = null;
 
-/** The sidebar a suite not about it starts: none, and no daemon dialed. */
-const noSidebar = (): void => undefined;
+/** The services a suite not about them start: none, and no daemon dialed. */
+const noServices = (): void => undefined;
 
 afterEach(() => {
   started?.dispose();
@@ -31,40 +30,39 @@ describe("startHost", () => {
     document.body.innerHTML = '<nav id="ws-sidebar"></nav><div id="main-col"></div>';
 
     // Act
-    started = startHost(document, window, { startSidebar: noSidebar });
+    started = startHost(document, window, { startServices: noServices });
 
     // Assert
     expect(document.getElementById("main-col")).toBeNull();
   });
 
-  it("installs the status colors' values before the sidebar draws", () => {
+  it("installs the status colors' values before the gate draws", () => {
     // Act
-    started = startHost(document, window, { startSidebar: noSidebar });
+    started = startHost(document, window, { startServices: noServices });
 
     // Assert
     expect(document.head.querySelector('style[data-source="render-colors.json#color_values"]')).not.toBeNull();
   });
 
-  it("lays out the stack of workspace pages, the sidebar over it, the load button, and the gate below them", () => {
+  it("lays out the stack of workspace pages, the load button over it, and the gate below them", () => {
     // Act
-    started = startHost(document, window, { startSidebar: noSidebar });
+    started = startHost(document, window, { startServices: noServices });
 
     // Assert
     expect([...document.body.children].map((e) => e.className || e.id)).toEqual([
       WEBHOST_FRAMES_CLASS,
-      WEBHOST_SIDEBAR_ID,
       WEBHOST_LOAD_ID,
       WEBHOST_GATE_ID,
     ]);
   });
 
-  it("hands the sidebar's start the load button's element to draw in", () => {
+  it("hands the services' start the load button's element to draw in", () => {
     // Arrange
     let handed: HTMLElement | undefined;
 
     // Act
     started = startHost(document, window, {
-      startSidebar: (_doc, _win, _host, _nav, deps) => {
+      startServices: (_doc, _win, _host, deps) => {
         handed = deps.load;
       },
     });
@@ -73,13 +71,13 @@ describe("startHost", () => {
     expect(handed?.id).toBe(WEBHOST_LOAD_ID);
   });
 
-  it("hands the sidebar's start the gate element to draw in", () => {
+  it("hands the services' start the gate element to draw in", () => {
     // Arrange
     let handed: HTMLElement | undefined;
 
     // Act
     started = startHost(document, window, {
-      startSidebar: (_doc, _win, _host, _nav, deps) => {
+      startServices: (_doc, _win, _host, deps) => {
         handed = deps.gate;
       },
     });
@@ -90,7 +88,7 @@ describe("startHost", () => {
 
   it("holds the workspace pages in the stack", () => {
     // Arrange
-    started = startHost(document, window, { startSidebar: noSidebar });
+    started = startHost(document, window, { startServices: noServices });
 
     // Act
     started.ensure("a", "http://ws-a.localhost:1/");
@@ -99,30 +97,33 @@ describe("startHost", () => {
     expect(document.querySelector(`.${WEBHOST_FRAMES_CLASS} iframe`)).not.toBeNull();
   });
 
-  it("starts the sidebar in its hidden nav, once the queued calls have run", () => {
+  it("starts the services once the queued calls have run", () => {
     // Arrange
     const order: string[] = [];
     window.__agentReplHostPending = [() => order.push("queued call")];
-    let nav: HTMLElement | null = null;
 
     // Act
     started = startHost(document, window, {
-      startSidebar: (_doc, _win, _host, element) => {
-        order.push("sidebar");
-        nav = element;
+      startServices: () => {
+        order.push("services");
       },
     });
 
     // Assert
-    expect([order, nav === null ? null : [(nav as HTMLElement).id, (nav as HTMLElement).hidden]]).toEqual([
-      ["queued call", "sidebar"],
-      [WEBHOST_SIDEBAR_ID, true],
-    ]);
+    expect(order).toEqual(["queued call", "services"]);
+  });
+
+  it("draws no sidebar of its own", () => {
+    // Act
+    started = startHost(document, window, { startServices: noServices });
+
+    // Assert
+    expect(document.getElementById("ws-sidebar")).toBeNull();
   });
 
   it("marks the root as the host", () => {
     // Act
-    started = startHost(document, window, { startSidebar: noSidebar });
+    started = startHost(document, window, { startServices: noServices });
 
     // Assert
     expect(document.documentElement.classList.contains(HOST_ROOT_CLASS)).toBe(true);
@@ -130,7 +131,7 @@ describe("startHost", () => {
 
   it("hands the host to Emacs", () => {
     // Act
-    started = startHost(document, window, { startSidebar: noSidebar });
+    started = startHost(document, window, { startServices: noServices });
 
     // Assert
     expect(window.agentReplHost).toBe(started);
@@ -138,7 +139,7 @@ describe("startHost", () => {
 
   it("answers Emacs's focus question for the host", () => {
     // Arrange
-    started = startHost(document, window, { startSidebar: noSidebar });
+    started = startHost(document, window, { startServices: noServices });
     const field = document.createElement("textarea");
     document.body.append(field);
 
@@ -151,7 +152,7 @@ describe("startHost", () => {
 
   it("puts its focus answer back once the page has loaded", () => {
     // Arrange
-    started = startHost(document, window, { startSidebar: noSidebar });
+    started = startHost(document, window, { startServices: noServices });
     window.xwHasFocus = () => false;
     const field = document.createElement("textarea");
     document.body.append(field);
@@ -173,7 +174,7 @@ describe("startHost", () => {
     ];
 
     // Act
-    started = startHost(document, window, { startSidebar: noSidebar });
+    started = startHost(document, window, { startServices: noServices });
 
     // Assert
     expect(order.map((answer) => (JSON.parse(answer) as { outcome: string }).outcome)).toEqual(["created", "shown"]);
@@ -184,7 +185,7 @@ describe("startHost", () => {
     window.__agentReplHostPending = [];
 
     // Act
-    started = startHost(document, window, { startSidebar: noSidebar });
+    started = startHost(document, window, { startServices: noServices });
 
     // Assert
     expect(window.__agentReplHostPending).toBeUndefined();

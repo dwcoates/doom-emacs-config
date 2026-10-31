@@ -25,6 +25,8 @@
  * `?host=1` is a different page altogether: Emacs's one web view, which holds
  * every workspace's page as an iframe (src/host/host.ts). It carries no
  * workspace and is read by {@link isHostAddress}, before any of the above.
+ * `?sidebar=1` is the other: the workspaces rail in a web view of its own
+ * (src/host/sidebar-page.ts), read by {@link isSidebarAddress}.
  *
  * Any other query parameter is IGNORED, not refused: the address is what this
  * page reads out of the URL, and an unrecognized parameter is somebody else's
@@ -68,4 +70,9 @@ export function pageAddress(search: string): PageAddress {
 /** Whether a `location.search` string addresses the host page (`?host=1`). */
 export function isHostAddress(search: string): boolean {
   return new URLSearchParams(search).get("host") === "1";
+}
+
+/** Whether a `location.search` string addresses the sidebar page (`?sidebar=1`). */
+export function isSidebarAddress(search: string): boolean {
+  return new URLSearchParams(search).get("sidebar") === "1";
 }

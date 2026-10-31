@@ -90,18 +90,6 @@ interface WebhostPressedMessage {
   readonly kind: "webhostPressed";
 }
 
-/**
- * host -> page: whether the webhost draws the sidebar over the page's sidebar
- * column. While it does, the page keeps that column empty and reserved, so its
- * main column and docked gate sit exactly where they would beside its own
- * sidebar. Sent once the webhost's sidebar has drawn, and replayed on hello.
- */
-interface SidebarDockMessage {
-  readonly channel: typeof HOST_CHANNEL;
-  readonly kind: "sidebarDock";
-  readonly docked: boolean;
-}
-
 /** One failure of the webhost's own machinery, as a warning chip row draws it. */
 export interface WebhostFailure {
   readonly arm: ClientFailureArm;
@@ -190,7 +178,6 @@ export type HostToPage =
   | DismissDigestMessage
   | FocusMovedMessage
   | WebhostPressedMessage
-  | SidebarDockMessage
   | WebhostFailuresMessage;
 
 /** page -> host: the page booted; send it everything it should know. */
@@ -316,8 +303,6 @@ export function parseHostToPage(data: unknown): HostToPage | null {
         ? { channel: HOST_CHANNEL, kind: "logLevel", level: data.level, untilMs: data.untilMs }
         : null;
     }
-    case "sidebarDock":
-      return typeof data.docked === "boolean" ? { channel: HOST_CHANNEL, kind: "sidebarDock", docked: data.docked } : null;
     case "heldIngress": {
       if (!Array.isArray(data.entries)) return null;
       const entries = data.entries.map(parseHeldIngressEntry);

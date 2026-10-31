@@ -61,6 +61,12 @@
 (declare-function agent-repl-page-unload-note-shown "page-unload" (ws))
 (declare-function agent-repl-roster-drawn-tab-order "roster" ())
 (declare-function agent-repl--ws-current-name "workspace" ())
+(declare-function agent-repl-sidebar-view-mark-shown "sidebar-view" (id))
+(declare-function agent-repl-sidebar-view-follow-daemon "sidebar-view" (origin))
+(declare-function agent-repl-sidebar-view-set-log-level "sidebar-view" (level until-ms))
+(declare-function agent-repl-sidebar-view-focus-moved "sidebar-view" ())
+(declare-function agent-repl-sidebar-view-navigate "sidebar-view" (conn))
+(declare-function agent-repl-sidebar-view-kill "sidebar-view" ())
 (declare-function xwidget-get "xwidget" (xwidget propname))
 (declare-function xwidget-put "xwidget" (xwidget propname value))
 
@@ -348,6 +354,7 @@ of the buffer, and signals an error naming WHAT.  Returns the buffer."
       (agent-repl--frontend-kill-webview buf))
     (setq agent-repl--webhost-buffer nil
           agent-repl--webhost-url nil)
+    (agent-repl-sidebar-view-kill)
     (agent-repl--info agent-repl--webhost-central "elisp.webhost.killed")))
 
 ;;;; ---- Calls -----------------------------------------------------------------
@@ -554,7 +561,10 @@ show, so the page can measure it."
     (when (and id (not (equal id agent-repl--webhost-shown)))
       (setq agent-repl--webhost-shown id)
       (agent-repl--info ws "elisp.webhost.show ws=%s id=%s" ws id)
-      (agent-repl--webhost-call "show" id switch-started))))
+      (agent-repl--webhost-call "show" id switch-started)
+      ;; THE SIDEBAR'S HIGHLIGHT MOVES WITH THE PAGE, in the same command:
+      ;; the sidebar is a web view of its own (sidebar-view.el).
+      (agent-repl-sidebar-view-mark-shown id))))
 
 (defun agent-repl-webhost-remove (ws &optional unloading)
   "Drop WS's page from the host, and everything held for it.
@@ -582,7 +592,7 @@ unloaded page's workspace still shows its gate at the composer's height
 
 A HANDOVER NEVER RELOADS THE HOST.  Reloading it replaced every page at
 once, and the page on screen stood blank for seconds (4.8s on the
-2026-10-23 14:38 deploy).  Instead the host's own calls (its sidebar's)
+2026-10-23 14:38 deploy).  Instead the host's own calls (its services')
 are pointed at the daemon WS moved to (`setDaemon'), and WS's page is
 re-pointed there: the host keeps a shown page on screen until its
 replacement has drawn (host.ts), so nobody sees it blank."
@@ -599,8 +609,8 @@ replacement has drawn (host.ts), so nobody sees it blank."
 
 (defun agent-repl-webhost-follow-daemon (ws conn)
   "Point the host's own calls at CONN's daemon, the one WS moved to.
-The host keeps its page and every workspace's; only where its sidebar's
-calls go moves (`setDaemon')."
+The host keeps its page and every workspace's; only where its services'
+calls, and the sidebar's (sidebar-view.el), go moves (`setDaemon')."
   (let ((origin (agent-repl-webhost-origin conn)))
     (unless (equal origin (or agent-repl--webhost-daemon-origin
                               (and agent-repl--webhost-url
@@ -608,7 +618,8 @@ calls go moves (`setDaemon')."
       (setq agent-repl--webhost-daemon-origin origin
             agent-repl--webhost-follow-conn conn)
       (agent-repl--info ws "elisp.webhost.follows-daemon ws=%s to=%s" ws origin)
-      (agent-repl--webhost-call "setDaemon" origin))))
+      (agent-repl--webhost-call "setDaemon" origin)
+      (agent-repl-sidebar-view-follow-daemon origin))))
 
 (defun agent-repl--webhost-url-origin (url)
   "The scheme, host and port of URL, as the host page reads its own origin."
@@ -645,6 +656,7 @@ once its window passes, so a page that loads later has nothing to draw."
 LEVEL `info', with UNTIL-MS nil, closes the window.  Kept for the host's
 reloads while the window lasts.  Non-nil when the call was sent."
   (setq agent-repl--webhost-log-level (unless (eq level 'info) (cons level until-ms)))
+  (agent-repl-sidebar-view-set-log-level level until-ms)
   (agent-repl--webhost-call "setLogLevel" (symbol-name level) until-ms))
 
 (defun agent-repl-webhost-dismiss-digest (ws)
@@ -661,6 +673,7 @@ reaches the pages: each lets go of every notice the pointer raised on it
 footer.  A key the web view forwards to Emacs selects another window without
 the web view ever losing the focus, so the pages cannot see this for
 themselves.  With no host there are no pages to tell, and nothing is sent."
+  (agent-repl-sidebar-view-focus-moved)
   (when (agent-repl-webhost-xwidget)
     (agent-repl--webhost-call "focusMoved")))
 
@@ -866,6 +879,9 @@ is the reload asked for."
               agent-repl--webhost-follow-conn nil
               agent-repl--webhost-reload-started-ms (agent-repl--now-unix-ms))
         (agent-repl--frontend-webview-navigate-widget xw agent-repl--webhost-url)
+        ;; THE SIDEBAR RELOADS WITH THE HOST, onto the same daemon, so the
+        ;; two documents run one build (sidebar-view.el).
+        (agent-repl-sidebar-view-navigate conn)
         (agent-repl--info agent-repl--webhost-central "elisp.webhost.reloaded pages=%d"
                           (hash-table-count agent-repl--webhost-pages)))
     (agent-repl--log agent-repl--webhost-central "elisp.webhost.reload-skipped reason=no-host")))

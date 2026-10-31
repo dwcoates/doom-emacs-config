@@ -17,13 +17,14 @@
  * how what this module does reaches the logs: an answer names the call, the
  * workspace, the outcome, and any notes the host made since the last answer
  * (a message it could not read, say). Answers are JSON strings because that
- * is what a script evaluation can hand Emacs. (The webhost's sidebar has a
- * daemon connection and a logger of its own, host/sidebar.ts; this module
+ * is what a script evaluation can hand Emacs. (The webhost's services have a
+ * daemon connection and a logger of their own, host/services.ts; this module
  * applies Emacs's calls and uses neither.)
  *
- * THE SIDEBAR IS DRAWN OVER THE PAGES, once (host/sidebar.ts). This module
- * tells every page whether it is docked and which of the webhost's failures
- * stand, and ends the sidebar above the gate band of the page on screen.
+ * THE SIDEBAR IS NOT HERE. It is a web view of its own, in an Emacs window
+ * beside the host's (host/sidebar-page.ts). This module tells every page which
+ * of the webhost's failures stand, and ends the pages above the gate band of
+ * the page on screen.
  */
 import { FOCUS_LEFT_EMACS, pageFocusLeft, type FocusLeftSource } from "../focus-left.js";
 import { endPage } from "../page-teardown.js";
@@ -67,8 +68,8 @@ export interface HostEnv {
   readonly frame?: (fn: () => void) => void;
   /**
    * The webhost document's own focus-left signal, which `focusMoved` fires as
-   * well as telling every page, so the webhost's sidebar lets go of what it
-   * raised (deploys-fold.ts); the document's own when omitted.
+   * well as telling every page, so the webhost's own layers let go of what
+   * they raised; the document's own when omitted.
    */
   readonly focusLeft?: FocusLeftSource;
 }
@@ -149,7 +150,7 @@ export interface Host {
   /** Drop workspace ID's page. */
   remove(id: string): string;
   /**
-   * Point the webhost's own daemon calls (its sidebar's) at ORIGIN, the
+   * Point the webhost's own daemon calls (its services') at ORIGIN, the
    * daemon its workspaces moved to: a handover no longer reloads the
    * webhost. Answers `retargeted`, `unchanged`, or `refused` for anything
    * that is not an http origin.
@@ -201,8 +202,6 @@ export interface Host {
   editing(): boolean;
   /** Every workspace id the host holds a page for. */
   ids(): string;
-  /** Tell every page whether the webhost's sidebar is docked over it. */
-  setSidebarDocked(docked: boolean): void;
   /** Tell every page the webhost's own failures standing now. */
   setFailures(failures: readonly WebhostFailure[]): void;
   /**
@@ -261,7 +260,6 @@ export function createHost(env: HostEnv): Host {
   const frames = new Map<string, Frame>();
   const frameParent = env.frames ?? doc.body;
   let shownId: string | null = null;
-  let sidebarDocked = false;
   let failures: readonly WebhostFailure[] = [];
   let notes: HostNote[] = [];
   const now = env.now ?? Date.now;
@@ -289,7 +287,7 @@ export function createHost(env: HostEnv): Host {
    * screen.
    */
   const incoming = new Map<string, { fresh: Frame; bound: number }>();
-  /** Who is told every page shown (`onShown`): the webhost's sidebar. */
+  /** Who is told every page shown (`onShown`): the webhost's gate. */
   const shownListeners = createListeners<[string]>();
   /**
    * THE PAGES HELD BACK UNTIL THE USER ASKS (`holdBack`), each id's dir: a
@@ -343,8 +341,6 @@ export function createHost(env: HostEnv): Host {
     ...(reloadStartedAtMs === null ? {} : { reloadStartedAtMs }),
   });
 
-  /** Whether the sidebar is docked over the pages, as every page is told. */
-  const dockMessage = (): HostToPage => ({ channel: HOST_CHANNEL, kind: "sidebarDock", docked: sidebarDocked });
   /** The webhost's failures, as every page is told. */
   const failuresMessage = (): HostToPage => ({ channel: HOST_CHANNEL, kind: "webhostFailures", failures });
   /** Tell every page MESSAGE. */
@@ -361,7 +357,6 @@ export function createHost(env: HostEnv): Host {
     const reloadStartedAtMs = frame.pendingReloadStartedAtMs;
     frame.pendingReloadStartedAtMs = null;
     post(frame, presenceOf(frame, switchStartedAtMs, reloadStartedAtMs));
-    post(frame, dockMessage());
     post(frame, failuresMessage());
     if (logLevel !== null && logLevel.untilMs > now()) {
       post(frame, { channel: HOST_CHANNEL, kind: "logLevel", level: logLevel.level, untilMs: logLevel.untilMs });
@@ -583,7 +578,7 @@ export function createHost(env: HostEnv): Host {
         frame.editing = message.editing;
         return;
       case "bubbleOverlay":
-        // The iframe rises above the sidebar while its page has a bubble open.
+        // The iframe rises above the webhost's layers while its page has a bubble open.
         frame.iframe.toggleAttribute(FRAME_OVERLAY_ATTRIBUTE, message.open);
         return;
     }
@@ -620,7 +615,7 @@ export function createHost(env: HostEnv): Host {
     take(frame, message);
   };
   win.addEventListener("message", onMessage);
-  // A PRESS ON THE WEBHOST'S OWN DOCUMENT (its sidebar) is a click inside the
+  // A PRESS ON THE WEBHOST'S OWN DOCUMENT (its gate or load button) is a click inside the
   // webapp outside every page, which no page's document sees: every page is
   // told, so it ends what a click on its own background would
   // (webhost-pressed.ts). A press inside a page's iframe never reaches here.
@@ -952,7 +947,7 @@ export function createHost(env: HostEnv): Host {
       return answer("drawn", id, frame === undefined ? "absent" : "present", { drawn: frame?.drawn ?? null });
     },
     selection() {
-      // TEXT SELECTED IN THE WEBHOST ITSELF (its sidebar) is the selection:
+      // TEXT SELECTED IN THE WEBHOST ITSELF (its gate) is the selection:
       // the pages cannot see it, and while it stands the user is not selecting
       // in a page.
       const own = selectedText(win);
@@ -970,10 +965,6 @@ export function createHost(env: HostEnv): Host {
     editing() {
       const frame = shownId === null ? undefined : frames.get(shownId);
       return frame?.editing ?? false;
-    },
-    setSidebarDocked(docked) {
-      sidebarDocked = docked;
-      broadcast(dockMessage());
     },
     setFailures(next) {
       failures = next;

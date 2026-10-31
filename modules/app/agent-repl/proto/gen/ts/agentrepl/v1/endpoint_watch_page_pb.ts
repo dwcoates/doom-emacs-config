@@ -87,11 +87,13 @@ export type WatchPageRequest = Message<"agentrepl.v1.WatchPageRequest"> & {
   page: string;
 
   /**
-   * PRESENT ONLY ON THE WEB VIEW HOST'S OWN PAGE STREAM (its sidebar's): the
-   * host is the one document a handover no longer reloads, so it states the
-   * webapp build it was loaded from, and a deploy that built another reloads
-   * it (WatchDaemonResponse.reload_webhost). Absent on every workspace page,
-   * which states its build on WatchWebWorkspace.
+   * PRESENT ONLY ON THE PAGE STREAMS OF EMACS'S OWN WEB VIEWS: the web view
+   * host's and the sidebar's (webapp/src/host/document.ts). They are the
+   * documents a handover no longer reloads, so each states the webapp build it
+   * was loaded from, and a deploy that built another reloads them
+   * (WatchDaemonResponse.reload_webhost: Emacs reloads the host, and the
+   * sidebar with it). Absent on every workspace page, which states its build on
+   * WatchWebWorkspace.
    *
    * @generated from field: optional agentrepl.v1.WebhostPage webhost = 2;
    */

@@ -466,7 +466,7 @@ recreates it (`agent-repl--ensure-input-buffer')."
 
 (cl-defun agent-repl-window-test--run-ensure-layout
     (&key show-view show-input (current-ws "cur") kill-view eager
-          in-progress setup after gate)
+          in-progress setup after gate (sidebar t) sidebar-shown)
   "Drive `agent-repl-window--ensure-layout' over a real window layout.
 Registers a view and an input buffer for workspace \"cur\", displays
 the view buffer when SHOW-VIEW and the input buffer when SHOW-INPUT
@@ -478,8 +478,10 @@ layout is built (for fixtures like a side window or another
 workspace's panel); AFTER, when non-nil, is a thunk run after the
 reconcile while the layout is still live (for window-liveness
 assertions the temp-frame restore would otherwise destroy).  GATE, when
-non-nil, is the gate the host view states for \"cur\".  Returns
-the list of workspaces a repair was dispatched for."
+non-nil, is the gate the host view states for \"cur\".  SIDEBAR says
+whether the sidebar's window stands (it does unless nil), and
+SIDEBAR-SHOWN, a thunk, is called with each connection the sidebar was
+shown on.  Returns the list of workspaces a repair was dispatched for."
   (let ((view-buf (generate-new-buffer " *elt-view*"))
         (input-buf (generate-new-buffer " *elt-input*"))
         (dispatched '()))
@@ -502,7 +504,12 @@ the list of workspaces a repair was dispatched for."
                       ((symbol-function 'agent-repl-host-state)
                        (lambda (ws) (and gate (equal ws "cur") (list :gate gate))))
                       ((symbol-function 'agent-repl--frontend-dispatch-show)
-                       (lambda (ws) (push ws dispatched))))
+                       (lambda (ws) (push ws dispatched)))
+                      ((symbol-function 'agent-repl-sidebar-view-window)
+                       (lambda (&optional _frame) (and sidebar 'sidebar-window)))
+                      ((symbol-function 'agent-repl-host-conn) (lambda (_ws) 'conn))
+                      ((symbol-function 'agent-repl-sidebar-view-show)
+                       (lambda (conn) (when sidebar-shown (funcall sidebar-shown conn)))))
               (let ((agent-repl--eager-open-in-progress eager)
                     (agent-repl-window--ensure-layout-in-progress in-progress))
                 (agent-repl-window--ensure-layout)))
@@ -528,6 +535,41 @@ repair is dispatched through the workspace's frontend (the view comes back)."
 repair is dispatched."
   (should-not (agent-repl-window-test--run-ensure-layout
                :show-view t :show-input t)))
+
+;; THE SIDEBAR STANDS WITH THE PANELS (sidebar-view.el).
+
+(ert-deftest agent-repl-window-test-ensure-layout-shows-a-missing-sidebar-beside-the-panels ()
+  "Both panels on screen without the sidebar's window → the sidebar is shown
+on the workspace's connection."
+  (let ((shown nil))
+    (agent-repl-window-test--run-ensure-layout
+     :show-view t :show-input t :sidebar nil
+     :sidebar-shown (lambda (conn) (push conn shown)))
+    (should (equal shown '(conn)))))
+
+(ert-deftest agent-repl-window-test-ensure-layout-shows-a-missing-sidebar-beside-a-gated-view ()
+  "A gated view standing alone without the sidebar's window → the sidebar is shown."
+  (let ((shown nil))
+    (agent-repl-window-test--run-ensure-layout
+     :show-view t :sidebar nil :gate '(:arm :cold-gate :value nil)
+     :sidebar-shown (lambda (conn) (push conn shown)))
+    (should (equal shown '(conn)))))
+
+(ert-deftest agent-repl-window-test-ensure-layout-leaves-a-standing-sidebar-alone ()
+  "Panels and sidebar all on screen → the sidebar is not shown again."
+  (let ((shown nil))
+    (agent-repl-window-test--run-ensure-layout
+     :show-view t :show-input t
+     :sidebar-shown (lambda (conn) (push conn shown)))
+    (should-not shown)))
+
+(ert-deftest agent-repl-window-test-ensure-layout-shows-no-sidebar-without-panels ()
+  "No panels on screen (a hidden workspace) → the sidebar is not shown."
+  (let ((shown nil))
+    (agent-repl-window-test--run-ensure-layout
+     :sidebar nil
+     :sidebar-shown (lambda (conn) (push conn shown)))
+    (should-not shown)))
 
 (ert-deftest agent-repl-window-test-ensure-layout-noop-when-neither-present ()
   "Neither panel window present (hidden/closed workspace) → no repair;
@@ -1242,6 +1284,26 @@ the foreign window stood), :selected (`:input', `:view' or `:other'), and
       (dolist (buf (list view-buf input-buf other-buf))
         (when (buffer-live-p buf) (kill-buffer buf)))
       (set-frame-parameter nil 'agent-repl-window--foreign-windows-seen nil))))
+
+(ert-deftest agent-repl-window-test-foreign-windows-leave-out-the-sidebar ()
+  "The sidebar's own side window stands with the panels and is never foreign."
+  (let ((view-buf (generate-new-buffer " *fw-view*"))
+        (input-buf (generate-new-buffer " *fw-input*"))
+        (side-buf (generate-new-buffer " *fw-sidebar*")))
+    (unwind-protect
+        (agent-repl-test--with-clean-state
+          (agent-repl-window-test--with-temp-frame
+            (agent-repl--ws-put "cur" :frontend-buffer view-buf)
+            (agent-repl--ws-put "cur" :input-buffer input-buf)
+            (set-window-buffer (selected-window) view-buf)
+            (set-window-buffer (split-window (selected-window)) input-buf)
+            (let ((side-win (display-buffer-in-side-window side-buf '((side . left) (slot . -1)))))
+              (cl-letf (((symbol-function 'agent-repl-sidebar-view-window-p)
+                         (lambda (win) (eq win side-win))))
+                ;; Act / Assert
+                (should-not (agent-repl-window--foreign-windows "cur"))))))
+      (dolist (buf (list view-buf input-buf side-buf))
+        (when (buffer-live-p buf) (kill-buffer buf))))))
 
 (ert-deftest agent-repl-window-test-focus-input-selects-input-after-window-closes ()
   "Closing the last non-panel window selects the input window."

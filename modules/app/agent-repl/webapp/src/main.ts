@@ -91,7 +91,7 @@ import { createPromptEcho, installPromptEcho } from "./prompt-echo.js";
 import { createPageSeen } from "./page-seen.js";
 import { createAgentReplClient } from "./rpc/client.js";
 import { createAppContext, type AppContext } from "./rpc/context.js";
-import { isHostAddress, pageAddress } from "./rpc/page-address.js";
+import { isHostAddress, isSidebarAddress, pageAddress } from "./rpc/page-address.js";
 import { createPageTransport } from "./rpc/transport.js";
 import { workspaceRef } from "./rpc/workspace-ref.js";
 import type { SubmitPromptCommandPanel } from "../../proto/gen/ts/agentrepl/v1/endpoint_submit_prompt_pb";
@@ -538,11 +538,17 @@ function reportBootFailure(err: unknown, failures: LocalFailures | null): void {
 // through a dynamic import so it reaches nothing of the workspace page it does
 // not need, while staying reachable from this one entry: the entry's hash is
 // the build's identity (bin/build-frontend.sh), and it covers the host too.
+// THE SIDEBAR PAGE, `?sidebar=1` (src/host/sidebar-page.ts), is reached the
+// same way: the rail in Emacs's second web view.
 const started = isHostAddress(window.location.search)
   ? import("./host/main.js").then((host) => {
       host.startHost(document, window);
     })
-  : boot();
+  : isSidebarAddress(window.location.search)
+    ? import("./host/sidebar-page.js").then((sidebar) => {
+        sidebar.startSidebarPage(document, window);
+      })
+    : boot();
 started.catch((err: unknown) => {
   queueMicrotask(() => {
     throw err;

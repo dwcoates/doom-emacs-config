@@ -869,14 +869,9 @@ body::after {
   font-size: 14px;
 }
 #ws-sidebar[hidden] { display: none; }
-/* A PAGE IN THE WEBHOST DRAWS NO SIDEBAR OF ITS OWN: the webhost draws the one
-   sidebar over this column (host/sidebar.ts), so the page keeps the column,
-   empty and invisible, at exactly the size its own sidebar took. */
-html.webhost-sidebar #ws-sidebar,
-html.webhost-sidebar #ws-sidebar[hidden] {
-  display: flex;
-  visibility: hidden;
-}
+/* A PAGE IN THE WEBHOST DRAWS NO SIDEBAR OF ITS OWN: the sidebar is a web view
+   of its own beside the host (host/sidebar-page.ts), so the page's rail stays
+   hidden and its column takes no width. */
 
 /* THE RAIL'S TEXT IS INFORMATION AND IS THEREFORE SELECTABLE (owner rulings,
    2026-09-14: "ensure that everything in the webapp (all text) can be copied

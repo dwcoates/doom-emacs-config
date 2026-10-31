@@ -20,6 +20,8 @@
  * instead, says so once at INFO, and drops what it stored.
  */
 import { installVersionHover } from "./memory.js";
+import { installVersionNotices, type SidebarNotices } from "./notices.js";
+import type { LocalFailureView } from "../failure/local.js";
 import { WatchWorkspaceRosterResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_workspace_roster_pb";
 import { createDrawnStatusLog } from "../drawn-status.js";
 import { log } from "../log.js";
@@ -174,12 +176,12 @@ export function mountWebhostSidebar(
   return mountSidebarIn(host, ctx, { case: "webhost" }, deps);
 }
 
-/** What the webhost's sidebar may have injected, beside the shared deps. */
-export type WebhostSidebarDeps = Pick<SidebarDeps, "storage" | "timers" | "wallPhase" | "frame"> & {
+/** What the sidebar page's rail may have injected, beside the shared deps. */
+export type WebhostSidebarDeps = Pick<SidebarDeps, "storage" | "timers" | "wallPhase" | "frame" | "focusLeft"> & {
   /** Told once, when the first push reveals the sidebar. */
   revealed?: () => void;
-  /** Told the roster's shown cold gates on every roster drawn (host/gate.ts). */
-  coldGates?: (gates: WorkspaceRoster["coldGates"]) => void;
+  /** The sidebar document's failures and notices, which its version lists (notices.ts). */
+  notices?: { failures: LocalFailureView; notices: SidebarNotices };
 };
 
 /** Where a sidebar is drawn, and what that placement needs. */
@@ -313,8 +315,14 @@ function mountSidebarIn(
     bandFit.refit();
   });
   const head = drawRailHead(search, createAppSwitcher(ctx, dropdowns));
+  // THE VERSION LISTS THE SIDEBAR'S OWN WARNINGS AND ERRORS on a click, and
+  // is tinted by them (notices.ts), in the sidebar's own web view.
+  const versionNotices =
+    deps.notices === undefined
+      ? null
+      : installVersionNotices(head.version, head.element, deps.notices.failures, deps.notices.notices, dropdowns);
   // THE VERSION HOVERS AGENT-REPL'S MEMORY (memory.ts), naming no workspace.
-  installVersionHover(ctx, head.version, head.element);
+  installVersionHover(ctx, head.version, head.element, () => versionNotices?.isOpen() ?? false);
   host.replaceChildren(head.element, search.bar, arrangeStatus, body, arrangeLayer);
   // THE RAIL'S LOOPS RUN ON THE WALL CLOCK (wall-phase.ts), so neither a
   // redraw nor a switch to another workspace's page restarts one.
@@ -421,7 +429,6 @@ function mountSidebarIn(
       guardMalformedNow(ctx, "sidebar.roster-draw", () =>
         timeRosterDraw(body, placement.case, (mark) => drawRosterNow(newest, mark), drawTiming),
       );
-      guardMalformedNow(ctx, "sidebar.cold-gates", () => deps.coldGates?.(newest.coldGates));
     });
   }
 
@@ -512,6 +519,7 @@ function mountSidebarIn(
       transients.dispose();
       removeDeploysFoldReset();
       rail.deploysMore.dispose();
+      versionNotices?.dispose();
       rail.rowHover.dispose();
       disposeWorkspaceRoster(rail);
       disposeThreadList(rail);

@@ -50,6 +50,10 @@
 (declare-function agent-repl--info "core")
 (declare-function agent-repl-host-state "host")
 (declare-function agent-repl-webhost-set-gate-dock "webhost" (ws pixels))
+(declare-function agent-repl-sidebar-view-show "sidebar-view" (conn))
+(declare-function agent-repl-sidebar-view-window "sidebar-view" (&optional frame))
+(declare-function agent-repl-sidebar-view-window-p "sidebar-view" (win))
+(declare-function agent-repl-host-conn "host" (ws))
 (declare-function agent-repl--input-buffer "input" (ws))
 (declare-function json-encode-string "json" (string))
 
@@ -692,6 +696,18 @@ other workspace takes the right layout when it is next shown."
       (when (equal ws (agent-repl--ws-current-name))
         (agent-repl-window--ensure-layout)))))
 
+(defun agent-repl-window--ensure-sidebar (ws view-win)
+  "Show the sidebar beside WS's panels when VIEW-WIN stands without it.
+THE SIDEBAR STANDS WITH THE PANELS (sidebar-view.el), in a full-height side
+window of its own: a layout change that took it off the frame while the
+panels stayed (a `delete-window' on it, a restored configuration saved
+without it) gets it back.  Non-nil when it was shown; nil when there is no
+view on screen or the sidebar already stands."
+  (when (and view-win (not (agent-repl-sidebar-view-window)))
+    (agent-repl--log ws "window--ensure-layout: ws=%s the sidebar's window is missing beside the panels; showing it" ws)
+    (agent-repl-sidebar-view-show (agent-repl-host-conn ws))
+    t))
+
 (defvar agent-repl-window--ensure-layout-in-progress nil
   "Non-nil while `agent-repl-window--ensure-layout' dispatches a repair.
 The repair remounts the two-panel layout, which re-fires
@@ -762,20 +778,24 @@ Returns non-nil when a repair was dispatched, nil on every no-op."
              (hidden (agent-repl-input-hidden-p ws)))
         (cond
          ((and (not hidden) (not (xor view-win input-win)))
-          (agent-repl--log-verbose
-           ws
-           "window--ensure-layout: noop reason=panel-pair-complete view-window=%S input-window=%S"
-           view-win input-win)
-          nil)
+          (or (agent-repl-window--ensure-sidebar ws view-win)
+              (progn
+                (agent-repl--log-verbose
+                 ws
+                 "window--ensure-layout: noop reason=panel-pair-complete view-window=%S input-window=%S"
+                 view-win input-win)
+                nil)))
          ;; A STANDING GATE's target is the view alone: the input window is
          ;; hidden while the webview docks the banner.  Neither window is a
          ;; hidden layout, left alone as ever.
          ((and hidden (not input-win))
-          (agent-repl--log-verbose
-           ws
-           "window--ensure-layout: noop reason=gate-layout-complete view-window=%S"
-           view-win)
-          nil)
+          (or (agent-repl-window--ensure-sidebar ws view-win)
+              (progn
+                (agent-repl--log-verbose
+                 ws
+                 "window--ensure-layout: noop reason=gate-layout-complete view-window=%S"
+                 view-win)
+                nil)))
          ((not (agent-repl-window--panels-restorable-p ws))
           (agent-repl--log ws
                            "window--ensure-layout: ws=%s input window present but view buffer dead — leaving for the next explicit show"
@@ -799,12 +819,15 @@ Returns non-nil when a repair was dispatched, nil on every no-op."
 
 (defun agent-repl-window--foreign-windows (ws &optional frame)
   "Return FRAME's live windows that are not one of WS's two panel windows.
-The minibuffer window is never counted.  Side windows (Doom popups, a
-treemacs sidebar) are counted: a file popup opened from a feed link is
-exactly the kind of window whose close hands focus back to the input."
+The minibuffer window is never counted, nor is the sidebar's
+\(sidebar-view.el), which stands with the panels.  Other side windows (Doom
+popups, a treemacs sidebar) are counted: a file popup opened from a feed
+link is exactly the kind of window whose close hands focus back to the
+input."
   (let ((view-win (agent-repl-window--panel-window :view ws frame))
         (input-win (agent-repl-window--panel-window :input ws frame)))
-    (cl-remove-if (lambda (win) (memq win (list view-win input-win)))
+    (cl-remove-if (lambda (win) (or (memq win (list view-win input-win))
+                                    (agent-repl-sidebar-view-window-p win)))
                   (window-list frame 'nomini))))
 
 (defun agent-repl-window-focus-input-when-panels-alone (&optional frame)
