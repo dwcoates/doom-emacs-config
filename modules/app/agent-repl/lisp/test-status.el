@@ -3297,18 +3297,19 @@ an explicit `agent-repl-set-priority'); nothing derives one locally."
 the unfaced terminator appended by `agent-repl--join-tabline-rows' lands
 within the visible columns (0..frame-width-1) after centering.
 
-This test pins the contract: a row built for width W must never be
-wider than W chars.  Combined with center-target = W, this guarantees
-the centered+terminated row source is `<= W + 1` chars total — with
-the caller passing `(1- frame-width)' as W, the terminator lands at
-col `<= frame-width - 1' (visible)."
+This test pins the contract: a row built for width W is never wider
+than W chars, its `+N' badge included, whichever tabs the ranks keep.
+Combined with center-target = W, this guarantees the centered+terminated
+row source is `<= W + 1' chars total -- with the caller passing
+`(1- frame-width)' as W, the terminator lands at col `<= frame-width - 1'
+\(visible)."
   (dolist (n '(5 10 20))
     (let ((entries (mapcar #'number-to-string (number-sequence 1 n))))
       (dolist (w '(4 8))
-        (dolist (max-rows '(1 2))
-          (dotimes (cur n)
-            (dolist (row (agent-repl--tabline-rows entries cur w max-rows))
-              (should (<= (length row) w)))))))))
+        (dotimes (newest n)
+          (let ((ranks (mapcar (lambda (i) (if (= i newest) 100 i))
+                               (number-sequence 0 (1- n)))))
+            (should (<= (length (agent-repl--tabline-row entries ranks w)) w))))))))
 
 ;;;; ---- Tests: +workspace--message-body override (suppress tabline flash) ----
 
@@ -3513,19 +3514,22 @@ test can assert the re-assertion left an already-correct frame alone, and
        ,@body)))
 
 (ert-deftest agent-repl-test-tabbar-reassert-repairs-startup-frame-reset ()
-  "A `frame-notice-user-settings'-style one-line frame is re-pinned to two."
-  ;; Arrange: startup applied `default-frame-alist' when it still said one line.
-  (let ((default-frame-alist '((tab-bar-lines . 1)
-                               (tab-bar-lines-keep-state . t))))
+  "A `frame-notice-user-settings'-style frame without the keep-state lock is
+re-pinned: `tab-bar-mode' writes `(tab-bar-lines . 1)' into
+`default-frame-alist' alone, so the initial frame carries the row count
+but nothing stops Emacs's own line recalculation from moving it."
+  ;; Arrange: startup applied an alist that `tab-bar-mode' rewrote.
+  (let ((default-frame-alist '((tab-bar-lines . 1))))
     (agent-repl-test-status--with-tabbar-frame
-        '((tab-bar-lines . 1) (tab-bar-lines-keep-state . t))
+        (list (cons 'tab-bar-lines agent-repl--tabline-row-count))
       ;; Act
       (let ((repinned (agent-repl--tabbar-reassert-row-count)))
         ;; Assert
         (should (equal repinned
                        (list (list 'frame-a agent-repl--tabline-row-count))))
         (should (= agent-repl--tabline-row-count
-                   (alist-get 'tab-bar-lines frame-params)))))))
+                   (alist-get 'tab-bar-lines frame-params)))
+        (should (eq t (alist-get 'tab-bar-lines-keep-state frame-params)))))))
 
 (ert-deftest agent-repl-test-tabbar-reassert-repairs-persp-hook-reset ()
   "The persp hook's `default-frame-alist' clobber is undone for new frames."
