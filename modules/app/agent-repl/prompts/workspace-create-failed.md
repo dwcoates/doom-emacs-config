@@ -9,6 +9,6 @@ The failure agent-repl reported:
 
 {{cause}}
 
-Please find out why it failed. agent-repl lives at `{{agent_repl_dir}}`, and its daemon records every create in its logs; the `/agent-repl-debug` skill knows where those logs are and how to read them, if it is available to you. Tell me the root cause, with the log records that show it, and propose a fix.
+Please find out why it failed. agent-repl lives at `{{agent_repl_dir}}`, and its daemon records every create in its logs; the `/agent-repl-debug` skill knows where those logs are and how to read them, if it is available to you. Then fix it as the metaprompt's "Handed failures" section says: name the root cause with the log records that show it, dispatch the fix as a one-shot child workspace that lands into master, and report the cause, the records, and the child you dispatched.
 
-Do not change anything, and do not retry the create, until I answer.
+Do not retry the create yourself.

@@ -4,14 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"testing"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/headless"
 	"agent-repld/internal/netstate"
-	"agent-repld/internal/prompts"
 	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
@@ -27,10 +25,7 @@ func script(f *fixture, answers ...headlessAnswer) {
 // fork continues — no more, no fewer.
 func TestTheShippedNamingBriefTakesTheConversation(t *testing.T) {
 	// Arrange.
-	brief, err := prompts.Load(filepath.Join("..", "..", "..", "prompts"), BriefWorkspaceName)
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
+	brief := loadShippedBrief(t, BriefWorkspaceName)
 
 	// Act.
 	got, err := brief.Splice(map[string]string{
@@ -409,10 +404,7 @@ func TestCreateRecordsEveryRejectedAnswer(t *testing.T) {
 // the values namingQuestion splices and to the validator's limit.
 func TestTheShippedShortenBriefStatesTheLimit(t *testing.T) {
 	// Arrange.
-	brief, err := prompts.Load(filepath.Join("..", "..", "..", "prompts"), BriefWorkspaceNameShorten)
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
+	brief := loadShippedBrief(t, BriefWorkspaceNameShorten)
 
 	// Act.
 	got, err := brief.Splice(map[string]string{
@@ -450,10 +442,7 @@ func TestCreateRefusesWhenTheShortenBriefIsAbsent(t *testing.T) {
 // the validator's constant, so the two can never disagree.
 func TestTheShippedNamingBriefStatesTheWordLimit(t *testing.T) {
 	// Arrange.
-	brief, err := prompts.Load(filepath.Join("..", "..", "..", "prompts"), BriefWorkspaceName)
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
+	brief := loadShippedBrief(t, BriefWorkspaceName)
 
 	// Act.
 	got, err := brief.Splice(map[string]string{"prompt": "p", "conversation": ""})

@@ -2444,10 +2444,7 @@ func TestCreateFailsARootWhoseArrangementCannotBeRead(t *testing.T) {
 
 func TestTheShippedSubsectionPlacementBriefNamesTheVerbs(t *testing.T) {
 	// Arrange.
-	brief, err := prompts.Load(filepath.Join("..", "..", "..", "prompts"), BriefSubsectionPlacement)
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
+	brief := loadShippedBrief(t, BriefSubsectionPlacement)
 
 	// Act.
 	text, err := brief.Splice(nil)
