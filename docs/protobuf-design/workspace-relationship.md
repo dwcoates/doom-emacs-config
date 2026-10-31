@@ -157,3 +157,28 @@ NON-OBVIOUS CONSEQUENCES.
   workspace too (the guard test now pins three shared calls).
 - Emacs creates name `:relationship` (child of OWNER, else peer) and never a
   landing target; `unknown_landing_target` is deliberately not decoded there.
+
+### 3. Backfill support: find by creator, and a retarget keeps its landing (agentrepl.v1)
+
+WHAT. `FindWorkspacesRequest.created_by` (6) narrows a find to the workspaces
+one workspace asked for, refused as `unknown_creator` when it names no
+workspace; `FoundWorkspace` gains `created_by` (9) and `parent` (10).
+`SetWorkspaceParentRequest.landing_target` UNSET now KEEPS where the workspace
+lands, instead of re-applying the relationship's default.
+
+WHY. The user asked to backfill the new relationships: every open workspace
+re-files the workspaces it created as children or peers. A workspace needs a
+deterministic list of what it created (its conversation may have been
+compacted), and re-filing an existing workspace must never move where its
+work lands.
+
+DECISIONS AND WHY ALTERNATIVES LOST.
+- Retarget default = keep, not re-apply. An existing workspace's branch was
+  cut from its current target; re-applying the default on reparenting (the
+  first landing of this record) would merge a branch cut from the primary
+  branch into the new parent's branch, carrying every unrelated primary commit
+  with it. The creation default (into the parent) stays, because a create cuts
+  the branch from that parent. Nothing but the command line calls
+  SetWorkspaceParent (verified: no Emacs or webapp caller), so no client relied
+  on the old default.
+- `unchanged` with no landing target stays malformed: it would change nothing.

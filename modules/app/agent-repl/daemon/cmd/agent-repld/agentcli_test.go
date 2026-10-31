@@ -1928,7 +1928,7 @@ func TestFindSendsEveryNarrowingItNames(t *testing.T) {
 		check func(*agentreplv1.FindWorkspacesRequest) bool
 	}{
 		{name: "nothing named sends the default limit and nothing else", args: nil, check: func(r *agentreplv1.FindWorkspacesRequest) bool {
-			return r.GetLimit() == defaultFindLimit && r.Repository == nil && r.Window == nil && r.Standing == nil && r.Text == nil
+			return r.GetLimit() == defaultFindLimit && r.Repository == nil && r.Window == nil && r.Standing == nil && r.Text == nil && r.CreatedBy == nil
 		}},
 		{name: "-all sends no limit", args: []string{"-all"}, check: func(r *agentreplv1.FindWorkspacesRequest) bool { return r.Limit == nil }},
 		{name: "-limit", args: []string{"-limit", "3"}, check: func(r *agentreplv1.FindWorkspacesRequest) bool { return r.GetLimit() == 3 }},
@@ -1948,6 +1948,9 @@ func TestFindSendsEveryNarrowingItNames(t *testing.T) {
 		{name: "-standing closed", args: []string{"-standing", "closed"}, check: func(r *agentreplv1.FindWorkspacesRequest) bool { return r.GetStanding().GetClosed() != nil }},
 		{name: "-standing landed", args: []string{"-standing", "landed"}, check: func(r *agentreplv1.FindWorkspacesRequest) bool { return r.GetStanding().GetLanded() != nil }},
 		{name: "-text", args: []string{"-text", "footer"}, check: func(r *agentreplv1.FindWorkspacesRequest) bool { return r.GetText() == "footer" }},
+		{name: "-created-by here is the caller", args: []string{"-created-by", "here"}, check: func(r *agentreplv1.FindWorkspacesRequest) bool {
+			return r.GetCreatedBy().GetId() == "ws-caller"
+		}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

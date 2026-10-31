@@ -36,6 +36,11 @@ message FindWorkspacesRequest {
   // At most this many workspaces, the most recently active first. UNSET =
   // every match. Zero is malformed (Connect InvalidArgument).
   optional uint32 limit = 5;
+  // Only workspaces this workspace's agent asked for (WorkspaceStatus
+  // .created_by): what a workspace reads to account for every workspace it
+  // made. UNSET = whoever asked. A ref naming no registered workspace is the
+  // unknown_creator answer.
+  optional workspace.v1.WorkspaceRef created_by = 6;
 }
 
 // A window of time a workspace's life must overlap: the workspace was created
@@ -128,6 +133,12 @@ message FoundWorkspace {
   int64 last_active_at_ms = 7;
   // The workspace's standing now.
   FoundWorkspaceStanding standing = 8;
+  // The workspace whose agent asked for this one's creation. UNSET when the
+  // user asked, or the workspace was registered rather than created.
+  optional workspace.v1.WorkspaceRef created_by = 9;
+  // The workspace's parent when it is a child (WorkspaceRelationship.child).
+  // UNSET for a peer.
+  optional workspace.v1.WorkspaceRef parent = 10;
 }
 
 // Whether a found workspace is open, closed, or landed. THE ARM IS THE
@@ -160,7 +171,11 @@ message FindWorkspacesError {
   oneof cause {
     // `repository` names a RepositoryRef the daemon's registry does not hold.
     FindWorkspacesUnknownRepository unknown_repository = 1;
+    // `created_by` names a workspace the daemon's registry does not hold.
+    FindWorkspacesUnknownCreator unknown_creator = 2;
   }
 }
 // Empty: the echoed ref is the only identity involved.
 message FindWorkspacesUnknownRepository {}
+// Empty: the echoed ref is the only identity involved.
+message FindWorkspacesUnknownCreator {}

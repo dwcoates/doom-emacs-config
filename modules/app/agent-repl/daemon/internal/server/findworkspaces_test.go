@@ -128,6 +128,53 @@ func TestFindWorkspacesAnswersAClosedWorkspaceWithItsCloseInstant(t *testing.T) 
 	}
 }
 
+func TestFindWorkspacesByCreatorNamesTheCreatorAndTheParent(t *testing.T) {
+	// Arrange: the landed workspace was asked for by the open one, and is its child.
+	h := findHarness(t)
+	landed := h.DB.workspaces["ws-landed"]
+	creator := ids.WorkspaceID("ws-open")
+	landed.RequestedBy, landed.Parent = &creator, &creator
+	h.DB.workspaces["ws-landed"] = landed
+
+	// Act
+	resp, err := h.Client.FindWorkspaces(context.Background(), connect.NewRequest(&agentreplv1.FindWorkspacesRequest{
+		CreatedBy: &workspacev1.WorkspaceRef{Id: "ws-open", Dir: "/src/open"}}))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("FindWorkspaces: %v", err)
+	}
+	found := resp.Msg.GetSuccess().GetComplete().GetWorkspaces()
+	if len(found) != 1 || found[0].GetName() != "landed-one" ||
+		found[0].GetCreatedBy().GetDir() != "/src/open" || found[0].GetParent().GetId() != "ws-open" {
+		t.Fatalf("found = %v, want only the landed workspace, naming its creator and parent", found)
+	}
+}
+
+func TestFindWorkspacesByAnUnknownCreatorIsAnAnswer(t *testing.T) {
+	tests := []struct {
+		name string
+		ref  *workspacev1.WorkspaceRef
+	}{
+		{name: "an id the registry does not hold", ref: &workspacev1.WorkspaceRef{Id: "ws-gone"}},
+		{name: "a dir that disagrees with the id's", ref: &workspacev1.WorkspaceRef{Id: "ws-open", Dir: "/src/elsewhere"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := findHarness(t)
+
+			// Act
+			resp, err := h.Client.FindWorkspaces(context.Background(), connect.NewRequest(&agentreplv1.FindWorkspacesRequest{CreatedBy: tt.ref}))
+
+			// Assert
+			if err != nil || resp.Msg.GetError().GetUnknownCreator() == nil {
+				t.Fatalf("FindWorkspaces = %v, %v; want unknown_creator", resp, err)
+			}
+		})
+	}
+}
+
 func TestFindWorkspacesOfAnUnknownRepositoryIsAnAnswer(t *testing.T) {
 	// Arrange
 	h := findHarness(t)
@@ -152,6 +199,7 @@ func TestFindWorkspacesRefusesAMalformedRequest(t *testing.T) {
 		{name: "a standing with no arm", req: &agentreplv1.FindWorkspacesRequest{Standing: &agentreplv1.FindWorkspacesStanding{}}},
 		{name: "a blank text", req: &agentreplv1.FindWorkspacesRequest{Text: ptrTo("  ")}},
 		{name: "a zero limit", req: &agentreplv1.FindWorkspacesRequest{Limit: ptrTo(uint32(0))}},
+		{name: "a creator ref naming no workspace", req: &agentreplv1.FindWorkspacesRequest{CreatedBy: &workspacev1.WorkspaceRef{}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

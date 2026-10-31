@@ -14,12 +14,16 @@ import (
 // workspace's recorded parent (workspaces.parent_id) is its relationship: a
 // child's parent coordinates it and the roster nests it there; no parent makes
 // it a peer. Its creation job's target directory (creation_jobs.target_dir) is
-// where its merge lands (agentrepl.v1.WorkspaceLandingTarget). The landing
-// target's DEFAULT follows the relationship -- a child lands into its parent
-// when the two share a repository, everything else on the primary branch -- so
-// a retarget writes both in ONE transaction, and the workspace the merge lands
-// into is read back from the target directory (Workspace.LandsInto), never
-// stored a second time.
+// where its merge lands (agentrepl.v1.WorkspaceLandingTarget). A retarget writes
+// both in ONE transaction, so one notice says both, and the workspace the merge
+// lands into is read back from the target directory (Workspace.LandsInto),
+// never stored a second time.
+//
+// A RETARGET KEEPS THE LANDING IT DOES NOT NAME. The workspace's branch was
+// cut from where it lands now; moving the landing because the relationship
+// changed would merge that branch into one it was never cut from. Only a
+// create applies the relationship's default, because a create cuts the
+// branch.
 
 // ParentRefusal is why SetParent refused a retarget. Each is the answer to
 // what was asked, never a store failure, and changes nothing.
@@ -79,9 +83,8 @@ type Retarget struct {
 	KeepParent bool
 	// Parent is the new parent, nil to make the workspace a top-level peer.
 	Parent *WorkspaceID
-	// Landing is where the merge lands from now on, nil to re-apply the
-	// default for the relationship the retarget leaves (a child of the same
-	// repository lands into its parent; anything else on the primary branch).
+	// Landing is where the merge lands from now on, nil to keep where it
+	// lands now.
 	Landing *LandingChoice
 }
 
@@ -100,7 +103,7 @@ func (r Retarget) String() string {
 	case r.Parent != nil:
 		parent = "parent " + string(*r.Parent)
 	}
-	landing := "default landing"
+	landing := "landing kept"
 	if r.Landing != nil {
 		landing = "landing on the primary branch"
 		if r.Landing.Into != nil {
@@ -111,7 +114,7 @@ func (r Retarget) String() string {
 }
 
 // ToParent is the retarget that makes PARENT (nil: none) the workspace's
-// parent and re-applies the default landing target for it.
+// parent and keeps where it lands.
 func ToParent(parent *WorkspaceID) Retarget { return Retarget{Parent: parent} }
 
 // AsParentRefused answers err's ParentRefusedError, if it carries one.
@@ -239,8 +242,10 @@ func setParent(ctx context.Context, tx *sql.Tx, id WorkspaceID, retarget Retarge
 	if retarget.KeepParent {
 		parent = current.parent
 	}
-	after := MergeTarget{Dir: repoDir, DefaultBranch: defaultBranch}
-	sameRepoParent := false
+	after := MergeTarget{Dir: before.Dir, LandsInto: before.LandsInto, LandsIntoName: before.LandsIntoName, DefaultBranch: defaultBranch}
+	if retarget.Landing != nil {
+		after.Dir, after.LandsInto, after.LandsIntoName = repoDir, nil, ""
+	}
 	if parent != nil {
 		var (
 			name, dir string
@@ -271,10 +276,6 @@ func setParent(ctx context.Context, tx *sql.Tx, id WorkspaceID, retarget Retarge
 		chosen := *parent
 		after.Parent, after.ParentName = &chosen, name
 		after.CrossRepository = repo != current.repo
-		sameRepoParent = !after.CrossRepository
-		if retarget.Landing == nil && sameRepoParent {
-			after.Dir, after.LandsInto, after.LandsIntoName = dir, &chosen, name
-		}
 	}
 	if retarget.Landing != nil && retarget.Landing.Into != nil {
 		into := *retarget.Landing.Into

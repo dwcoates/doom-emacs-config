@@ -52,7 +52,12 @@ type FindWorkspacesRequest struct {
 	Text *string `protobuf:"bytes,4,opt,name=text,proto3,oneof" json:"text,omitempty"`
 	// At most this many workspaces, the most recently active first. UNSET =
 	// every match. Zero is malformed (Connect InvalidArgument).
-	Limit         *uint32 `protobuf:"varint,5,opt,name=limit,proto3,oneof" json:"limit,omitempty"`
+	Limit *uint32 `protobuf:"varint,5,opt,name=limit,proto3,oneof" json:"limit,omitempty"`
+	// Only workspaces this workspace's agent asked for (WorkspaceStatus
+	// .created_by): what a workspace reads to account for every workspace it
+	// made. UNSET = whoever asked. A ref naming no registered workspace is the
+	// unknown_creator answer.
+	CreatedBy     *v1.WorkspaceRef `protobuf:"bytes,6,opt,name=created_by,json=createdBy,proto3,oneof" json:"created_by,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -120,6 +125,13 @@ func (x *FindWorkspacesRequest) GetLimit() uint32 {
 		return *x.Limit
 	}
 	return 0
+}
+
+func (x *FindWorkspacesRequest) GetCreatedBy() *v1.WorkspaceRef {
+	if x != nil {
+		return x.CreatedBy
+	}
+	return nil
 }
 
 // A window of time a workspace's life must overlap: the workspace was created
@@ -694,7 +706,13 @@ type FoundWorkspace struct {
 	// FindWorkspacesWindow is matched against and the answer is ordered by.
 	LastActiveAtMs int64 `protobuf:"varint,7,opt,name=last_active_at_ms,json=lastActiveAtMs,proto3" json:"last_active_at_ms,omitempty"`
 	// The workspace's standing now.
-	Standing      *FoundWorkspaceStanding `protobuf:"bytes,8,opt,name=standing,proto3" json:"standing,omitempty"`
+	Standing *FoundWorkspaceStanding `protobuf:"bytes,8,opt,name=standing,proto3" json:"standing,omitempty"`
+	// The workspace whose agent asked for this one's creation. UNSET when the
+	// user asked, or the workspace was registered rather than created.
+	CreatedBy *v1.WorkspaceRef `protobuf:"bytes,9,opt,name=created_by,json=createdBy,proto3,oneof" json:"created_by,omitempty"`
+	// The workspace's parent when it is a child (WorkspaceRelationship.child).
+	// UNSET for a peer.
+	Parent        *v1.WorkspaceRef `protobuf:"bytes,10,opt,name=parent,proto3,oneof" json:"parent,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -781,6 +799,20 @@ func (x *FoundWorkspace) GetLastActiveAtMs() int64 {
 func (x *FoundWorkspace) GetStanding() *FoundWorkspaceStanding {
 	if x != nil {
 		return x.Standing
+	}
+	return nil
+}
+
+func (x *FoundWorkspace) GetCreatedBy() *v1.WorkspaceRef {
+	if x != nil {
+		return x.CreatedBy
+	}
+	return nil
+}
+
+func (x *FoundWorkspace) GetParent() *v1.WorkspaceRef {
+	if x != nil {
+		return x.Parent
 	}
 	return nil
 }
@@ -1023,6 +1055,7 @@ type FindWorkspacesError struct {
 	// Types that are valid to be assigned to Cause:
 	//
 	//	*FindWorkspacesError_UnknownRepository
+	//	*FindWorkspacesError_UnknownCreator
 	Cause         isFindWorkspacesError_Cause `protobuf_oneof:"cause"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1074,6 +1107,15 @@ func (x *FindWorkspacesError) GetUnknownRepository() *FindWorkspacesUnknownRepos
 	return nil
 }
 
+func (x *FindWorkspacesError) GetUnknownCreator() *FindWorkspacesUnknownCreator {
+	if x != nil {
+		if x, ok := x.Cause.(*FindWorkspacesError_UnknownCreator); ok {
+			return x.UnknownCreator
+		}
+	}
+	return nil
+}
+
 type isFindWorkspacesError_Cause interface {
 	isFindWorkspacesError_Cause()
 }
@@ -1083,7 +1125,14 @@ type FindWorkspacesError_UnknownRepository struct {
 	UnknownRepository *FindWorkspacesUnknownRepository `protobuf:"bytes,1,opt,name=unknown_repository,json=unknownRepository,proto3,oneof"`
 }
 
+type FindWorkspacesError_UnknownCreator struct {
+	// `created_by` names a workspace the daemon's registry does not hold.
+	UnknownCreator *FindWorkspacesUnknownCreator `protobuf:"bytes,2,opt,name=unknown_creator,json=unknownCreator,proto3,oneof"`
+}
+
 func (*FindWorkspacesError_UnknownRepository) isFindWorkspacesError_Cause() {}
+
+func (*FindWorkspacesError_UnknownCreator) isFindWorkspacesError_Cause() {}
 
 // Empty: the echoed ref is the only identity involved.
 type FindWorkspacesUnknownRepository struct {
@@ -1122,11 +1171,48 @@ func (*FindWorkspacesUnknownRepository) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_find_workspaces_proto_rawDescGZIP(), []int{16}
 }
 
+// Empty: the echoed ref is the only identity involved.
+type FindWorkspacesUnknownCreator struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FindWorkspacesUnknownCreator) Reset() {
+	*x = FindWorkspacesUnknownCreator{}
+	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FindWorkspacesUnknownCreator) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FindWorkspacesUnknownCreator) ProtoMessage() {}
+
+func (x *FindWorkspacesUnknownCreator) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FindWorkspacesUnknownCreator.ProtoReflect.Descriptor instead.
+func (*FindWorkspacesUnknownCreator) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_find_workspaces_proto_rawDescGZIP(), []int{17}
+}
+
 var File_agentrepl_v1_endpoint_find_workspaces_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_find_workspaces_proto_rawDesc = "" +
 	"\n" +
-	"+agentrepl/v1/endpoint_find_workspaces.proto\x12\fagentrepl.v1\x1a\x1cworkspace/v1/workspace.proto\"\xcf\x02\n" +
+	"+agentrepl/v1/endpoint_find_workspaces.proto\x12\fagentrepl.v1\x1a\x1cworkspace/v1/workspace.proto\"\x9e\x03\n" +
 	"\x15FindWorkspacesRequest\x12@\n" +
 	"\n" +
 	"repository\x18\x01 \x01(\v2\x1b.workspace.v1.RepositoryRefH\x00R\n" +
@@ -1134,12 +1220,15 @@ const file_agentrepl_v1_endpoint_find_workspaces_proto_rawDesc = "" +
 	"\x06window\x18\x02 \x01(\v2\".agentrepl.v1.FindWorkspacesWindowH\x01R\x06window\x88\x01\x01\x12E\n" +
 	"\bstanding\x18\x03 \x01(\v2$.agentrepl.v1.FindWorkspacesStandingH\x02R\bstanding\x88\x01\x01\x12\x17\n" +
 	"\x04text\x18\x04 \x01(\tH\x03R\x04text\x88\x01\x01\x12\x19\n" +
-	"\x05limit\x18\x05 \x01(\rH\x04R\x05limit\x88\x01\x01B\r\n" +
+	"\x05limit\x18\x05 \x01(\rH\x04R\x05limit\x88\x01\x01\x12>\n" +
+	"\n" +
+	"created_by\x18\x06 \x01(\v2\x1a.workspace.v1.WorkspaceRefH\x05R\tcreatedBy\x88\x01\x01B\r\n" +
 	"\v_repositoryB\t\n" +
 	"\a_windowB\v\n" +
 	"\t_standingB\a\n" +
 	"\x05_textB\b\n" +
-	"\x06_limit\"p\n" +
+	"\x06_limitB\r\n" +
+	"\v_created_by\"p\n" +
 	"\x14FindWorkspacesWindow\x12\x1e\n" +
 	"\bsince_ms\x18\x01 \x01(\x03H\x00R\asinceMs\x88\x01\x01\x12\x1e\n" +
 	"\buntil_ms\x18\x02 \x01(\x03H\x01R\auntilMs\x88\x01\x01B\v\n" +
@@ -1170,7 +1259,7 @@ const file_agentrepl_v1_endpoint_find_workspaces_proto_rawDesc = "" +
 	"\n" +
 	"workspaces\x18\x01 \x03(\v2\x1c.agentrepl.v1.FoundWorkspaceR\n" +
 	"workspaces\x12\x18\n" +
-	"\aomitted\x18\x02 \x01(\rR\aomitted\"\xef\x02\n" +
+	"\aomitted\x18\x02 \x01(\rR\aomitted\"\x82\x04\n" +
 	"\x0eFoundWorkspace\x128\n" +
 	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x16\n" +
@@ -1181,9 +1270,15 @@ const file_agentrepl_v1_endpoint_find_workspaces_proto_rawDesc = "" +
 	"\asummary\x18\x05 \x01(\tH\x00R\asummary\x88\x01\x01\x12\"\n" +
 	"\rcreated_at_ms\x18\x06 \x01(\x03R\vcreatedAtMs\x12)\n" +
 	"\x11last_active_at_ms\x18\a \x01(\x03R\x0elastActiveAtMs\x12@\n" +
-	"\bstanding\x18\b \x01(\v2$.agentrepl.v1.FoundWorkspaceStandingR\bstandingB\n" +
+	"\bstanding\x18\b \x01(\v2$.agentrepl.v1.FoundWorkspaceStandingR\bstanding\x12>\n" +
 	"\n" +
-	"\b_summary\"\xf0\x01\n" +
+	"created_by\x18\t \x01(\v2\x1a.workspace.v1.WorkspaceRefH\x01R\tcreatedBy\x88\x01\x01\x127\n" +
+	"\x06parent\x18\n" +
+	" \x01(\v2\x1a.workspace.v1.WorkspaceRefH\x02R\x06parent\x88\x01\x01B\n" +
+	"\n" +
+	"\b_summaryB\r\n" +
+	"\v_created_byB\t\n" +
+	"\a_parent\"\xf0\x01\n" +
 	"\x16FoundWorkspaceStanding\x12>\n" +
 	"\x04open\x18\x01 \x01(\v2(.agentrepl.v1.FoundWorkspaceStandingOpenH\x00R\x04open\x12D\n" +
 	"\x06closed\x18\x02 \x01(\v2*.agentrepl.v1.FoundWorkspaceStandingClosedH\x00R\x06closed\x12D\n" +
@@ -1197,11 +1292,13 @@ const file_agentrepl_v1_endpoint_find_workspaces_proto_rawDesc = "" +
 	"\r_closed_at_ms\"@\n" +
 	"\x1cFoundWorkspaceStandingLanded\x12 \n" +
 	"\flanded_at_ms\x18\x01 \x01(\x03R\n" +
-	"landedAtMs\"~\n" +
+	"landedAtMs\"\xd5\x01\n" +
 	"\x13FindWorkspacesError\x12^\n" +
-	"\x12unknown_repository\x18\x01 \x01(\v2-.agentrepl.v1.FindWorkspacesUnknownRepositoryH\x00R\x11unknownRepositoryB\a\n" +
+	"\x12unknown_repository\x18\x01 \x01(\v2-.agentrepl.v1.FindWorkspacesUnknownRepositoryH\x00R\x11unknownRepository\x12U\n" +
+	"\x0funknown_creator\x18\x02 \x01(\v2*.agentrepl.v1.FindWorkspacesUnknownCreatorH\x00R\x0eunknownCreatorB\a\n" +
 	"\x05cause\"!\n" +
-	"\x1fFindWorkspacesUnknownRepositoryB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"\x1fFindWorkspacesUnknownRepository\"\x1e\n" +
+	"\x1cFindWorkspacesUnknownCreatorB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_endpoint_find_workspaces_proto_rawDescOnce sync.Once
@@ -1215,7 +1312,7 @@ func file_agentrepl_v1_endpoint_find_workspaces_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_find_workspaces_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes = make([]protoimpl.MessageInfo, 17)
+var file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes = make([]protoimpl.MessageInfo, 18)
 var file_agentrepl_v1_endpoint_find_workspaces_proto_goTypes = []any{
 	(*FindWorkspacesRequest)(nil),           // 0: agentrepl.v1.FindWorkspacesRequest
 	(*FindWorkspacesWindow)(nil),            // 1: agentrepl.v1.FindWorkspacesWindow
@@ -1234,34 +1331,39 @@ var file_agentrepl_v1_endpoint_find_workspaces_proto_goTypes = []any{
 	(*FoundWorkspaceStandingLanded)(nil),    // 14: agentrepl.v1.FoundWorkspaceStandingLanded
 	(*FindWorkspacesError)(nil),             // 15: agentrepl.v1.FindWorkspacesError
 	(*FindWorkspacesUnknownRepository)(nil), // 16: agentrepl.v1.FindWorkspacesUnknownRepository
-	(*v1.RepositoryRef)(nil),                // 17: workspace.v1.RepositoryRef
-	(*v1.WorkspaceRef)(nil),                 // 18: workspace.v1.WorkspaceRef
+	(*FindWorkspacesUnknownCreator)(nil),    // 17: agentrepl.v1.FindWorkspacesUnknownCreator
+	(*v1.RepositoryRef)(nil),                // 18: workspace.v1.RepositoryRef
+	(*v1.WorkspaceRef)(nil),                 // 19: workspace.v1.WorkspaceRef
 }
 var file_agentrepl_v1_endpoint_find_workspaces_proto_depIdxs = []int32{
-	17, // 0: agentrepl.v1.FindWorkspacesRequest.repository:type_name -> workspace.v1.RepositoryRef
+	18, // 0: agentrepl.v1.FindWorkspacesRequest.repository:type_name -> workspace.v1.RepositoryRef
 	1,  // 1: agentrepl.v1.FindWorkspacesRequest.window:type_name -> agentrepl.v1.FindWorkspacesWindow
 	2,  // 2: agentrepl.v1.FindWorkspacesRequest.standing:type_name -> agentrepl.v1.FindWorkspacesStanding
-	3,  // 3: agentrepl.v1.FindWorkspacesStanding.open:type_name -> agentrepl.v1.FindWorkspacesStandingOpen
-	4,  // 4: agentrepl.v1.FindWorkspacesStanding.closed:type_name -> agentrepl.v1.FindWorkspacesStandingClosed
-	5,  // 5: agentrepl.v1.FindWorkspacesStanding.landed:type_name -> agentrepl.v1.FindWorkspacesStandingLanded
-	7,  // 6: agentrepl.v1.FindWorkspacesResponse.success:type_name -> agentrepl.v1.FindWorkspacesSuccess
-	15, // 7: agentrepl.v1.FindWorkspacesResponse.error:type_name -> agentrepl.v1.FindWorkspacesError
-	8,  // 8: agentrepl.v1.FindWorkspacesSuccess.complete:type_name -> agentrepl.v1.FindWorkspacesSuccessComplete
-	9,  // 9: agentrepl.v1.FindWorkspacesSuccess.partial:type_name -> agentrepl.v1.FindWorkspacesSuccessPartial
-	10, // 10: agentrepl.v1.FindWorkspacesSuccessComplete.workspaces:type_name -> agentrepl.v1.FoundWorkspace
-	10, // 11: agentrepl.v1.FindWorkspacesSuccessPartial.workspaces:type_name -> agentrepl.v1.FoundWorkspace
-	18, // 12: agentrepl.v1.FoundWorkspace.workspace:type_name -> workspace.v1.WorkspaceRef
-	17, // 13: agentrepl.v1.FoundWorkspace.repository:type_name -> workspace.v1.RepositoryRef
-	11, // 14: agentrepl.v1.FoundWorkspace.standing:type_name -> agentrepl.v1.FoundWorkspaceStanding
-	12, // 15: agentrepl.v1.FoundWorkspaceStanding.open:type_name -> agentrepl.v1.FoundWorkspaceStandingOpen
-	13, // 16: agentrepl.v1.FoundWorkspaceStanding.closed:type_name -> agentrepl.v1.FoundWorkspaceStandingClosed
-	14, // 17: agentrepl.v1.FoundWorkspaceStanding.landed:type_name -> agentrepl.v1.FoundWorkspaceStandingLanded
-	16, // 18: agentrepl.v1.FindWorkspacesError.unknown_repository:type_name -> agentrepl.v1.FindWorkspacesUnknownRepository
-	19, // [19:19] is the sub-list for method output_type
-	19, // [19:19] is the sub-list for method input_type
-	19, // [19:19] is the sub-list for extension type_name
-	19, // [19:19] is the sub-list for extension extendee
-	0,  // [0:19] is the sub-list for field type_name
+	19, // 3: agentrepl.v1.FindWorkspacesRequest.created_by:type_name -> workspace.v1.WorkspaceRef
+	3,  // 4: agentrepl.v1.FindWorkspacesStanding.open:type_name -> agentrepl.v1.FindWorkspacesStandingOpen
+	4,  // 5: agentrepl.v1.FindWorkspacesStanding.closed:type_name -> agentrepl.v1.FindWorkspacesStandingClosed
+	5,  // 6: agentrepl.v1.FindWorkspacesStanding.landed:type_name -> agentrepl.v1.FindWorkspacesStandingLanded
+	7,  // 7: agentrepl.v1.FindWorkspacesResponse.success:type_name -> agentrepl.v1.FindWorkspacesSuccess
+	15, // 8: agentrepl.v1.FindWorkspacesResponse.error:type_name -> agentrepl.v1.FindWorkspacesError
+	8,  // 9: agentrepl.v1.FindWorkspacesSuccess.complete:type_name -> agentrepl.v1.FindWorkspacesSuccessComplete
+	9,  // 10: agentrepl.v1.FindWorkspacesSuccess.partial:type_name -> agentrepl.v1.FindWorkspacesSuccessPartial
+	10, // 11: agentrepl.v1.FindWorkspacesSuccessComplete.workspaces:type_name -> agentrepl.v1.FoundWorkspace
+	10, // 12: agentrepl.v1.FindWorkspacesSuccessPartial.workspaces:type_name -> agentrepl.v1.FoundWorkspace
+	19, // 13: agentrepl.v1.FoundWorkspace.workspace:type_name -> workspace.v1.WorkspaceRef
+	18, // 14: agentrepl.v1.FoundWorkspace.repository:type_name -> workspace.v1.RepositoryRef
+	11, // 15: agentrepl.v1.FoundWorkspace.standing:type_name -> agentrepl.v1.FoundWorkspaceStanding
+	19, // 16: agentrepl.v1.FoundWorkspace.created_by:type_name -> workspace.v1.WorkspaceRef
+	19, // 17: agentrepl.v1.FoundWorkspace.parent:type_name -> workspace.v1.WorkspaceRef
+	12, // 18: agentrepl.v1.FoundWorkspaceStanding.open:type_name -> agentrepl.v1.FoundWorkspaceStandingOpen
+	13, // 19: agentrepl.v1.FoundWorkspaceStanding.closed:type_name -> agentrepl.v1.FoundWorkspaceStandingClosed
+	14, // 20: agentrepl.v1.FoundWorkspaceStanding.landed:type_name -> agentrepl.v1.FoundWorkspaceStandingLanded
+	16, // 21: agentrepl.v1.FindWorkspacesError.unknown_repository:type_name -> agentrepl.v1.FindWorkspacesUnknownRepository
+	17, // 22: agentrepl.v1.FindWorkspacesError.unknown_creator:type_name -> agentrepl.v1.FindWorkspacesUnknownCreator
+	23, // [23:23] is the sub-list for method output_type
+	23, // [23:23] is the sub-list for method input_type
+	23, // [23:23] is the sub-list for extension type_name
+	23, // [23:23] is the sub-list for extension extendee
+	0,  // [0:23] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_find_workspaces_proto_init() }
@@ -1293,6 +1395,7 @@ func file_agentrepl_v1_endpoint_find_workspaces_proto_init() {
 	file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[13].OneofWrappers = []any{}
 	file_agentrepl_v1_endpoint_find_workspaces_proto_msgTypes[15].OneofWrappers = []any{
 		(*FindWorkspacesError_UnknownRepository)(nil),
+		(*FindWorkspacesError_UnknownCreator)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -1300,7 +1403,7 @@ func file_agentrepl_v1_endpoint_find_workspaces_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_find_workspaces_proto_rawDesc), len(file_agentrepl_v1_endpoint_find_workspaces_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   17,
+			NumMessages:   18,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

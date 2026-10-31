@@ -47,6 +47,8 @@ func fixture() ([]wsm.Workspace, map[wsm.WorkspaceID]wsm.WorkspaceSummary) {
 	landed := record("landed", "store-prune", other, 5)
 	landed.Closed = true
 	landed.MergedAt = ptr(at(6))
+	creator := wsm.WorkspaceID("open")
+	landed.RequestedBy = &creator
 	summaries := map[wsm.WorkspaceID]wsm.WorkspaceSummary{
 		"open":   {Title: "Fix the footer's clock"},
 		"landed": {Title: "Prune the store's old rows"},
@@ -73,6 +75,8 @@ func TestFindNarrowsByEveryCriterion(t *testing.T) {
 		{name: "text matches a summary", query: Query{Text: ptr("clock")}, want: []string{"open"}},
 		{name: "text matching nothing finds nothing", query: Query{Text: ptr("nowhere")}, want: nil},
 		{name: "criteria combine", query: Query{Repository: ptr(doom.ID), Standing: ClosedStanding}, want: []string{"closed"}},
+		{name: "a creator keeps only what it asked for", query: Query{CreatedBy: ptr(wsm.WorkspaceID("open"))}, want: []string{"landed"}},
+		{name: "a creator that asked for nothing finds nothing", query: Query{CreatedBy: ptr(wsm.WorkspaceID("closed"))}, want: nil},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

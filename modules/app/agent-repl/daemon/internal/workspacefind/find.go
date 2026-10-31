@@ -43,6 +43,9 @@ type Query struct {
 	Text *string
 	// Limit answers at most this many, the most recently active first.
 	Limit *int
+	// CreatedBy keeps only the workspaces this workspace's agent asked for
+	// (wsm.Workspace.RequestedBy).
+	CreatedBy *wsm.WorkspaceID
 }
 
 // Found is one workspace a find answered.
@@ -154,6 +157,9 @@ func matches(f Found, q Query) bool {
 		return false
 	}
 	if q.Text != nil && !containsText(f, *q.Text) {
+		return false
+	}
+	if q.CreatedBy != nil && (ws.RequestedBy == nil || *ws.RequestedBy != *q.CreatedBy) {
 		return false
 	}
 	return true
