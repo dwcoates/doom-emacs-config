@@ -221,14 +221,26 @@ reads it, so it is read here off `last-input-event' rather than passed."
     (let ((status (nth 3 last-input-event)))
       (agent-repl--info agent-repl--webhost-central "elisp.webhost.load-changed status=%s pages=%d shown=%s"
                         status (hash-table-count agent-repl--webhost-pages) agent-repl--webhost-shown)
-      (when (and (equal status "load-committed")
-                 (not (agent-repl--webhost-blank-uri-p (agent-repl--webhost-current-uri))))
-        (if-let ((strayed (and agent-repl--webhost-url
-                               (agent-repl--webhost-strayed-uri (agent-repl--webhost-current-uri)))))
-            (agent-repl--webhost-take-back strayed)
-          ;; From here on every answer is the new document's.
-          (setq agent-repl--webhost-predates-reload-pending nil)
-          (agent-repl--webhost-replay))))))
+      (agent-repl--webview-on-commit
+       status agent-repl--webhost-url (agent-repl--webhost-current-uri)
+       #'agent-repl--webhost-take-back
+       (lambda ()
+         ;; From here on every answer is the new document's.
+         (setq agent-repl--webhost-predates-reload-pending nil)
+         (agent-repl--webhost-replay))))))
+
+(defun agent-repl--webview-on-commit (status own-url uri take-back replay)
+  "Act on one load stage STATUS of a web view loaded at OWN-URL, now showing URI.
+ONE REPLAY PER DOCUMENT, at `load-committed' (`agent-repl--webhost-on-load'),
+and never into the blank document WebKit commits ahead of the first load
+\(`agent-repl--webhost-blank-uri-p').  A committed URI off OWN-URL's origin
+is an outward link that navigated the whole view, handed to TAKE-BACK;
+anything else is the view's own page, which REPLAY hands its state.  Every
+other stage does nothing."
+  (when (and (equal status "load-committed") (not (agent-repl--webhost-blank-uri-p uri)))
+    (if-let ((strayed (agent-repl--webview-strayed-uri own-url uri)))
+        (funcall take-back strayed)
+      (funcall replay))))
 
 (defun agent-repl--webhost-blank-uri-p (uri)
   "Return non-nil when URI is the blank document a web view holds before a load.

@@ -251,6 +251,37 @@ which restores a known prior handler rather than keeping the current one."
   (should (= 1 (agent-repl-test-wh--count-in-source "sidebar-view.el" "(agent-repl--webview-answered raw \"elisp.sidebar-view\"")))
   (should (= 0 (agent-repl-test-wh--count-in-source "sidebar-view.el" "(agent-repl-webhost-parse-answer raw)"))))
 
+(defun agent-repl-test-wh--on-commit (status uri)
+  "What `agent-repl--webview-on-commit' did for STATUS and URI on a view at the host's URL."
+  (let (did)
+    (agent-repl--webview-on-commit status "http://host.localhost:1/?host=1" uri
+                                   (lambda (strayed) (push (list 'take-back strayed) did))
+                                   (lambda () (push 'replay did)))
+    did))
+
+(ert-deftest agent-repl-test-wh-a-view-s-own-committed-page-is-replayed ()
+  "A committed load of the view's own page replays its state."
+  (should (equal (agent-repl-test-wh--on-commit "load-committed" "http://host.localhost:1/?host=1") '(replay))))
+
+(ert-deftest agent-repl-test-wh-a-view-s-strayed-commit-is-taken-back ()
+  "A committed load off the view's origin is taken back, and nothing is replayed."
+  (should (equal (agent-repl-test-wh--on-commit "load-committed" "https://example.com/")
+                 '((take-back "https://example.com/")))))
+
+(ert-deftest agent-repl-test-wh-a-view-s-blank-commit-does-nothing ()
+  "The blank document WebKit commits first is neither replayed into nor taken back."
+  (should-not (agent-repl-test-wh--on-commit "load-committed" "about:blank")))
+
+(ert-deftest agent-repl-test-wh-a-view-s-other-load-stages-do-nothing ()
+  "Only the commit acts: one replay per document."
+  (should-not (agent-repl-test-wh--on-commit "load-finished" "http://host.localhost:1/?host=1")))
+
+(ert-deftest agent-repl-test-wh-both-views-decide-a-commit-through-the-shared-helper ()
+  "The host and the sidebar decide a committed load through the one helper."
+  (should (= 1 (agent-repl-test-wh--count-in-source "webhost.el" "(agent-repl--webview-on-commit\n")))
+  (should (= 1 (agent-repl-test-wh--count-in-source "sidebar-view.el" "(agent-repl--webview-on-commit status")))
+  (should (= 0 (agent-repl-test-wh--count-in-source "sidebar-view.el" "\"load-committed\""))))
+
 (defmacro agent-repl-test-wh--with-made-view (live &rest body)
   "Run BODY with web view creation stubbed: a fresh buffer, an xwidget when LIVE.
 Binds `killed' to the buffers the kill function was handed."

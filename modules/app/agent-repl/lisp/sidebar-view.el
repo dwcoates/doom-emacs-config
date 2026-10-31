@@ -50,7 +50,7 @@
 (declare-function agent-repl-webhost-origin "webhost" (conn))
 (declare-function agent-repl--webview-answered "webhost" (raw prefix scope-of central predates))
 (declare-function agent-repl--webview-script "webhost" (global pending method args))
-(declare-function agent-repl--webview-strayed-uri "webhost" (own-url uri))
+(declare-function agent-repl--webview-on-commit "webhost" (status own-url uri take-back replay))
 (declare-function agent-repl--webview-make-hidden "webhost" (url name refuse-kill kill what))
 (declare-function agent-repl--webview-call-prior "webhost" (xwidget event-type))
 (declare-function agent-repl--webview-watch-load "webhost" (xw callback))
@@ -181,10 +181,9 @@ origin is taken back instead."
     (let ((status (nth 3 last-input-event))
           (uri (when-let ((xw (agent-repl-sidebar-view-xwidget))) (xwidget-webkit-uri xw))))
       (agent-repl--info agent-repl--sidebar-view-central "elisp.sidebar-view.load-changed status=%s" status)
-      (when (and (equal status "load-committed") (not (equal uri "about:blank")))
-        (if-let ((strayed (agent-repl--webview-strayed-uri agent-repl--sidebar-view-url uri)))
-            (agent-repl--sidebar-view-take-back strayed)
-          (agent-repl--sidebar-view-replay))))))
+      (agent-repl--webview-on-commit status agent-repl--sidebar-view-url uri
+                                     #'agent-repl--sidebar-view-take-back
+                                     #'agent-repl--sidebar-view-replay))))
 
 (defun agent-repl--sidebar-view-take-back (uri)
   "Navigate the sidebar, which strayed to URI, back to its own page.
