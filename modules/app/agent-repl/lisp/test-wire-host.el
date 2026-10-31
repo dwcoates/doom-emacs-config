@@ -405,6 +405,7 @@ A hand-rolled copy of either would drift from the shared shape and fail here."
                       (list "{\"evaluate\":{\"token\":{\"value\":\"t-1\"},\"text\":\"(+ 1 2)\"}}" :evaluate)
                       (list "{\"finalResponseClicked\":{}}" :final-response-clicked)
                       (list "{\"selectRequested\":{}}" :select-requested)
+                      (list "{\"loadPageRequested\":{}}" :load-page-requested)
                       (list "{\"composeEntry\":{\"label\":\"3.1\"}}" :compose-entry)
                       (list "{\"chatTextHighlighted\":{}}" :chat-text-highlighted)))
     (should (equal (plist-get (agent-repl-test-wire-host--decode
@@ -719,6 +720,22 @@ A hand-rolled copy of either would drift from the shared shape and fail here."
                   #'agent-repl-wire-decode-host-workspace-select-requested
                   "{\"workspace\":\"w\"}")
                  '("HostWorkspaceSelectRequested" workspace "unknown field"))))
+
+;;;; ---- The load button push ----
+
+(ert-deftest agent-repl-test-wire-host-load-page-requested-decodes-empty ()
+  "The load button's push is empty: presence is the fact, and the stream names the workspace."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-watch-host-workspace-response
+                  "{\"loadPageRequested\":{}}")
+                 '(:arm :load-page-requested :value nil))))
+
+(ert-deftest agent-repl-test-wire-host-load-page-requested-refuses-a-field ()
+  "A field on the empty load message is refused, not ignored."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-host-workspace-load-page-requested
+                  "{\"workspace\":\"w\"}")
+                 '("HostWorkspaceLoadPageRequested" workspace "unknown field"))))
 
 ;;;; ---- The branch click push ----
 
@@ -1647,7 +1664,7 @@ opens are OpenTabs streams."
                        #'string<)
                  (sort (list "evaluate" "host" "transferred" "reloadWebapp"
                              "openInEditor" "openCommitLog" "ending" "notificationClicked" "selection"
-                             "finalResponseClicked" "selectRequested" "composeEntry"
+                             "finalResponseClicked" "selectRequested" "loadPageRequested" "composeEntry"
                              "chatTextHighlighted" "transferWithdrawn")
                        #'string<))))
 

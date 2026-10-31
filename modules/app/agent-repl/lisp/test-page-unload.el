@@ -29,6 +29,9 @@
 (defvar agent-repl-test-pu--pages nil
   "Workspaces whose page the harness's host holds.")
 
+(defvar agent-repl-test-pu--held-back nil
+  "Workspaces whose page the harness's host holds back.")
+
 (defvar agent-repl-test-pu--hidden nil
   "Workspaces the roster answers hidden.")
 
@@ -100,6 +103,7 @@
            (agent-repl-test-pu--pending nil)
            (agent-repl-test-pu--events nil)
            (agent-repl-test-pu--pages (copy-sequence ,names))
+           (agent-repl-test-pu--held-back nil)
            (agent-repl-page-unload--clock (lambda () agent-repl-test-pu--now))
            (agent-repl-page-unload--shown nil)
            (agent-repl-page-unload-after 500)
@@ -144,7 +148,14 @@
                        ((symbol-function 'agent-repl-webhost-ensure-page)
                         (lambda (ws)
                           (push (list 'ensure ws) agent-repl-test-pu--events)
+                          (setq agent-repl-test-pu--held-back (delete ws agent-repl-test-pu--held-back))
                           (cl-pushnew ws agent-repl-test-pu--pages :test #'equal)))
+                       ((symbol-function 'agent-repl-webhost-hold-back)
+                        (lambda (ws)
+                          (push (list 'hold-back ws) agent-repl-test-pu--events)
+                          (cl-pushnew ws agent-repl-test-pu--held-back :test #'equal)))
+                       ((symbol-function 'agent-repl-webhost-held-back-p)
+                        (lambda (ws) (and (member ws agent-repl-test-pu--held-back) t)))
                        ((symbol-function 'agent-repl--info)
                         (agent-repl-test--record-into agent-repl-test-pu--logged)))
                ,@body))
@@ -393,6 +404,24 @@ Answers the outcomes, newest first: (dropped) or (kept WHY)."
     (setq agent-repl-test-pu--status '(("alpha" . :thinking)))
     ;; Act / Assert
     (should (agent-repl-page-unload-wanted-p "alpha"))))
+
+(ert-deftest agent-repl-test-pu-a-shown-cold-gated-page-is-not-wanted ()
+  "A cold-gated workspace's page is held back even on screen (owner request, 2026-10-30)."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha")
+    (setq agent-repl-test-pu--status '(("alpha" . :cold-gate))
+          agent-repl-page-unload--shown "alpha")
+    ;; Act / Assert
+    (should-not (agent-repl-page-unload-wanted-p "alpha"))))
+
+(ert-deftest agent-repl-test-pu-the-current-cold-gated-page-is-not-wanted ()
+  "The current workspace's page is held back while it stands at its cold gate."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha")
+    (setq agent-repl-test-pu--status '(("alpha" . :cold-gate))
+          agent-repl-test-pu--current "alpha")
+    ;; Act / Assert
+    (should-not (agent-repl-page-unload-wanted-p "alpha"))))
 
 (ert-deftest agent-repl-test-pu-an-idle-page-is-not-wanted ()
   "An idle workspace's page is not loaded ahead of its show."
@@ -827,6 +856,101 @@ naming a dead buffer, and every switch back found its panels closed."
     (agent-repl-page-unload-note-shown "alpha")
     ;; Assert
     (should-not (agent-repl--ws-get "alpha" :page-visit))))
+
+(ert-deftest agent-repl-test-pu-showing-an-unloaded-cold-gated-page-holds-it-back ()
+  "Showing a cold-gated workspace's unloaded page holds it back instead of loading it."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha")
+    (setq agent-repl-test-pu--pages nil
+          agent-repl-test-pu--status '(("alpha" . :cold-gate)))
+    ;; Act
+    (agent-repl-page-unload-note-shown "alpha")
+    ;; Assert
+    (should (equal (list agent-repl-test-pu--events (agent-repl-page-unloaded-p "alpha"))
+                   '(((hold-back "alpha")) t)))
+    (should (agent-repl-test-pu--said-p "elisp.page-unload.held-back" "ws=alpha"))))
+
+(ert-deftest agent-repl-test-pu-showing-a-loaded-cold-gated-page-holds-nothing-back ()
+  "A cold-gated workspace whose page is still loaded shows that page."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha")
+    (setq agent-repl-test-pu--status '(("alpha" . :cold-gate)))
+    ;; Act
+    (agent-repl-page-unload-note-shown "alpha")
+    ;; Assert
+    (should-not agent-repl-test-pu--events)))
+
+(ert-deftest agent-repl-test-pu-a-load-request-loads-the-held-back-page ()
+  "The load button's click puts the held-back page back."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha")
+    (setq agent-repl-test-pu--pages nil
+          agent-repl-test-pu--status '(("alpha" . :cold-gate)))
+    (agent-repl-page-unload-note-shown "alpha")
+    (setq agent-repl-test-pu--events nil)
+    ;; Act
+    (agent-repl-page-unload-load-requested "alpha")
+    ;; Assert
+    (should (equal (list agent-repl-test-pu--events
+                         (agent-repl-page-unloaded-p "alpha")
+                         agent-repl-test-pu--held-back)
+                   '(((ensure "alpha")) nil nil)))
+    (should (agent-repl-test-pu--said-p "elisp.page-unload.load-requested" "ws=alpha" "outcome=loaded"))))
+
+(ert-deftest agent-repl-test-pu-a-load-request-for-a-loaded-page-loads-nothing ()
+  "A click that crossed a load already made has nothing left to load."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha")
+    (setq agent-repl-test-pu--status '(("alpha" . :cold-gate)))
+    ;; Act
+    (agent-repl-page-unload-load-requested "alpha")
+    ;; Assert
+    (should-not agent-repl-test-pu--events)
+    (should (agent-repl-test-pu--said-p "elisp.page-unload.load-requested" "ws=alpha"
+                                        "outcome=already-loaded"))))
+
+(ert-deftest agent-repl-test-pu-a-pass-loads-a-shown-held-back-page-once-its-gate-is-gone ()
+  "A gate answered while its page is held back on screen loads the page."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha")
+    (setq agent-repl-test-pu--pages nil
+          agent-repl-test-pu--status '(("alpha" . :cold-gate)))
+    (agent-repl-page-unload-note-shown "alpha")
+    (setq agent-repl-test-pu--events nil
+          agent-repl-test-pu--status '(("alpha" . :ready)))
+    ;; Act
+    (agent-repl-page-unload-pass)
+    ;; Assert
+    (should (equal agent-repl-test-pu--events '((ensure "alpha"))))
+    (should (agent-repl-test-pu--said-p "elisp.page-unload.loaded" "ws=alpha" "reason=ungated"))))
+
+(ert-deftest agent-repl-test-pu-a-pass-keeps-a-shown-page-held-back-while-gated ()
+  "A pass loads nothing for a page held back while its gate still stands."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha")
+    (setq agent-repl-test-pu--pages nil
+          agent-repl-test-pu--status '(("alpha" . :cold-gate)))
+    (agent-repl-page-unload-note-shown "alpha")
+    (setq agent-repl-test-pu--events nil)
+    ;; Act
+    (agent-repl-page-unload-pass)
+    ;; Assert
+    (should-not agent-repl-test-pu--events)))
+
+(ert-deftest agent-repl-test-pu-a-pass-loads-no-ungated-held-back-page-off-screen ()
+  "A page held back and left is not loaded when its gate goes: it is idle off screen."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha" "beta")
+    (setq agent-repl-test-pu--pages '("beta")
+          agent-repl-test-pu--status '(("alpha" . :cold-gate)))
+    (agent-repl-page-unload-note-shown "alpha")
+    (agent-repl-page-unload-note-shown "beta")
+    (setq agent-repl-test-pu--events nil
+          agent-repl-test-pu--status nil)
+    ;; Act
+    (agent-repl-page-unload-pass)
+    ;; Assert
+    (should-not (assoc 'ensure agent-repl-test-pu--events))))
 
 (ert-deftest agent-repl-test-pu-showing-a-held-page-puts-nothing-back ()
   "Showing a page the host still holds sends it nothing."

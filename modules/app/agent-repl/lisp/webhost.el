@@ -80,6 +80,15 @@ workspace's own.")
 (defvar agent-repl--webhost-pages (make-hash-table :test #'equal)
   "Workspace id -> the URL its page is held at.  What the host should hold.")
 
+(defvar agent-repl--webhost-held-back (make-hash-table :test #'equal)
+  "Workspace id -> its dir, for each page held back until the user asks.
+A cold-gated workspace\='s page is not loaded when it is shown
+\(`agent-repl-page-unload-note-shown'): the host draws a load button in
+its place (webapp/src/host/load-button.ts), whose click reaches Emacs as
+the host stream\='s `load_page_requested'.  The dir completes the
+workspace ref the button\='s call names.  Holding the page drops the
+entry, as does removing it.")
+
 (defvar agent-repl--webhost-shown nil
   "The workspace id whose page the host should show, or nil.")
 
@@ -458,8 +467,31 @@ be built (`agent-repl-frontend-webview-url')."
     (unless (equal (gethash id agent-repl--webhost-pages) url)
       (puthash id url agent-repl--webhost-pages)
       (agent-repl--info ws "elisp.webhost.page-ensured ws=%s id=%s" ws id))
+    ;; A HELD PAGE IS NO LONGER HELD BACK: the host drops its load button.
+    (remhash id agent-repl--webhost-held-back)
     (agent-repl--webhost-call "ensure" id url)
     id))
+
+(defun agent-repl-webhost-hold-back (ws)
+  "Hold WS\='s page back until the user asks for it.
+The host draws a load button in its place while WS is shown.  Signals
+when WS has no ref: a workspace Emacs shows is always registered."
+  (let* ((ref (agent-repl-host-ref ws))
+         (id (plist-get ref :id))
+         (dir (plist-get ref :dir)))
+    (unless (and id dir)
+      (agent-repl--error ws "elisp.webhost.hold-back-unregistered ws=%s ref=%S" ws ref)
+      (error "webhost: %s has no workspace ref to hold its page back under" ws))
+    (unless (equal (gethash id agent-repl--webhost-held-back) dir)
+      (puthash id dir agent-repl--webhost-held-back)
+      (agent-repl--info ws "elisp.webhost.page-held-back ws=%s id=%s" ws id))
+    (agent-repl--webhost-call "holdBack" id dir)
+    id))
+
+(defun agent-repl-webhost-held-back-p (ws)
+  "Non-nil when the host is meant to hold WS\='s page back."
+  (let ((id (agent-repl--webhost-id ws)))
+    (and id (gethash id agent-repl--webhost-held-back) t)))
 
 (defvar agent-repl--webhost-switch-started nil
   "The user\='s latest switch not yet handed to a show: (WS . UNIX-MS), or nil.
@@ -502,6 +534,7 @@ unloaded page's workspace still shows its gate at the composer's height
 \(webapp/src/host/gate.ts)."
   (when-let ((id (agent-repl--webhost-id ws)))
     (remhash id agent-repl--webhost-pages)
+    (remhash id agent-repl--webhost-held-back)
     (unless unloading (remhash id agent-repl--webhost-gate-docks))
     (remhash id agent-repl--webhost-held-ingress)
     (when (equal id agent-repl--webhost-shown)
@@ -677,6 +710,9 @@ out (`agent-repl-host-adopting-p')."
     (maphash (lambda (id _url) (push id ids)) agent-repl--webhost-pages)
     (when agent-repl--webhost-shown
       (agent-repl--webhost-replay-page agent-repl--webhost-shown nil)
+      ;; A SHOWN PAGE HELD BACK is shown as its load button.
+      (when-let ((dir (gethash agent-repl--webhost-shown agent-repl--webhost-held-back)))
+        (agent-repl--webhost-call "holdBack" agent-repl--webhost-shown dir))
       (agent-repl--webhost-call "show" agent-repl--webhost-shown))
     (let* ((rest (delete agent-repl--webhost-shown (nreverse ids)))
            (adopting (cl-remove-if-not #'agent-repl--webhost-adopting-p rest))

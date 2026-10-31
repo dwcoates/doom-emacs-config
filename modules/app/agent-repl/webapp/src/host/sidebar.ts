@@ -40,6 +40,7 @@ import { mountWebhostSidebar } from "../sidebar/sidebar.js";
 import type { Host } from "./host.js";
 import { installLoadCensus, type LoadCensus } from "./load-census.js";
 import { createWebhostGate, type WebhostGate } from "./gate.js";
+import { createWebhostLoadButton, type WebhostLoadButton } from "./load-button.js";
 
 /** The id the webhost's sidebar element wears: the page's own, so one stylesheet draws both. */
 export const WEBHOST_SIDEBAR_ID = "ws-sidebar";
@@ -67,6 +68,13 @@ export interface WebhostSidebarStartDeps {
   gate?: HTMLElement;
   /** Create the webhost's gate; the real one draws through the feed's card. */
   createGate?: typeof createWebhostGate;
+  /**
+   * The element a held-back page's load button is drawn in
+   * (host/load-button.ts); no button is drawn when absent.
+   */
+  load?: HTMLElement;
+  /** Create the webhost's load button; the real one asks the daemon. */
+  createLoadButton?: typeof createWebhostLoadButton;
 }
 
 /**
@@ -141,6 +149,12 @@ export function startWebhostSidebar(
             },
           });
     const stopSlots = gate === null ? () => undefined : host.onGateSlot((id, pixels) => gate.setSlot(id, pixels));
+    // THE SHOWN HELD-BACK PAGE'S LOAD BUTTON follows the host's holds.
+    const loadEl = deps.load;
+    const loadButton: WebhostLoadButton | null =
+      loadEl === undefined ? null : (deps.createLoadButton ?? createWebhostLoadButton)({ el: loadEl, ctx });
+    const stopHeldBack =
+      loadButton === null ? () => undefined : host.onHeldBackShown((shown) => loadButton.setShown(shown));
     const sidebar = (deps.mount ?? mountWebhostSidebar)(nav, ctx, {
       coldGates: (gates) => gate?.setGates(gates),
       // THE PAGES RESERVE THE COLUMN ONLY ONCE THERE IS A SIDEBAR TO FILL IT,
@@ -164,6 +178,8 @@ export function startWebhostSidebar(
       unwatch();
       stopShown();
       stopSlots();
+      stopHeldBack();
+      loadButton?.dispose();
       gate?.dispose();
       sidebar.dispose();
       ctx.quiesce();

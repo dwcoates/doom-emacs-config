@@ -93,6 +93,7 @@ import "agentrepl/v1/endpoint_select_account.proto";
 import "agentrepl/v1/endpoint_select_chat_text.proto";
 import "agentrepl/v1/endpoint_select_feed_row.proto";
 import "agentrepl/v1/endpoint_select_in_editor.proto";
+import "agentrepl/v1/endpoint_load_page_in_editor.proto";
 import "agentrepl/v1/endpoint_select_response_text.proto";
 import "agentrepl/v1/endpoint_select_workspace.proto";
 import "agentrepl/v1/endpoint_send_hidden_keepalives.proto";
@@ -610,6 +611,10 @@ service AgentRepl {
   // host stream so the editor makes the switch as it makes a key's. See
   // endpoint_select_in_editor.proto.
   rpc SelectInEditor(SelectInEditorRequest) returns (SelectInEditorResponse);
+  // The webhost's load button for a held-back page (a cold-gated workspace's),
+  // relayed to the workspace's host stream so the editor loads the page. See
+  // endpoint_load_page_in_editor.proto.
+  rpc LoadPageInEditor(LoadPageInEditorRequest) returns (LoadPageInEditorResponse);
 
   // The webview's half of the handover rendezvous, called on the NEW
   // daemon. See endpoint_adopt_web_workspace.proto.

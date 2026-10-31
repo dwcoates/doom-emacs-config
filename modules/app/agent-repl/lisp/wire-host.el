@@ -637,6 +637,15 @@ The user clicked this workspace's row in a page's rail; the daemon
 relayed the click, so requesting the switch to it is all that is left."
   (agent-repl-wire--decode-empty "HostWorkspaceSelectRequested" value))
 
+;;;; ---- The load button push ----
+
+(defun agent-repl-wire-decode-host-workspace-load-page-requested (value)
+  "Decode VALUE as the empty message `HostWorkspaceLoadPageRequested'.
+The user clicked the load button the webhost draws for this workspace\='s
+held-back page; the daemon relayed the click, so loading the page is all
+that is left."
+  (agent-repl-wire--decode-empty "HostWorkspaceLoadPageRequested" value))
+
 ;;;; ---- The branch click push ----
 
 (defun agent-repl-wire-decode-host-workspace-compose-entry (value)
@@ -909,6 +918,10 @@ VALUE is (:workspace REF :token TOKEN :outcome OUTCOME), all required."
   "Decode the `select_requested' push arm VALUE."
   (agent-repl-wire-decode-host-workspace-select-requested value))
 
+(defun agent-repl-wire-decode-watch-host-workspace-response-load-page-requested (value)
+  "Decode the `load_page_requested' push arm VALUE."
+  (agent-repl-wire-decode-host-workspace-load-page-requested value))
+
 (defun agent-repl-wire-decode-watch-host-workspace-response-compose-entry (value)
   "Decode the `compose_entry' push arm VALUE."
   (agent-repl-wire-decode-host-workspace-compose-entry value))
@@ -969,6 +982,8 @@ VALUE is (:workspace REF :token TOKEN :outcome OUTCOME), all required."
                            agent-repl-wire-decode-watch-host-workspace-response-final-response-clicked)
      (selectRequested :select-requested
                       agent-repl-wire-decode-watch-host-workspace-response-select-requested)
+     (loadPageRequested :load-page-requested
+                        agent-repl-wire-decode-watch-host-workspace-response-load-page-requested)
      (composeEntry :compose-entry
                    agent-repl-wire-decode-watch-host-workspace-response-compose-entry)
      (chatTextHighlighted :chat-text-highlighted
@@ -980,7 +995,8 @@ VALUE is (:workspace REF :token TOKEN :outcome OUTCOME), all required."
     (agent-repl-wire--check-keys
      "WatchHostWorkspaceResponse" object
      '(host transferred reloadWebapp openInEditor openCommitLog ending notificationClicked selection evaluate
-       finalResponseClicked selectRequested composeEntry chatTextHighlighted transferWithdrawn))
+       finalResponseClicked selectRequested loadPageRequested composeEntry chatTextHighlighted
+       transferWithdrawn))
     (agent-repl-wire--decoded
      "WatchHostWorkspaceResponse"
      (agent-repl-wire-decode-watch-host-workspace-response-push object))))

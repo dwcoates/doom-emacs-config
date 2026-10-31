@@ -70,6 +70,43 @@ html.agent-repl-host #webhost-gate {
 }
 html.agent-repl-host #webhost-gate[hidden] { display: none; }
 
+/* A HELD-BACK PAGE'S LOAD BUTTON (host/load-button.ts): a cold-gated
+   workspace's page is not loaded on its show, and a subtle button stands at
+   the centre of where the page would be, right of the docked sidebar and
+   above the gate's band (owner request, 2026-10-30). */
+html.agent-repl-host #webhost-load {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: var(--webhost-gate-band, 0px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+}
+html.agent-repl-host #ws-sidebar:not([hidden]) ~ #webhost-load { left: 20vw; }
+html.agent-repl-host #webhost-load[hidden] { display: none; }
+html.agent-repl-host .webhost-load-button {
+  font: inherit;
+  font-size: 0.9rem;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.4rem 1rem;
+  cursor: pointer;
+  opacity: 0.8;
+}
+html.agent-repl-host .webhost-load-button:hover:not([aria-disabled="true"]) {
+  opacity: 1;
+  border-color: var(--muted);
+}
+html.agent-repl-host .webhost-load-button[aria-disabled="true"] {
+  cursor: default;
+  opacity: 0.5;
+}
+
 .workspace-frame {
   position: absolute;
   inset: 0;

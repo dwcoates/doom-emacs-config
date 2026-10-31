@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { HOST_ROOT_CLASS, WEBHOST_FRAMES_CLASS, startHost } from "../../src/host/main.js";
 import { WEBHOST_SIDEBAR_ID } from "../../src/host/sidebar.js";
 import { WEBHOST_GATE_ID } from "../../src/host/gate.js";
+import { WEBHOST_LOAD_ID } from "../../src/host/load-button.js";
 import type { Host } from "../../src/host/host.js";
 
 let started: Host | null = null;
@@ -44,7 +45,7 @@ describe("startHost", () => {
     expect(document.head.querySelector('style[data-source="render-colors.json#color_values"]')).not.toBeNull();
   });
 
-  it("lays out the stack of workspace pages, the sidebar over it, and the gate below them", () => {
+  it("lays out the stack of workspace pages, the sidebar over it, the load button, and the gate below them", () => {
     // Act
     started = startHost(document, window, { startSidebar: noSidebar });
 
@@ -52,8 +53,24 @@ describe("startHost", () => {
     expect([...document.body.children].map((e) => e.className || e.id)).toEqual([
       WEBHOST_FRAMES_CLASS,
       WEBHOST_SIDEBAR_ID,
+      WEBHOST_LOAD_ID,
       WEBHOST_GATE_ID,
     ]);
+  });
+
+  it("hands the sidebar's start the load button's element to draw in", () => {
+    // Arrange
+    let handed: HTMLElement | undefined;
+
+    // Act
+    started = startHost(document, window, {
+      startSidebar: (_doc, _win, _host, _nav, deps) => {
+        handed = deps.load;
+      },
+    });
+
+    // Assert
+    expect(handed?.id).toBe(WEBHOST_LOAD_ID);
   });
 
   it("hands the sidebar's start the gate element to draw in", () => {

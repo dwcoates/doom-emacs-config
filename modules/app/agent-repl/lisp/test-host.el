@@ -2232,6 +2232,32 @@ answers `:unknown' and records the breach rather than opening."
     ;; Assert
     (should (agent-repl-test-host--logged-p :info "elisp.host.notification-clicked ws=ws-1"))))
 
+;;;; ---- The load button ----
+
+(ert-deftest agent-repl-test-host-load-page-requested-loads-the-page ()
+  "A `load_page_requested' push asks for the page of the workspace its stream carries."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe-three)
+    (let ((asked nil))
+      (cl-letf (((symbol-function 'agent-repl-page-unload-load-requested)
+                 (lambda (ws) (push ws asked))))
+        ;; Act
+        (agent-repl-test-host--push "ws-2" (list :arm :load-page-requested :value nil)))
+      ;; Assert
+      (should (equal asked '("ws-2"))))))
+
+(ert-deftest agent-repl-test-host-load-page-requested-is-logged ()
+  "The click reaching Emacs leaves an INFO record naming the workspace."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe-three)
+    (cl-letf (((symbol-function 'agent-repl-page-unload-load-requested) #'ignore))
+      ;; Act
+      (agent-repl-test-host--push "ws-2" (list :arm :load-page-requested :value nil)))
+    ;; Assert
+    (should (agent-repl-test-host--logged-p :info "elisp.host.load-page-requested ws=ws-2"))))
+
 ;;;; ---- The rail's row click ----
 
 (ert-deftest agent-repl-test-host-select-requested-sends-select-workspace ()

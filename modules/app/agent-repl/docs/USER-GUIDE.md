@@ -894,6 +894,11 @@ The footer's `disconnected` status has three vendor substatuses for a Claude SDK
     - "pay and resume" and "compact first" keep them, with the badge "held for you", until you press Send now or Cancel.
     - "compact and resume" compacts, then sends them once the session is back.
       - The gate shows this button only while prompts are held at it.
+- **Switching to a workspace at its cold gate does not load its feed.**
+  - The gate stands at the bottom as always, and a subtle "load conversation" button stands where the feed would be.
+  - Clicking the button loads the feed.
+  - Answering the gate loads it too.
+  - So switching quickly past cold-gated workspaces costs nothing for the feeds you never look at.
 - **A compaction you chose at the gate says what it cost in the footer.**
   - Once the summary is written, the footer's activity line ends with the summarizing model and the tokens it spent, e.g. "· claude-sonnet-5 spent 104.3k tokens".
   - The line stays on the "compacted and resumed" outcome after the session is back.

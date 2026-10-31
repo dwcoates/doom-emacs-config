@@ -104,6 +104,12 @@ interface Frame {
   pendingReloadStartedAtMs: number | null;
 }
 
+/** A page held back until the user asks for it (`Host.holdBack`). */
+export interface HeldBackPage {
+  readonly id: string;
+  readonly dir: string;
+}
+
 /** The host's API, as Emacs calls it through `window.agentReplHost`. */
 export interface Host {
   /**
@@ -125,6 +131,19 @@ export interface Host {
   show(id: string, switchStartedAtMs?: number | null): string;
   /** Tell LISTENER the id of every page shown from now on; answers the stop. */
   onShown(listener: (id: string) => void): () => void;
+  /**
+   * Hold workspace ID's page back until the user asks for it: while ID is
+   * shown with no page, the webhost draws a load button in its place
+   * (host/load-button.ts), whose click asks Emacs for the page. DIR completes
+   * the workspace ref the button's call names. `ensure` for ID, or its
+   * `remove`, ends the hold. Answers `held-back`.
+   */
+  holdBack(id: string, dir: string): string;
+  /**
+   * Tell LISTENER the held-back page shown now, or null for none, at once and
+   * at every change; answers the stop.
+   */
+  onHeldBackShown(listener: (shown: HeldBackPage | null) => void): () => void;
   /** Drop workspace ID's page. */
   remove(id: string): string;
   /**
@@ -265,6 +284,23 @@ export function createHost(env: HostEnv): Host {
   const incoming = new Map<string, { fresh: Frame; bound: number }>();
   /** Who is told every page shown (`onShown`): the webhost's sidebar. */
   const shownListeners = createListeners<[string]>();
+  /**
+   * THE PAGES HELD BACK UNTIL THE USER ASKS (`holdBack`), each id's dir: a
+   * cold-gated workspace's, which Emacs does not load on its show.
+   */
+  const heldBack = new Map<string, string>();
+  /** Who is told the held-back page shown (`onHeldBackShown`): the load button. */
+  const heldBackListeners = createListeners<[HeldBackPage | null]>();
+  /** The held-back page shown now, last told; null for none. */
+  let heldBackShown: HeldBackPage | null = null;
+  /** Tell the load button the held-back page shown now, when it changed. */
+  const syncHeldBackShown = (): void => {
+    const dir = shownId === null || frames.has(shownId) ? undefined : heldBack.get(shownId);
+    const next = shownId === null || dir === undefined ? null : { id: shownId, dir };
+    if (next?.id === heldBackShown?.id && next?.dir === heldBackShown?.dir) return;
+    heldBackShown = next;
+    heldBackListeners.notify(next);
+  };
   /** Who is told every gate slot Emacs records (`onGateSlot`): the webhost's gate. */
   const gateSlots = createListeners<[string, number]>();
   /** Every gate slot Emacs recorded, by workspace id. */
@@ -652,6 +688,32 @@ export function createHost(env: HostEnv): Host {
   };
 
   /**
+   * Hide PREVIOUS, the page a switch left: off screen, its pending switch
+   * start forgotten, and told it is no longer shown. Every switch hides the
+   * page it leaves through here, a page's show and a held-back page's alike.
+   */
+  const hideSwitchedFrom = (previous: Frame): void => {
+    applyShown(previous, false);
+    previous.pendingSwitchStartedAtMs = null;
+    post(previous, presenceOf(previous));
+  };
+
+  /**
+   * Show ID's held-back page: its load button, in place of a page. The page
+   * shown until now is hidden, as any switch hides it.
+   */
+  const showHeldBack = (id: string): string => {
+    if (shownId === id) return answer("show", id, "unchanged");
+    const previous = shownId === null ? undefined : frames.get(shownId);
+    shownId = id;
+    if (previous !== undefined) hideSwitchedFrom(previous);
+    syncHeldBackShown();
+    // THE SIDEBAR'S HIGHLIGHT MOVES WITH THE SWITCH, page or no page.
+    shownListeners.notify(id);
+    return answer("show", id, "held-back", { previous: previous?.id ?? null });
+  };
+
+  /**
    * Answer OP on ID's page as ACT does it. A replacement waiting to take the
    * page's place (`incoming`) is given the same call, so it comes on screen
    * holding everything the page it replaces was told.
@@ -669,8 +731,17 @@ export function createHost(env: HostEnv): Host {
     ensure(id, url, lane, reloadStartedAtMs = null) {
       const frame = frames.get(id);
       const laneName = lane ?? undefined;
+      // A HELD PAGE IS HELD BACK NO LONGER.
+      heldBack.delete(id);
       if (frame === undefined) {
-        create(id, url, laneName).pendingReloadStartedAtMs = reloadStartedAtMs;
+        const created = create(id, url, laneName);
+        created.pendingReloadStartedAtMs = reloadStartedAtMs;
+        // A PAGE ASKED FOR WHILE ITS LOAD BUTTON STANDS takes the button's
+        // place, and the keyboard with it.
+        if (id === shownId) {
+          syncHeldBackShown();
+          if (doc.hasFocus()) created.iframe.focus();
+        }
         const queued = laneName !== undefined && laneNamed(laneName).waiting.includes(id);
         return answer("ensure", id, queued ? "queued" : "created");
       }
@@ -713,17 +784,17 @@ export function createHost(env: HostEnv): Host {
     },
     show(id, switchStartedAtMs = null) {
       const next = frames.get(id);
-      if (next === undefined) return answer("show", id, "absent");
+      if (next === undefined) {
+        if (!heldBack.has(id)) return answer("show", id, "absent");
+        return showHeldBack(id);
+      }
       if (shownId === id) return answer("show", id, "unchanged");
       const previous = shownId === null ? undefined : frames.get(shownId);
       shownId = id;
+      syncHeldBackShown();
       // A PAGE STILL WAITING ITS TURN loads now: it is the one wanted.
       const jumped = loadNow(next);
-      if (previous !== undefined) {
-        applyShown(previous, false);
-        previous.pendingSwitchStartedAtMs = null;
-        post(previous, presenceOf(previous));
-      }
+      if (previous !== undefined) hideSwitchedFrom(previous);
       applyShown(next, true);
       // A LISTENING PAGE IS TOLD THE SWITCH NOW; one still loading is told
       // with the presence its hello replays.
@@ -743,7 +814,22 @@ export function createHost(env: HostEnv): Host {
     onShown(listener) {
       return shownListeners.add(listener);
     },
+    holdBack(id, dir) {
+      heldBack.set(id, dir);
+      syncHeldBackShown();
+      return answer("holdBack", id, "held-back");
+    },
+    onHeldBackShown(listener) {
+      listener(heldBackShown);
+      return heldBackListeners.add(listener);
+    },
     remove(id) {
+      const held = heldBack.delete(id);
+      if (held && !frames.has(id)) {
+        if (shownId === id) shownId = null;
+        syncHeldBackShown();
+        return answer("remove", id, "removed");
+      }
       return withFrame("remove", id, (frame) => {
         dropIncoming(id);
         frames.delete(id);
@@ -824,7 +910,9 @@ export function createHost(env: HostEnv): Host {
         retire(frame);
       }
       frames.clear();
+      heldBack.clear();
       shownId = null;
+      syncHeldBackShown();
       note("info", `retired ${pages} page(s); the reload Emacs asked for follows`);
       endPage();
       return answer("retireAll", null, "retired", { pages });
@@ -895,7 +983,9 @@ export function createHost(env: HostEnv): Host {
       for (const id of [...incoming.keys()]) dropIncoming(id);
       for (const frame of frames.values()) frame.iframe.remove();
       frames.clear();
+      heldBack.clear();
       shownId = null;
+      syncHeldBackShown();
       for (const lane of lanes.values()) {
         if (lane.bound !== null) win.clearTimeout(lane.bound);
       }

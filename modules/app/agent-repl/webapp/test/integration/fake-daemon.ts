@@ -117,6 +117,7 @@ import { ClientLogResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endp
 import { RegisterWorkspaceResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_register_workspace_pb";
 import { SelectWorkspaceResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_select_workspace_pb";
 import { SelectInEditorResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_select_in_editor_pb";
+import { LoadPageInEditorResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_load_page_in_editor_pb";
 import { AdoptHostWorkspaceResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_adopt_host_workspace_pb";
 import { AdoptWebWorkspaceResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_adopt_web_workspace_pb";
 import { OpenLoginResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_open_login_pb";
@@ -1541,6 +1542,12 @@ export function createFakeDaemon(): FakeDaemon {
         record("selectInEditor", request);
         return answerFor("selectInEditor", SelectInEditorResponseSchema, {
           result: { case: "success", value: { route: { case: "relayed", value: {} } } },
+        });
+      },
+      loadPageInEditor(request) {
+        record("loadPageInEditor", request);
+        return answerFor("loadPageInEditor", LoadPageInEditorResponseSchema, {
+          result: { case: "success", value: {} },
         });
       },
       async *watchHostWorkspace(request, context) {

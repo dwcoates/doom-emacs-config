@@ -1,0 +1,74 @@
+// endpoint_load_page_in_editor.proto — LoadPageInEditor: the user asked for a
+// held-back page. WEB section. The webhost's load button calls this, so the
+// page is loaded by the EDITOR, which owns which pages the host holds.
+//
+// WHY A PAGE IS HELD BACK. A cold-gated workspace's page is not loaded when
+// the user switches to it (owner request, 2026-10-30): the gate is drawn by
+// the webhost on its own (host/gate.ts), and loading the feed behind it costs
+// the web process a whole page for a workspace the user is often only passing
+// on the way to another. The webhost draws a load button where the page would
+// be, and the click asks for the page through here.
+//
+// WHY THE EDITOR LOADS IT. Emacs owns the desired state of the host (which
+// pages it holds, and at which URL), and replays it whenever the host loads
+// (lisp/webhost.el). A page the webhost loaded on its own would be one Emacs
+// does not know it holds: never unloaded, never announced unloading, and lost
+// on the next replay. So the click is relayed on the workspace's host stream
+// as `load_page_requested`, and Emacs loads the page through the same path a
+// switch takes.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message LoadPageInEditorRequest {
+  // The workspace whose held-back page the user asked for.
+  workspace.v1.WorkspaceRef workspace = 1;
+}
+
+// THE ARM IS THE OUTCOME.
+message LoadPageInEditorResponse {
+  oneof result {
+    LoadPageInEditorSuccess success = 1;
+    LoadPageInEditorError error = 2;
+  }
+}
+
+// Relayed to the workspace's host stream: the editor loads the page. Empty:
+// nothing else is owed.
+message LoadPageInEditorSuccess {}
+
+// Validation failures (unset field, blank string) are Connect
+// InvalidArgument, never an arm.
+message LoadPageInEditorError {
+  oneof cause {
+    // The workspace id is not in the daemon's registry.
+    LoadPageInEditorUnknownWorkspace unknown_workspace = 1;
+    // The echoed dir disagrees with the registry's dir for this id.
+    LoadPageInEditorWorkspaceRefMismatch workspace_ref_mismatch = 2;
+    // This daemon released the workspace to a successor; dial `address`.
+    LoadPageInEditorTransferringAway transferring_away = 3;
+    // A joining daemon has not finished adopting this workspace yet.
+    LoadPageInEditorNotYetAdopted not_yet_adopted = 4;
+    // No host stream holds the workspace, so no editor heard the click and
+    // nothing will load the page. The editor holds a host stream for every
+    // workspace it shows, so this is a webhost drawing a button for a
+    // workspace its editor has let go of.
+    LoadPageInEditorNoEditor no_editor = 5;
+  }
+}
+message LoadPageInEditorUnknownWorkspace {}
+message LoadPageInEditorWorkspaceRefMismatch {
+  // The dir the registry holds for this id.
+  string registry_dir = 1;
+}
+message LoadPageInEditorTransferringAway {
+  // The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+  string address = 1;
+}
+message LoadPageInEditorNotYetAdopted {}
+message LoadPageInEditorNoEditor {}

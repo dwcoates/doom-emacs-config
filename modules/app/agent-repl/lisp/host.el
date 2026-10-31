@@ -555,6 +555,7 @@ roster it holds is at REVISION or later.")
 (declare-function agent-repl--frontend-fit-webviews "frontend" (&optional frame))
 (declare-function agent-repl-open-tabs-holds-p "open-tabs" (id))
 (declare-function agent-repl-link-up-p "daemon-link" ())
+(declare-function agent-repl-page-unload-load-requested "page-unload" (ws))
 
 (defun agent-repl-host-pending-selection ()
   "Return the workspace most recently REQUESTED and not yet answered, or nil.
@@ -1324,6 +1325,7 @@ re-create bookkeeping for a workspace whose tab is gone (measured
     (:final-response-clicked (agent-repl-host--reply-target-picked ws "final-response-clicked"))
     (:chat-text-highlighted (agent-repl-host--reply-target-picked ws "chat-text-highlighted"))
     (:select-requested (agent-repl-host--select-requested ws))
+    (:load-page-requested (agent-repl-host--load-page-requested ws))
     (:compose-entry (agent-repl-host--compose-entry ws value))
     (:transferred (agent-repl-host--transferred ws value))
     (:transfer-withdrawn (agent-repl-host--transfer-withdrawn ws))
@@ -1449,6 +1451,18 @@ workspace Emacs holds.  An event, never replayed, so a reconnect never
 switches."
   (agent-repl--info ws "elisp.host.select-requested ws=%s" ws)
   (agent-repl-host-request-switch ws 'sidebar))
+
+;;;; ---- The load button ----
+
+(defun agent-repl-host--load-page-requested (ws)
+  "Load WS\='s held-back page: the user clicked the webhost\='s load button.
+A cold-gated workspace\='s page is held back when the user switches to it
+\(`agent-repl-page-unload-note-shown'), and the webhost draws a load
+button where it would be; the daemon relays the click on WS\='s own host
+stream (LoadPageInEditor), because Emacs owns which pages the host holds.
+An event, never replayed, so a reconnect never loads a page."
+  (agent-repl--info ws "elisp.host.load-page-requested ws=%s" ws)
+  (agent-repl-page-unload-load-requested ws))
 
 ;;;; ---- The branch click ----
 

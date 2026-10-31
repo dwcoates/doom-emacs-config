@@ -413,6 +413,10 @@ func (s *fakeServer) SelectInEditor(ctx context.Context, req *connect.Request[v1
 	return handleUnary[v1.SelectInEditorRequest, v1.SelectInEditorResponse](ctx, s, "SelectInEditor", req.Msg)
 }
 
+func (s *fakeServer) LoadPageInEditor(ctx context.Context, req *connect.Request[v1.LoadPageInEditorRequest]) (*connect.Response[v1.LoadPageInEditorResponse], error) {
+	return handleUnary[v1.LoadPageInEditorRequest, v1.LoadPageInEditorResponse](ctx, s, "LoadPageInEditor", req.Msg)
+}
+
 func (s *fakeServer) AdoptWebWorkspace(ctx context.Context, req *connect.Request[v1.AdoptWebWorkspaceRequest]) (*connect.Response[v1.AdoptWebWorkspaceResponse], error) {
 	return handleUnary[v1.AdoptWebWorkspaceRequest, v1.AdoptWebWorkspaceResponse](ctx, s, "AdoptWebWorkspace", req.Msg)
 }

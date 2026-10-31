@@ -818,6 +818,18 @@ func (s *server) pushSelectRequested(ws ids.WorkspaceID) int {
 	})
 }
 
+// pushLoadPageRequested pushes load_page_requested onto the workspace's host
+// stream: the user clicked the load button the webhost draws for its
+// held-back page, and Emacs loads the page (LoadPageInEditor). It answers how
+// many host streams the event was handed to.
+func (s *server) pushLoadPageRequested(ws ids.WorkspaceID) int {
+	return s.hostEventStream(ws).Emit(&agentreplv1.WatchHostWorkspaceResponse{
+		Push: &agentreplv1.WatchHostWorkspaceResponse_LoadPageRequested{
+			LoadPageRequested: &agentreplv1.HostWorkspaceLoadPageRequested{},
+		},
+	})
+}
+
 // PushTransferred pushes `transferred` on the host stream and
 // `transferred{address}` on the web stream.
 //
