@@ -31,8 +31,8 @@ message GetMemoryOverviewSuccess {
   oneof outcome {
     // The figures, as of the latest sample.
     frontend.v1.SidebarMemoryOverview measured = 1;
-    // No sample yet: the collector samples on the metrics store's scrape,
-    // seconds after the daemon starts.
+    // No sample yet: the daemon samples once just after it starts serving
+    // (and every minute after), so this answers only in that first moment.
     GetMemoryOverviewNotYetMeasured not_yet_measured = 2;
   }
 }

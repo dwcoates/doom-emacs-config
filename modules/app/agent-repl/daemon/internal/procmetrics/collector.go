@@ -1,12 +1,15 @@
 package procmetrics
 
 import (
+	"context"
 	"errors"
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"agent-repld/internal/causelog"
+	"agent-repld/internal/clock"
 	"agent-repld/internal/dlog"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -35,7 +38,7 @@ type Deps struct {
 	Log       dlog.Logger
 }
 
-// pidState is what the last scrape read for one process.
+// pidState is what the last sample read for one process.
 type pidState struct {
 	group Group
 	start int64
@@ -52,23 +55,30 @@ type totals struct {
 // COUNTERS STAY MONOTONIC ACROSS PROCESS CHURN. A group's CPU, disk and
 // energy are not the sum of its live processes' lifetimes (a process exiting
 // would make that sum fall, which a rate reads as a reset and a spike).
-// Each scrape adds every live process's growth since the last scrape; a
-// process new to the group adds all it has used, except at the first scrape,
-// which only takes the baseline, so a daemon restart starts every counter
-// from zero rather than from the lifetimes of processes that predate it. A
-// reused pid is told from its predecessor by its start time.
+// Each sample (a scrape, or the daemon's own, Run) adds every live process's
+// growth since the last sample; a process new to the group adds all it has
+// used, except at the first sample, which only takes the baseline, so a
+// daemon restart starts every counter from zero rather than from the
+// lifetimes of processes that predate it. A reused pid is told from its
+// predecessor by its start time.
 type Collector struct {
 	deps   Deps
 	causes causelog.Tracker
+
+	// sampling serializes whole process reads, the scrape's and the
+	// daemon's own (Run): two reads folding into the counters out of order
+	// would count the growth between them twice. Latest takes only mu, so a
+	// popup never waits on a read.
+	sampling sync.Mutex
 
 	mu     sync.Mutex
 	primed bool
 	seen   map[int]pidState
 	totals map[Group]*totals
-	// latest is the last scrape's per-group footprints, for the rail's memory
-	// popups (memorypopup), which read it between scrapes.
+	// latest is the last sample's per-group footprints, for the rail's memory
+	// popups (memorypopup), which read it between samples.
 	latest Snapshot
-	// sampled is whether any scrape has run.
+	// sampled is whether any sample has run.
 	sampled bool
 	// hostBase is each CPU mode's host total at the first host read, so the
 	// host's CPU counts from the daemon's start like every other counter
@@ -153,31 +163,76 @@ func (c *Collector) goneSince(pid int, was Identity) bool {
 	return err == nil && now.StartUnixMicros != was.StartUnixMicros
 }
 
-// Snapshot is one scrape's physical footprint per group: what the rail's
+// Snapshot is one sample's physical footprint per group: what the rail's
 // memory popups draw.
 type Snapshot struct {
 	// Footprints holds every group a live process was in, summed.
 	Footprints map[Group]uint64
-	// Failed is set when the scrape could not list the host's processes, so
+	// Failed is set when the sample could not list the host's processes, so
 	// it measured nothing; Footprints is then empty.
 	Failed error
 }
 
-// Latest answers the last scrape's snapshot, false before the first scrape.
-// The figures are as fresh as the metrics store's scrape cadence.
+// Latest answers the latest sample's snapshot, false before the first one.
+// The figures are at most SampleEvery old (Run), fresher while the metrics
+// store scrapes.
 func (c *Collector) Latest() (Snapshot, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.latest, c.sampled
 }
 
+// SampleEvery is how often the daemon samples its processes itself (Run).
+const SampleEvery = time.Minute
+
+// Run samples the processes once at once and then every SampleEvery until
+// ctx ends, answering ctx.Err(). THE POPUPS' FIGURES ARE THE DAEMON'S OWN:
+// they never wait on the metrics store's first scrape, nor go stale while it
+// is down or before a successor's target is scraped. One sample is a kernel
+// read of the host's process table, the same read every scrape makes.
+func (c *Collector) Run(ctx context.Context, clk clock.Clock) error {
+	return clock.Repeat(ctx, clk, 0, SampleEvery, func(context.Context) { c.sample() })
+}
+
 func (c *Collector) collectProcesses(ch chan<- prometheus.Metric) {
+	sums, snapshot, ok := c.sample()
+	if !ok {
+		return
+	}
+	groups := make([]Group, 0, len(snapshot))
+	for g := range snapshot {
+		groups = append(groups, g)
+	}
+	sort.Slice(groups, func(i, j int) bool {
+		return groups[i].Process+"/"+groups[i].Workspace < groups[j].Process+"/"+groups[j].Workspace
+	})
+	for _, g := range groups {
+		t, s := snapshot[g], sums[g]
+		lv := []string{g.Process, g.Workspace}
+		ch <- prometheus.MustNewConstMetric(c.cpu, prometheus.CounterValue, t.cpu, lv...)
+		ch <- prometheus.MustNewConstMetric(c.read, prometheus.CounterValue, t.read, lv...)
+		ch <- prometheus.MustNewConstMetric(c.write, prometheus.CounterValue, t.write, lv...)
+		ch <- prometheus.MustNewConstMetric(c.energy, prometheus.CounterValue, t.energy, lv...)
+		ch <- prometheus.MustNewConstMetric(c.resident, prometheus.GaugeValue, float64(s.resident), lv...)
+		ch <- prometheus.MustNewConstMetric(c.footprint, prometheus.GaugeValue, float64(s.footprint), lv...)
+		ch <- prometheus.MustNewConstMetric(c.threads, prometheus.GaugeValue, float64(s.threads), lv...)
+		ch <- prometheus.MustNewConstMetric(c.fds, prometheus.GaugeValue, float64(s.fds), lv...)
+		ch <- prometheus.MustNewConstMetric(c.count, prometheus.GaugeValue, float64(s.count), lv...)
+	}
+}
+
+// sample reads every agent-repl process once, folds the read into the
+// counters and the latest snapshot, and answers each group's gauges and a
+// copy of its counters; false when the host's processes could not be listed.
+func (c *Collector) sample() (map[Group]gauges, map[Group]totals, bool) {
+	c.sampling.Lock()
+	defer c.sampling.Unlock()
 	pids, err := c.deps.Reader.PIDs()
 	if !c.note("list", err) {
 		c.mu.Lock()
 		c.latest, c.sampled = Snapshot{Failed: err}, true
 		c.mu.Unlock()
-		return
+		return nil, nil, false
 	}
 	ids := make(map[int]Identity, len(pids))
 	var identityErr error
@@ -221,27 +276,7 @@ func (c *Collector) collectProcesses(ch chan<- prometheus.Metric) {
 		snapshot[g] = *t
 	}
 	c.mu.Unlock()
-
-	groups := make([]Group, 0, len(snapshot))
-	for g := range snapshot {
-		groups = append(groups, g)
-	}
-	sort.Slice(groups, func(i, j int) bool {
-		return groups[i].Process+"/"+groups[i].Workspace < groups[j].Process+"/"+groups[j].Workspace
-	})
-	for _, g := range groups {
-		t, s := snapshot[g], sums[g]
-		lv := []string{g.Process, g.Workspace}
-		ch <- prometheus.MustNewConstMetric(c.cpu, prometheus.CounterValue, t.cpu, lv...)
-		ch <- prometheus.MustNewConstMetric(c.read, prometheus.CounterValue, t.read, lv...)
-		ch <- prometheus.MustNewConstMetric(c.write, prometheus.CounterValue, t.write, lv...)
-		ch <- prometheus.MustNewConstMetric(c.energy, prometheus.CounterValue, t.energy, lv...)
-		ch <- prometheus.MustNewConstMetric(c.resident, prometheus.GaugeValue, float64(s.resident), lv...)
-		ch <- prometheus.MustNewConstMetric(c.footprint, prometheus.GaugeValue, float64(s.footprint), lv...)
-		ch <- prometheus.MustNewConstMetric(c.threads, prometheus.GaugeValue, float64(s.threads), lv...)
-		ch <- prometheus.MustNewConstMetric(c.fds, prometheus.GaugeValue, float64(s.fds), lv...)
-		ch <- prometheus.MustNewConstMetric(c.count, prometheus.GaugeValue, float64(s.count), lv...)
-	}
+	return sums, snapshot, true
 }
 
 // account folds one scrape's live processes into the counters and answers

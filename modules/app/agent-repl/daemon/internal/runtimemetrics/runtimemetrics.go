@@ -9,10 +9,12 @@
 package runtimemetrics
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"sync/atomic"
 
+	"agent-repld/internal/clock"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/procmetrics"
 
@@ -150,9 +152,10 @@ func (s *Surface) RegisterProcesses(reader procmetrics.Reader, sockDir, diskPath
 	return nil
 }
 
-// Latest answers the process collector's latest scrape, false while none has
-// run: before the metrics store's first scrape, with no collector registered,
-// and on the off surface, which measures nothing.
+// Latest answers the process collector's latest sample, false while none has
+// run: before SampleProcesses' first sample or the metrics store's first
+// scrape, with no collector registered, and on the off surface, which
+// measures nothing.
 func (s *Surface) Latest() (procmetrics.Snapshot, bool) {
 	if s == nil {
 		return procmetrics.Snapshot{}, false
@@ -162,4 +165,17 @@ func (s *Surface) Latest() (procmetrics.Snapshot, bool) {
 		return procmetrics.Snapshot{}, false
 	}
 	return c.Latest()
+}
+
+// SampleProcesses samples the registered process collector once at once and
+// then every procmetrics.SampleEvery until ctx ends (procmetrics.Collector.Run),
+// answering ctx.Err(): the rail's memory popups read the daemon's own sample,
+// not the metrics store's scrape. With no collector registered, and on the
+// off surface, it measures nothing and waits for ctx to end.
+func (s *Surface) SampleProcesses(ctx context.Context, clk clock.Clock) error {
+	if s == nil || s.processes.Load() == nil {
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	return s.processes.Load().Run(ctx, clk)
 }

@@ -1,11 +1,14 @@
 package procmetrics
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
+	"agent-repld/internal/clock/clocktest"
 	"agent-repld/internal/dlog"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -548,5 +551,129 @@ func TestAFailedListingLeavesAFailedSnapshot(t *testing.T) {
 	// Assert
 	if !sampled || snap.Failed == nil || len(snap.Footprints) != 0 {
 		t.Fatalf("snapshot = %+v (sampled %v), want a failed one measuring nothing", snap, sampled)
+	}
+}
+
+// running is a collector's Run on a scripted clock, stopped by stop.
+type running struct {
+	clk  *clocktest.Scripted
+	stop func() error
+}
+
+func startRun(h *harness) running {
+	clk := clocktest.New(time.Unix(1_800_000_000, 0))
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- h.collector.Run(ctx, clk) }()
+	return running{clk: clk, stop: func() error {
+		cancel()
+		return <-done
+	}}
+}
+
+// tick answers the wait the run stands at, which must be WANT, and waits for
+// the sample it starts to end (the run's next wait).
+func (r running) tick(t *testing.T, want time.Duration) {
+	t.Helper()
+	if got := <-r.clk.Asked; got != want {
+		t.Fatalf("Run waited %v, want %v", got, want)
+	}
+	r.clk.Fire <- time.Time{}
+	if got := <-r.clk.Asked; got != SampleEvery {
+		t.Fatalf("Run then waited %v, want %v", got, SampleEvery)
+	}
+}
+
+func TestRunSamplesAtOnceWithoutAScrape(t *testing.T) {
+	// Arrange
+	reader := newWorld()
+	reader.setUsage(testSelf, Usage{FootprintBytes: 900})
+	h := newHarness(t, reader)
+	r := startRun(h)
+
+	// Act
+	if got := <-r.clk.Asked; got != 0 {
+		t.Fatalf("Run first waited %v, want no wait", got)
+	}
+	r.clk.Fire <- time.Time{}
+	if got := <-r.clk.Asked; got != SampleEvery {
+		t.Fatalf("Run then waited %v, want %v", got, SampleEvery)
+	}
+	snap, sampled := h.collector.Latest()
+
+	// Assert
+	if !sampled || snap.Footprints[Group{Process: ProcessDaemon}] != 900 {
+		t.Fatalf("snapshot = %+v (sampled %v), want the daemon at 900 before any scrape", snap, sampled)
+	}
+	if err := r.stop(); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Run = %v, want context.Canceled once stopped", err)
+	}
+}
+
+func TestRunSamplesAgainEveryMinute(t *testing.T) {
+	// Arrange
+	reader := newWorld()
+	h := newHarness(t, reader)
+	r := startRun(h)
+	r.tick(t, 0)
+	reader.setUsage(testSelf, Usage{FootprintBytes: 1200})
+
+	// Act
+	r.clk.Fire <- time.Time{}
+	if got := <-r.clk.Asked; got != SampleEvery {
+		t.Fatalf("Run then waited %v, want %v", got, SampleEvery)
+	}
+	snap, _ := h.collector.Latest()
+
+	// Assert
+	if got := snap.Footprints[Group{Process: ProcessDaemon}]; got != 1200 {
+		t.Fatalf("daemon footprint = %d after the minute's sample, want 1200", got)
+	}
+	if err := r.stop(); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Run = %v, want context.Canceled once stopped", err)
+	}
+}
+
+func TestASampleBetweenScrapesCountsEachGrowthOnce(t *testing.T) {
+	// Arrange
+	reader := newWorld()
+	h := newHarness(t, reader)
+	r := startRun(h)
+	h.scrape(t)
+	reader.setUsage(30, Usage{CPUSeconds: 8})
+	r.tick(t, 0)
+	reader.setUsage(30, Usage{CPUSeconds: 10})
+
+	// Act
+	get := h.scrape(t)
+
+	// Assert
+	mustValue(t, get, 5, "agentrepl_process_cpu_seconds_total", shim()...)
+	if err := r.stop(); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Run = %v, want context.Canceled once stopped", err)
+	}
+}
+
+func TestRunsFailedListingLeavesAFailedSnapshotAndIsRecorded(t *testing.T) {
+	// Arrange
+	reader := newWorld()
+	reader.pidsErr = errors.New("proc_listallpids: operation not permitted")
+	h := newHarness(t, reader)
+	r := startRun(h)
+
+	// Act
+	r.tick(t, 0)
+	snap, sampled := h.collector.Latest()
+
+	// Assert
+	if !sampled || snap.Failed == nil || len(snap.Footprints) != 0 {
+		t.Fatalf("snapshot = %+v (sampled %v), want a failed one measuring nothing", snap, sampled)
+	}
+	errs := errorRecords(h.log)
+	if len(errs) != 1 || errs[0].Operation != Operation || errs[0].Context["step"] != "list" {
+		t.Fatalf("error records = %+v, want one list failure", errs)
+	}
+	if err := r.stop(); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Run = %v, want context.Canceled once stopped", err)
 	}
 }

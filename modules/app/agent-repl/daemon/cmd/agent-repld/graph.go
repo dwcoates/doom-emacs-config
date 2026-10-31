@@ -1641,6 +1641,12 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			netwatch.Follow(ctx, networkWatch.Changed, fleet.NetworkChanged)
 			return nil
 		}},
+		// THE MEMORY POPUPS' SAMPLE: at once, then every minute, so the
+		// version's hover is measured from just after startup whether or not
+		// the metrics store has scraped this daemon yet.
+		{Name: "process_sample", Run: func(ctx context.Context) error {
+			return p.Metrics.SampleProcesses(ctx, clock.System{})
+		}},
 		{Name: "web_footprint", Run: func(ctx context.Context) error {
 			footprints.Run(ctx)
 			return nil
