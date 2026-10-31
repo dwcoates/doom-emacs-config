@@ -962,6 +962,19 @@ VALUE is (:workspace REF :token TOKEN :outcome OUTCOME), all required."
   "Decode the `open_commit_log' push arm VALUE."
   (agent-repl-wire-decode-open-in-editor-commit-log value))
 
+(defun agent-repl-wire-decode-open-in-editor-terminal-command (value)
+  "Decode VALUE as `OpenInEditorTerminalCommand'.
+Returns a plist (:command STRING)."
+  (let ((object (agent-repl-wire--object "OpenInEditorTerminalCommand" value)))
+    (agent-repl-wire--check-keys "OpenInEditorTerminalCommand" object '(command))
+    (agent-repl-wire--decoded
+     "OpenInEditorTerminalCommand"
+     (list :command (agent-repl-wire--decode-string "OpenInEditorTerminalCommand" 'command object)))))
+
+(defun agent-repl-wire-decode-watch-host-workspace-response-run-in-terminal (value)
+  "Decode the `run_in_terminal' push arm VALUE."
+  (agent-repl-wire-decode-open-in-editor-terminal-command value))
+
 (defun agent-repl-wire-decode-watch-host-workspace-response-evaluate (value)
   "Decode the `evaluate' push arm VALUE as its `(:token :text)' plist."
   (agent-repl-wire-decode-host-evaluate value))
@@ -985,6 +998,8 @@ VALUE is (:workspace REF :token TOKEN :outcome OUTCOME), all required."
                    agent-repl-wire-decode-watch-host-workspace-response-open-in-editor)
      (openCommitLog :open-commit-log
                     agent-repl-wire-decode-watch-host-workspace-response-open-commit-log)
+     (runInTerminal :run-in-terminal
+                    agent-repl-wire-decode-watch-host-workspace-response-run-in-terminal)
      (ending :ending agent-repl-wire-decode-watch-host-workspace-response-ending)
      (notificationClicked :notification-clicked
                           agent-repl-wire-decode-watch-host-workspace-response-notification-clicked)
@@ -1008,7 +1023,7 @@ VALUE is (:workspace REF :token TOKEN :outcome OUTCOME), all required."
   (let ((object (agent-repl-wire--object "WatchHostWorkspaceResponse" value)))
     (agent-repl-wire--check-keys
      "WatchHostWorkspaceResponse" object
-     '(host transferred reloadWebapp openInEditor openCommitLog ending notificationClicked selection evaluate
+     '(host transferred reloadWebapp openInEditor openCommitLog runInTerminal ending notificationClicked selection evaluate
        finalResponseClicked selectRequested loadPageRequested composeEntry chatTextHighlighted
        transferWithdrawn responseTextHighlighted))
     (agent-repl-wire--decoded
