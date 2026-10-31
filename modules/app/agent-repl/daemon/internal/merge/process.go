@@ -1029,20 +1029,27 @@ func (r *run) fixSettled(ctx context.Context, round tabRound, n, attempt int, su
 		why = line
 	}
 	if why != "" {
-		r.settleAgentic()
-		r.publish(fixingKey(n), fixingTab(round.settled(r.o.nowMS(), why), attempt))
-		r.settleTesting(why)
-		r.closeTab(ctx, round, "failed")
-		r.o.log(ctx, r.ws).Info(op, "the fixing attempt gave up; the merge fails", dlog.Context{
-			"workspace": string(r.ws), "attempt": attempt, "why": why})
-		out := failedIn(footer.FailedTests, why)
-		return &out, nil
+		return r.fixGaveUp(ctx, round, n, attempt, why), nil
 	}
 	r.settleAgentic()
 	r.publish(fixingKey(n), fixingTab(round.settled(r.o.nowMS(), ""), attempt))
 	r.publishTesting(false)
 	r.closeTab(ctx, round, "succeeded")
 	return nil, nil
+}
+
+// fixGaveUp settles a fixing attempt that ended the merge, for WHY: its
+// fixing sub-subtab and the tests tab settle failed, the round closes failed,
+// and the merge fails in its tests.
+func (r *run) fixGaveUp(ctx context.Context, round tabRound, n, attempt int, why string) *outcome {
+	r.settleAgentic()
+	r.publish(fixingKey(n), fixingTab(round.settled(r.o.nowMS(), why), attempt))
+	r.settleTesting(why)
+	r.closeTab(ctx, round, "failed")
+	r.o.log(ctx, r.ws).Info("daemon.merge.fixes", "the fixing attempt gave up; the merge fails", dlog.Context{
+		"workspace": string(r.ws), "attempt": attempt, "why": why})
+	out := failedIn(footer.FailedTests, why)
+	return &out
 }
 
 // resumeFix goes on with a fixing attempt a restart interrupted: the merge
