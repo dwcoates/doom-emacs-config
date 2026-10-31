@@ -1268,27 +1268,7 @@ func TestTheChainCheckAgainstItsQueue(t *testing.T) {
 				entries = append(entries, admittedEntry(ws))
 			}
 			h := resumeWorld(t, entries)
-			// A queue races only in a repository whose deploy merges locally.
-			h.mu.Lock()
-			h.config = localMergeConfig()
-			h.mu.Unlock()
-			ctx, cancel := context.WithCancelCause(context.Background())
-			defer cancel(nil)
-			h.o.mu.Lock()
-			h.o.window = 4
-			var chain []*run
-			for _, ws := range tc.chain {
-				r := h.o.newRun(ctx, cancel, h.repoKey(), ws, 1)
-				r.joined, r.leftLine = true, ws == tc.leftLine
-				chain = append(chain, r)
-			}
-			h.o.chains[h.repoKey()] = chain
-			// The chain extends only behind its running head (extendOnce), so
-			// its first member is the head running, which has read the
-			// repository's deploy config.
-			chain[0].target = deployTarget{cfg: localMergeConfig()}
-			h.o.running[h.repoKey()] = chain[0]
-			h.o.mu.Unlock()
+			standChain(t, h, tc.chain, tc.leftLine)
 
 			// Act
 			started := h.o.extendOnce(context.Background(), h.repoKey())
@@ -1310,6 +1290,36 @@ func TestTheChainCheckAgainstItsQueue(t *testing.T) {
 			}
 		})
 	}
+}
+
+// standChain stands CHAIN as h's racing chain with room to grow (a window of
+// four): each member joined, LEFT marked as having left its line, and the
+// first the running head, which has read its repository's local-merge deploy
+// config -- the chain extendOnce checks against its queue.
+func standChain(t *testing.T, h *harness, chain []ids.WorkspaceID, left ids.WorkspaceID) []*run {
+	t.Helper()
+	// A queue races only in a repository whose deploy merges locally.
+	h.mu.Lock()
+	h.config = localMergeConfig()
+	h.mu.Unlock()
+	ctx, cancel := context.WithCancelCause(context.Background())
+	t.Cleanup(func() { cancel(nil) })
+	h.o.mu.Lock()
+	defer h.o.mu.Unlock()
+	h.o.window = 4
+	var runs []*run
+	for _, ws := range chain {
+		r := h.o.newRun(ctx, cancel, h.repoKey(), ws, 1)
+		r.joined, r.leftLine = true, ws == left
+		runs = append(runs, r)
+	}
+	h.o.chains[h.repoKey()] = runs
+	// The chain extends only behind its running head (extendOnce), so its
+	// first member is the head running, which has read the repository's
+	// deploy config.
+	runs[0].target = deployTarget{cfg: localMergeConfig()}
+	h.o.running[h.repoKey()] = runs[0]
+	return runs
 }
 
 // headInGate runs the chain's head merge into its test gate and holds it
