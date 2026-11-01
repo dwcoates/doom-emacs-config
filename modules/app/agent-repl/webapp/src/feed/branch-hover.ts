@@ -20,6 +20,9 @@
  * is on it (owner request, 2026-10-27), in the box a response's own branch
  * takes, drawn as the composer's is while the person types that entry: the
  * label (`entries.ts`'s `answeredNodeAt`) names the response row and node.
+ * The box is the citation's orange (owner request, 2026-11-01), and the
+ * reverse holds: the pointer on a response's linked label lights the prompt
+ * entry that answered it (`ENTRY_LIT_CLASS`), in the same orange.
  *
  * THE AREA THAT BOXES A BRANCH IS THE BOX IT DRAWS (owner request,
  * 2026-10-28): on a tree line the pointer boxes the deepest node whose box
@@ -36,7 +39,7 @@ import { log } from "../log.js";
 import { selectionTouches } from "../selection.js";
 import { branchLineAt, governedRowAt, isResponseRow } from "./bubble-selection.js";
 import { TREE_CLASS, TREE_REFERENCE_ATTRIBUTE, TREE_REFERENCE_CLASS } from "../metaprompt-tree.js";
-import { LABEL_LINK_CLASS, answeredNodeAt } from "./entries.js";
+import { ENTRY_LIT_CLASS, LABEL_LINK_CLASS, answeredNodeAt, answeringEntryLines } from "./entries.js";
 import { COMPOSER_EDITED_EVENT } from "./composer-entry.js";
 import { feedRowId } from "./row-id.js";
 import {
@@ -135,7 +138,7 @@ function boxUnder(
   if (answered !== null) {
     return {
       ...answered,
-      box: HOVER_BOX,
+      box: REFERENCE_BOX,
       operation: "feed.branch-hover.entry",
       record: "boxed the response branch the prompt entry under the pointer answers",
     };
@@ -159,6 +162,24 @@ export function installBranchHover(host: HTMLElement, resolve: LengthResolver = 
   const boxesOf: LineBoxes = (line) => {
     if (measured?.line !== line) measured = { line, boxes: boxesOverLine(line, resolve) };
     return measured.boxes;
+  };
+  let lit: HTMLElement[] = [];
+  const unlight = (): void => {
+    for (const line of lit) line.classList.remove(ENTRY_LIT_CLASS);
+    lit = [];
+  };
+  const onLabelOver = (event: MouseEvent): void => {
+    const lines = event.target instanceof Element ? answeringEntryLines(host, event.target) : [];
+    if (lines.length === lit.length && lines.every((line, i) => line === lit[i])) return;
+    unlight();
+    for (const line of lines) line.classList.add(ENTRY_LIT_CLASS);
+    lit = lines;
+    if (lines.length > 0) {
+      log.debug("lit the prompt entry the response label under the pointer was answered by", {
+        operation: "feed.branch-hover.entry-lit",
+        context: { lines: lines.length },
+      });
+    }
   };
   const clear = (): void => {
     if (hovered === undefined) return;
@@ -219,7 +240,9 @@ export function installBranchHover(host: HTMLElement, resolve: LengthResolver = 
   host.ownerDocument.addEventListener(COMPOSER_EDITED_EVENT, onComposerEdited);
   host.addEventListener("mouseover", onOver);
   host.addEventListener("mousemove", onOver);
+  host.addEventListener("mouseover", onLabelOver);
   host.addEventListener("mouseleave", clear);
+  host.addEventListener("mouseleave", unlight);
   host.ownerDocument.addEventListener("selectionchange", onSelectionChange);
   return () => {
     host.removeEventListener("mouseover", onPointer, true);
@@ -227,8 +250,11 @@ export function installBranchHover(host: HTMLElement, resolve: LengthResolver = 
     host.ownerDocument.removeEventListener(COMPOSER_EDITED_EVENT, onComposerEdited);
     host.removeEventListener("mouseover", onOver);
     host.removeEventListener("mousemove", onOver);
+    host.removeEventListener("mouseover", onLabelOver);
     host.removeEventListener("mouseleave", clear);
+    host.removeEventListener("mouseleave", unlight);
     host.ownerDocument.removeEventListener("selectionchange", onSelectionChange);
     clear();
+    unlight();
   };
 }

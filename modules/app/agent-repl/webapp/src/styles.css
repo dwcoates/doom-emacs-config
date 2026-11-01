@@ -3238,6 +3238,9 @@ html[data-page-unshown] {
 .mp-entry-label,
 .mp-entry-path .mp-label { color: var(--answer-label); }
 .mp-entry-label { cursor: pointer; }
+/* The prompt entry whose answered response label the pointer is on, lit in the
+   citation's orange (feed/branch-hover.ts). */
+.mp-entry.mp-entry-lit { background: var(--reference-bg); }
 /* A RESPONSE NODE'S SUBTREE IS ONE BOX (feed/subtree-box.ts): each line
    inside it is painted from its left edge, the column the node's label starts
    at, to its right edge, the widest line's text. The box carries no accent bar
