@@ -27,6 +27,16 @@
 ;; The frame follows what it shows on every window change
 ;; (`window-state-change-functions', which calls with the frame) and on a
 ;; theme load.
+;;
+;; A WEB VIEW MEETS THE DIVIDER.  Every window draws a fringe on each side
+;; of its body, and a web view's buffer (the sidebar, a workspace's slot)
+;; draws it in its fringe face, a dark that is not the page's, so a strip
+;; stood between each divider and the page beside it.  A web view's buffer
+;; has no fringes: its fringe widths are buffer-local zeros, which every
+;; window it is displayed in takes up, and a window already showing it is
+;; given them at once.  The page is fitted to its window's body
+;; (frontend.el), so it fills the window to the divider.  The composer
+;; keeps its fringes, which it paints its own background.
 
 ;;; Code:
 
@@ -36,6 +46,7 @@
 (declare-function agent-repl-sidebar-view-window-p "sidebar-view" (win))
 (declare-function agent-repl--log "core" (ws fmt &rest args))
 (defvar agent-repl-input-background)
+(defvar agent-repl-frontend-webview-mode)
 
 (defconst agent-repl--dividers-log-scope
   '(:agent-repl-central "a frame's dividers belong to no one workspace")
@@ -120,10 +131,34 @@ the frame is painted afresh.  Every other face kept its color from before."
           (agent-repl--dividers-paint frame)
           (set-frame-parameter frame agent-repl--dividers-hidden rekept))))))
 
+(defun agent-repl--dividers-webview-fringes ()
+  "Give the current web view buffer no fringes, or its own back.
+On `agent-repl-frontend-webview-mode-hook\=', which runs as the mode
+turns on and off: on, the buffer\='s fringe widths are zero; off, they
+are the frame\='s again.  Every window showing the buffer takes the
+widths at once."
+  (let ((width (and agent-repl-frontend-webview-mode 0))
+        (windows (get-buffer-window-list (current-buffer) nil t)))
+    (agent-repl--log agent-repl--dividers-log-scope
+                     "elisp.dividers.webview-fringes buffer=%s width=%S windows=%d"
+                     (buffer-name) width (length windows))
+    (if width
+        (setq-local left-fringe-width width
+                    right-fringe-width width)
+      (kill-local-variable 'left-fringe-width)
+      (kill-local-variable 'right-fringe-width))
+    (dolist (win windows)
+      (set-window-fringes win width width))))
+
+(add-hook 'agent-repl-frontend-webview-mode-hook #'agent-repl--dividers-webview-fringes)
 (add-hook 'window-state-change-functions #'agent-repl-dividers-sync)
 (add-hook 'enable-theme-functions #'agent-repl--dividers-on-theme)
-;; A reload finds the frames already showing what they show.
+;; A reload finds the frames already showing what they show, and the web
+;; views already in their mode.
 (mapc #'agent-repl-dividers-sync (frame-list))
+(dolist (buf (buffer-list))
+  (when (buffer-local-value 'agent-repl-frontend-webview-mode buf)
+    (with-current-buffer buf (agent-repl--dividers-webview-fringes))))
 
 (provide 'dividers)
 ;;; dividers.el ends here
