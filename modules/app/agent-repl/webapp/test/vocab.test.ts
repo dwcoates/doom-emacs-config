@@ -46,6 +46,7 @@ import {
   paintClass,
   protoArmName,
   rosterStatusColor,
+  statusStepKey,
   toneClass,
   topbarConnectivityColor,
   topbarTone,
@@ -594,5 +595,17 @@ describe("color_values, each color's one value per theme", () => {
 
     // Assert
     expect(declaredInCss).toBe(false);
+  });
+});
+
+describe("statusStepKey", () => {
+  it("joins the arm and the step with a slash", () => {
+    // Arrange / Act / Assert
+    expect(statusStepKey("merging", "awaitingFree")).toBe("merging/awaitingFree");
+  });
+
+  it("keeps different pairs apart", () => {
+    // Arrange / Act / Assert
+    expect(statusStepKey("idle", "done")).not.toBe(statusStepKey("idle", "ready"));
   });
 });

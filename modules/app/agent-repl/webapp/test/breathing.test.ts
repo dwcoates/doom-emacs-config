@@ -23,6 +23,8 @@ import {
   statusWordWaves,
 } from "../src/breathing.js";
 import { FOOTER_STATUS_CASES } from "../src/footer/tones.js";
+import { statusStepKey } from "../src/vocab.js";
+import { FooterStatusSchema } from "../../proto/gen/ts/frontend/v1/footer_pb";
 
 const NOW = Date.parse("2024-05-01T12:00:00.000Z");
 
@@ -497,6 +499,23 @@ describe("statusWordWaves: which statuses mean progress", () => {
   it("holds a still arm still on any step", () => {
     // Arrange / Act / Assert
     expect(statusWordWaves("idle", "done")).toBe(false);
+  });
+
+  it("keys every still step through statusStepKey on a step the contract declares", () => {
+    // Arrange
+    const declared = FooterStatusSchema.oneofs
+      .find((oneof) => oneof.name === "status")
+      ?.fields.flatMap((field) =>
+        (field.message?.oneofs.find((oneof) => oneof.name === "substatus")?.fields ?? []).map((sub) =>
+          statusStepKey(field.localName, sub.localName),
+        ),
+      ) ?? [];
+
+    // Act
+    const undeclared = [...STILL_STATUS_STEPS].filter((key) => !declared.includes(key));
+
+    // Assert
+    expect(undeclared).toEqual([]);
   });
 
   it("names only steps of waving arms, so a still step is never redundant", () => {

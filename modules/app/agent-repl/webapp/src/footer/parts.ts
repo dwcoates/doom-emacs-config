@@ -9,7 +9,7 @@ import type { FooterColdGateFigure } from "../../../proto/gen/ts/frontend/v1/foo
 import { coldGateFigureColor } from "../pressure-color.js";
 import { MalformedView } from "../rpc/malformed.js";
 import { requireMessage } from "../rpc/strict.js";
-import { protoArmName } from "../vocab.js";
+import { protoArmName, statusStepKey } from "../vocab.js";
 
 /**
  * A status or substatus word: the arm's name, lowercase ASCII, with spaces.
@@ -53,26 +53,26 @@ export function statusWords(armCase: string): string {
  */
 export function statusCellWord(armCase: string, subCase?: string): string {
   if (subCase === undefined) return armCase === "starting" ? "loading" : statusWords(armCase);
-  return ELEVATED_STEP_WORDS[`${armCase}/${subCase}`] ?? statusWords(subCase);
+  return ELEVATED_STEP_WORDS.get(statusStepKey(armCase, subCase)) ?? statusWords(subCase);
 }
 
-/** The declared exceptions of statusCellWord, keyed `arm/step`. */
-const ELEVATED_STEP_WORDS: Readonly<Record<string, string>> = Object.freeze({
-  "closing/blocked": "close blocked",
-  "merging/awaitingFree": "waiting for",
-  "merging/preDeploy": "pre-deploy",
-  "merging/postDeploy": "post-deploy",
-  "mergeFailed/conflicts": "merge conflicts",
-  "mergeFailed/tests": "tests failed",
-  "mergeFailed/hook": "hook failed",
-  "mergeFailed/other": "merge failed",
-  "interrupted/byUser": "interrupted by user",
-  "loading/memory": "loading memory",
-  "loading/invoked": "loading skill",
-  "loading/discovered": "loading skills",
-  "loading/listing": "loading skill list",
-  "degraded/observation": "observation degraded",
-});
+/** The declared exceptions of statusCellWord, keyed by statusStepKey. */
+const ELEVATED_STEP_WORDS: ReadonlyMap<string, string> = new Map([
+  [statusStepKey("closing", "blocked"), "close blocked"],
+  [statusStepKey("merging", "awaitingFree"), "waiting for"],
+  [statusStepKey("merging", "preDeploy"), "pre-deploy"],
+  [statusStepKey("merging", "postDeploy"), "post-deploy"],
+  [statusStepKey("mergeFailed", "conflicts"), "merge conflicts"],
+  [statusStepKey("mergeFailed", "tests"), "tests failed"],
+  [statusStepKey("mergeFailed", "hook"), "hook failed"],
+  [statusStepKey("mergeFailed", "other"), "merge failed"],
+  [statusStepKey("interrupted", "byUser"), "interrupted by user"],
+  [statusStepKey("loading", "memory"), "loading memory"],
+  [statusStepKey("loading", "invoked"), "loading skill"],
+  [statusStepKey("loading", "discovered"), "loading skills"],
+  [statusStepKey("loading", "listing"), "loading skill list"],
+  [statusStepKey("degraded", "observation"), "observation degraded"],
+]);
 
 /** A composed line drawn verbatim, in its own classed span. */
 export function textLine(className: string, text: string): HTMLElement {

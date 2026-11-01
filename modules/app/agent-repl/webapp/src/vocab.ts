@@ -52,6 +52,15 @@ export function protoArmName(generatedCase: string): string {
   return generatedCase.replace(/[A-Z]/g, (ch) => `_${ch.toLowerCase()}`);
 }
 
+/**
+ * The key naming one step of one footer status arm, `arm/step`, both in the
+ * generated spelling. Every table keyed by a (status, step) pair is keyed
+ * through it, so the tables cannot disagree on the shape of a key.
+ */
+export function statusStepKey(armCase: string, stepCase: string): string {
+  return `${armCase}/${stepCase}`;
+}
+
 const ROSTER_STATUS: Readonly<Record<string, Color>> = renderColors.roster_status as Record<string, Color>;
 const FOOTER_STATUS: Readonly<Record<string, Color>> = renderColors.footer_status as Record<string, Color>;
 const TOPBAR_CONNECTIVITY: Readonly<Record<string, Color>> = renderColors.topbar_connectivity as Record<string, Color>;

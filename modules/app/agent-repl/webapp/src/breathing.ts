@@ -29,6 +29,7 @@
  * epoch mechanic (`AnimationEpoch`) for the same reason: the footer rebuilds
  * the nodes it paints out from under the animation.
  */
+import { statusStepKey } from "./vocab.js";
 
 /** Stops on the green → purple ramp. */
 export const BREATH_SHADES = 20;
@@ -250,16 +251,16 @@ export const WAVING_STATUS_ARMS: ReadonlySet<string> = new Set([
  * producing the reply.
  */
 export const STILL_STATUS_STEPS: ReadonlySet<string> = new Set([
-  "closing/blocked",
-  "merging/enqueued",
-  "merging/awaitingTurn",
-  "merging/awaitingFree",
-  "merging/waitingOnUser",
+  statusStepKey("closing", "blocked"),
+  statusStepKey("merging", "enqueued"),
+  statusStepKey("merging", "awaitingTurn"),
+  statusStepKey("merging", "awaitingFree"),
+  statusStepKey("merging", "waitingOnUser"),
 ]);
 
 /** Whether the status word of ARM, standing on STEP when it has one, waves. */
 export function statusWordWaves(armCase: string, stepCase?: string): boolean {
-  if (stepCase !== undefined && STILL_STATUS_STEPS.has(`${armCase}/${stepCase}`)) return false;
+  if (stepCase !== undefined && STILL_STATUS_STEPS.has(statusStepKey(armCase, stepCase))) return false;
   return WAVING_STATUS_ARMS.has(armCase);
 }
 
