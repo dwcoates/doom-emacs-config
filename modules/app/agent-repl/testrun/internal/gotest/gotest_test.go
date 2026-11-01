@@ -2,9 +2,6 @@ package gotest
 
 import (
 	"agentrepl/testrun/internal/testdir"
-	"go/ast"
-	"go/parser"
-	"go/token"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -13,43 +10,6 @@ import (
 	"strings"
 	"testing"
 )
-
-func TestIsTestFunc(t *testing.T) {
-	src := `package p
-
-import "testing"
-
-func TestA(t *testing.T)      {}
-func Test_b(t *testing.T)     {}
-func Testable(t *testing.T)   {}
-func TestMain(m *testing.M)   {}
-func TestNoParam()            {}
-func TestTwo(a, b *testing.T) {}
-func TestValue(t testing.T)   {}
-func FuzzF(f *testing.F)      {}
-`
-	f, err := parser.ParseFile(token.NewFileSet(), "p_test.go", src, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := map[string]bool{"TestA": true, "Test_b": true, "Testable": false, "TestMain": false, "TestNoParam": false, "TestTwo": false, "TestValue": false}
-	for _, d := range f.Decls {
-		fn, ok := d.(*ast.FuncDecl)
-		if !ok {
-			continue
-		}
-		name := fn.Name.Name
-		if name == "FuzzF" {
-			if !IsTestFunc(fn, "Fuzz", "F") || IsTestFunc(fn, "Test", "T") {
-				t.Errorf("FuzzF is a fuzz test and only that")
-			}
-			continue
-		}
-		if got := IsTestFunc(fn, "Test", "T"); got != want[name] {
-			t.Errorf("IsTestFunc(%s) = %t, want %t", name, got, want[name])
-		}
-	}
-}
 
 func TestTopPatternSelectsEveryNamedTopAndNoOther(t *testing.T) {
 	// Arrange

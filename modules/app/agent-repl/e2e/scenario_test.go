@@ -13,6 +13,8 @@ import (
 	"strings"
 	"testing"
 	"unicode"
+
+	"agentrepl/testrun/gofunc"
 )
 
 // A SCENARIO IS ONE TOP-LEVEL TEST WHOSE NAMED STEPS RUN IN ORDER.
@@ -126,35 +128,21 @@ func parseE2EPackage(t *testing.T) e2ePackage {
 			}
 			fname := fn.Name.Name
 			pkg.refs[fname] = append(pkg.refs[fname], namesIn(fn.Body)...)
-			if fn.Recv != nil || !takesOnlyT(fn) {
+			if fn.Recv != nil {
 				continue
 			}
 			switch {
-			case strings.HasPrefix(fname, "Test"):
+			case gofunc.IsTestFunc(fn, "Test", "T"):
 				pkg.tests[fname] = name
 				if steps, ok := scenarioSteps(fn); ok {
 					pkg.scenarios[fname] = steps
 				}
-			case strings.HasPrefix(fname, stepPrefix) && name != scenarioUnitFile:
+			case gofunc.IsTestFunc(fn, stepPrefix, "T") && name != scenarioUnitFile:
 				pkg.steps[fname] = name
 			}
 		}
 	}
 	return pkg
-}
-
-// takesOnlyT reports whether fn's one parameter is a *testing.T.
-func takesOnlyT(fn *ast.FuncDecl) bool {
-	params := fn.Type.Params.List
-	if len(params) != 1 || len(params[0].Names) > 1 {
-		return false
-	}
-	star, ok := params[0].Type.(*ast.StarExpr)
-	if !ok {
-		return false
-	}
-	sel, ok := star.X.(*ast.SelectorExpr)
-	return ok && sel.Sel.Name == "T"
 }
 
 // scenarioSteps is the steps a scenario's body lists, when its body is

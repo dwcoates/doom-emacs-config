@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 
+	"agentrepl/testrun/gofunc"
 	"agentrepl/testrun/internal/gotest"
 	"agentrepl/testrun/internal/run"
 	"agentrepl/testrun/internal/testtimes"
@@ -251,7 +252,7 @@ func GoTopLevelTestsTagged(dir, tags string) ([]string, error) {
 				if !ok || fn.Recv != nil {
 					continue
 				}
-				if gotest.IsTestFunc(fn, "Test", "T") || gotest.IsTestFunc(fn, "Fuzz", "F") {
+				if gofunc.IsTestFunc(fn, "Test", "T") || gofunc.IsTestFunc(fn, "Fuzz", "F") {
 					tests = append(tests, fn.Name.Name)
 				}
 			}
