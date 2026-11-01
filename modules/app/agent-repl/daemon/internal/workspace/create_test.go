@@ -2970,3 +2970,74 @@ func TestCreateFailsBeforeMaterializingWhenTheParentsForkPointCannotBeLearned(t 
 		t.Fatalf("worktrees %v registrations %v, want nothing made", f.git.created, f.db.registered)
 	}
 }
+
+// ---- a create that fails after its worktree exists leaves nothing behind ----
+
+func TestCreateThatFailsAfterMaterializingLeavesNothingBehind(t *testing.T) {
+	cases := []struct {
+		name       string
+		arrange    func(f *fixture)
+		registered bool
+	}{
+		{name: "the registration fails", arrange: func(f *fixture) { f.db.registerErr = errFake }, registered: false},
+		{name: "the session does not come up", arrange: func(f *fixture) { f.fleet.startErr = errors.New("the fork could not be made") }, registered: true},
+		{name: "the queue refuses the initial prompt", arrange: func(f *fixture) { f.queue.submitErr = errors.New("the queue is closed") }, registered: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			spec := standardSpec(t, f)
+			tc.arrange(f)
+
+			// Act.
+			_, err := f.verbs.Create(context.Background(), spec)
+
+			// Assert: the failure is surfaced, and its worktree, branch and
+			// registration are gone.
+			if err == nil {
+				t.Fatal("Create() = nil error, want the failure surfaced")
+			}
+			if len(f.git.created) != 1 {
+				t.Fatalf("worktrees created = %v, want the one the create made", f.git.created)
+			}
+			made := f.git.created[0]
+			if !slices.Equal(f.git.nuked, []nukedWorktree{{made.RepoDir, made.WorktreeDir, made.Branch}}) {
+				t.Fatalf("nuked = %v, want the created worktree and branch destroyed", f.git.nuked)
+			}
+			if got := len(f.db.forgotten); got != map[bool]int{true: 1, false: 0}[tc.registered] {
+				t.Fatalf("forgotten = %v, want the registration forgotten only when one was made", f.db.forgotten)
+			}
+			record, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Message: "undid the failed create: its worktree, branch and registration are gone"})
+			if !ok {
+				t.Fatalf("records = %+v, want the undo recorded", f.log.logger.Records())
+			}
+			if record.Context["branch"] != made.Branch || record.Context["registered"] != tc.registered || record.Context["cause"] != err.Error() {
+				t.Errorf("context = %v, want the branch, whether it was registered and the cause", record.Context)
+			}
+		})
+	}
+}
+
+func TestCreateWhoseUndoFailsSurfacesBothFailures(t *testing.T) {
+	// Arrange: the session does not come up, and git will not destroy the worktree.
+	f := newFixture(t)
+	spec := standardSpec(t, f)
+	f.fleet.startErr = errors.New("the shim died during bring-up")
+	f.git.nukeErr = errors.New("worktree locked")
+
+	// Act.
+	_, err := f.verbs.Create(context.Background(), spec)
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "the shim died during bring-up") || !strings.Contains(err.Error(), "undo the failed create") {
+		t.Fatalf("Create = %v, want the failure joined with the undo's", err)
+	}
+	record, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelError, Message: "the failed create could not be undone; its worktree or branch remains"})
+	if !ok {
+		t.Fatalf("records = %+v, want the failed undo recorded at error", f.log.logger.Records())
+	}
+	if record.Context["undo_cause"] == nil || record.Context["worktree_dir"] != f.git.created[0].WorktreeDir {
+		t.Errorf("context = %v, want the undo's cause and the worktree left", record.Context)
+	}
+}

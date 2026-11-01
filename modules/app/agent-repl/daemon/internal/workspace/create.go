@@ -83,7 +83,7 @@ func reportCreateStage(spec CreateSpec, stage CreateStage) {
 	}
 }
 
-func (v *verbs) create(ctx context.Context, spec CreateSpec) (wsm.Workspace, error) {
+func (v *verbs) create(ctx context.Context, spec CreateSpec) (_ wsm.Workspace, err error) {
 	global := v.deps.Log.Global().With(dlog.Context{"repo_dir": spec.RepoDir, "one_shot": spec.OneShot})
 
 	if err := v.validateCreate(global, spec); err != nil {
@@ -367,6 +367,17 @@ func (v *verbs) create(ctx context.Context, spec CreateSpec) (wsm.Workspace, err
 		"duration_ms": v.now().Sub(materializing).Milliseconds(),
 	})
 
+	// A CREATE THAT FAILS FROM HERE ON LEAVES NOTHING BEHIND: no worktree, no
+	// branch and, once registered, no registration (unmaterialize). A failed
+	// create is reported as failed, so a worktree it left would be a
+	// workspace nobody asked for and nothing would ever finish.
+	var made *wsm.Workspace
+	defer func() {
+		if err != nil {
+			err = v.unmaterialize(context.WithoutCancel(ctx), global, err, repoDir, worktreeDir, branch, made)
+		}
+	}()
+
 	// THE WORKTREE EXISTS; everything from here to the terminal outcome —
 	// registration, a fork's record, the session bring-up and the
 	// initial prompt's submission (steps 5-7) — is the session stage. Reported
@@ -393,6 +404,7 @@ func (v *verbs) create(ctx context.Context, spec CreateSpec) (wsm.Workspace, err
 	if err != nil {
 		return wsm.Workspace{}, fmt.Errorf("create %q: register: %w", branch, err)
 	}
+	made = &record
 
 	job.Workspace = record.ID
 	job.Materialized = true
@@ -489,6 +501,31 @@ func (v *verbs) create(ctx context.Context, spec CreateSpec) (wsm.Workspace, err
 	v.republishRegistry(ctx, log, opCreate)
 	v.deps.Derived.ReportCreated(record, spec.OwnerNotice)
 	return record, nil
+}
+
+// unmaterialize undoes a create that failed with CAUSE after its worktree was
+// made: a REGISTERED workspace is nuked (its session killed, its worktree and
+// branch destroyed, its record forgotten), and one that never registered has
+// its worktree and branch destroyed. It answers CAUSE when the undo succeeded,
+// and CAUSE joined with the undo's failure when it did not.
+func (v *verbs) unmaterialize(ctx context.Context, log dlog.Logger, cause error, repoDir, worktreeDir, branch string, registered *wsm.Workspace) error {
+	fields := dlog.Context{
+		"branch": branch, "worktree_dir": worktreeDir, "registered": registered != nil, "cause": cause.Error(),
+	}
+	var undo error
+	if registered != nil {
+		fields["workspace"] = string(registered.ID)
+		undo = v.nuke(ctx, log, *registered)
+	} else {
+		undo = v.deps.Git.Nuke(ctx, repoDir, worktreeDir, branch)
+	}
+	if undo != nil {
+		fields["undo_cause"] = undo.Error()
+		log.Error(opCreate, "the failed create could not be undone; its worktree or branch remains", fields)
+		return errors.Join(cause, fmt.Errorf("create %q: undo the failed create: %w", branch, undo))
+	}
+	log.Info(opCreate, "undid the failed create: its worktree, branch and registration are gone", fields)
+	return cause
 }
 
 // mintedPermissionMode is the mode the new session's row carries: what the

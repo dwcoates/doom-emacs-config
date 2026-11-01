@@ -594,7 +594,7 @@ func (d *fakeDB) RegisterWorkspace(_ context.Context, dir string, facts wsm.Regi
 		return existing, false, nil
 	}
 	ws := wsm.Workspace{
-		ID: ids.WorkspaceID("ws-" + filepath.Base(dir)), Dir: dir, Repo: d.repoFor(dir, facts),
+		ID: ids.WorkspaceID("ws-" + filepath.Base(dir)), Kind: wsm.WorkspaceKindRepository, Dir: dir, Repo: d.repoFor(dir, facts),
 		Name: facts.Name, Branch: facts.Branch, ParentBranch: facts.ParentBranch,
 		Parent: facts.Parent, Priority: facts.Priority,
 	}
