@@ -626,6 +626,12 @@ The one-shot\='s context workspace is not in the daemon\='s registry."
 \(:workspace REF).  The fork source workspace has no conversation to copy."
   (agent-repl-wire-verbs--decode-ref-arm "CreateWorkspaceForkSourceHasNoConversation" 'workspace json))
 
+(defun agent-repl-wire-decode-create-workspace-fork-source-has-no-finished-turn (json)
+  "Decode CreateWorkspaceForkSourceHasNoFinishedTurn from JSON into
+\(:workspace REF).  The fork source workspace is still in its
+conversation\='s first turn, so a fork of it would carry nothing."
+  (agent-repl-wire-verbs--decode-ref-arm "CreateWorkspaceForkSourceHasNoFinishedTurn" 'workspace json))
+
 (defun agent-repl-wire-decode-create-workspace-name-reserved (json)
   "Decode CreateWorkspaceNameReserved from JSON into (:branch BRANCH).
 The supplied name is reserved by a requested async merge whose merge
@@ -691,6 +697,10 @@ not a prefix."
 (defun agent-repl-wire-decode-create-workspace-error-fork-source-has-no-conversation (json)
   "Decode CreateWorkspaceError's `fork_source_has_no_conversation' cause arm."
   (agent-repl-wire-decode-create-workspace-fork-source-has-no-conversation json))
+
+(defun agent-repl-wire-decode-create-workspace-error-fork-source-has-no-finished-turn (json)
+  "Decode CreateWorkspaceError's `fork_source_has_no_finished_turn' cause arm."
+  (agent-repl-wire-decode-create-workspace-fork-source-has-no-finished-turn json))
 
 (defun agent-repl-wire-decode-create-workspace-worktree-creation-failed (json)
   "Decode CreateWorkspaceWorktreeCreationFailed from JSON into a plist
@@ -817,7 +827,7 @@ not decoded: an async merge, a create cut from origin and a create naming
 a landing target are an agent\='s requests, never the editor\='s, so one
 answering an editor create is a breach."
   (let ((message "CreateWorkspaceError"))
-    (agent-repl-wire-verbs--check-keys message json '(ungatedWithoutConsent noSlug briefMissing unknownRepository worktreeCreationFailed spawnFailed oneShotPolicyMissing namingFailed insideTemporaryDirectory unknownForkSource forkSourceHasNoConversation nameReserved nameHeld invalidName unknownContextWorkspace unknownOwner ownerNoticeRequired ownerNoticeUnexpected unknownRequester parentNotOpen transferringAway standingDown))
+    (agent-repl-wire-verbs--check-keys message json '(ungatedWithoutConsent noSlug briefMissing unknownRepository worktreeCreationFailed spawnFailed oneShotPolicyMissing namingFailed insideTemporaryDirectory unknownForkSource forkSourceHasNoConversation forkSourceHasNoFinishedTurn nameReserved nameHeld invalidName unknownContextWorkspace unknownOwner ownerNoticeRequired ownerNoticeUnexpected unknownRequester parentNotOpen transferringAway standingDown))
     (list :cause
           (agent-repl-wire-verbs--decode-oneof
            message "cause" json
@@ -832,6 +842,7 @@ answering an editor create is a breach."
          (list 'insideTemporaryDirectory :inside-temporary-directory #'agent-repl-wire-decode-create-workspace-error-inside-temporary-directory)
          (list 'unknownForkSource :unknown-fork-source #'agent-repl-wire-decode-create-workspace-error-unknown-fork-source)
          (list 'forkSourceHasNoConversation :fork-source-has-no-conversation #'agent-repl-wire-decode-create-workspace-error-fork-source-has-no-conversation)
+         (list 'forkSourceHasNoFinishedTurn :fork-source-has-no-finished-turn #'agent-repl-wire-decode-create-workspace-error-fork-source-has-no-finished-turn)
          (list 'nameReserved :name-reserved #'agent-repl-wire-decode-create-workspace-error-name-reserved)
          (list 'nameHeld :name-held #'agent-repl-wire-decode-create-workspace-error-name-held)
          (list 'invalidName :invalid-name #'agent-repl-wire-decode-create-workspace-error-invalid-name)

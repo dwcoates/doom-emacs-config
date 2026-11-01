@@ -140,6 +140,10 @@ const (
 	// ArmForkSourceHasNoConversation is a fork into the primary branch whose
 	// source never had a conversation.
 	ArmForkSourceHasNoConversation = "fork_source_has_no_conversation"
+	// ArmForkSourceHasNoFinishedTurn is a fork whose source is still in its
+	// conversation's first turn: a fork carries only finished turns, so it
+	// would carry nothing (ErrForkNothingFinished).
+	ArmForkSourceHasNoFinishedTurn = "fork_source_has_no_finished_turn"
 	// ArmSessionDeleted is a bring-up of a session whose record is terminal by
 	// deletion: a deleted session refuses resurrection.
 	ArmSessionDeleted = "session_deleted"

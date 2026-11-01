@@ -2240,7 +2240,7 @@ and the temporary root it carries."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_create_workspace.pb.go" "CreateWorkspaceError")
                        #'string<)
-                 (sort (list "ungatedWithoutConsent" "noSlug" "briefMissing" "unknownRepository" "worktreeCreationFailed" "spawnFailed" "oneShotPolicyMissing" "namingFailed" "insideTemporaryDirectory" "unknownForkSource" "forkSourceHasNoConversation" "nameReserved" "nameHeld" "invalidName" "unknownContextWorkspace" "unknownOwner" "ownerNoticeRequired" "ownerNoticeUnexpected" "unknownRequester" "asyncMergeUnknownBranch" "asyncMergeBranchOwned" "asyncMergeUnknownSubagent" "asyncMergeUnknownMaker" "asyncMergeContextNotMaker" "asyncMergeNameTaken" "asyncMergeUnknownCloseAfter" "opIdWithAsyncMerge" "versionIncrementRequired" "versionIncrementUnexpected" "asyncMergeRequesterQueued" "asyncMergeRequesterMerging" "asyncMergeRequesterSessionDeleted" "parentNotOpen" "originFetchFailed" "asyncMergeNoDeployConfig" "asyncMergeDeployConfigInvalid" "transferringAway" "standingDown" "placementBehindNotInLine" "unknownLandingTarget")
+                 (sort (list "ungatedWithoutConsent" "noSlug" "briefMissing" "unknownRepository" "worktreeCreationFailed" "spawnFailed" "oneShotPolicyMissing" "namingFailed" "insideTemporaryDirectory" "unknownForkSource" "forkSourceHasNoConversation" "forkSourceHasNoFinishedTurn" "nameReserved" "nameHeld" "invalidName" "unknownContextWorkspace" "unknownOwner" "ownerNoticeRequired" "ownerNoticeUnexpected" "unknownRequester" "asyncMergeUnknownBranch" "asyncMergeBranchOwned" "asyncMergeUnknownSubagent" "asyncMergeUnknownMaker" "asyncMergeContextNotMaker" "asyncMergeNameTaken" "asyncMergeUnknownCloseAfter" "opIdWithAsyncMerge" "versionIncrementRequired" "versionIncrementUnexpected" "asyncMergeRequesterQueued" "asyncMergeRequesterMerging" "asyncMergeRequesterSessionDeleted" "parentNotOpen" "originFetchFailed" "asyncMergeNoDeployConfig" "asyncMergeDeployConfigInvalid" "transferringAway" "standingDown" "placementBehindNotInLine" "unknownLandingTarget")
                        #'string<))))
 
 (ert-deftest agent-repl-test-wire-verbs-create-error-unknown-fork-source-arm ()
@@ -2269,6 +2269,16 @@ ref it names."
                     (agent-repl-test-wire-verbs--parse
                      "{\"forkSourceHasNoConversation\":{\"workspace\":{\"id\":\"ws-2\",\"dir\":\"/w/two\"}}}"))
                    '(:cause (:arm :fork-source-has-no-conversation
+                             :value (:workspace (:id "ws-2" :dir "/w/two"))))))))
+
+(ert-deftest agent-repl-test-wire-verbs-create-error-fork-source-has-no-finished-turn-arm ()
+  "CreateWorkspaceError's `fork_source_has_no_finished_turn' arm decodes the
+ref it names."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-create-workspace-error
+                    (agent-repl-test-wire-verbs--parse
+                     "{\"forkSourceHasNoFinishedTurn\":{\"workspace\":{\"id\":\"ws-2\",\"dir\":\"/w/two\"}}}"))
+                   '(:cause (:arm :fork-source-has-no-finished-turn
                              :value (:workspace (:id "ws-2" :dir "/w/two"))))))))
 
 (ert-deftest agent-repl-test-wire-verbs-create-error-unknown-owner-arm ()
@@ -6357,6 +6367,7 @@ instead diverges from it unseen."
   (dolist (fn '(agent-repl-wire-decode-create-workspace-unknown-fork-source
                 agent-repl-wire-decode-create-workspace-unknown-context-workspace
                 agent-repl-wire-decode-create-workspace-fork-source-has-no-conversation
+                agent-repl-wire-decode-create-workspace-fork-source-has-no-finished-turn
                 agent-repl-wire-decode-create-workspace-error-unknown-owner
                 agent-repl-wire-decode-create-workspace-error-unknown-requester
                 agent-repl-wire-decode-finish-workspace-error-owner-lands))

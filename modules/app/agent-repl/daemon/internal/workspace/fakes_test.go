@@ -2394,6 +2394,10 @@ type fakeSessions struct {
 	// is the refusal it answers with instead.
 	resumes   []ColdResume
 	resumeErr error
+	// forkProbeErr is what ProbeForkPoint answers for every parent, and
+	// forkProbed the parents it was asked about, in order.
+	forkProbeErr error
+	forkProbed   []ids.WorkspaceID
 	// resumePhases are the compaction phases this fake relays back through
 	// ColdResume.OnPhase, in order, standing in for the shim's own stream.
 	resumePhases []*conversationv1.SessionCompactionProgress
@@ -2537,6 +2541,11 @@ func (s *fakeSessions) StandingDown() bool { return s.standingDown }
 
 // Held answers a live session's shim, or a shim held with no session (held).
 func (s *fakeSessions) Held(ws ids.WorkspaceID) bool { return s.live[ws] || s.held[ws] }
+
+func (s *fakeSessions) ProbeForkPoint(_ context.Context, _ dlog.Logger, parent ids.WorkspaceID) error {
+	s.forkProbed = append(s.forkProbed, parent)
+	return s.forkProbeErr
+}
 
 func (s *fakeSessions) ResumeCold(_ context.Context, ws ids.WorkspaceID, resume ColdResume) error {
 	// The observer runs BEFORE anything else this fake does, which is what

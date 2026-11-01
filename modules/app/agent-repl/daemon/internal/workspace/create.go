@@ -777,6 +777,20 @@ func (v *verbs) forkableParentSession(ctx context.Context, log dlog.Logger, pare
 			fmt.Sprintf("workspace %q has no conversation to fork", parent), false,
 			map[string]any{"workspace": &workspacev1.WorkspaceRef{Id: string(parent)}})
 	}
+	// A FORK CARRIES ONLY FINISHED TURNS, so a parent still in its
+	// conversation's first turn has nothing to give: refused here, by the
+	// parent's shim's own account, before a worktree exists for a fork the
+	// child's shim would refuse at its bring-up.
+	if err := v.deps.Sessions.ProbeForkPoint(ctx, log, parent); err != nil {
+		if errors.Is(err, ErrForkNothingFinished) {
+			return wsm.Session{}, refuseWith(log, "CreateWorkspace", ArmForkSourceHasNoFinishedTurn,
+				fmt.Sprintf("workspace %q is still in its conversation's first turn, and a fork carries only finished turns, so this fork would carry nothing: "+
+					"create the workspace with a fresh context and put what it must know in the initial prompt, or fork once that turn has ended", parent), false,
+				map[string]any{"workspace": &workspacev1.WorkspaceRef{Id: string(parent)}})
+		}
+		// forkPoint recorded why at ERROR, where the parent's shim answered.
+		return wsm.Session{}, fmt.Errorf("fork from %q: %w", parent, err)
+	}
 	return parentConv.session, nil
 }
 

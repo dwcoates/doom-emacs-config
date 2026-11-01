@@ -1086,6 +1086,10 @@ type Sessions interface {
 	StartRebound(ctx context.Context, ws ids.WorkspaceID) error
 	// Stop ends a workspace's session, forced or graceful.
 	Stop(ctx context.Context, ws ids.WorkspaceID, force bool) error
+	// ProbeForkPoint answers whether a fork of PARENT taken now could be
+	// made (Fleet.ProbeForkPoint): nil, or why not, ErrForkNothingFinished
+	// for a parent still in its conversation's first turn.
+	ProbeForkPoint(ctx context.Context, log dlog.Logger, parent ids.WorkspaceID) error
 	// StandingDown reports whether this daemon has begun standing down, when
 	// it starts no session (shimclient.ErrStandingDown). A caller that answers
 	// before its start runs reads it to refuse up front.

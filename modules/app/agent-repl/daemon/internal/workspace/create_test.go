@@ -3,6 +3,7 @@ package workspace
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -2920,5 +2921,52 @@ func TestCreateRefusesALandingTargetThatIsNotOpen(t *testing.T) {
 	}
 	if !slices.Contains(f.db.openParentAsked, other.ID) || len(f.git.created) != 0 {
 		t.Fatalf("asked %v, worktrees %v; want the landing target asked and nothing built", f.db.openParentAsked, f.git.created)
+	}
+}
+
+// ---- a fork of a parent in its first turn is refused before anything is made ----
+
+func TestCreateRefusesAForkOfAParentStillInItsFirstTurn(t *testing.T) {
+	// Arrange: the parent's shim answers that its turn in flight is its first.
+	f, parent, spec := forkFixture(t, nil)
+	f.fleet.forkProbeErr = fmt.Errorf("%w: %w: the turn-opening record r1 is the parent's first", ErrForkRefused, ErrForkNothingFinished)
+
+	// Act.
+	_, err := f.verbs.Create(context.Background(), spec)
+
+	// Assert: the typed refusal names the parent, and nothing was made for it.
+	refusal := asRefusal(t, err, ArmForkSourceHasNoFinishedTurn)
+	if !strings.Contains(refusal.Error(), "fresh context") {
+		t.Errorf("refusal = %q, want it to tell the caller to use a fresh context", refusal.Error())
+	}
+	if !slices.Equal(f.fleet.forkProbed, []ids.WorkspaceID{parent}) {
+		t.Errorf("fork points probed = %v, want the parent's", f.fleet.forkProbed)
+	}
+	if len(f.git.created) != 0 || len(f.db.registered) != 0 || len(f.db.pendingForks) != 0 {
+		t.Fatalf("worktrees %v registrations %v pending forks %v, want nothing made", f.git.created, f.db.registered, f.db.pendingForks)
+	}
+	if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: opRefusal}); !ok {
+		t.Fatalf("records = %+v, want the refusal recorded at info", f.log.logger.Records())
+	}
+}
+
+func TestCreateFailsBeforeMaterializingWhenTheParentsForkPointCannotBeLearned(t *testing.T) {
+	// Arrange: the parent's shim cannot be asked.
+	f, _, spec := forkFixture(t, nil)
+	cause := fmt.Errorf("%w: ask the parent's shim for the fork point: socket closed", ErrForkRefused)
+	f.fleet.forkProbeErr = cause
+
+	// Act.
+	_, err := f.verbs.Create(context.Background(), spec)
+
+	// Assert.
+	if !errors.Is(err, ErrForkRefused) {
+		t.Fatalf("Create = %v, want the probe's failure", err)
+	}
+	if _, refused := AsRefusal(err); refused {
+		t.Fatalf("Create = %v, want a failure, not a refusal", err)
+	}
+	if len(f.git.created) != 0 || len(f.db.registered) != 0 {
+		t.Fatalf("worktrees %v registrations %v, want nothing made", f.git.created, f.db.registered)
 	}
 }
