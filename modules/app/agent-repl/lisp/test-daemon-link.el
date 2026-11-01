@@ -1880,6 +1880,20 @@ Returns the pending successor connection."
         (should-not (agent-repl-connect-connection-alive-p pending))
         (should (null agent-repl-link--reconnect-timer))))))
 
+(ert-deftest agent-repl-test-link-successor-dialed-while-down-drops-the-bounce-window ()
+  "A link that stands again says no restart is being waited out."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((successor (agent-repl-test-link--down-then-dial)))
+      (setq agent-repl-link--quiet-until-ms (+ (agent-repl--now-unix-ms) 60000)
+            agent-repl-link--bounce-cause (list :arm :self-merge-rollout :value nil))
+      ;; Act
+      (agent-repl-test-link--accept successor)
+      ;; Assert
+      (should (null agent-repl-link--quiet-until-ms))
+      (should (null agent-repl-link--bounce-cause))
+      (should (null agent-repl-link-drain-segment)))))
+
 (ert-deftest agent-repl-test-link-primary-ends-go-down-through-one-helper ()
   "Every primary end with no successor to promote takes the link down
 through `agent-repl-link--primary-ended-down', so the planned and the lost

@@ -923,6 +923,8 @@ transport it left awaiting acceptance are retired: one link, never two."
           agent-repl-link--pending-stream nil
           agent-repl-link--pending-reconnect-p nil)
     (agent-repl-link--cancel-reconnect)
+    (setq agent-repl-link--quiet-until-ms nil
+          agent-repl-link--bounce-cause nil)
     (when pending (agent-repl-connect-close pending))
     (agent-repl-link--refresh-indicator)
     (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.successor-became-link address=%S retired-pending=%S"
