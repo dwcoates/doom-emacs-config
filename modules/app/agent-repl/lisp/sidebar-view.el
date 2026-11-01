@@ -51,6 +51,8 @@
 (declare-function agent-repl--webview-answered "webhost" (raw prefix scope-of central predates))
 (declare-function agent-repl--webview-script "webhost" (global pending method args))
 (declare-function agent-repl--webview-on-commit "webhost" (status own-url uri take-back replay))
+(declare-function agent-repl--webview-on-finish "webhost" (status own-url uri xw global callback))
+(declare-function agent-repl--webview-record-boot "webhost" (scope view raw))
 (declare-function agent-repl--webview-make-hidden "webhost" (url name refuse-kill kill what))
 (declare-function agent-repl--webview-call-prior "webhost" (xwidget event-type))
 (declare-function agent-repl--webview-watch-load "webhost" (xw callback))
@@ -174,6 +176,7 @@ INSTALLED BY NAME, never as a closure, so a hot reload reaches it (see
 
 (defun agent-repl--sidebar-view-on-load (event-type)
   "Replay the desired state when the sidebar's EVENT-TYPE commits a load.
+At the load's finish the sidebar's boot is read (`agent-repl--webview-on-finish').
 One replay per document, at `load-committed', as the host replays
 \(`agent-repl--webhost-on-load').  A load that strayed off the sidebar's own
 origin is taken back instead."
@@ -183,7 +186,14 @@ origin is taken back instead."
       (agent-repl--info agent-repl--sidebar-view-central "elisp.sidebar-view.load-changed status=%s" status)
       (agent-repl--webview-on-commit status agent-repl--sidebar-view-url uri
                                      #'agent-repl--sidebar-view-take-back
-                                     #'agent-repl--sidebar-view-replay))))
+                                     #'agent-repl--sidebar-view-replay)
+      (agent-repl--webview-on-finish status agent-repl--sidebar-view-url uri (agent-repl-sidebar-view-xwidget)
+                                     "agentReplSidebar" 'agent-repl--sidebar-view-on-boot))))
+
+(defun agent-repl--sidebar-view-on-boot (raw)
+  "Record the sidebar's RAW boot answer (`agent-repl--webview-record-boot').
+Called BY SYMBOL from the read channel (`agent-repl--frontend-webview-read-script')."
+  (agent-repl--webview-record-boot agent-repl--sidebar-view-central "sidebar" raw))
 
 (defun agent-repl--sidebar-view-take-back (uri)
   "Navigate the sidebar, which strayed to URI, back to its own page.

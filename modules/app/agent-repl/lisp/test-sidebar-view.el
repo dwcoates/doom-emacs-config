@@ -222,6 +222,29 @@ Binds `records' to every central log record, as (LEVEL . TEXT), newest first."
     (agent-repl-test-sv--load "load-started" "http://host.localhost:1/?sidebar=1")
     (should-not agent-repl-test-sv--calls)))
 
+(ert-deftest agent-repl-test-sv-a-finished-load-reads-the-sidebars-boot ()
+  "At the sidebar's load-finished its boot is asked for, answered by symbol."
+  (agent-repl-test-sv--with-sidebar
+    (agent-repl-test-sv--load "load-finished" "http://host.localhost:1/?sidebar=1")
+    (should (equal agent-repl-test-sv--calls
+                   (list (cons (agent-repl--webview-boot-script "agentReplSidebar")
+                               'agent-repl--sidebar-view-on-boot))))))
+
+(ert-deftest agent-repl-test-sv-a-strayed-finish-reads-no-boot ()
+  "A site the sidebar strayed to is not its page, so it has no boot to read."
+  (agent-repl-test-sv--with-sidebar
+    (cl-letf (((symbol-function 'agent-repl--frontend-webview-navigate-widget) #'ignore))
+      (agent-repl-test-sv--load "load-finished" "https://example.com/"))
+    (should-not agent-repl-test-sv--calls)))
+
+(ert-deftest agent-repl-test-sv-a-boot-that-threw-is-recorded-at-error-as-the-sidebars ()
+  "The sidebar's boot errors are recorded at ERROR, naming the sidebar's view."
+  (agent-repl-test-sv--with-sidebar
+    (let (errors)
+      (cl-letf (((symbol-function 'agent-repl--error) (agent-repl-test--record-into errors)))
+        (agent-repl--sidebar-view-on-boot "{\"started\":false,\"hooked\":true,\"errors\":[\"error: boom\"]}"))
+      (should (equal errors '("elisp.webview.boot-errors view=sidebar started=nil errors=(\"error: boom\")"))))))
+
 (ert-deftest agent-repl-test-sv-the-blank-document-replays-nothing ()
   "WebKit's about:blank ahead of the first navigation is not the page."
   (agent-repl-test-sv--with-sidebar

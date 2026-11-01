@@ -23,3 +23,10 @@ export function shellHTML(): string {
   // fetch and run the application under test.
   return body.replace(/<script\b[\s\S]*?<\/script>/g, "");
 }
+
+/** The page's error hook from `index.html`: the inline script Emacs reads the earliest errors through. */
+export function pageErrorHookScript(): string {
+  const found = /<script data-agent-repl="page-errors">([\s\S]*?)<\/script>/.exec(indexHTML);
+  if (found === null) throw new Error('index.html has no <script data-agent-repl="page-errors">');
+  return found[1];
+}

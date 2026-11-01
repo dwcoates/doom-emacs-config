@@ -209,6 +209,7 @@ kills its buffers would otherwise take every workspace's page with it."
 
 (defun agent-repl--webhost-on-load (event-type)
   "Replay the desired state when the host's EVENT-TYPE is `load-changed'.
+At the load's finish the host's boot is read (`agent-repl--webview-on-finish').
 ONE REPLAY PER DOCUMENT, when it is committed.  A navigation reports
 `load-started', `load-committed' and `load-finished' (and a redirect),
 and a replay at each ran it three times per load (2026-10-17).  A call
@@ -228,7 +229,10 @@ reads it, so it is read here off `last-input-event' rather than passed."
        (lambda ()
          ;; From here on every answer is the new document's.
          (setq agent-repl--webhost-predates-reload-pending nil)
-         (agent-repl--webhost-replay))))))
+         (agent-repl--webhost-replay)))
+      (agent-repl--webview-on-finish
+       status agent-repl--webhost-url (agent-repl--webhost-current-uri) (agent-repl-webhost-xwidget)
+       "agentReplHost" 'agent-repl--webhost-on-boot))))
 
 (defun agent-repl--webview-on-commit (status own-url uri take-back replay)
   "Act on one load stage STATUS of a web view loaded at OWN-URL, now showing URI.
@@ -242,6 +246,59 @@ other stage does nothing."
     (if-let ((strayed (agent-repl--webview-strayed-uri own-url uri)))
         (funcall take-back strayed)
       (funcall replay))))
+
+(defun agent-repl--webview-boot-script (global)
+  "The script answering whether the page that defines GLOBAL started, and its earliest errors.
+GLOBAL names the object the page hands Emacs once it has started
+\(`agentReplHost', `agentReplSidebar').  `hooked' is false for a page from
+a build before the error hook (webapp/index.html), which has kept none."
+  (format (concat "JSON.stringify({started:!!window.%s,"
+                  "hooked:Array.isArray(window.__agentReplPageErrors),"
+                  "errors:Array.isArray(window.__agentReplPageErrors)?window.__agentReplPageErrors:[]})")
+          global))
+
+(defun agent-repl--webview-on-finish (status own-url uri xw global callback)
+  "Read the boot of the page XW finished loading at URI, when it is its own.
+At STATUS `load-finished' of the view's own page (not WebKit's blank
+document, not a site off OWN-URL's origin) the page is asked whether it
+started, as GLOBAL says, and what it threw (`agent-repl--webview-boot-script');
+the answer goes to CALLBACK, a symbol (the read channel's crash invariant).
+Every other stage does nothing.
+
+THE BOOT IS READ AT THE LOAD, from Emacs's side.  Each document records its
+own boot through its logger (webapp/src/host/boot.ts), but a page whose
+entry never ran (a chunk that failed to load, or threw while it was
+evaluated) has no logger: on 2026-11-01 every host page threw before its
+first line with nothing recorded anywhere.  Its earliest errors are kept on
+the page (webapp/index.html) and read here."
+  (when (and xw
+             (equal status "load-finished")
+             (not (agent-repl--webhost-blank-uri-p uri))
+             (not (agent-repl--webview-strayed-uri own-url uri)))
+    (agent-repl--frontend-webview-execute-script-value xw (agent-repl--webview-boot-script global) callback)))
+
+(defun agent-repl--webview-record-boot (scope view raw)
+  "Record VIEW's RAW answer to `agent-repl--webview-boot-script' under SCOPE.
+An error the page kept is an ERROR, naming every one: a page that threw
+while booting is a defect.  Otherwise whether the page has started is
+recorded at INFO: its code arrives by a dynamic import, which can settle
+after the load, and its own records say how it went from there.  VIEW
+names the web view in the record (`host', `sidebar')."
+  (condition-case err
+      (let* ((state (agent-repl-webhost-parse-answer raw))
+             (errors (plist-get state :errors)))
+        (if errors
+            (agent-repl--error scope "elisp.webview.boot-errors view=%s started=%s errors=%S"
+                               view (plist-get state :started) errors)
+          (agent-repl--info scope "elisp.webview.boot-state view=%s started=%s hooked=%s"
+                            view (plist-get state :started) (plist-get state :hooked))))
+    (error
+     (agent-repl--error scope "elisp.webview.boot-unreadable view=%s raw=%S error=%S" view raw err))))
+
+(defun agent-repl--webhost-on-boot (raw)
+  "Record the host's RAW boot answer (`agent-repl--webview-record-boot').
+Called BY SYMBOL from the read channel (`agent-repl--frontend-webview-read-script')."
+  (agent-repl--webview-record-boot agent-repl--webhost-central "host" raw))
 
 (defun agent-repl--webhost-blank-uri-p (uri)
   "Return non-nil when URI is the blank document a web view holds before a load.

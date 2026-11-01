@@ -282,6 +282,12 @@ which restores a known prior handler rather than keeping the current one."
   (should (= 1 (agent-repl-test-wh--count-in-source "sidebar-view.el" "(agent-repl--webview-on-commit status")))
   (should (= 0 (agent-repl-test-wh--count-in-source "sidebar-view.el" "\"load-committed\""))))
 
+(ert-deftest agent-repl-test-wh-both-views-read-their-boot-through-the-shared-helper ()
+  "The host and the sidebar read a finished load's boot through the one helper."
+  (should (= 1 (agent-repl-test-wh--count-in-source "webhost.el" "(agent-repl--webview-on-finish\n")))
+  (should (= 1 (agent-repl-test-wh--count-in-source "sidebar-view.el" "(agent-repl--webview-on-finish status")))
+  (should (= 0 (agent-repl-test-wh--count-in-source "sidebar-view.el" "\"load-finished\""))))
+
 (defmacro agent-repl-test-wh--with-made-view (live &rest body)
   "Run BODY with web view creation stubbed: a fresh buffer, an xwidget when LIVE.
 Binds `killed' to the buffers the kill function was handed."
@@ -1486,6 +1492,108 @@ The current tab's page, not shown here, is the nearest of all."
           (funcall (plist-get props 'callback) 'host-xwidget 'load-changed))))
     ;; Assert
     (should (= 1 (length (agent-repl-test-wh--sent "ensure"))))))
+
+;;;; ---- The boot, read at the load ----
+
+(defun agent-repl-test-wh--boot-reads ()
+  "The boot reads sent, each as (SCRIPT . CALLBACK), oldest first."
+  (seq-filter (lambda (call) (equal (car call) (agent-repl--webview-boot-script "agentReplHost")))
+              (reverse agent-repl-test-wh--calls)))
+
+(ert-deftest agent-repl-test-wh-a-finished-load-reads-the-hosts-boot ()
+  "At the host's load-finished its boot is asked for, answered by symbol."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (setq agent-repl--webhost-url "http://host.localhost:1/?host=1")
+    ;; Act
+    (agent-repl-test-wh--load "load-finished")
+    ;; Assert
+    (should (equal (agent-repl-test-wh--boot-reads)
+                   (list (cons (agent-repl--webview-boot-script "agentReplHost") 'agent-repl--webhost-on-boot))))))
+
+(ert-deftest agent-repl-test-wh-a-committed-load-reads-no-boot ()
+  "The commit replays; only the finish reads the boot."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (setq agent-repl--webhost-url "http://host.localhost:1/?host=1")
+    ;; Act
+    (agent-repl-test-wh--load "load-committed")
+    ;; Assert
+    (should-not (agent-repl-test-wh--boot-reads))))
+
+(ert-deftest agent-repl-test-wh-the-blank-documents-finish-reads-no-boot ()
+  "WebKit's about:blank is not the host's page, so it has no boot to read."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (agent-repl-test-wh--with-committed-uri "about:blank"
+      ;; Act
+      (agent-repl-test-wh--load "load-finished")
+      ;; Assert
+      (should-not (agent-repl-test-wh--boot-reads)))))
+
+(ert-deftest agent-repl-test-wh-a-strayed-documents-finish-reads-no-boot ()
+  "An outward site the host strayed to is not the host's page."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (agent-repl-test-wh--with-committed-uri "https://example.com/"
+      ;; Act
+      (agent-repl-test-wh--load "load-finished")
+      ;; Assert
+      (should-not (agent-repl-test-wh--boot-reads)))))
+
+(ert-deftest agent-repl-test-wh-the-boot-script-asks-for-the-pages-own-global ()
+  "Each web view's page is asked whether the global it hands Emacs is defined."
+  ;; Act
+  (let ((script (agent-repl--webview-boot-script "agentReplSidebar")))
+    ;; Assert
+    (should (string-prefix-p "JSON.stringify({started:!!window.agentReplSidebar," script))))
+
+(defun agent-repl-test-wh--boot-logged (raw)
+  "Record the host's RAW boot answer and return (LEVEL . LINE) for every line logged."
+  (let (logged)
+    (cl-letf (((symbol-function 'agent-repl--info)
+               (lambda (_ws fmt &rest args) (push (cons 'info (apply #'format fmt args)) logged)))
+              ((symbol-function 'agent-repl--warn)
+               (lambda (_ws fmt &rest args) (push (cons 'warn (apply #'format fmt args)) logged)))
+              ((symbol-function 'agent-repl--error)
+               (lambda (_ws fmt &rest args) (push (cons 'error (apply #'format fmt args)) logged))))
+      (agent-repl--webhost-on-boot raw))
+    (nreverse logged)))
+
+(ert-deftest agent-repl-test-wh-a-boot-that-threw-is-recorded-at-error-naming-each-error ()
+  "Every error the page kept is named, at ERROR."
+  (agent-repl-test--with-clean-state
+    ;; Act
+    (let ((logged (agent-repl-test-wh--boot-logged
+                   "{\"started\":false,\"hooked\":true,\"errors\":[\"error: ReferenceError: Cannot access uninitialized variable. at http://h/assets/app-1.js:1:15005\"]}")))
+      ;; Assert
+      (should (equal logged
+                     '((error . "elisp.webview.boot-errors view=host started=nil errors=(\"error: ReferenceError: Cannot access uninitialized variable. at http://h/assets/app-1.js:1:15005\")")))))))
+
+(ert-deftest agent-repl-test-wh-a-boot-without-errors-is-recorded-at-info ()
+  "A host that threw nothing is recorded at INFO, started or not yet."
+  (agent-repl-test--with-clean-state
+    ;; Act
+    (let ((logged (agent-repl-test-wh--boot-logged "{\"started\":true,\"hooked\":true,\"errors\":[]}")))
+      ;; Assert
+      (should (equal logged '((info . "elisp.webview.boot-state view=host started=t hooked=t")))))))
+
+(ert-deftest agent-repl-test-wh-a-page-without-the-error-hook-says-so ()
+  "A page from a build before the hook has kept no errors, and the record says so."
+  (agent-repl-test--with-clean-state
+    ;; Act
+    (let ((logged (agent-repl-test-wh--boot-logged "{\"started\":false,\"hooked\":false,\"errors\":[]}")))
+      ;; Assert
+      (should (equal logged '((info . "elisp.webview.boot-state view=host started=nil hooked=nil")))))))
+
+(ert-deftest agent-repl-test-wh-an-unreadable-boot-answer-is-recorded-at-error ()
+  "An answer that is not JSON is an ERROR naming it, never dropped."
+  (agent-repl-test--with-clean-state
+    ;; Act
+    (let ((logged (agent-repl-test-wh--boot-logged "not json")))
+      ;; Assert
+      (should (equal (mapcar #'car logged) '(error)))
+      (should (string-prefix-p "elisp.webview.boot-unreadable view=host raw=\"not json\"" (cdar logged))))))
 
 ;;;; ---- The callback by name ----
 
