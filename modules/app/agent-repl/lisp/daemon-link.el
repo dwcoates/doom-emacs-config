@@ -26,7 +26,11 @@
 ;; daemon still owns it.  host.el then adopts each workspace as the old
 ;; daemon releases it.  When the old daemon finally drops its own stream,
 ;; the successor is PROMOTED silently: no down hooks and no up hooks fire,
-;; because nothing was lost — every workspace was already adopted.
+;; because nothing was lost — every workspace was already adopted.  The
+;; old stream's end and the successor's acceptance ride two processes, so
+;; Emacs may read them in either order; an end read FIRST waits for the
+;; acceptance, which then runs the handover hooks and promotes at once.
+;; Either order is the same handover, never a link that went down.
 ;;
 ;; `shutdown_announced' WITHOUT an address is a PLAIN BOUNCE: no successor
 ;; exists, so there is nothing to attach to and the only correct behavior
@@ -259,6 +263,16 @@ The daemon on it is standing down in a PLANNED exit and the frame was
 the stream\='s last (`DaemonStreamEnding'), so the clean end that follows
 is recorded at INFO rather than as a link that went down unannounced.")
 
+(defvar agent-repl-link--primary-ended nil
+  "The close OUTCOME of the primary\='s stream, ended ahead of its successor.
+Nil whenever the primary\='s stream stands.  The old daemon announced a
+successor on that stream and then dropped it, and Emacs read the drop
+before the successor\='s `WatchDaemon' acceptance: the two arrive on
+separate processes, in no order Emacs can rely on.  The drop IS the
+handover\='s end, so nothing goes down: the acceptance runs the handover
+hooks and then promotes (`agent-repl-link--accept-successor'), and a
+successor that dies unaccepted takes the link down instead.")
+
 (defvar agent-repl-link--reconnect-timer nil
   "The pending reconnect timer, or nil when no reconnect is scheduled.")
 
@@ -481,14 +495,22 @@ workspace against a connection the daemon never answered."
       (setq agent-repl-link--pending nil
             agent-repl-link--pending-stream nil
             agent-repl-link--pending-reconnect-p nil)
-      (agent-repl-link--cancel-reconnect)
-      (setq agent-repl-link--quiet-until-ms nil
-            agent-repl-link--bounce-cause nil)
-      (agent-repl-link--refresh-indicator)
-      (if reconnect-p
-          (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.reconnected address=%S" address)
-        (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.up address=%S" address))
-      (agent-repl-link--run-hook 'agent-repl-link-up-functions agent-repl-link--primary))))
+      (agent-repl-link--stood-up
+       (if reconnect-p "elisp.link.reconnected address=%S" "elisp.link.up address=%S")
+       address))))
+
+(defun agent-repl-link--stood-up (fmt &rest args)
+  "Do what every link-up owes its consumers, once the primary is set.
+The reconnect loop is disarmed, any bounce quiet window is dropped, the
+indicator is redrawn, the link-up is recorded at INFO from FMT and ARGS,
+and `agent-repl-link-up-functions' run with the primary.  The one walk
+for every way the link comes up, so none of them can skip a step."
+  (agent-repl-link--cancel-reconnect)
+  (setq agent-repl-link--quiet-until-ms nil
+        agent-repl-link--bounce-cause nil)
+  (agent-repl-link--refresh-indicator)
+  (apply #'agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces") fmt args)
+  (agent-repl-link--run-hook 'agent-repl-link-up-functions agent-repl-link--primary))
 
 (defun agent-repl-link-teardown ()
   "Close every connection this link holds and forget all of its state.
@@ -514,6 +536,7 @@ ON-CLOSE runs with `(:cancelled)', which this file treats as normal."
           agent-repl-link--quiet-until-ms nil
           agent-repl-link--bounce-cause nil
           agent-repl-link--ending-conn nil
+          agent-repl-link--primary-ended nil
           agent-repl-link-drain nil)
     (dolist (conn conns) (agent-repl-connect-close conn)))
   (agent-repl-link--refresh-indicator))
@@ -603,7 +626,8 @@ the reconnect hooks would re-register a fleet that is already registered."
     (setq agent-repl-link--primary agent-repl-link--successor
           agent-repl-link--primary-stream agent-repl-link--successor-stream
           agent-repl-link--successor nil
-          agent-repl-link--successor-stream nil)
+          agent-repl-link--successor-stream nil
+          agent-repl-link--primary-ended nil)
     (when (eq agent-repl-link--ending-conn old)
       (setq agent-repl-link--ending-conn nil))
     (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.successor-promoted address=%S"
@@ -616,6 +640,13 @@ the reconnect hooks would re-register a fleet that is already registered."
     (agent-repl-link--run-hook 'agent-repl-link-promote-functions
                                old agent-repl-link--primary)
     (when old (agent-repl-connect-close old))))
+
+(defun agent-repl-link--complete-handover (outcome)
+  "Complete the handover: the old primary\='s stream ended with OUTCOME.
+The accepted successor is promoted.  The one completion for both orders
+in which Emacs reads the old end and the successor\='s acceptance."
+  (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.handover-complete outcome=%S" outcome)
+  (agent-repl-link--promote-successor))
 
 (defun agent-repl-link--handle-close (conn outcome)
   "React to the `WatchDaemon' stream on CONN closing with OUTCOME.
@@ -649,7 +680,15 @@ the stream\='s last frame was the planned ending
           (agent-repl--log '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.pending-successor-cancelled")
         (agent-repl--error '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.successor-open-refused address=%S outcome=%S"
                            (agent-repl-connect-connection-address conn) outcome)
-        (agent-repl-connect-close conn)))
+        (agent-repl-connect-close conn))
+      ;; The old daemon's stream had already ended, waiting on this
+      ;; acceptance to complete the handover: with no successor to promote,
+      ;; that end is the link going down after all.
+      (when agent-repl-link--primary-ended
+        (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.handover-abandoned primary-outcome=%S"
+                          agent-repl-link--primary-ended)
+        (agent-repl-link--primary-ended-down agent-repl-link--primary
+                                             agent-repl-link--primary-ended)))
      ((eq conn agent-repl-link--successor)
       ;; The successor died before it took over.  The old daemon still
       ;; owns whatever it has not transferred, so the link is not down —
@@ -668,19 +707,38 @@ the stream\='s last frame was the planned ending
       (agent-repl--log '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.primary-stream-cancelled"))
      (agent-repl-link--successor
       ;; The old daemon finished and dropped its stream after a handover.
-      (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.handover-complete outcome=%S" outcome)
-      (agent-repl-link--promote-successor))
-     ((and (eq kind :ended) (eq conn agent-repl-link--ending-conn))
-      ;; THE DAEMON SAID SO FIRST: a planned stand-down with no successor to
-      ;; promote.  The same walk as an unannounced loss -- down hooks, then
-      ;; the reconnect loop that resolves the live daemon -- recorded at INFO.
-      (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.down-planned address=%S"
-                        (agent-repl-connect-connection-address conn))
-      (agent-repl-link--primary-down conn t))
-     (t
-      (agent-repl--warn '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.down outcome=%S address=%S" outcome
-                        (agent-repl-connect-connection-address conn))
-      (agent-repl-link--primary-down conn)))))
+      (agent-repl-link--complete-handover outcome))
+     (agent-repl-link--pending-successor
+      ;; THE OLD DAEMON LEFT BEFORE ITS SUCCESSOR WAS ACCEPTED.  It announced
+      ;; the successor on this stream, so this end IS the handover's end,
+      ;; only read before the successor's acceptance.  Measured 2026-11-01:
+      ;; an Emacs busy for 389ms read the announcement, the ending and this
+      ;; close in one batch, ahead of the successor's acceptance, took the
+      ;; link down and never ran the handover hooks.  The acceptance
+      ;; completes the handover from here.
+      (setq agent-repl-link--primary-ended outcome)
+      (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.primary-ended-before-successor address=%S successor=%S outcome=%S"
+                        (agent-repl-connect-connection-address conn)
+                        (agent-repl-connect-connection-address agent-repl-link--pending-successor)
+                        outcome))
+     (t (agent-repl-link--primary-ended-down conn outcome)))))
+
+(defun agent-repl-link--primary-ended-down (conn outcome)
+  "Take the link down because the primary CONN\='s stream ended with OUTCOME.
+No successor stands to promote.  A stream whose last frame was the
+planned ending (`agent-repl-link--ending-conn') went down on purpose and
+is recorded at INFO; any other end is a loss and is a WARNING."
+  (if (and (eq (car outcome) :ended) (eq conn agent-repl-link--ending-conn))
+      (progn
+        ;; THE DAEMON SAID SO FIRST: a planned stand-down with no successor
+        ;; to promote.  The same walk as an unannounced loss -- down hooks,
+        ;; then the reconnect loop that resolves the live daemon -- at INFO.
+        (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.down-planned address=%S"
+                          (agent-repl-connect-connection-address conn))
+        (agent-repl-link--primary-down conn t))
+    (agent-repl--warn '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.down outcome=%S address=%S" outcome
+                      (agent-repl-connect-connection-address conn))
+    (agent-repl-link--primary-down conn)))
 
 (defun agent-repl-link--primary-down (conn &optional planned)
   "Take the link down after the primary CONN\='s stream ended.
@@ -690,7 +748,8 @@ non-nil says the daemon announced the ending first; the hooks read it as
 `agent-repl-link-down-planned'."
   (setq agent-repl-link--primary nil
         agent-repl-link--primary-stream nil
-        agent-repl-link--ending-conn nil)
+        agent-repl-link--ending-conn nil
+        agent-repl-link--primary-ended nil)
   (let ((agent-repl-link-down-planned planned))
     (agent-repl-link--run-hook 'agent-repl-link-down-functions conn))
   (agent-repl-connect-close conn)
@@ -829,8 +888,12 @@ which is still nil while the dial awaits acceptance."
   "Record the successor at ADDRESS as ADOPTABLE: it ACCEPTED its watch.
 Announced on OLD with CAUSE.  Until this runs `agent-repl-link-successor'
 answers nil, so host.el cannot send an adopt to a daemon that has not
-proven it is listening; from here the handover hooks run with both live
-connections."
+proven it is listening; from here the handover hooks run with both
+connections.  When the old daemon\='s stream already ended
+\=(`agent-repl-link--primary-ended') the handover is complete as well, so
+the successor is promoted at once: the order in which Emacs reads the
+old end and this acceptance changes nothing a consumer sees.  A successor
+dialed while the link was down (OLD nil) is the link itself now."
   (if (null agent-repl-link--pending-successor)
       (agent-repl--warn '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.successor-accept-without-pending address=%S"
                         address)
@@ -840,25 +903,40 @@ connections."
           agent-repl-link--pending-successor-stream nil)
     (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.successor-accepted address=%S cause=%S"
                       address (plist-get cause :arm))
-    (if (null agent-repl-link--primary)
-        ;; The old daemon dropped its stream before the successor was
-        ;; accepted, so there is nothing to hand over FROM: the successor is
-        ;; simply the link now, and the fleet has to be rebuilt on it.
-        (progn
-          (agent-repl--warn '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.successor-accepted-without-primary address=%S"
-                            address)
-          (setq agent-repl-link--primary agent-repl-link--successor
-                agent-repl-link--primary-stream agent-repl-link--successor-stream
-                agent-repl-link--successor nil
-                agent-repl-link--successor-stream nil)
-          (agent-repl-link--cancel-reconnect)
-          (agent-repl-link--refresh-indicator)
-          (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.up address=%S" address)
-          (agent-repl-link--run-hook 'agent-repl-link-up-functions agent-repl-link--primary))
+    (cond
+     (agent-repl-link--primary
       (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.handover-announced address=%S cause=%S"
                         address (plist-get cause :arm))
       (agent-repl-link--run-hook 'agent-repl-link-handover-functions
-                                 old agent-repl-link--successor))))
+                                 old agent-repl-link--successor)
+      (when agent-repl-link--primary-ended
+        (agent-repl-link--complete-handover agent-repl-link--primary-ended)))
+     (old
+      ;; A primary that ended with a successor pending stays the primary
+      ;; until the acceptance, so the one it was announced on cannot be gone.
+      (agent-repl--error '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.successor-accepted-primary-vanished address=%S old=%S"
+                         address (agent-repl-connect-connection-address old))
+      (error "agent-repl: the successor at %s was accepted after its announcing primary %s vanished"
+             address (agent-repl-connect-connection-address old)))
+     (t (agent-repl-link--successor-becomes-link address)))))
+
+(defun agent-repl-link--successor-becomes-link (address)
+  "Make the successor at ADDRESS the link: it was dialed while the link was down.
+A per-workspace rpc answered `transferring_away' after the primary went
+down, so the successor is the live daemon and nothing stands to hand
+over from.  It is a link-up like any other, so the reconnect loop and any
+transport it left awaiting acceptance are retired: one link, never two."
+  (let ((pending agent-repl-link--pending))
+    (setq agent-repl-link--primary agent-repl-link--successor
+          agent-repl-link--primary-stream agent-repl-link--successor-stream
+          agent-repl-link--successor nil
+          agent-repl-link--successor-stream nil
+          agent-repl-link--pending nil
+          agent-repl-link--pending-stream nil
+          agent-repl-link--pending-reconnect-p nil)
+    (when pending (agent-repl-connect-close pending))
+    (agent-repl-link--stood-up "elisp.link.successor-became-link address=%S retired-pending=%S"
+                               address (and pending (agent-repl-connect-connection-address pending)))))
 
 (defun agent-repl-link--drain-scheduled (schedule)
   "Record the standing drain SCHEDULE and redraw the indicator."
