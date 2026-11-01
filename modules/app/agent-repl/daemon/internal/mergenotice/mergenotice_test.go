@@ -29,14 +29,30 @@ const (
 	bob       = ids.WorkspaceID("ws-bob")
 )
 
-// fakeSubscriptions answers a fixed subscription set, or err.
+// fakeSubscriptions answers a fixed subscription set, or err. It records
+// every subscription it is asked to end; endErr fails those ends, and
+// takenAgain answers each end as a subscription taken again since the read.
 type fakeSubscriptions struct {
-	subs []wsm.MergeQueueSubscription
-	err  error
+	subs       []wsm.MergeQueueSubscription
+	err        error
+	endErr     error
+	takenAgain bool
+	ended      []wsm.MergeQueueSubscription
 }
 
-func (f fakeSubscriptions) MergeQueueSubscriptions(context.Context) ([]wsm.MergeQueueSubscription, error) {
+func (f *fakeSubscriptions) MergeQueueSubscriptions(context.Context) ([]wsm.MergeQueueSubscription, error) {
 	return f.subs, f.err
+}
+
+func (f *fakeSubscriptions) EndMergeQueueSubscription(_ context.Context, sub wsm.MergeQueueSubscription) (bool, error) {
+	if f.endErr != nil {
+		return false, f.endErr
+	}
+	if f.takenAgain {
+		return false, nil
+	}
+	f.ended = append(f.ended, sub)
+	return true, nil
 }
 
 // submission is one captured notice.
@@ -134,6 +150,7 @@ func (u *fakeUntold) RecordUntoldMergeNotice(_ context.Context, n wsm.UntoldMerg
 // fixture is one service over fakes.
 type fixture struct {
 	s       *Service
+	subs    *fakeSubscriptions
 	prompts *fakePrompts
 	holds   *fakeHolds
 	untold  *fakeUntold
@@ -142,19 +159,20 @@ type fixture struct {
 }
 
 // newFixture builds a service whose subscriptions are SUBS, whose briefs
-// splice the real brief's placeholders into "label|change|queue|detail",
+// splice the real brief's placeholders into
+// "label|change|queue|detail|lifetime",
 // and whose keys count up.
 func newFixture(subs fakeSubscriptions) *fixture {
-	f := &fixture{prompts: &fakePrompts{}, holds: &fakeHolds{retired: true}, untold: &fakeUntold{rows: map[[2]string]wsm.UntoldMergeNotice{}}, logs: dlog.NewTestSurfaces()}
+	f := &fixture{subs: &subs, prompts: &fakePrompts{}, holds: &fakeHolds{retired: true}, untold: &fakeUntold{rows: map[[2]string]wsm.UntoldMergeNotice{}}, logs: dlog.NewTestSurfaces()}
 	f.s = New(Deps{
-		Subscriptions: subs,
+		Subscriptions: f.subs,
 		Holds:         f.holds,
 		Untold:        f.untold,
 		Briefs: func(name string, values map[string]string) (string, error) {
 			if name != BriefNotice {
 				return "", fmt.Errorf("unknown brief %q", name)
 			}
-			return values["label"] + "|" + values["change"] + "|" + values["queue"] + "|" + values["detail"], nil
+			return values["label"] + "|" + values["change"] + "|" + values["queue"] + "|" + values["detail"] + "|" + values["lifetime"], nil
 		},
 		MintKey: func(prefix string) (string, error) {
 			f.keys++
@@ -588,7 +606,7 @@ func TestTheValuesSpliceIntoTheShippedBrief(t *testing.T) {
 	}
 
 	// Act.
-	text, err := brief.Splice(Values(wsm.MergeQueueDetailDepletes, []string{Sentence(landedLast)}, landedLast))
+	text, err := brief.Splice(Values(wsm.MergeQueueDetailDepletes, false, []string{Sentence(landedLast)}, landedLast))
 
 	// Assert.
 	if err != nil {
@@ -606,12 +624,13 @@ func TestTheValuesSpliceIntoTheShippedBrief(t *testing.T) {
 var steppedFix = change(merge.QueueChangeStepped, repoDoom, member("ws-fix", "fix", true, footer.StepTesting),
 	member("ws-fix", "fix", true, footer.StepTesting))
 
-// fieldsOf splits a fixture notice into its label, change, queue and detail.
+// fieldsOf splits a fixture notice into its label, change, queue, detail and
+// lifetime.
 func fieldsOf(t *testing.T, text string) []string {
 	t.Helper()
 	parts := strings.Split(text, "|")
-	if len(parts) != 4 {
-		t.Fatalf("notice %q does not split into the brief's four placeholders", text)
+	if len(parts) != 5 {
+		t.Fatalf("notice %q does not split into the brief's five placeholders", text)
 	}
 	return parts
 }
@@ -777,7 +796,7 @@ func TestValuesFailsHardOnANoticeOfNoChange(t *testing.T) {
 	}()
 
 	// Act.
-	Values(wsm.MergeQueueDetailEveryChange, nil, landedLast)
+	Values(wsm.MergeQueueDetailEveryChange, false, nil, landedLast)
 }
 
 func TestTheUntoldNoticeSurvivesARestartAndIsSuperseded(t *testing.T) {
@@ -919,7 +938,7 @@ func TestADeploysEndIsToldInFull(t *testing.T) {
 
 func TestADeploysSubscriberIsToldWhatItAskedFor(t *testing.T) {
 	// Act.
-	values := Values(wsm.MergeQueueDetailDeploys, []string{Sentence(deployed(merge.DeployEnd{}))}, deployed(merge.DeployEnd{}))
+	values := Values(wsm.MergeQueueDetailDeploys, false, []string{Sentence(deployed(merge.DeployEnd{}))}, deployed(merge.DeployEnd{}))
 
 	// Assert.
 	if values["detail"] != "each merge leaving the queue and each deploy's end" {
@@ -949,7 +968,7 @@ func TestADeploysEndReachesEverySubscriptionThatAdmitsIt(t *testing.T) {
 
 func TestADeploysNoticeNamesNoQueue(t *testing.T) {
 	// Act.
-	values := Values(wsm.MergeQueueDetailDeploys, []string{Sentence(deployed(merge.DeployEnd{}))}, deployed(merge.DeployEnd{}))
+	values := Values(wsm.MergeQueueDetailDeploys, false, []string{Sentence(deployed(merge.DeployEnd{}))}, deployed(merge.DeployEnd{}))
 
 	// Assert.
 	if !strings.Contains(values["queue"], "not one queue's") || strings.Contains(values["queue"], "The queue of") {
@@ -971,5 +990,192 @@ func TestDeployEndedIsDeliveredToItsSubscribers(t *testing.T) {
 	got := f.prompts.submissions()
 	if len(got) != 1 || got[0].ws != alice || !strings.Contains(got[0].text, "`fix-land`") {
 		t.Fatalf("submissions = %+v, want alice told of the deploy carrying fix-land", got)
+	}
+}
+
+// carol is a third subscriber.
+const carol = ids.WorkspaceID("ws-carol")
+
+func TestADepletionEndsEverySubscriptionInItsScopeAndTellsItsLastNotice(t *testing.T) {
+	// Arrange
+	scoped, unscoped, elsewhere := sub(alice, repoDoom, wsm.MergeQueueDetailDepletes), sub(bob, wsm.EveryRepository, wsm.MergeQueueDetailAdvances), sub(carol, repoOther, wsm.MergeQueueDetailEveryChange)
+	f := newFixture(fakeSubscriptions{subs: []wsm.MergeQueueSubscription{scoped, unscoped, elsewhere}})
+
+	// Act
+	f.s.deliver(context.Background(), f.prompts, landedLast)
+
+	// Assert
+	if want := []wsm.MergeQueueSubscription{scoped, unscoped}; !reflect.DeepEqual(f.subs.ended, want) {
+		t.Fatalf("ended = %+v, want %+v", f.subs.ended, want)
+	}
+	got := f.prompts.submissions()
+	if len(got) != 2 {
+		t.Fatalf("submissions = %+v, want alice and bob told", got)
+	}
+	for _, told := range got {
+		if lifetime := fieldsOf(t, told.text)[4]; lifetime != Lifetime(true) {
+			t.Fatalf("%s's lifetime = %q, want its last notice", told.ws, lifetime)
+		}
+	}
+}
+
+func TestADepletionRecordsEachSubscriptionItEnds(t *testing.T) {
+	// Arrange
+	f := newFixture(fakeSubscriptions{subs: []wsm.MergeQueueSubscription{sub(alice, repoDoom, wsm.MergeQueueDetailDeploys)}})
+
+	// Act
+	f.s.deliver(context.Background(), f.prompts, landedLast)
+
+	// Assert
+	record, ok := dlog.FindRecord(f.logs.Records(), dlog.RecordQuery{Level: "info", Operation: op, Message: "ended a merge queue subscription as its queue depleted"})
+	if !ok {
+		t.Fatalf("no record of the ended subscription: %+v", f.logs.Records())
+	}
+	want := dlog.Context{"subscriber": string(alice), "scope": string(repoDoom), "detail": "deploys", "repo": string(repoDoom), "change": "landed", "workspace": "ws-fix", "depleted": true}
+	for k, v := range want {
+		if record.Context[k] != v {
+			t.Fatalf("record context %s = %v, want %v (%+v)", k, record.Context[k], v, record.Context)
+		}
+	}
+	told, ok := dlog.FindRecord(f.logs.Records(), dlog.RecordQuery{Level: "info", Operation: op, Message: "told a subscriber's agent of a merge queue change"})
+	if !ok || told.Context["ended"] != true {
+		t.Fatalf("no record of the last notice marked ended: %+v", f.logs.Records())
+	}
+}
+
+func TestAQueueLeftNonEmptyKeepsItsSubscriptions(t *testing.T) {
+	tests := []struct {
+		name   string
+		change merge.QueueChange
+	}{
+		{name: "a merge left with another in line", change: change(merge.QueueChangeLanded, repoDoom, member("ws-fix", "fix", true, ""), member("ws-next", "next", false, ""))},
+		{name: "a merge stepped", change: steppedFix},
+		{name: "a deploy ended", change: deployed(merge.DeployEnd{})},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(fakeSubscriptions{subs: []wsm.MergeQueueSubscription{sub(alice, repoDoom, wsm.MergeQueueDetailEveryChange)}})
+
+			// Act
+			f.s.deliver(context.Background(), f.prompts, tt.change)
+
+			// Assert
+			if len(f.subs.ended) != 0 {
+				t.Fatalf("ended = %+v, want none", f.subs.ended)
+			}
+			got := f.prompts.submissions()
+			if len(got) != 1 || fieldsOf(t, got[0].text)[4] != Lifetime(false) {
+				t.Fatalf("submissions = %+v, want one notice saying the subscription stands", got)
+			}
+		})
+	}
+}
+
+func TestASubscriptionTakenAgainSinceTheReadStandsAndIsNotToldItEnded(t *testing.T) {
+	// Arrange
+	f := newFixture(fakeSubscriptions{subs: []wsm.MergeQueueSubscription{sub(alice, repoDoom, wsm.MergeQueueDetailDepletes)}, takenAgain: true})
+
+	// Act
+	f.s.deliver(context.Background(), f.prompts, landedLast)
+
+	// Assert
+	if got := f.prompts.submissions(); len(got) != 1 || fieldsOf(t, got[0].text)[4] != Lifetime(false) {
+		t.Fatalf("submissions = %+v, want one notice saying the subscription stands", got)
+	}
+	record, ok := dlog.FindRecord(f.logs.Records(), dlog.RecordQuery{Level: "info", Operation: op, Message: "a merge queue subscription was taken again after the depletion was read; the new one stands"})
+	if !ok || record.Context["subscriber"] != string(alice) || record.Context["scope"] != string(repoDoom) {
+		t.Fatalf("no record of the subscription taken again: %+v", f.logs.Records())
+	}
+}
+
+func TestAnUnendableSubscriptionIsRecordedAndItsNoticeSaysItStands(t *testing.T) {
+	// Arrange
+	f := newFixture(fakeSubscriptions{subs: []wsm.MergeQueueSubscription{sub(alice, repoDoom, wsm.MergeQueueDetailAdvances)}, endErr: errors.New("the store is gone")})
+
+	// Act
+	f.s.deliver(context.Background(), f.prompts, landedLast)
+
+	// Assert
+	if got := f.prompts.submissions(); len(got) != 1 || fieldsOf(t, got[0].text)[4] != Lifetime(false) {
+		t.Fatalf("submissions = %+v, want the notice still told, saying the subscription stands", got)
+	}
+	record, ok := dlog.FindRecord(f.logs.Records(), dlog.RecordQuery{Level: "error", Operation: op, Message: "could not end a merge queue subscription as its queue depleted; it stands, and its notice does not say it ended"})
+	if !ok || record.Context["cause"] != "the store is gone" || record.Context["subscriber"] != string(alice) || record.Context["detail"] != "advances" {
+		t.Fatalf("no error record naming the subscription and its cause: %+v", f.logs.Records())
+	}
+}
+
+func TestASubscriberWithOneSubscriptionLeftStandingIsNotToldItEnded(t *testing.T) {
+	// Arrange: alice's scoped subscription ends; her unscoped one was taken
+	// again since the read, so she still holds a subscription.
+	f := newFixture(fakeSubscriptions{subs: []wsm.MergeQueueSubscription{
+		sub(alice, wsm.EveryRepository, wsm.MergeQueueDetailAdvances), sub(alice, repoDoom, wsm.MergeQueueDetailDepletes),
+	}})
+	f.s.deps.Subscriptions = &partialEnd{fakeSubscriptions: f.subs, stands: wsm.EveryRepository}
+
+	// Act
+	f.s.deliver(context.Background(), f.prompts, landedLast)
+
+	// Assert
+	if got := f.prompts.submissions(); len(got) != 1 || fieldsOf(t, got[0].text)[4] != Lifetime(false) {
+		t.Fatalf("submissions = %+v, want one notice saying a subscription stands", got)
+	}
+}
+
+// partialEnd ends every subscription but the one in scope stands.
+type partialEnd struct {
+	*fakeSubscriptions
+	stands wsm.RepoKey
+}
+
+func (p *partialEnd) EndMergeQueueSubscription(ctx context.Context, sub wsm.MergeQueueSubscription) (bool, error) {
+	if sub.Repo == p.stands {
+		return false, nil
+	}
+	return p.fakeSubscriptions.EndMergeQueueSubscription(ctx, sub)
+}
+
+func TestInScopeIsTheChangesQueueOrEveryQueue(t *testing.T) {
+	tests := []struct {
+		name   string
+		sub    wsm.MergeQueueSubscription
+		change merge.QueueChange
+		want   bool
+	}{
+		{name: "the change's own queue", sub: sub(alice, repoDoom, wsm.MergeQueueDetailDepletes), change: landedLast, want: true},
+		{name: "every queue", sub: sub(alice, wsm.EveryRepository, wsm.MergeQueueDetailDepletes), change: landedLast, want: true},
+		{name: "another queue", sub: sub(alice, repoOther, wsm.MergeQueueDetailDepletes), change: landedLast, want: false},
+		{name: "a deploy, from another queue", sub: sub(alice, repoOther, wsm.MergeQueueDetailDeploys), change: deployed(merge.DeployEnd{}), want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := InScope(tt.sub, tt.change)
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("InScope = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestTheLastNoticeSplicesIntoTheShippedBrief(t *testing.T) {
+	// Arrange
+	brief, err := prompts.Load("../../../prompts", BriefNotice)
+	if err != nil {
+		t.Fatalf("load the shipped brief: %v", err)
+	}
+
+	// Act
+	text, err := brief.Splice(Values(wsm.MergeQueueDetailDepletes, true, []string{Sentence(landedLast)}, landedLast))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Splice: %v", err)
+	}
+	if !strings.Contains(text, "this subscription has ended: this is its last notice") || strings.Contains(text, "unsubscribe through") {
+		t.Fatalf("text = %q, want it to say the subscription ended and nothing of unsubscribing", text)
 	}
 }

@@ -5,9 +5,12 @@ import (
 	"errors"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
+	"time"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/sourcescan"
 )
 
 // subscription is WS's subscription to REPO at DETAIL, taken at instant.
@@ -446,5 +449,122 @@ func TestADeploysSubscriptionIsStoredAndReadBack(t *testing.T) {
 	// Assert
 	if got := subscriptionsOf(t, s); !reflect.DeepEqual(got, []MergeQueueSubscription{want}) {
 		t.Fatalf("subscriptions = %+v, want the deploys subscription", got)
+	}
+}
+
+func TestEndingASubscriptionAsReadEndsIt(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	repo := queueKey(t)
+	kept := subscription(ws.ID, EveryRepository, MergeQueueDetailAdvances)
+	mustSubscribe(t, s, subscription(ws.ID, repo, MergeQueueDetailDepletes))
+	mustSubscribe(t, s, kept)
+
+	// Act
+	ended, err := s.EndMergeQueueSubscription(context.Background(), subscription(ws.ID, repo, MergeQueueDetailDepletes))
+
+	// Assert
+	if err != nil || !ended {
+		t.Fatalf("EndMergeQueueSubscription = %v, %v; want the scoped subscription ended", ended, err)
+	}
+	if got := subscriptionsOf(t, s); !reflect.DeepEqual(got, []MergeQueueSubscription{kept}) {
+		t.Fatalf("subscriptions = %+v, want only the other scope's left", got)
+	}
+}
+
+func TestEndingASubscriptionTakenAgainSinceTheReadLeavesTheNewOne(t *testing.T) {
+	tests := []struct {
+		name  string
+		again MergeQueueSubscription
+	}{
+		{name: "a new detail", again: MergeQueueSubscription{Detail: MergeQueueDetailEveryChange, SubscribedAt: instant}},
+		{name: "a new instant", again: MergeQueueSubscription{Detail: MergeQueueDetailDepletes, SubscribedAt: instant.Add(time.Second)}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			ws := testWorkspace(t, s)
+			repo := queueKey(t)
+			read := subscription(ws.ID, repo, MergeQueueDetailDepletes)
+			mustSubscribe(t, s, read)
+			again := tt.again
+			again.Subscriber, again.Repo = ws.ID, repo
+			mustSubscribe(t, s, again)
+
+			// Act
+			ended, err := s.EndMergeQueueSubscription(context.Background(), read)
+
+			// Assert
+			if err != nil || ended {
+				t.Fatalf("EndMergeQueueSubscription = %v, %v; want nothing ended", ended, err)
+			}
+			if got := subscriptionsOf(t, s); !reflect.DeepEqual(got, []MergeQueueSubscription{again}) {
+				t.Fatalf("subscriptions = %+v, want the one taken again", got)
+			}
+		})
+	}
+}
+
+func TestEndingASubscriptionWhoseScopeCannotBeNormalizedIsRefused(t *testing.T) {
+	// Arrange
+	s, log := testStore(t)
+	ws := testWorkspace(t, s)
+
+	// Act
+	ended, err := s.EndMergeQueueSubscription(context.Background(), subscription(ws.ID, RepoKey("relative/.git"), MergeQueueDetailDepletes))
+
+	// Assert
+	if err == nil || ended {
+		t.Fatalf("EndMergeQueueSubscription = %v, %v; want a refusal", ended, err)
+	}
+	record, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "error", Operation: "daemon.wsm.end_merge_queue_subscription",
+		Message: "refused to end a merge queue subscription whose scope cannot be normalized"})
+	if !ok || record.Context["subscriber"] != string(ws.ID) || record.Context["repo"] != "relative/.git" || record.Context["detail"] != "depletes" {
+		t.Fatalf("no error record naming the refused subscription: %+v", log.Records())
+	}
+}
+
+// TestEverySingleSubscriptionEndGoesThroughEndSubscription pins that the one
+// statement deleting a single subscription is endSubscription's: an end that
+// hand-rolls it would skip the scope's normalization or its refusal record.
+func TestEverySingleSubscriptionEndGoesThroughEndSubscription(t *testing.T) {
+	// Arrange
+	statement := "DELETE FROM merge_queue_subscriptions WHERE subscriber = ? AND repo_key = ?"
+	found := 0
+
+	for _, file := range sourcescan.Production(t) {
+		// Act
+		found += strings.Count(string(file.Source), statement)
+	}
+
+	// Assert
+	if found != 1 {
+		t.Fatalf("%q appears %d times in production source, want once (endSubscription)", statement, found)
+	}
+}
+
+func TestSubscribingAgainAfterADepletionEndedTheSubscriptionTakesANewOne(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	repo := queueKey(t)
+	first := subscription(ws.ID, repo, MergeQueueDetailDepletes)
+	mustSubscribe(t, s, first)
+	if ended, err := s.EndMergeQueueSubscription(context.Background(), first); err != nil || !ended {
+		t.Fatalf("EndMergeQueueSubscription = %v, %v; want it ended", ended, err)
+	}
+	again := subscription(ws.ID, repo, MergeQueueDetailAdvances)
+
+	// Act
+	replaced, err := s.SubscribeMergeQueue(context.Background(), again)
+
+	// Assert
+	if err != nil || replaced {
+		t.Fatalf("SubscribeMergeQueue = %v, %v; want a new subscription", replaced, err)
+	}
+	if got := subscriptionsOf(t, s); !reflect.DeepEqual(got, []MergeQueueSubscription{again}) {
+		t.Fatalf("subscriptions = %+v, want the new one", got)
 	}
 }
