@@ -1894,6 +1894,66 @@ Returns the pending successor connection."
       (should (null agent-repl-link--bounce-cause))
       (should (null agent-repl-link-drain-segment)))))
 
+(ert-deftest agent-repl-test-link-stood-up-disarms-the-reconnect ()
+  "A link that stands polls for nothing."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (agent-repl-link--schedule-reconnect)
+    ;; Act
+    (agent-repl-link--stood-up "elisp.link.up address=%S" "127.0.0.1:9001")
+    ;; Assert
+    (should (null agent-repl-link--reconnect-timer))
+    (should (null agent-repl-link--reconnect-interval))))
+
+(ert-deftest agent-repl-test-link-stood-up-drops-the-bounce-window ()
+  "A link that stands waits out no restart."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (setq agent-repl-link--quiet-until-ms (+ (agent-repl--now-unix-ms) 60000)
+          agent-repl-link--bounce-cause (list :arm :self-merge-rollout :value nil))
+    ;; Act
+    (agent-repl-link--stood-up "elisp.link.up address=%S" "127.0.0.1:9001")
+    ;; Assert
+    (should (null agent-repl-link--quiet-until-ms))
+    (should (null agent-repl-link--bounce-cause))
+    (should (null agent-repl-link-drain-segment))))
+
+(ert-deftest agent-repl-test-link-stood-up-records-the-caller-s-line-at-info ()
+  "Each way up keeps its own record, at INFO."
+  (agent-repl-test-link--with-harness
+    ;; Act
+    (agent-repl-link--stood-up "elisp.link.reconnected address=%S" "127.0.0.1:9001")
+    ;; Assert
+    (should (agent-repl-test-link--logged-p :info "elisp.link.reconnected address=\"127.0.0.1:9001\""))))
+
+(ert-deftest agent-repl-test-link-stood-up-runs-the-up-hook-with-the-primary ()
+  "Consumers rebuild on the primary that stands."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-connect-open "127.0.0.1:9001")))
+      (setq agent-repl-link--primary conn)
+      (add-hook 'agent-repl-link-up-functions (agent-repl-test-link--record-hook :up))
+      ;; Act
+      (agent-repl-link--stood-up "elisp.link.up address=%S" "127.0.0.1:9001")
+      ;; Assert
+      (should (equal (cdr (assq :up agent-repl-test-link--hooks)) (list conn))))))
+
+(ert-deftest agent-repl-test-link-up-hooks-run-through-one-helper ()
+  "Every way the link comes up runs the up hooks through
+`agent-repl-link--stood-up', so no link-up skips a step of the walk."
+  (with-temp-buffer
+    (insert-file-contents (expand-file-name "daemon-link.el" agent-repl-test-link--lisp-dir))
+    (let ((runs 0) (calls 0))
+      (while (search-forward "(agent-repl-link--run-hook 'agent-repl-link-up-functions" nil t)
+        (setq runs (1+ runs)))
+      (goto-char (point-min))
+      (while (search-forward "(agent-repl-link--stood-up" nil t)
+        (setq calls (1+ calls)))
+      ;; The helper's own run, and the two ways up: acceptance and a
+      ;; successor dialed while the link was down.
+      (should (= runs 1))
+      (should (= calls 2)))))
+
 (ert-deftest agent-repl-test-link-primary-ends-go-down-through-one-helper ()
   "Every primary end with no successor to promote takes the link down
 through `agent-repl-link--primary-ended-down', so the planned and the lost

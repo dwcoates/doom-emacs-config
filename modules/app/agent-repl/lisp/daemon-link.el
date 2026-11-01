@@ -495,14 +495,22 @@ workspace against a connection the daemon never answered."
       (setq agent-repl-link--pending nil
             agent-repl-link--pending-stream nil
             agent-repl-link--pending-reconnect-p nil)
-      (agent-repl-link--cancel-reconnect)
-      (setq agent-repl-link--quiet-until-ms nil
-            agent-repl-link--bounce-cause nil)
-      (agent-repl-link--refresh-indicator)
-      (if reconnect-p
-          (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.reconnected address=%S" address)
-        (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.up address=%S" address))
-      (agent-repl-link--run-hook 'agent-repl-link-up-functions agent-repl-link--primary))))
+      (agent-repl-link--stood-up
+       (if reconnect-p "elisp.link.reconnected address=%S" "elisp.link.up address=%S")
+       address))))
+
+(defun agent-repl-link--stood-up (fmt &rest args)
+  "Do what every link-up owes its consumers, once the primary is set.
+The reconnect loop is disarmed, any bounce quiet window is dropped, the
+indicator is redrawn, the link-up is recorded at INFO from FMT and ARGS,
+and `agent-repl-link-up-functions' run with the primary.  The one walk
+for every way the link comes up, so none of them can skip a step."
+  (agent-repl-link--cancel-reconnect)
+  (setq agent-repl-link--quiet-until-ms nil
+        agent-repl-link--bounce-cause nil)
+  (agent-repl-link--refresh-indicator)
+  (apply #'agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces") fmt args)
+  (agent-repl-link--run-hook 'agent-repl-link-up-functions agent-repl-link--primary))
 
 (defun agent-repl-link-teardown ()
   "Close every connection this link holds and forget all of its state.
@@ -922,14 +930,9 @@ transport it left awaiting acceptance are retired: one link, never two."
           agent-repl-link--pending nil
           agent-repl-link--pending-stream nil
           agent-repl-link--pending-reconnect-p nil)
-    (agent-repl-link--cancel-reconnect)
-    (setq agent-repl-link--quiet-until-ms nil
-          agent-repl-link--bounce-cause nil)
     (when pending (agent-repl-connect-close pending))
-    (agent-repl-link--refresh-indicator)
-    (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.successor-became-link address=%S retired-pending=%S"
-                      address (and pending (agent-repl-connect-connection-address pending)))
-    (agent-repl-link--run-hook 'agent-repl-link-up-functions agent-repl-link--primary)))
+    (agent-repl-link--stood-up "elisp.link.successor-became-link address=%S retired-pending=%S"
+                               address (and pending (agent-repl-connect-connection-address pending)))))
 
 (defun agent-repl-link--drain-scheduled (schedule)
   "Record the standing drain SCHEDULE and redraw the indicator."
