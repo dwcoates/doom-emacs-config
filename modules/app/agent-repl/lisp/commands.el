@@ -1119,6 +1119,9 @@ either way most recently updated first (`agent-repl--switch-by-recency').
 Each line shows the workspace's status mark and its columns
 \(`agent-repl--switch-affixation').
 
+A HIDDEN WORKSPACE IS UNHIDDEN: choosing it shows it again
+\(`agent-repl-verb-set-hidden'), which lands on it once the daemon accepts.
+
 AN OPEN WORKSPACE IS A SWITCH REQUEST and nothing more: the daemon is
 asked to select it (`agent-repl-host-request-switch') and the frame
 follows the roster.
@@ -1160,6 +1163,9 @@ daemon-minted and there is no spelling of it Emacs could construct."
            (ws (plist-get entry :ws))
            (ref (plist-get entry :ref)))
       (cond
+       ((and ws (eq (plist-get entry :section) :hidden))
+        (agent-repl--info ws "elisp.commands.switch-unhides ws=%s" ws)
+        (agent-repl-verb-set-hidden ws nil))
        (ws
         (agent-repl--info ws "elisp.commands.switch-chosen ws=%s all=%s" ws (and all t))
         (agent-repl-host-request-switch ws 'picker))
