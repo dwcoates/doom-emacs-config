@@ -421,6 +421,11 @@ returning the SHA string (or the sentinel \"unknown\" when undetermined)."
 (agent-repl--load-module "profiling")
 (agent-repl--load-module "prompt-summary")
 (agent-repl--load-module "window")
+;; WHY: dividers.el paints the lines between a frame's windows the panels'
+;; color while the frame shows agent-repl.  It asks core.el's panel-buffer
+;; and sidebar-view.el's window predicates, and reads input.el's
+;; background, all loaded above, and its hook syncs every frame at load.
+(agent-repl--load-module "dividers")
 (agent-repl--load-module "sibling-popup")
 (agent-repl--load-module "panels")
 ;; WHY: open-progress.el shows its placeholder in the SAME main-area window
