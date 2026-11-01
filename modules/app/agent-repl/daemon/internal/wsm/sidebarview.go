@@ -68,6 +68,19 @@ const openFoldedDDL = `
 ALTER TABLE sidebar_view ADD COLUMN open_folded INTEGER NOT NULL DEFAULT 0;
 `
 
+// mergeQueueFoldedDDL is the layout-97 addition: the Merge Queue section's
+// fold (frontend.v1.WorkspaceRoster.merge_queue, owner request 2026-11-01:
+// the queues split out of the Deploys section, whose fold merged_folded
+// stays the Recently Merged section's) on the sidebar_view singleton. The
+// section is expanded (0) until someone folds it.
+//
+// Like the other column-add steps it is an ALTER, applied after sidebar_view
+// on a fresh file and as its own step on a migrated one. IT IS ADDITIVE: the
+// previous build names no such column.
+const mergeQueueFoldedDDL = `
+ALTER TABLE sidebar_view ADD COLUMN merge_queue_folded INTEGER NOT NULL DEFAULT 0;
+`
+
 // openShowsDDL is the layout-76 addition, kept as shipped because deployed
 // files carry it: what the open-workspaces section's repository sections
 // showed, their open workspaces (0) or their merge queues (1). THE TOGGLE WAS
@@ -127,8 +140,10 @@ const retiredGroupingColumn = "repository"
 
 // SidebarView is the sidebar's durable view state that belongs to no row.
 type SidebarView struct {
-	// MergedFolded is whether the merge queue section is collapsed.
+	// MergedFolded is whether the Recently Merged section is collapsed.
 	MergedFolded bool
+	// MergeQueueFolded is whether the Merge Queue section is collapsed.
+	MergeQueueFolded bool
 	// HiddenFolded is whether the hidden-workspaces section is collapsed.
 	HiddenFolded bool
 	// OpenFolded is whether the open-workspaces section is collapsed.
@@ -140,11 +155,18 @@ type SidebarView struct {
 // band away (owner ruling 2026-10-08).
 var DefaultSidebarView = SidebarView{MergedFolded: false}
 
-// SetMergedSectionFolded records whether the recently-merged band is
+// SetMergedSectionFolded records whether the Recently Merged section is
 // collapsed, leaving the rest of the view as it stands.
 func (s *store) SetMergedSectionFolded(ctx context.Context, folded bool) error {
 	return s.updateSidebarView(ctx, "daemon.wsm.set_merged_section_folded", dlog.Context{"folded": folded},
 		`UPDATE sidebar_view SET merged_folded = ? WHERE id = 1`, folded)
+}
+
+// SetMergeQueueSectionFolded records whether the Merge Queue section is
+// collapsed, leaving the rest of the view as it stands.
+func (s *store) SetMergeQueueSectionFolded(ctx context.Context, folded bool) error {
+	return s.updateSidebarView(ctx, "daemon.wsm.set_merge_queue_section_folded", dlog.Context{"folded": folded},
+		`UPDATE sidebar_view SET merge_queue_folded = ? WHERE id = 1`, folded)
 }
 
 // SetHiddenSectionFolded records whether the hidden-workspaces section is
@@ -183,8 +205,8 @@ func (s *store) SidebarView(ctx context.Context) (SidebarView, error) {
 	view := DefaultSidebarView
 	err := s.read(ctx, "daemon.wsm.sidebar_view", dlog.Context{}, func(ctx context.Context) error {
 		var read SidebarView
-		err := s.q(ctx).QueryRowContext(ctx, `SELECT merged_folded, hidden_folded, open_folded FROM sidebar_view WHERE id = 1`).
-			Scan(&read.MergedFolded, &read.HiddenFolded, &read.OpenFolded)
+		err := s.q(ctx).QueryRowContext(ctx, `SELECT merged_folded, merge_queue_folded, hidden_folded, open_folded FROM sidebar_view WHERE id = 1`).
+			Scan(&read.MergedFolded, &read.MergeQueueFolded, &read.HiddenFolded, &read.OpenFolded)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}

@@ -507,9 +507,12 @@ type Verbs interface {
 	// the roster, and on a collapse hides its open workspaces, standing down
 	// those it does not spare.
 	FoldSubsection(ctx context.Context, sub ids.SubsectionID, folded bool, requester FoldRequester) error
-	// FoldMergedSection records whether the recently-merged band is collapsed
-	// and republishes the roster.
+	// FoldMergedSection records whether the Recently Merged section is
+	// collapsed and republishes the roster.
 	FoldMergedSection(ctx context.Context, folded bool) error
+	// FoldMergeQueueSection records whether the Merge Queue section is
+	// collapsed and republishes the roster.
+	FoldMergeQueueSection(ctx context.Context, folded bool) error
 	// FoldHiddenSection records whether the hidden-workspaces section is
 	// collapsed and republishes the roster.
 	FoldHiddenSection(ctx context.Context, folded bool) error

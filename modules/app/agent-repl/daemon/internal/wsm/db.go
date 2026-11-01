@@ -390,9 +390,12 @@ type DB interface {
 	UpdateTask(ctx context.Context, id TaskID, change TaskChange) error
 	// Tasks loads every task, all-or-nothing.
 	Tasks(ctx context.Context) ([]Task, error)
-	// SetMergedSectionFolded records whether the recently-merged band is
+	// SetMergedSectionFolded records whether the Recently Merged section is
 	// collapsed.
 	SetMergedSectionFolded(ctx context.Context, folded bool) error
+	// SetMergeQueueSectionFolded records whether the Merge Queue section is
+	// collapsed.
+	SetMergeQueueSectionFolded(ctx context.Context, folded bool) error
 	// SetHiddenSectionFolded records whether the hidden-workspaces section is
 	// collapsed.
 	SetHiddenSectionFolded(ctx context.Context, folded bool) error

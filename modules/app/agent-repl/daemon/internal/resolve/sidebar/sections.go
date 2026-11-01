@@ -15,10 +15,14 @@ import (
 	"agent-repld/internal/wsm"
 )
 
-// MergedSectionLabel is the Deploys section's heading (owner request,
-// 2026-10-27; it was "Merge Queue"). It has one author for the same reason
-// every other drawn string does.
-const MergedSectionLabel = "Deploys"
+// MergedSectionLabel is the Recently Merged section's heading (owner
+// request, 2026-11-01; it was "Deploys", which drew the queues too). It has
+// one author for the same reason every other drawn string does.
+const MergedSectionLabel = "Recently Merged"
+
+// MergeQueueSectionLabel is the Merge Queue section's heading (owner
+// request, 2026-11-01).
+const MergeQueueSectionLabel = "Merge Queue"
 
 // HiddenSectionLabel is the hidden-workspaces section's heading.
 const HiddenSectionLabel = "Hidden"
@@ -461,60 +465,77 @@ func (r *resolver) assertRepositoryInvariant(byRepo map[ids.RepoID][]wsm.Workspa
 	}
 }
 
-// mergedSection resolves the Deploys section: ONE GROUP PER REPOSITORY whose
-// queue is active (repoQueue.listed) or that has a recently merged workspace,
-// in the repository grouping's order (owner request, 2026-10-31). A group
-// carries its queue on its queued arm, or is idle, and its merged rows in
-// merge order, the latest merge first (sortMergedNewestFirst, owner request
-// 2026-10-13). The merged rows are hoisted out of every grouping, because
-// that these workspaces are done is the interesting fact, and they are FLAT
-// — a settled merge has no family left to draw.
+// mergedSection resolves the Recently Merged section: ONE GROUP PER
+// REPOSITORY that has a recently merged workspace, in the repository
+// grouping's order, its merged rows in merge order, the latest merge first
+// (sortMergedNewestFirst, owner request 2026-10-13). The merged rows are
+// hoisted out of every grouping, because that these workspaces are done is
+// the interesting fact, and they are FLAT — a settled merge has no family
+// left to draw.
 //
-// A group follows no repository fold: it folds by itself on the page, from
-// its activity arm.
+// A group follows no repository fold: it folds by itself on the page.
 func (r *resolver) mergedSection(merged []wsm.Workspace, rc rowContext, log dlog.Logger) *frontendv1.RosterMergedSection {
 	byRepo := map[ids.RepoID][]wsm.Workspace{}
 	for _, ws := range merged {
 		byRepo[ws.Repo] = append(byRepo[ws.Repo], ws)
 	}
-	queues := r.repoQueues(log)
 	section := &frontendv1.RosterMergedSection{
 		Header: &frontendv1.RosterSectionHeader{Label: &frontendv1.RosterLabel{Text: MergedSectionLabel}},
 	}
 	for _, repo := range sortRepositories(r.state.reg.Repositories) {
-		q, queued := queues[repo.ID]
-		delete(queues, repo.ID)
-		queued = queued && q.listed()
 		workspaces, hasMerged := byRepo[repo.ID]
 		delete(byRepo, repo.ID)
-		if !queued && !hasMerged {
+		if !hasMerged {
 			continue
 		}
 		rows := &frontendv1.RosterMergedRows{}
 		for _, ws := range sortMergedNewestFirst(workspaces) {
 			rows.Rows = append(rows.Rows, &frontendv1.RosterMergedRow{Row: r.row(ws, rc, log)})
 		}
-		group := &frontendv1.RosterMergedRepoGroup{
+		section.Groups = append(section.Groups, &frontendv1.RosterMergedRepoGroup{
 			Key:        repoKey(repo),
-			Header:     &frontendv1.RosterMergedRepoGroupHeader{Label: &frontendv1.RosterLabel{Text: repo.Name}},
+			Header:     repoGroupHeader(repo),
 			MergedRows: rows,
-		}
-		if queued {
-			group.Activity = &frontendv1.RosterMergedRepoGroup_Queued{Queued: &frontendv1.RosterMergedRepoGroupQueued{
-				Queue: r.drawMergeQueue(q, log.With(dlog.Context{"repo_id": string(repo.ID)})),
-			}}
-		} else {
-			group.Activity = &frontendv1.RosterMergedRepoGroup_Idle{Idle: &frontendv1.RosterMergedRepoGroupIdle{}}
-		}
-		section.Groups = append(section.Groups, group)
+		})
 	}
-	for repo := range queues {
-		log.Error("daemon.sidebar.merged_section", "a merge queue holds merges of a repository the registry does not carry, so it is not drawn", dlog.Context{
-			"repo_id": string(repo), "invariant_violation": "a merge queue's workspaces name a registered repository"})
-	}
-	r.assertRepositoryInvariant(byRepo, "daemon.sidebar.merged_section", "the Deploys band", log)
+	r.assertRepositoryInvariant(byRepo, "daemon.sidebar.merged_section", "the Recently Merged band", log)
 	setMergedFold(section, r.state.reg.View.MergedFolded)
 	return section
+}
+
+// mergeQueueSection resolves the Merge Queue section: ONE GROUP PER
+// REPOSITORY whose queue is active (repoQueue.listed), in the repository
+// grouping's order (owner request, 2026-11-01). A group follows no
+// repository fold: it folds by itself on the page.
+func (r *resolver) mergeQueueSection(log dlog.Logger) *frontendv1.RosterMergeQueueSection {
+	queues := r.repoQueues(log)
+	section := &frontendv1.RosterMergeQueueSection{
+		Header: &frontendv1.RosterSectionHeader{Label: &frontendv1.RosterLabel{Text: MergeQueueSectionLabel}},
+	}
+	for _, repo := range sortRepositories(r.state.reg.Repositories) {
+		q, queued := queues[repo.ID]
+		delete(queues, repo.ID)
+		if !queued || !q.listed() {
+			continue
+		}
+		section.Groups = append(section.Groups, &frontendv1.RosterMergeQueueRepoGroup{
+			Key:    repoKey(repo),
+			Header: repoGroupHeader(repo),
+			Queue:  r.drawMergeQueue(q, log.With(dlog.Context{"repo_id": string(repo.ID)})),
+		})
+	}
+	for repo := range queues {
+		log.Error("daemon.sidebar.merge_queue_section", "a merge queue holds merges of a repository the registry does not carry, so it is not drawn", dlog.Context{
+			"repo_id": string(repo), "invariant_violation": "a merge queue's workspaces name a registered repository"})
+	}
+	setMergeQueueFold(section, r.state.reg.View.MergeQueueFolded)
+	return section
+}
+
+// repoGroupHeader is the header a repository's group draws in the Merge
+// Queue and Recently Merged sections alike: the repository's name.
+func repoGroupHeader(repo wsm.Repository) *frontendv1.RosterMergedRepoGroupHeader {
+	return &frontendv1.RosterMergedRepoGroupHeader{Label: &frontendv1.RosterLabel{Text: repo.Name}}
 }
 
 // hiddenSection resolves the hidden-workspaces section: the open workspaces
@@ -585,13 +606,23 @@ func (r *resolver) openSection() *frontendv1.RosterOpenSection {
 }
 
 // setMergedFold states the recently-merged band's fold. The fold is the
-// daemon.s so every page draws the same one (UpdateSidebarView).
+// daemon's so every page draws the same one (UpdateSidebarView).
 func setMergedFold(section *frontendv1.RosterMergedSection, folded bool) {
 	if folded {
 		section.Fold = &frontendv1.RosterMergedSection_Collapsed{Collapsed: &frontendv1.RosterMergedSectionCollapsed{}}
 		return
 	}
 	section.Fold = &frontendv1.RosterMergedSection_Expanded{Expanded: &frontendv1.RosterMergedSectionExpanded{}}
+}
+
+// setMergeQueueFold states the Merge Queue section's fold. The fold is the
+// daemon's so every page draws the same one (UpdateSidebarView).
+func setMergeQueueFold(section *frontendv1.RosterMergeQueueSection, folded bool) {
+	if folded {
+		section.Fold = &frontendv1.RosterMergeQueueSection_Collapsed{Collapsed: &frontendv1.RosterMergeQueueSectionCollapsed{}}
+		return
+	}
+	section.Fold = &frontendv1.RosterMergeQueueSection_Expanded{Expanded: &frontendv1.RosterMergeQueueSectionExpanded{}}
 }
 
 // sectionHeader composes a repository or Recently Merged header: its label and

@@ -197,6 +197,7 @@ var migrations = []migration{
 	{To: 94, Name: "queue_drain_owed", Kind: MigrationAdditive, DDL: queueDrainOwedDDL},
 	{To: 95, Name: "remote_control", Kind: MigrationAdditive, DDL: remoteControlDDL},
 	{To: 96, Name: "pull_requests", Kind: MigrationAdditive, DDL: pullRequestsDDL},
+	{To: 97, Name: "sidebar_view_merge_queue_folded", Kind: MigrationAdditive, DDL: mergeQueueFoldedDDL},
 }
 
 // mergeQueueLookupIndexesDDL keys the two lookups every workspace read makes
