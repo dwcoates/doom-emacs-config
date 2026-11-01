@@ -197,11 +197,12 @@ func readUnit(found *failingTests, unit, suiteName string, lines []string, modul
 	switch {
 	case !known:
 	case suite.GoTests != nil:
-		// A sandboxed suite's harness reruns its failing top-level tests
-		// alone (roster.Suite.GoTests): a harness names no subtest.
+		// A sandboxed suite's harness reruns its failing tests alone
+		// (roster.Suite.GoTests), each by its deepest failing path: a failed
+		// step of an e2e scenario reruns just that step.
 		script := filepath.Join(module, suite.Path)
 		named = readGoUnit(s, lines, suiteName, func(names []string) []string {
-			return []string{selectionFlag("harness", script, topLevel(names))}
+			return []string{selectionFlag("harness", script, deepest(names))}
 		})
 	case suite.Kind == roster.GoModule || suite.Kind == roster.E2E:
 		rel, _, ok := goUnitPackage(unit, suiteName)
@@ -261,18 +262,6 @@ func deepest(names []string) []string {
 		nested := slices.ContainsFunc(names, func(o string) bool { return strings.HasPrefix(o, n+"/") })
 		if !nested && !slices.Contains(out, n) {
 			out = append(out, n)
-		}
-	}
-	return out
-}
-
-// topLevel is the top-level tests of names (Go test paths), each once, in
-// the order first named.
-func topLevel(names []string) []string {
-	var out []string
-	for _, n := range names {
-		if top, _, _ := strings.Cut(n, "/"); !slices.Contains(out, top) {
-			out = append(out, top)
 		}
 	}
 	return out

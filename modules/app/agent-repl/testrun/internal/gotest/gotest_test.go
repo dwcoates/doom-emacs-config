@@ -63,6 +63,40 @@ func TestTopPatternSelectsEveryNamedTopAndNoOther(t *testing.T) {
 	}
 }
 
+func TestPathsPatterns(t *testing.T) {
+	tests := []struct {
+		name  string
+		names []string
+		want  []string
+	}{
+		{name: "top-level tests share one pattern", names: []string{"TestA", "TestB"},
+			want: []string{"^(TestA|TestB)$"}},
+		{name: "the direct subtests of one test share one pattern", names: []string{"TestA/x", "TestA/y"},
+			want: []string{"^(TestA)$/^(x|y)$"}},
+		{name: "the subtests of two tests are two patterns", names: []string{"TestA/x", "TestB/y"},
+			want: []string{"^(TestA)$/^(x)$", "^(TestB)$/^(y)$"}},
+		{name: "top-level tests and subtest paths are separate patterns", names: []string{"TestA/x", "TestB"},
+			want: []string{"^(TestB)$", "^(TestA)$/^(x)$"}},
+		{name: "two depths beneath one test are a pattern each", names: []string{"TestA/x/1", "TestA/y"},
+			want: []string{"^TestA$/^x$/^1$", "^TestA$/^y$"}},
+		{name: "a path beneath a named test runs with it", names: []string{"TestA/x", "TestA", "TestB/y/1", "TestB/y"},
+			want: []string{"^(TestA)$", "^(TestB)$/^(y)$"}},
+		{name: "a name given twice runs once", names: []string{"TestA/x", "TestA/x"},
+			want: []string{"^(TestA)$/^(x)$"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := PathsPatterns(tt.names)
+
+			// Assert
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("PathsPatterns(%q) = %q, want %q", tt.names, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestResultLineReadsOutcomeNameAndSeconds(t *testing.T) {
 	tests := []struct {
 		line string

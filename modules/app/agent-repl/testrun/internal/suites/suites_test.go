@@ -1,6 +1,7 @@
 package suites
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -274,6 +275,7 @@ func TestScriptUnitsOfAGoTestsSuite(t *testing.T) {
 		t.Fatal(err)
 	}
 	only := u.Only([]string{"TestEmacsA", "TestDoomB"})
+	steps := u.Only([]string{"TestEmacsA/StepX", "TestDoomB"})
 
 	// Assert
 	t.Run("a whole run hands the script the roster's pattern unchanged", func(t *testing.T) {
@@ -287,15 +289,26 @@ func TestScriptUnitsOfAGoTestsSuite(t *testing.T) {
 		}
 	})
 	t.Run("a run of named tests hands the script exactly those", func(t *testing.T) {
-		if want := []string{script, gotest.TopPattern([]string{"TestEmacsA", "TestDoomB"})}; !reflect.DeepEqual(only.Argv, want) {
-			t.Fatalf("only argv = %v, want %v", only.Argv, want)
+		if want := []string{script, gotest.TopPattern([]string{"TestEmacsA", "TestDoomB"})}; len(only) != 1 || !reflect.DeepEqual(only[0].Argv, want) {
+			t.Fatalf("only = %+v, want one unit running %v", only, want)
 		}
 	})
 	t.Run("a run of named tests is the whole run's unit in everything but its argument", func(t *testing.T) {
-		whole := u.Atomic[0]
-		whole.Argv, only.Argv = nil, nil
-		if !reflect.DeepEqual(whole, only) {
-			t.Fatalf("only = %+v, want the whole unit %+v", only, whole)
+		whole, named := u.Atomic[0], only[0]
+		whole.Argv, named.Argv = nil, nil
+		if !reflect.DeepEqual(whole, named) {
+			t.Fatalf("only = %+v, want the whole unit %+v", named, whole)
+		}
+	})
+	t.Run("a run naming a step and a test is one numbered unit per pattern", func(t *testing.T) {
+		want := [][]string{{script, "^(TestDoomB)$"}, {script, "^(TestEmacsA)$/^(StepX)$"}}
+		if len(steps) != len(want) {
+			t.Fatalf("units = %+v, want %d", steps, len(want))
+		}
+		for i, sp := range steps {
+			if id := fmt.Sprintf("e#%02d", i); sp.ID != id || !reflect.DeepEqual(sp.Argv, want[i]) {
+				t.Errorf("unit %d = %s %v, want %s %v", i, sp.ID, sp.Argv, id, want[i])
+			}
 		}
 	})
 }

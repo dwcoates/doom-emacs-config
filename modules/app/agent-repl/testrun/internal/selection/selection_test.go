@@ -250,6 +250,7 @@ func TestNarrowRefuses(t *testing.T) {
 		{name: "a vitest file its suite does not run", sel: vitestNamed(mod+"webapp/src/nope.test.ts", "x"), suite: "webapp", units: suites.Units{Splits: []suites.Split{{Group: "webapp", Items: []string{"src/a.test.ts"}}}}, want: "its suite does not run it"},
 		{name: "groups of a harness that has none", sel: harness(mod+"bin/test-test-all.sh", "g"), suite: "orchestrator-harness", units: suites.Units{Atomic: []run.Spec{{Unit: sched.Unit{ID: "orchestrator-harness"}}}}, want: "has no groups to name"},
 		{name: "a test a Go-tests harness does not run", sel: harness(mod+"bin/test-e2e-emacs.sh", "TestEmacsA", "TestNope"), suite: "e2e-emacs", units: goTestsHarnessUnits(), want: "runs no test TestNope (it runs TestDoomB, TestEmacsA)"},
+		{name: "a step of a test a Go-tests harness does not run", sel: harness(mod+"bin/test-e2e-emacs.sh", "TestNope/Step"), suite: "e2e-emacs", units: goTestsHarnessUnits(), want: "runs no test TestNope (it runs TestDoomB, TestEmacsA)"},
 		{name: "a group the harness does not list", sel: harness(mod+"bin/test-build-frontend.sh", "nope"), suite: "build-frontend-harness", units: suites.Units{Splits: []suites.Split{{Group: "build-frontend-harness", Items: []string{"a", "b"}}}}, want: "has no group nope"},
 	}
 	for _, tc := range cases {
@@ -339,8 +340,8 @@ func goTestsHarnessUnits() suites.Units {
 	return suites.Units{
 		Atomic: []run.Spec{{Unit: sched.Unit{ID: "e2e-emacs"}, Argv: []string{"whole"}}},
 		Tests:  []string{"TestDoomB", "TestEmacsA"},
-		Only: func(names []string) run.Spec {
-			return run.Spec{Unit: sched.Unit{ID: "e2e-emacs"}, Argv: append([]string{"only"}, names...)}
+		Only: func(names []string) []run.Spec {
+			return []run.Spec{{Unit: sched.Unit{ID: "e2e-emacs"}, Argv: append([]string{"only"}, names...)}}
 		},
 	}
 }
@@ -355,6 +356,7 @@ func TestNarrowRunsTheNamedTestsOfAGoTestsHarness(t *testing.T) {
 		{name: "one named test runs alone", sels: []*testrunv1.TestSelection{harness(script, "TestEmacsA")}, want: []string{"only", "TestEmacsA"}},
 		{name: "a test named twice runs once", sels: []*testrunv1.TestSelection{harness(script, "TestEmacsA", "TestDoomB"), harness(script, "TestEmacsA")}, want: []string{"only", "TestEmacsA", "TestDoomB"}},
 		{name: "the whole harness named beside its tests runs whole", sels: []*testrunv1.TestSelection{harness(script, "TestEmacsA"), harness(script)}, want: []string{"whole"}},
+		{name: "a step of a named test runs by its path", sels: []*testrunv1.TestSelection{harness(script, "TestEmacsA/EmacsStep", "TestDoomB")}, want: []string{"only", "TestEmacsA/EmacsStep", "TestDoomB"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
