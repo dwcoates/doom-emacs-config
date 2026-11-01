@@ -46,15 +46,14 @@ const emCapUndefinedSlotsForm = `(let (undefined)
         (push (symbol-name name) undefined))))
   (sort undefined #'string<))`
 
-// TestEmacsGuiRegistryNamesOnlyLiveCapabilities is the guard the three void
+// testEmacsGuiRegistryNamesOnlyLiveCapabilities is the guard the three void
 // slots defeated: every capability the loaded gui registration names must be
 // a function IN THE EMACS THAT LOADED IT.
 //
 // It needs no workspace and no turn. The registration happens at module load,
 // so a defect here exists before any user does anything — which is exactly
 // why it went unnoticed until someone pressed a key.
-func TestEmacsGuiRegistryNamesOnlyLiveCapabilities(t *testing.T) {
-	t.Parallel()
+func testEmacsGuiRegistryNamesOnlyLiveCapabilities(t *testing.T) {
 	// Arrange: an Emacs with the module loaded. No daemon act is needed.
 	w, e := emGHIWorld(t)
 	_ = w
@@ -69,7 +68,7 @@ func TestEmacsGuiRegistryNamesOnlyLiveCapabilities(t *testing.T) {
 	}
 }
 
-// TestEmacsGuiDurableSessionIdNamesTheVendorConversation is the slot that DID
+// testEmacsGuiDurableSessionIdNamesTheVendorConversation is the slot that DID
 // have a post-overhaul answer, end to end.
 //
 // The durable id is the vendor conversation's uuid — the one a resume replays
@@ -85,8 +84,7 @@ func TestEmacsGuiRegistryNamesOnlyLiveCapabilities(t *testing.T) {
 // starts no shim (owner ruling, 2026-10-28), so the first prompt's bring-up
 // is what publishes it; the capability answering nil with no live session is
 // unit-covered in lisp/test-host.el.
-func TestEmacsGuiDurableSessionIdNamesTheVendorConversation(t *testing.T) {
-	t.Parallel()
+func testEmacsGuiDurableSessionIdNamesTheVendorConversation(t *testing.T) {
 	// Arrange: a registered, selected workspace with its panel open.
 	w, e := emGHIWorld(t)
 	ws, dir := emGHIRegister(t, e, w.Emacs.box, "repo-durable-session-id")

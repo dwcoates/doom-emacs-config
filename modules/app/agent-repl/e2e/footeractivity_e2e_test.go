@@ -78,8 +78,7 @@ var feedItemDerivedLine = regexp.MustCompile(`[✅❌] [^"]* (finished|failed|ca
 // is swept for a line worded from a landed item. The pushes are read on their
 // own goroutine as they arrive, so the stream's buffer never decides what the
 // sweep sees.
-func TestNoFooterPushBetweenFeedItemsCarriesAFeedItemDerivedLine(t *testing.T) {
-	t.Parallel()
+func testNoFooterPushBetweenFeedItemsCarriesAFeedItemDerivedLine(t *testing.T) {
 	// Arrange
 	w, ws := newFileToolsWorkspace(t)
 	footer := w.WatchFooter(ws)

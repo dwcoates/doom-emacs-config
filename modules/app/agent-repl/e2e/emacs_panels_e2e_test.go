@@ -147,7 +147,7 @@ func awaitPanelWindows(e *Emacs, frontendPrefix, panelPrefix string) {
 		})
 }
 
-// TestEmacsPlainCloseTogglesThePanelsBack is the other half of scenario 15:
+// testEmacsPlainCloseTogglesThePanelsBack is the other half of scenario 15:
 // `SPC o c` is a TOGGLE, so a second press on a workspace whose panels are
 // merely hidden must put them back.
 //
@@ -157,8 +157,7 @@ func awaitPanelWindows(e *Emacs, frontendPrefix, panelPrefix string) {
 // (`:running-p-fn`) and shows rather than opens. That slot pointed at a void
 // symbol, and nothing caught it — the close half passes without ever asking
 // the question, and no unit test of a function that does not exist can fail.
-func TestEmacsPlainCloseTogglesThePanelsBack(t *testing.T) {
-	t.Parallel()
+func testEmacsPlainCloseTogglesThePanelsBack(t *testing.T) {
 	w, _ := emacsPanelWorld(t, 1)
 	e := w.Emacs
 	frontendPrefix, panelPrefix := bufferNamePrefixes(e)
@@ -197,13 +196,12 @@ func TestEmacsPlainCloseTogglesThePanelsBack(t *testing.T) {
 	}
 }
 
-// TestEmacsKillCloseLeavesTheTabOrderAlone is scenario 16. `SPC o C` closes
+// testEmacsKillCloseLeavesTheTabOrderAlone is scenario 16. `SPC o C` closes
 // the panels and kills the session, and NO CLOSE REORDERS THE TABS: only the
 // daemon orders them (owner ruling, 2026-10-19). The kill may take the tab
 // away once the daemon accepts it, so the claim is that the workspace either
 // keeps its place or is gone, and never moves to the back.
-func TestEmacsKillCloseLeavesTheTabOrderAlone(t *testing.T) {
-	t.Parallel()
+func testEmacsKillCloseLeavesTheTabOrderAlone(t *testing.T) {
 	w, _ := emacsPanelWorld(t, 2)
 	e := w.Emacs
 	frontendPrefix, panelPrefix := bufferNamePrefixes(e)
@@ -244,9 +242,8 @@ func keptPlaceOrGone(before, after []string, ws string) bool {
 	return strings.Join(without, "\x00") == strings.Join(after, "\x00")
 }
 
-// TestEmacsFocusInputSelectsTheComposer is scenario 17.
-func TestEmacsFocusInputSelectsTheComposer(t *testing.T) {
-	t.Parallel()
+// testEmacsFocusInputSelectsTheComposer is scenario 17.
+func testEmacsFocusInputSelectsTheComposer(t *testing.T) {
 	w, _ := emacsPanelWorld(t, 1)
 	e := w.Emacs
 	frontendPrefix, panelPrefix := bufferNamePrefixes(e)
@@ -288,14 +285,13 @@ func TestEmacsFocusInputSelectsTheComposer(t *testing.T) {
 		})
 }
 
-// TestEmacsFullscreenTogglesAndRestores is scenario 18.
+// testEmacsFullscreenTogglesAndRestores is scenario 18.
 //
 // The command has two branches and only the non-agent one maximizes, so the
 // press happens from an ordinary work window: from inside a panel buffer
 // `agent-repl-fullscreen-and-focus` moves point to the composer instead,
 // which is a different claim and not this scenario's.
-func TestEmacsFullscreenTogglesAndRestores(t *testing.T) {
-	t.Parallel()
+func testEmacsFullscreenTogglesAndRestores(t *testing.T) {
 	w, _ := emacsPanelWorld(t, 1)
 	e := w.Emacs
 	frontendPrefix, panelPrefix := bufferNamePrefixes(e)
@@ -356,7 +352,7 @@ func TestEmacsFullscreenTogglesAndRestores(t *testing.T) {
 	}
 }
 
-// TestEmacsDeleteOtherWindowsOverPanelsKeepsTheWorkLayout is scenario 18's
+// testEmacsDeleteOtherWindowsOverPanelsKeepsTheWorkLayout is scenario 18's
 // other half: the ORDINARY window key, pressed over the panels.
 //
 // `delete-other-windows` is not the module's close. Pressed from the
@@ -373,8 +369,7 @@ func TestEmacsFullscreenTogglesAndRestores(t *testing.T) {
 // -- and it is that remount which must record the frame it is ACTUALLY
 // covering. Kept, the landing-era configuration made the next close restore
 // the LANDING over the user's own window, which then had no window at all.
-func TestEmacsDeleteOtherWindowsOverPanelsKeepsTheWorkLayout(t *testing.T) {
-	t.Parallel()
+func testEmacsDeleteOtherWindowsOverPanelsKeepsTheWorkLayout(t *testing.T) {
 	w, _ := emacsPanelWorld(t, 1)
 	e := w.Emacs
 	frontendPrefix, panelPrefix := bufferNamePrefixes(e)
@@ -426,7 +421,7 @@ func TestEmacsDeleteOtherWindowsOverPanelsKeepsTheWorkLayout(t *testing.T) {
 	}
 }
 
-// TestEmacsOpenProgressLadderReachesRendered is scenario 19: the blessed
+// testEmacsOpenProgressLadderReachesRendered is scenario 19: the blessed
 // host-native progress ladder raised by `SPC o c` walks its stages and ends
 // with the real panel on the frame, never on a terminal phase.
 //
@@ -438,8 +433,7 @@ func TestEmacsDeleteOtherWindowsOverPanelsKeepsTheWorkLayout(t *testing.T) {
 // from before the keypress: the trail must open on `:requested`, rest only on
 // ladder stages, and end "gone" -- `agent-repl--open-progress-finish`, which
 // runs once the real panel is displayed -- with no terminal phase anywhere.
-func TestEmacsOpenProgressLadderReachesRendered(t *testing.T) {
-	t.Parallel()
+func testEmacsOpenProgressLadderReachesRendered(t *testing.T) {
 	w, _ := emacsPanelWorld(t, 1)
 	e := w.Emacs
 	frontendPrefix, panelPrefix := bufferNamePrefixes(e)

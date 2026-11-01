@@ -280,8 +280,7 @@ func dbAwaitSimpleToolCall(
 // ===========================================================================
 
 // Seam: shell-spool
-func TestBashDetachedStartAndComplete(t *testing.T) {
-	t.Parallel()
+func testBashDetachedStartAndComplete(t *testing.T) {
 	gatePath := filepath.Join(t.TempDir(), "detach-gate")
 	w := NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{
 		ExtraEnv: []string{dbDetachGatePathEnv + "=" + gatePath},
@@ -367,8 +366,7 @@ const dbDetachGatePathEnv = "AGENT_REPL_FAKE_DETACH_GATE"
 // naming TaskOutput.
 // ===========================================================================
 
-func TestBashDetachExplicitPoll(t *testing.T) {
-	t.Parallel()
+func testBashDetachExplicitPoll(t *testing.T) {
 	w := NewWorld(t, WorldOpts{})
 	// Detached work outliving its turn opens a health fault; that is the
 	// shape this test provokes.
@@ -435,8 +433,7 @@ func dbExpectNoUnmodeledWarning(t *testing.T, stream *harness.Stream[*frontendv1
 // ===========================================================================
 
 // Seam: stream-tool-card
-func TestBashForegroundCompleted(t *testing.T) {
-	t.Parallel()
+func testBashForegroundCompleted(t *testing.T) {
 	w := SharedWorld(t)
 	ws := w.NewWorkspace(t)
 

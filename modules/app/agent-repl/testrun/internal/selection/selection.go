@@ -340,8 +340,9 @@ func (r Resolved) Narrow(s roster.Suite, u suites.Units) (suites.Units, error) {
 
 // narrowScript narrows a Script suite, which every one of targets selects,
 // to its one unit: whole when any target asks for all of it, otherwise
-// running just the Go tests the targets name, once each. Only a suite that
-// lists its Go tests (suites.Units.Tests) has names to select.
+// running just the Go test paths the targets name (a top-level test, or a
+// subtest path beneath one), once each. Only a suite that lists its Go tests
+// (suites.Units.Tests) has names to select.
 func narrowScript(u suites.Units, targets []target) ([]run.Spec, error) {
 	var names []string
 	for _, t := range targets {
@@ -352,15 +353,15 @@ func narrowScript(u suites.Units, targets []target) ([]run.Spec, error) {
 			return nil, fmt.Errorf("%s: has no groups to name; select all of it", t.what)
 		}
 		for _, n := range t.names {
-			if !slices.Contains(u.Tests, n) {
-				return nil, fmt.Errorf("%s: runs no test %s (it runs %s)", t.what, n, strings.Join(u.Tests, ", "))
+			if top, _, _ := strings.Cut(n, "/"); !slices.Contains(u.Tests, top) {
+				return nil, fmt.Errorf("%s: runs no test %s (it runs %s)", t.what, top, strings.Join(u.Tests, ", "))
 			}
 			if !slices.Contains(names, n) {
 				names = append(names, n)
 			}
 		}
 	}
-	return []run.Spec{u.Only(names)}, nil
+	return u.Only(names), nil
 }
 
 // narrowGo narrows a Go suite to one package's named tests.

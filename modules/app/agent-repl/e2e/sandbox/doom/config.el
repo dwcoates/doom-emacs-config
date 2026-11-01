@@ -176,7 +176,7 @@ read as a wedged editor: the heartbeat missed, `declareWedged' fired, the
 scenario was reported as the sentinel-recursion hang this layer exists to
 catch, and the error that actually caused it reached the log only afterwards
 as \"signal: killed\".  Measured 2026-09-04 on
-TestEmacsHistoryRecallRestoresTheLastPrompt, whose native backtrace stood in
+TestEmacsLayout/EmacsHistoryRecallRestoresTheLastPrompt, whose native backtrace stood in
 `sit-for' under `server-return-error' with `seconds=10'.
 
 The drain the `sit-for' buys is worth nothing here -- the Go side reads the

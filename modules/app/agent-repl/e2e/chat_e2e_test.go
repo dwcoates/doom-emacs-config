@@ -71,7 +71,7 @@ func searched(t *testing.T, w *World, query string) []string {
 	return ids
 }
 
-func TestAChatThreadLivesItsWholeLife(t *testing.T) {
+func testAChatThreadLivesItsWholeLife(t *testing.T) {
 	w := NewWorld(t, WorldOpts{Zettel: true})
 	ctx := w.Ctx()
 	roster := w.WatchRoster()

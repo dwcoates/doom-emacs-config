@@ -13,7 +13,7 @@ import (
 //
 // Scenario 20 (SubmitFromComposerYieldsAResponseRow) is NOT here: it is the
 // layer's proof-of-life test and lives in `emacs_e2e_test.go` as
-// TestEmacsProofOfLife, per the spec's "The proof-of-life test" section.
+// TestEmacsWorkspaces/EmacsProofOfLife, per the spec's "The proof-of-life test" section.
 // This file carries scenarios 21 through 25, plus 25a.
 //
 // Every scenario here drives an ORDINARY interactive command through
@@ -305,15 +305,14 @@ func composerText(e *Emacs, buffer string) string {
 // 23. DiscardInputClearsTheComposer
 // ---------------------------------------------------------------------------
 
-// TestEmacsDiscardInputClearsTheComposer is scenario 23: the composer empties
+// testEmacsDiscardInputClearsTheComposer is scenario 23: the composer empties
 // and NOTHING was submitted.
 //
 // The negative half needs no probe window: `agent-repl-discard-input' is
 // synchronous and returns before the readback, so a submission it made would
 // already be in the observer. The observer is proved live by every other
 // scenario in this file.
-func TestEmacsDiscardInputClearsTheComposer(t *testing.T) {
-	t.Parallel()
+func testEmacsDiscardInputClearsTheComposer(t *testing.T) {
 	s := newEmacsScenario(t)
 	e := s.E
 	armSubmissionObserver(t, e)
@@ -337,13 +336,12 @@ func TestEmacsDiscardInputClearsTheComposer(t *testing.T) {
 // 25. HistoryRecallRestoresTheLastPrompt
 // ---------------------------------------------------------------------------
 
-// TestEmacsHistoryRecallRestoresTheLastPrompt is scenario 25.
+// testEmacsHistoryRecallRestoresTheLastPrompt is scenario 25.
 //
 // History is pushed on ACCEPTANCE, not on the keystroke, so the recall waits
 // on the composer being cleared — which is the acceptance's own visible act —
 // rather than on a duration.
-func TestEmacsHistoryRecallRestoresTheLastPrompt(t *testing.T) {
-	t.Parallel()
+func testEmacsHistoryRecallRestoresTheLastPrompt(t *testing.T) {
 	s := newEmacsScenario(t)
 	e := s.E
 

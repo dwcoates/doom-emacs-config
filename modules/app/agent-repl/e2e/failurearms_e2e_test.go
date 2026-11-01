@@ -70,7 +70,7 @@ func faDriveErrored(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, scenar
 // The twelve AgentFailure.api_request_failed sub-arms
 // ---------------------------------------------------------------------------
 
-// TestApiRateLimitedCarriesTheVendorWait pins the ONE api arm with a field of
+// testApiRateLimitedCarriesTheVendorWait pins the ONE api arm with a field of
 // its own: feed.proto:878-880 gives `FeedTurnErrorRateLimited` a
 // `retry_after_ms` that "the client counts down from", UNSET meaning the
 // vendor "said nothing, which is different from 'retry now'". `!api-429`'s
@@ -87,8 +87,7 @@ func faDriveErrored(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, scenar
 // merely its presence. This shape is the fake's declaration, not a capture.
 //
 // Seam: turn-failure
-func TestApiRateLimitedCarriesTheVendorWait(t *testing.T) {
-	t.Parallel()
+func testApiRateLimitedCarriesTheVendorWait(t *testing.T) {
 	// Arrange
 	w := SharedWorld(t)
 	w.ExpectWarnings(faApiErrorWarnings...)

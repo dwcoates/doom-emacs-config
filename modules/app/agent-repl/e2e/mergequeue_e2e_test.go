@@ -325,8 +325,7 @@ func (m *mqConflictedMerge) awaitFailed(t *testing.T) *frontendv1.FeedMerge {
 	return merge
 }
 
-func TestAWorkspaceWhoseMergeFailedTakesTheNextPromptAsAnOrdinaryTurn(t *testing.T) {
-	t.Parallel()
+func testAWorkspaceWhoseMergeFailedTakesTheNextPromptAsAnOrdinaryTurn(t *testing.T) {
 	// Arrange: the merge failed and handed the workspace back.
 	m := mqStartConflictedMerge(t, "mq-conflict-next")
 	m.awaitFailed(t)
@@ -366,8 +365,7 @@ func TestAWorkspaceWhoseMergeFailedTakesTheNextPromptAsAnOrdinaryTurn(t *testing
 // reaches git at all, so no conflict is scripted.
 // ---------------------------------------------------------------------------
 
-func TestDisplacedTurnCapturedEndedThenResubmittedExactlyOnce(t *testing.T) {
-	t.Parallel()
+func testDisplacedTurnCapturedEndedThenResubmittedExactlyOnce(t *testing.T) {
 	const displacedText = "keep going"
 	// A daemon killed mid-merge writes no stand-down manifest
 	// (daemon.rollout.reconcile), and a turn left in flight by a killed daemon
@@ -603,8 +601,7 @@ func TestDisplacedTurnCapturedEndedThenResubmittedExactlyOnce(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // Seam: fan-cancel
-func TestFanWideCancel(t *testing.T) {
-	t.Parallel()
+func testFanWideCancel(t *testing.T) {
 	// Arrange: a plain registered, opened workspace (no repository/merge
 	// machinery needed for this scenario).
 	w := SharedWorld(t)
@@ -755,8 +752,7 @@ func mqSelfRepoWorld(t *testing.T, repo *harness.Repo) *World {
 	}})
 }
 
-func TestFailMarkerFailsAPreDeployHooksDeploy(t *testing.T) {
-	t.Parallel()
+func testFailMarkerFailsAPreDeployHooksDeploy(t *testing.T) {
 	// A typo in the marker would leave both arms driving PLAIN PROSE, whose
 	// turns conclude — so the before arm would fail with a confusing terminal
 	// and the after arm would pass for the wrong reason. Stated here instead.

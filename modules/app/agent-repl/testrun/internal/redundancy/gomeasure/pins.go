@@ -11,7 +11,7 @@ import (
 	"strconv"
 	"strings"
 
-	"agentrepl/testrun/internal/gotest"
+	"agentrepl/testrun/gofunc"
 )
 
 // TestFuncs are the top-level tests the named test files of dir declare.
@@ -24,7 +24,7 @@ func TestFuncs(dir string, files []string) ([]string, error) {
 		}
 		for _, d := range af.Decls {
 			fd, ok := d.(*ast.FuncDecl)
-			if ok && fd.Recv == nil && gotest.IsTestFunc(fd, "Test", "T") {
+			if ok && fd.Recv == nil && gofunc.IsTestFunc(fd, "Test", "T") {
 				out = append(out, fd.Name.Name)
 			}
 		}

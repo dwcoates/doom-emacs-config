@@ -50,8 +50,7 @@ func awaitAnswered(t *testing.T, addr string, thread *workspacev1.WorkspaceRef, 
 	t.Fatalf("the chat view never showed an answer saying %q: %v", words, stream.Err())
 }
 
-func TestEmacsReachesAChatThreadOffTheTabBar(t *testing.T) {
-	t.Parallel()
+func testEmacsReachesAChatThreadOffTheTabBar(t *testing.T) {
 	box := requireSandbox(t)
 	w := NewEmacsWorld(t, box, WithZettel())
 	e := w.Emacs

@@ -103,12 +103,11 @@ func findClosedDegradedWindow(v *frontendv1.TopbarView, open *frontendv1.TopbarD
 	return nil
 }
 
-// TestRecoveryAfterStoreRestart is SPEC.md §C #57 (RecoveryAfterStoreRestart):
+// testRecoveryAfterStoreRestart is SPEC.md §C #57 (RecoveryAfterStoreRestart):
 // same family, second half — the SAME degraded window transitions to CLOSED
 // once the store is back and the shim reconnects ("the degraded fact
 // clears", SPEC.md).
-func TestRecoveryAfterStoreRestart(t *testing.T) {
-	t.Parallel()
+func testRecoveryAfterStoreRestart(t *testing.T) {
 	// Arrange: same setup as TestDegradedDuringRealStoreOutage, through the
 	// open window.
 	w := NewWorld(t, WorldOpts{})

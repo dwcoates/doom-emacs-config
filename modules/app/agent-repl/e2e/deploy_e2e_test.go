@@ -82,8 +82,7 @@ func dpAwaitAnnounced(t *testing.T, w *World, stream *harness.Stream[*agentreplv
 	}).GetShutdownAnnounced()
 }
 
-func TestADeployThatFindsTheDaemonStaleHandsOverAFreeWorkspace(t *testing.T) {
-	t.Parallel()
+func testADeployThatFindsTheDaemonStaleHandsOverAFreeWorkspace(t *testing.T) {
 	// Arrange: a HEADLESS workspace, which is free and has no rendezvous.
 	w := dpStaleDaemonWorld(t)
 	ws := w.NewWorkspace(t)
@@ -128,8 +127,7 @@ func TestADeployThatFindsTheDaemonStaleHandsOverAFreeWorkspace(t *testing.T) {
 	}
 }
 
-func TestADeployOverARunningTurnHandsItOverAndEndsNothing(t *testing.T) {
-	t.Parallel()
+func testADeployOverARunningTurnHandsItOverAndEndsNothing(t *testing.T) {
 	// Arrange: a workspace whose turn is parked on a foreground shell that
 	// concludes on nothing but an interrupt — a turn that is RUNNING for as
 	// long as this test lets it.
@@ -211,8 +209,7 @@ func TestADeployOverARunningTurnHandsItOverAndEndsNothing(t *testing.T) {
 	}
 }
 
-func TestASuccessorThatFinishedJoiningAcceptsADeploy(t *testing.T) {
-	t.Parallel()
+func testASuccessorThatFinishedJoiningAcceptsADeploy(t *testing.T) {
 	// Arrange: one completed handover, so the daemon now serving BOOTED AS A
 	// SUCCESSOR — which is every daemon a second deploy ever talks to. Found
 	// live on 2026-09-21: the first deploy after a handover was refused as

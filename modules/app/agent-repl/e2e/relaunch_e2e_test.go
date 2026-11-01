@@ -98,12 +98,11 @@ func rlStopAndRelaunch(t *testing.T, w *World) *harness.Daemon {
 	return successor
 }
 
-// TestARelaunchedDaemonKeepsTheConversationItStoodDown is J58's assertion
+// testARelaunchedDaemonKeepsTheConversationItStoodDown is J58's assertion
 // against the real quartet: after a stop and a relaunch, the announcement
 // Emacs sends is what brings the conversation back, and the page the new
 // daemon serves still draws the pre-stop turn.
-func TestARelaunchedDaemonKeepsTheConversationItStoodDown(t *testing.T) {
-	t.Parallel()
+func testARelaunchedDaemonKeepsTheConversationItStoodDown(t *testing.T) {
 	// Arrange: a real turn run to its terminal, so the store durably holds
 	// the conversation's own rows.
 	w := NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{DurableState: true}})

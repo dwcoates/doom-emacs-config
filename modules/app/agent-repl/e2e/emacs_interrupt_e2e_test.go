@@ -260,15 +260,14 @@ func emGHIAssertIngressEmpty(t *testing.T, e *Emacs, ws, when string) {
 // AREA G
 // ---------------------------------------------------------------------------
 
-// TestEmacsForcedRestartInterruptsTheTurn is scenario 35.
+// testEmacsForcedRestartInterruptsTheTurn is scenario 35.
 //
 // A prefix-argument restart is the interrupting act, and its contract has
 // two halves that must BOTH hold: the live turn stops (the roster arm
 // settles `:interrupted`), and the agent is NOT resumed afterwards — a
 // forced restart that quietly re-drove the turn would look identical at the
 // first assertion alone.
-func TestEmacsForcedRestartInterruptsTheTurn(t *testing.T) {
-	t.Parallel()
+func testEmacsForcedRestartInterruptsTheTurn(t *testing.T) {
 	// Arrange: a registered workspace with a genuinely live turn. The parked
 	// scenario is what makes "mid-turn" a fact rather than a race.
 	w, e := emGHIWorld(t)
@@ -297,7 +296,7 @@ func TestEmacsForcedRestartInterruptsTheTurn(t *testing.T) {
 	emGHIAssertIngressEmpty(t, e, ws, "after a forced restart")
 }
 
-// TestEmacsRestartHoldsPromptsMeanwhile is scenario 36.
+// testEmacsRestartHoldsPromptsMeanwhile is scenario 36.
 //
 // The claim under test is that a prompt written around a restart is HELD
 // rather than refused: undelivered user intent may never be silently
@@ -311,8 +310,7 @@ func TestEmacsForcedRestartInterruptsTheTurn(t *testing.T) {
 // daemon's `:success' answer to the deferral is read at the RPC boundary.
 // The daemon's tray itself is not read here: this Emacs-layer world exposes
 // no daemon client.
-func TestEmacsRestartHoldsPromptsMeanwhile(t *testing.T) {
-	t.Parallel()
+func testEmacsRestartHoldsPromptsMeanwhile(t *testing.T) {
 	// Arrange. The parked turn here is the fake's TURN GATE, not
 	// `emGHIParkedPrompt`: a GRACEFUL restart waits for the turn to finish,
 	// and `!interrupt` parks inside `awaitInterrupt()`, which only a FORCED

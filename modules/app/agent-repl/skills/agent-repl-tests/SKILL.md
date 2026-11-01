@@ -40,7 +40,7 @@ or absolute, inside the workspace's worktree):
 -ert FILE=test-a,test-b        those ert-deftests
 -harness SCRIPT                the whole shell harness
 -harness SCRIPT=group1,group2  those groups of a harness that lists groups
--harness SCRIPT=TestA,TestB    those top-level Go tests of a sandboxed suite (bin/test-e2e-emacs.sh)
+-harness SCRIPT=TestA,TestB/s  those Go tests of a sandboxed suite (bin/test-e2e-emacs.sh); TestB/s is one scenario step
 -suite NAME                    one roster suite, whole
 -every-suite                   the whole roster (the merge queue's gate)
 ```
@@ -135,6 +135,14 @@ before the unit starts; a harness bound that spans a whole run must allow
 for "waiting for CPU" (the run's events carry `waiting_for_cpu` and
 `cpu_wait_ended`).
 
+## E2E coverage is a step of a scenario
+
+- A new top-level e2e test is only for an entirely new, large feature, and it is itself a scenario (`scenario(t, steps...)` in `e2e/scenarios_test.go`).
+- Any other e2e coverage is a new step inside the existing scenario whose subject it extends: a `testXxx(t *testing.T)` function in the file of its subject, listed in that scenario's `scenario(...)` call.
+- A step still takes the world the shared-fixture rule allows (`SharedWorld` when it may share; its own `NewWorld` when it changes the fixture or reads a fixture-wide view), per `modules/app/agent-repl/AGENTS.md` "A case may share an expensive fixture, never a slice another case reads".
+- Why (owner ruling, 2026-10-31): the merge gate runs every e2e test side by side under the host's 35% CPU cap; tests that pass alone failed there waiting on a CPU inside their 5-6s bounds (in the 72h before 2026-10-31, `TestEmacsTabsRehydrateFromTheRosterOnConnect` failed 8 gate runs and `TestEmacsKillCloseLeavesTheTabOrderAlone` 6, across unrelated merges). Scenarios cap the concurrent worlds at the number of scenarios. The owner accepted "god tests" for this.
+- Layout and how a step reruns: `e2e/AGENTS.md`, "Every world-building test is a step of a scenario".
+
 ## The rules this builds on
 
 They are owned elsewhere; read them, do not restate them:
@@ -205,6 +213,12 @@ coverage impact (always none).
     - Evidence (2026-10-14, solo, steady state): an e2e `World` costs about 2.7s wall to build and tear down, a fresh workspace inside a running one 0.30-0.41s; three tests on three Worlds took 7.80s and 1.33 CPU-s, on one World 2.36s and 0.72 CPU-s. A daemon-integration `newOpened` fixture costs 0.14s, which is not worth sharing (docs/investigations/2026-10-14-test-shared-setup-lzb.md).
     - Fix: share the fixture, never a slice of it: `SharedWorld(t)` (e2e) builds one default World per test process, owned by `harness.Suite()`, and each test takes a `harness.Daemon.View` with its own sweep over the workspaces it registered. The rule is AGENTS.md "A case may share an expensive fixture, never a slice another case reads".
     - Coverage impact: none; every test keeps its own case, workspace and failure.
+
+12. **Too many e2e worlds at once in the gate.**
+    - Evidence: the 8 and 6 gate failures above, each logging up to about 1s "waiting for a CPU" per wait (2026-10-31, merge-queue-retest-rounds' analysis).
+    - Fix: 113 world-building top-level tests became 12 scenarios whose steps run in order (`e2e/scenarios_test.go`); the gate reruns a failed step alone by its path (daemon/internal/merge/failingtests.go `deepest`, testrun gotest.PathsPatterns).
+    - Measured (2026-10-31, solo): the Go e2e chunk 21.3s -> 16.3s wall; the Emacs layer's `go test` 64.2s -> 74.3s, its longest scenario (`TestEmacsWorkspaces`) 40.9s.
+    - Coverage impact: none; every former test runs whole as a step, its body unchanged but for its `t.Parallel()`.
 
 ## Changes that LOOK faster and are refused
 

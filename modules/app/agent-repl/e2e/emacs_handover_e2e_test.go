@@ -12,7 +12,7 @@
 // Scenario 40 (HandoverTransfersAtFreeness) provokes a REAL self-merge
 // landing, whose one deploy finds the daemon stale and hands it over, to get
 // the one announcement that carries a successor's address.
-// See the block above `TestEmacsHandoverTransfersAtFreeness`.
+// See the block above `TestEmacsDaemonLifecycle/EmacsHandoverTransfersAtFreeness`.
 package e2e
 
 import (
@@ -130,14 +130,13 @@ func emHOAwaitNewDaemon(t *testing.T, e *Emacs, before int) {
 		})
 }
 
-// TestEmacsTabsRehydrateFromTheRosterOnConnect is scenario 38.
+// testEmacsTabsRehydrateFromTheRosterOnConnect is scenario 38.
 //
 // The daemon is the source of which workspaces exist. After it is stopped
 // and a new one is launched under Emacs, the tabs are not remembered
 // locally and rebuilt from a cache — they are rebuilt FROM THE ROSTER the
 // new daemon pushes, and the tab bar follows that order strictly.
-func TestEmacsTabsRehydrateFromTheRosterOnConnect(t *testing.T) {
-	t.Parallel()
+func testEmacsTabsRehydrateFromTheRosterOnConnect(t *testing.T) {
 	// Arrange: two registered workspaces, so the assertion is about an
 	// ORDER and not merely about a single row surviving.
 	w, e := emGHIWorld(t)
@@ -207,14 +206,13 @@ func TestEmacsTabsRehydrateFromTheRosterOnConnect(t *testing.T) {
 	}
 }
 
-// TestEmacsDaemonDownSurfacesAndReconnects is scenario 41.
+// testEmacsDaemonDownSurfacesAndReconnects is scenario 41.
 //
 // Connection death is detected AT THE TRANSPORT — there are no keepalive
 // frames — so the assertion is that the link goes down on its own, that the
 // reconnect loop is armed rather than the outage being swallowed, and that
 // the link comes back when a daemon returns.
-func TestEmacsDaemonDownSurfacesAndReconnects(t *testing.T) {
-	t.Parallel()
+func testEmacsDaemonDownSurfacesAndReconnects(t *testing.T) {
 	// Arrange
 	w, e := emGHIWorld(t)
 	ws, dir := emGHIRegister(t, e, w.Emacs.box, "repo-daemon-down")
@@ -370,14 +368,13 @@ func emHO40AddedName(t *testing.T, before, after []string) string {
 	return added[0]
 }
 
-// TestEmacsHandoverTransfersAtFreeness is scenario 40.
+// testEmacsHandoverTransfersAtFreeness is scenario 40.
 //
 // The assertion is the HANDOVER: a successor announced by a real self-merge
 // rollout is attached, and at freeness it is PROMOTED to
 // `agent-repl-link--primary` with the old connection released — not a
 // reconnect that happened to find a new address, and not Emacs's own dial.
-func TestEmacsHandoverTransfersAtFreeness(t *testing.T) {
-	t.Parallel()
+func testEmacsHandoverTransfersAtFreeness(t *testing.T) {
 	// Arrange: a repository that deploys as agent-repl's own does, and a
 	// world whose Emacs — and therefore whose daemon — is given a merge gate
 	// that passes, so a commit landing on its main branch runs the deploy
@@ -507,7 +504,7 @@ func TestEmacsHandoverTransfersAtFreeness(t *testing.T) {
 	}
 }
 
-// TestEmacsRestartKeepsTheSelectedWorkspace pins the ruling that EMACS OWNS
+// testEmacsRestartKeepsTheSelectedWorkspace pins the ruling that EMACS OWNS
 // THE USER'S SELECTION ACROSS A DAEMON RESTART.
 //
 // A relaunched daemon has no memory of `current`: it stamps it on whichever
@@ -530,8 +527,7 @@ func TestEmacsHandoverTransfersAtFreeness(t *testing.T) {
 // workspace that re-registers LAST, read off the link-up walk itself: a user
 // standing on the one offered first is stamped `current` by accident and
 // passes this scenario against the defect.
-func TestEmacsRestartKeepsTheSelectedWorkspace(t *testing.T) {
-	t.Parallel()
+func testEmacsRestartKeepsTheSelectedWorkspace(t *testing.T) {
 	// Arrange: two registered workspaces, and THE USER STANDS ON THE ONE THAT
 	// RE-REGISTERS LAST. That is the whole adversarial shape of the defect:
 	// `agent-repl-host-on-link-up` walks the registry, so the workspace it

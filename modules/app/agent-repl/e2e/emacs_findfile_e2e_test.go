@@ -141,7 +141,7 @@ func hashKeys(e *Emacs, table string) []string {
 // #32 — AnUnroutableFileRecordsARefusal
 // ---------------------------------------------------------------------------
 
-// TestEmacsAnUnroutableFileRecordsARefusal is scenario 32: a root no
+// testEmacsAnUnroutableFileRecordsARefusal is scenario 32: a root no
 // workspace owns takes the CREATE branch, and when that verb refuses, the
 // refusal is RECORDED and the file still opens.
 //
@@ -151,8 +151,7 @@ func hashKeys(e *Emacs, table string) []string {
 // refusing function through the module's own documented injection point,
 // because a REFUSAL is the precondition and there is no other way to make the
 // daemon refuse an ordinary directory on demand.
-func TestEmacsAnUnroutableFileRecordsARefusal(t *testing.T) {
-	t.Parallel()
+func testEmacsAnUnroutableFileRecordsARefusal(t *testing.T) {
 	box := requireSandbox(t)
 	f := newEmacsFindFileFixture(t, box)
 	e := f.Emacs
@@ -187,7 +186,7 @@ func TestEmacsAnUnroutableFileRecordsARefusal(t *testing.T) {
 // #33 — PendingPlacementResolvesAfterRosterReconcile
 // ---------------------------------------------------------------------------
 
-// TestEmacsPendingPlacementResolvesAfterRosterReconcile is scenario 33, and
+// testEmacsPendingPlacementResolvesAfterRosterReconcile is scenario 33, and
 // the PENDING path is what makes this area more than a switch:
 //
 // When the verb answers but the workspace's tab is not there YET, the
@@ -202,8 +201,7 @@ func TestEmacsAnUnroutableFileRecordsARefusal(t *testing.T) {
 // returns. The DRAIN is then produced by the real thing — an ordinary
 // `agent-repl-add-project-workspace' on the same directory, whose roster push
 // reconciles the tab into existence.
-func TestEmacsPendingPlacementResolvesAfterRosterReconcile(t *testing.T) {
-	t.Parallel()
+func testEmacsPendingPlacementResolvesAfterRosterReconcile(t *testing.T) {
 	box := requireSandbox(t)
 	f := newEmacsFindFileFixture(t, box)
 	e := f.Emacs
@@ -251,12 +249,11 @@ func TestEmacsPendingPlacementResolvesAfterRosterReconcile(t *testing.T) {
 // ruling. Its two documented shapes are asserted as two tests, one edge case
 // each: a file with a line, and a directory.
 
-// TestEmacsPopupOpensADirectoryInDired is scenario 34's directory case: the
+// testEmacsPopupOpensADirectoryInDired is scenario 34's directory case: the
 // same one subroutine answers a directory with a DIRED buffer, in the same
 // right-side popup. A per-caller variant for directories is exactly the
 // divergence popup.el exists to prevent.
-func TestEmacsPopupOpensADirectoryInDired(t *testing.T) {
-	t.Parallel()
+func testEmacsPopupOpensADirectoryInDired(t *testing.T) {
 	box := requireSandbox(t)
 	f := newEmacsFindFileFixture(t, box)
 	e := f.Emacs

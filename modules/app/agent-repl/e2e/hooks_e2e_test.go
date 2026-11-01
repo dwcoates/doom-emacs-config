@@ -150,7 +150,7 @@ func assertOneHookCard(t *testing.T, rows []*frontendv1.FeedRow) {
 	}
 }
 
-// TestHookBlocked is #78 (golden hook-blocked): the fake SDK's blocking
+// testHookBlocked is #78 (golden hook-blocked): the fake SDK's blocking
 // PostToolUse hook around an Edit call.
 //
 // FINDING — reported, not fixed: the fake scenario's own ATTACHMENT record
@@ -163,8 +163,7 @@ func assertOneHookCard(t *testing.T, rows []*frontendv1.FeedRow) {
 // scenario's `hook_response.output`/`stderr`). The attachment's fuller
 // sentence is a durable-transcript fact the sidecar/store own; it never
 // reaches this wire. This test asserts the wire text, not the attachment's.
-func TestHookBlocked(t *testing.T) {
-	t.Parallel()
+func testHookBlocked(t *testing.T) {
 	// Arrange
 	w, _, ws := newHookWorld(t)
 
@@ -190,7 +189,7 @@ func TestHookBlocked(t *testing.T) {
 	}
 }
 
-// TestHookFailed is #79 (golden hook-failed): the fake SDK's non-blocking
+// testHookFailed is #79 (golden hook-failed): the fake SDK's non-blocking
 // failing SessionStart hook (exit 1 on stderr, no gated tool call at all).
 //
 // THE CARD IS LIVE ONLY: the shim hands the failed firing's start and outcome
@@ -200,8 +199,7 @@ func TestHookBlocked(t *testing.T) {
 // pages carry no hook line, draws the turn and no card (owner rulings
 // 2026-10-06; the shim's convert/hooks.test.ts "the hook records handed to the
 // record plane").
-func TestHookFailed(t *testing.T) {
-	t.Parallel()
+func testHookFailed(t *testing.T) {
 	// Arrange
 	w, repo, ws := newHookWorld(t)
 	w.ExpectWarnings("daemon.rollout.reconcile")

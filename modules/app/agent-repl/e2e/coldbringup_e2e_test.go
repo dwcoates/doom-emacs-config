@@ -79,10 +79,9 @@ func cbuBringUp(t *testing.T, w *World) string {
 	return repo.Dir
 }
 
-// TestColdBringUpEarnsNoStoreRefusal is the defect itself: a cold bring-up must
+// testColdBringUpEarnsNoStoreRefusal is the defect itself: a cold bring-up must
 // leave the store's log with no `unknown_agent` refusal in it at all.
-func TestColdBringUpEarnsNoStoreRefusal(t *testing.T) {
-	t.Parallel()
+func testColdBringUpEarnsNoStoreRefusal(t *testing.T) {
 	// Arrange.
 	w := NewWorld(t, WorldOpts{})
 

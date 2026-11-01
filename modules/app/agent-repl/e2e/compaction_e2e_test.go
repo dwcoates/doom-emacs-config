@@ -156,8 +156,7 @@ func cpDriveObservingInProgress(t *testing.T, w *World, ws *workspacev1.Workspac
 // ---------------------------------------------------------------------------
 
 // Seam: compaction
-func TestCompactionDirected(t *testing.T) {
-	t.Parallel()
+func testCompactionDirected(t *testing.T) {
 	// Arrange
 	w := SharedWorld(t)
 	ws, configDir := cpNewWorkspace(t, w)

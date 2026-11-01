@@ -3,7 +3,7 @@
  *
  * The one scenario in this layer where the DAEMON UNDER THE PAGE is replaced
  * while the page is mounted. It is driven from the Go side
- * (`TestWebappLayerRestartHandover`), which owns the incumbent's re-exec, the
+ * (`TestWebappLayer/WebappLayerRestartHandover`), which owns the incumbent's re-exec, the
  * successor's boot and the adoption rendezvous; this file is the page half.
  *
  * THE RENDEZVOUS, AND WHY IT IS NOT A SLEEP. The Go side must not replace the

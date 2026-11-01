@@ -88,7 +88,7 @@ import (
 //
 // KEPT ON THE GRANTED CLOCK since 2026-10-20 (the grantedclock package): a probe
 // is charged only the time the container was not starved. On wall time a
-// merge gate failed TestEmacsUnknownRosterArmIsRefusedLoudly as EMACS WEDGED
+// merge gate failed TestEmacsWorkspaces/EmacsUnknownRosterArmIsRefusedLoudly as EMACS WEDGED
 // at 3.196s while the container was throttled in 32 of 32 periods and Emacs
 // sat waiting on a starved Xvfb. The measurements above were taken on wall
 // time, which is never less than granted time, so the bound only loosened
@@ -139,7 +139,7 @@ const HeartbeatBound = 3 * time.Second
 //
 // KEPT ON THE GRANTED CLOCK since 2026-10-20, as HeartbeatBound is: a merge
 // gate killed a registry await's eval at 2.6s of wall while Emacs itself sat
-// runnable in a starved container (TestEmacsSubmitWithNoDaemonIsRefusedLoudly).
+// runnable in a starved container (TestEmacsDaemonLifecycle/EmacsSubmitWithNoDaemonIsRefusedLoudly).
 // The `eval-max` phase reports granted time.
 const evalBound = 2600 * time.Millisecond
 
@@ -254,7 +254,7 @@ const emacsBootBound = 500 * time.Millisecond
 // merge-gate runs of the full suite, on the granted clock, ran p50 253ms,
 // p99 328ms, p999 647ms and max 856ms. The earlier 1s was sized off an idle
 // host's 265ms and sat at 1.17x that maximum, so a full run's cold daemon
-// boot (TestEmacsProofOfLife's link took 1.18s granted while its fresh state
+// boot (TestEmacsWorkspaces/EmacsProofOfLife's link took 1.18s granted while its fresh state
 // database was created) failed it with nothing hung. Just over 2x the max.
 const daemonLinkBound = 1800 * time.Millisecond
 
@@ -286,7 +286,7 @@ const doomBootBound = 3500 * time.Millisecond
 // work the boot does rather than the time it waits: the same 3.5s, as CPU
 // spent by Emacs and its reaped children. A boot starved by a host running
 // two gates at once spends little CPU and keeps waiting (2026-10-15:
-// TestEmacsHandoverTransfersAtFreeness missed the WALL bound with two merges'
+// TestEmacsDaemonLifecycle/EmacsHandoverTransfersAtFreeness missed the WALL bound with two merges'
 // suites running); a boot that is slow or spinning spends it and fails.
 const doomBootCPUBound = doomBootBound
 
@@ -1729,7 +1729,7 @@ func (e *Emacs) declareWedged(cause string) {
 // bounded tail of each log (tailArtifacts), and the scratch copy is removed.
 // It used to print the pty output alone -- routinely empty for a GUI frame --
 // so a red in a full run (where nobody sets the variable) left nothing: two
-// `TestEmacsDaemonDownSurfacesAndReconnects` reds on 2026-10-06 could only be
+// `TestEmacsDaemonLifecycle/EmacsDaemonDownSurfacesAndReconnects` reds on 2026-10-06 could only be
 // put down to load by inference.
 func (e *Emacs) dumpArtifacts() {
 	dir := os.Getenv(ArtifactsEnv)
@@ -1791,7 +1791,7 @@ func (e *Emacs) dumpArtifacts() {
 // (`agent-repl--workspace-emacs-log-target`, lisp/core.el), which is outside
 // the state root and is swept with the container.
 //
-// The consequence, observed on a red `TestEmacsHandoverTransfersAtFreeness`:
+// The consequence, observed on a red `TestEmacsDaemonLifecycle/EmacsHandoverTransfersAtFreeness`:
 // the preserved artifacts held the module's GLOBAL elisp log and nothing else,
 // so the run could be seen to decode two `WatchHostWorkspaceResponse` pushes
 // and then fall silent -- while every record that says what host.el DID with
@@ -2084,7 +2084,7 @@ func (e *Emacs) stop() {
 	// alive to name it. `(kill-emacs)' below returns once Emacs has gone, so
 	// a group read after it finds no Emacs at all whenever Emacs exits fast,
 	// and nothing then waits for the WebKit processes its group still holds.
-	// MEASURED, merge gate 2026-10-16: TestEmacsSubmitWithNoDaemonIsRefusedLoudly
+	// MEASURED, merge gate 2026-10-16: TestEmacsDaemonLifecycle/EmacsSubmitWithNoDaemonIsRefusedLoudly
 	// recorded `emacs-exit took 1ms` and the reaper then found its
 	// WebKitNetworkProcess and WebKitWebProcess alive.
 	groups := e.emacsGroups()
@@ -3578,8 +3578,8 @@ func (e *Emacs) AddReapPath(p string) {
 // THE PARALLELISM BOUND
 // ===========================================================================
 
-// Every scenario in this layer is `t.Parallel()`, and it is isolated well
-// enough to be: `requireSandbox` mints a fresh `os.MkdirTemp` scratch per
+// Every scenario in this layer is `t.Parallel()` (its steps run in order,
+// scenario_test.go), and each step is isolated well enough for that: `requireSandbox` mints a fresh `os.MkdirTemp` scratch per
 // test, so the Emacs HOME, its Doom tree, the state root, the two account
 // roots, the store database, the kernel-lock directory and the fake SDK's
 // spool root are all per-test paths; every socket is `shortSocketPath`, which

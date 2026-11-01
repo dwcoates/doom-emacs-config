@@ -62,12 +62,11 @@ func procFields(t *testing.T, pid int, file string) []string {
 	return strings.FieldsFunc(string(body), func(r rune) bool { return r == 0 })
 }
 
-// TestEmacsLauncherArgvCarriesBothAccountRoots is scenario 2, and it is THE
+// testEmacsLauncherArgvCarriesBothAccountRoots is scenario 2, and it is THE
 // account-flags regression pinned: the defect reached the user's live logs
 // and SPEC.md §G raised it as unresolved, because only a test where Emacs
 // spawns the daemon can see the argv the launcher actually composed.
-func TestEmacsLauncherArgvCarriesBothAccountRoots(t *testing.T) {
-	t.Parallel()
+func testEmacsLauncherArgvCarriesBothAccountRoots(t *testing.T) {
 	w := coldStartWorld(t)
 	e := w.Emacs
 

@@ -427,7 +427,7 @@ cause and repeating the operator's note verbatim.
 
 #### F9 #39, the restart handover — `restart-handover.layer.test.ts`
 
-ITS OWN AREA FILE AND ITS OWN GO TEST (`TestWebappLayerRestartHandover`),
+ITS OWN AREA FILE AND ITS OWN GO TEST (`TestWebappLayer/WebappLayerRestartHandover`),
 because it is the one area whose Go side acts WHILE the page is mounted.
 
 THE RENDEZVOUS. The child logs a marker through the daemon's own `ClientLog`

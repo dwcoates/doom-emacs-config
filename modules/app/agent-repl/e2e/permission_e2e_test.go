@@ -120,7 +120,7 @@ func pmAwaitFeedRow(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, what s
 // #13 PermissionDeniedByUser
 // ---------------------------------------------------------------------------
 
-// TestPermissionAskAnsweredArms drives the three permission scenarios whose
+// testPermissionAskAnsweredArms drives the three permission scenarios whose
 // gate reaches an OPEN ask (shim.md "The permission gate": "AgentPermission
 // .start from the gate callback"), answers it with the arm under test, and
 // asserts: the permission card settles with the matching verdict, the gated
@@ -131,8 +131,7 @@ func pmAwaitFeedRow(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, what s
 // success.completed terminal, deny included.
 //
 // Seam: answer-path
-func TestPermissionAskAnsweredArms(t *testing.T) {
-	t.Parallel()
+func testPermissionAskAnsweredArms(t *testing.T) {
 	cases := []struct {
 		name         string
 		prompt       string

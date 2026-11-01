@@ -327,7 +327,7 @@ copy.
 
 Every witness this layer had was a **lisp** witness: the server socket, a
 nested eval, `debug-on-event`'s SIGUSR2, a plain SIGINT. All four need Emacs
-to reach a QUIT check. `TestEmacsPermissionAskFiresTheAttentionMarker` stalled
+to reach a QUIT check. `TestEmacsWorkspaces/EmacsPermissionAskFiresTheAttentionMarker` stalled
 in roughly **one run in sixteen** with Emacs `state=R wchan=0` answering none
 of them, so nothing in the layer could say what it was doing.
 
@@ -901,7 +901,7 @@ they drive the same verbs, and assert Emacs's own state rather than frames.
 ## The proof-of-life test
 
 Scenario 20 is implemented first and alone, as
-`TestEmacsProofOfLife` in `emacs_e2e_test.go`:
+`TestEmacsWorkspaces/EmacsProofOfLife` in `emacs_e2e_test.go`:
 
 1. Sandbox up, store and sidecar started by Go, binaries built by the
    existing helpers.
@@ -924,7 +924,7 @@ It skips loudly without the sandbox, with the exact reason `Available()`
 returned.
 
 **Partly verified now that a container has run.** Observed for real, via
-`sandbox/bin/e2e-sandbox.sh run --dir e2e go test . -run TestEmacsProofOfLife`:
+`sandbox/bin/e2e-sandbox.sh run --dir e2e go test . -run TestEmacsWorkspaces/EmacsProofOfLife`:
 the image builds; the dependency stage lands 2244 files; the store starts and
 serves; `script` behaves as `StartPTY` assumes and Emacs takes a tty frame
 (once `TERM` stopped being `dumb`). Observed since, via
@@ -943,7 +943,7 @@ been run to completion in the sandbox.
 
 **Every `PROVISIONAL` marker is withdrawn.** The numbers below come from ten
 healthy boots of this layer inside the sandbox — two `-count=5` runs of
-`TestEmacsProofOfLife` — and a third `-count=5` that held the bounds derived
+`TestEmacsWorkspaces/EmacsProofOfLife` — and a third `-count=5` that held the bounds derived
 from them.
 
 **Re-measured** over a `-count=2` of the whole layer (91 boots) after the image
@@ -975,11 +975,11 @@ with its own WebKit, Xvfb, daemon and shim, so one scenario's busy moment
 leaves the other's processes runnable with nowhere to run. On 2026-10-20 two
 merge gates failed that way:
 
-- `TestEmacsUnknownRosterArmIsRefusedLoudly` was reported EMACS WEDGED at
+- `TestEmacsWorkspaces/EmacsUnknownRosterArmIsRefusedLoudly` was reported EMACS WEDGED at
   3.196s of wall while the container was throttled in 32 of 32 periods, and
   Emacs's main thread sat in `XGetWindowProperty` waiting on an Xvfb with no
   CPU to answer it.
-- `TestEmacsSubmitWithNoDaemonIsRefusedLoudly` had its registry await's eval
+- `TestEmacsDaemonLifecycle/EmacsSubmitWithNoDaemonIsRefusedLoudly` had its registry await's eval
   killed at 2.6s of wall while Emacs itself sat in state R.
 
 The clock (`daemon/integration/grantedclock/`) is wall time less the container's
@@ -1054,7 +1054,8 @@ scenario — instead of returning as a boot-bound flake on a busy machine.
 
 ### The parallelism bound, measured
 
-Every scenario is `t.Parallel()`. The isolation that permits it is per-test by
+Every scenario is `t.Parallel()`, and its steps run in order
+(`scenario_test.go`). The isolation that permits it is per-step by
 construction, not by convention: `requireSandbox` mints a fresh
 `os.MkdirTemp` scratch, so the Emacs `HOME`, its Doom tree, the state root,
 both account roots, the store database, the kernel-lock directory and the fake

@@ -49,7 +49,7 @@ import (
 // reap.
 const straySettleBound = 2 * time.Second
 
-// TestHostRequestedStopLeavesNoProcessBehind pins the whole-tree guarantee the
+// testHostRequestedStopLeavesNoProcessBehind pins the whole-tree guarantee the
 // proto's `now` states ("stop accepting work, flush in-flight writes, go"):
 // after the host's stop, nothing this world started is still running except
 // the store and the sidecar, which the test owns and stands down itself.
@@ -58,8 +58,7 @@ const straySettleBound = 2 * time.Second
 // was worst in and the one a freeness-waiting stop could never get out of: the
 // real shim's `canUseTool` callback is standing on an ask nobody will answer,
 // so the turn never ends on its own.
-func TestHostRequestedStopLeavesNoProcessBehind(t *testing.T) {
-	t.Parallel()
+func testHostRequestedStopLeavesNoProcessBehind(t *testing.T) {
 	// Arrange: a live session with a real shim, parked on an open ask.
 	w, ws := pmNewPermissionWorld(t)
 	// THE STOP IS THE DAEMON'S OWN ORDERED STAND-DOWN, so no system writes a
@@ -224,7 +223,7 @@ func TestConclusionBudgetRecords(t *testing.T) {
 	}
 }
 
-// TestAStopAfterACompletedTurnLeavesOnTheStop pins that the ordinary stop ends
+// testAStopAfterACompletedTurnLeavesOnTheStop pins that the ordinary stop ends
 // the shim's tails rather than waiting out their conclusion budget, against
 // the WHOLE world: a real store, a real sidecar, a real daemon and the real
 // Node shim, with a turn driven to its terminal and every watch of the session
@@ -233,7 +232,7 @@ func TestConclusionBudgetRecords(t *testing.T) {
 // It is the e2e half of daemon/integration's test of the same name, which
 // checks the same stop against the fake shim. Only this one exercises the
 // real shim's teardown, which is where the tail conclusion lives.
-func TestAStopAfterACompletedTurnLeavesOnTheStop(t *testing.T) {
+func testAStopAfterACompletedTurnLeavesOnTheStop(t *testing.T) {
 	// Arrange: a live session whose turn has run and ended.
 	w, ws := pmNewPermissionWorld(t)
 	// THE STOP IS THE DAEMON'S OWN ORDERED STAND-DOWN, so no system writes a
@@ -267,7 +266,7 @@ func TestAStopAfterACompletedTurnLeavesOnTheStop(t *testing.T) {
 	assertNoWarningInAnySystemLog(t, w)
 }
 
-// TestACompletedTurnAndTeardownLeaveNoWatchTokenOutstanding is the store-side
+// testACompletedTurnAndTeardownLeaveNoWatchTokenOutstanding is the store-side
 // half of the same stop: the shim's reads must leave the store holding nothing.
 //
 // THE DEFECT, MEASURED. OpenAgentSession is unary and the store's service has
@@ -281,12 +280,11 @@ func TestAStopAfterACompletedTurnLeavesOnTheStop(t *testing.T) {
 // The registry's size is stated in ONE place — the store's own shutdown
 // record — so the assertion stops the store and reads it there, the same way
 // the cold-bring-up tests read the store's refusals out of its real log.
-func TestACompletedTurnAndTeardownLeaveNoWatchTokenOutstanding(t *testing.T) {
-	t.Parallel()
+func testACompletedTurnAndTeardownLeaveNoWatchTokenOutstanding(t *testing.T) {
 	// Arrange: a live session whose turn has run and ended.
 	w, ws := pmNewPermissionWorld(t)
 	// THE STOP IS THE DAEMON'S OWN ORDERED STAND-DOWN, which writes no WARN or
-	// ERROR in any system (TestAStopAfterACompletedTurnLeavesOnTheStop runs
+	// ERROR in any system (TestDaemonLifecycle/AStopAfterACompletedTurnLeavesOnTheStop runs
 	// the same stop and asserts exactly that), so nothing is declared.
 	turn := SubmitPrompt(t, w, ws, "!prose-streamed")
 	AwaitTurnEnded(t, w, ws, turn)

@@ -153,12 +153,11 @@ func sfAwaitSessionArmRecords(t *testing.T, w *World, workspaceDir, operation, a
 // alone would not say the event's own window reached the store.
 // ===========================================================================
 
-// TestRateLimitSevenDayWindowFeedsTheWeeklyAllowance wires a session's
+// testRateLimitSevenDayWindowFeedsTheWeeklyAllowance wires a session's
 // rate-limit event through the daemon to the footer's weekly allowance.
 //
 // Seam: session-footer
-func TestRateLimitSevenDayWindowFeedsTheWeeklyAllowance(t *testing.T) {
-	t.Parallel()
+func testRateLimitSevenDayWindowFeedsTheWeeklyAllowance(t *testing.T) {
 	// Arrange
 	w, ws, workspaceDir := sfNewWorkspace(t)
 	before := sfSessionArmRecords(t, w, workspaceDir, sfFooterSessionUpdate, "rate_limit_status")
@@ -220,4 +219,3 @@ func sfAssertEventFeedsAllowance(t *testing.T, view *frontendv1.FooterView, allo
 		t.Errorf("FooterAllowance.resets_at_s = 0, want the event's reset instant in epoch SECONDS")
 	}
 }
-

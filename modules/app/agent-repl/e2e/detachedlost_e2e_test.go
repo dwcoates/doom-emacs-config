@@ -73,7 +73,7 @@ import (
 // of the window alone.
 const dlSweepInterval = 200 * time.Millisecond
 
-// dlSilenceWindow is the shell-silence window TestDetachedLostWentSilent
+// dlSilenceWindow is the shell-silence window TestSubagents/DetachedLostWentSilent
 // buys. `!bash-detach-live` appends its one line and then never writes
 // again, so the spool falls silent immediately and the only thing the window
 // buys is the sidecar's own patience — it need only outlast the jitter
@@ -295,7 +295,7 @@ func dlDriveDetachedLive(t *testing.T, w *World) ([]*frontendv1.FeedRow, *harnes
 // (a) went_silent — the spool is still there and stopped growing.
 // ===========================================================================
 
-// TestDetachedLostWentSilent drives `!bash-detach-live`, whose spool gets one
+// testDetachedLostWentSilent drives `!bash-detach-live`, whose spool gets one
 // line and then nothing forever, against a sidecar whose SHELL-SILENCE
 // window is short. The proto's arm for this is `went_silent` — "The run
 // produced nothing past the reader's silence ruling" — and it is the arm
@@ -304,8 +304,7 @@ func dlDriveDetachedLive(t *testing.T, w *World) ([]*frontendv1.FeedRow, *harnes
 // ONLY THE SHELL-SILENCE WINDOW IS SHORTENED. The grace and the agent and
 // workflow silences stay at the sidecar's production defaults, so no OTHER
 // arm can reach a conclusion first and steal the subject.
-func TestDetachedLostWentSilent(t *testing.T) {
-	t.Parallel()
+func testDetachedLostWentSilent(t *testing.T) {
 	// Arrange.
 	w := NewWorldWithSidecarStaleness(t, WorldOpts{}, SidecarStaleness{ShellSilence: dlSilenceWindow})
 	initial, stream, ws := dlDriveDetachedLive(t, w)

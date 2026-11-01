@@ -83,7 +83,7 @@ func tlResponseMarkdown(t *testing.T, rows []*frontendv1.FeedRow, id *frontendv1
 // #1 TurnStartToCompletion
 // ---------------------------------------------------------------------------
 
-// TestTurnStartToCompletion pins daemon.md's "Package map" (agentrepl/v1
+// testTurnStartToCompletion pins daemon.md's "Package map" (agentrepl/v1
 // FEED: SubmitPrompt; OpenFeed -> WatchFeed) and shim.md's "What the shim's
 // streams owe consumers" ("every bounded stream concludes with a TERMINAL
 // FRAME"). Scenario: the fake registry's DEFAULT (no `!name` prefix) —
@@ -94,8 +94,7 @@ func tlResponseMarkdown(t *testing.T, rows []*frontendv1.FeedRow, id *frontendv1
 // prefix)", not a bare "!"+name.
 //
 // Seam: prompt-round-trip
-func TestTurnStartToCompletion(t *testing.T) {
-	t.Parallel()
+func testTurnStartToCompletion(t *testing.T) {
 	// Arrange
 	w := SharedWorld(t)
 	ws := w.NewWorkspace(t)

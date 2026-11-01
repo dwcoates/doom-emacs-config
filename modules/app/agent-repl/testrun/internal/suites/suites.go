@@ -92,9 +92,12 @@ type Units struct {
 	Programs []string
 	// Tests are the top-level Go tests a Script suite's one unit runs, for a
 	// suite that names them (roster.Suite.GoTests), in name order; Only is
-	// that unit running just the named ones of them. Both are nil otherwise.
+	// that unit running just the named test paths beneath them (a top-level
+	// test, or a subtest path such as a scenario's step), as one unit per
+	// -test.run pattern they need (gotest.PathsPatterns). Both are nil
+	// otherwise.
 	Tests []string
-	Only  func(names []string) run.Spec
+	Only  func(names []string) []run.Spec
 }
 
 // Build turns one suite into units.
@@ -183,7 +186,20 @@ func scriptUnits(l Layout, s roster.Suite) (Units, error) {
 	return Units{
 		Atomic: []run.Spec{unit(s.GoTests.Pattern)},
 		Tests:  tests,
-		Only:   func(names []string) run.Spec { return unit(gotest.TopPattern(names)) },
+		Only: func(names []string) []run.Spec {
+			patterns := gotest.PathsPatterns(names)
+			if len(patterns) == 1 {
+				return []run.Spec{unit(patterns[0])}
+			}
+			// Several patterns are several runs of the script, each its own
+			// unit, numbered as a Go package's chunks are.
+			specs := make([]run.Spec, len(patterns))
+			for i, pattern := range patterns {
+				specs[i] = unit(pattern)
+				specs[i].ID = fmt.Sprintf("%s#%02d", s.Name, i)
+			}
+			return specs
+		},
 	}, nil
 }
 

@@ -86,8 +86,8 @@ func NewEmacsWorld(t *testing.T, box sandbox, options ...EmacsWorldOption) *Emac
 
 	// THE SLOT COMES FIRST, BEFORE THE PER-RUN BUILDS AND BEFORE THE STORE.
 	//
-	// Every scenario is parallel and the machine is not unbounded; see
-	// emacsParallelSlots. Taking the slot HERE rather than inside StartEmacs
+	// Every scenario is parallel, a world per step, and the machine is not
+	// unbounded; see emacsParallelSlots. Taking the slot HERE rather than inside StartEmacs
 	// matters for two measured reasons:
 	//
 	//   * The first scenarios of a run also do this suite's one-time builds
@@ -367,7 +367,7 @@ func resolveOrFail(t *testing.T, dir string) string {
 	return resolved
 }
 
-// TestEmacsProofOfLife is scenario 20 of EMACS-LAYER-SPEC.md, implemented
+// testEmacsProofOfLife is scenario 20 of EMACS-LAYER-SPEC.md, implemented
 // first and alone: workspace created, agent-repl panel opened, prompt
 // submitted from the composer, response row visible in EMACS'S OWN STATE.
 //
@@ -376,8 +376,7 @@ func resolveOrFail(t *testing.T, dir string) string {
 // module, spawns the daemon through its own launcher, drives ordinary
 // commands, and hands state back as data — so the remaining 43 scenarios are
 // a matter of writing scenarios rather than of building machinery.
-func TestEmacsProofOfLife(t *testing.T) {
-	t.Parallel()
+func testEmacsProofOfLife(t *testing.T) {
 	box := requireSandbox(t)
 	w := NewEmacsWorld(t, box)
 	e := w.Emacs

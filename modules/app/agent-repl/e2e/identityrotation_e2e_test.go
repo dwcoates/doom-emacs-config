@@ -155,15 +155,14 @@ func awaitTopbarSessionLineNonEmpty(t *testing.T, w *World, topbar *harness.Stre
 	return view.GetSessionLine().GetText()
 }
 
-// TestClearRotatesIdentity drives SPEC.md §C #20: the real `!rotate`
+// testClearRotatesIdentity drives SPEC.md §C #20: the real `!rotate`
 // scenario, asserting both arms the scenario states it produces —
 // SessionIdentityRotated (observed via the topbar's session line, see the
 // file header) and AgentUpdate.context_cut(ContextCleared) (observed as a
 // feed separation row, matching every other context-cut test in this repo).
 //
 // Seam: clear-rotation
-func TestClearRotatesIdentity(t *testing.T) {
-	t.Parallel()
+func testClearRotatesIdentity(t *testing.T) {
 	// Arrange
 	w := SharedWorld(t)
 	ws := w.NewWorkspace(t)
@@ -197,20 +196,19 @@ func TestClearRotatesIdentity(t *testing.T) {
 	}
 }
 
-// TestSecondRotateUnderRotatedIdentity drives SPEC.md §C #21: a SECOND real
+// testSecondRotateUnderRotatedIdentity drives SPEC.md §C #21: a SECOND real
 // `!rotate` submitted on the SAME session, once the first rotation has
 // already landed — E2E-EVENT-INVENTORY.md remediation item 3 ("drive a
 // SECOND `!rotate` ... instead of fabricating"), proving the daemon composes
 // the second rotation onto its already-rotated state rather than this test
 // fabricating an intermediate identity.
-func TestSecondRotateUnderRotatedIdentity(t *testing.T) {
-	t.Parallel()
+func testSecondRotateUnderRotatedIdentity(t *testing.T) {
 	// Arrange
 	w := NewWorld(t, WorldOpts{})
 	ws := w.NewWorkspace(t)
 	topbar := w.WatchTopbar(ws)
 
-	// Act: first rotation, same as TestClearRotatesIdentity.
+	// Act: first rotation, same as TestTurns/ClearRotatesIdentity.
 	firstTurn := SubmitPrompt(t, w, ws, "!rotate")
 	initial := awaitTopbarSessionLineNonEmpty(t, w, topbar)
 	afterFirst := awaitTopbarSessionLineChange(t, w, topbar, initial)

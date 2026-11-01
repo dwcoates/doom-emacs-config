@@ -475,7 +475,7 @@ Two omissions worth restating:
 - **Emacs has xwidgets, and the Emacs layer now drives them.** The binary is
   built `--with-xwidgets` and the image carries `Xvfb`, and
   `e2e/emacs_display_test.go` starts one per test while `StartEmacs` takes a
-  graphical frame on it. `TestEmacsProofOfLife` asserts the live WKWebView
+  graphical frame on it. `TestEmacsWorkspaces/EmacsProofOfLife` asserts the live WKWebView
   and reads back the daemon origin it navigated to. The entrypoint still
   starts no display of its own, deliberately: the layer that needs one owns
   its lifetime, so a non-GUI run pays nothing.

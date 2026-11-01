@@ -2,11 +2,10 @@ package e2e
 
 import "testing"
 
-// TestTheSharedWorldGivesEachTestItsOwnViewOfOneDaemon drives a turn in two
+// testTheSharedWorldGivesEachTestItsOwnViewOfOneDaemon drives a turn in two
 // tests over the shared World: both reach the one daemon process, each
 // through its own view and its own fresh workspace, and each turn ends.
-func TestTheSharedWorldGivesEachTestItsOwnViewOfOneDaemon(t *testing.T) {
-	t.Parallel()
+func testTheSharedWorldGivesEachTestItsOwnViewOfOneDaemon(t *testing.T) {
 	pids := make([]int, 2)
 	dirs := make([]string, 2)
 	for i := range pids {
