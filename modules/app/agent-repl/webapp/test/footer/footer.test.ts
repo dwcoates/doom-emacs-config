@@ -1570,7 +1570,7 @@ describe("mountFooter: the client's own verdict overlays the daemon's view", () 
     reportClientFailure("unary_transport", "AnswerColdGate: unavailable");
     h.tail.push(pushView(footerView()));
     await settle();
-    expect(host.querySelector(".footer-status")?.textContent).toBe(
+    expect(host.querySelector(".footer-status")?.getAttribute("data-arm")).toBe(
       "disconnected",
     );
   });
@@ -1582,7 +1582,7 @@ describe("mountFooter: the client's own verdict overlays the daemon's view", () 
     clearClientFailures();
     h.tail.push(pushView(footerView()));
     await settle();
-    expect(host.querySelector(".footer-status")?.textContent).toBe("idle");
+    expect(host.querySelector(".footer-status")?.getAttribute("data-arm")).toBe("idle");
   });
 
   it("redraws the daemon's last view the moment the verdict is cleared", async () => {
@@ -1592,7 +1592,7 @@ describe("mountFooter: the client's own verdict overlays the daemon's view", () 
     await settle();
     reportClientFailure("unary_transport", "AnswerColdGate: unavailable");
     clearClientFailures();
-    expect(host.querySelector(".footer-status")?.textContent).toBe("idle");
+    expect(host.querySelector(".footer-status")?.getAttribute("data-arm")).toBe("idle");
   });
 
   it("does NOT close the composer gate, the retry being what lifts the verdict", async () => {

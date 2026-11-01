@@ -207,9 +207,9 @@ describe("substatuses", () => {
     );
   });
 
-  it("reads merge failed as its status word", async () => {
+  it("reads merge failed's catch-all area as the status word merge failed", async () => {
     // Arrange / Act
-    await withFooter({ status: "mergeFailed", substatus: "tests" });
+    await withFooter({ status: "mergeFailed", substatus: "other" });
     // Assert
     expect(harness.text(".footer-status")).toBe("merge failed");
   });
