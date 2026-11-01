@@ -488,7 +488,9 @@ type fakeVerbs struct {
 	// remoteChanges is every UpdateRemoteControlMode change, answered with
 	// remoteOn and remoteErr.
 	remoteChanges []wsm.RemoteControlChange
-	remoteOn      bool
+	// remoteWorkspaces is the workspace each of remoteChanges was asked of.
+	remoteWorkspaces []ids.WorkspaceID
+	remoteOn         bool
 	remoteErr     error
 
 	// retries counts every RetryVendorError, answered with retryResponse and
@@ -626,6 +628,7 @@ func (f *fakeVerbs) RunCreate(ctx context.Context, ticket *workspace.CreateTicke
 
 func (f *fakeVerbs) UpdateRemoteControlMode(_ context.Context, ws ids.WorkspaceID, change wsm.RemoteControlChange) (bool, error) {
 	f.remoteChanges = append(f.remoteChanges, change)
+	f.remoteWorkspaces = append(f.remoteWorkspaces, ws)
 	return f.remoteOn, f.remoteErr
 }
 

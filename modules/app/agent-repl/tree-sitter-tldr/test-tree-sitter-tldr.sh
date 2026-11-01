@@ -16,7 +16,9 @@ set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 cd "$root"
-[[ -d node_modules ]] || npm ci --silent
+# The one install path every npm package's tests take (bin/ensure-deps.sh):
+# deps that resolve are left alone, and a failed install says why.
+"$root/../bin/ensure-deps.sh" "$root"
 tree_sitter="$root/node_modules/.bin/tree-sitter"
 
 scratch="$(mktemp -d)"
