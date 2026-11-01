@@ -6,7 +6,7 @@
  *
  * THE FOCUS LEAVES THE PAGE when
  *   - the page's window loses the focus (`blur`): a click into another Emacs
- *     window, into the webhost's sidebar, or Emacs leaving the screen's front;
+ *     window, into the sidebar's own web view, or Emacs leaving the screen's front;
  *   - the page stops being seen (presence.ts): the host hid it for another
  *     workspace's, or Emacs left the screen;
  *   - Emacs moved its own focus (`left`, from the host's `focusMoved`): the

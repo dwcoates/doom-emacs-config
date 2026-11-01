@@ -99,6 +99,238 @@ RAW defaults to `agent-repl-test-wh--retired'."
     (should (string-search "typeof h[\"setDaemon\"]===\"function\"?h.setDaemon(" script))
     (should (string-search "outcome:\"unknown-call\"" script))))
 
+;;;; ---- The shapes every one of Emacs's web views shares ----
+
+(ert-deftest agent-repl-test-wh-a-view-script-calls-the-page-object-it-names ()
+  "A web view's script calls METHOD on the page object at the global named."
+  ;; Act
+  (let ((script (agent-repl--webview-script "agentReplSidebar" "__agentReplSidebarPending" "markShown" '("id-a"))))
+    ;; Assert
+    (should (string-search "var h=window.agentReplSidebar;" script))
+    (should (string-search "h.markShown(\"id-a\")" script))))
+
+(ert-deftest agent-repl-test-wh-a-view-script-queues-on-the-pending-list-it-names ()
+  "A call made before the page started is queued on the pending list named."
+  ;; Act
+  (let ((script (agent-repl--webview-script "agentReplSidebar" "__agentReplSidebarPending" "markShown" '("id-a"))))
+    ;; Assert
+    (should (string-search "(window.__agentReplSidebarPending=window.__agentReplSidebarPending||[]).push(c);" script))))
+
+(ert-deftest agent-repl-test-wh-the-host-script-is-the-view-script-on-the-host-globals ()
+  "The host's call script is the shared view script, never a divergent copy."
+  ;; Act
+  (let ((host (agent-repl--webhost-script "ensure" "id-a" "http://x/"))
+        (view (agent-repl--webview-script "agentReplHost" "__agentReplHostPending" "ensure" '("id-a" "http://x/"))))
+    ;; Assert
+    (should (equal host view))))
+
+(ert-deftest agent-repl-test-wh-a-view-strays-off-its-own-origin ()
+  "A URI on another origin than the view's own URL has strayed."
+  (should (equal (agent-repl--webview-strayed-uri "http://host.localhost:1/?sidebar=1" "https://example.com/x")
+                 "https://example.com/x")))
+
+(ert-deftest agent-repl-test-wh-a-view-on-its-own-origin-has-not-strayed ()
+  "A URI on the view's own origin, at any path, has not strayed."
+  (should-not (agent-repl--webview-strayed-uri "http://host.localhost:1/?sidebar=1" "http://host.localhost:1/other")))
+
+(ert-deftest agent-repl-test-wh-a-view-with-no-url-has-not-strayed ()
+  "A view not yet loaded at a URL of its own has nothing to stray from."
+  (should-not (agent-repl--webview-strayed-uri nil "https://example.com/x")))
+
+(ert-deftest agent-repl-test-wh-the-host-strays-as-every-view-does ()
+  "The host's stray check is the shared one over its own URL."
+  (let ((agent-repl--webhost-url "http://host.localhost:1/?host=1"))
+    (should (equal (agent-repl--webhost-strayed-uri "https://example.com/x")
+                   (agent-repl--webview-strayed-uri agent-repl--webhost-url "https://example.com/x")))))
+
+(defmacro agent-repl-test-wh--with-props (&rest body)
+  "Run BODY with xwidget properties held in the alist `props'."
+  (declare (indent 0))
+  `(let ((props nil))
+     (cl-letf (((symbol-function 'xwidget-get) (lambda (_xw prop) (alist-get prop props)))
+               ((symbol-function 'xwidget-put) (lambda (_xw prop value) (setf (alist-get prop props) value))))
+       ,@body)))
+
+(ert-deftest agent-repl-test-wh-watching-a-view-installs-its-callback-by-name ()
+  "A watched view's callback is the symbol named, never a closure."
+  (agent-repl-test-wh--with-props
+    (setf (alist-get 'callback props) 'xwidget-webkit-callback)
+    (agent-repl--webview-watch-load 'xw 'agent-repl--sidebar-view-callback)
+    (should (eq (alist-get 'callback props) 'agent-repl--sidebar-view-callback))))
+
+(ert-deftest agent-repl-test-wh-watching-a-view-keeps-its-prior-handler ()
+  "A watched view keeps the handler it had, for the callback to hand on."
+  (agent-repl-test-wh--with-props
+    (setf (alist-get 'callback props) 'xwidget-webkit-callback)
+    (agent-repl--webview-watch-load 'xw 'agent-repl--sidebar-view-callback)
+    (should (eq (alist-get 'agent-repl-prior-callback props) 'xwidget-webkit-callback))))
+
+(ert-deftest agent-repl-test-wh-a-view-hands-its-prior-handler-every-event ()
+  "The prior handler is handed the xwidget and the event."
+  (let ((handed nil))
+    (agent-repl-test-wh--with-props
+      (setf (alist-get 'agent-repl-prior-callback props) (lambda (xw ev) (push (list xw ev) handed)))
+      (agent-repl--webview-call-prior 'xw 'load-changed)
+      (should (equal handed '((xw load-changed)))))))
+
+(ert-deftest agent-repl-test-wh-a-view-with-no-prior-handler-hands-nothing-on ()
+  "A view whose prior handler is no function hands nothing on, and does not signal."
+  (agent-repl-test-wh--with-props
+    (should-not (agent-repl--webview-call-prior 'xw 'load-changed))))
+
+(defconst agent-repl-test-wh--lisp-dir
+  (file-name-directory (or load-file-name buffer-file-name))
+  "The directory this suite and the sources it reads live in.")
+
+(defun agent-repl-test-wh--count-in-source (file needle)
+  "How many times NEEDLE occurs in lisp/FILE."
+  (with-temp-buffer
+    (insert-file-contents (expand-file-name file agent-repl-test-wh--lisp-dir))
+    (let ((n 0))
+      (while (search-forward needle nil t) (cl-incf n))
+      n)))
+
+(ert-deftest agent-repl-test-wh-both-views-watch-their-loads-through-the-shared-helper ()
+  "The host and the sidebar install their callbacks through the one helper."
+  (should (= 1 (agent-repl-test-wh--count-in-source "webhost.el" "(agent-repl--webview-watch-load xw '")))
+  (should (= 1 (agent-repl-test-wh--count-in-source "sidebar-view.el" "(agent-repl--webview-watch-load xw '"))))
+
+(ert-deftest agent-repl-test-wh-no-view-sets-its-callback-by-hand ()
+  "Only the shared helper puts an xwidget's callback.
+The host's one other put is its hot-reload heal (`agent-repl--webhost-rewatch'),
+which restores a known prior handler rather than keeping the current one."
+  (should (= 2 (agent-repl-test-wh--count-in-source "webhost.el" "(xwidget-put xw 'callback")))
+  (should (= 0 (agent-repl-test-wh--count-in-source "sidebar-view.el" "(xwidget-put xw 'callback"))))
+
+(defmacro agent-repl-test-wh--with-answer-records (&rest body)
+  "Run BODY binding `records' to every answer record, as (LEVEL SCOPE TEXT), newest first."
+  (declare (indent 0))
+  `(let ((records nil))
+     (cl-letf (((symbol-function 'agent-repl--log)
+                (lambda (scope fmt &rest args) (push (list 'log scope (apply #'format fmt args)) records)))
+               ((symbol-function 'agent-repl--warn)
+                (lambda (scope fmt &rest args) (push (list 'warn scope (apply #'format fmt args)) records)))
+               ((symbol-function 'agent-repl--error)
+                (lambda (scope fmt &rest args) (push (list 'error scope (apply #'format fmt args)) records))))
+       ,@body)))
+
+(ert-deftest agent-repl-test-wh-a-view-answer-is-recorded-under-its-scope-and-prefix ()
+  "An answer is recorded as PREFIX.answer under the scope its answer names."
+  (agent-repl-test-wh--with-answer-records
+    (agent-repl--webview-answered "{\"op\":\"show\",\"id\":\"id-a\",\"outcome\":\"shown\",\"notes\":[]}"
+                                  "elisp.view" (lambda (answer) (plist-get answer :id)) 'central #'ignore)
+    (should (equal records '((log "id-a" "elisp.view.answer op=show id=id-a outcome=shown"))))))
+
+(ert-deftest agent-repl-test-wh-a-view-that-lacks-a-call-is-handed-to-its-predates ()
+  "An `unknown-call' answer hands the call's name to the view's own handler."
+  (agent-repl-test-wh--with-answer-records
+    (let ((handed nil))
+      (agent-repl--webview-answered "{\"op\":\"focusMoved\",\"id\":null,\"outcome\":\"unknown-call\",\"notes\":[]}"
+                                    "elisp.view" (lambda (_a) 'central) 'central (lambda (op) (push op handed)))
+      (should (equal handed '("focusMoved"))))))
+
+(ert-deftest agent-repl-test-wh-a-view-answer-s-notes-are-recorded-at-their-levels ()
+  "Every note an answer carries is recorded at its own level, under the answer's scope."
+  (agent-repl-test-wh--with-answer-records
+    (agent-repl--webview-answered
+     "{\"op\":\"show\",\"id\":null,\"outcome\":\"shown\",\"notes\":[{\"level\":\"warn\",\"text\":\"odd\"}]}"
+     "elisp.view" (lambda (_a) 'central) 'central #'ignore)
+    (should (member '(warn central "elisp.webhost.note op=show note=odd") records))))
+
+(ert-deftest agent-repl-test-wh-an-unreadable-view-answer-is-recorded-at-error-under-central ()
+  "An answer that is not JSON is recorded at error, as PREFIX.answer-unreadable, under the central scope."
+  (agent-repl-test-wh--with-answer-records
+    (agent-repl--webview-answered "not json" "elisp.view" (lambda (_a) 'nobody) 'central #'ignore)
+    (should (equal (car (car records)) 'error))
+    (should (eq (nth 1 (car records)) 'central))
+    (should (string-prefix-p "elisp.view.answer-unreadable raw=\"not json\"" (nth 2 (car records))))))
+
+(ert-deftest agent-repl-test-wh-both-views-record-answers-through-the-shared-helper ()
+  "The host and the sidebar record their answers through the one helper."
+  (should (= 1 (agent-repl-test-wh--count-in-source "webhost.el" "(agent-repl--webview-answered raw \"elisp.webhost\"")))
+  (should (= 1 (agent-repl-test-wh--count-in-source "sidebar-view.el" "(agent-repl--webview-answered raw \"elisp.sidebar-view\"")))
+  (should (= 0 (agent-repl-test-wh--count-in-source "sidebar-view.el" "(agent-repl-webhost-parse-answer raw)"))))
+
+(defun agent-repl-test-wh--on-commit (status uri)
+  "What `agent-repl--webview-on-commit' did for STATUS and URI on a view at the host's URL."
+  (let (did)
+    (agent-repl--webview-on-commit status "http://host.localhost:1/?host=1" uri
+                                   (lambda (strayed) (push (list 'take-back strayed) did))
+                                   (lambda () (push 'replay did)))
+    did))
+
+(ert-deftest agent-repl-test-wh-a-view-s-own-committed-page-is-replayed ()
+  "A committed load of the view's own page replays its state."
+  (should (equal (agent-repl-test-wh--on-commit "load-committed" "http://host.localhost:1/?host=1") '(replay))))
+
+(ert-deftest agent-repl-test-wh-a-view-s-strayed-commit-is-taken-back ()
+  "A committed load off the view's origin is taken back, and nothing is replayed."
+  (should (equal (agent-repl-test-wh--on-commit "load-committed" "https://example.com/")
+                 '((take-back "https://example.com/")))))
+
+(ert-deftest agent-repl-test-wh-a-view-s-blank-commit-does-nothing ()
+  "The blank document WebKit commits first is neither replayed into nor taken back."
+  (should-not (agent-repl-test-wh--on-commit "load-committed" "about:blank")))
+
+(ert-deftest agent-repl-test-wh-a-view-s-other-load-stages-do-nothing ()
+  "Only the commit acts: one replay per document."
+  (should-not (agent-repl-test-wh--on-commit "load-finished" "http://host.localhost:1/?host=1")))
+
+(ert-deftest agent-repl-test-wh-both-views-decide-a-commit-through-the-shared-helper ()
+  "The host and the sidebar decide a committed load through the one helper."
+  (should (= 1 (agent-repl-test-wh--count-in-source "webhost.el" "(agent-repl--webview-on-commit\n")))
+  (should (= 1 (agent-repl-test-wh--count-in-source "sidebar-view.el" "(agent-repl--webview-on-commit status")))
+  (should (= 0 (agent-repl-test-wh--count-in-source "sidebar-view.el" "\"load-committed\""))))
+
+(defmacro agent-repl-test-wh--with-made-view (live &rest body)
+  "Run BODY with web view creation stubbed: a fresh buffer, an xwidget when LIVE.
+Binds `killed' to the buffers the kill function was handed."
+  (declare (indent 1))
+  `(let ((killed nil)
+         (made (generate-new-buffer " *test-view*")))
+     (unwind-protect
+         (cl-letf (((symbol-function 'agent-repl--frontend-make-webview-buffer) (lambda (_url) made))
+                   ((symbol-function 'agent-repl--frontend-webview-live-widget) (lambda (_buf) (and ,live 'xw))))
+           ,@body)
+       (when (buffer-live-p made)
+         (with-current-buffer made (setq kill-buffer-query-functions nil))
+         (kill-buffer made)))))
+
+(defun agent-repl-test-wh--refuse () "A kill guard for the made-view tests." nil)
+
+(ert-deftest agent-repl-test-wh-a-made-view-has-no-mode-line ()
+  "A hidden web view shows no mode line in any window it is shown in."
+  (agent-repl-test-wh--with-made-view t
+    (let ((buf (agent-repl--webview-make-hidden "http://x/" " *made-view*" #'agent-repl-test-wh--refuse #'ignore "a view")))
+      (should-not (buffer-local-value 'mode-line-format buf)))))
+
+(ert-deftest agent-repl-test-wh-a-made-view-has-no-header-line ()
+  "A hidden web view shows no header line."
+  (agent-repl-test-wh--with-made-view t
+    (let ((buf (agent-repl--webview-make-hidden "http://x/" " *made-view*" #'agent-repl-test-wh--refuse #'ignore "a view")))
+      (should-not (buffer-local-value 'header-line-format buf)))))
+
+(ert-deftest agent-repl-test-wh-a-made-view-takes-its-name ()
+  "A hidden web view's buffer carries the name it was made with."
+  (agent-repl-test-wh--with-made-view t
+    (let ((buf (agent-repl--webview-make-hidden "http://x/" " *made-view*" #'agent-repl-test-wh--refuse #'ignore "a view")))
+      (should (equal (buffer-name buf) " *made-view*")))))
+
+(ert-deftest agent-repl-test-wh-a-made-view-stands-its-kill-guard ()
+  "A hidden web view's kill guard stands on its own kill query hook."
+  (agent-repl-test-wh--with-made-view t
+    (let ((buf (agent-repl--webview-make-hidden "http://x/" " *made-view*" #'agent-repl-test-wh--refuse #'ignore "a view")))
+      (should (memq #'agent-repl-test-wh--refuse (buffer-local-value 'kill-buffer-query-functions buf))))))
+
+(ert-deftest agent-repl-test-wh-a-made-view-without-an-xwidget-is-killed-and-signals ()
+  "A view created without a live xwidget is killed through its kill function and signals."
+  (agent-repl-test-wh--with-made-view nil
+    (let ((err (should-error (agent-repl--webview-make-hidden
+                              "http://x/" " *made-view*" #'agent-repl-test-wh--refuse
+                              (lambda (buf) (push buf killed)) "a view"))))
+      (should (equal (length killed) 1))
+      (should (string-search "a view was created without a live xwidget" (cadr err))))))
+
 (defmacro agent-repl-test-wh--with-predates (link &rest body)
   "Run BODY with LINK as the live link, host reloads and records captured.
 Binds `reloads' and `records', newest first."
@@ -1017,6 +1249,112 @@ The current tab's page, not shown here, is the nearest of all."
     (agent-repl-test-wh--load "load-committed")
     ;; Assert
     (should-not (agent-repl-test-wh--sent "holdBack"))))
+
+;;;; ---- The sidebar's web view follows the host (sidebar-view.el) ----
+
+(defmacro agent-repl-test-wh--with-sidebar-told (&rest body)
+  "Run BODY with every call the host makes on the sidebar recorded in `told'.
+`told' holds (FUNCTION . ARGS), newest first."
+  (declare (indent 0))
+  `(let ((told nil))
+     (cl-letf (((symbol-function 'agent-repl-sidebar-view-mark-shown)
+                (lambda (&rest args) (push (cons 'mark-shown args) told)))
+               ((symbol-function 'agent-repl-sidebar-view-follow-daemon)
+                (lambda (&rest args) (push (cons 'follow-daemon args) told)))
+               ((symbol-function 'agent-repl-sidebar-view-set-log-level)
+                (lambda (&rest args) (push (cons 'set-log-level args) told)))
+               ((symbol-function 'agent-repl-sidebar-view-focus-moved)
+                (lambda (&rest args) (push (cons 'focus-moved args) told)))
+               ((symbol-function 'agent-repl-sidebar-view-navigate)
+                (lambda (&rest args) (push (cons 'navigate args) told)))
+               ((symbol-function 'agent-repl-sidebar-view-kill)
+                (lambda (&rest args) (push (cons 'kill args) told))))
+       ,@body)))
+
+(ert-deftest agent-repl-test-wh-showing-a-page-marks-its-row-in-the-sidebar ()
+  "The sidebar's highlight moves with the page the host shows."
+  (agent-repl-test-wh--with-host
+    (agent-repl-test-wh--with-sidebar-told
+      (agent-repl-webhost-show "alpha")
+      (should (equal told '((mark-shown "id-alpha")))))))
+
+(ert-deftest agent-repl-test-wh-showing-the-shown-page-marks-nothing-again ()
+  "A show of the page already shown leaves the sidebar alone too."
+  (agent-repl-test-wh--with-host
+    (agent-repl-test-wh--with-sidebar-told
+      (agent-repl-webhost-show "alpha")
+      (agent-repl-webhost-show "alpha")
+      (should (equal told '((mark-shown "id-alpha")))))))
+
+(ert-deftest agent-repl-test-wh-following-a-daemon-points-the-sidebar-at-it ()
+  "A handover points the sidebar at the daemon the host follows."
+  (agent-repl-test-wh--with-host
+    (agent-repl-test-wh--with-sidebar-told
+      (agent-repl-webhost-follow-daemon "alpha" (agent-repl-test-wh--conn "127.0.0.1:2"))
+      (should (equal told '((follow-daemon "http://host.localhost:2")))))))
+
+(ert-deftest agent-repl-test-wh-a-log-level-reaches-the-sidebar ()
+  "A log level window raises the sidebar with the host."
+  (agent-repl-test-wh--with-host
+    (agent-repl-test-wh--with-sidebar-told
+      (let ((agent-repl--webhost-log-level nil))
+        (agent-repl-webhost-set-log-level 'debug 1792000000000)
+        (should (equal told '((set-log-level debug 1792000000000))))))))
+
+(ert-deftest agent-repl-test-wh-a-focus-move-reaches-the-sidebar ()
+  "Emacs moving its focus is told to the sidebar as to the pages."
+  (agent-repl-test-wh--with-host
+    (agent-repl-test-wh--with-sidebar-told
+      (agent-repl-webhost-focus-moved)
+      (should (equal told '((focus-moved)))))))
+
+(ert-deftest agent-repl-test-wh-a-host-reload-reloads-the-sidebar-on-the-same-daemon ()
+  "The sidebar reloads with the host, onto the daemon the host reloads onto."
+  (agent-repl-test-wh--with-host
+    (agent-repl-test-wh--with-sidebar-told
+      (cl-letf (((symbol-function 'agent-repl--frontend-webview-navigate-widget) #'ignore))
+        (let ((conn (agent-repl-test-wh--conn "127.0.0.1:3")))
+          (agent-repl--webhost-navigate conn)
+          (should (equal told (list (list 'navigate conn)))))))))
+
+(ert-deftest agent-repl-test-wh-killing-the-host-kills-the-sidebar ()
+  "The sidebar goes with the host."
+  (agent-repl-test-wh--with-host
+    (agent-repl-test-wh--with-sidebar-told
+      (let ((agent-repl--webhost-buffer (generate-new-buffer " *wh-kill*")))
+        (cl-letf (((symbol-function 'agent-repl--frontend-kill-webview) #'kill-buffer))
+          (agent-repl-webhost-kill))
+        (should (equal told '((kill))))))))
+
+;;;; ---- The sidebar's offset ----
+
+(ert-deftest agent-repl-test-wh-the-sidebar-offset-is-told-to-the-host ()
+  "A measured offset is handed to the host."
+  (agent-repl-test-wh--with-host
+    (agent-repl-webhost-set-sidebar-offset 12)
+    (should (equal (agent-repl-test-wh--sent "setSidebarOffset")
+                   (list (agent-repl--webhost-script "setSidebarOffset" 12))))))
+
+(ert-deftest agent-repl-test-wh-the-same-sidebar-offset-is-told-once ()
+  "An offset the host already has sends nothing."
+  (agent-repl-test-wh--with-host
+    (agent-repl-webhost-set-sidebar-offset 12)
+    (agent-repl-webhost-set-sidebar-offset 12)
+    (should (= 1 (length (agent-repl-test-wh--sent "setSidebarOffset"))))))
+
+(ert-deftest agent-repl-test-wh-a-loading-host-is-handed-the-sidebar-offset ()
+  "A host that loads is handed the offset it lost."
+  (agent-repl-test-wh--with-host
+    (setq agent-repl--webhost-sidebar-offset 9)
+    (agent-repl--webhost-replay)
+    (should (equal (agent-repl-test-wh--sent "setSidebarOffset")
+                   (list (agent-repl--webhost-script "setSidebarOffset" 9))))))
+
+(ert-deftest agent-repl-test-wh-a-loading-host-is-handed-no-level-offset ()
+  "Both windows level, the host's own zero stands and nothing is sent."
+  (agent-repl-test-wh--with-host
+    (agent-repl--webhost-replay)
+    (should-not (agent-repl-test-wh--sent "setSidebarOffset"))))
 
 ;;;; ---- The log level window ----
 

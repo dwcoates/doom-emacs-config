@@ -8,11 +8,12 @@
  * body as it stood at the click: the feed underneath is never moved, and the
  * overlay does not follow the bubble as it streams.
  *
- * IT COVERS THE SIDEBAR TOO, though the webhost draws the sidebar over every
- * page. The page cannot draw past its own iframe, so it states, on its root,
- * that an overlay stands (`BUBBLE_OVERLAY_ATTRIBUTE`); the host link
- * (host/embed.ts) reports that to the webhost, which lifts the page's iframe
- * above its sidebar while it does.
+ * IT COVERS THE WEBHOST'S OWN LAYERS TOO (the gate's band, the load button).
+ * The page cannot draw past its own iframe, so it states, on its root, that an
+ * overlay stands (`BUBBLE_OVERLAY_ATTRIBUTE`); the host link (host/embed.ts)
+ * reports that to the webhost, which lifts the page's iframe above them while
+ * it does. The sidebar is a web view of its own (host/sidebar-page.ts), in
+ * another Emacs window, which the overlay does not cover.
  *
  * Escape closes it, pressed here or in Emacs's composer (the host relays the
  * composer's escape as `dismissDigest`, which `closeStandingBubbleOverlay`

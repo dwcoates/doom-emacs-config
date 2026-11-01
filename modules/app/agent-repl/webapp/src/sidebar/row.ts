@@ -77,7 +77,7 @@ import type { SidebarContext } from "./context.js";
 import { toggleHiddenDropdown } from "./dropdowns.js";
 import { markReviving } from "./reviving.js";
 import { viewedMode } from "./viewed.js";
-import { rosterArmMark, rosterRowMark, type RosterStatusCase, type RowMarkers } from "./tones.js";
+import { rosterRowMark, type RosterStatusCase, type RowMarkers } from "./tones.js";
 import { drawTabNumberSlot } from "./tab-numbers.js";
 import { toneClass } from "../vocab.js";
 import { applyNameTint, nameTint } from "./name-tint.js";

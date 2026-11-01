@@ -827,6 +827,14 @@ re-routes their frontend resolution instead."
          (agent-repl--webhost-build nil)
          (agent-repl--webhost-url nil)
          (agent-repl--webhost-reloaded-for-call nil)
+         ;; The sidebar's web view (sidebar-view.el): a row one test marked
+         ;; shown, or a daemon it pointed the sidebar at, must not carry over.
+         (agent-repl--sidebar-view-buffer nil)
+         (agent-repl--sidebar-view-url nil)
+         (agent-repl--sidebar-view-shown nil)
+         (agent-repl--sidebar-view-daemon-origin nil)
+         (agent-repl--sidebar-view-reloaded-for-call nil)
+         (agent-repl--webhost-sidebar-offset 0)
          ;; Repo-fold set: global UI state, so a test that folds a repo
          ;; would otherwise leak that fold into every later test's
          ;; tab-bar render.

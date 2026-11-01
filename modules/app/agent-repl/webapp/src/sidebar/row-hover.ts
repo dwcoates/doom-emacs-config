@@ -34,6 +34,7 @@ import { log } from "../log.js";
 import { createKeyedTimers } from "../timers.js";
 import type { Dropdowns } from "./dropdowns.js";
 import { paintRowDetail } from "./row.js";
+import type { PopupMirror } from "../host/sidebar-popups.js";
 
 /**
  * The detail panel opens on HOVER. There is no chevron (owner ruling,
@@ -94,6 +95,12 @@ export interface RowHover {
   dismiss(why: string): void;
   /** The user is back in the rail: open the panel of the row the pointer rests on, at once on its duration, after the delay elsewhere on its line. */
   resume(): void;
+  /**
+   * Hand every open panel's live copy to the popup mirror again (a redraw
+   * replaced its row, a scroll or a resize moved its line). Nothing without a
+   * mirror.
+   */
+  mirrorOpen(): void;
   /** Cancel every timer: the rail is gone. */
   dispose(): void;
 }
@@ -106,7 +113,12 @@ interface Pointer {
   panel: boolean;
 }
 
-export function createRowHover(dropdowns: Dropdowns, openDetails: Set<string>): RowHover {
+/**
+ * Build the page's one hover owner. MIRROR, in the sidebar page, draws each
+ * open panel over the feed in the host instead of beside the row
+ * (host/sidebar-popups.ts); a page drawing its own sidebar has none.
+ */
+export function createRowHover(dropdowns: Dropdowns, openDetails: Set<string>, mirror: PopupMirror | null = null): RowHover {
   let copies = new Map<string, DrawnRow[]>();
   const pointers = new Map<string, Pointer>();
   const closeTimers = createKeyedTimers<string>();
@@ -159,6 +171,8 @@ export function createRowHover(dropdowns: Dropdowns, openDetails: Set<string>): 
       if (open) register(id, row);
       else dropdowns.released(row.detail);
     }
+    if (open) mirrorOne(id);
+    else mirror?.hide(id);
   }
 
   const scheduleClose = (id: string): void => {
@@ -175,6 +189,18 @@ export function createRowHover(dropdowns: Dropdowns, openDetails: Set<string>): 
     openTimers.start(id, HOVER_OPEN_DELAY_MS, () => {
       setOpen(id, true, "hover");
     });
+  };
+
+  /** The copy of ID's row to mirror: the first whose line is laid out, or none. */
+  const mirrored = (id: string): DrawnRow | undefined =>
+    (copies.get(id) ?? []).find((row) => row.line.isConnected && row.line.getClientRects().length > 0);
+
+  /** Hand ID's open panel to the mirror, or take it back when no copy is laid out. */
+  const mirrorOne = (id: string): void => {
+    if (mirror === null) return;
+    const row = mirrored(id);
+    if (row === undefined) mirror.hide(id);
+    else mirror.show(id, row.detail, row.line);
   };
 
   /** Whether NODE is inside the line or the panel of a drawn copy of ID's row. */
@@ -251,6 +277,9 @@ export function createRowHover(dropdowns: Dropdowns, openDetails: Set<string>): 
         if (at.duration) setOpen(id, true, "hover");
         else if (at.line && !openDetails.has(id)) scheduleOpen(id);
       }
+    },
+    mirrorOpen(): void {
+      for (const id of openDetails) mirrorOne(id);
     },
     dispose(): void {
       cancelTimers();

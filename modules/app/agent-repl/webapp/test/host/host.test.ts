@@ -930,7 +930,6 @@ describe("hello", () => {
     // Assert
     expect(posted).toEqual([
       { channel: HOST_CHANNEL, kind: "presence", shown: true },
-      { channel: HOST_CHANNEL, kind: "sidebarDock", docked: false },
       { channel: HOST_CHANNEL, kind: "webhostFailures", failures: [] },
     ]);
   });
@@ -1309,37 +1308,6 @@ describe("the webhost's sidebar", () => {
     // Assert
     unsubscribe();
     expect(left).toEqual([FOCUS_LEFT_EMACS]);
-  });
-
-  it("tells every page when it docks the sidebar over it", () => {
-    // Arrange
-    pages(host, "a", "b");
-    const toA = postsTo("a");
-    const toB = postsTo("b");
-
-    // Act
-    host.setSidebarDocked(true);
-
-    // Assert
-    const dock = { channel: HOST_CHANNEL, kind: "sidebarDock", docked: true };
-    expect([toA, toB]).toEqual([[dock], [dock]]);
-  });
-
-  it("tells a page that says hello after the dock that the sidebar is docked", () => {
-    // Arrange
-    pages(host, "a");
-    host.setSidebarDocked(true);
-    const posted = postsTo("a");
-
-    // Act
-    fromPage("a", { channel: HOST_CHANNEL, kind: "hello" });
-
-    // Assert
-    expect(posted).toContainEqual({
-      channel: HOST_CHANNEL,
-      kind: "sidebarDock",
-      docked: true,
-    });
   });
 
   it("tells every page its own standing failures", () => {
@@ -2249,5 +2217,40 @@ describe("restyle turns", () => {
     const answer = parsed(host.ids());
     // Assert
     expect([granted(toB), answer.notes]).toEqual([0, [{ level: "warn", text: "workspace b ended a restyle turn it did not hold" }]]);
+  });
+});
+
+describe("setSidebarOffset", () => {
+  it("keeps the sidebar's offset", () => {
+    const answer = parsed(host.setSidebarOffset(12));
+    expect([answer["outcome"], answer["pixels"]]).toEqual(["kept", 12]);
+  });
+
+  it("tells a listener the offset at once and at every change", () => {
+    const told: number[] = [];
+    host.setSidebarOffset(4);
+    host.onSidebarOffset((pixels) => told.push(pixels));
+    host.setSidebarOffset(-6);
+    expect(told).toEqual([4, -6]);
+  });
+
+  it("refuses an offset that is no number, with a note, keeping the last", () => {
+    const told: number[] = [];
+    host.setSidebarOffset(4);
+    host.onSidebarOffset((pixels) => told.push(pixels));
+    const answer = parsed(host.setSidebarOffset(Number.NaN));
+    expect([answer["outcome"], (answer["notes"] as { level: string }[]).map((n) => n.level), told]).toEqual([
+      "refused",
+      ["warn"],
+      [4],
+    ]);
+  });
+
+  it("tells nothing to a stopped listener", () => {
+    const told: number[] = [];
+    const stop = host.onSidebarOffset((pixels) => told.push(pixels));
+    stop();
+    host.setSidebarOffset(9);
+    expect(told).toEqual([0]);
   });
 });

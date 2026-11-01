@@ -46,7 +46,9 @@ describe("mintConnectionId", () => {
     const here = path.dirname(fileURLToPath(import.meta.url));
 
     // Act
-    const documents = ["main.ts", path.join("host", "sidebar.ts")].map((file) =>
+    // The workspace page, and Emacs's own two web views, which both start
+    // through host/document.ts (the host's services and the sidebar page).
+    const documents = ["main.ts", path.join("host", "document.ts")].map((file) =>
       readFileSync(path.join(here, "..", "src", file), "utf8"),
     );
 

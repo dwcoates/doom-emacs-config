@@ -4,7 +4,7 @@
  *
  * A cold-gated workspace's page is unloaded off screen, and the gate must be
  * on screen the instant the workspace is: only the feed may load behind it.
- * So the gate is the webhost's, as the sidebar is: the roster carries every
+ * So the gate is the webhost's: the roster carries every
  * open workspace's shown gate (`WorkspaceRoster.cold_gates`), and this draws
  * the shown page's in the composer's slot at the window's bottom, through the
  * feed's own card renderer. The page draws no standing gate of its own.
@@ -13,8 +13,7 @@
  * input window while the gate stands and tells the slot's pixels
  * (`Host.setGateDock`); the gate takes at least that height, grows only to fit
  * a selection (the compact submenu) and shrinks back, and never scrolls. The
- * pages and the sidebar end above the band it measures, so a switch between a
- * gated and an ungated workspace moves the sidebar by nothing, and a gate
+ * pages end above the band it measures, so a gate
  * coming or going resizes no page.
  */
 import { create, equals } from "@bufbuild/protobuf";
@@ -37,7 +36,7 @@ import type { AppContext, DaemonContext } from "../rpc/context.js";
 /** The id of the webhost's gate element. */
 export const WEBHOST_GATE_ID = "webhost-gate";
 
-/** The root custom property the pages and the sidebar end above: the gate's band, in pixels. */
+/** The root custom property the pages end above: the gate's band, in pixels. */
 export const GATE_BAND_PROPERTY = "--webhost-gate-band";
 
 /** What the gate needs from its environment, injectable for tests. */
@@ -110,7 +109,7 @@ export function createWebhostGate(env: WebhostGateEnv): WebhostGate {
   el.setAttribute("data-component", "gate-dock");
   el.hidden = true;
 
-  /** End the pages and the sidebar above the gate's band as laid out now. */
+  /** End the pages above the gate's band as laid out now. */
   const placeBand = (): void => {
     // THE EXACT HEIGHT, never rounded: a gate grown to fit a selection lays out
     // at a fractional height, and a rounded band left a seam between it and the

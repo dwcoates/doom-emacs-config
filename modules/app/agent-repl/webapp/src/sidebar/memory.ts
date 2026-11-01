@@ -295,14 +295,20 @@ function noteFailed(operation: string, err: unknown): void {
  * pointer's arrival, closes on its departure from both the version and the
  * panel, and asks again every REFRESH_TICKS seconds while open.
  */
-export function installVersionHover(ctx: DaemonContext, version: HTMLElement, rail: HTMLElement): void {
+export function installVersionHover(
+  ctx: DaemonContext,
+  version: HTMLElement,
+  rail: HTMLElement,
+  suppressed: () => boolean = () => false,
+): void {
   const panel = document.createElement("div");
   panel.className = `detail ${MEMORY_PANEL_CLASS}`;
   rail.appendChild(panel);
   let stop: (() => void) | null = null;
   let over = 0;
   const open = (): void => {
-    if (stop !== null) return;
+    // The version's click opened its notices (notices.ts): the hover stays shut under them.
+    if (stop !== null || suppressed()) return;
     fillNote(panel, "measuring…");
     panel.classList.add("open");
     const place = (): void => {

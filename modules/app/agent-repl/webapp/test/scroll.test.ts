@@ -6,6 +6,10 @@
 // to THAT element is half of what the footer-occlusion cases assert.
 import scrollSource from "../src/scroll.ts?raw";
 import selectionScrollSource from "../src/sidebar/selection-scroll.ts?raw";
+import scrollKeepSource from "../src/sidebar/scroll-keep.ts?raw";
+import bandFitSource from "../src/sidebar/band-fit.ts?raw";
+import sidebarPopupsSource from "../src/host/sidebar-popups.ts?raw";
+import deploysMoreSource from "../src/sidebar/deploys-more.ts?raw";
 import { chatEndTop, revealChatExchange } from "../src/scroll.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -14,7 +18,7 @@ import {
   collapseClicked,
   dragEdgeScroll,
   selectionRowScroll,
-  railScrollKept,
+  scrollKept,
   installIntentScroll,
   innerScrollerAt,
   TailFollow,
@@ -4410,14 +4414,26 @@ describe("selectionRowScroll", () => {
   });
 });
 
-describe("railScrollKept", () => {
-  it("puts the section back at the position the draw found it at", () => {
+describe("scrollKept", () => {
+  it("puts the scroller back at the position the draw found it at", () => {
     // Arrange
     const region = { scrollTop: 0 };
     // Act
-    railScrollKept(region, 140);
+    scrollKept(region, 140);
     // Assert
     expect(region.scrollTop).toBe(140);
+  });
+
+  it.each([
+    ["sidebar/scroll-keep.ts", scrollKeepSource],
+    ["sidebar/band-fit.ts", bandFitSource],
+    ["host/sidebar-popups.ts", sidebarPopupsSource],
+    ["sidebar/deploys-more.ts", deploysMoreSource],
+  ])("is how %s puts a redrawn scroller back", (_file, source) => {
+    // Act
+    const keeps = source.includes("scrollKept(");
+    // Assert
+    expect(keeps).toBe(true);
   });
 });
 

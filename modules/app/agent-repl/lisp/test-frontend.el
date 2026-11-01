@@ -38,6 +38,9 @@ a missing one are covered directly, against the real file, by
 `agent-repl-test-frontend-build-id-refuses-a-missing-stamp' in
 test-frontend-client.el, which is where that boundary belongs.")
 
+(defvar agent-repl-test--frontend-sidebar-shown nil
+  "The connections a mount showed the sidebar on, newest first.")
+
 (defmacro agent-repl-test--with-frontend-ws (ws plist &rest body)
   "Register workspace WS with PLIST for BODY, cleaning buffers after.
 Also pins the webapp build id (see
@@ -47,7 +50,12 @@ independent of whether the webapp has been built in this checkout."
   `(progn
      (unwind-protect
          (cl-letf (((symbol-function 'agent-repl--frontend-build-id)
-                    (lambda () agent-repl-test--frontend-build-id)))
+                    (lambda () agent-repl-test--frontend-build-id))
+                   ;; The sidebar's web view is its own boundary
+                   ;; (sidebar-view.el); a mount records that it was shown.
+                   ((symbol-function 'agent-repl-sidebar-view-show)
+                    (lambda (conn) (push conn agent-repl-test--frontend-sidebar-shown))))
+           (setq agent-repl-test--frontend-sidebar-shown nil)
            (puthash ,ws (copy-sequence ,plist) agent-repl--workspaces)
            ,@body)
        (let ((buf (agent-repl--ws-get ,ws :frontend-buffer)))
@@ -1201,6 +1209,47 @@ conversation from its own record."
              (lambda (_ws) nil)))
     ;; Act / Assert
     (should-not (agent-repl--gui-durable-session-id "ws1"))))
+
+(ert-deftest agent-repl-test-frontend-display-shows-the-sidebar-beside-the-panels ()
+  "Mounting the panels shows the sidebar on the workspace's connection."
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    (let ((buf (generate-new-buffer "*fake-webview-sb*")))
+      (unwind-protect
+          (cl-letf (((symbol-function 'agent-repl--panels-visible-p) (lambda () nil))
+                    ((symbol-function 'agent-repl-window--harden) (lambda (&rest _) nil))
+                    ((symbol-function 'agent-repl--ensure-input-buffer)
+                     (lambda (_ws) (get-buffer-create "*sb-input*")))
+                    ((symbol-function 'agent-repl-host-conn) (lambda (_ws) 'conn-ws1)))
+            ;; Act
+            (agent-repl--frontend-display-webview "ws1" buf)
+            ;; Assert
+            (should (equal agent-repl-test--frontend-sidebar-shown '(conn-ws1))))
+        (delete-other-windows)
+        (kill-buffer buf)
+        (kill-buffer "*sb-input*")))))
+
+(ert-deftest agent-repl-test-frontend-gui-hide-hides-the-sidebar ()
+  "Closing the current workspace's panels takes the sidebar off too."
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    (let ((hidden 0))
+      (cl-letf (((symbol-function 'agent-repl--current-ws-p) (lambda (_ws) t))
+                ((symbol-function 'agent-repl--restore-fullscreen-config) (lambda (_ws) t))
+                ((symbol-function 'agent-repl-sidebar-view-hide) (lambda () (cl-incf hidden))))
+        ;; Act
+        (agent-repl--gui-hide "ws1")
+        ;; Assert
+        (should (= hidden 1))))))
+
+(ert-deftest agent-repl-test-frontend-gui-hide-of-a-background-workspace-keeps-the-sidebar ()
+  "A background workspace's close leaves the frame, and its sidebar, alone."
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    (let ((hidden 0))
+      (cl-letf (((symbol-function 'agent-repl--current-ws-p) (lambda (_ws) nil))
+                ((symbol-function 'agent-repl-sidebar-view-hide) (lambda () (cl-incf hidden))))
+        ;; Act
+        (agent-repl--gui-hide "ws1")
+        ;; Assert
+        (should (= hidden 0))))))
 
 (ert-deftest agent-repl-test-frontend-gui-hide-restores-saved-layout ()
   "gui hide restores the pre-panel layout when one was saved.

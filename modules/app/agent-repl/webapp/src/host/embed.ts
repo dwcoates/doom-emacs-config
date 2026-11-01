@@ -77,12 +77,6 @@ export interface EmbedEnv {
 
 export { FOCUS_LEFT_EMACS };
 
-/**
- * The class the page's root wears while the webhost draws the sidebar over the
- * page's sidebar column, which the page then keeps empty and reserved.
- */
-export const WEBHOST_SIDEBAR_CLASS = "webhost-sidebar";
-
 /** The installed link; `dispose` removes every listener. */
 export interface HostLink {
   dispose(): void;
@@ -115,15 +109,6 @@ export function connectToHost(env: EmbedEnv): HostLink | null {
         // THE RELOAD FIRST, so a show it rides with already knows it.
         if (message.reloadStartedAtMs !== undefined) presence.setReloadStartedAt(message.reloadStartedAtMs);
         presence.setShown(message.shown, message.switchStartedAtMs ?? null);
-        return;
-      case "sidebarDock":
-        if (doc.documentElement.classList.contains(WEBHOST_SIDEBAR_CLASS) !== message.docked) {
-          log.info(message.docked ? "the webhost docked its sidebar over this page" : "the webhost undocked its sidebar", {
-            operation: "page.webhost-sidebar-dock",
-            context: { docked: message.docked },
-          });
-        }
-        doc.documentElement.classList.toggle(WEBHOST_SIDEBAR_CLASS, message.docked);
         return;
       case "webhostFailures":
         webhostFailures.set(message.failures);
@@ -256,7 +241,8 @@ export function connectToHost(env: EmbedEnv): HostLink | null {
   const drawnWatch = pageMutationObserver(doc, reportDrawn);
   drawnWatch.observe(doc.documentElement, { attributes: true, attributeFilter: [CONVERSATION_DRAWN_ATTRIBUTE] });
   // A BUBBLE EXPANDED OVER THE WEBAPP: the webhost lifts this page's iframe
-  // above its sidebar while the root says one stands.
+  // above its own layers (the gate's band, the load button) while the root
+  // says one stands.
   let overlayOpen = false;
   const reportOverlay = (): void => {
     const now = doc.documentElement.hasAttribute(BUBBLE_OVERLAY_ATTRIBUTE);

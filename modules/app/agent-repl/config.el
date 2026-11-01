@@ -398,6 +398,10 @@ returning the SHA string (or the sentinel \"unknown\" when undetermined)."
 ;; creates the host through frontend.el's webview boundary and talks to it
 ;; through frontend.el's execute-script chokepoint, so it loads after it.
 (agent-repl--load-module "webhost")
+;; WHY: sidebar-view.el is the sidebar's own web view, in a full-height side
+;; window; it is made through webhost.el's shared web view shapes, and the
+;; host's lifecycle calls it, so it loads right after.
+(agent-repl--load-module "sidebar-view")
 ;; WHY: webview-recovery.el makes every workspace's slot and page ahead of
 ;; the look through frontend.el's mount and webhost.el's host, so it loads
 ;; after both.

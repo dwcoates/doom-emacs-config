@@ -1,8 +1,9 @@
 /**
  * webhost failures — the webhost's own failures, listed in a page's warning chip.
  *
- * The webhost draws the sidebar for every workspace page, so a failure of its
- * machinery (the sidebar's stream, a verb it could not send) is the webhost's.
+ * The webhost draws the cold gate and the load button over every workspace
+ * page, so a failure of its machinery (the roster stream, a gate answer it
+ * could not send) is the webhost's.
  * The topbar's warning chip is the webapp's ONE error surface and the webhost
  * has no topbar, so the webhost hands every page the failures standing in it
  * (host/protocol.ts `webhostFailures`), and each page's chip lists them beside

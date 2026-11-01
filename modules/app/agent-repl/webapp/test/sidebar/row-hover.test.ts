@@ -9,6 +9,7 @@ import {
   type RowHover,
 } from "../../src/sidebar/row-hover.js";
 import { drawRosterFamily, drawRosterRow } from "../../src/sidebar/row.js";
+import type { PopupMirror } from "../../src/host/sidebar-popups.js";
 import { log } from "../../src/log.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 import { openRow, row, sidebarContext } from "./harness.js";
@@ -737,3 +738,109 @@ describe("the rows that report to the gesture", () => {
     });
   });
 });
+
+describe("the row hover gesture with a popup mirror", () => {
+  let dropdowns: Dropdowns;
+  let openDetails: Set<string>;
+  let hover: RowHover;
+  let told: string[];
+
+  /** A mirror that records what it is told. */
+  function recordingMirror(): PopupMirror {
+    return {
+      show: (key) => void told.push(`show:${key}`),
+      place: (key) => void told.push(`place:${key}`),
+      hide: (key) => void told.push(`hide:${key}`),
+      dispose: () => undefined,
+    };
+  }
+
+  /** A drawn copy of ID's row whose line is laid out (LAID) or not. */
+  function draw(id: string, laid = true): DrawnRow {
+    const copy = drawnRow();
+    copy.line.getClientRects = () => (laid ? ([{}] as unknown as DOMRectList) : ([] as unknown as DOMRectList));
+    hover.drawn(id, copy);
+    return copy;
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    told = [];
+    dropdowns = createDropdowns();
+    openDetails = new Set();
+    hover = createRowHover(dropdowns, openDetails, recordingMirror());
+  });
+
+  afterEach(() => {
+    hover.dispose();
+    vi.useRealTimers();
+    document.body.replaceChildren();
+  });
+
+  it("hands an opened panel to the mirror", () => {
+    draw("ws-a");
+    hover.enter("ws-a", "duration");
+    expect(told).toEqual(["show:ws-a"]);
+  });
+
+  it("takes a closed panel back from the mirror", () => {
+    draw("ws-a");
+    hover.enter("ws-a", "line");
+    hover.enter("ws-a", "duration");
+    hover.leave("ws-a", "duration");
+    hover.leave("ws-a", "line");
+    vi.advanceTimersByTime(HOVER_CLOSE_GRACE_MS + 1);
+    expect(told).toEqual(["show:ws-a", "hide:ws-a"]);
+  });
+
+  it("keeps the panel open while the pointer is on the mirror's copy", () => {
+    draw("ws-a");
+    hover.enter("ws-a", "line");
+    hover.enter("ws-a", "duration");
+    hover.leave("ws-a", "duration");
+    hover.leave("ws-a", "line");
+    hover.enter("ws-a", "panel");
+    vi.advanceTimersByTime(HOVER_CLOSE_GRACE_MS + 1);
+    expect(told).toEqual(["show:ws-a"]);
+  });
+
+  it("hands the mirror the copy whose line is laid out", () => {
+    const hidden = draw("ws-a", false);
+    const shown = draw("ws-a", true);
+    const handed: HTMLElement[] = [];
+    hover.dispose();
+    hover = createRowHover(dropdowns, openDetails, {
+      show: (_key, detail) => void handed.push(detail),
+      place: () => undefined,
+      hide: () => undefined,
+      dispose: () => undefined,
+    });
+    hover.drawn("ws-a", hidden);
+    hover.drawn("ws-a", shown);
+    hover.enter("ws-a", "duration");
+    expect(handed).toEqual([shown.detail]);
+  });
+
+  it("takes the panel back when no copy of its row is laid out", () => {
+    draw("ws-a", false);
+    hover.enter("ws-a", "duration");
+    expect(told).toEqual(["hide:ws-a"]);
+  });
+
+  it("hands every open panel's new copy to the mirror after a redraw", () => {
+    const first = draw("ws-a");
+    hover.enter("ws-a", "duration");
+    hover.forgetWithin(first.ws);
+    first.ws.remove();
+    draw("ws-a");
+    hover.mirrorOpen();
+    expect(told).toEqual(["show:ws-a", "show:ws-a"]);
+  });
+
+  it("hands nothing to the mirror after a redraw with no panel open", () => {
+    draw("ws-a");
+    hover.mirrorOpen();
+    expect(told).toEqual([]);
+  });
+});
+

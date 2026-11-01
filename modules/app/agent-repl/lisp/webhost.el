@@ -61,6 +61,12 @@
 (declare-function agent-repl-page-unload-note-shown "page-unload" (ws))
 (declare-function agent-repl-roster-drawn-tab-order "roster" ())
 (declare-function agent-repl--ws-current-name "workspace" ())
+(declare-function agent-repl-sidebar-view-mark-shown "sidebar-view" (id))
+(declare-function agent-repl-sidebar-view-follow-daemon "sidebar-view" (origin))
+(declare-function agent-repl-sidebar-view-set-log-level "sidebar-view" (level until-ms))
+(declare-function agent-repl-sidebar-view-focus-moved "sidebar-view" ())
+(declare-function agent-repl-sidebar-view-navigate "sidebar-view" (conn))
+(declare-function agent-repl-sidebar-view-kill "sidebar-view" ())
 (declare-function xwidget-get "xwidget" (xwidget propname))
 (declare-function xwidget-put "xwidget" (xwidget propname value))
 
@@ -125,6 +131,11 @@ Set when a reload navigates the host (`agent-repl--webhost-reload-now') and
 handed with every page the next replay loads, then cleared: each page
 measures how long it stood blank from it (`reload_blank').  Nil for the
 host's first load, which is the editor starting, not a reload.")
+
+(defvar agent-repl--webhost-sidebar-offset 0
+  "How far below the host's window top the sidebar's window content starts,
+in pixels, as last measured (`agent-repl-sidebar-view-tell-offset').
+Replayed to a host that loads.")
 
 (defvar agent-repl--webhost-held-ingress (make-hash-table :test #'equal)
   "Workspace id -> the vector of its held-prompt ingress entries the page draws
@@ -210,14 +221,26 @@ reads it, so it is read here off `last-input-event' rather than passed."
     (let ((status (nth 3 last-input-event)))
       (agent-repl--info agent-repl--webhost-central "elisp.webhost.load-changed status=%s pages=%d shown=%s"
                         status (hash-table-count agent-repl--webhost-pages) agent-repl--webhost-shown)
-      (when (and (equal status "load-committed")
-                 (not (agent-repl--webhost-blank-uri-p (agent-repl--webhost-current-uri))))
-        (if-let ((strayed (and agent-repl--webhost-url
-                               (agent-repl--webhost-strayed-uri (agent-repl--webhost-current-uri)))))
-            (agent-repl--webhost-take-back strayed)
-          ;; From here on every answer is the new document's.
-          (setq agent-repl--webhost-predates-reload-pending nil)
-          (agent-repl--webhost-replay))))))
+      (agent-repl--webview-on-commit
+       status agent-repl--webhost-url (agent-repl--webhost-current-uri)
+       #'agent-repl--webhost-take-back
+       (lambda ()
+         ;; From here on every answer is the new document's.
+         (setq agent-repl--webhost-predates-reload-pending nil)
+         (agent-repl--webhost-replay))))))
+
+(defun agent-repl--webview-on-commit (status own-url uri take-back replay)
+  "Act on one load stage STATUS of a web view loaded at OWN-URL, now showing URI.
+ONE REPLAY PER DOCUMENT, at `load-committed' (`agent-repl--webhost-on-load'),
+and never into the blank document WebKit commits ahead of the first load
+\(`agent-repl--webhost-blank-uri-p').  A committed URI off OWN-URL's origin
+is an outward link that navigated the whole view, handed to TAKE-BACK;
+anything else is the view's own page, which REPLAY hands its state.  Every
+other stage does nothing."
+  (when (and (equal status "load-committed") (not (agent-repl--webhost-blank-uri-p uri)))
+    (if-let ((strayed (agent-repl--webview-strayed-uri own-url uri)))
+        (funcall take-back strayed)
+      (funcall replay))))
 
 (defun agent-repl--webhost-blank-uri-p (uri)
   "Return non-nil when URI is the blank document a web view holds before a load.
@@ -234,15 +257,22 @@ into.  The host's own page commits after it."
   (when-let ((xw (agent-repl-webhost-xwidget)))
     (xwidget-webkit-uri xw)))
 
-(defun agent-repl--webhost-strayed-uri (uri)
-  "Return URI when the host committed it outside its own origin, else nil.
-The host only ever loads its own page (`agent-repl--webhost-url'); any other
-origin is an outward link that navigated the whole webview."
-  (when (and agent-repl--webhost-url (stringp uri) (not (string-empty-p uri))
-             (string-match "\\`https?://[^/]+" agent-repl--webhost-url))
-    (let ((origin (match-string 0 agent-repl--webhost-url)))
+(defun agent-repl--webview-strayed-uri (own-url uri)
+  "Return URI when a web view loaded at OWN-URL committed it outside that origin.
+Each of Emacs's web views (the host, and the sidebar, sidebar-view.el) only
+ever loads its own page; any other origin is an outward link that navigated
+the whole web view.  Nil when OWN-URL is nil, URI is empty, or URI is on
+OWN-URL's origin."
+  (when (and own-url (stringp uri) (not (string-empty-p uri))
+             (string-match "\\`https?://[^/]+" own-url))
+    (let ((origin (match-string 0 own-url)))
       (unless (or (string= uri origin) (string-prefix-p (concat origin "/") uri))
         uri))))
+
+(defun agent-repl--webhost-strayed-uri (uri)
+  "Return URI when the host committed it outside its own origin, else nil.
+The host only ever loads its own page (`agent-repl--webhost-url')."
+  (agent-repl--webview-strayed-uri agent-repl--webhost-url uri))
 
 (defun agent-repl--webhost-take-back (uri)
   "Navigate the host, which strayed to URI, back to its own page.
@@ -268,9 +298,27 @@ it went back to one, every load signalling \"Wrong number of arguments\"
 and replaying nothing (2026-10-17).  By name, the host runs whatever this
 module's current definitions are, and the prior handler rides the xwidget's
 `agent-repl-prior-callback' property."
-  (let ((prior (xwidget-get xwidget 'agent-repl-prior-callback)))
-    (when (functionp prior) (funcall prior xwidget event-type)))
+  (agent-repl--webview-call-prior xwidget event-type)
   (agent-repl--webhost-on-load event-type))
+
+(defun agent-repl--webview-call-prior (xwidget event-type)
+  "Hand EVENT-TYPE to the handler XWIDGET had before Emacs's own wrapped it.
+Every one of Emacs's web views wraps its xwidget's `callback' by name
+\(`agent-repl--webview-watch-load'), keeping the prior handler on the
+xwidget's `agent-repl-prior-callback' property; the webkit machinery still
+gets every event through it."
+  (let ((prior (xwidget-get xwidget 'agent-repl-prior-callback)))
+    (when (functionp prior) (funcall prior xwidget event-type))))
+
+(defun agent-repl--webview-watch-load (xw callback)
+  "Make XW's events reach CALLBACK, a symbol, keeping its own handler.
+The xwidget event handler calls the widget's `callback' property, so the
+existing one is WRAPPED rather than replaced: it is kept on
+`agent-repl-prior-callback' for CALLBACK to hand on
+\(`agent-repl--webview-call-prior').  CALLBACK is installed BY NAME, never as
+a closure, so a hot reload reaches it (`agent-repl--webhost-callback')."
+  (xwidget-put xw 'agent-repl-prior-callback (xwidget-get xw 'callback))
+  (xwidget-put xw 'callback callback))
 
 (defun agent-repl--webhost-watch-load (xw)
   "Make XW replay the desired state on every load, keeping its own handler.
@@ -278,8 +326,7 @@ The xwidget event handler calls the widget's `callback' property, so the
 existing one is WRAPPED rather than replaced: the webkit machinery still gets
 every event it needs.  The wrapper is `agent-repl--webhost-callback', by
 name (see that function)."
-  (xwidget-put xw 'agent-repl-prior-callback (xwidget-get xw 'callback))
-  (xwidget-put xw 'callback 'agent-repl--webhost-callback))
+  (agent-repl--webview-watch-load xw 'agent-repl--webhost-callback))
 
 (defun agent-repl--webhost-rewatch ()
   "Put the live host's callback back on `agent-repl--webhost-callback'.
@@ -302,23 +349,37 @@ The host is created once and lives for the session.  No window is touched:
 the host buffer is never displayed itself; workspace slots display it."
   (or (agent-repl-webhost-xwidget)
       (let* ((url (agent-repl-webhost-url conn))
-             (buf (save-window-excursion (agent-repl--frontend-make-webview-buffer url))))
-        (with-current-buffer buf
-          (setq-local xwidget-webkit-buffer-name-format agent-repl-webhost-buffer-name)
-          (setq-local header-line-format nil)
-          (setq-local mode-line-format nil)
-          (rename-buffer agent-repl-webhost-buffer-name t)
-          (add-hook 'kill-buffer-query-functions #'agent-repl--webhost-refuse-kill nil t))
-        (let ((xw (agent-repl--frontend-webview-live-widget buf)))
-          (unless xw
-            (let ((agent-repl--webhost-killing t))
-              (agent-repl--frontend-kill-webview buf))
-            (error "agent-repl: the web view host was created without a live xwidget"))
-          (setq agent-repl--webhost-buffer buf
-                agent-repl--webhost-url url)
-          (agent-repl--webhost-watch-load xw)
-          (agent-repl--info agent-repl--webhost-central "elisp.webhost.created url=%s" url)
-          xw))))
+             (buf (agent-repl--webview-make-hidden
+                   url agent-repl-webhost-buffer-name #'agent-repl--webhost-refuse-kill
+                   (lambda (buf)
+                     (let ((agent-repl--webhost-killing t))
+                       (agent-repl--frontend-kill-webview buf)))
+                   "the web view host"))
+             (xw (agent-repl--frontend-webview-live-widget buf)))
+        (setq agent-repl--webhost-buffer buf
+              agent-repl--webhost-url url)
+        (agent-repl--webhost-watch-load xw)
+        (agent-repl--info agent-repl--webhost-central "elisp.webhost.created url=%s" url)
+        xw)))
+
+(defun agent-repl--webview-make-hidden (url name refuse-kill kill what)
+  "Create a hidden web view buffer NAME at URL, guarded by REFUSE-KILL.
+The shape every one of Emacs's own web views shares (the host, and the
+sidebar, sidebar-view.el): no window is touched, the buffer has no header or
+mode line, and REFUSE-KILL stands on its `kill-buffer-query-functions'.
+A buffer created without a live xwidget is killed through KILL, a function
+of the buffer, and signals an error naming WHAT.  Returns the buffer."
+  (let ((buf (save-window-excursion (agent-repl--frontend-make-webview-buffer url))))
+    (with-current-buffer buf
+      (setq-local xwidget-webkit-buffer-name-format name)
+      (setq-local header-line-format nil)
+      (setq-local mode-line-format nil)
+      (rename-buffer name t)
+      (add-hook 'kill-buffer-query-functions refuse-kill nil t))
+    (unless (agent-repl--frontend-webview-live-widget buf)
+      (funcall kill buf)
+      (error "agent-repl: %s was created without a live xwidget" what))
+    buf))
 
 (defun agent-repl-webhost-kill ()
   "Kill the host and forget its desired state.  Every page goes with it."
@@ -327,29 +388,38 @@ the host buffer is never displayed itself; workspace slots display it."
       (agent-repl--frontend-kill-webview buf))
     (setq agent-repl--webhost-buffer nil
           agent-repl--webhost-url nil)
+    (agent-repl-sidebar-view-kill)
     (agent-repl--info agent-repl--webhost-central "elisp.webhost.killed")))
 
 ;;;; ---- Calls -----------------------------------------------------------------
 
-(defun agent-repl--webhost-script (method &rest args)
-  "The script calling the host's METHOD with ARGS, queued until the host starts.
+(defun agent-repl--webview-script (global pending method args)
+  "The script calling METHOD with ARGS on the page object at window.GLOBAL.
+Each of Emacs's own web views hands Emacs one such object (the host's
+`agentReplHost', the sidebar's `agentReplSidebar').  A call made before the
+page has started is queued on window.PENDING and run when it starts.
 Each of ARGS is JSON-encoded, so nothing is spliced into the script unquoted.
 A queued call answers `queued', naming the workspace id when the first of
-ARGS is one, so the caller can ask again.  A host that has no METHOD (one
+ARGS is one, so the caller can ask again.  A page that has no METHOD (one
 loaded from a build older than this elisp) answers `unknown-call' rather
-than throwing, so the gap between the two is seen
-\(`agent-repl--webhost-answered').
+than throwing, so the gap between the two is seen.
 The answer is always a string: a null answer is dropped without a callback."
   (let ((call (format "h.%s(%s)" method (mapconcat #'json-encode args ",")))
         (op (json-encode method))
         (id (if (stringp (car args)) (json-encode (car args)) "null")))
     (format (concat "(function(){var c=function(h){return typeof h[%s]===\"function\"?%s:"
                     "JSON.stringify({op:%s,id:%s,outcome:\"unknown-call\",notes:[]});};"
-                    "var h=window.agentReplHost;"
+                    "var h=window.%s;"
                     "if(h){return c(h);}"
-                    "(window.__agentReplHostPending=window.__agentReplHostPending||[]).push(c);"
+                    "(window.%s=window.%s||[]).push(c);"
                     "return JSON.stringify({op:%s,id:%s,outcome:\"queued\",notes:[]});})()")
-            op call op id op id)))
+            op call op id global pending pending op id)))
+
+(defun agent-repl--webhost-script (method &rest args)
+  "The script calling the host's METHOD with ARGS, queued until the host starts.
+See `agent-repl--webview-script'; an unknown call is handled by
+`agent-repl--webhost-answered'."
+  (agent-repl--webview-script "agentReplHost" "__agentReplHostPending" method args))
 
 (defun agent-repl--webhost-predates-call (op)
   "The host has no OP: it was loaded from a build older than this elisp.
@@ -411,22 +481,32 @@ JSON; every reader of a host answer parses it here."
   (json-parse-string raw :object-type 'plist :array-type 'list
                      :null-object nil :false-object nil))
 
+(defun agent-repl--webview-answered (raw prefix scope-of central predates)
+  "Record RAW, one of Emacs's web views' answers to a call, and its notes.
+The one shape every view's answer takes (webapp/src/host/answers.ts): the
+call, its outcome and its notes are recorded under the scope SCOPE-OF answers
+for the parsed answer, as PREFIX.answer; a view that lacks the call
+\(`unknown-call') is handed to PREDATES with the call's name; an answer that
+cannot be read is recorded at ERROR under CENTRAL as PREFIX.answer-unreadable."
+  (condition-case err
+      (let* ((answer (agent-repl-webhost-parse-answer raw))
+             (scope (funcall scope-of answer))
+             (op (plist-get answer :op)))
+        (agent-repl--log scope "%s.answer op=%s id=%s outcome=%s"
+                         prefix op (plist-get answer :id) (plist-get answer :outcome))
+        (when (equal (plist-get answer :outcome) "unknown-call")
+          (funcall predates op))
+        (dolist (note (plist-get answer :notes))
+          (agent-repl--webhost-record-note scope op note)))
+    (error
+     (agent-repl--error central "%s.answer-unreadable raw=%S error=%S" prefix raw err))))
+
 (defun agent-repl--webhost-answered (raw)
   "Record the host's RAW answer to a call, and every note it carries.
 The xwidget `javascript-callback' handler calls this BY SYMBOL: see
 `agent-repl--frontend-webview-read-script' for why a closure would crash."
-  (condition-case err
-      (let* ((answer (agent-repl-webhost-parse-answer raw))
-             (scope (agent-repl--webhost-answer-ws answer)))
-        (agent-repl--log scope "elisp.webhost.answer op=%s id=%s outcome=%s"
-                         (plist-get answer :op) (plist-get answer :id) (plist-get answer :outcome))
-        (when (equal (plist-get answer :outcome) "unknown-call")
-          (agent-repl--webhost-predates-call (plist-get answer :op)))
-        (dolist (note (plist-get answer :notes))
-          (agent-repl--webhost-record-note scope (plist-get answer :op) note)))
-    (error
-     (agent-repl--error agent-repl--webhost-central
-                        "elisp.webhost.answer-unreadable raw=%S error=%S" raw err))))
+  (agent-repl--webview-answered raw "elisp.webhost" #'agent-repl--webhost-answer-ws
+                                agent-repl--webhost-central #'agent-repl--webhost-predates-call))
 
 (defun agent-repl--webhost-call (method &rest args)
   "Call the host's METHOD with ARGS; non-nil when the call was sent.
@@ -525,7 +605,10 @@ show, so the page can measure it."
     (when (and id (not (equal id agent-repl--webhost-shown)))
       (setq agent-repl--webhost-shown id)
       (agent-repl--info ws "elisp.webhost.show ws=%s id=%s" ws id)
-      (agent-repl--webhost-call "show" id switch-started))))
+      (agent-repl--webhost-call "show" id switch-started)
+      ;; THE SIDEBAR'S HIGHLIGHT MOVES WITH THE PAGE, in the same command:
+      ;; the sidebar is a web view of its own (sidebar-view.el).
+      (agent-repl-sidebar-view-mark-shown id))))
 
 (defun agent-repl-webhost-remove (ws &optional unloading)
   "Drop WS's page from the host, and everything held for it.
@@ -553,7 +636,7 @@ unloaded page's workspace still shows its gate at the composer's height
 
 A HANDOVER NEVER RELOADS THE HOST.  Reloading it replaced every page at
 once, and the page on screen stood blank for seconds (4.8s on the
-2026-10-23 14:38 deploy).  Instead the host's own calls (its sidebar's)
+2026-10-23 14:38 deploy).  Instead the host's own calls (its services')
 are pointed at the daemon WS moved to (`setDaemon'), and WS's page is
 re-pointed there: the host keeps a shown page on screen until its
 replacement has drawn (host.ts), so nobody sees it blank."
@@ -570,8 +653,8 @@ replacement has drawn (host.ts), so nobody sees it blank."
 
 (defun agent-repl-webhost-follow-daemon (ws conn)
   "Point the host's own calls at CONN's daemon, the one WS moved to.
-The host keeps its page and every workspace's; only where its sidebar's
-calls go moves (`setDaemon')."
+The host keeps its page and every workspace's; only where its services'
+calls, and the sidebar's (sidebar-view.el), go moves (`setDaemon')."
   (let ((origin (agent-repl-webhost-origin conn)))
     (unless (equal origin (or agent-repl--webhost-daemon-origin
                               (and agent-repl--webhost-url
@@ -579,7 +662,8 @@ calls go moves (`setDaemon')."
       (setq agent-repl--webhost-daemon-origin origin
             agent-repl--webhost-follow-conn conn)
       (agent-repl--info ws "elisp.webhost.follows-daemon ws=%s to=%s" ws origin)
-      (agent-repl--webhost-call "setDaemon" origin))))
+      (agent-repl--webhost-call "setDaemon" origin)
+      (agent-repl-sidebar-view-follow-daemon origin))))
 
 (defun agent-repl--webhost-url-origin (url)
   "The scheme, host and port of URL, as the host page reads its own origin."
@@ -592,6 +676,17 @@ The host draws the gate whether or not WS's page is loaded."
   (when-let ((id (agent-repl--webhost-id ws)))
     (puthash id pixels agent-repl--webhost-gate-docks)
     (agent-repl--webhost-call "setGateDock" id pixels)))
+
+(defun agent-repl-webhost-set-sidebar-offset (pixels)
+  "Tell the host the sidebar's window starts PIXELS below its own.
+Kept for the host's reloads.
+The host draws the sidebar's row panels beside it, at the row's height plus
+this (webapp/src/host/sidebar-popups.ts).  Nothing is sent when PIXELS is
+the offset already told."
+  (unless (equal pixels agent-repl--webhost-sidebar-offset)
+    (setq agent-repl--webhost-sidebar-offset pixels)
+    (agent-repl--info agent-repl--webhost-central "elisp.webhost.sidebar-offset pixels=%d" pixels)
+    (agent-repl--webhost-call "setSidebarOffset" pixels)))
 
 (defun agent-repl-webhost-set-held-ingress (ws entries)
   "Tell WS's page the held-prompt ingress ENTRIES for WS; kept for its reloads.
@@ -616,6 +711,7 @@ once its window passes, so a page that loads later has nothing to draw."
 LEVEL `info', with UNTIL-MS nil, closes the window.  Kept for the host's
 reloads while the window lasts.  Non-nil when the call was sent."
   (setq agent-repl--webhost-log-level (unless (eq level 'info) (cons level until-ms)))
+  (agent-repl-sidebar-view-set-log-level level until-ms)
   (agent-repl--webhost-call "setLogLevel" (symbol-name level) until-ms))
 
 (defun agent-repl-webhost-dismiss-digest (ws)
@@ -632,6 +728,7 @@ reaches the pages: each lets go of every notice the pointer raised on it
 footer.  A key the web view forwards to Emacs selects another window without
 the web view ever losing the focus, so the pages cannot see this for
 themselves.  With no host there are no pages to tell, and nothing is sent."
+  (agent-repl-sidebar-view-focus-moved)
   (when (agent-repl-webhost-xwidget)
     (agent-repl--webhost-call "focusMoved")))
 
@@ -710,6 +807,9 @@ successor\='s rendezvous completes only once the page has called, inside
 the host\='s own 10s call bound.  Queued behind a lane\='s other pages, two
 such pages missed it on the 2026-10-22 11:14 deploy, and both adopts timed
 out (`agent-repl-host-adopting-p')."
+  ;; THE SIDEBAR'S OFFSET, which places the sidebar's row panels.
+  (unless (zerop agent-repl--webhost-sidebar-offset)
+    (agent-repl--webhost-call "setSidebarOffset" agent-repl--webhost-sidebar-offset))
   ;; EVERY GATE SLOT FIRST, a loaded page's or not: the host draws the gate
   ;; of whichever workspace is shown (webapp/src/host/gate.ts).
   (maphash (lambda (id pixels) (agent-repl--webhost-call "setGateDock" id pixels))
@@ -837,6 +937,9 @@ is the reload asked for."
               agent-repl--webhost-follow-conn nil
               agent-repl--webhost-reload-started-ms (agent-repl--now-unix-ms))
         (agent-repl--frontend-webview-navigate-widget xw agent-repl--webhost-url)
+        ;; THE SIDEBAR RELOADS WITH THE HOST, onto the same daemon, so the
+        ;; two documents run one build (sidebar-view.el).
+        (agent-repl-sidebar-view-navigate conn)
         (agent-repl--info agent-repl--webhost-central "elisp.webhost.reloaded pages=%d"
                           (hash-table-count agent-repl--webhost-pages)))
     (agent-repl--log agent-repl--webhost-central "elisp.webhost.reload-skipped reason=no-host")))

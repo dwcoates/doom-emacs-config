@@ -88,6 +88,7 @@
   (load (expand-file-name "test-splash.el" dir) nil t)
   (load (expand-file-name "test-session.el" dir) nil t)
   (load (expand-file-name "test-sibling-popup.el" dir) nil t)
+  (load (expand-file-name "test-sidebar-view.el" dir) nil t)
   (load (expand-file-name "test-spell.el" dir) nil t)
   (load (expand-file-name "test-status.el" dir) nil t)
   (load (expand-file-name "test-test-helpers.el" dir) nil t)

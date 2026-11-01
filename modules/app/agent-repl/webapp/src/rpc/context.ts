@@ -167,7 +167,7 @@ export interface DaemonContextInit {
   costs?: StreamCostMeter;
   /**
    * The movable daemon origin the client's transport reads, set by the web
-   * view host's context alone (host/sidebar.ts): its moves reopen every
+   * view host's and the sidebar page's contexts alone (host/document.ts): its moves reopen every
    * standing stream at the daemon now named. Unset on every workspace page,
    * whose daemon is its own origin for its whole life.
    */

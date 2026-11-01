@@ -869,14 +869,9 @@ body::after {
   font-size: 14px;
 }
 #ws-sidebar[hidden] { display: none; }
-/* A PAGE IN THE WEBHOST DRAWS NO SIDEBAR OF ITS OWN: the webhost draws the one
-   sidebar over this column (host/sidebar.ts), so the page keeps the column,
-   empty and invisible, at exactly the size its own sidebar took. */
-html.webhost-sidebar #ws-sidebar,
-html.webhost-sidebar #ws-sidebar[hidden] {
-  display: flex;
-  visibility: hidden;
-}
+/* A PAGE IN THE WEBHOST DRAWS NO SIDEBAR OF ITS OWN: the sidebar is a web view
+   of its own beside the host (host/sidebar-page.ts), so the page's rail stays
+   hidden and its column takes no width. */
 
 /* THE RAIL'S TEXT IS INFORMATION AND IS THEREFORE SELECTABLE (owner rulings,
    2026-09-14: "ensure that everything in the webapp (all text) can be copied
@@ -1890,7 +1885,10 @@ html.sb-dragging * { -webkit-user-select: none; user-select: none; }
 #ws-sidebar .detail .memory { margin: 0.35rem 0 0; }
 #ws-sidebar .detail .memory:empty { display: none; }
 #ws-sidebar .detail .children-head { color: var(--muted); }
-#ws-sidebar .detail .children ul { margin: 0.15rem 0 0; padding-left: 1rem; }
+/* A LONG CHILDREN LIST SCROLLS INSIDE ITSELF (owner request, 2026-10-31), so a
+   workspace with many children keeps its panel short and its branch, from
+   and commits lines in view; the reader scrolls it with the pointer on it. */
+#ws-sidebar .detail .children ul { margin: 0.15rem 0 0; padding-left: 1rem; max-height: 14rem; overflow-y: auto; }
 #ws-sidebar .detail .children li { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #ws-sidebar .detail .children li.receded { opacity: var(--receded-opacity); }
 

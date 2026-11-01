@@ -126,6 +126,8 @@
 
 ;; The one web view holding every workspace's page (webhost.el).
 (declare-function agent-repl-webhost-ensure "webhost" (conn))
+(declare-function agent-repl-sidebar-view-show "sidebar-view" (conn))
+(declare-function agent-repl-sidebar-view-hide "sidebar-view" ())
 (declare-function agent-repl-webhost-xwidget "webhost" ())
 (declare-function agent-repl-page-unload-note-mounted "page-unload" (ws))
 (declare-function agent-repl-page-unload-wanted-p "page-unload" (ws))
@@ -1150,7 +1152,11 @@ panels — the extra-windows-on-first-switch bug."
                                    :preserve-size  'height)
         (select-window input-win)
         (agent-repl--log ws "display-webview: mounted webview-window=%s input-window=%s input-height=%s target-height=%s"
-                         win input-win actual-height target-height)))))
+                         win input-win actual-height target-height))))
+    ;; THE SIDEBAR STANDS BESIDE THE PANELS, in a full-height window of its
+    ;; own at the frame's left edge (sidebar-view.el).  One for every
+    ;; workspace: a switch leaves the standing one where it is.
+    (agent-repl-sidebar-view-show (agent-repl-host-conn ws)))
   buf)
 
 ;;;; ---- Entry point ----------------------------------------------------------------
@@ -1547,7 +1553,10 @@ one workspace never disturbs another workspace's windows."
       (agent-repl--close-buffer-windows
        (agent-repl--ws-get ws :frontend-buffer)
        (or (agent-repl--ws-get ws :input-buffer)
-           (get-buffer (agent-repl--buffer-name "-input" ws)))))))
+           (get-buffer (agent-repl--buffer-name "-input" ws)))))
+    ;; THE SIDEBAR GOES WITH THE PANELS: a layout saved while it stood
+    ;; brings it back with the restore, so it is taken off explicitly.
+    (agent-repl-sidebar-view-hide)))
 
 (defun agent-repl--gui-running-p (ws)
   "The gui frontend's liveness capability (registry `:running-p-fn').

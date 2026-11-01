@@ -201,6 +201,24 @@ shares a main thread with, by symbol."
             (should (eq (nth 2 (car calls)) 'agent-repl-profiling--page-started)))
         (kill-buffer buf)))))
 
+(ert-deftest agent-repl-test-profiling-pages-start-the-sidebar-beside-the-host ()
+  "The sidebar is a web view of its own, sampled beside the host."
+  (agent-repl-test-profiling--with-root
+    (let ((host (generate-new-buffer " *host*"))
+          (sidebar (generate-new-buffer " *sidebar*"))
+          (calls nil))
+      (unwind-protect
+          (cl-letf (((symbol-function 'agent-repl-webhost-buffer) (lambda () host))
+                    ((symbol-function 'agent-repl-sidebar-view-buffer) (lambda () sidebar))
+                    ((symbol-function 'agent-repl--frontend-webview-read-script)
+                     (lambda (b script cb) (push (list b script cb) calls) t)))
+            (agent-repl-test-profiling--open root "s1")
+            (should (equal (agent-repl-profiling-reconcile) "started s1 pages=2"))
+            (should (equal (sort (mapcar (lambda (c) (buffer-name (car c))) calls) #'string<)
+                           '(" *host*" " *sidebar*"))))
+        (kill-buffer host)
+        (kill-buffer sidebar)))))
+
 (ert-deftest agent-repl-test-profiling-pages-without-a-host-reach-none ()
   "With no host there is no page to sample."
   (agent-repl-test-profiling--with-root

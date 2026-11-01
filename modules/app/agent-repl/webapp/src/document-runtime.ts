@@ -10,7 +10,7 @@ import { codeOfBlockControl } from "./code-block.js";
 import { boundCopyText, installCopyControls } from "./copy-control.js";
 import { installCopyChords, installCopyFallback } from "./copy.js";
 import type { LevelWindow } from "../../agent-shim/logging/ts/level-window.js";
-import { ForwardingLogger, setLogger, type ClientLogLevel } from "./log.js";
+import { defaultConsole, ForwardingLogger, setLogger, type ClientLogLevel } from "./log.js";
 import type { AgentReplClient } from "./rpc/client.js";
 import { clientLogSink, type ClientLogSource } from "./rpc/client-log-sink.js";
 import { installSelectionClickGuard } from "./selection.js";
@@ -18,15 +18,25 @@ import { installSelectionClickGuard } from "./selection.js";
 /**
  * Install the document's logger: every record from THRESHOLD up forwarded to
  * the daemon over GETCLIENT's client as SOURCE's. INSTALL defaults to the
- * page-wide logger slot. Answers the logger installed.
+ * page-wide logger slot. ON_RECORD, when given, is told every record written
+ * (its level and its JSON line) after the console has it. Answers the logger
+ * installed.
  */
 export function installForwardingLogger(
   getClient: () => AgentReplClient,
   source: ClientLogSource,
   threshold: ClientLogLevel | LevelWindow = "info",
   install: (logger: ForwardingLogger) => void = setLogger,
+  onRecord?: (level: ClientLogLevel, line: string) => void,
 ): ForwardingLogger {
-  const logger = new ForwardingLogger(clientLogSink(getClient, source), undefined, {}, threshold);
+  const write =
+    onRecord === undefined
+      ? defaultConsole
+      : (level: ClientLogLevel, line: string): void => {
+          defaultConsole(level, line);
+          onRecord(level, line);
+        };
+  const logger = new ForwardingLogger(clientLogSink(getClient, source), write, {}, threshold);
   install(logger);
   return logger;
 }

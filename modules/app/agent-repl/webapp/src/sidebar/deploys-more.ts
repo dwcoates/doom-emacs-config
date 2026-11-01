@@ -19,7 +19,7 @@
  */
 import { queryAll } from "../dom.js";
 import { log } from "../log.js";
-import { railScrollKept } from "../scroll.js";
+import { scrollKept } from "../scroll.js";
 import type { Timers } from "../timers.js";
 import { DEPLOYS_GROUP_CLASS, deploysGroupRepository } from "./deploys-fold.js";
 
@@ -121,7 +121,7 @@ export function createDeploysMore(root: ParentNode, timers: Timers, changed: () 
       .filter((page) => !page.hidden && page.getBoundingClientRect().bottom <= top)
       .reduce((sum, page) => sum + page.getBoundingClientRect().height, 0);
     paint(group);
-    railScrollKept(region, region.scrollTop - above);
+    scrollKept(region, region.scrollTop - above);
     changed();
   };
   const check = (): void => {
