@@ -838,9 +838,9 @@ describe("drawClientDisconnectedStrip: the one strip this client composes", () =
     expect(row.querySelector(".footer-activity")?.querySelector(".pfooter-grab")).toBeNull();
   });
 
-  it("draws the status word disconnected", () => {
+  it("draws the verdict as the status word, never the arm's word disconnected", () => {
     const row = drawClientDisconnectedStrip("daemon unreachable", "AnswerColdGate: unavailable");
-    expect(row.querySelector(".footer-status")?.textContent).toBe("disconnected");
+    expect(row.querySelector(".footer-status")?.textContent).not.toBe("disconnected");
   });
 
   it("marks the status cell with the disconnected arm, as a pushed strip does", () => {

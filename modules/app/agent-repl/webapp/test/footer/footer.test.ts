@@ -2099,7 +2099,7 @@ describe("mountFooter: the hovered response's usage stands in for the activity l
     // Act
     footer.showResponseUsage(hoveredUsage("2.1k"));
     // Assert
-    expect([host.querySelector(".footer-status")?.textContent, tierOf(host)]).toEqual(["disconnected", "hover"]);
+    expect([host.querySelector(".footer-status")?.getAttribute("data-arm"), tierOf(host)]).toEqual(["disconnected", "hover"]);
   });
 
   it("draws nothing before the first push", async () => {
