@@ -66,6 +66,11 @@ message GetForkPointFailure {
     // could carry part of the in-flight turn. NOT RETRYABLE while that turn
     // runs: asked again once it concludes, the shim names its final record.
     GetForkPointUnresolved unresolved = 1;
+    // The turn in flight is the conversation's first: its opener is the
+    // transcript's first record, so no finished turn precedes it and a fork
+    // that excludes it would carry nothing. NOT RETRYABLE while that turn
+    // runs: asked again once it concludes, the shim names its final record.
+    GetForkPointNothingFinished nothing_finished = 3;
   }
   // The shim's account, for a human and for logs; never switched on.
   string detail = 2;
@@ -73,3 +78,5 @@ message GetForkPointFailure {
 
 // No extent that excludes the turn in flight could be named.
 message GetForkPointUnresolved {}
+// The only turn the conversation holds is the one in flight.
+message GetForkPointNothingFinished {}

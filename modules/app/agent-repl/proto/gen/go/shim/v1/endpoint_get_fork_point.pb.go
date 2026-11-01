@@ -243,6 +243,7 @@ type GetForkPointFailure struct {
 	// Types that are valid to be assigned to Cause:
 	//
 	//	*GetForkPointFailure_Unresolved
+	//	*GetForkPointFailure_NothingFinished
 	Cause isGetForkPointFailure_Cause `protobuf_oneof:"cause"`
 	// The shim's account, for a human and for logs; never switched on.
 	Detail        string `protobuf:"bytes,2,opt,name=detail,proto3" json:"detail,omitempty"`
@@ -296,6 +297,15 @@ func (x *GetForkPointFailure) GetUnresolved() *GetForkPointUnresolved {
 	return nil
 }
 
+func (x *GetForkPointFailure) GetNothingFinished() *GetForkPointNothingFinished {
+	if x != nil {
+		if x, ok := x.Cause.(*GetForkPointFailure_NothingFinished); ok {
+			return x.NothingFinished
+		}
+	}
+	return nil
+}
+
 func (x *GetForkPointFailure) GetDetail() string {
 	if x != nil {
 		return x.Detail
@@ -315,7 +325,17 @@ type GetForkPointFailure_Unresolved struct {
 	Unresolved *GetForkPointUnresolved `protobuf:"bytes,1,opt,name=unresolved,proto3,oneof"`
 }
 
+type GetForkPointFailure_NothingFinished struct {
+	// The turn in flight is the conversation's first: its opener is the
+	// transcript's first record, so no finished turn precedes it and a fork
+	// that excludes it would carry nothing. NOT RETRYABLE while that turn
+	// runs: asked again once it concludes, the shim names its final record.
+	NothingFinished *GetForkPointNothingFinished `protobuf:"bytes,3,opt,name=nothing_finished,json=nothingFinished,proto3,oneof"`
+}
+
 func (*GetForkPointFailure_Unresolved) isGetForkPointFailure_Cause() {}
+
+func (*GetForkPointFailure_NothingFinished) isGetForkPointFailure_Cause() {}
 
 // No extent that excludes the turn in flight could be named.
 type GetForkPointUnresolved struct {
@@ -354,6 +374,43 @@ func (*GetForkPointUnresolved) Descriptor() ([]byte, []int) {
 	return file_shim_v1_endpoint_get_fork_point_proto_rawDescGZIP(), []int{4}
 }
 
+// The only turn the conversation holds is the one in flight.
+type GetForkPointNothingFinished struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetForkPointNothingFinished) Reset() {
+	*x = GetForkPointNothingFinished{}
+	mi := &file_shim_v1_endpoint_get_fork_point_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetForkPointNothingFinished) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetForkPointNothingFinished) ProtoMessage() {}
+
+func (x *GetForkPointNothingFinished) ProtoReflect() protoreflect.Message {
+	mi := &file_shim_v1_endpoint_get_fork_point_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetForkPointNothingFinished.ProtoReflect.Descriptor instead.
+func (*GetForkPointNothingFinished) Descriptor() ([]byte, []int) {
+	return file_shim_v1_endpoint_get_fork_point_proto_rawDescGZIP(), []int{5}
+}
+
 var File_shim_v1_endpoint_get_fork_point_proto protoreflect.FileDescriptor
 
 const file_shim_v1_endpoint_get_fork_point_proto_rawDesc = "" +
@@ -367,14 +424,16 @@ const file_shim_v1_endpoint_get_fork_point_proto_rawDesc = "" +
 	"\x13GetForkPointSuccess\x12(\n" +
 	"\x05point\x18\x01 \x01(\v2\x12.shim.v1.ForkPointR\x05point\x12>\n" +
 	"\athrough\x18\x02 \x01(\v2$.conversation.v1.ConversationThroughR\athrough\x12D\n" +
-	"\x11uninherited_turns\x18\x03 \x03(\v2\x17.conversation.v1.TurnIdR\x10uninheritedTurns\"y\n" +
+	"\x11uninherited_turns\x18\x03 \x03(\v2\x17.conversation.v1.TurnIdR\x10uninheritedTurns\"\xcc\x01\n" +
 	"\x13GetForkPointFailure\x12A\n" +
 	"\n" +
 	"unresolved\x18\x01 \x01(\v2\x1f.shim.v1.GetForkPointUnresolvedH\x00R\n" +
-	"unresolved\x12\x16\n" +
+	"unresolved\x12Q\n" +
+	"\x10nothing_finished\x18\x03 \x01(\v2$.shim.v1.GetForkPointNothingFinishedH\x00R\x0fnothingFinished\x12\x16\n" +
 	"\x06detail\x18\x02 \x01(\tR\x06detailB\a\n" +
 	"\x05cause\"\x18\n" +
-	"\x16GetForkPointUnresolvedB Z\x1eagentrepl/proto/shim/v1;shimv1b\x06proto3"
+	"\x16GetForkPointUnresolved\"\x1d\n" +
+	"\x1bGetForkPointNothingFinishedB Z\x1eagentrepl/proto/shim/v1;shimv1b\x06proto3"
 
 var (
 	file_shim_v1_endpoint_get_fork_point_proto_rawDescOnce sync.Once
@@ -388,29 +447,31 @@ func file_shim_v1_endpoint_get_fork_point_proto_rawDescGZIP() []byte {
 	return file_shim_v1_endpoint_get_fork_point_proto_rawDescData
 }
 
-var file_shim_v1_endpoint_get_fork_point_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
+var file_shim_v1_endpoint_get_fork_point_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
 var file_shim_v1_endpoint_get_fork_point_proto_goTypes = []any{
-	(*GetForkPointRequest)(nil),    // 0: shim.v1.GetForkPointRequest
-	(*GetForkPointResponse)(nil),   // 1: shim.v1.GetForkPointResponse
-	(*GetForkPointSuccess)(nil),    // 2: shim.v1.GetForkPointSuccess
-	(*GetForkPointFailure)(nil),    // 3: shim.v1.GetForkPointFailure
-	(*GetForkPointUnresolved)(nil), // 4: shim.v1.GetForkPointUnresolved
-	(*ForkPoint)(nil),              // 5: shim.v1.ForkPoint
-	(*v1.ConversationThrough)(nil), // 6: conversation.v1.ConversationThrough
-	(*v1.TurnId)(nil),              // 7: conversation.v1.TurnId
+	(*GetForkPointRequest)(nil),         // 0: shim.v1.GetForkPointRequest
+	(*GetForkPointResponse)(nil),        // 1: shim.v1.GetForkPointResponse
+	(*GetForkPointSuccess)(nil),         // 2: shim.v1.GetForkPointSuccess
+	(*GetForkPointFailure)(nil),         // 3: shim.v1.GetForkPointFailure
+	(*GetForkPointUnresolved)(nil),      // 4: shim.v1.GetForkPointUnresolved
+	(*GetForkPointNothingFinished)(nil), // 5: shim.v1.GetForkPointNothingFinished
+	(*ForkPoint)(nil),                   // 6: shim.v1.ForkPoint
+	(*v1.ConversationThrough)(nil),      // 7: conversation.v1.ConversationThrough
+	(*v1.TurnId)(nil),                   // 8: conversation.v1.TurnId
 }
 var file_shim_v1_endpoint_get_fork_point_proto_depIdxs = []int32{
 	2, // 0: shim.v1.GetForkPointResponse.success:type_name -> shim.v1.GetForkPointSuccess
 	3, // 1: shim.v1.GetForkPointResponse.failure:type_name -> shim.v1.GetForkPointFailure
-	5, // 2: shim.v1.GetForkPointSuccess.point:type_name -> shim.v1.ForkPoint
-	6, // 3: shim.v1.GetForkPointSuccess.through:type_name -> conversation.v1.ConversationThrough
-	7, // 4: shim.v1.GetForkPointSuccess.uninherited_turns:type_name -> conversation.v1.TurnId
+	6, // 2: shim.v1.GetForkPointSuccess.point:type_name -> shim.v1.ForkPoint
+	7, // 3: shim.v1.GetForkPointSuccess.through:type_name -> conversation.v1.ConversationThrough
+	8, // 4: shim.v1.GetForkPointSuccess.uninherited_turns:type_name -> conversation.v1.TurnId
 	4, // 5: shim.v1.GetForkPointFailure.unresolved:type_name -> shim.v1.GetForkPointUnresolved
-	6, // [6:6] is the sub-list for method output_type
-	6, // [6:6] is the sub-list for method input_type
-	6, // [6:6] is the sub-list for extension type_name
-	6, // [6:6] is the sub-list for extension extendee
-	0, // [0:6] is the sub-list for field type_name
+	5, // 6: shim.v1.GetForkPointFailure.nothing_finished:type_name -> shim.v1.GetForkPointNothingFinished
+	7, // [7:7] is the sub-list for method output_type
+	7, // [7:7] is the sub-list for method input_type
+	7, // [7:7] is the sub-list for extension type_name
+	7, // [7:7] is the sub-list for extension extendee
+	0, // [0:7] is the sub-list for field type_name
 }
 
 func init() { file_shim_v1_endpoint_get_fork_point_proto_init() }
@@ -425,6 +486,7 @@ func file_shim_v1_endpoint_get_fork_point_proto_init() {
 	}
 	file_shim_v1_endpoint_get_fork_point_proto_msgTypes[3].OneofWrappers = []any{
 		(*GetForkPointFailure_Unresolved)(nil),
+		(*GetForkPointFailure_NothingFinished)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -432,7 +494,7 @@ func file_shim_v1_endpoint_get_fork_point_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_shim_v1_endpoint_get_fork_point_proto_rawDesc), len(file_shim_v1_endpoint_get_fork_point_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   5,
+			NumMessages:   6,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

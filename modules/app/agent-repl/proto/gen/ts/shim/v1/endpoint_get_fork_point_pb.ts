@@ -27,7 +27,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file shim/v1/endpoint_get_fork_point.proto.
  */
 export const file_shim_v1_endpoint_get_fork_point: GenFile = /*@__PURE__*/
-  fileDesc("CiVzaGltL3YxL2VuZHBvaW50X2dldF9mb3JrX3BvaW50LnByb3RvEgdzaGltLnYxIhUKE0dldEZvcmtQb2ludFJlcXVlc3QiggEKFEdldEZvcmtQb2ludFJlc3BvbnNlEi8KB3N1Y2Nlc3MYASABKAsyHC5zaGltLnYxLkdldEZvcmtQb2ludFN1Y2Nlc3NIABIvCgdmYWlsdXJlGAIgASgLMhwuc2hpbS52MS5HZXRGb3JrUG9pbnRGYWlsdXJlSABCCAoGcmVzdWx0IqMBChNHZXRGb3JrUG9pbnRTdWNjZXNzEiEKBXBvaW50GAEgASgLMhIuc2hpbS52MS5Gb3JrUG9pbnQSNQoHdGhyb3VnaBgCIAEoCzIkLmNvbnZlcnNhdGlvbi52MS5Db252ZXJzYXRpb25UaHJvdWdoEjIKEXVuaW5oZXJpdGVkX3R1cm5zGAMgAygLMhcuY29udmVyc2F0aW9uLnYxLlR1cm5JZCJlChNHZXRGb3JrUG9pbnRGYWlsdXJlEjUKCnVucmVzb2x2ZWQYASABKAsyHy5zaGltLnYxLkdldEZvcmtQb2ludFVucmVzb2x2ZWRIABIOCgZkZXRhaWwYAiABKAlCBwoFY2F1c2UiGAoWR2V0Rm9ya1BvaW50VW5yZXNvbHZlZEIgWh5hZ2VudHJlcGwvcHJvdG8vc2hpbS92MTtzaGltdjFiBnByb3RvMw", [file_conversation_v1_history, file_conversation_v1_turn, file_shim_v1_fork_point]);
+  fileDesc("CiVzaGltL3YxL2VuZHBvaW50X2dldF9mb3JrX3BvaW50LnByb3RvEgdzaGltLnYxIhUKE0dldEZvcmtQb2ludFJlcXVlc3QiggEKFEdldEZvcmtQb2ludFJlc3BvbnNlEi8KB3N1Y2Nlc3MYASABKAsyHC5zaGltLnYxLkdldEZvcmtQb2ludFN1Y2Nlc3NIABIvCgdmYWlsdXJlGAIgASgLMhwuc2hpbS52MS5HZXRGb3JrUG9pbnRGYWlsdXJlSABCCAoGcmVzdWx0IqMBChNHZXRGb3JrUG9pbnRTdWNjZXNzEiEKBXBvaW50GAEgASgLMhIuc2hpbS52MS5Gb3JrUG9pbnQSNQoHdGhyb3VnaBgCIAEoCzIkLmNvbnZlcnNhdGlvbi52MS5Db252ZXJzYXRpb25UaHJvdWdoEjIKEXVuaW5oZXJpdGVkX3R1cm5zGAMgAygLMhcuY29udmVyc2F0aW9uLnYxLlR1cm5JZCKnAQoTR2V0Rm9ya1BvaW50RmFpbHVyZRI1Cgp1bnJlc29sdmVkGAEgASgLMh8uc2hpbS52MS5HZXRGb3JrUG9pbnRVbnJlc29sdmVkSAASQAoQbm90aGluZ19maW5pc2hlZBgDIAEoCzIkLnNoaW0udjEuR2V0Rm9ya1BvaW50Tm90aGluZ0ZpbmlzaGVkSAASDgoGZGV0YWlsGAIgASgJQgcKBWNhdXNlIhgKFkdldEZvcmtQb2ludFVucmVzb2x2ZWQiHQobR2V0Rm9ya1BvaW50Tm90aGluZ0ZpbmlzaGVkQiBaHmFnZW50cmVwbC9wcm90by9zaGltL3YxO3NoaW12MWIGcHJvdG8z", [file_conversation_v1_history, file_conversation_v1_turn, file_shim_v1_fork_point]);
 
 /**
  * Ask for the fork point of the shim's own conversation. The shim resolves it
@@ -152,6 +152,17 @@ export type GetForkPointFailure = Message<"shim.v1.GetForkPointFailure"> & {
      */
     value: GetForkPointUnresolved;
     case: "unresolved";
+  } | {
+    /**
+     * The turn in flight is the conversation's first: its opener is the
+     * transcript's first record, so no finished turn precedes it and a fork
+     * that excludes it would carry nothing. NOT RETRYABLE while that turn
+     * runs: asked again once it concludes, the shim names its final record.
+     *
+     * @generated from field: shim.v1.GetForkPointNothingFinished nothing_finished = 3;
+     */
+    value: GetForkPointNothingFinished;
+    case: "nothingFinished";
   } | { case: undefined; value?: undefined };
 
   /**
@@ -183,4 +194,19 @@ export type GetForkPointUnresolved = Message<"shim.v1.GetForkPointUnresolved"> &
  */
 export const GetForkPointUnresolvedSchema: GenMessage<GetForkPointUnresolved> = /*@__PURE__*/
   messageDesc(file_shim_v1_endpoint_get_fork_point, 4);
+
+/**
+ * The only turn the conversation holds is the one in flight.
+ *
+ * @generated from message shim.v1.GetForkPointNothingFinished
+ */
+export type GetForkPointNothingFinished = Message<"shim.v1.GetForkPointNothingFinished"> & {
+};
+
+/**
+ * Describes the message shim.v1.GetForkPointNothingFinished.
+ * Use `create(GetForkPointNothingFinishedSchema)` to create a new message.
+ */
+export const GetForkPointNothingFinishedSchema: GenMessage<GetForkPointNothingFinished> = /*@__PURE__*/
+  messageDesc(file_shim_v1_endpoint_get_fork_point, 5);
 
