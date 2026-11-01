@@ -59,6 +59,7 @@ func TestBaselineMergesEveryTierPerSystem(t *testing.T) {
 		CoverRoot: root, Commit: "abc123", Now: time.Date(2026, 10, 15, 1, 2, 3, 0, time.UTC),
 		GoSystems: map[string]string{"agent-repld": "daemon", "agentrepl/logging": "logging"},
 		Vitest:    map[string]VitestReports{"webapp": {Unit: istanbul}},
+		Selection: Selection{Every: true},
 	}
 
 	// Act
@@ -97,7 +98,9 @@ func TestBaselineRefuses(t *testing.T) {
 		tool    func(*[][]string) Runner
 		systems map[string]string
 		vitest  map[string]VitestReports
-		want    string
+		// sel is the run's selection; zero, every suite.
+		sel  Selection
+		want string
 	}{
 		{
 			name: "a run that wrote no counters",
@@ -128,6 +131,29 @@ func TestBaselineRefuses(t *testing.T) {
 			want:   "cover: webapp: read /gone/coverage-final.json",
 		},
 		{
+			name: "a selection whose Go suite wrote no counters",
+			root: func(t *testing.T) string { return t.TempDir() },
+			tool: func(c *[][]string) Runner { return profileTool(mergedProfile, c) },
+			sel:  Selection{Suites: []string{"daemon"}},
+			want: "holds no coverage counters",
+		},
+		{
+			name:    "a selected system no counter covers",
+			root:    counterTree,
+			tool:    func(c *[][]string) Runner { return profileTool(mergedProfile, c) },
+			systems: map[string]string{"agent-repld": "daemon", "agentrepl/shim-store": "store"},
+			sel:     Selection{Suites: []string{"e2e", "store"}},
+			want:    "no counter of the run covers agentrepl/shim-store (suite store)",
+		},
+		{
+			name:    "a selection that measured no system",
+			root:    func(t *testing.T) string { return t.TempDir() },
+			tool:    func(c *[][]string) Runner { return profileTool(mergedProfile, c) },
+			systems: map[string]string{"agent-repld": "daemon"},
+			sel:     Selection{Suites: []string{"e2e-emacs"}},
+			want:    "the suites e2e-emacs measured no coverage system",
+		},
+		{
 			name: "a merged profile without its mode line",
 			root: counterTree,
 			tool: func(c *[][]string) Runner { return profileTool("agent-repld/a.go:1.1,2.1 1 1\n", c) },
@@ -142,7 +168,11 @@ func TestBaselineRefuses(t *testing.T) {
 			if systems == nil {
 				systems = map[string]string{"agent-repld": "daemon"}
 			}
-			in := BaselineInput{CoverRoot: tt.root(t), GoSystems: systems, Vitest: tt.vitest, Commit: "c"}
+			sel := tt.sel
+			if sel.Suites == nil {
+				sel.Every = true
+			}
+			in := BaselineInput{CoverRoot: tt.root(t), GoSystems: systems, Vitest: tt.vitest, Selection: sel, Commit: "c"}
 
 			// Act
 			_, err := Baseline(tt.tool(&calls), in)
@@ -172,14 +202,20 @@ func TestIstanbulStatementsRefusesAnEmptyReport(t *testing.T) {
 }
 
 func TestParseBaselineArgs(t *testing.T) {
+	base := func() []string { return []string{"-module", "/m", "-work", "/w", "-commit", "c", "-out", "/o"} }
 	tests := []struct {
 		name    string
 		argv    []string
-		wantErr bool
+		want    Selection
+		wantErr string
 	}{
-		{name: "every flag", argv: []string{"-module", "/m", "-work", "/w", "-commit", "c", "-out", "/o"}},
-		{name: "no commit", argv: []string{"-module", "/m", "-work", "/w", "-out", "/o"}, wantErr: true},
-		{name: "a stray argument", argv: []string{"-module", "/m", "-work", "/w", "-commit", "c", "-out", "/o", "x"}, wantErr: true},
+		{name: "every flag, every suite", argv: append(base(), "-every-suite"), want: Selection{Every: true}},
+		{name: "a selection, sorted and once each", argv: append(base(), "-suite", "e2e-emacs", "-suite", "e2e", "-suite", "e2e-emacs"), want: Selection{Suites: []string{"e2e", "e2e-emacs"}}},
+		{name: "no selection", argv: base(), wantErr: "exactly one of -every-suite or one -suite"},
+		{name: "every suite and a selection", argv: append(base(), "-every-suite", "-suite", "e2e"), wantErr: "exactly one of -every-suite or one -suite"},
+		{name: "a suite the roster does not hold", argv: append(base(), "-suite", "nope"), wantErr: `"nope" is no roster suite`},
+		{name: "no commit", argv: []string{"-module", "/m", "-work", "/w", "-out", "/o", "-every-suite"}, wantErr: "takes exactly -module"},
+		{name: "a stray argument", argv: append(base(), "-every-suite", "x"), wantErr: "takes exactly -module"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -187,11 +223,17 @@ func TestParseBaselineArgs(t *testing.T) {
 			a, err := ParseBaselineArgs(tt.argv)
 
 			// Assert
-			if (err != nil) != tt.wantErr {
-				t.Fatalf("err = %v, wantErr %t", err, tt.wantErr)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("err = %v, want %q", err, tt.wantErr)
+				}
+				return
 			}
-			if !tt.wantErr && (a.Module != "/m" || a.Work != "/w" || a.Commit != "c" || a.Out != "/o") {
-				t.Fatalf("args = %+v", a)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if a.Module != "/m" || a.Work != "/w" || a.Commit != "c" || a.Out != "/o" || !reflect.DeepEqual(a.Selection, tt.want) {
+				t.Fatalf("args = %+v, want selection %+v", a, tt.want)
 			}
 		})
 	}
@@ -217,7 +259,7 @@ func TestRunBaselineWritesTheMergedFile(t *testing.T) {
 	}
 	out := filepath.Join(t.TempDir(), "coverage-baseline.json")
 	var calls [][]string
-	a := BaselineArgs{Module: "/m", Work: work, Commit: "c", Out: out}
+	a := BaselineArgs{Module: "/m", Work: work, Commit: "c", Out: out, Selection: Selection{Every: true}}
 
 	// Act
 	_, err := RunBaseline(profileTool(mergedProfile, &calls), a, map[string]string{"agent-repld": "daemon"}, []string{"webapp"}, time.Now())
@@ -346,11 +388,11 @@ func TestVitestReportsFindsEveryTiersReports(t *testing.T) {
 			}
 
 			// Act
-			r, err := vitestReports(work, cover, tt.system)
+			r, ok, err := vitestReports(work, cover, tt.system, Selection{Every: true})
 
 			// Assert
-			if err != nil {
-				t.Fatal(err)
+			if err != nil || !ok {
+				t.Fatalf("ok %t, err %v", ok, err)
 			}
 			var got []string
 			for _, ps := range r.Tiers {
@@ -386,5 +428,304 @@ func TestTheE2ESuiteWritesTheWebappLayersReportsWhereTheBaselineReads(t *testing
 		if !strings.Contains(src, want) {
 			t.Errorf("e2e/kit/webapplayer.go no longer writes %s", want)
 		}
+	}
+}
+
+func TestSelection(t *testing.T) {
+	tests := []struct {
+		name        string
+		sel         Selection
+		ran         map[string]bool
+		wantPartial string
+		wantGo      string
+	}{
+		{
+			name: "every suite", sel: Selection{Every: true},
+			ran:    map[string]bool{"daemon": true, "e2e": true},
+			wantGo: "go: unit, integration and e2e, spawned systems included",
+		},
+		{
+			name: "a selection", sel: Selection{Suites: []string{"e2e", "e2e-emacs"}},
+			ran:         map[string]bool{"daemon": false, "e2e": true, "e2e-emacs": true},
+			wantPartial: "a partial measurement: only the suites e2e, e2e-emacs ran",
+			wantGo:      "go: e2e, e2e-emacs only, spawned systems included",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act and assert
+			for suite, want := range tt.ran {
+				if got := tt.sel.Ran(suite); got != want {
+					t.Errorf("Ran(%s) = %t, want %t", suite, got, want)
+				}
+			}
+			if got := tt.sel.partial(); got != tt.wantPartial {
+				t.Errorf("partial = %q, want %q", got, tt.wantPartial)
+			}
+			if got := tt.sel.goTiers(); got != tt.wantGo {
+				t.Errorf("goTiers = %q, want %q", got, tt.wantGo)
+			}
+		})
+	}
+}
+
+func TestJoinReasonsDropsTheEmptyOnes(t *testing.T) {
+	// Act
+	got := joinReasons("", "a", "", "b")
+
+	// Assert
+	if got != "a; b" {
+		t.Fatalf("joinReasons = %q", got)
+	}
+}
+
+func TestBaselineOfASelectionReportsOnlyWhatItsSuitesReached(t *testing.T) {
+	// Arrange: the e2e suites ran; the store is a coverage system no counter
+	// reaches, and neither is its suite selected.
+	root := counterTree(t)
+	var calls [][]string
+	dir := t.TempDir()
+	layer := writeReport(t, filepath.Join(dir, "l.json"), statementsJSON("/w/src/a.ts", 1, 0, 0))
+	in := BaselineInput{
+		CoverRoot: root, Commit: "c",
+		GoSystems: map[string]string{"agent-repld": "daemon", "agentrepl/shim-store": "store"},
+		Vitest:    map[string]VitestReports{"webapp": {Tiers: map[string][]string{"e2e webapp layer": {layer}}}},
+		Selection: Selection{Suites: []string{"e2e", "e2e-emacs"}},
+	}
+
+	// Act
+	got, err := Baseline(profileTool(mergedProfile, &calls), in)
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Systems) != 2 {
+		t.Fatalf("systems = %v, want the daemon and the webapp only", got.Systems)
+	}
+	const why = "a partial measurement: only the suites e2e, e2e-emacs ran"
+	if d := got.Systems["agent-repld"]; d.Percent != 60 || d.Tiers != "go: e2e, e2e-emacs only, spawned systems included" || !d.Provisional || d.Reason != why {
+		t.Errorf("daemon = %+v", d)
+	}
+	if w := got.Systems["webapp"]; w.Percent*3 != 100 || !w.Provisional || w.Reason != why {
+		t.Errorf("webapp = %+v", w)
+	}
+}
+
+func TestBaselineOfASelectionWithoutGoCountersMergesNoProfile(t *testing.T) {
+	// Arrange: only the webapp suite ran, so no Go counter exists.
+	var calls [][]string
+	unit := writeReport(t, filepath.Join(t.TempDir(), "unit.json"), statementsJSON("/w/src/a.ts", 1, 1, 0))
+	in := BaselineInput{
+		CoverRoot: t.TempDir(), Commit: "c",
+		GoSystems: map[string]string{"agent-repld": "daemon"},
+		Vitest:    map[string]VitestReports{"webapp": {Unit: unit, Missing: "no layer"}},
+		Selection: Selection{Suites: []string{"webapp"}},
+	}
+
+	// Act
+	got, err := Baseline(profileTool(mergedProfile, &calls), in)
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(calls) != 0 || len(got.Systems) != 1 {
+		t.Fatalf("covdata calls %v, systems %v; want no merge and the webapp only", calls, got.Systems)
+	}
+	if w := got.Systems["webapp"]; w.Reason != "no layer; a partial measurement: only the suites webapp ran" {
+		t.Fatalf("webapp reason = %q", w.Reason)
+	}
+}
+
+func TestIstanbulStatementsWithoutAUnitReportCountsTheFilesTheTiersLoaded(t *testing.T) {
+	// Arrange: two layer runs loaded a.ts, one of them b.ts too.
+	dir := t.TempDir()
+	r := VitestReports{Tiers: map[string][]string{"e2e webapp layer": {
+		writeReport(t, filepath.Join(dir, "1.json"), statementsJSON("/w/src/a.ts", 1, 0, 0)),
+		writeReport(t, filepath.Join(dir, "2.json"), statementsJSON("/w/src/a.ts", 0, 1, 0), statementsJSON("/w/src/b.ts", 0, 0, 0)),
+	}}}
+
+	// Act
+	got, err := istanbulStatements(r)
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Statements != 6 || got.Percent*3 != 100 || got.Tiers != "vitest: e2e webapp layer only, over the files it loaded, merged by statement" {
+		t.Fatalf("baseline = %+v, want 2 of the 6 loaded statements", got)
+	}
+}
+
+func TestIstanbulStatementsWithoutAUnitReportRefuses(t *testing.T) {
+	tests := []struct {
+		name    string
+		reports func(dir string) map[string][]string
+		want    string
+	}{
+		{
+			name: "two runs that instrumented a file differently",
+			reports: func(dir string) map[string][]string {
+				other := strings.Replace(statementsJSON("/w/src/a.ts", 1, 0, 0), `"line": 3, "column": 0`, `"line": 4, "column": 0`, 1)
+				return map[string][]string{"e2e webapp layer": {
+					writeReport(t, filepath.Join(dir, "1.json"), statementsJSON("/w/src/a.ts", 1, 0, 0)),
+					writeReport(t, filepath.Join(dir, "2.json"), other),
+				}}
+			},
+			want: "2.json's statements of /w/src/a.ts are not " + "%s/1.json's",
+		},
+		{
+			name:    "no tier's report",
+			reports: func(string) map[string][]string { return map[string][]string{"e2e webapp layer": nil} },
+			want:    "no tier's report holds a statement",
+		},
+		{
+			name: "a report that is missing",
+			reports: func(dir string) map[string][]string {
+				return map[string][]string{"e2e webapp layer": {filepath.Join(dir, "gone.json")}}
+			},
+			want: "gone.json",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			dir := t.TempDir()
+			want := tt.want
+			if strings.Contains(want, "%s") {
+				want = fmt.Sprintf(want, dir)
+			}
+
+			// Act
+			_, err := istanbulStatements(VitestReports{Tiers: tt.reports(dir)})
+
+			// Assert
+			if err == nil || !strings.Contains(err.Error(), want) {
+				t.Fatalf("err = %v, want %q", err, want)
+			}
+		})
+	}
+}
+
+func TestVitestReportsOfASelection(t *testing.T) {
+	tests := []struct {
+		name     string
+		system   string
+		sel      Selection
+		layer    bool
+		wantOK   bool
+		wantUnit bool
+		missing  string
+	}{
+		{name: "the webapp not selected, reached by the layer", system: "webapp", sel: Selection{Suites: []string{"e2e"}}, layer: true, wantOK: true},
+		{name: "the webapp not selected, not reached", system: "webapp", sel: Selection{Suites: []string{"daemon"}}},
+		{name: "the shim not selected", system: "shim", sel: Selection{Suites: []string{"e2e"}}, layer: true},
+		{name: "the webapp selected without the e2e suite", system: "webapp", sel: Selection{Suites: []string{"webapp"}}, wantOK: true, wantUnit: true, missing: "no e2e webapp layer"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			work := t.TempDir()
+			cover := filepath.Join(work, "cover")
+			if err := os.MkdirAll(cover, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if tt.layer {
+				writeReport(t, filepath.Join(cover, "spawned", "e2e-001", WebappLayerDir, "driver-1", "run-1-a.layer.test.ts.json"))
+			}
+
+			// Act
+			r, ok, err := vitestReports(work, cover, tt.system, tt.sel)
+
+			// Assert
+			if err != nil || ok != tt.wantOK {
+				t.Fatalf("ok %t, err %v; want ok %t", ok, err, tt.wantOK)
+			}
+			if !ok {
+				return
+			}
+			if (r.Unit != "") != tt.wantUnit || !strings.Contains(r.Missing, tt.missing) {
+				t.Fatalf("reports = %+v", r)
+			}
+			if !tt.wantUnit && (r.Missing != "" || len(r.Tiers["e2e webapp layer"]) != 1) {
+				t.Fatalf("reports = %+v, want the layer's report alone and nothing missing", r)
+			}
+		})
+	}
+}
+
+func TestRunBaselineOfTheE2ESuitesAlone(t *testing.T) {
+	// Arrange: the run of 2026-10-31 that failed, `-suite e2e -suite e2e-emacs
+	// -coverage`: spawned counters and the layer's reports, no unit report.
+	work := t.TempDir()
+	dir := filepath.Join(work, "cover", "spawned", "e2e-000", "agent-repld")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "covmeta.x"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeReport(t, filepath.Join(work, "cover", "spawned", "e2e-000", WebappLayerDir, "driver-1", "run-1-a.layer.test.ts.json"), statementsJSON("/w/src/a.ts", 1, 1, 0))
+	out := filepath.Join(t.TempDir(), "coverage-baseline.json")
+	var calls [][]string
+	a := BaselineArgs{Module: "/m", Work: work, Commit: "c", Out: out, Selection: Selection{Suites: []string{"e2e", "e2e-emacs"}}}
+
+	// Act
+	_, err := RunBaseline(profileTool(mergedProfile, &calls), a, map[string]string{"agent-repld": "daemon", "agentrepl/logging": "logging"}, []string{"webapp", "shim"}, time.Now())
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := redundancy.ReadBaseline(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Systems) != 3 || !got.Systems["webapp"].Provisional || !got.Systems["agent-repld"].Provisional {
+		t.Fatalf("baseline = %+v, want the daemon, logging and the webapp, each partial", got.Systems)
+	}
+}
+
+func TestSystemLines(t *testing.T) {
+	// Arrange
+	f := &redundancy.BaselineFile{Systems: map[string]redundancy.SystemBaseline{
+		"webapp":      {Percent: 50, Statements: 4, Floor: 45, Tiers: "vitest: unit", Provisional: true, Reason: "partial"},
+		"agent-repld": {Percent: 60, Statements: 10, Floor: 55, Tiers: "go: e2e only"},
+	}}
+
+	// Act
+	got := SystemLines(f)
+
+	// Assert
+	want := []string{
+		"agent-repld 60.00% of 10 statements (floor 55.00%; go: e2e only)",
+		"webapp 50.00% of 4 statements (floor 45.00%; vitest: unit; provisional: partial)",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("lines = %q, want %q", got, want)
+	}
+}
+
+func TestSelectionOf(t *testing.T) {
+	tests := []struct {
+		name     string
+		selected []string
+		want     Selection
+		wantArgs []string
+	}{
+		{name: "no narrowing is every suite", want: Selection{Every: true}, wantArgs: []string{"-every-suite"}},
+		{name: "a narrowing, sorted and once each", selected: []string{"e2e-emacs", "e2e", "e2e-emacs"}, want: Selection{Suites: []string{"e2e", "e2e-emacs"}}, wantArgs: []string{"-suite", "e2e", "-suite", "e2e-emacs"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := SelectionOf(tt.selected)
+
+			// Assert
+			if !reflect.DeepEqual(got, tt.want) || !reflect.DeepEqual(got.Args(), tt.wantArgs) {
+				t.Fatalf("SelectionOf = %+v, args %v; want %+v, %v", got, got.Args(), tt.want, tt.wantArgs)
+			}
+		})
 	}
 }

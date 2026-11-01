@@ -15,6 +15,7 @@ import (
 
 	testrunv1 "agentrepl/proto/testrun/v1"
 
+	"agentrepl/testrun/internal/cover"
 	"agentrepl/testrun/internal/events"
 	"agentrepl/testrun/internal/history"
 	"agentrepl/testrun/internal/plan"
@@ -292,7 +293,7 @@ func Run(ctx context.Context, d Deps, a Args) int {
 		planned = append(planned, programs)
 	}
 	if a.Coverage {
-		baseline, ok, err := baselineUnit(layout, d, planned)
+		baseline, ok, err := baselineUnit(layout, d, a.Selected, planned)
 		if err != nil {
 			return abort("planning the coverage baseline failed: %v", err)
 		}
@@ -691,9 +692,10 @@ func BaselineFile(runLog string) string {
 }
 
 // baselineUnit is the coverage run's baseline merge, after every chunk and
-// every coverage report of the run. false when the run has no log to keep it
-// beside.
-func baselineUnit(layout suites.Layout, d Deps, planned []suites.Units) (suites.Units, bool, error) {
+// every coverage report of the run, told the run's selection (empty: every
+// suite) so it holds only the selected suites' tiers to being measured.
+// false when the run has no log to keep it beside.
+func baselineUnit(layout suites.Layout, d Deps, selected []string, planned []suites.Units) (suites.Units, bool, error) {
 	if d.RunLog == "" {
 		return suites.Units{}, false, nil
 	}
@@ -712,8 +714,9 @@ func baselineUnit(layout suites.Layout, d Deps, planned []suites.Units) (suites.
 			}
 		}
 	}
+	argv := []string{d.Self, "coverage-baseline", "-module", layout.Module, "-work", layout.Work, "-commit", commit, "-out", BaselineFile(d.RunLog)}
 	sp := run.Spec{
-		Argv: []string{d.Self, "coverage-baseline", "-module", layout.Module, "-work", layout.Work, "-commit", commit, "-out", BaselineFile(d.RunLog)},
+		Argv: append(argv, cover.SelectionOf(selected).Args()...),
 		Dir:  layout.Module,
 		Env:  suites.PinnedEnv(),
 	}
