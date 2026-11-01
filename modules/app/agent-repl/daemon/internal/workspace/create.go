@@ -810,9 +810,8 @@ func (v *verbs) forkableParentSession(ctx context.Context, log dlog.Logger, pare
 	}
 	if !parentConv.hasConversation() {
 		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "!parentConv.hasConversation()"})
-		return wsm.Session{}, refuseWith(log, "CreateWorkspace", arm,
-			fmt.Sprintf("workspace %q has no conversation to fork", parent), false,
-			map[string]any{"workspace": &workspacev1.WorkspaceRef{Id: string(parent)}})
+		return wsm.Session{}, refuseNamingWorkspace(log, "CreateWorkspace", arm,
+			fmt.Sprintf("workspace %q has no conversation to fork", parent), false, parent)
 	}
 	// A FORK CARRIES ONLY FINISHED TURNS, so a parent still in its
 	// conversation's first turn has nothing to give: refused here, by the
@@ -820,10 +819,9 @@ func (v *verbs) forkableParentSession(ctx context.Context, log dlog.Logger, pare
 	// child's shim would refuse at its bring-up.
 	if err := v.deps.Sessions.ProbeForkPoint(ctx, log, parent); err != nil {
 		if errors.Is(err, ErrForkNothingFinished) {
-			return wsm.Session{}, refuseWith(log, "CreateWorkspace", ArmForkSourceHasNoFinishedTurn,
+			return wsm.Session{}, refuseNamingWorkspace(log, "CreateWorkspace", ArmForkSourceHasNoFinishedTurn,
 				fmt.Sprintf("workspace %q is still in its conversation's first turn, and a fork carries only finished turns, so this fork would carry nothing: "+
-					"create the workspace with a fresh context and put what it must know in the initial prompt, or fork once that turn has ended", parent), false,
-				map[string]any{"workspace": &workspacev1.WorkspaceRef{Id: string(parent)}})
+					"create the workspace with a fresh context and put what it must know in the initial prompt, or fork once that turn has ended", parent), false, parent)
 		}
 		// forkPoint recorded why at ERROR, where the parent's shim answered.
 		return wsm.Session{}, fmt.Errorf("fork from %q: %w", parent, err)
@@ -879,9 +877,8 @@ func (v *verbs) landingWorkspace(ctx context.Context, log dlog.Logger, spec Crea
 // unknownLandingTarget refuses a create whose landing target is no workspace
 // of its repository, saying WHY.
 func unknownLandingTarget(log dlog.Logger, id ids.WorkspaceID, why string) error {
-	return refuseWith(log, "CreateWorkspace", ArmUnknownLandingTarget,
-		fmt.Sprintf("the workspace %q to land into %s", id, why), true,
-		map[string]any{"workspace": &workspacev1.WorkspaceRef{Id: string(id)}})
+	return refuseNamingWorkspace(log, "CreateWorkspace", ArmUnknownLandingTarget,
+		fmt.Sprintf("the workspace %q to land into %s", id, why), true, id)
 }
 
 // landsIntoID is the id of the workspace a create lands into, nil for the
@@ -1347,9 +1344,8 @@ func (v *verbs) checkDerivation(ctx context.Context, log dlog.Logger, spec Creat
 	if spec.Requester != nil {
 		if _, err := v.deps.DB.Workspace(ctx, *spec.Requester); err != nil {
 			if errors.Is(err, wsm.ErrNotFound) {
-				return refuseWith(log, "CreateWorkspace", ArmUnknownRequester,
-					fmt.Sprintf("no workspace %q is registered to have asked", *spec.Requester), true,
-					map[string]any{"workspace": &workspacev1.WorkspaceRef{Id: string(*spec.Requester)}})
+				return refuseNamingWorkspace(log, "CreateWorkspace", ArmUnknownRequester,
+					fmt.Sprintf("no workspace %q is registered to have asked", *spec.Requester), true, *spec.Requester)
 			}
 			log.Error(opCreate, "could not read the create's requester", dlog.WithCause(dlog.Context{"requester": string(*spec.Requester)}, err))
 			return fmt.Errorf("create: requester %q: %w", *spec.Requester, err)
@@ -1389,9 +1385,8 @@ func (v *verbs) checkDerivation(ctx context.Context, log dlog.Logger, spec Creat
 			return err
 		}
 		if source == nil {
-			return refuseWith(log, "CreateWorkspace", ArmUnknownForkSource,
-				fmt.Sprintf("no workspace %q is registered to hold a conversation to fork", *spec.ForkFrom), true,
-				map[string]any{"workspace": &workspacev1.WorkspaceRef{Id: string(*spec.ForkFrom)}})
+			return refuseNamingWorkspace(log, "CreateWorkspace", ArmUnknownForkSource,
+				fmt.Sprintf("no workspace %q is registered to hold a conversation to fork", *spec.ForkFrom), true, *spec.ForkFrom)
 		}
 	}
 	// WHO LANDS A CHILD: a child that is not a one-shot and does not carry its
