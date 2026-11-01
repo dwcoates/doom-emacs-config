@@ -43,20 +43,7 @@
 ;;
 ;; WHICH MODEL a workspace runs under is a CreateWorkspace field now, not a
 ;; `--model' flag: the daemon starts the session and Emacs supplies the
-;; preference the user set.  These are read by the creation commands
-;; (verbs.el) and by nothing else.
-
-(defcustom agent-repl-interactive-model "opus"
-  "Model alias Emacs asks for when it creates an interactive workspace.
-Travels as CreateWorkspace's model field; nil asks for no particular
-model and lets the daemon pick.  It is the INITIAL INPUT of verbs.el's
-model picker (`agent-repl-verbs--read-model'), so this setting is what
-a bare RET sends and the picker still takes any override.  Does NOT
-affect the headless prompt summariser, which has its own model
-variable."
-  :type '(choice (const :tag "Let the daemon choose" nil)
-                 (string :tag "Model alias"))
-  :group 'agent-repl)
+;; model the user types into verbs.el's model picker.
 
 ;; `agent-repl-oneshot-model-candidates' lives in verbs.el, beside the
 ;; one-shot creation commands that are its only consumer (ruled at the

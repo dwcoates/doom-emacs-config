@@ -147,9 +147,6 @@
 (defvar agent-repl-roster-view)
 (defvar agent-repl-metaprompt-file)
 
-;; Defined by session.el.  Declared, never defined here.
-(defvar agent-repl-interactive-model)
-
 
 ;;;; ---- Logging ----------------------------------------------------------
 ;;
@@ -2833,15 +2830,12 @@ Completes against `agent-repl-oneshot-model-candidates' without requiring
 a match: the candidate list is a convenience, and the model vocabulary is
 the vendor's, not ours.
 
-`agent-repl-interactive-model' seeds the prompt as its INITIAL INPUT, so
-the user's configured model is what a bare RET sends while the picker
-still allows any override -- including erasing the seed back to blank,
-which is what asks the daemon to choose.  A nil setting seeds nothing."
+The prompt opens BLANK: nothing is seeded, so a bare RET asks the daemon
+to choose and every model is typed or completed on purpose."
   (let ((value (string-trim
                 (completing-read
                  "Model (blank = daemon default): "
-                 agent-repl-oneshot-model-candidates nil nil
-                 agent-repl-interactive-model))))
+                 agent-repl-oneshot-model-candidates))))
     (unless (string-empty-p value) value)))
 
 (defun agent-repl-create-oneshot (&optional pick-model)
@@ -2960,7 +2954,8 @@ the model is asked for too."
   "Create a one-shot for COMMAND, asking for the model when PICK-MODEL.
 The one composition every one-shot command shares: the repository is what
 REPOSITORY-FN answers, the commission is read UNSEEDED into the one-shot
-history, and the model is asked for only under a prefix argument.
+history, and the model is asked for only under a prefix argument, BEFORE
+the commission so the commission is written knowing which model reads it.
 
 ABOUT-CURRENT names the current workspace as the one-shot\='s context, the
 workspace the commission is about; its prompt names that workspace so the
@@ -2974,6 +2969,9 @@ repository says so before the commission is typed."
                       repository-fn))
          (repository-name (agent-repl-verbs--repository-name repository))
          (about (and about-current (agent-repl--ws-current-name)))
+         (model (and pick-model
+                     (agent-repl-verbs--read-for
+                      command 'model #'agent-repl-verbs--read-model)))
          (prompt (agent-repl-verbs--read-for
                   command 'prompt
                   (lambda ()
@@ -2983,9 +2981,6 @@ repository says so before the commission is typed."
                        (format "One-shot (%s): " repository-name))
                      "a one-shot IS its prompt"
                      (agent-repl-verbs--oneshot-history-file) 'unseeded))))
-         (model (and pick-model
-                     (agent-repl-verbs--read-for
-                      command 'model #'agent-repl-verbs--read-model)))
          (context (and about (agent-repl-verbs--ref about))))
     (agent-repl--info agent-repl-verbs--create-log-scope
                       "elisp.verbs.create-one-shot mode=dynamic model=%S context=%S"
