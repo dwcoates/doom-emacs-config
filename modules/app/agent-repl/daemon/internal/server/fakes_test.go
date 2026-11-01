@@ -378,6 +378,13 @@ type fakeVerbs struct {
 	interruptErr     error
 	interruptTarget  workspace.InterruptTarget
 
+	// idleRestart and idleRestartErr are what RestartWhenIdle answers;
+	// restarts and idleRestarts count each restart verb asked.
+	idleRestart    workspace.IdleRestart
+	idleRestartErr error
+	restarts       int
+	idleRestarts   int
+
 	createTask    wsm.Task
 	createTaskErr error
 	// taskChanges records every UpdateTask change the handler resolved.
@@ -693,6 +700,16 @@ func (f *fakeVerbs) SelectAccount(_ context.Context, _ ids.WorkspaceID, configDi
 
 func (f *fakeVerbs) AssignTask(context.Context, ids.WorkspaceID, *ids.TaskID) error {
 	return f.assignTaskErr
+}
+
+func (f *fakeVerbs) Restart(context.Context, ids.WorkspaceID) error {
+	f.restarts++
+	return nil
+}
+
+func (f *fakeVerbs) RestartWhenIdle(context.Context, ids.WorkspaceID) (workspace.IdleRestart, error) {
+	f.idleRestarts++
+	return f.idleRestart, f.idleRestartErr
 }
 
 func (f *fakeVerbs) Interrupt(_ context.Context, _ ids.WorkspaceID, target workspace.InterruptTarget, _ bool) (workspace.InterruptOutcome, error) {

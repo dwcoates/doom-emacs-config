@@ -4,16 +4,24 @@
 // unstick ONE workspace without rebooting everything. Never the daemon, the
 // store or the sidecar.
 //
-// A RESTART IS IMMEDIATE, ALWAYS. It exists for a workspace that is stuck — a
-// turn that never ends, a vendor that will not answer or will not start — so
-// it never waits for anything to finish: waiting on a stuck workspace is
-// waiting forever. Whatever stands in the way is stopped first: the running
+// A RESTART IS IMMEDIATE BY DEFAULT. It exists for a workspace that is stuck —
+// a turn that never ends, a vendor that will not answer or will not start — so
+// by default it never waits for anything to finish: waiting on a stuck
+// workspace is waiting forever. Whatever stands in the way is stopped first: the running
 // turn is interrupted and every piece of detached work is stopped; because
 // the vendor is usually unreachable when a restart is wanted, those stops are
 // bounded and the shim's own teardown hard-kills whatever did not stop. Then
 // the shim is relaunched, the SAME session is resumed on it (a fresh vendor
 // start run, with the full retry window), every hold waiting on the session
 // is delivered once it is up, and the workspace's webapp page reloads.
+//
+// A RESTART ONCE IDLE (`when_idle`) is the second mode, for a workspace that is
+// NOT stuck but should be brought up to date with a changed harness (the
+// metaprompt, skills, CLAUDE.md), which the shim assembles at session start.
+// It interrupts nothing: the restart is registered with the workspace's bounce
+// registry, which runs it on the daemon's own freeness edges (the running
+// turn's end, the last detached item's end), never by polling. A workspace
+// already idle is restarted at once.
 //
 // NOT A ROUTINE ACTION. A relaunched shim or reloaded page runs the build on
 // disk, which may speak a newer API than the daemon that keeps running.
@@ -32,6 +40,9 @@ message RestartWorkspaceRequest {
   // in the way, so there is no second mode to select.
   reserved 2;
   reserved "force";
+  // Restart once the workspace is idle instead of at once: nothing is
+  // interrupted, and the answer is `scheduled` when work is in flight.
+  bool when_idle = 3;
 }
 
 // THE ARM IS THE OUTCOME.
@@ -39,11 +50,28 @@ message RestartWorkspaceResponse {
   oneof result {
     RestartWorkspaceSuccess success = 1;
     RestartWorkspaceError error = 2;
+    // Only for `when_idle`: the workspace had work in flight, so the restart
+    // was registered and runs when that work ends. Its outcome is recorded in
+    // the daemon's log, and the page reload arrives on the streams.
+    RestartWorkspaceScheduled scheduled = 3;
   }
 }
 
+// THE RESTART IS REGISTERED behind the workspace's work in flight. The fields
+// say what it waits on, as the bounce registry read it when it decided.
+message RestartWorkspaceScheduled {
+  // A turn is running.
+  bool turn_in_flight = 1;
+  // How many detached items (background agents, shells, monitors) are live.
+  uint32 detached_work = 2;
+  // A bounce was already registered for the workspace (a stale build, an
+  // earlier restart); this restart joined it rather than queueing a second.
+  bool already_pending = 3;
+}
+
 // THE RESTART HAPPENED (owner ruling, 2026-10-08: "i expect it to just
-// restart instantly", never "work on it when it gets around to it"). The
+// restart instantly", never "work on it when it gets around to it"). A
+// `when_idle` restart of an idle workspace answers it too: it ran at once. The
 // answer is sent once the bounce has finished: the shim was relaunched and the
 // session resumed on it, or there was nothing left to replace. A client shows
 // nothing for it; the page reload and the fresh session arrive on the streams.

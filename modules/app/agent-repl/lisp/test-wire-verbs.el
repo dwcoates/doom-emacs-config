@@ -112,6 +112,8 @@ names its requester and placement as well, so the request tests read
   ;; CreateWorkspaceResponse's `async_merge_accepted' answers only an async
   ;; merge, which is an agent's request and never the editor's, and its
   ;; `waiting_for_network' answers a synchronous create held for the network.
+  ;; RestartWorkspaceResponse's `scheduled' answers only a `when_idle'
+  ;; restart, which is an agent's request and never the editor's.
   '(("agentrepl/v1/endpoint_create_workspace.pb.go" "CreateWorkspaceResponse"
      ("accepted" "asyncMergeAccepted" "error" "success" "waitingForNetwork"))
     ("agentrepl/v1/endpoint_open_workspace.pb.go" "OpenWorkspaceResponse")
@@ -123,7 +125,8 @@ names its requester and placement as well, so the request tests read
     ("agentrepl/v1/endpoint_nuke_workspace.pb.go" "NukeWorkspaceResponse"
      ("accepted" "error" "success"))
     ("agentrepl/v1/endpoint_finish_workspace.pb.go" "FinishWorkspaceResponse")
-    ("agentrepl/v1/endpoint_restart_workspace.pb.go" "RestartWorkspaceResponse")
+    ("agentrepl/v1/endpoint_restart_workspace.pb.go" "RestartWorkspaceResponse"
+     ("error" "scheduled" "success"))
     ("agentrepl/v1/endpoint_set_workspace_priority.pb.go" "SetWorkspacePriorityResponse")
     ("agentrepl/v1/endpoint_submit_prompt.pb.go" "SubmitPromptResponse")
     ("agentrepl/v1/endpoint_update_shutdown_schedule.pb.go" "UpdateShutdownScheduleResponse")

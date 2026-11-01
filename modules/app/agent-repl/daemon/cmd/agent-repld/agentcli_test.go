@@ -1160,7 +1160,7 @@ func TestEveryOneWorkspaceVerbIsOnWorkspace(t *testing.T) {
 			raw = file.Source
 		}
 	}
-	verb := regexp.MustCompile(`(?s)func workspace(Kill|Select|Restart)\(c \*cliCall, args \[\]string\) int \{\n(.*?)\n}\n`)
+	verb := regexp.MustCompile(`(?s)func workspace(Kill|Select)\(c \*cliCall, args \[\]string\) int \{\n(.*?)\n}\n`)
 
 	// Act
 	matches := verb.FindAllSubmatch(raw, -1)
@@ -1173,6 +1173,59 @@ func TestEveryOneWorkspaceVerbIsOnWorkspace(t *testing.T) {
 		if !strings.HasPrefix(strings.TrimSpace(string(m[2])), "return onWorkspace(") {
 			t.Errorf("workspace%s parses its workspace by hand instead of onWorkspace", m[1])
 		}
+	}
+}
+
+// A ONE-WORKSPACE VERB WITH FLAGS OF ITS OWN PARSES THROUGH onlyWorkspace, the
+// parse onWorkspace runs, so its refusal of anything after the workspace
+// cannot drift from onWorkspace's.
+func TestEveryFlaggedOneWorkspaceVerbParsesThroughOnlyWorkspace(t *testing.T) {
+	// Arrange
+	var raw []byte
+	for _, file := range sourcescan.Production(t) {
+		if file.Name == "agentcli.go" {
+			raw = file.Source
+		}
+	}
+	body := regexp.MustCompile(`(?s)func (onWorkspace\[Res any\]|workspaceRestart)\(.*?\) int \{\n(.*?)\n}\n`)
+
+	// Act
+	matches := body.FindAllSubmatch(raw, -1)
+
+	// Assert
+	if len(matches) != 2 {
+		t.Fatalf("found %d of onWorkspace and workspaceRestart, want both", len(matches))
+	}
+	for _, m := range matches {
+		if !strings.Contains(string(m[2]), "c.onlyWorkspace(") {
+			t.Errorf("%s parses its workspace without onlyWorkspace", m[1])
+		}
+	}
+}
+
+func TestRestartAsksForItsMode(t *testing.T) {
+	tests := []struct {
+		name     string
+		flags    []string
+		whenIdle bool
+	}{
+		{name: "at once by default"},
+		{name: "once idle with -when-idle", flags: []string{"-when-idle"}, whenIdle: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newCLIFixture()
+
+			// Act
+			code := f.run(workspaceNoun, append([]string{"restart"}, append(tt.flags, "peer")...)...)
+
+			// Assert
+			req := only[*agentreplv1.RestartWorkspaceRequest](t, f)
+			if code != exitSuccess || req.GetWhenIdle() != tt.whenIdle || req.GetWorkspace().GetId() != "ws-peer" {
+				t.Fatalf("exit %d, request %v; want ws-peer with when_idle %v", code, req, tt.whenIdle)
+			}
+		})
 	}
 }
 

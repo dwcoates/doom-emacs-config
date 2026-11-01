@@ -1,6 +1,6 @@
 ---
 name: agent-repl-workspaces
-description: 'Work with agent-repl workspaces through the agent API: create a workspace (a child of this one or of another, or a peer, with its landing target (its parent''s branch or the main branch), a fresh context or one forked from a workspace''s conversation, as a one-shot or not), prompt another workspace, read a workspace''s status, list them all, or find workspaces open or closed by repository, time, standing or text with their summaries, mark this workspace a one-shot or as awaiting another workspace''s answer (which draws it in the background, yellow), store its links (owned or a reference; an owned pull request is followed for its comments, reviews and checks; the topbar summary''s menu), reply on a pull request it owns (`pr-comment`), rename a workspace, hide or show a workspace, set its priority, retarget its parent, adopt an existing workspace as this one''s child, reorganize this workspace''s work across repositories (move to the repository the work principally belongs to and govern one workspace in each other repository it touches, proactively and without asking), read its repository''s sidebar subsections and file it into one, finish a workspace (deploy it as its repository''s `.agent-repl/deploy.yaml` says), open, close, kill, compact, restart, interrupt or select one, answer a cold gate, and subscribe this workspace to another''s turns, asks, landing and close, and register a repository with agent-repl (`repository register`). Use whenever work should be split off into another workspace, handed to one, or followed; whenever this workspace commits to finishing the rest of its work unattended, or is told to one-shot itself or to land its work when done (mark it a one-shot); whenever a one-shot is reopened or prompted for more work after it finished (take the mark back); whenever this workspace ends a turn to wait for another workspace (mark it awaiting) and when that answer arrives (clear the mark); whenever this workspace''s task has clearly moved away from its name (rename it, without asking); whenever a child created with a note to its owner must be landed or closed by its owner; whenever a repository''s deploy config or a deploy hook is written or read; whenever work is in a repository agent-repl does not know yet (register it before creating workspaces there); whenever this workspace''s work principally belongs to another repository or touches several (reorganize it); and whenever a workspace must be closed, compacted, killed or have its gate answered. Replaces /create-or-update-workspace and the workspace command files.'
+description: 'Work with agent-repl workspaces through the agent API: create a workspace (a child of this one or of another, or a peer, with its landing target (its parent''s branch or the main branch), a fresh context or one forked from a workspace''s conversation, as a one-shot or not), prompt another workspace, read a workspace''s status, list them all, or find workspaces open or closed by repository, time, standing or text with their summaries, mark this workspace a one-shot or as awaiting another workspace''s answer (which draws it in the background, yellow), store its links (owned or a reference; an owned pull request is followed for its comments, reviews and checks; the topbar summary''s menu), reply on a pull request it owns (`pr-comment`), rename a workspace, hide or show a workspace, set its priority, retarget its parent, adopt an existing workspace as this one''s child, reorganize this workspace''s work across repositories (move to the repository the work principally belongs to and govern one workspace in each other repository it touches, proactively and without asking), read its repository''s sidebar subsections and file it into one, finish a workspace (deploy it as its repository''s `.agent-repl/deploy.yaml` says), open, close, kill, compact, restart (on its own, to unstick a workspace or refresh its harness), interrupt or select one, answer a cold gate, and subscribe this workspace to another''s turns, asks, landing and close, and register a repository with agent-repl (`repository register`). Use whenever work should be split off into another workspace, handed to one, or followed; whenever this workspace commits to finishing the rest of its work unattended, or is told to one-shot itself or to land its work when done (mark it a one-shot); whenever a one-shot is reopened or prompted for more work after it finished (take the mark back); whenever this workspace ends a turn to wait for another workspace (mark it awaiting) and when that answer arrives (clear the mark); whenever this workspace''s task has clearly moved away from its name (rename it, without asking); whenever a child created with a note to its owner must be landed or closed by its owner; whenever a repository''s deploy config or a deploy hook is written or read; whenever work is in a repository agent-repl does not know yet (register it before creating workspaces there); whenever this workspace''s work principally belongs to another repository or touches several (reorganize it); and whenever a workspace must be closed, compacted, killed or have its gate answered. Replaces /create-or-update-workspace and the workspace command files.'
 argument-hint: "create | async-merge | prompt | status | list | find | set | link | finished | open | close | kill | compact | restart | interrupt | select | gate | subscribe | unsubscribe | subsections | place | repository register"
 allowed-tools: Bash(~/.claude/skills/agent-repl-workspaces/agent-repld:*)
 ---
@@ -437,7 +437,11 @@ creating workspaces there with `-repository DIR`.
   A child that landed or finished through `workspace finished` closes itself,
   so this covers the children that do not.
 - `workspace compact WS [-instructions TEXT]` compacts WS's conversation.
-  Compact only when the user asked for it.
+  **CRITICAL: Compacting another workspace is NEVER autonomous.** Ask the user
+  for permission first, every time, naming the workspace, and run it only
+  after the user approves that specific compaction. Clearing a workspace's
+  context is likewise never done on an agent's own judgment, and is asked for
+  the same way.
 
 ## Deploying (`.agent-repl/deploy.yaml`)
 
@@ -557,9 +561,30 @@ queue_drained:
 
 ## Restarting, interrupting, selecting
 
-- **CRITICAL: Each of these runs ONLY when the user asked for it.** Each acts
-  on what the user is looking at or waiting on.
-- `workspace restart WS` relaunches WS's session at once and reloads its page.
+- **CRITICAL: `workspace interrupt` and `workspace select` run ONLY when the
+  user asked for them.** Each acts on what the user is looking at or waiting
+  on.
+- `workspace restart WS` relaunches WS's shim at once, interrupting its
+  running turn and detached work, resumes the SAME session and reloads its
+  page. It never compacts or clears context.
+  - An agent restarts ANOTHER workspace on its own judgment, without asking,
+    in exactly two cases.
+  - Case one is unsticking a stuck workspace (a turn that never ends, a vendor
+    that will not answer or will not start).
+    - Run `workspace restart WS`, which is immediate and the default.
+    - Waiting on a stuck workspace is waiting forever.
+  - Case two is bringing a workspace up to date with a changed harness
+    (metaprompt, system-prompt standing notice, skills, CLAUDE.md), which a
+    restart rebuilds.
+    - Run `workspace restart WS -when-idle`, so its running turn is not cut.
+    - The daemon runs it at once when WS is idle and answers `success`.
+    - Otherwise it answers `scheduled`, naming `turn_in_flight`,
+      `detached_work` or `already_pending`, and runs the restart when the turn
+      and detached work end.
+    - On `scheduled`, do not wait, poll or retry.
+  - Restarting this workspace itself is not one of these cases.
+  - Tell the user in the same response which workspace you restarted (or
+    scheduled) and why.
 - `workspace interrupt WS` stops WS's running turn. A stop while WS has live
   detached agents is refused once, naming them: `-confirm-agents` stops them
   too, and `-all-agents` stops every live agent instead of the turn.

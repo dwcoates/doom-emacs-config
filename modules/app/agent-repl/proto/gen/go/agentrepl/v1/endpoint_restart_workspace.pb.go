@@ -4,16 +4,24 @@
 // unstick ONE workspace without rebooting everything. Never the daemon, the
 // store or the sidecar.
 //
-// A RESTART IS IMMEDIATE, ALWAYS. It exists for a workspace that is stuck — a
-// turn that never ends, a vendor that will not answer or will not start — so
-// it never waits for anything to finish: waiting on a stuck workspace is
-// waiting forever. Whatever stands in the way is stopped first: the running
+// A RESTART IS IMMEDIATE BY DEFAULT. It exists for a workspace that is stuck —
+// a turn that never ends, a vendor that will not answer or will not start — so
+// by default it never waits for anything to finish: waiting on a stuck
+// workspace is waiting forever. Whatever stands in the way is stopped first: the running
 // turn is interrupted and every piece of detached work is stopped; because
 // the vendor is usually unreachable when a restart is wanted, those stops are
 // bounded and the shim's own teardown hard-kills whatever did not stop. Then
 // the shim is relaunched, the SAME session is resumed on it (a fresh vendor
 // start run, with the full retry window), every hold waiting on the session
 // is delivered once it is up, and the workspace's webapp page reloads.
+//
+// A RESTART ONCE IDLE (`when_idle`) is the second mode, for a workspace that is
+// NOT stuck but should be brought up to date with a changed harness (the
+// metaprompt, skills, CLAUDE.md), which the shim assembles at session start.
+// It interrupts nothing: the restart is registered with the workspace's bounce
+// registry, which runs it on the daemon's own freeness edges (the running
+// turn's end, the last detached item's end), never by polling. A workspace
+// already idle is restarted at once.
 //
 // NOT A ROUTINE ACTION. A relaunched shim or reloaded page runs the build on
 // disk, which may speak a newer API than the daemon that keeps running.
@@ -43,8 +51,11 @@ const (
 )
 
 type RestartWorkspaceRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Workspace     *v1.WorkspaceRef       `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	Workspace *v1.WorkspaceRef       `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
+	// Restart once the workspace is idle instead of at once: nothing is
+	// interrupted, and the answer is `scheduled` when work is in flight.
+	WhenIdle      bool `protobuf:"varint,3,opt,name=when_idle,json=whenIdle,proto3" json:"when_idle,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -86,6 +97,13 @@ func (x *RestartWorkspaceRequest) GetWorkspace() *v1.WorkspaceRef {
 	return nil
 }
 
+func (x *RestartWorkspaceRequest) GetWhenIdle() bool {
+	if x != nil {
+		return x.WhenIdle
+	}
+	return false
+}
+
 // THE ARM IS THE OUTCOME.
 type RestartWorkspaceResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -93,6 +111,7 @@ type RestartWorkspaceResponse struct {
 	//
 	//	*RestartWorkspaceResponse_Success
 	//	*RestartWorkspaceResponse_Error
+	//	*RestartWorkspaceResponse_Scheduled
 	Result        isRestartWorkspaceResponse_Result `protobuf_oneof:"result"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -153,6 +172,15 @@ func (x *RestartWorkspaceResponse) GetError() *RestartWorkspaceError {
 	return nil
 }
 
+func (x *RestartWorkspaceResponse) GetScheduled() *RestartWorkspaceScheduled {
+	if x != nil {
+		if x, ok := x.Result.(*RestartWorkspaceResponse_Scheduled); ok {
+			return x.Scheduled
+		}
+	}
+	return nil
+}
+
 type isRestartWorkspaceResponse_Result interface {
 	isRestartWorkspaceResponse_Result()
 }
@@ -165,12 +193,88 @@ type RestartWorkspaceResponse_Error struct {
 	Error *RestartWorkspaceError `protobuf:"bytes,2,opt,name=error,proto3,oneof"`
 }
 
+type RestartWorkspaceResponse_Scheduled struct {
+	// Only for `when_idle`: the workspace had work in flight, so the restart
+	// was registered and runs when that work ends. Its outcome is recorded in
+	// the daemon's log, and the page reload arrives on the streams.
+	Scheduled *RestartWorkspaceScheduled `protobuf:"bytes,3,opt,name=scheduled,proto3,oneof"`
+}
+
 func (*RestartWorkspaceResponse_Success) isRestartWorkspaceResponse_Result() {}
 
 func (*RestartWorkspaceResponse_Error) isRestartWorkspaceResponse_Result() {}
 
+func (*RestartWorkspaceResponse_Scheduled) isRestartWorkspaceResponse_Result() {}
+
+// THE RESTART IS REGISTERED behind the workspace's work in flight. The fields
+// say what it waits on, as the bounce registry read it when it decided.
+type RestartWorkspaceScheduled struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// A turn is running.
+	TurnInFlight bool `protobuf:"varint,1,opt,name=turn_in_flight,json=turnInFlight,proto3" json:"turn_in_flight,omitempty"`
+	// How many detached items (background agents, shells, monitors) are live.
+	DetachedWork uint32 `protobuf:"varint,2,opt,name=detached_work,json=detachedWork,proto3" json:"detached_work,omitempty"`
+	// A bounce was already registered for the workspace (a stale build, an
+	// earlier restart); this restart joined it rather than queueing a second.
+	AlreadyPending bool `protobuf:"varint,3,opt,name=already_pending,json=alreadyPending,proto3" json:"already_pending,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *RestartWorkspaceScheduled) Reset() {
+	*x = RestartWorkspaceScheduled{}
+	mi := &file_agentrepl_v1_endpoint_restart_workspace_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RestartWorkspaceScheduled) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RestartWorkspaceScheduled) ProtoMessage() {}
+
+func (x *RestartWorkspaceScheduled) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_restart_workspace_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RestartWorkspaceScheduled.ProtoReflect.Descriptor instead.
+func (*RestartWorkspaceScheduled) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_restart_workspace_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *RestartWorkspaceScheduled) GetTurnInFlight() bool {
+	if x != nil {
+		return x.TurnInFlight
+	}
+	return false
+}
+
+func (x *RestartWorkspaceScheduled) GetDetachedWork() uint32 {
+	if x != nil {
+		return x.DetachedWork
+	}
+	return 0
+}
+
+func (x *RestartWorkspaceScheduled) GetAlreadyPending() bool {
+	if x != nil {
+		return x.AlreadyPending
+	}
+	return false
+}
+
 // THE RESTART HAPPENED (owner ruling, 2026-10-08: "i expect it to just
-// restart instantly", never "work on it when it gets around to it"). The
+// restart instantly", never "work on it when it gets around to it"). A
+// `when_idle` restart of an idle workspace answers it too: it ran at once. The
 // answer is sent once the bounce has finished: the shim was relaunched and the
 // session resumed on it, or there was nothing left to replace. A client shows
 // nothing for it; the page reload and the fresh session arrive on the streams.
@@ -183,7 +287,7 @@ type RestartWorkspaceSuccess struct {
 
 func (x *RestartWorkspaceSuccess) Reset() {
 	*x = RestartWorkspaceSuccess{}
-	mi := &file_agentrepl_v1_endpoint_restart_workspace_proto_msgTypes[2]
+	mi := &file_agentrepl_v1_endpoint_restart_workspace_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -195,7 +299,7 @@ func (x *RestartWorkspaceSuccess) String() string {
 func (*RestartWorkspaceSuccess) ProtoMessage() {}
 
 func (x *RestartWorkspaceSuccess) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_restart_workspace_proto_msgTypes[2]
+	mi := &file_agentrepl_v1_endpoint_restart_workspace_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -208,7 +312,7 @@ func (x *RestartWorkspaceSuccess) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RestartWorkspaceSuccess.ProtoReflect.Descriptor instead.
 func (*RestartWorkspaceSuccess) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_restart_workspace_proto_rawDescGZIP(), []int{2}
+	return file_agentrepl_v1_endpoint_restart_workspace_proto_rawDescGZIP(), []int{3}
 }
 
 // Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
@@ -229,7 +333,7 @@ type RestartWorkspaceError struct {
 
 func (x *RestartWorkspaceError) Reset() {
 	*x = RestartWorkspaceError{}
-	mi := &file_agentrepl_v1_endpoint_restart_workspace_proto_msgTypes[3]
+	mi := &file_agentrepl_v1_endpoint_restart_workspace_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -241,7 +345,7 @@ func (x *RestartWorkspaceError) String() string {
 func (*RestartWorkspaceError) ProtoMessage() {}
 
 func (x *RestartWorkspaceError) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_restart_workspace_proto_msgTypes[3]
+	mi := &file_agentrepl_v1_endpoint_restart_workspace_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -254,7 +358,7 @@ func (x *RestartWorkspaceError) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RestartWorkspaceError.ProtoReflect.Descriptor instead.
 func (*RestartWorkspaceError) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_restart_workspace_proto_rawDescGZIP(), []int{3}
+	return file_agentrepl_v1_endpoint_restart_workspace_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *RestartWorkspaceError) GetCause() isRestartWorkspaceError_Cause {
@@ -357,7 +461,7 @@ type RestartWorkspaceUnknownWorkspace struct {
 
 func (x *RestartWorkspaceUnknownWorkspace) Reset() {
 	*x = RestartWorkspaceUnknownWorkspace{}
-	mi := &file_agentrepl_v1_endpoint_restart_workspace_proto_msgTypes[4]
+	mi := &file_agentrepl_v1_endpoint_restart_workspace_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -369,7 +473,7 @@ func (x *RestartWorkspaceUnknownWorkspace) String() string {
 func (*RestartWorkspaceUnknownWorkspace) ProtoMessage() {}
 
 func (x *RestartWorkspaceUnknownWorkspace) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_restart_workspace_proto_msgTypes[4]
+	mi := &file_agentrepl_v1_endpoint_restart_workspace_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -382,7 +486,7 @@ func (x *RestartWorkspaceUnknownWorkspace) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RestartWorkspaceUnknownWorkspace.ProtoReflect.Descriptor instead.
 func (*RestartWorkspaceUnknownWorkspace) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_restart_workspace_proto_rawDescGZIP(), []int{4}
+	return file_agentrepl_v1_endpoint_restart_workspace_proto_rawDescGZIP(), []int{5}
 }
 
 type RestartWorkspaceWorkspaceRefMismatch struct {
@@ -395,7 +499,7 @@ type RestartWorkspaceWorkspaceRefMismatch struct {
 
 func (x *RestartWorkspaceWorkspaceRefMismatch) Reset() {
 	*x = RestartWorkspaceWorkspaceRefMismatch{}
-	mi := &file_agentrepl_v1_endpoint_restart_workspace_proto_msgTypes[5]
+	mi := &file_agentrepl_v1_endpoint_restart_workspace_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -407,7 +511,7 @@ func (x *RestartWorkspaceWorkspaceRefMismatch) String() string {
 func (*RestartWorkspaceWorkspaceRefMismatch) ProtoMessage() {}
 
 func (x *RestartWorkspaceWorkspaceRefMismatch) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_restart_workspace_proto_msgTypes[5]
+	mi := &file_agentrepl_v1_endpoint_restart_workspace_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -420,7 +524,7 @@ func (x *RestartWorkspaceWorkspaceRefMismatch) ProtoReflect() protoreflect.Messa
 
 // Deprecated: Use RestartWorkspaceWorkspaceRefMismatch.ProtoReflect.Descriptor instead.
 func (*RestartWorkspaceWorkspaceRefMismatch) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_restart_workspace_proto_rawDescGZIP(), []int{5}
+	return file_agentrepl_v1_endpoint_restart_workspace_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *RestartWorkspaceWorkspaceRefMismatch) GetRegistryDir() string {
@@ -440,7 +544,7 @@ type RestartWorkspaceTransferringAway struct {
 
 func (x *RestartWorkspaceTransferringAway) Reset() {
 	*x = RestartWorkspaceTransferringAway{}
-	mi := &file_agentrepl_v1_endpoint_restart_workspace_proto_msgTypes[6]
+	mi := &file_agentrepl_v1_endpoint_restart_workspace_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -452,7 +556,7 @@ func (x *RestartWorkspaceTransferringAway) String() string {
 func (*RestartWorkspaceTransferringAway) ProtoMessage() {}
 
 func (x *RestartWorkspaceTransferringAway) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_restart_workspace_proto_msgTypes[6]
+	mi := &file_agentrepl_v1_endpoint_restart_workspace_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -465,7 +569,7 @@ func (x *RestartWorkspaceTransferringAway) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RestartWorkspaceTransferringAway.ProtoReflect.Descriptor instead.
 func (*RestartWorkspaceTransferringAway) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_restart_workspace_proto_rawDescGZIP(), []int{6}
+	return file_agentrepl_v1_endpoint_restart_workspace_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *RestartWorkspaceTransferringAway) GetAddress() string {
@@ -490,7 +594,7 @@ type RestartWorkspaceNotYetAdopted struct {
 
 func (x *RestartWorkspaceNotYetAdopted) Reset() {
 	*x = RestartWorkspaceNotYetAdopted{}
-	mi := &file_agentrepl_v1_endpoint_restart_workspace_proto_msgTypes[7]
+	mi := &file_agentrepl_v1_endpoint_restart_workspace_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -502,7 +606,7 @@ func (x *RestartWorkspaceNotYetAdopted) String() string {
 func (*RestartWorkspaceNotYetAdopted) ProtoMessage() {}
 
 func (x *RestartWorkspaceNotYetAdopted) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_restart_workspace_proto_msgTypes[7]
+	mi := &file_agentrepl_v1_endpoint_restart_workspace_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -515,7 +619,7 @@ func (x *RestartWorkspaceNotYetAdopted) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RestartWorkspaceNotYetAdopted.ProtoReflect.Descriptor instead.
 func (*RestartWorkspaceNotYetAdopted) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_restart_workspace_proto_rawDescGZIP(), []int{7}
+	return file_agentrepl_v1_endpoint_restart_workspace_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *RestartWorkspaceNotYetAdopted) GetAddress() string {
@@ -535,7 +639,7 @@ type RestartWorkspaceRelaunchFailed struct {
 
 func (x *RestartWorkspaceRelaunchFailed) Reset() {
 	*x = RestartWorkspaceRelaunchFailed{}
-	mi := &file_agentrepl_v1_endpoint_restart_workspace_proto_msgTypes[8]
+	mi := &file_agentrepl_v1_endpoint_restart_workspace_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -547,7 +651,7 @@ func (x *RestartWorkspaceRelaunchFailed) String() string {
 func (*RestartWorkspaceRelaunchFailed) ProtoMessage() {}
 
 func (x *RestartWorkspaceRelaunchFailed) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_restart_workspace_proto_msgTypes[8]
+	mi := &file_agentrepl_v1_endpoint_restart_workspace_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -560,7 +664,7 @@ func (x *RestartWorkspaceRelaunchFailed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RestartWorkspaceRelaunchFailed.ProtoReflect.Descriptor instead.
 func (*RestartWorkspaceRelaunchFailed) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_restart_workspace_proto_rawDescGZIP(), []int{8}
+	return file_agentrepl_v1_endpoint_restart_workspace_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *RestartWorkspaceRelaunchFailed) GetDetail() string {
@@ -574,13 +678,19 @@ var File_agentrepl_v1_endpoint_restart_workspace_proto protoreflect.FileDescript
 
 const file_agentrepl_v1_endpoint_restart_workspace_proto_rawDesc = "" +
 	"\n" +
-	"-agentrepl/v1/endpoint_restart_workspace.proto\x12\fagentrepl.v1\x1a\x1cworkspace/v1/workspace.proto\"`\n" +
+	"-agentrepl/v1/endpoint_restart_workspace.proto\x12\fagentrepl.v1\x1a\x1cworkspace/v1/workspace.proto\"}\n" +
 	"\x17RestartWorkspaceRequest\x128\n" +
-	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspaceJ\x04\b\x02\x10\x03R\x05force\"\xa4\x01\n" +
+	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\x12\x1b\n" +
+	"\twhen_idle\x18\x03 \x01(\bR\bwhenIdleJ\x04\b\x02\x10\x03R\x05force\"\xed\x01\n" +
 	"\x18RestartWorkspaceResponse\x12A\n" +
 	"\asuccess\x18\x01 \x01(\v2%.agentrepl.v1.RestartWorkspaceSuccessH\x00R\asuccess\x12;\n" +
-	"\x05error\x18\x02 \x01(\v2#.agentrepl.v1.RestartWorkspaceErrorH\x00R\x05errorB\b\n" +
-	"\x06result\"\x19\n" +
+	"\x05error\x18\x02 \x01(\v2#.agentrepl.v1.RestartWorkspaceErrorH\x00R\x05error\x12G\n" +
+	"\tscheduled\x18\x03 \x01(\v2'.agentrepl.v1.RestartWorkspaceScheduledH\x00R\tscheduledB\b\n" +
+	"\x06result\"\x8f\x01\n" +
+	"\x19RestartWorkspaceScheduled\x12$\n" +
+	"\x0eturn_in_flight\x18\x01 \x01(\bR\fturnInFlight\x12#\n" +
+	"\rdetached_work\x18\x02 \x01(\rR\fdetachedWork\x12'\n" +
+	"\x0falready_pending\x18\x03 \x01(\bR\x0ealreadyPending\"\x19\n" +
 	"\x17RestartWorkspaceSuccess\"\x8c\x04\n" +
 	"\x15RestartWorkspaceError\x12]\n" +
 	"\x11unknown_workspace\x18\x01 \x01(\v2..agentrepl.v1.RestartWorkspaceUnknownWorkspaceH\x00R\x10unknownWorkspace\x12j\n" +
@@ -614,33 +724,35 @@ func file_agentrepl_v1_endpoint_restart_workspace_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_restart_workspace_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_restart_workspace_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
+var file_agentrepl_v1_endpoint_restart_workspace_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
 var file_agentrepl_v1_endpoint_restart_workspace_proto_goTypes = []any{
 	(*RestartWorkspaceRequest)(nil),              // 0: agentrepl.v1.RestartWorkspaceRequest
 	(*RestartWorkspaceResponse)(nil),             // 1: agentrepl.v1.RestartWorkspaceResponse
-	(*RestartWorkspaceSuccess)(nil),              // 2: agentrepl.v1.RestartWorkspaceSuccess
-	(*RestartWorkspaceError)(nil),                // 3: agentrepl.v1.RestartWorkspaceError
-	(*RestartWorkspaceUnknownWorkspace)(nil),     // 4: agentrepl.v1.RestartWorkspaceUnknownWorkspace
-	(*RestartWorkspaceWorkspaceRefMismatch)(nil), // 5: agentrepl.v1.RestartWorkspaceWorkspaceRefMismatch
-	(*RestartWorkspaceTransferringAway)(nil),     // 6: agentrepl.v1.RestartWorkspaceTransferringAway
-	(*RestartWorkspaceNotYetAdopted)(nil),        // 7: agentrepl.v1.RestartWorkspaceNotYetAdopted
-	(*RestartWorkspaceRelaunchFailed)(nil),       // 8: agentrepl.v1.RestartWorkspaceRelaunchFailed
-	(*v1.WorkspaceRef)(nil),                      // 9: workspace.v1.WorkspaceRef
+	(*RestartWorkspaceScheduled)(nil),            // 2: agentrepl.v1.RestartWorkspaceScheduled
+	(*RestartWorkspaceSuccess)(nil),              // 3: agentrepl.v1.RestartWorkspaceSuccess
+	(*RestartWorkspaceError)(nil),                // 4: agentrepl.v1.RestartWorkspaceError
+	(*RestartWorkspaceUnknownWorkspace)(nil),     // 5: agentrepl.v1.RestartWorkspaceUnknownWorkspace
+	(*RestartWorkspaceWorkspaceRefMismatch)(nil), // 6: agentrepl.v1.RestartWorkspaceWorkspaceRefMismatch
+	(*RestartWorkspaceTransferringAway)(nil),     // 7: agentrepl.v1.RestartWorkspaceTransferringAway
+	(*RestartWorkspaceNotYetAdopted)(nil),        // 8: agentrepl.v1.RestartWorkspaceNotYetAdopted
+	(*RestartWorkspaceRelaunchFailed)(nil),       // 9: agentrepl.v1.RestartWorkspaceRelaunchFailed
+	(*v1.WorkspaceRef)(nil),                      // 10: workspace.v1.WorkspaceRef
 }
 var file_agentrepl_v1_endpoint_restart_workspace_proto_depIdxs = []int32{
-	9, // 0: agentrepl.v1.RestartWorkspaceRequest.workspace:type_name -> workspace.v1.WorkspaceRef
-	2, // 1: agentrepl.v1.RestartWorkspaceResponse.success:type_name -> agentrepl.v1.RestartWorkspaceSuccess
-	3, // 2: agentrepl.v1.RestartWorkspaceResponse.error:type_name -> agentrepl.v1.RestartWorkspaceError
-	4, // 3: agentrepl.v1.RestartWorkspaceError.unknown_workspace:type_name -> agentrepl.v1.RestartWorkspaceUnknownWorkspace
-	5, // 4: agentrepl.v1.RestartWorkspaceError.workspace_ref_mismatch:type_name -> agentrepl.v1.RestartWorkspaceWorkspaceRefMismatch
-	6, // 5: agentrepl.v1.RestartWorkspaceError.transferring_away:type_name -> agentrepl.v1.RestartWorkspaceTransferringAway
-	7, // 6: agentrepl.v1.RestartWorkspaceError.not_yet_adopted:type_name -> agentrepl.v1.RestartWorkspaceNotYetAdopted
-	8, // 7: agentrepl.v1.RestartWorkspaceError.relaunch_failed:type_name -> agentrepl.v1.RestartWorkspaceRelaunchFailed
-	8, // [8:8] is the sub-list for method output_type
-	8, // [8:8] is the sub-list for method input_type
-	8, // [8:8] is the sub-list for extension type_name
-	8, // [8:8] is the sub-list for extension extendee
-	0, // [0:8] is the sub-list for field type_name
+	10, // 0: agentrepl.v1.RestartWorkspaceRequest.workspace:type_name -> workspace.v1.WorkspaceRef
+	3,  // 1: agentrepl.v1.RestartWorkspaceResponse.success:type_name -> agentrepl.v1.RestartWorkspaceSuccess
+	4,  // 2: agentrepl.v1.RestartWorkspaceResponse.error:type_name -> agentrepl.v1.RestartWorkspaceError
+	2,  // 3: agentrepl.v1.RestartWorkspaceResponse.scheduled:type_name -> agentrepl.v1.RestartWorkspaceScheduled
+	5,  // 4: agentrepl.v1.RestartWorkspaceError.unknown_workspace:type_name -> agentrepl.v1.RestartWorkspaceUnknownWorkspace
+	6,  // 5: agentrepl.v1.RestartWorkspaceError.workspace_ref_mismatch:type_name -> agentrepl.v1.RestartWorkspaceWorkspaceRefMismatch
+	7,  // 6: agentrepl.v1.RestartWorkspaceError.transferring_away:type_name -> agentrepl.v1.RestartWorkspaceTransferringAway
+	8,  // 7: agentrepl.v1.RestartWorkspaceError.not_yet_adopted:type_name -> agentrepl.v1.RestartWorkspaceNotYetAdopted
+	9,  // 8: agentrepl.v1.RestartWorkspaceError.relaunch_failed:type_name -> agentrepl.v1.RestartWorkspaceRelaunchFailed
+	9,  // [9:9] is the sub-list for method output_type
+	9,  // [9:9] is the sub-list for method input_type
+	9,  // [9:9] is the sub-list for extension type_name
+	9,  // [9:9] is the sub-list for extension extendee
+	0,  // [0:9] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_restart_workspace_proto_init() }
@@ -651,22 +763,23 @@ func file_agentrepl_v1_endpoint_restart_workspace_proto_init() {
 	file_agentrepl_v1_endpoint_restart_workspace_proto_msgTypes[1].OneofWrappers = []any{
 		(*RestartWorkspaceResponse_Success)(nil),
 		(*RestartWorkspaceResponse_Error)(nil),
+		(*RestartWorkspaceResponse_Scheduled)(nil),
 	}
-	file_agentrepl_v1_endpoint_restart_workspace_proto_msgTypes[3].OneofWrappers = []any{
+	file_agentrepl_v1_endpoint_restart_workspace_proto_msgTypes[4].OneofWrappers = []any{
 		(*RestartWorkspaceError_UnknownWorkspace)(nil),
 		(*RestartWorkspaceError_WorkspaceRefMismatch)(nil),
 		(*RestartWorkspaceError_TransferringAway)(nil),
 		(*RestartWorkspaceError_NotYetAdopted)(nil),
 		(*RestartWorkspaceError_RelaunchFailed)(nil),
 	}
-	file_agentrepl_v1_endpoint_restart_workspace_proto_msgTypes[7].OneofWrappers = []any{}
+	file_agentrepl_v1_endpoint_restart_workspace_proto_msgTypes[8].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_restart_workspace_proto_rawDesc), len(file_agentrepl_v1_endpoint_restart_workspace_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   9,
+			NumMessages:   10,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

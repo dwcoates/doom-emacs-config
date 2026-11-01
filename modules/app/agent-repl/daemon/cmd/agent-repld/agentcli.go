@@ -157,7 +157,7 @@ var cliNouns = map[string]map[string]cliCommand{
 		"close":            {usage: "close WS [-as-user]", run: workspaceClose},
 		"kill":             {usage: "kill WS", run: workspaceKill},
 		"select":           {usage: "select WS", run: workspaceSelect},
-		"restart":          {usage: "restart WS", run: workspaceRestart},
+		"restart":          {usage: "restart WS [-when-idle]", run: workspaceRestart},
 		"park":             {usage: "park WS|-all", run: workspacePark},
 		"interrupt":        {usage: "interrupt WS [-all-agents] [-confirm-agents]", run: workspaceInterrupt},
 		"compact":          {usage: "compact WS [-instructions TEXT] [-as-user]", run: workspaceCompact},
@@ -1127,11 +1127,18 @@ func workspaceSelect(c *cliCall, args []string) int {
 	})
 }
 
-// workspaceRestart bounces WS's session and reloads its page, at once.
+// workspaceRestart bounces WS's session and reloads its page, at once, or
+// with -when-idle once WS's running turn and detached work end
+// (endpoint_restart_workspace.proto).
 func workspaceRestart(c *cliCall, args []string) int {
-	return onWorkspace(c, args, func(ref *workspacev1.WorkspaceRef) (*connect.Response[agentreplv1.RestartWorkspaceResponse], error) {
-		return c.client.RestartWorkspace(c.ctx, connect.NewRequest(&agentreplv1.RestartWorkspaceRequest{Workspace: ref}))
-	})
+	fs, stateDir := c.flags()
+	whenIdle := fs.Bool("when-idle", false, "restart once the workspace is idle, interrupting nothing")
+	ref, ok := c.onlyWorkspace(fs, stateDir, args)
+	if !ok {
+		return exitFailure
+	}
+	resp, err := c.client.RestartWorkspace(c.ctx, connect.NewRequest(&agentreplv1.RestartWorkspaceRequest{Workspace: ref, WhenIdle: *whenIdle}))
+	return answer(c, resp, err)
 }
 
 // workspacePark parks WS's session as the keep-alive cycle parks one, or with
@@ -1200,15 +1207,27 @@ func workspaceInterrupt(c *cliCall, args []string) int {
 // workspace on its own.
 func onWorkspace[Res any](c *cliCall, args []string, call func(*workspacev1.WorkspaceRef) (*connect.Response[Res], error)) int {
 	fs, stateDir := c.flags()
-	ref, rest, ok := c.workspaceArg(fs, stateDir, args)
+	ref, ok := c.onlyWorkspace(fs, stateDir, args)
 	if !ok {
 		return exitFailure
 	}
-	if len(rest) != 0 {
-		return c.usageFailed("the command names its workspace and nothing after it")
-	}
 	resp, err := call(ref)
 	return answer(c, resp, err)
+}
+
+// onlyWorkspace parses ARGS against FS for a verb that names one workspace
+// and nothing after it, refusing anything after it. It is onWorkspace's parse,
+// shared by a verb that also takes flags of its own.
+func (c *cliCall) onlyWorkspace(fs *flag.FlagSet, stateDir *string, args []string) (*workspacev1.WorkspaceRef, bool) {
+	ref, rest, ok := c.workspaceArg(fs, stateDir, args)
+	if !ok {
+		return nil, false
+	}
+	if len(rest) != 0 {
+		c.usageFailed("the command names its workspace and nothing after it")
+		return nil, false
+	}
+	return ref, true
 }
 
 func workspaceCompact(c *cliCall, args []string) int {

@@ -4,16 +4,24 @@
 // unstick ONE workspace without rebooting everything. Never the daemon, the
 // store or the sidecar.
 //
-// A RESTART IS IMMEDIATE, ALWAYS. It exists for a workspace that is stuck — a
-// turn that never ends, a vendor that will not answer or will not start — so
-// it never waits for anything to finish: waiting on a stuck workspace is
-// waiting forever. Whatever stands in the way is stopped first: the running
+// A RESTART IS IMMEDIATE BY DEFAULT. It exists for a workspace that is stuck —
+// a turn that never ends, a vendor that will not answer or will not start — so
+// by default it never waits for anything to finish: waiting on a stuck
+// workspace is waiting forever. Whatever stands in the way is stopped first: the running
 // turn is interrupted and every piece of detached work is stopped; because
 // the vendor is usually unreachable when a restart is wanted, those stops are
 // bounded and the shim's own teardown hard-kills whatever did not stop. Then
 // the shim is relaunched, the SAME session is resumed on it (a fresh vendor
 // start run, with the full retry window), every hold waiting on the session
 // is delivered once it is up, and the workspace's webapp page reloads.
+//
+// A RESTART ONCE IDLE (`when_idle`) is the second mode, for a workspace that is
+// NOT stuck but should be brought up to date with a changed harness (the
+// metaprompt, skills, CLAUDE.md), which the shim assembles at session start.
+// It interrupts nothing: the restart is registered with the workspace's bounce
+// registry, which runs it on the daemon's own freeness edges (the running
+// turn's end, the last detached item's end), never by polling. A workspace
+// already idle is restarted at once.
 //
 // NOT A ROUTINE ACTION. A relaunched shim or reloaded page runs the build on
 // disk, which may speak a newer API than the daemon that keeps running.
@@ -32,7 +40,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_restart_workspace.proto.
  */
 export const file_agentrepl_v1_endpoint_restart_workspace: GenFile = /*@__PURE__*/
-  fileDesc("Ci1hZ2VudHJlcGwvdjEvZW5kcG9pbnRfcmVzdGFydF93b3Jrc3BhY2UucHJvdG8SDGFnZW50cmVwbC52MSJVChdSZXN0YXJ0V29ya3NwYWNlUmVxdWVzdBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmSgQIAhADUgVmb3JjZSKUAQoYUmVzdGFydFdvcmtzcGFjZVJlc3BvbnNlEjgKB3N1Y2Nlc3MYASABKAsyJS5hZ2VudHJlcGwudjEuUmVzdGFydFdvcmtzcGFjZVN1Y2Nlc3NIABI0CgVlcnJvchgCIAEoCzIjLmFnZW50cmVwbC52MS5SZXN0YXJ0V29ya3NwYWNlRXJyb3JIAEIICgZyZXN1bHQiGQoXUmVzdGFydFdvcmtzcGFjZVN1Y2Nlc3MiswMKFVJlc3RhcnRXb3Jrc3BhY2VFcnJvchJLChF1bmtub3duX3dvcmtzcGFjZRgBIAEoCzIuLmFnZW50cmVwbC52MS5SZXN0YXJ0V29ya3NwYWNlVW5rbm93bldvcmtzcGFjZUgAElQKFndvcmtzcGFjZV9yZWZfbWlzbWF0Y2gYAiABKAsyMi5hZ2VudHJlcGwudjEuUmVzdGFydFdvcmtzcGFjZVdvcmtzcGFjZVJlZk1pc21hdGNoSAASSwoRdHJhbnNmZXJyaW5nX2F3YXkYAyABKAsyLi5hZ2VudHJlcGwudjEuUmVzdGFydFdvcmtzcGFjZVRyYW5zZmVycmluZ0F3YXlIABJGCg9ub3RfeWV0X2Fkb3B0ZWQYBCABKAsyKy5hZ2VudHJlcGwudjEuUmVzdGFydFdvcmtzcGFjZU5vdFlldEFkb3B0ZWRIABJHCg9yZWxhdW5jaF9mYWlsZWQYBiABKAsyLC5hZ2VudHJlcGwudjEuUmVzdGFydFdvcmtzcGFjZVJlbGF1bmNoRmFpbGVkSABCBwoFY2F1c2VKBAgFEAZSCm5vX3Nlc3Npb24iIgogUmVzdGFydFdvcmtzcGFjZVVua25vd25Xb3Jrc3BhY2UiPAokUmVzdGFydFdvcmtzcGFjZVdvcmtzcGFjZVJlZk1pc21hdGNoEhQKDHJlZ2lzdHJ5X2RpchgBIAEoCSIzCiBSZXN0YXJ0V29ya3NwYWNlVHJhbnNmZXJyaW5nQXdheRIPCgdhZGRyZXNzGAEgASgJIkEKHVJlc3RhcnRXb3Jrc3BhY2VOb3RZZXRBZG9wdGVkEhQKB2FkZHJlc3MYASABKAlIAIgBAUIKCghfYWRkcmVzcyIwCh5SZXN0YXJ0V29ya3NwYWNlUmVsYXVuY2hGYWlsZWQSDgoGZGV0YWlsGAEgASgJQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_workspace_v1_workspace]);
+  fileDesc("Ci1hZ2VudHJlcGwvdjEvZW5kcG9pbnRfcmVzdGFydF93b3Jrc3BhY2UucHJvdG8SDGFnZW50cmVwbC52MSJoChdSZXN0YXJ0V29ya3NwYWNlUmVxdWVzdBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmEhEKCXdoZW5faWRsZRgDIAEoCEoECAIQA1IFZm9yY2Ui0gEKGFJlc3RhcnRXb3Jrc3BhY2VSZXNwb25zZRI4CgdzdWNjZXNzGAEgASgLMiUuYWdlbnRyZXBsLnYxLlJlc3RhcnRXb3Jrc3BhY2VTdWNjZXNzSAASNAoFZXJyb3IYAiABKAsyIy5hZ2VudHJlcGwudjEuUmVzdGFydFdvcmtzcGFjZUVycm9ySAASPAoJc2NoZWR1bGVkGAMgASgLMicuYWdlbnRyZXBsLnYxLlJlc3RhcnRXb3Jrc3BhY2VTY2hlZHVsZWRIAEIICgZyZXN1bHQiYwoZUmVzdGFydFdvcmtzcGFjZVNjaGVkdWxlZBIWCg50dXJuX2luX2ZsaWdodBgBIAEoCBIVCg1kZXRhY2hlZF93b3JrGAIgASgNEhcKD2FscmVhZHlfcGVuZGluZxgDIAEoCCIZChdSZXN0YXJ0V29ya3NwYWNlU3VjY2VzcyKzAwoVUmVzdGFydFdvcmtzcGFjZUVycm9yEksKEXVua25vd25fd29ya3NwYWNlGAEgASgLMi4uYWdlbnRyZXBsLnYxLlJlc3RhcnRXb3Jrc3BhY2VVbmtub3duV29ya3NwYWNlSAASVAoWd29ya3NwYWNlX3JlZl9taXNtYXRjaBgCIAEoCzIyLmFnZW50cmVwbC52MS5SZXN0YXJ0V29ya3NwYWNlV29ya3NwYWNlUmVmTWlzbWF0Y2hIABJLChF0cmFuc2ZlcnJpbmdfYXdheRgDIAEoCzIuLmFnZW50cmVwbC52MS5SZXN0YXJ0V29ya3NwYWNlVHJhbnNmZXJyaW5nQXdheUgAEkYKD25vdF95ZXRfYWRvcHRlZBgEIAEoCzIrLmFnZW50cmVwbC52MS5SZXN0YXJ0V29ya3NwYWNlTm90WWV0QWRvcHRlZEgAEkcKD3JlbGF1bmNoX2ZhaWxlZBgGIAEoCzIsLmFnZW50cmVwbC52MS5SZXN0YXJ0V29ya3NwYWNlUmVsYXVuY2hGYWlsZWRIAEIHCgVjYXVzZUoECAUQBlIKbm9fc2Vzc2lvbiIiCiBSZXN0YXJ0V29ya3NwYWNlVW5rbm93bldvcmtzcGFjZSI8CiRSZXN0YXJ0V29ya3NwYWNlV29ya3NwYWNlUmVmTWlzbWF0Y2gSFAoMcmVnaXN0cnlfZGlyGAEgASgJIjMKIFJlc3RhcnRXb3Jrc3BhY2VUcmFuc2ZlcnJpbmdBd2F5Eg8KB2FkZHJlc3MYASABKAkiQQodUmVzdGFydFdvcmtzcGFjZU5vdFlldEFkb3B0ZWQSFAoHYWRkcmVzcxgBIAEoCUgAiAEBQgoKCF9hZGRyZXNzIjAKHlJlc3RhcnRXb3Jrc3BhY2VSZWxhdW5jaEZhaWxlZBIOCgZkZXRhaWwYASABKAlCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_workspace_v1_workspace]);
 
 /**
  * @generated from message agentrepl.v1.RestartWorkspaceRequest
@@ -42,6 +50,14 @@ export type RestartWorkspaceRequest = Message<"agentrepl.v1.RestartWorkspaceRequ
    * @generated from field: workspace.v1.WorkspaceRef workspace = 1;
    */
   workspace?: WorkspaceRef | undefined;
+
+  /**
+   * Restart once the workspace is idle instead of at once: nothing is
+   * interrupted, and the answer is `scheduled` when work is in flight.
+   *
+   * @generated from field: bool when_idle = 3;
+   */
+  whenIdle: boolean;
 };
 
 /**
@@ -72,6 +88,16 @@ export type RestartWorkspaceResponse = Message<"agentrepl.v1.RestartWorkspaceRes
      */
     value: RestartWorkspaceError;
     case: "error";
+  } | {
+    /**
+     * Only for `when_idle`: the workspace had work in flight, so the restart
+     * was registered and runs when that work ends. Its outcome is recorded in
+     * the daemon's log, and the page reload arrives on the streams.
+     *
+     * @generated from field: agentrepl.v1.RestartWorkspaceScheduled scheduled = 3;
+     */
+    value: RestartWorkspaceScheduled;
+    case: "scheduled";
   } | { case: undefined; value?: undefined };
 };
 
@@ -83,8 +109,46 @@ export const RestartWorkspaceResponseSchema: GenMessage<RestartWorkspaceResponse
   messageDesc(file_agentrepl_v1_endpoint_restart_workspace, 1);
 
 /**
+ * THE RESTART IS REGISTERED behind the workspace's work in flight. The fields
+ * say what it waits on, as the bounce registry read it when it decided.
+ *
+ * @generated from message agentrepl.v1.RestartWorkspaceScheduled
+ */
+export type RestartWorkspaceScheduled = Message<"agentrepl.v1.RestartWorkspaceScheduled"> & {
+  /**
+   * A turn is running.
+   *
+   * @generated from field: bool turn_in_flight = 1;
+   */
+  turnInFlight: boolean;
+
+  /**
+   * How many detached items (background agents, shells, monitors) are live.
+   *
+   * @generated from field: uint32 detached_work = 2;
+   */
+  detachedWork: number;
+
+  /**
+   * A bounce was already registered for the workspace (a stale build, an
+   * earlier restart); this restart joined it rather than queueing a second.
+   *
+   * @generated from field: bool already_pending = 3;
+   */
+  alreadyPending: boolean;
+};
+
+/**
+ * Describes the message agentrepl.v1.RestartWorkspaceScheduled.
+ * Use `create(RestartWorkspaceScheduledSchema)` to create a new message.
+ */
+export const RestartWorkspaceScheduledSchema: GenMessage<RestartWorkspaceScheduled> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_restart_workspace, 2);
+
+/**
  * THE RESTART HAPPENED (owner ruling, 2026-10-08: "i expect it to just
- * restart instantly", never "work on it when it gets around to it"). The
+ * restart instantly", never "work on it when it gets around to it"). A
+ * `when_idle` restart of an idle workspace answers it too: it ran at once. The
  * answer is sent once the bounce has finished: the shim was relaunched and the
  * session resumed on it, or there was nothing left to replace. A client shows
  * nothing for it; the page reload and the fresh session arrive on the streams.
@@ -100,7 +164,7 @@ export type RestartWorkspaceSuccess = Message<"agentrepl.v1.RestartWorkspaceSucc
  * Use `create(RestartWorkspaceSuccessSchema)` to create a new message.
  */
 export const RestartWorkspaceSuccessSchema: GenMessage<RestartWorkspaceSuccess> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_restart_workspace, 2);
+  messageDesc(file_agentrepl_v1_endpoint_restart_workspace, 3);
 
 /**
  * Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
@@ -161,7 +225,7 @@ export type RestartWorkspaceError = Message<"agentrepl.v1.RestartWorkspaceError"
  * Use `create(RestartWorkspaceErrorSchema)` to create a new message.
  */
 export const RestartWorkspaceErrorSchema: GenMessage<RestartWorkspaceError> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_restart_workspace, 3);
+  messageDesc(file_agentrepl_v1_endpoint_restart_workspace, 4);
 
 /**
  * @generated from message agentrepl.v1.RestartWorkspaceUnknownWorkspace
@@ -174,7 +238,7 @@ export type RestartWorkspaceUnknownWorkspace = Message<"agentrepl.v1.RestartWork
  * Use `create(RestartWorkspaceUnknownWorkspaceSchema)` to create a new message.
  */
 export const RestartWorkspaceUnknownWorkspaceSchema: GenMessage<RestartWorkspaceUnknownWorkspace> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_restart_workspace, 4);
+  messageDesc(file_agentrepl_v1_endpoint_restart_workspace, 5);
 
 /**
  * @generated from message agentrepl.v1.RestartWorkspaceWorkspaceRefMismatch
@@ -193,7 +257,7 @@ export type RestartWorkspaceWorkspaceRefMismatch = Message<"agentrepl.v1.Restart
  * Use `create(RestartWorkspaceWorkspaceRefMismatchSchema)` to create a new message.
  */
 export const RestartWorkspaceWorkspaceRefMismatchSchema: GenMessage<RestartWorkspaceWorkspaceRefMismatch> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_restart_workspace, 5);
+  messageDesc(file_agentrepl_v1_endpoint_restart_workspace, 6);
 
 /**
  * @generated from message agentrepl.v1.RestartWorkspaceTransferringAway
@@ -212,7 +276,7 @@ export type RestartWorkspaceTransferringAway = Message<"agentrepl.v1.RestartWork
  * Use `create(RestartWorkspaceTransferringAwaySchema)` to create a new message.
  */
 export const RestartWorkspaceTransferringAwaySchema: GenMessage<RestartWorkspaceTransferringAway> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_restart_workspace, 6);
+  messageDesc(file_agentrepl_v1_endpoint_restart_workspace, 7);
 
 /**
  * @generated from message agentrepl.v1.RestartWorkspaceNotYetAdopted
@@ -236,7 +300,7 @@ export type RestartWorkspaceNotYetAdopted = Message<"agentrepl.v1.RestartWorkspa
  * Use `create(RestartWorkspaceNotYetAdoptedSchema)` to create a new message.
  */
 export const RestartWorkspaceNotYetAdoptedSchema: GenMessage<RestartWorkspaceNotYetAdopted> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_restart_workspace, 7);
+  messageDesc(file_agentrepl_v1_endpoint_restart_workspace, 8);
 
 /**
  * @generated from message agentrepl.v1.RestartWorkspaceRelaunchFailed
@@ -255,5 +319,5 @@ export type RestartWorkspaceRelaunchFailed = Message<"agentrepl.v1.RestartWorksp
  * Use `create(RestartWorkspaceRelaunchFailedSchema)` to create a new message.
  */
 export const RestartWorkspaceRelaunchFailedSchema: GenMessage<RestartWorkspaceRelaunchFailed> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_restart_workspace, 8);
+  messageDesc(file_agentrepl_v1_endpoint_restart_workspace, 9);
 

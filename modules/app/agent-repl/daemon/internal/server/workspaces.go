@@ -899,12 +899,48 @@ func (s *server) RestartWorkspace(
 	if done {
 		return answer(resp, cerr)
 	}
+	if req.Msg.GetWhenIdle() {
+		return s.restartWhenIdle(ctx, subject, resp)
+	}
 	if err := s.deps.Verbs.Restart(ctx, subject.Record.ID); err != nil {
 		return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
 	}
+	return s.restarted(ctx, subject.Record.ID, resp)
+}
+
+// restartWhenIdle runs RestartWorkspace's `when_idle` mode: the restart ran at
+// once (`success`), or was scheduled behind the work it names (`scheduled`).
+func (s *server) restartWhenIdle(
+	ctx context.Context,
+	subject resolved,
+	resp *agentreplv1.RestartWorkspaceResponse,
+) (*connect.Response[agentreplv1.RestartWorkspaceResponse], error) {
+	idle, err := s.deps.Verbs.RestartWhenIdle(ctx, subject.Record.ID)
+	if err != nil {
+		return answer(resp, s.answerRefusal(subject.Log, "RestartWorkspace", resp, err, nil))
+	}
+	if !idle.Scheduled {
+		return s.restarted(ctx, subject.Record.ID, resp)
+	}
+	resp.Result = &agentreplv1.RestartWorkspaceResponse_Scheduled{
+		Scheduled: &agentreplv1.RestartWorkspaceScheduled{
+			TurnInFlight:   idle.TurnInFlight,
+			DetachedWork:   uint32(idle.DetachedWork),
+			AlreadyPending: idle.AlreadyPending,
+		},
+	}
+	return connect.NewResponse(resp), nil
+}
+
+// restarted answers a restart that ran.
+func (s *server) restarted(
+	ctx context.Context,
+	ws ids.WorkspaceID,
+	resp *agentreplv1.RestartWorkspaceResponse,
+) (*connect.Response[agentreplv1.RestartWorkspaceResponse], error) {
 	// The verb moved the session's standing or the composer's gate; the host
 	// view is recomposed from what the change left behind.
-	s.PublishHostWorkspace(ctx, subject.Record.ID)
+	s.PublishHostWorkspace(ctx, ws)
 	resp.Result = &agentreplv1.RestartWorkspaceResponse_Success{
 		Success: &agentreplv1.RestartWorkspaceSuccess{},
 	}

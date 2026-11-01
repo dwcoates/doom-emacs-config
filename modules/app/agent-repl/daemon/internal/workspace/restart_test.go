@@ -611,3 +611,176 @@ func TestARestartWhoseVendorWillNotStartIsRecordedAtInfo(t *testing.T) {
 		t.Fatalf("records = %+v, want no ERROR for a vendor that would not start", f.log.logger.Records())
 	}
 }
+
+func TestARestartWhenIdleOfAnIdleWorkspaceRunsAtOnce(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+
+	// Act.
+	got, err := f.verbs.RestartWhenIdle(context.Background(), "w1")
+
+	// Assert: the restart finished before the answer, and was not scheduled.
+	if err != nil || got.Scheduled {
+		t.Fatalf("RestartWhenIdle = (%+v, %v), want it run at once", got, err)
+	}
+	if reloads := f.rollout.reloadCalls(); len(reloads) != 1 {
+		t.Fatalf("webapp reloads = %v, want the one a finished restart pushes", reloads)
+	}
+}
+
+func TestARestartWhenIdleAsksForAnUnforcedBounce(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+
+	// Act.
+	if _, err := f.verbs.RestartWhenIdle(context.Background(), "w1"); err != nil {
+		t.Fatalf("RestartWhenIdle: %v", err)
+	}
+
+	// Assert.
+	if got := f.rollout.relaunchCalls(); len(got) != 1 || got[0].Force || got[0].Reason != rollout.ReasonRestartVerb {
+		t.Fatalf("relaunches = %+v, want one unforced restart-verb bounce", got)
+	}
+}
+
+func TestARestartWhenIdleInterruptsNothing(t *testing.T) {
+	// Arrange: a busy workspace, whose restart the registry registers.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	turn := wsm.TurnID("t1")
+	f.running.Turn = &turn
+	f.rollout.registered = &bounce.Decision{TurnInFlight: true}
+
+	// Act.
+	if _, err := f.verbs.RestartWhenIdle(context.Background(), "w1"); err != nil {
+		t.Fatalf("RestartWhenIdle: %v", err)
+	}
+
+	// Assert.
+	if len(f.shim.killedTurns) != 0 {
+		t.Fatalf("killed turns = %+v, want the running turn left alone", f.shim.killedTurns)
+	}
+	if len(f.fleet.vendorCancels) != 0 {
+		t.Fatalf("vendor starts cancelled = %v, want none", f.fleet.vendorCancels)
+	}
+}
+
+func TestARestartWhenIdleOfABusyWorkspaceAnswersScheduled(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.rollout.registered = &bounce.Decision{TurnInFlight: true, DetachedWork: 2, AlreadyPending: true}
+
+	// Act.
+	got, err := f.verbs.RestartWhenIdle(context.Background(), "w1")
+
+	// Assert.
+	want := IdleRestart{Scheduled: true, TurnInFlight: true, DetachedWork: 2, AlreadyPending: true}
+	if err != nil || got != want {
+		t.Fatalf("RestartWhenIdle = (%+v, %v), want (%+v, nil)", got, err, want)
+	}
+	if reloads := f.rollout.reloadCalls(); len(reloads) != 0 {
+		t.Fatalf("webapp reloads = %v, want none before the work ends", reloads)
+	}
+}
+
+func TestAScheduledRestartRecordsWhatItWaitsOn(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.rollout.registered = &bounce.Decision{TurnInFlight: true, DetachedWork: 1}
+
+	// Act.
+	if _, err := f.verbs.RestartWhenIdle(context.Background(), "w1"); err != nil {
+		t.Fatalf("RestartWhenIdle: %v", err)
+	}
+
+	// Assert.
+	r, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{
+		Level: dlog.LevelInfo, Operation: opRestart,
+		Message: "scheduled the restart for when the workspace falls idle; it runs when its work in flight ends",
+	})
+	if !ok {
+		t.Fatalf("records = %+v, want the scheduled restart at INFO", f.log.logger.Records())
+	}
+	if r.Context["turn_in_flight"] != true || r.Context["detached_work"] != 1 || r.Context["already_pending"] != false {
+		t.Fatalf("context = %+v, want what the restart waits on", r.Context)
+	}
+}
+
+func TestAScheduledRestartRunsWhenItsWorkEnds(t *testing.T) {
+	// Arrange: the restart was registered behind a running turn.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.rollout.registered = &bounce.Decision{TurnInFlight: true}
+	if _, err := f.verbs.RestartWhenIdle(context.Background(), "w1"); err != nil {
+		t.Fatalf("RestartWhenIdle: %v", err)
+	}
+
+	// Act: the turn ends, and the registry runs the bounce.
+	f.rollout.fireRegistered(t, nil)
+
+	// Assert.
+	if reloads := f.rollout.reloadCalls(); len(reloads) != 1 {
+		t.Fatalf("webapp reloads = %v, want the one a finished restart pushes", reloads)
+	}
+	if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{
+		Level: dlog.LevelInfo, Operation: opRestart, Message: "restarted the workspace",
+	}); !ok {
+		t.Fatalf("records = %+v, want the restart recorded at INFO", f.log.logger.Records())
+	}
+}
+
+func TestARestartWhenIdleOfAWorkspaceWithNoShimStartsItsSession(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.hasSession = false
+
+	// Act.
+	got, err := f.verbs.RestartWhenIdle(context.Background(), "w1")
+
+	// Assert.
+	if err != nil || got.Scheduled || len(f.fleet.started) != 1 || f.fleet.started[0] != "w1" {
+		t.Fatalf("RestartWhenIdle = (%+v, %v) after starts %v, want w1's session started at once", got, err, f.fleet.started)
+	}
+}
+
+func TestARestartWhenIdleWhoseRelaunchFailsAnswersRelaunchFailed(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.rollout.relaunchErr = errors.New("prelaunch failed")
+
+	// Act.
+	_, err := f.verbs.RestartWhenIdle(context.Background(), "w1")
+
+	// Assert.
+	var refusal *Refusal
+	if !errors.As(err, &refusal) || refusal.Arm != "relaunch_failed" {
+		t.Fatalf("RestartWhenIdle = %v, want relaunch_failed", err)
+	}
+	awaitRecord(t, f, "error", opRestart)
+}
+
+func TestARestartWhenIdleTheRegistryRefusesIsLogged(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.rollout.refuseErr = errors.New("registry closed")
+
+	// Act.
+	_, err := f.verbs.RestartWhenIdle(context.Background(), "w1")
+
+	// Assert.
+	if err == nil {
+		t.Fatal("RestartWhenIdle = nil, want the registry's refusal")
+	}
+	if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{
+		Level: dlog.LevelError, Operation: opRestart, Message: "the bounce registry refused the restart",
+	}); !ok {
+		t.Fatalf("records = %+v, want the refusal at ERROR", f.log.logger.Records())
+	}
+}
