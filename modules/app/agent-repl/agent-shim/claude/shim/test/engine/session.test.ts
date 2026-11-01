@@ -16683,6 +16683,37 @@ describe("GetForkPoint and ForkSession", () => {
     expect(point.uninheritedTurns.map((turn) => turn.value)).toEqual(["turn-1"]);
   });
 
+  it.each([
+    { name: "answers nothing_finished when the turn in flight opens the transcript", before: [], expected: "failure" },
+    { name: "still cuts before the opener when an earlier record precedes it", before: ["00000000-0000-4000-8000-0000000000e1"], expected: "success" },
+  ])("$name", async ({ before, expected }) => {
+    // Arrange
+    const h = harness();
+    const response = await started(h);
+    const vendorSessionId = response.result.case === "success" ? (response.result.value.session?.vendorSessionId ?? "") : "";
+    const send = await turnWithReply(h, "turn-1", "00000000-0000-4000-8000-0000000000a1");
+    writeTranscript(h.configDir, h.cwd, vendorSessionId, [
+      ...before.map((uuid) => ({ type: "assistant", uuid })),
+      { type: "user", uuid: send },
+      { type: "assistant", uuid: "00000000-0000-4000-8000-0000000000a1" },
+    ]);
+    const mark = logSinkMark();
+
+    // Act
+    const answer = await h.engine.getForkPoint(create(shimv1.GetForkPointRequestSchema, {}));
+
+    // Assert
+    expect(answer.result.case).toBe(expected);
+    if (expected === "failure") {
+      const failure = answer.result.case === "failure" ? answer.result.value : undefined;
+      expect(failure?.cause.case).toBe("nothingFinished");
+      expect(failure?.detail).toContain("no finished turn precedes it");
+      expect(logRecordsSince(mark).some((record) => record.message === "named no fork point: the turn in flight is the conversation's first")).toBe(true);
+    } else {
+      expect(success(answer).point?.extent).toMatchObject({ case: "beforeRecord", value: { record: { value: send } } });
+    }
+  });
+
   it("forgets the fork point when the conversation rotates to a new transcript", async () => {
     // Arrange
     const h = harness();

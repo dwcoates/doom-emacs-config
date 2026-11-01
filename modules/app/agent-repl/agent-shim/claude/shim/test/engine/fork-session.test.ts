@@ -7,6 +7,7 @@ import {
   forkableRecords,
   forkSession,
   recordOfToken,
+  openerPlace,
   resolveUpTo,
   type ForkVendorSession,
   remapForkedCompactBoundaries,
@@ -128,6 +129,22 @@ describe("recordOfToken", () => {
   ])("fails hard on a send $name", ({ records, error }) => {
     // Act / Assert
     expect(() => recordOfToken(records, "send-1")).toThrow(error);
+  });
+});
+
+describe("openerPlace", () => {
+  const chain = [{ uuid: "u1" }, { uuid: "a1" }, { uuid: "q1", queuedSend: "send-1" }];
+  it.each([
+    { name: "an opener the transcript does not hold is absent", token: "missing", expected: { kind: "absent" } },
+    { name: "the transcript's first record is first", token: "u1", expected: { kind: "first" } },
+    { name: "a later opener follows the record before it", token: "a1", expected: { kind: "after", previous: "u1" } },
+    { name: "a send folded in as a queued command follows the record before that command", token: "send-1", expected: { kind: "after", previous: "a1" } },
+  ])("$name", ({ token, expected }) => {
+    // Act
+    const place = openerPlace(chain, token);
+
+    // Assert
+    expect(place).toEqual(expected);
   });
 });
 

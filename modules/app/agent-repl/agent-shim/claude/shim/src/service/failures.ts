@@ -1073,14 +1073,15 @@ function forkRecordToken(uuid: string): shimv1.ForkRecordToken {
 
 /** The fork point the engine named, or why it could not name one. */
 export function forkPointAnswered(answer: ForkPointAnswer): shimv1.GetForkPointResponse {
-  if (answer.kind === "unresolved") {
+  if (answer.kind === "unresolved" || answer.kind === "nothing_finished") {
+    const cause: shimv1.GetForkPointFailure["cause"] =
+      answer.kind === "unresolved"
+        ? { case: "unresolved", value: create(shimv1.GetForkPointUnresolvedSchema, {}) }
+        : { case: "nothingFinished", value: create(shimv1.GetForkPointNothingFinishedSchema, {}) };
     return create(shimv1.GetForkPointResponseSchema, {
       result: {
         case: "failure",
-        value: create(shimv1.GetForkPointFailureSchema, {
-          detail: answer.detail,
-          cause: { case: "unresolved", value: create(shimv1.GetForkPointUnresolvedSchema, {}) },
-        }),
+        value: create(shimv1.GetForkPointFailureSchema, { detail: answer.detail, cause }),
       },
     });
   }
