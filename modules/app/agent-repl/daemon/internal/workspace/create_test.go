@@ -1394,8 +1394,8 @@ func TestCreateDerivations(t *testing.T) {
 				t.Fatalf("Create: %v", err)
 			}
 			facts := f.db.registered[len(f.db.registered)-1]
-			if facts.OwnerLands != tc.wantLands {
-				t.Errorf("OwnerLands = %v, want %v", facts.OwnerLands, tc.wantLands)
+			if facts.LacksParentContext != tc.wantLands || facts.OneShot {
+				t.Errorf("LacksParentContext = %v, OneShot = %v; want %v, false", facts.LacksParentContext, facts.OneShot, tc.wantLands)
 			}
 			if (facts.ContextFrom == nil) != (tc.fork == "") || (tc.fork != "" && *facts.ContextFrom != byName[tc.fork]) {
 				t.Errorf("ContextFrom = %v, want %q", facts.ContextFrom, tc.fork)
@@ -1415,6 +1415,77 @@ func TestCreateDerivations(t *testing.T) {
 				t.Errorf("derived events = %+v, want %+v", f.derived.events, want)
 			}
 		})
+	}
+}
+
+// TestCreateAOneShotChildLandsItself pins the owner ruling of 2026-10-31: a
+// one-shot child lands itself whatever its context, so a main workspace can
+// dispatch fresh one-shot children. It is still a child, owing no notice.
+func TestCreateAOneShotChildLandsItself(t *testing.T) {
+	tests := []struct {
+		name      string
+		fork      string
+		wantLacks bool
+	}{
+		{name: "fresh", wantLacks: true},
+		{name: "forked from its owner", fork: "owner"},
+		{name: "forked from another workspace", fork: "other", wantLacks: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			f, spec, owner, other := derivationFixture(t)
+			oneShotBriefs(f)
+			byName := map[string]ids.WorkspaceID{"owner": owner.ID, "other": other.ID}
+			parent := owner.ID
+			spec.Parent, spec.OneShot = &parent, true
+			if tc.fork != "" {
+				id := byName[tc.fork]
+				spec.ForkFrom = &id
+			}
+
+			// Act.
+			created, err := f.verbs.Create(context.Background(), spec)
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("Create: %v", err)
+			}
+			if spec.OwnerLands() {
+				t.Error("CreateSpec.OwnerLands() = true, want a one-shot to land itself")
+			}
+			facts := f.db.registered[len(f.db.registered)-1]
+			if facts.Parent == nil || *facts.Parent != owner.ID || !facts.OneShot || facts.LacksParentContext != tc.wantLacks {
+				t.Errorf("registered parent %v, one-shot %v, lacks parent context %v; want the owner, true, %v",
+					facts.Parent, facts.OneShot, facts.LacksParentContext, tc.wantLacks)
+			}
+			want := []derivedEvent{{workspace: created.ID}}
+			if !reflect.DeepEqual(f.derived.events, want) {
+				t.Errorf("derived events = %+v, want %+v with no owner notice", f.derived.events, want)
+			}
+		})
+	}
+}
+
+// TestCreateSpecOwnerLandsSharesTheStoresRule pins that a create decides who
+// lands it by the store's one rule (wsm.OwnerLands), never a copy of it.
+func TestCreateSpecOwnerLandsSharesTheStoresRule(t *testing.T) {
+	owner, other := ids.WorkspaceID("owner"), ids.WorkspaceID("other")
+	for _, parent := range []*ids.WorkspaceID{nil, &owner} {
+		for _, fork := range []*ids.WorkspaceID{nil, &owner, &other} {
+			for _, oneShot := range []bool{false, true} {
+				// Arrange.
+				spec := CreateSpec{Parent: parent, ForkFrom: fork, OneShot: oneShot}
+
+				// Act.
+				got := spec.OwnerLands()
+
+				// Assert.
+				if want := wsm.OwnerLands(spec.lacksParentContext(), oneShot); got != want {
+					t.Errorf("CreateSpec{parent %v, fork %v, one-shot %v}.OwnerLands() = %v, want the store's rule %v", parent, fork, oneShot, got, want)
+				}
+			}
+		}
 	}
 }
 
@@ -1449,8 +1520,8 @@ func TestCreateAChildOfAnOwnerOfAnotherRepository(t *testing.T) {
 				t.Fatalf("Create: %v", err)
 			}
 			facts := f.db.registered[len(f.db.registered)-1]
-			if facts.Parent == nil || *facts.Parent != elsewhere.ID || facts.OwnerLands != tc.wantLands {
-				t.Errorf("parent = %v, owner lands = %v, want %s and %v", facts.Parent, facts.OwnerLands, elsewhere.ID, tc.wantLands)
+			if facts.Parent == nil || *facts.Parent != elsewhere.ID || facts.LacksParentContext != tc.wantLands {
+				t.Errorf("parent = %v, lacks parent context = %v, want %s and %v", facts.Parent, facts.LacksParentContext, elsewhere.ID, tc.wantLands)
 			}
 			if got := f.git.created[0].BaseRef; got != "master" {
 				t.Errorf("base = %q, want the own repository's primary branch", got)
@@ -1521,7 +1592,7 @@ func TestCreateRefusesADerivationItCannotBuild(t *testing.T) {
 			}},
 		{name: "a notice on a top-level workspace", wantArm: ArmOwnerNoticeUnexpected,
 			arrange: func(_ *fixture, spec *CreateSpec, _, _ wsm.Workspace) { spec.OwnerNotice = "nobody to tell" }},
-		{name: "a one-shot child its owner would land", wantArm: ArmOneShotOwnerLands,
+		{name: "a notice on a fresh one-shot child, which lands itself", wantArm: ArmOwnerNoticeUnexpected,
 			arrange: func(f *fixture, spec *CreateSpec, owner, _ wsm.Workspace) {
 				oneShotBriefs(f)
 				id := owner.ID

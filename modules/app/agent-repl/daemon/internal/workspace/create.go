@@ -374,17 +374,18 @@ func (v *verbs) create(ctx context.Context, spec CreateSpec) (wsm.Workspace, err
 	// the moment git is done.
 	reportCreateStage(spec, CreateStageStartingSession)
 	record, err := v.Register(ctx, worktreeDir, wsm.RegisterFacts{
-		Name:          branch,
-		Branch:        branch,
-		ParentBranch:  parentBranch,
-		Parent:        (*wsm.WorkspaceID)(parent),
-		RepoDir:       repoDir,
-		DefaultBranch: defaultBranch,
-		MergeOf:       spec.MergeOf,
-		OwnerLands:    spec.OwnerLands(),
-		LandsInto:     landsIntoID(landsInto),
-		ContextFrom:   (*wsm.WorkspaceID)(spec.ForkFrom),
-		RequestedBy:   (*wsm.WorkspaceID)(spec.Requester),
+		Name:               branch,
+		Branch:             branch,
+		ParentBranch:       parentBranch,
+		Parent:             (*wsm.WorkspaceID)(parent),
+		RepoDir:            repoDir,
+		DefaultBranch:      defaultBranch,
+		MergeOf:            spec.MergeOf,
+		LacksParentContext: spec.lacksParentContext(),
+		OneShot:            spec.OneShot,
+		LandsInto:          landsIntoID(landsInto),
+		ContextFrom:        (*wsm.WorkspaceID)(spec.ForkFrom),
+		RequestedBy:        (*wsm.WorkspaceID)(spec.Requester),
 		// The priority rides the insert, because it decides the place the
 		// workspace lands on.
 		Priority: priority,
@@ -861,11 +862,18 @@ func (s CreateSpec) forkRefusalArm() string {
 	return ArmForkSourceHasNoConversation
 }
 
-// OwnerLands reports whether this create is a child whose context is not
-// forked from its owner, which only the owner (or the user) lands. A merge
+// lacksParentContext reports whether this create is a child whose context is
+// not forked from its owner (wsm.RegisterFacts.LacksParentContext). A merge
 // workspace never is: its landing is the queue's.
-func (s CreateSpec) OwnerLands() bool {
+func (s CreateSpec) lacksParentContext() bool {
 	return s.MergeOf == nil && s.Parent != nil && (s.ForkFrom == nil || *s.ForkFrom != *s.Parent)
+}
+
+// OwnerLands reports whether only the owner (or the user) lands this create:
+// a child lacking its owner's context that is not a one-shot. A one-shot
+// always lands itself, whatever its context (owner ruling, 2026-10-31).
+func (s CreateSpec) OwnerLands() bool {
+	return wsm.OwnerLands(s.lacksParentContext(), s.OneShot)
 }
 
 // forkedElsewhere reports whether the conversation is forked from a workspace
@@ -1335,14 +1343,9 @@ func (v *verbs) checkDerivation(ctx context.Context, log dlog.Logger, spec Creat
 				map[string]any{"workspace": &workspacev1.WorkspaceRef{Id: string(*spec.ForkFrom)}})
 		}
 	}
-	// WHO LANDS A CHILD: a child that does not carry its owner's context is
-	// the owner's to land, so it must tell the owner what is coming, and it
-	// cannot be a one-shot, which lands itself.
-	if spec.OwnerLands() && spec.OneShot {
-		return refuseWith(log, "CreateWorkspace", ArmOneShotOwnerLands,
-			"a one-shot lands itself, and a child that does not fork its owner's context is landed by its owner", false,
-			map[string]any{"owner": &workspacev1.WorkspaceRef{Id: string(*spec.Parent)}})
-	}
+	// WHO LANDS A CHILD: a child that is not a one-shot and does not carry its
+	// owner's context is the owner's to land, so it must tell the owner what
+	// is coming. A one-shot lands itself, so it never carries a notice.
 	if spec.OwnerLands() && strings.TrimSpace(spec.OwnerNotice) == "" {
 		return refuse(log, "CreateWorkspace", ArmOwnerNoticeRequired,
 			"a child that does not fork its owner's context must carry a notice to its owner", false)

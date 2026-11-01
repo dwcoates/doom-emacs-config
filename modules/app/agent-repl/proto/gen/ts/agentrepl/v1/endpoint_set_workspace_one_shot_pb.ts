@@ -28,9 +28,10 @@
 // nothing. A brief that cannot be composed fails the unmark with nothing
 // changed.
 //
-// A CHILD ITS OWNER LANDS IS NEVER A ONE-SHOT: landing it is its owner's act,
-// so marking one is refused (`owner_lands`), as creating one is
-// (CreateWorkspaceError.one_shot_owner_lands).
+// A ONE-SHOT ALWAYS LANDS ITSELF, whatever its context: any created workspace
+// may be marked, a child included. Marking a child whose context is not forked
+// from its parent makes it land itself while it stays a one-shot; unmarking it
+// hands its landing back to its parent (WorkspaceStatusOwner.owner_lands).
 //
 // A REPOSITORY'S MAIN WORKSPACE IS NEVER A ONE-SHOT: the workspace on the
 // repository's main checkout sits on the main branch, lands nothing itself and
@@ -55,7 +56,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_set_workspace_one_shot.proto.
  */
 export const file_agentrepl_v1_endpoint_set_workspace_one_shot: GenFile = /*@__PURE__*/
-  fileDesc("CjJhZ2VudHJlcGwvdjEvZW5kcG9pbnRfc2V0X3dvcmtzcGFjZV9vbmVfc2hvdC5wcm90bxIMYWdlbnRyZXBsLnYxIpIBChpTZXRXb3Jrc3BhY2VPbmVTaG90UmVxdWVzdBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmEjMKCXJlcXVlc3RlchgCIAEoCzIgLmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VSZXF1ZXN0ZXISEAoIb25lX3Nob3QYAyABKAginQEKG1NldFdvcmtzcGFjZU9uZVNob3RSZXNwb25zZRI7CgdzdWNjZXNzGAEgASgLMiguYWdlbnRyZXBsLnYxLlNldFdvcmtzcGFjZU9uZVNob3RTdWNjZXNzSAASNwoFZXJyb3IYAiABKAsyJi5hZ2VudHJlcGwudjEuU2V0V29ya3NwYWNlT25lU2hvdEVycm9ySABCCAoGcmVzdWx0InEKGlNldFdvcmtzcGFjZU9uZVNob3RTdWNjZXNzEiEKFGNvbXBsZXRpb25fZGlyZWN0aXZlGAEgASgJSACIAQESFwoPcm9zdGVyX3JldmlzaW9uGAIgASgEQhcKFV9jb21wbGV0aW9uX2RpcmVjdGl2ZSLMBAoYU2V0V29ya3NwYWNlT25lU2hvdEVycm9yEk4KEXVua25vd25fd29ya3NwYWNlGAEgASgLMjEuYWdlbnRyZXBsLnYxLlNldFdvcmtzcGFjZU9uZVNob3RVbmtub3duV29ya3NwYWNlSAASVwoWd29ya3NwYWNlX3JlZl9taXNtYXRjaBgCIAEoCzI1LmFnZW50cmVwbC52MS5TZXRXb3Jrc3BhY2VPbmVTaG90V29ya3NwYWNlUmVmTWlzbWF0Y2hIABI5CgZjbG9zZWQYAyABKAsyJy5hZ2VudHJlcGwudjEuU2V0V29ya3NwYWNlT25lU2hvdENsb3NlZEgAEkkKD25vX2NyZWF0aW9uX2pvYhgEIAEoCzIuLmFnZW50cmVwbC52MS5TZXRXb3Jrc3BhY2VPbmVTaG90Tm9DcmVhdGlvbkpvYkgAEkIKC293bmVyX2xhbmRzGAUgASgLMisuYWdlbnRyZXBsLnYxLlNldFdvcmtzcGFjZU9uZVNob3RPd25lckxhbmRzSAASVAoVcmVxdWVzdGVyX21heV9ub3Rfc2V0GAYgASgLMjMuYWdlbnRyZXBsLnYxLlNldFdvcmtzcGFjZU9uZVNob3RSZXF1ZXN0ZXJNYXlOb3RTZXRIABJICg5tYWluX3dvcmtzcGFjZRgIIAEoCzIuLmFnZW50cmVwbC52MS5TZXRXb3Jrc3BhY2VPbmVTaG90TWFpbldvcmtzcGFjZUgAQgcKBWNhdXNlSgQIBxAIUg5wb2xpY3lfbWlzc2luZyIlCiNTZXRXb3Jrc3BhY2VPbmVTaG90VW5rbm93bldvcmtzcGFjZSI/CidTZXRXb3Jrc3BhY2VPbmVTaG90V29ya3NwYWNlUmVmTWlzbWF0Y2gSFAoMcmVnaXN0cnlfZGlyGAEgASgJIhsKGVNldFdvcmtzcGFjZU9uZVNob3RDbG9zZWQiIgogU2V0V29ya3NwYWNlT25lU2hvdE5vQ3JlYXRpb25Kb2IiSgodU2V0V29ya3NwYWNlT25lU2hvdE93bmVyTGFuZHMSKQoFb3duZXIYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmIicKJVNldFdvcmtzcGFjZU9uZVNob3RSZXF1ZXN0ZXJNYXlOb3RTZXQiIgogU2V0V29ya3NwYWNlT25lU2hvdE1haW5Xb3Jrc3BhY2VCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_agentrepl_v1_workspace_topology, file_workspace_v1_workspace]);
+  fileDesc("CjJhZ2VudHJlcGwvdjEvZW5kcG9pbnRfc2V0X3dvcmtzcGFjZV9vbmVfc2hvdC5wcm90bxIMYWdlbnRyZXBsLnYxIpIBChpTZXRXb3Jrc3BhY2VPbmVTaG90UmVxdWVzdBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmEjMKCXJlcXVlc3RlchgCIAEoCzIgLmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VSZXF1ZXN0ZXISEAoIb25lX3Nob3QYAyABKAginQEKG1NldFdvcmtzcGFjZU9uZVNob3RSZXNwb25zZRI7CgdzdWNjZXNzGAEgASgLMiguYWdlbnRyZXBsLnYxLlNldFdvcmtzcGFjZU9uZVNob3RTdWNjZXNzSAASNwoFZXJyb3IYAiABKAsyJi5hZ2VudHJlcGwudjEuU2V0V29ya3NwYWNlT25lU2hvdEVycm9ySABCCAoGcmVzdWx0InEKGlNldFdvcmtzcGFjZU9uZVNob3RTdWNjZXNzEiEKFGNvbXBsZXRpb25fZGlyZWN0aXZlGAEgASgJSACIAQESFwoPcm9zdGVyX3JldmlzaW9uGAIgASgEQhcKFV9jb21wbGV0aW9uX2RpcmVjdGl2ZSKbBAoYU2V0V29ya3NwYWNlT25lU2hvdEVycm9yEk4KEXVua25vd25fd29ya3NwYWNlGAEgASgLMjEuYWdlbnRyZXBsLnYxLlNldFdvcmtzcGFjZU9uZVNob3RVbmtub3duV29ya3NwYWNlSAASVwoWd29ya3NwYWNlX3JlZl9taXNtYXRjaBgCIAEoCzI1LmFnZW50cmVwbC52MS5TZXRXb3Jrc3BhY2VPbmVTaG90V29ya3NwYWNlUmVmTWlzbWF0Y2hIABI5CgZjbG9zZWQYAyABKAsyJy5hZ2VudHJlcGwudjEuU2V0V29ya3NwYWNlT25lU2hvdENsb3NlZEgAEkkKD25vX2NyZWF0aW9uX2pvYhgEIAEoCzIuLmFnZW50cmVwbC52MS5TZXRXb3Jrc3BhY2VPbmVTaG90Tm9DcmVhdGlvbkpvYkgAElQKFXJlcXVlc3Rlcl9tYXlfbm90X3NldBgGIAEoCzIzLmFnZW50cmVwbC52MS5TZXRXb3Jrc3BhY2VPbmVTaG90UmVxdWVzdGVyTWF5Tm90U2V0SAASSAoObWFpbl93b3Jrc3BhY2UYCCABKAsyLi5hZ2VudHJlcGwudjEuU2V0V29ya3NwYWNlT25lU2hvdE1haW5Xb3Jrc3BhY2VIAEIHCgVjYXVzZUoECAcQCEoECAUQBlIOcG9saWN5X21pc3NpbmdSC293bmVyX2xhbmRzIiUKI1NldFdvcmtzcGFjZU9uZVNob3RVbmtub3duV29ya3NwYWNlIj8KJ1NldFdvcmtzcGFjZU9uZVNob3RXb3Jrc3BhY2VSZWZNaXNtYXRjaBIUCgxyZWdpc3RyeV9kaXIYASABKAkiGwoZU2V0V29ya3NwYWNlT25lU2hvdENsb3NlZCIiCiBTZXRXb3Jrc3BhY2VPbmVTaG90Tm9DcmVhdGlvbkpvYiInCiVTZXRXb3Jrc3BhY2VPbmVTaG90UmVxdWVzdGVyTWF5Tm90U2V0IiIKIFNldFdvcmtzcGFjZU9uZVNob3RNYWluV29ya3NwYWNlQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_agentrepl_v1_workspace_topology, file_workspace_v1_workspace]);
 
 /**
  * @generated from message agentrepl.v1.SetWorkspaceOneShotRequest
@@ -208,14 +209,6 @@ export type SetWorkspaceOneShotError = Message<"agentrepl.v1.SetWorkspaceOneShot
     case: "noCreationJob";
   } | {
     /**
-     * The workspace is a child its owner lands. Nothing was changed.
-     *
-     * @generated from field: agentrepl.v1.SetWorkspaceOneShotOwnerLands owner_lands = 5;
-     */
-    value: SetWorkspaceOneShotOwnerLands;
-    case: "ownerLands";
-  } | {
-    /**
      * The requester is neither the workspace, nor its owner, nor the user.
      *
      * @generated from field: agentrepl.v1.SetWorkspaceOneShotRequesterMayNotSet requester_may_not_set = 6;
@@ -301,25 +294,6 @@ export const SetWorkspaceOneShotNoCreationJobSchema: GenMessage<SetWorkspaceOneS
   messageDesc(file_agentrepl_v1_endpoint_set_workspace_one_shot, 7);
 
 /**
- * @generated from message agentrepl.v1.SetWorkspaceOneShotOwnerLands
- */
-export type SetWorkspaceOneShotOwnerLands = Message<"agentrepl.v1.SetWorkspaceOneShotOwnerLands"> & {
-  /**
-   * The owner, which lands the workspace.
-   *
-   * @generated from field: workspace.v1.WorkspaceRef owner = 1;
-   */
-  owner?: WorkspaceRef | undefined;
-};
-
-/**
- * Describes the message agentrepl.v1.SetWorkspaceOneShotOwnerLands.
- * Use `create(SetWorkspaceOneShotOwnerLandsSchema)` to create a new message.
- */
-export const SetWorkspaceOneShotOwnerLandsSchema: GenMessage<SetWorkspaceOneShotOwnerLands> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_set_workspace_one_shot, 8);
-
-/**
  * @generated from message agentrepl.v1.SetWorkspaceOneShotRequesterMayNotSet
  */
 export type SetWorkspaceOneShotRequesterMayNotSet = Message<"agentrepl.v1.SetWorkspaceOneShotRequesterMayNotSet"> & {
@@ -330,7 +304,7 @@ export type SetWorkspaceOneShotRequesterMayNotSet = Message<"agentrepl.v1.SetWor
  * Use `create(SetWorkspaceOneShotRequesterMayNotSetSchema)` to create a new message.
  */
 export const SetWorkspaceOneShotRequesterMayNotSetSchema: GenMessage<SetWorkspaceOneShotRequesterMayNotSet> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_set_workspace_one_shot, 9);
+  messageDesc(file_agentrepl_v1_endpoint_set_workspace_one_shot, 8);
 
 /**
  * A mark on a repository's main workspace. Empty: the arm is the whole
@@ -346,5 +320,5 @@ export type SetWorkspaceOneShotMainWorkspace = Message<"agentrepl.v1.SetWorkspac
  * Use `create(SetWorkspaceOneShotMainWorkspaceSchema)` to create a new message.
  */
 export const SetWorkspaceOneShotMainWorkspaceSchema: GenMessage<SetWorkspaceOneShotMainWorkspace> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_set_workspace_one_shot, 10);
+  messageDesc(file_agentrepl_v1_endpoint_set_workspace_one_shot, 9);
 

@@ -105,7 +105,10 @@ export function workspaceSection(workspaceName: string): string {
  * standing the daemon states at StartSession
  * (`shim.v1.SessionProfileAgent.standing`); the main workspace's rules are
  * what an agent there must not get wrong (it lands nothing, is never a
- * one-shot, and splits work off into created workspaces).
+ * one-shot, and splits work off into created workspaces). The main
+ * workspace's notice is also the ONE HOME of how a main workspace dispatches
+ * work (children cut from the main branch, one-shots and fresh contexts by
+ * preference); the metaprompt points here rather than restating it.
  */
 export function standingSection(standing: WorkspaceStanding): string {
   switch (standing) {
@@ -113,7 +116,12 @@ export function standingSection(standing: WorkspaceStanding): string {
       return (
         "This workspace is its repository's MAIN workspace: it sits on the repository's main checkout, on the main branch. " +
         "It lands nothing itself and is never a one-shot (`agent-repld workspace set here -one-shot` is refused), " +
-        "so separate work is split off into created workspaces (`agent-repld workspace create`), which land their own work."
+        "so separate work is split off into created workspaces (`agent-repld workspace create`), which land their own work. " +
+        "It dispatches that work as its children, cut from the main branch and landing into it asynchronously " +
+        "(`-relationship child -parent here -lands-into main`), one-shots (`-one-shot`) by preference. " +
+        "A child starts with a fresh context and a self-contained prompt carrying everything it needs (`-context fresh`) by default; " +
+        "it forks this workspace's long conversation (`-context fork -fork here`) only when it truly needs that conversation. " +
+        "A fresh child that is not a one-shot is this workspace's to land (`agent-repld workspace finished CHILD`), so its create carries `-owner-notice`."
       );
     case "linked_workspace":
       return (

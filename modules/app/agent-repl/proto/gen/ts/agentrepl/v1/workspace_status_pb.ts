@@ -244,7 +244,9 @@ export type WorkspaceStatusOwner = Message<"agentrepl.v1.WorkspaceStatusOwner"> 
 
   /**
    * TRUE when the owner arbitrates and lands this workspace's work, because
-   * its context was not forked from the owner; FALSE when it lands itself.
+   * it is not a one-shot and its context was not forked from the owner; FALSE
+   * when it lands itself. Marking or unmarking the workspace a one-shot
+   * changes it.
    *
    * @generated from field: bool owner_lands = 2;
    */

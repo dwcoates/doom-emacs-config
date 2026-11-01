@@ -146,6 +146,28 @@ describe("this repository's committed metaprompt", () => {
     expect(text).toContain("A shell command for the user to run is always its own fenced block, opened with ```bash");
     expect(text).toContain("The block holds exactly ONE runnable command");
   });
+
+  it("dispatches a handed failure's fix with a command valid from any repository", () => {
+    // Arrange
+    const home = homeOnThisRepository();
+    // Act
+    const text = readMetaprompt(home) ?? "";
+    // Assert — a fork never crosses repositories, so the other-repository
+    // command is fresh and names its repository.
+    expect(text).toContain("`agent-repld workspace create -relationship child -parent here -lands-into main -context fork -fork here -one-shot -prompt <the fix>`");
+    expect(text).toContain("`agent-repld workspace create -repository <repository> -relationship child -parent here -lands-into main -context fresh -one-shot -prompt <the fix>`");
+    expect(text).not.toContain("-repository <repository> -relationship child -parent here -lands-into main -context fork");
+  });
+
+  it("points a main workspace at its standing notice rather than restating how it dispatches work", () => {
+    // Arrange
+    const home = homeOnThisRepository();
+    // Act
+    const text = readMetaprompt(home) ?? "";
+    // Assert
+    expect(text).toContain("How a main workspace dispatches work is the notice that ends its system prompt.");
+    expect(text).not.toContain("only when it truly needs that conversation");
+  });
 });
 
 describe("systemPromptOption", () => {
@@ -207,6 +229,17 @@ describe("the standing notice", () => {
     expect(section).toContain("its repository's MAIN workspace");
     expect(section).toContain("It lands nothing itself and is never a one-shot");
     expect(section).toContain("`agent-repld workspace create`");
+  });
+
+  it("tells a main workspace to dispatch fresh one-shot children cut from the main branch", () => {
+    // Act
+    const section = standingSection("main_workspace");
+    // Assert
+    expect(section).toContain("`-relationship child -parent here -lands-into main`");
+    expect(section).toContain("one-shots (`-one-shot`) by preference");
+    expect(section).toContain("(`-context fresh`) by default");
+    expect(section).toContain("only when it truly needs that conversation");
+    expect(section).toContain("`-owner-notice`");
   });
 
   it("tells a linked worktree it is not the main workspace and lands its own work", () => {

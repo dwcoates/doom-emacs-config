@@ -34,7 +34,7 @@ func TestRegisterWorkspaceRecordsItsDerivation(t *testing.T) {
 			// Arrange
 			s, _ := testStore(t)
 			f := newParentFamily(t, s, "owner", "source", "asker")
-			facts := RegisterFacts{OwnerLands: tc.ownerLands}
+			facts := RegisterFacts{LacksParentContext: tc.ownerLands}
 			if tc.withParent {
 				id := f.byName["owner"].ID
 				facts.Parent = &id
@@ -78,7 +78,7 @@ func TestRegisterWorkspaceRefusesAnOwnerLandedWorkspaceWithNoOwner(t *testing.T)
 	f := newParentFamily(t, s, "other")
 
 	// Act
-	_, err := registerDerived(t, s, f.repoDir, "orphan", RegisterFacts{OwnerLands: true})
+	_, err := registerDerived(t, s, f.repoDir, "orphan", RegisterFacts{LacksParentContext: true})
 
 	// Assert
 	if err == nil {
@@ -86,6 +86,102 @@ func TestRegisterWorkspaceRefusesAnOwnerLandedWorkspaceWithNoOwner(t *testing.T)
 	}
 	if n := scalar[int](t, s, `SELECT COUNT(*) FROM workspaces WHERE name = 'orphan'`); n != 0 {
 		t.Errorf("rows named orphan = %d, want 0", n)
+	}
+}
+
+func TestRegisterWorkspaceAnswersAOneShotChildLandingItself(t *testing.T) {
+	tests := []struct {
+		name    string
+		oneShot bool
+		want    bool
+	}{
+		{name: "a child lacking its owner's context that is no one-shot is its owner's to land", want: true},
+		{name: "a one-shot child lacking its owner's context lands itself", oneShot: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			f := newParentFamily(t, s, "owner")
+			owner := f.byName["owner"].ID
+
+			// Act
+			ws, err := registerDerived(t, s, f.repoDir, "derived", RegisterFacts{Parent: &owner, LacksParentContext: true, OneShot: tc.oneShot})
+
+			// Assert
+			if err != nil {
+				t.Fatalf("RegisterWorkspace: %v", err)
+			}
+			if ws.OwnerLands != tc.want || ws.OneShot != tc.oneShot {
+				t.Errorf("answered OwnerLands = %v, OneShot = %v; want %v, %v", ws.OwnerLands, ws.OneShot, tc.want, tc.oneShot)
+			}
+		})
+	}
+}
+
+// TestOwnerLandsFollowsTheOneShotMark pins that who lands a child lacking its
+// owner's context is read off the one-shot mark, so each write of the mark
+// moves it with nothing else written.
+func TestOwnerLandsFollowsTheOneShotMark(t *testing.T) {
+	// Arrange: one fresh child of its owner, with a creation job to mark.
+	s, _ := testStore(t)
+	f := newParentFamily(t, s, "owner")
+	owner := f.byName["owner"].ID
+	ws, err := registerDerived(t, s, f.repoDir, "derived", RegisterFacts{Parent: &owner, LacksParentContext: true})
+	if err != nil {
+		t.Fatalf("RegisterWorkspace: %v", err)
+	}
+	if err := s.PutCreationJob(context.Background(), CreationJob{Workspace: ws.ID, Layout: MergeLayout{SourceBranch: ws.Branch, SourceDir: ws.Dir, TargetDir: ws.Dir}}); err != nil {
+		t.Fatalf("PutCreationJob: %v", err)
+	}
+	steps := []struct {
+		name    string
+		oneShot bool
+		want    bool
+	}{
+		{name: "marked a one-shot, it lands itself", oneShot: true, want: false},
+		{name: "unmarked, its owner lands it again", oneShot: false, want: true},
+	}
+	for _, step := range steps {
+		t.Run(step.name, func(t *testing.T) {
+			// Act
+			if err := s.SetOneShot(context.Background(), ws.ID, step.oneShot); err != nil {
+				t.Fatalf("SetOneShot(%v): %v", step.oneShot, err)
+			}
+			got, err := s.Workspace(context.Background(), ws.ID)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("Workspace: %v", err)
+			}
+			if got.OwnerLands != step.want {
+				t.Errorf("OwnerLands = %v, want %v", got.OwnerLands, step.want)
+			}
+		})
+	}
+}
+
+func TestOwnerLands(t *testing.T) {
+	tests := []struct {
+		name                        string
+		lacksParentContext, oneShot bool
+		want                        bool
+	}{
+		{name: "a child lacking its owner's context is its owner's to land", lacksParentContext: true, want: true},
+		{name: "a one-shot lacking its owner's context lands itself", lacksParentContext: true, oneShot: true},
+		{name: "a workspace carrying its owner's context lands itself"},
+		{name: "a one-shot carrying its owner's context lands itself", oneShot: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got := OwnerLands(tc.lacksParentContext, tc.oneShot)
+
+			// Assert
+			if got != tc.want {
+				t.Errorf("OwnerLands(%v, %v) = %v, want %v", tc.lacksParentContext, tc.oneShot, got, tc.want)
+			}
+		})
 	}
 }
 

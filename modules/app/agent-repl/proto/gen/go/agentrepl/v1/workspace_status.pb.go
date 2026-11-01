@@ -388,7 +388,9 @@ type WorkspaceStatusOwner struct {
 	// The owning workspace: the child's parent.
 	Workspace *v1.WorkspaceRef `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
 	// TRUE when the owner arbitrates and lands this workspace's work, because
-	// its context was not forked from the owner; FALSE when it lands itself.
+	// it is not a one-shot and its context was not forked from the owner; FALSE
+	// when it lands itself. Marking or unmarking the workspace a one-shot
+	// changes it.
 	OwnerLands    bool `protobuf:"varint,2,opt,name=owner_lands,json=ownerLands,proto3" json:"owner_lands,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

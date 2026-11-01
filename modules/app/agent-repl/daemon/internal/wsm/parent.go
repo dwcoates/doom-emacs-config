@@ -371,10 +371,11 @@ func readTarget(ctx context.Context, tx *sql.Tx, id WorkspaceID) (storedTarget, 
 // left with no parent stores the subsection it sat in until now, so it stays
 // where it was drawn.
 //
-// WHO LANDS THE WORKSPACE IS RE-DECIDED WITH ITS OWNER: a child its new owner
-// did not lend its context to is the owner's to land, and a workspace with no
-// owner lands itself (owner_lands, derivation.go). A merge workspace keeps its
-// own: its owner is its requester, which never lands it.
+// WHO LANDS THE WORKSPACE IS RE-DECIDED WITH ITS OWNER: the stored context
+// half (owner_lands, derivation.go) records whether its new owner lent it its
+// context, and a workspace with no owner lands itself. A one-shot lands itself
+// whatever the column says (OwnerLands). A merge workspace keeps its own: its
+// owner is its requester, which never lands it.
 //
 // All in the same statement as the parent, evaluated against the row as it
 // stood.

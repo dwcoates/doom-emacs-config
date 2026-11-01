@@ -57,6 +57,39 @@ func TestSetOneShotMarksAndAnswersTheDirective(t *testing.T) {
 	}
 }
 
+// TestSetOneShotMarksAChildItsOwnerWouldLand pins the owner ruling of
+// 2026-10-31: a one-shot always lands itself, so a fresh child its owner would
+// otherwise land is marked like any other workspace.
+func TestSetOneShotMarksAChildItsOwnerWouldLand(t *testing.T) {
+	tests := []struct {
+		name  string
+		asker *ids.WorkspaceID
+	}{
+		{name: "asked by the child itself", asker: idOf("w1")},
+		{name: "asked by its owner", asker: idOf("ws-owner")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := standingWorkspace(t)
+			ws := f.db.workspaces["w1"]
+			ws.OwnerLands = true
+			f.db.with(ws)
+
+			// Act
+			directive, err := f.verbs.SetOneShot(context.Background(), "w1", tt.asker, true)
+
+			// Assert
+			if err != nil || directive != completionDirectiveLead+"DIRECTIVE" {
+				t.Fatalf("SetOneShot = %q, %v; want the completion directive", directive, err)
+			}
+			if !f.db.jobs["w1"].OneShot {
+				t.Error("the creation job is not marked a one-shot")
+			}
+		})
+	}
+}
+
 func TestSetOneShotUnmarksWithNoDirective(t *testing.T) {
 	// Arrange
 	f := standingWorkspace(t)
@@ -86,11 +119,6 @@ func TestSetOneShotRefuses(t *testing.T) {
 			f.db.with(ws)
 		}, arm: ArmClosed},
 		{name: "a stranger asking", arrange: func(*fixture) {}, asker: idOf("ws-stranger"), arm: ArmRequesterMayNotSet},
-		{name: "a child its owner lands", arrange: func(f *fixture) {
-			ws := f.db.workspaces["w1"]
-			ws.OwnerLands = true
-			f.db.with(ws)
-		}, arm: ArmOwnerLands},
 		{name: "a registered workspace", arrange: func(f *fixture) { delete(f.db.jobs, "w1") }, arm: ArmNoCreationJob},
 		{name: "its repository's main workspace", arrange: asMainWorkspace, arm: ArmMainWorkspace},
 		{name: "its repository's main workspace, asked by a stranger", arrange: asMainWorkspace, asker: idOf("ws-stranger"), arm: ArmMainWorkspace},

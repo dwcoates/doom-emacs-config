@@ -106,8 +106,6 @@ const (
 	ArmOwnerNoticeRequired = "owner_notice_required"
 	// ArmOwnerNoticeUnexpected is a notice on a child that lands itself.
 	ArmOwnerNoticeUnexpected = "owner_notice_unexpected"
-	// ArmOneShotOwnerLands is a one-shot child its owner would have to land.
-	ArmOneShotOwnerLands = "one_shot_owner_lands"
 	// ArmUnknownRepository is a creation naming a repository the daemon
 	// cannot act in. The registry may still hold the row -- what it names is
 	// gone from disk, which is the same answer to the client as a ref that

@@ -2237,7 +2237,7 @@ and the temporary root it carries."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_create_workspace.pb.go" "CreateWorkspaceError")
                        #'string<)
-                 (sort (list "ungatedWithoutConsent" "noSlug" "briefMissing" "unknownRepository" "worktreeCreationFailed" "spawnFailed" "oneShotPolicyMissing" "namingFailed" "insideTemporaryDirectory" "unknownForkSource" "forkSourceHasNoConversation" "nameReserved" "nameHeld" "invalidName" "unknownContextWorkspace" "unknownOwner" "ownerNoticeRequired" "ownerNoticeUnexpected" "oneShotOwnerLands" "unknownRequester" "asyncMergeUnknownBranch" "asyncMergeBranchOwned" "asyncMergeUnknownSubagent" "asyncMergeUnknownMaker" "asyncMergeContextNotMaker" "asyncMergeNameTaken" "asyncMergeUnknownCloseAfter" "opIdWithAsyncMerge" "versionIncrementRequired" "versionIncrementUnexpected" "asyncMergeRequesterQueued" "asyncMergeRequesterMerging" "asyncMergeRequesterSessionDeleted" "parentNotOpen" "originFetchFailed" "asyncMergeNoDeployConfig" "asyncMergeDeployConfigInvalid" "transferringAway" "standingDown" "placementBehindNotInLine" "unknownLandingTarget")
+                 (sort (list "ungatedWithoutConsent" "noSlug" "briefMissing" "unknownRepository" "worktreeCreationFailed" "spawnFailed" "oneShotPolicyMissing" "namingFailed" "insideTemporaryDirectory" "unknownForkSource" "forkSourceHasNoConversation" "nameReserved" "nameHeld" "invalidName" "unknownContextWorkspace" "unknownOwner" "ownerNoticeRequired" "ownerNoticeUnexpected" "unknownRequester" "asyncMergeUnknownBranch" "asyncMergeBranchOwned" "asyncMergeUnknownSubagent" "asyncMergeUnknownMaker" "asyncMergeContextNotMaker" "asyncMergeNameTaken" "asyncMergeUnknownCloseAfter" "opIdWithAsyncMerge" "versionIncrementRequired" "versionIncrementUnexpected" "asyncMergeRequesterQueued" "asyncMergeRequesterMerging" "asyncMergeRequesterSessionDeleted" "parentNotOpen" "originFetchFailed" "asyncMergeNoDeployConfig" "asyncMergeDeployConfigInvalid" "transferringAway" "standingDown" "placementBehindNotInLine" "unknownLandingTarget")
                        #'string<))))
 
 (ert-deftest agent-repl-test-wire-verbs-create-error-unknown-fork-source-arm ()
@@ -2289,14 +2289,6 @@ ref it names."
     (should (equal (agent-repl-wire-decode-create-workspace-error
                     (agent-repl-test-wire-verbs--parse "{\"ownerNoticeUnexpected\":{}}"))
                    '(:cause (:arm :owner-notice-unexpected :value nil))))))
-
-(ert-deftest agent-repl-test-wire-verbs-create-error-one-shot-owner-lands-arm ()
-  "CreateWorkspaceError's `one_shot_owner_lands' arm decodes the owner that lands."
-  (agent-repl-test-wire-verbs--with-common
-    (should (equal (agent-repl-wire-decode-create-workspace-error
-                    (agent-repl-test-wire-verbs--parse
-                     "{\"oneShotOwnerLands\":{\"owner\":{\"id\":\"ws-2\",\"dir\":\"/w/two\"}}}"))
-                   '(:cause (:arm :one-shot-owner-lands :value (:owner (:id "ws-2" :dir "/w/two"))))))))
 
 (ert-deftest agent-repl-test-wire-verbs-create-error-unknown-requester-arm ()
   "CreateWorkspaceError's `unknown_requester' arm decodes the requester it names."
@@ -6363,7 +6355,6 @@ instead diverges from it unseen."
                 agent-repl-wire-decode-create-workspace-unknown-context-workspace
                 agent-repl-wire-decode-create-workspace-fork-source-has-no-conversation
                 agent-repl-wire-decode-create-workspace-error-unknown-owner
-                agent-repl-wire-decode-create-workspace-error-one-shot-owner-lands
                 agent-repl-wire-decode-create-workspace-error-unknown-requester
                 agent-repl-wire-decode-finish-workspace-error-owner-lands))
     (should (string-match-p "agent-repl-wire-verbs--decode-ref-arm"

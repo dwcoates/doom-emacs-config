@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"agent-repld/internal/bounce"
@@ -165,33 +166,84 @@ func TestAHandedOverCreateIsNotReported(t *testing.T) {
 	}
 }
 
-func TestACreateRefusedForTheCallersInputIsNotReported(t *testing.T) {
-	cases := []struct {
-		name string
-		arm  string
-	}{
-		{name: "a name that breaks the naming rule", arm: ArmInvalidName},
-		{name: "a name another create or merge holds", arm: ArmNameReserved},
-		{name: "a promptless one-shot", arm: ArmNoSlug},
+// classifiedArms lists, sorted, the create refusal arms createRefusalArms
+// classifies WANT (true: the caller's input).
+func classifiedArms(want bool) []string {
+	var arms []string
+	for arm, callerInput := range createRefusalArms {
+		if callerInput == want {
+			arms = append(arms, arm)
+		}
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
+	slices.Sort(arms)
+	return arms
+}
+
+// TestCreateRefusalArmsClassifyEveryArm pins that the shared classification
+// names exactly the contract's CreateWorkspaceError arms, so a new arm fails
+// here until it is classified, rather than reaching the main worktree as a
+// failed create because nobody remembered to exclude it.
+func TestCreateRefusalArmsClassifyEveryArm(t *testing.T) {
+	// Arrange.
+	fields := (&agentreplv1.CreateWorkspaceError{}).ProtoReflect().Descriptor().Oneofs().ByName("cause").Fields()
+	var contract []string
+	for i := 0; i < fields.Len(); i++ {
+		contract = append(contract, string(fields.Get(i).Name()))
+	}
+	slices.Sort(contract)
+
+	// Act.
+	classified := append(classifiedArms(true), classifiedArms(false)...)
+	slices.Sort(classified)
+
+	// Assert.
+	if !slices.Equal(classified, contract) {
+		t.Fatalf("classified arms = %v\nwant every CreateWorkspaceError arm = %v", classified, contract)
+	}
+}
+
+func TestACreateRefusedForTheCallersInputIsNotReported(t *testing.T) {
+	for _, arm := range classifiedArms(true) {
+		t.Run(arm, func(t *testing.T) {
 			// Arrange.
 			f := newFixture(t)
 			spec := failingCreate(t, f, true)
 			v := f.verbs.(*verbs)
 
 			// Act.
-			v.reportCreateFailure(context.Background(), spec, fmt.Errorf("create: %w", &Refusal{Rpc: "CreateWorkspace", Arm: tc.arm}))
+			v.reportCreateFailure(context.Background(), spec, fmt.Errorf("create: %w", &Refusal{Rpc: "CreateWorkspace", Arm: arm}))
 			v.createFailureReports.Wait()
 
 			// Assert.
 			record, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelDebug, Operation: opCreateFailedReport})
-			if !ok || !strings.Contains(record.Message, "caller's own input") || record.Context["arm"] != tc.arm {
-				t.Fatalf("records = %+v, want the debug record naming arm %s", f.log.logger.Records(), tc.arm)
+			if !ok || !strings.Contains(record.Message, "caller's own input") || record.Context["arm"] != arm {
+				t.Fatalf("records = %+v, want the debug record naming arm %s", f.log.logger.Records(), arm)
 			}
 			if len(f.queue.submissions) != 0 || len(f.fleet.started) != 0 {
 				t.Fatalf("submissions = %+v, started = %v, want no report", f.queue.submissions, f.fleet.started)
+			}
+		})
+	}
+}
+
+func TestACreateRefusedForAFaultIsStillReported(t *testing.T) {
+	for _, arm := range classifiedArms(false) {
+		if arm == ArmTransferringAway {
+			continue // a handover, never reported (TestCreateHandedOver)
+		}
+		t.Run(arm, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			spec := failingCreate(t, f, true)
+			v := f.verbs.(*verbs)
+
+			// Act.
+			v.reportCreateFailure(context.Background(), spec, &Refusal{Rpc: "CreateWorkspace", Arm: arm, Reason: "a fault"})
+			v.createFailureReports.Wait()
+
+			// Assert.
+			if len(f.queue.submissions) != 1 || f.queue.submissions[0].WS != mainWorkspaceID {
+				t.Fatalf("submissions = %+v, want the one report to the main worktree", f.queue.submissions)
 			}
 		})
 	}
@@ -204,7 +256,7 @@ func TestAnyOtherRefusedCreateIsStillReported(t *testing.T) {
 	v := f.verbs.(*verbs)
 
 	// Act.
-	v.reportCreateFailure(context.Background(), spec, &Refusal{Rpc: "CreateWorkspace", Arm: ArmUnknownOwner, Reason: "no such owner"})
+	v.reportCreateFailure(context.Background(), spec, &Refusal{Rpc: "CreateWorkspace", Arm: ArmNamingFailed, Reason: "the naming call failed"})
 	v.createFailureReports.Wait()
 
 	// Assert.
@@ -226,6 +278,8 @@ func TestCallerInputRefusal(t *testing.T) {
 		{name: "an invalid_name refusal", err: &Refusal{Arm: ArmInvalidName}, wantArm: ArmInvalidName, want: true},
 		{name: "a wrapped name_reserved refusal", err: fmt.Errorf("create: %w", &Refusal{Arm: ArmNameReserved}), wantArm: ArmNameReserved, want: true},
 		{name: "a no_slug refusal", err: &Refusal{Arm: ArmNoSlug}, wantArm: ArmNoSlug, want: true},
+		{name: "an unknown_owner refusal", err: &Refusal{Arm: ArmUnknownOwner}, wantArm: ArmUnknownOwner, want: true},
+		{name: "a family rule's closed parent", err: fmt.Errorf("create: %w", &wsm.ParentNotOpenError{}), wantArm: "parent_not_open", want: true},
 		{name: "a refusal of something the daemon holds", err: &Refusal{Arm: ArmUnknownRepository}, want: false},
 		{name: "a naming call that failed", err: &Refusal{Arm: ArmNamingFailed}, want: false},
 		{name: "an internal failure", err: errors.New("fatal: worktree add failed"), want: false},
