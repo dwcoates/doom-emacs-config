@@ -101,7 +101,7 @@ const keepaliveTestInterval = 100 * time.Millisecond
 // reused verbatim from HandoverChainTimeout rather than a same-value twin —
 // see that constant's own doc comment (world_test.go). The shape matches:
 // a real shim spawn, a real Hibernate/KillSession round trip, and (for
-// TestRevivalAfterHibernate) a SECOND real StartSession(resume) spawn all
+// testRevivalAfterHibernate) a SECOND real StartSession(resume) spawn all
 // chain onto one budget, exactly "two real process lifecycles on one
 // budget".
 // ---------------------------------------------------------------------------
@@ -146,7 +146,7 @@ const (
 // mount-spawned session that is never prompted goes idle at
 // hibernationIdleCutoffMS like any other — so on a quiet box the sweep stands
 // that session down BEFORE the test has submitted anything. Observed, from
-// TestRevivalAfterHibernate's own sink on an idle host: "hibernated an idle
+// testRevivalAfterHibernate's own sink on an idle host: "hibernated an idle
 // session" at T+0.368s, "the session was engaged inside the cutoff" (the
 // prompt queue's engagement stamp, promptqueue/deliver.go's touchEngagement)
 // at T+0.522s. An unmarked wait for that message therefore matched a
@@ -263,7 +263,7 @@ func distinctTurnIDs(rows []*frontendv1.FeedRow) map[string]bool {
 // own (agent-shim/claude/shim/src/fake/index.ts, runVendorTurn).
 const fakeVendorTurnMessage = "fake vendor runs a turn of its OWN before the next send; nothing in it is stamped"
 
-// TestKeepAliveAnswerAfterVendorTurnNeverServed — the owner's leak of
+// testKeepAliveAnswerAfterVendorTurnNeverServed — the owner's leak of
 // 2026-09-23. The vendor ran a turn of its OWN (a background task's
 // notification) between the shim's keep-alive send and its answer; that
 // turn's result closed the keep-alive early, and the keep-alive's answer then
@@ -284,7 +284,7 @@ const fakeVendorTurnMessage = "fake vendor runs a turn of its OWN before the nex
 // seen to end in the feed proves every row the shim wrote before it — the
 // keep-alive's included — reached the store, because the shim writes in
 // order. Only then is absence asserted.
-func TestKeepAliveAnswerAfterVendorTurnNeverServed(t *testing.T) {
+func testKeepAliveAnswerAfterVendorTurnNeverServed(t *testing.T) {
 	// Arrange
 	w, ws, shimLog := keepaliveWorld(t)
 	queued := SubmitPrompt(t, w, ws, "!queue-vendor-turn")
@@ -316,7 +316,7 @@ func TestKeepAliveAnswerAfterVendorTurnNeverServed(t *testing.T) {
 	}
 }
 
-// TestKeepAliveStoresNothingOnEitherPlane — nothing of a keep-alive is stored
+// testKeepAliveStoresNothingOnEitherPlane — nothing of a keep-alive is stored
 // (2026-09-23). The shim drops every keep-alive-tagged entry at its writer's
 // door, and the sidecar skips the turn's transcript records by the marker plus
 // the transcript's promptId and parentUuid links, so the real store holds no
@@ -332,7 +332,7 @@ func TestKeepAliveAnswerAfterVendorTurnNeverServed(t *testing.T) {
 // be, since no read verb ever returns one.
 //
 // Seam: keepalive-marker
-func TestKeepAliveStoresNothingOnEitherPlane(t *testing.T) {
+func testKeepAliveStoresNothingOnEitherPlane(t *testing.T) {
 	// Arrange
 	w, ws, shimLog := keepaliveWorld(t)
 	projectDir := harness.ProjectDir(w.DefaultConfigDir, ws.GetDir())
@@ -378,7 +378,7 @@ func TestKeepAliveStoresNothingOnEitherPlane(t *testing.T) {
 	}
 }
 
-// TestPromptDuringKeepAliveTurnsOnce — a real prompt submitted the moment the
+// testPromptDuringKeepAliveTurnsOnce — a real prompt submitted the moment the
 // shim has sent its own keep-alive (2026-09-23). The keep-alive is invisible
 // outside the shim: a StartTurn landing while it runs waits INSIDE the shim and
 // opens its turn once the keep-alive leaves the slot, so the daemon sees no
@@ -389,7 +389,7 @@ func TestKeepAliveStoresNothingOnEitherPlane(t *testing.T) {
 // keep-alive or just after it is the vendor's timing, and every assertion here
 // holds either way: SubmitPrompt fails the test on any refusal, the turn must
 // end, and the feed must carry exactly the real turns, each once.
-func TestPromptDuringKeepAliveTurnsOnce(t *testing.T) {
+func testPromptDuringKeepAliveTurnsOnce(t *testing.T) {
 	// Arrange
 	w, ws, shimLog := keepaliveWorld(t)
 	turn1 := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "prose-streamed")
@@ -416,7 +416,7 @@ func TestPromptDuringKeepAliveTurnsOnce(t *testing.T) {
 	}
 }
 
-// TestRevivalAfterHibernate — SPEC.md #46. Contract: the yield obligation
+// testRevivalAfterHibernate — SPEC.md #46. Contract: the yield obligation
 // (docs/overhaul/shim.md: "a real prompt submitted after trailing keep-alive
 // turns → the served context excludes them") combined with daemon.md's
 // SPAWN-ON-MOUNT / implicit-revive-on-prompt hibernation policy: "before
@@ -442,8 +442,7 @@ func TestPromptDuringKeepAliveTurnsOnce(t *testing.T) {
 // hibernate/revive boundary carries exactly the two real turns, in order,
 // with nothing from the idle interval's real keep-alive activity leaking
 // onto it.
-func TestRevivalAfterHibernate(t *testing.T) {
-	t.Parallel()
+func testRevivalAfterHibernate(t *testing.T) {
 	// Arrange
 	w := NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{
 		// HibernationChainTimeout IS THIS WORLD'S BUDGET — the same reason
@@ -547,7 +546,7 @@ func TestRevivalAfterHibernate(t *testing.T) {
 }
 
 // TestSweepRecordSinceIgnoresARecordBeforeTheMark is the marking rule itself,
-// against the exact shape that made TestRevivalAfterHibernate's pass depend on
+// against the exact shape that made TestKeepAlive/RevivalAfterHibernate's pass depend on
 // how busy the box was: a "hibernated an idle session" record the daemon wrote
 // BEFORE the test acted (the mount-spawned session's own stand-down) must not
 // satisfy a wait for the hibernation of the session the test then ran a turn
@@ -606,7 +605,7 @@ func TestSweepRecordSinceIgnoresAnotherOperationAtTheSameMessage(t *testing.T) {
 	}
 }
 
-// TestRevivalRunsInTheSessionsModeNotTheSummarizers is the hibernation
+// testRevivalRunsInTheSessionsModeNotTheSummarizers is the hibernation
 // contract's own posture clause, and it is here because a headless sandbox
 // run caught it broken: after an idle-cutoff park and a revival, the
 // topbar read `plan` and the revived turn ran under plan mode, which nobody
@@ -626,9 +625,8 @@ func TestSweepRecordSinceIgnoresAnotherOperationAtTheSameMessage(t *testing.T) {
 // prose scenario echoes `[mode=<the mode the query is running under>]`
 // (`fake/scenarios/prose.ts`), so this reads what the resumed query actually
 // runs under rather than what a resolver decided to draw.
-func TestRevivalRunsInTheSessionsModeNotTheSummarizers(t *testing.T) {
-	t.Parallel()
-	// Arrange: the same world TestRevivalAfterHibernate declares, for the same
+func testRevivalRunsInTheSessionsModeNotTheSummarizers(t *testing.T) {
+	// Arrange: the same world TestKeepAlive/RevivalAfterHibernate declares, for the same
 	// reasons -- a compressed cutoff so the sweep really parks the session, and
 	// the chain budget because this drives two real process lifecycles.
 	w := NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{

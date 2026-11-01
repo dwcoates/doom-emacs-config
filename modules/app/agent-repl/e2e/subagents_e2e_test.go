@@ -174,7 +174,7 @@ func awaitSubagentSettled(t *testing.T, w *World, page *frontendv1.FeedPage, str
 // #27 — SubagentSyncNestedActivity.
 // ---------------------------------------------------------------------------
 
-// TestSubagentSyncNestedActivity drives the `subagent` scenario (prompt
+// testSubagentSyncNestedActivity drives the `subagent` scenario (prompt
 // "!subagent"; MANIFEST.md capture golden "subagent-sync-nested-activity",
 // 2026-09-01) — a synchronous Agent-tool spawn whose subagent reads a file
 // and reports back within the SAME turn. daemon.md "Identity, as the
@@ -187,8 +187,7 @@ func awaitSubagentSettled(t *testing.T, w *World, page *frontendv1.FeedPage, str
 // — never inlined as a second top-level row on the root feed.
 //
 // Seam: subagent-frames
-func TestSubagentSyncNestedActivity(t *testing.T) {
-	t.Parallel()
+func testSubagentSyncNestedActivity(t *testing.T) {
 	// Arrange.
 	w := SharedWorld(t)
 	ws := w.NewWorkspace(t)
@@ -278,7 +277,7 @@ func pageHasAgentPromptText(rows []*frontendv1.FeedRow, text string) bool {
 // #28 — SubagentDetached.
 // ---------------------------------------------------------------------------
 
-// TestSubagentDetached drives the `subagent-detached` scenario (prompt
+// testSubagentDetached drives the `subagent-detached` scenario (prompt
 // "!subagent-detached"; MANIFEST.md capture golden "subagent-detached",
 // 2026-09-02) — an Agent tool_use with run_in_background:true. The turn
 // concludes with an async-launch ack; the sweep's own completion (its
@@ -291,8 +290,7 @@ func pageHasAgentPromptText(rows []*frontendv1.FeedRow, text string) bool {
 // drawing").
 //
 // Seam: subagent-file
-func TestSubagentDetached(t *testing.T) {
-	t.Parallel()
+func testSubagentDetached(t *testing.T) {
 	// Arrange.
 	w := SharedWorld(t)
 	ws := w.NewWorkspace(t)
@@ -341,7 +339,7 @@ func TestSubagentDetached(t *testing.T) {
 // #30 — NestedSubagentHistoricalUsage.
 // ---------------------------------------------------------------------------
 
-// TestNestedSubagentHistoricalUsage drives `!usage-historical` (landed
+// testNestedSubagentHistoricalUsage drives `!usage-historical` (landed
 // addition, subagents.ts) — E2E-EVENT-INVENTORY.md remediation item 9.
 // UNGROUNDED, INVENTED per MANIFEST.md: "no capture in this manifest
 // carries a FILE-plane-only historical usage record ... attributed to a
@@ -360,8 +358,7 @@ func TestSubagentDetached(t *testing.T) {
 // facts, keyed by the spawning call's tool_use_id its `.meta.json` names.
 // The test asserts that figure, that the ordinary turn is undisturbed, and
 // that the daemon fabricates NO subagent bubble for the agent.
-func TestNestedSubagentHistoricalUsage(t *testing.T) {
-	t.Parallel()
+func testNestedSubagentHistoricalUsage(t *testing.T) {
 	// Arrange.
 	w := NewWorld(t, WorldOpts{})
 	ws := w.NewWorkspace(t)
@@ -444,7 +441,7 @@ func uhNestedBookUsage(t *testing.T, w *World) *conversationv1.TokenUsage {
 	return usages[0]
 }
 
-// TestSubagentBubbleFromAReplayIsStillAddressable — PROTO-CHANGES.md Landing
+// testSubagentBubbleFromAReplayIsStillAddressable — PROTO-CHANGES.md Landing
 // 12 (AgentSubagentSuccess.created_agent_id).
 //
 // A HISTORY REPLAY IS A SETTLED-ONLY DELIVERY, and that is not an accident of
@@ -459,8 +456,7 @@ func uhNestedBookUsage(t *testing.T, w *World) *conversationv1.TokenUsage {
 // TestSubagentBubbleIsDrawnOnceAndAddressesItsSubFeed and then bounces the
 // daemon exactly as #47 does (adColdBoot, adoption_e2e_test.go), so the only
 // thing under test is what the replay alone can draw.
-func TestSubagentBubbleFromAReplayIsStillAddressable(t *testing.T) {
-	t.Parallel()
+func testSubagentBubbleFromAReplayIsStillAddressable(t *testing.T) {
 	// Arrange: a real spawn, driven to completion so the store holds it.
 	w := NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{DurableState: true}})
 	w.ExpectWarnings("daemon.rollout.reconcile")
@@ -493,7 +489,7 @@ func TestSubagentBubbleFromAReplayIsStillAddressable(t *testing.T) {
 // !subagent-detached-hold — an interjection ends the turn, never the agent.
 // ---------------------------------------------------------------------------
 
-// TestSubagentDetachedSurvivesAnInterjection drives `!subagent-detached-hold`
+// testSubagentDetachedSurvivesAnInterjection drives `!subagent-detached-hold`
 // (subagents.ts): a detached agent is launched LIVE and the turn that spawned
 // it then holds until an interrupt lands. The owner's ruling ("an interrupt
 // only necessitates the interrupt of the synchronous TURN, not the detached
@@ -506,8 +502,7 @@ func TestSubagentBubbleFromAReplayIsStillAddressable(t *testing.T) {
 // only against a live agent, and the bubble then settles `cancelled`, the arm
 // a hand stop draws. An interrupt that had taken the agent down with the turn
 // would have settled it already, and the stop would be refused.
-func TestSubagentDetachedSurvivesAnInterjection(t *testing.T) {
-	t.Parallel()
+func testSubagentDetachedSurvivesAnInterjection(t *testing.T) {
 	// Arrange: the held turn, with its detached agent live beneath it.
 	w := SharedWorld(t)
 	ws := w.NewWorkspace(t)
@@ -556,7 +551,7 @@ func TestSubagentDetachedSurvivesAnInterjection(t *testing.T) {
 // !subagent-interleaved — a subagent streaming INTO the main agent's blocks.
 // ---------------------------------------------------------------------------
 
-// TestSubagentInterleavedResponsesStayOnTheirOwnFeeds drives
+// testSubagentInterleavedResponsesStayOnTheirOwnFeeds drives
 // `!subagent-interleaved` (subagents.ts): a detached agent's two whole
 // responses land BETWEEN the deltas of the main agent's open thinking block
 // and open text block. A fold that kept one block cursor for every agent would
@@ -567,8 +562,7 @@ func TestSubagentDetachedSurvivesAnInterjection(t *testing.T) {
 // turn draws exactly ONE thinking unit and exactly ONE answer, each whole and
 // the answer marked final; the subagent's own two responses reach its bubble's
 // sub-feed and never the root feed; and the bubble settles succeeded.
-func TestSubagentInterleavedResponsesStayOnTheirOwnFeeds(t *testing.T) {
-	t.Parallel()
+func testSubagentInterleavedResponsesStayOnTheirOwnFeeds(t *testing.T) {
 	// Arrange.
 	w := NewWorld(t, WorldOpts{})
 	ws := w.NewWorkspace(t)
@@ -641,15 +635,14 @@ func TestSubagentInterleavedResponsesStayOnTheirOwnFeeds(t *testing.T) {
 // Liveness is the vendor process's level (conversation.v1 SessionLiveWork).
 // ---------------------------------------------------------------------------
 
-// TestADetachedSubagentWhoseProcessDiedIsNotLiveAfterAColdBoot is the
+// testADetachedSubagentWhoseProcessDiedIsNotLiveAfterAColdBoot is the
 // 2026-10-07 regression end to end: a detached subagent the record shows
 // running, whose vendor process is gone, must not come back as live work when
 // a successor daemon replays the conversation. The subagent of
 // `!subagent-detached-utterance` never completes; the daemon is crashed and
 // its shim killed, so the successor's bring-up resumes the conversation in a
 // NEW vendor process that runs no such agent.
-func TestADetachedSubagentWhoseProcessDiedIsNotLiveAfterAColdBoot(t *testing.T) {
-	t.Parallel()
+func testADetachedSubagentWhoseProcessDiedIsNotLiveAfterAColdBoot(t *testing.T) {
 	// Arrange.
 	first := NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{DurableState: true}})
 	first.ExpectWarnings("daemon.rollout.reconcile")

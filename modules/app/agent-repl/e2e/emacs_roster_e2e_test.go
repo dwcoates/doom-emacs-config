@@ -31,14 +31,13 @@ import (
 // 26. RosterArmsPaintTheTabInOrder
 // ---------------------------------------------------------------------------
 
-// TestEmacsRosterArmsPaintTheTabInOrder is scenario 26.
+// testEmacsRosterArmsPaintTheTabInOrder is scenario 26.
 //
 // The arms are collected INSIDE Emacs on `agent-repl-roster-update-functions'
 // — the module's own per-push hook — rather than by polling a hash table from
 // Go. A poll samples; the hook sees every push, so a transient running arm
 // cannot be missed and the walk cannot be observed out of order.
-func TestEmacsRosterArmsPaintTheTabInOrder(t *testing.T) {
-	t.Parallel()
+func testEmacsRosterArmsPaintTheTabInOrder(t *testing.T) {
 	s := newEmacsScenario(t)
 	e := s.E
 	connectSession(t, s)
@@ -122,7 +121,7 @@ func TestEmacsRosterArmsPaintTheTabInOrder(t *testing.T) {
 // 27. UnknownRosterArmIsRefusedLoudly
 // ---------------------------------------------------------------------------
 
-// TestEmacsUnknownRosterArmIsRefusedLoudly is scenario 27.
+// testEmacsUnknownRosterArmIsRefusedLoudly is scenario 27.
 //
 // A daemon this suite owns cannot be made to push an undeclared arm — and it
 // must not be: the fake SDK is the sole writer of vendor files and no test
@@ -130,8 +129,7 @@ func TestEmacsRosterArmsPaintTheTabInOrder(t *testing.T) {
 // own decode entry point, `agent-repl-wire-decode-roster-row', which is the
 // documented ingress every push travels through. The claim is that it
 // REFUSES rather than defaulting to some fallback dot.
-func TestEmacsUnknownRosterArmIsRefusedLoudly(t *testing.T) {
-	t.Parallel()
+func testEmacsUnknownRosterArmIsRefusedLoudly(t *testing.T) {
 	s := newEmacsScenario(t)
 	e := s.E
 
@@ -164,7 +162,7 @@ func TestEmacsUnknownRosterArmIsRefusedLoudly(t *testing.T) {
 // 28. PermissionAskFiresTheAttentionMarker
 // ---------------------------------------------------------------------------
 
-// TestEmacsPermissionAskFiresTheAttentionMarker is scenario 28.
+// testEmacsPermissionAskFiresTheAttentionMarker is scenario 28.
 //
 // EMACS ANSWERS NOTHING. There is no permission-answering command in `lisp/'
 // — the notification policy is Emacs's whole reaction to an ask — so this
@@ -182,8 +180,7 @@ func TestEmacsUnknownRosterArmIsRefusedLoudly(t *testing.T) {
 //     host.el routes to `agent-repl-status-blink-tab'. A second workspace is
 //     registered and selected through the ordinary command so the first is
 //     genuinely unselected.
-func TestEmacsPermissionAskFiresTheAttentionMarker(t *testing.T) {
-	t.Parallel()
+func testEmacsPermissionAskFiresTheAttentionMarker(t *testing.T) {
 	box := requireSandbox(t)
 
 	// THE ORDER PROBLEM, and the gate that solves it. `agent-repl-send' —
@@ -260,7 +257,7 @@ func TestEmacsPermissionAskFiresTheAttentionMarker(t *testing.T) {
 // 29. UnfocusedTurnEndRaisesTheDaemonsBanner
 // ---------------------------------------------------------------------------
 
-// TestEmacsUnfocusedTurnEndRaisesTheDaemonsBanner is scenario 29.
+// testEmacsUnfocusedTurnEndRaisesTheDaemonsBanner is scenario 29.
 //
 // THE DAEMON POSTS EVERY DESKTOP BANNER, decided on the focus Emacs reports.
 // Under Xvfb the frame's focus is whatever the display says, so the scenario
@@ -269,8 +266,7 @@ func TestEmacsPermissionAskFiresTheAttentionMarker(t *testing.T) {
 // `after-focus-change-function' takes. The banner is then read off the
 // recorder the daemon's banner program is (AGENT_REPL_NOTIFIER_CMD), which
 // proves what the daemon posted without any host banner program existing.
-func TestEmacsUnfocusedTurnEndRaisesTheDaemonsBanner(t *testing.T) {
-	t.Parallel()
+func testEmacsUnfocusedTurnEndRaisesTheDaemonsBanner(t *testing.T) {
 	s := newEmacsScenario(t)
 	e := s.E
 	connectSession(t, s)
@@ -320,7 +316,7 @@ func TestEmacsUnfocusedTurnEndRaisesTheDaemonsBanner(t *testing.T) {
 // 30. DrainScheduleDrawsTheStandingBanner
 // ---------------------------------------------------------------------------
 
-// TestEmacsDrainScheduleDrawsTheStandingBanner is scenario 30.
+// testEmacsDrainScheduleDrawsTheStandingBanner is scenario 30.
 //
 // `agent-repl-daemon-shutdown-schedule' prompts for the reason through
 // `completing-read', so the pick is stubbed FOR THE DURATION OF THE ONE CALL
@@ -331,8 +327,7 @@ func TestEmacsUnfocusedTurnEndRaisesTheDaemonsBanner(t *testing.T) {
 // STRING, deliberately: the segment's own composition is the subject, and it
 // is the sanctioned exception to "never scrape human text where a variable
 // exists". The variable behind it (`agent-repl-link-drain') is asserted too.
-func TestEmacsDrainScheduleDrawsTheStandingBanner(t *testing.T) {
-	t.Parallel()
+func testEmacsDrainScheduleDrawsTheStandingBanner(t *testing.T) {
 	s := newEmacsScenario(t)
 	e := s.E
 

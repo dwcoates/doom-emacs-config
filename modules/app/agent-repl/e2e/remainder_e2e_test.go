@@ -199,11 +199,10 @@ func rmOpenAgentBook(t *testing.T, w *World, agent *conversationv1.AgentId) *sto
 	return page
 }
 
-// TestCronCreateSetsTheFootersCronsChip drives `!cron-create`, which creates a
+// testCronCreateSetsTheFootersCronsChip drives `!cron-create`, which creates a
 // job and leaves it standing, so the footer's ⏱ chip stays set once the turn
 // has ended: a state every footer reader is handed, however far behind.
-func TestCronCreateSetsTheFootersCronsChip(t *testing.T) {
-	t.Parallel()
+func testCronCreateSetsTheFootersCronsChip(t *testing.T) {
 	// Arrange.
 	w, ws := rmNewWorkspace(t)
 
@@ -236,7 +235,7 @@ func TestCronCreateSetsTheFootersCronsChip(t *testing.T) {
 // document and, when the vendor named a plan file, an edit target.
 // ===========================================================================
 
-// TestPlanModeCoalescesOntoOneBubble is the SAME turn as #85 asked the other
+// testPlanModeCoalescesOntoOneBubble is the SAME turn as #85 asked the other
 // way: feed.proto's FeedPlan says the daemon keys the enter and the exit onto
 // ONE FeedId, so a plan episode is ONE row in the feed no matter how many
 // plan-mode calls it took or how many planes reported them. A screenshot of
@@ -250,8 +249,7 @@ func TestCronCreateSetsTheFootersCronsChip(t *testing.T) {
 // everything they are going to deliver for this turn before the page is read.
 //
 // Seam: two-plane-episode
-func TestPlanModeCoalescesOntoOneBubble(t *testing.T) {
-	t.Parallel()
+func testPlanModeCoalescesOntoOneBubble(t *testing.T) {
 	// Arrange
 	w := SharedWorld(t)
 	ws := w.NewWorkspace(t)
@@ -279,14 +277,13 @@ func TestPlanModeCoalescesOntoOneBubble(t *testing.T) {
 	}
 }
 
-// TestPlanModeSettlesPlanned reads the plan bubble's state off the page AFTER
+// testPlanModeSettlesPlanned reads the plan bubble's state off the page AFTER
 // both planes have delivered, rather than waiting for a `planned` row to
 // appear at any moment. The difference is the whole defect: the sidecar's copy
 // of the turn arrives after the shim's, its `EnterPlanMode` last, and a bubble
 // that took that enter would go back to its PLANNING treatment with the plan
 // already presented. #85's wait passes either way.
-func TestPlanModeSettlesPlanned(t *testing.T) {
-	t.Parallel()
+func testPlanModeSettlesPlanned(t *testing.T) {
 	// Arrange
 	w, ws := rmNewWorkspace(t)
 
@@ -322,8 +319,7 @@ func TestPlanModeSettlesPlanned(t *testing.T) {
 // host's empty), so the board settles as unavailable for exactly that reason.
 // ===========================================================================
 
-func TestChessBoard(t *testing.T) {
-	t.Parallel()
+func testChessBoard(t *testing.T) {
 	// Arrange
 	w, ws := rmNewWorkspace(t)
 

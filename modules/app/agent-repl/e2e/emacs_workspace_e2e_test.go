@@ -351,7 +351,7 @@ func walkRosterRows(r *frontendv1.WorkspaceRoster, visit func(*frontendv1.Roster
 // #7 — CreateWorkspaceAppearsOnTheRoster
 // ---------------------------------------------------------------------------
 
-// TestEmacsCreateWorkspaceAppearsOnTheRoster is scenario 7: the DAEMON minted
+// testEmacsCreateWorkspaceAppearsOnTheRoster is scenario 7: the DAEMON minted
 // the identity and Emacs only reacted — a new row in
 // `agent-repl-roster--rows-by-id', and the name in BOTH
 // `agent-repl-roster--tab-order' and `agent-repl--ws-tabline-names'.
@@ -360,8 +360,7 @@ func walkRosterRows(r *frontendv1.WorkspaceRoster, visit func(*frontendv1.Roster
 // ref), so the binding is asserted as a LOOKUP and the command is then run
 // with its readers bound for the duration of the one call — the standard ERT
 // way, which keeps the command's own argument-collection code path.
-func TestEmacsCreateWorkspaceAppearsOnTheRoster(t *testing.T) {
-	t.Parallel()
+func testEmacsCreateWorkspaceAppearsOnTheRoster(t *testing.T) {
 	box := requireSandbox(t)
 	f := newEmacsWorkspaceFixture(t, box)
 	e := f.Emacs
@@ -425,15 +424,14 @@ func containsString(xs []string, want string) bool {
 // #8 — RegisterAnExistingDirectory
 // ---------------------------------------------------------------------------
 
-// TestEmacsRegisterAnExistingDirectory is scenario 8: `SPC TAB p' hands the
+// testEmacsRegisterAnExistingDirectory is scenario 8: `SPC TAB p' hands the
 // daemon a DIRECTORY and the daemon MINTS the identity.
 //
 // The claim that matters is the second half: `agent-repl-host--by-name' holds
 // a ref whose `:id' EMACS NEVER CONSTRUCTED. Register is one of Emacs's only
 // two workspace verbs, and everything else about the workspace the daemon
 // derives and pushes.
-func TestEmacsRegisterAnExistingDirectory(t *testing.T) {
-	t.Parallel()
+func testEmacsRegisterAnExistingDirectory(t *testing.T) {
 	box := requireSandbox(t)
 	f := newEmacsWorkspaceFixture(t, box)
 
@@ -463,7 +461,7 @@ func TestEmacsRegisterAnExistingDirectory(t *testing.T) {
 // #11 — CloseWithAHeldPromptDoesNotTearTheTabDown
 // ---------------------------------------------------------------------------
 
-// TestEmacsCloseWithAHeldPromptDoesNotTearTheTabDown is scenario 11.
+// testEmacsCloseWithAHeldPromptDoesNotTearTheTabDown is scenario 11.
 //
 // What Emacs OWES here is precisely to NOT ACT. Per elisp.md the refusal
 // manifests in the WEBAPP FOOTER, not in an Emacs dialog, so the assertion is
@@ -482,8 +480,7 @@ func TestEmacsRegisterAnExistingDirectory(t *testing.T) {
 // The turn is parked with the fake SDK's `!hold' scenario so the close is
 // genuinely refused rather than merely slow: the deferral is held against a
 // turn that is actually in flight.
-func TestEmacsCloseWithAHeldPromptDoesNotTearTheTabDown(t *testing.T) {
-	t.Parallel()
+func testEmacsCloseWithAHeldPromptDoesNotTearTheTabDown(t *testing.T) {
 	box := requireSandbox(t)
 	f := newEmacsWorkspaceFixture(t, box)
 	e := f.Emacs
@@ -544,7 +541,7 @@ func TestEmacsCloseWithAHeldPromptDoesNotTearTheTabDown(t *testing.T) {
 // #13 — CloseThenKillDoesNotWedgeEmacs
 // ---------------------------------------------------------------------------
 
-// TestEmacsCloseThenKillDoesNotWedgeEmacs is scenario 13, and THE HEARTBEAT
+// testEmacsCloseThenKillDoesNotWedgeEmacs is scenario 13, and THE HEARTBEAT
 // IS THE ASSERTION.
 //
 // This pins the sentinel/kill-buffer recursion named in EMACS-LAYER-SPEC.md's
@@ -573,8 +570,7 @@ func TestEmacsCloseWithAHeldPromptDoesNotTearTheTabDown(t *testing.T) {
 // to back" (EMACS-LAYER-SPEC.md scenario 13) asks for; that `SPC j x' is this
 // command is scenario 12's assertion, made again here so the keystroke path
 // is not lost.
-func TestEmacsCloseThenKillDoesNotWedgeEmacs(t *testing.T) {
-	t.Parallel()
+func testEmacsCloseThenKillDoesNotWedgeEmacs(t *testing.T) {
 	box := requireSandbox(t)
 	f := newEmacsWorkspaceFixture(t, box)
 	e := f.Emacs

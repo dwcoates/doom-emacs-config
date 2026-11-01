@@ -34,7 +34,7 @@
 // itself, a different record, already covered by `!slash`/SLASH_LOCAL. The
 // shape was instead built from the deleted daemon/e2e suite's
 // `machinery_e2e_test.go` constants. TestSlashShapeANamed and
-// TestSlashShapeAUnnamed below drive this INVENTED shape and their
+// testSlashShapeAUnnamed below drive this INVENTED shape and their
 // assertions are scoped accordingly: they prove the fake SDK's own
 // documented file-plane write landed exactly as `session.ts` specifies, not
 // that any real vendor binary produces this record.
@@ -183,12 +183,11 @@ type scShapeAUserRecord struct {
 // SLASH_SHAPE_A_UNNAMED ("!slash-shape-a-unnamed").
 // ---------------------------------------------------------------------------
 
-// TestSlashShapeAUnnamed drives "!slash-shape-a-unnamed" and asserts the
+// testSlashShapeAUnnamed drives "!slash-shape-a-unnamed" and asserts the
 // withheld-unnamed record: `<local-command-stdout>...</local-command-stdout>`
 // only, with NO `<command-name>` element anywhere in it — the negative
 // #61 exists to prove alongside.
-func TestSlashShapeAUnnamed(t *testing.T) {
-	t.Parallel()
+func testSlashShapeAUnnamed(t *testing.T) {
 	// Arrange.
 	w := NewWorld(t, WorldOpts{})
 	ws := w.NewWorkspace(t)

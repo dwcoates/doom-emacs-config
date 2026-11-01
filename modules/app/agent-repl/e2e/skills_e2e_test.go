@@ -104,8 +104,7 @@ type skillScenarioCase struct {
 }
 
 // Seam: skill
-func TestSkillInvocation(t *testing.T) {
-	t.Parallel()
+func testSkillInvocation(t *testing.T) {
 	// #64 SkillInvocation -- `skill-invocation` -- tool_use -> ack -> isMeta
 	// document triple, driven bare ("!skill" with no name/args), which the
 	// fake's skillInvocationOf resolves to its documented default,

@@ -1253,6 +1253,7 @@ func deriveSeamWiring(t *testing.T) map[string][]string {
 	if err != nil {
 		t.Fatalf("glob the e2e tests: %v", err)
 	}
+	pkg := parseE2EPackage(t)
 	wiring := map[string][]string{}
 	for _, path := range files {
 		f, err := parser.ParseFile(fset, path, nil, parser.ParseComments)
@@ -1261,11 +1262,19 @@ func deriveSeamWiring(t *testing.T) map[string][]string {
 		}
 		for _, decl := range f.Decls {
 			fn, ok := decl.(*ast.FuncDecl)
-			if !ok || fn.Doc == nil || !strings.HasPrefix(fn.Name.Name, "Test") {
+			if !ok || fn.Doc == nil {
+				continue
+			}
+			// A wiring test is a step of a scenario, named by its path; a
+			// top-level test, by its name.
+			name := fn.Name.Name
+			if path, isStep := pkg.stepPath(name); isStep {
+				name = path
+			} else if !strings.HasPrefix(name, "Test") {
 				continue
 			}
 			for _, m := range seamLine.FindAllStringSubmatch(fn.Doc.Text(), -1) {
-				wiring[m[1]] = append(wiring[m[1]], fn.Name.Name)
+				wiring[m[1]] = append(wiring[m[1]], name)
 			}
 		}
 	}

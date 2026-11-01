@@ -12,8 +12,8 @@ import (
 // its processes' progress is a grantedclock.WithBound context, never a wall
 // timeout. A wall bound measures how busy the host is: on 2026-10-22 a gate
 // run on a host carrying a second full run failed
-// TestSubagentDetachedSurvivesAnInterjection and
-// TestADetachedSubagentWhoseProcessDiedIsNotLiveAfterAColdBoot on
+// TestSubagents/SubagentDetachedSurvivesAnInterjection and
+// TestSubagents/ADetachedSubagentWhoseProcessDiedIsNotLiveAfterAColdBoot on
 // context.WithTimeout waits for events that were merely late. The granted
 // clock charges only the time this binary's processes were not starved,
 // which is the harness's own rule (integration/harness/granted.go).

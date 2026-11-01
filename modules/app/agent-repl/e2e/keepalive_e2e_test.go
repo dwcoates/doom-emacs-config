@@ -183,11 +183,10 @@ func shimRecords(t *testing.T, path string) []harness.LogRecord {
 	return harness.ReadLog(t, path)
 }
 
-// TestPromptDuringKeepAliveRewindsPastTheKeepAliveAlone — a real prompt that
+// testPromptDuringKeepAliveRewindsPastTheKeepAliveAlone — a real prompt that
 // arrives while a keep-alive is in flight waits it out, then rewinds past
 // exactly that keep-alive to the last real turn.
-func TestPromptDuringKeepAliveRewindsPastTheKeepAliveAlone(t *testing.T) {
-	t.Parallel()
+func testPromptDuringKeepAliveRewindsPastTheKeepAliveAlone(t *testing.T) {
 	// Arrange
 	w, ws, shimLog := keepaliveWorld(t)
 	turn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "prose-streamed")
@@ -211,14 +210,13 @@ func TestPromptDuringKeepAliveRewindsPastTheKeepAliveAlone(t *testing.T) {
 	}
 }
 
-// TestStopReplayedByEveryRewindNeverLoops — the ship-gns loop (2026-10-02):
+// testStopReplayedByEveryRewindNeverLoops — the ship-gns loop (2026-10-02):
 // each rewind replaced the vendor query, the old query's task was reported
 // stopped, and the vendor answered that stop in a turn of its own. Driven by
 // the mock's `!stop-on-rewind` lever, every rewind must resume at the same
 // real anchor, discard the stop's answer with the keep-alive, trip no
 // refusal, and store and serve nothing of it.
-func TestStopReplayedByEveryRewindNeverLoops(t *testing.T) {
-	t.Parallel()
+func testStopReplayedByEveryRewindNeverLoops(t *testing.T) {
 	cases := []struct {
 		name   string
 		assert func(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, shimLog, armed string, rewinds []harness.LogRecord)
@@ -306,11 +304,10 @@ func TestStopReplayedByEveryRewindNeverLoops(t *testing.T) {
 	}
 }
 
-// TestRestartedShimCarriesItsKeepAlivesUntilARealReply — a restarted shim is
+// testRestartedShimCarriesItsKeepAlivesUntilARealReply — a restarted shim is
 // a new process with no anchor: its keep-alives are carried (never rewound,
 // never refused) until its own first real reply anchors the next rewind.
-func TestRestartedShimCarriesItsKeepAlivesUntilARealReply(t *testing.T) {
-	t.Parallel()
+func testRestartedShimCarriesItsKeepAlivesUntilARealReply(t *testing.T) {
 	// Arrange
 	w, ws, shimLog := keepaliveWorld(t)
 	// Restarting stands the shim down and brings it back: the same

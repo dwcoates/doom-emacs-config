@@ -57,7 +57,6 @@ import (
 	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"connectrpc.com/connect"
-
 )
 
 // submitCommand submits a daemon-recognized slash command (never a plain
@@ -86,14 +85,13 @@ func submitCommand(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, command
 	return success
 }
 
-// TestContextUsage drives #59: `!context-usage-drift` pushes a GROWING
+// testContextUsage drives #59: `!context-usage-drift` pushes a GROWING
 // conversation.v1 SessionUpdate.context_usage at every turn's end
 // (session start and turn end, per shim.md — never on request), and the
 // daemon's /context panel — which resolves purely from that already-pushed
 // state, never from a pull of its own — is read after each of two turns to
 // prove the second reading moved without the test ever calling a pull verb.
-func TestContextUsage(t *testing.T) {
-	t.Parallel()
+func testContextUsage(t *testing.T) {
 	// Arrange: one world, one (fake-git) repository registered as a
 	// workspace.
 	w := NewWorld(t, WorldOpts{})

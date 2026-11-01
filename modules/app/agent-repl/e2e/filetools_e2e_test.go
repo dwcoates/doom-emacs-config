@@ -84,7 +84,7 @@ func requireSucceeded(t *testing.T, row *frontendv1.FeedRow, toolName string) *f
 	return returned
 }
 
-// TestIdeDiagnosticsAfterWrite drives the `ide-diagnostics-write` fake
+// testIdeDiagnosticsAfterWrite drives the `ide-diagnostics-write` fake
 // scenario (files.ts IDE_DIAGNOSTICS_WRITE) — the WRITE sibling of
 // TestIdeDiagnosticsAfterEdit above.
 //
@@ -102,8 +102,7 @@ func requireSucceeded(t *testing.T, row *frontendv1.FeedRow, toolName string) *f
 // scenario this file drives. No capture grounds a diagnostics attachment on
 // any host (it requires a connected editor integration), which the shim's
 // testdata/captures/MANIFEST.md states once for both siblings.
-func TestIdeDiagnosticsAfterWrite(t *testing.T) {
-	t.Parallel()
+func testIdeDiagnosticsAfterWrite(t *testing.T) {
 	// Arrange
 	w, ws := newFileToolsWorkspace(t)
 	// As above, transcript diagnostics and the live Write card may arrive in

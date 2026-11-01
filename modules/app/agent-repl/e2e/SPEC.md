@@ -548,7 +548,7 @@ runBudgetWaits`, 30s). Handing it straight to a single rpc gives that call
 whatever the run happened to have left — every test here boots a real daemon,
 a store, a sidecar and a real Node shim before it asserts anything, so the
 LAST call in a test would answer `deadline_exceeded` for time the earlier ones
-spent. That is exactly how `TestHostRequestedStopLeavesNoProcessBehind` failed
+spent. That is exactly how `TestDaemonLifecycle/HostRequestedStopLeavesNoProcessBehind` failed
 ~1 in 20 at ~5.09s on a stop measured at 9ms p50 / 15ms max over 104 runs. A
 one-shot rpc whose latency is the subject takes a `DefaultTimeout` child of
 `w.Ctx()`.
@@ -1178,10 +1178,10 @@ byte-for-byte what it was, so the bundle's build identity is unchanged.
 
 The run: 138 `PASS` records, 59 `SKIP` (Emacs scenarios skip on a host with
 no batch Emacs; the webapp-layer tests skip without `webapp/node_modules`),
-`TestColdGate/Clear` failing as it is known to.
+`TestDaemonLifecycle/ColdGate/Clear` failing as it is known to.
 
 A CONTROL run of the same suite WITHOUT coverage recorded the identical
-138/59 pass/skip counts and the same known `TestColdGate/Clear` failure, so
+138/59 pass/skip counts and the same known `TestDaemonLifecycle/ColdGate/Clear` failure, so
 coverage does not move the pass set. Each of the two full runs also carried
 one DIFFERENT extra failure under full-suite load —
 `TestHibernateOnIdleCutoff` (coverage run) and

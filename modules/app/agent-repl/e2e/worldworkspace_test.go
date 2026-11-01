@@ -11,8 +11,7 @@ import (
 	"testing"
 )
 
-func TestNewRepoWorkspaceRegistersTheRepositoryItMinted(t *testing.T) {
-	t.Parallel()
+func testNewRepoWorkspaceRegistersTheRepositoryItMinted(t *testing.T) {
 	// Arrange
 	w := SharedWorld(t)
 
@@ -31,8 +30,7 @@ func TestNewRepoWorkspaceRegistersTheRepositoryItMinted(t *testing.T) {
 	}
 }
 
-func TestNewWorkspaceMintsAFreshWorkspaceEachTime(t *testing.T) {
-	t.Parallel()
+func testNewWorkspaceMintsAFreshWorkspaceEachTime(t *testing.T) {
 	// Arrange
 	w := SharedWorld(t)
 
@@ -76,8 +74,7 @@ func TestNoTestMintsAWorkspaceByHand(t *testing.T) {
 	}
 }
 
-func TestRequireOpenOpensARegisteredWorkspace(t *testing.T) {
-	t.Parallel()
+func testRequireOpenOpensARegisteredWorkspace(t *testing.T) {
 	// Arrange
 	w := SharedWorld(t)
 	ws := w.NewWorkspace(t)
@@ -90,8 +87,7 @@ func TestRequireOpenOpensARegisteredWorkspace(t *testing.T) {
 	AwaitTurnEnded(t, w, ws, turn)
 }
 
-func TestRequireOpenFailsTheTestForAWorkspaceTheDaemonDoesNotKnow(t *testing.T) {
-	t.Parallel()
+func testRequireOpenFailsTheTestForAWorkspaceTheDaemonDoesNotKnow(t *testing.T) {
 	// Arrange
 	w := SharedWorld(t)
 	r := harness.NewRecordingTB(t, "TestOpener")

@@ -154,8 +154,7 @@ func rfSubmitBubblePrompt(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, 
 // by the time the turn ends it is settled, never busy.
 // ===========================================================================
 
-func TestBubbleRefusedNotDeliverable(t *testing.T) {
-	t.Parallel()
+func testBubbleRefusedNotDeliverable(t *testing.T) {
 	// Arrange: drive a synchronous subagent to completion, then find its
 	// settled bubble row.
 	w := SharedWorld(t)
@@ -206,8 +205,7 @@ func TestBubbleRefusedNotDeliverable(t *testing.T) {
 // would race the send against the ask's arrival.
 // ===========================================================================
 
-func TestBubbleRefusedAgentBusy(t *testing.T) {
-	t.Parallel()
+func testBubbleRefusedAgentBusy(t *testing.T) {
 	// Arrange: drive the never-settling detached subagent, then find its
 	// still-live bubble row.
 	w := NewWorld(t, WorldOpts{})
@@ -278,8 +276,7 @@ func TestBubbleRefusedAgentBusy(t *testing.T) {
 // surface, not a defect in this test's authorship.
 // ===========================================================================
 
-func TestUnknownAgentOnUpdateAgent(t *testing.T) {
-	t.Parallel()
+func testUnknownAgentOnUpdateAgent(t *testing.T) {
 	// Arrange: raise a permission ask under a detached subagent, then stop
 	// that subagent out from under its own still-open ask.
 	w := NewWorld(t, WorldOpts{})
@@ -410,8 +407,7 @@ func rfAwaitVendorStartFailed(t *testing.T, w *World, ws *workspacev1.WorkspaceR
 // session did not come up, which is precisely what the lever asked for.
 var rfVendorStartFaultWarnings = []string{"daemon.health.open_fault", "daemon.workspace.open"}
 
-func TestStartSessionVendorStartFailedRecovers(t *testing.T) {
-	t.Parallel()
+func testStartSessionVendorStartFailedRecovers(t *testing.T) {
 	// Arrange: a world whose FIRST StartSession only is refused.
 	w := NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{ExtraEnv: []string{"AGENT_REPL_FAKE_REFUSE=start-once"}}})
 	// The retry's own bring-up path is the RECOVERY this test is named for:

@@ -18,7 +18,7 @@ import (
 	"testing"
 )
 
-// TestEmacsSubmitWithNoDaemonIsRefusedLoudly is scenario 42.
+// testEmacsSubmitWithNoDaemonIsRefusedLoudly is scenario 42.
 //
 // A submission with no daemon behind it is a unary call that cannot be made.
 // The contract has two halves and the second is the one that matters to the
@@ -31,8 +31,7 @@ import (
 // restarts, and Emacs holds none in memory), which the daemon ingests once
 // it serves; and the input history ring, from which the user can recall
 // them.
-func TestEmacsSubmitWithNoDaemonIsRefusedLoudly(t *testing.T) {
-	t.Parallel()
+func testEmacsSubmitWithNoDaemonIsRefusedLoudly(t *testing.T) {
 	// Arrange: a registered workspace, then no daemon. Emacs asks the daemon
 	// to exit — it never kills one — and the link drops at the transport.
 	w, e := emGHIWorld(t)

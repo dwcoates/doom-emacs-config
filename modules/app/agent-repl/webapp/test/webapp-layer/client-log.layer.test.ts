@@ -19,7 +19,7 @@
  * file back off disk.
  *
  * THE CROSS-RUNTIME JOIN IS THE GO DRIVER'S (`e2e/webapplayer_e2e_test.go`,
- * TestWebappLayerClientLog): it takes the record this file plants and matches
+ * TestWebappLayer/WebappLayerClientLog): it takes the record this file plants and matches
  * its promoted `agent_repl_session_id` against the daemon's own records and
  * its `claude_session_id` against the shim's. What is asserted HERE is the
  * half only the page can see — that the page's own record arrived at all,

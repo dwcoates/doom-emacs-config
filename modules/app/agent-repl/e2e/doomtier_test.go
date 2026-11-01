@@ -9,8 +9,7 @@ import (
 	"testing"
 )
 
-func TestDoomPopupOpensAFileRightSideHalfWidth(t *testing.T) {
-	t.Parallel()
+func testDoomPopupOpensAFileRightSideHalfWidth(t *testing.T) {
 	// Arrange
 	box := requireSandbox(t)
 	w := NewDoomWorld(t, box)
@@ -39,13 +38,12 @@ func TestDoomPopupOpensAFileRightSideHalfWidth(t *testing.T) {
 	}
 }
 
-// TestDoomRegisteringAWorkspaceSelectsIt is Emacs's half of "a workspace
+// testDoomRegisteringAWorkspaceSelectsIt is Emacs's half of "a workspace
 // registered while you stand in it is the daemon's current row" (d337583fcb):
 // once the daemon's ref attaches, Emacs sends SelectWorkspace for it. The
 // daemon's half, the roster stamping that row current, is
 // daemon/integration's TestSelectWorkspaceStampsCurrentOnTheRoster.
-func TestDoomRegisteringAWorkspaceSelectsIt(t *testing.T) {
-	t.Parallel()
+func testDoomRegisteringAWorkspaceSelectsIt(t *testing.T) {
 	// Arrange
 	box := requireSandbox(t)
 	w := NewDoomWorld(t, box)
@@ -65,11 +63,10 @@ func TestDoomRegisteringAWorkspaceSelectsIt(t *testing.T) {
 	}
 }
 
-// TestDoomWorkspaceNavigationFollowsTheDrawnTabBar: the chords walk the bar
+// testDoomWorkspaceNavigationFollowsTheDrawnTabBar: the chords walk the bar
 // the roster draws, wrapping, and `M-<n>' is the n-th DRAWN tab -- the
 // module's minor-mode map winning Doom's own numerals in a booted Doom.
-func TestDoomWorkspaceNavigationFollowsTheDrawnTabBar(t *testing.T) {
-	t.Parallel()
+func testDoomWorkspaceNavigationFollowsTheDrawnTabBar(t *testing.T) {
 	// Arrange: three workspaces, so a direction is observable.
 	box := requireSandbox(t)
 	w := NewDoomWorld(t, box)
@@ -112,13 +109,12 @@ func TestDoomWorkspaceNavigationFollowsTheDrawnTabBar(t *testing.T) {
 	}
 }
 
-// TestDoomANewProjectDoesNotRecycleTheWorkspaceBeingLeft: registering a
+// testDoomANewProjectDoesNotRecycleTheWorkspaceBeingLeft: registering a
 // second project while standing in a created workspace gives the new project
 // its own perspective, and the one being left keeps its perspective and its
 // tab -- Doom's `+workspaces-switch-to-project-h' recycles it unless the
 // module's policy is installed, which only a booted Doom can show.
-func TestDoomANewProjectDoesNotRecycleTheWorkspaceBeingLeft(t *testing.T) {
-	t.Parallel()
+func testDoomANewProjectDoesNotRecycleTheWorkspaceBeingLeft(t *testing.T) {
 	// Arrange: a registered workspace, then a created one the create selects.
 	box := requireSandbox(t)
 	w := NewDoomWorld(t, box)
@@ -144,12 +140,11 @@ func TestDoomANewProjectDoesNotRecycleTheWorkspaceBeingLeft(t *testing.T) {
 	}
 }
 
-// TestDoomPlainCloseHidesPanelsAndLeavesTheTabAlone: `SPC o c' -- the
+// testDoomPlainCloseHidesPanelsAndLeavesTheTabAlone: `SPC o c' -- the
 // module's `map!' leader form, live only in a booted Doom -- is the plain
 // close, which hides the panel windows and leaves the tab order alone, as
 // every close does: only the daemon orders the tabs.
-func TestDoomPlainCloseHidesPanelsAndLeavesTheTabAlone(t *testing.T) {
-	t.Parallel()
+func testDoomPlainCloseHidesPanelsAndLeavesTheTabAlone(t *testing.T) {
 	// Arrange
 	box := requireSandbox(t)
 	w := NewDoomWorld(t, box)

@@ -1296,7 +1296,7 @@ either way, and the issuer is **outside the measured interval by construction**:
 the origin stamp is the roster frame's arrival, not the call. Issuing it from
 the page spares the area a twenty-round cross-process rendezvous for a term the
 measurement does not contain. If the owner wants the call to originate in Go
-regardless, the rendezvous shape from `TestWebappLayerRestartHandover` is the
+regardless, the rendezvous shape from `TestWebappLayer/WebappLayerRestartHandover` is the
 one to reuse.
 
 ### I5. Findings — added to §H

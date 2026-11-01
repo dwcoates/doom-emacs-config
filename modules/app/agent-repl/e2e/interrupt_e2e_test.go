@@ -73,15 +73,14 @@ import (
 	"agent-repld/integration/harness"
 )
 
-// TestInterruptAfterTextDelta drives the `interrupt` golden (#18): a real
+// testInterruptAfterTextDelta drives the `interrupt` golden (#18): a real
 // mid-tool interrupt, delivered through the daemon's real Interrupt rpc
 // while the Bash tool call is genuinely live, must truncate the call in
 // place and end the turn `success.interrupted` — not a fabricated
 // AgentInterrupted the test invents by racing a sleep.
 //
 // Seam: interrupt-live-tool
-func TestInterruptAfterTextDelta(t *testing.T) {
-	t.Parallel()
+func testInterruptAfterTextDelta(t *testing.T) {
 	// Arrange: a world with a scripted-fake-git workspace (a later user
 	// ruling reversed real git: only agent-repld, the shim, shim-store, and
 	// shim-sidecar run for real), and a feed watch opened BEFORE the prompt

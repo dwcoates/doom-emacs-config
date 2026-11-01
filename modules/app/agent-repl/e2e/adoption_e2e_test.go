@@ -89,8 +89,7 @@ import (
 // #47 — ColdBootReadsReplayFromStore
 // ===========================================================================
 
-func TestColdBootReadsReplayFromStore(t *testing.T) {
-	t.Parallel()
+func testColdBootReadsReplayFromStore(t *testing.T) {
 	// Arrange: drive a real "!prose-streamed" turn to completion so the
 	// store durably holds REAL rows (driveScenarioToCompletion blocks on the
 	// sidecar's own cursor advance) before any bounce is simulated — the
@@ -131,7 +130,7 @@ func TestColdBootReadsReplayFromStore(t *testing.T) {
 // replayed into the feed AFTER that, on the watcher's own goroutines. So an
 // `OpenFeed` issued on the first line after the boot legitimately serves an
 // empty page, and every assertion about a replayed row read a page the replay
-// had not reached. That is `TestSubagentBubbleFromAReplayIsStillAddressable`
+// had not reached. That is `TestSubagents/SubagentBubbleFromAReplayIsStillAddressable`
 // failing once in nine in-container runs, and it is latent in every other
 // cold-boot page read.
 //
@@ -396,7 +395,7 @@ func adLeaveSessionDown(t *testing.T, w *World, ws *workspacev1.WorkspaceRef) {
 	})
 }
 
-// TestASessionlessWorkspaceHandedOverDrawsItsFeedWithNoPrompt — owner ruling
+// testASessionlessWorkspaceHandedOverDrawsItsFeedWithNoPrompt — owner ruling
 // 2026-10-02: "The feed (or rather, the most recent page of the feed) should
 // be automatically rendered when the workspace bounces or its backend(s)
 // bounce, always." A workspace the incumbent serves with NO session is handed
@@ -404,8 +403,7 @@ func adLeaveSessionDown(t *testing.T, w *World, ws *workspacev1.WorkspaceRef) {
 // and serve an empty feed until the user's next prompt revived it (ship-gns,
 // 2026-10-01 17:55). The successor now starts its session as it adopts it, so
 // the conversation's turn is drawn on the successor's feed with no prompt.
-func TestASessionlessWorkspaceHandedOverDrawsItsFeedWithNoPrompt(t *testing.T) {
-	t.Parallel()
+func testASessionlessWorkspaceHandedOverDrawsItsFeedWithNoPrompt(t *testing.T) {
 	// Arrange: a finished real conversation whose session the incumbent has
 	// left down. The shim deaths are what this test provokes: the link
 	// records, the redials, the fault and the loop guard's own WARN are their

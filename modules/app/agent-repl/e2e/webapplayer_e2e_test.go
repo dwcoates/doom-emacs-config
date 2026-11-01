@@ -359,7 +359,7 @@ func wlWebappWritable(webappDir string) error {
 // the boot's own fifty-odd.
 const wlClientLogOperation = "webapp-layer.client-log-round-trip"
 
-// TestWebappLayerClientLog is the five-runtime JOIN the logging contract
+// testWebappLayerClientLog is the five-runtime JOIN the logging contract
 // promises, asserted where it is real: a record emitted in the browser lands
 // in the daemon's own `webapp.log` carrying the identity that ties it to the
 // daemon's records and the shim's for the same session.
@@ -379,8 +379,7 @@ const wlClientLogOperation = "webapp-layer.client-log-round-trip"
 // promoted) are the half a browser can see. What only this side can see is
 // that those identities are the SAME strings the other runtimes wrote for the
 // same session — which is what makes one incident readable across five logs.
-func TestWebappLayerClientLog(t *testing.T) {
-	t.Parallel()
+func testWebappLayerClientLog(t *testing.T) {
 	w, ws := wlDriveAreaWorld(t, "client-log.layer.test.ts")
 
 	// The record the page planted, in the workspace's own webapp sink. The
@@ -451,9 +450,8 @@ func wlRequireJoin(t *testing.T, whose string, records []harness.LogRecord, fiel
 		field, want, whose, len(records), values)
 }
 
-// TestWebappLayerCards is section F4: permission and question cards.
-func TestWebappLayerCards(t *testing.T) {
-	t.Parallel()
+// testWebappLayerCards is section F4: permission and question cards.
+func testWebappLayerCards(t *testing.T) {
 	wlDriveArea(t, "cards.layer.test.ts")
 }
 
@@ -468,7 +466,7 @@ func TestWebappLayerCards(t *testing.T) {
 // are documented on each other and move together.
 const wlPageMountedOperation = "webapp-layer.handover.page-mounted"
 
-// TestWebappLayerRestartHandover is section F9 #39: THE RESTART HANDOVER, the
+// testWebappLayerRestartHandover is section F9 #39: THE RESTART HANDOVER, the
 // one area whose Go side acts WHILE the page is mounted.
 //
 // THE SHAPE, and why it is this shape:
@@ -502,8 +500,7 @@ const wlPageMountedOperation = "webapp-layer.handover.page-mounted"
 // THE DECLARED WARNING is this test's own subject, as in the adoption area:
 // the standing unlanded-arm refusal record is the evidence of the refusal a
 // handover deliberately provokes.
-func TestWebappLayerRestartHandover(t *testing.T) {
-	t.Parallel()
+func testWebappLayerRestartHandover(t *testing.T) {
 	wlHoldAreaSlot(t)
 	npm := wlRequireNPM(t)
 	webappDir := wlRequireWebappDeps(t)

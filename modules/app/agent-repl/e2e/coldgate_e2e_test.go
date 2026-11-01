@@ -258,7 +258,7 @@ func raiseColdGate(t *testing.T) *coldGate {
 	// between the two leaves the turn open on disk, and the successor rightly
 	// closes it as an orphan at WARN (`daemon.promptqueue.restore_holds`) — a
 	// crash inside that window is not this arrangement's subject, and racing
-	// it failed TestColdGate/Compact one run in three. The queue's own record
+	// it failed TestDaemonLifecycle/ColdGate/Compact one run in three. The queue's own record
 	// of the turn end is written after the close, so it is the edge to wait on.
 	first.Daemon.AwaitWorkspaceLogRecord(ws.GetDir(), "the first daemon's durable close of the seed turn", func(r harness.LogRecord) bool {
 		return r.Operation == "daemon.promptqueue.turn_ended" &&
@@ -544,8 +544,7 @@ func assertSessionProceeds(t *testing.T, g *coldGate) {
 // ---------------------------------------------------------------------------
 
 // Seam: cold-gate
-func TestColdGate(t *testing.T) {
-	t.Parallel()
+func testColdGate(t *testing.T) {
 	t.Run("Pay", func(t *testing.T) {
 		// Arrange
 		g := raiseColdGate(t)

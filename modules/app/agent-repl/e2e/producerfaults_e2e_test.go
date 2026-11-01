@@ -177,7 +177,7 @@ func pfQueryDiedWarnings(w *World) {
 // The vendor query dying: `!query-eof`, `!query-fail`, `!query-eof-mid-ask`.
 // ===========================================================================
 
-// TestQueryEofEndsTheTurnAsQueryDied drives `!query-eof` — the fake vendor's
+// testQueryEofEndsTheTurnAsQueryDied drives `!query-eof` — the fake vendor's
 // iterable ENDING with no result, "the CLI going away cleanly mid-turn"
 // (lifecycle.ts), whose arm is SessionQueryDied.cause=unexpected_eof.
 //
@@ -188,8 +188,7 @@ func pfQueryDiedWarnings(w *World) {
 // FeedTurnEndedErrored.query_died.
 //
 // Seam: query-death
-func TestQueryEofEndsTheTurnAsQueryDied(t *testing.T) {
-	t.Parallel()
+func testQueryEofEndsTheTurnAsQueryDied(t *testing.T) {
 	// Arrange
 	w := SharedWorld(t)
 	pfQueryDiedWarnings(w)
@@ -220,7 +219,7 @@ func TestQueryEofEndsTheTurnAsQueryDied(t *testing.T) {
 	}
 }
 
-// TestQueryEofMidAskDeniesTheOpenAsk drives `!query-eof-mid-ask`: the query
+// testQueryEofMidAskDeniesTheOpenAsk drives `!query-eof-mid-ask`: the query
 // dies with a `canUseTool` ask STILL OPEN. The scenario's whole point, in
 // its own words, is that "an unresolved `canUseTool` promise wedges the
 // vendor process, so the query-death path owes every pending callback a
@@ -233,8 +232,7 @@ func TestQueryEofEndsTheTurnAsQueryDied(t *testing.T) {
 // FeedPermissionAnswered.denied_by_user. Reported, not weakened: nothing in
 // permission.proto reserves a separate "denied because the producer died"
 // arm, so the user arm is what the contract offers.
-func TestQueryEofMidAskDeniesTheOpenAsk(t *testing.T) {
-	t.Parallel()
+func testQueryEofMidAskDeniesTheOpenAsk(t *testing.T) {
 	// Arrange
 	w := NewWorld(t, WorldOpts{})
 	pfQueryDiedWarnings(w)
@@ -273,7 +271,7 @@ func TestQueryEofMidAskDeniesTheOpenAsk(t *testing.T) {
 // The converter fault window: `!fault-converter`, `!fault-recover`.
 // ===========================================================================
 
-// TestConverterRecoveryClosesTheDegradedWindow is the pair's second half:
+// testConverterRecoveryClosesTheDegradedWindow is the pair's second half:
 // after the defect, `!fault-recover` sends the SAME hook announcement
 // WELL-FORMED, and `fault-recover`'s arms line is "the diagnostics returning
 // to HEALTHY with the degraded window CLOSED carrying the dropped count the
@@ -284,8 +282,7 @@ func TestQueryEofMidAskDeniesTheOpenAsk(t *testing.T) {
 // THAT window closed rather than merely that some closed window exists.
 //
 // Seam: shim-diagnostics
-func TestConverterRecoveryClosesTheDegradedWindow(t *testing.T) {
-	t.Parallel()
+func testConverterRecoveryClosesTheDegradedWindow(t *testing.T) {
 	// Arrange
 	w := SharedWorld(t)
 	w.ExpectWarnings("daemon.health.open_fault")
@@ -333,7 +330,7 @@ func TestConverterRecoveryClosesTheDegradedWindow(t *testing.T) {
 // Bookkeeping turns that draw NOTHING extra.
 // ===========================================================================
 
-// TestResidueAttachmentsDrawNoRow drives `!residue`, whose two attachments
+// testResidueAttachmentsDrawNoRow drives `!residue`, whose two attachments
 // (`deferred_tools_delta` and `agent_listing_delta`) are the records "BOTH
 // planes agree are vendor bookkeeping, not context". Its arms line is
 // literally "NONE — these are StoreUnservedItem.vendor_specific ... dropped
@@ -342,8 +339,7 @@ func TestConverterRecoveryClosesTheDegradedWindow(t *testing.T) {
 // one row more.
 //
 // Seam: two-plane-episode
-func TestResidueAttachmentsDrawNoRow(t *testing.T) {
-	t.Parallel()
+func testResidueAttachmentsDrawNoRow(t *testing.T) {
 	// Arrange
 	w := SharedWorld(t)
 	ws, configDir := pfNewWorkspace(t, w)
@@ -359,7 +355,7 @@ func TestResidueAttachmentsDrawNoRow(t *testing.T) {
 	pfAssertOnlyProseRows(t, rows, turn)
 }
 
-// TestContextTipDrawsNoRow drives `!context-tip` — the vendor's GENERIC CLI
+// testContextTipDrawsNoRow drives `!context-tip` — the vendor's GENERIC CLI
 // TIP attachment. Its arms line: "residue `attachment/context_tip` — the tip
 // is recorded as itself, unconverted, and reaches no arm", with the standing
 // ruling that "IT IS NOT THE CONTEXT-BUDGET WARNING ... mapping the tip to
@@ -368,8 +364,7 @@ func TestResidueAttachmentsDrawNoRow(t *testing.T) {
 // Two negatives, then: no extra feed row, and no footer salient line minted
 // from the tip (no footer line warns that the context is nearly full, owner
 // ruling 2026-10-06).
-func TestContextTipDrawsNoRow(t *testing.T) {
-	t.Parallel()
+func testContextTipDrawsNoRow(t *testing.T) {
 	// Arrange
 	w := NewWorld(t, WorldOpts{})
 	ws, configDir := pfNewWorkspace(t, w)
@@ -395,13 +390,12 @@ func TestContextTipDrawsNoRow(t *testing.T) {
 	}
 }
 
-// TestTokensReminderDrawsNoRow drives `!tokens-reminder` — the
+// testTokensReminderDrawsNoRow drives `!tokens-reminder` — the
 // `total_tokens_reminder` attachment, "the ONE token-budget carrier any real
 // capture holds ... IT IS NOT the context-budget warning either". Arms line:
 // "residue `attachment/total_tokens_reminder` — recorded as itself,
 // unconverted, and reaching no arm".
-func TestTokensReminderDrawsNoRow(t *testing.T) {
-	t.Parallel()
+func testTokensReminderDrawsNoRow(t *testing.T) {
 	// Arrange
 	w := NewWorld(t, WorldOpts{})
 	ws, configDir := pfNewWorkspace(t, w)

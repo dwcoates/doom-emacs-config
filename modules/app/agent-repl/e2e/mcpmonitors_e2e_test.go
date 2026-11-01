@@ -58,8 +58,7 @@ import (
 // so the world's log sweep fails the test if one is recorded.
 // ===========================================================================
 
-func TestMcpToolCall(t *testing.T) {
-	t.Parallel()
+func testMcpToolCall(t *testing.T) {
 	// Arrange
 	w := NewWorld(t, WorldOpts{})
 	ws := w.NewWorkspace(t)

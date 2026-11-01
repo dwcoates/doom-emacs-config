@@ -20,11 +20,10 @@ import (
 	"testing"
 )
 
-// TestAWorkspaceOpenReplaysItsFirstPageOnce covers the other half of the
+// testAWorkspaceOpenReplaysItsFirstPageOnce covers the other half of the
 // rule: the workspace's opening is a replay, it is the only one, and the turns
 // that follow start no watcher of their own.
-func TestAWorkspaceOpenReplaysItsFirstPageOnce(t *testing.T) {
-	t.Parallel()
+func testAWorkspaceOpenReplaysItsFirstPageOnce(t *testing.T) {
 	// Arrange.
 	w := NewWorld(t, WorldOpts{})
 	repo, ws := w.NewRepoWorkspace(t)
