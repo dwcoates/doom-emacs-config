@@ -11,7 +11,10 @@
 import type { MessageInitShape } from "@bufbuild/protobuf";
 import type { SidebarViewFoldSectionSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_sidebar_view_pb";
 import type { SidebarContext } from "./context.js";
+import { HIDDEN_FOLD_KEY, MERGED_FOLD_KEY } from "./context.js";
+import { HIDDEN_SECTION_CLASS, MERGED_SECTION_CLASS } from "./band-fit.js";
 import { queryAll } from "../dom.js";
+import type { FocusLeft } from "../focus-left.js";
 import { log } from "../log.js";
 import { requireCase, unreachableArm } from "../rpc/strict.js";
 import { changeView } from "./view-change.js";
@@ -218,4 +221,59 @@ export function drawRosterHoldsCurrent(fold: CollapsibleSectionFold, path: strin
 /** Say on SECTION's box whether it holds the current workspace. */
 export function paintHoldsCurrent(section: HTMLElement, holdsCurrent: boolean): void {
   section.toggleAttribute(HOLDS_CURRENT_ATTRIBUTE, holdsCurrent);
+}
+
+/** One section that folds itself when the focus leaves the page. */
+export interface FocusFoldedSection {
+  /** The class the section is drawn with (`band-fit.ts`). */
+  className: string;
+  /** The page key its fold is held under (`context.ts`). */
+  foldKey: string;
+  /** The section UpdateSidebarView folds. */
+  target: FoldTarget;
+}
+
+/**
+ * THE SECTIONS THAT FOLD THEMSELVES WHEN THE FOCUS LEAVES THE PAGE (owner
+ * request, 2026-11-01): Recently Merged, as its groups did while they sat in
+ * the Deploys section, and Hidden. Each is a glance at settled or put-away
+ * workspaces, opened by a click on its header and folded again once the
+ * user is done with the rail.
+ */
+export const FOCUS_FOLDED_SECTIONS: readonly FocusFoldedSection[] = [
+  { className: MERGED_SECTION_CLASS, foldKey: MERGED_FOLD_KEY, target: { case: "recentlyMerged", value: {} } },
+  { className: HIDDEN_SECTION_CLASS, foldKey: HIDDEN_FOLD_KEY, target: { case: "hidden", value: {} } },
+];
+
+/**
+ * Fold every `FOCUS_FOLDED_SECTIONS` section drawn open under HOST whenever
+ * FOCUS leaves the page, through the section's own fold gesture
+ * (`sectionFold`), so the collapse is painted at once and asked of the
+ * daemon as a click on its header would be. A section folded already, or
+ * left out of the rail, asks nothing. Answers the uninstall.
+ *
+ * A drawn section always carries its header as its fold control; one that
+ * does not is a broken invariant, logged and thrown.
+ */
+export function installFocusFold(host: HTMLElement, sc: SidebarContext, focus: FocusLeft): () => void {
+  return focus.onLeft((why) => {
+    for (const shape of FOCUS_FOLDED_SECTIONS) {
+      for (const section of queryAll<HTMLElement>(host, `.sb-pane > .${shape.className}`)) {
+        if (section.hidden || section.classList.contains("folded")) continue;
+        const control = section.querySelector<HTMLElement>(`:scope > [${FOLD_CONTROL_ATTRIBUTE}]`);
+        if (control === null) {
+          log.error("a section cannot fold itself as the focus leaves: it is drawn without its fold control", {
+            operation: "sidebar.fold.focus-left",
+            context: { section: shape.foldKey, why },
+          });
+          throw new Error(`section fold: the ${shape.foldKey} section has no fold control`);
+        }
+        log.debug("folding a section as the focus left the page", {
+          operation: "sidebar.fold.focus-left",
+          context: { section: shape.foldKey, why },
+        });
+        sectionFold(sc, shape.foldKey, shape.target)(section, control);
+      }
+    }
+  });
 }

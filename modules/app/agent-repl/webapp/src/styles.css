@@ -1067,9 +1067,10 @@ body::after {
      section under OPEN shows it folded or not (owner request, 2026-10-15),
      and so does Hidden Workspaces, whose count is every row it holds,
      scrolled out of its viewport or not (owner request, 2026-10-19).
-   - The Deploys section's header counts nothing (owner request,
-     2026-10-27): each repository's group counts its merges of today on its
-     own header (the rules with the Deploys groups, below).
+   - The Merge Queue and Recently Merged sections' headers count nothing
+     (owner requests, 2026-10-27 and 2026-11-01): each Recently Merged group
+     counts its merges of today on its own header (the rules with the
+     repository groups, below).
    - The open workspaces section's "(N)" takes the same grey and shows whether
      the section is folded or not (owner request, 2026-10-13;
      src/sidebar/roster.ts drawRosterOpenSection), and so does Hidden
@@ -1086,7 +1087,7 @@ body::after {
 #ws-sidebar .repo-head .sb-open-count,
 #ws-sidebar .repo.hidden-section > .repo-head .sb-count { color: var(--muted); }
 /* THE MERGE QUEUES (owner requests, 2026-10-25 and 2026-10-26;
-   src/sidebar/merge-queue-view.ts): the Deploys section draws each
+   src/sidebar/merge-queue-view.ts): the Merge Queue section draws each
    repository's queue, under the repository's label, as a small merge bubble
    for the merge at its head and one line per merge waiting behind it. The head's
    card and each waiting line take a row's padding, so the queue lines up
@@ -1103,7 +1104,7 @@ body::after {
 #ws-sidebar .sb-mq-head-line,
 #ws-sidebar .sb-mq-waiting { display: flex; align-items: center; gap: 0.45rem; }
 /* THE MERGE GLYPH'S WIDTH IS PINNED, so the names after it stand at one
-   indent the recent deploys under the queue share (--deploys-name-indent):
+   indent the queue's head name shares:
    the glyph's own width in the rail's font, measured in WebKit. */
 #ws-sidebar { --mq-glyph-w: 0.81rem; }
 #ws-sidebar .sb-mq-glyph { color: var(--blocked); flex: 0 0 auto; width: var(--mq-glyph-w); text-align: center; }
@@ -1127,10 +1128,14 @@ body::after {
    waiting merge's name is the head's size (owner request, 2026-10-27). */
 #ws-sidebar .sb-mq-head .sb-mq-name,
 #ws-sidebar .sb-mq-waiting .sb-mq-name { font-size: calc(var(--merged-group-head-font-size) * 0.96); }
+/* A WAITING MERGE'S LINE AND A RECENTLY MERGED ROW START AT ONE INDENT
+   (owner request, 2026-11-01): a merged row's name stands where a waiting
+   merge's bullet does, so the two sections' lists read alike. */
+#ws-sidebar { --mq-list-indent: calc(0.9rem + var(--ws-mark-width) + 0.45rem); }
 #ws-sidebar .sb-mq-waiting {
   color: color-mix(in srgb, var(--repo-head-expanded) 55%, var(--repo-head-collapsed));
   font-size: 0.9em;
-  padding-left: calc(0.9rem + var(--ws-mark-width) + 0.45rem);
+  padding-left: var(--mq-list-indent);
 }
 /* The bullet takes the line's color and holds its place in the indent; the
    line's gap sets the name off it. */
@@ -1391,8 +1396,9 @@ html.sb-dragging * { -webkit-user-select: none; user-select: none; }
   font-variant-numeric: tabular-nums;
 }
 
-/* THE BANDS UNDER THE REPOSITORY SECTIONS -- Deploys, then Hidden
-   Workspaces (owner request, 2026-10-27: Deploys moved above Hidden) -- hold no repository's section, so each is set off from the list above by
+/* THE BANDS UNDER THE REPOSITORY SECTIONS -- Merge Queue, Recently Merged,
+   then Hidden Workspaces (owner requests, 2026-10-27: the queues and merges
+   moved above Hidden; 2026-11-01: split into two sections) -- hold no repository's section, so each is set off from the list above by
    ONE shared light rule. Both bands' headers are drawn purple: Recently
    Merged's matches its rows' dots, and Hidden's matches Recently Merged's
    (owner request, 2026-10-11), and so is the open workspaces section's header
@@ -1417,47 +1423,54 @@ html.sb-dragging * { -webkit-user-select: none; user-select: none; }
   --inside-rule-gap: calc(var(--rule-gap) * 0.6);
 }
 #ws-sidebar .repo.hidden-section,
+#ws-sidebar .repo.merge-queue-section,
 #ws-sidebar .repo.merged-section {
   padding-top: 0;
   border-top: 1px solid color-mix(in srgb, var(--muted) 30%, transparent);
 }
 /* Above the rule: the gap less the 3.3px a row or a folded subsection
-   header reaches below its baseline (Deploys), or the 0.8px a folded
-   group's header does (Hidden). */
+   header reaches below its baseline, or the 0.8px a folded band's header
+   does. */
 #ws-sidebar {
   --merged-rule-lead: calc(var(--rule-gap) - 3.3px);
   --hidden-rule-lead: calc(var(--rule-gap) - 0.8px);
 }
-#ws-sidebar .repo.merged-section { margin-top: var(--merged-rule-lead); }
-#ws-sidebar .repo.hidden-section { margin-top: var(--hidden-rule-lead); }
+/* MERGE QUEUE AND RECENTLY MERGED (owner request, 2026-11-01) each stand
+   under a queue line or a row, as Deploys did, and so does Hidden under an
+   open Recently Merged group's last row. */
+#ws-sidebar .repo.merge-queue-section,
+#ws-sidebar .repo.merged-section,
+#ws-sidebar .repo.hidden-section { margin-top: var(--merged-rule-lead); }
 /* A FOLDED SECTION'S HEADER SPANS RULE TO RULE (owner request, 2026-10-31):
    its hover wash fills the whole band between the rule above it and the rule
    below, with no strip left bare at either edge. The space above the next
    band's rule is the folded header's own bottom padding rather than the next
    band's margin, and the rail's top padding is the Open header's own top
    padding; every line stands exactly where it stood. */
+#ws-sidebar .repo.folded + .repo.merge-queue-section,
 #ws-sidebar .repo.folded + .repo.merged-section,
 #ws-sidebar .repo.folded + .repo.hidden-section { margin-top: 0; }
-#ws-sidebar .repo.open-section.folded:has(+ .repo.merged-section) > .repo-head {
+#ws-sidebar .repo.open-section.folded:has(+ .repo:is(.merge-queue-section, .merged-section)) > .repo-head {
   padding-bottom: calc(var(--repo-head-pad-bottom) + var(--merged-rule-lead));
 }
 #ws-sidebar .repo.open-section.folded:has(+ .repo.hidden-section) > .repo-head {
   padding-bottom: calc(var(--repo-head-pad-bottom) + var(--hidden-rule-lead));
 }
-#ws-sidebar .repo.merged-section.folded:has(+ .repo.hidden-section) > .repo-head {
+#ws-sidebar .repo:is(.merge-queue-section, .merged-section).folded:has(+ .repo:is(.merged-section, .hidden-section)) > .repo-head {
   padding-bottom: var(--hidden-rule-lead);
 }
 #ws-sidebar .sb-scroll:has(> .sb-roster) { padding-top: 0; }
 #ws-sidebar .repo.open-section > .repo-head { padding-top: calc(var(--repo-head-pad-top) + var(--rail-body-pad-top)); }
 /* Below the rule: the gap less the 3.6px a band header's line puts above
    its cap top (Hidden's count line, 2.6px). */
-#ws-sidebar .repo.merged-section > .repo-head { padding-top: calc(var(--rule-gap) - 3.6px); }
+#ws-sidebar .repo:is(.merge-queue-section, .merged-section) > .repo-head { padding-top: calc(var(--rule-gap) - 3.6px); }
 #ws-sidebar .repo.hidden-section > .repo-head { padding-top: calc(var(--rule-gap) - 2.6px); }
 /* EACH SECTION'S ROWS SCROLL once the rail is out of room (owner requests,
    2026-10-11 and 2026-10-18): src/sidebar/band-fit.ts caps the rows region's
    height at a whole number of lines, and the rest scroll inside it. */
 #ws-sidebar .repo.open-section > .sb-sections,
 #ws-sidebar .repo.hidden-section > .rows,
+#ws-sidebar .repo.merge-queue-section > .rows,
 #ws-sidebar .repo.merged-section > .rows {
   overflow-y: auto;
 }
@@ -1478,13 +1491,14 @@ html.sb-dragging * { -webkit-user-select: none; user-select: none; }
    scrolled only as far as it needs never stops under the fade. */
 #ws-sidebar { --band-foot-fade: 1.4rem; }
 #ws-sidebar .repo[data-band-stretched][data-band-more] > .rows,
+#ws-sidebar .repo.merge-queue-section[data-band-more] > .rows,
 #ws-sidebar .repo.merged-section[data-band-more] > .rows,
 #ws-sidebar .repo.hidden-section[data-band-more] > .rows,
 #ws-sidebar .repo.open-section[data-band-more] > .sb-sections {
   mask-image: linear-gradient(to bottom, #000 calc(100% - var(--band-foot-fade)), transparent 100%);
   scroll-padding-bottom: var(--band-foot-fade);
 }
-#ws-sidebar .repo.merged-section {
+#ws-sidebar .repo:is(.merge-queue-section, .merged-section) {
   /* The row's line box, stated rather than left to the font: `normal`
      line-height varies with whatever font resolves, so the cap could not be
      expressed in rows without pinning it. 1.15rem (18.4px) clears the 14px row
@@ -1502,7 +1516,8 @@ html.sb-dragging * { -webkit-user-select: none; user-select: none; }
      held just under. */
   --merged-group-head-font-size: 0.68rem;
 }
-/* A REPOSITORY'S GROUP inside Deploys (owner request, 2026-10-31;
+/* A REPOSITORY'S GROUP inside Merge Queue or Recently Merged (owner
+   requests, 2026-10-31 and 2026-11-01;
    src/sidebar/deploys-fold.ts): its label and its "(K today, last D ago)",
    with no fold toggle drawn, as a quieter repository header, indented to the
    band's label. A click on the header folds or opens the group, and a
@@ -1521,6 +1536,7 @@ html.sb-dragging * { -webkit-user-select: none; user-select: none; }
 }
 #ws-sidebar .repo.open-section > .repo-head,
 #ws-sidebar .repo.hidden-section > .repo-head,
+#ws-sidebar .repo.merge-queue-section > .repo-head,
 #ws-sidebar .repo.merged-section > .repo-head { color: var(--blocked); }
 /* A REPOSITORY'S NAME IS FLANKED BY RULES (owner request, 2026-10-27), a
    queue group's and a merged group's alike: a short rule from the section
@@ -1562,7 +1578,7 @@ html.sb-dragging * { -webkit-user-select: none; user-select: none; }
 /* A PAUSED QUEUE IS DRAWN ON ITS OWN REPOSITORY (owner request, 2026-10-27;
    frontend.v1.RosterRepoMergeQueue.paused): the repository's name in the
    error red, a double click on it resuming the queue, and its merge glyphs
-   in the amber a paused merge bubble is framed in. The "Deploys" header
+   in the amber a paused merge bubble is framed in. The "Merge Queue" header
    keeps its purple. */
 #ws-sidebar .merged-group[data-paused] > .merged-group-head,
 #ws-sidebar .merged-group[data-paused] > .merged-group-head > .sb-label { color: var(--err); }
@@ -1574,12 +1590,12 @@ html.sb-dragging * { -webkit-user-select: none; user-select: none; }
 #ws-sidebar .sb-mq-head[data-suspended] .sb-mq-stage[data-state="live"] .sb-mq-stage-glyph { color: var(--muted); animation: none; }
 /* A GROUP'S NAME STANDS OFF THE TEXT AROUND IT BY --inside-rule-gap
    (owner request, 2026-10-31), measured from text to text in WebKit as the
-   rules between the sections are: the Deploys header's baseline above the
+   rules between the sections are: the section header's baseline above the
    first group, a row's baseline or a folded group's name above a later
    group, and a queue's or a row's text below an open group's name. The
-   Deploys header ends at its text, so the first group's name hangs by the
-   gap alone. */
-#ws-sidebar .repo.merged-section > .repo-head { padding-bottom: 0; }
+   Merge Queue and Recently Merged headers end at their text, so the first
+   group's name hangs by the gap alone. */
+#ws-sidebar .repo:is(.merge-queue-section, .merged-section) > .repo-head { padding-bottom: 0; }
 #ws-sidebar .merged-group-head {
   padding-top: calc(var(--inside-rule-gap) - 3px);
   padding-bottom: calc(var(--inside-rule-gap) - 4.5px);
@@ -1597,29 +1613,20 @@ html.sb-dragging * { -webkit-user-select: none; user-select: none; }
 #ws-sidebar .repo.merged-section .row {
   line-height: var(--merged-row-line-h);
 }
-/* A RECENT DEPLOY STEPS BACK FROM THE QUEUE (owner request, 2026-10-31):
-   its name starts where the queue's head name does, past the merge glyph,
-   a step smaller and a step greyer than an open row's. */
-#ws-sidebar { --deploys-name-indent: calc(0.9rem + var(--mq-glyph-w) + 0.45rem); }
-#ws-sidebar .repo.merged-section .ws > .row { padding-left: var(--deploys-name-indent); }
+/* A RECENTLY MERGED ROW IS DRAWN AS A WAITING MERGE'S LINE IS, WITH NO
+   BULLET (owner request, 2026-11-01): its name in the waiting names' size,
+   starting where their bullets do (--mq-list-indent), and in the merged
+   rows' own grey, a step greyer than an open row's. */
+#ws-sidebar .repo.merged-section .ws > .row { padding-left: var(--mq-list-indent); }
 #ws-sidebar .repo.merged-section .row .name.band-name {
   --name-rest: color-mix(in srgb, var(--repo-head-expanded) 70%, var(--repo-head-collapsed));
   color: var(--name-rest);
-  font-size: 0.8125rem;
-}
-/* THE RULE BETWEEN A GROUP'S QUEUE AND ITS RECENT DEPLOYS (owner request,
-   2026-10-31; src/sidebar/roster.ts drawDeploysSplit) spans what the group
-   header's two rules span, in their grey and thickness, with no name
-   between them. */
-#ws-sidebar .sb-deploys-split {
-  height: 1px;
-  background: var(--border);
-  margin: calc(var(--inside-rule-gap) * 0.5) 0.7rem;
+  font-size: calc(var(--merged-group-head-font-size) * 0.96);
 }
 /* THE ARROW UNDER A GROUP shows its next ten older deploys
    (src/sidebar/deploys-more.ts): small, muted, and only as tall as itself. */
 #ws-sidebar .sb-deploys-more {
-  padding: 0 0 calc(var(--inside-rule-gap) * 0.5 + 4.5px) var(--deploys-name-indent);
+  padding: 0 0 calc(var(--inside-rule-gap) * 0.5 + 4.5px) var(--mq-list-indent);
   font-size: 0.7rem;
   line-height: 1;
   color: var(--muted);

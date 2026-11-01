@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 /**
- * THE DEPLOYS GROUPS' FOLDS (owner request, 2026-10-31): each group open while
- * its queue is active and folded while idle, a click overriding that until
- * the queue changes or the user is done with the rail.
+ * THE REPOSITORY GROUPS' FOLDS (owner requests, 2026-10-31 and 2026-11-01):
+ * each Merge Queue and Recently Merged group open until a click folds it,
+ * the click lasting until its queue changes or the user is done with the
+ * rail, and a repository's two groups folding apart.
  */
 import { describe, expect, it } from "vitest";
 import {
@@ -10,10 +11,14 @@ import {
   DEPLOYS_GROUP_FOLDED_CLASS,
   DEPLOYS_LINE_ATTRIBUTE,
   DEPLOYS_REPOSITORY_ATTRIBUTE,
-  automaticFold,
+  DEPLOYS_SECTION_ATTRIBUTE,
+  RECENTLY_MERGED_GROUP_SELECTOR,
   createDeploysFold,
   deploysGroupRepository,
+  deploysGroupSection,
+  foldKeyOf,
   installDeploysFoldReset,
+  type DeploysGroupSection,
 } from "../../src/sidebar/deploys-fold.js";
 import { createFocusLeft, type FocusLeftSource } from "../../src/focus-left.js";
 import { createPresence } from "../../src/presence.js";
@@ -21,10 +26,14 @@ import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 import foldSource from "../../src/sidebar/deploys-fold.ts?raw";
 import moreSource from "../../src/sidebar/deploys-more.ts?raw";
 
-/** A group of REPOSITORY, queued with LINE when one is given and idle otherwise. */
-function group(repository: string, line: string | null = null): HTMLElement {
+/**
+ * A group of REPOSITORY in SECTION: a Merge Queue group stating LINE when one
+ * is given, a Recently Merged group unless said.
+ */
+function group(repository: string, line: string | null = null, section: DeploysGroupSection = line === null ? "recently-merged" : "merge-queue"): HTMLElement {
   const el = document.createElement("div");
   el.className = DEPLOYS_GROUP_CLASS;
+  el.setAttribute(DEPLOYS_SECTION_ATTRIBUTE, section);
   el.setAttribute(DEPLOYS_REPOSITORY_ATTRIBUTE, repository);
   if (line !== null) el.setAttribute(DEPLOYS_LINE_ATTRIBUTE, line);
   return el;
@@ -42,28 +51,28 @@ function manualFocus(): FocusLeftSource {
   return createFocusLeft(window, createPresence(document, true));
 }
 
-describe("automaticFold", () => {
+describe("foldKeyOf", () => {
   it.each([
-    { name: "folds an idle group", line: null, want: true },
-    { name: "opens a queued group", line: "w1", want: false },
-  ])("$name", ({ line, want }) => {
-    expect(automaticFold(group("r1", line))).toBe(want);
+    { name: "keys a Merge Queue group by its section and repository", g: () => group("r1", "w1"), want: "merge-queue:r1" },
+    { name: "keys a Recently Merged group by its section and repository", g: () => group("r1"), want: "recently-merged:r1" },
+  ])("$name", ({ g, want }) => {
+    expect(foldKeyOf(g())).toBe(want);
   });
 });
 
 describe("createDeploysFold", () => {
   it.each([
-    { name: "paints an idle group folded", line: null, want: true },
-    { name: "paints a queued group open", line: "w1", want: false },
-  ])("$name", ({ line, want }) => {
+    { name: "paints a Recently Merged group open", line: null },
+    { name: "paints a Merge Queue group open", line: "w1" },
+  ])("$name", ({ line }) => {
     const g = group("r1", line);
     createDeploysFold(rail(g), () => undefined).paint(g);
-    expect(g.classList.contains(DEPLOYS_GROUP_FOLDED_CLASS)).toBe(want);
+    expect(g.classList.contains(DEPLOYS_GROUP_FOLDED_CLASS)).toBe(false);
   });
 
   it.each([
-    { name: "opens an idle group on the first toggle", toggles: 1, want: false },
-    { name: "folds it again on the second toggle", toggles: 2, want: true },
+    { name: "folds a group on the first toggle", toggles: 1, want: true },
+    { name: "opens it again on the second toggle", toggles: 2, want: false },
   ])("$name, repainting the group", ({ toggles, want }) => {
     const g = group("r1");
     const folds = createDeploysFold(rail(g), () => undefined);
@@ -80,22 +89,27 @@ describe("createDeploysFold", () => {
   it.each([
     { name: "a merge joining the line", after: "w1 w2" },
     { name: "the queue draining", after: null },
-  ])("drops a choice on $name, the automatic fold winning", ({ after }) => {
+  ])("drops a choice on $name, the group opening again", ({ after }) => {
     const folds = createDeploysFold(document, () => undefined);
     folds.toggle(group("r1", "w1"));
-    const redrawn = group("r1", after);
-    expect(folds.folded(redrawn)).toBe(automaticFold(redrawn));
+    expect(folds.folded(group("r1", after, "merge-queue"))).toBe(false);
   });
 
   it("keeps one repository's choice off another's group", () => {
     const folds = createDeploysFold(document, () => undefined);
     folds.toggle(group("r1"));
-    expect(folds.folded(group("r2"))).toBe(true);
+    expect(folds.folded(group("r2"))).toBe(false);
+  });
+
+  it("keeps a repository's queue group's choice off its merged group", () => {
+    const folds = createDeploysFold(document, () => undefined);
+    folds.toggle(group("r1", "w1"));
+    expect([folds.folded(group("r1", "w1")), folds.folded(group("r1"))]).toEqual([true, false]);
   });
 
   it.each([
-    { name: "drops every choice on a reset", reset: true, want: true },
-    { name: "keeps the choices without one", reset: false, want: false },
+    { name: "drops every choice on a reset", reset: true, want: false },
+    { name: "keeps the choices without one", reset: false, want: true },
   ])("$name", ({ reset, want }) => {
     const g = group("r1");
     const folds = createDeploysFold(rail(g), () => undefined);
@@ -116,28 +130,35 @@ describe("createDeploysFold", () => {
 
   it("refuses a group that names no repository", () => {
     const folds = createDeploysFold(document, () => undefined);
-    const nameless = document.createElement("div");
-    nameless.className = DEPLOYS_GROUP_CLASS;
+    const nameless = group("r1");
+    nameless.removeAttribute(DEPLOYS_REPOSITORY_ATTRIBUTE);
     expect(() => folds.toggle(nameless)).toThrow(/carries no data-repository/);
   });
 
-  it("records a toggle with its repository and what caused it, at debug", async () => {
+  it("refuses a group that names no section", () => {
+    const folds = createDeploysFold(document, () => undefined);
+    const sectionless = group("r1");
+    sectionless.removeAttribute(DEPLOYS_SECTION_ATTRIBUTE);
+    expect(() => folds.toggle(sectionless)).toThrow(/carries no data-group-section/);
+  });
+
+  it("records a toggle with its group and what caused it, at debug", async () => {
     const capture = captureLogRecords("debug");
     createDeploysFold(document, () => undefined).toggle(group("r1"));
     const record = await forwardedRecord(capture, "sidebar.deploys-fold");
     expect([record.level.case, record.context]).toMatchObject([
       "debug",
-      { repository: "r1", folded: false, why: "its header was clicked" },
+      { group: "recently-merged:r1", folded: true, why: "its header was clicked" },
     ]);
   });
 
-  it("records a reset with the repositories it let go and why, at debug", async () => {
+  it("records a reset with the groups it let go and why, at debug", async () => {
     const folds = createDeploysFold(document, () => undefined);
     folds.toggle(group("r1"));
     const capture = captureLogRecords("debug");
     folds.reset("the focus left");
     const record = await forwardedRecord(capture, "sidebar.deploys-fold");
-    expect(record.context).toMatchObject({ repositories: ["r1"], why: "the focus left" });
+    expect(record.context).toMatchObject({ groups: ["recently-merged:r1"], why: "the focus left" });
   });
 });
 
@@ -147,7 +168,7 @@ describe("installDeploysFoldReset", () => {
     const el = document.createElement("div");
     el.innerHTML =
       '<div data-roster-row="open"><span class="name">open</span></div>' +
-      `<div class="${DEPLOYS_GROUP_CLASS}" ${DEPLOYS_REPOSITORY_ATTRIBUTE}="r1">` +
+      `<div class="${DEPLOYS_GROUP_CLASS}" ${DEPLOYS_SECTION_ATTRIBUTE}="recently-merged" ${DEPLOYS_REPOSITORY_ATTRIBUTE}="r1">` +
       '<div class="sb-mq-head"><span class="sb-mq-name">head</span></div>' +
       '<div data-roster-row="merged"><span class="name">merged</span></div></div>' +
       '<div class="sb-empty"></div>';
@@ -156,10 +177,10 @@ describe("installDeploysFoldReset", () => {
   }
 
   it.each([
-    { name: "resets on a click on an open row", target: '[data-roster-row="open"] .name', want: true },
-    { name: "keeps the choice on a click on a merge in a group's queue", target: ".sb-mq-name", want: false },
-    { name: "keeps the choice on a click on a group's merged row", target: '[data-roster-row="merged"] .name', want: false },
-    { name: "keeps the choice on a click on no workspace", target: ".sb-empty", want: false },
+    { name: "resets on a click on an open row", target: '[data-roster-row="open"] .name', want: false },
+    { name: "keeps the choice on a click on a merge in a group's queue", target: ".sb-mq-name", want: true },
+    { name: "keeps the choice on a click on a group's merged row", target: '[data-roster-row="merged"] .name', want: true },
+    { name: "keeps the choice on a click on no workspace", target: ".sb-empty", want: true },
   ])("$name", ({ target, want }) => {
     // Arrange
     const { el, g } = host();
@@ -179,7 +200,7 @@ describe("installDeploysFoldReset", () => {
     folds.toggle(g);
     installDeploysFoldReset(el, folds, focus);
     focus.left("the page lost focus");
-    expect(folds.folded(g)).toBe(true);
+    expect(folds.folded(g)).toBe(false);
   });
 
   it("resets on a click a row's own handler stops, since it listens first", () => {
@@ -189,7 +210,7 @@ describe("installDeploysFoldReset", () => {
     folds.toggle(g);
     installDeploysFoldReset(el, folds, manualFocus());
     (el.querySelector('[data-roster-row="open"] .name') as HTMLElement).click();
-    expect(folds.folded(g)).toBe(true);
+    expect(folds.folded(g)).toBe(false);
   });
 
   it("hears nothing once uninstalled", () => {
@@ -200,7 +221,32 @@ describe("installDeploysFoldReset", () => {
     installDeploysFoldReset(el, folds, focus)();
     focus.left("the page lost focus");
     (el.querySelector('[data-roster-row="open"] .name') as HTMLElement).click();
-    expect(folds.folded(g)).toBe(false);
+    expect(folds.folded(g)).toBe(true);
+  });
+});
+
+describe("deploysGroupSection", () => {
+  it.each([
+    { name: "answers a Merge Queue group's section", section: "merge-queue" as const },
+    { name: "answers a Recently Merged group's section", section: "recently-merged" as const },
+  ])("$name", ({ section }) => {
+    expect(deploysGroupSection(group("r1", null, section), "op")).toBe(section);
+  });
+
+  it("refuses and logs a group naming another section under the caller's operation", async () => {
+    const g = group("r1");
+    g.setAttribute(DEPLOYS_SECTION_ATTRIBUTE, "deploys");
+    const capture = captureLogRecords("error");
+    expect(() => deploysGroupSection(g, "sidebar.test-op")).toThrow(/^sidebar\.test-op: a repository group carries no data-group-section$/);
+    const record = await forwardedRecord(capture, "sidebar.test-op");
+    expect(record.context).toMatchObject({ attribute: DEPLOYS_SECTION_ATTRIBUTE, found: "deploys" });
+  });
+});
+
+describe("RECENTLY_MERGED_GROUP_SELECTOR", () => {
+  it("matches a Recently Merged group and no Merge Queue group", () => {
+    const root = rail(group("r1", "w1"), group("r1"));
+    expect([...root.querySelectorAll<HTMLElement>(RECENTLY_MERGED_GROUP_SELECTOR)].map((g) => foldKeyOf(g))).toEqual(["recently-merged:r1"]);
   });
 });
 
@@ -218,7 +264,7 @@ describe("deploysGroupRepository", () => {
     if (value === null) g.removeAttribute(DEPLOYS_REPOSITORY_ATTRIBUTE);
     else g.setAttribute(DEPLOYS_REPOSITORY_ATTRIBUTE, value);
     // Act + Assert
-    expect(() => deploysGroupRepository(g, "sidebar.test-op")).toThrow(/^sidebar\.test-op: a Deploys group carries no data-repository$/);
+    expect(() => deploysGroupRepository(g, "sidebar.test-op")).toThrow(/^sidebar\.test-op: a repository group carries no data-repository$/);
   });
 
   it("logs a refusal under the caller's operation with what it found", async () => {
@@ -238,7 +284,7 @@ describe("deploysGroupRepository", () => {
     { name: "the older deploys", source: moreSource },
   ])("is the one read of a group's repository for $name", ({ source }) => {
     const reads = source.match(/getAttribute\(DEPLOYS_REPOSITORY_ATTRIBUTE\)/g) ?? [];
-    const calls = source.match(/deploysGroupRepository\(group, "/g) ?? [];
+    const calls = source.match(/deploysGroupRepository\(group, /g) ?? [];
     expect([reads.length, calls.length]).toEqual([source === foldSource ? 1 : 0, 1]);
   });
 });

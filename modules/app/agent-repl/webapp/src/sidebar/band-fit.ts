@@ -1,7 +1,14 @@
 /**
- * band-fit — how many lines of the Open, Deploys and Hidden Workspaces
- * sections the rail shows, top to bottom, each section scrolling through the
- * rest.
+ * band-fit — how many lines of the Open, Merge Queue, Recently Merged and
+ * Hidden Workspaces sections the rail shows, top to bottom, each section
+ * scrolling through the rest.
+ *
+ * THE MERGE QUEUE AND RECENTLY MERGED SECTIONS FIT AS ONE BAND, "Deploys"
+ * below (owner request, 2026-11-01: the Deploys section split in two, every
+ * rule it was fitted by kept): its lines are the Merge Queue section's, then
+ * the Recently Merged section's (`combineStops`), the queue's every line
+ * claiming room as today's merges do, and the lines the band is given go to
+ * the Merge Queue section first (`splitLines`).
  *
  * THE RAIL NEVER SCROLLS; ITS SECTIONS DO (owner request, 2026-10-18). The
  * daemon sends every row of every section (Deploys holds a week of merges
@@ -95,15 +102,15 @@ import {
   MERGE_QUEUE_HEAD_CLASS,
   MERGE_QUEUE_REMEDIATING_CLASS,
   MERGE_QUEUE_WAITING_CLASS,
-  MERGE_QUEUE_CLASS,
 } from "./merge-queue-view.js";
 import { DEPLOYS_FLOOR, DEPLOYS_GROUP_CLASS, DEPLOYS_GROUP_FOLDED_CLASS } from "./deploys-fold.js";
 import { mergedToday } from "./row.js";
 
-/** The classes the three sections are drawn with. */
+/** The classes the four sections are drawn with. */
 export const OPEN_SECTION_CLASS = "open-section";
 export const HIDDEN_SECTION_CLASS = "hidden-section";
 export const MERGED_SECTION_CLASS = "merged-section";
+export const MERGE_QUEUE_SECTION_CLASS = "merge-queue-section";
 
 /** The class of the Open section's rows region: the box its repository sections are placed in. */
 export const OPEN_REGION_CLASS = "sb-sections";
@@ -126,6 +133,7 @@ export const BAND_FLOOR = 3;
 /** Each section's class and its rows region's, top to bottom. */
 const SECTION_REGIONS = [
   [OPEN_SECTION_CLASS, OPEN_REGION_CLASS],
+  [MERGE_QUEUE_SECTION_CLASS, "rows"],
   [MERGED_SECTION_CLASS, "rows"],
   [HIDDEN_SECTION_CLASS, "rows"],
 ] as const;
@@ -152,11 +160,44 @@ const LINE_SELECTOR = [
   `.${DEPLOYS_GROUP_CLASS}.${DEPLOYS_GROUP_FOLDED_CLASS} > .merged-group-head`,
 ].join(", ");
 
-/** How many lines each section's viewport shows. */
-export interface SectionLines {
+/**
+ * How many lines the allocation gives the Open section, the Deploys band
+ * (`merged`: the Merge Queue and Recently Merged sections together) and
+ * Hidden Workspaces.
+ */
+export interface BandLines {
   open: number;
   merged: number;
   hidden: number;
+}
+
+/** How many lines each section's viewport shows. */
+export interface SectionLines {
+  open: number;
+  queue: number;
+  merged: number;
+  hidden: number;
+}
+
+/**
+ * The Deploys band's stops (see the module note): the Merge Queue section's
+ * QUEUE stops, then the Recently Merged section's MERGED stops standing on
+ * the queue's whole height.
+ */
+export function combineStops(queue: BandStops, merged: BandStops): number[] {
+  assertStops(queue, "queue");
+  assertStops(merged, "merged");
+  const whole = queue[queue.length - 1];
+  return [...queue, ...merged.slice(1).map((h) => whole + h)];
+}
+
+/**
+ * The Deploys band's LINES split between its two sections: the Merge Queue
+ * section's QUEUE_TOTAL lines first, the rest the Recently Merged section's.
+ */
+export function splitLines(lines: number, queueTotal: number): { queue: number; merged: number } {
+  const queue = Math.min(lines, queueTotal);
+  return { queue, merged: lines - queue };
 }
 
 /**
@@ -205,7 +246,7 @@ export function bandShare(today: number, hidden: number): { merged: number; hidd
  * Split ROOM pixels between the three sections, as the module note says.
  * Returns the number of lines each section's viewport shows.
  */
-export function allocateSectionLines(room: number, stops: SectionStops): SectionLines {
+export function allocateSectionLines(room: number, stops: SectionStops): BandLines {
   const { open, merged, hidden, mergedToday: today, mergedFloor: floor } = stops;
   assertStops(open, "open");
   assertStops(merged, "merged");
@@ -305,8 +346,8 @@ export function regionStops(region: HTMLElement, lines: readonly HTMLElement[] =
 }
 
 /**
- * How many of Deploys' first LINES its open groups keep ahead of the other
- * sections: through its `DEPLOYS_FLOOR`th merged row (a line inside a row
+ * How many of the Recently Merged section's first LINES its open groups keep
+ * ahead of the other sections: through its `DEPLOYS_FLOOR`th merged row (a line inside a row
  * stamped `MERGED_AT_ATTRIBUTE`), or its last when it shows fewer. A folded
  * group draws no merged row, so with every group folded it keeps none.
  */
@@ -322,27 +363,26 @@ export function deploysFloorLines(lines: readonly HTMLElement[]): number {
 }
 
 /**
- * How many of Deploys' first LINES it takes to show its queues and every
- * merge that landed on NOW_MS's local date: through the last line that is a
- * queue's (inside `MERGE_QUEUE_CLASS`), a folded group's header, or whose
- * row carries a merged instant of today. Any other line outside a stamped
- * row is malformed.
+ * How many of the Recently Merged section's first LINES it takes to show
+ * every merge that landed on NOW_MS's local date: through the last line that
+ * is a folded group's header, or whose row carries a merged instant of
+ * today. Any other line outside a stamped row is malformed.
  */
 export function mergedTodayLines(lines: readonly HTMLElement[], nowMs: number): number {
   let through = 0;
   lines.forEach((line, i) => {
-    if (line.closest(`.${MERGE_QUEUE_CLASS}`) !== null || line.matches(`.${DEPLOYS_GROUP_CLASS} > .merged-group-head`)) {
+    if (line.matches(`.${DEPLOYS_GROUP_CLASS} > .merged-group-head`)) {
       through = i + 1;
       return;
     }
     const stamped = line.closest<HTMLElement>(`[${MERGED_AT_ATTRIBUTE}]`);
     const atMs = stamped === null ? Number.NaN : Number(stamped.getAttribute(MERGED_AT_ATTRIBUTE));
     if (!Number.isFinite(atMs)) {
-      log.error("a sidebar band cannot be fitted: a Deploys line is no queue's and carries no merged instant", {
+      log.error("a sidebar band cannot be fitted: a Recently Merged line carries no merged instant", {
         operation: "sidebar.band-fit.unstamped",
         context: { line: i, merged_at: stamped?.getAttribute(MERGED_AT_ATTRIBUTE) ?? null },
       });
-      throw new Error(`band fit: Deploys line ${i} is no queue's and carries no merged instant`);
+      throw new Error(`band fit: Recently Merged line ${i} carries no merged instant`);
     }
     if (mergedToday(atMs, nowMs)) through = i + 1;
   });
@@ -497,10 +537,10 @@ function stretchedEntry(sized: ReadonlyArray<readonly [Measured, number]>, lowes
  * module note).
  */
 export function fitBands(scroller: HTMLElement, pane: HTMLElement, nowMs: number): SectionLines | null {
-  const [openSection, mergedSection, hiddenSection] = SECTION_REGIONS.map(([className, regionClass]) =>
+  const [openSection, queueSection, mergedSection, hiddenSection] = SECTION_REGIONS.map(([className, regionClass]) =>
     openBand(pane, className, regionClass),
   );
-  if (openSection === null && mergedSection === null && hiddenSection === null) return null;
+  if (openSection === null && queueSection === null && mergedSection === null && hiddenSection === null) return null;
   const paneHeight = pane.getBoundingClientRect().height;
   const scrollerHeight = scroller.getBoundingClientRect().height;
   if (paneHeight <= 0 || scrollerHeight <= 0) {
@@ -510,7 +550,7 @@ export function fitBands(scroller: HTMLElement, pane: HTMLElement, nowMs: number
     });
     return null;
   }
-  const bands = [openSection, mergedSection, hiddenSection].filter((band): band is Band => band !== null);
+  const bands = [openSection, queueSection, mergedSection, hiddenSection].filter((band): band is Band => band !== null);
   // THE FIT NEVER MOVES THE READER'S VIEW (owner report, 2026-10-27): letting
   // a viewport go shrinks it to its rows, and the measuring that follows lays
   // it out, clamping its scroll to its top. Each viewport's position is read
@@ -521,19 +561,28 @@ export function fitBands(scroller: HTMLElement, pane: HTMLElement, nowMs: number
   for (const band of bands) band.region.style.height = "";
   const room = measureRoom(scroller, pane, bands);
   const open = measure(openSection);
+  const queue = measure(queueSection);
   const merged = measure(mergedSection);
   const hidden = measure(hiddenSection);
-  const today = merged === null ? 0 : mergedTodayLines(merged.lines, nowMs);
-  const floor = merged === null ? 0 : deploysFloorLines(merged.lines);
-  const lines = allocateSectionLines(room, {
+  // THE DEPLOYS BAND (see the module note): every queue line claims room as
+  // today's merges do, and the floor counts the queue's lines above it.
+  const queueTotal = (queue?.stops.length ?? 1) - 1;
+  const mergedToday = merged === null ? 0 : mergedTodayLines(merged.lines, nowMs);
+  const mergedFloor = merged === null ? 0 : deploysFloorLines(merged.lines);
+  const today = queueTotal + mergedToday;
+  const floor = mergedFloor === 0 ? 0 : queueTotal + mergedFloor;
+  const allocated = allocateSectionLines(room, {
     open: open?.stops ?? [0],
-    merged: merged?.stops ?? [0],
+    merged: combineStops(queue?.stops ?? [0], merged?.stops ?? [0]),
     hidden: hidden?.stops ?? [0],
     mergedToday: today,
     mergedFloor: floor,
   });
+  const split = splitLines(allocated.merged, queueTotal);
+  const lines: SectionLines = { open: allocated.open, queue: split.queue, merged: split.merged, hidden: allocated.hidden };
   const sized = [
     [open, lines.open],
+    [queue, lines.queue],
     [merged, lines.merged],
     [hidden, lines.hidden],
   ].filter((entry): entry is [Measured, number] => entry[0] !== null);
@@ -549,9 +598,11 @@ export function fitBands(scroller: HTMLElement, pane: HTMLElement, nowMs: number
     open_shown: lines.open,
     hidden_total: (hidden?.stops.length ?? 1) - 1,
     hidden_shown: lines.hidden,
+    queue_total: queueTotal,
+    queue_shown: lines.queue,
     merged_total: (merged?.stops.length ?? 1) - 1,
-    merged_today: today,
-    merged_floor: floor,
+    merged_today: mergedToday,
+    merged_floor: mergedFloor,
     merged_shown: lines.merged,
     stretch,
   };

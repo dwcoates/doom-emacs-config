@@ -1,6 +1,6 @@
 /**
- * deploys-more — HOW MANY OF EACH REPOSITORY'S RECENT DEPLOYS ITS DEPLOYS
- * GROUP SHOWS (owner request, 2026-10-31; frontend.v1.RosterMergedRepoGroup).
+ * deploys-more — HOW MANY OF EACH REPOSITORY'S RECENT MERGES ITS RECENTLY
+ * MERGED GROUP SHOWS (owner request, 2026-10-31; frontend.v1.RosterMergedRepoGroup).
  *
  * A GROUP SHOWS ITS TEN MOST RECENT DEPLOYS. Every older one is drawn in a
  * page of ten (`DEPLOYS_PAGE_CLASS`) that stays hidden until the small arrow
@@ -8,20 +8,20 @@
  * more page. The arrow is drawn only while a page is still hidden.
  *
  * THE PAGES SHOWN GO AGAIN once none of them has been in view for
- * `DEPLOYS_MORE_LINGER_MS`: scrolled out of the Deploys viewport, or folded
+ * `DEPLOYS_MORE_LINGER_MS`: scrolled out of the Recently Merged viewport, or folded
  * away with their group. One coming back into view before then keeps them.
  * Letting them go keeps whatever the viewport showed where it stood, so a
  * page above the viewport's top shifts nothing in view.
  *
  * THE COUNT IS THIS PAGE'S OWN, never the daemon's view state, and it
- * outlives every draw, so a push that redraws the Deploys section draws each
+ * outlives every draw, so a push that redraws the Recently Merged section draws each
  * group with the pages it had.
  */
 import { queryAll } from "../dom.js";
 import { log } from "../log.js";
 import { scrollKept } from "../scroll.js";
 import type { Timers } from "../timers.js";
-import { DEPLOYS_GROUP_CLASS, deploysGroupRepository } from "./deploys-fold.js";
+import { RECENTLY_MERGED_GROUP_SELECTOR, deploysGroupRepository } from "./deploys-fold.js";
 
 /** How many deploys a group shows before its arrow is clicked, and how many each click adds. */
 export const DEPLOYS_PAGE_SIZE = 10;
@@ -38,10 +38,10 @@ export const DEPLOYS_MORE_CLASS = "sb-deploys-more";
 /** What the arrow draws: a small downward arrow. */
 export const DEPLOYS_MORE_GLYPH = "▾";
 
-/** The Deploys section's rows region, the viewport a page is in view of or not. */
+/** The Recently Merged section's rows region, the viewport a page is in view of or not. */
 const DEPLOYS_REGION_SELECTOR = ".merged-section > .rows";
 
-/** The page's one count of the Deploys pages each group shows. */
+/** The page's one count of the Recently Merged pages each group shows. */
 export interface DeploysMore {
   /** Show GROUP's next page; the arrow's click. */
   more(group: HTMLElement): void;
@@ -67,15 +67,15 @@ function pagesOf(group: HTMLElement): HTMLElement[] {
   return queryAll<HTMLElement>(group, `.${DEPLOYS_PAGE_CLASS}`);
 }
 
-/** The Deploys viewport GROUP is drawn in. A group always hangs in one. */
+/** The Recently Merged viewport GROUP is drawn in. A group always hangs in one. */
 function regionOf(group: HTMLElement): HTMLElement {
   const region = group.closest<HTMLElement>(DEPLOYS_REGION_SELECTOR);
   if (region === null) {
-    log.error("a Deploys group's older deploys cannot be looked at: it hangs in no Deploys viewport", {
+    log.error("a Recently Merged group's older merges cannot be looked at: it hangs in no Recently Merged viewport", {
       operation: "sidebar.deploys-more.malformed",
       context: { repository: repositoryOf(group) },
     });
-    throw new Error("deploys more: a Deploys group hangs in no Deploys viewport");
+    throw new Error("deploys more: a Recently Merged group hangs in no Recently Merged viewport");
   }
   return region;
 }
@@ -97,7 +97,7 @@ export function pagesInView(pages: readonly HTMLElement[], region: HTMLElement):
 export function createDeploysMore(root: ParentNode, timers: Timers, changed: () => void): DeploysMore {
   const shown = new Map<string, Shown>();
   const groupOf = (repository: string): HTMLElement | null =>
-    queryAll<HTMLElement>(root, `.${DEPLOYS_GROUP_CLASS}`).find((group) => repositoryOf(group) === repository) ?? null;
+    queryAll<HTMLElement>(root, RECENTLY_MERGED_GROUP_SELECTOR).find((group) => repositoryOf(group) === repository) ?? null;
   const paint = (group: HTMLElement): void => {
     const pages = shown.get(repositoryOf(group))?.pages ?? 0;
     const all = pagesOf(group);
@@ -110,7 +110,7 @@ export function createDeploysMore(root: ParentNode, timers: Timers, changed: () 
   const letGo = (repository: string): void => {
     shown.delete(repository);
     const group = groupOf(repository);
-    log.debug("let a Deploys group's older deploys go", {
+    log.debug("let a Recently Merged group's older merges go", {
       operation: "sidebar.deploys-more",
       context: { repository, why: `none was in view for ${DEPLOYS_MORE_LINGER_MS}ms`, drawn: group !== null },
     });
@@ -142,7 +142,7 @@ export function createDeploysMore(root: ParentNode, timers: Timers, changed: () 
       const state = shown.get(repository) ?? { pages: 0, linger: null };
       state.pages += 1;
       shown.set(repository, state);
-      log.debug("showed a Deploys group's next older deploys", {
+      log.debug("showed a Recently Merged group's next older merges", {
         operation: "sidebar.deploys-more",
         context: { repository, pages: state.pages, why: "its arrow was clicked" },
       });
