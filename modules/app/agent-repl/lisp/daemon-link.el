@@ -641,6 +641,13 @@ the reconnect hooks would re-register a fleet that is already registered."
                                old agent-repl-link--primary)
     (when old (agent-repl-connect-close old))))
 
+(defun agent-repl-link--complete-handover (outcome)
+  "Complete the handover: the old primary\='s stream ended with OUTCOME.
+The accepted successor is promoted.  The one completion for both orders
+in which Emacs reads the old end and the successor\='s acceptance."
+  (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.handover-complete outcome=%S" outcome)
+  (agent-repl-link--promote-successor))
+
 (defun agent-repl-link--handle-close (conn outcome)
   "React to the `WatchDaemon' stream on CONN closing with OUTCOME.
 OUTCOME is connect.el's vocabulary: `(:cancelled)' is the client's own
@@ -700,8 +707,7 @@ the stream\='s last frame was the planned ending
       (agent-repl--log '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.primary-stream-cancelled"))
      (agent-repl-link--successor
       ;; The old daemon finished and dropped its stream after a handover.
-      (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.handover-complete outcome=%S" outcome)
-      (agent-repl-link--promote-successor))
+      (agent-repl-link--complete-handover outcome))
      (agent-repl-link--pending-successor
       ;; THE OLD DAEMON LEFT BEFORE ITS SUCCESSOR WAS ACCEPTED.  It announced
       ;; the successor on this stream, so this end IS the handover's end,
@@ -904,9 +910,7 @@ dialed while the link was down (OLD nil) is the link itself now."
       (agent-repl-link--run-hook 'agent-repl-link-handover-functions
                                  old agent-repl-link--successor)
       (when agent-repl-link--primary-ended
-        (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.handover-complete outcome=%S"
-                          agent-repl-link--primary-ended)
-        (agent-repl-link--promote-successor)))
+        (agent-repl-link--complete-handover agent-repl-link--primary-ended)))
      (old
       ;; A primary that ended with a successor pending stays the primary
       ;; until the acceptance, so the one it was announced on cannot be gone.

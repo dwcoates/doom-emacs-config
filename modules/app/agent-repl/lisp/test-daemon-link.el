@@ -1954,6 +1954,43 @@ Returns the pending successor connection."
       (should (= runs 1))
       (should (= calls 2)))))
 
+(ert-deftest agent-repl-test-link-complete-handover-promotes-the-successor ()
+  "Completing a handover makes the accepted successor the primary."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let* ((conn (agent-repl-test-link--connect "127.0.0.1:9001"))
+           (successor (agent-repl-test-link--announce-successor conn "127.0.0.1:9100")))
+      ;; Act
+      (agent-repl-link--complete-handover '(:ended))
+      ;; Assert
+      (should (eq (agent-repl-link-primary) successor))
+      (should (null (agent-repl-link-successor))))))
+
+(ert-deftest agent-repl-test-link-complete-handover-records-the-outcome-at-info ()
+  "The completion names how the old stream ended."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-test-link--connect "127.0.0.1:9001")))
+      (agent-repl-test-link--announce-successor conn "127.0.0.1:9100")
+      ;; Act
+      (agent-repl-link--complete-handover '(:error (:kind :transport)))
+      ;; Assert
+      (should (agent-repl-test-link--logged-p
+               :info "elisp.link.handover-complete outcome=(:error (:kind :transport))")))))
+
+(ert-deftest agent-repl-test-link-handovers-complete-through-one-helper ()
+  "Both orders complete the handover through `agent-repl-link--complete-handover'."
+  (with-temp-buffer
+    (insert-file-contents (expand-file-name "daemon-link.el" agent-repl-test-link--lisp-dir))
+    (let ((promotes 0) (calls 0))
+      (while (search-forward "(agent-repl-link--promote-successor)" nil t)
+        (setq promotes (1+ promotes)))
+      (goto-char (point-min))
+      (while (search-forward "(agent-repl-link--complete-handover " nil t)
+        (setq calls (1+ calls)))
+      (should (= promotes 1))
+      (should (= calls 2)))))
+
 (ert-deftest agent-repl-test-link-primary-ends-go-down-through-one-helper ()
   "Every primary end with no successor to promote takes the link down
 through `agent-repl-link--primary-ended-down', so the planned and the lost
