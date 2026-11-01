@@ -1342,9 +1342,14 @@ NAME is the canonical spelling, e.g. \"Content-Type\"."
 
 (defun agent-repl-itest--with-apps (roster)
   "Return the protojson ROSTER with the sidebar's app sections, when absent.
-The daemon always sends the app switcher and the thread section; a fixture
-that is not about threads gets the Workspaces app shown and no thread."
+The daemon always sends the app switcher, the thread section and the
+Merge Queue section; a fixture that is not about them gets the Workspaces
+app shown, no thread, and no queue."
   (append roster
+          (unless (assq 'mergeQueue roster)
+            '((mergeQueue . ((header . ((label . ((text . "Merge Queue")))))
+                             (groups . [])
+                             (expanded . ())))))
           (unless (assq 'appSwitcher roster)
             '((appSwitcher . ((title . ((text . "Workspaces")))
                               (shown . ((workspaces . ())))
