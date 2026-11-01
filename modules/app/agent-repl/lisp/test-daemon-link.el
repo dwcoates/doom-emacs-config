@@ -96,6 +96,7 @@
          (agent-repl-link--quiet-until-ms nil)
          (agent-repl-link--bounce-cause nil)
          (agent-repl-link--ending-conn nil)
+         (agent-repl-link--primary-ended nil)
          (agent-repl-link-drain nil)
          (agent-repl-link--surfaced-faults (make-hash-table :test #'equal))
          (agent-repl-link-drain-segment nil)
@@ -1614,6 +1615,282 @@ as if it were understood."
                                    '(:error (:kind :transport)))
       ;; Assert
       (should (agent-repl-test-link--logged-p :error "elisp.link.successor-open-refused")))))
+
+;;;; ---- The old stream's end read before the successor's acceptance ----
+
+(defun agent-repl-test-link--end-before-acceptance (&optional outcome)
+  "Stand a primary, announce a successor, end the primary's stream first.
+The stream carries the planned ending frame and then closes with OUTCOME
+\(`(:ended)' when nil) while the successor is still PENDING -- the order a
+busy Emacs reads them in.  Returns the primary connection."
+  (let ((conn (agent-repl-test-link--connect "127.0.0.1:9001")))
+    (agent-repl-test-link--push
+     conn (list :arm :shutdown-announced
+                :value (agent-repl-test-link--announcement :address "127.0.0.1:9100")))
+    (agent-repl-test-link--push conn (list :arm :ending :value nil))
+    (agent-repl-test-link--close conn (or outcome '(:ended)))
+    conn))
+
+(ert-deftest agent-repl-test-link-end-before-acceptance-runs-no-down-hook ()
+  "The announced successor is on its way, so the old end is not a link-down."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (add-hook 'agent-repl-link-down-functions (agent-repl-test-link--record-hook :down))
+    ;; Act
+    (agent-repl-test-link--end-before-acceptance)
+    ;; Assert
+    (should (null (assq :down agent-repl-test-link--hooks)))))
+
+(ert-deftest agent-repl-test-link-end-before-acceptance-keeps-the-primary ()
+  "The primary stands until the acceptance promotes its successor."
+  (agent-repl-test-link--with-harness
+    ;; Act
+    (let ((conn (agent-repl-test-link--end-before-acceptance)))
+      ;; Assert
+      (should (eq (agent-repl-link-primary) conn)))))
+
+(ert-deftest agent-repl-test-link-end-before-acceptance-schedules-no-reconnect ()
+  "Nothing went down, so the reconnect loop is not armed."
+  (agent-repl-test-link--with-harness
+    ;; Act
+    (agent-repl-test-link--end-before-acceptance)
+    ;; Assert
+    (should (null agent-repl-test-link--timers))))
+
+(ert-deftest agent-repl-test-link-end-before-acceptance-is-logged-at-info ()
+  "The order is seen in the log, at INFO: nothing is wrong."
+  (agent-repl-test-link--with-harness
+    ;; Act
+    (agent-repl-test-link--end-before-acceptance)
+    ;; Assert
+    (should (agent-repl-test-link--logged-p
+             :info "elisp.link.primary-ended-before-successor address=\"127.0.0.1:9001\" successor=\"127.0.0.1:9100\" outcome=(:ended)"))))
+
+(ert-deftest agent-repl-test-link-end-before-acceptance-records-the-outcome ()
+  "The ended stream's outcome is kept for the acceptance to complete on."
+  (agent-repl-test-link--with-harness
+    ;; Act
+    (agent-repl-test-link--end-before-acceptance '(:error (:kind :transport)))
+    ;; Assert
+    (should (equal agent-repl-link--primary-ended '(:error (:kind :transport))))))
+
+(ert-deftest agent-repl-test-link-acceptance-after-the-end-runs-the-handover-hook ()
+  "The handover hooks run with both connections, whichever arrived first."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (add-hook 'agent-repl-link-handover-functions (agent-repl-test-link--record-hook :handover))
+    (let* ((conn (agent-repl-test-link--end-before-acceptance))
+           (successor agent-repl-link--pending-successor))
+      ;; Act
+      (agent-repl-test-link--accept successor)
+      ;; Assert
+      (should (equal (cdr (assq :handover agent-repl-test-link--hooks))
+                     (list conn successor))))))
+
+(ert-deftest agent-repl-test-link-acceptance-after-the-end-promotes ()
+  "The acceptance completes the handover: the successor is the primary."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (agent-repl-test-link--end-before-acceptance)
+    (let ((successor agent-repl-link--pending-successor))
+      ;; Act
+      (agent-repl-test-link--accept successor)
+      ;; Assert
+      (should (eq (agent-repl-link-primary) successor))
+      (should (null (agent-repl-link-successor)))
+      (should (null agent-repl-link--primary-ended)))))
+
+(ert-deftest agent-repl-test-link-acceptance-after-the-end-runs-the-promote-hook ()
+  "The promote hooks receive the old connection and the new."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (add-hook 'agent-repl-link-promote-functions (agent-repl-test-link--record-hook :promote))
+    (let* ((conn (agent-repl-test-link--end-before-acceptance))
+           (successor agent-repl-link--pending-successor))
+      ;; Act
+      (agent-repl-test-link--accept successor)
+      ;; Assert
+      (should (equal (cdr (assq :promote agent-repl-test-link--hooks))
+                     (list conn successor))))))
+
+(ert-deftest agent-repl-test-link-acceptance-after-the-end-hands-over-before-promoting ()
+  "Consumers see the handover first, then the promotion, as in the other order."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (add-hook 'agent-repl-link-handover-functions (agent-repl-test-link--record-hook :handover))
+    (add-hook 'agent-repl-link-promote-functions (agent-repl-test-link--record-hook :promote))
+    (agent-repl-test-link--end-before-acceptance)
+    ;; Act
+    (agent-repl-test-link--accept agent-repl-link--pending-successor)
+    ;; Assert: the record list is newest first.
+    (should (equal (mapcar #'car agent-repl-test-link--hooks) '(:promote :handover)))))
+
+(ert-deftest agent-repl-test-link-acceptance-after-the-end-runs-no-up-or-down-hook ()
+  "A promotion rebuilds nothing, whichever order the two edges were read in."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (agent-repl-test-link--end-before-acceptance)
+    (add-hook 'agent-repl-link-up-functions (agent-repl-test-link--record-hook :up))
+    (add-hook 'agent-repl-link-down-functions (agent-repl-test-link--record-hook :down))
+    ;; Act
+    (agent-repl-test-link--accept agent-repl-link--pending-successor)
+    ;; Assert
+    (should (null (assq :up agent-repl-test-link--hooks)))
+    (should (null (assq :down agent-repl-test-link--hooks)))))
+
+(ert-deftest agent-repl-test-link-acceptance-after-the-end-closes-the-old-connection ()
+  "The old connection is closed once its consumers were told."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-test-link--end-before-acceptance)))
+      ;; Act
+      (agent-repl-test-link--accept agent-repl-link--pending-successor)
+      ;; Assert
+      (should-not (agent-repl-connect-connection-alive-p conn)))))
+
+(ert-deftest agent-repl-test-link-acceptance-after-the-end-warns-nothing ()
+  "The order is ordinary: no WARNING and no ERROR anywhere on the walk."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (agent-repl-test-link--end-before-acceptance)
+    ;; Act
+    (agent-repl-test-link--accept agent-repl-link--pending-successor)
+    ;; Assert
+    (should-not (seq-some (lambda (entry) (memq (car entry) '(:warn :error)))
+                          agent-repl-test-link--logs))
+    (should (agent-repl-test-link--logged-p :info "elisp.link.handover-complete outcome=(:ended)"))))
+
+(ert-deftest agent-repl-test-link-successor-death-after-the-end-takes-the-link-down-planned ()
+  "No successor to promote: the announced ending is the link going down, at INFO."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let (planned)
+      (add-hook 'agent-repl-link-down-functions
+                (lambda (conn) (push (cons conn agent-repl-link-down-planned) planned)))
+      (let ((conn (agent-repl-test-link--end-before-acceptance)))
+        ;; Act
+        (agent-repl-test-link--close agent-repl-link--pending-successor
+                                     '(:error (:kind :transport)))
+        ;; Assert
+        (should (equal planned (list (cons conn t))))
+        (should (null (agent-repl-link-primary)))
+        (should (null agent-repl-link--primary-ended))
+        (should agent-repl-test-link--timers)
+        (should (agent-repl-test-link--logged-p :info "elisp.link.handover-abandoned primary-outcome=(:ended)"))
+        (should (agent-repl-test-link--logged-p :info "elisp.link.down-planned"))))))
+
+(ert-deftest agent-repl-test-link-successor-death-after-an-unannounced-end-warns-the-down ()
+  "An old end with no ending frame was a loss: the down it becomes is a WARNING."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-test-link--connect "127.0.0.1:9001")))
+      (agent-repl-test-link--push
+       conn (list :arm :shutdown-announced
+                  :value (agent-repl-test-link--announcement :address "127.0.0.1:9100")))
+      (agent-repl-test-link--close conn '(:error (:kind :transport)))
+      ;; Act
+      (agent-repl-test-link--close agent-repl-link--pending-successor
+                                   '(:error (:kind :transport)))
+      ;; Assert
+      (should (agent-repl-test-link--logged-p :warn "elisp.link.down outcome=(:error (:kind :transport))"))
+      (should (null (agent-repl-link-primary))))))
+
+(ert-deftest agent-repl-test-link-teardown-forgets-an-ended-primary ()
+  "Teardown leaves no ended-primary mark for a later link to inherit."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (agent-repl-test-link--end-before-acceptance)
+    ;; Act
+    (agent-repl-link-teardown)
+    ;; Assert
+    (should (null agent-repl-link--primary-ended))))
+
+(ert-deftest agent-repl-test-link-acceptance-after-the-primary-vanished-fails-hard ()
+  "A successor announced on a primary that is gone is an invariant breach."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-test-link--connect "127.0.0.1:9001")))
+      (agent-repl-test-link--push
+       conn (list :arm :shutdown-announced
+                  :value (agent-repl-test-link--announcement :address "127.0.0.1:9100")))
+      (setq agent-repl-link--primary nil)
+      ;; Act / Assert
+      (should-error (agent-repl-test-link--accept agent-repl-link--pending-successor))
+      (should (agent-repl-test-link--logged-p
+               :error "elisp.link.successor-accepted-primary-vanished address=\"127.0.0.1:9100\" old=\"127.0.0.1:9001\"")))))
+
+;;;; ---- A successor dialed while the link is down ----
+
+(defun agent-repl-test-link--down-then-dial ()
+  "Take a stood link down unannounced, then dial a successor from a refusal.
+Returns the pending successor connection."
+  (let ((conn (agent-repl-test-link--connect "127.0.0.1:9001")))
+    (agent-repl-test-link--close conn '(:error (:kind :transport)))
+    (agent-repl-link-dial-successor "127.0.0.1:9100")
+    agent-repl-link--pending-successor))
+
+(ert-deftest agent-repl-test-link-successor-dialed-while-down-becomes-the-link ()
+  "Nothing stands to hand over from: the accepted successor is the primary."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((successor (agent-repl-test-link--down-then-dial)))
+      ;; Act
+      (agent-repl-test-link--accept successor)
+      ;; Assert
+      (should (eq (agent-repl-link-primary) successor))
+      (should (null (agent-repl-link-successor))))))
+
+(ert-deftest agent-repl-test-link-successor-dialed-while-down-runs-the-up-hook ()
+  "The link came up again, so consumers rebuild on it."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((successor (agent-repl-test-link--down-then-dial)))
+      (add-hook 'agent-repl-link-up-functions (agent-repl-test-link--record-hook :up))
+      ;; Act
+      (agent-repl-test-link--accept successor)
+      ;; Assert
+      (should (equal (cdr (assq :up agent-repl-test-link--hooks)) (list successor))))))
+
+(ert-deftest agent-repl-test-link-successor-dialed-while-down-is-logged-at-info ()
+  "Recovering onto the successor is ordinary: INFO, never a WARNING."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((successor (agent-repl-test-link--down-then-dial)))
+      (setq agent-repl-test-link--logs nil)
+      ;; Act
+      (agent-repl-test-link--accept successor)
+      ;; Assert
+      (should (agent-repl-test-link--logged-p
+               :info "elisp.link.successor-became-link address=\"127.0.0.1:9100\" retired-pending=nil"))
+      (should-not (seq-some (lambda (entry) (eq (car entry) :warn)) agent-repl-test-link--logs)))))
+
+(ert-deftest agent-repl-test-link-successor-dialed-while-down-retires-the-reconnect ()
+  "One link, never two: the poll and its unaccepted transport are retired."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((successor (agent-repl-test-link--down-then-dial)))
+      (setq agent-repl-test-link--address "127.0.0.1:9002")
+      (agent-repl-link--reconnect-tick)
+      (let ((pending agent-repl-link--pending))
+        (should pending)
+        ;; Act
+        (agent-repl-test-link--accept successor)
+        ;; Assert
+        (should (null agent-repl-link--pending))
+        (should-not (agent-repl-connect-connection-alive-p pending))
+        (should (null agent-repl-link--reconnect-timer))))))
+
+(ert-deftest agent-repl-test-link-primary-ends-go-down-through-one-helper ()
+  "Every primary end with no successor to promote takes the link down
+through `agent-repl-link--primary-ended-down', so the planned and the lost
+levels are decided in one place."
+  (with-temp-buffer
+    (insert-file-contents (expand-file-name "daemon-link.el" agent-repl-test-link--lisp-dir))
+    (let ((count 0))
+      (while (search-forward "(agent-repl-link--primary-down " nil t)
+        (setq count (1+ count)))
+      ;; The helper's two calls, planned and lost, and no others.
+      (should (= count 2)))))
 
 (ert-deftest agent-repl-test-link-teardown-closes-a-pending-connection ()
   "Teardown owes the same closure to a transport still awaiting acceptance."
