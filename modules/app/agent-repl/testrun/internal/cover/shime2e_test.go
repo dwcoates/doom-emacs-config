@@ -66,10 +66,10 @@ func TestShimE2EReachRendersAndSumsTheShimsOwnSources(t *testing.T) {
 	if err != nil || len(lines) != 1 || !strings.HasPrefix(lines[0], "37.5% (3/8 statements over 2 files)") {
 		t.Fatalf("ShimE2EReach = %q, %v; want the shim's own 3 of 8 statements", lines, err)
 	}
-	want := []string{filepath.Join(root, "e2e"), c8, "report", "--temp-directory=" + filepath.Join(root, "e2e", "shim"),
+	want := []string{filepath.Join(root, "e2e"), c8, "report", "--allowExternal", "--temp-directory=" + filepath.Join(root, "e2e", "shim"),
 		"--reports-dir=" + filepath.Join(reports, "0"), "--reporter=json-summary", "--reporter=html"}
 	if len(f.calls) != 1 || !slices.Equal(f.calls[0], want) {
-		t.Fatalf("c8 ran %q, want %q: from the directory above the profiles", f.calls, want)
+		t.Fatalf("c8 ran %q, want %q: keeping the bundle wherever it was staged", f.calls, want)
 	}
 }
 

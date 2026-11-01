@@ -5,7 +5,7 @@ package cover
 //
 // Every shim the suite spawns under coverage writes v8 profiles (the daemon
 // hands it NODE_V8_COVERAGE) into a ShimReachDir directory beside the Go
-// counters, with the bundle it ran staged in the directory above. c8 remaps
+// counters; the bundle it ran stays where the e2e suite staged it. c8 remaps
 // the bundle's coverage through its source map, so the report carries one
 // entry per original file: ours under agent-shim/**/src, and every dependency
 // esbuild inlined. Only ours is summed.
@@ -62,10 +62,14 @@ func ShimE2EReach(run Exec, c8, coverRoot, reportRoot string) ([]string, error) 
 	var lines []string
 	for i, dir := range dirs {
 		out := filepath.Join(reportRoot, strconv.Itoa(i))
-		// c8 runs FROM THE DIRECTORY ABOVE THE PROFILES: its default filter
-		// keeps only scripts beneath its working directory, and the bundle
-		// the profiles name is staged there.
-		if _, err := run(filepath.Dir(dir), c8, "report", "--temp-directory="+dir, "--reports-dir="+out,
+		// c8 KEEPS SCRIPTS OUTSIDE ITS WORKING DIRECTORY (--allowExternal):
+		// its default filter keeps only scripts beneath it, and the bundle
+		// the profiles name lies wherever the e2e suite took it from, the
+		// run's shared prebuild directory under testrun rather than beside
+		// the profiles (e2e/main_test.go buildShimBundle). Without it, c8
+		// dropped the bundle and reported no file at all (2026-10-31).
+		// shimSummary keeps only the shim's own sources of what c8 remaps.
+		if _, err := run(filepath.Dir(dir), c8, "report", "--allowExternal", "--temp-directory="+dir, "--reports-dir="+out,
 			"--reporter=json-summary", "--reporter=html"); err != nil {
 			return nil, fmt.Errorf("cover: render the shim's e2e reach in %s (raw v8 profiles remain there): %w", dir, err)
 		}
