@@ -44,9 +44,9 @@ Binds `root' to the root and `logged' to the (LEVEL . MESSAGE) records."
           (armed nil))
      (unwind-protect
          (cl-letf (((symbol-function 'agent-repl--info)
-                    (lambda (_ws fmt &rest args) (push (cons 'info (apply #'format fmt args)) logged)))
+                    (agent-repl-test--record-leveled-into logged 'info))
                    ((symbol-function 'agent-repl--error)
-                    (lambda (_ws fmt &rest args) (push (cons 'error (apply #'format fmt args)) logged)))
+                    (agent-repl-test--record-leveled-into logged 'error))
                    ((symbol-function 'run-at-time)
                     (lambda (_secs _repeat fn &rest args) (push (cons fn args) armed) (timer-create)))
                    ((symbol-function 'agent-repl--ws-list-names) (lambda () nil)))

@@ -356,11 +356,11 @@ Binds `reloads' and `records', newest first."
                ((symbol-function 'agent-repl-webhost-reload) (lambda (conn) (push conn reloads)))
                ((symbol-function 'agent-repl--log) #'ignore)
                ((symbol-function 'agent-repl--info)
-                (lambda (_ws fmt &rest args) (push (cons 'info (apply #'format fmt args)) records)))
+                (agent-repl-test--record-leveled-into records 'info))
                ((symbol-function 'agent-repl--warn)
-                (lambda (_ws fmt &rest args) (push (cons 'warn (apply #'format fmt args)) records)))
+                (agent-repl-test--record-leveled-into records 'warn))
                ((symbol-function 'agent-repl--error)
-                (lambda (_ws fmt &rest args) (push (cons 'error (apply #'format fmt args)) records))))
+                (agent-repl-test--record-leveled-into records 'error)))
        ,@body)))
 
 (ert-deftest agent-repl-test-wh-a-host-that-lacks-a-call-is-reloaded-on-the-live-daemon ()
@@ -478,18 +478,43 @@ Binds `reloads' and `records', newest first."
       ;; Assert
       (should (equal logged '("elisp.webhost.answer op=show id=nil outcome=shown"))))))
 
-(defun agent-repl-test-wh--note-levels (raw)
-  "Record the host's RAW answer and return (LEVEL . LINE) for every note logged."
+(defun agent-repl-test-wh--leveled (fn)
+  "Call FN and return (LEVEL . LINE) for every INFO, WARN and ERROR line it logged.
+A DEBUG line (`agent-repl--log') is dropped."
   (let (logged)
     (cl-letf (((symbol-function 'agent-repl--log) #'ignore)
               ((symbol-function 'agent-repl--info)
-               (lambda (_ws fmt &rest args) (push (cons 'info (apply #'format fmt args)) logged)))
+               (agent-repl-test--record-leveled-into logged 'info))
               ((symbol-function 'agent-repl--warn)
-               (lambda (_ws fmt &rest args) (push (cons 'warn (apply #'format fmt args)) logged)))
+               (agent-repl-test--record-leveled-into logged 'warn))
               ((symbol-function 'agent-repl--error)
-               (lambda (_ws fmt &rest args) (push (cons 'error (apply #'format fmt args)) logged))))
-      (agent-repl--webhost-answered raw))
+               (agent-repl-test--record-leveled-into logged 'error)))
+      (funcall fn))
     (nreverse logged)))
+
+(defun agent-repl-test-wh--note-levels (raw)
+  "Record the host's RAW answer and return (LEVEL . LINE) for every note logged."
+  (agent-repl-test-wh--leveled (lambda () (agent-repl--webhost-answered raw))))
+
+(ert-deftest agent-repl-test-wh-the-level-recorder-names-each-line-by-level ()
+  "Every INFO, WARN and ERROR line is returned with its level, oldest first."
+  (agent-repl-test--with-clean-state
+    ;; Act
+    (let ((logged (agent-repl-test-wh--leveled
+                   (lambda ()
+                     (agent-repl--info nil "a %s" "i")
+                     (agent-repl--warn nil "b")
+                     (agent-repl--error nil "c")))))
+      ;; Assert
+      (should (equal logged '((info . "a i") (warn . "b") (error . "c")))))))
+
+(ert-deftest agent-repl-test-wh-the-level-recorder-drops-debug-lines ()
+  "A DEBUG line is not one of the levels a case reads."
+  (agent-repl-test--with-clean-state
+    ;; Act
+    (let ((logged (agent-repl-test-wh--leveled (lambda () (agent-repl--log nil "d")))))
+      ;; Assert
+      (should (null logged)))))
 
 (ert-deftest agent-repl-test-wh-an-info-note-is-recorded-at-info ()
   "What a working host does (a page cooling, a page mid-rollout) is INFO."
@@ -1550,15 +1575,7 @@ The current tab's page, not shown here, is the nearest of all."
 
 (defun agent-repl-test-wh--boot-logged (raw)
   "Record the host's RAW boot answer and return (LEVEL . LINE) for every line logged."
-  (let (logged)
-    (cl-letf (((symbol-function 'agent-repl--info)
-               (lambda (_ws fmt &rest args) (push (cons 'info (apply #'format fmt args)) logged)))
-              ((symbol-function 'agent-repl--warn)
-               (lambda (_ws fmt &rest args) (push (cons 'warn (apply #'format fmt args)) logged)))
-              ((symbol-function 'agent-repl--error)
-               (lambda (_ws fmt &rest args) (push (cons 'error (apply #'format fmt args)) logged))))
-      (agent-repl--webhost-on-boot raw))
-    (nreverse logged)))
+  (agent-repl-test-wh--leveled (lambda () (agent-repl--webhost-on-boot raw))))
 
 (ert-deftest agent-repl-test-wh-a-boot-that-threw-is-recorded-at-error-naming-each-error ()
   "Every error the page kept is named, at ERROR."
