@@ -36,6 +36,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -832,7 +833,10 @@ type sidecarProc struct {
 	LogPath string
 	Daemon  *fakeClientLog
 	done    chan error
-	stopped bool
+	// stopped reports the test asked the process to leave (Stop, Kill, a
+	// subject's own signal): its exit is then no fault. It is read by the
+	// process's waiter goroutine, so it is atomic.
+	stopped atomic.Bool
 }
 
 func startSidecar(t *testing.T, opts sidecarOptions) *sidecarProc {
@@ -915,7 +919,7 @@ func startSidecar(t *testing.T, opts sidecarOptions) *sidecarProc {
 		t.Fatalf("start sidecar: %v", err)
 	}
 	p := &sidecarProc{t: t, cmd: cmd, LogPath: opts.LogPath, Daemon: daemon, done: make(chan error, 1)}
-	go func() { p.done <- cmd.Wait() }()
+	go waitLatched(t, "the sidecar", cmd, &p.stopped, captured, p.done)
 	t.Cleanup(p.Stop)
 	return p
 }
@@ -924,10 +928,9 @@ func startSidecar(t *testing.T, opts sidecarOptions) *sidecarProc {
 // restart-recovery subject uses to cut the sidecar off mid-file.
 func (p *sidecarProc) Stop() {
 	p.t.Helper()
-	if p.stopped {
+	if p.stopped.Swap(true) {
 		return
 	}
-	p.stopped = true
 	if p.cmd.Process != nil {
 		_ = p.cmd.Process.Signal(syscall.SIGTERM)
 	}
@@ -954,10 +957,9 @@ func (p *sidecarProc) Stop() {
 // poll those subjects exist to cut it off before.
 func (p *sidecarProc) Kill() {
 	p.t.Helper()
-	if p.stopped {
+	if p.stopped.Swap(true) {
 		return
 	}
-	p.stopped = true
 	if p.cmd.Process != nil {
 		_ = p.cmd.Process.Kill()
 	}
@@ -2386,9 +2388,56 @@ func awaitCatchupEnd(ctx context.Context, t *testing.T, path string) logRecord {
 // Small assertion helpers.
 // ---------------------------------------------------------------------------
 
+// The context is a child of the test's FAULT LATCH (faultFor), so every wait
+// on it ends the moment a sidecar the test started exits unasked, with the
+// exit as its cause (context.Cause), rather than at waitBudget.
 func testContext(t *testing.T) (context.Context, context.CancelFunc) {
 	t.Helper()
-	return context.WithTimeout(context.Background(), waitBudget)
+	return context.WithTimeout(faultFor(t).ctx, waitBudget)
+}
+
+// testFault is one test's fault latch: closed, with its cause, when a process
+// the test started fails in a way no wait of the test can outlast (the agent-repl-tests
+// skill, "Synchronization: events, never time").
+type testFault struct {
+	ctx    context.Context
+	cancel context.CancelCauseFunc
+}
+
+// testFaults is every running test's latch.
+var testFaults sync.Map
+
+// faultFor answers t's fault latch, made at its first use and released when t
+// ends.
+func faultFor(t *testing.T) *testFault {
+	ctx, cancel := context.WithCancelCause(context.Background())
+	v, loaded := testFaults.LoadOrStore(t, &testFault{ctx: ctx, cancel: cancel})
+	if loaded {
+		cancel(nil)
+		return v.(*testFault)
+	}
+	t.Cleanup(func() {
+		testFaults.Delete(t)
+		cancel(context.Canceled)
+	})
+	return v.(*testFault)
+}
+
+// waitLatched reaps CMD, which WHAT names, into DONE, closing t's fault latch
+// with the exit and OUTPUT when the process left without STOPPED set.
+func waitLatched(t *testing.T, what string, cmd *exec.Cmd, stopped *atomic.Bool, output fmt.Stringer, done chan<- error) {
+	err := cmd.Wait()
+	if !stopped.Load() {
+		faultFor(t).close(t, fmt.Errorf("%s exited unasked (%v); its output:\n%s", what, err, output))
+	}
+	done <- err
+}
+
+// close closes the latch with CAUSE, saying so in t's log at once: a wait
+// whose own message names only its deadline still shows what ended it.
+func (f *testFault) close(t *testing.T, cause error) {
+	t.Logf("fault latch closed: %v", cause)
+	f.cancel(cause)
 }
 
 func sortedStrings(in []string) []string {
