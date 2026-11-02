@@ -98,12 +98,13 @@ export function startHost(doc: Document, win: Window, deps: StartHostDeps): Host
   // services installed: 2026-10-31. The logger is now the runtime's, made
   // before the host's code loaded.)
   (deps.startServices ?? startWebhostServices)(doc, win, host, runtime, { gate, load });
-  // THE SIDEBAR'S OPEN ROW PANELS, drawn over the pages (sidebar-popups.ts).
+  // THE SIDEBAR'S HOVER POPUPS, drawn over the pages (sidebar-popups.ts).
   (deps.installPopups ?? installPopupLayer)({
     doc,
     win,
     channel: (deps.popupChannel ?? openPopupChannel)(),
     onOffset: (listener) => host.onSidebarOffset(listener),
+    onPagePressed: (listener) => host.onPagePressed(() => listener()),
   });
   win.agentReplHost = host;
   const pending = win.__agentReplHostPending;

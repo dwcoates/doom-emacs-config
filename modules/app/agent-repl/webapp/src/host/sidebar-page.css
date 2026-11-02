@@ -91,9 +91,11 @@ html.agent-repl-sidebar #ws-sidebar .sb-notices-none {
   color: var(--muted);
 }
 
-/* AN OPEN ROW'S PANEL IS DRAWN OVER THE FEED, by the host
-   (host/sidebar-popups.ts): this window ends at the feed's edge, so the
-   rail's own copy stays undrawn and only hands its contents over. */
-html.agent-repl-sidebar #ws-sidebar .ws.open > .detail {
+/* AN OPEN ROW'S PANEL AND THE VERSION'S MEMORY HOVER ARE DRAWN OVER THE
+   FEED, by the host (host/sidebar-popups.ts): this window ends at the feed's
+   edge, so the rail's own copy stays undrawn and only hands its contents
+   over. */
+html.agent-repl-sidebar #ws-sidebar .ws.open > .detail,
+html.agent-repl-sidebar #ws-sidebar .detail.sb-memory.open {
   display: none;
 }

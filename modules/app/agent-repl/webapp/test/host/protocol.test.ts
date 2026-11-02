@@ -99,6 +99,7 @@ describe("parsePageToHost", () => {
     ["responseHighlight holding none", { channel: HOST_CHANNEL, kind: "responseHighlight", words: null }],
     ["restyleTurn", { channel: HOST_CHANNEL, kind: "restyleTurn" }],
     ["restyled", { channel: HOST_CHANNEL, kind: "restyled" }],
+    ["pressed", { channel: HOST_CHANNEL, kind: "pressed" }],
     ["bubbleOverlay open", { channel: HOST_CHANNEL, kind: "bubbleOverlay", open: true }],
     ["bubbleOverlay closed", { channel: HOST_CHANNEL, kind: "bubbleOverlay", open: false }],
   ])("reads a %s message", (_name, data) => {

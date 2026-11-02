@@ -5,10 +5,12 @@
  * panel, a "⋯" menu, the subsection name popup.
  *
  * THE USER LEAVES THE RAIL when
- *   - the page loses the focus: a click into a workspace page's feed (an
- *     iframe, so the focus leaves this document), into another Emacs window,
- *     or Emacs leaving the screen's front;
- *   - the page is hidden;
+ *   - the focus leaves the page (focus-left.ts): a click into a workspace
+ *     page's feed (another document), into another Emacs window, Emacs
+ *     leaving the screen's front, the page hidden, or Emacs moving its own
+ *     focus, such as to its composer, which the web view never sees;
+ *   - the reader presses anywhere outside a popup the webhost draws over the
+ *     feed (host/sidebar-popups.ts `dismiss`), the rail's focus or no;
  *   - the selection moves: whichever workspace the rail highlights changed,
  *     by a click, by Emacs (`M-{`), or by the daemon, even with the pointer
  *     still resting on another row.
@@ -31,6 +33,8 @@
  */
 import { log } from "../log.js";
 import { createPointerRest } from "../pointer-rest.js";
+import type { FocusLeft } from "../focus-left.js";
+import type { PopupMirror } from "../host/sidebar-popups.js";
 import type { Dropdowns } from "./dropdowns.js";
 import type { RowHover } from "./row-hover.js";
 
@@ -41,8 +45,10 @@ export const HOVER_SUSPENDED_CLASS = "sb-hover-suspended";
 export interface TransientsDeps {
   dropdowns: Dropdowns;
   rowHover: RowHover;
-  /** The window whose focus the rail's document holds. */
-  win: Window;
+  /** The page's focus-left signal: the focus gone, the page hidden, Emacs's focus moved. */
+  focusLeft: FocusLeft;
+  /** The mirror drawing the rail's popups over the feed, whose host asks to dismiss them; none for a page's own rail. */
+  popupMirror: Pick<PopupMirror, "onDismissed"> | null;
 }
 
 export interface Transients {
@@ -54,8 +60,7 @@ export interface Transients {
 
 /** Install the transients' dismissal on the rail HOST. */
 export function installTransients(host: HTMLElement, deps: TransientsDeps): Transients {
-  const { dropdowns, rowHover, win } = deps;
-  const doc = win.document;
+  const { dropdowns, rowHover, focusLeft, popupMirror } = deps;
   let selection: string | null = null;
   /** Whether the hover highlight is suspended, and until when (pointer-rest.ts). */
   const rest = createPointerRest();
@@ -97,18 +102,12 @@ export function installTransients(host: HTMLElement, deps: TransientsDeps): Tran
   const keyed = (): void => {
     if (rest.resume()) resumed("key");
   };
-  const blurred = (): void => {
-    dismiss("the page lost focus");
-  };
-  const visibility = (): void => {
-    if (doc.visibilityState === "hidden") dismiss("the page was hidden");
-  };
 
   host.addEventListener("mousemove", moved);
   host.addEventListener("mouseleave", left);
   host.addEventListener("keydown", keyed);
-  win.addEventListener("blur", blurred);
-  doc.addEventListener("visibilitychange", visibility);
+  const stopFocusLeft = focusLeft.onLeft(dismiss);
+  const stopDismissals = popupMirror?.onDismissed(dismiss) ?? ((): void => undefined);
 
   return {
     selected(id: string | null): void {
@@ -121,8 +120,8 @@ export function installTransients(host: HTMLElement, deps: TransientsDeps): Tran
       host.removeEventListener("mousemove", moved);
       host.removeEventListener("mouseleave", left);
       host.removeEventListener("keydown", keyed);
-      win.removeEventListener("blur", blurred);
-      doc.removeEventListener("visibilitychange", visibility);
+      stopFocusLeft();
+      stopDismissals();
     },
   };
 }

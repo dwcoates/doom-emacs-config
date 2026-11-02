@@ -327,7 +327,12 @@ function mountSidebarIn(
       ? null
       : installVersionNotices(head.version, head.element, deps.notices.failures, deps.notices.notices, dropdowns);
   // THE VERSION HOVERS AGENT-REPL'S MEMORY (memory.ts), naming no workspace.
-  installVersionHover(ctx, head.version, head.element, () => versionNotices?.isOpen() ?? false);
+  // DRAWN OVER THE FEED in the sidebar page, as an open row's panel is.
+  installVersionHover(ctx, head.version, head.element, {
+    suppressed: () => versionNotices?.isOpen() ?? false,
+    dropdowns,
+    mirror: deps.popupMirror ?? null,
+  });
   host.replaceChildren(head.element, search.bar, arrangeStatus, body, arrangeLayer);
   // THE RAIL'S LOOPS RUN ON THE WALL CLOCK (wall-phase.ts), so neither a
   // redraw nor a switch to another workspace's page restarts one.
@@ -355,11 +360,16 @@ function mountSidebarIn(
   // moved. The host, which no draw replaces, also says where the pointer is
   // (row-hover.ts): a row drawn under a resting pointer never sees it leave,
   // but the host sees every move and the pointer leaving the rail.
-  const transients = installTransients(host, { dropdowns, rowHover: rail.rowHover, win: window });
+  const focusLeft = deps.focusLeft ?? pageFocusLeft();
+  const transients = installTransients(host, {
+    dropdowns,
+    rowHover: rail.rowHover,
+    focusLeft,
+    popupMirror: deps.popupMirror ?? null,
+  });
   // EACH MERGE QUEUE AND RECENTLY MERGED GROUP OPENS AGAIN THE MOMENT THE
   // USER IS DONE WITH THE RAIL (deploys-fold.ts): the focus gone from the
   // page, or a workspace outside the groups clicked.
-  const focusLeft = deps.focusLeft ?? pageFocusLeft();
   const removeDeploysFoldReset = installDeploysFoldReset(host, rail.deploysFold, focusLeft);
   // RECENTLY MERGED AND HIDDEN FOLD THEMSELVES as the focus leaves the page
   // (section-fold.ts, owner request 2026-11-01), through a scope of their own

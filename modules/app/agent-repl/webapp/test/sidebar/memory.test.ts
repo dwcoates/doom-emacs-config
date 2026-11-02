@@ -23,12 +23,16 @@ import {
   formatBytes,
   formatUnloadIn,
   installVersionHover,
+  VERSION_POPUP_KEY,
+  type VersionHoverOptions,
   overviewLines,
   pageLine,
   showRowMemory,
   workspaceLines,
 } from "../../src/sidebar/memory.js";
 import type { SidebarContext } from "../../src/sidebar/context.js";
+import { createDropdowns } from "../../src/sidebar/dropdowns.js";
+import type { PopupMirror } from "../../src/host/sidebar-popups.js";
 import { appContext, fakeTicker } from "./harness.js";
 
 const MIB = 1024 * 1024;
@@ -172,7 +176,10 @@ describe("a workspace hover's lines", () => {
 });
 
 describe("the version hover", () => {
-  function mounted(answer: () => ReturnType<typeof create<typeof GetMemoryOverviewResponseSchema>>) {
+  function mounted(
+    answer: () => ReturnType<typeof create<typeof GetMemoryOverviewResponseSchema>>,
+    options: VersionHoverOptions = {},
+  ) {
     const ticker = fakeTicker();
     let asked = 0;
     const ctx = appContext(
@@ -188,7 +195,7 @@ describe("the version hover", () => {
     const version = document.createElement("span");
     head.appendChild(version);
     document.body.appendChild(head);
-    installVersionHover(ctx, version, head);
+    installVersionHover(ctx, version, head, options);
     const panel = head.querySelector<HTMLElement>(".sb-memory")!;
     return { ticker, version, panel, asked: () => asked };
   }
@@ -236,6 +243,125 @@ describe("the version hover", () => {
     version.dispatchEvent(new MouseEvent("mouseleave"));
 
     expect(panel.classList.contains("open")).toBe(true);
+  });
+
+  /** A mirror that records what it is told, as "show:KEY", "place:KEY", "hide:KEY". */
+  function recordingMirror(told: string[], shown: HTMLElement[] = []): PopupMirror {
+    return {
+      show: (key, detail, line) => {
+        told.push(`show:${key}`);
+        shown.push(detail, line);
+      },
+      place: (key) => void told.push(`place:${key}`),
+      hide: (key) => void told.push(`hide:${key}`),
+      onDismissed: () => () => undefined,
+      dispose: () => undefined,
+    };
+  }
+
+  describe("drawn over the feed by a popup mirror", () => {
+    it("hands the mirror its panel beside the version's line when it opens", () => {
+      // ARRANGE
+      const told: string[] = [];
+      const shown: HTMLElement[] = [];
+      const { version, panel } = mounted(measured, { mirror: recordingMirror(told, shown) });
+      // ACT
+      version.dispatchEvent(new MouseEvent("mouseenter"));
+      // ASSERT
+      expect([told[0], shown]).toEqual([`show:${VERSION_POPUP_KEY}`, [panel, version]]);
+    });
+
+    it("has the mirror place the panel again once the overview is drawn", async () => {
+      // ARRANGE
+      const told: string[] = [];
+      const { version } = mounted(measured, { mirror: recordingMirror(told) });
+      // ACT
+      version.dispatchEvent(new MouseEvent("mouseenter"));
+      await settle();
+      // ASSERT
+      expect(told.at(-1)).toBe(`place:${VERSION_POPUP_KEY}`);
+    });
+
+    it("takes the panel off the feed when the pointer leaves", async () => {
+      // ARRANGE
+      const told: string[] = [];
+      const { version } = mounted(measured, { mirror: recordingMirror(told) });
+      version.dispatchEvent(new MouseEvent("mouseenter"));
+      await settle();
+      // ACT
+      version.dispatchEvent(new MouseEvent("mouseleave"));
+      // ASSERT
+      expect(told.at(-1)).toBe(`hide:${VERSION_POPUP_KEY}`);
+    });
+  });
+
+  describe("as one of the rail's dropdowns", () => {
+    it.each([
+      ["the user leaving the rail", (d: ReturnType<typeof createDropdowns>) => d.dismissAll("the page lost focus")],
+      [
+        "another dropdown opening",
+        (d: ReturnType<typeof createDropdowns>) =>
+          d.opened({ kind: "row-menu", element: document.createElement("div"), openers: [], close: () => undefined }),
+      ],
+      ["a click elsewhere in the rail", (d: ReturnType<typeof createDropdowns>) => d.dismissOutside(document.body)],
+    ])("closes, stopping its fetches, on %s", async (_name, act) => {
+      // ARRANGE
+      const dropdowns = createDropdowns();
+      const { version, panel, ticker } = mounted(measured, { dropdowns });
+      version.dispatchEvent(new MouseEvent("mouseenter"));
+      await settle();
+      // ACT
+      act(dropdowns);
+      // ASSERT
+      expect([panel.classList.contains("open"), ticker.subscribers()]).toEqual([false, 0]);
+    });
+
+    it("takes the panel off the feed when the dropdowns close it", async () => {
+      // ARRANGE
+      const dropdowns = createDropdowns();
+      const told: string[] = [];
+      const { version } = mounted(measured, { dropdowns, mirror: recordingMirror(told) });
+      version.dispatchEvent(new MouseEvent("mouseenter"));
+      await settle();
+      // ACT
+      dropdowns.dismissAll("the page lost focus");
+      // ASSERT
+      expect(told.at(-1)).toBe(`hide:${VERSION_POPUP_KEY}`);
+    });
+
+    it("stays open for a click on the version itself", async () => {
+      // ARRANGE
+      const dropdowns = createDropdowns();
+      const { version, panel } = mounted(measured, { dropdowns });
+      version.dispatchEvent(new MouseEvent("mouseenter"));
+      await settle();
+      // ACT
+      dropdowns.dismissOutside(version);
+      // ASSERT
+      expect(panel.classList.contains("open")).toBe(true);
+    });
+
+    it("lets the dropdowns go of it when the pointer closes it", async () => {
+      // ARRANGE
+      const dropdowns = createDropdowns();
+      const released = vi.spyOn(dropdowns, "released");
+      const { version, panel } = mounted(measured, { dropdowns });
+      version.dispatchEvent(new MouseEvent("mouseenter"));
+      await settle();
+      // ACT
+      version.dispatchEvent(new MouseEvent("mouseleave"));
+      // ASSERT
+      expect(released).toHaveBeenCalledWith(panel);
+    });
+
+    it("opens nothing while suppressed", () => {
+      // ARRANGE
+      const { version, panel } = mounted(measured, { suppressed: () => true });
+      // ACT
+      version.dispatchEvent(new MouseEvent("mouseenter"));
+      // ASSERT
+      expect(panel.classList.contains("open")).toBe(false);
+    });
   });
 
   it("says not measured yet before the first sample", async () => {

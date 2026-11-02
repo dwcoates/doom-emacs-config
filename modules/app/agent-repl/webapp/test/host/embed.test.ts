@@ -292,6 +292,17 @@ describe("Emacs moving its focus", () => {
   });
 });
 
+describe("a press on the page", () => {
+  it("tells the host the reader pressed the page", async () => {
+    // Act
+    pageDoc.body.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true }));
+
+    // Assert
+    await delivered();
+    expect(received).toContainEqual({ channel: HOST_CHANNEL, kind: "pressed" });
+  });
+});
+
 describe("the page's held response highlight", () => {
   it("tells the host the words the page holds highlighted", async () => {
     // Act
