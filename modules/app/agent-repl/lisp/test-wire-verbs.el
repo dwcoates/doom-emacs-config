@@ -691,6 +691,32 @@ that outcome answering the editor\='s close is a contract breach."
                      :value (:cause (:arm :not-yet-adopted :value (:address nil))))))))
 
 
+;;;; ---- AgentModel -----------------------------------------------------
+
+(ert-deftest agent-repl-test-wire-verbs-agent-model-decodes-its-name ()
+  "An AgentModel decodes as its model id."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-agent-model
+                    (agent-repl-test-wire-verbs--parse "{\"name\":\"claude-opus-5\"}"))
+                   '(:name "claude-opus-5")))))
+
+(ert-deftest agent-repl-test-wire-verbs-agent-model-refuses-an-unknown-field ()
+  "A field AgentModel does not declare is a contract breach."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-agent-model
+                   (agent-repl-test-wire-verbs--parse "{\"name\":\"opus\",\"alias\":\"o\"}"))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-transcript-last-model-is-the-agent-model-decoder ()
+  "A transcript's `last_model' use site decodes through the one AgentModel decoder."
+  (agent-repl-test-wire-verbs--with-common
+    (let (seen)
+      (cl-letf (((symbol-function 'agent-repl-wire-decode-agent-model)
+                 (lambda (json) (setq seen json) '(:name "stub"))))
+        (should (equal (agent-repl-wire-decode-workspace-transcript-last-model '((name . "opus")))
+                       '(:name "stub")))
+        (should (equal seen '((name . "opus"))))))))
+
 ;;;; ---- SetWorkspaceHidden ----------------------------------------------
 
 (ert-deftest agent-repl-test-wire-verbs-validate-name-request-carries-the-name ()

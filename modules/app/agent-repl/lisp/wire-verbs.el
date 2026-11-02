@@ -1133,12 +1133,17 @@ arm this codec does not know is refused as an unknown field."
                (agent-repl-wire-verbs--require "ListWorkspaceTranscriptsRequest" "workspace"
                                                (plist-get request :workspace))))))
 
-(defun agent-repl-wire-decode-workspace-transcript-last-model (json)
-  "Decode WorkspaceTranscript's `last_model' use site from JSON.
-`conversation.v1.AgentModel' carries the model id and nothing else."
+(defun agent-repl-wire-decode-agent-model (json)
+  "Decode `conversation.v1.AgentModel' from JSON into (:name NAME).
+The model\='s identity carries the model id and nothing else; every use
+site of the message decodes it here."
   (let ((message "AgentModel"))
     (agent-repl-wire-verbs--check-keys message json '(name))
     (list :name (agent-repl-wire-verbs--decode-string message 'name json))))
+
+(defun agent-repl-wire-decode-workspace-transcript-last-model (json)
+  "Decode WorkspaceTranscript's `last_model' use site from JSON."
+  (agent-repl-wire-decode-agent-model json))
 
 (defun agent-repl-wire-decode-workspace-transcript-current (json)
   "Decode WorkspaceTranscriptCurrent from JSON.  Empty: presence IS the fact —
