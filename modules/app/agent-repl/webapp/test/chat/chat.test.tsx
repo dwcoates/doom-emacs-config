@@ -6,6 +6,7 @@
 import { create, type MessageInitShape } from "@bufbuild/protobuf";
 import { createRouterTransport } from "@connectrpc/connect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { awaitDom, recorded, type Recorded } from "../events.js";
 import { AgentRepl } from "../../../proto/gen/ts/agentrepl/v1/service_pb";
 import { ReportChatSightingsResponseSchema, type ReportChatSightingsRequest } from "../../../proto/gen/ts/agentrepl/v1/endpoint_report_chat_sightings_pb";
 import { SelectChatTextResponseSchema, type SelectChatTextRequest } from "../../../proto/gen/ts/agentrepl/v1/endpoint_select_chat_text_pb";
@@ -48,9 +49,9 @@ function exchange(node: string, question: string, answer: string, extra: Record<
 function daemon() {
   const views: ChatView[] = [];
   let wake: (() => void) | null = null;
-  const switches: SwitchChatSiblingRequest[] = [];
-  const selections: SelectChatTextRequest[] = [];
-  const sightings: ReportChatSightingsRequest[] = [];
+  const switched = recorded<SwitchChatSiblingRequest>();
+  const selected = recorded<SelectChatTextRequest>();
+  const sighted = recorded<ReportChatSightingsRequest>();
   const transport = createRouterTransport(({ service }) => {
     service(AgentRepl, {
       async *watchChat(_request, context) {
@@ -67,24 +68,27 @@ function daemon() {
         }
       },
       switchChatSibling(request) {
-        switches.push(request);
+        switched.record(request);
         return create(SwitchChatSiblingResponseSchema, { result: { case: "success", value: {} } });
       },
       selectChatText(request) {
-        selections.push(request);
+        selected.record(request);
         return create(SelectChatTextResponseSchema, { result: { case: "success", value: {} } });
       },
       reportChatSightings(request) {
-        sightings.push(request);
+        sighted.record(request);
         return create(ReportChatSightingsResponseSchema, { result: { case: "success", value: {} } });
       },
     });
   });
   return {
     transport,
-    switches,
-    selections,
-    sightings,
+    switches: switched.calls,
+    selections: selected.calls,
+    sightings: sighted.calls,
+    switched,
+    selected,
+    sighted,
     push(view: ViewInit) {
       views.push(create(ChatViewSchema, view as never));
       wake?.();
@@ -138,11 +142,7 @@ function mount(d: ReturnType<typeof daemon>, shown = true): void {
 
 /** The element answering SELECTOR, once the chat has drawn it. */
 async function drawn(selector: string): Promise<HTMLElement> {
-  return vi.waitFor(() => {
-    const el = host.querySelector<HTMLElement>(selector);
-    if (el === null) throw new Error(`${selector} is not drawn yet`);
-    return el;
-  });
+  return awaitDom(host, `the chat drawing ${selector}`, () => host.querySelector<HTMLElement>(selector));
 }
 
 describe("the chat view", () => {
@@ -169,7 +169,9 @@ describe("the chat view", () => {
     await drawn("[data-chat-empty]");
 
     // Assert
-    await vi.waitFor(() => expect(document.documentElement.getAttribute(CONVERSATION_DRAWN_ATTRIBUTE)).toBe("page"));
+    await awaitDom(document.documentElement, "the conversation drawn", () =>
+      document.documentElement.getAttribute(CONVERSATION_DRAWN_ATTRIBUTE) === "page" ? true : null,
+    );
   });
 
   it("draws the path's questions and answers, a quote, and a sibling control", async () => {
@@ -240,7 +242,7 @@ describe("the chat's gestures", () => {
     control.querySelectorAll<HTMLElement>("ar-button")[button].click();
 
     // Assert
-    await vi.waitFor(() => expect(d.switches).toHaveLength(1));
+    await d.switched.reached(1);
     expect(d.switches[0].shown?.id).toBe("n2");
     expect(d.switches[0].direction?.way.case).toBe(way);
   });
@@ -256,7 +258,7 @@ describe("the chat's gestures", () => {
     for (let i = 0; i < 6; i += 1) wrap.dispatchEvent(new WheelEvent("wheel", { deltaX: 40, bubbles: true }));
 
     // Assert
-    await vi.waitFor(() => expect(d.switches).toHaveLength(1));
+    await d.switched.reached(1);
     expect(d.switches[0].direction?.way.case).toBe("next");
   });
 
@@ -277,7 +279,7 @@ describe("the chat's gestures", () => {
     answer.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
 
     // Assert
-    await vi.waitFor(() => expect(d.selections).toHaveLength(1));
+    await d.selected.reached(1);
     const state = d.selections[0].selection?.state;
     expect(state?.case).toBe("highlighted");
     if (state?.case === "highlighted") {
@@ -300,7 +302,7 @@ describe("the chat's gestures", () => {
     answer.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
 
     // Assert
-    await vi.waitFor(() => expect(d.selections).toHaveLength(1));
+    await d.selected.reached(1);
     expect(d.selections[0].selection?.state.case).toBe("cleared");
   });
 
@@ -318,7 +320,7 @@ describe("the chat's gestures", () => {
     vi.useRealTimers();
 
     // Assert
-    await vi.waitFor(() => expect(d.sightings).toHaveLength(1));
+    await d.sighted.reached(1);
     expect(d.sightings[0].nodes.map((n) => n.id)).toEqual(["n1", "n2"]);
   });
 
@@ -391,7 +393,9 @@ describe("the chat's end after a question is asked", () => {
   /** Push VIEW, wait until QUESTION is the pending question drawn. */
   async function pushPending(d: ReturnType<typeof daemon>, view: ViewInit, question: string): Promise<void> {
     d.push(view);
-    await vi.waitFor(() => expect(host.querySelector("[data-chat-pending] [data-chat-question]")?.textContent).toBe(question));
+    await awaitDom(host, `the pending question ${question} drawn`, () =>
+      host.querySelector("[data-chat-pending] [data-chat-question]")?.textContent === question ? true : null,
+    );
   }
 
   it("lands at the end when a question goes in flight", async () => {
@@ -420,7 +424,7 @@ describe("the chat's end after a question is asked", () => {
     const d = daemon();
     mount(d);
     d.push(conversation([]));
-    await vi.waitFor(() => expect(host.querySelector(".chat-col")).not.toBeNull());
+    await drawn(".chat-col");
     await pushPending(d, conversation([], pending("why?")), "why?");
     top = 0;
     moves = [];
@@ -532,12 +536,14 @@ describe("the chat's room past its end", () => {
  * first view carried.
  */
 describe("the chat's reveal of an asked-for node", () => {
+  let moved: Recorded<unknown>;
   let moves: unknown[];
 
   beforeEach(() => {
-    moves = [];
+    moved = recorded<unknown>();
+    moves = moved.calls;
     vi.spyOn(log, "info").mockImplementation((_message, fields) => {
-      if (fields?.operation === "scroll.chat-moved") moves.push((fields.context as { cause: string }).cause);
+      if (fields?.operation === "scroll.chat-moved") moved.record((fields.context as { cause: string }).cause);
     });
   });
 
@@ -557,15 +563,16 @@ describe("the chat's reveal of an asked-for node", () => {
     mount(d);
     d.push(revealing());
     await drawn('[data-chat-answer="n3"]');
-    moves = [];
+    moves.length = 0;
 
     d.push(revealing("n2", 1));
-    await vi.waitFor(() => expect(moves).toEqual(["chatNodeRevealed"]));
+    await moved.seen((cause) => cause === "chatNodeRevealed");
+    expect(moves).toEqual(["chatNodeRevealed"]);
   });
 
   it("records a reveal of a node it did not draw as the defect it is", async () => {
-    const errors: unknown[] = [];
-    vi.spyOn(log, "error").mockImplementation((_message, fields) => void errors.push(fields?.operation));
+    const failed = recorded<unknown>();
+    vi.spyOn(log, "error").mockImplementation((_message, fields) => void failed.record(fields?.operation));
     const d = daemon();
     mount(d);
     d.push(revealing());
@@ -573,7 +580,7 @@ describe("the chat's reveal of an asked-for node", () => {
 
     d.push(revealing("n9", 1));
 
-    await vi.waitFor(() => expect(errors).toContain("chat.reveal-missing"));
+    await failed.seen((operation) => operation === "chat.reveal-missing");
     expect(moves).not.toContain("chatNodeRevealed");
   });
 
@@ -593,8 +600,8 @@ describe("the chat's reveal of an asked-for node", () => {
     d.push(revealing());
     await drawn('[data-chat-answer="n3"]');
     d.push(revealing("n2", 1));
-    await vi.waitFor(() => expect(moves).toContain("chatNodeRevealed"));
-    moves = [];
+    await moved.seen((cause) => cause === "chatNodeRevealed");
+    moves.length = 0;
 
     d.push(revealing("n2", 1));
     d.push(conversation([exchange("n1", "q1", "a1"), exchange("n2", "q2", "a2"), exchange("n3", "q3", "a3"), exchange("n4", "q4", "a4")]));

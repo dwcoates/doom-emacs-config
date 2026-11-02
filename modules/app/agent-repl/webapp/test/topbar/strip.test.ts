@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
+import { recorded } from "../events.js";
 import { create } from "@bufbuild/protobuf";
 import {
   TopbarAccountSchema,
@@ -282,15 +283,18 @@ function plainPaint(): Record<string, string> {
 }
 
 /** A context whose OpenExternal records every request it is sent. */
-function recordingContext(): { ctx: AppContext; opened: OpenExternalRequest[] } {
-  const opened: OpenExternalRequest[] = [];
+/** A context recording every OpenExternal request (events.ts's recorded). */
+function recordingContext(): { ctx: AppContext; opened: OpenExternalRequest[]; first: Promise<void> } {
+  const opens = recorded<OpenExternalRequest>();
   const ctx = appContext({
     openExternal: (req) => {
-      opened.push(req);
+      opens.record(req);
       return create(OpenExternalResponseSchema, { result: { case: "success", value: {} } });
     },
   });
-  return { ctx, opened };
+  // The router transport answers on a timer, so a test awaits the request
+  // as the event it is rather than polling the recording.
+  return { ctx, opened: opens.calls, first: opens.reached(1) };
 }
 
 const click = (el: Element): void => {
@@ -326,14 +330,15 @@ describe("drawTopbarTitle with one shown link", () => {
 
   it("opens the url through OpenExternal when clicked", async () => {
     // Arrange
-    const { ctx, opened } = recordingContext();
+    const { ctx, opened, first } = recordingContext();
     const title = drawTopbarTitle(linked(), topbarContext(ctx).tc);
     document.body.replaceChildren(title);
     // Act
     click(title.querySelector("a")!);
     // Assert: the router transport answers on a timer, so the request is
-    // awaited rather than read synchronously.
-    await vi.waitFor(() => expect(opened.map((req) => req.url)).toEqual([URL]));
+    // awaited (recordingContext's first) rather than read synchronously.
+    await first;
+    expect(opened.map((req) => req.url)).toEqual([URL]);
   });
 
   it("does not also open the heading's session line", () => {
@@ -442,13 +447,14 @@ describe("drawTopbarTitle with several shown links", () => {
 
   it("opens a picked link through OpenExternal and closes the menu", async () => {
     // Arrange
-    const { ctx, opened } = recordingContext();
+    const { ctx, opened, first } = recordingContext();
     const { host, title } = drawn(ctx);
     click(title);
     // Act
-    click(openPanel(host)!.querySelectorAll("a")[1]!);
+    click(openPanel(host)!.querySelectorAll("a")[1]);
     // Assert
-    await vi.waitFor(() => expect(opened.map((req) => req.url)).toEqual([DOC]));
+    await first;
+    expect(opened.map((req) => req.url)).toEqual([DOC]);
     expect(openPanel(host)).toBeNull();
   });
 
@@ -465,29 +471,31 @@ describe("drawTopbarTitle with several shown links", () => {
   });
 
   it("opens a row's link when its url line is clicked", async () => {
-    const { ctx, opened } = recordingContext();
+    const { ctx, opened, first } = recordingContext();
     const { host, title } = drawn(ctx);
     click(title);
-    click(openPanel(host)!.querySelectorAll<HTMLElement>(".topbar-title-link-url")[1]!);
-    await vi.waitFor(() => expect(opened.map((req) => req.url)).toEqual([DOC]));
+    click(openPanel(host)!.querySelectorAll<HTMLElement>(".topbar-title-link-url")[1]);
+    await first;
+    expect(opened.map((req) => req.url)).toEqual([DOC]);
     expect(openPanel(host)).toBeNull();
   });
 
   it("opens a row's link when the row's own background is clicked", async () => {
-    const { ctx, opened } = recordingContext();
+    const { ctx, opened, first } = recordingContext();
     const { host, title } = drawn(ctx);
     click(title);
-    click(openPanel(host)!.querySelectorAll<HTMLElement>(".topbar-title-link-option")[0]!);
-    await vi.waitFor(() => expect(opened.map((req) => req.url)).toEqual([PR]));
+    click(openPanel(host)!.querySelectorAll<HTMLElement>(".topbar-title-link-option")[0]);
+    await first;
+    expect(opened.map((req) => req.url)).toEqual([PR]);
     expect(openPanel(host)).toBeNull();
   });
 
   it("opens a label click's link exactly once", async () => {
-    const { ctx, opened } = recordingContext();
+    const { ctx, opened, first } = recordingContext();
     const { host, title } = drawn(ctx);
     click(title);
-    click(openPanel(host)!.querySelectorAll("a")[0]!);
-    await vi.waitFor(() => expect(opened.length).toBeGreaterThan(0));
+    click(openPanel(host)!.querySelectorAll("a")[0]);
+    await first;
     expect(opened.map((req) => req.url)).toEqual([PR]);
   });
 

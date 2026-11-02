@@ -35,6 +35,7 @@
  * from the file the daemon serves.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { awaitDom } from "./events.js";
 
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -99,33 +100,13 @@ const BOOT_SETTLE_MS = 2000;
  * heading's warning list is opened and the `bootFailed` row's detail read back.
  */
 async function awaitBootFailureChip(): Promise<string> {
-  const selector = '#topbar .topbar-heading-warnings[data-local-arms~="bootFailed"]';
-  // THE CHIP'S ARRIVAL IS AN EVENT: the wait resolves on the DOM mutation
-  // that draws it, and BOOT_SETTLE_MS only bounds a boot that never does.
-  const chip = await new Promise<HTMLElement>((resolve, reject) => {
-    const drawn = document.querySelector<HTMLElement>(selector);
-    if (drawn !== null) {
-      resolve(drawn);
-      return;
-    }
-    const observer = new MutationObserver(() => {
-      const now = document.querySelector<HTMLElement>(selector);
-      if (now === null) return;
-      observer.disconnect();
-      clearTimeout(bound);
-      resolve(now);
-    });
-    observer.observe(document, { subtree: true, childList: true, attributes: true });
-    const bound = setTimeout(() => {
-      observer.disconnect();
-      reject(
-        new Error(
-          `the boot listed no failure in the warning chip within ${BOOT_SETTLE_MS}ms; ` +
-            `the topbar holds ${document.querySelector("#topbar")?.innerHTML ?? "<no topbar>"}`,
-        ),
-      );
-    }, BOOT_SETTLE_MS);
-  });
+  const chip = await awaitDom(
+    document,
+    "the boot listing a failure in the warning chip",
+    () => document.querySelector<HTMLElement>('#topbar .topbar-heading-warnings[data-local-arms~="bootFailed"]'),
+    () => `the topbar ${document.querySelector("#topbar")?.innerHTML ?? "<no topbar>"}`,
+    BOOT_SETTLE_MS,
+  );
   chip.click();
   document.querySelector<HTMLElement>('#topbar [data-reveal] [data-local][data-arm="bootFailed"]')?.click();
   return document.querySelector("#topbar [data-reveal]")?.textContent ?? "";

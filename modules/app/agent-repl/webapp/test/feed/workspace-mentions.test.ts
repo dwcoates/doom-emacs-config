@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { awaitDom, recorded } from "../events.js";
 import { create } from "@bufbuild/protobuf";
 import {
   SelectInEditorResponseSchema,
@@ -245,18 +246,19 @@ describe("readMentionTargets", () => {
 describe("installWorkspaceMentionClicks", () => {
   /** A page whose SelectInEditor records its requests, with ROOT's clicks installed. */
   function page(root: HTMLElement) {
-    const calls: SelectInEditorRequest[] = [];
+    const selected = recorded<SelectInEditorRequest>();
+    const calls = selected.calls;
     const ctx = scriptedAppContext(
       {
         selectInEditor: (req) => {
-          calls.push(req);
+          selected.record(req);
           return create(SelectInEditorResponseSchema, { result: { case: "success", value: { route: { case: "relayed", value: {} } } } });
         },
       },
       { workspace: WORKSPACE, failures: new RecordingSink() },
     );
     const uninstall = installWorkspaceMentionClicks(ctx, root);
-    return { calls, uninstall };
+    return { calls, selected, uninstall };
   }
 
   it("selects the mentioned workspace, echoed verbatim", async () => {
@@ -264,11 +266,12 @@ describe("installWorkspaceMentionClicks", () => {
     applyMentionTargets(targets("alpha"), () => []);
     const root = tree("<code>alpha</code>");
     linkWorkspaceMentions(root);
-    const { calls, uninstall } = page(root);
+    const { calls, selected, uninstall } = page(root);
     // ACT
     root.querySelector<HTMLElement>(`.${WORKSPACE_MENTION_CLASS}`)?.click();
     // ASSERT
-    await vi.waitFor(() => expect(calls).toHaveLength(1));
+    await selected.reached(1);
+    expect(calls).toHaveLength(1);
     expect(calls[0].workspace?.id).toBe("ws-alpha");
     expect(calls[0].workspace?.dir).toBe("/w/alpha");
     uninstall();
@@ -353,7 +356,8 @@ describe("watchWorkspaceMentions", () => {
     // ACT
     const stream = watchWorkspaceMentions(ctx, () => [root]);
     // ASSERT
-    await vi.waitFor(() => expect(mentions(root)).toEqual(["alpha=ws-alpha"]));
+    await awaitDom(root, "the pushed targets linking the mention", () => (mentions(root).length > 0 ? true : null));
+    expect(mentions(root)).toEqual(["alpha=ws-alpha"]);
     expect(requests[0].viewer?.id).toBe(WORKSPACE.id);
     stream.cancel();
   });
