@@ -283,21 +283,34 @@ retuning the ground moves the border with it.")
 (defconst agent-repl-input-text-inset 8
   "The pixels between the composer's left edge and its text, border included.")
 
-(defun agent-repl--input-border-color ()
-  "Return the composer's border color, a #rrggbb hex string.
-`agent-repl-input-background' mixed `agent-repl-input-border-lift' of
-the way toward white, channel by channel, as the webapp's srgb
-`color-mix' would.  A ground that is not a #rrggbb string breaks the
-defcustom's contract and signals an error."
+(defconst agent-repl-input-fill-lift 0.03
+  "How far the composer's own fill is mixed from the ground toward white, 0..1.
+Only the composer's text area wears it, so it reads a little lighter than
+the sidebar, the footer and the mode line, which keep the ground itself.")
+
+(defun agent-repl--input-lifted-ground (lift)
+  "Return `agent-repl-input-background' mixed LIFT of the way toward white.
+The result is a #rrggbb hex string, mixed channel by channel as the
+webapp's srgb `color-mix' would.  A ground that is not a #rrggbb string
+breaks the defcustom's contract and signals an error."
   (let ((ground agent-repl-input-background))
     (unless (and (stringp ground) (string-match-p "\\`#[0-9a-fA-F]\\{6\\}\\'" ground))
       (error "agent-repl: input background %S is not a #rrggbb hex string" ground))
     (apply #'format "#%02x%02x%02x"
            (mapcar (lambda (start)
                      (let ((channel (string-to-number (substring ground start (+ start 2)) 16)))
-                       (round (+ (* (- 1 agent-repl-input-border-lift) channel)
-                                 (* agent-repl-input-border-lift 255)))))
+                       (round (+ (* (- 1 lift) channel) (* lift 255)))))
                    '(1 3 5)))))
+
+(defun agent-repl--input-border-color ()
+  "Return the composer's border color, a #rrggbb hex string.
+The ground lifted `agent-repl-input-border-lift' of the way toward white."
+  (agent-repl--input-lifted-ground agent-repl-input-border-lift))
+
+(defun agent-repl--input-fill-color ()
+  "Return the composer's text-area color, a #rrggbb hex string.
+The ground lifted `agent-repl-input-fill-lift' of the way toward white."
+  (agent-repl--input-lifted-ground agent-repl-input-fill-lift))
 
 (defun agent-repl--input-border-line ()
   "Return the composer's border line: one row as wide as the selected window.
@@ -335,11 +348,13 @@ its text is inset by a stretch of ground on every screen line."
 (defvar-local agent-repl--input-painted nil
   "The (GROUND . COOKIES) this composer was painted with, or nil.")
 
-(defun agent-repl--input-paint-remaps (ground)
-  "Remap the current buffer to GROUND with its border's fringes.
-The default and fringe wear GROUND, then the fringe, the border's sides,
-wears the border color over it.  Returns the three remaps' cookies."
-  (append (agent-repl--set-buffer-background ground)
+(defun agent-repl--input-paint-remaps (_ground)
+  "Remap the current buffer to the composer's fill, with its border's fringes.
+The default and fringe wear the fill (`agent-repl--input-fill-color'),
+a little lighter than the ground, then the fringe, the border's sides,
+wears the border color over it.  Returns the three remaps' cookies.
+The ground is `agent-repl-input-background', which the fill derives from."
+  (append (agent-repl--set-buffer-background (agent-repl--input-fill-color))
           (list (face-remap-add-relative 'fringe :background (agent-repl--input-border-color)))))
 
 (defun agent-repl--input-paint ()
