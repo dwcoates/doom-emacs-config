@@ -12,7 +12,8 @@ import { nextPush } from "../next-push.js";
 import { testTempDir } from "../temp-dir.js";
 import path from "node:path";
 import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
-import { logRecordsDuring, logRecordsSince, logSinkMark } from "../log-records.js";
+import { logRecordsDuring, logRecordsSince, logSinkMark, untilLogged } from "../log-records.js";
+import { holds, untilPushed } from "../until-pushed.js";
 import { create } from "@bufbuild/protobuf";
 import { Code } from "@connectrpc/connect";
 import { conversationv1, shimv1, storev1 } from "../../src/proto.js";
@@ -788,9 +789,11 @@ describe("StartSession, fresh", () => {
         h.queries[0]?.query.emit(
           initMessage({ sessionId: freshSessionId(h.queries[0].spec), model: "claude-sonnet-5" }),
         );
-        await vi.waitFor(() => {
-          expect(h.queries[0]?.query.calls).toContain("supportedModels");
-        });
+        await untilPushed(h.engine.pushes, "expect(h.queries[0]?.query.calls).toContain('supportedModels');", () =>
+          holds(() => {
+            expect(h.queries[0]?.query.calls).toContain("supportedModels");
+          }),
+        );
       },
     );
 
@@ -2803,9 +2806,11 @@ describe("a prompt waiting to join when an ask opens", () => {
     openAsk(h);
 
     // Assert
-    await vi.waitFor(() => {
-      expect(withdrawals(pushed)).toEqual([["turn-2", "turn-1"]]);
-    });
+    await untilPushed(h.engine.pushes, "expect(withdrawals(pushed)).toEqual([['turn-2', 'turn-1']]);", () =>
+      holds(() => {
+        expect(withdrawals(pushed)).toEqual([["turn-2", "turn-1"]]);
+      }),
+    );
   });
 
   it("runs no turn for the withdrawn prompt once the running turn ends", async () => {
@@ -2814,9 +2819,11 @@ describe("a prompt waiting to join when an ask opens", () => {
     const { running } = await joining(h);
     const pushed = vi.spyOn(h.engine.pushes, "push");
     openAsk(h);
-    await vi.waitFor(() => {
-      expect(withdrawals(pushed)).toHaveLength(1);
-    });
+    await untilPushed(h.engine.pushes, "expect(withdrawals(pushed)).toHaveLength(1);", () =>
+      holds(() => {
+        expect(withdrawals(pushed)).toHaveLength(1);
+      }),
+    );
 
     // Act
     await h.engine.onSdkMessage({ ...resultMessage("turn-1-result"), user_message_uuid: running } as SdkMessage);
@@ -2836,9 +2843,7 @@ describe("a prompt waiting to join when an ask opens", () => {
     const pushed = vi.spyOn(h.engine.pushes, "push");
     const mark = logSinkMark();
     openAsk(h);
-    await vi.waitFor(() => {
-      expect(logRecordsSince(mark).some((record) => record.message.includes("had already taken in the prompt"))).toBe(true);
-    });
+    await untilLogged(mark, (records) => records.some((record) => record.message.includes("had already taken in the prompt")));
 
     // Act
     await h.engine.onSdkMessage({ ...resultMessage("turn-1-result"), user_message_uuid: running } as SdkMessage);
@@ -2862,15 +2867,16 @@ describe("a prompt waiting to join when an ask opens", () => {
     openAsk(h);
 
     // Assert
-    await vi.waitFor(() => {
-      const record = logRecordsSince(mark).find((entry) => entry.message.includes("did not answer the request to give back"));
-      expect([record?.level, record?.context.cause, record?.context.turn_id, withdrawals(pushed)]).toEqual([
-        "error",
-        "the control channel closed",
-        "turn-2",
-        [],
-      ]);
-    });
+    await untilLogged(mark, (records) =>
+      records.some((entry) => entry.message.includes("did not answer the request to give back")),
+    );
+    const record = logRecordsSince(mark).find((entry) => entry.message.includes("did not answer the request to give back"));
+    expect([record?.level, record?.context.cause, record?.context.turn_id, withdrawals(pushed)]).toEqual([
+      "error",
+      "the control channel closed",
+      "turn-2",
+      [],
+    ]);
   });
 
   it("asks the vendor for nothing when no prompt waits to join", async () => {
@@ -9649,9 +9655,11 @@ describe("the proven-live signal a start settles on", () => {
           ...initMessage({ sessionId: freshSessionId(h.queries[0].spec) }),
           permissionMode: "plan",
         } as SdkMessage);
-        await vi.waitFor(() => {
-          expect(h.fold.seen.length).toBeGreaterThan(0);
-        });
+        await untilPushed(h.engine.pushes, "expect(h.fold.seen.length).toBeGreaterThan(0);", () =>
+          holds(() => {
+            expect(h.fold.seen.length).toBeGreaterThan(0);
+          }),
+        );
       },
     );
 
@@ -9674,9 +9682,11 @@ describe("the proven-live signal a start settles on", () => {
           : undefined,
       async () => {
         h.queries[0]?.query.emit(initMessage({ sessionId: freshSessionId(h.queries[0].spec) }));
-        await vi.waitFor(() => {
-          expect(h.fold.seen.length).toBeGreaterThan(0);
-        });
+        await untilPushed(h.engine.pushes, "expect(h.fold.seen.length).toBeGreaterThan(0);", () =>
+          holds(() => {
+            expect(h.fold.seen.length).toBeGreaterThan(0);
+          }),
+        );
       },
     );
 
@@ -9694,9 +9704,11 @@ describe("the proven-live signal a start settles on", () => {
       (update) => (update.case === "identityRotated" ? update.value.vendorSessionId : undefined),
       async () => {
         h.queries[0]?.query.emit(initMessage({ sessionId: "22222222-2222-4222-8222-222222222222" }));
-        await vi.waitFor(() => {
-          expect(h.fold.seen.length).toBeGreaterThan(0);
-        });
+        await untilPushed(h.engine.pushes, "expect(h.fold.seen.length).toBeGreaterThan(0);", () =>
+          holds(() => {
+            expect(h.fold.seen.length).toBeGreaterThan(0);
+          }),
+        );
       },
     );
 
@@ -10368,9 +10380,11 @@ describe("StartSession's remaining refusals", () => {
       }),
     );
     h.queries[0]?.query.emit(resultMessage());
-    await vi.waitFor(() => {
-      expect(h.engine.pushes.faultCount).toBeGreaterThan(before);
-    });
+    await untilPushed(h.engine.pushes, "expect(h.engine.pushes.faultCount).toBeGreaterThan(before);", () =>
+      holds(() => {
+        expect(h.engine.pushes.faultCount).toBeGreaterThan(before);
+      }),
+    );
   });
 });
 
@@ -12098,9 +12112,11 @@ describe("a vendor failure that is not an Error", () => {
       h.queries[0]?.query.emit(resultMessage());
       // The re-probe rides the turn's end asynchronously; the collector must
       // still be reading when its fault lands.
-      await vi.waitFor(() => {
-        expect(reads).toBe(2);
-      });
+      await untilPushed(h.engine.pushes, "expect(reads).toBe(2);", () =>
+        holds(() => {
+          expect(reads).toBe(2);
+        }),
+      );
     });
 
     expect(details).toContain("supportedModels failed: the catalog endpoint went away");
@@ -13533,9 +13549,11 @@ describe("a component that recovers", () => {
     await closeATurn(h, "turn-1");
 
     // Assert.
-    await vi.waitFor(() => {
-      expect(faultyComponents(h)).not.toContain("vendor-context-usage");
-    });
+    await untilPushed(h.engine.pushes, "expect(faultyComponents(h)).not.toContain('vendor-context-usage');", () =>
+      holds(() => {
+        expect(faultyComponents(h)).not.toContain("vendor-context-usage");
+      }),
+    );
   });
 
   it("raises the plan-usage read's fault when the vendor refuses it, and clears it when the next read answers", async () => {
@@ -13586,9 +13604,11 @@ describe("a component that recovers", () => {
     await closeATurn(h, "turn-1");
 
     // Assert.
-    await vi.waitFor(() => {
-      expect(faultyComponents(h)).not.toContain("vendor-mcp-status");
-    });
+    await untilPushed(h.engine.pushes, "expect(faultyComponents(h)).not.toContain('vendor-mcp-status');", () =>
+      holds(() => {
+        expect(faultyComponents(h)).not.toContain("vendor-mcp-status");
+      }),
+    );
   });
 
   it("clears the model catalog's fault when the next read answers", async () => {
@@ -13607,17 +13627,21 @@ describe("a component that recovers", () => {
     });
     await started(h);
     await closeATurn(h, "turn-1");
-    await vi.waitFor(() => {
-      expect(faultyComponents(h)).toContain("vendor-model-catalog");
-    });
+    await untilPushed(h.engine.pushes, "expect(faultyComponents(h)).toContain('vendor-model-catalog');", () =>
+      holds(() => {
+        expect(faultyComponents(h)).toContain("vendor-model-catalog");
+      }),
+    );
 
     // Act.
     await closeATurn(h, "turn-2");
 
     // Assert.
-    await vi.waitFor(() => {
-      expect(faultyComponents(h)).not.toContain("vendor-model-catalog");
-    });
+    await untilPushed(h.engine.pushes, "expect(faultyComponents(h)).not.toContain('vendor-model-catalog');", () =>
+      holds(() => {
+        expect(faultyComponents(h)).not.toContain("vendor-model-catalog");
+      }),
+    );
   });
 
   // THE OWNER'S OWN FAULT, EXACTLY. The re-announcement's read of the open
@@ -13640,9 +13664,11 @@ describe("a component that recovers", () => {
     await watch.next();
 
     // Assert.
-    await vi.waitFor(() => {
-      expect(faultyComponents(h)).not.toContain("store-live-work");
-    });
+    await untilPushed(h.engine.pushes, "expect(faultyComponents(h)).not.toContain('store-live-work');", () =>
+      holds(() => {
+        expect(faultyComponents(h)).not.toContain("store-live-work");
+      }),
+    );
     await watch.return?.();
   });
 
@@ -13652,18 +13678,22 @@ describe("a component that recovers", () => {
     await started(h);
     h.persistence.writeThrows = new Error("the row could not be enveloped");
     keepaliveNow(h);
-    await vi.waitFor(() => {
-      expect(faultyComponents(h)).toContain("shim-engine-keepalive");
-    });
+    await untilPushed(h.engine.pushes, "expect(faultyComponents(h)).toContain('shim-engine-keepalive');", () =>
+      holds(() => {
+        expect(faultyComponents(h)).toContain("shim-engine-keepalive");
+      }),
+    );
 
     // Act.
     h.persistence.writeThrows = undefined;
     keepaliveNow(h);
 
     // Assert.
-    await vi.waitFor(() => {
-      expect(faultyComponents(h)).not.toContain("shim-engine-keepalive");
-    });
+    await untilPushed(h.engine.pushes, "expect(faultyComponents(h)).not.toContain('shim-engine-keepalive');", () =>
+      holds(() => {
+        expect(faultyComponents(h)).not.toContain("shim-engine-keepalive");
+      }),
+    );
   });
 
   // THE ONE FAULT MEANT TO STAND. Nothing in this process restarts a query it
@@ -13683,9 +13713,11 @@ describe("a component that recovers", () => {
     });
     await started(h);
     h.queries[0]?.query.fail(new Error("the vendor process is gone"));
-    await vi.waitFor(() => {
-      expect(faultyComponents(h)).toContain("vendor-query");
-    });
+    await untilPushed(h.engine.pushes, "expect(faultyComponents(h)).toContain('vendor-query');", () =>
+      holds(() => {
+        expect(faultyComponents(h)).toContain("vendor-query");
+      }),
+    );
 
     // Act: the context probe is resolved directly, the way a later sample does.
     h.engine.pushes.resolveComponent("vendor-context-usage", 0);
@@ -15021,9 +15053,7 @@ describe("a subagent resumed by a send whose spawn this process never saw", () =
       agentID: LOCATOR,
       requestId: "req_1",
     });
-    await vi.waitFor(() => {
-      expect(h.persistence.buffered.some((entry) => entry.source.discriminator.includes("permission"))).toBe(true);
-    });
+    await h.persistence.untilBuffered((entry) => entry.source.discriminator.includes("permission"));
     await h.engine.standDown("SIGTERM");
     await pending;
     const entry = h.persistence.buffered.find((buffered) => buffered.source.discriminator.includes("permission"));
@@ -17070,9 +17100,11 @@ describe("the slash-command catalog", () => {
     await started(h);
 
     // Assert.
-    await vi.waitFor(() => {
-      expect(statedCatalogs(pushed)).toEqual([["merge-queue", "compact"]]);
-    });
+    await untilPushed(h.engine.pushes, "expect(statedCatalogs(pushed)).toEqual([['merge-queue', 'compact']]);", () =>
+      holds(() => {
+        expect(statedCatalogs(pushed)).toEqual([["merge-queue", "compact"]]);
+      }),
+    );
   });
 
   it("states a changed catalog when a turn's end re-reads it", async () => {
@@ -17085,18 +17117,22 @@ describe("the slash-command catalog", () => {
     });
     const pushed = vi.spyOn(h.engine.pushes, "push");
     await started(h);
-    await vi.waitFor(() => {
-      expect(statedCatalogs(pushed)).toHaveLength(1);
-    });
+    await untilPushed(h.engine.pushes, "expect(statedCatalogs(pushed)).toHaveLength(1);", () =>
+      holds(() => {
+        expect(statedCatalogs(pushed)).toHaveLength(1);
+      }),
+    );
 
     // Act.
     current = commands("compact", "new-skill");
     await closeTurn(h, "turn-1");
 
     // Assert.
-    await vi.waitFor(() => {
-      expect(statedCatalogs(pushed).at(-1)).toEqual(["compact", "new-skill"]);
-    });
+    await untilPushed(h.engine.pushes, "expect(statedCatalogs(pushed).at(-1)).toEqual(['compact', 'new-skill']);", () =>
+      holds(() => {
+        expect(statedCatalogs(pushed).at(-1)).toEqual(["compact", "new-skill"]);
+      }),
+    );
   });
 
   it("faults the catalog's own component when the read fails, and states no catalog", async () => {
@@ -17114,9 +17150,11 @@ describe("the slash-command catalog", () => {
     await started(h);
 
     // Assert.
-    await vi.waitFor(() => {
-      expect(faultComponents(h)).toContain("vendor-command-catalog");
-    });
+    await untilPushed(h.engine.pushes, "expect(faultComponents(h)).toContain('vendor-command-catalog');", () =>
+      holds(() => {
+        expect(faultComponents(h)).toContain("vendor-command-catalog");
+      }),
+    );
     const update = h.engine.pushes.diagnostics().update;
     const details =
       update.case === "diagnostics" && update.value.health.case === "unhealthy"
@@ -17139,17 +17177,21 @@ describe("the slash-command catalog", () => {
       },
     });
     await started(h);
-    await vi.waitFor(() => {
-      expect(faultComponents(h)).toContain("vendor-command-catalog");
-    });
+    await untilPushed(h.engine.pushes, "expect(faultComponents(h)).toContain('vendor-command-catalog');", () =>
+      holds(() => {
+        expect(faultComponents(h)).toContain("vendor-command-catalog");
+      }),
+    );
 
     // Act.
     await closeTurn(h, "turn-1");
 
     // Assert.
-    await vi.waitFor(() => {
-      expect(faultComponents(h)).not.toContain("vendor-command-catalog");
-    });
+    await untilPushed(h.engine.pushes, "expect(faultComponents(h)).not.toContain('vendor-command-catalog');", () =>
+      holds(() => {
+        expect(faultComponents(h)).not.toContain("vendor-command-catalog");
+      }),
+    );
   });
 });
 

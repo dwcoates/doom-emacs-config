@@ -37,6 +37,23 @@ import {
 } from "../../src/fake/catalogs.js";
 import { HARNESS_NOW_MS, driveScenario, ofType, recordsOfType, theResult, type Driven } from "./harness.js";
 
+/**
+ * A drive's first `result` message, as the event a `during` waits on
+ * (driveScenario's onMessage), never a poll of the messages delivered.
+ */
+function resultDelivered(): { onMessage: (message: SdkMessage) => void; delivered: Promise<void> } {
+  let resolve!: () => void;
+  const delivered = new Promise<void>((settle) => {
+    resolve = settle;
+  });
+  return {
+    onMessage: (message) => {
+      if (message.type === "result") resolve();
+    },
+    delivered,
+  };
+}
+
 const ALLOW: CanUseToolLike = async (_n, input) =>
   ({ behavior: "allow", updatedInput: input });
 
@@ -1009,12 +1026,12 @@ describe("cancelAsyncMessage", () => {
     let answer: boolean | undefined;
 
     // Act
+    const result = resultDelivered();
     await driveScenario(["one"], {
       clientUuids: ["ua"],
-      during: async (query, _feeder, messages) => {
-        await vi.waitFor(() => {
-          expect(messages.some((message) => message.type === "result")).toBe(true);
-        });
+      onMessage: result.onMessage,
+      during: async (query) => {
+        await result.delivered;
         answer = await query.cancelAsyncMessage("ua");
       },
     });
@@ -1593,13 +1610,13 @@ describe("injectRemotePrompt", () => {
     let uuid: string | undefined;
 
     // Act
+    const result = resultDelivered();
     const driven = await driveScenario([], {
-      during: async (query, _feeder, messages) => {
+      onMessage: result.onMessage,
+      during: async (query) => {
         await query.enableRemoteControl(true, "parser-fix");
         uuid = (query as FakeQuery).injectRemotePrompt("hello");
-        await vi.waitFor(() => {
-          expect(messages.some((message) => message.type === "result")).toBe(true);
-        });
+        await result.delivered;
       },
     });
 
@@ -1609,13 +1626,13 @@ describe("injectRemotePrompt", () => {
 
   it("files the remote prompt in the transcript as a person's, from the bridge", async () => {
     // Arrange, Act
+    const result = resultDelivered();
     const driven = await driveScenario([], {
-      during: async (query, _feeder, messages) => {
+      onMessage: result.onMessage,
+      during: async (query) => {
         await query.enableRemoteControl(true, "parser-fix");
         (query as FakeQuery).injectRemotePrompt("hello");
-        await vi.waitFor(() => {
-          expect(messages.some((message) => message.type === "result")).toBe(true);
-        });
+        await result.delivered;
       },
     });
 

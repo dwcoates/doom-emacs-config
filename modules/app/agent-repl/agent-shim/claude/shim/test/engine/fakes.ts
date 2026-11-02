@@ -495,6 +495,28 @@ export class RecordingPersistence implements Persistence {
     if (this.writeThrows !== undefined) throw this.writeThrows;
     this.wroteUnderProducer = true;
     this.buffered.push(...entries);
+    for (const waiter of [...this.bufferWaiters]) {
+      const entry = entries.find(waiter.predicate);
+      if (entry === undefined) continue;
+      this.bufferWaiters.delete(waiter);
+      waiter.resolve(entry);
+    }
+  }
+  private readonly bufferWaiters = new Set<{
+    predicate: (entry: PersistEntry) => boolean;
+    resolve: (entry: PersistEntry) => void;
+  }>();
+  /**
+   * Resolves with the first buffered entry PREDICATE accepts: one already
+   * buffered, or the next one written. The write is the event a test waits
+   * on, never a poll of `buffered`.
+   */
+  untilBuffered(predicate: (entry: PersistEntry) => boolean): Promise<PersistEntry> {
+    const already = this.buffered.find(predicate);
+    if (already !== undefined) return Promise.resolve(already);
+    return new Promise((resolve) => {
+      this.bufferWaiters.add({ predicate, resolve });
+    });
   }
   /** Every pointer a reading session was asked to conclude through. */
   readonly concludedThrough: string[] = [];
