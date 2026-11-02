@@ -1795,6 +1795,182 @@ workspace from the working directory, so no source tag rides it."
     (should (seq-some (lambda (line) (string-match-p "\\`elisp.input.border .*color=#232323 width=1" line))
                       logs))))
 
+;;;; ---- The ground's one owner ----
+
+(ert-deftest agent-repl-input-ground-is-set-through-its-owner ()
+  "The ground's `:set' is its one owner."
+  ;; Act + Assert
+  (should (eq (get 'agent-repl-input-background 'custom-set) #'agent-repl--input-background-set)))
+
+(ert-deftest agent-repl-input-ground-set-takes-the-new-value ()
+  "Setting the ground through its owner leaves the new value in force."
+  ;; Arrange
+  (let ((agent-repl-input-background "#171717")
+        (agent-repl-input-background-painters nil))
+    (cl-letf (((symbol-function 'agent-repl--info) #'ignore))
+      ;; Act
+      (agent-repl--input-background-set 'agent-repl-input-background "#000000")
+      ;; Assert
+      (should (equal agent-repl-input-background "#000000")))))
+
+(ert-deftest agent-repl-input-ground-set-runs-every-painter-after-the-value ()
+  "Each painter runs once the new ground is in force, so it paints the new color."
+  ;; Arrange
+  (let* ((seen nil)
+         (agent-repl-input-background "#171717")
+         (agent-repl-input-background-painters
+          (list (lambda () (push agent-repl-input-background seen))
+                (lambda () (push agent-repl-input-background seen)))))
+    (cl-letf (((symbol-function 'agent-repl--info) #'ignore))
+      ;; Act
+      (agent-repl--input-background-set 'agent-repl-input-background "#000000"))
+    ;; Assert
+    (should (equal seen '("#000000" "#000000")))))
+
+(ert-deftest agent-repl-input-ground-set-logs-the-change ()
+  "A change of the ground is recorded with the new color, the old one and the painters."
+  ;; Arrange
+  (let ((logs nil)
+        (agent-repl-input-background "#171717")
+        (agent-repl-input-background-painters (list #'ignore)))
+    (cl-letf (((symbol-function 'agent-repl--info) (agent-repl-test--record-into logs)))
+      ;; Act
+      (agent-repl--input-background-set 'agent-repl-input-background "#000000"))
+    ;; Assert
+    (should (equal logs
+                   '("elisp.input.ground-set symbol=agent-repl-input-background color=#000000 from=\"#171717\" painters=(ignore)")))))
+
+(ert-deftest agent-repl-input-ground-reevaluated-reaches-every-painter ()
+  "A stale ground re-evaluated through Custom takes its default and runs every painter."
+  ;; Arrange
+  (let* ((ran 0)
+         (agent-repl-input-background "#1a1a1a")
+         (agent-repl-input-background-painters (list (lambda () (cl-incf ran)))))
+    (cl-letf (((symbol-function 'agent-repl--info) #'ignore))
+      ;; Act
+      (custom-reevaluate-setting 'agent-repl-input-background)
+      ;; Assert
+      (should (equal (list agent-repl-input-background ran)
+                     (list (eval (car (get 'agent-repl-input-background 'standard-value)) t) 1))))))
+
+(ert-deftest agent-repl-input-ground-painters-are-every-surface ()
+  "The composers, the minibuffers and echo areas, and the hidden frames each repaint on a change."
+  ;; Act + Assert
+  (should (seq-set-equal-p (seq-filter (lambda (fn)
+                                         (memq fn '(agent-repl--input-paint-all
+                                                    agent-repl-minibuffer-ground-paint-all
+                                                    agent-repl--dividers-repaint-all)))
+                                       agent-repl-input-background-painters)
+                           '(agent-repl--dividers-repaint-all
+                             agent-repl-minibuffer-ground-paint-all
+                             agent-repl--input-paint-all))))
+
+(ert-deftest agent-repl-input-ground-set-repaints-a-composer-without-stacking ()
+  "Each change leaves the composer exactly one ground remap and its border's fringe over it."
+  ;; Arrange
+  (let ((agent-repl-input-background "#171717")
+        (agent-repl-input-background-painters (list #'agent-repl--input-paint-all)))
+    (cl-letf (((symbol-function 'agent-repl--info) #'ignore))
+      (with-temp-buffer
+        (agent-repl-input-mode)
+        ;; Act
+        (agent-repl--input-background-set 'agent-repl-input-background "#000000")
+        (agent-repl--input-background-set 'agent-repl-input-background "#ff0000")
+        ;; Assert
+        (should (equal (list (agent-repl-test--remapped-backgrounds 'default)
+                             (agent-repl-test--remapped-backgrounds 'fringe))
+                       '(("#ff0000") ("#ff0d0d" "#ff0000"))))))))
+
+(ert-deftest agent-repl-input-paint-in-the-same-ground-adds-nothing ()
+  "A composer repainted in the ground it wears keeps its remaps and logs no paint."
+  ;; Arrange
+  (let ((agent-repl-input-background "#171717")
+        (logs nil))
+    (cl-letf (((symbol-function 'agent-repl--log) (agent-repl-test--record-into logs)))
+      (with-temp-buffer
+        (agent-repl-input-mode)
+        (let ((before (copy-tree face-remapping-alist)))
+          (setq logs nil)
+          ;; Act
+          (agent-repl--input-paint-all)
+          ;; Assert
+          (should (equal face-remapping-alist before))
+          (should-not (seq-some (lambda (line) (string-prefix-p "elisp.input.paint " line)) logs)))))))
+
+(ert-deftest agent-repl-input-paint-logs-the-composer-and-colors ()
+  "A composer's paint is recorded with its buffer, the new ground and the one it replaced."
+  ;; Arrange
+  (let ((agent-repl-input-background "#171717")
+        (logs nil))
+    (cl-letf (((symbol-function 'agent-repl--log) (agent-repl-test--record-into logs)))
+      (with-temp-buffer
+        (rename-buffer " *test-input-paint*" t)
+        (agent-repl-input-mode)
+        (setq logs nil)
+        ;; Act
+        (let ((agent-repl-input-background "#000000"))
+          (agent-repl--input-paint))
+        ;; Assert
+        (should (member "elisp.input.paint buffer= *test-input-paint* color=#000000 from=\"#171717\""
+                        logs))))))
+
+(ert-deftest agent-repl-input-paint-all-leaves-other-buffers ()
+  "Only composer buffers are repainted: another buffer gains no remap."
+  ;; Arrange
+  (let ((agent-repl-input-background "#000000"))
+    (cl-letf (((symbol-function 'agent-repl--log) #'ignore))
+      (with-temp-buffer
+        ;; Act
+        (agent-repl--input-paint-all)
+        ;; Assert
+        (should-not face-remapping-alist)))))
+
+(ert-deftest agent-repl-input-draw-border-all-draws-a-composer-made-without-one ()
+  "A composer made before the border (no header or mode line, frame fringes) gets the border."
+  ;; Arrange
+  (let ((agent-repl-input-background "#171717"))
+    (cl-letf (((symbol-function 'agent-repl--log) #'ignore)
+              ((symbol-function 'agent-repl-dividers-fix-fringes) #'ignore))
+      (with-temp-buffer
+        (agent-repl-input-mode)
+        (setq-local header-line-format nil
+                    mode-line-format nil)
+        (setq face-remapping-alist nil
+              agent-repl--input-painted nil)
+        ;; Act
+        (agent-repl--input-draw-border-all)
+        ;; Assert
+        (should (equal (list header-line-format mode-line-format
+                             (agent-repl-test--remapped-backgrounds 'fringe))
+                       (list agent-repl--input-border-line-format
+                             agent-repl--input-border-line-format
+                             '("#232323" "#171717"))))))))
+
+(ert-deftest agent-repl-input-draw-border-all-never-stacks-a-drawn-composer ()
+  "Drawing a composer that already wears its border again adds no remap."
+  ;; Arrange
+  (let ((agent-repl-input-background "#171717"))
+    (cl-letf (((symbol-function 'agent-repl--log) #'ignore)
+              ((symbol-function 'agent-repl-dividers-fix-fringes) #'ignore))
+      (with-temp-buffer
+        (agent-repl-input-mode)
+        (let ((before (copy-tree face-remapping-alist)))
+          ;; Act
+          (agent-repl--input-draw-border-all)
+          ;; Assert
+          (should (equal face-remapping-alist before)))))))
+
+(ert-deftest agent-repl-input-draw-border-all-leaves-other-buffers ()
+  "Only composers are drawn: another buffer keeps its header line."
+  ;; Arrange
+  (cl-letf (((symbol-function 'agent-repl--log) #'ignore))
+    (with-temp-buffer
+      (setq-local header-line-format "mine")
+      ;; Act
+      (agent-repl--input-draw-border-all)
+      ;; Assert
+      (should (equal header-line-format "mine")))))
+
 (ert-deftest agent-repl-input-mode-enables-visual-line-mode ()
   "The composer turns on `visual-line-mode' so Evil moves by screen line."
   ;; Arrange.

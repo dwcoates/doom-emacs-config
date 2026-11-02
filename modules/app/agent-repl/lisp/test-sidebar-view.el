@@ -321,11 +321,35 @@ Binds `made' to that buffer; it is killed afterwards."
                (lambda (_url) (error "made twice"))))
       (should (eq (agent-repl-sidebar-view-ensure (agent-repl-test-sv--conn "127.0.0.1:5")) 'sidebar-xwidget)))))
 
-(ert-deftest agent-repl-test-sv-the-sidebar-has-no-mode-line ()
-  "The sidebar's buffer draws no mode line, as the feed and composer draw none."
+(ert-deftest agent-repl-test-sv-the-sidebar-mode-line-is-the-composers-border ()
+  "The sidebar's buffer draws the composer's border line as its mode line, one source for both."
   (agent-repl-test-sv--with-created
     (agent-repl-sidebar-view-ensure (agent-repl-test-sv--conn "127.0.0.1:5"))
-    (should-not (buffer-local-value 'mode-line-format made))))
+    (should (eq (buffer-local-value 'mode-line-format made) agent-repl--input-border-line-format))))
+
+(ert-deftest agent-repl-test-sv-the-sidebar-bottom-border-is-logged ()
+  "Drawing the sidebar's bottom border is recorded with its buffer."
+  (let ((logs nil))
+    (with-temp-buffer
+      (rename-buffer " *test-sv-border*" t)
+      (cl-letf (((symbol-function 'agent-repl--log) (agent-repl-test--record-into logs)))
+        ;; Act
+        (agent-repl--sidebar-view-draw-bottom-border (current-buffer)))
+      ;; Assert
+      (should (equal logs '("elisp.sidebar-view.bottom-border buffer= *test-sv-border*"))))))
+
+(ert-deftest agent-repl-test-sv-the-sidebar-border-row-is-the-composers-row ()
+  "Evaluated in the sidebar's window, the border line is one pixel high in the composer's border color."
+  (let ((agent-repl-input-background "#171717"))
+    (with-temp-buffer
+      ;; Arrange
+      (agent-repl--sidebar-view-draw-bottom-border (current-buffer))
+      ;; Act
+      (let ((line (eval (cadr mode-line-format) t)))
+        ;; Assert
+        (should (equal (list (get-text-property 0 'face line)
+                             (plist-get (cdr (get-text-property 0 'display line)) :height))
+                       '((:background "#232323") (1))))))))
 
 (ert-deftest agent-repl-test-sv-the-sidebar-buffer-refuses-a-foreign-kill ()
   "Only this module kills the sidebar buffer."
@@ -380,12 +404,12 @@ Binds `made' to that buffer; it is killed afterwards."
           (should (eq (window-parameter win 'window-side) 'left))
           (should (= (window-total-height win) (window-total-height (frame-root-window)))))))))
 
-(ert-deftest agent-repl-test-sv-showing-draws-no-mode-line-in-the-window ()
-  "The sidebar's window draws no mode line."
+(ert-deftest agent-repl-test-sv-showing-leaves-the-buffers-mode-line-to-the-window ()
+  "The sidebar's window sets no mode line of its own, so the buffer's border line shows."
   (agent-repl-test-sv--with-created
     (agent-repl-test-sv--with-frame
       (let ((win (agent-repl-sidebar-view-show (agent-repl-test-sv--conn "127.0.0.1:5"))))
-        (should (eq (window-parameter win 'mode-line-format) 'none))))))
+        (should-not (window-parameter win 'mode-line-format))))))
 
 (ert-deftest agent-repl-test-sv-showing-opens-at-the-configured-width ()
   "The sidebar opens at its fraction of the frame's width."

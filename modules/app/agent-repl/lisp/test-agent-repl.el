@@ -94,6 +94,7 @@
   (load (expand-file-name "test-test-helpers.el" dir) nil t)
   (load (expand-file-name "test-threads.el" dir) nil t)
   (load (expand-file-name "test-titlebar.el" dir) nil t)
+  (load (expand-file-name "test-frame-border.el" dir) nil t)
   (load (expand-file-name "test-dividers.el" dir) nil t)
   (load (expand-file-name "test-minibuffer-ground.el" dir) nil t)
   (load (expand-file-name "test-webhost.el" dir) nil t)

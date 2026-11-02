@@ -609,6 +609,275 @@ Every module in ABSENT is named by config.el but gets no file."
           ;; Assert
           (should (and (equal outcome "other-root") (null agent-repl-test-eb--loaded))))))))
 
+;;;; ---- A reload's changed defaults ----
+;;
+;; Each case declares its own option: an UNINTERNED symbol for the apply
+;; step, which only reads the symbol it is handed, and the one interned
+;; `agent-repl-test-eb--option' for the snapshot, which walks the obarray.
+
+(defun agent-repl-test-eb--option (value default &rest props)
+  "Return a fresh uninterned option holding VALUE whose declared default is DEFAULT.
+PROPS are more (PROPERTY VALUE) pairs to put on it, as `saved-value'."
+  (let ((symbol (make-symbol "agent-repl-test-eb-option")))
+    (set-default symbol value)
+    (put symbol 'standard-value (list (list 'quote default)))
+    (while props
+      (put symbol (pop props) (pop props)))
+    symbol))
+
+(defun agent-repl-test-eb--logged (kind prefix)
+  "Return every record of KIND (:log :info :error) whose text starts with PREFIX."
+  (seq-filter (lambda (record) (and (eq (car record) kind) (string-prefix-p prefix (cdr record))))
+              agent-repl-test-eb--logs))
+
+(ert-deftest agent-repl-test-eb-defaults-uncustomized-option-takes-the-new-default ()
+  "An option still holding the old default, which no one customized, takes the new one."
+  (agent-repl-test-eb--with-harness
+    ;; Arrange
+    (let ((option (agent-repl-test-eb--option "#1a1a1a" "#171717")))
+      ;; Act
+      (let ((applied (agent-repl--elisp-defaults-apply (list (cons option "#1a1a1a")))))
+        ;; Assert
+        (should (equal (list applied (default-value option)) (list (list option) "#171717")))))))
+
+(ert-deftest agent-repl-test-eb-defaults-new-default-goes-through-the-options-set ()
+  "The new default is set through the option's `:set', so its owner repaints."
+  (agent-repl-test-eb--with-harness
+    ;; Arrange
+    (let* ((set nil)
+           (option (agent-repl-test-eb--option "#1a1a1a" "#171717"
+                                               'custom-set (lambda (symbol value)
+                                                             (push value set)
+                                                             (set-default symbol value)))))
+      ;; Act
+      (agent-repl--elisp-defaults-apply (list (cons option "#1a1a1a")))
+      ;; Assert
+      (should (equal set '("#171717"))))))
+
+(ert-deftest agent-repl-test-eb-defaults-new-default-is-logged ()
+  "A default given is recorded at INFO with the option and both defaults."
+  (agent-repl-test-eb--with-harness
+    ;; Arrange
+    (let ((option (agent-repl-test-eb--option "#1a1a1a" "#171717")))
+      ;; Act
+      (agent-repl--elisp-defaults-apply (list (cons option "#1a1a1a")))
+      ;; Assert
+      (should (equal (agent-repl-test-eb--logged :info "elisp.elisp-build.default-applied")
+                     '((:info . "elisp.elisp-build.default-applied symbol=agent-repl-test-eb-option from=\"#1a1a1a\" to=\"#171717\"")))))))
+
+(ert-deftest agent-repl-test-eb-defaults-saved-option-keeps-its-value ()
+  "An option with a saved value keeps it through a changed default."
+  (agent-repl-test-eb--with-harness
+    ;; Arrange
+    (let ((option (agent-repl-test-eb--option "#1a1a1a" "#171717" 'saved-value '("#1a1a1a"))))
+      ;; Act
+      (let ((applied (agent-repl--elisp-defaults-apply (list (cons option "#1a1a1a")))))
+        ;; Assert
+        (should (equal (list applied (default-value option)) '(nil "#1a1a1a")))))))
+
+(ert-deftest agent-repl-test-eb-defaults-customized-option-keeps-its-value ()
+  "An option customized this session keeps its value through a changed default."
+  (agent-repl-test-eb--with-harness
+    ;; Arrange
+    (let ((option (agent-repl-test-eb--option "#1a1a1a" "#171717" 'customized-value '("#1a1a1a"))))
+      ;; Act
+      (agent-repl--elisp-defaults-apply (list (cons option "#1a1a1a")))
+      ;; Assert
+      (should (equal (default-value option) "#1a1a1a")))))
+
+(ert-deftest agent-repl-test-eb-defaults-theme-set-option-keeps-its-value ()
+  "An option a theme set keeps its value through a changed default."
+  (agent-repl-test-eb--with-harness
+    ;; Arrange
+    (let ((option (agent-repl-test-eb--option "#1a1a1a" "#171717" 'theme-value '((user "#1a1a1a")))))
+      ;; Act
+      (agent-repl--elisp-defaults-apply (list (cons option "#1a1a1a")))
+      ;; Assert
+      (should (equal (default-value option) "#1a1a1a")))))
+
+(ert-deftest agent-repl-test-eb-defaults-customized-option-logs-the-kept-value ()
+  "A customized option kept through a changed default is recorded with the reason."
+  (agent-repl-test-eb--with-harness
+    ;; Arrange
+    (let ((option (agent-repl-test-eb--option "#1a1a1a" "#171717" 'customized-value '("#1a1a1a"))))
+      ;; Act
+      (agent-repl--elisp-defaults-apply (list (cons option "#1a1a1a")))
+      ;; Assert
+      (should (equal (agent-repl-test-eb--logged :log "elisp.elisp-build.default-kept")
+                     '((:log . "elisp.elisp-build.default-kept symbol=agent-repl-test-eb-option reason=customized default=\"#171717\"")))))))
+
+(ert-deftest agent-repl-test-eb-defaults-option-set-outside-custom-keeps-its-value ()
+  "An option no longer holding the old default (an `add-to-list' in an init file) keeps its value."
+  (agent-repl-test-eb--with-harness
+    ;; Arrange
+    (let ((option (agent-repl-test-eb--option '(("repo" . ("a.el"))) '(("other")))))
+      ;; Act
+      (let ((applied (agent-repl--elisp-defaults-apply (list (cons option nil)))))
+        ;; Assert
+        (should (equal (list applied (default-value option)) '(nil (("repo" . ("a.el"))))))))))
+
+(ert-deftest agent-repl-test-eb-defaults-option-set-outside-custom-logs-the-kept-value ()
+  "An option set outside Custom kept through a changed default is recorded with the reason."
+  (agent-repl-test-eb--with-harness
+    ;; Arrange
+    (let ((option (agent-repl-test-eb--option "#222222" "#171717")))
+      ;; Act
+      (agent-repl--elisp-defaults-apply (list (cons option "#1a1a1a")))
+      ;; Assert
+      (should (equal (agent-repl-test-eb--logged :log "elisp.elisp-build.default-kept")
+                     '((:log . "elisp.elisp-build.default-kept symbol=agent-repl-test-eb-option reason=set-outside-custom value=\"#222222\" default=\"#171717\"")))))))
+
+(ert-deftest agent-repl-test-eb-defaults-unchanged-default-is-left-alone ()
+  "An option whose default did not change is neither set nor logged, whatever its value."
+  (agent-repl-test-eb--with-harness
+    ;; Arrange
+    (let* ((set nil)
+           (option (agent-repl-test-eb--option "#222222" "#171717"
+                                               'custom-set (lambda (_symbol value) (push value set)))))
+      ;; Act
+      (agent-repl--elisp-defaults-apply (list (cons option "#171717")))
+      ;; Assert
+      (should (equal (list set (default-value option) agent-repl-test-eb--logs)
+                     '(nil "#222222" nil))))))
+
+(ert-deftest agent-repl-test-eb-defaults-unevaluable-default-is-an-error ()
+  "A default that does not evaluate is an ERROR, and the option keeps its value."
+  (agent-repl-test-eb--with-harness
+    ;; Arrange
+    (let ((option (agent-repl-test-eb--option "#1a1a1a" nil)))
+      (put option 'standard-value '((error "Broken default")))
+      ;; Act
+      (let ((applied (agent-repl--elisp-defaults-apply (list (cons option "#1a1a1a")))))
+        ;; Assert
+        (should (equal (list applied (default-value option)) '(nil "#1a1a1a")))
+        (should (string-match-p
+                 "\\`elisp\\.elisp-build\\.default-unevaluable symbol=agent-repl-test-eb-option form=(error \"Broken default\") error=(error \"Broken default\")"
+                 (cdar (agent-repl-test-eb--logged :error "elisp.elisp-build.default-unevaluable"))))))))
+
+(defcustom agent-repl-test-eb--option "old"
+  "An agent-repl option the snapshot cases change the default of."
+  :type 'string
+  :group 'agent-repl)
+
+(defmacro agent-repl-test-eb--with-option (value &rest body)
+  "Run BODY with `agent-repl-test-eb--option' holding VALUE, its default \"old\".
+Its value and declared default are restored afterwards."
+  (declare (indent 1))
+  `(let ((standard (get 'agent-repl-test-eb--option 'standard-value)))
+     (unwind-protect
+         (progn
+           (put 'agent-repl-test-eb--option 'standard-value (list (list 'quote "old")))
+           (set-default 'agent-repl-test-eb--option ,value)
+           ,@body)
+       (put 'agent-repl-test-eb--option 'standard-value standard)
+       (set-default 'agent-repl-test-eb--option "old"))))
+
+(defun agent-repl-test-eb--declare-default (default)
+  "Re-declare `agent-repl-test-eb--option''s default as DEFAULT, as a reload does."
+  (put 'agent-repl-test-eb--option 'standard-value (list (list 'quote default))))
+
+(ert-deftest agent-repl-test-eb-defaults-snapshot-holds-each-options-default ()
+  "The snapshot holds every agent-repl option with its declared default evaluated."
+  (agent-repl-test-eb--with-harness
+    (agent-repl-test-eb--with-option "set by hand"
+      ;; Act
+      (let ((snapshot (agent-repl--elisp-defaults-snapshot)))
+        ;; Assert
+        (should (equal (assq 'agent-repl-test-eb--option snapshot)
+                       '(agent-repl-test-eb--option . "old")))))))
+
+(ert-deftest agent-repl-test-eb-defaults-snapshot-holds-no-other-packages-option ()
+  "An option outside agent-repl is never in the snapshot."
+  (agent-repl-test-eb--with-harness
+    ;; Act
+    (let ((snapshot (agent-repl--elisp-defaults-snapshot)))
+      ;; Assert
+      (should (and (custom-variable-p 'fill-column) (null (assq 'fill-column snapshot)))))))
+
+(ert-deftest agent-repl-test-eb-defaults-with-defaults-applies-what-the-load-changed ()
+  "A load that changes an untouched option's default leaves the option on the new one."
+  (agent-repl-test-eb--with-harness
+    (agent-repl-test-eb--with-option "old"
+      ;; Act
+      (agent-repl--elisp-with-defaults (lambda () (agent-repl-test-eb--declare-default "new")))
+      ;; Assert
+      (should (equal agent-repl-test-eb--option "new")))))
+
+(ert-deftest agent-repl-test-eb-defaults-with-defaults-answers-the-loads-answer ()
+  "The wrapped load's answer is the wrapper's."
+  (agent-repl-test-eb--with-harness
+    ;; Act + Assert
+    (should (eq (agent-repl--elisp-with-defaults (lambda () 'loaded)) 'loaded))))
+
+(ert-deftest agent-repl-test-eb-defaults-hot-load-loads-every-file-in-order ()
+  "The runtime's hot load loads each file it is handed, in order, and answers t."
+  (agent-repl-test-eb--with-harness
+    ;; Act
+    (let ((answer (agent-repl-elisp-hot-load '("/m/lisp/a.el" "/m/lisp/b.el"))))
+      ;; Assert
+      (should (equal (list answer (reverse agent-repl-test-eb--loaded))
+                     '(t ("/m/lisp/a.el" "/m/lisp/b.el")))))))
+
+(ert-deftest agent-repl-test-eb-defaults-hot-load-logs-each-file ()
+  "Each file the hot load loads is recorded at INFO."
+  (agent-repl-test-eb--with-harness
+    ;; Act
+    (agent-repl-elisp-hot-load '("/m/lisp/a.el" "/m/lisp/b.el"))
+    ;; Assert
+    (should (equal (reverse (agent-repl-test-eb--logged :info "elisp.elisp-build.hot-load"))
+                   '((:info . "elisp.elisp-build.hot-load file=\"/m/lisp/a.el\"")
+                     (:info . "elisp.elisp-build.hot-load file=\"/m/lisp/b.el\""))))))
+
+(ert-deftest agent-repl-test-eb-defaults-hot-load-applies-a-changed-default ()
+  "A default one of the hot-loaded files changed reaches the running editor."
+  (agent-repl-test-eb--with-harness
+    (agent-repl-test-eb--with-option "old"
+      (cl-letf (((symbol-function 'agent-repl--elisp-reload-load-file)
+                 (lambda (_file) (agent-repl-test-eb--declare-default "new"))))
+        ;; Act
+        (agent-repl-elisp-hot-load '("/m/lisp/a.el"))
+        ;; Assert
+        (should (equal agent-repl-test-eb--option "new"))))))
+
+(ert-deftest agent-repl-test-eb-defaults-hot-load-failure-signals ()
+  "A file that fails to load signals out of the hot load, so the verb fails loudly."
+  (agent-repl-test-eb--with-harness
+    ;; Arrange
+    (setq agent-repl-test-eb--failing-loads '("a"))
+    ;; Act + Assert
+    (should-error (agent-repl-elisp-hot-load '("/m/lisp/a.el")))))
+
+(ert-deftest agent-repl-test-eb-defaults-reload-applies-a-changed-default ()
+  "A pushed reload that changes an untouched option's default leaves the option on the new one."
+  (agent-repl-test-eb--with-harness
+    (agent-repl-test-eb--with-root root
+      (agent-repl-test-eb--with-option "old"
+        ;; Arrange
+        (agent-repl-test-eb--write-root root '("core"))
+        (cl-letf (((symbol-function 'agent-repl--elisp-reload-load-file)
+                   (lambda (_file) (agent-repl-test-eb--declare-default "new"))))
+          ;; Act
+          (agent-repl--elisp-reload-run root "any")
+          ;; Assert
+          (should (equal agent-repl-test-eb--option "new")))))))
+
+(ert-deftest agent-repl-test-eb-defaults-reload-keeps-a-customized-option ()
+  "A pushed reload leaves a customized option on its value through a changed default."
+  (agent-repl-test-eb--with-harness
+    (agent-repl-test-eb--with-root root
+      (agent-repl-test-eb--with-option "old"
+        ;; Arrange
+        (agent-repl-test-eb--write-root root '("core"))
+        (put 'agent-repl-test-eb--option 'customized-value '("old"))
+        (unwind-protect
+            (cl-letf (((symbol-function 'agent-repl--elisp-reload-load-file)
+                       (lambda (_file) (agent-repl-test-eb--declare-default "new"))))
+              ;; Act
+              (agent-repl--elisp-reload-run root "any")
+              ;; Assert
+              (should (equal agent-repl-test-eb--option "old")))
+          (put 'agent-repl-test-eb--option 'customized-value nil))))))
+
 (provide 'test-elisp-build)
 
 ;;; test-elisp-build.el ends here

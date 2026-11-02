@@ -16,11 +16,6 @@
                     (file-name-directory (or load-file-name buffer-file-name)))
   "The module's source, for the scan below.")
 
-(defun agent-repl-test-minibuffer-ground--backgrounds (face)
-  "Return every :background the current buffer remaps FACE to, newest first."
-  (delq nil (mapcar (lambda (spec) (and (listp spec) (plist-get spec :background)))
-                    (cdr (assq face face-remapping-alist)))))
-
 (defmacro agent-repl-test-minibuffer-ground--with-buffer (&rest body)
   "Run BODY in a fresh buffer, `logs' collecting every canonical log line."
   (declare (indent 0))
@@ -37,8 +32,8 @@
     ;; Act
     (agent-repl-minibuffer-ground-paint)
     ;; Assert
-    (should (equal (list (agent-repl-test-minibuffer-ground--backgrounds 'default)
-                         (agent-repl-test-minibuffer-ground--backgrounds 'fringe))
+    (should (equal (list (agent-repl-test--remapped-backgrounds 'default)
+                         (agent-repl-test--remapped-backgrounds 'fringe))
                    '(("#123456") ("#123456"))))))
 
 (ert-deftest agent-repl-test-minibuffer-ground-same-color-paints-once ()
@@ -49,7 +44,7 @@
     ;; Act
     (agent-repl-minibuffer-ground-paint)
     ;; Assert
-    (should (equal (agent-repl-test-minibuffer-ground--backgrounds 'default) '("#123456")))
+    (should (equal (agent-repl-test--remapped-backgrounds 'default) '("#123456")))
     (should (= (length logs) 1))))
 
 (ert-deftest agent-repl-test-minibuffer-ground-new-color-takes-the-old-back ()
@@ -61,8 +56,8 @@
     (let ((agent-repl-input-background "#abcdef"))
       (agent-repl-minibuffer-ground-paint))
     ;; Assert
-    (should (equal (list (agent-repl-test-minibuffer-ground--backgrounds 'default)
-                         (agent-repl-test-minibuffer-ground--backgrounds 'fringe))
+    (should (equal (list (agent-repl-test--remapped-backgrounds 'default)
+                         (agent-repl-test--remapped-backgrounds 'fringe))
                    '(("#abcdef") ("#abcdef"))))))
 
 (ert-deftest agent-repl-test-minibuffer-ground-paint-logs-buffer-and-colors ()
@@ -92,7 +87,7 @@
           ;; Assert
           (should (equal (mapcar (lambda (name)
                                    (with-current-buffer name
-                                     (car (agent-repl-test-minibuffer-ground--backgrounds 'default))))
+                                     (car (agent-repl-test--remapped-backgrounds 'default))))
                                  agent-repl--minibuffer-ground-echo-buffers)
                          '("#123456" "#123456"))))
       (cl-letf (((symbol-function 'agent-repl--log) #'ignore))
@@ -112,7 +107,7 @@
             (should minibuffers)
             (dolist (buf minibuffers)
               (with-current-buffer buf
-                (should (equal (car (agent-repl-test-minibuffer-ground--backgrounds 'default))
+                (should (equal (car (agent-repl-test--remapped-backgrounds 'default))
                                "#123456"))))))
       (cl-letf (((symbol-function 'agent-repl--log) #'ignore))
         (let ((agent-repl-input-background original))
@@ -134,9 +129,34 @@
     ;; Act
     (minibuffer-inactive-mode)
     ;; Assert
-    (should (equal (agent-repl-test-minibuffer-ground--backgrounds 'default) '("#123456")))))
+    (should (equal (agent-repl-test--remapped-backgrounds 'default) '("#123456")))))
 
 ;;;; ---- One color ----
+
+(ert-deftest agent-repl-test-minibuffer-ground-repaints-on-a-ground-change ()
+  "A change of the ground repaints every minibuffer and echo area (`agent-repl-input-background-painters')."
+  ;; Act + Assert
+  (should (memq #'agent-repl-minibuffer-ground-paint-all agent-repl-input-background-painters)))
+
+(ert-deftest agent-repl-test-minibuffer-ground-ground-change-never-stacks ()
+  "Two changes of the ground through its owner leave the echo area one remap of the latest."
+  (let ((original agent-repl-input-background))
+    (unwind-protect
+        (let ((agent-repl-input-background original)
+              (agent-repl-input-background-painters (list #'agent-repl-minibuffer-ground-paint-all)))
+          (cl-letf (((symbol-function 'agent-repl--log) #'ignore)
+                    ((symbol-function 'agent-repl--info) #'ignore))
+            ;; Act
+            (agent-repl--input-background-set 'agent-repl-input-background "#123456")
+            (agent-repl--input-background-set 'agent-repl-input-background "#abcdef"))
+          ;; Assert
+          (with-current-buffer (car agent-repl--minibuffer-ground-echo-buffers)
+            (should (equal (list (agent-repl-test--remapped-backgrounds 'default)
+                                 (agent-repl-test--remapped-backgrounds 'fringe))
+                           '(("#abcdef") ("#abcdef"))))))
+      (cl-letf (((symbol-function 'agent-repl--log) #'ignore))
+        (let ((agent-repl-input-background original))
+          (agent-repl-minibuffer-ground-paint-all))))))
 
 (ert-deftest agent-repl-test-minibuffer-ground-names-no-color-of-its-own ()
   "The module writes no hex color: it wears `agent-repl-input-background'."

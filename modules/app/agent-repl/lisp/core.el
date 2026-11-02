@@ -4417,6 +4417,25 @@ two remapping cookies, for `face-remap-remove-relative' to take back."
   (list (face-remap-add-relative 'default :background color)
         (face-remap-add-relative 'fringe :background color)))
 
+(declare-function face-remap-remove-relative "face-remap" (cookie))
+
+(defun agent-repl--ground-swap (scope event painted color paint)
+  "Return the current buffer's (COLOR . COOKIES) record once painted COLOR.
+PAINTED is the record of the buffer's last paint, or nil.  A buffer
+already painted COLOR keeps PAINTED as it is and nothing is logged.
+Otherwise PAINTED's remaps are taken back FIRST, so no paint ever stacks
+on another, PAINT is called with COLOR to add the new remaps and return
+their cookies, and EVENT is logged under SCOPE with the buffer, the new
+color and the one it replaced.  The caller stores the returned record in
+its own buffer-local variable: each painter owns its remaps alone."
+  (if (equal (car painted) color)
+      painted
+    ;; EVENT heads the format itself, so it names the record's operation.
+    (agent-repl--log scope (concat event " buffer=%s color=%s from=%S")
+                     (buffer-name) color (car painted))
+    (mapc #'face-remap-remove-relative (cdr painted))
+    (cons color (funcall paint color))))
+
 ;;; Harness-injected (meta) prompt spans
 ;;
 ;; Some prompts agent-repl sends carry text the USER never typed: the

@@ -19,14 +19,15 @@
 ;; The echo area buffers keep theirs, so they are painted at load.  Each
 ;; buffer records the color it was painted and its remap cookies, so a
 ;; repaint in the same color does nothing and one in a new color takes
-;; the old remap back first.
+;; the old remap back first.  A change of the ground itself repaints
+;; them all (`agent-repl-input-background-painters', input.el).
 
 ;;; Code:
 
 (require 'seq)
 
 (declare-function agent-repl--set-buffer-background "core" (color))
-(declare-function agent-repl--log "core" (ws fmt &rest args))
+(declare-function agent-repl--ground-swap "core" (scope event painted color paint))
 (defvar agent-repl-input-background)
 
 (defconst agent-repl--minibuffer-ground-log-scope
@@ -43,15 +44,13 @@
 (defun agent-repl-minibuffer-ground-paint ()
   "Paint the current buffer's background `agent-repl-input-background'.
 A buffer already in that color is left as it is; one painted another
-color has that remap taken back first."
-  (let ((color agent-repl-input-background))
-    (unless (equal (car agent-repl--minibuffer-ground-painted) color)
-      (agent-repl--log agent-repl--minibuffer-ground-log-scope
-                       "elisp.minibuffer-ground.paint buffer=%s color=%s from=%S"
-                       (buffer-name) color (car agent-repl--minibuffer-ground-painted))
-      (mapc #'face-remap-remove-relative (cdr agent-repl--minibuffer-ground-painted))
-      (setq agent-repl--minibuffer-ground-painted
-            (cons color (agent-repl--set-buffer-background color))))))
+color has that remap taken back first (`agent-repl--ground-swap')."
+  (setq agent-repl--minibuffer-ground-painted
+        (agent-repl--ground-swap agent-repl--minibuffer-ground-log-scope
+                                 "elisp.minibuffer-ground.paint"
+                                 agent-repl--minibuffer-ground-painted
+                                 agent-repl-input-background
+                                 #'agent-repl--set-buffer-background)))
 
 (defun agent-repl-minibuffer-ground-paint-all ()
   "Paint every minibuffer and both echo area buffers.
@@ -64,6 +63,8 @@ way Emacs itself makes it, so the first message finds it painted."
 
 (add-hook 'minibuffer-setup-hook #'agent-repl-minibuffer-ground-paint)
 (add-hook 'minibuffer-inactive-mode-hook #'agent-repl-minibuffer-ground-paint)
+;; A new ground repaints every minibuffer and echo area (input.el).
+(add-hook 'agent-repl-input-background-painters #'agent-repl-minibuffer-ground-paint-all)
 ;; A load (and a reload) finds the minibuffers and echo areas already made.
 (agent-repl-minibuffer-ground-paint-all)
 

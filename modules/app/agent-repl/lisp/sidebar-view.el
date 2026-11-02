@@ -62,6 +62,7 @@
 (declare-function agent-repl--ws-current-name "workspace" ())
 
 (defvar agent-repl--webhost-log-level)
+(defvar agent-repl--input-border-line-format)
 
 (defgroup agent-repl-sidebar-view nil
   "The agent-repl sidebar's own window."
@@ -149,9 +150,24 @@ Created once and kept for the session.  No window is touched."
         (setq agent-repl--sidebar-view-buffer buf
               agent-repl--sidebar-view-url url
               agent-repl--sidebar-view-daemon-origin nil)
+        (agent-repl--sidebar-view-draw-bottom-border buf)
         (agent-repl--sidebar-view-watch-load xw)
         (agent-repl--info agent-repl--sidebar-view-central "elisp.sidebar-view.created url=%s" url)
         xw)))
+
+(defun agent-repl--sidebar-view-draw-bottom-border (buf)
+  "Draw the composer's border along the bottom of the sidebar BUF's window.
+THE COMPOSER'S BOTTOM BORDER RUNS ON UNDER THE SIDEBAR (owner request,
+2026-11-02): the sidebar's mode line is one pixel of the composer's
+border, the composer's own line format (`agent-repl--input-border-line-format',
+input.el), so the color has the one source and the row falls where the
+composer's mode line falls, both windows ending at the echo area.  Set
+on the buffer, never the window, so a window configuration restored
+without its parameters keeps it."
+  (agent-repl--log agent-repl--sidebar-view-central
+                   "elisp.sidebar-view.bottom-border buffer=%s" (buffer-name buf))
+  (with-current-buffer buf
+    (setq-local mode-line-format agent-repl--input-border-line-format)))
 
 (defun agent-repl-sidebar-view-kill ()
   "Kill the sidebar's web view, and its window with it."
@@ -317,8 +333,9 @@ The window itself is kept by webhost.el (`agent-repl--webhost-log-level')."
 
 (defun agent-repl-sidebar-view-show (conn)
   "Show the sidebar, on CONN's daemon, in its window at the frame's left edge.
-A left side window: the frame's whole height, one for every workspace, with
-no mode line.  Nothing is changed when it already stands.  Returns the window."
+A left side window: the frame's whole height, one for every workspace,
+whose mode line is the composer's border run on under it
+\(`agent-repl--sidebar-view-draw-bottom-border').  Nothing is changed when it already stands.  Returns the window."
   (agent-repl-sidebar-view-ensure conn)
   (or (agent-repl-sidebar-view-window)
       (let* ((buf (agent-repl-sidebar-view-buffer))
@@ -326,8 +343,7 @@ no mode line.  Nothing is changed when it already stands.  Returns the window."
              (win (display-buffer-in-side-window
                    buf `((side . left) (slot . -1) (window-width . ,width) (dedicated . t)
                          (window-parameters . ((no-delete-other-windows . t)
-                                               (no-other-window . t)
-                                               (mode-line-format . none)))))))
+                                               (no-other-window . t)))))))
         (unless (window-live-p win)
           (error "agent-repl: the sidebar's window could not be made (buffer=%S)" buf))
         (window-preserve-size win t t)
@@ -362,6 +378,10 @@ Non-nil when a window was removed."
     (delete-window win)
     (agent-repl--info agent-repl--sidebar-view-central "elisp.sidebar-view.hidden window=%S" win)
     t))
+
+;; A reload finds the sidebar already made, by code that drew no border.
+(when-let ((buf (agent-repl-sidebar-view-buffer)))
+  (agent-repl--sidebar-view-draw-bottom-border buf))
 
 (provide 'sidebar-view)
 

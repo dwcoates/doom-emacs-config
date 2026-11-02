@@ -840,6 +840,34 @@ stubs every rung alike."
     ;; Assert
     (should-not hand-rolled)))
 
+(ert-deftest agent-repl-test-helpers-remapped-backgrounds-reads-newest-first ()
+  "The reader returns each :background FACE is remapped to, newest first, stacked ones included."
+  (with-temp-buffer
+    ;; Arrange
+    (face-remap-add-relative 'default :background "#111111")
+    (face-remap-add-relative 'default :background "#222222")
+    (face-remap-add-relative 'fringe :foreground "#333333")
+    ;; Act + Assert
+    (should (equal (list (agent-repl-test--remapped-backgrounds 'default)
+                         (agent-repl-test--remapped-backgrounds 'fringe)
+                         (agent-repl-test--remapped-backgrounds 'header-line))
+                   '(("#222222" "#111111") nil nil)))))
+
+(ert-deftest agent-repl-test-helpers-no-suite-hand-rolls-the-remapped-backgrounds ()
+  "Every suite reads a buffer's remapped backgrounds through `agent-repl-test--remapped-backgrounds'."
+  ;; Arrange
+  (let ((dir agent-repl-test-helpers--dir)
+        (hand-rolled nil))
+    ;; Act
+    (dolist (file (directory-files dir t "\\`test-.*\\.el\\'"))
+      (unless (member (file-name-nondirectory file) '("test-helpers.el" "test-test-helpers.el"))
+        (with-temp-buffer
+          (insert-file-contents file)
+          (when (re-search-forward "(plist-get spec :background)" nil t)
+            (push (file-name-nondirectory file) hand-rolled)))))
+    ;; Assert
+    (should-not hand-rolled)))
+
 (ert-deftest agent-repl-test-helpers-no-suite-hand-rolls-the-recorder ()
   "Every suite records a logging rung through `agent-repl-test--record-into'."
   ;; Arrange
