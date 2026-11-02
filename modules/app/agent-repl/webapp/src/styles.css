@@ -57,13 +57,15 @@
   /* THE ONE SHARED GROUND (owner requests, 2026-11-01 and 2026-11-02): the
      sidebar page, the rail (#ws-sidebar and every band of it), the footer
      (.pfooter) and the composer all paint this token and nothing else, so
-     no visible surface of the sidebar ever differs from the composer. The
+     no visible surface of the sidebar ever differs from the composer.
+     THE TOPBAR WEARS IT TOO (owner request, 2026-11-02): #topbar, on a
+     workspace's page and on a zettel chat's page alike (one shell, one
+     header), paints this token directly. Its own --topbar-bg (#ffffff light,
+     #141414 dark, the 2026-10-27/28 "a touch above the feed" rulings) is
+     retired, so the topbar can never drift from the sidebar. The
      dark value resolves to #171717, which Emacs's input window and
      minibuffer (agent-repl-input-background, lisp/input.el) wear too. */
   --sidebar-ground: color-mix(in srgb, var(--sidebar-base) 88%, #000000);
-  /* The topbar's ground (owner request, 2026-10-27): a little lighter than
-     --sidebar-base, which in the light theme is already white. */
-  --topbar-bg: #ffffff;
   /* The rail's dropdowns (the apps menu): a shade off the rail so the menu
      reads as its own surface, kept BELOW --card so an option's hover wash
      still lifts off it. */
@@ -567,9 +569,6 @@
     /* Claude's sidebar: a step below the prompt bubble's #212121, still
        lighter than the feed (owner requests, 2026-10-28). */
     --sidebar-base: #1a1a1a;
-    /* Only a touch above the feed, between it and the composer (owner
-       request, 2026-10-28). */
-    --topbar-bg: #141414;
     /* A little lighter than the rail, and below --card's hover wash. */
     --sidebar-menu-bg: #262626;
     /* Deeper than the light theme's shadow: a faint drop shadow reads as
@@ -1911,8 +1910,11 @@ html.sb-dragging * { -webkit-user-select: none; user-select: none; }
   gap: 0.75rem;
   /* Fixed to --topbar-h (shared with .sb-head) so the two header dividers land
      flush; horizontal padding only, with the height governing the vertical box.
-     align-items: center keeps the pickers centered within it. */
-  background: var(--topbar-bg);
+     align-items: center keeps the pickers centered within it.
+     THE SIDEBAR'S GROUND (owner request, 2026-11-02): exactly the color the
+     sidebar renders, in both themes and on every page with a topbar (a
+     workspace's and a zettel chat's), from the one shared token. */
+  background: var(--sidebar-ground);
   height: var(--topbar-h);
   /* NO EDGE INSET OF ITS OWN. `.topbar-row` inside carries the strip's one
      `--topbar-cell-gap` edge padding, and a second inset here stacked on top
