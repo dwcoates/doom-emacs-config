@@ -997,21 +997,22 @@ func (s *store) setCurrent(ctx context.Context, op string, id WorkspaceID, stamp
 	var committed sql.NullString
 	err := s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
 		if stamp != nil {
-			err := tx.QueryRowContext(ctx, `SELECT id FROM workspaces WHERE is_current = 1 AND walk_landed_at IS NOT NULL AND id <> ?`, id).Scan(&committed)
+			var landedAt int64
+			err := tx.QueryRowContext(ctx, `SELECT id, walk_landed_at FROM workspaces WHERE is_current = 1 AND walk_landed_at IS NOT NULL AND id <> ?`, id).Scan(&committed, &landedAt)
 			switch {
 			case errors.Is(err, sql.ErrNoRows):
 			case err != nil:
 				return err
 			default:
-				if _, err := tx.ExecContext(ctx, `UPDATE workspaces SET last_selected_at = walk_landed_at WHERE id = ?`, committed.String); err != nil {
+				if err := updateWorkspaceColumns(ctx, tx, WorkspaceID(committed.String),
+					workspaceColumn{name: "last_selected_at", value: landedAt}); err != nil {
 					return err
 				}
 			}
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE workspaces SET walk_landed_at = NULL WHERE walk_landed_at IS NOT NULL`); err != nil {
-			return err
-		}
-		if _, err := tx.ExecContext(ctx, `UPDATE workspaces SET is_current = 0 WHERE is_current = 1`); err != nil {
+		// ONLY THE CURRENT ROW EVER CARRIES A WALK LANDING (it is set on the
+		// row made current below), so clearing the current row clears it.
+		if _, err := tx.ExecContext(ctx, `UPDATE workspaces SET is_current = 0, walk_landed_at = NULL WHERE is_current = 1`); err != nil {
 			return err
 		}
 		res, err := tx.ExecContext(ctx, `UPDATE workspaces SET is_current = 1, last_selected_at = COALESCE(?, last_selected_at), walk_landed_at = ?, cache_lapses_at = CASE WHEN closed = 1 THEN cache_lapses_at END, cache_lapse_gated_tokens = CASE WHEN closed = 1 THEN cache_lapse_gated_tokens END WHERE id = ?`, nullNanos(stamp), nullNanos(walked), id)
