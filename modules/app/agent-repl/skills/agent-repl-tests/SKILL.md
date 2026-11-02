@@ -186,6 +186,19 @@ to every harness, fake and fixture a test uses, in every language.
   its event and its bound. The test then fails at that instant, naming the
   dependency's own record and its stderr or log tail, instead of failing
   seconds later with "never satisfied".
+- A test declares what it provokes BEFORE it provokes it, since a record
+  written before its declaration closes the latch. In the daemon harness:
+  - a boot's warnings go in `harness.Opts.ExpectWarnings`, never in an
+    `ExpectWarnings` call after `StartDaemon` returns (the daemon writes them
+    while it boots, as does a fixture with a short `IdleCutoffMS`);
+  - a mid-life warning is declared right after its daemon is made, before
+    the act that writes it;
+  - a failing exit that is the subject is declared with
+    `Daemon.ExpectFailedExit` (or `Opts.ExpectEarlyExit` for a refused
+    boot); `Daemon.AwaitExit` itself is never ended by the exit it awaits;
+  - a test whose subject is its own undeclared warnings (a sweep test, a
+    golden's regeneration) calls `Daemon.SweepIsTheSubject`, which stands its
+    record latch aside while its cleanup sweep still judges every record.
 - A dependency that initializes asynchronously reports its failed boot at
   once (its exit, its refusal record), and the harness's readiness wait ends
   on that report. A readiness wait that only times out is a defect.
