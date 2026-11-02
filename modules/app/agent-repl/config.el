@@ -332,6 +332,10 @@ returning the SHA string (or the sentinel \"unknown\" when undetermined)."
 (agent-repl--load-module "notifications")
 (agent-repl--load-module "history")
 (agent-repl--load-module "status")
+;; WHY: frame-border.el is the one owner of a frame's internal border, which
+;; titlebar.el and dividers.el, both loaded below, each record their state
+;; with.  It logs through core.el, and syncs every frame at load.
+(agent-repl--load-module "frame-border")
 ;; WHY: titlebar.el colors the title bar while Emacs is unfocused.  Its
 ;; orange is status.el's render-colors value, read at load, and it rides
 ;; notifications.el's focus hook, both loaded above.

@@ -28,19 +28,19 @@ no case leaks into another."
      (cl-letf (((symbol-function 'agent-repl--dividers-shows-panels-p) (lambda (_frame) shows))
                ((symbol-function 'agent-repl--log) (agent-repl-test--record-into logs)))
        (dolist (face agent-repl--dividers-faces)
-         (set-face-attribute face frame (agent-repl--dividers-attribute face) "#686868"))
+         (set-face-attribute face frame :foreground "#686868"))
        (unwind-protect
            (progn ,@body)
-         (agent-repl--dividers-restore frame)))))
+         (agent-repl--dividers-restore frame)
+         (agent-repl-frame-border-set-panels frame nil)))))
 
 (put 'agent-repl-test-dividers--theme 'theme-settings
      '((theme-face window-divider agent-repl-test-dividers--theme ((t :foreground "#abcdef")))
        (theme-value some-variable agent-repl-test-dividers--theme t)))
 
 (defun agent-repl-test-dividers--colors (frame)
-  "Return the color every divider face draws its seam in on FRAME."
-  (mapcar (lambda (face) (face-attribute face (agent-repl--dividers-attribute face) frame))
-          agent-repl--dividers-faces))
+  "Return the foreground of every divider face on FRAME."
+  (mapcar (lambda (face) (face-attribute face :foreground frame)) agent-repl--dividers-faces))
 
 ;;;; ---- A frame showing agent-repl ----
 
@@ -84,77 +84,41 @@ no case leaks into another."
                    "#686868"))
     (should-not logs)))
 
-;;;; ---- The frame's internal border ----
+;;;; ---- The frame's border ----
 
-(ert-deftest agent-repl-test-dividers-internal-border-is-a-seam ()
-  "The frame's internal border is one of the faces a hidden frame paints."
-  ;; Act + Assert
-  (should (memq 'internal-border agent-repl--dividers-faces)))
-
-(ert-deftest agent-repl-test-dividers-internal-border-draws-in-its-background ()
-  "The internal border fills its strip with its background; a divider draws in its foreground."
-  ;; Act + Assert
-  (should (equal (list (agent-repl--dividers-attribute 'internal-border)
-                       (agent-repl--dividers-attribute 'window-divider)
-                       (agent-repl--dividers-attribute 'vertical-border))
-                 '(:background :foreground :foreground))))
-
-(ert-deftest agent-repl-test-dividers-panels-paint-the-internal-border-the-ground ()
-  "A frame showing panels wears the ground round its edge, under the echo area included."
+(ert-deftest agent-repl-test-dividers-panels-are-recorded-with-the-border ()
+  "A frame showing panels is recorded with the border's owner, which paints it the ground."
   (agent-repl-test-dividers--with-frame t
-    ;; Act
-    (agent-repl-dividers-sync frame)
-    ;; Assert
-    (should (equal (face-attribute 'internal-border :background frame) "#121212"))))
+    ;; Arrange
+    (let ((recorded nil))
+      (cl-letf (((symbol-function 'agent-repl-frame-border-set-panels)
+                 (lambda (fr shows) (push (list fr shows) recorded))))
+        ;; Act
+        (agent-repl-dividers-sync frame))
+      ;; Assert
+      (should (equal recorded (list (list frame t)))))))
 
-(ert-deftest agent-repl-test-dividers-no-panels-restore-the-internal-border ()
-  "A frame that stops showing panels gets its own internal border color back."
+(ert-deftest agent-repl-test-dividers-no-panels-are-recorded-with-the-border ()
+  "A frame that stops showing panels is recorded with the border's owner as showing none."
   (agent-repl-test-dividers--with-frame t
     ;; Arrange
     (agent-repl-dividers-sync frame)
     (setq shows nil)
-    ;; Act
-    (agent-repl-dividers-sync frame)
-    ;; Assert
-    (should (equal (face-attribute 'internal-border :background frame) "#686868"))))
+    (let ((recorded nil))
+      (cl-letf (((symbol-function 'agent-repl-frame-border-set-panels)
+                 (lambda (fr shows) (push (list fr shows) recorded))))
+        ;; Act
+        (agent-repl-dividers-sync frame))
+      ;; Assert
+      (should (equal recorded (list (list frame nil)))))))
 
-(ert-deftest agent-repl-test-dividers-hidden-before-a-face-joined-paints-it ()
-  "A frame hidden before a face joined the seams (a reload added it) paints that face too."
+(ert-deftest agent-repl-test-dividers-panels-paint-the-frames-border-the-ground ()
+  "Through the border's owner, a frame showing panels wears the ground round its edge."
   (agent-repl-test-dividers--with-frame t
-    ;; Arrange
-    (set-frame-parameter frame agent-repl--dividers-hidden
-                         (mapcar (lambda (face) (cons face "#686868"))
-                                 (remq 'internal-border agent-repl--dividers-faces)))
     ;; Act
     (agent-repl-dividers-sync frame)
     ;; Assert
     (should (equal (face-attribute 'internal-border :background frame) "#121212"))))
-
-(ert-deftest agent-repl-test-dividers-hidden-before-a-face-joined-keeps-its-color ()
-  "The face that joined keeps the frame's own color, and the earlier kept colors stay."
-  (agent-repl-test-dividers--with-frame t
-    ;; Arrange
-    (let ((earlier (mapcar (lambda (face) (cons face "#545454"))
-                           (remq 'internal-border agent-repl--dividers-faces))))
-      (set-frame-parameter frame agent-repl--dividers-hidden earlier)
-      ;; Act
-      (agent-repl-dividers-sync frame)
-      ;; Assert
-      (should (equal (frame-parameter frame agent-repl--dividers-hidden)
-                     (append earlier '((internal-border . "#686868"))))))))
-
-(ert-deftest agent-repl-test-dividers-hidden-before-a-face-joined-logs-the-hide ()
-  "Hiding the face that joined is recorded through the canonical log helper."
-  (agent-repl-test-dividers--with-frame t
-    ;; Arrange
-    (set-frame-parameter frame agent-repl--dividers-hidden
-                         (mapcar (lambda (face) (cons face "#686868"))
-                                 (remq 'internal-border agent-repl--dividers-faces)))
-    ;; Act
-    (agent-repl-dividers-sync frame)
-    ;; Assert
-    (should (seq-some (lambda (line) (string-match-p "\\`elisp.dividers.hide .*internal-border" line))
-                      logs))))
 
 ;;;; ---- A new ground ----
 

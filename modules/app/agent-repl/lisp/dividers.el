@@ -55,6 +55,7 @@
 (declare-function agent-repl-sidebar-view-buffer "sidebar-view" ())
 (declare-function agent-repl-webhost-buffer "webhost" ())
 (declare-function agent-repl--log "core" (ws fmt &rest args))
+(declare-function agent-repl-frame-border-set-panels "frame-border" (frame shows))
 (defvar agent-repl-input-background)
 (defvar agent-repl-frontend-webview-mode)
 
@@ -63,25 +64,13 @@
   "The central log scope every divider record is written under.")
 
 (defconst agent-repl--dividers-faces
-  '(window-divider window-divider-first-pixel window-divider-last-pixel vertical-border
-                   internal-border)
-  "Every face Emacs draws a seam of the frame in.
-The line between two windows, and the frame's internal border: the
-strip round its edge, under the minibuffer's last row among them, which
-otherwise wears the theme's default background (#1d1f21 beneath the
-echo area, measured 2026-11-02).")
-
-(defun agent-repl--dividers-attribute (face)
-  "Return the attribute FACE draws its seam in.
-A divider and `vertical-border' draw their line in their foreground; the
-internal border fills its strip with its background."
-  (if (eq face 'internal-border) :background :foreground))
+  '(window-divider window-divider-first-pixel window-divider-last-pixel vertical-border)
+  "Every face Emacs draws the line between two windows in.")
 
 (defconst agent-repl--dividers-hidden 'agent-repl-dividers-hidden
   "The frame parameter of a frame whose dividers are hidden.
 Its value is an alist of each of `agent-repl--dividers-faces' to the
-frame\='s color for it from before (`agent-repl--dividers-attribute');
-nil when not hidden.")
+frame\='s foreground for it from before; nil when not hidden.")
 
 (defun agent-repl--dividers-shows-panels-p (frame)
   "Return non-nil when a window of FRAME shows an agent-repl panel.
@@ -95,8 +84,7 @@ included."
 (defun agent-repl--dividers-paint (frame)
   "Set every divider face on FRAME to the panels\=' color."
   (dolist (face agent-repl--dividers-faces)
-    (set-face-attribute face frame (agent-repl--dividers-attribute face)
-                        agent-repl-input-background)))
+    (set-face-attribute face frame :foreground agent-repl-input-background)))
 
 (defun agent-repl--dividers-hidden-frames ()
   "Return every frame whose dividers are hidden."
@@ -104,7 +92,7 @@ included."
               (frame-list)))
 
 (defun agent-repl--dividers-repaint-all ()
-  "Paint every hidden frame\='s seams the current ground.
+  "Paint every hidden frame\='s dividers the current ground.
 A frame showing no panels keeps its own colors, and paints the ground
 only when it is hidden."
   (dolist (frame (agent-repl--dividers-hidden-frames))
@@ -115,22 +103,15 @@ only when it is hidden."
 
 (defun agent-repl--dividers-hide (frame)
   "Draw FRAME\='s dividers in the panels\=' color, keeping its own colors.
-A frame already hidden is left as it is, unless it was hidden before a
-face joined `agent-repl--dividers-faces' (a reload added one): that
-face's own color is kept too, and the frame painted afresh."
-  (let* ((hidden (frame-parameter frame agent-repl--dividers-hidden))
-         (added (seq-remove (lambda (face) (assq face hidden)) agent-repl--dividers-faces)))
-    (when added
-      (let ((kept (append hidden
-                          (mapcar (lambda (face)
-                                    (cons face (face-attribute face (agent-repl--dividers-attribute face)
-                                                               frame)))
-                                  added))))
-        (agent-repl--log agent-repl--dividers-log-scope
-                         "elisp.dividers.hide frame=%S color=%s kept=%S"
-                         frame agent-repl-input-background kept)
-        (agent-repl--dividers-paint frame)
-        (set-frame-parameter frame agent-repl--dividers-hidden kept)))))
+A frame already hidden is left as it is."
+  (unless (frame-parameter frame agent-repl--dividers-hidden)
+    (let ((kept (mapcar (lambda (face) (cons face (face-attribute face :foreground frame)))
+                        agent-repl--dividers-faces)))
+      (agent-repl--log agent-repl--dividers-log-scope
+                       "elisp.dividers.hide frame=%S color=%s kept=%S"
+                       frame agent-repl-input-background kept)
+      (agent-repl--dividers-paint frame)
+      (set-frame-parameter frame agent-repl--dividers-hidden kept))))
 
 (defun agent-repl--dividers-restore (frame)
   "Put FRAME\='s own divider colors back.
@@ -139,7 +120,7 @@ A frame not hidden is left as it is."
     (agent-repl--log agent-repl--dividers-log-scope
                      "elisp.dividers.restore frame=%S kept=%S" frame kept)
     (dolist (entry kept)
-      (set-face-attribute (car entry) frame (agent-repl--dividers-attribute (car entry)) (cdr entry)))
+      (set-face-attribute (car entry) frame :foreground (cdr entry)))
     (set-frame-parameter frame agent-repl--dividers-hidden nil)))
 
 (defvar-local agent-repl--dividers-fixed-fringe nil
@@ -160,14 +141,19 @@ one already at its buffer\='s width is left alone."
 
 (defun agent-repl-dividers-sync (&optional frame)
   "Hide FRAME\='s dividers while it shows agent-repl, restore them otherwise.
-Every window of FRAME showing a buffer with fixed fringes gets them.
-FRAME defaults to the selected frame; a dead one is left alone.
-Registered on `window-state-change-functions\=', which calls it with FRAME."
+Whether it shows agent-repl is recorded with the frame\='s border owner
+\=(`agent-repl-frame-border-set-panels'), which paints the border round
+its edge the ground while it does.  Every window of FRAME showing a
+buffer with fixed fringes gets them.  FRAME defaults to the selected
+frame; a dead one is left alone.  Registered on
+`window-state-change-functions\=', which calls it with FRAME."
   (let ((frame (or frame (selected-frame))))
     (when (frame-live-p frame)
-      (if (agent-repl--dividers-shows-panels-p frame)
-          (agent-repl--dividers-hide frame)
-        (agent-repl--dividers-restore frame))
+      (let ((shows (agent-repl--dividers-shows-panels-p frame)))
+        (if shows
+            (agent-repl--dividers-hide frame)
+          (agent-repl--dividers-restore frame))
+        (agent-repl-frame-border-set-panels frame shows))
       (agent-repl--dividers-fit-fringes frame))))
 
 (defun agent-repl--dividers-theme-faces (theme)
@@ -185,10 +171,7 @@ the frame is painted afresh.  Every other face kept its color from before."
     (dolist (frame (agent-repl--dividers-hidden-frames))
       (let ((rekept (mapcar (lambda (entry)
                               (if (memq (car entry) rewritten)
-                                  (cons (car entry)
-                                        (face-attribute (car entry)
-                                                        (agent-repl--dividers-attribute (car entry))
-                                                        frame))
+                                  (cons (car entry) (face-attribute (car entry) :foreground frame))
                                 entry))
                             (frame-parameter frame agent-repl--dividers-hidden))))
         (agent-repl--log agent-repl--dividers-log-scope

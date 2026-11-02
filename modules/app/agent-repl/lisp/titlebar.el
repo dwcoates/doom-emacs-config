@@ -13,7 +13,8 @@
 ;; Emacs offers no other handle on that color than the frame's
 ;; `background-color'.  So an unfocused frame's background is set orange,
 ;; and the one other surface that would show it, the internal border, is
-;; pinned to the frame's color from before.  Every buffer the frame shows
+;; pinned to the frame's color from before: recorded with the border's one
+;; owner (frame-border.el), which also knows when the frame shows panels.  Every buffer the frame shows
 ;; draws its own background, so none turns orange.
 ;;
 ;; THE FOCUSED COLOR IS NEVER STORED.  A focus gain unpins the border and
@@ -35,6 +36,7 @@
 (declare-function agent-repl--emacs-focused-p "notifications" (&optional ws))
 (declare-function agent-repl-status--color-value "status" (color))
 (declare-function agent-repl--log "core" (ws fmt &rest args))
+(declare-function agent-repl-frame-border-set-pinned "frame-border" (frame color))
 (defvar agent-repl--focus-log-scope)
 (defvar agent-repl-focus-settled-hook)
 
@@ -63,7 +65,7 @@ A frame already painted is left as it is."
       (agent-repl--log agent-repl--focus-log-scope
                        "elisp.titlebar.paint frame=%S background=%s color=%s"
                        frame background agent-repl-titlebar-unfocused-color)
-      (set-face-attribute 'internal-border frame :background background)
+      (agent-repl-frame-border-set-pinned frame background)
       ;; THE FRAME KEEPS ITS LIGHT OR DARK MODE.  Setting `background-color'
       ;; has Emacs derive the frame's `background-mode' from the new color
       ;; (`frame-set-background-mode'), and the orange reads as light, so
@@ -79,7 +81,7 @@ A frame already painted is left as it is."
 A frame not painted is left as it is."
   (when (frame-parameter frame agent-repl--titlebar-painted)
     (agent-repl--log agent-repl--focus-log-scope "elisp.titlebar.unpaint frame=%S" frame)
-    (set-face-attribute 'internal-border frame :background 'unspecified)
+    (agent-repl-frame-border-set-pinned frame nil)
     (face-spec-recalc 'default frame)
     (set-frame-parameter frame agent-repl--titlebar-painted nil)))
 
