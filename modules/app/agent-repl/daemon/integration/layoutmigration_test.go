@@ -4,12 +4,15 @@ package integration
 
 import (
 	"database/sql"
+	"errors"
+	"io/fs"
+	"os"
+	"path/filepath"
 	"testing"
 
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/integration/harness"
-	"agent-repld/internal/wsm"
 )
 
 // TestBootServesAWorkspaceRegisteredUnderTheOlderLayout is the defect this
@@ -36,264 +39,91 @@ func TestBootServesAWorkspaceRegisteredUnderTheOlderLayout(t *testing.T) {
 	})
 }
 
-// layout3Undo is the inverse of EVERY migration step this build can apply,
-// keyed by the layout version that step produces. It is what takes a state
-// file written by THIS build back to a genuine layout-3 file.
-//
-// IT IS KEYED BY VERSION SO IT CANNOT DRIFT SILENTLY. It was a flat list of
-// statements once, hand-maintained against a migration list that grows, and it
-// drifted exactly as such a list does: layout 10 appended `feed_text_scale`,
-// the list was never extended, and the "layout 3" file it produced still
-// carried a layout-10 table. The migration then replayed step 10 onto it, hit
-// `table feed_text_scale already exists`, and rolled the whole chain back --
-// so both tests here failed on a daemon that had done nothing wrong. The
-// production refusal is CORRECT and is deliberately left alone: a migration
-// that finds an object it is about to create must refuse rather than write
-// over it. What was wrong was the fixture's claim about the file it built.
-//
-// demoteToLayout3 checks this map covers every version from 4 to
-// wsm.LayoutVersion, so appending a migration step without its inverse fails
-// loudly here instead of producing a file that is not the layout it claims.
-var layout3Undo = map[int][]string{
-	4: {
-		`DROP INDEX ported_prompts_by_workspace`,
-		`DROP TABLE ported_prompts`,
-	},
-	// The layout-5 step is a BACKFILL: it introduces no shape, so taking the
-	// file back past it removes nothing. The rows it healed stay healed, which
-	// is harmless -- re-running the backfill over them is a no-op.
-	5:  nil,
-	6:  {`ALTER TABLE creation_jobs ADD COLUMN one_shot_finish TEXT NOT NULL DEFAULT ''`},
-	7:  {`ALTER TABLE sessions DROP COLUMN selected_config_dir`},
-	8:  {`ALTER TABLE workspaces DROP COLUMN spawned_shim_pid`},
-	9:  {`ALTER TABLE workspaces DROP COLUMN last_activity_at`},
-	10: {`DROP TABLE feed_text_scale`},
-	11: {`ALTER TABLE idempotency_keys DROP COLUMN accepted_at`},
-	12: {`ALTER TABLE held_prompts DROP COLUMN delivery`},
-	13: {
-		`ALTER TABLE workspaces DROP COLUMN result_read`,
-		`ALTER TABLE workspaces DROP COLUMN result_end`,
-	},
-	14: {
-		`ALTER TABLE held_prompts DROP COLUMN coalesced`,
-		`ALTER TABLE held_prompts DROP COLUMN act_value`,
-		`ALTER TABLE held_prompts DROP COLUMN act_kind`,
-	},
-	15: {
-		`ALTER TABLE merge_queue DROP COLUMN source_branch`,
-		`ALTER TABLE merge_queue DROP COLUMN source_workspace`,
-		`ALTER TABLE merge_queue DROP COLUMN source_keep_open`,
-		`ALTER TABLE merge_queue DROP COLUMN source_kind`,
-	},
-	16: {`DROP TABLE durable_feed_rows`},
-	17: {`ALTER TABLE repositories DROP COLUMN folded`},
-	18: {`DROP TABLE rolled_back_turns`},
-	19: {`DROP TABLE news_digest_sources`, `DROP TABLE news_digest`},
-	20: {`DROP TABLE editor_instance`, `ALTER TABLE news_digest DROP COLUMN latest_made_at`, `ALTER TABLE news_digest DROP COLUMN latest_overlay`},
-	21: {`DROP TABLE agent_repl_session`},
-	22: {`DROP TABLE news_digest_items`, `ALTER TABLE news_digest DROP COLUMN history_since`},
-	23: {`DROP TABLE sidebar_view`, `ALTER TABLE tasks DROP COLUMN folded`},
-	24: {`DROP TABLE account_usage`},
-	25: {
-		`ALTER TABLE account_usage DROP COLUMN seat_sampled_at_ms`,
-		`ALTER TABLE account_usage DROP COLUMN seat_currency`,
-		`ALTER TABLE account_usage DROP COLUMN seat_spent_minor`,
-		`ALTER TABLE account_usage DROP COLUMN seat_allotment_minor`,
-	},
-	26: {
-		`ALTER TABLE agent_repl_session ADD COLUMN bytes_received INTEGER NOT NULL DEFAULT 0 CHECK (bytes_received >= 0)`,
-		`ALTER TABLE agent_repl_session ADD COLUMN bytes_sent INTEGER NOT NULL DEFAULT 0 CHECK (bytes_sent >= 0)`,
-	},
-	27: {`DROP TABLE reveal_gaps`},
-	28: {`ALTER TABLE merge_queue DROP COLUMN ledger_id`, `DROP TABLE merge_progress`},
-	29: {
-		`ALTER TABLE sidebar_view DROP COLUMN merging_folded`,
-		`ALTER TABLE sidebar_view DROP COLUMN in_progress_folded`,
-		`ALTER TABLE sidebar_view DROP COLUMN backlog_folded`,
-	},
-	30: {`DROP TABLE reveal_burst_gaps`},
-	31: {`DROP TABLE reveal_block_speeds`},
-	32: {`ALTER TABLE sidebar_view DROP COLUMN hidden_folded`, `ALTER TABLE workspaces DROP COLUMN hidden`},
-	33: {
-		`DROP TABLE removed_merge_workspaces`,
-		`ALTER TABLE workspaces DROP COLUMN merge_request_id`,
-		`ALTER TABLE workspaces DROP COLUMN merge_of`,
-		`ALTER TABLE merge_queue DROP COLUMN source_detach_id`,
-	},
-	34: {`ALTER TABLE workspaces DROP COLUMN commit_count`},
-	35: {
-		`DROP TRIGGER workspaces_land_unplaced`,
-		`DROP INDEX workspaces_by_place`,
-		`ALTER TABLE workspaces DROP COLUMN place`,
-	},
-	36: {`ALTER TABLE merge_queue DROP COLUMN source_front`},
-	37: {`DROP TABLE merge_rollout_hold`},
-	38: {`DROP INDEX owed_resumptions_by_workspace`, `DROP TABLE owed_resumptions`},
-	39: {
-		`ALTER TABLE turns DROP COLUMN mirror`,
-		`ALTER TABLE workspaces DROP COLUMN merge_revealed`,
-		`ALTER TABLE merge_queue DROP COLUMN pick_turn`,
-		`ALTER TABLE merge_queue DROP COLUMN pick_started_at`,
-		`ALTER TABLE merge_queue DROP COLUMN source_pick`,
-		`ALTER TABLE merge_queue DROP COLUMN source_detach_name`,
-	},
-	40: {`ALTER TABLE sidebar_view DROP COLUMN viewed_folded`, `ALTER TABLE workspaces DROP COLUMN result_read_at`},
-	41: {`ALTER TABLE workspaces DROP COLUMN merge_fork_head`, `ALTER TABLE workspaces DROP COLUMN landed_head`, `ALTER TABLE workspaces DROP COLUMN landed_at`},
-	42: {`DROP TABLE signed_in_turns`},
-	43: {`ALTER TABLE workspaces DROP COLUMN hidden_at`, `ALTER TABLE workspaces DROP COLUMN dwelt_at`},
-	44: {`ALTER TABLE merge_queue DROP COLUMN source_compact_after`, `ALTER TABLE workspaces DROP COLUMN merge_compact_after`},
-	45: {`ALTER TABLE merge_queue DROP COLUMN source_close_on_landing`, `ALTER TABLE merge_queue DROP COLUMN source_cleanup_worktree`, `ALTER TABLE merge_queue DROP COLUMN source_cleanup_dir`,
-		`ALTER TABLE workspaces DROP COLUMN merge_close_on_landing`, `ALTER TABLE workspaces DROP COLUMN merge_cleanup_worktree`, `ALTER TABLE workspaces DROP COLUMN merge_cleanup_dir`},
-	46: {`ALTER TABLE sidebar_view DROP COLUMN open_folded`},
-	47: {`DROP TABLE fork_uninherited_turns`, `DROP TABLE fork_lineage`, `DROP TABLE pending_forks`},
-	48: {`ALTER TABLE workspaces DROP COLUMN cache_lapses_at`, `ALTER TABLE workspaces DROP COLUMN cache_lapse_gated_tokens`},
-	49: {`ALTER TABLE merge_queue DROP COLUMN source_version_part`, `ALTER TABLE merge_queue DROP COLUMN source_changelog_line`},
-	50: {`DROP TABLE owed_handbacks`},
-	51: {`ALTER TABLE merge_queue DROP COLUMN source_actions_before`, `ALTER TABLE merge_queue DROP COLUMN source_actions_after`},
-	52: {`ALTER TABLE workspaces DROP COLUMN closure_at`, `ALTER TABLE workspaces DROP COLUMN closure_by`},
-	53: {`DROP TABLE merge_racing_disabled`},
-	54: {`ALTER TABLE workspaces DROP COLUMN status_changed_at`},
-	55: {`DROP TABLE merge_queue_subscriptions`},
-	56: {`DROP TABLE workspace_summaries`},
-	57: {`DROP TABLE cold_read_payments`},
-	58: {`DROP TRIGGER workspaces_child_stores_no_subsection_update`, `DROP TRIGGER workspaces_child_stores_no_subsection_insert`,
-		`DROP TRIGGER workspaces_subsection_same_repo_update`, `DROP TRIGGER workspaces_subsection_same_repo_insert`,
-		`ALTER TABLE workspaces DROP COLUMN subsection_id`, `DROP TABLE subsections`,
-		`DROP TRIGGER repositories_land_unplaced`, `DROP INDEX repositories_by_place`, `ALTER TABLE repositories DROP COLUMN place`},
-	59: {`ALTER TABLE subsections DROP COLUMN folded`},
-	60: {`ALTER TABLE workspaces DROP COLUMN requested_by`, `ALTER TABLE workspaces DROP COLUMN context_from`, `ALTER TABLE workspaces DROP COLUMN owner_lands`},
-	61: {`ALTER TABLE merge_queue DROP COLUMN source_detach_target_maker`, `ALTER TABLE merge_queue DROP COLUMN source_detach_maker`},
-	62: {`DROP INDEX workspace_subscriptions_followed`, `DROP TABLE workspace_subscriptions`},
-	63: {`ALTER TABLE workspaces DROP COLUMN close_when_turn_ends`},
-	64: {`ALTER TABLE workspaces DROP COLUMN awaiting_correspondence`},
-	65: {`ALTER TABLE held_prompts DROP COLUMN sent_by`, `ALTER TABLE turns DROP COLUMN sent_by`},
-	66: {`ALTER TABLE subsections DROP COLUMN slot`},
-	67: {`ALTER TABLE merge_queue_repos DROP COLUMN deploy_skipped`, `ALTER TABLE merge_queue_repos DROP COLUMN deploy_held_at`},
-	68: {`ALTER TABLE creation_jobs RENAME COLUMN pre_deploy_hooks TO actions_before`,
-		`ALTER TABLE creation_jobs RENAME COLUMN post_deploy_hooks TO actions_after`,
-		`ALTER TABLE merge_queue RENAME COLUMN source_pre_deploy_hooks TO source_actions_before`,
-		`ALTER TABLE merge_queue RENAME COLUMN source_post_deploy_hooks TO source_actions_after`},
-	69: {`DROP TABLE merge_queue_untold_notices`},
-	70: {`DROP TABLE workspace_untold_notices`},
-	71: {`ALTER TABLE workspaces DROP COLUMN principal_link`},
-	72: {
-		`ALTER TABLE account_usage DROP COLUMN weekly_opus_utilization`,
-		`ALTER TABLE account_usage DROP COLUMN weekly_opus_resets_at_s`,
-		`ALTER TABLE account_usage DROP COLUMN weekly_opus_sampled_at_ms`,
-		`ALTER TABLE account_usage DROP COLUMN weekly_opus_verdict`,
-		`ALTER TABLE account_usage DROP COLUMN weekly_sonnet_utilization`,
-		`ALTER TABLE account_usage DROP COLUMN weekly_sonnet_resets_at_s`,
-		`ALTER TABLE account_usage DROP COLUMN weekly_sonnet_sampled_at_ms`,
-		`ALTER TABLE account_usage DROP COLUMN weekly_sonnet_verdict`,
-		`ALTER TABLE account_usage DROP COLUMN session_verdict_resets_at_s`,
-		`ALTER TABLE account_usage DROP COLUMN weekly_verdict_resets_at_s`,
-		`ALTER TABLE account_usage DROP COLUMN weekly_opus_verdict_resets_at_s`,
-		`ALTER TABLE account_usage DROP COLUMN weekly_sonnet_verdict_resets_at_s`,
-		`ALTER TABLE account_usage DROP COLUMN overage_verdict_resets_at_s`,
-	},
-	// Layout 73 re-encodes stored rows and changes no shape: nothing to undo.
-	73: {},
-	74: {`ALTER TABLE merge_queue DROP COLUMN source_behind`},
-	75: {`DROP INDEX merge_queue_by_workspace`, `DROP INDEX workspaces_by_merge_of`},
-	76: {`ALTER TABLE sidebar_view DROP COLUMN open_shows_merge_queues`},
-	// Layout 77 re-encodes stored rows and changes no shape: nothing to undo.
-	77: {},
-	78: {
-		`DROP TRIGGER workspaces_thread_lives_in_the_zettel_home_insert`,
-		`DROP TRIGGER workspaces_thread_lives_in_the_zettel_home_update`,
-		`ALTER TABLE turns DROP COLUMN thread_parent`,
-		`ALTER TABLE turns DROP COLUMN thread_question`,
-		`ALTER TABLE held_prompts DROP COLUMN thread_parent`,
-		`ALTER TABLE workspaces DROP COLUMN kind`,
-		`ALTER TABLE repositories DROP COLUMN kind`,
-	},
-	// Layout 79 drops stored rows and changes no shape: nothing to undo.
-	79: {},
-	80: {`ALTER TABLE subsections DROP COLUMN created_by`},
-	81: {`ALTER TABLE workspaces DROP COLUMN last_keepalive_at`},
-	82: {`DROP TABLE reconnected_turns`},
-	85: {`DROP TABLE workspace_links`},
-	86: {`DROP TABLE queued_creates`},
-	83: {
-		`ALTER TABLE merge_queue_repos DROP COLUMN paused_hard`,
-		`ALTER TABLE merge_queue_repos DROP COLUMN paused_by_name`,
-		`ALTER TABLE merge_queue_repos DROP COLUMN paused_by`,
-		`ALTER TABLE merge_queue_repos DROP COLUMN paused_at`,
-	},
-	84: {`DROP TABLE account_default_models`},
-	87: {`DROP TABLE workspace_book`},
-	88: {`DROP TABLE cold_gate`},
-	89: {`DROP TABLE account_model_catalogs`, `DROP TABLE workspace_selections`},
-	90: {`ALTER TABLE workspaces DROP COLUMN cache_cold_turn_at`},
-	// Layout 91 dropped the account usage's unproduced columns; restoring
-	// them is what lets the layout-72, -25 and -24 inverses drop them again.
-	91: {
-		`ALTER TABLE account_usage ADD COLUMN no_allowance INTEGER NOT NULL DEFAULT 0`,
-		`ALTER TABLE account_usage ADD COLUMN session_utilization REAL`,
-		`ALTER TABLE account_usage ADD COLUMN session_resets_at_s INTEGER`,
-		`ALTER TABLE account_usage ADD COLUMN session_sampled_at_ms INTEGER`,
-		`ALTER TABLE account_usage ADD COLUMN session_verdict TEXT`,
-		`ALTER TABLE account_usage ADD COLUMN session_verdict_resets_at_s INTEGER`,
-		`ALTER TABLE account_usage ADD COLUMN weekly_sampled_at_ms INTEGER`,
-		`ALTER TABLE account_usage ADD COLUMN overage_sampled_at_ms INTEGER`,
-		`ALTER TABLE account_usage ADD COLUMN weekly_opus_sampled_at_ms INTEGER`,
-		`ALTER TABLE account_usage ADD COLUMN weekly_sonnet_sampled_at_ms INTEGER`,
-		`ALTER TABLE account_usage ADD COLUMN seat_allotment_minor INTEGER`,
-		`ALTER TABLE account_usage ADD COLUMN seat_spent_minor INTEGER`,
-		`ALTER TABLE account_usage ADD COLUMN seat_currency TEXT`,
-		`ALTER TABLE account_usage ADD COLUMN seat_sampled_at_ms INTEGER`,
-	},
-	92: {`ALTER TABLE workspace_links DROP COLUMN owned`},
-	93: {`DROP TABLE workspace_slack_origins`},
-	94: {`ALTER TABLE merge_queue_repos DROP COLUMN drain_owed`},
-	95: {`DROP TABLE workspace_remote_control`},
-	96: {
-		`DROP TABLE pull_request_subscriptions`,
-		`DROP TABLE pull_request_untold_notices`,
-		`DROP TABLE main_sync_notices`,
-		`ALTER TABLE workspace_links DROP COLUMN pr_owner`,
-		`ALTER TABLE workspace_links DROP COLUMN pr_repo`,
-		`ALTER TABLE workspace_links DROP COLUMN pr_number`,
-	},
-	97: {`ALTER TABLE sidebar_view DROP COLUMN merge_queue_folded`},
-	98: {`ALTER TABLE workspaces DROP COLUMN walk_landed_at`},
-}
+// layout3Schema is the frozen layout-3 schema the wsm package's migration
+// tests build from (internal/wsm/testdata/layout3.sql): the shape the build
+// before `ported_prompts` wrote, captured once and never regenerated.
+var layout3Schema = filepath.Join("..", "internal", "wsm", "testdata", "layout3.sql")
 
-// demoteToLayout3 takes a stopped daemon's state database back to layout 3 by
-// undoing every migration step since layout 3, newest first, and stamping the
-// version. The daemon must be stopped: it holds the sole writing handle while
-// it runs.
+// demoteToLayout3 replaces a stopped daemon's state database with a GENUINE
+// layout-3 file: one built from the frozen layout-3 schema, carrying the
+// repositories and workspaces the daemon registered. The daemon must be
+// stopped: it holds the sole writing handle while it runs.
+//
+// IT BUILDS THE OLD FILE RATHER THAN UNDOING THE NEW ONE. It once undid every
+// migration step since layout 3 from a hand-kept map of inverses, and every
+// branch that appended a step without its inverse failed this test at the
+// merge gate (five merges between 2026-10-31 and 2026-11-01, steps 92 to 97)
+// rather than anywhere its author ran tests. A file built from the frozen
+// schema needs nothing from a new step, so a new step cannot break it.
 func demoteToLayout3(t *testing.T, d *harness.Daemon) {
 	t.Helper()
-	for v := 4; v <= wsm.LayoutVersion; v++ {
-		if _, covered := layout3Undo[v]; !covered {
-			t.Fatalf("layout3Undo has no inverse for migration step %d; a step was appended to wsm.migrations without one, so this fixture cannot build a layout-3 file", v)
+	ddl, err := os.ReadFile(layout3Schema)
+	if err != nil {
+		t.Fatalf("read the frozen layout-3 schema: %v", err)
+	}
+	type repoRow struct{ id, dir, name, defaultBranch string }
+	type workspaceRow struct {
+		id, repoID, dir, name, branch, parentBranch string
+		createdAt                                   int64
+	}
+	var repos []repoRow
+	var workspaces []workspaceRow
+	d.WithDB(func(db *sql.DB) {
+		rows, err := db.Query(`SELECT id, dir, name, default_branch FROM repositories`)
+		if err != nil {
+			t.Fatalf("read the registered repositories: %v", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var r repoRow
+			if err := rows.Scan(&r.id, &r.dir, &r.name, &r.defaultBranch); err != nil {
+				t.Fatalf("scan a registered repository: %v", err)
+			}
+			repos = append(repos, r)
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatalf("read the registered repositories: %v", err)
+		}
+		wsRows, err := db.Query(`SELECT id, repo_id, dir, name, branch, parent_branch, created_at FROM workspaces`)
+		if err != nil {
+			t.Fatalf("read the registered workspaces: %v", err)
+		}
+		defer wsRows.Close()
+		for wsRows.Next() {
+			var w workspaceRow
+			if err := wsRows.Scan(&w.id, &w.repoID, &w.dir, &w.name, &w.branch, &w.parentBranch, &w.createdAt); err != nil {
+				t.Fatalf("scan a registered workspace: %v", err)
+			}
+			workspaces = append(workspaces, w)
+		}
+		if err := wsRows.Err(); err != nil {
+			t.Fatalf("read the registered workspaces: %v", err)
+		}
+	})
+	if len(workspaces) == 0 {
+		t.Fatalf("the daemon registered no workspace to carry into the layout-3 file")
+	}
+	path := d.DBPath()
+	for _, suffix := range []string{"", "-wal", "-shm"} {
+		if err := os.Remove(path + suffix); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			t.Fatalf("remove the state database %s: %v", path+suffix, err)
 		}
 	}
 	d.WithDB(func(db *sql.DB) {
-		// NEWEST FIRST: a step's inverse may depend on shape a later step's
-		// inverse has not yet removed.
-		for v := wsm.LayoutVersion; v >= 4; v-- {
-			for _, stmt := range layout3Undo[v] {
-				if _, err := db.Exec(stmt); err != nil {
-					t.Fatalf("demote the state database past layout %d (%s): %v", v, stmt, err)
-				}
+		if _, err := db.Exec(string(ddl)); err != nil {
+			t.Fatalf("create the layout-3 state database: %v", err)
+		}
+		for _, r := range repos {
+			if _, err := db.Exec(`INSERT INTO repositories (id, dir, name, default_branch) VALUES (?, ?, ?, ?)`,
+				r.id, r.dir, r.name, r.defaultBranch); err != nil {
+				t.Fatalf("carry repository %s into the layout-3 file: %v", r.id, err)
 			}
 		}
-		if _, err := db.Exec(`UPDATE layout SET version = 3 WHERE id = 1`); err != nil {
-			t.Fatalf("stamp the demoted state database at layout 3: %v", err)
-		}
-		// The file must actually BE layout 3, not merely stamped as one: every
-		// table a migration since layout 3 creates has to be gone, or the
-		// migration this fixture exists to drive will refuse the step that
-		// creates it.
-		for _, table := range []string{"ported_prompts", "feed_text_scale"} {
-			var present int
-			if err := db.QueryRow(`SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = ?`, table).Scan(&present); err != nil {
-				t.Fatalf("probe the demoted state database for %s: %v", table, err)
-			}
-			if present != 0 {
-				t.Fatalf("the demoted state database still carries %s; the fixture is not a layout-3 file", table)
+		for _, w := range workspaces {
+			if _, err := db.Exec(`INSERT INTO workspaces (id, repo_id, dir, name, branch, parent_branch, closed, attention, is_current, created_at)
+				VALUES (?, ?, ?, ?, ?, ?, 0, 0, 0, ?)`,
+				w.id, w.repoID, w.dir, w.name, w.branch, w.parentBranch, w.createdAt); err != nil {
+				t.Fatalf("carry workspace %s into the layout-3 file: %v", w.id, err)
 			}
 		}
 	})
