@@ -79,7 +79,7 @@ Read `ARCHITECTURE.md` first: the package map, the seams, the conventions.
 - Every test process exports `AGENT_REPL_FORBID_VENDOR_CALLS=1`. No test
   ever calls the vendor.
 - **Wait bounds are TIGHT, on purpose.** Every wait the harness performs is
-  bounded, never a `time.Sleep`. Teamlead run 8 measured 443 passing tests at
+  bounded, and waits on events (the rule is the `agent-repl-tests` skill, "Synchronization: events, never time"). Teamlead run 8 measured 443 passing tests at
   a 0.2s median and 1.7s max wall time each, so a wait that only ever needs to
   observe ORDINARY daemon behavior does not need anywhere near 30s to prove
   itself — and a red test that DOES time out should burn seconds, not 30 of
@@ -2365,7 +2365,7 @@ The integration fake pushes one with `push_retired` (`ShimControl.PushRetired`).
 
 Table-driven tests, Arrange/Act/Assert, one test file per source file, one
 edge case per test CASE (a case is the smallest unit the runner names: a
-`t.Run` subtest counts), no `time.Sleep` for synchronization. GIT IS NEVER CALLED
+`t.Run` subtest counts); synchronization is the `agent-repl-tests` skill, "Synchronization: events, never time". GIT IS NEVER CALLED
 DURING TESTING (user directive): every package above the git client tests
 against a fake `gitclient.Git`; the integration harness scripts every git
 fact (commits, conflicts, landed ranges, worktree lists) as fixture data;
