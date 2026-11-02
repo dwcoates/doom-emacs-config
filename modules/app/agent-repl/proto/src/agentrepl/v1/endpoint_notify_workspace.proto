@@ -1,0 +1,104 @@
+// endpoint_notify_workspace.proto — NotifyWorkspace: an agent posts a desktop
+// banner attributed to a workspace (its own or another's), whose click brings
+// Emacs forward and selects that workspace. AGENT API section.
+//
+// THE BANNER IS THE DAEMON'S OWN. It is posted through the same notifier as
+// every other banner (internal/desktopnotify): titled by the target
+// workspace's name, the request's message below it, grouped with the target's
+// other banners so it replaces the previous one, ringing the banner chime, and
+// held for a focus gain's claim. So the rule every banner obeys holds here
+// too: a focused Emacs gets no banner, and the answer says so.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message NotifyWorkspaceRequest {
+  // The workspace the banner is attributed to: its title is this workspace's
+  // name, and its click selects this workspace. It may be the caller's own or
+  // any other open workspace.
+  workspace.v1.WorkspaceRef workspace = 1;
+  // The banner's text, below the workspace's name. A blank message is a
+  // malformed request (Connect InvalidArgument).
+  string message = 2;
+}
+
+// THE ARM IS THE OUTCOME.
+message NotifyWorkspaceResponse {
+  oneof result {
+    NotifyWorkspaceSuccess success = 1;
+    NotifyWorkspaceError error = 2;
+  }
+}
+
+// The request was served: the banner is being posted, or Emacs is focused and
+// none is wanted.
+message NotifyWorkspaceSuccess {
+  // What became of the banner. Both arms are answers, never failures: a
+  // focused Emacs is the one condition under which the daemon deliberately
+  // posts no banner.
+  oneof delivery {
+    // The banner is being posted.
+    NotifyWorkspacePosting posting = 1;
+    // Emacs is focused, so no banner was posted.
+    NotifyWorkspaceEditorFocused editor_focused = 2;
+  }
+}
+
+// The banner is being composed and posted on the notifier's own goroutine.
+// The platform program runs after the answer, so its own failure is recorded
+// in the daemon's log (daemon.desktopnotify.post), never here.
+message NotifyWorkspacePosting {}
+
+// Emacs is focused, and a focused Emacs gets no desktop banner: the user is
+// already looking at it. DELIBERATELY EMPTY.
+message NotifyWorkspaceEditorFocused {}
+
+// No banner was posted.
+message NotifyWorkspaceError {
+  oneof cause {
+    // The workspace id is not in the daemon's registry.
+    NotifyWorkspaceUnknownWorkspace unknown_workspace = 1;
+    // The echoed dir disagrees with the registry's dir for this id.
+    NotifyWorkspaceWorkspaceRefMismatch workspace_ref_mismatch = 2;
+    // The workspace is closed, so a click would have no tab to select.
+    NotifyWorkspaceWorkspaceClosed workspace_closed = 3;
+    // No desktop banner program could be resolved on this host.
+    NotifyWorkspaceNoBannerProgram no_banner_program = 4;
+    // The daemon is standing down and starts no banner.
+    NotifyWorkspaceStandingDown standing_down = 5;
+  }
+}
+
+// The workspace id is not in the daemon's registry.
+message NotifyWorkspaceUnknownWorkspace {
+  // The workspace the request named.
+  workspace.v1.WorkspaceRef workspace = 1;
+}
+
+// The echoed dir disagrees with the registry's dir for this id.
+message NotifyWorkspaceWorkspaceRefMismatch {
+  // The workspace the request named.
+  workspace.v1.WorkspaceRef workspace = 1;
+  // The dir the registry holds for this id.
+  string registry_dir = 2;
+}
+
+// The workspace is closed: its tab is gone, so a banner whose click selects it
+// would lead nowhere. DELIBERATELY EMPTY.
+message NotifyWorkspaceWorkspaceClosed {}
+
+// No desktop banner program could be resolved at the daemon's boot
+// (terminal-notifier on macOS, notify-send on Linux).
+message NotifyWorkspaceNoBannerProgram {
+  // Why the program could not be resolved, as the daemon recorded it at boot.
+  string cause = 1;
+}
+
+// The daemon is standing down (a stop, a restart, a drain) and posts no more
+// banners. The caller asks the daemon that serves next. DELIBERATELY EMPTY.
+message NotifyWorkspaceStandingDown {}
