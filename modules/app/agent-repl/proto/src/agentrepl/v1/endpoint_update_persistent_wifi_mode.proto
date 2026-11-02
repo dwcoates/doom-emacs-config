@@ -12,8 +12,9 @@
 //   3. the energy mode — low power (on) or high power (off) — once the
 //      machine is known to stay awake, so a lid-closed machine draws as
 //      little as it can and an open one runs at full speed again;
-//   4. the display — dimmed (on) or restored (off) — LAST, as the visible
-//      sign that the machine is in its final state and the lid may close.
+//   4. the display — LAST, and only where the change moves it: dimmed when
+//      turning on with the lid closed, restored when turning off with a lid
+//      dim in force (UpdatePersistentWifiModeDisplay).
 // A failed hotspot, energy mode or display step never stops the change:
 // staying awake on whatever network is present is still the outcome asked
 // for, so those three steps report how they went inside the SUCCESS, and only
@@ -149,22 +150,47 @@ message UpdatePersistentWifiModeEnergyModeFailed {
 
 // The display step's outcome. THE ARM IS THE OUTCOME, and none of these is a
 // failure of the request.
+//
+// THE DISPLAY FOLLOWS THE LID, NOT THE SWITCH. While the mode is on, closing
+// the lid dims the built-in display to 0 and opening it restores the level the
+// display had the moment before it closed (PersistentWifiState.lid_dim). So
+// the step acts only where the change itself moves the display: turning on
+// with the lid closed dims it, turning off with a lid dim in force restores
+// it, and every other change leaves the user's brightness alone.
 message UpdatePersistentWifiModeDisplay {
   oneof outcome {
-    // Turning on: the display was dimmed.
+    // Turning on with the lid closed: the display was dimmed to 0, and the
+    // level it had is kept to restore.
     UpdatePersistentWifiModeDisplayDimmed dimmed = 1;
-    // Turning off: the display was restored to full brightness.
+    // Turning off with a lid dim in force: the display was restored to the
+    // level it had before the lid closed, and the kept level was cleared.
     UpdatePersistentWifiModeDisplayRestored restored = 2;
-    // The brightness tool is not installed; the step was skipped.
+    // The step had to move the display, and the brightness tool is not
+    // installed; the step was skipped.
     UpdatePersistentWifiModeDisplayToolMissing tool_missing = 3;
-    // The brightness tool ran and failed.
+    // The brightness tool could not read the level to keep, could not set the
+    // display, or the kept level could not be stored or cleared.
     UpdatePersistentWifiModeDisplayFailed failed = 4;
+    // Nothing to move: turning on with the lid open (or not watched), or
+    // turning off with no lid dim in force. The display keeps the user's
+    // brightness.
+    UpdatePersistentWifiModeDisplayUnchanged unchanged = 5;
   }
 }
-// Dimmed.
-message UpdatePersistentWifiModeDisplayDimmed {}
-// Restored.
-message UpdatePersistentWifiModeDisplayRestored {}
+// The display was dimmed for the closed lid.
+message UpdatePersistentWifiModeDisplayDimmed {
+  // The brightness (0.0 to 1.0) the display had before the dim, which opening
+  // the lid or turning the mode off restores.
+  double restore_level = 1;
+}
+// The display was restored from a lid dim.
+message UpdatePersistentWifiModeDisplayRestored {
+  // The brightness (0.0 to 1.0) the display was restored to: the level kept
+  // when the lid closed.
+  double level = 1;
+}
+// The change left the display as the user set it.
+message UpdatePersistentWifiModeDisplayUnchanged {}
 // The brightness tool is absent.
 message UpdatePersistentWifiModeDisplayToolMissing {
   // The path the daemon looked for it at.

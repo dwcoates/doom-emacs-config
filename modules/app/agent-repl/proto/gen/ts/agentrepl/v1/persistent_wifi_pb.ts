@@ -6,8 +6,10 @@
 // PERSISTENT WIFI MODE is the laptop's lid-closed operation: system sleep is
 // disabled outright, so closing the lid neither sleeps the machine nor drops
 // its network, its sessions or a phone hotspot it is joined to. Turning the
-// mode on also joins the configured phone hotspot and dims the display; turning
-// it off leaves the hotspot and restores the display. The daemon owns both the
+// mode on also joins the configured phone hotspot; turning it off leaves it.
+// While the mode is on the display follows the lid: closing it dims the
+// built-in display to 0, opening it restores the brightness it had before
+// (lid_dim). The daemon owns both the
 // reading and the change (it is the one process that outlives every client).
 //
 // It is a fact about the MACHINE, never about a workspace, so it rides the
@@ -25,7 +27,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/persistent_wifi.proto.
  */
 export const file_agentrepl_v1_persistent_wifi: GenFile = /*@__PURE__*/
-  fileDesc("CiJhZ2VudHJlcGwvdjEvcGVyc2lzdGVudF93aWZpLnByb3RvEgxhZ2VudHJlcGwudjEi/gEKE1BlcnNpc3RlbnRXaWZpU3RhdGUSNAoGam9pbmVkGAEgASgLMiIuYWdlbnRyZXBsLnYxLlBlcnNpc3RlbnRXaWZpSm9pbmVkSAASOwoKbm90X2pvaW5lZBgCIAEoCzIlLmFnZW50cmVwbC52MS5QZXJzaXN0ZW50V2lmaU5vdEpvaW5lZEgAEjAKAm9uGAMgASgLMiIuYWdlbnRyZXBsLnYxLlBlcnNpc3RlbnRXaWZpTW9kZU9uSAESMgoDb2ZmGAQgASgLMiMuYWdlbnRyZXBsLnYxLlBlcnNpc3RlbnRXaWZpTW9kZU9mZkgBQgYKBHdpZmlCBgoEbW9kZSJCChRQZXJzaXN0ZW50V2lmaUpvaW5lZBIZCgxuZXR3b3JrX25hbWUYASABKAlIAIgBAUIPCg1fbmV0d29ya19uYW1lIhkKF1BlcnNpc3RlbnRXaWZpTm90Sm9pbmVkIhYKFFBlcnNpc3RlbnRXaWZpTW9kZU9uIhcKFVBlcnNpc3RlbnRXaWZpTW9kZU9mZkIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM");
+  fileDesc("CiJhZ2VudHJlcGwvdjEvcGVyc2lzdGVudF93aWZpLnByb3RvEgxhZ2VudHJlcGwudjEiuQQKE1BlcnNpc3RlbnRXaWZpU3RhdGUSNAoGam9pbmVkGAEgASgLMiIuYWdlbnRyZXBsLnYxLlBlcnNpc3RlbnRXaWZpSm9pbmVkSAASOwoKbm90X2pvaW5lZBgCIAEoCzIlLmFnZW50cmVwbC52MS5QZXJzaXN0ZW50V2lmaU5vdEpvaW5lZEgAEjAKAm9uGAMgASgLMiIuYWdlbnRyZXBsLnYxLlBlcnNpc3RlbnRXaWZpTW9kZU9uSAESMgoDb2ZmGAQgASgLMiMuYWdlbnRyZXBsLnYxLlBlcnNpc3RlbnRXaWZpTW9kZU9mZkgBEjcKCGxpZF9vcGVuGAUgASgLMiMuYWdlbnRyZXBsLnYxLlBlcnNpc3RlbnRXaWZpTGlkT3BlbkgCEjsKCmxpZF9jbG9zZWQYBiABKAsyJS5hZ2VudHJlcGwudjEuUGVyc2lzdGVudFdpZmlMaWRDbG9zZWRIAhIzCgZub19saWQYByABKAsyIS5hZ2VudHJlcGwudjEuUGVyc2lzdGVudFdpZmlOb0xpZEgCEkEKDWxpZF91bndhdGNoZWQYCCABKAsyKC5hZ2VudHJlcGwudjEuUGVyc2lzdGVudFdpZmlMaWRVbndhdGNoZWRIAhI4CgdsaWRfZGltGAkgASgLMiIuYWdlbnRyZXBsLnYxLlBlcnNpc3RlbnRXaWZpTGlkRGltSAOIAQFCBgoEd2lmaUIGCgRtb2RlQgUKA2xpZEIKCghfbGlkX2RpbSJCChRQZXJzaXN0ZW50V2lmaUpvaW5lZBIZCgxuZXR3b3JrX25hbWUYASABKAlIAIgBAUIPCg1fbmV0d29ya19uYW1lIhkKF1BlcnNpc3RlbnRXaWZpTm90Sm9pbmVkIhYKFFBlcnNpc3RlbnRXaWZpTW9kZU9uIhcKFVBlcnNpc3RlbnRXaWZpTW9kZU9mZiIXChVQZXJzaXN0ZW50V2lmaUxpZE9wZW4iGQoXUGVyc2lzdGVudFdpZmlMaWRDbG9zZWQiFQoTUGVyc2lzdGVudFdpZmlOb0xpZCIsChpQZXJzaXN0ZW50V2lmaUxpZFVud2F0Y2hlZBIOCgZkZXRhaWwYASABKAkiLQoUUGVyc2lzdGVudFdpZmlMaWREaW0SFQoNcmVzdG9yZV9sZXZlbBgBIAEoAUIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM");
 
 /**
  * The machine's persistent-wifi standing as the daemon last read it: whether
@@ -86,6 +88,53 @@ export type PersistentWifiState = Message<"agentrepl.v1.PersistentWifiState"> & 
     value: PersistentWifiModeOff;
     case: "off";
   } | { case: undefined; value?: undefined };
+
+  /**
+   * The built-in display's lid, as the operating system last reported it. The
+   * daemon HEARS the lid (an IOKit clamshell notification) rather than polling
+   * it, reading its state once when it subscribes and taking every change
+   * after. UNASSIGNED only between the daemon's first read and that
+   * subscription, an instant at boot: a reader draws it as not yet heard.
+   *
+   * @generated from oneof agentrepl.v1.PersistentWifiState.lid
+   */
+  lid: {
+    /**
+     * @generated from field: agentrepl.v1.PersistentWifiLidOpen lid_open = 5;
+     */
+    value: PersistentWifiLidOpen;
+    case: "lidOpen";
+  } | {
+    /**
+     * @generated from field: agentrepl.v1.PersistentWifiLidClosed lid_closed = 6;
+     */
+    value: PersistentWifiLidClosed;
+    case: "lidClosed";
+  } | {
+    /**
+     * @generated from field: agentrepl.v1.PersistentWifiNoLid no_lid = 7;
+     */
+    value: PersistentWifiNoLid;
+    case: "noLid";
+  } | {
+    /**
+     * @generated from field: agentrepl.v1.PersistentWifiLidUnwatched lid_unwatched = 8;
+     */
+    value: PersistentWifiLidUnwatched;
+    case: "lidUnwatched";
+  } | { case: undefined; value?: undefined };
+
+  /**
+   * The lid-close dim in force: the display was dimmed to 0 when the lid
+   * closed with the mode on, and is restored to restore_level when the lid
+   * opens or the mode is turned off. UNSET: no lid dim is in force and the
+   * display is at the user's own brightness. It is independent of `lid`: a
+   * restore that failed leaves it set with the lid open, because the display
+   * is still dimmed. The daemon keeps it durably, so it survives a restart.
+   *
+   * @generated from field: optional agentrepl.v1.PersistentWifiLidDim lid_dim = 9;
+   */
+  lidDim?: PersistentWifiLidDim | undefined;
 };
 
 /**
@@ -166,4 +215,95 @@ export type PersistentWifiModeOff = Message<"agentrepl.v1.PersistentWifiModeOff"
  */
 export const PersistentWifiModeOffSchema: GenMessage<PersistentWifiModeOff> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_persistent_wifi, 4);
+
+/**
+ * The lid is open.
+ *
+ * @generated from message agentrepl.v1.PersistentWifiLidOpen
+ */
+export type PersistentWifiLidOpen = Message<"agentrepl.v1.PersistentWifiLidOpen"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.PersistentWifiLidOpen.
+ * Use `create(PersistentWifiLidOpenSchema)` to create a new message.
+ */
+export const PersistentWifiLidOpenSchema: GenMessage<PersistentWifiLidOpen> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_persistent_wifi, 5);
+
+/**
+ * The lid is closed.
+ *
+ * @generated from message agentrepl.v1.PersistentWifiLidClosed
+ */
+export type PersistentWifiLidClosed = Message<"agentrepl.v1.PersistentWifiLidClosed"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.PersistentWifiLidClosed.
+ * Use `create(PersistentWifiLidClosedSchema)` to create a new message.
+ */
+export const PersistentWifiLidClosedSchema: GenMessage<PersistentWifiLidClosed> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_persistent_wifi, 6);
+
+/**
+ * The machine reports no lid (a desktop Mac): the display never follows a lid.
+ *
+ * @generated from message agentrepl.v1.PersistentWifiNoLid
+ */
+export type PersistentWifiNoLid = Message<"agentrepl.v1.PersistentWifiNoLid"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.PersistentWifiNoLid.
+ * Use `create(PersistentWifiNoLidSchema)` to create a new message.
+ */
+export const PersistentWifiNoLidSchema: GenMessage<PersistentWifiNoLid> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_persistent_wifi, 7);
+
+/**
+ * The daemon is NOT hearing the lid: its subscription to the operating
+ * system's lid notifications could not be made, or ended while the daemon
+ * ran. There is no polling fallback, so while this arm stands the display
+ * does not follow the lid; the daemon has logged the cause at ERROR.
+ *
+ * @generated from message agentrepl.v1.PersistentWifiLidUnwatched
+ */
+export type PersistentWifiLidUnwatched = Message<"agentrepl.v1.PersistentWifiLidUnwatched"> & {
+  /**
+   * Why the lid is not heard, verbatim from the failed subscription.
+   *
+   * @generated from field: string detail = 1;
+   */
+  detail: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.PersistentWifiLidUnwatched.
+ * Use `create(PersistentWifiLidUnwatchedSchema)` to create a new message.
+ */
+export const PersistentWifiLidUnwatchedSchema: GenMessage<PersistentWifiLidUnwatched> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_persistent_wifi, 8);
+
+/**
+ * A lid-close dim in force.
+ *
+ * @generated from message agentrepl.v1.PersistentWifiLidDim
+ */
+export type PersistentWifiLidDim = Message<"agentrepl.v1.PersistentWifiLidDim"> & {
+  /**
+   * The brightness (0.0 to 1.0) the display had the moment before the lid
+   * closed: the ONE level every restore returns it to.
+   *
+   * @generated from field: double restore_level = 1;
+   */
+  restoreLevel: number;
+};
+
+/**
+ * Describes the message agentrepl.v1.PersistentWifiLidDim.
+ * Use `create(PersistentWifiLidDimSchema)` to create a new message.
+ */
+export const PersistentWifiLidDimSchema: GenMessage<PersistentWifiLidDim> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_persistent_wifi, 9);
 
