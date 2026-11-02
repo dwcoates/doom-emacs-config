@@ -27,7 +27,7 @@
  */
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { create } from "@bufbuild/protobuf";
+import { clone, create } from "@bufbuild/protobuf";
 import { bindLog, clearRequestId, onLogSinkPoisoned, setClaudeSessionId, setRequestId } from "../log.js";
 import { conversationv1, shimv1 } from "../proto.js";
 import {
@@ -93,6 +93,7 @@ import type {
   ModelInfoLike,
 } from "../sdk/types.js";
 import { RemoteControl } from "./remote-control.js";
+import { ParkedBridge, parkedBridgeRefused, type ParkedBridgeRefusal } from "./parked-bridge.js";
 import { classifyReplay, isReplay, OwnSends } from "./replays.js";
 import {
   forkPointAnswered,
@@ -1060,6 +1061,16 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    */
   let liveSignalMisses = 0;
   let started = false;
+  /**
+   * The parked conversation held reachable from claude.ai
+   * (shim.v1.HoldParkedBridge), while it is. Set only once its vendor process
+   * and bridge are up; the `pay` answer's StartSession promotes it and clears
+   * it. While it is set, `started` is true: the session is open here, and
+   * only the daemon has not been told.
+   */
+  let parked: ParkedBridge | undefined;
+  /** The HoldParkedBridge opening under way, which every later call waits out. */
+  let parkedOpening: Promise<void> | undefined;
   /** The workspace's name, as StartSession stated it; unset until then. */
   let workspaceName: string | undefined;
   /**
@@ -2766,6 +2777,9 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       );
     }
     sends.foreign(replay.uuid);
+    // A PROMPT REACHING A PARKED CONVERSATION ANSWERS ITS GATE: the vendor is
+    // running it already, and the daemon is told (shim.v1.HoldParkedBridge).
+    if (parked !== undefined) parked.remotePromptArrived({ said: replay.said, clientUuid: replay.uuid });
     const prompt: RemotePrompt = { uuid: replay.uuid, said: replay.said, message };
     const running = sends.current();
     const into = running.kind === "send" || running.kind === "vendor" ? turnFor(false, running) : undefined;
@@ -7051,6 +7065,192 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    * one whose query died, which nothing in this process restarts: it has no
    * session to bridge.
    */
+  /**
+   * StartSession as the daemon calls it. A shim holding a parked
+   * conversation's bridge answers it from the bridge ({@link promoteParked});
+   * every other call is an ordinary start. An opening under way is waited out
+   * first, so a start never runs beside the bridge's own.
+   */
+  async function startSessionAsked(request: shimv1.StartSessionRequest): Promise<shimv1.StartSessionResponse> {
+    if (parkedOpening !== undefined) await parkedOpening;
+    if (parked !== undefined) return promoteParked(parked, request);
+    return startSession(request);
+  }
+
+  /**
+   * THE GATE'S PAY ANSWER TAKES THE PARKED SESSION (shim.v1.HoldParkedBridge).
+   * The bridge's vendor process already resumed the conversation exactly as
+   * the answer would, so the answer is the session it opened, and a turn a
+   * remote prompt started there is its turn in flight. Any other start is
+   * refused `already_started`: the daemon stands this shim down and starts the
+   * answer on a new one.
+   */
+  function promoteParked(bridge: ParkedBridge, request: shimv1.StartSessionRequest): shimv1.StartSessionResponse {
+    const source = request.source;
+    const pays =
+      source.case === "resume" &&
+      source.value.vendorSessionId === bridge.vendorSessionId &&
+      source.value.coldRemediation?.remediation.case === "pay";
+    if (!pays) {
+      const detail =
+        "this shim holds the parked conversation's Remote Control bridge, and only the cold gate's pay answer on that conversation takes it";
+      LOGGER.info(
+        {
+          vendor_session_id: bridge.vendorSessionId,
+          source: source.case ?? "",
+          asked_vendor_session_id: source.case === "resume" ? source.value.vendorSessionId : "",
+          remediation: source.case === "resume" ? (source.value.coldRemediation?.remediation.case ?? "") : "",
+        },
+        "refused StartSession: " + detail,
+      );
+      return startSessionRefused({ kind: "alreadyStarted" }, detail);
+    }
+    if (announcedStart === undefined) {
+      throw new Error("shim session: a parked bridge stands on a session that announced no start");
+    }
+    bridge.promote();
+    parked = undefined;
+    LOGGER.info(
+      {
+        vendor_session_id: bridge.vendorSessionId,
+        bridge_session_id: bridge.bridgeSessionId,
+        remote_prompt_uuid: bridge.remotePrompt?.clientUuid ?? "",
+      },
+      "the cold gate's pay answer took the parked session; the bridge's vendor process is the session's",
+    );
+    return startSessionStarted(announcedStart);
+  }
+
+  /**
+   * Hold the parked conversation's bridge (shim.v1.HoldParkedBridge): open it
+   * when none is open, then watch it. A bridge already open on the same
+   * conversation is watched as it is.
+   */
+  async function* holdParkedBridge(
+    request: shimv1.HoldParkedBridgeRequest,
+    signal: AbortSignal,
+  ): AsyncIterable<shimv1.HoldParkedBridgeResponse> {
+    if (parkedOpening !== undefined) await parkedOpening;
+    const start = request.start;
+    const remote = request.remoteControl;
+    if (start === undefined || start.source.case !== "resume" || remote === undefined) {
+      throw new Error("shim session: HoldParkedBridge reached the engine without a resume and a bridge to hold");
+    }
+    const vendorSessionId = start.source.value.vendorSessionId;
+    if (parked !== undefined) {
+      if (parked.vendorSessionId !== vendorSessionId) {
+        yield refusingParkedBridge({
+          kind: "alreadyStarted",
+          detail: `this shim holds the bridge of parked conversation ${JSON.stringify(parked.vendorSessionId)}, not ${JSON.stringify(vendorSessionId)}`,
+        });
+        return;
+      }
+      LOGGER.info(
+        { vendor_session_id: vendorSessionId, remote_prompt_uuid: parked.remotePrompt?.clientUuid ?? "" },
+        "a HoldParkedBridge watch found the parked conversation's bridge already open",
+      );
+      yield* parked.watch(true, signal);
+      return;
+    }
+    if (started) {
+      yield refusingParkedBridge({
+        kind: "alreadyStarted",
+        detail: "this shim already serves a session that no cold gate parked",
+      });
+      return;
+    }
+    let opened!: () => void;
+    parkedOpening = new Promise<void>((resolve) => {
+      opened = resolve;
+    });
+    let outcome: { readonly kind: "open"; readonly bridge: ParkedBridge } | { readonly kind: "refused"; readonly refusal: ParkedBridgeRefusal };
+    try {
+      outcome = await openParked(start, remote);
+    } finally {
+      parkedOpening = undefined;
+      opened();
+    }
+    if (outcome.kind === "refused") {
+      yield refusingParkedBridge(outcome.refusal);
+      return;
+    }
+    yield* outcome.bridge.watch(false, signal);
+  }
+
+  /** The refusal frame, recorded once at INFO: the gate stands with no bridge. */
+  function refusingParkedBridge(refusal: ParkedBridgeRefusal): shimv1.HoldParkedBridgeResponse {
+    LOGGER.info({ refusal: refusal.kind, cause: refusal.detail }, "refused HoldParkedBridge; the parked conversation has no bridge");
+    return parkedBridgeRefused(refusal);
+  }
+
+  /**
+   * Resume the parked conversation exactly as the gate's pay answer would,
+   * sending no prompt, and put the bridge on it.
+   */
+  async function openParked(
+    start: shimv1.StartSessionRequest,
+    remote: shimv1.SetSessionRemoteControlRequest,
+  ): Promise<{ readonly kind: "open"; readonly bridge: ParkedBridge } | { readonly kind: "refused"; readonly refusal: ParkedBridgeRefusal }> {
+    if (start.source.case !== "resume") {
+      throw new Error("shim session: a parked bridge was asked for a start that resumes nothing");
+    }
+    const vendorSessionId = start.source.value.vendorSessionId;
+    // THE FIRST VENDOR ASSUMPTION, stated where it is relied on until a live
+    // bridge confirms it: resumed and never prompted, the vendor process makes
+    // no model request, so holding the bridge spends nothing.
+    LOGGER.info(
+      { vendor_session_id: vendorSessionId, assumption: "an idle resumed vendor process makes no API request" },
+      "opening the parked conversation's vendor process, idle, to hold its Remote Control bridge",
+    );
+    const paying = clone(shimv1.StartSessionRequestSchema, start);
+    if (paying.source.case !== "resume") {
+      throw new Error("shim session: a cloned resume is no longer a resume");
+    }
+    paying.source.value.coldRemediation = create(conversationv1.SessionColdRemediationSchema, {
+      remediation: { case: "pay", value: create(conversationv1.SessionColdPaySchema, {}) },
+    });
+    const response = await startSession(paying);
+    if (response.result.case !== "success") {
+      const detail =
+        response.result.case === "failure"
+          ? `${response.result.value.cause.case ?? "unstated"}: ${response.result.value.detail}`
+          : "StartSession answered neither a success nor a failure";
+      return { kind: "refused", refusal: { kind: "resumeFailed", detail } };
+    }
+    const session = response.result.value.session;
+    const active = query;
+    if (session === undefined || active === undefined) {
+      throw new Error("shim session: the parked conversation started with no opening facts or no vendor query");
+    }
+    const outcome = await remoteControl.set(active, {
+      enabled: true,
+      name: remote.name,
+      ...(remote.reattachBridgeSessionId === undefined ? {} : { reattachBridgeSessionId: remote.reattachBridgeSessionId }),
+    });
+    if (outcome.kind === "refused") {
+      return { kind: "refused", refusal: { kind: "vendorRefused", detail: outcome.detail } };
+    }
+    if (outcome.kind === "off") {
+      throw new Error("shim session: the parked bridge was asked on and answered off");
+    }
+    pushes.resolveComponent(REMOTE_CONTROL_COMPONENT, 0);
+    // THE SECOND VENDOR ASSUMPTION: a prompt typed on claude.ai while no
+    // bridge was attached reaches the bridge that re-binds the same claude.ai
+    // session, so it arrives here now.
+    LOGGER.info(
+      {
+        vendor_session_id: vendorSessionId,
+        bridge_session_id: outcome.bridgeSessionId,
+        reattached: remote.reattachBridgeSessionId !== undefined,
+        assumption: "a prompt typed on claude.ai while detached is delivered on reattach",
+      },
+      "the parked conversation is reachable from claude.ai; a prompt typed there while it was detached is expected now",
+    );
+    const bridge = new ParkedBridge(vendorSessionId, session, outcome.bridgeSessionId);
+    parked = bridge;
+    return { kind: "open", bridge };
+  }
+
   async function setSessionRemoteControl(
     request: shimv1.SetSessionRemoteControlRequest,
   ): Promise<shimv1.SetSessionRemoteControlResponse> {
@@ -7979,7 +8179,8 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   const engine: SessionEngine = {
     pushes,
     onSdkMessage,
-    startSession: async (request) => statingBook(await startSession(request)),
+    startSession: async (request) => statingBook(await startSessionAsked(request)),
+    holdParkedBridge: (request, signal) => holdParkedBridge(request, signal),
     // `subscribe()` runs EAGERLY here, at the open, not at the consumer's first
     // pull: the diagnostics frame is seeded into the subscriber's queue by that
     // call, and a generator that only subscribed on first `next()` would leave

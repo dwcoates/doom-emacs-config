@@ -159,6 +159,36 @@ func validateSetSessionEffortRequest(req *shimv1.SetSessionEffortRequest) error 
 	return nil
 }
 
+// validateHoldParkedBridgeRequest is HoldParkedBridgeRequest's validator: a
+// resume of the parked conversation naming no remediation (the shim pays it
+// itself), and a bridge turned on.
+func validateHoldParkedBridgeRequest(req *shimv1.HoldParkedBridgeRequest) error {
+	const m = "HoldParkedBridgeRequest"
+	if req == nil {
+		return invalid(m, m, "request is nil")
+	}
+	if req.GetStart() == nil {
+		return invalid(m, "HoldParkedBridgeRequest.start", "unset")
+	}
+	if err := validateStartSessionRequest(req.GetStart()); err != nil {
+		return err
+	}
+	resume := req.GetStart().GetResume()
+	if resume == nil {
+		return invalid(m, "HoldParkedBridgeRequest.start.source", "not a resume; only a parked conversation has a bridge to hold")
+	}
+	if resume.ColdRemediation != nil {
+		return invalid(m, "HoldParkedBridgeRequest.start.resume.cold_remediation", "set; the gate parks a resume that named none")
+	}
+	if req.GetRemoteControl() == nil {
+		return invalid(m, "HoldParkedBridgeRequest.remote_control", "unset")
+	}
+	if !req.GetRemoteControl().GetEnabled() {
+		return invalid(m, "HoldParkedBridgeRequest.remote_control.enabled", "false; a bridge held off is no bridge")
+	}
+	return validateSetSessionRemoteControlRequest(req.GetRemoteControl())
+}
+
 // validateSetSessionRemoteControlRequest is SetSessionRemoteControlRequest's
 // base function. An on names the session claude.ai lists it under; an off
 // names nothing, and re-binds nothing.

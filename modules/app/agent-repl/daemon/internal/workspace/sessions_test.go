@@ -17,6 +17,7 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
+	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 	shimv1 "agentrepl/proto/shim/v1"
@@ -71,6 +72,15 @@ type fakeClient struct {
 	remoteControlErr      error
 	// onRemoteControl, when set, runs as each SetSessionRemoteControl is asked.
 	onRemoteControl func()
+	// bridges is every HoldParkedBridge asked, and bridgeErr refuses the
+	// open. bridgeFrames is what an opened bridge's stream reads (a test
+	// makes it before the bridge opens; nil reads nothing), unbuffered,
+	// so a test's send returns only once the fleet asked for the frame; a
+	// closed bridgeFrames ends the stream with bridgeEnd, else io.EOF.
+	bridges      []*shimv1.HoldParkedBridgeRequest
+	bridgeErr    error
+	bridgeFrames chan *shimv1.HoldParkedBridgeResponse
+	bridgeEnd    error
 
 	// detached counts Detach calls: the link let go, the process left running.
 	detached int
@@ -274,6 +284,9 @@ func (s *fakeSessionStream) Recv() (*shimv1.WatchSessionResponse, error) {
 
 func (s *fakeSessionStream) Close() { s.once.Do(func() { close(s.closed) }) }
 
+// StandingDown answers the fake's stand-down latch.
+func (c *fakeClient) StandingDown() bool { return c.stoodDown }
+
 // StandDown arms the fake's stand-down latch. It answers false for the
 // detached shape, exactly as the real client does.
 func (c *fakeClient) StandDown() bool {
@@ -350,6 +363,50 @@ func (c *fakeClient) SetSessionRemoteControl(_ context.Context, req *shimv1.SetS
 	}
 	return &shimv1.SetSessionRemoteControlResponse{Result: &shimv1.SetSessionRemoteControlResponse_Success{Success: success}}, nil
 }
+
+func (c *fakeClient) HoldParkedBridge(ctx context.Context, req *shimv1.HoldParkedBridgeRequest) (shimclient.Stream[*shimv1.HoldParkedBridgeResponse], error) {
+	c.bridges = append(c.bridges, req)
+	if c.bridgeErr != nil {
+		return nil, c.bridgeErr
+	}
+	return &fakeBridgeStream{frames: c.bridgeFrames, end: c.bridgeEnd, ctx: ctx}, nil
+}
+
+// fakeBridgeStream is one opened HoldParkedBridge: it reads the test's frames
+// and ends when they are closed or the request's context ends. A closed frame
+// channel wins over an ended context, so a test that closes the frames before
+// it drains the fleet reads the end it arranged.
+type fakeBridgeStream struct {
+	frames <-chan *shimv1.HoldParkedBridgeResponse
+	end    error
+	ctx    context.Context
+}
+
+func (s *fakeBridgeStream) Recv() (*shimv1.HoldParkedBridgeResponse, error) {
+	select {
+	case frame, ok := <-s.frames:
+		return s.read(frame, ok)
+	case <-s.ctx.Done():
+		select {
+		case frame, ok := <-s.frames:
+			return s.read(frame, ok)
+		default:
+			return nil, s.ctx.Err()
+		}
+	}
+}
+
+func (s *fakeBridgeStream) read(frame *shimv1.HoldParkedBridgeResponse, ok bool) (*shimv1.HoldParkedBridgeResponse, error) {
+	if ok {
+		return frame, nil
+	}
+	if s.end != nil {
+		return nil, s.end
+	}
+	return nil, io.EOF
+}
+
+func (s *fakeBridgeStream) Close() {}
 
 func (c *fakeClient) Kill(_ context.Context, attr shimclient.KillAttribution) error {
 	if c.killErr != nil {
@@ -582,6 +639,12 @@ func coldResponse() *shimv1.StartSessionResponse {
 // fixtureInstance is the daemon instance every fixture fleet serves as.
 const fixtureInstance = ids.InstanceID("fleet-fixture-instance")
 
+// paidGate is one answer the fleet gave a cold gate through PayColdGate.
+type paidGate struct {
+	ws     ids.WorkspaceID
+	answer *agentreplv1.AnswerColdGateRequest
+}
+
 // fleetFixture is one arranged Fleet plus the fakes behind it.
 // bringUpEdge is one BringUps call the fleet made.
 type bringUpEdge struct {
@@ -623,6 +686,10 @@ func vendorRefusal(label *shimv1.StartSessionVendorStartFailed, detail string) *
 }
 
 type fleetFixture struct {
+	// paid receives every cold gate the fleet answered through PayColdGate;
+	// payErr is what each answer returns.
+	paid   chan paidGate
+	payErr error
 	// persisted are the books the shims persisted, by workspace directory;
 	// persistedErr fails every such read.
 	persisted    map[string]string
@@ -810,6 +877,7 @@ func newFleetFixtureBoundedAt(t *testing.T, adoptBound time.Duration) *fleetFixt
 	t.Helper()
 	order := &[]string{}
 	f := &fleetFixture{
+		paid:         make(chan paidGate, 8),
 		topbarWindow: 1_000_000,
 		now:          fixedNow,
 		standDown:    order,
@@ -847,6 +915,10 @@ func newFleetFixtureBoundedAt(t *testing.T, adoptBound time.Duration) *fleetFixt
 		},
 		Standing: func(context.Context, ids.WorkspaceID) (Standing, error) {
 			return f.standing, f.standingErr
+		},
+		PayColdGate: func(_ context.Context, ws ids.WorkspaceID, answer *agentreplv1.AnswerColdGateRequest) error {
+			f.paid <- paidGate{ws: ws, answer: answer}
+			return f.payErr
 		},
 		DB: f.db, Instance: fixtureInstance, Accounts: f.accounts, Supervisor: f.supervisor, ShimBundle: f.bundle,
 		Feed: f.feed, Footer: f.footer, Topbar: stubTopbar{coldGates: &f.topbarGates, picked: &f.picked, warnings: &f.topbarWarnings, window: &f.topbarWindow, remoteControl: &f.topbarRemote}, Log: f.log,
@@ -1062,6 +1134,20 @@ func TestNewFleetRefusesMissingCollaborators(t *testing.T) {
 				Steps: func(ids.WorkspaceID, opentabs.Step) {}, Restarts: &restarttimingtest.Recorder{}, ShimLife: &fakeShimLife{},
 				ChatSystemPrompt: func() (string, error) { return "", nil },
 				NetworkChanged:   func() <-chan struct{} { return nil },
+			},
+		},
+		{
+			name: "no cold-gate answer",
+			deps: FleetDeps{
+				DB: newFakeDB(), StoreHistory: &fakeStoreHistory{}, Instance: fixtureInstance, Accounts: &fakeAccounts{}, Supervisor: &fakeSupervisor{},
+				PersistedBook: func(string) (string, bool, error) { return "", false, nil },
+				SocketPath:    func(ids.WorkspaceID) string { return "" }, ShimBundle: &fakeBundle{build: "b"},
+				Log: dlog.NewTestSurfaces(), LockDir: "/run", BringUps: func(ids.WorkspaceID, bool) {},
+				SessionsUp: func(ids.WorkspaceID) {}, VendorStarts: func(ids.WorkspaceID, sidebar.VendorStart) {},
+				Steps: func(ids.WorkspaceID, opentabs.Step) {}, Restarts: &restarttimingtest.Recorder{}, ShimLife: &fakeShimLife{},
+				ChatSystemPrompt: func() (string, error) { return "", nil },
+				NetworkChanged:   func() <-chan struct{} { return nil },
+				Standing:         func(context.Context, ids.WorkspaceID) (Standing, error) { return 0, nil },
 			},
 		},
 		{
@@ -4170,5 +4256,111 @@ func TestStartGoesOnWhenTheBookCannotBeRecorded(t *testing.T) {
 	}
 	if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: "error", Message: "could not record the workspace's book; its history is read through its shim until a start records it"}); !ok {
 		t.Fatalf("records = %+v, want the failed record at ERROR", f.log.logger.Records())
+	}
+}
+
+// ---- startSessionRequest: the one builder of a StartSession ----
+
+func TestStartSessionRequest(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(f *fleetFixture, ws ids.WorkspaceID)
+		src     source
+		want    *shimv1.StartSessionRequest
+	}{
+		{
+			name: "a resume names the conversation, the recorded model and every rolled-back turn",
+			arrange: func(f *fleetFixture, ws ids.WorkspaceID) {
+				f.db.sessions[ws] = wsm.Session{Workspace: ws, VendorSessionID: "vendor-1", Model: "opus"}
+				f.db.rolledBack = map[ids.WorkspaceID][]ids.TurnID{ws: {"turn-3"}}
+			},
+			src: source{VendorSessionID: "vendor-1", WorkspaceName: "w1"},
+			want: &shimv1.StartSessionRequest{WorkspaceName: "w1", Source: &shimv1.StartSessionRequest_Resume{Resume: &shimv1.StartSessionResume{
+				VendorSessionId: "vendor-1",
+				Model:           &conversationv1.AgentModel{Name: "opus"},
+				RolledBackTurns: []*conversationv1.TurnId{{Value: "turn-3"}},
+			}}},
+		},
+		{
+			name:    "a resume carries the gate's remediation and a rebind",
+			arrange: func(*fleetFixture, ids.WorkspaceID) {},
+			src: source{VendorSessionID: "vendor-1", WorkspaceName: "w1", Rebind: true, ColdRemediation: &conversationv1.SessionColdRemediation{
+				Remediation: &conversationv1.SessionColdRemediation_Pay{Pay: &conversationv1.SessionColdPay{}},
+			}},
+			want: &shimv1.StartSessionRequest{WorkspaceName: "w1", Source: &shimv1.StartSessionRequest_Resume{Resume: &shimv1.StartSessionResume{
+				VendorSessionId: "vendor-1",
+				Rebind:          &shimv1.StartSessionRebind{},
+				ColdRemediation: &conversationv1.SessionColdRemediation{
+					Remediation: &conversationv1.SessionColdRemediation_Pay{Pay: &conversationv1.SessionColdPay{}},
+				},
+			}}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFleetFixture(t)
+			ws := resumable(f)
+			tt.arrange(f, ws)
+			session := f.db.sessions[ws]
+
+			// Act.
+			got, err := f.fleet.startSessionRequest(context.Background(), f.log.logger, ws, tt.src, session, "/accounts/work")
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("startSessionRequest: %v", err)
+			}
+			got.Profile = nil
+			if !proto.Equal(got, tt.want) {
+				t.Fatalf("request = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestStartSessionRequestRefusesUnreadableRolledBackTurns(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := resumable(f)
+	f.db.rolledBackErr = errFake
+
+	// Act.
+	_, err := f.fleet.startSessionRequest(context.Background(), f.log.logger, ws, source{VendorSessionID: "vendor-1", WorkspaceName: "w1"}, f.db.sessions[ws], "/accounts/work")
+
+	// Assert.
+	if !errors.Is(err, errFake) {
+		t.Fatalf("err = %v, want the store's failure", err)
+	}
+	if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: "error", Operation: "daemon.workspace.start_session",
+		Message: "the rolled-back turns could not be read; the session was not resumed"}); !ok {
+		t.Fatalf("records = %+v, want the failure at ERROR", f.log.logger.Records())
+	}
+}
+
+// TestAStartSendsTheBuiltRequest asserts a bring-up's StartSession is the
+// builder's request, so no start can hand-roll a divergent one.
+func TestAStartSendsTheBuiltRequest(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := resumable(f)
+	record, err := f.db.Workspace(context.Background(), ws)
+	if err != nil {
+		t.Fatalf("Workspace: %v", err)
+	}
+	want, err := f.fleet.startSessionRequest(context.Background(), f.log.logger, ws,
+		source{VendorSessionID: "vendor-1"}.withRecord(record), f.db.sessions[ws], "")
+	if err != nil {
+		t.Fatalf("startSessionRequest: %v", err)
+	}
+
+	// Act.
+	if err := f.fleet.Start(context.Background(), ws); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Assert.
+	if len(f.client.requests) != 1 || !proto.Equal(f.client.requests[0], want) {
+		t.Fatalf("StartSession requests = %v, want exactly %v", f.client.requests, want)
 	}
 }

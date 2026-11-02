@@ -50,6 +50,7 @@ import {
   validateWatchAgentRequest,
   validateWatchBashRequest,
   validateWatchSessionRequest,
+  validateHoldParkedBridgeRequest,
 } from "./validate/requests.js";
 
 const LOGGER = bindLog({ component: "shim-routes", operation: "shim.service.route" });
@@ -214,6 +215,12 @@ export function shimRoutes(engine: Engine): (router: ConnectRouter) => void {
         entered("SetSessionRemoteControl");
         validateSetSessionRemoteControlRequest(request);
         return answering("SetSessionRemoteControl", () => engine.setSessionRemoteControl(request));
+      },
+
+      async *holdParkedBridge(request, context) {
+        entered("HoldParkedBridge");
+        validateHoldParkedBridgeRequest(request);
+        yield* streaming("HoldParkedBridge", () => engine.holdParkedBridge(request, context.signal), context.signal);
       },
 
       async hibernate(request) {

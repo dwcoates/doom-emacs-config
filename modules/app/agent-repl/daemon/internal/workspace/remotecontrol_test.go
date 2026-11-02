@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"google.golang.org/protobuf/proto"
+
 	shimv1 "agentrepl/proto/shim/v1"
 
 	"agent-repld/internal/shimclient"
@@ -634,5 +636,77 @@ func TestRegistrationFailsOnAnUnreadableRemoteControlMode(t *testing.T) {
 	// Assert.
 	if err == nil || !strings.Contains(err.Error(), "database is locked") {
 		t.Fatalf("Register = %v, want the read's failure", err)
+	}
+}
+
+// ---- remoteControlRequest: the one builder of a bridge request ----
+
+func TestRemoteControlRequest(t *testing.T) {
+	kept := "bridge-kept"
+	tests := []struct {
+		name     string
+		standing wsm.RemoteControl
+		on       bool
+		want     *shimv1.SetSessionRemoteControlRequest
+	}{
+		{"an on names the workspace and re-binds the kept bridge", wsm.RemoteControl{On: true, BridgeSessionID: kept}, true,
+			&shimv1.SetSessionRemoteControlRequest{Enabled: true, Name: "name-w1", ReattachBridgeSessionId: &kept}},
+		{"an on with no kept bridge re-binds none", wsm.RemoteControl{On: true}, true,
+			&shimv1.SetSessionRemoteControlRequest{Enabled: true, Name: "name-w1"}},
+		{"an off names nothing", wsm.RemoteControl{BridgeSessionID: kept}, false,
+			&shimv1.SetSessionRemoteControlRequest{}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFleetFixture(t)
+			ws := f.workspace("w1")
+			f.db.setRemote(ws.ID, tt.standing)
+
+			// Act.
+			got, err := f.fleet.remoteControlRequest(context.Background(), ws.ID, tt.on)
+
+			// Assert.
+			if err != nil || !proto.Equal(got, tt.want) {
+				t.Fatalf("remoteControlRequest = %v, %v; want %v", got, err, tt.want)
+			}
+		})
+	}
+}
+
+func TestRemoteControlRequestRefusesAnUnreadableStanding(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.db.remoteErr = errFake
+
+	// Act.
+	_, err := f.fleet.remoteControlRequest(context.Background(), ws.ID, true)
+
+	// Assert.
+	if !errors.Is(err, errFake) {
+		t.Fatalf("err = %v, want the store's failure", err)
+	}
+}
+
+// TestALiveBridgeIsAskedTheBuiltRequest asserts a live session's bridge is
+// asked exactly the builder's request.
+func TestALiveBridgeIsAskedTheBuiltRequest(t *testing.T) {
+	// Arrange.
+	f, ws := startedFleet(t)
+	f.db.setRemote(ws.ID, wsm.RemoteControl{On: true, BridgeSessionID: "bridge-kept"})
+	want, err := f.fleet.remoteControlRequest(context.Background(), ws.ID, true)
+	if err != nil {
+		t.Fatalf("remoteControlRequest: %v", err)
+	}
+
+	// Act.
+	if _, err := f.fleet.SetRemoteControl(context.Background(), f.log.logger, ws.ID, wsm.RemoteControlOn); err != nil {
+		t.Fatalf("SetRemoteControl: %v", err)
+	}
+
+	// Assert.
+	if n := len(f.client.remoteControls); n == 0 || !proto.Equal(f.client.remoteControls[n-1], want) {
+		t.Fatalf("SetSessionRemoteControl asks = %v, want the last to be %v", f.client.remoteControls, want)
 	}
 }

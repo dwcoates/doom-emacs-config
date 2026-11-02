@@ -226,6 +226,19 @@ func (f *verbsForwarder) bound(what string) (workspace.Verbs, error) {
 	return verbs, nil
 }
 
+// answerColdGate is the cold gate's answer for the fleet, built BEFORE the
+// verbs, which own it: the parked bridge answers a workspace's gate pay
+// through it when a prompt typed on claude.ai reaches the parked workspace.
+// One asked for before the verbs are bound is a wiring defect, answered as an
+// error.
+func (f *verbsForwarder) answerColdGate(ctx context.Context, ws ids.WorkspaceID, answer *agentreplv1.AnswerColdGateRequest) error {
+	verbs, err := f.bound("a cold gate was answered for a prompt typed on claude.ai")
+	if err != nil {
+		return err
+	}
+	return verbs.AnswerColdGate(ctx, ws, answer)
+}
+
 // publishRegistry is the roster's durable-half republish for a component built
 // BEFORE the verbs, which own it. The republish reads the verbs out of the
 // forwarder when it runs; one asked for before they are bound is a wiring

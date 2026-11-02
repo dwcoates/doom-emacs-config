@@ -17755,20 +17755,22 @@ describe("the vendor's echoes of user messages", () => {
   });
 });
 
-describe("a prompt typed on claude.ai", () => {
-  const REMOTE = "00000000-0000-4000-8000-0000000000re";
+/** The uuid a prompt typed on claude.ai runs under, in these tests. */
+const REMOTE = "00000000-0000-4000-8000-0000000000re";
 
-  /** The vendor's echo of a prompt typed on claude.ai, under `uuid`. */
-  const remoteEcho = (text: string, uuid = REMOTE): SdkMessage =>
-    ({
-      type: "user",
-      message: { role: "user", content: text },
-      parent_tool_use_id: null,
-      uuid,
-      session_id: "s",
-      isReplay: true,
-      origin: { kind: "human" },
-    }) as never;
+/** The vendor's echo of a prompt typed on claude.ai, under `uuid`. */
+const remoteEcho = (text: string, uuid = REMOTE): SdkMessage =>
+  ({
+    type: "user",
+    message: { role: "user", content: text },
+    parent_tool_use_id: null,
+    uuid,
+    session_id: "s",
+    isReplay: true,
+    origin: { kind: "human" },
+  }) as never;
+
+describe("a prompt typed on claude.ai", () => {
 
   /** A reply stamped as answering `uuid`. */
   const stampedBy = (message: SdkMessage, uuid: string): SdkMessage =>
@@ -18092,5 +18094,277 @@ describe("a permission answered on claude.ai", () => {
 
     // Assert
     expect(settledAs(h)).toBe("open");
+  });
+});
+
+describe("HoldParkedBridge", () => {
+  /** A lapsed transcript, so a resume of it parks at the cold gate. */
+  const LAPSED_NOW_MS = 1_000_000 + 10 * 60 * 1000;
+
+  const pay = (): conversationv1.SessionColdRemediation =>
+    create(conversationv1.SessionColdRemediationSchema, {
+      remediation: { case: "pay", value: create(conversationv1.SessionColdPaySchema, {}) },
+    });
+  const clear = (): conversationv1.SessionColdRemediation =>
+    create(conversationv1.SessionColdRemediationSchema, {
+      remediation: { case: "clear", value: create(conversationv1.SessionColdClearSchema, {}) },
+    });
+
+  function holdRequest(
+    vendorSessionId = "resume-1",
+    bridge: Partial<shimv1.SetSessionRemoteControlRequest> = {},
+  ): shimv1.HoldParkedBridgeRequest {
+    return create(shimv1.HoldParkedBridgeRequestSchema, {
+      start: resumeRequest(vendorSessionId),
+      remoteControl: remoteControlRequest(bridge),
+    });
+  }
+
+  /** A parked workspace's harness: a lapsed transcript of `resume-1`. */
+  function parkedHarness(): Harness {
+    const h = harness({ nowMs: LAPSED_NOW_MS });
+    writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
+    return h;
+  }
+
+  /** A watch's frames, read one at a time. */
+  function watching(h: Harness, request = holdRequest(), signal = new AbortController().signal) {
+    return h.engine.holdParkedBridge(request, signal)[Symbol.asyncIterator]();
+  }
+
+  /** Open the bridge: the first frame, once the resumed query answers its opening. */
+  async function opened(h: Harness, request = holdRequest()) {
+    const frames = watching(h, request);
+    const first = frames.next();
+    (await untilQuery(h, 0)).query.emit(initMessage({ sessionId: "resume-1" }));
+    return { frames, first: await first };
+  }
+
+  function eventOf(result: IteratorResult<shimv1.HoldParkedBridgeResponse>): unknown {
+    if (result.done === true) return "done";
+    const event = result.value.event;
+    switch (event.case) {
+      case "opened":
+        return { opened: event.value.bridgeSessionId, alreadyOpen: event.value.alreadyOpen };
+      case "remotePrompt": {
+        const block = event.value.said?.content?.blocks[0]?.block;
+        return { remotePrompt: event.value.clientUuid, said: block?.case === "text" ? block.value.text : "" };
+      }
+      case "refused":
+        return { refused: event.value.cause.case };
+      default:
+        return "unset";
+    }
+  }
+
+  it("resumes the parked conversation on one query and answers opened with the bridge's claude.ai session", async () => {
+    // Arrange
+    const h = parkedHarness();
+
+    // Act
+    const { first } = await opened(h);
+
+    // Assert
+    expect([eventOf(first), h.queries.length, h.queries[0]?.query.remoteControlCalls[0]?.name]).toEqual([
+      { opened: "bridge-1", alreadyOpen: false },
+      1,
+      "parser-fix",
+    ]);
+  });
+
+  it("re-binds the claude.ai session the request names", async () => {
+    // Arrange
+    const h = parkedHarness();
+
+    // Act
+    const { first } = await opened(h, holdRequest("resume-1", { reattachBridgeSessionId: "session_prev" }));
+
+    // Assert
+    expect(eventOf(first)).toEqual({ opened: "session_prev", alreadyOpen: false });
+  });
+
+  it("records both vendor assumptions at INFO when it opens", async () => {
+    // Arrange
+    const h = parkedHarness();
+    const mark = logSinkMark();
+
+    // Act
+    await opened(h);
+
+    // Assert
+    expect(
+      logRecordsSince(mark)
+        .filter((record) => record.context?.assumption !== undefined)
+        .map((record) => [record.level, record.context?.assumption]),
+    ).toEqual([
+      ["info", "an idle resumed vendor process makes no API request"],
+      ["info", "a prompt typed on claude.ai while detached is delivered on reattach"],
+    ]);
+  });
+
+  it("sends the vendor no prompt while it holds the bridge", async () => {
+    // Arrange
+    const delivered: string[] = [];
+    const h = harness({ nowMs: LAPSED_NOW_MS, drainPrompts: delivered });
+    writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
+
+    // Act
+    await opened(h);
+
+    // Assert
+    expect(delivered).toEqual([]);
+  });
+
+  it("states a prompt typed on claude.ai that reaches the parked process", async () => {
+    // Arrange
+    const h = parkedHarness();
+    const { frames } = await opened(h);
+
+    // Act
+    await h.engine.onSdkMessage(remoteEcho("fix the build"));
+
+    // Assert
+    expect(eventOf(await frames.next())).toEqual({ remotePrompt: REMOTE, said: "fix the build" });
+  });
+
+  it("answers the gate's pay StartSession with the session the bridge opened, opening no second query", async () => {
+    // Arrange
+    const h = parkedHarness();
+    await opened(h);
+
+    // Act
+    const response = await h.engine.startSession(resumeRequest("resume-1", pay()));
+
+    // Assert
+    expect([
+      response.result.case,
+      response.result.case === "success" ? response.result.value.session?.vendorSessionId : undefined,
+      h.queries.length,
+    ]).toEqual(["success", "resume-1", 1]);
+  });
+
+  it("ends its watch once the pay answer takes the session", async () => {
+    // Arrange
+    const h = parkedHarness();
+    const { frames } = await opened(h);
+
+    // Act
+    await h.engine.startSession(resumeRequest("resume-1", pay()));
+
+    // Assert
+    expect(eventOf(await frames.next())).toBe("done");
+  });
+
+  it("adopts the remote prompt's turn as REMOTE_CONTROL once the pay answer took the session", async () => {
+    // Arrange
+    const h = parkedHarness();
+    await opened(h);
+    await h.engine.onSdkMessage(remoteEcho("fix the build"));
+    await h.engine.startSession(resumeRequest("resume-1", pay()));
+
+    // Act
+    await h.engine.onSdkMessage(assistantMessage("00000000-0000-4000-8000-0000000000a1"));
+
+    // Assert
+    expect(
+      h.persistence.buffered.flatMap((entry) => (entry.item.kind === "prompt" ? [entry.item.prompt.origin] : [])),
+    ).toEqual([conversationv1.PromptOrigin.REMOTE_CONTROL]);
+  });
+
+  it("refuses any other answer already_started, keeping the bridge", async () => {
+    // Arrange
+    const h = parkedHarness();
+    await opened(h);
+
+    // Act
+    const response = await h.engine.startSession(resumeRequest("resume-1", clear()));
+    const again = await h.engine.startSession(resumeRequest("resume-1", pay()));
+
+    // Assert
+    expect([failureCause(response), again.result.case]).toEqual(["alreadyStarted", "success"]);
+  });
+
+  it("refuses a pay answer on another conversation already_started", async () => {
+    // Arrange
+    const h = parkedHarness();
+    await opened(h);
+
+    // Act
+    const response = await h.engine.startSession(resumeRequest("resume-2", pay()));
+
+    // Assert
+    expect(failureCause(response)).toBe("alreadyStarted");
+  });
+
+  it("answers a second watch on the same conversation from the open bridge, stating the latched prompt", async () => {
+    // Arrange
+    const h = parkedHarness();
+    await opened(h);
+    await h.engine.onSdkMessage(remoteEcho("fix the build"));
+
+    // Act
+    const frames = watching(h);
+
+    // Assert
+    expect([eventOf(await frames.next()), eventOf(await frames.next()), h.queries.length]).toEqual([
+      { opened: "bridge-1", alreadyOpen: true },
+      { remotePrompt: REMOTE, said: "fix the build" },
+      1,
+    ]);
+  });
+
+  it("refuses a watch on another conversation already_started", async () => {
+    // Arrange
+    const h = parkedHarness();
+    await opened(h);
+
+    // Act
+    const frames = watching(h, holdRequest("resume-2"));
+
+    // Assert
+    expect([eventOf(await frames.next()), eventOf(await frames.next())]).toEqual([
+      { refused: "alreadyStarted" },
+      "done",
+    ]);
+  });
+
+  it("refuses vendor_refused when the vendor will not hold the bridge", async () => {
+    // Arrange
+    const h = harness({
+      nowMs: LAPSED_NOW_MS,
+      onQueryCreated: (query) => {
+        query.enableRemoteControlRejects = new Error("Remote Control is disabled by policy");
+      },
+    });
+    writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
+
+    // Act
+    const { frames, first } = await opened(h);
+
+    // Assert
+    expect([eventOf(first), eventOf(await frames.next())]).toEqual([{ refused: "vendorRefused" }, "done"]);
+  });
+
+  it("refuses resume_failed when the parked conversation cannot be resumed", async () => {
+    // Arrange: no transcript, so the resume names an unknown session.
+    const h = harness({ nowMs: LAPSED_NOW_MS });
+
+    // Act
+    const frames = watching(h);
+
+    // Assert
+    expect([eventOf(await frames.next()), h.queries.length]).toEqual([{ refused: "resumeFailed" }, 0]);
+  });
+
+  it("refuses already_started on a shim that serves a session no gate parked", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+
+    // Act
+    const frames = watching(h);
+
+    // Assert
+    expect(eventOf(await frames.next())).toEqual({ refused: "alreadyStarted" });
   });
 });

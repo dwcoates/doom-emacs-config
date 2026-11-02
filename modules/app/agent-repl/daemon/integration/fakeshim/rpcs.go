@@ -16,6 +16,7 @@ const (
 	RPCSetSessionPermissionMode = "SetSessionPermissionMode"
 	RPCSetSessionEffort         = "SetSessionEffort"
 	RPCSetSessionRemoteControl  = "SetSessionRemoteControl"
+	RPCHoldParkedBridge         = "HoldParkedBridge"
 	RPCHibernate                = "Hibernate"
 	RPCSendKeepalive            = "SendKeepalive"
 	RPCRetryVendorErrorNow      = "RetryVendorErrorNow"
@@ -94,10 +95,10 @@ func newResponse(rpc string) proto.Message {
 }
 
 // knownRPC reports whether the verb can be recorded, expected and counted.
-// The three stream verbs have no scriptable answer but are still recorded.
+// The four stream verbs have no scriptable answer but are still recorded.
 func knownRPC(rpc string) bool {
 	switch rpc {
-	case RPCWatchSession, RPCWatchAgent, RPCWatchBash:
+	case RPCWatchSession, RPCWatchAgent, RPCWatchBash, RPCHoldParkedBridge:
 		return true
 	default:
 		return newResponse(rpc) != nil

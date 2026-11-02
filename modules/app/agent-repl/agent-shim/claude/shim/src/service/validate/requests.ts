@@ -182,6 +182,34 @@ export function validateSetSessionRemoteControlRequest(request: shimv1.SetSessio
   }
 }
 
+/**
+ * `shim.v1.HoldParkedBridgeRequest` — a resume of the parked conversation,
+ * naming no remediation (the shim pays it itself), and a bridge turned on.
+ */
+export function validateHoldParkedBridgeRequest(request: shimv1.HoldParkedBridgeRequest): void {
+  if (request.start === undefined) {
+    refuse("HoldParkedBridge", unsetOneof("hold_parked_bridge.start"));
+  }
+  if (request.remoteControl === undefined) {
+    refuse("HoldParkedBridge", unsetOneof("hold_parked_bridge.remote_control"));
+  }
+  validateStartSessionRequest(request.start);
+  validateSetSessionRemoteControlRequest(request.remoteControl);
+  try {
+    if (request.start.source.case !== "resume") {
+      throw invalidArgument("hold_parked_bridge.start.source is not a resume; only a parked conversation has a bridge to hold");
+    }
+    if (request.start.source.value.coldRemediation !== undefined) {
+      throw invalidArgument("hold_parked_bridge.start.resume.cold_remediation is set; the gate parks a resume that named none");
+    }
+    if (!request.remoteControl.enabled) {
+      throw invalidArgument("hold_parked_bridge.remote_control.enabled is false; a bridge held off is no bridge");
+    }
+  } catch (err) {
+    refuse("HoldParkedBridge", err);
+  }
+}
+
 /** `shim.v1.HibernateRequest` — empty by design; see validateWatchSessionRequest. */
 export function validateHibernateRequest(_request: shimv1.HibernateRequest): void {
   // No fields. Nothing to refuse.

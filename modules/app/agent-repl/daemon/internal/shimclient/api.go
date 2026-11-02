@@ -153,6 +153,12 @@ type Client interface {
 	// (claude.ai) on or off, for every vendor process the shim opens from now
 	// on; an on answers the bridge's claude.ai session.
 	SetSessionRemoteControl(ctx context.Context, req *shimv1.SetSessionRemoteControlRequest) (*shimv1.SetSessionRemoteControlResponse, error)
+	// HoldParkedBridge holds a cold-parked conversation's Remote Control
+	// bridge on an idle vendor process (shim.v1.HoldParkedBridge). The open
+	// answers once the first frame -- opened or refused -- is in; the stream
+	// then states the prompt typed on claude.ai that reaches the parked
+	// process, and ends when the gate's pay answer promotes the bridge.
+	HoldParkedBridge(ctx context.Context, req *shimv1.HoldParkedBridgeRequest) (Stream[*shimv1.HoldParkedBridgeResponse], error)
 	// Hibernate stands the session down for the idle sweep. It is NOT used by
 	// the relaunch engine, which kills gracefully instead.
 	Hibernate(ctx context.Context, req *shimv1.HibernateRequest) (*shimv1.HibernateResponse, error)

@@ -104,9 +104,47 @@ ruling, 2026-10-31). Its beats go on as every workspace's do, but no beat is
 followed by the keep-alive cycle's park, and no settings visit stands it down.
 Since it is never parked, it never needs the restore before a beat. The idle
 cutoff still hibernates it as it does any workspace, and the bridge goes down
-with the shim. The mode is read when each stand-down is decided, so turning it
+with the shim. A workspace parked at its cold gate keeps its bridge (see "A
+parked workspace"). The mode is read when each stand-down is decided, so turning it
 off lets the next beat park the shim as usual. See `shim-lifecycle.md`,
 "Keep-alives".
+
+## A parked workspace
+
+A workspace parked at its cold gate runs no vendor process, so it has no
+bridge, and a prompt typed on the phone reached nothing on this machine until
+someone answered the gate at the editor. A workspace in remote control
+therefore keeps its bridge while it is parked (owner ruling, 2026-11-02, which
+overturns "the gate runs no shim" for this case only):
+
+- **The bridge.** Wherever the daemon would stand a gate's shim down, it
+  settles it instead (`workspace.Fleet.settleGateShim`). With the mode on, one
+  shim holds the parked conversation's bridge (`shim.v1.HoldParkedBridge`):
+  it resumes the conversation exactly as the gate's pay answer would, sends no
+  prompt, and turns the bridge on, re-binding the kept claude.ai session. A
+  gate raised from its record with no shim gets a shim spawned for it, and so
+  does turning the mode on while parked. Turning it off stands the shim down.
+- **A remote prompt pays.** The vendor runs a prompt typed on claude.ai the
+  moment it arrives, so the cold read is spent then. The shim states it on the
+  bridge's stream, and the daemon answers the gate pay through the same
+  `AnswerColdGate` the editor's button uses, logging the prompt and the gate at
+  INFO (`daemon.workspace.parked_bridge`). The answer retires the gate, keeps
+  the prompts held at it as pay always does, and marks the cache.
+- **The answer promotes the bridge.** The pay answer's `StartSession` is
+  answered with the session the bridge already opened, and the remote
+  prompt's turn is its turn in flight. Any other answer (clear, compact) stands
+  the bridge's shim down and resumes on a new shim.
+- **A bridge that cannot be held** is logged at ERROR and stated on the warning
+  strip, and the gate keeps no shim.
+- **A prompt from anywhere else** meets the gate as before.
+
+Two vendor behaviors are assumed and not yet confirmed against a live bridge.
+The shim logs each at INFO, with an `assumption` field, every time it opens a
+parked bridge:
+
+- an idle resumed vendor process makes no API request;
+- a prompt typed on claude.ai while no bridge was attached is delivered when
+  the bridge re-binds the same claude.ai session.
 
 ## Surfaces
 

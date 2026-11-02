@@ -53,6 +53,8 @@ const (
 	// ShimSetSessionRemoteControlProcedure is the fully-qualified name of the Shim's
 	// SetSessionRemoteControl RPC.
 	ShimSetSessionRemoteControlProcedure = "/shim.v1.Shim/SetSessionRemoteControl"
+	// ShimHoldParkedBridgeProcedure is the fully-qualified name of the Shim's HoldParkedBridge RPC.
+	ShimHoldParkedBridgeProcedure = "/shim.v1.Shim/HoldParkedBridge"
 	// ShimHibernateProcedure is the fully-qualified name of the Shim's Hibernate RPC.
 	ShimHibernateProcedure = "/shim.v1.Shim/Hibernate"
 	// ShimSendKeepaliveProcedure is the fully-qualified name of the Shim's SendKeepalive RPC.
@@ -112,6 +114,7 @@ var (
 	shimSetSessionEffortMethodDescriptor         = shimServiceDescriptor.Methods().ByName("SetSessionEffort")
 	shimSetSessionPermissionModeMethodDescriptor = shimServiceDescriptor.Methods().ByName("SetSessionPermissionMode")
 	shimSetSessionRemoteControlMethodDescriptor  = shimServiceDescriptor.Methods().ByName("SetSessionRemoteControl")
+	shimHoldParkedBridgeMethodDescriptor         = shimServiceDescriptor.Methods().ByName("HoldParkedBridge")
 	shimHibernateMethodDescriptor                = shimServiceDescriptor.Methods().ByName("Hibernate")
 	shimSendKeepaliveMethodDescriptor            = shimServiceDescriptor.Methods().ByName("SendKeepalive")
 	shimRetryVendorErrorNowMethodDescriptor      = shimServiceDescriptor.Methods().ByName("RetryVendorErrorNow")
@@ -163,6 +166,10 @@ type ShimClient interface {
 	// every vendor process the shim opens from now on. See
 	// endpoint_set_session_remote_control.proto.
 	SetSessionRemoteControl(context.Context, *connect.Request[v1.SetSessionRemoteControlRequest]) (*connect.Response[v1.SetSessionRemoteControlResponse], error)
+	// Hold a parked conversation's Remote Control bridge on an idle vendor
+	// process, and state the prompt typed on claude.ai that arrives there. See
+	// endpoint_hold_parked_bridge.proto.
+	HoldParkedBridge(context.Context, *connect.Request[v1.HoldParkedBridgeRequest]) (*connect.ServerStreamForClient[v1.HoldParkedBridgeResponse], error)
 	// The pre-hibernation directive: the shim compacts, then acks; the daemon
 	// stands the shim down only after the ack. See endpoint_hibernate.proto.
 	Hibernate(context.Context, *connect.Request[v1.HibernateRequest]) (*connect.Response[v1.HibernateResponse], error)
@@ -290,6 +297,12 @@ func NewShimClient(httpClient connect.HTTPClient, baseURL string, opts ...connec
 			httpClient,
 			baseURL+ShimSetSessionRemoteControlProcedure,
 			connect.WithSchema(shimSetSessionRemoteControlMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
+		holdParkedBridge: connect.NewClient[v1.HoldParkedBridgeRequest, v1.HoldParkedBridgeResponse](
+			httpClient,
+			baseURL+ShimHoldParkedBridgeProcedure,
+			connect.WithSchema(shimHoldParkedBridgeMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
 		hibernate: connect.NewClient[v1.HibernateRequest, v1.HibernateResponse](
@@ -441,6 +454,7 @@ type shimClient struct {
 	setSessionEffort         *connect.Client[v1.SetSessionEffortRequest, v1.SetSessionEffortResponse]
 	setSessionPermissionMode *connect.Client[v1.SetSessionPermissionModeRequest, v1.SetSessionPermissionModeResponse]
 	setSessionRemoteControl  *connect.Client[v1.SetSessionRemoteControlRequest, v1.SetSessionRemoteControlResponse]
+	holdParkedBridge         *connect.Client[v1.HoldParkedBridgeRequest, v1.HoldParkedBridgeResponse]
 	hibernate                *connect.Client[v1.HibernateRequest, v1.HibernateResponse]
 	sendKeepalive            *connect.Client[v1.SendKeepaliveRequest, v1.SendKeepaliveResponse]
 	retryVendorErrorNow      *connect.Client[v1.RetryVendorErrorNowRequest, v1.RetryVendorErrorNowResponse]
@@ -494,6 +508,11 @@ func (c *shimClient) SetSessionPermissionMode(ctx context.Context, req *connect.
 // SetSessionRemoteControl calls shim.v1.Shim.SetSessionRemoteControl.
 func (c *shimClient) SetSessionRemoteControl(ctx context.Context, req *connect.Request[v1.SetSessionRemoteControlRequest]) (*connect.Response[v1.SetSessionRemoteControlResponse], error) {
 	return c.setSessionRemoteControl.CallUnary(ctx, req)
+}
+
+// HoldParkedBridge calls shim.v1.Shim.HoldParkedBridge.
+func (c *shimClient) HoldParkedBridge(ctx context.Context, req *connect.Request[v1.HoldParkedBridgeRequest]) (*connect.ServerStreamForClient[v1.HoldParkedBridgeResponse], error) {
+	return c.holdParkedBridge.CallServerStream(ctx, req)
 }
 
 // Hibernate calls shim.v1.Shim.Hibernate.
@@ -637,6 +656,10 @@ type ShimHandler interface {
 	// every vendor process the shim opens from now on. See
 	// endpoint_set_session_remote_control.proto.
 	SetSessionRemoteControl(context.Context, *connect.Request[v1.SetSessionRemoteControlRequest]) (*connect.Response[v1.SetSessionRemoteControlResponse], error)
+	// Hold a parked conversation's Remote Control bridge on an idle vendor
+	// process, and state the prompt typed on claude.ai that arrives there. See
+	// endpoint_hold_parked_bridge.proto.
+	HoldParkedBridge(context.Context, *connect.Request[v1.HoldParkedBridgeRequest], *connect.ServerStream[v1.HoldParkedBridgeResponse]) error
 	// The pre-hibernation directive: the shim compacts, then acks; the daemon
 	// stands the shim down only after the ack. See endpoint_hibernate.proto.
 	Hibernate(context.Context, *connect.Request[v1.HibernateRequest]) (*connect.Response[v1.HibernateResponse], error)
@@ -760,6 +783,12 @@ func NewShimHandler(svc ShimHandler, opts ...connect.HandlerOption) (string, htt
 		ShimSetSessionRemoteControlProcedure,
 		svc.SetSessionRemoteControl,
 		connect.WithSchema(shimSetSessionRemoteControlMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
+	shimHoldParkedBridgeHandler := connect.NewServerStreamHandler(
+		ShimHoldParkedBridgeProcedure,
+		svc.HoldParkedBridge,
+		connect.WithSchema(shimHoldParkedBridgeMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
 	shimHibernateHandler := connect.NewUnaryHandler(
@@ -914,6 +943,8 @@ func NewShimHandler(svc ShimHandler, opts ...connect.HandlerOption) (string, htt
 			shimSetSessionPermissionModeHandler.ServeHTTP(w, r)
 		case ShimSetSessionRemoteControlProcedure:
 			shimSetSessionRemoteControlHandler.ServeHTTP(w, r)
+		case ShimHoldParkedBridgeProcedure:
+			shimHoldParkedBridgeHandler.ServeHTTP(w, r)
 		case ShimHibernateProcedure:
 			shimHibernateHandler.ServeHTTP(w, r)
 		case ShimSendKeepaliveProcedure:
@@ -991,6 +1022,10 @@ func (UnimplementedShimHandler) SetSessionPermissionMode(context.Context, *conne
 
 func (UnimplementedShimHandler) SetSessionRemoteControl(context.Context, *connect.Request[v1.SetSessionRemoteControlRequest]) (*connect.Response[v1.SetSessionRemoteControlResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("shim.v1.Shim.SetSessionRemoteControl is not implemented"))
+}
+
+func (UnimplementedShimHandler) HoldParkedBridge(context.Context, *connect.Request[v1.HoldParkedBridgeRequest], *connect.ServerStream[v1.HoldParkedBridgeResponse]) error {
+	return connect.NewError(connect.CodeUnimplemented, errors.New("shim.v1.Shim.HoldParkedBridge is not implemented"))
 }
 
 func (UnimplementedShimHandler) Hibernate(context.Context, *connect.Request[v1.HibernateRequest]) (*connect.Response[v1.HibernateResponse], error) {

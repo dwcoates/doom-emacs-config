@@ -15,6 +15,7 @@ import (
 	"golang.org/x/text/message"
 	"google.golang.org/protobuf/proto"
 
+	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 	shimv1 "agentrepl/proto/shim/v1"
@@ -271,6 +272,11 @@ type FleetDeps struct {
 	// one raised again (from its record, after a failed answer, carried over
 	// a handover).
 	ColdGateRaised func(ws ids.WorkspaceID, judged bool)
+	// PayColdGate answers WS's standing cold gate through the verb the
+	// editor's answer takes (agentrepl.v1.AnswerColdGate). The parked bridge
+	// calls it with the pay answer when a prompt typed on claude.ai reaches a
+	// parked workspace (parkedbridge.go). Required.
+	PayColdGate func(ctx context.Context, ws ids.WorkspaceID, answer *agentreplv1.AnswerColdGateRequest) error
 }
 
 // live is one workspace's live session: the client, its watcher, and the facts
@@ -319,6 +325,10 @@ type live struct {
 	// an adopted shim is installed before its started session is noted, and
 	// in that window its session is UNKNOWN, never absent (SessionAbsent).
 	sessionAbsent bool
+	// bridged reports that this client's shim holds, or is opening, the
+	// parked conversation's Remote Control bridge (parkedbridge.go): it takes
+	// only the gate's pay answer, and any other answer runs on a new shim.
+	bridged bool
 }
 
 // held reports whether the entry's shim is still held: its client is not
@@ -563,6 +573,8 @@ func NewFleet(deps FleetDeps) (*Fleet, error) {
 		return nil, fmt.Errorf("workspace: the session fleet needs the network-change signal; a vendor start the network failed is retried at a reconnect by it")
 	case deps.Standing == nil:
 		return nil, fmt.Errorf("workspace: the session fleet needs the serving standing; a workspace this daemon does not serve is never brought up by it")
+	case deps.PayColdGate == nil:
+		return nil, fmt.Errorf("workspace: the session fleet needs the cold gate's answer; a prompt typed on claude.ai into a parked workspace answers its gate pay through it")
 	}
 	probe := deps.Probe
 	if probe == nil {
@@ -856,8 +868,9 @@ func (f *Fleet) ReraiseColdGate(ws ids.WorkspaceID, vendorSessionID string) bool
 	}
 	f.raiseColdGate(ws, vendorSessionID, cold, held.configDir, false)
 	// THE GATE RUNS NO SHIM AGAIN: the one the failed answer spawned, or found
-	// still held, is stood down.
-	f.Detach(func(ctx context.Context) { f.standDownAtGate(ctx, ws) })
+	// still held, is stood down, unless the workspace is in remote control and
+	// it holds the gate's bridge again (parkedbridge.go).
+	f.Detach(func(ctx context.Context) { f.settleGateShim(ctx, ws) })
 	return true
 }
 
@@ -1566,7 +1579,9 @@ func (f *Fleet) timedStart(
 		// AND THE SHIM GOES (owner ruling, 2026-10-27): a gate needs no shim,
 		// so it is stood down before this start returns, under its start
 		// gate, and the answer spawns the one it resumes through (ResumeCold).
-		f.standDownAtGate(ctx, ws)
+		// A workspace in remote control keeps it, holding the parked
+		// conversation's bridge (owner ruling, 2026-11-02; parkedbridge.go).
+		f.settleGateShim(ctx, ws)
 		return nil
 	}
 
@@ -2557,12 +2572,12 @@ func (f *Fleet) agentStanding(ctx context.Context, log dlog.Logger, ws ids.Works
 // value is REFUSED, never ignored.
 const DefaultStartSessionBound = 60 * time.Second
 
-// askToStartSession sends ONE StartSession and answers its outcome. A nil
-// SessionStarted with a nil error means the session is parked behind a
-// standing cold gate, which is an answer and not a failure. Every refusal is
-// LABELED (startLabel) with the shim's verdict on whether asking again can
-// help; startSession owns what follows from it.
-func (f *Fleet) askToStartSession(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, client shimclient.Client, src source, session wsm.Session, configDir string) (*conversationv1.SessionStarted, error) {
+// startSessionRequest is the StartSession that brings SRC up: the source as
+// recorded (a fresh start's model and permission mode, or a resume's model,
+// rolled-back turns and rebind), and the session's profile. It is the one
+// builder of a StartSession, so the cold gate's parked bridge resumes exactly
+// what a start or the gate's answer would.
+func (f *Fleet) startSessionRequest(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, src source, session wsm.Session, configDir string) (*shimv1.StartSessionRequest, error) {
 	req := &shimv1.StartSessionRequest{WorkspaceName: src.WorkspaceName}
 	if src.Fresh {
 		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "src.Fresh"})
@@ -2617,6 +2632,19 @@ func (f *Fleet) askToStartSession(ctx context.Context, log dlog.Logger, ws ids.W
 		return nil, err
 	}
 	req.Profile = profile
+	return req, nil
+}
+
+// askToStartSession sends ONE StartSession and answers its outcome. A nil
+// SessionStarted with a nil error means the session is parked behind a
+// standing cold gate, which is an answer and not a failure. Every refusal is
+// LABELED (startLabel) with the shim's verdict on whether asking again can
+// help; startSession owns what follows from it.
+func (f *Fleet) askToStartSession(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, client shimclient.Client, src source, session wsm.Session, configDir string) (*conversationv1.SessionStarted, error) {
+	req, err := f.startSessionRequest(ctx, log, ws, src, session, configDir)
+	if err != nil {
+		return nil, err
+	}
 
 	// THE CALL IS BOUNDED. See DefaultStartSessionBound: a shim that accepts
 	// the start and never answers held this call, and the workspace's start

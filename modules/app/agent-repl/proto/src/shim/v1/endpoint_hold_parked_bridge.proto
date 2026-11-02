@@ -1,0 +1,103 @@
+// endpoint_hold_parked_bridge.proto — HoldParkedBridge: keep a workspace
+// parked at its cold gate reachable from claude.ai, and say when a prompt
+// typed there arrives.
+//
+// WHY A PARKED SHIM HOLDS A VENDOR PROCESS AT ALL (owner ruling, 2026-11-02,
+// overturning the 2026-10-27 "a gate runs no shim" ruling for this case only).
+// The Remote Control bridge is the vendor CLI's own connection, so a parked
+// workspace with no vendor process cannot be reached: a prompt typed on the
+// phone reached nothing on this machine, and the person got no answer until
+// someone answered the gate at the editor. A workspace whose remote control is
+// on therefore keeps, while it is parked, ONE idle vendor process resumed on
+// the parked conversation, with the bridge on.
+//
+// IDLE COSTS NOTHING. The process is resumed exactly as a `pay` answer resumes
+// it, and no prompt is sent, so no model request is made until a prompt typed
+// on claude.ai arrives (an assumption the shim logs at INFO each time it opens
+// one, until a live bridge confirms it).
+//
+// A REMOTE PROMPT PAYS. The vendor runs a prompt typed on claude.ai the moment
+// it arrives, past agent-repl's queue (owner ruling, 2026-10-31), so the cold
+// read is spent then. The shim states it here (`remote_prompt`), and the daemon
+// answers the gate `pay` through the one path the editor's answer takes
+// (agentrepl.v1.AnswerColdGate), which records what the vendor spent: it
+// retires the gate, settles the prompts held at it and marks the cache.
+//
+// THE ANSWER PROMOTES, IT DOES NOT RE-OPEN. The `pay` answer's StartSession
+// (a resume of the same conversation with `cold_remediation` pay) is answered
+// with the session this bridge already opened, and the turn the remote prompt
+// started is its turn in flight. Any other StartSession on a shim holding a
+// parked bridge is refused `already_started`: the caller stands the shim down
+// and starts the answer on a new one.
+//
+// THE BRIDGE IS THE SHIM'S, THE STREAM ONLY WATCHES IT. The bridge stays open
+// for the shim's life, until the answer promotes it or the shim is stood down.
+// A stream opened again (a new daemon adopting the shim) is answered `opened`
+// at once, and a remote prompt that arrived while no stream was open is
+// stated to the next one: the arrival is a latch, never an event that a
+// stream not yet open could miss. The stream ends once the bridge is
+// promoted.
+
+syntax = "proto3";
+
+package shim.v1;
+
+import "conversation/v1/user.proto";
+import "shim/v1/endpoint_set_session_remote_control.proto";
+import "shim/v1/endpoint_start_session.proto";
+
+option go_package = "agentrepl/proto/shim/v1;shimv1";
+
+message HoldParkedBridgeRequest {
+  // The resume the gate parked: `source` is `resume`, naming the parked
+  // conversation, with no `cold_remediation`. The shim resumes it as a `pay`
+  // answer would.
+  StartSessionRequest start = 1;
+  // The bridge to hold: `enabled` is true, `name` is the workspace's name.
+  SetSessionRemoteControlRequest remote_control = 2;
+}
+
+message HoldParkedBridgeResponse {
+  oneof event {
+    // The parked conversation's vendor process is up, idle, with the bridge
+    // on. First on every stream that holds one.
+    HoldParkedBridgeOpened opened = 1;
+    // The bridge could not be held. The last frame of the stream: the gate
+    // stands with no bridge, and the caller stands the shim down.
+    HoldParkedBridgeRefused refused = 2;
+    // A prompt typed on claude.ai arrived, and the vendor is running it.
+    // At most once per bridge, after `opened`.
+    HoldParkedBridgeRemotePrompt remote_prompt = 3;
+  }
+}
+
+message HoldParkedBridgeOpened {
+  // The bridge's claude.ai session, for the daemon to keep and re-bind.
+  string bridge_session_id = 1;
+  // Whether this stream found the bridge already open (a second stream on the
+  // same shim) rather than opening it.
+  bool already_open = 2;
+}
+
+message HoldParkedBridgeRefused {
+  oneof cause {
+    // The parked conversation's vendor process could not be resumed.
+    HoldParkedBridgeResumeFailed resume_failed = 1;
+    // The vendor refused the bridge.
+    HoldParkedBridgeVendorRefused vendor_refused = 2;
+    // The shim already serves a session that no gate parked.
+    HoldParkedBridgeAlreadyStarted already_started = 3;
+  }
+  // The cause, verbatim.
+  string detail = 4;
+}
+message HoldParkedBridgeResumeFailed {}
+message HoldParkedBridgeVendorRefused {}
+message HoldParkedBridgeAlreadyStarted {}
+
+message HoldParkedBridgeRemotePrompt {
+  // What was typed on claude.ai, as the vendor echoed it.
+  conversation.v1.UserSaid said = 1;
+  // The uuid the vendor runs the prompt under.
+  string client_uuid = 2;
+}

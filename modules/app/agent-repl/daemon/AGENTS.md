@@ -1789,6 +1789,15 @@ resume it refuses cold:
 - **The record is retired** when a session comes up (`sessionUp`, which every
   answer's resume reaches) or a rebind points the workspace at another
   conversation, and with the workspace's row.
+- **Except in remote control** (owner ruling, 2026-11-02, overturning the
+  above for this case only; `internal/workspace/parkedbridge.go`). Every place
+  that would stand a gate's shim down settles it instead (`settleGateShim`):
+  a workspace whose remote-control mode is on keeps one shim holding the
+  parked conversation's bridge (`shim.v1.HoldParkedBridge`), spawned for a
+  gate raised from its record. A prompt typed on claude.ai that reaches it
+  answers the gate pay through `AnswerColdGate`, logged at INFO with the
+  prompt and the gate, and the pay's resume promotes the bridge. Any other
+  answer stands the bridge's shim down and resumes on a new one.
 
 ## A prompt waits at the cold gate, and nothing that waits on a session is left unheld
 

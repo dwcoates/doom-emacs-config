@@ -15,6 +15,7 @@ import "shim/v1/endpoint_fork_session.proto";
 import "shim/v1/endpoint_gather_title_digest.proto";
 import "shim/v1/endpoint_get_fork_point.proto";
 import "shim/v1/endpoint_hibernate.proto";
+import "shim/v1/endpoint_hold_parked_bridge.proto";
 import "shim/v1/endpoint_kill_session.proto";
 import "shim/v1/endpoint_kill_turn.proto";
 import "shim/v1/endpoint_roll_back_session.proto";
@@ -74,6 +75,10 @@ service Shim {
   // every vendor process the shim opens from now on. See
   // endpoint_set_session_remote_control.proto.
   rpc SetSessionRemoteControl(SetSessionRemoteControlRequest) returns (SetSessionRemoteControlResponse);
+  // Hold a parked conversation's Remote Control bridge on an idle vendor
+  // process, and state the prompt typed on claude.ai that arrives there. See
+  // endpoint_hold_parked_bridge.proto.
+  rpc HoldParkedBridge(HoldParkedBridgeRequest) returns (stream HoldParkedBridgeResponse);
 
   // The pre-hibernation directive: the shim compacts, then acks; the daemon
   // stands the shim down only after the ack. See endpoint_hibernate.proto.
