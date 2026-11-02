@@ -485,6 +485,10 @@ func TestNukeWorkspaceAGitFailureDuringTheWorktreeRemoveAnswersGitFailed(t *test
 	// Arrange: a registered (no live session) workspace whose worktree
 	// removal is scripted to fail.
 	d := newDaemon(t, harness.Opts{})
+	// The git leaf records its own command failure at ERROR — that record IS
+	// the evidence the refusal's detail is drawn from — and the verb answers
+	// the refusal above it.
+	d.ExpectWarnings("NukeWorkspace", "daemon.gitclient.remove_worktree")
 	repo := harness.NewRepo(t)
 	dir := worktreeOf(t, repo, "nuke-fails")
 	ws := harness.Register(t, d, dir)
@@ -511,10 +515,6 @@ func TestNukeWorkspaceAGitFailureDuringTheWorktreeRemoveAnswersGitFailed(t *test
 	if !strings.Contains(failed.GetDetail(), "unable to remove worktree") {
 		t.Fatalf("git_failed.detail = %q, want git's own account of the failure", failed.GetDetail())
 	}
-	// The git leaf records its own command failure at ERROR — that record IS
-	// the evidence the refusal's detail is drawn from — and the verb answers
-	// the refusal above it.
-	d.ExpectWarnings("NukeWorkspace", "daemon.gitclient.remove_worktree")
 }
 
 // ---- CloseWorkspace: blocked by live detached work with no turn open ----
@@ -527,6 +527,7 @@ func TestCloseWorkspaceBlockedByLiveDetachedWorkWithNoTurnOpenAnswersBlocked(t *
 	// "turn_in_flight"; this test's own branch is reached only once that is
 	// nil AND live work remains, answering "live_work" instead).
 	f := newOpened(t, harness.Opts{})
+	f.d.ExpectWarnings("daemon.workspace.close")
 	footer := f.d.WatchFooter(f.ws)
 	pushDetachedShell(f.shim, "work-close-1", "sleep 100")
 	awaitLiveWork(t, f, 1)
@@ -552,7 +553,6 @@ func TestCloseWorkspaceBlockedByLiveDetachedWorkWithNoTurnOpenAnswersBlocked(t *
 	if !strings.Contains(line, "detached") {
 		t.Fatalf("close-blocked activity text = %q, want it to name the live detached work, not a turn in flight", line)
 	}
-	f.d.ExpectWarnings("daemon.workspace.close")
 }
 
 // ---- create* helpers (prefixed create* so they cannot collide) ----
@@ -715,6 +715,12 @@ func TestCreateWorkspaceWhoseShimWillNotComeUpAnswersTheSpawnFailedArm(t *testin
 	// Arrange: the create mints the workspace dir, so the dying shim is
 	// scripted through the profile EVERY spawn falls back to.
 	d := newDaemon(t, harness.Opts{})
+	// THE FAILED CREATE IS THEN REPORTED, ASYNCHRONOUSLY, to the repository's
+	// main-worktree workspace: the report is queued, and its revival dies by
+	// the same default profile, which the queue says at ERROR. Awaited rather
+	// than left to race the test's end: whether that record landed before the
+	// sweep used to decide the test's verdict.
+	d.RequireWarnings("daemon.promptqueue.submit")
 	// The sweep covers every test; the declared records are evidence of the bring-up death the test scripts.
 	// The failed create is then reported to the repository's main-worktree
 	// workspace (workspace.reportCreateFailure): the report is queued, and the
@@ -748,12 +754,6 @@ func TestCreateWorkspaceWhoseShimWillNotComeUpAnswersTheSpawnFailedArm(t *testin
 		t.Fatalf("CreateWorkspace onto a dying shim = %v, want the spawn_failed arm carrying a detail",
 			resp.Msg.GetResult())
 	}
-	// THE FAILED CREATE IS THEN REPORTED, ASYNCHRONOUSLY, to the repository's
-	// main-worktree workspace: the report is queued, and its revival dies by
-	// the same default profile, which the queue says at ERROR. Awaited rather
-	// than left to race the test's end: whether that record landed before the
-	// sweep used to decide the test's verdict.
-	d.RequireWarnings("daemon.promptqueue.submit")
 	d.AwaitWorkspaceLogRecord(repo.Dir, "the failed create's report's revival failing", func(r harness.LogRecord) bool {
 		return r.Operation == "daemon.promptqueue.submit" && r.Level == "error"
 	})

@@ -244,3 +244,33 @@ func TestRunOutErrorNamesItsBoundAndSpan(t *testing.T) {
 		t.Fatalf("Error() = %q (Is deadline %v), want %q", got, errors.Is(err, context.DeadlineExceeded), want)
 	}
 }
+
+func TestExplainAnswersTheCauseOfAParentCancelledWithOne(t *testing.T) {
+	cases := []struct {
+		name  string
+		child func(parent context.Context) (context.Context, context.CancelFunc)
+	}{
+		{name: "the cancelled context itself", child: func(p context.Context) (context.Context, context.CancelFunc) { return p, func() {} }},
+		{name: "a bound under it", child: func(p context.Context) (context.Context, context.CancelFunc) {
+			return withBoundOn(p, time.Hour, (&scriptedSource{reads: []reading{{}}}).now, (&scriptedSource{reads: []reading{{}}}).stall, make(chan time.Time))
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			parent, cancelCause := context.WithCancelCause(context.Background())
+			child, cancel := tc.child(parent)
+			defer cancel()
+			cause := errors.New("the daemon exited unasked")
+
+			// Act
+			cancelCause(cause)
+
+			// Assert
+			<-child.Done()
+			if got := Explain(child); !errors.Is(got, cause) {
+				t.Fatalf("Explain = %v, want the parent's cause %v", got, cause)
+			}
+		})
+	}
+}

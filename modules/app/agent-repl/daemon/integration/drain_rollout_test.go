@@ -262,7 +262,6 @@ func TestUpdateShutdownScheduleNowLeavesNoShimBehindThatIsStillBringingUp(t *tes
 	// Arrange: a shim that withholds its opening diagnostics, so OpenWorkspace
 	// blocks inside bring-up and the process reaches no session map.
 	f := newRegistered(t, harness.Opts{})
-	f.d.WriteShimProfile(f.repo.Dir, harness.ShimProfile{DelayDiagnostics: true})
 	// The daemon is stood down mid-bring-up on purpose; these are that act's
 	// own trail, on both sides of the abandoned spawn.
 	f.d.ExpectWarnings(
@@ -271,6 +270,7 @@ func TestUpdateShutdownScheduleNowLeavesNoShimBehindThatIsStillBringingUp(t *tes
 		"daemon.workspace.bring_up", "daemon.workspace.restart",
 		"daemon.health.session", "daemon.health.open_fault",
 	)
+	f.d.WriteShimProfile(f.repo.Dir, harness.ShimProfile{DelayDiagnostics: true})
 	// AN OPEN STARTS NO SHIM (owner ruling, 2026-10-28): the start under test
 	// is the restart's.
 	if opened, err := f.d.Client().OpenWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: f.ws})); err != nil || opened.Msg.GetSuccess() == nil {
@@ -399,8 +399,8 @@ func TestAScheduledDrainDoesNotWaitOnADetachedSubagentThatHasSettled(t *testing.
 	t.Parallel()
 	// Arrange: a live session with one detached subagent, settled.
 	f := newOpened(t, harness.Opts{})
-	expectSessionKillRecords(f.d)
 	f.d.ExpectWarnings("daemon.health.open_fault", "daemon.workspace.bring_up")
+	expectSessionKillRecords(f.d)
 	f.shim.ExpectStartSession()
 	footer := f.d.WatchFooter(f.ws)
 	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, ftSubagentSpawn("toolu-1", "toolu-1", "sweep the tree")))
@@ -439,6 +439,10 @@ func TestDuringADrainNewPromptsAreHeldWithTheShutdownHold(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
+	// The one submission held under the drain lease is the FIRST refusal the
+	// controller ever notes, which always fires its WARN immediately
+	// (internal/drain/refusals.go NoteRefusal: openedAt is zero).
+	f.d.ExpectWarnings("daemon.drain.refusal")
 	tray := f.d.WatchHolds(f.ws)
 	harness.AwaitNext(t, f.d.Ctx(), tray, "the empty tray")
 	if _, err := f.d.Client().UpdateShutdownSchedule(f.d.Ctx(), connect.NewRequest(&agentreplv1.UpdateShutdownScheduleRequest{
@@ -473,10 +477,6 @@ func TestDuringADrainNewPromptsAreHeldWithTheShutdownHold(t *testing.T) {
 	if held.GetShutdown().GetScheduleId() == "" {
 		t.Fatalf("held prompt's shutdown hold = %v, want a schedule id", held.GetShutdown())
 	}
-	// The one submission held under the drain lease is the FIRST refusal the
-	// controller ever notes, which always fires its WARN immediately
-	// (internal/drain/refusals.go NoteRefusal: openedAt is zero).
-	f.d.ExpectWarnings("daemon.drain.refusal")
 }
 
 // TestDrainRefusalLogsAreRateLimitedWithSuppressedAndTotalCounts is critique
@@ -991,6 +991,9 @@ func TestARestartAskedOfAMovedWorkspaceIsAnsweredTransferringAway(t *testing.T) 
 	t.Parallel()
 	// Arrange: a busy workspace, moved mid-turn.
 	selfRepo, d := drainSelfRepoDaemon(t)
+	// The standing refusal is recorded as the transport's unlanded arm, as
+	// every refusal of a workspace this daemon no longer serves is.
+	d.ExpectWarnings("daemon.refusal.unlanded_arm.standing")
 	f := drainOpenWorkspace(t, d)
 	f.shim.ExpectStartSession()
 	f.shim.ExpectWatchSession()
@@ -1016,9 +1019,6 @@ func TestARestartAskedOfAMovedWorkspaceIsAnsweredTransferringAway(t *testing.T) 
 	if got := f.shim.Count(harness.RPCKillTurn); got != 0 {
 		t.Fatalf("KillTurn was called %d time(s); the incumbent must not run a restart it has moved away", got)
 	}
-	// The standing refusal is recorded as the transport's unlanded arm, as
-	// every refusal of a workspace this daemon no longer serves is.
-	d.ExpectWarnings("daemon.refusal.unlanded_arm.standing")
 }
 
 func TestAnEarlyAdoptionCallDuringATurnAdoptsTheWorkspaceWithoutEndingIt(t *testing.T) {
@@ -1076,6 +1076,8 @@ func TestARefusedMidWorkAdoptionFallsBackToFreenessAndNamesTheHoldout(t *testing
 	selfRepo.DeploysAsAgentRepl()
 	d := harness.StartDaemon(t, harness.Opts{
 		DurableState: true,
+		// The holdout is named on the cadence at WARN, which is the subject.
+		ExpectWarnings: []string{"daemon.rollout.handover"},
 		ExtraEnv: []string{
 			harness.TestAllScriptEnv(script.Path),
 			"AGENT_REPL_HOLDOUT_WARN_EVERY=25ms",
@@ -1136,7 +1138,6 @@ func TestARefusedMidWorkAdoptionFallsBackToFreenessAndNamesTheHoldout(t *testing
 	if got := f.shim.Count(harness.RPCKillTurn); got != 0 {
 		t.Fatalf("KillTurn was called %d time(s); the fallback interrupts nothing", got)
 	}
-	d.ExpectWarnings("daemon.rollout.handover")
 }
 
 // namesHoldout reports whether a JSON-decoded holdout list names ws.
@@ -1202,8 +1203,8 @@ func TestASessionlessWorkspaceHandedOverDrawsItsFeedWithNoPrompt(t *testing.T) {
 	// Arrange: a headless workspace whose shim died twice before any turn
 	// ended, so the loop guard left its session down.
 	f := newRegistered(t, harness.Opts{DurableState: true, Timeout: harness.HandoverChainTimeout})
-	f.open()
 	f.d.RequireWarnings(append([]string{"daemon.promptqueue.revive"}, deadShimRecords...)...)
+	f.open()
 	f.shim.ExpectStartSession()
 	concludeFirstTurn(t, f)
 	killShim(t, f, f.shim)

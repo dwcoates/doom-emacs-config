@@ -346,12 +346,12 @@ func TestStartSessionResumeColdStandsAGateBlockingReopenUntilAnswered(t *testing
 	t.Parallel()
 	// Arrange: kill to get a resumable session, then script the resume as cold.
 	f := newOpened(t, harness.Opts{})
-	f.remoteControlOff()
 	// The sweep covers every test; the declared records are evidence of a KillSession the fake shim answers by exiting, a bring-up the test blocks or kills, a session fault the test opens, the shim death the test drives, the shim link the test severs.
 	f.d.ExpectWarnings("daemon.shimclient.redial", "daemon.sessionwatcher.reopen", "daemon.health.open_fault", "daemon.sessionwatcher.link_fault",
 		"daemon.sessionwatcher.watch_agent", "daemon.sessionwatcher.watch_session",
 		"daemon.shimclient.exit", "daemon.shimclient.kill_session", "daemon.workspace.bring_up",
 		"daemon.workspace.kill")
+	f.remoteControlOff()
 	f.shim.ExpectStartSession()
 	if _, err := f.d.Client().KillWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.KillWorkspaceRequest{Workspace: f.ws})); err != nil {
 		t.Fatalf("KillWorkspace = error %v, want a success", err)
@@ -437,12 +437,12 @@ func promptHeldAtTheGate(t *testing.T) heldAtTheGate {
 	t.Helper()
 	// Arrange: kill to get a resumable session, then script the resume as cold.
 	f := newOpened(t, harness.Opts{})
-	f.remoteControlOff()
 	// The sweep covers every test; the declared records are evidence of a KillSession the fake shim answers by exiting, a bring-up the test blocks or kills, a session fault the test opens, the shim death the test drives, the shim link the test severs.
 	f.d.ExpectWarnings("daemon.shimclient.redial", "daemon.sessionwatcher.reopen", "daemon.health.open_fault", "daemon.sessionwatcher.link_fault",
 		"daemon.sessionwatcher.watch_agent", "daemon.sessionwatcher.watch_session",
 		"daemon.shimclient.exit", "daemon.shimclient.kill_session", "daemon.workspace.bring_up",
 		"daemon.workspace.kill")
+	f.remoteControlOff()
 	f.shim.ExpectStartSession()
 	if _, err := f.d.Client().KillWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.KillWorkspaceRequest{Workspace: f.ws})); err != nil {
 		t.Fatalf("KillWorkspace = error %v, want a success", err)
@@ -529,12 +529,12 @@ func TestAnswerColdGateCompactEchoesExactly(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
-	f.remoteControlOff()
 	// The sweep covers every test; the declared records are evidence of a KillSession the fake shim answers by exiting, a bring-up the test blocks or kills, a session fault the test opens, the shim death the test drives, the shim link the test severs.
 	f.d.ExpectWarnings("daemon.shimclient.redial", "daemon.sessionwatcher.reopen", "daemon.health.open_fault", "daemon.sessionwatcher.link_fault",
 		"daemon.sessionwatcher.watch_agent", "daemon.sessionwatcher.watch_session",
 		"daemon.shimclient.exit", "daemon.shimclient.kill_session", "daemon.workspace.bring_up",
 		"daemon.workspace.kill")
+	f.remoteControlOff()
 	f.shim.ExpectStartSession()
 	if _, err := f.d.Client().KillWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.KillWorkspaceRequest{Workspace: f.ws})); err != nil {
 		t.Fatalf("KillWorkspace = error %v, want a success", err)
@@ -632,12 +632,12 @@ func TestAnswerColdGateRefusesAScopeTheMenuNeverServed(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
-	f.remoteControlOff()
 	// The sweep covers every test; the declared records are evidence of a KillSession the fake shim answers by exiting, a bring-up the test blocks or kills, a session fault the test opens, the shim death the test drives, the shim link the test severs.
 	f.d.ExpectWarnings("daemon.shimclient.redial", "daemon.sessionwatcher.reopen", "daemon.health.open_fault", "daemon.sessionwatcher.link_fault",
 		"daemon.sessionwatcher.watch_agent", "daemon.sessionwatcher.watch_session",
 		"daemon.shimclient.exit", "daemon.shimclient.kill_session", "daemon.workspace.bring_up",
 		"daemon.workspace.kill")
+	f.remoteControlOff()
 	f.shim.ExpectStartSession()
 	if _, err := f.d.Client().KillWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.KillWorkspaceRequest{Workspace: f.ws})); err != nil {
 		t.Fatalf("KillWorkspace = error %v, want a success", err)
@@ -895,6 +895,7 @@ func TestCloseWorkspaceBlockedCarriesTheQuietChecksEvidence(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
+	f.d.ExpectWarnings("daemon.workspace.close")
 	f.shim.ExpectStartSession()
 	f.submit("do the thing", "k-close-evidence", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 
@@ -909,7 +910,6 @@ func TestCloseWorkspaceBlockedCarriesTheQuietChecksEvidence(t *testing.T) {
 	if blocked == nil || !blocked.GetTurnInFlight() || blocked.GetSummary() == "" {
 		t.Fatalf("CloseWorkspaceBlocked = %v, want turn_in_flight true with a composed summary", blocked)
 	}
-	f.d.ExpectWarnings("daemon.workspace.close")
 }
 
 func TestNukeWorkspaceRemovesTheWorktreeAndBranchAndTheRow(t *testing.T) {
@@ -988,11 +988,8 @@ func TestRestartWorkspaceForcedInterruptsFirst(t *testing.T) {
 func TestHibernationParksAnIdleSessionAndRevivesOnPrompt(t *testing.T) {
 	t.Parallel()
 	// Arrange: a very short idle cutoff so hibernation fires promptly.
-	f := newOpened(t, harness.Opts{IdleCutoffMS: 50})
+	f := newOpened(t, harness.Opts{IdleCutoffMS: 50, ExpectWarnings: []string{"daemon.shimclient.redial", "daemon.sessionwatcher.reopen", "daemon.health.open_fault", "daemon.sessionwatcher.link_fault", "daemon.sessionwatcher.watch_agent", "daemon.sessionwatcher.watch_session", "daemon.shimclient.exit", "daemon.shimclient.kill_session", "daemon.workspace.bring_up"}})
 	// The sweep covers every test; the declared records are evidence of a KillSession the fake shim answers by exiting, a bring-up the test blocks or kills, a session fault the test opens, the shim death the test drives, the shim link the test severs.
-	f.d.ExpectWarnings("daemon.shimclient.redial", "daemon.sessionwatcher.reopen", "daemon.health.open_fault", "daemon.sessionwatcher.link_fault",
-		"daemon.sessionwatcher.watch_agent", "daemon.sessionwatcher.watch_session",
-		"daemon.shimclient.exit", "daemon.shimclient.kill_session", "daemon.workspace.bring_up")
 	// THE START IS READ FROM THE SHIM'S DURABLE LOG, never popped live. At a
 	// 50ms cutoff the sweep can hibernate the shim, which then exits, before
 	// this line runs, and a live pop then met a closed control socket
@@ -1057,15 +1054,15 @@ func TestABounceOfANeverTurnedSessionComesUpFresh(t *testing.T) {
 	// the mount bounces the shim — and the fake withholds the transcript until the
 	// first turn, exactly as the vendor does.
 	f := newRegistered(t, harness.Opts{ExtraEnv: []string{"FAKESHIM_BUILD_SHA=older-build"}})
-	f.d.WriteShimProfile(f.repo.Dir, harness.ShimProfile{NoTranscriptUntilTurn: true})
-	// The sweep covers every test; the declared records are evidence of the bounce's stand-down, the abandoned conversation the classifier records, and the shim death the bounce drives.
-	f.d.ExpectWorkspaceRestartWarnings()
 	f.d.ExpectWarnings("daemon.account.find_transcript",
 		"daemon.workspace.bring_up", "daemon.workspace.kill",
 		// The fake's replacement reports the SAME older build (its
 		// FAKESHIM_BUILD_SHA outlives the bounce), which the staleness judge
 		// names as a bounce that did not take.
 		"daemon.rollout.staleness")
+	// The sweep covers every test; the declared records are evidence of the bounce's stand-down, the abandoned conversation the classifier records, and the shim death the bounce drives.
+	f.d.ExpectWorkspaceRestartWarnings()
+	f.d.WriteShimProfile(f.repo.Dir, harness.ShimProfile{NoTranscriptUntilTurn: true})
 
 	// Act
 	if resp, err := f.startRaw(); err != nil || resp.GetSuccess() == nil {
@@ -1093,6 +1090,22 @@ func TestBuildStalenessBounceRelaunchesAStaleShimAtFreeness(t *testing.T) {
 	// Arrange: the fake reports a build that is not the installed bundle's, so
 	// the mount finds the session on an older build.
 	f := newRegistered(t, harness.Opts{ExtraEnv: []string{"FAKESHIM_BUILD_SHA=older-build"}})
+	// THE STAND-DOWN ITSELF IS SILENT NOW. What this list held for the two
+	// standing streams, the severed link and the fault behind it was the
+	// daemon recording its own act once per observer; every observer reads the
+	// shim client's stand-down latch instead, so a bounce this daemon ordered
+	// is an ordinary event on every side that sees it.
+	//
+	// WHAT REMAINS IS THE FAKE'S OWN VIOLENCE, and it is left loud on purpose:
+	// the fake shim EXITS while answering KillSession, so the rpc it was
+	// answering genuinely fails, the relaunch genuinely waits its window out
+	// before forcing, and the client's redial genuinely races the death. Those
+	// are failures, not the teardown.
+	f.d.ExpectWarnings("daemon.sessionwatcher.reopen", "daemon.rollout.relaunch",
+		"daemon.shimclient.kill_session", "daemon.shimclient.redial",
+		// The replacement reports the same older build, which the staleness
+		// judge names as a bounce that did not take -- and does not repeat.
+		"daemon.rollout.staleness")
 	if resp, err := f.startRaw(); err != nil || resp.GetSuccess() == nil {
 		t.Fatalf("the start = (%v, %v), want a success", resp, err)
 	}
@@ -1119,22 +1132,6 @@ func TestBuildStalenessBounceRelaunchesAStaleShimAtFreeness(t *testing.T) {
 	if got := f.d.WorkspaceLogOperationCount(f.repo.Dir, "daemon.shimclient.spawn"); got != spawns {
 		t.Fatalf("shim spawns = %d after a second mount, want the %d already made: the stamp was already bounced for", got, spawns)
 	}
-	// THE STAND-DOWN ITSELF IS SILENT NOW. What this list held for the two
-	// standing streams, the severed link and the fault behind it was the
-	// daemon recording its own act once per observer; every observer reads the
-	// shim client's stand-down latch instead, so a bounce this daemon ordered
-	// is an ordinary event on every side that sees it.
-	//
-	// WHAT REMAINS IS THE FAKE'S OWN VIOLENCE, and it is left loud on purpose:
-	// the fake shim EXITS while answering KillSession, so the rpc it was
-	// answering genuinely fails, the relaunch genuinely waits its window out
-	// before forcing, and the client's redial genuinely races the death. Those
-	// are failures, not the teardown.
-	f.d.ExpectWarnings("daemon.sessionwatcher.reopen", "daemon.rollout.relaunch",
-		"daemon.shimclient.kill_session", "daemon.shimclient.redial",
-		// The replacement reports the same older build, which the staleness
-		// judge names as a bounce that did not take -- and does not repeat.
-		"daemon.rollout.staleness")
 }
 
 func TestCrashBootAdoptsARunningShimWithoutASecondSpawn(t *testing.T) {
@@ -1195,7 +1192,13 @@ func TestCloseWorkspaceWithAHeldPromptRefuses(t *testing.T) {
 	// (no turn, no detached work) at that point, which is what lets
 	// closeBlocker (internal/workspace/open.go) reach its held_prompts branch
 	// instead of returning turn_in_flight first.
-	f := newOpened(t, harness.Opts{IdleCutoffMS: 50})
+	// The hibernation's own stand-down is loud by design, and the fake makes it
+	// louder: the fake shim EXITS on accepting KillSession, so the call it was
+	// answering fails, the client records the death, and each of the shim's two
+	// standing streams ends without the session ending. Every one of these is
+	// that one stand-down, honestly recorded once per observer -- the same set
+	// TestABuildStampBounceFiresOnceAndStandsTheOldShimDown declares.
+	f := newOpened(t, harness.Opts{IdleCutoffMS: 50, ExpectWarnings: []string{"daemon.sessionwatcher.reopen", "daemon.workspace.close", "daemon.shimclient.exit", "daemon.shimclient.kill_session", "daemon.shimclient.redial", "daemon.workspace.bring_up", "daemon.sessionwatcher.watch_session", "daemon.sessionwatcher.watch_agent", "daemon.sessionwatcher.link_fault", "daemon.health.open_fault"}})
 	// THE START IS READ FROM THE SHIM'S DURABLE LOG, never popped live. At a
 	// 50ms cutoff the sweep can hibernate the shim, which then exits, before
 	// this line runs, and a live pop then met a closed control socket
@@ -1245,17 +1248,6 @@ func TestCloseWorkspaceWithAHeldPromptRefuses(t *testing.T) {
 	if !strings.Contains(text, "held prompt") {
 		t.Fatalf("closing.blocked activity text = %q, want it to name the held-prompt cause", text)
 	}
-	// The hibernation's own stand-down is loud by design, and the fake makes it
-	// louder: the fake shim EXITS on accepting KillSession, so the call it was
-	// answering fails, the client records the death, and each of the shim's two
-	// standing streams ends without the session ending. Every one of these is
-	// that one stand-down, honestly recorded once per observer -- the same set
-	// TestABuildStampBounceFiresOnceAndStandsTheOldShimDown declares.
-	f.d.ExpectWarnings("daemon.sessionwatcher.reopen", "daemon.workspace.close",
-		"daemon.shimclient.exit", "daemon.shimclient.kill_session",
-		"daemon.shimclient.redial", "daemon.workspace.bring_up",
-		"daemon.sessionwatcher.watch_session", "daemon.sessionwatcher.watch_agent",
-		"daemon.sessionwatcher.link_fault", "daemon.health.open_fault")
 }
 
 func TestRestartWorkspaceReapsTheOldShimBeforeResumingOnTheNew(t *testing.T) {
@@ -1451,6 +1443,7 @@ func TestSessionStartedDetachedOriginLiveWorkWithNoKindIsAnErrorAndSkipped(t *te
 	// internal/sessionwatcher/route.go's resolveDetachedLocked refuses it at
 	// ERROR before any view takes it.
 	f := newRegistered(t, harness.Opts{})
+	f.d.ExpectWarnings("daemon.sessionwatcher.detached_kind_unknown")
 	unknown := &conversationv1.AgentDetachedWork{
 		Work: &conversationv1.DetachedWorkId{Value: "restored-detached-1"},
 		Origin: &conversationv1.AgentDetachedWork_Detached{Detached: &conversationv1.DetachedWorkDetached{
@@ -1469,7 +1462,6 @@ func TestSessionStartedDetachedOriginLiveWorkWithNoKindIsAnErrorAndSkipped(t *te
 	// restored live-work set settles at zero rather than crashing bring-up.
 	f.d.AwaitWorkspaceLogOperation(f.repo.Dir, "daemon.sessionwatcher.detached_kind_unknown")
 	awaitLiveWork(t, f, 0)
-	f.d.ExpectWarnings("daemon.sessionwatcher.detached_kind_unknown")
 }
 
 // ---- critique 17 (this agent's share): AnswerColdGate{clear} ----
@@ -1478,12 +1470,12 @@ func TestAnswerColdGateClearEchoesExactly(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
-	f.remoteControlOff()
 	// The sweep covers every test; the declared records are evidence of a KillSession the fake shim answers by exiting, a bring-up the test blocks or kills, a session fault the test opens, the shim death the test drives, the shim link the test severs.
 	f.d.ExpectWarnings("daemon.shimclient.redial", "daemon.sessionwatcher.reopen", "daemon.health.open_fault", "daemon.sessionwatcher.link_fault",
 		"daemon.sessionwatcher.watch_agent", "daemon.sessionwatcher.watch_session",
 		"daemon.shimclient.exit", "daemon.shimclient.kill_session", "daemon.workspace.bring_up",
 		"daemon.workspace.kill")
+	f.remoteControlOff()
 	f.shim.ExpectStartSession()
 	if _, err := f.d.Client().KillWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.KillWorkspaceRequest{Workspace: f.ws})); err != nil {
 		t.Fatalf("KillWorkspace = error %v, want a success", err)
@@ -1607,12 +1599,13 @@ func TestHibernateTransportFailureDefersTheStandDown(t *testing.T) {
 	// the workspace was already open, which raced the sweep at both ends: an
 	// early sweep hibernated for real before the first was filed, and a
 	// loaded run exhausted the twenty.
-	f := newOpenedWithProfile(t, harness.Opts{IdleCutoffMS: 50}, harness.ShimProfile{HibernateFailure: "transport blew up"})
-	f.shim.ExpectStartSession()
 	// The shim client records each refused call at ERROR of its own — that
 	// record IS the transport failure this test scripts — and the sweep then
-	// records the deferral.
-	f.d.ExpectWarnings("daemon.drain.sweep", "daemon.shimclient.hibernate")
+	// records the deferral. The sweep can fire before the fixture returns, so
+	// they are declared before the daemon starts.
+	f := newOpenedWithProfile(t, harness.Opts{IdleCutoffMS: 50, ExpectWarnings: []string{"daemon.drain.sweep", "daemon.shimclient.hibernate"}},
+		harness.ShimProfile{HibernateFailure: "transport blew up"})
+	f.shim.ExpectStartSession()
 
 	// Act: wait for the sweep to log the failed directive.
 	rec := f.d.AwaitLogRecord(harness.WorkspaceLogPath(f.repo.Dir, "daemon"),
@@ -1659,11 +1652,8 @@ func TestOpenWorkspaceOnAHibernatedRowSendsStartSessionResume(t *testing.T) {
 	t.Parallel()
 	// Arrange: hibernate the session via the idle sweep, then retire the
 	// daemon that had the cutoff armed.
-	f := newOpened(t, harness.Opts{DurableState: true, IdleCutoffMS: 50})
 	// The sweep covers every test; the declared records are evidence of a KillSession the fake shim answers by exiting, a bring-up the test blocks or kills, a session fault the test opens, the shim death the test drives, the shim link the test severs.
-	f.d.ExpectWarnings("daemon.shimclient.redial", "daemon.sessionwatcher.reopen", "daemon.health.open_fault", "daemon.sessionwatcher.link_fault",
-		"daemon.sessionwatcher.watch_agent", "daemon.sessionwatcher.watch_session",
-		"daemon.shimclient.exit", "daemon.shimclient.kill_session", "daemon.workspace.bring_up")
+	f := newOpened(t, harness.Opts{DurableState: true, IdleCutoffMS: 50, ExpectWarnings: []string{"daemon.shimclient.redial", "daemon.sessionwatcher.reopen", "daemon.health.open_fault", "daemon.sessionwatcher.link_fault", "daemon.sessionwatcher.watch_agent", "daemon.sessionwatcher.watch_session", "daemon.shimclient.exit", "daemon.shimclient.kill_session", "daemon.workspace.bring_up"}})
 	// THE START IS READ FROM THE SHIM'S DURABLE LOG, never popped live. At a
 	// 50ms cutoff the sweep can hibernate the shim, which then exits, before
 	// this line runs, and a live pop then met a closed control socket
@@ -1688,17 +1678,17 @@ func TestOpenWorkspaceOnAHibernatedRowSendsStartSessionResume(t *testing.T) {
 	// and the resume's transcript was filed under the incumbent's — a
 	// successor given new roots finds no transcript for the vendor session it
 	// is resuming, which is a different subject than this test's.
+	// The sweep covers every test; the declared records are evidence of a bring-up the test blocks or kills.
 	successor := harness.StartDaemon(t, harness.Opts{
-		DurableState: true,
-		StateDir:     f.d.StateDir,
+		ExpectWarnings: []string{"daemon.workspace.bring_up"},
+		DurableState:   true,
+		StateDir:       f.d.StateDir,
 		ExtraArgs: []string{
 			"--default-config-dir", f.d.DefaultConfigDir,
 			"--multi-repo-config-dir", f.d.MultiRepoConfigDir,
 		},
 		ExtraEnv: []string{"AGENT_REPL_LOCK_DIR=" + f.d.LockDir},
 	})
-	// The sweep covers every test; the declared records are evidence of a bring-up the test blocks or kills.
-	successor.ExpectWarnings("daemon.workspace.bring_up")
 	harness.OpenAndStart(t, successor, f.ws)
 	// The request is read from the fake's DURABLE log, which spans both shims
 	// and both daemons; the wait names the RESUME because the Arrange's own
@@ -1741,9 +1731,8 @@ func TestOpenWorkspaceOnATerminallyDeletedSessionAnswersSessionDeleted(t *testin
 	f.d.CorruptRow("sessions", "terminal_kind", "workspace_id", f.ws.GetId(), "deleted")
 
 	// Act: restart on the same state root and reopen.
-	successor := harness.StartDaemon(t, harness.Opts{StateDir: f.d.StateDir, ExtraEnv: []string{"AGENT_REPL_LOCK_DIR=" + f.d.LockDir}})
 	// The sweep covers every test; the declared records are evidence of a bring-up the test blocks or kills.
-	successor.ExpectWarnings("daemon.workspace.restart")
+	successor := harness.StartDaemon(t, harness.Opts{ExpectWarnings: []string{"daemon.workspace.restart"}, StateDir: f.d.StateDir, ExtraEnv: []string{"AGENT_REPL_LOCK_DIR=" + f.d.LockDir}})
 	if opened, err := successor.Client().OpenWorkspace(successor.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: f.ws})); err != nil || opened.Msg.GetSuccess() == nil {
 		t.Fatalf("OpenWorkspace = (%v, %v), want a success: an open starts nothing to refuse", opened, err)
 	}
@@ -1784,12 +1773,12 @@ func TestAnAnsweredGateWhoseReopenFailsStandsAgain(t *testing.T) {
 	// Arrange: stand a cold gate, whose shim is stood down, and script the
 	// shim its answer spawns to refuse the remediated resume.
 	f := newOpened(t, harness.Opts{})
-	f.remoteControlOff()
 	// The sweep covers every test; the declared records are evidence of a KillSession the fake shim answers by exiting, a bring-up the test blocks or kills, a session fault the test opens, the shim death the test drives, the shim link the test severs.
 	f.d.ExpectWarnings("daemon.shimclient.redial", "daemon.sessionwatcher.reopen", "daemon.health.open_fault", "daemon.sessionwatcher.link_fault",
 		"daemon.sessionwatcher.watch_agent", "daemon.sessionwatcher.watch_session",
 		"daemon.shimclient.exit", "daemon.shimclient.kill_session", "daemon.workspace.bring_up",
 		"daemon.workspace.kill")
+	f.remoteControlOff()
 	f.shim.ExpectStartSession()
 	if _, err := f.d.Client().KillWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.KillWorkspaceRequest{Workspace: f.ws})); err != nil {
 		t.Fatalf("KillWorkspace = error %v, want a success", err)
@@ -2056,11 +2045,8 @@ func TestARestartBringsUpAWorkspaceWhoseVendorWasRejected(t *testing.T) {
 func TestAParkedRowIsIdleOnEveryRosterResolvedAfterTheHibernationRecord(t *testing.T) {
 	t.Parallel()
 	// Arrange: a very short idle cutoff so hibernation fires promptly.
-	f := newOpened(t, harness.Opts{IdleCutoffMS: 50})
+	f := newOpened(t, harness.Opts{IdleCutoffMS: 50, ExpectWarnings: []string{"daemon.shimclient.redial", "daemon.sessionwatcher.reopen", "daemon.health.open_fault", "daemon.sessionwatcher.link_fault", "daemon.sessionwatcher.watch_agent", "daemon.sessionwatcher.watch_session", "daemon.shimclient.exit", "daemon.shimclient.kill_session", "daemon.workspace.bring_up"}})
 	// The sweep covers every test; the declared records are evidence of a KillSession the fake shim answers by exiting, a bring-up the test blocks or kills, a session fault the test opens, the shim death the test drives, the shim link the test severs.
-	f.d.ExpectWarnings("daemon.shimclient.redial", "daemon.sessionwatcher.reopen", "daemon.health.open_fault", "daemon.sessionwatcher.link_fault",
-		"daemon.sessionwatcher.watch_agent", "daemon.sessionwatcher.watch_session",
-		"daemon.shimclient.exit", "daemon.shimclient.kill_session", "daemon.workspace.bring_up")
 	// THE START IS READ FROM THE SHIM'S DURABLE LOG, never popped live. At a
 	// 50ms cutoff the sweep can hibernate the shim, which then exits, before
 	// this line runs, and a live pop then met a closed control socket
@@ -2108,11 +2094,8 @@ func TestAParkedRowIsIdleOnEveryRosterResolvedAfterTheHibernationRecord(t *testi
 func TestAParkedWorkspaceKeepsAnOpenComposerOnItsHostView(t *testing.T) {
 	t.Parallel()
 	// Arrange: a very short idle cutoff so hibernation fires promptly.
-	f := newOpened(t, harness.Opts{IdleCutoffMS: 50})
+	f := newOpened(t, harness.Opts{IdleCutoffMS: 50, ExpectWarnings: []string{"daemon.shimclient.redial", "daemon.sessionwatcher.reopen", "daemon.health.open_fault", "daemon.sessionwatcher.link_fault", "daemon.sessionwatcher.watch_agent", "daemon.sessionwatcher.watch_session", "daemon.shimclient.exit", "daemon.shimclient.kill_session", "daemon.workspace.bring_up"}})
 	// The sweep covers every test; the declared records are evidence of a KillSession the fake shim answers by exiting, a bring-up the test blocks or kills, a session fault the test opens, the shim death the test drives, the shim link the test severs.
-	f.d.ExpectWarnings("daemon.shimclient.redial", "daemon.sessionwatcher.reopen", "daemon.health.open_fault", "daemon.sessionwatcher.link_fault",
-		"daemon.sessionwatcher.watch_agent", "daemon.sessionwatcher.watch_session",
-		"daemon.shimclient.exit", "daemon.shimclient.kill_session", "daemon.workspace.bring_up")
 	// THE START IS READ FROM THE SHIM'S DURABLE LOG, never popped live. At a
 	// 50ms cutoff the sweep can hibernate the shim, which then exits, before
 	// this line runs, and a live pop then met a closed control socket
@@ -2172,11 +2155,8 @@ func TestAParkedWorkspaceKeepsAnOpenComposerOnItsHostView(t *testing.T) {
 func TestAParkedWorkspacesFooterIsIdleAndTheIndicatorReportsNoFault(t *testing.T) {
 	t.Parallel()
 	// Arrange: a very short idle cutoff so hibernation fires promptly.
-	f := newOpened(t, harness.Opts{IdleCutoffMS: 50})
+	f := newOpened(t, harness.Opts{IdleCutoffMS: 50, ExpectWarnings: []string{"daemon.shimclient.redial", "daemon.sessionwatcher.reopen", "daemon.health.open_fault", "daemon.sessionwatcher.link_fault", "daemon.sessionwatcher.watch_agent", "daemon.sessionwatcher.watch_session", "daemon.shimclient.exit", "daemon.shimclient.kill_session", "daemon.workspace.bring_up"}})
 	// The sweep covers every test; the declared records are evidence of a KillSession the fake shim answers by exiting, a bring-up the test blocks or kills, a session fault the test opens, the shim death the test drives, the shim link the test severs.
-	f.d.ExpectWarnings("daemon.shimclient.redial", "daemon.sessionwatcher.reopen", "daemon.health.open_fault", "daemon.sessionwatcher.link_fault",
-		"daemon.sessionwatcher.watch_agent", "daemon.sessionwatcher.watch_session",
-		"daemon.shimclient.exit", "daemon.shimclient.kill_session", "daemon.workspace.bring_up")
 	// THE START IS READ FROM THE SHIM'S DURABLE LOG, never popped live. At a
 	// 50ms cutoff the sweep can hibernate the shim, which then exits, before
 	// this line runs, and a live pop then met a closed control socket

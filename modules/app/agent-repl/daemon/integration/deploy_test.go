@@ -332,12 +332,12 @@ func TestADeployWhoseBuildFailsStandsAsAFaultOnTheFooter(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
+	f.d.ExpectWarnings("daemon.scriptrunner.run", "daemon.deploy.build", "daemon.deploy.run")
 	footer := f.d.WatchFooter(f.ws)
 	awaitFooter(t, f, footer, "the footer after readiness", func(v *frontendv1.FooterView) bool {
 		return v.GetStrip().GetStatus().GetIdle() != nil
 	})
 	f.d.StageDeployBuild(harness.DeployFails)
-	f.d.ExpectWarnings("daemon.scriptrunner.run", "daemon.deploy.build", "daemon.deploy.run")
 
 	// Act
 	resp, err := f.d.Client().Deploy(f.d.Ctx(), connect.NewRequest(&agentreplv1.DeployRequest{}))
@@ -358,9 +358,9 @@ func TestALaterDeployThatBuildsTakesTheFaultDown(t *testing.T) {
 	t.Parallel()
 	// Arrange: a failed deploy's fault stands on the strip.
 	f := newOpened(t, harness.Opts{})
+	f.d.ExpectWarnings("daemon.scriptrunner.run", "daemon.deploy.build", "daemon.deploy.run")
 	footer := f.d.WatchFooter(f.ws)
 	f.d.StageDeployBuild(harness.DeployFails)
-	f.d.ExpectWarnings("daemon.scriptrunner.run", "daemon.deploy.build", "daemon.deploy.run")
 	if _, err := f.d.Client().Deploy(f.d.Ctx(), connect.NewRequest(&agentreplv1.DeployRequest{})); err != nil {
 		t.Fatalf("Deploy = error %v, want the typed refusal", err)
 	}
@@ -483,10 +483,9 @@ func failDeploy(t *testing.T, d *harness.Daemon) {
 func TestACLIStartedDeployWhoseBuildFailsReachesEmacs(t *testing.T) {
 	t.Parallel()
 	// Arrange: an Emacs holds the daemon stream, and the deploy is the CLI's.
-	d := harness.StartDaemon(t, harness.Opts{})
+	d := harness.StartDaemon(t, harness.Opts{ExpectWarnings: []string{"daemon.scriptrunner.run", "daemon.deploy.build", "daemon.deploy.run"}})
 	emacs := d.WatchDaemonStream()
 	d.StageDeployBuild(harness.DeployFails)
-	d.ExpectWarnings("daemon.scriptrunner.run", "daemon.deploy.build", "daemon.deploy.run")
 	ctx, cancel := d.WaitCtx()
 	defer cancel()
 	cli := exec.CommandContext(ctx, harness.DaemonBinary(t), "deploy", "-state-dir", d.StateDir)

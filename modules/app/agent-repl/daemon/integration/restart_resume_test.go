@@ -23,10 +23,9 @@ func cutAndReopen(t *testing.T) (*fixture, *harness.ShimControl) {
 	f.submit("do the long thing", "k-cut", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	f.shim.ExpectStartTurn()
 	shutdownNow(t, f.d)
-	f.d = harness.StartDaemon(t, harness.Opts{StateDir: f.d.StateDir})
 	// The fake shim writes no vendor transcript, so the successor's resume
 	// finds none and says so; a real session's transcript is on disk.
-	f.d.ExpectWarnings("daemon.workspace.bring_up")
+	f.d = harness.StartDaemon(t, harness.Opts{StateDir: f.d.StateDir, ExpectWarnings: []string{"daemon.workspace.bring_up"}})
 	resp, err := f.d.Client().OpenWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: f.ws}))
 	if err != nil || resp.Msg.GetSuccess() == nil {
 		t.Fatalf("OpenWorkspace on the successor = (%v, %v), want a success", resp, err)
@@ -52,8 +51,7 @@ func cutByCrashAndReopen(t *testing.T) (*fixture, *harness.ShimControl) {
 		t.Fatalf("kill the fake shim %d: %v", pid, err)
 	}
 	harness.AwaitProcessGone(t, f.d.Ctx(), pid)
-	f.d = harness.StartDaemon(t, harness.Opts{StateDir: f.d.StateDir})
-	f.d.ExpectWarnings("daemon.workspace.bring_up", "daemon.promptqueue.restore_holds")
+	f.d = harness.StartDaemon(t, harness.Opts{StateDir: f.d.StateDir, ExpectWarnings: []string{"daemon.workspace.bring_up", "daemon.promptqueue.restore_holds"}})
 	resp, err := f.d.Client().OpenWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: f.ws}))
 	if err != nil || resp.Msg.GetSuccess() == nil {
 		t.Fatalf("OpenWorkspace on the successor = (%v, %v), want a success", resp, err)

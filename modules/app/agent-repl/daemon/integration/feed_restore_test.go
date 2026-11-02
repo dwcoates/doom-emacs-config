@@ -22,19 +22,21 @@ import (
 // newest page reaches its reader the moment a shim comes up.
 
 // restartedWith restarts a freshly opened workspace (restarted) onto a book
-// holding the relaunch fixture's turn: a prompt and its settled answer.
-func restartedWith(t *testing.T, profile harness.ShimProfile) *fixture {
+// holding the relaunch fixture's turn: a prompt and its settled answer. EXPECT
+// are the warnings the successor writes as it boots (harness.Opts.ExpectWarnings).
+func restartedWith(t *testing.T, profile harness.ShimProfile, expect ...string) *fixture {
 	t.Helper()
 	profile.ResumeHistory = harness.EncodeHistory(t, relaunchAnswerEntry(), relaunchPromptEntry())
-	return restarted(newOpened(t, harness.Opts{DurableState: true}), profile)
+	return restarted(newOpened(t, harness.Opts{DurableState: true}), profile, expect...)
 }
 
 // restarted stops a fixture's daemon, writes the shim profile its successor's
 // bring-up spawns the shim under — the book it resumes is the profile's own
 // ResumeHistory — and boots the successor on the same state and account
 // roots, answering the successor's fixture with the workspace announced and
-// both client hops held. A fixture restarted is restartable again.
-func restarted(f *fixture, profile harness.ShimProfile) *fixture {
+// both client hops held. A fixture restarted is restartable again. EXPECT are
+// the warnings the successor writes as it boots (harness.Opts.ExpectWarnings).
+func restarted(f *fixture, profile harness.ShimProfile, expect ...string) *fixture {
 	t := f.t
 	t.Helper()
 	expectSessionKillRecords(f.d)
@@ -51,7 +53,9 @@ func restarted(f *fixture, profile harness.ShimProfile) *fixture {
 	// it, and the store holds the book before any shim of it is up.
 	f.d.WriteShimProfile(f.repo.Dir, profile)
 	f.d.KeepResumedBook(f.ws.GetId(), profile)
-	d2 := harness.StartDaemon(t, f.d.SuccessorOpts())
+	opts := f.d.SuccessorOpts()
+	opts.ExpectWarnings = expect
+	d2 := harness.StartDaemon(t, opts)
 	// THE SUCCESSOR RUNS ON ITS PREDECESSOR'S ACCOUNT ROOT — the flag above
 	// overrides the one the harness minted for it — so its fixture names that
 	// root, and a further restart hands the same one on. Naming the minted one
@@ -148,9 +152,9 @@ func TestARestartedWorkspaceWhoseVendorStartFailedOpensWithItsConversation(t *te
 	t.Parallel()
 	// Arrange: the vendor start is rejected; its shim stays held with no
 	// session, and the reader opens once the failure is recorded.
-	f := restartedWith(t, harness.ShimProfile{VendorStartFailed: "invalid api key"})
-	// The sweep covers every test; the declared records are evidence of the rejection the test scripts.
-	f.d.ExpectWarnings("daemon.workspace.bring_up", "daemon.boot.bring_up")
+	// The sweep covers every test; the declared records are evidence of the
+	// rejection the test scripts, which the successor's boot writes.
+	f := restartedWith(t, harness.ShimProfile{VendorStartFailed: "invalid api key"}, "daemon.workspace.bring_up", "daemon.boot.bring_up")
 	f.d.AwaitWorkspaceLogRecord(f.ws.GetDir(), "the failed start's shim held with no session", func(r harness.LogRecord) bool {
 		return r.PID == f.d.PID() && r.Message == "the failed start's shim stays held with no session; the next start reuses it"
 	})

@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"syscall"
+	"unsafe"
 
 	"golang.org/x/sys/unix"
 )
@@ -68,6 +70,37 @@ func (e *exitEvent) await(ctx context.Context) error {
 }
 
 // close releases the pidfd.
+// takeEndEvent is takeExitEvent for a child of this process; on linux every
+// pidfd's process can be asked how it ended (endOf).
+func takeEndEvent(pid int) (*exitEvent, error) { return takeExitEvent(pid) }
+
+// endOf answers how the exited process of the event ended, read with waitid's
+// WNOWAIT so the process stays unreaped for its owner's own reap.
+func (e *exitEvent) endOf(pid int) (ProcessEnd, error) {
+	var info unix.Siginfo
+	if err := unix.Waitid(unix.P_PIDFD, e.fd, &info, unix.WEXITED|unix.WNOWAIT, nil); err != nil {
+		return ProcessEnd{}, fmt.Errorf("waitid %d: %w", pid, err)
+	}
+	// si_status follows si_pid and si_uid in the SIGCHLD arm of the union,
+	// 24 bytes into the struct on every 64-bit linux.
+	status := int(*(*int32)(unsafe.Add(unsafe.Pointer(&info), 24)))
+	switch info.Code {
+	case cldExited:
+		return ProcessEnd{Code: status}, nil
+	case cldKilled, cldDumped:
+		return ProcessEnd{Signal: syscall.Signal(status)}, nil
+	}
+	return ProcessEnd{}, fmt.Errorf("waitid %d answered si_code %d, which is no exit", pid, info.Code)
+}
+
+// The SIGCHLD si_code values (asm-generic/siginfo.h) waitid answers for an
+// exited child.
+const (
+	cldExited = 1
+	cldKilled = 2
+	cldDumped = 3
+)
+
 func (e *exitEvent) close() {
 	unix.Close(e.fd)
 }

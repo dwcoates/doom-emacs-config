@@ -1301,7 +1301,7 @@ run.
 
 - Table-driven tests, AAA (Arrange/Act/Assert), ONE edge case per test
   function, one `_test.go` per source file.
-- NEVER `time.Sleep` for synchronization. The cycle is driven in tests by
+- Synchronization is the `agent-repl-tests` skill, "Synchronization: events, never time". The cycle is driven in tests by
   calling its steps against an injected clock (`sidecar.now`, `sidecar.jitter`,
   `sidecar.bootTimeMs`), never by waiting on a real one.
 - The fake store is an in-process `storev1connect` handler on a SHORT unix
@@ -1314,7 +1314,7 @@ run.
   mtime) must be stamped on the harness clock with `os.Chtimes`.
 - The integration suite exercises the LOST arms through the window flags above
   (`integration/lost_policy_test.go`), with every wait a bounded receive on a
-  real signal — a cursor advance, a store read, a log line — never a sleep.
+  real signal: a cursor advance, a store read, a log line.
 - A coverage run of the suite (`agent-repld test run -suite sidecar -coverage`)
   reports per-function and aggregate statement coverage for this module; it is
   available for a review pass, never a gate.

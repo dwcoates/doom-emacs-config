@@ -78,10 +78,7 @@ func TestAColdStartedDaemonHandsOverTheSessionsItBroughtUp(t *testing.T) {
 
 			// Arrange: a second daemon COLD-STARTS on the same state root and
 			// brings the session up with nobody re-registering the workspace.
-			selfRepo, cold := coldStartSelfRepoDaemon(t, first)
-			if len(tt.coldWarnings) > 0 {
-				cold.ExpectWarnings(tt.coldWarnings...)
-			}
+			selfRepo, cold := coldStartSelfRepoDaemon(t, first, tt.coldWarnings...)
 			// THE BOOT'S OWN BRING-UP IS THE BARRIER: its session-up record,
 			// by the cold daemon. An open starts and waits on nothing (owner
 			// ruling, 2026-10-28), so it can no longer stand in.
@@ -137,7 +134,8 @@ func TestAColdStartedDaemonHandsOverTheSessionsItBroughtUp(t *testing.T) {
 // and shim profiles -- the same machine, restarted -- whose OWN checkout is a
 // fresh fake repository with a passing test gate, so a landing on it fires the
 // self-merge handover. See drainSelfRepoDaemon for the gate and the timeout.
-func coldStartSelfRepoDaemon(t *testing.T, first *harness.Daemon) (*harness.Repo, *harness.Daemon) {
+// EXPECT are the warnings it writes as it boots (harness.Opts.ExpectWarnings).
+func coldStartSelfRepoDaemon(t *testing.T, first *harness.Daemon, expect ...string) (*harness.Repo, *harness.Daemon) {
 	t.Helper()
 	selfRepo := harness.NewRepo(t)
 	script := harness.NewTestAllScript(t, selfRepo.Dir)
@@ -147,6 +145,7 @@ func coldStartSelfRepoDaemon(t *testing.T, first *harness.Daemon) (*harness.Repo
 	selfRepo.DeploysAsAgentRepl()
 	opts.ExtraEnv = []string{harness.TestAllScriptEnv(script.Path)}
 	opts.Timeout = harness.HandoverChainTimeout
+	opts.ExpectWarnings = expect
 	d := harness.StartDaemon(t, opts)
 	return selfRepo, d
 }

@@ -1317,9 +1317,8 @@ whole module end to end over a socket).
 
 - Go tests are table-driven, AAA, one edge case per test function, one
   `_test.go` per source file.
-- **Never `time.Sleep` for synchronization.** Use channels, `sync.WaitGroup`,
-  contexts, or a real signal — a Connect stream delivering a frame is a
-  legitimate primitive. `internal/server`'s fake `Store` gates `LinesSince`,
+- Synchronization is the `agent-repl-tests` skill, "Synchronization: events, never time"; a Connect stream delivering a frame is a
+  legitimate event. `internal/server`'s fake `Store` gates `LinesSince`,
   which is entered strictly after the handler subscribes; that gate is how the
   replay-to-live handoff, buffer overflow and shutdown paths are driven
   deterministically.

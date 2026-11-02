@@ -93,7 +93,7 @@ func AwaitView[T any](t testing.TB, ctx context.Context, s *Stream[T], what stri
 		select {
 		case v, ok := <-s.C:
 			if !ok {
-				t.Fatalf("stream ended before %s: %v", what, s.Err())
+				t.Fatalf("stream ended before %s: %v%s", what, s.Err(), endCause(ctx))
 				return zero
 			}
 			if pred(v) {
@@ -104,6 +104,16 @@ func AwaitView[T any](t testing.TB, ctx context.Context, s *Stream[T], what stri
 			return zero
 		}
 	}
+}
+
+// endCause names, for a stream that ended under a wait, why the wait's
+// context ended if it has: a fault latch (fault.go) ends the stream's context
+// with its cause, which the stream's own error does not carry.
+func endCause(ctx context.Context) string {
+	if why := grantedclock.Explain(ctx); why != nil {
+		return "; the wait's context ended: " + why.Error()
+	}
+	return ""
 }
 
 // SessionServes reports whether a host push states the workspace's session

@@ -143,6 +143,104 @@ for "waiting for CPU" (the run's events carry `waiting_for_cpu` and
 - Why (owner ruling, 2026-10-31): the merge gate runs every e2e test side by side under the host's 35% CPU cap; tests that pass alone failed there waiting on a CPU inside their 5-6s bounds (in the 72h before 2026-10-31, `TestEmacsTabsRehydrateFromTheRosterOnConnect` failed 8 gate runs and `TestEmacsKillCloseLeavesTheTabOrderAlone` 6, across unrelated merges). Scenarios cap the concurrent worlds at the number of scenarios. The owner accepted "god tests" for this.
 - Layout and how a step reruns: `e2e/AGENTS.md`, "Every world-building test is a step of a scenario".
 
+## Synchronization: events, never time
+
+A flaky test is a test whose verdict depends on timing. Owner ruling,
+2026-11-02: the suites carry none. Every rule below applies to test code and
+to every harness, fake and fixture a test uses, in every language.
+
+### No sleep stands in for an event
+
+- A test waits for the EVENT it needs: a channel receive, a `sync.WaitGroup`,
+  a mutex or condition variable, a process exit, a line on an inherited pipe,
+  a stream frame, a promise or deferred the fake resolves, a log record.
+- NEVER `time.Sleep`, `setTimeout(r, ms)`, `sleep-for`/`sit-for`, a timed
+  `accept-process-output`, or shell `sleep N` to let something happen first.
+  A sleep that passes today fails under the gate's load tomorrow.
+- A sleep loop is a sleep: polling a condition every few milliseconds is
+  allowed only when no event exists, and then the poll obeys the fault latch
+  rule below.
+- A fixture that must report something (a pid, its readiness, that it
+  trapped a signal) reports it over a pipe the test reads, never through a
+  file the test polls for.
+- A fake whose call a test awaits signals the call (a channel, a resolved
+  deferred), so the test never polls a recorder.
+- Time itself is the subject only through a fake clock: Go's injected
+  `clock`/`now`, vitest fake timers, ERT's stubbed `current-time`. A
+  `setTimeout(r, 0)` flush is a sleep too when the work it waits for is not
+  one macrotask; await that work's own promise.
+- A negative assertion ("X never happens") is not a window of time: order it
+  against a later positive event that the system emits only after X would
+  have happened.
+
+### A wait fails at its dependency's failure, not at its bound
+
+- Every process a harness spawns (the daemon, a shim, the store, the sidecar,
+  Emacs, a fake daemon, Xvfb) has ONE FAULT LATCH, owned by the harness that
+  spawned it. The latch closes, with its cause, the moment the process:
+  - exits when nobody asked it to,
+  - writes a record that would fail the test anyway (an ERROR, or a WARN the
+    test did not declare with `ExpectWarnings`),
+  - reports that it could not start (its boot refusal, its readiness error).
+- Every wait selects on the latches of the processes it depends on, beside
+  its event and its bound. The test then fails at that instant, naming the
+  dependency's own record and its stderr or log tail, instead of failing
+  seconds later with "never satisfied".
+- A test declares what it provokes BEFORE it provokes it, since a record
+  written before its declaration closes the latch. In the daemon harness:
+  - a boot's warnings go in `harness.Opts.ExpectWarnings`, never in an
+    `ExpectWarnings` call after `StartDaemon` returns (the daemon writes them
+    while it boots, as does a fixture with a short `IdleCutoffMS`);
+  - a mid-life warning is declared right after its daemon is made, before
+    the act that writes it;
+  - a failing exit that is the subject is declared with
+    `Daemon.ExpectFailedExit` (or `Opts.ExpectEarlyExit` for a refused
+    boot); `Daemon.AwaitExit` itself is never ended by the exit it awaits;
+  - a test whose subject is its own undeclared warnings (a sweep test, a
+    golden's regeneration) calls `Daemon.SweepIsTheSubject`, which stands its
+    record latch aside while its cleanup sweep still judges every record.
+- A dependency that initializes asynchronously reports its failed boot at
+  once (its exit, its refusal record), and the harness's readiness wait ends
+  on that report. A readiness wait that only times out is a defect.
+- A failed call inside a polled form is a failure, not a value: a poll that
+  gets an error back from the thing it asks (an elisp signal, a refused rpc,
+  a 4xx from a fake) fails with that error unless the test declared the
+  error an expected intermediate state.
+- The bound stays, as the FALLBACK for a hang that writes nothing and does
+  not exit. It is sized by AGENTS.md "Every timeout is sized deliberately",
+  on the granted clock where the harness has one. A timeout is never the
+  main channel a failure has.
+- Shared wait primitives own this, so a test cannot forget it: the daemon
+  integration harness's `Await*` family, the e2e `AwaitEval`/`AwaitView`
+  helpers, ERT's `agent-repl-itest--wait-until`, and the vitest harness waits.
+  A new wait goes through one of them, or adds the latch to its own select;
+  a wait loop hand-rolled without the latch is refused.
+
+### A resource that is not the subject is built once
+
+- A test builds fresh only what it tests. A dependency that is not the
+  subject (the fake git, a compiled fake, Xvfb, a Doom boot, the store and
+  sidecar under a daemon test, a copied fixture tree, a module re-import) is
+  built ONCE per test process (`TestMain`, `sync.Once`, `testenv.ProgramOr`,
+  `harness.Suite()`, a vitest `globalSetup`) and each case takes its own
+  slice of it: a hard link, a key prefix, a fresh workspace, a fresh buffer.
+- One of our own systems that IS the subject (the daemon in a daemon test, a
+  shim in a shim test) may be started per case; a second start in one case
+  needs a reason the case states (a restart, a handover, a crash).
+- What a case may share is ruled by AGENTS.md "A case may share an expensive
+  fixture, never a slice another case reads".
+
+### Finding and fixing a flake
+
+- Gate history is the first evidence: every gate archive is under
+  `~/.claude-emacs/merge-logs/`; a test that failed across unrelated
+  branches, or failed one round and passed the next, is a flake.
+- Reproduce with `agent-repld test run ... -runs N` on just that test; never
+  under added load unless the user asks.
+- The fix removes the timing dependency at its source: production first when
+  the race is in the product, the harness when the test read an intermediate
+  state. Raising a bound, adding a retry, or rerunning is refused.
+
 ## The rules this builds on
 
 They are owned elsewhere; read them, do not restate them:
@@ -152,8 +250,7 @@ They are owned elsewhere; read them, do not restate them:
   slot.
 - `daemon/AGENTS.md`, `webapp/AGENTS.md`, `lisp/AGENTS.md`,
   `agent-shim/*/AGENTS.md`: each suite's exact test and lint invocations.
-- Go: no `time.Sleep` for synchronization (channels, `sync.WaitGroup`);
-  table-driven tests in Arrange/Act/Assert.
+- Go: table-driven tests in Arrange/Act/Assert.
 - No real git in any test (the fake git); mock external dependencies only.
   Owner approval, 2026-10-12: the daemon's TEST logs and TEST state may live
   in memory (the in-memory state seam; the log pipe was tried and rejected,
@@ -219,6 +316,11 @@ coverage impact (always none).
     - Fix: 113 world-building top-level tests became 12 scenarios whose steps run in order (`e2e/scenarios_test.go`); the gate reruns a failed step alone by its path (daemon/internal/merge/failingtests.go `deepest`, testrun gotest.PathsPatterns).
     - Measured (2026-10-31, solo): the Go e2e chunk 21.3s -> 16.3s wall; the Emacs layer's `go test` 64.2s -> 74.3s, its longest scenario (`TestEmacsWorkspaces`) 40.9s.
     - Coverage impact: none; every former test runs whole as a step, its body unchanged but for its `t.Parallel()`.
+
+13. **A wait that learns of its dependency's failure only from its bound.**
+    - Evidence: every flake in the merge gates from 2026-10-30 to 2026-11-02 was a wait running out its bound while its dependency had already failed: a page that hung on a Vite chunk cycle and never drew (`TestEmacsKillCloseLeavesTheTabOrderAlone`, 5 branches; `TestEmacsTabsRehydrateFromTheRosterOnConnect`, 4), a registration refused in silence (`TestDoom/*`, 4 steps at 5s each), a successor that closed the gap a test meant to read (`TestHandoverTransfersAFreeWorkspaceThroughTheAdoptionRendezvous`, 2). Each read as "slow under load" (docs/investigations/2026-11-02-flaky-tests.md).
+    - Fix: the fault latch (see "Synchronization: events, never time"); the dependency's failure ends the wait with its own record.
+    - Coverage impact: none; a wait that fails sooner asserts the same thing.
 
 ## Changes that LOOK faster and are refused
 

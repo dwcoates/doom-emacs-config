@@ -73,8 +73,8 @@ func TestARetryOfAnUndeliveredSubmissionIsDeliveredNotRefused(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
-	f.shim.AnswerFailure(harness.RPCStartTurn, "the vendor never took the turn")
 	f.d.ExpectWarnings("daemon.promptqueue.deliver", "daemon.shimclient.start_turn", "SubmitPrompt")
+	f.shim.AnswerFailure(harness.RPCStartTurn, "the vendor never took the turn")
 	if err := f.submitExpectingError(&agentreplv1.SubmitPromptRequest{
 		Workspace: f.ws, Said: said("do the thing"), IdempotencyKey: "retried-key", Origin: origin,
 	}); err == nil {
@@ -101,8 +101,8 @@ func TestARetryOfAnUndeliveredSubmissionRestartsTheSameTurn(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
-	f.shim.AnswerFailure(harness.RPCStartTurn, "the vendor never took the turn")
 	f.d.ExpectWarnings("daemon.promptqueue.deliver", "daemon.shimclient.start_turn", "SubmitPrompt")
+	f.shim.AnswerFailure(harness.RPCStartTurn, "the vendor never took the turn")
 	if err := f.submitExpectingError(&agentreplv1.SubmitPromptRequest{
 		Workspace: f.ws, Said: said("do the thing"), IdempotencyKey: "retried-key", Origin: origin,
 	}); err == nil {
@@ -332,6 +332,7 @@ func TestAPromptHeldBehindAnUninterruptibleContextCutSkipsClassifyingAndRefusesR
 	// Arrange: /clear runs as the turn in front, marking it uninterruptible
 	// (internal/promptqueue/acts.go's runContextCut).
 	f := newOpened(t, harness.Opts{})
+	f.d.ExpectWarnings("daemon.promptqueue.release")
 	cutResp := f.submit("/clear", "k-clear-running", origin)
 	if cutResp.GetError() != nil {
 		t.Fatalf("SubmitPrompt(/clear) = %v, want a success", cutResp)
@@ -341,7 +342,6 @@ func TestAPromptHeldBehindAnUninterruptibleContextCutSkipsClassifyingAndRefusesR
 	awaitView(t, f, holds, "the initial empty tray", func(tray *frontendv1.FeedHeld) bool {
 		return len(tray.GetItems()) == 0
 	})
-	f.d.ExpectWarnings("daemon.promptqueue.release")
 
 	// Act: a follow-up prompt arrives while the cut is running.
 	resp2 := f.submit("a follow-up behind the cut", "k-behind-cut", origin)
@@ -407,7 +407,12 @@ func TestARevivalTimeHeldPromptCarriesTheReconnectHoldAndRefusesRelease(t *testi
 	// Arrange: hibernate an idle session, then submit a revival prompt while
 	// the revival's new shim withholds its diagnostics, so the lease is still
 	// held when the assertions run.
-	f := newOpened(t, harness.Opts{IdleCutoffMS: 50})
+	// The hibernation stands the old shim down: the kill does not answer, the
+	// client records the death, both standing streams end without the session
+	// ending, and the lost link is recorded as the session's own fault. Every
+	// one of these is that one stand-down, honestly recorded once per observer
+	// -- the same set TestCloseWorkspaceWithAHeldPromptRefuses declares.
+	f := newOpened(t, harness.Opts{IdleCutoffMS: 50, ExpectWarnings: []string{"daemon.sessionwatcher.reopen", "daemon.promptqueue.release", "daemon.shimclient.exit", "daemon.shimclient.kill_session", "daemon.shimclient.redial", "daemon.workspace.bring_up", "daemon.sessionwatcher.watch_session", "daemon.sessionwatcher.watch_agent", "daemon.sessionwatcher.link_fault", "daemon.health.open_fault"}})
 	// THE START IS READ FROM THE SHIM'S DURABLE LOG, never popped live. At a
 	// 50ms cutoff the sweep can hibernate the shim, which then exits, before
 	// this line runs, and a live pop then met a closed control socket
@@ -418,16 +423,6 @@ func TestARevivalTimeHeldPromptCarriesTheReconnectHoldAndRefusesRelease(t *testi
 	f.shim.AwaitGone()
 	f.d.WriteShimProfile(f.repo.Dir, harness.ShimProfile{DelayDiagnostics: true})
 	holds := f.d.WatchHolds(f.ws)
-	// The hibernation stands the old shim down: the kill does not answer, the
-	// client records the death, both standing streams end without the session
-	// ending, and the lost link is recorded as the session's own fault. Every
-	// one of these is that one stand-down, honestly recorded once per observer
-	// -- the same set TestCloseWorkspaceWithAHeldPromptRefuses declares.
-	f.d.ExpectWarnings("daemon.sessionwatcher.reopen", "daemon.promptqueue.release",
-		"daemon.shimclient.exit", "daemon.shimclient.kill_session",
-		"daemon.shimclient.redial", "daemon.workspace.bring_up",
-		"daemon.sessionwatcher.watch_session", "daemon.sessionwatcher.watch_agent",
-		"daemon.sessionwatcher.link_fault", "daemon.health.open_fault")
 
 	held := f.submit("wake up", "k-session-starting-hold", origin)
 	turn := held.GetSuccess().GetTurn().GetTurn()
@@ -496,9 +491,8 @@ func TestUpdateHeldPromptDropRemovesTheEntryDurablyAcrossADaemonRestart(t *testi
 	})
 
 	// Act: restart the daemon on the same state root.
-	nd := promptRestartDaemon(t, f)
 	// The sweep covers every test; the declared records are evidence of the in-flight turn the restart orphans.
-	nd.ExpectWarnings("daemon.promptqueue.restore_holds")
+	nd := promptRestartDaemon(t, f, "daemon.promptqueue.restore_holds")
 
 	// Assert: still gone.
 	newHolds := nd.WatchHolds(f.ws)
@@ -557,9 +551,8 @@ func TestAHeldPromptSurvivesADaemonRestart(t *testing.T) {
 	turn2 := resp2.GetSuccess().GetTurn().GetTurn()
 
 	// Act
-	nd := promptRestartDaemon(t, f)
 	// The sweep covers every test; the declared records are evidence of the in-flight turn the restart orphans.
-	nd.ExpectWarnings("daemon.promptqueue.restore_holds")
+	nd := promptRestartDaemon(t, f, "daemon.promptqueue.restore_holds")
 
 	// Assert
 	holds := nd.WatchHolds(f.ws)
@@ -611,10 +604,8 @@ func TestACorruptedHeldPromptRowFailsBootLoudlyWithExactlyOneRestoreError(t *tes
 	// Act: corrupt ONE row's `said` column with bytes that cannot decode as a
 	// UserSaid, and restart on the same state root.
 	f.d.CorruptRow("held_prompts", "said", "turn_id", turn2.GetValue(), []byte("not a protobuf blob"))
-	nd := harness.StartDaemon(t, harness.Opts{StateDir: f.d.StateDir, ExpectEarlyExit: true})
 	// The sweep covers every test; the declared records are evidence of the in-flight turn the restart orphans, the state row the test corrupts.
-	nd.ExpectWarnings("daemon.boot.restore_holds", "daemon.promptqueue.restore_holds",
-		"daemon.wsm.all_held_prompts")
+	nd := harness.StartDaemon(t, harness.Opts{ExpectWarnings: []string{"daemon.boot.restore_holds", "daemon.promptqueue.restore_holds", "daemon.wsm.all_held_prompts"}, StateDir: f.d.StateDir, ExpectEarlyExit: true})
 	code := nd.AwaitExit()
 
 	// Assert: the boot refuses loudly.
@@ -652,14 +643,14 @@ func TestAFailedInterjectRevertsToHoldForTurnEndAndFifoOrder(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
-	f.submit("start the long task", "k-running", origin)
-	f.shim.ExpectStartTurn()
-	footer := f.d.WatchFooter(f.ws)
-	holds := f.d.WatchHolds(f.ws)
 	// internal/promptqueue/classify.go's stripJump logs the refused interject
 	// at WARN under opInterject, and the refused shim call is recorded by the
 	// client that made it — the refusal IS the scenario.
 	f.d.ExpectWarnings("daemon.promptqueue.interject", "daemon.shimclient.kill_turn")
+	f.submit("start the long task", "k-running", origin)
+	f.shim.ExpectStartTurn()
+	footer := f.d.WatchFooter(f.ws)
+	holds := f.d.WatchHolds(f.ws)
 
 	// Act: the interjecting prompt's KillTurn is refused by the shim.
 	f.shim.AnswerFailure(harness.RPCKillTurn, "the vendor refused the kill")
@@ -834,6 +825,9 @@ func TestASecondSubmitWhileATurnRunsOnTheSameAgentThroughTheBubblePathAnswersThe
 	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
+	// The queue records the shim's refusal of the delivery it attempted; the
+	// refusal is an ANSWER to the caller and the record is its evidence.
+	f.d.ExpectWarnings("daemon.promptqueue.deliver")
 	feed := f.watchRootFeed()
 	f.shim.PushAgentFrame(mainAgent, detachedWorkFrame(mainAgent, detachedSubagent("work-1", "sub-1", "reviewing the diff")))
 	row := awaitRow(t, f, feed, "the subagent bubble row", func(r *frontendv1.FeedRow) bool {
@@ -872,9 +866,6 @@ func TestASecondSubmitWhileATurnRunsOnTheSameAgentThroughTheBubblePathAnswersThe
 	if refused.GetDetail() == "" {
 		t.Fatalf("bubble_refused.detail is empty, want the shim's own words as evidence")
 	}
-	// The queue records the shim's refusal of the delivery it attempted; the
-	// refusal is an ANSWER to the caller and the record is its evidence.
-	f.d.ExpectWarnings("daemon.promptqueue.deliver")
 }
 
 // ---------------------------------------------------------------------------
@@ -1241,6 +1232,9 @@ func TestResendingInterruptWithConfirmAgentsStopsThem(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
+	// The first, unconfirmed interrupt is refused at WARN while detached work
+	// is live.
+	f.d.ExpectWarnings("daemon.workspace.interrupt")
 	f.submit("start the work", "k-running", origin)
 	f.shim.ExpectStartTurn()
 	f.shim.PushAgentFrame(mainAgent, detachedWorkFrame(mainAgent, detachedSubagent("work-1", "sub-1", "reviewing the diff")))
@@ -1257,7 +1251,6 @@ func TestResendingInterruptWithConfirmAgentsStopsThem(t *testing.T) {
 	if first.Msg.GetError().GetConfirmRequired() == nil {
 		t.Fatalf("the first Interrupt{turn} = (%v), want confirm_required to set up the challenge", first.Msg)
 	}
-	f.d.ExpectWarnings("daemon.workspace.interrupt")
 
 	// Act
 	_, err = f.d.Client().Interrupt(f.d.Ctx(), connect.NewRequest(&agentreplv1.InterruptRequest{
@@ -1719,11 +1712,12 @@ func TestADisplacedTurnIsCapturedAtLeaseAcquisitionAndResubmittedExactlyOnceAtRe
 
 // promptRestartDaemon stops the fixture's daemon and starts a fresh one on
 // the same state root (so wsm.db, and this test's fake-git world, persist),
-// updating the fixture's own daemon in place.
-func promptRestartDaemon(t *testing.T, f *fixture) *harness.Daemon {
+// updating the fixture's own daemon in place. EXPECT are the warnings the new
+// daemon writes as it boots (harness.Opts.ExpectWarnings).
+func promptRestartDaemon(t *testing.T, f *fixture, expect ...string) *harness.Daemon {
 	t.Helper()
 	f.d.Stop()
-	nd := harness.StartDaemon(t, harness.Opts{StateDir: f.d.StateDir})
+	nd := harness.StartDaemon(t, harness.Opts{StateDir: f.d.StateDir, ExpectWarnings: expect})
 	f.d = nd
 	return nd
 }
@@ -1814,9 +1808,8 @@ func TestADeferredHoldSurvivesADaemonRestartStillDeferred(t *testing.T) {
 	turn := f.submitDeferred("run the tests afterwards", "k-deferred").GetSuccess().GetTurn().GetTurn()
 
 	// Act
-	nd := promptRestartDaemon(t, f)
 	// The sweep covers every test; the declared records are evidence of the in-flight turn the restart orphans.
-	nd.ExpectWarnings("daemon.promptqueue.restore_holds")
+	nd := promptRestartDaemon(t, f, "daemon.promptqueue.restore_holds")
 
 	// Assert
 	holds := nd.WatchHolds(f.ws)

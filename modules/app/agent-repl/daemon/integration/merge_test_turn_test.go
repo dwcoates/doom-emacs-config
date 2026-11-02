@@ -142,8 +142,8 @@ func TestTwoMergesOfARepositoryAlternateTheTestTurnAndTheirGatesNeverOverlap(t *
 	gate := newTurnGate(t)
 	repo.DeploysAsAgentRepl()
 	d := harness.StartDaemon(t, harness.Opts{DurableState: true, Timeout: harness.MergeChainTimeout,
-		ExtraEnv: []string{harness.TestAllScriptEnv(gate.path)}})
-	d.ExpectWarnings("daemon.merge.tests", "daemon.scriptrunner.run")
+		ExpectWarnings: []string{"daemon.merge.tests", "daemon.scriptrunner.run"},
+		ExtraEnv:       []string{harness.TestAllScriptEnv(gate.path)}})
 	repoRef := mergeRepositoryRef(t, d, repo)
 	a := mergeCreateChild(t, d, repoRef, "alpha", "the first work", nil)
 	b := mergeCreateChild(t, d, repoRef, "beta", "the second work", nil)

@@ -665,8 +665,8 @@ func testADetachedSubagentWhoseProcessDiedIsNotLiveAfterAColdBoot(t *testing.T) 
 	opts := first.SuccessorOpts(t)
 	opts.ExtraArgs = []string{"--default-config-dir", first.DefaultConfigDir}
 	opts.Timeout = AdoptionChainTimeout
+	opts.ExpectWarnings = []string{"daemon.rollout.reconcile"}
 	successor := harness.StartDaemon(t, opts)
-	successor.ExpectWarnings("daemon.rollout.reconcile")
 
 	// Assert: the replayed bubble is drawn, and not as running...
 	bubble := adAwaitReplayedFeedRow(t, successor, ws,

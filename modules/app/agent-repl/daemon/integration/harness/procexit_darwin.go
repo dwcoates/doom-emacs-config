@@ -26,17 +26,37 @@ const unregisteredExitSeen = false
 // registration, held from takeExitEvent until close.
 type exitEvent struct {
 	kq int
+	// data is the exit event's filter data once await has seen it: the wait
+	// status when the registration asked NOTE_EXITSTATUS (takeEndEvent).
+	data int64
 }
 
 // takeExitEvent registers for pid's exit, answering nil (and no error) for a
 // process the kernel refuses the registration for (ESRCH: one that has begun
 // exiting, or is gone).
 func takeExitEvent(pid int) (*exitEvent, error) {
+	return registerExitEvent(pid, unix.NOTE_EXIT)
+}
+
+// takeEndEvent is takeExitEvent for a CHILD of this process, whose event also
+// carries its wait status (NOTE_EXITSTATUS, valid only on a child): how it
+// ended can be read without reaping it.
+func takeEndEvent(pid int) (*exitEvent, error) {
+	return registerExitEvent(pid, unix.NOTE_EXIT|unix.NOTE_EXITSTATUS)
+}
+
+// endOf answers how the process of an event awaited from takeEndEvent ended.
+func (e *exitEvent) endOf(int) (ProcessEnd, error) {
+	return processEndOf(syscall.WaitStatus(e.data)), nil
+}
+
+// registerExitEvent registers pid's exit, with FFLAGS, on a fresh queue.
+func registerExitEvent(pid int, fflags uint32) (*exitEvent, error) {
 	kq, err := newExitQueue()
 	if err != nil {
 		return nil, err
 	}
-	change := unix.Kevent_t{Ident: uint64(pid), Filter: unix.EVFILT_PROC, Flags: unix.EV_ADD | unix.EV_ONESHOT, Fflags: unix.NOTE_EXIT}
+	change := unix.Kevent_t{Ident: uint64(pid), Filter: unix.EVFILT_PROC, Flags: unix.EV_ADD | unix.EV_ONESHOT, Fflags: fflags}
 	if _, err := unix.Kevent(kq, []unix.Kevent_t{change}, nil, nil); err != nil {
 		unix.Close(kq)
 		if errors.Is(err, unix.ESRCH) {
@@ -75,6 +95,7 @@ func (e *exitEvent) await(ctx context.Context) error {
 		if events[0].Filter == unix.EVFILT_USER {
 			return ctx.Err()
 		}
+		e.data = events[0].Data
 		return nil
 	}
 }

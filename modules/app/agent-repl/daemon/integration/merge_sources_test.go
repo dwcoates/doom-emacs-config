@@ -492,6 +492,7 @@ func TestARelaunchedDaemonReplaysARepairTurnInItsTabAlone(t *testing.T) {
 	// session resolves (the repair turn under test), and whose second it gives
 	// up on, so the merge FAILS and the requester stays open and served.
 	s := newSourcedRepo(t)
+	s.d.ExpectWarnings("daemon.gitclient.merge_no_ff")
 
 	root := s.f.watchRootFeed()
 	harness.CommitWork(t, s.f.ws.GetDir(), "work.txt")
@@ -500,7 +501,6 @@ func TestARelaunchedDaemonReplaysARepairTurnInItsTabAlone(t *testing.T) {
 	branch := mergeBranchOf(t, s.f.ws)
 	s.repo.ScriptRebaseConflict(branch, 1, "work.txt")
 	s.repo.ScriptRebaseConflict(branch, 2, "more.txt")
-	s.d.ExpectWarnings("daemon.gitclient.merge_no_ff")
 	s.finish(t)
 	req := s.f.shim.ExpectStartTurn()
 	s.d.AwaitWorkspaceLogOperationCount(s.f.ws.GetDir(), harness.OpTurnOpened, 2)

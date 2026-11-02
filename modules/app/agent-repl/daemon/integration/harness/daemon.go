@@ -408,6 +408,11 @@ type Opts struct {
 	// ExpectEarlyExit stops the harness from failing when the daemon exits on
 	// its own, for the tests whose subject is a refusal to boot.
 	ExpectEarlyExit bool
+	// ExpectWarnings declares, BEFORE the process starts, the operations whose
+	// WARN or ERROR records the daemon is meant to write: Daemon.ExpectWarnings
+	// for the records a daemon writes while it boots, which would close its
+	// record latch (fault.go) before StartDaemon returned.
+	ExpectWarnings []string
 	// ExtraArgs and ExtraEnv are appended verbatim.
 	ExtraArgs []string
 	ExtraEnv  []string
@@ -502,6 +507,9 @@ type Daemon struct {
 	// expectedFor are the operations ExpectWarningsFor licensed for one
 	// workspace's records only, keyed by the workspace's directory forms.
 	expectedFor map[string]map[string]bool
+	// sweepIsTheSubject stands this sweeper's record latch aside
+	// (SweepIsTheSubject, fault.go).
+	sweepIsTheSubject bool
 	// view is whether this Daemon is a View of a process another fixture
 	// owns; claims are the workspace directory forms the view answers for.
 	view   bool
@@ -513,11 +521,21 @@ type Daemon struct {
 	*daemonProc
 }
 
+// newDaemonProc is the one way a daemonProc is made: the process's state
+// with its fault latch (fault.go) and its shims' registry, over CMD (nil
+// until StartDaemon has started the process).
+func newDaemonProc(cmd *exec.Cmd) *daemonProc {
+	return &daemonProc{cmd: cmd, shims: map[string]*ShimControl{}, fault: newProcessFault()}
+}
+
 // daemonProc is the state of one daemon PROCESS, shared by everything that
 // names it. Its mu also guards the per-test expectation maps on Daemon, so one
 // lock orders every read and write the sweep makes.
 type daemonProc struct {
-	cmd        *exec.Cmd
+	cmd *exec.Cmd
+	// fault is the process latch every wait on this process selects on
+	// (fault.go).
+	fault      *processFault
 	stderrPath string
 	// afterGroupStopped, when set, runs inside Kill between the group's
 	// SIGSTOP and the leader's SIGKILL: the instant at which the harness's own
@@ -689,7 +707,7 @@ func StartDaemon(t testing.TB, opts Opts) *Daemon {
 		t:                  t,
 		expected:           map[string]bool{},
 		required:           map[string]bool{},
-		daemonProc:         &daemonProc{shims: map[string]*ShimControl{}},
+		daemonProc:         newDaemonProc(nil),
 	}
 	if opts.DefaultSettings != "" {
 		writeFile(t, filepath.Join(d.DefaultConfigDir, "settings.json"), opts.DefaultSettings)
@@ -799,7 +817,13 @@ func StartDaemon(t testing.TB, opts Opts) *Daemon {
 	// (grantedBound), so a host with no CPU to give this daemon never reads
 	// as the daemon's failure.
 	requireGrantedClock(t)
-	ctx, cancel := grantedclock.WithBound(context.Background(), timeout*runBudgetWaits)
+	// The run budget is a child of the fault latches (fault.go): the daemon's
+	// unasked exit, or a record its test did not declare, ends every wait.
+	if opts.ExpectEarlyExit {
+		d.ExpectFailedExit()
+	}
+	d.ExpectWarnings(opts.ExpectWarnings...)
+	ctx, cancel := grantedclock.WithBound(d.watchRecords(t, d.fault.ctx), timeout*runBudgetWaits)
 	t.Cleanup(cancel)
 	d.ctx = ctx
 
@@ -963,6 +987,7 @@ func StartDaemon(t testing.TB, opts Opts) *Daemon {
 		t.Fatalf("harness: start daemon: %v", err)
 	}
 	d.cmd = cmd
+	d.watchProcessEnd(t)
 	// EVERY DEPLOY THIS DAEMON RUNS IS A NO-OP unless the test stages another:
 	// the builds it states are the ones running.
 	d.StageDeployBuild(DeployCurrent)
@@ -1152,6 +1177,7 @@ func (d *Daemon) dumpOnStall(bound time.Duration) string {
 		return "the daemon was already reaped; no goroutine dump"
 	}
 	pid := d.cmd.Process.Pid
+	d.fault.ask()
 	err := syscall.Kill(pid, syscall.SIGQUIT)
 	d.sigMu.Unlock()
 	if errors.Is(err, syscall.ESRCH) {
@@ -1303,6 +1329,7 @@ func (d *Daemon) gracefulStopForCoverage() {
 		return
 	}
 	d.sigMu.Lock()
+	d.fault.ask()
 	sent := !d.reapBegun && d.cmd.Process.Signal(syscall.SIGTERM) == nil
 	d.sigMu.Unlock()
 	if !sent {
@@ -1416,6 +1443,7 @@ func (d *Daemon) killGroup() bool {
 		return false
 	}
 	pgid := d.cmd.Process.Pid
+	d.fault.ask()
 	if !d.signalGroup(pgid, syscall.SIGSTOP) {
 		return false
 	}
@@ -1812,6 +1840,7 @@ func (d *Daemon) signal(sig syscall.Signal) {
 	if d.reapBegun {
 		return
 	}
+	d.fault.ask()
 	if err := d.cmd.Process.Signal(sig); err != nil && !errors.Is(err, os.ErrProcessDone) {
 		d.t.Fatalf("harness: signal %v: %v", sig, err)
 	}
@@ -1891,9 +1920,13 @@ func isZombie(pid int) bool {
 
 // AwaitExit waits for the process to leave and answers its exit status,
 // failing the test if it outlives ONE wait's bound.
+//
+// ITS BOUND IS NOT UNDER THE PROCESS LATCH (fault.go): the exit is what it
+// waits for, so the latch closing on that same exit must never end it before
+// the exit status is read. The test judges the status itself.
 func (d *Daemon) AwaitExit() int {
 	d.t.Helper()
-	wait, cancelWait := d.waitCtx()
+	wait, cancelWait := grantedclock.WithBound(context.Background(), d.waitBound)
 	defer cancelWait()
 	done := make(chan int, 1)
 	go func() { done <- d.Wait() }()
@@ -1901,7 +1934,7 @@ func (d *Daemon) AwaitExit() int {
 	case code := <-done:
 		return code
 	case <-wait.Done():
-		d.t.Fatalf("daemon did not exit: %v\nstderr:\n%s", wait.Err(), d.Stderr())
+		d.t.Fatalf("daemon did not exit: %v\nstderr:\n%s", grantedclock.Explain(wait), d.Stderr())
 		return -1
 	}
 }

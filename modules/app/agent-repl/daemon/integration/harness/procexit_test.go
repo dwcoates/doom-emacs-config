@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -165,5 +166,87 @@ func TestAwakenOnEndReleaseAwaitsARunningWake(t *testing.T) {
 	// Assert
 	if !finished {
 		t.Fatalf("release() returned while the wake was still running")
+	}
+}
+
+func TestAwaitProcessEndReadsHowAChildEndedWithoutReapingIt(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+		kill bool
+		want ProcessEnd
+	}{
+		{name: "an exit code", args: []string{"-c", "exit 3"}, want: ProcessEnd{Code: 3}},
+		{name: "a clean exit", args: []string{"-c", "exit 0"}, want: ProcessEnd{}},
+		{name: "a kill", args: []string{"-c", "exec cat"}, kill: true, want: ProcessEnd{Signal: syscall.SIGKILL}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: the child holds its stdin open until the end is
+			// registered, so it cannot exit before the watch is taken.
+			cmd := exec.Command("/bin/sh", append(tc.args[:1:1], "read _; "+tc.args[1])...)
+			stdin, err := cmd.StdinPipe()
+			if err != nil {
+				t.Fatalf("stdin: %v", err)
+			}
+			if err := cmd.Start(); err != nil {
+				t.Fatalf("start: %v", err)
+			}
+			t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
+			ctx, cancel := context.WithTimeout(context.Background(), DefaultTimeout)
+			defer cancel()
+			type ended struct {
+				end ProcessEnd
+				err error
+			}
+			got := make(chan ended, 1)
+			ev, err := takeEndEvent(cmd.Process.Pid)
+			if err != nil || ev == nil {
+				t.Fatalf("takeEndEvent = (%v, %v), want an event", ev, err)
+			}
+			go func() {
+				defer ev.close()
+				if err := ev.await(ctx); err != nil {
+					got <- ended{err: err}
+					return
+				}
+				end, err := ev.endOf(cmd.Process.Pid)
+				got <- ended{end, err}
+			}()
+
+			// Act
+			if tc.kill {
+				if err := cmd.Process.Kill(); err != nil {
+					t.Fatalf("kill: %v", err)
+				}
+			} else {
+				_ = stdin.Close()
+			}
+			res := <-got
+
+			// Assert
+			if res.err != nil || res.end != tc.want {
+				t.Fatalf("end = (%v, %v), want %v", res.end, res.err, tc.want)
+			}
+			if !isZombie(cmd.Process.Pid) {
+				t.Fatalf("pid %d is no longer an unreaped zombie: reading its end reaped it", cmd.Process.Pid)
+			}
+		})
+	}
+}
+
+func TestAwaitProcessEndRefusesAProcessAlreadyReaped(t *testing.T) {
+	// Arrange
+	cmd := exec.Command("/bin/sh", "-c", "exit 0")
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	// Act
+	_, err := AwaitProcessEnd(context.Background(), cmd.Process.Pid)
+
+	// Assert
+	if !errors.Is(err, errEndUnwatchable) {
+		t.Fatalf("AwaitProcessEnd of a reaped pid = %v, want errEndUnwatchable", err)
 	}
 }
