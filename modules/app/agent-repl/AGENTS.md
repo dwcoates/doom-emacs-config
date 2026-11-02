@@ -3142,7 +3142,11 @@ hibernation. `docs/developer/shim-lifecycle.md` is the reference for when a
 shim runs.
 A WORKSPACE AT ITS COLD GATE RUNS NO SHIM until the user answers the gate: the
 gate is recorded and raised from the record, and only the answer spawns a shim
-(daemon/AGENTS.md "A workspace at its cold gate runs no shim").
+(daemon/AGENTS.md "A workspace at its cold gate runs no shim"). The one
+exception is a workspace whose remote control is on, which keeps one shim
+holding the parked conversation's Remote Control bridge, so a prompt typed on
+claude.ai reaches it and answers the gate pay (owner ruling, 2026-11-02;
+`docs/developer/remote-control.md`, "A parked workspace").
 A BOOT OR A DEPLOY BRINGS BACK ONLY THE SHIMS THAT WERE UP when the last
 daemon stopped (`bringup.OnlyWasUp`), hidden or not: the session record states
 each workspace's shim at every park and unpark, and nothing else decides.

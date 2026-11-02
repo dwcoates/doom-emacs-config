@@ -128,6 +128,11 @@ A shim judges a cold gate once, at a start. The fleet records it in
 raised from the record with no shim, at every start, the boot's included. Only
 an answer spawns the shim its resume runs through. See `coldgaterecord.go`.
 
+A workspace whose remote control is on is the exception (owner ruling,
+2026-11-02): its gate keeps one shim holding the parked conversation's Remote
+Control bridge, so claude.ai can still reach it. See `remote-control.md`, "A
+parked workspace", and `parkedbridge.go`.
+
 ## Keep-alives
 
 The daemon drives every keep-alive (owner ruling, 2026-10-26). A shim runs no
