@@ -7632,3 +7632,58 @@ the page read."
         (insert-file-contents (expand-file-name file dir))
         (should (save-excursion (search-forward "(agent-repl-serial-send" nil t)))
         (should-not (re-search-forward "in-flight nil$" nil t))))))
+
+;;;; ---- Tests: completion reads that tune ivy ----
+
+(defvar agent-repl-test-core--ivy-alist nil
+  "Stands in for one of ivy's per-caller alists, which batch tests never load.")
+
+(ert-deftest agent-repl-test-core-completing-read-under-ivy-heads-the-alist ()
+  "Under ivy the entry is the alist's `t' entry, ahead of ivy's, for the read."
+  ;; Arrange
+  (let ((agent-repl-test-core--ivy-alist '((t . ivy-own)))
+        (seen nil))
+    (cl-letf (((symbol-function 'completing-read)
+               (lambda (&rest args)
+                 (setq seen (cons args agent-repl-test-core--ivy-alist))
+                 "one")))
+      ;; Act
+      (should (equal (agent-repl--completing-read-under-ivy
+                      'agent-repl-test-core--ivy-alist 'mine "p: " 'table)
+                     "one"))
+      ;; Assert
+      (should (equal (car seen) '("p: " table nil t)))
+      (should (equal (cdr seen) '((t . mine) (t . ivy-own)))))))
+
+(ert-deftest agent-repl-test-core-completing-read-under-ivy-restores-the-alist ()
+  "The entry is gone once the read returns."
+  ;; Arrange
+  (let ((agent-repl-test-core--ivy-alist '((t . ivy-own))))
+    (cl-letf (((symbol-function 'completing-read) (lambda (&rest _) "one")))
+      ;; Act
+      (agent-repl--completing-read-under-ivy 'agent-repl-test-core--ivy-alist 'mine "p: " 'table))
+    ;; Assert
+    (should (equal agent-repl-test-core--ivy-alist '((t . ivy-own))))))
+
+(ert-deftest agent-repl-test-core-completing-read-under-ivy-without-ivy ()
+  "An alist ivy has not defined is a plain read that leaves it unbound."
+  ;; Arrange
+  (let ((alist (make-symbol "ivy-undefined-alist"))
+        (args nil))
+    (cl-letf (((symbol-function 'completing-read)
+               (lambda (&rest a) (setq args a) "one")))
+      ;; Act
+      (should (equal (agent-repl--completing-read-under-ivy alist 'mine "p: " 'table) "one"))
+      ;; Assert
+      (should (equal args '("p: " table nil t)))
+      (should-not (boundp alist)))))
+
+(ert-deftest agent-repl-test-core-ivy-tuned-reads-share-the-helper ()
+  "Every read that tunes an ivy alist goes through the one helper.
+A hand-rolled `let' of an ivy alist around a read would drift from it."
+  (let ((dir (file-name-directory (symbol-file 'agent-repl--completing-read-under-ivy 'defun))))
+    (dolist (file '("commands.el"))
+      (with-temp-buffer
+        (insert-file-contents (expand-file-name file dir))
+        (should (save-excursion (search-forward "(agent-repl--completing-read-under-ivy" nil t)))
+        (should-not (re-search-forward "(let\\*? ((ivy-[a-z-]+-alist" nil t))))))

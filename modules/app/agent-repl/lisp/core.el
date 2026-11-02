@@ -3285,6 +3285,21 @@ side never spell the same span two ways."
      ((< seconds 86400) (format "%dh ago" (/ seconds 3600)))
      (t (format "%dd ago" (/ seconds 86400))))))
 
+;;;; ---- Completion reads that tune ivy ----
+
+(defun agent-repl--completing-read-under-ivy (alist entry prompt table)
+  "Read a match from TABLE at PROMPT, ENTRY heading ivy's ALIST for the read.
+ALIST is the symbol of one of ivy's per-caller alists
+\(`ivy-sort-matches-functions-alist', `ivy-format-functions-alist'), and
+ENTRY becomes its `t' entry, ahead of ivy's own, for this read alone.
+Every other UI reads a plain `completing-read'.  Binding the variable
+before ivy defines it would leave it void once the read returns, so its
+being bound is the test."
+  (if (boundp alist)
+      (cl-progv (list alist) (list (cons (cons t entry) (symbol-value alist)))
+        (completing-read prompt table nil t))
+    (completing-read prompt table nil t)))
+
 ;;;; ---- User-facing copy: the one thing the minibuffer is allowed to say ----
 ;;
 ;; THE MINIBUFFER CARRIES USER COPY, NEVER EVIDENCE.  A wrapped Go error
