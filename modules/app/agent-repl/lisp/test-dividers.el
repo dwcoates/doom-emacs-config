@@ -228,12 +228,11 @@ no case leaks into another."
 
 ;;;; ---- A web view's fringes ----
 
-(defmacro agent-repl-test-dividers--with-webview (on &rest body)
-  "Run BODY in a web view buffer, bound as `buf', with the mode ON or off.
-The buffer is shown in the selected window, bound as `win'.
+(defmacro agent-repl-test-dividers--with-webview (&rest body)
+  "Run BODY with a web view buffer, bound as `buf', in the selected window `win'.
 `set-window-fringes' is recorded into `fringed' as (WINDOW LEFT RIGHT),
 since a batch frame draws no fringes; `logs' collects every log line."
-  (declare (indent 1))
+  (declare (indent 0))
   `(let ((buf (generate-new-buffer "*agent-repl-test-dividers-webview*"))
          (fringed nil)
          (logs nil))
@@ -244,37 +243,34 @@ since a batch frame draws no fringes; `logs' collects every log line."
              (cl-letf (((symbol-function 'set-window-fringes)
                         (lambda (window left right &rest _) (push (list window left right) fringed)))
                        ((symbol-function 'agent-repl--log) (agent-repl-test--record-into logs)))
-               (with-current-buffer buf
-                 (setq-local agent-repl-frontend-webview-mode ,on))
                ,@body)))
        (kill-buffer buf))))
 
 (ert-deftest agent-repl-test-dividers-webview-on-zeroes-the-buffers-fringes ()
-  "A web view buffer in its mode has zero fringe widths of its own."
-  (agent-repl-test-dividers--with-webview t
+  "A web view buffer given no fringes has zero fringe widths of its own."
+  (agent-repl-test-dividers--with-webview
     ;; Act
-    (with-current-buffer buf (agent-repl--dividers-webview-fringes))
+    (agent-repl-dividers-webview-fringes buf t)
     ;; Assert
     (should (equal (buffer-local-value 'left-fringe-width buf) 0))
     (should (equal (buffer-local-value 'right-fringe-width buf) 0))))
 
 (ert-deftest agent-repl-test-dividers-webview-on-zeroes-a-showing-windows-fringes ()
   "A window already showing the web view is given zero fringes at once."
-  (agent-repl-test-dividers--with-webview t
+  (agent-repl-test-dividers--with-webview
     ;; Act
-    (with-current-buffer buf (agent-repl--dividers-webview-fringes))
+    (agent-repl-dividers-webview-fringes buf t)
     ;; Assert
     (should (equal fringed (list (list win 0 0))))))
 
 (ert-deftest agent-repl-test-dividers-webview-off-returns-the-frames-fringes ()
-  "A web view leaving its mode drops its widths, and its windows take the frame\='s."
-  (agent-repl-test-dividers--with-webview t
+  "A web view given its fringes back drops its widths, and its windows take the frame\='s."
+  (agent-repl-test-dividers--with-webview
     ;; Arrange
-    (with-current-buffer buf (agent-repl--dividers-webview-fringes))
+    (agent-repl-dividers-webview-fringes buf t)
     (setq fringed nil)
-    (with-current-buffer buf (setq-local agent-repl-frontend-webview-mode nil))
     ;; Act
-    (with-current-buffer buf (agent-repl--dividers-webview-fringes))
+    (agent-repl-dividers-webview-fringes buf nil)
     ;; Assert
     (should-not (local-variable-p 'left-fringe-width buf))
     (should-not (local-variable-p 'right-fringe-width buf))
@@ -282,13 +278,96 @@ since a batch frame draws no fringes; `logs' collects every log line."
 
 (ert-deftest agent-repl-test-dividers-webview-logs-the-widths ()
   "The fringe change is recorded through the canonical log helper."
-  (agent-repl-test-dividers--with-webview t
+  (agent-repl-test-dividers--with-webview
     ;; Act
-    (with-current-buffer buf (agent-repl--dividers-webview-fringes))
+    (agent-repl-dividers-webview-fringes buf t)
     ;; Assert
     (should (seq-some (lambda (line)
                         (string-match-p "\\`elisp.dividers.webview-fringes .*width=0 windows=1" line))
                       logs))))
+
+(ert-deftest agent-repl-test-dividers-webview-mode-on-gives-no-fringes ()
+  "A slot whose web view mode turns on loses its fringes."
+  (agent-repl-test-dividers--with-webview
+    ;; Arrange
+    (with-current-buffer buf (setq-local agent-repl-frontend-webview-mode t))
+    ;; Act
+    (with-current-buffer buf (agent-repl--dividers-on-webview-mode))
+    ;; Assert
+    (should (equal (buffer-local-value 'left-fringe-width buf) 0))))
+
+(ert-deftest agent-repl-test-dividers-webview-mode-off-returns-the-fringes ()
+  "A slot whose web view mode turns off gets the frame\='s fringes back."
+  (agent-repl-test-dividers--with-webview
+    ;; Arrange
+    (agent-repl-dividers-webview-fringes buf t)
+    (with-current-buffer buf (setq-local agent-repl-frontend-webview-mode nil))
+    ;; Act
+    (with-current-buffer buf (agent-repl--dividers-on-webview-mode))
+    ;; Assert
+    (should-not (local-variable-p 'left-fringe-width buf))))
+
+(ert-deftest agent-repl-test-dividers-webview-on-marks-the-buffer ()
+  "A web view given no fringes is marked, so later window changes keep it so."
+  (agent-repl-test-dividers--with-webview
+    ;; Act
+    (agent-repl-dividers-webview-fringes buf t)
+    ;; Assert
+    (should (buffer-local-value 'agent-repl--dividers-no-fringes buf))))
+
+;;;; ---- A window restored with its saved fringes ----
+
+(defmacro agent-repl-test-dividers--with-fringed-window (marked fringes &rest body)
+  "Run BODY with the selected window showing a web view MARKED fringeless or not.
+The window reports FRINGES, as a batch frame draws none of its own."
+  (declare (indent 2))
+  `(agent-repl-test-dividers--with-webview
+     (with-current-buffer buf (setq agent-repl--dividers-no-fringes ,marked))
+     (cl-letf (((symbol-function 'window-fringes) (lambda (&optional _win) ,fringes)))
+       ,@body)))
+
+(ert-deftest agent-repl-test-dividers-fit-gives-a-restored-window-zero-fringes ()
+  "A window showing a fringeless web view with fringes again is given zero."
+  (agent-repl-test-dividers--with-fringed-window t '(8 8 t nil)
+    ;; Act
+    (agent-repl--dividers-fit-fringes (selected-frame))
+    ;; Assert
+    (should (equal fringed (list (list win 0 0))))))
+
+(ert-deftest agent-repl-test-dividers-fit-logs-the-restored-window ()
+  "The fit is recorded through the canonical log helper with the widths it replaced."
+  (agent-repl-test-dividers--with-fringed-window t '(8 8 t nil)
+    ;; Act
+    (agent-repl--dividers-fit-fringes (selected-frame))
+    ;; Assert
+    (should (seq-some (lambda (line) (string-match-p "\\`elisp.dividers.fit-fringes .*from=(8 8 t nil)" line))
+                      logs))))
+
+(ert-deftest agent-repl-test-dividers-fit-leaves-a-zero-fringed-window ()
+  "A window already at zero fringes is not touched."
+  (agent-repl-test-dividers--with-fringed-window t '(0 0 nil nil)
+    ;; Act
+    (agent-repl--dividers-fit-fringes (selected-frame))
+    ;; Assert
+    (should-not fringed)
+    (should-not logs)))
+
+(ert-deftest agent-repl-test-dividers-fit-leaves-other-buffers-windows ()
+  "A window showing a buffer not marked fringeless keeps its fringes."
+  (agent-repl-test-dividers--with-fringed-window nil '(8 8 t nil)
+    ;; Act
+    (agent-repl--dividers-fit-fringes (selected-frame))
+    ;; Assert
+    (should-not fringed)))
+
+(ert-deftest agent-repl-test-dividers-sync-fits-the-fringes ()
+  "The frame sync on every window change fits the web views\=' fringes."
+  (agent-repl-test-dividers--with-fringed-window t '(8 8 t nil)
+    (cl-letf (((symbol-function 'agent-repl--dividers-shows-panels-p) (lambda (_frame) nil)))
+      ;; Act
+      (agent-repl-dividers-sync (selected-frame))
+      ;; Assert
+      (should (equal fringed (list (list win 0 0)))))))
 
 ;;;; ---- Hooks ----
 
@@ -297,7 +376,7 @@ since a batch frame draws no fringes; `logs' collects every log line."
   ;; Act + Assert
   (should (memq #'agent-repl-dividers-sync (default-value 'window-state-change-functions)))
   (should (memq #'agent-repl--dividers-on-theme enable-theme-functions))
-  (should (memq #'agent-repl--dividers-webview-fringes agent-repl-frontend-webview-mode-hook)))
+  (should (memq #'agent-repl--dividers-on-webview-mode agent-repl-frontend-webview-mode-hook)))
 
 (provide 'test-dividers)
 ;;; test-dividers.el ends here
