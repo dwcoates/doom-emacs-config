@@ -4,7 +4,8 @@
  *
  * THE GLYPH IS ALWAYS BLACK AND THE MODE ARM PAINTS THE DISC (owner request,
  * 2026-10-02): on → a green disc; off or unassigned → a white one. The wifi arm
- * rides as a data attribute but paints nothing; the daemon's tooltip says it.
+ * and the lid arm ride as data attributes but paint nothing; the daemon's
+ * tooltip says them (the lid, and the lid-close dim in force).
  * The arms ride as data attributes and the stylesheet does the painting, so
  * this file decides nothing beyond naming the arm.
  *
@@ -83,6 +84,26 @@ function modeArm(u: TopbarPersistentWifi): string {
   }
 }
 
+/** The lid arm's attribute value; "unheard" is the unassigned oneof. */
+function lidArm(u: TopbarPersistentWifi): string {
+  switch (u.lid.case) {
+    case "lidOpen":
+      return "open";
+    case "lidClosed":
+      return "closed";
+    case "noLid":
+      return "none";
+    case "lidUnwatched":
+      return "unwatched";
+    case undefined:
+      return "unheard";
+    default: {
+      const other: { case: string } = u.lid;
+      return unreachableArm("TopbarPersistentWifi.lid", other.case);
+    }
+  }
+}
+
 /** The causes only UpdatePersistentWifiMode can answer with. */
 export const UPDATE_PERSISTENT_WIFI_MODE_CAUSES = {
   powerSettingsRefused: (value: { detail: string }) =>
@@ -102,10 +123,12 @@ export const UPDATE_PERSISTENT_WIFI_MODE_CAUSES = {
 export function drawTopbarPersistentWifi(u: TopbarPersistentWifi, tc: TopbarContext): HTMLElement {
   const wifi = wifiArm(u);
   const mode = modeArm(u);
+  const lid = lidArm(u);
   const chip = document.createElement("span");
   chip.className = "topbar-wifi";
   chip.setAttribute("data-wifi", wifi);
   chip.setAttribute("data-mode", mode);
+  chip.setAttribute("data-lid", lid);
   chip.title = requireMessage(u.tooltip, "TopbarPersistentWifi.tooltip").text;
 
   const button = createControl();
@@ -119,7 +142,7 @@ export function drawTopbarPersistentWifi(u: TopbarPersistentWifi, tc: TopbarCont
 
   log.debug("drawing the persistent-wifi chip", {
     operation: "topbar.persistent-wifi",
-    context: { wifi, mode },
+    context: { wifi, mode, lid },
   });
   return chip;
 }
@@ -155,6 +178,7 @@ export async function togglePersistentWifiMode(
         context: {
           mode: state.mode.case ?? "unknown",
           wifi: state.wifi.case ?? "unknown",
+          lid: state.lid.case ?? "unheard",
           hotspot: stepOutcomeArm(success.hotspot, "hotspot", "UpdatePersistentWifiModeHotspot"),
           energyMode: stepOutcomeArm(success.energyMode, "energyMode", "UpdatePersistentWifiModeEnergyMode"),
           display: stepOutcomeArm(success.display, "display", "UpdatePersistentWifiModeDisplay"),

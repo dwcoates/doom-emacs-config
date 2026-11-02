@@ -3,11 +3,14 @@ package harness
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
+	"net"
 	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
 	"agent-repld/internal/shellword"
@@ -375,7 +378,7 @@ const FakeHotspot = "Harness Hotspot"
 // STATEFUL where the daemon reads back what it wrote: `pmset -a disablesleep`
 // writes the value `pmset -g` reports, through the fake `sudo`, which runs
 // the command it is handed. No test ever touches the real machine's power or
-// network settings.
+// network settings, and `mac-brightness` keeps the level it was set to.
 var fakeHostTools = map[string]string{
 	"sudo": `#!/bin/sh
 [ "$1" = "-n" ] && shift
@@ -396,8 +399,106 @@ exit 0
 	"ipconfig": `#!/bin/sh
 printf '<dictionary> {\n  InterfaceType : WiFi\n  LinkStatusActive : TRUE\n  SSID : ` + FakeHostNetwork + `\n}\n'
 `,
-	"wifi-util":      "#!/bin/sh\nexit 0\n",
-	"mac-brightness": "#!/bin/sh\nexit 0\n",
+	"wifi-util": "#!/bin/sh\nexit 0\n",
+	// The display's level, read with no argument and set with one; it starts
+	// at FakeBrightness.
+	"mac-brightness": `#!/bin/sh
+state="$(dirname "$0")/brightness.state"
+if [ $# -eq 0 ]; then
+  cat "$state" 2>/dev/null || echo ` + FakeBrightness + `
+else
+  printf '%s\n' "$1" > "$state"
+fi
+exit 0
+`,
+}
+
+// FakeBrightness is the display level the fake brightness tool starts at.
+const FakeBrightness = "0.81"
+
+// FakeBrightnessLevel answers the level the fake brightness tool in dir was
+// last set to, FakeBrightness when it never was.
+func FakeBrightnessLevel(t testing.TB, dir string) string {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join(dir, "brightness.state"))
+	if errors.Is(err, os.ErrNotExist) {
+		return FakeBrightness
+	}
+	if err != nil {
+		t.Fatalf("harness: read the fake brightness: %v", err)
+	}
+	return strings.TrimSpace(string(b))
+}
+
+// FakeLid is the daemon's lid on a fake host
+// (AGENT_REPL_PERSISTENT_WIFI_LID): a Unix socket that writes each daemon
+// connecting to it the lid's state, then every change. Each connection is a
+// stream of its own, so a handover's predecessor and successor both hear the
+// lid and neither takes the other's lines.
+type FakeLid struct {
+	// Path is the socket the daemon is pointed at.
+	Path string
+	ln   net.Listener
+
+	mu    sync.Mutex
+	state string
+	conns map[net.Conn]bool
+}
+
+// NewFakeLid serves the socket in dir, a directory short enough for a socket
+// path, with the lid open.
+func NewFakeLid(t testing.TB, dir string) *FakeLid {
+	t.Helper()
+	path := filepath.Join(dir, "lid")
+	ln, err := net.Listen("unix", path)
+	if err != nil {
+		t.Fatalf("harness: listen on the lid socket: %v", err)
+	}
+	l := &FakeLid{Path: path, ln: ln, state: "open", conns: map[net.Conn]bool{}}
+	accepted := make(chan struct{})
+	go func() {
+		defer close(accepted)
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			l.mu.Lock()
+			l.conns[conn] = true
+			_, _ = conn.Write([]byte(l.state + "\n"))
+			l.mu.Unlock()
+		}
+	}()
+	t.Cleanup(func() {
+		_ = ln.Close()
+		<-accepted
+		l.mu.Lock()
+		defer l.mu.Unlock()
+		for conn := range l.conns {
+			_ = conn.Close()
+		}
+	})
+	return l
+}
+
+// Close closes the lid.
+func (l *FakeLid) Close() { l.set("closed") }
+
+// Open opens the lid.
+func (l *FakeLid) Open() { l.set("open") }
+
+// set stands the state and writes it to every connected daemon. A daemon
+// that has gone away is dropped.
+func (l *FakeLid) set(state string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.state = state
+	for conn := range l.conns {
+		if _, err := conn.Write([]byte(state + "\n")); err != nil {
+			_ = conn.Close()
+			delete(l.conns, conn)
+		}
+	}
 }
 
 // NewFakeHostTools writes the persistent-wifi host tools into dir

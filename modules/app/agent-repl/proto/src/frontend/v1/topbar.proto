@@ -194,8 +194,17 @@ message TopbarPersistentWifi {
     TopbarPersistentWifiModeOn on = 3;
     TopbarPersistentWifiModeOff off = 4;
   }
-  // The hover text, composed by the daemon from both facts.
+  // The hover text, composed by the daemon from every fact.
   TopbarPersistentWifiTooltip tooltip = 5;
+  // The built-in display's lid. Rides as a data attribute and paints nothing:
+  // the tooltip states it, with the lid-close dim in force and the cause of
+  // an unwatched lid. UNASSIGNED = the daemon has not heard the lid yet.
+  oneof lid {
+    TopbarPersistentWifiLidOpen lid_open = 6;
+    TopbarPersistentWifiLidClosed lid_closed = 7;
+    TopbarPersistentWifiNoLid no_lid = 8;
+    TopbarPersistentWifiLidUnwatched lid_unwatched = 9;
+  }
 }
 // On a Wi-Fi network: the glyph is green.
 message TopbarPersistentWifiJoined {}
@@ -206,6 +215,14 @@ message TopbarPersistentWifiNotJoined {}
 message TopbarPersistentWifiModeOn {}
 // Persistent wifi mode is off — closing the lid sleeps the machine: no disc.
 message TopbarPersistentWifiModeOff {}
+// The lid is open.
+message TopbarPersistentWifiLidOpen {}
+// The lid is closed.
+message TopbarPersistentWifiLidClosed {}
+// The machine has no lid.
+message TopbarPersistentWifiNoLid {}
+// The daemon is not hearing the lid; the tooltip names why.
+message TopbarPersistentWifiLidUnwatched {}
 // The chip's hover text.
 message TopbarPersistentWifiTooltip {
   // Drawn verbatim ("Wi-Fi: joined (network name withheld by macOS) ·

@@ -11,13 +11,6 @@ import (
 	"agent-repld/internal/usersetup"
 )
 
-// Brightness levels the display step sets: dimmed to the second gradation
-// above black when the mode goes on, full when it goes off.
-const (
-	brightnessDimmed   = "0.0625"
-	brightnessRestored = "1.0"
-)
-
 // Energy modes the energy mode step sets through `pmset -a powermode`: macOS's
 // Low Power Mode when the mode goes on, so a lid-closed machine draws as little
 // as it can, and High Power Mode when it goes off. The sudoers grant names both
@@ -268,32 +261,4 @@ func (c *Controller) setEnergyMode(ctx context.Context, on bool) *agentreplv1.Up
 		}
 	}
 	return e
-}
-
-// setDisplay is the display step. Cosmetic: no outcome of it fails the
-// request.
-func (c *Controller) setDisplay(ctx context.Context, on bool) *agentreplv1.UpdatePersistentWifiModeDisplay {
-	d := &agentreplv1.UpdatePersistentWifiModeDisplay{}
-	if !c.exists(c.cfg.Tools.Brightness) {
-		d.Outcome = &agentreplv1.UpdatePersistentWifiModeDisplay_ToolMissing{
-			ToolMissing: &agentreplv1.UpdatePersistentWifiModeDisplayToolMissing{ToolPath: c.cfg.Tools.Brightness},
-		}
-		return d
-	}
-	level := brightnessRestored
-	if on {
-		level = brightnessDimmed
-	}
-	if _, err := run(ctx, c.runner, c.cfg.Tools.Brightness, level); err != nil {
-		d.Outcome = &agentreplv1.UpdatePersistentWifiModeDisplay_Failed{
-			Failed: &agentreplv1.UpdatePersistentWifiModeDisplayFailed{Detail: err.Error()},
-		}
-		return d
-	}
-	if on {
-		d.Outcome = &agentreplv1.UpdatePersistentWifiModeDisplay_Dimmed{Dimmed: &agentreplv1.UpdatePersistentWifiModeDisplayDimmed{}}
-	} else {
-		d.Outcome = &agentreplv1.UpdatePersistentWifiModeDisplay_Restored{Restored: &agentreplv1.UpdatePersistentWifiModeDisplayRestored{}}
-	}
-	return d
 }

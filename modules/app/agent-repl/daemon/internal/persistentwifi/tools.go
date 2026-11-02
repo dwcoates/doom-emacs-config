@@ -5,7 +5,11 @@
 // It is the daemon-side port of the owner's `laptop_keep_alive` script, and it
 // keeps that script's behavior and step order (hotspot, power settings,
 // display; see endpoint_update_persistent_wifi_mode.proto), with an energy
-// mode step (Low Power Mode on, High Power Mode off) before the display. It also READS the
+// mode step (Low Power Mode on, High Power Mode off) before the display. The
+// display FOLLOWS THE LID while the mode is on (display.go): a closed lid
+// dims it to 0 and opening it restores the level kept when it closed. The
+// lid is HEARD through IOKit's clamshell notification (lid_darwin.go), never
+// polled. It also READS the
 // standing, which the script only half did: whether the Wi-Fi interface is
 // joined to a network, and whether sleep is disabled. The controller re-reads
 // both on a fixed cadence and after every change, and publishes the standing
@@ -54,8 +58,9 @@ type Tools struct {
 	// macOS has no built-in command for. Optional: absent, leaving the hotspot
 	// goes straight to a radio restart.
 	WifiUtil string
-	// Brightness sets the built-in display's brightness. Optional: absent, the
-	// display step is skipped and says so.
+	// Brightness reads (no argument) and sets (one level, 0.0 to 1.0) the
+	// built-in display's brightness, for the lid-close dim. Optional: absent,
+	// a display move is skipped and says so.
 	Brightness string
 }
 
@@ -86,19 +91,47 @@ func ToolsIn(dir string) Tools {
 	}
 }
 
-// Config is the environment's say over the package: which tools, and which
-// hotspot.
+// Config is the environment's say over the package: which tools, which
+// hotspot, and where the lid is heard from.
 type Config struct {
 	Tools   Tools
 	Hotspot string
+	// FakeLid is EnvLid's value; empty is the operating system's lid
+	// (SystemLid).
+	FakeLid string
+}
+
+// Lid is the LidWatcher the config names.
+func (c Config) Lid() LidWatcher {
+	if c.FakeLid == "" {
+		return SystemLid()
+	}
+	if l, err := parseLidLine(c.FakeLid); err == nil {
+		return FixedLid(l)
+	}
+	return SocketLid(c.FakeLid)
 }
 
 // ConfigFromEnv resolves the Config from getenv. A tools dir that is set but
 // not absolute is REFUSED: a relative dir resolves against whatever the
 // daemon's working directory happens to be, which is never what was meant.
+// Fake tools without a fake lid are REFUSED too: the real lid would then move
+// a display the fake tools only pretend to set, and a fake lid is likewise
+// refused without fake tools.
 func ConfigFromEnv(getenv func(string) string) (Config, error) {
 	cfg := Config{Tools: DefaultTools()}
-	if dir := getenv(EnvToolsDir); dir != "" {
+	dir, lid := getenv(EnvToolsDir), getenv(EnvLid)
+	_, lidErr := parseLidLine(lid)
+	switch {
+	case dir != "" && lid == "":
+		return Config{}, fmt.Errorf("persistentwifi: %s is set without %s; fake host tools never hear the real lid", EnvToolsDir, EnvLid)
+	case lid != "" && dir == "":
+		return Config{}, fmt.Errorf("persistentwifi: %s is set without %s; a fake lid never moves the real display", EnvLid, EnvToolsDir)
+	case lid != "" && lidErr != nil && !filepath.IsAbs(lid):
+		return Config{}, fmt.Errorf("persistentwifi: %s=%q is neither a lid state nor an absolute socket path", EnvLid, lid)
+	}
+	cfg.FakeLid = lid
+	if dir != "" {
 		if !filepath.IsAbs(dir) {
 			return Config{}, fmt.Errorf("persistentwifi: %s=%q is not an absolute path", EnvToolsDir, dir)
 		}

@@ -1640,7 +1640,8 @@ opens are OpenTabs streams."
                   #'agent-repl-wire-decode-watch-daemon-response
                   "{\"persistentWifi\":{\"notJoined\":{},\"on\":{}}}")
                  '(:arm :persistent-wifi
-                   :value (:wifi (:arm :not-joined :value nil) :mode (:arm :on :value nil))))))
+                   :value (:wifi (:arm :not-joined :value nil) :mode (:arm :on :value nil)
+                           :lid nil :lid-dim nil)))))
 
 (ert-deftest agent-repl-test-wire-host-reload-webhost-push-decodes-its-build ()
   "The web view host's reload push decodes to the build it names."

@@ -5990,7 +5990,7 @@ instead diverges from it unseen."
                   #'agent-repl-wire-decode-persistent-wifi-state
                   "{\"joined\":{\"networkName\":\"Home\"},\"on\":{}}")
                  '(:wifi (:arm :joined :value (:network-name "Home"))
-                   :mode (:arm :on :value nil)))))
+                   :mode (:arm :on :value nil) :lid nil :lid-dim nil))))
 
 (ert-deftest agent-repl-test-wire-verbs-persistent-wifi-state-withheld-name-is-nil ()
   "A joined network whose name macOS withholds decodes with no name."
@@ -5998,13 +5998,44 @@ instead diverges from it unseen."
                   #'agent-repl-wire-decode-persistent-wifi-state
                   "{\"joined\":{},\"off\":{}}")
                  '(:wifi (:arm :joined :value (:network-name nil))
-                   :mode (:arm :off :value nil)))))
+                   :mode (:arm :off :value nil) :lid nil :lid-dim nil))))
 
 (ert-deftest agent-repl-test-wire-verbs-persistent-wifi-state-unread-facts-are-nil ()
   "Facts the daemon could not read are unassigned oneofs, never a breach."
   (should (equal (agent-repl-test-wire-verbs--decode-quietly
                   #'agent-repl-wire-decode-persistent-wifi-state "{}")
-                 '(:wifi nil :mode nil))))
+                 '(:wifi nil :mode nil :lid nil :lid-dim nil))))
+
+(ert-deftest agent-repl-test-wire-verbs-persistent-wifi-state-decodes-each-lid-arm ()
+  "Each lid arm decodes arm for arm, the unwatched one with its detail."
+  (dolist (case '(("{\"lidOpen\":{}}" . (:arm :lid-open :value nil))
+                  ("{\"lidClosed\":{}}" . (:arm :lid-closed :value nil))
+                  ("{\"noLid\":{}}" . (:arm :no-lid :value nil))
+                  ("{\"lidUnwatched\":{\"detail\":\"gone\"}}"
+                   . (:arm :lid-unwatched :value (:detail "gone")))))
+    (should (equal (plist-get (agent-repl-test-wire-verbs--decode-quietly
+                               #'agent-repl-wire-decode-persistent-wifi-state (car case))
+                              :lid)
+                   (cdr case)))))
+
+(ert-deftest agent-repl-test-wire-verbs-persistent-wifi-state-decodes-the-lid-dim ()
+  "A lid-close dim in force decodes its restore level; zero is the omitted default."
+  (dolist (case '(("{\"lidClosed\":{},\"lidDim\":{\"restoreLevel\":0.81}}" . (:restore-level 0.81))
+                  ("{\"lidDim\":{}}" . (:restore-level 0.0))))
+    (should (equal (plist-get (agent-repl-test-wire-verbs--decode-quietly
+                               #'agent-repl-wire-decode-persistent-wifi-state (car case))
+                              :lid-dim)
+                   (cdr case)))))
+
+(ert-deftest agent-repl-test-wire-verbs-persistent-wifi-state-arms-pinned ()
+  "PersistentWifiState's oneofs have exactly the arms decoded here."
+  (should (equal (sort (agent-repl-test--generated-oneof-arms
+                        "agentrepl/v1/persistent_wifi.pb.go" "PersistentWifiState")
+                       #'string<)
+                 (sort (append '("joined" "notJoined" "on" "off")
+                               (mapcar (lambda (arm) (symbol-name (car arm)))
+                                       agent-repl-wire-persistent-wifi-lid-arms))
+                       #'string<))))
 
 (ert-deftest agent-repl-test-wire-verbs-persistent-wifi-state-unknown-field-refused ()
   "A field the codec does not hold is refused, not dropped."
@@ -6037,7 +6068,7 @@ instead diverges from it unseen."
                           "\"display\":{\"toolMissing\":{\"toolPath\":\"/b/mac-brightness\"}}}}"))
                  '(:arm :success
                    :value (:state (:wifi (:arm :joined :value (:network-name nil))
-                                   :mode (:arm :on :value nil))
+                                   :mode (:arm :on :value nil) :lid nil :lid-dim nil)
                            :hotspot (:arm :failed :value (:network-name "Phone" :detail "not visible"))
                            :energy-mode (:arm :failed :value (:detail "refused"))
                            :display (:arm :tool-missing :value (:tool-path "/b/mac-brightness")))))))
@@ -6052,7 +6083,22 @@ instead diverges from it unseen."
                                                 "\"display\":{\"restored\":{}}}}"))
                                        :value)
                             :state)
-                 '(:wifi nil :mode nil))))
+                 '(:wifi nil :mode nil :lid nil :lid-dim nil))))
+
+(ert-deftest agent-repl-test-wire-verbs-persistent-wifi-display-decodes-its-levels ()
+  "The dimmed and restored arms carry their brightness levels as floats."
+  (dolist (case '(("{\"dimmed\":{\"restoreLevel\":0.81}}" . (:arm :dimmed :value (:restore-level 0.81)))
+                  ("{\"restored\":{\"level\":0.5}}" . (:arm :restored :value (:level 0.5)))
+                  ("{\"unchanged\":{}}" . (:arm :unchanged :value nil))))
+    (should (equal (plist-get (plist-get (agent-repl-test-wire-verbs--decode-quietly
+                                          #'agent-repl-wire-decode-update-persistent-wifi-mode-response
+                                          (concat "{\"success\":{\"state\":{},"
+                                                  "\"hotspot\":{\"notOnHotspot\":{}},"
+                                                  "\"energyMode\":{\"highPower\":{}},"
+                                                  "\"display\":" (car case) "}}"))
+                                         :value)
+                              :display)
+                   (cdr case)))))
 
 (ert-deftest agent-repl-test-wire-verbs-persistent-wifi-success-without-hotspot-refused ()
   "A success missing its required hotspot outcome is a breach."
@@ -6121,13 +6167,27 @@ instead diverges from it unseen."
     (should (equal (sort (mapcar #'symbol-name calls) #'string<)
                    '("display" "energyMode" "hotspot")))))
 
-(ert-deftest agent-repl-test-wire-verbs-decode-string-fields-reads-every-named-string ()
-  "The all-strings decoder answers each named field, absent ones as empty."
+(ert-deftest agent-repl-test-wire-verbs-decode-scalar-fields-reads-every-named-string ()
+  "The scalar decoder answers each named string field, absent ones as empty."
   (agent-repl-test-wire-verbs--with-common
-    (should (equal (agent-repl-wire-verbs--decode-string-fields
+    (should (equal (agent-repl-wire-verbs--decode-scalar-fields
                     "M" (agent-repl-test-wire-verbs--parse "{\"a\":\"x\"}")
                     '((a :a) (b :b)))
                    '(:a "x" :b "")))))
+
+(ert-deftest agent-repl-test-wire-verbs-decode-scalar-fields-reads-a-double ()
+  "A :double field decodes as a float, absent as 0.0."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-verbs--decode-scalar-fields
+                    "M" (agent-repl-test-wire-verbs--parse "{\"a\":0.5}")
+                    '((a :a :double) (b :b :double)))
+                   '(:a 0.5 :b 0.0)))))
+
+(ert-deftest agent-repl-test-wire-verbs-decode-scalar-fields-refuses-an-unknown-type ()
+  "A field type the decoder does not know fails hard."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-verbs--decode-scalar-fields
+                   "M" (agent-repl-test-wire-verbs--parse "{\"a\":1}") '((a :a :int128))))))
 
 (ert-deftest agent-repl-test-wire-verbs-persistent-wifi-arm-tables-pinned ()
   "Each outcome table names exactly the arms the frozen schema declares."

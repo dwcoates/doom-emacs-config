@@ -752,6 +752,15 @@ type DB interface {
 	// when none is set.
 	FeedTextScale(ctx context.Context) (float64, error)
 
+	// PutLidDimLevel keeps the display's brightness from the moment the lid
+	// closed with persistent wifi mode on.
+	PutLidDimLevel(ctx context.Context, level float64) error
+	// LidDimLevel answers the kept pre-close brightness, false when no
+	// lid-close dim is in force.
+	LidDimLevel(ctx context.Context) (float64, bool, error)
+	// ClearLidDimLevel forgets the kept pre-close brightness.
+	ClearLidDimLevel(ctx context.Context) error
+
 	// PutAccountDefaultModel records the model new sessions on one account
 	// root start under when nobody names one.
 	PutAccountDefaultModel(ctx context.Context, configDir, model string) error

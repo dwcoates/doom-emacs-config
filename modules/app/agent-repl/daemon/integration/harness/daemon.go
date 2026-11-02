@@ -479,6 +479,9 @@ type Daemon struct {
 	// (AGENT_REPL_PERSISTENT_WIFI_TOOLS_DIR), so no test ever reads or changes
 	// the real machine's power or network settings.
 	HostToolsDir string
+	// Lid is the fake host's lid (AGENT_REPL_PERSISTENT_WIFI_LID),
+	// starting open, so no test ever hears the real machine's lid.
+	Lid *FakeLid
 	// PromptsDir is the copy of prompts/ the daemon reads its briefs from.
 	PromptsDir string
 	// WebappDir is the served dist.
@@ -704,6 +707,7 @@ func StartDaemon(t testing.TB, opts Opts) *Daemon {
 		Notifier:           NewFakeNotifier(t, filepath.Join(root, "bin")),
 		Chime:              NewFakeChime(t, filepath.Join(root, "bin")),
 		HostToolsDir:       NewFakeHostTools(t, filepath.Join(root, "host-tools")),
+		Lid:                NewFakeLid(t, sockRoot),
 		t:                  t,
 		expected:           map[string]bool{},
 		required:           map[string]bool{},
@@ -889,6 +893,7 @@ func StartDaemon(t testing.TB, opts Opts) *Daemon {
 		"AGENT_REPL_CHIME_CMD="+d.Chime.Path,
 		"AGENT_REPL_PERSISTENT_WIFI_TOOLS_DIR="+d.HostToolsDir,
 		"AGENT_REPL_PERSISTENT_WIFI_HOTSPOT="+FakeHotspot,
+		"AGENT_REPL_PERSISTENT_WIFI_LID="+d.Lid.Path,
 		"AGENT_REPL_LAUNCH_AGENTS_DIR="+filepath.Join(root, "LaunchAgents"),
 		fakegit.EnvStateFile+"="+d.Git.StateFile,
 		"FAKESHIM_PROFILE_DIR="+d.ProfileDir,

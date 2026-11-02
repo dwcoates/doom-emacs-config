@@ -66,6 +66,25 @@ describe("drawTopbarPersistentWifi", () => {
     expect(draw(chip(joined, unset as never)).getAttribute("data-mode")).toBe("unknown");
   });
 
+  it.each([
+    ["lidOpen", "open"],
+    ["lidClosed", "closed"],
+    ["noLid", "none"],
+    ["lidUnwatched", "unwatched"],
+  ])("marks the %s lid as %s", (arm, attribute) => {
+    const u = { ...chip(joined, on), lid: { case: arm, value: {} } as TopbarPersistentWifi["lid"] };
+    expect(draw(u).getAttribute("data-lid")).toBe(attribute);
+  });
+
+  it("marks a lid not yet heard as unheard", () => {
+    expect(draw(chip(joined, on)).getAttribute("data-lid")).toBe("unheard");
+  });
+
+  it("refuses a lid arm this bundle cannot name", () => {
+    const u = { ...chip(joined, on), lid: { case: "lidAjar", value: {} } as never };
+    expect(() => draw(u)).toThrow(MalformedView);
+  });
+
   it("carries the daemon's tooltip verbatim", () => {
     expect(draw(chip(joined, on)).title).toBe("the daemon's words");
   });

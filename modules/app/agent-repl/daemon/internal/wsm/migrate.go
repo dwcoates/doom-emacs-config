@@ -199,6 +199,7 @@ var migrations = []migration{
 	{To: 96, Name: "pull_requests", Kind: MigrationAdditive, DDL: pullRequestsDDL},
 	{To: 97, Name: "sidebar_view_merge_queue_folded", Kind: MigrationAdditive, DDL: mergeQueueFoldedDDL},
 	{To: 98, Name: "walk_landing", Kind: MigrationAdditive, DDL: walkLandingDDL},
+	{To: 99, Name: "persistent_wifi_lid_dim", Kind: MigrationAdditive, DDL: persistentWifiLidDimDDL},
 }
 
 // mergeQueueLookupIndexesDDL keys the two lookups every workspace read makes
