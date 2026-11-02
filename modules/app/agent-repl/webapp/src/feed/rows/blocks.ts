@@ -16,6 +16,7 @@
 import { collapsedThumbnail } from "../../bubble/collapsed-thumbnail.js";
 import { requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
 import { log } from "../../log.js";
+import { MENTION_TEXT_CLASS, linkWorkspaceMentionsInText } from "../workspace-mentions.js";
 import { markdownSlot, proseCharacters, proseSource, type SlotMark } from "../../bubble/body.js";
 import { BUBBLE_QUOTE_CLASS, QUOTE_MARKER_CLASS, QUOTE_PARTS_CLASS } from "../../bubble/quote.js";
 import { codeBlockHtml } from "../../code-block.js";
@@ -52,7 +53,16 @@ export function drawFeedTextBlock(block: FeedTextBlock, mark?: SlotMark): HTMLEl
     operation: "feed.draw-text-block",
     context: { characters: proseCharacters(requireMessage(block.prose, "FeedTextBlock.prose")), marked: mark !== undefined },
   });
-  return markdownSlot("prompt-block prompt-block-text", requireMessage(block.prose, "FeedTextBlock.prose"), mark);
+  // A WORKSPACE'S NAME IN THE TEXT switches to it (workspace-mentions.ts).
+  const linked: SlotMark = (rendered) => {
+    mark?.(rendered);
+    linkWorkspaceMentionsInText(rendered);
+  };
+  return markdownSlot(
+    `prompt-block prompt-block-text ${MENTION_TEXT_CLASS}`,
+    requireMessage(block.prose, "FeedTextBlock.prose"),
+    linked,
+  );
 }
 
 /**
