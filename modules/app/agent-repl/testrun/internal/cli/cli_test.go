@@ -370,6 +370,8 @@ type fakeExec struct {
 	mu    sync.Mutex
 	exits map[string]int
 	ran   []string
+	// argv holds each started unit's argv, by unit ID.
+	argv map[string][]string
 }
 
 type fakeProc struct{ exit int }
@@ -381,6 +383,10 @@ func (e *fakeExec) Start(s run.Spec, out *bytes.Buffer) (run.Process, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.ran = append(e.ran, s.ID)
+	if e.argv == nil {
+		e.argv = map[string][]string{}
+	}
+	e.argv[s.ID] = s.Argv
 	out.WriteString("output of " + s.ID + "\n")
 	return fakeProc{exit: e.exits[s.ID]}, nil
 }
@@ -1238,6 +1244,59 @@ func TestRunAFailingSelectionEndsFailed(t *testing.T) {
 	if code != 1 || evs[len(evs)-1].GetEnded().GetFailed().GetFailedUnits() != 1 {
 		t.Fatalf("exit = %d, events = %v; want 1 and ended failed", code, evs)
 	}
+}
+
+// TestRunATargetedE2EEmacsSelectionPlansAndRunsEachPattern is the merge
+// queue's failing-tests command for e2e-emacs: steps beneath two top-level
+// tests need two -test.run patterns, so two runs of the script, and both must
+// plan and run (2026-11-02: they were named as chunks are and the planner
+// refused them).
+func TestRunATargetedE2EEmacsSelectionPlansAndRunsEachPattern(t *testing.T) {
+	// Arrange
+	h := newHarness(t, nil, nil)
+	script := filepath.Join(h.module, "bin", "test-e2e-emacs.sh")
+	for path, body := range map[string]string{
+		script: "#!/bin/sh\n",
+		filepath.Join(h.module, "e2e", "x_test.go"): "package e2e\n\nimport \"testing\"\n\n" +
+			"func TestEmacsDaemonLifecycle(t *testing.T) {}\nfunc TestEmacsWorkspaces(t *testing.T) {}\n",
+	} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	h.deps.Build = suites.Build
+	var stream bytes.Buffer
+	h.deps.Events = events.New(&stream, h.deps.Log)
+	sel := &testrunv1.TestRunRequest{Selections: []*testrunv1.TestSelection{{Target: &testrunv1.TestSelection_Harness{Harness: &testrunv1.TestSelectionHarness{
+		Script: "modules/app/agent-repl/bin/test-e2e-emacs.sh",
+		Groups: &testrunv1.TestSelectionHarness_Named{Named: &testrunv1.TestSelectionHarnessNamedGroups{Names: []string{
+			"TestEmacsDaemonLifecycle/EmacsHandoverTransfersAtFreeness", "TestEmacsWorkspaces/EmacsCreateWorkspaceAppearsOnTheRoster",
+		}}}}}}}}
+
+	// Act
+	code := h.run(t, "--selection", writeSelection(t, sel))
+
+	// Assert
+	t.Run("the run plans and passes", func(t *testing.T) {
+		if code != 0 {
+			t.Fatalf("exit = %d, stderr:\n%s", code, h.errOut)
+		}
+		if evs := eventsOf(t, &stream); len(evs) == 0 || evs[0].GetPlanned() == nil || evs[len(evs)-1].GetEnded().GetPassed() == nil {
+			t.Fatalf("events = %v, want planned first and ended passed last", evs)
+		}
+	})
+	t.Run("each pattern is its own run of the script", func(t *testing.T) {
+		want := map[string][]string{
+			suites.ScriptRunID("e2e-emacs", 0): {script, "^(TestEmacsDaemonLifecycle)$/^(EmacsHandoverTransfersAtFreeness)$"},
+			suites.ScriptRunID("e2e-emacs", 1): {script, "^(TestEmacsWorkspaces)$/^(EmacsCreateWorkspaceAppearsOnTheRoster)$"},
+		}
+		if !reflect.DeepEqual(h.exec.argv, want) {
+			t.Fatalf("ran %v, want %v", h.exec.argv, want)
+		}
+	})
 }
 
 func TestRunRefusesASelectionItCannotRun(t *testing.T) {

@@ -1,7 +1,6 @@
 package suites
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -13,6 +12,7 @@ import (
 	"agentrepl/testrun/internal/cover"
 	"agentrepl/testrun/internal/gotest"
 	"agentrepl/testrun/internal/run"
+	"agentrepl/testrun/internal/sched"
 	"agentrepl/testrun/internal/testtimes"
 	"agentrepl/testrun/roster"
 )
@@ -306,8 +306,27 @@ func TestScriptUnitsOfAGoTestsSuite(t *testing.T) {
 			t.Fatalf("units = %+v, want %d", steps, len(want))
 		}
 		for i, sp := range steps {
-			if id := fmt.Sprintf("e#%02d", i); sp.ID != id || !reflect.DeepEqual(sp.Argv, want[i]) {
+			if id := ScriptRunID("e", i); sp.ID != id || !reflect.DeepEqual(sp.Argv, want[i]) {
 				t.Errorf("unit %d = %s %v, want %s %v", i, sp.ID, sp.Argv, id, want[i])
+			}
+		}
+	})
+}
+
+func TestScriptRunID(t *testing.T) {
+	// Act
+	first, second := ScriptRunID("e2e-emacs", 0), ScriptRunID("e2e-emacs", 1)
+
+	// Assert
+	t.Run("a run is named after its suite and its index", func(t *testing.T) {
+		if first != "e2e-emacs/00" || second != "e2e-emacs/01" {
+			t.Fatalf("ids = %q, %q, want e2e-emacs/00, e2e-emacs/01", first, second)
+		}
+	})
+	t.Run("a run is never named as a chunk is", func(t *testing.T) {
+		for _, id := range []string{first, second} {
+			if strings.Contains(id, "#") || id == sched.ChunkID("e2e-emacs", 0) {
+				t.Errorf("id %q holds a chunk's '#'", id)
 			}
 		}
 	})
