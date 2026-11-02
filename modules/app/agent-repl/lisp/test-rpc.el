@@ -108,6 +108,9 @@ would abort the very branch a test is asserting."
     ("ValidateWorkspaceName" agent-repl-rpc-validate-workspace-name
      agent-repl-wire-encode-validate-workspace-name-request
      agent-repl-wire-decode-validate-workspace-name-response)
+    ("ListCreationModels" agent-repl-rpc-list-creation-models
+     agent-repl-wire-encode-list-creation-models-request
+     agent-repl-wire-decode-list-creation-models-response)
     ("SetWorkspaceHidden" agent-repl-rpc-set-workspace-hidden
      agent-repl-wire-encode-set-workspace-hidden-request
      agent-repl-wire-decode-set-workspace-hidden-response)

@@ -1944,10 +1944,11 @@ the forked context: a child forked from its owner, which lands itself."
 
 ;; audit-3 #53(e)
 (ert-deftest agent-repl-itest-verbs-create-oneshot-with-a-model-prefix-sends-the-chosen-model ()
-  "A model-prefix one-shot sends the picker's CHOSEN candidate as `model'.
-`agent-repl-oneshot-model-candidates' backs the picker; without this a
-prefix that asked for a model choice could silently create on the
-daemon's default instead."
+  "A model-prefix one-shot offers the daemon's catalog and sends the CHOSEN model.
+The picker's candidates are what ListCreationModels serves for the
+one-shot's repository; without this a prefix that asked for a model
+choice could offer models the login does not know, or silently create
+on the daemon's default instead."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-verbs--with-workspace daemon ref
@@ -1958,27 +1959,39 @@ daemon's default instead."
           daemon (list (agent-repl-itest-verbs--roster-row
                         (plist-get ref :id) (plist-get ref :dir)
                         :name agent-repl-itest-verbs--ws))
-        (cl-letf (((symbol-function 'agent-repl--ws-current-name)
-                   (lambda () agent-repl-itest-verbs--ws))
-                  ((symbol-function 'agent-repl--main-worktree-for-dir)
-                   (lambda (_dir)
-                     (agent-repl--path-canonical
-                      (plist-get agent-repl-itest-verbs--repo :dir))))
-                  ((symbol-function 'completing-read)
-                   (lambda (prompt &rest _)
-                     (if (string-prefix-p "Model" prompt) "haiku"
-                       (error "a one-shot must not ask for a repository"))))
-                  ((symbol-function 'read-string)
-                   (lambda (prompt &optional initial &rest _)
-                     (ignore prompt initial) "one-shot with a model")))
-          ;; Act.
-          (agent-repl-create-oneshot t)
-          (agent-repl-itest--await-call daemon "CreateWorkspace")
-          ;; Assert.
-          (should (equal (agent-repl-itest--body-field
-                          (agent-repl-itest-verbs--body daemon "CreateWorkspace")
-                          'model)
-                         "haiku")))))))
+        (let (offered)
+          (cl-letf (((symbol-function 'agent-repl--ws-current-name)
+                     (lambda () agent-repl-itest-verbs--ws))
+                    ((symbol-function 'agent-repl--main-worktree-for-dir)
+                     (lambda (_dir)
+                       (agent-repl--path-canonical
+                        (plist-get agent-repl-itest-verbs--repo :dir))))
+                    ((symbol-function 'completing-read)
+                     (lambda (prompt collection &rest _)
+                       (if (string-prefix-p "Model" prompt)
+                           (progn (setq offered (all-completions "" collection)) "haiku")
+                         (error "a one-shot must not ask for a repository"))))
+                    ((symbol-function 'read-string)
+                     (lambda (prompt &optional initial &rest _)
+                       (ignore prompt initial) "one-shot with a model")))
+            (agent-repl-itest--script
+             daemon "ListCreationModels"
+             '((success . ((configDir . "/home/me/.claude")
+                           (known . ((options . [((model . ((name . "opus"))) (displayName . "Opus"))
+                                                 ((model . ((name . "haiku"))) (displayName . "Haiku"))])))))))
+            ;; Act.
+            (agent-repl-create-oneshot t)
+            (agent-repl-itest--await-call daemon "CreateWorkspace")
+            ;; Assert.
+            (should (equal offered '("opus" "haiku")))
+            (should (equal (agent-repl-itest--body-field
+                            (agent-repl-itest-verbs--body daemon "ListCreationModels")
+                            'repository 'id)
+                           (plist-get agent-repl-itest-verbs--repo :id)))
+            (should (equal (agent-repl-itest--body-field
+                            (agent-repl-itest-verbs--body daemon "CreateWorkspace")
+                            'model)
+                           "haiku"))))))))
 
 ;;;; ---- #54: OpenWorkspace picks a CLOSED roster row; shutdown-schedule reads
 

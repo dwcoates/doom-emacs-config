@@ -19,15 +19,6 @@
                                             (or load-file-name buffer-file-name)))
       nil t)
 
-;;;; ---- Model preferences ----
-
-(ert-deftest agent-repl-test-session-oneshot-candidates-are-a-non-empty-list ()
-  "The one-shot picker has something to offer."
-  ;; Act / Assert
-  (should (and (listp agent-repl-oneshot-model-candidates)
-               agent-repl-oneshot-model-candidates
-               (cl-every #'stringp agent-repl-oneshot-model-candidates))))
-
 ;;;; ---- Reaction (2): the magit refresh ----
 
 (defmacro agent-repl-test-session--with-magit (var &rest body)

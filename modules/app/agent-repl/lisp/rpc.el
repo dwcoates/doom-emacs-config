@@ -95,6 +95,8 @@
 (declare-function agent-repl-wire-decode-create-workspace-response "wire-verbs" (alist))
 (declare-function agent-repl-wire-encode-validate-workspace-name-request "wire-verbs" (request))
 (declare-function agent-repl-wire-decode-validate-workspace-name-response "wire-verbs" (json))
+(declare-function agent-repl-wire-encode-list-creation-models-request "wire-verbs" (request))
+(declare-function agent-repl-wire-decode-list-creation-models-response "wire-verbs" (json))
 (declare-function agent-repl-wire-encode-register-repository-request "wire-verbs" (request))
 (declare-function agent-repl-wire-decode-register-repository-response "wire-verbs" (alist))
 (declare-function agent-repl-wire-encode-open-workspace-request "wire-verbs" (request))
@@ -396,6 +398,14 @@ answer.")
   "Ask the daemon whether a supplied workspace name keeps its naming rule.
 A read: the success\='s verdict is `legal\=' or the create\='s own
 `invalid_name\=' shape, so the rule lives in the daemon alone.")
+
+(agent-repl-rpc--defverb agent-repl-rpc-list-creation-models
+  "ListCreationModels"
+  agent-repl-wire-encode-list-creation-models-request
+  agent-repl-wire-decode-list-creation-models-response
+  "Ask the daemon which models a create in a repository may name.
+A read: the success names the creating login and its catalog, or says the
+login has none yet.  CreateWorkspace refuses any other model.")
 
 (agent-repl-rpc--defverb agent-repl-rpc-register-repository
   "RegisterRepository"

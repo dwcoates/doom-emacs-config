@@ -818,6 +818,46 @@ The requesting workspace is not in the daemon\='s registry."
   (agent-repl-wire-verbs--decode-ref-arm
    "CreateWorkspaceUnknownRequester" 'workspace json))
 
+;; A MODEL THE CREATING LOGIN DOES NOT KNOW is refused before anything is
+;; built (CreateWorkspaceError.model_not_in_catalog / .model_catalog_unknown).
+;; Both arms name the model and the login; the first carries the login's
+;; catalog too, so the sentence can say what may be named instead.
+
+(defun agent-repl-wire-decode-model-option (json)
+  "Decode `conversation.v1.ModelOption\=' from JSON into a plist.
+The plist is (:name NAME :display-name D :description DESC).  NAME is the
+option\='s `model.name\=', the string a create names; `capabilities\=' is
+accepted and not decoded, because no Emacs surface offers fast or auto
+mode per model."
+  (let ((message "ModelOption"))
+    (agent-repl-wire-verbs--check-keys message json '(model displayName description capabilities))
+    (list :name (plist-get (agent-repl-wire-decode-agent-model
+                            (agent-repl-wire-verbs--require message "model" (alist-get 'model json)))
+                           :name)
+          :display-name (agent-repl-wire-verbs--decode-string message 'displayName json)
+          :description (agent-repl-wire-verbs--decode-string message 'description json))))
+
+(defun agent-repl-wire-decode-create-workspace-model-not-in-catalog (json)
+  "Decode CreateWorkspaceModelNotInCatalog from JSON into a plist.
+The plist is (:model M :config-dir D :options OPTIONS).  M is the model
+as requested, D the login the workspace would spend as, and OPTIONS its
+catalog as `agent-repl-wire-decode-model-option\=' plists."
+  (let ((message "CreateWorkspaceModelNotInCatalog"))
+    (agent-repl-wire-verbs--check-keys message json '(model configDir options))
+    (list :model (agent-repl-wire-verbs--decode-string message 'model json)
+          :config-dir (agent-repl-wire-verbs--decode-string message 'configDir json)
+          :options (agent-repl-wire-verbs--decode-repeated
+                    message 'options json #'agent-repl-wire-decode-model-option))))
+
+(defun agent-repl-wire-decode-create-workspace-model-catalog-unknown (json)
+  "Decode CreateWorkspaceModelCatalogUnknown from JSON.
+The answer is (:model M :config-dir D): no session on login D has served
+a catalog, so model M could not be named."
+  (let ((message "CreateWorkspaceModelCatalogUnknown"))
+    (agent-repl-wire-verbs--check-keys message json '(model configDir))
+    (list :model (agent-repl-wire-verbs--decode-string message 'model json)
+          :config-dir (agent-repl-wire-verbs--decode-string message 'configDir json))))
+
 (defun agent-repl-wire-decode-create-workspace-error (json)
   "Decode CreateWorkspaceError from JSON into (:cause (:arm ARM :value V)).
 THE ARM IS THE REFUSAL, so an unset cause is a contract breach and an
@@ -827,7 +867,7 @@ not decoded: an async merge, a create cut from origin and a create naming
 a landing target are an agent\='s requests, never the editor\='s, so one
 answering an editor create is a breach."
   (let ((message "CreateWorkspaceError"))
-    (agent-repl-wire-verbs--check-keys message json '(ungatedWithoutConsent noSlug briefMissing unknownRepository worktreeCreationFailed spawnFailed oneShotPolicyMissing namingFailed insideTemporaryDirectory unknownForkSource forkSourceHasNoConversation forkSourceHasNoFinishedTurn nameReserved nameHeld invalidName unknownContextWorkspace unknownOwner ownerNoticeRequired ownerNoticeUnexpected unknownRequester parentNotOpen transferringAway standingDown))
+    (agent-repl-wire-verbs--check-keys message json '(ungatedWithoutConsent noSlug briefMissing unknownRepository worktreeCreationFailed spawnFailed oneShotPolicyMissing namingFailed insideTemporaryDirectory unknownForkSource forkSourceHasNoConversation forkSourceHasNoFinishedTurn nameReserved nameHeld invalidName unknownContextWorkspace unknownOwner ownerNoticeRequired ownerNoticeUnexpected unknownRequester parentNotOpen transferringAway standingDown modelNotInCatalog modelCatalogUnknown))
     (list :cause
           (agent-repl-wire-verbs--decode-oneof
            message "cause" json
@@ -853,6 +893,8 @@ answering an editor create is a breach."
          (list 'unknownRequester :unknown-requester #'agent-repl-wire-decode-create-workspace-error-unknown-requester)
          (list 'transferringAway :transferring-away #'agent-repl-wire-decode-create-workspace-error-transferring-away)
          (list 'standingDown :standing-down #'agent-repl-wire-decode-create-workspace-error-standing-down)
+         (list 'modelNotInCatalog :model-not-in-catalog #'agent-repl-wire-decode-create-workspace-model-not-in-catalog)
+         (list 'modelCatalogUnknown :model-catalog-unknown #'agent-repl-wire-decode-create-workspace-model-catalog-unknown)
          agent-repl-wire-verbs--parent-not-open-arm)))))
 
 (defun agent-repl-wire-decode-create-workspace-response-success (json)
@@ -5650,6 +5692,58 @@ Empty: the contract names no cause, and a set error is a failed check."
    "ValidateWorkspaceNameResponse" json
    #'agent-repl-wire-decode-validate-workspace-name-success
    #'agent-repl-wire-decode-validate-workspace-name-error))
+
+;;;; ---- ListCreationModels --------------------------------------------
+;;
+;; Which models may a create in this repository name?  The catalog of the
+;; login its workspace would spend as.  See endpoint_list_creation_models.proto.
+
+(defun agent-repl-wire-encode-list-creation-models-request (request)
+  "Encode ListCreationModelsRequest from plist REQUEST, (:repository REF)."
+  (list (cons 'repository
+              (agent-repl-wire-encode-repository-ref
+               (agent-repl-wire-verbs--require "ListCreationModelsRequest" "repository"
+                                               (plist-get request :repository))))))
+
+(defun agent-repl-wire-decode-list-creation-models-known (json)
+  "Decode ListCreationModelsKnown from JSON into (:options OPTIONS).
+OPTIONS are `agent-repl-wire-decode-model-option\=' plists, in the
+vendor\='s order."
+  (let ((message "ListCreationModelsKnown"))
+    (agent-repl-wire-verbs--check-keys message json '(options))
+    (list :options (agent-repl-wire-verbs--decode-repeated
+                    message 'options json #'agent-repl-wire-decode-model-option))))
+
+(defun agent-repl-wire-decode-list-creation-models-success (json)
+  "Decode ListCreationModelsSuccess from JSON.
+The answer is (:config-dir D :catalog (:arm ARM :value V)).  ARM is
+`:known\=' with (:options OPTIONS), or `:unknown\=' with no value when no
+session on login D has served a catalog yet."
+  (let ((message "ListCreationModelsSuccess"))
+    (agent-repl-wire-verbs--check-keys message json '(configDir known unknown))
+    (list :config-dir (agent-repl-wire-verbs--decode-string message 'configDir json)
+          :catalog (agent-repl-wire-verbs--decode-oneof
+                    message "catalog" json
+                    (list (list 'known :known #'agent-repl-wire-decode-list-creation-models-known)
+                          (list 'unknown :unknown (agent-repl-wire-verbs--empty-arm "ListCreationModelsUnknown")))))))
+
+(defun agent-repl-wire-decode-list-creation-models-error (json)
+  "Decode ListCreationModelsError from JSON into (:cause (:arm ARM :value V)).
+The one cause is `:unknown-repository\='."
+  (let ((message "ListCreationModelsError"))
+    (agent-repl-wire-verbs--check-keys message json '(unknownRepository))
+    (list :cause
+          (agent-repl-wire-verbs--decode-oneof
+           message "cause" json
+           (list (list 'unknownRepository :unknown-repository
+                       (agent-repl-wire-verbs--empty-arm "ListCreationModelsUnknownRepository")))))))
+
+(defun agent-repl-wire-decode-list-creation-models-response (json)
+  "Decode ListCreationModelsResponse from JSON into (:arm ARM :value V)."
+  (agent-repl-wire-verbs--decode-result
+   "ListCreationModelsResponse" json
+   #'agent-repl-wire-decode-list-creation-models-success
+   #'agent-repl-wire-decode-list-creation-models-error))
 
 ;;;; ---- SetWorkspaceHidden ---------------------------------------------
 ;;

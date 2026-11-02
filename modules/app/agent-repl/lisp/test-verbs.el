@@ -2546,7 +2546,7 @@ A fork that left no trace was indistinguishable from one never run."
                       ((symbol-function 'agent-repl-verbs--explanation-engine-repository)
                        (lambda () (agent-repl-test-verbs--repo-ref)))
                       ;; The model is answered, so `SPC TAB C-n' reaches its prompt.
-                      ((symbol-function 'agent-repl-verbs--read-model) (lambda () nil))
+                      ((symbol-function 'agent-repl-verbs--read-model) (lambda (_repository) nil))
                       ((symbol-function 'agent-repl-verbs--read-prompt)
                        (lambda (_p &optional _history-file _unseeded) (signal 'quit nil)))
                       ((symbol-function 'read-string)
@@ -2653,7 +2653,10 @@ because what happens on completion is the repository's own directive."
     (cl-letf (((symbol-function 'agent-repl-verbs--agent-repl-repository)
                (lambda () (agent-repl-test-verbs--repo-ref)))
               ((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p &optional _history-file _unseeded) "commission"))
-              ((symbol-function 'agent-repl-verbs--read-model) (lambda () "haiku")))
+              ((symbol-function 'agent-repl-verbs--read-model)
+               (lambda (repository)
+                 (should (equal repository (agent-repl-test-verbs--repo-ref)))
+                 "haiku")))
       (agent-repl-create-oneshot t)
       (should (equal (plist-get (agent-repl-test-verbs--request :create) :model) "haiku")))))
 
@@ -2773,7 +2776,7 @@ Every prompt label the commission read is offered is pushed onto PROMPTS."
   (let (prompts)
     (agent-repl-test-verbs--with nil
       (agent-repl-test-verbs--with-oneshot-reads prompts
-        (cl-letf (((symbol-function 'agent-repl-verbs--read-model) (lambda () "haiku")))
+        (cl-letf (((symbol-function 'agent-repl-verbs--read-model) (lambda (_repository) "haiku")))
           ;; Act.
           (agent-repl-create-oneshot-for-current-workspace t)
           ;; Assert.
@@ -2786,7 +2789,7 @@ Every prompt label the commission read is offered is pushed onto PROMPTS."
       (cl-letf (((symbol-function 'agent-repl-verbs--agent-repl-repository)
                  (lambda () (agent-repl-test-verbs--repo-ref)))
                 ((symbol-function 'agent-repl-verbs--read-model)
-                 (lambda () (push 'model asked) "haiku"))
+                 (lambda (_repository) (push 'model asked) "haiku"))
                 ((symbol-function 'agent-repl-verbs--read-prompt)
                  (lambda (&rest _) (push 'prompt asked) "fix its feed")))
         ;; Act.
@@ -2844,7 +2847,7 @@ Every prompt label the commission read is offered is pushed onto PROMPTS."
     (agent-repl-test-verbs--with nil
       (agent-repl-test-verbs--with-agent-repl-repo "/tmp/agent-repl-test/doom/.git"
         (cl-letf (((symbol-function 'agent-repl-verbs--read-model)
-                   (lambda () (push 'model order) "sonnet"))
+                   (lambda (_repository) (push 'model order) "sonnet"))
                   ((symbol-function 'agent-repl-verbs--read-prompt)
                    (lambda (_p &optional _history-file _unseeded) (push 'prompt order) "commission")))
           ;; Act.
@@ -3616,7 +3619,7 @@ and the current workspace sits in the other repository."
                (lambda (p &optional _history-file _unseeded)
                  (should (equal p "Initial prompt (picked): "))
                  "do a thing"))
-              ((symbol-function 'agent-repl-verbs--read-model) (lambda () "haiku")))
+              ((symbol-function 'agent-repl-verbs--read-model) (lambda (_repository) "haiku")))
       ;; Act.
       (agent-repl-create-workspace-in-repository)
       ;; Assert.
@@ -3638,7 +3641,7 @@ and the current workspace sits in the other repository."
                 ((symbol-function 'agent-repl-verbs--read-prompt)
                  (lambda (&rest _) (push 'prompt asked) "do a thing"))
                 ((symbol-function 'agent-repl-verbs--read-model)
-                 (lambda () (push 'model asked) nil)))
+                 (lambda (_repository) (push 'model asked) nil)))
         ;; Act.
         (agent-repl-create-workspace-in-repository)
         ;; Assert.
@@ -3665,7 +3668,7 @@ and the current workspace sits in the other repository."
     (cl-letf (((symbol-function 'agent-repl-verbs--read-repository)
                (lambda () (agent-repl-test-verbs--repo-ref)))
               ((symbol-function 'agent-repl-verbs--read-prompt) (lambda (&rest _) "do a thing"))
-              ((symbol-function 'agent-repl-verbs--read-model) (lambda () (signal 'quit nil))))
+              ((symbol-function 'agent-repl-verbs--read-model) (lambda (_repository) (signal 'quit nil))))
       ;; Act / Assert.
       (should (agent-repl-test-verbs--quits-p #'agent-repl-create-workspace-in-repository))
       (should-not agent-repl-test-verbs--sent))))
@@ -3679,7 +3682,7 @@ and the current workspace sits in the other repository."
                  (lambda () (agent-repl-test-verbs--repo-ref)))
                 ((symbol-function 'agent-repl-verbs--read-prompt)
                  (lambda (&rest _) (setq prompt-asked t) "do a thing"))
-                ((symbol-function 'agent-repl-verbs--read-model) (lambda () (signal 'quit nil))))
+                ((symbol-function 'agent-repl-verbs--read-model) (lambda (_repository) (signal 'quit nil))))
         ;; Act.
         (agent-repl-test-verbs--quits-p #'agent-repl-create-workspace-in-repository)
         ;; Assert.
@@ -3719,7 +3722,7 @@ name are fixed."
                   (lambda (&rest _) (agent-repl-test-verbs--repo-ref)))
                  ((symbol-function 'agent-repl-verbs--explanation-engine-repository)
                   (lambda () (agent-repl-test-verbs--repo-ref)))
-                 ((symbol-function 'agent-repl-verbs--read-model) (lambda () nil))
+                 ((symbol-function 'agent-repl-verbs--read-model) (lambda (_repository) nil))
                  ((symbol-function 'agent-repl-verbs--read-prompt)
                   (lambda (_p &optional _history-file _unseeded) "do a thing"))
                  ((symbol-function 'agent-repl-verbs--read-required-prompt)
@@ -4652,26 +4655,142 @@ goes on is an async merge, which Emacs does not offer."
 
 ;;;; ---- Model selection ----
 
+(defconst agent-repl-test-verbs--catalog
+  '(:arm :success
+    :value (:config-dir "/home/me/.claude"
+            :catalog (:arm :known
+                      :value (:options ((:name "opus" :display-name "Opus 5.5" :description "For complex work")
+                                        (:name "sonnet" :display-name "Sonnet 5.5" :description ""))))))
+  "A decoded ListCreationModels answer offering opus and sonnet.")
+
+(defvar agent-repl-test-verbs--catalog-asks nil
+  "The repositories the stubbed ListCreationModels was asked about, newest first.")
+
+(defmacro agent-repl-test-verbs--with-catalog (answer &rest body)
+  "Run BODY with ListCreationModels answering ANSWER.
+ANSWER is a decoded response plist, or a function called with the request
+that answers or signals.  INFO and ERROR records land in
+`agent-repl-test-verbs--logged\='."
+  (declare (indent 1))
+  `(let ((agent-repl-test-verbs--catalog-asks nil)
+         (agent-repl-test-verbs--logged nil))
+     (cl-letf (((symbol-function 'agent-repl-verbs--conn) (lambda (&optional _ws) 'conn))
+               ((symbol-function 'agent-repl-rpc-list-creation-models-sync)
+                (lambda (_conn request &optional _timeout)
+                  (push (plist-get request :repository) agent-repl-test-verbs--catalog-asks)
+                  (let ((answer ,answer))
+                    (if (functionp answer) (funcall answer request) answer))))
+               ((symbol-function 'agent-repl--info) (agent-repl-test--record-into agent-repl-test-verbs--logged))
+               ((symbol-function 'agent-repl--error) (agent-repl-test--record-into agent-repl-test-verbs--logged)))
+       ,@body)))
+
+(ert-deftest agent-repl-verbs-read-model-offers-only-the-logins-models ()
+  "The picker completes over the creating login's catalog and requires a match."
+  (agent-repl-test-verbs--with-catalog agent-repl-test-verbs--catalog
+    (let (seen-candidates seen-require-match)
+      (cl-letf (((symbol-function 'completing-read)
+                 (lambda (_p collection &optional _pr require-match &rest _)
+                   (setq seen-candidates (all-completions "" collection)
+                         seen-require-match require-match)
+                   "sonnet")))
+        (should (equal (agent-repl-verbs--read-model (agent-repl-test-verbs--repo-ref)) "sonnet"))
+        (should (equal seen-candidates '("opus" "sonnet")))
+        (should (eq seen-require-match t))
+        (should (equal agent-repl-test-verbs--catalog-asks (list (agent-repl-test-verbs--repo-ref))))))))
+
+(ert-deftest agent-repl-verbs-read-model-names-the-login-in-its-prompt ()
+  "The picker's question names the login whose models it offers."
+  (agent-repl-test-verbs--with-catalog agent-repl-test-verbs--catalog
+    (let (seen-prompt)
+      (cl-letf (((symbol-function 'completing-read)
+                 (lambda (prompt &rest _) (setq seen-prompt prompt) "")))
+        (agent-repl-verbs--read-model (agent-repl-test-verbs--repo-ref))
+        (should (equal seen-prompt
+                       (format "Model for %s (blank = daemon default): "
+                               (abbreviate-file-name "/home/me/.claude"))))))))
+
+(ert-deftest agent-repl-verbs-read-model-annotates-each-model ()
+  "Each candidate is annotated with its display name and description."
+  (agent-repl-test-verbs--with-catalog agent-repl-test-verbs--catalog
+    (let (annotate)
+      (cl-letf (((symbol-function 'completing-read)
+                 (lambda (_p collection &rest _)
+                   (setq annotate (alist-get 'annotation-function
+                                             (cdr (funcall collection "" nil 'metadata))))
+                   "")))
+        (agent-repl-verbs--read-model (agent-repl-test-verbs--repo-ref))
+        (should (equal (funcall annotate "opus") "  Opus 5.5 -- For complex work"))
+        (should (equal (funcall annotate "sonnet") "  Sonnet 5.5"))))))
+
 (ert-deftest agent-repl-verbs-read-model-has-no-default-input ()
-  "The picker opens with nothing seeded."
-  (let ((seen-initial :unset))
-    (cl-letf (((symbol-function 'completing-read)
-               (lambda (_p _c &optional _pr _rm initial &rest _)
-                 (setq seen-initial initial) "")))
-      (should-not (agent-repl-verbs--read-model))
-      (should-not seen-initial))))
+  "The picker opens with nothing seeded, so a bare RET asks the daemon to choose."
+  (agent-repl-test-verbs--with-catalog agent-repl-test-verbs--catalog
+    (let ((seen-initial :unset))
+      (cl-letf (((symbol-function 'completing-read)
+                 (lambda (_p _c &optional _pr _rm initial &rest _)
+                   (setq seen-initial initial) "")))
+        (should-not (agent-repl-verbs--read-model (agent-repl-test-verbs--repo-ref)))
+        (should-not seen-initial)))))
 
 (ert-deftest agent-repl-verbs-read-model-answers-the-typed-model ()
-  "A typed model is returned trimmed."
-  (cl-letf (((symbol-function 'completing-read)
-             (lambda (&rest _) " opus ")))
-    (should (equal (agent-repl-verbs--read-model) "opus"))))
+  "A picked model is returned trimmed."
+  (agent-repl-test-verbs--with-catalog agent-repl-test-verbs--catalog
+    (cl-letf (((symbol-function 'completing-read) (lambda (&rest _) " opus ")))
+      (should (equal (agent-repl-verbs--read-model (agent-repl-test-verbs--repo-ref)) "opus")))))
 
-(ert-deftest agent-repl-verbs-read-model-blank-asks-the-daemon-to-choose ()
-  "A blank answer is nil, the daemon's default."
-  (cl-letf (((symbol-function 'completing-read)
-             (lambda (&rest _) "   ")))
-    (should-not (agent-repl-verbs--read-model))))
+(ert-deftest agent-repl-verbs-read-model-honors-a-blank-answer ()
+  "A blank answer still asks the daemon to choose."
+  (agent-repl-test-verbs--with-catalog agent-repl-test-verbs--catalog
+    (cl-letf (((symbol-function 'completing-read) (lambda (&rest _) "   ")))
+      (should-not (agent-repl-verbs--read-model (agent-repl-test-verbs--repo-ref))))))
+
+(ert-deftest agent-repl-verbs-read-model-refuses-a-login-with-no-catalog ()
+  "A login no session has served a catalog for offers nothing, and says so."
+  (agent-repl-test-verbs--with-catalog
+      '(:arm :success :value (:config-dir "/home/me/.claude-work" :catalog (:arm :unknown :value nil)))
+    (cl-letf (((symbol-function 'completing-read)
+               (lambda (&rest _) (error "no picker opens without a catalog"))))
+      (let ((err (should-error (agent-repl-verbs--read-model (agent-repl-test-verbs--repo-ref))
+                               :type 'user-error)))
+        (should (string-match-p "no models are known yet for the login .*\\.claude-work" (cadr err)))
+        (should (member "elisp.verbs.read-model-refused config-dir=/home/me/.claude-work cause=catalog-unknown"
+                        agent-repl-test-verbs--logged))))))
+
+(ert-deftest agent-repl-verbs-read-model-signals-a-failed-transport ()
+  "A catalog ask the transport fails is recorded at ERROR and signalled."
+  (agent-repl-test-verbs--with-catalog
+      (lambda (_request) (signal 'agent-repl-connect-error (list '(:kind :timeout :message "no answer"))))
+    (let ((err (should-error (agent-repl-verbs--read-model (agent-repl-test-verbs--repo-ref)) :type 'error)))
+      (should (string-match-p "could not ask the daemon which models it may create with" (cadr err)))
+      (should (cl-some (lambda (m) (string-match-p "\\`elisp.verbs.creation-models-failed repository=.* cause=agent-repl-connect-error detail=.*no answer" m))
+                       agent-repl-test-verbs--logged)))))
+
+(ert-deftest agent-repl-verbs-read-model-signals-the-daemons-error-arm ()
+  "The daemon's error arm is a failed ask, recorded at ERROR and signalled."
+  (agent-repl-test-verbs--with-catalog
+      '(:arm :error :value (:cause (:arm :unknown-repository :value nil)))
+    (let ((err (should-error (agent-repl-verbs--read-model (agent-repl-test-verbs--repo-ref)) :type 'error)))
+      (should (string-match-p "the daemon could not say which models" (cadr err)))
+      (should (cl-some (lambda (m) (string-match-p "\\`elisp.verbs.creation-models-failed repository=.* cause=error-arm response=" m))
+                       agent-repl-test-verbs--logged)))))
+
+(ert-deftest agent-repl-verbs-create-refusal-words-a-model-not-in-catalog ()
+  "A `model_not_in_catalog' refusal names the model, the login and what it offers."
+  (should (equal (agent-repl-verbs--create-refusal-sentence
+                  '(:cause (:arm :model-not-in-catalog
+                            :value (:model "gpt-9" :config-dir "/home/me/.claude"
+                                    :options ((:name "opus" :display-name "Opus" :description "")
+                                              (:name "sonnet" :display-name "Sonnet" :description ""))))))
+                 (format "the login %s does not offer the model \"gpt-9\"; it offers opus, sonnet"
+                         (abbreviate-file-name "/home/me/.claude")))))
+
+(ert-deftest agent-repl-verbs-create-refusal-words-a-model-catalog-unknown ()
+  "A `model_catalog_unknown' refusal names the login and the model."
+  (should (equal (agent-repl-verbs--create-refusal-sentence
+                  '(:cause (:arm :model-catalog-unknown
+                            :value (:model "opus" :config-dir "/home/me/.claude"))))
+                 (format "no models are known yet for the login %s, so the model \"opus\" could not be checked; create without a model"
+                         (abbreviate-file-name "/home/me/.claude")))))
 
 (ert-deftest agent-repl-verbs-register-repository-switched-away-from-moves-nothing ()
   "Registering a repository withdraws its landing on a switch in Emacs too."
