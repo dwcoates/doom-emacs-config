@@ -149,6 +149,12 @@ type Workspace struct {
 	// counts the idle time since work last finished and stays stable across
 	// mere selection, navigation, and the start of the next turn.
 	LastTurnEndedAt *time.Time
+	// LastTurnStartedAt is when the workspace's most recent turn STARTED, of
+	// any kind and running or closed: derived on read from the turns'
+	// started_at, never stored on the row. Nil when no turn of the workspace
+	// has started. The roster's last-turn-started instant reads it
+	// (frontend.v1.RosterRowLastTurnStarted).
+	LastTurnStartedAt *time.Time
 	// LastAskedAt is when a chat thread was last asked a question: its newest
 	// question turn's start, derived on read from the turns, never stored on
 	// the row. Nil for a thread never asked one, and for every agent

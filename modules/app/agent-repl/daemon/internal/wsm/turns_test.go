@@ -761,6 +761,67 @@ func TestTheWorkspaceReadAnswersItsLastTurnEnd(t *testing.T) {
 	}
 }
 
+// TestWorkspaceLastTurnStartedIsTheNewestStart pins the derived
+// LastTurnStartedAt: the newest started_at of the workspace's own turns,
+// open or closed, nil with none.
+func TestWorkspaceLastTurnStartedIsTheNewestStart(t *testing.T) {
+	hour, twoHours := time.Hour, 2*time.Hour
+	type turnSpec struct {
+		other  bool
+		start  time.Duration
+		closed *time.Duration
+	}
+	tests := []struct {
+		name  string
+		turns []turnSpec
+		want  *time.Duration
+	}{
+		{name: "no turn at all", want: nil},
+		{name: "an open turn counts", turns: []turnSpec{{start: hour}}, want: &hour},
+		{name: "a closed turn counts", turns: []turnSpec{{start: hour, closed: &twoHours}}, want: &hour},
+		{name: "the newest of several starts", turns: []turnSpec{{start: hour, closed: &hour}, {start: twoHours, closed: &twoHours}}, want: &twoHours},
+		{name: "another workspace's later start", turns: []turnSpec{{start: hour}, {other: true, start: twoHours}}, want: &hour},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			ctx := context.Background()
+			s, _ := testStore(t)
+			ws := testWorkspace(t, s)
+			other := testWorkspaceNamed(t, s, "other")
+			for _, spec := range tc.turns {
+				owner := ws.ID
+				if spec.other {
+					owner = other.ID
+				}
+				id := NewTurnID()
+				if err := s.PutTurn(ctx, Turn{ID: id, Workspace: owner, Text: "go", Origin: "emacs", StartedAt: instant.Add(spec.start)}); err != nil {
+					t.Fatalf("PutTurn: %v", err)
+				}
+				if spec.closed != nil {
+					if err := s.CloseTurn(ctx, id, instant.Add(*spec.closed), CloseCompleted); err != nil {
+						t.Fatalf("CloseTurn: %v", err)
+					}
+				}
+			}
+
+			// Act.
+			got, err := s.Workspace(ctx, ws.ID)
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("Workspace: %v", err)
+			}
+			switch {
+			case tc.want == nil && got.LastTurnStartedAt != nil:
+				t.Fatalf("last turn start = %v, want none", got.LastTurnStartedAt)
+			case tc.want != nil && (got.LastTurnStartedAt == nil || !got.LastTurnStartedAt.Equal(instant.Add(*tc.want))):
+				t.Fatalf("last turn start = %v, want %v", got.LastTurnStartedAt, instant.Add(*tc.want))
+			}
+		})
+	}
+}
+
 // TestPutTurnDoesNotPullLastActivityBackward pins the MONOTONIC guard: a fleet
 // rollout re-PUTs an in-flight turn to mark it displaced, carrying the turn's
 // ORIGINAL (older) start. That re-put must not drag the stamp back to a past

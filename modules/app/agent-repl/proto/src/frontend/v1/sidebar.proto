@@ -1621,6 +1621,11 @@ message RosterRow {
   // RosterRowLastTurnBoundary, which carries the field's whole contract.
   optional RosterRowLastTurnBoundary last_turn_boundary = 70;
 
+  // When one of this workspace's turns most recently STARTED, running or not.
+  // UNSET = no turn of the workspace has started yet. See
+  // RosterRowLastTurnStarted, which carries the field's whole contract.
+  optional RosterRowLastTurnStarted last_turn_started = 71;
+
   // When this workspace was CLOSED, and by whom: the durable close record the
   // daemon keeps across restarts of every client. UNSET while the workspace
   // is open. See RosterRowClosure, which carries the field's whole contract.
@@ -1947,6 +1952,21 @@ message RosterRowLastTurnEnded {
 // daemon restart an idle workspace still carries its last end.
 message RosterRowLastTurnBoundary {
   // The boundary instant, epoch milliseconds on the daemon's clock.
+  int64 at_ms = 1;
+}
+
+// When the workspace's most recent turn STARTED, in epoch MILLISECONDS: the
+// start instant of its latest turn, running or closed, read from the durable
+// turn record, so it survives a restart of the daemon and of every client.
+//
+// It is START RECENCY, and it exists so a client can find the workspace that
+// most recently began work -- the editor's jump to the workspace that most
+// recently started a turn. Unlike RosterRowLastTurnBoundary it never reads as
+// an end once the turn closes, so a workspace that started later but ended
+// earlier still ranks by its start. Clients order by it and never draw it.
+// Selecting the workspace does not move it.
+message RosterRowLastTurnStarted {
+  // The instant the workspace's most recent turn started, epoch milliseconds.
   int64 at_ms = 1;
 }
 
