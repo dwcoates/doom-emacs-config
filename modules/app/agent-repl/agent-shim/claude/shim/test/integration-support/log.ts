@@ -48,8 +48,19 @@ export type LogPredicate = (record: LogRecord) => boolean;
 export interface RecordSink {
   /** Every record seen so far, in the order the shim wrote them. */
   records(): LogRecord[];
-  /** The first record matching `predicate`, awaiting one if none has arrived. */
+  /**
+   * The first record matching `predicate`, awaiting one if none has arrived.
+   * Once the records have ended ({@link endOfRecords}) a wait no record
+   * matched rejects, naming why they ended.
+   */
   record(predicate: LogPredicate): Promise<LogRecord>;
+  /**
+   * NO RECORD CAN ARRIVE AFTER THIS: the writer is gone and everything it
+   * wrote has been read. Every wait still pending rejects with REASON at once,
+   * and so does every later wait no record already matches, rather than
+   * hanging to the test's budget.
+   */
+  endOfRecords(reason: string): void;
   /** Stop reading. */
   close(): void;
 }
@@ -57,6 +68,17 @@ export interface RecordSink {
 interface Waiter {
   readonly predicate: LogPredicate;
   readonly resolve: (record: LogRecord) => void;
+  readonly reject: (error: Error) => void;
+}
+
+/** The error a wait gets once its sink's records have ended unmatched. */
+function endedUnmatched(reason: string): Error {
+  return new Error(`no awaited record can arrive any more: ${reason}`);
+}
+
+/** Rejects every waiter in WAITERS with REASON and empties it. */
+function rejectAll(waiters: Waiter[], reason: string): void {
+  for (const waiter of waiters.splice(0)) waiter.reject(endedUnmatched(reason));
 }
 
 /**
@@ -73,6 +95,8 @@ export class LogTail implements RecordSink {
   private offset = 0;
   private carry = "";
   private closed = false;
+  /** Why the records ended ({@link endOfRecords}), or null while they flow. */
+  private ended: string | null = null;
   private readonly redrain = new ReDrain(() => {
     this.drain();
   });
@@ -106,8 +130,9 @@ export class LogTail implements RecordSink {
     this.drain();
     const already = this.parsed.find(predicate);
     if (already !== undefined) return already;
-    const pending = new Promise<LogRecord>((resolve) => {
-      this.waiters.push({ predicate, resolve });
+    if (this.ended !== null) throw endedUnmatched(this.ended);
+    const pending = new Promise<LogRecord>((resolve, reject) => {
+      this.waiters.push({ predicate, resolve, reject });
     });
     // The watcher is the fast path; the re-drain covers an FSEvents
     // notification the kernel never delivers, which would otherwise hang the
@@ -117,6 +142,15 @@ export class LogTail implements RecordSink {
     // registered, so re-check the level now that the edge is armed.
     this.drain();
     return pending;
+  }
+
+  /** The writer has exited: read what it left, then end every wait. */
+  endOfRecords(reason: string): void {
+    if (this.ended !== null) return;
+    this.drain();
+    this.ended = reason;
+    this.redrain.stop();
+    rejectAll(this.waiters, reason);
   }
 
   /** Stop watching and release the descriptor. */
@@ -196,10 +230,16 @@ export class StreamRecords implements RecordSink {
   private readonly parsed: LogRecord[] = [];
   private readonly waiters: Waiter[] = [];
   private carry = "";
+  /** Why the records ended ({@link endOfRecords}), or null while they flow. */
+  private ended: string | null = null;
 
   constructor(private readonly source: NodeJS.ReadableStream) {
     source.on("data", (chunk: Buffer | string) => {
       this.consume(typeof chunk === "string" ? chunk : chunk.toString("utf8"));
+    });
+    // A pipe's end is every byte its writers will ever send delivered.
+    source.on("end", () => {
+      this.endOfRecords("the shim's log pipe ended");
     });
   }
 
@@ -210,9 +250,16 @@ export class StreamRecords implements RecordSink {
   async record(predicate: LogPredicate): Promise<LogRecord> {
     const already = this.parsed.find(predicate);
     if (already !== undefined) return already;
-    return new Promise<LogRecord>((resolve) => {
-      this.waiters.push({ predicate, resolve });
+    if (this.ended !== null) throw endedUnmatched(this.ended);
+    return new Promise<LogRecord>((resolve, reject) => {
+      this.waiters.push({ predicate, resolve, reject });
     });
+  }
+
+  endOfRecords(reason: string): void {
+    if (this.ended !== null) return;
+    this.ended = reason;
+    rejectAll(this.waiters, reason);
   }
 
   close(): void {

@@ -308,6 +308,17 @@ export async function spawnShim(options: SpawnShimOptions = {}): Promise<ShimHan
   // knows which sink it got.
   const log: RecordSink =
     pipeEnd === null ? LogTail.open(dirs.logPath) : new StreamRecords(pipeEnd);
+  // THE SHIM'S EXIT ENDS ITS FILE'S RECORDS: nothing else writes that file,
+  // so a wait still pending then can never be satisfied and rejects with the
+  // exit at once (RecordSink.endOfRecords). A pipe's records end on the
+  // pipe's own end, once every byte in it has been read.
+  if (pipeEnd === null) {
+    void exited.then((exit) => {
+      log.endOfRecords(
+        `the shim exited (code ${String(exit.code)}, signal ${String(exit.signal)}); its stderr:\n${stderrText}`,
+      );
+    });
+  }
   const handle: ShimHandle = {
     dirs,
     child,
