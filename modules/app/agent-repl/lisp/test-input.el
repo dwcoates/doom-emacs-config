@@ -1593,15 +1593,15 @@ workspace from the working directory, so no source tag rides it."
 ;; web view host (`agent-repl--input-notify'), whose footer draws it as a
 ;; transient line and lets it lapse (webapp/test/footer/editor-notice.test.ts).
 
-(ert-deftest agent-repl-input-mode-draws-no-mode-line ()
-  "The composer draws no mode line: its line is the composer's own."
+(ert-deftest agent-repl-input-mode-draws-the-border-as-its-mode-line ()
+  "The composer's mode line is its border's bottom row and shows nothing else."
   ;; Arrange.
   (with-temp-buffer
     ;; Act.
     (agent-repl-input-mode)
     ;; Assert.
     (should (local-variable-p 'mode-line-format))
-    (should (null mode-line-format))))
+    (should (eq mode-line-format agent-repl--input-border-line-format))))
 
 (ert-deftest agent-repl-input-mode-leaves-other-buffers-their-mode-line ()
   "Only the composer loses its mode line; every other buffer keeps its own."
@@ -1616,8 +1616,8 @@ workspace from the working directory, so no source tag rides it."
           (should (buffer-local-value 'mode-line-format other)))
       (kill-buffer other))))
 
-(ert-deftest agent-repl-input-mode-window-has-no-mode-line ()
-  "A window showing the composer gives no line to a mode line."
+(ert-deftest agent-repl-input-mode-window-border-row-spans-its-window ()
+  "Evaluated with the composer's window selected, as redisplay evaluates it, the border row spans that window."
   ;; Arrange.
   (let ((buffer (generate-new-buffer " *agent-repl-test-composer-window*"))
         (config (current-window-configuration)))
@@ -1625,11 +1625,13 @@ workspace from the working directory, so no source tag rides it."
         (progn
           (with-current-buffer buffer (agent-repl-input-mode))
           (delete-other-windows)
-          (let ((win (split-window nil nil 'below)))
+          (let ((win (split-window nil nil 'right)))
             ;; Act.
             (set-window-buffer win buffer)
-            ;; Assert.
-            (should (= 0 (window-mode-line-height win)))))
+            (let ((line (with-selected-window win (eval (cadr mode-line-format) t))))
+              ;; Assert.
+              (should (equal (get-text-property 0 'display line)
+                             `(space :width (,(window-pixel-width win)) :height (1)))))))
       (set-window-configuration config)
       (kill-buffer buffer))))
 
@@ -1695,15 +1697,103 @@ workspace from the working directory, so no source tag rides it."
           (should (null sent)))
       (kill-buffer buffer))))
 
-(ert-deftest agent-repl-input-mode-draws-no-header-line ()
-  "The composer draws no header line, so no Settings or Help line tops it."
+(ert-deftest agent-repl-input-mode-draws-the-border-as-its-header-line ()
+  "The composer's header line is its border's top row, so no Settings or Help line tops it."
   ;; Arrange.
   (with-temp-buffer
     (setq-local header-line-format "stale")
     ;; Act.
     (agent-repl-input-mode)
     ;; Assert.
-    (should (null header-line-format))))
+    (should (eq header-line-format agent-repl--input-border-line-format))))
+
+;;;; ---- The composer's border ----
+
+(ert-deftest agent-repl-input-border-color-is-the-ground-lifted ()
+  "The dark ground #171717 lifted 5% toward white is the border's #232323."
+  ;; Arrange.
+  (let ((agent-repl-input-background "#171717"))
+    ;; Act / Assert.
+    (should (equal (agent-repl--input-border-color) "#232323"))))
+
+(ert-deftest agent-repl-input-border-color-follows-the-ground ()
+  "The border is derived from the ground alone: a black ground gives #0d0d0d."
+  ;; Arrange.
+  (let ((agent-repl-input-background "#000000"))
+    ;; Act / Assert.
+    (should (equal (agent-repl--input-border-color) "#0d0d0d"))))
+
+(ert-deftest agent-repl-input-border-color-lifts-each-channel ()
+  "Each channel is lifted on its own, as the webapp's srgb color-mix lifts it."
+  ;; Arrange.
+  (let ((agent-repl-input-background "#ff0000"))
+    ;; Act / Assert.
+    (should (equal (agent-repl--input-border-color) "#ff0d0d"))))
+
+(ert-deftest agent-repl-input-border-color-refuses-a-ground-that-is-not-hex ()
+  "A ground that is not #rrggbb breaks the defcustom's contract and signals."
+  ;; Arrange.
+  (let ((agent-repl-input-background "dark gray"))
+    ;; Act / Assert.
+    (should (equal (cadr (should-error (agent-repl--input-border-color)))
+                   "agent-repl: input background \"dark gray\" is not a #rrggbb hex string"))))
+
+(ert-deftest agent-repl-input-border-line-is-one-row-of-the-border-color ()
+  "The border line is one pixel high, in the border's color, as wide as the window."
+  ;; Arrange.
+  (let ((agent-repl-input-background "#171717"))
+    ;; Act.
+    (let ((line (agent-repl--input-border-line)))
+      ;; Assert.
+      (should (equal (list (get-text-property 0 'face line) (get-text-property 0 'display line))
+                     (list '(:background "#232323")
+                           `(space :width (,(window-pixel-width)) :height (1))))))))
+
+(ert-deftest agent-repl-input-mode-holds-its-fringes-at-the-border-width ()
+  "The composer's fringes are the border's sides, held at one pixel through window changes."
+  ;; Arrange.
+  (let ((fixed nil))
+    (cl-letf (((symbol-function 'agent-repl-dividers-fix-fringes)
+               (lambda (buf width) (push (list buf width) fixed))))
+      (with-temp-buffer
+        ;; Act.
+        (agent-repl-input-mode)
+        ;; Assert.
+        (should (equal fixed (list (list (current-buffer) 1))))))))
+
+(ert-deftest agent-repl-input-mode-paints-its-fringes-the-border-color ()
+  "The composer's fringes wear the border's color, over the ground's fringe remap."
+  ;; Arrange.
+  (let ((agent-repl-input-background "#171717"))
+    (with-temp-buffer
+      ;; Act.
+      (agent-repl-input-mode)
+      ;; Assert.
+      (should (equal (cadr (assq 'fringe face-remapping-alist)) '(:background "#232323"))))))
+
+(ert-deftest agent-repl-input-mode-insets-its-text-past-the-border ()
+  "Every screen line starts with a stretch of ground, so the text sits eight pixels in."
+  ;; Arrange.
+  (with-temp-buffer
+    ;; Act.
+    (agent-repl-input-mode)
+    ;; Assert.
+    (should (equal (list (get-text-property 0 'display line-prefix)
+                         (get-text-property 0 'display wrap-prefix))
+                   '((space :width (7)) (space :width (7)))))))
+
+(ert-deftest agent-repl-input-mode-logs-the-border ()
+  "Drawing the border is recorded through the canonical log helper with its color and width."
+  ;; Arrange.
+  (let ((agent-repl-input-background "#171717")
+        (logs nil))
+    (cl-letf (((symbol-function 'agent-repl--log) (agent-repl-test--record-into logs)))
+      (with-temp-buffer
+        ;; Act.
+        (agent-repl-input-mode)))
+    ;; Assert.
+    (should (seq-some (lambda (line) (string-match-p "\\`elisp.input.border .*color=#232323 width=1" line))
+                      logs))))
 
 (ert-deftest agent-repl-input-mode-enables-visual-line-mode ()
   "The composer turns on `visual-line-mode' so Evil moves by screen line."
@@ -1728,14 +1818,14 @@ workspace from the working directory, so no source tag rides it."
         (should (equal remapped "#123456"))))))
 
 (ert-deftest agent-repl-input-background-is-the-webapp-composer-color ()
-  "The composer's default background is the webapp's dark `--composer-bg'.
-That is the dark sidebar's ground `--sidebar-bg', #1a1a1a.
+  "The composer's default background is the webapp's dark `--sidebar-ground'.
+That is the ground the sidebar, footer and composer share, #171717.
 The ert suite may not read webapp/src/styles.css, so the shared value is
 pinned on both sides: here, and in webapp/test/styles.test.ts."
   ;; Arrange / Act.
   (let ((background (eval (car (get 'agent-repl-input-background 'standard-value)))))
     ;; Assert.
-    (should (equal background "#1a1a1a"))))
+    (should (equal background "#171717"))))
 
 (ert-deftest agent-repl-input-mode-wraps-at-word-boundaries ()
   "The composer soft-wraps long lines at word boundaries."

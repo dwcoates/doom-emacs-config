@@ -330,7 +330,7 @@ binding form of the module and every one of its keymaps.")
 (defconst agent-repl-input-help-button-background "#202020"
   "A help button's fill: a little darker than the sidebar's selected row.
 The webapp fills the selected workspace row with `--row-highlight-tint', 69%
-of the dark `--card' over `--sidebar-bg' (#262626); a button sits between
+of the dark `--card' over `--sidebar-base' (#262626); a button sits between
 that and the bar's ground, so it reads as a quieter cousin of the
 selection.  test-input-help.el checks it stays between the two, and
 webapp/test/styles.test.ts pins the selected row's color.")
