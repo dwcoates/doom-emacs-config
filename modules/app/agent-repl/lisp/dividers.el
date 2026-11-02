@@ -13,8 +13,9 @@
 ;; right and below) and, where a frame has no divider, in
 ;; `vertical-border'.  Both are frame-level faces no buffer can remap, so
 ;; the frame's own copy of each is set to `agent-repl-input-background',
-;; the composer's color and the dark sidebar's `--sidebar-ground'.  The dividers keep their
-;; width, so a window edge is still grabbed and dragged where it was.
+;; the composer's color and the dark sidebar's `--sidebar-ground'.  The
+;; dividers keep their width, so a window edge is still grabbed and
+;; dragged where it was.
 ;;
 ;; THE FRAME'S OWN COLORS ARE KEPT IN THE MARK.  A face set with no frame
 ;; (config.el's `vertical-border') has no spec to recalculate back to, so
@@ -37,11 +38,13 @@
 ;; displayed in takes up.  A window can also come back with the fringes it
 ;; was saved with (a workspace switch restores its window configuration), so
 ;; every window change gives each window showing such a buffer zero fringes
-;; again.  Emacs's own web views (the host, the sidebar) lose their fringes
-;; as webhost.el makes them, a slot as its mode turns on.  The page is
-;; fitted to its window's body (frontend.el), so it fills the window to the
-;; divider.  The composer keeps its fringes, which it paints its own
-;; background.
+;; again.  The same fit holds any buffer to a fixed fringe width of its
+;; own (`agent-repl-dividers-fix-fringes'), zero for a web view.  Emacs's
+;; own web views (the host, the sidebar) lose their fringes as webhost.el
+;; makes them, a slot as its mode turns on.  The page is fitted to its
+;; window's body (frontend.el), so it fills the window to the divider.
+;; The composer holds its fringes at one pixel, painted as its border
+;; (input.el).
 
 ;;; Code:
 
@@ -104,24 +107,25 @@ A frame not hidden is left as it is."
       (set-face-attribute (car entry) frame :foreground (cdr entry)))
     (set-frame-parameter frame agent-repl--dividers-hidden nil)))
 
-(defvar-local agent-repl--dividers-no-fringes nil
-  "Non-nil in a web view buffer that has no fringes.")
+(defvar-local agent-repl--dividers-fixed-fringe nil
+  "The width in pixels of each fringe every window showing this buffer wears.
+Nil when the buffer wears the frame\='s fringes; zero in a web view.")
 
 (defun agent-repl--dividers-fit-fringes (frame)
-  "Give every window of FRAME showing a fringeless web view zero fringes.
+  "Give every window of FRAME showing a buffer with fixed fringes those fringes.
 A window restored with the fringes it was saved with is the one changed;
-one already at zero is left alone."
+one already at its buffer\='s width is left alone."
   (dolist (win (window-list frame 'no-minibuf))
-    (when (and (buffer-local-value 'agent-repl--dividers-no-fringes (window-buffer win))
-               (not (equal (seq-take (window-fringes win) 2) '(0 0))))
-      (agent-repl--log agent-repl--dividers-log-scope
-                       "elisp.dividers.fit-fringes window=%S buffer=%s from=%S"
-                       win (buffer-name (window-buffer win)) (window-fringes win))
-      (set-window-fringes win 0 0))))
+    (let ((width (buffer-local-value 'agent-repl--dividers-fixed-fringe (window-buffer win))))
+      (when (and width (not (equal (seq-take (window-fringes win) 2) (list width width))))
+        (agent-repl--log agent-repl--dividers-log-scope
+                         "elisp.dividers.fit-fringes window=%S buffer=%s width=%S from=%S"
+                         win (buffer-name (window-buffer win)) width (window-fringes win))
+        (set-window-fringes win width width)))))
 
 (defun agent-repl-dividers-sync (&optional frame)
   "Hide FRAME\='s dividers while it shows agent-repl, restore them otherwise.
-Every window of FRAME showing a fringeless web view gets zero fringes.
+Every window of FRAME showing a buffer with fixed fringes gets them.
 FRAME defaults to the selected frame; a dead one is left alone.
 Registered on `window-state-change-functions\=', which calls it with FRAME."
   (let ((frame (or frame (selected-frame))))
@@ -155,20 +159,19 @@ the frame is painted afresh.  Every other face kept its color from before."
           (agent-repl--dividers-paint frame)
           (set-frame-parameter frame agent-repl--dividers-hidden rekept))))))
 
-(defun agent-repl-dividers-webview-fringes (buf on)
-  "Give web view buffer BUF no fringes when ON, or the frame\='s back.
-ON, BUF\='s fringe widths are buffer-local zeros; off, they are the
-frame\='s again.  Every window showing BUF takes the widths at once.
-Called for each of Emacs\='s own web views as it is made (webhost.el) and
-for a workspace\='s slot as `agent-repl-frontend-webview-mode\=' turns on
-or off."
-  (let ((width (and on 0))
-        (windows (get-buffer-window-list buf nil t)))
+(defun agent-repl-dividers-fix-fringes (buf width)
+  "Hold BUF\='s fringes at WIDTH pixels each, or give it the frame\='s back.
+WIDTH an integer, BUF\='s fringe widths are buffer-local WIDTHs, which
+every later window change holds it to; nil, they are the frame\='s again.
+Every window showing BUF takes the widths at once.  Called with zero for
+each of Emacs\='s own web views as it is made (webhost.el) and for a
+workspace\='s slot as `agent-repl-frontend-webview-mode\=' turns on or off."
+  (let ((windows (get-buffer-window-list buf nil t)))
     (agent-repl--log agent-repl--dividers-log-scope
-                     "elisp.dividers.webview-fringes buffer=%s width=%S windows=%d"
+                     "elisp.dividers.fix-fringes buffer=%s width=%S windows=%d"
                      (buffer-name buf) width (length windows))
     (with-current-buffer buf
-      (setq agent-repl--dividers-no-fringes on)
+      (setq agent-repl--dividers-fixed-fringe width)
       (if width
           (setq-local left-fringe-width width
                       right-fringe-width width)
@@ -179,7 +182,7 @@ or off."
 
 (defun agent-repl--dividers-on-webview-mode ()
   "Follow `agent-repl-frontend-webview-mode\=' turning on or off in its buffer."
-  (agent-repl-dividers-webview-fringes (current-buffer) agent-repl-frontend-webview-mode))
+  (agent-repl-dividers-fix-fringes (current-buffer) (and agent-repl-frontend-webview-mode 0)))
 
 (add-hook 'agent-repl-frontend-webview-mode-hook #'agent-repl--dividers-on-webview-mode)
 (add-hook 'window-state-change-functions #'agent-repl-dividers-sync)
@@ -191,7 +194,7 @@ or off."
   (when (or (buffer-local-value 'agent-repl-frontend-webview-mode buf)
             (eq buf (agent-repl-sidebar-view-buffer))
             (eq buf (agent-repl-webhost-buffer)))
-    (agent-repl-dividers-webview-fringes buf t)))
+    (agent-repl-dividers-fix-fringes buf 0)))
 
 (provide 'dividers)
 ;;; dividers.el ends here
