@@ -20,11 +20,6 @@ html.agent-repl-host body {
   position: relative;
 }
 
-/* Each workspace page draws its own bottom-edge shadow. */
-html.agent-repl-host body::after {
-  content: none;
-}
-
 /* The stack of workspace pages fills the window above the gate's band. The
    sidebar is a web view of its own (host/sidebar-page.ts). */
 .webhost-frames {
