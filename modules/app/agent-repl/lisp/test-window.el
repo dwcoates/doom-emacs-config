@@ -738,9 +738,11 @@ naturally."
 ;;;; ---- Panel-finder log routing ----
 
 (ert-deftest agent-repl-test-window-panel-window-placeholder-logs-globally ()
-  "Asking about a persp PLACEHOLDER's panel logs against the global sink.
+  "Asking about a persp PLACEHOLDER's panel asks for the central sink explicitly.
 The workspace-switch path queries this finder for whatever perspective
-persp-mode activated, and \"main\"/\"none\" own no durable log sink."
+persp-mode activated, and \"main\"/\"none\" own no durable log sink.  A bare
+nil scope would leave the record to the ambient log context, and outside
+one that is a routing error."
   (agent-repl-test--with-clean-state
     ;; Arrange
     (let ((logged 'no-record))
@@ -750,7 +752,111 @@ persp-mode activated, and \"main\"/\"none\" own no durable log sink."
         ;; Act
         (agent-repl-window--panel-window :input "main"))
       ;; Assert
-      (should (null logged)))))
+      (should (eq logged agent-repl--global-log-scope)))))
+
+(defmacro agent-repl-window-test--capturing-log-outside-context (current-ws records unroutable &rest body)
+  "Run BODY through the real logging ladder outside every log context.
+The current perspective reads as CURRENT-WS, no request or buffer owns the
+record, and durable writes persist at debug.  Each written record's text is
+pushed onto RECORDS and each workspace the ladder could not route onto
+UNROUTABLE, both oldest first once BODY returns.  RECORDS and UNROUTABLE
+are the caller's own variables, so they hold the captures afterwards."
+  (declare (indent 3))
+  `(let ((agent-repl--log-context-workspace nil)
+         (agent-repl-log-to-file t)
+         (agent-repl-log-file-level 'debug))
+     (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () ,current-ws))
+               ((symbol-function 'agent-repl--buffer-owner) (lambda (_buffer) nil))
+               ((symbol-function 'agent-repl--do-log-to-file)
+                (lambda (text &optional _ws) (push text ,records)))
+               ((symbol-function 'agent-repl--note-unroutable-log-workspace)
+                (lambda (ws) (push ws ,unroutable))))
+       (setq ,records nil
+             ,unroutable nil)
+       ,@body
+       (setq ,records (nreverse ,records)
+             ,unroutable (nreverse ,unroutable)))))
+
+(defun agent-repl-window-test--record-matching (records regexp)
+  "Return the first record text in RECORDS whose content matches REGEXP."
+  (seq-find (lambda (text) (string-match-p regexp text)) records))
+
+(ert-deftest agent-repl-test-window-panel-window-without-workspace-raises-no-routing-error ()
+  "With no workspace current at all, the finder's records route centrally.
+Before the fix the finder's scope was nil, and outside a log context nil
+has nowhere to go, so the ladder raised `log-routing-error'."
+  (agent-repl-test--with-clean-state
+    (let (records unroutable)
+      ;; Arrange / Act
+      (agent-repl-window-test--capturing-log-outside-context nil records unroutable
+        (should-not (agent-repl-window--panel-window :view)))
+      ;; Assert
+      (should-not unroutable)
+      (should-not (agent-repl-window-test--record-matching records "log-routing-error")))))
+
+(ert-deftest agent-repl-test-window-panel-window-without-workspace-records-the-lookup ()
+  "With no workspace current, the finder's own record still reaches the log."
+  (agent-repl-test--with-clean-state
+    (let (records unroutable)
+      ;; Arrange / Act
+      (agent-repl-window-test--capturing-log-outside-context nil records unroutable
+        (agent-repl-window--panel-window :view))
+      ;; Assert
+      (should (agent-repl-window-test--record-matching
+               records "window--panel-window: ws=nil kind=:view buffer=nil")))))
+
+(ert-deftest agent-repl-test-window-panel-buffer-without-workspace-raises-no-routing-error ()
+  "`--panel-buffer' with no workspace current answers nil and routes centrally."
+  (agent-repl-test--with-clean-state
+    (let (records unroutable)
+      ;; Arrange / Act
+      (agent-repl-window-test--capturing-log-outside-context nil records unroutable
+        (should-not (agent-repl-window--panel-buffer :input)))
+      ;; Assert
+      (should-not unroutable)
+      (should (agent-repl-window-test--record-matching
+               records "window--panel-buffer: ws=nil kind=:input key=:input-buffer"))
+      (should-not (agent-repl-window-test--record-matching records "log-routing-error")))))
+
+(ert-deftest agent-repl-test-window-panel-window-main-outside-context-raises-no-routing-error ()
+  "The startup shape: \"main\" is current and no log context is bound.
+This is the sidebar's offset (`agent-repl-sidebar-view-tell-offset') on
+`window-size-change-functions', asking for the view window right after
+startup activated persp-mode's \"main\" (2026-11-02)."
+  (agent-repl-test--with-clean-state
+    (let (records unroutable)
+      ;; Arrange / Act
+      (agent-repl-window-test--capturing-log-outside-context "main" records unroutable
+        (should-not (agent-repl-window--panel-window :view)))
+      ;; Assert
+      (should-not unroutable)
+      (should-not (agent-repl-window-test--record-matching records "log-routing-error")))))
+
+(ert-deftest agent-repl-test-window-panel-window-main-outside-context-records-the-lookup ()
+  "The startup shape's finder records name \"main\" in their text."
+  (agent-repl-test--with-clean-state
+    (let (records unroutable)
+      ;; Arrange / Act
+      (agent-repl-window-test--capturing-log-outside-context "main" records unroutable
+        (agent-repl-window--panel-window :view))
+      ;; Assert
+      (should (agent-repl-window-test--record-matching
+               records "window--panel-buffer: ws=main kind=:view key=:frontend-buffer"))
+      (should (agent-repl-window-test--record-matching
+               records "window--panel-window: ws=main kind=:view")))))
+
+(ert-deftest agent-repl-test-window-perspective-records-share-the-one-scope-helper ()
+  "window.el scopes every record about a perspective through `--ws-log-scope'.
+`agent-repl--ws-log-name' answers nil for a name without a sink, which
+leaves the record to the ambient context; a site using it would raise a
+routing error again whenever it runs outside one."
+  (let ((source (with-temp-buffer
+                  (insert-file-contents
+                   (expand-file-name "window.el"
+                                     (file-name-directory
+                                      (symbol-file 'agent-repl-window--panel-window))))
+                  (buffer-string))))
+    (should-not (string-match-p "(agent-repl--ws-log-name " source))))
 
 (ert-deftest agent-repl-test-window-panel-window-routable-ws-keeps-attribution ()
   "Asking about a REAL workspace's panel keeps the record attributed to it."
