@@ -2181,6 +2181,29 @@ and `--switched' to the workspace whose switch was requested of the daemon."
       (funcall command)
       agent-repl-test-commands--offered)))
 
+(ert-deftest agent-repl-test-commands-switcher-unhides-a-chosen-hidden-workspace ()
+  "Choosing a hidden workspace in `SPC p p' shows it rather than only switching."
+  ;; Arrange
+  (let ((unhidden nil) (switched nil)
+        (agent-repl-roster-view
+         (agent-repl-test-commands--roster
+          nil (list (agent-repl-test-commands--row "tucked" "id-tucked" 100)))))
+    (cl-letf (((symbol-function 'agent-repl--live-ws-names) (lambda () nil))
+              ((symbol-function 'agent-repl--ws-by-ref-id) (lambda (_id) "tucked"))
+              ((symbol-function 'agent-repl--ws-current-log-name) (lambda () nil))
+              ((symbol-function 'agent-repl--info) (lambda (&rest _) nil))
+              ((symbol-function 'completing-read) (lambda (_p table &rest _)
+                                                    (car (all-completions "" table))))
+              ((symbol-function 'agent-repl-verb-set-hidden)
+               (lambda (ws hidden) (push (list ws hidden) unhidden)))
+              ((symbol-function 'agent-repl-host-request-switch)
+               (lambda (ws _t) (setq switched ws))))
+      ;; Act
+      (agent-repl-switch-to-project)
+      ;; Assert
+      (should (equal unhidden '(("tucked" nil))))
+      (should-not switched))))
+
 (ert-deftest agent-repl-test-commands-switcher-offers-open-hidden-merged-and-user-closed ()
   "`SPC p p' offers the open, hidden, merged and user-closed workspaces."
   ;; Arrange
