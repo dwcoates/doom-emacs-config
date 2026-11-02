@@ -172,3 +172,31 @@ func testDoomPlainCloseHidesPanelsAndLeavesTheTabAlone(t *testing.T) {
 		t.Fatalf("the plain close moved the tab order: %q -> %q; no close reorders the tabs", orderBefore, orderAfter)
 	}
 }
+
+// testDoomSplashLoadsWithoutTheDashboardModule: the sandbox's profile omits
+// `:ui doom-dashboard', and splash.el still loads to its end -- its feature
+// provided and its `load-history' entry recorded, which the bytecode
+// schedule reads -- rather than signalling on the dashboard's unbound
+// variables.
+func testDoomSplashLoadsWithoutTheDashboardModule(t *testing.T) {
+	// Arrange
+	box := requireSandbox(t)
+	w := NewDoomWorld(t, box)
+	e := w.Emacs
+
+	// Act
+	enabled := e.EvalBool(`(and (modulep! :ui doom-dashboard) t)`)
+	provided := e.EvalBool(`(and (featurep 'splash) t)`)
+	recorded := e.EvalBool(`(and (symbol-file 'agent-repl-splash-install 'defun) t)`)
+
+	// Assert
+	if enabled {
+		t.Fatalf("the sandbox profile enables :ui doom-dashboard, want it absent: this scenario pins splash.el in a profile without it")
+	}
+	if !provided {
+		t.Fatalf("(featurep 'splash) = nil: splash.el's load stopped before its provide")
+	}
+	if !recorded {
+		t.Fatalf("load-history records no file defining agent-repl-splash-install: splash.el's load did not complete")
+	}
+}

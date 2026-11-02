@@ -330,6 +330,47 @@ loaded after this one silently reached the real `git' / `gh' / daemon."
         (should (equal agent-repl--elisp-module-builds
                        (list (cons "probe" (agent-repl--elisp-file-sha256 file)))))))))
 
+(ert-deftest agent-repl-config-test-loader-reports-a-module-whose-load-signals ()
+  "A module whose load signals is recorded and reported loudly, never as loaded."
+  (agent-repl-config-test--with-root root
+    ;; Arrange
+    (agent-repl-config-test--write-bytes (expand-file-name "lisp/probe.el" root)
+                                         "(error \"probe boom\")\n")
+    (let ((agent-repl--elisp-module-builds nil)
+          (agent-repl--load-errors nil)
+          (load-file-name (expand-file-name "config.el" root))
+          (infos nil)
+          (warns nil))
+      ;; Act
+      (cl-letf (((symbol-function 'agent-repl--boot-info)
+                 (lambda (fmt &rest args) (push (apply #'format fmt args) infos)))
+                ((symbol-function 'agent-repl--boot-warn)
+                 (lambda (fmt &rest args) (push (apply #'format fmt args) warns))))
+        (eval '(agent-repl--load-module "probe") t))
+      ;; Assert
+      (should (equal agent-repl--load-errors '(("probe" error "probe boom"))))
+      (should (equal warns '("FAILED to load probe.el: (error \"probe boom\")")))
+      (should-not (member "probe.el loaded." infos)))))
+
+(ert-deftest agent-repl-config-test-loader-does-not-go-through-doom-load ()
+  "A load error reaches the loader even where `doom-load' would swallow it.
+`doom-load' answers nil for a file outside Doom's directories (a symlinked
+module); stubbed so here, the failing module is still recorded."
+  (agent-repl-config-test--with-root root
+    ;; Arrange
+    (agent-repl-config-test--write-bytes (expand-file-name "lisp/probe.el" root)
+                                         "(error \"probe boom\")\n")
+    (let ((agent-repl--elisp-module-builds nil)
+          (agent-repl--load-errors nil)
+          (load-file-name (expand-file-name "config.el" root)))
+      ;; Act
+      (cl-letf (((symbol-function 'doom-load) #'ignore)
+                ((symbol-function 'agent-repl--boot-info) #'ignore)
+                ((symbol-function 'agent-repl--boot-warn) #'ignore))
+        (eval '(agent-repl--load-module "probe") t))
+      ;; Assert
+      (should (equal (mapcar #'car agent-repl--load-errors) '("probe"))))))
+
 (ert-deftest agent-repl-config-test-load-resets-the-record ()
   "Every load of config.el starts the record over, like its load errors.
 Read from the source rather than by re-loading config.el here: a real load
@@ -366,7 +407,7 @@ reset must be a top-level `setq' that precedes the first module load."
 
 (ert-deftest agent-repl-config-test-loads-no-deleted-module ()
   "config.el names no module this branch deleted.
-A `load!' of a missing file is a load ERROR, which fails the whole
+A load of a missing module file is a load ERROR, which fails the whole
 module, so this is the cheapest place to catch a stale load line."
   (let ((text (with-temp-buffer
                 (insert-file-contents

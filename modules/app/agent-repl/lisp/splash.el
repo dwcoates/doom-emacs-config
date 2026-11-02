@@ -27,6 +27,11 @@
 ;;
 ;; A LOAD REDRAWS AN OPEN DASHBOARD, so a deploy's reload shows the splash
 ;; without a restart.
+;;
+;; A PROFILE WITHOUT `:ui doom-dashboard' HAS NOTHING TO DRESS.  The
+;; dashboard module's config defines every variable the install sets, so a
+;; load in such a profile (the e2e sandbox's) installs nothing and logs
+;; that it skipped.
 
 ;;; Code:
 
@@ -174,7 +179,20 @@ An `:eval', so the release appears once the roster brings it."
         (agent-repl-splash-install-mode-name))
       (+doom-dashboard-reload 'force))))
 
-(agent-repl-splash-install)
+(defun agent-repl-splash--dashboard-enabled-p ()
+  "Return non-nil when the profile enables Doom's `:ui doom-dashboard'."
+  (modulep! :ui doom-dashboard))
+
+(defun agent-repl-splash-install-if-enabled ()
+  "Dress Doom's dashboard as ZETTEL when the profile enables the dashboard.
+Without `:ui doom-dashboard' the variables `agent-repl-splash-install'
+sets are unbound, so nothing is installed."
+  (if (agent-repl-splash--dashboard-enabled-p)
+      (agent-repl-splash-install)
+    (agent-repl--log agent-repl-splash--log-scope
+                     "elisp.splash.install: skipped, :ui doom-dashboard is not enabled")))
+
+(agent-repl-splash-install-if-enabled)
 
 (provide 'splash)
 

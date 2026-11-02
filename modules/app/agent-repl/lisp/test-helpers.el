@@ -101,8 +101,8 @@ load (BATCH-P nil) is already inert and is never refused."
 
 ;; Doom workspace API
 ;; Doom's dashboard module, which splash.el dresses as ZETTEL: its widget
-;; list as Doom defines it (agent-repl loads after every Doom module, so
-;; the variable is always bound there).
+;; list as Doom defines it (bound wherever `:ui doom-dashboard' is
+;; enabled, the only profile splash.el installs in).
 (defvar +doom-dashboard-functions
   '(doom-dashboard-widget-banner doom-dashboard-widget-shortmenu
     doom-dashboard-widget-loaded doom-dashboard-widget-footer)

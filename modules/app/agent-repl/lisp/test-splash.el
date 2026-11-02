@@ -199,6 +199,26 @@ Redraws are recorded in `reloads'; centering pads to the width as Doom's does."
       (should (equal reloads '(force)))
       (should (equal mode-name '(:eval (agent-repl-splash-mode-name)))))))
 
+(ert-deftest agent-repl-test-splash-install-if-enabled-installs-with-the-dashboard ()
+  "With `:ui doom-dashboard' enabled, the load's install dresses the dashboard."
+  (agent-repl-test-splash--with-dashboard "agent-repl-test-splash-no-such-buffer"
+    (cl-letf (((symbol-function 'agent-repl-splash--dashboard-enabled-p) (lambda () t)))
+      (agent-repl-splash-install-if-enabled))
+    (should (eq +doom-dashboard-ascii-banner-fn #'agent-repl-splash-draw-banner))))
+
+(ert-deftest agent-repl-test-splash-install-if-enabled-without-the-dashboard-installs-nothing ()
+  "Without `:ui doom-dashboard', the load sets and hooks nothing, and logs the skip."
+  (let (logged)
+    (agent-repl-test-splash--with-dashboard "agent-repl-test-splash-no-such-buffer"
+      (cl-letf (((symbol-function 'agent-repl-splash--dashboard-enabled-p) (lambda () nil))
+                ((symbol-function 'agent-repl--log) (agent-repl-test--record-into logged)))
+        (agent-repl-splash-install-if-enabled))
+      (should-not +doom-dashboard-ascii-banner-fn)
+      (should-not +doom-dashboard-mode-hook)
+      (should-not agent-repl-roster-update-functions)
+      (should-not reloads))
+    (should (equal logged '("elisp.splash.install: skipped, :ui doom-dashboard is not enabled")))))
+
 (ert-deftest agent-repl-test-splash-roster-update-redraws-the-dashboard-mode-line ()
   "A roster push redraws an open dashboard's mode line."
   (let (updated)
