@@ -2868,3 +2868,59 @@ func TestNoHandRolledRAMDiskFiltersRemain(t *testing.T) {
 		t.Fatalf("RAM image checks at %v, want only ramDisks's own", hand)
 	}
 }
+
+func TestListDisks(t *testing.T) {
+	tests := []struct {
+		name string
+		host *fakeHost
+		want string
+	}{
+		{name: "both read", host: &fakeHost{info: ramInfo() + servedBlock("/dev/disk4", "", 50373), procs: []proctable.Entry{helperEntry(50373, helperStart), {Pid: 1, Comm: "launchd"}}}},
+		{name: "the listing fails", host: &fakeHost{fail: map[string]bool{"hdiutil info": true}}, want: "list the attached images to find a disk: refused: hdiutil info"},
+		{name: "the process table fails", host: &fakeHost{procsErr: errors.New("proc_info listpids: EINVAL")}, want: "read the process table to identify the RAM disks' helpers: proc_info listpids: EINVAL"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			m := newManager(t, tc.host)
+
+			// Act
+			info, starts, err := m.listDisks("find a disk")
+
+			// Assert
+			if tc.want != "" {
+				if err == nil || err.Error() != tc.want {
+					t.Fatalf("listDisks error = %v, want %q", err, tc.want)
+				}
+				return
+			}
+			if err != nil || info != tc.host.info || len(starts) != 1 || !starts[50373].Equal(helperStart) {
+				t.Fatalf("listDisks = %q, %v, %v; want the listing and the one started process", info, starts, err)
+			}
+		})
+	}
+}
+
+func TestEveryDiskListingReadsTheHelpersThroughListDisks(t *testing.T) {
+	// Arrange
+	// The needle is split so this test's own source never matches it.
+	needle := ".helper" + "Starts()"
+	var sites []string
+	for _, file := range []string{"ramdisk.go", "leak.go"} {
+		raw, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Act
+		for i, line := range strings.Split(string(raw), "\n") {
+			if strings.Contains(line, needle) {
+				sites = append(sites, fmt.Sprintf("%s:%d", file, i+1))
+			}
+		}
+	}
+
+	// Assert: listDisks, and the leak check, which is handed its listing.
+	if len(sites) != 2 {
+		t.Fatalf("process table reads at %v, want only listDisks's and leaksLocked's", sites)
+	}
+}

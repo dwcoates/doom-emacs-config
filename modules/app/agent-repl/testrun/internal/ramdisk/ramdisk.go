@@ -531,11 +531,7 @@ func (m Manager) attach(sizeMiB int) (_ *Volume, err error) {
 
 // identify reads which helper serves the RAM disk just attached as device.
 func (m Manager) identify(device string) (helper, error) {
-	info, err := m.listImages()
-	if err != nil {
-		return helper{}, fmt.Errorf("list the attached images to identify the RAM disk %s: %w", device, err)
-	}
-	starts, err := m.helperStarts()
+	info, starts, err := m.listDisks(fmt.Sprintf("identify the RAM disk %s", device))
 	if err != nil {
 		return helper{}, err
 	}
@@ -678,11 +674,7 @@ func (v *Volume) gone() (bool, error) {
 	if v.helper.zero() {
 		return false, nil
 	}
-	info, err := v.m.listImages()
-	if err != nil {
-		return false, fmt.Errorf("list the attached images to find the RAM disk %s by its helper before detaching it: %w", v.Device, err)
-	}
-	starts, err := v.m.helperStarts()
+	info, starts, err := v.m.listDisks(fmt.Sprintf("find the RAM disk %s by its helper before detaching it", v.Device))
 	if err != nil {
 		return false, err
 	}
@@ -845,15 +837,11 @@ func (m Manager) adoptOrphans() (_ []orphan, err error) {
 		return nil, err
 	}
 	defer releaseRegistry(unlock, &err)
-	info, err := m.listImages()
-	if err != nil {
-		return nil, fmt.Errorf("list the attached images to find the RAM disks no record names: %w", err)
-	}
-	records, err := m.readRecordsLocked()
+	info, starts, err := m.listDisks("find the RAM disks no record names")
 	if err != nil {
 		return nil, err
 	}
-	starts, err := m.helperStarts()
+	records, err := m.readRecordsLocked()
 	if err != nil {
 		return nil, err
 	}
@@ -1101,11 +1089,7 @@ func (m Manager) reclaimHeld(path string, pid int) (Reclaimed, error) {
 	// (2026-10-30, /dev/disk4 recorded by dead run 31920 and attached by live
 	// run 32482). Only the disk the record's helper serves, or one mounted at
 	// a mount point of the dead run's pid, read now, is the dead run's (owns).
-	info, err := m.listImages()
-	if err != nil {
-		return r, fmt.Errorf("list the attached images to find the disks of dead run pid %d: %w", pid, err)
-	}
-	starts, err := m.helperStarts()
+	info, starts, err := m.listDisks(fmt.Sprintf("find the disks of dead run pid %d", pid))
 	if err != nil {
 		return r, err
 	}
@@ -1505,6 +1489,21 @@ func owns(img image, starts map[int]time.Time, pid int, rec record) bool {
 	}
 	marked, ok := img.marked()
 	return ok && marked == pid
+}
+
+// listDisks reads `hdiutil info` and when each process started
+// (helperStarts): what a disk is told apart by. why says what the listing is
+// for, in its failure.
+func (m Manager) listDisks(why string) (string, map[int]time.Time, error) {
+	info, err := m.listImages()
+	if err != nil {
+		return "", nil, fmt.Errorf("list the attached images to %s: %w", why, err)
+	}
+	starts, err := m.helperStarts()
+	if err != nil {
+		return "", nil, err
+	}
+	return info, starts, nil
 }
 
 // helperStarts reads when each process the table lists started, by pid: what
