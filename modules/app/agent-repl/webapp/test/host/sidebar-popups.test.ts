@@ -4,11 +4,13 @@
 import { afterEach, describe, expect, it, onTestFinished } from "vitest";
 
 import {
+  DISMISS_HOST_PRESS,
+  DISMISS_PAGE_PRESS,
   POPUP_LAYER_CLASS,
   createPopupMirror,
   hostAnchor,
   installPopupLayer,
-  parsePopupPointerMessage,
+  parseHostPopupMessage,
   parseSidebarPopupMessage,
   type PopupLayer,
   type PopupMirror,
@@ -77,21 +79,22 @@ describe("parseSidebarPopupMessage", () => {
   });
 });
 
-describe("parsePopupPointerMessage", () => {
-  it("reads a pointer message", () => {
-    expect(parsePopupPointerMessage({ kind: "pointer", key: "ws-a", inside: true })).toEqual({
-      kind: "pointer",
-      key: "ws-a",
-      inside: true,
-    });
+describe("parseHostPopupMessage", () => {
+  it.each([
+    ["a pointer message", { kind: "pointer", key: "ws-a", inside: true }],
+    ["a dismiss", { kind: "dismiss", key: "ws-a", why: "a press in a workspace page" }],
+  ])("reads %s", (_name, data) => {
+    expect(parseHostPopupMessage(data)).toEqual(data);
   });
 
-  it("refuses a pointer message whose inside is no boolean", () => {
-    expect(parsePopupPointerMessage({ kind: "pointer", key: "ws-a", inside: 1 })).toBeNull();
-  });
-
-  it("refuses a sidebar message", () => {
-    expect(parsePopupPointerMessage({ kind: "hide", key: "ws-a" })).toBeNull();
+  it.each([
+    ["a pointer message whose inside is no boolean", { kind: "pointer", key: "ws-a", inside: 1 }],
+    ["a dismiss with no why", { kind: "dismiss", key: "ws-a" }],
+    ["a dismiss with an empty why", { kind: "dismiss", key: "ws-a", why: "" }],
+    ["a dismiss with no key", { kind: "dismiss", key: "", why: "a press" }],
+    ["a sidebar message", { kind: "hide", key: "ws-a" }],
+  ])("refuses %s", (_name, data) => {
+    expect(parseHostPopupMessage(data)).toBeNull();
   });
 });
 
@@ -106,6 +109,7 @@ describe("the host's popup layer", () => {
   function install(height = 100) {
     const fake = fakePopupChannel();
     let tellOffset: ((pixels: number) => void) | null = null;
+    let tellPagePressed: (() => void) | null = null;
     layer = installPopupLayer({
       doc: document,
       win: window,
@@ -117,10 +121,72 @@ describe("the host's popup layer", () => {
           tellOffset = null;
         };
       },
+      onPagePressed: (listener) => {
+        tellPagePressed = listener;
+        return () => {
+          tellPagePressed = null;
+        };
+      },
     });
     const drawn = (): HTMLElement | null => document.querySelector<HTMLElement>(`.${POPUP_LAYER_CLASS} .detail`);
-    return { ...fake, drawn, offset: (pixels: number) => tellOffset?.(pixels) };
+    return {
+      ...fake,
+      drawn,
+      offset: (pixels: number) => tellOffset?.(pixels),
+      pagePressed: () => tellPagePressed?.(),
+      pagePressSubscribed: () => tellPagePressed !== null,
+    };
   }
+
+  /** Press the pointer down on TARGET. */
+  const press = (target: EventTarget): void => {
+    target.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true }));
+  };
+
+  describe("a press outside the panel", () => {
+    it("asks the sidebar to dismiss the panel for a press in the host's own document", () => {
+      // ARRANGE
+      const { deliver, posted } = install();
+      deliver({ kind: "show", key: "ws-a", html: PANEL, top: 40, bottom: 62 });
+      // ACT
+      press(document.body);
+      // ASSERT
+      expect(posted).toEqual([{ kind: "dismiss", key: "ws-a", why: DISMISS_HOST_PRESS }]);
+    });
+
+    it("asks the sidebar to dismiss the panel for a press inside a workspace page", () => {
+      // ARRANGE
+      const { deliver, posted, pagePressed } = install();
+      deliver({ kind: "show", key: "ws-a", html: PANEL, top: 40, bottom: 62 });
+      // ACT
+      pagePressed();
+      // ASSERT
+      expect(posted).toEqual([{ kind: "dismiss", key: "ws-a", why: DISMISS_PAGE_PRESS }]);
+    });
+
+    it("asks nothing for a press on the panel itself", () => {
+      // ARRANGE
+      const { deliver, posted, drawn } = install();
+      deliver({ kind: "show", key: "ws-a", html: PANEL, top: 40, bottom: 62 });
+      // ACT
+      press(drawn()!.querySelector("dd")!);
+      // ASSERT
+      expect(posted).toEqual([]);
+    });
+
+    it.each([
+      ["in the host's own document", "host"],
+      ["inside a workspace page", "page"],
+    ] as const)("asks nothing for a press %s with no panel drawn", (_name, where) => {
+      // ARRANGE
+      const { posted, pagePressed } = install();
+      // ACT
+      if (where === "host") press(document.body);
+      else pagePressed();
+      // ASSERT
+      expect(posted).toEqual([]);
+    });
+  });
 
   it("lays its layer in the document, wearing the rail's id", () => {
     install();
@@ -295,6 +361,17 @@ describe("the host's popup layer", () => {
     layer = null;
     expect([listeners.size, document.querySelector(`.${POPUP_LAYER_CLASS}`)]).toEqual([0, null]);
   });
+
+  it("stops hearing presses when disposed", () => {
+    // ARRANGE
+    const { posted, pagePressSubscribed } = install();
+    // ACT
+    layer?.dispose();
+    layer = null;
+    press(document.body);
+    // ASSERT
+    expect([posted, pagePressSubscribed()]).toEqual([[], false]);
+  });
 });
 
 describe("the sidebar's popup mirror", () => {
@@ -377,6 +454,46 @@ describe("the sidebar's popup mirror", () => {
     mirror?.show("ws-a", detail, line);
     deliver({ kind: "pointer", key: "ws-a", inside });
     expect(seen).toEqual([event]);
+  });
+
+  it("tells its listeners why the host dismissed the open panel", () => {
+    // ARRANGE
+    const { deliver, line, detail } = setUp();
+    const whys: string[] = [];
+    mirror?.onDismissed((why) => whys.push(why));
+    mirror?.show("ws-a", detail, line);
+    // ACT
+    deliver({ kind: "dismiss", key: "ws-a", why: DISMISS_PAGE_PRESS });
+    // ASSERT
+    expect(whys).toEqual([DISMISS_PAGE_PRESS]);
+  });
+
+  it.each([
+    ["another panel's", "ws-b", true],
+    ["a closed panel's", "ws-a", false],
+  ] as const)("tells nothing for %s dismiss", (_name, key, opened) => {
+    // ARRANGE
+    const { deliver, line, detail } = setUp();
+    const whys: string[] = [];
+    mirror?.onDismissed((why) => whys.push(why));
+    if (opened) mirror?.show("ws-a", detail, line);
+    // ACT
+    deliver({ kind: "dismiss", key, why: DISMISS_PAGE_PRESS });
+    // ASSERT
+    expect(whys).toEqual([]);
+  });
+
+  it("tells nothing once the listener stopped", () => {
+    // ARRANGE
+    const { deliver, line, detail } = setUp();
+    const whys: string[] = [];
+    const stop = mirror!.onDismissed((why) => whys.push(why));
+    mirror?.show("ws-a", detail, line);
+    // ACT
+    stop();
+    deliver({ kind: "dismiss", key: "ws-a", why: DISMISS_PAGE_PRESS });
+    // ASSERT
+    expect(whys).toEqual([]);
   });
 
   it("replays nothing for another row's panel", () => {

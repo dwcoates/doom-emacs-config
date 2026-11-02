@@ -4,6 +4,9 @@ import { createDropdowns, type Dropdowns } from "../../src/sidebar/dropdowns.js"
 import { createRowHover, type RowHover } from "../../src/sidebar/row-hover.js";
 import { HOVER_SUSPENDED_CLASS, installTransients, type Transients } from "../../src/sidebar/transients.js";
 import { log } from "../../src/log.js";
+import { createListeners } from "../../src/listeners.js";
+import { FOCUS_LEFT_BLUR, FOCUS_LEFT_EMACS, FOCUS_LEFT_HIDDEN } from "../../src/focus-left.js";
+import { DISMISS_PAGE_PRESS } from "../../src/host/sidebar-popups.js";
 import stylesheet from "../../src/styles.css?raw";
 import { rulesOf } from "../stylesheet.js";
 
@@ -13,15 +16,31 @@ describe("the rail's transients", () => {
   let rowHover: RowHover;
   let transients: Transients;
   let closes: string[];
+  /** The page's focus-left signal, fired by hand. */
+  let focusLeft: ReturnType<typeof createListeners<[string]>>;
+  /** The popup mirror's dismissals, fired by hand. */
+  let dismissals: ReturnType<typeof createListeners<[string]>>;
 
   beforeEach(() => {
     host = document.createElement("nav");
     document.body.appendChild(host);
     dropdowns = createDropdowns();
     rowHover = createRowHover(dropdowns, new Set());
-    transients = installTransients(host, { dropdowns, rowHover, win: window });
+    focusLeft = createListeners<[string]>();
+    dismissals = createListeners<[string]>();
+    transients = installTransients(host, {
+      dropdowns,
+      rowHover,
+      focusLeft: { onLeft: (listener) => focusLeft.add(listener) },
+      popupMirror: { onDismissed: (listener) => dismissals.add(listener) },
+    });
     closes = [];
   });
+
+  /** The focus leaves the page, WHY. */
+  const leave = (why: string = FOCUS_LEFT_BLUR): void => {
+    focusLeft.notify(why);
+  };
 
   afterEach(() => {
     transients.dispose();
@@ -45,12 +64,6 @@ describe("the rail's transients", () => {
     host.dispatchEvent(new MouseEvent("mousemove", { bubbles: true, clientX: x, clientY: y }));
   }
 
-  /** Set the document's visibility to STATE and announce it. */
-  function setVisibility(state: DocumentVisibilityState): void {
-    vi.spyOn(document, "visibilityState", "get").mockReturnValue(state);
-    document.dispatchEvent(new Event("visibilitychange"));
-  }
-
   const suspended = (): boolean => host.classList.contains(HOVER_SUSPENDED_CLASS);
 
   describe("the page losing focus", () => {
@@ -58,7 +71,7 @@ describe("the rail's transients", () => {
       // ARRANGE
       openDropdown();
       // ACT
-      window.dispatchEvent(new FocusEvent("blur"));
+      leave();
       // ASSERT
       expect(closes).toEqual(["the page lost focus"]);
     });
@@ -67,14 +80,14 @@ describe("the rail's transients", () => {
       // ARRANGE
       const dismiss = vi.spyOn(rowHover, "dismiss");
       // ACT
-      window.dispatchEvent(new FocusEvent("blur"));
+      leave();
       // ASSERT
       expect(dismiss).toHaveBeenCalledWith("the page lost focus");
     });
 
     it("suspends the hover highlight", () => {
       // ACT
-      window.dispatchEvent(new FocusEvent("blur"));
+      leave();
       // ASSERT
       expect(suspended()).toBe(true);
     });
@@ -83,7 +96,7 @@ describe("the rail's transients", () => {
       // ARRANGE
       const debug = vi.spyOn(log, "debug");
       // ACT
-      window.dispatchEvent(new FocusEvent("blur"));
+      leave();
       // ASSERT
       expect(debug).toHaveBeenCalledWith("the user left the rail; closing everything the pointer raised in it", {
         operation: "sidebar.transients.dismiss",
@@ -92,23 +105,37 @@ describe("the rail's transients", () => {
     });
   });
 
-  describe("the page's visibility", () => {
-    it("dismisses when the page is hidden", () => {
+  describe("the focus leaving the page for another reason", () => {
+    it.each([
+      ["the page hidden", FOCUS_LEFT_HIDDEN],
+      ["Emacs moving its focus, such as to its composer", FOCUS_LEFT_EMACS],
+    ])("dismisses for %s", (_name, why) => {
       // ARRANGE
       openDropdown();
       // ACT
-      setVisibility("hidden");
+      leave(why);
       // ASSERT
-      expect([closes, suspended()]).toEqual([["the page was hidden"], true]);
+      expect([closes, suspended()]).toEqual([[why], true]);
+    });
+  });
+
+  describe("the webhost dismissing a popup over the feed", () => {
+    it("closes every open dropdown", () => {
+      // ARRANGE
+      openDropdown();
+      // ACT
+      dismissals.notify(DISMISS_PAGE_PRESS);
+      // ASSERT
+      expect([closes, suspended()]).toEqual([[DISMISS_PAGE_PRESS], true]);
     });
 
-    it("dismisses nothing when the page is shown", () => {
+    it("closes the row panels", () => {
       // ARRANGE
-      openDropdown();
+      const dismiss = vi.spyOn(rowHover, "dismiss");
       // ACT
-      setVisibility("visible");
+      dismissals.notify(DISMISS_PAGE_PRESS);
       // ASSERT
-      expect([closes, suspended()]).toEqual([[], false]);
+      expect(dismiss).toHaveBeenCalledWith(DISMISS_PAGE_PRESS);
     });
   });
 
@@ -157,7 +184,7 @@ describe("the rail's transients", () => {
     it("lifts on a pointer move away from where it was suspended", () => {
       // ARRANGE
       move(10, 10);
-      window.dispatchEvent(new FocusEvent("blur"));
+      leave();
       // ACT
       move(11, 10);
       // ASSERT
@@ -167,7 +194,7 @@ describe("the rail's transients", () => {
     it("stays for a move WebKit synthesizes where the pointer rests", () => {
       // ARRANGE
       move(10, 10);
-      window.dispatchEvent(new FocusEvent("blur"));
+      leave();
       // ACT
       move(10, 10);
       // ASSERT
@@ -176,7 +203,7 @@ describe("the rail's transients", () => {
 
     it("lifts on any move when the pointer was never seen in the rail", () => {
       // ARRANGE
-      window.dispatchEvent(new FocusEvent("blur"));
+      leave();
       // ACT
       move(10, 10);
       // ASSERT
@@ -186,7 +213,7 @@ describe("the rail's transients", () => {
     it("lifts on a key pressed in the rail", () => {
       // ARRANGE
       move(10, 10);
-      window.dispatchEvent(new FocusEvent("blur"));
+      leave();
       // ACT
       host.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Tab" }));
       // ASSERT
@@ -195,7 +222,7 @@ describe("the rail's transients", () => {
 
     it("lets the row panels answer again when it lifts", () => {
       // ARRANGE
-      window.dispatchEvent(new FocusEvent("blur"));
+      leave();
       const resume = vi.spyOn(rowHover, "resume");
       // ACT
       move(10, 10);
@@ -205,7 +232,7 @@ describe("the rail's transients", () => {
 
     it("logs the lift with what lifted it", () => {
       // ARRANGE
-      window.dispatchEvent(new FocusEvent("blur"));
+      leave();
       const debug = vi.spyOn(log, "debug");
       // ACT
       move(10, 10);
@@ -267,8 +294,8 @@ describe("the rail's transients", () => {
     openDropdown();
     transients.dispose();
     // ACT
-    window.dispatchEvent(new FocusEvent("blur"));
-    setVisibility("hidden");
+    leave();
+    dismissals.notify(DISMISS_PAGE_PRESS);
     host.dispatchEvent(new MouseEvent("mouseleave"));
     // ASSERT
     expect([closes, suspended()]).toEqual([[], false]);

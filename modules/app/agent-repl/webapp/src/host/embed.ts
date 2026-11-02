@@ -253,7 +253,14 @@ export function connectToHost(env: EmbedEnv): HostLink | null {
   const overlayWatch = pageMutationObserver(doc, reportOverlay);
   overlayWatch.observe(doc.documentElement, { attributes: true, attributeFilter: [BUBBLE_OVERLAY_ATTRIBUTE] });
 
+  // A PRESS ON THE PAGE closes the sidebar's popups over it (sidebar-popups.ts),
+  // which the webhost draws and this page's document cannot see.
+  const onPointerDown = (): void => {
+    send({ channel: HOST_CHANNEL, kind: "pressed" });
+  };
+
   win.addEventListener("message", onMessage);
+  doc.addEventListener("pointerdown", onPointerDown, { capture: true });
   const stopHighlightWords = onResponseHighlightWords(doc, (words) => {
     send({ channel: HOST_CHANNEL, kind: "responseHighlight", words });
   });
@@ -273,6 +280,7 @@ export function connectToHost(env: EmbedEnv): HostLink | null {
       drawnWatch.disconnect();
       overlayWatch.disconnect();
       win.removeEventListener("message", onMessage);
+      doc.removeEventListener("pointerdown", onPointerDown, { capture: true });
       stopHighlightWords();
       doc.removeEventListener("selectionchange", reportSelection);
       win.removeEventListener("focus", reportSelection);

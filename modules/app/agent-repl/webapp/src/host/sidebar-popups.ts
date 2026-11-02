@@ -31,11 +31,19 @@
  * the anchor's right edge is the host's left edge and the panel's left edge is
  * zero (`besideFloor`): no margin stands between a panel and its row.
  *
+ * A PRESS ANYWHERE BUT ON THE PANEL CLOSES IT (owner request, 2026-11-02),
+ * as a click away from it in the rail does: a press in the host's own
+ * document outside the layer, or inside a workspace page (`pressed`,
+ * host/protocol.ts, which the host relays through `Host.onPagePressed`),
+ * answers `dismiss`, and the sidebar lets go of every popup the way it does
+ * when the user leaves the rail (sidebar/transients.ts), which hides the copy.
+ *
  * The markup is the sidebar's own drawing of the panel, from the same bundle,
  * and is drawn into the host verbatim: nothing in it comes from outside the
  * webapp's own DOM.
  */
 import { pageMutationObserver, queryAll } from "../dom.js";
+import { createListeners } from "../listeners.js";
 import { log } from "../log.js";
 import { scrollKept } from "../scroll.js";
 import { clampBeside, type Rect } from "../topbar/clamp.js";
@@ -73,7 +81,22 @@ export interface PopupPointerMessage {
   readonly inside: boolean;
 }
 
+/** host -> sidebar: the reader pressed somewhere outside the host's copy of panel KEY, WHY. */
+export interface DismissPopupMessage {
+  readonly kind: "dismiss";
+  readonly key: string;
+  readonly why: string;
+}
+
 export type SidebarPopupMessage = ShowPopupMessage | HidePopupMessage;
+
+/** Every message the host sends the sidebar. */
+export type HostPopupMessage = PopupPointerMessage | DismissPopupMessage;
+
+/** Why the host dismissed a popup, for a press in its own document. */
+export const DISMISS_HOST_PRESS = "a press in the webhost outside the popup";
+/** Why the host dismissed a popup, for a press inside a workspace page. */
+export const DISMISS_PAGE_PRESS = "a press in a workspace page";
 
 /** The part of a BroadcastChannel either side uses, injectable for tests. */
 export interface PopupChannel {
@@ -109,10 +132,16 @@ export function parseSidebarPopupMessage(data: unknown): SidebarPopupMessage | n
   return null;
 }
 
-/** DATA as a host pointer message, or null for anything else. */
-export function parsePopupPointerMessage(data: unknown): PopupPointerMessage | null {
-  if (!isRecord(data) || data.kind !== "pointer" || typeof data.key !== "string" || data.key === "") return null;
-  return typeof data.inside === "boolean" ? { kind: "pointer", key: data.key, inside: data.inside } : null;
+/** DATA as a host-to-sidebar message, or null for anything else. */
+export function parseHostPopupMessage(data: unknown): HostPopupMessage | null {
+  if (!isRecord(data) || typeof data.key !== "string" || data.key === "") return null;
+  if (data.kind === "pointer" && typeof data.inside === "boolean") {
+    return { kind: "pointer", key: data.key, inside: data.inside };
+  }
+  if (data.kind === "dismiss" && typeof data.why === "string" && data.why !== "") {
+    return { kind: "dismiss", key: data.key, why: data.why };
+  }
+  return null;
 }
 
 /** The anchor a panel is placed beside in the host: the row's line, at the host's own left edge. */
@@ -144,6 +173,11 @@ export interface PopupLayerEnv {
    * two windows' tops level, when omitted.
    */
   readonly onOffset?: (listener: (pixels: number) => void) => () => void;
+  /**
+   * Subscribe to every press inside a workspace page (`Host.onPagePressed`);
+   * answers the stop. No page presses when omitted.
+   */
+  readonly onPagePressed?: (listener: () => void) => () => void;
 }
 
 /** Draw the sidebar's popups over the host, from what CHANNEL carries. */
@@ -167,6 +201,17 @@ export function installPopupLayer(env: PopupLayerEnv): PopupLayer {
   };
   const entered = point(true);
   const left = point(false);
+
+  /** Ask the sidebar to let go of the panel drawn now, for WHY; nothing when none is. */
+  const dismiss = (why: string): void => {
+    if (key === null) return;
+    const message: DismissPopupMessage = { kind: "dismiss", key, why };
+    channel.postMessage(message);
+  };
+  const onPointerDown = (event: Event): void => {
+    if (event.target instanceof Node && layer.contains(event.target)) return;
+    dismiss(DISMISS_HOST_PRESS);
+  };
 
   /** The scroll offsets of the panel and every scroller in it, in drawn order. */
   const scrollTops = (): number[] => {
@@ -264,6 +309,10 @@ export function installPopupLayer(env: PopupLayerEnv): PopupLayer {
     }
   };
   channel.addEventListener("message", onMessage);
+  doc.addEventListener("pointerdown", onPointerDown, { capture: true });
+  const stopPagePresses = (env.onPagePressed ?? (() => () => undefined))(() => {
+    dismiss(DISMISS_PAGE_PRESS);
+  });
   const stopOffset = (env.onOffset ?? (() => () => undefined))((pixels) => {
     offset = pixels;
     if (last !== null && key === last.key) show(last);
@@ -273,6 +322,8 @@ export function installPopupLayer(env: PopupLayerEnv): PopupLayer {
     shown: () => key,
     dispose() {
       stopOffset();
+      stopPagePresses();
+      doc.removeEventListener("pointerdown", onPointerDown, { capture: true });
       channel.removeEventListener("message", onMessage);
       clear();
       layer.remove();
@@ -292,6 +343,8 @@ export interface PopupMirror {
   place(key: string): void;
   /** Row KEY's panel closed. */
   hide(key: string): void;
+  /** Tell LISTENER, WHY, every time the host asks to let go of the open panel; answers the stop. */
+  onDismissed(listener: (why: string) => void): () => void;
   dispose(): void;
 }
 
@@ -336,12 +389,17 @@ export function createPopupMirror(env: PopupMirrorEnv): PopupMirror {
     open = null;
   };
 
+  const dismissals = createListeners<[string]>();
+
   // THE POINTER ON THE HOST'S COPY IS THE POINTER ON THIS PANEL: replayed as
   // the panel's own enter and leave, which the row's hover owner listens to.
+  // A PRESS OUTSIDE THE COPY is the user leaving the popup: its listeners
+  // (sidebar/transients.ts) let go of it.
   const onMessage = (event: MessageEvent): void => {
-    const message = parsePopupPointerMessage(event.data);
+    const message = parseHostPopupMessage(event.data);
     if (message === null || open === null || message.key !== open.key) return;
-    open.detail.dispatchEvent(new MouseEvent(message.inside ? "mouseenter" : "mouseleave"));
+    if (message.kind === "dismiss") dismissals.notify(message.why);
+    else open.detail.dispatchEvent(new MouseEvent(message.inside ? "mouseenter" : "mouseleave"));
   };
   channel.addEventListener("message", onMessage);
 
@@ -361,8 +419,12 @@ export function createPopupMirror(env: PopupMirrorEnv): PopupMirror {
     hide(key) {
       if (open !== null && open.key === key) close();
     },
+    onDismissed(listener) {
+      return dismissals.add(listener);
+    },
     dispose() {
       close();
+      dismissals.clear();
       channel.removeEventListener("message", onMessage);
     },
   };

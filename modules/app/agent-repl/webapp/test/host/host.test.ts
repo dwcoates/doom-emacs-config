@@ -2220,6 +2220,35 @@ describe("restyle turns", () => {
   });
 });
 
+describe("onPagePressed", () => {
+  it("tells a listener which page the reader pressed", () => {
+    // Arrange
+    pages(host, "a");
+    const told: string[] = [];
+    host.onPagePressed((id) => told.push(id));
+
+    // Act
+    fromPage("a", { channel: HOST_CHANNEL, kind: "pressed" });
+
+    // Assert
+    expect(told).toEqual(["a"]);
+  });
+
+  it("tells nothing to a stopped listener", () => {
+    // Arrange
+    pages(host, "a");
+    const told: string[] = [];
+    const stop = host.onPagePressed((id) => told.push(id));
+    stop();
+
+    // Act
+    fromPage("a", { channel: HOST_CHANNEL, kind: "pressed" });
+
+    // Assert
+    expect(told).toEqual([]);
+  });
+});
+
 describe("setSidebarOffset", () => {
   it("keeps the sidebar's offset", () => {
     const answer = parsed(host.setSidebarOffset(12));

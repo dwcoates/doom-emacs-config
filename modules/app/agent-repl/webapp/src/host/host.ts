@@ -180,6 +180,8 @@ export interface Host {
   setSidebarOffset(pixels: number): string;
   /** Tell LISTENER the sidebar's offset now and at every change; answers the stop. */
   onSidebarOffset(listener: (pixels: number) => void): () => void;
+  /** Tell LISTENER every press the reader makes inside a workspace page; answers the stop. */
+  onPagePressed(listener: (id: string) => void): () => void;
   /**
    * Tell ID's page the editor's held-prompt ingress entries for its
    * workspace, the whole list. An entry that is not one (host/protocol.ts
@@ -291,6 +293,8 @@ export function createHost(env: HostEnv): Host {
   let sidebarOffset = 0;
   /** Who is told every sidebar offset Emacs records: the popup layer. */
   const sidebarOffsets = createListeners<[number]>();
+  /** Who is told every press inside a page (`onPagePressed`): the popup layer. */
+  const pagePresses = createListeners<[string]>();
   /** Who is told every page shown (`onShown`): the webhost's gate. */
   const shownListeners = createListeners<[string]>();
   /**
@@ -575,6 +579,9 @@ export function createHost(env: HostEnv): Host {
       case "bubbleOverlay":
         // The iframe rises above the webhost's layers while its page has a bubble open.
         frame.iframe.toggleAttribute(FRAME_OVERLAY_ATTRIBUTE, message.open);
+        return;
+      case "pressed":
+        pagePresses.notify(frame.id);
         return;
     }
   };
@@ -893,6 +900,9 @@ export function createHost(env: HostEnv): Host {
       sidebarOffset = pixels;
       sidebarOffsets.notify(pixels);
       return answer("setSidebarOffset", null, "kept", { pixels });
+    },
+    onPagePressed(listener) {
+      return pagePresses.add(listener);
     },
     onSidebarOffset(listener) {
       listener(sidebarOffset);

@@ -105,6 +105,15 @@ function hoverDuration(drawn: HTMLElement): void {
   durationOf(drawn).dispatchEvent(new MouseEvent("mouseenter"));
 }
 
+/** The row's "⋯" control, which opens the panel at once too (owner request, 2026-11-02). */
+const moreOf = (drawn: HTMLElement): HTMLElement => lineOf(drawn).querySelector(":scope > .sb-more") as HTMLElement;
+
+/** Bring the pointer onto the row's "⋯", by way of its line. */
+function hoverMore(drawn: HTMLElement): void {
+  lineOf(drawn).dispatchEvent(new MouseEvent("mouseenter"));
+  moreOf(drawn).dispatchEvent(new MouseEvent("mouseenter"));
+}
+
 function hoverOut(drawn: HTMLElement): void {
   lineOf(drawn).dispatchEvent(new MouseEvent("mouseleave"));
 }
@@ -1745,6 +1754,26 @@ describe("the detail panel opens on hover", () => {
     hoverDuration(drawn);
     // ACT
     durationOf(drawn).dispatchEvent(new MouseEvent("mouseleave"));
+    vi.runAllTimers();
+    // ASSERT
+    expect(drawn.classList.contains("open")).toBe(true);
+  });
+
+  it("opens at once when the pointer reaches the ⋯", () => {
+    // ARRANGE
+    const drawn = drawRosterRow(row({ id: "ws-1" }), sidebarContext(), "R");
+    // ACT
+    hoverMore(drawn);
+    // ASSERT
+    expect(drawn.classList.contains("open")).toBe(true);
+  });
+
+  it("stays open while the pointer moves from the ⋯ to the rest of the line", () => {
+    // ARRANGE
+    const drawn = drawRosterRow(row({ id: "ws-1" }), sidebarContext(), "R");
+    hoverMore(drawn);
+    // ACT
+    moreOf(drawn).dispatchEvent(new MouseEvent("mouseleave"));
     vi.runAllTimers();
     // ASSERT
     expect(drawn.classList.contains("open")).toBe(true);

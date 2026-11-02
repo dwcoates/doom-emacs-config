@@ -241,6 +241,16 @@ interface BubbleOverlayMessage {
   readonly open: boolean;
 }
 
+/**
+ * page -> host: the reader pressed the page. A press inside a page's iframe
+ * never reaches the webhost's document, and the sidebar's popups drawn over
+ * the pages close on a press anywhere outside them (host/sidebar-popups.ts).
+ */
+interface PressedMessage {
+  readonly channel: typeof HOST_CHANNEL;
+  readonly kind: "pressed";
+}
+
 /** page -> host: the page's restyle turn is over; the next page's may begin. */
 interface RestyledMessage {
   readonly channel: typeof HOST_CHANNEL;
@@ -256,7 +266,8 @@ export type PageToHost =
   | EditingMessage
   | BubbleOverlayMessage
   | RestyleTurnMessage
-  | RestyledMessage;
+  | RestyledMessage
+  | PressedMessage;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -377,6 +388,8 @@ export function parsePageToHost(data: unknown): PageToHost | null {
       return { channel: HOST_CHANNEL, kind: "restyleTurn" };
     case "restyled":
       return { channel: HOST_CHANNEL, kind: "restyled" };
+    case "pressed":
+      return { channel: HOST_CHANNEL, kind: "pressed" };
     default:
       return null;
   }

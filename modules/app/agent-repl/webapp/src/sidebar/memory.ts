@@ -31,6 +31,8 @@ import type {
 import type { WorkspaceRef } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import type { SidebarContext } from "./context.js";
 import { detailsPanel, requireFactHome, syncDetailsEntry } from "./detail-more.js";
+import type { Dropdowns } from "./dropdowns.js";
+import type { PopupMirror } from "../host/sidebar-popups.js";
 
 /** How many ticks of the shared one-second clock pass between a popup's asks. */
 export const REFRESH_TICKS = 2;
@@ -302,6 +304,27 @@ function noteFailed(operation: string, err: unknown): void {
   });
 }
 
+/** The key the version hover's panel is mirrored under (host/sidebar-popups.ts): no workspace id. */
+export const VERSION_POPUP_KEY = "sb-version";
+
+/** What the version hover answers to besides the pointer. */
+export interface VersionHoverOptions {
+  /** Whether the hover must stay shut: the version's click opened its notices (notices.ts). */
+  readonly suppressed?: () => boolean;
+  /**
+   * The rail's dropdowns: the open hover is one, so a click elsewhere in the
+   * rail, another dropdown opening, or the user leaving the rail
+   * (transients.ts) closes it.
+   */
+  readonly dropdowns?: Dropdowns;
+  /**
+   * The mirror drawing the panel over the feed, beside the version's line, as
+   * an open row's is (host/sidebar-popups.ts); the panel stands under the
+   * version, in the rail, without one.
+   */
+  readonly mirror?: PopupMirror | null;
+}
+
 /**
  * Hover the rail's version to show the overview. The panel opens on the
  * pointer's arrival, closes on its departure from both the version and the
@@ -311,31 +334,52 @@ export function installVersionHover(
   ctx: DaemonContext,
   version: HTMLElement,
   rail: HTMLElement,
-  suppressed: () => boolean = () => false,
+  options: VersionHoverOptions = {},
 ): void {
+  const suppressed = options.suppressed ?? (() => false);
+  const dropdowns = options.dropdowns ?? null;
+  const mirror = options.mirror ?? null;
   const panel = document.createElement("div");
   panel.className = `detail ${MEMORY_PANEL_CLASS}`;
   rail.appendChild(panel);
   let stop: (() => void) | null = null;
   let over = 0;
+  /** Close the panel; RELEASE when its own gesture closed it, not the dropdowns. */
+  const close = (release: boolean): void => {
+    if (stop === null) return;
+    stop();
+    stop = null;
+    panel.classList.remove("open");
+    if (release) dropdowns?.released(panel);
+    mirror?.hide(VERSION_POPUP_KEY);
+  };
   const open = (): void => {
     // The version's click opened its notices (notices.ts): the hover stays shut under them.
     if (stop !== null || suppressed()) return;
     fillNote(panel, "measuring…");
     panel.classList.add("open");
+    // REGISTERED BEFORE IT IS MIRRORED: the row panel it closes takes its
+    // copy off the feed first.
+    dropdowns?.opened({
+      kind: "version-memory",
+      element: panel,
+      openers: [version],
+      close: () => {
+        close(false);
+      },
+    });
     const place = (): void => {
+      // THE SAME PANEL SHOWN AGAIN is placed again (sidebar-popups.ts).
+      if (mirror !== null) {
+        mirror.show(VERSION_POPUP_KEY, panel, version);
+        return;
+      }
       applyPlacement(panel, clampReveal(version.getBoundingClientRect(), panel.getBoundingClientRect(), viewportOf()));
     };
     place();
     stop = refreshWhileOpen(ctx, () => {
       fetchOverview(ctx, panel).then(place, (err: unknown) => noteFailed("sidebar.memory.overview-fetch", err));
     });
-  };
-  const close = (): void => {
-    if (stop === null) return;
-    stop();
-    stop = null;
-    panel.classList.remove("open");
   };
   for (const el of [version, panel]) {
     el.addEventListener("mouseenter", () => {
@@ -347,7 +391,7 @@ export function installVersionHover(
       // The pointer crossing from the version into the panel leaves one
       // before it enters the other; the next frame decides.
       nextFrame(() => {
-        if (over === 0) close();
+        if (over === 0) close(true);
       });
     });
   }
