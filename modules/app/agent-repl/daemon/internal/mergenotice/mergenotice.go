@@ -4,8 +4,18 @@
 // The merge orchestrator reports every change of every queue it makes, with
 // the queue as it stands after it (merge.QueueObserver). This package keeps
 // those changes in order in memory, and one loop delivers them: it reads the
-// subscriptions at delivery time, picks each subscriber whose subscription
-// admits the change at its detail, and submits ONE notice per subscriber.
+// subscriptions at delivery time, picks each subscriber with a subscription in
+// the change's scope, and submits ONE notice per subscriber.
+//
+// ONLY THREE CHANGES ARE TOLD: a merge put in line, a merge leaving the queue,
+// and a deploy ending (Admits). A notice wakes its subscriber and costs it a
+// full read of its context, and a merge's start, its steps, a reorder, a
+// pause and a restart's requeue are changes nobody waits on, so the
+// orchestrator still reports them (other observers read them) and this
+// package drops them.
+//
+// A NOTICE IS ONE SHORT LINE: the queue, the change, and the queue's state in
+// a few words (Notice). It never lists the queue; `merge-queue status` does.
 //
 // THE NOTICE TAKES THE PATH EVERY UNDER-THE-HOOD REPORT TO AN AGENT TAKES: a
 // deferred prompt submitted through the prompt handler, exactly as an async
@@ -126,8 +136,7 @@ func (s *Service) QueueChanged(change merge.QueueChange) {
 
 // DeployEnded is told each deploy's end (mergeworkspace.Service.PayOwed). A
 // DEPLOY IS THE DAEMON'S OWN, not one queue's: it is told to every
-// subscription whose detail admits it, whatever repository it scopes, with no
-// queue read for it. It appends, as QueueChanged does, and never blocks.
+// subscription, whatever repository it scopes, with no queue read for it. It appends, as QueueChanged does, and never blocks.
 func (s *Service) DeployEnded(end merge.DeployEnd) {
 	s.loop.Report(merge.QueueChange{Kind: merge.QueueChangeDeployed, Deploy: end})
 }
@@ -150,18 +159,23 @@ func (s *Service) untold(change merge.QueueChange) {
 	s.deps.Log.Global().Info(op, "a merge queue change came after the notifier stopped, as the daemon stood down; it is not told, and the next notice carries its effect", changeFields(change))
 }
 
-// deliver tells CHANGE to every subscriber whose subscription admits it, once
-// each.
+// deliver tells CHANGE to every subscriber in its scope, once each. A change
+// no subscription is told (Admits) is dropped before the subscriptions are
+// read.
 func (s *Service) deliver(ctx context.Context, prompts prompthandler.Submitter, change merge.QueueChange) {
 	log := s.deps.Log.Global()
+	if !Admits(change) {
+		log.Debug(op, "a merge queue change no subscription is told; nobody is notified", changeFields(change))
+		return
+	}
 	subs, err := s.deps.Subscriptions.MergeQueueSubscriptions(ctx)
 	if err != nil {
 		log.Error(op, "could not read the merge queue subscriptions; nobody is told of the change", dlog.WithCause(changeFields(change), err))
 		return
 	}
 	ended := s.endDepleted(ctx, subs, change)
-	for _, told := range Recipients(subs, change) {
-		s.notify(ctx, prompts, told, ended[told.Subscriber], change)
+	for _, subscriber := range Recipients(subs, change) {
+		s.notify(ctx, prompts, subscriber, ended[subscriber], change)
 	}
 }
 
@@ -180,7 +194,7 @@ func (s *Service) endDepleted(ctx context.Context, subs []wsm.MergeQueueSubscrip
 			continue
 		}
 		fields := changeFields(change)
-		fields["subscriber"], fields["scope"], fields["detail"] = string(sub.Subscriber), string(sub.Repo), sub.Detail.String()
+		fields["subscriber"], fields["scope"] = string(sub.Subscriber), string(sub.Repo)
 		done, err := s.deps.Subscriptions.EndMergeQueueSubscription(ctx, sub)
 		switch {
 		case err != nil:
@@ -204,87 +218,73 @@ func InScope(sub wsm.MergeQueueSubscription, change merge.QueueChange) bool {
 	return change.Kind == merge.QueueChangeDeployed || sub.Repo == wsm.EveryRepository || sub.Repo == change.Queue.Repo
 }
 
-// Recipient is one subscriber a change is told to, at the detail of the
-// subscription that admitted it.
-type Recipient struct {
-	Subscriber ids.WorkspaceID
-	Detail     wsm.MergeQueueDetail
-}
-
-// Recipients answers who is told CHANGE (a deploy's end: every subscriber
-// whose detail admits it, whatever its scope): every subscriber holding a
+// Recipients answers who is told CHANGE: every subscriber holding a
 // subscription in the change's queue's scope (that repository, or every
-// repository) whose detail admits it, ONCE each, in the subscriptions' order.
-// A subscriber holding both a scoped and an unscoped subscription that admit
-// the change is told at the finer of the two details.
-func Recipients(subs []wsm.MergeQueueSubscription, change merge.QueueChange) []Recipient {
-	var out []Recipient
-	at := map[ids.WorkspaceID]int{}
+// repository; a deploy's end, every subscriber), ONCE each, in the
+// subscriptions' order, and nobody for a change no subscription is told.
+func Recipients(subs []wsm.MergeQueueSubscription, change merge.QueueChange) []ids.WorkspaceID {
+	if !Admits(change) {
+		return nil
+	}
+	var out []ids.WorkspaceID
+	seen := map[ids.WorkspaceID]bool{}
 	for _, sub := range subs {
-		if !InScope(sub, change) {
+		if !InScope(sub, change) || seen[sub.Subscriber] {
 			continue
 		}
-		if !Admits(sub.Detail, change) {
-			continue
-		}
-		if i, seen := at[sub.Subscriber]; seen {
-			if sub.Detail.Fineness() < out[i].Detail.Fineness() {
-				out[i].Detail = sub.Detail
-			}
-			continue
-		}
-		at[sub.Subscriber] = len(out)
-		out = append(out, Recipient{Subscriber: sub.Subscriber, Detail: sub.Detail})
+		seen[sub.Subscriber] = true
+		out = append(out, sub.Subscriber)
 	}
 	return out
 }
 
-// Admits reports whether a subscription at DETAIL is told CHANGE: every
-// change at every_change, a merge leaving or a deploy ending at deploys, a
-// merge leaving at advances, and a leave that emptied the line at depletes.
-func Admits(detail wsm.MergeQueueDetail, change merge.QueueChange) bool {
-	switch detail {
-	case wsm.MergeQueueDetailEveryChange:
+// Admits reports whether CHANGE is told to the subscriptions in its scope: a
+// merge put in line, a merge leaving the queue, or a deploy ending. A
+// merge's start, its steps, a reorder, a pause, a resume and a restart's
+// requeue (a merge that never left the line) are not.
+func Admits(change merge.QueueChange) bool {
+	switch change.Kind {
+	case merge.QueueChangeEnqueued, merge.QueueChangeDeployed:
 		return true
-	case wsm.MergeQueueDetailDeploys:
-		return change.Kind.Leaves() || change.Kind == merge.QueueChangeDeployed
-	case wsm.MergeQueueDetailAdvances:
-		return change.Kind.Leaves()
-	case wsm.MergeQueueDetailDepletes:
-		return change.Kind.Leaves() && change.Depleted
+	case merge.QueueChangeRequeued, merge.QueueChangeStarted, merge.QueueChangeStepped, merge.QueueChangeReordered,
+		merge.QueueChangePaused, merge.QueueChangeResumed:
+		return false
 	}
-	panic(fmt.Sprintf("mergenotice: a subscription holds the undeclared detail %d", int(detail)))
+	if change.Kind.Leaves() {
+		return true
+	}
+	panic(fmt.Sprintf("mergenotice: a queue change of undeclared kind %d", int(change.Kind)))
 }
 
-// notify composes and submits one notice of CHANGE to TOLD, saying first
-// every change of the subscriber's untold notice it supersedes, and records
-// it as the subscriber's untold notice of the queue. ENDED says the change
-// ended the subscriber's subscription, so the notice is its last.
-func (s *Service) notify(ctx context.Context, prompts prompthandler.Submitter, told Recipient, ended bool, change merge.QueueChange) {
+// notify composes and submits one notice of CHANGE to SUBSCRIBER, saying
+// first every change of the subscriber's untold notice it supersedes, and
+// records it as the subscriber's untold notice of the queue. ENDED says the
+// change ended the subscriber's subscription, so the notice is its last.
+func (s *Service) notify(ctx context.Context, prompts prompthandler.Submitter, subscriber ids.WorkspaceID, ended bool, change merge.QueueChange) {
 	log := s.deps.Log.Global()
 	fields := changeFields(change)
-	fields["subscriber"], fields["detail"], fields["ended"] = string(told.Subscriber), told.Detail.String(), ended
-	sentences := append(s.carried(ctx, told.Subscriber, change.Queue.Repo), Sentence(change))
+	fields["subscriber"], fields["ended"] = string(subscriber), ended
+	sentences := append(s.carried(ctx, subscriber, change.Queue.Repo), Sentence(change))
 	fields["changes"] = len(sentences)
-	turn, failure, err := s.submit(ctx, prompts, told, ended, sentences, change)
+	turn, failure, err := s.submit(ctx, prompts, subscriber, ended, sentences, change)
 	if err != nil {
 		log.Error(op, failure, dlog.WithCause(fields, err))
 	} else {
 		fields["turn"] = string(turn)
 		log.Info(op, "told a subscriber's agent of a merge queue change", fields)
 	}
-	untold := wsm.UntoldMergeNotice{Subscriber: told.Subscriber, Repo: change.Queue.Repo, Turn: turn, Sentences: sentences}
+	untold := wsm.UntoldMergeNotice{Subscriber: subscriber, Repo: change.Queue.Repo, Turn: turn, Sentences: sentences}
 	if err := s.deps.Untold.RecordUntoldMergeNotice(ctx, untold); err != nil {
 		log.Error(op, "could not record the subscriber's untold notice; the next notice cannot supersede it", dlog.WithCause(fields, err))
 	}
 }
 
 // submit composes the notice of SENTENCES, the latest being CHANGE's, and
-// submits it to TOLD, answering the turn it was submitted as, or the record a
-// failure is written with and why.
-func (s *Service) submit(ctx context.Context, prompts prompthandler.Submitter, told Recipient, ended bool, sentences []string, change merge.QueueChange) (ids.TurnID, string, error) {
+// submits it to SUBSCRIBER, answering the turn it was submitted as, or the
+// record a failure is written with and why.
+func (s *Service) submit(ctx context.Context, prompts prompthandler.Submitter, subscriber ids.WorkspaceID, ended bool, sentences []string, change merge.QueueChange) (ids.TurnID, string, error) {
 	turn, err := briefprompt.Composer{Briefs: s.deps.Briefs, MintKey: s.deps.MintKey}.
-		Submit(ctx, prompts, told.Subscriber, BriefNotice, Values(told.Detail, ended, sentences, change), "merge-queue-notice", Origin)
+		Submit(ctx, prompts, subscriber, BriefNotice, Values(ended, sentences, change), "merge-queue-notice", Origin)
 	switch briefprompt.StepOf(err) {
 	case briefprompt.StepCompose:
 		return "", "could not compose a merge queue notice; the subscriber is not told of the change", err
@@ -311,177 +311,115 @@ func (s *Service) carried(ctx context.Context, subscriber ids.WorkspaceID, repo 
 }
 
 // Values are the brief's placeholders for one notice of SENTENCES, oldest
-// first, the last being LATEST's: the latest change's headline, every change
-// stated in full, the queue as the latest change left it, the detail the
-// subscriber asked for, and the subscription's lifetime: ENDED says LATEST
-// ended it, so the notice is its last.
-func Values(detail wsm.MergeQueueDetail, ended bool, sentences []string, latest merge.QueueChange) map[string]string {
+// first, the last being LATEST's, all on one line: the queue the notice is
+// about, every change, the queue's state as the latest change left it in a
+// few words, and, when ENDED says LATEST ended the subscription, that it
+// ended. A deploy is the daemon's own, not one queue's, so its notice names
+// no repository and says nothing of a queue.
+func Values(ended bool, sentences []string, latest merge.QueueChange) map[string]string {
 	if len(sentences) == 0 {
 		panic("mergenotice: a notice was composed of no change")
 	}
-	queue := Queue(latest.Queue)
+	scope, queue := "merge queue of "+repositoryName(latest.Queue.Repo), " "+QueueState(latest.Queue)
 	if latest.Kind == merge.QueueChangeDeployed {
-		queue = "A deploy is the daemon's own, not one queue's: no queue's line changed with it."
+		scope, queue = "merge queue", ""
 	}
 	return map[string]string{
-		"label":    Headline(latest),
-		"change":   untoldnotice.Sentences(sentences),
+		"scope":    scope,
+		"changes":  Changes(sentences),
 		"queue":    queue,
-		"detail":   detailWords(detail),
 		"lifetime": Lifetime(ended),
 	}
 }
 
-// Lifetime is a notice's closing word on its subscription: that it ended
-// with this notice, or when it will.
+// Lifetime is a notice's closing words on its subscription: that this notice
+// is its last, or nothing.
 func Lifetime(ended bool) string {
 	if ended {
-		return "The queue is empty with nothing running, so this subscription has ended: this is its last notice. To follow the queue's next work, subscribe again through `agent-repld merge-queue subscribe`."
+		return " Subscription ended."
 	}
-	return "This subscription ends on its own once a queue it watches is empty with nothing running, with a last notice saying so. To stop these notices sooner, unsubscribe through `agent-repld merge-queue unsubscribe`."
+	return ""
 }
 
-// Headline is a notice's first line: the queue and what happened to it.
-func Headline(change merge.QueueChange) string {
-	head := "merge queue of " + repositoryName(change.Queue.Repo) + ": "
-	switch change.Kind {
-	case merge.QueueChangePaused:
-		return head + "paused"
-	case merge.QueueChangeResumed:
-		return head + "resumed"
-	case merge.QueueChangeDeployed:
-		return "the daemon's deploy: " + deployWords(change.Deploy)
+// Changes states every change of a notice, oldest first, as one sentence:
+// one change alone, several counted and joined. A notice of no change is a
+// caller's defect.
+func Changes(sentences []string) string {
+	switch len(sentences) {
+	case 0:
+		panic("mergenotice: a notice was composed of no change")
+	case 1:
+		return sentences[0] + "."
 	}
-	line := head + change.Subject.Name + " " + kindWords(change)
-	if change.Depleted {
-		line += "; the queue is empty"
-	}
-	return line
+	return fmt.Sprintf("%d changes: %s.", len(sentences), strings.Join(sentences, "; "))
 }
 
-// Sentence states the change in full.
+// Sentence states one change in a few words, with no closing stop: Changes
+// joins and closes them.
 func Sentence(change merge.QueueChange) string {
-	subject := fmt.Sprintf("The %s merge of `%s` (branch `%s`)", change.Subject.Mode, change.Subject.Name, change.Subject.Branch)
+	subject := "`" + change.Subject.Name + "`"
 	switch change.Kind {
 	case merge.QueueChangeEnqueued:
-		return subject + " was put in line."
-	case merge.QueueChangeRequeued:
-		return subject + ", which a daemon restart cut short, was put back in line to run again."
-	case merge.QueueChangeStarted:
-		return subject + " started."
-	case merge.QueueChangeStepped:
-		return subject + " moved to its " + change.Subject.Step.Words() + " step."
+		return subject + " put in line"
 	case merge.QueueChangeLanded:
-		return subject + " landed and left the queue."
+		return subject + " landed"
 	case merge.QueueChangeFailed:
-		return subject + " failed and left the queue."
+		return subject + " failed"
 	case merge.QueueChangeDequeued:
-		return subject + " was taken off the queue (" + strings.ReplaceAll(change.Cause, "_", " ") + ")."
-	case merge.QueueChangeReordered:
-		return subject + " moved to a new place in line."
-	case merge.QueueChangePaused:
-		return "The queue was paused: nothing new starts until it is resumed."
-	case merge.QueueChangeResumed:
-		return "The queue was resumed."
+		return subject + " taken off (" + strings.ReplaceAll(change.Cause, "_", " ") + ")"
 	case merge.QueueChangeDeployed:
 		return DeploySentence(change.Deploy)
 	}
-	panic(fmt.Sprintf("mergenotice: a queue change of undeclared kind %d", int(change.Kind)))
-}
-
-// deployWords is a deploy's headline: how it ended.
-func deployWords(end merge.DeployEnd) string {
-	switch {
-	case end.Failure != "":
-		return "a deploy failed"
-	case end.Boot:
-		return "the daemon booted on a new build"
-	}
-	return "a deploy finished"
+	panic(fmt.Sprintf("mergenotice: a queue change of kind %s is never told", change.Kind))
 }
 
 // DeploySentence states how a deploy ended, and the reported landings its
-// build carries.
+// build carries, in a few words.
 func DeploySentence(end merge.DeployEnd) string {
-	var b strings.Builder
+	var line string
 	switch {
 	case end.Failure != "":
-		b.WriteString(fmt.Sprintf("A deploy of the daemon's checkout failed (%s): the running build does not carry what it was to deploy.", end.Failure))
+		line = "deploy failed (" + end.Failure + "); the running build does not carry it"
 	case end.Boot:
-		b.WriteString("The daemon booted on a new build: it, and every shim judged against it, now runs the checkout as it stands.")
+		line = "daemon booted on a new build"
 	default:
-		b.WriteString("A deploy of the daemon's checkout finished: its build is running, every shim judged against it.")
+		line = "deploy finished"
 	}
-	if len(end.Carried) > 0 {
-		names := make([]string, len(end.Carried))
-		for i, n := range end.Carried {
-			names[i] = "`" + n + "`"
-		}
-		b.WriteString(" It carries the landings of " + strings.Join(names, ", ") + ".")
+	if len(end.Carried) == 0 {
+		return line
 	}
-	return b.String()
+	names := make([]string, len(end.Carried))
+	for i, n := range end.Carried {
+		names[i] = "`" + n + "`"
+	}
+	return line + ", carries " + strings.Join(names, ", ")
 }
 
-// Queue states the queue as it stands, every member front first.
-func Queue(queue merge.QueueSnapshot) string {
-	state := "running"
-	if queue.Paused {
-		state = "paused"
-	}
+// QueueState states the queue as it stands in a few words: how many merges
+// are in line, the front one and how it stands, how many fix their tests out
+// of line, and whether it is paused. It never lists the queue.
+func QueueState(queue merge.QueueSnapshot) string {
+	var line string
 	if len(queue.Members) == 0 {
-		return fmt.Sprintf("The queue of `%s` is now empty (%s).", repositoryDir(queue.Repo), state)
-	}
-	var b strings.Builder
-	b.WriteString(fmt.Sprintf("The queue of `%s` now (%s), front first:", repositoryDir(queue.Repo), state))
-	for i, member := range queue.Members {
-		standing := "waiting"
+		line = "Queue empty"
+	} else {
+		front := queue.Members[0]
+		standing := "next"
 		switch {
-		case member.Started && member.Step != "":
-			standing = "started, " + member.Step.Words()
-		case member.Started:
+		case front.Started && front.Step != "":
+			standing = front.Step.Words()
+		case front.Started:
 			standing = "started"
 		}
-		b.WriteString(fmt.Sprintf("\n%d. `%s`: branch `%s`, %s, %s", i+1, member.Name, member.Branch, member.Mode, standing))
+		line = fmt.Sprintf("%d in line; `%s` %s", len(queue.Members), front.Name, standing)
 	}
-	return b.String()
-}
-
-// kindWords is the headline's verb for a change about one merge.
-func kindWords(change merge.QueueChange) string {
-	switch change.Kind {
-	case merge.QueueChangeEnqueued:
-		return "put in line"
-	case merge.QueueChangeRequeued:
-		return "put back in line"
-	case merge.QueueChangeStarted:
-		return "started"
-	case merge.QueueChangeStepped:
-		return change.Subject.Step.Words()
-	case merge.QueueChangeLanded:
-		return "landed"
-	case merge.QueueChangeFailed:
-		return "failed"
-	case merge.QueueChangeDequeued:
-		return "taken off the queue"
-	case merge.QueueChangeReordered:
-		return "moved in line"
+	if n := len(queue.Remediating); n > 0 {
+		line += fmt.Sprintf("; %d fixing out of line", n)
 	}
-	panic(fmt.Sprintf("mergenotice: a queue change of kind %s has no headline verb", change.Kind))
-}
-
-// detailWords names the detail a subscriber asked for, as the notice says it.
-func detailWords(detail wsm.MergeQueueDetail) string {
-	switch detail {
-	case wsm.MergeQueueDetailEveryChange:
-		return "every change"
-	case wsm.MergeQueueDetailAdvances:
-		return "each merge leaving the queue"
-	case wsm.MergeQueueDetailDepletes:
-		return "the queue emptying"
-	case wsm.MergeQueueDetailDeploys:
-		return "each merge leaving the queue and each deploy's end"
+	if queue.Paused {
+		line += "; paused"
 	}
-	panic(fmt.Sprintf("mergenotice: a subscription holds the undeclared detail %d", int(detail)))
+	return line + "."
 }
 
 // repositoryDir is the repository's main checkout a queue key names: the key
@@ -494,7 +432,7 @@ func repositoryDir(repo wsm.RepoKey) string {
 	return key
 }
 
-// repositoryName is the repository's directory name, for a headline.
+// repositoryName is the repository's directory name, for a notice.
 func repositoryName(repo wsm.RepoKey) string {
 	return filepath.Base(repositoryDir(repo))
 }

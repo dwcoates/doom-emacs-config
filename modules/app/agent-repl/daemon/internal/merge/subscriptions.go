@@ -631,16 +631,16 @@ func (o *orchestrator) noteFacts(ws ids.WorkspaceID, repo wsm.RepoKey, hadFacts 
 }
 
 // Subscribe implements Orchestrator.
-func (o *orchestrator) Subscribe(ctx context.Context, subscriber ids.WorkspaceID, scope *RepositoryScope, detail wsm.MergeQueueDetail) (bool, error) {
+func (o *orchestrator) Subscribe(ctx context.Context, subscriber ids.WorkspaceID, scope *RepositoryScope) (bool, error) {
 	const op = "daemon.merge.subscribe"
 	repo, err := o.subscriptionScope(ctx, op, "a merge queue subscription", scope)
 	if err != nil {
 		return false, err
 	}
 	log := o.log(ctx, subscriber)
-	fields := dlog.Context{"subscriber": string(subscriber), "repo": string(repo), "scoped": scope != nil, "detail": detail.String()}
+	fields := dlog.Context{"subscriber": string(subscriber), "repo": string(repo), "scoped": scope != nil}
 	replaced, err := o.deps.DB.SubscribeMergeQueue(ctx, wsm.MergeQueueSubscription{
-		Subscriber: subscriber, Repo: repo, Detail: detail, SubscribedAt: o.deps.Now(),
+		Subscriber: subscriber, Repo: repo, SubscribedAt: o.deps.Now(),
 	})
 	if errors.Is(err, wsm.ErrSubscriberClosed) {
 		log.Info(op, "refused a merge queue subscription of a closed workspace", withField(fields, "arm", ArmSubscriberClosed))

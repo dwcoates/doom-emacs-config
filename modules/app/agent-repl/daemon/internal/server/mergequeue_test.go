@@ -17,15 +17,10 @@ import (
 	"agent-repld/internal/wsm"
 )
 
-// advancesDetail is the advances detail level.
-func advancesDetail() *agentreplv1.SubscribeMergeQueueDetail {
-	return &agentreplv1.SubscribeMergeQueueDetail{Level: &agentreplv1.SubscribeMergeQueueDetail_Advances{Advances: &agentreplv1.SubscribeMergeQueueAdvances{}}}
-}
-
-// subscribeRequest subscribes the harness workspace at DETAIL, scoped to
-// REPO when it is set.
-func subscribeRequest(detail *agentreplv1.SubscribeMergeQueueDetail, repo *workspacev1.RepositoryRef) *connect.Request[agentreplv1.SubscribeMergeQueueRequest] {
-	return connect.NewRequest(&agentreplv1.SubscribeMergeQueueRequest{Subscriber: ref(), Repository: repo, Detail: detail})
+// subscribeRequest subscribes the harness workspace, scoped to REPO when it
+// is set.
+func subscribeRequest(repo *workspacev1.RepositoryRef) *connect.Request[agentreplv1.SubscribeMergeQueueRequest] {
+	return connect.NewRequest(&agentreplv1.SubscribeMergeQueueRequest{Subscriber: ref(), Repository: repo})
 }
 
 // aQueue is a repository's queue with one merge running and one waiting at
@@ -107,41 +102,24 @@ func TestGetMergeQueueStatusAnswersAnUnknownRepository(t *testing.T) {
 	}
 }
 
-func TestSubscribeMergeQueueReachesTheOrchestratorAtEachDetail(t *testing.T) {
-	tests := []struct {
-		name   string
-		detail *agentreplv1.SubscribeMergeQueueDetail
-		want   wsm.MergeQueueDetail
-	}{
-		{name: "every change", want: wsm.MergeQueueDetailEveryChange, detail: &agentreplv1.SubscribeMergeQueueDetail{
-			Level: &agentreplv1.SubscribeMergeQueueDetail_EveryChange{EveryChange: &agentreplv1.SubscribeMergeQueueEveryChange{}}}},
-		{name: "advances", want: wsm.MergeQueueDetailAdvances, detail: advancesDetail()},
-		{name: "depletes", want: wsm.MergeQueueDetailDepletes, detail: &agentreplv1.SubscribeMergeQueueDetail{
-			Level: &agentreplv1.SubscribeMergeQueueDetail_Depletes{Depletes: &agentreplv1.SubscribeMergeQueueDepletes{}}}},
-		{name: "deploys", want: wsm.MergeQueueDetailDeploys, detail: &agentreplv1.SubscribeMergeQueueDetail{
-			Level: &agentreplv1.SubscribeMergeQueueDetail_Deploys{Deploys: &agentreplv1.SubscribeMergeQueueDeploys{}}}},
+func TestSubscribeMergeQueueReachesTheOrchestrator(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.Merge.statuses = []merge.QueueStatus{aQueue()}
+
+	// Act
+	resp, err := h.Client.SubscribeMergeQueue(context.Background(), subscribeRequest(nil))
+
+	// Assert
+	if err != nil || resp.Msg.GetSuccess().GetTaken().GetSubscribed() == nil {
+		t.Fatalf("SubscribeMergeQueue = %v, %v; want subscribed", resp, err)
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Arrange
-			h := newHarness(t)
-			h.Merge.statuses = []merge.QueueStatus{aQueue()}
-
-			// Act
-			resp, err := h.Client.SubscribeMergeQueue(context.Background(), subscribeRequest(tt.detail, nil))
-
-			// Assert
-			if err != nil || resp.Msg.GetSuccess().GetTaken().GetSubscribed() == nil {
-				t.Fatalf("SubscribeMergeQueue = %v, %v; want subscribed", resp, err)
-			}
-			if len(resp.Msg.GetSuccess().GetQueues()) != 1 {
-				t.Errorf("queues = %v, want the queues as they stand", resp.Msg.GetSuccess().GetQueues())
-			}
-			want := []fakeSubscription{{ws: ids.WorkspaceID(ref().GetId()), detail: tt.want}}
-			if !reflect.DeepEqual(h.Merge.subscriptions, want) {
-				t.Fatalf("subscriptions = %+v, want %+v", h.Merge.subscriptions, want)
-			}
-		})
+	if len(resp.Msg.GetSuccess().GetQueues()) != 1 {
+		t.Errorf("queues = %v, want the queues as they stand", resp.Msg.GetSuccess().GetQueues())
+	}
+	want := []fakeSubscription{{ws: ids.WorkspaceID(ref().GetId())}}
+	if !reflect.DeepEqual(h.Merge.subscriptions, want) {
+		t.Fatalf("subscriptions = %+v, want %+v", h.Merge.subscriptions, want)
 	}
 }
 
@@ -151,7 +129,7 @@ func TestSubscribeMergeQueueAgainIsResubscribed(t *testing.T) {
 	h.Merge.replaced = true
 
 	// Act
-	resp, err := h.Client.SubscribeMergeQueue(context.Background(), subscribeRequest(advancesDetail(), nil))
+	resp, err := h.Client.SubscribeMergeQueue(context.Background(), subscribeRequest(nil))
 
 	// Assert
 	if err != nil || resp.Msg.GetSuccess().GetTaken().GetResubscribed() == nil {
@@ -164,7 +142,7 @@ func TestSubscribeMergeQueueCarriesItsRepositoryScope(t *testing.T) {
 	h := newHarness(t)
 
 	// Act
-	_, err := h.Client.SubscribeMergeQueue(context.Background(), subscribeRequest(advancesDetail(), &workspacev1.RepositoryRef{Id: "repo-1"}))
+	_, err := h.Client.SubscribeMergeQueue(context.Background(), subscribeRequest(&workspacev1.RepositoryRef{Id: "repo-1"}))
 
 	// Assert
 	if err != nil {
@@ -198,7 +176,7 @@ func TestSubscribeMergeQueueRefuses(t *testing.T) {
 			tt.arrange(h)
 
 			// Act
-			resp, err := h.Client.SubscribeMergeQueue(context.Background(), subscribeRequest(advancesDetail(), nil))
+			resp, err := h.Client.SubscribeMergeQueue(context.Background(), subscribeRequest(nil))
 
 			// Assert
 			if err != nil || !tt.got(resp.Msg.GetError()) {
@@ -214,7 +192,7 @@ func TestSubscribeMergeQueueOfAnUnknownSubscriberIsAnAnswer(t *testing.T) {
 
 	// Act
 	resp, err := h.Client.SubscribeMergeQueue(context.Background(), connect.NewRequest(&agentreplv1.SubscribeMergeQueueRequest{
-		Subscriber: &workspacev1.WorkspaceRef{Id: "ws-none"}, Detail: advancesDetail()}))
+		Subscriber: &workspacev1.WorkspaceRef{Id: "ws-none"}}))
 
 	// Assert
 	if err != nil || resp.Msg.GetError().GetUnknownSubscriber() == nil {
@@ -227,12 +205,8 @@ func TestAMergeQueueSubscriptionMissingAFieldIsInvalid(t *testing.T) {
 		name string
 		call func(h *harness) error
 	}{
-		{name: "a subscribe with no detail", call: func(h *harness) error {
-			_, err := h.Client.SubscribeMergeQueue(context.Background(), subscribeRequest(&agentreplv1.SubscribeMergeQueueDetail{}, nil))
-			return err
-		}},
 		{name: "a subscribe with no subscriber", call: func(h *harness) error {
-			_, err := h.Client.SubscribeMergeQueue(context.Background(), connect.NewRequest(&agentreplv1.SubscribeMergeQueueRequest{Detail: advancesDetail()}))
+			_, err := h.Client.SubscribeMergeQueue(context.Background(), connect.NewRequest(&agentreplv1.SubscribeMergeQueueRequest{}))
 			return err
 		}},
 		{name: "an unsubscribe with no subscriber", call: func(h *harness) error {

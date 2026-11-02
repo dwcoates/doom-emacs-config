@@ -151,16 +151,16 @@ Either kind:
   reruns its whole suite when it heads the queue. It still has one fixing
   attempt: a second failing suite fails it out. A head with nobody behind it
   fixes in place.
-- `merge-queue subscribe -detail every_change|deploys|advances|depletes
-  [-repository here|DIR]` has this workspace told as the queue changes (to land
-  after it drains, to report a landing) instead of polling it. It ends on
+- `merge-queue subscribe [-repository here|DIR]` has this workspace told as
+  the queue changes (to land after it drains, to report a landing) instead of
+  polling it. It is told, in one short line each, a merge put in line, a
+  merge leaving the queue (landed, failed or taken off), and each deploy of
+  the daemon's own checkout ending (its build running, or failed), naming the
+  landings it carries; never a merge's start or steps. It ends on
   `merge-queue unsubscribe`, on the workspace's close, and on its own when a
   queue in scope depletes (a merge leaves and none is left in line), that
   notice being its last; subscribe again to follow the next work, and to hear
-  a deploy that ends after the depletion. `deploys` tells each merge leaving the
-  queue and each deploy of the daemon's own checkout ending (its build
-  running, or failed), naming the reported landings it carries: the level
-  for watching what a landing's rollout did.
+  a deploy that ends after the depletion.
 - Holding or releasing a repository's deploys is `/agent-repl-runtime`'s.
 
 ### Commandeering the running spot

@@ -82,7 +82,8 @@ daemon/
     merge/         merge orchestrator (per-repo queue, two methods, tabs, lease, test gate and its per-repo test turn, briefs, ledger,
                    queue-change reports and subscription records)
     mergenotice/   merge queue subscription notices: buffers every reported queue change, and one loop tells each
-                   admitting subscriber's agent once, as a deferred prompt of origin MERGE_QUEUE_NOTICE
+                   subscriber's agent once of a merge put in line, a merge leaving or a deploy's end, in one short
+                   line, as a deferred prompt of origin MERGE_QUEUE_NOTICE
     promptorigin/  leaf: which prompt origins are drawn nowhere (no feed row, no held card)
     drain/         shutdown schedule + idle sweep (hibernation policy incl. Hibernate directive);
                    the SAME stand-down for a workspace the user hid or collapsed (withheld.go),

@@ -183,7 +183,7 @@ var cliNouns = map[string]map[string]cliCommand{
 		"resume":         {usage: "resume [-repository here|DIR]", run: queuePause(false)},
 		"disable-racing": {usage: "disable-racing", run: queueRacing(false)},
 		"enable-racing":  {usage: "enable-racing", run: queueRacing(true)},
-		"subscribe":      {usage: "subscribe -detail every_change|deploys|advances|depletes [-repository here|DIR]", run: queueSubscribe},
+		"subscribe":      {usage: "subscribe [-repository here|DIR]", run: queueSubscribe},
 		"unsubscribe":    {usage: "unsubscribe [-repository here|DIR]", run: queueUnsubscribe},
 	},
 	repositoryNoun: {
@@ -1947,26 +1947,12 @@ func queueRacing(enable bool) func(c *cliCall, args []string) int {
 	}
 }
 
-// queueDetails are the -detail spellings.
-var queueDetails = map[string]*agentreplv1.SubscribeMergeQueueDetail{
-	"every_change": {Level: &agentreplv1.SubscribeMergeQueueDetail_EveryChange{EveryChange: &agentreplv1.SubscribeMergeQueueEveryChange{}}},
-	"advances":     {Level: &agentreplv1.SubscribeMergeQueueDetail_Advances{Advances: &agentreplv1.SubscribeMergeQueueAdvances{}}},
-	"depletes":     {Level: &agentreplv1.SubscribeMergeQueueDetail_Depletes{Depletes: &agentreplv1.SubscribeMergeQueueDepletes{}}},
-	"deploys":      {Level: &agentreplv1.SubscribeMergeQueueDetail_Deploys{Deploys: &agentreplv1.SubscribeMergeQueueDeploys{}}},
-}
-
+// queueSubscribe has the caller told of a merge put in line, a merge leaving
+// the queue and each deploy's end, in one short line each.
 func queueSubscribe(c *cliCall, args []string) int {
 	fs, stateDir := c.flags()
-	detail := fs.String("detail", "", "every_change, advances or depletes")
 	repository := fs.String("repository", "", "here, or a main checkout; unset is every repository")
-	if _, ok := c.parse(fs, args); !ok {
-		return exitFailure
-	}
-	level, known := queueDetails[*detail]
-	if !known {
-		return c.usageFailed("-detail is every_change, advances or depletes, not %q", *detail)
-	}
-	if !c.dial(*stateDir) {
+	if _, ok := c.parse(fs, args); !ok || !c.dial(*stateDir) {
 		return exitFailure
 	}
 	scope, ok := c.scopeFlag(*repository)
@@ -1977,7 +1963,7 @@ func queueSubscribe(c *cliCall, args []string) int {
 	if !ok {
 		return exitFailure
 	}
-	resp, err := c.client.SubscribeMergeQueue(c.ctx, connect.NewRequest(&agentreplv1.SubscribeMergeQueueRequest{Subscriber: subscriber, Repository: scope, Detail: level}))
+	resp, err := c.client.SubscribeMergeQueue(c.ctx, connect.NewRequest(&agentreplv1.SubscribeMergeQueueRequest{Subscriber: subscriber, Repository: scope}))
 	return answer(c, resp, err)
 }
 
