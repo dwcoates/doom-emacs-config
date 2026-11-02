@@ -4575,8 +4575,8 @@ describe("the tool card's command grey", () => {
   // pins #171717 too.
   it("defines the dark theme's shared ground as Emacs's input background, #171717", () => {
     // Arrange
-    const mix = /--sidebar-ground:\s*color-mix\(in srgb,\s*var\(--sidebar-base\)\s*([\d.]+)%,\s*#([0-9a-fA-F]{6})\)/.exec(
-      withoutBlockComments(declarationsOf(":root") ?? ""),
+    const mix = /^color-mix\(in srgb,\s*var\(--sidebar-base\)\s*([\d.]+)%,\s*#([0-9a-fA-F]{6})\)$/.exec(
+      themeValueOf(declarationsOf(":root") ?? "", "--sidebar-ground") ?? "",
     );
     if (mix === null) throw new Error("--sidebar-ground is not a color-mix of --sidebar-base");
     const share = Number(mix[1]) / 100;
