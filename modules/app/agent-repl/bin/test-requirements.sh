@@ -116,6 +116,25 @@ test_the_real_manifests_honor_the_contract() {
   fi
 }
 
+# launchd_service_plists: every launchd_service entry's plist template, one
+# module-relative path per line, across every real manifest. The cases that
+# hold every service to a launchd contract read their plists from here.
+launchd_service_plists() {
+  find "$MODULE" -name requirements.json -not -path '*/node_modules/*' -not -path '*/testdata/*' -print0 \
+    | xargs -0 jq -r '.requirements[]? | select(.kind == "launchd_service") | .plist'
+}
+
+test_launchd_service_plists_names_every_service() {
+  local got
+  got="$(launchd_service_plists | sort | tr '\n' ' ')"
+  if [[ "$got" == *launchd/com.agentrepl.shim-store.plist* && "$got" == *launchd/com.agentrepl.shim-claude-sidecar.plist* \
+        && "$got" == *launchd/com.agentrepl.zettel.plist* && "$got" == *launchd/com.agentrepl.victoriametrics.plist* ]]; then
+    pass "launchd_service_plists names every service's plist"
+  else
+    fail "launchd_service_plists" "got: $got"
+  fi
+}
+
 # A live service the editor waits on must never rank below a test suite:
 # launchd's `Background` is darwinbg (efficiency cores, throttled disk I/O),
 # which loses every I/O contention to a `nice 19` suite.
@@ -124,8 +143,7 @@ test_every_launchd_service_runs_at_standard_priority() {
   while IFS= read -r plist; do
     type="$(plutil -extract ProcessType raw -o - "$MODULE/$plist" 2>/dev/null || echo "<unset>")"
     [ "$type" = Standard ] || bad="$bad $plist=$type"
-  done < <(find "$MODULE" -name requirements.json -not -path '*/node_modules/*' -not -path '*/testdata/*' -print0 \
-             | xargs -0 jq -r '.requirements[]? | select(.kind == "launchd_service") | .plist')
+  done < <(launchd_service_plists)
   if [ -z "$bad" ]; then pass "every launchd service runs at Standard priority"; else fail "launchd services not at Standard priority:$bad"; fi
 }
 
