@@ -1362,6 +1362,27 @@ func TestTimedNotesEachCallsDurationAndResult(t *testing.T) {
 	}
 }
 
+func TestUnreapedRunsEachCallInsideTheShield(t *testing.T) {
+	// Arrange.
+	var shielded, ran []string
+	inner := func(name string, args ...string) (string, error) {
+		ran = append(ran, name+" "+strings.Join(args, " "))
+		return "out", errors.New("refused")
+	}
+	shield := func(fn func()) { shielded = append(shielded, "enter"); fn(); shielded = append(shielded, "leave") }
+
+	// Act.
+	out, err := Unreaped(inner, shield)("diskutil", "eraseDisk", "APFS")
+
+	// Assert.
+	if out != "out" || err == nil || err.Error() != "refused" {
+		t.Fatalf("Unreaped() = %q, %v; want the inner call's answer", out, err)
+	}
+	if !slices.Equal(ran, []string{"diskutil eraseDisk APFS"}) || !slices.Equal(shielded, []string{"enter", "leave"}) {
+		t.Fatalf("ran %q inside %q; want the one call inside the shield", ran, shielded)
+	}
+}
+
 func TestCommandOutcome(t *testing.T) {
 	expired, cancel := context.WithTimeout(context.Background(), 0)
 	defer cancel()

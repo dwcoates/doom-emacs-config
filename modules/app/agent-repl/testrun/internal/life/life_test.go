@@ -478,6 +478,66 @@ func TestCancelOnLifelineCancelsAndReapsWhenTheSentinelGoes(t *testing.T) {
 	}
 }
 
+func TestUnreapedHoldsOffEveryReapWhileItsCommandRuns(t *testing.T) {
+	// Arrange.
+	r, _, _ := pipeRunner(t, nil)
+	ran := false
+	reapable := true
+
+	// Act.
+	r.Unreaped(func() {
+		ran = true
+		if reapable = r.commands.TryLock(); reapable {
+			r.commands.Unlock()
+		}
+	})
+
+	// Assert.
+	if !ran || reapable {
+		t.Fatalf("Unreaped ran its command: %v; a reap could start meanwhile: %v", ran, reapable)
+	}
+}
+
+func TestReapSessionHoldsOffEveryUnreapedCommandWhileItReaps(t *testing.T) {
+	// Arrange.
+	r, _, _ := pipeRunner(t, nil)
+	commandable := true
+	r.reap = func(reap.Members) (reap.Result, error) {
+		if commandable = r.commands.TryRLock(); commandable {
+			r.commands.RUnlock()
+		}
+		return reap.Result{}, nil
+	}
+
+	// Act.
+	err := r.ReapSession()
+
+	// Assert.
+	if err != nil || commandable {
+		t.Fatalf("ReapSession() = %v; an unreaped command could start mid-reap: %v", err, commandable)
+	}
+}
+
+func TestReapSessionWaitsForTheUnreapedCommandInFlight(t *testing.T) {
+	// Arrange: a command is in flight when the cut's reap begins.
+	r, _, _ := pipeRunner(t, nil)
+	var order []string
+	reaped := make(chan error, 1)
+	r.reap = func(reap.Members) (reap.Result, error) { order = append(order, "reap"); return reap.Result{}, nil }
+
+	// Act.
+	r.Unreaped(func() {
+		go func() { reaped <- r.ReapSession() }()
+		order = append(order, "command")
+	})
+	err := <-reaped
+
+	// Assert.
+	if err != nil || !slices.Equal(order, []string{"command", "reap"}) {
+		t.Fatalf("ReapSession() = %v, order %q; want the reap after the command", err, order)
+	}
+}
+
 func TestCutLogFallsBackToTheRunLog(t *testing.T) {
 	// Arrange.
 	path := filepath.Join(t.TempDir(), "run.log")

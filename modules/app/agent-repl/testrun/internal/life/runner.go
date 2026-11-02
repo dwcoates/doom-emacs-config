@@ -26,6 +26,9 @@ type Runner struct {
 	reap   func(reap.Members) (reap.Result, error)
 	warden *os.File
 	mu     sync.Mutex
+	// commands is held shared by every command in flight through Unreaped,
+	// and exclusively by every reap of the session (ReapSession).
+	commands sync.RWMutex
 }
 
 // WardenCommand is how the runner starts its warden: the program and its
@@ -139,10 +142,28 @@ func (r *Runner) Members() reap.Members {
 	return m
 }
 
-// ReapSession reaps every member of the run but the runner and its warden.
+// ReapSession reaps every member of the run but the runner and its warden,
+// once no command running through Unreaped is in flight.
 func (r *Runner) ReapSession() error {
+	r.commands.Lock()
+	defer r.commands.Unlock()
 	_, err := r.reap(r.Members())
 	return err
+}
+
+// Unreaped runs fn, which runs a command the runner must see to its end,
+// while no reap of the session runs: a reap waits for fn to end, and fn waits
+// for a reap under way.
+//
+// A DISK COMMAND KILLED MID-FLIGHT LEAVES ITS WORK RUNNING WITHOUT IT. The
+// cut's reap killed run 35946's `diskutil eraseDisk` (2026-11-01): the erase
+// went on in the disk manager, held the disk busy so that even a forced
+// detach was refused, and then mounted the volume in /Volumes. Each command
+// keeps its own bound (ramdisk.CommandBound), so a reap waits at most that.
+func (r *Runner) Unreaped(fn func()) {
+	r.commands.RLock()
+	defer r.commands.RUnlock()
+	fn()
 }
 
 // CancelOnLifeline calls cancel and reaps the session the moment gone closes:

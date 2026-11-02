@@ -113,6 +113,16 @@ func Timed(r Runner, note func(call string, took time.Duration, err error)) Runn
 	}
 }
 
+// Unreaped wraps r so every call runs inside shield (life.Runner.Unreaped),
+// which no reap of the run's session interrupts: a disk command killed
+// mid-flight leaves the disk manager working on the disk without it.
+func Unreaped(r Runner, shield func(func())) Runner {
+	return func(name string, args ...string) (out string, err error) {
+		shield(func() { out, err = r(name, args...) })
+		return out, err
+	}
+}
+
 // BoundedRunner runs one external command within bound and answers its
 // combined output.
 type BoundedRunner func(bound time.Duration, name string, args ...string) (string, error)
