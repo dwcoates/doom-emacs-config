@@ -1738,6 +1738,43 @@ workspace from the working directory, so no source tag rides it."
     (should (equal (cadr (should-error (agent-repl--input-border-color)))
                    "agent-repl: input background \"dark gray\" is not a #rrggbb hex string"))))
 
+(ert-deftest agent-repl-input-fill-color-is-the-ground-lifted-a-little ()
+  "The dark ground #171717 lifted 3% toward white is the composer's #1e1e1e."
+  ;; Arrange.
+  (let ((agent-repl-input-background "#171717"))
+    ;; Act / Assert.
+    (should (equal (agent-repl--input-fill-color) "#1e1e1e"))))
+
+(ert-deftest agent-repl-input-fill-color-sits-between-ground-and-border ()
+  "The fill is lighter than the ground and no lighter than the border."
+  ;; Arrange.
+  (let ((agent-repl-input-background "#171717"))
+    ;; Act.
+    (let ((ground 23)
+          (fill (string-to-number (substring (agent-repl--input-fill-color) 1 3) 16))
+          (border (string-to-number (substring (agent-repl--input-border-color) 1 3) 16)))
+      ;; Assert.
+      (should (< ground fill))
+      (should (<= fill border)))))
+
+(ert-deftest agent-repl-input-fill-color-refuses-a-ground-that-is-not-hex ()
+  "A ground that is not #rrggbb breaks the defcustom's contract and signals."
+  ;; Arrange.
+  (let ((agent-repl-input-background "dark gray"))
+    ;; Act / Assert.
+    (should (equal (cadr (should-error (agent-repl--input-fill-color)))
+                   "agent-repl: input background \"dark gray\" is not a #rrggbb hex string"))))
+
+(ert-deftest agent-repl-input-paint-wears-the-fill-not-the-ground ()
+  "A composer's default and fringe wear the fill while the ground stays the shared color."
+  ;; Arrange.
+  (let ((agent-repl-input-background "#171717"))
+    (with-temp-buffer
+      ;; Act.
+      (agent-repl-input-mode)
+      ;; Assert.
+      (should (equal (agent-repl-test--remapped-backgrounds 'default) '("#1e1e1e"))))))
+
 (ert-deftest agent-repl-input-border-line-is-one-row-of-the-border-color ()
   "The border line is one pixel high, in the border's color, as wide as the window."
   ;; Arrange.
@@ -1879,7 +1916,7 @@ workspace from the working directory, so no source tag rides it."
         ;; Assert
         (should (equal (list (agent-repl-test--remapped-backgrounds 'default)
                              (agent-repl-test--remapped-backgrounds 'fringe))
-                       '(("#ff0000") ("#ff0d0d" "#ff0000"))))))))
+                       '(("#ff0808") ("#ff0d0d" "#ff0808"))))))))
 
 (ert-deftest agent-repl-input-paint-in-the-same-ground-adds-nothing ()
   "A composer repainted in the ground it wears keeps its remaps and logs no paint."
@@ -1944,7 +1981,7 @@ workspace from the working directory, so no source tag rides it."
                              (agent-repl-test--remapped-backgrounds 'fringe))
                        (list agent-repl--input-border-line-format
                              agent-repl--input-border-line-format
-                             '("#232323" "#171717"))))))))
+                             '("#232323" "#1e1e1e"))))))))
 
 (ert-deftest agent-repl-input-draw-border-all-never-stacks-a-drawn-composer ()
   "Drawing a composer that already wears its border again adds no remap."
@@ -1981,7 +2018,7 @@ workspace from the working directory, so no source tag rides it."
     (should visual-line-mode)))
 
 (ert-deftest agent-repl-input-mode-paints-the-composer-background ()
-  "The composer paints `agent-repl-input-background' behind its text."
+  "The composer paints `agent-repl-input-background' lifted 3% behind its text."
   ;; Arrange.
   (let ((agent-repl-input-background "#123456")
         (remapped nil))
@@ -1991,7 +2028,7 @@ workspace from the working directory, so no source tag rides it."
         ;; Act.
         (agent-repl-input-mode)
         ;; Assert.
-        (should (equal remapped "#123456"))))))
+        (should (equal remapped "#193a5b"))))))
 
 (ert-deftest agent-repl-input-background-is-the-webapp-composer-color ()
   "The composer's default background is the webapp's dark `--sidebar-ground'.
