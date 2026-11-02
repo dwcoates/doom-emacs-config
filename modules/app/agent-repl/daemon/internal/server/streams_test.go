@@ -631,6 +631,25 @@ func TestAPlannedCloseEndsEachStandingStreamWithItsEndingFrame(t *testing.T) {
 				}
 			},
 		},
+		{
+			name: "WatchWorkspaceMentions",
+			open: func(t *testing.T, ctx context.Context, h *harness) func() (bool, error) {
+				stream, err := h.Client.WatchWorkspaceMentions(ctx, connect.NewRequest(&agentreplv1.WatchWorkspaceMentionsRequest{
+					Viewer: &workspacev1.WorkspaceRef{Id: "v"},
+				}))
+				if err != nil {
+					t.Fatalf("open the mentions stream: %v", err)
+				}
+				h.Sidebar.topic.Publish(&frontendv1.WorkspaceRoster{})
+				if !stream.Receive() || stream.Msg().GetTargets() == nil {
+					t.Fatalf("prove the mentions subscription: %v", stream.Err())
+				}
+				return func() (bool, error) {
+					last, err := lastFrameBeforeEnd(stream)
+					return last.GetEnding() != nil, err
+				}
+			},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

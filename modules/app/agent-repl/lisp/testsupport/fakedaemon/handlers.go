@@ -205,6 +205,14 @@ func (s *fakeServer) WatchTopbar(ctx context.Context, req *connect.Request[v1.Wa
 		fmt.Errorf("fakedaemon mocks only Emacs's streams; WatchTopbar is a webapp stream"))
 }
 
+func (s *fakeServer) WatchWorkspaceMentions(ctx context.Context, req *connect.Request[v1.WatchWorkspaceMentionsRequest], stream *connect.ServerStream[v1.WatchWorkspaceMentionsResponse]) error {
+	s.record(ctx, "WatchWorkspaceMentions", req.Msg)
+	logWarn("fakedaemon.stream.not-mocked", "a stream this fake does not mock was called",
+		map[string]any{"method": "WatchWorkspaceMentions"})
+	return connect.NewError(connect.CodeUnimplemented,
+		fmt.Errorf("fakedaemon mocks only Emacs's streams; WatchWorkspaceMentions is a webapp stream"))
+}
+
 func (s *fakeServer) SetModel(ctx context.Context, req *connect.Request[v1.SetModelRequest]) (*connect.Response[v1.SetModelResponse], error) {
 	return handleUnary[v1.SetModelRequest, v1.SetModelResponse](ctx, s, "SetModel", req.Msg)
 }

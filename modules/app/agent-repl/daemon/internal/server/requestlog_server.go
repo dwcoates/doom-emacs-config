@@ -401,6 +401,14 @@ func (s *requestLoggingServer) AssignWorkspaceTask(
 	return serveUnary(s, ctx, "AssignWorkspaceTask", req, s.server.AssignWorkspaceTask)
 }
 
+func (s *requestLoggingServer) WatchWorkspaceMentions(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.WatchWorkspaceMentionsRequest],
+	stream *connect.ServerStream[agentreplv1.WatchWorkspaceMentionsResponse],
+) error {
+	return serveStream(s, ctx, "WatchWorkspaceMentions", req, stream, s.server.WatchWorkspaceMentions)
+}
+
 func (s *requestLoggingServer) WatchTopbar(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.WatchTopbarRequest],

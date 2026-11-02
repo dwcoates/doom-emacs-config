@@ -584,6 +584,18 @@ func (s *server) pageWatchFor(
 		return pageWatch{"WatchTopbar", func(ctx context.Context) error {
 			return s.watchTopbar(ctx, watch.Topbar, sink)
 		}}, true
+	case *agentreplv1.SubscribePageRequest_WorkspaceMentions:
+		sink := pageSink[agentreplv1.WatchWorkspaceMentionsResponse]{page: page, sub: sub,
+			wrap: func(m *agentreplv1.WatchWorkspaceMentionsResponse) *agentreplv1.PageFrame {
+				return &agentreplv1.PageFrame{Payload: &agentreplv1.PageFrame_WorkspaceMentions{WorkspaceMentions: m}}
+			}}
+		return pageWatch{"WatchWorkspaceMentions", func(ctx context.Context) error {
+			if err := s.watchWorkspaceMentions(ctx, watch.WorkspaceMentions, sink); err != nil {
+				return err
+			}
+			endStandingStream(s, "WatchWorkspaceMentions", s.log, sink, workspaceMentionsEnding())
+			return nil
+		}}, true
 	case *agentreplv1.SubscribePageRequest_Chat:
 		sink := pageSink[agentreplv1.WatchChatResponse]{page: page, sub: sub,
 			wrap: func(m *agentreplv1.WatchChatResponse) *agentreplv1.PageFrame {
