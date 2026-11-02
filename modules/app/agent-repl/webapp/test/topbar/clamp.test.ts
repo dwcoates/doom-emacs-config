@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   REVEAL_MARGIN_PX,
+  besideFloor,
   clampBeside,
   clampEdge,
   clampReveal,
@@ -104,6 +105,26 @@ describe("clampReveal shares the clamp arithmetic", () => {
   });
 });
 
+describe("besideFloor", () => {
+  it("is one margin for an anchor whose right edge stands past it", () => {
+    expect(besideFloor(rect(8, 0, 190, 24))).toBe(REVEAL_MARGIN_PX);
+  });
+
+  it("is the anchor's right edge when that stands inside the margin", () => {
+    expect(besideFloor(rect(0, 0, 5, 24))).toBe(5);
+  });
+
+  it("is zero for an anchor ending left of the viewport", () => {
+    expect(besideFloor(rect(-200, 0, 190, 24))).toBe(0);
+  });
+});
+
+describe("clampEdge's floor", () => {
+  it("holds the leading edge at the floor it is given", () => {
+    expect(clampEdge(-50, 100, 1000, 0)).toBe(0);
+  });
+});
+
 describe("clampBeside", () => {
   /** A rail row: 190 wide from the window's left, 24 tall. */
   const rowAt = (top: number): Rect => rect(8, top, 190, 24);
@@ -137,6 +158,19 @@ describe("clampBeside", () => {
     expect(clampBeside(rect(700, 100, 190, 24), rect(0, 0, 300, 200), VIEWPORT).left).toBe(
       1000 - REVEAL_MARGIN_PX - 300,
     );
+  });
+
+  it("meets an anchor whose right edge stands inside the margin, leaving no gap", () => {
+    // ARRANGE: the host's anchor for a sidebar row, its right edge at the host's left edge.
+    const anchor = rect(0, 100, 0, 24);
+    // ACT
+    const placement = clampBeside(anchor, rect(0, 0, 300, 200), VIEWPORT);
+    // ASSERT
+    expect(placement.left).toBe(0);
+  });
+
+  it("meets an anchor whose right edge stands a few pixels in", () => {
+    expect(clampBeside(rect(0, 100, 3, 24), rect(0, 0, 300, 200), VIEWPORT).left).toBe(3);
   });
 
   it("answers clampEdge on both axes and heightBelow under its own top", () => {

@@ -26,6 +26,11 @@
  * scrolling inside itself past that. A row beside the composer, below the
  * feed's window, gets its panel standing on the feed's bottom edge.
  *
+ * THE PANEL MEETS THE SIDEBAR. The host's web view starts at the seam with
+ * the sidebar's (Emacs measures the two windows a one-pixel divider apart), so
+ * the anchor's right edge is the host's left edge and the panel's left edge is
+ * zero (`besideFloor`): no margin stands between a panel and its row.
+ *
  * The markup is the sidebar's own drawing of the panel, from the same bundle,
  * and is drawn into the host verbatim: nothing in it comes from outside the
  * webapp's own DOM.

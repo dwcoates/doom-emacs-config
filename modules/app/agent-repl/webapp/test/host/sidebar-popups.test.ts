@@ -133,10 +133,10 @@ describe("the host's popup layer", () => {
     expect(drawn()?.parentElement?.className).toBe("ws open");
   });
 
-  it("places a shown panel at the host's left edge, its top on the row's line", () => {
+  it("places a shown panel at the host's left edge, meeting the sidebar with no gap, its top on the row's line", () => {
     const { deliver, drawn } = install();
     deliver({ kind: "show", key: "ws-a", html: PANEL, top: 40, bottom: 62 });
-    expect([drawn()?.style.left, drawn()?.style.top]).toEqual([`${REVEAL_MARGIN_PX}px`, "40px"]);
+    expect([drawn()?.style.left, drawn()?.style.top]).toEqual(["0px", "40px"]);
   });
 
   it("slides a panel up to stand on the window's bottom edge for a row below it", () => {

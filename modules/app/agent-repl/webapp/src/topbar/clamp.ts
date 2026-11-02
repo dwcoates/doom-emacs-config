@@ -55,16 +55,18 @@ export const REVEAL_MARGIN_PX = 8;
 
 /**
  * The leading edge nearest PREFERRED that keeps a SIZE-long box inside an
- * EXTENT-long viewport axis, either axis alike.
+ * EXTENT-long viewport axis, either axis alike. FLOOR is the nearest the
+ * leading edge may come to the axis's start, one margin unless a caller's
+ * anchor stands closer than that (`clampBeside`).
  *
  * It slides back only as far as the far edge demands. A box LONGER than the
  * axis would make the furthest fitting edge smaller than the margin, so the
  * lower bound is applied second and wins: overflowing the far edge is better
  * than overflowing the near one, where the reader's text begins.
  */
-export function clampEdge(preferred: number, size: number, extent: number): number {
+export function clampEdge(preferred: number, size: number, extent: number, floor: number = REVEAL_MARGIN_PX): number {
   const furthest = extent - REVEAL_MARGIN_PX - size;
-  return Math.max(REVEAL_MARGIN_PX, Math.min(preferred, furthest));
+  return Math.max(floor, Math.min(preferred, furthest));
 }
 
 /**
@@ -92,6 +94,21 @@ export function clampReveal(anchor: Rect, reveal: Rect, viewport: Viewport): Rev
 }
 
 /**
+ * The nearest a reveal BESIDE ANCHOR may come to the viewport's left edge:
+ * one margin, or the anchor's own right edge when that stands closer.
+ *
+ * A REVEAL BESIDE ITS ANCHOR MEETS IT (owner request, 2026-11-01). The margin
+ * holds a box clear of an edge it would otherwise touch; a reveal growing out
+ * of an anchor's right edge already has the anchor between it and the left
+ * edge. The host draws a sidebar row's panel beside an anchor at its own left
+ * edge (host/sidebar-popups.ts `hostAnchor`, right edge 0), and the one-margin
+ * floor stood that panel 8px off the seam with the sidebar.
+ */
+export function besideFloor(anchor: Rect): number {
+  return Math.min(REVEAL_MARGIN_PX, Math.max(0, anchor.right));
+}
+
+/**
  * Place REVEAL BESIDE ANCHOR, to its right, inside VIEWPORT.
  *
  * The reveal's top-left corner prefers the anchor's top-right corner, so it
@@ -104,7 +121,7 @@ export function clampReveal(anchor: Rect, reveal: Rect, viewport: Viewport): Rev
 export function clampBeside(anchor: Rect, reveal: Rect, viewport: Viewport): RevealPlacement {
   const top = clampEdge(anchor.top, reveal.height, viewport.height);
   return {
-    left: clampEdge(anchor.right, reveal.width, viewport.width),
+    left: clampEdge(anchor.right, reveal.width, viewport.width, besideFloor(anchor)),
     top,
     maxHeight: heightBelow(top, viewport),
   };
