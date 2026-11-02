@@ -4536,15 +4536,15 @@ describe("the tool card's command grey", () => {
   // Emacs's input window is the host-native composer, so its
   // `agent-repl-input-background' (lisp/input.el) wears this same color.
   // Neither suite may read the other's file, so lisp/test-input.el pins it too.
-  it("defines the dark theme's composer as Emacs's input background, the feed's #121212", () => {
+  it("defines the dark theme's composer as Emacs's input background, #0a0a0a, darker than the feed", () => {
     // Arrange
     const block = darkThemeBlock();
 
     // Act
     const got = [themeValueOf(block, "--composer-bg"), themeRgbOf(block, "--composer-bg")];
 
-    // Assert — the token itself, never a copied value, resolving to Emacs's pinned color.
-    expect(got).toEqual(["var(--bg)", [0x12, 0x12, 0x12]]);
+    // Assert
+    expect(got).toEqual(["#0a0a0a", [0x0a, 0x0a, 0x0a]]);
   });
 
   // The Settings page (lisp/settings.el) is grounded with the dark sidebar's

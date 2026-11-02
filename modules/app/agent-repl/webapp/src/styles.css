@@ -619,12 +619,13 @@
     --info-tasks: #d07784;
     --turn-complete-bg: #3a3116;
     --turn-complete-border: #6b5a22;
-    /* THE COMPOSER WEARS THE FEED'S GROUND (owner request, 2026-10-28,
-       superseding the same day's sidebar ground), through the token itself,
-       so the two never drift. Emacs's input window
-       (agent-repl-input-background, lisp/input.el) wears this same color;
-       Emacs cannot read this sheet, so both suites pin the value. */
-    --composer-bg: var(--bg);
+    /* THE COMPOSER IS SIGNIFICANTLY DARKER THAN THE FEED, THOUGH NOT BLACK
+       (owner request, 2026-11-01, superseding the 2026-10-28 ruling that it
+       wear the feed's ground), so it contrasts with the feed above it.
+       Emacs's input window (agent-repl-input-background, lisp/input.el)
+       wears this same color; Emacs cannot read this sheet, so both suites
+       pin the value. */
+    --composer-bg: #0a0a0a;
     /* Both washes stay bright in the dark theme rather than being dimmed to
        suit it: the mark is the thing the user is hunting for, so it is the one
        place the stylesheet WANTS to shout against the background. --search-fg
