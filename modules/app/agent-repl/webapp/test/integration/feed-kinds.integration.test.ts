@@ -10,7 +10,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import { chessWidgetLoader } from "../../src/feed/cards/chess-widget-loader";
-import { EARLIER_STEPS_LABEL } from "../../src/feed/rows/earlier-steps";
+import { fireIntersection } from "../intersection-observer";
 
 import {
   FeedRowSchema,
@@ -89,6 +89,7 @@ import {
   commandPanelRow,
   commandRefusedRow,
   earlierStepsRow,
+  feedPageSuccess,
   detachedShellRow,
   shellHeadRow,
   peerMessageRow,
@@ -1793,7 +1794,7 @@ describe("a refused command card", () => {
   });
 });
 
-describe("an earlier-steps fold", () => {
+describe("an earlier-steps indicator", () => {
   it("carries the earlier-steps row kind", async () => {
     // Arrange / Act
     const row = await drawRow(earlierStepsRow());
@@ -1801,19 +1802,25 @@ describe("an earlier-steps fold", () => {
     expect(row.dataset.rowKind).toBe("earlierSteps");
   });
 
-  it("draws the fold's label", async () => {
+  it("draws no label", async () => {
     // Arrange / Act
     const row = await drawRow(earlierStepsRow());
     // Assert
-    expect(row.querySelector("[data-earlier-steps]")?.textContent).toBe(EARLIER_STEPS_LABEL);
+    expect(row.querySelector("[data-earlier-steps]")?.textContent).toBe("");
   });
 
-  it("walks one page older when activated", async () => {
-    // Arrange
-    const row = await drawRow(earlierStepsRow());
+  it("walks one page older when it comes into view", async () => {
+    // Arrange: the opening page has older pages above it, as a page drawing
+    // the row always does.
+    harness = await startHarness({
+      arrange: (fake) => fake.setPage(WORKSPACE_ID, ROOT_FEED, feedPageSuccess([earlierStepsRow()], { edge: "hasMore" })),
+    });
+    await harness.settle();
+    const row = harness.row(earlierStepsRow().id?.value ?? "row-1");
+    if (!row) throw new Error("the feed drew no earlier-steps row");
     const before = harness.fake.calls("getFeedPage").length;
     // Act
-    row.querySelector<HTMLElement>("[data-earlier-steps]")?.click();
+    fireIntersection(row.querySelector("[data-earlier-steps]") as Element, true);
     await harness.settle();
     // Assert
     const calls = harness.fake.calls<GetFeedPageRequest>("getFeedPage");

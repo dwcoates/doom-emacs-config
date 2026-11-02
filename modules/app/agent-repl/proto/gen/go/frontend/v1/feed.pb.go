@@ -1443,8 +1443,9 @@ type FeedRow_EarlierSteps struct {
 	// prompt when the page that carried the prompt (as one of its heads) says
 	// steps sit between that prompt and the page's own rows
 	// (HistoryTurnHead.steps_between); never when they follow it directly.
-	// The client draws it as a fold ("earlier steps") whose activation runs
-	// the same older-page walk the "load previous page" control runs. The
+	// The client draws it as a small loading spinner, no label, that runs
+	// the same older-page walk the "load previous page" control runs as soon
+	// as it comes into view, and turns while that walk is in flight. The
 	// daemon REMOVES it (the `removed` arm) once the walk has loaded every
 	// step between the prompt and the rows below it.
 	EarlierSteps *FeedTurnEarlierSteps `protobuf:"bytes,24,opt,name=earlier_steps,json=earlierSteps,proto3,oneof"`

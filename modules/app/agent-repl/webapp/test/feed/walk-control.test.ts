@@ -7,6 +7,7 @@ import {
   FEED_LOADING_LABEL,
   WALK_LOADING_ATTRIBUTE,
   WALK_SPINNER_CLASS,
+  createWalkFaces,
   createWalkTrigger,
   drawWalkControl,
   setWalkLoading,
@@ -261,5 +262,133 @@ describe("the feed's walk control goes through walk-control.ts", () => {
 
   it("never hand-rolls the control's class", () => {
     expect(codeOf(feedViewSource)).not.toMatch(/"feed-load-more"/);
+  });
+});
+
+describe("createWalkFaces", () => {
+  /** Two mounted controls, each counting its clicks. */
+  function two() {
+    const top = drawWalkControl();
+    const indicator = drawWalkControl("data-earlier-steps");
+    document.body.replaceChildren(top, indicator);
+    return { top, indicator };
+  }
+
+  it("marks a face by the marker it was drawn with", () => {
+    // Arrange / Act
+    const indicator = drawWalkControl("data-earlier-steps");
+
+    // Assert
+    expect([indicator.hasAttribute("data-earlier-steps"), indicator.hasAttribute("data-load-more")]).toEqual([true, false]);
+  });
+
+  it("shows every face loading at once", () => {
+    // Arrange
+    const { top, indicator } = two();
+    const faces = createWalkFaces("root");
+    faces.add(top);
+    faces.add(indicator);
+
+    // Act
+    faces.setLoading(true);
+
+    // Assert
+    expect([top, indicator].map((c) => c.hasAttribute(WALK_LOADING_ATTRIBUTE))).toEqual([true, true]);
+    faces.dispose();
+  });
+
+  it("draws a face added mid-walk turning", () => {
+    // Arrange
+    const { top, indicator } = two();
+    const faces = createWalkFaces("root");
+    faces.add(top);
+    faces.setLoading(true);
+
+    // Act
+    faces.add(indicator);
+
+    // Assert
+    expect({ loading: indicator.hasAttribute(WALK_LOADING_ATTRIBUTE), disabled: indicator.disabled }).toEqual({ loading: true, disabled: true });
+    faces.dispose();
+  });
+
+  it("clicks a face when it comes into view", () => {
+    // Arrange
+    const { indicator } = two();
+    let clicks = 0;
+    indicator.addEventListener("click", () => (clicks += 1));
+    const faces = createWalkFaces("root");
+    faces.add(indicator);
+
+    // Act
+    fireIntersection(indicator, true);
+
+    // Assert
+    expect(clicks).toBe(1);
+    faces.dispose();
+  });
+
+  it("re-asks the observer about every face on rearm", () => {
+    // Arrange
+    const { top, indicator } = two();
+    const observed: Element[] = [];
+    class Recording {
+      observe(el: Element): void {
+        observed.push(el);
+      }
+      unobserve(): void {}
+      disconnect(): void {}
+    }
+    const faces = createWalkFaces("root", Recording as unknown as typeof IntersectionObserver);
+    faces.add(top);
+    faces.add(indicator);
+    observed.length = 0;
+
+    // Act
+    faces.rearm();
+
+    // Assert
+    expect(observed).toEqual([top, indicator]);
+  });
+
+  it("stops watching and drops a face on its teardown", () => {
+    // Arrange
+    const { top, indicator } = two();
+    const faces = createWalkFaces("root");
+    faces.add(top);
+    const teardown = faces.add(indicator);
+
+    // Act
+    teardown();
+
+    // Assert
+    expect(faces.controls()).toEqual([top]);
+    expect(() => fireIntersection(indicator, true)).toThrow(/no IntersectionObserver/);
+    faces.dispose();
+  });
+
+  it("stops watching every face once disposed", () => {
+    // Arrange
+    const { top, indicator } = two();
+    const faces = createWalkFaces("root");
+    faces.add(top);
+    faces.add(indicator);
+
+    // Act
+    faces.dispose();
+
+    // Assert
+    expect(faces.controls()).toEqual([]);
+    expect(() => fireIntersection(top, true)).toThrow(/no IntersectionObserver/);
+  });
+});
+
+describe("every face of the feed's walk goes through createWalkFaces", () => {
+  it("never watches a face with a trigger of its own", () => {
+    expect(codeOf(feedViewSource)).not.toMatch(/createWalkTrigger\(/);
+  });
+
+  it("never sets a face's loading state by hand", () => {
+    expect(codeOf(feedViewSource)).not.toMatch(/setWalkLoading\(/);
   });
 });

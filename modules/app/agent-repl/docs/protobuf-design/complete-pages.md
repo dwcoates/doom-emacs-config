@@ -27,8 +27,11 @@ prompt sits below it.
 
 ### FeedRow `earlier_steps` (field 24)
 - WHAT: drawn under a carried prompt while the steps between it and the
-  page's rows are on older pages; activating it runs the older-page walk; the
-  daemon removes it (`removed`) once those steps are loaded.
+  page's rows are on older pages. The client draws it as a centered loading
+  spinner with no label (owner request, 2026-11-01; a clickable "earlier
+  steps" fold before) that runs the older-page walk as soon as it comes into
+  view; the daemon removes it (`removed`) once those steps are loaded. A
+  refused walk rests the spinner beside its refusal.
 - WHY: the prompt and the newest steps are drawn together without implying
   nothing happened between them.
 

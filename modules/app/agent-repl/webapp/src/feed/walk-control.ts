@@ -43,11 +43,19 @@ export const WALK_LOADING_ATTRIBUTE = "data-loading";
 /** The class of the spinner that is the control's whole face. */
 export const WALK_SPINNER_CLASS = "feed-load-more-spinner";
 
-/** Build the walk control, idle: its spinner, at rest. */
-export function drawWalkControl(): Control {
+/** The attribute marking the "load previous page" control at the feed's top. */
+export const LOAD_MORE_ATTRIBUTE = "data-load-more";
+
+/**
+ * Build a walk control, idle: its spinner, at rest. MARKER names which face of
+ * the walk it is: the "load previous page" control at the top of the feed (the
+ * default), or a turn's earlier-steps indicator (rows/earlier-steps.ts). Every
+ * face looks the same and runs the same walk.
+ */
+export function drawWalkControl(marker: string = LOAD_MORE_ATTRIBUTE): Control {
   const control = createControl();
   control.className = "feed-load-more";
-  control.setAttribute("data-load-more", "");
+  control.setAttribute(marker, "");
   const spinner = document.createElement("span");
   spinner.className = WALK_SPINNER_CLASS;
   control.replaceChildren(spinner);
@@ -116,5 +124,62 @@ export function createWalkTrigger(
       observer.observe(control);
     },
     dispose: () => observer.disconnect(),
+  };
+}
+
+/**
+ * EVERY FACE OF ONE FEED'S WALK. A feed's walk into the past is shown by more
+ * than one control: the "load previous page" control at its top, and the
+ * indicator each turn whose earlier steps sit on an older page draws under its
+ * prompt (rows/earlier-steps.ts). They are one walk, so they are one state:
+ * every face turns while a walk is in flight and rests otherwise, every face
+ * loads its page on sight, and every face is re-asked about its place once a
+ * page lands. A face drawn mid-walk is drawn turning.
+ */
+export interface WalkFaces {
+  /**
+   * Make CONTROL a face of the walk: drawn in the walk's current state and
+   * clicked whenever it comes into view. Answers its teardown, which stops
+   * watching it and drops it from the walk.
+   */
+  add(control: Control): () => void;
+  /** Show every face loading or idle (`setWalkLoading`). */
+  setLoading(loading: boolean): void;
+  /** Re-ask the observer about every face's place (`WalkTrigger.rearm`). */
+  rearm(): void;
+  /** Every face, for a sweep of what a refused walk left beside them. */
+  controls(): readonly Control[];
+  /** Stop watching every face when the feed disposes. */
+  dispose(): void;
+}
+
+/** The faces of the walk of FEED, each watched through `createWalkTrigger`. */
+export function createWalkFaces(
+  feed: string,
+  Observer: typeof IntersectionObserver | null = pageIntersectionObserver(),
+): WalkFaces {
+  const faces = new Map<Control, WalkTrigger>();
+  let loading = false;
+  return {
+    add: (control) => {
+      setWalkLoading(control, loading);
+      faces.set(control, createWalkTrigger(control, feed, Observer));
+      return () => {
+        faces.get(control)?.dispose();
+        faces.delete(control);
+      };
+    },
+    setLoading: (next) => {
+      loading = next;
+      for (const control of faces.keys()) setWalkLoading(control, next);
+    },
+    rearm: () => {
+      for (const trigger of faces.values()) trigger.rearm();
+    },
+    controls: () => [...faces.keys()],
+    dispose: () => {
+      for (const trigger of faces.values()) trigger.dispose();
+      faces.clear();
+    },
   };
 }

@@ -928,31 +928,6 @@ describe("createFeedController: the walk", () => {
     expect(h.calls.getFeedPage[0]?.page.case).toBe("olderThan");
   });
 
-  it("walks one page older when a turn's earlier-steps fold is activated", async () => {
-    // Arrange
-    const h = harness({
-      getFeedPage: () =>
-        create(GetFeedPageResponseSchema, {
-          result: {
-            case: "success",
-            value: page([withOrder(responseRow("older"), "a")]),
-          },
-        }),
-    });
-    const { controller, host } = fixture(h);
-    controller.applyPage(
-      page([rowWith("gap", { case: "earlierSteps", value: {} }), responseRow("b")], { hasMore: true }),
-      "replace",
-    );
-
-    // Act
-    host.querySelector<HTMLElement>("[data-earlier-steps]")?.click();
-    await settle();
-
-    // Assert
-    expect(h.calls.getFeedPage[0]?.page.case).toBe("olderThan");
-  });
-
   it("names the oldest row it holds as the row to page above", async () => {
     const h = harness({
       getFeedPage: () =>
@@ -3227,23 +3202,23 @@ describe("createFeedController: the walk's refusal does not accumulate", () => {
   });
 });
 
+/** An older page (older pages remaining above it) the test answers when it chooses. */
+function heldPage() {
+  let answer: (rows: readonly FeedRow[]) => void = () => undefined;
+  const h = harness({
+    getFeedPage: () =>
+      new Promise((resolve) => {
+        answer = (rows) =>
+          resolve(create(GetFeedPageResponseSchema, { result: { case: "success", value: page(rows, { hasMore: true }) } }));
+      }),
+  });
+  return { h, answer: (rows: readonly FeedRow[]) => answer(rows) };
+}
+
 // THE WALK CONTROL LOADS ITS PAGE ON SIGHT, AND SPINS WHILE IT LOADS
 // (walk-control.ts): scrolling "load previous page" into view asks for the page,
 // and the pill gives way to a spinner until the page lands.
 describe("createFeedController: the walk control on sight", () => {
-  /** An older page the test answers when it chooses. */
-  function heldPage() {
-    let answer: (rows: readonly FeedRow[]) => void = () => undefined;
-    const h = harness({
-      getFeedPage: () =>
-        new Promise((resolve) => {
-          answer = (rows) =>
-            resolve(create(GetFeedPageResponseSchema, { result: { case: "success", value: page(rows, { hasMore: true }) } }));
-        }),
-    });
-    return { h, answer: (rows: readonly FeedRow[]) => answer(rows) };
-  }
-
   /** The feed's control, which the page in each case offers. */
   const controlOf = (host: HTMLElement): HTMLElement & { disabled: boolean } => {
     const control = host.querySelector<HTMLElement & { disabled: boolean }>("[data-load-more]");
@@ -3431,6 +3406,203 @@ describe("createFeedController: the walk control on sight", () => {
 
     // Assert
     expect(() => fireIntersection(control, true)).toThrow(/no IntersectionObserver/);
+  });
+});
+
+// A TURN'S EARLIER STEPS ON AN OLDER PAGE ARE A LOADING STATE (rows/earlier-
+// steps.ts): the row's spinner is a face of the feed's walk, asking for the
+// older page on sight, turning while it loads, and resting beside its refusal.
+describe("createFeedController: a turn's earlier-steps indicator", () => {
+  /** A page holding an earlier-steps row under a turn's prompt, older pages remaining. */
+  const gapPage = (hasMore = true) =>
+    page([rowWith("gap", { case: "earlierSteps", value: {} }), responseRow("b")], { hasMore });
+
+  /** The earlier-steps indicator the page drew. */
+  const indicatorOf = (host: HTMLElement): HTMLElement & { disabled: boolean } => {
+    const found = host.querySelector<HTMLElement & { disabled: boolean }>("[data-earlier-steps]");
+    if (found === null) throw new Error("the feed drew no earlier-steps indicator");
+    return found;
+  };
+
+  it("asks for the older page when the indicator comes into view", async () => {
+    // Arrange
+    const { h, answer } = heldPage();
+    const { controller, host } = fixture(h);
+    controller.applyPage(gapPage(), "replace");
+
+    // Act
+    fireIntersection(indicatorOf(host), true);
+    await settle();
+
+    // Assert
+    expect(h.calls.getFeedPage.map((a) => a.page.case)).toEqual(["olderThan"]);
+    answer([withOrder(responseRow("older"), "a")]);
+    await settle();
+  });
+
+  it("turns the indicator while the page loads", async () => {
+    // Arrange
+    const { h, answer } = heldPage();
+    const { controller, host } = fixture(h);
+    controller.applyPage(gapPage(), "replace");
+
+    // Act
+    fireIntersection(indicatorOf(host), true);
+    await settle();
+
+    // Assert
+    expect({ loading: indicatorOf(host).hasAttribute(WALK_LOADING_ATTRIBUTE), text: indicatorOf(host).textContent }).toEqual({
+      loading: true,
+      text: "",
+    });
+    answer([withOrder(responseRow("older"), "a")]);
+    await settle();
+  });
+
+  it("asks one page when the indicator and the top control are sighted together", async () => {
+    // Arrange
+    const { h, answer } = heldPage();
+    const { controller, host } = fixture(h);
+    controller.applyPage(gapPage(), "replace");
+
+    // Act
+    fireIntersection(indicatorOf(host), true);
+    fireIntersection(host.querySelector("[data-load-more]") as Element, true);
+    await settle();
+
+    // Assert
+    expect(h.calls.getFeedPage).toHaveLength(1);
+    answer([withOrder(responseRow("older"), "a")]);
+    await settle();
+  });
+
+  it("re-asks the observer about the indicator once a page lands, so a turn still short of its steps keeps loading", async () => {
+    // Arrange
+    const { h, answer } = heldPage();
+    const { controller, host } = fixture(h);
+    controller.applyPage(gapPage(), "replace");
+    const indicator = indicatorOf(host);
+    fireIntersection(indicator, true);
+    await settle();
+    const observe = vi.spyOn(globalThis.IntersectionObserver.prototype, "observe");
+
+    // Act
+    answer([withOrder(responseRow("older"), "a")]);
+    await settle();
+
+    // Assert
+    expect(observe.mock.calls.filter(([el]) => el === indicator)).toHaveLength(1);
+    observe.mockRestore();
+  });
+
+  it("rests the indicator and draws the refusal beside it when the daemon refuses the page", async () => {
+    // Arrange
+    const h = harness({ getFeedPage: () => create(GetFeedPageResponseSchema, { result: { case: "error", value: {} } }) });
+    const { controller, host } = fixture(h);
+    controller.applyPage(gapPage(), "replace");
+
+    // Act
+    fireIntersection(indicatorOf(host), true);
+    await settle();
+
+    // Assert
+    const indicator = indicatorOf(host);
+    expect({
+      loading: indicator.hasAttribute(WALK_LOADING_ATTRIBUTE),
+      disabled: indicator.disabled,
+      beside: indicator.nextElementSibling?.getAttribute("data-arm"),
+    }).toEqual({ loading: false, disabled: false, beside: "error" });
+  });
+
+  it("records the daemon's refusal of the page in the log", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    const h = harness({ getFeedPage: () => create(GetFeedPageResponseSchema, { result: { case: "error", value: {} } }) });
+    const { controller, host } = fixture(h);
+    controller.applyPage(gapPage(), "replace");
+
+    // Act
+    fireIntersection(indicatorOf(host), true);
+    await settle();
+
+    // Assert
+    const record = await forwardedRecord(capture, "feed.page-refused");
+    expect(record.context).toMatchObject({ feed: "root", arm: "unset" });
+  });
+
+  it("rests the indicator and draws a transport refusal beside it, recorded by the unary layer, when the daemon is unreachable", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    const h = harness({
+      getFeedPage: () => {
+        throw new Error("gone");
+      },
+    });
+    const { controller, host } = fixture(h);
+    controller.applyPage(gapPage(), "replace");
+
+    // Act
+    fireIntersection(indicatorOf(host), true);
+    await settle();
+
+    // Assert
+    const indicator = indicatorOf(host);
+    const record = await forwardedRecord(capture, "rpc.unary-transport-failure");
+    expect({
+      loading: indicator.hasAttribute(WALK_LOADING_ATTRIBUTE),
+      beside: indicator.nextElementSibling?.getAttribute("data-arm"),
+      rpc: record.context?.rpc,
+    }).toEqual({ loading: false, beside: "transport", rpc: "GetFeedPage" });
+  });
+
+  it("clears the refusal beside the indicator when the walk is asked again", async () => {
+    // Arrange
+    let refuse = true;
+    const h = harness({
+      getFeedPage: () =>
+        refuse
+          ? create(GetFeedPageResponseSchema, { result: { case: "error", value: {} } })
+          : new Promise(() => undefined),
+    });
+    const { controller, host } = fixture(h);
+    controller.applyPage(gapPage(), "replace");
+    fireIntersection(indicatorOf(host), true);
+    await settle();
+    refuse = false;
+
+    // Act
+    indicatorOf(host).click();
+    await settle();
+
+    // Assert
+    expect(host.querySelectorAll(".refusal")).toHaveLength(0);
+  });
+
+  it("asks nothing when sighted with the feed at its start", async () => {
+    // Arrange
+    const h = harness();
+    const { controller, host } = fixture(h);
+    controller.applyPage(gapPage(false), "replace");
+
+    // Act
+    fireIntersection(indicatorOf(host), true);
+    await settle();
+
+    // Assert
+    expect(h.calls.getFeedPage).toEqual([]);
+  });
+
+  it("stops watching the indicator once the daemon removes its row", () => {
+    // Arrange
+    const { controller, host } = fixture();
+    controller.applyPage(gapPage(), "replace");
+    const indicator = indicatorOf(host);
+
+    // Act
+    controller.upsert(rowWith("gap", { case: "removed", value: {} }));
+
+    // Assert
+    expect(() => fireIntersection(indicator, true)).toThrow(/no IntersectionObserver/);
   });
 });
 
