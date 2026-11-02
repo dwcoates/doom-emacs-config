@@ -44,16 +44,21 @@ describe("mintConnectionId", () => {
   it("is the one minter: no document hand-rolls its own", () => {
     // Arrange
     const here = path.dirname(fileURLToPath(import.meta.url));
+    const read = (file: string) => readFileSync(path.join(here, "..", "src", file), "utf8");
 
     // Act
-    // The workspace page, and Emacs's own two web views, which both start
-    // through host/document.ts (the host's services and the sidebar page).
-    const documents = ["main.ts", path.join("host", "document.ts")].map((file) =>
-      readFileSync(path.join(here, "..", "src", file), "utf8"),
-    );
+    // Every document begins through document-runtime.ts `startPageRuntime`,
+    // which mints the connection: the workspace page, and Emacs's own two web
+    // views, which both start through host/document.ts.
+    const runtime = read("document-runtime.ts");
+    const documents = ["main.ts", path.join("host", "document.ts")].map(read);
 
     // Assert
-    expect(documents.map((source) => [source.includes("mintConnectionId()"), source.includes("randomUUID")])).toEqual([
+    expect([
+      [runtime.includes("mintConnectionId()"), runtime.includes("randomUUID")],
+      ...documents.map((source) => [source.includes("startPageRuntime("), source.includes("randomUUID")]),
+    ]).toEqual([
+      [true, false],
       [true, false],
       [true, false],
     ]);

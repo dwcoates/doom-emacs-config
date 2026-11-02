@@ -4,13 +4,14 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 import type { ClientLogRequest } from "../../proto/gen/ts/agentrepl/v1/endpoint_client_log_pb";
 import { codeBlockHtml } from "../src/code-block.js";
-import { installForwardingLogger, installTextAffordances } from "../src/document-runtime.js";
+import { installForwardingLogger, installTextAffordances, startPageRuntime } from "../src/document-runtime.js";
 import { clientLogRecorder } from "./rpc/client-log-recorder.js";
-import { setLogger, log, type ForwardingLogger } from "../src/log.js";
+import { setLogger, log, resetLoggingForTests, type ForwardingLogger } from "../src/log.js";
+import { pageEnding } from "../src/page-teardown.js";
 
 /** Install a forwarding logger as SOURCE at THRESHOLD, log at LEVEL, and answer what reached the daemon. */
 async function forwardOne(threshold: "info" | "warn", level: "info" | "warn"): Promise<ClientLogRequest[]> {
@@ -25,6 +26,115 @@ async function forwardOne(threshold: "info" | "warn", level: "info" | "warn"): P
   await new Promise((resolve) => setTimeout(resolve, 0));
   return logged;
 }
+
+describe("startPageRuntime", () => {
+  afterEach(() => {
+    resetLoggingForTests();
+  });
+
+  /** Start a runtime over a recording client, its logger installed page-wide. */
+  function start(context?: { workspace_id: string; workspace_dir: string }) {
+    const { client, logged } = clientLogRecorder();
+    let installed: ForwardingLogger | null = null;
+    const made = startPageRuntime({
+      daemon: "http://ws-a.localhost:1",
+      kind: "page",
+      source: { case: "webhost", value: {} },
+      context,
+      level: "info",
+      client,
+      installLogger: (logger) => {
+        installed = logger;
+        setLogger(logger);
+      },
+    });
+    const flushed = async (): Promise<ClientLogRequest[]> => {
+      (installed)?.flush();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      return logged;
+    };
+    return { made, client, flushed };
+  }
+
+  it("answers the client it was handed", () => {
+    // Act
+    const { made, client } = start();
+
+    // Assert
+    expect(made.client).toBe(client);
+  });
+
+  it("forwards every record through its client as the source it names", async () => {
+    // Arrange
+    const { flushed } = start();
+
+    // Act
+    log.info("one record", { operation: "test.page-runtime", context: {} });
+
+    // Assert
+    expect((await flushed()).map((r) => r.source.case)).toEqual(["webhost"]);
+  });
+
+  it("binds its connection to every record", async () => {
+    // Arrange
+    const { made, flushed } = start();
+
+    // Act
+    log.info("one record", { operation: "test.page-runtime", context: {} });
+
+    // Assert
+    expect((await flushed()).map((r) => r.record?.context?.connection_id)).toEqual([made.connectionId]);
+  });
+
+  it("binds its context, so a record naming another workspace is refused", () => {
+    // Arrange
+    start({ workspace_id: "ws-1", workspace_dir: "/tmp/ws-1" });
+
+    // Act
+    const act = () => log.info("a stray record", { operation: "test.page-runtime", context: { workspace_id: "ws-2" } });
+
+    // Assert
+    expect(act).toThrow("conflicts with bound identity");
+  });
+
+  it("tells every record written to the listener it was handed", () => {
+    // Arrange
+    const told: string[] = [];
+    startPageRuntime({
+      daemon: "http://ws-a.localhost:1",
+      kind: "page",
+      source: { case: "webhost", value: {} },
+      level: "info",
+      client: clientLogRecorder().client,
+      installLogger: setLogger,
+      onRecord: (level) => told.push(level),
+    });
+
+    // Act
+    log.warn("one record", { operation: "test.page-runtime", context: {} });
+
+    // Assert
+    expect(told).toEqual(["warn"]);
+  });
+
+  it("begins the page before it is answered", () => {
+    // Arrange
+    const before = pageEnding();
+
+    // Act
+    startPageRuntime({
+      daemon: "http://ws-a.localhost:1",
+      kind: "page",
+      source: { case: "webhost", value: {} },
+      level: "info",
+      client: clientLogRecorder().client,
+      installLogger: () => undefined,
+    });
+
+    // Assert
+    expect(pageEnding()).not.toBe(before);
+  });
+});
 
 describe("installForwardingLogger", () => {
   it("forwards each record to the daemon as the source it names", async () => {
@@ -142,16 +252,18 @@ describe("installTextAffordances", () => {
     // Assert
     expect(
       sources.map((s) => [
-        s.includes("installForwardingLogger("),
+        s.includes("startPageRuntime("),
         s.includes("installTextAffordances("),
+        s.includes("installForwardingLogger("),
         s.includes("new ForwardingLogger("),
+        s.includes("mintConnectionId("),
         s.includes("installCopyFallback("),
         s.includes("installCopyChords("),
         s.includes("installCodeCopy("),
       ]),
     ).toEqual([
-      [true, true, false, false, false, false],
-      [true, true, false, false, false, false],
+      [true, true, false, false, false, false, false, false],
+      [true, true, false, false, false, false, false, false],
     ]);
   });
 });

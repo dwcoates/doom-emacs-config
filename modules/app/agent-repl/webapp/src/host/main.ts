@@ -20,14 +20,14 @@
  * away from it. The answer comes instead from the shown page, which reports
  * whether one of its text fields holds the focus (embed.ts).
  */
-import { LevelWindow } from "../../../agent-shim/logging/ts/level-window.js";
 import { createHost, hostHasFocus, type Host } from "./host.js";
 import { startWebhostServices } from "./services.js";
 import { installPopupLayer, openPopupChannel, type PopupChannel, type PopupLayerEnv } from "./sidebar-popups.js";
 import { WEBHOST_GATE_ID } from "./gate.js";
 import { WEBHOST_LOAD_ID } from "./load-button.js";
 import { installColorValues } from "../vocab.js";
-import { createDaemonOrigin, type DaemonOrigin } from "../rpc/daemon-origin.js";
+import { runQueuedCalls } from "./answers.js";
+import type { WebhostRuntime } from "./document.js";
 import "./host.css";
 
 /** A call Emacs made before the host started, queued on the page. */
@@ -49,12 +49,15 @@ export const WEBHOST_FRAMES_CLASS = "webhost-frames";
 
 /** What the start may have injected, for a suite that is not about the services. */
 export interface StartHostDeps {
+  /** The webhost's connection and logger, made before its code loaded (boot.ts). */
+  runtime: WebhostRuntime;
   /** Start the webhost's services; the real one dials the daemon. */
   startServices?: (
     doc: Document,
     win: Window,
     host: Host,
-    deps: { level: LevelWindow; daemon: DaemonOrigin; gate: HTMLElement; load: HTMLElement },
+    runtime: WebhostRuntime,
+    deps: { gate: HTMLElement; load: HTMLElement },
   ) => unknown;
   /** Install the layer the sidebar's popups are drawn in; the real one listens on the channel. */
   installPopups?: (env: PopupLayerEnv) => unknown;
@@ -63,7 +66,8 @@ export interface StartHostDeps {
 }
 
 /** Turn the page in DOC and WIN into the host, and hand it to Emacs. */
-export function startHost(doc: Document, win: Window, deps: StartHostDeps = {}): Host {
+export function startHost(doc: Document, win: Window, deps: StartHostDeps): Host {
+  const { runtime } = deps;
   doc.body.replaceChildren();
   doc.documentElement.classList.add(HOST_ROOT_CLASS);
   // THE STATUS COLORS' VALUES come from the shared vocabulary, never from
@@ -83,19 +87,17 @@ export function startHost(doc: Document, win: Window, deps: StartHostDeps = {}):
   load.hidden = true;
   doc.body.append(frames, load, gate);
   // THE WEBHOST'S OWN LOG LEVEL, raised with every page's by a profiling
-  // session (`Host.setLogLevel`); its logger is its services'.
-  const level = LevelWindow.fixed("info");
-  // THE WEBHOST'S DAEMON starts as the one that served it, and moves with
-  // its workspaces at a handover (`Host.setDaemon`).
-  const daemon = createDaemonOrigin(win.location.origin);
+  // session (`Host.setLogLevel`), and ITS DAEMON, which starts as the one that
+  // served it and moves with its workspaces at a handover (`Host.setDaemon`):
+  // both made with its logger, before its code loaded (boot.ts).
+  const { level, daemon } = runtime;
   const host = createHost({ doc, win, frames, level, daemon });
-  // THE SERVICES START BEFORE EMACS'S QUEUED CALLS RUN: they install the
-  // webhost's logger, and a queued call that logs (`focusMoved` does, through
-  // the focus-left signal) threw without one, which ended the start there:
-  // every call queued after it was lost and the services never started
-  // (2026-10-31, the merge gate's e2e run). Every listener the services add
-  // is told the state the queued calls then set, or replays it.
-  (deps.startServices ?? startWebhostServices)(doc, win, host, { level, daemon, gate, load });
+  // THE SERVICES START BEFORE EMACS'S QUEUED CALLS RUN, so every listener
+  // they add is told the state the queued calls then set, or replays it. (A
+  // queued call that logs once threw here for want of a logger, which the
+  // services installed: 2026-10-31. The logger is now the runtime's, made
+  // before the host's code loaded.)
+  (deps.startServices ?? startWebhostServices)(doc, win, host, runtime, { gate, load });
   // THE SIDEBAR'S OPEN ROW PANELS, drawn over the pages (sidebar-popups.ts).
   (deps.installPopups ?? installPopupLayer)({
     doc,
@@ -104,9 +106,9 @@ export function startHost(doc: Document, win: Window, deps: StartHostDeps = {}):
     onOffset: (listener) => host.onSidebarOffset(listener),
   });
   win.agentReplHost = host;
-  const pending = win.__agentReplHostPending ?? [];
+  const pending = win.__agentReplHostPending;
   delete win.__agentReplHostPending;
-  for (const call of pending) call(host);
+  runQueuedCalls(pending, host);
   const answerFocus = (): boolean => hostHasFocus(doc, host);
   win.xwHasFocus = answerFocus;
   // Emacs injects its own definition as a user script, which can run after

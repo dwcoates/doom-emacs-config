@@ -4,11 +4,18 @@
 // src/host/document.ts.
 import { afterEach, describe, expect, it } from "vitest";
 
-import { startWebhostDocument, type StartedWebhostDocument, type WebhostDocumentDeps } from "../../src/host/document.js";
+import {
+  startWebhostDocument,
+  startWebhostRuntime,
+  type StartedWebhostDocument,
+  type WebhostDocumentDeps,
+  type WebhostRuntime,
+  type WebhostRuntimeDeps,
+} from "../../src/host/document.js";
 import { ForwardingLogger, log, setLogger } from "../../src/log.js";
-import { createDaemonOrigin } from "../../src/rpc/daemon-origin.js";
 import { captureLogRecords } from "../log-capture.js";
 import { clientLogRecorder } from "../rpc/client-log-recorder.js";
+import { quietWebhostRuntime } from "./webhost-runtime.js";
 import { dispatchPageTransition } from "../page-transition.js";
 import { beginPage, pageEnded, pageEnding, tearDownPage } from "../../src/page-teardown.js";
 
@@ -21,33 +28,45 @@ afterEach(() => {
   beginPage();
 });
 
-/** Start the sidebar's document with DEPS over a quiet client, keeping the page-wide logger. */
-function start(deps: WebhostDocumentDeps = {}) {
+/** Begin the sidebar's runtime with DEPS over a quiet client, keeping the page-wide logger. */
+function runtime(deps: WebhostRuntimeDeps = {}) {
   const { client, logged } = clientLogRecorder();
-  started = startWebhostDocument("sidebar", document, window, {
-    client,
-    installLogger: () => undefined,
+  const made = startWebhostRuntime("sidebar", window, { client, installLogger: () => undefined, ...deps });
+  return { made, logged };
+}
+
+/** Start the sidebar's document with DEPS on a quiet runtime; answers the runtime. */
+function start(deps: WebhostDocumentDeps = {}): WebhostRuntime {
+  const made = quietWebhostRuntime("sidebar").runtime;
+  started = startWebhostDocument(made, document, window, {
     installCensus: () => ({ stop: () => undefined }),
     webappBuild: () => "Web1",
     ...deps,
   });
-  return logged;
+  return made;
 }
 
-describe("startWebhostDocument", () => {
+/** Install the runtime's logger page-wide, answering it for a flush. */
+function installing() {
+  let installed: ForwardingLogger | null = null;
+  return {
+    installLogger: (logger: ForwardingLogger) => {
+      installed = logger;
+      setLogger(logger);
+    },
+    flush: () => (installed)?.flush(),
+  };
+}
+
+describe("startWebhostRuntime", () => {
   it("files its records as the webhost's", async () => {
     // Arrange
-    let installed: ForwardingLogger | null = null;
-    const logged = start({
-      installLogger: (logger) => {
-        installed = logger;
-        setLogger(logger);
-      },
-    });
+    const logger = installing();
+    const { logged } = runtime({ installLogger: logger.installLogger });
 
     // Act
     log.info("a document record", { operation: "test.webhost-record", context: {} });
-    (installed as ForwardingLogger | null)?.flush();
+    logger.flush();
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     // Assert
@@ -57,7 +76,7 @@ describe("startWebhostDocument", () => {
   it("names the document in every record it writes", () => {
     // Arrange
     const capture = captureLogRecords();
-    start();
+    runtime();
 
     // Act
     log.info("a document record", { operation: "test.webhost-document", context: {} });
@@ -68,35 +87,53 @@ describe("startWebhostDocument", () => {
     expect(record?.context?.["webhost_document"]).toBe("sidebar");
   });
 
-  it("tells its record observer every record it writes", () => {
+  it("tells every record observer every record it writes", () => {
     // Arrange
     const seen: string[] = [];
-    let installed: ForwardingLogger | null = null;
-    start({
-      installLogger: (logger) => {
-        installed = logger;
-        setLogger(logger);
-      },
-      onRecord: (level, line) => seen.push(`${level}:${(JSON.parse(line) as { operation: string }).operation}`),
-    });
+    const logger = installing();
+    const { made } = runtime({ installLogger: logger.installLogger });
+    made.onRecord((level, line) => seen.push(`${level}:${(JSON.parse(line) as { operation: string }).operation}`));
 
     // Act
     log.warn("a warning", { operation: "test.observed", context: {} });
 
     // Assert
-    expect(installed).not.toBeNull();
     expect(seen).toContain("warn:test.observed");
   });
 
+  it("stops telling an observer once its stop is called", () => {
+    // Arrange
+    const seen: string[] = [];
+    const logger = installing();
+    const { made } = runtime({ installLogger: logger.installLogger });
+    const stop = made.onRecord((level) => seen.push(level));
+
+    // Act
+    stop();
+    log.warn("a warning", { operation: "test.observed", context: {} });
+
+    // Assert
+    expect(seen).toEqual([]);
+  });
+
+  it("starts at info, on the daemon that served it", () => {
+    // Act
+    const { made } = runtime();
+
+    // Assert
+    expect([made.daemon.current(), made.document]).toEqual([window.location.origin, "sidebar"]);
+  });
+});
+
+describe("startWebhostDocument", () => {
   it("tells its context's streams when the daemon it dials moves", () => {
     // Arrange
-    const daemon = createDaemonOrigin("http://host.localhost:1");
-    start({ daemon });
+    const { daemon } = start();
     let moves = 0;
     started?.ctx.onDaemonMoved(() => (moves += 1));
 
     // Act
-    daemon.set("http://host.localhost:2");
+    daemon.set("http://host.localhost:9");
 
     // Assert
     expect(moves).toBe(1);

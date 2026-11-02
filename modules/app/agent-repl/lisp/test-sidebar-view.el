@@ -47,13 +47,13 @@ Binds `records' to every central log record, as (LEVEL . TEXT), newest first."
                  ((symbol-function 'agent-repl--frontend-webview-navigate-widget)
                   (lambda (_xw url) (push url agent-repl-test-sv--navigated)))
                  ((symbol-function 'agent-repl--info)
-                  (lambda (_ws fmt &rest args) (push (cons 'info (apply #'format fmt args)) records)))
+                  (agent-repl-test--record-leveled-into records 'info))
                  ((symbol-function 'agent-repl--log)
-                  (lambda (_ws fmt &rest args) (push (cons 'log (apply #'format fmt args)) records)))
+                  (agent-repl-test--record-leveled-into records 'log))
                  ((symbol-function 'agent-repl--warn)
-                  (lambda (_ws fmt &rest args) (push (cons 'warn (apply #'format fmt args)) records)))
+                  (agent-repl-test--record-leveled-into records 'warn))
                  ((symbol-function 'agent-repl--error)
-                  (lambda (_ws fmt &rest args) (push (cons 'error (apply #'format fmt args)) records))))
+                  (agent-repl-test--record-leveled-into records 'error)))
          ,@body))))
 
 (defun agent-repl-test-sv--conn (address)
@@ -221,6 +221,29 @@ Binds `records' to every central log record, as (LEVEL . TEXT), newest first."
     (setq agent-repl--sidebar-view-shown "id-a")
     (agent-repl-test-sv--load "load-started" "http://host.localhost:1/?sidebar=1")
     (should-not agent-repl-test-sv--calls)))
+
+(ert-deftest agent-repl-test-sv-a-finished-load-reads-the-sidebars-boot ()
+  "At the sidebar's load-finished its boot is asked for, answered by symbol."
+  (agent-repl-test-sv--with-sidebar
+    (agent-repl-test-sv--load "load-finished" "http://host.localhost:1/?sidebar=1")
+    (should (equal agent-repl-test-sv--calls
+                   (list (cons (agent-repl--webview-boot-script "agentReplSidebar")
+                               'agent-repl--sidebar-view-on-boot))))))
+
+(ert-deftest agent-repl-test-sv-a-strayed-finish-reads-no-boot ()
+  "A site the sidebar strayed to is not its page, so it has no boot to read."
+  (agent-repl-test-sv--with-sidebar
+    (cl-letf (((symbol-function 'agent-repl--frontend-webview-navigate-widget) #'ignore))
+      (agent-repl-test-sv--load "load-finished" "https://example.com/"))
+    (should-not agent-repl-test-sv--calls)))
+
+(ert-deftest agent-repl-test-sv-a-boot-that-threw-is-recorded-at-error-as-the-sidebars ()
+  "The sidebar's boot errors are recorded at ERROR, naming the sidebar's view."
+  (agent-repl-test-sv--with-sidebar
+    (let (errors)
+      (cl-letf (((symbol-function 'agent-repl--error) (agent-repl-test--record-into errors)))
+        (agent-repl--sidebar-view-on-boot "{\"started\":false,\"hooked\":true,\"errors\":[\"error: boom\"]}"))
+      (should (equal errors '("elisp.webview.boot-errors view=sidebar started=nil errors=(\"error: boom\")"))))))
 
 (ert-deftest agent-repl-test-sv-the-blank-document-replays-nothing ()
   "WebKit's about:blank ahead of the first navigation is not the page."

@@ -19,18 +19,19 @@
  * warnings and errors are listed behind the rail's version (sidebar/
  * notices.ts), since the pages' warning chip is in another web view.
  */
-import { LevelWindow, parseWindowLevel, type AppliedLevel, type WindowLevel } from "../../../agent-shim/logging/ts/level-window.js";
+import { parseWindowLevel, type AppliedLevel, type LevelWindow, type WindowLevel } from "../../../agent-shim/logging/ts/level-window.js";
 import { bootFailed } from "../failure/sink.js";
 import { FOCUS_LEFT_EMACS, pageFocusLeft, type FocusLeftSource } from "../focus-left.js";
 import { log } from "../log.js";
-import { createDaemonOrigin, isDaemonOrigin, type DaemonOrigin } from "../rpc/daemon-origin.js";
+import { isDaemonOrigin } from "../rpc/daemon-origin.js";
 import { mountWebhostSidebar } from "../sidebar/sidebar.js";
 import { createSidebarNotices, type SidebarNotices } from "../sidebar/notices.js";
 import { installColorValues } from "../vocab.js";
-import { createCallAnswers } from "./answers.js";
+import { createCallAnswers, runQueuedCalls } from "./answers.js";
 import { createPopupMirror, openPopupChannel, type PopupChannel } from "./sidebar-popups.js";
-import { startWebhostDocument, type WebhostDocumentDeps } from "./document.js";
+import { startWebhostDocument, type WebhostDocumentDeps, type WebhostRuntime } from "./document.js";
 import "./sidebar-page.css";
+import { errorCause } from "../error-cause.js";
 
 /** The id the rail's element wears: the page's own, so one stylesheet draws both. */
 export const SIDEBAR_ID = "ws-sidebar";
@@ -77,6 +78,8 @@ declare global {
 
 /** What the start may have injected, for a suite that drives it. */
 export interface StartSidebarPageDeps extends WebhostDocumentDeps {
+  /** The sidebar's connection and logger, made before its code loaded (boot.ts). */
+  runtime: WebhostRuntime;
   /** Mount the rail; the real one opens the roster stream. */
   mount?: typeof mountWebhostSidebar;
   /** The page's notices; a fresh set when absent. */
@@ -88,7 +91,8 @@ export interface StartSidebarPageDeps extends WebhostDocumentDeps {
 }
 
 /** Turn the page in DOC and WIN into the sidebar, and hand it to Emacs. */
-export function startSidebarPage(doc: Document, win: Window, deps: StartSidebarPageDeps = {}): SidebarPage {
+export function startSidebarPage(doc: Document, win: Window, deps: StartSidebarPageDeps): SidebarPage {
+  const { runtime } = deps;
   doc.body.replaceChildren();
   doc.documentElement.classList.add(SIDEBAR_ROOT_CLASS);
   // THE STATUS COLORS' VALUES come from the shared vocabulary, never from
@@ -100,21 +104,15 @@ export function startSidebarPage(doc: Document, win: Window, deps: StartSidebarP
   nav.hidden = true;
   doc.body.append(nav);
 
-  const level = deps.level ?? LevelWindow.fixed("info");
-  // THE PAGE'S DAEMON starts as the one that served it, and moves with its
-  // workspaces at a handover (`setDaemon`).
-  const daemon: DaemonOrigin = deps.daemon ?? createDaemonOrigin(win.location.origin);
+  // THE PAGE'S LOG LEVEL, and ITS DAEMON, which starts as the one that served
+  // it and moves with its workspaces at a handover (`setDaemon`): both made
+  // with its logger, before its code loaded (boot.ts).
+  const { level, daemon } = runtime;
   const notices = deps.notices ?? createSidebarNotices();
   const focusLeft = deps.focusLeft ?? pageFocusLeft();
-  const started = startWebhostDocument("sidebar", doc, win, {
-    ...deps,
-    level,
-    daemon,
-    onRecord: (recordLevel, line) => {
-      notices.record(recordLevel, line);
-      deps.onRecord?.(recordLevel, line);
-    },
-  });
+  // EVERY RECORD THE PAGE WRITES FROM HERE ON reaches its notices.
+  runtime.onRecord((recordLevel, line) => notices.record(recordLevel, line));
+  const started = startWebhostDocument(runtime, doc, win, deps);
 
   let markShown = (_id: string): void => undefined;
   try {
@@ -132,7 +130,7 @@ export function startSidebarPage(doc: Document, win: Window, deps: StartSidebarP
     });
     markShown = (id) => rail.markShown(id);
   } catch (err) {
-    const cause = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+    const cause = errorCause(err);
     log.error(`the sidebar failed to start: ${cause}`, {
       operation: "sidebar-page.start-failed",
       context: { cause },
@@ -189,9 +187,9 @@ export function startSidebarPage(doc: Document, win: Window, deps: StartSidebarP
     },
   };
   win.agentReplSidebar = page;
-  const pending = win.__agentReplSidebarPending ?? [];
+  const pending = win.__agentReplSidebarPending;
   delete win.__agentReplSidebarPending;
-  for (const call of pending) call(page);
+  runQueuedCalls(pending, page);
   return page;
 }
 

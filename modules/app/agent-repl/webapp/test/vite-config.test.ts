@@ -92,6 +92,26 @@ function chunkHolding(output: Rollup.RollupOutput, fragment: string): string | u
 }
 
 /**
+ * Every chunk on an import cycle of CHUNKS' static imports, as the cycle's
+ * chunk names joined by arrows; empty when the imports form no cycle.
+ */
+function staticImportCycles(chunks: readonly Pick<Rollup.OutputChunk, "fileName" | "imports">[]): string[] {
+  const byName = new Map(chunks.map((chunk) => [chunk.fileName, chunk]));
+  const cycles: string[] = [];
+  for (const start of chunks) {
+    // Every path from START back to itself, walked depth first.
+    const walk = (name: string, path: string[]): void => {
+      for (const next of byName.get(name)?.imports ?? []) {
+        if (next === start.fileName) cycles.push([...path, next].join(" -> "));
+        else if (!path.includes(next)) walk(next, [...path, next]);
+      }
+    };
+    walk(start.fileName, [start.fileName]);
+  }
+  return cycles;
+}
+
+/**
  * The chunk the config's manualChunks names for a module id, called as Rollup
  * would; undefined when it names none (Rollup reads null and undefined alike).
  */
@@ -114,6 +134,7 @@ describe("vite.config.ts manualChunks", () => {
     { name: "markdown-it goes to markdown", id: "/r/node_modules/markdown-it/index.mjs", want: "markdown" },
     { name: "any other vendor module is left to rollup", id: "/r/node_modules/other/index.js", want: undefined },
     { name: "app source is left to rollup", id: "/r/webapp/src/main.ts", want: undefined },
+    { name: "vite's preload helper goes to preload", id: "\0vite/preload-helper.js", want: "preload" },
   ];
 
   it.each(cases)("$name", ({ id, want }) => {
@@ -211,6 +232,25 @@ describe("vite.config.ts build", () => {
     expect(unreached).toEqual([]);
   });
 
+  it("imports no chunk statically that imports it back, so every chunk runs after what it imports", () => {
+    // Act.
+    const cycles = staticImportCycles(chunksOf(clean.output));
+
+    // Assert.
+    expect(cycles).toEqual([]);
+  });
+
+  it("puts vite's preload helper in a chunk that imports nothing", () => {
+    // Arrange.
+    const holder = chunksOf(clean.output).find((chunk) => chunk.moduleIds.some((id) => id.includes("vite/preload-helper")));
+
+    // Act.
+    const imports = holder?.imports;
+
+    // Assert.
+    expect([holder?.fileName, imports]).toEqual([expect.stringMatching(/^assets\/preload-[A-Za-z0-9_-]+\.js$/), []]);
+  });
+
   it("resolves every static import of every chunk to a file the build wrote", () => {
     // Act.
     const missing = chunksOf(clean.output).flatMap((chunk) =>
@@ -263,6 +303,40 @@ describe("vite.config.ts build", () => {
 
     // Assert.
     expect(missing).toEqual([]);
+  });
+
+  // THE CYCLE CHECK MUST BE ABLE TO FAIL: chunks that import each other are
+  // named, and a chain that only descends is not.
+  describe("the static import cycle scan", () => {
+    it("names chunks that import each other", () => {
+      // Arrange.
+      const chunks = [
+        { fileName: "a.js", imports: ["b.js"] },
+        { fileName: "b.js", imports: ["c.js"] },
+        { fileName: "c.js", imports: ["a.js"] },
+      ];
+
+      // Act.
+      const cycles = staticImportCycles(chunks);
+
+      // Assert.
+      expect(cycles).toContain("a.js -> b.js -> c.js -> a.js");
+    });
+
+    it("names no cycle in imports that only descend", () => {
+      // Arrange.
+      const chunks = [
+        { fileName: "a.js", imports: ["b.js", "c.js"] },
+        { fileName: "b.js", imports: ["c.js"] },
+        { fileName: "c.js", imports: [] },
+      ];
+
+      // Act.
+      const cycles = staticImportCycles(chunks);
+
+      // Assert.
+      expect(cycles).toEqual([]);
+    });
   });
 
   // THE ERROR PATH: the warning and size checks above must be able to fail.

@@ -41,6 +41,9 @@ const LAYER_BUDGET = 400_000;
 /** Whether a module id is the webapp's own source. */
 const isApp = (id: string): boolean => id.includes("/webapp/src/");
 
+/** Whether a module id is Vite's preload helper, which every lazy `import()` calls. */
+const isPreloadHelper = (id: string): boolean => id.includes("vite/preload-helper");
+
 /** Whether a module id is the generated protobuf code. */
 const isProto = (id: string): boolean => id.includes("/proto/gen/ts/");
 
@@ -74,6 +77,16 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks(id, graph) {
+          // VITE'S PRELOAD HELPER GETS A CHUNK OF ITS OWN, which imports
+          // nothing. Every lazy `import()` calls it, and left to Rollup it rode
+          // in the chunk of whichever module used it first (the layer holding
+          // the login terminal's xterm import), so a lazy import in any lower
+          // layer imported that layer back: a chunk cycle, which no warning
+          // reports, and whose first chunk to run read a binding the other had
+          // not yet set. When the webhost's boot moved its own lazy import
+          // into the lowest layer, every host page threw `Cannot access
+          // uninitialized variable` before its first line ran (2026-11-01).
+          if (isPreloadHelper(id)) return "preload";
           if (isProto(id)) {
             protoChunks ??= layerChunks(graph as ModuleGraph, isProto, LAYER_BUDGET, "proto");
             return protoChunks.get(id);

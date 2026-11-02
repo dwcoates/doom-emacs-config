@@ -1088,6 +1088,16 @@ Stub a rung with it: ((symbol-function \='agent-repl--error)
 uses (test-test-helpers.el holds every suite to it)."
   `(lambda (_scope fmt &rest args) (push (apply #'format fmt args) ,place)))
 
+(defmacro agent-repl-test--record-leveled-into (place level)
+  "A stand-in for a logging rung that records each record as (LEVEL . TEXT) into PLACE.
+`agent-repl-test--record-into' with the rung's LEVEL kept, for a case that
+reads which rung a record went to: stub each rung with its own LEVEL, as
+in ((symbol-function \='agent-repl--warn)
+\(agent-repl-test--record-leveled-into records \='warn)).  PLACE holds the
+records newest first.  THE ONE such recorder every suite uses
+\(test-test-helpers.el holds every suite to it)."
+  `(lambda (_scope fmt &rest args) (push (cons ,level (apply #'format fmt args)) ,place)))
+
 (defmacro agent-repl-test--fatal-into (place)
   "A stand-in for `agent-repl--fatal' that records into PLACE, then signals.
 Like `agent-repl-test--record-into', it pushes each record's text onto

@@ -857,6 +857,35 @@ stubs every rung alike."
     ;; Assert
     (should-not hand-rolled)))
 
+(ert-deftest agent-repl-test-helpers-record-leveled-into-records-level-and-text-newest-first ()
+  "A rung stubbed with the leveled recorder keeps each record as (LEVEL . TEXT), newest first."
+  ;; Arrange
+  (let ((records nil))
+    (cl-letf (((symbol-function 'agent-repl--info) (agent-repl-test--record-leveled-into records 'info))
+              ((symbol-function 'agent-repl--error) (agent-repl-test--record-leveled-into records 'error)))
+      ;; Act
+      (agent-repl--info "ws-1" "first n=%d" 1)
+      (agent-repl--error nil "second s=%s" "x"))
+    ;; Assert
+    (should (equal records '((error . "second s=x") (info . "first n=1"))))))
+
+(ert-deftest agent-repl-test-helpers-no-suite-hand-rolls-the-leveled-recorder ()
+  "Every suite records a rung with its level through `agent-repl-test--record-leveled-into'."
+  ;; Arrange
+  (let ((dir agent-repl-test-helpers--dir)
+        (hand-rolled nil))
+    ;; Act
+    (dolist (file (directory-files dir t "\\`test-.*\\.el\\'"))
+      (unless (equal (file-name-nondirectory file) "test-helpers.el")
+        (with-temp-buffer
+          (insert-file-contents file)
+          (when (re-search-forward
+                 "(lambda (_[a-z]* fmt &rest args)[ \t\n]*(push (cons '[a-z]+ (apply #'format fmt args))"
+                 nil t)
+            (push (file-name-nondirectory file) hand-rolled)))))
+    ;; Assert
+    (should-not hand-rolled)))
+
 ;;;; ---- The page-unloading reporter ----
 
 (defun agent-repl-test-helpers--report-through (answer)

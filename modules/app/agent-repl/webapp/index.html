@@ -4,6 +4,40 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>claude-repl</title>
+    <!-- THE PAGE'S EARLIEST ERRORS, kept where Emacs can read them.
+
+         Every record the page makes goes through a logger its entry module
+         installs, so an error before that module's first line ran (a chunk
+         that failed to load, or one that threw while it was evaluated) left
+         no record anywhere: on 2026-11-01 every host page threw `Cannot
+         access uninitialized variable` in a chunk's module code, and only a
+         probe like this one could name it. Emacs reads the list at the host's
+         load (lisp/webhost.el `agent-repl--webview-on-finish`). The first
+         few are kept, as the earliest are the boot's. -->
+    <script data-agent-repl="page-errors">
+      (function () {
+        var errors = (window.__agentReplPageErrors = []);
+        var keep = function (text) {
+          if (errors.length < 20) errors.push(String(text).slice(0, 2000));
+        };
+        addEventListener(
+          "error",
+          function (event) {
+            if (event instanceof ErrorEvent) {
+              keep("error: " + event.message + " at " + event.filename + ":" + event.lineno + ":" + event.colno);
+            } else {
+              var target = event.target;
+              keep("failed to load: " + ((target && (target.src || target.href)) || String(target)));
+            }
+          },
+          true,
+        );
+        addEventListener("unhandledrejection", function (event) {
+          var reason = event.reason;
+          keep("rejection: " + (reason && reason.stack ? reason.stack : String(reason)));
+        });
+      })();
+    </script>
   </head>
   <body>
     <!-- THE SHELL.
