@@ -209,8 +209,9 @@ user in the same response what it reorganized and why.
   `workspace prompt`, never `SendMessage`.** `SendMessage` stays the way to
   talk to this workspace's own subagents. `workspace prompt` goes through
   agent-repld, which holds the prompt behind the recipient's running work,
-  waits out its cold gate, and draws the send in both workspaces' feeds; a
-  `SendMessage` to another session goes around all of it.
+  refuses it while the recipient is parked at a cold gate, and draws the send
+  in both workspaces' feeds; a `SendMessage` to another session goes around
+  all of it.
 - `ListAgents` never lists workspaces: an open workspace that is idle or
   cold has no running Claude process, so it is missing there however open it
   is. Find workspaces with `workspace list`, `workspace status` and
@@ -221,6 +222,13 @@ user in the same response what it reorganized and why.
   name, and this workspace's feed shows it sent, with WS's name then a right
   arrow, and whether it was held or refused. A prompt that begins with a slash command is refused: an agent never
   clears another workspace's conversation.
+- A refused `workspace prompt` exits 6, prints the daemon's answer on
+  stdout, and prints one plain sentence on stderr saying why WS cannot take
+  the prompt. Read that sentence to tell the user what became of the send.
+- **A workspace parked at a cold gate refuses every prompt an agent sends
+  it, `-as-user` or not** (`cold_gate`). Nothing is held for later: once the
+  user answers the gate (`workspace status` names it), send the prompt
+  again. `-as-user` lifts only the fan-out cap below, never the cold gate.
 - **CRITICAL: NEVER broadcast to the fleet.** Every workspace a prompt
   reaches wakes and resends its whole context. A notice every workspace
   needs goes in the harness (`/agent-repl-update-harness`), never in a
