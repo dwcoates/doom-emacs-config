@@ -309,12 +309,12 @@ describe("row decoration", () => {
     expect(group?.querySelector(".merged-group-head > .sb-label")?.textContent).toBe("doom");
   });
 
-  it("draws an idle repository's group folded, the band still drawn", async () => {
+  it("draws a repository's group open in the Recently Merged band", async () => {
     // Arrange / Act
     await withRoster({ mergedCollapsed: false });
     // Assert
     const band = harness.$(".sb-pane .merged-section") as HTMLElement | null;
-    expect([band?.hidden, band?.querySelector<HTMLElement>(".merged-group")?.classList.contains("folded")]).toEqual([false, true]);
+    expect([band?.hidden, band?.querySelector<HTMLElement>(".merged-group")?.classList.contains("folded")]).toEqual([false, false]);
   });
 });
 
@@ -608,13 +608,14 @@ describe("roster ordering", () => {
       ],
     });
     // Assert
-    // The open workspaces section heads the pane and the Deploys section
-    // follows it, by construction (an empty Hidden section is left out).
+    // The open workspaces section heads the pane and the Recently Merged
+    // section follows it, by construction (an empty Merge Queue and an empty
+    // Hidden section are left out).
     expect(harness.texts('.sb-pane .repo-head .sb-label')).toEqual([
       "Open",
       "zulu",
       "alpha",
-      "deploys",
+      "Recently Merged",
     ]);
   });
 
