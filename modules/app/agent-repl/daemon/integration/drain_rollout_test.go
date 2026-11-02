@@ -262,7 +262,6 @@ func TestUpdateShutdownScheduleNowLeavesNoShimBehindThatIsStillBringingUp(t *tes
 	// Arrange: a shim that withholds its opening diagnostics, so OpenWorkspace
 	// blocks inside bring-up and the process reaches no session map.
 	f := newRegistered(t, harness.Opts{})
-	f.d.WriteShimProfile(f.repo.Dir, harness.ShimProfile{DelayDiagnostics: true})
 	// The daemon is stood down mid-bring-up on purpose; these are that act's
 	// own trail, on both sides of the abandoned spawn.
 	f.d.ExpectWarnings(
@@ -271,6 +270,7 @@ func TestUpdateShutdownScheduleNowLeavesNoShimBehindThatIsStillBringingUp(t *tes
 		"daemon.workspace.bring_up", "daemon.workspace.restart",
 		"daemon.health.session", "daemon.health.open_fault",
 	)
+	f.d.WriteShimProfile(f.repo.Dir, harness.ShimProfile{DelayDiagnostics: true})
 	// AN OPEN STARTS NO SHIM (owner ruling, 2026-10-28): the start under test
 	// is the restart's.
 	if opened, err := f.d.Client().OpenWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: f.ws})); err != nil || opened.Msg.GetSuccess() == nil {
@@ -399,8 +399,8 @@ func TestAScheduledDrainDoesNotWaitOnADetachedSubagentThatHasSettled(t *testing.
 	t.Parallel()
 	// Arrange: a live session with one detached subagent, settled.
 	f := newOpened(t, harness.Opts{})
-	expectSessionKillRecords(f.d)
 	f.d.ExpectWarnings("daemon.health.open_fault", "daemon.workspace.bring_up")
+	expectSessionKillRecords(f.d)
 	f.shim.ExpectStartSession()
 	footer := f.d.WatchFooter(f.ws)
 	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, ftSubagentSpawn("toolu-1", "toolu-1", "sweep the tree")))
@@ -439,6 +439,10 @@ func TestDuringADrainNewPromptsAreHeldWithTheShutdownHold(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
+	// The one submission held under the drain lease is the FIRST refusal the
+	// controller ever notes, which always fires its WARN immediately
+	// (internal/drain/refusals.go NoteRefusal: openedAt is zero).
+	f.d.ExpectWarnings("daemon.drain.refusal")
 	tray := f.d.WatchHolds(f.ws)
 	harness.AwaitNext(t, f.d.Ctx(), tray, "the empty tray")
 	if _, err := f.d.Client().UpdateShutdownSchedule(f.d.Ctx(), connect.NewRequest(&agentreplv1.UpdateShutdownScheduleRequest{
@@ -473,10 +477,6 @@ func TestDuringADrainNewPromptsAreHeldWithTheShutdownHold(t *testing.T) {
 	if held.GetShutdown().GetScheduleId() == "" {
 		t.Fatalf("held prompt's shutdown hold = %v, want a schedule id", held.GetShutdown())
 	}
-	// The one submission held under the drain lease is the FIRST refusal the
-	// controller ever notes, which always fires its WARN immediately
-	// (internal/drain/refusals.go NoteRefusal: openedAt is zero).
-	f.d.ExpectWarnings("daemon.drain.refusal")
 }
 
 // TestDrainRefusalLogsAreRateLimitedWithSuppressedAndTotalCounts is critique
@@ -1203,8 +1203,8 @@ func TestASessionlessWorkspaceHandedOverDrawsItsFeedWithNoPrompt(t *testing.T) {
 	// Arrange: a headless workspace whose shim died twice before any turn
 	// ended, so the loop guard left its session down.
 	f := newRegistered(t, harness.Opts{DurableState: true, Timeout: harness.HandoverChainTimeout})
-	f.open()
 	f.d.RequireWarnings(append([]string{"daemon.promptqueue.revive"}, deadShimRecords...)...)
+	f.open()
 	f.shim.ExpectStartSession()
 	concludeFirstTurn(t, f)
 	killShim(t, f, f.shim)

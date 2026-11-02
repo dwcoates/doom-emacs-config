@@ -113,7 +113,10 @@ func TestEveryScenarioGoldenProjectsToItsFeedGolden(t *testing.T) {
 			path := filepath.Join(scenarioGoldensDir, name, "feed.json")
 			f := newOpened(t, harness.Opts{})
 			var want feedGolden
-			if !write {
+			if write {
+				// The golden's warnings are read back undeclared.
+				f.d.SweepIsTheSubject()
+			} else {
 				want = readFeedGolden(t, path)
 				f.d.RequireWarnings(want.Warnings...)
 			}

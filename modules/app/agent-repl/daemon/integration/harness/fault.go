@@ -220,9 +220,23 @@ func (d *Daemon) recordFault(read map[string]int) (error, error) {
 func (d *Daemon) failsSweep(r LogRecord) bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	if d.sweepIsTheSubject {
+		return false
+	}
 	_, claimed := d.claimed[r.WorkspaceDir]
 	if d.view && !d.claims[r.WorkspaceDir] || !d.view && claimed {
 		return false
 	}
 	return !d.expects(r)
+}
+
+// SweepIsTheSubject stands this sweeper's record latch aside, for a test
+// whose subject is the warnings it reads back undeclared (UnexpectedWarnings,
+// a golden's regeneration): its waits must not end on the very records it
+// reads. The cleanup sweep still fails every record the test leaves
+// undeclared.
+func (d *Daemon) SweepIsTheSubject() {
+	d.mu.Lock()
+	d.sweepIsTheSubject = true
+	d.mu.Unlock()
 }

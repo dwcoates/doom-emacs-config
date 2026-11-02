@@ -36,8 +36,7 @@ func TestRacingDisabledBeforeARestartStaysDisabledInTheSuccessor(t *testing.T) {
 	d1.Stop()
 
 	// Act
-	d2 := harness.StartDaemon(t, harness.Opts{StateDir: d1.StateDir, ExtraEnv: []string{"AGENT_REPL_LOCK_DIR=" + d1.LockDir}})
-	d2.ExpectWarnings("daemon.merge.disable_racing")
+	d2 := harness.StartDaemon(t, harness.Opts{ExpectWarnings: []string{"daemon.merge.disable_racing"}, StateDir: d1.StateDir, ExtraEnv: []string{"AGENT_REPL_LOCK_DIR=" + d1.LockDir}})
 	again := switchRacing(t, d2, false)
 
 	// Assert

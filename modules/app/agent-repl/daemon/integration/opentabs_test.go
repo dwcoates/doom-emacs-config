@@ -292,10 +292,9 @@ func cutWhileHidden(t *testing.T) *fixture {
 	f.shim.ExpectStartTurn()
 	hide(t, f.d, f.ws)
 	shutdownNow(t, f.d)
-	f.d = harness.StartDaemon(t, harness.Opts{StateDir: f.d.StateDir})
 	// The fake shim writes no vendor transcript, so the successor's resume
 	// finds none and says so; a real session's transcript is on disk.
-	f.d.ExpectWarnings("daemon.workspace.bring_up")
+	f.d = harness.StartDaemon(t, harness.Opts{StateDir: f.d.StateDir, ExpectWarnings: []string{"daemon.workspace.bring_up"}})
 	return f
 }
 

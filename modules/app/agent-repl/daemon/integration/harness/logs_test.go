@@ -631,7 +631,7 @@ func TestNoIntegrationTestSpellsOutTheWorkspaceRestartWarnings(t *testing.T) {
 	if err != nil || len(files) == 0 {
 		t.Fatalf("glob the integration tests = (%v, %v), want files", files, err)
 	}
-	call := regexp.MustCompile(`(?s)ExpectWarnings(For)?\((.*?)\)\n`)
+	call := warningDeclaration
 
 	for _, file := range files {
 		raw, err := os.ReadFile(file)
@@ -643,8 +643,9 @@ func TestNoIntegrationTestSpellsOutTheWorkspaceRestartWarnings(t *testing.T) {
 		for _, match := range call.FindAllStringSubmatch(string(raw), -1) {
 			// Assert
 			spelled := 0
+			declared := match[1] + match[2]
 			for _, op := range WorkspaceRestartWarnings {
-				if strings.Contains(match[2], `"`+op+`"`) {
+				if strings.Contains(declared, `"`+op+`"`) {
 					spelled++
 				}
 			}
@@ -652,5 +653,31 @@ func TestNoIntegrationTestSpellsOutTheWorkspaceRestartWarnings(t *testing.T) {
 				t.Fatalf("%s declares the whole workspace-restart set by hand; call ExpectWorkspaceRestartWarnings:\n%s", file, match[0])
 			}
 		}
+	}
+}
+
+// warningDeclaration matches one warning declaration in a test's source: a
+// call, or an Opts.ExpectWarnings literal that declares a boot's warnings
+// before the process starts. Its first or second group is what it declares.
+var warningDeclaration = regexp.MustCompile(`(?s)ExpectWarnings(?:For)?(?:\((.*?)\)\n|: \[\]string\{(.*?)\})`)
+
+func TestWarningDeclarationReadsEveryDeclarationForm(t *testing.T) {
+	cases := []struct {
+		name, src, want string
+	}{
+		{name: "a call", src: "d.ExpectWarnings(\"a.b\", \"c.d\")\n", want: `"a.b", "c.d"`},
+		{name: "a per-workspace call", src: "d.ExpectWarningsFor(ws, \"a.b\")\n", want: `ws, "a.b"`},
+		{name: "an Opts literal", src: "harness.Opts{ExpectWarnings: []string{\"a.b\"}, StateDir: dir}", want: `"a.b"`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			m := warningDeclaration.FindStringSubmatch(tc.src)
+
+			// Assert
+			if m == nil || m[1]+m[2] != tc.want {
+				t.Fatalf("warningDeclaration on %q = %q, want %q", tc.src, m, tc.want)
+			}
+		})
 	}
 }

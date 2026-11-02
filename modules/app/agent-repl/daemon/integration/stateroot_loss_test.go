@@ -66,6 +66,8 @@ func TestADaemonStandsDownWhenWhatItOwnsOnDiskVanishes(t *testing.T) {
 				d = newDaemon(t, harness.Opts{})
 			}
 			d.ExpectWarnings("daemon.cmd.state_root")
+			// The non-zero stand-down is the subject.
+			d.ExpectFailedExit()
 
 			// Act
 			if err := os.RemoveAll(tc.remove(d)); err != nil {

@@ -1,6 +1,7 @@
 package harness
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -168,5 +169,26 @@ func TestKilledHoldsNoLock(t *testing.T) {
 				t.Fatalf("killedHoldsNoLock = %v, want it to name %q", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+// The process latch closes on an unasked failing exit, and AwaitExit, whose
+// subject is that exit, still answers its code rather than the latch's end.
+func TestAwaitExitAnswersAFailingExitTheProcessLatchClosesOn(t *testing.T) {
+	// Arrange
+	d, release, watched := startLatchedChild(t, "3")
+	d.waitBound = DefaultTimeout
+
+	// Act
+	release()
+	<-watched
+	code := d.AwaitExit()
+
+	// Assert
+	if context.Cause(d.fault.ctx) == nil {
+		t.Fatalf("the process latch is open after an unasked exit 3; the arrangement did not close it")
+	}
+	if code != 3 {
+		t.Fatalf("AwaitExit = %d, want the exit code 3", code)
 	}
 }

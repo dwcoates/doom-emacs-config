@@ -176,8 +176,8 @@ func adColdBoot(t *testing.T, w *World) *harness.Daemon {
 	// AdoptionChainTimeout documents (world_test.go) — reused verbatim rather
 	// than the tighter single-boot DefaultTimeout.
 	opts.Timeout = AdoptionChainTimeout
+	opts.ExpectWarnings = []string{"daemon.rollout.reconcile"}
 	successor := harness.StartDaemon(t, opts)
-	successor.ExpectWarnings("daemon.rollout.reconcile")
 	return successor
 }
 

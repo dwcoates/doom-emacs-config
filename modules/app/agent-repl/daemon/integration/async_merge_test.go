@@ -104,13 +104,13 @@ func TestAnAsyncMergeWorkspaceStaysHiddenEvenAfterItsMergeFails(t *testing.T) {
 	// way in.
 	// Arrange: replaying the merge workspace's branch conflicts.
 	s := newSourcedRepo(t)
+	// The sweep covers every test; the declared records are evidence of the
+	// merge conflict the test stages.
+	s.d.ExpectWarnings("daemon.gitclient.merge_no_ff")
 	root := s.f.watchRootFeed()
 	s.repo.AddBranch("agent-fix")
 	s.repo.CommitIn(s.repo.Dir, "main.txt", "moved\n")
 	s.repo.ScriptRebaseConflict("async-fix", 1, "branch.txt")
-	// The sweep covers every test; the declared records are evidence of the
-	// merge conflict the test stages.
-	s.d.ExpectWarnings("daemon.gitclient.merge_no_ff")
 
 	// Act: the merge workspace's agent is briefed on the conflict, and gives up.
 	s.asyncMerge(t, "async-fix", "agent-fix")
@@ -158,10 +158,10 @@ func TestAFailedAsyncMergesWorkspaceHasItsSessionStoodDown(t *testing.T) {
 	// its session is stood down rather than left running unseen.
 	// Arrange: replaying the merge workspace's branch conflicts.
 	s := newSourcedRepo(t)
+	s.d.ExpectWarnings("daemon.gitclient.merge_no_ff")
 	s.repo.AddBranch("agent-fix")
 	s.repo.CommitIn(s.repo.Dir, "main.txt", "moved\n")
 	s.repo.ScriptRebaseConflict("async-fix", 1, "branch.txt")
-	s.d.ExpectWarnings("daemon.gitclient.merge_no_ff")
 
 	// Act: the merge workspace's agent gives up on every attempt.
 	s.asyncMerge(t, "async-fix", "agent-fix")

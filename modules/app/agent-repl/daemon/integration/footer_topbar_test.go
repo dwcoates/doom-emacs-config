@@ -618,6 +618,25 @@ func TestFooterShimExitFlipsToDeadAndStopsRedials(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
+	// The exit was not attributed to a daemon-requested kill, so
+	// publishExit's ELSE branch fires: daemon.shimclient.exit at ERROR
+	// ("shim died"). Nothing else observes this exit (no query_died update
+	// was pushed -- the process simply exited).
+	// The shim's own standing streams end WITH IT, and the session never
+	// ended, which is exactly what the session watcher records at ERROR for
+	// each of the two. They are the same crash the exit record names.
+	// The lost link is also RECORDED as the session's own fault, which is what
+	// SessionHealth answers with: the watcher says so and the reporter opens
+	// it.
+	// daemon.shimclient.redial is the adopted-death witness doing its job: the
+	// monitor can see the stream break before the exit is decoded, so it says
+	// "shim link broke; redialing" and then, the moment the death is evidence,
+	// "redial stopped" -- which is precisely the stop this test asserts.
+	// Before the witness was wired the redials looped forever instead; both
+	// records are failure-path evidence and stay loud.
+	f.d.ExpectWarnings("daemon.sessionwatcher.reopen", "daemon.shimclient.exit", "daemon.shimclient.redial",
+		"daemon.sessionwatcher.watch_session", "daemon.sessionwatcher.watch_agent",
+		"daemon.sessionwatcher.link_fault", "daemon.health.open_fault")
 	footer := f.d.WatchFooter(f.ws)
 	roster := f.d.WatchRoster()
 	awaitFooter(t, f, footer, "idle before the shim exits", func(v *frontendv1.FooterView) bool {
@@ -658,25 +677,6 @@ func TestFooterShimExitFlipsToDeadAndStopsRedials(t *testing.T) {
 			waiting = false
 		}
 	}
-	// The exit was not attributed to a daemon-requested kill, so
-	// publishExit's ELSE branch fires: daemon.shimclient.exit at ERROR
-	// ("shim died"). Nothing else observes this exit (no query_died update
-	// was pushed -- the process simply exited).
-	// The shim's own standing streams end WITH IT, and the session never
-	// ended, which is exactly what the session watcher records at ERROR for
-	// each of the two. They are the same crash the exit record names.
-	// The lost link is also RECORDED as the session's own fault, which is what
-	// SessionHealth answers with: the watcher says so and the reporter opens
-	// it.
-	// daemon.shimclient.redial is the adopted-death witness doing its job: the
-	// monitor can see the stream break before the exit is decoded, so it says
-	// "shim link broke; redialing" and then, the moment the death is evidence,
-	// "redial stopped" -- which is precisely the stop this test asserts.
-	// Before the witness was wired the redials looped forever instead; both
-	// records are failure-path evidence and stay loud.
-	f.d.ExpectWarnings("daemon.sessionwatcher.reopen", "daemon.shimclient.exit", "daemon.shimclient.redial",
-		"daemon.sessionwatcher.watch_session", "daemon.sessionwatcher.watch_agent",
-		"daemon.sessionwatcher.link_fault", "daemon.health.open_fault")
 }
 
 // ---------------------------------------------------------------------------

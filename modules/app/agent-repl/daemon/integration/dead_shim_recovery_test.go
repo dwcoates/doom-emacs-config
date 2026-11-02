@@ -424,9 +424,10 @@ func TestATurnCutBeforeABootReplaysAsEnded(t *testing.T) {
 	f.d.KeepResumedBook(f.ws.GetId(), resumed)
 
 	// Act: a successor boots on the same machine.
-	successor := harness.StartDaemon(t, f.d.SuccessorOpts())
+	opts := f.d.SuccessorOpts()
 	// The boot closing a turn the crash cut is loud by design.
-	successor.ExpectWarnings("daemon.promptqueue.restore_holds")
+	opts.ExpectWarnings = []string{"daemon.promptqueue.restore_holds"}
+	successor := harness.StartDaemon(t, opts)
 	f.d = successor
 	f.host = successor.WatchHost(f.ws)
 	f.web = successor.WatchWeb(f.ws)

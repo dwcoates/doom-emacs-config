@@ -93,8 +93,8 @@ func rlStopAndRelaunch(t *testing.T, w *World) *harness.Daemon {
 	// this test then asserts on, which is the same
 	// two-process-lifecycles-on-one-budget shape the adoption chain has.
 	opts.Timeout = AdoptionChainTimeout
+	opts.ExpectWarnings = []string{"daemon.rollout.reconcile"}
 	successor := harness.StartDaemon(t, opts)
-	successor.ExpectWarnings("daemon.rollout.reconcile")
 	return successor
 }
 

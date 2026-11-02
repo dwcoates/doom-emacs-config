@@ -275,3 +275,21 @@ func TestEveryRunBudgetIsAChildOfTheFaultLatches(t *testing.T) {
 		t.Fatalf("run budgets under the latches: owner %v, view %v; want StartDaemon's and View's", sites, views)
 	}
 }
+
+func TestSweepIsTheSubjectStandsOnlyTheRecordLatchAside(t *testing.T) {
+	// Arrange
+	d := newOwnerForViews(t, t)
+	d.SweepIsTheSubject()
+	appendRecords(t, d, warnFor("", "daemon.boom"))
+
+	// Act
+	cause, err := d.recordFault(map[string]int{})
+
+	// Assert: the latch stays open, and the sweep still names the record.
+	if cause != nil || err != nil {
+		t.Fatalf("recordFault = (%v, %v), want the latch to stand aside", cause, err)
+	}
+	if got := operations(d.UnexpectedWarnings()); len(got) != 1 || got[0] != "daemon.boom" {
+		t.Fatalf("UnexpectedWarnings = %v, want the sweep to still name daemon.boom", got)
+	}
+}

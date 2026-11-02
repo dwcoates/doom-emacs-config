@@ -1381,6 +1381,11 @@ func TestQueryDiedDrawsTheTurnsTerminal(t *testing.T) {
 	t.Parallel()
 	// Arrange: a turn in flight when the query dies out from under it.
 	f := newOpened(t, harness.Opts{})
+	// The query's death is logged from two places per route.go/turnended.go:
+	// the session watcher's own routing (daemon.sessionwatcher.query_died,
+	// ERROR) and the feed resolver's terminal draw (daemon.feed.query_died,
+	// WARN).
+	f.d.ExpectWarnings("daemon.sessionwatcher.query_died", "daemon.feed.query_died")
 	f.submit("go", "k-querydied", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	tail := f.watchRootFeed()
 
@@ -1399,11 +1404,6 @@ func TestQueryDiedDrawsTheTurnsTerminal(t *testing.T) {
 	if row.GetTurnEnded().GetErrored().GetHeadline().GetText() == "" {
 		t.Fatal("the query-died terminal carries no composed headline")
 	}
-	// The query's death is logged from two places per route.go/turnended.go:
-	// the session watcher's own routing (daemon.sessionwatcher.query_died,
-	// ERROR) and the feed resolver's terminal draw (daemon.feed.query_died,
-	// WARN).
-	f.d.ExpectWarnings("daemon.sessionwatcher.query_died", "daemon.feed.query_died")
 }
 
 // ==========================================================================
@@ -1848,6 +1848,8 @@ func TestADetachedBashTailPastTheCapIsRefusedAndLogged(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
+	// subagent.go logs daemon.feed.spool_over_cap at ERROR on the refusal.
+	f.d.ExpectWarnings("daemon.feed.spool_over_cap")
 	f.submit("go", "k-spoolovercap", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	tail := f.watchRootFeed()
 	pushDetachedShell(f.shim, "work-overcap-1", "long-build")
@@ -1862,8 +1864,6 @@ func TestADetachedBashTailPastTheCapIsRefusedAndLogged(t *testing.T) {
 	// Assert: refused — the BODY row it would have drawn never appears.
 	expectNoShellSpool(t, f, head, "an over-cap tail must not draw the shell's spool body")
 	harness.ExpectNoPush(t, tail, harness.ProbeWindow, "an over-cap tail must not upsert the shell's head")
-	// subagent.go logs daemon.feed.spool_over_cap at ERROR on the refusal.
-	f.d.ExpectWarnings("daemon.feed.spool_over_cap")
 }
 
 // olderThanOldestOf asks for the page above the oldest row PAGE served, as a

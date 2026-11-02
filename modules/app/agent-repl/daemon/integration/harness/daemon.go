@@ -507,6 +507,9 @@ type Daemon struct {
 	// expectedFor are the operations ExpectWarningsFor licensed for one
 	// workspace's records only, keyed by the workspace's directory forms.
 	expectedFor map[string]map[string]bool
+	// sweepIsTheSubject stands this sweeper's record latch aside
+	// (SweepIsTheSubject, fault.go).
+	sweepIsTheSubject bool
 	// view is whether this Daemon is a View of a process another fixture
 	// owns; claims are the workspace directory forms the view answers for.
 	view   bool
@@ -1917,9 +1920,13 @@ func isZombie(pid int) bool {
 
 // AwaitExit waits for the process to leave and answers its exit status,
 // failing the test if it outlives ONE wait's bound.
+//
+// ITS BOUND IS NOT UNDER THE PROCESS LATCH (fault.go): the exit is what it
+// waits for, so the latch closing on that same exit must never end it before
+// the exit status is read. The test judges the status itself.
 func (d *Daemon) AwaitExit() int {
 	d.t.Helper()
-	wait, cancelWait := d.waitCtx()
+	wait, cancelWait := grantedclock.WithBound(context.Background(), d.waitBound)
 	defer cancelWait()
 	done := make(chan int, 1)
 	go func() { done <- d.Wait() }()
@@ -1927,7 +1934,7 @@ func (d *Daemon) AwaitExit() int {
 	case code := <-done:
 		return code
 	case <-wait.Done():
-		d.t.Fatalf("daemon did not exit: %v\nstderr:\n%s", wait.Err(), d.Stderr())
+		d.t.Fatalf("daemon did not exit: %v\nstderr:\n%s", grantedclock.Explain(wait), d.Stderr())
 		return -1
 	}
 }

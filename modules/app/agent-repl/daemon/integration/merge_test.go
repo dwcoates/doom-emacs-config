@@ -437,6 +437,8 @@ func TestLandingAMergeWhoseTargetIsTheSelfRepoDeploysOnce(t *testing.T) {
 	t.Parallel()
 	// Arrange: the deploy's build fails, which is the landing's loud answer.
 	f, d, repo, script := mergeCleanRepo(t)
+	// The failing deploy is loud by design.
+	d.ExpectWarnings("daemon.scriptrunner.run", "daemon.deploy.build", "daemon.deploy.run", "daemon.deploy.landing")
 	d.StageDeployBuild(harness.DeployFails)
 	script.SetExitCode(0)
 	script.SetStdout("daemon: passed in 1s\n")
@@ -463,7 +465,6 @@ func TestLandingAMergeWhoseTargetIsTheSelfRepoDeploysOnce(t *testing.T) {
 	// so nothing was installed or restarted. The deploy runs off the merge, so
 	// its global record is the synchronization point: the landing's own
 	// workspace sink is reached through the worktree the teardown removed.
-	d.ExpectWarnings("daemon.scriptrunner.run", "daemon.deploy.build", "daemon.deploy.run", "daemon.deploy.landing")
 	d.AwaitLogRecord(d.RunLogPath(), "the landing's deploy failing its build", func(r harness.LogRecord) bool {
 		return r.Operation == "daemon.deploy.landing" && r.Message == "the landing's deploy failed"
 	})
@@ -1006,9 +1007,8 @@ func TestUpdateMergeQueuePauseWithNoRepositoryPausesEveryRepositoryWithAQueue(t 
 	t.Parallel()
 	// Arrange: two independent repositories, each with a blocked queue, on
 	// ONE daemon.
-	d := harness.StartDaemon(t, harness.Opts{})
 	// The sweep covers every test; the declared records are evidence of a refusal the test provokes.
-	d.ExpectWarnings("daemon.merge.pause")
+	d := harness.StartDaemon(t, harness.Opts{ExpectWarnings: []string{"daemon.merge.pause"}})
 	_, _, _, repoRefA := mergeBlockedRepoOn(t, d, "repoa")
 	_, _, _, repoRefB := mergeBlockedRepoOn(t, d, "repob")
 
@@ -1036,9 +1036,8 @@ func TestUpdateMergeQueuePauseWithNoRepositoryPausesEveryRepositoryWithAQueue(t 
 func TestUpdateMergeQueueOnAnUnknownRepositoryIsRefused(t *testing.T) {
 	t.Parallel()
 	// Arrange: a daemon that has never heard of this repository ref at all.
-	d := harness.StartDaemon(t, harness.Opts{})
 	// The sweep covers every test; the declared records are evidence of a refusal the test provokes.
-	d.ExpectWarnings("daemon.merge.pause")
+	d := harness.StartDaemon(t, harness.Opts{ExpectWarnings: []string{"daemon.merge.pause"}})
 	bogus := &workspacev1.RepositoryRef{Dir: "/nowhere/this/repo/does/not/exist"}
 
 	// Act

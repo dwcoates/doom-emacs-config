@@ -116,6 +116,9 @@ func TestAWarningLoggedAfterTheWorktreeIsGoneIsStillSwept(t *testing.T) {
 	// Arrange: a workspace on a worktree, so its removal is a real merge's
 	// removal and not the repository's.
 	f := newOpenedWorktree(t, harness.Opts{}, "merged")
+	// The undeclared exit read back below is the subject.
+	f.d.SweepIsTheSubject()
+	f.d.ExpectWarnings("daemon.health.open_fault")
 	link := harness.WorkspaceLogPath(f.ws.GetDir(), "daemon")
 	if err := os.RemoveAll(f.ws.GetDir()); err != nil {
 		t.Fatalf("removing the worktree: %v", err)
@@ -149,7 +152,6 @@ func TestAWarningLoggedAfterTheWorktreeIsGoneIsStillSwept(t *testing.T) {
 	// own goroutine and may land after the test body ends, so it is only
 	// allowed.
 	f.d.RequireWarnings("daemon.shimclient.exit")
-	f.d.ExpectWarnings("daemon.health.open_fault")
 }
 
 // holdsOperation reports whether a swept record set names that operation.
@@ -170,9 +172,9 @@ func TestARequiredWarningCountsAsStaleUntilItIsProduced(t *testing.T) {
 	t.Parallel()
 	// Arrange.
 	f := newOpened(t, harness.Opts{})
+	f.d.ExpectWarnings("daemon.health.open_fault")
 	f.shim.ExpectStartSession()
 	f.d.RequireWarnings("daemon.shimclient.exit")
-	f.d.ExpectWarnings("daemon.health.open_fault")
 	before := f.d.UnproducedRequiredWarnings()
 
 	// Act: the shim dies, which writes the death's one ERROR.

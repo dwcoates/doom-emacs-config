@@ -306,8 +306,8 @@ func raiseColdGate(t *testing.T) *coldGate {
 	// documents (world_test.go), reused verbatim rather than the tighter
 	// single-boot DefaultTimeout.
 	opts.Timeout = AdoptionChainTimeout
+	opts.ExpectWarnings = append([]string{"daemon.rollout.reconcile"}, coldGateWarnings...)
 	successor := harness.StartDaemon(t, opts)
-	successor.ExpectWarnings(append([]string{"daemon.rollout.reconcile"}, coldGateWarnings...)...)
 	w := &World{Daemon: successor, Store: first.Store, Sidecar: first.Sidecar}
 
 	// The footer stream is opened BEFORE the mount, so the parked status is

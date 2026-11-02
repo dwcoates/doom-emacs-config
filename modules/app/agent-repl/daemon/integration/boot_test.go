@@ -61,9 +61,8 @@ func TestSecondDaemonOnTheSameStateRootRefusesToBoot(t *testing.T) {
 	// The incumbent holds daemon.serving, so the refusal is decided at once
 	// by the serving probe, inside the default wait bound; it no longer
 	// waits out daemonaddr.ClaimWaitBound.
-	second := harness.StartDaemon(t, harness.Opts{StateDir: incumbent.StateDir, ExpectEarlyExit: true})
 	// The sweep covers every test; the declared records are evidence of the second daemon the test boots.
-	second.ExpectWarnings("daemon.cmd.claim")
+	second := harness.StartDaemon(t, harness.Opts{ExpectWarnings: []string{"daemon.cmd.claim"}, StateDir: incumbent.StateDir, ExpectEarlyExit: true})
 	code := second.AwaitExit()
 
 	// Assert
@@ -183,9 +182,8 @@ func TestBootOpensTheWorkspaceStateFresh(t *testing.T) {
 func TestPprofRefusesARoutableBind(t *testing.T) {
 	t.Parallel()
 	// Arrange / Act
-	d := harness.StartDaemon(t, harness.Opts{Pprof: "0.0.0.0:6060", ExpectEarlyExit: true})
 	// The sweep covers every test; the declared records are evidence of the routable pprof bind the test refuses.
-	d.ExpectWarnings("daemon.cmd.pprof", "daemon.pprof.refused")
+	d := harness.StartDaemon(t, harness.Opts{ExpectWarnings: []string{"daemon.cmd.pprof", "daemon.pprof.refused"}, Pprof: "0.0.0.0:6060", ExpectEarlyExit: true})
 	code := d.AwaitExit()
 
 	// Assert
@@ -274,8 +272,11 @@ func TestWorkspaceBoundWarnStaysOffTheRunLog(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	f := newRegistered(t, harness.Opts{})
-	// The start under test is the restart's, whose failure is its own ERROR.
+	// The start under test is the restart's, whose failure is its own ERROR,
+	// and the dying bring-up's own records.
 	f.d.ExpectWarnings("daemon.workspace.restart")
+	f.d.ExpectWarnings("daemon.shimclient.redial", "daemon.shimclient.spawn", "daemon.workspace.open",
+		"daemon.shimclient.exit", "daemon.workspace.bring_up")
 	f.d.WriteShimProfile(f.repo.Dir, harness.ShimProfile{
 		ExitOn: harness.ExitOnStartup, ExitCode: 3, Stderr: "boom: workspace-bound warn",
 	})
@@ -306,9 +307,6 @@ func TestWorkspaceBoundWarnStaysOffTheRunLog(t *testing.T) {
 				r, harness.WorkspaceLogPath(f.repo.Dir, "daemon"))
 		}
 	}
-
-	f.d.ExpectWarnings("daemon.shimclient.redial", "daemon.shimclient.spawn", "daemon.workspace.open",
-		"daemon.shimclient.exit", "daemon.workspace.bring_up")
 }
 
 // TestCloseWorkspaceRemovesTheLogSinkSymlink covers what daemon.md's LOG
@@ -365,9 +363,8 @@ func TestBootRefusesAForeignLayoutVersion(t *testing.T) {
 	})
 
 	// Act: restart on the same state root.
-	nd := harness.StartDaemon(t, harness.Opts{StateDir: d.StateDir, ExpectEarlyExit: true})
 	// The sweep covers every test; the declared records are evidence of the state row the test corrupts.
-	nd.ExpectWarnings("daemon.cmd.state", "daemon.wsm.open")
+	nd := harness.StartDaemon(t, harness.Opts{ExpectWarnings: []string{"daemon.cmd.state", "daemon.wsm.open"}, StateDir: d.StateDir, ExpectEarlyExit: true})
 	code := nd.AwaitExit()
 
 	// Assert
@@ -410,9 +407,8 @@ func TestBootRefusesACorruptTaskRow(t *testing.T) {
 	d.CorruptRow("tasks", "done", "id", taskID, "not-a-bool")
 
 	// Act: restart on the same state root.
-	nd := harness.StartDaemon(t, harness.Opts{StateDir: d.StateDir, ExpectEarlyExit: true})
 	// The sweep covers every test; the declared records are evidence of a state read the test corrupts, the state row the test corrupts.
-	nd.ExpectWarnings("daemon.cmd.serve", "daemon.workspace.register", "daemon.wsm.tasks")
+	nd := harness.StartDaemon(t, harness.Opts{ExpectWarnings: []string{"daemon.cmd.serve", "daemon.workspace.register", "daemon.wsm.tasks"}, StateDir: d.StateDir, ExpectEarlyExit: true})
 	code := nd.AwaitExit()
 
 	// Assert
@@ -456,12 +452,11 @@ func TestBootRefusesACorruptSessionRowOfAnAdoptedWorkspace(t *testing.T) {
 
 	// Act: restart on the same state root, with the same redirected lock
 	// directory so the probe finds the surviving shim's lock still held.
-	nd := harness.StartDaemon(t, harness.Opts{StateDir: f.d.StateDir, ExtraEnv: []string{"AGENT_REPL_LOCK_DIR=" + f.d.LockDir}, ExpectEarlyExit: true})
 	// The sweep covers every test; the declared records are evidence of the state row the test corrupts.
 	// The crash-restart's own stale daemon.addr is reported by the boot that
 	// overwrites it; TestAStaleAddressFileIsReportedAndOverwritten is where
 	// that record is the subject.
-	nd.ExpectWarnings("daemon.boot.adopt", "daemon.wsm.session", "daemon.cmd.claim")
+	nd := harness.StartDaemon(t, harness.Opts{ExpectWarnings: []string{"daemon.boot.adopt", "daemon.wsm.session", "daemon.cmd.claim"}, StateDir: f.d.StateDir, ExtraEnv: []string{"AGENT_REPL_LOCK_DIR=" + f.d.LockDir}, ExpectEarlyExit: true})
 	code := nd.AwaitExit()
 
 	// Assert
@@ -498,10 +493,10 @@ func TestBootRefusesACorruptCreationJobOfAnAdmittedMerge(t *testing.T) {
 	// flow, and CreationJob's own scan validates pre_deploy_hooks/post_deploy_hooks
 	// as JSON regardless of how the row was written.
 	f := newRegistered(t, harness.Opts{DurableState: true})
-	f.d.Stop()
 	// The run log is a symlink each runtime relinks onto its own file, so this
 	// daemon's sweep reads the SUCCESSOR's records; it declares the same list.
 	f.d.ExpectWarnings("daemon.boot.recover_merges", "daemon.merge.recover", "daemon.wsm.creation_job")
+	f.d.Stop()
 	f.d.WithDB(func(db *sql.DB) {
 		now := time.Now().UnixNano()
 		if _, err := db.Exec(
@@ -519,9 +514,8 @@ func TestBootRefusesACorruptCreationJobOfAnAdmittedMerge(t *testing.T) {
 	f.d.CorruptRow("creation_jobs", "pre_deploy_hooks", "workspace_id", f.ws.GetId(), "not valid json")
 
 	// Act: restart on the same state root.
-	nd := harness.StartDaemon(t, harness.Opts{StateDir: f.d.StateDir, ExpectEarlyExit: true})
 	// The sweep covers every test; the declared records are evidence of the state row the test corrupts, the unfinished merge a restart leaves.
-	nd.ExpectWarnings("daemon.boot.recover_merges", "daemon.merge.recover", "daemon.wsm.creation_job")
+	nd := harness.StartDaemon(t, harness.Opts{ExpectWarnings: []string{"daemon.boot.recover_merges", "daemon.merge.recover", "daemon.wsm.creation_job"}, StateDir: f.d.StateDir, ExpectEarlyExit: true})
 	code := nd.AwaitExit()
 
 	// Assert: an undecodable row refuses the boot, non-zero and loud.
@@ -621,7 +615,6 @@ func TestPprofServesOverAUnixSocket(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("GET /debug/pprof/ over the pprof unix socket = %d, want 200", resp.StatusCode)
 	}
-	d.ExpectWarnings("daemon.pprof.enabled")
 }
 
 // TestBootRefusesWithoutAnAccountRoot is the cross-system guard for the
@@ -643,9 +636,8 @@ func TestBootRefusesWithoutAnAccountRoot(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			// Arrange / Act
-			d := harness.StartDaemon(t, harness.Opts{OmitArgs: []string{tc.omit}, ExpectEarlyExit: true})
 			// The graph refusal is the point of the test, not a stray warning.
-			d.ExpectWarnings("daemon.cmd.graph")
+			d := harness.StartDaemon(t, harness.Opts{ExpectWarnings: []string{"daemon.cmd.graph"}, OmitArgs: []string{tc.omit}, ExpectEarlyExit: true})
 			code := d.AwaitExit()
 
 			// Assert
@@ -765,8 +757,8 @@ func TestAnUnhealthySurvivorIsAdoptedWithinTheBound(t *testing.T) {
 	// Arrange: the shim answers every stream unhealthy, and the daemon alone
 	// is killed so the shim survives holding the workspace lock.
 	f := newRegistered(t, harness.Opts{DurableState: true})
-	f.d.WriteShimProfile(f.repo.Dir, harness.ShimProfile{OpeningFault: "the store is unreachable"})
 	f.d.ExpectWarnings("daemon.shimclient.ready", "daemon.health.open_fault", "daemon.health.session")
+	f.d.WriteShimProfile(f.repo.Dir, harness.ShimProfile{OpeningFault: "the store is unreachable"})
 	f.open()
 	f.d.Kill()
 
@@ -846,8 +838,7 @@ func TestBootClosesAWorkspaceWhoseDirectoryAndBranchAreGone(t *testing.T) {
 	repo.RemoveBranch("swept")
 
 	// Act: the next boot reconciles the row.
-	nd := harness.StartDaemon(t, harness.Opts{StateDir: d.StateDir, KeepStaleAddr: true})
-	nd.ExpectWarnings("daemon.cmd.claim", "daemon.boot.close_missing_dir", "daemon.workspace.register")
+	nd := harness.StartDaemon(t, harness.Opts{ExpectWarnings: []string{"daemon.cmd.claim", "daemon.boot.close_missing_dir", "daemon.workspace.register"}, StateDir: d.StateDir, KeepStaleAddr: true})
 
 	// Assert: the boot recorded the close with the workspace, the directory
 	// and the stat error.
@@ -888,8 +879,7 @@ func TestBootRecreatesAnOpenWorkspaceWhoseBranchSurvives(t *testing.T) {
 	}
 
 	// Act.
-	nd := harness.StartDaemon(t, harness.Opts{StateDir: d.StateDir, KeepStaleAddr: true})
-	nd.ExpectWarnings("daemon.cmd.claim", "daemon.workspace.register")
+	nd := harness.StartDaemon(t, harness.Opts{ExpectWarnings: []string{"daemon.cmd.claim", "daemon.workspace.register"}, StateDir: d.StateDir, KeepStaleAddr: true})
 
 	// Assert.
 	nd.AwaitLogRecord(nd.RunLogPath(), "the boot's recreation record", func(r harness.LogRecord) bool {
@@ -924,8 +914,7 @@ func vanishedWorktree(t *testing.T, repo *harness.Repo, name string) (*harness.D
 	if err := os.RemoveAll(dir); err != nil {
 		t.Fatalf("remove the workspace directory: %v", err)
 	}
-	nd := harness.StartDaemon(t, harness.Opts{StateDir: d.StateDir, KeepStaleAddr: true})
-	nd.ExpectWarnings("daemon.cmd.claim", "daemon.boot.close_missing_dir", "daemon.workspace.register")
+	nd := harness.StartDaemon(t, harness.Opts{ExpectWarnings: []string{"daemon.cmd.claim", "daemon.boot.close_missing_dir", "daemon.workspace.register"}, StateDir: d.StateDir, KeepStaleAddr: true})
 	return nd, ws
 }
 
@@ -1016,8 +1005,7 @@ func TestARequestOnAVanishedDirectoryRoutesItsRecordsCentrally(t *testing.T) {
 		t.Fatalf("remove the workspace directory: %v", err)
 	}
 	repo.RemoveBranch("routed")
-	nd := harness.StartDaemon(t, harness.Opts{StateDir: d.StateDir, KeepStaleAddr: true})
-	nd.ExpectWarnings("daemon.cmd.claim", "daemon.boot.close_missing_dir", "daemon.workspace.register")
+	nd := harness.StartDaemon(t, harness.Opts{ExpectWarnings: []string{"daemon.cmd.claim", "daemon.boot.close_missing_dir", "daemon.workspace.register"}, StateDir: d.StateDir, KeepStaleAddr: true})
 
 	// Act.
 	if _, err := nd.Client().OpenWorkspace(nd.Ctx(),
@@ -1050,8 +1038,7 @@ func TestBootCountsTheMissingDirectoryCloseInItsReport(t *testing.T) {
 	repo.RemoveBranch("counted")
 
 	// Act.
-	nd := harness.StartDaemon(t, harness.Opts{StateDir: d.StateDir, KeepStaleAddr: true})
-	nd.ExpectWarnings("daemon.cmd.claim", "daemon.boot.close_missing_dir", "daemon.workspace.register")
+	nd := harness.StartDaemon(t, harness.Opts{ExpectWarnings: []string{"daemon.cmd.claim", "daemon.boot.close_missing_dir", "daemon.workspace.register"}, StateDir: d.StateDir, KeepStaleAddr: true})
 
 	// Assert.
 	nd.AwaitLogRecord(nd.RunLogPath(), "the boot completion record's count", func(r harness.LogRecord) bool {

@@ -25,9 +25,9 @@ func TestARestartOverAMergeWaitingForItsWorkspaceRestartsAndTheMergeLands(t *tes
 	t.Parallel()
 	// Arrange: a merge waiting on a live background subagent.
 	f, d, _, script := mergeCleanRepo(t)
+	d.ExpectWorkspaceRestartWarnings()
 	script.SetExitCode(0)
 	script.SetStdout("daemon: passed in 1s\n")
-	d.ExpectWorkspaceRestartWarnings()
 	workspaceLog := harness.WorkspaceLogPath(f.ws.GetDir(), "daemon")
 	tail := f.watchRootFeed()
 	f.submit("keep going", "k-restart-over-merge", origin)

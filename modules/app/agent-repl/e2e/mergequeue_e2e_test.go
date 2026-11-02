@@ -453,8 +453,8 @@ func testDisplacedTurnCapturedEndedThenResubmittedExactlyOnce(t *testing.T) {
 	// Act: a second real agent-repld boots on the SAME state root, store
 	// socket and lock dir.
 	d2Opts := w.SuccessorOpts(t)
+	d2Opts.ExpectWarnings = append(d2Opts.ExpectWarnings, mqExpectedBounceWarnings...)
 	d2 := harness.StartDaemon(t, d2Opts)
-	d2.ExpectWarnings(mqExpectedBounceWarnings...)
 	// Re-point World at the new process: every w.Client()/w.WatchFeed/... call
 	// from here on reaches d2, exactly as
 	// daemon/integration/merge_test.go's own displacedTurnAcrossABounce
@@ -502,8 +502,8 @@ func testDisplacedTurnCapturedEndedThenResubmittedExactlyOnce(t *testing.T) {
 	// the turn back is durable, so the boot after it finds nothing owed.
 	w.Kill()
 	d3Opts := w.SuccessorOpts(t)
+	d3Opts.ExpectWarnings = append(d3Opts.ExpectWarnings, mqExpectedBounceWarnings...)
 	d3 := harness.StartDaemon(t, d3Opts)
-	d3.ExpectWarnings(mqExpectedBounceWarnings...)
 	w.Daemon = d3
 	if n := d3.DisplacedTurnCount(); n != 0 {
 		t.Fatalf("turns marked displaced after a second bounce on a settled state root = %d, want none (nothing was owed)", n)

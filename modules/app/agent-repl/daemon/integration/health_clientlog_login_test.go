@@ -193,9 +193,8 @@ func TestADaemonRestartDoesNotReopenAClosedPromptsDirFault(t *testing.T) {
 	// Act: stop this daemon and start a fresh one on the SAME state root, so
 	// the faults table (wsm.db) persists across the restart.
 	d.Stop()
-	nd := harness.StartDaemon(t, harness.Opts{StateDir: stateDir})
 	// The sweep covers every test; the declared records are evidence of the in-flight turn the restart orphans.
-	nd.ExpectWarnings("daemon.promptqueue.restore_holds")
+	nd := harness.StartDaemon(t, harness.Opts{ExpectWarnings: []string{"daemon.promptqueue.restore_holds"}, StateDir: stateDir})
 
 	// Assert
 	resp, err := nd.Client().DaemonHealth(nd.Ctx(), healthRequest())
@@ -258,7 +257,6 @@ func TestSessionHealthAfterTheShimExitsReportsShimDied(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
-	footer := f.d.WatchFooter(f.ws)
 	// A lost link is EVIDENCE, recorded loudly: the watcher says so, the
 	// health reporter opens the fault, and SessionHealth answers unhealthy.
 	// daemon.shimclient.redial is the adopted-death witness doing its job: the
@@ -269,6 +267,7 @@ func TestSessionHealthAfterTheShimExitsReportsShimDied(t *testing.T) {
 	f.d.ExpectWarnings("daemon.sessionwatcher.reopen", "daemon.shimclient.exit", "daemon.shimclient.redial",
 		"daemon.sessionwatcher.watch_session", "daemon.sessionwatcher.watch_agent",
 		"daemon.sessionwatcher.link_fault", "daemon.health.open_fault", "daemon.health.session")
+	footer := f.d.WatchFooter(f.ws)
 
 	// The daemon brings a shim that died on its own straight back, and the
 	// revival's HEALTHY ATTACH closes shim_died (workspace/sessions.go: the
@@ -877,10 +876,10 @@ func TestOpenExternalWithAFailingLauncherAnswersLaunchFailed(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	f := newRegistered(t, harness.Opts{})
-	f.d.Browser.SetExitCode(1)
 	// A launcher that will not run is recorded at ERROR under the verb's own
 	// operation and then ANSWERED as launch_failed{detail}.
 	f.d.RequireWarnings("daemon.workspace.open_external", "daemon.externalbrowser.open")
+	f.d.Browser.SetExitCode(1)
 
 	// Act
 	resp, err := f.d.Client().OpenExternal(f.d.Ctx(), connect.NewRequest(&agentreplv1.OpenExternalRequest{
