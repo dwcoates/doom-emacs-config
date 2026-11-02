@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -69,10 +68,10 @@ var runMount = regexp.MustCompile(`/artr-([0-9]+)$`)
 
 // recordInfo is one record in the registry, as the leak check reads it.
 type recordInfo struct {
-	path   string
-	pid    int
-	device string
-	live   bool
+	path string
+	pid  int
+	rec  record
+	live bool
 }
 
 // readRecordsLocked reads every record in the registry and whether its run
@@ -104,58 +103,53 @@ func (m Manager) readRecordsLocked() ([]recordInfo, error) {
 		if err != nil {
 			return nil, fmt.Errorf("read the RAM disk record %s: %w", path, err)
 		}
-		device := parseRecord(string(raw)).Device
-		records = append(records, recordInfo{path: path, pid: pid, device: device, live: !dead})
+		records = append(records, recordInfo{path: path, pid: pid, rec: parseRecord(string(raw)), live: !dead})
 	}
 	return records, nil
 }
 
 // leaksLocked answers every RAM disk in info that this runner made and no live
-// run's record names. The caller holds the registry lock, so no live run is
+// run's record owns. The caller holds the registry lock, so no live run is
 // between its attach and its record.
 //
-// A RAM DISK IS THE RUNNER'S when a record names one of its devices, or when
-// one of its volumes is mounted at an artr-<pid> mount point (the volume name
-// and the mount point a run gives its disk). A RAM disk neither marks is not
-// the runner's to judge, and is left out.
+// A RAM DISK IS THE RUNNER'S when a record owns it (owns: the record names
+// the helper serving it, or it is mounted at the artr-<pid> mount point of the
+// record's pid), or when one of its volumes is mounted at any artr-<pid>
+// mount point (marked). A RAM disk neither marks is not the runner's to
+// judge, and is left out.
 func (m Manager) leaksLocked(info string) ([]Leak, error) {
 	records, err := m.readRecordsLocked()
 	if err != nil {
 		return nil, err
 	}
+	starts, err := m.helperStarts()
+	if err != nil {
+		return nil, err
+	}
 	var leaks []Leak
-	for _, img := range parseImages(info) {
-		if !img.isRAM() || len(img.Devices) == 0 {
-			continue
-		}
-		// A LIVE RUN'S RECORD OUTRANKS A DEAD ONE naming the same device:
-		// macOS reuses device numbers, so a dead record (one a failed reclaim
-		// left) may name a disk a live run attached since.
-		var named *recordInfo
+	for _, img := range ramDisks(info) {
+		// A LIVE RUN'S RECORD OUTRANKS A DEAD ONE owning the same disk: a dead
+		// record of the same pid (one a failed reclaim left before the pid
+		// came round again) marks the live run's disk too.
+		var owner *recordInfo
 		for i := range records {
-			if !slices.Contains(img.Devices, records[i].device) {
+			if !owns(img, starts, records[i].pid, records[i].rec) {
 				continue
 			}
-			if named == nil || records[i].live {
-				named = &records[i]
+			if owner == nil || records[i].live {
+				owner = &records[i]
 			}
 		}
-		if named != nil && named.live {
+		if owner != nil && owner.live {
 			continue
 		}
-		leak := Leak{Device: img.Devices[0], Mounts: img.Mounts}
-		switch {
-		case named != nil:
-			leak.Pid, leak.Record = named.pid, named.path
-		default:
-			for _, mount := range img.Mounts {
-				if match := runMount.FindStringSubmatch(mount); match != nil {
-					leak.Pid, _ = strconv.Atoi(match[1])
-				}
-			}
-		}
-		if named == nil && leak.Pid == 0 {
+		marked, isMarked := img.marked()
+		if owner == nil && !isMarked {
 			continue
+		}
+		leak := Leak{Device: img.Devices[0], Mounts: img.Mounts, Pid: marked}
+		if owner != nil {
+			leak.Pid, leak.Record = owner.pid, owner.path
 		}
 		leak.PidAlive = m.Alive(leak.Pid)
 		leaks = append(leaks, leak)

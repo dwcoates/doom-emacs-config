@@ -253,6 +253,9 @@ func runParent(log *run.Log, module string, runner *life.Runner) (string, []stri
 		}
 		log.Infof("ramdisk: %s answered in %s", call, took.Round(time.Millisecond))
 	})
+	// NO REAP OF THE SESSION KILLS A DISK COMMAND MID-FLIGHT: the cut's reap
+	// runs while the acquire or the release still asks the disk manager.
+	m.Run = ramdisk.Unreaped(m.Run, runner.Unreaped)
 	size, err := ramdisk.SizeFromEnv(os.Getenv)
 	if err != nil {
 		log.Errorf("RAM DISK UNAVAILABLE, this run's root falls back to the disk at %s: %v", run.DefaultTmpParent, err)

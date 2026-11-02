@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
@@ -37,10 +38,12 @@ func attachCalled(calls []string) bool {
 }
 
 func TestAcquireRefusesWhileADeadRunsRecordedRAMDiskStands(t *testing.T) {
-	// Arrange: the reclaim of pid 7 failed, so its record still names its disk.
-	h := &fakeHost{info: ramInfo("/dev/disk7")}
+	// Arrange: the reclaim of pid 7 failed, so its record still names its
+	// disk's helper, and the disk is mounted nowhere (2026-11-01, run 35946's
+	// disk mid-erase).
+	h := &fakeHost{info: ramInfo() + servedBlock("/dev/disk7", "", 50373), procs: []proctable.Entry{helperEntry(50373, helperStart)}}
 	m := newManager(t, h)
-	record := deadRecord(t, m, "7", "/dev/disk7", "/tmp/artr-7")
+	record := servedRecord(t, m, "7", "/dev/disk7", "/tmp/artr-7", 50373)
 
 	// Act
 	_, err := m.Acquire(16)
@@ -324,8 +327,8 @@ func TestSetupLogsTheProbesAtInfo(t *testing.T) {
 }
 
 func TestSetupAnswersALeakAsTrouble(t *testing.T) {
-	// Arrange
-	h := &fakeHost{info: ramInfo("/dev/disk4=/private/tmp/artr-7583")}
+	// Arrange: the reclaim cannot detach the orphan it adopts.
+	h := &fakeHost{info: ramInfo("/dev/disk4=/private/tmp/artr-7583"), fail: map[string]bool{"hdiutil detach -force /dev/disk4": true}}
 	m := newManager(t, h)
 
 	// Act
@@ -366,7 +369,7 @@ func TestSetupLogsAFailedReclaimAtError(t *testing.T) {
 	m.Setup(16) //nolint:errcheck // the log is the subject
 
 	// Assert
-	if !log.has("ERROR reclaiming a dead run's RAM disk failed: detach the dead run's RAM disk /dev/disk7") {
+	if !log.has("ERROR reclaiming a dead run's RAM disk failed: detach the RAM disk /dev/disk7 of dead run pid 7") {
 		t.Fatalf("log = %q, want the failed reclaim at ERROR", log.lines)
 	}
 }
@@ -548,8 +551,11 @@ func TestSetupReadsNoHostStateWhenBothProbesAnswer(t *testing.T) {
 			t.Fatalf("calls = %q, want no read of the host's state", h.calls)
 		}
 	}
-	if h.procsRead != 0 {
-		t.Fatalf("the process table was read %d times, want none", h.procsRead)
+	// The process table is read for the disks' helpers all the same.
+	for _, line := range m.Log.(*fakeLog).snapshot() {
+		if strings.Contains(line, "; the host: ") {
+			t.Fatalf("log line %q, want no read of the host's state", line)
+		}
 	}
 }
 
@@ -838,6 +844,42 @@ func TestAcquireTakesADeviceALiveRecordNamesAsTheLiveRunsBesideADeadRecord(t *te
 	// Assert
 	if err != nil {
 		t.Fatalf("Acquire = %v, want the live run's disk taken as no leak", err)
+	}
+	v.Release() //nolint:errcheck // cleanup
+}
+
+func TestSetupHealsAnOrphanedDiskThenAttaches(t *testing.T) {
+	// Arrange: the live state of 2026-11-01: run 35946's disk, mounted in
+	// /Volumes, which no record names, refused every run's attach.
+	h := &fakeHost{info: ramInfo() + servedBlock("/dev/disk4", "/Volumes/artr-35946", 50373), procs: []proctable.Entry{helperEntry(50373, helperStart)}}
+	m := newManager(t, h)
+
+	// Act
+	v, trouble, err := m.Setup(16)
+
+	// Assert
+	if err != nil || trouble != nil || v == nil {
+		t.Fatalf("Setup = %v, %v, %v; want the orphan reclaimed and a disk attached", v, trouble, err)
+	}
+	t.Cleanup(func() { v.Release() })
+	if got := detaches(h.calls); !slices.Equal(got, []string{"hdiutil detach -force /dev/disk4"}) {
+		t.Fatalf("detaches = %q, want the orphan detached", got)
+	}
+}
+
+func TestAcquireLeavesADiskOnlyAStaleDeviceNumberNamesOutOfTheCheck(t *testing.T) {
+	// Arrange: a dead record names /dev/disk4, which an unmarked disk with
+	// another helper is attached as now.
+	h := &fakeHost{info: ramInfo() + servedBlock("/dev/disk4", "", 50373), procs: []proctable.Entry{helperEntry(50373, helperStart)}}
+	m := newManager(t, h)
+	servedRecord(t, m, "7", "/dev/disk4", "/tmp/artr-7", 40000)
+
+	// Act
+	v, err := m.Acquire(16)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Acquire = %v, want a disk the dead record names only by number not taken for a leak", err)
 	}
 	v.Release() //nolint:errcheck // cleanup
 }
