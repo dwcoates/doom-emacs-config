@@ -1063,7 +1063,10 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// ---- the persistent-wifi controller ----
 	//
 	// Every host tool it runs goes through the one script runner, and every
-	// standing it reads reaches the topbar's chip on every strip.
+	// standing it reads reaches the topbar's chip on every strip. It hears
+	// the lid from the operating system (or the fake host's pipe) and keeps
+	// the pre-close brightness in the state database, so a lid-close dim
+	// outlives a restart.
 	wifiConfig, err := persistentwifi.ConfigFromEnv(os.Getenv)
 	if err != nil {
 		return nil, fmt.Errorf("agent-repld: resolve the persistent-wifi config: %w", err)
@@ -1074,6 +1077,8 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Clock:    clock.System{},
 		OnChange: topbarResolver.SetPersistentWifi,
 		Log:      log,
+		Lid:      wifiConfig.Lid(),
+		LidDims:  p.DB,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("agent-repld: build the persistent-wifi controller: %w", err)
@@ -1716,6 +1721,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		}},
 		{Name: "lock_watchdog", Run: stalls.Run},
 		{Name: "persistent_wifi", Run: wifi.Run},
+		{Name: "persistent_wifi_lid", Run: wifi.WatchLid},
 		{Name: "network_watch", Run: networkWatch.Run},
 		{Name: "network_changed", Run: func(ctx context.Context) error {
 			netwatch.Follow(ctx, networkWatch.Changed, fleet.NetworkChanged)

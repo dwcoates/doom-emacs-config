@@ -17,13 +17,28 @@ func TestConfigFromEnv(t *testing.T) {
 			want: Config{Tools: DefaultTools()},
 		},
 		{
-			name: "a tools dir resolves every tool there by its base name",
-			env:  map[string]string{EnvToolsDir: "/fake/bin"},
+			name: "a tools dir resolves every tool there by its base name, with its lid pipe",
+			env:  map[string]string{EnvToolsDir: "/fake/bin", EnvLidPipe: "/fake/lid"},
 			want: Config{Tools: Tools{
 				Sudo: "/fake/bin/sudo", Pmset: "/fake/bin/pmset", Ipconfig: "/fake/bin/ipconfig",
 				Networksetup: "/fake/bin/networksetup", WifiUtil: "/fake/bin/wifi-util",
 				Brightness: "/fake/bin/mac-brightness",
-			}},
+			}, LidPipe: "/fake/lid"},
+		},
+		{
+			name:    "a tools dir without a lid pipe is refused",
+			env:     map[string]string{EnvToolsDir: "/fake/bin"},
+			wantErr: true,
+		},
+		{
+			name:    "a lid pipe without a tools dir is refused",
+			env:     map[string]string{EnvLidPipe: "/fake/lid"},
+			wantErr: true,
+		},
+		{
+			name:    "a relative lid pipe is refused",
+			env:     map[string]string{EnvToolsDir: "/fake/bin", EnvLidPipe: "fake/lid"},
+			wantErr: true,
 		},
 		{
 			name: "a hotspot override names the hotspot",
@@ -32,7 +47,7 @@ func TestConfigFromEnv(t *testing.T) {
 		},
 		{
 			name:    "a relative tools dir is refused",
-			env:     map[string]string{EnvToolsDir: "fake/bin"},
+			env:     map[string]string{EnvToolsDir: "fake/bin", EnvLidPipe: "/fake/lid"},
 			wantErr: true,
 		},
 		{

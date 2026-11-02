@@ -124,9 +124,14 @@ const (
 	argDisconnect = "/t/wifi-util disconnect"
 	argRadioOff   = "/t/networksetup -setairportpower en0 off"
 	argRadioOn    = "/t/networksetup -setairportpower en0 on"
-	argDim        = "/t/mac-brightness 0.0625"
-	argRestore    = "/t/mac-brightness 1.0"
+	// argBrightnessRead reads the display's level.
+	argBrightnessRead = "/t/mac-brightness"
+	// argLidDim sets the closed lid's level.
+	argLidDim = "/t/mac-brightness 0"
 )
+
+// argBrightness is one `mac-brightness <level>` call.
+func argBrightness(level string) string { return "/t/mac-brightness " + level }
 
 // preferred composes a `networksetup -listpreferredwirelessnetworks` answer.
 func preferred(names ...string) string {
@@ -158,4 +163,78 @@ func scriptPower(r *fakeRunner, value string) {
 		r.on(argPower(s, value), answer{})
 	}
 	r.on(argEnergy(value == "1"), answer{})
+}
+
+// fakeLidDims is the durable pre-close brightness: a level, and an error for
+// each operation. Every put and clear is recorded.
+type fakeLidDims struct {
+	mu                       sync.Mutex
+	level                    *float64
+	getErr, putErr, clearErr error
+	puts                     []float64
+	clears                   int
+}
+
+func (f *fakeLidDims) LidDimLevel(context.Context) (float64, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.getErr != nil {
+		return 0, false, f.getErr
+	}
+	if f.level == nil {
+		return 0, false, nil
+	}
+	return *f.level, true, nil
+}
+
+func (f *fakeLidDims) PutLidDimLevel(_ context.Context, level float64) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.putErr != nil {
+		return f.putErr
+	}
+	f.puts = append(f.puts, level)
+	f.level = &level
+	return nil
+}
+
+func (f *fakeLidDims) ClearLidDimLevel(context.Context) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.clearErr != nil {
+		return f.clearErr
+	}
+	f.clears++
+	f.level = nil
+	return nil
+}
+
+// kept answers the stored level, nil when none.
+func (f *fakeLidDims) kept() *float64 {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.level
+}
+
+// fakeLidWatcher hands Watch's heard every lid sent on lids, then answers
+// end once lids is closed, or nil when ctx ends first.
+type fakeLidWatcher struct {
+	lids chan Lid
+	end  error
+}
+
+func newFakeLidWatcher() *fakeLidWatcher { return &fakeLidWatcher{lids: make(chan Lid)} }
+
+func (f *fakeLidWatcher) Watch(ctx context.Context, heard func(Lid)) error {
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case l, ok := <-f.lids:
+			if !ok {
+				return f.end
+			}
+			heard(l)
+		}
+	}
 }
