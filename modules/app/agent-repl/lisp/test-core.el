@@ -3690,6 +3690,24 @@ The master kill-switch overrides the always-on file-write decoupling."
       (should (equal logs
                      '("elisp.test.paint buffer= *test-ground-swap* color=#abcdef from=\"#123456\""))))))
 
+(ert-deftest agent-repl-test-ground-swap-every-ground-painter-shares-it ()
+  "The composer and the minibuffer each paint through the one swap, under their own record."
+  ;; Arrange
+  (let ((events nil))
+    (cl-letf (((symbol-function 'agent-repl--ground-swap)
+               (lambda (_scope event _painted color _paint)
+                 (push event events)
+                 (cons color nil))))
+      (with-temp-buffer
+        ;; Act
+        (agent-repl--input-paint)
+        (agent-repl-minibuffer-ground-paint)
+        ;; Assert
+        (should (equal (list agent-repl--input-painted agent-repl--minibuffer-ground-painted)
+                       (list (list agent-repl-input-background)
+                             (list agent-repl-input-background))))))
+    (should (equal (reverse events) '("elisp.input.paint" "elisp.minibuffer-ground.paint")))))
+
 ;;;; ---- Tests: harness-injected (meta) prompt spans ----
 
 (ert-deftest agent-repl-test-meta-wrap-brackets-the-text ()

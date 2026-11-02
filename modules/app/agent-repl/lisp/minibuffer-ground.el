@@ -19,7 +19,8 @@
 ;; The echo area buffers keep theirs, so they are painted at load.  Each
 ;; buffer records the color it was painted and its remap cookies, so a
 ;; repaint in the same color does nothing and one in a new color takes
-;; the old remap back first.
+;; the old remap back first.  A change of the ground itself repaints
+;; them all (`agent-repl-input-background-painters', input.el).
 
 ;;; Code:
 
@@ -62,6 +63,8 @@ way Emacs itself makes it, so the first message finds it painted."
 
 (add-hook 'minibuffer-setup-hook #'agent-repl-minibuffer-ground-paint)
 (add-hook 'minibuffer-inactive-mode-hook #'agent-repl-minibuffer-ground-paint)
+;; A new ground repaints every minibuffer and echo area (input.el).
+(add-hook 'agent-repl-input-background-painters #'agent-repl-minibuffer-ground-paint-all)
 ;; A load (and a reload) finds the minibuffers and echo areas already made.
 (agent-repl-minibuffer-ground-paint-all)
 

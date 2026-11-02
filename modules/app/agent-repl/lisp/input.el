@@ -94,6 +94,7 @@
 (defvar agent-repl--global-log-scope)
 (declare-function agent-repl--meta-wrap "agent-repl-core" (text))
 (declare-function agent-repl--set-buffer-background "agent-repl-core" (color))
+(declare-function agent-repl--ground-swap "agent-repl-core" (scope event painted color paint))
 (declare-function agent-repl--ws-current-name "agent-repl-workspace" ())
 (declare-function agent-repl--ws-current-log-name "agent-repl-workspace" ())
 (declare-function agent-repl--ws-get "agent-repl-workspace" (ws key))
@@ -212,14 +213,47 @@ Pre-formatted once so the common case costs no formatting.")
 
 ;;;; ---- The input buffer ------------------------------------------------
 
+;; THE GROUND HAS ONE OWNER: its `:set'.  Every surface that wears it (each
+;; composer and its border, every minibuffer and echo area, a hidden frame's
+;; dividers and edge) registers a painter on
+;; `agent-repl-input-background-painters', and every change made through
+;; Custom (`setopt', `customize-set-variable', a reload applying a changed
+;; default, `custom-reevaluate-setting') runs them all.  Each painter swaps
+;; its own previous remap out, so a repaint never stacks on the last.
+
+(defconst agent-repl--input-ground-log-scope
+  '(:agent-repl-central "the ground is one color for every workspace")
+  "The central log scope the ground's change record is written under.")
+
+(defvar agent-repl-input-background-painters nil
+  "Functions that repaint every surface wearing `agent-repl-input-background'.
+Each is called with no arguments after the ground changes, the new value
+already in force.  Each owner file adds its painter at load.")
+
+(defun agent-repl--input-background-set (symbol value)
+  "Set SYMBOL, the ground, to VALUE and repaint every surface wearing it.
+The `:set' of `agent-repl-input-background', so it is the one place a
+change of the ground takes effect."
+  (agent-repl--info agent-repl--input-ground-log-scope
+                    "elisp.input.ground-set symbol=%s color=%s from=%S painters=%S"
+                    symbol value (and (boundp symbol) (default-value symbol))
+                    agent-repl-input-background-painters)
+  (set-default symbol value)
+  (run-hooks 'agent-repl-input-background-painters))
+
 (defcustom agent-repl-input-background "#171717"
   "The input buffer's background, a #rrggbb hex string.
 The webapp's dark `--sidebar-ground' (webapp/src/styles.css), the one
 ground the sidebar, the footer and the composer share: the input window
 is the host-native composer, so it wears that color too (owner request,
 2026-11-02).  The token is `color-mix(in srgb, #1a1a1a 88%, #000000)',
-which WebKit paints as #171717."
+which WebKit paints as #171717.
+Changed through Custom, every surface wearing it is repainted
+\=(`agent-repl--input-background-set').  The first definition paints
+nothing: each surface paints itself as it is made."
   :type 'string
+  :initialize #'custom-initialize-default
+  :set #'agent-repl--input-background-set
   :group 'agent-repl)
 
 ;;;; ---- The composer's border ----------------------------------------------
@@ -295,8 +329,40 @@ its text is inset by a stretch of ground on every screen line."
                 mode-line-format agent-repl--input-border-line-format
                 line-prefix inset
                 wrap-prefix inset)
-    (face-remap-add-relative 'fringe :background color)
+    (agent-repl--input-paint)
     (agent-repl-dividers-fix-fringes (current-buffer) agent-repl-input-border-width)))
+
+(defvar-local agent-repl--input-painted nil
+  "The (GROUND . COOKIES) this composer was painted with, or nil.")
+
+(defun agent-repl--input-paint-remaps (ground)
+  "Remap the current buffer to GROUND with its border's fringes.
+The default and fringe wear GROUND, then the fringe, the border's sides,
+wears the border color over it.  Returns the three remaps' cookies."
+  (append (agent-repl--set-buffer-background ground)
+          (list (face-remap-add-relative 'fringe :background (agent-repl--input-border-color)))))
+
+(defun agent-repl--input-paint ()
+  "Paint the current composer its ground and its border's sides.
+A composer already painted the ground is left as it is; one painted
+another has those remaps taken back first (`agent-repl--ground-swap')."
+  (setq agent-repl--input-painted
+        (agent-repl--ground-swap agent-repl--input-ground-log-scope
+                                 "elisp.input.paint"
+                                 agent-repl--input-painted
+                                 agent-repl-input-background
+                                 #'agent-repl--input-paint-remaps)))
+
+(defun agent-repl--input-paint-all ()
+  "Paint every composer buffer the current ground.
+The border's top and bottom rows derive their color at redisplay, so
+the repaint reaches them with the fringes."
+  (dolist (buf (buffer-list))
+    (when (eq (buffer-local-value 'major-mode buf) 'agent-repl-input-mode)
+      (with-current-buffer buf
+        (agent-repl--input-paint)))))
+
+(add-hook 'agent-repl-input-background-painters #'agent-repl--input-paint-all)
 
 (defvar-local agent-repl-input-waiting nil
   "The composer's held-prompt waiting line, or nil.
@@ -325,7 +391,6 @@ nothing, since the transient it raised lapses on its own."
 
 (define-derived-mode agent-repl-input-mode fundamental-mode "Agent Input"
   "Major mode for the host-native composer buffer."
-  (agent-repl--set-buffer-background agent-repl-input-background)
   ;; THE COMPOSER HAS NO MODE LINE (owner ruling, 2026-10-31).  What it said
   ;; (a refused send, a held-prompt edit, the prompts waiting for the daemon)
   ;; is an editor notice the page's footer draws as a transient line

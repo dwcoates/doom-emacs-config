@@ -138,6 +138,31 @@
 
 ;;;; ---- One color ----
 
+(ert-deftest agent-repl-test-minibuffer-ground-repaints-on-a-ground-change ()
+  "A change of the ground repaints every minibuffer and echo area (`agent-repl-input-background-painters')."
+  ;; Act + Assert
+  (should (memq #'agent-repl-minibuffer-ground-paint-all agent-repl-input-background-painters)))
+
+(ert-deftest agent-repl-test-minibuffer-ground-ground-change-never-stacks ()
+  "Two changes of the ground through its owner leave the echo area one remap of the latest."
+  (let ((original agent-repl-input-background))
+    (unwind-protect
+        (let ((agent-repl-input-background original)
+              (agent-repl-input-background-painters (list #'agent-repl-minibuffer-ground-paint-all)))
+          (cl-letf (((symbol-function 'agent-repl--log) #'ignore)
+                    ((symbol-function 'agent-repl--info) #'ignore))
+            ;; Act
+            (agent-repl--input-background-set 'agent-repl-input-background "#123456")
+            (agent-repl--input-background-set 'agent-repl-input-background "#abcdef"))
+          ;; Assert
+          (with-current-buffer (car agent-repl--minibuffer-ground-echo-buffers)
+            (should (equal (list (agent-repl-test-minibuffer-ground--backgrounds 'default)
+                                 (agent-repl-test-minibuffer-ground--backgrounds 'fringe))
+                           '(("#abcdef") ("#abcdef"))))))
+      (cl-letf (((symbol-function 'agent-repl--log) #'ignore))
+        (let ((agent-repl-input-background original))
+          (agent-repl-minibuffer-ground-paint-all))))))
+
 (ert-deftest agent-repl-test-minibuffer-ground-names-no-color-of-its-own ()
   "The module writes no hex color: it wears `agent-repl-input-background'."
   (with-temp-buffer
