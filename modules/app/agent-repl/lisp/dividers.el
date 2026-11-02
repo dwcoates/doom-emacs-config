@@ -98,16 +98,20 @@ included."
     (set-face-attribute face frame (agent-repl--dividers-attribute face)
                         agent-repl-input-background)))
 
+(defun agent-repl--dividers-hidden-frames ()
+  "Return every frame whose dividers are hidden."
+  (seq-filter (lambda (frame) (frame-parameter frame agent-repl--dividers-hidden))
+              (frame-list)))
+
 (defun agent-repl--dividers-repaint-all ()
   "Paint every hidden frame\='s seams the current ground.
 A frame showing no panels keeps its own colors, and paints the ground
 only when it is hidden."
-  (dolist (frame (frame-list))
-    (when (frame-parameter frame agent-repl--dividers-hidden)
-      (agent-repl--log agent-repl--dividers-log-scope
-                       "elisp.dividers.repaint frame=%S color=%s"
-                       frame agent-repl-input-background)
-      (agent-repl--dividers-paint frame))))
+  (dolist (frame (agent-repl--dividers-hidden-frames))
+    (agent-repl--log agent-repl--dividers-log-scope
+                     "elisp.dividers.repaint frame=%S color=%s"
+                     frame agent-repl-input-background)
+    (agent-repl--dividers-paint frame)))
 
 (defun agent-repl--dividers-hide (frame)
   "Draw FRAME\='s dividers in the panels\=' color, keeping its own colors.
@@ -178,20 +182,19 @@ The load recalculated, on each frame, the faces THEME defines: each such
 divider face now holds THEME\='s color, which becomes its kept color, and
 the frame is painted afresh.  Every other face kept its color from before."
   (let ((rewritten (agent-repl--dividers-theme-faces theme)))
-    (dolist (frame (frame-list))
-      (when-let ((kept (frame-parameter frame agent-repl--dividers-hidden)))
-        (let ((rekept (mapcar (lambda (entry)
-                                (if (memq (car entry) rewritten)
-                                    (cons (car entry)
-                                          (face-attribute (car entry)
-                                                          (agent-repl--dividers-attribute (car entry))
-                                                          frame))
-                                  entry))
-                              kept)))
-          (agent-repl--log agent-repl--dividers-log-scope
-                           "elisp.dividers.theme frame=%S theme=%S kept=%S" frame theme rekept)
-          (agent-repl--dividers-paint frame)
-          (set-frame-parameter frame agent-repl--dividers-hidden rekept))))))
+    (dolist (frame (agent-repl--dividers-hidden-frames))
+      (let ((rekept (mapcar (lambda (entry)
+                              (if (memq (car entry) rewritten)
+                                  (cons (car entry)
+                                        (face-attribute (car entry)
+                                                        (agent-repl--dividers-attribute (car entry))
+                                                        frame))
+                                entry))
+                            (frame-parameter frame agent-repl--dividers-hidden))))
+        (agent-repl--log agent-repl--dividers-log-scope
+                         "elisp.dividers.theme frame=%S theme=%S kept=%S" frame theme rekept)
+        (agent-repl--dividers-paint frame)
+        (set-frame-parameter frame agent-repl--dividers-hidden rekept)))))
 
 (defun agent-repl-dividers-fix-fringes (buf width)
   "Hold BUF\='s fringes at WIDTH pixels each, or give it the frame\='s back.

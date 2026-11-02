@@ -158,6 +158,29 @@ no case leaks into another."
 
 ;;;; ---- A new ground ----
 
+(ert-deftest agent-repl-test-dividers-hidden-frames-are-the-marked-ones ()
+  "The hidden frames are exactly those carrying the mark."
+  (agent-repl-test-dividers--with-frame t
+    ;; Arrange
+    (let ((before (agent-repl--dividers-hidden-frames)))
+      (agent-repl-dividers-sync frame)
+      ;; Act + Assert
+      (should (equal (list (memq frame before) (memq frame (agent-repl--dividers-hidden-frames)))
+                     (list nil (list frame)))))))
+
+(ert-deftest agent-repl-test-dividers-hidden-frames-walk-is-shared ()
+  "The repaint and the theme reach the hidden frames through the one walk."
+  ;; Arrange
+  (let ((walks 0))
+    (cl-letf (((symbol-function 'agent-repl--dividers-hidden-frames)
+               (lambda () (cl-incf walks) nil)))
+      ;; Act
+      (agent-repl--dividers-repaint-all)
+      (agent-repl--dividers-on-theme 'agent-repl-test-dividers--theme))
+    ;; Assert
+    (should (= walks 2))))
+
+
 (ert-deftest agent-repl-test-dividers-repaint-paints-a-hidden-frame-the-new-ground ()
   "A ground change repaints every seam of a hidden frame in the new color."
   (agent-repl-test-dividers--with-frame t
