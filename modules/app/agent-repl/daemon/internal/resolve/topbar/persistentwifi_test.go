@@ -64,6 +64,86 @@ func TestPersistentWifiChipProjectsEachFact(t *testing.T) {
 	}
 }
 
+func TestPersistentWifiChipProjectsTheLid(t *testing.T) {
+	cases := []struct {
+		name        string
+		lid         func(*agentreplv1.PersistentWifiState)
+		dim         *agentreplv1.PersistentWifiLidDim
+		arm         string
+		wantTooltip string
+	}{
+		{name: "an unheard lid states nothing", arm: "",
+			wantTooltip: "Closing laptop lid disables agents"},
+		{name: "an open lid", arm: "open",
+			lid: func(s *agentreplv1.PersistentWifiState) {
+				s.Lid = &agentreplv1.PersistentWifiState_LidOpen{LidOpen: &agentreplv1.PersistentWifiLidOpen{}}
+			},
+			wantTooltip: "Closing laptop lid disables agents. Lid open."},
+		{name: "a closed lid with a dim in force", arm: "closed",
+			lid: func(s *agentreplv1.PersistentWifiState) {
+				s.Lid = &agentreplv1.PersistentWifiState_LidClosed{LidClosed: &agentreplv1.PersistentWifiLidClosed{}}
+			},
+			dim:         &agentreplv1.PersistentWifiLidDim{RestoreLevel: 0.81},
+			wantTooltip: "Closing laptop lid disables agents. Lid closed. Display dimmed for the closed lid; it returns to 81%."},
+		{name: "no lid", arm: "none",
+			lid: func(s *agentreplv1.PersistentWifiState) {
+				s.Lid = &agentreplv1.PersistentWifiState_NoLid{NoLid: &agentreplv1.PersistentWifiNoLid{}}
+			},
+			wantTooltip: "Closing laptop lid disables agents. No lid."},
+		{name: "an unwatched lid names its cause", arm: "unwatched",
+			lid: func(s *agentreplv1.PersistentWifiState) {
+				s.Lid = &agentreplv1.PersistentWifiState_LidUnwatched{LidUnwatched: &agentreplv1.PersistentWifiLidUnwatched{Detail: "IOPMrootDomain was not found"}}
+			},
+			wantTooltip: "Closing laptop lid disables agents. The lid is not being watched, so the display does not follow it: IOPMrootDomain was not found."},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			state := wifiState("joined", "on", nil)
+			if tc.lid != nil {
+				tc.lid(state)
+			}
+			state.LidDim = tc.dim
+
+			// Act.
+			chip := persistentWifiChip(state)
+
+			// Assert.
+			arm := ""
+			switch {
+			case chip.GetLidOpen() != nil:
+				arm = "open"
+			case chip.GetLidClosed() != nil:
+				arm = "closed"
+			case chip.GetNoLid() != nil:
+				arm = "none"
+			case chip.GetLidUnwatched() != nil:
+				arm = "unwatched"
+			}
+			if arm != tc.arm {
+				t.Fatalf("lid arm = %q, want %q", arm, tc.arm)
+			}
+			if got := chip.GetTooltip().GetText(); got != tc.wantTooltip {
+				t.Fatalf("tooltip = %q, want %q", got, tc.wantTooltip)
+			}
+		})
+	}
+}
+
+func TestPersistentWifiChipStatesTheLidAfterAnUnreadFact(t *testing.T) {
+	// Arrange.
+	state := wifiState("", "on", nil)
+	state.Lid = &agentreplv1.PersistentWifiState_LidOpen{LidOpen: &agentreplv1.PersistentWifiLidOpen{}}
+
+	// Act.
+	chip := persistentWifiChip(state)
+
+	// Assert.
+	if got, want := chip.GetTooltip().GetText(), "Closing laptop lid disables agents. Wi-Fi could not be read. Lid open."; got != want {
+		t.Fatalf("tooltip = %q, want %q", got, want)
+	}
+}
+
 func TestThePersistentWifiStandingStandsOnEveryStrip(t *testing.T) {
 	tests := []struct {
 		name  string

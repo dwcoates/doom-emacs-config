@@ -1,6 +1,8 @@
 package topbar
 
 import (
+	"fmt"
+	"math"
 	"strings"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
@@ -56,6 +58,38 @@ func persistentWifiChip(state *agentreplv1.PersistentWifiState) *frontendv1.Topb
 		subject := strings.Join(unread, " and ")
 		text += ". " + strings.ToUpper(subject[:1]) + subject[1:] + " could not be read."
 	}
+	if lid := persistentWifiLid(chip, state); lid != "" {
+		if len(unread) == 0 {
+			text += "."
+		}
+		text += " " + lid
+	}
 	chip.Tooltip = &frontendv1.TopbarPersistentWifiTooltip{Text: text}
 	return chip
+}
+
+// persistentWifiLid projects the lid onto the chip's lid arm and answers the
+// tooltip's lid sentence, with the lid-close dim in force; empty while the
+// lid is not yet heard and no dim stands. The arm paints nothing, so the
+// sentence is how the reader learns the lid.
+func persistentWifiLid(chip *frontendv1.TopbarPersistentWifi, state *agentreplv1.PersistentWifiState) string {
+	var sentences []string
+	switch {
+	case state.GetLidOpen() != nil:
+		chip.Lid = &frontendv1.TopbarPersistentWifi_LidOpen{LidOpen: &frontendv1.TopbarPersistentWifiLidOpen{}}
+		sentences = append(sentences, "Lid open.")
+	case state.GetLidClosed() != nil:
+		chip.Lid = &frontendv1.TopbarPersistentWifi_LidClosed{LidClosed: &frontendv1.TopbarPersistentWifiLidClosed{}}
+		sentences = append(sentences, "Lid closed.")
+	case state.GetNoLid() != nil:
+		chip.Lid = &frontendv1.TopbarPersistentWifi_NoLid{NoLid: &frontendv1.TopbarPersistentWifiNoLid{}}
+		sentences = append(sentences, "No lid.")
+	case state.GetLidUnwatched() != nil:
+		chip.Lid = &frontendv1.TopbarPersistentWifi_LidUnwatched{LidUnwatched: &frontendv1.TopbarPersistentWifiLidUnwatched{}}
+		sentences = append(sentences, "The lid is not being watched, so the display does not follow it: "+state.GetLidUnwatched().GetDetail()+".")
+	}
+	if dim := state.GetLidDim(); dim != nil {
+		sentences = append(sentences, fmt.Sprintf("Display dimmed for the closed lid; it returns to %d%%.", int(math.Round(dim.GetRestoreLevel()*100))))
+	}
+	return strings.Join(sentences, " ")
 }
