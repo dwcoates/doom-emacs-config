@@ -112,6 +112,102 @@ or nested mention is not a module.  The daemon reads the same lines.")
         (push (match-string-no-properties 1) modules))
       (nreverse modules))))
 
+;;;; ---- A reload's changed defaults ----
+;;
+;; RE-EVALUATING A DEFCUSTOM NEVER RESETS A BOUND VARIABLE: the load
+;; records the new default (its `standard-value') and leaves the value as
+;; it was, so a landed default never reached a running editor until a
+;; restart (the composer's ground, 2026-11-02).  So every reload snapshots
+;; each agent-repl option's declared default before it loads and, after,
+;; gives each option whose default changed the new one through Custom
+;; \=(`custom-reevaluate-setting', which runs the option's `:set').
+;;
+;; AN OPTION SOMEONE SET KEEPS ITS VALUE.  One Custom recorded a value for
+;; (saved, customized or set by a theme) is customized.  One whose value is
+;; no longer the default the previous load declared was set outside Custom
+;; (a `setq' or `add-to-list' in an init file, a hook's functions, a minor
+;; mode turned on), and is just as much the user's.  Only an option still
+;; holding the old default takes the new one.
+
+(defun agent-repl--elisp-option-p (symbol)
+  "Return non-nil when SYMBOL is a bound agent-repl user option."
+  (and (custom-variable-p symbol)
+       (boundp symbol)
+       (string-prefix-p "agent-repl" (symbol-name symbol))
+       (get symbol 'standard-value)))
+
+(defun agent-repl--elisp-option-default (symbol)
+  "Return (t . VALUE), SYMBOL's declared default evaluated, or nil on an error.
+A default that does not evaluate is an ERROR, and the option is left out
+of the comparison, since no change of it can be told."
+  (condition-case err
+      (cons t (eval (car (get symbol 'standard-value)) t))
+    (error
+     (agent-repl--error agent-repl--elisp-build-log-scope
+                        "elisp.elisp-build.default-unevaluable symbol=%s form=%S error=%S"
+                        symbol (car (get symbol 'standard-value)) err)
+     nil)))
+
+(defun agent-repl--elisp-defaults-snapshot ()
+  "Return (SYMBOL . DEFAULT) for every agent-repl option, DEFAULT its value now."
+  (let (snapshot)
+    (mapatoms (lambda (symbol)
+                (when (agent-repl--elisp-option-p symbol)
+                  (when-let ((default (agent-repl--elisp-option-default symbol)))
+                    (push (cons symbol (cdr default)) snapshot)))))
+    snapshot))
+
+(defun agent-repl--elisp-defaults-apply (snapshot)
+  "Give every option of SNAPSHOT whose default changed the new default.
+SNAPSHOT is `agent-repl--elisp-defaults-snapshot''s answer from before
+the load.  An option customized, or set outside Custom, keeps its value,
+and the kept change is recorded.  Returns the options given the new
+default, in SNAPSHOT order."
+  (let (applied)
+    (dolist (entry snapshot)
+      (let* ((symbol (car entry))
+             (old (cdr entry))
+             (new (agent-repl--elisp-option-default symbol)))
+        (when (and new (not (equal (cdr new) old)))
+          (cond
+           ((or (get symbol 'saved-value) (get symbol 'customized-value) (get symbol 'theme-value))
+            (agent-repl--log agent-repl--elisp-build-log-scope
+                             "elisp.elisp-build.default-kept symbol=%s reason=customized default=%S"
+                             symbol (cdr new)))
+           ((not (equal (default-value symbol) old))
+            (agent-repl--log agent-repl--elisp-build-log-scope
+                             "elisp.elisp-build.default-kept symbol=%s reason=set-outside-custom value=%S default=%S"
+                             symbol (default-value symbol) (cdr new)))
+           (t
+            (agent-repl--info agent-repl--elisp-build-log-scope
+                              "elisp.elisp-build.default-applied symbol=%s from=%S to=%S"
+                              symbol old (cdr new))
+            (custom-reevaluate-setting symbol)
+            (push symbol applied))))))
+    (nreverse applied)))
+
+(defun agent-repl--elisp-with-defaults (load)
+  "Call LOAD, then give each option whose default it changed the new default.
+Returns LOAD's answer."
+  (let* ((snapshot (agent-repl--elisp-defaults-snapshot))
+         (answer (funcall load)))
+    (agent-repl--elisp-defaults-apply snapshot)
+    answer))
+
+(defun agent-repl-elisp-hot-load (files)
+  "Load the elisp sources FILES in order, applying the defaults they changed.
+The runtime\='s `hot-reload' verb asks this, as a deploy\='s reload loads
+the whole set: a default one of FILES changed reaches the running editor
+\=(`agent-repl--elisp-with-defaults').  A file that fails to load signals,
+so the verb fails loudly.  Returns t."
+  (agent-repl--elisp-with-defaults
+   (lambda ()
+     (dolist (file files)
+       (agent-repl--info agent-repl--elisp-build-log-scope
+                         "elisp.elisp-build.hot-load file=%S" file)
+       (agent-repl--elisp-reload-load-file file))
+     t)))
+
 ;;;; ---- The pushed reload ----
 
 (defun agent-repl--elisp-normalize-root (root)
@@ -234,7 +330,8 @@ failure is already recorded at ERROR."
                 config (error-message-string err))))
     (when modules
       (let* ((started (agent-repl--now))
-             (loaded (agent-repl--elisp-reload-load-modules root modules))
+             (loaded (agent-repl--elisp-with-defaults
+                      (lambda () (agent-repl--elisp-reload-load-modules root modules))))
              (entries (car loaded))
              (failures (cdr loaded)))
         (setq agent-repl--elisp-module-builds entries)

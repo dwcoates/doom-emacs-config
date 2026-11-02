@@ -79,7 +79,7 @@ case "\$form" in
         [ -n "\${STUB_NEVER_EXITS:-}" ] || rm -f "$STATE/running"
         exit 0 ;;
     *mapconcat*) printf '"%s"\n' "\${STUB_UNSAVED:-}" ;;
-    "(load "*) printf 'emacsclient %s\n' "\$form" >>"$TRANSCRIPT" ;;
+    *agent-repl-elisp-hot-load*) printf 'emacsclient %s\n' "\$form" >>"$TRANSCRIPT"; printf 't\n' ;;
     *reload-if-stale*)
         printf 'emacsclient %s\n' "\$form" >>"$TRANSCRIPT"
         printf '"%s"\n' "\${STUB_RELOAD:-current}" ;;
@@ -279,7 +279,12 @@ reset
 mkdir -p "$TMP/lisp"
 : >"$TMP/lisp/panels.el"
 "$RUNTIME" hot-reload "$TMP/lisp/panels.el" >/dev/null 2>&1
-expect_transcript "hot-reload loads the file into the running Emacs" "emacsclient (load \"$TMP/lisp/panels.el\" nil t)"
+expect_transcript "hot-reload loads the file into the running Emacs, applying its changed defaults" "emacsclient (progn (unless (fboundp (quote agent-repl-elisp-hot-load)) (load \"$MODULE/lisp/elisp-build.el\" nil t)) (agent-repl-elisp-hot-load (list \"$TMP/lisp/panels.el\")))"
+
+reset
+: >"$TMP/lisp/input.el"
+"$RUNTIME" hot-reload "$TMP/lisp/panels.el" "$TMP/lisp/input.el" >/dev/null 2>&1
+expect_transcript "hot-reload loads every file in one form, in order" "emacsclient (progn (unless (fboundp (quote agent-repl-elisp-hot-load)) (load \"$MODULE/lisp/elisp-build.el\" nil t)) (agent-repl-elisp-hot-load (list \"$TMP/lisp/panels.el\" \"$TMP/lisp/input.el\")))"
 
 reset
 : >"$TMP/lisp/test-panels.el"
