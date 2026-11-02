@@ -641,10 +641,10 @@ workspace has not been created yet; BRANCH is what the name resolves to."
     (list :branch (agent-repl-wire-verbs--decode-string message 'branch json))))
 
 (defun agent-repl-wire-decode-create-workspace-name-held (json)
-  "Decode CreateWorkspaceNameHeld from JSON into (:branch B :workspace REF :open O).
-The supplied name is already the name or branch of workspace REF, which
-has not landed; B is the branch the name resolves to, and O is non-nil
-when REF is open."
+  "Decode CreateWorkspaceNameHeld from JSON.
+The answer is (:branch B :workspace REF :open O).  The supplied name is
+already the name or branch of workspace REF, which has not landed; B is
+the branch the name resolves to, and O is non-nil when REF is open."
   (let ((message "CreateWorkspaceNameHeld"))
     (agent-repl-wire-verbs--check-keys message json '(branch workspace open))
     (list :branch (agent-repl-wire-verbs--decode-string message 'branch json)
