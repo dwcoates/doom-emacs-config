@@ -10,6 +10,7 @@
  * queued before they started in one way (`runQueuedCalls`).
  */
 import { log } from "../log.js";
+import { errorCause } from "../error-cause.js";
 
 /**
  * One note a document made for Emacs to record, at the level it deserves:
@@ -69,8 +70,7 @@ export function runQueuedCalls<P>(queue: readonly ((page: P) => unknown)[] | und
     try {
       return drainedAnswer(call(page));
     } catch (err) {
-      const cause = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
-      throw new Error(`queued call ${index + 1} of ${calls.length} threw: ${cause}`, { cause: err });
+      throw new Error(`queued call ${index + 1} of ${calls.length} threw: ${errorCause(err)}`, { cause: err });
     }
   });
   log.info("the document started and ran the calls Emacs queued", {

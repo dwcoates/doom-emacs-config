@@ -23,6 +23,7 @@ import { startWebhostDocument, type WebhostDocumentDeps, type WebhostRuntime } f
 import type { Host } from "./host.js";
 import { createWebhostGate, type WebhostGate } from "./gate.js";
 import { createWebhostLoadButton, type WebhostLoadButton } from "./load-button.js";
+import { errorCause } from "../error-cause.js";
 
 /** What the start may have injected, for a suite that drives it. */
 export interface WebhostServicesDeps extends WebhostDocumentDeps {
@@ -126,7 +127,7 @@ export function startWebhostServices(
       gate?.dispose();
     };
   } catch (err) {
-    const cause = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+    const cause = errorCause(err);
     log.error(`the webhost's services failed to start: ${cause}`, {
       operation: "webhost.services-start-failed",
       context: { cause },

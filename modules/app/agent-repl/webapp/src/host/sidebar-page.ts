@@ -31,6 +31,7 @@ import { createCallAnswers, runQueuedCalls } from "./answers.js";
 import { createPopupMirror, openPopupChannel, type PopupChannel } from "./sidebar-popups.js";
 import { startWebhostDocument, type WebhostDocumentDeps, type WebhostRuntime } from "./document.js";
 import "./sidebar-page.css";
+import { errorCause } from "../error-cause.js";
 
 /** The id the rail's element wears: the page's own, so one stylesheet draws both. */
 export const SIDEBAR_ID = "ws-sidebar";
@@ -129,7 +130,7 @@ export function startSidebarPage(doc: Document, win: Window, deps: StartSidebarP
     });
     markShown = (id) => rail.markShown(id);
   } catch (err) {
-    const cause = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+    const cause = errorCause(err);
     log.error(`the sidebar failed to start: ${cause}`, {
       operation: "sidebar-page.start-failed",
       context: { cause },

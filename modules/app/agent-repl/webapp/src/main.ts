@@ -99,6 +99,7 @@ import type { FeedId } from "../../proto/gen/ts/frontend/v1/feed_pb";
 import { shellElements } from "./shell.js";
 import { composerClosedFor, installColorValues } from "./vocab.js";
 import { childrenMatching, queryAll } from "./dom.js";
+import { errorCause } from "./error-cause.js";
 
 export async function boot(): Promise<void> {
   let failures: LocalFailures | null = null;
@@ -516,7 +517,7 @@ function noFeedRow(id: FeedId, operation: string, said: string): Promise<boolean
  * sink is built inside the block that just threw.
  */
 function reportBootFailure(err: unknown, failures: LocalFailures | null): void {
-  const cause = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+  const cause = errorCause(err);
   if (failures !== null) {
     failures.report(bootFailed(cause));
     log.error(`the webapp failed to boot: ${cause}`, {

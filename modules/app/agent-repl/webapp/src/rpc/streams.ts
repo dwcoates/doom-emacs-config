@@ -60,6 +60,7 @@ import { MalformedView, UnknownPushArm, isMalformedView, isUnknownPushArm } from
 import { assertNoUnknownFields } from "./strict.js";
 import type { AgentReplClient } from "./client.js";
 import { pageEnded } from "../page-teardown.js";
+import { errorCause } from "../error-cause.js";
 
 /** How a stream's run finished. `cancelled` is the only legitimate one. */
 export type StreamEnd =
@@ -298,7 +299,7 @@ export function watchStream<Res extends Message>(
   };
 
   const reportUndrawable = (err: unknown): void => {
-    const cause = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+    const cause = errorCause(err);
     log.error(`a ${opts.name} push was read and this page could not draw it; drawing the stream afresh`, {
       operation: "rpc.stream-frame-undrawable",
       context: { rpc: opts.name, cause, stack: err instanceof Error ? (err.stack ?? "") : "", backoff_ms: backoffMs },

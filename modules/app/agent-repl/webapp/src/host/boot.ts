@@ -14,16 +14,12 @@
  */
 import { log } from "../log.js";
 import { startWebhostRuntime, type WebhostDocument, type WebhostRuntime } from "./document.js";
+import { errorCause } from "../error-cause.js";
 
 /** What the boot may have injected, for a suite that drives it. */
 export interface BootWebhostDeps {
   /** Begin the document and install its logger; the real one dials the daemon. */
   startRuntime?: (document: WebhostDocument, win: Window) => WebhostRuntime;
-}
-
-/** The cause of ERR, as a record carries it. */
-function causeOf(err: unknown): string {
-  return err instanceof Error ? `${err.name}: ${err.message}` : String(err);
 }
 
 /**
@@ -52,7 +48,7 @@ export async function bootWebhostDocument<Code, Started>(
   try {
     code = await load();
   } catch (err) {
-    const cause = causeOf(err);
+    const cause = errorCause(err);
     log.error(`the document's code failed to import: ${cause}`, {
       operation: "webhost.boot-import-failed",
       context: { cause },
@@ -66,7 +62,7 @@ export async function bootWebhostDocument<Code, Started>(
   try {
     return start(code, runtime);
   } catch (err) {
-    const cause = causeOf(err);
+    const cause = errorCause(err);
     log.error(`the document failed to start: ${cause}`, {
       operation: "webhost.boot-failed",
       context: { cause },
