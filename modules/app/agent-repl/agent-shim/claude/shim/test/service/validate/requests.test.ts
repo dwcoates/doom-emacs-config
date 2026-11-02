@@ -815,3 +815,72 @@ describe("validateForkSessionRequest", () => {
     expect(codeOf(() => validate.validateForkSessionRequest(request))).toBe(Code.InvalidArgument);
   });
 });
+
+describe("validateHoldParkedBridgeRequest", () => {
+  const cases: { name: string; edit: (request: shimv1.HoldParkedBridgeRequest) => void; want: Code | undefined }[] = [
+    { name: "accepts a resume naming no remediation and a bridge turned on", edit: () => undefined, want: undefined },
+    {
+      name: "refuses a request with no start",
+      edit: (request) => {
+        request.start = undefined;
+      },
+      want: Code.InvalidArgument,
+    },
+    {
+      name: "refuses a request with no bridge",
+      edit: (request) => {
+        request.remoteControl = undefined;
+      },
+      want: Code.InvalidArgument,
+    },
+    {
+      name: "refuses a start that is no legal start",
+      edit: (request) => {
+        if (request.start !== undefined) request.start.workspaceName = "";
+      },
+      want: Code.InvalidArgument,
+    },
+    {
+      name: "refuses a fresh start",
+      edit: (request) => {
+        request.start = requests.startSessionRequest();
+      },
+      want: Code.InvalidArgument,
+    },
+    {
+      name: "refuses a resume naming a remediation",
+      edit: (request) => {
+        if (request.start?.source.case === "resume") {
+          request.start.source.value.coldRemediation = create(conversationv1.SessionColdRemediationSchema, {
+            remediation: { case: "pay", value: create(conversationv1.SessionColdPaySchema, {}) },
+          });
+        }
+      },
+      want: Code.InvalidArgument,
+    },
+    {
+      name: "refuses a bridge held off",
+      edit: (request) => {
+        if (request.remoteControl !== undefined) request.remoteControl.enabled = false;
+      },
+      want: Code.InvalidArgument,
+    },
+    {
+      name: "refuses a bridge naming no session",
+      edit: (request) => {
+        if (request.remoteControl !== undefined) request.remoteControl.name = "";
+      },
+      want: Code.InvalidArgument,
+    },
+  ];
+  for (const tc of cases) {
+    it(tc.name, () => {
+      // Arrange
+      const request = requests.holdParkedBridgeRequest();
+      tc.edit(request);
+
+      // Act, Assert
+      expect(codeOf(() => validate.validateHoldParkedBridgeRequest(request))).toBe(tc.want);
+    });
+  }
+});

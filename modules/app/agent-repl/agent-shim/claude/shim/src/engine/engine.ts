@@ -76,6 +76,17 @@ export interface Engine {
     request: shimv1.SetSessionRemoteControlRequest,
   ): Promise<shimv1.SetSessionRemoteControlResponse>;
 
+  /**
+   * Hold a cold-parked conversation's Remote Control bridge on an idle vendor
+   * process, and state the prompt typed on claude.ai that arrives there. The
+   * stream ends when the gate's pay answer promotes the bridge, or `signal`
+   * aborts; the bridge itself outlives the stream.
+   */
+  holdParkedBridge(
+    request: shimv1.HoldParkedBridgeRequest,
+    signal: AbortSignal,
+  ): AsyncIterable<shimv1.HoldParkedBridgeResponse>;
+
   /** Compact, then ack. The daemon stands the shim down only after the ack. */
   hibernate(request: shimv1.HibernateRequest): Promise<shimv1.HibernateResponse>;
 
@@ -245,6 +256,10 @@ export class NotImplementedEngine implements Engine {
 
   setSessionRemoteControl(): Promise<shimv1.SetSessionRemoteControlResponse> {
     return Promise.reject(unimplemented("SetSessionRemoteControl"));
+  }
+
+  holdParkedBridge(): AsyncIterable<shimv1.HoldParkedBridgeResponse> {
+    return refuseStream<shimv1.HoldParkedBridgeResponse>("HoldParkedBridge");
   }
 
   hibernate(): Promise<shimv1.HibernateResponse> {

@@ -54,6 +54,10 @@ function recordingEngine(): { engine: Engine; calls: Array<{ verb: string; reque
       record("setSessionRemoteControl")(request);
       return create(shimv1.SetSessionRemoteControlResponseSchema, {});
     },
+    async *holdParkedBridge(request) {
+      record("holdParkedBridge")(request);
+      yield create(shimv1.HoldParkedBridgeResponseSchema, {});
+    },
     async hibernate(request) {
       record("hibernate")(request);
       return create(shimv1.HibernateResponseSchema, {});
@@ -226,6 +230,7 @@ describe("shimRoutes stream delegation", () => {
     ["watchSession", requests.watchSessionRequest],
     ["watchAgent", requests.watchAgentRequest],
     ["watchBash", requests.watchBashRequest],
+    ["holdParkedBridge", requests.holdParkedBridgeRequest],
   ] as const)("routes %s to its own engine method", async (verb, build) => {
     // Arrange.
     const { engine, calls } = recordingEngine();

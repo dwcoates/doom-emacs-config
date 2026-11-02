@@ -67,6 +67,13 @@ export function setSessionRemoteControlRequest(): shimv1.SetSessionRemoteControl
   return create(shimv1.SetSessionRemoteControlRequestSchema, { enabled: true, name: "parser-fix" });
 }
 
+/** A bridge on the parked conversation `vendor-1`, resumed with no remediation. */
+export function holdParkedBridgeRequest(): shimv1.HoldParkedBridgeRequest {
+  const start = startSessionRequest();
+  start.source = { case: "resume", value: create(shimv1.StartSessionResumeSchema, { vendorSessionId: "vendor-1" }) };
+  return create(shimv1.HoldParkedBridgeRequestSchema, { start, remoteControl: setSessionRemoteControlRequest() });
+}
+
 export function hibernateRequest(): shimv1.HibernateRequest {
   return create(shimv1.HibernateRequestSchema, {});
 }
