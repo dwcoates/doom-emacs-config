@@ -199,5 +199,6 @@ func TestDoom(t *testing.T) {
 		testDoomWorkspaceNavigationFollowsTheDrawnTabBar,
 		testDoomANewProjectDoesNotRecycleTheWorkspaceBeingLeft,
 		testDoomPlainCloseHidesPanelsAndLeavesTheTabAlone,
+		testDoomSplashLoadsWithoutTheDashboardModule,
 	)
 }
