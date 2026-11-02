@@ -197,6 +197,10 @@ func (c *cliClient) CommentOnPullRequest(_ context.Context, req *connect.Request
 	return connect.NewResponse(&agentreplv1.CommentOnPullRequestResponse{}), c.record(req.Msg)
 }
 
+func (c *cliClient) NotifyWorkspace(_ context.Context, req *connect.Request[agentreplv1.NotifyWorkspaceRequest]) (*connect.Response[agentreplv1.NotifyWorkspaceResponse], error) {
+	return connect.NewResponse(&agentreplv1.NotifyWorkspaceResponse{}), c.record(req.Msg)
+}
+
 func (c *cliClient) AnswerColdGate(_ context.Context, req *connect.Request[agentreplv1.AnswerColdGateRequest]) (*connect.Response[agentreplv1.AnswerColdGateResponse], error) {
 	return connect.NewResponse(&agentreplv1.AnswerColdGateResponse{}), c.record(req.Msg)
 }
@@ -2540,6 +2544,57 @@ func TestPullRequestVerbsRefuseAMalformedCall(t *testing.T) {
 			// Assert
 			if code == exitSuccess {
 				t.Fatalf("exit %d, want a usage failure", code)
+			}
+		})
+	}
+}
+
+func TestNotifyPostsTheBannerForTheNamedWorkspace(t *testing.T) {
+	tests := []struct {
+		name   string
+		target string
+		wantID string
+	}{
+		{name: "another workspace, by name", target: "peer", wantID: "ws-peer"},
+		{name: "the calling workspace", target: "here", wantID: "ws-caller"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newCLIFixture()
+
+			// Act
+			code := f.run(workspaceNoun, "notify", tt.target, "The build is green")
+
+			// Assert
+			req := only[*agentreplv1.NotifyWorkspaceRequest](t, f)
+			if code != exitSuccess || req.GetWorkspace().GetId() != tt.wantID || req.GetMessage() != "The build is green" {
+				t.Fatalf("exit %d, request %v; want %s notified with the text", code, req, tt.wantID)
+			}
+		})
+	}
+}
+
+func TestNotifyRefusesAMalformedCall(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{name: "no text", args: []string{"notify", "peer"}},
+		{name: "blank text", args: []string{"notify", "peer", "  "}},
+		{name: "two texts", args: []string{"notify", "peer", "one", "two"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newCLIFixture()
+
+			// Act
+			code := f.run(workspaceNoun, tt.args...)
+
+			// Assert
+			if code == exitSuccess || len(f.client.requests) != 0 {
+				t.Fatalf("exit %d, sent %v; want a usage failure and nothing sent", code, f.client.requests)
 			}
 		})
 	}
