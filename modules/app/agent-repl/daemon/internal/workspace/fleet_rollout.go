@@ -93,7 +93,7 @@ func (f *Fleet) AwaitFree(ctx context.Context, ws ids.WorkspaceID) error {
 		if ok {
 			watcher, client = session.watcher, session.client
 		}
-		moved := f.sessionsMoved
+		moved := f.sessionsMoved.Changed()
 		f.mu.RUnlock()
 		if !ok || (watcher == nil && client == nil) {
 			return nil
@@ -114,7 +114,7 @@ func (f *Fleet) AwaitFree(ctx context.Context, ws ids.WorkspaceID) error {
 		f.mu.RLock()
 		current, still := f.sessions[ws]
 		unchanged := still && current == session && current.watcher == watcher
-		moved = f.sessionsMoved
+		moved = f.sessionsMoved.Changed()
 		f.mu.RUnlock()
 		if unchanged {
 			if err := waitMoved(ctx, moved); err != nil {
@@ -148,8 +148,7 @@ func waitMoved(ctx context.Context, moved <-chan struct{}) error {
 // every freeness wait standing on the old one. Called with f.mu held for
 // writing.
 func (f *Fleet) movedLocked() {
-	close(f.sessionsMoved)
-	f.sessionsMoved = make(chan struct{})
+	f.sessionsMoved.Notify()
 }
 
 // AwaitTurnEnd blocks until one submitted turn ends and reports how. A

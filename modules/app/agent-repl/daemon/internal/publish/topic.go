@@ -9,6 +9,7 @@
 package publish
 
 import (
+	"agent-repld/internal/changesignal"
 	"agent-repld/internal/inflight"
 	"context"
 	"fmt"
@@ -44,9 +45,9 @@ type Topic[T any] struct {
 	// latestOnly makes every subscriber's queue hold at most the newest
 	// value. It is fixed at construction.
 	latestOnly bool
-	// subsChanged closes at the next change of the subscriber set and is
-	// replaced by it (AwaitSubscribers).
-	subsChanged chan struct{}
+	// subsChanged announces every change of the subscriber set
+	// (AwaitSubscribers).
+	subsChanged changesignal.Signal
 }
 
 // NewLatestOnly builds a topic whose subscribers are handed only the newest
@@ -175,7 +176,7 @@ func (t *Topic[T]) register(ctx context.Context, s *Mailbox[T]) <-chan T {
 		t.subs = make(map[*Mailbox[T]]struct{})
 	}
 	t.subs[s] = struct{}{}
-	t.noteSubsChangedLocked()
+	t.subsChanged.Notify()
 	t.mu.Unlock()
 
 	inflight.Standing(func() { pump(ctx, s, t.remove) })
@@ -189,10 +190,7 @@ func (t *Topic[T]) AwaitSubscribers(ctx context.Context, want int) error {
 	for {
 		t.mu.Lock()
 		got := len(t.subs)
-		if t.subsChanged == nil {
-			t.subsChanged = make(chan struct{})
-		}
-		changed := t.subsChanged
+		changed := t.subsChanged.Changed()
 		t.mu.Unlock()
 		if got == want {
 			return nil
@@ -202,14 +200,6 @@ func (t *Topic[T]) AwaitSubscribers(ctx context.Context, want int) error {
 		case <-ctx.Done():
 			return fmt.Errorf("the topic serves %d subscriptions, want %d: %w", got, want, ctx.Err())
 		}
-	}
-}
-
-// noteSubsChangedLocked wakes every AwaitSubscribers. The caller holds mu.
-func (t *Topic[T]) noteSubsChangedLocked() {
-	if t.subsChanged != nil {
-		close(t.subsChanged)
-		t.subsChanged = nil
 	}
 }
 
@@ -267,7 +257,7 @@ func (t *Topic[T]) remove(s *Mailbox[T]) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	delete(t.subs, s)
-	t.noteSubsChangedLocked()
+	t.subsChanged.Notify()
 }
 
 // Mailbox is one live subscription's delivery: an unbounded queue, a wake-up

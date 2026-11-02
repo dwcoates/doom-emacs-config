@@ -552,9 +552,8 @@ func TestAnAnswerLatchClosesOnlyOnAChange(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange
-			l := newAnswerLatch()
-			l.answer = tc.start
-			edge := l.changed
+			l := &answerLatch{answer: tc.start}
+			edge := l.changed.Changed()
 
 			// Act
 			l.set(tc.to)

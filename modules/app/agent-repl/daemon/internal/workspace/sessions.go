@@ -22,6 +22,7 @@ import (
 
 	"agent-repld/internal/account"
 	"agent-repld/internal/cachelapse"
+	"agent-repld/internal/changesignal"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/headless"
@@ -397,11 +398,11 @@ type Fleet struct {
 	starting startingshim.Waiter
 	mu       sync.RWMutex
 	sessions map[ids.WorkspaceID]*live
-	// sessionsMoved is closed, and replaced, every time a workspace's entry in
-	// sessions or its watcher changes (movedLocked). A freeness wait whose
+	// sessionsMoved announces every change to a workspace's entry in sessions
+	// or its watcher (movedLocked). A freeness wait whose
 	// watcher closed, or whose session is still coming up, waits on it for the
 	// workspace's next watcher rather than failing or reading the gap as free.
-	sessionsMoved chan struct{}
+	sessionsMoved changesignal.Signal
 	coldGates     map[ids.WorkspaceID]coldGate
 	// heldAtGate is how many prompts are held at a cold gate per workspace,
 	// as the prompt queue last reported it (SetColdGateHeld). It is kept
@@ -669,7 +670,6 @@ func NewFleet(deps FleetDeps) (*Fleet, error) {
 		},
 
 		sessions:           map[ids.WorkspaceID]*live{},
-		sessionsMoved:      make(chan struct{}),
 		coldGates:          map[ids.WorkspaceID]coldGate{},
 		heldAtGate:         map[ids.WorkspaceID]int{},
 		handedOver:         map[ids.WorkspaceID]bool{},

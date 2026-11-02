@@ -1,6 +1,7 @@
 package rollout
 
 import (
+	"agent-repld/internal/changesignal"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 )
@@ -194,7 +195,7 @@ func (c *controller) servesIntakeLocked() bool {
 func (c *controller) IntakeChanged() <-chan struct{} {
 	c.mu.Lock()
 	defer c.unlock()
-	return c.intake.changed
+	return c.intake.changed.Changed()
 }
 
 // ServesQueue implements Controller.
@@ -236,7 +237,7 @@ func (c *controller) servesQueueLocked() bool {
 func (c *controller) QueueChanged() <-chan struct{} {
 	c.mu.Lock()
 	defer c.unlock()
-	return c.queue.changed
+	return c.queue.changed.Changed()
 }
 
 // ServesWorkspace implements Controller: false for a workspace this daemon
@@ -254,26 +255,21 @@ func (c *controller) ServesWorkspace(ws ids.WorkspaceID) bool {
 	return true
 }
 
-// answerLatch is one standing answer as of the last unlock, and the channel
-// its next change closes.
+// answerLatch is one standing answer as of the last unlock, and the
+// broadcast its changes are announced on. Its zero value is ready; the
+// caller sets the answer before any waiter reads it.
 type answerLatch struct {
 	answer  bool
-	changed chan struct{}
+	changed changesignal.Signal
 }
 
-// newAnswerLatch is a latch whose answer the caller sets before any waiter
-// reads it.
-func newAnswerLatch() answerLatch { return answerLatch{changed: make(chan struct{})} }
-
-// set records ANSWER, closing the channel and arming a fresh one when it
-// changed.
+// set records ANSWER, announcing it when it changed.
 func (l *answerLatch) set(answer bool) {
 	if answer == l.answer {
 		return
 	}
 	l.answer = answer
-	close(l.changed)
-	l.changed = make(chan struct{})
+	l.changed.Notify()
 }
 
 // unlock releases mu, first signaling a change of ServesIntake's or
