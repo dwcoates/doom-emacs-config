@@ -3566,6 +3566,41 @@ function selectedBubble(className: string, role: string, variant: string): HTMLE
   return bubble;
 }
 
+/**
+ * `color-mix(in srgb, A SHARE, B)` as WebKit paints it: each channel mixed
+ * SHARE (0..1) of the way from B to A, rounded to 8 bits. Module scope so
+ * every suite that computes a mixed token reads the one rule.
+ */
+function srgbMix(a: readonly number[], b: readonly number[], share: number): number[] {
+  return [0, 1, 2].map((i) => Math.round(share * a[i] + (1 - share) * b[i]));
+}
+
+describe("srgbMix", () => {
+  it.each([
+    ["the dark sidebar base 88% over black", [0x1a, 0x1a, 0x1a], [0, 0, 0], 0.88, [0x17, 0x17, 0x17]],
+    ["an even split, rounded", [0xff, 0x00, 0x10], [0x00, 0xff, 0x11], 0.5, [128, 128, 17]],
+    ["all of the first color", [1, 2, 3], [9, 9, 9], 1, [1, 2, 3]],
+    ["none of the first color", [1, 2, 3], [9, 9, 9], 0, [9, 9, 9]],
+  ] as const)("mixes %s", (_case, a, b, share, want) => {
+    // Arrange / Act
+    const got = srgbMix(a, b, share);
+
+    // Assert
+    expect(got).toEqual(want);
+  });
+
+  it("is the one mixing rule: no case in this file mixes channels by hand", () => {
+    // Arrange
+    const source = readFileSync(fileURLToPath(import.meta.url), "utf8");
+
+    // Act
+    const handRolled = source.match(/Math\.round\(share \*/g) ?? [];
+
+    // Assert
+    expect(handRolled).toHaveLength(1);
+  });
+});
+
 function rgbOf(block: string, token: string): [number, number, number] {
   const hex = new RegExp(`${token}:\\s*#([0-9a-fA-F]{6})\\s*;`).exec(block)?.[1];
   if (hex === undefined) throw new Error(`no six-digit ${token} in the block`);
@@ -4022,7 +4057,7 @@ describe("the dark theme's iMessage fills (owner ruling, 2026-09-27)", () => {
     const user = rgbOf(root, "--user");
 
     // Assert
-    expect(user).toEqual(bg.map((c, i) => Math.round((c + sidebar[i]) / 2)));
+    expect(user).toEqual(srgbMix(bg, sidebar, 0.5));
   });
 
   it("paints a response a neutral grey rather than a hue", () => {
@@ -4549,7 +4584,7 @@ describe("the tool card's command grey", () => {
     const base = rgbOf(darkThemeBlock(), "--sidebar-base");
 
     // Act — srgb color-mix, each channel rounded to 8 bits as WebKit paints it.
-    const got = [0, 1, 2].map((i) => Math.round(share * base[i] + (1 - share) * other[i]));
+    const got = srgbMix(base, other, share);
 
     // Assert
     expect(got).toEqual([0x17, 0x17, 0x17]);
@@ -4607,7 +4642,7 @@ describe("the tool card's command grey", () => {
     const share = 0.69;
 
     // Act
-    const tint = [0, 1, 2].map((i) => Math.round(share * card[i] + (1 - share) * ground[i]));
+    const tint = srgbMix(card, ground, share);
 
     // Assert
     expect(withoutBlockComments(stylesheet)).toContain(
