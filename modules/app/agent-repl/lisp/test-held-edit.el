@@ -41,14 +41,10 @@
 (defconst agent-repl-test-he--ref '(:id "ws-id-1" :dir "/tmp/agent-repl-test/ws-1")
   "The decoded `WorkspaceRef' the requests echo.")
 
-(defun agent-repl-test-he--said (text)
-  "Return a `UserSaid' of TEXT alone."
-  (list :content (list :blocks (list (list :arm :text :value (list :text text))))))
-
 (defun agent-repl-test-he--edit (text &optional id)
   "Return a host view carrying a standing edit of turn t-1 with TEXT and ID."
   (list :held-prompt-edit (list :turn '(:value "t-1")
-                                :said (agent-repl-test-he--said text)
+                                :said (agent-repl-test--user-said text)
                                 :edit (or id 1))))
 
 (defmacro agent-repl-test-he--with (&rest body)
@@ -269,12 +265,12 @@
     ;; Arrange
     (agent-repl-held-edit-on-host-update "ws-one" (agent-repl-test-he--edit "w"))
     ;; Act
-    (agent-repl-held-edit-commit "ws-one" (agent-repl-test-he--said "revised") nil)
+    (agent-repl-held-edit-commit "ws-one" (agent-repl-test--user-said "revised") nil)
     ;; Assert
     (should (equal (car agent-repl-test-he--requests)
                    (list :workspace agent-repl-test-he--ref :turn '(:value "t-1")
                          :action (list :arm :commit
-                                       :value (list :said (agent-repl-test-he--said "revised"))))))))
+                                       :value (list :said (agent-repl-test--user-said "revised"))))))))
 
 (ert-deftest agent-repl-held-edit-a-refused-commit-restores-the-composer ()
   "A refused commit gives the user their words back."
@@ -285,7 +281,7 @@
     (setq agent-repl-test-he--answer (agent-repl-test-he--refusal :already-delivered))
     (let ((snapshot (agent-repl--input-optimistic-clear "ws-one" "revised")))
       ;; Act
-      (agent-repl-held-edit-commit "ws-one" (agent-repl-test-he--said "revised") snapshot))
+      (agent-repl-held-edit-commit "ws-one" (agent-repl-test--user-said "revised") snapshot))
     ;; Assert
     (should (equal (agent-repl-test-he--text) "revised"))))
 
@@ -296,7 +292,7 @@
     (agent-repl-held-edit-on-host-update "ws-one" (agent-repl-test-he--edit "w"))
     (setq agent-repl-test-he--answer (agent-repl-test-he--refusal :not-held))
     ;; Act
-    (agent-repl-held-edit-commit "ws-one" (agent-repl-test-he--said "revised") nil)
+    (agent-repl-held-edit-commit "ws-one" (agent-repl-test--user-said "revised") nil)
     ;; Assert
     (should (equal (car agent-repl-test-he--messages)
                    "agent-repl: editing the held prompt was refused -- not-held"))))
@@ -308,7 +304,7 @@
     (agent-repl-held-edit-on-host-update "ws-one" (agent-repl-test-he--edit "w"))
     (setq agent-repl-test-he--answer (agent-repl-test-he--refusal :already-delivered))
     ;; Act
-    (agent-repl-held-edit-commit "ws-one" (agent-repl-test-he--said "revised") nil)
+    (agent-repl-held-edit-commit "ws-one" (agent-repl-test--user-said "revised") nil)
     ;; Assert
     (should (agent-repl-test-he--logged-p
              "elisp.held-edit.refused ws=ws-one step=commit arm=:already-delivered"))))
@@ -320,7 +316,7 @@
     (agent-repl-held-edit-on-host-update "ws-one" (agent-repl-test-he--edit "w"))
     (setq agent-repl-test-he--answer (agent-repl-test-he--refusal :being-delivered))
     ;; Act
-    (agent-repl-held-edit-commit "ws-one" (agent-repl-test-he--said "revised") nil)
+    (agent-repl-held-edit-commit "ws-one" (agent-repl-test--user-said "revised") nil)
     ;; Assert
     (should (equal (car agent-repl-test-he--messages)
                    "agent-repl: editing the held prompt was refused -- being-delivered"))))
@@ -332,7 +328,7 @@
     (agent-repl-held-edit-on-host-update "ws-one" (agent-repl-test-he--edit "w"))
     (setq agent-repl-test-he--answer (agent-repl-test-he--refusal :not-yet-adopted))
     ;; Act
-    (agent-repl-held-edit-commit "ws-one" (agent-repl-test-he--said "revised") nil)
+    (agent-repl-held-edit-commit "ws-one" (agent-repl-test--user-said "revised") nil)
     ;; Assert
     (should (equal agent-repl-test-he--handovers '((:arm :not-yet-adopted :value nil))))))
 
@@ -345,7 +341,7 @@
     (setq agent-repl-test-he--answer '(:failure (:kind :transport :message "down")))
     (let ((snapshot (agent-repl--input-optimistic-clear "ws-one" "revised")))
       ;; Act
-      (agent-repl-held-edit-commit "ws-one" (agent-repl-test-he--said "revised") snapshot))
+      (agent-repl-held-edit-commit "ws-one" (agent-repl-test--user-said "revised") snapshot))
     ;; Assert
     (should (equal (agent-repl-test-he--text) "revised"))))
 

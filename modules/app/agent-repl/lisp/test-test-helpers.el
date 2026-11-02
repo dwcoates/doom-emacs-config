@@ -751,6 +751,28 @@ signatures this looks for."
     ;; Assert
     (should-not hand-rolled)))
 
+;;;; ---- agent-repl-test--user-said ------------------------------------
+
+(ert-deftest agent-repl-test-helpers-user-said-is-one-text-block ()
+  "The fixture is the decoded UserSaid of its text as one text block."
+  (should (equal (agent-repl-test--user-said "fix the feed")
+                 '(:content (:blocks ((:arm :text :value (:text "fix the feed"))))))))
+
+(ert-deftest agent-repl-test-helpers-no-suite-hand-rolls-the-user-said-fixture ()
+  "Every suite that builds a one-text-block UserSaid uses the one fixture."
+  ;; Arrange
+  (let ((dir agent-repl-test-helpers--dir)
+        (hand-rolled nil))
+    ;; Act
+    (dolist (file (directory-files dir t "\\`test-.*\\.el\\'"))
+      (unless (member (file-name-nondirectory file) '("test-helpers.el" "test-test-helpers.el"))
+        (with-temp-buffer
+          (insert-file-contents file)
+          (when (search-forward "(list :content (list :blocks (list (list :arm :text :value (list :text text)))))" nil t)
+            (push (file-name-nondirectory file) hand-rolled)))))
+    ;; Assert
+    (should-not hand-rolled)))
+
 (provide 'test-test-helpers)
 
 ;;; test-test-helpers.el ends here

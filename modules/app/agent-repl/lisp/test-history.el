@@ -38,10 +38,6 @@
 
 ;;;; ---- Tests: history-record-initial-prompt ----
 
-(defun agent-repl-test-history--said (text)
-  "Return the decoded UserSaid plist of the one text block TEXT."
-  (list :content (list :blocks (list (list :arm :text :value (list :text text))))))
-
 (defmacro agent-repl-test-history--with-composer (history &rest body)
   "Run BODY with workspace \"test-ws\" owning a composer whose ring is HISTORY.
 The composer is current, its project directory a fresh temporary one bound
@@ -70,7 +66,7 @@ to `dir', and every info and error record is collected into `infos' and
   (agent-repl-test-history--with-composer '("second" "first sent")
     ;; Act.
     (should (eq (agent-repl--history-record-initial-prompt
-                 "test-ws" (agent-repl-test-history--said "fix the feed"))
+                 "test-ws" (agent-repl-test--user-said "fix the feed"))
                 'recorded))
     ;; Assert.
     (should (equal agent-repl--input-history '("second" "first sent" "fix the feed")))))
@@ -80,7 +76,7 @@ to `dir', and every info and error record is collected into `infos' and
   (agent-repl-test-history--with-composer nil
     ;; Act.
     (agent-repl--history-record-initial-prompt
-     "test-ws" (agent-repl-test-history--said "fix the feed"))
+     "test-ws" (agent-repl-test--user-said "fix the feed"))
     ;; Assert.
     (should (equal (agent-repl--read-sexp-file (agent-repl--history-file dir))
                    '("fix the feed")))))
@@ -90,7 +86,7 @@ to `dir', and every info and error record is collected into `infos' and
   (agent-repl-test-history--with-composer nil
     ;; Act.
     (agent-repl--history-record-initial-prompt
-     "test-ws" (agent-repl-test-history--said "  fix the feed\n"))
+     "test-ws" (agent-repl-test--user-said "  fix the feed\n"))
     ;; Assert.
     (should (equal agent-repl--input-history '("fix the feed")))))
 
@@ -99,11 +95,11 @@ to `dir', and every info and error record is collected into `infos' and
   (agent-repl-test-history--with-composer nil
     ;; Arrange.
     (agent-repl--history-record-initial-prompt
-     "test-ws" (agent-repl-test-history--said "fix the feed"))
+     "test-ws" (agent-repl-test--user-said "fix the feed"))
     (push "a later prompt" agent-repl--input-history)
     ;; Act.
     (should (eq (agent-repl--history-record-initial-prompt
-                 "test-ws" (agent-repl-test-history--said "fix the feed"))
+                 "test-ws" (agent-repl-test--user-said "fix the feed"))
                 'present))
     ;; Assert.
     (should (equal agent-repl--input-history '("a later prompt" "fix the feed")))))
@@ -116,7 +112,7 @@ to `dir', and every info and error record is collected into `infos' and
     (agent-repl--history-push-discard)
     ;; Act.
     (agent-repl--history-record-initial-prompt
-     "test-ws" (agent-repl-test-history--said "fix the feed"))
+     "test-ws" (agent-repl-test--user-said "fix the feed"))
     ;; Assert.
     (should (equal (agent-repl--history-unsent-head) "half a thought"))
     (should (equal agent-repl--input-history '("half a thought" "fix the feed")))))
@@ -135,7 +131,7 @@ to `dir', and every info and error record is collected into `infos' and
   (agent-repl-test-history--with-composer nil
     ;; Act.
     (should (eq (agent-repl--history-record-initial-prompt
-                 "test-ws" (agent-repl-test-history--said " \n "))
+                 "test-ws" (agent-repl-test--user-said " \n "))
                 'none))
     ;; Assert.
     (should (null agent-repl--input-history))))
@@ -147,7 +143,7 @@ to `dir', and every info and error record is collected into `infos' and
     (agent-repl--ws-put "test-ws" :input-buffer nil)
     ;; Act.
     (should (eq (agent-repl--history-record-initial-prompt
-                 "test-ws" (agent-repl-test-history--said "fix the feed"))
+                 "test-ws" (agent-repl-test--user-said "fix the feed"))
                 'no-composer))
     ;; Assert.
     (should-not (file-exists-p (agent-repl--history-file dir)))))
@@ -157,7 +153,7 @@ to `dir', and every info and error record is collected into `infos' and
   (agent-repl-test-history--with-composer '("sent")
     ;; Act.
     (agent-repl--history-record-initial-prompt
-     "test-ws" (agent-repl-test-history--said "fix the feed"))
+     "test-ws" (agent-repl-test--user-said "fix the feed"))
     ;; Assert.
     (should (= (length infos) 1))
     (should (string-match-p
@@ -172,7 +168,7 @@ to `dir', and every info and error record is collected into `infos' and
                (lambda (&rest _) (signal 'file-error '("disk full")))))
       ;; Act.
       (should-error (agent-repl--history-record-initial-prompt
-                     "test-ws" (agent-repl-test-history--said "fix the feed"))
+                     "test-ws" (agent-repl-test--user-said "fix the feed"))
                     :type 'file-error))
     ;; Assert.
     (should (equal agent-repl--input-history '("sent")))
@@ -186,7 +182,7 @@ to `dir', and every info and error record is collected into `infos' and
   (agent-repl-test-history--with-composer nil
     ;; Act.
     (agent-repl--history-on-host-update
-     "test-ws" (list :initial-prompt (agent-repl-test-history--said "fix the feed")))
+     "test-ws" (list :initial-prompt (agent-repl-test--user-said "fix the feed")))
     ;; Assert.
     (should (equal agent-repl--input-history '("fix the feed")))))
 

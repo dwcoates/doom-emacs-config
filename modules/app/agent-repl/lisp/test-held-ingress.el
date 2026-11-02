@@ -20,10 +20,6 @@
 
 ;;;; ---- Fixtures ----
 
-(defun agent-repl-test-hi--said (text)
-  "Return a `UserSaid' carrying TEXT, as the composer builds it."
-  (list :content (list :blocks (list (list :arm :text :value (list :text text))))))
-
 (defmacro agent-repl-test-hi--with (&rest body)
   "Run BODY with a private state dir and two workspaces, ws-one and ws-two.
 Each has a project directory; ws-one has a live composer buffer."
@@ -63,7 +59,7 @@ Each has a project directory; ws-one has a live composer buffer."
   (agent-repl-test-hi--with
     ;; Act
     (let ((path (agent-repl-held-ingress-write
-                 "ws-one" (agent-repl-test-hi--said "hi") :user-sent "k-1")))
+                 "ws-one" (agent-repl-test--user-said "hi") :user-sent "k-1")))
       ;; Assert
       (should (string-match-p
                (format "\\`held_[0-9]\\{8\\}T[0-9]\\{6\\}\\.[0-9]\\{9\\}_%s_k-1\\.json\\'"
@@ -75,7 +71,7 @@ Each has a project directory; ws-one has a live composer buffer."
   (agent-repl-test-hi--with
     ;; Act
     (let ((path (agent-repl-held-ingress-write
-                 "ws-one" (agent-repl-test-hi--said "hi") :user-sent "k-1")))
+                 "ws-one" (agent-repl-test--user-said "hi") :user-sent "k-1")))
       ;; Assert
       (should (equal (file-name-directory path)
                      (file-name-as-directory
@@ -86,7 +82,7 @@ Each has a project directory; ws-one has a live composer buffer."
   (agent-repl-test-hi--with
     ;; Act
     (let* ((path (agent-repl-held-ingress-write
-                  "ws-one" (agent-repl-test-hi--said "hello") :deferred-prompt "k-1"))
+                  "ws-one" (agent-repl-test--user-said "hello") :deferred-prompt "k-1"))
            (body (with-temp-buffer
                    (insert-file-contents path)
                    (json-parse-buffer :object-type 'alist))))
@@ -105,7 +101,7 @@ Each has a project directory; ws-one has a live composer buffer."
   "Write one entry under DELIVERY and return its body's `delivery' member.
 Answers the symbol `absent' when the body carries no such member."
   (let* ((path (agent-repl-held-ingress-write
-                "ws-one" (agent-repl-test-hi--said "hi") :deferred-prompt "k-1" delivery))
+                "ws-one" (agent-repl-test--user-said "hi") :deferred-prompt "k-1" delivery))
          (body (with-temp-buffer
                  (insert-file-contents path)
                  (json-parse-buffer :object-type 'alist))))
@@ -134,7 +130,7 @@ Answers the symbol `absent' when the body carries no such member."
                    (when (string-prefix-p "elisp.wire.encoded" fmt)
                      (push (symbol-name (nth 2 args)) messages)))))
         ;; Act
-        (agent-repl-held-ingress--body "ws-one" (agent-repl-test-hi--said "hi")
+        (agent-repl-held-ingress--body "ws-one" (agent-repl-test--user-said "hi")
                                        :deferred-prompt "k-1" :deferred))
       ;; Assert
       (should (equal (sort messages #'string<)
@@ -147,7 +143,7 @@ Answers the symbol `absent' when the body carries no such member."
   (agent-repl-test-hi--with
     ;; Act
     (let* ((path (agent-repl-held-ingress-write
-                  "ws-one" (agent-repl-test-hi--said "héllo ✓ 日本") :user-sent "k-1"))
+                  "ws-one" (agent-repl-test--user-said "héllo ✓ 日本") :user-sent "k-1"))
            (body (with-temp-buffer
                    (let ((coding-system-for-read 'utf-8))
                      (insert-file-contents path))
@@ -160,7 +156,7 @@ Answers the symbol `absent' when the body carries no such member."
   "The body is renamed into place, so no dot-prefixed temp file remains."
   (agent-repl-test-hi--with
     ;; Act
-    (agent-repl-held-ingress-write "ws-one" (agent-repl-test-hi--said "hi") :user-sent "k-1")
+    (agent-repl-held-ingress-write "ws-one" (agent-repl-test--user-said "hi") :user-sent "k-1")
     ;; Assert
     (should (equal (length (agent-repl-test-hi--files)) 1))
     (should-not (seq-some (lambda (f) (string-prefix-p "." f)) (agent-repl-test-hi--files)))))
@@ -170,10 +166,10 @@ Answers the symbol `absent' when the body carries no such member."
   (agent-repl-test-hi--with
     ;; Arrange
     (let ((first (agent-repl-held-ingress-write
-                  "ws-one" (agent-repl-test-hi--said "hi") :user-sent "k-1")))
+                  "ws-one" (agent-repl-test--user-said "hi") :user-sent "k-1")))
       ;; Act
       (let ((second (agent-repl-held-ingress-write
-                     "ws-one" (agent-repl-test-hi--said "hi") :user-sent "k-1")))
+                     "ws-one" (agent-repl-test--user-said "hi") :user-sent "k-1")))
         ;; Assert
         (should (equal second first))
         (should (equal (agent-repl-held-ingress-waiting "ws-one") 1))))))
@@ -183,28 +179,28 @@ Answers the symbol `absent' when the body carries no such member."
   (agent-repl-test-hi--with
     ;; Act, Assert
     (should-error (agent-repl-held-ingress-write
-                   "ws-one" (agent-repl-test-hi--said "hi") :user-sent "../k"))))
+                   "ws-one" (agent-repl-test--user-said "hi") :user-sent "../k"))))
 
 (ert-deftest agent-repl-held-ingress-write-refuses-a-workspace-with-no-directory ()
   "An entry must name its workspace, so one with no directory signals."
   (agent-repl-test-hi--with
     ;; Act, Assert
     (should-error (agent-repl-held-ingress-write
-                   "ws-nowhere" (agent-repl-test-hi--said "hi") :user-sent "k-1"))))
+                   "ws-nowhere" (agent-repl-test--user-said "hi") :user-sent "k-1"))))
 
 (ert-deftest agent-repl-held-ingress-write-refuses-an-unknown-origin ()
   "The origin vocabulary is closed; an unknown one is refused before writing."
   (agent-repl-test-hi--with
     ;; Act, Assert
     (should-error (agent-repl-held-ingress-write
-                   "ws-one" (agent-repl-test-hi--said "hi") :no-such-origin "k-1"))
+                   "ws-one" (agent-repl-test--user-said "hi") :no-such-origin "k-1"))
     (should-not (agent-repl-test-hi--files))))
 
 (ert-deftest agent-repl-held-ingress-write-draws-the-waiting-line ()
   "A written entry shows at once in the composer's waiting line."
   (agent-repl-test-hi--with
     ;; Act
-    (agent-repl-held-ingress-write "ws-one" (agent-repl-test-hi--said "hi") :user-sent "k-1")
+    (agent-repl-held-ingress-write "ws-one" (agent-repl-test--user-said "hi") :user-sent "k-1")
     ;; Assert
     (should (equal (agent-repl-test-hi--shown "ws-one") "1 prompt waiting for the daemon"))))
 
@@ -215,9 +211,9 @@ Answers the symbol `absent' when the body carries no such member."
   (agent-repl-test-hi--with
     ;; Arrange
     (let ((first (agent-repl-held-ingress-write
-                  "ws-one" (agent-repl-test-hi--said "a") :user-sent "k-b"))
+                  "ws-one" (agent-repl-test--user-said "a") :user-sent "k-b"))
           (second (agent-repl-held-ingress-write
-                   "ws-one" (agent-repl-test-hi--said "b") :user-sent "k-a")))
+                   "ws-one" (agent-repl-test--user-said "b") :user-sent "k-a")))
       ;; Act, Assert
       (should (equal (agent-repl-held-ingress-entries "ws-one") (list first second))))))
 
@@ -225,7 +221,7 @@ Answers the symbol `absent' when the body carries no such member."
   "Another workspace's entries are not this one's waiting prompts."
   (agent-repl-test-hi--with
     ;; Arrange
-    (agent-repl-held-ingress-write "ws-two" (agent-repl-test-hi--said "a") :user-sent "k-1")
+    (agent-repl-held-ingress-write "ws-two" (agent-repl-test--user-said "a") :user-sent "k-1")
     ;; Act, Assert
     (should (equal (agent-repl-held-ingress-waiting "ws-one") 0))))
 
@@ -251,8 +247,8 @@ Everything in memory is gone -- the workspace's cached hash, the composer
 and its line -- and only the files remain."
   (agent-repl-test-hi--with
     ;; Arrange: two prompts held by the Emacs that is about to die.
-    (agent-repl-held-ingress-write "ws-one" (agent-repl-test-hi--said "a") :user-sent "k-1")
-    (agent-repl-held-ingress-write "ws-one" (agent-repl-test-hi--said "b") :user-sent "k-2")
+    (agent-repl-held-ingress-write "ws-one" (agent-repl-test--user-said "a") :user-sent "k-1")
+    (agent-repl-held-ingress-write "ws-one" (agent-repl-test--user-said "b") :user-sent "k-2")
     (let ((dir (agent-repl--ws-get "ws-one" :project-dir))
           (reborn (generate-new-buffer " *hi-reborn*")))
       (unwind-protect
@@ -273,7 +269,7 @@ and its line -- and only the files remain."
   (agent-repl-test-hi--with
     ;; Arrange
     (let ((path (agent-repl-held-ingress-write
-                 "ws-one" (agent-repl-test-hi--said "hi") :user-sent "k-1")))
+                 "ws-one" (agent-repl-test--user-said "hi") :user-sent "k-1")))
       (delete-file path)
       ;; Act
       (run-hook-with-args 'agent-repl-host-update-functions "ws-one" nil)
@@ -313,7 +309,7 @@ PUSHED holds (WS . ENTRIES) per push, newest first."
   "A written entry reaches the page as its key, its instant and its said."
   (agent-repl-test-hi--with-page
     ;; Act
-    (agent-repl-held-ingress-write "ws-one" (agent-repl-test-hi--said "sent offline") :user-sent "k-1")
+    (agent-repl-held-ingress-write "ws-one" (agent-repl-test--user-said "sent offline") :user-sent "k-1")
     ;; Assert
     (let ((view (aref (cdar pushed) 0)))
       (should (equal (caar pushed) "ws-one"))
@@ -326,9 +322,9 @@ PUSHED holds (WS . ENTRIES) per push, newest first."
   "A second entry hands the page both, oldest first."
   (agent-repl-test-hi--with-page
     ;; Arrange
-    (agent-repl-held-ingress-write "ws-one" (agent-repl-test-hi--said "a") :user-sent "k-1")
+    (agent-repl-held-ingress-write "ws-one" (agent-repl-test--user-said "a") :user-sent "k-1")
     ;; Act
-    (agent-repl-held-ingress-write "ws-one" (agent-repl-test-hi--said "b") :user-sent "k-2")
+    (agent-repl-held-ingress-write "ws-one" (agent-repl-test--user-said "b") :user-sent "k-2")
     ;; Assert
     (should (equal (agent-repl-test-hi--keys (cdar pushed)) '("k-1" "k-2")))))
 
@@ -336,7 +332,7 @@ PUSHED holds (WS . ENTRIES) per push, newest first."
   "A re-count that finds the same keys hands the page nothing."
   (agent-repl-test-hi--with-page
     ;; Arrange
-    (agent-repl-held-ingress-write "ws-one" (agent-repl-test-hi--said "a") :user-sent "k-1")
+    (agent-repl-held-ingress-write "ws-one" (agent-repl-test--user-said "a") :user-sent "k-1")
     ;; Act
     (agent-repl-held-ingress-refresh "ws-one")
     ;; Assert
@@ -346,7 +342,7 @@ PUSHED holds (WS . ENTRIES) per push, newest first."
   "The daemon removes the entry, then pushes; the page is handed none."
   (agent-repl-test-hi--with-page
     ;; Arrange
-    (let ((path (agent-repl-held-ingress-write "ws-one" (agent-repl-test-hi--said "a") :user-sent "k-1")))
+    (let ((path (agent-repl-held-ingress-write "ws-one" (agent-repl-test--user-said "a") :user-sent "k-1")))
       (delete-file path)
       ;; Act
       (run-hook-with-args 'agent-repl-host-update-functions "ws-one" nil)
@@ -357,7 +353,7 @@ PUSHED holds (WS . ENTRIES) per push, newest first."
   "A workspace whose page was handed entries is re-counted with no composer."
   (agent-repl-test-hi--with-page
     ;; Arrange
-    (let ((path (agent-repl-held-ingress-write "ws-two" (agent-repl-test-hi--said "a") :user-sent "k-1")))
+    (let ((path (agent-repl-held-ingress-write "ws-two" (agent-repl-test--user-said "a") :user-sent "k-1")))
       (delete-file path)
       ;; Act
       (run-hook-with-args 'agent-repl-host-update-functions "ws-two" nil)
@@ -368,7 +364,7 @@ PUSHED holds (WS . ENTRIES) per push, newest first."
   "An entry that is not JSON is recorded as an ERROR naming it, and not handed."
   (agent-repl-test-hi--with-page
     ;; Arrange
-    (let ((path (agent-repl-held-ingress-write "ws-one" (agent-repl-test-hi--said "a") :user-sent "k-1"))
+    (let ((path (agent-repl-held-ingress-write "ws-one" (agent-repl-test--user-said "a") :user-sent "k-1"))
           (errors nil))
       (with-temp-file path (insert "not json"))
       (clrhash agent-repl--held-ingress-pushed)
