@@ -466,7 +466,7 @@ recreates it (`agent-repl--ensure-input-buffer')."
 
 (cl-defun agent-repl-window-test--run-ensure-layout
     (&key show-view show-input (current-ws "cur") kill-view eager
-          in-progress setup after gate (sidebar t) sidebar-shown)
+          in-progress setup after gate (sidebar t) sidebar-shown input-lines)
   "Drive `agent-repl-window--ensure-layout' over a real window layout.
 Registers a view and an input buffer for workspace \"cur\", displays
 the view buffer when SHOW-VIEW and the input buffer when SHOW-INPUT
@@ -481,7 +481,9 @@ assertions the temp-frame restore would otherwise destroy).  GATE, when
 non-nil, is the gate the host view states for \"cur\".  SIDEBAR says
 whether the sidebar's window stands (it does unless nil), and
 SIDEBAR-SHOWN, a thunk, is called with each connection the sidebar was
-shown on.  Returns the list of workspaces a repair was dispatched for."
+shown on.  INPUT-LINES is the composer height the frame derives
+\(`agent-repl-window--input-height'), the input window's own height when nil.
+Returns the list of workspaces a repair was dispatched for."
   (let ((view-buf (generate-new-buffer " *elt-view*"))
         (input-buf (generate-new-buffer " *elt-input*"))
         (dispatched '()))
@@ -507,6 +509,11 @@ shown on.  Returns the list of workspaces a repair was dispatched for."
                        (lambda (ws) (push ws dispatched)))
                       ((symbol-function 'agent-repl-sidebar-view-window)
                        (lambda (&optional _frame) (and sidebar 'sidebar-window)))
+                      ((symbol-function 'agent-repl-window--input-height)
+                       (lambda (&rest _)
+                         (or input-lines
+                             (let ((win (get-buffer-window input-buf)))
+                               (and win (window-total-height win))))))
                       ((symbol-function 'agent-repl-host-conn) (lambda (_ws) 'conn))
                       ((symbol-function 'agent-repl-sidebar-view-show)
                        (lambda (conn) (when sidebar-shown (funcall sidebar-shown conn)))))
@@ -535,6 +542,45 @@ repair is dispatched through the workspace's frontend (the view comes back)."
 repair is dispatched."
   (should-not (agent-repl-window-test--run-ensure-layout
                :show-view t :show-input t)))
+
+;; THE COMPOSER'S HEIGHT IS RE-ASSERTED at every reconcile: a frame change
+;; after the mount (the tab bar's line appearing for a chat thread) must not
+;; leave one workspace's composer taller than another's.
+
+(ert-deftest agent-repl-window-test-ensure-layout-resizes-a-drifted-composer-to-the-derived-height ()
+  "A composer whose height drifted from the frame's derived height is resized to it."
+  (let ((heights nil))
+    (agent-repl-window-test--run-ensure-layout
+     :show-view t :show-input t :input-lines 3
+     :after (lambda ()
+              (push (window-total-height (get-buffer-window " *elt-input*")) heights)))
+    (should (equal heights '(3)))))
+
+(ert-deftest agent-repl-window-test-ensure-layout-leaves-an-exact-composer-alone ()
+  "A composer already at the derived height is not resized."
+  (let ((resized nil))
+    (cl-letf (((symbol-function 'agent-repl-window--apply-height)
+               (lambda (&rest _) (setq resized t) 0)))
+      (agent-repl-window-test--run-ensure-layout :show-view t :show-input t))
+    (should-not resized)))
+
+(ert-deftest agent-repl-window-test-ensure-input-height-answers-nil-when-the-frame-refuses ()
+  "A resize that leaves the height unchanged answers nil, so no reconcile loops on it."
+  (agent-repl-window-test--with-temp-frame
+    (let ((win (split-window)))
+      (cl-letf (((symbol-function 'agent-repl-window--input-height) (lambda (&rest _) 1))
+                ((symbol-function 'agent-repl-window--apply-height)
+                 (lambda (w &rest _) (window-total-height w))))
+        (should-not (agent-repl-window--ensure-input-height "cur" win))))))
+
+(ert-deftest agent-repl-window-test-ensure-input-height-answers-non-nil-when-it-resized ()
+  "A resize that moves the height answers non-nil."
+  (agent-repl-window-test--with-temp-frame
+    (let* ((win (split-window))
+           (target (1+ (window-total-height win))))
+      (cl-letf (((symbol-function 'agent-repl-window--input-height) (lambda (&rest _) target))
+                ((symbol-function 'agent-repl-window--apply-height) (lambda (&rest _) target)))
+        (should (agent-repl-window--ensure-input-height "cur" win))))))
 
 ;; THE SIDEBAR STANDS WITH THE PANELS (sidebar-view.el).
 

@@ -365,6 +365,21 @@ and never the request."
                             win actual lines (window-total-height win) err))))
       (window-total-height win))))
 
+(defun agent-repl-window--ensure-input-height (ws input-win)
+  "Re-assert WS's composer height on INPUT-WIN, non-nil when it changed.
+The mount sizes the composer once (`agent-repl-window--apply-height'), but
+the frame can change under it afterwards: the tab bar's line appearing for
+a zettel chat thread took a line off the view and gave one to the
+composer, so a thread's composer stood a line taller than a workspace's.
+Every composer therefore answers to `agent-repl-window--input-height',
+the one source, at the mount AND at every layout reconcile.  A resize the
+frame refuses leaves the height as it was and answers nil, so the
+reconcile does not re-trigger itself on a height it cannot change."
+  (let* ((target (agent-repl-window--input-height (window-frame input-win) ws))
+         (before (window-total-height input-win)))
+    (unless (= before target)
+      (/= before (agent-repl-window--apply-height input-win target ws)))))
+
 ;;;; --- Deletion, or its structural substitute -----------------------------
 ;;
 ;; A frame's SOLE ordinary window and the minibuffer window cannot be
@@ -737,7 +752,8 @@ drift from the canonical one.
 The trigger is strictly \"exactly one of the two panel windows is
 present\".  Everything else is an expected state and a no-op:
 
-- BOTH present: the layout already conforms.
+- BOTH present: the layout already conforms, except that the composer's
+  height is re-asserted (`agent-repl-window--ensure-input-height').
 - NEITHER present: the workspace's panels are hidden or closed
   \(`agent-repl--hide-panels', the `SPC o c' / `SPC o C' paths); a
   repair here would resurrect a deliberately hidden layout.
@@ -778,7 +794,8 @@ Returns non-nil when a repair was dispatched, nil on every no-op."
              (hidden (agent-repl-input-hidden-p ws)))
         (cond
          ((and (not hidden) (not (xor view-win input-win)))
-          (or (agent-repl-window--ensure-sidebar ws view-win)
+          (or (and input-win (agent-repl-window--ensure-input-height ws input-win))
+              (agent-repl-window--ensure-sidebar ws view-win)
               (progn
                 (agent-repl--log-verbose
                  ws
