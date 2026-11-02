@@ -430,6 +430,14 @@ func (c *cliCall) arrangedRepositoryOf(ref *workspacev1.WorkspaceRef) (*agentrep
 
 // answer prints an rpc's answer and answers the command's exit.
 func answer[Res any](c *cliCall, resp *connect.Response[Res], err error) int {
+	return answerDescribed(c, resp, err, func(*Res) (string, error) { return "the daemon refused", nil })
+}
+
+// answerDescribed is answer whose refusal line on stderr is WHY's sentence
+// for the refused answer, so the reason reaches a caller that reads only
+// stderr. A refusal WHY has no sentence for is a bug: it is reported as one,
+// and the command still exits refused.
+func answerDescribed[Res any](c *cliCall, resp *connect.Response[Res], err error, why func(*Res) (string, error)) int {
 	if errors.Is(err, errDryRun) {
 		return exitSuccess
 	}
@@ -446,7 +454,12 @@ func answer[Res any](c *cliCall, resp *connect.Response[Res], err error) int {
 		return exitFailure
 	}
 	if refusedAnswer(msg) {
-		fmt.Fprintf(c.errOut, "agent-repld %s: the daemon refused\n", c.name)
+		line, err := why(resp.Msg)
+		if err != nil {
+			c.failed("%v", err)
+			return exitRefused
+		}
+		c.failed("%s", line)
 		return exitRefused
 	}
 	return exitSuccess
@@ -799,12 +812,19 @@ func workspaceAsyncMerge(c *cliCall, args []string) int {
 
 // workspaceArg parses a command of one workspace and answers it.
 func (c *cliCall) workspaceArg(fs *flag.FlagSet, stateDir *string, args []string) (*workspacev1.WorkspaceRef, []string, bool) {
+	_, ref, rest, ok := c.namedWorkspaceArg(fs, stateDir, args)
+	return ref, rest, ok
+}
+
+// namedWorkspaceArg is workspaceArg also answering the workspace as the
+// caller named it, for a command that speaks of it in the caller's words.
+func (c *cliCall) namedWorkspaceArg(fs *flag.FlagSet, stateDir *string, args []string) (string, *workspacev1.WorkspaceRef, []string, bool) {
 	positionals, ok := c.targetArgs(fs, stateDir, args, "workspace")
 	if !ok {
-		return nil, nil, false
+		return "", nil, nil, false
 	}
 	ref, ok := c.named(positionals[0])
-	return ref, positionals[1:], ok
+	return positionals[0], ref, positionals[1:], ok
 }
 
 // targetArgs parses ARGS for a command whose first positional names its
@@ -828,7 +848,7 @@ func (c *cliCall) targetArgs(fs *flag.FlagSet, stateDir *string, args []string, 
 func workspacePrompt(c *cliCall, args []string) int {
 	fs, stateDir := c.flags()
 	asUser := fs.Bool("as-user", false, "the user explicitly asked for this send: lifts the fan-out cap")
-	ref, rest, ok := c.workspaceArg(fs, stateDir, args)
+	name, ref, rest, ok := c.namedWorkspaceArg(fs, stateDir, args)
 	if !ok {
 		return exitFailure
 	}
@@ -848,7 +868,9 @@ func workspacePrompt(c *cliCall, args []string) int {
 	}
 	resp, err := c.client.SubmitPrompt(c.ctx, connect.NewRequest(&agentreplv1.SubmitPromptRequest{Workspace: ref, Said: feed.SaidText(rest[0]),
 		IdempotencyKey: key, Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT, SentBy: sender, AsUser: *asUser}))
-	return answer(c, resp, err)
+	return answerDescribed(c, resp, err, func(msg *agentreplv1.SubmitPromptResponse) (string, error) {
+		return describePromptRefusal(name, msg.GetError())
+	})
 }
 
 func workspaceSet(c *cliCall, args []string) int {
