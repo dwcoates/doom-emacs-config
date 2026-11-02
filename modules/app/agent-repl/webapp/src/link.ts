@@ -464,13 +464,14 @@ function localFilePath(href: string): string | null {
 }
 
 /**
- * Whether this component takes the click.
+ * Whether an href-less link takes the click: the editor links here, and a
+ * workspace mention (feed/workspace-mentions.ts).
  *
  * A modified or non-primary click is the user asking their own platform to do
  * something with the link, and an already-cancelled event has been claimed by
  * somebody else. Neither is ours to hijack.
  */
-function claimsClick(event: MouseEvent): boolean {
+export function claimsClick(event: MouseEvent): boolean {
   if (event.defaultPrevented) return false;
   if (event.button !== 0) return false;
   return !(event.metaKey || event.ctrlKey || event.shiftKey || event.altKey);

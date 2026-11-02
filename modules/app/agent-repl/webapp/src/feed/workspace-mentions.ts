@@ -37,6 +37,7 @@ import { WorkspaceRefSchema, type WorkspaceRef } from "../../../proto/gen/ts/wor
 import { queryAll } from "../dom.js";
 import { log } from "../log.js";
 import { escapeRegExp } from "../regexp.js";
+import { claimsClick } from "../link.js";
 import type { AppContext } from "../rpc/context.js";
 import { guardMalformed } from "../rpc/guard.js";
 import { MalformedView } from "../rpc/malformed.js";
@@ -213,8 +214,7 @@ export function installWorkspaceMentionClicks(ctx: AppContext, root: HTMLElement
     if (!(event.target instanceof Element)) return;
     const mention = event.target.closest<HTMLElement>(`.${WORKSPACE_MENTION_CLASS}`);
     if (mention === null || !root.contains(mention)) return;
-    if (event.defaultPrevented || event.button !== 0) return;
-    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    if (!claimsClick(event)) return;
     event.preventDefault();
     event.stopPropagation();
     const id = mention.getAttribute(WORKSPACE_MENTION_ATTRIBUTE) ?? "";
