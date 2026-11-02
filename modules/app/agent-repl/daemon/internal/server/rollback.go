@@ -424,18 +424,21 @@ func (p rollbackPlan) context() dlog.Context {
 	}
 }
 
-// excerptOf is the prompt's opening words, for the confirmation to name it.
-func excerptOf(said *conversationv1.UserSaid) string {
-	var text strings.Builder
+// saidText is every text block of what the reader said, in order, joined by a
+// blank line: the prompt's text in full.
+func saidText(said *conversationv1.UserSaid) string {
+	var texts []string
 	for _, block := range said.GetContent().GetBlocks() {
 		if t := block.GetText().GetText(); t != "" {
-			if text.Len() > 0 {
-				text.WriteByte(' ')
-			}
-			text.WriteString(t)
+			texts = append(texts, t)
 		}
 	}
-	words := strings.Join(strings.Fields(text.String()), " ")
+	return strings.Join(texts, "\n\n")
+}
+
+// excerptOf is the prompt's opening words, for the confirmation to name it.
+func excerptOf(said *conversationv1.UserSaid) string {
+	words := strings.Join(strings.Fields(saidText(said)), " ")
 	if utf8.RuneCountInString(words) <= rollbackExcerptRunes {
 		return words
 	}

@@ -621,8 +621,9 @@ nothing to roll back.  Planning changes nothing.")
   "List the prompts a rollback of a workspace's conversation can reach.
 The request carries the workspace ref; the daemon answers them newest
 first, each with its row (handed back to PlanRollback to name it), its
-opening words, when it was sent and how full the context was just before
-it.  Listing changes nothing.")
+whole text, when it was sent, and how full the context was just before it
+\(the count and its fill of the topbar chip's window).  Listing changes
+nothing.")
 
 (agent-repl-rpc--defverb agent-repl-rpc-roll-back
   "RollBack"

@@ -23,7 +23,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_list_rollback_prompts.proto.
  */
 export const file_agentrepl_v1_endpoint_list_rollback_prompts: GenFile = /*@__PURE__*/
-  fileDesc("CjFhZ2VudHJlcGwvdjEvZW5kcG9pbnRfbGlzdF9yb2xsYmFja19wcm9tcHRzLnByb3RvEgxhZ2VudHJlcGwudjEiSwoaTGlzdFJvbGxiYWNrUHJvbXB0c1JlcXVlc3QSLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZiKdAQobTGlzdFJvbGxiYWNrUHJvbXB0c1Jlc3BvbnNlEjsKB3N1Y2Nlc3MYASABKAsyKC5hZ2VudHJlcGwudjEuTGlzdFJvbGxiYWNrUHJvbXB0c1N1Y2Nlc3NIABI3CgVlcnJvchgCIAEoCzImLmFnZW50cmVwbC52MS5MaXN0Um9sbGJhY2tQcm9tcHRzRXJyb3JIAEIICgZyZXN1bHQiUAoaTGlzdFJvbGxiYWNrUHJvbXB0c1N1Y2Nlc3MSMgoHcHJvbXB0cxgBIAMoCzIhLmFnZW50cmVwbC52MS5Sb2xsYmFja1Byb21wdEVudHJ5IqMBChNSb2xsYmFja1Byb21wdEVudHJ5EiMKBnByb21wdBgBIAEoCzITLmZyb250ZW5kLnYxLkZlZWRJZBIPCgdleGNlcnB0GAIgASgJEhcKCnNlbnRfYXRfbXMYAyABKANIAIgBARIbCg5jb250ZXh0X3Rva2VucxgEIAEoBEgBiAEBQg0KC19zZW50X2F0X21zQhEKD19jb250ZXh0X3Rva2VucyLnAgoYTGlzdFJvbGxiYWNrUHJvbXB0c0Vycm9yEk4KEXVua25vd25fd29ya3NwYWNlGAEgASgLMjEuYWdlbnRyZXBsLnYxLkxpc3RSb2xsYmFja1Byb21wdHNVbmtub3duV29ya3NwYWNlSAASVwoWd29ya3NwYWNlX3JlZl9taXNtYXRjaBgCIAEoCzI1LmFnZW50cmVwbC52MS5MaXN0Um9sbGJhY2tQcm9tcHRzV29ya3NwYWNlUmVmTWlzbWF0Y2hIABJOChF0cmFuc2ZlcnJpbmdfYXdheRgDIAEoCzIxLmFnZW50cmVwbC52MS5MaXN0Um9sbGJhY2tQcm9tcHRzVHJhbnNmZXJyaW5nQXdheUgAEkkKD25vdF95ZXRfYWRvcHRlZBgEIAEoCzIuLmFnZW50cmVwbC52MS5MaXN0Um9sbGJhY2tQcm9tcHRzTm90WWV0QWRvcHRlZEgAQgcKBWNhdXNlIiUKI0xpc3RSb2xsYmFja1Byb21wdHNVbmtub3duV29ya3NwYWNlIj8KJ0xpc3RSb2xsYmFja1Byb21wdHNXb3Jrc3BhY2VSZWZNaXNtYXRjaBIUCgxyZWdpc3RyeV9kaXIYASABKAkiNgojTGlzdFJvbGxiYWNrUHJvbXB0c1RyYW5zZmVycmluZ0F3YXkSDwoHYWRkcmVzcxgBIAEoCSJECiBMaXN0Um9sbGJhY2tQcm9tcHRzTm90WWV0QWRvcHRlZBIUCgdhZGRyZXNzGAEgASgJSACIAQFCCgoIX2FkZHJlc3NCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_workspace_v1_workspace, file_frontend_v1_feed]);
+  fileDesc("CjFhZ2VudHJlcGwvdjEvZW5kcG9pbnRfbGlzdF9yb2xsYmFja19wcm9tcHRzLnByb3RvEgxhZ2VudHJlcGwudjEiSwoaTGlzdFJvbGxiYWNrUHJvbXB0c1JlcXVlc3QSLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZiKdAQobTGlzdFJvbGxiYWNrUHJvbXB0c1Jlc3BvbnNlEjsKB3N1Y2Nlc3MYASABKAsyKC5hZ2VudHJlcGwudjEuTGlzdFJvbGxiYWNrUHJvbXB0c1N1Y2Nlc3NIABI3CgVlcnJvchgCIAEoCzImLmFnZW50cmVwbC52MS5MaXN0Um9sbGJhY2tQcm9tcHRzRXJyb3JIAEIICgZyZXN1bHQiUAoaTGlzdFJvbGxiYWNrUHJvbXB0c1N1Y2Nlc3MSMgoHcHJvbXB0cxgBIAMoCzIhLmFnZW50cmVwbC52MS5Sb2xsYmFja1Byb21wdEVudHJ5ItkBChNSb2xsYmFja1Byb21wdEVudHJ5EiMKBnByb21wdBgBIAEoCzITLmZyb250ZW5kLnYxLkZlZWRJZBIMCgR0ZXh0GAUgASgJEhcKCnNlbnRfYXRfbXMYAyABKANIAIgBARIbCg5jb250ZXh0X3Rva2VucxgEIAEoBEgBiAEBEhgKC3dpbmRvd19maWxsGAYgASgBSAKIAQFCDQoLX3NlbnRfYXRfbXNCEQoPX2NvbnRleHRfdG9rZW5zQg4KDF93aW5kb3dfZmlsbEoECAIQA1IHZXhjZXJwdCLnAgoYTGlzdFJvbGxiYWNrUHJvbXB0c0Vycm9yEk4KEXVua25vd25fd29ya3NwYWNlGAEgASgLMjEuYWdlbnRyZXBsLnYxLkxpc3RSb2xsYmFja1Byb21wdHNVbmtub3duV29ya3NwYWNlSAASVwoWd29ya3NwYWNlX3JlZl9taXNtYXRjaBgCIAEoCzI1LmFnZW50cmVwbC52MS5MaXN0Um9sbGJhY2tQcm9tcHRzV29ya3NwYWNlUmVmTWlzbWF0Y2hIABJOChF0cmFuc2ZlcnJpbmdfYXdheRgDIAEoCzIxLmFnZW50cmVwbC52MS5MaXN0Um9sbGJhY2tQcm9tcHRzVHJhbnNmZXJyaW5nQXdheUgAEkkKD25vdF95ZXRfYWRvcHRlZBgEIAEoCzIuLmFnZW50cmVwbC52MS5MaXN0Um9sbGJhY2tQcm9tcHRzTm90WWV0QWRvcHRlZEgAQgcKBWNhdXNlIiUKI0xpc3RSb2xsYmFja1Byb21wdHNVbmtub3duV29ya3NwYWNlIj8KJ0xpc3RSb2xsYmFja1Byb21wdHNXb3Jrc3BhY2VSZWZNaXNtYXRjaBIUCgxyZWdpc3RyeV9kaXIYASABKAkiNgojTGlzdFJvbGxiYWNrUHJvbXB0c1RyYW5zZmVycmluZ0F3YXkSDwoHYWRkcmVzcxgBIAEoCSJECiBMaXN0Um9sbGJhY2tQcm9tcHRzTm90WWV0QWRvcHRlZBIUCgdhZGRyZXNzGAEgASgJSACIAQFCCgoIX2FkZHJlc3NCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_workspace_v1_workspace, file_frontend_v1_feed]);
 
 /**
  * @generated from message agentrepl.v1.ListRollbackPromptsRequest
@@ -115,12 +115,13 @@ export type RollbackPromptEntry = Message<"agentrepl.v1.RollbackPromptEntry"> & 
   prompt?: FeedId | undefined;
 
   /**
-   * The prompt's opening words, cut to the same length the rollback
-   * confirmation names a prompt by.
+   * The prompt's text IN FULL, never cut: every text block of what the reader
+   * said, in order, joined by a blank line. Its whitespace is as said; a
+   * frontend drawing one line per prompt folds it itself.
    *
-   * @generated from field: string excerpt = 2;
+   * @generated from field: string text = 5;
    */
-  excerpt: string;
+  text: string;
 
   /**
    * When the prompt was sent, epoch ms: the start of the turn it opened. The
@@ -142,6 +143,16 @@ export type RollbackPromptEntry = Message<"agentrepl.v1.RollbackPromptEntry"> & 
    * @generated from field: optional uint64 context_tokens = 4;
    */
   contextTokens?: bigint | undefined;
+
+  /**
+   * context_tokens over the context window the topbar's context chip measures
+   * against (TopbarContextChip.window_fill's window), clamped to [0, 1], so a
+   * frontend colors the figure as the chip would color the same count. SET
+   * exactly when context_tokens is.
+   *
+   * @generated from field: optional double window_fill = 6;
+   */
+  windowFill?: number | undefined;
 };
 
 /**

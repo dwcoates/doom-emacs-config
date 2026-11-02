@@ -1907,11 +1907,23 @@ type fakeTopbar struct {
 	topbar.Resolver
 	topic publish.Topic[*frontendv1.TopbarView]
 
+	// contextWindow is what ContextWindow answers for every workspace.
+	contextWindow int64
+
 	edges participantRecorder
 }
 
 func (f *fakeTopbar) Topic(ids.WorkspaceID) *publish.Topic[*frontendv1.TopbarView] {
 	return &f.topic
+}
+
+// ContextWindow answers the window set on the fake, failing loudly when a
+// test reads one it never set.
+func (f *fakeTopbar) ContextWindow(ids.WorkspaceID) int64 {
+	if f.contextWindow <= 0 {
+		panic("fakeTopbar.ContextWindow: the test set no context window")
+	}
+	return f.contextWindow
 }
 
 // SetParticipants records the stream-liveness edges the server states.

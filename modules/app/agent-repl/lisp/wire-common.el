@@ -291,20 +291,31 @@ spellings are honored; a negative value is a contract breach."
     (when raw
       (agent-repl-wire--parse-integer message-name field raw))))
 
+(defun agent-repl-wire--parse-double (message-name field raw)
+  "Return RAW, a present double, as a float for MESSAGE-NAME's FIELD.
+protojson spells a double as a JSON number, but also ACCEPTS the decimal
+string spelling, so both are honored here.  A non-finite spelling
+\(\"NaN\"/\"Infinity\") is a contract breach and is refused rather than
+silently coerced."
+  (cond
+   ((numberp raw) (float raw))
+   ((and (stringp raw) (string-match-p "\\`-?[0-9]+\\(\\.[0-9]+\\)?\\([eE][-+]?[0-9]+\\)?\\'" raw))
+    (float (string-to-number raw)))
+   (t (agent-repl-wire--fail message-name field "expected a double"))))
+
 (defun agent-repl-wire--decode-double (message-name field object)
   "Decode OBJECT's non-optional double FIELD of MESSAGE-NAME as a float.
-protojson spells a double as a JSON number, but also ACCEPTS the decimal
-string spelling, so both are honored here; an absent field is the proto3
-default 0.0, which protojson omits.  A non-finite spelling
-\(\"NaN\"/\"Infinity\") is a contract breach for a scale field and is
-refused rather than silently coerced."
+An absent field is the proto3 default 0.0, which protojson omits; a
+present one is read by `agent-repl-wire--parse-double'."
   (let ((raw (agent-repl-wire--raw object field)))
-    (cond
-     ((null raw) 0.0)
-     ((numberp raw) (float raw))
-     ((and (stringp raw) (string-match-p "\\`-?[0-9]+\\(\\.[0-9]+\\)?\\([eE][-+]?[0-9]+\\)?\\'" raw))
-      (float (string-to-number raw)))
-     (t (agent-repl-wire--fail message-name field "expected a double")))))
+    (if (null raw) 0.0 (agent-repl-wire--parse-double message-name field raw))))
+
+(defun agent-repl-wire--decode-optional-double (message-name field object)
+  "Decode OBJECT's optional double FIELD of MESSAGE-NAME, nil when absent.
+A present one is read by `agent-repl-wire--parse-double'."
+  (let ((raw (agent-repl-wire--raw object field)))
+    (when raw
+      (agent-repl-wire--parse-double message-name field raw))))
 
 (defun agent-repl-wire--decode-message (message-name field object decoder)
   "Decode OBJECT's REQUIRED message FIELD of MESSAGE-NAME with DECODER.

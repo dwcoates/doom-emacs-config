@@ -40,9 +40,15 @@ message RollbackPromptEntry {
   // The prompt's root-feed row: handed back verbatim as
   // PlanRollbackRequest.prompt to roll back to just before it.
   frontend.v1.FeedId prompt = 1;
-  // The prompt's opening words, cut to the same length the rollback
-  // confirmation names a prompt by.
-  string excerpt = 2;
+  // Field 2 was `excerpt`, the prompt's opening words cut to the length the
+  // rollback confirmation names a prompt by. A reader picking among prompts
+  // needs all of each one's words, so the whole text replaced it (`text`).
+  reserved 2;
+  reserved "excerpt";
+  // The prompt's text IN FULL, never cut: every text block of what the reader
+  // said, in order, joined by a blank line. Its whitespace is as said; a
+  // frontend drawing one line per prompt folds it itself.
+  string text = 5;
   // When the prompt was sent, epoch ms: the start of the turn it opened. The
   // frontend draws the time since then, ticking it itself. UNSET for a prompt
   // the workspace never recorded sending (one the vendor's transcript holds
@@ -54,6 +60,11 @@ message RollbackPromptEntry {
   // since the conversation's last clear or compaction, so no honest figure
   // exists; never a zero standing in for one.
   optional uint64 context_tokens = 4;
+  // context_tokens over the context window the topbar's context chip measures
+  // against (TopbarContextChip.window_fill's window), clamped to [0, 1], so a
+  // frontend colors the figure as the chip would color the same count. SET
+  // exactly when context_tokens is.
+  optional double window_fill = 6;
 }
 
 // Arms derived from the daemon's refusal sites, mirroring PlanRollback.

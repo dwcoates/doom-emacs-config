@@ -5206,16 +5206,27 @@ REF is required."
 
 (defun agent-repl-wire-decode-rollback-prompt-entry (json)
   "Decode RollbackPromptEntry from JSON into a plist.
-\(:prompt FEEDID :excerpt STRING :sent-at-ms MS-or-nil
-:context-tokens N-or-nil).  PROMPT is required: it is what a pick hands
-back to PlanRollback.  The two figures are nil when unset, never zero."
+\(:prompt FEEDID :text STRING :sent-at-ms MS-or-nil
+:context-tokens N-or-nil :window-fill FILL-or-nil).  PROMPT is required:
+it is what a pick hands back to PlanRollback.  TEXT is the prompt in
+full.  The figures are nil when unset, never zero; FILL, the context
+figure over the topbar chip's window, is set exactly when the context
+figure is, and is never outside [0, 1]."
   (let ((message "RollbackPromptEntry"))
-    (agent-repl-wire-verbs--check-keys message json '(prompt excerpt sentAtMs contextTokens))
-    (list :prompt (agent-repl-wire-verbs--decode-required-message
-                   message 'prompt json #'agent-repl-wire-decode-feed-id)
-          :excerpt (agent-repl-wire-verbs--decode-string message 'excerpt json)
-          :sent-at-ms (agent-repl-wire--decode-optional-int64 message 'sentAtMs json)
-          :context-tokens (agent-repl-wire--decode-optional-uint64 message 'contextTokens json))))
+    (agent-repl-wire-verbs--check-keys
+     message json '(prompt text sentAtMs contextTokens windowFill))
+    (let ((tokens (agent-repl-wire--decode-optional-uint64 message 'contextTokens json))
+          (fill (agent-repl-wire--decode-optional-double message 'windowFill json)))
+      (unless (eq (null tokens) (null fill))
+        (agent-repl-wire--fail message 'windowFill "set exactly when contextTokens is"))
+      (when (and fill (not (<= 0.0 fill 1.0)))
+        (agent-repl-wire--fail message 'windowFill "outside [0, 1]"))
+      (list :prompt (agent-repl-wire-verbs--decode-required-message
+                     message 'prompt json #'agent-repl-wire-decode-feed-id)
+            :text (agent-repl-wire-verbs--decode-string message 'text json)
+            :sent-at-ms (agent-repl-wire--decode-optional-int64 message 'sentAtMs json)
+            :context-tokens tokens
+            :window-fill fill))))
 
 (defun agent-repl-wire-decode-list-rollback-prompts-success (json)
   "Decode ListRollbackPromptsSuccess from JSON into (:prompts ENTRIES).

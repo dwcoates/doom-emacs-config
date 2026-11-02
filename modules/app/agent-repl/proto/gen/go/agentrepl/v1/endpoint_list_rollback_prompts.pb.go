@@ -216,9 +216,10 @@ type RollbackPromptEntry struct {
 	// The prompt's root-feed row: handed back verbatim as
 	// PlanRollbackRequest.prompt to roll back to just before it.
 	Prompt *v11.FeedId `protobuf:"bytes,1,opt,name=prompt,proto3" json:"prompt,omitempty"`
-	// The prompt's opening words, cut to the same length the rollback
-	// confirmation names a prompt by.
-	Excerpt string `protobuf:"bytes,2,opt,name=excerpt,proto3" json:"excerpt,omitempty"`
+	// The prompt's text IN FULL, never cut: every text block of what the reader
+	// said, in order, joined by a blank line. Its whitespace is as said; a
+	// frontend drawing one line per prompt folds it itself.
+	Text string `protobuf:"bytes,5,opt,name=text,proto3" json:"text,omitempty"`
 	// When the prompt was sent, epoch ms: the start of the turn it opened. The
 	// frontend draws the time since then, ticking it itself. UNSET for a prompt
 	// the workspace never recorded sending (one the vendor's transcript holds
@@ -230,6 +231,11 @@ type RollbackPromptEntry struct {
 	// since the conversation's last clear or compaction, so no honest figure
 	// exists; never a zero standing in for one.
 	ContextTokens *uint64 `protobuf:"varint,4,opt,name=context_tokens,json=contextTokens,proto3,oneof" json:"context_tokens,omitempty"`
+	// context_tokens over the context window the topbar's context chip measures
+	// against (TopbarContextChip.window_fill's window), clamped to [0, 1], so a
+	// frontend colors the figure as the chip would color the same count. SET
+	// exactly when context_tokens is.
+	WindowFill    *float64 `protobuf:"fixed64,6,opt,name=window_fill,json=windowFill,proto3,oneof" json:"window_fill,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -271,9 +277,9 @@ func (x *RollbackPromptEntry) GetPrompt() *v11.FeedId {
 	return nil
 }
 
-func (x *RollbackPromptEntry) GetExcerpt() string {
+func (x *RollbackPromptEntry) GetText() string {
 	if x != nil {
-		return x.Excerpt
+		return x.Text
 	}
 	return ""
 }
@@ -288,6 +294,13 @@ func (x *RollbackPromptEntry) GetSentAtMs() int64 {
 func (x *RollbackPromptEntry) GetContextTokens() uint64 {
 	if x != nil && x.ContextTokens != nil {
 		return *x.ContextTokens
+	}
+	return 0
+}
+
+func (x *RollbackPromptEntry) GetWindowFill() float64 {
+	if x != nil && x.WindowFill != nil {
+		return *x.WindowFill
 	}
 	return 0
 }
@@ -603,15 +616,18 @@ const file_agentrepl_v1_endpoint_list_rollback_prompts_proto_rawDesc = "" +
 	"\x05error\x18\x02 \x01(\v2&.agentrepl.v1.ListRollbackPromptsErrorH\x00R\x05errorB\b\n" +
 	"\x06result\"Y\n" +
 	"\x1aListRollbackPromptsSuccess\x12;\n" +
-	"\aprompts\x18\x01 \x03(\v2!.agentrepl.v1.RollbackPromptEntryR\aprompts\"\xcd\x01\n" +
+	"\aprompts\x18\x01 \x03(\v2!.agentrepl.v1.RollbackPromptEntryR\aprompts\"\x8c\x02\n" +
 	"\x13RollbackPromptEntry\x12+\n" +
-	"\x06prompt\x18\x01 \x01(\v2\x13.frontend.v1.FeedIdR\x06prompt\x12\x18\n" +
-	"\aexcerpt\x18\x02 \x01(\tR\aexcerpt\x12!\n" +
+	"\x06prompt\x18\x01 \x01(\v2\x13.frontend.v1.FeedIdR\x06prompt\x12\x12\n" +
+	"\x04text\x18\x05 \x01(\tR\x04text\x12!\n" +
 	"\n" +
 	"sent_at_ms\x18\x03 \x01(\x03H\x00R\bsentAtMs\x88\x01\x01\x12*\n" +
-	"\x0econtext_tokens\x18\x04 \x01(\x04H\x01R\rcontextTokens\x88\x01\x01B\r\n" +
+	"\x0econtext_tokens\x18\x04 \x01(\x04H\x01R\rcontextTokens\x88\x01\x01\x12$\n" +
+	"\vwindow_fill\x18\x06 \x01(\x01H\x02R\n" +
+	"windowFill\x88\x01\x01B\r\n" +
 	"\v_sent_at_msB\x11\n" +
-	"\x0f_context_tokens\"\xb0\x03\n" +
+	"\x0f_context_tokensB\x0e\n" +
+	"\f_window_fillJ\x04\b\x02\x10\x03R\aexcerpt\"\xb0\x03\n" +
 	"\x18ListRollbackPromptsError\x12`\n" +
 	"\x11unknown_workspace\x18\x01 \x01(\v21.agentrepl.v1.ListRollbackPromptsUnknownWorkspaceH\x00R\x10unknownWorkspace\x12m\n" +
 	"\x16workspace_ref_mismatch\x18\x02 \x01(\v25.agentrepl.v1.ListRollbackPromptsWorkspaceRefMismatchH\x00R\x14workspaceRefMismatch\x12`\n" +

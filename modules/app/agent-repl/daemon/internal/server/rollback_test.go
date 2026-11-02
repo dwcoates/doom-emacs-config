@@ -624,6 +624,34 @@ func TestExcerptOf(t *testing.T) {
 	}
 }
 
+// TestSaidText pins saidText's shape: every text block in full, in order,
+// joined by a blank line, with its whitespace as said and never cut.
+func TestSaidText(t *testing.T) {
+	long := strings.Repeat("a", 500)
+	tests := []struct {
+		name string
+		said *conversationv1.UserSaid
+		want string
+	}{
+		{name: "one block is its text", said: multiBlockSaid("Hello"), want: "Hello"},
+		{name: "multiple blocks join with a blank line", said: multiBlockSaid("Hello", "world"), want: "Hello\n\nworld"},
+		{name: "internal whitespace is kept", said: multiBlockSaid("Hello\n  world"), want: "Hello\n  world"},
+		{name: "a long prompt is never cut", said: multiBlockSaid(long), want: long},
+		{name: "no text block is the empty text", said: &conversationv1.UserSaid{}, want: ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act.
+			got := saidText(tc.said)
+
+			// Assert.
+			if got != tc.want {
+				t.Fatalf("saidText(...) = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 // namedPlan builds a PlanRollback request, keeping files, that names ROW.
 func namedPlan(row string) *agentreplv1.PlanRollbackRequest {
 	req := keepFilesPlan()
