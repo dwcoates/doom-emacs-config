@@ -51,6 +51,26 @@ written inside BODY after the act."
                    . "persistent wifi could not be read · Wi-Fi could not be read")))
     (should (equal (agent-repl-persistent-wifi-describe (car case)) (cdr case)))))
 
+(ert-deftest agent-repl-test-pwifi-describe-names-the-lid-and-the-dim ()
+  "The lid and a lid-close dim in force follow the mode and the Wi-Fi."
+  (dolist (case '(((:arm :lid-open :value nil) nil . "lid open")
+                  ((:arm :lid-closed :value nil) (:restore-level 0.81)
+                   . "lid closed, display dimmed, returns to 81%")
+                  ((:arm :no-lid :value nil) nil . "no lid")
+                  ((:arm :lid-unwatched :value (:detail "IOPMrootDomain was not found")) nil
+                   . "lid not watched (IOPMrootDomain was not found)")
+                  (nil (:restore-level 0.4) . "display dimmed, returns to 40%")))
+    (let ((state (append (agent-repl-test-pwifi--state :not-joined :on)
+                         (list :lid (nth 0 case) :lid-dim (nth 1 case)))))
+      (should (equal (agent-repl-persistent-wifi-describe state)
+                     (concat "persistent wifi on: the lid can close · no Wi-Fi · "
+                             (nthcdr 2 case)))))))
+
+(ert-deftest agent-repl-test-pwifi-describe-refuses-an-unknown-lid-arm ()
+  "A lid arm the wording does not know fails hard."
+  (should-error (agent-repl-persistent-wifi-describe
+                 (append (agent-repl-test-pwifi--state :joined :on) '(:lid (:arm :ajar))))))
+
 (ert-deftest agent-repl-test-pwifi-describe-refuses-an-unknown-arm ()
   "An arm the wording does not know fails hard rather than reading as unread."
   (should-error (agent-repl-persistent-wifi-describe '(:wifi (:arm :radio-off) :mode nil))))
@@ -81,8 +101,10 @@ written inside BODY after the act."
 
 (ert-deftest agent-repl-test-pwifi-display-text-words-every-arm ()
   "Every display outcome arm has its own words."
-  (dolist (case '(((:arm :dimmed :value nil) . "display: dimmed")
-                  ((:arm :restored :value nil) . "display: restored")
+  (dolist (case '(((:arm :dimmed :value (:restore-level 0.81))
+                   . "display: dimmed for the closed lid, returns to 81%")
+                  ((:arm :restored :value (:level 0.5)) . "display: restored to 50%")
+                  ((:arm :unchanged :value nil) . "display: unchanged")
                   ((:arm :tool-missing :value (:tool-path "/b/x")) . "display: /b/x is not installed")
                   ((:arm :failed :value (:detail "no panel")) . "display: failed (no panel)")))
     (should (equal (agent-repl-persistent-wifi--display-text (car case)) (cdr case)))))
@@ -151,10 +173,10 @@ written inside BODY after the act."
      (list :state (agent-repl-test-pwifi--state :joined :on "Phone")
            :hotspot '(:arm :joined :value (:network-name "Phone"))
            :energy-mode '(:arm :low-power :value nil)
-           :display '(:arm :dimmed :value nil)))
+           :display '(:arm :unchanged :value nil)))
     ;; Assert
     (should (equal (echoed)
-                   '("agent-repl: persistent wifi on: the lid can close · Wi-Fi joined to Phone · hotspot: joined Phone · energy: low power · display: dimmed")))))
+                   '("agent-repl: persistent wifi on: the lid can close · Wi-Fi joined to Phone · hotspot: joined Phone · energy: low power · display: unchanged")))))
 
 (ert-deftest agent-repl-test-pwifi-a-success-is-not-echoed-again-by-its-push ()
   "The success adopts its standing, so the daemon's push of it is silent."
@@ -165,7 +187,7 @@ written inside BODY after the act."
      (list :state (agent-repl-test-pwifi--state :joined :on)
            :hotspot '(:arm :not-on-hotspot :value nil)
            :energy-mode '(:arm :low-power :value nil)
-           :display '(:arm :dimmed :value nil)))
+           :display '(:arm :dimmed :value (:restore-level 0.5))))
     ;; Act
     (agent-repl-persistent-wifi-handle (agent-repl-test-pwifi--state :joined :on))
     ;; Assert

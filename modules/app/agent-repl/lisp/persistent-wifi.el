@@ -14,6 +14,10 @@
 ;;     UpdatePersistentWifiMode{toggle} over the daemon-level connection and
 ;;     reports what the change left.
 ;;
+;; While the mode is on, the display follows the LID (the daemon hears
+;; it): closing it dims the display to 0, opening it restores the level
+;; it had before.  The standing states the lid and the dim in force.
+;;
 ;; The toggle is resolved by the DAEMON from the mode it reads at that
 ;; moment, never from the standing this file last heard, so two presses in
 ;; quick succession turn the mode over twice.
@@ -21,6 +25,7 @@
 ;;; Code:
 
 (require 'cl-lib)
+(require 'subr-x)
 
 (declare-function agent-repl-verbs--send "verbs")
 (declare-function agent-repl-verbs--conn "verbs")
@@ -37,9 +42,11 @@ take far longer than an ordinary verb's deadline."
 
 (defvar agent-repl-persistent-wifi-state nil
   "The machine's persistent-wifi standing as the daemon last stated it.
-A decoded `PersistentWifiState' plist `(:wifi ONEOF :mode ONEOF)', each
-ONEOF nil when the daemon could not read that fact; nil before the
-daemon has stated any.")
+A decoded `PersistentWifiState' plist
+`(:wifi ONEOF :mode ONEOF :lid ONEOF :lid-dim DIM)', each ONEOF nil when
+the daemon could not read (or, for the lid, has not yet heard) that fact,
+DIM nil while no lid-close dim is in force; nil before the daemon has
+stated any.")
 
 (defconst agent-repl-persistent-wifi--log-scope
   '(:agent-repl-central "the persistent-wifi standing is the machine's, not a workspace's")
@@ -67,11 +74,37 @@ daemon has stated any.")
     (:off "persistent wifi off: closing the lid sleeps")
     (arm (error "agent-repl-persistent-wifi: mode arm %S has no wording" arm))))
 
+(defun agent-repl-persistent-wifi--percent (level)
+  "Return the brightness LEVEL (0.0 to 1.0) as a whole percent."
+  (format "%d%%" (round (* 100 level))))
+
+(defun agent-repl-persistent-wifi--lid-text (lid dim)
+  "Return the words for the decoded LID oneof and lid-close DIM.
+Nil when the lid is not yet heard and no dim stands."
+  (let ((lid-words
+         (pcase (plist-get lid :arm)
+           ('nil nil)
+           (:lid-open "lid open")
+           (:lid-closed "lid closed")
+           (:no-lid "no lid")
+           (:lid-unwatched (format "lid not watched (%s)"
+                                   (plist-get (plist-get lid :value) :detail)))
+           (arm (error "agent-repl-persistent-wifi: lid arm %S has no wording" arm))))
+        (dim-words
+         (when dim
+           (format "display dimmed, returns to %s"
+                   (agent-repl-persistent-wifi--percent (plist-get dim :restore-level))))))
+    (when (or lid-words dim-words)
+      (string-join (delq nil (list lid-words dim-words)) ", "))))
+
 (defun agent-repl-persistent-wifi-describe (state)
   "Return one line describing the decoded persistent-wifi STATE."
-  (format "%s · %s"
-          (agent-repl-persistent-wifi--mode-text (plist-get state :mode))
-          (agent-repl-persistent-wifi--wifi-text (plist-get state :wifi))))
+  (string-join
+   (delq nil (list (agent-repl-persistent-wifi--mode-text (plist-get state :mode))
+                   (agent-repl-persistent-wifi--wifi-text (plist-get state :wifi))
+                   (agent-repl-persistent-wifi--lid-text (plist-get state :lid)
+                                                         (plist-get state :lid-dim))))
+   " · "))
 
 (defun agent-repl-persistent-wifi--hotspot-text (hotspot)
   "Return the words for the decoded HOTSPOT step outcome."
@@ -100,8 +133,11 @@ daemon has stated any.")
   "Return the words for the decoded DISPLAY step outcome."
   (let ((v (plist-get display :value)))
     (pcase (plist-get display :arm)
-      (:dimmed "display: dimmed")
-      (:restored "display: restored")
+      (:dimmed (format "display: dimmed for the closed lid, returns to %s"
+                       (agent-repl-persistent-wifi--percent (plist-get v :restore-level))))
+      (:restored (format "display: restored to %s"
+                         (agent-repl-persistent-wifi--percent (plist-get v :level))))
+      (:unchanged "display: unchanged")
       (:tool-missing (format "display: %s is not installed" (plist-get v :tool-path)))
       (:failed (format "display: failed (%s)" (plist-get v :detail)))
       (arm (error "agent-repl-persistent-wifi: display arm %S has no wording" arm)))))
@@ -147,9 +183,10 @@ push of the same standing then reads as unchanged."
 (defun agent-repl-persistent-wifi-mode-toggle ()
   "Turn the machine's persistent wifi mode (lid-closed operation) over.
 On: join the phone hotspot, disable system sleep, switch to Low Power
-Mode, dim the display; while on, the daemon rejoins the hotspot whenever
-Wi-Fi is lost.  Off: leave the hotspot, enable sleep, switch to
-High Power Mode, restore the display.  The daemon reads
+Mode; while on, the daemon rejoins the hotspot whenever Wi-Fi is lost,
+and the display follows the lid (dimmed while it is closed, restored when
+it opens).  Off: leave the hotspot, enable sleep, switch to High Power
+Mode, and restore the display if a lid-close dim is in force.  The daemon reads
 the mode and turns it; a refusal (no sudo grant for pmset) is reported as
 the daemon's refusal."
   (interactive)
