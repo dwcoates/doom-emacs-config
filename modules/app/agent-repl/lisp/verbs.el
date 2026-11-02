@@ -2969,10 +2969,11 @@ daemon opens the commission with a note saying the issue it cites -- a bug
 in \"the feed\", say -- is that workspace\='s, by name, worktree and
 branch.  When that workspace\='s feed has a bubble selected, the daemon
 quotes it after the note, kind, row and text: the daemon holds the
-selection, so nothing more is sent.  The one-shot is still top-level, cut from and merging into the
-primary branch; nothing of the current workspace\='s conversation or
-worktree is carried over.  Unlike `SPC TAB o\=', its repository is the
-current workspace\='s (`agent-repl-verbs--oneshot-repository\=').
+selection, so nothing more is sent.  The one-shot is still top-level,
+cut from and merging into the primary branch; nothing of the current
+workspace\='s conversation or worktree is carried over.  Unlike
+`SPC TAB o\=', its repository is the current workspace\='s
+\(`agent-repl-verbs--oneshot-repository\=').
 
 A prefix argument PICK-MODEL asks for the model."
   (interactive "P")
