@@ -221,6 +221,28 @@
                           [remap +workspace/switch-to-0])
               'agent-repl-switch-to-workspace-1)))
 
+;;;; ---- The turn-recency chords and the end of the bar ----
+
+(ert-deftest agent-repl-test-keybindings-meta-0-jumps-to-the-last-started ()
+  "`M-0' jumps to the workspace that most recently started a turn."
+  (should (eq (lookup-key agent-repl-workspace-numerals-mode-map (kbd "M-0"))
+              'agent-repl-switch-to-last-started-workspace)))
+
+(ert-deftest agent-repl-test-keybindings-meta-close-paren-jumps-to-the-last-finished ()
+  "`M-)' jumps to the workspace that most recently ended a turn."
+  (should (eq (lookup-key agent-repl-workspace-numerals-mode-map (kbd "M-)"))
+              'agent-repl-switch-to-last-finished-workspace)))
+
+(ert-deftest agent-repl-test-keybindings-meta-super-close-paren-is-the-end-of-the-bar ()
+  "`M-s-)' switches to the last tab on the bar, what `M-0' used to do."
+  (should (eq (lookup-key agent-repl-workspace-numerals-mode-map (kbd "M-s-)"))
+              'agent-repl-switch-to-last-workspace)))
+
+(ert-deftest agent-repl-test-keybindings-super-0-stays-the-end-of-the-bar ()
+  "`s-0' keeps the end of the bar."
+  (should (eq (lookup-key agent-repl-workspace-numerals-mode-map (kbd "s-0"))
+              'agent-repl-switch-to-last-workspace)))
+
 ;;;; ---- Every retired command is gone ----
 
 (ert-deftest agent-repl-test-keybindings-retired-commands-are-gone ()

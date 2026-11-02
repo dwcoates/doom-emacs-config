@@ -147,6 +147,7 @@
                 (agent-repl-switch-to-previous-workspace "Switch to the workspace or chat thread selected before this one.")
                 (agent-repl-switch-sidebar-app "Switch between the last workspace and the last chat thread; a new thread when none was viewed in the last hour.")
                 (agent-repl-switch-to-last-finished-workspace "Switch to the workspace that most recently finished its turn.")
+                (agent-repl-switch-to-last-started-workspace "Switch to the workspace that most recently started a turn.")
                 (agent-repl-open-most-recent-workspace "Switch to the most recently selected workspace not yet visited this cycle.")
                 (agent-repl-switch-to-project "Switch to a current or recent workspace, or to a project.")
                 (agent-repl-switch-to-any-workspace "Switch to any known workspace, opening it first when needed.")))

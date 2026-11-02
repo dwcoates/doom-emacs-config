@@ -73,6 +73,7 @@ status arm and whatever else the case is about."
                    :last-selected nil
                    :last-turn-ended nil
                    :last-turn-boundary nil
+                   :last-turn-started nil
                    :closure nil
                    :last-updated (:at-ms 1)
                    :availability (:arm :available :value nil)
@@ -274,6 +275,15 @@ status arm and whatever else the case is about."
                              (agent-repl-test-wire-roster--row
                               "\"done\":{}" "\"lastTurnBoundary\":{\"atMs\":\"1756400000000\"}"))
                             :last-turn-boundary)
+                 '(:at-ms 1756400000000))))
+
+(ert-deftest agent-repl-test-wire-roster-row-decodes-the-last-turn-started-instant ()
+  "A row carrying `lastTurnStarted' decodes its newest turn start."
+  (should (equal (plist-get (agent-repl-test-wire-roster--decode
+                             #'agent-repl-wire-decode-roster-row
+                             (agent-repl-test-wire-roster--row
+                              "\"done\":{}" "\"lastTurnStarted\":{\"atMs\":\"1756400000000\"}"))
+                            :last-turn-started)
                  '(:at-ms 1756400000000))))
 
 (ert-deftest agent-repl-test-wire-roster-row-last-turn-ended-refuses-an-unknown-field ()
@@ -601,6 +611,7 @@ name: each one's breach names that message exactly as the helper's does."
   (dolist (pair '((agent-repl-wire-decode-roster-row-last-selected . "RosterRowLastSelected")
                   (agent-repl-wire-decode-roster-row-last-turn-ended . "RosterRowLastTurnEnded")
                   (agent-repl-wire-decode-roster-row-last-turn-boundary . "RosterRowLastTurnBoundary")
+                  (agent-repl-wire-decode-roster-row-last-turn-started . "RosterRowLastTurnStarted")
                   (agent-repl-wire-decode-roster-row-when-merged . "RosterRowWhenMerged")))
     (let ((json "{\"atMs\":\"1\",\"extra\":1}"))
       (should (equal (agent-repl-test-wire-roster--breach (car pair) json)

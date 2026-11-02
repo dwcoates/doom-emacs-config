@@ -317,9 +317,8 @@ Each result is `(RELATIVE-FILE OWNER FORM)'."
     ("commands.el" agent-repl-switch-sidebar-app
      "[agent-repl] No workspace to switch to"
      "tells the user SPC SPC from Chat found no workspace to go back to")
-    ("commands.el" agent-repl-switch-to-last-finished-workspace
-     "[agent-repl] No other workspace has finished"
-     "tells the user SPC TAB g found no other finished workspace to jump to")
+    ("commands.el" agent-repl--jump-to-ranked-workspace "[agent-repl] %s"
+     "tells the user SPC TAB g or M-0 or M-) found no other workspace to jump to, in the gesture's own words")
     ("commands.el" agent-repl-switch-to-workspace
      "[agent-repl] No workspace tabs on the bar"
      "explains why the requested interactive switch did nothing")

@@ -853,6 +853,56 @@ naming its own row field, so no accessor hand-rolls a divergent read."
                        "repo" (list (agent-repl-test-roster--row "a" "first" :ready))))))
     (should-not (agent-repl-roster-last-turn-boundary-ms "first"))))
 
+;;; --- The last-started ranking
+
+(defmacro agent-repl-test-roster--with-starts (rows &rest body)
+  "Run BODY with ROWS (list of (NAME STATUS STARTED-MS)) as the roster's rows."
+  (declare (indent 1))
+  `(let ((rows ,rows))
+     (cl-letf (((symbol-function 'agent-repl-roster-row-for-ws)
+                (lambda (ws)
+                  (let ((row (assoc ws rows)))
+                    (and row
+                         (list :status (list :arm (nth 1 row) :value nil)
+                               :last-turn-started (and (nth 2 row)
+                                                       (list :at-ms (nth 2 row)))))))))
+       ,@body)))
+
+(ert-deftest agent-repl-test-roster-last-turn-started-ms-reads-the-row ()
+  "The accessor reads the row's turn-start instant."
+  (agent-repl-test-roster--with-starts '(("a" :done 123))
+    (should (equal (agent-repl-roster-last-turn-started-ms "a") 123))))
+
+(ert-deftest agent-repl-test-roster-last-turn-started-ms-nil-without-a-turn ()
+  "A row with no turn start answers nil."
+  (agent-repl-test-roster--with-starts '(("a" :ready nil))
+    (should-not (agent-repl-roster-last-turn-started-ms "a"))))
+
+(ert-deftest agent-repl-test-roster-last-started-picks-the-newest-start ()
+  "The workspace whose turn started last wins."
+  (agent-repl-test-roster--with-starts '(("a" :done 100) ("b" :done 900) ("c" :done 500))
+    (should (equal (agent-repl-roster-last-started-name '("a" "b" "c")) "b"))))
+
+(ert-deftest agent-repl-test-roster-last-started-counts-a-running-turn ()
+  "A workspace still working counts by its start, unlike a finish."
+  (agent-repl-test-roster--with-starts '(("a" :done 100) ("b" :thinking 900))
+    (should (equal (agent-repl-roster-last-started-name '("a" "b")) "b"))))
+
+(ert-deftest agent-repl-test-roster-last-started-skips-a-row-without-a-start ()
+  "A row with no recorded start has nothing to rank by."
+  (agent-repl-test-roster--with-starts '(("a" :done 100) ("b" :ready nil))
+    (should (equal (agent-repl-roster-last-started-name '("b" "a")) "a"))))
+
+(ert-deftest agent-repl-test-roster-last-started-ties-keep-the-given-order ()
+  "Equal starts keep the order NAMES gives them."
+  (agent-repl-test-roster--with-starts '(("a" :done 100) ("b" :done 100))
+    (should (equal (agent-repl-roster-last-started-name '("b" "a")) "b"))))
+
+(ert-deftest agent-repl-test-roster-last-started-is-nil-with-no-start ()
+  "No started workspace means no jump target."
+  (agent-repl-test-roster--with-starts '(("a" :ready nil))
+    (should-not (agent-repl-roster-last-started-name '("a")))))
+
 ;;; --- The last-finished ranking
 
 (defmacro agent-repl-test-roster--with-finishes (rows &rest body)

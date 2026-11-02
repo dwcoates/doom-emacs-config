@@ -1038,6 +1038,27 @@ the roster has no row for WS or no turn of WS has started.  The one-line
 tab bar keeps the tabs newest by it (`agent-repl--tabline-recency-keep')."
   (agent-repl-roster--instant-ms ws :last-turn-boundary))
 
+(defun agent-repl-roster-last-turn-started-ms (ws)
+  "Return WS's most recent turn-start instant in epoch ms, or nil.
+Read from WS's roster row (`RosterRowLastTurnStarted'): the running turn's
+start, else the newest durable start, resolved by the daemon so it survives
+an Emacs restart.  nil when the roster has no row for WS or no turn of WS
+has started."
+  (agent-repl-roster--instant-ms ws :last-turn-started))
+
+(defun agent-repl-roster-last-started-name (names)
+  "Return the one of NAMES whose turn most recently STARTED, or nil.
+Ranks by `agent-repl-roster-last-turn-started-ms', newest first, whatever
+the workspace's status now: a turn still running and a turn long closed
+both count by their start.  A name with no recorded start is not a
+candidate.  Ties keep the order NAMES gives them."
+  (let (best best-ms)
+    (dolist (name names)
+      (let ((ms (agent-repl-roster-last-turn-started-ms name)))
+        (when (and ms (or (null best-ms) (> ms best-ms)))
+          (setq best name best-ms ms))))
+    best))
+
 (defun agent-repl-roster-last-finished-name (names)
   "Return the one of NAMES that most recently FINISHED, or nil.
 FINISHED is the move from working (red) to done (green): the row's arm

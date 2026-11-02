@@ -1105,7 +1105,7 @@ Binds `switched' to the requested target and `asked' to the names ranked."
   "A jump records where it went from, where to, and the turn-end instant."
   (agent-repl-test-commands--with-last-finished "here" '("here" "b") "b"
     (agent-repl-switch-to-last-finished-workspace)
-    (should (member "elisp.commands.last-finished from=here target=b ended-ms=42" logged))))
+    (should (member "elisp.commands.last-finished from=here target=b instant-ms=42" logged))))
 
 (ert-deftest agent-repl-test-commands-last-finished-without-a-candidate-is-a-logged-no-op ()
   "No finished workspace requests nothing and says so in the log."
@@ -1113,6 +1113,49 @@ Binds `switched' to the requested target and `asked' to the names ranked."
     (agent-repl-switch-to-last-finished-workspace)
     (should-not switched)
     (should (member "elisp.commands.last-finished-none from=here candidates=1" logged))))
+
+(defmacro agent-repl-test-commands--with-last-started (shown drawn started &rest body)
+  "Run BODY standing on SHOWN with DRAWN tabs, the start ranking answering STARTED.
+Binds `switched' to the requested target and `asked' to the names ranked."
+  (declare (indent 3))
+  `(let ((switched nil) (asked :unset) (logged nil))
+     (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () ,shown))
+               ((symbol-function 'agent-repl--ws-log-name) (lambda (ws) ws))
+               ((symbol-function 'agent-repl--drawn-tab-names) (lambda () ,drawn))
+               ((symbol-function 'agent-repl-roster-last-started-name)
+                (lambda (names) (setq asked names) ,started))
+               ((symbol-function 'agent-repl-roster-last-turn-started-ms) (lambda (_ws) 77))
+               ((symbol-function 'agent-repl--info)
+                (agent-repl-test--record-into logged))
+               ((symbol-function 'agent-repl-host-request-switch)
+                (lambda (ws trigger) (setq switched (cons ws trigger))))
+               ((symbol-function 'message) (lambda (&rest _) nil)))
+       ,@body)))
+
+(ert-deftest agent-repl-test-commands-last-started-requests-the-ranked-target ()
+  "The jump requests the switch to the workspace the start ranking names."
+  (agent-repl-test-commands--with-last-started "here" '("here" "a" "b") "b"
+    (agent-repl-switch-to-last-started-workspace)
+    (should (equal switched '("b" . last-started)))))
+
+(ert-deftest agent-repl-test-commands-last-started-never-ranks-the-shown-workspace ()
+  "The workspace the user stands in is not a candidate."
+  (agent-repl-test-commands--with-last-started "here" '("a" "here" "b") "a"
+    (agent-repl-switch-to-last-started-workspace)
+    (should (equal asked '("a" "b")))))
+
+(ert-deftest agent-repl-test-commands-last-started-logs-the-switch ()
+  "A jump records where it went from, where to, and the turn-start instant."
+  (agent-repl-test-commands--with-last-started "here" '("here" "b") "b"
+    (agent-repl-switch-to-last-started-workspace)
+    (should (member "elisp.commands.last-started from=here target=b instant-ms=77" logged))))
+
+(ert-deftest agent-repl-test-commands-last-started-without-a-candidate-is-a-logged-no-op ()
+  "No other started workspace requests nothing and says so in the log."
+  (agent-repl-test-commands--with-last-started "here" '("here" "a") nil
+    (agent-repl-switch-to-last-started-workspace)
+    (should-not switched)
+    (should (member "elisp.commands.last-started-none from=here candidates=1" logged))))
 
 ;;;; ---- Navigation follows the DRAWN tab order ----
 

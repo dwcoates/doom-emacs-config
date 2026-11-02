@@ -190,9 +190,11 @@ the module."
 ;; highlighted and `M-2' on the FIRST tab.  Every chord here names the tab
 ;; the DAEMON numbers N (`agent-repl--numbered-tab'), the number the bar and
 ;; the sidebar both paint, so the numerals, the picture and the sidebar
-;; cannot disagree.  `M-0' is ours too: it runs
-;; `agent-repl-switch-to-last-workspace', the tab at the END of the drawn
-;; bar, where Doom's `+workspace/switch-to-final' took persp-mode's last.
+;; cannot disagree.  `s-0' and `M-s-)' are ours
+;; too: they run `agent-repl-switch-to-last-workspace', the tab at the END of
+;; the drawn bar, where Doom's `+workspace/switch-to-final' took persp-mode's
+;; last.  `M-0' jumps to the workspace that most recently STARTED a turn and
+;; `M-)' to the one that most recently ENDED one.
 ;;
 ;; WHY A KEYMAP OF OUR OWN, and not a later `map!' over Doom's.  Doom's
 ;; numerals are `:g' bindings, i.e. `global-map' entries, and beating a
@@ -227,6 +229,11 @@ the module."
         (define-key map (kbd (format "%s-%d" modifier n))
                     (intern (format "agent-repl-switch-to-workspace-%d" n)))))
     (define-key map (kbd (format "%s-0" modifier)) 'agent-repl-switch-to-last-workspace))
+  ;; `M-0' and `M-)' are the turn-recency jumps; the end of the bar is
+  ;; `M-s-)'.  Command-0 keeps the end of the bar.
+  (define-key map (kbd "M-0") 'agent-repl-switch-to-last-started-workspace)
+  (define-key map (kbd "M-)") 'agent-repl-switch-to-last-finished-workspace)
+  (define-key map (kbd "M-s-)") 'agent-repl-switch-to-last-workspace)
   ;; DOOM'S OWN WORKSPACE NAVIGATION IS REMAPPED, wherever it is bound
   ;; (`SPC TAB [', `SPC TAB ]', `SPC TAB 1'..`9'): those commands switch the
   ;; frame locally over persp-mode's list, and every switch trigger must
@@ -249,7 +256,8 @@ the module."
 ;; after Emacs started never reached it.
 (defvar agent-repl-workspace-numerals-mode-map (make-sparse-keymap)
   "Keymap carrying `M-0\=' .. `M-9\=' and `s-0\=' .. `s-9\=', the bar chords.
-`M-1\=' .. `M-9\=' are slots, `M-0\=' the last tab on the bar.
+`M-1\=' .. `M-9\=' are slots, `M-0\=' and `M-)\=' the turn-recency jumps,
+`M-s-)\=' the last tab on the bar.
 Built from `agent-repl-switch-numeral-count', the modifiers in
 `agent-repl-switch-numeral-modifiers' and the commands `commands.el\='
 generates from the same number, so a chord with no command behind it --
