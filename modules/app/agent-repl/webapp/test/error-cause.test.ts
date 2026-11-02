@@ -1,22 +1,14 @@
 // The cause of a thrown value, as records and failures carry it. See
 // src/error-cause.ts.
-import { readdirSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import { errorCause } from "../src/error-cause.js";
+import { filesUnder } from "./files-under.js";
 
 const SRC = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "src");
-
-/** Every TypeScript source under DIR, as paths relative to SRC. */
-function sources(dir: string): string[] {
-  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
-    const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) return sources(full);
-    return entry.name.endsWith(".ts") ? [path.relative(SRC, full)] : [];
-  });
-}
 
 describe("errorCause", () => {
   const cases: { name: string; err: unknown; want: string }[] = [
@@ -40,9 +32,9 @@ describe("errorCause", () => {
     const handRolled = /instanceof Error \? `\$\{\w+\.name\}: \$\{\w+\.message\}` : String\(/;
 
     // Act
-    const sites = sources(SRC).filter(
-      (file) => file !== "error-cause.ts" && handRolled.test(readFileSync(path.join(SRC, file), "utf8")),
-    );
+    const sites = filesUnder(SRC)
+      .map((file) => path.relative(SRC, file))
+      .filter((file) => file !== "error-cause.ts" && handRolled.test(readFileSync(path.join(SRC, file), "utf8")));
 
     // Assert
     expect(sites).toEqual([]);
