@@ -4,16 +4,15 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import { FOCUS_LEFT_EMACS, type FocusLeftSource } from "../../src/focus-left.js";
-import { LevelWindow } from "../../../agent-shim/logging/ts/level-window.js";
 import { SIDEBAR_ID, SIDEBAR_ROOT_CLASS, startSidebarPage, type StartSidebarPageDeps } from "../../src/host/sidebar-page.js";
 import { log, setLogger, type ForwardingLogger } from "../../src/log.js";
-import { createDaemonOrigin } from "../../src/rpc/daemon-origin.js";
 import type { DaemonContext } from "../../src/rpc/context.js";
 import { createSidebarNotices } from "../../src/sidebar/notices.js";
 import { fakePopupChannel, quietPopupChannel } from "./popup-channel.js";
 import type { WebhostSidebarDeps } from "../../src/sidebar/sidebar.js";
 import { captureLogRecords } from "../log-capture.js";
-import { clientLogRecorder } from "../rpc/client-log-recorder.js";
+import { quietWebhostRuntime } from "./webhost-runtime.js";
+import type { WebhostRuntime } from "../../src/host/document.js";
 import { beginPage, tearDownPage } from "../../src/page-teardown.js";
 import { levelApplyShapeOf } from "./level-apply-shape.js";
 
@@ -39,12 +38,10 @@ function recordingRail() {
   return { mount, told };
 }
 
-/** Start the page with DEPS over a quiet client. */
-function start(deps: StartSidebarPageDeps = {}) {
-  const { client } = clientLogRecorder();
+/** Start the page with DEPS on RUNTIME, a quiet one when absent. */
+function start(deps: Omit<StartSidebarPageDeps, "runtime"> = {}, runtime: WebhostRuntime = quietWebhostRuntime("sidebar").runtime) {
   return startSidebarPage(document, window, {
-    client,
-    installLogger: () => undefined,
+    runtime,
     installCensus: () => ({ stop: () => undefined }),
     webappBuild: () => "Web1",
     mount: recordingRail().mount,
@@ -161,10 +158,7 @@ describe("startSidebarPage", () => {
   it("counts the warnings it records in its notices", () => {
     // Arrange
     const notices = createSidebarNotices();
-    start({
-      notices,
-      installLogger: (logger: ForwardingLogger) => setLogger(logger),
-    });
+    start({ notices }, quietWebhostRuntime("sidebar", (logger: ForwardingLogger) => setLogger(logger)).runtime);
 
     // Act
     log.warn("careful", { operation: "test.sidebar-warn", context: {} });
@@ -236,8 +230,9 @@ describe("markShown", () => {
 describe("setDaemon", () => {
   it("points the rail's calls at the daemon named", () => {
     // Arrange
-    const daemon = createDaemonOrigin("http://host.localhost:1");
-    const page = start({ daemon });
+    const { runtime } = quietWebhostRuntime("sidebar");
+    const daemon = runtime.daemon;
+    const page = start({}, runtime);
 
     // Act
     const answer = page.setDaemon("http://host.localhost:2");
@@ -248,10 +243,11 @@ describe("setDaemon", () => {
 
   it("answers unchanged for the daemon it already dials", () => {
     // Arrange
-    const page = start({ daemon: createDaemonOrigin("http://host.localhost:1") });
+    const { runtime } = quietWebhostRuntime("sidebar");
+    const page = start({}, runtime);
 
     // Act
-    const answer = page.setDaemon("http://host.localhost:1");
+    const answer = page.setDaemon(runtime.daemon.current());
 
     // Assert
     expect(outcome(answer)).toBe("unchanged");
@@ -259,22 +255,24 @@ describe("setDaemon", () => {
 
   it("refuses what is no daemon origin, leaving the daemon where it was", () => {
     // Arrange
-    const daemon = createDaemonOrigin("http://host.localhost:1");
-    const page = start({ daemon });
+    const { runtime } = quietWebhostRuntime("sidebar");
+    const before = runtime.daemon.current();
+    const page = start({}, runtime);
 
     // Act
     const answer = page.setDaemon("ftp://elsewhere");
 
     // Assert
-    expect([outcome(answer), daemon.current()]).toEqual(["refused", "http://host.localhost:1"]);
+    expect([outcome(answer), runtime.daemon.current()]).toEqual(["refused", before]);
   });
 });
 
 describe("setLogLevel", () => {
   it("opens a level window until the end named", () => {
     // Arrange
-    const level = LevelWindow.fixed("info");
-    const page = start({ level });
+    const { runtime } = quietWebhostRuntime("sidebar");
+    const level = runtime.level;
+    const page = start({}, runtime);
 
     // Act
     const answer = page.setLogLevel("debug", Date.now() + 60_000);
@@ -285,8 +283,9 @@ describe("setLogLevel", () => {
 
   it("closes the window at info", () => {
     // Arrange
-    const level = LevelWindow.fixed("info");
-    const page = start({ level });
+    const { runtime } = quietWebhostRuntime("sidebar");
+    const level = runtime.level;
+    const page = start({}, runtime);
     page.setLogLevel("debug", Date.now() + 60_000);
 
     // Act

@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 // The host page's start: the workspace shell cleared, the root marked, the
 // host and its focus answer handed to Emacs. See src/host/main.ts.
-import { afterEach, describe, expect, it } from "vitest";
-import { resetLoggingForTests, setLogger } from "../../src/log.js";
-import { captureLogRecords } from "../log-capture.js";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { captureLogRecords, forwardedRecord, type LogCapture } from "../log-capture.js";
+import { quietWebhostRuntime } from "./webhost-runtime.js";
 
 import { HOST_ROOT_CLASS, WEBHOST_FRAMES_CLASS, startHost } from "../../src/host/main.js";
 import { WEBHOST_GATE_ID } from "../../src/host/gate.js";
@@ -13,6 +13,19 @@ import type { PopupLayerEnv } from "../../src/host/sidebar-popups.js";
 import { quietPopupChannel } from "./popup-channel.js";
 
 let started: Host | null = null;
+let capture: LogCapture;
+
+/** The runtime the boot makes before the host's code loads, over a quiet client. */
+const quiet = () => quietWebhostRuntime("host").runtime;
+
+/** A queued call that throws, as a call against a broken host would. */
+const throwingCall = (): never => {
+  throw new TypeError("no such page");
+};
+
+beforeEach(() => {
+  capture = captureLogRecords("debug");
+});
 
 /** The services a suite not about them start: none, and no daemon dialed. */
 const noServices = (): void => undefined;
@@ -37,7 +50,8 @@ describe("startHost", () => {
     document.body.innerHTML = '<nav id="ws-sidebar"></nav><div id="main-col"></div>';
 
     // Act
-    started = startHost(document, window, { startServices: noServices, installPopups: noPopups });
+    started = startHost(document, window, {
+      runtime: quiet(), startServices: noServices, installPopups: noPopups });
 
     // Assert
     expect(document.getElementById("main-col")).toBeNull();
@@ -45,7 +59,8 @@ describe("startHost", () => {
 
   it("installs the status colors' values before the gate draws", () => {
     // Act
-    started = startHost(document, window, { startServices: noServices, installPopups: noPopups });
+    started = startHost(document, window, {
+      runtime: quiet(), startServices: noServices, installPopups: noPopups });
 
     // Assert
     expect(document.head.querySelector('style[data-source="render-colors.json#color_values"]')).not.toBeNull();
@@ -53,7 +68,8 @@ describe("startHost", () => {
 
   it("lays out the stack of workspace pages, the load button over it, and the gate below them", () => {
     // Act
-    started = startHost(document, window, { startServices: noServices, installPopups: noPopups });
+    started = startHost(document, window, {
+      runtime: quiet(), startServices: noServices, installPopups: noPopups });
 
     // Assert
     expect([...document.body.children].map((e) => e.className || e.id)).toEqual([
@@ -69,7 +85,8 @@ describe("startHost", () => {
 
     // Act
     started = startHost(document, window, {
-      startServices: (_doc, _win, _host, deps) => {
+      runtime: quiet(),
+      startServices: (_doc, _win, _host, _runtime, deps) => {
         handed = deps.load;
       },
       installPopups: noPopups,
@@ -85,7 +102,8 @@ describe("startHost", () => {
 
     // Act
     started = startHost(document, window, {
-      startServices: (_doc, _win, _host, deps) => {
+      runtime: quiet(),
+      startServices: (_doc, _win, _host, _runtime, deps) => {
         handed = deps.gate;
       },
       installPopups: noPopups,
@@ -97,7 +115,8 @@ describe("startHost", () => {
 
   it("holds the workspace pages in the stack", () => {
     // Arrange
-    started = startHost(document, window, { startServices: noServices, installPopups: noPopups });
+    started = startHost(document, window, {
+      runtime: quiet(), startServices: noServices, installPopups: noPopups });
 
     // Act
     started.ensure("a", "http://ws-a.localhost:1/");
@@ -113,6 +132,7 @@ describe("startHost", () => {
 
     // Act
     started = startHost(document, window, {
+      runtime: quiet(),
       startServices: () => {
         order.push("services");
       },
@@ -125,19 +145,12 @@ describe("startHost", () => {
     expect(order).toEqual(["services", "popups", "queued call"]);
   });
 
-  it("runs a queued call that logs with the logger the services installed", () => {
+  it("runs a queued call that logs with the logger its runtime installed", () => {
     // Arrange
-    const capture = captureLogRecords("debug");
-    resetLoggingForTests();
     window.__agentReplHostPending = [(host) => host.focusMoved()];
 
     // Act
-    started = startHost(document, window, {
-      startServices: () => {
-        setLogger(capture.logger);
-      },
-      installPopups: noPopups,
-    });
+    started = startHost(document, window, { runtime: quiet(), startServices: noServices, installPopups: noPopups });
 
     // Assert
     capture.logger.flush();
@@ -146,28 +159,71 @@ describe("startHost", () => {
 
   it("runs every call queued after one that logs", () => {
     // Arrange
-    const capture = captureLogRecords("debug");
-    resetLoggingForTests();
     window.__agentReplHostPending = [
       (host) => host.focusMoved(),
       (host) => host.ensure("a", "http://ws-a.localhost:1/"),
     ];
 
     // Act
-    started = startHost(document, window, {
-      startServices: () => {
-        setLogger(capture.logger);
-      },
-      installPopups: noPopups,
-    });
+    started = startHost(document, window, { runtime: quiet(), startServices: noServices, installPopups: noPopups });
 
     // Assert
     expect(document.querySelectorAll(`.${WEBHOST_FRAMES_CLASS} iframe`).length).toBe(1);
   });
 
+  it("records what each call Emacs queued answered once it has run them", async () => {
+    // Arrange
+    window.__agentReplHostPending = [
+      (host) => host.ensure("a", "http://ws-a.localhost:1/"),
+      (host) => host.show("a"),
+    ];
+
+    // Act
+    started = startHost(document, window, { runtime: quiet(), startServices: noServices, installPopups: noPopups });
+
+    // Assert
+    expect((await forwardedRecord(capture, "webhost.boot-started")).context).toMatchObject({
+      drained: 2,
+      answers: [
+        { op: "ensure", id: "a", outcome: "created" },
+        { op: "show", id: "a", outcome: "shown" },
+      ],
+    });
+  });
+
+  it("names the queued call that threw", () => {
+    // Arrange
+    window.__agentReplHostPending = [() => undefined, throwingCall];
+
+    // Act
+    const act = () => startHost(document, window, { runtime: quiet(), startServices: noServices, installPopups: noPopups });
+
+    // Assert
+    expect(act).toThrow("queued call 2 of 2 threw: TypeError: no such page");
+  });
+
+  it("hands the services the runtime its logger was made with", () => {
+    // Arrange
+    const made = quiet();
+    let handed: unknown = null;
+
+    // Act
+    started = startHost(document, window, {
+      runtime: made,
+      startServices: (_doc, _win, _host, runtime) => {
+        handed = runtime;
+      },
+      installPopups: noPopups,
+    });
+
+    // Assert
+    expect(handed).toBe(made);
+  });
+
   it("draws no sidebar of its own", () => {
     // Act
-    started = startHost(document, window, { startServices: noServices, installPopups: noPopups });
+    started = startHost(document, window, {
+      runtime: quiet(), startServices: noServices, installPopups: noPopups });
 
     // Assert
     expect(document.getElementById("ws-sidebar")).toBeNull();
@@ -175,7 +231,8 @@ describe("startHost", () => {
 
   it("marks the root as the host", () => {
     // Act
-    started = startHost(document, window, { startServices: noServices, installPopups: noPopups });
+    started = startHost(document, window, {
+      runtime: quiet(), startServices: noServices, installPopups: noPopups });
 
     // Assert
     expect(document.documentElement.classList.contains(HOST_ROOT_CLASS)).toBe(true);
@@ -183,7 +240,8 @@ describe("startHost", () => {
 
   it("hands the host to Emacs", () => {
     // Act
-    started = startHost(document, window, { startServices: noServices, installPopups: noPopups });
+    started = startHost(document, window, {
+      runtime: quiet(), startServices: noServices, installPopups: noPopups });
 
     // Assert
     expect(window.agentReplHost).toBe(started);
@@ -191,7 +249,8 @@ describe("startHost", () => {
 
   it("answers Emacs's focus question for the host", () => {
     // Arrange
-    started = startHost(document, window, { startServices: noServices, installPopups: noPopups });
+    started = startHost(document, window, {
+      runtime: quiet(), startServices: noServices, installPopups: noPopups });
     const field = document.createElement("textarea");
     document.body.append(field);
 
@@ -204,7 +263,8 @@ describe("startHost", () => {
 
   it("puts its focus answer back once the page has loaded", () => {
     // Arrange
-    started = startHost(document, window, { startServices: noServices, installPopups: noPopups });
+    started = startHost(document, window, {
+      runtime: quiet(), startServices: noServices, installPopups: noPopups });
     window.xwHasFocus = () => false;
     const field = document.createElement("textarea");
     document.body.append(field);
@@ -226,7 +286,8 @@ describe("startHost", () => {
     ];
 
     // Act
-    started = startHost(document, window, { startServices: noServices, installPopups: noPopups });
+    started = startHost(document, window, {
+      runtime: quiet(), startServices: noServices, installPopups: noPopups });
 
     // Assert
     expect(order.map((answer) => (JSON.parse(answer) as { outcome: string }).outcome)).toEqual(["created", "shown"]);
@@ -237,7 +298,8 @@ describe("startHost", () => {
     window.__agentReplHostPending = [];
 
     // Act
-    started = startHost(document, window, { startServices: noServices, installPopups: noPopups });
+    started = startHost(document, window, {
+      runtime: quiet(), startServices: noServices, installPopups: noPopups });
 
     // Assert
     expect(window.__agentReplHostPending).toBeUndefined();
@@ -250,6 +312,7 @@ describe("startHost", () => {
 
     // Act
     started = startHost(document, window, {
+      runtime: quiet(),
       startServices: noServices,
       popupChannel: () => channel,
       installPopups: (e) => {

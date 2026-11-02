@@ -6,8 +6,10 @@
  * call, the workspace it names, its outcome, anything the call adds, and every
  * note the document made since its last answer (lisp/webhost.el
  * `agent-repl--webhost-record-note' records each at its level). Built here
- * once, so the two documents answer in one shape.
+ * once, so the two documents answer in one shape, and drain the calls Emacs
+ * queued before they started in one way (`runQueuedCalls`).
  */
+import { log } from "../log.js";
 
 /**
  * One note a document made for Emacs to record, at the level it deserves:
@@ -41,4 +43,38 @@ export function createCallAnswers(limit: number): CallAnswers {
       return JSON.stringify({ op, id, outcome, ...extra, notes: taken });
     },
   };
+}
+
+/**
+ * One queued call's answer, as the drain's record carries it: a call answer's
+ * op, id and outcome (every answer is JSON, `createCallAnswers`, so one that
+ * is not throws), and any other value as it is.
+ */
+function drainedAnswer(answer: unknown): unknown {
+  if (typeof answer !== "string") return answer;
+  const { op, id, outcome } = JSON.parse(answer) as { op?: unknown; id?: unknown; outcome?: unknown };
+  return { op, id, outcome };
+}
+
+/**
+ * Run on PAGE every call Emacs queued before the document started (QUEUE, in
+ * order), and record what each answered: the answers say whether the replay
+ * Emacs made at the document's commit reached it (2026-10-31). A call that
+ * throws stops the start: the error names which call it was, and the boot
+ * records it (boot.ts).
+ */
+export function runQueuedCalls<P>(queue: readonly ((page: P) => unknown)[] | undefined, page: P): void {
+  const calls = queue ?? [];
+  const answers = calls.map((call, index) => {
+    try {
+      return drainedAnswer(call(page));
+    } catch (err) {
+      const cause = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+      throw new Error(`queued call ${index + 1} of ${calls.length} threw: ${cause}`, { cause: err });
+    }
+  });
+  log.info("the document started and ran the calls Emacs queued", {
+    operation: "webhost.boot-started",
+    context: { drained: answers.length, answers },
+  });
 }

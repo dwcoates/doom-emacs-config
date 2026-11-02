@@ -19,7 +19,7 @@ import { log } from "../log.js";
 import type { DaemonContext } from "../rpc/context.js";
 import { requireCase, requireMessage, unreachablePushArm } from "../rpc/strict.js";
 import { watchStream, type StreamHandle } from "../rpc/streams.js";
-import { startWebhostDocument, type WebhostDocumentDeps } from "./document.js";
+import { startWebhostDocument, type WebhostDocumentDeps, type WebhostRuntime } from "./document.js";
 import type { Host } from "./host.js";
 import { createWebhostGate, type WebhostGate } from "./gate.js";
 import { createWebhostLoadButton, type WebhostLoadButton } from "./load-button.js";
@@ -70,7 +70,7 @@ export function watchColdGates(
 }
 
 /**
- * Start the webhost's services for HOST, served from WIN's origin.
+ * Start the webhost's services for HOST, served from WIN's origin, on RUNTIME's connection.
  *
  * Services that cannot start leave the pages working: the failure is logged
  * and listed in every page's warning chip, never thrown past the webhost.
@@ -80,9 +80,10 @@ export function startWebhostServices(
   doc: Document,
   win: Window,
   host: Host,
+  runtime: WebhostRuntime,
   deps: WebhostServicesDeps = {},
 ): { dispose(): void } {
-  const started = startWebhostDocument("host", doc, win, deps);
+  const started = startWebhostDocument(runtime, doc, win, deps);
   const { ctx, failures } = started;
   // THE WEBHOST'S FAILURES ARE LISTED IN EVERY PAGE'S CHIP: the whole set,
   // every time it changes.

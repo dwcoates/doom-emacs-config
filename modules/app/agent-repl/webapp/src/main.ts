@@ -92,6 +92,7 @@ import { createPromptEcho, installPromptEcho } from "./prompt-echo.js";
 import { createPageSeen } from "./page-seen.js";
 import { createAppContext, type AppContext } from "./rpc/context.js";
 import { isHostAddress, isSidebarAddress, pageAddress } from "./rpc/page-address.js";
+import { bootWebhostDocument } from "./host/boot.js";
 import { workspaceRef } from "./rpc/workspace-ref.js";
 import type { SubmitPromptCommandPanel } from "../../proto/gen/ts/agentrepl/v1/endpoint_submit_prompt_pb";
 import type { FeedId } from "../../proto/gen/ts/frontend/v1/feed_pb";
@@ -541,14 +542,23 @@ function reportBootFailure(err: unknown, failures: LocalFailures | null): void {
 // the build's identity (bin/build-frontend.sh), and it covers the host too.
 // THE SIDEBAR PAGE, `?sidebar=1` (src/host/sidebar-page.ts), is reached the
 // same way: the rail in Emacs's second web view.
+// Each installs its logger before that import (src/host/boot.ts).
 const started = isHostAddress(window.location.search)
-  ? import("./host/main.js").then((host) => {
-      host.startHost(document, window);
-    })
+  ? bootWebhostDocument(
+      "host",
+      window,
+      () => window.__agentReplHostPending?.length ?? 0,
+      () => import("./host/main.js"),
+      (host, runtime) => host.startHost(document, window, { runtime }),
+    )
   : isSidebarAddress(window.location.search)
-    ? import("./host/sidebar-page.js").then((sidebar) => {
-        sidebar.startSidebarPage(document, window);
-      })
+    ? bootWebhostDocument(
+        "sidebar",
+        window,
+        () => window.__agentReplSidebarPending?.length ?? 0,
+        () => import("./host/sidebar-page.js"),
+        (sidebar, runtime) => sidebar.startSidebarPage(document, window, { runtime }),
+      )
     : boot();
 started.catch((err: unknown) => {
   queueMicrotask(() => {

@@ -11,7 +11,7 @@ import { daemonUnreachable } from "../../src/failure/sink.js";
 import type { DaemonContext } from "../../src/rpc/context.js";
 import type { WorkspaceRoster } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import { captureLogRecords } from "../log-capture.js";
-import { clientLogRecorder } from "../rpc/client-log-recorder.js";
+import { quietWebhostRuntime } from "./webhost-runtime.js";
 import { beginPage, tearDownPage } from "../../src/page-teardown.js";
 
 let stop: { dispose(): void } | null = null;
@@ -75,10 +75,8 @@ function recordingColdGates() {
 
 /** Start the services with DEPS over a quiet client, keeping the page-wide logger. */
 function start(host: Host, deps: WebhostServicesDeps) {
-  const { client, logged } = clientLogRecorder();
-  stop = startWebhostServices(document, window, host, {
-    client,
-    installLogger: () => undefined,
+  const { runtime, logged } = quietWebhostRuntime("host");
+  stop = startWebhostServices(document, window, host, runtime, {
     installCensus: () => ({ stop: () => undefined }),
     webappBuild: () => "Web1",
     watchColdGates: recordingColdGates().watchColdGates,
