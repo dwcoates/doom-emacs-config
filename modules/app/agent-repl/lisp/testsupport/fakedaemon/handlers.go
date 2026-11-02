@@ -66,19 +66,11 @@ func (s *fakeServer) OpenFeed(ctx context.Context, req *connect.Request[v1.OpenF
 }
 
 func (s *fakeServer) WatchFeed(ctx context.Context, req *connect.Request[v1.WatchFeedRequest], stream *connect.ServerStream[v1.WatchFeedResponse]) error {
-	s.record(ctx, "WatchFeed", req.Msg)
-	logWarn("fakedaemon.stream.not-mocked", "a stream this fake does not mock was called",
-		map[string]any{"method": "WatchFeed"})
-	return connect.NewError(connect.CodeUnimplemented,
-		fmt.Errorf("fakedaemon mocks only Emacs's streams; WatchFeed is a webapp stream"))
+	return s.webappStreamNotMocked(ctx, "WatchFeed", req.Msg)
 }
 
 func (s *fakeServer) LoadFeedThrough(ctx context.Context, req *connect.Request[v1.LoadFeedThroughRequest], stream *connect.ServerStream[v1.LoadFeedThroughResponse]) error {
-	s.record(ctx, "LoadFeedThrough", req.Msg)
-	logWarn("fakedaemon.stream.not-mocked", "a stream this fake does not mock was called",
-		map[string]any{"method": "LoadFeedThrough"})
-	return connect.NewError(connect.CodeUnimplemented,
-		fmt.Errorf("fakedaemon mocks only Emacs's streams; LoadFeedThrough is a webapp stream"))
+	return s.webappStreamNotMocked(ctx, "LoadFeedThrough", req.Msg)
 }
 
 func (s *fakeServer) GetFeedPage(ctx context.Context, req *connect.Request[v1.GetFeedPageRequest]) (*connect.Response[v1.GetFeedPageResponse], error) {
@@ -198,19 +190,11 @@ func (s *fakeServer) AssignWorkspaceTask(ctx context.Context, req *connect.Reque
 }
 
 func (s *fakeServer) WatchTopbar(ctx context.Context, req *connect.Request[v1.WatchTopbarRequest], stream *connect.ServerStream[v1.WatchTopbarResponse]) error {
-	s.record(ctx, "WatchTopbar", req.Msg)
-	logWarn("fakedaemon.stream.not-mocked", "a stream this fake does not mock was called",
-		map[string]any{"method": "WatchTopbar"})
-	return connect.NewError(connect.CodeUnimplemented,
-		fmt.Errorf("fakedaemon mocks only Emacs's streams; WatchTopbar is a webapp stream"))
+	return s.webappStreamNotMocked(ctx, "WatchTopbar", req.Msg)
 }
 
 func (s *fakeServer) WatchWorkspaceMentions(ctx context.Context, req *connect.Request[v1.WatchWorkspaceMentionsRequest], stream *connect.ServerStream[v1.WatchWorkspaceMentionsResponse]) error {
-	s.record(ctx, "WatchWorkspaceMentions", req.Msg)
-	logWarn("fakedaemon.stream.not-mocked", "a stream this fake does not mock was called",
-		map[string]any{"method": "WatchWorkspaceMentions"})
-	return connect.NewError(connect.CodeUnimplemented,
-		fmt.Errorf("fakedaemon mocks only Emacs's streams; WatchWorkspaceMentions is a webapp stream"))
+	return s.webappStreamNotMocked(ctx, "WatchWorkspaceMentions", req.Msg)
 }
 
 func (s *fakeServer) SetModel(ctx context.Context, req *connect.Request[v1.SetModelRequest]) (*connect.Response[v1.SetModelResponse], error) {
@@ -234,11 +218,7 @@ func (s *fakeServer) SelectAccount(ctx context.Context, req *connect.Request[v1.
 }
 
 func (s *fakeServer) WatchFooter(ctx context.Context, req *connect.Request[v1.WatchFooterRequest], stream *connect.ServerStream[v1.WatchFooterResponse]) error {
-	s.record(ctx, "WatchFooter", req.Msg)
-	logWarn("fakedaemon.stream.not-mocked", "a stream this fake does not mock was called",
-		map[string]any{"method": "WatchFooter"})
-	return connect.NewError(connect.CodeUnimplemented,
-		fmt.Errorf("fakedaemon mocks only Emacs's streams; WatchFooter is a webapp stream"))
+	return s.webappStreamNotMocked(ctx, "WatchFooter", req.Msg)
 }
 
 func (s *fakeServer) UpdateHeldPrompt(ctx context.Context, req *connect.Request[v1.UpdateHeldPromptRequest]) (*connect.Response[v1.UpdateHeldPromptResponse], error) {
@@ -386,11 +366,7 @@ func (s *fakeServer) AdoptHostWorkspace(ctx context.Context, req *connect.Reques
 }
 
 func (s *fakeServer) WatchWebWorkspace(ctx context.Context, req *connect.Request[v1.WatchWebWorkspaceRequest], stream *connect.ServerStream[v1.WatchWebWorkspaceResponse]) error {
-	s.record(ctx, "WatchWebWorkspace", req.Msg)
-	logWarn("fakedaemon.stream.not-mocked", "a stream this fake does not mock was called",
-		map[string]any{"method": "WatchWebWorkspace"})
-	return connect.NewError(connect.CodeUnimplemented,
-		fmt.Errorf("fakedaemon mocks only Emacs's streams; WatchWebWorkspace is a webapp stream"))
+	return s.webappStreamNotMocked(ctx, "WatchWebWorkspace", req.Msg)
 }
 
 func (s *fakeServer) OpenLogin(ctx context.Context, req *connect.Request[v1.OpenLoginRequest]) (*connect.Response[v1.OpenLoginResponse], error) {
@@ -398,11 +374,7 @@ func (s *fakeServer) OpenLogin(ctx context.Context, req *connect.Request[v1.Open
 }
 
 func (s *fakeServer) WatchLoginTerminal(ctx context.Context, req *connect.Request[v1.WatchLoginTerminalRequest], stream *connect.ServerStream[v1.LoginTerminalOutput]) error {
-	s.record(ctx, "WatchLoginTerminal", req.Msg)
-	logWarn("fakedaemon.stream.not-mocked", "a stream this fake does not mock was called",
-		map[string]any{"method": "WatchLoginTerminal"})
-	return connect.NewError(connect.CodeUnimplemented,
-		fmt.Errorf("fakedaemon mocks only Emacs's streams; WatchLoginTerminal is a webapp stream"))
+	return s.webappStreamNotMocked(ctx, "WatchLoginTerminal", req.Msg)
 }
 
 func (s *fakeServer) SendLoginInput(ctx context.Context, req *connect.Request[v1.SendLoginInputRequest]) (*connect.Response[v1.SendLoginInputResponse], error) {
