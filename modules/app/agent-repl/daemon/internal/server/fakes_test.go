@@ -491,7 +491,7 @@ type fakeVerbs struct {
 	// remoteWorkspaces is the workspace each of remoteChanges was asked of.
 	remoteWorkspaces []ids.WorkspaceID
 	remoteOn         bool
-	remoteErr     error
+	remoteErr        error
 
 	// retries counts every RetryVendorError, answered with retryResponse and
 	// retryErr.
