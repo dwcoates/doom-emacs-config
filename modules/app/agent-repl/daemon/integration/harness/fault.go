@@ -127,6 +127,35 @@ func (d *Daemon) watchProcessEnd(t testing.TB) <-chan struct{} {
 	return done
 }
 
+// FailOnUnaskedExit closes this daemon's process latch when another process
+// the test's world depends on (the store, the sidecar) exits and ASKED says
+// nobody asked it to: no wait on the daemon can be satisfied without it, so
+// every wait ends with the exit, which STATUS names, as its cause. It watches
+// until EXITED closes or the test ends.
+func (d *Daemon) FailOnUnaskedExit(what string, exited <-chan struct{}, asked func() bool, status func() string) {
+	t, f := d.t, d.fault
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		select {
+		case <-stop:
+			return
+		case <-exited:
+		}
+		if asked() {
+			return
+		}
+		cause := fmt.Errorf("%s exited unasked, %s", what, status())
+		t.Logf("harness: fault latch closed: %v", cause)
+		f.cancel(cause)
+	}()
+	t.Cleanup(func() {
+		close(stop)
+		<-done
+	})
+}
+
 // ExpectFailedExit declares that the test means this daemon to exit failing
 // (a refused boot, a fatal record) on its own, so that exit fails no wait.
 func (d *Daemon) ExpectFailedExit() {
