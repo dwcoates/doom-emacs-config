@@ -1,8 +1,9 @@
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { escapeRegExp } from "../src/regexp.js";
 import { codeOf } from "./source-text.js";
+import { filesUnder } from "./files-under.js";
 
 describe("escapeRegExp", () => {
   const cases: Array<{ name: string; text: string }> = [
@@ -24,15 +25,7 @@ describe("escapeRegExp", () => {
 
   it("is the one escaper in the webapp's source", () => {
     // ARRANGE
-    const files: string[] = [];
-    const walk = (dir: string): void => {
-      for (const entry of readdirSync(dir)) {
-        const path = join(dir, entry);
-        if (statSync(path).isDirectory()) walk(path);
-        else if (path.endsWith(".ts")) files.push(path);
-      }
-    };
-    walk(join(process.cwd(), "src"));
+    const files = filesUnder(join(process.cwd(), "src"));
     // ACT
     const escapers = files.filter((file) => codeOf(readFileSync(file, "utf8")).includes("/[.*+?^${}()|[\\]\\\\]/g"));
     // ASSERT

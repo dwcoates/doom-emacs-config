@@ -2,13 +2,14 @@ package server
 
 import (
 	"agent-repld/internal/restarttiming"
+	"agent-repld/internal/sourcescan"
 	"context"
 	"errors"
 	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
-	"strings"
+	"slices"
 	"testing"
 	"time"
 
@@ -778,31 +779,13 @@ func TestServeThenEndFollowsACleanBodyWithTheEnding(t *testing.T) {
 // serveThenEnd: outside it, endStandingStream is called only by the page's own
 // drain and the host stream, whose endings follow work of their own.
 func TestEveryEndingStreamServesThroughServeThenEnd(t *testing.T) {
-	// Arrange.
-	files, err := filepath.Glob("*.go")
-	if err != nil {
-		t.Fatalf("glob: %v", err)
-	}
-	callers := map[string]int{}
-
 	// Act.
-	for _, file := range files {
-		if strings.HasSuffix(file, "_test.go") {
-			continue
-		}
-		source, err := os.ReadFile(file)
-		if err != nil {
-			t.Fatalf("read %s: %v", file, err)
-		}
-		if n := strings.Count(string(source), "\tendStandingStream(s, "); n > 0 {
-			callers[file] = n
-		}
-	}
+	sites := sourcescan.Sites(t, "\tendStandingStream(s, ")
 
 	// Assert.
-	want := map[string]int{"streams.go": 2, "page.go": 1}
-	if !maps.Equal(callers, want) {
-		t.Fatalf("endStandingStream callers = %v, want %v (serveThenEnd, the host stream, the page's drain)", callers, want)
+	want := []string{"page.go", "streams.go", "streams.go"}
+	if !slices.Equal(sites, want) {
+		t.Fatalf("endStandingStream call sites = %v, want %v (the page's drain, serveThenEnd, the host stream)", sites, want)
 	}
 }
 
