@@ -1978,14 +1978,71 @@ transiently activated workspace while eager-open is in progress."
         (should (equal agent-repl--recency-walk-landing "b"))))))
 
 (ert-deftest agent-repl-test-record-workspace-history-another-activation-ends-the-walk ()
-  "Activating any other workspace clears the walk mark and records the visit."
+  "Activating any other workspace ends the walk: its landing, then the new visit, lead."
   (agent-repl-test--with-clean-state
     (let ((agent-repl--workspace-history '("a" "b" "c"))
           (agent-repl--recency-walk-landing "b"))
       (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "c")))
         (agent-repl--record-workspace-history)
-        (should (equal agent-repl--workspace-history '("c" "a" "b")))
+        (should (equal agent-repl--workspace-history '("c" "b" "a")))
         (should-not agent-repl--recency-walk-landing)))))
+
+;;;; ---- Tests: --end-recency-walk ----
+
+(ert-deftest agent-repl-test-end-recency-walk-records-the-landing-as-a-visit ()
+  "Ending a walk puts its landing first in the history and stamps it viewed."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((agent-repl--workspace-history '("a" "b" "c"))
+          (agent-repl--recency-walk-landing "c"))
+      (agent-repl--ws-put "c" :project-dir "/tmp/c")
+      (cl-letf (((symbol-function 'current-time) (lambda () '(25000 0))))
+        ;; Act
+        (agent-repl--end-recency-walk "d" 'picker))
+      ;; Assert
+      (should (equal agent-repl--workspace-history '("c" "a" "b")))
+      (should (equal (agent-repl--ws-get "c" :last-viewed-at) '(25000 0))))))
+
+(ert-deftest agent-repl-test-end-recency-walk-clears-the-landing ()
+  "Ending a walk clears its landing mark, so the landing's next activation is a visit."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((agent-repl--workspace-history '("a" "b"))
+          (agent-repl--recency-walk-landing "b"))
+      ;; Act
+      (agent-repl--end-recency-walk "a" 'picker)
+      ;; Assert
+      (should-not agent-repl--recency-walk-landing))))
+
+(ert-deftest agent-repl-test-end-recency-walk-logs-the-landing-and-reason ()
+  "Ending a walk records the landing it ended on and what ended it, in LOG-WS's sink."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((agent-repl--workspace-history '("a" "b"))
+          (agent-repl--recency-walk-landing "b")
+          (records nil))
+      (cl-letf (((symbol-function 'agent-repl--info)
+                 (lambda (ws fmt &rest args) (push (cons ws (apply #'format fmt args)) records))))
+        ;; Act
+        (agent-repl--end-recency-walk "d" 'picker))
+      ;; Assert
+      (should (equal records
+                     '(("d" . "elisp.workspace.recency-walk-ended landing=b reason=picker")))))))
+
+(ert-deftest agent-repl-test-end-recency-walk-without-a-walk-changes-nothing ()
+  "With no walk running, ending one records no visit and logs nothing."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((agent-repl--workspace-history '("a" "b"))
+          (agent-repl--recency-walk-landing nil)
+          (records nil))
+      (cl-letf (((symbol-function 'agent-repl--info)
+                 (lambda (&rest args) (push args records))))
+        ;; Act
+        (agent-repl--end-recency-walk "a" 'picker))
+      ;; Assert
+      (should (equal agent-repl--workspace-history '("a" "b")))
+      (should-not records))))
 
 ;;;; ---- Tests: --ws-new ----
 

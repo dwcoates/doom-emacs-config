@@ -272,6 +272,9 @@ type fakeDB struct {
 	// keptHistorySelects are the selections SetCurrentKeepingLastSelected
 	// recorded, in order.
 	keptHistorySelects []ids.WorkspaceID
+	// keptHistoryAt are the instants SetCurrentKeepingLastSelected was
+	// given, in order.
+	keptHistoryAt []time.Time
 	// keepSelectedErr fails SetCurrentKeepingLastSelected.
 	keepSelectedErr error
 	forgotten       []ids.WorkspaceID
@@ -947,12 +950,13 @@ func (d *fakeDB) SetCurrent(_ context.Context, id ids.WorkspaceID, at time.Time)
 	return nil
 }
 
-func (d *fakeDB) SetCurrentKeepingLastSelected(_ context.Context, id ids.WorkspaceID) error {
+func (d *fakeDB) SetCurrentKeepingLastSelected(_ context.Context, id ids.WorkspaceID, at time.Time) error {
 	if d.keepSelectedErr != nil {
 		return d.keepSelectedErr
 	}
 	d.current = &id
 	d.keptHistorySelects = append(d.keptHistorySelects, id)
+	d.keptHistoryAt = append(d.keptHistoryAt, at)
 	return nil
 }
 

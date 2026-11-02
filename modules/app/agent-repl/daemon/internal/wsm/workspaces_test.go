@@ -1016,7 +1016,7 @@ func TestSetCurrentKeepingLastSelectedLeavesTheInstant(t *testing.T) {
 			}
 
 			// Act
-			if err := s.SetCurrentKeepingLastSelected(context.Background(), ws.ID); err != nil {
+			if err := s.SetCurrentKeepingLastSelected(context.Background(), ws.ID, instant.Add(2*time.Hour)); err != nil {
 				t.Fatalf("SetCurrentKeepingLastSelected: %v", err)
 			}
 
@@ -1050,7 +1050,7 @@ func TestSetCurrentKeepingLastSelectedRefusesAnUnknownWorkspace(t *testing.T) {
 	}
 
 	// Act
-	err := s.SetCurrentKeepingLastSelected(context.Background(), WorkspaceID("absent"))
+	err := s.SetCurrentKeepingLastSelected(context.Background(), WorkspaceID("absent"), instant)
 
 	// Assert — the refusal rolls back the clear, and is recorded under its own operation.
 	if !errors.Is(err, ErrNotFound) {
@@ -1808,7 +1808,7 @@ func TestSelectingAWorkspaceExpandsTheFoldsHoldingIt(t *testing.T) {
 			name: "a recency walk's step expands them too",
 			pick: func(w selectionFoldWorld) Workspace { return w.root },
 			act: func(s *store, id WorkspaceID) error {
-				return s.SetCurrentKeepingLastSelected(context.Background(), id)
+				return s.SetCurrentKeepingLastSelected(context.Background(), id, instant)
 			},
 			wantOp: "daemon.wsm.set_current_keeping_last_selected",
 		},

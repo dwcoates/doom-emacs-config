@@ -952,19 +952,30 @@ func (s *store) SetHidden(ctx context.Context, id WorkspaceID, hidden bool, at t
 // (Workspace.LetsCacheLapse), and once they move off it the lapse is the
 // shim's fresh projection, never the one that stood before the selection. A
 // CLOSED workspace keeps its lapse: it lapses whether or not it is selected.
+//
+// A SELECTION THAT LEAVES A RECENCY WALK'S LANDING COMMITS IT: the workspace
+// being left takes the instant the walk landed on it (walk_landed_at) as its
+// last-selected instant, so it stands as the workspace selected before this
+// one (walklanding.go).
 func (s *store) SetCurrent(ctx context.Context, id WorkspaceID, at time.Time) error {
-	return s.setCurrent(ctx, "daemon.wsm.set_current", id, &at)
+	return s.setCurrent(ctx, "daemon.wsm.set_current", id, &at, nil)
 }
 
 // SetCurrentKeepingLastSelected is SetCurrent for a step of a walk through the
-// selection history: the workspace becomes current, and its last-selected
-// instant stands, so the walk never reorders the history it walks.
-func (s *store) SetCurrentKeepingLastSelected(ctx context.Context, id WorkspaceID) error {
-	return s.setCurrent(ctx, "daemon.wsm.set_current_keeping_last_selected", id, nil)
+// selection history: the workspace becomes current at AT, and its
+// last-selected instant stands, so the walk never reorders the history it
+// walks. AT is kept as the walk's landing, which the selection ending the walk
+// commits (walklanding.go); a further step replaces it uncommitted, because
+// the user did not stop on the step it leaves.
+func (s *store) SetCurrentKeepingLastSelected(ctx context.Context, id WorkspaceID, at time.Time) error {
+	return s.setCurrent(ctx, "daemon.wsm.set_current_keeping_last_selected", id, nil, &at)
 }
 
 // setCurrent is SetCurrent's and SetCurrentKeepingLastSelected's one write.
-// A nil STAMP leaves last_selected_at as it stands.
+// A nil STAMP leaves last_selected_at as it stands; a non-nil one first
+// commits the walk landing it leaves (walklanding.go). WALKED, set only for a
+// walk step, is the new current workspace's walk_landed_at; every other row's
+// is cleared, so at most one workspace ever carries one.
 //
 // SELECTING A WORKSPACE EXPANDS THE FOLDS HOLDING IT (owner request,
 // 2026-10-25): its repository's section and the subsection it sits in
@@ -974,17 +985,37 @@ func (s *store) SetCurrentKeepingLastSelected(ctx context.Context, id WorkspaceI
 // reader can ever see the current workspace inside a collapsed one: with the
 // collapse that would hold it refused (holds_current), the current workspace
 // sitting in a collapsed section is a state the store cannot reach.
-func (s *store) setCurrent(ctx context.Context, op string, id WorkspaceID, stamp *time.Time) error {
+func (s *store) setCurrent(ctx context.Context, op string, id WorkspaceID, stamp, walked *time.Time) error {
 	fields := dlog.Context{"workspace": string(id)}
 	if stamp != nil {
 		fields["at"] = *stamp
 	}
+	if walked != nil {
+		fields["walked_at"] = *walked
+	}
 	var expanded expandedFolds
+	var committed sql.NullString
 	err := s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
-		if _, err := tx.ExecContext(ctx, `UPDATE workspaces SET is_current = 0 WHERE is_current = 1`); err != nil {
+		if stamp != nil {
+			var landedAt int64
+			err := tx.QueryRowContext(ctx, `SELECT id, walk_landed_at FROM workspaces WHERE is_current = 1 AND walk_landed_at IS NOT NULL AND id <> ?`, id).Scan(&committed, &landedAt)
+			switch {
+			case errors.Is(err, sql.ErrNoRows):
+			case err != nil:
+				return err
+			default:
+				if err := updateWorkspaceColumns(ctx, tx, WorkspaceID(committed.String),
+					workspaceColumn{name: "last_selected_at", value: landedAt}); err != nil {
+					return err
+				}
+			}
+		}
+		// ONLY THE CURRENT ROW EVER CARRIES A WALK LANDING (it is set on the
+		// row made current below), so clearing the current row clears it.
+		if _, err := tx.ExecContext(ctx, `UPDATE workspaces SET is_current = 0, walk_landed_at = NULL WHERE is_current = 1`); err != nil {
 			return err
 		}
-		res, err := tx.ExecContext(ctx, `UPDATE workspaces SET is_current = 1, last_selected_at = COALESCE(?, last_selected_at), cache_lapses_at = CASE WHEN closed = 1 THEN cache_lapses_at END, cache_lapse_gated_tokens = CASE WHEN closed = 1 THEN cache_lapse_gated_tokens END WHERE id = ?`, nullNanos(stamp), id)
+		res, err := tx.ExecContext(ctx, `UPDATE workspaces SET is_current = 1, last_selected_at = COALESCE(?, last_selected_at), walk_landed_at = ?, cache_lapses_at = CASE WHEN closed = 1 THEN cache_lapses_at END, cache_lapse_gated_tokens = CASE WHEN closed = 1 THEN cache_lapse_gated_tokens END WHERE id = ?`, nullNanos(stamp), nullNanos(walked), id)
 		if err != nil {
 			return err
 		}
@@ -996,6 +1027,11 @@ func (s *store) setCurrent(ctx context.Context, op string, id WorkspaceID, stamp
 	})
 	if err != nil {
 		return err
+	}
+	if committed.Valid {
+		s.log.Info(op, "the selection left a recency walk's landing; the landing's selection instant is the walk's", dlog.Merge(fields, dlog.Context{
+			"landing": committed.String,
+		}))
 	}
 	if expanded.repository || expanded.subsection {
 		s.log.Info(op, "the selection expanded the collapsed folds holding the workspace", dlog.Merge(fields, dlog.Context{
