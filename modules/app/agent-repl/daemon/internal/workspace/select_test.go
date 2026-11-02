@@ -1406,6 +1406,22 @@ func TestSelectAsARecencyWalkStepLeavesTheSelectionInstant(t *testing.T) {
 	}
 }
 
+func TestSelectAsARecencyWalkStepKeepsItsInstantAsTheWalkLanding(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+
+	// Act.
+	if err := f.verbs.Select(context.Background(), "w1", KeepSelectionHistory); err != nil {
+		t.Fatalf("Select: %v", err)
+	}
+
+	// Assert: the step's instant is the daemon clock's, for the walk's end to commit.
+	if !slices.Equal(f.db.keptHistoryAt, []time.Time{fixedNow}) {
+		t.Fatalf("walk landing instants = %v, want [%v]", f.db.keptHistoryAt, fixedNow)
+	}
+}
+
 func TestSelectAsARecencyWalkStepStillTellsTheRoster(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)

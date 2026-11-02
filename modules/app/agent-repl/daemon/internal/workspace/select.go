@@ -89,7 +89,7 @@ func (v *verbs) selectCurrent(ctx context.Context, log dlog.Logger, ws ids.Works
 		// A STEP OF A RECENCY WALK is not a choice: stamping the instant
 		// would move the workspace to the front of the history the walk is
 		// stepping along, and the next step would land somewhere else.
-		if err := v.deps.DB.SetCurrentKeepingLastSelected(ctx, ws); err != nil {
+		if err := v.deps.DB.SetCurrentKeepingLastSelected(ctx, ws, v.now()); err != nil {
 			log.Error(opSelect, "could not record the walk's selection", dlog.Context{"cause": err.Error(), "history": history.String()})
 			return false, fmt.Errorf("select %q: %w", ws, err)
 		}

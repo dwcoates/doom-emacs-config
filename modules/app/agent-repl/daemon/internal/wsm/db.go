@@ -85,11 +85,14 @@ type DB interface {
 	// expanding its repository's section and subsection in the same write
 	// (setCurrent).
 	SetCurrent(ctx context.Context, id WorkspaceID, at time.Time) error
-	// SetCurrentKeepingLastSelected records a workspace as current and leaves
-	// its last-selected instant as it stands: a step of a walk through the
-	// selection history, which must not reorder the history it walks. It
-	// expands the folds holding the workspace as SetCurrent does.
-	SetCurrentKeepingLastSelected(ctx context.Context, id WorkspaceID) error
+	// SetCurrentKeepingLastSelected records a workspace as current at an
+	// instant and leaves its last-selected instant as it stands: a step of a
+	// walk through the selection history, which must not reorder the history
+	// it walks. The instant is kept as the walk's landing (walk_landed_at),
+	// which the next SetCurrent commits as the workspace's last-selected
+	// instant when it moves off it. It expands the folds holding the
+	// workspace as SetCurrent does.
+	SetCurrentKeepingLastSelected(ctx context.Context, id WorkspaceID, at time.Time) error
 	// Current reports the currently selected workspace, nil when none is.
 	Current(ctx context.Context) (*WorkspaceID, error)
 	// DataVersion answers SQLite's `PRAGMA data_version` on this handle's one

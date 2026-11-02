@@ -886,7 +886,8 @@ The top bar's phone chip, just left of the wifi chip, makes the workspace's sess
   - `s-]` goes back toward the one you viewed most recently.
   - Both wrap at the ends, as `s-{` and `s-}` do.
   - Stepping with them does not count as viewing, so the order holds still while you step through it.
-  - Any other switch, a tab click, `M-1`, `s-{` or a picker, counts as viewing the workspace it lands on.
+  - Any other switch, a tab click, `M-1`, `s-{`, `SPC p p` or an agent's switch, counts as viewing the workspace it lands on.
+  - That switch also counts the workspace you stopped stepping on as viewed, so `s-[` from the new workspace goes back to it.
 
 ## Reopening a merged workspace
 
