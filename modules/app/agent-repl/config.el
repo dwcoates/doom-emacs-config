@@ -426,6 +426,10 @@ returning the SHA string (or the sentinel \"unknown\" when undetermined)."
 ;; and sidebar-view.el's window predicates, and reads input.el's
 ;; background, all loaded above, and its hook syncs every frame at load.
 (agent-repl--load-module "dividers")
+;; WHY: minibuffer-ground.el paints the minibuffer and the echo area the
+;; composer's color.  It reads input.el's background and calls core.el's
+;; buffer-background helper, both loaded above, and paints at load.
+(agent-repl--load-module "minibuffer-ground")
 (agent-repl--load-module "sibling-popup")
 (agent-repl--load-module "panels")
 ;; WHY: open-progress.el shows its placeholder in the SAME main-area window
