@@ -3,6 +3,9 @@ package server
 import (
 	"context"
 	"errors"
+	"os"
+	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -12,6 +15,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
+	"agent-repld/internal/dlog"
 	"agent-repld/internal/health"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/promptqueue"
@@ -1458,5 +1462,92 @@ func TestAnAskMoveRepublishesTheHostView(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("the ask's move never reached the host stream")
+	}
+}
+
+// ---- logHostStreamRead ------------------------------------------------------
+
+// TestLogHostStreamReadLevelsByCause pins the one recording of a failed host
+// read: a cancelled context is the client leaving, INFO naming the stream; any
+// other cause is a fault, ERROR. Both carry the caller's fields and the cause.
+func TestLogHostStreamReadLevelsByCause(t *testing.T) {
+	tests := []struct {
+		name  string
+		err   error
+		level string
+		msg   string
+		want  dlog.Context
+	}{
+		{
+			name: "cancelled", err: context.Canceled, level: "INFO",
+			msg:  "the view was not composed; the stream's context was cancelled",
+			want: dlog.Context{"workspace": "ws-1", "stream": "WatchHostWorkspace", "cause": context.Canceled.Error()},
+		},
+		{
+			name: "deadline exceeded", err: context.DeadlineExceeded, level: "INFO",
+			msg:  "the view was not composed; the stream's context was cancelled",
+			want: dlog.Context{"workspace": "ws-1", "stream": "WatchHostWorkspace", "cause": context.DeadlineExceeded.Error()},
+		},
+		{
+			name: "a genuine read failure", err: errors.New("the database is gone"), level: "ERROR",
+			msg:  "could not read the thing",
+			want: dlog.Context{"workspace": "ws-1", "cause": "the database is gone"},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			log := &recordingLogger{}
+
+			// Act.
+			logHostStreamRead(log, "daemon.server.test", "the view was not composed",
+				"could not read the thing", tc.err, dlog.Context{"workspace": "ws-1"})
+
+			// Assert.
+			if len(log.records) != 1 {
+				t.Fatalf("records = %v, want exactly one", log.records)
+			}
+			got := log.records[0]
+			if got.Level != tc.level || got.Operation != "daemon.server.test" || got.Message != tc.msg {
+				t.Fatalf("record = %+v, want level %s message %q", got, tc.level, tc.msg)
+			}
+			if !reflect.DeepEqual(got.Context, tc.want) {
+				t.Fatalf("context = %v, want %v", got.Context, tc.want)
+			}
+		})
+	}
+}
+
+// TestLogHostStreamReadLeavesTheCallersFieldsAlone pins that the caller's
+// context map is merged from, never written into.
+func TestLogHostStreamReadLeavesTheCallersFieldsAlone(t *testing.T) {
+	// Arrange.
+	fields := dlog.Context{"workspace": "ws-1"}
+
+	// Act.
+	logHostStreamRead(&recordingLogger{}, "op", "skipped", "failed", context.Canceled, fields)
+
+	// Assert.
+	if !reflect.DeepEqual(fields, dlog.Context{"workspace": "ws-1"}) {
+		t.Fatalf("fields = %v, want them unchanged", fields)
+	}
+}
+
+// TestHostReadsAreRecordedThroughOneHelper pins that every host read failure
+// in host.go goes through logHostStreamRead: a hand-rolled cancelled-context
+// branch beside it is the drift the helper exists to prevent.
+func TestHostReadsAreRecordedThroughOneHelper(t *testing.T) {
+	// Arrange.
+	src, err := os.ReadFile("host.go")
+	if err != nil {
+		t.Fatalf("read host.go: %v", err)
+	}
+
+	// Act.
+	branches := strings.Count(string(src), "ctxend.Is(")
+
+	// Assert.
+	if branches != 1 {
+		t.Fatalf("host.go tests ctxend.Is %d times, want once, inside logHostStreamRead", branches)
 	}
 }
