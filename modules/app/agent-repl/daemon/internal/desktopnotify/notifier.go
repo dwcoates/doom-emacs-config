@@ -101,8 +101,39 @@ func New(deps Deps) *Notifier {
 	return &Notifier{deps: deps, ctx: ctx, cancel: cancel, held: held{banners: map[ids.WorkspaceID]heldBanner{}}}
 }
 
+// Decision is what Post decided for one banner before composing it.
+type Decision int
+
+const (
+	// Dispatched is a banner being composed and posted on its own goroutine.
+	// What the platform's program then does is recorded, never answered.
+	Dispatched Decision = iota
+	// EditorFocused is a banner not posted because Emacs is focused.
+	EditorFocused
+	// NoProgram is a banner not posted because no banner program could be
+	// resolved (Deps.BackendErr says why).
+	NoProgram
+	// StandingDown is a banner not posted because the daemon is standing down.
+	StandingDown
+)
+
+// String names the decision for the record.
+func (d Decision) String() string {
+	switch d {
+	case Dispatched:
+		return "dispatched"
+	case EditorFocused:
+		return "editor_focused"
+	case NoProgram:
+		return "no_program"
+	case StandingDown:
+		return "standing_down"
+	}
+	return fmt.Sprintf("Decision(%d)", int(d))
+}
+
 // Post raises one banner for ws, unless Emacs is focused, and rings the chime
-// the instant the banner is made.
+// the instant the banner is made. It answers what it decided before composing.
 //
 // A SOUND IS ONLY EVER A BANNER'S. The chime is rung from one place: the edge
 // the backend reports the banner made on (Backend.Post's made). A banner that
@@ -113,15 +144,32 @@ func New(deps Deps) *Notifier {
 // The focus is read twice: here, so a focused Emacs costs no composition at
 // all, and again once the banner is composed, so focus gained meanwhile still
 // suppresses it.
-func (n *Notifier) Post(ws ids.WorkspaceID, kind string, compose Compose) {
+func (n *Notifier) Post(ws ids.WorkspaceID, kind string, compose Compose) Decision {
 	log := n.deps.Log.With(dlog.Context{"workspace": string(ws), "kind": kind})
 	if n.deps.Focus.Focused() {
 		log.Info(opPost, "Emacs is focused; no desktop banner", nil)
-		return
+		return EditorFocused
+	}
+	if n.deps.Backend == nil {
+		log.Error(opPost, "no desktop banner program; the banner was not posted", dlog.Context{
+			"cause": n.deps.BackendErr.Error(),
+		})
+		return NoProgram
 	}
 	if !n.spawn(func() { n.show(ws, log, compose) }) {
 		log.Info(opPost, "the daemon is standing down; no desktop banner", nil)
+		return StandingDown
 	}
+	return Dispatched
+}
+
+// NoProgramCause is why no banner program could be resolved. It panics when
+// one was: a caller asks only after Post answered NoProgram.
+func (n *Notifier) NoProgramCause() string {
+	if n.deps.BackendErr == nil {
+		panic("desktopnotify: NoProgramCause asked of a notifier that has a banner program")
+	}
+	return n.deps.BackendErr.Error()
 }
 
 // ring plays the chime on a goroutine of its own, so it sounds alongside a
@@ -176,9 +224,26 @@ func (n *Notifier) play(log dlog.Logger) {
 // or the agent addressing the user. It is titled by the workspace's name, with
 // the notification's own line below it.
 func (n *Notifier) Raise(ws ids.WorkspaceID, kind, text string) {
-	n.Post(ws, kind, func(_ context.Context, name string) Banner {
-		return Banner{Title: name, Body: text}
-	})
+	n.Post(ws, kind, titledByName(text))
+}
+
+// KindWorkspaceNotify is the banner an agent posts for a workspace through
+// the agent API (agentrepl.v1.NotifyWorkspace).
+const KindWorkspaceNotify = "workspace_notify"
+
+// Notify posts the banner an agent asked for on behalf of ws: titled by ws's
+// name, with MESSAGE below it, so its click selects ws. It answers what Post
+// decided.
+func (n *Notifier) Notify(ws ids.WorkspaceID, message string) Decision {
+	return n.Post(ws, KindWorkspaceNotify, titledByName(message))
+}
+
+// titledByName composes a banner titled by its workspace's name, with BODY
+// below it: an agent notification's and an agent-requested banner's shape.
+func titledByName(body string) Compose {
+	return func(_ context.Context, name string) Banner {
+		return Banner{Title: name, Body: body}
+	}
 }
 
 // show composes and posts one banner, rings its chime the instant it is made,
@@ -196,12 +261,6 @@ func (n *Notifier) show(ws ids.WorkspaceID, log dlog.Logger, compose Compose) {
 	banner := compose(n.ctx, workspace.Name)
 	if n.deps.Focus.Focused() {
 		log.Info(opPost, "Emacs was focused while the banner was composed; no desktop banner", nil)
-		return
-	}
-	if n.deps.Backend == nil {
-		log.Error(opPost, "no desktop banner program; the banner was not posted", dlog.Context{
-			"cause": n.deps.BackendErr.Error(), "title": banner.Title,
-		})
 		return
 	}
 	log.Info(opPost, "posting a desktop banner", dlog.Context{

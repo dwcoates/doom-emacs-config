@@ -670,3 +670,132 @@ func TestNewRefusesAHalfWiredNotifier(t *testing.T) {
 		})
 	}
 }
+
+// TestNotifierPostAnswersItsDecision pins what Post answers for each way it
+// decides a banner before composing it, and that only a dispatched banner is
+// handed to the program.
+func TestNotifierPostAnswersItsDecision(t *testing.T) {
+	cases := []struct {
+		name        string
+		focused     bool
+		noProgram   bool
+		closed      bool
+		want        Decision
+		wantBanners int
+	}{
+		{name: "Emacs is unfocused", want: Dispatched, wantBanners: 1},
+		{name: "Emacs is focused", focused: true, want: EditorFocused},
+		{name: "no banner program is installed", noProgram: true, want: NoProgram},
+		{name: "the daemon is standing down", closed: true, want: StandingDown},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			log := dlog.NewTestLogger()
+			focus := NewFocus(log)
+			focus.Attach(tc.focused)
+			backend := &fakeBackend{}
+			deps := Deps{Focus: focus, Chime: &fakeChime{}, Clicks: &fakeClicks{}, Workspaces: named, Log: log}
+			if tc.noProgram {
+				deps.BackendErr = errors.New("terminal-notifier is not installed")
+			} else {
+				deps.Backend = backend
+			}
+			n := New(deps)
+			if tc.closed {
+				n.Close()
+			}
+
+			// Act
+			got := n.Post("ws1", KindTurnEnded, titledBy)
+			n.wg.Wait()
+
+			// Assert
+			if got != tc.want {
+				t.Fatalf("Post = %s, want %s", got, tc.want)
+			}
+			if posted := backend.banners(); len(posted) != tc.wantBanners {
+				t.Fatalf("posted %d banners, want %d", len(posted), tc.wantBanners)
+			}
+		})
+	}
+}
+
+func TestNotifierNotifyPostsTheMessageUnderTheTargetsName(t *testing.T) {
+	// Arrange
+	f := newNotifierFixture(t, named)
+
+	// Act
+	got := f.notifier.Notify("ws1", "The build is green")
+	f.notifier.wg.Wait()
+
+	// Assert
+	if got != Dispatched {
+		t.Fatalf("Notify = %s, want dispatched", got)
+	}
+	banners := f.backend.banners()
+	if len(banners) != 1 || banners[0] != (Banner{Title: "ws-name", Body: "The build is green"}) {
+		t.Fatalf("posted %+v, want the target's name over the message", banners)
+	}
+}
+
+func TestNotifierNotifyTargetsTheNamedWorkspace(t *testing.T) {
+	// Arrange
+	f := newNotifierFixture(t, named)
+
+	// Act
+	f.notifier.Notify("ws1", "The build is green")
+	f.notifier.wg.Wait()
+
+	// Assert
+	targets := f.backend.postedTargets()
+	if len(targets) != 1 || targets[0] != (Target{ID: "ws1", Dir: "/work/ws-name"}) {
+		t.Fatalf("targets = %+v, want the named workspace, so the click selects it", targets)
+	}
+}
+
+func TestNotifierNotifyRecordsItsKind(t *testing.T) {
+	// Arrange
+	f := newNotifierFixture(t, named)
+	f.focus.Attach(true)
+
+	// Act
+	f.notifier.Notify("ws1", "The build is green")
+
+	// Assert
+	r, ok := hasRecord(f.log, "info", "Emacs is focused; no desktop banner")
+	if !ok || r.Context["kind"] != KindWorkspaceNotify || r.Context["workspace"] != "ws1" {
+		t.Fatalf("record = %+v (found %v), want the workspace_notify kind and the target", r, ok)
+	}
+}
+
+func TestNotifierNoProgramCauseAnswersTheBootCause(t *testing.T) {
+	// Arrange
+	log := dlog.NewTestLogger()
+	n := New(Deps{
+		Focus: NewFocus(log), BackendErr: errors.New("terminal-notifier is not installed"), Chime: &fakeChime{},
+		Clicks: &fakeClicks{}, Workspaces: named, Log: log,
+	})
+
+	// Act
+	got := n.NoProgramCause()
+
+	// Assert
+	if got != "terminal-notifier is not installed" {
+		t.Fatalf("NoProgramCause = %q, want the boot cause", got)
+	}
+}
+
+func TestNotifierNoProgramCausePanicsWithAProgram(t *testing.T) {
+	// Arrange
+	f := newNotifierFixture(t, named)
+	defer func() {
+		// Assert
+		if recover() == nil {
+			t.Fatal("NoProgramCause answered for a notifier that has a banner program")
+		}
+	}()
+
+	// Act
+	f.notifier.NoProgramCause()
+}
