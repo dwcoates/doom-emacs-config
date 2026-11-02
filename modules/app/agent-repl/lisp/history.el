@@ -21,6 +21,7 @@
 (declare-function agent-repl--ws-put "workspace")
 (declare-function agent-repl-instantiation-p "workspace")
 (declare-function agent-repl-instantiation-session-id "workspace")
+(declare-function agent-repl--input-buffer "input" (ws))
 
 ;; `agent-repl--input-history' and `agent-repl--history-discard-entry' are
 ;; buffer-local and declared with `defvar-local' further down, beside the
@@ -329,12 +330,13 @@ HISTORY itself is left untouched."
   "Return the live input buffer for workspace WS, or nil.
 WS defaults to the current workspace name."
   (let* ((ws (or ws (agent-repl--ws-current-name)))
-         (buf (and ws (agent-repl--ws-get ws :input-buffer))))
-    (if (and buf (buffer-live-p buf))
+         (buf (and ws (agent-repl--input-buffer ws))))
+    (if buf
         (progn
           (agent-repl--log ws "ws-live-input-buffer: live ws=%s buffer=%s" ws (buffer-name buf))
           buf)
-      (agent-repl--log ws "ws-live-input-buffer: no live input buffer ws=%s buf=%s" ws buf)
+      (agent-repl--log ws "ws-live-input-buffer: no live input buffer ws=%s recorded=%s"
+                       ws (and ws (agent-repl--ws-get ws :input-buffer)))
       nil)))
 
 (defun agent-repl--history-save (&optional ws)
@@ -622,7 +624,6 @@ pushed as `agent-repl--history-push' does."
 ;; recorded when the ring does not already hold it, so the restatement on
 ;; every host push and on every composer birth records it exactly once.
 
-(declare-function agent-repl--input-buffer "input" (ws))
 (declare-function agent-repl--input-said-parts "input" (said))
 (declare-function agent-repl--input-parts-text "input" (parts))
 (defvar agent-repl-host-update-functions)

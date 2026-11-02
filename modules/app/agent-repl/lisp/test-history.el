@@ -692,6 +692,20 @@ transcripts."
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws")))
         (should-not (agent-repl--ws-live-input-buffer nil))))))
 
+(ert-deftest agent-repl-test-ws-live-input-buffer-resolves-through-the-composer-lookup ()
+  "ws-live-input-buffer answers what `agent-repl--input-buffer' answers, never its own lookup."
+  (agent-repl-test--with-clean-state
+    (let ((asked nil)
+          (sentinel (generate-new-buffer " *test-live-input-shared*")))
+      (unwind-protect
+          (cl-letf (((symbol-function 'agent-repl--input-buffer)
+                     (lambda (ws) (push ws asked) sentinel)))
+            ;; Act.
+            (should (eq (agent-repl--ws-live-input-buffer "test-ws") sentinel))
+            ;; Assert.
+            (should (equal asked '("test-ws"))))
+        (kill-buffer sentinel)))))
+
 (ert-deftest agent-repl-test-ws-live-input-buffer-nil-when-no-buffer ()
   "ws-live-input-buffer returns nil when no input buffer is set."
   (agent-repl-test--with-clean-state
