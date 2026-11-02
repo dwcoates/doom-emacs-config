@@ -331,6 +331,13 @@ func (s *requestLoggingServer) SetWorkspaceName(
 	return serveUnary(s, ctx, "SetWorkspaceName", req, s.server.SetWorkspaceName)
 }
 
+func (s *requestLoggingServer) ListCreationModels(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.ListCreationModelsRequest],
+) (*connect.Response[agentreplv1.ListCreationModelsResponse], error) {
+	return serveUnary(s, ctx, "ListCreationModels", req, s.server.ListCreationModels)
+}
+
 func (s *requestLoggingServer) ValidateWorkspaceName(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.ValidateWorkspaceNameRequest],

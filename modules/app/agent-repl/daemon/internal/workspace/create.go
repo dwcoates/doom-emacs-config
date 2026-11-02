@@ -161,6 +161,13 @@ func (v *verbs) create(ctx context.Context, spec CreateSpec) (_ wsm.Workspace, e
 		return wsm.Workspace{}, err
 	}
 
+	// THE MODEL IS CHECKED BEFORE ANYTHING IS SPENT TOO: a model the creating
+	// login does not know is refused before the naming call and before git
+	// is touched (creationmodels.go).
+	if err := v.checkCreateModel(ctx, global, spec, repoDir); err != nil {
+		return wsm.Workspace{}, err
+	}
+
 	// A ONE-SHOT RUNS THE REPOSITORY'S OWN POLICY, so the policy is resolved
 	// and required HERE — before the id is minted, before the NAMING CALL is
 	// made, before the creation job is recorded, before git is touched. A

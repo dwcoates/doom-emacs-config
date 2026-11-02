@@ -646,6 +646,7 @@ func TestCreateRecordsThePriority(t *testing.T) {
 func TestCreateRecordsTheModelAndModeAsSpawnFacts(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
+	f.db.modelCatalogs = map[string]*conversationv1.ModelCatalog{"/config": catalogOf("opus")}
 	spec := standardSpec(t, f)
 	spec.Model = "opus"
 	spec.PermissionMode = "plan"

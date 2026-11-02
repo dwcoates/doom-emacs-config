@@ -1254,6 +1254,39 @@ func (s *server) ValidateWorkspaceName(
 	}), nil
 }
 
+// ListCreationModels answers the models a create in a repository may name:
+// the catalog of the login its workspace would spend as, read by the very
+// verb CreateWorkspace's model check reads (workspace.CreationCatalog). A
+// read: nothing is recorded and no session starts.
+func (s *server) ListCreationModels(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.ListCreationModelsRequest],
+) (*connect.Response[agentreplv1.ListCreationModelsResponse], error) {
+	const rpc = "ListCreationModels"
+	if err := validateListCreationModelsRequest(req.Msg); err != nil {
+		return nil, err
+	}
+	resp := &agentreplv1.ListCreationModelsResponse{}
+	repository, cerr, done := s.resolveRepository(ctx, rpc, resp, req.Msg.GetRepository())
+	if done {
+		return answer(resp, cerr)
+	}
+	catalog, err := s.deps.Verbs.CreationCatalog(ctx, repository.Dir)
+	if err != nil {
+		return nil, fail(s.log, rpc, err)
+	}
+	success := &agentreplv1.ListCreationModelsSuccess{ConfigDir: catalog.ConfigDir}
+	if catalog.Known {
+		success.Catalog = &agentreplv1.ListCreationModelsSuccess_Known{
+			Known: &agentreplv1.ListCreationModelsKnown{Options: catalog.Options},
+		}
+	} else {
+		success.Catalog = &agentreplv1.ListCreationModelsSuccess_Unknown{Unknown: &agentreplv1.ListCreationModelsUnknown{}}
+	}
+	resp.Result = &agentreplv1.ListCreationModelsResponse_Success{Success: success}
+	return connect.NewResponse(resp), nil
+}
+
 // SetWorkspaceHidden moves a workspace into the roster's hidden section, or
 // back out of it. The new state arrives on the roster stream.
 func (s *server) SetWorkspaceHidden(
