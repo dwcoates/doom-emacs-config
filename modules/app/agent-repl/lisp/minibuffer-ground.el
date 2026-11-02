@@ -26,7 +26,7 @@
 (require 'seq)
 
 (declare-function agent-repl--set-buffer-background "core" (color))
-(declare-function agent-repl--log "core" (ws fmt &rest args))
+(declare-function agent-repl--ground-swap "core" (scope event painted color paint))
 (defvar agent-repl-input-background)
 
 (defconst agent-repl--minibuffer-ground-log-scope
@@ -43,15 +43,13 @@
 (defun agent-repl-minibuffer-ground-paint ()
   "Paint the current buffer's background `agent-repl-input-background'.
 A buffer already in that color is left as it is; one painted another
-color has that remap taken back first."
-  (let ((color agent-repl-input-background))
-    (unless (equal (car agent-repl--minibuffer-ground-painted) color)
-      (agent-repl--log agent-repl--minibuffer-ground-log-scope
-                       "elisp.minibuffer-ground.paint buffer=%s color=%s from=%S"
-                       (buffer-name) color (car agent-repl--minibuffer-ground-painted))
-      (mapc #'face-remap-remove-relative (cdr agent-repl--minibuffer-ground-painted))
-      (setq agent-repl--minibuffer-ground-painted
-            (cons color (agent-repl--set-buffer-background color))))))
+color has that remap taken back first (`agent-repl--ground-swap')."
+  (setq agent-repl--minibuffer-ground-painted
+        (agent-repl--ground-swap agent-repl--minibuffer-ground-log-scope
+                                 "elisp.minibuffer-ground.paint"
+                                 agent-repl--minibuffer-ground-painted
+                                 agent-repl-input-background
+                                 #'agent-repl--set-buffer-background)))
 
 (defun agent-repl-minibuffer-ground-paint-all ()
   "Paint every minibuffer and both echo area buffers.

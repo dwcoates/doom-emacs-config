@@ -3604,6 +3604,92 @@ The master kill-switch overrides the always-on file-write decoupling."
       (should-not (assq 'default face-remapping-alist))
       (should-not (assq 'fringe face-remapping-alist)))))
 
+;;;; ---- Tests: swapping a buffer's ground ----
+
+(defun agent-repl-test-ground-swap--backgrounds (face)
+  "Return every :background the current buffer remaps FACE to, newest first."
+  (delq nil (mapcar (lambda (spec) (and (listp spec) (plist-get spec :background)))
+                    (cdr (assq face face-remapping-alist)))))
+
+(defmacro agent-repl-test-ground-swap--with-buffer (&rest body)
+  "Run BODY in a fresh buffer, `logs' collecting every canonical log line."
+  (declare (indent 0))
+  `(let ((logs nil))
+     (cl-letf (((symbol-function 'agent-repl--log) (agent-repl-test--record-into logs)))
+       (agent-repl-test--with-temp-buffer " *test-ground-swap*" ,@body))))
+
+(ert-deftest agent-repl-test-ground-swap-first-paint-records-color-and-cookies ()
+  "A buffer never painted is painted, and its record holds the color and PAINT's cookies."
+  (agent-repl-test-ground-swap--with-buffer
+    ;; Act
+    (let ((painted (agent-repl--ground-swap 'scope "elisp.test.paint" nil "#123456"
+                                            #'agent-repl--set-buffer-background)))
+      ;; Assert
+      (should (equal (car painted) "#123456"))
+      (should (= (length (cdr painted)) 2))
+      (should (equal (agent-repl-test-ground-swap--backgrounds 'default) '("#123456"))))))
+
+(ert-deftest agent-repl-test-ground-swap-same-color-keeps-the-record ()
+  "A repaint in the color already worn returns the same record, calls no PAINT and logs nothing."
+  (agent-repl-test-ground-swap--with-buffer
+    ;; Arrange
+    (let ((painted (agent-repl--ground-swap 'scope "elisp.test.paint" nil "#123456"
+                                            #'agent-repl--set-buffer-background))
+          (calls 0))
+      (setq logs nil)
+      ;; Act
+      (let ((again (agent-repl--ground-swap 'scope "elisp.test.paint" painted "#123456"
+                                            (lambda (_color) (cl-incf calls) nil))))
+        ;; Assert
+        (should (eq again painted))
+        (should (= calls 0))
+        (should-not logs)))))
+
+(ert-deftest agent-repl-test-ground-swap-new-color-never-stacks ()
+  "A repaint in a new color takes the old remaps back, so only the new color's remain."
+  (agent-repl-test-ground-swap--with-buffer
+    ;; Arrange
+    (let ((painted (agent-repl--ground-swap 'scope "elisp.test.paint" nil "#123456"
+                                            #'agent-repl--set-buffer-background)))
+      ;; Act
+      (setq painted (agent-repl--ground-swap 'scope "elisp.test.paint" painted "#abcdef"
+                                             #'agent-repl--set-buffer-background))
+      (agent-repl--ground-swap 'scope "elisp.test.paint" painted "#0a0a0a"
+                               #'agent-repl--set-buffer-background)
+      ;; Assert
+      (should (equal (list (agent-repl-test-ground-swap--backgrounds 'default)
+                           (agent-repl-test-ground-swap--backgrounds 'fringe))
+                     '(("#0a0a0a") ("#0a0a0a")))))))
+
+(ert-deftest agent-repl-test-ground-swap-takes-the-old-back-before-painting ()
+  "PAINT runs only once the old remaps are gone, so it never sees them."
+  (agent-repl-test-ground-swap--with-buffer
+    ;; Arrange
+    (let ((painted (agent-repl--ground-swap 'scope "elisp.test.paint" nil "#123456"
+                                            #'agent-repl--set-buffer-background))
+          (seen 'unset))
+      ;; Act
+      (agent-repl--ground-swap 'scope "elisp.test.paint" painted "#abcdef"
+                               (lambda (_color)
+                                 (setq seen (agent-repl-test-ground-swap--backgrounds 'default))
+                                 nil))
+      ;; Assert
+      (should (null seen)))))
+
+(ert-deftest agent-repl-test-ground-swap-logs-event-buffer-and-colors ()
+  "A paint is recorded under EVENT with the buffer, the new color and the one it replaced."
+  (agent-repl-test-ground-swap--with-buffer
+    ;; Arrange
+    (let ((painted (agent-repl--ground-swap 'scope "elisp.test.paint" nil "#123456"
+                                            #'agent-repl--set-buffer-background)))
+      (setq logs nil)
+      ;; Act
+      (agent-repl--ground-swap 'scope "elisp.test.paint" painted "#abcdef"
+                               #'agent-repl--set-buffer-background)
+      ;; Assert
+      (should (equal logs
+                     '("elisp.test.paint buffer= *test-ground-swap* color=#abcdef from=\"#123456\""))))))
+
 ;;;; ---- Tests: harness-injected (meta) prompt spans ----
 
 (ert-deftest agent-repl-test-meta-wrap-brackets-the-text ()
