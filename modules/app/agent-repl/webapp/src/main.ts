@@ -64,6 +64,8 @@ import { mountSidebar } from "./sidebar/sidebar.js";
 import { mountTopbar } from "./topbar/topbar.js";
 import { installNavigationGuard, installProseLinkRouting, installRunControlRouting } from "./link.js";
 import { installLinkHoverPopup } from "./link-hover.js";
+import { RESPONSE_PROSE_CLASS } from "./feed/cards/response.js";
+import { installWorkspaceMentionClicks, watchWorkspaceMentions } from "./feed/workspace-mentions.js";
 import { bootFailed } from "./failure/sink.js";
 import { createLocalFailures, type LocalFailures } from "./failure/local.js";
 import { LEVEL_WINDOW_OPERATION, bindLogContext, log } from "./log.js";
@@ -98,7 +100,7 @@ import type { SubmitPromptCommandPanel } from "../../proto/gen/ts/agentrepl/v1/e
 import type { FeedId } from "../../proto/gen/ts/frontend/v1/feed_pb";
 import { shellElements } from "./shell.js";
 import { composerClosedFor, installColorValues } from "./vocab.js";
-import { childrenMatching } from "./dom.js";
+import { childrenMatching, queryAll } from "./dom.js";
 
 export async function boot(): Promise<void> {
   let failures: LocalFailures | null = null;
@@ -421,6 +423,11 @@ export async function boot(): Promise<void> {
       log.info("a chat thread's page mounts no footer", { operation: "main.thread-no-footer" });
     } else {
       mountWorkspaceFooter(shell, ctx, workspaceFeed, gate, editorNotices);
+      // A WORKSPACE'S NAME IN A RESPONSE'S TREE SWITCHES TO IT
+      // (feed/workspace-mentions.ts): the daemon serves the names, every push
+      // re-links the response trees already drawn, and a click selects.
+      watchWorkspaceMentions(ctx, () => queryAll(shell.feedScroll, `.${RESPONSE_PROSE_CLASS}`));
+      installWorkspaceMentionClicks(ctx, shell.feedScroll);
     }
 
     if (address.composer) {

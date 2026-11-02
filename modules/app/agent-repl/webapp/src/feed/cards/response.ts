@@ -106,6 +106,7 @@ import { FINAL_RESPONSE_CLASS } from "../rows/turn-ended.js";
 import { easeIntoLook, readBubbleLook } from "../../bubble/collapse-motion.js";
 import { drawOutcomeCard } from "../marker.js";
 import { linkAnswers } from "../entries.js";
+import { linkWorkspaceMentions } from "../workspace-mentions.js";
 import { bubbleCopyControl, reserveCopyRoom } from "../../bubble/copy-room.js";
 import { readResponseUsage, setResponseUsage } from "../response-usage.js";
 import { markComposerEntry } from "../composer-entry.js";
@@ -275,6 +276,8 @@ export function drawFeedResponse(u: FeedResponse, rc: RowContext): HTMLElement {
   const rowId = rc.row.id?.value ?? "";
   const prose = markdownSlot(RESPONSE_PROSE_CLASS, served, (rendered) => {
     if (answers.length > 0) linkAnswers(rendered, answers);
+    // A WORKSPACE'S NAME IN THE TREE switches to it (workspace-mentions.ts).
+    linkWorkspaceMentions(rendered);
     markComposerEntry(rendered, rowId);
     markRevealedNode(rendered, rowId);
   });
