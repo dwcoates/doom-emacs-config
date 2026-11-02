@@ -527,3 +527,25 @@ func TestRemediationName(t *testing.T) {
 		})
 	}
 }
+
+func TestARefusalFromAShimStoodDownWhileItsBridgeOpenedIsNoFailure(t *testing.T) {
+	// Arrange: an answer other than pay stood the bridge's shim down while
+	// its bridge was opening.
+	f, ws := parkedInRemoteControl(t)
+	f.client.stoodDown = true
+
+	// Act.
+	f.client.bridgeFrames <- refusedFrame()
+	settled(t, f)
+
+	// Assert.
+	if _, ok := bridgeRecord(f, "info", "the parked bridge's shim was stood down while its bridge opened"); !ok {
+		t.Fatalf("records = %+v, want the stood-down refusal at INFO", f.log.logger.Records())
+	}
+	if _, ok := bridgeRecord(f, "error", ""); ok || len(f.topbarWarnings) != 0 {
+		t.Fatalf("records = %+v, warnings %v; want no error and no warning", f.log.logger.Records(), f.topbarWarnings)
+	}
+	if _, ok := f.fleet.ColdGate(ws); !ok {
+		t.Fatal("no gate stands, want the gate standing")
+	}
+}

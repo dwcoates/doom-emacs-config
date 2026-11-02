@@ -219,8 +219,15 @@ func (f *Fleet) watchParkedBridge(ctx context.Context, log dlog.Logger, ws ids.W
 		case *shimv1.HoldParkedBridgeResponse_Opened:
 			f.parkedBridgeOpened(ctx, log, ws, event.Opened)
 		case *shimv1.HoldParkedBridgeResponse_Refused:
-			f.parkedBridgeFailed(ctx, log, ws, "the shim could not hold the parked workspace's bridge",
-				fmt.Sprintf("%s: %s", refusedBridgeArm(event.Refused), event.Refused.GetDetail()))
+			cause := fmt.Sprintf("%s: %s", refusedBridgeArm(event.Refused), event.Refused.GetDetail())
+			// A SHIM THIS DAEMON STOOD DOWN WHILE ITS BRIDGE OPENED (an answer
+			// other than pay, the mode turning off) refuses the bridge because
+			// it is going: the stand-down's own record says why.
+			if client.StandingDown() {
+				log.Info(opParkedBridge, "the parked bridge's shim was stood down while its bridge opened", dlog.Context{"cause": cause})
+				return
+			}
+			f.parkedBridgeFailed(ctx, log, ws, "the shim could not hold the parked workspace's bridge", cause)
 			return
 		case *shimv1.HoldParkedBridgeResponse_RemotePrompt:
 			f.payForRemotePrompt(ctx, log, ws, event.RemotePrompt)
