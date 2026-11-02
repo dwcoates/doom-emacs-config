@@ -366,5 +366,37 @@ the fake's own answer and not an echo of the request."
     ;; Assert
     (should-not (file-exists-p agent-repl-itest--fixture-root))))
 
+;;;; ---- A fake daemon's death fails every wait at once ----
+
+(defun agent-repl-itest-fixture--exited-stand-in (code)
+  "Return a fake-daemon struct over a finished `sh' that exited with CODE."
+  (let* ((stderr (generate-new-buffer " *agent-repl-itest-stand-in*"))
+         (process (make-process :name "agent-repl-itest-stand-in"
+                                :command (list "/bin/sh" "-c" (format "echo dying >&2; exit %d" code))
+                                :connection-type 'pipe :noquery t :stderr stderr)))
+    (agent-repl-itest--wait-until (lambda () (memq (process-status process) '(exit signal)))
+                                  agent-repl-itest-default-timeout "the stand-in to exit")
+    (accept-process-output nil 0)
+    (agent-repl-itest--make-daemon :process process :state-dir "/stand-in" :stderr-buffer stderr)))
+
+(ert-deftest agent-repl-itest-fixture-a-daemon-that-died-unasked-fails-the-wait-at-once ()
+  (let* ((daemon (agent-repl-itest-fixture--exited-stand-in 3))
+         (agent-repl-itest--watched-daemons (list daemon))
+         (err (should-error (agent-repl-itest--wait-until #'ignore nil "nothing"))))
+    (should (string-match-p "waiting for nothing: the fake daemon in /stand-in exited unasked (exit 3)"
+                            (error-message-string err)))
+    (should-not (string-match-p "timed out" (error-message-string err)))))
+
+(ert-deftest agent-repl-itest-fixture-an-asked-exit-fails-no-wait ()
+  (let* ((daemon (agent-repl-itest-fixture--exited-stand-in 3))
+         (agent-repl-itest--watched-daemons (list daemon)))
+    (setf (agent-repl-itest-daemon-asked daemon) t)
+    (should (null (agent-repl-itest--daemon-fault)))))
+
+(ert-deftest agent-repl-itest-fixture-a-clean-exit-fails-no-wait ()
+  (let* ((daemon (agent-repl-itest-fixture--exited-stand-in 0))
+         (agent-repl-itest--watched-daemons (list daemon)))
+    (should (null (agent-repl-itest--daemon-fault)))))
+
 (provide 'test-integration-fixture)
 ;;; test-integration-fixture.el ends here

@@ -116,8 +116,37 @@ Signals when PATH is set but names no executable."
 PROCESS is its Emacs process object, STATE-DIR the private
 `AGENT_REPL_STATE_DIR' it was started with, ADDRESS the `127.0.0.1:PORT'
 it wrote to that dir's `daemon.addr', and STDERR-BUFFER its structured
-JSON log."
-  process state-dir address stderr-buffer)
+JSON log.  ASKED is non-nil once the suite asked it to exit
+(`agent-repl-itest--exit', `agent-repl-itest--stop-daemon'), so its
+exit fails no wait (`agent-repl-itest--daemon-fault')."
+  process state-dir address stderr-buffer asked)
+
+(defvar agent-repl-itest--watched-daemons nil
+  "Every fake daemon `agent-repl-itest--start-daemon' started and no stop reaped.
+A WAIT FAILS AT ONCE WHEN ONE OF THEM HAS DIED UNASKED
+(`agent-repl-itest--daemon-fault'): nothing the suite waits on can happen
+without its daemon, and the death, with the daemon's own stderr, is the
+cause, not the wait's bound.")
+
+(defun agent-repl-itest--daemon-fault ()
+  "Describe the first watched fake daemon that exited unasked, or nil.
+An exit the suite asked for, and an exit with status 0 (the fake's orderly
+`/_fake/exit'), are no fault."
+  (seq-some
+   (lambda (daemon)
+     (let ((process (agent-repl-itest-daemon-process daemon)))
+       (unless (or (process-live-p process)
+                   (agent-repl-itest-daemon-asked daemon)
+                   (and (eq (process-status process) 'exit)
+                        (zerop (process-exit-status process))))
+         (format "the fake daemon in %s exited unasked (%s %s); its stderr:\n%s"
+                 (agent-repl-itest-daemon-state-dir daemon)
+                 (process-status process) (process-exit-status process)
+                 (let ((stderr (agent-repl-itest-daemon-stderr-buffer daemon)))
+                   (if (buffer-live-p stderr)
+                       (with-current-buffer stderr (buffer-string))
+                     "(its log buffer is gone)"))))))
+   agent-repl-itest--watched-daemons))
 
 (defconst agent-repl-itest-default-timeout 14
   "Seconds `agent-repl-itest--wait-until' waits before failing.
@@ -143,6 +172,9 @@ almost useless."
       (while t
         (when (funcall pred)
           (throw 'agent-repl-itest--satisfied t))
+        (when-let ((fault (agent-repl-itest--daemon-fault)))
+          (error "agent-repl-itest: waiting for %s: %s"
+                 (or description (prin1-to-string pred)) fault))
         (when (> (float-time) deadline)
           (error "agent-repl-itest: timed out after %ss waiting for %s"
                  limit (or description (prin1-to-string pred))))
@@ -301,15 +333,19 @@ the INCUMBENT'S, and returning it would hand the caller a struct whose
       (let ((text (with-current-buffer stderr (buffer-string))))
         (error "agent-repl-itest: the fake daemon exited before publishing daemon.addr:\n%s"
                text)))
-    (agent-repl-itest--make-daemon
-     :process process
-     :state-dir dir
-     :address (agent-repl-itest--read-addr-file dir)
-     :stderr-buffer stderr)))
+    (let ((daemon (agent-repl-itest--make-daemon
+                   :process process
+                   :state-dir dir
+                   :address (agent-repl-itest--read-addr-file dir)
+                   :stderr-buffer stderr)))
+      (push daemon agent-repl-itest--watched-daemons)
+      daemon)))
 
 (defun agent-repl-itest--stop-daemon (daemon &optional keep-state-dir)
   "Stop DAEMON, orderly if it still answers, and reap its buffers.
 Unless KEEP-STATE-DIR, deletes its private state dir."
+  (setf (agent-repl-itest-daemon-asked daemon) t)
+  (setq agent-repl-itest--watched-daemons (delq daemon agent-repl-itest--watched-daemons))
   (let ((process (agent-repl-itest-daemon-process daemon)))
     (when (process-live-p process)
       ;; Ask for the orderly exit first, so daemon.addr removal is exercised
@@ -542,6 +578,7 @@ armed gate, and ends every standing stream with a clean end frame."
 
 (defun agent-repl-itest--exit (daemon)
   "Ask DAEMON to exit orderly (removing its `daemon.addr')."
+  (setf (agent-repl-itest-daemon-asked daemon) t)
   (agent-repl-itest--control-ok daemon "/_fake/exit" "{}"))
 
 (defun agent-repl-itest--await-subscriber (daemon stream &optional workspace-id count)
