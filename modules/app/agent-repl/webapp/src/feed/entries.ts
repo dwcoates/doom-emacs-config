@@ -177,6 +177,26 @@ export function answeredNodeAt(host: ParentNode, prompt: HTMLElement, target: El
   return row === null ? null : { row, label };
 }
 
+/** The class every line of a prompt entry wears while the response label it answers is hovered. */
+export const ENTRY_LIT_CLASS = "mp-entry-lit";
+
+/**
+ * The lines of the prompt entry that answered the response label TARGET is
+ * on, drawn in HOST, or an empty list: TARGET is not on a linked label, or
+ * the prompt that answered it draws no such entry.
+ */
+export function answeringEntryLines(host: ParentNode, target: Element): HTMLElement[] {
+  const label = target.closest<HTMLElement>(`.${TREE_LABEL_CLASS}.${LABEL_LINK_CLASS}`);
+  if (label === null) return [];
+  const node = label.getAttribute(TREE_LABEL_ATTRIBUTE);
+  const promptId = label.getAttribute(ANSWER_PROMPT_ATTRIBUTE);
+  if (node === null || promptId === null) throw new Error("a linked label names no node or answering prompt");
+  return queryAll<HTMLElement>(host, `.${ENTRY_CLASS}[${ENTRY_ATTRIBUTE}]`).filter((line) => {
+    const row = feedRowOf(line);
+    return line.getAttribute(ENTRY_ATTRIBUTE) === node && row !== null && feedRowId(row) === promptId;
+  });
+}
+
 /**
  * Flash ROW's entry answering LABEL, which a linked label revealed: every line
  * the entry is drawn on, as the row is drawn now. A row that draws no such

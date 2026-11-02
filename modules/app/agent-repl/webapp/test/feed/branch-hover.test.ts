@@ -440,7 +440,7 @@ describe("the box over the response node a hovered prompt entry answers", () => 
     over(labelOf(prompt, "3.1"));
     // Assert
     const width = `    └── 3.1.1 At fork time`.length;
-    expect(boxedBy(row, HOVER_BOX)).toEqual([
+    expect(boxedBy(row, REFERENCE_BOX)).toEqual([
       ["3.1", "4ch", `${width}ch`],
       ["3.1.1", "4ch", `${width}ch`],
     ]);
@@ -453,7 +453,7 @@ describe("the box over the response node a hovered prompt entry answers", () => 
     // Act
     over(labelOf(prompt, "3"));
     // Assert
-    expect(boxedBy(row, HOVER_BOX).map(([node]) => node)).toEqual(["3", "3.1", "3.1.1", "3.2"]);
+    expect(boxedBy(row, REFERENCE_BOX).map(([node]) => node)).toEqual(["3", "3.1", "3.1.1", "3.2"]);
   });
 
   it("boxes nothing in the prompt itself", () => {
@@ -463,7 +463,7 @@ describe("the box over the response node a hovered prompt entry answers", () => 
     // Act
     over(labelOf(prompt, "3.1"));
     // Assert
-    expect(boxedBy(prompt, HOVER_BOX)).toEqual([]);
+    expect(boxedBy(prompt, REFERENCE_BOX)).toEqual([]);
   });
 
   it("is taken down when the pointer moves off the label onto the entry's words", () => {
@@ -474,7 +474,7 @@ describe("the box over the response node a hovered prompt entry answers", () => 
     // Act
     over(words(prompt, "3.1"));
     // Assert
-    expect(boxedBy(row, HOVER_BOX)).toEqual([]);
+    expect(boxedBy(row, REFERENCE_BOX)).toEqual([]);
   });
 
   it("boxes nothing for an entry no drawn response is answered by", () => {
@@ -484,7 +484,7 @@ describe("the box over the response node a hovered prompt entry answers", () => 
     // Act
     over(labelOf(prompt, "4.2"));
     // Assert
-    expect(boxedBy(row, HOVER_BOX)).toEqual([]);
+    expect(boxedBy(row, REFERENCE_BOX)).toEqual([]);
   });
 
   it("records each newly boxed answered node at debug", async () => {
@@ -497,6 +497,39 @@ describe("the box over the response node a hovered prompt entry answers", () => 
     // Assert
     const record = await forwardedRecord(capture, "feed.branch-hover.entry");
     expect([record.level.case, record.context]).toEqual(["debug", expect.objectContaining({ row: "r1", label: "3.1" })]);
+  });
+});
+
+describe("the prompt entry lit by a hovered response label (owner request, 2026-11-01)", () => {
+  it("lights the entry that answered the hovered linked label", () => {
+    // Arrange
+    const { response: row, prompt } = answeredFeed();
+    uninstall = installBranchHover(document.body, TEN_PX_COLUMNS);
+    // Act
+    over(labelOf(row, "3.1"));
+    // Assert
+    expect(prompt.querySelectorAll(".mp-entry-lit")).toHaveLength(1);
+  });
+
+  it("lights nothing for a label no prompt answered", () => {
+    // Arrange
+    const { response: row, prompt } = answeredFeed();
+    uninstall = installBranchHover(document.body, TEN_PX_COLUMNS);
+    // Act
+    over(labelOf(row, "3.2"));
+    // Assert
+    expect(prompt.querySelectorAll(".mp-entry-lit")).toHaveLength(0);
+  });
+
+  it("puts the light out when the pointer moves off the label", () => {
+    // Arrange
+    const { response: row, prompt } = answeredFeed();
+    uninstall = installBranchHover(document.body, TEN_PX_COLUMNS);
+    over(labelOf(row, "3.1"));
+    // Act
+    over(labelOf(row, "3.2"));
+    // Assert
+    expect(prompt.querySelectorAll(".mp-entry-lit")).toHaveLength(0);
   });
 });
 
