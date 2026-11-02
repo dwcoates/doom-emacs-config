@@ -2671,8 +2671,15 @@ whole promise is that the process is still there afterwards."
                                     :noquery t)))
             (unwind-protect
                 (progn
-                  (while (not (file-exists-p pidfile))
-                    (accept-process-output nil 0.002))
+                  ;; A poll, because a file's arrival announces nothing, but
+                  ;; one that ends at the stub's death and at a bound.
+                  (let ((deadline (+ (float-time) 5)))
+                    (while (not (file-exists-p pidfile))
+                      (unless (process-live-p proc)
+                        (error "The stub exited before it recorded its pid"))
+                      (when (> (float-time) deadline)
+                        (error "The stub recorded no pid within 5s"))
+                      (accept-process-output proc 0.002)))
                   ;; The pid the stub reported must be the process Emacs
                   ;; holds: that is the `exec', not a shell in between.
                   (let ((pid (string-to-number
@@ -2680,11 +2687,22 @@ whole promise is that the process is still there afterwards."
                                 (insert-file-contents pidfile)
                                 (string-trim (buffer-string))))))
                     (should (equal pid (process-id proc)))
-                    ;; Act: the signal Emacs sends every child on exit.
+                    ;; Act: the signal Emacs sends every child on exit, then
+                    ;; a SIGTERM that ends the wait.  Pending signals are
+                    ;; delivered lowest number first, so a process that did
+                    ;; not ignore the SIGHUP dies of it (1) and one that did
+                    ;; dies of the SIGTERM (15): its exit is the event, never
+                    ;; a window of time.
                     (signal-process pid 'SIGHUP)
-                    ;; Assert: still there.
-                    (accept-process-output nil 0.05)
-                    (should (process-attributes pid))))
+                    (signal-process pid 'SIGTERM)
+                    (let ((deadline (+ (float-time) 5)))
+                      (while (process-live-p proc)
+                        (when (> (float-time) deadline)
+                          (error "The stub outlived its SIGTERM by 5s"))
+                        (accept-process-output proc 0.05)))
+                    ;; Assert: the SIGHUP did nothing; the SIGTERM ended it.
+                    (should (equal (list (process-status proc) (process-exit-status proc))
+                                   '(signal 15)))))
               (agent-repl-test--reap-process proc))))
       (delete-directory dir t))))
 
