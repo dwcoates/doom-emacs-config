@@ -408,6 +408,11 @@ type Opts struct {
 	// ExpectEarlyExit stops the harness from failing when the daemon exits on
 	// its own, for the tests whose subject is a refusal to boot.
 	ExpectEarlyExit bool
+	// ExpectWarnings declares, BEFORE the process starts, the operations whose
+	// WARN or ERROR records the daemon is meant to write: Daemon.ExpectWarnings
+	// for the records a daemon writes while it boots, which would close its
+	// record latch (fault.go) before StartDaemon returned.
+	ExpectWarnings []string
 	// ExtraArgs and ExtraEnv are appended verbatim.
 	ExtraArgs []string
 	ExtraEnv  []string
@@ -513,11 +518,21 @@ type Daemon struct {
 	*daemonProc
 }
 
+// newDaemonProc is the one way a daemonProc is made: the process's state
+// with its fault latch (fault.go) and its shims' registry, over CMD (nil
+// until StartDaemon has started the process).
+func newDaemonProc(cmd *exec.Cmd) *daemonProc {
+	return &daemonProc{cmd: cmd, shims: map[string]*ShimControl{}, fault: newProcessFault()}
+}
+
 // daemonProc is the state of one daemon PROCESS, shared by everything that
 // names it. Its mu also guards the per-test expectation maps on Daemon, so one
 // lock orders every read and write the sweep makes.
 type daemonProc struct {
-	cmd        *exec.Cmd
+	cmd *exec.Cmd
+	// fault is the process latch every wait on this process selects on
+	// (fault.go).
+	fault      *processFault
 	stderrPath string
 	// afterGroupStopped, when set, runs inside Kill between the group's
 	// SIGSTOP and the leader's SIGKILL: the instant at which the harness's own
@@ -689,7 +704,7 @@ func StartDaemon(t testing.TB, opts Opts) *Daemon {
 		t:                  t,
 		expected:           map[string]bool{},
 		required:           map[string]bool{},
-		daemonProc:         &daemonProc{shims: map[string]*ShimControl{}},
+		daemonProc:         newDaemonProc(nil),
 	}
 	if opts.DefaultSettings != "" {
 		writeFile(t, filepath.Join(d.DefaultConfigDir, "settings.json"), opts.DefaultSettings)
@@ -799,7 +814,13 @@ func StartDaemon(t testing.TB, opts Opts) *Daemon {
 	// (grantedBound), so a host with no CPU to give this daemon never reads
 	// as the daemon's failure.
 	requireGrantedClock(t)
-	ctx, cancel := grantedclock.WithBound(context.Background(), timeout*runBudgetWaits)
+	// The run budget is a child of the fault latches (fault.go): the daemon's
+	// unasked exit, or a record its test did not declare, ends every wait.
+	if opts.ExpectEarlyExit {
+		d.ExpectFailedExit()
+	}
+	d.ExpectWarnings(opts.ExpectWarnings...)
+	ctx, cancel := grantedclock.WithBound(d.watchRecords(t, d.fault.ctx), timeout*runBudgetWaits)
 	t.Cleanup(cancel)
 	d.ctx = ctx
 
@@ -963,6 +984,7 @@ func StartDaemon(t testing.TB, opts Opts) *Daemon {
 		t.Fatalf("harness: start daemon: %v", err)
 	}
 	d.cmd = cmd
+	d.watchProcessEnd(t)
 	// EVERY DEPLOY THIS DAEMON RUNS IS A NO-OP unless the test stages another:
 	// the builds it states are the ones running.
 	d.StageDeployBuild(DeployCurrent)
@@ -1152,6 +1174,7 @@ func (d *Daemon) dumpOnStall(bound time.Duration) string {
 		return "the daemon was already reaped; no goroutine dump"
 	}
 	pid := d.cmd.Process.Pid
+	d.fault.ask()
 	err := syscall.Kill(pid, syscall.SIGQUIT)
 	d.sigMu.Unlock()
 	if errors.Is(err, syscall.ESRCH) {
@@ -1303,6 +1326,7 @@ func (d *Daemon) gracefulStopForCoverage() {
 		return
 	}
 	d.sigMu.Lock()
+	d.fault.ask()
 	sent := !d.reapBegun && d.cmd.Process.Signal(syscall.SIGTERM) == nil
 	d.sigMu.Unlock()
 	if !sent {
@@ -1416,6 +1440,7 @@ func (d *Daemon) killGroup() bool {
 		return false
 	}
 	pgid := d.cmd.Process.Pid
+	d.fault.ask()
 	if !d.signalGroup(pgid, syscall.SIGSTOP) {
 		return false
 	}
@@ -1812,6 +1837,7 @@ func (d *Daemon) signal(sig syscall.Signal) {
 	if d.reapBegun {
 		return
 	}
+	d.fault.ask()
 	if err := d.cmd.Process.Signal(sig); err != nil && !errors.Is(err, os.ErrProcessDone) {
 		d.t.Fatalf("harness: signal %v: %v", sig, err)
 	}

@@ -590,7 +590,8 @@ func TestPprofServesOverAUnixSocket(t *testing.T) {
 	t.Cleanup(func() { os.RemoveAll(sockDir) })
 	sockPath := filepath.Join(sockDir, "p.sock")
 
-	d := newDaemon(t, harness.Opts{Pprof: sockPath})
+	// The profiling surface says so out loud at boot.
+	d := newDaemon(t, harness.Opts{Pprof: sockPath, ExpectWarnings: []string{"daemon.pprof.enabled"}})
 	record := d.AwaitRunLogOperation("daemon.pprof.enabled")
 	network, _ := record.Context["network"].(string)
 	if network != "unix" {
@@ -689,18 +690,18 @@ func TestBootServesThoughASurvivingShimIsUnreachable(t *testing.T) {
 	// Act: restart on the same state root and the same redirected lock
 	// directory, so the probe finds the survivor's lock held and the dial finds
 	// nothing at the path.
+	// The sweep covers every test; the declared records are the overrun
+	// adoption this test arranges, reported by the supervisor and by the boot,
+	// and the bounce accounting's bounce_unknown for the session nobody could
+	// adopt.
 	nd := harness.StartDaemon(t, harness.Opts{
 		StateDir: f.d.StateDir,
 		ExtraEnv: []string{
 			"AGENT_REPL_LOCK_DIR=" + f.d.LockDir,
 			"AGENT_REPL_BOOT_ADOPT_BOUND=300ms",
 		},
+		ExpectWarnings: []string{"daemon.boot.adopt", "daemon.shimclient.adopt", "daemon.rollout.reconcile"},
 	})
-	// The sweep covers every test; the declared records are the overrun
-	// adoption this test arranges, reported by the supervisor and by the boot,
-	// and the bounce accounting's bounce_unknown for the session nobody could
-	// adopt.
-	nd.ExpectWarnings("daemon.boot.adopt", "daemon.shimclient.adopt", "daemon.rollout.reconcile")
 
 	// Assert: the daemon answers. StartDaemon already waited for the serving
 	// record, and this is the socket actually accepting a connection.
@@ -725,16 +726,16 @@ func TestAnUnadoptedSurvivorWithNoManifestKeepsItsBounceUnknownStanding(t *testi
 	}
 
 	// Act
+	// The sweep covers every test; the declared records are the overrun
+	// adoption this test arranges and the bounce_unknown it is about.
 	nd := harness.StartDaemon(t, harness.Opts{
 		StateDir: f.d.StateDir,
 		ExtraEnv: []string{
 			"AGENT_REPL_LOCK_DIR=" + f.d.LockDir,
 			"AGENT_REPL_BOOT_ADOPT_BOUND=300ms",
 		},
+		ExpectWarnings: []string{"daemon.boot.adopt", "daemon.shimclient.adopt", "daemon.rollout.reconcile"},
 	})
-	// The sweep covers every test; the declared records are the overrun
-	// adoption this test arranges and the bounce_unknown it is about.
-	nd.ExpectWarnings("daemon.boot.adopt", "daemon.shimclient.adopt", "daemon.rollout.reconcile")
 
 	// Assert: recorded for this workspace.
 	nd.AwaitLogRecord(nd.RunLogPath(), "the unadopted session's bounce_unknown", func(r harness.LogRecord) bool {
@@ -776,9 +777,8 @@ func TestAnUnhealthySurvivorIsAdoptedWithinTheBound(t *testing.T) {
 			"AGENT_REPL_LOCK_DIR=" + f.d.LockDir,
 			"AGENT_REPL_BOOT_ADOPT_BOUND=60s",
 		},
+		ExpectWarnings: []string{"daemon.shimclient.ready", "daemon.health.open_fault", "daemon.health.session", "daemon.boot.adopt", "daemon.shimclient.adopt"},
 	})
-	nd.ExpectWarnings("daemon.shimclient.ready", "daemon.health.open_fault", "daemon.health.session",
-		"daemon.boot.adopt", "daemon.shimclient.adopt")
 
 	// Assert: the survivor was adopted, and the fault it is standing on
 	// reached the workspace health path rather than being a boot blocker.

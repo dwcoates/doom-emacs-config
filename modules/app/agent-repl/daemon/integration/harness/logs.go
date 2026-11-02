@@ -166,7 +166,7 @@ func awaitLogRecordAfter(t testing.TB, wait context.Context, path, what string, 
 		case <-ticker.C:
 		case <-wait.Done():
 			records := readLog(t, path)
-			t.Fatalf("waiting for %s in %s: %v\n%s\n%s", what, path, wait.Err(), anchorAccount(records, after, pred), logTail(records, failureTailRecords))
+			t.Fatalf("waiting for %s in %s: %v\n%s\n%s", what, path, grantedclock.Explain(wait), anchorAccount(records, after, pred), logTail(records, failureTailRecords))
 			return LogRecord{}
 		}
 	}
@@ -294,6 +294,16 @@ func ReadLog(t testing.TB, path string) []LogRecord { return readLog(t, path) }
 // never writes into the shared one.
 func readLog(t testing.TB, path string) []LogRecord {
 	t.Helper()
+	records, err := readLogRecords(t, path)
+	if err != nil {
+		t.Fatalf("harness: %v", err)
+	}
+	return records
+}
+
+// readLogRecords is readLog answering its failure instead of failing t, for a
+// reader on a goroutine of its own (fault.go's record latch).
+func readLogRecords(t testing.TB, path string) ([]LogRecord, error) {
 	tail := logReaderFor(t, path)
 	tail.mu.Lock()
 	defer tail.mu.Unlock()
@@ -301,30 +311,30 @@ func readLog(t testing.TB, path string) []LogRecord {
 	f, err := os.Open(path)
 	if os.IsNotExist(err) {
 		tail.reset(nil)
-		return nil
+		return nil, nil
 	}
 	if err != nil {
-		t.Fatalf("harness: read %s: %v", path, err)
+		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
 	defer f.Close()
 	info, err := f.Stat()
 	if err != nil {
-		t.Fatalf("harness: stat %s: %v", path, err)
+		return nil, fmt.Errorf("stat %s: %w", path, err)
 	}
 	if tail.info == nil || !os.SameFile(tail.info, info) || info.Size() < tail.offset {
 		tail.reset(info)
 	}
 	if info.Size() == tail.offset {
-		return slices.Clip(tail.records)
+		return slices.Clip(tail.records), nil
 	}
 	body := make([]byte, info.Size()-tail.offset)
 	if _, err := f.ReadAt(body, tail.offset); err != nil && err != io.EOF {
-		t.Fatalf("harness: read %s: %v", path, err)
+		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
 	// Everything after the last newline is a record still being written.
 	end := bytes.LastIndexByte(body, '\n')
 	if end < 0 {
-		return slices.Clip(tail.records)
+		return slices.Clip(tail.records), nil
 	}
 	body = body[:end+1]
 
@@ -337,16 +347,16 @@ func readLog(t testing.TB, path string) []LogRecord {
 		}
 		var rec LogRecord
 		if err := json.Unmarshal([]byte(line), &rec); err != nil {
-			t.Fatalf("harness: %s holds a non-JSONL line %q: %v", path, line, err)
+			return nil, fmt.Errorf("%s holds a non-JSONL line %q: %w", path, line, err)
 		}
 		rec.Raw = line
 		tail.records = append(tail.records, rec)
 	}
 	if err := scanner.Err(); err != nil {
-		t.Fatalf("harness: scan %s: %v", path, err)
+		return nil, fmt.Errorf("scan %s: %w", path, err)
 	}
 	tail.offset += int64(end + 1)
-	return slices.Clip(tail.records)
+	return slices.Clip(tail.records), nil
 }
 
 // logReader is one log file's decoded records up to offset, the byte after the

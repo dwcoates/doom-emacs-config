@@ -909,10 +909,9 @@ func TestOpenExternalWithAFailingLauncherAnswersLaunchFailed(t *testing.T) {
 func TestOpenExternalWithNoBrowserConfiguredAnswersNoBrowserConfigured(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newRegistered(t, harness.Opts{ExtraArgs: []string{"--no-browser"}})
 	// The graph says so out loud at boot: a daemon that cannot open a link is
 	// not silently degraded.
-	f.d.ExpectWarnings("daemon.cmd.graph")
+	f := newRegistered(t, harness.Opts{ExtraArgs: []string{"--no-browser"}, ExpectWarnings: []string{"daemon.cmd.graph"}})
 
 	// Act
 	resp, err := f.d.Client().OpenExternal(f.d.Ctx(), connect.NewRequest(&agentreplv1.OpenExternalRequest{

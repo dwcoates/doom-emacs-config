@@ -172,8 +172,7 @@ func TestAFreshBootReleasesTheHoldsADeadDaemonLeft(t *testing.T) {
 	}
 
 	// Act
-	second := harness.StartDaemon(t, harness.Opts{StateDir: first.d.StateDir})
-	second.ExpectWarnings("daemon.boot.orphan_leases")
+	second := harness.StartDaemon(t, harness.Opts{StateDir: first.d.StateDir, ExpectWarnings: []string{"daemon.boot.orphan_leases"}})
 	released := second.AwaitLogRecord(second.RunLogPath(), "the orphan's release", func(r harness.LogRecord) bool {
 		return r.Operation == "daemon.boot.orphan_leases" && r.Level == "error"
 	})

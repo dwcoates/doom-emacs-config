@@ -112,12 +112,14 @@ func (c *boundCtx) String() string {
 }
 
 // Explain answers why CTX ended: for a WithBound context, the bound that ran
-// out with its span or the clock read that failed; for any other, its Err.
-// It answers nil for a context that has not ended.
+// out with its span, the clock read that failed, or its parent's
+// explanation; for any other, its cause (context.Cause), which is its Err
+// unless it was cancelled with one. It answers nil for a context that has not
+// ended.
 func Explain(ctx context.Context) error {
 	c, ok := ctx.(*boundCtx)
 	if !ok {
-		return ctx.Err()
+		return context.Cause(ctx)
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()

@@ -1,7 +1,6 @@
 package harness
 
 import (
-	"context"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -69,7 +68,7 @@ func (d *Daemon) View(t testing.TB) *Daemon {
 	// can see, so the test's git world is the daemon's.
 	bindWorld(t, d.Git)
 	requireGrantedClock(t)
-	ctx, cancel := grantedclock.WithBound(context.Background(), v.waitBound*runBudgetWaits)
+	ctx, cancel := grantedclock.WithBound(v.watchRecords(t, d.fault.ctx), v.waitBound*runBudgetWaits)
 	v.ctx = ctx
 	// Registered first so it runs last: the sweeps below read the logs, and
 	// the budget must outlive them.

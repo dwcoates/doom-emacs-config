@@ -991,6 +991,9 @@ func TestARestartAskedOfAMovedWorkspaceIsAnsweredTransferringAway(t *testing.T) 
 	t.Parallel()
 	// Arrange: a busy workspace, moved mid-turn.
 	selfRepo, d := drainSelfRepoDaemon(t)
+	// The standing refusal is recorded as the transport's unlanded arm, as
+	// every refusal of a workspace this daemon no longer serves is.
+	d.ExpectWarnings("daemon.refusal.unlanded_arm.standing")
 	f := drainOpenWorkspace(t, d)
 	f.shim.ExpectStartSession()
 	f.shim.ExpectWatchSession()
@@ -1016,9 +1019,6 @@ func TestARestartAskedOfAMovedWorkspaceIsAnsweredTransferringAway(t *testing.T) 
 	if got := f.shim.Count(harness.RPCKillTurn); got != 0 {
 		t.Fatalf("KillTurn was called %d time(s); the incumbent must not run a restart it has moved away", got)
 	}
-	// The standing refusal is recorded as the transport's unlanded arm, as
-	// every refusal of a workspace this daemon no longer serves is.
-	d.ExpectWarnings("daemon.refusal.unlanded_arm.standing")
 }
 
 func TestAnEarlyAdoptionCallDuringATurnAdoptsTheWorkspaceWithoutEndingIt(t *testing.T) {
@@ -1076,6 +1076,8 @@ func TestARefusedMidWorkAdoptionFallsBackToFreenessAndNamesTheHoldout(t *testing
 	selfRepo.DeploysAsAgentRepl()
 	d := harness.StartDaemon(t, harness.Opts{
 		DurableState: true,
+		// The holdout is named on the cadence at WARN, which is the subject.
+		ExpectWarnings: []string{"daemon.rollout.handover"},
 		ExtraEnv: []string{
 			harness.TestAllScriptEnv(script.Path),
 			"AGENT_REPL_HOLDOUT_WARN_EVERY=25ms",
@@ -1136,7 +1138,6 @@ func TestARefusedMidWorkAdoptionFallsBackToFreenessAndNamesTheHoldout(t *testing
 	if got := f.shim.Count(harness.RPCKillTurn); got != 0 {
 		t.Fatalf("KillTurn was called %d time(s); the fallback interrupts nothing", got)
 	}
-	d.ExpectWarnings("daemon.rollout.handover")
 }
 
 // namesHoldout reports whether a JSON-decoded holdout list names ws.

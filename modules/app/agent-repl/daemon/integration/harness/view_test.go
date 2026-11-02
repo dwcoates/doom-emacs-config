@@ -35,7 +35,7 @@ func newOwnerForViews(t *testing.T, owner testing.TB) *Daemon {
 	return &Daemon{
 		t: owner, ctx: context.Background(), StateDir: state, waitBound: DefaultTimeout, Git: World(owner),
 		expected: map[string]bool{}, required: map[string]bool{},
-		daemonProc: &daemonProc{cmd: &exec.Cmd{Process: process}},
+		daemonProc: newDaemonProc(&exec.Cmd{Process: process}),
 	}
 }
 
