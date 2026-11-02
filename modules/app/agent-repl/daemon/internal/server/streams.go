@@ -189,6 +189,19 @@ func endStandingStream[R any](s *server, rpc string, log dlog.Logger, out stream
 	log.Debug(rpc, "sent the standing stream's planned ending", nil)
 }
 
+// serveThenEnd serves one standing stream with an ending frame: BODY writes
+// its views into OUT, and once it returns cleanly ENDING follows as the last
+// frame when the daemon's own lifetime ended it (`endStandingStream`). A
+// body's error is the stream's, and no ending follows it. The dedicated rpc
+// and its page subscription both serve through here.
+func serveThenEnd[R any](s *server, rpc string, out streamSink[R], ending *R, body func() error) error {
+	if err := body(); err != nil {
+		return err
+	}
+	endStandingStream(s, rpc, s.log, out, ending)
+	return nil
+}
+
 // refuseStream answers a refused stream open. A Watch* rpc has NO `<Rpc>Error`
 // message — a refused open is a Connect error BEFORE any frame — and by ruling
 // (landing 6) that is the SETTLED shape rather than an unlanded arm, so the
@@ -205,12 +218,9 @@ func (s *server) WatchWorkspaceRoster(
 	req *connect.Request[agentreplv1.WatchWorkspaceRosterRequest],
 	out *connect.ServerStream[agentreplv1.WatchWorkspaceRosterResponse],
 ) error {
-	const rpc = "WatchWorkspaceRoster"
-	if err := s.watchWorkspaceRoster(ctx, req.Msg, out); err != nil {
-		return err
-	}
-	endStandingStream(s, rpc, s.log, out, rosterEnding())
-	return nil
+	return serveThenEnd(s, "WatchWorkspaceRoster", out, rosterEnding(), func() error {
+		return s.watchWorkspaceRoster(ctx, req.Msg, out)
+	})
 }
 
 // rosterEnding is the roster stream's planned ending frame, the dedicated
@@ -552,11 +562,9 @@ func (s *server) WatchDaemon(
 	req *connect.Request[agentreplv1.WatchDaemonRequest],
 	out *connect.ServerStream[agentreplv1.WatchDaemonResponse],
 ) error {
-	if err := s.watchDaemon(ctx, req.Msg, out); err != nil {
-		return err
-	}
-	endStandingStream(s, "WatchDaemon", s.log, out, daemonEnding())
-	return nil
+	return serveThenEnd(s, "WatchDaemon", out, daemonEnding(), func() error {
+		return s.watchDaemon(ctx, req.Msg, out)
+	})
 }
 
 // daemonEnding is the daemon stream's planned ending frame, the dedicated

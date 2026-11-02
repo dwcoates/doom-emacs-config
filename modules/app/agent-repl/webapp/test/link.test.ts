@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import { codeOf } from "./source-text.js";
 import { fileURLToPath } from "node:url";
 import { codeUnder } from "./files-under.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -29,6 +30,7 @@ import { createTicker } from "../src/clock.js";
 import type { FailureSink } from "../src/failure/sink.js";
 import { ForwardingLogger, setLogger } from "../src/log.js";
 import {
+  claimsClick,
   editorTargetAnchor,
   installNavigationGuard,
   installProseLinkRouting,
@@ -179,6 +181,35 @@ function workspaceFileOf(req: OpenInEditorRequest): OpenInEditorWorkspaceFile {
 function testLog(token = "log-7f3a", label = "~/.claude-emacs/merge-logs/ws-tests-2.log"): FeedMergeTestLog {
   return create(FeedMergeTestLogSchema, { token: { value: token }, label: { text: label } });
 }
+
+describe("claimsClick", () => {
+  const cases: Array<{ name: string; init: MouseEventInit; cancelled?: boolean; want: boolean }> = [
+    { name: "a plain primary click", init: { button: 0 }, want: true },
+    { name: "a middle click", init: { button: 1 }, want: false },
+    { name: "a meta click", init: { button: 0, metaKey: true }, want: false },
+    { name: "a ctrl click", init: { button: 0, ctrlKey: true }, want: false },
+    { name: "a shift click", init: { button: 0, shiftKey: true }, want: false },
+    { name: "an alt click", init: { button: 0, altKey: true }, want: false },
+    { name: "a click somebody already claimed", init: { button: 0 }, cancelled: true, want: false },
+  ];
+  for (const tc of cases) {
+    it(`${tc.want ? "takes" : "leaves"} ${tc.name}`, () => {
+      // ARRANGE
+      const event = new MouseEvent("click", { cancelable: true, ...tc.init });
+      if (tc.cancelled === true) event.preventDefault();
+      // ACT + ASSERT
+      expect(claimsClick(event)).toBe(tc.want);
+    });
+  }
+
+  it("is the claim every href-less link shares, never re-spelled", () => {
+    // ARRANGE
+    const mentions = codeOf(readFileSync(path.join(process.cwd(), "src/feed/workspace-mentions.ts"), "utf8"));
+    // ACT + ASSERT
+    expect(mentions).toContain("claimsClick(event)");
+    expect(mentions).not.toMatch(/event\.button\s*!==\s*0|event\.metaKey/);
+  });
+});
 
 describe("editorTargetAnchor", () => {
   const target = { case: "workspaceFile", value: { path: "lisp/core.el" } } as const;

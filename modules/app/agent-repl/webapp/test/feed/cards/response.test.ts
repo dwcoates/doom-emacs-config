@@ -67,6 +67,8 @@ import { boundCopyText } from "../../../src/copy-control.js";
 import { BUBBLE_COPY_CLASS, COPY_ROOM_CLASS } from "../../../src/bubble/copy-room.js";
 import { responseUsageOf } from "../../../src/feed/response-usage.js";
 import { COMPOSER_ENTRY_CLASS, createComposerEntryHighlight } from "../../../src/feed/composer-entry.js";
+import { applyMentionTargets, resetMentionTargets, WORKSPACE_MENTION_ATTRIBUTE } from "../../../src/feed/workspace-mentions.js";
+import { WorkspaceMentionTargetsSchema } from "../../../../proto/gen/ts/frontend/v1/workspace_mention_pb";
 
 const SINK: FailureSink = { report: () => {}, retract: () => {} };
 
@@ -868,6 +870,27 @@ describe("the wrapped tree a settled response carries", () => {
     // Assert
     const linked = [...el.querySelectorAll(".mp-label-linked")].map((l) => [l.getAttribute("data-label"), l.getAttribute("data-answer-prompt")]);
     expect(linked).toEqual([["1.1", "p2"]]);
+  });
+
+  it("links a workspace its tree mentions to that workspace on paint", () => {
+    // Arrange — the page's targets name the workspace `first`.
+    applyMentionTargets(
+      create(WorkspaceMentionTargetsSchema, { targets: [{ name: { text: "first" }, workspace: { id: "ws-first", dir: "/w/first" } }] }),
+      () => [],
+    );
+    try {
+      const el = drawFeedResponse(
+        response({ result: { case: "success", value: { prose: { prose: treeProse(ANSWERED_TREE) } } } }),
+        rowContext(),
+      );
+      // Act
+      mount(el);
+      // Assert
+      const linked = [...el.querySelectorAll(`.mp-tree [${WORKSPACE_MENTION_ATTRIBUTE}]`)].map((m) => [m.textContent, m.getAttribute(WORKSPACE_MENTION_ATTRIBUTE)]);
+      expect(linked).toEqual([["first", "ws-first"]]);
+    } finally {
+      resetMentionTargets();
+    }
   });
 
   it("links nothing in a response nothing answers", () => {

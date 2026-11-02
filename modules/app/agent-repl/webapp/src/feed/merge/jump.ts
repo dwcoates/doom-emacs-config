@@ -38,7 +38,7 @@ import {
 import type { WorkspaceRef } from "../../../../proto/gen/ts/workspace/v1/workspace_pb";
 import type { FeedId } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import { armName } from "../renderers.js";
-import type { RowContext } from "../renderers.js";
+import type { AppContext } from "../../rpc/context.js";
 import { childrenMatching } from "../../dom.js";
 import { openWorkspaceRefusal } from "../../sidebar/verbs.js";
 
@@ -59,7 +59,7 @@ export interface JumpSite {
  */
 export async function jumpToWorkspace(
   host: HTMLElement,
-  rc: RowContext,
+  ctx: AppContext,
   workspace: WorkspaceRef,
   site: JumpSite,
   reveal?: FeedId,
@@ -72,7 +72,7 @@ export async function jumpToWorkspace(
   let response: SelectWorkspaceResponse;
   try {
     response = await callUnary(
-      rc.ctx,
+      ctx,
       "SelectWorkspace",
       (client) =>
         client.selectWorkspace(
@@ -116,7 +116,7 @@ export async function jumpToWorkspace(
  */
 export async function openAndJumpToWorkspace(
   host: HTMLElement,
-  rc: RowContext,
+  ctx: AppContext,
   workspace: WorkspaceRef,
   site: JumpSite,
 ): Promise<void> {
@@ -128,7 +128,7 @@ export async function openAndJumpToWorkspace(
   let response: OpenWorkspaceResponse;
   try {
     response = await callUnary(
-      rc.ctx,
+      ctx,
       "OpenWorkspace",
       (client) => client.openWorkspace(create(OpenWorkspaceRequestSchema, { workspace })),
       OpenWorkspaceResponseSchema,
@@ -140,7 +140,7 @@ export async function openAndJumpToWorkspace(
   const result = requireCase(response.result, "OpenWorkspaceResponse.result");
   switch (result.case) {
     case "success":
-      return jumpToWorkspace(host, rc, workspace, site);
+      return jumpToWorkspace(host, ctx, workspace, site);
     case "error": {
       const cause = requireCase(result.value.cause, "OpenWorkspaceError.cause");
       const sentence =

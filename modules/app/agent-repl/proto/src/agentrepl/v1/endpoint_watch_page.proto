@@ -49,6 +49,7 @@ import "agentrepl/v1/endpoint_watch_footer.proto";
 import "agentrepl/v1/endpoint_watch_feed.proto";
 import "agentrepl/v1/endpoint_watch_login_terminal.proto";
 import "agentrepl/v1/endpoint_watch_chat.proto";
+import "agentrepl/v1/endpoint_watch_workspace_mentions.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 
@@ -119,6 +120,8 @@ message PageFrame {
     LoginTerminalOutput login_terminal = 9;
     // A thread page's chat view (WatchChat).
     WatchChatResponse chat = 10;
+    // A workspace page's mention targets (WatchWorkspaceMentions).
+    WatchWorkspaceMentionsResponse workspace_mentions = 11;
   }
   // Tag 7 is RETIRED: the held section rides the root feed's own frames
   // (WatchFeedResponse.held), not a stream of its own.
@@ -203,6 +206,8 @@ message SubscribePageRequest {
     WatchLoginTerminalRequest login_terminal = 10;
     // A thread page's chat view (WatchChat).
     WatchChatRequest chat = 11;
+    // A workspace page's mention targets (WatchWorkspaceMentions).
+    WatchWorkspaceMentionsRequest workspace_mentions = 12;
   }
   // Tag 8 is RETIRED: the held section rides the root feed's own
   // subscription (`feed`), not a stream of its own.

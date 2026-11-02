@@ -3154,6 +3154,9 @@ html[data-page-unshown] {
   padding-right: var(--bubble-copy-room);
 }
 .md a { color: var(--accent); }
+/* A WORKSPACE MENTION (src/feed/workspace-mentions.ts) is a link with no href,
+   so it wears the link color above and asks for the pointer itself. */
+.workspace-mention { cursor: pointer; }
 /* A link in a blue prompt bubble takes the prompt's own link color. */
 .bubble[data-role="prompt"] a { color: var(--prompt-link); }
 /* A REPLY'S QUOTED RESPONSE IS GREY (owner request, 2026-10-24: it was blue

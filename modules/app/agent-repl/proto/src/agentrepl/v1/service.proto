@@ -141,6 +141,7 @@ import "agentrepl/v1/endpoint_watch_host_workspace.proto";
 import "agentrepl/v1/endpoint_watch_login_terminal.proto";
 import "agentrepl/v1/endpoint_watch_page.proto";
 import "agentrepl/v1/endpoint_watch_topbar.proto";
+import "agentrepl/v1/endpoint_watch_workspace_mentions.proto";
 import "agentrepl/v1/endpoint_watch_web_workspace.proto";
 import "agentrepl/v1/endpoint_watch_workspace_roster.proto";
 
@@ -205,6 +206,12 @@ service AgentRepl {
   // newest page and mints the token WatchFeed echoes.
   rpc OpenFeed(OpenFeedRequest) returns (OpenFeedResponse);
   rpc WatchFeed(WatchFeedRequest) returns (stream WatchFeedResponse);
+  // The names a page's response trees link to the workspaces they switch to.
+  // See endpoint_watch_workspace_mentions.proto.
+  rpc WatchWorkspaceMentions(WatchWorkspaceMentionsRequest) returns (stream WatchWorkspaceMentionsResponse) {
+    // A READ: it changes nothing (`agent-repld -dry-run` lets it through).
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
 
   // The feed's history half: a page of rows for one container, "first" or
   // "next" — the daemon holds the walk. See endpoint_get_feed_page.proto.

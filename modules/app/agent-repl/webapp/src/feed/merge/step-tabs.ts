@@ -189,7 +189,7 @@ function drawReplayTarget(
   el.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopPropagation();
-    void guardMalformed(rc.ctx, "feed.merge.replay-target", openAndJumpToWorkspace(host, rc, workspace, TARGET_JUMP));
+    void guardMalformed(rc.ctx, "feed.merge.replay-target", openAndJumpToWorkspace(host, rc.ctx, workspace, TARGET_JUMP));
   });
   return el;
 }

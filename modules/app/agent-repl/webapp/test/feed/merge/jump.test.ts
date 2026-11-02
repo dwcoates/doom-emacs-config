@@ -53,7 +53,7 @@ function scripted(answer: SelectWorkspaceResponse | Error) {
 async function jump(answer: SelectWorkspaceResponse | Error) {
   const s = scripted(answer);
   const host = document.createElement("div");
-  const call = jumpToWorkspace(host, s.rc, TARGET, SITE);
+  const call = jumpToWorkspace(host, s.rc.ctx, TARGET, SITE);
   await vi.advanceTimersByTimeAsync(0);
   await call;
   return { host, calls: s.calls };
@@ -103,7 +103,7 @@ describe("jumpToWorkspace", () => {
     const s = scripted(new ConnectError("socket is gone", Code.Unavailable));
     const host = document.createElement("div");
     for (let i = 0; i < 2; i += 1) {
-      const call = jumpToWorkspace(host, s.rc, TARGET, SITE);
+      const call = jumpToWorkspace(host, s.rc.ctx, TARGET, SITE);
       await vi.advanceTimersByTimeAsync(0);
       await call;
     }
@@ -149,7 +149,7 @@ function scriptedOpen(opened: OpenWorkspaceResponse | Error) {
 async function openAndJump(opened: OpenWorkspaceResponse | Error) {
   const s = scriptedOpen(opened);
   const host = document.createElement("div");
-  const call = openAndJumpToWorkspace(host, s.rc, TARGET, SITE);
+  const call = openAndJumpToWorkspace(host, s.rc.ctx, TARGET, SITE);
   await vi.advanceTimersByTimeAsync(0);
   await call;
   return { host, calls: s.calls };
@@ -206,7 +206,7 @@ describe("openAndJumpToWorkspace", () => {
     const s = scriptedOpen(OPEN_REFUSED);
     const host = document.createElement("div");
     for (let i = 0; i < 2; i += 1) {
-      const call = openAndJumpToWorkspace(host, s.rc, TARGET, SITE);
+      const call = openAndJumpToWorkspace(host, s.rc.ctx, TARGET, SITE);
       await vi.advanceTimersByTimeAsync(0);
       await call;
     }

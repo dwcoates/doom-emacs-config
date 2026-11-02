@@ -201,6 +201,17 @@ func (s *fakeServer) countCallsLocked(method string) int {
 	return count
 }
 
+// webappStreamNotMocked records a call to METHOD, a stream only the webapp
+// opens, and refuses it as unimplemented: this fake mocks only Emacs's
+// streams. Every such stream's handler is this one call.
+func (s *fakeServer) webappStreamNotMocked(ctx context.Context, method string, msg proto.Message) error {
+	s.record(ctx, method, msg)
+	logWarn("fakedaemon.stream.not-mocked", "a stream this fake does not mock was called",
+		map[string]any{"method": method})
+	return connect.NewError(connect.CodeUnimplemented,
+		fmt.Errorf("fakedaemon mocks only Emacs's streams; %s is a webapp stream", method))
+}
+
 func (s *fakeServer) recordedCalls() []recordedCall {
 	s.mu.Lock()
 	defer s.mu.Unlock()

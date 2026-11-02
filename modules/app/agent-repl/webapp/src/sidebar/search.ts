@@ -24,6 +24,7 @@
 import { createControl, type Control } from "../control.js";
 import { childrenMatching, queryAll, SVG_NS } from "../dom.js";
 import { log } from "../log.js";
+import { escapeRegExp } from "../regexp.js";
 
 /** The class a row the query does not match wears. */
 export const SEARCH_MISS_CLASS = "sb-search-miss";
@@ -48,10 +49,6 @@ export function searchPattern(query: string): RegExp | null {
 /** Whether NAME matches QUERY (see `searchPattern`). */
 export function matchesSearch(name: string, query: string): boolean {
   return searchPattern(query)?.test(name) ?? true;
-}
-
-function escapeRegExp(word: string): string {
-  return word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 /** The name a drawn roster row shows: its own line's `.name`. */

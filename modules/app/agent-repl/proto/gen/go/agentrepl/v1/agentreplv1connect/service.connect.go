@@ -73,6 +73,9 @@ const (
 	AgentReplOpenFeedProcedure = "/agentrepl.v1.AgentRepl/OpenFeed"
 	// AgentReplWatchFeedProcedure is the fully-qualified name of the AgentRepl's WatchFeed RPC.
 	AgentReplWatchFeedProcedure = "/agentrepl.v1.AgentRepl/WatchFeed"
+	// AgentReplWatchWorkspaceMentionsProcedure is the fully-qualified name of the AgentRepl's
+	// WatchWorkspaceMentions RPC.
+	AgentReplWatchWorkspaceMentionsProcedure = "/agentrepl.v1.AgentRepl/WatchWorkspaceMentions"
 	// AgentReplGetFeedPageProcedure is the fully-qualified name of the AgentRepl's GetFeedPage RPC.
 	AgentReplGetFeedPageProcedure = "/agentrepl.v1.AgentRepl/GetFeedPage"
 	// AgentReplLoadFeedThroughProcedure is the fully-qualified name of the AgentRepl's LoadFeedThrough
@@ -420,6 +423,7 @@ var (
 	agentReplRequestCommandSupportMethodDescriptor        = agentReplServiceDescriptor.Methods().ByName("RequestCommandSupport")
 	agentReplOpenFeedMethodDescriptor                     = agentReplServiceDescriptor.Methods().ByName("OpenFeed")
 	agentReplWatchFeedMethodDescriptor                    = agentReplServiceDescriptor.Methods().ByName("WatchFeed")
+	agentReplWatchWorkspaceMentionsMethodDescriptor       = agentReplServiceDescriptor.Methods().ByName("WatchWorkspaceMentions")
 	agentReplGetFeedPageMethodDescriptor                  = agentReplServiceDescriptor.Methods().ByName("GetFeedPage")
 	agentReplLoadFeedThroughMethodDescriptor              = agentReplServiceDescriptor.Methods().ByName("LoadFeedThrough")
 	agentReplInterruptMethodDescriptor                    = agentReplServiceDescriptor.Methods().ByName("Interrupt")
@@ -592,6 +596,9 @@ type AgentReplClient interface {
 	// newest page and mints the token WatchFeed echoes.
 	OpenFeed(context.Context, *connect.Request[v1.OpenFeedRequest]) (*connect.Response[v1.OpenFeedResponse], error)
 	WatchFeed(context.Context, *connect.Request[v1.WatchFeedRequest]) (*connect.ServerStreamForClient[v1.WatchFeedResponse], error)
+	// The names a page's response trees link to the workspaces they switch to.
+	// See endpoint_watch_workspace_mentions.proto.
+	WatchWorkspaceMentions(context.Context, *connect.Request[v1.WatchWorkspaceMentionsRequest]) (*connect.ServerStreamForClient[v1.WatchWorkspaceMentionsResponse], error)
 	// The feed's history half: a page of rows for one container, "first" or
 	// "next" — the daemon holds the walk. See endpoint_get_feed_page.proto.
 	GetFeedPage(context.Context, *connect.Request[v1.GetFeedPageRequest]) (*connect.Response[v1.GetFeedPageResponse], error)
@@ -1051,6 +1058,13 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			httpClient,
 			baseURL+AgentReplWatchFeedProcedure,
 			connect.WithSchema(agentReplWatchFeedMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
+		watchWorkspaceMentions: connect.NewClient[v1.WatchWorkspaceMentionsRequest, v1.WatchWorkspaceMentionsResponse](
+			httpClient,
+			baseURL+AgentReplWatchWorkspaceMentionsProcedure,
+			connect.WithSchema(agentReplWatchWorkspaceMentionsMethodDescriptor),
+			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 			connect.WithClientOptions(opts...),
 		),
 		getFeedPage: connect.NewClient[v1.GetFeedPageRequest, v1.GetFeedPageResponse](
@@ -1816,6 +1830,7 @@ type agentReplClient struct {
 	requestCommandSupport        *connect.Client[v1.RequestCommandSupportRequest, v1.RequestCommandSupportResponse]
 	openFeed                     *connect.Client[v1.OpenFeedRequest, v1.OpenFeedResponse]
 	watchFeed                    *connect.Client[v1.WatchFeedRequest, v1.WatchFeedResponse]
+	watchWorkspaceMentions       *connect.Client[v1.WatchWorkspaceMentionsRequest, v1.WatchWorkspaceMentionsResponse]
 	getFeedPage                  *connect.Client[v1.GetFeedPageRequest, v1.GetFeedPageResponse]
 	loadFeedThrough              *connect.Client[v1.LoadFeedThroughRequest, v1.LoadFeedThroughResponse]
 	interrupt                    *connect.Client[v1.InterruptRequest, v1.InterruptResponse]
@@ -1998,6 +2013,11 @@ func (c *agentReplClient) OpenFeed(ctx context.Context, req *connect.Request[v1.
 // WatchFeed calls agentrepl.v1.AgentRepl.WatchFeed.
 func (c *agentReplClient) WatchFeed(ctx context.Context, req *connect.Request[v1.WatchFeedRequest]) (*connect.ServerStreamForClient[v1.WatchFeedResponse], error) {
 	return c.watchFeed.CallServerStream(ctx, req)
+}
+
+// WatchWorkspaceMentions calls agentrepl.v1.AgentRepl.WatchWorkspaceMentions.
+func (c *agentReplClient) WatchWorkspaceMentions(ctx context.Context, req *connect.Request[v1.WatchWorkspaceMentionsRequest]) (*connect.ServerStreamForClient[v1.WatchWorkspaceMentionsResponse], error) {
+	return c.watchWorkspaceMentions.CallServerStream(ctx, req)
 }
 
 // GetFeedPage calls agentrepl.v1.AgentRepl.GetFeedPage.
@@ -2658,6 +2678,9 @@ type AgentReplHandler interface {
 	// newest page and mints the token WatchFeed echoes.
 	OpenFeed(context.Context, *connect.Request[v1.OpenFeedRequest]) (*connect.Response[v1.OpenFeedResponse], error)
 	WatchFeed(context.Context, *connect.Request[v1.WatchFeedRequest], *connect.ServerStream[v1.WatchFeedResponse]) error
+	// The names a page's response trees link to the workspaces they switch to.
+	// See endpoint_watch_workspace_mentions.proto.
+	WatchWorkspaceMentions(context.Context, *connect.Request[v1.WatchWorkspaceMentionsRequest], *connect.ServerStream[v1.WatchWorkspaceMentionsResponse]) error
 	// The feed's history half: a page of rows for one container, "first" or
 	// "next" — the daemon holds the walk. See endpoint_get_feed_page.proto.
 	GetFeedPage(context.Context, *connect.Request[v1.GetFeedPageRequest]) (*connect.Response[v1.GetFeedPageResponse], error)
@@ -3113,6 +3136,13 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		AgentReplWatchFeedProcedure,
 		svc.WatchFeed,
 		connect.WithSchema(agentReplWatchFeedMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
+	agentReplWatchWorkspaceMentionsHandler := connect.NewServerStreamHandler(
+		AgentReplWatchWorkspaceMentionsProcedure,
+		svc.WatchWorkspaceMentions,
+		connect.WithSchema(agentReplWatchWorkspaceMentionsMethodDescriptor),
+		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 		connect.WithHandlerOptions(opts...),
 	)
 	agentReplGetFeedPageHandler := connect.NewUnaryHandler(
@@ -3887,6 +3917,8 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplOpenFeedHandler.ServeHTTP(w, r)
 		case AgentReplWatchFeedProcedure:
 			agentReplWatchFeedHandler.ServeHTTP(w, r)
+		case AgentReplWatchWorkspaceMentionsProcedure:
+			agentReplWatchWorkspaceMentionsHandler.ServeHTTP(w, r)
 		case AgentReplGetFeedPageProcedure:
 			agentReplGetFeedPageHandler.ServeHTTP(w, r)
 		case AgentReplLoadFeedThroughProcedure:
@@ -4186,6 +4218,10 @@ func (UnimplementedAgentReplHandler) OpenFeed(context.Context, *connect.Request[
 
 func (UnimplementedAgentReplHandler) WatchFeed(context.Context, *connect.Request[v1.WatchFeedRequest], *connect.ServerStream[v1.WatchFeedResponse]) error {
 	return connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.WatchFeed is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) WatchWorkspaceMentions(context.Context, *connect.Request[v1.WatchWorkspaceMentionsRequest], *connect.ServerStream[v1.WatchWorkspaceMentionsResponse]) error {
+	return connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.WatchWorkspaceMentions is not implemented"))
 }
 
 func (UnimplementedAgentReplHandler) GetFeedPage(context.Context, *connect.Request[v1.GetFeedPageRequest]) (*connect.Response[v1.GetFeedPageResponse], error) {

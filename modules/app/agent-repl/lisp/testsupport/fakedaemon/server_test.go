@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
 
@@ -580,5 +581,52 @@ func userPrimaryCreate(dir string) *agentreplv1.CreateWorkspaceRequest {
 		ContextOrigin: &agentreplv1.WorkspaceContextOrigin{
 			Origin: &agentreplv1.WorkspaceContextOrigin_Fresh{Fresh: &agentreplv1.WorkspaceContextOriginFresh{}},
 		},
+	}
+}
+
+// TestWebappStreamNotMockedRecordsAndRefuses pins the one handler every
+// webapp-only stream shares: the call is recorded, then refused as
+// unimplemented with the method named.
+func TestWebappStreamNotMockedRecordsAndRefuses(t *testing.T) {
+	// Arrange.
+	server := newFakeServer()
+	msg := &agentreplv1.WatchWorkspaceMentionsRequest{Viewer: &workspacev1.WorkspaceRef{Id: "ws-1"}}
+
+	// Act.
+	err := server.webappStreamNotMocked(context.Background(), "WatchWorkspaceMentions", msg)
+
+	// Assert.
+	if connect.CodeOf(err) != connect.CodeUnimplemented {
+		t.Fatalf("code = %v, want unimplemented", connect.CodeOf(err))
+	}
+	if !strings.Contains(err.Error(), "WatchWorkspaceMentions is a webapp stream") {
+		t.Fatalf("error %q does not name the method", err.Error())
+	}
+	calls := server.recordedCalls()
+	if len(calls) != 1 || calls[0].Method != "WatchWorkspaceMentions" {
+		t.Fatalf("recorded calls = %+v, want the one WatchWorkspaceMentions call", calls)
+	}
+}
+
+// TestEveryWebappStreamHandlerIsTheSharedOne pins that no handler re-spells
+// the not-mocked refusal: each webapp stream answers through
+// webappStreamNotMocked.
+func TestEveryWebappStreamHandlerIsTheSharedOne(t *testing.T) {
+	// Arrange.
+	source, err := os.ReadFile("handlers.go")
+	if err != nil {
+		t.Fatalf("read handlers.go: %v", err)
+	}
+
+	// Act.
+	respelled := strings.Count(string(source), "is a webapp stream")
+	shared := strings.Count(string(source), "return s.webappStreamNotMocked(ctx, ")
+
+	// Assert.
+	if respelled != 0 {
+		t.Fatalf("handlers.go spells the webapp-stream refusal by hand %d times", respelled)
+	}
+	if shared < 7 {
+		t.Fatalf("handlers.go answers %d webapp streams through webappStreamNotMocked, want every one (at least 7)", shared)
 	}
 }
