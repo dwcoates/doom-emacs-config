@@ -3594,6 +3594,17 @@ The master kill-switch overrides the always-on file-write decoupling."
         (agent-repl--set-buffer-background "#1e1e1e")))
     (should-not (equal hex-a hex-b))))
 
+(ert-deftest agent-repl-test-set-buffer-background-returns-removable-cookies ()
+  "set-buffer-background returns the cookies that take both remappings back."
+  (agent-repl-test--with-temp-buffer " *test-bg-cookies*"
+    ;; Act
+    (let ((cookies (agent-repl--set-buffer-background "#1e1e1e")))
+      (mapc #'face-remap-remove-relative cookies)
+      ;; Assert
+      (should (= (length cookies) 2))
+      (should-not (assq 'default face-remapping-alist))
+      (should-not (assq 'fringe face-remapping-alist)))))
+
 ;;;; ---- Tests: harness-injected (meta) prompt spans ----
 
 (ert-deftest agent-repl-test-meta-wrap-brackets-the-text ()
