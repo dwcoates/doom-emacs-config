@@ -1,5 +1,5 @@
 /**
- * workspace-mentions — A WORKSPACE'S NAME IN A RESPONSE'S TREE IS A LINK that
+ * workspace-mentions — A WORKSPACE'S NAME IN A RESPONSE'S TREE OR A PROMPT'S TEXT IS A LINK that
  * switches to that workspace (owner request, 2026-11-01).
  *
  * THE DAEMON DECIDES WHICH NAMES ARE LINKS. The page subscribes to its
@@ -48,6 +48,13 @@ import { jumpToWorkspace, type JumpSite } from "./merge/jump.js";
 
 /** The class every mention wears. */
 export const WORKSPACE_MENTION_CLASS = "workspace-mention";
+
+/**
+ * The class of a text slot searched WHOLE, as a response's trees are: a
+ * prompt bubble's text block (owner request, 2026-11-02). Its words are
+ * prose, not a tree, so there are no rails or labels to skip.
+ */
+export const MENTION_TEXT_CLASS = "mention-text";
 
 /** The attribute naming the `WorkspaceRef.id` a mention switches to. */
 export const WORKSPACE_MENTION_ATTRIBUTE = "data-workspace-mention";
@@ -176,12 +183,28 @@ export function linkWorkspaceMentions(root: ParentNode): void {
   relink(root, current);
 }
 
-/** Re-link every tree in ROOT with TARGETS; answers how many mentions were linked. */
+/**
+ * Link every mention in the whole of ROOT, a prompt's rendered text: the mark
+ * a prompt's text block runs on every paint. Mentions already drawn are
+ * re-linked from scratch.
+ */
+export function linkWorkspaceMentionsInText(root: Element): void {
+  unlinkTree(root);
+  linkTree(root, current);
+}
+
+/**
+ * Re-link every tree and every whole-text slot (`MENTION_TEXT_CLASS`) in
+ * ROOT, ROOT itself included when it is such a slot, with TARGETS; answers
+ * how many mentions were linked.
+ */
 function relink(root: ParentNode, targets: Targets): number {
   let linked = 0;
-  for (const tree of queryAll(root, `.${TREE_CLASS}`)) {
-    unlinkTree(tree);
-    linked += linkTree(tree, targets);
+  const scopes = queryAll(root, `.${TREE_CLASS}, .${MENTION_TEXT_CLASS}`);
+  if (root instanceof Element && root.classList.contains(MENTION_TEXT_CLASS)) scopes.unshift(root);
+  for (const scope of scopes) {
+    unlinkTree(scope);
+    linked += linkTree(scope, targets);
   }
   return linked;
 }

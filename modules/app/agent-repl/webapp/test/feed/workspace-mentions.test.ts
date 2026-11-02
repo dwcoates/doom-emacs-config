@@ -14,6 +14,7 @@ import {
   type WorkspaceMentionTargets,
 } from "../../../proto/gen/ts/frontend/v1/workspace_mention_pb";
 import {
+  MENTION_TEXT_CLASS,
   WORKSPACE_MENTION_ATTRIBUTE,
   WORKSPACE_MENTION_CLASS,
   applyMentionTargets,
@@ -122,6 +123,59 @@ describe("linkWorkspaceMentions", () => {
     // ASSERT
     expect(mentions(root)).toEqual(["alpha=ws-alpha", "alpha=ws-alpha"]);
     expect(root.querySelectorAll(`.${WORKSPACE_MENTION_CLASS} .${WORKSPACE_MENTION_CLASS}`)).toHaveLength(0);
+  });
+});
+
+/** A prompt's text slot whose one paragraph is BODY (HTML). */
+function promptText(body: string): HTMLElement {
+  const slot = document.createElement("div");
+  slot.className = `prompt-block-text ${MENTION_TEXT_CLASS}`;
+  slot.innerHTML = `<p>${body}</p>`;
+  document.body.append(slot);
+  return slot;
+}
+
+describe("a whole-text slot (a prompt's text)", () => {
+  it("links a name in plain text with no tree around it", () => {
+    // ARRANGE
+    applyMentionTargets(targets("alpha"), () => []);
+    const slot = promptText("see alpha now");
+    // ACT
+    linkWorkspaceMentions(slot);
+    // ASSERT
+    expect(mentions(slot)).toEqual(["alpha=ws-alpha"]);
+  });
+
+  it("links a code span that is wholly a name", () => {
+    // ARRANGE
+    applyMentionTargets(targets("alpha"), () => []);
+    const slot = promptText("see <code>alpha</code>");
+    // ACT
+    linkWorkspaceMentions(slot);
+    // ASSERT
+    expect(mentions(slot)).toEqual(["alpha=ws-alpha"]);
+  });
+
+  it("never links a name inside a longer name", () => {
+    // ARRANGE
+    applyMentionTargets(targets("alpha"), () => []);
+    const slot = promptText("see alpha-beta");
+    // ACT
+    linkWorkspaceMentions(slot);
+    // ASSERT
+    expect(mentions(slot)).toEqual([]);
+  });
+
+  it("is re-linked by a push when the slot is itself the live root", () => {
+    // ARRANGE
+    applyMentionTargets(targets("alpha"), () => []);
+    const slot = promptText("alpha and beta");
+    linkWorkspaceMentions(slot);
+    // ACT
+    applyMentionTargets(targets("beta"), () => [slot]);
+    // ASSERT
+    expect(mentions(slot)).toEqual(["beta=ws-beta"]);
+    expect(slot.textContent).toBe("alpha and beta");
   });
 });
 

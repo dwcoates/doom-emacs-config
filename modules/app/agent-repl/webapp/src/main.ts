@@ -65,7 +65,7 @@ import { mountTopbar } from "./topbar/topbar.js";
 import { installNavigationGuard, installProseLinkRouting, installRunControlRouting } from "./link.js";
 import { installLinkHoverPopup } from "./link-hover.js";
 import { RESPONSE_PROSE_CLASS } from "./feed/cards/response.js";
-import { installWorkspaceMentionClicks, watchWorkspaceMentions } from "./feed/workspace-mentions.js";
+import { MENTION_TEXT_CLASS, installWorkspaceMentionClicks, watchWorkspaceMentions } from "./feed/workspace-mentions.js";
 import { bootFailed } from "./failure/sink.js";
 import { createLocalFailures, type LocalFailures } from "./failure/local.js";
 import { LEVEL_WINDOW_OPERATION, log } from "./log.js";
@@ -422,7 +422,7 @@ export async function boot(): Promise<void> {
       // A WORKSPACE'S NAME IN A RESPONSE'S TREE SWITCHES TO IT
       // (feed/workspace-mentions.ts): the daemon serves the names, every push
       // re-links the response trees already drawn, and a click selects.
-      watchWorkspaceMentions(ctx, () => queryAll(shell.feedScroll, `.${RESPONSE_PROSE_CLASS}`));
+      watchWorkspaceMentions(ctx, () => queryAll(shell.feedScroll, `.${RESPONSE_PROSE_CLASS}, .${MENTION_TEXT_CLASS}`));
       installWorkspaceMentionClicks(ctx, shell.feedScroll);
     }
 

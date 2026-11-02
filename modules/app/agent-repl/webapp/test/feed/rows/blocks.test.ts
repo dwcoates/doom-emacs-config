@@ -29,6 +29,8 @@ import imageThumbnail from "../../../../proto/vocab/image-thumbnail.json";
 import { BUBBLE_QUOTE_CLASS, QUOTE_MARKER_CLASS, QUOTE_PARTS_CLASS } from "../../../src/bubble/quote.js";
 import { BUBBLE_COLLAPSED_THUMBNAIL_CLASS } from "../../../src/bubble/collapsed-thumbnail.js";
 import { MARKDOWN_SLOT_ATTRIBUTE, createBubbleBody, paintBody } from "../../../src/bubble/body.js";
+import { WorkspaceMentionTargetsSchema } from "../../../../proto/gen/ts/frontend/v1/workspace_mention_pb";
+import { applyMentionTargets, resetMentionTargets } from "../../../src/feed/workspace-mentions.js";
 import { plainProse } from "../../prose.js";
 import { servedProse } from "../../prose.js";
 
@@ -53,6 +55,28 @@ describe("drawFeedTextBlock", () => {
     const el = painted(drawFeedTextBlock(create(FeedTextBlockSchema, { prose: plainProse("one\ntwo") })));
     expect(el.querySelectorAll("p").length).toBe(1);
     expect(el.querySelector("p br")).not.toBeNull();
+  });
+
+  it("links a workspace's name in the text to that workspace", () => {
+    // ARRANGE
+    applyMentionTargets(
+      create(WorkspaceMentionTargetsSchema, { targets: [{ name: { text: "alpha" }, workspace: { id: "ws-alpha", dir: "/d" } }] }),
+      () => [],
+    );
+    // ACT
+    const el = painted(drawFeedTextBlock(create(FeedTextBlockSchema, { prose: plainProse("see alpha now") })));
+    // ASSERT
+    resetMentionTargets();
+    expect(el.querySelector(".workspace-mention")?.getAttribute("data-workspace-mention")).toBe("ws-alpha");
+  });
+
+  it("keeps the caller's own mark beside the workspace links", () => {
+    // ARRANGE
+    const marked: string[] = [];
+    // ACT
+    painted(drawFeedTextBlock(create(FeedTextBlockSchema, { prose: plainProse("hi") }), (rendered) => marked.push(rendered.textContent ?? "")));
+    // ASSERT
+    expect(marked).toEqual(["hi\n"]);
   });
 
   it("draws an empty block as an empty body rather than refusing", () => {
