@@ -65,6 +65,11 @@ import {
   type WatchChatRequest,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_chat_pb";
 import {
+  WatchWorkspaceMentionsResponseSchema,
+  type WatchWorkspaceMentionsRequest,
+  type WatchWorkspaceMentionsResponse,
+} from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_workspace_mentions_pb";
+import {
   WatchWorkspaceRosterResponseSchema,
   type WatchWorkspaceRosterRequest,
   type WatchWorkspaceRosterResponse,
@@ -1003,6 +1008,24 @@ export function createFakeDaemon(): FakeDaemon {
     return iterate();
   };
 
+  /** The page's mention targets: none, so no fake response's tree links a workspace. */
+  const workspaceMentionsSource = (
+    request: WatchWorkspaceMentionsRequest,
+    signal: AbortSignal,
+  ): AsyncGenerator<object> => {
+    record("watchWorkspaceMentions", request);
+    consumeFailure("watchWorkspaceMentions");
+    const workspace = request.viewer?.id ?? "";
+    const { channel, iterate } = openStream("watchWorkspaceMentions", workspace, signal);
+    channel.push(
+      taint(
+        "watchWorkspaceMentions",
+        create(WatchWorkspaceMentionsResponseSchema, { push: { case: "targets", value: { targets: [] } } }),
+      ),
+    );
+    return iterate();
+  };
+
   /**
    * Open the source one `SubscribePage` arm stands for.
    *
@@ -1031,6 +1054,8 @@ export function createFakeDaemon(): FakeDaemon {
         return loginTerminalSource(request.value, signal);
       case "chat":
         return chatSource(request.value, signal);
+      case "workspaceMentions":
+        return workspaceMentionsSource(request.value, signal);
       case undefined:
         throw new ConnectError(
           "SubscribePageRequest.request is required and no arm was set",
@@ -1395,6 +1420,9 @@ export function createFakeDaemon(): FakeDaemon {
       // ---- topbar / footer / tray -----------------------------------------
       async *watchTopbar(request, context) {
         yield* topbarSource(request, context.signal) as AsyncGenerator<WatchTopbarResponse>;
+      },
+      async *watchWorkspaceMentions(request, context) {
+        yield* workspaceMentionsSource(request, context.signal) as AsyncGenerator<WatchWorkspaceMentionsResponse>;
       },
       setModel(request) {
         record("setModel", request);
