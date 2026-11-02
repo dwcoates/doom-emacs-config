@@ -1981,7 +1981,7 @@ workspace from the working directory, so no source tag rides it."
                              (agent-repl-test--remapped-backgrounds 'fringe))
                        (list agent-repl--input-border-line-format
                              agent-repl--input-border-line-format
-                             '("#232323" "#171717"))))))))
+                             '("#232323" "#1e1e1e"))))))))
 
 (ert-deftest agent-repl-input-draw-border-all-never-stacks-a-drawn-composer ()
   "Drawing a composer that already wears its border again adds no remap."
@@ -2018,7 +2018,7 @@ workspace from the working directory, so no source tag rides it."
     (should visual-line-mode)))
 
 (ert-deftest agent-repl-input-mode-paints-the-composer-background ()
-  "The composer paints `agent-repl-input-background' behind its text."
+  "The composer paints `agent-repl-input-background' lifted 3% behind its text."
   ;; Arrange.
   (let ((agent-repl-input-background "#123456")
         (remapped nil))
@@ -2028,7 +2028,7 @@ workspace from the working directory, so no source tag rides it."
         ;; Act.
         (agent-repl-input-mode)
         ;; Assert.
-        (should (equal remapped "#123456"))))))
+        (should (equal remapped "#193a5b"))))))
 
 (ert-deftest agent-repl-input-background-is-the-webapp-composer-color ()
   "The composer's default background is the webapp's dark `--sidebar-ground'.
