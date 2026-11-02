@@ -102,6 +102,8 @@
 (declare-function agent-repl-thread-new "threads" ())
 (declare-function agent-repl-roster-last-finished-name "agent-repl-roster" (names))
 (declare-function agent-repl-roster-last-turn-ended-ms "agent-repl-roster" (ws))
+(declare-function agent-repl-roster-last-started-name "agent-repl-roster" (names))
+(declare-function agent-repl-roster-last-turn-started-ms "agent-repl-roster" (ws))
 (declare-function agent-repl-roster-row-ref "agent-repl-roster" (row))
 (declare-function agent-repl-roster-row-closed-p "agent-repl-roster" (row))
 (declare-function agent-repl-roster-row-name "agent-repl-roster" (row))
@@ -1399,31 +1401,51 @@ switched to here."
        (agent-repl--error log-ws "elisp.commands.sidebar-app-unknown from=%s app=%S" shown app)
        (error "agent-repl: the roster shows an unknown sidebar app %S" app)))))
 
+(defun agent-repl--jump-to-ranked-workspace (rank-fn instant-fn slug none-message)
+  "Request the switch to the drawn tab RANK-FN picks, standing elsewhere.
+The ONE body of the turn-recency jumps.  RANK-FN answers the best of the
+DRAWN tabs (`agent-repl--drawn-tab-names') less the workspace shown: the
+change the user is answering is the one the bar showed them, and switching
+to where they stand is no switch.  INSTANT-FN reads the ranking instant of
+the target for the record.  SLUG names the gesture in its records
+\(`elisp.commands.SLUG', `elisp.commands.SLUG-none') and is the switch
+request's trigger.  No candidate is a reported, logged no-op saying
+NONE-MESSAGE.  The target is REQUESTED of the daemon, never switched to here."
+  (let* ((shown (agent-repl--ws-current-name))
+         (log-ws (agent-repl--jump-log-ws shown))
+         (names (remove shown (agent-repl--drawn-tab-names)))
+         (target (funcall rank-fn names)))
+    (if (null target)
+        (progn
+          (agent-repl--info log-ws (format "elisp.commands.%s-none from=%%s candidates=%%d" slug)
+                            shown (length names))
+          (message "[agent-repl] %s" none-message))
+      (agent-repl--info log-ws (format "elisp.commands.%s from=%%s target=%%s instant-ms=%%s" slug)
+                        shown target (funcall instant-fn target))
+      (agent-repl-host-request-switch target (intern slug)))))
+
 (defun agent-repl-switch-to-last-finished-workspace ()
   "Switch to the workspace that most recently FINISHED its turn.
 FINISHED means its tab went from working (red) to done (green), and it
 is still done: `agent-repl-roster-last-finished-name' ranks by the
 daemon's durable turn-end instant, so a finish that landed while Emacs
-was down or reconnecting counts as surely as one it watched.
-
-The candidates are the DRAWN tabs (`agent-repl--drawn-tab-names') less
-the workspace shown: the red-to-green change the user is answering is
-the one the bar showed them, and switching to where they stand is no
-switch.  No candidate is a reported, logged no-op.  The target is
-REQUESTED of the daemon, never switched to here."
+was down or reconnecting counts as surely as one it watched.  Bound to
+`M-)\='.  See `agent-repl--jump-to-ranked-workspace' for the candidates."
   (interactive)
-  (let* ((shown (agent-repl--ws-current-name))
-         (log-ws (agent-repl--jump-log-ws shown))
-         (names (remove shown (agent-repl--drawn-tab-names)))
-         (target (agent-repl-roster-last-finished-name names)))
-    (if (null target)
-        (progn
-          (agent-repl--info log-ws "elisp.commands.last-finished-none from=%s candidates=%d"
-                            shown (length names))
-          (message "[agent-repl] No other workspace has finished"))
-      (agent-repl--info log-ws "elisp.commands.last-finished from=%s target=%s ended-ms=%s"
-                        shown target (agent-repl-roster-last-turn-ended-ms target))
-      (agent-repl-host-request-switch target 'last-finished))))
+  (agent-repl--jump-to-ranked-workspace
+   #'agent-repl-roster-last-finished-name #'agent-repl-roster-last-turn-ended-ms
+   "last-finished" "No other workspace has finished"))
+
+(defun agent-repl-switch-to-last-started-workspace ()
+  "Switch to the workspace whose turn most recently STARTED.
+`agent-repl-roster-last-started-name' ranks by the daemon's turn-start
+instant, running or closed, so a turn that began while Emacs was down
+counts as surely as one it watched.  Bound to `M-0\='.  See
+`agent-repl--jump-to-ranked-workspace' for the candidates."
+  (interactive)
+  (agent-repl--jump-to-ranked-workspace
+   #'agent-repl-roster-last-started-name #'agent-repl-roster-last-turn-started-ms
+   "last-started" "No other workspace has started a turn"))
 
 (defun agent-repl--drawn-tab-names ()
   "Return the workspace names the tab bar DRAWS, in the order it draws them.
@@ -1759,7 +1781,7 @@ An empty bar still answers 1, so the switch reports its own no-tabs miss."
 
 (defun agent-repl-switch-to-last-workspace ()
   "Switch to the LAST tab on the drawn bar, however many it draws.
-Bound to `M-0\=' and `s-0\=' in place of Doom's `+workspace/switch-to-final\=',
+Bound to `M-s-)\=' and `s-0\=' in place of Doom's `+workspace/switch-to-final\=',
 which indexes persp-mode's perspective list rather than the bar."
   (interactive)
   (agent-repl-switch-to-workspace (agent-repl--last-tab-slot)))

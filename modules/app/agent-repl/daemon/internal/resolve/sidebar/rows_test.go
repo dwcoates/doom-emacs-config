@@ -1789,6 +1789,47 @@ func TestTheRowCarriesTheNewestTurnBoundary(t *testing.T) {
 	}
 }
 
+// THE TURN START is the running turn's start while one runs, else the durable
+// newest start: it never reads as an end once the turn closes.
+func TestTheRowCarriesTheNewestTurnStart(t *testing.T) {
+	tests := []struct {
+		name      string
+		started   *time.Time
+		ended     *time.Time
+		runningAt *time.Time
+		want      *int64
+	}{
+		{name: "no turn has started", want: nil},
+		{name: "an idle workspace counts from its last start, not its end", started: at(time.Hour), ended: at(2 * time.Hour), want: millis(at(time.Hour))},
+		{name: "a running turn counts from its start", started: at(time.Hour), ended: at(90 * time.Minute), runningAt: at(2 * time.Hour), want: millis(at(2 * time.Hour))},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			ws := workspace(string(theWS), "one")
+			ws.LastTurnStartedAt = tc.started
+			ws.LastTurnEndedAt = tc.ended
+			r := live(t, arrange(t, ws))
+			if tc.runningAt != nil {
+				r.SetTurn(theWS, &footer.TurnStarted{At: *tc.runningAt, Act: footer.ActPrompt})
+			}
+
+			// Act.
+			got := onlyRow(t, r).GetLastTurnStarted()
+
+			// Assert.
+			switch {
+			case tc.want == nil && got != nil:
+				t.Fatalf("last_turn_started = %v, want unset", got)
+			case tc.want != nil && got == nil:
+				t.Fatalf("last_turn_started unset, want %d", *tc.want)
+			case tc.want != nil && got.GetAtMs() != *tc.want:
+				t.Fatalf("last_turn_started = %d, want %d", got.GetAtMs(), *tc.want)
+			}
+		})
+	}
+}
+
 func TestRunningTurnStartReadsOnlyARunningClock(t *testing.T) {
 	started, ended := int64(10), int64(20)
 	tests := []struct {

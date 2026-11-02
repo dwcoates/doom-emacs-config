@@ -296,6 +296,13 @@ orders by it and never draws it: the one-line tab bar keeps the tabs
 whose turns moved most recently (`agent-repl--tabline-recency-keep')."
   (agent-repl-wire-roster--decode-instant "RosterRowLastTurnBoundary" value))
 
+(defun agent-repl-wire-decode-roster-row-last-turn-started (value)
+  "Decode VALUE as `RosterRowLastTurnStarted', a plist `(:at-ms)'.
+The instant the workspace's most recent turn STARTED, running or closed,
+epoch MILLISECONDS, as the daemon resolves it.  Emacs orders by it and
+never draws it (`agent-repl-roster-last-started-name')."
+  (agent-repl-wire-roster--decode-instant "RosterRowLastTurnStarted" value))
+
 (defun agent-repl-wire-decode-roster-row-last-updated (value)
   "Decode VALUE as `RosterRowLastUpdated', a plist `(:at-ms)'.
 The instant the workspace was LAST UPDATED, epoch MILLISECONDS: the
@@ -752,7 +759,7 @@ unknown field by the row's key check."
    "RosterRow" 'status value agent-repl-wire-roster-row-status-arms))
 
 (defconst agent-repl-wire--roster-row-keys
-  (append '(workspace attention priority viewed idleAsyncUnread reviving detachedLive oneShot opening asyncMerging mergePaused lastSelected lastTurnEnded lastTurnBoundary closure lastUpdated availability name current when detail closed)
+  (append '(workspace attention priority viewed idleAsyncUnread reviving detachedLive oneShot opening asyncMerging mergePaused lastSelected lastTurnEnded lastTurnBoundary lastTurnStarted closure lastUpdated availability name current when detail closed)
           (mapcar #'car agent-repl-wire-roster-row-status-arms))
   "Every key `RosterRow' may carry: its own fields plus the 22 status arms.")
 
@@ -762,7 +769,7 @@ Returns `(:workspace W :attention A :priority P :viewed V
 :idle-async-unread IU :reviving R
 :detached-live DL :one-shot OS :opening O :async-merging AM
 :merge-paused MP :last-selected L :last-turn-ended LT
-:last-turn-boundary LB :closure CL
+:last-turn-boundary LB :last-turn-started LS :closure CL
 :last-updated LU
 :availability AV
 :name N :status
@@ -816,6 +823,9 @@ nests its rows in its own row type (`RosterOpenRow', `RosterHiddenRow')."
            :last-turn-boundary (agent-repl-wire--decode-optional-message
                                 "RosterRow" 'lastTurnBoundary object
                                 #'agent-repl-wire-decode-roster-row-last-turn-boundary)
+           :last-turn-started (agent-repl-wire--decode-optional-message
+                               "RosterRow" 'lastTurnStarted object
+                               #'agent-repl-wire-decode-roster-row-last-turn-started)
            :closure (agent-repl-wire--decode-optional-message
                      "RosterRow" 'closure object
                      #'agent-repl-wire-decode-roster-row-closure)

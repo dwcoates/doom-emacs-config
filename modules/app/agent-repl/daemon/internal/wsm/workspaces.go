@@ -57,6 +57,7 @@ const workspaceColumns = `id, repo_id, dir, name, branch, parent_branch, parent_
 	`(EXISTS (SELECT 1 FROM merge_queue WHERE merge_queue.workspace_id = workspaces.id) ` +
 	`OR EXISTS (SELECT 1 FROM workspaces AS merge_ws JOIN merge_queue ON merge_queue.workspace_id = merge_ws.id WHERE merge_ws.merge_of = workspaces.id)), ` +
 	`(SELECT MAX(turns.closed_at) FROM turns WHERE turns.workspace_id = workspaces.id), ` +
+	`(SELECT MAX(turns.started_at) FROM turns WHERE turns.workspace_id = workspaces.id), ` +
 	`(SELECT MAX(turns.started_at) FROM turns WHERE turns.workspace_id = workspaces.id AND turns.thread_question IS NOT NULL), ` +
 	mergeTurnStartedColumn + `, ` +
 	landsIntoColumn
@@ -94,6 +95,7 @@ func scanWorkspace(row interface{ Scan(...any) error }) (Workspace, error) {
 		landAt        sql.NullInt64
 		commits       sql.NullInt64
 		ended         sql.NullInt64
+		started       sql.NullInt64
 		asked         sql.NullInt64
 		mergeTurn     sql.NullInt64
 		hiddenAt      sql.NullInt64
@@ -115,7 +117,7 @@ func scanWorkspace(row interface{ Scan(...any) error }) (Workspace, error) {
 		// of Workspace.OwnerLands (OwnerLands).
 		lacksContext bool
 	)
-	if err := row.Scan(&ws.ID, &ws.Repo, &ws.Dir, &ws.Name, &ws.Branch, &ws.ParentBranch, &parent, &ws.Closed, &ws.Attention, &priority, &task, &selected, &activity, &merged, &spawned, &created, &end, &read, &ws.Hidden, &hiddenAt, &mergeOf, &request, &forkHead, &compact, &closes, &cleanup, &cleanDir, &landHead, &landAt, &commits, &ws.Place, &ws.MergeRevealed, &lapsesAt, &gated, &closedAt, &closedBy, &statusChanged, &ws.Current, &subsection, &lacksContext, &contextFrom, &requestedBy, &selfClose, &awaiting, &kind, &lastKeepalive, &cacheCold, &ws.OneShot, &ws.MergePending, &ended, &asked, &mergeTurn, &landsInto); err != nil {
+	if err := row.Scan(&ws.ID, &ws.Repo, &ws.Dir, &ws.Name, &ws.Branch, &ws.ParentBranch, &parent, &ws.Closed, &ws.Attention, &priority, &task, &selected, &activity, &merged, &spawned, &created, &end, &read, &ws.Hidden, &hiddenAt, &mergeOf, &request, &forkHead, &compact, &closes, &cleanup, &cleanDir, &landHead, &landAt, &commits, &ws.Place, &ws.MergeRevealed, &lapsesAt, &gated, &closedAt, &closedBy, &statusChanged, &ws.Current, &subsection, &lacksContext, &contextFrom, &requestedBy, &selfClose, &awaiting, &kind, &lastKeepalive, &cacheCold, &ws.OneShot, &ws.MergePending, &ended, &started, &asked, &mergeTurn, &landsInto); err != nil {
 		return Workspace{}, err
 	}
 	switch WorkspaceKind(kind) {
@@ -197,6 +199,7 @@ func scanWorkspace(row interface{ Scan(...any) error }) (Workspace, error) {
 	ws.LastSelectedAt = optTime(selected)
 	ws.LastActivityAt = optTime(activity)
 	ws.LastTurnEndedAt = optTime(ended)
+	ws.LastTurnStartedAt = optTime(started)
 	ws.LastAskedAt = optTime(asked)
 	ws.MergeTurnStartedAt = optTime(mergeTurn)
 	ws.StatusChangedAt = optTime(statusChanged)

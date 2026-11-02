@@ -151,6 +151,10 @@ func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *front
 	// bar keeps the tabs whose turns most recently moved. Unset when no turn
 	// has started.
 	out.LastTurnBoundary = lastTurnBoundary(rec, mergeStartedAt, clock)
+	// THE TURN-START INSTANT, for ordering only: the editor's jump to the
+	// workspace that most recently started a turn ranks by it. Unset when no
+	// turn has started.
+	out.LastTurnStarted = lastTurnStarted(rec, clock)
 	// THE DURABLE CLOSE RECORD, for filtering and ordering only: the editor's
 	// switcher offers the workspaces the user most recently closed. Unset
 	// while open, and on a close that predates the record.
@@ -239,6 +243,21 @@ func lastTurnBoundary(rec wsm.Workspace, mergeStartedAt *int64, clock *frontendv
 		return nil
 	}
 	return &frontendv1.RosterRowLastTurnBoundary{AtMs: at.UnixMilli()}
+}
+
+// lastTurnStarted resolves the row's newest turn START
+// (frontend.v1.RosterRowLastTurnStarted), or nil when no turn has started:
+// the running turn's start from the footer clock while one runs (the same
+// reading the boundary and the when-column share), else the durable newest
+// start.
+func lastTurnStarted(rec wsm.Workspace, clock *frontendv1.FooterClock) *frontendv1.RosterRowLastTurnStarted {
+	if running := runningTurnStart(clock); running != nil {
+		return &frontendv1.RosterRowLastTurnStarted{AtMs: *running}
+	}
+	if rec.LastTurnStartedAt == nil {
+		return nil
+	}
+	return &frontendv1.RosterRowLastTurnStarted{AtMs: rec.LastTurnStartedAt.UnixMilli()}
 }
 
 // lastUpdated resolves the row's update recency
