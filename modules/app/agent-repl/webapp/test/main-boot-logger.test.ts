@@ -99,26 +99,36 @@ const BOOT_SETTLE_MS = 2000;
  * heading's warning list is opened and the `bootFailed` row's detail read back.
  */
 async function awaitBootFailureChip(): Promise<string> {
-  const deadline = Date.now() + BOOT_SETTLE_MS;
-  for (;;) {
-    const chip = document.querySelector<HTMLElement>(
-      '#topbar .topbar-heading-warnings[data-local-arms~="bootFailed"]',
-    );
-    if (chip !== null) {
-      chip.click();
-      document
-        .querySelector<HTMLElement>('#topbar [data-reveal] [data-local][data-arm="bootFailed"]')
-        ?.click();
-      return document.querySelector("#topbar [data-reveal]")?.textContent ?? "";
+  const selector = '#topbar .topbar-heading-warnings[data-local-arms~="bootFailed"]';
+  // THE CHIP'S ARRIVAL IS AN EVENT: the wait resolves on the DOM mutation
+  // that draws it, and BOOT_SETTLE_MS only bounds a boot that never does.
+  const chip = await new Promise<HTMLElement>((resolve, reject) => {
+    const drawn = document.querySelector<HTMLElement>(selector);
+    if (drawn !== null) {
+      resolve(drawn);
+      return;
     }
-    if (Date.now() > deadline) {
-      throw new Error(
-        `the boot listed no failure in the warning chip within ${BOOT_SETTLE_MS}ms; ` +
-          `the topbar holds ${document.querySelector("#topbar")?.innerHTML ?? "<no topbar>"}`,
+    const observer = new MutationObserver(() => {
+      const now = document.querySelector<HTMLElement>(selector);
+      if (now === null) return;
+      observer.disconnect();
+      clearTimeout(bound);
+      resolve(now);
+    });
+    observer.observe(document, { subtree: true, childList: true, attributes: true });
+    const bound = setTimeout(() => {
+      observer.disconnect();
+      reject(
+        new Error(
+          `the boot listed no failure in the warning chip within ${BOOT_SETTLE_MS}ms; ` +
+            `the topbar holds ${document.querySelector("#topbar")?.innerHTML ?? "<no topbar>"}`,
+        ),
       );
-    }
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  }
+    }, BOOT_SETTLE_MS);
+  });
+  chip.click();
+  document.querySelector<HTMLElement>('#topbar [data-reveal] [data-local][data-arm="bootFailed"]')?.click();
+  return document.querySelector("#topbar [data-reveal]")?.textContent ?? "";
 }
 
 /**
