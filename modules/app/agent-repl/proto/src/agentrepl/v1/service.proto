@@ -63,6 +63,7 @@ import "agentrepl/v1/endpoint_load_feed_through.proto";
 import "agentrepl/v1/endpoint_mark_workspace_viewed.proto";
 import "agentrepl/v1/endpoint_move_workspace.proto";
 import "agentrepl/v1/endpoint_nuke_workspace.proto";
+import "agentrepl/v1/endpoint_notify_workspace.proto";
 import "agentrepl/v1/endpoint_open_external.proto";
 import "agentrepl/v1/endpoint_open_feed.proto";
 import "agentrepl/v1/endpoint_open_feed_image.proto";
@@ -718,6 +719,9 @@ service AgentRepl {
   // Post a comment on a pull request for a workspace, recorded as its own so
   // it is never told back to it. See endpoint_comment_on_pull_request.proto.
   rpc CommentOnPullRequest(CommentOnPullRequestRequest) returns (CommentOnPullRequestResponse);
+  // Post a desktop banner attributed to a workspace, whose click brings Emacs
+  // forward and selects that workspace. See endpoint_notify_workspace.proto.
+  rpc NotifyWorkspace(NotifyWorkspaceRequest) returns (NotifyWorkspaceResponse);
   // Run the named tests from one workspace's worktree, streaming what the run
   // reports; the daemon is the one runner of tests on the host. See
   // endpoint_run_tests.proto.

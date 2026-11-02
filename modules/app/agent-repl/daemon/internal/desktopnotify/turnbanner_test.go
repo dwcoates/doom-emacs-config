@@ -29,10 +29,11 @@ type fakePoster struct {
 	banners    []Banner
 }
 
-func (a *fakePoster) Post(ws ids.WorkspaceID, kind string, compose Compose) {
+func (a *fakePoster) Post(ws ids.WorkspaceID, kind string, compose Compose) Decision {
 	a.workspaces = append(a.workspaces, ws)
 	a.kinds = append(a.kinds, kind)
 	a.banners = append(a.banners, compose(context.Background(), "my-ws"))
+	return Dispatched
 }
 
 // fakeSummaries answers a fixed summary and records the answer it was handed.

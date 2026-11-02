@@ -170,6 +170,7 @@ var cliNouns = map[string]map[string]cliCommand{
 		"pr-unsubscribe":   {usage: "pr-unsubscribe WS -pr URL|OWNER/REPO#N", run: workspacePullRequestUnsubscribe},
 		"pr-subscriptions": {usage: "pr-subscriptions WS", run: workspacePullRequestSubscriptions},
 		"pr-comment":       {usage: "pr-comment WS -pr URL|OWNER/REPO#N (-body TEXT | -body-file PATH) [-in-reply-to COMMENT_ID]", run: workspacePullRequestComment},
+		"notify":           {usage: "notify WS TEXT", run: workspaceNotify},
 		"gate":             {usage: "gate WS pay|clear|compact|compact-and-resume [-model M -scope all|prompts|responses]", run: workspaceGate},
 		"subsections":      {usage: "subsections WS", run: workspaceSubsections},
 		"place":            {usage: "place WS... -subsection NAME|-new-subsection NAME", run: workspacePlace},
@@ -1754,6 +1755,23 @@ func workspacePullRequestComment(c *cliCall, args []string) int {
 		req.Placement = &agentreplv1.CommentOnPullRequestRequest_Reply{Reply: &agentreplv1.CommentOnPullRequestReply{InReplyToCommentId: *inReplyTo, Markdown: markdown}}
 	}
 	resp, err := c.client.CommentOnPullRequest(c.ctx, connect.NewRequest(req))
+	return answer(c, resp, err)
+}
+
+// workspaceNotify posts a desktop banner attributed to WS: titled by WS's
+// name, TEXT below it, its click bringing Emacs forward on WS
+// (endpoint_notify_workspace.proto). WS may be the caller's own workspace or
+// any other.
+func workspaceNotify(c *cliCall, args []string) int {
+	fs, stateDir := c.flags()
+	ws, rest, ok := c.workspaceArg(fs, stateDir, args)
+	if !ok {
+		return exitFailure
+	}
+	if len(rest) != 1 || strings.TrimSpace(rest[0]) == "" {
+		return c.usageFailed("the command names the banner's text, once")
+	}
+	resp, err := c.client.NotifyWorkspace(c.ctx, connect.NewRequest(&agentreplv1.NotifyWorkspaceRequest{Workspace: ws, Message: rest[0]}))
 	return answer(c, resp, err)
 }
 

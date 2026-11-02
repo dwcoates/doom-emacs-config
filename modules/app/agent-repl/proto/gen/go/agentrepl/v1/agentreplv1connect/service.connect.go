@@ -399,6 +399,9 @@ const (
 	// AgentReplCommentOnPullRequestProcedure is the fully-qualified name of the AgentRepl's
 	// CommentOnPullRequest RPC.
 	AgentReplCommentOnPullRequestProcedure = "/agentrepl.v1.AgentRepl/CommentOnPullRequest"
+	// AgentReplNotifyWorkspaceProcedure is the fully-qualified name of the AgentRepl's NotifyWorkspace
+	// RPC.
+	AgentReplNotifyWorkspaceProcedure = "/agentrepl.v1.AgentRepl/NotifyWorkspace"
 	// AgentReplRunTestsProcedure is the fully-qualified name of the AgentRepl's RunTests RPC.
 	AgentReplRunTestsProcedure = "/agentrepl.v1.AgentRepl/RunTests"
 	// AgentReplRunRedundancyProcedure is the fully-qualified name of the AgentRepl's RunRedundancy RPC.
@@ -546,6 +549,7 @@ var (
 	agentReplUnsubscribePullRequestMethodDescriptor       = agentReplServiceDescriptor.Methods().ByName("UnsubscribePullRequest")
 	agentReplListPullRequestSubscriptionsMethodDescriptor = agentReplServiceDescriptor.Methods().ByName("ListPullRequestSubscriptions")
 	agentReplCommentOnPullRequestMethodDescriptor         = agentReplServiceDescriptor.Methods().ByName("CommentOnPullRequest")
+	agentReplNotifyWorkspaceMethodDescriptor              = agentReplServiceDescriptor.Methods().ByName("NotifyWorkspace")
 	agentReplRunTestsMethodDescriptor                     = agentReplServiceDescriptor.Methods().ByName("RunTests")
 	agentReplRunRedundancyMethodDescriptor                = agentReplServiceDescriptor.Methods().ByName("RunRedundancy")
 	agentReplEvaluateInEditorMethodDescriptor             = agentReplServiceDescriptor.Methods().ByName("EvaluateInEditor")
@@ -969,6 +973,9 @@ type AgentReplClient interface {
 	// Post a comment on a pull request for a workspace, recorded as its own so
 	// it is never told back to it. See endpoint_comment_on_pull_request.proto.
 	CommentOnPullRequest(context.Context, *connect.Request[v1.CommentOnPullRequestRequest]) (*connect.Response[v1.CommentOnPullRequestResponse], error)
+	// Post a desktop banner attributed to a workspace, whose click brings Emacs
+	// forward and selects that workspace. See endpoint_notify_workspace.proto.
+	NotifyWorkspace(context.Context, *connect.Request[v1.NotifyWorkspaceRequest]) (*connect.Response[v1.NotifyWorkspaceResponse], error)
 	// Run the named tests from one workspace's worktree, streaming what the run
 	// reports; the daemon is the one runner of tests on the host. See
 	// endpoint_run_tests.proto.
@@ -1803,6 +1810,12 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(agentReplCommentOnPullRequestMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
+		notifyWorkspace: connect.NewClient[v1.NotifyWorkspaceRequest, v1.NotifyWorkspaceResponse](
+			httpClient,
+			baseURL+AgentReplNotifyWorkspaceProcedure,
+			connect.WithSchema(agentReplNotifyWorkspaceMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
 		runTests: connect.NewClient[v1.RunTestsRequest, v1.RunTestsResponse](
 			httpClient,
 			baseURL+AgentReplRunTestsProcedure,
@@ -1964,6 +1977,7 @@ type agentReplClient struct {
 	unsubscribePullRequest       *connect.Client[v1.UnsubscribePullRequestRequest, v1.UnsubscribePullRequestResponse]
 	listPullRequestSubscriptions *connect.Client[v1.ListPullRequestSubscriptionsRequest, v1.ListPullRequestSubscriptionsResponse]
 	commentOnPullRequest         *connect.Client[v1.CommentOnPullRequestRequest, v1.CommentOnPullRequestResponse]
+	notifyWorkspace              *connect.Client[v1.NotifyWorkspaceRequest, v1.NotifyWorkspaceResponse]
 	runTests                     *connect.Client[v1.RunTestsRequest, v1.RunTestsResponse]
 	runRedundancy                *connect.Client[v1.RunRedundancyRequest, v1.RunRedundancyResponse]
 	evaluateInEditor             *connect.Client[v1.EvaluateInEditorRequest, v1.EvaluateInEditorResponse]
@@ -2630,6 +2644,11 @@ func (c *agentReplClient) CommentOnPullRequest(ctx context.Context, req *connect
 	return c.commentOnPullRequest.CallUnary(ctx, req)
 }
 
+// NotifyWorkspace calls agentrepl.v1.AgentRepl.NotifyWorkspace.
+func (c *agentReplClient) NotifyWorkspace(ctx context.Context, req *connect.Request[v1.NotifyWorkspaceRequest]) (*connect.Response[v1.NotifyWorkspaceResponse], error) {
+	return c.notifyWorkspace.CallUnary(ctx, req)
+}
+
 // RunTests calls agentrepl.v1.AgentRepl.RunTests.
 func (c *agentReplClient) RunTests(ctx context.Context, req *connect.Request[v1.RunTestsRequest]) (*connect.ServerStreamForClient[v1.RunTestsResponse], error) {
 	return c.runTests.CallServerStream(ctx, req)
@@ -3067,6 +3086,9 @@ type AgentReplHandler interface {
 	// Post a comment on a pull request for a workspace, recorded as its own so
 	// it is never told back to it. See endpoint_comment_on_pull_request.proto.
 	CommentOnPullRequest(context.Context, *connect.Request[v1.CommentOnPullRequestRequest]) (*connect.Response[v1.CommentOnPullRequestResponse], error)
+	// Post a desktop banner attributed to a workspace, whose click brings Emacs
+	// forward and selects that workspace. See endpoint_notify_workspace.proto.
+	NotifyWorkspace(context.Context, *connect.Request[v1.NotifyWorkspaceRequest]) (*connect.Response[v1.NotifyWorkspaceResponse], error)
 	// Run the named tests from one workspace's worktree, streaming what the run
 	// reports; the daemon is the one runner of tests on the host. See
 	// endpoint_run_tests.proto.
@@ -3897,6 +3919,12 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		connect.WithSchema(agentReplCommentOnPullRequestMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
+	agentReplNotifyWorkspaceHandler := connect.NewUnaryHandler(
+		AgentReplNotifyWorkspaceProcedure,
+		svc.NotifyWorkspace,
+		connect.WithSchema(agentReplNotifyWorkspaceMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
 	agentReplRunTestsHandler := connect.NewServerStreamHandler(
 		AgentReplRunTestsProcedure,
 		svc.RunTests,
@@ -4187,6 +4215,8 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplListPullRequestSubscriptionsHandler.ServeHTTP(w, r)
 		case AgentReplCommentOnPullRequestProcedure:
 			agentReplCommentOnPullRequestHandler.ServeHTTP(w, r)
+		case AgentReplNotifyWorkspaceProcedure:
+			agentReplNotifyWorkspaceHandler.ServeHTTP(w, r)
 		case AgentReplRunTestsProcedure:
 			agentReplRunTestsHandler.ServeHTTP(w, r)
 		case AgentReplRunRedundancyProcedure:
@@ -4730,6 +4760,10 @@ func (UnimplementedAgentReplHandler) ListPullRequestSubscriptions(context.Contex
 
 func (UnimplementedAgentReplHandler) CommentOnPullRequest(context.Context, *connect.Request[v1.CommentOnPullRequestRequest]) (*connect.Response[v1.CommentOnPullRequestResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.CommentOnPullRequest is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) NotifyWorkspace(context.Context, *connect.Request[v1.NotifyWorkspaceRequest]) (*connect.Response[v1.NotifyWorkspaceResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.NotifyWorkspace is not implemented"))
 }
 
 func (UnimplementedAgentReplHandler) RunTests(context.Context, *connect.Request[v1.RunTestsRequest], *connect.ServerStream[v1.RunTestsResponse]) error {

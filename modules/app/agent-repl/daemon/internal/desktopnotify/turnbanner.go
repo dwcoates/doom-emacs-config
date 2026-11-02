@@ -24,7 +24,7 @@ type Endings interface {
 // Poster raises one banner, which rings its chime the instant it is made
 // (Notifier.Post).
 type Poster interface {
-	Post(ws ids.WorkspaceID, kind string, compose Compose)
+	Post(ws ids.WorkspaceID, kind string, compose Compose) Decision
 }
 
 // Summaries writes a completed turn's body (Summarizer.Summarize).
