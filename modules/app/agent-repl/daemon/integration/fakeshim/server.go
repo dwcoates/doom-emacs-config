@@ -1266,6 +1266,27 @@ func (s *server) SetSessionRemoteControl(ctx context.Context, req *connect.Reque
 	}), nil
 }
 
+// HoldParkedBridge holds the parked conversation's bridge: it answers opened
+// under the bridge session the request re-binds (else FakeBridgeSessionID) and
+// then stands until the caller lets go. The fake runs no vendor, so no prompt
+// typed on claude.ai ever reaches it.
+func (s *server) HoldParkedBridge(ctx context.Context, req *connect.Request[shimv1.HoldParkedBridgeRequest], stream *connect.ServerStream[shimv1.HoldParkedBridgeResponse]) error {
+	if err := s.enter(ctx, RPCHoldParkedBridge, req.Msg); err != nil {
+		return err
+	}
+	bridge := FakeBridgeSessionID
+	if reattach := req.Msg.GetRemoteControl().GetReattachBridgeSessionId(); reattach != "" {
+		bridge = reattach
+	}
+	if err := stream.Send(&shimv1.HoldParkedBridgeResponse{
+		Event: &shimv1.HoldParkedBridgeResponse_Opened{Opened: &shimv1.HoldParkedBridgeOpened{BridgeSessionId: bridge}},
+	}); err != nil {
+		return err
+	}
+	<-ctx.Done()
+	return nil
+}
+
 func (s *server) SetSessionPermissionMode(ctx context.Context, req *connect.Request[shimv1.SetSessionPermissionModeRequest]) (*connect.Response[shimv1.SetSessionPermissionModeResponse], error) {
 	if err := s.enter(ctx, RPCSetSessionPermissionMode, req.Msg); err != nil {
 		return nil, err

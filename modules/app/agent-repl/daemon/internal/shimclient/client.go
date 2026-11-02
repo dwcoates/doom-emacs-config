@@ -1629,6 +1629,19 @@ func (c *client) SetSessionRemoteControl(ctx context.Context, req *shimv1.SetSes
 	return unary(ctx, c, "set_session_remote_control", req, validateSetSessionRemoteControlRequest, c.rpc.SetSessionRemoteControl)
 }
 
+// HoldParkedBridge holds a cold-parked conversation's bridge and watches it.
+func (c *client) HoldParkedBridge(ctx context.Context, req *shimv1.HoldParkedBridgeRequest) (Stream[*shimv1.HoldParkedBridgeResponse], error) {
+	return openStream(ctx, c, "hold_parked_bridge", req, validateHoldParkedBridgeRequest, c.rpc.HoldParkedBridge,
+		func(resp *shimv1.HoldParkedBridgeResponse) (*shimv1.HoldParkedBridgeResponse, error) {
+			// THE EVENT ONEOF IS VALIDATED, never guessed: an unset event is
+			// illegal on the wire.
+			if resp.GetEvent() == nil {
+				return nil, invalid("HoldParkedBridgeResponse", "HoldParkedBridgeResponse.event", "oneof is unset on a pushed frame")
+			}
+			return resp, nil
+		})
+}
+
 // Hibernate stands the session down for the idle sweep.
 func (c *client) Hibernate(ctx context.Context, req *shimv1.HibernateRequest) (*shimv1.HibernateResponse, error) {
 	return unary(ctx, c, "hibernate", req, validateHibernateRequest, c.rpc.Hibernate)

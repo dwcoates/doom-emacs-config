@@ -2420,3 +2420,85 @@ func TestSetSessionRemoteControlReachesTheShim(t *testing.T) {
 		t.Fatalf("no record under daemon.shimclient.set_session_remote_control: %+v", log.Records())
 	}
 }
+
+// TestHoldParkedBridgeStream asserts the bridge stream hands every legal
+// frame on whole and refuses a frame whose event is unset.
+func TestHoldParkedBridgeStream(t *testing.T) {
+	opened := &shimv1.HoldParkedBridgeResponse{Event: &shimv1.HoldParkedBridgeResponse_Opened{
+		Opened: &shimv1.HoldParkedBridgeOpened{BridgeSessionId: "bridge-1"},
+	}}
+	prompt := &shimv1.HoldParkedBridgeResponse{Event: &shimv1.HoldParkedBridgeResponse_RemotePrompt{
+		RemotePrompt: &shimv1.HoldParkedBridgeRemotePrompt{ClientUuid: "uuid-1"},
+	}}
+	tests := []struct {
+		name     string
+		frames   []*shimv1.HoldParkedBridgeResponse
+		wantOpen bool
+		want     []string
+	}{
+		{"opened then a remote prompt", []*shimv1.HoldParkedBridgeResponse{opened, prompt}, true, []string{"opened", "remote_prompt"}},
+		{"a first frame with no event", []*shimv1.HoldParkedBridgeResponse{{}}, false, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			dir := shortDir(t)
+			f, uds := startFakeShim(t, dir)
+			f.holdParkedBridgeFrames = tt.frames
+			client := adoptReady(t, f, dir, uds)
+
+			// Act.
+			stream, err := client.HoldParkedBridge(context.Background(), validHoldParkedBridgeRequest())
+
+			// Assert.
+			if (err == nil) != tt.wantOpen {
+				t.Fatalf("HoldParkedBridge() error = %v, want open %v", err, tt.wantOpen)
+			}
+			if err != nil {
+				return
+			}
+			t.Cleanup(stream.Close)
+			var got []string
+			for range tt.want {
+				frame, err := stream.Recv()
+				if err != nil {
+					t.Fatalf("Recv() error = %v", err)
+				}
+				switch frame.GetEvent().(type) {
+				case *shimv1.HoldParkedBridgeResponse_Opened:
+					got = append(got, "opened")
+				case *shimv1.HoldParkedBridgeResponse_RemotePrompt:
+					got = append(got, "remote_prompt")
+				default:
+					got = append(got, "other")
+				}
+			}
+			if strings.Join(got, ",") != strings.Join(tt.want, ",") {
+				t.Fatalf("frames = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestHoldParkedBridgeValidatesItsRequest asserts an illegal bridge request
+// never reaches the shim.
+func TestHoldParkedBridgeValidatesItsRequest(t *testing.T) {
+	// Arrange.
+	dir := shortDir(t)
+	f, uds := startFakeShim(t, dir)
+	client := adoptReady(t, f, dir, uds)
+	req := validHoldParkedBridgeRequest()
+	req.RemoteControl.Enabled = false
+
+	// Act.
+	_, err := client.HoldParkedBridge(context.Background(), req)
+
+	// Assert.
+	var invalidErr *InvalidRequestError
+	if !errors.As(err, &invalidErr) {
+		t.Fatalf("HoldParkedBridge() error = %v, want *InvalidRequestError", err)
+	}
+	if got := f.count("HoldParkedBridge"); got != 0 {
+		t.Fatalf("HoldParkedBridge calls = %d, want 0", got)
+	}
+}

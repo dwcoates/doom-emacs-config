@@ -783,3 +783,79 @@ func TestValidateForkRequestsAcceptLegalShapes(t *testing.T) {
 	}
 	assertInvalidField(t, validateGetForkPointRequest(nil), "GetForkPointRequest")
 }
+
+// validHoldParkedBridgeRequest is a bridge request the shim accepts: a resume
+// naming no remediation, and a bridge turned on.
+func validHoldParkedBridgeRequest() *shimv1.HoldParkedBridgeRequest {
+	return &shimv1.HoldParkedBridgeRequest{
+		Start: &shimv1.StartSessionRequest{WorkspaceName: "parser-fix", Source: &shimv1.StartSessionRequest_Resume{
+			Resume: &shimv1.StartSessionResume{VendorSessionId: "vendor-1"},
+		}},
+		RemoteControl: &shimv1.SetSessionRemoteControlRequest{Enabled: true, Name: "parser-fix"},
+	}
+}
+
+func TestValidateHoldParkedBridgeRequestRefuses(t *testing.T) {
+	tests := []struct {
+		name  string
+		edit  func(*shimv1.HoldParkedBridgeRequest) *shimv1.HoldParkedBridgeRequest
+		field string
+	}{
+		{"a nil request", func(*shimv1.HoldParkedBridgeRequest) *shimv1.HoldParkedBridgeRequest { return nil }, "HoldParkedBridgeRequest"},
+		{"no start", func(r *shimv1.HoldParkedBridgeRequest) *shimv1.HoldParkedBridgeRequest {
+			r.Start = nil
+			return r
+		}, "HoldParkedBridgeRequest.start"},
+		{"a start that is no legal start", func(r *shimv1.HoldParkedBridgeRequest) *shimv1.HoldParkedBridgeRequest {
+			r.Start.WorkspaceName = ""
+			return r
+		}, "StartSessionRequest.workspace_name"},
+		{"a fresh start", func(r *shimv1.HoldParkedBridgeRequest) *shimv1.HoldParkedBridgeRequest {
+			r.Start.Source = &shimv1.StartSessionRequest_Fresh{Fresh: &shimv1.StartSessionFresh{Model: validModel(), PermissionMode: validMode()}}
+			return r
+		}, "HoldParkedBridgeRequest.start.source"},
+		{"a resume naming a remediation", func(r *shimv1.HoldParkedBridgeRequest) *shimv1.HoldParkedBridgeRequest {
+			r.Start.GetResume().ColdRemediation = &conversationv1.SessionColdRemediation{
+				Remediation: &conversationv1.SessionColdRemediation_Pay{Pay: &conversationv1.SessionColdPay{}},
+			}
+			return r
+		}, "HoldParkedBridgeRequest.start.resume.cold_remediation"},
+		{"no bridge", func(r *shimv1.HoldParkedBridgeRequest) *shimv1.HoldParkedBridgeRequest {
+			r.RemoteControl = nil
+			return r
+		}, "HoldParkedBridgeRequest.remote_control"},
+		{"a bridge held off", func(r *shimv1.HoldParkedBridgeRequest) *shimv1.HoldParkedBridgeRequest {
+			r.RemoteControl.Enabled = false
+			return r
+		}, "HoldParkedBridgeRequest.remote_control.enabled"},
+		{"a bridge naming no session", func(r *shimv1.HoldParkedBridgeRequest) *shimv1.HoldParkedBridgeRequest {
+			r.RemoteControl.Name = " "
+			return r
+		}, "SetSessionRemoteControlRequest.name"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			req := tt.edit(validHoldParkedBridgeRequest())
+
+			// Act.
+			err := validateHoldParkedBridgeRequest(req)
+
+			// Assert.
+			assertInvalidField(t, err, tt.field)
+		})
+	}
+}
+
+func TestValidateHoldParkedBridgeRequestAccepts(t *testing.T) {
+	// Arrange.
+	req := validHoldParkedBridgeRequest()
+
+	// Act.
+	err := validateHoldParkedBridgeRequest(req)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("validateHoldParkedBridgeRequest() = %v, want nil", err)
+	}
+}

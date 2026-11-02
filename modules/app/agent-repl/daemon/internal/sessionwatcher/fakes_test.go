@@ -525,6 +525,10 @@ func (c *fakeClient) SendKeepalive(context.Context, *shimv1.SendKeepaliveRequest
 	panic("sessionwatcher must not call SendKeepalive")
 }
 
+func (c *fakeClient) HoldParkedBridge(context.Context, *shimv1.HoldParkedBridgeRequest) (shimclient.Stream[*shimv1.HoldParkedBridgeResponse], error) {
+	panic("sessionwatcher must not call HoldParkedBridge")
+}
+
 func (c *fakeClient) Hibernate(context.Context, *shimv1.HibernateRequest) (*shimv1.HibernateResponse, error) {
 	panic("sessionwatcher must not call Hibernate")
 }

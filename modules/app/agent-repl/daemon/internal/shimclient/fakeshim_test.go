@@ -42,7 +42,10 @@ type fakeShim struct {
 	watchAgentFrames    []*shimv1.WatchAgentResponse
 	watchBashRefusal    error
 	watchSessionRefuse  error
-	killSessionResp     *shimv1.KillSessionResponse
+	// holdParkedBridgeFrames is what HoldParkedBridge sends before it stands
+	// until the caller lets go.
+	holdParkedBridgeFrames []*shimv1.HoldParkedBridgeResponse
+	killSessionResp        *shimv1.KillSessionResponse
 	// killSessionErr, when set, fails the KillSession call instead of
 	// answering it, over a connection that stays up.
 	killSessionErr error
@@ -278,6 +281,20 @@ func (f *fakeShim) SetSessionEffort(_ context.Context, _ *connect.Request[shimv1
 func (f *fakeShim) SetSessionRemoteControl(_ context.Context, _ *connect.Request[shimv1.SetSessionRemoteControlRequest]) (*connect.Response[shimv1.SetSessionRemoteControlResponse], error) {
 	f.record("SetSessionRemoteControl")
 	return connect.NewResponse(&shimv1.SetSessionRemoteControlResponse{}), nil
+}
+
+func (f *fakeShim) HoldParkedBridge(ctx context.Context, _ *connect.Request[shimv1.HoldParkedBridgeRequest], stream *connect.ServerStream[shimv1.HoldParkedBridgeResponse]) error {
+	f.record("HoldParkedBridge")
+	f.mu.Lock()
+	frames := f.holdParkedBridgeFrames
+	f.mu.Unlock()
+	for _, frame := range frames {
+		if err := stream.Send(frame); err != nil {
+			return err
+		}
+	}
+	<-ctx.Done()
+	return ctx.Err()
 }
 
 func (f *fakeShim) SetSessionPermissionMode(_ context.Context, _ *connect.Request[shimv1.SetSessionPermissionModeRequest]) (*connect.Response[shimv1.SetSessionPermissionModeResponse], error) {
