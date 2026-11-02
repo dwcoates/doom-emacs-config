@@ -623,6 +623,10 @@ func StartEmacs(t *testing.T, box sandbox, opts EmacsOpts) *Emacs {
 	// The persistent-wifi controller's host tools are faked too: the sandbox
 	// has no pmset or networksetup, and no scenario may touch a real one.
 	hostTools := harness.NewFakeHostTools(t, filepath.Join(root, "host-tools"))
+	// And its lid: a pipe the daemon reads, so it never subscribes to a real
+	// one. The sandbox's kernel keeps its own end of the pipe, so the lid
+	// stays unheard there, which no scenario reads.
+	hostLid := harness.NewFakeLid(t, filepath.Join(root, "host-lid"))
 	e.Notifier = fakeNotifier
 	e.Chime = fakeChime
 	e.Browser = fakeBrowser
@@ -677,6 +681,7 @@ func StartEmacs(t *testing.T, box sandbox, opts EmacsOpts) *Emacs {
 		"AGENT_REPL_BROWSER_CMD=" + fakeBrowser.Path,
 		"AGENT_REPL_PERSISTENT_WIFI_TOOLS_DIR=" + hostTools,
 		"AGENT_REPL_PERSISTENT_WIFI_HOTSPOT=" + harness.FakeHotspot,
+		"AGENT_REPL_PERSISTENT_WIFI_LID_PIPE=" + hostLid.Path,
 		"MULTI_REPO_ROOT=" + e.MultiRepoRoot,
 		// A tty frame needs a terminal that can position the cursor, and
 		// `dumb` by definition cannot: it has no `cup` capability, so Emacs

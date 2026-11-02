@@ -3,11 +3,13 @@ package harness
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 
 	"agent-repld/internal/shellword"
@@ -375,7 +377,7 @@ const FakeHotspot = "Harness Hotspot"
 // STATEFUL where the daemon reads back what it wrote: `pmset -a disablesleep`
 // writes the value `pmset -g` reports, through the fake `sudo`, which runs
 // the command it is handed. No test ever touches the real machine's power or
-// network settings.
+// network settings, and `mac-brightness` keeps the level it was set to.
 var fakeHostTools = map[string]string{
 	"sudo": `#!/bin/sh
 [ "$1" = "-n" ] && shift
@@ -396,8 +398,80 @@ exit 0
 	"ipconfig": `#!/bin/sh
 printf '<dictionary> {\n  InterfaceType : WiFi\n  LinkStatusActive : TRUE\n  SSID : ` + FakeHostNetwork + `\n}\n'
 `,
-	"wifi-util":      "#!/bin/sh\nexit 0\n",
-	"mac-brightness": "#!/bin/sh\nexit 0\n",
+	"wifi-util": "#!/bin/sh\nexit 0\n",
+	// The display's level, read with no argument and set with one; it starts
+	// at FakeBrightness.
+	"mac-brightness": `#!/bin/sh
+state="$(dirname "$0")/brightness.state"
+if [ $# -eq 0 ]; then
+  cat "$state" 2>/dev/null || echo ` + FakeBrightness + `
+else
+  printf '%s\n' "$1" > "$state"
+fi
+exit 0
+`,
+}
+
+// FakeBrightness is the display level the fake brightness tool starts at.
+const FakeBrightness = "0.81"
+
+// FakeBrightnessLevel answers the level the fake brightness tool in dir was
+// last set to, FakeBrightness when it never was.
+func FakeBrightnessLevel(t testing.TB, dir string) string {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join(dir, "brightness.state"))
+	if errors.Is(err, os.ErrNotExist) {
+		return FakeBrightness
+	}
+	if err != nil {
+		t.Fatalf("harness: read the fake brightness: %v", err)
+	}
+	return strings.TrimSpace(string(b))
+}
+
+// FakeLid is the daemon's lid on a fake host
+// (AGENT_REPL_PERSISTENT_WIFI_LID_PIPE): a named pipe the harness holds open
+// read-write, so each state written is buffered until the daemon reads it,
+// whenever it subscribes.
+type FakeLid struct {
+	// Path is the pipe the daemon is pointed at.
+	Path string
+	t    testing.TB
+	pipe *os.File
+}
+
+// NewFakeLid makes the pipe in dir with the lid open, the state the daemon
+// reads when it subscribes.
+func NewFakeLid(t testing.TB, dir string) *FakeLid {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("harness: mkdir %s: %v", dir, err)
+	}
+	path := filepath.Join(dir, "lid")
+	if err := syscall.Mkfifo(path, 0o600); err != nil {
+		t.Fatalf("harness: mkfifo %s: %v", path, err)
+	}
+	pipe, err := os.OpenFile(path, os.O_RDWR, 0)
+	if err != nil {
+		t.Fatalf("harness: open the lid pipe: %v", err)
+	}
+	t.Cleanup(func() { _ = pipe.Close() })
+	l := &FakeLid{Path: path, t: t, pipe: pipe}
+	l.write("open")
+	return l
+}
+
+// Close closes the lid.
+func (l *FakeLid) Close() { l.write("closed") }
+
+// Open opens the lid.
+func (l *FakeLid) Open() { l.write("open") }
+
+func (l *FakeLid) write(state string) {
+	l.t.Helper()
+	if _, err := l.pipe.WriteString(state + "\n"); err != nil {
+		l.t.Fatalf("harness: write the lid pipe: %v", err)
+	}
 }
 
 // NewFakeHostTools writes the persistent-wifi host tools into dir
