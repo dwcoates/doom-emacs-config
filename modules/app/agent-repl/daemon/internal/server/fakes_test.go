@@ -491,7 +491,7 @@ type fakeVerbs struct {
 	// remoteWorkspaces is the workspace each of remoteChanges was asked of.
 	remoteWorkspaces []ids.WorkspaceID
 	remoteOn         bool
-	remoteErr     error
+	remoteErr        error
 
 	// retries counts every RetryVendorError, answered with retryResponse and
 	// retryErr.
@@ -1172,13 +1172,12 @@ func (f *fakeMerge) Status(_ context.Context, scope *merge.RepositoryScope) ([]m
 
 // fakeSubscription is one Subscribe or Unsubscribe the fake was asked for.
 type fakeSubscription struct {
-	ws     ids.WorkspaceID
-	scope  *merge.RepositoryScope
-	detail wsm.MergeQueueDetail
+	ws    ids.WorkspaceID
+	scope *merge.RepositoryScope
 }
 
-func (f *fakeMerge) Subscribe(_ context.Context, ws ids.WorkspaceID, scope *merge.RepositoryScope, detail wsm.MergeQueueDetail) (bool, error) {
-	f.subscriptions = append(f.subscriptions, fakeSubscription{ws: ws, scope: scope, detail: detail})
+func (f *fakeMerge) Subscribe(_ context.Context, ws ids.WorkspaceID, scope *merge.RepositoryScope) (bool, error) {
+	f.subscriptions = append(f.subscriptions, fakeSubscription{ws: ws, scope: scope})
 	return f.replaced, f.subscribeErr
 }
 

@@ -12,7 +12,7 @@ import (
 
 // This file is the durable half of MERGE QUEUE SUBSCRIPTIONS
 // (agentrepl.v1.UpdateMergeQueueSubscribe): which workspace's agent is told
-// about which repository's merge queue, and at what detail. A subscription is
+// about which repository's merge queue. A subscription is
 // DURABLE because a landing in the daemon's own checkout redeploys and
 // restarts the daemon: one that a restart dropped would end at the very change
 // it exists to report.
@@ -50,75 +50,15 @@ CREATE TABLE merge_queue_subscriptions (
 // queue: MergeQueueSubscription.Repo when the subscription names none.
 const EveryRepository RepoKey = ""
 
-// MergeQueueDetail is how much of a merge queue's change a subscription
-// reports (agentrepl.v1.UpdateMergeQueueSubscribeDetail's arms), as the store
-// keeps it. The levels nest: every depletion is an advance, every advance is
-// told at deploys (which adds each deploy's end), and all of it is a change.
-// ITS STORED VALUES ARE DURABLE and must not be renumbered, so their order is
-// not their nesting: Fineness is.
-type MergeQueueDetail int
-
-// The details. The zero value is no detail, so a detail left unset is never
-// read as one of them.
-const (
-	// MergeQueueDetailEveryChange reports every change of the queue.
-	MergeQueueDetailEveryChange MergeQueueDetail = iota + 1
-	// MergeQueueDetailAdvances reports only a merge leaving the queue.
-	MergeQueueDetailAdvances
-	// MergeQueueDetailDepletes reports only the queue running out of merges.
-	MergeQueueDetailDepletes
-	// MergeQueueDetailDeploys reports a merge leaving the queue, and each
-	// deploy of the daemon's own checkout ending.
-	MergeQueueDetailDeploys
-)
-
-// Fineness ranks the details by how much they tell, finest (every change)
-// first: a subscriber holding two subscriptions that admit a change is told
-// at the finer.
-func (d MergeQueueDetail) Fineness() int {
-	switch d {
-	case MergeQueueDetailEveryChange:
-		return 0
-	case MergeQueueDetailDeploys:
-		return 1
-	case MergeQueueDetailAdvances:
-		return 2
-	case MergeQueueDetailDepletes:
-		return 3
-	}
-	panic(fmt.Sprintf("wsm: the undeclared merge queue detail %d has no fineness", int(d)))
-}
-
-// String names the detail in log records and in a notice.
-func (d MergeQueueDetail) String() string {
-	switch d {
-	case MergeQueueDetailEveryChange:
-		return "every_change"
-	case MergeQueueDetailAdvances:
-		return "advances"
-	case MergeQueueDetailDepletes:
-		return "depletes"
-	case MergeQueueDetailDeploys:
-		return "deploys"
-	}
-	return fmt.Sprintf("MergeQueueDetail(%d)", int(d))
-}
-
-// ParseMergeQueueDetail reads a detail as String spells it, the spelling a
-// command file and the merge-queue verb carry. Any other text is refused.
-func ParseMergeQueueDetail(text string) (MergeQueueDetail, error) {
-	for _, detail := range []MergeQueueDetail{MergeQueueDetailEveryChange, MergeQueueDetailDeploys, MergeQueueDetailAdvances, MergeQueueDetailDepletes} {
-		if detail.String() == text {
-			return detail, nil
-		}
-	}
-	return 0, fmt.Errorf("wsm: %q is none of the merge queue subscription details every_change, deploys, advances and depletes", text)
-}
-
-// Valid reports whether d is one of the declared details.
-func (d MergeQueueDetail) Valid() bool {
-	return d >= MergeQueueDetailEveryChange && d <= MergeQueueDetailDeploys
-}
+// legacyMergeQueueDetail is what every row's detail column holds. A
+// subscription once chose how much of a queue's change it was told; every one
+// is now told the same changes (internal/mergenotice), and nothing reads the
+// column. IT IS STILL WRITTEN because the build before this one reads it and
+// refuses a row without a detail it knows, and both builds serve the store
+// across a handover. 4 is that build's "deploys", the level whose notices are
+// closest to what every subscription is now told. Dropping the column is a
+// breaking layout step, left until no running build reads it (org/todo.md).
+const legacyMergeQueueDetail = 4
 
 // MergeQueueSubscription is one workspace's subscription to one scope's merge
 // queue changes.
@@ -128,9 +68,7 @@ type MergeQueueSubscription struct {
 	// Repo is the queue subscribed to, by its queue key; EveryRepository
 	// subscribes to every repository's queue.
 	Repo RepoKey
-	// Detail is how much of a change is told.
-	Detail MergeQueueDetail
-	// SubscribedAt is when the subscription took its current detail.
+	// SubscribedAt is when the subscription was taken, or last taken again.
 	SubscribedAt time.Time
 }
 
@@ -139,18 +77,13 @@ type MergeQueueSubscription struct {
 // would never end.
 var ErrSubscriberClosed = errors.New("wsm: a closed workspace cannot subscribe")
 
-// SubscribeMergeQueue records SUB, replacing the detail of the subscription
-// its subscriber already holds in the same scope, and answers whether it
-// replaced one. The subscriber's open state is checked in the same
+// SubscribeMergeQueue records SUB, standing in for the subscription its
+// subscriber already holds in the same scope, and answers whether it replaced
+// one. The subscriber's open state is checked in the same
 // transaction, so a close cannot slip between the check and the write.
 func (s *store) SubscribeMergeQueue(ctx context.Context, sub MergeQueueSubscription) (bool, error) {
 	const op = "daemon.wsm.subscribe_merge_queue"
-	fields := dlog.Context{"subscriber": string(sub.Subscriber), "repo": string(sub.Repo), "detail": sub.Detail.String()}
-	if !sub.Detail.Valid() {
-		err := fmt.Errorf("wsm: merge queue subscription of %s: detail %d is none of the declared details", sub.Subscriber, int(sub.Detail))
-		s.log.Error(op, "refused a merge queue subscription with an undeclared detail", withError(fields, err))
-		return false, err
-	}
+	fields := dlog.Context{"subscriber": string(sub.Subscriber), "repo": string(sub.Repo)}
 	repo, err := subscriptionScope(sub.Repo)
 	if err != nil {
 		s.log.Error(op, "refused a merge queue subscription whose scope cannot be normalized", withError(fields, err))
@@ -177,7 +110,7 @@ func (s *store) SubscribeMergeQueue(ctx context.Context, sub MergeQueueSubscript
 		_, err = tx.ExecContext(ctx,
 			`INSERT INTO merge_queue_subscriptions (subscriber, repo_key, detail, subscribed_at) VALUES (?, ?, ?, ?)
 			 ON CONFLICT(subscriber, repo_key) DO UPDATE SET detail = excluded.detail, subscribed_at = excluded.subscribed_at`,
-			sub.Subscriber, repo, int(sub.Detail), nanos(sub.SubscribedAt))
+			sub.Subscriber, repo, legacyMergeQueueDetail, nanos(sub.SubscribedAt))
 		return err
 	})
 	return replaced, err
@@ -191,13 +124,12 @@ func (s *store) UnsubscribeMergeQueue(ctx context.Context, subscriber WorkspaceI
 }
 
 // EndMergeQueueSubscription ends SUB as it was read: its subscriber's
-// subscription in its scope, only while it still holds SUB's detail and
-// SUB's SubscribedAt. It answers whether it ended one. A subscription the
+// subscription in its scope, only while it still holds SUB's SubscribedAt. It answers whether it ended one. A subscription the
 // subscriber took again since SUB was read is not SUB, and stands.
 func (s *store) EndMergeQueueSubscription(ctx context.Context, sub MergeQueueSubscription) (bool, error) {
 	return s.endSubscription(ctx, "daemon.wsm.end_merge_queue_subscription", "refused to end a merge queue subscription whose scope cannot be normalized",
-		dlog.Context{"subscriber": string(sub.Subscriber), "repo": string(sub.Repo), "detail": sub.Detail.String()},
-		sub.Subscriber, sub.Repo, ` AND detail = ? AND subscribed_at = ?`, int(sub.Detail), nanos(sub.SubscribedAt))
+		dlog.Context{"subscriber": string(sub.Subscriber), "repo": string(sub.Repo)},
+		sub.Subscriber, sub.Repo, ` AND subscribed_at = ?`, nanos(sub.SubscribedAt))
 }
 
 // endSubscription deletes SUBSCRIBER's subscription in scope REPO, narrowed by
@@ -224,13 +156,12 @@ func (s *store) endSubscription(ctx context.Context, op, refused string, fields 
 }
 
 // MergeQueueSubscriptions loads every subscription, by subscriber then scope,
-// all-or-nothing. A row whose detail is undeclared refuses the whole read: it
-// would otherwise be delivered at a detail nobody asked for.
+// all-or-nothing.
 func (s *store) MergeQueueSubscriptions(ctx context.Context) ([]MergeQueueSubscription, error) {
 	var out []MergeQueueSubscription
 	err := s.read(ctx, "daemon.wsm.merge_queue_subscriptions", dlog.Context{}, func(ctx context.Context) error {
 		rows, err := s.q(ctx).QueryContext(ctx,
-			`SELECT subscriber, repo_key, detail, subscribed_at FROM merge_queue_subscriptions ORDER BY subscriber, repo_key`)
+			`SELECT subscriber, repo_key, subscribed_at FROM merge_queue_subscriptions ORDER BY subscriber, repo_key`)
 		if err != nil {
 			return err
 		}
@@ -238,16 +169,11 @@ func (s *store) MergeQueueSubscriptions(ctx context.Context) ([]MergeQueueSubscr
 		var loaded []MergeQueueSubscription
 		for rows.Next() {
 			var (
-				sub    MergeQueueSubscription
-				detail int
-				at     int64
+				sub MergeQueueSubscription
+				at  int64
 			)
-			if err := rows.Scan(&sub.Subscriber, &sub.Repo, &detail, &at); err != nil {
+			if err := rows.Scan(&sub.Subscriber, &sub.Repo, &at); err != nil {
 				return err
-			}
-			sub.Detail = MergeQueueDetail(detail)
-			if !sub.Detail.Valid() {
-				return fmt.Errorf("wsm: merge queue subscription of %s to %q holds undeclared detail %d", sub.Subscriber, sub.Repo, detail)
 			}
 			sub.SubscribedAt = fromNanos(at)
 			loaded = append(loaded, sub)

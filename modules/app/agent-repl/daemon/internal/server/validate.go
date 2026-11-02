@@ -1267,9 +1267,6 @@ func validateSubscribeMergeQueueRequest(req *agentreplv1.SubscribeMergeQueueRequ
 	if err := validateWorkspaceRef("subscriber", req.GetSubscriber()); err != nil {
 		return err
 	}
-	if req.GetDetail().GetLevel() == nil {
-		return invalid("detail", "a subscription's detail level arm is required")
-	}
 	if req.Repository != nil {
 		return validateRepositoryRef("repository", req.GetRepository())
 	}

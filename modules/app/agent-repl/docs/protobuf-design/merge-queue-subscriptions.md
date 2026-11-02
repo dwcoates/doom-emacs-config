@@ -99,6 +99,40 @@ selection round; each decision below records the reasoning a reviewer needs.
   refusal to the arm; the command-file path quarantines the entry with the
   cause, as any refusal.
 
+### 4. Every subscription is told the same three changes; the detail retires (2026-11-01)
+
+- **What**: `SubscribeMergeQueueRequest.detail` (3) is `reserved`, and the
+  `SubscribeMergeQueueDetail` message and its four level arms are removed.
+  Every subscription is told a merge put in line, a merge leaving the queue
+  (landed, failed, or taken off), and a deploy of the daemon's own checkout
+  ending. Nothing else is told: not a start, a step, a reorder, a pause or a
+  resume, and not a restart's requeue of a merge that never left the line.
+  The `-detail` flag is gone from `merge-queue subscribe`, which refuses it.
+- **Why**: owner ruling, 2026-11-01: "we only want additions to the queue,
+  advancement in the queue, and deploys to result in notices, and we want the
+  notices to be extremely short (no reason to blow up context)". A notice
+  wakes its subscriber for a full read of its context; an `every_change`
+  subscriber was woken at every step of every merge, several times a merge,
+  for changes nobody waits on.
+- **Not breaking**: a field retired with `reserved` keeps the package version
+  (proto `AGENTS.md`). An older client still sending `detail` has it ignored
+  as an unknown field.
+- **A notice is one line**, about 25 to 40 tokens where it was about 380:
+  `merge queue of doom: `fix` landed. 6 in line; `next` testing.` The brief
+  keeps only `{{scope}}`, `{{changes}}`, `{{queue}}` and `{{lifetime}}`; the
+  queue listing and the two fixed paragraphs are gone. `merge-queue status`
+  reads the queue in full, and the skill already says how to act on a notice.
+  A notice that waited behind the subscriber's turn and is superseded folds
+  its changes into the same line ("3 changes: ...; ...; ...").
+- **The store keeps the `detail` column**, written with the previous build's
+  `deploys` value (4) and never read. That build serves the same store across
+  a handover, reads the column, and refuses a row without a detail it knows.
+  Dropping the column is a breaking layout step and waits until no running
+  build reads it (`org/todo.md`).
+- **A pause is said, not told**: the queue's few words end "paused" on the
+  next notice that is told, so a subscriber waiting for a landing learns why
+  none comes without being woken by the pause itself.
+
 ## Non-contract decisions recorded for the implementation
 
 - **Persistence model.** Subscriptions are durable (wsm layout 55,

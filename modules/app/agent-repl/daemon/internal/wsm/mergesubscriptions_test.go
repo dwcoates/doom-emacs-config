@@ -13,9 +13,9 @@ import (
 	"agent-repld/internal/sourcescan"
 )
 
-// subscription is WS's subscription to REPO at DETAIL, taken at instant.
-func subscription(ws WorkspaceID, repo RepoKey, detail MergeQueueDetail) MergeQueueSubscription {
-	return MergeQueueSubscription{Subscriber: ws, Repo: repo, Detail: detail, SubscribedAt: instant}
+// subscription is WS's subscription to REPO, taken at instant.
+func subscription(ws WorkspaceID, repo RepoKey) MergeQueueSubscription {
+	return MergeQueueSubscription{Subscriber: ws, Repo: repo, SubscribedAt: instant}
 }
 
 // queueKey is a fresh directory keyed as the queue keys it, so a
@@ -47,44 +47,67 @@ func subscriptionsOf(t *testing.T, s *store) []MergeQueueSubscription {
 	return subs
 }
 
-func TestASubscriptionRoundTripsAtEachDetail(t *testing.T) {
+func TestASubscriptionRoundTrips(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	repo := queueKey(t)
+	want := subscription(ws.ID, repo)
+
+	// Act
+	replaced, err := s.SubscribeMergeQueue(context.Background(), want)
+
+	// Assert
+	if err != nil || replaced {
+		t.Fatalf("SubscribeMergeQueue = %v, %v; want a fresh subscription", replaced, err)
+	}
+	if got := subscriptionsOf(t, s); !reflect.DeepEqual(got, []MergeQueueSubscription{want}) {
+		t.Fatalf("subscriptions = %+v, want %+v", got, want)
+	}
+}
+
+// TestASubscriptionsRowHoldsTheDetailThePreviousBuildReads pins the retired
+// detail column's value: the build before this one serves the same store
+// across a handover, reads the column, and refuses a row without a detail it
+// knows. A row an older build wrote at another detail takes it on the next
+// subscribe.
+func TestASubscriptionsRowHoldsTheDetailThePreviousBuildReads(t *testing.T) {
 	tests := []struct {
-		name   string
-		detail MergeQueueDetail
+		name  string
+		older bool
 	}{
-		{name: "every change", detail: MergeQueueDetailEveryChange},
-		{name: "advances", detail: MergeQueueDetailAdvances},
-		{name: "depletes", detail: MergeQueueDetailDepletes},
+		{name: "a new subscription"},
+		{name: "a subscription taken again over an older build's row", older: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
 			s, _ := testStore(t)
 			ws := testWorkspace(t, s)
-			repo := queueKey(t)
-			want := subscription(ws.ID, repo, tt.detail)
+			if tt.older {
+				mustSubscribe(t, s, subscription(ws.ID, EveryRepository))
+				corrupt(t, s, `UPDATE merge_queue_subscriptions SET detail = 1`)
+			}
 
 			// Act
-			replaced, err := s.SubscribeMergeQueue(context.Background(), want)
+			mustSubscribe(t, s, subscription(ws.ID, EveryRepository))
 
 			// Assert
-			if err != nil || replaced {
-				t.Fatalf("SubscribeMergeQueue = %v, %v; want a fresh subscription", replaced, err)
-			}
-			if got := subscriptionsOf(t, s); !reflect.DeepEqual(got, []MergeQueueSubscription{want}) {
-				t.Fatalf("subscriptions = %+v, want %+v", got, want)
+			if got := scalar[int](t, s, `SELECT detail FROM merge_queue_subscriptions WHERE subscriber = ?`, ws.ID); got != legacyMergeQueueDetail {
+				t.Fatalf("detail column = %d, want %d", got, legacyMergeQueueDetail)
 			}
 		})
 	}
 }
 
-func TestSubscribingAgainInTheSameScopeReplacesTheDetail(t *testing.T) {
+func TestSubscribingAgainInTheSameScopeTakesItAgain(t *testing.T) {
 	// Arrange
 	s, _ := testStore(t)
 	ws := testWorkspace(t, s)
 	repo := queueKey(t)
-	mustSubscribe(t, s, subscription(ws.ID, repo, MergeQueueDetailEveryChange))
-	want := subscription(ws.ID, repo, MergeQueueDetailDepletes)
+	mustSubscribe(t, s, subscription(ws.ID, repo))
+	want := subscription(ws.ID, repo)
+	want.SubscribedAt = instant.Add(time.Second)
 
 	// Act
 	replaced, err := s.SubscribeMergeQueue(context.Background(), want)
@@ -103,8 +126,8 @@ func TestAScopedAndAnUnscopedSubscriptionStandTogether(t *testing.T) {
 	s, _ := testStore(t)
 	ws := testWorkspace(t, s)
 	repo := queueKey(t)
-	every := subscription(ws.ID, EveryRepository, MergeQueueDetailAdvances)
-	scoped := subscription(ws.ID, repo, MergeQueueDetailEveryChange)
+	every := subscription(ws.ID, EveryRepository)
+	scoped := subscription(ws.ID, repo)
 
 	// Act
 	mustSubscribe(t, s, every)
@@ -127,31 +150,11 @@ func TestASubscriptionsScopeIsKeyedAsTheQueueKeysIt(t *testing.T) {
 	}
 
 	// Act
-	mustSubscribe(t, s, subscription(ws.ID, RepoKey(dir+string(filepath.Separator)), MergeQueueDetailAdvances))
+	mustSubscribe(t, s, subscription(ws.ID, RepoKey(dir+string(filepath.Separator))))
 
 	// Assert
 	if got := subscriptionsOf(t, s); len(got) != 1 || got[0].Repo != want {
 		t.Fatalf("subscriptions = %+v, want one keyed %q", got, want)
-	}
-}
-
-func TestASubscriptionWithAnUndeclaredDetailIsRefused(t *testing.T) {
-	// Arrange
-	s, log := testStore(t)
-	ws := testWorkspace(t, s)
-
-	// Act
-	_, err := s.SubscribeMergeQueue(context.Background(), subscription(ws.ID, EveryRepository, MergeQueueDetail(0)))
-
-	// Assert
-	if err == nil {
-		t.Fatal("SubscribeMergeQueue accepted an undeclared detail")
-	}
-	if _, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "error", Operation: "daemon.wsm.subscribe_merge_queue"}); !ok {
-		t.Fatalf("no error record for the refused detail: %+v", log.Records())
-	}
-	if got := subscriptionsOf(t, s); len(got) != 0 {
-		t.Fatalf("subscriptions = %+v, want none written", got)
 	}
 }
 
@@ -160,7 +163,7 @@ func TestASubscriptionOfAnUnknownWorkspaceIsNotFound(t *testing.T) {
 	s, _ := testStore(t)
 
 	// Act
-	_, err := s.SubscribeMergeQueue(context.Background(), subscription("no-such-workspace", EveryRepository, MergeQueueDetailAdvances))
+	_, err := s.SubscribeMergeQueue(context.Background(), subscription("no-such-workspace", EveryRepository))
 
 	// Assert
 	if !errors.Is(err, ErrNotFound) {
@@ -180,7 +183,7 @@ func TestAClosedWorkspaceCannotSubscribe(t *testing.T) {
 	}
 
 	// Act
-	_, err := s.SubscribeMergeQueue(context.Background(), subscription(ws.ID, EveryRepository, MergeQueueDetailAdvances))
+	_, err := s.SubscribeMergeQueue(context.Background(), subscription(ws.ID, EveryRepository))
 
 	// Assert
 	if !errors.Is(err, ErrSubscriberClosed) {
@@ -199,8 +202,8 @@ func TestUnsubscribingEndsOnlyThatScope(t *testing.T) {
 	s, _ := testStore(t)
 	ws := testWorkspace(t, s)
 	repo := queueKey(t)
-	scoped := subscription(ws.ID, repo, MergeQueueDetailEveryChange)
-	mustSubscribe(t, s, subscription(ws.ID, EveryRepository, MergeQueueDetailAdvances))
+	scoped := subscription(ws.ID, repo)
+	mustSubscribe(t, s, subscription(ws.ID, EveryRepository))
 	mustSubscribe(t, s, scoped)
 
 	// Act
@@ -234,9 +237,9 @@ func TestClosingAWorkspaceEndsEverySubscriptionItHolds(t *testing.T) {
 	s, log := testStore(t)
 	closing := testWorkspace(t, s)
 	other := testWorkspaceNamed(t, s, "other")
-	kept := subscription(other.ID, EveryRepository, MergeQueueDetailAdvances)
-	mustSubscribe(t, s, subscription(closing.ID, EveryRepository, MergeQueueDetailAdvances))
-	mustSubscribe(t, s, subscription(closing.ID, RepoKey(t.TempDir()), MergeQueueDetailDepletes))
+	kept := subscription(other.ID, EveryRepository)
+	mustSubscribe(t, s, subscription(closing.ID, EveryRepository))
+	mustSubscribe(t, s, subscription(closing.ID, RepoKey(t.TempDir())))
 	mustSubscribe(t, s, kept)
 
 	// Act
@@ -279,7 +282,7 @@ func TestReopeningAWorkspaceDoesNotRestoreItsSubscriptions(t *testing.T) {
 	// Arrange
 	s, _ := testStore(t)
 	ws := testWorkspace(t, s)
-	mustSubscribe(t, s, subscription(ws.ID, EveryRepository, MergeQueueDetailAdvances))
+	mustSubscribe(t, s, subscription(ws.ID, EveryRepository))
 	if err := s.MarkClosed(context.Background(), ws.ID, Closure{At: instant, By: CloseByUser}); err != nil {
 		t.Fatalf("MarkClosed: %v", err)
 	}
@@ -300,7 +303,7 @@ func TestForgettingAWorkspaceEndsItsSubscriptions(t *testing.T) {
 	// Arrange
 	s, _ := testStore(t)
 	ws := testWorkspace(t, s)
-	mustSubscribe(t, s, subscription(ws.ID, EveryRepository, MergeQueueDetailAdvances))
+	mustSubscribe(t, s, subscription(ws.ID, EveryRepository))
 
 	// Act
 	_, err := s.Forget(context.Background(), ws.ID)
@@ -322,7 +325,7 @@ func TestASubscriptionSurvivesARestart(t *testing.T) {
 		t.Fatalf("Open: %v", err)
 	}
 	ws := testWorkspace(t, first.(*store))
-	want := subscription(ws.ID, EveryRepository, MergeQueueDetailDepletes)
+	want := subscription(ws.ID, EveryRepository)
 	mustSubscribe(t, first.(*store), want)
 	if err := first.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
@@ -345,124 +348,17 @@ func TestASubscriptionSurvivesARestart(t *testing.T) {
 	}
 }
 
-func TestAStoredUndeclaredDetailRefusesTheRead(t *testing.T) {
-	// Arrange
-	s, _ := testStore(t)
-	ws := testWorkspace(t, s)
-	mustSubscribe(t, s, subscription(ws.ID, EveryRepository, MergeQueueDetailAdvances))
-	corrupt(t, s, `UPDATE merge_queue_subscriptions SET detail = 9`)
-
-	// Act
-	got, err := s.MergeQueueSubscriptions(context.Background())
-
-	// Assert
-	if err == nil {
-		t.Fatalf("MergeQueueSubscriptions = %+v, want the undeclared detail refused", got)
-	}
-}
-
-func TestMergeQueueDetailNamesEachDetail(t *testing.T) {
-	tests := []struct {
-		detail MergeQueueDetail
-		want   string
-	}{
-		{detail: MergeQueueDetailEveryChange, want: "every_change"},
-		{detail: MergeQueueDetailAdvances, want: "advances"},
-		{detail: MergeQueueDetailDepletes, want: "depletes"},
-		{detail: MergeQueueDetailDeploys, want: "deploys"},
-		{detail: MergeQueueDetail(7), want: "MergeQueueDetail(7)"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.want, func(t *testing.T) {
-			// Act
-			got := tt.detail.String()
-
-			// Assert
-			if got != tt.want {
-				t.Fatalf("String() = %q, want %q", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestParseMergeQueueDetailReadsEachDetailsSpelling(t *testing.T) {
-	for _, want := range []MergeQueueDetail{MergeQueueDetailEveryChange, MergeQueueDetailDeploys, MergeQueueDetailAdvances, MergeQueueDetailDepletes} {
-		t.Run(want.String(), func(t *testing.T) {
-			// Act.
-			got, err := ParseMergeQueueDetail(want.String())
-
-			// Assert.
-			if err != nil || got != want {
-				t.Fatalf("ParseMergeQueueDetail(%q) = %v, %v; want %v", want.String(), got, err, want)
-			}
-		})
-	}
-}
-
-func TestParseMergeQueueDetailRefusesAnUndeclaredSpelling(t *testing.T) {
-	// Act.
-	_, err := ParseMergeQueueDetail("sometimes")
-
-	// Assert.
-	if err == nil {
-		t.Fatal("ParseMergeQueueDetail accepted an undeclared detail")
-	}
-}
-
-func TestMergeQueueDetailFinenessRanksByHowMuchIsTold(t *testing.T) {
-	// Arrange: finest first, as the levels nest.
-	nested := []MergeQueueDetail{MergeQueueDetailEveryChange, MergeQueueDetailDeploys, MergeQueueDetailAdvances, MergeQueueDetailDepletes}
-
-	// Act / Assert.
-	for i := 1; i < len(nested); i++ {
-		if nested[i-1].Fineness() >= nested[i].Fineness() {
-			t.Fatalf("%s is not finer than %s", nested[i-1], nested[i])
-		}
-	}
-	if !MergeQueueDetailDeploys.Valid() || MergeQueueDetail(5).Valid() {
-		t.Fatal("deploys must be a declared detail, and the next number none")
-	}
-}
-
-func TestMergeQueueDetailFinenessFailsHardOnAnUndeclaredDetail(t *testing.T) {
-	// Arrange.
-	defer func() {
-		// Assert.
-		if recover() == nil {
-			t.Fatal("Fineness ranked an undeclared detail")
-		}
-	}()
-
-	// Act.
-	MergeQueueDetail(9).Fineness()
-}
-
-func TestADeploysSubscriptionIsStoredAndReadBack(t *testing.T) {
-	// Arrange
-	s, _ := testStore(t)
-	ws := testWorkspace(t, s)
-	want := subscription(ws.ID, EveryRepository, MergeQueueDetailDeploys)
-
-	// Act
-	mustSubscribe(t, s, want)
-
-	// Assert
-	if got := subscriptionsOf(t, s); !reflect.DeepEqual(got, []MergeQueueSubscription{want}) {
-		t.Fatalf("subscriptions = %+v, want the deploys subscription", got)
-	}
-}
-
 func TestEndingASubscriptionAsReadEndsIt(t *testing.T) {
 	// Arrange
 	s, _ := testStore(t)
 	ws := testWorkspace(t, s)
 	repo := queueKey(t)
-	kept := subscription(ws.ID, EveryRepository, MergeQueueDetailAdvances)
-	mustSubscribe(t, s, subscription(ws.ID, repo, MergeQueueDetailDepletes))
+	kept := subscription(ws.ID, EveryRepository)
+	mustSubscribe(t, s, subscription(ws.ID, repo))
 	mustSubscribe(t, s, kept)
 
 	// Act
-	ended, err := s.EndMergeQueueSubscription(context.Background(), subscription(ws.ID, repo, MergeQueueDetailDepletes))
+	ended, err := s.EndMergeQueueSubscription(context.Background(), subscription(ws.ID, repo))
 
 	// Assert
 	if err != nil || !ended {
@@ -474,36 +370,25 @@ func TestEndingASubscriptionAsReadEndsIt(t *testing.T) {
 }
 
 func TestEndingASubscriptionTakenAgainSinceTheReadLeavesTheNewOne(t *testing.T) {
-	tests := []struct {
-		name  string
-		again MergeQueueSubscription
-	}{
-		{name: "a new detail", again: MergeQueueSubscription{Detail: MergeQueueDetailEveryChange, SubscribedAt: instant}},
-		{name: "a new instant", again: MergeQueueSubscription{Detail: MergeQueueDetailDepletes, SubscribedAt: instant.Add(time.Second)}},
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	repo := queueKey(t)
+	read := subscription(ws.ID, repo)
+	mustSubscribe(t, s, read)
+	again := subscription(ws.ID, repo)
+	again.SubscribedAt = instant.Add(time.Second)
+	mustSubscribe(t, s, again)
+
+	// Act
+	ended, err := s.EndMergeQueueSubscription(context.Background(), read)
+
+	// Assert
+	if err != nil || ended {
+		t.Fatalf("EndMergeQueueSubscription = %v, %v; want nothing ended", ended, err)
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Arrange
-			s, _ := testStore(t)
-			ws := testWorkspace(t, s)
-			repo := queueKey(t)
-			read := subscription(ws.ID, repo, MergeQueueDetailDepletes)
-			mustSubscribe(t, s, read)
-			again := tt.again
-			again.Subscriber, again.Repo = ws.ID, repo
-			mustSubscribe(t, s, again)
-
-			// Act
-			ended, err := s.EndMergeQueueSubscription(context.Background(), read)
-
-			// Assert
-			if err != nil || ended {
-				t.Fatalf("EndMergeQueueSubscription = %v, %v; want nothing ended", ended, err)
-			}
-			if got := subscriptionsOf(t, s); !reflect.DeepEqual(got, []MergeQueueSubscription{again}) {
-				t.Fatalf("subscriptions = %+v, want the one taken again", got)
-			}
-		})
+	if got := subscriptionsOf(t, s); !reflect.DeepEqual(got, []MergeQueueSubscription{again}) {
+		t.Fatalf("subscriptions = %+v, want the one taken again", got)
 	}
 }
 
@@ -513,7 +398,7 @@ func TestEndingASubscriptionWhoseScopeCannotBeNormalizedIsRefused(t *testing.T) 
 	ws := testWorkspace(t, s)
 
 	// Act
-	ended, err := s.EndMergeQueueSubscription(context.Background(), subscription(ws.ID, RepoKey("relative/.git"), MergeQueueDetailDepletes))
+	ended, err := s.EndMergeQueueSubscription(context.Background(), subscription(ws.ID, RepoKey("relative/.git")))
 
 	// Assert
 	if err == nil || ended {
@@ -521,7 +406,7 @@ func TestEndingASubscriptionWhoseScopeCannotBeNormalizedIsRefused(t *testing.T) 
 	}
 	record, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "error", Operation: "daemon.wsm.end_merge_queue_subscription",
 		Message: "refused to end a merge queue subscription whose scope cannot be normalized"})
-	if !ok || record.Context["subscriber"] != string(ws.ID) || record.Context["repo"] != "relative/.git" || record.Context["detail"] != "depletes" {
+	if !ok || record.Context["subscriber"] != string(ws.ID) || record.Context["repo"] != "relative/.git" {
 		t.Fatalf("no error record naming the refused subscription: %+v", log.Records())
 	}
 }
@@ -550,12 +435,12 @@ func TestSubscribingAgainAfterADepletionEndedTheSubscriptionTakesANewOne(t *test
 	s, _ := testStore(t)
 	ws := testWorkspace(t, s)
 	repo := queueKey(t)
-	first := subscription(ws.ID, repo, MergeQueueDetailDepletes)
+	first := subscription(ws.ID, repo)
 	mustSubscribe(t, s, first)
 	if ended, err := s.EndMergeQueueSubscription(context.Background(), first); err != nil || !ended {
 		t.Fatalf("EndMergeQueueSubscription = %v, %v; want it ended", ended, err)
 	}
-	again := subscription(ws.ID, repo, MergeQueueDetailAdvances)
+	again := subscription(ws.ID, repo)
 
 	// Act
 	replaced, err := s.SubscribeMergeQueue(context.Background(), again)

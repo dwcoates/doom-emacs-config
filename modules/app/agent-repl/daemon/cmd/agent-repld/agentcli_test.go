@@ -1951,21 +1951,43 @@ func TestResumeTakesNoHardFlag(t *testing.T) {
 	}
 }
 
-// EVERY SUBSCRIPTION DETAIL THE CONTRACT DECLARES HAS A -detail SPELLING, so a
-// level added to the proto is never one the command line cannot ask for.
-func TestEveryMergeQueueDetailHasASpelling(t *testing.T) {
+func (c *cliClient) SubscribeMergeQueue(_ context.Context, req *connect.Request[agentreplv1.SubscribeMergeQueueRequest]) (*connect.Response[agentreplv1.SubscribeMergeQueueResponse], error) {
+	if err := c.record(req.Msg); err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(&agentreplv1.SubscribeMergeQueueResponse{Result: &agentreplv1.SubscribeMergeQueueResponse_Success{Success: &agentreplv1.SubscribeMergeQueueSuccess{
+		Taken: &agentreplv1.SubscribeMergeQueueSuccessTaken{Taken: &agentreplv1.SubscribeMergeQueueSuccessTaken_Subscribed{Subscribed: &agentreplv1.SubscribeMergeQueueSuccessTakenSubscribed{}}}}}}), nil
+}
+
+func TestSubscribeSubscribesTheCallerToEveryQueue(t *testing.T) {
 	// Arrange
-	levels := (&agentreplv1.SubscribeMergeQueueDetail{}).ProtoReflect().Descriptor().Oneofs().ByName("level").Fields()
+	f := newCLIFixture()
 
 	// Act
-	for i := 0; i < levels.Len(); i++ {
-		name := string(levels.Get(i).Name())
-		detail, spelled := queueDetails[name]
+	code := f.run(mergeQueueNoun, "subscribe")
 
-		// Assert
-		if !spelled || detail.ProtoReflect().WhichOneof(detail.ProtoReflect().Descriptor().Oneofs().ByName("level")).Name() != levels.Get(i).Name() {
-			t.Errorf("the detail %s has no -detail spelling that asks for it", name)
-		}
+	// Assert
+	if code != exitSuccess {
+		t.Fatalf("exit %d, stderr %q; want success", code, f.errOut.String())
+	}
+	req := only[*agentreplv1.SubscribeMergeQueueRequest](t, f)
+	if req.GetSubscriber().GetId() != "ws-caller" || req.Repository != nil {
+		t.Fatalf("request = %v, want the caller subscribed to every repository's queue", req)
+	}
+}
+
+// A RETIRED -detail IS REFUSED, NOT IGNORED: an agent following an older
+// skill learns at once that every subscription is now told the same changes.
+func TestSubscribeRefusesTheRetiredDetailFlag(t *testing.T) {
+	// Arrange
+	f := newCLIFixture()
+
+	// Act
+	code := f.run(mergeQueueNoun, "subscribe", "-detail", "advances")
+
+	// Assert
+	if code == exitSuccess || len(f.client.requests) != 0 {
+		t.Fatalf("exit %d, requests %v; want a usage failure sending nothing", code, f.client.requests)
 	}
 }
 

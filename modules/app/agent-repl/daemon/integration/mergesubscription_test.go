@@ -13,16 +13,10 @@ import (
 	"agent-repld/integration/harness"
 )
 
-// subscribeDepletes subscribes WS's agent to every repository's merge queue,
-// told only when a queue runs out of merges.
-func subscribeDepletes(t *testing.T, d *harness.Daemon, ws *workspacev1.WorkspaceRef) *agentreplv1.SubscribeMergeQueueResponse {
+// subscribeEvery subscribes WS's agent to every repository's merge queue.
+func subscribeEvery(t *testing.T, d *harness.Daemon, ws *workspacev1.WorkspaceRef) *agentreplv1.SubscribeMergeQueueResponse {
 	t.Helper()
-	resp, err := d.Client().SubscribeMergeQueue(d.Ctx(), connect.NewRequest(&agentreplv1.SubscribeMergeQueueRequest{
-		Subscriber: ws,
-		Detail: &agentreplv1.SubscribeMergeQueueDetail{
-			Level: &agentreplv1.SubscribeMergeQueueDetail_Depletes{Depletes: &agentreplv1.SubscribeMergeQueueDepletes{}},
-		},
-	}))
+	resp, err := d.Client().SubscribeMergeQueue(d.Ctx(), connect.NewRequest(&agentreplv1.SubscribeMergeQueueRequest{Subscriber: ws}))
 	if err != nil {
 		t.Fatalf("SubscribeMergeQueue = error %v", err)
 	}
@@ -47,7 +41,7 @@ func TestAMergeQueueSubscriptionSurvivesADaemonRestart(t *testing.T) {
 	d := newDaemon(t, harness.Opts{DurableState: true})
 	repo := harness.NewRepo(t)
 	ws := harness.Register(t, d, worktreeOf(t, repo, "subscriber"))
-	if got := subscribeDepletes(t, d, ws); got.GetSuccess() == nil {
+	if got := subscribeEvery(t, d, ws); got.GetSuccess() == nil {
 		t.Fatalf("subscribe = %v, want success", got)
 	}
 	d.Stop()
@@ -74,7 +68,7 @@ func TestClosingAWorkspaceEndsItsMergeQueueSubscription(t *testing.T) {
 	d := newDaemon(t, harness.Opts{})
 	repo := harness.NewRepo(t)
 	ws := harness.Register(t, d, worktreeOf(t, repo, "subscriber"))
-	if got := subscribeDepletes(t, d, ws); got.GetSuccess() == nil {
+	if got := subscribeEvery(t, d, ws); got.GetSuccess() == nil {
 		t.Fatalf("subscribe = %v, want success", got)
 	}
 
@@ -87,7 +81,7 @@ func TestClosingAWorkspaceEndsItsMergeQueueSubscription(t *testing.T) {
 	if got := unsubscribeEvery(t, d, ws); got.GetSuccess().GetNotSubscribed() == nil {
 		t.Fatalf("unsubscribe after the close = %v, want not_subscribed: the close ended it", got)
 	}
-	if got := subscribeDepletes(t, d, ws); got.GetError().GetSubscriberClosed() == nil {
+	if got := subscribeEvery(t, d, ws); got.GetError().GetSubscriberClosed() == nil {
 		t.Fatalf("subscribe while closed = %v, want subscriber_closed", got)
 	}
 }

@@ -3356,8 +3356,10 @@ deletes only the row as read, so one taken again since stands) before it
 submits the depletion's notice, whose `{{lifetime}}` then says it is the
 last. Each end is an INFO `daemon.mergenotice` record; an end that failed is
 an ERROR, and that notice says the subscription stands. Every queue change the orchestrator reports reaches
-`internal/mergenotice`, which tells each subscriber whose detail admits it
-ONCE, through the prompt handler as a deferred prompt of origin
+`internal/mergenotice`, which drops all but the three a subscriber waits on (a
+merge put in line, a merge leaving, a deploy's end: `Admits`) and tells each
+subscriber in the change's scope ONCE, in ONE short line (the queue, the
+change, the queue's state in a few words; never a listing), through the prompt handler as a deferred prompt of origin
 `PROMPT_ORIGIN_MERGE_QUEUE_NOTICE` (the handback's path); the feed draws no
 row and the tray no card for it (`internal/promptorigin`). Every notice told
 is an INFO `daemon.mergenotice` record; every notice not told (unreadable
@@ -3372,8 +3374,8 @@ subscriber therefore holds at most ONE untold notice per queue, recorded
 DURABLY (wsm `merge_queue_untold_notices`, layout 69) because every deploy
 restarts the daemon and an in-memory one was forgotten at each restart, which
 piled the stale notices up again: the next change retires it (`promptqueue` `Supersede`, tombstone `superseded`) and the new
-notice lists every change it said, oldest first, then the queue as it now
-stands. The queue's delivery lock decides a supersession racing a delivery,
+notice says every change it said, oldest first, on the same line, then the
+queue's state as it now stands. The queue's delivery lock decides a supersession racing a delivery,
 so each change is told exactly once; a notice already told (or being
 delivered) is never repeated, and a notice that could not be retired stands
 and is told (ERROR `daemon.mergenotice`).

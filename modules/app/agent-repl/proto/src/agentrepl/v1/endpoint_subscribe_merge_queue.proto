@@ -7,37 +7,52 @@
 // deferred prompt of origin
 // conversation.v1.PromptOrigin.PROMPT_ORIGIN_MERGE_QUEUE_NOTICE, the same
 // path an async merge's handback takes: it waits behind a running turn, wakes
-// an idle agent, and the feed draws no row for it. Every notice names the
-// changes it reports and carries the queue AS IT STANDS AFTER THEM
-// (MergeQueueStatus).
+// an idle agent, and the feed draws no row for it.
+//
+// WHAT IS TOLD: a merge put in line, a merge leaving the queue (landed,
+// failed, or taken off it: evicted, dequeued, or abandoned under its closing
+// workspace or a restart), and a deploy of the daemon's own checkout ending
+// (its build running, or failed), naming the reported landings its build
+// carries. NOTHING ELSE IS TOLD: not a merge starting or moving to a new step,
+// not a reorder, not a pause or a resume, and not a merge a restart cut short
+// being put back in line, which never left it. A notice wakes the subscriber
+// and costs it a full read of its context, and none of those is a change a
+// subscriber waits on. A deploy is the daemon's own, not one queue's, so it is
+// told to every subscription, whatever repository it scopes.
+//
+// A NOTICE IS ONE SHORT LINE: the queue, the change, and how the queue stands
+// after it in a few words (how many merges are in line, the running merge and
+// its step, whether it is paused). It never lists the queue: `merge-queue
+// status` reads it. A notice still waiting behind the subscriber's turn when
+// the next change comes is superseded by one that names every change it
+// named, then the new one, still on one line.
 //
 // SCOPE: a workspace holds AT MOST ONE subscription per scope -- one
 // repository's queue, or every repository's -- and subscribing again in a
-// scope it holds replaces that subscription's detail. A scoped and an
-// unscoped subscription may stand together; a change both admit is delivered
-// once, as one notice.
+// scope it holds stands in for that subscription. A scoped and an unscoped
+// subscription may stand together; a change both admit is delivered once, as
+// one notice.
 //
 // LIFETIME: a subscription ends when its workspace unsubscribes in its scope,
 // when the workspace closes, however it closes (closed, killed, nuked, or
 // closed by its own landing), and when a queue in its scope DEPLETES -- a
 // merge leaves it and no merge is left in line, so nothing runs. Re-opening
 // the workspace does not restore it. A depletion ends every subscription in
-// that queue's scope, the repository's and the every-repository one alike, at
-// every detail: each detail admits the depletion, so its notice is the
-// subscription's LAST and says the subscription has ended. A notice wakes the
-// subscriber and costs it a full read of its context, so a subscription never
-// outlives the work it was taken to watch. Following the queue's next work
-// takes a new subscription; one taken after the last notice stands, even one
-// taken before the daemon finished delivering it.
+// that queue's scope, the repository's and the every-repository one alike, so
+// its notice is the subscription's LAST and says the subscription has ended.
+// Following the queue's next work takes a new subscription; one taken after
+// the last notice stands, even one taken before the daemon finished
+// delivering it. A deploy ending after the depletion is told only to a
+// subscription taken again.
 // It is DURABLE across a daemon restart and a handover: a landing's own deploy
 // restarts the daemon, so a subscription that a restart dropped would end at
 // the very change it exists to report. A change made while no daemon serves
-// is never reported; the next notice's snapshot carries its effect.
+// is never reported; the next notice's few words on the queue carry its
+// effect.
 //
 // NOTHING SLIPS BETWEEN READING AND FOLLOWING. The answer carries the queues
-// in scope as they stand when the subscription is taken (MergeQueueStatus,
-// the same status every notice carries), and every change after that answer
-// is noticed.
+// in scope as they stand when the subscription is taken (MergeQueueStatus),
+// and every change after that answer that a subscription is told is noticed.
 
 syntax = "proto3";
 
@@ -55,52 +70,12 @@ message SubscribeMergeQueueRequest {
   // WHICH repository's queue. UNSET = every repository's queue, including a
   // repository whose queue is empty or does not exist yet.
   optional workspace.v1.RepositoryRef repository = 2;
-  // Which changes the subscriber is told about.
-  SubscribeMergeQueueDetail detail = 3;
+  // Retired: a subscription once chose how much of a queue's change it was
+  // told (every change, advances, deploys or depletes). Every subscription is
+  // now told the same three changes (WHAT IS TOLD).
+  reserved 3;
+  reserved "detail";
 }
-// How much of a queue's change a subscription reports.
-message SubscribeMergeQueueDetail {
-  // THE ARM IS THE LEVEL. The levels nest -- every depletion is an advance,
-  // every advance is told at deploys, and all of it is a change -- so a
-  // subscriber picks the coarsest one that still wakes it for what it waits
-  // on.
-  oneof level {
-    // Every change of the queue.
-    SubscribeMergeQueueEveryChange every_change = 1;
-    // Only a merge leaving the queue.
-    SubscribeMergeQueueAdvances advances = 2;
-    // Only the queue running out of merges.
-    SubscribeMergeQueueDepletes depletes = 3;
-    // A merge leaving the queue, and each deploy of the daemon's own
-    // checkout ending.
-    SubscribeMergeQueueDeploys deploys = 4;
-  }
-}
-// EVERY CHANGE: a merge put in line, started, moved to a new step, landed,
-// failed, or taken off the queue (evicted, dequeued, or abandoned under its
-// closing workspace or a restart); the queue's order changed by a move; the
-// queue paused or resumed; and a deploy of the daemon's own checkout ended. Several changes made at once arrive as one
-// notice per change, each carrying the queue as it stood after its own.
-message SubscribeMergeQueueEveryChange {}
-// ADVANCES: a merge leaves the queue -- landed, failed, or taken off it. A
-// merge's start, its steps, a reorder and a pause are not reported.
-message SubscribeMergeQueueAdvances {}
-// DEPLOYS: a merge leaves the queue (as ADVANCES), and a deploy of the
-// daemon's own checkout ends, until a queue in scope depletes (LIFETIME): a
-// deploy ending after the depletion that ended the subscription is told only
-// to a subscription taken again -- whichever daemon ends it, the one that stays
-// or the successor it handed over to, and a fresh boot on a new build --
-// once its build is running, shims judged, or once it failed. The notice
-// names the reported landings its build carries. A deploy is the daemon's
-// own, not one queue's, so it is told to every subscription at this level
-// (or every_change), whatever repository it scopes.
-message SubscribeMergeQueueDeploys {}
-// DEPLETES: a merge leaves the queue and no merge is left in line, reported
-// once per emptying. That one notice is the subscription's last: the
-// depletion ends it (LIFETIME). A queue that empties by a removal of a merge never put
-// in line is not reported, since nothing left the line.
-message SubscribeMergeQueueDepletes {}
-
 // THE ARM IS THE OUTCOME.
 message SubscribeMergeQueueResponse {
   oneof result {
@@ -110,7 +85,8 @@ message SubscribeMergeQueueResponse {
 }
 // Subscribed, with the queues in scope as they stand now.
 message SubscribeMergeQueueSuccess {
-  // Whether the subscription is new or replaced one already held in scope.
+  // Whether the subscription is new or stands in for one already held in
+  // scope.
   SubscribeMergeQueueSuccessTaken taken = 1;
   // The queues in scope when the subscription was taken, one per repository.
   repeated MergeQueueStatus queues = 2;
@@ -121,7 +97,8 @@ message SubscribeMergeQueueSuccessTaken {
   oneof taken {
     // The subscriber held no subscription in this scope.
     SubscribeMergeQueueSuccessTakenSubscribed subscribed = 1;
-    // The subscriber's subscription in this scope now has this detail.
+    // The subscriber already held a subscription in this scope; it stands,
+    // taken anew.
     SubscribeMergeQueueSuccessTakenResubscribed resubscribed = 2;
   }
 }

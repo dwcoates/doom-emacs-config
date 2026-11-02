@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"fmt"
 
 	"connectrpc.com/connect"
 
@@ -12,7 +11,6 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/merge"
 	"agent-repld/internal/workspace"
-	"agent-repld/internal/wsm"
 )
 
 // The merge queue's agent-facing reads and follows: its status, and a
@@ -59,7 +57,7 @@ func (s *server) SubscribeMergeQueue(
 	if done {
 		return answer(resp, refused)
 	}
-	replaced, err := s.deps.Merge.Subscribe(ctx, subject.Record.ID, scopeOf(req.Msg.Repository), subscriptionDetailOf(req.Msg.GetDetail()))
+	replaced, err := s.deps.Merge.Subscribe(ctx, subject.Record.ID, scopeOf(req.Msg.Repository))
 	if err != nil {
 		return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
 	}
@@ -169,22 +167,4 @@ func mergeQueueStatusOf(status merge.QueueStatus) *agentreplv1.MergeQueueStatus 
 		})
 	}
 	return out
-}
-
-// subscriptionDetailOf renders a subscription's detail arm as the store's
-// detail. validateSubscribeMergeQueueRequest has refused a detail with no
-// arm, so an arm this switch does not know is a contract arm added without
-// its mapping, and fails hard.
-func subscriptionDetailOf(detail *agentreplv1.SubscribeMergeQueueDetail) wsm.MergeQueueDetail {
-	switch detail.GetLevel().(type) {
-	case *agentreplv1.SubscribeMergeQueueDetail_EveryChange:
-		return wsm.MergeQueueDetailEveryChange
-	case *agentreplv1.SubscribeMergeQueueDetail_Advances:
-		return wsm.MergeQueueDetailAdvances
-	case *agentreplv1.SubscribeMergeQueueDetail_Depletes:
-		return wsm.MergeQueueDetailDepletes
-	case *agentreplv1.SubscribeMergeQueueDetail_Deploys:
-		return wsm.MergeQueueDetailDeploys
-	}
-	panic(fmt.Sprintf("server: a merge queue subscription detail %T has no store detail", detail.GetLevel()))
 }

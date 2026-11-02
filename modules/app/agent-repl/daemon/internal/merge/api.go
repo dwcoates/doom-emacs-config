@@ -171,11 +171,11 @@ type Orchestrator interface {
 	// repository's slot, and the call returns once that is done.
 	Evict(ctx context.Context, ws ids.WorkspaceID) error
 	// Subscribe records SUBSCRIBER's subscription to the queue of the
-	// repository SCOPE names (every repository's for nil) at DETAIL,
-	// replacing the detail of the one it holds in that scope, and answers
-	// whether it replaced one. A closed subscriber is refused
-	// (ArmSubscriberClosed), as is an unknown repository.
-	Subscribe(ctx context.Context, subscriber ids.WorkspaceID, scope *RepositoryScope, detail wsm.MergeQueueDetail) (bool, error)
+	// repository SCOPE names (every repository's for nil), standing in for
+	// the one it holds in that scope, and answers whether it replaced one. A
+	// closed subscriber is refused (ArmSubscriberClosed), as is an unknown
+	// repository.
+	Subscribe(ctx context.Context, subscriber ids.WorkspaceID, scope *RepositoryScope) (bool, error)
 	// LeaseChanged is told each lease change of a workspace: a queue front
 	// that waited for that workspace's lease is offered to its queue again.
 	LeaseChanged(ws ids.WorkspaceID)

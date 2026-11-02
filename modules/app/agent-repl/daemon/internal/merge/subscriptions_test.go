@@ -625,7 +625,7 @@ func TestSubscribeRecordsTheSubscriptionInItsScope(t *testing.T) {
 			h := newHarness(t)
 
 			// Act.
-			replaced, err := h.o.Subscribe(context.Background(), theWorkspace, tt.scope, wsm.MergeQueueDetailAdvances)
+			replaced, err := h.o.Subscribe(context.Background(), theWorkspace, tt.scope)
 
 			// Assert.
 			if err != nil || replaced {
@@ -636,11 +636,11 @@ func TestSubscribeRecordsTheSubscriptionInItsScope(t *testing.T) {
 			}
 			got := h.db.subscriptions[0]
 			got.SubscribedAt = time.Time{}
-			if want := (wsm.MergeQueueSubscription{Subscriber: theWorkspace, Repo: tt.wantRepo(h), Detail: wsm.MergeQueueDetailAdvances}); got != want {
+			if want := (wsm.MergeQueueSubscription{Subscriber: theWorkspace, Repo: tt.wantRepo(h)}); got != want {
 				t.Fatalf("subscription = %+v, want %+v", got, want)
 			}
 			if !loggedLike(h, logLike{level: "info", op: "daemon.merge.subscribe", text: "subscribed the workspace's agent",
-				context: map[string]string{"detail": "advances", "replaced": "false"}}) {
+				context: map[string]string{"replaced": "false"}}) {
 				t.Fatalf("no record of the subscription: %+v", h.logs.Records())
 			}
 		})
@@ -650,19 +650,19 @@ func TestSubscribeRecordsTheSubscriptionInItsScope(t *testing.T) {
 func TestSubscribingAgainAnswersReplaced(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
-	if _, err := h.o.Subscribe(context.Background(), theWorkspace, nil, wsm.MergeQueueDetailAdvances); err != nil {
+	if _, err := h.o.Subscribe(context.Background(), theWorkspace, nil); err != nil {
 		t.Fatalf("Subscribe: %v", err)
 	}
 
 	// Act.
-	replaced, err := h.o.Subscribe(context.Background(), theWorkspace, nil, wsm.MergeQueueDetailDepletes)
+	replaced, err := h.o.Subscribe(context.Background(), theWorkspace, nil)
 
 	// Assert.
 	if err != nil || !replaced {
 		t.Fatalf("Subscribe = %v, %v; want the standing subscription replaced", replaced, err)
 	}
-	if len(h.db.subscriptions) != 1 || h.db.subscriptions[0].Detail != wsm.MergeQueueDetailDepletes {
-		t.Fatalf("subscriptions = %+v, want one at depletes", h.db.subscriptions)
+	if len(h.db.subscriptions) != 1 {
+		t.Fatalf("subscriptions = %+v, want the one taken again", h.db.subscriptions)
 	}
 }
 
@@ -671,7 +671,7 @@ func TestSubscribeRefusesAnUnknownRepository(t *testing.T) {
 	h := newHarness(t)
 
 	// Act.
-	_, err := h.o.Subscribe(context.Background(), theWorkspace, &RepositoryScope{Dir: "/no/such/repository"}, wsm.MergeQueueDetailAdvances)
+	_, err := h.o.Subscribe(context.Background(), theWorkspace, &RepositoryScope{Dir: "/no/such/repository"})
 
 	// Assert.
 	if refusal, ok := Refused(err); !ok || refusal.Arm != ArmUnknownRepository {
@@ -691,7 +691,7 @@ func TestSubscribeRefusesAClosedSubscriber(t *testing.T) {
 	h.db.subscribeErr = wsm.ErrSubscriberClosed
 
 	// Act.
-	_, err := h.o.Subscribe(context.Background(), theWorkspace, nil, wsm.MergeQueueDetailAdvances)
+	_, err := h.o.Subscribe(context.Background(), theWorkspace, nil)
 
 	// Assert.
 	if refusal, ok := Refused(err); !ok || refusal.Arm != ArmSubscriberClosed || refusal.Workspace != theWorkspace {
@@ -709,7 +709,7 @@ func TestSubscribeRecordsAStoreFailure(t *testing.T) {
 	h.db.subscribeErr = errors.New("the store is gone")
 
 	// Act.
-	_, err := h.o.Subscribe(context.Background(), theWorkspace, nil, wsm.MergeQueueDetailAdvances)
+	_, err := h.o.Subscribe(context.Background(), theWorkspace, nil)
 
 	// Assert.
 	if !errors.Is(err, h.db.subscribeErr) {
@@ -724,7 +724,7 @@ func TestSubscribeRecordsAStoreFailure(t *testing.T) {
 func TestUnsubscribeEndsTheSubscriptionInItsScope(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
-	if _, err := h.o.Subscribe(context.Background(), theWorkspace, nil, wsm.MergeQueueDetailAdvances); err != nil {
+	if _, err := h.o.Subscribe(context.Background(), theWorkspace, nil); err != nil {
 		t.Fatalf("Subscribe: %v", err)
 	}
 
