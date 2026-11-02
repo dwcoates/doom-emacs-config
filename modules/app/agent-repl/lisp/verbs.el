@@ -2915,7 +2915,8 @@ to choose and every model is picked on purpose.
 
 A login no session has served a catalog for has no models to offer: the
 picker still opens, says so in its question, and accepts only a blank
-answer, the daemon\='s default, which every login can run."
+answer, the daemon\='s default, which every login can run.  Every model
+question opens with \"Model\", whatever the catalog holds."
   (let* ((answer (agent-repl-verbs--creation-models repository))
          (config-dir (abbreviate-file-name (plist-get answer :config-dir)))
          (catalog (plist-get answer :catalog))
@@ -2929,7 +2930,7 @@ answer, the daemon\='s default, which every login can run."
                   (completing-read
                    (if known
                        (format "Model for %s (blank = daemon default): " config-dir)
-                     (format "No models known yet for %s (blank = daemon default): " config-dir))
+                     (format "Model for %s (none known yet; blank = daemon default): " config-dir))
                    (agent-repl-verbs--model-completion-table options)
                    nil t))))
       (unless (string-empty-p value) value))))

@@ -4815,7 +4815,7 @@ that answers or signals.  INFO and ERROR records land in
                          seen-require-match require-match)
                    "")))
         (should-not (agent-repl-verbs--read-model (agent-repl-test-verbs--repo-ref)))
-        (should (string-match-p "\\`No models known yet for .*\\.claude-work (blank = daemon default): \\'" seen-prompt))
+        (should (string-match-p "\\`Model for .*\\.claude-work (none known yet; blank = daemon default): \\'" seen-prompt))
         (should-not seen-candidates)
         (should (eq seen-require-match t))
         (should (cl-some (lambda (m) (string-match-p "\\`elisp.verbs.read-model-offers-nothing config-dir=.*\\.claude-work cause=catalog-unknown" m))
