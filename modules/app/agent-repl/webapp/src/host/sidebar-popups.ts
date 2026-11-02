@@ -39,6 +39,7 @@ import { pageMutationObserver, queryAll } from "../dom.js";
 import { log } from "../log.js";
 import { scrollKept } from "../scroll.js";
 import { clampBeside, type Rect } from "../topbar/clamp.js";
+import { applyPlacement, viewportOf } from "../placement.js";
 import { detailsEntry, placeDetailsPanel, wireDetailsEntry } from "../sidebar/detail-more.js";
 
 /** The channel both documents open, on the host origin. */
@@ -222,19 +223,14 @@ export function installPopupLayer(env: PopupLayerEnv): PopupLayer {
     last = message;
     // THE ROW'S HEIGHT IN THE HOST is its height in the sidebar plus how far
     // below the host's top the sidebar's window starts, which Emacs measures.
-    const placement = clampBeside(hostAnchor(message.top + offset, message.bottom + offset), measure(drawn), {
-      width: win.innerWidth,
-      height: win.innerHeight,
-    });
-    drawn.style.left = `${placement.left}px`;
-    drawn.style.top = `${placement.top}px`;
-    drawn.style.maxHeight = `${placement.maxHeight}px`;
+    const placement = clampBeside(hostAnchor(message.top + offset, message.bottom + offset), measure(drawn), viewportOf(win));
+    applyPlacement(drawn, placement);
     drawn.addEventListener("mouseenter", entered);
     drawn.addEventListener("mouseleave", left);
     // THE DETAILS POPUP STANDS BESIDE THIS COPY as the copy stands beside the
     // row: placed by the same `clampBeside`, against this copy's right edge.
     const placeDetails = (): void => {
-      placeDetailsPanel(drawn, measure, { width: win.innerWidth, height: win.innerHeight });
+      placeDetailsPanel(drawn, measure, viewportOf(win));
     };
     wireDetailsEntry(drawn, placeDetails);
     const entry = detailsEntry(drawn);

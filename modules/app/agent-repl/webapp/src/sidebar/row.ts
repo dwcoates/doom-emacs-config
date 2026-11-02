@@ -82,7 +82,8 @@ import { drawTabNumberSlot } from "./tab-numbers.js";
 import { toneClass } from "../vocab.js";
 import { applyNameTint, nameTint } from "./name-tint.js";
 import { guardMalformed, guardMalformedNow } from "../rpc/guard.js";
-import { clampBeside, type Rect, type Viewport } from "../topbar/clamp.js";
+import { clampBeside, type Rect } from "../topbar/clamp.js";
+import { applyPlacement, viewportOf } from "../placement.js";
 import {
   closeDetails,
   detailsPanel,
@@ -938,7 +939,7 @@ function installHoverPanel(
     hover.leave(workspaceId, "panel");
   });
   wireDetailsEntry(detail, () => {
-    placeDetailsPanel(detail, measureBox, windowViewport());
+    placeDetailsPanel(detail, measureBox, viewportOf());
   });
   line.addEventListener("focusin", () => {
     hover.focusIn(workspaceId);
@@ -966,8 +967,6 @@ export function paintRowDetail(ws: HTMLElement, open: boolean): void {
 /** An element's laid-out box. */
 const measureBox = (el: Element): Rect => el.getBoundingClientRect();
 
-/** This page's window, as the placements read it. */
-const windowViewport = (): Viewport => ({ width: window.innerWidth, height: window.innerHeight });
 
 /**
  * Where an OPEN row's detail panel lands.
@@ -998,7 +997,7 @@ export function placeRowDetail(ws: HTMLElement): void {
   // Measured at its natural height: a cap the last placement applied would
   // otherwise hold a panel that moved up the window at its old, shorter size.
   detail.style.maxHeight = "";
-  const placement = clampBeside(line.getBoundingClientRect(), detail.getBoundingClientRect(), windowViewport());
+  const placement = clampBeside(line.getBoundingClientRect(), detail.getBoundingClientRect(), viewportOf());
   log.debug("placing a row's detail panel", {
     operation: "sidebar.row.detail-place",
     verbosity: "verbose",
@@ -1009,13 +1008,9 @@ export function placeRowDetail(ws: HTMLElement): void {
       max_height: placement.maxHeight,
     },
   });
-  // Viewport coordinates, applied verbatim: a fixed box is positioned against
-  // the window, so there is no host box to translate them back into.
-  detail.style.left = `${placement.left}px`;
-  detail.style.top = `${placement.top}px`;
-  detail.style.maxHeight = `${placement.maxHeight}px`;
+  applyPlacement(detail, placement);
   // Its details popup, when open, stands beside it wherever it now stands.
-  placeDetailsPanel(detail, measureBox, windowViewport());
+  placeDetailsPanel(detail, measureBox, viewportOf());
 }
 
 /**

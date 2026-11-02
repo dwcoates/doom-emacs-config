@@ -20,6 +20,7 @@ import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { log } from "../log.js";
 import { nextFrame } from "../frame.js";
 import { clampReveal } from "../topbar/clamp.js";
+import { applyPlacement, viewportOf } from "../placement.js";
 import { GetMemoryOverviewResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_get_memory_overview_pb";
 import { GetWorkspaceMemoryResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_get_workspace_memory_pb";
 import type {
@@ -323,13 +324,7 @@ export function installVersionHover(
     fillNote(panel, "measuring…");
     panel.classList.add("open");
     const place = (): void => {
-      const at = clampReveal(version.getBoundingClientRect(), panel.getBoundingClientRect(), {
-        width: window.innerWidth,
-        height: window.innerHeight,
-      });
-      panel.style.left = `${at.left}px`;
-      panel.style.top = `${at.top}px`;
-      panel.style.maxHeight = `${at.maxHeight}px`;
+      applyPlacement(panel, clampReveal(version.getBoundingClientRect(), panel.getBoundingClientRect(), viewportOf()));
     };
     place();
     stop = refreshWhileOpen(ctx, () => {

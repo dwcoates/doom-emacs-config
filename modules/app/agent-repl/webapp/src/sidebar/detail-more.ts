@@ -18,6 +18,7 @@
  * leaves the panel, which closes both.
  */
 import { log } from "../log.js";
+import { applyPlacement } from "../placement.js";
 import { clampBeside, type Rect, type RevealPlacement, type Viewport } from "../topbar/clamp.js";
 
 /** The class of a row panel's "details" entry. */
@@ -143,10 +144,7 @@ export function placeDetailsPanel(detail: HTMLElement, measure: (el: Element) =>
   const sub = entryPanel(entry);
   // Measured at its natural height, as the row panel is.
   sub.style.maxHeight = "";
-  const at = detailsPlacement(measure(detail), measure(entry), measure(sub), viewport);
-  sub.style.left = `${at.left}px`;
-  sub.style.top = `${at.top}px`;
-  sub.style.maxHeight = `${at.maxHeight}px`;
+  applyPlacement(sub, detailsPlacement(measure(detail), measure(entry), measure(sub), viewport));
 }
 
 /** Open DETAIL's details popup (a drawn entry only) and place it with PLACE. */

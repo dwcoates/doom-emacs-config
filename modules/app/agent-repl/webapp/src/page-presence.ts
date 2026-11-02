@@ -22,6 +22,7 @@ import { log } from "./log.js";
 import { pagePresence, type Presence } from "./presence.js";
 import { nextFrame } from "./frame.js";
 import { pageSize } from "./page-size.js";
+import { viewportOf } from "./placement.js";
 
 /** What the presence log needs from its environment, injectable for tests. */
 export interface PagePresenceEnv {
@@ -57,7 +58,7 @@ export function installPagePresenceLog(env: PagePresenceEnv = pagePresenceEnv())
   const { doc, win, now, frame } = env;
   const presence = env.presence ?? pagePresence();
   let lastEventAt = now();
-  let size = { width: win.innerWidth, height: win.innerHeight };
+  let size = viewportOf(win);
   let resizePending = false;
 
   const sinceLast = (): number => {
@@ -76,8 +77,7 @@ export function installPagePresenceLog(env: PagePresenceEnv = pagePresenceEnv())
           context: {
             cause,
             paint_ms: Math.round(now() - started),
-            width: win.innerWidth,
-            height: win.innerHeight,
+            ...viewportOf(win),
             ...pageSize(doc),
           },
         });
@@ -113,7 +113,7 @@ export function installPagePresenceLog(env: PagePresenceEnv = pagePresenceEnv())
     resizePending = true;
     frame(() => {
       resizePending = false;
-      const next = { width: win.innerWidth, height: win.innerHeight };
+      const next = viewportOf(win);
       if (next.width === size.width && next.height === size.height) return;
       const before = size;
       size = next;
