@@ -168,6 +168,10 @@ type fakeDB struct {
 	sessions map[ids.WorkspaceID]wsm.Session
 	// sessionErr fails every session read.
 	sessionErr error
+	// creationJobs are the creation jobs CreationJob answers, by workspace;
+	// creationJobErr fails every creation-job read.
+	creationJobs   map[ids.WorkspaceID]wsm.CreationJob
+	creationJobErr error
 	// leases are the occupancy leases in force, by workspace.
 	leases map[ids.WorkspaceID]wsm.Lease
 	// leaseErr fails every lease read.
@@ -197,6 +201,14 @@ func (f *fakeDB) Session(_ context.Context, id ids.WorkspaceID) (wsm.Session, bo
 	}
 	session, ok := f.sessions[id]
 	return session, ok, nil
+}
+
+func (f *fakeDB) CreationJob(_ context.Context, id ids.WorkspaceID) (wsm.CreationJob, bool, error) {
+	if f.creationJobErr != nil {
+		return wsm.CreationJob{}, false, f.creationJobErr
+	}
+	job, ok := f.creationJobs[id]
+	return job, ok, nil
 }
 
 func (f *fakeDB) Lease(_ context.Context, id ids.WorkspaceID) (wsm.Lease, bool, error) {

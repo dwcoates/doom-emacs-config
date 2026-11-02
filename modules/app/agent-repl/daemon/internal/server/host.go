@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
@@ -13,6 +14,7 @@ import (
 	"agent-repld/internal/ids"
 	"agent-repld/internal/publish"
 	"agent-repld/internal/replyquote"
+	"agent-repld/internal/resolve/feed"
 	"agent-repld/internal/wsm"
 )
 
@@ -228,6 +230,14 @@ func (s *server) composeHostWorkspace(
 	// restated (composer_entries.go); always set, empty while every reported
 	// label targets a response.
 	view.ComposerEntries = &agentreplv1.HostComposerEntries{Unanswered: s.composerUnansweredOf(ws)}
+
+	// THE PROMPT THE WORKSPACE WAS CREATED WITH, as its creator wrote it: the
+	// creation job keeps the undecorated words, whoever made the create.
+	initial, ok := s.hostInitialPrompt(ctx, log, ws)
+	if !ok {
+		return nil, false
+	}
+	view.InitialPrompt = initial
 
 	facts, live := s.deps.SessionFacts.HostSessionFacts(ws)
 	switch {
@@ -642,6 +652,32 @@ func faultEvidence(f wsm.Fault, key string) string {
 // hostNaming composes what Emacs names buffers from. Both fields are OPTIONAL
 // and stay unset rather than blank: the slug is unset until the daemon has
 // derived one, and the title until the vendor supplies one.
+// hostInitialPrompt answers the prompt ws was created with, nil when it was
+// created without one or has no creation job (a registered directory, the
+// main workspace). It reports false when the creation job cannot be read: the
+// view is then withheld rather than published with the prompt missing.
+func (s *server) hostInitialPrompt(
+	ctx context.Context,
+	log dlog.Logger,
+	ws ids.WorkspaceID,
+) (*conversationv1.UserSaid, bool) {
+	const op = "daemon.server.compose_host_workspace"
+	job, found, err := s.deps.DB.CreationJob(ctx, ws)
+	if err != nil {
+		if ctxend.Is(err) {
+			log.Info(op, "the host view was not composed; the stream's context was cancelled",
+				dlog.Context{"stream": "WatchHostWorkspace", "cause": err.Error()})
+			return nil, false
+		}
+		log.Error(op, "could not read the creation job", dlog.Context{"cause": err.Error()})
+		return nil, false
+	}
+	if !found || strings.TrimSpace(job.InitialPrompt) == "" {
+		return nil, true
+	}
+	return feed.SaidText(job.InitialPrompt), true
+}
+
 func hostNaming(record wsm.Workspace) *agentreplv1.HostWorkspaceNaming {
 	out := &agentreplv1.HostWorkspaceNaming{}
 	if record.Name != "" {
