@@ -13,7 +13,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -549,24 +548,3 @@ func wlLiveGroupMembers(pgid int) ([]int, error) {
 // full stream is already in the test log via t.Logf; this is the excerpt that
 // rides the failure message itself.
 const wlTailLines = 40
-
-// wlAwaitPidFile reads the pid the stand-in child wrote, polling a file the
-// child creates rather than sleeping for a fixed guess at its startup.
-func wlAwaitPidFile(t *testing.T, path string) int {
-	t.Helper()
-	deadline := time.Now().Add(DefaultTimeout)
-	for {
-		body, err := os.ReadFile(path)
-		if err == nil {
-			if pid, convErr := strconv.Atoi(strings.TrimSpace(string(body))); convErr == nil && pid > 0 {
-				return pid
-			}
-		} else if !os.IsNotExist(err) {
-			t.Fatalf("read %s: %v", path, err)
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("the stand-in child never wrote its grandchild's pid to %s within %s", path, DefaultTimeout)
-		}
-		time.Sleep(PollInterval)
-	}
-}

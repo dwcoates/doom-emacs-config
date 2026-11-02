@@ -2,10 +2,8 @@ package stack
 
 import (
 	"agent-repld/integration/harness"
-	"errors"
 	"fmt"
 	"os/exec"
-	"path/filepath"
 	"syscall"
 	"testing"
 	"time"
@@ -82,19 +80,24 @@ func TestWebappLayerParticipantHoldOutlivesTheWaitBound(t *testing.T) {
 // group-wide kill can reach the grandchild it left behind.
 func TestWlKillTreeReapsAGrandchild(t *testing.T) {
 	t.Parallel()
-	// Arrange: a shell that spawns a long-lived grandchild, writes its pid,
+	// Arrange: a shell that spawns a long-lived grandchild, reports its pid,
 	// and waits — the npm/vitest shape.
-	pidFile := filepath.Join(t.TempDir(), "grandchild.pid")
+	report := reportFIFO(t, t.TempDir(), "grandchild.pid")
 	cmd := exec.Command("/bin/sh", "-c",
-		fmt.Sprintf("sleep 600 & echo $! > %s; wait", pidFile))
+		fmt.Sprintf("sleep 600 & echo $! > %s; wait", report))
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start the stand-in child: %v", err)
 	}
 	child := &wlChild{t: t, cmd: cmd, done: make(chan error, 1)}
-	go func() { child.done <- cmd.Wait() }()
+	exited := make(chan struct{})
+	go func() {
+		err := cmd.Wait()
+		close(exited)
+		child.done <- err
+	}()
 
-	grandchild := wlAwaitPidFile(t, pidFile)
+	grandchild := readReportedPID(t, report, exited)
 	if err := syscall.Kill(grandchild, 0); err != nil {
 		t.Fatalf("the grandchild %d is not running before the kill: %v", grandchild, err)
 	}
@@ -103,15 +106,8 @@ func TestWlKillTreeReapsAGrandchild(t *testing.T) {
 	child.killTree()
 
 	// Assert: the grandchild is gone, not merely its parent.
-	deadline := time.Now().Add(DefaultTimeout)
-	for {
-		if err := syscall.Kill(grandchild, 0); errors.Is(err, syscall.ESRCH) {
-			return
-		}
-		if time.Now().After(deadline) {
-			_ = syscall.Kill(grandchild, syscall.SIGKILL)
-			t.Fatalf("the grandchild %d survived killTree for %s; the kill reached the parent only", grandchild, DefaultTimeout)
-		}
-		time.Sleep(PollInterval)
+	if err := awaitPIDGone(grandchild, DefaultTimeout); err != nil {
+		_ = syscall.Kill(grandchild, syscall.SIGKILL)
+		t.Fatalf("the grandchild survived killTree; the kill reached the parent only: %v", err)
 	}
 }
