@@ -1097,18 +1097,11 @@ an empty input leaves the recency order, any other puts MAIN first
 
 (defun agent-repl--switch-read (prompt table main)
   "Read a workspace name from TABLE at PROMPT, MAIN topping the matches.
-When ivy has defined its match sorters, the sorter is bound to
-`agent-repl--switch-ivy-sort' for the read; every other UI reads TABLE's
-own display sort (`agent-repl--switch-table').  Binding the variable
-before ivy defines it would leave it void once the read returns, so its
-being bound is the test."
-  (defvar ivy-sort-matches-functions-alist)
-  (if (boundp 'ivy-sort-matches-functions-alist)
-      (let ((ivy-sort-matches-functions-alist
-             (cons (cons t (agent-repl--switch-ivy-sort main))
-                   ivy-sort-matches-functions-alist)))
-        (completing-read prompt table nil t))
-    (completing-read prompt table nil t)))
+Under ivy the sorter is `agent-repl--switch-ivy-sort' for the read
+\(`agent-repl--completing-read-under-ivy'); every other UI reads TABLE's
+own display sort (`agent-repl--switch-table')."
+  (agent-repl--completing-read-under-ivy
+   'ivy-sort-matches-functions-alist (agent-repl--switch-ivy-sort main) prompt table))
 
 (defun agent-repl--switch-to-known-workspace (&optional all)
   "Pick a workspace and stand on it, opening it first if it is not here.
