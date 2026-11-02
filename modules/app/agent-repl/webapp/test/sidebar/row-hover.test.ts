@@ -223,6 +223,40 @@ describe("the row hover gesture", () => {
       expect(isOpen(a)).toBe(false);
     });
 
+    it("opens at once for a pointer reaching the ⋯, leaving no timer", () => {
+      // ARRANGE
+      const a = draw("ws-1");
+      hover.enter("ws-1", "line");
+      // ACT
+      hover.enter("ws-1", "more");
+      // ASSERT
+      expect([isOpen(a), vi.getTimerCount()]).toEqual([true, 0]);
+    });
+
+    it("keeps the panel open while the pointer moves from the ⋯ to the rest of the line", () => {
+      // ARRANGE
+      const a = draw("ws-1");
+      hover.enter("ws-1", "line");
+      hover.enter("ws-1", "more");
+      // ACT
+      hover.leave("ws-1", "more");
+      vi.runAllTimers();
+      // ASSERT
+      expect(isOpen(a)).toBe(true);
+    });
+
+    it("opens nothing for a pointer reaching the ⋯ after a dismiss", () => {
+      // ARRANGE
+      const a = draw("ws-1");
+      hover.dismiss("the page lost focus");
+      // ACT
+      hover.enter("ws-1", "line");
+      hover.enter("ws-1", "more");
+      vi.runAllTimers();
+      // ASSERT
+      expect(isOpen(a)).toBe(false);
+    });
+
     it("opens nothing for a pointer reaching the duration after a dismiss", () => {
       // ARRANGE
       const a = draw("ws-1");
@@ -706,6 +740,18 @@ describe("the row hover gesture", () => {
       expect(isOpen(a)).toBe(true);
     });
 
+    it("opens at once the panel of the ⋯ the pointer rests on when the user is back", () => {
+      // ARRANGE
+      const a = draw("ws-1");
+      hover.dismiss("the page lost focus");
+      hover.enter("ws-1", "line");
+      hover.enter("ws-1", "more");
+      // ACT
+      hover.resume();
+      // ASSERT
+      expect(isOpen(a)).toBe(true);
+    });
+
     it("cancels an open already pending", () => {
       // ARRANGE
       const a = draw("ws-1");
@@ -792,6 +838,7 @@ describe("the row hover gesture with a popup mirror", () => {
       show: (key) => void told.push(`show:${key}`),
       place: (key) => void told.push(`place:${key}`),
       hide: (key) => void told.push(`hide:${key}`),
+      onDismissed: () => () => undefined,
       dispose: () => undefined,
     };
   }
@@ -854,6 +901,7 @@ describe("the row hover gesture with a popup mirror", () => {
       show: (_key, detail) => void handed.push(detail),
       place: () => undefined,
       hide: () => undefined,
+      onDismissed: () => () => undefined,
       dispose: () => undefined,
     });
     hover.drawn("ws-a", hidden);

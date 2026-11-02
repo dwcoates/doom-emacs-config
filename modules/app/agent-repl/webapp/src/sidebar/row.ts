@@ -355,7 +355,8 @@ export function drawRosterRow(
   const duration = drawRosterRowWhen(when, sc, `${path}.when`);
   line.appendChild(duration);
   const target: VerbTarget = { sc, workspace, name, kind: "workspace" };
-  line.appendChild(drawMenuControl(ws, target));
+  const more = drawMenuControl(ws, target);
+  line.appendChild(more);
   ws.appendChild(line);
   // THE MENU IS ALWAYS DRAWN, hidden until it is asked for. Building it lazily
   // made the row's verbs exist only after a click, which is a different DOM
@@ -374,7 +375,7 @@ export function drawRosterRow(
   ws.appendChild(detail);
   // The hover wiring listens on the panel too, so the pointer can travel from
   // the row into it without it closing.
-  installHoverPanel(ws, line, duration, detail, sc, workspace.id);
+  installHoverPanel(ws, line, { duration, more }, detail, sc, workspace.id);
 
   appendRowKids(ws, children, familyPath, (child, childPath) => drawRosterFamily(child, sc, childPath, place));
   return ws;
@@ -905,7 +906,7 @@ export function drawStatusMark(arm: RosterStatusCase, path: string, markers: Row
  * 2026-10-31, which retired the duration field as the only trigger of
  * 2026-10-14). The panel opens once the pointer has rested anywhere on the
  * line for `HOVER_OPEN_DELAY_MS`, at once when it reaches the duration
- * field, and the pointer leaving the line for anywhere but the panel closes
+ * field or the "⋯" control, and the pointer leaving the line for anywhere but the panel closes
  * it.
  *
  * The keyboard gets the same panel through `focusin`/`focusout`.
@@ -913,7 +914,7 @@ export function drawStatusMark(arm: RosterStatusCase, path: string, markers: Row
 function installHoverPanel(
   ws: HTMLElement,
   line: HTMLElement,
-  duration: HTMLElement,
+  instant: { duration: HTMLElement; more: HTMLElement },
   detail: HTMLElement,
   sc: SidebarContext,
   workspaceId: string,
@@ -926,12 +927,14 @@ function installHoverPanel(
   line.addEventListener("mouseleave", () => {
     hover.leave(workspaceId, "line");
   });
-  duration.addEventListener("mouseenter", () => {
-    hover.enter(workspaceId, "duration");
-  });
-  duration.addEventListener("mouseleave", () => {
-    hover.leave(workspaceId, "duration");
-  });
+  for (const part of ["duration", "more"] as const) {
+    instant[part].addEventListener("mouseenter", () => {
+      hover.enter(workspaceId, part);
+    });
+    instant[part].addEventListener("mouseleave", () => {
+      hover.leave(workspaceId, part);
+    });
+  }
   detail.addEventListener("mouseenter", () => {
     hover.enter(workspaceId, "panel");
   });

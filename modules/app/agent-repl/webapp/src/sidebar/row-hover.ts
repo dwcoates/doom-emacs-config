@@ -53,6 +53,9 @@ import type { PopupMirror } from "../host/sidebar-popups.js";
  * pointer reaching the duration, which lies inside the line, opens the panel
  * with no delay.
  *
+ * SO DOES THE "⋯" CONTROL at the line's far right (owner request,
+ * 2026-11-02): the pointer reaching it opens the panel at once.
+ *
  * THREE QUARTERS OF A SECOND (owner request, 2026-11-01), down from two.
  */
 export const HOVER_OPEN_DELAY_MS = 750;
@@ -76,7 +79,14 @@ export interface DrawnRow {
 }
 
 /** Which part of a row the pointer is over. */
-type HoverPart = "line" | "duration" | "panel";
+type HoverPart = "line" | "duration" | "more" | "panel";
+
+/** The parts inside the line that open the panel at once: the duration field and the "⋯" control. */
+type InstantPart = "duration" | "more";
+
+function isInstant(part: HoverPart): part is InstantPart {
+  return part === "duration" || part === "more";
+}
 
 export interface RowHover {
   /** The drawing under ROOT was thrown away: its row copies are gone, every other stays. */
@@ -95,7 +105,7 @@ export interface RowHover {
   pointerAt(target: EventTarget | null): void;
   /** The rail lost the user, for WHY: close every open panel, and open none until `resume`. */
   dismiss(why: string): void;
-  /** The user is back in the rail: open the panel of the row the pointer rests on, at once on its duration, after the delay elsewhere on its line. */
+  /** The user is back in the rail: open the panel of the row the pointer rests on, at once on its duration or "⋯", after the delay elsewhere on its line. */
   resume(): void;
   /**
    * Hand every open panel's live copy to the popup mirror again (a redraw
@@ -112,6 +122,8 @@ interface Pointer {
   line: boolean;
   /** The duration field, which lies inside the line. */
   duration: boolean;
+  /** The "⋯" control, which lies inside the line. */
+  more: boolean;
   panel: boolean;
 }
 
@@ -226,20 +238,20 @@ export function createRowHover(dropdowns: Dropdowns, openDetails: Set<string>, m
       if (openDetails.has(id)) register(id, row);
     },
     enter(id: string, part: HoverPart): void {
-      const at = pointers.get(id) ?? { line: false, duration: false, panel: false };
+      const at = pointers.get(id) ?? { line: false, duration: false, more: false, panel: false };
       at[part] = true;
       pointers.set(id, at);
       closeTimers.cancel(id);
-      if (part === "duration" && !suspended) setOpen(id, true, "hover");
+      if (isInstant(part) && !suspended) setOpen(id, true, "hover");
       if (part === "line" && !suspended && !openDetails.has(id)) scheduleOpen(id);
     },
     leave(id: string, part: HoverPart): void {
       const at = pointers.get(id);
       if (at === undefined || !at[part]) return;
       at[part] = false;
-      // The duration lies inside the line: the pointer leaving it is still on
-      // the row, unless the line reports its own leave.
-      if (part === "duration") return;
+      // The duration and the "⋯" lie inside the line: the pointer leaving
+      // either is still on the row, unless the line reports its own leave.
+      if (isInstant(part)) return;
       if (!at.line && !at.panel) pointers.delete(id);
       if (part === "line") openTimers.cancel(id);
       scheduleClose(id);
@@ -276,7 +288,7 @@ export function createRowHover(dropdowns: Dropdowns, openDetails: Set<string>, m
     resume(): void {
       suspended = false;
       for (const [id, at] of pointers) {
-        if (at.duration) setOpen(id, true, "hover");
+        if (at.duration || at.more) setOpen(id, true, "hover");
         else if (at.line && !openDetails.has(id)) scheduleOpen(id);
       }
     },
