@@ -117,7 +117,7 @@ and is reported on the loader's own path."
                              module root))))
 
 (defmacro agent-repl--load-module (file)
-  "Load FILE via `load!', recording any error for collective reporting.
+  "Load FILE with `load', recording any error for collective reporting.
 Before loading, FILE's source bytes are recorded in
 `agent-repl--elisp-module-builds' (the build this Emacs reports).
 FILE names a module source WITHOUT its `lisp/' prefix and `.el' suffix:
@@ -128,12 +128,16 @@ The per-file success line is background chatter and goes to the quiet sink
 via `agent-repl--boot-info'; a load FAILURE is loud, via
 `agent-repl--boot-warn'.  Both use the bootstrap helpers rather than the
 core.el ladder directly because the very first expansion of this macro is
-what loads core.el."
+what loads core.el.
+`load' rather than Doom's `load!': `doom-load' re-signals a load error
+only when the file's truename lies under one of Doom's directories and
+otherwise returns nil, so a module mounted through a symlink from
+elsewhere (the e2e sandbox's) would fail its load silently, logged as
+loaded."
   `(condition-case err
-       (progn
-         (agent-repl--elisp-record-module-build
-          (file-name-directory (or load-file-name buffer-file-name)) ,file)
-         (load! (concat "lisp/" ,file))
+       (let ((root (file-name-directory (or load-file-name buffer-file-name))))
+         (agent-repl--elisp-record-module-build root ,file)
+         (load (expand-file-name (concat "lisp/" ,file) root) nil 'nomessage)
          (agent-repl--boot-info "%s.el loaded." ,file))
      (error
       (push (cons ,file err) agent-repl--load-errors)
