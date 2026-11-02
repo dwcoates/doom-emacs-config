@@ -353,14 +353,28 @@ another has those remaps taken back first (`agent-repl--ground-swap')."
                                  agent-repl-input-background
                                  #'agent-repl--input-paint-remaps)))
 
+(defun agent-repl--input-composers ()
+  "Return every live composer buffer."
+  (seq-filter (lambda (buf) (eq (buffer-local-value 'major-mode buf) 'agent-repl-input-mode))
+              (buffer-list)))
+
 (defun agent-repl--input-paint-all ()
   "Paint every composer buffer the current ground.
 The border's top and bottom rows derive their color at redisplay, so
 the repaint reaches them with the fringes."
-  (dolist (buf (buffer-list))
-    (when (eq (buffer-local-value 'major-mode buf) 'agent-repl-input-mode)
-      (with-current-buffer buf
-        (agent-repl--input-paint)))))
+  (dolist (buf (agent-repl--input-composers))
+    (with-current-buffer buf
+      (agent-repl--input-paint))))
+
+(defun agent-repl--input-draw-border-all ()
+  "Draw every composer's border as this load's code draws it.
+A composer keeps what the code it was made under drew (a reload never
+runs its mode again), so one made before the border was drawn has
+none.  Each is drawn again: its lines, fringes and inset set anew,
+its remaps swapped (`agent-repl--input-paint')."
+  (dolist (buf (agent-repl--input-composers))
+    (with-current-buffer buf
+      (agent-repl--input-draw-border))))
 
 (add-hook 'agent-repl-input-background-painters #'agent-repl--input-paint-all)
 
@@ -2917,6 +2931,10 @@ has nothing under `<return>'."
 ;; observable under `emacs -Q'.  `RET' and `C-c C-k' keep their meanings.
 (define-key agent-repl-input-mode-map (kbd "C-c C-<return>") #'agent-repl-rollback-keep-files)
 (define-key agent-repl-input-mode-map (kbd "C-c M-<return>") #'agent-repl-rollback-restore-files)
+
+;; A load (and a reload) finds the composers already made, each drawn by the
+;; code it was made under, so each is drawn as this load's code draws it.
+(agent-repl--input-draw-border-all)
 
 (provide 'input)
 

@@ -1925,6 +1925,52 @@ workspace from the working directory, so no source tag rides it."
         ;; Assert
         (should-not face-remapping-alist)))))
 
+(ert-deftest agent-repl-input-draw-border-all-draws-a-composer-made-without-one ()
+  "A composer made before the border (no header or mode line, frame fringes) gets the border."
+  ;; Arrange
+  (let ((agent-repl-input-background "#171717"))
+    (cl-letf (((symbol-function 'agent-repl--log) #'ignore)
+              ((symbol-function 'agent-repl-dividers-fix-fringes) #'ignore))
+      (with-temp-buffer
+        (agent-repl-input-mode)
+        (setq-local header-line-format nil
+                    mode-line-format nil)
+        (setq face-remapping-alist nil
+              agent-repl--input-painted nil)
+        ;; Act
+        (agent-repl--input-draw-border-all)
+        ;; Assert
+        (should (equal (list header-line-format mode-line-format
+                             (agent-repl-test--remapped-backgrounds 'fringe))
+                       (list agent-repl--input-border-line-format
+                             agent-repl--input-border-line-format
+                             '("#232323" "#171717"))))))))
+
+(ert-deftest agent-repl-input-draw-border-all-never-stacks-a-drawn-composer ()
+  "Drawing a composer that already wears its border again adds no remap."
+  ;; Arrange
+  (let ((agent-repl-input-background "#171717"))
+    (cl-letf (((symbol-function 'agent-repl--log) #'ignore)
+              ((symbol-function 'agent-repl-dividers-fix-fringes) #'ignore))
+      (with-temp-buffer
+        (agent-repl-input-mode)
+        (let ((before (copy-tree face-remapping-alist)))
+          ;; Act
+          (agent-repl--input-draw-border-all)
+          ;; Assert
+          (should (equal face-remapping-alist before)))))))
+
+(ert-deftest agent-repl-input-draw-border-all-leaves-other-buffers ()
+  "Only composers are drawn: another buffer keeps its header line."
+  ;; Arrange
+  (cl-letf (((symbol-function 'agent-repl--log) #'ignore))
+    (with-temp-buffer
+      (setq-local header-line-format "mine")
+      ;; Act
+      (agent-repl--input-draw-border-all)
+      ;; Assert
+      (should (equal header-line-format "mine")))))
+
 (ert-deftest agent-repl-input-mode-enables-visual-line-mode ()
   "The composer turns on `visual-line-mode' so Evil moves by screen line."
   ;; Arrange.
