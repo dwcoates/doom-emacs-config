@@ -4831,6 +4831,26 @@ that answers or signals.  INFO and ERROR records land in
       (should (cl-some (lambda (m) (string-match-p "\\`elisp.verbs.creation-models-failed repository=.* cause=error-arm response=" m))
                        agent-repl-test-verbs--logged)))))
 
+(ert-deftest agent-repl-verbs-model-names-answers-each-options-name-in-order ()
+  "The model names of a catalog are its options' names, in the vendor's order."
+  (should (equal (agent-repl-verbs--model-names
+                  '((:name "opus" :display-name "Opus" :description "")
+                    (:name "haiku" :display-name "Haiku" :description "")))
+                 '("opus" "haiku")))
+  (should-not (agent-repl-verbs--model-names nil)))
+
+(ert-deftest agent-repl-verbs-model-names-is-every-offered-lists-reader ()
+  "The completion table and the refusal sentence both read names through one helper."
+  (let ((calls 0))
+    (cl-letf* ((real (symbol-function 'agent-repl-verbs--model-names))
+               ((symbol-function 'agent-repl-verbs--model-names)
+                (lambda (options) (cl-incf calls) (funcall real options))))
+      (agent-repl-verbs--create-model-not-in-catalog-sentence
+       '(:model "x" :config-dir "/c" :options ((:name "opus"))))
+      (should (= calls 1))
+      (agent-repl-verbs--model-completion-table '((:name "opus")))
+      (should (= calls 2)))))
+
 (ert-deftest agent-repl-verbs-create-refusal-words-a-model-not-in-catalog ()
   "A `model_not_in_catalog' refusal names the model, the login and what it offers."
   (should (equal (agent-repl-verbs--create-refusal-sentence

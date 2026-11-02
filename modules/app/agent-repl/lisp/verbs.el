@@ -1490,8 +1490,7 @@ offer, because the user\='s next move is to name one of them."
   (format "the login %s does not offer the model %S; it offers %s"
           (abbreviate-file-name (plist-get refused :config-dir))
           (plist-get refused :model)
-          (mapconcat (lambda (option) (plist-get option :name))
-                     (plist-get refused :options) ", ")))
+          (string-join (agent-repl-verbs--model-names (plist-get refused :options)) ", ")))
 
 (defun agent-repl-verbs--create-invalid-name-sentence (invalid)
   "Word an `invalid_name\=' refusal whose fields are INVALID.
@@ -2875,12 +2874,18 @@ never opened on a guessed one."
                      (plist-get (plist-get success :catalog) :arm))
     success))
 
+(defun agent-repl-verbs--model-names (options)
+  "Answer the model names of OPTIONS, decoded `conversation.v1.ModelOption\='s.
+A name is what a create names, so every list of offered models is read
+through here."
+  (mapcar (lambda (option) (plist-get option :name)) options))
+
 (defun agent-repl-verbs--model-completion-table (options)
   "Return a completion table over the model names of OPTIONS.
 OPTIONS are decoded `conversation.v1.ModelOption\=' plists; each
 candidate is annotated with its display name and description, so the
 picker says what each model id is."
-  (let ((names (mapcar (lambda (option) (plist-get option :name)) options)))
+  (let ((names (agent-repl-verbs--model-names options)))
     (lambda (string predicate action)
       (if (eq action 'metadata)
           `(metadata
