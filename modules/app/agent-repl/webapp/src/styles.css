@@ -30,7 +30,7 @@
   /* Tool-card grey: the fill under every full-width response card (Bash, Read,
      etc.) and the badges/tickers riding on them. A notch darker than the old
      near-white #f9fafb, so a card lifts off the feed instead of melting into
-     it, while staying above the composer well (--composer-bg) below it. */
+     it. */
   --card: #eef1f4;
   /* The fill the response bubble (--assistant) and the footer dock share. It is --card itself in this theme; the
      dark theme sets its own (owner ruling, 2026-09-27). */
@@ -242,9 +242,11 @@
      such word. */
   --turn-complete-bg: #fbf0d2;
   --turn-complete-border: #e6d190;
-  /* Composer well: a grey darker than --card, so the box you type into reads as
-     sunken against the feed rather than as one more card floating on it. */
-  --composer-bg: #e4e7eb;
+  /* THE COMPOSER WEARS THE SIDEBAR'S GROUND, IN BOTH THEMES (owner request,
+     2026-11-02, superseding the 2026-11-01 ruling that it sit significantly
+     darker than the feed). It is a reference, never a copy, so the two can
+     never drift. */
+  --composer-bg: var(--sidebar-bg);
   /* Remediation notice ("devising remediation plan"): a true yellow, sitting
      between the --err red and the --thinking orange the alarm dot alternates
      between, so the topbar reads as one escalating band. */
@@ -619,13 +621,11 @@
     --info-tasks: #d07784;
     --turn-complete-bg: #3a3116;
     --turn-complete-border: #6b5a22;
-    /* THE COMPOSER IS SIGNIFICANTLY DARKER THAN THE FEED, THOUGH NOT BLACK
-       (owner request, 2026-11-01, superseding the 2026-10-28 ruling that it
-       wear the feed's ground), so it contrasts with the feed above it.
-       Emacs's input window (agent-repl-input-background, lisp/input.el)
-       wears this same color; Emacs cannot read this sheet, so both suites
-       pin the value. */
-    --composer-bg: #0a0a0a;
+    /* The composer wears this theme's sidebar ground (owner request,
+       2026-11-02). Emacs's input window (agent-repl-input-background,
+       lisp/input.el) wears this same color; Emacs cannot read this sheet,
+       so both suites pin the value. */
+    --composer-bg: var(--sidebar-bg);
     /* Both washes stay bright in the dark theme rather than being dimmed to
        suit it: the mark is the thing the user is hunting for, so it is the one
        place the stylesheet WANTS to shout against the background. --search-fg

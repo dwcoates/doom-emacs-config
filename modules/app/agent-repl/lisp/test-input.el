@@ -1729,12 +1729,13 @@ workspace from the working directory, so no source tag rides it."
 
 (ert-deftest agent-repl-input-background-is-the-webapp-composer-color ()
   "The composer's default background is the webapp's dark `--composer-bg'.
+That is the dark sidebar's ground `--sidebar-bg', #1a1a1a.
 The ert suite may not read webapp/src/styles.css, so the shared value is
 pinned on both sides: here, and in webapp/test/styles.test.ts."
   ;; Arrange / Act.
   (let ((background (eval (car (get 'agent-repl-input-background 'standard-value)))))
     ;; Assert.
-    (should (equal background "#0a0a0a"))))
+    (should (equal background "#1a1a1a"))))
 
 (ert-deftest agent-repl-input-mode-wraps-at-word-boundaries ()
   "The composer soft-wraps long lines at word boundaries."

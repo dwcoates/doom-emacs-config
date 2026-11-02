@@ -4536,15 +4536,28 @@ describe("the tool card's command grey", () => {
   // Emacs's input window is the host-native composer, so its
   // `agent-repl-input-background' (lisp/input.el) wears this same color.
   // Neither suite may read the other's file, so lisp/test-input.el pins it too.
-  it("defines the dark theme's composer as Emacs's input background, #0a0a0a, darker than the feed", () => {
+  it("defines the dark theme's composer as Emacs's input background, #1a1a1a", () => {
     // Arrange
     const block = darkThemeBlock();
 
     // Act
-    const got = [themeValueOf(block, "--composer-bg"), themeRgbOf(block, "--composer-bg")];
+    const got = themeRgbOf(block, "--composer-bg");
 
     // Assert
-    expect(got).toEqual(["#0a0a0a", [0x0a, 0x0a, 0x0a]]);
+    expect(got).toEqual([0x1a, 0x1a, 0x1a]);
+  });
+
+  // The composer wears the sidebar's ground in both themes (owner request,
+  // 2026-11-02), as a reference so the two can never drift.
+  it.each(THEME_BLOCKS)("declares the %s theme's composer as var(--sidebar-bg)", (_theme, blockOf) => {
+    // Arrange
+    const block = blockOf();
+
+    // Act
+    const got = themeValueOf(block, "--composer-bg");
+
+    // Assert
+    expect(got).toBe("var(--sidebar-bg)");
   });
 
   // The Settings page (lisp/settings.el) is grounded with the dark sidebar's
