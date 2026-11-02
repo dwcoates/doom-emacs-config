@@ -118,6 +118,7 @@ var createRefusalArms = map[string]bool{
 	ArmInsideTemporaryDirectory:             true,
 	ArmUnknownForkSource:                    true,
 	ArmForkSourceHasNoConversation:          true,
+	ArmForkSourceHasNoFinishedTurn:          true,
 	ArmNameReserved:                         true,
 	ArmNameHeld:                             true,
 	ArmInvalidName:                          true,

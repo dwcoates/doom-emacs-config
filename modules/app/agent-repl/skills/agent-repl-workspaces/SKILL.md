@@ -54,6 +54,13 @@ not the relationship's default, its landing target:
     the local main branch; it goes only with `-lands-into main`.
 - `-context fresh` starts an empty conversation. `-context fork -fork WS`
   copies WS's conversation (cut at its last concluded turn).
+  - A fork carries only FINISHED turns, never the one in flight. Forking
+    `here` mid-turn leaves out everything this turn has found so far, so a
+    diagnosis made in this turn goes into the `-prompt`.
+  - A fork of a workspace still in its FIRST turn would carry nothing, so the
+    daemon refuses it (`fork_source_has_no_finished_turn`) before anything is
+    made. Use `-context fresh` with everything the new workspace needs in the
+    `-prompt`.
 - **A workspace created in another repository forks only to MOVE this
   workspace.** `-context fork -fork here` with another `-repository` is the
   move in "Reorganizing across repositories" below, where this workspace's

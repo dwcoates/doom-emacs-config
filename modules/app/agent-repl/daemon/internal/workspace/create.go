@@ -83,7 +83,7 @@ func reportCreateStage(spec CreateSpec, stage CreateStage) {
 	}
 }
 
-func (v *verbs) create(ctx context.Context, spec CreateSpec) (wsm.Workspace, error) {
+func (v *verbs) create(ctx context.Context, spec CreateSpec) (_ wsm.Workspace, err error) {
 	global := v.deps.Log.Global().With(dlog.Context{"repo_dir": spec.RepoDir, "one_shot": spec.OneShot})
 
 	if err := v.validateCreate(global, spec); err != nil {
@@ -367,6 +367,17 @@ func (v *verbs) create(ctx context.Context, spec CreateSpec) (wsm.Workspace, err
 		"duration_ms": v.now().Sub(materializing).Milliseconds(),
 	})
 
+	// A CREATE THAT FAILS FROM HERE ON LEAVES NOTHING BEHIND: no worktree, no
+	// branch and, once registered, no registration (unmaterialize). A failed
+	// create is reported as failed, so a worktree it left would be a
+	// workspace nobody asked for and nothing would ever finish.
+	var made *wsm.Workspace
+	defer func() {
+		if err != nil {
+			err = v.unmaterialize(context.WithoutCancel(ctx), global, err, repoDir, worktreeDir, branch, made)
+		}
+	}()
+
 	// THE WORKTREE EXISTS; everything from here to the terminal outcome —
 	// registration, a fork's record, the session bring-up and the
 	// initial prompt's submission (steps 5-7) — is the session stage. Reported
@@ -393,6 +404,7 @@ func (v *verbs) create(ctx context.Context, spec CreateSpec) (wsm.Workspace, err
 	if err != nil {
 		return wsm.Workspace{}, fmt.Errorf("create %q: register: %w", branch, err)
 	}
+	made = &record
 
 	job.Workspace = record.ID
 	job.Materialized = true
@@ -489,6 +501,31 @@ func (v *verbs) create(ctx context.Context, spec CreateSpec) (wsm.Workspace, err
 	v.republishRegistry(ctx, log, opCreate)
 	v.deps.Derived.ReportCreated(record, spec.OwnerNotice)
 	return record, nil
+}
+
+// unmaterialize undoes a create that failed with CAUSE after its worktree was
+// made: a REGISTERED workspace is nuked (its session killed, its worktree and
+// branch destroyed, its record forgotten), and one that never registered has
+// its worktree and branch destroyed. It answers CAUSE when the undo succeeded,
+// and CAUSE joined with the undo's failure when it did not.
+func (v *verbs) unmaterialize(ctx context.Context, log dlog.Logger, cause error, repoDir, worktreeDir, branch string, registered *wsm.Workspace) error {
+	fields := dlog.Context{
+		"branch": branch, "worktree_dir": worktreeDir, "registered": registered != nil, "cause": cause.Error(),
+	}
+	var undo error
+	if registered != nil {
+		fields["workspace"] = string(registered.ID)
+		undo = v.nuke(ctx, log, *registered)
+	} else {
+		undo = v.deps.Git.Nuke(ctx, repoDir, worktreeDir, branch)
+	}
+	if undo != nil {
+		fields["undo_cause"] = undo.Error()
+		log.Error(opCreate, "the failed create could not be undone; its worktree or branch remains", fields)
+		return errors.Join(cause, fmt.Errorf("create %q: undo the failed create: %w", branch, undo))
+	}
+	log.Info(opCreate, "undid the failed create: its worktree, branch and registration are gone", fields)
+	return cause
 }
 
 // mintedPermissionMode is the mode the new session's row carries: what the
@@ -773,9 +810,21 @@ func (v *verbs) forkableParentSession(ctx context.Context, log dlog.Logger, pare
 	}
 	if !parentConv.hasConversation() {
 		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "!parentConv.hasConversation()"})
-		return wsm.Session{}, refuseWith(log, "CreateWorkspace", arm,
-			fmt.Sprintf("workspace %q has no conversation to fork", parent), false,
-			map[string]any{"workspace": &workspacev1.WorkspaceRef{Id: string(parent)}})
+		return wsm.Session{}, refuseNamingWorkspace(log, "CreateWorkspace", arm,
+			fmt.Sprintf("workspace %q has no conversation to fork", parent), false, parent)
+	}
+	// A FORK CARRIES ONLY FINISHED TURNS, so a parent still in its
+	// conversation's first turn has nothing to give: refused here, by the
+	// parent's shim's own account, before a worktree exists for a fork the
+	// child's shim would refuse at its bring-up.
+	if err := v.deps.Sessions.ProbeForkPoint(ctx, log, parent); err != nil {
+		if errors.Is(err, ErrForkNothingFinished) {
+			return wsm.Session{}, refuseNamingWorkspace(log, "CreateWorkspace", ArmForkSourceHasNoFinishedTurn,
+				fmt.Sprintf("workspace %q is still in its conversation's first turn, and a fork carries only finished turns, so this fork would carry nothing: "+
+					"create the workspace with a fresh context and put what it must know in the initial prompt, or fork once that turn has ended", parent), false, parent)
+		}
+		// forkPoint recorded why at ERROR, where the parent's shim answered.
+		return wsm.Session{}, fmt.Errorf("fork from %q: %w", parent, err)
 	}
 	return parentConv.session, nil
 }
@@ -828,9 +877,8 @@ func (v *verbs) landingWorkspace(ctx context.Context, log dlog.Logger, spec Crea
 // unknownLandingTarget refuses a create whose landing target is no workspace
 // of its repository, saying WHY.
 func unknownLandingTarget(log dlog.Logger, id ids.WorkspaceID, why string) error {
-	return refuseWith(log, "CreateWorkspace", ArmUnknownLandingTarget,
-		fmt.Sprintf("the workspace %q to land into %s", id, why), true,
-		map[string]any{"workspace": &workspacev1.WorkspaceRef{Id: string(id)}})
+	return refuseNamingWorkspace(log, "CreateWorkspace", ArmUnknownLandingTarget,
+		fmt.Sprintf("the workspace %q to land into %s", id, why), true, id)
 }
 
 // landsIntoID is the id of the workspace a create lands into, nil for the
@@ -1296,9 +1344,8 @@ func (v *verbs) checkDerivation(ctx context.Context, log dlog.Logger, spec Creat
 	if spec.Requester != nil {
 		if _, err := v.deps.DB.Workspace(ctx, *spec.Requester); err != nil {
 			if errors.Is(err, wsm.ErrNotFound) {
-				return refuseWith(log, "CreateWorkspace", ArmUnknownRequester,
-					fmt.Sprintf("no workspace %q is registered to have asked", *spec.Requester), true,
-					map[string]any{"workspace": &workspacev1.WorkspaceRef{Id: string(*spec.Requester)}})
+				return refuseNamingWorkspace(log, "CreateWorkspace", ArmUnknownRequester,
+					fmt.Sprintf("no workspace %q is registered to have asked", *spec.Requester), true, *spec.Requester)
 			}
 			log.Error(opCreate, "could not read the create's requester", dlog.WithCause(dlog.Context{"requester": string(*spec.Requester)}, err))
 			return fmt.Errorf("create: requester %q: %w", *spec.Requester, err)
@@ -1338,9 +1385,8 @@ func (v *verbs) checkDerivation(ctx context.Context, log dlog.Logger, spec Creat
 			return err
 		}
 		if source == nil {
-			return refuseWith(log, "CreateWorkspace", ArmUnknownForkSource,
-				fmt.Sprintf("no workspace %q is registered to hold a conversation to fork", *spec.ForkFrom), true,
-				map[string]any{"workspace": &workspacev1.WorkspaceRef{Id: string(*spec.ForkFrom)}})
+			return refuseNamingWorkspace(log, "CreateWorkspace", ArmUnknownForkSource,
+				fmt.Sprintf("no workspace %q is registered to hold a conversation to fork", *spec.ForkFrom), true, *spec.ForkFrom)
 		}
 	}
 	// WHO LANDS A CHILD: a child that is not a one-shot and does not carry its

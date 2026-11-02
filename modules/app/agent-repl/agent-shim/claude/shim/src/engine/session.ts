@@ -26,6 +26,7 @@
  * needs.
  */
 import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
 import { create } from "@bufbuild/protobuf";
 import { bindLog, clearRequestId, onLogSinkPoisoned, setClaudeSessionId, setRequestId } from "../log.js";
 import { conversationv1, shimv1 } from "../proto.js";
@@ -167,10 +168,12 @@ import {
   SessionIdentity,
   type AgentIdentityStore,
 } from "./identity.js";
-import { ForkPointTracker, type OpenForkTurn } from "./fork-point.js";
+import { ForkPointTracker, type ForkPointAnswer, type OpenForkTurn } from "./fork-point.js";
 import {
   forkableRecords,
   forkSession as forkVendorConversation,
+  openerIsFirstDetail,
+  openerPlace,
   resolveUpTo,
   type ForkVendorSession,
 } from "./fork-session.js";
@@ -1870,7 +1873,8 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    */
   function getForkPoint(): shimv1.GetForkPointResponse {
     const now = deps.nowMs();
-    if (identity === undefined) {
+    const current = identity;
+    if (current === undefined) {
       LOGGER.info({ through_ms: now }, "named the fork point: no session, the whole transcript");
       return forkPointAnswered({ kind: "whole", throughMs: now, uninherited: [] });
     }
@@ -1884,9 +1888,12 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         openerUuid: forkPoints.firstRecord(turnId) ?? (turn.adopted === true ? undefined : promptUuid(turnId)),
       });
     }
-    const answer = forkPoints.point(openTurns, now);
+    const answer = nothingFinishedBefore(forkPoints.point(openTurns, now), current.vendorSessionId);
     if (answer.kind === "unresolved") {
       LOGGER.error({ open_turns: openTurns.map((turn) => turn.turnId), cause: answer.detail }, "no fork point could be named");
+    } else if (answer.kind === "nothing_finished") {
+      // A caller's request, not a fault: the daemon refuses the create up front.
+      LOGGER.info({ open_turns: openTurns.map((turn) => turn.turnId), cause: answer.detail }, "named no fork point: the turn in flight is the conversation's first");
     } else {
       LOGGER.info(
         {
@@ -1899,6 +1906,21 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       );
     }
     return forkPointAnswered(answer);
+  }
+
+  /**
+   * A point before the opener of the turn in flight carries nothing when that
+   * opener is the transcript's first record: the turn is the conversation's
+   * first. Answered as `nothing_finished` here, so the create that asked is
+   * refused before anything is made for it, rather than by the child's
+   * ForkSession after its worktree exists.
+   */
+  function nothingFinishedBefore(answer: ForkPointAnswer, vendorSessionId: string): ForkPointAnswer {
+    if (answer.kind !== "before_record") return answer;
+    const file = transcriptPath(deps.env.configDir, deps.env.cwd, vendorSessionId);
+    if (!existsSync(file)) return answer;
+    if (openerPlace(forkableRecords(file), answer.recordUuid).kind !== "first") return answer;
+    return { kind: "nothing_finished", detail: openerIsFirstDetail(answer.recordUuid) };
   }
 
   /**

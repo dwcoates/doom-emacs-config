@@ -352,3 +352,75 @@ func fleetLogged(f *fleetFixture, level, operation, message string) bool {
 	}
 	return false
 }
+
+// nothingFinishedResponse is a parent shim answering that its turn in flight
+// is its conversation's first.
+func nothingFinishedResponse() *shimv1.GetForkPointResponse {
+	return &shimv1.GetForkPointResponse{Result: &shimv1.GetForkPointResponse_Failure{Failure: &shimv1.GetForkPointFailure{
+		Cause:  &shimv1.GetForkPointFailure_NothingFinished{NothingFinished: &shimv1.GetForkPointNothingFinished{}},
+		Detail: "the turn-opening record r1 is the parent's first; no finished turn precedes it",
+	}}}
+}
+
+func TestAForkOfAParentInItsFirstTurnIsRefusedAsNothingFinished(t *testing.T) {
+	// Arrange
+	f := newFleetFixture(t)
+	parent, child := pendingFork(f)
+	if err := f.fleet.Start(context.Background(), parent.ID); err != nil {
+		t.Fatalf("Start parent: %v", err)
+	}
+	f.client.forkPoint = nothingFinishedResponse()
+
+	// Act
+	err := f.fleet.Start(context.Background(), child.ID)
+
+	// Assert
+	if !errors.Is(err, ErrForkRefused) || !errors.Is(err, ErrForkNothingFinished) {
+		t.Fatalf("Start = %v, want ErrForkRefused wrapping ErrForkNothingFinished", err)
+	}
+	if len(f.client.forkSessionAsked) != 0 {
+		t.Fatalf("ForkSession asked %d times, want the child's shim never asked", len(f.client.forkSessionAsked))
+	}
+	if !fleetLogged(f, "info", opBringUp, "the fork's parent is in its conversation's first turn; there is no finished turn to fork") {
+		t.Fatalf("records = %+v, want the first turn recorded at info", f.log.logger.Records())
+	}
+}
+
+func TestProbeForkPointAnswersWhetherAForkCouldBeMade(t *testing.T) {
+	cases := []struct {
+		name      string
+		running   bool
+		forkPoint *shimv1.GetForkPointResponse
+		pointErr  error
+		want      error
+	}{
+		{name: "a parent with no running shim forks whole", running: false, want: nil},
+		{name: "a parent that concluded a turn has a point", running: true, forkPoint: forkPointResponse("rec-1", 1), want: nil},
+		{name: "a parent in its first turn has nothing finished", running: true, forkPoint: nothingFinishedResponse(), want: ErrForkNothingFinished},
+		{name: "a parent whose shim cannot be asked fails", running: true, pointErr: errors.New("socket closed"), want: ErrForkRefused},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			f := newFleetFixture(t)
+			parent, _ := pendingFork(f)
+			if tc.running {
+				if err := f.fleet.Start(context.Background(), parent.ID); err != nil {
+					t.Fatalf("Start parent: %v", err)
+				}
+			}
+			f.client.forkPoint, f.client.forkPointErr = tc.forkPoint, tc.pointErr
+
+			// Act
+			err := f.fleet.ProbeForkPoint(context.Background(), f.log.logger, parent.ID)
+
+			// Assert: the answer, and no delivery held for a read.
+			if tc.want == nil && err != nil || tc.want != nil && !errors.Is(err, tc.want) {
+				t.Fatalf("ProbeForkPoint = %v, want %v", err, tc.want)
+			}
+			if len(f.deliveries.held) != 0 {
+				t.Fatalf("deliveries held = %v, want none for a probe", f.deliveries.held)
+			}
+		})
+	}
+}

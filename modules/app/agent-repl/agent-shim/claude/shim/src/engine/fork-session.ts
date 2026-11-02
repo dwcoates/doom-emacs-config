@@ -147,6 +147,32 @@ export function recordOfToken(records: readonly ForkableRecord[], token: string)
 }
 
 /**
+ * Where the record that opened a turn in flight sits in the transcript: not in
+ * it, its FIRST record (the turn is the conversation's first, so no finished
+ * turn precedes it and a fork before it carries nothing), or after `previous`,
+ * the last record a fork before it carries. Read by ForkSession's cut and by
+ * GetForkPoint, which refuses up front what the cut would refuse.
+ */
+export function openerPlace(
+  records: readonly ForkableRecord[],
+  token: string,
+):
+  | { readonly kind: "absent" }
+  | { readonly kind: "first" }
+  | { readonly kind: "after"; readonly previous: string } {
+  const record = recordOfToken(records, token);
+  const at = record === undefined ? -1 : records.findIndex((each) => each.uuid === record);
+  if (at < 0) return { kind: "absent" };
+  const previous = records[at - 1];
+  return previous === undefined ? { kind: "first" } : { kind: "after", previous: previous.uuid };
+}
+
+/** The account of a turn-opening record that is the transcript's first. */
+export function openerIsFirstDetail(token: string): string {
+  return `the turn-opening record ${token} is the parent's first; no finished turn precedes it`;
+}
+
+/**
  * The last record the fork carries, from the point: undefined for the whole
  * transcript, or the refusal when the point's record is not in it.
  */
@@ -166,13 +192,15 @@ export function resolveUpTo(
     }
     case "beforeRecord": {
       const token = point.extent.value.record?.value ?? "";
-      const record = recordOfToken(records, token);
-      const at = record === undefined ? -1 : records.findIndex((each) => each.uuid === record);
-      if (at < 0) return { kind: "absent", detail: `the turn-opening record ${token} is not in the parent transcript` };
-      if (at === 0) {
-        return { kind: "absent", detail: `the turn-opening record ${token} is the parent's first; no finished turn precedes it` };
+      const place = openerPlace(records, token);
+      switch (place.kind) {
+        case "absent":
+          return { kind: "absent", detail: `the turn-opening record ${token} is not in the parent transcript` };
+        case "first":
+          return { kind: "absent", detail: openerIsFirstDetail(token) };
+        case "after":
+          return { kind: "ok", upTo: place.previous };
       }
-      return { kind: "ok", upTo: records[at - 1]?.uuid };
     }
     case undefined:
       break;

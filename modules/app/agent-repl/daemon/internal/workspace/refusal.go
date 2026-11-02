@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 
+	workspacev1 "agentrepl/proto/workspace/v1"
+
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/tempdirs"
@@ -140,6 +142,10 @@ const (
 	// ArmForkSourceHasNoConversation is a fork into the primary branch whose
 	// source never had a conversation.
 	ArmForkSourceHasNoConversation = "fork_source_has_no_conversation"
+	// ArmForkSourceHasNoFinishedTurn is a fork whose source is still in its
+	// conversation's first turn: a fork carries only finished turns, so it
+	// would carry nothing (ErrForkNothingFinished).
+	ArmForkSourceHasNoFinishedTurn = "fork_source_has_no_finished_turn"
 	// ArmSessionDeleted is a bring-up of a session whose record is terminal by
 	// deletion: a deleted session refuses resurrection.
 	ArmSessionDeleted = "session_deleted"
@@ -456,6 +462,13 @@ func (v *verbs) requireOpenParent(ctx context.Context, log dlog.Logger, op strin
 func refuseUnrestorable(log dlog.Logger, rpc string, record wsm.Workspace, detail string) *Refusal {
 	return refuseWith(log, rpc, ArmWorktreeUnrestorable, detail, false,
 		map[string]any{"dir": record.Dir, "branch": record.Branch})
+}
+
+// refuseNamingWorkspace is refuseWith for an arm whose one field is the
+// workspace WS it names (`workspace`, a workspace.v1.WorkspaceRef): the create
+// arms naming a fork source, a landing target or a requester.
+func refuseNamingWorkspace(log dlog.Logger, rpc, arm, reason string, notFound bool, ws ids.WorkspaceID) *Refusal {
+	return refuseWith(log, rpc, arm, reason, notFound, map[string]any{"workspace": &workspacev1.WorkspaceRef{Id: string(ws)}})
 }
 
 // refuseWith is refuse for an arm that carries its OWN fields as evidence. A

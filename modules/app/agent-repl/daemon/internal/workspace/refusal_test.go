@@ -4,8 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"slices"
+	"strings"
 	"testing"
+
+	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
@@ -307,5 +311,44 @@ func TestEveryParentPreCheckGoesThroughRequireOpenParent(t *testing.T) {
 	// Assert.
 	if direct != 1 || shared != 3 {
 		t.Fatalf("direct reads = %d, shared calls = %d; want Open, and Create's parent and landing target, all through the one helper", direct, shared)
+	}
+}
+
+func TestRefuseNamingWorkspaceCarriesTheWorkspaceRefAsItsOneField(t *testing.T) {
+	// Arrange.
+	log := dlog.NewTestLogger()
+
+	// Act.
+	r := refuseNamingWorkspace(log, "CreateWorkspace", ArmUnknownForkSource, "no such workspace", true, "ws-7")
+
+	// Assert: the arm, its reason and not-found, and exactly one `workspace` ref.
+	if r.Rpc != "CreateWorkspace" || r.Arm != ArmUnknownForkSource || r.Reason != "no such workspace" || !r.NotFound {
+		t.Fatalf("refusal = %+v, want the rpc, arm, reason and not-found it was given", r)
+	}
+	ref, ok := r.Fields["workspace"].(*workspacev1.WorkspaceRef)
+	if len(r.Fields) != 1 || !ok || ref.GetId() != "ws-7" {
+		t.Fatalf("Fields = %v, want only the workspace ref ws-7", r.Fields)
+	}
+	if records := log.Records(); len(records) != 1 || records[0].Context["arm_workspace"] != r.Fields["workspace"] {
+		t.Fatalf("records = %v, want one refusal recording the workspace ref", records)
+	}
+}
+
+// TestNoRefusalHandRollsAWorkspaceRefField pins that every refusal whose one
+// field is a `workspace` ref goes through refuseNamingWorkspace, so the field's
+// name and shape are spelled once.
+func TestNoRefusalHandRollsAWorkspaceRefField(t *testing.T) {
+	// Act.
+	perFile := map[string]int{}
+	for _, file := range sourcescan.Production(t) {
+		if n := strings.Count(string(file.Source), `map[string]any{"workspace": &workspacev1.WorkspaceRef{`); n > 0 {
+			perFile[file.Name] = n
+		}
+	}
+
+	// Assert: the helper's own spelling alone.
+	want := map[string]int{"refusal.go": 1}
+	if !reflect.DeepEqual(perFile, want) {
+		t.Fatalf("hand-rolled workspace ref fields per file = %v, want %v", perFile, want)
 	}
 }

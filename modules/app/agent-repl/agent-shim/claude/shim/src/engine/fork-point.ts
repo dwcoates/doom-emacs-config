@@ -57,6 +57,11 @@ export type ForkPointAnswer =
   | {
       readonly kind: "unresolved";
       readonly detail: string;
+    }
+  | {
+      /** The turn in flight is the conversation's first: a fork before it would carry nothing. */
+      readonly kind: "nothing_finished";
+      readonly detail: string;
     };
 
 /** The newest concluded turn whose final record this process saw. */

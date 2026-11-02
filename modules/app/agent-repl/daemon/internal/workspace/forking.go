@@ -45,6 +45,13 @@ const forkCall = "fork"
 // again.
 var ErrForkRefused = errors.New("workspace: the fork could not be made")
 
+// ErrForkNothingFinished is the parent's shim answering that the turn in
+// flight is its conversation's first (shim.v1.GetForkPointNothingFinished):
+// a fork carries only finished turns, so this one would carry nothing. The
+// create asks first (ProbeForkPoint) and refuses on it, before anything is
+// made; at a bring-up it wraps ErrForkRefused as every other reason does.
+var ErrForkNothingFinished = errors.New("workspace: the fork's parent has no finished turn")
+
 // madeFork is what one fork answered: the vendor id to resume, and its lineage.
 type madeFork struct {
 	vendorSessionID string
@@ -123,6 +130,12 @@ func (f *Fleet) forkPoint(ctx context.Context, log dlog.Logger, parent ids.Works
 	case *shimv1.GetForkPointResponse_Success:
 		return result.Success, nil
 	case *shimv1.GetForkPointResponse_Failure:
+		if result.Failure.GetNothingFinished() != nil {
+			log.Info(opBringUp, "the fork's parent is in its conversation's first turn; there is no finished turn to fork", dlog.Context{
+				"cause": result.Failure.GetDetail(),
+			})
+			return nil, fmt.Errorf("%w: %w: %s", ErrForkRefused, ErrForkNothingFinished, result.Failure.GetDetail())
+		}
 		log.Error(opBringUp, "the fork's parent shim could name no fork point", dlog.Context{
 			"cause": result.Failure.GetDetail(), "arm": fmt.Sprintf("%T", result.Failure.GetCause()),
 		})
@@ -131,6 +144,16 @@ func (f *Fleet) forkPoint(ctx context.Context, log dlog.Logger, parent ids.Works
 		log.Error(opBringUp, "the fork's parent shim answered no outcome", nil)
 		return nil, fmt.Errorf("%w: the parent's shim answered GetForkPoint with no outcome", ErrForkRefused)
 	}
+}
+
+// ProbeForkPoint asks whether a fork of PARENT taken now could be made,
+// answering the error forkPoint would: ErrForkNothingFinished for a parent in
+// its conversation's first turn. It reads and holds nothing; the create asks
+// it before anything is named, recorded or materialized, and the bring-up
+// still names the point it forks at under the parent's hold.
+func (f *Fleet) ProbeForkPoint(ctx context.Context, log dlog.Logger, parent ids.WorkspaceID) error {
+	_, err := f.forkPoint(ctx, log, parent)
+	return err
 }
 
 // forkThrough asks the child's shim for the vendor's fork at POINT and answers

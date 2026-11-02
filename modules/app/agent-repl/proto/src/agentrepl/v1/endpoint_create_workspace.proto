@@ -507,6 +507,13 @@ message CreateWorkspaceError {
     CreateWorkspaceUnknownForkSource unknown_fork_source = 16;
     // The forked workspace has no conversation to fork.
     CreateWorkspaceForkSourceHasNoConversation fork_source_has_no_conversation = 17;
+    // The forked workspace is in the first turn of its conversation, so it
+    // has no finished turn: a fork carries only a source's finished turns,
+    // never the one in flight, and this fork would carry nothing. Decided
+    // before anything is named, recorded or materialized. The caller creates
+    // the workspace with a fresh context, carrying what it meant to hand over
+    // in the initial prompt, or forks once that first turn has ended.
+    CreateWorkspaceForkSourceHasNoFinishedTurn fork_source_has_no_finished_turn = 48;
     // The supplied name is reserved by a pending async merge, whose merge
     // workspace will be created under it when the merge starts
     // (agentrepl.v1.CreateWorkspaceAsyncMerge.name).
@@ -635,6 +642,10 @@ message CreateWorkspaceUnknownForkSource {
 }
 // Names the forked workspace that has no conversation.
 message CreateWorkspaceForkSourceHasNoConversation {
+  workspace.v1.WorkspaceRef workspace = 1;
+}
+// Names the forked workspace that is still in its conversation's first turn.
+message CreateWorkspaceForkSourceHasNoFinishedTurn {
   workspace.v1.WorkspaceRef workspace = 1;
 }
 // Names the one-shot context workspace the registry does not hold

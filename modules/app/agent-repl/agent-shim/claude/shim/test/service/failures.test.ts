@@ -884,14 +884,17 @@ describe("forkPointAnswered", () => {
     expect(success?.uninheritedTurns.map((turn) => turn.value)).toEqual(["t2"]);
   });
 
-  it("answers unresolved as the failure arm with its detail", () => {
+  it.each([
+    { kind: "unresolved" as const, arm: "unresolved" },
+    { kind: "nothing_finished" as const, arm: "nothingFinished" },
+  ])("answers $kind as the $arm failure arm with its detail", ({ kind, arm }) => {
     // Act.
-    const response = failures.forkPointAnswered({ kind: "unresolved", detail: "why" });
+    const response = failures.forkPointAnswered({ kind, detail: "why" });
 
     // Assert.
     expect(response.result.case).toBe("failure");
     const failure = response.result.case === "failure" ? response.result.value : undefined;
-    expect(failure?.cause.case).toBe("unresolved");
+    expect(failure?.cause.case).toBe(arm);
     expect(failure?.detail).toBe("why");
   });
 });
