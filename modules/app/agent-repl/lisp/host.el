@@ -806,6 +806,7 @@ ON-SETTLED is as `agent-repl-host-select' documents."
      (when on-settled (funcall on-settled :error)))))
 
 (defvar agent-repl--recency-walk-landing)
+(declare-function agent-repl--end-recency-walk "agent-repl-workspace" (log-ws reason))
 
 (defvar agent-repl-host-last-request nil
   "The newest switch request, as (WS . FLOAT-TIME), or nil.
@@ -874,7 +875,8 @@ THE `recency-walk' TRIGGER KEEPS THE SELECTION HISTORY: a step of the walk
 \(`agent-repl-switch-older', `agent-repl-switch-newer') is not a choice, so
 the daemon leaves the last-selected instant standing and Emacs records no
 visit (`agent-repl--recency-walk-landing').  Every other trigger is a
-choice, and ends any walk the frame stood in.
+choice, and ends any walk the frame stood in, recording the landing the
+walk stopped on as a visit (`agent-repl--end-recency-walk').
 
 A request that cannot be sent is LOUD: a switch the user asked for that
 goes nowhere is reported in the echo area and at WARN, never dropped.
@@ -883,8 +885,12 @@ Answers t when the request was sent or queued, nil otherwise."
         (walk (eq trigger 'recency-walk)))
     (unless (eq trigger 'startup)
       (agent-repl-host--count-editor-switch ws trigger))
-    ;; Set BEFORE the frame moves: the move's own activation reads it.
-    (setq agent-repl--recency-walk-landing (and walk ws))
+    ;; Set BEFORE the frame moves: the move's own activation reads it.  A
+    ;; choice ends the walk first, recording the landing the user stopped on
+    ;; as the visit before this one (`agent-repl--end-recency-walk').
+    (if walk
+        (setq agent-repl--recency-walk-landing ws)
+      (agent-repl--end-recency-walk ws trigger))
     (setq agent-repl-host-last-request (cons ws (float-time)))
     (agent-repl--info ws "elisp.host.switch-requested ws=%s trigger=%s shown=%s pending=%s"
                       ws trigger shown (or (agent-repl-host-pending-selection) "none"))

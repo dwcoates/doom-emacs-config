@@ -198,6 +198,7 @@ unary rpc can produce, which the contract never collapses into one."
          (agent-repl-host--select-queued nil)
          (agent-repl-host--confirming nil)
          (agent-repl--recency-walk-landing nil)
+         (agent-repl--workspace-history nil)
          (agent-repl-host-last-request nil)
          (agent-repl-host--editor-switches 0)
          (agent-repl-host-automatic-switch nil)
@@ -1196,6 +1197,34 @@ says now rather than wait for a push that will never come."
     (agent-repl-host-request-switch "ws-2" 'slot)
     ;; Assert
     (should-not agent-repl--recency-walk-landing)))
+
+(ert-deftest agent-repl-test-host-a-chosen-request-records-the-walk-landing-as-viewed ()
+  "A choice after a walk records the walk's landing as visited before the frame moves."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe-three)
+    (setq agent-repl--workspace-history '("ws-2" "ws-1"))
+    (setq agent-repl--recency-walk-landing "ws-1")
+    (let ((seen :unset))
+      (cl-letf (((symbol-function 'agent-repl-host--move-on-request)
+                 (lambda (_ws _shown) (setq seen agent-repl--workspace-history))))
+        ;; Act
+        (agent-repl-host-request-switch "ws-3" 'picker))
+      ;; Assert
+      (should (equal seen '("ws-1" "ws-2"))))))
+
+(ert-deftest agent-repl-test-host-a-walk-step-records-no-earlier-landing ()
+  "A further walk step moves the landing on without recording the step it leaves."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe-three)
+    (setq agent-repl--workspace-history '("ws-3" "ws-2" "ws-1"))
+    (setq agent-repl--recency-walk-landing "ws-2")
+    ;; Act
+    (agent-repl-host-request-switch "ws-1" 'recency-walk)
+    ;; Assert
+    (should (equal agent-repl--workspace-history '("ws-3" "ws-2" "ws-1")))
+    (should (equal agent-repl--recency-walk-landing "ws-1"))))
 
 (ert-deftest agent-repl-test-host-a-queued-walk-step-keeps-the-history-when-sent ()
   "A walk step queued behind one in flight is sent with its own keep flag."

@@ -174,8 +174,11 @@ Set by `agent-repl-host-request-switch' for the `recency-walk' trigger
 every other request.  While the frame stands on it its activations are NOT
 visits (`agent-repl--record-workspace-history'): the walk steps along
 `agent-repl--workspace-history', and recording its own landings would
-reorder the very list it is stepping along.  An activation of any other
-workspace ends the walk and clears it.")
+reorder the very list it is stepping along.  Any other switch -- a request
+of any other trigger, or an activation of any other workspace, the daemon's
+follows included -- ends the walk (`agent-repl--end-recency-walk'), and the
+landing it ends on IS a visit: the walk's last step is where the user
+stopped and looked.")
 
 (defvar agent-repl--workspace-log-targets)
 
@@ -2601,13 +2604,14 @@ would otherwise STUB-CREATE a spurious :project-dir-less entry."
 
 (defun agent-repl--record-workspace-history (&rest _)
   "Record the current workspace at the front of `agent-repl--workspace-history'.
-Removes any prior occurrence of the name so the list stays
-most-recently-visited-first with no duplicates.  No-op when there is no
-current workspace.  Registered on the persp activation hook below.
+The visit is `agent-repl--note-workspace-visit''s, which also stamps
+`:last-viewed-at'.  No-op when there is no current workspace.  Registered
+on the persp activation hook below.
 
-Also stamps `:last-viewed-at' with `current-time' on the activated
-workspace's plist.  A step of the recency walk records nothing
-\(`agent-repl--recency-walk-landing').  This is the single view chokepoint every
+A step of the recency walk records nothing
+\(`agent-repl--recency-walk-landing'); an activation of any other
+workspace first ends the walk, recording its landing
+\(`agent-repl--end-recency-walk').  This is the single view chokepoint every
 perspective activation funnels through, so the project picker
 \(`agent-repl-switch-to-project') can sort by most-recently-viewed and
 `agent-repl--state-save' can persist the stamp for dead workspaces."
@@ -2626,14 +2630,38 @@ perspective activation funnels through, so the project picker
        ((equal name agent-repl--recency-walk-landing)
         (agent-repl--info name "elisp.workspace.history-kept ws=%s reason=recency-walk" name))
        (t
-        (when agent-repl--recency-walk-landing
-          (agent-repl--info name "elisp.workspace.recency-walk-ended ws=%s landing=%s"
-                            name agent-repl--recency-walk-landing)
-          (setq agent-repl--recency-walk-landing nil))
-        (agent-repl--stamp-workspace-viewed name)
-        (setq agent-repl--workspace-history
-              (cons name (cl-remove name agent-repl--workspace-history
-                                    :test #'string=))))))))
+        (agent-repl--end-recency-walk name "activation")
+        (agent-repl--note-workspace-visit name))))))
+
+(defun agent-repl--note-workspace-visit (name)
+  "Record a visit to workspace NAME: stamp it viewed, and put it first in the history.
+Removes any prior occurrence of NAME, so `agent-repl--workspace-history'
+stays most-recently-visited-first with no duplicates.  The one writer of a
+visit, for an activation (`agent-repl--record-workspace-history') and for
+the landing a walk ends on (`agent-repl--end-recency-walk') alike."
+  (agent-repl--stamp-workspace-viewed name)
+  (setq agent-repl--workspace-history
+        (cons name (cl-remove name agent-repl--workspace-history :test #'string=))))
+
+(defun agent-repl--end-recency-walk (log-ws reason)
+  "End the recency walk the frame stands in, if any, recording its landing as a visit.
+THE WALK'S LANDING IS A VISIT ONCE THE WALK ENDS.  Its steps record nothing
+while the walk runs (`agent-repl--recency-walk-landing'), so the history
+holds still under it; but the step the user stopped on is the workspace
+they then looked at, so a later switch away -- `SPC p p', a tab chord, a
+sidebar click, the daemon's follow -- must leave it as the workspace viewed
+before.  Left unrecorded, the next `s-[' skipped it for whatever the walk
+started from.  The daemon commits the landing's durable instant on its own
+side (agentrepl.v1 SelectWorkspaceRequest.keep_selection_history).
+
+LOG-WS is the record's sink; REASON names what ended the walk.  No-op when
+no walk is running."
+  (when agent-repl--recency-walk-landing
+    (let ((landing agent-repl--recency-walk-landing))
+      (setq agent-repl--recency-walk-landing nil)
+      (agent-repl--info log-ws "elisp.workspace.recency-walk-ended landing=%s reason=%s"
+                        landing reason)
+      (agent-repl--note-workspace-visit landing))))
 
 (agent-repl--ws-add-activated-hook #'agent-repl--record-workspace-history)
 
