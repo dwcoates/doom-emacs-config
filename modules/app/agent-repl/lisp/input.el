@@ -157,6 +157,7 @@
 (declare-function markdown-mode "markdown-mode" ())
 (declare-function agent-repl-popup-show "popup" (buffer))
 (declare-function agent-repl-host-selection-markdown "agent-repl-host" (ws))
+(declare-function agent-repl-dividers-fix-fringes "dividers" (buf width))
 
 ;;;; ---- Metaprompt on-demand re-read -----------------------------------
 
@@ -221,6 +222,82 @@ which WebKit paints as #171717."
   :type 'string
   :group 'agent-repl)
 
+;;;; ---- The composer's border ----------------------------------------------
+;;
+;; THE COMPOSER WEARS A THIN BORDER (owner request, 2026-11-02): one pixel,
+;; a little lighter than its ground, between it and the feed above, the
+;; sidebar to its left and the minibuffer below.  The lines between windows
+;; are frame-level faces painted the ground (dividers.el), so no divider
+;; can be lighter around the composer alone.  The composer draws the border
+;; inside its own window instead: its header line and mode line are each a
+;; one-pixel row of the border's color, and both its fringes are one pixel
+;; wide and painted it.  The text is held off the left fringe by a stretch
+;; of ground, so it sits where the eight-pixel fringe used to put it.
+
+(defconst agent-repl--input-border-log-scope
+  '(:agent-repl-central "a composer's border is drawn before it belongs to a workspace")
+  "The central log scope the composer's border record is written under.")
+
+(defconst agent-repl-input-border-lift 0.05
+  "How far the composer's border is mixed from its ground toward white, 0..1.
+The border's color is derived from `agent-repl-input-background' alone, so
+retuning the ground moves the border with it.")
+
+(defconst agent-repl-input-border-width 1
+  "The border's width in pixels: each fringe's width, each line's height.")
+
+(defconst agent-repl-input-text-inset 8
+  "The pixels between the composer's left edge and its text, border included.")
+
+(defun agent-repl--input-border-color ()
+  "Return the composer's border color, a #rrggbb hex string.
+`agent-repl-input-background' mixed `agent-repl-input-border-lift' of
+the way toward white, channel by channel, as the webapp's srgb
+`color-mix' would.  A ground that is not a #rrggbb string breaks the
+defcustom's contract and signals an error."
+  (let ((ground agent-repl-input-background))
+    (unless (and (stringp ground) (string-match-p "\\`#[0-9a-fA-F]\\{6\\}\\'" ground))
+      (error "agent-repl: input background %S is not a #rrggbb hex string" ground))
+    (apply #'format "#%02x%02x%02x"
+           (mapcar (lambda (start)
+                     (let ((channel (string-to-number (substring ground start (+ start 2)) 16)))
+                       (round (+ (* (- 1 agent-repl-input-border-lift) channel)
+                                 (* agent-repl-input-border-lift 255)))))
+                   '(1 3 5)))))
+
+(defun agent-repl--input-border-line ()
+  "Return the composer's border line: one row as wide as the selected window.
+Its header line and mode line each show it, and redisplay evaluates it
+with the composer's window selected, so it spans that window exactly."
+  (propertize " "
+              'face (list :background (agent-repl--input-border-color))
+              'display `(space :width (,(window-pixel-width))
+                               :height (,agent-repl-input-border-width))))
+
+(defconst agent-repl--input-border-line-format
+  '(:eval (agent-repl--input-border-line))
+  "The composer's header line and mode line: its border's top and bottom rows.")
+
+(defun agent-repl--input-draw-border ()
+  "Draw the composer's border in the current buffer.
+Its header and mode lines become the border's top and bottom rows, its
+fringes the border's sides, held at `agent-repl-input-border-width'
+through every window change (`agent-repl-dividers-fix-fringes'), and
+its text is inset by a stretch of ground on every screen line."
+  (let ((color (agent-repl--input-border-color))
+        (inset (propertize " " 'display
+                           `(space :width (,(- agent-repl-input-text-inset
+                                               agent-repl-input-border-width))))))
+    (agent-repl--log agent-repl--input-border-log-scope
+                     "elisp.input.border buffer=%s color=%s width=%d"
+                     (buffer-name) color agent-repl-input-border-width)
+    (setq-local header-line-format agent-repl--input-border-line-format
+                mode-line-format agent-repl--input-border-line-format
+                line-prefix inset
+                wrap-prefix inset)
+    (face-remap-add-relative 'fringe :background color)
+    (agent-repl-dividers-fix-fringes (current-buffer) agent-repl-input-border-width)))
+
 (defvar-local agent-repl-input-waiting nil
   "The composer's held-prompt waiting line, or nil.
 \"N prompts waiting for the daemon\" while prompts this workspace's
@@ -253,11 +330,11 @@ nothing, since the transient it raised lapses on its own."
   ;; (a refused send, a held-prompt edit, the prompts waiting for the daemon)
   ;; is an editor notice the page's footer draws as a transient line
   ;; (`agent-repl--input-notify'), and the line it took is the composer's.
-  ;; Buffer-local, so no other window loses its mode line.
-  (setq-local mode-line-format nil)
   ;; NOR A HEADER LINE (owner request, 2026-10-31): the Settings and Help
-  ;; buttons that filled it are reachable from the splash.
-  (setq-local header-line-format nil)
+  ;; buttons that filled it are reachable from the splash.  Both rows are
+  ;; now one pixel of the composer's border, and show nothing else.
+  ;; Buffer-local, so no other window loses its lines.
+  (agent-repl--input-draw-border)
   ;; Widen the fill column so wrapped prose and `fill-paragraph' reflow to
   ;; 150 columns rather than the 70-column default.
   (setq-local fill-column 150)
