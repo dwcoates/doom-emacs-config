@@ -2360,6 +2360,63 @@ called with the request that answers or signals."
       (should (member "elisp.verbs.name-validation-failed name=\"fix-login\" cause=error-arm response=(:arm :error :value nil)"
                       agent-repl-test-verbs--logged)))))
 
+;;;; ---- The one synchronous creation question ----
+
+(defun agent-repl-test-verbs--ask (answer)
+  "Ask the daemon one synchronous question answered by ANSWER.
+ANSWER is a decoded response or a function that signals.  The INFO and
+ERROR records land in `agent-repl-test-verbs--logged\='."
+  (let ((rpc (lambda (conn request &optional _timeout)
+               (should (eq conn 'conn))
+               (should (equal request '(:q 1)))
+               (if (functionp answer) (funcall answer) answer))))
+    (cl-letf (((symbol-function 'agent-repl-verbs--conn) (lambda (&optional _ws) 'conn))
+              ((symbol-function 'agent-repl--info) (agent-repl-test--record-into agent-repl-test-verbs--logged))
+              ((symbol-function 'agent-repl--error) (agent-repl-test--record-into agent-repl-test-verbs--logged)))
+      (agent-repl-verbs--ask-sync rpc '(:q 1) "elisp.verbs.q-failed" (cons "q" "it")
+                                  "could not ask" "the daemon could not answer"))))
+
+(ert-deftest agent-repl-verbs-ask-sync-answers-the-success-value ()
+  "A success answer is its value, and nothing is recorded."
+  (let ((agent-repl-test-verbs--logged nil))
+    (should (equal (agent-repl-test-verbs--ask '(:arm :success :value (:a 1))) '(:a 1)))
+    (should-not agent-repl-test-verbs--logged)))
+
+(ert-deftest agent-repl-verbs-ask-sync-signals-a-failed-transport ()
+  "A failed transport is recorded at ERROR with the subject and signalled."
+  (let ((agent-repl-test-verbs--logged nil))
+    (let ((err (should-error
+                (agent-repl-test-verbs--ask
+                 (lambda () (signal 'agent-repl-connect-error (list '(:kind :timeout :message "no answer")))))
+                :type 'error)))
+      (should (string-match-p "\\`agent-repl: could not ask: " (cadr err)))
+      (should (cl-some (lambda (m) (string-match-p "\\`elisp.verbs.q-failed q=\"it\" cause=agent-repl-connect-error detail=.*no answer" m))
+                       agent-repl-test-verbs--logged)))))
+
+(ert-deftest agent-repl-verbs-ask-sync-signals-the-daemons-error-arm ()
+  "The daemon's error arm is recorded at ERROR with the response and signalled."
+  (let ((agent-repl-test-verbs--logged nil))
+    (let ((err (should-error (agent-repl-test-verbs--ask '(:arm :error :value nil)) :type 'error)))
+      (should (equal (cadr err) "agent-repl: the daemon could not answer"))
+      (should (member "elisp.verbs.q-failed q=\"it\" cause=error-arm response=(:arm :error :value nil)"
+                      agent-repl-test-verbs--logged)))))
+
+(ert-deftest agent-repl-verbs-ask-sync-is-every-creation-questions-shape ()
+  "The name check and the model catalog both ask through the one helper."
+  (let (asked)
+    (cl-letf (((symbol-function 'agent-repl-verbs--ask-sync)
+               (lambda (rpc _request event &rest _)
+                 (push (cons rpc event) asked)
+                 (if (eq rpc #'agent-repl-rpc-validate-workspace-name-sync)
+                     '(:verdict (:arm :legal :value nil))
+                   '(:config-dir "/c" :catalog (:arm :unknown :value nil)))))
+              ((symbol-function 'agent-repl--log) #'ignore))
+      (agent-repl-verbs--name-refusal "fix-login")
+      (agent-repl-verbs--creation-models (agent-repl-test-verbs--repo-ref))
+      (should (equal (reverse asked)
+                     (list (cons #'agent-repl-rpc-validate-workspace-name-sync "elisp.verbs.name-validation-failed")
+                           (cons #'agent-repl-rpc-list-creation-models-sync "elisp.verbs.creation-models-failed")))))))
+
 (ert-deftest agent-repl-verbs-read-name-asks-what-it-wants-and-checks-on-exit ()
   "The name question says it wants a slug, and its minibuffer's exit is the check."
   ;; Arrange.

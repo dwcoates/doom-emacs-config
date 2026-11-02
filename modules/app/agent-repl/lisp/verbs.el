@@ -2566,6 +2566,33 @@ the question is the one place to say so before the user types.")
  (lambda (map)
    (define-key map [remap exit-minibuffer] #'agent-repl-verbs-name-minibuffer-exit)))
 
+(defun agent-repl-verbs--ask-sync (rpc request event subject failed-ask failed-answer)
+  "Ask the daemon REQUEST through RPC, a `-sync\=' verb, and answer its success.
+THE ONE SHAPE OF A SYNCHRONOUS QUESTION a creation asks before it sends
+anything: the answer is the success arm\='s value, and every other
+outcome is recorded at ERROR and SIGNALLED, so a question nobody
+answered is never passed on as an answer.
+
+EVENT names the failure record, and SUBJECT is (KEY . VALUE), the fact
+the question is about, rendered into it as KEY=VALUE.  A failed ask --
+the transport or an undecodable answer -- signals FAILED-ASK followed by
+the cause; the daemon\='s error arm signals FAILED-ANSWER."
+  (let ((response
+         (condition-case err
+             (funcall rpc (agent-repl-verbs--conn) request)
+           ((agent-repl-connect-error agent-repl-wire-error)
+            (agent-repl--error agent-repl-verbs--create-log-scope
+                               "%s %s=%S cause=%s detail=%S"
+                               event (car subject) (cdr subject) (car err) (cdr err))
+            (error "agent-repl: %s: %s" failed-ask (error-message-string err))))))
+    (pcase response
+      (`(:arm :success :value ,success) success)
+      (_
+       (agent-repl--error agent-repl-verbs--create-log-scope
+                          "%s %s=%S cause=error-arm response=%S"
+                          event (car subject) (cdr subject) response)
+       (error "agent-repl: %s" failed-answer)))))
+
 (defun agent-repl-verbs--name-refusal (name)
   "Answer the sentence refusing NAME as a workspace name, or nil if it is one.
 THE NAMING RULE LIVES IN THE DAEMON ALONE, so this asks it
@@ -2574,33 +2601,24 @@ refusal is worded as the create\='s own `invalid_name\=' refusal is
 \(`agent-repl-verbs--create-invalid-name-sentence\=').
 
 An ask that fails -- the transport, an undecodable answer, or the
-daemon\='s error arm -- is recorded at ERROR and SIGNALLED: a name nobody
-checked is never passed on as a legal one."
-  (let ((response
-         (condition-case err
-             (agent-repl-rpc-validate-workspace-name-sync
-              (agent-repl-verbs--conn) (list :name name))
-           ((agent-repl-connect-error agent-repl-wire-error)
-            (agent-repl--error agent-repl-verbs--create-log-scope
-                               "elisp.verbs.name-validation-failed name=%S cause=%s detail=%S"
-                               name (car err) (cdr err))
-            (error "agent-repl: could not check the name with the daemon: %s"
-                   (error-message-string err))))))
-    (pcase response
-      (`(:arm :success :value (:verdict (:arm :legal . ,_)))
-       (agent-repl--log agent-repl-verbs--create-log-scope
-                        "elisp.verbs.name-validated name=%S verdict=legal" name)
-       nil)
-      (`(:arm :success :value (:verdict (:arm :invalid :value ,invalid)))
-       (agent-repl--info agent-repl-verbs--create-log-scope
-                         "elisp.verbs.name-validated name=%S verdict=invalid component=%S rule=%s"
-                         name (plist-get invalid :component) (plist-get invalid :rule))
-       (agent-repl-verbs--create-invalid-name-sentence invalid))
-      (_
-       (agent-repl--error agent-repl-verbs--create-log-scope
-                          "elisp.verbs.name-validation-failed name=%S cause=error-arm response=%S"
-                          name response)
-       (error "agent-repl: the daemon could not check the name %S" name)))))
+daemon\='s error arm -- is recorded at ERROR and SIGNALLED
+\(`agent-repl-verbs--ask-sync\='): a name nobody checked is never passed
+on as a legal one."
+  (pcase (plist-get (agent-repl-verbs--ask-sync
+                     #'agent-repl-rpc-validate-workspace-name-sync (list :name name)
+                     "elisp.verbs.name-validation-failed" (cons "name" name)
+                     "could not check the name with the daemon"
+                     (format "the daemon could not check the name %S" name))
+                    :verdict)
+    (`(:arm :legal . ,_)
+     (agent-repl--log agent-repl-verbs--create-log-scope
+                      "elisp.verbs.name-validated name=%S verdict=legal" name)
+     nil)
+    (`(:arm :invalid :value ,invalid)
+     (agent-repl--info agent-repl-verbs--create-log-scope
+                       "elisp.verbs.name-validated name=%S verdict=invalid component=%S rule=%s"
+                       name (plist-get invalid :component) (plist-get invalid :rule))
+     (agent-repl-verbs--create-invalid-name-sentence invalid))))
 
 (defun agent-repl-verbs-name-minibuffer-exit ()
   "Leave the name minibuffer only with a name the daemon accepts.
@@ -2842,31 +2860,20 @@ very verb CreateWorkspace refuses an unknown model with, so the picker
 never offers a model the create refuses.
 
 An ask that fails -- the transport, an undecodable answer, or the
-daemon\='s error arm -- is recorded at ERROR and SIGNALLED: a picker with
-no list to offer is never opened on a guessed one."
-  (let ((response
-         (condition-case err
-             (agent-repl-rpc-list-creation-models-sync
-              (agent-repl-verbs--conn) (list :repository repository))
-           ((agent-repl-connect-error agent-repl-wire-error)
-            (agent-repl--error agent-repl-verbs--create-log-scope
-                               "elisp.verbs.creation-models-failed repository=%S cause=%s detail=%S"
-                               repository (car err) (cdr err))
-            (error "agent-repl: could not ask the daemon which models it may create with: %s"
-                   (error-message-string err))))))
-    (pcase response
-      (`(:arm :success :value ,success)
-       (agent-repl--log agent-repl-verbs--create-log-scope
-                        "elisp.verbs.creation-models repository=%S config-dir=%s catalog=%s"
-                        repository (plist-get success :config-dir)
-                        (plist-get (plist-get success :catalog) :arm))
-       success)
-      (_
-       (agent-repl--error agent-repl-verbs--create-log-scope
-                          "elisp.verbs.creation-models-failed repository=%S cause=error-arm response=%S"
-                          repository response)
-       (error "agent-repl: the daemon could not say which models %s may create with"
-              (agent-repl-verbs--repository-name repository))))))
+daemon\='s error arm -- is recorded at ERROR and SIGNALLED
+\(`agent-repl-verbs--ask-sync\='): a picker with no list to offer is
+never opened on a guessed one."
+  (let ((success (agent-repl-verbs--ask-sync
+                  #'agent-repl-rpc-list-creation-models-sync (list :repository repository)
+                  "elisp.verbs.creation-models-failed" (cons "repository" repository)
+                  "could not ask the daemon which models it may create with"
+                  (format "the daemon could not say which models %s may create with"
+                          (agent-repl-verbs--repository-name repository)))))
+    (agent-repl--log agent-repl-verbs--create-log-scope
+                     "elisp.verbs.creation-models repository=%S config-dir=%s catalog=%s"
+                     repository (plist-get success :config-dir)
+                     (plist-get (plist-get success :catalog) :arm))
+    success))
 
 (defun agent-repl-verbs--model-completion-table (options)
   "Return a completion table over the model names of OPTIONS.
