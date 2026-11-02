@@ -36,6 +36,7 @@ import type { WorkspaceMentionTargets } from "../../../proto/gen/ts/frontend/v1/
 import { WorkspaceRefSchema, type WorkspaceRef } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import { queryAll } from "../dom.js";
 import { log } from "../log.js";
+import { escapeRegExp } from "../regexp.js";
 import type { AppContext } from "../rpc/context.js";
 import { guardMalformed } from "../rpc/guard.js";
 import { MalformedView } from "../rpc/malformed.js";
@@ -72,11 +73,6 @@ const NO_TARGETS: Targets = { byName: new Map(), byId: new Map(), pattern: null 
 
 /** This page's targets: none until the first push. */
 let current: Targets = NO_TARGETS;
-
-/** Escape TEXT for use inside a regular expression. */
-function escapeRegExp(text: string): string {
-  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
 
 /**
  * The served TARGETS, read to the page's lookup. A target with no name or no
