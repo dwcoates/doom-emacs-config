@@ -26,6 +26,20 @@ with normal disk I/O, so a `Background` store lost every I/O contention to
 them and logged thousands of slow-query warnings while suites ran.
 `bin/test-requirements.sh` holds every `launchd_service` to `Standard`.
 
+## Launched through /usr/bin/env
+
+Every service's `ProgramArguments` starts with `/usr/bin/env`, which execs
+the real program in its place. macOS's background task manager names each
+login item by its program's code signature and posts an "App Background
+Activity" notice whenever it sees a new one. The binaries built here
+(`shim-store`, `shim-claude-sidecar`, `zettel`) carry only the Go linker's
+ad-hoc signature, so every rebuild read as a new login item and posted a
+notice on each deploy (2026-11-02). Apple-signed `/usr/bin/env` never
+changes, so each service keeps one identity across rebuilds. The metrics
+store already ran this way so that `env` could find Homebrew's
+`victoria-metrics` on `PATH`. `bin/test-requirements.sh` holds every
+`launchd_service` to `/usr/bin/env`.
+
 ## The flag contracts
 
 Each plist's `ProgramArguments` is a contract with that service's `main.go`,

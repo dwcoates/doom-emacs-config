@@ -147,6 +147,19 @@ test_every_launchd_service_runs_at_standard_priority() {
   if [ -z "$bad" ]; then pass "every launchd service runs at Standard priority"; else fail "launchd services not at Standard priority:$bad"; fi
 }
 
+# macOS's background task manager names a login item by its program's code
+# signature. A program built here is only ad-hoc signed, so each rebuild reads
+# as a new login item and posts an "App Background Activity" notice; a service
+# whose first argument is Apple-signed /usr/bin/env keeps one identity forever.
+test_every_launchd_service_launches_through_env() {
+  local bad="" plist program
+  while IFS= read -r plist; do
+    program="$(plutil -extract ProgramArguments.0 raw -o - "$MODULE/$plist" 2>/dev/null || echo "<unset>")"
+    [ "$program" = /usr/bin/env ] || bad="$bad $plist=$program"
+  done < <(launchd_service_plists)
+  if [ -z "$bad" ]; then pass "every launchd service launches through /usr/bin/env"; else fail "launchd services not launched through /usr/bin/env:$bad"; fi
+}
+
 test_every_system_with_a_manifest_is_included() {
   local missing="" f rel
   while IFS= read -r f; do

@@ -32,8 +32,17 @@
     <key>Label</key>
     <string>com.agentrepl.shim-store</string>
 
+    <!--
+      LAUNCHED THROUGH /usr/bin/env, NEVER DIRECTLY. macOS's background task
+      manager identifies a login item by its program's code signature. The
+      built binary is only ad-hoc signed, so every rebuild reads as a new item
+      and posts an "App Background Activity" notice; Apple-signed
+      /usr/bin/env never changes, and it execs the binary in its place.
+      launchd/AGENTS.md "Launched through /usr/bin/env" says why.
+    -->
     <key>ProgramArguments</key>
     <array>
+        <string>/usr/bin/env</string>
         <string>~/.cache/agent-repl/bin/shim-store</string>
         <string>--socket</string>
         <string>~/.cache/agent-repl/sock/store.sock</string>
