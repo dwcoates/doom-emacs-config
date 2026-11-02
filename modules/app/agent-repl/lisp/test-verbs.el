@@ -3712,6 +3712,8 @@ and the current workspace sits in the other repository."
                (lambda () (agent-repl-test-verbs--repo-ref)))
               ((symbol-function 'agent-repl-verbs--read-prompt)
                (lambda (&rest _) "do a thing"))
+              ((symbol-function 'agent-repl-verbs--creation-models)
+               (lambda (_repository) (plist-get agent-repl-test-verbs--catalog :value)))
               ((symbol-function 'completing-read) (lambda (&rest _) "")))
       ;; Act.
       (agent-repl-create-workspace-in-repository)
@@ -4801,17 +4803,23 @@ that answers or signals.  INFO and ERROR records land in
     (cl-letf (((symbol-function 'completing-read) (lambda (&rest _) "   ")))
       (should-not (agent-repl-verbs--read-model (agent-repl-test-verbs--repo-ref))))))
 
-(ert-deftest agent-repl-verbs-read-model-refuses-a-login-with-no-catalog ()
-  "A login no session has served a catalog for offers nothing, and says so."
+(ert-deftest agent-repl-verbs-read-model-offers-nothing-but-blank-on-a-login-with-no-catalog ()
+  "A login with no catalog offers no model, says so, and still takes a blank answer."
   (agent-repl-test-verbs--with-catalog
       '(:arm :success :value (:config-dir "/home/me/.claude-work" :catalog (:arm :unknown :value nil)))
-    (cl-letf (((symbol-function 'completing-read)
-               (lambda (&rest _) (error "no picker opens without a catalog"))))
-      (let ((err (should-error (agent-repl-verbs--read-model (agent-repl-test-verbs--repo-ref))
-                               :type 'user-error)))
-        (should (string-match-p "no models are known yet for the login .*\\.claude-work" (cadr err)))
-        (should (member "elisp.verbs.read-model-refused config-dir=/home/me/.claude-work cause=catalog-unknown"
-                        agent-repl-test-verbs--logged))))))
+    (let (seen-prompt seen-candidates seen-require-match)
+      (cl-letf (((symbol-function 'completing-read)
+                 (lambda (prompt collection &optional _pr require-match &rest _)
+                   (setq seen-prompt prompt
+                         seen-candidates (all-completions "" collection)
+                         seen-require-match require-match)
+                   "")))
+        (should-not (agent-repl-verbs--read-model (agent-repl-test-verbs--repo-ref)))
+        (should (string-match-p "\\`No models known yet for .*\\.claude-work (blank = daemon default): \\'" seen-prompt))
+        (should-not seen-candidates)
+        (should (eq seen-require-match t))
+        (should (cl-some (lambda (m) (string-match-p "\\`elisp.verbs.read-model-offers-nothing config-dir=.*\\.claude-work cause=catalog-unknown" m))
+                         agent-repl-test-verbs--logged))))))
 
 (ert-deftest agent-repl-verbs-read-model-signals-a-failed-transport ()
   "A catalog ask the transport fails is recorded at ERROR and signalled."

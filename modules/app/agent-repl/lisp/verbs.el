@@ -2913,24 +2913,25 @@ to choose.
 The prompt opens BLANK: nothing is seeded, so a bare RET asks the daemon
 to choose and every model is picked on purpose.
 
-A login no session has served a catalog for has no models to offer, so
-the pick is refused with a sentence saying so."
+A login no session has served a catalog for has no models to offer: the
+picker still opens, says so in its question, and accepts only a blank
+answer, the daemon\='s default, which every login can run."
   (let* ((answer (agent-repl-verbs--creation-models repository))
-         (config-dir (plist-get answer :config-dir))
-         (catalog (plist-get answer :catalog)))
-    (unless (eq (plist-get catalog :arm) :known)
+         (config-dir (abbreviate-file-name (plist-get answer :config-dir)))
+         (catalog (plist-get answer :catalog))
+         (known (eq (plist-get catalog :arm) :known))
+         (options (and known (plist-get (plist-get catalog :value) :options))))
+    (unless known
       (agent-repl--info agent-repl-verbs--create-log-scope
-                        "elisp.verbs.read-model-refused config-dir=%s cause=catalog-unknown"
-                        config-dir)
-      (user-error "agent-repl: no models are known yet for the login %s; open a workspace on it once, or create without picking a model"
-                  (abbreviate-file-name config-dir)))
-    (let* ((options (plist-get (plist-get catalog :value) :options))
-           (value (string-trim
-                   (completing-read
-                    (format "Model for %s (blank = daemon default): "
-                            (abbreviate-file-name config-dir))
-                    (agent-repl-verbs--model-completion-table options)
-                    nil t))))
+                        "elisp.verbs.read-model-offers-nothing config-dir=%s cause=catalog-unknown"
+                        config-dir))
+    (let ((value (string-trim
+                  (completing-read
+                   (if known
+                       (format "Model for %s (blank = daemon default): " config-dir)
+                     (format "No models known yet for %s (blank = daemon default): " config-dir))
+                   (agent-repl-verbs--model-completion-table options)
+                   nil t))))
       (unless (string-empty-p value) value))))
 
 (defun agent-repl-create-oneshot (&optional pick-model)
