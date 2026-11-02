@@ -39,6 +39,7 @@ import "agentrepl/v1/family.proto";
 import "agentrepl/v1/merge_version_increment.proto";
 import "agentrepl/v1/workspace_priority.proto";
 import "agentrepl/v1/workspace_topology.proto";
+import "conversation/v1/api.proto";
 import "conversation/v1/user.proto";
 import "repoconfig/v1/deploy_config.proto";
 import "workspace/v1/workspace.proto";
@@ -80,6 +81,12 @@ message CreateWorkspaceRequest {
   // never an empty-string sentinel. Refused as invalid beside `async_merge`,
   // whose workspace forks its maker's session under the maker's model;
   // `priority` and `allow_ungated` are refused beside it likewise.
+  //
+  // ONLY A MODEL THE CREATING LOGIN KNOWS IS ACCEPTED: the name must be one of
+  // the options' `model.name` in the catalog ListCreationModels serves for
+  // this repository, verbatim. Any other name is refused before anything is
+  // named or built (`model_not_in_catalog`), and so is any name at all on a
+  // login that has served no catalog yet (`model_catalog_unknown`).
   optional string model = 5;
 
   // The workspace's priority. UNSET = unprioritized, except that a child
@@ -606,7 +613,31 @@ message CreateWorkspaceError {
     // a restart across a state layout change, a signal) and admits no new
     // create. Nothing was created; the daemon that serves next creates it.
     CreateWorkspaceStandingDown standing_down = 44;
+    // The requested model is not in the catalog of the login the workspace
+    // would spend as. Nothing was named or built.
+    CreateWorkspaceModelNotInCatalog model_not_in_catalog = 49;
+    // A model was requested, but no session on the login the workspace would
+    // spend as has served a catalog yet, so no model is known to it. Nothing
+    // was named or built; the same create without a model runs under the
+    // daemon's default.
+    CreateWorkspaceModelCatalogUnknown model_catalog_unknown = 50;
   }
+}
+// A requested model the creating login does not offer.
+message CreateWorkspaceModelNotInCatalog {
+  // The model as requested.
+  string model = 1;
+  // The account root (login) the workspace would spend as.
+  string config_dir = 2;
+  // The login's catalog, in the vendor's order: the models a create may name.
+  repeated conversation.v1.ModelOption options = 3;
+}
+// A requested model on a login with no recorded catalog.
+message CreateWorkspaceModelCatalogUnknown {
+  // The model as requested.
+  string model = 1;
+  // The account root (login) the workspace would spend as.
+  string config_dir = 2;
 }
 // A create this daemon did not admit because it is handing over. Every create
 // it admitted before closing finishes before the handover lists what it

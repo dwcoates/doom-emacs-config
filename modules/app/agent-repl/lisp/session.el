@@ -43,12 +43,8 @@
 ;;
 ;; WHICH MODEL a workspace runs under is a CreateWorkspace field now, not a
 ;; `--model' flag: the daemon starts the session and Emacs supplies the
-;; model the user types into verbs.el's model picker.
-
-;; `agent-repl-oneshot-model-candidates' lives in verbs.el, beside the
-;; one-shot creation commands that are its only consumer (ruled at the
-;; wave-2 seam).  It is deliberately NOT a model preference of the
-;; interactive session, which is what this section otherwise holds.
+;; model the user picks in verbs.el's model picker, which offers only the
+;; creating login's own models (ListCreationModels).
 
 ;;;; ---- The magit refresh ------------------------------------------------
 

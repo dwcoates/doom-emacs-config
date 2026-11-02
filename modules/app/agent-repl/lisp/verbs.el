@@ -116,6 +116,7 @@
 (declare-function agent-repl-rpc-interrupt "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-create-workspace "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-validate-workspace-name-sync "agent-repl-rpc" (conn request &optional timeout))
+(declare-function agent-repl-rpc-list-creation-models-sync "agent-repl-rpc" (conn request &optional timeout))
 (declare-function agent-repl-mutation-progress-new-op-id "mutation-progress" ())
 (declare-function agent-repl-mutation-progress-register "mutation-progress" (op-id &rest callbacks))
 (declare-function agent-repl-mutation-progress-forget "mutation-progress" (op-id))
@@ -1425,6 +1426,12 @@ arm is named by its keyword and its own fields."
       (agent-repl-verbs-temporary-directory-sentence (plist-get refusal :value)))
      ((eq keyword :invalid-name)
       (agent-repl-verbs--create-invalid-name-sentence (plist-get refusal :value)))
+     ((eq keyword :model-not-in-catalog)
+      (agent-repl-verbs--create-model-not-in-catalog-sentence (plist-get refusal :value)))
+     ((eq keyword :model-catalog-unknown)
+      (let ((unknown (plist-get refusal :value)))
+        (format "no models are known yet for the login %s, so the model %S could not be checked; create without a model"
+                (abbreviate-file-name (plist-get unknown :config-dir)) (plist-get unknown :model))))
      (t
       (format "the daemon refused it: %s%s"
               (if keyword (substring (symbol-name keyword) 1) "unstated")
@@ -1475,6 +1482,15 @@ to supply a name by hand."
             (if (and answer (not (string-empty-p answer)))
                 (format " -- the model answered %S" answer)
               ""))))
+
+(defun agent-repl-verbs--create-model-not-in-catalog-sentence (refused)
+  "Word a `model_not_in_catalog\=' refusal whose fields are REFUSED.
+The sentence names the model, the login, and the models that login does
+offer, because the user\='s next move is to name one of them."
+  (format "the login %s does not offer the model %S; it offers %s"
+          (abbreviate-file-name (plist-get refused :config-dir))
+          (plist-get refused :model)
+          (string-join (agent-repl-verbs--model-names (plist-get refused :options)) ", ")))
 
 (defun agent-repl-verbs--create-invalid-name-sentence (invalid)
   "Word an `invalid_name\=' refusal whose fields are INVALID.
@@ -2549,6 +2565,33 @@ the question is the one place to say so before the user types.")
  (lambda (map)
    (define-key map [remap exit-minibuffer] #'agent-repl-verbs-name-minibuffer-exit)))
 
+(defun agent-repl-verbs--ask-sync (rpc request event subject failed-ask failed-answer)
+  "Ask the daemon REQUEST through RPC, a `-sync\=' verb, and answer its success.
+THE ONE SHAPE OF A SYNCHRONOUS QUESTION a creation asks before it sends
+anything: the answer is the success arm\='s value, and every other
+outcome is recorded at ERROR and SIGNALLED, so a question nobody
+answered is never passed on as an answer.
+
+EVENT names the failure record, and SUBJECT is (KEY . VALUE), the fact
+the question is about, rendered into it as KEY=VALUE.  A failed ask --
+the transport or an undecodable answer -- signals FAILED-ASK followed by
+the cause; the daemon\='s error arm signals FAILED-ANSWER."
+  (let ((response
+         (condition-case err
+             (funcall rpc (agent-repl-verbs--conn) request)
+           ((agent-repl-connect-error agent-repl-wire-error)
+            (agent-repl--error agent-repl-verbs--create-log-scope
+                               "%s %s=%S cause=%s detail=%S"
+                               event (car subject) (cdr subject) (car err) (cdr err))
+            (error "agent-repl: %s: %s" failed-ask (error-message-string err))))))
+    (pcase response
+      (`(:arm :success :value ,success) success)
+      (_
+       (agent-repl--error agent-repl-verbs--create-log-scope
+                          "%s %s=%S cause=error-arm response=%S"
+                          event (car subject) (cdr subject) response)
+       (error "agent-repl: %s" failed-answer)))))
+
 (defun agent-repl-verbs--name-refusal (name)
   "Answer the sentence refusing NAME as a workspace name, or nil if it is one.
 THE NAMING RULE LIVES IN THE DAEMON ALONE, so this asks it
@@ -2557,33 +2600,24 @@ refusal is worded as the create\='s own `invalid_name\=' refusal is
 \(`agent-repl-verbs--create-invalid-name-sentence\=').
 
 An ask that fails -- the transport, an undecodable answer, or the
-daemon\='s error arm -- is recorded at ERROR and SIGNALLED: a name nobody
-checked is never passed on as a legal one."
-  (let ((response
-         (condition-case err
-             (agent-repl-rpc-validate-workspace-name-sync
-              (agent-repl-verbs--conn) (list :name name))
-           ((agent-repl-connect-error agent-repl-wire-error)
-            (agent-repl--error agent-repl-verbs--create-log-scope
-                               "elisp.verbs.name-validation-failed name=%S cause=%s detail=%S"
-                               name (car err) (cdr err))
-            (error "agent-repl: could not check the name with the daemon: %s"
-                   (error-message-string err))))))
-    (pcase response
-      (`(:arm :success :value (:verdict (:arm :legal . ,_)))
-       (agent-repl--log agent-repl-verbs--create-log-scope
-                        "elisp.verbs.name-validated name=%S verdict=legal" name)
-       nil)
-      (`(:arm :success :value (:verdict (:arm :invalid :value ,invalid)))
-       (agent-repl--info agent-repl-verbs--create-log-scope
-                         "elisp.verbs.name-validated name=%S verdict=invalid component=%S rule=%s"
-                         name (plist-get invalid :component) (plist-get invalid :rule))
-       (agent-repl-verbs--create-invalid-name-sentence invalid))
-      (_
-       (agent-repl--error agent-repl-verbs--create-log-scope
-                          "elisp.verbs.name-validation-failed name=%S cause=error-arm response=%S"
-                          name response)
-       (error "agent-repl: the daemon could not check the name %S" name)))))
+daemon\='s error arm -- is recorded at ERROR and SIGNALLED
+\(`agent-repl-verbs--ask-sync\='): a name nobody checked is never passed
+on as a legal one."
+  (pcase (plist-get (agent-repl-verbs--ask-sync
+                     #'agent-repl-rpc-validate-workspace-name-sync (list :name name)
+                     "elisp.verbs.name-validation-failed" (cons "name" name)
+                     "could not check the name with the daemon"
+                     (format "the daemon could not check the name %S" name))
+                    :verdict)
+    (`(:arm :legal . ,_)
+     (agent-repl--log agent-repl-verbs--create-log-scope
+                      "elisp.verbs.name-validated name=%S verdict=legal" name)
+     nil)
+    (`(:arm :invalid :value ,invalid)
+     (agent-repl--info agent-repl-verbs--create-log-scope
+                       "elisp.verbs.name-validated name=%S verdict=invalid component=%S rule=%s"
+                       name (plist-get invalid :component) (plist-get invalid :rule))
+     (agent-repl-verbs--create-invalid-name-sentence invalid))))
 
 (defun agent-repl-verbs-name-minibuffer-exit ()
   "Leave the name minibuffer only with a name the daemon accepts.
@@ -2638,7 +2672,7 @@ recorded before the abandonment propagates."
   (let* ((repository (agent-repl-verbs--read-for command 'repository repository-fn))
          (model (and pick-model
                      (agent-repl-verbs--read-for
-                      command 'model #'agent-repl-verbs--read-model)))
+                      command 'model (lambda () (agent-repl-verbs--read-model repository)))))
          (prompt (agent-repl-verbs--read-for
                   command 'prompt
                   (lambda () (agent-repl-verbs--read-prompt
@@ -2805,16 +2839,6 @@ THE FORK IS NOT SELECTED."
 ;; `SPC TAB O' in explanation-engine's.  Only `SPC TAB M-o', a one-shot
 ;; ABOUT the current workspace, takes the current workspace's repository.
 
-(defcustom agent-repl-oneshot-model-candidates '("opus" "sonnet" "haiku")
-  "The models offered when creating a ONE-SHOT workspace, in order.
-One-shots ride the wire -- Emacs supplies prompt, model and parentage
-through the dedicated one-shot creation form and the daemon owns naming,
-the worktree and decoration -- so this list
-is a picker's contents and nothing more.  It lives beside the one-shot
-commands that read it, which are its only consumer."
-  :type '(repeat string)
-  :group 'agent-repl)
-
 (defconst agent-repl-verbs--oneshot-history-basename "oneshot-commission-history.el"
   "The file, under the global state directory, holding one-shot commissions.")
 
@@ -2824,19 +2848,92 @@ It is process-wide, under `agent-repl--global-state-dir', because a
 one-shot is commissioned from any workspace or none."
   (agent-repl--global-state-file agent-repl-verbs--oneshot-history-basename))
 
-(defun agent-repl-verbs--read-model ()
-  "Read a model, or nil for the daemon's default.
-Completes against `agent-repl-oneshot-model-candidates' without requiring
-a match: the candidate list is a convenience, and the model vocabulary is
-the vendor's, not ours.
+(defun agent-repl-verbs--creation-models (repository)
+  "Answer what the daemon knows of the models a create in REPOSITORY may name.
+The answer is ListCreationModels\=' success: (:config-dir D :catalog C),
+where D is the login the new workspace would spend as and C is
+\(:arm :known :value (:options OPTIONS)) or (:arm :unknown).
+
+THE LIST IS THE DAEMON\='S, read from the login\='s stored catalog by the
+very verb CreateWorkspace refuses an unknown model with, so the picker
+never offers a model the create refuses.
+
+An ask that fails -- the transport, an undecodable answer, or the
+daemon\='s error arm -- is recorded at ERROR and SIGNALLED
+\(`agent-repl-verbs--ask-sync\='): a picker with no list to offer is
+never opened on a guessed one."
+  (let ((success (agent-repl-verbs--ask-sync
+                  #'agent-repl-rpc-list-creation-models-sync (list :repository repository)
+                  "elisp.verbs.creation-models-failed" (cons "repository" repository)
+                  "could not ask the daemon which models it may create with"
+                  (format "the daemon could not say which models %s may create with"
+                          (agent-repl-verbs--repository-name repository)))))
+    (agent-repl--log agent-repl-verbs--create-log-scope
+                     "elisp.verbs.creation-models repository=%S config-dir=%s catalog=%s"
+                     repository (plist-get success :config-dir)
+                     (plist-get (plist-get success :catalog) :arm))
+    success))
+
+(defun agent-repl-verbs--model-names (options)
+  "Answer the model names of OPTIONS, decoded `conversation.v1.ModelOption\='s.
+A name is what a create names, so every list of offered models is read
+through here."
+  (mapcar (lambda (option) (plist-get option :name)) options))
+
+(defun agent-repl-verbs--model-completion-table (options)
+  "Return a completion table over the model names of OPTIONS.
+OPTIONS are decoded `conversation.v1.ModelOption\=' plists; each
+candidate is annotated with its display name and description, so the
+picker says what each model id is."
+  (let ((names (agent-repl-verbs--model-names options)))
+    (lambda (string predicate action)
+      (if (eq action 'metadata)
+          `(metadata
+            (category . agent-repl-model)
+            (annotation-function
+             . ,(lambda (name)
+                  (when-let* ((option (cl-find name options
+                                               :key (lambda (o) (plist-get o :name))
+                                               :test #'equal)))
+                    (concat "  " (plist-get option :display-name)
+                            (let ((description (plist-get option :description)))
+                              (if (string-empty-p description) ""
+                                (concat " -- " description))))))))
+        (complete-with-action action names string predicate)))))
+
+(defun agent-repl-verbs--read-model (repository)
+  "Read a model for a create in REPOSITORY, or nil for the daemon\='s default.
+ONLY A MODEL THE CREATING LOGIN KNOWS IS OFFERED OR ACCEPTED: the
+candidates are the catalog the daemon serves for the login the new
+workspace would spend as (`agent-repl-verbs--creation-models\='), and the
+picker requires a match, so text naming any other model is refused in
+the minibuffer.  A blank answer is still accepted and asks the daemon
+to choose.
 
 The prompt opens BLANK: nothing is seeded, so a bare RET asks the daemon
-to choose and every model is typed or completed on purpose."
-  (let ((value (string-trim
-                (completing-read
-                 "Model (blank = daemon default): "
-                 agent-repl-oneshot-model-candidates))))
-    (unless (string-empty-p value) value)))
+to choose and every model is picked on purpose.
+
+A login no session has served a catalog for has no models to offer: the
+picker still opens, says so in its question, and accepts only a blank
+answer, the daemon\='s default, which every login can run.  Every model
+question opens with \"Model\", whatever the catalog holds."
+  (let* ((answer (agent-repl-verbs--creation-models repository))
+         (config-dir (abbreviate-file-name (plist-get answer :config-dir)))
+         (catalog (plist-get answer :catalog))
+         (known (eq (plist-get catalog :arm) :known))
+         (options (and known (plist-get (plist-get catalog :value) :options))))
+    (unless known
+      (agent-repl--info agent-repl-verbs--create-log-scope
+                        "elisp.verbs.read-model-offers-nothing config-dir=%s cause=catalog-unknown"
+                        config-dir))
+    (let ((value (string-trim
+                  (completing-read
+                   (if known
+                       (format "Model for %s (blank = daemon default): " config-dir)
+                     (format "Model for %s (none known yet; blank = daemon default): " config-dir))
+                   (agent-repl-verbs--model-completion-table options)
+                   nil t))))
+      (unless (string-empty-p value) value))))
 
 (defun agent-repl-create-oneshot (&optional pick-model)
   "Create a ONE-SHOT workspace for a commission read from the minibuffer.
@@ -2874,10 +2971,11 @@ daemon opens the commission with a note saying the issue it cites -- a bug
 in \"the feed\", say -- is that workspace\='s, by name, worktree and
 branch.  When that workspace\='s feed has a bubble selected, the daemon
 quotes it after the note, kind, row and text: the daemon holds the
-selection, so nothing more is sent.  The one-shot is still top-level, cut from and merging into the
-primary branch; nothing of the current workspace\='s conversation or
-worktree is carried over.  Unlike `SPC TAB o\=', its repository is the
-current workspace\='s (`agent-repl-verbs--oneshot-repository\=').
+selection, so nothing more is sent.  The one-shot is still top-level,
+cut from and merging into the primary branch; nothing of the current
+workspace\='s conversation or worktree is carried over.  Unlike
+`SPC TAB o\=', its repository is the current workspace\='s
+\(`agent-repl-verbs--oneshot-repository\=').
 
 A prefix argument PICK-MODEL asks for the model."
   (interactive "P")
@@ -2971,7 +3069,7 @@ repository says so before the commission is typed."
          (about (and about-current (agent-repl--ws-current-name)))
          (model (and pick-model
                      (agent-repl-verbs--read-for
-                      command 'model #'agent-repl-verbs--read-model)))
+                      command 'model (lambda () (agent-repl-verbs--read-model repository)))))
          (prompt (agent-repl-verbs--read-for
                   command 'prompt
                   (lambda ()

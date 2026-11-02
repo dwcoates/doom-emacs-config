@@ -79,8 +79,12 @@ type fakeDB struct {
 
 	// defaultModels is each login's chosen default model, by account root;
 	// defaultModelErr fails its read and putDefaultModelErr its write.
-	defaultModels      map[string]string
-	defaultModelErr    error
+	defaultModels   map[string]string
+	defaultModelErr error
+	// modelCatalogs is each login's recorded model catalog, by account root;
+	// modelCatalogErr fails its read.
+	modelCatalogs      map[string]*conversationv1.ModelCatalog
+	modelCatalogErr    error
 	putDefaultModelErr error
 
 	// workspaceByDirErr fails WorkspaceByDir, at workspaceByDirErrAt alone
@@ -150,7 +154,7 @@ type fakeDB struct {
 	// (read back as wsm.DefaultSidebarView); setMergedFoldedErr,
 	// setMaturityFoldedErr and setGroupingErr fail its writes and viewErr its
 	// read.
-	view               *wsm.SidebarView
+	view                   *wsm.SidebarView
 	setMergedFoldedErr     error
 	setMergeQueueFoldedErr error
 	setHiddenFoldedErr     error
@@ -1040,6 +1044,14 @@ func (d *fakeDB) AccountDefaultModel(_ context.Context, configDir string) (strin
 	}
 	model, ok := d.defaultModels[configDir]
 	return model, ok, nil
+}
+
+func (d *fakeDB) AccountModelCatalog(_ context.Context, configDir string) (*conversationv1.ModelCatalog, bool, error) {
+	if d.modelCatalogErr != nil {
+		return nil, false, d.modelCatalogErr
+	}
+	catalog, ok := d.modelCatalogs[configDir]
+	return catalog, ok, nil
 }
 
 func (d *fakeDB) PutAccountDefaultModel(_ context.Context, configDir, model string) error {

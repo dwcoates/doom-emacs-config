@@ -133,7 +133,8 @@ names its requester and placement as well, so the request tests read
     ("agentrepl/v1/endpoint_update_merge_queue.pb.go" "UpdateMergeQueueResponse")
     ("agentrepl/v1/endpoint_daemon_health.pb.go" "DaemonHealthResponse")
     ("agentrepl/v1/endpoint_session_health.pb.go" "SessionHealthResponse")
-    ("agentrepl/v1/endpoint_register_repository.pb.go" "RegisterRepositoryResponse"))
+    ("agentrepl/v1/endpoint_register_repository.pb.go" "RegisterRepositoryResponse")
+    ("agentrepl/v1/endpoint_list_creation_models.pb.go" "ListCreationModelsResponse"))
   "Every response whose result oneof this codec decodes, with its binding.")
 
 
@@ -690,6 +691,95 @@ that outcome answering the editor\='s close is a contract breach."
                    '(:arm :error
                      :value (:cause (:arm :not-yet-adopted :value (:address nil))))))))
 
+
+;;;; ---- AgentModel -----------------------------------------------------
+
+(ert-deftest agent-repl-test-wire-verbs-agent-model-decodes-its-name ()
+  "An AgentModel decodes as its model id."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-agent-model
+                    (agent-repl-test-wire-verbs--parse "{\"name\":\"claude-opus-5\"}"))
+                   '(:name "claude-opus-5")))))
+
+(ert-deftest agent-repl-test-wire-verbs-agent-model-refuses-an-unknown-field ()
+  "A field AgentModel does not declare is a contract breach."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-agent-model
+                   (agent-repl-test-wire-verbs--parse "{\"name\":\"opus\",\"alias\":\"o\"}"))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-transcript-last-model-is-the-agent-model-decoder ()
+  "A transcript's `last_model' use site decodes through the one AgentModel decoder."
+  (agent-repl-test-wire-verbs--with-common
+    (let (seen)
+      (cl-letf (((symbol-function 'agent-repl-wire-decode-agent-model)
+                 (lambda (json) (setq seen json) '(:name "stub"))))
+        (should (equal (agent-repl-wire-decode-workspace-transcript-last-model '((name . "opus")))
+                       '(:name "stub")))
+        (should (equal seen '((name . "opus"))))))))
+
+;;;; ---- ListCreationModels ----------------------------------------------
+
+(ert-deftest agent-repl-test-wire-verbs-list-creation-models-request-carries-the-repository ()
+  "A catalog ask carries the repository a create would be made in."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-encode-list-creation-models-request
+                    '(:repository (:id "repo-1" :dir "/r")))
+                   '((repository . ((id . "repo-1") (dir . "/r"))))))))
+
+(ert-deftest agent-repl-test-wire-verbs-list-creation-models-request-without-repository ()
+  "A catalog ask with no repository is incomplete and errors before send."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-encode-list-creation-models-request nil)
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-list-creation-models-known-catalog ()
+  "A known catalog decodes as the login and its options, in order."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-list-creation-models-response
+                    (agent-repl-test-wire-verbs--parse
+                     "{\"success\":{\"configDir\":\"/c\",\"known\":{\"options\":[{\"model\":{\"name\":\"opus\"},\"displayName\":\"Opus 5.5\",\"description\":\"Complex work\",\"capabilities\":{\"supportsFastMode\":true}},{\"model\":{\"name\":\"haiku\"},\"displayName\":\"Haiku\"}]}}}"))
+                   '(:arm :success
+                     :value (:config-dir "/c"
+                             :catalog (:arm :known
+                                       :value (:options ((:name "opus" :display-name "Opus 5.5" :description "Complex work")
+                                                         (:name "haiku" :display-name "Haiku" :description ""))))))))))
+
+(ert-deftest agent-repl-test-wire-verbs-list-creation-models-unknown-catalog ()
+  "A login with no catalog decodes as the empty `unknown' arm."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-list-creation-models-response
+                    (agent-repl-test-wire-verbs--parse "{\"success\":{\"configDir\":\"/c\",\"unknown\":{}}}"))
+                   '(:arm :success :value (:config-dir "/c" :catalog (:arm :unknown :value nil)))))))
+
+(ert-deftest agent-repl-test-wire-verbs-list-creation-models-unknown-repository ()
+  "The error arm decodes its one cause."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-list-creation-models-response
+                    (agent-repl-test-wire-verbs--parse "{\"error\":{\"unknownRepository\":{}}}"))
+                   '(:arm :error :value (:cause (:arm :unknown-repository :value nil)))))))
+
+(ert-deftest agent-repl-test-wire-verbs-list-creation-models-unset-catalog-is-a-breach ()
+  "A success with no catalog arm set is a contract breach."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-list-creation-models-response
+                   (agent-repl-test-wire-verbs--parse "{\"success\":{\"configDir\":\"/c\"}}"))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-model-option-without-model-is-a-breach ()
+  "A ModelOption naming no model is a contract breach, never a blank candidate."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-model-option
+                   (agent-repl-test-wire-verbs--parse "{\"displayName\":\"Opus\"}"))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-list-creation-models-catalog-arms-pinned ()
+  "ListCreationModelsSuccess's catalog oneof is exactly the two arms decoded here."
+  (should (equal (sort (agent-repl-test--generated-oneof-arms
+                        "agentrepl/v1/endpoint_list_creation_models.pb.go"
+                        "ListCreationModelsSuccess")
+                       #'string<)
+                 '("known" "unknown"))))
 
 ;;;; ---- SetWorkspaceHidden ----------------------------------------------
 
@@ -2240,8 +2330,27 @@ and the temporary root it carries."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_create_workspace.pb.go" "CreateWorkspaceError")
                        #'string<)
-                 (sort (list "ungatedWithoutConsent" "noSlug" "briefMissing" "unknownRepository" "worktreeCreationFailed" "spawnFailed" "oneShotPolicyMissing" "namingFailed" "insideTemporaryDirectory" "unknownForkSource" "forkSourceHasNoConversation" "forkSourceHasNoFinishedTurn" "nameReserved" "nameHeld" "invalidName" "unknownContextWorkspace" "unknownOwner" "ownerNoticeRequired" "ownerNoticeUnexpected" "unknownRequester" "asyncMergeUnknownBranch" "asyncMergeBranchOwned" "asyncMergeUnknownSubagent" "asyncMergeUnknownMaker" "asyncMergeContextNotMaker" "asyncMergeNameTaken" "asyncMergeUnknownCloseAfter" "opIdWithAsyncMerge" "versionIncrementRequired" "versionIncrementUnexpected" "asyncMergeRequesterQueued" "asyncMergeRequesterMerging" "asyncMergeRequesterSessionDeleted" "parentNotOpen" "originFetchFailed" "asyncMergeNoDeployConfig" "asyncMergeDeployConfigInvalid" "transferringAway" "standingDown" "placementBehindNotInLine" "unknownLandingTarget")
+                 (sort (list "ungatedWithoutConsent" "noSlug" "briefMissing" "unknownRepository" "worktreeCreationFailed" "spawnFailed" "oneShotPolicyMissing" "namingFailed" "insideTemporaryDirectory" "unknownForkSource" "forkSourceHasNoConversation" "forkSourceHasNoFinishedTurn" "nameReserved" "nameHeld" "invalidName" "unknownContextWorkspace" "unknownOwner" "ownerNoticeRequired" "ownerNoticeUnexpected" "unknownRequester" "asyncMergeUnknownBranch" "asyncMergeBranchOwned" "asyncMergeUnknownSubagent" "asyncMergeUnknownMaker" "asyncMergeContextNotMaker" "asyncMergeNameTaken" "asyncMergeUnknownCloseAfter" "opIdWithAsyncMerge" "versionIncrementRequired" "versionIncrementUnexpected" "asyncMergeRequesterQueued" "asyncMergeRequesterMerging" "asyncMergeRequesterSessionDeleted" "parentNotOpen" "originFetchFailed" "asyncMergeNoDeployConfig" "asyncMergeDeployConfigInvalid" "transferringAway" "standingDown" "placementBehindNotInLine" "unknownLandingTarget" "modelNotInCatalog" "modelCatalogUnknown")
                        #'string<))))
+
+(ert-deftest agent-repl-test-wire-verbs-create-error-model-not-in-catalog-arm ()
+  "CreateWorkspaceError's `model_not_in_catalog' arm decodes the model, the
+login and its catalog."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-create-workspace-error
+                    (agent-repl-test-wire-verbs--parse
+                     "{\"modelNotInCatalog\":{\"model\":\"gpt-9\",\"configDir\":\"/c\",\"options\":[{\"model\":{\"name\":\"opus\"},\"displayName\":\"Opus\"}]}}"))
+                   '(:cause (:arm :model-not-in-catalog
+                             :value (:model "gpt-9" :config-dir "/c"
+                                     :options ((:name "opus" :display-name "Opus" :description "")))))))))
+
+(ert-deftest agent-repl-test-wire-verbs-create-error-model-catalog-unknown-arm ()
+  "CreateWorkspaceError's `model_catalog_unknown' arm decodes the model and the login."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-create-workspace-error
+                    (agent-repl-test-wire-verbs--parse
+                     "{\"modelCatalogUnknown\":{\"model\":\"opus\",\"configDir\":\"/c\"}}"))
+                   '(:cause (:arm :model-catalog-unknown :value (:model "opus" :config-dir "/c")))))))
 
 (ert-deftest agent-repl-test-wire-verbs-create-error-unknown-fork-source-arm ()
   "CreateWorkspaceError's `unknown_fork_source' arm decodes the ref it names."

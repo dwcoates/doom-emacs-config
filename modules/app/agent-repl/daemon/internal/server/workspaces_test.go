@@ -14,6 +14,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
+	conversationv1 "agentrepl/proto/conversation/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"agent-repld/internal/dlog"
@@ -2650,6 +2651,162 @@ func TestValidateWorkspaceNameRefusesABlankName(t *testing.T) {
 	// Assert
 	if connect.CodeOf(err) != connect.CodeInvalidArgument {
 		t.Fatalf("ValidateWorkspaceName err = %v, want InvalidArgument", err)
+	}
+}
+
+// ---- ListCreationModels ----------------------------------------------------
+
+// modelOption is a served catalog option naming NAME.
+func modelOption(name string) *conversationv1.ModelOption {
+	return &conversationv1.ModelOption{Model: &conversationv1.AgentModel{Name: name}, DisplayName: name}
+}
+
+func TestListCreationModelsAnswersTheCreatingLoginsCatalog(t *testing.T) {
+	tests := []struct {
+		name      string
+		catalog   workspace.CreationCatalog
+		wantKnown []string
+	}{
+		{name: "a known catalog is served in order", catalog: workspace.CreationCatalog{ConfigDir: "/home/.claude", Known: true, Options: []*conversationv1.ModelOption{modelOption("opus"), modelOption("sonnet")}}, wantKnown: []string{"opus", "sonnet"}},
+		{name: "a login with no catalog is answered as unknown", catalog: workspace.CreationCatalog{ConfigDir: "/home/.claude"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			ref := registeredRepoRef(h)
+			h.Verbs.creationCatalog = tt.catalog
+
+			// Act.
+			resp, err := h.Client.ListCreationModels(context.Background(),
+				connect.NewRequest(&agentreplv1.ListCreationModelsRequest{Repository: ref}))
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("ListCreationModels: %v", err)
+			}
+			success := resp.Msg.GetSuccess()
+			if success.GetConfigDir() != "/home/.claude" {
+				t.Fatalf("config_dir = %q, want the login", success.GetConfigDir())
+			}
+			if len(h.Verbs.creationCatalogDirs) != 1 || h.Verbs.creationCatalogDirs[0] != "/tmp/agent-repl-test-repo" {
+				t.Fatalf("asked about %v, want the registered repository's dir", h.Verbs.creationCatalogDirs)
+			}
+			if tt.wantKnown == nil {
+				if success.GetUnknown() == nil {
+					t.Fatalf("catalog = %v, want unknown", success.GetCatalog())
+				}
+				return
+			}
+			var names []string
+			for _, option := range success.GetKnown().GetOptions() {
+				names = append(names, option.GetModel().GetName())
+			}
+			if !slices.Equal(names, tt.wantKnown) {
+				t.Fatalf("options = %v, want %v", names, tt.wantKnown)
+			}
+		})
+	}
+}
+
+func TestListCreationModelsRefusesAnUnknownRepository(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	resp, err := h.Client.ListCreationModels(context.Background(),
+		connect.NewRequest(&agentreplv1.ListCreationModelsRequest{Repository: &workspacev1.RepositoryRef{Id: "repo-nope"}}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("ListCreationModels: %v", err)
+	}
+	if resp.Msg.GetError().GetUnknownRepository() == nil {
+		t.Fatalf("result = %v, want unknown_repository", resp.Msg.GetResult())
+	}
+	if len(h.Verbs.creationCatalogDirs) != 0 {
+		t.Fatalf("asked about %v, want no catalog read", h.Verbs.creationCatalogDirs)
+	}
+}
+
+func TestListCreationModelsRefusesAMissingRepository(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	_, err := h.Client.ListCreationModels(context.Background(),
+		connect.NewRequest(&agentreplv1.ListCreationModelsRequest{}))
+
+	// Assert.
+	if connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Fatalf("ListCreationModels err = %v, want InvalidArgument", err)
+	}
+}
+
+func TestListCreationModelsFailsWhenTheCatalogCannotBeRead(t *testing.T) {
+	// Arrange.
+	log := dlog.NewTestLogger()
+	h := newHarness(t, func(deps *Deps) { deps.Log = &fakeSurfaces{global: log, workspace: log} })
+	ref := registeredRepoRef(h)
+	h.Verbs.creationCatalogErr = errors.New("disk on fire")
+
+	// Act.
+	_, err := h.Client.ListCreationModels(context.Background(),
+		connect.NewRequest(&agentreplv1.ListCreationModelsRequest{Repository: ref}))
+
+	// Assert.
+	if connect.CodeOf(err) != connect.CodeInternal {
+		t.Fatalf("ListCreationModels err = %v, want Internal", err)
+	}
+	if _, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: dlog.LevelError}); !ok {
+		t.Fatalf("records = %+v, want the failure at ERROR", log.Records())
+	}
+}
+
+func TestCreateWorkspaceCarriesTheModelRefusalsOnTheirArms(t *testing.T) {
+	tests := []struct {
+		name   string
+		refuse *workspace.Refusal
+		check  func(*agentreplv1.CreateWorkspaceError) bool
+	}{
+		{
+			name: "model_not_in_catalog carries the model, the login and the catalog",
+			refuse: &workspace.Refusal{Rpc: "CreateWorkspace", Arm: workspace.ArmModelNotInCatalog, Reason: "not offered",
+				Fields: map[string]any{"model": "gpt-9", "config_dir": "/home/.claude", "options": []proto.Message{modelOption("opus")}}},
+			check: func(e *agentreplv1.CreateWorkspaceError) bool {
+				arm := e.GetModelNotInCatalog()
+				return arm.GetModel() == "gpt-9" && arm.GetConfigDir() == "/home/.claude" &&
+					len(arm.GetOptions()) == 1 && arm.GetOptions()[0].GetModel().GetName() == "opus"
+			},
+		},
+		{
+			name: "model_catalog_unknown carries the model and the login",
+			refuse: &workspace.Refusal{Rpc: "CreateWorkspace", Arm: workspace.ArmModelCatalogUnknown, Reason: "no catalog",
+				Fields: map[string]any{"model": "opus", "config_dir": "/home/.claude"}},
+			check: func(e *agentreplv1.CreateWorkspaceError) bool {
+				arm := e.GetModelCatalogUnknown()
+				return arm.GetModel() == "opus" && arm.GetConfigDir() == "/home/.claude"
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			ref := registeredRepoRef(h)
+			h.Verbs.createErr = tt.refuse
+
+			// Act.
+			resp, err := h.Client.CreateWorkspace(context.Background(), connect.NewRequest(standardCreate(ref, "")))
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("CreateWorkspace: %v", err)
+			}
+			if !tt.check(resp.Msg.GetError()) {
+				t.Fatalf("result = %v, want the %s arm with its fields", resp.Msg.GetResult(), tt.refuse.Arm)
+			}
+		})
 	}
 }
 

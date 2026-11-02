@@ -1445,6 +1445,15 @@ func validateValidateWorkspaceNameRequest(req *agentreplv1.ValidateWorkspaceName
 	return nil
 }
 
+// validateListCreationModelsRequest is ListCreationModelsRequest's base
+// function: the repository a create would be made in.
+func validateListCreationModelsRequest(req *agentreplv1.ListCreationModelsRequest) *connect.Error {
+	if req.GetRepository() == nil {
+		return invalid("repository", "the repository a create would be made in is required")
+	}
+	return nil
+}
+
 // validateUpdateDeployHoldRequest is UpdateDeployHoldRequest's base function:
 // a repository and an action arm.
 func validateUpdateDeployHoldRequest(req *agentreplv1.UpdateDeployHoldRequest) *connect.Error {

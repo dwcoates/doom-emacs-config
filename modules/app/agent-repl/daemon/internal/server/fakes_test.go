@@ -529,6 +529,12 @@ type fakeVerbs struct {
 	// set, is the failure it returns instead.
 	createRec wsm.Workspace
 	createErr error
+	// creationCatalog is what CreationCatalog answers; creationCatalogErr
+	// fails it. creationCatalogDirs records each repository dir it was asked
+	// about.
+	creationCatalog     workspace.CreationCatalog
+	creationCatalogErr  error
+	creationCatalogDirs []string
 	// createStages are the stages Create reports through spec.Progress, in
 	// order, before it returns — so a test can drive the server's progress
 	// relay without the real naming/worktree steps.
@@ -613,6 +619,12 @@ func (f *fakeVerbs) Create(ctx context.Context, spec workspace.CreateSpec) (wsm.
 		return wsm.Workspace{}, f.createErr
 	}
 	return f.createRec, nil
+}
+
+// CreationCatalog answers creationCatalog, or fails with creationCatalogErr.
+func (f *fakeVerbs) CreationCatalog(_ context.Context, repoDir string) (workspace.CreationCatalog, error) {
+	f.creationCatalogDirs = append(f.creationCatalogDirs, repoDir)
+	return f.creationCatalog, f.creationCatalogErr
 }
 
 // EnterCreate answers a ticket for the spec, joined to createJoined when that

@@ -335,6 +335,10 @@ type Verbs interface {
 	// the create or joining the identical one already pending
 	// (pendingcreates.go). The ticket says which.
 	EnterCreate(spec CreateSpec) *CreateTicket
+	// CreationCatalog answers the login a create in a repository spends as and
+	// the model catalog that login last served (creationmodels.go): the models
+	// a create may name.
+	CreationCatalog(ctx context.Context, repoDir string) (CreationCatalog, error)
 	// RunCreate runs the create a ticket names to its answer.
 	RunCreate(ctx context.Context, ticket *CreateTicket) (wsm.Workspace, error)
 	// RecoverQueuedCreates takes up every create a previous daemon held for

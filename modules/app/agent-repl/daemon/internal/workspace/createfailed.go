@@ -122,6 +122,8 @@ var createRefusalArms = map[string]bool{
 	ArmNameReserved:                         true,
 	ArmNameHeld:                             true,
 	ArmInvalidName:                          true,
+	ArmModelNotInCatalog:                    true,
+	ArmModelCatalogUnknown:                  true,
 	"unknown_context_workspace":             true,
 	"parent_not_open":                       true,
 	ArmUnknownOwner:                         true,

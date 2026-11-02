@@ -133,6 +133,7 @@ import "agentrepl/v1/endpoint_update_shutdown_schedule.proto";
 import "agentrepl/v1/endpoint_update_sidebar_view.proto";
 import "agentrepl/v1/endpoint_update_task.proto";
 import "agentrepl/v1/endpoint_validate_workspace_name.proto";
+import "agentrepl/v1/endpoint_list_creation_models.proto";
 import "agentrepl/v1/endpoint_watch_chat.proto";
 import "agentrepl/v1/endpoint_watch_daemon.proto";
 import "agentrepl/v1/endpoint_watch_feed.proto";
@@ -289,6 +290,12 @@ service AgentRepl {
   // Would a create accept this supplied name? Asked while the user can still
   // edit it. See endpoint_validate_workspace_name.proto.
   rpc ValidateWorkspaceName(ValidateWorkspaceNameRequest) returns (ValidateWorkspaceNameResponse) {
+    // A READ: it changes nothing (`agent-repld -dry-run` lets it through).
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // Which models a create in this repository may name: the catalog of the
+  // login its workspace would spend as. See endpoint_list_creation_models.proto.
+  rpc ListCreationModels(ListCreationModelsRequest) returns (ListCreationModelsResponse) {
     // A READ: it changes nothing (`agent-repld -dry-run` lets it through).
     option idempotency_level = NO_SIDE_EFFECTS;
   }
