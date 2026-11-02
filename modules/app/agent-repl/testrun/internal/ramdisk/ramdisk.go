@@ -14,10 +14,13 @@
 //
 // ITS LIFETIME IS HELD BY THE KERNEL. The run holds an exclusive flock on
 // <Registry>/<pid>.lock for as long as it lives, and the record in that file
-// names the device and the mount. A run that does not end ordinarily (a
-// SIGKILL, a crash) leaves its RAM disk attached; the next run's Reclaim finds
-// the record, sees the lock free, kills whatever still runs out of the mount,
-// and detaches it.
+// names the disk by the helper process serving its image (helper), never by
+// its device number alone, and the mount. A run that does not end ordinarily
+// (a SIGKILL, a crash, a cut mid-acquire) leaves its RAM disk attached; the
+// next run's Reclaim finds the record, sees the lock free, kills whatever
+// still runs out of the disk, and detaches the disk the record owns (owns),
+// wherever it is mounted. A disk the runner made that no record names any more
+// is adopted first (adoptOrphans), and reclaimed the same way.
 //
 // A LEAK OR A WEDGED DISK MANAGER STOPS THE ATTACH (owner ruling,
 // 2026-10-12). Before anything is attached, Setup asks the disk manager for
@@ -316,9 +319,9 @@ type Volume struct {
 	SizeMiB int
 
 	m Manager
-	// mounted is set once the volume is mounted at Mount: from then on the
-	// release finds its disk by that mount, never by Device (diskMountedAt).
-	mounted bool
+	// helper is the process serving the disk's image, read at the attach:
+	// the release finds its disk by it, never by Device (helper).
+	helper helper
 	// use records the space in use over the run (WatchUse).
 	use  *use
 	lock *os.File
@@ -437,7 +440,6 @@ func (m Manager) Acquire(sizeMiB int) (_ *Volume, err error) {
 	if _, err := m.Run("diskutil", "mount", "nobrowse", "-mountPoint", v.Mount, volume); err != nil {
 		return v, fmt.Errorf("mount the RAM disk's volume %s at %s: %w", volume, v.Mount, err)
 	}
-	v.mounted = true
 	end := m.Now()
 	m.Log.Infof("RAM disk acquire: %s mounted at %s in %s (attach %s, format %s, mount %s)",
 		v.Device, v.Mount, end.Sub(start), attached.Sub(start), formatted.Sub(attached), end.Sub(formatted))
@@ -511,10 +513,43 @@ func (m Manager) attach(sizeMiB int) (_ *Volume, err error) {
 	v.Device = fields[0]
 	// THE RECORD IS WRITTEN BEFORE ANYTHING ELSE CAN FAIL, so a run killed
 	// from here on leaves a device the next run can find.
-	if err := writeRecord(lock, record{Device: v.Device, Mount: v.Mount, Session: m.Own.Session, Since: m.Own.Since}); err != nil {
+	rec := record{Device: v.Device, Mount: v.Mount, Session: m.Own.Session, Since: m.Own.Since}
+	if err := writeRecord(lock, rec); err != nil {
+		return v, err
+	}
+	// THE RECORD THEN NAMES THE DISK BY ITS HELPER, still under the registry
+	// lock, so no other run sees the disk before its record names it so.
+	if v.helper, err = m.identify(v.Device); err != nil {
+		return v, err
+	}
+	rec.Helper = v.helper
+	if err := writeRecord(lock, rec); err != nil {
 		return v, err
 	}
 	return v, nil
+}
+
+// identify reads which helper serves the RAM disk just attached as device.
+func (m Manager) identify(device string) (helper, error) {
+	info, err := m.listImages()
+	if err != nil {
+		return helper{}, fmt.Errorf("list the attached images to identify the RAM disk %s: %w", device, err)
+	}
+	starts, err := m.helperStarts()
+	if err != nil {
+		return helper{}, err
+	}
+	for _, img := range parseImages(info) {
+		if !img.isRAM() || len(img.Devices) == 0 || img.Devices[0] != device {
+			continue
+		}
+		id, ok := img.identity(starts)
+		if !ok {
+			return helper{}, fmt.Errorf("the helper of the RAM disk %s, process %d, is not in the process table", device, img.Helper)
+		}
+		return id, nil
+	}
+	return helper{}, fmt.Errorf("hdiutil info lists no RAM disk %s, which hdiutil attach just answered", device)
 }
 
 // detachNewRAMDisks force-detaches every RAM disk `hdiutil info` lists now
@@ -586,7 +621,7 @@ func (v *Volume) Release() error {
 			// A DISK ALREADY GONE IS NOT DETACHED BY ITS NUMBER, which by now
 			// may name another run's disk: the mount point and the record go,
 			// and the loss is answered to the run, which records it at ERROR.
-			errs = append(errs, fmt.Errorf("the RAM disk %s was already gone from %s before its release, so nothing was detached", v.Device, v.Mount))
+			errs = append(errs, fmt.Errorf("the RAM disk %s was already gone before its release (its helper, process %d, serves no image), so nothing was detached", v.Device, v.helper.Pid))
 		}
 	}
 	if v.Device != "" && detached && !gone {
@@ -635,27 +670,34 @@ func (v *Volume) Release() error {
 	return errors.Join(errs...)
 }
 
-// gone says whether the volume's disk is already gone: once the volume was
-// mounted, whether no RAM disk is mounted at Mount any more. Before that,
-// the disk is the one this run attached moments ago, and is never gone. A
-// disk mounted there that is not Device is an error, and nothing is
-// detached.
+// gone says whether the volume's disk is already gone: whether no attached
+// image is the one its helper serves. A disk whose helper was never read (its
+// attach failed before) is the one this run attached moments ago: no record
+// names it so any other run reclaims it, so its number is still its own. An
+// image of that helper under another device is an error, and nothing is
+// detached: an attached image keeps its device.
 func (v *Volume) gone() (bool, error) {
-	if !v.mounted {
+	if v.helper.zero() {
 		return false, nil
 	}
 	info, err := v.m.listImages()
 	if err != nil {
-		return false, fmt.Errorf("list the attached images to find the RAM disk mounted at %s before detaching it: %w", v.Mount, err)
+		return false, fmt.Errorf("list the attached images to find the RAM disk %s by its helper before detaching it: %w", v.Device, err)
 	}
-	device, err := v.m.diskMountedAt(info, v.Mount)
+	starts, err := v.m.helperStarts()
 	if err != nil {
 		return false, err
 	}
-	if device != "" && device != v.Device {
-		return false, fmt.Errorf("the RAM disk mounted at %s is %s, not this run's %s, so nothing is detached", v.Mount, device, v.Device)
+	for _, img := range parseImages(info) {
+		if id, ok := img.identity(starts); !ok || !id.equal(v.helper) || len(img.Devices) == 0 {
+			continue
+		}
+		if img.Devices[0] != v.Device {
+			return false, fmt.Errorf("the RAM disk %s's helper, process %d, serves %s now, so nothing is detached", v.Device, v.helper.Pid, img.Devices[0])
+		}
+		return false, nil
 	}
-	return device == "", nil
+	return true, nil
 }
 
 // holders names the processes with a file open on the volume, as
@@ -707,37 +749,59 @@ func holderNames(out string) []string {
 // Reclaimed is one dead run's RAM disk that Reclaim took down.
 type Reclaimed struct {
 	Pid int
-	// Device is the disk found mounted at Mount and detached; empty when
-	// nothing was mounted there.
-	Device string
-	Mount  string
+	// Devices are the disks the dead run's record owns (owns), found now and
+	// detached; empty when none was attached.
+	Devices []string
+	Mount   string
 	// Recorded is the device the dead run's record named. It is never what
 	// is detached: macOS reuses device numbers, so it may be another run's.
 	Recorded string
-	// RecordedNow says what Recorded is now, when it is not Device (it is
-	// never touched).
+	// RecordedNow says what Recorded is now, when it is none of Devices (it
+	// is never touched).
 	RecordedNow string
-	// Attached is false when no RAM disk was mounted at Mount (the host
+	// Attached is false when no disk the record owns was attached (the host
 	// rebooted, or the disk went before its run did), so only the record and
 	// mount point went, and nothing was detached.
 	Attached bool
 	Killed   int
-	// Stray is set when no record named the mount point (Device is then
+	// Stray is set when no record named the mount point (Devices is then
 	// empty): its disk was already gone, and only the mount point went.
 	Stray bool
 }
 
 // Reclaim takes down the RAM disk of every dead run in the registry: one whose
 // record's lock nobody holds. A live run's record is left strictly alone.
-// Then it removes every mount point a dead run left that no record names
-// (reclaimStrays).
+// First it adopts every RAM disk the runner made that no record names
+// (adoptOrphans), and last it removes every mount point a dead run left that
+// no record names (reclaimStrays).
 func (m Manager) Reclaim() ([]Reclaimed, error) {
-	records, err := filepath.Glob(filepath.Join(m.Registry, "*.lock"))
-	if err != nil {
-		return nil, fmt.Errorf("list the RAM disk records: %w", err)
-	}
 	var done []Reclaimed
 	var errs []error
+	orphans, err := m.adoptOrphans()
+	// A STUCK REGISTRY LOCK IS NOT WAITED ON AGAIN: every record's probe
+	// would wait out the same bound on the same holder.
+	var stuck *LockTimeoutError
+	if errors.As(err, &stuck) {
+		return nil, err
+	}
+	if err != nil {
+		errs = append(errs, err)
+	}
+	for _, o := range orphans {
+		r, err := m.reclaimHeld(o.path, o.pid)
+		if closeErr := o.f.Close(); closeErr != nil {
+			err = errors.Join(err, fmt.Errorf("close the adopted RAM disk record %s: %w", o.path, closeErr))
+		}
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		done = append(done, r)
+	}
+	records, err := filepath.Glob(filepath.Join(m.Registry, "*.lock"))
+	if err != nil {
+		return done, errors.Join(append(errs, fmt.Errorf("list the RAM disk records: %w", err))...)
+	}
 	for _, path := range records {
 		r, ok, err := m.reclaimOne(path)
 		if err != nil {
@@ -750,6 +814,89 @@ func (m Manager) Reclaim() ([]Reclaimed, error) {
 	}
 	strays, err := m.reclaimStrays()
 	return append(done, strays...), errors.Join(append(errs, err)...)
+}
+
+// orphan is a RAM disk adopted for its reclaim: the record made for it, held.
+type orphan struct {
+	path string
+	pid  int
+	f    *os.File
+}
+
+// adoptOrphans makes a record, held by this run, for every RAM disk the runner
+// made that no record names: one mounted at an artr-<pid> mount point (marked)
+// whose pid has no record, and that no record owns by its helper. The record
+// names the disk's helper and the mount point a run of that pid is given, so
+// the reclaim that follows takes the disk down like any dead run's.
+//
+// AN ORPHAN HAS NO LIVE RUN. A run makes its record, under the registry lock,
+// before it attaches, and removes it only once its disk is detached, so every
+// disk a run holds has its record; adopting runs under that same lock. An
+// orphan is a disk whose record a reclaim that found it by its mount alone
+// retired (2026-11-01: run 35946's /dev/disk4, which its erase mounted only in
+// /Volumes), and before this every run refused to attach behind it for good.
+//
+// The adopted record is held, so no other run's reclaim takes the same disk at
+// once: each reclaims only a record whose flock it took.
+func (m Manager) adoptOrphans() (_ []orphan, err error) {
+	if err := os.MkdirAll(m.Registry, 0o755); err != nil {
+		return nil, fmt.Errorf("make the RAM disk registry %s: %w", m.Registry, err)
+	}
+	unlock, err := m.lockRegistry()
+	if err != nil {
+		return nil, err
+	}
+	defer releaseRegistry(unlock, &err)
+	info, err := m.listImages()
+	if err != nil {
+		return nil, fmt.Errorf("list the attached images to find the RAM disks no record names: %w", err)
+	}
+	records, err := m.readRecordsLocked()
+	if err != nil {
+		return nil, err
+	}
+	starts, err := m.helperStarts()
+	if err != nil {
+		return nil, err
+	}
+	var orphans []orphan
+	for _, img := range parseImages(info) {
+		pid, ok := img.marked()
+		if !img.isRAM() || len(img.Devices) == 0 || !ok || pid == m.Pid {
+			continue
+		}
+		if slices.ContainsFunc(records, func(r recordInfo) bool { return r.pid == pid || owns(img, starts, r.pid, r.rec) }) {
+			continue
+		}
+		path := m.recordPath(pid)
+		f, err := m.createRecordLocked(path)
+		if err != nil {
+			return orphans, errors.Join(err, closeOrphans(orphans))
+		}
+		rec := record{Device: img.Devices[0], Mount: filepath.Join(m.MountParent, fmt.Sprintf("artr-%d", pid))}
+		// A helper the process table does not list leaves the disk owned by
+		// its mount alone (owns).
+		rec.Helper, _ = img.identity(starts)
+		if err := writeRecord(f, rec); err != nil {
+			return orphans, errors.Join(err, f.Close(), closeOrphans(orphans))
+		}
+		m.Log.Infof("adopted the RAM disk %s (mounted at %s), which no record named, as dead run pid %d's, so it is reclaimed", img.Devices[0], strings.Join(img.Mounts, ", "), pid)
+		orphans = append(orphans, orphan{path: path, pid: pid, f: f})
+		records = append(records, recordInfo{path: path, pid: pid, rec: rec, live: true})
+	}
+	return orphans, nil
+}
+
+// closeOrphans lets go of the adopted records of an adoption that failed
+// part way: each is a dead run's record the next reclaim takes.
+func closeOrphans(orphans []orphan) error {
+	var errs []error
+	for _, o := range orphans {
+		if err := o.f.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("close the adopted RAM disk record %s: %w", o.path, err))
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // strayMount is the name of a run's mount point under MountParent, and of
@@ -836,8 +983,8 @@ func (m Manager) takeStray(dir string, pid int) (killed int, taken bool, err err
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return 0, false, fmt.Errorf("look for the RAM disk record of pid %d: %w", pid, err)
 	}
-	// A VOLUME STILL MOUNTED THERE IS A LEAK, not a stray: the leak check
-	// names it, and nothing under it is removed.
+	// A VOLUME STILL MOUNTED THERE IS AN ORPHAN, not a stray: the next
+	// reclaim adopts it (adoptOrphans), and nothing under it is removed.
 	mounted, err := m.Mounted(dir)
 	if err != nil {
 		return 0, false, err
@@ -888,10 +1035,10 @@ func (m Manager) logReclaimed(r Reclaimed) {
 		recorded += ", which was not touched: it is now " + r.RecordedNow
 	}
 	if !r.Attached {
-		m.Log.Infof("retired the RAM disk record of dead run pid %d: no RAM disk was mounted at %s, so nothing was detached (%s)", r.Pid, r.Mount, recorded)
+		m.Log.Infof("retired the RAM disk record of dead run pid %d: no disk it owns was attached, so nothing was detached and only %s went (%s)", r.Pid, r.Mount, recorded)
 		return
 	}
-	m.Log.Infof("reclaimed the RAM disk %s at %s left by dead run pid %d: the disk mounted there was detached (%s; killed %d leftover processes)", r.Device, r.Mount, r.Pid, recorded, r.Killed)
+	m.Log.Infof("reclaimed the RAM disk %s left by dead run pid %d: it was detached and %s went (%s; killed %d leftover processes)", strings.Join(r.Devices, ", "), r.Pid, r.Mount, recorded, r.Killed)
 }
 
 // ReclaimRun reclaims the RAM disk of the run of pid, which has died: the
@@ -928,9 +1075,17 @@ func (m Manager) reclaimOne(path string) (Reclaimed, bool, error) {
 		return Reclaimed{}, false, err
 	}
 	defer f.Close()
+	r, err := m.reclaimHeld(path, pid)
+	return r, err == nil, err
+}
+
+// reclaimHeld takes down the RAM disk of the dead run of pid whose record at
+// path the caller holds the flock of: every disk the record owns is detached,
+// then the run's mount point and the record go.
+func (m Manager) reclaimHeld(path string, pid int) (Reclaimed, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return Reclaimed{}, false, fmt.Errorf("read the RAM disk record %s: %w", path, err)
+		return Reclaimed{}, fmt.Errorf("read the RAM disk record %s: %w", path, err)
 	}
 	rec := parseRecord(string(raw))
 	mount := rec.Mount
@@ -939,38 +1094,54 @@ func (m Manager) reclaimOne(path string) (Reclaimed, bool, error) {
 	// record must name the mount point a run of that pid is given, or nothing
 	// at all is touched.
 	if mount != "" && (!filepath.IsAbs(mount) || filepath.Base(mount) != fmt.Sprintf("artr-%d", pid)) {
-		return r, false, fmt.Errorf("the RAM disk record %s names %q, which is no mount point a run of pid %d is given", path, mount, pid)
+		return r, fmt.Errorf("the RAM disk record %s names %q, which is no mount point a run of pid %d is given", path, mount, pid)
 	}
-	// THE DISK IS FOUND BY THE DEAD RUN'S MOUNT, NEVER BY ITS RECORDED DEVICE.
-	// macOS hands a detached disk's number to the next attach, so the device
-	// a dead record names may by now be another live run's disk: reclaims
-	// that detached by the recorded device took live runs' disks away
-	// mid-run (2026-10-30, /dev/disk4 recorded by dead run 31920 and attached
-	// by live run 32482). Only the disk mounted at the dead run's own mount
-	// point, read now, is the dead run's; an entry whose mount point has
-	// nothing mounted is retired without detaching anything.
+	// THE DISK IS FOUND BY WHAT OWNS IT, NEVER BY ITS RECORDED DEVICE. macOS
+	// hands a detached disk's number to the next attach, so the device a dead
+	// record names may by now be another live run's disk: reclaims that
+	// detached by the recorded device took live runs' disks away mid-run
+	// (2026-10-30, /dev/disk4 recorded by dead run 31920 and attached by live
+	// run 32482). Only the disk the record's helper serves, or one mounted at
+	// a mount point of the dead run's pid, read now, is the dead run's (owns).
+	info, err := m.listImages()
+	if err != nil {
+		return r, fmt.Errorf("list the attached images to find the disks of dead run pid %d: %w", pid, err)
+	}
+	starts, err := m.helperStarts()
+	if err != nil {
+		return r, err
+	}
+	dirs := []string{}
 	if mount != "" {
-		info, err := m.listImages()
-		if err != nil {
-			return r, false, fmt.Errorf("list the attached images to find the disk mounted at %s: %w", mount, err)
+		// A volume no RAM disk lists at the mount point, or two RAM disks
+		// there, stop the reclaim before anything there is detached or
+		// removed.
+		if _, err := m.diskMountedAt(info, mount); err != nil {
+			return r, err
 		}
-		r.Device, err = m.diskMountedAt(info, mount)
-		if err != nil {
-			return r, false, err
+		dirs = append(dirs, mount)
+	}
+	for _, img := range parseImages(info) {
+		if !img.isRAM() || len(img.Devices) == 0 || !owns(img, starts, pid, rec) {
+			continue
 		}
-		r.Attached = r.Device != ""
-		if rec.Device != "" && rec.Device != r.Device {
-			r.RecordedNow = describeDevice(info, rec.Device)
-		}
+		r.Devices = append(r.Devices, img.Devices[0])
+		dirs = append(dirs, img.Mounts...)
+	}
+	r.Attached = len(r.Devices) > 0
+	if rec.Device != "" && !slices.Contains(r.Devices, rec.Device) {
+		r.RecordedNow = describeDevice(info, rec.Device)
 	}
 	if r.Attached {
-		res, err := m.reapMembers(reap.Members{What: fmt.Sprintf("dead run pid %d", pid), Session: rec.Session, Since: rec.Since, Except: []int{m.Pid}}, mount)
+		res, err := m.reapMembers(reap.Members{What: fmt.Sprintf("dead run pid %d", pid), Session: rec.Session, Since: rec.Since, Except: []int{m.Pid}}, dirs...)
 		r.Killed = len(res.Killed)
 		if err != nil {
-			return r, false, fmt.Errorf("kill what still runs out of %s: %w", mount, err)
+			return r, fmt.Errorf("kill what still runs out of the disks of dead run pid %d (%s): %w", pid, strings.Join(dirs, ", "), err)
 		}
-		if _, err := m.Run("hdiutil", "detach", "-force", r.Device); err != nil {
-			return r, false, fmt.Errorf("detach the dead run's RAM disk %s mounted at %s: %w", r.Device, mount, err)
+		for _, device := range r.Devices {
+			if _, err := m.Run("hdiutil", "detach", "-force", device); err != nil {
+				return r, fmt.Errorf("detach the RAM disk %s of dead run pid %d: %w", device, pid, err)
+			}
 		}
 	}
 	if mount != "" {
@@ -979,13 +1150,13 @@ func (m Manager) reclaimOne(path string) (Reclaimed, bool, error) {
 		// the host's own filesystem (a write that landed after the volume went
 		// away), and all of it is that dead run's.
 		if err := os.RemoveAll(mount); err != nil {
-			return r, false, fmt.Errorf("remove the dead run's mount point %s: %w", mount, err)
+			return r, fmt.Errorf("remove the dead run's mount point %s: %w", mount, err)
 		}
 	}
 	if err := os.Remove(path); err != nil {
-		return r, false, fmt.Errorf("remove the dead run's RAM disk record %s: %w", path, err)
+		return r, fmt.Errorf("remove the dead run's RAM disk record %s: %w", path, err)
 	}
-	return r, true, nil
+	return r, nil
 }
 
 // registryLockName is the registry's own lock: the one a record's creation and
@@ -1169,18 +1340,25 @@ func (m Manager) recordPath(pid int) string {
 	return filepath.Join(m.Registry, fmt.Sprintf("%d.lock", pid))
 }
 
-// record is what a run's lock record names: its RAM disk, where it is
-// mounted, and the run's session (reap.Members.Session and Since), so a
-// reclaim of a dead run reaps the same members its own release would have.
+// record is what a run's lock record names: its RAM disk, by its device and
+// by the helper serving it, where it is mounted, and the run's session
+// (reap.Members.Session and Since), so a reclaim of a dead run reaps the same
+// members its own release would have.
 type record struct {
-	Device  string
+	Device string
+	// Helper names the disk for every reclaim (owns): the device only says
+	// what the disk was attached as.
+	Helper  helper
 	Mount   string
 	Session int
 	Since   time.Time
 }
 
 func writeRecord(f *os.File, r record) error {
-	body := fmt.Sprintf("device=%s\nmount=%s\nsession=%d\nsince=%d\n", r.Device, r.Mount, r.Session, r.Since.Unix())
+	body := fmt.Sprintf("device=%s\nhelper=%d\nhelper_start=%d\nmount=%s\nsession=%d\nsince=%d\n", r.Device, r.Helper.Pid, r.Helper.Start.UnixMicro(), r.Mount, r.Session, r.Since.Unix())
+	if err := f.Truncate(0); err != nil {
+		return fmt.Errorf("empty the RAM disk record %s to write it: %w", f.Name(), err)
+	}
 	if _, err := f.WriteAt([]byte(body), 0); err != nil {
 		return fmt.Errorf("write the RAM disk record %s: %w", f.Name(), err)
 	}
@@ -1191,7 +1369,9 @@ func writeRecord(f *os.File, r record) error {
 }
 
 // parseRecord reads a record. A record that names no session (one written
-// before the session was recorded) is reclaimed by its mount alone.
+// before the session was recorded) is reclaimed by its mount alone, and one
+// that names no helper (one written before the helper was recorded, or by an
+// attach that failed before) owns only the disks its pid's mount marks.
 func parseRecord(raw string) record {
 	var r record
 	for line := range strings.SplitSeq(raw, "\n") {
@@ -1199,6 +1379,12 @@ func parseRecord(raw string) record {
 		switch key {
 		case "device":
 			r.Device = v
+		case "helper":
+			r.Helper.Pid, _ = strconv.Atoi(v)
+		case "helper_start":
+			if micros, err := strconv.ParseInt(v, 10, 64); err == nil && micros != 0 {
+				r.Helper.Start = time.UnixMicro(micros)
+			}
 		case "mount":
 			r.Mount = v
 		case "session":
@@ -1212,15 +1398,18 @@ func parseRecord(raw string) record {
 	return r
 }
 
-// reapMembers reaps ms with dir's spellings as its directory net.
-func (m Manager) reapMembers(ms reap.Members, dir string) (reap.Result, error) {
-	dirs, err := reap.Spellings(dir)
-	if err != nil {
-		return reap.Result{}, err
+// reapMembers reaps ms with every spelling of dirs as its directory net.
+func (m Manager) reapMembers(ms reap.Members, dirs ...string) (reap.Result, error) {
+	ms.Dirs = slices.Clone(ms.Dirs)
+	for _, dir := range dirs {
+		spellings, err := reap.Spellings(dir)
+		if err != nil {
+			return reap.Result{}, err
+		}
+		ms.Dirs = append(ms.Dirs, spellings...)
 	}
-	ms.Dirs = append(slices.Clone(ms.Dirs), dirs...)
 	if ms.What == "" {
-		ms.What = "the run on " + dir
+		ms.What = "the run on " + strings.Join(dirs, ", ")
 	}
 	return m.Reap(ms)
 }
@@ -1245,9 +1434,83 @@ type image struct {
 	Devices []string
 	// Mounts are the mount points its device lines name.
 	Mounts []string
+	// Helper is its "process ID": the diskimages-helper serving it.
+	Helper int
 }
 
 func (img image) isRAM() bool { return strings.HasPrefix(img.Path, "ram://") }
+
+// helper is the diskimages-helper process serving one attached image, by its
+// pid and when it started.
+//
+// IT NAMES EXACTLY ONE ATTACH. macOS starts one helper per attached image,
+// which serves it until its detach, so no two images share a helper, and a pid
+// with its start (to the microsecond) names one process for good. A device
+// number names whichever disk attached last under it: a dead run's record
+// that named /dev/disk4 was taken for a live run's disk (2026-10-30), and a
+// mount names a disk only once it is mounted there, which a disk whose run was
+// cut mid-acquire never was (2026-11-01, run 35946's /dev/disk4, mounted only
+// in /Volumes by the erase its run was killed in).
+type helper struct {
+	Pid   int
+	Start time.Time
+}
+
+func (h helper) zero() bool { return h.Pid == 0 }
+
+func (h helper) equal(o helper) bool {
+	return h.Pid == o.Pid && h.Start.UnixMicro() == o.Start.UnixMicro()
+}
+
+// identity answers the helper serving img, by starts (helperStarts); false
+// when hdiutil named none or the process table does not list it.
+func (img image) identity(starts map[int]time.Time) (helper, bool) {
+	start, ok := starts[img.Helper]
+	if img.Helper == 0 || !ok {
+		return helper{}, false
+	}
+	return helper{Pid: img.Helper, Start: start}, true
+}
+
+// marked answers the pid of the run whose artr-<pid> mount point one of img's
+// volumes is mounted at: the run's own under the mount parent, or the one
+// `diskutil eraseDisk` gives it in /Volumes.
+func (img image) marked() (int, bool) {
+	for _, mount := range img.Mounts {
+		if match := runMount.FindStringSubmatch(mount); match != nil {
+			pid, err := strconv.Atoi(match[1])
+			return pid, err == nil
+		}
+	}
+	return 0, false
+}
+
+// owns says whether img is the disk of the run of pid whose record is rec:
+// the image rec's helper serves, or one mounted at a mount point a run of pid
+// gives its volume (marked).
+func owns(img image, starts map[int]time.Time, pid int, rec record) bool {
+	if id, ok := img.identity(starts); ok && !rec.Helper.zero() && id.equal(rec.Helper) {
+		return true
+	}
+	marked, ok := img.marked()
+	return ok && marked == pid
+}
+
+// helperStarts reads when each process the table lists started, by pid: what
+// a helper is told apart by (helper).
+func (m Manager) helperStarts() (map[int]time.Time, error) {
+	procs, err := m.Procs()
+	if err != nil {
+		return nil, fmt.Errorf("read the process table to identify the RAM disks' helpers: %w", err)
+	}
+	starts := make(map[int]time.Time, len(procs))
+	for _, p := range procs {
+		if !p.Start.IsZero() {
+			starts[p.Pid] = p.Start
+		}
+	}
+	return starts, nil
+}
 
 // imageSeparator starts each image's block in `hdiutil info`.
 const imageSeparator = "================================================"
@@ -1265,6 +1528,10 @@ func parseImages(info string) []image {
 		for _, line := range strings.Split(block, "\n") {
 			if v, ok := strings.CutPrefix(strings.TrimSpace(line), "image-path"); ok {
 				img.Path = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(v), ":"))
+				continue
+			}
+			if v, ok := strings.CutPrefix(strings.TrimSpace(line), "process ID"); ok {
+				img.Helper, _ = strconv.Atoi(strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(v), ":")))
 				continue
 			}
 			cols := strings.Split(line, "\t")
