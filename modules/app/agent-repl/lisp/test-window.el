@@ -870,18 +870,21 @@ persp-mode activated, and \"main\"/\"none\" own no durable log sink."
                                 (window-total-height (frame-root-window))))
                       agent-repl-input-height-line-offset)))))))
 
-(ert-deftest agent-repl-window-test-input-height-default-is-two-lines-under-the-fraction ()
-  "By default the composer is exactly two lines shorter than the fraction alone."
+(ert-deftest agent-repl-window-test-input-height-default-is-three-lines-under-the-fraction ()
+  "By default the composer is exactly three lines shorter than the fraction alone.
+The fraction is raised so the batch frame's short height leaves the
+offset clear of the floor (`agent-repl-window--input-height-minimum')."
   (agent-repl-window-test--with-temp-frame
     (agent-repl-window-test--with-fresh-height-cache
       ;; Arrange
-      (let ((unadjusted (let ((agent-repl-input-height-line-offset 0))
+      (let* ((agent-repl-input-height-fraction 0.9)
+             (unadjusted (let ((agent-repl-input-height-line-offset 0))
                           (agent-repl-window--input-height))))
         (set-frame-parameter nil agent-repl-window--input-height-parameter nil)
         ;; Act
         (let ((lines (agent-repl-window--input-height)))
           ;; Assert
-          (should (= lines (- unadjusted 2))))))))
+          (should (= lines (- unadjusted 3))))))))
 
 (ert-deftest agent-repl-window-test-input-height-minimum-is-two-body-lines ()
   "The floor is two lines, every one of them body: the composer has no mode line."
