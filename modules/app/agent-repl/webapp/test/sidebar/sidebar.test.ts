@@ -211,7 +211,7 @@ describe("the preferences a page stored before the view was the daemon's", () =>
   });
 });
 
-describe("the rail's Deploys groups", () => {
+describe("the rail's Recently Merged groups and section", () => {
   /** The page's focus-left signal, fired by hand through its own writer. */
   function manualFocus(): FocusLeftSource {
     return createFocusLeft(window, createPresence(document, true));
@@ -221,9 +221,9 @@ describe("the rail's Deploys groups", () => {
   const heading = (host: HTMLElement): HTMLElement => group(host).querySelector<HTMLElement>(".merged-group-head")!;
 
   it.each([
-    { name: "draws an idle group folded when the rail mounts", clicks: 0, leave: false, want: true },
-    { name: "opens it when its header is clicked", clicks: 1, leave: false, want: false },
-    { name: "folds it again once the focus leaves the page", clicks: 1, leave: true, want: true },
+    { name: "draws a group open when the rail mounts", clicks: 0, leave: false, want: false },
+    { name: "folds it when its header is clicked", clicks: 1, leave: false, want: true },
+    { name: "opens it again once the focus leaves the page", clicks: 1, leave: true, want: false },
   ])("$name", async ({ clicks, leave, want }) => {
     // Arrange
     const host = document.createElement("nav");
@@ -239,6 +239,24 @@ describe("the rail's Deploys groups", () => {
     if (leave) focus.left("the page lost focus");
     // Assert
     expect(group(host).classList.contains("folded")).toBe(want);
+  });
+  it.each([
+    { name: "folds the Recently Merged section once the focus leaves the page", leave: true, want: true },
+    { name: "leaves the Recently Merged section open while the focus stays", leave: false, want: false },
+  ])("$name", async ({ leave, want }) => {
+    // Arrange
+    const host = document.createElement("nav");
+    document.body.replaceChildren(host);
+    const focus = manualFocus();
+    mountSidebar(host, ctxFor([roster({ merged: mergedSection([row({ id: "ws-9", closed: true })], false) })]), {
+      timers: fakeTimers(),
+      focusLeft: focus,
+    });
+    await settle();
+    // Act
+    if (leave) focus.left("the page lost focus");
+    // Assert
+    expect(host.querySelector(".merged-section")?.classList.contains("folded")).toBe(want);
   });
 });
 

@@ -20,6 +20,8 @@ import {
   RosterOpenSectionSchema,
   RosterMergedRepoGroupSchema,
   RosterMergedSectionSchema,
+  RosterMergeQueueRepoGroupSchema,
+  RosterMergeQueueSectionSchema,
   RosterRepoEntrySchema,
   RosterMergeQueueHeadSchema,
   RosterMergeQueueSubjectSchema,
@@ -35,6 +37,8 @@ import {
   type RosterOpenSection,
   type RosterMergedRepoGroup,
   type RosterMergedSection,
+  type RosterMergeQueueRepoGroup,
+  type RosterMergeQueueSection,
   type RosterRepoSection,
   type RosterRow,
   type WorkspaceRoster,
@@ -386,47 +390,62 @@ function sectionFold(
 }
 
 /**
- * The Deploys section with one idle group holding ROWS, or none. Its
- * daemon-held fold is COLLAPSED unless said, as the daemon draws a section
- * nobody has unfolded.
+ * The Recently Merged section with one group holding ROWS, or none. Its
+ * daemon-held fold is COLLAPSED unless said, as the rail leaves it once the
+ * focus has left the page.
  */
 export function mergedSection(rows: RosterRow[] = [], collapsed: boolean = true): RosterMergedSection {
   return mergedBand(rows.length === 0 ? [] : [mergedGroup({ id: "repo-1", rows })], collapsed);
 }
 
 /**
- * The Deploys section carrying GROUPS and its fold stated. Its header counts
- * nothing, as the daemon draws it.
+ * The Recently Merged section carrying GROUPS and its fold stated. Its header
+ * counts nothing, as the daemon draws it.
  */
 export function mergedBand(groups: RosterMergedRepoGroup[], collapsed: boolean = true): RosterMergedSection {
   return create(RosterMergedSectionSchema, {
-    header: { label: { text: "Deploys" } },
+    header: { label: { text: "Recently Merged" } },
     groups,
     fold: collapsed ? { case: "collapsed", value: {} } : { case: "expanded", value: {} },
   });
 }
 
-/** One repository's QUEUED group inside the Deploys section: its queue, and ROWS merged unless said none. */
+/**
+ * The Merge Queue section carrying GROUPS, none unless said, and its fold
+ * stated: EXPANDED unless said, as the daemon draws a section nobody has
+ * folded. Its header counts nothing, as the daemon draws it.
+ */
+export function mergeQueueBand(groups: RosterMergeQueueRepoGroup[] = [], collapsed: boolean = false): RosterMergeQueueSection {
+  return create(RosterMergeQueueSectionSchema, {
+    header: { label: { text: "Merge Queue" } },
+    groups,
+    fold: collapsed ? { case: "collapsed", value: {} } : { case: "expanded", value: {} },
+  });
+}
+
+/** One repository's group inside the Merge Queue section: its QUEUE, an empty one unless said. */
 export function queueGroup(init: {
   id: string;
   label?: string;
-  rows?: RosterRow[];
   queue?: MessageInitShape<typeof RosterRepoMergeQueueSchema>;
-}): RosterMergedRepoGroup {
-  return mergedGroup({ ...init, queue: init.queue ?? {} });
+}): RosterMergeQueueRepoGroup {
+  return create(RosterMergeQueueRepoGroupSchema, {
+    key: { repository: { id: init.id, dir: `/r/${init.id}` } },
+    header: { label: { text: init.label ?? init.id } },
+    queue: create(RosterRepoMergeQueueSchema, init.queue ?? {}),
+  });
 }
 
 /**
- * One repository's group inside the Deploys section, QUEUED when a QUEUE is
- * given and idle otherwise. A row left on `row`'s default when arm (no turn
- * running) is stamped on the merged arm, as the daemon stamps every merged
- * row, a minute apart and most recent first.
+ * One repository's group inside the Recently Merged section. A row left on
+ * `row`'s default when arm (no turn running) is stamped on the merged arm,
+ * as the daemon stamps every merged row, a minute apart and most recent
+ * first.
  */
 export function mergedGroup(init: {
   id: string;
   label?: string;
   rows?: RosterRow[];
-  queue?: MessageInitShape<typeof RosterRepoMergeQueueSchema>;
 }): RosterMergedRepoGroup {
   const rows = (init.rows ?? []).map((r, i) => {
     if (r.when === undefined || r.when.shown.case !== "noTurnRunning") return r;
@@ -438,10 +457,6 @@ export function mergedGroup(init: {
     key: { repository: { id: init.id, dir: `/r/${init.id}` } },
     header: { label: { text: init.label ?? init.id } },
     mergedRows: { rows: rows.map((row) => ({ row })) },
-    activity:
-      init.queue === undefined
-        ? { case: "idle", value: {} }
-        : { case: "queued", value: { queue: create(RosterRepoMergeQueueSchema, init.queue) } },
   });
 }
 
@@ -477,6 +492,7 @@ export function openSection(collapsed: boolean = false): RosterOpenSection {
 export function roster(init: {
   repos?: RosterRepoSection[];
   merged?: RosterMergedSection;
+  mergeQueue?: RosterMergeQueueSection;
   hidden?: RosterHiddenSection;
   open?: RosterOpenSection;
   /** The daemon-resolved open count; unless said, the sum of the sections' counts. */
@@ -504,6 +520,7 @@ export function roster(init: {
     repository: { sections: repos, openCount: { workspaces: init.openCount ?? counted } },
     open: init.open ?? openSection(),
     recentlyMerged: init.merged ?? mergedSection(),
+    mergeQueue: init.mergeQueue ?? mergeQueueBand(),
     hidden: init.hidden ?? hiddenSection(),
     closed: {},
     ...rosterApps(init.chat),

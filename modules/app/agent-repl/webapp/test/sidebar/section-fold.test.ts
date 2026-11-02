@@ -10,7 +10,9 @@ import {
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_sidebar_view_pb";
 import {
   CURRENT_FLASH_CLASS,
+  FOCUS_FOLDED_SECTIONS,
   HOLDS_CURRENT_ATTRIBUTE,
+  installFocusFold,
   foldOnClick,
   drawRosterHoldsCurrent,
   drawRosterSectionFold,
@@ -21,7 +23,22 @@ import {
 import { log } from "../../src/log.js";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import { codeOf } from "../source-text.js";
-import { appContext, sidebarContext } from "./harness.js";
+import { createFocusLeft } from "../../src/focus-left.js";
+import { createPresence } from "../../src/presence.js";
+import { drawWorkspaceRoster } from "../../src/sidebar/roster.js";
+import { captureLogRecords, forwardedRecord } from "../log-capture.js";
+import {
+  NOW,
+  appContext,
+  hiddenSection,
+  mergeQueueBand,
+  mergedSection,
+  mergingHead,
+  queueGroup,
+  roster,
+  row,
+  sidebarContext,
+} from "./harness.js";
 
 /** A sidebar whose daemon records every UpdateSidebarView and answers success. */
 function recording(): { asked: UpdateSidebarViewRequest[]; sc: ReturnType<typeof sidebarContext> } {
@@ -305,5 +322,103 @@ describe("drawRosterSectionFold", () => {
 
   it("refuses an unset fold as a malformed view", () => {
     expect(() => drawRosterSectionFold({ case: undefined }, "fold")).toThrow(MalformedView);
+  });
+});
+
+describe("installFocusFold", () => {
+  afterEach(() => {
+    document.body.replaceChildren();
+  });
+
+  /** A rail drawn with Recently Merged, Hidden, Merge Queue and Open all expanded, and a focus-left fired by hand. */
+  function rail(init: { mergedCollapsed?: boolean } = {}) {
+    const { asked, sc } = recording();
+    const merged = row({ id: "ws-m", closed: true, status: { case: "merged", value: {} }, when: { case: "merged", value: { atMs: BigInt(NOW) } } });
+    const host = document.createElement("div");
+    host.appendChild(
+      drawWorkspaceRoster(
+        roster({
+          merged: mergedSection([merged], init.mergedCollapsed ?? false),
+          hidden: hiddenSection([row({ id: "ws-h" })]),
+          mergeQueue: mergeQueueBand([queueGroup({ id: "repo-1", queue: { head: mergingHead("w1") } })]),
+        }),
+        sc,
+      ),
+    );
+    document.body.appendChild(host);
+    const focus = createFocusLeft(window, createPresence(document, true));
+    return { asked, sc, host, focus };
+  }
+
+  /** The sections each recorded ask folds, and which way. */
+  const folds = (asked: UpdateSidebarViewRequest[]) =>
+    asked.map((request) =>
+      request.change.case === "foldSection" ? [request.change.value.section.case, request.change.value.fold.case] : request.change.case,
+    );
+
+  it("collapses an open Recently Merged and Hidden as the focus leaves, and no other section", async () => {
+    // Arrange
+    const { asked, sc, host, focus } = rail();
+    installFocusFold(host, sc, focus);
+    // Act
+    focus.left("the page lost focus");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    // Assert
+    expect(folds(asked)).toEqual([
+      ["recentlyMerged", "collapse"],
+      ["hidden", "collapse"],
+    ]);
+  });
+
+  it("paints each collapse at once", () => {
+    const { sc, host, focus } = rail();
+    installFocusFold(host, sc, focus);
+    focus.left("the page lost focus");
+    expect([".merged-section", ".hidden-section"].map((sel) => host.querySelector(sel)?.classList.contains("folded"))).toEqual([true, true]);
+  });
+
+  it("asks nothing of a section folded already", async () => {
+    const { asked, sc, host, focus } = rail({ mergedCollapsed: true });
+    installFocusFold(host, sc, focus);
+    focus.left("the page lost focus");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(folds(asked)).toEqual([["hidden", "collapse"]]);
+  });
+
+  it("hears nothing once uninstalled", async () => {
+    const { asked, sc, host, focus } = rail();
+    installFocusFold(host, sc, focus)();
+    focus.left("the page lost focus");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(asked).toEqual([]);
+  });
+
+  it("records each fold with its section and why the focus left, at debug", async () => {
+    const { sc, host, focus } = rail();
+    installFocusFold(host, sc, focus);
+    const capture = captureLogRecords("debug");
+    focus.left("the page lost focus");
+    const record = await forwardedRecord(capture, "sidebar.fold.focus-left");
+    expect([record.level.case, record.context]).toMatchObject(["debug", { section: "merged", why: "the page lost focus" }]);
+  });
+
+  it("refuses and logs a drawn section without its fold control, asking nothing", async () => {
+    // Arrange
+    const { asked, sc, host, focus } = rail();
+    host.querySelector(".merged-section > [data-section-fold]")!.removeAttribute("data-section-fold");
+    installFocusFold(host, sc, focus);
+    const capture = captureLogRecords("error");
+    // Act
+    expect(() => focus.left("the page lost focus")).toThrow(/the merged section has no fold control/);
+    // Assert
+    const record = await forwardedRecord(capture, "sidebar.fold.focus-left");
+    expect([record.context, asked]).toMatchObject([{ section: "merged", why: "the page lost focus" }, []]);
+  });
+
+  it("folds exactly the Recently Merged and Hidden sections", () => {
+    expect(FOCUS_FOLDED_SECTIONS.map((shape) => [shape.className, shape.foldKey, shape.target?.case])).toEqual([
+      ["merged-section", "merged", "recentlyMerged"],
+      ["hidden-section", "hidden", "hidden"],
+    ]);
   });
 });

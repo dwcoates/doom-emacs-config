@@ -2360,17 +2360,24 @@ func (v *fakeVerbs) FoldRepository(_ context.Context, repo ids.RepoID, folded bo
 	return v.foldErr
 }
 
-// sectionFold is one FoldMergedSection (merged), FoldHiddenSection (hidden)
-// or FoldOpenSection (open) the verb received.
+// sectionFold is one FoldMergedSection (merged), FoldMergeQueueSection
+// (mergeQueue), FoldHiddenSection (hidden) or FoldOpenSection (open) the verb
+// received.
 type sectionFold struct {
-	merged bool
-	hidden bool
-	open   bool
-	folded bool
+	merged     bool
+	mergeQueue bool
+	hidden     bool
+	open       bool
+	folded     bool
 }
 
 func (v *fakeVerbs) FoldMergedSection(_ context.Context, folded bool) error {
 	v.sectionFolds = append(v.sectionFolds, sectionFold{merged: true, folded: folded})
+	return v.sectionFoldErr
+}
+
+func (v *fakeVerbs) FoldMergeQueueSection(_ context.Context, folded bool) error {
+	v.sectionFolds = append(v.sectionFolds, sectionFold{mergeQueue: true, folded: folded})
 	return v.sectionFoldErr
 }
 

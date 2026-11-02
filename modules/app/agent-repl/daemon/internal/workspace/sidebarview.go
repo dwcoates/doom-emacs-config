@@ -9,16 +9,24 @@ import (
 
 // The operations UpdateSidebarView's records carry, one per change.
 const (
-	opFoldMergedSection = "daemon.workspace.fold_merged_section"
-	opFoldHiddenSection = "daemon.workspace.fold_hidden_section"
-	opFoldOpenSection   = "daemon.workspace.fold_open_section"
+	opFoldMergedSection     = "daemon.workspace.fold_merged_section"
+	opFoldMergeQueueSection = "daemon.workspace.fold_merge_queue_section"
+	opFoldHiddenSection     = "daemon.workspace.fold_hidden_section"
+	opFoldOpenSection       = "daemon.workspace.fold_open_section"
 )
 
-// FoldMergedSection records whether the merge queue section is collapsed,
-// then republishes the roster to every page. There is nothing to refuse: the
-// roster carries exactly one.
+// FoldMergedSection records whether the Recently Merged section is
+// collapsed, then republishes the roster to every page. There is nothing to
+// refuse: the roster carries exactly one.
 func (v *verbs) FoldMergedSection(ctx context.Context, folded bool) error {
-	return v.foldSingletonSection(ctx, opFoldMergedSection, "merge queue section", v.deps.DB.SetMergedSectionFolded, folded)
+	return v.foldSingletonSection(ctx, opFoldMergedSection, "recently merged section", v.deps.DB.SetMergedSectionFolded, folded)
+}
+
+// FoldMergeQueueSection records whether the Merge Queue section is
+// collapsed, then republishes the roster to every page. There is nothing to
+// refuse: the roster carries exactly one.
+func (v *verbs) FoldMergeQueueSection(ctx context.Context, folded bool) error {
+	return v.foldSingletonSection(ctx, opFoldMergeQueueSection, "merge queue section", v.deps.DB.SetMergeQueueSectionFolded, folded)
 }
 
 // FoldHiddenSection records whether the hidden-workspaces section is

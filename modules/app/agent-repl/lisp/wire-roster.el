@@ -1232,7 +1232,7 @@ open row in no subsection, or `:subsection'.  It is never unset."
 
 ;;;; ---- frontend.v1.RosterRepoMergeQueue ----
 ;; A repository's merge queue, which the webview draws in the repository's
-;; Deploys group (`RosterMergedRepoGroupQueued').  Emacs draws nothing from it,
+;; Merge Queue group (`RosterMergeQueueRepoGroup').  Emacs draws nothing from it,
 ;; but the codec refuses unknown fields, so it is decoded and validated
 ;; whole.
 
@@ -1440,8 +1440,8 @@ subsections, interleaved (`agent-repl-wire-decode-roster-repo-entry')."
 
 (defun agent-repl-wire-decode-roster-merged-section-header (value)
   "Decode `RosterMergedSection''s `header' field VALUE, a plist `(:label L)'.
-The Deploys section's header carries NO count: each group's header
-carries its own deploy summary."
+The Recently Merged and Merge Queue sections' headers carry NO count:
+each Recently Merged group's header carries its own merge summary."
   (let ((object (agent-repl-wire--object "RosterSectionHeader" value)))
     (agent-repl-wire--check-keys "RosterSectionHeader" object '(label))
     (agent-repl-wire--decoded
@@ -1469,36 +1469,13 @@ A group's header is its repository's label and nothing to toggle."
                    "RosterMergedRepoGroupHeader" 'label object
                    #'agent-repl-wire-decode-roster-merged-repo-group-header-label)))))
 
-(defun agent-repl-wire-decode-roster-merged-repo-group-queued (value)
-  "Decode VALUE as `RosterMergedRepoGroupQueued', a plist `(:queue Q)'.
-The repository's active queue.  Emacs draws nothing from it."
-  (let ((object (agent-repl-wire--object "RosterMergedRepoGroupQueued" value)))
-    (agent-repl-wire--check-keys "RosterMergedRepoGroupQueued" object '(queue))
-    (agent-repl-wire--decoded
-     "RosterMergedRepoGroupQueued"
-     (list :queue (agent-repl-wire--decode-message
-                   "RosterMergedRepoGroupQueued" 'queue object
-                   #'agent-repl-wire-decode-roster-repo-merge-queue)))))
-
-(defun agent-repl-wire-decode-roster-merged-repo-group-idle (value)
-  "Decode VALUE as the empty message `RosterMergedRepoGroupIdle'."
-  (agent-repl-wire--decode-empty "RosterMergedRepoGroupIdle" value))
-
-(defun agent-repl-wire-decode-roster-merged-repo-group-activity (object)
-  "Decode `RosterMergedRepoGroup''s `activity' oneof from OBJECT.
-THE ARM IS WHETHER THE REPOSITORY'S QUEUE IS ACTIVE; it is never unset."
-  (agent-repl-wire--decode-oneof
-   "RosterMergedRepoGroup" 'activity object
-   '((queued :queued agent-repl-wire-decode-roster-merged-repo-group-queued)
-     (idle :idle agent-repl-wire-decode-roster-merged-repo-group-idle))))
-
 (defun agent-repl-wire-decode-roster-merged-repo-group (value)
   "Decode VALUE as `RosterMergedRepoGroup'.
-A plist `(:key :header :merged-rows :activity)'.  One repository in the
-Deploys section: its queue while one is active, and its merged rows."
+A plist `(:key :header :merged-rows)'.  One repository in the Recently
+Merged section: its merged rows."
   (let ((object (agent-repl-wire--object "RosterMergedRepoGroup" value)))
     (agent-repl-wire--check-keys "RosterMergedRepoGroup" object
-                                 '(key header mergedRows queued idle))
+                                 '(key header mergedRows))
     (agent-repl-wire--decoded
      "RosterMergedRepoGroup"
      (list :key (agent-repl-wire--decode-message
@@ -1509,8 +1486,7 @@ Deploys section: its queue while one is active, and its merged rows."
                     #'agent-repl-wire-decode-roster-merged-repo-group-header)
            :merged-rows (agent-repl-wire--decode-message
                          "RosterMergedRepoGroup" 'mergedRows object
-                         #'agent-repl-wire-decode-roster-merged-rows)
-           :activity (agent-repl-wire-decode-roster-merged-repo-group-activity object)))))
+                         #'agent-repl-wire-decode-roster-merged-rows)))))
 
 (defun agent-repl-wire-decode-roster-merged-section-expanded (value)
   "Decode VALUE as the empty message `RosterMergedSectionExpanded'."
@@ -1531,9 +1507,9 @@ THE ARM IS THE FOLD, the daemon's view state; it is never unset."
 (defun agent-repl-wire-decode-roster-merged-section (value)
   "Decode VALUE as `RosterMergedSection'.
 A plist `(:header :groups :fold)'.
-The Deploys section has no key of its own — the roster carries
+The Recently Merged section has no key of its own — the roster carries
 exactly one.  It holds one `RosterMergedRepoGroup' per repository with
-an active queue or a recent merge."
+a recent merge."
   (let ((object (agent-repl-wire--object "RosterMergedSection" value)))
     (agent-repl-wire--check-keys "RosterMergedSection" object
                                  '(header groups expanded collapsed))
@@ -1546,6 +1522,55 @@ an active queue or a recent merge."
                     "RosterMergedSection" 'groups object
                     #'agent-repl-wire-decode-roster-merged-repo-group)
            :fold (agent-repl-wire-decode-roster-merged-section-fold object)))))
+
+;;;; ---- The Merge Queue section ----
+
+(defun agent-repl-wire-decode-roster-merge-queue-repo-group (value)
+  "Decode VALUE as `RosterMergeQueueRepoGroup'.
+A plist `(:key :header :queue)'.  One repository in the Merge Queue
+section: its active queue.  Emacs draws nothing from it."
+  (let ((object (agent-repl-wire--object "RosterMergeQueueRepoGroup" value)))
+    (agent-repl-wire--check-keys "RosterMergeQueueRepoGroup" object '(key header queue))
+    (agent-repl-wire--decoded
+     "RosterMergeQueueRepoGroup"
+     (list :key (agent-repl-wire--decode-message
+                 "RosterMergeQueueRepoGroup" 'key object
+                 #'agent-repl-wire-decode-roster-repo-key)
+           :header (agent-repl-wire--decode-message
+                    "RosterMergeQueueRepoGroup" 'header object
+                    #'agent-repl-wire-decode-roster-merged-repo-group-header)
+           :queue (agent-repl-wire--decode-message
+                   "RosterMergeQueueRepoGroup" 'queue object
+                   #'agent-repl-wire-decode-roster-repo-merge-queue)))))
+
+(defun agent-repl-wire-decode-roster-merge-queue-section-expanded (value)
+  "Decode VALUE as the empty message `RosterMergeQueueSectionExpanded'."
+  (agent-repl-wire--decode-empty "RosterMergeQueueSectionExpanded" value))
+
+(defun agent-repl-wire-decode-roster-merge-queue-section-collapsed (value)
+  "Decode VALUE as the empty message `RosterMergeQueueSectionCollapsed'."
+  (agent-repl-wire--decode-empty "RosterMergeQueueSectionCollapsed" value))
+
+(defun agent-repl-wire-decode-roster-merge-queue-section (value)
+  "Decode VALUE as `RosterMergeQueueSection'.
+A plist `(:header :groups :fold)'.  The section has no key of its own —
+the roster carries exactly one.  It holds one `RosterMergeQueueRepoGroup'
+per repository whose queue is active."
+  (let ((object (agent-repl-wire--object "RosterMergeQueueSection" value)))
+    (agent-repl-wire--check-keys "RosterMergeQueueSection" object
+                                 '(header groups expanded collapsed))
+    (agent-repl-wire--decoded
+     "RosterMergeQueueSection"
+     (list :header (agent-repl-wire--decode-message
+                    "RosterMergeQueueSection" 'header object
+                    #'agent-repl-wire-decode-roster-merged-section-header)
+           :groups (agent-repl-wire--decode-repeated
+                    "RosterMergeQueueSection" 'groups object
+                    #'agent-repl-wire-decode-roster-merge-queue-repo-group)
+           :fold (agent-repl-wire--decode-oneof
+                  "RosterMergeQueueSection" 'fold object
+                  '((expanded :expanded agent-repl-wire-decode-roster-merge-queue-section-expanded)
+                    (collapsed :collapsed agent-repl-wire-decode-roster-merge-queue-section-collapsed)))))))
 
 ;;;; ---- The hidden-workspaces section ----
 
@@ -1686,6 +1711,10 @@ fields."
 (defun agent-repl-wire-decode-workspace-roster-recently-merged (value)
   "Decode `WorkspaceRoster''s `recently_merged' field VALUE."
   (agent-repl-wire-decode-roster-merged-section value))
+
+(defun agent-repl-wire-decode-workspace-roster-merge-queue (value)
+  "Decode `WorkspaceRoster''s `merge_queue' field VALUE."
+  (agent-repl-wire-decode-roster-merge-queue-section value))
 
 (defun agent-repl-wire-decode-workspace-roster-hidden (value)
   "Decode `WorkspaceRoster''s `hidden' field VALUE."
@@ -2000,7 +2029,8 @@ read further."
 
 (defun agent-repl-wire-decode-workspace-roster (value)
   "Decode VALUE as `WorkspaceRoster'.
-Returns `(:repository V :open O :hidden H :recently-merged S :closed C
+Returns `(:repository V :open O :hidden H :recently-merged S
+:merge-queue Q :closed C
 :current C-or-nil :revision N :version V-or-nil :app-switcher A
 :threads T :cold-gates G)'.  THERE IS NO TAB BAR
 MESSAGE: the Open section's rows are the tab bar, each stating its own
@@ -2008,7 +2038,7 @@ tab."
   (let ((object (agent-repl-wire--object "WorkspaceRoster" value)))
     (agent-repl-wire--check-keys
      "WorkspaceRoster" object
-     '(repository open hidden recentlyMerged closed current revision version appSwitcher threads coldGates))
+     '(repository open hidden recentlyMerged mergeQueue closed current revision version appSwitcher threads coldGates))
     (agent-repl-wire--decoded
      "WorkspaceRoster"
      (list :repository (agent-repl-wire--decode-message
@@ -2023,6 +2053,9 @@ tab."
            :recently-merged (agent-repl-wire--decode-message
                              "WorkspaceRoster" 'recentlyMerged object
                              #'agent-repl-wire-decode-workspace-roster-recently-merged)
+           :merge-queue (agent-repl-wire--decode-message
+                         "WorkspaceRoster" 'mergeQueue object
+                         #'agent-repl-wire-decode-workspace-roster-merge-queue)
            :closed (agent-repl-wire--decode-message
                     "WorkspaceRoster" 'closed object
                     #'agent-repl-wire-decode-workspace-roster-closed)

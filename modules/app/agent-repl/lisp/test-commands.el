@@ -623,8 +623,7 @@ band's, in one group."
           :recently-merged (list :header (list :label (list :text "m"))
                                  :groups (and merged
                                               (list (list :header (list :label (list :text "repo"))
-                                                          :merged-rows (agent-repl-test--merged-rows merged)
-                                                          :activity '(:arm :idle :value nil)))))
+                                                          :merged-rows (agent-repl-test--merged-rows merged)))))
           :closed (agent-repl-test--closed-rows closed)
           :current nil)))
 

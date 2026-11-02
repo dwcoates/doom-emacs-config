@@ -150,6 +150,57 @@ func TestFoldOpenSectionSurfacesAFailedWriteAtError(t *testing.T) {
 	}
 }
 
+func TestFoldMergeQueueSectionRecordsTheFoldAndRepublishesTheRoster(t *testing.T) {
+	tests := []struct {
+		name   string
+		folded bool
+	}{{"collapse", true}, {"expand", false}}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+			prior := wsm.DefaultSidebarView
+			prior.MergeQueueFolded = !tt.folded
+			f.db.view = &prior
+
+			// Act
+			err := f.verbs.FoldMergeQueueSection(context.Background(), tt.folded)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("FoldMergeQueueSection: %v", err)
+			}
+			if len(f.sidebar.registries) != 1 {
+				t.Fatalf("roster republications = %d, want exactly one", len(f.sidebar.registries))
+			}
+			view := f.sidebar.registries[0].View
+			if view.MergeQueueFolded != tt.folded || view.MergedFolded != prior.MergedFolded {
+				t.Fatalf("republished view = %+v, want the queue fold %v and the merged fold untouched", view, tt.folded)
+			}
+		})
+	}
+}
+
+func TestFoldMergeQueueSectionSurfacesAFailedWriteAtError(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	f.db.setMergeQueueFoldedErr = errors.New("disk I/O error")
+
+	// Act
+	err := f.verbs.FoldMergeQueueSection(context.Background(), false)
+
+	// Assert
+	if err == nil {
+		t.Fatal("a failed fold write was answered as success")
+	}
+	if !loggedAtError(f, opFoldMergeQueueSection) {
+		t.Fatal("the failed write was not recorded at error")
+	}
+	if len(f.sidebar.registries) != 0 {
+		t.Fatalf("roster republications = %d, want none for a failed fold", len(f.sidebar.registries))
+	}
+}
+
 func TestFoldHiddenSectionSurfacesAFailedWriteAtError(t *testing.T) {
 	// Arrange
 	f := newFixture(t)
@@ -309,7 +360,8 @@ func TestEverySingletonSectionFoldSharesOneShape(t *testing.T) {
 		section string
 		fold    func(Verbs) error
 	}{
-		{"merge queue", opFoldMergedSection, "merge queue section", func(v Verbs) error { return v.FoldMergedSection(context.Background(), true) }},
+		{"recently merged", opFoldMergedSection, "recently merged section", func(v Verbs) error { return v.FoldMergedSection(context.Background(), true) }},
+		{"merge queue", opFoldMergeQueueSection, "merge queue section", func(v Verbs) error { return v.FoldMergeQueueSection(context.Background(), true) }},
 		{"hidden", opFoldHiddenSection, "hidden section", func(v Verbs) error { return v.FoldHiddenSection(context.Background(), true) }},
 		{"open", opFoldOpenSection, "open section", func(v Verbs) error { return v.FoldOpenSection(context.Background(), true) }},
 	}

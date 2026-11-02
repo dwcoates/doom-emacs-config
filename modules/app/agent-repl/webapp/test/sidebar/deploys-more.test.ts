@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
 /**
- * EACH DEPLOYS GROUP SHOWS ITS TEN MOST RECENT DEPLOYS (owner request,
+ * EACH RECENTLY MERGED GROUP SHOWS ITS TEN MOST RECENT MERGES (owner request,
  * 2026-10-31): an arrow shows ten more at a time, and the pages it showed go
  * again once none of them has been in view for fifteen seconds.
  */
 import { describe, expect, it } from "vitest";
-import { DEPLOYS_GROUP_CLASS, DEPLOYS_REPOSITORY_ATTRIBUTE } from "../../src/sidebar/deploys-fold.js";
+import { DEPLOYS_GROUP_CLASS, DEPLOYS_REPOSITORY_ATTRIBUTE, DEPLOYS_SECTION_ATTRIBUTE } from "../../src/sidebar/deploys-fold.js";
 import {
   DEPLOYS_MORE_CLASS,
   DEPLOYS_MORE_GLYPH,
@@ -55,6 +55,7 @@ function drawn(pages: number, repository = "r1"): { root: HTMLElement; region: H
   region.className = "rows";
   const group = document.createElement("div");
   group.className = DEPLOYS_GROUP_CLASS;
+  group.setAttribute(DEPLOYS_SECTION_ATTRIBUTE, "recently-merged");
   group.setAttribute(DEPLOYS_REPOSITORY_ATTRIBUTE, repository);
   const body = document.createElement("div");
   const drawnPages = Array.from({ length: pages }, () => {
@@ -319,7 +320,25 @@ describe("createDeploysMore", () => {
     expect(record.context).toMatchObject({ attribute: DEPLOYS_REPOSITORY_ATTRIBUTE, found: null });
   });
 
-  it("refuses to look at a group hanging in no Deploys viewport, logging why", async () => {
+  it("lets go of the Recently Merged group's pages, never the same repository's Merge Queue group's", () => {
+    // Arrange: the repository's queue group drawn above its merged group.
+    const { root, group, pages } = drawn(1);
+    const queueGroup = document.createElement("div");
+    queueGroup.className = DEPLOYS_GROUP_CLASS;
+    queueGroup.setAttribute(DEPLOYS_SECTION_ATTRIBUTE, "merge-queue");
+    queueGroup.setAttribute(DEPLOYS_REPOSITORY_ATTRIBUTE, "r1");
+    root.prepend(queueGroup);
+    placeAt(pages[0], 120, 140);
+    const timers = recordedTimers();
+    const more = createDeploysMore(root, timers, () => undefined);
+    more.more(group);
+    // Act
+    timers.fire();
+    // Assert
+    expect(hiddenFlags(pages)).toEqual([true]);
+  });
+
+  it("refuses to look at a group hanging in no Recently Merged viewport, logging why", async () => {
     // Arrange
     const { group } = drawn(1);
     const root = document.createElement("div");
@@ -329,7 +348,7 @@ describe("createDeploysMore", () => {
     // Act
     const act = (): void => more.more(group);
     // Assert
-    expect(act).toThrow(/hangs in no Deploys viewport/);
+    expect(act).toThrow(/hangs in no Recently Merged viewport/);
     const record = await forwardedRecord(capture, "sidebar.deploys-more.malformed");
     expect(record.context).toMatchObject({ repository: "r1" });
   });

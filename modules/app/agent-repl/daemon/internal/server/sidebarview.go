@@ -75,6 +75,8 @@ func (s *server) foldSection(
 		return false, nil, s.deps.Verbs.FoldRepository(ctx, repository.ID, folded, requester)
 	case *agentreplv1.SidebarViewFoldSection_RecentlyMerged:
 		return false, nil, s.deps.Verbs.FoldMergedSection(ctx, folded)
+	case *agentreplv1.SidebarViewFoldSection_MergeQueue:
+		return false, nil, s.deps.Verbs.FoldMergeQueueSection(ctx, folded)
 	case *agentreplv1.SidebarViewFoldSection_Hidden:
 		return false, nil, s.deps.Verbs.FoldHiddenSection(ctx, folded)
 	case *agentreplv1.SidebarViewFoldSection_Open:

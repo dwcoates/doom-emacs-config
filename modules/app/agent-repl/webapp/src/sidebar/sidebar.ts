@@ -37,6 +37,8 @@ import { createDropdowns } from "./dropdowns.js";
 import { createRowHover } from "./row-hover.js";
 import { createDeploysFold, installDeploysFoldReset } from "./deploys-fold.js";
 import { createDeploysMore } from "./deploys-more.js";
+import { openScope } from "./scope.js";
+import { installFocusFold } from "./section-fold.js";
 import { pageFocusLeft, type FocusLeft } from "../focus-left.js";
 import { installTransients } from "./transients.js";
 import { createArrangeHold } from "./arrange.js";
@@ -354,10 +356,16 @@ function mountSidebarIn(
   // (row-hover.ts): a row drawn under a resting pointer never sees it leave,
   // but the host sees every move and the pointer leaving the rail.
   const transients = installTransients(host, { dropdowns, rowHover: rail.rowHover, win: window });
-  // EACH DEPLOYS GROUP FOLDS BY ITS ACTIVITY AGAIN THE MOMENT THE USER IS
-  // DONE WITH THE RAIL (deploys-fold.ts): the focus gone from the page, or a
-  // workspace outside the groups clicked.
-  const removeDeploysFoldReset = installDeploysFoldReset(host, rail.deploysFold, deps.focusLeft ?? pageFocusLeft());
+  // EACH MERGE QUEUE AND RECENTLY MERGED GROUP OPENS AGAIN THE MOMENT THE
+  // USER IS DONE WITH THE RAIL (deploys-fold.ts): the focus gone from the
+  // page, or a workspace outside the groups clicked.
+  const focusLeft = deps.focusLeft ?? pageFocusLeft();
+  const removeDeploysFoldReset = installDeploysFoldReset(host, rail.deploysFold, focusLeft);
+  // RECENTLY MERGED AND HIDDEN FOLD THEMSELVES as the focus leaves the page
+  // (section-fold.ts, owner request 2026-11-01), through a scope of their own
+  // that lives as long as the rail.
+  const focusFoldScope = openScope(rail);
+  const removeFocusFold = installFocusFold(host, focusFoldScope.context, focusLeft);
 
   // ONLY A PAGE'S OWN SIDEBAR IS GATED: the webhost's is the one on screen.
   const unseen =
@@ -524,6 +532,8 @@ function mountSidebarIn(
       host.removeEventListener("click", dismiss);
       transients.dispose();
       removeDeploysFoldReset();
+      removeFocusFold();
+      focusFoldScope.dispose(host);
       rail.deploysMore.dispose();
       versionNotices?.dispose();
       rail.rowHover.dispose();

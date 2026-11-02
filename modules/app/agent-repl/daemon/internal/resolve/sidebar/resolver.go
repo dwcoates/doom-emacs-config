@@ -299,6 +299,7 @@ func (r *resolver) render(log dlog.Logger, cause string) *frontendv1.WorkspaceRo
 		Hidden:         r.hiddenSection(hidden, rc, log),
 		Open:           r.openSection(),
 		RecentlyMerged: r.mergedSection(merged, rc, log),
+		MergeQueue:     r.mergeQueueSection(log),
 		Closed:         r.closedRows(closed, rc, log),
 		AppSwitcher:    r.appSwitcher(),
 		Threads:        r.threadSection(threads),

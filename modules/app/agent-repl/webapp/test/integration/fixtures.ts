@@ -2598,8 +2598,13 @@ export function roster(init?: {
       hiddenRows: { rows: (init?.hidden ?? []).map(hiddenRow) },
       fold: { case: "expanded", value: {} },
     },
+    mergeQueue: {
+      header: { label: { text: "Merge Queue" } },
+      groups: [],
+      fold: { case: "expanded", value: {} },
+    },
     recentlyMerged: {
-      header: { label: { text: "deploys" } },
+      header: { label: { text: "Recently Merged" } },
       groups: [
         {
           key: { repository: repositoryRef() },
@@ -2607,7 +2612,6 @@ export function roster(init?: {
           mergedRows: {
             rows: (init?.merged ?? [rosterRow({ id: "ws-merged", status: "merged", when: "merged" })]).map((row) => ({ row })),
           },
-          activity: { case: "idle", value: {} },
         },
       ],
       fold: init?.mergedCollapsed === false ? { case: "expanded", value: {} } : { case: "collapsed", value: {} },

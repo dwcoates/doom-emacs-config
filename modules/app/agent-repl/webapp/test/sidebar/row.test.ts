@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { createDeploysFold, DEPLOYS_GROUP_CLASS, DEPLOYS_REPOSITORY_ATTRIBUTE } from "../../src/sidebar/deploys-fold.js";
+import { createDeploysFold, DEPLOYS_GROUP_CLASS, DEPLOYS_REPOSITORY_ATTRIBUTE, DEPLOYS_SECTION_ATTRIBUTE } from "../../src/sidebar/deploys-fold.js";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -1037,13 +1037,14 @@ describe("returnFromBand", () => {
   }
 
   it.each([
-    { name: "lets the Deploys groups fold by their activity once a reopen from one succeeds", resets: true, answer: true, want: true },
-    { name: "keeps the hand's fold when the reopen was refused", resets: true, answer: false, want: false },
-    { name: "keeps the hand's fold after a return from another band", resets: false, answer: true, want: false },
+    { name: "opens every group folded by hand once a reopen from one succeeds", resets: true, answer: true, want: false },
+    { name: "keeps the hand's fold when the reopen was refused", resets: true, answer: false, want: true },
+    { name: "keeps the hand's fold after a return from another band", resets: false, answer: true, want: true },
   ])("$name", async ({ resets, answer, want }) => {
-    // Arrange: an idle group the hand opened.
+    // Arrange: a Recently Merged group the hand folded.
     const group = document.createElement("div");
     group.className = DEPLOYS_GROUP_CLASS;
+    group.setAttribute(DEPLOYS_SECTION_ATTRIBUTE, "recently-merged");
     group.setAttribute(DEPLOYS_REPOSITORY_ATTRIBUTE, "r1");
     const folds = createDeploysFold(document, () => undefined);
     folds.toggle(group);
@@ -1054,7 +1055,7 @@ describe("returnFromBand", () => {
     expect(folds.folded(group)).toBe(want);
   });
 
-  it("resets the Deploys folds on a reopen from each merged return, never on a hidden one's", () => {
+  it("resets the repository groups' folds on a reopen from each merged return, never on a hidden one's", () => {
     expect([BAND_RETURNS.merged.map((r) => r.resetsDeploysFolds), BAND_RETURNS.hidden.map((r) => r.resetsDeploysFolds)]).toEqual([
       [true, true],
       [false],

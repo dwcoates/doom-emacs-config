@@ -44,6 +44,21 @@ func TestSidebarViewWritesAreReadBack(t *testing.T) {
 			want: SidebarView{MergedFolded: true, HiddenFolded: true},
 		},
 		{
+			name:  "folding the merge queue section keeps the band",
+			write: func(s *store) error { return s.SetMergeQueueSectionFolded(context.Background(), true) },
+			want:  SidebarView{MergeQueueFolded: true},
+		},
+		{
+			name: "unfolding the merge queue section again replaces its fold",
+			write: func(s *store) error {
+				if err := s.SetMergeQueueSectionFolded(context.Background(), true); err != nil {
+					return err
+				}
+				return s.SetMergeQueueSectionFolded(context.Background(), false)
+			},
+			want: SidebarView{},
+		},
+		{
 			name:  "folding the hidden section keeps the band",
 			write: func(s *store) error { return s.SetHiddenSectionFolded(context.Background(), true) },
 			want:  SidebarView{HiddenFolded: true},
@@ -283,5 +298,34 @@ func TestAMigratedViewKeepsItsFoldsWhenTheShowsColumnLands(t *testing.T) {
 	want := SidebarView{MergedFolded: true, HiddenFolded: true, OpenFolded: true}
 	if err != nil || view != want {
 		t.Fatalf("SidebarView after the migration = %+v, %v; want %+v", view, err, want)
+	}
+}
+
+// TestTheMigrationAddsTheMergeQueueSectionFold pins the layout-97 step: a
+// view someone had already changed keeps its folds, and the Merge Queue
+// section lands expanded.
+func TestTheMigrationAddsTheMergeQueueSectionFold(t *testing.T) {
+	// Arrange
+	path := fixtureAt(t, 96)
+	execRaw(t, path, `INSERT INTO sidebar_view (id, merged_folded, grouping, hidden_folded, open_folded) VALUES (1, 1, 'repository', 1, 0)`)
+
+	// Act
+	handle, err := Open(context.Background(), path, WithUnsyncedWrites())
+	if err != nil {
+		t.Fatalf("Open on a layout-96 database: %v", err)
+	}
+	defer handle.Close()
+	view, err := handle.(*store).SidebarView(context.Background())
+
+	// Assert
+	want := SidebarView{MergedFolded: true, HiddenFolded: true}
+	if err != nil || view != want {
+		t.Fatalf("SidebarView after the migration = %+v, %v; want %+v", view, err, want)
+	}
+}
+
+func TestTheDefaultViewExpandsTheMergeQueueSection(t *testing.T) {
+	if DefaultSidebarView.MergeQueueFolded {
+		t.Fatal("the default view folds the Merge Queue section; a merge in flight must be in sight")
 	}
 }

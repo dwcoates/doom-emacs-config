@@ -1111,8 +1111,8 @@ export interface BandReturn {
   /** The verb that brings the workspace back; answers whether it did. */
   bringBack: (line: HTMLElement, sc: SidebarContext, workspace: WorkspaceRef) => Promise<boolean>;
   /**
-   * Whether bringing it back lets every Deploys group fold by its activity
-   * again, the group it was drawn in included (owner request, 2026-10-27;
+   * Whether bringing it back opens every repository group folded by hand,
+   * the group it was drawn in included (owner request, 2026-10-27;
    * deploys-fold.ts).
    */
   resetsDeploysFolds: boolean;
@@ -1223,7 +1223,7 @@ export async function returnFromBand(
   });
   const back = await band.bringBack(line, sc, workspace);
   if (!back) return;
-  if (band.resetsDeploysFolds) sc.deploysFold.reset("a workspace was reopened from a Deploys group");
+  if (band.resetsDeploysFolds) sc.deploysFold.reset("a workspace was reopened from a Recently Merged group");
   await selectWorkspace(line, sc, workspace);
 }
 

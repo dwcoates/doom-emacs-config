@@ -103,16 +103,14 @@ OVERRIDES replaces top-level entries (notably `current')."
                          (groups . [])
                          (collapsed . ()))))))
 
-(defun agent-repl-itest-roster--merged-group (rows arm)
+(defun agent-repl-itest-roster--merged-group (rows)
   "Return a RosterMergedRepoGroup protojson alist of the fixture repository.
 ROWS is a vector of RosterRow alists, which `agent-repl-itest--listed'
-lists as the group's `mergedRows'; ARM is the `activity' arm's key
-symbol, `idle'."
+lists as the group's `mergedRows'."
   `((key . ((repository . ((id . "repo-itest")
                            (dir . ,agent-repl-itest-roster--repo-dir)))))
     (header . ((label . ((text . "itest-repo")))))
-    (rows . ((rows . ,rows)))
-    (,arm . ())))
+    (rows . ((rows . ,rows)))))
 
 (defun agent-repl-itest-roster--push (daemon roster)
   "Push ROSTER on DAEMON's roster stream."
@@ -747,7 +745,7 @@ in the Open section), so only the repo section's row is on the bar."
                  `(recentlyMerged
                    . ((header . ((label . ((text . "merge queue")))))
                       (groups . ,(vector (agent-repl-itest-roster--merged-group
-                                          (vector merged-row) 'idle)))
+                                          (vector merged-row))))
                       (collapsed . ())))))
         ;; Assert.
         (agent-repl-itest--wait-until
@@ -999,7 +997,7 @@ never a silently-empty view."
       ;; Assert.
       (agent-repl-itest--await-log daemon "elisp.rpc.push-invalid" "error")
       (should (agent-repl-itest--logged-p daemon "elisp.rpc.push-invalid" "error"))
-      ;; The raw-context needle is the Deploys section's header, NOT the
+      ;; The raw-context needle is the Recently Merged section's header, NOT the
       ;; row's marker: the rows live inside `repository', so deleting that
       ;; field deletes them with it and no row text is on the wire at all.
       ;; What is left of the roster is what the raw context must still carry.

@@ -65,15 +65,11 @@ COLLAPSED non-nil makes the daemon hold the section collapsed."
         :entries (agent-repl-test--row-entries rows)
         :fold (list :arm (if collapsed :collapsed :expanded) :value nil)))
 
-(defun agent-repl-test-roster--merged-group (label rows &optional queued)
-  "Return a decoded `RosterMergedRepoGroup' for repository LABEL holding ROWS.
-QUEUED non-nil puts it on the `queued' arm, with an empty queue."
+(defun agent-repl-test-roster--merged-group (label rows)
+  "Return a decoded `RosterMergedRepoGroup' for repository LABEL holding ROWS."
   (list :key (list :repository (list :id (concat "r-" label) :dir (concat "/r/" label)))
         :header (list :label (list :text label))
-        :merged-rows (agent-repl-test--merged-rows rows)
-        :activity (if queued
-                      (list :arm :queued :value (list :queue (list :waiting nil :remediating nil)))
-                    (list :arm :idle :value nil))))
+        :merged-rows (agent-repl-test--merged-rows rows)))
 
 (cl-defun agent-repl-test-roster--roster (&key sections hidden merged merged-groups closed current threads)
   "Return a decoded `WorkspaceRoster' plist from SECTIONS, HIDDEN, MERGED and CURRENT.
@@ -446,20 +442,8 @@ whose calls are the observation."
       ;; Assert
       (should (equal ids '("m1" "m2"))))))
 
-(ert-deftest agent-repl-test-roster-walk-keeps-a-queued-groups-merged-rows-uncollapsed ()
-  "A queued Deploys group's merged rows are walked as drawn, as an idle one's are."
-  ;; Arrange
-  (let ((roster (agent-repl-test-roster--roster
-                 :merged-groups
-                 (list (agent-repl-test-roster--merged-group
-                        "alpha" (list (agent-repl-test-roster--row "m1" "m1" :merged)) t)))))
-    ;; Act
-    (let ((entry (car (agent-repl-roster-walk roster))))
-      ;; Assert
-      (should-not (plist-get entry :collapsed)))))
-
-(ert-deftest agent-repl-test-roster-walk-keeps-an-idle-merged-group-on-the-bar ()
-  "An idle Deploys group's merged rows are walked as drawn, under the band's label."
+(ert-deftest agent-repl-test-roster-walk-keeps-a-merged-group-on-the-bar ()
+  "A Recently Merged group's rows are walked as drawn, under the band's label."
   ;; Arrange
   (let ((roster (agent-repl-test-roster--roster
                  :merged (list (agent-repl-test-roster--row "m1" "m1" :merged)))))

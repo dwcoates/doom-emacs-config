@@ -21,6 +21,8 @@ import {
   BAND_STRETCHED_ATTRIBUTE,
   allocateSectionLines,
   bandShare,
+  combineStops,
+  splitLines,
   fitBands,
   installBandFit,
   mergedTodayLines,
@@ -38,7 +40,11 @@ import {
   fakeTicker,
   hiddenSection,
   mergedSection,
+  mergeQueueBand,
+  mergingHead,
   openSection,
+  queueGroup,
+  waitingMerge,
   repoSection,
   roster,
   row,
@@ -63,12 +69,14 @@ interface Drawing {
   /** How many of the merged rows, the first ones, landed today. */
   today?: number;
   folded?: { open?: boolean; hidden?: boolean; merged?: boolean };
-  /** Whether the Deploys group, idle and so folded by itself, was opened by hand (deploys-fold.ts); opened unless said. */
+  /** Whether the Recently Merged group stays open, as it is drawn, or was folded by hand (deploys-fold.ts); open unless said. */
   expanded?: boolean;
+  /** How many lines the Merge Queue section's one queue draws, its head and the merges waiting; none unless said. */
+  queued?: number;
 }
 
 /** A rail drawn as DRAWING says. */
-function drawn({ open = 0, hidden = 0, merged = 0, today = 0, folded = {}, expanded = true }: Drawing): { scroller: HTMLElement; pane: HTMLElement } {
+function drawn({ open = 0, hidden = 0, merged = 0, today = 0, folded = {}, expanded = true, queued = 0 }: Drawing): { scroller: HTMLElement; pane: HTMLElement } {
   const folds = createDeploysFold(document, () => undefined);
   const openRows = Array.from({ length: open }, (_, i) => row({ id: `o-${i}` }));
   const hiddenRows = Array.from({ length: hidden }, (_, i) => row({ id: `h-${i}` }));
@@ -89,13 +97,18 @@ function drawn({ open = 0, hidden = 0, merged = 0, today = 0, folded = {}, expan
         open: openSection(folded.open ?? false),
         hidden: hiddenSection(hiddenRows, hidden, folded.hidden ?? false),
         merged: mergedSection(mergedRows, folded.merged ?? false),
+        mergeQueue: mergeQueueBand(
+          queued === 0
+            ? []
+            : [queueGroup({ id: "alpha", queue: { head: mergingHead("q-0"), waiting: Array.from({ length: queued - 1 }, (_, i) => waitingMerge(`q-${i + 1}`)) } })],
+        ),
       }),
       sidebarContext(undefined, undefined, undefined, undefined, undefined, folds),
     ),
   );
   document.body.replaceChildren(scroller);
-  const group = scroller.querySelector<HTMLElement>(".merged-group");
-  if (expanded && group !== null) folds.toggle(group);
+  const group = scroller.querySelector<HTMLElement>(".merged-section .merged-group");
+  if (!expanded && group !== null) folds.toggle(group);
   const pane = scroller.querySelector(".sb-pane") as HTMLElement;
   return { scroller, pane };
 }
@@ -108,6 +121,7 @@ function rect(top: number, height: number): DOMRect {
 /** Each section's class and its rows region's selector. */
 const REGIONS = {
   "open-section": ":scope > .sb-sections",
+  "merge-queue-section": ":scope > .rows",
   "hidden-section": ":scope > .rows",
   "merged-section": ":scope > .rows",
 } as const;
@@ -129,8 +143,8 @@ function layRegion(pane: HTMLElement, cls: SectionClass): void {
   const section = pane.querySelector<HTMLElement>(`:scope > .${cls}`);
   const rows = region(pane, cls);
   if (section === null || rows === null) return;
-  const lines = [...rows.querySelectorAll<HTMLElement>(".row, .merged-group.folded > .merged-group-head")].filter(
-    (line) => !(line.matches(".row") && line.closest(".merged-group.folded") !== null),
+  const lines = [...rows.querySelectorAll<HTMLElement>(".row, .sb-mq-head, .sb-mq-waiting, .merged-group.folded > .merged-group-head")].filter(
+    (line) => line.matches(".merged-group-head") || line.closest(".merged-group.folded") === null,
   );
   const full = lines.length * ROW;
   const height = (): number => {
@@ -164,6 +178,9 @@ function railHeight(scroller: HTMLElement, rail: number): void {
 
 const SECTIONS: SectionClass[] = ["open-section", "merged-section", "hidden-section"];
 
+/** Every section the fit lays out, the Merge Queue section's included, top to bottom. */
+const LAID_OUT: SectionClass[] = ["open-section", "merge-queue-section", "merged-section", "hidden-section"];
+
 /**
  * State the layout: the rail's height and the pane's other content. OTHERS
  * may read the sections' drawn heights, for a layout whose other content
@@ -174,10 +191,10 @@ function laidOut(
   rail: number,
   others: number | (() => number),
 ): void {
-  for (const cls of SECTIONS) layRegion(pane, cls);
+  for (const cls of LAID_OUT) layRegion(pane, cls);
   railHeight(scroller, rail);
   const other = typeof others === "number" ? () => others : others;
-  pane.getBoundingClientRect = () => rect(0, other() + SECTIONS.reduce((sum, cls) => sum + regionHeight(pane, cls), 0));
+  pane.getBoundingClientRect = () => rect(0, other() + LAID_OUT.reduce((sum, cls) => sum + regionHeight(pane, cls), 0));
 }
 
 /** A section's box in PANE. */
@@ -218,6 +235,30 @@ describe("bandShare", () => {
     const got = bandShare(today, hidden);
     // Assert
     expect(got).toEqual(want);
+  });
+});
+
+describe("combineStops", () => {
+  it.each([
+    { name: "the queue's stops, then the merged ones standing on the queue's height", queue: stops(2), merged: stops(3), want: [0, 20, 40, 60, 80, 100] },
+    { name: "the merged stops alone under no queue", queue: [0], merged: stops(2), want: [0, 20, 40] },
+    { name: "the queue's stops alone over no merge", queue: stops(2), merged: [0], want: [0, 20, 40] },
+  ])("lays out $name", ({ queue, merged, want }) => {
+    expect(combineStops(queue, merged)).toEqual(want);
+  });
+
+  it("refuses stops that do not start at 0", () => {
+    expect(() => combineStops([5, 20], stops(1))).toThrow(/queue stops/);
+  });
+});
+
+describe("splitLines", () => {
+  it.each([
+    { name: "gives the queue its lines first", lines: 5, queueTotal: 2, want: { queue: 2, merged: 3 } },
+    { name: "gives the queue all of a share shorter than it", lines: 1, queueTotal: 3, want: { queue: 1, merged: 0 } },
+    { name: "gives the merges every line with no queue", lines: 4, queueTotal: 0, want: { queue: 0, merged: 4 } },
+  ])("$name", ({ lines, queueTotal, want }) => {
+    expect(splitLines(lines, queueTotal)).toEqual(want);
   });
 });
 
@@ -363,13 +404,13 @@ describe("regionLines", () => {
 });
 
 describe("deploysFloorLines", () => {
-  /** A queue line, then a merged line per merged row, as a Deploys region draws them. */
+  /** A folded group's header line, then a merged line per merged row, as a Recently Merged region draws them. */
   function deploysLines(merged: number): HTMLElement[] {
-    const queues = document.createElement("div");
-    queues.className = MERGE_QUEUE_CLASS;
+    const folded = document.createElement("div");
+    folded.className = "merged-group folded";
     const head = document.createElement("div");
-    head.className = "sb-mq-head";
-    queues.appendChild(head);
+    head.className = "merged-group-head";
+    folded.appendChild(head);
     const rows = Array.from({ length: merged }, () => {
       const ws = document.createElement("div");
       ws.setAttribute("data-merged-at", String(startOfToday() - 5));
@@ -418,26 +459,18 @@ describe("mergedTodayLines", () => {
     expect(got).toBe(want);
   });
 
-  it.each([
-    { name: "every queue line ahead of older merges", queued: 2, at: [startOfToday() - 5], want: 2 },
-    { name: "every queue line and today's merges after them", queued: 1, at: [startOfToday() + 5, startOfToday() - 5], want: 2 },
-  ])("reaches $name", ({ queued, at, want }) => {
-    // Arrange: the queues' lines stand above the merged rows.
+  it("refuses a queue's line, which the Recently Merged section never draws", () => {
+    // Arrange: a waiting merge's line, which stands in the Merge Queue section.
     const queues = document.createElement("div");
     queues.className = MERGE_QUEUE_CLASS;
-    const queueLines = Array.from({ length: queued }, () => {
-      const line = document.createElement("div");
-      line.className = "sb-mq-waiting";
-      queues.appendChild(line);
-      return line;
-    });
-    // Act
-    const got = mergedTodayLines([...queueLines, ...mergedLines(at)], NOW);
-    // Assert
-    expect(got).toBe(want);
+    const line = document.createElement("div");
+    line.className = "sb-mq-waiting";
+    queues.appendChild(line);
+    // Act / Assert
+    expect(() => mergedTodayLines([line, ...mergedLines([startOfToday() + 5])], NOW)).toThrow(/no merged instant/);
   });
 
-  it("reaches a folded Deploys group's header", () => {
+  it("reaches a folded Recently Merged group's header", () => {
     // Arrange: a folded group draws no merged row, and its header is a line of its own.
     const group = document.createElement("div");
     group.className = "merged-group folded";
@@ -578,6 +611,38 @@ describe("paintBandMore", () => {
 });
 
 describe("fitBands", () => {
+  it("gives the Merge Queue section its lines first, the floor counting them above the merges", () => {
+    // Arrange — room for twenty lines: a queue of two lines over ten older merges.
+    const rail = drawn({ open: 30, queued: 2, merged: 10 });
+    laidOut(rail, 500, 100);
+    // Act
+    const got = fitBands(rail.scroller, rail.pane, NOW);
+    // Assert
+    expect(got).toEqual({ open: 13, queue: 2, merged: 5, hidden: 0 });
+  });
+
+  it("claims room for every queue line as for today's merges", () => {
+    // Arrange — room for twenty lines: a queue of four lines and no merge.
+    const rail = drawn({ open: 30, queued: 4 });
+    laidOut(rail, 500, 100);
+    // Act
+    const got = fitBands(rail.scroller, rail.pane, NOW);
+    // Assert
+    expect(got).toEqual({ open: 16, queue: 4, merged: 0, hidden: 0 });
+  });
+
+  it("logs the queue's lines beside the merges'", async () => {
+    // Arrange
+    const rail = drawn({ open: 30, queued: 2, merged: 10 });
+    laidOut(rail, 500, 100);
+    const capture = captureLogRecords("debug");
+    // Act
+    fitBands(rail.scroller, rail.pane, NOW);
+    // Assert
+    const record = await forwardedRecord(capture, "sidebar.band-fit");
+    expect(record.context).toMatchObject({ queue_total: 2, queue_shown: 2, merged_total: 10, merged_shown: 5 });
+  });
+
   it("lengthens the Open section until the bands keep their six-line share", () => {
     // Arrange — room for twenty lines below 100px of other content; a
     // folded Deploys group is its header's one line.
@@ -606,7 +671,7 @@ describe("fitBands", () => {
     // Act
     const got = fitBands(rail.scroller, rail.pane, NOW);
     // Assert
-    expect(got).toEqual({ open: 15, merged: 5, hidden: 0 });
+    expect(got).toEqual({ queue: 0, open: 15, merged: 5, hidden: 0 });
   });
 
   it("stretches Hidden Workspaces to the rail's foot through a line it cuts", () => {
@@ -803,7 +868,7 @@ describe("fitBands", () => {
     // Act
     const got = fitBands(rail.scroller, rail.pane, NOW);
     // Assert
-    expect(got).toEqual({ open: 17, hidden: 2, merged: 1 });
+    expect(got).toEqual({ queue: 0, open: 17, hidden: 2, merged: 1 });
   });
 
   it("leaves every section uncapped when every line fits", () => {
@@ -823,7 +888,7 @@ describe("fitBands", () => {
     // Act
     const got = fitBands(rail.scroller, rail.pane, NOW);
     // Assert
-    expect(got).toEqual({ open: 4, hidden: 0, merged: 6 });
+    expect(got).toEqual({ queue: 0, open: 4, hidden: 0, merged: 6 });
   });
 
   it("re-fits a capped section from its whole content", () => {
@@ -835,7 +900,7 @@ describe("fitBands", () => {
     // Act
     const got = fitBands(rail.scroller, rail.pane, NOW);
     // Assert
-    expect(got).toEqual({ open: 10, hidden: 10, merged: 10 });
+    expect(got).toEqual({ queue: 0, open: 10, hidden: 10, merged: 10 });
   });
 
   it("keeps the daemon's count on a scrolling band", () => {
@@ -885,7 +950,7 @@ describe("fitBands", () => {
     // Act
     const got = fitBands(rail.scroller, rail.pane, NOW);
     // Assert
-    expect(got).toEqual({ open: 0, hidden: 0, merged: 5 });
+    expect(got).toEqual({ queue: 0, open: 0, hidden: 0, merged: 5 });
   });
 
   it("takes the rail's drawn borders and padding out of the room", () => {
@@ -897,7 +962,7 @@ describe("fitBands", () => {
     // Act
     const got = fitBands(rail.scroller, rail.pane, NOW);
     // Assert
-    expect(got).toEqual({ open: 0, hidden: 0, merged: 5 });
+    expect(got).toEqual({ queue: 0, open: 0, hidden: 0, merged: 5 });
   });
 
   it("refuses a rail whose border is not in px", () => {

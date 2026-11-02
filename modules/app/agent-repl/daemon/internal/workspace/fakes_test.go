@@ -151,10 +151,11 @@ type fakeDB struct {
 	// setMaturityFoldedErr and setGroupingErr fail its writes and viewErr its
 	// read.
 	view               *wsm.SidebarView
-	setMergedFoldedErr error
-	setHiddenFoldedErr error
-	setOpenFoldedErr   error
-	viewErr            error
+	setMergedFoldedErr     error
+	setMergeQueueFoldedErr error
+	setHiddenFoldedErr     error
+	setOpenFoldedErr       error
+	viewErr                error
 	// workspaceErr fails the one-workspace read, which the map cannot.
 	workspaceErr error
 	// setHiddenErr fails the hidden-flag write.
@@ -3659,6 +3660,17 @@ func (d *fakeDB) SetMergedSectionFolded(_ context.Context, folded bool) error {
 	}
 	view := d.currentView()
 	view.MergedFolded = folded
+	d.view = &view
+	return nil
+}
+
+// SetMergeQueueSectionFolded records the Merge Queue section's fold.
+func (d *fakeDB) SetMergeQueueSectionFolded(_ context.Context, folded bool) error {
+	if d.setMergeQueueFoldedErr != nil {
+		return d.setMergeQueueFoldedErr
+	}
+	view := d.currentView()
+	view.MergeQueueFolded = folded
 	d.view = &view
 	return nil
 }

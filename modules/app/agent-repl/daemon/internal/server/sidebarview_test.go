@@ -32,6 +32,10 @@ func mergedSection() *agentreplv1.SidebarViewFoldSection_RecentlyMerged {
 	return &agentreplv1.SidebarViewFoldSection_RecentlyMerged{RecentlyMerged: &agentreplv1.SidebarViewRecentlyMerged{}}
 }
 
+func mergeQueueSection() *agentreplv1.SidebarViewFoldSection_MergeQueue {
+	return &agentreplv1.SidebarViewFoldSection_MergeQueue{MergeQueue: &agentreplv1.SidebarViewMergeQueue{}}
+}
+
 func hiddenSection() *agentreplv1.SidebarViewFoldSection_Hidden {
 	return &agentreplv1.SidebarViewFoldSection_Hidden{Hidden: &agentreplv1.SidebarViewHidden{}}
 }
@@ -64,6 +68,8 @@ func TestUpdateSidebarViewHandsASectionFoldToTheVerb(t *testing.T) {
 	}{
 		{"expand the merged band", &agentreplv1.SidebarViewFoldSection{Section: mergedSection(), Fold: expandFold()}, sectionFold{merged: true, folded: false}},
 		{"collapse the merged band", &agentreplv1.SidebarViewFoldSection{Section: mergedSection(), Fold: collapseFold()}, sectionFold{merged: true, folded: true}},
+		{"expand the merge queue section", &agentreplv1.SidebarViewFoldSection{Section: mergeQueueSection(), Fold: expandFold()}, sectionFold{mergeQueue: true, folded: false}},
+		{"collapse the merge queue section", &agentreplv1.SidebarViewFoldSection{Section: mergeQueueSection(), Fold: collapseFold()}, sectionFold{mergeQueue: true, folded: true}},
 		{"collapse the hidden section", &agentreplv1.SidebarViewFoldSection{Section: hiddenSection(), Fold: collapseFold()}, sectionFold{hidden: true, folded: true}},
 		{"expand the hidden section", &agentreplv1.SidebarViewFoldSection{Section: hiddenSection(), Fold: expandFold()}, sectionFold{hidden: true, folded: false}},
 		{"collapse the open section", &agentreplv1.SidebarViewFoldSection{Section: openSection(), Fold: collapseFold()}, sectionFold{open: true, folded: true}},

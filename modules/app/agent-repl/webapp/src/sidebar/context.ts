@@ -68,9 +68,9 @@ export interface RailContext {
   shownAhead(): string | null;
   /** What arranging the repository grouping needs (`arrange.ts`). */
   arrange: ArrangeContext;
-  /** Whether each Deploys group is folded, this page's own (`deploys-fold.ts`). */
+  /** Whether each Merge Queue and Recently Merged group is folded, this page's own (`deploys-fold.ts`). */
   deploysFold: DeploysFold;
-  /** How many older deploys each Deploys group shows, this page's own (`deploys-more.ts`). */
+  /** How many older merges each Recently Merged group shows, this page's own (`deploys-more.ts`). */
   deploysMore: DeploysMore;
 }
 
@@ -113,6 +113,12 @@ export function subsectionFoldKey(subsectionId: string): string {
  * has no key of its own — its identity is that there is only ever one.
  */
 export const MERGED_FOLD_KEY = "merged";
+
+/**
+ * The Merge Queue section's fold key. FIXED for the same reason as
+ * `MERGED_FOLD_KEY`: the roster carries exactly one such section.
+ */
+export const MERGE_QUEUE_FOLD_KEY = "merge-queue";
 
 /**
  * The hidden-workspaces section's fold key. FIXED for the same reason as
