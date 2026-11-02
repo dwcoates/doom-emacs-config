@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"agent-repld/internal/dlog"
@@ -114,26 +115,39 @@ func (f *Fleet) heldForAnswer(ctx context.Context, log dlog.Logger, ws ids.Works
 	if held, ok := f.idleHeldForAnswer(ws); ok {
 		return held, nil
 	}
+	src := source{VendorSessionID: resume.VendorSessionID, ColdRemediation: resume.Remediation}.withRecord(record)
+	log.Info(opColdGate, "the answered gate has no shim; spawning the one its resume runs through", dlog.Context{"vendor_session_id": resume.VendorSessionID})
+	held, err := f.spawnAtGate(ctx, log, ws, record, previous, src, "AnswerColdGate")
+	var refusal *Refusal
+	if err != nil && !errors.As(err, &refusal) {
+		return nil, fmt.Errorf("re-open session for %q: %w", ws, err)
+	}
+	return held, err
+}
+
+// spawnAtGate spawns the shim a standing gate's conversation is resumed
+// through, held with no session, under the workspace's start gate (the
+// caller holds it). VERB names the act for a refusal: a shim that already runs
+// a session on the conversation leaves the gate nothing to resume.
+func (f *Fleet) spawnAtGate(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, record wsm.Workspace, previous wsm.Session, src source, verb string) (*live, error) {
 	configDir := accountRootFor(f.deps.Accounts, record.Dir, previous)
 	hostSessionID := previous.HostSessionID
 	if hostSessionID == "" {
 		hostSessionID = wsm.NewHostSessionID()
 	}
-	src := source{VendorSessionID: resume.VendorSessionID, ColdRemediation: resume.Remediation}.withRecord(record)
-	log.Info(opColdGate, "the answered gate has no shim; spawning the one its resume runs through", dlog.Context{"vendor_session_id": resume.VendorSessionID})
 	client, path, err := f.reuseOrBringUp(ctx, stampSession(log, hostSessionID), ws, record.Dir, f.deps.SocketPath(ws), configDir, hostSessionID, src)
 	if err != nil {
-		return nil, fmt.Errorf("re-open session for %q: bring up the shim the answer resumes through: %w", ws, err)
+		return nil, fmt.Errorf("bring up the shim the cold gate's conversation resumes through: %w", err)
 	}
 	if path == pathAdopted {
 		// A SHIM ALREADY RUNS A SESSION ON THIS CONVERSATION: there is nothing
-		// cold left to answer, and a resume would be refused already_started.
-		return nil, refuse(log, "AnswerColdGate", ArmNoSession,
-			fmt.Sprintf("a running shim already holds workspace %q's session; the answered gate has nothing to re-open", ws), false)
+		// cold left to resume, and a resume would be refused already_started.
+		return nil, refuse(log, verb, ArmNoSession,
+			fmt.Sprintf("a running shim already holds workspace %q's session; its cold gate has nothing to re-open", ws), false)
 	}
 	held, ok := f.idleHeldForAnswer(ws)
 	if !ok || held.client != client {
-		return nil, fmt.Errorf("re-open session for %q: %w", ws, ErrShimTaken)
+		return nil, ErrShimTaken
 	}
 	return held, nil
 }

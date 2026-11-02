@@ -186,21 +186,9 @@ type shimclientRemoteControl interface {
 // may run under an rpc's context, which ends when the rpc answers, and a
 // bridge cut there would be a refusal nobody caused.
 func (f *Fleet) applyRemoteControl(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, client shimclientRemoteControl, on bool) error {
-	req := &shimv1.SetSessionRemoteControlRequest{Enabled: on}
-	if on {
-		record, err := f.deps.DB.Workspace(ctx, ws)
-		if err != nil {
-			return fmt.Errorf("read the workspace's name for claude.ai: %w", err)
-		}
-		standing, err := f.deps.DB.RemoteControl(ctx, ws)
-		if err != nil {
-			return fmt.Errorf("read the bridge session to re-bind: %w", err)
-		}
-		req.Name = record.Name
-		if standing.BridgeSessionID != "" {
-			reattach := standing.BridgeSessionID
-			req.ReattachBridgeSessionId = &reattach
-		}
+	req, err := f.remoteControlRequest(ctx, ws, on)
+	if err != nil {
+		return err
 	}
 	bounded, cancel := context.WithTimeout(context.WithoutCancel(ctx), RemoteControlBound)
 	defer cancel()
@@ -236,6 +224,32 @@ func (f *Fleet) applyRemoteControl(ctx context.Context, log dlog.Logger, ws ids.
 		"bridge_session_id": success.GetBridgeSessionId(), "reattached": req.ReattachBridgeSessionId != nil,
 	})
 	return nil
+}
+
+// remoteControlRequest is the SetSessionRemoteControl that puts the bridge
+// ON or off: an on names the workspace as the sidebar draws it and re-binds
+// the bridge session last kept. It is the one builder of a bridge request, so
+// a live session's bridge and a parked conversation's re-bind the same
+// claude.ai session.
+func (f *Fleet) remoteControlRequest(ctx context.Context, ws ids.WorkspaceID, on bool) (*shimv1.SetSessionRemoteControlRequest, error) {
+	req := &shimv1.SetSessionRemoteControlRequest{Enabled: on}
+	if !on {
+		return req, nil
+	}
+	record, err := f.deps.DB.Workspace(ctx, ws)
+	if err != nil {
+		return nil, fmt.Errorf("read the workspace's name for claude.ai: %w", err)
+	}
+	standing, err := f.deps.DB.RemoteControl(ctx, ws)
+	if err != nil {
+		return nil, fmt.Errorf("read the bridge session to re-bind: %w", err)
+	}
+	req.Name = record.Name
+	if standing.BridgeSessionID != "" {
+		reattach := standing.BridgeSessionID
+		req.ReattachBridgeSessionId = &reattach
+	}
+	return req, nil
 }
 
 // remoteControlArm names a SetSessionRemoteControl refusal's arm, spelled as

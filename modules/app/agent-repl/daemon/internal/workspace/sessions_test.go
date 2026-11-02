@@ -4172,3 +4172,109 @@ func TestStartGoesOnWhenTheBookCannotBeRecorded(t *testing.T) {
 		t.Fatalf("records = %+v, want the failed record at ERROR", f.log.logger.Records())
 	}
 }
+
+// ---- startSessionRequest: the one builder of a StartSession ----
+
+func TestStartSessionRequest(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(f *fleetFixture, ws ids.WorkspaceID)
+		src     source
+		want    *shimv1.StartSessionRequest
+	}{
+		{
+			name: "a resume names the conversation, the recorded model and every rolled-back turn",
+			arrange: func(f *fleetFixture, ws ids.WorkspaceID) {
+				f.db.sessions[ws] = wsm.Session{Workspace: ws, VendorSessionID: "vendor-1", Model: "opus"}
+				f.db.rolledBack = map[ids.WorkspaceID][]ids.TurnID{ws: {"turn-3"}}
+			},
+			src: source{VendorSessionID: "vendor-1", WorkspaceName: "w1"},
+			want: &shimv1.StartSessionRequest{WorkspaceName: "w1", Source: &shimv1.StartSessionRequest_Resume{Resume: &shimv1.StartSessionResume{
+				VendorSessionId: "vendor-1",
+				Model:           &conversationv1.AgentModel{Name: "opus"},
+				RolledBackTurns: []*conversationv1.TurnId{{Value: "turn-3"}},
+			}}},
+		},
+		{
+			name:    "a resume carries the gate's remediation and a rebind",
+			arrange: func(*fleetFixture, ids.WorkspaceID) {},
+			src: source{VendorSessionID: "vendor-1", WorkspaceName: "w1", Rebind: true, ColdRemediation: &conversationv1.SessionColdRemediation{
+				Remediation: &conversationv1.SessionColdRemediation_Pay{Pay: &conversationv1.SessionColdPay{}},
+			}},
+			want: &shimv1.StartSessionRequest{WorkspaceName: "w1", Source: &shimv1.StartSessionRequest_Resume{Resume: &shimv1.StartSessionResume{
+				VendorSessionId: "vendor-1",
+				Rebind:          &shimv1.StartSessionRebind{},
+				ColdRemediation: &conversationv1.SessionColdRemediation{
+					Remediation: &conversationv1.SessionColdRemediation_Pay{Pay: &conversationv1.SessionColdPay{}},
+				},
+			}}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFleetFixture(t)
+			ws := resumable(f)
+			tt.arrange(f, ws)
+			session := f.db.sessions[ws]
+
+			// Act.
+			got, err := f.fleet.startSessionRequest(context.Background(), f.log.logger, ws, tt.src, session, "/accounts/work")
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("startSessionRequest: %v", err)
+			}
+			got.Profile = nil
+			if !proto.Equal(got, tt.want) {
+				t.Fatalf("request = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestStartSessionRequestRefusesUnreadableRolledBackTurns(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := resumable(f)
+	f.db.rolledBackErr = errFake
+
+	// Act.
+	_, err := f.fleet.startSessionRequest(context.Background(), f.log.logger, ws, source{VendorSessionID: "vendor-1", WorkspaceName: "w1"}, f.db.sessions[ws], "/accounts/work")
+
+	// Assert.
+	if !errors.Is(err, errFake) {
+		t.Fatalf("err = %v, want the store's failure", err)
+	}
+	if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: "error", Operation: "daemon.workspace.start_session",
+		Message: "the rolled-back turns could not be read; the session was not resumed"}); !ok {
+		t.Fatalf("records = %+v, want the failure at ERROR", f.log.logger.Records())
+	}
+}
+
+// TestAStartSendsTheBuiltRequest asserts a bring-up's StartSession is the
+// builder's request, so no start can hand-roll a divergent one.
+func TestAStartSendsTheBuiltRequest(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := resumable(f)
+	record, err := f.db.Workspace(context.Background(), ws)
+	if err != nil {
+		t.Fatalf("Workspace: %v", err)
+	}
+	want, err := f.fleet.startSessionRequest(context.Background(), f.log.logger, ws,
+		source{VendorSessionID: "vendor-1"}.withRecord(record), f.db.sessions[ws], "")
+	if err != nil {
+		t.Fatalf("startSessionRequest: %v", err)
+	}
+
+	// Act.
+	if err := f.fleet.Start(context.Background(), ws); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Assert.
+	if len(f.client.requests) != 1 || !proto.Equal(f.client.requests[0], want) {
+		t.Fatalf("StartSession requests = %v, want exactly %v", f.client.requests, want)
+	}
+}

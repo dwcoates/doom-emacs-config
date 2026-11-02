@@ -2557,12 +2557,12 @@ func (f *Fleet) agentStanding(ctx context.Context, log dlog.Logger, ws ids.Works
 // value is REFUSED, never ignored.
 const DefaultStartSessionBound = 60 * time.Second
 
-// askToStartSession sends ONE StartSession and answers its outcome. A nil
-// SessionStarted with a nil error means the session is parked behind a
-// standing cold gate, which is an answer and not a failure. Every refusal is
-// LABELED (startLabel) with the shim's verdict on whether asking again can
-// help; startSession owns what follows from it.
-func (f *Fleet) askToStartSession(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, client shimclient.Client, src source, session wsm.Session, configDir string) (*conversationv1.SessionStarted, error) {
+// startSessionRequest is the StartSession that brings SRC up: the source as
+// recorded (a fresh start's model and permission mode, or a resume's model,
+// rolled-back turns and rebind), and the session's profile. It is the one
+// builder of a StartSession, so the cold gate's parked bridge resumes exactly
+// what a start or the gate's answer would.
+func (f *Fleet) startSessionRequest(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, src source, session wsm.Session, configDir string) (*shimv1.StartSessionRequest, error) {
 	req := &shimv1.StartSessionRequest{WorkspaceName: src.WorkspaceName}
 	if src.Fresh {
 		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "src.Fresh"})
@@ -2617,6 +2617,19 @@ func (f *Fleet) askToStartSession(ctx context.Context, log dlog.Logger, ws ids.W
 		return nil, err
 	}
 	req.Profile = profile
+	return req, nil
+}
+
+// askToStartSession sends ONE StartSession and answers its outcome. A nil
+// SessionStarted with a nil error means the session is parked behind a
+// standing cold gate, which is an answer and not a failure. Every refusal is
+// LABELED (startLabel) with the shim's verdict on whether asking again can
+// help; startSession owns what follows from it.
+func (f *Fleet) askToStartSession(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, client shimclient.Client, src source, session wsm.Session, configDir string) (*conversationv1.SessionStarted, error) {
+	req, err := f.startSessionRequest(ctx, log, ws, src, session, configDir)
+	if err != nil {
+		return nil, err
+	}
 
 	// THE CALL IS BOUNDED. See DefaultStartSessionBound: a shim that accepts
 	// the start and never answers held this call, and the workspace's start

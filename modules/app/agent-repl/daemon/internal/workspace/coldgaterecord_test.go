@@ -258,3 +258,47 @@ func TestAStandingGateIsAQuietSessionWithNoShim(t *testing.T) {
 		t.Fatalf("Running = %+v, %v; Health = %v, %v; want a quiet session that exists and does not serve", running, live, exists, serving)
 	}
 }
+
+// ---- spawnAtGate: the one spawn of a gate's shim ----
+
+func TestSpawnAtGateHoldsTheSpawnedShimWithNoSession(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := resumable(f)
+	record, err := f.db.Workspace(context.Background(), ws)
+	if err != nil {
+		t.Fatalf("Workspace: %v", err)
+	}
+
+	// Act.
+	held, err := f.fleet.spawnAtGate(context.Background(), f.log.logger, ws, record, f.db.sessions[ws],
+		source{VendorSessionID: "vendor-1"}.withRecord(record), "AnswerColdGate")
+
+	// Assert.
+	if err != nil || held == nil || held.client != f.client || held.sessionStarted {
+		t.Fatalf("spawnAtGate = %+v, %v; want the spawned shim held with no session", held, err)
+	}
+	if len(f.supervisor.spawns) != 1 || !f.fleet.Held(ws) {
+		t.Fatalf("spawns %d, held %v; want one spawn, held", len(f.supervisor.spawns), f.fleet.Held(ws))
+	}
+}
+
+func TestSpawnAtGateWhoseSpawnFailsHoldsNothing(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := resumable(f)
+	f.supervisor.spawnErr = errFake
+	record, err := f.db.Workspace(context.Background(), ws)
+	if err != nil {
+		t.Fatalf("Workspace: %v", err)
+	}
+
+	// Act.
+	_, err = f.fleet.spawnAtGate(context.Background(), f.log.logger, ws, record, f.db.sessions[ws],
+		source{VendorSessionID: "vendor-1"}.withRecord(record), "AnswerColdGate")
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), errFake.Error()) || f.fleet.Held(ws) {
+		t.Fatalf("err = %v, held %v; want the spawn's failure and nothing held", err, f.fleet.Held(ws))
+	}
+}
