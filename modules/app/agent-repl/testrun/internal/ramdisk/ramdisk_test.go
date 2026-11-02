@@ -2816,3 +2816,55 @@ func TestReapMembersNetsEverySpellingOfEveryDirectory(t *testing.T) {
 		t.Fatalf("reaped %+v, want the given dirs kept and both directories named", got)
 	}
 }
+
+func TestRAMDisks(t *testing.T) {
+	tests := []struct {
+		name string
+		info string
+		want []string
+	}{
+		{name: "no image", info: "framework : 1\n"},
+		{name: "a RAM disk", info: ramInfo("/dev/disk4"), want: []string{"/dev/disk4"}},
+		{name: "a disk image that is no RAM disk", info: "framework : 1\n================================================\nimage-path      : /Users/x/a.dmg\n/dev/disk6\t\t\n"},
+		{name: "a RAM disk with no device line", info: "framework : 1\n================================================\nimage-path      : ram://2048\n"},
+		{name: "RAM disks among other images", info: ramInfo("/dev/disk4") + "================================================\nimage-path      : /Users/x/a.dmg\n/dev/disk6\t\t\n" + ramBlock("/dev/disk7", "/Volumes/artr-7"), want: []string{"/dev/disk4", "/dev/disk7"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			var got []string
+			for _, img := range ramDisks(tc.info) {
+				got = append(got, img.Devices[0])
+			}
+
+			// Assert
+			if !slices.Equal(got, tc.want) {
+				t.Fatalf("ramDisks = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestNoHandRolledRAMDiskFiltersRemain(t *testing.T) {
+	// Arrange
+	// The needle is split so this test's own source never matches it.
+	needle := "img.is" + "RAM()"
+	var hand []string
+	for _, file := range []string{"ramdisk.go", "leak.go"} {
+		raw, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Act
+		for i, line := range strings.Split(string(raw), "\n") {
+			if strings.Contains(line, needle) {
+				hand = append(hand, fmt.Sprintf("%s:%d", file, i+1))
+			}
+		}
+	}
+
+	// Assert: ramDisks is the one filter of the RAM disk images.
+	if len(hand) != 1 {
+		t.Fatalf("RAM image checks at %v, want only ramDisks's own", hand)
+	}
+}

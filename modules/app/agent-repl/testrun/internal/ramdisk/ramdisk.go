@@ -539,8 +539,8 @@ func (m Manager) identify(device string) (helper, error) {
 	if err != nil {
 		return helper{}, err
 	}
-	for _, img := range parseImages(info) {
-		if !img.isRAM() || len(img.Devices) == 0 || img.Devices[0] != device {
+	for _, img := range ramDisks(info) {
+		if img.Devices[0] != device {
 			continue
 		}
 		id, ok := img.identity(starts)
@@ -562,14 +562,12 @@ func (m Manager) detachNewRAMDisks(before string) error {
 		return fmt.Errorf("list the attached images after a failed attach, to detach what it may have left: %w", err)
 	}
 	old := map[string]bool{}
-	for _, img := range parseImages(before) {
-		if img.isRAM() && len(img.Devices) > 0 {
-			old[img.Devices[0]] = true
-		}
+	for _, img := range ramDisks(before) {
+		old[img.Devices[0]] = true
 	}
 	var errs []error
-	for _, img := range parseImages(after) {
-		if !img.isRAM() || len(img.Devices) == 0 || old[img.Devices[0]] {
+	for _, img := range ramDisks(after) {
+		if old[img.Devices[0]] {
 			continue
 		}
 		device := img.Devices[0]
@@ -688,8 +686,8 @@ func (v *Volume) gone() (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	for _, img := range parseImages(info) {
-		if id, ok := img.identity(starts); !ok || !id.equal(v.helper) || len(img.Devices) == 0 {
+	for _, img := range ramDisks(info) {
+		if id, ok := img.identity(starts); !ok || !id.equal(v.helper) {
 			continue
 		}
 		if img.Devices[0] != v.Device {
@@ -860,9 +858,9 @@ func (m Manager) adoptOrphans() (_ []orphan, err error) {
 		return nil, err
 	}
 	var orphans []orphan
-	for _, img := range parseImages(info) {
+	for _, img := range ramDisks(info) {
 		pid, ok := img.marked()
-		if !img.isRAM() || len(img.Devices) == 0 || !ok || pid == m.Pid {
+		if !ok || pid == m.Pid {
 			continue
 		}
 		if slices.ContainsFunc(records, func(r recordInfo) bool { return r.pid == pid || owns(img, starts, r.pid, r.rec) }) {
@@ -1121,8 +1119,8 @@ func (m Manager) reclaimHeld(path string, pid int) (Reclaimed, error) {
 		}
 		dirs = append(dirs, mount)
 	}
-	for _, img := range parseImages(info) {
-		if !img.isRAM() || len(img.Devices) == 0 || !owns(img, starts, pid, rec) {
+	for _, img := range ramDisks(info) {
+		if !owns(img, starts, pid, rec) {
 			continue
 		}
 		r.Devices = append(r.Devices, img.Devices[0])
@@ -1440,6 +1438,19 @@ type image struct {
 
 func (img image) isRAM() bool { return strings.HasPrefix(img.Path, "ram://") }
 
+// ramDisks answers the RAM disk images info (`hdiutil info`) lists that have
+// a device, each with its whole disk first: the only images the runner ever
+// judges, reclaims or detaches.
+func ramDisks(info string) []image {
+	var disks []image
+	for _, img := range parseImages(info) {
+		if img.isRAM() && len(img.Devices) > 0 {
+			disks = append(disks, img)
+		}
+	}
+	return disks
+}
+
 // helper is the diskimages-helper process serving one attached image, by its
 // pid and when it started.
 //
@@ -1554,8 +1565,8 @@ func parseImages(info string) []image {
 // describeDevice says what `hdiutil info` lists device as now: a device of a
 // RAM disk and where that is mounted, or not a RAM disk's device at all.
 func describeDevice(info, device string) string {
-	for _, img := range parseImages(info) {
-		if !img.isRAM() || !slices.Contains(img.Devices, device) {
+	for _, img := range ramDisks(info) {
+		if !slices.Contains(img.Devices, device) {
 			continue
 		}
 		if len(img.Mounts) == 0 {
@@ -1582,10 +1593,7 @@ func (m Manager) diskMountedAt(info, mount string) (string, error) {
 		return "", fmt.Errorf("resolve the mount point %s to find the disk mounted there: %w", mount, err)
 	}
 	var found []string
-	for _, img := range parseImages(info) {
-		if !img.isRAM() || len(img.Devices) == 0 {
-			continue
-		}
+	for _, img := range ramDisks(info) {
 		for _, s := range spellings {
 			if slices.Contains(img.Mounts, s) {
 				found = append(found, img.Devices[0])

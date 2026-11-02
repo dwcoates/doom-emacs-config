@@ -127,10 +127,7 @@ func (m Manager) leaksLocked(info string) ([]Leak, error) {
 		return nil, err
 	}
 	var leaks []Leak
-	for _, img := range parseImages(info) {
-		if !img.isRAM() || len(img.Devices) == 0 {
-			continue
-		}
+	for _, img := range ramDisks(info) {
 		// A LIVE RUN'S RECORD OUTRANKS A DEAD ONE owning the same disk: a dead
 		// record of the same pid (one a failed reclaim left before the pid
 		// came round again) marks the live run's disk too.
