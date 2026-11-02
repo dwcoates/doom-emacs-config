@@ -657,6 +657,9 @@ func validateForkSessionRequest(req *shimv1.ForkSessionRequest) error {
 	if req.GetParentWorkspaceDir() == "" {
 		return invalid(m, m+".parent_workspace_dir", "is empty")
 	}
+	if req.GetParentAccountRoot() == "" {
+		return invalid(m, m+".parent_account_root", "is empty")
+	}
 	point := req.GetPoint()
 	if point == nil {
 		return invalid(m, m+".point", "is unset")

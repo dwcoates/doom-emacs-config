@@ -33,11 +33,15 @@ func (d *fakeDeliveries) Exclusively(ctx context.Context, ws ids.WorkspaceID, wh
 	return perform(ctx)
 }
 
+// parentAccountRoot is the account root pendingFork's parent session was
+// spawned under.
+const parentAccountRoot = "/accounts/parent"
+
 // pendingFork arranges a parent with a conversation and a child owing a fork
 // of it, with a session row and no vendor id yet.
 func pendingFork(f *fleetFixture) (parent, child wsm.Workspace) {
 	parent, child = f.workspace("parent"), f.workspace("child")
-	f.db.sessions[parent.ID] = wsm.Session{Workspace: parent.ID, VendorSessionID: "vendor-parent"}
+	f.db.sessions[parent.ID] = wsm.Session{Workspace: parent.ID, VendorSessionID: "vendor-parent", ConfigDir: parentAccountRoot}
 	f.db.sessions[child.ID] = wsm.Session{Workspace: child.ID, HostSessionID: "host-child"}
 	if f.db.pendingForks == nil {
 		f.db.pendingForks = map[ids.WorkspaceID]wsm.PendingFork{}
@@ -82,6 +86,9 @@ func TestAForksFirstBringUpMakesTheForkThenResumesIt(t *testing.T) {
 	if asked.GetParentVendorSessionId() != "vendor-parent" || asked.GetParentWorkspaceDir() != parent.Dir || asked.GetPoint().GetWhole() == nil {
 		t.Fatalf("ForkSession asked %v, want the parent's whole transcript", asked)
 	}
+	if asked.GetParentAccountRoot() != parentAccountRoot {
+		t.Fatalf("ForkSession parent_account_root = %q, want the root the parent was spawned under %q", asked.GetParentAccountRoot(), parentAccountRoot)
+	}
 	if !slices.Equal(f.deliveries.held, []ids.WorkspaceID{parent.ID}) {
 		t.Fatalf("held = %v, want the parent's deliveries held once", f.deliveries.held)
 	}
@@ -101,6 +108,29 @@ func TestAForksFirstBringUpMakesTheForkThenResumesIt(t *testing.T) {
 	}
 	if !slices.Contains(f.feed.freshBooks, child.ID) {
 		t.Fatalf("fresh books = %v, want the fork's own book known empty", f.feed.freshBooks)
+	}
+}
+
+func TestAForkNamesTheRootTheParentWasSpawnedUnderNotItsSelection(t *testing.T) {
+	// Arrange: the reader selected another account for the parent, which the
+	// parent has not been restarted into, so its transcript is still filed
+	// under the root it was spawned under.
+	f := newFleetFixture(t)
+	parent, child := pendingFork(f)
+	session := f.db.sessions[parent.ID]
+	session.SelectedConfigDir = "/accounts/selected"
+	f.db.sessions[parent.ID] = session
+	f.client.response = startedResponse("forked-1")
+
+	// Act
+	err := f.fleet.Start(context.Background(), child.ID)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if got := f.client.forkSessionAsked[0].GetParentAccountRoot(); got != parentAccountRoot {
+		t.Fatalf("ForkSession parent_account_root = %q, want the spawned-under root %q", got, parentAccountRoot)
 	}
 }
 
@@ -181,6 +211,13 @@ func TestAForkThatCannotBeMadeLeavesItOwedAndSaysWhy(t *testing.T) {
 				f.client.forkSessionErr = errors.New("socket closed")
 			},
 			message: "the child's shim could not be asked for the fork",
+		},
+		{
+			name: "the parent's conversation records no account root",
+			arrange: func(f *fleetFixture, parent wsm.Workspace) {
+				f.db.sessions[parent.ID] = wsm.Session{Workspace: parent.ID, VendorSessionID: "vendor-parent"}
+			},
+			message: "the fork's parent conversation records no account root",
 		},
 		{
 			name: "the parent has no conversation",

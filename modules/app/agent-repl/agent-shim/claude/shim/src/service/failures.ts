@@ -1137,7 +1137,8 @@ export type ForkSessionRefusal =
   | "record_absent"
   | "parent_book_unknown"
   | "already_started"
-  | "vendor_failed";
+  | "vendor_failed"
+  | "import_failed";
 
 /** A refused fork: nothing was written. */
 export function forkSessionRefused(cause: ForkSessionRefusal, detail: string): shimv1.ForkSessionResponse {
@@ -1157,6 +1158,9 @@ export function forkSessionRefused(cause: ForkSessionRefusal, detail: string): s
       break;
     case "vendor_failed":
       arm = { case: "vendorFailed", value: create(shimv1.ForkSessionVendorFailedSchema, {}) };
+      break;
+    case "import_failed":
+      arm = { case: "importFailed", value: create(shimv1.ForkSessionImportFailedSchema, {}) };
       break;
   }
   return create(shimv1.ForkSessionResponseSchema, {

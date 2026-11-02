@@ -76,6 +76,17 @@ func (f *Fleet) makeFork(ctx context.Context, log dlog.Logger, ws ids.WorkspaceI
 		log.Error(opBringUp, "the fork's parent has no conversation to fork", dlog.Context{"parent_session_recorded": parentConv.recorded})
 		return "", fmt.Errorf("%w: workspace %q has no conversation to fork", ErrForkRefused, pending.Parent)
 	}
+	// THE PARENT'S TRANSCRIPT IS WHERE ITS SESSION WAS SPAWNED: the recorded
+	// ConfigDir, never the routing or the reader's selection, which can name a
+	// root the parent has not been restarted into. The child's shim imports
+	// the transcript from it when the child spends from another account.
+	parentRoot := parentConv.session.ConfigDir
+	if parentRoot == "" {
+		log.Error(opBringUp, "the fork's parent conversation records no account root", dlog.Context{
+			"parent_vendor_session_id": parentConv.session.VendorSessionID,
+		})
+		return "", fmt.Errorf("%w: workspace %q records no account root for its conversation", ErrForkRefused, pending.Parent)
+	}
 	if f.deps.Deliveries == nil {
 		// Every production fleet is wired with the queue; a fleet without it
 		// could fork a parent mid-turn, so it fails rather than forking.
@@ -90,7 +101,7 @@ func (f *Fleet) makeFork(ctx context.Context, log dlog.Logger, ws ids.WorkspaceI
 		if err != nil {
 			return err
 		}
-		made, err = forkThrough(ctx, log, client, ws, pending.Parent, parentRecord.Dir, parentConv.session.VendorSessionID, point)
+		made, err = forkThrough(ctx, log, client, ws, pending.Parent, parentRecord.Dir, parentRoot, parentConv.session.VendorSessionID, point)
 		return err
 	})
 	if err != nil {
@@ -156,12 +167,13 @@ func (f *Fleet) ProbeForkPoint(ctx context.Context, log dlog.Logger, parent ids.
 	return err
 }
 
-// forkThrough asks the child's shim for the vendor's fork at POINT and answers
-// what it made.
-func forkThrough(ctx context.Context, log dlog.Logger, client shimclient.Client, ws, parent ids.WorkspaceID, parentDir, parentVendorSessionID string, point *shimv1.GetForkPointSuccess) (madeFork, error) {
+// forkThrough asks the child's shim for the vendor's fork at POINT of the
+// parent filed under PARENTROOT and answers what it made.
+func forkThrough(ctx context.Context, log dlog.Logger, client shimclient.Client, ws, parent ids.WorkspaceID, parentDir, parentRoot, parentVendorSessionID string, point *shimv1.GetForkPointSuccess) (madeFork, error) {
 	resp, err := client.ForkSession(ctx, &shimv1.ForkSessionRequest{
 		ParentVendorSessionId: parentVendorSessionID,
 		ParentWorkspaceDir:    parentDir,
+		ParentAccountRoot:     parentRoot,
 		Point:                 point.GetPoint(),
 	})
 	if err != nil {
@@ -187,7 +199,7 @@ func forkThrough(ctx context.Context, log dlog.Logger, client shimclient.Client,
 	case *shimv1.ForkSessionResponse_Failure:
 		log.Error(opBringUp, "the child's shim refused the fork", dlog.Context{
 			"cause": result.Failure.GetDetail(), "arm": fmt.Sprintf("%T", result.Failure.GetCause()),
-			"parent_vendor_session_id": parentVendorSessionID, "parent_dir": parentDir,
+			"parent_vendor_session_id": parentVendorSessionID, "parent_dir": parentDir, "parent_account_root": parentRoot,
 		})
 		return madeFork{}, fmt.Errorf("%w: the child's shim refused it: %s", ErrForkRefused, result.Failure.GetDetail())
 	default:

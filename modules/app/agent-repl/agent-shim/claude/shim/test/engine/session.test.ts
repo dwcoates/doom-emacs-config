@@ -16748,6 +16748,7 @@ describe("GetForkPoint and ForkSession", () => {
       create(shimv1.ForkSessionRequestSchema, {
         parentVendorSessionId: "parent",
         parentWorkspaceDir: "/parent",
+        parentAccountRoot: "/accounts/parent",
         point: create(shimv1.ForkPointSchema, { extent: { case: "whole", value: create(shimv1.ForkPointWholeSchema, {}) } }),
       }),
     );
@@ -16777,13 +16778,15 @@ describe("GetForkPoint and ForkSession", () => {
       create(shimv1.ForkSessionRequestSchema, {
         parentVendorSessionId: "parent",
         parentWorkspaceDir: "/parent",
+        parentAccountRoot: "/accounts/parent",
         point: create(shimv1.ForkPointSchema, { extent: { case: "whole", value: create(shimv1.ForkPointWholeSchema, {}) } }),
       }),
     );
 
-    // Assert: no parent transcript exists in the harness root, so the fork is
-    // refused before the vendor is asked.
+    // Assert: no parent transcript exists under the parent's account root, so
+    // the fork is refused before the vendor is asked, naming that root.
     expect(response.result.case === "failure" ? response.result.value.cause.case : "").toBe("unknownSession");
+    expect(response.result.case === "failure" ? response.result.value.detail : "").toContain("/accounts/parent/projects/");
     expect(forks).toEqual([]);
   });
 });

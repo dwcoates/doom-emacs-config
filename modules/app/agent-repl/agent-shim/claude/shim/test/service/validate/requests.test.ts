@@ -789,6 +789,7 @@ describe("validateForkSessionRequest", () => {
   it.each([
     { name: "an empty parent session id", edit: (r: shimv1.ForkSessionRequest): void => void (r.parentVendorSessionId = "") },
     { name: "an empty parent directory", edit: (r: shimv1.ForkSessionRequest): void => void (r.parentWorkspaceDir = "") },
+    { name: "an empty parent account root", edit: (r: shimv1.ForkSessionRequest): void => void (r.parentAccountRoot = "") },
     { name: "no point", edit: (r: shimv1.ForkSessionRequest): void => void (r.point = undefined) },
     { name: "a point with no extent", edit: (r: shimv1.ForkSessionRequest): void => void (r.point = create(shimv1.ForkPointSchema, {})) },
     {

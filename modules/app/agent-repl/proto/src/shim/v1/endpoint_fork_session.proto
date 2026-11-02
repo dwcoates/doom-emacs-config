@@ -17,9 +17,15 @@
 // fork's book holds only what the fork itself goes on to say. A reader of the
 // fork reads its inherited past from the parent's book, which this answer names.
 //
-// THE PARENT'S TRANSCRIPT MUST BE UNDER THIS SHIM'S ACCOUNT ROOT: the vendor
-// reads it from the root its caller runs under. A parent filed under another
-// account is refused as `unknown_session`.
+// A PARENT UNDER ANOTHER ACCOUNT IS IMPORTED FOR THE FORK. The vendor reads the
+// parent from the account root its caller runs under (`CLAUDE_CONFIG_DIR`),
+// and two repositories may spend from different roots. The request names the
+// root the parent is filed under; when it is not this shim's, the shim copies
+// the parent's transcript and its sibling session directory into this shim's
+// root under the same project, asks the vendor for the fork, and removes the
+// copy once the fork is filed. A copy that outlived the fork would be a stale
+// snapshot of a conversation still growing under its own root, and would stand
+// in the way of that conversation's own later move between accounts.
 
 syntax = "proto3";
 
@@ -41,6 +47,11 @@ message ForkSessionRequest {
   // How much of the parent's transcript the fork carries: GetForkPoint's answer
   // from the parent's shim, or `whole` when the parent has no running session.
   ForkPoint point = 3;
+  // The account root (a `CLAUDE_CONFIG_DIR`) the parent's transcript is filed
+  // under: the root the parent's session was spawned under, as the daemon
+  // recorded it. Never empty. Equal to this shim's own root, the fork reads
+  // the parent where it is; different, the parent is imported first.
+  string parent_account_root = 4;
 }
 
 // THE ARM IS THE OUTCOME.
@@ -69,7 +80,7 @@ message ForkSessionSuccess {
 message ForkSessionFailure {
   // Exactly one arm is set.
   oneof cause {
-    // No transcript of the parent session is filed under this shim's account
+    // No transcript of the parent session is filed under the parent's account
     // root for the parent's working directory. NOT RETRYABLE.
     ForkSessionUnknownSession unknown_session = 1;
     // The fork point's record is not in the parent's transcript. NOT
@@ -84,12 +95,17 @@ message ForkSessionFailure {
     // The vendor's fork failed; `detail` carries what it said. RETRYABLE: the
     // parent transcript is unchanged and nothing was written.
     ForkSessionVendorFailed vendor_failed = 5;
+    // The parent is filed under another account root and could not be copied
+    // into this shim's root: the destination already holds a file of that
+    // name, or the copy itself failed. `detail` names the source, the
+    // destination and the cause. Nothing of the import is left behind.
+    ForkSessionImportFailed import_failed = 7;
   }
   // The shim's account, for a human and for logs; never switched on.
   string detail = 6;
 }
 
-// The parent's transcript is not under this shim's account root.
+// The parent's transcript is not under the parent's account root.
 message ForkSessionUnknownSession {}
 
 // The fork point names a record the parent's transcript does not hold.
@@ -103,3 +119,7 @@ message ForkSessionAlreadyStarted {}
 
 // The vendor's fork call failed.
 message ForkSessionVendorFailed {}
+
+// The parent's transcript could not be imported from its account root into
+// this shim's.
+message ForkSessionImportFailed {}
