@@ -82,7 +82,16 @@ import { drawTabNumberSlot } from "./tab-numbers.js";
 import { toneClass } from "../vocab.js";
 import { applyNameTint, nameTint } from "./name-tint.js";
 import { guardMalformed, guardMalformedNow } from "../rpc/guard.js";
-import { clampBeside } from "../topbar/clamp.js";
+import { clampBeside, type Rect, type Viewport } from "../topbar/clamp.js";
+import {
+  closeDetails,
+  detailsPanel,
+  factHome,
+  placeDetailsPanel,
+  requireFactHome,
+  syncDetailsEntry,
+  wireDetailsEntry,
+} from "./detail-more.js";
 import {
   buildSelectInEditorRequest,
   buildSetWorkspaceHiddenRequest,
@@ -734,22 +743,24 @@ export function drawRosterRowWhenHiddenCache(u: RosterRowWhenHiddenCache, path: 
 export function drawRosterRowDetail(u: RosterRowDetail, path: string): HTMLElement {
   const detail = document.createElement("div");
   detail.className = "detail";
-  const list = document.createElement("dl");
+  const lines: Array<[string, string]> = [];
   if (u.branch !== undefined) {
-    appendDetailLine(list, "branch", drawRosterRowDetailBranch(u.branch, `${path}.branch`));
+    lines.push(["branch", drawRosterRowDetailBranch(u.branch, `${path}.branch`)]);
   }
   if (u.parentBranch !== undefined) {
-    appendDetailLine(
-      list,
-      "from",
-      drawRosterRowDetailParentBranch(u.parentBranch, `${path}.parent_branch`),
-    );
+    lines.push(["from", drawRosterRowDetailParentBranch(u.parentBranch, `${path}.parent_branch`)]);
   }
   if (u.commits !== undefined) {
-    appendDetailLine(list, "commits", String(drawRosterRowDetailCommits(u.commits, `${path}.commits`)));
+    lines.push(["commits", String(drawRosterRowDetailCommits(u.commits, `${path}.commits`))]);
   }
+  // EACH LINE IS STATED IN ITS HOME (detail-more.ts `FACT_HOMES`): the panel,
+  // or the details popup behind the entry at its bottom.
+  const list = document.createElement("dl");
+  const details = document.createElement("dl");
+  for (const [label, value] of lines) appendDetailLine(factHome(label) === "panel" ? list : details, label, value);
   if (list.childElementCount > 0) detail.appendChild(list);
   if (u.summary !== undefined) {
+    requireFactHome("summary", "panel");
     const summary = document.createElement("p");
     summary.className = "summary";
     summary.textContent = drawRosterRowDetailSummary(u.summary, `${path}.summary`);
@@ -760,6 +771,7 @@ export function drawRosterRowDetail(u: RosterRowDetail, path: string): HTMLEleme
   // wherever the rail draws it, so a child that is closed, merged or hidden
   // is still named here.
   if (u.children.length > 0) {
+    requireFactHome("children", "panel");
     const block = document.createElement("div");
     block.className = "children";
     const head = document.createElement("div");
@@ -771,6 +783,10 @@ export function drawRosterRowDetail(u: RosterRowDetail, path: string): HTMLEleme
     block.appendChild(items);
     detail.appendChild(block);
   }
+  if (details.childElementCount > 0) {
+    detailsPanel(detail).appendChild(details);
+    syncDetailsEntry(detail);
+  }
   log.debug("drawing a row's detail panel", {
     operation: "sidebar.row.detail",
     context: {
@@ -780,6 +796,7 @@ export function drawRosterRowDetail(u: RosterRowDetail, path: string): HTMLEleme
       commits: u.commits !== undefined,
       summary: u.summary !== undefined,
       children: u.children.length,
+      details: details.childElementCount / 2,
     },
   });
   return detail;
@@ -920,6 +937,9 @@ function installHoverPanel(
   detail.addEventListener("mouseleave", () => {
     hover.leave(workspaceId, "panel");
   });
+  wireDetailsEntry(detail, () => {
+    placeDetailsPanel(detail, measureBox, windowViewport());
+  });
   line.addEventListener("focusin", () => {
     hover.focusIn(workspaceId);
   });
@@ -937,7 +957,17 @@ export function paintRowDetail(ws: HTMLElement, open: boolean): void {
   ws.classList.toggle("open", open);
   showRowMemory(ws, open);
   if (open) placeRowDetail(ws);
+  else {
+    const detail = ws.querySelector<HTMLElement>(":scope > .detail");
+    if (detail !== null) closeDetails(detail);
+  }
 }
+
+/** An element's laid-out box. */
+const measureBox = (el: Element): Rect => el.getBoundingClientRect();
+
+/** This page's window, as the placements read it. */
+const windowViewport = (): Viewport => ({ width: window.innerWidth, height: window.innerHeight });
 
 /**
  * Where an OPEN row's detail panel lands.
@@ -968,10 +998,7 @@ export function placeRowDetail(ws: HTMLElement): void {
   // Measured at its natural height: a cap the last placement applied would
   // otherwise hold a panel that moved up the window at its old, shorter size.
   detail.style.maxHeight = "";
-  const placement = clampBeside(line.getBoundingClientRect(), detail.getBoundingClientRect(), {
-    width: window.innerWidth,
-    height: window.innerHeight,
-  });
+  const placement = clampBeside(line.getBoundingClientRect(), detail.getBoundingClientRect(), windowViewport());
   log.debug("placing a row's detail panel", {
     operation: "sidebar.row.detail-place",
     verbosity: "verbose",
@@ -987,6 +1014,8 @@ export function placeRowDetail(ws: HTMLElement): void {
   detail.style.left = `${placement.left}px`;
   detail.style.top = `${placement.top}px`;
   detail.style.maxHeight = `${placement.maxHeight}px`;
+  // Its details popup, when open, stands beside it wherever it now stands.
+  placeDetailsPanel(detail, measureBox, windowViewport());
 }
 
 /**

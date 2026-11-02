@@ -29,6 +29,7 @@ import type {
 } from "../../../proto/gen/ts/frontend/v1/sidebar_memory_pb";
 import type { WorkspaceRef } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import type { SidebarContext } from "./context.js";
+import { detailsPanel, requireFactHome, syncDetailsEntry } from "./detail-more.js";
 
 /** How many ticks of the shared one-second clock pass between a popup's asks. */
 export const REFRESH_TICKS = 2;
@@ -130,8 +131,18 @@ export function pageLine(u: SidebarWorkspaceMemoryPage, nowMs: number, path: str
   }
 }
 
-/** A workspace hover's memory lines, as (label, value) pairs in drawn order. */
+/**
+ * A workspace hover's memory lines, as (label, value) pairs in drawn order.
+ * Every one is a detail (detail-more.ts `FACT_HOMES`), drawn in the panel's
+ * details popup; a line classified otherwise is refused.
+ */
 export function workspaceLines(u: SidebarWorkspaceMemory, nowMs: number, path: string): Array<[string, string]> {
+  const lines = workspaceMemoryLines(u, nowMs, path);
+  for (const [label] of lines) requireFactHome(label, "details");
+  return lines;
+}
+
+function workspaceMemoryLines(u: SidebarWorkspaceMemory, nowMs: number, path: string): Array<[string, string]> {
   const agent = requireCase(requireMessage(u.agent, `${path}.agent`).state, `${path}.agent.state`);
   const lines: Array<[string, string]> = [];
   switch (agent.case) {
@@ -382,7 +393,9 @@ export function showRowMemory(ws: HTMLElement, open: boolean): void {
   if (row.block === null) {
     const block = document.createElement("div");
     block.className = ROW_MEMORY_CLASS;
-    row.detail.appendChild(block);
+    // A WORKSPACE'S MEMORY IS A DETAIL (detail-more.ts): its block is drawn
+    // in the panel's details popup, whose entry shows once it is filled.
+    detailsPanel(row.detail).appendChild(block);
     row.block = block;
     // A REDRAW THROWS THE ROW AWAY without closing its panel, so the
     // drawing's own teardown stops its fetches; the new copy starts its own
@@ -391,8 +404,9 @@ export function showRowMemory(ws: HTMLElement, open: boolean): void {
   }
   const block = row.block;
   row.stop = refreshWhileOpen(row.sc.ctx, () => {
-    fetchWorkspace(row.sc.ctx, row.workspace, block).catch((err: unknown) =>
-      noteFailed("sidebar.memory.workspace-fetch", err),
+    fetchWorkspace(row.sc.ctx, row.workspace, block).then(
+      () => syncDetailsEntry(row.detail),
+      (err: unknown) => noteFailed("sidebar.memory.workspace-fetch", err),
     );
   });
 }

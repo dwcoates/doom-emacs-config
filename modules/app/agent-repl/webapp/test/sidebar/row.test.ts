@@ -598,6 +598,25 @@ describe("the when-column", () => {
 });
 
 describe("the detail panel", () => {
+  it("draws no details entry when no line it states is a detail", () => {
+    const drawn = drawRosterRow(
+      row({ id: "ws-1", detail: { branch: { name: "feat/rail" }, parentBranch: { name: "master" }, commits: { count: 2 } } }),
+      sidebarContext(),
+      "R",
+    );
+    expect(drawn.querySelector(".detail .detail-more")).toBeNull();
+  });
+
+  it("states the branch, from and commits lines in the panel itself", () => {
+    const drawn = drawRosterRow(
+      row({ id: "ws-1", detail: { branch: { name: "feat/rail" }, parentBranch: { name: "master" }, commits: { count: 2 } } }),
+      sidebarContext(),
+      "R",
+    );
+    const terms = [...drawn.querySelectorAll(".detail > dl > dt")].map((dt) => dt.textContent);
+    expect(terms).toEqual(["branch", "from", "commits"]);
+  });
+
   it("draws the branch when the line is present", () => {
     const drawn = drawRosterRow(
       row({ id: "ws-1", detail: { branch: { name: "feat/rail" } } }),
