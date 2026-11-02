@@ -2,7 +2,10 @@ package harness
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"sync"
+	"syscall"
 	"testing"
 )
 
@@ -67,4 +70,53 @@ func awakenOnEnd(ctx context.Context, wake func()) (release func()) {
 		released = true
 		mu.Unlock()
 	}
+}
+
+// ProcessEnd is how a process ended: its exit code, or the signal that ended
+// it (Signal non-zero, Code then meaningless).
+type ProcessEnd struct {
+	Code   int
+	Signal syscall.Signal
+}
+
+// Clean reports an exit of its own accord with code 0.
+func (e ProcessEnd) Clean() bool { return e.Signal == 0 && e.Code == 0 }
+
+func (e ProcessEnd) String() string {
+	if e.Signal != 0 {
+		return fmt.Sprintf("killed by %v", e.Signal)
+	}
+	return fmt.Sprintf("exit code %d", e.Code)
+}
+
+// processEndOf reads a wait status.
+func processEndOf(ws syscall.WaitStatus) ProcessEnd {
+	if ws.Signaled() {
+		return ProcessEnd{Signal: ws.Signal()}
+	}
+	return ProcessEnd{Code: ws.ExitStatus()}
+}
+
+// errEndUnwatchable is AwaitProcessEnd's answer for a process whose exit
+// could not be registered: it had already exited (or was exiting), so how it
+// ended is no longer the kernel's to tell without a reap.
+var errEndUnwatchable = errors.New("the process had already exited when its end was registered")
+
+// AwaitProcessEnd waits, bounded by ctx, for the exit of pid, which must be a
+// child of this process, and answers how it ended WITHOUT REAPING IT: the
+// process's owner still reaps it, on its own schedule, so every signal it
+// sends under its reap's lock (Daemon.sigMu) stays safe.
+func AwaitProcessEnd(ctx context.Context, pid int) (ProcessEnd, error) {
+	ev, err := takeEndEvent(pid)
+	if err != nil {
+		return ProcessEnd{}, err
+	}
+	if ev == nil {
+		return ProcessEnd{}, errEndUnwatchable
+	}
+	defer ev.close()
+	if err := ev.await(ctx); err != nil {
+		return ProcessEnd{}, err
+	}
+	return ev.endOf(pid)
 }
