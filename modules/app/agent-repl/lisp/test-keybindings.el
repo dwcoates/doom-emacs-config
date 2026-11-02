@@ -475,15 +475,15 @@ walked for KEY followed by its #\\='COMMAND."
   (should (eq (lookup-key agent-repl-workspace-numerals-mode-map [remap +workspace/other])
               'agent-repl-switch-to-previous-workspace)))
 
-(ert-deftest agent-repl-test-keybindings-m-0-switches-to-the-last-tab ()
-  "`M-0' runs the last-tab command, not Doom's persp-indexed final switch."
-  (should (eq (lookup-key agent-repl-workspace-numerals-mode-map (kbd "M-0"))
+(ert-deftest agent-repl-test-keybindings-m-s-close-paren-switches-to-the-last-tab ()
+  "`M-s-)' runs the last-tab command, not Doom's persp-indexed final switch."
+  (should (eq (lookup-key agent-repl-workspace-numerals-mode-map (kbd "M-s-)"))
               'agent-repl-switch-to-last-workspace)))
 
-(ert-deftest agent-repl-test-keybindings-s-0-matches-m-0 ()
-  "Command-0 (`s-0\=') runs the SAME command as Option-0 (`M-0\=')."
+(ert-deftest agent-repl-test-keybindings-s-0-matches-m-s-close-paren ()
+  "Command-0 (`s-0\=') runs the SAME command as `M-s-)\='."
   (should (eq (lookup-key agent-repl-workspace-numerals-mode-map (kbd "s-0"))
-              (lookup-key agent-repl-workspace-numerals-mode-map (kbd "M-0")))))
+              (lookup-key agent-repl-workspace-numerals-mode-map (kbd "M-s-)")))))
 
 (ert-deftest agent-repl-test-keybindings-doom-switch-to-final-is-remapped ()
   "Doom's `+workspace/switch-to-final\=', wherever bound, runs the last-tab command."
@@ -491,29 +491,29 @@ walked for KEY followed by its #\\='COMMAND."
                           [remap +workspace/switch-to-final])
               'agent-repl-switch-to-last-workspace)))
 
-(ert-deftest agent-repl-test-keybindings-m-0-shadows-dooms-own ()
-  "`M-0' reaches OUR command even with Doom's final switch in `global-map'."
+(ert-deftest agent-repl-test-keybindings-m-s-close-paren-shadows-dooms-own ()
+  "`M-s-)' reaches OUR command even with Doom's final switch in `global-map'."
   (let ((saved (current-global-map)))
     (unwind-protect
         (progn
           (use-global-map (copy-keymap saved))
-          (define-key (current-global-map) (kbd "M-0") '+workspace/switch-to-final)
+          (define-key (current-global-map) (kbd "M-s-)") '+workspace/switch-to-final)
           (agent-repl-workspace-numerals-mode 1)
-          (should (eq (key-binding (kbd "M-0")) 'agent-repl-switch-to-last-workspace)))
+          (should (eq (key-binding (kbd "M-s-)")) 'agent-repl-switch-to-last-workspace)))
       (use-global-map saved))))
 
 (ert-deftest agent-repl-test-keybindings-reload-rebuilds-the-live-numerals-map ()
-  "Reloading keybindings.el puts `M-0' back on the SAME live keymap object.
+  "Reloading keybindings.el puts `M-s-)' back on the SAME live keymap object.
 A map built inside its `defvar' kept the first load's chords forever, so
-`M-0', added after Emacs started, never reached the running map."
+`M-s-)', added after Emacs started, never reached the running map."
   ;; Arrange
   (let ((live agent-repl-workspace-numerals-mode-map))
-    (define-key live (kbd "M-0") nil)
+    (define-key live (kbd "M-s-)") nil)
     ;; Act
     (load agent-repl-test-keybindings--file nil t)
     ;; Assert
     (should (eq agent-repl-workspace-numerals-mode-map live))
-    (should (eq (lookup-key live (kbd "M-0")) 'agent-repl-switch-to-last-workspace))))
+    (should (eq (lookup-key live (kbd "M-s-)")) 'agent-repl-switch-to-last-workspace))))
 
 ;;;; ---- The helpers a binding needs ----
 
