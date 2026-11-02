@@ -315,5 +315,10 @@ fi
 
 reset
 if grep_in "$("$RUNTIME" help)" -q 'bounce --hard'; then pass "help lists the verbs"; else fail "help lists the verbs"; fi
+if [ "$(grep -c 'lisp/elisp-build.el' "$RUNTIME")" -eq 1 ]; then
+    pass "every elisp-build call is built by the one form"
+else
+    fail "every elisp-build call is built by the one form"
+fi
 
 harness_finish

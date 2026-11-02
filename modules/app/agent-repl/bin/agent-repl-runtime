@@ -160,21 +160,26 @@ emacs_process_up() {
 # fixes. A failed load stops the hard bounce with nothing stopped: the
 # restarted Emacs would load the same broken elisp.
 reload_form() {
-    printf '(progn (unless (fboundp (quote agent-repl-elisp-reload-if-stale)) (load "%s/lisp/elisp-build.el" nil t)) (agent-repl-elisp-reload-if-stale "%s"))' \
-        "$MODULE_DIR" "$MODULE_DIR"
+    elisp_build_form agent-repl-elisp-reload-if-stale "\"$MODULE_DIR\""
+}
+
+# elisp_build_form FUNCTION ARGS prints the form that calls elisp-build.el's
+# FUNCTION with ARGS (elisp text) in the running Emacs. AN EMACS OLDER THAN
+# THE FUNCTION is exactly the one that most needs it, so the form loads its
+# defining file first when it is missing.
+elisp_build_form() {
+    printf '(progn (unless (fboundp (quote %s)) (load "%s/lisp/elisp-build.el" nil t)) (%s %s))' \
+        "$1" "$MODULE_DIR" "$1" "$2"
 }
 
 # hot_load_form loads FILES (a string of quoted paths) through the reload's
 # own changed-defaults path.
 hot_load_form() {
-    printf '(progn (unless (fboundp (quote agent-repl-elisp-hot-load)) (load "%s/lisp/elisp-build.el" nil t)) (agent-repl-elisp-hot-load (list%s)))' \
-        "$MODULE_DIR" "$1"
+    elisp_build_form agent-repl-elisp-hot-load "(list$1)"
 }
 
 reload_stale_elisp() {
     local outcome
-    # AN EMACS OLDER THAN THE FUNCTION is exactly the one that most needs it,
-    # so the form loads its defining file first when it is missing.
     outcome="$("$EMACSCLIENT" --eval "$(reload_form)")" ||
         die "the running Emacs could not be asked to reload its elisp; nothing was stopped"
     outcome="${outcome//\"/}"
@@ -255,8 +260,7 @@ case "$verb" in
         done
         emacs_running || die "no running Emacs answers its server"
         # ONE FORM LOADS EVERY FILE, so a default one of them changed reaches
-        # the running editor (`agent-repl-elisp-hot-load'). An Emacs older
-        # than that function loads its defining file first.
+        # the running editor (`agent-repl-elisp-hot-load').
         files=""
         for file in "$@"; do
             abs="$(cd "$(dirname "$file")" && pwd -P)/$(basename "$file")"
