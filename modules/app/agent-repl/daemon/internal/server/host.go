@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
@@ -13,6 +14,7 @@ import (
 	"agent-repld/internal/ids"
 	"agent-repld/internal/publish"
 	"agent-repld/internal/replyquote"
+	"agent-repld/internal/resolve/feed"
 	"agent-repld/internal/wsm"
 )
 
@@ -126,16 +128,8 @@ func (s *server) PublishHostWorkspace(ctx context.Context, ws ids.WorkspaceID) {
 		// is cancelled the moment the client goes away or the daemon exits in
 		// an orderly way. The view is simply not published; there is nobody
 		// left to publish it to, and it is not a fault.
-		if ctxend.Is(err) {
-			s.log.Info(op, "the host view was not published; the stream's context was cancelled",
-				dlog.Context{
-					"stream": "WatchHostWorkspace", "workspace": string(ws), "cause": err.Error(),
-				})
-			return
-		}
-		s.log.Error(op, "could not resolve the workspace", dlog.Context{
-			"workspace": string(ws), "cause": err.Error(),
-		})
+		logHostStreamRead(s.log, op, "the host view was not published",
+			"could not resolve the workspace", err, dlog.Context{"workspace": string(ws)})
 		return
 	}
 	// THE WEB LINK'S IDENTITY MOVES ON EXACTLY THESE EDGES. It is composed
@@ -173,22 +167,12 @@ func (s *server) composeHostWorkspace(
 
 	record, err := s.deps.DB.Workspace(ctx, ws)
 	if err != nil {
-		if ctxend.Is(err) {
-			log.Info(op, "the host view was not composed; the stream's context was cancelled",
-				dlog.Context{"stream": "WatchHostWorkspace", "cause": err.Error()})
-			return nil, false
-		}
-		log.Error(op, "could not read the workspace record", dlog.Context{"cause": err.Error()})
+		logHostStreamRead(log, op, "the host view was not composed", "could not read the workspace record", err, nil)
 		return nil, false
 	}
 	session, hasSession, err := s.deps.DB.Session(ctx, ws)
 	if err != nil {
-		if ctxend.Is(err) {
-			log.Info(op, "the host view was not composed; the stream's context was cancelled",
-				dlog.Context{"stream": "WatchHostWorkspace", "cause": err.Error()})
-			return nil, false
-		}
-		log.Error(op, "could not read the session record", dlog.Context{"cause": err.Error()})
+		logHostStreamRead(log, op, "the host view was not composed", "could not read the session record", err, nil)
 		return nil, false
 	}
 
@@ -228,6 +212,14 @@ func (s *server) composeHostWorkspace(
 	// restated (composer_entries.go); always set, empty while every reported
 	// label targets a response.
 	view.ComposerEntries = &agentreplv1.HostComposerEntries{Unanswered: s.composerUnansweredOf(ws)}
+
+	// THE PROMPT THE WORKSPACE WAS CREATED WITH, as its creator wrote it: the
+	// creation job keeps the undecorated words, whoever made the create.
+	initial, ok := s.hostInitialPrompt(ctx, log, ws)
+	if !ok {
+		return nil, false
+	}
+	view.InitialPrompt = initial
 
 	facts, live := s.deps.SessionFacts.HostSessionFacts(ws)
 	switch {
@@ -438,12 +430,8 @@ func (s *server) setHostComposer(
 	const op = "daemon.server.compose_host_workspace"
 	lease, held, err := s.deps.DB.Lease(ctx, ws)
 	if err != nil {
-		if ctxend.Is(err) {
-			log.Info(op, "the occupancy lease was not read; the stream's context was cancelled",
-				dlog.Context{"stream": "WatchHostWorkspace", "cause": err.Error()})
-			return false
-		}
-		log.Error(op, "could not read the occupancy lease", dlog.Context{"cause": err.Error()})
+		logHostStreamRead(log, op, "the occupancy lease was not read",
+			"could not read the occupancy lease", err, nil)
 		return false
 	}
 	if !held {
@@ -489,12 +477,8 @@ func (s *server) hostFaults(ctx context.Context, log dlog.Logger, ws ids.Workspa
 	scope := ws
 	open, err := s.deps.Health.OpenFaults(ctx, wsm.FaultScope{Workspace: &scope})
 	if err != nil {
-		if ctxend.Is(err) {
-			log.Info(op, "the open faults were not read; the stream's context was cancelled",
-				dlog.Context{"stream": "WatchHostWorkspace", "cause": err.Error()})
-			return nil
-		}
-		log.Error(op, "could not read the workspace's open faults", dlog.Context{"cause": err.Error()})
+		logHostStreamRead(log, op, "the open faults were not read",
+			"could not read the workspace's open faults", err, nil)
 		return nil
 	}
 	out := make([]*agentreplv1.HostFault, 0, len(open))
@@ -642,6 +626,45 @@ func faultEvidence(f wsm.Fault, key string) string {
 // hostNaming composes what Emacs names buffers from. Both fields are OPTIONAL
 // and stay unset rather than blank: the slug is unset until the daemon has
 // derived one, and the title until the vendor supplies one.
+// hostInitialPrompt answers the prompt ws was created with, nil when it was
+// created without one or has no creation job (a registered directory, the
+// main workspace). It reports false when the creation job cannot be read: the
+// view is then withheld rather than published with the prompt missing.
+func (s *server) hostInitialPrompt(
+	ctx context.Context,
+	log dlog.Logger,
+	ws ids.WorkspaceID,
+) (*conversationv1.UserSaid, bool) {
+	const op = "daemon.server.compose_host_workspace"
+	job, found, err := s.deps.DB.CreationJob(ctx, ws)
+	if err != nil {
+		logHostStreamRead(log, op, "the host view was not composed", "could not read the creation job", err, nil)
+		return nil, false
+	}
+	if !found || strings.TrimSpace(job.InitialPrompt) == "" {
+		return nil, true
+	}
+	return feed.SaidText(job.InitialPrompt), true
+}
+
+// logHostStreamRead records a read the host stream's composition could not
+// make, the ONE way every such read is recorded. A CANCELLED CONTEXT IS THE
+// CLIENT LEAVING (or an orderly exit): INFO, saying what was not done
+// (`skipped`) and naming the stream. Any other cause is a fault: ERROR, saying
+// what could not be read (`failed`). Both carry `fields` and the cause.
+func logHostStreamRead(log dlog.Logger, op, skipped, failed string, err error, fields dlog.Context) {
+	out := dlog.Context{"cause": err.Error()}
+	for k, v := range fields {
+		out[k] = v
+	}
+	if ctxend.Is(err) {
+		out["stream"] = "WatchHostWorkspace"
+		log.Info(op, skipped+"; the stream's context was cancelled", out)
+		return
+	}
+	log.Error(op, failed, out)
+}
+
 func hostNaming(record wsm.Workspace) *agentreplv1.HostWorkspaceNaming {
 	out := &agentreplv1.HostWorkspaceNaming{}
 	if record.Name != "" {

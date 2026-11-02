@@ -36,6 +36,160 @@
     (agent-repl--history-push)
     (should (equal agent-repl--input-history '("world" "hello")))))
 
+;;;; ---- Tests: history-record-initial-prompt ----
+
+(defmacro agent-repl-test-history--with-composer (history &rest body)
+  "Run BODY with workspace \"test-ws\" owning a composer whose ring is HISTORY.
+The composer is current, its project directory a fresh temporary one bound
+to `dir', and every info and error record is collected into `infos' and
+`errors'."
+  (declare (indent 1))
+  `(agent-repl-test--with-clean-state
+     (let ((dir (make-temp-file "test-hist-initial-" t))
+           (infos nil)
+           (errors nil))
+       (unwind-protect
+           (agent-repl-test--with-temp-buffer " *test-hist-initial*"
+             (setq-local agent-repl--input-history ,history)
+             (setq-local agent-repl--history-discard-entry nil)
+             (agent-repl--ws-put "test-ws" :project-dir dir)
+             (agent-repl--ws-put "test-ws" :input-buffer (current-buffer))
+             (cl-letf (((symbol-function 'agent-repl--info)
+                        (agent-repl-test--record-into infos))
+                       ((symbol-function 'agent-repl--error)
+                        (agent-repl-test--record-into errors)))
+               ,@body))
+         (delete-directory dir t)))))
+
+(ert-deftest agent-repl-test-history-initial-prompt-is-recorded-as-the-oldest-entry ()
+  "The initial prompt goes at the oldest end of the ring, behind what was sent since."
+  (agent-repl-test-history--with-composer '("second" "first sent")
+    ;; Act.
+    (should (eq (agent-repl--history-record-initial-prompt
+                 "test-ws" (agent-repl-test--user-said "fix the feed"))
+                'recorded))
+    ;; Assert.
+    (should (equal agent-repl--input-history '("second" "first sent" "fix the feed")))))
+
+(ert-deftest agent-repl-test-history-initial-prompt-is-persisted ()
+  "A recorded initial prompt is in the history file, so a restart keeps it."
+  (agent-repl-test-history--with-composer nil
+    ;; Act.
+    (agent-repl--history-record-initial-prompt
+     "test-ws" (agent-repl-test--user-said "fix the feed"))
+    ;; Assert.
+    (should (equal (agent-repl--read-sexp-file (agent-repl--history-file dir))
+                   '("fix the feed")))))
+
+(ert-deftest agent-repl-test-history-initial-prompt-is-trimmed ()
+  "The initial prompt is recorded trimmed, as a sent prompt is."
+  (agent-repl-test-history--with-composer nil
+    ;; Act.
+    (agent-repl--history-record-initial-prompt
+     "test-ws" (agent-repl-test--user-said "  fix the feed\n"))
+    ;; Assert.
+    (should (equal agent-repl--input-history '("fix the feed")))))
+
+(ert-deftest agent-repl-test-history-initial-prompt-is-recorded-once ()
+  "Restating the initial prompt, as every host push does, records it once."
+  (agent-repl-test-history--with-composer nil
+    ;; Arrange.
+    (agent-repl--history-record-initial-prompt
+     "test-ws" (agent-repl-test--user-said "fix the feed"))
+    (push "a later prompt" agent-repl--input-history)
+    ;; Act.
+    (should (eq (agent-repl--history-record-initial-prompt
+                 "test-ws" (agent-repl-test--user-said "fix the feed"))
+                'present))
+    ;; Assert.
+    (should (equal agent-repl--input-history '("a later prompt" "fix the feed")))))
+
+(ert-deftest agent-repl-test-history-initial-prompt-keeps-the-unsent-head ()
+  "Recording at the oldest end leaves an unsent discard at the head unsent."
+  (agent-repl-test-history--with-composer nil
+    ;; Arrange.
+    (insert "half a thought")
+    (agent-repl--history-push-discard)
+    ;; Act.
+    (agent-repl--history-record-initial-prompt
+     "test-ws" (agent-repl-test--user-said "fix the feed"))
+    ;; Assert.
+    (should (equal (agent-repl--history-unsent-head) "half a thought"))
+    (should (equal agent-repl--input-history '("half a thought" "fix the feed")))))
+
+(ert-deftest agent-repl-test-history-initial-prompt-absent-records-nothing ()
+  "A workspace created without a prompt records nothing."
+  (agent-repl-test-history--with-composer '("sent")
+    ;; Act.
+    (should (eq (agent-repl--history-record-initial-prompt "test-ws" nil) 'none))
+    ;; Assert.
+    (should (equal agent-repl--input-history '("sent")))
+    (should-not (file-exists-p (agent-repl--history-file dir)))))
+
+(ert-deftest agent-repl-test-history-initial-prompt-blank-records-nothing ()
+  "An initial prompt of whitespace alone records nothing."
+  (agent-repl-test-history--with-composer nil
+    ;; Act.
+    (should (eq (agent-repl--history-record-initial-prompt
+                 "test-ws" (agent-repl-test--user-said " \n "))
+                'none))
+    ;; Assert.
+    (should (null agent-repl--input-history))))
+
+(ert-deftest agent-repl-test-history-initial-prompt-waits-for-a-composer ()
+  "With no composer yet there is no ring to record into, and nothing is written."
+  (agent-repl-test-history--with-composer nil
+    ;; Arrange.
+    (agent-repl--ws-put "test-ws" :input-buffer nil)
+    ;; Act.
+    (should (eq (agent-repl--history-record-initial-prompt
+                 "test-ws" (agent-repl-test--user-said "fix the feed"))
+                'no-composer))
+    ;; Assert.
+    (should-not (file-exists-p (agent-repl--history-file dir)))))
+
+(ert-deftest agent-repl-test-history-initial-prompt-recording-is-logged ()
+  "A recording is one info record naming the workspace and the ring's size."
+  (agent-repl-test-history--with-composer '("sent")
+    ;; Act.
+    (agent-repl--history-record-initial-prompt
+     "test-ws" (agent-repl-test--user-said "fix the feed"))
+    ;; Assert.
+    (should (= (length infos) 1))
+    (should (string-match-p
+             "elisp.history.initial-prompt ws=test-ws outcome=recorded input-chars=12 history-count=2"
+             (car infos)))))
+
+(ert-deftest agent-repl-test-history-initial-prompt-failed-save-restores-the-ring ()
+  "A ring that cannot be persisted is put back, the failure logged and re-signalled."
+  (agent-repl-test-history--with-composer '("sent")
+    ;; Arrange.
+    (cl-letf (((symbol-function 'agent-repl--write-sexp-file)
+               (lambda (&rest _) (signal 'file-error '("disk full")))))
+      ;; Act.
+      (should-error (agent-repl--history-record-initial-prompt
+                     "test-ws" (agent-repl-test--user-said "fix the feed"))
+                    :type 'file-error))
+    ;; Assert.
+    (should (equal agent-repl--input-history '("sent")))
+    (should (= (length errors) 1))
+    (should (string-match-p "outcome=save-failed input-chars=12 history-count=1" (car errors)))
+    (should (string-match-p "disk full" (car errors)))
+    (should (null infos))))
+
+(ert-deftest agent-repl-test-history-host-update-records-the-initial-prompt ()
+  "A host push records the initial prompt it states."
+  (agent-repl-test-history--with-composer nil
+    ;; Act.
+    (agent-repl--history-on-host-update
+     "test-ws" (list :initial-prompt (agent-repl-test--user-said "fix the feed")))
+    ;; Assert.
+    (should (equal agent-repl--input-history '("fix the feed")))))
+
+(ert-deftest agent-repl-test-history-host-update-hook-is-registered ()
+  "The initial prompt is recorded on every host push."
+  (should (memq #'agent-repl--history-on-host-update agent-repl-host-update-functions)))
+
 ;;;; ---- Tests: history-push-discard ----
 
 (defmacro agent-repl-test-history--discarding (initial &rest body)
@@ -533,6 +687,20 @@ transcripts."
       (kill-buffer buf)
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws")))
         (should-not (agent-repl--ws-live-input-buffer nil))))))
+
+(ert-deftest agent-repl-test-ws-live-input-buffer-resolves-through-the-composer-lookup ()
+  "ws-live-input-buffer answers what `agent-repl--input-buffer' answers, never its own lookup."
+  (agent-repl-test--with-clean-state
+    (let ((asked nil)
+          (sentinel (generate-new-buffer " *test-live-input-shared*")))
+      (unwind-protect
+          (cl-letf (((symbol-function 'agent-repl--input-buffer)
+                     (lambda (ws) (push ws asked) sentinel)))
+            ;; Act.
+            (should (eq (agent-repl--ws-live-input-buffer "test-ws") sentinel))
+            ;; Assert.
+            (should (equal asked '("test-ws"))))
+        (kill-buffer sentinel)))))
 
 (ert-deftest agent-repl-test-ws-live-input-buffer-nil-when-no-buffer ()
   "ws-live-input-buffer returns nil when no input buffer is set."

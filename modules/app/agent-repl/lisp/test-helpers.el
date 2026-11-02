@@ -1064,6 +1064,12 @@ suites to it)."
 The prefix is `agent-repl--build-log-text's: the record's time, then
 \"[agent-repl] \", at every level (a warning's level follows the prefix).")
 
+(defun agent-repl-test--user-said (text)
+  "Return the decoded `UserSaid' plist of the one text block TEXT, as the composer builds it.
+THE ONE such fixture every suite builds a typed prompt with
+\(test-test-helpers.el holds every suite to it)."
+  (list :content (list :blocks (list (list :arm :text :value (list :text text))))))
+
 (defun agent-repl-test--said (messages)
   "Return MESSAGES without the log records the batch logger echoed among them.
 In batch every log record is also a `message', so a suite that records

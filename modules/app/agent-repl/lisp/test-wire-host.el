@@ -839,7 +839,8 @@ A hand-rolled copy of either would drift from the shared shape and fail here."
                    :held-prompt-edit nil
                    :gate nil
                    :ask nil
-                   :composer-entries (:unanswered nil)))))
+                   :composer-entries (:unanswered nil)
+                   :initial-prompt nil))))
 
 (ert-deftest agent-repl-test-wire-host-workspace-decodes-the-terminal-standing ()
   "A terminal session states whether reopening can rehydrate it."
@@ -916,6 +917,23 @@ A hand-rolled copy of either would drift from the shared shape and fail here."
                             #'agent-repl-wire-decode-host-workspace
                             "{\"none\":{},\"naming\":{},\"composerEntries\":{}}")
                            :held-prompt-edit))))
+
+;;;; ---- The initial prompt ----
+
+(ert-deftest agent-repl-test-wire-host-workspace-decodes-the-initial-prompt ()
+  "The prompt the workspace was created with decodes as a UserSaid."
+  (should (equal (plist-get (agent-repl-test-wire-host--decode
+                             #'agent-repl-wire-decode-host-workspace
+                             "{\"none\":{},\"naming\":{},\"composerEntries\":{},\"initialPrompt\":{\"content\":{\"blocks\":[{\"text\":{\"text\":\"fix the feed\"}}]}}}")
+                            :initial-prompt)
+                 '(:content (:blocks ((:arm :text :value (:text "fix the feed"))))))))
+
+(ert-deftest agent-repl-test-wire-host-workspace-without-an-initial-prompt-carries-none ()
+  "An absent initial_prompt is the fact that the workspace was created without one."
+  (should (null (plist-get (agent-repl-test-wire-host--decode
+                            #'agent-repl-wire-decode-host-workspace
+                            "{\"none\":{},\"naming\":{},\"composerEntries\":{}}")
+                           :initial-prompt))))
 
 ;;;; ---- The standing ask ----
 

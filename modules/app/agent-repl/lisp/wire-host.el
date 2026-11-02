@@ -560,16 +560,18 @@ breach."
 (defun agent-repl-wire-decode-host-workspace (value)
   "Decode VALUE as `HostWorkspace'.
 The plist is `(:session :naming :held-prompt-edit :gate :ask
-:composer-entries)'.
+:composer-entries :initial-prompt)'.
 `naming' is a REQUIRED message sitting beside the session oneof; its two
 fields are the optional halves, not the message.  `held_prompt_edit' is
 absent when no held-prompt edit stands, and its absence is that fact.
 `gate' is absent when no gate stands, likewise, and `ask' when no question
 or permission card stands on the root feed.  `composer_entries' is always
-set: the composer's labels that answer nothing."
+set: the composer's labels that answer nothing.  `initial_prompt' is
+absent when the workspace was created without a prompt."
   (let ((object (agent-repl-wire--object "HostWorkspace" value)))
     (agent-repl-wire--check-keys "HostWorkspace" object
-                                 '(none existing naming heldPromptEdit gate ask composerEntries))
+                                 '(none existing naming heldPromptEdit gate ask composerEntries
+                                   initialPrompt))
     (agent-repl-wire--decoded
      "HostWorkspace"
      (list :session (agent-repl-wire-decode-host-workspace-session object)
@@ -587,7 +589,10 @@ set: the composer's labels that answer nothing."
                  #'agent-repl-wire-decode-host-ask)
            :composer-entries (agent-repl-wire--decode-message
                               "HostWorkspace" 'composerEntries object
-                              #'agent-repl-wire-decode-host-composer-entries)))))
+                              #'agent-repl-wire-decode-host-composer-entries)
+           :initial-prompt (agent-repl-wire--decode-optional-message
+                            "HostWorkspace" 'initialPrompt object
+                            #'agent-repl-wire-decode-user-said)))))
 
 (defun agent-repl-wire-decode-host-composer-entries (value)
   "Decode VALUE as `HostComposerEntries', the plist (:unanswered LABELS).

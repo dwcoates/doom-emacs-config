@@ -122,13 +122,6 @@ daemon-link.el's own reconnect machinery."
            ,@body)
        (agent-repl-connect-close ,var))))
 
-(defun agent-repl-itest-verbs--said (text)
-  "Return the `UserSaid' plist carrying TEXT as its one text block.
-A self-contained equivalent of verbs.el's private `agent-repl-verbs--said',
-kept here so this suite does not reach into another module's internal
-helper."
-  (list :content (list :blocks (list (list :arm :text :value (list :text text))))))
-
 (defun agent-repl-itest-verbs--host-live-with-faults (fault-detail)
   "Return a HostWorkspace protojson alist: a LIVE, open session with one fault.
 FAULT-DETAIL is that fault's `detail' string.  Every non-optional field of

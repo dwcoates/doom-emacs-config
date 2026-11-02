@@ -25,6 +25,8 @@
 (declare-function agent-repl--frontend-dispatch-show "frontends")
 (declare-function agent-repl--frontend-webview-buffer-name "frontend")
 (declare-function agent-repl--history-restore "history")
+(declare-function agent-repl--history-record-initial-prompt "history" (ws said))
+(declare-function agent-repl-host-state "host" (ws))
 (declare-function agent-repl--input-restore-unsent "input" (ws))
 (declare-function agent-repl--info "core")
 (declare-function agent-repl--kill-cause-str "core")
@@ -1389,6 +1391,11 @@ Errors if the buffer is already initialized (already in
         (agent-repl--log ws "initialize-input-buffer: ws=%s buffer=%s mode=enabled history=restore"
                           ws (buffer-name input-buf))
         (agent-repl--history-restore ws))
+      ;; THE PROMPT THE WORKSPACE WAS CREATED WITH is in its history: the
+      ;; host view may have stated it before the composer existed, and the
+      ;; push hook only records it into a composer that does.
+      (agent-repl--history-record-initial-prompt
+       ws (plist-get (agent-repl-host-state ws) :initial-prompt))
       ;; WHAT THE COMPOSER HELD WHEN EMACS LAST QUIT comes back: the
       ;; shutdown save left it as the history's unsent head.
       (agent-repl--input-restore-unsent ws)
