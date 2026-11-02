@@ -873,6 +873,27 @@ that tells its three cases apart."
                      "M" 'scale (agent-repl-test-wire-common--parse "{\"scale\":\"NaN\"}"))))
                  '("M" scale "expected a double"))))
 
+(ert-deftest agent-repl-test-wire-common-optional-double-absent-is-nil ()
+  "An absent optional double is nil: presence is the fact, never a 0.0."
+  (should-not (agent-repl-wire--decode-optional-double "M" 'fill nil)))
+
+(ert-deftest agent-repl-test-wire-common-optional-double-present-is-a-float ()
+  "A present optional double decodes as a float, number or decimal string."
+  (should (equal (agent-repl-wire--decode-optional-double
+                  "M" 'fill (agent-repl-test-wire-common--parse "{\"fill\":0.25}"))
+                 0.25))
+  (should (equal (agent-repl-wire--decode-optional-double
+                  "M" 'fill (agent-repl-test-wire-common--parse "{\"fill\":\"0.25\"}"))
+                 0.25)))
+
+(ert-deftest agent-repl-test-wire-common-optional-double-refuses-a-non-number ()
+  "A non-numeric spelling in an optional double field is a contract breach."
+  (should (equal (agent-repl-test-wire-common--breach
+                  (lambda ()
+                    (agent-repl-wire--decode-optional-double
+                     "M" 'fill (agent-repl-test-wire-common--parse "{\"fill\":\"NaN\"}"))))
+                 '("M" fill "expected a double"))))
+
 ;;;; ---- TurnId encode, uint64, and UserSaid decode (a held-prompt edit) ----
 
 (ert-deftest agent-repl-test-wire-common-turn-id-encodes-its-echo-token ()
