@@ -1,20 +1,15 @@
 // @vitest-environment jsdom
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { applyPlacement, viewportOf } from "../src/placement.js";
+import { filesUnder } from "./files-under.js";
 
 const SRC = path.join(path.dirname(fileURLToPath(import.meta.url)), "../src");
 
-/** Every TypeScript source under DIR, relative to SRC. */
-function sources(dir: string = SRC): string[] {
-  return readdirSync(dir).flatMap((name) => {
-    const full = path.join(dir, name);
-    if (statSync(full).isDirectory()) return sources(full);
-    return name.endsWith(".ts") ? [path.relative(SRC, full)] : [];
-  });
-}
+/** Every TypeScript source under SRC, relative to it. */
+const sources = (): string[] => filesUnder(SRC).map((file) => path.relative(SRC, file));
 
 describe("viewportOf", () => {
   it("reads the window's inner size", () => {
