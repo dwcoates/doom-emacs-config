@@ -1,0 +1,33 @@
+// endpoint_watch_workspace_mentions.proto — WatchWorkspaceMentions: one
+// page's workspace mention targets, the names its response trees link to the
+// workspaces they switch to. FEED section. The response wraps
+// frontend.v1.WorkspaceMentionTargets itself, whole.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/daemon_stream_ending.proto";
+import "frontend/v1/workspace_mention.proto";
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// Opens the stream for one viewing page.
+message WatchWorkspaceMentionsRequest {
+  // The workspace whose page draws the mentions. It is never one of the
+  // targets: a mention of the page's own workspace stays plain text.
+  workspace.v1.WorkspaceRef viewer = 1;
+}
+
+// The targets, delivered live: the first push on open, then one push per
+// change to the set.
+message WatchWorkspaceMentionsResponse {
+  // What this frame carries.
+  oneof push {
+    // The targets, whole.
+    frontend.v1.WorkspaceMentionTargets targets = 1;
+    // The daemon is standing down on purpose; this is the stream's last frame.
+    DaemonStreamEnding ending = 2;
+  }
+}

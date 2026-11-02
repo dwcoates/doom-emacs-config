@@ -1,0 +1,50 @@
+// workspace_mention.proto — A WORKSPACE MENTION: a workspace's name in a
+// response's tree, drawn as a link whose click switches to that workspace.
+//
+// The page draws the links; the daemon decides WHICH names are links. It
+// serves the mention targets (`WorkspaceMentionTargets`) for one page, and the
+// page links every whole-name occurrence of a served name in a tree's text and
+// nothing else, so a page never decides on its own that a word names a
+// workspace.
+
+syntax = "proto3";
+
+package frontend.v1;
+
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/frontend/v1;frontendv1";
+
+// Every workspace a response's tree may mention, as one page links them.
+//
+// THE SET IS RESOLVED, NOT RAW. It holds the open workspaces the sidebar's
+// Open section shows, less the viewing page's own workspace (a link to the
+// page the reader is already on would switch nowhere), less every name two of
+// them share (a name that collides across repositories names no ONE workspace,
+// so it is drawn as plain text rather than as a link that might switch to the
+// wrong one). A hidden workspace is never a target: switching to it would
+// select a workspace the sidebar does not show.
+//
+// Pushed whole, and again only when the set changes, so a push is always a
+// change a page re-links its drawn trees for.
+message WorkspaceMentionTargets {
+  // The targets, in the sidebar's Open-section order. Every name is distinct.
+  repeated WorkspaceMentionTarget targets = 1;
+}
+
+// One workspace a mention may switch to: the name a tree's text writes, and
+// the workspace a click on it selects.
+message WorkspaceMentionTarget {
+  // The name a mention is matched by.
+  WorkspaceMentionName name = 1;
+  // The workspace a click selects (`SelectWorkspace`), echoed verbatim.
+  workspace.v1.WorkspaceRef workspace = 2;
+}
+
+// A workspace's name, exactly as the sidebar draws it. A mention is a WHOLE
+// occurrence of it: an inline code span whose whole text is the name, or the
+// name in plain text bounded by characters no workspace name is made of.
+message WorkspaceMentionName {
+  // The name's text, never empty.
+  string text = 1;
+}
