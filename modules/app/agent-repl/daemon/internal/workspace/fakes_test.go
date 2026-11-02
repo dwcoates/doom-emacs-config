@@ -154,7 +154,7 @@ type fakeDB struct {
 	// (read back as wsm.DefaultSidebarView); setMergedFoldedErr,
 	// setMaturityFoldedErr and setGroupingErr fail its writes and viewErr its
 	// read.
-	view               *wsm.SidebarView
+	view                   *wsm.SidebarView
 	setMergedFoldedErr     error
 	setMergeQueueFoldedErr error
 	setHiddenFoldedErr     error
