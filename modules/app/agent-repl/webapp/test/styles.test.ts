@@ -4600,6 +4600,9 @@ describe("the tool card's command grey", () => {
     ["the footer", stylesheet, ".pfooter"],
     ["the shell composer", stylesheet, "#composer-input"],
     ["a bubble's composer", stylesheet, ".composer-input"],
+    // One shell, one header: a workspace's page and a zettel chat's page both
+    // draw index.html's #topbar (owner request, 2026-11-02).
+    ["the topbar, on a workspace's page and a zettel chat's", stylesheet, "#topbar"],
   ] as const)("paints %s with var(--sidebar-ground)", (_surface, css, selector) => {
     // Arrange
     const painting = rulesOf(css).filter((r) => r.selectors.includes(selector) && /(^|;)\s*background(?:-color)?\s*:/.test(r.declarations));
@@ -6529,24 +6532,13 @@ describe("the prompt bubble's edge highlight (owner requests, 2026-10-27 and 202
   });
 });
 
-describe("the topbar's ground (owner request, 2026-10-27)", () => {
-  it("paints #topbar from --topbar-bg", () => {
+describe("the topbar's ground (owner request, 2026-11-02)", () => {
+  it("leaves no --topbar-bg token that could point the topbar at another ground", () => {
     // Arrange / Act
-    const rule = declarationsOf("#topbar") ?? "";
+    const declared = /--topbar-bg\s*:/.test(withoutBlockComments(stylesheet));
 
     // Assert
-    expect(rule).toMatch(/background:\s*var\(--topbar-bg\)\s*;/);
-  });
-
-  it("sits the dark topbar a touch above the feed (owner request, 2026-10-28)", () => {
-    // Arrange
-    const block = darkThemeBlock();
-
-    // Act
-    const [feed, topbar] = ["--bg", "--topbar-bg"].map((token) => luminance(themeRgbOf(block, token)));
-
-    // Assert
-    expect(feed < topbar).toBe(true);
+    expect(declared).toBe(false);
   });
 });
 
