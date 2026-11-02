@@ -916,6 +916,9 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		// the eviction waits for that run to stop.
 		// A HIDDEN OR CLOSED WORKSPACE PARKED AT ITS GATE takes the gate's
 		// lapse (cachelapse.Keeper.ColdGateRaised).
+		// A PROMPT TYPED ON claude.ai INTO A PARKED WORKSPACE answers its
+		// cold gate through the verb the editor's answer takes.
+		PayColdGate: verbsRef.answerColdGate,
 		ColdGateRaised: func(ws ids.WorkspaceID, judged bool) {
 			cacheKeeper.ColdGateRaised(ws, judged)
 			if eject := ejectCold; eject != nil {

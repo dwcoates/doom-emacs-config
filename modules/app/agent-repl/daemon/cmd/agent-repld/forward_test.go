@@ -842,3 +842,56 @@ func TestAnUnboundMergeForwarderRefusesAQueueReview(t *testing.T) {
 		t.Fatal("an unbound forwarder carried a review to nobody")
 	}
 }
+
+// answeringVerbs is a workspace.Verbs whose only live method is the cold
+// gate's answer.
+type answeringVerbs struct {
+	workspace.Verbs
+	answered []*agentreplv1.AnswerColdGateRequest
+	err      error
+}
+
+func (v *answeringVerbs) AnswerColdGate(_ context.Context, _ ids.WorkspaceID, answer *agentreplv1.AnswerColdGateRequest) error {
+	v.answered = append(v.answered, answer)
+	return v.err
+}
+
+func TestVerbsForwarderAnswerColdGateReachesTheBoundVerbs(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+	}{
+		{name: "an answer the verb takes", err: nil},
+		{name: "an answer the verb refuses", err: errors.New("no cold gate stands")},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			target := &answeringVerbs{err: tc.err}
+			f := &verbsForwarder{}
+			f.bind(target)
+			pay := &agentreplv1.AnswerColdGateRequest{Choice: &agentreplv1.AnswerColdGateRequest_Pay{Pay: &agentreplv1.AnswerColdGatePay{}}}
+
+			// Act.
+			err := f.answerColdGate(context.Background(), "w1", pay)
+
+			// Assert.
+			if len(target.answered) != 1 || target.answered[0] != pay || !errors.Is(err, tc.err) {
+				t.Fatalf("answered %v, err = %v; want the pay answer once, answering %v", target.answered, err, tc.err)
+			}
+		})
+	}
+}
+
+func TestVerbsForwarderAnswerColdGateBeforeTheVerbsIsAnError(t *testing.T) {
+	// Arrange.
+	f := &verbsForwarder{}
+
+	// Act.
+	err := f.answerColdGate(context.Background(), "w1", &agentreplv1.AnswerColdGateRequest{})
+
+	// Assert.
+	if err == nil || err.Error() != "agent-repld: a cold gate was answered for a prompt typed on claude.ai before the workspace verbs existed" {
+		t.Fatalf("err = %v, want the wiring defect named", err)
+	}
+}

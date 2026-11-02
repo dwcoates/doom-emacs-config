@@ -104,6 +104,14 @@ func (f *Fleet) SetRemoteControl(ctx context.Context, log dlog.Logger, ws ids.Wo
 	f.deps.Topbar.SetRemoteControl(ws, on)
 	fields := dlog.Context{"change": change.String(), "remote_control": on}
 	log.Info(opRemoteControl, "recorded the workspace's remote-control mode", fields)
+	// A PARKED WORKSPACE'S BRIDGE IS ITS GATE'S (parkedbridge.go): an on
+	// bridges the standing gate, an off stands the bridge's shim down, and no
+	// live session is asked anything.
+	if _, gated := f.StandingColdGate(ws); gated {
+		log.Info(opRemoteControl, "the workspace is parked at its cold gate; the gate's bridge follows the mode", fields)
+		f.Detach(func(ctx context.Context) { f.settleGateShim(ctx, ws) })
+		return on, nil
+	}
 	client, ok := f.Client(ws)
 	if !ok {
 		return on, &ShimRefusal{Verb: "SetSessionRemoteControl", Arm: ArmShimNoSession, Detail: "the workspace has no live shim"}

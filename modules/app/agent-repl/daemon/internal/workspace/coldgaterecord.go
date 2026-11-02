@@ -21,6 +21,11 @@ import (
 // from the store (ReadHistory). Only an answer spawns a shim: the one the
 // remediated resume runs through (ResumeCold).
 //
+// EXCEPT IN REMOTE CONTROL (owner ruling, 2026-11-02): a workspace whose
+// remote-control mode is on keeps one shim holding the parked conversation's
+// bridge, so a prompt typed on claude.ai reaches it (parkedbridge.go). Every
+// stand-down above goes through settleGateShim, which decides.
+//
 // THE RECORD IS RETIRED when no gate can stand any more: a session coming up
 // (sessionUp, which every answer's resume reaches, a clear's fresh
 // conversation included) and a rebind to another conversation. Forgetting the
@@ -53,8 +58,11 @@ func (f *Fleet) raiseRecordedGate(ctx context.Context, ws ids.WorkspaceID) (bool
 	}
 	f.raiseColdGate(ws, rec.VendorSessionID, rec.Cold, rec.ConfigDir, false)
 	f.deps.Steps(ws, opentabs.Step{Kind: opentabs.StepColdGate})
-	log.Info(opColdGate, "raised the workspace's recorded cold gate; no shim is started until it is answered",
+	log.Info(opColdGate, "raised the workspace's recorded cold gate; no session is started until it is answered",
 		dlog.Context{"vendor_session_id": rec.VendorSessionID, "context_tokens": rec.Cold.GetContextTokens()})
+	// A WORKSPACE IN REMOTE CONTROL is bridged at its recorded gate, as at
+	// every other (parkedbridge.go); any other keeps no shim.
+	f.settleGateShim(ctx, ws)
 	return true, nil
 }
 
@@ -113,7 +121,15 @@ func (f *Fleet) heldForAnswer(ctx context.Context, log dlog.Logger, ws ids.Works
 	gate.Lock()
 	defer gate.Unlock()
 	if held, ok := f.idleHeldForAnswer(ws); ok {
-		return held, nil
+		// A PARKED BRIDGE TAKES ONLY A PAY (parkedbridge.go): its shim already
+		// resumed the conversation as pay does, so any other answer runs on a
+		// new shim, and the bridge's is stood down first.
+		if !held.bridged || isPay(resume.Remediation) {
+			return held, nil
+		}
+		if err := f.standDownBridge(ctx, log, ws, held, "the cold gate was answered "+remediationName(resume.Remediation)+", which the parked bridge's shim does not take"); err != nil {
+			return nil, fmt.Errorf("re-open session for %q: %w", ws, err)
+		}
 	}
 	src := source{VendorSessionID: resume.VendorSessionID, ColdRemediation: resume.Remediation}.withRecord(record)
 	log.Info(opColdGate, "the answered gate has no shim; spawning the one its resume runs through", dlog.Context{"vendor_session_id": resume.VendorSessionID})
