@@ -135,6 +135,47 @@ describe("the row hover gesture", () => {
       expect(isOpen(a)).toBe(false);
     });
 
+    it("waits three quarters of a second on the line, one named delay", () => {
+      expect(HOVER_OPEN_DELAY_MS).toBe(750);
+    });
+
+    it("keeps one open timer for a line entered twice before the delay", () => {
+      // ARRANGE
+      draw("ws-1");
+      hover.enter("ws-1", "line");
+      // ACT
+      hover.enter("ws-1", "line");
+      // ASSERT
+      expect(vi.getTimerCount()).toBe(1);
+    });
+
+    it("toggles the panel once for a pointer moving between the duration and the rest of the line", () => {
+      // ARRANGE
+      const debug = spyOnDebug();
+      draw("ws-1");
+      hover.enter("ws-1", "line");
+      // ACT
+      hover.enter("ws-1", "duration");
+      hover.leave("ws-1", "duration");
+      hover.enter("ws-1", "duration");
+      hover.leave("ws-1", "duration");
+      vi.runAllTimers();
+      // ASSERT
+      const toggles = debug.mock.calls.filter(([, fields]) => fields?.operation === "sidebar.row.detail-toggle");
+      expect(toggles).toHaveLength(1);
+    });
+
+    it("arms no timer for a pointer moving from the duration to the rest of the line", () => {
+      // ARRANGE
+      draw("ws-1");
+      hover.enter("ws-1", "line");
+      hover.enter("ws-1", "duration");
+      // ACT
+      hover.leave("ws-1", "duration");
+      // ASSERT
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
     it("opens at once for a pointer reaching the duration, leaving no timer", () => {
       // ARRANGE
       const a = draw("ws-1");
