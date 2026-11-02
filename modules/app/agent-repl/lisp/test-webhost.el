@@ -310,6 +310,13 @@ Binds `killed' to the buffers the kill function was handed."
     (let ((buf (agent-repl--webview-make-hidden "http://x/" " *made-view*" #'agent-repl-test-wh--refuse #'ignore "a view")))
       (should-not (buffer-local-value 'header-line-format buf)))))
 
+(ert-deftest agent-repl-test-wh-a-made-view-has-no-fringes ()
+  "A hidden web view has zero fringes, so its page meets the divider."
+  (agent-repl-test-wh--with-made-view t
+    (let ((buf (agent-repl--webview-make-hidden "http://x/" " *made-view*" #'agent-repl-test-wh--refuse #'ignore "a view")))
+      (should (equal (buffer-local-value 'left-fringe-width buf) 0))
+      (should (equal (buffer-local-value 'right-fringe-width buf) 0)))))
+
 (ert-deftest agent-repl-test-wh-a-made-view-takes-its-name ()
   "A hidden web view's buffer carries the name it was made with."
   (agent-repl-test-wh--with-made-view t

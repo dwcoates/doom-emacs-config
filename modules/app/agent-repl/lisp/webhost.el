@@ -52,6 +52,7 @@
 (declare-function agent-repl-link-live "daemon-link" ())
 (declare-function agent-repl-connect-connection-address "connect" (conn))
 (declare-function agent-repl--frontend-make-webview-buffer "frontend" (url))
+(declare-function agent-repl-dividers-webview-fringes "dividers" (buf on))
 (declare-function agent-repl--frontend-webview-live-widget "frontend" (buf))
 (declare-function agent-repl--frontend-webview-execute-script-value "frontend" (xw script callback))
 (declare-function agent-repl--frontend-webview-navigate-widget "frontend" (xwidget uri))
@@ -366,7 +367,7 @@ the host buffer is never displayed itself; workspace slots display it."
   "Create a hidden web view buffer NAME at URL, guarded by REFUSE-KILL.
 The shape every one of Emacs's own web views shares (the host, and the
 sidebar, sidebar-view.el): no window is touched, the buffer has no header or
-mode line, and REFUSE-KILL stands on its `kill-buffer-query-functions'.
+mode line and no fringes (dividers.el), and REFUSE-KILL stands on its `kill-buffer-query-functions'.
 A buffer created without a live xwidget is killed through KILL, a function
 of the buffer, and signals an error naming WHAT.  Returns the buffer."
   (let ((buf (save-window-excursion (agent-repl--frontend-make-webview-buffer url))))
@@ -376,6 +377,7 @@ of the buffer, and signals an error naming WHAT.  Returns the buffer."
       (setq-local mode-line-format nil)
       (rename-buffer name t)
       (add-hook 'kill-buffer-query-functions refuse-kill nil t))
+    (agent-repl-dividers-webview-fringes buf t)
     (unless (agent-repl--frontend-webview-live-widget buf)
       (funcall kill buf)
       (error "agent-repl: %s was created without a live xwidget" what))
