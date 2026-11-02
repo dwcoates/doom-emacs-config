@@ -3,10 +3,12 @@ package server
 import (
 	"agent-repld/internal/restarttiming"
 	"context"
+	"errors"
 	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"testing"
 	"time"
 
@@ -721,6 +723,86 @@ func TestEndStandingStreamSendsOnlyWhenTheLifetimeEnded(t *testing.T) {
 				t.Fatalf("endings sent = %d, want %d", len(sink.sent), tc.wantEndings)
 			}
 		})
+	}
+}
+
+// TestServeThenEndFollowsACleanBodyWithTheEnding pins the one shape every
+// ending-carrying stream serves through: a body that fails answers its error
+// with no ending, and a clean body is followed by the ending only when the
+// daemon's lifetime ended it.
+func TestServeThenEndFollowsACleanBodyWithTheEnding(t *testing.T) {
+	failed := errors.New("the watch failed")
+	cases := []struct {
+		name        string
+		bodyErr     error
+		lifeEnded   bool
+		wantEndings int
+	}{
+		{name: "a clean body the daemon's lifetime ended", lifeEnded: true, wantEndings: 1},
+		{name: "a clean body its client ended", lifeEnded: false, wantEndings: 0},
+		{name: "a failed body, even as the lifetime ends", bodyErr: failed, lifeEnded: true, wantEndings: 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			life, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			if tc.lifeEnded {
+				cancel()
+			}
+			s := &server{life: life, log: &recordingLogger{}}
+			sink := &endingSink{}
+			ran := false
+
+			// Act.
+			err := serveThenEnd(s, "WatchDaemon", streamSink[agentreplv1.WatchDaemonResponse](sink), daemonEnding(), func() error {
+				ran = true
+				return tc.bodyErr
+			})
+
+			// Assert.
+			if !ran {
+				t.Fatal("the body never ran")
+			}
+			if !errors.Is(err, tc.bodyErr) || (tc.bodyErr == nil && err != nil) {
+				t.Fatalf("serveThenEnd answered %v, want the body's own %v", err, tc.bodyErr)
+			}
+			if len(sink.sent) != tc.wantEndings {
+				t.Fatalf("endings sent = %d, want %d", len(sink.sent), tc.wantEndings)
+			}
+		})
+	}
+}
+
+// TestEveryEndingStreamServesThroughServeThenEnd pins that no stream re-spells
+// serveThenEnd: outside it, endStandingStream is called only by the page's own
+// drain and the host stream, whose endings follow work of their own.
+func TestEveryEndingStreamServesThroughServeThenEnd(t *testing.T) {
+	// Arrange.
+	files, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatalf("glob: %v", err)
+	}
+	callers := map[string]int{}
+
+	// Act.
+	for _, file := range files {
+		if strings.HasSuffix(file, "_test.go") {
+			continue
+		}
+		source, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatalf("read %s: %v", file, err)
+		}
+		if n := strings.Count(string(source), "\tendStandingStream(s, "); n > 0 {
+			callers[file] = n
+		}
+	}
+
+	// Assert.
+	want := map[string]int{"streams.go": 2, "page.go": 1}
+	if !maps.Equal(callers, want) {
+		t.Fatalf("endStandingStream callers = %v, want %v (serveThenEnd, the host stream, the page's drain)", callers, want)
 	}
 }
 

@@ -20,12 +20,9 @@ func (s *server) WatchWorkspaceMentions(
 	req *connect.Request[agentreplv1.WatchWorkspaceMentionsRequest],
 	out *connect.ServerStream[agentreplv1.WatchWorkspaceMentionsResponse],
 ) error {
-	const rpc = "WatchWorkspaceMentions"
-	if err := s.watchWorkspaceMentions(ctx, req.Msg, out); err != nil {
-		return err
-	}
-	endStandingStream(s, rpc, s.log, out, workspaceMentionsEnding())
-	return nil
+	return serveThenEnd(s, "WatchWorkspaceMentions", out, workspaceMentionsEnding(), func() error {
+		return s.watchWorkspaceMentions(ctx, req.Msg, out)
+	})
 }
 
 // workspaceMentionsEnding is the mention stream's planned ending frame, the

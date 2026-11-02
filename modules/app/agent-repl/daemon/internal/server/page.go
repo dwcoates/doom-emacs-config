@@ -550,11 +550,7 @@ func (s *server) pageWatchFor(
 				return &agentreplv1.PageFrame{Payload: &agentreplv1.PageFrame_Roster{Roster: m}}
 			}}
 		return pageWatch{"WatchWorkspaceRoster", func(ctx context.Context) error {
-			if err := s.watchWorkspaceRoster(ctx, watch.Roster, sink); err != nil {
-				return err
-			}
-			endStandingStream(s, "WatchWorkspaceRoster", s.log, sink, rosterEnding())
-			return nil
+			return serveThenEnd(s, "WatchWorkspaceRoster", sink, rosterEnding(), func() error { return s.watchWorkspaceRoster(ctx, watch.Roster, sink) })
 		}}, true
 	case *agentreplv1.SubscribePageRequest_WebWorkspace:
 		sink := pageSink[agentreplv1.WatchWebWorkspaceResponse]{page: page, sub: sub,
@@ -570,11 +566,7 @@ func (s *server) pageWatchFor(
 				return &agentreplv1.PageFrame{Payload: &agentreplv1.PageFrame_Daemon{Daemon: m}}
 			}}
 		return pageWatch{"WatchDaemon", func(ctx context.Context) error {
-			if err := s.watchDaemon(ctx, watch.Daemon, sink); err != nil {
-				return err
-			}
-			endStandingStream(s, "WatchDaemon", s.log, sink, daemonEnding())
-			return nil
+			return serveThenEnd(s, "WatchDaemon", sink, daemonEnding(), func() error { return s.watchDaemon(ctx, watch.Daemon, sink) })
 		}}, true
 	case *agentreplv1.SubscribePageRequest_Topbar:
 		sink := pageSink[agentreplv1.WatchTopbarResponse]{page: page, sub: sub,
@@ -590,11 +582,7 @@ func (s *server) pageWatchFor(
 				return &agentreplv1.PageFrame{Payload: &agentreplv1.PageFrame_WorkspaceMentions{WorkspaceMentions: m}}
 			}}
 		return pageWatch{"WatchWorkspaceMentions", func(ctx context.Context) error {
-			if err := s.watchWorkspaceMentions(ctx, watch.WorkspaceMentions, sink); err != nil {
-				return err
-			}
-			endStandingStream(s, "WatchWorkspaceMentions", s.log, sink, workspaceMentionsEnding())
-			return nil
+			return serveThenEnd(s, "WatchWorkspaceMentions", sink, workspaceMentionsEnding(), func() error { return s.watchWorkspaceMentions(ctx, watch.WorkspaceMentions, sink) })
 		}}, true
 	case *agentreplv1.SubscribePageRequest_Chat:
 		sink := pageSink[agentreplv1.WatchChatResponse]{page: page, sub: sub,
