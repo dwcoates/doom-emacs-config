@@ -10,6 +10,7 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/resolve/topbar"
 	"agent-repld/internal/wsm"
 )
 
@@ -31,12 +32,19 @@ func (s *server) ListRollbackPrompts(
 	}
 	ws := subject.Record.ID
 	choices := s.deps.Feed.RollbackChoices(ws)
+	// THE CHIP'S WINDOW: each figure is colored as the topbar's context chip
+	// would color the same count.
+	window := s.deps.Topbar.ContextWindow(ws)
 	success := &agentreplv1.ListRollbackPromptsSuccess{}
 	for _, choice := range slices.Backward(choices) {
 		entry := &agentreplv1.RollbackPromptEntry{
 			Prompt:        choice.Row,
-			Excerpt:       excerptOf(choice.Said),
+			Text:          saidText(choice.Said),
 			ContextTokens: choice.ContextTokens,
+		}
+		if tokens := choice.ContextTokens; tokens != nil {
+			fill := topbar.WindowFill(int64(*tokens), window)
+			entry.WindowFill = &fill
 		}
 		turn, err := s.deps.DB.Turn(ctx, ws, choice.Turn)
 		switch {
@@ -52,7 +60,7 @@ func (s *server) ListRollbackPrompts(
 		success.Prompts = append(success.Prompts, entry)
 	}
 	subject.Log.Info(opRollback, "listed the prompts a rollback can reach for the reader to choose among",
-		dlog.Context{"prompts": len(success.Prompts)})
+		dlog.Context{"prompts": len(success.Prompts), "context_window": window})
 	resp.Result = &agentreplv1.ListRollbackPromptsResponse_Success{Success: success}
 	return connect.NewResponse(resp), nil
 }

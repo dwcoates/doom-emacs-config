@@ -16,6 +16,10 @@ import { MalformedView } from "./rpc/malformed.js";
  * 40, yellow by 70, orange by 90, red at 90 and above. Between 40 and 90 the
  * hue runs continuously, so 55 sits halfway between green and yellow and 80
  * halfway between yellow and orange; 90 is a hard step to red.
+ *
+ * EMACS COLORS THE ROLLBACK PICKER BY THE SAME RULE: its twin is
+ * `agent-repl--input-pressure-percent-stops` (lisp/input.el), and the two
+ * tables change together.
  */
 const PRESSURE_PERCENT_STOPS: readonly PercentStop[] = [
   { at: 40, hue: HUE_GREEN },

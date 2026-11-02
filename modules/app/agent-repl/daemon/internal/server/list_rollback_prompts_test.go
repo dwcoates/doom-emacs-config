@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -31,6 +32,7 @@ func listRollbackPrompts(t *testing.T, h *harness) (*agentreplv1.ListRollbackPro
 func TestListRollbackPromptsAnswersNewestFirstWithWhatTellsThemApart(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
+	h.Topbar.contextWindow = 200_000
 	tokens := uint64(42_000)
 	h.Feed.rollbackChoices = []feed.RollbackChoice{
 		{Row: feedIDs("p1")[0], Turn: "t1", Said: said("the first prompt")},
@@ -49,18 +51,42 @@ func TestListRollbackPromptsAnswersNewestFirstWithWhatTellsThemApart(t *testing.
 	if len(got) != 2 {
 		t.Fatalf("prompts = %v, want 2", got)
 	}
-	if got[0].GetPrompt().GetValue() != "p2" || got[0].GetExcerpt() != "the second prompt" ||
+	if got[0].GetPrompt().GetValue() != "p2" || got[0].GetText() != "the second prompt" ||
 		got[0].GetSentAtMs() != 2_000 || got[0].ContextTokens == nil || got[0].GetContextTokens() != 42_000 {
 		t.Fatalf("newest entry = %v, want p2 sent at 2000 with 42000 tokens", got[0])
 	}
-	if got[1].GetPrompt().GetValue() != "p1" || got[1].ContextTokens != nil {
-		t.Fatalf("oldest entry = %v, want p1 with no context figure", got[1])
+	if got[0].WindowFill == nil || got[0].GetWindowFill() != 0.21 {
+		t.Fatalf("newest window_fill = %v, want 0.21 of the chip's 200000 window", got[0].WindowFill)
+	}
+	if got[1].GetPrompt().GetValue() != "p1" || got[1].ContextTokens != nil || got[1].WindowFill != nil {
+		t.Fatalf("oldest entry = %v, want p1 with no context figure and no window fill", got[1])
+	}
+}
+
+func TestListRollbackPromptsAnswersALongPromptsTextInFull(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Topbar.contextWindow = 200_000
+	long := strings.Repeat("every word counts ", 20)
+	h.Feed.rollbackChoices = []feed.RollbackChoice{{Row: feedIDs("p1")[0], Turn: "t1", Said: said(long)}}
+	h.DB.turnStarted = map[ids.TurnID]time.Time{"t1": time.UnixMilli(1_000)}
+
+	// Act.
+	msg, err := listRollbackPrompts(t, h)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("ListRollbackPrompts: %v", err)
+	}
+	if got := msg.GetSuccess().GetPrompts()[0].GetText(); got != long {
+		t.Fatalf("text = %q, want the whole prompt %q", got, long)
 	}
 }
 
 func TestListRollbackPromptsLeavesAnAdoptedPromptsSendTimeUnset(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
+	h.Topbar.contextWindow = 200_000
 	h.Feed.rollbackChoices = []feed.RollbackChoice{{Row: feedIDs("p1")[0], Turn: "t1", Said: said("adopted")}}
 	h.DB.turnStartedErr = wsm.ErrNotFound
 
@@ -79,6 +105,7 @@ func TestListRollbackPromptsLeavesAnAdoptedPromptsSendTimeUnset(t *testing.T) {
 func TestListRollbackPromptsWithNoneAnswersAnEmptySuccess(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
+	h.Topbar.contextWindow = 200_000
 
 	// Act.
 	msg, err := listRollbackPrompts(t, h)
@@ -97,6 +124,7 @@ func TestListRollbackPromptsSurfacesATurnReadFailure(t *testing.T) {
 	log := dlog.NewTestLogger()
 	h := newHarness(t)
 	h.Surfaces.workspace = log
+	h.Topbar.contextWindow = 200_000
 	h.Feed.rollbackChoices = []feed.RollbackChoice{{Row: feedIDs("p1")[0], Turn: "t1", Said: said("x")}}
 	h.DB.turnStartedErr = errors.New("database is locked")
 

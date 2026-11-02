@@ -4680,13 +4680,37 @@ click on a linked label), `entry' (a click on a prompt's entry) and
     (should (equal (agent-repl-wire-decode-list-rollback-prompts-response
                     (agent-repl-test-wire-verbs--parse
                      (concat "{\"success\":{\"prompts\":["
-                             "{\"prompt\":{\"value\":\"p2\"},\"excerpt\":\"newer\",\"sentAtMs\":\"1700000000000\",\"contextTokens\":\"42000\"},"
-                             "{\"prompt\":{\"value\":\"p1\"},\"excerpt\":\"older\"}]}}")))
+                             "{\"prompt\":{\"value\":\"p2\"},\"text\":\"newer\",\"sentAtMs\":\"1700000000000\",\"contextTokens\":\"42000\",\"windowFill\":0.21},"
+                             "{\"prompt\":{\"value\":\"p1\"},\"text\":\"older\"}]}}")))
                    '(:arm :success :value
-                     (:prompts ((:prompt (:value "p2") :excerpt "newer"
-                                 :sent-at-ms 1700000000000 :context-tokens 42000)
-                                (:prompt (:value "p1") :excerpt "older"
-                                 :sent-at-ms nil :context-tokens nil))))))))
+                     (:prompts ((:prompt (:value "p2") :text "newer"
+                                 :sent-at-ms 1700000000000 :context-tokens 42000 :window-fill 0.21)
+                                (:prompt (:value "p1") :text "older"
+                                 :sent-at-ms nil :context-tokens nil :window-fill nil))))))))
+
+(ert-deftest agent-repl-test-wire-verbs-list-rollback-prompts-fill-without-tokens-refused ()
+  "A window fill with no context figure to be the fill of is a contract breach."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-list-rollback-prompts-response
+                   (agent-repl-test-wire-verbs--parse
+                    "{\"success\":{\"prompts\":[{\"prompt\":{\"value\":\"p\"},\"windowFill\":0.5}]}}"))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-list-rollback-prompts-tokens-without-fill-refused ()
+  "A context figure with no window fill cannot be colored: a contract breach."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-list-rollback-prompts-response
+                   (agent-repl-test-wire-verbs--parse
+                    "{\"success\":{\"prompts\":[{\"prompt\":{\"value\":\"p\"},\"contextTokens\":\"5\"}]}}"))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-list-rollback-prompts-fill-out-of-range-refused ()
+  "A window fill outside [0, 1] is a contract breach: the daemon clamps."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-list-rollback-prompts-response
+                   (agent-repl-test-wire-verbs--parse
+                    "{\"success\":{\"prompts\":[{\"prompt\":{\"value\":\"p\"},\"contextTokens\":\"5\",\"windowFill\":1.5}]}}"))
+                  :type 'agent-repl-wire-error)))
 
 (ert-deftest agent-repl-test-wire-verbs-list-rollback-prompts-empty ()
   "No reachable prompt is an empty success."
@@ -4700,7 +4724,7 @@ click on a linked label), `entry' (a click on a prompt's entry) and
   (agent-repl-test-wire-verbs--with-common
     (should-error (agent-repl-wire-decode-list-rollback-prompts-response
                    (agent-repl-test-wire-verbs--parse
-                    "{\"success\":{\"prompts\":[{\"excerpt\":\"x\"}]}}"))
+                    "{\"success\":{\"prompts\":[{\"text\":\"x\"}]}}"))
                   :type 'agent-repl-wire-error)))
 
 (ert-deftest agent-repl-test-wire-verbs-list-rollback-prompts-error-arms ()

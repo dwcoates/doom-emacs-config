@@ -68,6 +68,7 @@
 (require 'cl-lib)
 (require 'seq)
 (require 'subr-x)
+(require 'color)
 
 (declare-function agent-repl--ws-put "workspace" (ws key val))
 (declare-function agent-repl-webhost-dismiss-digest "webhost" (ws))
@@ -1215,17 +1216,59 @@ nil (no figure stands) is a dash, never a zero."
    ((< tokens 1000000) (format "%dk" (round tokens 1000.0)))
    (t (format "%.1fM" (/ tokens 1000000.0)))))
 
+(defconst agent-repl--input-pressure-percent-stops
+  '((40 . 140) (70 . 60) (90 . 30) (90 . 0))
+  "Where a pressure percentage's hues sit, as (PERCENT . HUE) stops.
+The webapp's `PRESSURE_PERCENT_STOPS' (webapp/src/pressure-color.ts), the
+rule the topbar's context chip is colored by: green below 40, yellow by
+70, orange by 90, a hard step to red at 90.  The two tables are one rule
+and change together.")
+
+(defun agent-repl--input-pressure-hue (percent)
+  "Return the hue PERCENT (0..100) takes on the pressure stops.
+Below the first stop it is the first stop's hue, at or past the last the
+last's; between two stops it runs linearly, and two stops at one percent
+are a hard step to the later one.  The webapp's `hueAt'
+\(webapp/src/percent-gradient.ts), stop for stop."
+  (let ((stops agent-repl--input-pressure-percent-stops))
+    (if (< percent (caar stops))
+        (cdar stops)
+      (or (cl-loop for (from to) on stops
+                   while to
+                   when (and (<= (car from) percent) (< percent (car to)))
+                   return (+ (cdr from)
+                             (/ (* (- (cdr to) (cdr from)) (- percent (car from)))
+                                (float (- (car to) (car from))))))
+          (cdr (car (last stops)))))))
+
+(defun agent-repl--input-window-fill-color (fill)
+  "Return FILL's color as a hex string: how the topbar's context chip colors it.
+FILL (0..1) is taken as the whole percent the chip draws, its hue read off
+the pressure stops at the chip's saturation and lightness (80%, 45%).  A
+fill outside [0, 1] breaks the daemon's contract and signals an error."
+  (unless (and (numberp fill) (<= 0.0 fill 1.0))
+    (error "agent-repl: window fill %S is outside [0, 1]" fill))
+  (let ((hue (round (agent-repl--input-pressure-hue (round (* fill 100))))))
+    (apply #'color-rgb-to-hex
+           (append (color-hsl-to-rgb (/ hue 360.0) 0.8 0.45) '(2)))))
+
 (defun agent-repl--input-rollback-candidate (index entry now)
   "Return the picker line for ENTRY, the INDEXth prompt (1 is the newest).
 Columns: the index (keeping lines distinct), time since the prompt was
-sent (as of NOW, a float time), the context size before it, and its
-opening words."
-  (let ((sent (plist-get entry :sent-at-ms)))
-    (format "%2d  %-12s  %6s  %s"
-            index
-            (or (and sent (agent-repl--format-summary-relative-time (/ sent 1000.0) now)) "-")
-            (agent-repl--input-rollback-tokens-text (plist-get entry :context-tokens))
-            (plist-get entry :excerpt))))
+sent (as of NOW, a float time), the context size before it, and the
+prompt's whole text folded onto the one line, never cut.  The line wears
+the color the topbar's context chip would give its context figure; a
+prompt with no figure stays uncolored."
+  (let* ((sent (plist-get entry :sent-at-ms))
+         (fill (plist-get entry :window-fill))
+         (line (format "%2d  %-12s  %6s  %s"
+                       index
+                       (or (and sent (agent-repl--format-summary-relative-time (/ sent 1000.0) now)) "-")
+                       (agent-repl--input-rollback-tokens-text (plist-get entry :context-tokens))
+                       (string-join (split-string (plist-get entry :text)) " "))))
+    (if fill
+        (propertize line 'face (list :foreground (agent-repl--input-window-fill-color fill)))
+      line)))
 
 (defun agent-repl--input-rollback-read-entry (entries)
   "Read one of ENTRIES (newest first) with `completing-read'; return it.
@@ -1242,7 +1285,7 @@ completion backend would otherwise apply."
                       '(metadata (display-sort-function . identity)
                                  (cycle-sort-function . identity))
                     (complete-with-action action (mapcar #'car lines) string predicate))))
-         (choice (completing-read "Roll back to before (sent, context): " table nil t)))
+         (choice (completing-read "Rollback to before prompt: " table nil t)))
     (cdr (assoc choice lines))))
 
 (defun agent-repl--input-rollback-choose (ws)

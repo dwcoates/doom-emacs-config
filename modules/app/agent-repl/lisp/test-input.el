@@ -3566,10 +3566,10 @@ CONFIRM is what the y/n question answers; ROLL-BACK is RollBack's answer."
 
 ;;;; ---- The stop key's second press: the rollback offer -----------------
 
-(defun agent-repl-test-input--entry (row excerpt &optional sent-at-ms tokens)
+(defun agent-repl-test-input--entry (row text &optional sent-at-ms tokens fill)
   "A decoded RollbackPromptEntry for ROW."
-  (list :prompt (list :value row) :excerpt excerpt
-        :sent-at-ms sent-at-ms :context-tokens tokens))
+  (list :prompt (list :value row) :text text
+        :sent-at-ms sent-at-ms :context-tokens tokens :window-fill fill))
 
 (defun agent-repl-test-input--listed (&rest entries)
   "A ListRollbackPrompts success answering ENTRIES."
@@ -3739,7 +3739,7 @@ The candidates offered are kept in `agent-repl-test-input--offered'."
     (should (equal (agent-repl--input-rollback-tokens-text (car case)) (cadr case)))))
 
 (ert-deftest agent-repl-test-input-rollback-candidate-columns ()
-  "A picker line is index, time since sent, context and excerpt."
+  "A picker line is index, time since sent, context and text."
   (let ((now 1000.0))
     (should (equal (agent-repl--input-rollback-candidate
                     3 (agent-repl-test-input--entry "p" "fix it" (* 1000 (- 1000 600)) 42000) now)
@@ -3750,6 +3750,62 @@ The candidates offered are kept in `agent-repl-test-input--offered'."
   (should (equal (agent-repl--input-rollback-candidate
                   1 (agent-repl-test-input--entry "p" "adopted") 1000.0)
                  " 1  -                  -  adopted")))
+
+(ert-deftest agent-repl-test-input-rollback-candidate-keeps-the-whole-text ()
+  "A long prompt is never cut: every word of it is on the line."
+  (let ((text (string-join (make-list 40 "every word counts") " ")))
+    (should (string-suffix-p
+             text (agent-repl--input-rollback-candidate
+                   1 (agent-repl-test-input--entry "p" text) 1000.0)))))
+
+(ert-deftest agent-repl-test-input-rollback-candidate-folds-the-text-onto-one-line ()
+  "A multi-line prompt's whitespace folds to single spaces on its one line."
+  (should (equal (agent-repl--input-rollback-candidate
+                  1 (agent-repl-test-input--entry "p" "fix it\n\n  then  test") 1000.0)
+                 " 1  -                  -  fix it then test")))
+
+(ert-deftest agent-repl-test-input-rollback-candidate-wears-the-window-fill-color ()
+  "A prompt with a context figure wears its fill's pressure color."
+  (let ((line (agent-repl--input-rollback-candidate
+               1 (agent-repl-test-input--entry "p" "x" nil 950000 0.95) 1000.0)))
+    (should (equal (get-text-property 0 'face line)
+                   (list :foreground (agent-repl--input-window-fill-color 0.95))))
+    (should (equal (get-text-property (1- (length line)) 'face line)
+                   (get-text-property 0 'face line)))))
+
+(ert-deftest agent-repl-test-input-rollback-candidate-without-a-figure-is-uncolored ()
+  "A prompt with no context figure has no face: no honest color exists."
+  (should-not (get-text-property
+               0 'face (agent-repl--input-rollback-candidate
+                        1 (agent-repl-test-input--entry "p" "x") 1000.0))))
+
+(ert-deftest agent-repl-test-input-pressure-hue-follows-the-chip-stops ()
+  "The hue is green below 40, blends to yellow by 70 and orange by 90, red at 90."
+  (dolist (case '((0 140) (39 140) (40 140) (55 100.0) (70 60) (80 45.0)
+                  (89 31.5) (90 0) (100 0)))
+    (should (= (agent-repl--input-pressure-hue (car case)) (cadr case)))))
+
+(ert-deftest agent-repl-test-input-window-fill-color-is-the-chip-hsl ()
+  "A fill's color is its whole percent's hue at 80% saturation, 45% lightness."
+  (dolist (case '((0.0 "#16ce54") (0.7 "#cece16") (0.9 "#ce1616")))
+    (should (equal (agent-repl--input-window-fill-color (car case)) (cadr case)))))
+
+(ert-deftest agent-repl-test-input-window-fill-color-refuses-an-out-of-range-fill ()
+  "A fill outside [0, 1] breaks the daemon's contract and signals."
+  (should-error (agent-repl--input-window-fill-color 1.5))
+  (should-error (agent-repl--input-window-fill-color -0.1)))
+
+(ert-deftest agent-repl-test-input-rollback-read-entry-asks-plainly ()
+  "The picker's prompt is the plain question."
+  (let (asked)
+    (cl-letf (((symbol-function 'completing-read)
+               (lambda (prompt table &rest _)
+                 (setq asked prompt)
+                 (car (all-completions "" table)))))
+      ;; Act
+      (agent-repl--input-rollback-read-entry (list (agent-repl-test-input--entry "p1" "a")))
+      ;; Assert
+      (should (equal asked "Rollback to before prompt: ")))))
 
 (ert-deftest agent-repl-test-input-rollback-read-entry-keeps-the-daemon-order ()
   "The completion table tells every backend not to re-sort it."
