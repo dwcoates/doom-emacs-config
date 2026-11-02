@@ -228,7 +228,7 @@ export function selectQueueEntryWorkspace(
   rc: RowContext,
   workspace: WorkspaceRef,
 ): Promise<void> {
-  return jumpToWorkspace(entry, rc, workspace, QUEUE_JUMP);
+  return jumpToWorkspace(entry, rc.ctx, workspace, QUEUE_JUMP);
 }
 
 /**
@@ -244,7 +244,7 @@ export function openQueueEntryBubble(
   bubble: FeedMergeQueueBubble,
 ): Promise<void> {
   const requester = requireMessage(bubble.requester, `${PATH}Bubble.requester`);
-  return jumpToWorkspace(entry, rc, requester, QUEUE_JUMP, bubble.row);
+  return jumpToWorkspace(entry, rc.ctx, requester, QUEUE_JUMP, bubble.row);
 }
 
 /**

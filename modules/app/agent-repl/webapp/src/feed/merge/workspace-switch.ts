@@ -64,7 +64,7 @@ export function drawMergeWorkspaceSwitch(facts: SwitchFacts, rc: RowContext): HT
     return el;
   }
   button.addEventListener("click", () => {
-    void guardMalformed(rc.ctx, "feed.merge.workspace-switch", jumpToWorkspace(el, rc, target, SWITCH_JUMP));
+    void guardMalformed(rc.ctx, "feed.merge.workspace-switch", jumpToWorkspace(el, rc.ctx, target, SWITCH_JUMP));
   });
   return el;
 }
