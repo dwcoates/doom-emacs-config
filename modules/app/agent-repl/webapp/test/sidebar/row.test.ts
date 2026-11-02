@@ -318,7 +318,7 @@ describe("the highlight and the receded styling", () => {
     expect([
       declarations.some((d) => /background-color:\s*var\(--row-highlight-tint\)/.test(d)),
       token("--row-highlight-tint"),
-    ]).toEqual([true, "color-mix(in srgb, var(--card) 69%, var(--sidebar-bg))"]);
+    ]).toEqual([true, "color-mix(in srgb, var(--card) 69%, var(--sidebar-base))"]);
   });
 
   it("paints the current row's tint through the cascade", () => {

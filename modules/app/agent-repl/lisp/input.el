@@ -211,11 +211,13 @@ Pre-formatted once so the common case costs no formatting.")
 
 ;;;; ---- The input buffer ------------------------------------------------
 
-(defcustom agent-repl-input-background "#1a1a1a"
+(defcustom agent-repl-input-background "#171717"
   "The input buffer's background, a #rrggbb hex string.
-The webapp's dark `--composer-bg' (webapp/src/styles.css): the input
-window is the host-native composer, so the two wear one color, the dark
-sidebar's ground `--sidebar-bg' (owner request, 2026-11-02)."
+The webapp's dark `--sidebar-ground' (webapp/src/styles.css), the one
+ground the sidebar, the footer and the composer share: the input window
+is the host-native composer, so it wears that color too (owner request,
+2026-11-02).  The token is `color-mix(in srgb, #1a1a1a 88%, #000000)',
+which WebKit paints as #171717."
   :type 'string
   :group 'agent-repl)
 

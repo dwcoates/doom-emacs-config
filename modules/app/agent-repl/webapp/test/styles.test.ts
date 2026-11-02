@@ -23,6 +23,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import stylesheet from "../src/styles.css?raw";
+import sidebarPageStylesheet from "../src/host/sidebar-page.css?raw";
 import renderColors from "../../proto/vocab/render-colors.json";
 import { colorValuesStylesheet } from "../src/vocab.js";
 import { TITLE_FOLD_OPEN_SELECTOR } from "../src/feed/title-fold.js";
@@ -3996,7 +3997,7 @@ describe("the dark theme's iMessage fills (owner ruling, 2026-09-27)", () => {
     // Arrange
     const block = darkThemeBlock();
     // Act
-    const [user, sidebar] = [luminance(rgbOf(block, "--user")), luminance(rgbOf(block, "--sidebar-bg"))];
+    const [user, sidebar] = [luminance(rgbOf(block, "--user")), luminance(rgbOf(block, "--sidebar-base"))];
     // Assert
     expect(user).toBeGreaterThan(sidebar);
   });
@@ -4013,11 +4014,11 @@ describe("the dark theme's iMessage fills (owner ruling, 2026-09-27)", () => {
     expect(low).toBeLessThan(high);
   });
 
-  it("paints a prompt in the light theme the feed's --bg halfway to --sidebar-bg (owner request, 2026-10-27)", () => {
+  it("paints a prompt in the light theme the feed's --bg halfway to --sidebar-base (owner request, 2026-10-27)", () => {
     // Arrange
     const root = declarationsOf(":root") ?? "";
     // Act
-    const [bg, sidebar] = [rgbOf(root, "--bg"), rgbOf(root, "--sidebar-bg")];
+    const [bg, sidebar] = [rgbOf(root, "--bg"), rgbOf(root, "--sidebar-base")];
     const user = rgbOf(root, "--user");
 
     // Assert
@@ -4049,7 +4050,7 @@ describe("the dark theme's iMessage fills (owner ruling, 2026-09-27)", () => {
     const block = darkThemeBlock();
 
     // Act
-    const [rail, feed] = [luminance(rgbOf(block, "--sidebar-bg")), luminance(rgbOf(block, "--bg"))];
+    const [rail, feed] = [luminance(rgbOf(block, "--sidebar-base")), luminance(rgbOf(block, "--bg"))];
 
     // Assert
     expect(rail).toBeGreaterThan(feed);
@@ -4057,7 +4058,7 @@ describe("the dark theme's iMessage fills (owner ruling, 2026-09-27)", () => {
 
   it.each([
     [".tool-card", "--tool-card-bg"],
-    [".pfooter", "--rail-bg"],
+    [".pfooter", "--sidebar-ground"],
     [".merge-strip", "--tool-card-bg"],
   ])("fills %s with %s", (selector, token) => {
     // Arrange / Act
@@ -4068,7 +4069,7 @@ describe("the dark theme's iMessage fills (owner ruling, 2026-09-27)", () => {
     expect(rule?.declarations).toMatch(new RegExp(`background:\\s*var\\(${token}\\)`));
   });
 
-  it("paints the footer's own box from --rail-bg alone, so it always matches the sidebar (owner request, 2026-10-28)", () => {
+  it("paints the footer's own box from --sidebar-ground alone, so it always matches the sidebar (owner request, 2026-10-28)", () => {
     // Arrange — every rule that paints the footer box itself.
     const painting = rulesOf(stylesheet).filter(
       (r) => r.selectors.some((sel) => /(?:^|[\s>])\.pfooter(?![-\w])[^\s>+~]*$/.test(sel)) && /(^|;)\s*background(?:-color)?\s*:/.test(r.declarations),
@@ -4076,7 +4077,7 @@ describe("the dark theme's iMessage fills (owner ruling, 2026-09-27)", () => {
     // Act
     const grounds = painting.map((r) => /background(?:-color)?\s*:\s*([^;]+);/.exec(r.declarations)?.[1]?.trim());
     // Assert
-    expect([painting.length > 0, grounds.every((ground) => ground === "var(--rail-bg)")]).toEqual([true, true]);
+    expect([painting.length > 0, grounds.every((ground) => ground === "var(--sidebar-ground)")]).toEqual([true, true]);
   });
 
   it("gives a merge bubble no fill of its own, so it wears the tool card's (owner request, 2026-10-24)", () => {
@@ -4534,42 +4535,65 @@ describe("the tool card's command grey", () => {
   });
 
   // Emacs's input window is the host-native composer, so its
-  // `agent-repl-input-background' (lisp/input.el) wears this same color.
-  // Neither suite may read the other's file, so lisp/test-input.el pins it too.
-  it("defines the dark theme's composer as Emacs's input background, #1a1a1a", () => {
+  // `agent-repl-input-background' (lisp/input.el) wears the dark shared
+  // ground. Neither suite may read the other's file, so lisp/test-input.el
+  // pins #171717 too.
+  it("defines the dark theme's shared ground as Emacs's input background, #171717", () => {
     // Arrange
-    const block = darkThemeBlock();
+    const mix = /--sidebar-ground:\s*color-mix\(in srgb,\s*var\(--sidebar-base\)\s*([\d.]+)%,\s*#([0-9a-fA-F]{6})\)/.exec(
+      withoutBlockComments(declarationsOf(":root") ?? ""),
+    );
+    if (mix === null) throw new Error("--sidebar-ground is not a color-mix of --sidebar-base");
+    const share = Number(mix[1]) / 100;
+    const other = rgbOf(`--other: #${mix[2]};`, "--other");
+    const base = rgbOf(darkThemeBlock(), "--sidebar-base");
 
-    // Act
-    const got = themeRgbOf(block, "--composer-bg");
+    // Act — srgb color-mix, each channel rounded to 8 bits as WebKit paints it.
+    const got = [0, 1, 2].map((i) => Math.round(share * base[i] + (1 - share) * other[i]));
 
     // Assert
-    expect(got).toEqual([0x1a, 0x1a, 0x1a]);
+    expect(got).toEqual([0x17, 0x17, 0x17]);
   });
 
-  // The composer wears the sidebar's ground in both themes (owner request,
-  // 2026-11-02), as a reference so the two can never drift.
-  it.each(THEME_BLOCKS)("declares the %s theme's composer as var(--sidebar-bg)", (_theme, blockOf) => {
+  // THE ONE SHARED GROUND (owner request, 2026-11-02): every visible surface of
+  // the sidebar, the footer and both composers paint --sidebar-ground, so no
+  // surface of the sidebar can differ from the composer.
+  it.each([
+    ["the sidebar page", sidebarPageStylesheet, "html.agent-repl-sidebar body"],
+    ["the rail", stylesheet, "#ws-sidebar"],
+    ["a subsection's header band", stylesheet, "#ws-sidebar .sb-subsection-head"],
+    ["the footer", stylesheet, ".pfooter"],
+    ["the shell composer", stylesheet, "#composer-input"],
+    ["a bubble's composer", stylesheet, ".composer-input"],
+  ] as const)("paints %s with var(--sidebar-ground)", (_surface, css, selector) => {
     // Arrange
-    const block = blockOf();
+    const painting = rulesOf(css).filter((r) => r.selectors.includes(selector) && /(^|;)\s*background(?:-color)?\s*:/.test(r.declarations));
 
     // Act
-    const got = themeValueOf(block, "--composer-bg");
+    const grounds = painting.map((r) => /background(?:-color)?\s*:\s*([^;]+);/.exec(withoutBlockComments(r.declarations))?.[1]?.trim());
 
     // Assert
-    expect(got).toBe("var(--sidebar-bg)");
+    expect(grounds).toEqual(["var(--sidebar-ground)"]);
+  });
+
+  it("leaves no --composer-bg alias that could point the composer at another ground", () => {
+    // Arrange / Act
+    const aliases = withoutBlockComments(stylesheet).match(/--composer-bg\b/g) ?? [];
+
+    // Assert
+    expect(aliases).toEqual([]);
   });
 
   // The Settings page (lisp/settings.el) is grounded with the dark sidebar's
   // color, and the help bar's buttons are filled a little darker than the
   // sidebar's selected row. Neither suite may read the other's file, so the
   // lisp suites pin both colors too.
-  it("defines the dark theme's sidebar as the Settings page's ground, #1a1a1a", () => {
+  it("defines the dark theme's sidebar base as the Settings page's ground, #1a1a1a", () => {
     // Arrange
     const block = darkThemeBlock();
 
     // Act
-    const got = rgbOf(block, "--sidebar-bg");
+    const got = rgbOf(block, "--sidebar-base");
 
     // Assert
     expect(got).toEqual([0x1a, 0x1a, 0x1a]);
@@ -4579,7 +4603,7 @@ describe("the tool card's command grey", () => {
     // Arrange
     const block = darkThemeBlock();
     const card = rgbOf(block, "--card");
-    const ground = rgbOf(block, "--sidebar-bg");
+    const ground = rgbOf(block, "--sidebar-base");
     const share = 0.69;
 
     // Act
@@ -4587,7 +4611,7 @@ describe("the tool card's command grey", () => {
 
     // Assert
     expect(withoutBlockComments(stylesheet)).toContain(
-      "--row-highlight-tint: color-mix(in srgb, var(--card) 69%, var(--sidebar-bg));",
+      "--row-highlight-tint: color-mix(in srgb, var(--card) 69%, var(--sidebar-base));",
     );
     expect(tint).toEqual([0x26, 0x26, 0x26]);
   });
@@ -6128,8 +6152,8 @@ describe("the repository's subsections and the drag", () => {
   });
 
   it("lays a subsection's header row on a band slightly darker than the rail", () => {
-    expect(declarationsOf("#ws-sidebar .sb-subsection-head")).toMatch(/background:\s*var\(--rail-bg\)/);
-    expect(declarationsOf("#ws-sidebar")).toMatch(/background:\s*var\(--rail-bg\)/);
+    expect(declarationsOf("#ws-sidebar .sb-subsection-head")).toMatch(/background:\s*var\(--sidebar-ground\)/);
+    expect(declarationsOf("#ws-sidebar")).toMatch(/background:\s*var\(--sidebar-ground\)/);
   });
 
   it("draws the name popup's input with a hairline border and no focus ring", () => {

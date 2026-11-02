@@ -13,7 +13,7 @@
 ;; right and below) and, where a frame has no divider, in
 ;; `vertical-border'.  Both are frame-level faces no buffer can remap, so
 ;; the frame's own copy of each is set to `agent-repl-input-background',
-;; the composer's color and the dark sidebar's `--sidebar-bg'.  The dividers keep their
+;; the composer's color and the dark sidebar's `--sidebar-ground'.  The dividers keep their
 ;; width, so a window edge is still grabbed and dragged where it was.
 ;;
 ;; THE FRAME'S OWN COLORS ARE KEPT IN THE MARK.  A face set with no frame

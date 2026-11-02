@@ -14,7 +14,7 @@ html.agent-repl-sidebar body {
   width: 100%;
   height: 100%;
   overflow: hidden;
-  background: var(--sidebar-bg);
+  background: var(--sidebar-ground);
 }
 
 html.agent-repl-sidebar body {
@@ -36,13 +36,13 @@ html.agent-repl-sidebar #ws-sidebar .sb-version {
   cursor: pointer;
 }
 html.agent-repl-sidebar #ws-sidebar .sb-version.notices-ok {
-  color: color-mix(in srgb, var(--ok) 45%, var(--sidebar-bg));
+  color: color-mix(in srgb, var(--ok) 45%, var(--sidebar-base));
 }
 html.agent-repl-sidebar #ws-sidebar .sb-version.notices-warn {
-  color: color-mix(in srgb, var(--async) 55%, var(--sidebar-bg));
+  color: color-mix(in srgb, var(--async) 55%, var(--sidebar-base));
 }
 html.agent-repl-sidebar #ws-sidebar .sb-version.notices-error {
-  color: color-mix(in srgb, var(--err) 55%, var(--sidebar-bg));
+  color: color-mix(in srgb, var(--err) 55%, var(--sidebar-base));
 }
 
 /* THE VERSION'S NOTICES: a detail panel under the version, as its memory
