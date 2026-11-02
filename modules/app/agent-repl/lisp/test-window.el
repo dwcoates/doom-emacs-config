@@ -858,30 +858,51 @@ persp-mode activated, and \"main\"/\"none\" own no durable log sink."
 (defvar agent-repl-window-test--debug nil
   "Debug records the stubbed rung received during a capture.")
 
+(defconst agent-repl-window-test--unfloored-fraction 0.9
+  "A composer fraction tall enough that the batch frame clears the floor.
+The batch frame is short, so the default fraction plus the default
+offset lands on `agent-repl-window--input-height-minimum', which would
+hide the offset arithmetic the cases below assert.")
+
+(defun agent-repl-window-test--unfloored-height ()
+  "The composer height the fraction and offset alone give the selected frame."
+  (+ (round (* agent-repl-input-height-fraction
+               (window-total-height (frame-root-window))))
+     agent-repl-input-height-line-offset))
+
+(ert-deftest agent-repl-window-test-unfloored-fraction-clears-the-floor ()
+  "The shared fraction leaves the batch frame's height above the floor."
+  (agent-repl-window-test--with-temp-frame
+    (let ((agent-repl-input-height-fraction agent-repl-window-test--unfloored-fraction))
+      (should (> (agent-repl-window-test--unfloored-height)
+                 agent-repl-window--input-height-minimum)))))
+
 (ert-deftest agent-repl-window-test-input-height-is-the-declared-fraction-of-the-main-area ()
   "The composer height is the declared fraction of the main area plus the offset."
   (agent-repl-window-test--with-temp-frame
     (agent-repl-window-test--with-fresh-height-cache
       ;; Act
-      (let ((lines (agent-repl-window--input-height)))
+      (let* ((agent-repl-input-height-fraction agent-repl-window-test--unfloored-fraction)
+             (lines (agent-repl-window--input-height)))
         ;; Assert
         (should (= lines
-                   (+ (round (* agent-repl-input-height-fraction
-                                (window-total-height (frame-root-window))))
-                      agent-repl-input-height-line-offset)))))))
+                   (agent-repl-window-test--unfloored-height)))))))
 
-(ert-deftest agent-repl-window-test-input-height-default-is-two-lines-under-the-fraction ()
-  "By default the composer is exactly two lines shorter than the fraction alone."
+(ert-deftest agent-repl-window-test-input-height-default-is-three-lines-under-the-fraction ()
+  "By default the composer is exactly three lines shorter than the fraction alone.
+The fraction is raised so the batch frame's short height leaves the
+offset clear of the floor (`agent-repl-window--input-height-minimum')."
   (agent-repl-window-test--with-temp-frame
     (agent-repl-window-test--with-fresh-height-cache
       ;; Arrange
-      (let ((unadjusted (let ((agent-repl-input-height-line-offset 0))
+      (let* ((agent-repl-input-height-fraction agent-repl-window-test--unfloored-fraction)
+             (unadjusted (let ((agent-repl-input-height-line-offset 0))
                           (agent-repl-window--input-height))))
         (set-frame-parameter nil agent-repl-window--input-height-parameter nil)
         ;; Act
         (let ((lines (agent-repl-window--input-height)))
           ;; Assert
-          (should (= lines (- unadjusted 2))))))))
+          (should (= lines (- unadjusted 3))))))))
 
 (ert-deftest agent-repl-window-test-input-height-minimum-is-two-body-lines ()
   "The floor is two lines, every one of them body: the composer has no mode line."
@@ -923,12 +944,11 @@ workspace mounted while the frame carried something else came out short."
       (set-frame-parameter nil agent-repl-window--input-height-parameter
                            (cons (+ 1000 (frame-height)) 99))
       ;; Act
-      (let ((lines (agent-repl-window--input-height)))
+      (let* ((agent-repl-input-height-fraction agent-repl-window-test--unfloored-fraction)
+             (lines (agent-repl-window--input-height)))
         ;; Assert
         (should (= lines
-                   (+ (round (* agent-repl-input-height-fraction
-                                (window-total-height (frame-root-window))))
-                      agent-repl-input-height-line-offset)))))))
+                   (agent-repl-window-test--unfloored-height)))))))
 
 (ert-deftest agent-repl-window-test-input-height-floors-at-the-minimum ()
   "A fraction too small to leave a usable composer is floored, not honored."

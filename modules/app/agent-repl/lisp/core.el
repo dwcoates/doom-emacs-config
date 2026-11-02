@@ -4392,13 +4392,15 @@ BUF may be a buffer object or a name string."
 ;; Moved here from the now-deleted overlay.el, which otherwise existed
 ;; only for the vterm hide-overlay / font-scale / color-advice machinery.
 ;; This survives because `agent-repl-input-mode' (input.el) calls
-;; `agent-repl--set-buffer-background' to tint the input composer.
+;; `agent-repl--set-buffer-background' to tint the input composer, and
+;; minibuffer-ground.el to tint the minibuffer and echo area alike.
 
 (defun agent-repl--set-buffer-background (color)
   "Set default and fringe background to COLOR in the current buffer.
-COLOR is any Emacs color spec, e.g. a #rrggbb hex string."
-  (face-remap-add-relative 'default :background color)
-  (face-remap-add-relative 'fringe :background color))
+COLOR is any Emacs color spec, e.g. a #rrggbb hex string.  Return the
+two remapping cookies, for `face-remap-remove-relative' to take back."
+  (list (face-remap-add-relative 'default :background color)
+        (face-remap-add-relative 'fringe :background color)))
 
 ;;; Harness-injected (meta) prompt spans
 ;;
