@@ -38,10 +38,10 @@
 import { drawFeedEarlierSteps } from "./rows/earlier-steps.js";
 import {
   FEED_LOAD_MORE_LABEL,
-  createWalkTrigger,
+  createWalkFaces,
   drawWalkControl,
-  setWalkLoading,
 } from "./walk-control.js";
+import type { Control } from "../control.js";
 import { log } from "../log.js";
 import { createListeners } from "../listeners.js";
 import { SELECTED_ROW_ATTRIBUTE, syncSelectedEntry } from "./selected-entry.js";
@@ -319,6 +319,11 @@ export function createFeedController(
   // THE RE-ANCHORS IN FLIGHT (reanchorAtCompaction): "load previous page"
   // stays disabled while one runs, so the old walk is never continued.
   let reanchoring = 0;
+  // THE OLDER-PAGE WALKS ASKED FOR AND NOT YET LANDED (walkOlder): counted from
+  // the ask, not from when the queued step starts, so every face of the walk
+  // is disabled the moment one is asked for and a second sighting in the same
+  // moment cannot queue a second page.
+  let olderPending = 0;
 
   opts.host.setAttribute(
     "data-feed",
@@ -377,11 +382,13 @@ export function createFeedController(
   };
 
   loadMore.addEventListener("click", () => {
-    void guardMalformed(opts.ctx, "feed.load-older", serializeWalk(loadOlder));
+    walkOlder(loadMore, "feed.load-older");
   });
-  // THE CONTROL LOADS ITS PAGE ON SIGHT (walk-control.ts): scrolling it into
+  // EVERY FACE OF THE WALK LOADS ITS PAGE ON SIGHT (walk-control.ts): the
+  // control above and each turn's earlier-steps indicator. Scrolling one into
   // view clicks it, and a landed page rearms the watch.
-  const walkTrigger = createWalkTrigger(loadMore, feedName());
+  const walkFaces = createWalkFaces(feedName());
+  walkFaces.add(loadMore);
 
   const bodyHandle = opts.body(bodyMount, subfeed, opts.bodyContext);
 
@@ -708,7 +715,7 @@ export function createFeedController(
     truncateAtSeparation(row, id);
     if (separationBoundsFeed(row) && !separationEndsHistory(row)) {
       reanchoring += 1;
-      setWalkLoading(loadMore, true);
+      walkFaces.setLoading(true);
       void guardMalformed(
         opts.ctx,
         "feed.walk-reanchor",
@@ -1643,8 +1650,22 @@ export function createFeedController(
       case "commandRefused":
         return opts.renderers.commandRefused(arm.value, rc);
       case "earlierSteps":
-        return drawFeedEarlierSteps(() => {
-          void guardMalformed(opts.ctx, "feed.earlier-steps", serializeWalk(loadOlder));
+        return drawFeedEarlierSteps({
+          run: (indicator) => {
+            // AT THE FEED'S START there is no older page to ask for: the walk
+            // has loaded the steps, and the daemon's removal of this row is on
+            // its way. Asking would only answer the start again, in a loop
+            // for as long as the indicator stays in view.
+            if (walkEdge === "atStart") {
+              log.debug("an earlier-steps indicator was sighted with the feed at its start; nothing older is asked for", {
+                operation: "feed.earlier-steps-at-start",
+                context: { feed: feedName(), turn: row.turn?.value ?? "none" },
+              });
+              return;
+            }
+            walkOlder(indicator, "feed.earlier-steps");
+          },
+          attach: (indicator) => walkFaces.add(indicator),
         });
       case "mergeTab":
         // INSIDE a merge bubble the strip consumes these and this path is never
@@ -1764,22 +1785,50 @@ export function createFeedController(
   // ---- the walk ---------------------------------------------------------
 
   /**
-   * Ask for the page above the oldest row this feed holds; a feed holding no
-   * row (its opening was served none) asks for the newest page instead.
+   * THE ONE WAY A FACE OF THE WALK ASKS FOR THE PAGE ABOVE: the "load previous
+   * page" control and every earlier-steps indicator call it, AT being the face
+   * that asked (its refusal is drawn beside it) and OPERATION naming the face
+   * to the malformed-answer guard. Every face is disabled at once, before the
+   * queued step runs.
    */
-  async function loadOlder(): Promise<void> {
+  function walkOlder(at: Control, operation: string): void {
+    olderPending += 1;
+    walkFaces.setLoading(true);
+    void guardMalformed(opts.ctx, operation, serializeWalk(() => loadOlder(at)));
+  }
+
+  /**
+   * Ask for the page above the oldest row this feed holds; a feed holding no
+   * row (its opening was served none) asks for the newest page instead. A
+   * refusal is drawn beside AT, the face that asked, and every face rests,
+   * whatever the answer was (an unreadable one included).
+   */
+  async function loadOlder(at: Control): Promise<void> {
     const oldest = oldestHeld();
     log.info("walking one page older", {
       operation: "feed.load-older",
-      context: { feed: feedName(), oldest_held: oldest?.key ?? "none" },
+      context: {
+        feed: feedName(),
+        oldest_held: oldest?.key ?? "none",
+        asked_by: at === loadMore ? "load previous page" : "earlier steps",
+      },
     });
     clearRefusals();
-    setWalkLoading(loadMore, true);
-    const page = await askFeedPage(oldest === undefined ? { case: "first" } : { case: "olderThan", oldestHeld: oldest });
-    releaseLoadMore();
+    let page: FeedPage | null;
+    try {
+      page = await askFeedPage(
+        oldest === undefined ? { case: "first" } : { case: "olderThan", oldestHeld: oldest },
+        (arm, text) => {
+          at.after(refusalAt(arm, text));
+        },
+      );
+    } finally {
+      olderPending -= 1;
+      releaseLoadMore();
+    }
     if (page === null) return;
     applyPage(page, "prepend");
-    walkTrigger.rearm();
+    walkFaces.rearm();
   }
 
   /**
@@ -1811,6 +1860,12 @@ export function createFeedController(
       case "success":
         return result.value;
       case "error":
+        // A transport failure is logged by callUnary; a refusal the daemon
+        // answered is logged here, once, by the layer that asked.
+        log.info(`GetFeedPage was refused: ${result.value.cause.case ?? "unset"}`, {
+          operation: "feed.page-refused",
+          context: { feed: feedName(), arm: result.value.cause.case ?? "unset" },
+        });
         refused("error", "older pages are not available");
         return null;
       default:
@@ -1819,11 +1874,11 @@ export function createFeedController(
   }
 
   /**
-   * Enable "load previous page" again unless a walk to a row or a re-anchor
-   * still holds it.
+   * Rest every face of the walk again unless an older page, a walk to a row or
+   * a re-anchor still holds it.
    */
   function releaseLoadMore(): void {
-    setWalkLoading(loadMore, throughRunning > 0 || reanchoring > 0);
+    walkFaces.setLoading(olderPending > 0 || throughRunning > 0 || reanchoring > 0);
   }
 
   /**
@@ -1859,7 +1914,7 @@ export function createFeedController(
           operation: "feed.walk-reanchored",
           context: { feed: feedName(), row: divider, edge: walkEdge ?? "none" },
         });
-        walkTrigger.rearm();
+        walkFaces.rearm();
         return;
       case "error":
         drawPageError(page.value);
@@ -1904,7 +1959,7 @@ export function createFeedController(
     });
     clearRefusals();
     throughRunning += 1;
-    setWalkLoading(loadMore, true);
+    walkFaces.setLoading(true);
     let outcome: LoadThroughOutcome;
     try {
       outcome = await consumeLoadThrough(target);
@@ -1912,7 +1967,7 @@ export function createFeedController(
       throughRunning -= 1;
       releaseLoadMore();
     }
-    if (outcome === "reached") walkTrigger.rearm();
+    if (outcome === "reached") walkFaces.rearm();
     return outcome;
   }
 
@@ -2003,6 +2058,11 @@ export function createFeedController(
   function clearRefusals(): void {
     for (const stale of childrenMatching(opts.host, ".refusal"))
       stale.remove();
+    // A REFUSAL DRAWN BESIDE AN EARLIER-STEPS INDICATOR stands inside its row.
+    for (const face of walkFaces.controls()) {
+      const beside = face.nextElementSibling;
+      if (beside?.matches(".refusal") === true) beside.remove();
+    }
   }
 
   /** Keep the tail on screen while a named cause's follow stands. */
@@ -2087,7 +2147,7 @@ export function createFeedController(
   function dispose(): void {
     if (disposed) return;
     disposed = true;
-    walkTrigger.dispose();
+    walkFaces.dispose();
     bodyHandle.dispose();
     clearRows();
     listeners.clear();

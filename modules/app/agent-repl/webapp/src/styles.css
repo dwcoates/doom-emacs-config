@@ -6064,16 +6064,17 @@ bubble-body.bubble-body { display: block; }
     animation-duration: 1.4s;
   }
 }
-/* A TURN'S EARLIER STEPS ON AN OLDER PAGE: the load control's look, under the
-   prompt it belongs to (feed/rows/earlier-steps.ts). */
+/* A TURN'S EARLIER STEPS ON AN OLDER PAGE: the walk control's own spinner,
+   centered under the prompt it belongs to, and nothing else: no band, no
+   border, no label (owner request, 2026-11-01; feed/rows/earlier-steps.ts).
+   The spinner is a `.feed-load-more` control, so it turns, rests and slows
+   under reduced motion by the rules above. A refusal stands beside it. */
 .feed-earlier-steps {
-  display: block;
-  color: var(--muted);
-  cursor: pointer;
-  font-size: 0.9em;
-  padding: 2px 0;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 0.4rem;
 }
-.feed-earlier-steps:hover { text-decoration: underline; }
 
 /* The breadcrumb header a nested page draws — ONLY when the trail is non-empty
    (R6): expansion is inline, so this is context, never navigation. */
