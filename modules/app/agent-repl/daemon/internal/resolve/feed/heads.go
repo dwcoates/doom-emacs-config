@@ -101,7 +101,7 @@ func (r *resolver) replayHead(s *wsState, agent *conversationv1.AgentId, head *c
 	if head.GetBetween() == nil {
 		// EVERY HEAD SAYS WHETHER STEPS SIT BETWEEN by contract
 		// (HistoryTurnHead.between). Drawing it would mean guessing whether a
-		// fold belongs under it, so it is not drawn: its turn's entries are
+		// loading row belongs under it, so it is not drawn: its turn's entries are
 		// withheld and the walk completes them, as on a page without heads.
 		log.Error("daemon.feed.turn_head_no_between",
 			"a page's turn head says nothing of whether steps sit between it and the page; it was not drawn",
@@ -148,7 +148,7 @@ func (r *resolver) drawEarlierSteps(s *wsState, head *conversationv1.HistoryEntr
 	}
 	load.book.gaps[turn] = gapRow{feed: at.feed, id: row.GetId().GetValue()}
 	r.logger(s.id).Info("daemon.feed.earlier_steps_drawn",
-		"a turn's prompt was drawn from a page's turn heads; its earlier steps are on an older page, so a fold stands under it until the walk loads them",
+		"a turn's prompt was drawn from a page's turn heads; its earlier steps are on an older page, so a loading row stands under it until the walk loads them",
 		dlog.Context{"feed": load.feedKey, "turn": string(turn), "row": row.GetId().GetValue()})
 }
 
@@ -168,6 +168,6 @@ func (r *resolver) closeGap(s *wsState, at *conversationv1.HistoryEntryAt, load 
 	delete(load.book.gaps, turn)
 	removed := r.retire(s, gap.feed, gap.id)
 	r.logger(s.id).Info("daemon.feed.earlier_steps_removed",
-		"the walk loaded the page holding a turn's prompt, so every earlier step of it is loaded and its fold was removed",
+		"the walk loaded the page holding a turn's prompt, so every earlier step of it is loaded and its loading row was removed",
 		dlog.Context{"feed": load.feedKey, "turn": string(turn), "row": gap.id, "stood": removed})
 }
