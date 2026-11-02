@@ -24,8 +24,8 @@
  * thing a fresh directory makes different, its path, replaced by
  * {@link ROOT_TOKEN} (and its vendor slug by {@link ROOT_SLUG_TOKEN}).
  */
-import { realpathSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { join, relative, resolve } from "node:path";
+import { realpathSync, readFileSync } from "node:fs";
+import { relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { toJson } from "@bufbuild/protobuf";
@@ -35,6 +35,7 @@ import { conversationv1, storev1 } from "../../src/proto.js";
 import type { PersistEntry } from "../../src/store/persistence.js";
 import { driveEngineScenario, type EnginePolicy } from "./golden-engine.js";
 import { HARNESS_NOW_MS } from "./harness.js";
+import { filesUnder } from "../files-under.js";
 
 /** Where the goldens live, under the module's shared testdata. */
 export const GOLDENS_DIR = resolve(fileURLToPath(new URL(".", import.meta.url)), "../../../../../testdata/scenario-goldens");
@@ -148,14 +149,9 @@ function substitution(root: string): (text: string) => string {
 /** Every file under root, keyed by its substituted relative path. */
 function readTree(root: string, substitute: (text: string) => string): Map<string, string> {
   const tree = new Map<string, string>();
-  const walk = (dir: string): void => {
-    for (const name of readdirSync(dir).sort()) {
-      const path = join(dir, name);
-      if (statSync(path).isDirectory()) walk(path);
-      else tree.set(substitute(relative(root, path)), substitute(readFileSync(path, "utf8")));
-    }
-  };
-  walk(root);
+  for (const path of filesUnder(root)) {
+    tree.set(substitute(relative(root, path)), substitute(readFileSync(path, "utf8")));
+  }
   return tree;
 }
 

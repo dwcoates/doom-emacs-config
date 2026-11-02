@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { mkdtempSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -11,6 +11,7 @@ import {
 } from "../src/vendor-guard.js";
 import { createFakeQuery } from "../src/fake/index.js";
 import { driveScenario } from "./fake/harness.js";
+import { filesUnder } from "./files-under.js";
 
 // test/setup.ts sets the variable for the whole suite; the "allowed" cases
 // below clear it and this restores the suite-wide posture afterwards.
@@ -124,13 +125,8 @@ describe("the chokepoint is structural", () => {
     // Arrange
     const srcDir = fileURLToPath(new URL("../src", import.meta.url));
     const guard = path.join(srcDir, "vendor-guard.ts");
-    const walk = (dir: string): string[] =>
-      readdirSync(dir).flatMap((entry) => {
-        const full = path.join(dir, entry);
-        return statSync(full).isDirectory() ? walk(full) : [full];
-      });
     // Act
-    const offenders = walk(srcDir).filter(
+    const offenders = filesUnder(srcDir).filter(
       (file) =>
         file !== guard &&
         file.endsWith(".ts") &&
