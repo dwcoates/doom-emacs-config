@@ -50,6 +50,8 @@ type cliClient struct {
 	registered *agentreplv1.RegisterRepositoryResponse
 	// remote answers UpdateRemoteControlMode, a success when nil.
 	remote *agentreplv1.UpdateRemoteControlModeResponse
+	// prompted answers SubmitPrompt, an empty answer when nil.
+	prompted *agentreplv1.SubmitPromptResponse
 }
 
 func (c *cliClient) RegisterRepository(_ context.Context, req *connect.Request[agentreplv1.RegisterRepositoryRequest]) (*connect.Response[agentreplv1.RegisterRepositoryResponse], error) {
@@ -149,6 +151,9 @@ func (c *cliClient) ChangeWorkspaceLinks(_ context.Context, req *connect.Request
 }
 
 func (c *cliClient) SubmitPrompt(_ context.Context, req *connect.Request[agentreplv1.SubmitPromptRequest]) (*connect.Response[agentreplv1.SubmitPromptResponse], error) {
+	if c.prompted != nil {
+		return connect.NewResponse(c.prompted), c.record(req.Msg)
+	}
 	return connect.NewResponse(&agentreplv1.SubmitPromptResponse{}), c.record(req.Msg)
 }
 
