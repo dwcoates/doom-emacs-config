@@ -916,6 +916,7 @@ describe("forkSessionAnswered", () => {
     { kind: "record_absent" as const, arm: "recordAbsent" },
     { kind: "parent_book_unknown" as const, arm: "parentBookUnknown" },
     { kind: "vendor_failed" as const, arm: "vendorFailed" },
+    { kind: "import_failed" as const, arm: "importFailed" },
   ])("answers $kind as the $arm failure", ({ kind, arm }) => {
     // Act.
     const response = failures.forkSessionAnswered({ kind, detail: "d" });

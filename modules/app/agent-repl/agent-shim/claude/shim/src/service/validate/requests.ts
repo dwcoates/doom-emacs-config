@@ -401,6 +401,9 @@ export function validateForkSessionRequest(request: shimv1.ForkSessionRequest): 
     if (request.parentWorkspaceDir === "") {
       throw invalidArgument("fork_session.parent_workspace_dir is empty; the parent's transcript is filed under a directory");
     }
+    if (request.parentAccountRoot === "") {
+      throw invalidArgument("fork_session.parent_account_root is empty; the parent's transcript is filed under an account root");
+    }
     validateForkPoint(request.point, "fork_session.point");
   } catch (err) {
     refuse("ForkSession", err);

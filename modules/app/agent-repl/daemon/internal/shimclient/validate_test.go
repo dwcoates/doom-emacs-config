@@ -739,18 +739,19 @@ func TestValidateForkSessionRequest(t *testing.T) {
 		{name: "nil", req: nil, field: "ForkSessionRequest"},
 		{name: "no parent session", req: &shimv1.ForkSessionRequest{ParentWorkspaceDir: "/p", Point: whole}, field: "ForkSessionRequest.parent_vendor_session_id"},
 		{name: "no parent dir", req: &shimv1.ForkSessionRequest{ParentVendorSessionId: "v", Point: whole}, field: "ForkSessionRequest.parent_workspace_dir"},
-		{name: "no point", req: &shimv1.ForkSessionRequest{ParentVendorSessionId: "v", ParentWorkspaceDir: "/p"}, field: "ForkSessionRequest.point"},
-		{name: "no extent", req: &shimv1.ForkSessionRequest{ParentVendorSessionId: "v", ParentWorkspaceDir: "/p", Point: &shimv1.ForkPoint{}}, field: "ForkSessionRequest.point.extent"},
+		{name: "no parent account root", req: &shimv1.ForkSessionRequest{ParentVendorSessionId: "v", ParentWorkspaceDir: "/p", Point: whole}, field: "ForkSessionRequest.parent_account_root"},
+		{name: "no point", req: &shimv1.ForkSessionRequest{ParentVendorSessionId: "v", ParentWorkspaceDir: "/p", ParentAccountRoot: "/a"}, field: "ForkSessionRequest.point"},
+		{name: "no extent", req: &shimv1.ForkSessionRequest{ParentVendorSessionId: "v", ParentWorkspaceDir: "/p", ParentAccountRoot: "/a", Point: &shimv1.ForkPoint{}}, field: "ForkSessionRequest.point.extent"},
 		{
 			name: "a cut naming no record",
-			req: &shimv1.ForkSessionRequest{ParentVendorSessionId: "v", ParentWorkspaceDir: "/p", Point: &shimv1.ForkPoint{
+			req: &shimv1.ForkSessionRequest{ParentVendorSessionId: "v", ParentWorkspaceDir: "/p", ParentAccountRoot: "/a", Point: &shimv1.ForkPoint{
 				Extent: &shimv1.ForkPoint_ThroughRecord{ThroughRecord: &shimv1.ForkPointThroughRecord{}},
 			}},
 			field: "ForkSessionRequest.point.through_record.record",
 		},
 		{
 			name: "a cut before no record",
-			req: &shimv1.ForkSessionRequest{ParentVendorSessionId: "v", ParentWorkspaceDir: "/p", Point: &shimv1.ForkPoint{
+			req: &shimv1.ForkSessionRequest{ParentVendorSessionId: "v", ParentWorkspaceDir: "/p", ParentAccountRoot: "/a", Point: &shimv1.ForkPoint{
 				Extent: &shimv1.ForkPoint_BeforeRecord{BeforeRecord: &shimv1.ForkPointBeforeRecord{Record: &shimv1.ForkRecordToken{}}},
 			}},
 			field: "ForkSessionRequest.point.before_record.record",
@@ -770,7 +771,7 @@ func TestValidateForkSessionRequest(t *testing.T) {
 // TestValidateForkRequestsAcceptLegalShapes pins the shapes a fork sends.
 func TestValidateForkRequestsAcceptLegalShapes(t *testing.T) {
 	// Arrange.
-	fork := &shimv1.ForkSessionRequest{ParentVendorSessionId: "v", ParentWorkspaceDir: "/p", Point: &shimv1.ForkPoint{
+	fork := &shimv1.ForkSessionRequest{ParentVendorSessionId: "v", ParentWorkspaceDir: "/p", ParentAccountRoot: "/a", Point: &shimv1.ForkPoint{
 		Extent: &shimv1.ForkPoint_ThroughRecord{ThroughRecord: &shimv1.ForkPointThroughRecord{Record: &shimv1.ForkRecordToken{Value: "r"}}},
 	}}
 

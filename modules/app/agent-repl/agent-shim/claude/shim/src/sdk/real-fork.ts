@@ -8,6 +8,8 @@
  *
  * The vendor reads the parent from, and writes the fork into, the account root
  * this process runs under (`CLAUDE_CONFIG_DIR`), beside the parent's transcript.
+ * A parent filed under another account is imported into this root first
+ * (engine/fork-session.ts `importParent`).
  */
 import type { VendorForkSpec } from "../engine/fork-session.js";
 import { importRealSDK } from "../vendor-guard.js";

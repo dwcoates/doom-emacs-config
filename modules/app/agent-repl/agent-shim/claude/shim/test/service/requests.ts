@@ -208,6 +208,7 @@ export function forkSessionRequest(): shimv1.ForkSessionRequest {
   return create(shimv1.ForkSessionRequestSchema, {
     parentVendorSessionId: "parent-session",
     parentWorkspaceDir: "/repo/parent",
+    parentAccountRoot: "/accounts/parent",
     point: create(shimv1.ForkPointSchema, { extent: { case: "whole", value: create(shimv1.ForkPointWholeSchema, {}) } }),
   });
 }

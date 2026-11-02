@@ -1,12 +1,14 @@
 import { create } from "@bufbuild/protobuf";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 import {
   forkableRecords,
   forkSession,
+  importParent,
   recordOfToken,
+  removeImport,
   openerPlace,
   resolveUpTo,
   type ForkVendorSession,
@@ -20,7 +22,7 @@ import { shimv1 } from "../../src/proto.js";
 import { logRecordsSince, logSinkMark } from "../log-records.js";
 import { testTempDir } from "../temp-dir.js";
 import { sequentialIds, writeTranscript } from "../vendor-transcript.js";
-import { transcriptPath } from "../../src/engine/vendor-paths.js";
+import { projectDir, transcriptPath } from "../../src/engine/vendor-paths.js";
 
 const PARENT_ID = "11111111-1111-4111-8111-111111111111";
 const PARENT_DIR = "/repo/parent";
@@ -195,7 +197,7 @@ describe("forkSession", () => {
     // Act
     const outcome = await forkSession(
       { configDir, stateDir, cwd: CHILD_DIR, forkVendorSession: fork },
-      { parentVendorSessionId: PARENT_ID, parentWorkspaceDir: PARENT_DIR, point: throughRecord("a1") },
+      { parentVendorSessionId: PARENT_ID, parentWorkspaceDir: PARENT_DIR, parentAccountRoot: configDir, point: throughRecord("a1") },
     );
 
     // Assert
@@ -223,7 +225,7 @@ describe("forkSession", () => {
     // Act
     const outcome = await forkSession(
       { configDir, stateDir, cwd: CHILD_DIR, forkVendorSession: fork },
-      { parentVendorSessionId: PARENT_ID, parentWorkspaceDir: PARENT_DIR, point: throughRecord("send-1") },
+      { parentVendorSessionId: PARENT_ID, parentWorkspaceDir: PARENT_DIR, parentAccountRoot: configDir, point: throughRecord("send-1") },
     );
 
     // Assert
@@ -243,7 +245,7 @@ describe("forkSession", () => {
     // Act
     await forkSession(
       { configDir, stateDir, cwd: CHILD_DIR, forkVendorSession: fork },
-      { parentVendorSessionId: PARENT_ID, parentWorkspaceDir: PARENT_DIR, point: whole() },
+      { parentVendorSessionId: PARENT_ID, parentWorkspaceDir: PARENT_DIR, parentAccountRoot: configDir, point: whole() },
     );
 
     // Assert
@@ -257,7 +259,7 @@ describe("forkSession", () => {
       parent: false,
       point: whole(),
       kind: "unknown_session",
-      message: "the fork was refused: no parent transcript under this account root",
+      message: "the fork was refused: no parent transcript under the parent's account root",
       detail: "no transcript at",
     },
     {
@@ -288,7 +290,7 @@ describe("forkSession", () => {
     // Act
     const outcome = await forkSession(
       { configDir, stateDir, cwd: CHILD_DIR, forkVendorSession: fork },
-      { parentVendorSessionId: PARENT_ID, parentWorkspaceDir: PARENT_DIR, point },
+      { parentVendorSessionId: PARENT_ID, parentWorkspaceDir: PARENT_DIR, parentAccountRoot: configDir, point },
     );
 
     // Assert
@@ -312,7 +314,7 @@ describe("forkSession", () => {
     // Act
     const outcome = await forkSession(
       { configDir, stateDir, cwd: CHILD_DIR, forkVendorSession: fork },
-      { parentVendorSessionId: PARENT_ID, parentWorkspaceDir: PARENT_DIR, point: whole() },
+      { parentVendorSessionId: PARENT_ID, parentWorkspaceDir: PARENT_DIR, parentAccountRoot: configDir, point: whole() },
     );
 
     // Assert
@@ -332,7 +334,7 @@ describe("forkSession", () => {
     await expect(
       forkSession(
         { configDir, stateDir, cwd: CHILD_DIR, forkVendorSession: fork },
-        { parentVendorSessionId: PARENT_ID, parentWorkspaceDir: PARENT_DIR, point: whole() },
+        { parentVendorSessionId: PARENT_ID, parentWorkspaceDir: PARENT_DIR, parentAccountRoot: configDir, point: whole() },
       ),
     ).rejects.toThrow(/wrote no/);
   });
@@ -465,7 +467,7 @@ describe("forkSession over a compacted parent", () => {
     // Act
     const outcome = await forkSession(
       { configDir, stateDir, cwd: CHILD_DIR, forkVendorSession: fork },
-      { parentVendorSessionId: PARENT_ID, parentWorkspaceDir: PARENT_DIR, point: whole() },
+      { parentVendorSessionId: PARENT_ID, parentWorkspaceDir: PARENT_DIR, parentAccountRoot: configDir, point: whole() },
     );
 
     // Assert: every reference names a record of the fork, none the parent's.
@@ -478,5 +480,223 @@ describe("forkSession over a compacted parent", () => {
       expect(uuids.has(reference)).toBe(true);
     }
     expect(forkRecordsSince(mark)).toMatchObject([{ level: "info", context: { boundary_references_remapped: 5 } }]);
+  });
+});
+
+/** The parent's sibling session directory under `configDir`, holding one subagent transcript. */
+function writeParentSessionDir(configDir: string): string {
+  const dir = path.join(projectDir(configDir, PARENT_DIR), PARENT_ID, "subagents");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(path.join(dir, "agent-x.jsonl"), "{}\n");
+  return path.join(projectDir(configDir, PARENT_DIR), PARENT_ID);
+}
+
+describe("forkSession across account roots", () => {
+  it("imports nothing when the parent is filed under this shim's own root", async () => {
+    // Arrange
+    const { configDir, stateDir } = await fixture();
+    writeParent(configDir);
+    const fork = vi.fn<ForkVendorSession>((spec) => Promise.resolve(forkFakeSession(configDir, spec, sequentialIds())));
+    const mark = logSinkMark();
+
+    // Act: the same root, spelled with a trailing separator.
+    const outcome = await forkSession(
+      { configDir, stateDir, cwd: CHILD_DIR, forkVendorSession: fork },
+      { parentVendorSessionId: PARENT_ID, parentWorkspaceDir: PARENT_DIR, parentAccountRoot: `${configDir}/`, point: whole() },
+    );
+
+    // Assert
+    expect(outcome.kind).toBe("forked");
+    expect(existsSync(transcriptPath(configDir, PARENT_DIR, PARENT_ID))).toBe(true);
+    expect(forkRecordsSince(mark).map((record) => record.message)).toEqual([
+      "forked the parent conversation through the vendor and filed it under this workspace",
+    ]);
+  });
+
+  it("imports the parent and its session directory for the fork, then removes the copy", async () => {
+    // Arrange: the parent is filed under another account root.
+    const { configDir, stateDir } = await fixture();
+    const sourceRoot = testTempDir("fork-source-");
+    const source = writeParent(sourceRoot);
+    writeParentSessionDir(sourceRoot);
+    const copied = transcriptPath(configDir, PARENT_DIR, PARENT_ID);
+    const copiedSubagent = path.join(projectDir(configDir, PARENT_DIR), PARENT_ID, "subagents", "agent-x.jsonl");
+    const seenAtFork: boolean[] = [];
+    const fork: ForkVendorSession = (spec) => {
+      seenAtFork.push(existsSync(copied), existsSync(copiedSubagent));
+      return Promise.resolve(forkFakeSession(configDir, spec, sequentialIds()));
+    };
+    const mark = logSinkMark();
+
+    // Act
+    const outcome = await forkSession(
+      { configDir, stateDir, cwd: CHILD_DIR, forkVendorSession: fork },
+      { parentVendorSessionId: PARENT_ID, parentWorkspaceDir: PARENT_DIR, parentAccountRoot: sourceRoot, point: throughRecord("a1") },
+    );
+
+    // Assert
+    expect(outcome).toEqual({ kind: "forked", vendorSessionId: "id-1", parentBook: "book-original" });
+    expect(seenAtFork).toEqual([true, true]);
+    expect(existsSync(transcriptPath(configDir, CHILD_DIR, "id-1"))).toBe(true);
+    expect(existsSync(projectDir(configDir, PARENT_DIR))).toBe(false);
+    expect(existsSync(source)).toBe(true);
+    expect(forkRecordsSince(mark)).toMatchObject([
+      {
+        level: "info",
+        message: "imported the parent transcript from its account root into this one for the fork",
+        context: { source, destination: copied, parent_account_root: sourceRoot, session_dir_imported: true },
+      },
+      { level: "info", message: "forked the parent conversation through the vendor and filed it under this workspace" },
+      { level: "info", message: "removed the imported parent transcript after the fork", context: { destination: copied } },
+    ]);
+  });
+
+  it("removes the copy when the vendor's fork of it fails", async () => {
+    // Arrange
+    const { configDir, stateDir } = await fixture();
+    const sourceRoot = testTempDir("fork-source-");
+    writeParent(sourceRoot);
+    const fork: ForkVendorSession = () => Promise.reject(new Error("vendor said no"));
+
+    // Act
+    const outcome = await forkSession(
+      { configDir, stateDir, cwd: CHILD_DIR, forkVendorSession: fork },
+      { parentVendorSessionId: PARENT_ID, parentWorkspaceDir: PARENT_DIR, parentAccountRoot: sourceRoot, point: whole() },
+    );
+
+    // Assert
+    expect(outcome).toEqual({ kind: "vendor_failed", detail: "vendor said no" });
+    expect(existsSync(projectDir(configDir, PARENT_DIR))).toBe(false);
+  });
+
+  it("refuses unknown_session naming the parent's root when the parent is not there", async () => {
+    // Arrange: the transcript sits under this shim's root, not the parent's.
+    const { configDir, stateDir } = await fixture();
+    writeParent(configDir);
+    const sourceRoot = testTempDir("fork-source-");
+    const fork = vi.fn<ForkVendorSession>();
+
+    // Act
+    const outcome = await forkSession(
+      { configDir, stateDir, cwd: CHILD_DIR, forkVendorSession: fork },
+      { parentVendorSessionId: PARENT_ID, parentWorkspaceDir: PARENT_DIR, parentAccountRoot: sourceRoot, point: whole() },
+    );
+
+    // Assert
+    expect(outcome).toEqual({ kind: "unknown_session", detail: `no transcript at ${transcriptPath(sourceRoot, PARENT_DIR, PARENT_ID)}` });
+    expect(fork).not.toHaveBeenCalled();
+  });
+
+  it("refuses import_failed when the destination already holds the parent's transcript, leaving it untouched", async () => {
+    // Arrange
+    const { configDir, stateDir } = await fixture();
+    const sourceRoot = testTempDir("fork-source-");
+    const source = writeParent(sourceRoot);
+    const destination = writeTranscript(configDir, PARENT_DIR, PARENT_ID, [{ type: "user", uuid: "other" }]);
+    const before = readFileSync(destination, "utf8");
+    const fork = vi.fn<ForkVendorSession>();
+    const mark = logSinkMark();
+
+    // Act
+    const outcome = await forkSession(
+      { configDir, stateDir, cwd: CHILD_DIR, forkVendorSession: fork },
+      { parentVendorSessionId: PARENT_ID, parentWorkspaceDir: PARENT_DIR, parentAccountRoot: sourceRoot, point: whole() },
+    );
+
+    // Assert
+    expect(outcome).toEqual({ kind: "import_failed", detail: `import ${source} into ${destination}: ${destination} already exists` });
+    expect(fork).not.toHaveBeenCalled();
+    expect(readFileSync(destination, "utf8")).toBe(before);
+    expect(forkRecordsSince(mark)).toMatchObject([
+      {
+        level: "error",
+        message: "the fork was refused: the parent transcript could not be imported into this account root",
+        context: { source, destination, cause: `${destination} already exists`, parent_vendor_session_id: PARENT_ID },
+      },
+    ]);
+  });
+
+  it("refuses import_failed when the copy fails part-way, removing what it wrote", async () => {
+    // Arrange: a subagent transcript the copy cannot read.
+    const { configDir, stateDir } = await fixture();
+    const sourceRoot = testTempDir("fork-source-");
+    const source = writeParent(sourceRoot);
+    const sessionDir = writeParentSessionDir(sourceRoot);
+    const unreadable = path.join(sessionDir, "subagents", "agent-x.jsonl");
+    chmodSync(unreadable, 0o000);
+    const fork = vi.fn<ForkVendorSession>();
+    const mark = logSinkMark();
+
+    // Act
+    const outcome = await forkSession(
+      { configDir, stateDir, cwd: CHILD_DIR, forkVendorSession: fork },
+      { parentVendorSessionId: PARENT_ID, parentWorkspaceDir: PARENT_DIR, parentAccountRoot: sourceRoot, point: whole() },
+    );
+    chmodSync(unreadable, 0o644);
+
+    // Assert
+    expect(outcome.kind).toBe("import_failed");
+    expect(fork).not.toHaveBeenCalled();
+    expect(existsSync(projectDir(configDir, PARENT_DIR))).toBe(false);
+    const records = forkRecordsSince(mark);
+    expect(records).toMatchObject([
+      {
+        level: "error",
+        context: { source, destination: transcriptPath(configDir, PARENT_DIR, PARENT_ID) },
+      },
+    ]);
+    expect((records[0]?.context as { cause?: string } | undefined)?.cause).toMatch(/EACCES/);
+  });
+});
+
+describe("importParent", () => {
+  it("copies only the transcript when the parent has no session directory", () => {
+    // Arrange
+    const sourceRoot = testTempDir("fork-source-");
+    const destinationRoot = testTempDir("fork-destination-");
+    writeParent(sourceRoot);
+
+    // Act
+    const outcome = importParent(sourceRoot, destinationRoot, PARENT_DIR, PARENT_ID);
+
+    // Assert
+    expect(outcome).toEqual({
+      kind: "imported",
+      import: { transcript: transcriptPath(destinationRoot, PARENT_DIR, PARENT_ID), createdProjectDir: projectDir(destinationRoot, PARENT_DIR) },
+    });
+  });
+
+  it("refuses a session directory already at the destination", () => {
+    // Arrange
+    const sourceRoot = testTempDir("fork-source-");
+    const destinationRoot = testTempDir("fork-destination-");
+    writeParent(sourceRoot);
+    const taken = writeParentSessionDir(destinationRoot);
+
+    // Act
+    const outcome = importParent(sourceRoot, destinationRoot, PARENT_DIR, PARENT_ID);
+
+    // Assert
+    expect(outcome).toMatchObject({ kind: "failed", cause: `${taken} already exists` });
+  });
+});
+
+describe("removeImport", () => {
+  it("fails hard, logging what it could not remove, when the copy is already gone", () => {
+    // Arrange
+    const destination = path.join(testTempDir("fork-destination-"), "gone.jsonl");
+    const mark = logSinkMark();
+
+    // Act / Assert
+    expect(() => removeImport({ transcript: destination }, { parent_vendor_session_id: PARENT_ID })).toThrow(/remove the imported parent transcript/);
+    const records = forkRecordsSince(mark);
+    expect(records).toMatchObject([
+      {
+        level: "error",
+        message: "the imported parent transcript could not be removed after the fork",
+        context: { destination, parent_vendor_session_id: PARENT_ID },
+      },
+    ]);
+    expect((records[0]?.context as { cause?: string } | undefined)?.cause).toMatch(/ENOENT/);
   });
 });

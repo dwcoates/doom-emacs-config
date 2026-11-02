@@ -2012,6 +2012,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         {
           parentVendorSessionId: request.parentVendorSessionId,
           parentWorkspaceDir: request.parentWorkspaceDir,
+          parentAccountRoot: request.parentAccountRoot,
           point: request.point,
         },
       ),

@@ -13,8 +13,17 @@
  * NOTHING IS WRITTEN UNLESS EVERYTHING CHECKS OUT: the parent transcript, the
  * fork point's record and the parent's book are all resolved before the vendor
  * is asked, so every refusal leaves the disk as it was.
+ *
+ * A PARENT UNDER ANOTHER ACCOUNT IS IMPORTED FOR THE FORK'S DURATION. The
+ * vendor reads the parent from this shim's account root, and a fork between
+ * repositories on different accounts names a parent filed under another one.
+ * The parent's transcript and its sibling session directory are copied into
+ * this root, the vendor forks the copy, and the copy is removed once the fork
+ * is filed: left behind, it would be a stale snapshot of a conversation still
+ * growing under its own root, and the daemon's port of that conversation
+ * between accounts refuses a destination that already exists.
  */
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmdirSync, rmSync, statSync, writeFileSync, constants as fsConstants } from "node:fs";
 import path from "node:path";
 import type { shimv1 } from "../proto.js";
 import { bindLog } from "../log.js";
@@ -57,6 +66,8 @@ export interface ForkSessionDeps {
 export interface ForkSessionAsk {
   readonly parentVendorSessionId: string;
   readonly parentWorkspaceDir: string;
+  /** The account root the parent's transcript is filed under. */
+  readonly parentAccountRoot: string;
   readonly point: shimv1.ForkPoint;
 }
 
@@ -64,7 +75,7 @@ export interface ForkSessionAsk {
 export type ForkSessionOutcome =
   | { readonly kind: "forked"; readonly vendorSessionId: string; readonly parentBook: string }
   | {
-      readonly kind: "unknown_session" | "record_absent" | "parent_book_unknown" | "vendor_failed";
+      readonly kind: "unknown_session" | "record_absent" | "parent_book_unknown" | "vendor_failed" | "import_failed";
       readonly detail: string;
     };
 
@@ -215,12 +226,13 @@ export async function forkSession(deps: ForkSessionDeps, ask: ForkSessionAsk): P
   const context = {
     parent_vendor_session_id: ask.parentVendorSessionId,
     parent_workspace_dir: ask.parentWorkspaceDir,
+    parent_account_root: ask.parentAccountRoot,
     point: ask.point.extent.case ?? "",
   };
-  const parentFile = transcriptPath(deps.configDir, ask.parentWorkspaceDir, ask.parentVendorSessionId);
+  const parentFile = transcriptPath(ask.parentAccountRoot, ask.parentWorkspaceDir, ask.parentVendorSessionId);
   if (!existsSync(parentFile)) {
     const detail = `no transcript at ${parentFile}`;
-    LOGGER.error({ ...context, parent_transcript: parentFile, detail }, "the fork was refused: no parent transcript under this account root");
+    LOGGER.error({ ...context, parent_transcript: parentFile, detail }, "the fork was refused: no parent transcript under the parent's account root");
     return { kind: "unknown_session", detail };
   }
   const upTo = resolveUpTo(forkableRecords(parentFile), ask.point);
@@ -234,16 +246,47 @@ export async function forkSession(deps: ForkSessionDeps, ask: ForkSessionAsk): P
     LOGGER.error({ ...context, detail }, "the fork was refused: the parent workspace has no persisted book identity");
     return { kind: "parent_book_unknown", detail };
   }
+  let imported: ParentImport | undefined;
+  if (path.resolve(ask.parentAccountRoot) !== path.resolve(deps.configDir)) {
+    const made = importParent(ask.parentAccountRoot, deps.configDir, ask.parentWorkspaceDir, ask.parentVendorSessionId);
+    if (made.kind === "failed") {
+      LOGGER.error(
+        { ...context, source: made.source, destination: made.destination, cause: made.cause },
+        "the fork was refused: the parent transcript could not be imported into this account root",
+      );
+      return { kind: "import_failed", detail: `import ${made.source} into ${made.destination}: ${made.cause}` };
+    }
+    imported = made.import;
+    LOGGER.info(
+      { ...context, source: parentFile, destination: imported.transcript, session_dir_imported: imported.sessionDir !== undefined },
+      "imported the parent transcript from its account root into this one for the fork",
+    );
+  }
+  try {
+    return await forkImported(deps, ask, context, upTo.upTo, parentBook);
+  } finally {
+    if (imported !== undefined) removeImport(imported, context);
+  }
+}
+
+/** Ask the vendor for the fork and file it under this shim's directory. */
+async function forkImported(
+  deps: ForkSessionDeps,
+  ask: ForkSessionAsk,
+  context: Record<string, string>,
+  upTo: string | undefined,
+  parentBook: string,
+): Promise<ForkSessionOutcome> {
   let forkedId: string;
   try {
     forkedId = await deps.forkVendorSession({
       parentSessionId: ask.parentVendorSessionId,
       parentDir: ask.parentWorkspaceDir,
-      ...(upTo.upTo === undefined ? {} : { upToMessageId: upTo.upTo }),
+      ...(upTo === undefined ? {} : { upToMessageId: upTo }),
     });
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
-    LOGGER.error({ ...context, up_to: upTo.upTo ?? "", cause: detail }, "the fork was refused: the vendor's fork failed");
+    LOGGER.error({ ...context, up_to: upTo ?? "", cause: detail }, "the fork was refused: the vendor's fork failed");
     return { kind: "vendor_failed", detail };
   }
   const written = transcriptPath(deps.configDir, ask.parentWorkspaceDir, forkedId);
@@ -257,10 +300,96 @@ export async function forkSession(deps: ForkSessionDeps, ask: ForkSessionAsk): P
   }
   const remapped = repairForkedTranscript(filed);
   LOGGER.info(
-    { ...context, up_to: upTo.upTo ?? "", vendor_session_id: forkedId, parent_book: parentBook, transcript: filed, boundary_references_remapped: remapped },
+    { ...context, up_to: upTo ?? "", vendor_session_id: forkedId, parent_book: parentBook, transcript: filed, boundary_references_remapped: remapped },
     "forked the parent conversation through the vendor and filed it under this workspace",
   );
   return { kind: "forked", vendorSessionId: forkedId, parentBook };
+}
+
+/**
+ * What one import wrote into this shim's account root, so exactly that is
+ * removed once the fork is filed.
+ */
+interface ParentImport {
+  /** The copied transcript. */
+  readonly transcript: string;
+  /** The copied sibling session directory. Absent: the parent has none. */
+  readonly sessionDir?: string;
+  /** The project directory the import created. Absent: it already existed. */
+  readonly createdProjectDir?: string;
+}
+
+/** What became of one import. THE KIND IS THE OUTCOME. */
+type ParentImportOutcome =
+  | { readonly kind: "imported"; readonly import: ParentImport }
+  | { readonly kind: "failed"; readonly source: string; readonly destination: string; readonly cause: string };
+
+/** The vendor's per-session directory beside a transcript: its path without `.jsonl`. */
+function sessionDirOf(transcript: string): string {
+  return transcript.slice(0, -".jsonl".length);
+}
+
+/**
+ * Copy the parent's transcript, and its sibling session directory when it has
+ * one, from `sourceRoot` into `destinationRoot` under the same project.
+ *
+ * A DESTINATION THAT EXISTS IS REFUSED, never overwritten: it is a file this
+ * import did not write. A copy that fails part-way removes what it wrote, so a
+ * failed import leaves the destination root as it was.
+ */
+export function importParent(sourceRoot: string, destinationRoot: string, parentDir: string, vendorSessionId: string): ParentImportOutcome {
+  const source = transcriptPath(sourceRoot, parentDir, vendorSessionId);
+  const destination = transcriptPath(destinationRoot, parentDir, vendorSessionId);
+  const sourceDir = sessionDirOf(source);
+  const destinationDir = sessionDirOf(destination);
+  for (const taken of [destination, destinationDir]) {
+    if (existsSync(taken)) return { kind: "failed", source, destination, cause: `${taken} already exists` };
+  }
+  const projectDir = path.dirname(destination);
+  const createdProjectDir = existsSync(projectDir) ? undefined : projectDir;
+  const hasSessionDir = existsSync(sourceDir) && statSync(sourceDir).isDirectory();
+  try {
+    mkdirSync(projectDir, { recursive: true });
+    copyFileSync(source, destination, fsConstants.COPYFILE_EXCL);
+    if (hasSessionDir) cpSync(sourceDir, destinationDir, { recursive: true, errorOnExist: true, force: false });
+  } catch (err) {
+    rmSync(destination, { force: true });
+    rmSync(destinationDir, { recursive: true, force: true });
+    if (createdProjectDir !== undefined) rmSync(createdProjectDir, { recursive: true, force: true });
+    return { kind: "failed", source, destination, cause: err instanceof Error ? err.message : String(err) };
+  }
+  return {
+    kind: "imported",
+    import: {
+      transcript: destination,
+      ...(hasSessionDir ? { sessionDir: destinationDir } : {}),
+      ...(createdProjectDir === undefined ? {} : { createdProjectDir }),
+    },
+  };
+}
+
+/**
+ * Remove what an import wrote. A copy that cannot be removed fails hard: it is
+ * the stale snapshot the removal exists to prevent.
+ */
+export function removeImport(imported: ParentImport, context: Record<string, string>): void {
+  try {
+    rmSync(imported.transcript);
+    if (imported.sessionDir !== undefined) rmSync(imported.sessionDir, { recursive: true });
+    // The vendor files the fork beside the copy, and it is moved out before
+    // this runs, so a project directory the import created is empty again.
+    if (imported.createdProjectDir !== undefined && readdirSync(imported.createdProjectDir).length === 0) {
+      rmdirSync(imported.createdProjectDir);
+    }
+  } catch (err) {
+    const cause = err instanceof Error ? err.message : String(err);
+    LOGGER.error(
+      { ...context, destination: imported.transcript, session_dir: imported.sessionDir ?? "", cause },
+      "the imported parent transcript could not be removed after the fork",
+    );
+    throw new Error(`fork session: remove the imported parent transcript ${imported.transcript}: ${cause}`);
+  }
+  LOGGER.info({ ...context, destination: imported.transcript }, "removed the imported parent transcript after the fork");
 }
 
 /**
