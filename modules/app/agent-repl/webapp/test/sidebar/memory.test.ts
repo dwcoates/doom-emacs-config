@@ -279,7 +279,7 @@ describe("the version hover", () => {
       version.dispatchEvent(new MouseEvent("mouseenter"));
       await settle();
       // ASSERT
-      expect(told.at(-1)).toBe(`place:${VERSION_POPUP_KEY}`);
+      expect(told).toEqual([`show:${VERSION_POPUP_KEY}`, `show:${VERSION_POPUP_KEY}`]);
     });
 
     it("takes the panel off the feed when the pointer leaves", async () => {

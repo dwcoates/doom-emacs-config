@@ -369,13 +369,13 @@ export function installVersionHover(
       },
     });
     const place = (): void => {
+      // THE SAME PANEL SHOWN AGAIN is placed again (sidebar-popups.ts).
       if (mirror !== null) {
-        mirror.place(VERSION_POPUP_KEY);
+        mirror.show(VERSION_POPUP_KEY, panel, version);
         return;
       }
       applyPlacement(panel, clampReveal(version.getBoundingClientRect(), panel.getBoundingClientRect(), viewportOf()));
     };
-    mirror?.show(VERSION_POPUP_KEY, panel, version);
     place();
     stop = refreshWhileOpen(ctx, () => {
       fetchOverview(ctx, panel).then(place, (err: unknown) => noteFailed("sidebar.memory.overview-fetch", err));
