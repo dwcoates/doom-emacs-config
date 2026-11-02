@@ -7682,7 +7682,7 @@ the page read."
   "Every read that tunes an ivy alist goes through the one helper.
 A hand-rolled `let' of an ivy alist around a read would drift from it."
   (let ((dir (file-name-directory (symbol-file 'agent-repl--completing-read-under-ivy 'defun))))
-    (dolist (file '("commands.el"))
+    (dolist (file '("commands.el" "input.el"))
       (with-temp-buffer
         (insert-file-contents (expand-file-name file dir))
         (should (save-excursion (search-forward "(agent-repl--completing-read-under-ivy" nil t)))

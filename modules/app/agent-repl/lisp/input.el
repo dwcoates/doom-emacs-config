@@ -1251,28 +1251,50 @@ fill outside [0, 1] breaks the daemon's contract and signals an error."
     (apply #'color-rgb-to-hex
            (append (color-hsl-to-rgb (/ hue 360.0) 0.8 0.45) '(2)))))
 
+(defun agent-repl--input-rollback-row (index sent tokens text)
+  "Return one picker row of the four column cells INDEX, SENT, TOKENS, TEXT.
+Every cell is a string, its faces kept.  The header and every prompt's
+line are laid out by this one row, so the column names sit over their
+columns."
+  (format "%2s  %-12s  %6s  %s" index sent tokens text))
+
+(defconst agent-repl--input-rollback-header
+  (propertize (agent-repl--input-rollback-row "#" "Sent" "Tokens" "Prompt")
+              'face '(:inherit shadow :weight bold))
+  "The picker's column names, over the columns `agent-repl--input-rollback-row' lays out.")
+
 (defun agent-repl--input-rollback-candidate (index entry now)
   "Return the picker line for ENTRY, the INDEXth prompt (1 is the newest).
 Columns: the index (keeping lines distinct), time since the prompt was
 sent (as of NOW, a float time), the context size before it, and the
-prompt's whole text folded onto the one line, never cut.  The line wears
-the color the topbar's context chip would give its context figure; a
-prompt with no figure stays uncolored."
-  (let* ((sent (plist-get entry :sent-at-ms))
-         (fill (plist-get entry :window-fill))
-         (line (format "%2d  %-12s  %6s  %s"
-                       index
-                       (or (and sent (agent-repl--format-summary-relative-time (/ sent 1000.0) now)) "-")
-                       (agent-repl--input-rollback-tokens-text (plist-get entry :context-tokens))
-                       (string-join (split-string (plist-get entry :text)) " "))))
-    (if fill
-        (propertize line 'face (list :foreground (agent-repl--input-window-fill-color fill)))
-      line)))
+prompt's whole text folded onto the one line, never cut.  The index and
+the time are dimmed and the text is plain; the context size alone wears
+the color the topbar's context chip would give it, and a prompt with no
+figure leaves that cell uncolored too."
+  (let ((sent (plist-get entry :sent-at-ms))
+        (fill (plist-get entry :window-fill))
+        (tokens (agent-repl--input-rollback-tokens-text (plist-get entry :context-tokens))))
+    (agent-repl--input-rollback-row
+     (propertize (number-to-string index) 'face 'shadow)
+     (propertize (or (and sent (agent-repl--format-summary-relative-time (/ sent 1000.0) now)) "-")
+                 'face 'shadow)
+     (if fill
+         (propertize tokens 'face (list :foreground (agent-repl--input-window-fill-color fill)))
+       tokens)
+     (string-join (split-string (plist-get entry :text)) " "))))
+
+(defun agent-repl--input-rollback-ivy-format (format)
+  "Return an ivy candidate formatter drawing the column names over FORMAT's lines.
+FORMAT is the formatter ivy would otherwise draw the candidates with."
+  (lambda (candidates)
+    (concat agent-repl--input-rollback-header "\n" (funcall format candidates))))
 
 (defun agent-repl--input-rollback-read-entry (entries)
   "Read one of ENTRIES (newest first) with `completing-read'; return it.
 The list keeps the daemon's order, newest at the top, whatever sorting the
-completion backend would otherwise apply."
+completion backend would otherwise apply.  Under ivy the column names head
+the list (`agent-repl--input-rollback-ivy-format')."
+  (defvar ivy-format-functions-alist)
   (let* ((now (float-time))
          (index 0)
          (lines (mapcar (lambda (entry)
@@ -1284,7 +1306,12 @@ completion backend would otherwise apply."
                       '(metadata (display-sort-function . identity)
                                  (cycle-sort-function . identity))
                     (complete-with-action action (mapcar #'car lines) string predicate))))
-         (choice (completing-read "Rollback to before prompt: " table nil t)))
+         (choice (agent-repl--completing-read-under-ivy
+                  'ivy-format-functions-alist
+                  (and (boundp 'ivy-format-functions-alist)
+                       (agent-repl--input-rollback-ivy-format
+                        (alist-get t ivy-format-functions-alist)))
+                  "Rollback to before prompt: " table)))
     (cdr (assoc choice lines))))
 
 (defun agent-repl--input-rollback-choose (ws)

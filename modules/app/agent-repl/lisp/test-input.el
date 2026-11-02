@@ -3733,6 +3733,9 @@ The candidates offered are kept in `agent-repl-test-input--offered'."
                   '(:arm :prompt-not-reachable :value (:prompt (:value "p1"))))
                  "rollback: that prompt can no longer be rolled back to; press the key again")))
 
+(defvar ivy-format-functions-alist nil
+  "Stands in for ivy's own definition, which these batch tests never load.")
+
 (ert-deftest agent-repl-test-input-rollback-tokens-text ()
   "The context column is short, and a missing figure is a dash."
   (dolist (case '((nil "-") (0 "0") (999 "999") (1000 "1k") (42400 "42k")
@@ -3765,20 +3768,55 @@ The candidates offered are kept in `agent-repl-test-input--offered'."
                   1 (agent-repl-test-input--entry "p" "fix it\n\n  then  test") 1000.0)
                  " 1  -                  -  fix it then test")))
 
-(ert-deftest agent-repl-test-input-rollback-candidate-wears-the-window-fill-color ()
-  "A prompt with a context figure wears its fill's pressure color."
-  (let ((line (agent-repl--input-rollback-candidate
-               1 (agent-repl-test-input--entry "p" "x" nil 950000 0.95) 1000.0)))
-    (should (equal (get-text-property 0 'face line)
+(ert-deftest agent-repl-test-input-rollback-candidate-colors-only-the-tokens ()
+  "A prompt with a context figure wears its fill's pressure color on the figure alone."
+  (let* ((line (agent-repl--input-rollback-candidate
+                1 (agent-repl-test-input--entry "p" "fix it" nil 950000 0.95) 1000.0))
+         (tokens (string-match "950k" line)))
+    (should (equal (get-text-property tokens 'face line)
                    (list :foreground (agent-repl--input-window-fill-color 0.95))))
-    (should (equal (get-text-property (1- (length line)) 'face line)
-                   (get-text-property 0 'face line)))))
+    (should-not (get-text-property (string-match "fix it" line) 'face line))))
+
+(ert-deftest agent-repl-test-input-rollback-candidate-dims-the-index-and-time ()
+  "The index and the time since sent are dimmed metadata."
+  (let ((line (agent-repl--input-rollback-candidate
+               7 (agent-repl-test-input--entry "p" "x" (* 1000 (- 1000 600)) 42000 0.1) 1000.0)))
+    (should (eq (get-text-property (string-match "7" line) 'face line) 'shadow))
+    (should (eq (get-text-property (string-match "10m ago" line) 'face line) 'shadow))))
 
 (ert-deftest agent-repl-test-input-rollback-candidate-without-a-figure-is-uncolored ()
-  "A prompt with no context figure has no face: no honest color exists."
-  (should-not (get-text-property
-               0 'face (agent-repl--input-rollback-candidate
-                        1 (agent-repl-test-input--entry "p" "x") 1000.0))))
+  "A prompt with no context figure leaves its tokens cell uncolored: no honest color exists."
+  (let ((line (agent-repl--input-rollback-candidate
+               1 (agent-repl-test-input--entry "p" "x") 1000.0)))
+    (should-not (get-text-property (string-match "-  x" line) 'face line))))
+
+(ert-deftest agent-repl-test-input-rollback-header-names-the-columns ()
+  "The header names each column over the column it heads."
+  (should (equal agent-repl--input-rollback-header
+                 " #  Sent          Tokens  Prompt")))
+
+(ert-deftest agent-repl-test-input-rollback-header-aligns-with-the-lines ()
+  "Each column name ends where its column's cell ends on a line."
+  (let ((line (agent-repl--input-rollback-candidate
+               3 (agent-repl-test-input--entry "p" "fix it" (* 1000 (- 1000 600)) 42000) 1000.0)))
+    (should (= (string-match "#" agent-repl--input-rollback-header) (string-match "3" line)))
+    (should (= (string-match "Sent" agent-repl--input-rollback-header) (string-match "10m" line)))
+    (should (= (progn (string-match "Tokens" agent-repl--input-rollback-header) (match-end 0))
+               (progn (string-match "42k" line) (match-end 0))))
+    (should (= (string-match "Prompt" agent-repl--input-rollback-header)
+               (string-match "fix it" line)))))
+
+(ert-deftest agent-repl-test-input-rollback-header-is-bold-and-dim ()
+  "The column names are bold and dimmed."
+  (should (equal (get-text-property 0 'face agent-repl--input-rollback-header)
+                 '(:inherit shadow :weight bold))))
+
+(ert-deftest agent-repl-test-input-rollback-ivy-format-heads-the-lines ()
+  "The ivy formatter draws the column names over the lines ivy's own would draw."
+  (let ((format (agent-repl--input-rollback-ivy-format
+                 (lambda (candidates) (string-join candidates "\n")))))
+    (should (equal (funcall format '("a" "b"))
+                   (concat agent-repl--input-rollback-header "\na\nb")))))
 
 (ert-deftest agent-repl-test-input-pressure-hue-follows-the-chip-stops ()
   "The hue is green below 40, blends to yellow by 70 and orange by 90, red at 90."
@@ -3823,6 +3861,34 @@ The candidates offered are kept in `agent-repl-test-input--offered'."
         (should (equal (plist-get entry :prompt) '(:value "p2")))
         (should (eq (alist-get 'display-sort-function (cdr metadata)) 'identity))
         (should (eq (alist-get 'cycle-sort-function (cdr metadata)) 'identity))))))
+
+(ert-deftest agent-repl-test-input-rollback-read-entry-heads-ivys-list ()
+  "Under ivy the read draws the column names over ivy's own formatter."
+  ;; Arrange
+  (let ((ivy-format-functions-alist (list (cons t (lambda (c) (string-join c "|")))))
+        (drawn nil))
+    (cl-letf (((symbol-function 'completing-read)
+               (lambda (_prompt table &rest _)
+                 (setq drawn (funcall (alist-get t ivy-format-functions-alist) '("a" "b")))
+                 (car (all-completions "" table)))))
+      ;; Act
+      (agent-repl--input-rollback-read-entry (list (agent-repl-test-input--entry "p1" "a"))))
+    ;; Assert
+    (should (equal drawn (concat agent-repl--input-rollback-header "\na|b")))))
+
+(ert-deftest agent-repl-test-input-rollback-read-entry-without-ivy ()
+  "Without ivy the read is a plain `completing-read' that leaves ivy's alist unbound."
+  ;; Arrange
+  (let ((ivy-format-functions-alist nil))
+    (makunbound 'ivy-format-functions-alist)
+    (cl-letf (((symbol-function 'completing-read)
+               (lambda (_prompt table &rest _) (car (all-completions "" table)))))
+      ;; Act
+      (let ((entry (agent-repl--input-rollback-read-entry
+                    (list (agent-repl-test-input--entry "p1" "a")))))
+        ;; Assert
+        (should (equal (plist-get entry :prompt) '(:value "p1")))
+        (should-not (boundp 'ivy-format-functions-alist))))))
 
 (ert-deftest agent-repl-test-input-rollback-endpoints-answer-ref-and-conn ()
   "With a ref and a connection the guard answers both and flashes nothing."
