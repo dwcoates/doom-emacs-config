@@ -96,37 +96,41 @@ func ToolsIn(dir string) Tools {
 type Config struct {
 	Tools   Tools
 	Hotspot string
-	// LidPipe is EnvLidPipe's named pipe; empty is the operating system's lid
+	// FakeLid is EnvLid's value; empty is the operating system's lid
 	// (SystemLid).
-	LidPipe string
+	FakeLid string
 }
 
 // Lid is the LidWatcher the config names.
 func (c Config) Lid() LidWatcher {
-	if c.LidPipe != "" {
-		return PipeLid(c.LidPipe)
+	if c.FakeLid == "" {
+		return SystemLid()
 	}
-	return SystemLid()
+	if l, err := parseLidLine(c.FakeLid); err == nil {
+		return FixedLid(l)
+	}
+	return SocketLid(c.FakeLid)
 }
 
 // ConfigFromEnv resolves the Config from getenv. A tools dir that is set but
 // not absolute is REFUSED: a relative dir resolves against whatever the
 // daemon's working directory happens to be, which is never what was meant.
 // Fake tools without a fake lid are REFUSED too: the real lid would then move
-// a display the fake tools only pretend to set, and a lid pipe is likewise
+// a display the fake tools only pretend to set, and a fake lid is likewise
 // refused without fake tools.
 func ConfigFromEnv(getenv func(string) string) (Config, error) {
 	cfg := Config{Tools: DefaultTools()}
-	dir, pipe := getenv(EnvToolsDir), getenv(EnvLidPipe)
+	dir, lid := getenv(EnvToolsDir), getenv(EnvLid)
+	_, lidErr := parseLidLine(lid)
 	switch {
-	case dir != "" && pipe == "":
-		return Config{}, fmt.Errorf("persistentwifi: %s is set without %s; fake host tools never hear the real lid", EnvToolsDir, EnvLidPipe)
-	case pipe != "" && dir == "":
-		return Config{}, fmt.Errorf("persistentwifi: %s is set without %s; a fake lid never moves the real display", EnvLidPipe, EnvToolsDir)
-	case pipe != "" && !filepath.IsAbs(pipe):
-		return Config{}, fmt.Errorf("persistentwifi: %s=%q is not an absolute path", EnvLidPipe, pipe)
+	case dir != "" && lid == "":
+		return Config{}, fmt.Errorf("persistentwifi: %s is set without %s; fake host tools never hear the real lid", EnvToolsDir, EnvLid)
+	case lid != "" && dir == "":
+		return Config{}, fmt.Errorf("persistentwifi: %s is set without %s; a fake lid never moves the real display", EnvLid, EnvToolsDir)
+	case lid != "" && lidErr != nil && !filepath.IsAbs(lid):
+		return Config{}, fmt.Errorf("persistentwifi: %s=%q is neither a lid state nor an absolute socket path", EnvLid, lid)
 	}
-	cfg.LidPipe = pipe
+	cfg.FakeLid = lid
 	if dir != "" {
 		if !filepath.IsAbs(dir) {
 			return Config{}, fmt.Errorf("persistentwifi: %s=%q is not an absolute path", EnvToolsDir, dir)

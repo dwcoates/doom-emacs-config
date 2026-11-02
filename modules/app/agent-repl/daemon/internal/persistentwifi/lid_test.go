@@ -5,8 +5,9 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"net"
 	"strings"
-	"syscall"
+	"sync"
 	"testing"
 
 	"agent-repld/internal/dlog"
@@ -218,32 +219,61 @@ func TestWatchLidEndedByItsContextRecordsNothing(t *testing.T) {
 	}
 }
 
-// fifo makes a named pipe holding lines, read-write so the writes buffer
-// before any reader opens it.
-func fifo(t *testing.T, lines string) string {
+// lidServer serves a Unix socket in a short directory, writing each
+// connection the lines given and then holding it open until hold is closed
+// (or closing it at once when end is set). It answers the socket's path.
+func lidServer(t *testing.T, lines string, end bool) (path string, hold chan struct{}) {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "lid")
-	if err := syscall.Mkfifo(path, 0o600); err != nil {
-		t.Fatalf("mkfifo: %v", err)
-	}
-	w, err := os.OpenFile(path, os.O_RDWR, 0)
+	dir, err := os.MkdirTemp("/tmp", "pwl")
 	if err != nil {
-		t.Fatalf("open the fifo: %v", err)
+		t.Fatalf("mkdir: %v", err)
 	}
-	t.Cleanup(func() { _ = w.Close() })
-	if _, err := w.WriteString(lines); err != nil {
-		t.Fatalf("write the fifo: %v", err)
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	path = filepath.Join(dir, "lid")
+	ln, err := net.Listen("unix", path)
+	if err != nil {
+		t.Fatalf("listen: %v", err)
 	}
-	return path
+	hold = make(chan struct{})
+	var held sync.WaitGroup
+	t.Cleanup(func() {
+		_ = ln.Close()
+		select {
+		case <-hold:
+		default:
+			close(hold)
+		}
+		held.Wait()
+	})
+	held.Add(1)
+	go func() {
+		defer held.Done()
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			held.Add(1)
+			go func() {
+				defer held.Done()
+				defer conn.Close()
+				_, _ = conn.Write([]byte(lines))
+				if !end {
+					<-hold
+				}
+			}()
+		}
+	}()
+	return path, hold
 }
 
-func TestPipeLidHearsEachLine(t *testing.T) {
+func TestSocketLidHearsEachLine(t *testing.T) {
 	// Arrange.
-	path := fifo(t, "open\nclosed\nnone\nbogus\n")
+	path, _ := lidServer(t, "open\nclosed\nnone\nbogus\n", false)
 	var heard []Lid
 
 	// Act.
-	err := PipeLid(path).Watch(context.Background(), func(l Lid) { heard = append(heard, l) })
+	err := SocketLid(path).Watch(context.Background(), func(l Lid) { heard = append(heard, l) })
 
 	// Assert.
 	if len(heard) != 3 || heard[0] != LidOpen || heard[1] != LidClosed || heard[2] != LidNone {
@@ -254,14 +284,14 @@ func TestPipeLidHearsEachLine(t *testing.T) {
 	}
 }
 
-func TestPipeLidEndsQuietlyWithItsContext(t *testing.T) {
+func TestSocketLidEndsQuietlyWithItsContext(t *testing.T) {
 	// Arrange.
-	path := fifo(t, "open\n")
+	path, _ := lidServer(t, "open\n", false)
 	ctx, cancel := context.WithCancel(context.Background())
 
-	// Act: the first line cancels, which closes the pipe under the blocked
-	// read of the second.
-	err := PipeLid(path).Watch(ctx, func(Lid) { cancel() })
+	// Act: the first line cancels, which closes the connection under the
+	// blocked read of the next.
+	err := SocketLid(path).Watch(ctx, func(Lid) { cancel() })
 
 	// Assert.
 	if err != nil {
@@ -269,13 +299,87 @@ func TestPipeLidEndsQuietlyWithItsContext(t *testing.T) {
 	}
 }
 
-func TestPipeLidRefusesAMissingPipe(t *testing.T) {
+// TestSocketLidGivesEachWatchItsOwnStream pins what a handover needs: a
+// watch whose ctx ends stops at once while another watch of the same socket
+// still hears the lid.
+func TestSocketLidGivesEachWatchItsOwnStream(t *testing.T) {
+	// Arrange.
+	path, _ := lidServer(t, "open\n", false)
+	ctxA, cancelA := context.WithCancel(context.Background())
+	ctxB, cancelB := context.WithCancel(context.Background())
+	heardB := make(chan Lid, 1)
+	doneB := make(chan error, 1)
+	go func() { doneB <- SocketLid(path).Watch(ctxB, func(l Lid) { heardB <- l }) }()
+
 	// Act.
-	err := PipeLid(filepath.Join(t.TempDir(), "absent")).Watch(context.Background(), func(Lid) {})
+	errA := SocketLid(path).Watch(ctxA, func(Lid) { cancelA() })
 
 	// Assert.
-	if err == nil || !strings.Contains(err.Error(), "open the lid pipe") {
-		t.Fatalf("Watch() = %v, want the open refused", err)
+	if errA != nil {
+		t.Fatalf("first Watch() = %v, want nil once its ctx ended", errA)
+	}
+	if l := <-heardB; l != LidOpen {
+		t.Fatalf("second watch heard %v, want open", l)
+	}
+	cancelB()
+	if err := <-doneB; err != nil {
+		t.Fatalf("second Watch() = %v, want nil once its ctx ended", err)
+	}
+}
+
+func TestSocketLidReportsAStreamThatEnded(t *testing.T) {
+	// Arrange.
+	path, _ := lidServer(t, "open\n", true)
+
+	// Act.
+	err := SocketLid(path).Watch(context.Background(), func(Lid) {})
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "ended") {
+		t.Fatalf("Watch() = %v, want the ended stream reported", err)
+	}
+}
+
+func TestSocketLidRefusesAMissingSocket(t *testing.T) {
+	// Act.
+	err := SocketLid(filepath.Join("/tmp", "pwl-absent-lid")).Watch(context.Background(), func(Lid) {})
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "connect to the lid socket") {
+		t.Fatalf("Watch() = %v, want the connection refused", err)
+	}
+}
+
+func TestFixedLidIsHeardOnceUntilItsContextEnds(t *testing.T) {
+	// Arrange.
+	ctx, cancel := context.WithCancel(context.Background())
+	var heard []Lid
+
+	// Act.
+	err := FixedLid(LidClosed).Watch(ctx, func(l Lid) { heard = append(heard, l); cancel() })
+
+	// Assert.
+	if err != nil || len(heard) != 1 || heard[0] != LidClosed {
+		t.Fatalf("Watch() = %v having heard %v, want closed once and nil", err, heard)
+	}
+}
+
+func TestConfigLidPicksTheWatcherItsValueNames(t *testing.T) {
+	cases := []struct {
+		fake string
+		want LidWatcher
+	}{
+		{fake: "", want: SystemLid()},
+		{fake: "none", want: FixedLid(LidNone)},
+		{fake: "/tmp/lid", want: SocketLid("/tmp/lid")},
+	}
+	for _, tc := range cases {
+		t.Run(tc.fake, func(t *testing.T) {
+			// Act, Assert.
+			if got := (Config{FakeLid: tc.fake}).Lid(); got != tc.want {
+				t.Fatalf("Lid() = %#v, want %#v", got, tc.want)
+			}
+		})
 	}
 }
 

@@ -4,12 +4,13 @@ import (
 	"bufio"
 	"encoding/json"
 	"errors"
+	"net"
 	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
-	"syscall"
+	"sync"
 	"testing"
 
 	"agent-repld/internal/shellword"
@@ -430,47 +431,73 @@ func FakeBrightnessLevel(t testing.TB, dir string) string {
 }
 
 // FakeLid is the daemon's lid on a fake host
-// (AGENT_REPL_PERSISTENT_WIFI_LID_PIPE): a named pipe the harness holds open
-// read-write, so each state written is buffered until the daemon reads it,
-// whenever it subscribes.
+// (AGENT_REPL_PERSISTENT_WIFI_LID): a Unix socket that writes each daemon
+// connecting to it the lid's state, then every change. Each connection is a
+// stream of its own, so a handover's predecessor and successor both hear the
+// lid and neither takes the other's lines.
 type FakeLid struct {
-	// Path is the pipe the daemon is pointed at.
+	// Path is the socket the daemon is pointed at.
 	Path string
-	t    testing.TB
-	pipe *os.File
+	ln   net.Listener
+
+	mu    sync.Mutex
+	state string
+	conns map[net.Conn]bool
 }
 
-// NewFakeLid makes the pipe in dir with the lid open, the state the daemon
-// reads when it subscribes.
+// NewFakeLid serves the socket in dir, a directory short enough for a socket
+// path, with the lid open.
 func NewFakeLid(t testing.TB, dir string) *FakeLid {
 	t.Helper()
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatalf("harness: mkdir %s: %v", dir, err)
-	}
 	path := filepath.Join(dir, "lid")
-	if err := syscall.Mkfifo(path, 0o600); err != nil {
-		t.Fatalf("harness: mkfifo %s: %v", path, err)
-	}
-	pipe, err := os.OpenFile(path, os.O_RDWR, 0)
+	ln, err := net.Listen("unix", path)
 	if err != nil {
-		t.Fatalf("harness: open the lid pipe: %v", err)
+		t.Fatalf("harness: listen on the lid socket: %v", err)
 	}
-	t.Cleanup(func() { _ = pipe.Close() })
-	l := &FakeLid{Path: path, t: t, pipe: pipe}
-	l.write("open")
+	l := &FakeLid{Path: path, ln: ln, state: "open", conns: map[net.Conn]bool{}}
+	accepted := make(chan struct{})
+	go func() {
+		defer close(accepted)
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			l.mu.Lock()
+			l.conns[conn] = true
+			_, _ = conn.Write([]byte(l.state + "\n"))
+			l.mu.Unlock()
+		}
+	}()
+	t.Cleanup(func() {
+		_ = ln.Close()
+		<-accepted
+		l.mu.Lock()
+		defer l.mu.Unlock()
+		for conn := range l.conns {
+			_ = conn.Close()
+		}
+	})
 	return l
 }
 
 // Close closes the lid.
-func (l *FakeLid) Close() { l.write("closed") }
+func (l *FakeLid) Close() { l.set("closed") }
 
 // Open opens the lid.
-func (l *FakeLid) Open() { l.write("open") }
+func (l *FakeLid) Open() { l.set("open") }
 
-func (l *FakeLid) write(state string) {
-	l.t.Helper()
-	if _, err := l.pipe.WriteString(state + "\n"); err != nil {
-		l.t.Fatalf("harness: write the lid pipe: %v", err)
+// set stands the state and writes it to every connected daemon. A daemon
+// that has gone away is dropped.
+func (l *FakeLid) set(state string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.state = state
+	for conn := range l.conns {
+		if _, err := conn.Write([]byte(state + "\n")); err != nil {
+			_ = conn.Close()
+			delete(l.conns, conn)
+		}
 	}
 }
 

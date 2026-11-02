@@ -17,27 +17,32 @@ func TestConfigFromEnv(t *testing.T) {
 			want: Config{Tools: DefaultTools()},
 		},
 		{
-			name: "a tools dir resolves every tool there by its base name, with its lid pipe",
-			env:  map[string]string{EnvToolsDir: "/fake/bin", EnvLidPipe: "/fake/lid"},
+			name: "a tools dir resolves every tool there by its base name, with its fake lid",
+			env:  map[string]string{EnvToolsDir: "/fake/bin", EnvLid: "/fake/lid"},
 			want: Config{Tools: Tools{
 				Sudo: "/fake/bin/sudo", Pmset: "/fake/bin/pmset", Ipconfig: "/fake/bin/ipconfig",
 				Networksetup: "/fake/bin/networksetup", WifiUtil: "/fake/bin/wifi-util",
 				Brightness: "/fake/bin/mac-brightness",
-			}, LidPipe: "/fake/lid"},
+			}, FakeLid: "/fake/lid"},
 		},
 		{
-			name:    "a tools dir without a lid pipe is refused",
+			name:    "a tools dir without a fake lid is refused",
 			env:     map[string]string{EnvToolsDir: "/fake/bin"},
 			wantErr: true,
 		},
 		{
-			name:    "a lid pipe without a tools dir is refused",
-			env:     map[string]string{EnvLidPipe: "/fake/lid"},
+			name:    "a fake lid without a tools dir is refused",
+			env:     map[string]string{EnvLid: "/fake/lid"},
 			wantErr: true,
 		},
 		{
-			name:    "a relative lid pipe is refused",
-			env:     map[string]string{EnvToolsDir: "/fake/bin", EnvLidPipe: "fake/lid"},
+			name: "a lid state is a fixed lid",
+			env:  map[string]string{EnvToolsDir: "/fake/bin", EnvLid: "open"},
+			want: Config{Tools: ToolsIn("/fake/bin"), FakeLid: "open"},
+		},
+		{
+			name:    "a relative lid socket is refused",
+			env:     map[string]string{EnvToolsDir: "/fake/bin", EnvLid: "fake/lid"},
 			wantErr: true,
 		},
 		{
@@ -47,7 +52,7 @@ func TestConfigFromEnv(t *testing.T) {
 		},
 		{
 			name:    "a relative tools dir is refused",
-			env:     map[string]string{EnvToolsDir: "fake/bin", EnvLidPipe: "/fake/lid"},
+			env:     map[string]string{EnvToolsDir: "fake/bin", EnvLid: "/fake/lid"},
 			wantErr: true,
 		},
 		{

@@ -5,19 +5,21 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
+	"net"
 	"strings"
 	"sync"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 )
 
-// EnvLidPipe replaces the operating system's lid with a named pipe: each line
-// written to it ("open", "closed" or "none") is one lid state, the first being
-// the state read at subscription. It is the test knob that pairs with
-// EnvToolsDir, so a daemon running against fake host tools never hears the
-// real machine's lid (ConfigFromEnv refuses the one without the other).
-const EnvLidPipe = "AGENT_REPL_PERSISTENT_WIFI_LID_PIPE"
+// EnvLid replaces the operating system's lid with a fake one, in one of two
+// forms: an absolute path is a Unix socket a test harness serves (SocketLid),
+// and "open", "closed" or "none" is a lid fixed in that state (FixedLid), for
+// a world whose daemon the harness cannot reach. It is the test knob that
+// pairs with EnvToolsDir, so a daemon running against fake host tools never
+// hears the real machine's lid (ConfigFromEnv refuses the one without the
+// other).
+const EnvLid = "AGENT_REPL_PERSISTENT_WIFI_LID"
 
 // Lid is what the operating system says about the built-in display's lid.
 type Lid int
@@ -32,7 +34,7 @@ const (
 	LidNone
 )
 
-// String names the lid for the record and for EnvLidPipe's lines.
+// String names the lid for the record and for a fake lid's lines.
 func (l Lid) String() string {
 	switch l {
 	case LidOpen:
@@ -123,58 +125,72 @@ func (f lidFact) stamp(s *agentreplv1.PersistentWifiState) {
 	}
 }
 
-// PipeLid is the LidWatcher over EnvLidPipe's named pipe.
-func PipeLid(path string) LidWatcher { return pipeLid{path: path} }
+// SocketLid is the LidWatcher over a Unix socket a harness serves: the
+// server writes each connection the lid's state when it connects, then every
+// change, one per line ("open", "closed" or "none"). EACH WATCH HAS A
+// CONNECTION OF ITS OWN, so two daemons watching at once (a handover's
+// predecessor and successor) never take each other's lines, and closing a
+// watch's own connection is what wakes its read when ctx ends.
+func SocketLid(path string) LidWatcher { return socketLid{path: path} }
 
-type pipeLid struct{ path string }
+type socketLid struct{ path string }
 
-// Watch opens the pipe read-write, so it never sees an end of file while it
-// holds it, and reads one lid per line. THE END OF CTX IS WRITTEN INTO THE
-// PIPE: the read blocks in the kernel (the runtime does not poll a pipe on
-// macOS, so closing it would not wake the read), and the watcher's own
-// descriptor writes the line that wakes it.
-func (p pipeLid) Watch(ctx context.Context, heard func(Lid)) error {
-	f, err := os.OpenFile(p.path, os.O_RDWR, 0)
+func (s socketLid) Watch(ctx context.Context, heard func(Lid)) error {
+	var dialer net.Dialer
+	conn, err := dialer.DialContext(ctx, "unix", s.path)
 	if err != nil {
-		return fmt.Errorf("open the lid pipe: %w", err)
-	}
-	defer f.Close()
-	stopped := make(chan struct{})
-	var waker sync.WaitGroup
-	waker.Add(1)
-	go func() {
-		defer waker.Done()
-		select {
-		case <-ctx.Done():
-			_, _ = f.WriteString("\n")
-		case <-stopped:
-		}
-	}()
-	defer waker.Wait()
-	defer close(stopped)
-	sc := bufio.NewScanner(f)
-	for sc.Scan() {
 		if ctx.Err() != nil {
 			return nil
 		}
+		return fmt.Errorf("connect to the lid socket: %w", err)
+	}
+	stopped := make(chan struct{})
+	var closer sync.WaitGroup
+	closer.Add(1)
+	go func() {
+		defer closer.Done()
+		select {
+		case <-ctx.Done():
+		case <-stopped:
+		}
+		_ = conn.Close()
+	}()
+	defer closer.Wait()
+	defer close(stopped)
+	sc := bufio.NewScanner(conn)
+	for sc.Scan() {
 		l, err := parseLidLine(sc.Text())
 		if err != nil {
 			return err
 		}
 		heard(l)
 	}
-	if err := sc.Err(); err != nil {
-		return fmt.Errorf("read the lid pipe: %w", err)
+	if ctx.Err() != nil {
+		return nil
 	}
-	return errors.New("the lid pipe ended")
+	if err := sc.Err(); err != nil {
+		return fmt.Errorf("read the lid socket: %w", err)
+	}
+	return errors.New("the lid socket ended")
 }
 
-// parseLidLine reads one EnvLidPipe line.
+// FixedLid is a lid heard once, in state l, that never changes.
+func FixedLid(l Lid) LidWatcher { return fixedLid{lid: l} }
+
+type fixedLid struct{ lid Lid }
+
+func (f fixedLid) Watch(ctx context.Context, heard func(Lid)) error {
+	heard(f.lid)
+	<-ctx.Done()
+	return nil
+}
+
+// parseLidLine reads one lid state's name.
 func parseLidLine(line string) (Lid, error) {
 	for _, l := range []Lid{LidOpen, LidClosed, LidNone} {
 		if strings.TrimSpace(line) == l.String() {
 			return l, nil
 		}
 	}
-	return 0, fmt.Errorf("the lid pipe wrote %q, which names no lid state", line)
+	return 0, fmt.Errorf("%q names no lid state", line)
 }
