@@ -359,13 +359,15 @@ The ground is `agent-repl-input-background', which the fill derives from."
 
 (defun agent-repl--input-paint ()
   "Paint the current composer its ground and its border's sides.
-A composer already painted the ground is left as it is; one painted
-another has those remaps taken back first (`agent-repl--ground-swap')."
+A composer already painted the fill the ground now derives is left as it
+is; one painted another fill, from a changed ground OR a changed
+derivation after a reload, has those remaps taken back first
+(`agent-repl--ground-swap')."
   (setq agent-repl--input-painted
         (agent-repl--ground-swap agent-repl--input-ground-log-scope
                                  "elisp.input.paint"
                                  agent-repl--input-painted
-                                 agent-repl-input-background
+                                 (agent-repl--input-fill-color)
                                  #'agent-repl--input-paint-remaps)))
 
 (defun agent-repl--input-composers ()
