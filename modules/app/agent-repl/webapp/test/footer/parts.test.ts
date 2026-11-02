@@ -24,6 +24,36 @@ describe("statusCellWord", () => {
   it("draws every other arm as its name", () => {
     expect(statusCellWord("networkFault")).toBe("network fault");
   });
+
+  it.each([
+    ["closing", "blocked", "close blocked"],
+    ["merging", "awaitingFree", "waiting for"],
+    ["merging", "conflictResolution", "conflict resolution"],
+    ["merging", "preDeploy", "pre-deploy"],
+    ["merging", "postDeploy", "post-deploy"],
+    ["mergeFailed", "conflicts", "merge conflicts"],
+    ["mergeFailed", "tests", "tests failed"],
+    ["mergeFailed", "hook", "hook failed"],
+    ["mergeFailed", "other", "merge failed"],
+    ["agentReplFault", "startFailed", "start failed"],
+    ["agentReplFault", "daemonImpaired", "daemon impaired"],
+    ["networkFault", "offline", "offline"],
+    ["vendorFault", "vendorRetry", "vendor retry"],
+    ["vendorFault", "queryDied", "query died"],
+    ["interrupted", "byUser", "interrupted by user"],
+    ["interrupted", "hostShutdown", "host shutdown"],
+    ["loading", "memory", "loading memory"],
+    ["loading", "invoked", "loading skill"],
+    ["loading", "discovered", "loading skills"],
+    ["loading", "listing", "loading skill list"],
+    ["degraded", "observation", "observation degraded"],
+    ["degraded", "stateUnreported", "state unreported"],
+    ["idle", "turnFailed", "turn failed"],
+    ["working", "executing", "executing"],
+    ["working", "thinking", "thinking"],
+  ])("draws the %s/%s step as the status '%s'", (arm, step, expected) => {
+    expect(statusCellWord(arm, step)).toBe(expected);
+  });
 });
 
 describe("textLine", () => {

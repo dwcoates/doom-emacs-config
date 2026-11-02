@@ -1513,20 +1513,20 @@ describe("mountFooter: the client's own verdict overlays the daemon's view", () 
     clearClientFailures();
   });
 
-  it("draws the status disconnected under a unary transport failure", async () => {
+  it("marks the status disconnected under a unary transport failure", async () => {
     const { host } = mount();
     await settle();
     reportClientFailure("unary_transport", "AnswerColdGate: unavailable");
-    expect(host.querySelector(".footer-status")?.textContent).toBe(
+    expect(host.querySelector(".footer-status")?.getAttribute("data-arm")).toBe(
       "disconnected",
     );
   });
 
-  it("draws the substatus daemon unreachable under a unary transport failure", async () => {
+  it("draws the status daemon unreachable under a unary transport failure", async () => {
     const { host } = mount();
     await settle();
     reportClientFailure("unary_transport", "AnswerColdGate: unavailable");
-    expect(host.querySelector(".footer-substatus")?.textContent).toBe(
+    expect(host.querySelector(".footer-status")?.textContent).toBe(
       "daemon unreachable",
     );
   });
@@ -1570,7 +1570,7 @@ describe("mountFooter: the client's own verdict overlays the daemon's view", () 
     reportClientFailure("unary_transport", "AnswerColdGate: unavailable");
     h.tail.push(pushView(footerView()));
     await settle();
-    expect(host.querySelector(".footer-status")?.textContent).toBe(
+    expect(host.querySelector(".footer-status")?.getAttribute("data-arm")).toBe(
       "disconnected",
     );
   });
@@ -1582,7 +1582,7 @@ describe("mountFooter: the client's own verdict overlays the daemon's view", () 
     clearClientFailures();
     h.tail.push(pushView(footerView()));
     await settle();
-    expect(host.querySelector(".footer-status")?.textContent).toBe("idle");
+    expect(host.querySelector(".footer-status")?.getAttribute("data-arm")).toBe("idle");
   });
 
   it("redraws the daemon's last view the moment the verdict is cleared", async () => {
@@ -1592,7 +1592,7 @@ describe("mountFooter: the client's own verdict overlays the daemon's view", () 
     await settle();
     reportClientFailure("unary_transport", "AnswerColdGate: unavailable");
     clearClientFailures();
-    expect(host.querySelector(".footer-status")?.textContent).toBe("idle");
+    expect(host.querySelector(".footer-status")?.getAttribute("data-arm")).toBe("idle");
   });
 
   it("does NOT close the composer gate, the retry being what lifts the verdict", async () => {
@@ -2099,7 +2099,7 @@ describe("mountFooter: the hovered response's usage stands in for the activity l
     // Act
     footer.showResponseUsage(hoveredUsage("2.1k"));
     // Assert
-    expect([host.querySelector(".footer-status")?.textContent, tierOf(host)]).toEqual(["disconnected", "hover"]);
+    expect([host.querySelector(".footer-status")?.getAttribute("data-arm"), tierOf(host)]).toEqual(["disconnected", "hover"]);
   });
 
   it("draws nothing before the first push", async () => {

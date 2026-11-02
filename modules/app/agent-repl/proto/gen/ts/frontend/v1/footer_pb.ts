@@ -7,10 +7,10 @@
 // carrying more of its information in text fields; then the turn's figures;
 // then the live-work chips, right-aligned:
 //
-//   ┌───────────┬─────────────────────┬──────────────────────────────┬───────┬───────────────┬─────────────┐
-//   │ merging   │ cherry-picking 3/7  │ 4f2a1c: fold tokens into api │ 0:42  │ 18.2k in ⚠ ✓ │ ⚙3 ☑3/7 $2 │
-//   └───────────┴─────────────────────┴──────────────────────────────┴───────┴───────────────┴─────────────┘
-//     Status      SubStatus             StatusActivity                 Clock   Tokens cell     LiveWork chips
+//   ┌─────────────┬──────────────────────────────┬───────┬───────────────┬─────────────┐
+//   │ rebasing 3/7│ 4f2a1c: fold tokens into api │ 0:42  │ 18.2k in ⚠ ✓ │ ⚙3 ☑3/7 $2 │
+//   └─────────────┴──────────────────────────────┴───────┴───────────────┴─────────────┘
+//     Status        StatusActivity                 Clock   Tokens cell     LiveWork chips
 //     coarsest ──────────── resolution increases ────────────► finest
 //
 //   Status         the coarsest state, one word + color, a small closed set;
@@ -170,14 +170,16 @@ export const FooterStripSchema: GenMessage<FooterStrip> = /*@__PURE__*/
  * the client holds no table.
  *
  * RENDERING RULES, stated once:
- * - The strip draws | status | substatus | activity |. A status arm with NO
- *   substatus oneof merges the substatus cell into the status cell, and the
- *   activity cell always absorbs the free width.
+ * - The strip draws | status | activity |. The SubStatus is DRAWN AS THE
+ *   STATUS (owner request, 2026-10-31): when the arm sets a step, the status
+ *   cell's word is the step's, in the arm's color, carrying the step's
+ *   figures; with no step it is the arm's own word. The activity cell always
+ *   absorbs the free width.
  * - STATUS AND SUBSTATUS TEXT is rendered lowercase ASCII with spaces,
  *   NEVER underscores — the arm name is a schema spelling, not the label.
  * - ACTIVITY is the rich cell: colorized, formatted, and ALWAYS EXACTLY ONE
  *   LINE, truncated with an ellipsis when it would overflow; it never grows
- *   the strip's height. The status and substatus cells may wrap. A
+ *   the strip's height. The status cell may wrap. A
  *   STATICALLY TYPED datum in an activity message (a count, an instant, a
  *   sha) is a strong indicator that datum deserves color in the rendered
  *   line.
@@ -787,7 +789,7 @@ export const FooterSubStatusIdleTurnFailedSchema: GenMessage<FooterSubStatusIdle
  */
 export type FooterStatusTurnFailed = Message<"frontend.v1.FooterStatusTurnFailed"> & {
   /**
-   * No substatus: the substatus cell merges into the status cell.
+   * No substatus: the status cell draws the arm's own word.
    * The activity cell. ALWAYS SET, the same cell an idle session carries.
    * When the turn failed because the vendor query died, the cell is the
    * salient dead-query line.
@@ -2572,7 +2574,7 @@ export const FooterStatusMergeFailedSchema: GenMessage<FooterStatusMergeFailed> 
   messageDesc(file_frontend_v1_footer, 64);
 
 /**
- * Drawn "conflicts".
+ * Drawn "merge conflicts".
  *
  * @generated from message frontend.v1.FooterSubStatusMergeFailedConflicts
  */
@@ -2587,7 +2589,7 @@ export const FooterSubStatusMergeFailedConflictsSchema: GenMessage<FooterSubStat
   messageDesc(file_frontend_v1_footer, 65);
 
 /**
- * Drawn "tests".
+ * Drawn "tests failed".
  *
  * @generated from message frontend.v1.FooterSubStatusMergeFailedTests
  */
@@ -2602,7 +2604,7 @@ export const FooterSubStatusMergeFailedTestsSchema: GenMessage<FooterSubStatusMe
   messageDesc(file_frontend_v1_footer, 66);
 
 /**
- * Drawn "merge"; the account is the bubble's.
+ * Drawn "merge failed"; the account is the bubble's.
  *
  * @generated from message frontend.v1.FooterSubStatusMergeFailedOther
  */
@@ -2617,7 +2619,7 @@ export const FooterSubStatusMergeFailedOtherSchema: GenMessage<FooterSubStatusMe
   messageDesc(file_frontend_v1_footer, 67);
 
 /**
- * Drawn "hook"; the account is the bubble's hook tab.
+ * Drawn "hook failed"; the account is the bubble's hook tab.
  *
  * @generated from message frontend.v1.FooterSubStatusMergeFailedHook
  */
@@ -2638,7 +2640,7 @@ export const FooterSubStatusMergeFailedHookSchema: GenMessage<FooterSubStatusMer
  */
 export type FooterStatusMerged = Message<"frontend.v1.FooterStatusMerged"> & {
   /**
-   * No substatus: the substatus cell merges into the status cell.
+   * No substatus: the status cell draws the arm's own word.
    * The activity cell. ALWAYS SET, the same cell a merge in flight carries.
    *
    * @generated from field: frontend.v1.FooterStatusMergingActivity activity = 1;
@@ -3207,7 +3209,7 @@ export const FooterMergeStepCommittingSchema: GenMessage<FooterMergeStepCommitti
 export type FooterStatusBackground = Message<"frontend.v1.FooterStatusBackground"> & {
   /**
    * No substatus: the chips and expanded panels carry the detail, so the
-   * substatus cell merges into the status cell.
+   * status cell draws the arm's own word.
    * The activity cell. ALWAYS SET: the enduring tier guarantees the cell has
    * something to draw under every status.
    *
@@ -3810,8 +3812,8 @@ export type FooterStatusActivityFault = Message<"frontend.v1.FooterStatusActivit
    * The fault kind, spelled exactly as the daemon's fault vocabulary spells
    * it (`resume_failed`, `bounce_unknown`, `prompts_dir_missing`, ...). The
    * client renders it lowercase with spaces, never underscores — the same
-   * rule the status and substatus cells follow — and holds no table keyed on
-   * it: the status and substatus cells beside it are already resolved.
+   * rule the status cell follows — and holds no table keyed on it: the
+   * status cell beside it is already resolved.
    *
    * @generated from field: string kind = 1;
    */
@@ -4869,7 +4871,7 @@ export const FooterStatusClosingSalientSchema: GenMessage<FooterStatusClosingSal
 /**
  * A final response is being rewritten from words highlighted in it. It
  * declares no substatus oneof: the response's own bubble shows which response
- * is updating, so the status cell merges with the substatus cell.
+ * is updating, so the status cell draws the arm's own word.
  *
  * @generated from message frontend.v1.FooterStatusUpdating
  */

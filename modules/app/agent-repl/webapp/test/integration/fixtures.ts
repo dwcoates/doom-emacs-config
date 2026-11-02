@@ -1726,8 +1726,9 @@ const substatusValue = (substatus: string): object => {
 };
 
 /**
- * The words each merge substatus draws, as the reader sees them: the arm's
- * name, plus the figures the three counted steps carry (substatusValue).
+ * The status word each merge substatus draws, as the reader sees it: the
+ * step's word, plus the figures the three counted steps carry
+ * (substatusValue).
  */
 export const MERGE_SUBSTATUS_WORDS: Record<string, Record<string, string>> = {
   merging: {
@@ -1742,7 +1743,7 @@ export const MERGE_SUBSTATUS_WORDS: Record<string, Record<string, string>> = {
     postDeploy: "post-deploy",
     waitingOnUser: "waiting on user",
   },
-  mergeFailed: { conflicts: "conflicts", tests: "tests", other: "merge", hook: "hook" },
+  mergeFailed: { conflicts: "merge conflicts", tests: "tests failed", other: "merge failed", hook: "hook failed" },
 };
 
 /** Every merge step line arm, with a complete payload and the words it draws. */

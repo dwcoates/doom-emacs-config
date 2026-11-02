@@ -16,12 +16,15 @@ import {
   STATUS_WAVE_LETTER_OFFSET_MS,
   STATUS_WAVE_PERIOD_MS,
   StatusWave,
+  STILL_STATUS_STEPS,
   WAVING_STATUS_ARMS,
   statusColorStyle,
   statusWaveStyle,
   statusWordWaves,
 } from "../src/breathing.js";
 import { FOOTER_STATUS_CASES } from "../src/footer/tones.js";
+import { statusStepKey } from "../src/vocab.js";
+import { FooterStatusSchema } from "../../proto/gen/ts/frontend/v1/footer_pb";
 
 const NOW = Date.parse("2024-05-01T12:00:00.000Z");
 
@@ -478,6 +481,49 @@ describe("statusWordWaves: which statuses mean progress", () => {
   )("holds the %s arm still", (arm) => {
     // Arrange / Act / Assert
     expect(statusWordWaves(arm)).toBe(false);
+  });
+
+  it.each([...STILL_STATUS_STEPS].map((key) => key.split("/") as [string, string]))(
+    "holds the %s arm still on its %s step",
+    (arm, step) => {
+      // Arrange / Act / Assert
+      expect(statusWordWaves(arm, step)).toBe(false);
+    },
+  );
+
+  it("waves a waving arm on a step that gets somewhere", () => {
+    // Arrange / Act / Assert
+    expect(statusWordWaves("merging", "rebasing")).toBe(true);
+  });
+
+  it("holds a still arm still on any step", () => {
+    // Arrange / Act / Assert
+    expect(statusWordWaves("idle", "done")).toBe(false);
+  });
+
+  it("keys every still step through statusStepKey on a step the contract declares", () => {
+    // Arrange
+    const declared = FooterStatusSchema.oneofs
+      .find((oneof) => oneof.name === "status")
+      ?.fields.flatMap((field) =>
+        (field.message?.oneofs.find((oneof) => oneof.name === "substatus")?.fields ?? []).map((sub) =>
+          statusStepKey(field.localName, sub.localName),
+        ),
+      ) ?? [];
+
+    // Act
+    const undeclared = [...STILL_STATUS_STEPS].filter((key) => !declared.includes(key));
+
+    // Assert
+    expect(undeclared).toEqual([]);
+  });
+
+  it("names only steps of waving arms, so a still step is never redundant", () => {
+    // Arrange / Act
+    const stray = [...STILL_STATUS_STEPS].filter((key) => !WAVING_STATUS_ARMS.has(key.split("/")[0] ?? ""));
+
+    // Assert
+    expect(stray).toEqual([]);
   });
 
   it("names only arms the contract declares, so a renamed arm cannot rot the set", () => {

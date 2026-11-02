@@ -128,11 +128,11 @@ describe("the status cell", () => {
     expect(harness.$(".footer-status")?.className).toContain(`tone-${footerStatusColor(status)}`);
   });
 
-  it("reads a single-word arm lowercase", async () => {
+  it("reads a single-word step lowercase", async () => {
     // Arrange / Act
     await withFooter({ status: "merging", substatus: "testing" });
     // Assert
-    expect(harness.text(".footer-status")).toContain("merging");
+    expect(harness.text(".footer-status")).toBe("testing");
   });
 
   it("reads a compound substatus arm as lowercase words separated by spaces", async () => {
@@ -146,7 +146,7 @@ describe("the status cell", () => {
     // Arrange / Act
     await withFooter({ status: "merging", substatus: "conflictResolution" });
     // Assert
-    expect(harness.text(".footer-substatus")).toBe("conflict resolution");
+    expect(harness.text(".footer-status")).toBe("conflict resolution");
   });
 
   it("reads the host-shutdown interrupt substatus as words", async () => {
@@ -166,17 +166,21 @@ describe("substatuses", () => {
     // Arrange / Act
     await withFooter({ status, substatus });
     // Assert
-    expect(harness.$(".footer-substatus")?.dataset.arm).toBe(substatus);
+    expect(harness.$(".footer-status")?.dataset.substatus).toBe(substatus);
   });
 
-  it("merges the status into the status cell when the arm has no substatus", async () => {
-    // Arrange / Act: `background` declares no substatus oneof at all.
-    await withFooter({ status: FOOTER_STATUS_WITHOUT_SUBSTATUS });
+  it.each(
+    FOOTER_STATUS_ARMS.flatMap((status) =>
+      FOOTER_STATUS_SUBSTATUSES[status].map((substatus) => ({ status, substatus })),
+    ),
+  )("draws no substatus cell for $status/$substatus", async ({ status, substatus }) => {
+    // Arrange / Act
+    await withFooter({ status, substatus });
     // Assert
     expect(harness.$(".footer-substatus")).toBeNull();
   });
 
-  it("still names the status when there is no substatus to merge", async () => {
+  it("names the arm itself when the arm has no substatus", async () => {
     // Arrange / Act
     await withFooter({ status: FOOTER_STATUS_WITHOUT_SUBSTATUS });
     // Assert
@@ -191,7 +195,7 @@ describe("substatuses", () => {
     // Arrange / Act
     await withFooter({ status, substatus });
     // Assert
-    expect(harness.text(".footer-substatus")).toBe(drawn);
+    expect(harness.text(".footer-status")).toBe(drawn);
   });
 
   it("gives every merge substatus its words", () => {
@@ -203,9 +207,9 @@ describe("substatuses", () => {
     );
   });
 
-  it("reads merge failed as its status word", async () => {
+  it("reads merge failed's catch-all area as the status word merge failed", async () => {
     // Arrange / Act
-    await withFooter({ status: "mergeFailed", substatus: "tests" });
+    await withFooter({ status: "mergeFailed", substatus: "other" });
     // Assert
     expect(harness.text(".footer-status")).toBe("merge failed");
   });
@@ -412,7 +416,7 @@ describe("the activity cell", () => {
     });
     // Assert
     expect(harness.text(".footer-activity")).toContain("bin/deploy-landing.sh");
-    expect(harness.text(".footer-substatus")).toBe("deploying");
+    expect(harness.text(".footer-status")).toBe("deploying");
   });
 
   it("colors a conflict's file count as a typed datum", async () => {

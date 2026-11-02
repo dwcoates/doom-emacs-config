@@ -3040,9 +3040,10 @@ marker alone.
 
 **A TOOL CALL AND A PROMPT'S DELIVERY DRAW NO ACTIVITY LINE** (owner ruling,
 2026-10-06). The `tool_call` and `submitting` transients are retired (tags 6
-and 8 of `FooterActivityTransient` are reserved): the substatus cell already
-states the step (`executing`, `reading`, `submitting`, and the rest under
-`working`), so the activity line repeating it added nothing. The prompt
+and 8 of `FooterActivityTransient` are reserved): the status cell already
+states the step, drawn as the status (`executing`, `reading`, `submitting`,
+and the rest under `working`), so the activity line repeating it added
+nothing. The prompt
 queue still reports each delivery stage to the footer, which records it and
 ends the agent's push notification on it, but raises no line.
 
