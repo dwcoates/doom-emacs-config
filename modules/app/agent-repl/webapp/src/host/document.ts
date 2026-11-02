@@ -14,11 +14,10 @@
  */
 import type { LevelWindow } from "../../../agent-shim/logging/ts/level-window.js";
 import { createTicker } from "../clock.js";
-import { mintConnectionId } from "../connection-id.js";
 import { createLocalFailures, type LocalFailures } from "../failure/local.js";
-import { bindLogContext, setLogger, type ClientLogLevel, type ForwardingLogger } from "../log.js";
-import { installForwardingLogger, installTextAffordances } from "../document-runtime.js";
-import { beginPage, endPageAtPagehide, stopAtPageTeardown } from "../page-teardown.js";
+import type { ClientLogLevel, ForwardingLogger } from "../log.js";
+import { installTextAffordances, startPageRuntime } from "../document-runtime.js";
+import { endPageAtPagehide, stopAtPageTeardown } from "../page-teardown.js";
 import { createAgentReplClient, type AgentReplClient } from "../rpc/client.js";
 import { createDaemonContext, type DaemonContext } from "../rpc/context.js";
 import { createPageTransport } from "../rpc/transport.js";
@@ -71,19 +70,16 @@ export function startWebhostDocument(
   win: Window,
   deps: WebhostDocumentDeps = {},
 ): StartedWebhostDocument {
-  beginPage();
-  const connectionId = mintConnectionId();
-  const client =
-    deps.client ??
-    createAgentReplClient(createPageTransport(deps.daemon ?? win.location.origin, "webhost", connectionId));
-  bindLogContext({ connection_id: connectionId, webhost_document: document });
-  installForwardingLogger(
-    () => client,
-    { case: "webhost", value: {} },
-    deps.level ?? "info",
-    deps.installLogger ?? setLogger,
-    deps.onRecord,
-  );
+  const { connectionId, client } = startPageRuntime({
+    daemon: deps.daemon ?? win.location.origin,
+    kind: "webhost",
+    source: { case: "webhost", value: {} },
+    context: { webhost_document: document },
+    level: deps.level ?? "info",
+    client: deps.client,
+    installLogger: deps.installLogger,
+    onRecord: deps.onRecord,
+  });
   const failures = createLocalFailures();
   // THE LOAD THE DOCUMENT PUTS ON ITS WEB PROCESS (load-census.ts), once its
   // records have somewhere to go.

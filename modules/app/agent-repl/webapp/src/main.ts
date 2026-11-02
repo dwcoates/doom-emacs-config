@@ -68,15 +68,14 @@ import { RESPONSE_PROSE_CLASS } from "./feed/cards/response.js";
 import { installWorkspaceMentionClicks, watchWorkspaceMentions } from "./feed/workspace-mentions.js";
 import { bootFailed } from "./failure/sink.js";
 import { createLocalFailures, type LocalFailures } from "./failure/local.js";
-import { LEVEL_WINDOW_OPERATION, bindLogContext, log } from "./log.js";
+import { LEVEL_WINDOW_OPERATION, log } from "./log.js";
 import { LevelWindow, selectionContext, selectionNote, selectLevel } from "../../agent-shim/logging/ts/level-window.js";
 import { installPagePresenceLog } from "./page-presence.js";
 import { installPageCensus } from "./page-census.js";
 import { pageAfter } from "./every.js";
-import { beginPage, endPageAtPagehide, stopAtPageTeardown } from "./page-teardown.js";
+import { endPageAtPagehide, stopAtPageTeardown } from "./page-teardown.js";
 import { connectToHost } from "./host/embed.js";
-import { installForwardingLogger, installTextAffordances } from "./document-runtime.js";
-import { mintConnectionId } from "./connection-id.js";
+import { installTextAffordances, startPageRuntime } from "./document-runtime.js";
 import { watchShownEdge } from "./host/shown-edge.js";
 import { createWebhostFailureView, mergeFailureViews } from "./failure/webhost.js";
 import { createEditorIngressView } from "./held/editor-ingress.js";
@@ -91,10 +90,8 @@ import { watchReloadBlank } from "./reload-blank.js";
 import { watchPageStall } from "./page-stall.js";
 import { createPromptEcho, installPromptEcho } from "./prompt-echo.js";
 import { createPageSeen } from "./page-seen.js";
-import { createAgentReplClient } from "./rpc/client.js";
 import { createAppContext, type AppContext } from "./rpc/context.js";
 import { isHostAddress, isSidebarAddress, pageAddress } from "./rpc/page-address.js";
-import { createPageTransport } from "./rpc/transport.js";
 import { workspaceRef } from "./rpc/workspace-ref.js";
 import type { SubmitPromptCommandPanel } from "../../proto/gen/ts/agentrepl/v1/endpoint_submit_prompt_pb";
 import type { FeedId } from "../../proto/gen/ts/frontend/v1/feed_pb";
@@ -133,33 +130,30 @@ export async function boot(): Promise<void> {
     // own, and `test/setup.ts` installs a logger for every suite, so the one
     // condition this failed under is the only one no suite creates.
     //
-    // Everything above `setLogger` is silent by construction, and must stay
-    // so: `pageAddress`, `workspaceRef`, the transport, the client,
-    // `mintConnectionId` and `bindLogContext` do not log, which is what
-    // makes them safe to run before the sink exists. Anything added here
-    // that logs reintroduces exactly this defect.
+    // Everything up to the logger is silent by construction, and must stay
+    // so: `pageAddress`, `workspaceRef`, the level window and
+    // `startPageRuntime` (the transport, the client, the connection and the
+    // bound context) do not log, which is what makes them safe to run before
+    // the sink exists. Anything added here that logs reintroduces exactly
+    // this defect.
     const address = pageAddress(window.location.search);
     const workspace = workspaceRef(address.workspaceId, address.workspaceDir);
 
-    // THE PAGE ENDS AT ITS UNLOAD (page-teardown.ts): every request this
-    // transport makes is aborted then, and nothing it asked for answers into
-    // a page that is gone.
-    beginPage();
-    endPageAtPagehide(window);
-    const connectionId = mintConnectionId();
-    const transport = createPageTransport(window.location.origin, "page", connectionId);
-    const client = createAgentReplClient(transport);
-
-    bindLogContext({
-      connection_id: connectionId,
-      workspace_id: workspace.id,
-      workspace_dir: workspace.dir,
-    });
     // A level other than info is a window (proto/vocab/log-level-window.json):
     // a page reloaded from an address whose window has ended boots at info.
     const levelSelection = selectLevel(address.logLevel, address.logLevelUntil, Date.now(), "log_level");
     const levelWindow = new LevelWindow(levelSelection);
-    installForwardingLogger(() => client, { case: "workspace", value: workspace }, levelWindow);
+    const { connectionId, client } = startPageRuntime({
+      daemon: window.location.origin,
+      kind: "page",
+      source: { case: "workspace", value: workspace },
+      context: { workspace_id: workspace.id, workspace_dir: workspace.dir },
+      level: levelWindow,
+    });
+    // THE PAGE ENDS AT ITS UNLOAD (page-teardown.ts): every request this
+    // transport makes is aborted then, and nothing it asked for answers into
+    // a page that is gone.
+    endPageAtPagehide(window);
     const levelNote = selectionNote(levelSelection);
     if (levelNote !== null) log.info(levelNote, { operation: LEVEL_WINDOW_OPERATION, context: selectionContext(levelSelection) });
 
