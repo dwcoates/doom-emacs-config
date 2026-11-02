@@ -3606,11 +3606,6 @@ The master kill-switch overrides the always-on file-write decoupling."
 
 ;;;; ---- Tests: swapping a buffer's ground ----
 
-(defun agent-repl-test-ground-swap--backgrounds (face)
-  "Return every :background the current buffer remaps FACE to, newest first."
-  (delq nil (mapcar (lambda (spec) (and (listp spec) (plist-get spec :background)))
-                    (cdr (assq face face-remapping-alist)))))
-
 (defmacro agent-repl-test-ground-swap--with-buffer (&rest body)
   "Run BODY in a fresh buffer, `logs' collecting every canonical log line."
   (declare (indent 0))
@@ -3627,7 +3622,7 @@ The master kill-switch overrides the always-on file-write decoupling."
       ;; Assert
       (should (equal (car painted) "#123456"))
       (should (= (length (cdr painted)) 2))
-      (should (equal (agent-repl-test-ground-swap--backgrounds 'default) '("#123456"))))))
+      (should (equal (agent-repl-test--remapped-backgrounds 'default) '("#123456"))))))
 
 (ert-deftest agent-repl-test-ground-swap-same-color-keeps-the-record ()
   "A repaint in the color already worn returns the same record, calls no PAINT and logs nothing."
@@ -3657,8 +3652,8 @@ The master kill-switch overrides the always-on file-write decoupling."
       (agent-repl--ground-swap 'scope "elisp.test.paint" painted "#0a0a0a"
                                #'agent-repl--set-buffer-background)
       ;; Assert
-      (should (equal (list (agent-repl-test-ground-swap--backgrounds 'default)
-                           (agent-repl-test-ground-swap--backgrounds 'fringe))
+      (should (equal (list (agent-repl-test--remapped-backgrounds 'default)
+                           (agent-repl-test--remapped-backgrounds 'fringe))
                      '(("#0a0a0a") ("#0a0a0a")))))))
 
 (ert-deftest agent-repl-test-ground-swap-takes-the-old-back-before-painting ()
@@ -3671,7 +3666,7 @@ The master kill-switch overrides the always-on file-write decoupling."
       ;; Act
       (agent-repl--ground-swap 'scope "elisp.test.paint" painted "#abcdef"
                                (lambda (_color)
-                                 (setq seen (agent-repl-test-ground-swap--backgrounds 'default))
+                                 (setq seen (agent-repl-test--remapped-backgrounds 'default))
                                  nil))
       ;; Assert
       (should (null seen)))))

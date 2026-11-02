@@ -1797,11 +1797,6 @@ workspace from the working directory, so no source tag rides it."
 
 ;;;; ---- The ground's one owner ----
 
-(defun agent-repl-test-input--backgrounds (face)
-  "Return every :background the current buffer remaps FACE to, newest first."
-  (delq nil (mapcar (lambda (spec) (and (listp spec) (plist-get spec :background)))
-                    (cdr (assq face face-remapping-alist)))))
-
 (ert-deftest agent-repl-input-ground-is-set-through-its-owner ()
   "The ground's `:set' is its one owner."
   ;; Act + Assert
@@ -1882,8 +1877,8 @@ workspace from the working directory, so no source tag rides it."
         (agent-repl--input-background-set 'agent-repl-input-background "#000000")
         (agent-repl--input-background-set 'agent-repl-input-background "#ff0000")
         ;; Assert
-        (should (equal (list (agent-repl-test-input--backgrounds 'default)
-                             (agent-repl-test-input--backgrounds 'fringe))
+        (should (equal (list (agent-repl-test--remapped-backgrounds 'default)
+                             (agent-repl-test--remapped-backgrounds 'fringe))
                        '(("#ff0000") ("#ff0d0d" "#ff0000"))))))))
 
 (ert-deftest agent-repl-input-paint-in-the-same-ground-adds-nothing ()

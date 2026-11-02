@@ -1079,6 +1079,14 @@ every suite to it)."
   (cl-remove-if (lambda (m) (string-match-p agent-repl-test--log-echo-regexp m))
                 messages))
 
+(defun agent-repl-test--remapped-backgrounds (face)
+  "Return every :background the current buffer remaps FACE to, newest first.
+Read from `face-remapping-alist', so a remap stacked on another shows as
+two.  THE ONE such reader every suite uses (test-test-helpers.el holds
+every suite to it)."
+  (delq nil (mapcar (lambda (spec) (and (listp spec) (plist-get spec :background)))
+                    (cdr (assq face face-remapping-alist)))))
+
 (defmacro agent-repl-test--record-into (place)
   "A stand-in for a logging rung that records each record's text into PLACE.
 The lambda takes the rung's arguments (SCOPE FMT &rest ARGS), formats the
