@@ -156,6 +156,12 @@ func (l Layout) resolve(p string) string {
 // NeedsWebappDist), and the run is the dist's one writer.
 const NoWebappBuildEnv = "AGENT_REPL_SANDBOX_NO_WEBAPP_BUILD"
 
+// ScriptRunID is run i of a Script suite run once per -test.run pattern
+// (Units.Only). Each run is an atomic unit, so its ID never holds the '#'
+// that names a split's chunks (sched.ChunkID): the scheduler refuses an
+// atomic ID that does, and history would read it as a chunk's.
+func ScriptRunID(suite string, i int) string { return fmt.Sprintf("%s/%02d", suite, i) }
+
 func scriptUnits(l Layout, s roster.Suite) (Units, error) {
 	path, err := executableScriptPath(l, s)
 	if err != nil {
@@ -192,11 +198,11 @@ func scriptUnits(l Layout, s roster.Suite) (Units, error) {
 				return []run.Spec{unit(patterns[0])}
 			}
 			// Several patterns are several runs of the script, each its own
-			// unit, numbered as a Go package's chunks are.
+			// atomic unit (ScriptRunID).
 			specs := make([]run.Spec, len(patterns))
 			for i, pattern := range patterns {
 				specs[i] = unit(pattern)
-				specs[i].ID = fmt.Sprintf("%s#%02d", s.Name, i)
+				specs[i].ID = ScriptRunID(s.Name, i)
 			}
 			return specs
 		},
