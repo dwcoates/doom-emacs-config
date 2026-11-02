@@ -527,6 +527,7 @@ func TestAnswerColdGateCompactEchoesExactly(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
+	f.remoteControlOff()
 	// The sweep covers every test; the declared records are evidence of a KillSession the fake shim answers by exiting, a bring-up the test blocks or kills, a session fault the test opens, the shim death the test drives, the shim link the test severs.
 	f.d.ExpectWarnings("daemon.shimclient.redial", "daemon.sessionwatcher.reopen", "daemon.health.open_fault", "daemon.sessionwatcher.link_fault",
 		"daemon.sessionwatcher.watch_agent", "daemon.sessionwatcher.watch_session",
@@ -629,6 +630,7 @@ func TestAnswerColdGateRefusesAScopeTheMenuNeverServed(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
+	f.remoteControlOff()
 	// The sweep covers every test; the declared records are evidence of a KillSession the fake shim answers by exiting, a bring-up the test blocks or kills, a session fault the test opens, the shim death the test drives, the shim link the test severs.
 	f.d.ExpectWarnings("daemon.shimclient.redial", "daemon.sessionwatcher.reopen", "daemon.health.open_fault", "daemon.sessionwatcher.link_fault",
 		"daemon.sessionwatcher.watch_agent", "daemon.sessionwatcher.watch_session",
@@ -1474,6 +1476,7 @@ func TestAnswerColdGateClearEchoesExactly(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
+	f.remoteControlOff()
 	// The sweep covers every test; the declared records are evidence of a KillSession the fake shim answers by exiting, a bring-up the test blocks or kills, a session fault the test opens, the shim death the test drives, the shim link the test severs.
 	f.d.ExpectWarnings("daemon.shimclient.redial", "daemon.sessionwatcher.reopen", "daemon.health.open_fault", "daemon.sessionwatcher.link_fault",
 		"daemon.sessionwatcher.watch_agent", "daemon.sessionwatcher.watch_session",

@@ -10,6 +10,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	shimv1 "agentrepl/proto/shim/v1"
 
+	"agent-repld/internal/ctxend"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/holdfold"
 	"agent-repld/internal/ids"
@@ -278,10 +279,10 @@ func (f *Fleet) parkedBridgeEnded(ctx context.Context, log dlog.Logger, ws ids.W
 }
 
 // standingDown reports whether ERR is this daemon's own context ending under
-// the call: judged off the error, so a break that merely coincides with the
-// stand-down is still the break it is.
+// the call: judged off the error (ctxend.Is), so a break that merely coincides
+// with the stand-down is still the break it is.
 func standingDown(ctx context.Context, err error) bool {
-	return ctx.Err() != nil && (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded))
+	return ctx.Err() != nil && ctxend.Is(err)
 }
 
 // parkedBridgeFailed states a bridge that cannot be held: at ERROR and on the

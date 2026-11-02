@@ -12,6 +12,9 @@ import (
 	"testing"
 	"time"
 
+	"connectrpc.com/connect"
+
+	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	shimv1 "agentrepl/proto/shim/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
@@ -110,6 +113,21 @@ func (f *fixture) awaitGateShimStoodDown() {
 	f.d.AwaitWorkspaceLogRecord(f.repo.Dir, "the cold gate's shim stood down", func(r harness.LogRecord) bool {
 		return r.Message == "stood the cold gate's shim down; the gate stands until it is answered"
 	})
+}
+
+// remoteControlOff turns the fixture workspace's remote control off. A
+// repository's main worktree defaults to on, and a gate in remote control
+// keeps a shim holding its bridge rather than standing it down
+// (workspace/parkedbridge.go), so a test of the gate with no bridge says so.
+func (f *fixture) remoteControlOff() {
+	f.t.Helper()
+	resp, err := f.d.Client().UpdateRemoteControlMode(f.d.Ctx(), connect.NewRequest(&agentreplv1.UpdateRemoteControlModeRequest{
+		Workspace: f.ws,
+		Action:    &agentreplv1.UpdateRemoteControlModeRequest_Off{Off: &agentreplv1.UpdateRemoteControlModeOff{}},
+	}))
+	if err != nil || resp.Msg.GetSuccess() == nil || resp.Msg.GetSuccess().GetOn() {
+		f.t.Fatalf("UpdateRemoteControlMode(off) = (%v, %v), want a success leaving it off", resp, err)
+	}
 }
 
 // answerShim is the shim a gate's answer spawned to resume through.
