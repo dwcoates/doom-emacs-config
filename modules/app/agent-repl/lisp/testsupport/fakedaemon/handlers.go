@@ -672,3 +672,7 @@ func (s *fakeServer) ListPullRequestSubscriptions(ctx context.Context, req *conn
 func (s *fakeServer) CommentOnPullRequest(ctx context.Context, req *connect.Request[v1.CommentOnPullRequestRequest]) (*connect.Response[v1.CommentOnPullRequestResponse], error) {
 	return handleUnary[v1.CommentOnPullRequestRequest, v1.CommentOnPullRequestResponse](ctx, s, "CommentOnPullRequest", req.Msg)
 }
+
+func (s *fakeServer) NotifyWorkspace(ctx context.Context, req *connect.Request[v1.NotifyWorkspaceRequest]) (*connect.Response[v1.NotifyWorkspaceResponse], error) {
+	return handleUnary[v1.NotifyWorkspaceRequest, v1.NotifyWorkspaceResponse](ctx, s, "NotifyWorkspace", req.Msg)
+}

@@ -10,20 +10,26 @@ import (
 
 	"agent-repld/internal/desktopnotify"
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
 	"agent-repld/internal/wsm"
 )
 
 // opEditorFocus is the operation ReportEditorFocus's records carry.
 const opEditorFocus = "daemon.server.report_editor_focus"
 
-// Banners is the desktop banners a focus gain claims among
-// (desktopnotify.Notifier): the claim itself, and the selection that lets
-// every held banner go.
+// Banners is the daemon's desktop banners (desktopnotify.Notifier): the
+// claim a focus gain makes among them, the selection that lets every held
+// banner go, and the banner an agent asks for on behalf of a workspace.
 type Banners interface {
 	// Claim answers the newest held banner and lets go of every banner held.
 	Claim() desktopnotify.Claim
 	// Forget lets go of every held banner, for reason.
 	Forget(reason string)
+	// Notify posts an agent's banner for ws, answering what was decided.
+	Notify(ws ids.WorkspaceID, message string) desktopnotify.Decision
+	// NoProgramCause is why no banner program could be resolved, asked only
+	// after Notify answered desktopnotify.NoProgram.
+	NoProgramCause() string
 }
 
 // ReportEditorFocus moves Emacs's desktop focus, which decides every later

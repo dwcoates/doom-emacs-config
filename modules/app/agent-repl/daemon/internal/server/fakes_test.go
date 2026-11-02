@@ -2055,12 +2055,43 @@ type harness struct {
 	WebappDist    string
 }
 
-// fakeBanners answers one scripted claim and records every claim and forget.
+// fakeBanners answers one scripted claim and one scripted notify decision, and
+// records every claim, forget and notify.
 type fakeBanners struct {
 	mu      sync.Mutex
 	claim   desktopnotify.Claim
 	claims  int
 	forgets []string
+	// decision is what every Notify answers (Dispatched by default).
+	decision desktopnotify.Decision
+	// noProgramCause is what NoProgramCause answers.
+	noProgramCause string
+	notified       []fakeNotify
+}
+
+// fakeNotify is one Notify a fakeBanners was handed.
+type fakeNotify struct {
+	ws      ids.WorkspaceID
+	message string
+}
+
+func (b *fakeBanners) Notify(ws ids.WorkspaceID, message string) desktopnotify.Decision {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.notified = append(b.notified, fakeNotify{ws: ws, message: message})
+	return b.decision
+}
+
+func (b *fakeBanners) notifies() []fakeNotify {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return append([]fakeNotify(nil), b.notified...)
+}
+
+func (b *fakeBanners) NoProgramCause() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.noProgramCause
 }
 
 func (b *fakeBanners) Claim() desktopnotify.Claim {

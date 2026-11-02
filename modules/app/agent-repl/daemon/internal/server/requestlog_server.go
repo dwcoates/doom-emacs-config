@@ -1049,3 +1049,10 @@ func (s *requestLoggingServer) CommentOnPullRequest(
 ) (*connect.Response[agentreplv1.CommentOnPullRequestResponse], error) {
 	return serveUnary(s, ctx, "CommentOnPullRequest", req, s.server.CommentOnPullRequest)
 }
+
+func (s *requestLoggingServer) NotifyWorkspace(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.NotifyWorkspaceRequest],
+) (*connect.Response[agentreplv1.NotifyWorkspaceResponse], error) {
+	return serveUnary(s, ctx, "NotifyWorkspace", req, s.server.NotifyWorkspace)
+}
