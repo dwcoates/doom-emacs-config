@@ -6,8 +6,8 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	frontendv1 "agentrepl/proto/frontend/v1"
 	"agent-repld/internal/wsm"
+	frontendv1 "agentrepl/proto/frontend/v1"
 )
 
 // gateCard is a standing cold gate's card as the fleet hands it over.
