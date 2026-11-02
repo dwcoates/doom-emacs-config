@@ -613,6 +613,67 @@ pushed as `agent-repl--history-push' does."
         (when (> (length agent-repl--input-history) count)
           (setq agent-repl--history-discard-entry (car agent-repl--input-history)))))))
 
+;; THE PROMPT A WORKSPACE WAS CREATED WITH IS IN ITS HISTORY, whoever created
+;; it: the editor's own create, another workspace through the agent API, a
+;; Slack message.  None of those prompts passes through the composer, so the
+;; daemon states it on the host view (`HostWorkspace.initial_prompt', the
+;; creator's own words) and the composer records it here, at the OLDEST end of
+;; the ring, because it was the first prompt the workspace was given.  It is
+;; recorded when the ring does not already hold it, so the restatement on
+;; every host push and on every composer birth records it exactly once.
+
+(declare-function agent-repl--input-buffer "input" (ws))
+(declare-function agent-repl--input-said-parts "input" (said))
+(declare-function agent-repl--input-parts-text "input" (parts))
+(defvar agent-repl-host-update-functions)
+
+(defun agent-repl--history-record-initial-prompt (ws said)
+  "Record SAID, WS's initial prompt, as the oldest entry of its composer's history.
+SAID is the decoded `UserSaid' the host view carries, or nil when WS was
+created without one.  Persists the ring when it records.  Returns
+`recorded', `present', `none' or `no-composer'."
+  (let ((buf (agent-repl--input-buffer ws))
+        (text (and said
+                   (string-trim
+                    (agent-repl--input-parts-text
+                     (plist-get (agent-repl--input-said-parts said) :parts))))))
+    (cond
+     ((or (null text) (string-empty-p text))
+      (agent-repl--log-verbose ws "elisp.history.initial-prompt ws=%s outcome=none" ws)
+      'none)
+     ((null buf)
+      (agent-repl--log-verbose ws "elisp.history.initial-prompt ws=%s outcome=no-composer" ws)
+      'no-composer)
+     ((member text (buffer-local-value 'agent-repl--input-history buf))
+      (agent-repl--log-verbose ws "elisp.history.initial-prompt ws=%s outcome=present" ws)
+      'present)
+     (t
+      (let ((before (buffer-local-value 'agent-repl--input-history buf)))
+        (with-current-buffer buf
+          (setq agent-repl--input-history (append before (list text))))
+        ;; A ring that could not be persisted is put back as it was, so the
+        ;; next restatement tries the record again rather than finding it
+        ;; present in memory alone.
+        (condition-case err
+            (agent-repl--history-save ws)
+          (error
+           (with-current-buffer buf
+             (setq agent-repl--input-history before))
+           (agent-repl--error ws "elisp.history.initial-prompt ws=%s outcome=save-failed input-chars=%d history-count=%d err=%S"
+                              ws (length text) (length before) err)
+           (signal (car err) (cdr err)))))
+      (agent-repl--info ws "elisp.history.initial-prompt ws=%s outcome=recorded input-chars=%d history-count=%d"
+                        ws (length text)
+                        (length (buffer-local-value 'agent-repl--input-history buf)))
+      'recorded))))
+
+(defun agent-repl--history-on-host-update (ws host)
+  "Record the initial prompt HOST states for WS in its composer's history.
+Registered on `agent-repl-host-update-functions'."
+  (agent-repl--history-record-initial-prompt ws (plist-get host :initial-prompt)))
+
+(add-hook 'agent-repl-host-update-functions #'agent-repl--history-on-host-update)
+
 (defun agent-repl--history-reset ()
   "Reset history browsing index to the default (not browsing) state."
   (agent-repl--log-verbose (agent-repl--buffer-owner (current-buffer))
