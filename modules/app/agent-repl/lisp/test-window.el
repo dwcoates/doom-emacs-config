@@ -876,6 +876,102 @@ routing error again whenever it runs outside one."
       ;; Assert
       (should (equal logged "ws1")))))
 
+;;;; ---- Saving and restoring a layout ----
+
+(ert-deftest agent-repl-test-window-restore-configuration-clears-a-side-gained-after-the-save ()
+  "A window that became a side window after the save comes back a plain window.
+The 2026-11-02 shape: the frame was saved as one window, the sidebar then
+took that window object, and the restore kept its `window-side'."
+  (agent-repl-test--with-clean-state
+    (agent-repl-window-test--with-temp-frame
+      ;; Arrange
+      (let* ((win (selected-window))
+             (config (agent-repl-window--save-configuration)))
+        (set-window-parameter win 'window-side 'left)
+        (set-window-parameter win 'no-other-window t)
+        ;; Act
+        (agent-repl-window--restore-configuration config "ws")
+        ;; Assert
+        (should-not (window-parameter win 'window-side))
+        (should-not (window-parameter win 'no-other-window))))))
+
+(ert-deftest agent-repl-test-window-restore-configuration-puts-back-a-saved-parameter ()
+  "A layout parameter the save recorded is restored to its saved value."
+  (agent-repl-test--with-clean-state
+    (agent-repl-window-test--with-temp-frame
+      ;; Arrange
+      (let ((win (selected-window)))
+        (unwind-protect
+            (progn
+              (set-window-parameter win 'no-other-window t)
+              (let ((config (agent-repl-window--save-configuration)))
+                (set-window-parameter win 'no-other-window nil)
+                ;; Act
+                (agent-repl-window--restore-configuration config "ws"))
+              ;; Assert
+              (should (eq (window-parameter win 'no-other-window) t)))
+          (set-window-parameter win 'no-other-window nil))))))
+
+(ert-deftest agent-repl-test-window-restore-configuration-restores-the-saved-windows ()
+  "The restore puts the saved window tree back."
+  (agent-repl-test--with-clean-state
+    (agent-repl-window-test--with-temp-frame
+      ;; Arrange
+      (let ((config (agent-repl-window--save-configuration)))
+        (split-window)
+        ;; Act
+        (agent-repl-window--restore-configuration config "ws")
+        ;; Assert
+        (should (= (length (window-list nil 'nomini)) 1))))))
+
+(ert-deftest agent-repl-test-window-restore-configuration-records-the-restore ()
+  "The restore is recorded through the canonical logger, centrally for \"main\"."
+  (agent-repl-test--with-clean-state
+    (agent-repl-window-test--with-temp-frame
+      ;; Arrange
+      (let ((config (agent-repl-window--save-configuration))
+            (records nil))
+        (cl-letf (((symbol-function 'agent-repl--log)
+                   (lambda (ws fmt &rest args) (push (list ws (apply #'format fmt args)) records))))
+          ;; Act
+          (agent-repl-window--restore-configuration config "main"))
+        ;; Assert
+        (should (seq-find (lambda (record)
+                            (and (eq (car record) agent-repl--global-log-scope)
+                                 (string-match-p "window--restore-configuration: .* windows=1 "
+                                                 (cadr record))))
+                          records))))))
+
+(ert-deftest agent-repl-test-window-with-layout-parameters-makes-each-persistent ()
+  "Inside the binding every layout parameter is persistent."
+  (let ((inside (agent-repl-window--with-layout-parameters
+                 (lambda () window-persistent-parameters))))
+    (dolist (param agent-repl-window--layout-parameters)
+      (should (cdr (assq param inside))))))
+
+(ert-deftest agent-repl-test-window-with-layout-parameters-leaves-the-global-alone ()
+  "The binding does not outlive its call."
+  (let ((before window-persistent-parameters))
+    (agent-repl-window--with-layout-parameters #'ignore)
+    (should (equal window-persistent-parameters before))))
+
+(ert-deftest agent-repl-test-window-panels-saves-and-restores-layouts-through-the-helpers ()
+  "panels.el saves and restores every layout through the window.el pair.
+A bare `current-window-configuration' or `set-window-configuration'
+drops the layout parameters, which is how the sidebar's side survived a
+close."
+  (with-temp-buffer
+    (insert-file-contents
+     (expand-file-name "panels.el"
+                       (file-name-directory
+                        (symbol-file 'agent-repl-window--panel-window))))
+    (should (= 0 (how-many (regexp-quote "(set-window-configuration ") (point-min) (point-max))))
+    (should (= 0 (how-many (regexp-quote "(current-window-configuration)") (point-min) (point-max))))
+    (should (= 2 (how-many (regexp-quote "(agent-repl-window--restore-configuration ")
+                           (point-min) (point-max))))
+    (should (= 2 (how-many (regexp-quote "(agent-repl-window--save-configuration)")
+                           (point-min) (point-max))))))
+
 ;;; test-window.el ends here
 
 ;;;; ---- Deletion, or its structural substitute ----

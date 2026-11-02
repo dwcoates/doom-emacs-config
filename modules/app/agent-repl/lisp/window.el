@@ -160,6 +160,51 @@ frame-level side-window UI elements."
                              win live side)
     side))
 
+;;;; --- Saving and restoring a layout -------------------------------------
+
+(defconst agent-repl-window--layout-parameters
+  '(window-side window-slot no-other-window no-delete-other-windows
+    mode-line-format window-size-fixed window-preserved-size)
+  "Window parameters a saved layout records and its restore puts back.
+The parameters a window gains when it becomes a side window (the
+sidebar's `display-buffer-in-side-window' and its window parameters) or
+a hardened panel (`agent-repl-window--harden').  `set-window-configuration'
+REUSES the window objects a configuration names, and by default it saves
+and restores no parameter but `window-persistent-parameters''s own.  So a
+frame saved as one plain window, whose window then became the sidebar's
+left side window, came back as that one window still carrying
+`window-side' = left, and the frame then refused every split and every
+`delete-other-windows' (2026-11-02).  Listed as persistent around both
+the save and the restore, each comes back as it was saved, nil included.")
+
+(defun agent-repl-window--with-layout-parameters (fn)
+  "Call FN with `agent-repl-window--layout-parameters' persistent."
+  (let ((window-persistent-parameters
+         (append (mapcar (lambda (param) (cons param t))
+                         agent-repl-window--layout-parameters)
+                 window-persistent-parameters)))
+    (funcall fn)))
+
+(defun agent-repl-window--save-configuration ()
+  "Return the selected frame's window configuration, for a later restore.
+Saved with `agent-repl-window--layout-parameters' persistent; restore it
+with `agent-repl-window--restore-configuration'."
+  (agent-repl-window--with-layout-parameters #'current-window-configuration))
+
+(defun agent-repl-window--restore-configuration (config &optional ws)
+  "Restore CONFIG, saved by `agent-repl-window--save-configuration'.
+Every window CONFIG names gets back the layout parameters it was saved
+with (`agent-repl-window--layout-parameters').  WS names the workspace
+for the record only."
+  (agent-repl-window--with-layout-parameters
+   (lambda () (set-window-configuration config)))
+  (agent-repl--log (agent-repl--ws-log-scope (or ws (agent-repl--ws-current-name)))
+                   "window--restore-configuration: frame=%S windows=%d selected=%S"
+                   (window-configuration-frame config)
+                   (length (window-list (window-configuration-frame config) 'nomini))
+                   (selected-window))
+  t)
+
 ;;;; --- Per-window hardening ----------------------------------------------
 
 (cl-defun agent-repl-window--harden

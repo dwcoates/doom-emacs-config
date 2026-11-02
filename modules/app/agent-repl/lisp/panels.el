@@ -82,6 +82,8 @@
 (declare-function agent-repl--ws-add-before-collapse-hook "workspace" (fn))
 (declare-function agent-repl-window--panel-window "window")
 (declare-function agent-repl-window--panels-restorable-p "window")
+(declare-function agent-repl-window--restore-configuration "window" (config &optional ws))
+(declare-function agent-repl-window--save-configuration "window" ())
 (declare-function agent-repl-window--side-window-p "window")
 
 ;; Special variables owned by other sources in this module, declared here
@@ -1882,7 +1884,7 @@ and Emacs filled the window with the webview -- which the layout
 reconciler then remounted the composer beside, so a close undid itself."
   (if (agent-repl--panels-cover-frame-p ws)
       (agent-repl--log ws "%s: kept-fullscreen-layout reason=panels-cover-frame" site)
-    (agent-repl--ws-put ws :fullscreen-config (current-window-configuration))
+    (agent-repl--ws-put ws :fullscreen-config (agent-repl-window--save-configuration))
     (agent-repl--log ws "%s: saved-fullscreen-layout" site)))
 
 (defun agent-repl--panels-cover-frame-p (ws)
@@ -1958,7 +1960,7 @@ frame with no `:fullscreen-config' has no layout to restore to."
           (agent-repl--ws-put ws :fullscreen-config nil)
           (agent-repl--log ws "restore-fullscreen-config: dropped stale config ws=%s" ws)
           nil)
-      (set-window-configuration saved)
+      (agent-repl-window--restore-configuration saved ws)
       (agent-repl--ws-put ws :fullscreen-config nil)
       t)))
 
@@ -2025,9 +2027,9 @@ real main-area window — see
           (select-window input-win)))
     (if agent-repl--window-fullscreen-config
         (progn
-          (set-window-configuration agent-repl--window-fullscreen-config)
+          (agent-repl-window--restore-configuration agent-repl--window-fullscreen-config)
           (setq agent-repl--window-fullscreen-config nil))
-      (setq agent-repl--window-fullscreen-config (current-window-configuration))
+      (setq agent-repl--window-fullscreen-config (agent-repl-window--save-configuration))
       (let ((keep (selected-window)))
         (agent-repl-window--delete-where
          (lambda (win) (not (eq win keep))))))))
