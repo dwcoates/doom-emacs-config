@@ -269,6 +269,17 @@ message HostWorkspace {
   // selection, a response's tree). Always set; empty while every reported
   // label targets a response.
   HostComposerEntries composer_entries = 7;
+  // THE PROMPT THE WORKSPACE WAS CREATED WITH, as its creator wrote it, absent
+  // when it was created without one. It is the creator's own words, never the
+  // decorated message the session was sent (the one-shot preamble, the
+  // placement note and the like stay the daemon's). Whoever created it -- the
+  // editor's own create, another workspace through the agent API, a Slack
+  // message -- the editor records it in the workspace's prompt history, so
+  // the composer's history recall reaches it as it reaches every prompt sent
+  // from the composer. STATE, not an event: it never changes once the
+  // workspace exists, and the editor records it once however often it is
+  // restated.
+  optional conversation.v1.UserSaid initial_prompt = 8;
 }
 
 // What the daemon reads of the composer's reported entries.
