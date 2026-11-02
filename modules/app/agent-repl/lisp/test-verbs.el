@@ -2780,6 +2780,21 @@ Every prompt label the commission read is offered is pushed onto PROMPTS."
           ;; Assert.
           (should (equal (plist-get (agent-repl-test-verbs--request :create) :model) "haiku")))))))
 
+(ert-deftest agent-repl-verbs-oneshot-with-model-asks-the-model-before-the-prompt ()
+  "`SPC TAB C-o\=' reads the model first, so the commission is written knowing it."
+  (let (asked)
+    (agent-repl-test-verbs--with nil
+      (cl-letf (((symbol-function 'agent-repl-verbs--agent-repl-repository)
+                 (lambda () (agent-repl-test-verbs--repo-ref)))
+                ((symbol-function 'agent-repl-verbs--read-model)
+                 (lambda () (push 'model asked) "haiku"))
+                ((symbol-function 'agent-repl-verbs--read-prompt)
+                 (lambda (&rest _) (push 'prompt asked) "fix its feed")))
+        ;; Act.
+        (agent-repl-create-oneshot-with-model)
+        ;; Assert.
+        (should (equal (reverse asked) '(model prompt)))))))
+
 (ert-deftest agent-repl-verbs-oneshot-commands-share-the-one-shot-composition ()
   "Both one-shot commands compose through `agent-repl-verbs--create-oneshot\='."
   (let (calls prompts)
@@ -4638,44 +4653,26 @@ goes on is an async merge, which Emacs does not offer."
 
 ;;;; ---- Model selection ----
 
-(ert-deftest agent-repl-verbs-read-model-seeds-the-configured-model ()
-  "The picker opens on `agent-repl-interactive-model' as its initial input."
-  (let ((agent-repl-interactive-model "sonnet")
-        (seen-initial :unset))
-    (cl-letf (((symbol-function 'completing-read)
-               (lambda (_p _c &optional _pr _rm initial &rest _)
-                 (setq seen-initial initial) initial)))
-      (should (equal (agent-repl-verbs--read-model) "sonnet"))
-      (should (equal seen-initial "sonnet")))))
-
-(ert-deftest agent-repl-verbs-read-model-seeds-nothing-when-unset ()
-  "A nil setting seeds no initial input, so the prompt opens blank."
-  (let ((agent-repl-interactive-model nil)
-        (seen-initial :unset))
+(ert-deftest agent-repl-verbs-read-model-has-no-default-input ()
+  "The picker opens with nothing seeded."
+  (let ((seen-initial :unset))
     (cl-letf (((symbol-function 'completing-read)
                (lambda (_p _c &optional _pr _rm initial &rest _)
                  (setq seen-initial initial) "")))
       (should-not (agent-repl-verbs--read-model))
       (should-not seen-initial))))
 
-(ert-deftest agent-repl-verbs-read-model-seeds-todays-default ()
-  "Unconfigured, the picker opens on the defcustom's shipped default."
-  (let ((seen-initial :unset))
-    (cl-letf (((symbol-function 'completing-read)
-               (lambda (_p _c &optional _pr _rm initial &rest _)
-                 (setq seen-initial initial) initial)))
-      (agent-repl-verbs--read-model)
-      (should (equal seen-initial
-                     (eval (car (get 'agent-repl-interactive-model
-                                     'standard-value))
-                           t))))))
+(ert-deftest agent-repl-verbs-read-model-answers-the-typed-model ()
+  "A typed model is returned trimmed."
+  (cl-letf (((symbol-function 'completing-read)
+             (lambda (&rest _) " opus ")))
+    (should (equal (agent-repl-verbs--read-model) "opus"))))
 
-(ert-deftest agent-repl-verbs-read-model-honors-an-erased-seed ()
-  "Erasing the seed back to blank still asks the daemon to choose."
-  (let ((agent-repl-interactive-model "opus"))
-    (cl-letf (((symbol-function 'completing-read)
-               (lambda (&rest _) "   ")))
-      (should-not (agent-repl-verbs--read-model)))))
+(ert-deftest agent-repl-verbs-read-model-blank-asks-the-daemon-to-choose ()
+  "A blank answer is nil, the daemon's default."
+  (cl-letf (((symbol-function 'completing-read)
+             (lambda (&rest _) "   ")))
+    (should-not (agent-repl-verbs--read-model))))
 
 (ert-deftest agent-repl-verbs-register-repository-switched-away-from-moves-nothing ()
   "Registering a repository withdraws its landing on a switch in Emacs too."

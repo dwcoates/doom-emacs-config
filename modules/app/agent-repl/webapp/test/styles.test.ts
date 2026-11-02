@@ -4057,7 +4057,7 @@ describe("the dark theme's iMessage fills (owner ruling, 2026-09-27)", () => {
 
   it.each([
     [".tool-card", "--tool-card-bg"],
-    [".pfooter", "--sidebar-bg"],
+    [".pfooter", "--rail-bg"],
     [".merge-strip", "--tool-card-bg"],
   ])("fills %s with %s", (selector, token) => {
     // Arrange / Act
@@ -4068,7 +4068,7 @@ describe("the dark theme's iMessage fills (owner ruling, 2026-09-27)", () => {
     expect(rule?.declarations).toMatch(new RegExp(`background:\\s*var\\(${token}\\)`));
   });
 
-  it("paints the footer's own box from --sidebar-bg alone, so it always matches the sidebar (owner request, 2026-10-28)", () => {
+  it("paints the footer's own box from --rail-bg alone, so it always matches the sidebar (owner request, 2026-10-28)", () => {
     // Arrange — every rule that paints the footer box itself.
     const painting = rulesOf(stylesheet).filter(
       (r) => r.selectors.some((sel) => /(?:^|[\s>])\.pfooter(?![-\w])[^\s>+~]*$/.test(sel)) && /(^|;)\s*background(?:-color)?\s*:/.test(r.declarations),
@@ -4076,7 +4076,7 @@ describe("the dark theme's iMessage fills (owner ruling, 2026-09-27)", () => {
     // Act
     const grounds = painting.map((r) => /background(?:-color)?\s*:\s*([^;]+);/.exec(r.declarations)?.[1]?.trim());
     // Assert
-    expect([painting.length > 0, grounds.every((ground) => ground === "var(--sidebar-bg)")]).toEqual([true, true]);
+    expect([painting.length > 0, grounds.every((ground) => ground === "var(--rail-bg)")]).toEqual([true, true]);
   });
 
   it("gives a merge bubble no fill of its own, so it wears the tool card's (owner request, 2026-10-24)", () => {
@@ -6115,7 +6115,8 @@ describe("the repository's subsections and the drag", () => {
   });
 
   it("lays a subsection's header row on a band slightly darker than the rail", () => {
-    expect(declarationsOf("#ws-sidebar .sb-subsection-head")).toMatch(/background:\s*color-mix\(in srgb, var\(--sidebar-bg\) 88%, #000000\)/);
+    expect(declarationsOf("#ws-sidebar .sb-subsection-head")).toMatch(/background:\s*var\(--rail-bg\)/);
+    expect(declarationsOf("#ws-sidebar")).toMatch(/background:\s*var\(--rail-bg\)/);
   });
 
   it("draws the name popup's input with a hairline border and no focus ring", () => {

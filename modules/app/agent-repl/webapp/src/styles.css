@@ -56,6 +56,8 @@
      THE ONE GROUND OF THE SIDEBAR AND THE FOOTER: `.pfooter` paints this same
      token, so the two always match in both themes. */
   --sidebar-bg: #ffffff;
+  /* THE RAIL'S GROUND (owner request, 2026-11-01): the subsection header band's color, now under every row of the rail. */
+  --rail-bg: color-mix(in srgb, var(--sidebar-bg) 88%, #000000);
   /* The topbar's ground (owner request, 2026-10-27): a little lighter than
      --sidebar-bg, which in the light theme is already white. */
   --topbar-bg: #ffffff;
@@ -864,7 +866,7 @@ body::after {
   margin: 0.5rem;
   border-radius: 10px;
   overflow: hidden;
-  background: var(--sidebar-bg);
+  background: var(--rail-bg);
   box-shadow: var(--sidebar-shadow);
   font-size: 14px;
 }
@@ -966,7 +968,7 @@ body::after {
   display: flex;
   align-items: center;
   padding: 0 0.7rem;
-  background: var(--sidebar-bg);
+  background: var(--rail-bg);
   border-bottom: 1px solid var(--border);
   transition: height 160ms ease-out;
 }
@@ -997,7 +999,7 @@ body::after {
   flex: 0 0 auto;
   padding: 0.3rem 0.7rem;
   border-top: 1px solid var(--border);
-  background: var(--sidebar-bg);
+  background: var(--rail-bg);
   color: var(--err);
   font-size: 0.72rem;
   overflow: hidden;
@@ -1216,7 +1218,7 @@ body::after {
   /* A SUBSECTION'S HEADER ROW SITS ON A SLIGHTLY DARKER BAND than the rail
      (owner request, 2026-10-30): the rail's own ground with a little black
      mixed in, across the whole row. */
-  background: color-mix(in srgb, var(--sidebar-bg) 88%, #000000);
+  background: var(--rail-bg);
 }
 #ws-sidebar .sb-subsection-head .sb-count { font-size: 0.85em; }
 /* A SUBSECTION'S NAME WEARS THE REPOSITORY NAMES' INK (owner request,
@@ -4969,10 +4971,10 @@ html[data-page-unshown] {
   max-width: var(--agent-bubble-cap);
   margin: 0 auto;
   /* THE FOOTER AND THE SIDEBAR ALWAYS SHARE ONE GROUND (owner requests,
-     2026-10-27 and 2026-10-28): both paint `--sidebar-bg` and nothing else,
+     2026-10-27 and 2026-10-28): both paint `--rail-bg` and nothing else,
      so retuning the one token moves both. Never give the footer a color of
      its own. */
-  background: var(--sidebar-bg);
+  background: var(--rail-bg);
   border: 1px solid var(--border);
   border-radius: 10px;
   box-shadow: var(--sidebar-shadow);
