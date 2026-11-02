@@ -21,6 +21,7 @@ import type { LocalFailureView } from "../failure/local.js";
 import type { ClientLogLevel } from "../log.js";
 import { createListeners } from "../listeners.js";
 import { clampReveal } from "../topbar/clamp.js";
+import { applyPlacement, viewportOf } from "../placement.js";
 import type { Dropdowns } from "./dropdowns.js";
 
 /** How many records the list keeps; the counts behind the tint keep counting past it. */
@@ -171,13 +172,7 @@ export function installVersionNotices(
     for (const each of tones) version.classList.toggle(noticesToneClass(each), each === tone);
   };
   const place = (): void => {
-    const at = clampReveal(version.getBoundingClientRect(), panel.getBoundingClientRect(), {
-      width: window.innerWidth,
-      height: window.innerHeight,
-    });
-    panel.style.left = `${at.left}px`;
-    panel.style.top = `${at.top}px`;
-    panel.style.maxHeight = `${at.maxHeight}px`;
+    applyPlacement(panel, clampReveal(version.getBoundingClientRect(), panel.getBoundingClientRect(), viewportOf()));
   };
   const isOpen = (): boolean => panel.classList.contains("open");
   const close = (): void => {

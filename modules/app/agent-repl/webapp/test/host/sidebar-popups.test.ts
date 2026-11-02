@@ -133,10 +133,10 @@ describe("the host's popup layer", () => {
     expect(drawn()?.parentElement?.className).toBe("ws open");
   });
 
-  it("places a shown panel at the host's left edge, its top on the row's line", () => {
+  it("places a shown panel at the host's left edge, meeting the sidebar with no gap, its top on the row's line", () => {
     const { deliver, drawn } = install();
     deliver({ kind: "show", key: "ws-a", html: PANEL, top: 40, bottom: 62 });
-    expect([drawn()?.style.left, drawn()?.style.top]).toEqual([`${REVEAL_MARGIN_PX}px`, "40px"]);
+    expect([drawn()?.style.left, drawn()?.style.top]).toEqual(["0px", "40px"]);
   });
 
   it("slides a panel up to stand on the window's bottom edge for a row below it", () => {
@@ -183,6 +183,61 @@ describe("the host's popup layer", () => {
     if (list) list.scrollTop = 37;
     deliver({ kind: "show", key: "ws-b", html: PANEL, top: 40, bottom: 62 });
     expect(drawn()?.querySelector("ul")?.scrollTop).toBe(0);
+  });
+
+  describe("the details popup", () => {
+    const WITH_DETAILS =
+      '<div class="detail"><dl><dt>branch</dt><dd>main</dd></dl>' +
+      '<div class="detail-more" tabindex="0"><span class="detail-more-label">details</span>' +
+      '<div class="detail-sub"><div class="memory"><dl><dt>agent</dt><dd>98 MB</dd></dl></div></div></div></div>';
+    const entry = (): HTMLElement | null => document.querySelector<HTMLElement>(`.${POPUP_LAYER_CLASS} .detail-more`);
+    const sub = (): HTMLElement | null => document.querySelector<HTMLElement>(`.${POPUP_LAYER_CLASS} .detail-sub`);
+    const hoverEntry = (): void => {
+      entry()?.querySelector(".detail-more-label")?.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+    };
+
+    it("opens beside the copy, meeting its right edge with no gap", () => {
+      // ARRANGE: every box measures 200 wide from the host's left edge.
+      const { deliver } = install();
+      deliver({ kind: "show", key: "ws-a", html: WITH_DETAILS, top: 40, bottom: 62 });
+      // ACT
+      hoverEntry();
+      // ASSERT
+      expect([entry()?.classList.contains("open"), sub()?.style.left]).toEqual([true, "200px"]);
+    });
+
+    it("stays open when the same panel is shown again", () => {
+      // ARRANGE
+      const { deliver } = install();
+      deliver({ kind: "show", key: "ws-a", html: WITH_DETAILS, top: 40, bottom: 62 });
+      hoverEntry();
+      // ACT
+      deliver({ kind: "show", key: "ws-a", html: WITH_DETAILS, top: 40, bottom: 62 });
+      // ASSERT
+      expect([entry()?.classList.contains("open"), sub()?.style.left]).toEqual([true, "200px"]);
+    });
+
+    it("is shut on another row's panel", () => {
+      // ARRANGE
+      const { deliver } = install();
+      deliver({ kind: "show", key: "ws-a", html: WITH_DETAILS, top: 40, bottom: 62 });
+      hoverEntry();
+      // ACT
+      deliver({ kind: "show", key: "ws-b", html: WITH_DETAILS, top: 80, bottom: 102 });
+      // ASSERT
+      expect(entry()?.classList.contains("open")).toBe(false);
+    });
+
+    it("is not reopened behind an entry the update hid", () => {
+      // ARRANGE
+      const { deliver } = install();
+      deliver({ kind: "show", key: "ws-a", html: WITH_DETAILS, top: 40, bottom: 62 });
+      hoverEntry();
+      // ACT
+      deliver({ kind: "show", key: "ws-a", html: WITH_DETAILS.replace('tabindex="0"', 'tabindex="0" hidden=""'), top: 40, bottom: 62 });
+      // ASSERT
+      expect(entry()?.classList.contains("open")).toBe(false);
+    });
   });
 
   it("draws one panel at a time", () => {

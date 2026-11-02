@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import { GetMemoryOverviewResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_get_memory_overview_pb";
+import { factHome } from "../../src/sidebar/detail-more.js";
 import {
   GetWorkspaceMemoryResponseSchema,
   type GetWorkspaceMemoryRequest,
@@ -143,6 +144,14 @@ describe("a workspace hover's lines", () => {
   it("states a running shim's footprint", () => {
     const memory = create(SidebarWorkspaceMemorySchema, { agent: { state: { case: "running", value: { footprintBytes: BigInt(98 * MIB) } } } });
     expect(workspaceLines(memory, 0, "w")).toEqual([["agent", "98 MB"]]);
+  });
+
+  it("states only lines classified as details", () => {
+    const memory = create(SidebarWorkspaceMemorySchema, {
+      agent: { state: { case: "running", value: { footprintBytes: BigInt(98 * MIB) } } },
+      page: { state: { case: "notLoaded", value: {} } },
+    });
+    expect(workspaceLines(memory, 0, "w").map(([label]) => factHome(label))).toEqual(["details", "details"]);
   });
 
   it("states a running shim not measured yet", () => {
@@ -302,6 +311,35 @@ describe("an open row's memory", () => {
     await settle();
 
     expect([sent.map((r) => r.workspace?.id), detail.querySelector(".memory dd")?.textContent]).toEqual([["ws-1"], "not running"]);
+  });
+
+  it("draws the row's memory in the panel's details popup, not the panel itself", async () => {
+    const { ws, detail } = rowWith(notRunning);
+
+    showRowMemory(ws, true);
+    await settle();
+
+    expect([detail.querySelector(":scope > .memory"), detail.querySelector(":scope > .detail-more > .detail-sub > .memory dd")?.textContent]).toEqual([
+      null,
+      "not running",
+    ]);
+  });
+
+  it("keeps the details entry hidden until the memory is answered", () => {
+    const { ws, detail } = rowWith(notRunning);
+
+    showRowMemory(ws, true);
+
+    expect(detail.querySelector<HTMLElement>(".detail-more")?.hidden).toBe(true);
+  });
+
+  it("draws the details entry once the memory is answered", async () => {
+    const { ws, detail } = rowWith(notRunning);
+
+    showRowMemory(ws, true);
+    await settle();
+
+    expect(detail.querySelector<HTMLElement>(".detail-more")?.hidden).toBe(false);
   });
 
   it("asks nothing and draws nothing while the panel is closed", async () => {

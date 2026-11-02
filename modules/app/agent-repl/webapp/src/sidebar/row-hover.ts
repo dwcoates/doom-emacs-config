@@ -52,8 +52,10 @@ import type { PopupMirror } from "../host/sidebar-popups.js";
  * THE DURATION FIELD STILL OPENS IT AT ONCE (owner request, 2026-10-31): the
  * pointer reaching the duration, which lies inside the line, opens the panel
  * with no delay.
+ *
+ * THREE QUARTERS OF A SECOND (owner request, 2026-11-01), down from two.
  */
-export const HOVER_OPEN_DELAY_MS = 2000;
+export const HOVER_OPEN_DELAY_MS = 750;
 
 /**
  * The other delay is travel: `HOVER_CLOSE_GRACE_MS`. The panel stands beside

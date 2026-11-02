@@ -1871,6 +1871,32 @@ html.sb-dragging * { -webkit-user-select: none; user-select: none; }
 #ws-sidebar .detail .children ul { margin: 0.15rem 0 0; padding-left: 1rem; max-height: 14rem; overflow-y: auto; }
 #ws-sidebar .detail .children li { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #ws-sidebar .detail .children li.receded { opacity: var(--receded-opacity); }
+/* THE DETAILS ENTRY (sidebar/detail-more.ts, owner request, 2026-11-01): the
+   panel's last line, drawn only while its popup states a fact. Its popup is a
+   card of the panel's own look, fixed beside the panel's right edge with no
+   gap, its top on the entry's line (`placeDetailsPanel`); being the entry's
+   descendant, it escapes the panel's scrolling clip (`position: fixed`) and
+   keeps the pointer inside the panel while the pointer is on it. */
+#ws-sidebar .detail .detail-more { margin: 0.35rem 0 0; color: var(--muted); cursor: default; outline: none; }
+#ws-sidebar .detail .detail-more-label::after { content: " \203A"; }
+#ws-sidebar .detail .detail-more.open > .detail-more-label,
+#ws-sidebar .detail .detail-more:focus-visible > .detail-more-label { color: var(--fg); }
+#ws-sidebar .detail .detail-sub { display: none; }
+#ws-sidebar .detail .detail-more.open > .detail-sub {
+  display: block;
+  position: fixed;
+  z-index: 41;
+  width: max-content;
+  min-width: 10rem;
+  max-width: min(34rem, calc(100vw - 1rem));
+  overflow-y: auto;
+  margin: 0;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.5rem 0.6rem;
+}
+#ws-sidebar .detail .detail-sub .memory { margin: 0; }
 
 /* THE BREATH ONLY BRIGHTENS (owner request, 2026-10-29): a breathing name
    swings between the name's resting ink (--name-rest) and --name-peak, the

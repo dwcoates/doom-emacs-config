@@ -27,6 +27,7 @@
 import { stopTicking } from "../feed/ticking.js";
 import { log } from "../log.js";
 import { clampReveal, type Rect } from "./clamp.js";
+import { viewportOf } from "../placement.js";
 
 /** What a reveal draws, built fresh from the current view each time. */
 export type RevealBody = () => HTMLElement;
@@ -61,7 +62,7 @@ export interface RevealGeometry {
 
 const DOM_GEOMETRY: RevealGeometry = {
   rectOf: (element) => element.getBoundingClientRect(),
-  viewport: () => ({ width: window.innerWidth, height: window.innerHeight }),
+  viewport: () => viewportOf(),
 };
 
 /**

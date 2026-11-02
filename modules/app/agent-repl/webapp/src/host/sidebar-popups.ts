@@ -26,6 +26,11 @@
  * scrolling inside itself past that. A row beside the composer, below the
  * feed's window, gets its panel standing on the feed's bottom edge.
  *
+ * THE PANEL MEETS THE SIDEBAR. The host's web view starts at the seam with
+ * the sidebar's (Emacs measures the two windows a one-pixel divider apart), so
+ * the anchor's right edge is the host's left edge and the panel's left edge is
+ * zero (`besideFloor`): no margin stands between a panel and its row.
+ *
  * The markup is the sidebar's own drawing of the panel, from the same bundle,
  * and is drawn into the host verbatim: nothing in it comes from outside the
  * webapp's own DOM.
@@ -34,6 +39,8 @@ import { pageMutationObserver, queryAll } from "../dom.js";
 import { log } from "../log.js";
 import { scrollKept } from "../scroll.js";
 import { clampBeside, type Rect } from "../topbar/clamp.js";
+import { applyPlacement, viewportOf } from "../placement.js";
+import { detailsEntry, placeDetailsPanel, wireDetailsEntry } from "../sidebar/detail-more.js";
 
 /** The channel both documents open, on the host origin. */
 export const SIDEBAR_POPUPS_CHANNEL = "agent-repl.sidebar-popups";
@@ -189,6 +196,12 @@ export function installPopupLayer(env: PopupLayerEnv): PopupLayer {
     // memory block refreshes while the panel is open, and a redraw that reset
     // a scrolled children list would snatch it back to the top.
     const scrolls = wasKey === message.key ? scrollTops() : null;
+    // ITS DETAILS POPUP STAYS OPEN ACROSS AN UPDATE TOO (sidebar/detail-more.ts):
+    // the copy opens it here, the sidebar's own panel never does, so every
+    // redraw would otherwise shut it under the pointer.
+    const drawnBefore = panel();
+    const detailsOpen =
+      wasKey === message.key && drawnBefore !== null && detailsEntry(drawnBefore)?.classList.contains("open") === true;
     clear();
     // THE ROW'S OWN CLASSES around the copy, so the stylesheet's rules for an
     // open row's panel (`#ws-sidebar .ws.open > .detail`) draw it here too.
@@ -210,15 +223,21 @@ export function installPopupLayer(env: PopupLayerEnv): PopupLayer {
     last = message;
     // THE ROW'S HEIGHT IN THE HOST is its height in the sidebar plus how far
     // below the host's top the sidebar's window starts, which Emacs measures.
-    const placement = clampBeside(hostAnchor(message.top + offset, message.bottom + offset), measure(drawn), {
-      width: win.innerWidth,
-      height: win.innerHeight,
-    });
-    drawn.style.left = `${placement.left}px`;
-    drawn.style.top = `${placement.top}px`;
-    drawn.style.maxHeight = `${placement.maxHeight}px`;
+    const placement = clampBeside(hostAnchor(message.top + offset, message.bottom + offset), measure(drawn), viewportOf(win));
+    applyPlacement(drawn, placement);
     drawn.addEventListener("mouseenter", entered);
     drawn.addEventListener("mouseleave", left);
+    // THE DETAILS POPUP STANDS BESIDE THIS COPY as the copy stands beside the
+    // row: placed by the same `clampBeside`, against this copy's right edge.
+    const placeDetails = (): void => {
+      placeDetailsPanel(drawn, measure, viewportOf(win));
+    };
+    wireDetailsEntry(drawn, placeDetails);
+    const entry = detailsEntry(drawn);
+    if (detailsOpen && entry !== null && !entry.hidden) {
+      entry.classList.add("open");
+      placeDetails();
+    }
     if (scrolls !== null) restoreScrollTops(scrolls);
     if (wasKey !== message.key) {
       log.debug("the webhost drew a sidebar popup over the feed", {
