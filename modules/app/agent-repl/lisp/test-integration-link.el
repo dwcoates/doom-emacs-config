@@ -290,14 +290,15 @@ the normal reconnect path rather than a duplicate-creation hazard."
             (unwind-protect
                 (progn
                   (agent-repl-itest--await-subscriber successor "daemon")
-                  (agent-repl-itest--await-call successor "RegisterWorkspace")
+                  (agent-repl-itest--await-call successor "RegisterWorkspaces")
                   (agent-repl-itest--await-call successor "WatchHostWorkspace")
                   ;; Assert: the SUCCESSOR itself recorded both calls, for
                   ;; the same dir — host.el's hook did the work.
-                  (should (equal dir (agent-repl-itest--body-field
-                                      (car (agent-repl-itest--call-bodies
-                                            successor "RegisterWorkspace"))
-                                      'dir)))
+                  (should (member dir (append (agent-repl-itest--body-field
+                                               (car (agent-repl-itest--call-bodies
+                                                     successor "RegisterWorkspaces"))
+                                               'dirs)
+                                              nil)))
                   (should (equal dir (agent-repl-itest--body-field
                                       (car (agent-repl-itest--call-bodies
                                             successor "WatchHostWorkspace"))

@@ -2062,10 +2062,11 @@ still go through."
             (agent-repl-host-on-link-up conn)
             ;; Assert.
             (agent-repl-itest--await-log daemon "elisp.host.link-up-skipped" "warn")
-            (agent-repl-itest--await-call daemon "RegisterWorkspace")
-            (should (equal 1 (length (agent-repl-itest--calls daemon "RegisterWorkspace"))))
-            (let ((body (car (agent-repl-itest--call-bodies daemon "RegisterWorkspace"))))
-              (should (equal (agent-repl-itest--body-field body 'dir) (agent-repl-itest--fixture-dir "itest-host-ws")))))
+            (agent-repl-itest--await-call daemon "RegisterWorkspaces")
+            (should (equal 1 (length (agent-repl-itest--calls daemon "RegisterWorkspaces"))))
+            (let ((body (car (agent-repl-itest--call-bodies daemon "RegisterWorkspaces"))))
+              (should (equal (append (agent-repl-itest--body-field body 'dirs) nil)
+                             (list (agent-repl-itest--fixture-dir "itest-host-ws"))))))
         (ignore-errors (agent-repl-host-forget agent-repl-itest-host--ws))
         (agent-repl-connect-close conn)))))
 
@@ -2077,8 +2078,9 @@ no ref to subscribe with, so nothing must call `WatchHostWorkspace' for
 it."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
-    (agent-repl-itest--script daemon "RegisterWorkspace"
-                              '((error . ((notAWorktree . ())))))
+    (agent-repl-itest--script daemon "RegisterWorkspaces"
+                              `((outcomes . [((dir . ,(agent-repl-itest--fixture-dir "itest-host-ws"))
+                                              (refused . ((notAWorktree . ()))))])))
     (let ((conn (agent-repl-connect-open (agent-repl-itest-daemon-address daemon))))
       (unwind-protect
           (progn
@@ -2088,7 +2090,7 @@ it."
             ;; Assert.
             (agent-repl-itest--await-log daemon "elisp.host.link-up-register-failed" "error")
             (should (null (agent-repl-itest--subscribers daemon "host")))
-            (should (equal 1 (length (agent-repl-itest--calls daemon "RegisterWorkspace")))))
+            (should (equal 1 (length (agent-repl-itest--calls daemon "RegisterWorkspaces")))))
         (ignore-errors (agent-repl-host-forget agent-repl-itest-host--ws))
         (agent-repl-connect-close conn)))))
 
@@ -2138,7 +2140,7 @@ the page is re-pointed in the one host web view rather than remounted."
                 ;; Act.
                 (agent-repl-host-on-link-up fresh)
                 ;; Assert.
-                (agent-repl-itest--await-call successor "RegisterWorkspace")
+                (agent-repl-itest--await-call successor "RegisterWorkspaces")
                 (agent-repl-itest--wait-until (lambda () navigated) nil
                                               "the webview to be re-pointed")
                 ;; The workspace's own page host, at the NEW daemon's port.
