@@ -18,6 +18,8 @@
 ;;
 ;; `SPC SPC' (`agent-repl-switch-sidebar-app', commands.el) reaches the
 ;; thread viewed last, or this file's new-thread prompt when none is fresh.
+;; `SPC C-SPC' (`agent-repl-thread-send-background') asks that same thread a
+;; question without leaving the workspace the frame is on.
 ;;
 ;; and the daemon's push asking for the new-thread prompt, which the
 ;; sidebar's new-thread button sends (`DaemonNewThreadRequested').
@@ -37,6 +39,8 @@
 (declare-function agent-repl--global-state-file "core" (relative))
 (declare-function agent-repl--when-minibuffer-free "workspace" (scope label key fn))
 (declare-function agent-repl-verbs--read-required-prompt "verbs" (prompt-text refusal &optional history-file unseeded))
+(declare-function agent-repl--send "input" (origin &optional prompt ws force-metaprompt))
+(declare-function agent-repl--sidebar-app-last-thread "commands" ())
 (declare-function agent-repl-host-request-switch "host" (ws trigger))
 (declare-function agent-repl-link-primary "daemon-link" ())
 (declare-function agent-repl-rpc-create-thread "rpc" (conn request &rest keys))
@@ -115,6 +119,27 @@ a timer, and held while another minibuffer is open."
      (agent-repl--when-minibuffer-free
       agent-repl-threads--log-scope "new-thread prompt" 'new-thread
       (lambda (_released) (call-interactively #'agent-repl-thread-new))))))
+
+;;;; ---- A question to the last thread, in the background ----
+
+(defun agent-repl-thread-send-background ()
+  "Ask the thread viewed last a question, staying where the frame is.
+Bound to `SPC C-SPC'.  Like `SPC SPC' (`agent-repl-switch-sidebar-app') it
+targets the open thread viewed most recently, but it only submits the
+question read in the minibuffer: the frame is never switched to the thread.
+With no open thread the press is refused before the question is read."
+  (interactive)
+  (let ((thread (agent-repl--sidebar-app-last-thread)))
+    (unless thread
+      (agent-repl--warn agent-repl-threads--log-scope "elisp.threads.background-send-refused reason=no-thread")
+      (user-error "agent-repl: there is no thread yet; SPC TAB t starts one"))
+    (let ((question (agent-repl-verbs--read-required-prompt
+                     (format "Ask %s: " thread) "a question to a thread must not be blank"
+                     (agent-repl-threads--history-file) 'unseeded)))
+      (agent-repl--info agent-repl-threads--log-scope
+                        "elisp.threads.background-send thread=%s chars=%d" thread (length question))
+      (agent-repl--send :command-thread-background question thread)
+      (message "[agent-repl] Asked %s" thread))))
 
 ;;;; ---- Opening a thread ----
 

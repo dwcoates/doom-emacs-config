@@ -129,7 +129,8 @@ the module."
 ;; Replaces Doom's `SPC SPC' (find a file in the project): from Workspaces
 ;; to the chat thread viewed last, from Chat to the workspace selected last.
 (map! :leader
-      :desc "Switch to the other sidebar app (Workspaces / Chat)" "SPC" #'agent-repl-switch-sidebar-app)
+      :desc "Switch to the other sidebar app (Workspaces / Chat)" "SPC" #'agent-repl-switch-sidebar-app
+      :desc "Ask the last thread a question, staying here" "C-SPC" #'agent-repl-thread-send-background)
 
 ;;;; ---- SPC TAB : workspaces ---------------------------------------------
 

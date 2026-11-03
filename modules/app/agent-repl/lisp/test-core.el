@@ -518,6 +518,8 @@ Each result is `(RELATIVE-FILE OWNER FORM)'."
      "reports an answer to the user's new thread this build cannot read")
     ("threads.el" agent-repl-threads--open "[agent-repl] Thread %s is still opening"
      "tells the user the thread they picked has no workspace open yet")
+    ("threads.el" agent-repl-thread-send-background "[agent-repl] Asked %s"
+     "confirms the question sent to the last thread without switching to it, by the thread's name")
     ("threads.el" agent-repl-threads--open-recent-launched
      "[agent-repl] There is no thread yet; SPC TAB t starts one"
      "tells the user who opened Chats from outside Emacs that there is no thread to show")

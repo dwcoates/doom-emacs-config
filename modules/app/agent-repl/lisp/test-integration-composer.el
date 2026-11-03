@@ -444,6 +444,10 @@ the wrong value would silently mismark a stored turn's editor situation."
   :command-explain-prompt "PROMPT_ORIGIN_COMMAND_EXPLAIN_PROMPT")
 
 (agent-repl-itest-composer--deftest-origin
+    agent-repl-itest-composer-command-thread-background-site-sends-its-own-origin
+  :command-thread-background "PROMPT_ORIGIN_COMMAND_THREAD_BACKGROUND")
+
+(agent-repl-itest-composer--deftest-origin
     agent-repl-itest-composer-command-update-pr-site-sends-its-own-origin
   :command-update-pr "PROMPT_ORIGIN_COMMAND_UPDATE_PR")
 

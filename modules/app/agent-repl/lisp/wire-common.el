@@ -774,7 +774,8 @@ cannot be put back in the composer, which counts it among what it drops."
     (:merge-before-action . "PROMPT_ORIGIN_MERGE_BEFORE_ACTION")
     (:merge-after-action . "PROMPT_ORIGIN_MERGE_AFTER_ACTION")
     (:merge-displaced-turn-resume . "PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME")
-    (:resume-after-restart . "PROMPT_ORIGIN_RESUME_AFTER_RESTART"))
+    (:resume-after-restart . "PROMPT_ORIGIN_RESUME_AFTER_RESTART")
+    (:command-thread-background . "PROMPT_ORIGIN_COMMAND_THREAD_BACKGROUND"))
   "The whole `conversation.v1.PromptOrigin' vocabulary, keyword to wire name.
 UNSPECIFIED is deliberately ABSENT: every send site must choose a real
 value, so the zero value has no elisp spelling to reach for by accident.

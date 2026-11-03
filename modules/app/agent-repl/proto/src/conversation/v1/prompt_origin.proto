@@ -240,4 +240,9 @@ enum PromptOrigin {
   // edits, deletions, state changes and finished checks since the subscriber
   // was last told. Submitted and drawn as a workspace notice is.
   PROMPT_ORIGIN_PULL_REQUEST_NOTICE = 47;
+  // A prompt Emacs sends to the zettel chat thread viewed last without
+  // switching to it (`SPC C-SPC`): the words are read in the minibuffer and
+  // the frame stays where it is. Its one Emacs send site is
+  // `agent-repl-thread-send-background`.
+  PROMPT_ORIGIN_COMMAND_THREAD_BACKGROUND = 48;
 }
