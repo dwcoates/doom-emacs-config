@@ -1,7 +1,7 @@
 package merge
 
 import (
-	"agent-repld/internal/deployconfig"
+	"agent-repld/internal/lifecycleconfig"
 	"context"
 	"fmt"
 	"os"
@@ -804,22 +804,6 @@ func (r *run) awaitFree(ctx context.Context, ws ids.WorkspaceID) error {
 // roundKey addresses one tab round.
 func roundKey(kind string, round int) string { return fmt.Sprintf("%s/%d", kind, round) }
 
-// sameDir reports whether two directory spellings name one directory. The
-// self-reload fires for the daemon's OWN checkout only: a sibling worktree of
-// the same repository shares its common dir but is not the tree the running
-// binary was built from.
-func sameDir(a, b string) bool {
-	ra, err := filepath.EvalSymlinks(filepath.Clean(a))
-	if err != nil {
-		ra = filepath.Clean(a)
-	}
-	rb, err := filepath.EvalSymlinks(filepath.Clean(b))
-	if err != nil {
-		rb = filepath.Clean(b)
-	}
-	return ra == rb
-}
-
 // execute runs the method the source and the target select, and lands
 // whatever end it reaches on the one terminal path.
 func (r *run) execute(ctx context.Context) error {
@@ -917,7 +901,7 @@ func failedIn(area footer.MergeFailedArea, summary string) outcome {
 // at that stage's boundary for its turn (concurrent.go, awaitTurnFor).
 func (r *run) method(ctx context.Context) (outcome, error) {
 	if !r.resumingPast(TabPreDeploy) {
-		if err := r.awaitTurnFor(ctx, deployconfig.StagePreDeploy); err != nil {
+		if err := r.awaitTurnFor(ctx, lifecycleconfig.StagePreDeploy); err != nil {
 			return outcome{}, err
 		}
 		if out, gaveUp, err := r.preDeploy(ctx); err != nil || gaveUp {
@@ -940,7 +924,7 @@ func (r *run) method(ctx context.Context) (outcome, error) {
 		}
 	}
 	if !r.resumingPast(TabDeploy) {
-		if err := r.awaitTurnFor(ctx, deployconfig.StageDeploy); err != nil {
+		if err := r.awaitTurnFor(ctx, lifecycleconfig.StageDeploy); err != nil {
 			return outcome{}, err
 		}
 		var err error
@@ -948,7 +932,7 @@ func (r *run) method(ctx context.Context) (outcome, error) {
 			return out, err
 		}
 	}
-	if err := r.awaitTurnFor(ctx, deployconfig.StagePostDeploy); err != nil {
+	if err := r.awaitTurnFor(ctx, lifecycleconfig.StagePostDeploy); err != nil {
 		return outcome{}, err
 	}
 	return r.postDeploy(ctx, out)

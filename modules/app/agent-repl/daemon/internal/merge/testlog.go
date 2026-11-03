@@ -60,8 +60,9 @@ func LogsDir(stateDir string) string { return filepath.Join(stateDir, mergeLogsD
 
 // logName matches the basename of every log the queue writes: a tests round's
 // (testLog), a script hook round's (hookLogName), a released deploy hook's
-// (releaseLogName) and a queue_drained script's (runDrainedScript).
-var logName = regexp.MustCompile(`^(?:[0-9a-f]+-(?:tests|pre_deploy|deploy|post_deploy)-[0-9]+|release-[0-9]+|queue_drained-[0-9]+-[0-9]+)\.log$`)
+// (releaseLogName), a queue_drained script's (runDrainedScript), and a
+// creation or finish script hook's (LifecycleLogPath).
+var logName = regexp.MustCompile(`^(?:[0-9a-f]+-(?:tests|pre_deploy|deploy|post_deploy)-[0-9]+|release-[0-9]+|(?:queue_drained|creation|finish)-[0-9]+-[0-9]+)\.log$`)
 
 // IsLog answers whether base names a log the queue writes.
 func IsLog(base string) bool { return logName.MatchString(base) }

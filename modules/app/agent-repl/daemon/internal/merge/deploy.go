@@ -13,17 +13,20 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 	repoconfigv1 "agentrepl/proto/repoconfig/v1"
 
-	"agent-repld/internal/deployconfig"
+	"agent-repld/internal/dirpath"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/lifecycleconfig"
 	"agent-repld/internal/resolve/footer"
 	"agent-repld/internal/scriptrunner"
 	"agent-repld/internal/wsm"
 )
 
-// This file is a merge's DEPLOY: the three stages its repository's
-// `.agent-repl/deploy.yaml` (repoconfig.v1.DeployConfig) describes, and the
-// hooks they run.
+// This file is a merge's DEPLOY: the three deploy stages its repository's
+// `.agent-repl/lifecycle.yaml` (repoconfig.v1.LifecycleConfig) describes, and
+// the hooks they run. Which hooks a stage runs is the deploy OWNER's kind's
+// (lifecycleconfig.Builtins.Hooks): the repository's list for that kind, or
+// the kind's built-in default.
 //
 //	pre_deploy   its hooks, then the built-in local merge (process.go) when
 //	             the config has one; never held
@@ -54,7 +57,7 @@ const (
 // async request's are its CreateWorkspaceError arms, renamed by its handler.
 const (
 	// ArmNoDeployConfig refuses a deploy into a repository with no
-	// `.agent-repl/deploy.yaml`. Its `path` field names the file.
+	// `.agent-repl/lifecycle.yaml`. Its `path` field names the file.
 	ArmNoDeployConfig = "no_deploy_config"
 	// ArmDeployConfigInvalid refuses a deploy into a repository whose config
 	// is unusable. Its `path` and `detail` fields name the file and why.
@@ -76,8 +79,6 @@ const (
 	// "a deploy this daemon is not running", and the landed change was never
 	// deployed.
 	EnvDeployDaemon = "AGENT_REPL_DEPLOY_DAEMON"
-	// EnvDeployStage is the stage the hook runs in.
-	EnvDeployStage = "AGENT_REPL_DEPLOY_STAGE"
 )
 
 // scriptTailLines is how many of a script hook's last output lines its tab
@@ -89,13 +90,57 @@ const scriptTailLines = 20
 // config.
 type deployTarget struct {
 	// cfg is the repository's deploy config.
-	cfg *repoconfigv1.DeployConfig
+	cfg *repoconfigv1.LifecycleConfig
 	// repoRoot is the repository's main checkout root: where its config lives
 	// and where a script hook runs.
 	repoRoot string
 	// toMain reports that the target is the repository's main branch in its
 	// main worktree, which `main` hooks and a version tag need.
 	toMain bool
+	// owner is who the deploy's owner is to its repository's hooks.
+	owner hookOwner
+}
+
+// hookOwner is what a repository's hooks know of the workspace they run for:
+// its kind, which picks its hook lists, and its originating Slack thread.
+type hookOwner struct {
+	// kind is who created the workspace.
+	kind lifecycleconfig.Originator
+	// slackThread is the link of the Slack message the workspace was created
+	// for, empty when none.
+	slackThread string
+}
+
+// hookOwnerOf reads WS's kind and originating thread. A workspace nothing
+// recorded an originator for (one registered rather than created, or created
+// before originators were recorded) is a user_or_workspace workspace: only a
+// create states emoji_ack.
+func (o *orchestrator) hookOwnerOf(ctx context.Context, ws ids.WorkspaceID) (hookOwner, error) {
+	owner := hookOwner{kind: lifecycleconfig.OriginatorUserOrWorkspace}
+	spelled, found, err := o.deps.DB.WorkspaceOriginator(ctx, ws)
+	if err != nil {
+		return hookOwner{}, fmt.Errorf("merge: reading who created %s: %w", ws, err)
+	}
+	if found {
+		if owner.kind, err = lifecycleconfig.ParseOriginator(spelled); err != nil {
+			return hookOwner{}, fmt.Errorf("merge: the originator recorded for %s: %w", ws, err)
+		}
+	}
+	if owner.slackThread, _, err = o.deps.DB.WorkspaceSlackOrigin(ctx, ws); err != nil {
+		return hookOwner{}, fmt.Errorf("merge: reading the Slack thread %s was created for: %w", ws, err)
+	}
+	return owner, nil
+}
+
+// env is the environment every script hook of the owner's carries beside a
+// stage's own: its worktree, its stage, and its originating thread when it
+// has one.
+func (h hookOwner) env(dir string, stage lifecycleconfig.Stage) []string {
+	env := []string{EnvCallingWorkspace + "=" + dir, lifecycleconfig.EnvHookStage + "=" + stage.Key()}
+	if h.slackThread != "" {
+		env = append(env, lifecycleconfig.EnvSlackThread+"="+h.slackThread)
+	}
+	return env
 }
 
 // deployTargetFor reads the deploy config of the repository TARGET is a
@@ -108,8 +153,8 @@ func (o *orchestrator) deployTargetFor(ctx context.Context, ws ids.WorkspaceID, 
 	}
 	cfg, err := o.deps.DeployConfig.Load(main)
 	if err != nil {
-		var missing *deployconfig.MissingError
-		var invalid *deployconfig.InvalidError
+		var missing *lifecycleconfig.MissingError
+		var invalid *lifecycleconfig.InvalidError
 		switch {
 		case errors.As(err, &missing):
 			refusal := refuse(ArmNoDeployConfig, ws, "the repository states no deploy: %s does not exist", missing.Path)
@@ -122,7 +167,11 @@ func (o *orchestrator) deployTargetFor(ctx context.Context, ws ids.WorkspaceID, 
 		}
 		return deployTarget{}, fmt.Errorf("merge: reading the deploy config of %s: %w", main, err)
 	}
-	return deployTarget{cfg: cfg, repoRoot: main, toMain: sameDir(target, main)}, nil
+	owner, err := o.hookOwnerOf(ctx, ws)
+	if err != nil {
+		return deployTarget{}, err
+	}
+	return deployTarget{cfg: cfg, repoRoot: main, toMain: dirpath.Same(target, main), owner: owner}, nil
 }
 
 // localMerge is the config's built-in local merge, nil when nothing lands
@@ -135,42 +184,36 @@ func (t deployTarget) localMerge() *repoconfigv1.DeployLocalMerge {
 // Only a run with a local merge tests, so a run without one asking for it is a
 // defect.
 func (t deployTarget) testScript() string {
-	path := deployconfig.TestScript(t.cfg)
+	path := lifecycleconfig.TestScript(t.cfg)
 	if path == "" {
 		panic("merge: a run with no agent_repl_suites test step asked for its test script")
 	}
 	return path
 }
 
-// configured answers the config's hooks of one stage that run for this
-// deploy's target.
-func (t deployTarget) configured(entries []*repoconfigv1.DeployHookEntry) []*repoconfigv1.DeployHook {
-	var out []*repoconfigv1.DeployHook
-	for _, entry := range entries {
-		if deployconfig.RunsFor(entry, t.toMain) {
-			out = append(out, entry.GetHook())
-		}
-	}
-	return out
+// configured answers STAGE's hooks that run for this deploy's owner and
+// target: its kind's list, or its kind's built-in default.
+func (r *run) configured(stage lifecycleconfig.Stage) []*repoconfigv1.Hook {
+	return r.o.deps.Builtins.Hooks(r.target.cfg, stage, r.target.owner.kind, r.target.toMain)
 }
 
 // preDeployHooks are the hooks the pre-deploy stage runs: the ones the
 // request or the owner's creation supplied, which REPLACE the repository's,
-// and otherwise the repository's that run for this target.
-func (r *run) preDeployHooks() []*repoconfigv1.DeployHook {
+// and otherwise the repository's that run for this owner and target.
+func (r *run) preDeployHooks() []*repoconfigv1.Hook {
 	if hooks := r.requestHooks().PreDeploy; len(hooks) > 0 {
 		return hooks
 	}
-	return r.target.configured(r.target.cfg.GetPreDeploy().GetHooks())
+	return r.configured(lifecycleconfig.StagePreDeploy)
 }
 
 // postDeployHooks are the post-deploy stage's hooks, chosen as the
 // pre-deploy stage's are.
-func (r *run) postDeployHooks() []*repoconfigv1.DeployHook {
+func (r *run) postDeployHooks() []*repoconfigv1.Hook {
 	if hooks := r.requestHooks().PostDeploy; len(hooks) > 0 {
 		return hooks
 	}
-	return r.target.configured(r.target.cfg.GetPostDeploy())
+	return r.configured(lifecycleconfig.StagePostDeploy)
 }
 
 // requestHooks are the hooks the owner's creation recorded: for an async
@@ -178,14 +221,10 @@ func (r *run) postDeployHooks() []*repoconfigv1.DeployHook {
 // hand-off); for any other workspace, what its creation supplied.
 func (r *run) requestHooks() wsm.DeployHooks { return r.job.Hooks }
 
-// deployHook is the repository's deploy hook when it runs for this target,
-// nil otherwise.
-func (r *run) deployHook() *repoconfigv1.DeployHook {
-	entry := r.target.cfg.GetDeploy()
-	if entry == nil || !deployconfig.RunsFor(entry, r.target.toMain) {
-		return nil
-	}
-	return entry.GetHook()
+// deployHook is the repository's deploy hook for this owner's kind when it
+// runs for this target, nil otherwise.
+func (r *run) deployHook() *repoconfigv1.Hook {
+	return lifecycleconfig.DeployHook(r.target.cfg, r.target.owner.kind, r.target.toMain)
 }
 
 // stageOf names a hook tab kind's stage as the footer, the environment and the
@@ -194,13 +233,13 @@ type stageOf struct {
 	kind   string
 	step   footer.MergeStep
 	origin conversationv1.PromptOrigin
-	env    string
+	stage  lifecycleconfig.Stage
 }
 
 var (
-	stagePreDeploy  = stageOf{kind: TabPreDeploy, step: footer.StepPreDeploy, origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_BEFORE_ACTION, env: "pre_deploy"}
-	stageDeploy     = stageOf{kind: TabDeploy, step: footer.StepDeploying, origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_DEPLOY_HOOK, env: "deploy"}
-	stagePostDeploy = stageOf{kind: TabPostDeploy, step: footer.StepPostDeploy, origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_AFTER_ACTION, env: "post_deploy"}
+	stagePreDeploy  = stageOf{kind: TabPreDeploy, step: footer.StepPreDeploy, origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_BEFORE_ACTION, stage: lifecycleconfig.StagePreDeploy}
+	stageDeploy     = stageOf{kind: TabDeploy, step: footer.StepDeploying, origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_DEPLOY_HOOK, stage: lifecycleconfig.StageDeploy}
+	stagePostDeploy = stageOf{kind: TabPostDeploy, step: footer.StepPostDeploy, origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_AFTER_ACTION, stage: lifecycleconfig.StagePostDeploy}
 )
 
 // preDeploy runs the pre-deploy stage's hooks, in order. A failed hook fails
@@ -293,14 +332,22 @@ func shortSHA(sha string) string {
 // failure's one-line account, empty when it succeeded. LANDED is what the
 // deploy has landed so far, recorded with a prompt hook's turn so a resume
 // carries it on; nil before anything landed.
-func (r *run) runHook(ctx context.Context, stage stageOf, i int, hook *repoconfigv1.DeployHook, landed *outcome) (string, error) {
+func (r *run) runHook(ctx context.Context, stage stageOf, i int, hook *repoconfigv1.Hook, landed *outcome) (string, error) {
 	switch h := hook.GetHook().(type) {
-	case *repoconfigv1.DeployHook_Prompt:
+	case *repoconfigv1.Hook_Prompt:
 		var doc *outcomeDoc
 		if landed != nil {
 			doc = toOutcomeDoc(*landed)
 		}
-		round, close, err := r.configuredPrompt(ctx, stage.kind, stage.step, i, h.Prompt.GetText(), stage.origin, doc)
+		text, err := lifecycleconfig.ExpandPrompt(h.Prompt.GetText(), r.target.owner.slackThread)
+		if err != nil {
+			// A CONFIG THAT NAMES A THREAD THE OWNER HAS NONE OF is the
+			// repository's defect, and the hook fails before it is drawn.
+			r.o.log(ctx, r.ws).Error("daemon.merge.hook", "a prompt hook names the originating Slack thread of a workspace created for none; the deploy fails", dlog.Context{
+				"workspace": string(r.ws), "lease": string(r.lease.ID), "stage": stage.kind, "hook": i, "originator": r.target.owner.kind.String(), "cause": err.Error()})
+			return fmt.Sprintf("its %s prompt hook %v", stageWords(stage.kind), err), nil
+		}
+		round, close, err := r.configuredPrompt(ctx, stage.kind, stage.step, i, text, stage.origin, doc)
 		if round.kind == "" {
 			return "", nil
 		}
@@ -322,7 +369,7 @@ func (r *run) runHook(ctx context.Context, stage stageOf, i int, hook *repoconfi
 		r.o.log(ctx, r.ws).Info("daemon.merge.hook", "a prompt hook succeeded", dlog.Context{
 			"workspace": string(r.ws), "lease": string(r.lease.ID), "stage": stage.kind, "hook": i, "close": close.String()})
 		return "", nil
-	case *repoconfigv1.DeployHook_Script:
+	case *repoconfigv1.Hook_Script:
 		return r.runScriptHook(ctx, stage, i, h.Script)
 	}
 	panic("merge: a checked hook is neither a script nor a prompt")
@@ -418,7 +465,7 @@ func hookLine(stage stageOf, hook *frontendv1.FooterMergeStepHook) *frontendv1.F
 // A SCRIPT HOOK A RESTART CUT SHORT RUNS AGAIN on resume: the dead daemon's
 // child cannot be reattached to, and a hook acts on the repository's current
 // state, so running it again is what the skill documents a hook must bear.
-func (r *run) runScriptHook(ctx context.Context, stage stageOf, i int, script *repoconfigv1.DeployHookScript) (string, error) {
+func (r *run) runScriptHook(ctx context.Context, stage stageOf, i int, script *repoconfigv1.HookScript) (string, error) {
 	const op = "daemon.merge.hook"
 	// ONE INDEX COUNTS A STAGE'S HOOKS, scripts and prompts alike
 	// (progressDoc.PromptIndex), so a resume skips exactly the hooks before
@@ -459,11 +506,9 @@ func (r *run) runScriptHook(ctx context.Context, stage stageOf, i int, script *r
 		}
 		r.upsert(round, hookScriptTab(round.live(), view))
 	}
-	env := []string{
-		EnvCallingWorkspace + "=" + r.subject.dir, EnvDeployLedger + "=" + string(r.lease.ID),
-		EnvDeployDaemon + "=" + r.o.deps.SelfAddress, EnvDeployStage + "=" + stage.env,
-	}
-	argv := []string{"bash", filepath.Join(r.target.repoRoot, script.GetPath())}
+	env := append(r.target.owner.env(r.subject.dir, stage.stage),
+		EnvDeployLedger+"="+string(r.lease.ID), EnvDeployDaemon+"="+r.o.deps.SelfAddress)
+	argv := lifecycleconfig.ScriptArgv(r.target.repoRoot, script)
 	r.o.log(ctx, r.ws).Info(op, "a script hook started", fields)
 	run, err := r.o.deps.HookRunner.RunLinesWith(ctx, r.target.repoRoot, argv,
 		scriptrunner.Options{Env: env, Timeout: time.Duration(script.GetTimeoutSeconds()) * time.Second}, onLine)
@@ -514,7 +559,7 @@ func (r *run) settleScript(ctx context.Context, round tabRound, view scriptView,
 // hookLogPath is where one script hook round's output is kept: among the
 // queue's logs (LogsDir), by the deploy's ledger, its stage and its round.
 func (r *run) hookLogPath(stage stageOf, round tabRound) string {
-	return filepath.Join(LogsDir(r.o.deps.StateDir), fmt.Sprintf("%s-%s-%d.log", r.lease.ID, stage.env, round.n))
+	return filepath.Join(LogsDir(r.o.deps.StateDir), fmt.Sprintf("%s-%s-%d.log", r.lease.ID, stage.stage.Key(), round.n))
 }
 
 // setDeploy records what the deploy decided about its rollout, once.

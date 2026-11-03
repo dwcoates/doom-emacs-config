@@ -258,8 +258,11 @@ func (o *orchestrator) Enqueue(ctx context.Context, req Request) (Enqueued, erro
 	if req.OneShot {
 		o.publishOneShot(ctx, log, ws)
 	}
-	if req.By == RequestedByUser {
+	if req.By == RequestedByUser && !o.hasFinishStage(deploy, record) {
 		// THE USER'S ASK HAS NO REQUESTING TURN: it is put in line at once.
+		// A workspace whose finish stage runs hooks waits instead, for any
+		// turn in flight to end and then for those hooks: a prompt hook is a
+		// turn of the workspace, which cannot run beside one (finish.go).
 		return enqueued, o.queueRequest(ctx, ws, repo)
 	}
 	o.awaitRequestingTurn(ws, repo)
@@ -508,6 +511,21 @@ func (o *orchestrator) waitThenQueue(wait *requestWait) {
 				dlog.Context{"workspace": string(ws), "turn": string(turn), "error": err.Error()})
 			return
 		}
+	}
+	// THE FINISH STAGE RUNS HERE, between the requesting turn's end and the
+	// deploy's place in line (finish.go).
+	failure, err := o.runFinishStage(ctx, ws, wait.repo)
+	if err != nil {
+		if ctx.Err() != nil {
+			log.Info(op, "the merge request was withdrawn during its finish stage", dlog.Context{"workspace": string(ws), "cause": err.Error()})
+			return
+		}
+		log.Error(op, "the finish stage could not be run; the request stays recorded for the next boot", dlog.Context{"workspace": string(ws), "error": err.Error()})
+		return
+	}
+	if failure != "" {
+		o.withdrawFinished(ctx, ws, wait.repo, failure)
+		return
 	}
 	if err := o.queueRequest(ctx, ws, wait.repo); err != nil {
 		log.Error(op, "could not put the merge request in line", dlog.Context{"workspace": string(ws), "error": err.Error()})
