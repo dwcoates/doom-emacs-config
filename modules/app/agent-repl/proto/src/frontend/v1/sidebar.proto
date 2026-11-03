@@ -933,7 +933,11 @@ message RosterRepoMergeQueue {
 // One merge remediating its failing tests out of line.
 message RosterMergeQueueRemediating {
   RosterMergeQueueSubject subject = 1;
-  // When it stepped aside, epoch ms: its clock ticks from here.
+  // WHEN THE MERGE TOOK ITS REMEDIATING SLOT, epoch ms: the moment its queue
+  // entry stepped aside, written durably in the same store write that moved
+  // it there, so a restart or a handover reads the same moment. Its clock
+  // ticks from here, starting at zero as it steps aside however long it
+  // headed the queue before. Never zero.
   int64 since_ms = 2;
 }
 
@@ -1026,9 +1030,13 @@ message RosterMergeQueueHead {
   // is RETIRED (2026-10-27): a queue whose line is empty is not listed.
   reserved 5;
   reserved "failed";
-  // WHEN THIS MERGE REACHED THE HEAD, epoch ms: the head's clock ticks from
-  // it, so a merge that waited hours in line reads zero as it takes the
-  // head slot (owner ruling, 2026-10-30). Never zero.
+  // WHEN THIS MERGE TOOK THE HEAD SLOT, epoch ms: the head's clock ticks
+  // from it, so a merge that waited hours in line reads zero as it takes the
+  // head slot (owner ruling, 2026-10-30). It is the queue entry's durable
+  // slot moment, written in the same store write that made the merge the
+  // front of its line, so a restart or a handover reads the same moment, and
+  // a merge that left the head (to remediate, or overtaken by a race's
+  // winner) and takes it again starts again from zero. Never zero.
   int64 head_since_ms = 6;
 }
 
@@ -1100,6 +1108,19 @@ message RosterMergeQueueWaiting {
   // TRUE when it was put in line at the front
   // (agentrepl.v1.MergeQueuePlacementFront).
   bool placed_at_front = 3;
+  // PRESENT while the merge is being worked on behind the head (racing it
+  // to land): it then holds an active slot, and the row's clock ticks from
+  // the moment it took that slot rather than from `queued_at_ms`. UNSET
+  // while it only waits its turn.
+  optional RosterMergeQueueWaitingRacing racing = 4;
+}
+
+// A merge behind the head is being worked on, racing the head to land.
+message RosterMergeQueueWaitingRacing {
+  // WHEN THE MERGE TOOK ITS RACING SLOT, epoch ms: the queue entry's durable
+  // slot moment, written in the same store write that admitted it behind the
+  // head, so a restart or a handover reads the same moment. Never zero.
+  int64 since_ms = 1;
 }
 
 // One entry of a repository section's body: a top-level row in no
