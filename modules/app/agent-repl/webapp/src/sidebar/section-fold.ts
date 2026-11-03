@@ -104,22 +104,6 @@ export function sectionFold(sc: SidebarContext, foldKey: string, target: FoldTar
 }
 
 /**
- * The fold gesture of a section that NEVER COLLAPSES: the one-shot subsection
- * (`frontend.v1.RosterSubsectionNeverCollapses`), whose workspaces work
- * unattended, so a collapse that stood their sessions down would stop the
- * work it shows. The gesture asks nothing, as on a section holding the
- * current workspace.
- */
-export function neverFolds(foldKey: string): FoldGesture {
-  return () => {
-    log.debug("the section never collapses; its fold gesture asks nothing", {
-      operation: "sidebar.fold.never-collapses",
-      context: { section: foldKey },
-    });
-  };
-}
-
-/**
  * Fold SECTION as the wire says (WIRE_FOLDED), unless this page's own ask
  * under FOLD_KEY is still in flight, and keep it painted as the ask settles.
  */
@@ -169,14 +153,11 @@ export function drawRosterSectionFold(fold: RosterSectionFold, path: string): bo
 
 /**
  * Whether an expanded repository section or subsection may collapse, as the
- * daemon resolved it. Both carry the same two arms in their own messages; a
- * subsection's carries a third, `neverCollapses`, which only the one-shot
- * subsection sets.
+ * daemon resolved it. Both carry the same two arms in their own messages.
  */
 export type RosterExpandedCollapse =
   | { case: "collapsible"; value: unknown }
   | { case: "holdsCurrent"; value: unknown }
-  | { case: "neverCollapses"; value: unknown }
   | { case: undefined; value?: undefined };
 
 /** A repository section's or subsection's fold, whose expanded arm says whether it may collapse. */
@@ -201,10 +182,6 @@ export function drawRosterHoldsCurrent(fold: CollapsibleSectionFold, path: strin
           return false;
         case "holdsCurrent":
           return true;
-        // The one-shot subsection's arm says it never collapses, and nothing
-        // of the current workspace.
-        case "neverCollapses":
-          return false;
         default: {
           const other: { case: string } = collapse;
           return unreachableArm(`${path}.expanded.collapse`, other.case);
