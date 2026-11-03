@@ -662,7 +662,7 @@ The notices it hands its page are captured in
     (should (eq (plist-get (agent-repl-test-input--request) :origin) :metaprompt-read))))
 
 (ert-deftest agent-repl-input-every-origin-has-one-site ()
-  "The accepted vocabulary is exactly the thirteen Emacs send sites."
+  "The accepted vocabulary is exactly the fourteen Emacs send sites."
   (should (equal agent-repl--input-origins
                  '(:user-sent
                    :user-sent-and-hide
@@ -676,7 +676,8 @@ The notices it hands its page are captured in
                    :command-update-pr
                    :command-rebase
                    :command-create-or-update-pr
-                   :deferred-prompt))))
+                   :deferred-prompt
+                   :command-thread-background))))
 
 ;;;; ---- Send-variant composition ----
 
