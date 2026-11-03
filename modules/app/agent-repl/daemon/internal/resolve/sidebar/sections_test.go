@@ -1701,6 +1701,41 @@ func TestTheMergeQueueDrawsAMergeRemediatingOutOfLineAsItsSecondSpot(t *testing.
 	}
 }
 
+func TestAMergeRemediatingOutOfLineCarriesWhatItRepairs(t *testing.T) {
+	cases := []struct {
+		name   string
+		reason *frontendv1.RosterMergeQueueRemediatingReason
+		want   func(*frontendv1.RosterMergeQueueRemediatingReason) bool
+	}{
+		{name: "its failing tests",
+			reason: &frontendv1.RosterMergeQueueRemediatingReason{Reason: &frontendv1.RosterMergeQueueRemediatingReason_Tests{Tests: &frontendv1.RosterMergeQueueRemediatingTests{}}},
+			want:   func(r *frontendv1.RosterMergeQueueRemediatingReason) bool { return r.GetTests() != nil }},
+		{name: "its rebase's conflicts",
+			reason: &frontendv1.RosterMergeQueueRemediatingReason{Reason: &frontendv1.RosterMergeQueueRemediatingReason_Conflicts{Conflicts: &frontendv1.RosterMergeQueueRemediatingConflicts{}}},
+			want:   func(r *frontendv1.RosterMergeQueueRemediatingReason) bool { return r.GetConflicts() != nil }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			r, _ := newResolver(t)
+			r.SetMergeQueue(theRepo, sidebar.MergeQueue{
+				Workspaces:  []ids.WorkspaceID{"w2", "w1"},
+				Line:        inLine("w2"),
+				Remediating: []sidebar.QueueEntry{{Workspace: "w1", Credited: "w1", SlotSince: time.UnixMilli(1), RemediatingFor: tc.reason}},
+			})
+
+			// Act
+			r.SetRegistry(queueView(workspace("w1", "one"), workspace("w2", "two")))
+
+			// Assert
+			aside := queuedGroups(latest(t, r))[0].GetQueue().GetRemediating()
+			if len(aside) != 1 || !tc.want(aside[0].GetReason()) {
+				t.Fatalf("remediating = %v, want one carrying %s", aside, tc.name)
+			}
+		})
+	}
+}
+
 func TestAQueueWhoseOnlyMergeRemediatesIsListedWithNoHead(t *testing.T) {
 	// Arrange: the line is empty; w1 remediates out of line.
 	r, _ := newResolver(t)

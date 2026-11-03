@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 
 	"connectrpc.com/connect"
 
@@ -152,7 +153,8 @@ func mergeQueueStatusOf(status merge.QueueStatus) *agentreplv1.MergeQueueStatus 
 		stage := &agentreplv1.MergeQueueStatusEntryStage{Stage: &agentreplv1.MergeQueueStatusEntryStage_Waiting{Waiting: &agentreplv1.MergeQueueStatusEntryStageWaiting{}}}
 		switch {
 		case e.remediating:
-			stage.Stage = &agentreplv1.MergeQueueStatusEntryStage_Remediating{Remediating: &agentreplv1.MergeQueueStatusEntryStageRemediating{}}
+			stage.Stage = &agentreplv1.MergeQueueStatusEntryStage_Remediating{Remediating: &agentreplv1.MergeQueueStatusEntryStageRemediating{
+				Reason: remediatingReasonOf(member.AsideFor)}}
 		case member.Started:
 			stage.Stage = &agentreplv1.MergeQueueStatusEntryStage_Running{Running: &agentreplv1.MergeQueueStatusEntryStageRunning{
 				StepDescription: member.Step.Words()}}
@@ -167,4 +169,19 @@ func mergeQueueStatusOf(status merge.QueueStatus) *agentreplv1.MergeQueueStatus 
 		})
 	}
 	return out
+}
+
+// remediatingReasonOf renders why a merge remediating out of line stepped
+// aside. Every remediating member carries its reason (merge.QueueSnapshot),
+// so a zero or unknown one is a defect in the snapshot, and panics.
+func remediatingReasonOf(why merge.AsideReason) *agentreplv1.MergeQueueStatusEntryStageRemediatingReason {
+	switch why {
+	case merge.AsideForTests:
+		return &agentreplv1.MergeQueueStatusEntryStageRemediatingReason{Reason: &agentreplv1.MergeQueueStatusEntryStageRemediatingReason_Tests{
+			Tests: &agentreplv1.MergeQueueStatusEntryStageRemediatingTests{}}}
+	case merge.AsideForConflicts:
+		return &agentreplv1.MergeQueueStatusEntryStageRemediatingReason{Reason: &agentreplv1.MergeQueueStatusEntryStageRemediatingReason_Conflicts{
+			Conflicts: &agentreplv1.MergeQueueStatusEntryStageRemediatingConflicts{}}}
+	}
+	panic(fmt.Sprintf("server: a remediating merge's snapshot carries no reason it stepped aside for (merge.AsideReason(%d))", int(why)))
 }

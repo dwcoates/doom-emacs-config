@@ -684,11 +684,7 @@ func (r *run) speculativeGate(ctx context.Context, place chainPlace, targetBranc
 	r.briefAhead = place.ahead
 	// A RUN PROMOTED WHILE ITS GATE RAN IS THE HEAD NOW: its whole suite
 	// failed at the head, so it steps aside as a head does (remediate.go).
-	var aside func()
-	if r.o.stepsAside(ctx, r) {
-		aside = func() { r.o.stepAside(r) }
-	}
-	if gaveUp, err := r.fixThen(ctx, attempt, verdict.result, targetBranch, aside); err != nil || gaveUp != nil {
+	if gaveUp, err := r.fixThen(ctx, attempt, verdict.result, targetBranch, r.asideOn(ctx, AsideForTests)); err != nil || gaveUp != nil {
 		return gaveUp, err
 	}
 	r.fixesUsed = attempt

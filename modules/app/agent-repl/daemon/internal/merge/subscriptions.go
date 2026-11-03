@@ -149,6 +149,9 @@ type QueueMember struct {
 	// Step is a started merge's step, empty while it waits and before its
 	// first step is published.
 	Step footer.MergeStep
+	// AsideFor is why a merge remediating out of line stepped aside, zero for
+	// every merge in line.
+	AsideFor AsideReason
 }
 
 // QueueSnapshot is one repository's queue as it stands.
@@ -503,6 +506,11 @@ func (o *orchestrator) readQueue(ctx context.Context, db wsm.DB, repo wsm.RepoKe
 		remediating, err = o.queueMembers(ctx, db, aside)
 		if err != nil {
 			return QueueSnapshot{}, err
+		}
+		for i := range remediating {
+			if remediating[i].AsideFor, err = asideReasonFor(ctx, db, remediating[i].Workspace); err != nil {
+				return QueueSnapshot{}, err
+			}
 		}
 	}
 	return QueueSnapshot{Repo: repo, Paused: paused, Members: members, Remediating: remediating}, nil

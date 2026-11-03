@@ -133,7 +133,7 @@ func (r *resolver) drawMergeQueue(q repoQueue, log dlog.Logger) *frontendv1.Rost
 			continue
 		}
 		out.Remediating = append(out.Remediating, &frontendv1.RosterMergeQueueRemediating{
-			Subject: sub, SinceMs: entry.SlotSince.UnixMilli()})
+			Subject: sub, SinceMs: entry.SlotSince.UnixMilli(), Reason: entry.RemediatingFor})
 	}
 	if len(q.line) == 0 {
 		return out

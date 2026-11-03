@@ -68,22 +68,39 @@ func TestGetMergeQueueStatusRendersEachQueue(t *testing.T) {
 }
 
 func TestGetMergeQueueStatusListsAMergeRemediatingAfterTheLine(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	queue := aQueue()
-	queue.Queue.Remediating = []merge.QueueMember{{Workspace: "ws-fixing", Name: "fixing", Branch: "agent/fixing", Started: true}}
-	h.Merge.statuses = []merge.QueueStatus{queue}
-
-	// Act
-	resp, err := h.Client.GetMergeQueueStatus(context.Background(), connect.NewRequest(&agentreplv1.GetMergeQueueStatusRequest{}))
-
-	// Assert
-	if err != nil {
-		t.Fatalf("GetMergeQueueStatus: %v", err)
+	cases := []struct {
+		name  string
+		aside merge.AsideReason
+		want  func(*agentreplv1.MergeQueueStatusEntryStageRemediatingReason) bool
+	}{
+		{name: "a merge fixing its failing tests", aside: merge.AsideForTests,
+			want: func(r *agentreplv1.MergeQueueStatusEntryStageRemediatingReason) bool { return r.GetTests() != nil }},
+		{name: "a merge resolving its rebase's conflicts", aside: merge.AsideForConflicts,
+			want: func(r *agentreplv1.MergeQueueStatusEntryStageRemediatingReason) bool { return r.GetConflicts() != nil }},
 	}
-	entries := resp.Msg.GetSuccess().GetQueues()[0].GetEntries()
-	if len(entries) != 3 || entries[2].GetName() != "fixing" || entries[2].GetStage().GetRemediating() == nil {
-		t.Fatalf("entries = %v, want the remediating merge last, at the remediating stage", entries)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			queue := aQueue()
+			queue.Queue.Remediating = []merge.QueueMember{{Workspace: "ws-fixing", Name: "fixing", Branch: "agent/fixing", Started: true, AsideFor: tc.aside}}
+			h.Merge.statuses = []merge.QueueStatus{queue}
+
+			// Act
+			resp, err := h.Client.GetMergeQueueStatus(context.Background(), connect.NewRequest(&agentreplv1.GetMergeQueueStatusRequest{}))
+
+			// Assert
+			if err != nil {
+				t.Fatalf("GetMergeQueueStatus: %v", err)
+			}
+			entries := resp.Msg.GetSuccess().GetQueues()[0].GetEntries()
+			if len(entries) != 3 || entries[2].GetName() != "fixing" || entries[2].GetStage().GetRemediating() == nil {
+				t.Fatalf("entries = %v, want the remediating merge last, at the remediating stage", entries)
+			}
+			if reason := entries[2].GetStage().GetRemediating().GetReason(); !tc.want(reason) {
+				t.Fatalf("reason = %v, want the arm of %v", reason, tc.aside)
+			}
+		})
 	}
 }
 

@@ -2,6 +2,7 @@ package merge
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"go/ast"
 	"go/parser"
@@ -11,8 +12,11 @@ import (
 	"testing"
 	"time"
 
+	conversationv1 "agentrepl/proto/conversation/v1"
+
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/promptqueue"
 	"agent-repld/internal/resolve/sidebar"
 	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
@@ -326,7 +330,7 @@ func TestAHeadSteppingAsideIsCutBeforeItWaitsForItsFixingTurn(t *testing.T) {
 	mu.Lock()
 	cause, waited := causes[ids.TurnID(doc.Turn)]
 	mu.Unlock()
-	if !waited || !errors.Is(cause, errSteppedAside) {
+	if !waited || !errors.Is(cause, errAsideForTests) {
 		t.Fatalf("the fixing turn's wait began with cause %v (waited %v), want it already cut by the step aside", cause, waited)
 	}
 	if got := c.git.landedOwn(); len(got) != 0 {
@@ -375,7 +379,7 @@ func TestAStepAsideLeavesARunAnotherEndTookFirstToThatEnd(t *testing.T) {
 			h.o.mu.Unlock()
 
 			// Act
-			h.o.stepAside(r)
+			h.o.stepAside(r, AsideForTests)
 
 			// Assert
 			if err := cause(); err != nil {
@@ -384,14 +388,14 @@ func TestAStepAsideLeavesARunAnotherEndTookFirstToThatEnd(t *testing.T) {
 			h.o.mu.Lock()
 			why, away := h.o.takenAway[theWorkspace]
 			h.o.mu.Unlock()
-			if away && why.by == suspendStepAside.by {
+			if away && why.by == suspendAsideForTests.by {
 				t.Fatal("the step aside marked the run taken away, want it left to the end that took it")
 			}
 			if got := entryState(t, h); got != wsm.MergeRemediating {
 				t.Fatalf("entry state = %v, want remediating for that end to read", got)
 			}
 			if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "info", Operation: opRemediate,
-				Message: "the failing head stepped aside as another end took its run; that end settles the merge remediating"}); !ok {
+				Message: "the merge stepped aside as another end took its run; that end settles the merge remediating"}); !ok {
 				t.Fatal("no INFO record of the step aside left to another end")
 			}
 		})
@@ -404,7 +408,7 @@ func TestAStepAsideThatCannotLeaveTheLineFixesAtTheHead(t *testing.T) {
 	r, cause := stepAsideRun(t, h, wsm.MergeQueued)
 
 	// Act
-	h.o.stepAside(r)
+	h.o.stepAside(r, AsideForTests)
 
 	// Assert
 	if err := cause(); err != nil {
@@ -433,7 +437,7 @@ func TestATakeBackAfterAStepAsideRecordsWhatFailed(t *testing.T) {
 		message string
 	}{
 		{name: "the run never lets go", arrange: func(h *harness, r *run) { h.o.drainBound = time.Nanosecond },
-			message: "the failing head that stepped aside did not let go"},
+			message: "the merge that stepped aside did not let go"},
 		{name: "the take-back cannot read the queues", arrange: func(h *harness, r *run) {
 			close(r.finished)
 			h.db.mu.Lock()
@@ -449,7 +453,7 @@ func TestATakeBackAfterAStepAsideRecordsWhatFailed(t *testing.T) {
 			tc.arrange(h, r)
 
 			// Act
-			h.o.takeBackSteppedAside(r, dlog.Context{"workspace": string(theWorkspace)})
+			h.o.takeBackSteppedAside(r, suspendAsideForTests, dlog.Context{"workspace": string(theWorkspace)})
 
 			// Assert
 			record, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opRemediate, Message: tc.message})
@@ -609,14 +613,14 @@ func TestAStepAsideTakesTheEntryOutOfLineBeforeItCutsTheRun(t *testing.T) {
 	}
 
 	// Act
-	h.o.stepAside(r)
+	h.o.stepAside(r, AsideForTests)
 
 	// Assert
 	if cutAtWrite || !markedAtWrite {
 		t.Fatalf("at the line write the run was cut=%v marked=%v, want uncut and marked", cutAtWrite, markedAtWrite)
 	}
-	if !errors.Is(cause(), errSteppedAside) {
-		t.Fatalf("the run's cause after the step aside = %v, want errSteppedAside", cause())
+	if !errors.Is(cause(), errAsideForTests) {
+		t.Fatalf("the run's cause after the step aside = %v, want errAsideForTests", cause())
 	}
 }
 
@@ -706,4 +710,607 @@ func underLineLock(stack []ast.Node) bool {
 		}
 	}
 	return false
+}
+
+// ---- Conflict step aside (owner request, 2026-11-03) ----
+
+// keepMergeTurns records every merge prompt's turn as the session's, so a
+// resumed run reattaches to the turn it handed off rather than delivering it
+// again, as a live session's turn store says.
+func (c *chain) keepMergeTurns() {
+	c.h.queue.mu.Lock()
+	defer c.h.queue.mu.Unlock()
+	c.h.queue.onSubmit = func(sub promptqueue.Submission) {
+		c.h.db.mu.Lock()
+		c.h.db.turns[sub.WS] = append(c.h.db.turns[sub.WS], wsm.Turn{ID: sub.Turn, Workspace: sub.WS})
+		c.h.db.mu.Unlock()
+	}
+}
+
+// steppedAside answers a channel closed once ws's step aside begins its
+// take-back (onStepAside).
+func (c *chain) steppedAside(ws ids.WorkspaceID) <-chan struct{} {
+	aside := make(chan struct{})
+	var once sync.Once
+	c.h.o.onStepAside = func(stepped ids.WorkspaceID) {
+		if stepped == ws {
+			once.Do(func() { close(aside) })
+		}
+	}
+	return aside
+}
+
+// settle waits for every goroutine the orchestrator started to end: a step
+// aside's take-back among them.
+func (c *chain) settle(t *testing.T, what string) {
+	t.Helper()
+	settled := make(chan struct{})
+	go func() { c.h.o.live.Wait(); close(settled) }()
+	receiveWithin(t, settled, what)
+}
+
+// conflictAsideScenario runs a head whose rebase conflicts with what master
+// moved to (m1) with ws-b in line behind it, on a one-merge window, until the
+// head stepped aside and its step aside settled.
+func conflictAsideScenario(t *testing.T) *chain {
+	t.Helper()
+	return conflictAsideScenarioWith(t, func(*chain) {})
+}
+
+// conflictAsideScenarioWith is conflictAsideScenario, with ARRANGE run on the
+// chain before the conflicting head is admitted.
+func conflictAsideScenarioWith(t *testing.T, arrange func(*chain)) *chain {
+	t.Helper()
+	c := newChainOfWidth(t, 1)
+	arrange(c)
+	c.keepMergeTurns()
+	c.git.commitOn("master", "m1")
+	c.git.conflict("a1", "m1", "x.go")
+	enqueue(t, c.h)
+	c.queue(t, "ws-b", "b1")
+	if err := receiveWithin(t, admitAsync(c.h, context.Background()), "the conflicting head's admission ending"); err != nil {
+		t.Fatalf("the conflicting head's admission ended on: %v", err)
+	}
+	c.settle(t, "the conflict step aside settling")
+	return c
+}
+
+// entryOf answers ws's entry in the chain's queue, and whether it stands.
+func (c *chain) entryOf(t *testing.T, ws ids.WorkspaceID) (wsm.MergeQueueEntry, bool) {
+	t.Helper()
+	queue, err := c.h.db.MergeQueue(context.Background(), c.h.repoKey())
+	if err != nil {
+		t.Fatalf("MergeQueue: %v", err)
+	}
+	at := slices.IndexFunc(queue, func(e wsm.MergeQueueEntry) bool { return e.Workspace == ws })
+	if at < 0 {
+		return wsm.MergeQueueEntry{}, false
+	}
+	return queue[at], true
+}
+
+// lineOrder answers the workspaces in line, front first.
+func (c *chain) lineOrder(t *testing.T) []ids.WorkspaceID {
+	t.Helper()
+	queue, err := c.h.db.MergeQueue(context.Background(), c.h.repoKey())
+	if err != nil {
+		t.Fatalf("MergeQueue: %v", err)
+	}
+	var out []ids.WorkspaceID
+	for _, e := range inLine(queue) {
+		out = append(out, e.Workspace)
+	}
+	return out
+}
+
+// steppedAsideFor counts the records of ws stepping aside for its conflicts.
+func (c *chain) steppedAsideFor(ws ids.WorkspaceID, why AsideReason) int {
+	n := 0
+	for _, rec := range c.h.logs.Records() {
+		if rec.Level == "info" && rec.Operation == opRemediate && rec.Message == why.suspension().moved &&
+			rec.Context["workspace"] == string(ws) && rec.Context["reason"] == why.String() {
+			n++
+		}
+	}
+	return n
+}
+
+func TestAHeadWhoseRebaseConflictsStepsAsideOutOfLine(t *testing.T) {
+	// Arrange + Act
+	c := conflictAsideScenario(t)
+
+	// Assert
+	entry, ok := c.entryOf(t, theWorkspace)
+	if !ok || entry.State != wsm.MergeRemediating {
+		t.Fatalf("entry = %+v (standing %v), want the conflicting head remediating", entry, ok)
+	}
+	if got := c.lineOrder(t); !slices.Equal(got, []ids.WorkspaceID{"ws-b"}) {
+		t.Fatalf("line = %v, want only ws-b in line", got)
+	}
+	if got := c.prompts(theWorkspace, conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR); got != 1 {
+		t.Fatalf("conflict prompts = %d, want the resolving prompt delivered before the step aside", got)
+	}
+	if got := c.steppedAsideFor(theWorkspace, AsideForConflicts); got != 1 {
+		t.Fatalf("conflict step aside records = %d, want 1", got)
+	}
+}
+
+func TestAConflictStepAsideIsShownAsRemediatingItsConflicts(t *testing.T) {
+	// Arrange
+	c := conflictAsideScenario(t)
+
+	// Act
+	snapshot, err := c.h.o.readQueue(context.Background(), c.h.o.deps.DB, c.h.repoKey())
+	if err == nil {
+		err = c.h.o.republishQueue(context.Background(), c.h.repoKey())
+	}
+
+	// Assert
+	if err != nil {
+		t.Fatalf("reading the queue: %v", err)
+	}
+	if len(snapshot.Remediating) != 1 || snapshot.Remediating[0].AsideFor != AsideForConflicts {
+		t.Fatalf("remediating = %+v, want the head remediating its conflicts", snapshot.Remediating)
+	}
+	roster := c.h.sidebar.queueOf(c.h.repoKey()).Remediating
+	if len(roster) != 1 || roster[0].RemediatingFor.GetConflicts() == nil {
+		t.Fatalf("roster remediating = %+v, want the head drawn resolving its conflicts", roster)
+	}
+}
+
+func TestTheMergeBehindAConflictingHeadTakesTheHeadAndLandsFirst(t *testing.T) {
+	// Arrange
+	c := conflictAsideScenario(t)
+
+	// Act
+	c.drainUntil(t, "ws-b landing", func() bool { return len(c.git.landedOwn()) == 1 })
+	if err := c.h.o.returnRemediated(context.Background(), theWorkspace, c.h.repoKey()); err != nil {
+		t.Fatalf("returnRemediated: %v", err)
+	}
+	c.drain(t)
+
+	// Assert
+	got := c.git.landedOwn()
+	if len(got) != 2 || !slices.Equal(got[0], []string{"b1"}) || !slices.Equal(got[1], []string{"a1"}) {
+		t.Fatalf("landings brought %v, want b1 then a1", got)
+	}
+	if n := c.prompts(theWorkspace, conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR); n != 1 {
+		t.Fatalf("conflict prompts = %d, want 1: the return reads the resolving turn's end and rerere replays it onto the new tip", n)
+	}
+}
+
+func TestAConflictingHeadWithNobodyBehindItResolvesInPlace(t *testing.T) {
+	// Arrange: the head alone, its commit conflicting with master's move.
+	c := newChainOfWidth(t, 1)
+	c.keepMergeTurns()
+	c.git.commitOn("master", "m1")
+	c.git.conflict("a1", "m1", "x.go")
+	enqueue(t, c.h)
+
+	// Act
+	c.drain(t)
+
+	// Assert
+	if got := c.git.landedOwn(); len(got) != 1 || !slices.Equal(got[0], []string{"a1"}) {
+		t.Fatalf("landings brought %v, want a1 resolved in place", got)
+	}
+	if got := c.steppedAsideFor(theWorkspace, AsideForConflicts); got != 0 {
+		t.Fatalf("conflict step aside records = %d, want none: nobody stood behind the head", got)
+	}
+}
+
+func TestAMergeReturningFromAConflictStepAsideNeverEvictsTheRunningMerge(t *testing.T) {
+	// Arrange: ws-b took the head and holds inside its gate; ws-c waits.
+	c := conflictAsideScenario(t)
+	c.queue(t, "ws-c", "c1")
+	entered, release := c.runner.hold(c.dirs["ws-b"])
+	done := admitAsync(c.h, context.Background())
+	receiveWithin(t, entered, "ws-b's gate starting at the head")
+
+	// Act
+	err := c.h.o.returnRemediated(context.Background(), theWorkspace, c.h.repoKey())
+	order := c.lineOrder(t)
+	close(release)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("returnRemediated: %v", err)
+	}
+	if want := []ids.WorkspaceID{"ws-b", theWorkspace, "ws-c"}; !slices.Equal(order, want) {
+		t.Fatalf("line = %v, want %v: back at the first waiting place, behind the merge running", order, want)
+	}
+	if err := receiveWithin(t, done, "ws-b's admission ending"); err != nil {
+		t.Fatalf("ws-b's admission ended on: %v", err)
+	}
+}
+
+func TestAConflictStepAsideSpendsNoFixingAttempt(t *testing.T) {
+	// Arrange: the head conflicts and steps aside; once it returns, its first
+	// suite fails.
+	c := conflictAsideScenario(t)
+	c.runner.script(c.dirs[theWorkspace], failingSuiteRun)
+	stored, _, _ := c.h.db.MergeProgressOf(context.Background(), theWorkspace)
+	doc, err := decodeProgress(stored)
+	if err != nil {
+		t.Fatalf("decodeProgress: %v", err)
+	}
+
+	// Act
+	c.drainUntil(t, "ws-b landing", func() bool { return len(c.git.landedOwn()) == 1 })
+	if err := c.h.o.returnRemediated(context.Background(), theWorkspace, c.h.repoKey()); err != nil {
+		t.Fatalf("returnRemediated: %v", err)
+	}
+	c.drain(t)
+
+	// Assert
+	if doc.FixesUsed != 0 {
+		t.Fatalf("the step aside's record counts %d fixing attempts used, want none", doc.FixesUsed)
+	}
+	if n := c.prompts(theWorkspace, fixOrigin); n != 1 {
+		t.Fatalf("fixing prompts = %d, want its one fixing attempt still to spend", n)
+	}
+	if got := c.git.landedOwn(); len(got) != 2 || !slices.Equal(got[1], []string{"a1"}) {
+		t.Fatalf("landings brought %v, want a1 to land once fixed", got)
+	}
+}
+
+func TestAMergeThatConflictsAgainOnItsReturnStepsAsideAgain(t *testing.T) {
+	// Arrange: a1 conflicts with master's m1; a2 conflicts with b1, which
+	// lands while a1 is resolved out of line; ws-c waits behind.
+	c := conflictAsideScenarioWith(t, func(c *chain) {
+		c.git.commitOn("feature", "a2")
+		c.git.conflict("a2", "b1", "y.go")
+	})
+	c.queue(t, "ws-c", "c1")
+	c.drainUntil(t, "ws-b landing", func() bool { return len(c.git.landedOwn()) == 1 })
+
+	// Act: the return rebases onto b1's landing, conflicts on a2 and steps
+	// aside again; ws-c lands; the second return lands it.
+	if err := c.h.o.returnRemediated(context.Background(), theWorkspace, c.h.repoKey()); err != nil {
+		t.Fatalf("the first returnRemediated: %v", err)
+	}
+	c.drainUntil(t, "ws-c landing", func() bool { return len(c.git.landedOwn()) == 2 })
+	c.settle(t, "the second step aside settling")
+	if err := c.h.o.returnRemediated(context.Background(), theWorkspace, c.h.repoKey()); err != nil {
+		t.Fatalf("the second returnRemediated: %v", err)
+	}
+	c.drain(t)
+
+	// Assert
+	if got := c.steppedAsideFor(theWorkspace, AsideForConflicts); got != 2 {
+		t.Fatalf("conflict step aside records = %d, want 2", got)
+	}
+	got := c.git.landedOwn()
+	if len(got) != 3 || !slices.Equal(got[0], []string{"b1"}) || !slices.Equal(got[1], []string{"c1"}) || !slices.Equal(got[2], []string{"a1", "a2"}) {
+		t.Fatalf("landings brought %v, want b1, c1, then a1 a2", got)
+	}
+}
+
+func TestARestartMidConflictStepAsideTakesTheMergeBackRemediatingItsConflicts(t *testing.T) {
+	// Arrange: the head stepped aside for its conflicts; the daemon restarts.
+	c := conflictAsideScenario(t)
+	c.h.restart(t)
+	c.wire(c.h.o)
+	c.h.o.window = 1
+
+	// Act
+	if err := c.h.o.Recover(context.Background()); err != nil {
+		t.Fatalf("Recover: %v", err)
+	}
+
+	// Assert
+	c.h.o.mu.Lock()
+	_, armed := c.h.o.remediating[theWorkspace]
+	c.h.o.mu.Unlock()
+	if !armed {
+		t.Fatal("the boot armed no wait on the resolving turn")
+	}
+	snapshot, err := c.h.o.readQueue(context.Background(), c.h.o.deps.DB, c.h.repoKey())
+	if err != nil {
+		t.Fatalf("readQueue: %v", err)
+	}
+	if len(snapshot.Remediating) != 1 || snapshot.Remediating[0].AsideFor != AsideForConflicts {
+		t.Fatalf("remediating = %+v, want the merge still remediating its conflicts", snapshot.Remediating)
+	}
+	if rec, ok := c.h.recordFor("info", "daemon.merge.recover"); !ok || rec.Context["reason"] != "conflicts" {
+		t.Fatalf("recover record = %+v (found %v), want the take-back naming its reason", rec, ok)
+	}
+}
+
+func TestARacingMemberWhoseRebaseConflictsLeavesTheRaceToTheNextInLine(t *testing.T) {
+	// Arrange: on the two-merge window ws-b races behind the head; its commit
+	// conflicts with master's m1; ws-c waits beyond the window.
+	c := newChain(t)
+	c.keepMergeTurns()
+	c.git.commitOn("master", "m1")
+	c.git.conflict("b1", "m1", "x.go")
+	enqueue(t, c.h)
+	c.queue(t, "ws-b", "b1")
+	c.queue(t, "ws-c", "c1")
+	// THE HEAD HOLDS IN ITS GATE until ws-b stepped aside, so ws-b meets its
+	// conflict racing behind the head, never after a merge overtook it.
+	headGate, releaseHead := c.runner.hold(c.dirs[theWorkspace])
+	asideB := c.steppedAside("ws-b")
+	done := admitAsync(c.h, context.Background())
+	receiveWithin(t, headGate, "the head's gate starting")
+	receiveWithin(t, asideB, "ws-b stepping aside")
+	close(releaseHead)
+	if err := receiveWithin(t, done, "the head's admission ending"); err != nil {
+		t.Fatalf("the head's admission ended on: %v", err)
+	}
+
+	// Act
+	c.drainUntil(t, "ws-1 and ws-c landing", func() bool { return len(c.git.landedOwn()) == 2 })
+	c.settle(t, "ws-b's step aside settling")
+	entry, standing := c.entryOf(t, "ws-b")
+	if err := c.h.o.returnRemediated(context.Background(), "ws-b", c.h.repoKey()); err != nil {
+		t.Fatalf("returnRemediated: %v", err)
+	}
+	c.drain(t)
+
+	// Assert
+	if !standing || entry.State != wsm.MergeRemediating {
+		t.Fatalf("ws-b's entry = %+v (standing %v), want it remediating while the others land", entry, standing)
+	}
+	if got := c.steppedAsideFor("ws-b", AsideForConflicts); got != 1 {
+		t.Fatalf("ws-b's conflict step aside records = %d, want 1", got)
+	}
+	got := c.git.landedOwn()
+	first := [][]string{got[0], got[1]}
+	if len(got) != 3 || !slices.ContainsFunc(first, func(p []string) bool { return slices.Equal(p, []string{"a1"}) }) ||
+		!slices.ContainsFunc(first, func(p []string) bool { return slices.Equal(p, []string{"c1"}) }) || !slices.Equal(got[2], []string{"b1"}) {
+		t.Fatalf("landings brought %v, want a1 and c1 in either order, then b1", got)
+	}
+}
+
+func TestStepsAside(t *testing.T) {
+	cases := []struct {
+		name    string
+		line    []wsm.MergeQueueEntry
+		chain   []ids.WorkspaceID
+		who     int
+		why     AsideReason
+		readErr error
+		want    bool
+	}{
+		{name: "a head with a merge behind it steps aside for its tests", line: []wsm.MergeQueueEntry{admittedEntry("ws-a"), queuedEntry("ws-b")},
+			chain: []ids.WorkspaceID{"ws-a"}, why: AsideForTests, want: true},
+		{name: "a head with a merge behind it steps aside for its conflicts", line: []wsm.MergeQueueEntry{admittedEntry("ws-a"), queuedEntry("ws-b")},
+			chain: []ids.WorkspaceID{"ws-a"}, why: AsideForConflicts, want: true},
+		{name: "a head alone in line repairs in place", line: []wsm.MergeQueueEntry{admittedEntry("ws-a")},
+			chain: []ids.WorkspaceID{"ws-a"}, why: AsideForConflicts},
+		{name: "a racing member with a merge behind it steps aside for its conflicts",
+			line:  []wsm.MergeQueueEntry{admittedEntry("ws-a"), admittedEntry("ws-b"), queuedEntry("ws-c")},
+			chain: []ids.WorkspaceID{"ws-a", "ws-b"}, who: 1, why: AsideForConflicts, want: true},
+		{name: "a racing member fixes its tests where it stands",
+			line:  []wsm.MergeQueueEntry{admittedEntry("ws-a"), admittedEntry("ws-b"), queuedEntry("ws-c")},
+			chain: []ids.WorkspaceID{"ws-a", "ws-b"}, who: 1, why: AsideForTests},
+		{name: "a racing member with only the head ahead of it resolves in place",
+			line:  []wsm.MergeQueueEntry{admittedEntry("ws-a"), admittedEntry("ws-b")},
+			chain: []ids.WorkspaceID{"ws-a", "ws-b"}, who: 1, why: AsideForConflicts},
+		{name: "a queue that cannot be read keeps the head where it stands", line: []wsm.MergeQueueEntry{admittedEntry("ws-a"), queuedEntry("ws-b")},
+			chain: []ids.WorkspaceID{"ws-a"}, why: AsideForConflicts, readErr: errors.New("store gone")},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := resumeWorld(t, tc.line)
+			runs := standChain(t, h, tc.chain, "")
+			for _, r := range runs[1:] {
+				r.speculative = true
+			}
+			h.db.mu.Lock()
+			h.db.queueReadErr = tc.readErr
+			h.db.mu.Unlock()
+
+			// Act
+			got := h.o.stepsAside(context.Background(), runs[tc.who], tc.why)
+			aside := runs[tc.who].asideOn(context.Background(), tc.why)
+
+			// Assert
+			if got != tc.want || (aside != nil) != tc.want {
+				t.Fatalf("stepsAside = %v, asideOn set = %v, want %v", got, aside != nil, tc.want)
+			}
+			if tc.readErr == nil {
+				return
+			}
+			rec, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opRemediate,
+				Message: "could not read the queue to decide whether the merge steps aside; it repairs where it stands"})
+			if !ok || rec.Context["workspace"] != string(runs[tc.who].ws) || rec.Context["reason"] != tc.why.String() || rec.Context["error"] == nil {
+				t.Fatalf("ERROR record = %+v (found %v), want the workspace, the reason and the error", rec, ok)
+			}
+		})
+	}
+}
+
+func TestAMergeNeitherHeadingNorRacingNeverStepsAside(t *testing.T) {
+	// Arrange: a waiting member's background rebase, in no chain.
+	h := resumeWorld(t, []wsm.MergeQueueEntry{admittedEntry("ws-a"), queuedEntry("ws-b"), queuedEntry("ws-c")})
+	standChain(t, h, []ids.WorkspaceID{"ws-a"}, "")
+	ctx, cancel := context.WithCancelCause(context.Background())
+	t.Cleanup(func() { cancel(nil) })
+	background := h.o.newRun(ctx, cancel, h.repoKey(), "ws-b", 1)
+
+	// Act
+	aside := background.asideOn(context.Background(), AsideForConflicts)
+
+	// Assert
+	if aside != nil {
+		t.Fatal("a waiting member's background rebase stepped aside")
+	}
+}
+
+func TestAsideReasonOf(t *testing.T) {
+	cases := []struct {
+		step    string
+		want    AsideReason
+		wantErr bool
+	}{
+		{step: TabFixes, want: AsideForTests},
+		{step: TabConflicts, want: AsideForConflicts},
+		{step: TabTests, wantErr: true},
+		{step: TabRebasing, wantErr: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.step, func(t *testing.T) {
+			// Act
+			got, err := asideReasonOf(progressDoc{Step: tc.step})
+
+			// Assert
+			if (err != nil) != tc.wantErr || got != tc.want {
+				t.Fatalf("asideReasonOf(%q) = (%v, %v), want (%v, error %v)", tc.step, got, err, tc.want, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestAsideReasonFor(t *testing.T) {
+	cases := []struct {
+		name    string
+		arrange func(h *harness)
+		want    AsideReason
+	}{
+		{name: "a record at its fixing step remediates its tests", want: AsideForTests,
+			arrange: func(h *harness) { putProgressAt(t, h, TabFixes) }},
+		{name: "a record at its conflicts step remediates its conflicts", want: AsideForConflicts,
+			arrange: func(h *harness) { putProgressAt(t, h, TabConflicts) }},
+		{name: "a record at a step that waits on no turn is a defect",
+			arrange: func(h *harness) { putProgressAt(t, h, TabTests) }},
+		{name: "no record is a defect", arrange: func(*harness) {}},
+		{name: "a record that cannot be read is answered", arrange: func(h *harness) {
+			h.db.mu.Lock()
+			h.db.progressReadErr = errors.New("store gone")
+			h.db.mu.Unlock()
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			tc.arrange(h)
+
+			// Act
+			got, err := asideReasonFor(context.Background(), h.db, theWorkspace)
+
+			// Assert
+			if got != tc.want || (err == nil) != (tc.want != 0) {
+				t.Fatalf("asideReasonFor = (%v, %v), want %v", got, err, tc.want)
+			}
+		})
+	}
+}
+
+// putProgressAt stores a progress record of the harness's merge at STEP.
+func putProgressAt(t *testing.T, h *harness, step string) {
+	t.Helper()
+	encoded, err := json.Marshal(progressDoc{Version: progressVersion, Step: step, Repo: string(h.repoKey()),
+		Subject: subjectDoc{TargetDir: h.targetD}, Active: roundDoc{Kind: step, N: 1}})
+	if err != nil {
+		t.Fatalf("encoding the record: %v", err)
+	}
+	if err := h.db.PutMergeProgress(context.Background(), wsm.MergeProgress{Workspace: theWorkspace, Lease: deadLease, Document: encoded}); err != nil {
+		t.Fatalf("PutMergeProgress: %v", err)
+	}
+}
+
+func TestATakeBackOfARemediatingMergeWhoseRecordWaitsOnNoTurnIsRefused(t *testing.T) {
+	// Arrange: a remediating entry whose record stands at its tests step.
+	h := newHarness(t)
+	enqueue(t, h)
+	ctx := context.Background()
+	if _, err := h.db.AcquireLeaseAs(ctx, theWorkspace, deadLease, wsm.HolderMerge, wsm.PolicyHold); err != nil {
+		t.Fatalf("taking the lease: %v", err)
+	}
+	putProgressAt(t, h, TabTests)
+	entry, err := h.o.entryOf(ctx, h.repoKey(), theWorkspace)
+	if err != nil {
+		t.Fatalf("entryOf: %v", err)
+	}
+
+	// Act
+	err = h.o.recoverRemediating(ctx, h.repoKey(), entry)
+
+	// Assert
+	if err == nil {
+		t.Fatal("the take-back of a remediating merge waiting on no turn was accepted")
+	}
+	rec, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opRemediate,
+		Message: "a merge remediating out of line has a progress record that waits on no repairing turn; it is not taken back"})
+	if !ok || rec.Context["workspace"] != string(theWorkspace) || rec.Context["step"] != TabTests || rec.Context["error"] == nil {
+		t.Fatalf("ERROR record = %+v (found %v), want the workspace, the step and the error", rec, ok)
+	}
+	h.o.mu.Lock()
+	_, armed := h.o.remediating[theWorkspace]
+	h.o.mu.Unlock()
+	if armed {
+		t.Fatal("a refused take-back armed a wait")
+	}
+}
+
+func TestTheRosterIsNotToldAQueueWhoseRemediatingMergeHasNoReason(t *testing.T) {
+	// Arrange: the head stepped aside, then its record is lost.
+	c := stepAsideScenario(t)
+	c.h.db.mu.Lock()
+	delete(c.h.db.progress, theWorkspace)
+	c.h.db.mu.Unlock()
+
+	// Act
+	_ = c.h.o.republishQueue(context.Background(), c.h.repoKey())
+
+	// Assert
+	rec, ok := dlog.FindRecord(c.h.logs.Records(), dlog.RecordQuery{Level: "error",
+		Message: "could not read why a merge remediating out of line stepped aside, so the roster is not told the queue"})
+	if !ok || rec.Context["workspace"] != string(theWorkspace) || rec.Context["error"] == nil {
+		t.Fatalf("ERROR record = %+v (found %v), want the workspace and the error", rec, ok)
+	}
+}
+
+// TestEveryStepAsideGoesThroughAsideOn covers the one path both triggers
+// share: stepAside is reached only through asideOn, and asideOn is called for
+// every reason there is.
+func TestEveryStepAsideGoesThroughAsideOn(t *testing.T) {
+	// Arrange
+	fset := token.NewFileSet()
+	reasons := map[string]int{}
+	for _, source := range sourcescan.Production(t) {
+		parsed, err := parser.ParseFile(fset, source.Name, source.Source, 0)
+		if err != nil {
+			t.Fatalf("parsing %s: %v", source.Name, err)
+		}
+
+		// Act
+		var enclosing string
+		ast.Inspect(parsed, func(n ast.Node) bool {
+			if decl, ok := n.(*ast.FuncDecl); ok {
+				enclosing = decl.Name.Name
+			}
+			call, ok := n.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			sel, ok := call.Fun.(*ast.SelectorExpr)
+			if !ok {
+				return true
+			}
+			switch sel.Sel.Name {
+			case "stepAside":
+				// Assert
+				if enclosing != "asideOn" {
+					t.Errorf("%s: stepAside is called from %s, not through asideOn", fset.Position(call.Pos()), enclosing)
+				}
+			case "asideOn":
+				if len(call.Args) == 2 {
+					if id, ok := call.Args[1].(*ast.Ident); ok {
+						reasons[id.Name]++
+					}
+				}
+			}
+			return true
+		})
+	}
+	for _, why := range []string{"AsideForTests", "AsideForConflicts"} {
+		if reasons[why] == 0 {
+			t.Errorf("no step asks asideOn to step aside for %s", why)
+		}
+	}
 }

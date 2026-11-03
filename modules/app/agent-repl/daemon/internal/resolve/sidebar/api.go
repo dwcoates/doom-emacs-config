@@ -274,6 +274,10 @@ type QueueEntry struct {
 	// frontend.v1.RosterMergeQueueWaitingRacing.since_ms,
 	// frontend.v1.RosterMergeQueueRemediating.since_ms).
 	SlotSince time.Time
+	// RemediatingFor is what a merge remediating out of line repairs
+	// (frontend.v1.RosterMergeQueueRemediating.reason). Only a remediating
+	// merge carries it, and it always does.
+	RemediatingFor *frontendv1.RosterMergeQueueRemediatingReason
 }
 
 // FooterStatus is the footer resolver's answers to what a workspace's strip
