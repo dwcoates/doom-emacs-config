@@ -29,6 +29,34 @@ func (v *verbs) Register(ctx context.Context, dir string, facts wsm.RegisterFact
 	return record, namedRefusal(err, "RegisterWorkspace")
 }
 
+// RegisterAll records every workspace Emacs re-announced in one call, each
+// exactly as Register records it, and answers one Registered per dir, in the
+// order given. One dir's refusal or fault never costs another its answer.
+//
+// THE DIRS ARE REGISTERED ONE AFTER ANOTHER AND THE ROSTER IS REPUBLISHED
+// ONCE. Emacs re-announces every workspace it holds at a link edge, and as one
+// RegisterWorkspace each that was dozens of concurrent registrations, each
+// republishing the roster: every republication re-reads the whole arrangement
+// on the state database's one connection, so the registrations queued behind
+// each other's republications until Emacs's budget ran out (2026-11-03,
+// `daemon.wsm.conn_pressure` led by `daemon.wsm.read_arrangement`). Here no
+// two registrations contend, and the roster is read once, after the last.
+func (v *verbs) RegisterAll(ctx context.Context, dirs []string) []Registered {
+	answers := make([]Registered, 0, len(dirs))
+	registered := 0
+	for _, dir := range dirs {
+		record, _, err := v.registerRow(ctx, dir, wsm.RegisterFacts{})
+		if err == nil {
+			registered++
+		}
+		answers = append(answers, Registered{Dir: dir, Record: record, Err: namedRefusal(err, "RegisterWorkspaces")})
+	}
+	global := v.deps.Log.Global().With(dlog.Context{"dirs": len(dirs), "registered": registered})
+	v.republishRegistry(ctx, global, opRegister)
+	global.Info(opRegister, "registered the re-announced workspaces one after another and republished the roster once", nil)
+	return answers
+}
+
 // register is THE registration, and it is the only one. Both RegisterWorkspace
 // and RegisterRepository run it -- the second for the repository's own main
 // worktree (owner ruling, 2026-09-14) -- because one directory must not have

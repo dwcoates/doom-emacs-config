@@ -715,6 +715,20 @@ func validateRegisterWorkspaceRequest(req *agentreplv1.RegisterWorkspaceRequest)
 	return nil
 }
 
+// validateRegisterWorkspacesRequest is RegisterWorkspacesRequest's base
+// function: at least one dir, and none blank.
+func validateRegisterWorkspacesRequest(req *agentreplv1.RegisterWorkspacesRequest) *connect.Error {
+	if len(req.GetDirs()) == 0 {
+		return invalid("dirs", "at least one workspace directory is required")
+	}
+	for _, dir := range req.GetDirs() {
+		if dir == "" {
+			return invalid("dirs", "a workspace directory may not be blank")
+		}
+	}
+	return nil
+}
+
 // validateRegisterRepositoryRequest is RegisterRepositoryRequest's base
 // function. A blank path is a VALIDATION failure rather than an arm: the two
 // arms are about what a real path turned out to be, and an empty string is not

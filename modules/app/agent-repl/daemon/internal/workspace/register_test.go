@@ -1504,3 +1504,83 @@ func TestANewWorkspaceRegisteredDuringAHandoverIsClaimed(t *testing.T) {
 		t.Fatalf("a workspace this registration minted claimed no serving ownership")
 	}
 }
+
+// TestRegisterAll pins the batched re-announcement: every dir registered as
+// Register registers it, one answer per dir in request order, and one dir's
+// refusal never costs another its registration.
+func TestRegisterAll(t *testing.T) {
+	cases := []struct {
+		name string
+		// dirs builds the request; a nil entry is a directory that is not a
+		// worktree.
+		dirs func(t *testing.T) []string
+		// wantRegistered says, per answer, whether it carries a record.
+		wantRegistered []bool
+	}{
+		{
+			name:           "every worktree is registered in request order",
+			dirs:           func(t *testing.T) []string { return []string{worktreeDir(t), worktreeDir(t)} },
+			wantRegistered: []bool{true, true},
+		},
+		{
+			name:           "a refused dir does not cost the dirs after it",
+			dirs:           func(t *testing.T) []string { return []string{t.TempDir(), worktreeDir(t)} },
+			wantRegistered: []bool{false, true},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			dirs := tc.dirs(t)
+
+			// Act.
+			answers := f.verbs.RegisterAll(context.Background(), dirs)
+
+			// Assert.
+			if len(answers) != len(dirs) {
+				t.Fatalf("RegisterAll answered %d, want one per dir (%d)", len(answers), len(dirs))
+			}
+			for i, answer := range answers {
+				if answer.Dir != dirs[i] {
+					t.Errorf("answer %d names %q, want %q in request order", i, answer.Dir, dirs[i])
+				}
+				if got := answer.Err == nil && answer.Record.ID != ""; got != tc.wantRegistered[i] {
+					t.Errorf("answer %d registered = %v (err %v), want %v", i, got, answer.Err, tc.wantRegistered[i])
+				}
+			}
+		})
+	}
+}
+
+// TestRegisterAllRefusalIsNamedForTheBatch pins that a refused dir's typed
+// refusal names the rpc that carried it, so the server spells its arm.
+func TestRegisterAllRefusalIsNamedForTheBatch(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+
+	// Act.
+	answers := f.verbs.RegisterAll(context.Background(), []string{t.TempDir()})
+
+	// Assert.
+	if refusal := asRefusal(t, answers[0].Err, ArmNotAWorktree); refusal.Rpc != "RegisterWorkspaces" {
+		t.Fatalf("refusal rpc = %q, want RegisterWorkspaces", refusal.Rpc)
+	}
+}
+
+// TestRegisterAllRepublishesTheRosterOnce covers the 2026-11-03 flood: each
+// registration republishing the roster re-read the arrangement on the state
+// database's one connection, so a batch republishes once, after the last.
+func TestRegisterAllRepublishesTheRosterOnce(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	dirs := []string{worktreeDir(t), worktreeDir(t), worktreeDir(t)}
+
+	// Act.
+	f.verbs.RegisterAll(context.Background(), dirs)
+
+	// Assert.
+	if len(f.sidebar.registries) != 1 {
+		t.Fatalf("roster republications = %d, want exactly one for the batch", len(f.sidebar.registries))
+	}
+}

@@ -3046,3 +3046,137 @@ func TestACreatesReporterPublishesEveryStepOnItsOp(t *testing.T) {
 		})
 	}
 }
+
+// ---- RegisterWorkspaces ----------------------------------------------------
+
+// TestRegisterWorkspacesAnswersEachDirsOutcome pins one outcome per dir, in
+// the order the verb answered them, each in the arm its answer calls for: a
+// record is `registered`, a typed refusal is `refused` with RegisterWorkspace's
+// own arm, and any other error is `failed`.
+func TestRegisterWorkspacesAnswersEachDirsOutcome(t *testing.T) {
+	tests := []struct {
+		name   string
+		answer workspace.Registered
+		check  func(t *testing.T, outcome *agentreplv1.RegisterWorkspacesOutcome)
+	}{
+		{"a registered dir answers its ref",
+			workspace.Registered{Dir: "/w/a", Record: wsm.Workspace{ID: "ws-a", Dir: "/w/a"}},
+			func(t *testing.T, outcome *agentreplv1.RegisterWorkspacesOutcome) {
+				if got := outcome.GetRegistered().GetWorkspace().GetId(); got != "ws-a" {
+					t.Fatalf("registered id = %q (outcome %v), want ws-a", got, outcome)
+				}
+			}},
+		{"a refused dir answers RegisterWorkspace's refusal arm",
+			workspace.Registered{Dir: "/w/b", Err: &workspace.Refusal{
+				Arm: workspace.ArmNotAWorktree, Reason: "not a worktree", Rpc: "RegisterWorkspaces",
+			}},
+			func(t *testing.T, outcome *agentreplv1.RegisterWorkspacesOutcome) {
+				if outcome.GetRefused().GetNotAWorktree() == nil {
+					t.Fatalf("outcome = %v, want refused not_a_worktree", outcome)
+				}
+			}},
+		{"a faulted dir answers failed with its cause",
+			workspace.Registered{Dir: "/w/c", Err: errors.New("git broke")},
+			func(t *testing.T, outcome *agentreplv1.RegisterWorkspacesOutcome) {
+				if got := outcome.GetFailed().GetCause(); got != "git broke" {
+					t.Fatalf("failed cause = %q (outcome %v), want git broke", got, outcome)
+				}
+			}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			h.Verbs.registerAllAnswers = []workspace.Registered{tc.answer}
+
+			// Act.
+			resp, err := h.Client.RegisterWorkspaces(context.Background(),
+				connect.NewRequest(&agentreplv1.RegisterWorkspacesRequest{Dirs: []string{tc.answer.Dir}}))
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("RegisterWorkspaces: %v", err)
+			}
+			if len(resp.Msg.GetOutcomes()) != 1 || resp.Msg.GetOutcomes()[0].GetDir() != tc.answer.Dir {
+				t.Fatalf("outcomes = %v, want one naming %q", resp.Msg.GetOutcomes(), tc.answer.Dir)
+			}
+			tc.check(t, resp.Msg.GetOutcomes()[0])
+		})
+	}
+}
+
+// TestRegisterWorkspacesHandsEveryDirToOneBatch pins that the request's dirs
+// reach the verb as ONE batch, in order: the whole point of the rpc.
+func TestRegisterWorkspacesHandsEveryDirToOneBatch(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	dirs := []string{"/w/a", "/w/b", "/w/c"}
+	for _, dir := range dirs {
+		h.Verbs.registerAllAnswers = append(h.Verbs.registerAllAnswers,
+			workspace.Registered{Dir: dir, Record: wsm.Workspace{ID: ids.WorkspaceID("id" + dir), Dir: dir}})
+	}
+
+	// Act.
+	if _, err := h.Client.RegisterWorkspaces(context.Background(),
+		connect.NewRequest(&agentreplv1.RegisterWorkspacesRequest{Dirs: dirs})); err != nil {
+		t.Fatalf("RegisterWorkspaces: %v", err)
+	}
+
+	// Assert.
+	if len(h.Verbs.registerAllDirs) != 1 || !slices.Equal(h.Verbs.registerAllDirs[0], dirs) {
+		t.Fatalf("batches = %v, want one carrying %v", h.Verbs.registerAllDirs, dirs)
+	}
+}
+
+// TestRegisterWorkspacesRecordsAFaultedDirAtError pins the fault's one ERROR
+// record, naming the dir and its cause.
+func TestRegisterWorkspacesRecordsAFaultedDirAtError(t *testing.T) {
+	// Arrange.
+	log := &recordingLogger{}
+	h := newHarness(t, func(deps *Deps) { deps.Log = &fakeSurfaces{global: log, workspace: log} })
+	h.Verbs.registerAllAnswers = []workspace.Registered{{Dir: "/w/c", Err: errors.New("git broke")}}
+
+	// Act.
+	if _, err := h.Client.RegisterWorkspaces(context.Background(),
+		connect.NewRequest(&agentreplv1.RegisterWorkspacesRequest{Dirs: []string{"/w/c"}})); err != nil {
+		t.Fatalf("RegisterWorkspaces: %v", err)
+	}
+
+	// Assert.
+	for _, rec := range log.at("ERROR") {
+		if rec.Operation == "RegisterWorkspaces" && rec.Context["cause"] == "git broke" {
+			return
+		}
+	}
+	t.Fatalf("ERROR records = %+v, want the faulted dir's cause", log.at("ERROR"))
+}
+
+// TestRegisterWorkspacesRefusesAMalformedRequest pins no dirs, or a blank
+// one, as a malformed request that reaches no verb.
+func TestRegisterWorkspacesRefusesAMalformedRequest(t *testing.T) {
+	tests := []struct {
+		name string
+		dirs []string
+	}{
+		{"no dirs", nil},
+		{"a blank dir", []string{"/w/a", ""}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+
+			// Act.
+			_, err := h.Client.RegisterWorkspaces(context.Background(),
+				connect.NewRequest(&agentreplv1.RegisterWorkspacesRequest{Dirs: tc.dirs}))
+
+			// Assert.
+			if connect.CodeOf(err) != connect.CodeInvalidArgument {
+				t.Fatalf("code = %v (%v), want InvalidArgument", connect.CodeOf(err), err)
+			}
+			if len(h.Verbs.registerAllDirs) != 0 {
+				t.Fatalf("batches = %v, want none for a malformed request", h.Verbs.registerAllDirs)
+			}
+		})
+	}
+}

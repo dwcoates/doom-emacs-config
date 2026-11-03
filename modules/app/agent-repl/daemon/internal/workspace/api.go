@@ -273,11 +273,26 @@ type InterruptTarget struct {
 	RollBack *RollbackRequest
 }
 
+// Registered is one dir's answer from RegisterAll: the record it registered
+// as, or the error (a typed refusal, or a fault) that ended its registration.
+type Registered struct {
+	// Dir is the dir exactly as the caller named it.
+	Dir string
+	// Record is the registered workspace; zero when Err is set.
+	Record wsm.Workspace
+	// Err is why the dir was not registered; nil when it was.
+	Err error
+}
+
 // Verbs is the whole verb surface. Each method is one rpc's body.
 type Verbs interface {
 	// Register records a workspace Emacs announced. Idempotent by normalized
 	// dir.
 	Register(ctx context.Context, dir string, facts wsm.RegisterFacts) (wsm.Workspace, error)
+	// RegisterAll records every dir as Register would, one after another, and
+	// republishes the roster once after the last. It answers one Registered per
+	// dir, in order; each carries its own record or its own error.
+	RegisterAll(ctx context.Context, dirs []string) []Registered
 	// RegisterRepository records a repository resolved from ANY path inside it
 	// (a file or a directory) through git's main worktree, AND registers that
 	// main worktree as an open workspace through the same registration

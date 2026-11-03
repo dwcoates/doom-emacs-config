@@ -518,6 +518,53 @@ func (s *server) RegisterWorkspace(
 	return connect.NewResponse(resp), nil
 }
 
+// RegisterWorkspaces records every workspace Emacs re-announced at a link
+// edge, in one call: each dir registered as RegisterWorkspace registers it,
+// one after another, and the roster republished once. Every dir gets its own
+// outcome, in request order. A refusal is the dir's `refused` arm, spelled
+// exactly as RegisterWorkspace's error arm would spell it, and a fault is its
+// `failed` arm, recorded at ERROR here, once.
+func (s *server) RegisterWorkspaces(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.RegisterWorkspacesRequest],
+) (*connect.Response[agentreplv1.RegisterWorkspacesResponse], error) {
+	const rpc = "RegisterWorkspaces"
+	if err := validateRegisterWorkspacesRequest(req.Msg); err != nil {
+		return nil, err
+	}
+	resp := &agentreplv1.RegisterWorkspacesResponse{}
+	for _, answer := range s.deps.Verbs.RegisterAll(ctx, req.Msg.GetDirs()) {
+		resp.Outcomes = append(resp.Outcomes, s.registeredOutcome(rpc, answer))
+	}
+	s.log.Info("daemon.server.register_workspaces", "registered the re-announced workspaces",
+		dlog.Context{"dirs": len(req.Msg.GetDirs())})
+	return connect.NewResponse(resp), nil
+}
+
+// registeredOutcome renders one dir's RegisterAll answer as its outcome.
+func (s *server) registeredOutcome(rpc string, answer workspace.Registered) *agentreplv1.RegisterWorkspacesOutcome {
+	outcome := &agentreplv1.RegisterWorkspacesOutcome{Dir: answer.Dir}
+	if answer.Err == nil {
+		outcome.Outcome = &agentreplv1.RegisterWorkspacesOutcome_Registered{
+			Registered: &agentreplv1.RegisterWorkspaceSuccess{Workspace: answer.Record.Ref()},
+		}
+		return outcome
+	}
+	log := s.log.With(dlog.Context{"dir": answer.Dir})
+	// A REFUSAL IS SPELLED AS RegisterWorkspace SPELLS IT: the same typed
+	// refusal set onto the same error message.
+	single := &agentreplv1.RegisterWorkspaceResponse{}
+	if s.refuseOnto(log, rpc, single, answer.Err) {
+		outcome.Outcome = &agentreplv1.RegisterWorkspacesOutcome_Refused{Refused: single.GetError()}
+		return outcome
+	}
+	log.Error(rpc, "a re-announced workspace's registration failed", dlog.Context{"cause": answer.Err.Error()})
+	outcome.Outcome = &agentreplv1.RegisterWorkspacesOutcome_Failed{
+		Failed: &agentreplv1.RegisterWorkspacesFailed{Cause: answer.Err.Error()},
+	}
+	return outcome
+}
+
 // RegisterRepository records a repository resolved from any path inside it,
 // and registers that repository's main worktree as an open workspace. It is
 // NOT a per-workspace verb -- the REQUEST carries no ref to key on -- so no
