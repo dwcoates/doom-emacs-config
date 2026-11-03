@@ -3699,7 +3699,7 @@ The master kill-switch overrides the always-on file-write decoupling."
         (agent-repl-minibuffer-ground-paint)
         ;; Assert
         (should (equal (list agent-repl--input-painted agent-repl--minibuffer-ground-painted)
-                       (list (list agent-repl-input-background)
+                       (list (list (agent-repl--input-fill-color))
                              (list agent-repl-input-background))))))
     (should (equal (reverse events) '("elisp.input.paint" "elisp.minibuffer-ground.paint")))))
 
