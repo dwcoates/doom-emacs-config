@@ -33,6 +33,7 @@ import type {
   RosterMergeQueueStage,
   RosterMergeQueueSubject,
   RosterMergeQueueRemediating,
+  RosterMergeQueueRemediatingReason,
   RosterMergeQueueWaiting,
   RosterRepoMergeQueue,
 } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
@@ -394,11 +395,11 @@ export function drawRosterMergeQueueStage(u: RosterMergeQueueStage, path: string
 export const MERGE_QUEUE_BULLET_CLASS = "sb-mq-bullet";
 
 /**
- * THE SECOND SPOT (owner ruling, 2026-10-31): one merge that headed the
- * queue, finished its test suite with failures and stepped aside to fix them
- * out of line. Drawn under the head as a smaller, quieter card than the
- * head's -- the merge glyph, its name, how long it has remediated -- and
- * above the merges waiting, with a "remediating" line beneath. A click
+ * THE SECOND SPOT (owner rulings, 2026-10-31 and 2026-11-03): one merge that
+ * stepped aside to repair out of line -- its failing tests, or its rebase's
+ * conflicts. Drawn under the head as a smaller, quieter card than the head's
+ * -- the merge glyph, its name, how long it has remediated -- and above the
+ * merges waiting, with a line beneath saying what it repairs. A click
  * reveals its merge bubble, as the head's does.
  */
 export function drawRosterMergeQueueRemediating(u: RosterMergeQueueRemediating, sc: SidebarContext, path: string): HTMLElement {
@@ -413,9 +414,25 @@ export function drawRosterMergeQueueRemediating(u: RosterMergeQueueRemediating, 
   line.append(glyph, drawSubjectName(subject, `${path}.subject`), drawClock(sc, msOf(u.sinceMs, `${path}.since_ms`)));
   const detail = document.createElement("div");
   detail.className = "sb-mq-detail";
-  detail.textContent = "remediating";
+  detail.textContent = remediatingDetail(requireMessage(u.reason, `${path}.reason`));
   card.append(line, detail);
   return card;
+}
+
+/**
+ * The line beneath a remediating merge's name: what its turn out of line
+ * repairs. A reason this build does not name is drawn as a bare
+ * "remediating", per frontend.v1.RosterMergeQueueRemediating.reason.
+ */
+export function remediatingDetail(reason: RosterMergeQueueRemediatingReason): string {
+  switch (reason.reason.case) {
+    case "tests":
+      return "remediating tests";
+    case "conflicts":
+      return "resolving conflicts";
+    default:
+      return "remediating";
+  }
 }
 
 /**
