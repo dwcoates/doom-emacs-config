@@ -42,10 +42,12 @@ type PullRequestAnchor interface {
 // first successful read tells what is already on the pull request. A url the
 // external browser would refuse to open is refused invalid_link, and a label
 // that is not two to eight words in one sentence invalid_label, before
-// anything is written. It answers every link the workspace then holds.
+// anything is written. A stored OWNED link is posted into the Slack thread
+// the workspace was created for, once ever (slackorigin.go). It answers every
+// link the workspace then holds.
 func (v *verbs) SetLink(ctx context.Context, ws ids.WorkspaceID, url, label string, owned bool) ([]wsm.WorkspaceLink, error) {
 	fields := dlog.Context{"url": url, "label": label, "owned": owned}
-	return v.changeLinks(ctx, ws, fields, "set a link", func(log dlog.Logger) ([]wsm.WorkspaceLink, error) {
+	links, err := v.changeLinks(ctx, ws, fields, "set a link", func(log dlog.Logger) ([]wsm.WorkspaceLink, error) {
 		if err := externalbrowser.Validate(url); err != nil {
 			return nil, refuseWith(log, rpcChangeWorkspaceLinks, ArmInvalidLink,
 				fmt.Sprintf("%q is not a link the external browser opens: %v", url, err), false,
@@ -70,6 +72,10 @@ func (v *verbs) SetLink(ctx context.Context, ws ids.WorkspaceID, url, label stri
 		}
 		return v.deps.DB.SetWorkspaceLink(ctx, ws, set)
 	})
+	if err == nil && owned {
+		v.postOwnedLink(ctx, ws, url, label)
+	}
+	return links, err
 }
 
 // ownedSubscription answers the subscription an owned link to PR takes: nil

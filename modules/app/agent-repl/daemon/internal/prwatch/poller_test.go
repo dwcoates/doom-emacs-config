@@ -3,6 +3,7 @@ package prwatch
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -73,6 +74,38 @@ func TestAMergeIsToldAndEndsTheSubscription(t *testing.T) {
 	live, err := r.db.LivePullRequestSubscriptions(context.Background())
 	if err != nil || len(live) != 0 {
 		t.Fatalf("live = %v, %v; want the subscription ended", live, err)
+	}
+}
+
+func TestAMergeIsToldToTheMergeObserverOnce(t *testing.T) {
+	// Arrange
+	r := newRig(t)
+	r.subscribe(t, wsm.PullRequestEventState)
+	r.gh.set(pathPull(), pullJSON("closed", false, true, "head1"))
+
+	// Act
+	r.tick()
+	r.tick()
+
+	// Assert
+	want := []string{string(r.ws) + " " + prK.String()}
+	if got := r.merges.merges(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("merges told = %q, want %q", got, want)
+	}
+}
+
+func TestAClosureUnmergedIsNotToldToTheMergeObserver(t *testing.T) {
+	// Arrange
+	r := newRig(t)
+	r.subscribe(t, wsm.PullRequestEventState)
+	r.gh.set(pathPull(), pullJSON("closed", false, false, "head1"))
+
+	// Act
+	r.tick()
+
+	// Assert
+	if got := r.merges.merges(); len(got) != 0 {
+		t.Fatalf("merges told = %q, want none", got)
 	}
 }
 

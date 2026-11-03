@@ -250,8 +250,24 @@ type fakeDB struct {
 	slackOrigins       map[ids.WorkspaceID]string
 	slackOriginErr     error
 	slackOriginReadErr error
-	linksErr           error
-	linksReadErr       error
+	// slackOpened are the workspaces whose opening post is claimed;
+	// slackOpeningErr fails the claim.
+	slackOpened     map[ids.WorkspaceID]bool
+	slackOpeningErr error
+	// slackLinkPosts are each workspace's posted links, in claim order, as
+	// the store keeps them; slackClaimErr fails a link's claim,
+	// slackRecordErr the record of its ts, slackMarkErr the mark of its
+	// merge, and slackPostsReadErr the read of them all.
+	slackLinkPosts    map[ids.WorkspaceID][]wsm.SlackLinkPost
+	slackClaimErr     error
+	slackRecordErr    error
+	slackMarkErr      error
+	slackPostsReadErr error
+	// summaries answers WorkspaceSummaryOf; summaryErr fails it.
+	summaries    map[ids.WorkspaceID]wsm.WorkspaceSummary
+	summaryErr   error
+	linksErr     error
+	linksReadErr error
 	// linkSets is every link set the verbs wrote, in order.
 	linkSets []wsm.LinkSet
 	// prSubs answers WorkspacePullRequestSubscriptions.
@@ -860,6 +876,91 @@ func (d *fakeDB) WorkspaceSlackOrigin(_ context.Context, id ids.WorkspaceID) (st
 	}
 	url, found := d.slackOrigins[id]
 	return url, found, nil
+}
+
+// ClaimSlackOpening claims the opening once, as the store does, for a
+// workspace with a recorded origin; slackOpeningErr fails it.
+func (d *fakeDB) ClaimSlackOpening(_ context.Context, id ids.WorkspaceID) (string, bool, error) {
+	if d.slackOpeningErr != nil {
+		return "", false, d.slackOpeningErr
+	}
+	url, found := d.slackOrigins[id]
+	if !found || d.slackOpened[id] {
+		return "", false, nil
+	}
+	if d.slackOpened == nil {
+		d.slackOpened = map[ids.WorkspaceID]bool{}
+	}
+	d.slackOpened[id] = true
+	return url, true, nil
+}
+
+// slackLinkPost answers the index of LINK's post among ID's, -1 for none.
+func (d *fakeDB) slackLinkPost(id ids.WorkspaceID, link string) int {
+	return slices.IndexFunc(d.slackLinkPosts[id], func(p wsm.SlackLinkPost) bool { return p.URL == link })
+}
+
+// ClaimSlackLinkPost claims a link's post once, as the store does, for a
+// workspace with a recorded origin; slackClaimErr fails it.
+func (d *fakeDB) ClaimSlackLinkPost(_ context.Context, id ids.WorkspaceID, link string) (string, bool, error) {
+	if d.slackClaimErr != nil {
+		return "", false, d.slackClaimErr
+	}
+	url, found := d.slackOrigins[id]
+	if !found || d.slackLinkPost(id, link) >= 0 {
+		return "", false, nil
+	}
+	if d.slackLinkPosts == nil {
+		d.slackLinkPosts = map[ids.WorkspaceID][]wsm.SlackLinkPost{}
+	}
+	d.slackLinkPosts[id] = append(d.slackLinkPosts[id], wsm.SlackLinkPost{URL: link})
+	return url, true, nil
+}
+
+// RecordSlackLinkPost records a claimed link's ts, answering its merge, as
+// the store does; slackRecordErr fails it.
+func (d *fakeDB) RecordSlackLinkPost(_ context.Context, id ids.WorkspaceID, link, ts string) (bool, error) {
+	if d.slackRecordErr != nil {
+		return false, d.slackRecordErr
+	}
+	i := d.slackLinkPost(id, link)
+	if i < 0 || d.slackLinkPosts[id][i].MessageTS != "" {
+		return false, fmt.Errorf("fake: no unanswered claim on %s in %s", link, id)
+	}
+	d.slackLinkPosts[id][i].MessageTS = ts
+	return d.slackLinkPosts[id][i].Merged, nil
+}
+
+// MarkSlackLinkMerged marks a posted link merged once, answering its ts, as
+// the store does; slackMarkErr fails it.
+func (d *fakeDB) MarkSlackLinkMerged(_ context.Context, id ids.WorkspaceID, link string) (string, error) {
+	if d.slackMarkErr != nil {
+		return "", d.slackMarkErr
+	}
+	i := d.slackLinkPost(id, link)
+	if i < 0 || d.slackLinkPosts[id][i].Merged {
+		return "", nil
+	}
+	d.slackLinkPosts[id][i].Merged = true
+	return d.slackLinkPosts[id][i].MessageTS, nil
+}
+
+// WorkspaceSlackLinkPosts answers ID's posted links; slackPostsReadErr fails
+// it.
+func (d *fakeDB) WorkspaceSlackLinkPosts(_ context.Context, id ids.WorkspaceID) ([]wsm.SlackLinkPost, error) {
+	if d.slackPostsReadErr != nil {
+		return nil, d.slackPostsReadErr
+	}
+	return slices.Clone(d.slackLinkPosts[id]), nil
+}
+
+// WorkspaceSummaryOf answers ID's summary; summaryErr fails it.
+func (d *fakeDB) WorkspaceSummaryOf(_ context.Context, id ids.WorkspaceID) (wsm.WorkspaceSummary, bool, error) {
+	if d.summaryErr != nil {
+		return wsm.WorkspaceSummary{}, false, d.summaryErr
+	}
+	sum, found := d.summaries[id]
+	return sum, found, nil
 }
 
 // ClearWorkspaceLinks removes every stored link; linksErr fails it.
@@ -2747,12 +2848,19 @@ func (s *fakeShim) KillSession(_ context.Context, force bool) error {
 	return nil
 }
 
-// fakeSlack is a slackpost.Poster: it records every reply and answers
-// permalink, or err when set.
+// fakeSlack is a slackpost.Poster: it records every reply and reaction, and
+// answers each reply posted as the next message ts ("ts-1", "ts-2", ...) or
+// err when set, and each reaction reactErr. onReply, when set, runs while a
+// reply is in flight.
 type fakeSlack struct {
+	onReply func()
+	// bounded records, for every reply and reaction in order, whether its
+	// context carried a deadline.
+	bounded   []bool
 	replies   []slackReply
-	permalink string
+	reactions []slackReaction
 	err       error
+	reactErr  error
 }
 
 // slackReply is one reply fakeSlack was asked to post.
@@ -2761,9 +2869,30 @@ type slackReply struct {
 	body   string
 }
 
-func (s *fakeSlack) Reply(_ context.Context, thread slackpost.Thread, markdown string) (string, error) {
+// slackReaction is one reaction fakeSlack was asked to add.
+type slackReaction struct {
+	channel, ts, emoji string
+}
+
+func (s *fakeSlack) Reply(ctx context.Context, thread slackpost.Thread, markdown string) (slackpost.Posted, error) {
+	_, bounded := ctx.Deadline()
+	s.bounded = append(s.bounded, bounded)
 	s.replies = append(s.replies, slackReply{thread: thread, body: markdown})
-	return s.permalink, s.err
+	if s.onReply != nil {
+		s.onReply()
+	}
+	if s.err != nil {
+		return slackpost.Posted{}, s.err
+	}
+	ts := fmt.Sprintf("ts-%d", len(s.replies))
+	return slackpost.Posted{TS: ts, Permalink: "https://w.slack.com/archives/C1/p" + ts}, nil
+}
+
+func (s *fakeSlack) React(ctx context.Context, channel, ts, emoji string) error {
+	_, bounded := ctx.Deadline()
+	s.bounded = append(s.bounded, bounded)
+	s.reactions = append(s.reactions, slackReaction{channel: channel, ts: ts, emoji: emoji})
+	return s.reactErr
 }
 
 // fakeBrowser is an externalbrowser.Opener.

@@ -84,19 +84,23 @@ func fakeRunner(out string, err error, calls *[]recordedRun) Runner {
 	}
 }
 
+// sentAnswer is gns's JSON answer to a send that posted message TS.
+const sentAnswer = `{"ok":true,"ts":"1730000001.000000","permalink":"https://w.slack.com/archives/C1/p1730000001000000"}`
+
 func TestReplySendsBlocksIntoTheThread(t *testing.T) {
 	// Arrange.
 	var calls []recordedRun
-	p := New(Config{Run: fakeRunner("sent https://w.slack.com/archives/C1/p1730000001000000 ok", nil, &calls)})
+	p := New(Config{Run: fakeRunner(sentAnswer, nil, &calls)})
 
 	// Act.
-	link, err := p.Reply(context.Background(), thread, "- [The fix](https://example.com/a)\n")
+	posted, err := p.Reply(context.Background(), thread, "- [The fix](https://example.com/a)\n")
 
 	// Assert.
-	if err != nil || link != "https://w.slack.com/archives/C1/p1730000001000000" {
-		t.Fatalf("Reply() = (%q, %v), want the permalink", link, err)
+	want := Posted{TS: "1730000001.000000", Permalink: "https://w.slack.com/archives/C1/p1730000001000000"}
+	if err != nil || posted != want {
+		t.Fatalf("Reply() = (%+v, %v), want %+v", posted, err, want)
 	}
-	wantArgs := []string{"slack", "send", "--channel", "C1", "--thread", "1730000000.123456", "--no-unfurl", "--blocks", "-"}
+	wantArgs := []string{"slack", "send", "--channel", "C1", "--thread", "1730000000.123456", "--no-unfurl", "--output", "json", "--blocks", "-"}
 	if len(calls) != 1 || calls[0].name != "gns" || !reflect.DeepEqual(calls[0].args, wantArgs) {
 		t.Fatalf("calls = %+v, want one gns send with %q", calls, wantArgs)
 	}
@@ -109,17 +113,72 @@ func TestReplySendsBlocksIntoTheThread(t *testing.T) {
 func TestReplySendsAMentionAsMrkdwn(t *testing.T) {
 	// Arrange.
 	var calls []recordedRun
-	p := New(Config{Gns: "/opt/gns", Run: fakeRunner("", nil, &calls)})
+	p := New(Config{Gns: "/opt/gns", Run: fakeRunner(`{"ts":"1730000001.000000"}`, nil, &calls)})
 
 	// Act.
-	link, err := p.Reply(context.Background(), thread, "ping <@U012ABCDEF> now\n")
+	posted, err := p.Reply(context.Background(), thread, "ping <@U012ABCDEF> now\n")
 
 	// Assert.
-	if err != nil || link != "" {
-		t.Fatalf("Reply() = (%q, %v), want no permalink and no error", link, err)
+	if err != nil || posted != (Posted{TS: "1730000001.000000"}) {
+		t.Fatalf("Reply() = (%+v, %v), want the ts and no permalink", posted, err)
 	}
 	if len(calls) != 1 || calls[0].name != "/opt/gns" || calls[0].args[len(calls[0].args)-2] != "--message" || calls[0].stdin != "ping <@U012ABCDEF> now" {
 		t.Fatalf("calls = %+v, want one mrkdwn send through the configured gns", calls)
+	}
+}
+
+func TestReplyRefusesAnAnswerNamingNoMessage(t *testing.T) {
+	tests := []struct {
+		name     string
+		answer   string
+		fragment string
+	}{
+		{name: "an answer that is not JSON", answer: "sent ok", fragment: "is not JSON"},
+		{name: "an answer with no ts", answer: `{"ok":true,"permalink":"https://w.slack.com/archives/C1/p1730000001000000"}`, fragment: "names no message ts"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			var calls []recordedRun
+			p := New(Config{Run: fakeRunner(tt.answer, nil, &calls)})
+
+			// Act.
+			posted, err := p.Reply(context.Background(), thread, "Fix the footer.\n")
+
+			// Assert.
+			if err == nil || !strings.Contains(err.Error(), tt.fragment) || posted != (Posted{}) {
+				t.Fatalf("Reply() = (%+v, %v), want no message and an error naming %q", posted, err, tt.fragment)
+			}
+		})
+	}
+}
+
+func TestReactAddsTheReactionToTheMessage(t *testing.T) {
+	// Arrange.
+	var calls []recordedRun
+	p := New(Config{Run: fakeRunner("", nil, &calls)})
+
+	// Act.
+	err := p.React(context.Background(), "C1", "1730000001.000000", "merged")
+
+	// Assert.
+	wantArgs := []string{"slack", "react", "--channel", "C1", "--ts", "1730000001.000000", "--emoji", "merged"}
+	if err != nil || len(calls) != 1 || calls[0].name != "gns" || !reflect.DeepEqual(calls[0].args, wantArgs) {
+		t.Fatalf("React() = %v after calls %+v, want one gns react with %q", err, calls, wantArgs)
+	}
+}
+
+func TestReactAnswersSlacksRejection(t *testing.T) {
+	// Arrange.
+	var calls []recordedRun
+	p := New(Config{Run: fakeRunner("", errors.New("message_not_found"), &calls)})
+
+	// Act.
+	err := p.React(context.Background(), "C1", "1730000001.000000", "merged")
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), ":merged:") || !strings.Contains(err.Error(), "1730000001.000000") || !strings.Contains(err.Error(), "message_not_found") {
+		t.Fatalf("React() = %v, want Slack's rejection naming the reaction and the message", err)
 	}
 }
 
@@ -144,7 +203,7 @@ func TestReplyAnswersSlacksRejection(t *testing.T) {
 	p := New(Config{Run: fakeRunner("", errors.New("not_in_channel"), &calls)})
 
 	// Act.
-	_, err := p.Reply(context.Background(), thread, "Work on this has begun.\n")
+	_, err := p.Reply(context.Background(), thread, "Fix the footer.\n")
 
 	// Assert.
 	if err == nil || !strings.Contains(err.Error(), "Slack rejected the reply") || !strings.Contains(err.Error(), "not_in_channel") {

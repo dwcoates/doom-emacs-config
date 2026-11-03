@@ -169,9 +169,28 @@ func (h *fakeHolds) Supersede(context.Context, ids.WorkspaceID, ids.TurnID) (boo
 	return h.retired, nil
 }
 
+// fakeMerges records every merge the watcher told, as `subscriber pr`.
+type fakeMerges struct {
+	mu   sync.Mutex
+	told []string
+}
+
+func (m *fakeMerges) PullRequestMerged(_ context.Context, subscriber ids.WorkspaceID, pr wsm.PullRequestKey) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.told = append(m.told, string(subscriber)+" "+pr.String())
+}
+
+func (m *fakeMerges) merges() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]string(nil), m.told...)
+}
+
 // rig is one watcher over a real store, a scripted GitHub, and a script clock.
 type rig struct {
 	w       *Watcher
+	merges  *fakeMerges
 	db      wsm.DB
 	gh      *fakeGH
 	prompts *fakePrompts
@@ -196,8 +215,8 @@ func newRig(t *testing.T) *rig {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := &rig{db: db, gh: newGH(), prompts: &fakePrompts{}, holds: &fakeHolds{}, clock: clocktest.New(t0), log: dlog.NewTestLogger(), ws: record.ID, serves: true}
-	r.w, err = New(Deps{Store: db, GH: r.gh, Holds: r.holds, Briefs: briefs, MintKey: func(p string) (string, error) { return p + "-key", nil },
+	r := &rig{merges: &fakeMerges{}, db: db, gh: newGH(), prompts: &fakePrompts{}, holds: &fakeHolds{}, clock: clocktest.New(t0), log: dlog.NewTestLogger(), ws: record.ID, serves: true}
+	r.w, err = New(Deps{Store: db, GH: r.gh, Merges: r.merges, Holds: r.holds, Briefs: briefs, MintKey: func(p string) (string, error) { return p + "-key", nil },
 		Serves: func() bool { return r.serves }, Clock: r.clock, Every: DefaultEvery, Log: r.log})
 	if err != nil {
 		t.Fatal(err)

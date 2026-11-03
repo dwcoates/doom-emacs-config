@@ -170,6 +170,24 @@ func (f *fakeStore) stored(ws ids.WorkspaceID) (wsm.WorkspaceSummary, bool) {
 	return sum, ok
 }
 
+// fakeInstalled records every summary the synthesizer told it was installed.
+type fakeInstalled struct {
+	mu   sync.Mutex
+	told []string
+}
+
+func (f *fakeInstalled) SummaryInstalled(_ context.Context, ws ids.WorkspaceID, title string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.told = append(f.told, string(ws)+": "+title)
+}
+
+func (f *fakeInstalled) summaries() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.told...)
+}
+
 // ---- fixtures -------------------------------------------------------------
 
 // briefDir writes a minimal brief the synthesizer can load, so a test does not
@@ -193,26 +211,28 @@ func digestResponse(boundary shimv1.TitleDigestBoundary, said ...string) *shimv1
 	}
 }
 
-// harness wires a synthesizer over the five fakes.
+// harness wires a synthesizer over the six fakes.
 type harness struct {
-	synth   *Synthesizer
-	digest  *fakeDigester
-	model   *fakeHeadless
-	configs *fakeConfigDirs
-	titles  *fakeTitles
-	store   *fakeStore
-	log     *dlog.TestLogger
+	synth     *Synthesizer
+	digest    *fakeDigester
+	model     *fakeHeadless
+	configs   *fakeConfigDirs
+	titles    *fakeTitles
+	store     *fakeStore
+	installed *fakeInstalled
+	log       *dlog.TestLogger
 }
 
 func newHarness(t *testing.T, resp *shimv1.GatherTitleDigestResponse) *harness {
 	t.Helper()
 	h := &harness{
-		digest:  &fakeDigester{resp: resp},
-		model:   &fakeHeadless{text: "Wire up the reconnect backoff"},
-		configs: &fakeConfigDirs{dir: "/root/.claude", ok: true},
-		titles:  &fakeTitles{},
-		store:   newFakeStore(),
-		log:     dlog.NewTestLogger(),
+		digest:    &fakeDigester{resp: resp},
+		model:     &fakeHeadless{text: "Wire up the reconnect backoff"},
+		configs:   &fakeConfigDirs{dir: "/root/.claude", ok: true},
+		titles:    &fakeTitles{},
+		store:     newFakeStore(),
+		installed: &fakeInstalled{},
+		log:       dlog.NewTestLogger(),
 	}
 	h.synth = New(Deps{
 		Digester:   h.digest,
@@ -220,6 +240,7 @@ func newHarness(t *testing.T, resp *shimv1.GatherTitleDigestResponse) *harness {
 		ConfigDirs: h.configs,
 		Titles:     h.titles,
 		Store:      h.store,
+		Installed:  h.installed,
 		PromptsDir: briefDir(t),
 		Log:        h.log,
 	})
@@ -239,6 +260,34 @@ func TestSynthesizesWhenThereIsMaterial(t *testing.T) {
 	got, ok := h.titles.last()
 	if !ok || got != "Wire up the reconnect backoff" {
 		t.Fatalf("synthesized title = %q (set=%v), want the model's answer", got, ok)
+	}
+}
+
+func TestEveryInstalledSummaryIsTold(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, digestResponse(shimv1.TitleDigestBoundary_TITLE_DIGEST_BOUNDARY_NONE, "make reconnect backoff"))
+
+	// Act.
+	h.synth.synthesizeOnce(context.Background(), testWS)
+
+	// Assert.
+	want := []string{string(testWS) + ": Wire up the reconnect backoff"}
+	if got := h.installed.summaries(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("told summaries = %q, want %q", got, want)
+	}
+}
+
+func TestASummaryNotInstalledIsNotTold(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, digestResponse(shimv1.TitleDigestBoundary_TITLE_DIGEST_BOUNDARY_NONE, "one prompt"))
+	h.synth.synthesizeOnce(context.Background(), testWS)
+
+	// Act — the same digest again distills nothing.
+	h.synth.synthesizeOnce(context.Background(), testWS)
+
+	// Assert.
+	if got := h.installed.summaries(); len(got) != 1 {
+		t.Fatalf("told summaries = %q, want only the one installed", got)
 	}
 }
 
