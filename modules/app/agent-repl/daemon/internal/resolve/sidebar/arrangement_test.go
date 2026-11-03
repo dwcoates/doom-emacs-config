@@ -164,6 +164,29 @@ func TestASubsectionNestsAChildUnderItsParent(t *testing.T) {
 	}
 }
 
+func TestASubsectionNestsAChildOfAnotherRepositoryUnderItsParent(t *testing.T) {
+	// Arrange: the child reads its subsection from its root (wsm's
+	// rootSubsectionColumn), a subsection of its parent's repository.
+	r, _ := newResolver(t)
+	later := subsection("sub-later", "later", 1)
+	parent := in(placed(workspace("w-p", "parent"), 1), later)
+	child := in(placed(workspace("w-k", "child"), 2), later)
+	child.Repo, child.Dir = otherRepo.ID, "/repos/two/w-k"
+	child.Parent = &parent.ID
+	reg := registry(parent, child)
+	reg.Repositories = append(reg.Repositories, otherRepo)
+	reg.Subsections = []wsm.Subsection{later}
+
+	// Act
+	r.SetRegistry(reg)
+
+	// Assert
+	rows := rosterwalk.Subsections(latest(t, r).GetRepository().GetSections()[0])[0].GetOpenRows().GetRows()
+	if len(rows) != 1 || !equal(rowNames(innerRows(rows[0].GetChildren())), []string{"child"}) {
+		t.Fatalf("subsection rows = %v, want parent with the other repository's child nested", rowNames(innerRows(rows)))
+	}
+}
+
 func TestSetRegistryRefusesAnArrangementItCannotDraw(t *testing.T) {
 	foreign := wsm.Subsection{ID: "sub-foreign", Repo: otherRepo.ID, Name: "foreign", Place: 1}
 	tests := []struct {
@@ -182,6 +205,20 @@ func TestSetRegistryRefusesAnArrangementItCannotDraw(t *testing.T) {
 			name: "a workspace in another repository's subsection",
 			reg: func() sidebar.Registry {
 				reg := registry(in(placed(workspace("w1", "one"), 1), foreign))
+				reg.Repositories = append(reg.Repositories, otherRepo)
+				reg.Subsections = []wsm.Subsection{foreign}
+				return reg
+			},
+			message: "a workspace sits in another repository's subsection",
+		},
+		{
+			name: "a child of another repository in its own repository's subsection, not its family's",
+			reg: func() sidebar.Registry {
+				parent := placed(workspace("w-p", "parent"), 1)
+				child := in(placed(workspace("w-k", "child"), 2), foreign)
+				child.Repo, child.Dir = otherRepo.ID, "/repos/two/w-k"
+				child.Parent = &parent.ID
+				reg := registry(parent, child)
 				reg.Repositories = append(reg.Repositories, otherRepo)
 				reg.Subsections = []wsm.Subsection{foreign}
 				return reg

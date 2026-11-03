@@ -204,14 +204,21 @@ func sortSubsections(in []wsm.Subsection) []wsm.Subsection {
 
 // assertArrangement refuses a registry whose arrangement cannot be drawn: a
 // workspace naming a subsection the registry does not carry, or one of
-// another repository, or a subsection of an unregistered repository.
+// another repository than its FAMILY's, or a subsection of an unregistered
+// repository.
 //
-// EACH IS UNREACHABLE. SQLite refuses a workspace in another repository's
-// subsection (wsm's workspaces_subsection_same_repo triggers), a deleted
-// subsection sets its workspaces' reference to NULL in the same statement,
-// a repository's subsections cascade with it, and the registry reads all
-// three in ONE snapshot (wsm.ReadArrangement). Reaching here is a defect in
-// one of those, so it fails hard rather than drawing a guess.
+// A FAMILY'S REPOSITORY IS ITS ROOT'S (sectionRepos). A child reads its
+// subsection from its root (wsm's rootSubsectionColumn), and a child of
+// another repository than its parent's nests in that family, so the
+// subsection it names is its root's repository's, never necessarily its own.
+//
+// EACH IS UNREACHABLE. SQLite refuses a root in another repository's
+// subsection (wsm's workspaces_subsection_same_repo triggers), a child stores
+// none (workspaces_child_stores_no_subsection), a deleted subsection sets its
+// workspaces' reference to NULL in the same statement, a repository's
+// subsections cascade with it, and the registry reads all three in ONE
+// snapshot (wsm.ReadArrangement). Reaching here is a defect in one of those,
+// so it fails hard rather than drawing a guess.
 func (r *resolver) assertArrangement(reg Registry) {
 	repos := map[ids.RepoID]bool{}
 	for _, repo := range reg.Repositories {
@@ -225,6 +232,7 @@ func (r *resolver) assertArrangement(reg Registry) {
 		}
 		subsections[sub.ID] = sub
 	}
+	family := sectionRepos(reg.Workspaces)
 	for _, ws := range reg.Workspaces {
 		if ws.Subsection == nil {
 			continue
@@ -234,9 +242,9 @@ func (r *resolver) assertArrangement(reg Registry) {
 			r.failArrangement("a workspace names a subsection the registry does not carry",
 				dlog.Context{"workspace_id": string(ws.ID), "subsection": string(*ws.Subsection)})
 		}
-		if sub.Repo != ws.Repo {
+		if sub.Repo != family[ws.ID] {
 			r.failArrangement("a workspace sits in another repository's subsection",
-				dlog.Context{"workspace_id": string(ws.ID), "subsection": string(sub.ID), "repo_id": string(ws.Repo), "subsection_repo_id": string(sub.Repo)})
+				dlog.Context{"workspace_id": string(ws.ID), "subsection": string(sub.ID), "repo_id": string(ws.Repo), "family_repo_id": string(family[ws.ID]), "subsection_repo_id": string(sub.Repo)})
 		}
 	}
 }
@@ -244,7 +252,7 @@ func (r *resolver) assertArrangement(reg Registry) {
 // failArrangement records an arrangement invariant violation once, at ERROR,
 // and panics with MESSAGE.
 func (r *resolver) failArrangement(message string, ctx dlog.Context) {
-	ctx["invariant_violation"] = "every subsection a workspace names is one of its own repository's, read in the same snapshot"
+	ctx["invariant_violation"] = "every subsection a workspace names is one of its family root's repository's, read in the same snapshot"
 	ctx["remediation"] = "compose the registry from one wsm.ReadArrangement"
 	r.log.Global().Error("daemon.sidebar.set_registry", message, ctx)
 	panic(fmt.Sprintf("sidebar: %s: %v", message, ctx))
