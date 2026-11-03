@@ -367,10 +367,22 @@ creating workspaces there with `-repository DIR`.
     - `-reference`: it exists apart from the work, which only points at it
       (the thread or ticket the task came from, a doc it read, a pull
       request it did not open, even one its work amends).
-    - The daemon reads it: a workspace created for a Slack message
-      (`create -slack-thread URL`) has every owned link posted into that
-      thread when its finish's deploy ends. The daemon makes that post, and
-      the one saying work began, itself; the agent posts neither.
+    - The daemon reads the ownership for a workspace created for a Slack
+      message (`create -slack-thread URL`), one-shot or not:
+      - It speaks for the workspace in that thread itself; the agent posts
+        none of it.
+      - Once the workspace's one-sentence summary (the one the topbar
+        shows) first exists, the daemon posts it into the thread as the
+        opening, once.
+      - Every link set `-owned` is posted into the thread as it is stored: a
+        pull request by its label and its `#<number>` link, anything else by
+        its label. A link is posted once; setting it again, a relabel among
+        them, never posts it again.
+      - When an owned pull request the daemon follows merges, the daemon
+        adds the `:merged:` reaction to the message that posted it.
+      - A finish whose deploy fails is posted to the thread with where to
+        look (the workspace, and every owned link). A deploy that lands
+        posts nothing more.
     - The daemon follows an owned github.com pull request: every comment,
       review, line comment, edit, deletion, state change and finished check
       arrives as a notice (a deferred prompt the feed draws no row for). It
