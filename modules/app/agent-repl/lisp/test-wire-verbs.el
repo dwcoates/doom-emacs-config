@@ -2489,6 +2489,15 @@ workspace's ref and whether it is open."
                    '(:cause (:arm :name-held
                              :value (:branch "agent-1/fix" :workspace (:id "ws-2" :dir "/w/two") :open t)))))))
 
+(ert-deftest agent-repl-test-wire-verbs-create-error-name-branch-exists-arm ()
+  "CreateWorkspaceError's `name_branch_exists' arm decodes the branch and its tip."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-create-workspace-error
+                    (agent-repl-test-wire-verbs--parse
+                     "{\"nameBranchExists\":{\"branch\":\"agent-1/fix\",\"head\":\"7fdd54832a\"}}"))
+                   '(:cause (:arm :name-branch-exists
+                             :value (:branch "agent-1/fix" :head "7fdd54832a")))))))
+
 (ert-deftest agent-repl-test-wire-verbs-create-error-name-reserved-arm ()
   "CreateWorkspaceError's `name_reserved' arm decodes the branch the name resolves to."
   (agent-repl-test-wire-verbs--with-common
