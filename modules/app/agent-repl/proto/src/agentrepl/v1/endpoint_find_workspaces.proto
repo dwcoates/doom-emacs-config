@@ -65,6 +65,11 @@ message FindWorkspacesRequest {
   // the Slack emoji-ack intake reads to see only the workspaces a reaction
   // may be routed to. UNSET = every login.
   optional FindWorkspacesLogin login = 9;
+  // Only workspaces that had at least one AGENT TURN inside this window
+  // (FoundWorkspace.last_turn_at_ms says which turns count). UNSET = no turn
+  // window. Unlike `window`, which matches every kind of activity, this one
+  // matches turns alone.
+  optional FindWorkspacesTurnWindow turned = 10;
 }
 
 // The login a find narrows to (FindWorkspacesRequest.login). THE ARM IS HOW
@@ -76,12 +81,32 @@ message FindWorkspacesLogin {
     // -login here` names the calling workspace). A ref naming no registered
     // workspace is the unknown_login_workspace answer.
     workspace.v1.WorkspaceRef of_workspace = 1;
+    // The login whose Claude config dir is this account root, spelled as an
+    // option of the topbar's account cell spells it: the same `config_dir`
+    // SelectAccountRequest carries, an absolute path the daemon compares
+    // verbatim (`workspace find -login-root ~/.claude-chesscom`). A root the
+    // daemon does not know is the unknown_login_root answer, never an empty
+    // one. A blank root is malformed (Connect InvalidArgument).
+    string account_root = 2;
   }
 }
 
 // Narrows a find to the workspaces the sidebar roster draws. No fields: its
 // presence is the criterion.
 message FindWorkspacesOnRoster {}
+
+// A window an agent turn's START must fall in, both ends inclusive: a
+// workspace matches when at least one of its agent turns started at or after
+// `since_ms` and at or before `until_ms`. With neither end set it matches
+// every workspace that ever took an agent turn.
+message FindWorkspacesTurnWindow {
+  // The window's start, unix milliseconds. UNSET = open-ended into the past.
+  optional int64 since_ms = 1;
+  // The window's end, unix milliseconds. UNSET = open-ended up to now. A
+  // window whose end precedes its start is malformed (Connect
+  // InvalidArgument).
+  optional int64 until_ms = 2;
+}
 
 // A window of time a workspace's life must overlap: the workspace was created
 // no later than its end, and was last active no earlier than its start. A
@@ -191,6 +216,22 @@ message FoundWorkspace {
   // SET FOR A MERGE WORKSPACE, the hidden workspace an async merge runs in to
   // land another workspace's branch; UNSET for every other workspace.
   optional FoundWorkspaceMerge merge = 13;
+  // The Claude config dir the workspace's session runs under, as its session
+  // last came up. UNSET for a workspace whose session never came up. It is a
+  // fact of the session, not what FindWorkspacesRequest.login matches: the
+  // login filter matches by the routing of the workspace's repository, and
+  // by its parent's for a child.
+  optional string config_dir = 14;
+  // When the workspace's last AGENT TURN started, unix milliseconds: the
+  // instant FindWorkspacesTurnWindow is matched against. An agent turn is one
+  // that set the agent working: a prompt the user sent (from the editor, the
+  // webapp or claude.ai), a prompt another workspace's agent sent, a daemon
+  // brief or notice, or a turn the vendor started on its own. A compaction or
+  // a /clear, any other session command the daemon acts on itself, and the
+  // re-drive of a turn a restart interrupted are not agent turns, and neither
+  // is anything that is no turn at all (a gate answer, a rename, a status
+  // change). UNSET for a workspace that never took an agent turn.
+  optional int64 last_turn_at_ms = 15;
 }
 
 // What makes a found workspace a merge workspace.
@@ -276,8 +317,8 @@ message FoundWorkspaceStandingLanded {
   int64 landed_at_ms = 1;
 }
 
-// Validation failures (a blank text, a zero limit, a reversed window) are
-// Connect InvalidArgument, never an arm.
+// Validation failures (a blank text or account root, a zero limit, a
+// reversed window or turn window) are Connect InvalidArgument, never an arm.
 message FindWorkspacesError {
   oneof cause {
     // `repository` names a RepositoryRef the daemon's registry does not hold.
@@ -289,6 +330,8 @@ message FindWorkspacesError {
     // `login.of_workspace` names a workspace the daemon's registry does not
     // hold.
     FindWorkspacesUnknownLoginWorkspace unknown_login_workspace = 4;
+    // `login.account_root` names an account root the daemon does not know.
+    FindWorkspacesUnknownLoginRoot unknown_login_root = 5;
   }
 }
 // Empty: the echoed ref is the only identity involved.
@@ -299,3 +342,8 @@ message FindWorkspacesUnknownCreator {}
 message FindWorkspacesUnknownCaller {}
 // Empty: the echoed ref is the only identity involved.
 message FindWorkspacesUnknownLoginWorkspace {}
+// The account roots the daemon does know, so the caller can say which one it
+// meant.
+message FindWorkspacesUnknownLoginRoot {
+  repeated string known = 1;
+}
