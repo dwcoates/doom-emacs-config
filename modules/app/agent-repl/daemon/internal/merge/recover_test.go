@@ -785,3 +785,173 @@ func TestRecoverPutsARecordlessHeadBackAtItsOwnPlace(t *testing.T) {
 		t.Fatalf("changes = %v, want the head reported requeued", kinds)
 	}
 }
+
+// staleRebaseLease is the lease a background rebase took over the harness's
+// waiting merge (rebasewaiting.go): a merge holder under the hold policy.
+var staleRebaseLease = wsm.Lease{ID: "lease-dead-rebase", Workspace: theWorkspace, Holder: wsm.HolderMerge, Policy: wsm.PolicyHold}
+
+// leaveLease stands LEASE in the harness's store, as the process that took it
+// left it when it died.
+func leaveLease(h *harness, lease wsm.Lease) {
+	h.db.mu.Lock()
+	defer h.db.mu.Unlock()
+	h.db.leases[lease.Workspace] = lease
+}
+
+// takeBack is one way a successor takes a waiting merge back from the store:
+// a boot's recovery, or a takeover's review of the queues.
+type takeBack struct {
+	name string
+	call func(o *orchestrator) error
+}
+
+var takeBacks = []takeBack{
+	{name: "a boot's recovery", call: func(o *orchestrator) error { return o.Recover(context.Background()) }},
+	{name: "a successor's takeover", call: func(o *orchestrator) error { return o.ReviewQueues(context.Background()) }},
+}
+
+// successorOf builds the daemon that takes the harness's queue over from a
+// process that died.
+func successorOf(t *testing.T, h *harness) *orchestrator {
+	t.Helper()
+	fresh, err := newOrchestrator(h.deps())
+	if err != nil {
+		t.Fatalf("building the successor: %v", err)
+	}
+	return fresh
+}
+
+// TestTakeBackReleasesTheLeaseADeadBackgroundRebaseLeftOnAWaitingMerge covers
+// the 2026-11-03 stall: a daemon exited mid background rebase, its lease
+// outlived it, and the pump's every admission of the merge at the head was
+// refused by it.
+func TestTakeBackReleasesTheLeaseADeadBackgroundRebaseLeftOnAWaitingMerge(t *testing.T) {
+	for _, tb := range takeBacks {
+		t.Run(tb.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			enqueue(t, h)
+			leaveLease(h, staleRebaseLease)
+			fresh := successorOf(t, h)
+
+			// Act.
+			if err := tb.call(fresh); err != nil {
+				t.Fatalf("take-back: %v", err)
+			}
+
+			// Assert.
+			_, held, _ := h.db.Lease(context.Background(), theWorkspace)
+			entries, _ := h.db.MergeQueue(context.Background(), h.repoKey())
+			got := []any{held, len(entries) == 1 && entries[0].State == wsm.MergeQueued}
+			if want := []any{false, true}; !reflect.DeepEqual(got, want) {
+				t.Fatalf("lease held, merge still waiting = %v, want %v", got, want)
+			}
+		})
+	}
+}
+
+// TestTakeBackRecordsTheReleasedRebaseLeaseAndTellsTheQueue covers the record
+// and the queue's notice of a released dead rebase's lease.
+func TestTakeBackRecordsTheReleasedRebaseLeaseAndTellsTheQueue(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	enqueue(t, h)
+	leaveLease(h, staleRebaseLease)
+	fresh := successorOf(t, h)
+
+	// Act.
+	if err := fresh.Recover(context.Background()); err != nil {
+		t.Fatalf("Recover: %v", err)
+	}
+
+	// Assert.
+	rec, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "info", Operation: "daemon.merge.recover",
+		Message: "released the merge lease a background rebase left on a waiting merge when its process died; the merge waits in line unheld"})
+	if !ok || rec.Context["workspace"] != string(theWorkspace) || rec.Context["lease"] != "lease-dead-rebase" {
+		t.Fatalf("the released lease was recorded as %+v, want INFO naming its workspace and lease", rec)
+	}
+	h.queue.mu.Lock()
+	defer h.queue.mu.Unlock()
+	if n := len(h.queue.leaseEvents); n == 0 || h.queue.leaseEvents[n-1] {
+		t.Fatalf("lease events %v, want the queue told the merge lease is gone", h.queue.leaseEvents)
+	}
+}
+
+// TestTakeBackLeavesAWaitingMergesLeaseItIsNotTheMergesToJudge covers the
+// leases the release must never touch: another holder's, and one a live run
+// of this daemon holds.
+func TestTakeBackLeavesAWaitingMergesLeaseItIsNotTheMergesToJudge(t *testing.T) {
+	tests := []struct {
+		name  string
+		lease wsm.Lease
+		live  bool
+	}{
+		{name: "another holder's lease", lease: wsm.Lease{ID: "lease-restart", Workspace: theWorkspace, Holder: wsm.HolderRestart, Policy: wsm.PolicyHold}},
+		{name: "a live run of this daemon's", lease: staleRebaseLease, live: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			enqueue(t, h)
+			leaveLease(h, tt.lease)
+			fresh := successorOf(t, h)
+			if tt.live {
+				fresh.mu.Lock()
+				fresh.runsByWorkspace[theWorkspace] = &run{ws: theWorkspace}
+				fresh.mu.Unlock()
+			}
+
+			// Act.
+			if err := fresh.releaseWaitingRebaseLease(context.Background(), h.repoKey(), theWorkspace); err != nil {
+				t.Fatalf("release: %v", err)
+			}
+
+			// Assert.
+			if got, held, _ := h.db.Lease(context.Background(), theWorkspace); !held || got.ID != tt.lease.ID {
+				t.Fatalf("the lease after the take-back is %+v (held %v), want %s left standing", got, held, tt.lease.ID)
+			}
+		})
+	}
+}
+
+// TestTakeBackRefusesWhenTheWaitingMergesLeaseCannotBeSettled covers both
+// store failures: the take-back fails loudly at ERROR, and a lease it could not
+// release is left as it stood.
+func TestTakeBackRefusesWhenTheWaitingMergesLeaseCannotBeSettled(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(f *fakeDB)
+		message string
+	}{
+		{name: "the lease cannot be read", arrange: func(f *fakeDB) { f.leaseReadErr = errors.New("disk I/O error") },
+			message: "could not read whether a waiting merge's workspace holds a lease"},
+		{name: "the lease cannot be released", arrange: func(f *fakeDB) { f.releaseErr = errors.New("disk I/O error") },
+			message: "could not release the merge lease a dead background rebase left on a waiting merge"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			enqueue(t, h)
+			leaveLease(h, staleRebaseLease)
+			fresh := successorOf(t, h)
+			h.db.mu.Lock()
+			tt.arrange(h.db)
+			h.db.mu.Unlock()
+
+			// Act.
+			err := fresh.releaseWaitingRebaseLease(context.Background(), h.repoKey(), theWorkspace)
+
+			// Assert.
+			h.db.mu.Lock()
+			h.db.leaseReadErr = nil
+			h.db.mu.Unlock()
+			_, held, _ := h.db.Lease(context.Background(), theWorkspace)
+			_, logged := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: "daemon.merge.recover", Message: tt.message})
+			if got := []any{err != nil, held, logged}; !reflect.DeepEqual(got, []any{true, true, true}) {
+				t.Fatalf("failed, lease kept, logged at ERROR = %v, want all true (err %v)", got, err)
+			}
+		})
+	}
+}
