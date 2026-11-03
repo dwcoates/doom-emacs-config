@@ -39,6 +39,10 @@ type cliClient struct {
 	// create makes first still answer.
 	createErr error
 	finish    *agentreplv1.FinishWorkspaceResponse
+	// retargeted and oneShot script SetWorkspaceParent's and
+	// SetWorkspaceOneShot's answers; nil answers an empty success.
+	retargeted *agentreplv1.SetWorkspaceParentResponse
+	oneShot    *agentreplv1.SetWorkspaceOneShotResponse
 	queues    *agentreplv1.GetMergeQueueStatusResponse
 	// found answers FindWorkspaces, an empty complete find when nil.
 	found *agentreplv1.FindWorkspacesResponse
@@ -135,10 +139,16 @@ func (c *cliClient) SetWorkspaceHidden(_ context.Context, req *connect.Request[a
 }
 
 func (c *cliClient) SetWorkspaceParent(_ context.Context, req *connect.Request[agentreplv1.SetWorkspaceParentRequest]) (*connect.Response[agentreplv1.SetWorkspaceParentResponse], error) {
+	if c.retargeted != nil {
+		return connect.NewResponse(c.retargeted), c.record(req.Msg)
+	}
 	return connect.NewResponse(&agentreplv1.SetWorkspaceParentResponse{}), c.record(req.Msg)
 }
 
 func (c *cliClient) SetWorkspaceOneShot(_ context.Context, req *connect.Request[agentreplv1.SetWorkspaceOneShotRequest]) (*connect.Response[agentreplv1.SetWorkspaceOneShotResponse], error) {
+	if c.oneShot != nil {
+		return connect.NewResponse(c.oneShot), c.record(req.Msg)
+	}
 	return connect.NewResponse(&agentreplv1.SetWorkspaceOneShotResponse{}), c.record(req.Msg)
 }
 
@@ -2644,6 +2654,46 @@ func TestNotifyRefusesAMalformedCall(t *testing.T) {
 			// Assert
 			if code == exitSuccess || len(f.client.requests) != 0 {
 				t.Fatalf("exit %d, sent %v; want a usage failure and nothing sent", code, f.client.requests)
+			}
+		})
+	}
+}
+
+func TestWorkspaceVerbsSayTheMissingGeometrysRefusalInPlainEnglish(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(c *cliClient)
+		args    []string
+		want    string
+	}{
+		{name: "finished", arrange: func(c *cliClient) {
+			c.finish = &agentreplv1.FinishWorkspaceResponse{Result: &agentreplv1.FinishWorkspaceResponse_Error{Error: &agentreplv1.FinishWorkspaceError{
+				Cause: &agentreplv1.FinishWorkspaceError_NoLayoutFacts{NoLayoutFacts: &agentreplv1.FinishWorkspaceNoLayoutFacts{}}}}}
+		}, args: []string{"finished", "peer", "-placement", "back"},
+			want: "peer records no merge geometry, so nothing says where it lands; record it by restating where the workspace lands: `agent-repld workspace set peer -lands-into main`"},
+		{name: "set -one-shot", arrange: func(c *cliClient) {
+			c.oneShot = &agentreplv1.SetWorkspaceOneShotResponse{Result: &agentreplv1.SetWorkspaceOneShotResponse_Error{Error: &agentreplv1.SetWorkspaceOneShotError{
+				Cause: &agentreplv1.SetWorkspaceOneShotError_NoCreationJob{NoCreationJob: &agentreplv1.SetWorkspaceOneShotNoCreationJob{}}}}}
+		}, args: []string{"set", "peer", "-one-shot"},
+			want: "peer records no creation job to mark; record it by restating where the workspace lands"},
+		{name: "set -top-level", arrange: func(c *cliClient) {
+			c.retargeted = &agentreplv1.SetWorkspaceParentResponse{Result: &agentreplv1.SetWorkspaceParentResponse_Error{Error: &agentreplv1.SetWorkspaceParentError{
+				Cause: &agentreplv1.SetWorkspaceParentError_NoMergeLayout{NoMergeLayout: &agentreplv1.SetWorkspaceParentNoMergeLayout{}}}}}
+		}, args: []string{"set", "peer", "-top-level"},
+			want: "peer records no merge geometry to keep; restate where it lands with -lands-into main"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newCLIFixture()
+			tt.arrange(f.client)
+
+			// Act
+			code := f.run(workspaceNoun, tt.args...)
+
+			// Assert
+			if code != exitRefused || !strings.Contains(f.errOut.String(), tt.want) {
+				t.Fatalf("exit %d, stderr %q; want refused saying %q", code, f.errOut.String(), tt.want)
 			}
 		})
 	}

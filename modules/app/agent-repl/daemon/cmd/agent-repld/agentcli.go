@@ -893,7 +893,7 @@ func workspaceSet(c *cliCall, args []string) int {
 	name := fs.String("name", "", "rename the workspace: its name only, never its branch or directory")
 	remoteControl := fs.String("remote-control", "", "on or off: whether the workspace's session is reachable from claude.ai")
 	asUser := fs.Bool("as-user", false, "the user asks, not the calling workspace")
-	ref, rest, ok := c.workspaceArg(fs, stateDir, args)
+	named, ref, rest, ok := c.namedWorkspaceArg(fs, stateDir, args)
 	if !ok {
 		return exitFailure
 	}
@@ -943,7 +943,9 @@ func workspaceSet(c *cliCall, args []string) int {
 		}
 		calls = append(calls, func() int {
 			resp, err := c.client.SetWorkspaceParent(c.ctx, connect.NewRequest(retarget))
-			return answer(c, resp, err)
+			return answerDescribed(c, resp, err, func(msg *agentreplv1.SetWorkspaceParentResponse) (string, error) {
+				return describeRetargetRefusal(named, msg.GetError())
+			})
 		})
 	}
 	if *name != "" {
@@ -970,7 +972,9 @@ func workspaceSet(c *cliCall, args []string) int {
 		if *oneShot || *notOneShot {
 			calls = append(calls, func() int {
 				resp, err := c.client.SetWorkspaceOneShot(c.ctx, connect.NewRequest(&agentreplv1.SetWorkspaceOneShotRequest{Workspace: ref, Requester: requester, OneShot: *oneShot}))
-				return answer(c, resp, err)
+				return answerDescribed(c, resp, err, func(msg *agentreplv1.SetWorkspaceOneShotResponse) (string, error) {
+					return describeOneShotRefusal(named, msg.GetError())
+				})
 			})
 		}
 		switch {
@@ -1114,7 +1118,7 @@ func workspaceFinished(c *cliCall, args []string) int {
 	part := fs.String("version-part", "", "minor or patch, for a deploy onto a versioned repository's main branch")
 	line := fs.String("changelog-line", "", "the version tag's changelog line")
 	asUser := fs.Bool("as-user", false, "the user asks, not the calling workspace")
-	ref, rest, ok := c.workspaceArg(fs, stateDir, args)
+	named, ref, rest, ok := c.namedWorkspaceArg(fs, stateDir, args)
 	if !ok {
 		return exitFailure
 	}
@@ -1135,7 +1139,9 @@ func workspaceFinished(c *cliCall, args []string) int {
 	}
 	resp, err := c.client.FinishWorkspace(c.ctx, connect.NewRequest(&agentreplv1.FinishWorkspaceRequest{Workspace: ref, Requester: requester,
 		Placement: where, VersionIncrement: version}))
-	return answer(c, resp, err)
+	return answerDescribed(c, resp, err, func(msg *agentreplv1.FinishWorkspaceResponse) (string, error) {
+		return describeFinishRefusal(named, msg.GetError())
+	})
 }
 
 func workspaceOpen(c *cliCall, args []string) int {
