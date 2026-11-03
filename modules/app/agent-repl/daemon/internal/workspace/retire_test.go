@@ -288,27 +288,42 @@ func TestRetireLandedRefusesAWorkspaceThisDaemonDoesNotServe(t *testing.T) {
 
 // TestRetireLandedDeletesTheLandedBranch covers the branch going with the
 // retired requester's worktree (landedbranch.Retire): deleted once its tip is
-// inside the branch it landed into, kept when it holds anything that did not
-// land.
+// the head its landing recorded (a rebased landing, whose tip is no ancestor
+// of its parent) or is inside the branch it landed into, kept when it holds
+// anything that did not land.
 func TestRetireLandedDeletesTheLandedBranch(t *testing.T) {
 	cases := []struct {
-		name        string
-		offParent   bool
-		wantDeleted bool
-		wantLevel   string
-		wantMessage string
+		name string
+		// tipIsLandedHead makes the branch's tip the head the landing
+		// recorded ("sha-of-HEAD"); otherwise it is "sha-of-refs/heads/B".
+		tipIsLandedHead bool
+		offParent       bool
+		wantDeleted     bool
+		wantJudgedBy    string
+		wantLevel       string
+		wantMessage     string
 	}{
 		{
-			name:        "a branch inside its parent is deleted at its tip",
-			wantDeleted: true,
-			wantLevel:   dlog.LevelInfo,
-			wantMessage: "deleted the landed branch: its tip is inside the ref it landed into",
+			name:            "a rebased landing whose tip is the recorded head is deleted though it is off its parent",
+			tipIsLandedHead: true,
+			offParent:       true,
+			wantDeleted:     true,
+			wantJudgedBy:    "recorded_head",
+			wantLevel:       dlog.LevelInfo,
+			wantMessage:     "deleted the landed branch",
 		},
 		{
-			name:        "a branch holding commits its parent does not is kept",
+			name:         "a branch inside its parent is deleted at its tip by ancestry",
+			wantDeleted:  true,
+			wantJudgedBy: "ancestry",
+			wantLevel:    dlog.LevelInfo,
+			wantMessage:  "deleted the landed branch",
+		},
+		{
+			name:        "a branch neither at the recorded head nor inside its parent is kept at INFO",
 			offParent:   true,
-			wantLevel:   dlog.LevelDebug,
-			wantMessage: "kept the branch: it holds commits the ref it landed into does not",
+			wantLevel:   dlog.LevelInfo,
+			wantMessage: "kept the branch: its tip is neither the head its landing recorded nor inside the ref it landed into",
 		},
 	}
 	for _, tc := range cases {
@@ -316,8 +331,13 @@ func TestRetireLandedDeletesTheLandedBranch(t *testing.T) {
 			// Arrange
 			f := newFixture(t)
 			ws := landedRequester(t, f)
+			tip := "sha-of-refs/heads/" + ws.Branch
+			if tc.tipIsLandedHead {
+				tip = ws.Landed.Head
+				f.git.refs = map[string]string{"refs/heads/" + ws.Branch: tip}
+			}
 			f.git.existingBranches = map[string]bool{ws.Branch: true}
-			f.git.offPrimary = map[string]bool{"sha-of-refs/heads/" + ws.Branch: tc.offParent}
+			f.git.offPrimary = map[string]bool{tip: tc.offParent}
 
 			// Act
 			kept, err := f.verbs.RetireLanded(context.Background(), ws.ID)
@@ -328,7 +348,7 @@ func TestRetireLandedDeletesTheLandedBranch(t *testing.T) {
 			}
 			var want []string
 			if tc.wantDeleted {
-				want = []string{ws.Branch + "@sha-of-refs/heads/" + ws.Branch}
+				want = []string{ws.Branch + "@" + tip}
 			}
 			if len(f.git.deletedBranches) != len(want) || (len(want) == 1 && f.git.deletedBranches[0] != want[0]) {
 				t.Fatalf("deleted %v, want %v", f.git.deletedBranches, want)
@@ -337,8 +357,11 @@ func TestRetireLandedDeletesTheLandedBranch(t *testing.T) {
 			if !ok {
 				t.Fatalf("no %s %s record %q: %+v", tc.wantLevel, opRetire, tc.wantMessage, f.log.logger.Records())
 			}
-			if record.Context["into"] != "master" || record.Context["branch"] != ws.Branch {
-				t.Fatalf("the record's context is %v, want branch %s into master", record.Context, ws.Branch)
+			if record.Context["into"] != "master" || record.Context["branch"] != ws.Branch || record.Context["landed_head"] != ws.Landed.Head {
+				t.Fatalf("the record's context is %v, want branch %s into master, landed_head %s", record.Context, ws.Branch, ws.Landed.Head)
+			}
+			if tc.wantJudgedBy != "" && record.Context["judged_by"] != tc.wantJudgedBy {
+				t.Fatalf("judged_by = %v, want %q", record.Context["judged_by"], tc.wantJudgedBy)
 			}
 		})
 	}

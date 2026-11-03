@@ -129,10 +129,14 @@ func (v *verbs) RetireLanded(ctx context.Context, ws ids.WorkspaceID) (string, e
 		return "", fmt.Errorf("retire %q: stamp merged: %w", ws, err)
 	}
 	log.Info(opRetire, "retired a requester whose detached merge landed: its session stopped, its worktree removed", fields)
-	// ITS LANDED BRANCH GOES WITH ITS WORKTREE, verified against the branch
-	// it landed into (landedbranch.Retire records every outcome itself): a
-	// branch left behind refuses every later create of the same name.
-	_, _ = landedbranch.Retire(ctx, v.deps.Git, log, opRetire, repoDir, record.Branch, record.ParentBranch, fields)
+	// ITS LANDED BRANCH GOES WITH ITS WORKTREE, judged landed by the head its
+	// landing recorded (landedbranch.Retire records every outcome itself): a
+	// detached merge lands REBASED copies of the branch's commits, so the
+	// branch's tip is never inside the branch it landed into, and only the
+	// recorded head says it landed. A branch left behind refuses every later
+	// create of the same name (2026-11-03, `ramdisk-leak-investigation`).
+	_, _ = landedbranch.Retire(ctx, v.deps.Git, log, opRetire, repoDir, record.Branch,
+		landedbranch.Landing{Into: record.ParentBranch, Head: landing.Head}, fields)
 	v.republishRegistry(ctx, log, opRetire)
 	return "", nil
 }
