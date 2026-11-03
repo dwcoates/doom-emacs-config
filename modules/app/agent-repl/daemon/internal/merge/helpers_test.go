@@ -82,6 +82,10 @@ type fakeDB struct {
 	jobDecodeErrs map[ids.WorkspaceID]error
 	sessions      map[ids.WorkspaceID]wsm.Session
 	leases        map[ids.WorkspaceID]wsm.Lease
+	// leaseReadErr, when set, is what Lease answers; releaseErr, when set, is
+	// what ReleaseLease answers, releasing nothing.
+	leaseReadErr error
+	releaseErr   error
 	// onAdmit, when set, is called under the lock as each merge is admitted.
 	onAdmit func(ids.WorkspaceID)
 	turns   map[ids.WorkspaceID][]wsm.Turn
@@ -385,6 +389,9 @@ func (f *fakeDB) ReleaseLease(_ context.Context, lease wsm.LeaseID) error {
 	if f.shut {
 		return errStateClientClosed
 	}
+	if f.releaseErr != nil {
+		return f.releaseErr
+	}
 	if f.beforeRelease != nil {
 		f.beforeRelease(f)
 	}
@@ -400,6 +407,9 @@ func (f *fakeDB) ReleaseLease(_ context.Context, lease wsm.LeaseID) error {
 func (f *fakeDB) Lease(_ context.Context, id ids.WorkspaceID) (wsm.Lease, bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.leaseReadErr != nil {
+		return wsm.Lease{}, false, f.leaseReadErr
+	}
 	lease, ok := f.leases[id]
 	return lease, ok, nil
 }

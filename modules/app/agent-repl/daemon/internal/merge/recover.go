@@ -167,6 +167,9 @@ func (o *orchestrator) recoverWaiting(ctx context.Context, repo wsm.RepoKey, ent
 		o.deps.Log.Global().Error(op, "refusing the boot: a queued merge's creation_jobs row will not decode", fields)
 		return false, fmt.Errorf("merge: recover %q: %w", ws, decodeErr)
 	}
+	if err := o.releaseWaitingRebaseLease(ctx, repo, ws); err != nil {
+		return false, err
+	}
 	if jobErr != nil {
 		o.deps.Log.Global().Warn(op, "abandoning a merge the restart could not put back on its queue", dlog.Context{
 			"workspace": string(ws), "repo": string(repo), "error": jobErr.Error()})
@@ -192,6 +195,52 @@ func (o *orchestrator) recoverWaiting(ctx context.Context, repo wsm.RepoKey, ent
 	// back, and redraws it there.
 	o.ledgerOfEntry(entry)
 	return true, nil
+}
+
+// releaseWaitingRebaseLease releases the merge lease a WAITING merge's
+// background rebase left standing when the process running it died.
+//
+// A WAITING MERGE OWNS NO LEASE OF ITS OWN: the only merge lease ever taken
+// over a waiting entry is its background rebase's (rebasewaiting.go), which
+// records no progress and is never resumed. A process that exits mid-rebase
+// can close its state handle before the rebase gives its lease back (the
+// drain's bound, 2026-11-03: lease ab46021474a94971 on test-waits-on-events),
+// and nothing would ever release it: the entry reads as merely waiting, so
+// no resume adopts the lease, and the pump's every admission of it at the
+// head is refused by it, stalling the whole queue. Every taker of a waiting
+// entry (the boot, a handover's take-back, a review) comes through here, so
+// a merge lease no live run of this daemon holds is always a dead process's.
+// A lease of any other holder is not the merge's to judge and is left to its
+// own owner.
+func (o *orchestrator) releaseWaitingRebaseLease(ctx context.Context, repo wsm.RepoKey, ws ids.WorkspaceID) error {
+	const op = "daemon.merge.recover"
+	lease, held, err := o.deps.DB.Lease(ctx, ws)
+	if err != nil {
+		o.deps.Log.Global().Error(op, "could not read whether a waiting merge's workspace holds a lease", dlog.Context{
+			"workspace": string(ws), "repo": string(repo), "error": err.Error()})
+		return fmt.Errorf("merge: read the lease of waiting %q: %w", ws, err)
+	}
+	if !held || lease.Holder != wsm.HolderMerge {
+		return nil
+	}
+	// A RUN OF THIS DAEMON'S OWN holds it while it runs (registerBackground),
+	// and gives it back itself: only a lease no live run here holds is a dead
+	// process's.
+	o.mu.Lock()
+	live := o.runsByWorkspace[ws] != nil
+	o.mu.Unlock()
+	if live {
+		return nil
+	}
+	fields := dlog.Context{"workspace": string(ws), "repo": string(repo), "lease": string(lease.ID),
+		"policy": lease.Policy.String(), "acquired_at": lease.AcquiredAt.Format(time.RFC3339Nano)}
+	if err := o.deps.DB.ReleaseLease(ctx, lease.ID); err != nil {
+		o.log(ctx, ws).Error(op, "could not release the merge lease a dead background rebase left on a waiting merge", withField(fields, "error", err.Error()))
+		return fmt.Errorf("merge: release the dead background rebase's lease on %q: %w", ws, err)
+	}
+	o.deps.Queue.OnLeaseChanged(ws)
+	o.log(ctx, ws).Info(op, "released the merge lease a background rebase left on a waiting merge when its process died; the merge waits in line unheld", fields)
+	return nil
 }
 
 // ledgerOfEntry stands a queued merge's bubble identity as the one its row
