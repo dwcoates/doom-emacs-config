@@ -102,6 +102,50 @@ func TestAFailingReadIsToldOnceThenItsRecovery(t *testing.T) {
 	}
 }
 
+// recoverQuietly fails one read of the rig's pull request, then lets the
+// next succeed with nothing new on it.
+func recoverQuietly(r *rig) {
+	r.gh.set(pathPull(), &ghclient.Failure{Kind: ghclient.KindUnreachable, Message: "no route to host"})
+	r.tick()
+	r.gh.set(pathPull(), pullJSON("open", false, false, "head1"))
+	r.tick()
+}
+
+func TestARecoveryWithNoActivityIsNotToldAsANotice(t *testing.T) {
+	// Arrange
+	r := newRig(t)
+	r.subscribe(t, wsm.PullRequestEventComment)
+
+	// Act
+	recoverQuietly(r)
+	r.tick()
+
+	// Assert
+	told := r.told()
+	if len(told) != 1 || !contains(told[0], "reads of this pull request are failing") {
+		t.Fatalf("told = %q, want only the failure: a recovery with no activity is no notice", told)
+	}
+	if _, ok := dlog.FindRecord(r.log.Records(), dlog.RecordQuery{Level: "info", Operation: opPoll,
+		Message: "the pull request's reads work again and it did nothing meanwhile; its subscriber is told nothing"}); !ok {
+		t.Fatalf("no record of the quiet recovery: %+v", r.log.Records())
+	}
+}
+
+func TestARecoveryWithNoActivityClearsTheSubscriptionsHealth(t *testing.T) {
+	// Arrange
+	r := newRig(t)
+	r.subscribe(t, wsm.PullRequestEventComment)
+
+	// Act
+	recoverQuietly(r)
+
+	// Assert
+	live, err := r.db.LivePullRequestSubscriptions(context.Background())
+	if err != nil || len(live) != 1 || live[0].Failing != nil || live[0].LastRead.IsZero() {
+		t.Fatalf("live = %+v, %v; want the one subscription healthy and read", live, err)
+	}
+}
+
 func TestASpentRateLimitIsWaitedOut(t *testing.T) {
 	// Arrange
 	r := newRig(t)

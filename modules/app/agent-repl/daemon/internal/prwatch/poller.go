@@ -183,15 +183,19 @@ func (w *Watcher) advance(ctx context.Context, sub wsm.PullRequestSubscription, 
 		}
 	}
 	owed := sentencesOf(told)
-	if sub.Failing != nil {
-		owed = append([]string{recoveredSentence}, owed...)
-	}
 	end := endOf(snap.PR)
 	if end != nil {
 		owed = append(owed, endedSentence)
 	}
+	// A RECOVERY IS NO ACTIVITY: reads that work again are said only as the
+	// preface to what the pull request did meanwhile, never as a notice of
+	// their own. The advance still runs, so the stored health clears.
+	recovered := sub.Failing != nil
+	if recovered && len(owed) > 0 {
+		owed = append([]string{recoveredSentence}, owed...)
+	}
 	to := encodeTold(next)
-	if to == sub.Told && len(owed) == 0 {
+	if to == sub.Told && len(owed) == 0 && !recovered {
 		return
 	}
 	applied, err := w.deps.Store.AdvancePullRequestTold(ctx, wsm.PullRequestAdvance{
@@ -207,6 +211,8 @@ func (w *Watcher) advance(ctx context.Context, sub wsm.PullRequestSubscription, 
 		w.deps.Log.Info(opPoll, "the pull request ended; its subscription ended after telling it", fields)
 	case len(owed) > 0:
 		w.deps.Log.Info(opPoll, "the pull request's activity is owed to its subscriber", fields)
+	case recovered:
+		w.deps.Log.Info(opPoll, "the pull request's reads work again and it did nothing meanwhile; its subscriber is told nothing", fields)
 	}
 }
 
