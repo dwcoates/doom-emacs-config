@@ -526,8 +526,9 @@ func feedPage(page *conversationv1.HistoryPage) *conversationv1.HistoryPage {
 // OLDEST FIRST — the order they were written in — and gives each the one
 // treatment its kind and the page's origin call for.
 //
-// A TERMINAL on any page is history: it is recorded as served, so a later
-// re-serving of it on the live stream is a replay, and it is never routed.
+// A TERMINAL is recorded as served, so a later re-serving of it on the live
+// stream is a replay, and routePageTerminalLocked decides whether it closes a
+// turn this watcher still holds open.
 //
 // A CUT is routed by routePageCutLocked, because a cut the views never took
 // leaves them standing in the act it ended: a watch re-opened after the
@@ -543,11 +544,90 @@ func (w *watcher) routePageClosingsLocked(a *agentWatch, page *conversationv1.Hi
 		case frame == nil:
 			continue
 		case isTerminalFrame(frame):
-			w.closingReplayedLocked(a, frame, at.GetAt())
+			if !w.closingReplayedLocked(a, frame, at.GetAt()) {
+				w.routePageTerminalLocked(a, frame, at, origin)
+			}
 		case frame.GetUpdate().GetContextCut() != nil:
 			w.routePageCutLocked(a, frame, at.GetAt(), PlaceOf(at), origin)
 		}
 	}
+}
+
+// routePageTerminalLocked decides what one terminal first served on an opening
+// page is, and closes the turn it ends when that turn is still open here.
+//
+// A MAIN WATCH'S OPENING PAGE IS THE ONE SUBSCRIPTION A TURN'S CLOSE RIDES.
+// The watch catches up from the newest pointer this daemon (or the predecessor
+// it resumed from) was served, so the page and the tail behind it are one
+// ordered serving of every main-agent entry written after that mark: a
+// terminal written after it is on the page or on the tail, never between
+// them. The session facts that stood the turn open are a separate stream, read
+// earlier, so they say only that the turn was open WHEN THEY WERE READ. A
+// handover's successor took a turn from them that closed before its main
+// watch stood (2026-11-02 18:43:44, the merge queue's conflict turn): the
+// close was on this page, the page called every terminal history, and the
+// merge waited on the turn for nineteen hours.
+//
+//   - On StartTurn's page it is left alone: the main watch standing beside
+//     that page serves the turn's own frames live.
+//   - On any other agent's page it is that agent's history.
+//   - Unstamped, it names no turn, and charging it to the turn open now is
+//     how a store restart once ended a live turn with the previous turn's
+//     terminal (2026-09-23 12:38:36); it is history.
+//   - Stamped with a turn that is not open, it ends nothing that is open.
+//   - Stamped with the turn in flight, or one waiting behind it, it ends that
+//     turn exactly as the live terminal would have, bar the feed, which drew
+//     the row from the page it was just handed.
+func (w *watcher) routePageTerminalLocked(a *agentWatch, frame *conversationv1.AgentFrame, at *conversationv1.HistoryEntryAt, origin pageOrigin) {
+	agent := frame.GetAgentId()
+	stamp := ids.TurnID(at.GetTurn().GetValue())
+	ctx := dlog.Context{
+		"agent_id": agent.GetValue(), "pointer": at.GetAt().GetValue(), "origin": origin.String(),
+		"turn_id": string(stamp), "turn_in_flight": ids.Optional(w.turn),
+	}
+	switch {
+	case origin == pageTurnAccepted:
+		w.log.Debug("daemon.sessionwatcher.page_terminal_history", "a terminal on StartTurn's page is left to the main watch, which serves the turn's frames live", ctx)
+		return
+	case a.id != nil:
+		w.log.Debug("daemon.sessionwatcher.page_terminal_history", "a terminal on another agent's opening page is that agent's history; it closes no turn", ctx)
+		return
+	case stamp == "":
+		w.log.Info("daemon.sessionwatcher.page_terminal_history", "a terminal on the main watch's opening page names no turn; it is not charged to the turn open now", ctx)
+		return
+	case !w.turnOpenLocked(stamp):
+		w.log.Debug("daemon.sessionwatcher.page_terminal_history", "a terminal on the main watch's opening page names a turn that is not open; it ends nothing that is open", ctx)
+		return
+	}
+	// THE MAIN WATCH CARRIES THE MAIN AGENT'S FRAMES ALONE, so a turn adopted
+	// at attach, which no StartTurn of this watcher's named, is named by its
+	// own terminal here exactly as on the live stream.
+	if w.mainAgent == nil {
+		w.adoptMainAgentLocked(agent, "catch_up_terminal")
+	}
+	if !w.isMainAgent(agent) {
+		w.log.Info("daemon.sessionwatcher.page_terminal_history", "a terminal on the main watch's opening page is not the main agent's; it closes no turn", dlog.Context{
+			"agent_id": agent.GetValue(), "main_agent_id": w.mainAgent.GetValue(), "pointer": at.GetAt().GetValue(), "turn_id": string(stamp),
+		})
+		return
+	}
+	w.log.Info("daemon.sessionwatcher.turn_closed_on_catch_up", "the main watch's opening page carries the close of a turn still open here; the turn ends", ctx)
+	w.endAgentRunLocked(agent, true, &stamp, frame.GetSuccess(), frame.GetFailure())
+	w.releaseHeldTerminalLocked()
+}
+
+// turnOpenLocked reports whether TURN is open here: the turn in flight, or one
+// waiting behind it.
+func (w *watcher) turnOpenLocked(turn ids.TurnID) bool {
+	if w.turn != nil && *w.turn == turn {
+		return true
+	}
+	for _, waiting := range w.waiting {
+		if waiting.turn == turn {
+			return true
+		}
+	}
+	return false
 }
 
 // routePageCutLocked decides what one cut on an opening page is, and routes
@@ -1362,12 +1442,20 @@ func (w *watcher) routeTerminalLocked(a *agentWatch, agent *conversationv1.Agent
 		"agent_id": agent.GetValue(), "main": isMain, "failed": failure != nil,
 	})
 	w.sinks.Feed.OnAgentTerminal(w.ws, agent, turn, success, failure, place)
+	w.endAgentRunLocked(agent, isMain, turn, success, failure)
+}
+
+// endAgentRunLocked is what one agent's terminal does past the feed, whether
+// it arrived live (routeTerminalLocked) or first on a main watch's catch-up
+// page (routePageTerminalLocked): the footer and sidebar take it, the turn it
+// names ends when the agent is the main one, and the agent leaves live work.
+func (w *watcher) endAgentRunLocked(agent *conversationv1.AgentId, isMain bool, turn *ids.TurnID, success *conversationv1.AgentSuccess, failure *conversationv1.AgentFailure) {
 	w.sinks.Footer.OnAgentTerminal(w.ws, agent, turn, success, failure)
 	w.sinks.Sidebar.OnAgentTerminal(w.ws, agent, turn, success, failure)
 
 	switch {
 	case isMain && turn != nil:
-		w.log.Debug("daemon.sessionwatcher.routing_decision", "selected a session routing branch", dlog.Context{"function": "routeTerminalLocked", "branch": "case isMain && turn != nil"})
+		w.log.Debug("daemon.sessionwatcher.routing_decision", "selected a session routing branch", dlog.Context{"function": "endAgentRunLocked", "branch": "case isMain && turn != nil"})
 		how := turnCloseOf(success, failure)
 		w.log.Info("daemon.sessionwatcher.turn_ended", "the turn closed", dlog.Context{
 			"turn_id": string(*turn), "close": int(how),

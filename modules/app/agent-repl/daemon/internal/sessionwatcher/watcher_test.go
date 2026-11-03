@@ -2818,6 +2818,48 @@ func TestATurnStillInFlightAtAttachIsRecordedAtInfo(t *testing.T) {
 	}
 }
 
+// TestAMainWatchOpenedWithNoMarkOverAnAttachedTurnIsRecorded covers the one
+// opening no catch-up covers: a pure attach with no main mark opens tail_only,
+// so a turn the facts stood open closes on the tail alone, and the record says
+// so. A resume from a mark catches up, and records nothing.
+func TestAMainWatchOpenedWithNoMarkOverAnAttachedTurnIsRecorded(t *testing.T) {
+	tests := []struct {
+		name       string
+		opening    Opening
+		inFlight   string
+		wantRecord bool
+	}{
+		{name: "no mark and a turn in flight is recorded", opening: WorkspaceOpened(), inFlight: "turn-1", wantRecord: true},
+		{name: "no mark and no turn records nothing", opening: WorkspaceOpened()},
+		{
+			name:     "a mark and a turn in flight records nothing",
+			opening:  ResumeFrom(Pointers{Main: &conversationv1.HistoryPointer{Value: "ptr-main"}}),
+			inFlight: "turn-1",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := startHarness(t, Session{Opening: tt.opening}, nil)
+			h.session = h.client.nextSessionOpen(t)
+
+			// Act.
+			h.sendSessionStarted(t, sessionStarted(tt.inFlight))
+			h.client.nextAgentOpenFor(t, "")
+
+			// Assert.
+			if got := h.hasRecord("info", "daemon.sessionwatcher.main_watch_tail_only_at_attach"); got != tt.wantRecord {
+				t.Fatalf("tail_only-at-attach record logged = %v, want %v", got, tt.wantRecord)
+			}
+			if tt.wantRecord {
+				if got := h.recordContext(t, "info", "daemon.sessionwatcher.main_watch_tail_only_at_attach")["turn_id"]; got != tt.inFlight {
+					t.Fatalf("the record names turn %v, want %s", got, tt.inFlight)
+				}
+			}
+		})
+	}
+}
+
 // ---------------------------------------------------------------------------
 // A shim that dies on its own ends the turn it was running
 // ---------------------------------------------------------------------------
