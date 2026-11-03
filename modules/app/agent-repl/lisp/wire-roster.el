@@ -1424,16 +1424,35 @@ and the merges remediating out of line
 
 (defun agent-repl-wire-decode-roster-merge-queue-remediating (value)
   "Decode VALUE as `RosterMergeQueueRemediating'.
-A plist `(:subject SUBJECT :since-ms MS)': a merge remediating its failing
-tests out of line, and when it stepped aside."
+A plist `(:subject SUBJECT :since-ms MS :reason REASON)': a merge
+remediating out of line, when it stepped aside, and what it repairs
+\(`agent-repl-wire-decode-roster-merge-queue-remediating-reason')."
   (let ((object (agent-repl-wire--object "RosterMergeQueueRemediating" value)))
-    (agent-repl-wire--check-keys "RosterMergeQueueRemediating" object '(subject sinceMs))
+    (agent-repl-wire--check-keys "RosterMergeQueueRemediating" object '(subject sinceMs reason))
     (agent-repl-wire--decoded
      "RosterMergeQueueRemediating"
      (list :subject (agent-repl-wire--decode-message
                      "RosterMergeQueueRemediating" 'subject object
                      #'agent-repl-wire-decode-roster-merge-queue-subject)
-           :since-ms (agent-repl-wire--decode-int64 "RosterMergeQueueRemediating" 'sinceMs object)))))
+           :since-ms (agent-repl-wire--decode-int64 "RosterMergeQueueRemediating" 'sinceMs object)
+           :reason (agent-repl-wire--decode-message
+                    "RosterMergeQueueRemediating" 'reason object
+                    #'agent-repl-wire-decode-roster-merge-queue-remediating-reason)))))
+
+(defun agent-repl-wire-decode-roster-merge-queue-remediating-reason (value)
+  "Decode VALUE as `RosterMergeQueueRemediatingReason'.
+`:tests' for a merge fixing its failing tests, `:conflicts' for one
+resolving its rebase's conflicts, and nil for a reason set with no arm
+this build names."
+  (let ((object (agent-repl-wire--object "RosterMergeQueueRemediatingReason" value)))
+    (agent-repl-wire--check-keys "RosterMergeQueueRemediatingReason" object '(tests conflicts))
+    (plist-get
+     (agent-repl-wire--decode-oneof
+      "RosterMergeQueueRemediatingReason" 'reason object
+      `((tests :tests ,(lambda (v) (agent-repl-wire--decode-empty "RosterMergeQueueRemediatingTests" v)))
+        (conflicts :conflicts ,(lambda (v) (agent-repl-wire--decode-empty "RosterMergeQueueRemediatingConflicts" v))))
+      t)
+     :arm)))
 
 (defun agent-repl-wire-decode-roster-repo-section (value)
   "Decode VALUE as `RosterRepoSection'.
