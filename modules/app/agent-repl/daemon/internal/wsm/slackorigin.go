@@ -113,11 +113,9 @@ func (s *store) ClaimSlackOpening(ctx context.Context, id WorkspaceID) (string, 
 		if err != nil {
 			return err
 		}
-		n, err := res.RowsAffected()
-		if err != nil || n == 0 {
+		if claimed, err = touchedRow(res); err != nil || !claimed {
 			return err
 		}
-		claimed = true
 		return tx.QueryRowContext(ctx, `SELECT thread_url FROM workspace_slack_origins WHERE workspace_id = ?`, id).Scan(&url)
 	})
 	return url, claimed, err
@@ -144,8 +142,7 @@ func (s *store) ClaimSlackLinkPost(ctx context.Context, id WorkspaceID, link str
 		if err != nil {
 			return err
 		}
-		n, err := res.RowsAffected()
-		claimed = n == 1
+		claimed, err = touchedRow(res)
 		return err
 	})
 	if !claimed {
@@ -173,11 +170,12 @@ func (s *store) RecordSlackLinkPost(ctx context.Context, id WorkspaceID, link, t
 		if err != nil {
 			return err
 		}
-		if n, err := res.RowsAffected(); err != nil || n == 0 {
-			if err == nil {
-				err = fmt.Errorf("wsm: slack post of %s in %s: no unanswered claim to record a ts on", link, id)
-			}
+		touched, err := touchedRow(res)
+		if err != nil {
 			return err
+		}
+		if !touched {
+			return fmt.Errorf("wsm: slack post of %s in %s: no unanswered claim to record a ts on", link, id)
 		}
 		return tx.QueryRowContext(ctx, `SELECT merged FROM workspace_slack_link_posts WHERE workspace_id = ? AND url = ?`, id, link).Scan(&merged)
 	})
@@ -195,7 +193,7 @@ func (s *store) MarkSlackLinkMerged(ctx context.Context, id WorkspaceID, link st
 		if err != nil {
 			return err
 		}
-		if n, err := res.RowsAffected(); err != nil || n == 0 {
+		if touched, err := touchedRow(res); err != nil || !touched {
 			return err
 		}
 		return tx.QueryRowContext(ctx, `SELECT message_ts FROM workspace_slack_link_posts WHERE workspace_id = ? AND url = ?`, id, link).Scan(&ts)
