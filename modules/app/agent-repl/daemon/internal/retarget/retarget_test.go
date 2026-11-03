@@ -178,6 +178,13 @@ func TestRetargetNoticeNamesTheNewAndPreviousTargets(t *testing.T) {
 		}, want: []string{
 			"lands in the workspace `parent-ws`, whose checkout is `/wt/parent-ws`, as a top-level peer nobody coordinates",
 		}},
+		{name: "a restated landing that recorded the first geometry", change: func() wsm.ParentChange {
+			c := toParent()
+			c.Before = wsm.MergeTarget{Unrecorded: true, DefaultBranch: "master"}
+			return c
+		}, want: []string{
+			"used to land in no recorded place: no merge geometry was recorded for it, so it could not be landed, as a top-level peer nobody coordinates",
+		}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

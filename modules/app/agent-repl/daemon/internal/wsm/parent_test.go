@@ -535,3 +535,117 @@ func TestSetParentRefusesALandingTargetItCannotLandIn(t *testing.T) {
 		})
 	}
 }
+
+func TestSetParentRestatingTheLandingRecordsTheMissingCreationJob(t *testing.T) {
+	tests := []struct {
+		name string
+		// landing is the restated landing, of the stranded workspace.
+		landing       func(f parentFamily) *LandingChoice
+		wantTarget    func(f parentFamily) string
+		wantLandsInto string
+	}{
+		{name: "lands on the primary branch",
+			landing:    func(f parentFamily) *LandingChoice { return &LandingChoice{} },
+			wantTarget: func(f parentFamily) string { return f.repoDir }},
+		{name: "lands into a workspace",
+			landing:       func(f parentFamily) *LandingChoice { return &LandingChoice{Into: f.id("other")} },
+			wantTarget:    func(f parentFamily) string { return f.byName["other"].Dir },
+			wantLandsInto: "other"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			f := newParentFamily(t, s, "parent", "other")
+			stranded := registerInRepo(t, s, f.repoDir, "stranded", false)
+			f.byName["stranded"] = stranded
+
+			// Act
+			change, err := s.SetParent(context.Background(), stranded.ID, Retarget{KeepParent: true, Landing: tt.landing(f)})
+
+			// Assert
+			if err != nil {
+				t.Fatalf("SetParent: %v", err)
+			}
+			job, found, err := s.CreationJob(context.Background(), stranded.ID)
+			if err != nil || !found {
+				t.Fatalf("CreationJob = found %v, %v; want the recorded job", found, err)
+			}
+			want := MergeLayout{SourceBranch: "stranded", SourceDir: stranded.Dir, TargetDir: tt.wantTarget(f), Origin: LayoutOriginRestatedLanding}
+			if job.Layout != want {
+				t.Fatalf("layout = %+v, want %+v", job.Layout, want)
+			}
+			if !job.Materialized || job.OneShot || job.BaseRef != "" || !job.Hooks.Equal(DeployHooks{}) {
+				t.Fatalf("job = %+v, want materialized, no one-shot, no base, no hooks", job)
+			}
+			if !change.Before.Unrecorded || change.Before.Dir != "" || change.After.Unrecorded {
+				t.Fatalf("change = %+v, want an unrecorded before and a recorded after", change)
+			}
+			if ids.Optional(change.After.LandsInto) != ids.Optional(f.id(tt.wantLandsInto)) {
+				t.Fatalf("lands into %q, want %q", ids.Optional(change.After.LandsInto), tt.wantLandsInto)
+			}
+		})
+	}
+}
+
+func TestSetParentRestatingTheLandingRefusesAWorkspaceNoGeometryDescribes(t *testing.T) {
+	tests := []struct {
+		name    string
+		subject func(t *testing.T, s *store, f parentFamily) WorkspaceID
+	}{
+		{name: "the repository's main workspace",
+			subject: func(t *testing.T, s *store, f parentFamily) WorkspaceID { return registerMain(t, s, f.repoDir).ID }},
+		{name: "a workspace with no branch",
+			subject: func(t *testing.T, s *store, f parentFamily) WorkspaceID {
+				ws := registerInRepo(t, s, f.repoDir, "detached", false)
+				corrupt(t, s, `UPDATE workspaces SET branch = '' WHERE id = ?`, ws.ID)
+				return ws.ID
+			}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			f := newParentFamily(t, s, "parent")
+			subject := tt.subject(t, s, f)
+
+			// Act
+			_, err := s.SetParent(context.Background(), subject, Retarget{KeepParent: true, Landing: &LandingChoice{}})
+
+			// Assert
+			refused, ok := AsParentRefused(err)
+			if !ok || refused.Refusal != ParentNoMergeLayout {
+				t.Fatalf("SetParent = %v, want no_merge_layout", err)
+			}
+			if _, found, err := s.CreationJob(context.Background(), subject); err != nil || found {
+				t.Fatalf("CreationJob = found %v, %v; want none recorded", found, err)
+			}
+		})
+	}
+}
+
+func TestRestoreParentRemovesTheCreationJobARestatedLandingRecorded(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	f := newParentFamily(t, s, "parent")
+	stranded := registerInRepo(t, s, f.repoDir, "stranded", false)
+	change, err := s.SetParent(context.Background(), stranded.ID, Retarget{Parent: f.id("parent"), Landing: &LandingChoice{}})
+	if err != nil {
+		t.Fatalf("SetParent: %v", err)
+	}
+
+	// Act
+	stale, err := s.RestoreParent(context.Background(), change)
+
+	// Assert
+	if err != nil || stale {
+		t.Fatalf("RestoreParent = stale %v, %v; want it undone", stale, err)
+	}
+	if _, found, err := s.CreationJob(context.Background(), stranded.ID); err != nil || found {
+		t.Fatalf("CreationJob = found %v, %v; want the recorded job removed", found, err)
+	}
+	ws, err := s.Workspace(context.Background(), stranded.ID)
+	if err != nil || ws.Parent != nil {
+		t.Fatalf("Workspace = parent %q, %v; want the prior top-level standing", ids.Optional(ws.Parent), err)
+	}
+}

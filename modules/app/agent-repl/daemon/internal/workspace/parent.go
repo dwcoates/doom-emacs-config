@@ -51,6 +51,7 @@ func (v *verbs) SetParent(ctx context.Context, ws ids.WorkspaceID, retarget wsm.
 	log.Info(opSetParent, "recorded the workspace's new parent and merge target", dlog.Context{
 		"retarget": retarget.String(), "parent": ids.Optional(change.After.Parent), "target_dir": change.After.Dir,
 		"previous_parent": ids.Optional(change.Before.Parent), "previous_target_dir": change.Before.Dir,
+		"recorded_layout": change.Before.Unrecorded,
 	})
 	v.republishRegistry(ctx, log, opSetParent)
 	return change, nil

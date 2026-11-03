@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/wsm"
 )
@@ -46,6 +47,38 @@ func TestSetParentRecordsTheRetargetAndRepublishesTheRoster(t *testing.T) {
 	}
 	if !hasLogRecord(f, "info", opSetParent) {
 		t.Fatalf("records = %+v, want the retarget recorded at info", f.log.logger.Records())
+	}
+}
+
+func TestSetParentRecordsWhetherItRecordedTheMergeGeometry(t *testing.T) {
+	tests := []struct {
+		name       string
+		unrecorded bool
+	}{
+		{name: "a retarget of recorded geometry", unrecorded: false},
+		{name: "a restated landing that recorded the first geometry", unrecorded: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+			f.workspace("w1", t.TempDir())
+			change := retargetChange("w1")
+			change.Before.Unrecorded = tt.unrecorded
+			f.db.setParentChange = change
+
+			// Act
+			_, err := f.verbs.SetParent(context.Background(), "w1", wsm.Retarget{KeepParent: true, Landing: &wsm.LandingChoice{}})
+
+			// Assert
+			if err != nil {
+				t.Fatalf("SetParent: %v", err)
+			}
+			record, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Message: "recorded the workspace's new parent and merge target"})
+			if !ok || record.Context["recorded_layout"] != tt.unrecorded {
+				t.Fatalf("records = %+v, want recorded_layout %v", f.log.logger.Records(), tt.unrecorded)
+			}
+		})
 	}
 }
 

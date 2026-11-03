@@ -142,7 +142,10 @@ func (s *Service) notify(ctx context.Context, change wsm.ParentChange) (ids.Turn
 // another repository when it is), or a top-level peer.
 func Describe(target wsm.MergeTarget) string {
 	lands := fmt.Sprintf("the repository's main checkout at `%s`, on its default branch `%s`", target.Dir, target.DefaultBranch)
-	if target.LandsInto != nil {
+	switch {
+	case target.Unrecorded:
+		lands = "no recorded place: no merge geometry was recorded for it, so it could not be landed"
+	case target.LandsInto != nil:
 		lands = fmt.Sprintf("the workspace `%s`, whose checkout is `%s`", target.LandsIntoName, target.Dir)
 	}
 	switch {
