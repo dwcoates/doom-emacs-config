@@ -1,5 +1,7 @@
 # The sidebar's one-shot subsection
 
+> RETIRED 2026-11-03: the one-shot subsection is gone, and one-shots file themselves into subsections like any other workspace. Changes 1 to 4 below are undone, and changes 5 and 6 stand. See `2026-11-03-one-shot-subsection-retired.md`.
+
 The owner (2026-10-24): "setting or unsetting a workspace as a one-shot in daemon should add that workspace to the one-shot subsection for the repository (creating if it doesnt exist) in the sidebar's OPEN section. when the one-shot subsection is empty, it should remove itself (it's special like that). the one-shot subsection should always be the last subsection of the workspace (its special like that)". "Last subsection of the workspace" means the last entry of the repository's section.
 
 This change runs as a one-shot workspace with contract changes pre-approved by the owner, so the design was settled here and landed directly, without the interactive sequence.
