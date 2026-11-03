@@ -2187,7 +2187,7 @@ func TestSubsectionsReadsANamedWorkspacesRepository(t *testing.T) {
 	}
 }
 
-func TestPlaceFilesTheWorkspacesKeepingTheirOneShotMarks(t *testing.T) {
+func TestPlaceFilesTheWorkspacesAtTheSubsectionsEnd(t *testing.T) {
 	// Arrange
 	f := newCLIFixture()
 	f.client.arrangement = subsectionsArrangement()
@@ -2201,10 +2201,9 @@ func TestPlaceFilesTheWorkspacesKeepingTheirOneShotMarks(t *testing.T) {
 	}
 	place := only[*agentreplv1.ArrangeSidebarRequest](t, f).GetPlaceWorkspaces()
 	want := &agentreplv1.ArrangePlaceWorkspaces{
-		Workspaces:  []*workspacev1.WorkspaceRef{{Id: "ws-caller", Dir: "/wt/caller"}, {Id: "ws-peer", Dir: "/wt/peer"}},
-		Into:        &agentreplv1.ArrangePlaceWorkspaces_Subsection{Subsection: &agentreplv1.SubsectionRef{Id: "sub-later"}},
-		At:          &agentreplv1.ArrangePlaceWorkspaces_End{End: &agentreplv1.ArrangeEnd{}},
-		KeepOneShot: true,
+		Workspaces: []*workspacev1.WorkspaceRef{{Id: "ws-caller", Dir: "/wt/caller"}, {Id: "ws-peer", Dir: "/wt/peer"}},
+		Into:       &agentreplv1.ArrangePlaceWorkspaces_Subsection{Subsection: &agentreplv1.SubsectionRef{Id: "sub-later"}},
+		At:         &agentreplv1.ArrangePlaceWorkspaces_End{End: &agentreplv1.ArrangeEnd{}},
 	}
 	if !proto.Equal(place, want) {
 		t.Fatalf("placement = %v, want %v", place, want)

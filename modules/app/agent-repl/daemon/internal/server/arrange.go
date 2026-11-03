@@ -72,7 +72,7 @@ func (s *server) ArrangeSidebar(
 			answered bool
 			cerr     *connect.Error
 		)
-		answered, cerr, err = s.placeWorkspaces(ctx, rpc, resp, []*workspacev1.WorkspaceRef{place.GetWorkspace()}, place.GetSubsection(), place.GetBefore(), place.GetBeforeSubsection(), oneShotMarks(place.GetKeepOneShot()))
+		answered, cerr, err = s.placeWorkspaces(ctx, rpc, resp, []*workspacev1.WorkspaceRef{place.GetWorkspace()}, place.GetSubsection(), place.GetBefore(), place.GetBeforeSubsection())
 		if answered {
 			return answer(resp, cerr)
 		}
@@ -82,7 +82,7 @@ func (s *server) ArrangeSidebar(
 			answered bool
 			cerr     *connect.Error
 		)
-		answered, cerr, err = s.placeWorkspaces(ctx, rpc, resp, place.GetWorkspaces(), place.GetSubsection(), place.GetBefore(), place.GetBeforeSubsection(), oneShotMarks(place.GetKeepOneShot()))
+		answered, cerr, err = s.placeWorkspaces(ctx, rpc, resp, place.GetWorkspaces(), place.GetSubsection(), place.GetBefore(), place.GetBeforeSubsection())
 		if answered {
 			return answer(resp, cerr)
 		}
@@ -170,18 +170,9 @@ func (s *server) moveRepository(
 	return false, nil, s.deps.Verbs.MoveRepository(ctx, repository.ID, before)
 }
 
-// oneShotMarks is a placement's keep_one_shot as the store's fate for the
-// placed families' one-shot marks.
-func oneShotMarks(keep bool) wsm.OneShotMarks {
-	if keep {
-		return wsm.KeepOneShotMarks
-	}
-	return wsm.ClearOneShotMarks
-}
-
 // placeWorkspaces resolves the placed workspaces and their anchor (a
 // workspace BEFORE, a subsection BEFORE_SUBSECTION, or neither: the end),
-// then places them as one block, their one-shot marks as MARKS says.
+// then places them as one block.
 // `answered` says a resolution refused and the caller answers at once with
 // cerr; otherwise err is the verb's.
 func (s *server) placeWorkspaces(
@@ -192,7 +183,6 @@ func (s *server) placeWorkspaces(
 	into *agentreplv1.SubsectionRef,
 	before *workspacev1.WorkspaceRef,
 	beforeSubsection *agentreplv1.SubsectionRef,
-	marks wsm.OneShotMarks,
 ) (answered bool, cerr *connect.Error, err error) {
 	named := refs
 	if before != nil {
@@ -218,7 +208,7 @@ func (s *server) placeWorkspaces(
 		id := ids.SubsectionID(into.GetId())
 		destination = &id
 	}
-	return false, nil, s.deps.Verbs.PlaceWorkspaces(ctx, placed, destination, at, marks)
+	return false, nil, s.deps.Verbs.PlaceWorkspaces(ctx, placed, destination, at)
 }
 
 // GetSidebarArrangement answers the repository grouping's arrangement, for
@@ -241,11 +231,6 @@ func (s *server) GetSidebarArrangement(
 			Name:       repo.Repository.Name,
 		}
 		for _, entry := range repo.Entries {
-			if entry.OneShot != nil {
-				out.Entries = append(out.Entries, &agentreplv1.ArrangedEntry{Entry: &agentreplv1.ArrangedEntry_OneShot{
-					OneShot: &agentreplv1.ArrangedOneShot{Workspaces: arrangedWorkspaces(entry.OneShot)}}})
-				continue
-			}
 			if entry.Subsection == nil {
 				out.Entries = append(out.Entries, &agentreplv1.ArrangedEntry{Entry: &agentreplv1.ArrangedEntry_Workspace{
 					Workspace: arrangedWorkspaces([]sidebar.ArrangedWorkspace{entry.Workspace})[0]}})

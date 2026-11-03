@@ -169,13 +169,9 @@ func withoutMainWorktrees(t *testing.T, s *store, all []Workspace) []Workspace {
 // worktree.
 func isMainWorktree(t *testing.T, s *store, id WorkspaceID) bool {
 	t.Helper()
-	var main bool
-	if err := s.write(context.Background(), "test.is_main_worktree", nil, func(ctx context.Context, tx *sql.Tx) error {
-		var err error
-		main, err = isMainWorkspace(ctx, tx, id)
-		return err
-	}); err != nil {
-		t.Fatalf("isMainWorkspace(%s): %v", id, err)
+	var dir, repoDir string
+	if err := s.db().QueryRowContext(context.Background(), `SELECT workspaces.dir, repositories.dir FROM workspaces JOIN repositories ON repositories.id = workspaces.repo_id WHERE workspaces.id = ?`, id).Scan(&dir, &repoDir); err != nil {
+		t.Fatalf("read %s's main-worktree standing: %v", id, err)
 	}
-	return main
+	return IsMainWorktree(dir, repoDir)
 }

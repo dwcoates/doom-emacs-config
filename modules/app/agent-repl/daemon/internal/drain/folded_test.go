@@ -276,7 +276,7 @@ func (h *harness) inCollapsedSubsection(t *testing.T, ws ids.WorkspaceID) {
 	if err != nil {
 		t.Fatalf("CreateSubsection: %v", err)
 	}
-	if err := h.db.PlaceWorkspaces(ctx, []ids.WorkspaceID{ws}, &sub.ID, wsm.AtEnd{}, wsm.ClearOneShotMarks); err != nil {
+	if err := h.db.PlaceWorkspaces(ctx, []ids.WorkspaceID{ws}, &sub.ID, wsm.AtEnd{}); err != nil {
 		t.Fatalf("PlaceWorkspaces: %v", err)
 	}
 	if err := h.db.SetSubsectionFolded(ctx, sub.ID, true); err != nil {

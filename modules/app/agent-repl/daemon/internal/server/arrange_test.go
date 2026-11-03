@@ -102,37 +102,21 @@ func TestArrangeSidebarHandsEachChangeToItsVerb(t *testing.T) {
 		{name: "move a repository before another", req: moveRepository("repo-2", repoRef("repo-1")), want: "MoveRepository repo-2 repo-1"},
 		{name: "move a repository to the end", req: moveRepository("repo-1", nil), want: "MoveRepository repo-1 "},
 		{name: "place a workspace before another in a subsection", req: placeWorkspace(ref(), "sub-1", other),
-			want: "PlaceWorkspaces [" + string(testWorkspaceID) + "] sub-1 before workspace ws-2 clear"},
+			want: "PlaceWorkspaces [" + string(testWorkspaceID) + "] sub-1 before workspace ws-2"},
 		{name: "place a workspace last among the unsectioned", req: placeWorkspace(ref(), "", nil),
-			want: "PlaceWorkspaces [" + string(testWorkspaceID) + "]  end clear"},
+			want: "PlaceWorkspaces [" + string(testWorkspaceID) + "]  end"},
 		{name: "place a workspace before a subsection", req: placeBeforeSubsection(ref(), "sub-2"),
-			want: "PlaceWorkspaces [" + string(testWorkspaceID) + "]  before subsection sub-2 clear"},
-		{name: "place several workspaces before a subsection", want: "PlaceWorkspaces [ws-2]  before subsection sub-2 clear",
+			want: "PlaceWorkspaces [" + string(testWorkspaceID) + "]  before subsection sub-2"},
+		{name: "place several workspaces before a subsection", want: "PlaceWorkspaces [ws-2]  before subsection sub-2",
 			req: &agentreplv1.ArrangeSidebarRequest{Change: &agentreplv1.ArrangeSidebarRequest_PlaceWorkspaces{
 				PlaceWorkspaces: &agentreplv1.ArrangePlaceWorkspaces{
 					Workspaces: []*workspacev1.WorkspaceRef{other},
 					Into:       &agentreplv1.ArrangePlaceWorkspaces_NoSubsection{NoSubsection: &agentreplv1.ArrangeNoSubsection{}},
 					At:         &agentreplv1.ArrangePlaceWorkspaces_BeforeSubsection{BeforeSubsection: subRef("sub-2")},
 				}}}},
-		{name: "place a workspace keeping its one-shot marks", want: "PlaceWorkspaces [" + string(testWorkspaceID) + "] sub-1 end keep",
-			req: &agentreplv1.ArrangeSidebarRequest{Change: &agentreplv1.ArrangeSidebarRequest_PlaceWorkspace{
-				PlaceWorkspace: &agentreplv1.ArrangePlaceWorkspace{
-					Workspace:   ref(),
-					Into:        &agentreplv1.ArrangePlaceWorkspace_Subsection{Subsection: subRef("sub-1")},
-					At:          &agentreplv1.ArrangePlaceWorkspace_End{End: endPlace()},
-					KeepOneShot: true,
-				}}}},
-		{name: "place several workspaces keeping their one-shot marks", want: "PlaceWorkspaces [ws-2] sub-1 end keep",
-			req: &agentreplv1.ArrangeSidebarRequest{Change: &agentreplv1.ArrangeSidebarRequest_PlaceWorkspaces{
-				PlaceWorkspaces: &agentreplv1.ArrangePlaceWorkspaces{
-					Workspaces:  []*workspacev1.WorkspaceRef{other},
-					Into:        &agentreplv1.ArrangePlaceWorkspaces_Subsection{Subsection: subRef("sub-1")},
-					At:          &agentreplv1.ArrangePlaceWorkspaces_End{End: endPlace()},
-					KeepOneShot: true,
-				}}}},
 		{name: "create an agent's subsection", want: "CreateAgentSubsection " + string(testWorkspaceID) + " auth [" + string(testWorkspaceID) + " ws-2]",
 			req: createAgentSubsection(ref(), "auth", ref(), other)},
-		{name: "place several workspaces as one block", want: "PlaceWorkspaces [ws-2 " + string(testWorkspaceID) + "] sub-1 end clear",
+		{name: "place several workspaces as one block", want: "PlaceWorkspaces [ws-2 " + string(testWorkspaceID) + "] sub-1 end",
 			req: &agentreplv1.ArrangeSidebarRequest{Change: &agentreplv1.ArrangeSidebarRequest_PlaceWorkspaces{
 				PlaceWorkspaces: &agentreplv1.ArrangePlaceWorkspaces{
 					Workspaces: []*workspacev1.WorkspaceRef{other, ref()},

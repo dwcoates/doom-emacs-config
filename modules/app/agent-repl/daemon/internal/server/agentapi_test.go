@@ -940,8 +940,8 @@ func TestSetWorkspaceOneShotHandsTheVerbItsAskAndAnswersTheDirective(t *testing.
 }
 
 func TestSetWorkspaceOneShotAnswersTheRosterRevisionThatCarriesTheChange(t *testing.T) {
-	// Arrange -- a sidebar that drew a drag into the one-shot subsection
-	// holds its drawing until a push at this revision.
+	// Arrange -- every roster at this revision draws the row's one-shot
+	// mark as asked.
 	h := newHarness(t)
 	h.Deps.Sidebar.(*fakeSidebar).revision = 42
 

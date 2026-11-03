@@ -55,9 +55,8 @@ func (v *verbs) CreateSubsection(ctx context.Context, repo ids.RepoID, name stri
 
 // CreateAgentSubsection adds a subsection named NAME, created by workspace
 // CREATOR's agent, at the bottom of its MEMBERS' repository, with their
-// families placed in it in that order, keeping their one-shot marks. It is
-// deleted by the write that leaves it with no open workspace
-// (wsm.CreateAgentSubsection). The creator and every member must be this
+// families placed in it in that order. It is deleted by the write that leaves
+// it with no open workspace (wsm.CreateAgentSubsection). The creator and every member must be this
 // daemon's to serve, as every per-workspace verb's are.
 func (v *verbs) CreateAgentSubsection(ctx context.Context, creator ids.WorkspaceID, name string, members []ids.WorkspaceID) (wsm.Subsection, error) {
 	for _, id := range append([]ids.WorkspaceID{creator}, members...) {
@@ -118,10 +117,10 @@ func (v *verbs) MoveRepository(ctx context.Context, id ids.RepoID, before *ids.R
 }
 
 // PlaceWorkspaces puts root workspaces WS, in that order and with their
-// families, into subsection INTO (nil: none) as one block at AT, clearing or
-// keeping their one-shot marks as MARKS says. Every workspace named must be
-// this daemon's to serve, as every per-workspace verb's are.
-func (v *verbs) PlaceWorkspaces(ctx context.Context, ws []ids.WorkspaceID, into *ids.SubsectionID, at wsm.Anchor, marks wsm.OneShotMarks) error {
+// families, into subsection INTO (nil: none) as one block at AT. Every
+// workspace named must be this daemon's to serve, as every per-workspace
+// verb's are.
+func (v *verbs) PlaceWorkspaces(ctx context.Context, ws []ids.WorkspaceID, into *ids.SubsectionID, at wsm.Anchor) error {
 	named := slices.Clone(ws)
 	if before, ok := at.(wsm.BeforeWorkspace); ok {
 		named = append(named, before.ID)
@@ -131,9 +130,9 @@ func (v *verbs) PlaceWorkspaces(ctx context.Context, ws []ids.WorkspaceID, into 
 			return err
 		}
 	}
-	log := v.deps.Log.Global().With(dlog.Context{"workspaces": ws, "into": ids.Optional(into), "at": wsm.AnchorField(at), "one_shot_marks": marks.String()})
+	log := v.deps.Log.Global().With(dlog.Context{"workspaces": ws, "into": ids.Optional(into), "at": wsm.AnchorField(at)})
 	return v.arrange(ctx, log, opPlaceWorkspace, "place the workspaces", func() error {
-		return v.deps.DB.PlaceWorkspaces(ctx, ws, into, at, marks)
+		return v.deps.DB.PlaceWorkspaces(ctx, ws, into, at)
 	})
 }
 

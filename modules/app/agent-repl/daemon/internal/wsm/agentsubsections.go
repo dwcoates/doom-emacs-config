@@ -51,8 +51,7 @@ WHERE created_by IS NOT NULL
 // CreateAgentSubsection records a subsection named NAME (trimmed), created by
 // workspace CREATOR's agent, after the members' repository's other
 // subsections, and places the families of MEMBERS in it, in that order, as
-// one write, keeping their one-shot marks (an agent filing workspaces is no
-// drag). The members must all be of one repository (ErrOtherRepository) and
+// one write. The members must all be of one repository (ErrOtherRepository) and
 // at least one must be open (ErrNoOpenConstituent). A blank name is
 // ErrBlankSubsectionName, an unknown creator or member ErrNotFound, and no
 // member, or one twice, is malformed.
@@ -86,7 +85,7 @@ func (s *store) CreateAgentSubsection(ctx context.Context, creator WorkspaceID, 
 			return err
 		}
 		// A subsection just made is open, so the placement expands nothing.
-		if _, err := placeFamilies(ctx, tx, members, &out.ID, AtEnd{}, KeepOneShotMarks); err != nil {
+		if _, err := placeFamilies(ctx, tx, members, &out.ID, AtEnd{}); err != nil {
 			return err
 		}
 		empty, err := listRows(ctx, tx, emptyAgentSubsectionsQuery+` AND id = ?`, scanSubsection, out.ID)

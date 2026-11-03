@@ -32,18 +32,12 @@ type repoArrangement struct {
 }
 
 // bucket is one run of a repository's workspaces: consecutive families in no
-// subsection (subsection nil, oneShot false), one subsection's workspaces, or
-// the repository's one-shot families (oneShot), in roster order. Two
-// unsectioned runs are never adjacent: a run ends only where a subsection
-// stands.
+// subsection (subsection nil), or one subsection's workspaces, in roster
+// order. Two unsectioned runs are never adjacent: a run ends only where a
+// subsection stands. A one-shot is filed like any other workspace: its mark
+// draws no bucket of its own (owner request, 2026-11-03).
 type bucket struct {
 	subsection *wsm.Subsection
-	// oneShot marks the repository's ONE-SHOT bucket
-	// (frontend.v1.RosterSubsectionOneShot): every family of the repository
-	// holding an open one-shot member, except the main workspace's family
-	// (oneShotHeld). It is always the repository's last bucket, and present
-	// only when it has workspaces.
-	oneShot    bool
 	workspaces []wsm.Workspace
 }
 
@@ -55,15 +49,9 @@ type bucket struct {
 func arrange(reg Registry, workspaces []wsm.Workspace) ([]repoArrangement, map[ids.RepoID][]wsm.Workspace) {
 	bySubsection := map[ids.SubsectionID][]wsm.Workspace{}
 	unsectioned := map[ids.RepoID][]wsm.Workspace{}
-	held := oneShotHeld(workspaces, reg.Repositories)
-	oneShot := map[ids.RepoID][]wsm.Workspace{}
 	section := sectionRepos(workspaces)
 	for _, ws := range workspaces {
 		repo := section[ws.ID]
-		if held[ws.ID] {
-			oneShot[repo] = append(oneShot[repo], ws)
-			continue
-		}
 		if ws.Subsection != nil {
 			bySubsection[*ws.Subsection] = append(bySubsection[*ws.Subsection], ws)
 			continue
@@ -77,15 +65,8 @@ func arrange(reg Registry, workspaces []wsm.Workspace) ([]repoArrangement, map[i
 	var out []repoArrangement
 	for _, repo := range sortRepositories(reg.Repositories) {
 		placed := repoArrangement{repo: repo, buckets: walkBuckets(unsectioned[repo.ID], subsections[repo.ID], bySubsection)}
-		if members := oneShot[repo.ID]; len(members) > 0 {
-			placed.buckets = append(placed.buckets, bucket{oneShot: true, workspaces: sortWorkspaces(members)})
-		}
 		delete(unsectioned, repo.ID)
-		delete(oneShot, repo.ID)
 		out = append(out, placed)
-	}
-	for repo, members := range oneShot {
-		unsectioned[repo] = append(unsectioned[repo], members...)
 	}
 	return out, unsectioned
 }
@@ -107,51 +88,6 @@ func sectionRepos(workspaces []wsm.Workspace) map[ids.WorkspaceID]ids.RepoID {
 		out[ws.ID] = repoOf[root[ws.ID]]
 	}
 	return out
-}
-
-// oneShotHeld answers which of WORKSPACES the one-shot subsection holds: every
-// member of a family in which some OPEN member is marked one-shot
-// (wsm.Workspace.OneShot), unless the family's root is its repository's MAIN
-// workspace (wsm.IsMainWorktree against REPOSITORIES).
-//
-// THE MARK IS THE ONLY FACT. Nothing about the subsection is stored, so every
-// path that sets or clears a mark moves the family's rows, and a boot draws
-// them from the marks it reads. THE FAMILY IS THE UNIT, because a family never
-// splits across subsections: one marked member brings its whole family, as
-// placing one member moves its family (ArrangePlaceWorkspace). A closed or
-// hidden member's mark does not count, since a finished one-shot keeps its
-// mark once it closes.
-//
-// THE MAIN WORKSPACE'S FAMILY IS NEVER HELD. The main workspace is never a
-// one-shot itself, so its family's marks are only ever its children's, and
-// those children stay nested under it as ordinary children where it stands.
-// They are still one-shots in every other respect (the completion directive,
-// the unattended landing): only the sidebar's grouping ignores their marks.
-func oneShotHeld(workspaces []wsm.Workspace, repositories []wsm.Repository) map[ids.WorkspaceID]bool {
-	root := familyRoots(workspaces)
-	repoDir := make(map[ids.RepoID]string, len(repositories))
-	for _, repo := range repositories {
-		repoDir[repo.ID] = repo.Dir
-	}
-	mainRoot := map[ids.WorkspaceID]bool{}
-	for _, ws := range workspaces {
-		if root[ws.ID] == ws.ID && wsm.IsMainWorktree(ws.Dir, repoDir[ws.Repo]) {
-			mainRoot[ws.ID] = true
-		}
-	}
-	marked := map[ids.WorkspaceID]bool{}
-	for _, ws := range workspaces {
-		if ws.OneShot && ws.ListedOpen() && !mainRoot[root[ws.ID]] {
-			marked[root[ws.ID]] = true
-		}
-	}
-	held := map[ids.WorkspaceID]bool{}
-	for _, ws := range workspaces {
-		if marked[root[ws.ID]] {
-			held[ws.ID] = true
-		}
-	}
-	return held
 }
 
 // walkBuckets files one repository's UNSECTIONED workspaces and its SUBS'
