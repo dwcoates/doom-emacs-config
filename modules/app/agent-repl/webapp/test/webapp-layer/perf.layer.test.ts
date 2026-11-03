@@ -189,7 +189,10 @@ it(
       const send = typeInto("!hold");
       await app.settle();
       send.click();
-      await awaitDrawn(app, "the footer to report a running turn", () => footerArm() === "thinking");
+      // `working` is the STATUS arm of a running turn (frontend.v1.FooterStatus),
+      // which is what `data-arm` carries; `thinking` is one of its substatuses
+      // and rides `data-substatus`, so a wait for it here could never end.
+      await awaitDrawn(app, "the footer to report a running turn", () => footerArm() === "working");
 
       // The footer's own interrupt, as a user reaches it.
       const interrupt = app.$(".footer-clock [data-interrupt]");
