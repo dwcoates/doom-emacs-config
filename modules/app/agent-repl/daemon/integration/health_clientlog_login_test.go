@@ -140,7 +140,7 @@ func TestRestoringThePromptsDirClosesTheFault(t *testing.T) {
 	}
 
 	// Act: the directory comes back, and a brief read through it succeeds.
-	harness.CopyPrompts(t, d.PromptsDir)
+	harness.LinkPrompts(t, d.PromptsDir)
 	if _, err := d.Client().RequestCommandSupport(d.Ctx(), connect.NewRequest(&agentreplv1.RequestCommandSupportRequest{
 		Workspace: ws,
 		Command:   "/status2",
@@ -181,7 +181,7 @@ func TestADaemonRestartDoesNotReopenAClosedPromptsDirFault(t *testing.T) {
 	})); err == nil {
 		t.Log("RequestCommandSupport succeeded before the dir was restored; the fault is asserted below regardless")
 	}
-	harness.CopyPrompts(t, d.PromptsDir)
+	harness.LinkPrompts(t, d.PromptsDir)
 	if _, err := d.Client().RequestCommandSupport(d.Ctx(), connect.NewRequest(&agentreplv1.RequestCommandSupportRequest{
 		Workspace: ws,
 		Command:   "/status2",

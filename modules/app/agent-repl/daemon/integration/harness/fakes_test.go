@@ -247,3 +247,89 @@ func TestFakeLidIsAStateSocketNamedLidStartingOpen(t *testing.T) {
 		t.Fatalf("lid socket %s in state %q, want %s open", l.Path, l.state, filepath.Join(dir, "lid"))
 	}
 }
+
+func TestLinkPromptsStagesEveryShippedPrompt(t *testing.T) {
+	// Arrange
+	src := filepath.Join(RepoRoot(t), "prompts")
+	want, err := os.ReadDir(src)
+	if err != nil {
+		t.Fatalf("read %s: %v", src, err)
+	}
+
+	// Act
+	dst := LinkPrompts(t, filepath.Join(t.TempDir(), "prompts"))
+
+	// Assert
+	for _, e := range want {
+		if e.IsDir() {
+			continue
+		}
+		shipped, _ := os.ReadFile(filepath.Join(src, e.Name()))
+		staged, err := os.ReadFile(filepath.Join(dst, e.Name()))
+		if err != nil || string(staged) != string(shipped) {
+			t.Fatalf("staged %s = (%d bytes, %v), want the shipped %d bytes", e.Name(), len(staged), err, len(shipped))
+		}
+	}
+}
+
+func TestLinkPromptsRefusesAWriteIntoALinkedPrompt(t *testing.T) {
+	// Arrange
+	dst := LinkPrompts(t, filepath.Join(t.TempDir(), "prompts"))
+	entries, _ := os.ReadDir(dst)
+	path := filepath.Join(dst, entries[0].Name())
+
+	// Act
+	err := os.WriteFile(path, []byte("changed in place"), 0o644)
+
+	// Assert: the write would have changed every daemon's prompt at once.
+	if !errors.Is(err, os.ErrPermission) {
+		t.Fatalf("an in-place write into a linked prompt = %v, want it refused", err)
+	}
+}
+
+func TestReplacePromptChangesOnlyItsOwnDirectory(t *testing.T) {
+	// Arrange
+	mine := LinkPrompts(t, filepath.Join(t.TempDir(), "mine"))
+	theirs := LinkPrompts(t, filepath.Join(t.TempDir(), "theirs"))
+	entries, _ := os.ReadDir(mine)
+	name := entries[0].Name()
+	before, _ := os.ReadFile(filepath.Join(theirs, name))
+
+	// Act
+	ReplacePrompt(t, filepath.Join(mine, name), "a brief of this test's own")
+
+	// Assert
+	got, _ := os.ReadFile(filepath.Join(mine, name))
+	after, _ := os.ReadFile(filepath.Join(theirs, name))
+	if string(got) != "a brief of this test's own" || string(after) != string(before) {
+		t.Fatalf("mine = %q, theirs changed = %v; want only mine replaced", got, string(after) != string(before))
+	}
+}
+
+func TestLinkPromptsStagesReadOnlyPromptsOnAnotherFilesystem(t *testing.T) {
+	// Arrange: /tmp, which is another filesystem than a test run's RAM-disk
+	// root (and the same one outside a run, where the prompts are linked).
+	scratch, err := os.MkdirTemp("/tmp", "arprompts")
+	if err != nil {
+		t.Fatalf("mkdir /tmp scratch: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(scratch) })
+
+	// Act
+	dst := LinkPrompts(t, filepath.Join(scratch, "prompts"))
+
+	// Assert: the shipped content, and as read-only as the template.
+	entries, _ := os.ReadDir(dst)
+	if len(entries) == 0 {
+		t.Fatal("LinkPrompts staged nothing on the other filesystem")
+	}
+	path := filepath.Join(dst, entries[0].Name())
+	shipped, _ := os.ReadFile(filepath.Join(RepoRoot(t), "prompts", entries[0].Name()))
+	staged, _ := os.ReadFile(path)
+	if string(staged) != string(shipped) {
+		t.Fatalf("staged %s differs from the shipped prompt", entries[0].Name())
+	}
+	if err := os.WriteFile(path, []byte("x"), 0o644); !errors.Is(err, os.ErrPermission) {
+		t.Fatalf("an in-place write into a staged prompt = %v, want it refused", err)
+	}
+}
