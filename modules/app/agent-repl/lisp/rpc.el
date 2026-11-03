@@ -50,6 +50,7 @@
 
 ;; The codec.  Defined in wire-*.el; named, never implemented, here.
 (declare-function agent-repl-wire-encode-register-workspace-request "wire-host" (request))
+(declare-function agent-repl-wire-encode-register-workspaces-request "wire-host" (request))
 (declare-function agent-repl-wire-encode-retry-vendor-error-request "wire-verbs" (request))
 (declare-function agent-repl-wire-decode-retry-vendor-error-response "wire-verbs" (json))
 (declare-function agent-repl-wire-encode-send-hidden-keepalives-request "wire-verbs" (&optional request))
@@ -59,6 +60,7 @@
 (declare-function agent-repl-wire-encode-update-remote-control-mode-request "wire-verbs" (request))
 (declare-function agent-repl-wire-decode-update-remote-control-mode-response "wire-verbs" (json))
 (declare-function agent-repl-wire-decode-register-workspace-response "wire-host" (alist))
+(declare-function agent-repl-wire-decode-register-workspaces-response "wire-host" (alist))
 (declare-function agent-repl-wire-encode-create-thread-request "wire-chat" (request))
 (declare-function agent-repl-wire-decode-create-thread-response "wire-chat" (alist))
 (declare-function agent-repl-wire-encode-select-workspace-request "wire-host" (request))
@@ -296,6 +298,16 @@ Blocking form: returns the decoded response plist, or signals
   "Hand the daemon a directory and receive the workspace identity it mints.
 Idempotent by dir: re-registering after a reconnect or a daemon restart
 reconciles to the same ref and answers one success.")
+
+(agent-repl-rpc--defverb agent-repl-rpc-register-workspaces
+  "RegisterWorkspaces"
+  agent-repl-wire-encode-register-workspaces-request
+  agent-repl-wire-decode-register-workspaces-response
+  "Re-announce every directory Emacs holds in one call, one outcome per dir.
+The daemon registers them one after another, each as RegisterWorkspace
+would, and republishes the roster once: the link edges\=' walk, which as
+one RegisterWorkspace per workspace raced a booting daemon\='s one state
+database connection.")
 
 (agent-repl-rpc--defverb agent-repl-rpc-select-workspace
   "SelectWorkspace"

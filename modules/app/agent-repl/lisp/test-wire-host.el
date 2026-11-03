@@ -105,6 +105,43 @@
                   "{\"pending\":{}}")
                  '("RegisterWorkspaceResponse" pending "unknown field"))))
 
+;;;; ---- RegisterWorkspaces ----
+
+(ert-deftest agent-repl-test-wire-host-register-workspaces-request-carries-every-path ()
+  "RegisterWorkspaces sends every re-announced PATH, in order, in one call."
+  (should (equal (agent-repl-test-wire-host--quiet
+                   (json-serialize
+                    (agent-repl-wire-encode-register-workspaces-request
+                     '(:dirs ("/w/a" "/w/b")))))
+                 "{\"dirs\":[\"/w/a\",\"/w/b\"]}")))
+
+(ert-deftest agent-repl-test-wire-host-register-workspaces-decodes-each-outcome-arm ()
+  "Each dir\='s outcome decodes to its own arm, in request order."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-register-workspaces-response
+                  (concat "{\"outcomes\":["
+                          "{\"dir\":\"/w/a\",\"registered\":{\"workspace\":{\"id\":\"ws-a\",\"dir\":\"/w/a\"}}},"
+                          "{\"dir\":\"/w/b\",\"refused\":{\"notAWorktree\":{}}},"
+                          "{\"dir\":\"/w/c\",\"failed\":{\"cause\":\"git broke\"}}]}"))
+                 '(:outcomes
+                   ((:dir "/w/a" :outcome (:arm :registered :value (:workspace (:id "ws-a" :dir "/w/a"))))
+                    (:dir "/w/b" :outcome (:arm :refused :value (:cause (:arm :not-a-worktree :value nil))))
+                    (:dir "/w/c" :outcome (:arm :failed :value (:cause "git broke"))))))))
+
+(ert-deftest agent-repl-test-wire-host-register-workspaces-unset-outcome-is-a-breach ()
+  "An outcome with no arm set is a contract breach."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-register-workspaces-response
+                  "{\"outcomes\":[{\"dir\":\"/w/a\"}]}")
+                 '("RegisterWorkspacesOutcome" outcome "oneof is unset"))))
+
+(ert-deftest agent-repl-test-wire-host-register-workspaces-outcome-without-dir-is-a-breach ()
+  "An outcome that does not echo its dir is a contract breach."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-register-workspaces-response
+                  "{\"outcomes\":[{\"failed\":{}}]}")
+                 '("RegisterWorkspacesOutcome" dir "required string is empty"))))
+
 ;;;; ---- SelectWorkspace ----
 
 (ert-deftest agent-repl-test-wire-host-select-request-echoes-the-ref ()
