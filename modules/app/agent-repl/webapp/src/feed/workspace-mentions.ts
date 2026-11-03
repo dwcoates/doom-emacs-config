@@ -10,7 +10,7 @@
  *
  * A MENTION IS A WHOLE OCCURRENCE of a served name in a tree's text: a code
  * span whose whole text is the name (agents write a workspace's name as
- * inline code), or the name in plain text with no name character
+ * inline code, and the span's code markers are stripped when it is linked), or the name in plain text with no name character
  * (`NAME_CHAR`) on either side, so `alpha` never links inside `alpha-beta`.
  * Text already inside a link, a code span that is more than the name, the
  * tree's rails and its labels are never searched.
@@ -142,9 +142,8 @@ function linkTree(tree: Element, targets: Targets): number {
     const name = code.textContent ?? "";
     const workspace = targets.byName.get(name);
     if (workspace === undefined) continue;
-    const mention = mentionAnchor(doc, workspace, name, []);
-    code.replaceWith(mention);
-    mention.append(code);
+    // The code markers are stripped: the mention is plain purple text, as in a prompt.
+    code.replaceWith(mentionAnchor(doc, workspace, name, [doc.createTextNode(name)]));
     linked++;
   }
   const pattern = targets.pattern;

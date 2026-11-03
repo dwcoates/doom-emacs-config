@@ -156,6 +156,17 @@ describe("a whole-text slot (a prompt's text)", () => {
     expect(mentions(slot)).toEqual(["alpha=ws-alpha"]);
   });
 
+  it("strips the code markers from a linked code span", () => {
+    // ARRANGE
+    applyMentionTargets(targets("alpha"), () => []);
+    const root = tree("see <code>alpha</code>");
+    // ACT
+    linkWorkspaceMentions(root);
+    // ASSERT
+    expect(mentions(root)).toEqual(["alpha=ws-alpha"]);
+    expect(root.querySelectorAll(`.${WORKSPACE_MENTION_CLASS} code`)).toHaveLength(0);
+  });
+
   it("never links a name inside a longer name", () => {
     // ARRANGE
     applyMentionTargets(targets("alpha"), () => []);
@@ -255,7 +266,7 @@ describe("installWorkspaceMentionClicks", () => {
     linkWorkspaceMentions(root);
     const { calls, uninstall } = page(root);
     // ACT
-    root.querySelector<HTMLElement>(`.${WORKSPACE_MENTION_CLASS} code`)?.click();
+    root.querySelector<HTMLElement>(`.${WORKSPACE_MENTION_CLASS}`)?.click();
     // ASSERT
     await vi.waitFor(() => expect(calls).toHaveLength(1));
     expect(calls[0].workspace?.id).toBe("ws-alpha");
