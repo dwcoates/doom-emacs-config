@@ -156,6 +156,12 @@ refusals, (6) the announcing link relation, (7) the finish-hook prompt origin.
   registration removed) and the failure is reported to the repository's main
   workspace through the existing failed-create report. Both arms are faults
   of the repository, not of the caller's input.
+- AMENDED while implementing: `creation_hook_failed` also carries a creation
+  PROMPT hook whose `{{slack_thread}}` its workspace cannot resolve (path and
+  log path empty), because that is the only way a creation prompt fails and
+  it must fail the create, not reach the agent with a hole in it. An async
+  merge's hidden merge workspace runs no creation stage; the comment on
+  `LifecycleConfig.creation` now says so.
 
 ### 6. An owned link may announce another link (`WorkspaceLinkOwned.announces`)
 

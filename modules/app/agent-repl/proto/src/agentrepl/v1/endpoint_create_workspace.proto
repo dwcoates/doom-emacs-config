@@ -928,15 +928,17 @@ message CreateWorkspaceOriginFetchFailed {
   string detail = 1;
 }
 
-// A creation-stage script hook failed, which fails the create.
+// A creation-stage hook failed, which fails the create: a script that did
+// not exit 0, or a prompt naming the originating Slack thread of a workspace
+// created for none.
 message CreateWorkspaceCreationHookFailed {
   // The script, relative to the repository's main checkout root, as the
-  // config names it; for a built-in default, its path in agent-repl's
-  // checkout.
+  // config names it. Empty for a prompt hook, which has no path.
   string path = 1;
-  // How it failed, in one line: its exit status, its timeout, or why it could
-  // not be run.
+  // How it failed, in one line: its exit status, its timeout, why it could
+  // not be run, or the placeholder it could not resolve.
   string detail = 2;
-  // The file its whole output was kept in.
+  // The file a script's whole output was kept in. Empty for a prompt hook,
+  // which ran nothing.
   string log_path = 3;
 }

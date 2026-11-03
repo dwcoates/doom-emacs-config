@@ -4780,17 +4780,19 @@ func (x *CreateWorkspaceOriginFetchFailed) GetDetail() string {
 	return ""
 }
 
-// A creation-stage script hook failed, which fails the create.
+// A creation-stage hook failed, which fails the create: a script that did
+// not exit 0, or a prompt naming the originating Slack thread of a workspace
+// created for none.
 type CreateWorkspaceCreationHookFailed struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The script, relative to the repository's main checkout root, as the
-	// config names it; for a built-in default, its path in agent-repl's
-	// checkout.
+	// config names it. Empty for a prompt hook, which has no path.
 	Path string `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
-	// How it failed, in one line: its exit status, its timeout, or why it could
-	// not be run.
+	// How it failed, in one line: its exit status, its timeout, why it could
+	// not be run, or the placeholder it could not resolve.
 	Detail string `protobuf:"bytes,2,opt,name=detail,proto3" json:"detail,omitempty"`
-	// The file its whole output was kept in.
+	// The file a script's whole output was kept in. Empty for a prompt hook,
+	// which ran nothing.
 	LogPath       string `protobuf:"bytes,3,opt,name=log_path,json=logPath,proto3" json:"log_path,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

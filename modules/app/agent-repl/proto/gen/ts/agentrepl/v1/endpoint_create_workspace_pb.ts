@@ -2451,30 +2451,32 @@ export const CreateWorkspaceOriginFetchFailedSchema: GenMessage<CreateWorkspaceO
   messageDesc(file_agentrepl_v1_endpoint_create_workspace, 66);
 
 /**
- * A creation-stage script hook failed, which fails the create.
+ * A creation-stage hook failed, which fails the create: a script that did
+ * not exit 0, or a prompt naming the originating Slack thread of a workspace
+ * created for none.
  *
  * @generated from message agentrepl.v1.CreateWorkspaceCreationHookFailed
  */
 export type CreateWorkspaceCreationHookFailed = Message<"agentrepl.v1.CreateWorkspaceCreationHookFailed"> & {
   /**
    * The script, relative to the repository's main checkout root, as the
-   * config names it; for a built-in default, its path in agent-repl's
-   * checkout.
+   * config names it. Empty for a prompt hook, which has no path.
    *
    * @generated from field: string path = 1;
    */
   path: string;
 
   /**
-   * How it failed, in one line: its exit status, its timeout, or why it could
-   * not be run.
+   * How it failed, in one line: its exit status, its timeout, why it could
+   * not be run, or the placeholder it could not resolve.
    *
    * @generated from field: string detail = 2;
    */
   detail: string;
 
   /**
-   * The file its whole output was kept in.
+   * The file a script's whole output was kept in. Empty for a prompt hook,
+   * which ran nothing.
    *
    * @generated from field: string log_path = 3;
    */

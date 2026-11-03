@@ -93,7 +93,9 @@ export type LifecycleConfig = Message<"repoconfig.v1.LifecycleConfig"> & {
    * is registered, before the session's first prompt. A failed script FAILS
    * THE CREATE: the create is undone, as any failed create is, and reported
    * (agentrepl.v1.CreateWorkspaceError.creation_hook_failed). The `runs_for`
-   * of a creation hook reads the workspace's landing target.
+   * of a creation hook reads the workspace's landing target. An async merge's
+   * hidden merge workspace runs no creation stage: the queue makes it, and
+   * its request names every hook it runs.
    *
    * @generated from field: optional repoconfig.v1.LifecycleStageHooks creation = 6;
    */
