@@ -149,6 +149,7 @@
 ;; W2-A's names (host.el) and the transport's connection accessor.
 (declare-function agent-repl-host-ref "host" (ws))
 (declare-function agent-repl-host-conn "host" (ws))
+(declare-function agent-repl-host-page-conn "host" (ws))
 (declare-function agent-repl-host-vendor-session-id "host" (ws))
 (declare-function agent-repl-connect-connection-address "connect" (conn))
 
@@ -966,7 +967,7 @@ webview window resolves against the worktree the REPL is attached to."
                                      (buffer-name existing))
                     existing)
                 (agent-repl--with-deferred-quit "frontend-ensure-webview"
-                  (let* ((xw (agent-repl-webhost-ensure (agent-repl-host-conn ws)))
+                  (let* ((xw (agent-repl-webhost-ensure (agent-repl-host-page-conn ws)))
                          (name (agent-repl--frontend-webview-buffer-name ws))
                          (buf (agent-repl--frontend-make-slot-buffer name xw)))
                     (agent-repl--frontend-adopt-webview-buffer buf name ws)
@@ -1358,15 +1359,16 @@ parentage).  A query parameter here would be a second, drifting channel
 for facts the daemon already pushes.
 
 The ADDRESS is the address of the connection that owns WS
-\(`agent-repl-host-conn'), not a global one: during a daemon handover a
-workspace's webview must load from whichever daemon currently owns it.
+\(`agent-repl-host-page-conn'), not a global one: during a daemon handover a
+workspace's webview must load from whichever daemon currently owns it, and
+a detached workspace's from the live daemon its walk is re-attaching it to.
 
 Signals through `agent-repl--fatal' when WS has no ref or no connection:
 a URL invented without either would address the wrong daemon or the
 wrong workspace, and a webview pointed at the wrong workspace is worse
 than no webview."
   (let ((ref (and (fboundp 'agent-repl-host-ref) (agent-repl-host-ref ws)))
-        (conn (and (fboundp 'agent-repl-host-conn) (agent-repl-host-conn ws))))
+        (conn (and (fboundp 'agent-repl-host-page-conn) (agent-repl-host-page-conn ws))))
     (unless ref
       (agent-repl--fatal ws "elisp.frontend.webview-url: no ref for ws=%s" ws))
     (unless conn
