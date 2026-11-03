@@ -105,6 +105,14 @@ func recognize(text string) recognized {
 	}
 }
 
+// RecognizeText is what the daemon makes of a submission's TEXT, read the way
+// the prompt handler reads it before acting: for a reader of turns already
+// recorded, which tells a session act (a /compact, a /clear) from an ordinary
+// prompt that set the agent working.
+func RecognizeText(text string) Recognition {
+	return recognize(text).kind
+}
+
 // Recognize reports what the daemon makes of a submission's text without acting
 // on it, answering the recognition and the literal command as typed.
 func (h *handler) Recognize(text string) (Recognition, string) {
