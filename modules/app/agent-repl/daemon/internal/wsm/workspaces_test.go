@@ -2028,3 +2028,81 @@ func TestTheWorkspaceReadAnswersTheStartOfTheTurnThatAskedForItsMerge(t *testing
 }
 
 func ptrDuration(d time.Duration) *time.Duration { return &d }
+
+// createdFacts is the registration a create makes of its fresh worktree under
+// repoDir, after recording the creation job it keyed on JOB.
+func createdFacts(repoDir string, job WorkspaceID) RegisterFacts {
+	return RegisterFacts{Name: "created", Branch: "created", ParentBranch: "master", RepoDir: repoDir, DefaultBranch: "master", CreationJob: job}
+}
+
+func TestRegisterWorkspaceWithACreationJobTakesItsIDAndMarksItMaterialized(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	main := testWorkspaceNamed(t, s, "main")
+	job := NewWorkspaceID()
+	if err := s.PutCreationJob(context.Background(), CreationJob{Workspace: job,
+		Layout: MergeLayout{SourceBranch: "created", SourceDir: "/wt/created", TargetDir: main.Dir, Origin: "create"}, CreatedAt: instant}); err != nil {
+		t.Fatalf("PutCreationJob: %v", err)
+	}
+
+	// Act
+	ws, created, err := s.RegisterWorkspace(context.Background(), t.TempDir(), createdFacts(main.Dir, job))
+
+	// Assert
+	if err != nil || !created {
+		t.Fatalf("RegisterWorkspace = created %v, %v; want a minted row", created, err)
+	}
+	if ws.ID != job {
+		t.Fatalf("registered id = %s, want the creation job's %s", ws.ID, job)
+	}
+	got, found, err := s.CreationJob(context.Background(), ws.ID)
+	if err != nil || !found {
+		t.Fatalf("CreationJob = found %v, %v; want the job under the registered id", found, err)
+	}
+	if !got.Materialized || got.Layout.TargetDir != main.Dir {
+		t.Fatalf("job = %+v, want it materialized with its geometry", got)
+	}
+}
+
+func TestRegisterWorkspaceWithAMissingCreationJobWritesNothing(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	main := testWorkspaceNamed(t, s, "main")
+	dir := t.TempDir()
+
+	// Act
+	_, _, err := s.RegisterWorkspace(context.Background(), dir, createdFacts(main.Dir, NewWorkspaceID()))
+
+	// Assert
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("RegisterWorkspace = %v, want the missing job's ErrNotFound", err)
+	}
+	if _, err := s.WorkspaceByDir(context.Background(), dir); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("WorkspaceByDir = %v, want no row for a registration refused whole", err)
+	}
+}
+
+func TestRegisterWorkspaceWithACreationJobRefusesARegisteredDir(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	main := testWorkspaceNamed(t, s, "main")
+	held, _, err := s.RegisterWorkspace(context.Background(), t.TempDir(), RegisterFacts{Name: "held", Branch: "held", ParentBranch: "master", RepoDir: main.Dir})
+	if err != nil {
+		t.Fatalf("RegisterWorkspace: %v", err)
+	}
+	job := NewWorkspaceID()
+	if err := s.PutCreationJob(context.Background(), CreationJob{Workspace: job, CreatedAt: instant}); err != nil {
+		t.Fatalf("PutCreationJob: %v", err)
+	}
+
+	// Act
+	_, _, err = s.RegisterWorkspace(context.Background(), held.Dir, createdFacts(main.Dir, job))
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "already registered as workspace "+string(held.ID)) {
+		t.Fatalf("RegisterWorkspace = %v, want the collision naming %s", err, held.ID)
+	}
+	if got, _, _ := s.CreationJob(context.Background(), job); got.Materialized {
+		t.Fatalf("job = %+v, want it left unmaterialized", got)
+	}
+}

@@ -69,7 +69,9 @@ const (
 //     consent — BEFORE anything is materialized, so a crash leaves
 //     evidence of what was being built rather than an unexplained worktree;
 //  4. materialize the worktree through git;
-//  5. REGISTER only once the worktree exists;
+//  5. REGISTER only once the worktree exists, under the creation job's own
+//     id, marking the job materialized in the same transaction, so no
+//     failure afterwards can leave the workspace without its geometry;
 //  6. bring the session up — for a fork, recording first the fork it owes, which
 //     the bring-up makes through the vendor before the session resumes;
 //  7. submit the initial prompt through the QUEUE, with origin
@@ -306,8 +308,8 @@ func (v *verbs) create(ctx context.Context, spec CreateSpec) (_ wsm.Workspace, e
 	}
 	job := wsm.CreationJob{
 		// The pre-minted workspace id lets the geometry be recorded BEFORE
-		// materialization; registration mints the registry's own id, and the
-		// job is re-keyed onto it below.
+		// materialization; registration takes the same id and marks the job
+		// materialized in its own transaction (RegisterFacts.CreationJob).
 		Workspace: workspaceID,
 		Layout: wsm.MergeLayout{
 			SourceBranch: branch,
@@ -332,6 +334,15 @@ func (v *verbs) create(ctx context.Context, spec CreateSpec) (_ wsm.Workspace, e
 		"base_ref": baseRef,
 		"parent":   ids.Optional(parent),
 	})
+	// A CREATE THAT FAILS BEFORE IT REGISTERS LEAVES NO JOB BEHIND: the job
+	// names a workspace that will never exist. Once registered, the job is
+	// the workspace's and goes only with it (unmaterialize's nuke).
+	var made *wsm.Workspace
+	defer func() {
+		if err != nil && made == nil {
+			err = v.dropCreationJob(context.WithoutCancel(ctx), global, err, workspaceID, branch)
+		}
+	}()
 
 	// A MERGE WORKSPACE IS CUT AT ITS FORK HEAD, never at wherever its
 	// requester's branch has moved to since: the head it records is then
@@ -378,7 +389,6 @@ func (v *verbs) create(ctx context.Context, spec CreateSpec) (_ wsm.Workspace, e
 	// branch and, once registered, no registration (unmaterialize). A failed
 	// create is reported as failed, so a worktree it left would be a
 	// workspace nobody asked for and nothing would ever finish.
-	var made *wsm.Workspace
 	defer func() {
 		if err != nil {
 			err = v.unmaterialize(context.WithoutCancel(ctx), global, err, repoDir, worktreeDir, branch, made)
@@ -407,19 +417,20 @@ func (v *verbs) create(ctx context.Context, spec CreateSpec) (_ wsm.Workspace, e
 		// The priority rides the insert, because it decides the place the
 		// workspace lands on.
 		Priority: priority,
+		// THE ROW TAKES THE JOB'S ID and marks the job materialized in its
+		// own transaction, so no failure after this line -- an error, a
+		// panic, the daemon killed -- can leave the workspace registered
+		// without its merge geometry (2026-11-03: a panic in the roster's
+		// republish cut a create between its registration and a separate
+		// re-keying write, and the workspace could never be landed).
+		CreationJob: workspaceID,
 	})
 	if err != nil {
 		return wsm.Workspace{}, fmt.Errorf("create %q: register: %w", branch, err)
 	}
 	made = &record
-
-	job.Workspace = record.ID
-	job.Materialized = true
-	if err := v.deps.DB.PutCreationJob(ctx, job); err != nil {
-		global.Error(opCreate, "could not re-key the creation job onto the registered id", dlog.Context{
-			"workspace": string(record.ID), "cause": err.Error(),
-		})
-		return wsm.Workspace{}, fmt.Errorf("create %q: record the materialized creation job: %w", branch, err)
+	if record.ID != workspaceID {
+		panic(fmt.Sprintf("workspace: create %q registered as %s, not the creation job's id %s", branch, record.ID, workspaceID))
 	}
 
 	log, err := v.deps.Log.Workspace(record.Dir)
@@ -532,6 +543,20 @@ func (v *verbs) unmaterialize(ctx context.Context, log dlog.Logger, cause error,
 		return errors.Join(cause, fmt.Errorf("create %q: undo the failed create: %w", branch, undo))
 	}
 	log.Info(opCreate, "undid the failed create: its worktree, branch and registration are gone", fields)
+	return cause
+}
+
+// dropCreationJob removes the creation job of a create that failed with CAUSE
+// before registering a workspace under ID. It answers CAUSE when the job is
+// gone, and CAUSE joined with the delete's failure when it is not.
+func (v *verbs) dropCreationJob(ctx context.Context, log dlog.Logger, cause error, id wsm.WorkspaceID, branch string) error {
+	fields := dlog.Context{"workspace": string(id), "branch": branch, "cause": cause.Error()}
+	if err := v.deps.DB.DeleteCreationJob(ctx, id); err != nil {
+		fields["undo_cause"] = err.Error()
+		log.Error(opCreate, "the failed create's creation job could not be removed; it names a workspace that never registered", fields)
+		return errors.Join(cause, fmt.Errorf("create %q: remove the creation job: %w", branch, err))
+	}
+	log.Debug(opCreate, "removed the failed create's creation job", fields)
 	return cause
 }
 

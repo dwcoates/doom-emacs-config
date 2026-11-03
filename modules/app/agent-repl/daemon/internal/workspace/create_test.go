@@ -161,15 +161,117 @@ func TestCreateRecordsTheCreationJobBeforeMaterialization(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 
-	// Assert: the FIRST recorded job says the worktree does not exist yet.
-	if len(f.db.putJobs) < 2 {
-		t.Fatalf("creation jobs recorded = %d, want at least two", len(f.db.putJobs))
+	// Assert: the ONE recorded job says the worktree does not exist yet; the
+	// registration, not a second write, marks it materialized.
+	if len(f.db.putJobs) != 1 {
+		t.Fatalf("creation jobs recorded = %d, want exactly one", len(f.db.putJobs))
 	}
 	if f.db.putJobs[0].Materialized {
-		t.Fatal("the first recorded creation job is already marked materialized")
+		t.Fatal("the recorded creation job is already marked materialized")
 	}
-	if !f.db.putJobs[len(f.db.putJobs)-1].Materialized {
-		t.Fatal("the last recorded creation job is not marked materialized")
+	if job := f.db.jobs[f.db.putJobs[0].Workspace]; !job.Materialized {
+		t.Fatal("the registration did not mark the creation job materialized")
+	}
+}
+
+func TestCreateRegistersTheWorkspaceUnderItsCreationJobsID(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+
+	// Act.
+	record, err := f.verbs.Create(context.Background(), standardSpec(t, f))
+
+	// Assert: the row and its job share one id from the start, so no
+	// failure after the registration can leave the row without its job.
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	job := f.db.putJobs[0].Workspace
+	if facts := f.db.registered[len(f.db.registered)-1]; facts.CreationJob != job {
+		t.Fatalf("registered with creation job %q, want the recorded job's %q", facts.CreationJob, job)
+	}
+	if record.ID != job {
+		t.Fatalf("workspace id = %q, want the creation job's %q", record.ID, job)
+	}
+}
+
+func TestCreateThatFailsBeforeRegisteringRemovesItsCreationJob(t *testing.T) {
+	cases := []struct {
+		name    string
+		arrange func(f *fixture)
+	}{
+		{name: "the worktree cannot be made", arrange: func(f *fixture) { f.git.createErr = errFake }},
+		{name: "the registration fails", arrange: func(f *fixture) { f.db.registerErr = errFake }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			tc.arrange(f)
+
+			// Act.
+			_, err := f.verbs.Create(context.Background(), standardSpec(t, f))
+
+			// Assert: the failure is surfaced, and the job naming a workspace
+			// that never registered is gone.
+			if !errors.Is(err, errFake) {
+				t.Fatalf("Create() = %v, want the failure surfaced", err)
+			}
+			job := f.db.putJobs[0].Workspace
+			if !slices.Equal(f.db.deletedJobs, []ids.WorkspaceID{job}) {
+				t.Fatalf("deleted jobs = %v, want the create's own %q", f.db.deletedJobs, job)
+			}
+			if _, ok := f.db.jobs[job]; ok {
+				t.Fatalf("the failed create's job %q is still recorded", job)
+			}
+			record, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelDebug, Message: "removed the failed create's creation job"})
+			if !ok || record.Context["workspace"] != string(job) || record.Context["cause"] != err.Error() {
+				t.Fatalf("records = %+v, want the removal recorded with the job and the cause", f.log.logger.Records())
+			}
+		})
+	}
+}
+
+func TestCreateThatFailsAfterRegisteringKeepsItsCreationJobForTheUndo(t *testing.T) {
+	// Arrange: the session does not come up, after the registration.
+	f := newFixture(t)
+	f.fleet.startErr = errors.New("the shim died during bring-up")
+
+	// Act.
+	_, err := f.verbs.Create(context.Background(), standardSpec(t, f))
+
+	// Assert: the registered workspace is nuked whole; the job is never
+	// deleted on its own, which would strand a row without its geometry.
+	if err == nil {
+		t.Fatal("Create() = nil error, want the failure surfaced")
+	}
+	if len(f.db.deletedJobs) != 0 {
+		t.Fatalf("deleted jobs = %v, want none: the job goes with the registered workspace", f.db.deletedJobs)
+	}
+	if len(f.db.forgotten) != 1 {
+		t.Fatalf("forgotten = %v, want the registered workspace undone whole", f.db.forgotten)
+	}
+}
+
+func TestCreateWhoseCreationJobRemovalFailsSurfacesBothFailures(t *testing.T) {
+	// Arrange: the worktree cannot be made, and the job will not delete.
+	f := newFixture(t)
+	f.git.createErr = errFake
+	f.db.deleteJobErr = errors.New("database is locked")
+
+	// Act.
+	_, err := f.verbs.Create(context.Background(), standardSpec(t, f))
+
+	// Assert.
+	if !errors.Is(err, errFake) || err == nil || !strings.Contains(err.Error(), "remove the creation job: database is locked") {
+		t.Fatalf("Create = %v, want the failure joined with the removal's", err)
+	}
+	record, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelError, Message: "the failed create's creation job could not be removed; it names a workspace that never registered"})
+	if !ok {
+		t.Fatalf("records = %+v, want the failed removal recorded at error", f.log.logger.Records())
+	}
+	if record.Context["undo_cause"] != "database is locked" || record.Context["workspace"] != string(f.db.putJobs[0].Workspace) {
+		t.Errorf("context = %v, want the removal's cause and the job", record.Context)
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 
 	"agent-repld/internal/dlog"
 )
@@ -41,6 +42,27 @@ func (s *store) PutCreationJob(ctx context.Context, job CreationJob) error {
 			job.Workspace, job.Layout.SourceBranch, job.Layout.SourceDir, job.Layout.TargetDir, job.Layout.Origin,
 			before, after, job.BaseRef, job.Materialized, job.OneShot, job.InitialPrompt, job.ConsentedUngatedMode,
 			nanos(job.CreatedAt))
+		return err
+	})
+}
+
+// DeleteCreationJob removes the creation job a create recorded under ID before
+// it failed without registering a workspace there, so the failed create leaves
+// nothing behind. A registered workspace's job is never deleted here: it goes
+// with the workspace (Forget), and deleting it alone would strand the
+// workspace without its merge geometry, so that is refused. A job already
+// gone is no error.
+func (s *store) DeleteCreationJob(ctx context.Context, id WorkspaceID) error {
+	const op = "daemon.wsm.delete_creation_job"
+	return s.write(ctx, op, dlog.Context{"workspace": string(id)}, func(ctx context.Context, tx *sql.Tx) error {
+		var registered bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM workspaces WHERE id = ?)`, id).Scan(&registered); err != nil {
+			return err
+		}
+		if registered {
+			return fmt.Errorf("wsm: delete the creation job of %s: the workspace is registered, and its job goes only with it", id)
+		}
+		_, err := tx.ExecContext(ctx, `DELETE FROM creation_jobs WHERE workspace_id = ?`, id)
 		return err
 	})
 }

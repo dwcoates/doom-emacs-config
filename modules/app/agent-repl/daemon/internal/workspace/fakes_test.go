@@ -58,6 +58,11 @@ var errFake = errors.New("workspace test: arranged failure")
 type fakeDB struct {
 	wsm.DB
 
+	// deletedJobs is every creation job DeleteCreationJob removed, in order;
+	// deleteJobErr fails the delete.
+	deletedJobs  []ids.WorkspaceID
+	deleteJobErr error
+
 	// remoteMu guards remote, each workspace's remote-control standing (an
 	// absent one is off: the fake cannot tell a main worktree); remoteErr
 	// fails reading it, remoteSetErr recording a mode, and bridgeErr keeping
@@ -615,10 +620,26 @@ func (d *fakeDB) RegisterWorkspace(_ context.Context, dir string, facts wsm.Regi
 	d.registerDir = dir
 	d.registered = append(d.registered, facts)
 	if existing, ok := d.byDir[dir]; ok {
+		if facts.CreationJob != "" {
+			return wsm.Workspace{}, false, fmt.Errorf("fake: a create's directory %s is already registered", dir)
+		}
 		return existing, false, nil
 	}
+	// A CREATE'S ROW TAKES ITS JOB'S ID and marks the job materialized in
+	// the same write, as the store does; a missing job is the store's
+	// ErrNotFound.
+	id := ids.WorkspaceID("ws-" + filepath.Base(dir))
+	if facts.CreationJob != "" {
+		job, ok := d.jobs[facts.CreationJob]
+		if !ok {
+			return wsm.Workspace{}, false, fmt.Errorf("fake: the creation job of %s: %w", facts.CreationJob, wsm.ErrNotFound)
+		}
+		job.Materialized = true
+		d.jobs[facts.CreationJob] = job
+		id = facts.CreationJob
+	}
 	ws := wsm.Workspace{
-		ID: ids.WorkspaceID("ws-" + filepath.Base(dir)), Kind: wsm.WorkspaceKindRepository, Dir: dir, Repo: d.repoFor(dir, facts),
+		ID: id, Kind: wsm.WorkspaceKindRepository, Dir: dir, Repo: d.repoFor(dir, facts),
 		Name: facts.Name, Branch: facts.Branch, ParentBranch: facts.ParentBranch,
 		Parent: facts.Parent, Priority: facts.Priority,
 	}
@@ -1125,6 +1146,18 @@ func (d *fakeDB) PutCreationJob(_ context.Context, job wsm.CreationJob) error {
 	}
 	d.putJobs = append(d.putJobs, job)
 	d.jobs[job.Workspace] = job
+	return nil
+}
+
+func (d *fakeDB) DeleteCreationJob(_ context.Context, id ids.WorkspaceID) error {
+	if d.deleteJobErr != nil {
+		return d.deleteJobErr
+	}
+	if _, ok := d.workspaces[id]; ok {
+		return fmt.Errorf("fake: the workspace %s is registered, and its job goes only with it", id)
+	}
+	d.deletedJobs = append(d.deletedJobs, id)
+	delete(d.jobs, id)
 	return nil
 }
 

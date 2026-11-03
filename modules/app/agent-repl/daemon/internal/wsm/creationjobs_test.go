@@ -5,6 +5,7 @@ import (
 
 	"context"
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -148,5 +149,63 @@ func TestCreationJobFailsWholeOnACorruptActionList(t *testing.T) {
 	}
 	if !loggedOperation(log, "daemon.wsm.creation_job", "error") {
 		t.Fatalf("the decode failure was not logged at error: %v", log.Records())
+	}
+}
+
+func TestDeleteCreationJob(t *testing.T) {
+	tests := []struct {
+		name string
+		// arrange answers the id whose job is deleted.
+		arrange   func(t *testing.T, s *store) WorkspaceID
+		wantErr   string
+		wantFound bool
+	}{
+		{
+			name: "the job of a create that never registered is removed",
+			arrange: func(t *testing.T, s *store) WorkspaceID {
+				id := NewWorkspaceID()
+				if err := s.PutCreationJob(context.Background(), CreationJob{Workspace: id, CreatedAt: instant}); err != nil {
+					t.Fatalf("PutCreationJob: %v", err)
+				}
+				return id
+			},
+		},
+		{
+			name:    "a job already gone is no error",
+			arrange: func(t *testing.T, s *store) WorkspaceID { return NewWorkspaceID() },
+		},
+		{
+			name: "a registered workspace's job is refused and kept",
+			arrange: func(t *testing.T, s *store) WorkspaceID {
+				ws := testLinkedWorkspace(t, s)
+				if err := s.PutCreationJob(context.Background(), CreationJob{Workspace: ws.ID, CreatedAt: instant}); err != nil {
+					t.Fatalf("PutCreationJob: %v", err)
+				}
+				return ws.ID
+			},
+			wantErr:   "the workspace is registered",
+			wantFound: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			id := tt.arrange(t, s)
+
+			// Act
+			err := s.DeleteCreationJob(context.Background(), id)
+
+			// Assert
+			if tt.wantErr == "" && err != nil {
+				t.Fatalf("DeleteCreationJob = %v, want success", err)
+			}
+			if tt.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tt.wantErr)) {
+				t.Fatalf("DeleteCreationJob = %v, want %q", err, tt.wantErr)
+			}
+			if _, found, err := s.CreationJob(context.Background(), id); err != nil || found != tt.wantFound {
+				t.Fatalf("CreationJob = found %v, %v; want found %v", found, err, tt.wantFound)
+			}
+		})
 	}
 }
