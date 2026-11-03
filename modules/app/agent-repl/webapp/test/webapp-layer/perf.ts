@@ -46,6 +46,7 @@ import type { JsonObject } from "@bufbuild/protobuf";
 
 import type { MountedApp } from "../integration/harness";
 import { realNow } from "../real-clock";
+import { settleUntil } from "./drive";
 
 /** The REAL clock (test/real-clock.ts), which every interval here is read off. */
 export { realNow };
@@ -254,19 +255,14 @@ export async function awaitSample(
   void armed.then((ms) => {
     closed = ms;
   });
-  const deadline = realNow() + budgetMs;
-  for (;;) {
-    await app.settle();
-    if (closed !== undefined) return closed;
-    if (realNow() >= deadline) {
-      probe.disarm();
-      throw new Error(
-        `${what}: the probe never closed within ${budgetMs}ms; ` +
-          `failure arms: [${app.failureArms().join(", ")}]; ` +
-          `refusal arms: [${app.refusalArms().join(", ")}]`,
-      );
-    }
-  }
+  const { met } = await settleUntil(app, () => closed !== undefined, realNow() + budgetMs, realNow);
+  if (met) return closed as number;
+  probe.disarm();
+  throw new Error(
+    `${what}: the probe never closed within ${budgetMs}ms; ` +
+      `failure arms: [${app.failureArms().join(", ")}]; ` +
+      `refusal arms: [${app.refusalArms().join(", ")}]`,
+  );
 }
 
 /**

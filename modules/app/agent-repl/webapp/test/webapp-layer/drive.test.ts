@@ -16,11 +16,13 @@
  * vitest configs and `e2e/kit/scans/scenariomatrix_test.go` use to mean "the Go world
  * drives this one".
  */
+import { readFileSync, readdirSync } from "node:fs";
+import { resolve } from "node:path";
 import { createControl, type Control } from "../../src/control.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { MountedApp } from "../integration/harness";
-import { COMPOSER_READY_BUDGET_MS, press, send } from "./drive";
+import { COMPOSER_READY_BUDGET_MS, press, send, settleUntil } from "./drive";
 
 const HOST = '[data-component="composer"]';
 
@@ -216,5 +218,72 @@ describe("press", () => {
 
     // Act / Assert — dropped, and NOT a fault: §F8 #33 presses expecting this.
     await expect(press(page.app)).resolves.toBe(false);
+  });
+});
+
+describe("settleUntil", () => {
+  /** The stub page's clock, which its settle moves SETTLE_STEP_MS. */
+  const now = (): number => Date.now();
+
+  it("answers met on the first settle that meets it", async () => {
+    // Arrange
+    const page = stubPage();
+
+    // Act
+    const answer = await settleUntil(page.app, () => true, now() + 1_000, now);
+
+    // Assert
+    expect(answer).toEqual({ met: true, settles: 1 });
+  });
+
+  it("settles again until it is met", async () => {
+    // Arrange
+    const page = stubPage();
+    let asked = 0;
+
+    // Act
+    const answer = await settleUntil(page.app, () => (asked += 1) === 3, now() + 10_000, now);
+
+    // Assert
+    expect(answer).toEqual({ met: true, settles: 3 });
+  });
+
+  it("answers unmet once the clock it is handed reaches the deadline", async () => {
+    // Arrange: each stub settle moves the clock SETTLE_STEP_MS.
+    const page = stubPage();
+
+    // Act
+    const answer = await settleUntil(page.app, () => false, now() + 2 * SETTLE_STEP_MS, now);
+
+    // Assert
+    expect(answer).toEqual({ met: false, settles: 2 });
+  });
+
+  it("runs between after every settle that did not meet it, and only those", async () => {
+    // Arrange
+    const page = stubPage();
+    let asked = 0;
+    let between = 0;
+
+    // Act
+    await settleUntil(page.app, () => (asked += 1) === 3, now() + 10_000, now, async () => {
+      between += 1;
+    });
+
+    // Assert
+    expect(between).toBe(2);
+  });
+
+  it("is the only budgeted settle loop in the layer", () => {
+    // Arrange
+    const dir = resolve(process.cwd(), "test/webapp-layer");
+
+    // Act: every hand-rolled loop that settles the page inside it.
+    const loops = readdirSync(dir)
+      .filter((name) => name.endsWith(".ts") && name !== "drive.ts" && name !== "drive.test.ts")
+      .filter((name) => /for \(;;\) \{\s*await app\.settle\(/.test(readFileSync(resolve(dir, name), "utf8")));
+
+    // Assert: a second loop is a second place for the budget's clock to drift.
+    expect(loops).toEqual([]);
   });
 });
