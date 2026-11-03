@@ -45,17 +45,10 @@
 import type { JsonObject } from "@bufbuild/protobuf";
 
 import type { MountedApp } from "../integration/harness";
+import { realNow } from "../real-clock";
 
-/**
- * The REAL clock, captured before anything fakes it.
- *
- * `performance.now()` rather than `Date.now()`: jsdom resolves the former to
- * sub-millisecond floats, and §C row 3b already warns that a millisecond
- * quantum is marginal against these budgets. The function is bound at module
- * evaluation, which ESM guarantees happens before any test body runs and so
- * before `mountApp` calls `vi.useFakeTimers`.
- */
-export const realNow: () => number = globalThis.performance.now.bind(globalThis.performance);
+/** The REAL clock (test/real-clock.ts), which every interval here is read off. */
+export { realNow };
 
 /**
  * The REAL microtask queue, captured for the same reason and at the same
