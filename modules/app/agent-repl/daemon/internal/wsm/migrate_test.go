@@ -1119,3 +1119,25 @@ func TestAnIncumbentHandleKeepsWritingAcrossTheJoiningMigration(t *testing.T) {
 		t.Fatalf("the incumbent's write after the join: %v", err)
 	}
 }
+
+func TestTheMigrationAddsTheLifecycleHooksFacts(t *testing.T) {
+	// Arrange -- a file written before a workspace recorded who created it, a
+	// link what it announces, or a finish stage its progress.
+	path := layout3Fixture(t)
+
+	// Act
+	handle, err := Open(context.Background(), path, WithUnsyncedWrites())
+	if err != nil {
+		t.Fatalf("Open on a layout-3 database: %v", err)
+	}
+	defer handle.Close()
+
+	// Assert
+	s := handle.(*store)
+	originators := scalar[int](t, s, `SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'workspace_originators'`)
+	announces := scalar[int](t, s, `SELECT count(*) FROM pragma_table_info('workspace_links') WHERE name = 'announces' AND "notnull" = 0`)
+	finish := scalar[int](t, s, `SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'merge_finish_progress'`)
+	if originators != 1 || announces != 1 || finish != 1 {
+		t.Fatalf("workspace_originators %d, workspace_links.announces (nullable) %d, merge_finish_progress %d; want 1 each", originators, announces, finish)
+	}
+}

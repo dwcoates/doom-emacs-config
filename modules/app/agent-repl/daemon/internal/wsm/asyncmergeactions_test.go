@@ -11,22 +11,22 @@ import (
 
 	repoconfigv1 "agentrepl/proto/repoconfig/v1"
 
-	"agent-repld/internal/deployconfig"
+	"agent-repld/internal/lifecycleconfig"
 )
 
 // promptHook is a prompt hook of TEXT.
-func promptHook(text string) *repoconfigv1.DeployHook {
-	return deployconfig.PromptHook(text)
+func promptHook(text string) *repoconfigv1.Hook {
+	return lifecycleconfig.PromptHook(text)
 }
 
 // scriptHook is a script hook of PATH bounded at SECONDS.
-func scriptHook(path string, seconds uint32) *repoconfigv1.DeployHook {
-	return deployconfig.ScriptHook(path, seconds)
+func scriptHook(path string, seconds uint32) *repoconfigv1.Hook {
+	return lifecycleconfig.ScriptHook(path, seconds)
 }
 
 // someHooks is a pre-deploy prompt and a post-deploy script, as an async
 // request names them.
-var someHooks = DeployHooks{PreDeploy: []*repoconfigv1.DeployHook{promptHook("run the linters")}, PostDeploy: []*repoconfigv1.DeployHook{scriptHook("bin/notify.sh", 30)}}
+var someHooks = DeployHooks{PreDeploy: []*repoconfigv1.Hook{promptHook("run the linters")}, PostDeploy: []*repoconfigv1.Hook{scriptHook("bin/notify.sh", 30)}}
 
 // detachedSource is an async request for branch feature carrying HOOKS.
 func detachedSource(hooks DeployHooks) MergeSource {
@@ -39,8 +39,8 @@ func TestAnAsyncRequestKeepsItsDeployHooksInTheQueue(t *testing.T) {
 		hooks DeployHooks
 	}{
 		{name: "both stages", hooks: someHooks},
-		{name: "a pre-deploy hook alone", hooks: DeployHooks{PreDeploy: []*repoconfigv1.DeployHook{promptHook("run the linters")}}},
-		{name: "a post-deploy script alone", hooks: DeployHooks{PostDeploy: []*repoconfigv1.DeployHook{scriptHook("bin/notify.sh", 30)}}},
+		{name: "a pre-deploy hook alone", hooks: DeployHooks{PreDeploy: []*repoconfigv1.Hook{promptHook("run the linters")}}},
+		{name: "a post-deploy script alone", hooks: DeployHooks{PostDeploy: []*repoconfigv1.Hook{scriptHook("bin/notify.sh", 30)}}},
 		{name: "no hook", hooks: DeployHooks{}},
 	}
 	for _, tt := range tests {

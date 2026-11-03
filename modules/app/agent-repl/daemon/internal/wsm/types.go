@@ -448,14 +448,14 @@ type MergeLayout struct {
 
 // DeployHooks are the hooks a request or a creation supplies
 // (agentrepl.v1.CreateWorkspaceDeployHooks): each stage given here REPLACES the
-// repository's own hooks for that stage (repoconfig.v1.DeployConfig), and a
+// repository's own hooks for that stage (repoconfig.v1.LifecycleConfig), and a
 // stage left empty runs the repository's. Each hook is a script or a prompt,
-// checked by deployconfig.CheckHook at the boundary that built it.
+// checked by lifecycleconfig.CheckHook at the boundary that built it.
 type DeployHooks struct {
 	// PreDeploy runs before the local merge, in order.
-	PreDeploy []*repoconfigv1.DeployHook
+	PreDeploy []*repoconfigv1.Hook
 	// PostDeploy runs after the deploy stage, in order.
-	PostDeploy []*repoconfigv1.DeployHook
+	PostDeploy []*repoconfigv1.Hook
 }
 
 // Empty reports whether no stage is given.
@@ -467,7 +467,7 @@ func (h DeployHooks) Equal(o DeployHooks) bool {
 }
 
 // equalHooks reports whether two hook lists are equal hook for hook.
-func equalHooks(a, b []*repoconfigv1.DeployHook) bool {
+func equalHooks(a, b []*repoconfigv1.Hook) bool {
 	if len(a) != len(b) {
 		return false
 	}

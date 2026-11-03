@@ -687,6 +687,19 @@ type DB interface {
 	// WorkspaceSlackLinkPosts answers every link posted, or claimed to be
 	// posted, into a workspace's originating thread.
 	WorkspaceSlackLinkPosts(ctx context.Context, id WorkspaceID) ([]SlackLinkPost, error)
+	// SetWorkspaceOriginator records who created a workspace, once, at its
+	// creation (lifecycle.go).
+	SetWorkspaceOriginator(ctx context.Context, id WorkspaceID, originator string) error
+	// WorkspaceOriginator answers who created a workspace, false when nothing
+	// recorded it.
+	WorkspaceOriginator(ctx context.Context, id WorkspaceID) (string, bool, error)
+	// PutFinishProgress records where a workspace's finish stage stands.
+	PutFinishProgress(ctx context.Context, id WorkspaceID, progress FinishProgress) error
+	// WorkspaceFinishProgress answers where a workspace's finish stage
+	// stands, false when none is under way.
+	WorkspaceFinishProgress(ctx context.Context, id WorkspaceID) (FinishProgress, bool, error)
+	// ClearFinishProgress forgets a workspace's finish stage.
+	ClearFinishProgress(ctx context.Context, id WorkspaceID) error
 	// PutQueuedCreate holds a create until the network is restored, or
 	// replaces the held create of the same request key (queuedcreates.go).
 	PutQueuedCreate(ctx context.Context, q QueuedCreate) error

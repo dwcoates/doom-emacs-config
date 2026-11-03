@@ -17,7 +17,7 @@ func TestPutCreationJobRoundTripsTheMergeGeometry(t *testing.T) {
 	job := CreationJob{
 		Workspace:            ws.ID,
 		Layout:               MergeLayout{SourceBranch: "feature", SourceDir: "/src", TargetDir: "/target", Origin: "create"},
-		Hooks:                DeployHooks{PreDeploy: []*repoconfigv1.DeployHook{promptHook("pre")}, PostDeploy: []*repoconfigv1.DeployHook{promptHook("post"), scriptHook("bin/notify.sh", 5)}},
+		Hooks:                DeployHooks{PreDeploy: []*repoconfigv1.Hook{promptHook("pre")}, PostDeploy: []*repoconfigv1.Hook{promptHook("post"), scriptHook("bin/notify.sh", 5)}},
 		BaseRef:              "master",
 		Materialized:         true,
 		OneShot:              true,
@@ -54,7 +54,7 @@ func TestPutCreationJobRoundTripsTheDeployHooks(t *testing.T) {
 	// Arrange
 	s, _ := testStore(t)
 	ws := testWorkspace(t, s)
-	hooks := DeployHooks{PreDeploy: []*repoconfigv1.DeployHook{promptHook("a"), scriptHook("bin/b.sh", 9)}, PostDeploy: []*repoconfigv1.DeployHook{promptHook("c")}}
+	hooks := DeployHooks{PreDeploy: []*repoconfigv1.Hook{promptHook("a"), scriptHook("bin/b.sh", 9)}, PostDeploy: []*repoconfigv1.Hook{promptHook("c")}}
 
 	// Act
 	if err := s.PutCreationJob(context.Background(), CreationJob{Workspace: ws.ID, Hooks: hooks, CreatedAt: instant}); err != nil {
