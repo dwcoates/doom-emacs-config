@@ -12,3 +12,9 @@
  */
 export const realNow: () => number = globalThis.performance.now.bind(globalThis.performance);
 
+/**
+ * THE REAL `setImmediate`, captured at the same moment and for the same
+ * reason: a mount fakes the page's, and a yield to real I/O, or a test's own
+ * real event-loop turn, must not depend on whether a fake clock is installed.
+ */
+export const realSetImmediate: typeof globalThis.setImmediate = globalThis.setImmediate;

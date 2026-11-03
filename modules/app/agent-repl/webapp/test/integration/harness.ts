@@ -28,6 +28,7 @@ import { createPageSeen } from "../../src/page-seen.js";
 import { pagePresence } from "../../src/presence.js";
 import { TITLE_REVEALED_ATTRIBUTE } from "../../src/feed/title-reveal.js";
 import { CONVERSATION_DRAWN_ATTRIBUTE } from "../../src/feed/conversation-drawn.js";
+import { realSetImmediate } from "../real-clock";
 
 /** One animation frame of fake time, as `finishTypeOuts` steps it. */
 const TYPE_OUT_FRAME_MS = 16;
@@ -512,16 +513,16 @@ async function mountApp(
   options: HarnessOptions,
   fake?: FakeDaemon,
 ): Promise<MountedApp> {
-  // CAPTURED BEFORE THE CLOCK IS FAKED. `settle()` needs a way to hand the
-  // event loop back to Node so the loopback round trip to the fake daemon can
-  // land; every scheduling primitive on the page is about to become fake, so
-  // the real one is taken now. This is NOT a sleep and never waits for a
-  // duration: it is a zero-length yield, the only thing that lets real socket
-  // I/O make progress between two microtask drains.
-  const yieldToIo = ((): (() => Promise<void>) => {
-    const realSetImmediate = globalThis.setImmediate;
-    return () => new Promise<void>((resolve) => realSetImmediate(() => resolve()));
-  })();
+  // `settle()` needs a way to hand the event loop back to Node so the
+  // loopback round trip to the fake daemon can land; every scheduling
+  // primitive on the page is about to become fake. This is NOT a sleep and
+  // never waits for a duration: it is a zero-length yield, the only thing
+  // that lets real socket I/O make progress between two microtask drains.
+  // ON THE `setImmediate` CAPTURED AT MODULE EVALUATION (test/real-clock.ts):
+  // taken here it was whatever stood at mount time, and a mount whose boot
+  // was refused used to leave its fake clock installed, so the next mount
+  // captured a FAKE one that only the clock's own advance ever ran.
+  const yieldToIo = (): Promise<void> => new Promise<void>((resolve) => realSetImmediate(() => resolve()));
 
   // THE CLOCK STARTS WHERE THE FIXTURES LIVE. Every wire timestamp in
   // `fixtures.ts` is a small absolute epoch value (a queue at 3 s, a last
@@ -642,14 +643,30 @@ async function mountApp(
   // mounted over a workspace this page could not adopt. The harness mirrors
   // that: it files the same failure, stops the daemon it started (no Harness is returned to
   // stop it later), and lets the throw reach the test.
+  /**
+   * THE PAGE LEAVES ITS DAEMON, as a closed tab does, and the clock goes back
+   * to real. The page goes quiet BEFORE its daemon stops: the page's own
+   * stream (`WatchPage`) is no mount's to dispose, so without this it outlives
+   * the page, reads the daemon's stop as a transport failure, and reconnects
+   * on backoff to a socket that no longer exists, on the next test's clock and
+   * into the next test's log. A daemon this mount did not start is the
+   * caller's to stop; the fake one it did start is stopped here, and the agent
+   * holding its sockets is closed (a run leaves ~1600 of them otherwise).
+   */
+  const leave = async (): Promise<void> => {
+    ctx.quiesce();
+    await fake?.stop();
+    await closeDispatcher();
+    vi.useRealTimers();
+  };
+
   try {
     await adoptAtBoot(ctx);
   } catch (err) {
     // The topbar is LEFT MOUNTED on purpose: its warning chip is the only
     // account of the failed boot a test can read.
     failures.report(bootFailed(err instanceof Error ? err.message : String(err)));
-    await fake?.stop();
-    await closeDispatcher();
+    await leave();
     throw err;
   }
   const newsDigest = mountNewsDigest(shell.newsDigest, ctx, { feedScroll: shell.feedScroll });
@@ -848,42 +865,41 @@ async function mountApp(
     async stop() {
       if (stopped) return;
       stopped = true;
-      for (const handle of [...handles].reverse()) handle.dispose();
-      // Draining clears the logger's timer and settle holds the socket open
-      // until every resulting ClientLog response head lands. Without both,
-      // a later test's clock can flush this page's records after its fake
-      // daemon has already stopped.
-      if (clientLogger !== undefined) {
-        clientLogger.flush();
-        await settle();
-        // Stream cancellation below can itself log. Detach production's sink
-        // only after it is drained so teardown diagnostics cannot address a
-        // fake daemon that teardown has already stopped.
-        setLogger(new ForwardingLogger(async () => "accepted", () => {}));
-      }
-      // A daemon this mount did not start is the caller's to stop; the fake
-      // one it did start is stopped here.
-      await fake?.stop();
-      // The agent holds this daemon's sockets open; a run leaves ~1600 of them
-      // otherwise, and the next test's daemon is a different socket anyway.
-      await closeDispatcher();
-      // A FRESH BROWSER PROFILE PER TEST. The webview-local preferences (R14 —
-      // the open footer panel, the sidebar grouping, folds) live in
-      // `localStorage`, which jsdom shares across every test in a file. Left
-      // behind, one test's click decides what the NEXT test's page opens with,
-      // which is a dependency between tests and not a fact about the app.
-      // The page's claim on the turns IT submitted dies with the page, the
-      // same way it does on a reload (R14: nothing is persisted).
-      observer.disconnect();
-      forgetOwnTurns();
+      // THE PAGE LEAVES EVEN WHEN ITS TEARDOWN FAILS: the failure still
+      // reaches the caller, and the next test still starts on a real clock
+      // with no stream of this page left addressing anything.
       try {
-        window.localStorage.clear();
-      } catch {
-        // A jsdom without storage is fine: there is then nothing to clear.
+        for (const handle of [...handles].reverse()) handle.dispose();
+        // Draining clears the logger's timer, and the settle holds the page
+        // until every request the teardown made has answered: each ClientLog
+        // record, and each `UnsubscribePage` the disposed mounts sent. A
+        // request still open when the daemon stops fails, and its failure is
+        // reported through whatever logger the NEXT test has installed.
+        clientLogger?.flush();
+        await settle();
+        // Stream cancellation in `leave` can itself log. Detach production's
+        // sink only after it is drained so teardown diagnostics cannot address
+        // a fake daemon that teardown has already stopped.
+        if (clientLogger !== undefined) setLogger(new ForwardingLogger(async () => "accepted", () => {}));
+        // A FRESH BROWSER PROFILE PER TEST. The webview-local preferences (R14 —
+        // the open footer panel, the sidebar grouping, folds) live in
+        // `localStorage`, which jsdom shares across every test in a file. Left
+        // behind, one test's click decides what the NEXT test's page opens with,
+        // which is a dependency between tests and not a fact about the app.
+        // The page's claim on the turns IT submitted dies with the page, the
+        // same way it does on a reload (R14: nothing is persisted).
+        observer.disconnect();
+        forgetOwnTurns();
+        try {
+          window.localStorage.clear();
+        } catch {
+          // A jsdom without storage is fine: there is then nothing to clear.
+        }
+        // The drawn mark is the page's, set once per page: a fresh page per test.
+        document.documentElement.removeAttribute(CONVERSATION_DRAWN_ATTRIBUTE);
+      } finally {
+        await leave();
       }
-      // The drawn mark is the page's, set once per page: a fresh page per test.
-      document.documentElement.removeAttribute(CONVERSATION_DRAWN_ATTRIBUTE);
-      vi.useRealTimers();
     },
 
     $,

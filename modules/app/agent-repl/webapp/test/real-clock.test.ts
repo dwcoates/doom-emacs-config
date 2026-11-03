@@ -6,7 +6,7 @@ import { relative, resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { filesUnder } from "./files-under";
-import { realNow } from "./real-clock";
+import { realNow, realSetImmediate } from "./real-clock";
 
 afterEach(() => {
   vi.useRealTimers();
@@ -47,6 +47,39 @@ describe("realNow", () => {
       .map((path) => relative(root, path));
 
     // Assert: a second hand-rolled capture would drift from this one.
+    expect(captures).toEqual([]);
+  });
+});
+
+describe("realSetImmediate", () => {
+  it("runs with the page's fake clock installed and never advanced", async () => {
+    // Arrange
+    vi.useFakeTimers({ toFake: ["setImmediate", "clearImmediate"] });
+    let ran = false;
+
+    // Act
+    await new Promise<void>((resolve) =>
+      realSetImmediate(() => {
+        ran = true;
+        resolve();
+      }),
+    );
+
+    // Assert
+    expect(ran).toBe(true);
+  });
+
+  it("is the only real setImmediate the suites capture", () => {
+    // Arrange
+    const root = resolve(process.cwd(), "test");
+
+    // Act
+    const captures = filesUnder(root)
+      .filter((path) => !path.endsWith("real-clock.ts") && !path.endsWith("real-clock.test.ts"))
+      .filter((path) => /=\s*globalThis\.setImmediate\b/.test(readFileSync(path, "utf8")))
+      .map((path) => relative(root, path));
+
+    // Assert
     expect(captures).toEqual([]);
   });
 });
