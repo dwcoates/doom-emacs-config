@@ -1918,6 +1918,20 @@ workspace from the working directory, so no source tag rides it."
                              (agent-repl-test--remapped-backgrounds 'fringe))
                        '(("#ff0808") ("#ff0d0d" "#ff0808"))))))))
 
+(ert-deftest agent-repl-input-paint-repaints-a-composer-painted-a-stale-fill ()
+  "A composer holding a fill the ground no longer derives is repainted with the current one."
+  ;; Arrange
+  (let ((agent-repl-input-background "#171717"))
+    (with-temp-buffer
+      (agent-repl-input-mode)
+      (mapc #'face-remap-remove-relative (cdr agent-repl--input-painted))
+      (setq agent-repl--input-painted
+            (cons "#171717" (agent-repl--set-buffer-background "#171717")))
+      ;; Act
+      (agent-repl--input-paint)
+      ;; Assert
+      (should (equal (agent-repl-test--remapped-backgrounds 'default) '("#1e1e1e"))))))
+
 (ert-deftest agent-repl-input-paint-in-the-same-ground-adds-nothing ()
   "A composer repainted in the ground it wears keeps its remaps and logs no paint."
   ;; Arrange
@@ -1948,7 +1962,7 @@ workspace from the working directory, so no source tag rides it."
         (let ((agent-repl-input-background "#000000"))
           (agent-repl--input-paint))
         ;; Assert
-        (should (member "elisp.input.paint buffer= *test-input-paint* color=#000000 from=\"#171717\""
+        (should (member "elisp.input.paint buffer= *test-input-paint* color=#080808 from=\"#1e1e1e\""
                         logs))))))
 
 (ert-deftest agent-repl-input-paint-all-leaves-other-buffers ()
