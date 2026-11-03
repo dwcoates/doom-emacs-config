@@ -187,13 +187,10 @@ func (w *Watcher) advance(ctx context.Context, sub wsm.PullRequestSubscription, 
 	if end != nil {
 		owed = append(owed, endedSentence)
 	}
-	// A RECOVERY IS NO ACTIVITY: reads that work again are said only as the
-	// preface to what the pull request did meanwhile, never as a notice of
-	// their own. The advance still runs, so the stored health clears.
+	// A RECOVERY IS NO ACTIVITY: reads that work again are never said, not
+	// even as a preface to what the pull request did meanwhile. The advance
+	// still runs, so the stored health clears.
 	recovered := sub.Failing != nil
-	if recovered && len(owed) > 0 {
-		owed = append([]string{recoveredSentence}, owed...)
-	}
 	to := encodeTold(next)
 	if to == sub.Told && len(owed) == 0 && !recovered {
 		return
