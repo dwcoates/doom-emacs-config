@@ -130,6 +130,11 @@ const (
 	// has not landed already holds (agentrepl.v1.CreateWorkspaceError
 	// .name_held), naming it and whether it is open.
 	ArmNameHeld = "name_held"
+	// ArmNameBranchExists refuses a supplied create name whose branch already
+	// exists in the repository while no registered workspace that has not
+	// landed holds it (agentrepl.v1.CreateWorkspaceError.name_branch_exists),
+	// naming the branch and its `head`.
+	ArmNameBranchExists = "name_branch_exists"
 	// ArmInvalidName refuses a supplied name that breaks the naming rule
 	// (CreateWorkspaceError.invalid_name, ValidateSuppliedName). It carries
 	// `name`, `component` and the nested `rule` arm.

@@ -433,3 +433,83 @@ func TestCreateFailsLoudlyWhenTheHeldNameCheckCannotReadTheRegistry(t *testing.T
 		t.Fatalf("created = %+v, want nothing built", f.git.created)
 	}
 }
+
+// TestCreateRefusesASuppliedNameWhoseBranchExistsUnheld covers the
+// branch-exists check inside the name claim (refuseBranchExistsLocked): a
+// standard create's supplied name whose branch the repository already has,
+// while no unlanded workspace holds it, is refused as name_branch_exists
+// naming the branch and its tip, recorded once, before any git builds
+// anything, and leaves no claim; a probe that fails fails the create loudly.
+func TestCreateRefusesASuppliedNameWhoseBranchExistsUnheld(t *testing.T) {
+	const branch = "ABC/ramdisk-leak-investigation"
+	merged := time.Unix(1_700_000_000, 0).UTC()
+	probeFailed := errors.New("git could not answer")
+	resolveFailed := errors.New("git could not resolve")
+	cases := []struct {
+		name string
+		// landed registers a landed workspace that last named the branch.
+		landed     bool
+		probeErr   error
+		resolveErr error
+		wantArm    bool
+		wantError  string
+	}{
+		{name: "a branch no workspace names", wantArm: true},
+		{name: "a branch a landed workspace left behind", landed: true, wantArm: true},
+		{name: "a probe that fails fails the create", probeErr: probeFailed,
+			wantError: "could not ask whether the supplied name's branch already exists"},
+		{name: "a resolve that fails fails the create", resolveErr: resolveFailed,
+			wantError: "could not resolve the existing branch of the supplied name"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+			t.Setenv(PrefixEnv, "ABC")
+			t.Setenv(LegacyPrefixEnv, "")
+			repo := mainWorktree(t, f)
+			if tc.landed {
+				f.db.with(wsm.Workspace{ID: "ws-inv", Name: branch, Branch: branch, Repo: "repo-1", Dir: t.TempDir(), Closed: true, MergedAt: &merged})
+			}
+			f.git.existingBranches = map[string]bool{branch: true}
+			if tc.probeErr != nil {
+				f.git.branchExistsErrFor = map[string]error{branch: tc.probeErr}
+			}
+			if tc.resolveErr != nil {
+				f.git.resolveErrFor = map[string]error{"refs/heads/" + branch: tc.resolveErr}
+			}
+
+			// Act
+			_, err := f.verbs.Create(context.Background(), CreateSpec{RepoDir: repo, Name: "ramdisk-leak-investigation"})
+
+			// Assert
+			if len(f.git.created) != 0 {
+				t.Fatalf("created = %+v, want nothing built", f.git.created)
+			}
+			if claimed := f.verbs.(*verbs).names.claimed; len(claimed) != 0 {
+				t.Fatalf("claimed = %+v, want no claim left by a refused name", claimed)
+			}
+			if !tc.wantArm {
+				if _, ok := AsRefusal(err); ok || err == nil {
+					t.Fatalf("Create = %v, want a failure, not a refusal", err)
+				}
+				if got := dlog.FilterRecords(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: opCreate, Message: tc.wantError}); len(got) != 1 {
+					t.Fatalf("want one ERROR %s record %q, got %+v", opCreate, tc.wantError, f.log.logger.Records())
+				}
+				return
+			}
+			refusal, ok := AsRefusal(err)
+			if !ok || refusal.Arm != ArmNameBranchExists {
+				t.Fatalf("Create = %v, want the %s refusal", err, ArmNameBranchExists)
+			}
+			wantHead := "sha-of-refs/heads/" + branch
+			if refusal.Fields["branch"] != branch || refusal.Fields["head"] != wantHead {
+				t.Fatalf("refusal fields = %v, want branch %s at %s", refusal.Fields, branch, wantHead)
+			}
+			record, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: opRefusal})
+			if !ok || record.Context["arm"] != ArmNameBranchExists || record.Context["arm_branch"] != branch || record.Context["arm_head"] != wantHead {
+				t.Fatalf("no INFO %s record naming the branch and its tip: %+v", opRefusal, f.log.logger.Records())
+			}
+		})
+	}
+}

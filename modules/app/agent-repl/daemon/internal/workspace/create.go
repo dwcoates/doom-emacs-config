@@ -694,10 +694,10 @@ func (v *verbs) branchFor(ctx context.Context, log dlog.Logger, spec CreateSpec,
 // claimSupplied resolves a SUPPLIED name to its branch and claims it. A name a
 // standing async merge reserved is refused (ArmNameReserved), unless the
 // reservation is HOLDER's own (the fork it was made for); a name another
-// allocation claims is refused the same way, and a standard create's name an
-// unlanded workspace holds is refused as ArmNameHeld. A supplied name is
-// otherwise not disambiguated: the user typed it, and is owed git's own
-// refusal if it is a branch no workspace names.
+// allocation claims is refused the same way, a standard create's name an
+// unlanded workspace holds is refused as ArmNameHeld, and one whose branch
+// already exists with no such workspace holding it as ArmNameBranchExists. A
+// supplied name is otherwise not disambiguated: the user typed it.
 func (v *verbs) claimSupplied(ctx context.Context, log dlog.Logger, repoDir, name string, holder wsm.WorkspaceID) (string, func(), error) {
 	if strings.TrimSpace(name) == "" {
 		err := errors.New("create: a merge workspace is named by the request it was forked for, and this one carries no name")
@@ -725,11 +725,17 @@ func (v *verbs) claimSupplied(ctx context.Context, log dlog.Logger, repoDir, nam
 	// A NAME AN UNLANDED WORKSPACE HOLDS IS REFUSED HERE, under the lock that
 	// claims names, so "is it already there" and "take it" are one step: two
 	// creates of one name can never both pass it. A landed workspace's name
-	// is free again, its branch deleted at its landing (landedbranch.Retire).
-	// A merge workspace (a HOLDER) skips it: its request already checked the
-	// name against every registered workspace and reserved it (ClaimMergeName).
+	// is free again once its branch is deleted (landedbranch.Retire), and a
+	// branch that outlived its landing, or one cut by hand, is refused here
+	// too, typed, rather than by `git worktree add -b` (2026-11-03,
+	// `ramdisk-leak-investigation`). A merge workspace (a HOLDER) skips both:
+	// its request already checked the name against every registered
+	// workspace and every branch, and reserved it (ClaimMergeName).
 	if holder == "" {
 		if err := v.refuseHeldLocked(ctx, log, branch); err != nil {
+			return "", nil, err
+		}
+		if err := v.refuseBranchExistsLocked(ctx, log, repoDir, branch); err != nil {
 			return "", nil, err
 		}
 	}
@@ -759,6 +765,31 @@ func (v *verbs) refuseHeldLocked(ctx context.Context, log dlog.Logger, branch st
 			})
 	}
 	return nil
+}
+
+// refuseBranchExistsLocked refuses BRANCH, a supplied name's branch no
+// registered unlanded workspace holds (refuseHeldLocked ran first), when the
+// repository at REPODIR already has it: `git worktree add -b` would refuse it
+// with an untyped failure. The refusal (ArmNameBranchExists) names the branch
+// and the commit it points at. The caller holds v.names.mu.
+func (v *verbs) refuseBranchExistsLocked(ctx context.Context, log dlog.Logger, repoDir, branch string) error {
+	fields := dlog.Context{"branch": branch, "repo_dir": repoDir}
+	exists, err := v.deps.Git.BranchExists(ctx, repoDir, branch)
+	if err != nil {
+		log.Error(opCreate, "could not ask whether the supplied name's branch already exists", dlog.WithCause(fields, err))
+		return fmt.Errorf("create %q: probe the branch: %w", branch, err)
+	}
+	if !exists {
+		return nil
+	}
+	head, err := v.deps.Git.ResolveRef(ctx, repoDir, "refs/heads/"+branch)
+	if err != nil {
+		log.Error(opCreate, "could not resolve the existing branch of the supplied name", dlog.WithCause(fields, err))
+		return fmt.Errorf("create %q: resolve the existing branch: %w", branch, err)
+	}
+	return refuseWith(log, "CreateWorkspace", ArmNameBranchExists,
+		fmt.Sprintf("the name %q is already a branch of the repository, at %s, and no workspace that has not landed holds it", branch, head), false,
+		map[string]any{"branch": branch, "head": head})
 }
 
 // forkNamingConversation answers the summary of the conversation a FORK
