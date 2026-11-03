@@ -128,3 +128,42 @@ and the wrong thing everywhere else:
 
 The rules are in the `agent-repl-tests` skill, "Synchronization: events, never
 time".
+
+## What landed
+
+| Harness | The wait now ends at | Where |
+|---|---|---|
+| daemon integration, e2e worlds | the daemon's unasked exit; a WARN/ERROR its test did not declare; the world's store, sidecar or zettel exiting unasked | `daemon/integration/harness/fault.go`, `e2e/kit/stack/world.go` `latchExit` |
+| sidecar integration | the sidecar exiting unasked | `agent-shim/claude/shim-sidecar/integration/helpers_test.go` `waitLatched` |
+| shim vitest integration | the shim's exit (file sink) or its log pipe's end | `test/integration-support/log.ts` `endOfRecords` |
+| ERT integration | a fake daemon dying unasked | `lisp/test-integration-helpers.el` `agent-repl-itest--daemon-fault` |
+
+- Every time-based wait in the list above became an event: the Go sleep loops
+  (a kernel exit event, `changesignal.Signal`; master fixed the page and
+  successor tests its own way first), the 6 TypeScript
+  sleeps, the 51 `vi.waitFor` polls (`webapp/test/events.ts`,
+  `agent-shim/claude/shim/test/until-pushed.ts`, `untilLogged`,
+  `untilBuffered`), and the elisp and shell polls. A test in each of the
+  webapp and the shim refuses a new `vi.waitFor`.
+- `prompts/` is staged once per test process and hard-linked per daemon
+  (`LinkPrompts`) instead of rewritten at each of about 800 daemon starts.
+- The Emacs e2e layer, which carried an elisp await judge and record latch on
+  this branch, was removed from master (`06d7d45312`) before it landed, so
+  neither landed.
+
+## What is still open
+
+- **The window panel finder logs with no scope**
+  (`elisp.core.log-routing-error ... window-panel-buffer`), an ERROR every
+  Emacs session writes. Scoping it globally (`agent-repl--ws-log-scope`) made
+  the removed `TestEmacsLayout` steps fail with "Cannot split side window";
+  why was never diagnosed (the `org/todo.md` row).
+- **The WebKit suite's** `webapp/test/webkit/containment-page.ts:236` still
+  sleeps 10ms in a loop: no roster suite runs that suite, so a change to it
+  cannot be run (the existing `org/todo.md` row).
+- **Fixtures built per step that are not the subject**: each e2e `NewWorld`
+  (45 sites against 25 `SharedWorld`) starts its own store and sidecar, about
+  2.7s of a 3.4s step; the webapp integration suite cold-boots once per file
+  (`bootColdOnce`) under `isolate: false`.
+- About 70 `await new Promise((r) => setTimeout(r, 0))` flushes in the webapp
+  tests assume one macrotask drains the work they await.

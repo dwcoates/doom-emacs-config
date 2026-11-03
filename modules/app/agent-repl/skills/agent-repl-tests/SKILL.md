@@ -404,6 +404,16 @@ coverage impact (always none).
     - Fix: check `pmset -g` shows `powermode 2` before any measurement; persistent wifi now changes the energy mode only on lid close and open (0.427.1).
     - Coverage impact: none.
 
+17. **A platform guarantee assumed, not checked.**
+    - Evidence: the e2e Emacs teardown's `awaitFindable` (since removed with the Emacs layer) polled `/proc` for a stand-in on the premise "Start returns at the fork". Replaced by a one-shot invariant check, it failed on its first linux run (2026-11-02): linux wakes the vfork parent at `exec_mmap`, before the new environment is published, so `/proc/<pid>/environ` can lag `cmd.Start`.
+    - Fix: assert a believed guarantee loudly once, and keep a wait only where it fails; the wait stays a poll (no event exists) that ends at the stand-in's exit.
+    - Coverage impact: none.
+
+18. **A fault latch finds the defects a suite was silently carrying.**
+    - Evidence: the Emacs e2e layer's elisp record latch (never landed; the layer was removed) failed every scenario on its first run, twice: a sandbox-only bytecode ERROR and a panel-finder record logged with no scope, both written in every scenario for weeks with nobody reading them (2026-11-02).
+    - Fix: land a latch only after a run of the whole suite under it, and fix each record it finds at the source; declare one (`ExpectWarnings`) only when the test provokes it on purpose.
+    - Coverage impact: none; the latch adds failures, never removes them.
+
 ## Changes that LOOK faster and are refused
 
 - Skipping a test, or moving it behind a flag nobody sets: coverage loss.
