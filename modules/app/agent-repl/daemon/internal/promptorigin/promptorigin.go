@@ -159,3 +159,77 @@ func Adopted(origin conversationv1.PromptOrigin) bool {
 	}
 	return false
 }
+
+// StartsAgentTurn reports whether a turn of ORIGIN set the agent working: a
+// prompt the user sent (from the editor, the webapp or claude.ai), one another
+// workspace's agent sent, a daemon brief or notice, or a turn the vendor
+// started on its own. Two kinds of turn are not: the re-drive of a turn a
+// restart or a merge interrupted, which continues work an earlier turn was
+// asked for, and a compaction the daemon submitted, which only cuts the
+// context. (A compaction or /clear the user TYPED carries a user origin; its
+// text, not its origin, says it is no agent turn.)
+//
+// THE SWITCH NAMES EVERY ORIGIN, so a new one fails hard here until it is
+// classified, rather than being counted or dropped by default.
+// PROMPT_ORIGIN_UNSPECIFIED, which no submit site sends, fails hard too.
+func StartsAgentTurn(origin conversationv1.PromptOrigin) bool {
+	switch origin {
+	case conversationv1.PromptOrigin_PROMPT_ORIGIN_RESUME_AFTER_RESTART,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_COMPACT,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_COMPACT_AFTER:
+		return false
+	case conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT_AND_HIDE,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT_WITH_METAPROMPT,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT_WITH_POSTFIX,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT_WITH_PREFIX,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_METAPROMPT_READ,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_COMMAND_DIFF_ANALYSIS,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_COMMAND_EXPLAIN_CONTEXT,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_COMMAND_EXPLAIN_PROMPT,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_COMMAND_UPDATE_PR,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_COMMAND_REBASE,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_COMMAND_CREATE_OR_UPDATE_PR,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_PANEL_SELECTION,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_DEFERRED_PROMPT,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_LEGACY_HOST_PROMPT,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_GNS_SOCKETS_CLOSE,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_LEGACY_HOST_EVAL_RESULT,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_EXPLAIN_CONFIG,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_CARD_ACTION,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_CREATED,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_TEST_REPAIR,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_BEFORE_ACTION,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_AFTER_ACTION,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_VENDOR_STARTED,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_LINK_UNRESOLVED,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_HANDBACK,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_RETARGETED,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_PICK,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_CREATE_FAILED,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_QUEUE_NOTICE,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_REVERT,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_DERIVED_WORKSPACE_NOTICE,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_COMMAND_TERMINAL_OUTPUT,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_COMMAND_THREAD_BACKGROUND,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_DEPLOY_MEDIATION,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_FINISH_HOOK,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_GITHUB_MERGE_QUEUE_NOTICE,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_GITHUB_WORKFLOW_RUN_NOTICE,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_PRODUCTION_MEDIATION,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_SLACK_THREAD_NOTICE,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_OWNER_NOTICE,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_NOTICE,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_DEPLOY_HOOK,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_SUBSECTION_PLACEMENT,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_REMOTE_CONTROL,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_MAIN_SYNC_REPAIR,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_PULL_REQUEST_NOTICE:
+		return true
+	}
+	panic(fmt.Sprintf("promptorigin: origin %s is not classified as starting an agent turn or not", origin))
+}

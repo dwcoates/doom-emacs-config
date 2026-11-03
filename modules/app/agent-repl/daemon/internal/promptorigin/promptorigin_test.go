@@ -312,3 +312,54 @@ func TestDeliveredOnArrivalNamedReadsTheStoredSpelling(t *testing.T) {
 		})
 	}
 }
+
+// noAgentTurnOrigins are the origins whose turns set no agent working: the
+// re-drives of an interrupted turn and the daemon's compactions.
+var noAgentTurnOrigins = map[conversationv1.PromptOrigin]bool{
+	conversationv1.PromptOrigin_PROMPT_ORIGIN_RESUME_AFTER_RESTART:        true,
+	conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME: true,
+	conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_COMPACT:           true,
+	conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_COMPACT_AFTER:         true,
+}
+
+func TestStartsAgentTurnClassifiesEveryNamedOrigin(t *testing.T) {
+	for value := range conversationv1.PromptOrigin_name {
+		origin := conversationv1.PromptOrigin(value)
+		if origin == conversationv1.PromptOrigin_PROMPT_ORIGIN_UNSPECIFIED {
+			continue
+		}
+		t.Run(origin.String(), func(t *testing.T) {
+			// Act.
+			got := StartsAgentTurn(origin)
+
+			// Assert.
+			if want := !noAgentTurnOrigins[origin]; got != want {
+				t.Fatalf("StartsAgentTurn(%s) = %v, want %v", origin, got, want)
+			}
+		})
+	}
+}
+
+func TestStartsAgentTurnFailsHardOnAnUnclassifiedOrigin(t *testing.T) {
+	tests := []struct {
+		name   string
+		origin conversationv1.PromptOrigin
+	}{
+		{name: "the unspecified origin", origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_UNSPECIFIED},
+		{name: "an origin the vocabulary does not name", origin: conversationv1.PromptOrigin(9999)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			defer func() {
+				// Assert.
+				if recovered := recover(); recovered == nil {
+					t.Fatalf("StartsAgentTurn(%s) did not fail hard", tt.origin)
+				}
+			}()
+
+			// Act.
+			StartsAgentTurn(tt.origin)
+		})
+	}
+}
