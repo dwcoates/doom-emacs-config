@@ -1,0 +1,80 @@
+// endpoint_register_workspaces.proto — RegisterWorkspaces: Emacs announces
+// EVERY workspace it holds, in one call. HOST section.
+//
+// THE RE-ANNOUNCEMENT IS ONE CALL, NOT ONE PER WORKSPACE. When Emacs's link
+// comes up on a daemon, or is promoted onto a successor, it re-announces every
+// workspace it holds. Sent as one RegisterWorkspace per workspace, that is
+// dozens of concurrent calls racing a daemon whose state database has ONE
+// connection, and each registration also republished the roster, which re-reads
+// the whole arrangement on that same connection: the calls queued behind each
+// other's republications until they outlived Emacs's unary budget and the
+// workspaces they were for were left with no daemon. Here the daemon registers
+// the directories ONE AFTER ANOTHER, exactly as RegisterWorkspace registers
+// each, and republishes the roster ONCE, after the last.
+//
+// EACH DIRECTORY HAS ITS OWN OUTCOME. One directory's refusal or fault never
+// costs the others theirs: the answer carries one outcome per requested
+// directory, in request order, and every one is settled before the answer is
+// sent.
+//
+// IDEMPOTENT BY DIR, as RegisterWorkspace is: a directory already registered
+// answers the ref it already has, and a directory named twice answers the same
+// ref twice.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/endpoint_register_workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// The directories to announce. Validation failures (no directory at all, a
+// blank one) are Connect InvalidArgument, never an outcome.
+message RegisterWorkspacesRequest {
+  // The worktrees' paths, each in whatever spelling the host has, in the order
+  // the answer's outcomes follow. PATHS, not identities: the daemon normalizes
+  // each and MINTS the identity its outcome returns. REQUIRED non-empty, and
+  // no entry may be blank.
+  repeated string dirs = 1;
+}
+
+// One outcome per requested directory. THE BATCH ITSELF HAS NO FAILURE ARM:
+// everything that can go wrong goes wrong for one directory and is that
+// directory's outcome, and a call the daemon could not serve at all is a
+// transport or Connect error.
+message RegisterWorkspacesResponse {
+  // Exactly one per entry of `RegisterWorkspacesRequest.dirs`, in the same
+  // order. A consumer pairs them by position or by `dir`, which echoes the
+  // request.
+  repeated RegisterWorkspacesOutcome outcomes = 1;
+}
+
+// How one announced directory's registration ended.
+message RegisterWorkspacesOutcome {
+  // The directory exactly as the request spelled it, echoed so the host can
+  // find the workspace it sent it for without normalizing anything.
+  string dir = 1;
+  // THE ARM IS THE OUTCOME, and exactly one is set.
+  oneof outcome {
+    // Registered (or already was), with the identity every later call uses:
+    // the same answer RegisterWorkspace gives.
+    RegisterWorkspaceSuccess registered = 2;
+    // The daemon refused the directory, for one of RegisterWorkspace's own
+    // refusal causes. The directory is not served; the host reports why.
+    RegisterWorkspaceError refused = 3;
+    // The registration broke on the daemon's side (git or the state database
+    // failed under it). The directory is not served; the daemon recorded the
+    // fault in its own log.
+    RegisterWorkspacesFailed failed = 4;
+  }
+}
+
+// A registration that broke on the daemon's side rather than being refused.
+// Where RegisterWorkspace answers such a fault as a Connect error for the whole
+// call, a batch answers it for its one directory, so the others still land.
+message RegisterWorkspacesFailed {
+  // What broke, in the daemon's words, for the host's record. Free text for a
+  // reader; nothing parses it.
+  string cause = 1;
+}

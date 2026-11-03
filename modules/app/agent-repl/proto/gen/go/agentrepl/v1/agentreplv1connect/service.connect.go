@@ -296,6 +296,9 @@ const (
 	// AgentReplRegisterWorkspaceProcedure is the fully-qualified name of the AgentRepl's
 	// RegisterWorkspace RPC.
 	AgentReplRegisterWorkspaceProcedure = "/agentrepl.v1.AgentRepl/RegisterWorkspace"
+	// AgentReplRegisterWorkspacesProcedure is the fully-qualified name of the AgentRepl's
+	// RegisterWorkspaces RPC.
+	AgentReplRegisterWorkspacesProcedure = "/agentrepl.v1.AgentRepl/RegisterWorkspaces"
 	// AgentReplSelectWorkspaceProcedure is the fully-qualified name of the AgentRepl's SelectWorkspace
 	// RPC.
 	AgentReplSelectWorkspaceProcedure = "/agentrepl.v1.AgentRepl/SelectWorkspace"
@@ -512,6 +515,7 @@ var (
 	agentReplReportLatenciesMethodDescriptor              = agentReplServiceDescriptor.Methods().ByName("ReportLatencies")
 	agentReplUpdatePersistentWifiModeMethodDescriptor     = agentReplServiceDescriptor.Methods().ByName("UpdatePersistentWifiMode")
 	agentReplRegisterWorkspaceMethodDescriptor            = agentReplServiceDescriptor.Methods().ByName("RegisterWorkspace")
+	agentReplRegisterWorkspacesMethodDescriptor           = agentReplServiceDescriptor.Methods().ByName("RegisterWorkspaces")
 	agentReplSelectWorkspaceMethodDescriptor              = agentReplServiceDescriptor.Methods().ByName("SelectWorkspace")
 	agentReplMarkWorkspaceViewedMethodDescriptor          = agentReplServiceDescriptor.Methods().ByName("MarkWorkspaceViewed")
 	agentReplReportPageUnloadingMethodDescriptor          = agentReplServiceDescriptor.Methods().ByName("ReportPageUnloading")
@@ -852,6 +856,10 @@ type AgentReplClient interface {
 	// Emacs announces a workspace exists; idempotent by dir. See
 	// endpoint_register_workspace.proto.
 	RegisterWorkspace(context.Context, *connect.Request[v1.RegisterWorkspaceRequest]) (*connect.Response[v1.RegisterWorkspaceResponse], error)
+	// Emacs announces every workspace it holds in one call, each registered as
+	// RegisterWorkspace would and the roster republished once. See
+	// endpoint_register_workspaces.proto.
+	RegisterWorkspaces(context.Context, *connect.Request[v1.RegisterWorkspacesRequest]) (*connect.Response[v1.RegisterWorkspacesResponse], error)
 	// The user switched to this workspace in the editor; idempotent. See
 	// endpoint_select_workspace.proto.
 	SelectWorkspace(context.Context, *connect.Request[v1.SelectWorkspaceRequest]) (*connect.Response[v1.SelectWorkspaceResponse], error)
@@ -1583,6 +1591,12 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(agentReplRegisterWorkspaceMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
+		registerWorkspaces: connect.NewClient[v1.RegisterWorkspacesRequest, v1.RegisterWorkspacesResponse](
+			httpClient,
+			baseURL+AgentReplRegisterWorkspacesProcedure,
+			connect.WithSchema(agentReplRegisterWorkspacesMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
 		selectWorkspace: connect.NewClient[v1.SelectWorkspaceRequest, v1.SelectWorkspaceResponse](
 			httpClient,
 			baseURL+AgentReplSelectWorkspaceProcedure,
@@ -1940,6 +1954,7 @@ type agentReplClient struct {
 	reportLatencies              *connect.Client[v1.ReportLatenciesRequest, v1.ReportLatenciesResponse]
 	updatePersistentWifiMode     *connect.Client[v1.UpdatePersistentWifiModeRequest, v1.UpdatePersistentWifiModeResponse]
 	registerWorkspace            *connect.Client[v1.RegisterWorkspaceRequest, v1.RegisterWorkspaceResponse]
+	registerWorkspaces           *connect.Client[v1.RegisterWorkspacesRequest, v1.RegisterWorkspacesResponse]
 	selectWorkspace              *connect.Client[v1.SelectWorkspaceRequest, v1.SelectWorkspaceResponse]
 	markWorkspaceViewed          *connect.Client[v1.MarkWorkspaceViewedRequest, v1.MarkWorkspaceViewedResponse]
 	reportPageUnloading          *connect.Client[v1.ReportPageUnloadingRequest, v1.ReportPageUnloadingResponse]
@@ -2459,6 +2474,11 @@ func (c *agentReplClient) RegisterWorkspace(ctx context.Context, req *connect.Re
 	return c.registerWorkspace.CallUnary(ctx, req)
 }
 
+// RegisterWorkspaces calls agentrepl.v1.AgentRepl.RegisterWorkspaces.
+func (c *agentReplClient) RegisterWorkspaces(ctx context.Context, req *connect.Request[v1.RegisterWorkspacesRequest]) (*connect.Response[v1.RegisterWorkspacesResponse], error) {
+	return c.registerWorkspaces.CallUnary(ctx, req)
+}
+
 // SelectWorkspace calls agentrepl.v1.AgentRepl.SelectWorkspace.
 func (c *agentReplClient) SelectWorkspace(ctx context.Context, req *connect.Request[v1.SelectWorkspaceRequest]) (*connect.Response[v1.SelectWorkspaceResponse], error) {
 	return c.selectWorkspace.CallUnary(ctx, req)
@@ -2965,6 +2985,10 @@ type AgentReplHandler interface {
 	// Emacs announces a workspace exists; idempotent by dir. See
 	// endpoint_register_workspace.proto.
 	RegisterWorkspace(context.Context, *connect.Request[v1.RegisterWorkspaceRequest]) (*connect.Response[v1.RegisterWorkspaceResponse], error)
+	// Emacs announces every workspace it holds in one call, each registered as
+	// RegisterWorkspace would and the roster republished once. See
+	// endpoint_register_workspaces.proto.
+	RegisterWorkspaces(context.Context, *connect.Request[v1.RegisterWorkspacesRequest]) (*connect.Response[v1.RegisterWorkspacesResponse], error)
 	// The user switched to this workspace in the editor; idempotent. See
 	// endpoint_select_workspace.proto.
 	SelectWorkspace(context.Context, *connect.Request[v1.SelectWorkspaceRequest]) (*connect.Response[v1.SelectWorkspaceResponse], error)
@@ -3692,6 +3716,12 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		connect.WithSchema(agentReplRegisterWorkspaceMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
+	agentReplRegisterWorkspacesHandler := connect.NewUnaryHandler(
+		AgentReplRegisterWorkspacesProcedure,
+		svc.RegisterWorkspaces,
+		connect.WithSchema(agentReplRegisterWorkspacesMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
 	agentReplSelectWorkspaceHandler := connect.NewUnaryHandler(
 		AgentReplSelectWorkspaceProcedure,
 		svc.SelectWorkspace,
@@ -4141,6 +4171,8 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplUpdatePersistentWifiModeHandler.ServeHTTP(w, r)
 		case AgentReplRegisterWorkspaceProcedure:
 			agentReplRegisterWorkspaceHandler.ServeHTTP(w, r)
+		case AgentReplRegisterWorkspacesProcedure:
+			agentReplRegisterWorkspacesHandler.ServeHTTP(w, r)
 		case AgentReplSelectWorkspaceProcedure:
 			agentReplSelectWorkspaceHandler.ServeHTTP(w, r)
 		case AgentReplMarkWorkspaceViewedProcedure:
@@ -4612,6 +4644,10 @@ func (UnimplementedAgentReplHandler) UpdatePersistentWifiMode(context.Context, *
 
 func (UnimplementedAgentReplHandler) RegisterWorkspace(context.Context, *connect.Request[v1.RegisterWorkspaceRequest]) (*connect.Response[v1.RegisterWorkspaceResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.RegisterWorkspace is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) RegisterWorkspaces(context.Context, *connect.Request[v1.RegisterWorkspacesRequest]) (*connect.Response[v1.RegisterWorkspacesResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.RegisterWorkspaces is not implemented"))
 }
 
 func (UnimplementedAgentReplHandler) SelectWorkspace(context.Context, *connect.Request[v1.SelectWorkspaceRequest]) (*connect.Response[v1.SelectWorkspaceResponse], error) {

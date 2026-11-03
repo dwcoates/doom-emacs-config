@@ -78,6 +78,7 @@ import "agentrepl/v1/endpoint_reap_worktrees.proto";
 import "agentrepl/v1/endpoint_refresh_news_digest.proto";
 import "agentrepl/v1/endpoint_register_repository.proto";
 import "agentrepl/v1/endpoint_register_workspace.proto";
+import "agentrepl/v1/endpoint_register_workspaces.proto";
 import "agentrepl/v1/endpoint_report_chat_sightings.proto";
 import "agentrepl/v1/endpoint_report_composer_entries.proto";
 import "agentrepl/v1/endpoint_report_editor_focus.proto";
@@ -556,6 +557,11 @@ service AgentRepl {
   // Emacs announces a workspace exists; idempotent by dir. See
   // endpoint_register_workspace.proto.
   rpc RegisterWorkspace(RegisterWorkspaceRequest) returns (RegisterWorkspaceResponse);
+
+  // Emacs announces every workspace it holds in one call, each registered as
+  // RegisterWorkspace would and the roster republished once. See
+  // endpoint_register_workspaces.proto.
+  rpc RegisterWorkspaces(RegisterWorkspacesRequest) returns (RegisterWorkspacesResponse);
 
   // The user switched to this workspace in the editor; idempotent. See
   // endpoint_select_workspace.proto.
