@@ -284,8 +284,12 @@ export type SetWorkspaceParentError = Message<"agentrepl.v1.SetWorkspaceParentEr
     case: "cycle";
   } | {
     /**
-     * The workspace has no merge geometry: it was registered by the editor
-     * rather than created by the daemon, so it has no merge to retarget.
+     * The workspace has no merge geometry and the request did not restate
+     * where it lands (landing_target unset), so there is no landing to keep;
+     * or it can never have any (its repository's main workspace, or a
+     * worktree with no branch). A request that sets landing_target on a
+     * workspace with no geometry RECORDS its creation job from that
+     * statement, the workspace's own branch and worktree as the source.
      *
      * @generated from field: agentrepl.v1.SetWorkspaceParentNoMergeLayout no_merge_layout = 9;
      */

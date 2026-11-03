@@ -88,7 +88,9 @@ message FinishWorkspaceError {
     FinishWorkspaceTransferringAway transferring_away = 3;
     // A joining daemon has not finished adopting this workspace yet.
     FinishWorkspaceNotYetAdopted not_yet_adopted = 4;
-    // The daemon holds no layout facts for this workspace to deploy with.
+    // The daemon holds no layout facts for this workspace to deploy with,
+    // and never infers them. Restating where it lands
+    // (SetWorkspaceParentRequest.landing_target) records them.
     FinishWorkspaceNoLayoutFacts no_layout_facts = 5;
     // The workspace's session has been deleted.
     FinishWorkspaceSessionDeleted session_deleted = 6;
