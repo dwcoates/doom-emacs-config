@@ -2409,11 +2409,7 @@ func TestAMainWatchPageReachesTheFeedWithItsAgentBeforeStartTurnNamesIt(t *testi
 // stampedFrameAt wraps an AgentFrame as one live entry at a pointer, stamped
 // with the turn it was produced within ("" leaves it unstamped).
 func stampedFrameAt(frame *conversationv1.AgentFrame, pointer, turn string) *shimv1.WatchAgentResponse {
-	resp := entryFrameAt(frame, pointer)
-	if turn != "" {
-		resp.GetEntry().Turn = &conversationv1.TurnId{Value: turn}
-	}
-	return resp
+	return &shimv1.WatchAgentResponse{Frame: &shimv1.WatchAgentResponse_Entry{Entry: stampedPageEntryAt(pointer, turn, frame)}}
 }
 
 // A MAIN TERMINAL ENDS THE TURN ITS STAMP NAMES, never merely the open one.
