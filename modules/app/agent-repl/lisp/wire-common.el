@@ -795,7 +795,7 @@ no client ever sends them.")
     "PROMPT_ORIGIN_AGENT_SENT" "PROMPT_ORIGIN_WORKSPACE_COMPACT"
     "PROMPT_ORIGIN_DEPLOY_HOOK" "PROMPT_ORIGIN_SUBSECTION_PLACEMENT"
     "PROMPT_ORIGIN_REMOTE_CONTROL" "PROMPT_ORIGIN_MAIN_SYNC_REPAIR"
-    "PROMPT_ORIGIN_PULL_REQUEST_NOTICE")
+    "PROMPT_ORIGIN_PULL_REQUEST_NOTICE" "PROMPT_ORIGIN_FINISH_HOOK")
   "PromptOrigin values no client ever sends: only the shim or the daemon does.
 VENDOR_STARTED names a turn the vendor began on its own, which the shim
 adopts; an editor submit carrying it would claim the vendor started a
@@ -822,6 +822,8 @@ remote control is on, which the shim adopts as the turn's first row.
 MAIN_SYNC_REPAIR is the daemon's brief asking a repository's main
 workspace to repair a main checkout it could not fast-forward, and
 PULL_REQUEST_NOTICE its notice of a followed pull request's activity.
+FINISH_HOOK is a finish-stage prompt hook the daemon sends a finishing
+workspace before its deploy is put in line.
 None has an elisp spelling at all.")
 
 (defun agent-repl-wire-encode-prompt-origin (value)

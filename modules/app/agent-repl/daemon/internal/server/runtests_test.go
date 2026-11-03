@@ -20,6 +20,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/lifecycleconfig"
 	"agent-repld/internal/merge"
 	"agent-repld/internal/scriptrunner"
 	"agent-repld/internal/wsm"
@@ -110,7 +111,7 @@ func testsWorkspace(t *testing.T, h *harness, deploy string) *workspacev1.Worksp
 		if err := os.MkdirAll(filepath.Join(dir, ".agent-repl"), 0o755); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(dir, ".agent-repl", "deploy.yaml"), []byte(deploy), 0o644); err != nil {
+		if err := os.WriteFile(lifecycleconfig.Path(dir), []byte(deploy), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -125,12 +126,13 @@ const testsDeploy = `pre_deploy:
       agent_repl_suites:
         script_path: bin/test-all.sh
 deploy:
-  hook:
-    script:
-      path: bin/deploy.sh
-      timeout_seconds: 60
-  runs_for:
-    main: {}
+  user_or_workspace:
+    hook:
+      script:
+        path: bin/deploy.sh
+        timeout_seconds: 60
+    runs_for:
+      main: {}
 `
 
 // agent is a workspace's agent asking.
@@ -228,7 +230,7 @@ func TestRunTestsRefuses(t *testing.T) {
 			return e.GetRunnerFailed().GetExitCode() == -1 && strings.Contains(e.GetRunnerFailed().GetDetail(), "deploy config")
 		}},
 		{name: "a deploy config naming no test script", req: func(h *harness) *agentreplv1.RunTestsRequest {
-			return &agentreplv1.RunTestsRequest{Workspace: testsWorkspace(t, h, "pre_deploy: {}\ndeploy:\n  hook:\n    script:\n      path: bin/deploy.sh\n      timeout_seconds: 60\n  runs_for:\n    main: {}\n"), Run: oneHarness(), Requester: agent()}
+			return &agentreplv1.RunTestsRequest{Workspace: testsWorkspace(t, h, "pre_deploy: {}\ndeploy:\n  user_or_workspace:\n    hook:\n      script:\n        path: bin/deploy.sh\n        timeout_seconds: 60\n    runs_for:\n      main: {}\n"), Run: oneHarness(), Requester: agent()}
 		}, check: func(e *agentreplv1.RunTestsError) bool {
 			return strings.Contains(e.GetRunnerFailed().GetDetail(), "names no agent_repl_suites test script")
 		}},

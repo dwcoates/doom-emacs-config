@@ -14,6 +14,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/headless"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/lifecycleconfig"
 	"agent-repld/internal/prompts"
 	"agent-repld/internal/replyquote"
 	"agent-repld/internal/resolve/feed"
@@ -189,6 +190,14 @@ func (v *verbs) create(ctx context.Context, spec CreateSpec) (_ wsm.Workspace, e
 		}
 	}
 
+	// THE LIFECYCLE CONFIG IS READ BEFORE ANYTHING IS SPENT as well: an
+	// unusable one refuses the create before the naming call, so its creation
+	// stage is never half-run (lifecycle.go).
+	lifecycle, err := v.readLifecycle(global, repoDir)
+	if err != nil {
+		return wsm.Workspace{}, err
+	}
+
 	// The workspace id is minted HERE, before anything is named: it is the
 	// creation job's key, and it is also what an unnamed, promptless create is
 	// named after — there is nothing else to derive a name from, and the
@@ -306,6 +315,8 @@ func (v *verbs) create(ctx context.Context, spec CreateSpec) (_ wsm.Workspace, e
 	if spec.OneShot {
 		jobOrigin = OriginCreateOneShot
 	}
+	creation := v.creationStageOf(lifecycle, spec, repoDir, targetDir)
+
 	job := wsm.CreationJob{
 		// The pre-minted workspace id lets the geometry be recorded BEFORE
 		// materialization; registration takes the same id and marks the job
@@ -438,7 +449,18 @@ func (v *verbs) create(ctx context.Context, spec CreateSpec) (_ wsm.Workspace, e
 		global.Error(opCreate, "could not resolve the workspace log sink", dlog.Context{"cause": err.Error()})
 		return wsm.Workspace{}, fmt.Errorf("create %q: resolve log sink: %w", branch, err)
 	}
-	log = log.With(dlog.Context{"workspace": string(record.ID)})
+	log = log.With(dlog.Context{"workspace": string(record.ID), "originator": spec.Originator.String()})
+
+	// WHO CREATED IT, AND FOR WHICH SLACK MESSAGE, are recorded before any
+	// hook runs: every later stage's hooks read them (lifecycle.go).
+	if err := v.recordOrigin(ctx, log, record, spec); err != nil {
+		return wsm.Workspace{}, err
+	}
+	// THE CREATION STAGE'S SCRIPTS RUN NOW, before any session comes up, so
+	// a failed one undoes a create that started nothing.
+	if err := v.runCreationScripts(ctx, log, record, spec, creation); err != nil {
+		return wsm.Workspace{}, err
+	}
 
 	// The spawn facts the fleet reads at bring-up. The model and permission
 	// mode are recorded HERE, before any session exists, because
@@ -509,7 +531,7 @@ func (v *verbs) create(ctx context.Context, spec CreateSpec) (_ wsm.Workspace, e
 		log.Info(opCreate, "created a workspace with no initial prompt; its first prompt starts its session", nil)
 	}
 
-	if err := v.submitInitialPrompt(ctx, log, record, spec, policy); err != nil {
+	if err := v.submitInitialPrompt(ctx, log, record, spec, policy, creation); err != nil {
 		return wsm.Workspace{}, err
 	}
 
@@ -575,6 +597,16 @@ func mintedPermissionMode(requested string) string {
 // validateCreate refuses the forms that cannot be built, before anything is
 // minted or written.
 func (v *verbs) validateCreate(log dlog.Logger, spec CreateSpec) error {
+	// EVERY CREATOR STATES WHO IT IS (lifecycleconfig.Originator): the zero
+	// value is no kind, so a spec that left it unset is its builder's defect.
+	if spec.Originator == 0 {
+		log.Error(opCreate, "a create spec names no originator", nil)
+		return errors.New("create: the spec names no originator; every creator states whether it is the emoji-ack system or the user or a workspace")
+	}
+	if spec.Originator == lifecycleconfig.OriginatorEmojiAck && spec.SlackThread == "" {
+		log.Error(opCreate, "an emoji-ack create names no Slack message", nil)
+		return errors.New("create: an emoji-ack create names the Slack message it was dispatched for")
+	}
 	// A BASE IS A MERGE WORKSPACE'S ALONE: every other workspace is cut from
 	// its source's tip, which no request names.
 	if spec.BaseRef != "" && spec.MergeOf == nil {
@@ -1015,9 +1047,13 @@ func filesItself(parent *ids.WorkspaceID, merge bool) bool {
 // subsection placement note when its repository has subsections. A one-shot
 // prompt is DECORATED last: the autonomous preamble, the composed message,
 // and the repository's completion directive.
-func (v *verbs) submitInitialPrompt(ctx context.Context, log dlog.Logger, record wsm.Workspace, spec CreateSpec, policy prompts.Source) error {
+func (v *verbs) submitInitialPrompt(ctx context.Context, log dlog.Logger, record wsm.Workspace, spec CreateSpec, policy prompts.Source, creation creationStage) error {
 	if strings.TrimSpace(spec.InitialPrompt) == "" {
-		log.Debug(opCreate, "created without an initial prompt", nil)
+		if creation.hasCreationPrompts() {
+			log.Info(opCreate, "created without an initial prompt; the creation stage's prompt hooks have no prompt to join, and are not run", nil)
+		} else {
+			log.Debug(opCreate, "created without an initial prompt", nil)
+		}
 		return nil
 	}
 	text := spec.InitialPrompt
@@ -1047,6 +1083,16 @@ func (v *verbs) submitInitialPrompt(ctx context.Context, log dlog.Logger, record
 			}
 			text = decorated
 		}
+	}
+	// THE CREATION STAGE'S PROMPTS JOIN THE INITIAL PROMPT, after the
+	// commission and its notes and before a one-shot's completion directive,
+	// so they cost no turn of their own (lifecycle.go).
+	prompts, err := creationPrompts(log, spec, creation)
+	if err != nil {
+		return err
+	}
+	if prompts != "" {
+		text = text + "\n\n" + prompts
 	}
 	if spec.OneShot {
 		decorated, err := v.decorateOneShot(text, policy)
@@ -1119,13 +1165,15 @@ func (v *verbs) CreateMergeWorkspace(ctx context.Context, requester wsm.Workspac
 	}
 	parent, maker := requester.ID, origin.Maker
 	return v.Create(ctx, CreateSpec{
-		RepoDir:   repoDir,
-		BaseRef:   base,
-		Parent:    &parent,
-		ForkFrom:  &maker,
-		Requester: &parent,
-		MergeOf:   &origin,
-		MergeName: name,
+		// A MERGE WORKSPACE IS THE QUEUE'S, made for a workspace's request.
+		Originator: lifecycleconfig.OriginatorUserOrWorkspace,
+		RepoDir:    repoDir,
+		BaseRef:    base,
+		Parent:     &parent,
+		ForkFrom:   &maker,
+		Requester:  &parent,
+		MergeOf:    &origin,
+		MergeName:  name,
 	})
 }
 

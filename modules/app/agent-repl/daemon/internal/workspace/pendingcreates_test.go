@@ -14,6 +14,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/headless"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/lifecycleconfig"
 	"agent-repld/internal/netstate"
 	"agent-repld/internal/prompts"
 	"agent-repld/internal/wsm"
@@ -359,7 +360,7 @@ func TestAnIdenticalRequestJoinsTheCreateInFlight(t *testing.T) {
 }
 
 func TestDistinctRequestsAreDistinctCreates(t *testing.T) {
-	base := CreateSpec{RepoDir: "/r", InitialPrompt: "fix the login bug"}
+	base := CreateSpec{Originator: lifecycleconfig.OriginatorUserOrWorkspace, RepoDir: "/r", InitialPrompt: "fix the login bug"}
 	p1 := wsm.PriorityP1
 	tests := []struct {
 		name       string
@@ -384,7 +385,7 @@ func TestDistinctRequestsAreDistinctCreates(t *testing.T) {
 		{name: "a model does not", change: func(s *CreateSpec) { s.Model = "opus" }},
 		{name: "a priority does not", change: func(s *CreateSpec) { s.Priority = &p1 }},
 		{name: "deploy hooks do not", change: func(s *CreateSpec) {
-			s.DeployHooks.PreDeploy = []*repoconfigv1.DeployHook{{}}
+			s.DeployHooks.PreDeploy = []*repoconfigv1.Hook{{}}
 		}},
 	}
 	for _, tc := range tests {
@@ -410,13 +411,14 @@ func TestAHeldRequestSurvivesItsEncoding(t *testing.T) {
 	// Arrange
 	p2 := wsm.PriorityP2
 	spec := CreateSpec{
+		Originator: lifecycleconfig.OriginatorEmojiAck, SlackThread: "https://w.slack.com/archives/C1/p1730000000123456",
 		RepoDir: "/r", InitialPrompt: "fix it", OneShot: true, FromOrigin: true, Landing: &wsm.LandingChoice{},
 		ContextWorkspace: ptr(ids.WorkspaceID("ctx")), Parent: ptr(ids.WorkspaceID("owner")),
 		ContextSelection: &ContextSelection{Kind: ContextSelectionBubble, Row: "row-1", Markdown: "the text"},
 		ForkFrom:         ptr(ids.WorkspaceID("source")), Requester: ptr(ids.WorkspaceID("asker")),
 		OwnerNotice: "land it", ConsentedUngatedMode: "bypassPermissions", Name: "n", Model: "opus",
 		PermissionMode: "bypassPermissions", Priority: &p2,
-		DeployHooks: wsm.DeployHooks{PreDeploy: []*repoconfigv1.DeployHook{{}}},
+		DeployHooks: wsm.DeployHooks{PreDeploy: []*repoconfigv1.Hook{{}}},
 	}
 
 	// Act
@@ -449,7 +451,7 @@ func TestAHeldRequestKeepsItsLandingTarget(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
-			spec := CreateSpec{RepoDir: "/r", InitialPrompt: "fix it", Landing: tt.landing}
+			spec := CreateSpec{Originator: lifecycleconfig.OriginatorUserOrWorkspace, RepoDir: "/r", InitialPrompt: "fix it", Landing: tt.landing}
 
 			// Act
 			encoded, err := encodeHeldSpec(spec)
@@ -551,3 +553,26 @@ func TestTheShippedDequeuedBriefSplices(t *testing.T) {
 
 // ptr answers a pointer to V.
 func ptr[T any](v T) *T { return &v }
+
+func TestAHeldRequestFromBeforeOriginatorsResumesAsAUserOrWorkspaceCreate(t *testing.T) {
+	// Arrange: a held create a build that recorded no originator wrote.
+	encoded := `{"repo_dir":"/r","initial_prompt":"fix it"}`
+
+	// Act
+	spec, err := decodeHeldSpec(encoded)
+
+	// Assert
+	if err != nil || spec.Originator != lifecycleconfig.OriginatorUserOrWorkspace {
+		t.Fatalf("decodeHeldSpec = %+v, %v; want a user_or_workspace create", spec, err)
+	}
+}
+
+func TestAHeldRequestNamingAnUnknownOriginatorIsRefused(t *testing.T) {
+	// Act
+	_, err := decodeHeldSpec(`{"repo_dir":"/r","originator":"emoji"}`)
+
+	// Assert
+	if err == nil {
+		t.Fatal("decodeHeldSpec succeeded, want the unknown originator refused")
+	}
+}

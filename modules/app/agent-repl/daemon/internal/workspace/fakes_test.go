@@ -17,6 +17,7 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	repoconfigv1 "agentrepl/proto/repoconfig/v1"
 	shimv1 "agentrepl/proto/shim/v1"
 
 	"agent-repld/internal/account"
@@ -30,6 +31,7 @@ import (
 	"agent-repld/internal/headless"
 	"agent-repld/internal/health"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/lifecycleconfig"
 	"agent-repld/internal/merge"
 	"agent-repld/internal/netstate"
 	"agent-repld/internal/promptqueue"
@@ -40,8 +42,8 @@ import (
 	"agent-repld/internal/resolve/sidebar"
 	"agent-repld/internal/resolve/topbar"
 	"agent-repld/internal/rollout"
+	"agent-repld/internal/scriptrunner"
 	"agent-repld/internal/shimlife"
-	"agent-repld/internal/slackpost"
 	"agent-repld/internal/wsm"
 )
 
@@ -255,24 +257,12 @@ type fakeDB struct {
 	slackOrigins       map[ids.WorkspaceID]string
 	slackOriginErr     error
 	slackOriginReadErr error
-	// slackOpened are the workspaces whose opening post is claimed;
-	// slackOpeningErr fails the claim.
-	slackOpened     map[ids.WorkspaceID]bool
-	slackOpeningErr error
-	// slackLinkPosts are each workspace's posted links, in claim order, as
-	// the store keeps them; slackClaimErr fails a link's claim,
-	// slackRecordErr the record of its ts, slackMarkErr the mark of its
-	// merge, and slackPostsReadErr the read of them all.
-	slackLinkPosts    map[ids.WorkspaceID][]wsm.SlackLinkPost
-	slackClaimErr     error
-	slackRecordErr    error
-	slackMarkErr      error
-	slackPostsReadErr error
-	// summaries answers WorkspaceSummaryOf; summaryErr fails it.
-	summaries    map[ids.WorkspaceID]wsm.WorkspaceSummary
-	summaryErr   error
-	linksErr     error
-	linksReadErr error
+	// originators are the recorded originators; originatorErr fails a
+	// record.
+	originators   map[ids.WorkspaceID]string
+	originatorErr error
+	linksErr      error
+	linksReadErr  error
 	// linkSets is every link set the verbs wrote, in order.
 	linkSets []wsm.LinkSet
 	// prSubs answers WorkspacePullRequestSubscriptions.
@@ -826,7 +816,10 @@ func (d *fakeDB) SetWorkspaceLink(_ context.Context, id ids.WorkspaceID, set wsm
 		d.links = map[ids.WorkspaceID][]wsm.WorkspaceLink{}
 	}
 	links := d.links[id]
-	link := wsm.WorkspaceLink{URL: url, Label: label, Owned: set.Owned, PullRequest: set.PullRequest}
+	if set.Announces != "" && !slices.ContainsFunc(d.links[id], func(l wsm.WorkspaceLink) bool { return l.URL == set.Announces }) {
+		return nil, &wsm.UnknownAnnouncedLinkError{URL: set.Announces}
+	}
+	link := wsm.WorkspaceLink{URL: url, Label: label, Owned: set.Owned, PullRequest: set.PullRequest, Announces: set.Announces}
 	if i := slices.IndexFunc(links, func(l wsm.WorkspaceLink) bool { return l.URL == url }); i >= 0 {
 		link.Shown = links[i].Shown
 		links = slices.Delete(links, i, i+1)
@@ -886,6 +879,19 @@ func (d *fakeDB) SetWorkspaceSlackOrigin(_ context.Context, id ids.WorkspaceID, 
 		d.slackOrigins = map[ids.WorkspaceID]string{}
 	}
 	d.slackOrigins[id] = url
+	return nil
+}
+
+// SetWorkspaceOriginator records who created the workspace; originatorErr
+// fails it and records nothing.
+func (d *fakeDB) SetWorkspaceOriginator(_ context.Context, id ids.WorkspaceID, originator string) error {
+	if d.originatorErr != nil {
+		return d.originatorErr
+	}
+	if d.originators == nil {
+		d.originators = map[ids.WorkspaceID]string{}
+	}
+	d.originators[id] = originator
 	return nil
 }
 
@@ -2892,51 +2898,52 @@ func (s *fakeShim) KillSession(_ context.Context, force bool) error {
 	return nil
 }
 
-// fakeSlack is a slackpost.Poster: it records every reply and reaction, and
-// answers each reply posted as the next message ts ("ts-1", "ts-2", ...) or
-// err when set, and each reaction reactErr. onReply, when set, runs while a
-// reply is in flight.
-type fakeSlack struct {
-	onReply func()
-	// bounded records, for every reply and reaction in order, whether its
-	// context carried a deadline.
-	bounded   []bool
-	replies   []slackReply
-	reactions []slackReaction
-	err       error
-	reactErr  error
+// fakeHookRunner is a merge.HookScriptRunner: it records every script run and
+// answers each in turn from runs (an exit of 0 once they run out), or err.
+type fakeHookRunner struct {
+	calls []hookRun
+	runs  []scriptrunner.Run
+	err   error
 }
 
-// slackReply is one reply fakeSlack was asked to post.
-type slackReply struct {
-	thread slackpost.Thread
-	body   string
+// hookRun is one script fakeHookRunner was asked to run.
+type hookRun struct {
+	dir  string
+	argv []string
+	env  []string
 }
 
-// slackReaction is one reaction fakeSlack was asked to add.
-type slackReaction struct {
-	channel, ts, emoji string
-}
-
-func (s *fakeSlack) Reply(ctx context.Context, thread slackpost.Thread, markdown string) (slackpost.Posted, error) {
-	_, bounded := ctx.Deadline()
-	s.bounded = append(s.bounded, bounded)
-	s.replies = append(s.replies, slackReply{thread: thread, body: markdown})
-	if s.onReply != nil {
-		s.onReply()
+func (r *fakeHookRunner) RunLinesWith(_ context.Context, dir string, argv []string, opts scriptrunner.Options, _ func(string)) (scriptrunner.Run, error) {
+	r.calls = append(r.calls, hookRun{dir: dir, argv: argv, env: opts.Env})
+	if r.err != nil {
+		return scriptrunner.Run{}, r.err
 	}
-	if s.err != nil {
-		return slackpost.Posted{}, s.err
+	if len(r.runs) == 0 {
+		return scriptrunner.Run{}, nil
 	}
-	ts := fmt.Sprintf("ts-%d", len(s.replies))
-	return slackpost.Posted{TS: ts, Permalink: "https://w.slack.com/archives/C1/p" + ts}, nil
+	run := r.runs[0]
+	r.runs = r.runs[1:]
+	return run, nil
 }
 
-func (s *fakeSlack) React(ctx context.Context, channel, ts, emoji string) error {
-	_, bounded := ctx.Deadline()
-	s.bounded = append(s.bounded, bounded)
-	s.reactions = append(s.reactions, slackReaction{channel: channel, ts: ts, emoji: emoji})
-	return s.reactErr
+// fakeLifecycle is a lifecycleconfig.Files: it answers cfg, or err, for every
+// repository, and records the roots it was asked about. A fixture's
+// repositories state no config unless a test sets one.
+type fakeLifecycle struct {
+	cfg   *repoconfigv1.LifecycleConfig
+	err   error
+	roots []string
+}
+
+func (l *fakeLifecycle) Load(root string) (*repoconfigv1.LifecycleConfig, error) {
+	l.roots = append(l.roots, root)
+	if l.err != nil {
+		return nil, l.err
+	}
+	if l.cfg == nil {
+		return nil, &lifecycleconfig.MissingError{Path: lifecycleconfig.Path(root)}
+	}
+	return l.cfg, nil
 }
 
 // fakeBrowser is an externalbrowser.Opener.
@@ -3268,7 +3275,9 @@ type fixture struct {
 	host       *fakeHost
 	banners    *fakeBanners
 	browser    *fakeBrowser
-	slack      *fakeSlack
+	hooks      *fakeHookRunner
+	lifecycle  *fakeLifecycle
+	stateDir   string
 	// anchors anchors an owned pull-request link's subscription.
 	anchors *fakeAnchors
 	fleet   *fakeSessions
@@ -3366,7 +3375,9 @@ func newFixture(t *testing.T) *fixture {
 		host:       &fakeHost{},
 		banners:    &fakeBanners{},
 		browser:    &fakeBrowser{},
-		slack:      &fakeSlack{},
+		hooks:      &fakeHookRunner{},
+		lifecycle:  &fakeLifecycle{},
+		stateDir:   t.TempDir(),
 		anchors:    &fakeAnchors{},
 		fleet:      newFakeSessions(),
 		threads:    &fakeThreadGraphs{},
@@ -3410,7 +3421,7 @@ func newFixture(t *testing.T) *fixture {
 			return rec
 		},
 		DB: f.db, Derived: f.derived, Git: f.git, Creates: f.creates, Accounts: f.account, PullOwners: f.pullOwners, Queue: f.queue, TurnStops: f.queue, Merge: f.merge,
-		Rollout: f.rollout, Feed: f.feed, Footer: f.footer, Topbar: stubTopbar{picked: &f.topbarPicked, parked: &f.topbarParked, coldGates: &f.topbarColdGates, accounts: &f.topbarAccounts, loginDefaults: &f.topbarLoginDefaults, effortSettings: &f.topbarEffortSettings, warnings: &f.topbarWarnings, links: &f.topbarLinks, names: &f.topbarNames, namings: &f.topbarNamings}, Browser: f.browser, Slack: f.slack, PullRequests: f.anchors,
+		Rollout: f.rollout, Feed: f.feed, Footer: f.footer, Topbar: stubTopbar{picked: &f.topbarPicked, parked: &f.topbarParked, coldGates: &f.topbarColdGates, accounts: &f.topbarAccounts, loginDefaults: &f.topbarLoginDefaults, effortSettings: &f.topbarEffortSettings, warnings: &f.topbarWarnings, links: &f.topbarLinks, names: &f.topbarNames, namings: &f.topbarNamings}, Browser: f.browser, HookRunner: f.hooks, Lifecycle: f.lifecycle, StateDir: f.stateDir, PullRequests: f.anchors,
 		Sidebar: f.sidebar, Host: f.host, Banners: f.banners, Sessions: f.fleet, Threads: f.threads, ColdGateAnswers: &f.gateAnswers, SettingsVisits: f.ensureVisits(), Drain: &f.visitDrain,
 		Headless:   f.headless,
 		Health:     f.health,

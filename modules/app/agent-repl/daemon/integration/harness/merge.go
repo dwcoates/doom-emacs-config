@@ -5,7 +5,7 @@ import (
 	repoconfigv1 "agentrepl/proto/repoconfig/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
-	"agent-repld/internal/deployconfig"
+	"agent-repld/internal/lifecycleconfig"
 )
 
 // merge.go holds the merge-request shapes and the landing wait that the daemon
@@ -87,11 +87,27 @@ func Create(repository *workspacev1.RepositoryRef, edits ...CreateEdit) *agentre
 		Form:          &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{Relationship: Peer()}},
 		Requester:     User(),
 		ContextOrigin: Fresh(),
+		Originator:    UserOrWorkspace(),
 	}
 	for _, edit := range edits {
 		edit(req)
 	}
 	return req
+}
+
+// UserOrWorkspace is the originator of every create the user or a workspace
+// makes.
+func UserOrWorkspace() *agentreplv1.WorkspaceOriginator {
+	return &agentreplv1.WorkspaceOriginator{Originator: &agentreplv1.WorkspaceOriginator_UserOrWorkspace{UserOrWorkspace: &agentreplv1.WorkspaceOriginatorUserOrWorkspace{}}}
+}
+
+// EmojiAck is the originator of a create the Slack emoji-ack system makes,
+// for the Slack message THREAD.
+func EmojiAck(thread string) CreateEdit {
+	return func(req *agentreplv1.CreateWorkspaceRequest) {
+		req.Originator = &agentreplv1.WorkspaceOriginator{Originator: &agentreplv1.WorkspaceOriginator_EmojiAck{EmojiAck: &agentreplv1.WorkspaceOriginatorEmojiAck{}}}
+		req.SlackOrigin = &agentreplv1.CreateWorkspaceSlackOrigin{ThreadUrl: thread}
+	}
 }
 
 // Standard edits the standard form.
@@ -133,7 +149,7 @@ func AsyncMerge(repository *workspacev1.RepositoryRef, requester *workspacev1.Wo
 		edit(async)
 	}
 	return &agentreplv1.CreateWorkspaceRequest{Repository: repository, Requester: AskedBy(requester), ContextOrigin: Fork(requester),
-		Form: &agentreplv1.CreateWorkspaceRequest_AsyncMerge{AsyncMerge: async}}
+		Originator: UserOrWorkspace(), Form: &agentreplv1.CreateWorkspaceRequest_AsyncMerge{AsyncMerge: async}}
 }
 
 // WithInstruction gives an async merge its resolving instruction.
@@ -196,10 +212,10 @@ func (d *Daemon) AwaitLandingDeployed() {
 }
 
 // PromptHooks are TEXTS as prompt hooks, in order.
-func PromptHooks(texts ...string) []*repoconfigv1.DeployHook {
-	var out []*repoconfigv1.DeployHook
+func PromptHooks(texts ...string) []*repoconfigv1.Hook {
+	var out []*repoconfigv1.Hook
 	for _, text := range texts {
-		out = append(out, deployconfig.PromptHook(text))
+		out = append(out, lifecycleconfig.PromptHook(text))
 	}
 	return out
 }

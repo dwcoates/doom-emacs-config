@@ -158,7 +158,9 @@ var createRefusalArms = map[string]bool{
 	// A branch nothing the daemon serves owns is the repository's state: most
 	// often a landed branch the landed-branch sweep kept, whose record says
 	// why, which the main worktree investigates.
-	ArmNameBranchExists: false,
+	ArmNameBranchExists:       false,
+	ArmLifecycleConfigInvalid: false,
+	ArmCreationHookFailed:     false,
 	// A handover.
 	ArmTransferringAway: false,
 	ArmStandingDown:     false,

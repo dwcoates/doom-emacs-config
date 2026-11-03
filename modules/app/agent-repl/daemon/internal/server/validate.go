@@ -1,7 +1,7 @@
 package server
 
 import (
-	"agent-repld/internal/deployconfig"
+	"agent-repld/internal/lifecycleconfig"
 
 	"fmt"
 	"strings"
@@ -15,7 +15,7 @@ import (
 
 	"agent-repld/internal/prompthandler"
 	"agent-repld/internal/promptorigin"
-	"agent-repld/internal/slackpost"
+	"agent-repld/internal/slacklink"
 )
 
 // THE VALIDATION INVARIANT (ARCHITECTURE.md "Cross-cutting conventions"): one
@@ -556,9 +556,22 @@ func validateCreateWorkspaceRequest(req *agentreplv1.CreateWorkspaceRequest) *co
 		}
 	}
 	if req.SlackOrigin != nil {
-		if _, err := slackpost.ParseThread(req.GetSlackOrigin().GetThreadUrl()); err != nil {
+		if _, err := slacklink.ParseThread(req.GetSlackOrigin().GetThreadUrl()); err != nil {
 			return invalid("slack_origin.thread_url", err.Error())
 		}
+	}
+	// WHO CREATED IT IS STATED, never inferred (agentrepl.v1.WorkspaceOriginator).
+	switch req.GetOriginator().GetOriginator().(type) {
+	case *agentreplv1.WorkspaceOriginator_UserOrWorkspace:
+	case *agentreplv1.WorkspaceOriginator_EmojiAck:
+		if req.GetAsyncMerge() != nil {
+			return invalid("originator.emoji_ack", "an async merge's workspace is the queue's, and the emoji-ack system created none of it")
+		}
+		if req.SlackOrigin == nil {
+			return invalid("originator.emoji_ack", "the emoji-ack system dispatches a workspace for a Slack message, which slack_origin names")
+		}
+	default:
+		return invalid("originator", "every create states who created the workspace: emoji_ack or user_or_workspace")
 	}
 	if req.Priority != nil {
 		if err := validateWorkspacePriority("priority", req.GetPriority()); err != nil {
@@ -681,15 +694,15 @@ func validateCreateWorkspaceAsyncMerge(field string, async *agentreplv1.CreateWo
 }
 
 // validateDeployHooks holds a request's own deploy hooks to the rules a
-// repository's config is held to (deployconfig.CheckHook). Unset is no hooks.
+// repository's config is held to (lifecycleconfig.CheckHook). Unset is no hooks.
 func validateDeployHooks(field string, hooks *agentreplv1.CreateWorkspaceDeployHooks) *connect.Error {
 	for i, hook := range hooks.GetPreDeploy() {
-		if err := deployconfig.CheckHook(fmt.Sprintf("%s.pre_deploy[%d]", field, i), hook); err != nil {
+		if err := lifecycleconfig.CheckHook(fmt.Sprintf("%s.pre_deploy[%d]", field, i), hook); err != nil {
 			return invalid(fmt.Sprintf("%s.pre_deploy[%d]", field, i), err.Error())
 		}
 	}
 	for i, hook := range hooks.GetPostDeploy() {
-		if err := deployconfig.CheckHook(fmt.Sprintf("%s.post_deploy[%d]", field, i), hook); err != nil {
+		if err := lifecycleconfig.CheckHook(fmt.Sprintf("%s.post_deploy[%d]", field, i), hook); err != nil {
 			return invalid(fmt.Sprintf("%s.post_deploy[%d]", field, i), err.Error())
 		}
 	}

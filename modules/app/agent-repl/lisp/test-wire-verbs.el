@@ -167,7 +167,8 @@ relationship, its requester and its context origin, and nothing else."
                      (concat "{\"repository\":{\"id\":\"repo-1\",\"dir\":\"/r/one\"},"
                              "\"standard\":{\"relationship\":{\"peer\":{}}},"
                              "\"requester\":{\"user\":{}},"
-                             "\"contextOrigin\":{\"fresh\":{}}}"))))))
+                             "\"contextOrigin\":{\"fresh\":{}},"
+                             "\"originator\":{\"userOrWorkspace\":{}}}"))))))
 
 (ert-deftest agent-repl-test-wire-verbs-create-standard-initial-prompt ()
   "A standard create's initial prompt encodes through the UserSaid codec."
@@ -2990,17 +2991,17 @@ carries."
   "FinishWorkspaceError's `no_deploy_config' arm decodes the path looked for."
   (agent-repl-test-wire-verbs--with-common
     (should (equal (agent-repl-wire-decode-finish-workspace-error
-                    (agent-repl-test-wire-verbs--parse "{\"noDeployConfig\":{\"path\":\"/r/.agent-repl/deploy.yaml\"}}"))
-                   '(:cause (:arm :no-deploy-config :value (:path "/r/.agent-repl/deploy.yaml")))))))
+                    (agent-repl-test-wire-verbs--parse "{\"noDeployConfig\":{\"path\":\"/r/.agent-repl/lifecycle.yaml\"}}"))
+                   '(:cause (:arm :no-deploy-config :value (:path "/r/.agent-repl/lifecycle.yaml")))))))
 
 (ert-deftest agent-repl-test-wire-verbs-finish-error-deploy-config-invalid-arm ()
   "FinishWorkspaceError's `deploy_config_invalid' arm decodes its path and why."
   (agent-repl-test-wire-verbs--with-common
     (should (equal (agent-repl-wire-decode-finish-workspace-error
                     (agent-repl-test-wire-verbs--parse
-                     "{\"deployConfigInvalid\":{\"path\":\"/r/.agent-repl/deploy.yaml\",\"detail\":\"pre_deploy is required\"}}"))
+                     "{\"deployConfigInvalid\":{\"path\":\"/r/.agent-repl/lifecycle.yaml\",\"detail\":\"pre_deploy is required\"}}"))
                    '(:cause (:arm :deploy-config-invalid
-                             :value (:path "/r/.agent-repl/deploy.yaml" :detail "pre_deploy is required")))))))
+                             :value (:path "/r/.agent-repl/lifecycle.yaml" :detail "pre_deploy is required")))))))
 
 (ert-deftest agent-repl-test-wire-verbs-finish-error-owner-lands-arm ()
   "FinishWorkspaceError's `owner_lands' arm decodes the owner that lands."
@@ -6653,3 +6654,33 @@ instead diverges from it unseen."
     (should (equal (agent-repl-wire-decode-update-held-prompt-error
                     (agent-repl-test-wire-verbs--parse (format "{\"%s\":{}}" (car case))))
                    (list :cause (list :arm (cdr case) :value nil))))))
+
+;;;; ---- CreateWorkspace: the lifecycle refusals ------------------------
+
+(ert-deftest agent-repl-test-wire-verbs-create-states-the-users-originator ()
+  "Every create the editor sends states the user_or_workspace originator:
+the editor never speaks for the Slack emoji-ack system."
+  (agent-repl-test-wire-verbs--with-common
+    (let* ((request (list :repository agent-repl-test-wire-verbs--repo
+                          :form '(:arm :standard :value nil)))
+           (encoded (agent-repl-test-wire-verbs--encode-create request)))
+      (should (equal (json-serialize (cdr (assq 'originator encoded)))
+                     "{\"userOrWorkspace\":{}}")))))
+
+(ert-deftest agent-repl-test-wire-verbs-create-error-creation-hook-failed ()
+  "CreateWorkspaceError's `creation_hook_failed' arm decodes the hook, how
+it failed and its log."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-create-workspace-error
+                    (agent-repl-test-wire-verbs--parse "{\"creationHookFailed\":{\"path\":\"bin/setup.sh\",\"detail\":\"it exited 2\",\"logPath\":\"/s/creation-1-0.log\"}}"))
+                   '(:cause (:arm :creation-hook-failed
+                             :value (:path "bin/setup.sh" :detail "it exited 2" :log-path "/s/creation-1-0.log")))))))
+
+(ert-deftest agent-repl-test-wire-verbs-create-error-lifecycle-config-invalid ()
+  "CreateWorkspaceError's `lifecycle_config_invalid' arm decodes the file
+and why."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-create-workspace-error
+                    (agent-repl-test-wire-verbs--parse "{\"lifecycleConfigInvalid\":{\"path\":\"/r/.agent-repl/lifecycle.yaml\",\"detail\":\"pre_deploy is required\"}}"))
+                   '(:cause (:arm :lifecycle-config-invalid
+                             :value (:path "/r/.agent-repl/lifecycle.yaml" :detail "pre_deploy is required")))))))

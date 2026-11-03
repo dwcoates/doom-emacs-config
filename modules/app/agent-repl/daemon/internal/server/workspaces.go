@@ -20,6 +20,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/lifecycleconfig"
 	"agent-repld/internal/merge"
 	"agent-repld/internal/semver"
 	"agent-repld/internal/workspace"
@@ -127,6 +128,7 @@ func (s *server) CreateWorkspace(
 		Requester:   requesterID(req.Msg.GetRequester()),
 		ForkFrom:    forkSourceID(req.Msg.GetContextOrigin()),
 		SlackThread: req.Msg.GetSlackOrigin().GetThreadUrl(),
+		Originator:  originatorOf(req.Msg.GetOriginator()),
 	}
 	if standard := req.Msg.GetStandard(); standard != nil {
 		spec.InitialPrompt = s.saidText(s.log, "standard.initial_prompt", standard.GetInitialPrompt())
@@ -1227,7 +1229,8 @@ func (s *server) ChangeWorkspaceLinks(
 	var err error
 	switch change := req.Msg.GetChange().(type) {
 	case *agentreplv1.ChangeWorkspaceLinksRequest_Set:
-		links, err = s.deps.Verbs.SetLink(ctx, ws, change.Set.GetUrl(), change.Set.GetLabel(), change.Set.GetOwnership().GetOwned() != nil)
+		owned := change.Set.GetOwnership().GetOwned()
+		links, err = s.deps.Verbs.SetLink(ctx, ws, change.Set.GetUrl(), change.Set.GetLabel(), owned != nil, owned.GetAnnounces().GetUrl())
 	case *agentreplv1.ChangeWorkspaceLinksRequest_Remove:
 		links, err = s.deps.Verbs.RemoveLink(ctx, ws, change.Remove.GetUrl())
 	case *agentreplv1.ChangeWorkspaceLinksRequest_Show:
@@ -1598,4 +1601,12 @@ func (s *server) subjectForField(
 		return resolved{}, s.refuse(s.log, rpc, resp, *r), true
 	}
 	return subject, nil, false
+}
+
+// originatorOf is the kind a create's validated originator names.
+func originatorOf(originator *agentreplv1.WorkspaceOriginator) lifecycleconfig.Originator {
+	if originator.GetEmojiAck() != nil {
+		return lifecycleconfig.OriginatorEmojiAck
+	}
+	return lifecycleconfig.OriginatorUserOrWorkspace
 }

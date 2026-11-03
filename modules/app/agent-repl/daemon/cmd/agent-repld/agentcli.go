@@ -28,8 +28,8 @@ import (
 	workspacev1 "agentrepl/proto/workspace/v1"
 	"agentrepl/protohelpers/rosterwalk"
 
-	"agent-repld/internal/deployconfig"
 	"agent-repld/internal/envc"
+	"agent-repld/internal/lifecycleconfig"
 	"agent-repld/internal/prompthandler"
 	"agent-repld/internal/protoarm"
 	"agent-repld/internal/prwatch"
@@ -147,11 +147,11 @@ type cliCommand struct {
 // cliNouns are every noun's subcommands.
 var cliNouns = map[string]map[string]cliCommand{
 	workspaceNoun: {
-		"create":           {usage: "create -repository here|DIR -relationship child|peer [-parent WS] [-lands-into WS|main] [-origin-master] [-owner-notice TEXT] -context fresh|fork [-fork WS] [-one-shot] [-prompt TEXT] [-name NAME] [-model M] [-priority p05|p1|p2|p3] [-pre-deploy-prompt TEXT] [-pre-deploy-script PATH:SECONDS] [-post-deploy-prompt TEXT] [-post-deploy-script PATH:SECONDS] [-slack-thread URL] [-as-user]", run: workspaceCreate},
+		"create":           {usage: "create -repository here|DIR -relationship child|peer [-parent WS] [-lands-into WS|main] [-origin-master] [-owner-notice TEXT] -context fresh|fork [-fork WS] [-one-shot] [-prompt TEXT] [-name NAME] [-model M] [-priority p05|p1|p2|p3] [-pre-deploy-prompt TEXT] [-pre-deploy-script PATH:SECONDS] [-post-deploy-prompt TEXT] [-post-deploy-script PATH:SECONDS] [-slack-thread URL] [-originator emoji-ack|user-or-workspace] [-as-user]", run: workspaceCreate},
 		"async-merge":      {usage: "async-merge -name NAME -branch BRANCH (-maker WS | -maker-subagent ID) -context-fork WS -target primary|maker -placement back|front|behind=MERGE [-instruction TEXT] [-close-after WS] [-cleanup-worktree] [-compact-after] [-pre-deploy-prompt TEXT] [-pre-deploy-script PATH:SECONDS] [-post-deploy-prompt TEXT] [-post-deploy-script PATH:SECONDS] [-version-part minor|patch -changelog-line TEXT]", run: workspaceAsyncMerge},
 		"prompt":           {usage: "prompt [-as-user] WS TEXT", run: workspacePrompt},
 		"set":              {usage: "set WS [-hidden|-shown] [-priority p05|p1|p2|p3|none] [-parent WS|-top-level] [-lands-into WS|main] [-one-shot|-not-one-shot] [-await WS|-not-awaiting] [-name NAME] [-remote-control on|off] [-as-user]", run: workspaceSet},
-		"link":             {usage: "link WS (-url URL -label TEXT -owned|-reference | -remove URL | -show URL [-show URL]... | -clear)", run: workspaceLink},
+		"link":             {usage: "link WS (-url URL -label TEXT -owned [-announces URL]|-reference | -remove URL | -show URL [-show URL]... | -clear)", run: workspaceLink},
 		"finished":         {usage: "finished WS -placement back|front|behind=MERGE [-version-part minor|patch -changelog-line TEXT] [-as-user]", run: workspaceFinished},
 		"open":             {usage: "open WS", run: workspaceOpen},
 		"close":            {usage: "close WS [-as-user]", run: workspaceClose},
@@ -494,7 +494,7 @@ func optionalSaid(text string) *conversationv1.UserSaid {
 // hookList is one stage's deploy hooks as its flags name them, in the order
 // given: each -<stage>-prompt and -<stage>-script flag appends one hook.
 type hookList struct {
-	hooks []*repoconfigv1.DeployHook
+	hooks []*repoconfigv1.Hook
 }
 
 // promptFlag appends a prompt hook to its list.
@@ -505,7 +505,7 @@ func (f promptFlag) Set(text string) error {
 	if strings.TrimSpace(text) == "" {
 		return errors.New("a prompt hook is never blank")
 	}
-	f.list.hooks = append(f.list.hooks, deployconfig.PromptHook(text))
+	f.list.hooks = append(f.list.hooks, lifecycleconfig.PromptHook(text))
 	return nil
 }
 
@@ -522,7 +522,7 @@ func (f scriptFlag) Set(value string) error {
 	if err != nil || timeout < 1 {
 		return fmt.Errorf("a script hook's timeout is a whole number of seconds, at least 1, not %q", seconds)
 	}
-	f.list.hooks = append(f.list.hooks, deployconfig.ScriptHook(path, uint32(timeout)))
+	f.list.hooks = append(f.list.hooks, lifecycleconfig.ScriptHook(path, uint32(timeout)))
 	return nil
 }
 
@@ -600,7 +600,8 @@ func workspaceCreate(c *cliCall, args []string) int {
 	model := fs.String("model", "", "the session's model; unset is the daemon's")
 	priority := fs.String("priority", "", "p05, p1, p2 or p3; unset is unprioritized")
 	pre, post := hookFlags(fs)
-	slackThread := fs.String("slack-thread", "", "the link of the Slack message the workspace acts on; the daemon posts into its thread when work begins and when a finish's deploy ends")
+	slackThread := fs.String("slack-thread", "", "the link of the Slack message the workspace acts on; its hooks read it as AGENT_REPL_SLACK_THREAD and {{slack_thread}}")
+	originator := fs.String("originator", originatorUserOrWorkspace, "who creates the workspace: emoji-ack (the Slack emoji-ack system, with -slack-thread) or user-or-workspace")
 	asUser := fs.Bool("as-user", false, "the user asks, not the calling workspace")
 	positionals, ok := c.parse(fs, args)
 	if !ok {
@@ -612,10 +613,14 @@ func workspaceCreate(c *cliCall, args []string) int {
 	if *originMaster && *landsInto != landsIntoMain {
 		return c.usageFailed("-origin-master cuts a workspace landing on main, so it goes with -lands-into main")
 	}
+	stated, known := originatorFlag(*originator)
+	if !known {
+		return c.usageFailed("-originator is %s or %s, not %q", originatorEmojiAck, originatorUserOrWorkspace, *originator)
+	}
 	if !c.dial(*stateDir) {
 		return exitFailure
 	}
-	req := &agentreplv1.CreateWorkspaceRequest{}
+	req := &agentreplv1.CreateWorkspaceRequest{Originator: stated}
 	var good bool
 	if req.Repository, good = c.repository(*repository); !good {
 		return exitFailure
@@ -808,7 +813,8 @@ func workspaceAsyncMerge(c *cliCall, args []string) int {
 	if !ok {
 		return exitFailure
 	}
-	req := &agentreplv1.CreateWorkspaceRequest{Repository: repository, Requester: requester,
+	userOrWorkspace, _ := originatorFlag(originatorUserOrWorkspace)
+	req := &agentreplv1.CreateWorkspaceRequest{Repository: repository, Requester: requester, Originator: userOrWorkspace,
 		ContextOrigin: &agentreplv1.WorkspaceContextOrigin{Origin: &agentreplv1.WorkspaceContextOrigin_Fork{Fork: &agentreplv1.WorkspaceContextOriginFork{Workspace: forkRef}}},
 		Form:          &agentreplv1.CreateWorkspaceRequest_AsyncMerge{AsyncMerge: async}}
 	resp, err := c.client.CreateWorkspace(c.ctx, connect.NewRequest(req))
@@ -1007,6 +1013,24 @@ func workspaceSet(c *cliCall, args []string) int {
 	return exitSuccess
 }
 
+// The -originator spellings.
+const (
+	originatorEmojiAck        = "emoji-ack"
+	originatorUserOrWorkspace = "user-or-workspace"
+)
+
+// originatorFlag reads an -originator spelling into the create's originator,
+// false for a spelling that names none.
+func originatorFlag(spelled string) (*agentreplv1.WorkspaceOriginator, bool) {
+	switch spelled {
+	case originatorEmojiAck:
+		return &agentreplv1.WorkspaceOriginator{Originator: &agentreplv1.WorkspaceOriginator_EmojiAck{EmojiAck: &agentreplv1.WorkspaceOriginatorEmojiAck{}}}, true
+	case originatorUserOrWorkspace:
+		return &agentreplv1.WorkspaceOriginator{Originator: &agentreplv1.WorkspaceOriginator_UserOrWorkspace{UserOrWorkspace: &agentreplv1.WorkspaceOriginatorUserOrWorkspace{}}}, true
+	}
+	return nil, false
+}
+
 // workspaceLink changes one of a workspace's links, the topbar summary's
 // menu: store or relabel one (-url with -label, and -owned or -reference),
 // remove one (-remove), name
@@ -1018,6 +1042,7 @@ func workspaceLink(c *cliCall, args []string) int {
 	label := fs.String("label", "", "the link's label: two to eight words, one sentence")
 	owned := fs.Bool("owned", false, "the workspace's work made what the link points at (a pull request it opened): the daemon follows an owned pull request")
 	reference := fs.Bool("reference", false, "the link points at something apart from the workspace's work (the thread or ticket it came from)")
+	announces := fs.String("announces", "", "with -owned: the url of a link the workspace holds that this one announces (a Slack post saying a pull request was created names that pull request)")
 	remove := fs.String("remove", "", "the url of the link to remove")
 	var show []string
 	fs.Var(repeatedFlag{values: &show, noun: "url"}, "show", "a url the menu shows; repeat it for each, at most five")
@@ -1026,7 +1051,7 @@ func workspaceLink(c *cliCall, args []string) int {
 	if !ok {
 		return exitFailure
 	}
-	req, problem := linkRequest(ref, linkSet{url: *url, label: *label, owned: *owned, reference: *reference}, *remove, show, *clear)
+	req, problem := linkRequest(ref, linkSet{url: *url, label: *label, owned: *owned, reference: *reference, announces: *announces}, *remove, show, *clear)
 	if len(rest) != 0 || problem != "" {
 		if problem == "" {
 			problem = "nothing is positional"
@@ -1039,12 +1064,14 @@ func workspaceLink(c *cliCall, args []string) int {
 
 // linkSet is workspaceLink's set flags.
 type linkSet struct {
-	url, label       string
-	owned, reference bool
+	url, label, announces string
+	owned, reference      bool
 }
 
 // given reports whether any set flag was named.
-func (s linkSet) given() bool { return s.url != "" || s.label != "" || s.owned || s.reference }
+func (s linkSet) given() bool {
+	return s.url != "" || s.label != "" || s.owned || s.reference || s.announces != ""
+}
 
 // linkRequest reads workspaceLink's flags into the request for REF, or names
 // why they do not make one: exactly one change, and a set names its url, its
@@ -1068,7 +1095,14 @@ func linkRequest(ref *workspacev1.WorkspaceRef, set linkSet, remove string, show
 		if set.owned == set.reference {
 			return nil, "a set names exactly one of -owned (the workspace's work made it) and -reference (it only points at it)"
 		}
-		req.Change = &agentreplv1.ChangeWorkspaceLinksRequest_Set{Set: &agentreplv1.ChangeWorkspaceLinksSet{Url: set.url, Label: set.label, Ownership: workspace.LinkOwnershipView(set.owned)}}
+		if set.announces != "" && !set.owned {
+			return nil, "-announces goes with -owned: only a link the workspace's work made announces another"
+		}
+		ownership := workspace.LinkOwnershipView(set.owned)
+		if set.announces != "" {
+			ownership.GetOwned().Announces = &agentreplv1.WorkspaceLinkAnnouncement{Url: set.announces}
+		}
+		req.Change = &agentreplv1.ChangeWorkspaceLinksRequest_Set{Set: &agentreplv1.ChangeWorkspaceLinksSet{Url: set.url, Label: set.label, Ownership: ownership}}
 	case remove != "":
 		req.Change = &agentreplv1.ChangeWorkspaceLinksRequest_Remove{Remove: &agentreplv1.ChangeWorkspaceLinksRemove{Url: remove}}
 	case len(show) > 0:

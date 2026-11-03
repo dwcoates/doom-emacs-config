@@ -496,13 +496,20 @@ repository\='s own config."
   "Encode CreateWorkspaceRequest's `allow_ungated' use site from PRESENT."
   (agent-repl-wire-encode-create-workspace-ungated-consent present))
 
+(defun agent-repl-wire-encode-workspace-originator-user-or-workspace ()
+  "Encode WorkspaceOriginator as its `user_or_workspace\=' arm, which is empty:
+the arm IS the fact."
+  (list (list 'userOrWorkspace)))
+
 (defun agent-repl-wire-encode-create-workspace-request (request)
   "Encode CreateWorkspaceRequest from plist REQUEST.
 REQUEST is (:repository REPO-REF :form ONEOF :requester REQUESTER
 :context-origin ORIGIN :model STRING :priority PRIORITY :allow-ungated
 FLAG).  The repository, the form arm, the requester and the context
 origin are required -- nothing is implied, so a request without one is
-refused before it can be sent.  Everything else is optional and absent
+refused before it can be sent.  The originator is always the user\='s
+(`user_or_workspace\='): the editor never speaks for the Slack emoji-ack
+system.  Everything else is optional and absent
 means what the proto says absence means: the daemon's default model, an
 unprioritized workspace, no ungated consent."
   (let ((message "CreateWorkspaceRequest")
@@ -527,6 +534,10 @@ unprioritized workspace, no ungated consent."
                 (agent-repl-wire-encode-workspace-context-origin
                  (agent-repl-wire-verbs--require message "context_origin" (plist-get request :context-origin))))
           out)
+    ;; THE EDITOR IS THE USER, never the Slack emoji-ack system, so every
+    ;; create it sends states the `user_or_workspace' originator the daemon
+    ;; requires (agentrepl.v1.WorkspaceOriginator).
+    (push (cons 'originator (agent-repl-wire-encode-workspace-originator-user-or-workspace)) out)
     (when (plist-get request :model)
       (push (cons 'model (plist-get request :model)) out))
     (when (plist-get request :priority)
@@ -880,7 +891,7 @@ not decoded: an async merge, a create cut from origin and a create naming
 a landing target are an agent\='s requests, never the editor\='s, so one
 answering an editor create is a breach."
   (let ((message "CreateWorkspaceError"))
-    (agent-repl-wire-verbs--check-keys message json '(ungatedWithoutConsent noSlug briefMissing unknownRepository worktreeCreationFailed spawnFailed oneShotPolicyMissing namingFailed insideTemporaryDirectory unknownForkSource forkSourceHasNoConversation forkSourceHasNoFinishedTurn nameReserved nameHeld nameBranchExists invalidName unknownContextWorkspace unknownOwner ownerNoticeRequired ownerNoticeUnexpected unknownRequester parentNotOpen transferringAway standingDown modelNotInCatalog modelCatalogUnknown))
+    (agent-repl-wire-verbs--check-keys message json '(ungatedWithoutConsent noSlug briefMissing unknownRepository worktreeCreationFailed spawnFailed oneShotPolicyMissing namingFailed insideTemporaryDirectory unknownForkSource forkSourceHasNoConversation forkSourceHasNoFinishedTurn nameReserved nameHeld nameBranchExists invalidName unknownContextWorkspace unknownOwner ownerNoticeRequired ownerNoticeUnexpected unknownRequester parentNotOpen transferringAway standingDown modelNotInCatalog modelCatalogUnknown lifecycleConfigInvalid creationHookFailed))
     (list :cause
           (agent-repl-wire-verbs--decode-oneof
            message "cause" json
@@ -909,7 +920,20 @@ answering an editor create is a breach."
          (list 'standingDown :standing-down #'agent-repl-wire-decode-create-workspace-error-standing-down)
          (list 'modelNotInCatalog :model-not-in-catalog #'agent-repl-wire-decode-create-workspace-model-not-in-catalog)
          (list 'modelCatalogUnknown :model-catalog-unknown #'agent-repl-wire-decode-create-workspace-model-catalog-unknown)
+         (list 'lifecycleConfigInvalid :lifecycle-config-invalid #'agent-repl-wire-decode-deploy-config-invalid)
+         (list 'creationHookFailed :creation-hook-failed #'agent-repl-wire-decode-create-workspace-creation-hook-failed)
          agent-repl-wire-verbs--parent-not-open-arm)))))
+
+(defun agent-repl-wire-decode-create-workspace-creation-hook-failed (json)
+  "Decode CreateWorkspaceCreationHookFailed from JSON into
+\(:path PATH :detail DETAIL :log-path LOG).  A creation-stage hook of the
+repository failed, so the create was undone: PATH is the script (empty for
+a prompt hook), DETAIL how it failed, LOG the file its output was kept in."
+  (let ((message "CreateWorkspaceCreationHookFailed"))
+    (agent-repl-wire-verbs--check-keys message json '(path detail logPath))
+    (list :path (agent-repl-wire-verbs--decode-string message 'path json)
+          :detail (agent-repl-wire-verbs--decode-string message 'detail json)
+          :log-path (agent-repl-wire-verbs--decode-string message 'logPath json))))
 
 (defun agent-repl-wire-decode-create-workspace-response-success (json)
   "Decode CreateWorkspaceResponse's `success' arm from JSON."
@@ -1899,7 +1923,7 @@ teardown\='s end arrives on the WatchDaemon progress channel."
   "Encode FinishWorkspaceRequest from plist REQUEST.
 REQUEST is (:workspace REF :requester REQUESTER :placement PLACEMENT).
 `workspace\' is the workspace whose work is finished; what its deploy then
-does is its repository\='s `.agent-repl/deploy.yaml\'.  All three are
+does is its repository\='s `.agent-repl/lifecycle.yaml\'.  All three are
 required -- nothing is implied.  The editor carries no version increment:
 the user\='s own deploy needs none."
   (agent-repl--log '(:agent-repl-context "a codec call outside a request has no workspace") "elisp.wire.verbs-encode-finish-workspace-request")
@@ -2014,16 +2038,16 @@ of its own to deploy."
     (list :dir (agent-repl-wire-verbs--decode-string message 'dir json))))
 
 (defun agent-repl-wire-decode-deploy-config-missing (json)
-  "Decode DeployConfigMissing from JSON into (:path PATH).
-The repository has no `.agent-repl/deploy.yaml\' at PATH."
-  (let ((message "DeployConfigMissing"))
+  "Decode LifecycleConfigMissing from JSON into (:path PATH).
+The repository has no `.agent-repl/lifecycle.yaml\' at PATH."
+  (let ((message "LifecycleConfigMissing"))
     (agent-repl-wire-verbs--check-keys message json '(path))
     (list :path (agent-repl-wire-verbs--decode-string message 'path json))))
 
 (defun agent-repl-wire-decode-deploy-config-invalid (json)
-  "Decode DeployConfigInvalid from JSON into (:path PATH :detail DETAIL).
-The repository\='s deploy config at PATH could not be used, for DETAIL."
-  (let ((message "DeployConfigInvalid"))
+  "Decode LifecycleConfigInvalid from JSON into (:path PATH :detail DETAIL).
+The repository\='s lifecycle config at PATH could not be used, for DETAIL."
+  (let ((message "LifecycleConfigInvalid"))
     (agent-repl-wire-verbs--check-keys message json '(path detail))
     (list :path (agent-repl-wire-verbs--decode-string message 'path json)
           :detail (agent-repl-wire-verbs--decode-string message 'detail json))))

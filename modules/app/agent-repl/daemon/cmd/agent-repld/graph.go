@@ -43,6 +43,7 @@ import (
 	"agent-repld/internal/heldingress"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/imageorigin"
+	"agent-repld/internal/lifecycleconfig"
 	"agent-repld/internal/lockwatch"
 	"agent-repld/internal/login"
 	"agent-repld/internal/mainsync"
@@ -80,7 +81,6 @@ import (
 	"agent-repld/internal/shimidentity"
 	"agent-repld/internal/shimlife"
 	"agent-repld/internal/signin"
-	"agent-repld/internal/slackpost"
 	"agent-repld/internal/stallbeat"
 	"agent-repld/internal/startslots"
 	"agent-repld/internal/storereader"
@@ -1335,7 +1335,6 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Timings:       p.Metrics,
 		QueueEvents:   merge.QueueObservers{queueNotices, edges},
 		Detached:      detachedRef,
-		Ends:          verbsRef,
 		Names:         verbsRef,
 		InterruptTurn: verbsRef.interruptTurn,
 		PublishHost:   relay.PublishHostWorkspace,
@@ -1357,6 +1356,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		TestMetricsRoot: p.Metrics.Root(),
 		TestRunner:      scripts,
 		HookRunner:      scripts,
+		Builtins:        lifecycleconfig.Builtins{CheckoutRoot: paths.Checkout},
 		SelfAddress:     p.Claim.Address(),
 		Governor:        gateGovernor,
 		Painter:         painter,
@@ -1479,7 +1479,8 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Sessions:          fleet,
 		Headless:          headlessClient,
 		Browser:           browser,
-		Slack:             slackpost.New(slackpost.Config{}),
+		HookRunner:        scripts,
+		StateDir:          p.Layout.Dir(),
 		PullRequests:      pullRequests,
 		PromptsDir:        paths.PromptsDir,
 		CheckoutRoot:      paths.Checkout,

@@ -1461,3 +1461,13 @@ func TestARemoteControlPromptOpensItsTurn(t *testing.T) {
 		t.Fatalf("turn in flight = %v, want the claude.ai prompt's turn", turn)
 	}
 }
+
+func TestAFinishHookPromptIsNamedForTheHook(t *testing.T) {
+	// Act
+	got := AuthorLabel(conversationv1.PromptOrigin_PROMPT_ORIGIN_FINISH_HOOK)
+
+	// Assert
+	if got != "Finish hook" {
+		t.Fatalf("AuthorLabel = %q, want the finish hook named, never the user", got)
+	}
+}

@@ -22,7 +22,7 @@ import (
 
 // merge_test.go exercises FinishWorkspace, UpdateMergeQueue, AnswerMergeQueueOffer
 // and the deploy queue's visible effects (feed sub-feed, footer, roster, host
-// composer) against repositories whose `.agent-repl/deploy.yaml` the harness
+// composer) against repositories whose `.agent-repl/lifecycle.yaml` the harness
 // writes (Repo.DeploysAsAgentRepl for agent-repl's own), with a FAKE bin/test-all.sh
 // (harness.NewTestAllScript) pointed at through AGENT_REPL_TEST_ALL_SCRIPT in
 // harness.Opts.ExtraEnv, and the deploy's fake build at d.Deploy. Conflicts are

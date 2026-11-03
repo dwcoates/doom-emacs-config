@@ -738,7 +738,7 @@ nothing on the stream would ever retire the registration."
   "Enqueue the deploy of WS\='s finished work, run in WS.
 Success means ENQUEUED.  The request is asked by the user and joins the
 back of the queue; what the deploy does is WS\='s repository\='s own
-`.agent-repl/deploy.yaml\=', and a repository with none refuses it.  WS
+`.agent-repl/lifecycle.yaml\=', and a repository with none refuses it.  WS
 closes once its deploy succeeds.  A failed deploy never closes it, and
 its failure is handed back to WS\='s conversation.
 

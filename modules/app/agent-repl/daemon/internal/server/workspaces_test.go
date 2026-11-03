@@ -19,6 +19,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/lifecycleconfig"
 	"agent-repld/internal/merge"
 	"agent-repld/internal/promptqueue"
 	"agent-repld/internal/refusalarm"
@@ -408,6 +409,7 @@ func standardCreate(repoRef *workspacev1.RepositoryRef, opID string) *agentreplv
 		},
 		Requester:     userRequester(),
 		ContextOrigin: freshContext(),
+		Originator:    userOrWorkspaceOriginator(),
 	}
 	if opID != "" {
 		req.OpId = &opID
@@ -961,6 +963,9 @@ func TestChangeWorkspaceLinksHandsTheChangeToTheVerb(t *testing.T) {
 	}{
 		{"set", &agentreplv1.ChangeWorkspaceLinksRequest{Workspace: ref(), Change: &agentreplv1.ChangeWorkspaceLinksRequest_Set{Set: &agentreplv1.ChangeWorkspaceLinksSet{Url: "https://example.com/pr/1", Label: "The pull request", Ownership: workspace.LinkOwnershipView(true)}}},
 			"set https://example.com/pr/1 The pull request owned"},
+		{"set of an announcement", &agentreplv1.ChangeWorkspaceLinksRequest{Workspace: ref(), Change: &agentreplv1.ChangeWorkspaceLinksRequest_Set{Set: &agentreplv1.ChangeWorkspaceLinksSet{Url: "https://w.slack.com/archives/C1/p1", Label: "The pull request's announcement",
+			Ownership: &agentreplv1.WorkspaceLinkOwnership{Ownership: &agentreplv1.WorkspaceLinkOwnership_Owned{Owned: &agentreplv1.WorkspaceLinkOwned{Announces: &agentreplv1.WorkspaceLinkAnnouncement{Url: "https://example.com/pr/1"}}}}}}},
+			"set https://w.slack.com/archives/C1/p1 The pull request's announcement owned announcing https://example.com/pr/1"},
 		{"set of a reference", &agentreplv1.ChangeWorkspaceLinksRequest{Workspace: ref(), Change: &agentreplv1.ChangeWorkspaceLinksRequest_Set{Set: &agentreplv1.ChangeWorkspaceLinksSet{Url: "https://example.com/t/1", Label: "The tracking ticket", Ownership: workspace.LinkOwnershipView(false)}}},
 			"set https://example.com/t/1 The tracking ticket reference"},
 		{"remove", &agentreplv1.ChangeWorkspaceLinksRequest{Workspace: ref(), Change: &agentreplv1.ChangeWorkspaceLinksRequest_Remove{Remove: &agentreplv1.ChangeWorkspaceLinksRemove{Url: "https://example.com/pr/1"}}},
@@ -1037,6 +1042,10 @@ func TestChangeWorkspaceLinksMapsTheVerbsRefusals(t *testing.T) {
 		{name: "unknown_link", refusal: &workspace.Refusal{Arm: workspace.ArmUnknownLink, Fields: map[string]any{"url": "https://absent"}},
 			check: func(e *agentreplv1.ChangeWorkspaceLinksError) bool {
 				return e.GetUnknownLink().GetUrl() == "https://absent"
+			}},
+		{name: "unknown_announced_link", refusal: &workspace.Refusal{Arm: workspace.ArmUnknownAnnouncedLink, Fields: map[string]any{"url": "https://absent"}},
+			check: func(e *agentreplv1.ChangeWorkspaceLinksError) bool {
+				return e.GetUnknownAnnouncedLink().GetUrl() == "https://absent"
 			}},
 		{name: "too_many_shown", refusal: &workspace.Refusal{Arm: workspace.ArmTooManyShown, Fields: map[string]any{"named": uint32(6), "limit": uint32(5)}},
 			check: func(e *agentreplv1.ChangeWorkspaceLinksError) bool {
@@ -1510,14 +1519,14 @@ func TestFinishWorkspaceMapsTheQueuesRefusalsOntoItsArms(t *testing.T) {
 		{name: "already deploying", refusal: &merge.RefusalError{Arm: merge.ArmAlreadyMerging, Reason: "already running"},
 			got: func(e *agentreplv1.FinishWorkspaceError) bool { return e.GetAlreadyDeploying() != nil }},
 		{name: "no deploy config", refusal: &merge.RefusalError{Arm: merge.ArmNoDeployConfig, Reason: "none",
-			Fields: map[string]any{"path": "/repo/.agent-repl/deploy.yaml"}},
+			Fields: map[string]any{"path": "/repo/.agent-repl/lifecycle.yaml"}},
 			got: func(e *agentreplv1.FinishWorkspaceError) bool {
-				return e.GetNoDeployConfig().GetPath() == "/repo/.agent-repl/deploy.yaml"
+				return e.GetNoDeployConfig().GetPath() == "/repo/.agent-repl/lifecycle.yaml"
 			}},
 		{name: "an unusable deploy config", refusal: &merge.RefusalError{Arm: merge.ArmDeployConfigInvalid, Reason: "bad",
-			Fields: map[string]any{"path": "/repo/.agent-repl/deploy.yaml", "detail": "pre_deploy is required"}},
+			Fields: map[string]any{"path": "/repo/.agent-repl/lifecycle.yaml", "detail": "pre_deploy is required"}},
 			got: func(e *agentreplv1.FinishWorkspaceError) bool {
-				return e.GetDeployConfigInvalid().GetPath() == "/repo/.agent-repl/deploy.yaml" && e.GetDeployConfigInvalid().GetDetail() == "pre_deploy is required"
+				return e.GetDeployConfigInvalid().GetPath() == "/repo/.agent-repl/lifecycle.yaml" && e.GetDeployConfigInvalid().GetDetail() == "pre_deploy is required"
 			}},
 		{name: "placed behind a merge not in line", refusal: &merge.RefusalError{Arm: merge.ArmPlacementBehindNotInLine, Reason: "none",
 			Fields: map[string]any{"behind": "two"}},
@@ -2081,6 +2090,7 @@ func oneShotCreate(repoRef *workspacev1.RepositoryRef, about *workspacev1.Worksp
 		Form:          &agentreplv1.CreateWorkspaceRequest_OneShot{OneShot: oneShot},
 		Requester:     userRequester(),
 		ContextOrigin: freshContext(),
+		Originator:    userOrWorkspaceOriginator(),
 	}
 }
 
@@ -3176,6 +3186,74 @@ func TestRegisterWorkspacesRefusesAMalformedRequest(t *testing.T) {
 			}
 			if len(h.Verbs.registerAllDirs) != 0 {
 				t.Fatalf("batches = %v, want none for a malformed request", h.Verbs.registerAllDirs)
+			}
+		})
+	}
+}
+
+func TestCreateWorkspaceMapsTheOriginatorToTheSpec(t *testing.T) {
+	const thread = "https://w.slack.com/archives/C1/p1730000000123456"
+	tests := []struct {
+		name       string
+		originator *agentreplv1.WorkspaceOriginator
+		want       lifecycleconfig.Originator
+	}{
+		{name: "the emoji-ack system", originator: emojiAckOriginator(), want: lifecycleconfig.OriginatorEmojiAck},
+		{name: "the user or a workspace", originator: userOrWorkspaceOriginator(), want: lifecycleconfig.OriginatorUserOrWorkspace},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			h.Verbs.createRec = wsm.Workspace{ID: "ws-created", Dir: "/tmp/ws", Name: "minted"}
+			req := oneShotCreate(registeredRepoRef(h), nil)
+			req.Originator = tt.originator
+			req.SlackOrigin = &agentreplv1.CreateWorkspaceSlackOrigin{ThreadUrl: thread}
+
+			// Act.
+			resp, err := h.Client.CreateWorkspace(context.Background(), connect.NewRequest(req))
+
+			// Assert.
+			if err != nil || resp.Msg.GetSuccess() == nil {
+				t.Fatalf("CreateWorkspace = (%v, %v), want success", resp, err)
+			}
+			if got := h.Verbs.createSpecs[0].Originator; got != tt.want {
+				t.Fatalf("spec originator = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCreateWorkspaceAnswersTheLifecycleRefusals(t *testing.T) {
+	tests := []struct {
+		name    string
+		refusal *workspace.Refusal
+		check   func(*agentreplv1.CreateWorkspaceError) bool
+	}{
+		{name: "a failed creation hook", refusal: &workspace.Refusal{Rpc: "CreateWorkspace", Arm: workspace.ArmCreationHookFailed,
+			Fields: map[string]any{"path": "bin/setup.sh", "detail": "it exited 2", "log_path": "/state/merge-logs/creation-1-0.log"}},
+			check: func(e *agentreplv1.CreateWorkspaceError) bool {
+				f := e.GetCreationHookFailed()
+				return f.GetPath() == "bin/setup.sh" && f.GetDetail() == "it exited 2" && f.GetLogPath() == "/state/merge-logs/creation-1-0.log"
+			}},
+		{name: "an unusable lifecycle config", refusal: &workspace.Refusal{Rpc: "CreateWorkspace", Arm: workspace.ArmLifecycleConfigInvalid,
+			Fields: map[string]any{"path": "/r/.agent-repl/lifecycle.yaml", "detail": "unknown field"}},
+			check: func(e *agentreplv1.CreateWorkspaceError) bool {
+				return e.GetLifecycleConfigInvalid().GetPath() == "/r/.agent-repl/lifecycle.yaml" && e.GetLifecycleConfigInvalid().GetDetail() == "unknown field"
+			}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			h.Verbs.createErr = tt.refusal
+
+			// Act.
+			resp, err := h.Client.CreateWorkspace(context.Background(), connect.NewRequest(standardCreate(registeredRepoRef(h), "")))
+
+			// Assert.
+			if err != nil || !tt.check(resp.Msg.GetError()) {
+				t.Fatalf("CreateWorkspace = (%v, %v), want the refusal's arm with its fields", resp, err)
 			}
 		})
 	}

@@ -12,6 +12,18 @@ import (
 
 // The agent API's required choices, spelled once for every test request.
 
+// userOrWorkspaceOriginator is the originator of every create the user or a
+// workspace makes.
+func userOrWorkspaceOriginator() *agentreplv1.WorkspaceOriginator {
+	return &agentreplv1.WorkspaceOriginator{Originator: &agentreplv1.WorkspaceOriginator_UserOrWorkspace{UserOrWorkspace: &agentreplv1.WorkspaceOriginatorUserOrWorkspace{}}}
+}
+
+// emojiAckOriginator is the originator of a create the Slack emoji-ack system
+// makes.
+func emojiAckOriginator() *agentreplv1.WorkspaceOriginator {
+	return &agentreplv1.WorkspaceOriginator{Originator: &agentreplv1.WorkspaceOriginator_EmojiAck{EmojiAck: &agentreplv1.WorkspaceOriginatorEmojiAck{}}}
+}
+
 func userRequester() *agentreplv1.WorkspaceRequester {
 	return &agentreplv1.WorkspaceRequester{Asker: &agentreplv1.WorkspaceRequester_User{User: &agentreplv1.WorkspaceRequesterUser{}}}
 }
@@ -61,6 +73,7 @@ func validCreate(edit func(*agentreplv1.CreateWorkspaceRequest)) *agentreplv1.Cr
 		Form:          &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{Relationship: peerRelationship()}},
 		Requester:     userRequester(),
 		ContextOrigin: freshContext(),
+		Originator:    userOrWorkspaceOriginator(),
 	}
 	if edit != nil {
 		edit(req)

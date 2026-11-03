@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/lifecycleconfig"
 	"agent-repld/internal/refusalarm"
 )
 
@@ -433,7 +434,7 @@ func TestCreateAndRenameRefuseABadNameAlike(t *testing.T) {
 
 	// Act
 	_, renameErr := f.verbs.SetName(context.Background(), "w1", "Bad Name")
-	_, createErr := f.verbs.Create(context.Background(), CreateSpec{RepoDir: mainWorktree(t, f), Name: "Bad Name"})
+	_, createErr := f.verbs.Create(context.Background(), CreateSpec{Originator: lifecycleconfig.OriginatorUserOrWorkspace, RepoDir: mainWorktree(t, f), Name: "Bad Name"})
 
 	// Assert
 	renamed, createdRefusal := asRefusal(t, renameErr, ArmInvalidName), asRefusal(t, createErr, ArmInvalidName)

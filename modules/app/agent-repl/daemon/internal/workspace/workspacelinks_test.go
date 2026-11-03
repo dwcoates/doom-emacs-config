@@ -32,12 +32,12 @@ func TestLinkVerbsRecordAndRepublish(t *testing.T) {
 	}{
 		{name: "a set stores the link and hands the title it",
 			act: func(v Verbs) ([]wsm.WorkspaceLink, error) {
-				return v.SetLink(context.Background(), "w1", docLink.URL, docLink.Label, false)
+				return v.SetLink(context.Background(), "w1", docLink.URL, docLink.Label, false, "")
 			},
 			want: []wsm.WorkspaceLink{docLink}, wantTopbar: []topbar.Link{{Label: docLink.Label, URL: docLink.URL}}, wantLine: "set a link"},
 		{name: "an owned set stores the link owned",
 			act: func(v Verbs) ([]wsm.WorkspaceLink, error) {
-				return v.SetLink(context.Background(), "w1", docLink.URL, docLink.Label, true)
+				return v.SetLink(context.Background(), "w1", docLink.URL, docLink.Label, true, "")
 			},
 			want: []wsm.WorkspaceLink{{URL: docLink.URL, Label: docLink.Label, Shown: true, Owned: true}}, wantTopbar: []topbar.Link{{Label: docLink.Label, URL: docLink.URL}}, wantLine: "set a link"},
 		{name: "a removal hands the title the rest", standing: []wsm.WorkspaceLink{ticketLink, docLink},
@@ -94,31 +94,31 @@ func TestLinkVerbsRefuse(t *testing.T) {
 	}{
 		{name: "a url that is not http or https",
 			act: func(v Verbs) ([]wsm.WorkspaceLink, error) {
-				return v.SetLink(context.Background(), "w1", "ftp://example.com/x", "An ftp link", false)
+				return v.SetLink(context.Background(), "w1", "ftp://example.com/x", "An ftp link", false, "")
 			}, arm: ArmInvalidLink, wantFields: map[string]any{"url": "ftp://example.com/x"}},
 		{name: "a url carrying whitespace",
 			act: func(v Verbs) ([]wsm.WorkspaceLink, error) {
-				return v.SetLink(context.Background(), "w1", "https://example.com/a b", "A spaced link", false)
+				return v.SetLink(context.Background(), "w1", "https://example.com/a b", "A spaced link", false, "")
 			}, arm: ArmInvalidLink, wantFields: map[string]any{"url": "https://example.com/a b"}},
 		{name: "a one-word label",
 			act: func(v Verbs) ([]wsm.WorkspaceLink, error) {
-				return v.SetLink(context.Background(), "w1", "https://example.com/x", "Doc", false)
+				return v.SetLink(context.Background(), "w1", "https://example.com/x", "Doc", false, "")
 			}, arm: ArmInvalidLabel, wantFields: map[string]any{"label": "Doc"}},
 		{name: "a nine-word label",
 			act: func(v Verbs) ([]wsm.WorkspaceLink, error) {
-				return v.SetLink(context.Background(), "w1", "https://example.com/x", "one two three four five six seven eight nine", false)
+				return v.SetLink(context.Background(), "w1", "https://example.com/x", "one two three four five six seven eight nine", false, "")
 			}, arm: ArmInvalidLabel, wantFields: map[string]any{"label": "one two three four five six seven eight nine"}},
 		{name: "a label of two sentences",
 			act: func(v Verbs) ([]wsm.WorkspaceLink, error) {
-				return v.SetLink(context.Background(), "w1", "https://example.com/x", "The doc. Read it", false)
+				return v.SetLink(context.Background(), "w1", "https://example.com/x", "The doc. Read it", false, "")
 			}, arm: ArmInvalidLabel, wantFields: map[string]any{"label": "The doc. Read it"}},
 		{name: "a label on two lines",
 			act: func(v Verbs) ([]wsm.WorkspaceLink, error) {
-				return v.SetLink(context.Background(), "w1", "https://example.com/x", "The design\ndoc", false)
+				return v.SetLink(context.Background(), "w1", "https://example.com/x", "The design\ndoc", false, "")
 			}, arm: ArmInvalidLabel, wantFields: map[string]any{"label": "The design\ndoc"}},
 		{name: "a label with whitespace at its end",
 			act: func(v Verbs) ([]wsm.WorkspaceLink, error) {
-				return v.SetLink(context.Background(), "w1", "https://example.com/x", "The design doc ", false)
+				return v.SetLink(context.Background(), "w1", "https://example.com/x", "The design doc ", false, "")
 			}, arm: ArmInvalidLabel, wantFields: map[string]any{"label": "The design doc "}},
 		{name: "removing a link the workspace does not hold",
 			act: func(v Verbs) ([]wsm.WorkspaceLink, error) {
@@ -134,7 +134,7 @@ func TestLinkVerbsRefuse(t *testing.T) {
 			}, arm: ArmTooManyShown, wantFields: map[string]any{"named": uint32(6), "limit": uint32(5)}},
 		{name: "a workspace that is not registered",
 			act: func(v Verbs) ([]wsm.WorkspaceLink, error) {
-				return v.SetLink(context.Background(), "absent", docLink.URL, docLink.Label, false)
+				return v.SetLink(context.Background(), "absent", docLink.URL, docLink.Label, false, "")
 			}, arm: ArmUnknownWorkspace, wantFields: map[string]any{}},
 	}
 	for _, tt := range tests {
@@ -179,7 +179,7 @@ func TestLinkVerbsFailLoudlyWhenTheStoreWillNotWrite(t *testing.T) {
 	f.db.linksErr = errors.New("disk full")
 
 	// Act.
-	_, err := f.verbs.SetLink(context.Background(), "w1", docLink.URL, docLink.Label, false)
+	_, err := f.verbs.SetLink(context.Background(), "w1", docLink.URL, docLink.Label, false, "")
 
 	// Assert: the error surfaces, is recorded with its context, and the title
 	// is not handed links the store does not hold.
@@ -328,7 +328,7 @@ func TestSetLinkFollowsAnOwnedPullRequest(t *testing.T) {
 			}
 
 			// Act.
-			_, err := f.verbs.SetLink(context.Background(), "w1", tt.url, "The pull request", tt.owned)
+			_, err := f.verbs.SetLink(context.Background(), "w1", tt.url, "The pull request", tt.owned, "")
 
 			// Assert.
 			if err != nil || len(f.db.linkSets) != 1 {
@@ -382,5 +382,51 @@ func TestLinksViewSaysHowAnOwnedLinkIsFollowed(t *testing.T) {
 				t.Fatalf("ownership = %v, want %s", rel, tt.arm)
 			}
 		})
+	}
+}
+
+// slackPost is a Slack post announcing docLink, as a finish stage stores it.
+const slackPost = "https://acme.slack.com/archives/C1/p1730000000123456"
+
+func TestAnOwnedLinkAnnouncesAStoredLink(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.db.links = map[ids.WorkspaceID][]wsm.WorkspaceLink{"w1": {docLink}}
+
+	// Act
+	links, err := f.verbs.SetLink(context.Background(), "w1", slackPost, "The pull request's announcement", true, docLink.URL)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("SetLink: %v", err)
+	}
+	if links[0].URL != slackPost || links[0].Announces != docLink.URL {
+		t.Fatalf("links = %+v, want the post announcing the doc", links)
+	}
+	view := LinksView(links)
+	if got := view.GetLinks()[0].GetOwnership().GetOwned().GetAnnounces().GetUrl(); got != docLink.URL {
+		t.Fatalf("view = %v, want the announcement read back as owned.announces", view.GetLinks()[0])
+	}
+	if view.GetLinks()[1].GetOwnership().GetOwned().GetAnnounces() != nil {
+		t.Fatalf("view = %v, want the announced link to announce nothing", view.GetLinks()[1])
+	}
+}
+
+func TestAnAnnouncementOfAnUnheldLinkIsRefused(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+
+	// Act
+	_, err := f.verbs.SetLink(context.Background(), "w1", slackPost, "The pull request's announcement", true, docLink.URL)
+
+	// Assert
+	refusal, refused := AsRefusal(err)
+	if !refused || refusal.Arm != ArmUnknownAnnouncedLink || refusal.Fields["url"] != docLink.URL {
+		t.Fatalf("SetLink = %v, want unknown_announced_link naming the url", err)
+	}
+	if len(f.db.links["w1"]) != 0 {
+		t.Fatalf("links = %+v, want nothing stored", f.db.links["w1"])
 	}
 }
