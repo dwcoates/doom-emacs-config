@@ -67,7 +67,7 @@ const (
 // The environment a script hook runs in, beside the daemon's own.
 const (
 	// EnvCallingWorkspace is the full path of the deploy owner's worktree.
-	EnvCallingWorkspace = "AGENT_REPL_CALLING_WORKSPACE"
+	EnvCallingWorkspace = lifecycleconfig.EnvCallingWorkspace
 	// EnvDeployLedger is the deploy's ledger (agentrepl.v1.DeployLedger), which
 	// a script names when it calls back into the daemon about this deploy.
 	EnvDeployLedger = "AGENT_REPL_DEPLOY_LEDGER"
@@ -136,11 +136,7 @@ func (o *orchestrator) hookOwnerOf(ctx context.Context, ws ids.WorkspaceID) (hoo
 // stage's own: its worktree, its stage, and its originating thread when it
 // has one.
 func (h hookOwner) env(dir string, stage lifecycleconfig.Stage) []string {
-	env := []string{EnvCallingWorkspace + "=" + dir, lifecycleconfig.EnvHookStage + "=" + stage.Key()}
-	if h.slackThread != "" {
-		env = append(env, lifecycleconfig.EnvSlackThread+"="+h.slackThread)
-	}
-	return env
+	return lifecycleconfig.HookEnv(dir, stage, h.slackThread)
 }
 
 // deployTargetFor reads the deploy config of the repository TARGET is a

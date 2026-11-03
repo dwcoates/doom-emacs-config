@@ -51,6 +51,23 @@ func (s Stage) Key() string {
 // from (Stage.Key).
 const EnvHookStage = "AGENT_REPL_HOOK_STAGE"
 
+// EnvCallingWorkspace is the environment variable every script hook of a
+// workspace reads the workspace's worktree from (for a deploy, its owner's).
+const EnvCallingWorkspace = "AGENT_REPL_CALLING_WORKSPACE"
+
+// HookEnv is the environment every script hook of a workspace runs with
+// beside a stage's own: the workspace's worktree DIR, the STAGE, and the
+// originating Slack thread when the workspace has one (SLACKTHREAD, "" for
+// none). EVERY RUNNER OF A WORKSPACE'S SCRIPT HOOK BUILDS IT HERE, so the
+// creation, finish and deploy stages hand a script one environment.
+func HookEnv(dir string, stage Stage, slackThread string) []string {
+	env := []string{EnvCallingWorkspace + "=" + dir, EnvHookStage + "=" + stage.Key()}
+	if slackThread != "" {
+		env = append(env, EnvSlackThread+"="+slackThread)
+	}
+	return env
+}
+
 // Originator is the kind of workspace a hook list is for, decided only by who
 // created the workspace (agentrepl.v1.WorkspaceOriginator).
 type Originator int

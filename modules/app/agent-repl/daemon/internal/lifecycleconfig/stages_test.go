@@ -2,7 +2,10 @@ package lifecycleconfig
 
 import (
 	"errors"
+	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 
 	repoconfigv1 "agentrepl/proto/repoconfig/v1"
@@ -304,5 +307,65 @@ func TestEveryDefaultRunsForAnEmojiAckWorkspaceWithAThread(t *testing.T) {
 		if _, err := ExpandPrompt(text, ""); !errors.Is(err, ErrNoSlackThread) {
 			t.Errorf("ExpandPrompt(%q, \"\") = %v, want ErrNoSlackThread: the default names the thread", text, err)
 		}
+	}
+}
+
+func TestHookEnv(t *testing.T) {
+	tests := []struct {
+		name, thread string
+		want         []string
+	}{
+		{name: "a workspace with a Slack origin", thread: "https://w.slack.com/archives/C1/p1",
+			want: []string{"AGENT_REPL_CALLING_WORKSPACE=/w", "AGENT_REPL_HOOK_STAGE=finish", "AGENT_REPL_SLACK_THREAD=https://w.slack.com/archives/C1/p1"}},
+		{name: "a workspace with none", thread: "",
+			want: []string{"AGENT_REPL_CALLING_WORKSPACE=/w", "AGENT_REPL_HOOK_STAGE=finish"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := HookEnv("/w", StageFinish, tt.thread)
+
+			// Assert
+			if !slices.Equal(got, tt.want) {
+				t.Fatalf("HookEnv = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestEveryWorkspaceScriptHookEnvironmentIsHookEnvs pins that no runner of a
+// workspace's script hook spells the stage variable itself.
+func TestEveryWorkspaceScriptHookEnvironmentIsHookEnvs(t *testing.T) {
+	// Arrange
+	daemon, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var byHand []string
+
+	// Act
+	err = filepath.WalkDir(daemon, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") || filepath.Base(filepath.Dir(path)) == "lifecycleconfig" {
+			return nil
+		}
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if strings.Contains(string(raw), "EnvCallingWorkspace + \"=\"") || strings.Contains(string(raw), "EnvSlackThread+\"=\"") {
+			byHand = append(byHand, path)
+		}
+		return nil
+	})
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(byHand) != 0 {
+		t.Fatalf("a script hook's environment built by hand in %v, want HookEnv", byHand)
 	}
 }

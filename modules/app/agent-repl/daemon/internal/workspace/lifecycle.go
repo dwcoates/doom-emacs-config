@@ -118,10 +118,7 @@ func (v *verbs) recordOrigin(ctx context.Context, log dlog.Logger, record wsm.Wo
 // repository's main checkout root, and answers the first failure as the
 // create's refusal. Prompt hooks are the initial prompt's (creationPrompts).
 func (v *verbs) runCreationScripts(ctx context.Context, log dlog.Logger, record wsm.Workspace, spec CreateSpec, stage creationStage) error {
-	env := []string{merge.EnvCallingWorkspace + "=" + record.Dir, lifecycleconfig.EnvHookStage + "=" + lifecycleconfig.StageCreation.Key()}
-	if spec.SlackThread != "" {
-		env = append(env, lifecycleconfig.EnvSlackThread+"="+spec.SlackThread)
-	}
+	env := lifecycleconfig.HookEnv(record.Dir, lifecycleconfig.StageCreation, spec.SlackThread)
 	for i, hook := range stage.hooks {
 		script := hook.GetScript()
 		if script == nil {
