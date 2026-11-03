@@ -1,7 +1,8 @@
-// Package slackpost is how the daemon posts into a Slack thread on its own:
-// the reply a workspace created for a Slack message makes when its work
-// begins, and the one it makes when its work ends. No agent writes or sends
-// these; the daemon composes each body and posts it here.
+// Package slackpost is how the daemon posts into a Slack thread on its own,
+// and reacts to what it posted there: the replies a workspace created for a
+// Slack message makes into that thread (internal/workspace/slackorigin.go).
+// No agent writes or sends these; the daemon composes each body and posts it
+// here.
 //
 // EVERY BODY IS FORMATTED BY slackfmt, the port of the send-to-slack skill's
 // formatter, so a daemon post reads exactly as a hand-sent one does: Block
@@ -9,7 +10,9 @@
 // A body slackfmt refuses as not Slack-native is never sent.
 //
 // THE POST GOES THROUGH `gns slack send`, as the signed-in user, with link
-// previews suppressed (`--no-unfurl`), as every send-to-slack post is.
+// previews suppressed (`--no-unfurl`), as every send-to-slack post is, and
+// answers as JSON (`--output json`) so the posted message's ts is read from
+// it. A REACTION GOES THROUGH `gns slack react`, as the same user.
 package slackpost
 
 import (
@@ -68,12 +71,25 @@ func ParseThread(link string) (Thread, error) {
 // standard error. Injected so no test runs the real gns.
 type Runner func(ctx context.Context, name string, args []string, stdin []byte) (stdout string, err error)
 
-// Poster replies into Slack threads.
+// Posted is a message a reply posted.
+type Posted struct {
+	// TS is the message's Slack timestamp, which a reaction names it by.
+	// Never empty: an answer without one is an error.
+	TS string
+	// Permalink is the message's link, empty when gns answered none.
+	Permalink string
+}
+
+// Poster replies into Slack threads, and reacts to messages in them.
 type Poster interface {
-	// Reply renders MARKDOWN and posts it into THREAD, answering the post's
-	// permalink, empty when gns printed none. A body slackfmt refuses is a
-	// *slackfmt.NotSlackNativeError and nothing is sent.
-	Reply(ctx context.Context, thread Thread, markdown string) (string, error)
+	// Reply renders MARKDOWN and posts it into THREAD, answering the posted
+	// message. A body slackfmt refuses is a *slackfmt.NotSlackNativeError and
+	// nothing is sent; an answer that names no message ts is an error,
+	// although the message was posted.
+	Reply(ctx context.Context, thread Thread, markdown string) (Posted, error)
+	// React adds the reaction EMOJI (its name, without colons) to the
+	// message TS in CHANNEL.
+	React(ctx context.Context, channel, ts, emoji string) error
 }
 
 // Config builds a Poster.
@@ -104,31 +120,56 @@ type gnsPoster struct {
 	renderer slackfmt.Renderer
 }
 
-// permalinkRE finds a Slack permalink in gns's answer.
-var permalinkRE = regexp.MustCompile(`https://[A-Za-z0-9.-]+\.slack\.com/archives/[^\s")]+`)
+// sendAnswer is the part of `gns slack send --output json`'s answer a reply
+// reads.
+type sendAnswer struct {
+	TS        string `json:"ts"`
+	Permalink string `json:"permalink"`
+}
 
 // Reply implements Poster.
-func (p *gnsPoster) Reply(ctx context.Context, thread Thread, markdown string) (string, error) {
+func (p *gnsPoster) Reply(ctx context.Context, thread Thread, markdown string) (Posted, error) {
 	payload, err := p.renderer.Render(markdown)
 	if err != nil {
-		return "", fmt.Errorf("slackpost: render the reply into %s: %w", thread.URL, err)
+		return Posted{}, fmt.Errorf("slackpost: render the reply into %s: %w", thread.URL, err)
 	}
 	args, stdin, err := SendArgs(thread, payload)
 	if err != nil {
-		return "", err
+		return Posted{}, err
 	}
 	out, err := p.run(ctx, p.gns, args, stdin)
 	if err != nil {
-		return "", fmt.Errorf("slackpost: Slack rejected the reply into %s: %w", thread.URL, err)
+		return Posted{}, fmt.Errorf("slackpost: Slack rejected the reply into %s: %w", thread.URL, err)
 	}
-	return permalinkRE.FindString(out), nil
+	var answer sendAnswer
+	if err := json.Unmarshal([]byte(out), &answer); err != nil {
+		return Posted{}, fmt.Errorf("slackpost: the reply into %s was sent, but gns's answer %q is not JSON: %w", thread.URL, out, err)
+	}
+	if answer.TS == "" {
+		return Posted{}, fmt.Errorf("slackpost: the reply into %s was sent, but gns's answer %q names no message ts", thread.URL, out)
+	}
+	return Posted{TS: answer.TS, Permalink: answer.Permalink}, nil
+}
+
+// React implements Poster.
+func (p *gnsPoster) React(ctx context.Context, channel, ts, emoji string) error {
+	if _, err := p.run(ctx, p.gns, ReactArgs(channel, ts, emoji), nil); err != nil {
+		return fmt.Errorf("slackpost: Slack rejected the :%s: reaction on %s in %s: %w", emoji, ts, channel, err)
+	}
+	return nil
+}
+
+// ReactArgs is the `gns slack react` argument list that adds EMOJI to the
+// message TS in CHANNEL.
+func ReactArgs(channel, ts, emoji string) []string {
+	return []string{"slack", "react", "--channel", channel, "--ts", ts, "--emoji", emoji}
 }
 
 // SendArgs is the `gns slack send` argument list and standard input that post
 // PAYLOAD into THREAD: Block Kit or mrkdwn read from stdin, previews
-// suppressed.
+// suppressed, answered as JSON.
 func SendArgs(thread Thread, payload slackfmt.Payload) ([]string, []byte, error) {
-	args := []string{"slack", "send", "--channel", thread.Channel, "--thread", thread.TS, "--no-unfurl"}
+	args := []string{"slack", "send", "--channel", thread.Channel, "--thread", thread.TS, "--no-unfurl", "--output", "json"}
 	if payload.Blocks == nil {
 		return append(args, "--message", "-"), []byte(payload.Text), nil
 	}

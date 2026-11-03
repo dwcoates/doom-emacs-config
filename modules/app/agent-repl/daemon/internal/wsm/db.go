@@ -666,6 +666,23 @@ type DB interface {
 	// WorkspaceSlackOrigin answers the Slack thread a workspace was created
 	// for, false when it was created for none.
 	WorkspaceSlackOrigin(ctx context.Context, id WorkspaceID) (string, bool, error)
+	// ClaimSlackOpening claims the opening post into a workspace's
+	// originating thread, once ever, answering the thread when this call took
+	// the claim.
+	ClaimSlackOpening(ctx context.Context, id WorkspaceID) (string, bool, error)
+	// ClaimSlackLinkPost claims the post of an owned link into a workspace's
+	// originating thread, once per link, answering the thread when this call
+	// took the claim.
+	ClaimSlackLinkPost(ctx context.Context, id WorkspaceID, link string) (string, bool, error)
+	// RecordSlackLinkPost records the message ts a claimed link was posted
+	// as, answering whether its pull request is already marked merged.
+	RecordSlackLinkPost(ctx context.Context, id WorkspaceID, link, ts string) (bool, error)
+	// MarkSlackLinkMerged marks a posted link's pull request merged,
+	// answering the ts the reaction goes on when it is the caller's to add.
+	MarkSlackLinkMerged(ctx context.Context, id WorkspaceID, link string) (string, error)
+	// WorkspaceSlackLinkPosts answers every link posted, or claimed to be
+	// posted, into a workspace's originating thread.
+	WorkspaceSlackLinkPosts(ctx context.Context, id WorkspaceID) ([]SlackLinkPost, error)
 	// PutQueuedCreate holds a create until the network is restored, or
 	// replaces the held create of the same request key (queuedcreates.go).
 	PutQueuedCreate(ctx context.Context, q QueuedCreate) error

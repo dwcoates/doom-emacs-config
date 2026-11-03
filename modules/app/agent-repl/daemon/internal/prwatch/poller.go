@@ -51,11 +51,22 @@ type Store interface {
 	RecordPullRequestNoticeSubmitted(ctx context.Context, subscriber ids.WorkspaceID, pr wsm.PullRequestKey, turn ids.TurnID, sentences []string, took int) error
 }
 
+// MergeObserver is told every subscription a pull request's merge ended, so
+// the daemon can react to the message that posted it into the Slack thread
+// the subscriber was created for (workspace.PullRequestMerged).
+type MergeObserver interface {
+	// PullRequestMerged is told that PR, followed by SUBSCRIBER, merged.
+	PullRequestMerged(ctx context.Context, subscriber ids.WorkspaceID, pr wsm.PullRequestKey)
+}
+
 // Deps are the watcher's collaborators: everything but the prompt handler,
 // which is handed to Run.
 type Deps struct {
 	Store Store
 	GH    ghclient.Client
+	// Merges is told every subscription a merge ended, once: by the advance
+	// that ended it.
+	Merges MergeObserver
 	// Holds retires a notice a newer one supersedes.
 	Holds untoldnotice.Holds
 	// Briefs loads and splices a brief at use time.
@@ -81,7 +92,7 @@ type Watcher struct {
 // New builds the watcher, refusing a missing collaborator.
 func New(deps Deps) (*Watcher, error) {
 	switch {
-	case deps.Store == nil, deps.GH == nil, deps.Holds == nil, deps.Briefs == nil, deps.MintKey == nil, deps.Serves == nil, deps.Clock == nil, deps.Log == nil:
+	case deps.Store == nil, deps.GH == nil, deps.Merges == nil, deps.Holds == nil, deps.Briefs == nil, deps.MintKey == nil, deps.Serves == nil, deps.Clock == nil, deps.Log == nil:
 		return nil, errors.New("prwatch: every collaborator is required")
 	case deps.Every <= 0:
 		return nil, fmt.Errorf("prwatch: the cadence must be positive, not %v", deps.Every)
@@ -206,6 +217,9 @@ func (w *Watcher) advance(ctx context.Context, sub wsm.PullRequestSubscription, 
 		w.deps.Log.Info(opPoll, "the subscription moved since it was read; the next poll reads again", fields)
 	case end != nil:
 		w.deps.Log.Info(opPoll, "the pull request ended; its subscription ended after telling it", fields)
+		if end.Merged {
+			w.deps.Merges.PullRequestMerged(ctx, sub.Subscriber, sub.PullRequest)
+		}
 	case len(owed) > 0:
 		w.deps.Log.Info(opPoll, "the pull request's activity is owed to its subscriber", fields)
 	case recovered:

@@ -472,9 +472,17 @@ type Verbs interface {
 	// then holds and republishing the summary's menu.
 	SetLink(ctx context.Context, ws ids.WorkspaceID, url, label string, owned bool) ([]wsm.WorkspaceLink, error)
 	// MergeEnded is told how a merge run in WS left the queue for good
-	// (merge.EndObserver). A workspace created for a Slack message posts the
-	// end of a finish's deploy into that thread, with every link it owns.
+	// (merge.EndObserver). A workspace created for a Slack message posts a
+	// finish's FAILED deploy into that thread, with where to look.
 	MergeEnded(ctx context.Context, ws ids.WorkspaceID, out merge.DetachedOutcome)
+	// SummaryInstalled is told every summary a distillation installs
+	// (titlesynth.SummaryObserver). A workspace created for a Slack message
+	// posts its first summary into that thread as the opening.
+	SummaryInstalled(ctx context.Context, ws ids.WorkspaceID, title string)
+	// PullRequestMerged is told that a pull request WS follows merged
+	// (prwatch.MergeObserver). The message that posted it into the Slack
+	// thread WS was created for gets the :merged: reaction.
+	PullRequestMerged(ctx context.Context, ws ids.WorkspaceID, pr wsm.PullRequestKey)
 	// RemoveLink removes one stored link, answering the rest.
 	RemoveLink(ctx context.Context, ws ids.WorkspaceID, url string) ([]wsm.WorkspaceLink, error)
 	// ShowLinks names exactly the links the summary's menu shows, answering
@@ -767,9 +775,8 @@ type Deps struct {
 	ColdGateAnswers ColdGateAnswerTelemetry
 	// Browser opens a clicked link in the pinned external browser.
 	Browser externalbrowser.Opener
-	// Slack posts into the Slack thread a workspace was created for: when its
-	// work begins, and when a finish's deploy ends (slackorigin.go).
-	// Required.
+	// Slack posts into the Slack thread a workspace was created for, and
+	// reacts to its own posts there (slackorigin.go). Required.
 	Slack slackpost.Poster
 	// Headless is the daemon's own one-shot vendor run. A create that supplies
 	// no name asks it for one; nothing else in this package uses it. nil is a
