@@ -68,6 +68,45 @@ WS is the workspace a thread is open in, nil while it is still opening."
       (should (agent-repl-test-threads--recorded 'info "elisp.threads.created id=t1 name=why-blue"))
       (should (null agent-repl-test-threads--switched)))))
 
+(defmacro agent-repl-test-threads--with-background-send (last-thread &rest body)
+  "Run BODY with LAST-THREAD the thread viewed last, recording the sends.
+Binds `sent' to the (ORIGIN PROMPT WS) list `agent-repl--send' received
+and `said' to the last message."
+  (declare (indent 1))
+  `(agent-repl-test-threads--with nil
+     (let ((sent nil) (said nil))
+       (cl-letf (((symbol-function 'agent-repl--sidebar-app-last-thread) (lambda () ,last-thread))
+                 ((symbol-function 'agent-repl-verbs--read-required-prompt)
+                  (lambda (&rest _) "and the moon?"))
+                 ((symbol-function 'agent-repl--send)
+                  (lambda (origin &optional prompt ws _force) (setq sent (list origin prompt ws))))
+                 ((symbol-function 'message)
+                  (lambda (fmt &rest args) (setq said (apply #'format fmt args)))))
+         ,@body))))
+
+(ert-deftest agent-repl-test-threads-background-send-submits-to-the-last-thread ()
+  "The question goes to the last thread under its own origin."
+  (agent-repl-test-threads--with-background-send "chat/t"
+    (agent-repl-thread-send-background)
+    (should (equal sent '(:command-thread-background "and the moon?" "chat/t")))
+    (should (equal said "[agent-repl] Asked chat/t"))
+    (should (agent-repl-test-threads--recorded
+             'info "elisp.threads.background-send thread=chat/t chars=13"))))
+
+(ert-deftest agent-repl-test-threads-background-send-never-switches ()
+  "The frame is not moved onto the thread."
+  (agent-repl-test-threads--with-background-send "chat/t"
+    (agent-repl-thread-send-background)
+    (should (null agent-repl-test-threads--switched))))
+
+(ert-deftest agent-repl-test-threads-background-send-without-a-thread-is-refused ()
+  "With no thread nothing is read or sent: the user is told and the refusal logged."
+  (agent-repl-test-threads--with-background-send nil
+    (should-error (agent-repl-thread-send-background) :type 'user-error)
+    (should (null sent))
+    (should (agent-repl-test-threads--recorded
+             'warn "elisp.threads.background-send-refused reason=no-thread"))))
+
 (ert-deftest agent-repl-test-threads-a-refused-or-unsent-thread-is-reported ()
   "A refusal is recorded at WARN with its detail, a transport failure at ERROR."
   (dolist (case '(((:response (:arm :error :value (:cause (:arm :creation-failed :value (:detail "no name")))))

@@ -189,6 +189,7 @@
      :title "Chat threads"
      :bindings ((agent-repl-thread-new "New chat thread, from its first question.")
                 (agent-repl-thread-recent "Open the chat thread last interacted with.")
+                (agent-repl-thread-send-background "Ask the chat thread last interacted with a question, without switching to it.")
                 (agent-repl-thread-pick "Open a chat thread picked by name.")))
     (:id panels
      :group "Workspaces"

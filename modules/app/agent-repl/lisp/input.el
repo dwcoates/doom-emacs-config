@@ -1855,7 +1855,8 @@ user keeps every word they wrote."
     :command-update-pr
     :command-rebase
     :command-create-or-update-pr
-    :deferred-prompt)
+    :deferred-prompt
+    :command-thread-background)
   "Every `PromptOrigin' an Emacs send site may choose.
 Each value has EXACTLY ONE production send site, which is what makes a
 stored turn traceable back to the editor situation that caused it.  The

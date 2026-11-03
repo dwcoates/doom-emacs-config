@@ -100,6 +100,16 @@
            (regexp-quote "\"SPC\" #'agent-repl-switch-sidebar-app")
            (agent-repl-test-keybindings--source))))
 
+(ert-deftest agent-repl-test-keybindings-spc-c-spc-asks-the-last-thread-in-the-background ()
+  "`SPC C-SPC' asks the last thread a question without switching to it."
+  (should (string-match-p
+           (regexp-quote "\"C-SPC\" #'agent-repl-thread-send-background")
+           (agent-repl-test-keybindings--source))))
+
+(ert-deftest agent-repl-test-keybindings-thread-send-background-is-defined ()
+  "The background thread send the binding names is an interactive command."
+  (should (commandp 'agent-repl-thread-send-background)))
+
 (ert-deftest agent-repl-test-keybindings-sidebar-app-switch-is-defined ()
   "The sidebar-app switch the binding names is an interactive command."
   (should (commandp 'agent-repl-switch-sidebar-app)))
