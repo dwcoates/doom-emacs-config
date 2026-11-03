@@ -10733,7 +10733,7 @@ export const FeedMergeFoldByReaderSchema: GenMessage<FeedMergeFoldByReader> = /*
  * subtabs carry the replay's round) and gates again under the same tests tab
  * (its runs keep counting), and each is drawn live again while it works.
  *
- * A deploy's tabs follow its repository's config (repoconfig.v1.DeployConfig):
+ * A deploy's tabs follow its repository's config (repoconfig.v1.LifecycleConfig):
  * queue, then one hook tab per `pre_deploy` hook, then rebasing | tests |
  * committing when the config has a local merge, then the `deploy` hook's tab
  * (absent when the repository is held or has none), then one per `post_deploy`
@@ -12376,7 +12376,7 @@ export const FeedMergeUpdatingMainFastForwardingSchema: GenMessage<FeedMergeUpda
   messageDesc(file_frontend_v1_feed, 397);
 
 /**
- * AGENTIC: a PROMPT HOOK (repoconfig.v1.DeployHookPrompt) running as a turn
+ * AGENTIC: a PROMPT HOOK (repoconfig.v1.HookPrompt) running as a turn
  * of the deploy's owner under the lease, in whichever stage its label names
  * ("pre-deploy", "deploy", "post-deploy"). Present only for a hook the
  * repository's config or the request supplied and the deploy reached. Settled
@@ -12412,7 +12412,7 @@ export const FeedMergeTabHookPromptSchema: GenMessage<FeedMergeTabHookPrompt> = 
   messageDesc(file_frontend_v1_feed, 398);
 
 /**
- * RESOLVED: a SCRIPT HOOK (repoconfig.v1.DeployHookScript) the daemon runs
+ * RESOLVED: a SCRIPT HOOK (repoconfig.v1.HookScript) the daemon runs
  * from the repository's main checkout root, in whichever stage its label names.
  * Live while the script runs; settled succeeded on exit 0, failed on any other
  * exit or on its timeout, which FAILS the deploy. Replaced whole per push.

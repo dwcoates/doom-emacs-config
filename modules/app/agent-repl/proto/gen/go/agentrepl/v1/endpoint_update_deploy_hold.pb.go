@@ -4,7 +4,7 @@
 // HOLDING SKIPS THE DEPLOY STAGE, AND ONLY IT. While a repository is held, its
 // deploys run their `pre_deploy` stage exactly as they do (agent-repl's
 // merges keep landing on master), skip their `deploy` hook
-// (repoconfig.v1.DeployConfig.deploy), and run their `post_deploy` hooks; the
+// (repoconfig.v1.LifecycleConfig.deploy), and run their `post_deploy` hooks; the
 // skip is recorded on the hold and noted in each deploy's report. For
 // agent-repl the deploy hook is the runtime's redeploy, so a hold keeps a
 // hand-deployed build (a profiling build) from being replaced by the next
@@ -15,7 +15,10 @@
 // when a deploy skipped its deploy hook during it and that hook is a script,
 // runs the script once, with no owner (AGENT_REPL_CALLING_WORKSPACE and
 // AGENT_REPL_DEPLOY_LEDGER unset): a deploy hook acts on the repository's
-// current tip, never on one landing, so one run covers every skip. A skipped
+// current tip, never on one landing, so one run covers every skip. The deploy
+// stage holds one hook per kind of workspace; the release runs the
+// `user_or_workspace` kind's main-scoped script, or else the `emoji_ack`
+// kind's, whichever kind the skipped deploys were. A skipped
 // PROMPT hook is not run at release: a prompt runs in a deploy's owner, and the
 // skipped deploys' owners are gone.
 

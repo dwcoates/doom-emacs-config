@@ -1,0 +1,370 @@
+// lifecycle_config.proto — the schema of `.agent-repl/lifecycle.yaml`, the
+// file a repository commits at its main checkout root to say what happens at
+// each point of one of its workspaces' lives: when the workspace is CREATED
+// (agentrepl.v1.CreateWorkspace), when it is FINISHED
+// (agentrepl.v1.FinishWorkspace) and its deploy runs, and when an async merge
+// of one of its branches deploys (agentrepl.v1.CreateWorkspaceAsyncMerge).
+//
+// THE FILE IS READ AT EVERY USE, never cached, so an edit takes effect on the
+// next create or deploy without a daemon restart. The daemon converts the
+// YAML to JSON and decodes it into LifecycleConfig with unknown fields
+// REFUSED: a misspelled key is a refusal with the key named, never a silent
+// default. Keys are the field names below in snake_case.
+//
+// A REPOSITORY WITHOUT THE FILE HAS NO DEPLOY. `workspace finished` and an
+// async merge in it are refused, naming the file; there is no default
+// destination. A create in it runs only the built-in creation defaults.
+//
+// THE STAGES, in the order a workspace meets them:
+//
+//   creation     once, when the workspace first comes online: its prompt
+//                hooks become part of the initial prompt, its scripts run
+//                before that prompt is delivered
+//   finish       when the workspace calls `workspace finished`, once its
+//                requesting turn has ended and before its deploy is put in
+//                the queue
+//   pre_deploy   its hooks, then the built-in local merge when configured;
+//                never held
+//   deploy       one hook; the only thing a repository hold
+//                (agentrepl.v1.UpdateDeployHold) skips
+//   post_deploy  its hooks, in order; never held
+//
+// and then the daemon's own last steps, which no config changes: the report to
+// an async merge's requester, closing the deploy's OWNER (the finished
+// workspace, or the async merge's hidden merge workspace) and removing its
+// worktree. A deploy whose hook fails FAILS: its owner is not closed, and the
+// failure is handed back to the workspace that follows it, which is prompted to
+// investigate. The three deploy stages run inside the repository's queue, one
+// deploy at a time unless `concurrent` names a leading run of them that deploys
+// run side by side ahead of their turn (DeployConcurrentStages).
+// `queue_drained` runs apart from every workspace, when the queue empties.
+//
+// TWO KINDS OF WORKSPACE, decided only by who created it
+// (agentrepl.v1.WorkspaceOriginator, stated by the creator and recorded at
+// creation): `emoji_ack`, created by the Slack emoji-ack reaction system, and
+// `user_or_workspace`, created by the user or by another workspace. Every
+// workspace stage holds one list of hooks for each kind, and a workspace runs
+// only its own kind's list. A kind's list LEFT UNSET runs the stage's BUILT-IN
+// DEFAULT for that kind; a kind's list SET, even to an empty list, replaces
+// it. The built-in defaults are the daemon's (internal/lifecycleconfig), and
+// exist only for `emoji_ack`:
+//
+//   creation     a prompt: post a brief message to the originating Slack
+//                thread, in the agent's own words, saying work has started
+//   finish       a prompt: post to the thread that the work's pull request was
+//                created, with a hyperlink to it, then store that post's
+//                permalink as an owned link announcing the pull request
+//                (agentrepl.v1.WorkspaceLinkOwned.announces)
+//   post_deploy  a script: add the `:merged:` reaction to every Slack message
+//                whose stored link announces a pull request that has merged,
+//                found through the workspace's links alone
+//
+// Every other stage and kind defaults to no hooks.
+
+syntax = "proto3";
+
+package repoconfig.v1;
+
+option go_package = "agentrepl/proto/repoconfig/v1;repoconfigv1";
+
+// A repository's lifecycle: the whole of `.agent-repl/lifecycle.yaml`.
+message LifecycleConfig {
+  // Tags 2 and 3 held the deploy and post-deploy stages as one hook (list)
+  // for every workspace, before stages held one list per kind of workspace.
+  reserved 2, 3;
+
+  // The creation stage: hooks run once, when a workspace first comes online,
+  // before its initial prompt is delivered. UNSET: both kinds run their
+  // built-in defaults.
+  //
+  // A PROMPT HOOK'S TEXT IS APPENDED TO THE INITIAL PROMPT, after the
+  // commission and before a one-shot's completion directive, so it costs no
+  // turn of its own; a workspace created with no initial prompt runs none of
+  // the stage's prompt hooks. A SCRIPT HOOK runs once the worktree exists and
+  // is registered, before the session's first prompt. A failed script FAILS
+  // THE CREATE: the create is undone, as any failed create is, and reported
+  // (agentrepl.v1.CreateWorkspaceError.creation_hook_failed). The `runs_for`
+  // of a creation hook reads the workspace's landing target.
+  optional LifecycleStageHooks creation = 6;
+  // The finish stage: hooks run when a workspace calls `workspace finished`
+  // (agentrepl.v1.FinishWorkspace), once the turn that called it has ended,
+  // and before its deploy is put in the queue: nothing about the deploy is
+  // drawn while they run, and they never wait for another deploy. Prompt
+  // hooks are turns of the finishing workspace, drawn in its own feed
+  // (conversation.v1.PromptOrigin.PROMPT_ORIGIN_FINISH_HOOK). A failed hook
+  // withdraws the deploy before it is put in line and hands the failure back
+  // to the workspace. An async merge has no finish stage. UNSET: both kinds
+  // run their built-in defaults.
+  optional LifecycleStageHooks finish = 7;
+  // The first deploy stage: hooks, then the built-in local merge. Never held.
+  // REQUIRED: an empty `pre_deploy: {}` states a deploy with no first stage.
+  DeployPreDeployStage pre_deploy = 1;
+  // The deploy stage's one hook per kind: what DEPLOYING means for this
+  // repository (agent-repl's runtime redeploying itself, a pull request
+  // merged upstream). The only part of a deploy a repository hold skips.
+  // UNSET: neither kind's deploy has such a step.
+  optional LifecycleDeployStage deploy = 9;
+  // The last deploy stage's hooks, run in order once the deploy stage has
+  // finished. Never held. UNSET: both kinds run their built-in defaults.
+  optional LifecycleStageHooks post_deploy = 10;
+  // The deploy stages, from the first, that deploys run CONCURRENTLY, ahead
+  // of their turn; the stages after them run one deploy at a time, entered in
+  // queue order. UNSET: every stage runs one deploy at a time, which is how a
+  // repository with a local merge always runs.
+  optional DeployConcurrentStages concurrent = 4;
+  // Scripts run, in order, when the repository's queue FULLY DEPLETES: no
+  // deploy waits in it or runs, it is not paused, and a deploy was admitted
+  // since these scripts last all succeeded (agent-repl's: push master to
+  // origin as a release).
+  //
+  // THEY ARE OWED DURABLY from each deploy's admission, in the write that
+  // admits it, so a restart between a landing and the queue emptying (the
+  // rollout a landing deploys is one) leaves them owed, and the next daemon
+  // runs them once it finds the queue empty. They run under the repository's
+  // queue lock with the queue's admissions held, so no deploy lands while
+  // they run. A failed or killed script leaves them owed and stops the rest;
+  // the queue's next emptying runs them all again, so each must bear running
+  // again on the same state.
+  //
+  // SCRIPTS ONLY, AND FOR NO KIND OF WORKSPACE: an empty queue has no
+  // workspace, so neither a prompt (a turn of some workspace) nor a kind
+  // applies. Each runs as a script hook does, with no workspace environment,
+  // its output kept among the queue's logs. Empty when the repository runs
+  // nothing then.
+  repeated HookScript queue_drained = 5;
+}
+
+// ---- Stages: one hook list per kind of workspace ----
+
+// A workspace stage's hooks, one list per kind of workspace. Each kind runs
+// only its own list. A kind's list UNSET runs the stage's built-in default for
+// that kind (empty but for emoji-ack creation, finish and post_deploy); SET,
+// even empty, it replaces the default.
+message LifecycleStageHooks {
+  // The hooks for a workspace the Slack emoji-ack system created.
+  optional LifecycleHookList emoji_ack = 1;
+  // The hooks for a workspace the user or another workspace created.
+  optional LifecycleHookList user_or_workspace = 2;
+}
+
+// One kind's hooks for a stage, run in order. A failed hook stops the stage
+// and fails what the stage belongs to (the create, the finish, the deploy).
+message LifecycleHookList {
+  // The hooks, in the order they run. Empty runs nothing, and replaces the
+  // stage's built-in default for the kind.
+  repeated HookEntry hooks = 1;
+}
+
+// The deploy stage: one hook per kind of workspace, chosen as a
+// LifecycleStageHooks list is (unset: the kind's built-in default, which is
+// no hook for either kind).
+message LifecycleDeployStage {
+  // The deploy hook of a workspace the Slack emoji-ack system created.
+  optional HookEntry emoji_ack = 1;
+  // The deploy hook of a workspace the user or another workspace created.
+  optional HookEntry user_or_workspace = 2;
+}
+
+// The first deploy stage: each kind's hooks, then the built-in local merge.
+message DeployPreDeployStage {
+  // Tag 1 held one hook list for every workspace, before the stage held one
+  // list per kind.
+  reserved 1;
+  reserved "hooks";
+  // The hooks of a workspace the Slack emoji-ack system created, run before
+  // the local merge. A failed hook fails the deploy before anything lands.
+  // UNSET: the kind's built-in default, which is none. A request's own pre-
+  // deploy hooks (agentrepl.v1.CreateWorkspaceDeployHooks, or those a
+  // workspace's creation recorded) REPLACE both kinds' for that deploy.
+  optional LifecycleHookList emoji_ack = 3;
+  // The hooks of a workspace the user or another workspace created, chosen
+  // as `emoji_ack`'s are.
+  optional LifecycleHookList user_or_workspace = 4;
+  // The built-in local merge: the branch rebased onto its target, tested,
+  // fixed by its owner when a test fails, landed as a merge commit and
+  // optionally tagged. UNSET when nothing lands locally, and the hooks of the
+  // three deploy stages are then the whole deploy. The same for both kinds:
+  // only one deploy at a time may move the target, whoever created it.
+  optional DeployLocalMerge local_merge = 2;
+}
+
+// ---- The deploy's ordering ----
+
+// THE CONCURRENT STAGES ARE A LEADING RUN, and the arm is the stage it runs
+// through. Every deploy waiting in the repository's queue runs these stages
+// side by side, with no other deploy's progress to wait on; each then waits
+// for every deploy ahead of it in the queue to finish, and runs the rest of
+// its stages one at a time, in queue order.
+//
+// ONLY A LEADING RUN IS EXPRESSIBLE, so a concurrent stage between two
+// one-at-a-time stages cannot be written. A local merge cannot be concurrent:
+// it lands on the target, which only one deploy at a time may move, so a
+// config with `pre_deploy.local_merge` and any arm here is refused
+// (deploy_config_invalid). SET WITH NO ARM is refused too.
+message DeployConcurrentStages {
+  // Which stage the concurrent run ends with; the stages after it run one
+  // deploy at a time.
+  oneof through {
+    // pre_deploy runs concurrently; deploy and post_deploy one at a time.
+    DeployConcurrentThroughPreDeploy through_pre_deploy = 1;
+    // pre_deploy and deploy run concurrently; post_deploy one at a time. A
+    // deploy hook that waits on something outside the daemon (a pull request
+    // merging upstream) then holds no other deploy back.
+    DeployConcurrentThroughDeploy through_deploy = 2;
+  }
+}
+// The concurrent run is pre_deploy alone. DELIBERATELY EMPTY: the arm is the
+// run.
+message DeployConcurrentThroughPreDeploy {}
+// The concurrent run is pre_deploy and deploy. DELIBERATELY EMPTY: the arm is
+// the run.
+message DeployConcurrentThroughDeploy {}
+
+// ---- The local merge ----
+
+// THE BUILT-IN LOCAL MERGE. Its steps are the daemon's own code, in this
+// order: rebase the branch onto the target's tip (its owner resolving any
+// conflict), run the tests (its owner fixing a failure, a bounded number of
+// times), land a non-fast-forward merge commit on the target, and tag the
+// landing when `version_tag` is set. Queued deploys behind the head rebase and
+// test ahead of their turn (racing), which only a local merge does.
+message DeployLocalMerge {
+  // How the rebased branch is tested before it lands. REQUIRED: a local merge
+  // always tests.
+  DeployLocalMergeTests tests = 1;
+  // Present when the repository versions its landings: a landing in the
+  // repository's MAIN worktree carries a `minor` or `patch` increment, which an
+  // agent's request must state (agentrepl.v1.MergeWorkspaceVersionIncrement)
+  // and the landing tags as the next `MAJOR.MINOR.PATCH`. A landing elsewhere
+  // (a child into its parent's worktree) never carries one. UNSET when the
+  // repository is not versioned, and no request may carry an increment.
+  optional DeployVersionTag version_tag = 2;
+}
+
+// Which test step the local merge runs. THE ARM IS THE STEP KIND: each is
+// daemon code that knows how to select, run and read one test runner.
+message DeployLocalMergeTests {
+  // The test runner the local merge drives.
+  oneof kind {
+    // agent-repl's own suites, through its `test-all.sh`.
+    DeployTestsAgentReplSuites agent_repl_suites = 1;
+  }
+}
+
+// agent-repl's test runner: the suites a change touches are selected from the
+// changed paths, run through the named script, read off its pass and skip
+// lines, and a failing case is handed to the owner with the exact command that
+// reruns it.
+message DeployTestsAgentReplSuites {
+  // The runner script, relative to the repository's main checkout root (for
+  // agent-repl, `modules/app/agent-repl/bin/test-all.sh`). It is run from the
+  // checkout being tested, at the same relative path. REQUIRED.
+  string script_path = 1;
+}
+
+// The repository versions its landings. No fields: which increment a landing
+// carries is the request's to state.
+message DeployVersionTag {}
+
+// ---- Hooks ----
+
+// One hook of a stage, and which workspaces of its kind it runs for.
+message HookEntry {
+  // What the hook does. REQUIRED.
+  Hook hook = 1;
+  // Which landing targets the hook runs for. REQUIRED, with no default: a
+  // hook that only makes sense for the repository's main branch says so. A
+  // creation or finish hook reads the target the workspace lands into.
+  HookRunsFor runs_for = 2;
+}
+
+// A hook: a script the daemon runs, a prompt it sends to the workspace the
+// stage runs in, or the stage's built-in default. Script and prompt are equal
+// arms: anywhere one may be given, so may the other. A prompt never names a
+// workspace: it always goes to the workspace whose stage runs (for a deploy,
+// its OWNER, which outlives every hook because closing it is the deploy's last
+// step).
+message Hook {
+  // What kind of hook this is.
+  oneof hook {
+    // A script, run by the daemon.
+    HookScript script = 1;
+    // A prompt, run as a turn of the workspace (or, in the creation stage, as
+    // part of its initial prompt).
+    HookPrompt prompt = 2;
+    // The stage's built-in emoji-ack default, run in this place. Valid only
+    // in an `emoji_ack` list of a stage that has one (creation, finish,
+    // post_deploy); refused anywhere else, including a request's own hooks.
+    // It lets a repository that replaces the default keep it beside its own
+    // hooks without copying it.
+    HookBuiltIn builtin = 3;
+  }
+}
+
+// A script hook. The daemon runs it with bash, with the repository's MAIN
+// checkout root as its working directory, in an environment carrying:
+//
+//   AGENT_REPL_CALLING_WORKSPACE  the full path of the workspace's worktree
+//                                 (a deploy's owner's)
+//   AGENT_REPL_HOOK_STAGE         creation, finish, pre_deploy, deploy or
+//                                 post_deploy
+//   AGENT_REPL_SLACK_THREAD       the link of the Slack message the workspace
+//                                 was created for; set only for a workspace
+//                                 with a Slack origin
+//                                 (agentrepl.v1.CreateWorkspaceSlackOrigin)
+//   AGENT_REPL_DEPLOY_LEDGER      in a deploy stage, the deploy's ledger, which
+//                                 a script names when it calls back into the
+//                                 daemon about this deploy
+//                                 (agentrepl.v1.RollOutLanding)
+//   AGENT_REPL_DEPLOY_DAEMON      in a deploy stage, the address of the
+//                                 daemon running the deploy
+//
+// Exit 0 is success; any other exit, or running past the timeout (the script
+// is then killed), fails the hook. Its standard output and error are kept in a
+// log; in a deploy stage the bubble's tab links it and draws its last lines.
+message HookScript {
+  // The script, relative to the repository's main checkout root. REQUIRED.
+  string path = 1;
+  // How long the script may run, in seconds, before it is killed and the hook
+  // fails. REQUIRED, and at least 1.
+  uint32 timeout_seconds = 2;
+}
+
+// A prompt hook. In the creation stage its text is appended to the initial
+// prompt; in every other stage it is submitted as a turn of the workspace,
+// which revives the workspace's session when it has none, and the turn ending
+// in failure, or being interrupted, fails the hook.
+//
+// ONE PLACEHOLDER: `{{slack_thread}}` is replaced by the link of the Slack
+// message the workspace was created for. A workspace with no Slack origin
+// cannot resolve it, and the hook fails. Any other `{{...}}` is refused when
+// the config is read, so a misspelled placeholder never reaches an agent.
+message HookPrompt {
+  // The prompt, submitted once its placeholder is replaced. REQUIRED, never
+  // blank.
+  string text = 1;
+}
+
+// The stage's built-in emoji-ack default, run where this hook stands.
+// DELIBERATELY EMPTY: the stage it stands in decides what the default is.
+message HookBuiltIn {}
+
+// Which landing targets a hook runs for. THE ARM IS THE SCOPE.
+message HookRunsFor {
+  // The landing targets the hook applies to.
+  oneof scope {
+    // Only a workspace or deploy whose target is the repository's main
+    // branch, in its main worktree: a child landing into its parent's
+    // worktree skips the hook.
+    HookRunsForMain main = 1;
+    // Every target, a child's into its parent's worktree included.
+    HookRunsForAnyTarget any_target = 2;
+  }
+}
+
+// The hook runs only for the repository's main branch. DELIBERATELY EMPTY:
+// the arm is the scope.
+message HookRunsForMain {}
+
+// The hook runs whatever the target. DELIBERATELY EMPTY: the arm is the scope.
+message HookRunsForAnyTarget {}

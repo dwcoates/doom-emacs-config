@@ -1,0 +1,32 @@
+// lifecycle_config_refusal.proto — the refusals every way of asking for a
+// deploy or a create shares when the target repository's
+// `.agent-repl/lifecycle.yaml` (repoconfig.v1.LifecycleConfig) is missing or
+// unusable: a workspace finishing (FinishWorkspace), an async merge
+// (CreateWorkspaceAsyncMerge), and a create reading its creation stage
+// (CreateWorkspace). The file is read when the deploy or the create is asked
+// for, so a request into a repository that states no usable config records
+// nothing.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// The repository has no lifecycle config, so nothing says what a deploy does
+// there.
+message LifecycleConfigMissing {
+  // The path the daemon looked for: `.agent-repl/lifecycle.yaml` beneath the
+  // repository's main checkout root.
+  string path = 1;
+}
+
+// The repository's lifecycle config could not be read, or does not decode as
+// repoconfig.v1.LifecycleConfig, or leaves a required field unset.
+message LifecycleConfigInvalid {
+  // The file's path.
+  string path = 1;
+  // Why it was refused, as the reader or the decoder put it: the unknown or
+  // misspelled key, the YAML error, the required field left unset.
+  string detail = 2;
+}

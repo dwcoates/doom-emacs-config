@@ -924,7 +924,7 @@ message FooterStatusMerging {
     // A `post_deploy` hook is running.
     FooterSubStatusMergingPostDeploy post_deploy = 25;
     // The deploy finished the stages its repository runs concurrently
-    // (repoconfig.v1.DeployConfig.concurrent) and waits for the deploys queued
+    // (repoconfig.v1.LifecycleConfig.concurrent) and waits for the deploys queued
     // ahead of it to finish their one-at-a-time stages.
     FooterSubStatusMergingAwaitingTurn awaiting_turn = 26;
     // Conflict resolution or fixing is held on the user: this workspace's

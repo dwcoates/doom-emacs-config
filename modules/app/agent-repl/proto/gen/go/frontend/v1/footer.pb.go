@@ -4345,7 +4345,7 @@ type FooterStatusMerging_PostDeploy struct {
 
 type FooterStatusMerging_AwaitingTurn struct {
 	// The deploy finished the stages its repository runs concurrently
-	// (repoconfig.v1.DeployConfig.concurrent) and waits for the deploys queued
+	// (repoconfig.v1.LifecycleConfig.concurrent) and waits for the deploys queued
 	// ahead of it to finish their one-at-a-time stages.
 	AwaitingTurn *FooterSubStatusMergingAwaitingTurn `protobuf:"bytes,26,opt,name=awaiting_turn,json=awaitingTurn,proto3,oneof"`
 }

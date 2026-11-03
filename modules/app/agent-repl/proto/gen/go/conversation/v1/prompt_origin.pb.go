@@ -66,7 +66,7 @@ const (
 	// hooks, or a request's own before prompts), run as a turn of the deploy's
 	// owner.
 	PromptOrigin_PROMPT_ORIGIN_MERGE_BEFORE_ACTION PromptOrigin = 24
-	// A deploy's `post_deploy` prompt hook (repoconfig.v1.DeployConfig
+	// A deploy's `post_deploy` prompt hook (repoconfig.v1.LifecycleConfig
 	// post_deploy, or a request's own after prompts), run as a turn of the
 	// deploy's owner.
 	PromptOrigin_PROMPT_ORIGIN_MERGE_AFTER_ACTION          PromptOrigin = 25
@@ -215,7 +215,7 @@ const (
 	// The compaction CompactWorkspace submitted. Waits behind a running turn
 	// like any deferred prompt; drawn as the context cut it produces.
 	PromptOrigin_PROMPT_ORIGIN_WORKSPACE_COMPACT PromptOrigin = 42
-	// A deploy's `deploy` stage prompt hook (repoconfig.v1.DeployConfig.deploy),
+	// A deploy's `deploy` stage prompt hook (repoconfig.v1.LifecycleConfig.deploy),
 	// run as a turn of the deploy's owner. Drawn, like the other two hook
 	// origins, inside the deploy bubble's hook tab rather than as a prompt the
 	// user said.
@@ -256,6 +256,12 @@ const (
 	// the frame stays where it is. Its one Emacs send site is
 	// `agent-repl-thread-send-background`.
 	PromptOrigin_PROMPT_ORIGIN_COMMAND_THREAD_BACKGROUND PromptOrigin = 48
+	// A finish-stage prompt hook (repoconfig.v1.LifecycleConfig.finish), run as
+	// a turn of the workspace that called `workspace finished`, once that call's
+	// turn has ended and before its deploy is put in the queue. No deploy bubble
+	// exists yet, so it is drawn in the workspace's own feed as an ordinary
+	// prompt bubble the daemon sent, never as a prompt the user said.
+	PromptOrigin_PROMPT_ORIGIN_FINISH_HOOK PromptOrigin = 49
 )
 
 // Enum value maps for PromptOrigin.
@@ -309,6 +315,7 @@ var (
 		46: "PROMPT_ORIGIN_MAIN_SYNC_REPAIR",
 		47: "PROMPT_ORIGIN_PULL_REQUEST_NOTICE",
 		48: "PROMPT_ORIGIN_COMMAND_THREAD_BACKGROUND",
+		49: "PROMPT_ORIGIN_FINISH_HOOK",
 	}
 	PromptOrigin_value = map[string]int32{
 		"PROMPT_ORIGIN_UNSPECIFIED":                 0,
@@ -359,6 +366,7 @@ var (
 		"PROMPT_ORIGIN_MAIN_SYNC_REPAIR":            46,
 		"PROMPT_ORIGIN_PULL_REQUEST_NOTICE":         47,
 		"PROMPT_ORIGIN_COMMAND_THREAD_BACKGROUND":   48,
+		"PROMPT_ORIGIN_FINISH_HOOK":                 49,
 	}
 )
 
@@ -393,7 +401,7 @@ var File_conversation_v1_prompt_origin_proto protoreflect.FileDescriptor
 
 const file_conversation_v1_prompt_origin_proto_rawDesc = "" +
 	"\n" +
-	"#conversation/v1/prompt_origin.proto\x12\x0fconversation.v1*\x9f\x0e\n" +
+	"#conversation/v1/prompt_origin.proto\x12\x0fconversation.v1*\xbe\x0e\n" +
 	"\fPromptOrigin\x12\x1d\n" +
 	"\x19PROMPT_ORIGIN_UNSPECIFIED\x10\x00\x12\x1b\n" +
 	"\x17PROMPT_ORIGIN_USER_SENT\x10\x01\x12$\n" +
@@ -443,7 +451,8 @@ const file_conversation_v1_prompt_origin_proto_rawDesc = "" +
 	"\x1cPROMPT_ORIGIN_REMOTE_CONTROL\x10-\x12\"\n" +
 	"\x1ePROMPT_ORIGIN_MAIN_SYNC_REPAIR\x10.\x12%\n" +
 	"!PROMPT_ORIGIN_PULL_REQUEST_NOTICE\x10/\x12+\n" +
-	"'PROMPT_ORIGIN_COMMAND_THREAD_BACKGROUND\x100B0Z.agentrepl/proto/conversation/v1;conversationv1b\x06proto3"
+	"'PROMPT_ORIGIN_COMMAND_THREAD_BACKGROUND\x100\x12\x1d\n" +
+	"\x19PROMPT_ORIGIN_FINISH_HOOK\x101B0Z.agentrepl/proto/conversation/v1;conversationv1b\x06proto3"
 
 var (
 	file_conversation_v1_prompt_origin_proto_rawDescOnce sync.Once

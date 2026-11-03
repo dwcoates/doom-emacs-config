@@ -197,7 +197,8 @@ type ChangeWorkspaceLinksSet struct {
 	// every stored link says which it is. A relabel sets it anew. A pull
 	// request the workspace opened is OWNED, and storing it owned subscribes
 	// the workspace to it; changing it to a reference, or removing it, ends
-	// that subscription.
+	// that subscription. An owned link may name the stored link it announces
+	// (WorkspaceLinkOwned.announces).
 	Ownership     *WorkspaceLinkOwnership `protobuf:"bytes,3,opt,name=ownership,proto3" json:"ownership,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -535,6 +536,7 @@ type ChangeWorkspaceLinksError struct {
 	//	*ChangeWorkspaceLinksError_InvalidLabel
 	//	*ChangeWorkspaceLinksError_UnknownLink
 	//	*ChangeWorkspaceLinksError_TooManyShown
+	//	*ChangeWorkspaceLinksError_UnknownAnnouncedLink
 	Cause         isChangeWorkspaceLinksError_Cause `protobuf_oneof:"cause"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -649,6 +651,15 @@ func (x *ChangeWorkspaceLinksError) GetTooManyShown() *ChangeWorkspaceLinksTooMa
 	return nil
 }
 
+func (x *ChangeWorkspaceLinksError) GetUnknownAnnouncedLink() *ChangeWorkspaceLinksUnknownAnnouncedLink {
+	if x != nil {
+		if x, ok := x.Cause.(*ChangeWorkspaceLinksError_UnknownAnnouncedLink); ok {
+			return x.UnknownAnnouncedLink
+		}
+	}
+	return nil
+}
+
 type isChangeWorkspaceLinksError_Cause interface {
 	isChangeWorkspaceLinksError_Cause()
 }
@@ -694,6 +705,12 @@ type ChangeWorkspaceLinksError_TooManyShown struct {
 	TooManyShown *ChangeWorkspaceLinksTooManyShown `protobuf:"bytes,8,opt,name=too_many_shown,json=tooManyShown,proto3,oneof"`
 }
 
+type ChangeWorkspaceLinksError_UnknownAnnouncedLink struct {
+	// A set's owned link announces a url the workspace does not hold
+	// (WorkspaceLinkOwned.announces).
+	UnknownAnnouncedLink *ChangeWorkspaceLinksUnknownAnnouncedLink `protobuf:"bytes,9,opt,name=unknown_announced_link,json=unknownAnnouncedLink,proto3,oneof"`
+}
+
 func (*ChangeWorkspaceLinksError_UnknownWorkspace) isChangeWorkspaceLinksError_Cause() {}
 
 func (*ChangeWorkspaceLinksError_WorkspaceRefMismatch) isChangeWorkspaceLinksError_Cause() {}
@@ -709,6 +726,8 @@ func (*ChangeWorkspaceLinksError_InvalidLabel) isChangeWorkspaceLinksError_Cause
 func (*ChangeWorkspaceLinksError_UnknownLink) isChangeWorkspaceLinksError_Cause() {}
 
 func (*ChangeWorkspaceLinksError_TooManyShown) isChangeWorkspaceLinksError_Cause() {}
+
+func (*ChangeWorkspaceLinksError_UnknownAnnouncedLink) isChangeWorkspaceLinksError_Cause() {}
 
 // The workspace id is not in the daemon's registry. DELIBERATELY EMPTY.
 type ChangeWorkspaceLinksUnknownWorkspace struct {
@@ -1105,6 +1124,52 @@ func (x *ChangeWorkspaceLinksTooManyShown) GetLimit() uint32 {
 	return 0
 }
 
+// The announced url is not a link the workspace holds.
+type ChangeWorkspaceLinksUnknownAnnouncedLink struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The url the set's announcement named.
+	Url           string `protobuf:"bytes,1,opt,name=url,proto3" json:"url,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ChangeWorkspaceLinksUnknownAnnouncedLink) Reset() {
+	*x = ChangeWorkspaceLinksUnknownAnnouncedLink{}
+	mi := &file_agentrepl_v1_endpoint_change_workspace_links_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ChangeWorkspaceLinksUnknownAnnouncedLink) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ChangeWorkspaceLinksUnknownAnnouncedLink) ProtoMessage() {}
+
+func (x *ChangeWorkspaceLinksUnknownAnnouncedLink) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_change_workspace_links_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ChangeWorkspaceLinksUnknownAnnouncedLink.ProtoReflect.Descriptor instead.
+func (*ChangeWorkspaceLinksUnknownAnnouncedLink) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_change_workspace_links_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *ChangeWorkspaceLinksUnknownAnnouncedLink) GetUrl() string {
+	if x != nil {
+		return x.Url
+	}
+	return ""
+}
+
 var File_agentrepl_v1_endpoint_change_workspace_links_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_change_workspace_links_proto_rawDesc = "" +
@@ -1131,7 +1196,7 @@ const file_agentrepl_v1_endpoint_change_workspace_links_proto_rawDesc = "" +
 	"\x05error\x18\x02 \x01(\v2'.agentrepl.v1.ChangeWorkspaceLinksErrorH\x00R\x05errorB\b\n" +
 	"\x06result\"Q\n" +
 	"\x1bChangeWorkspaceLinksSuccess\x122\n" +
-	"\x05links\x18\x01 \x01(\v2\x1c.agentrepl.v1.WorkspaceLinksR\x05links\"\x8c\x06\n" +
+	"\x05links\x18\x01 \x01(\v2\x1c.agentrepl.v1.WorkspaceLinksR\x05links\"\xfc\x06\n" +
 	"\x19ChangeWorkspaceLinksError\x12a\n" +
 	"\x11unknown_workspace\x18\x01 \x01(\v22.agentrepl.v1.ChangeWorkspaceLinksUnknownWorkspaceH\x00R\x10unknownWorkspace\x12n\n" +
 	"\x16workspace_ref_mismatch\x18\x02 \x01(\v26.agentrepl.v1.ChangeWorkspaceLinksWorkspaceRefMismatchH\x00R\x14workspaceRefMismatch\x12a\n" +
@@ -1140,7 +1205,8 @@ const file_agentrepl_v1_endpoint_change_workspace_links_proto_rawDesc = "" +
 	"\finvalid_link\x18\x05 \x01(\v2-.agentrepl.v1.ChangeWorkspaceLinksInvalidLinkH\x00R\vinvalidLink\x12U\n" +
 	"\rinvalid_label\x18\x06 \x01(\v2..agentrepl.v1.ChangeWorkspaceLinksInvalidLabelH\x00R\finvalidLabel\x12R\n" +
 	"\funknown_link\x18\a \x01(\v2-.agentrepl.v1.ChangeWorkspaceLinksUnknownLinkH\x00R\vunknownLink\x12V\n" +
-	"\x0etoo_many_shown\x18\b \x01(\v2..agentrepl.v1.ChangeWorkspaceLinksTooManyShownH\x00R\ftooManyShownB\a\n" +
+	"\x0etoo_many_shown\x18\b \x01(\v2..agentrepl.v1.ChangeWorkspaceLinksTooManyShownH\x00R\ftooManyShown\x12n\n" +
+	"\x16unknown_announced_link\x18\t \x01(\v26.agentrepl.v1.ChangeWorkspaceLinksUnknownAnnouncedLinkH\x00R\x14unknownAnnouncedLinkB\a\n" +
 	"\x05cause\"&\n" +
 	"$ChangeWorkspaceLinksUnknownWorkspace\"M\n" +
 	"(ChangeWorkspaceLinksWorkspaceRefMismatch\x12!\n" +
@@ -1161,7 +1227,9 @@ const file_agentrepl_v1_endpoint_change_workspace_links_proto_rawDesc = "" +
 	"\x03url\x18\x01 \x01(\tR\x03url\"N\n" +
 	" ChangeWorkspaceLinksTooManyShown\x12\x14\n" +
 	"\x05named\x18\x01 \x01(\rR\x05named\x12\x14\n" +
-	"\x05limit\x18\x02 \x01(\rR\x05limitB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"\x05limit\x18\x02 \x01(\rR\x05limit\"<\n" +
+	"(ChangeWorkspaceLinksUnknownAnnouncedLink\x12\x10\n" +
+	"\x03url\x18\x01 \x01(\tR\x03urlB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_endpoint_change_workspace_links_proto_rawDescOnce sync.Once
@@ -1175,7 +1243,7 @@ func file_agentrepl_v1_endpoint_change_workspace_links_proto_rawDescGZIP() []byt
 	return file_agentrepl_v1_endpoint_change_workspace_links_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_change_workspace_links_proto_msgTypes = make([]protoimpl.MessageInfo, 16)
+var file_agentrepl_v1_endpoint_change_workspace_links_proto_msgTypes = make([]protoimpl.MessageInfo, 17)
 var file_agentrepl_v1_endpoint_change_workspace_links_proto_goTypes = []any{
 	(*ChangeWorkspaceLinksRequest)(nil),              // 0: agentrepl.v1.ChangeWorkspaceLinksRequest
 	(*ChangeWorkspaceLinksSet)(nil),                  // 1: agentrepl.v1.ChangeWorkspaceLinksSet
@@ -1193,20 +1261,21 @@ var file_agentrepl_v1_endpoint_change_workspace_links_proto_goTypes = []any{
 	(*ChangeWorkspaceLinksInvalidLabel)(nil),         // 13: agentrepl.v1.ChangeWorkspaceLinksInvalidLabel
 	(*ChangeWorkspaceLinksUnknownLink)(nil),          // 14: agentrepl.v1.ChangeWorkspaceLinksUnknownLink
 	(*ChangeWorkspaceLinksTooManyShown)(nil),         // 15: agentrepl.v1.ChangeWorkspaceLinksTooManyShown
-	(*v1.WorkspaceRef)(nil),                          // 16: workspace.v1.WorkspaceRef
-	(*WorkspaceLinkOwnership)(nil),                   // 17: agentrepl.v1.WorkspaceLinkOwnership
-	(*WorkspaceLinks)(nil),                           // 18: agentrepl.v1.WorkspaceLinks
+	(*ChangeWorkspaceLinksUnknownAnnouncedLink)(nil), // 16: agentrepl.v1.ChangeWorkspaceLinksUnknownAnnouncedLink
+	(*v1.WorkspaceRef)(nil),                          // 17: workspace.v1.WorkspaceRef
+	(*WorkspaceLinkOwnership)(nil),                   // 18: agentrepl.v1.WorkspaceLinkOwnership
+	(*WorkspaceLinks)(nil),                           // 19: agentrepl.v1.WorkspaceLinks
 }
 var file_agentrepl_v1_endpoint_change_workspace_links_proto_depIdxs = []int32{
-	16, // 0: agentrepl.v1.ChangeWorkspaceLinksRequest.workspace:type_name -> workspace.v1.WorkspaceRef
+	17, // 0: agentrepl.v1.ChangeWorkspaceLinksRequest.workspace:type_name -> workspace.v1.WorkspaceRef
 	1,  // 1: agentrepl.v1.ChangeWorkspaceLinksRequest.set:type_name -> agentrepl.v1.ChangeWorkspaceLinksSet
 	2,  // 2: agentrepl.v1.ChangeWorkspaceLinksRequest.remove:type_name -> agentrepl.v1.ChangeWorkspaceLinksRemove
 	3,  // 3: agentrepl.v1.ChangeWorkspaceLinksRequest.show:type_name -> agentrepl.v1.ChangeWorkspaceLinksShow
 	4,  // 4: agentrepl.v1.ChangeWorkspaceLinksRequest.clear:type_name -> agentrepl.v1.ChangeWorkspaceLinksClear
-	17, // 5: agentrepl.v1.ChangeWorkspaceLinksSet.ownership:type_name -> agentrepl.v1.WorkspaceLinkOwnership
+	18, // 5: agentrepl.v1.ChangeWorkspaceLinksSet.ownership:type_name -> agentrepl.v1.WorkspaceLinkOwnership
 	6,  // 6: agentrepl.v1.ChangeWorkspaceLinksResponse.success:type_name -> agentrepl.v1.ChangeWorkspaceLinksSuccess
 	7,  // 7: agentrepl.v1.ChangeWorkspaceLinksResponse.error:type_name -> agentrepl.v1.ChangeWorkspaceLinksError
-	18, // 8: agentrepl.v1.ChangeWorkspaceLinksSuccess.links:type_name -> agentrepl.v1.WorkspaceLinks
+	19, // 8: agentrepl.v1.ChangeWorkspaceLinksSuccess.links:type_name -> agentrepl.v1.WorkspaceLinks
 	8,  // 9: agentrepl.v1.ChangeWorkspaceLinksError.unknown_workspace:type_name -> agentrepl.v1.ChangeWorkspaceLinksUnknownWorkspace
 	9,  // 10: agentrepl.v1.ChangeWorkspaceLinksError.workspace_ref_mismatch:type_name -> agentrepl.v1.ChangeWorkspaceLinksWorkspaceRefMismatch
 	10, // 11: agentrepl.v1.ChangeWorkspaceLinksError.transferring_away:type_name -> agentrepl.v1.ChangeWorkspaceLinksTransferringAway
@@ -1215,11 +1284,12 @@ var file_agentrepl_v1_endpoint_change_workspace_links_proto_depIdxs = []int32{
 	13, // 14: agentrepl.v1.ChangeWorkspaceLinksError.invalid_label:type_name -> agentrepl.v1.ChangeWorkspaceLinksInvalidLabel
 	14, // 15: agentrepl.v1.ChangeWorkspaceLinksError.unknown_link:type_name -> agentrepl.v1.ChangeWorkspaceLinksUnknownLink
 	15, // 16: agentrepl.v1.ChangeWorkspaceLinksError.too_many_shown:type_name -> agentrepl.v1.ChangeWorkspaceLinksTooManyShown
-	17, // [17:17] is the sub-list for method output_type
-	17, // [17:17] is the sub-list for method input_type
-	17, // [17:17] is the sub-list for extension type_name
-	17, // [17:17] is the sub-list for extension extendee
-	0,  // [0:17] is the sub-list for field type_name
+	16, // 17: agentrepl.v1.ChangeWorkspaceLinksError.unknown_announced_link:type_name -> agentrepl.v1.ChangeWorkspaceLinksUnknownAnnouncedLink
+	18, // [18:18] is the sub-list for method output_type
+	18, // [18:18] is the sub-list for method input_type
+	18, // [18:18] is the sub-list for extension type_name
+	18, // [18:18] is the sub-list for extension extendee
+	0,  // [0:18] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_change_workspace_links_proto_init() }
@@ -1247,6 +1317,7 @@ func file_agentrepl_v1_endpoint_change_workspace_links_proto_init() {
 		(*ChangeWorkspaceLinksError_InvalidLabel)(nil),
 		(*ChangeWorkspaceLinksError_UnknownLink)(nil),
 		(*ChangeWorkspaceLinksError_TooManyShown)(nil),
+		(*ChangeWorkspaceLinksError_UnknownAnnouncedLink)(nil),
 	}
 	file_agentrepl_v1_endpoint_change_workspace_links_proto_msgTypes[11].OneofWrappers = []any{}
 	type x struct{}
@@ -1255,7 +1326,7 @@ func file_agentrepl_v1_endpoint_change_workspace_links_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_change_workspace_links_proto_rawDesc), len(file_agentrepl_v1_endpoint_change_workspace_links_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   16,
+			NumMessages:   17,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
