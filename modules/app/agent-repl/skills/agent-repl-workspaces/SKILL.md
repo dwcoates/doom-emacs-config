@@ -139,7 +139,8 @@ one repository, except the move below):
 - Create ONE workspace unless the user asked for more. A process-style ask
   ("one per failing test") is one workspace whose prompt does the enumerating
   and creates the rest.
-- Omit `-name` and the daemon names the workspace from its prompt. A name you
+- Omit `-name` and the daemon names the workspace from its prompt, in either
+  form (standard or `-one-shot`). A name you
   give is a short lowercase hyphenated slug naming the SUBJECT (never the
   channel, the person or the thread it came from), with no prefix or suffix of
   your own.
@@ -445,6 +446,16 @@ creating workspaces there with `-repository DIR`.
   into this one, add `-lands-into here`, ONLY when its branch was cut from
   this workspace's; otherwise keep its landing. `-top-level` makes it a
   top-level peer.
+- **NO MERGE GEOMETRY.** A workspace whose creation job records no merge
+  geometry (the editor registered it, or a create was cut short before it
+  finished) is refused `no_layout_facts` by `workspace finished` and
+  `no_creation_job` by `-one-shot`. The daemon never guesses where it lands.
+  - Restate where it lands with `workspace set WS -lands-into main` (or
+    `-lands-into W`). That one statement records its creation job, with its
+    own branch and worktree as the source.
+  - After that, `-one-shot` marks it and `workspace finished` lands it.
+  - A repository's main workspace never gets geometry, so it stays refused
+    `no_merge_layout`.
 - **REMOTE CONTROL.** `workspace set WS -remote-control on|off` turns WS's
   remote control on or off: its session becomes reachable, or stops being
   reachable, from claude.ai and its mobile app. WS may be this workspace or
