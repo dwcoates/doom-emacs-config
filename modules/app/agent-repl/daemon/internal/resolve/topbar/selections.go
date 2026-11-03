@@ -40,6 +40,16 @@ func WithSelectionStore(store SelectionStore) Option {
 
 const opSelections = "daemon.topbar.selections"
 
+// selectionsError records MESSAGE at ERROR on WS's log under opSelections:
+// the ONE record every failed keep or read of the topbar's remembered facts
+// leaves.
+func (r *resolver) selectionsError(ws ids.WorkspaceID, message string, ctx dlog.Context) {
+	r.mu.Lock()
+	log := r.logOf(ws, r.stateLocked(ws))
+	r.mu.Unlock()
+	log.Error(opSelections, message, ctx)
+}
+
 // remember writes one changed control through WRITE. A write that fails is
 // recorded at ERROR: the control is still drawn from the live session, and
 // only what a later sessionless strip draws is stale.
@@ -49,10 +59,7 @@ func (r *resolver) remember(ws ids.WorkspaceID, what string, write func(context.
 		return
 	}
 	if err := write(context.Background(), store); err != nil {
-		r.mu.Lock()
-		log := r.logOf(ws, r.stateLocked(ws))
-		r.mu.Unlock()
-		log.Error(opSelections, "could not keep a topbar control for when the shim is down", dlog.Context{"control": what, "cause": err.Error()})
+		r.selectionsError(ws, "could not keep a topbar control for when the shim is down", dlog.Context{"control": what, "cause": err.Error()})
 	}
 }
 
@@ -106,10 +113,7 @@ func (r *resolver) seedSelections(ws ids.WorkspaceID, configDir string) {
 		catalog, _, err = store.AccountModelCatalog(ctx, configDir)
 	}
 	if err != nil {
-		r.mu.Lock()
-		log := r.logOf(ws, r.stateLocked(ws))
-		r.mu.Unlock()
-		log.Error(opSelections, "could not read the remembered topbar controls; they are drawn once a session states them", dlog.Context{"cause": err.Error()})
+		r.selectionsError(ws, "could not read the remembered topbar controls; they are drawn once a session states them", dlog.Context{"cause": err.Error()})
 		return
 	}
 	if !found && len(catalog.GetOptions()) == 0 {
@@ -168,10 +172,7 @@ func (r *resolver) seedContextUsage(ws ids.WorkspaceID) {
 	}
 	rec, found, err := store.WorkspaceContextUsage(context.Background(), ws)
 	if err != nil {
-		r.mu.Lock()
-		log := r.logOf(ws, r.stateLocked(ws))
-		r.mu.Unlock()
-		log.Error(opSelections, "could not read the remembered context reading; the chip is drawn from the next one", dlog.Context{"cause": err.Error()})
+		r.selectionsError(ws, "could not read the remembered context reading; the chip is drawn from the next one", dlog.Context{"cause": err.Error()})
 		return
 	}
 	if !found {
