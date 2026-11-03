@@ -2259,6 +2259,18 @@ func (a *fakeAccounts) Read(_ context.Context, configDir string) (account.Accoun
 
 // Roster answers every root the fixture holds, defaulting to the routed one
 // alone.
+// Roots answers the roots Roster names, without reading them.
+func (a *fakeAccounts) Roots() []string {
+	if a.roster == nil {
+		return []string{a.configDir}
+	}
+	roots := make([]string, 0, len(a.roster))
+	for _, acct := range a.roster {
+		roots = append(roots, acct.ConfigDir)
+	}
+	return roots
+}
+
 func (a *fakeAccounts) Roster(ctx context.Context) ([]account.Account, error) {
 	if a.rosterErr != nil {
 		return nil, a.rosterErr
