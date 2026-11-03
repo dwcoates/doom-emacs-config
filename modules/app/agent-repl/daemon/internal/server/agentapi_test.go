@@ -90,6 +90,55 @@ func TestCreateWorkspaceMapsItsChoicesOntoTheSpec(t *testing.T) {
 	}
 }
 
+func TestCreateWorkspaceMapsTheSuppliedNameOntoTheSpecInEitherForm(t *testing.T) {
+	name := "parser-fix"
+	tests := []struct {
+		name string
+		form func() any
+		want string
+	}{
+		{name: "a standard create's name", want: name, form: func() any {
+			return &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{Relationship: peerRelationship(), Name: &name}}
+		}},
+		{name: "a one-shot's name", want: name, form: func() any {
+			return &agentreplv1.CreateWorkspaceRequest_OneShot{OneShot: &agentreplv1.CreateWorkspaceOneShot{
+				Prompt: workspace.SaidText("fix the parser"), Relationship: peerRelationship(), Name: &name}}
+		}},
+		{name: "a one-shot with no name", want: "", form: func() any {
+			return &agentreplv1.CreateWorkspaceRequest_OneShot{OneShot: &agentreplv1.CreateWorkspaceOneShot{
+				Prompt: workspace.SaidText("fix the parser"), Relationship: peerRelationship()}}
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			repoRef := registeredRepoRef(h)
+			h.Verbs.createRec = wsm.Workspace{ID: "ws-created", Dir: "/tmp/ws", Name: "minted"}
+			req := validCreate(func(r *agentreplv1.CreateWorkspaceRequest) {
+				switch form := tt.form().(type) {
+				case *agentreplv1.CreateWorkspaceRequest_Standard:
+					r.Form = form
+				case *agentreplv1.CreateWorkspaceRequest_OneShot:
+					r.Form = form
+				}
+			})
+			req.Repository = repoRef
+
+			// Act
+			resp, err := h.Client.CreateWorkspace(context.Background(), connect.NewRequest(req))
+
+			// Assert
+			if err != nil || resp.Msg.GetSuccess() == nil {
+				t.Fatalf("CreateWorkspace = %v, %v; want success", resp, err)
+			}
+			if got := h.Verbs.createSpecs[0].Name; got != tt.want {
+				t.Fatalf("spec name = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 // ---- CreateWorkspace: the async merge form -----------------------------------
 
 // asyncHarness is a harness whose workspace is a workspace of repo-1, and

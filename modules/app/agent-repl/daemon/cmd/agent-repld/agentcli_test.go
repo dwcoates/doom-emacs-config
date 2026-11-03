@@ -347,6 +347,55 @@ func TestCreateSendsEveryChoiceItNames(t *testing.T) {
 	}
 }
 
+func TestCreateSendsTheNameItNamesInEitherForm(t *testing.T) {
+	tests := []struct {
+		name    string
+		args    []string
+		formGot func(*agentreplv1.CreateWorkspaceRequest) *string
+	}{
+		{name: "a standard create",
+			args:    []string{"-prompt", "fix the parser"},
+			formGot: func(r *agentreplv1.CreateWorkspaceRequest) *string { return r.GetStandard().Name }},
+		{name: "a one-shot",
+			args:    []string{"-one-shot", "-prompt", "fix the parser"},
+			formGot: func(r *agentreplv1.CreateWorkspaceRequest) *string { return r.GetOneShot().Name }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newCLIFixture()
+			args := append([]string{"create", "-repository", "here", "-relationship", "peer", "-context", "fresh", "-name", "parser-fix"}, tt.args...)
+
+			// Act
+			code := f.run(workspaceNoun, args...)
+
+			// Assert
+			if code != exitSuccess {
+				t.Fatalf("exit %d, stderr %q", code, f.errOut.String())
+			}
+			if got := tt.formGot(only[*agentreplv1.CreateWorkspaceRequest](t, f)); got == nil || *got != "parser-fix" {
+				t.Fatalf("name = %v, want parser-fix carried by the form", got)
+			}
+		})
+	}
+}
+
+func TestCreateSendsNoNameItWasNotGiven(t *testing.T) {
+	// Arrange
+	f := newCLIFixture()
+
+	// Act
+	code := f.run(workspaceNoun, "create", "-repository", "here", "-relationship", "peer", "-context", "fresh", "-one-shot", "-prompt", "fix the parser")
+
+	// Assert
+	if code != exitSuccess {
+		t.Fatalf("exit %d, stderr %q", code, f.errOut.String())
+	}
+	if req := only[*agentreplv1.CreateWorkspaceRequest](t, f); req.GetOneShot().Name != nil {
+		t.Fatalf("name = %q, want unset so the daemon mints one", req.GetOneShot().GetName())
+	}
+}
+
 func TestCreateSendsAPriorityItNames(t *testing.T) {
 	// Arrange
 	f := newCLIFixture()

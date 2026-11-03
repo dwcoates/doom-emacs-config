@@ -662,7 +662,11 @@ func workspaceCreate(c *cliCall, args []string) int {
 		if *ownerNotice != "" {
 			return c.usageFailed("a one-shot lands itself, so it carries no -owner-notice")
 		}
-		req.Form = &agentreplv1.CreateWorkspaceRequest_OneShot{OneShot: &agentreplv1.CreateWorkspaceOneShot{Prompt: feed.SaidText(*prompt), Relationship: kind, LandingTarget: landing}}
+		form := &agentreplv1.CreateWorkspaceOneShot{Prompt: feed.SaidText(*prompt), Relationship: kind, LandingTarget: landing}
+		if *name != "" {
+			form.Name = name
+		}
+		req.Form = &agentreplv1.CreateWorkspaceRequest_OneShot{OneShot: form}
 	} else {
 		standard := &agentreplv1.CreateWorkspaceStandard{InitialPrompt: optionalSaid(*prompt), Relationship: kind, LandingTarget: landing, DeployHooks: deployHooks(pre, post)}
 		if *ownerNotice != "" {
