@@ -627,6 +627,7 @@ func (r *resolver) SetAccount(ws ids.WorkspaceID, account Account) {
 			s.accountSet = true
 		})
 	r.seedSelections(ws, account.ConfigDir)
+	r.seedContextUsage(ws)
 	// A SESSION THAT STARTED BEFORE ITS LOGIN WAS INSTALLED served a catalog
 	// no root could key; it is kept under the root now.
 	r.mu.Lock()
@@ -952,6 +953,9 @@ func (r *resolver) OnContextCut(ws ids.WorkspaceID, agent *conversationv1.AgentI
 			s.contextUsage = nil
 			s.contextCut = true
 		})
+	if cutMade {
+		r.rememberContextCut(ws)
+	}
 }
 
 // contextCutArm names the cut's arm for the record and reports whether it
@@ -984,6 +988,8 @@ func (r *resolver) OnSessionUpdate(ws ids.WorkspaceID, update *conversationv1.Se
 		r.rememberModel(ws, u.ModelChanged.GetEffectiveModel().GetName())
 	case *conversationv1.SessionUpdate_PermissionModeChanged:
 		r.rememberMode(ws, permissionModeName(u.PermissionModeChanged.GetPermissionMode()))
+	case *conversationv1.SessionUpdate_ContextUsage:
+		r.rememberContextUsage(ws, u.ContextUsage)
 	}
 }
 

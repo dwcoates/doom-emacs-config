@@ -20,12 +20,17 @@ type fakeSelections struct {
 	mu         sync.Mutex
 	selections map[ids.WorkspaceID]wsm.Selections
 	catalogs   map[string]*conversationv1.ModelCatalog
+	contexts   map[ids.WorkspaceID]wsm.ContextUsageRecord
 	readErr    error
 	writeErr   error
 }
 
 func newFakeSelections() *fakeSelections {
-	return &fakeSelections{selections: map[ids.WorkspaceID]wsm.Selections{}, catalogs: map[string]*conversationv1.ModelCatalog{}}
+	return &fakeSelections{
+		selections: map[ids.WorkspaceID]wsm.Selections{},
+		catalogs:   map[string]*conversationv1.ModelCatalog{},
+		contexts:   map[ids.WorkspaceID]wsm.ContextUsageRecord{},
+	}
 }
 
 func (f *fakeSelections) WorkspaceSelections(_ context.Context, id ids.WorkspaceID) (wsm.Selections, bool, error) {
@@ -74,6 +79,31 @@ func (f *fakeSelections) PutAccountModelCatalog(_ context.Context, configDir str
 	}
 	f.catalogs[configDir] = catalog
 	return nil
+}
+
+func (f *fakeSelections) WorkspaceContextUsage(_ context.Context, id ids.WorkspaceID) (wsm.ContextUsageRecord, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	rec, ok := f.contexts[id]
+	return rec, ok, f.readErr
+}
+
+func (f *fakeSelections) putContext(id ids.WorkspaceID, rec wsm.ContextUsageRecord) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.writeErr != nil {
+		return f.writeErr
+	}
+	f.contexts[id] = rec
+	return nil
+}
+
+func (f *fakeSelections) PutWorkspaceContextUsage(_ context.Context, id ids.WorkspaceID, usage *conversationv1.SessionContextUsage) error {
+	return f.putContext(id, wsm.ContextUsageRecord{Usage: usage})
+}
+
+func (f *fakeSelections) PutWorkspaceContextCut(_ context.Context, id ids.WorkspaceID) error {
+	return f.putContext(id, wsm.ContextUsageRecord{Cut: true})
 }
 
 func keptOption(name string) *conversationv1.ModelOption {
@@ -252,5 +282,175 @@ func TestAFailedReadIsAnErrorAndSeedsNothing(t *testing.T) {
 	// Assert
 	if !errorRecorded(h, opSelections) || h.view(t).GetModelSelector() != nil {
 		t.Fatalf("want an ERROR %s record and no seeded selector", opSelections)
+	}
+}
+
+func keptReading(total, window int64) *conversationv1.SessionContextUsage {
+	return &conversationv1.SessionContextUsage{TotalTokens: total, MaxTokens: window}
+}
+
+func TestTheRememberedContextReadingIsDrawn(t *testing.T) {
+	tests := []struct {
+		name     string
+		started  bool
+		wantText string
+		wantFill float64
+	}{
+		{name: "with no session", wantText: "50k", wantFill: 0.25},
+		{name: "on a revived session with no reading yet", started: true, wantText: "50k", wantFill: 0.25},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			store := newFakeSelections()
+			store.contexts[testWS] = wsm.ContextUsageRecord{Usage: keptReading(50_000, 200_000)}
+			h := newHarness(t, WithSelectionStore(store))
+			h.r.SetNaming(testWS, Naming{Name: "w", ConfigDir: "/Users/dev/.claude"})
+			if tt.started {
+				h.r.OnSessionStarted(testWS, sessionStarted("vend-1", "claude-opus-5"))
+			}
+
+			// Act
+			h.r.SetAccount(testWS, testAccount("dev@example.com"))
+
+			// Assert
+			chip := h.view(t).GetContext()
+			if chip.GetText() != tt.wantText || chip.GetWindowFill() != tt.wantFill {
+				t.Fatalf("chip = %q at %v, want %q at %v", chip.GetText(), chip.GetWindowFill(), tt.wantText, tt.wantFill)
+			}
+		})
+	}
+}
+
+func TestARememberedCutIsDrawnUnknown(t *testing.T) {
+	// Arrange
+	store := newFakeSelections()
+	store.contexts[testWS] = wsm.ContextUsageRecord{Cut: true}
+	h := newHarness(t, WithSelectionStore(store))
+
+	// Act
+	sessionless(t, h)
+
+	// Assert
+	if got := h.view(t).GetContext().GetText(); got != contextUnknownText {
+		t.Fatalf("chip = %q, want the unknown dash", got)
+	}
+}
+
+func TestALiveContextFactBeatsTheRememberedOne(t *testing.T) {
+	tests := []struct {
+		name     string
+		live     func(h *harness)
+		wantText string
+	}{
+		{name: "a live reading", live: func(h *harness) {
+			h.r.OnSessionUpdate(testWS, contextUsage(12_000, 200_000, 6, "claude-opus-5"))
+		}, wantText: "12k"},
+		{name: "a live cut", live: func(h *harness) {
+			h.r.OnContextCut(testWS, cutAgent, clearedCut())
+		}, wantText: contextUnknownText},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			store := newFakeSelections()
+			h := newHarness(t, WithSelectionStore(store))
+			h.r.SetNaming(testWS, Naming{Name: "w", ConfigDir: "/Users/dev/.claude"})
+			tt.live(h)
+			store.contexts[testWS] = wsm.ContextUsageRecord{Usage: keptReading(50_000, 200_000)}
+
+			// Act
+			h.r.SetAccount(testWS, testAccount("dev@example.com"))
+
+			// Assert
+			if got := h.view(t).GetContext().GetText(); got != tt.wantText {
+				t.Fatalf("chip = %q, want the live %q", got, tt.wantText)
+			}
+		})
+	}
+}
+
+func TestEveryContextFactIsKept(t *testing.T) {
+	tests := []struct {
+		name string
+		act  func(h *harness)
+		want wsm.ContextUsageRecord
+	}{
+		{name: "a reading", act: func(h *harness) {
+			h.r.OnSessionUpdate(testWS, contextUsage(12_000, 200_000, 6, "claude-opus-5"))
+		}, want: wsm.ContextUsageRecord{Usage: &conversationv1.SessionContextUsage{TotalTokens: 12_000, MaxTokens: 200_000, Percentage: 6, Model: "claude-opus-5"}}},
+		{name: "a clear", act: func(h *harness) { h.r.OnContextCut(testWS, cutAgent, clearedCut()) }, want: wsm.ContextUsageRecord{Cut: true}},
+		{name: "a completed compaction", act: func(h *harness) { h.r.OnContextCut(testWS, cutAgent, compactedCut()) }, want: wsm.ContextUsageRecord{Cut: true}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			store := newFakeSelections()
+			h := newHarness(t, WithSelectionStore(store))
+			h.ready(t)
+			delete(store.contexts, testWS)
+
+			// Act
+			tt.act(h)
+
+			// Assert
+			got, ok := store.contexts[testWS]
+			if !ok || got.Cut != tt.want.Cut || !proto.Equal(got.Usage, tt.want.Usage) {
+				t.Fatalf("kept = %+v (%v), want %+v", got, ok, tt.want)
+			}
+		})
+	}
+}
+
+func TestAFailedCompactionKeepsTheReading(t *testing.T) {
+	// Arrange
+	store := newFakeSelections()
+	h := newHarness(t, WithSelectionStore(store))
+	h.ready(t)
+	h.r.OnSessionUpdate(testWS, contextUsage(12_000, 200_000, 6, "claude-opus-5"))
+
+	// Act
+	h.r.OnContextCut(testWS, cutAgent, compactionFailedCut())
+
+	// Assert
+	if got := store.contexts[testWS]; got.Cut || got.Usage.GetTotalTokens() != 12_000 {
+		t.Fatalf("kept = %+v, want the reading still standing", got)
+	}
+}
+
+func TestAFailedContextKeepIsAnError(t *testing.T) {
+	// Arrange
+	store := newFakeSelections()
+	h := newHarness(t, WithSelectionStore(store))
+	h.ready(t)
+	store.writeErr = errors.New("disk full")
+
+	// Act
+	h.r.OnSessionUpdate(testWS, contextUsage(12_000, 200_000, 6, "claude-opus-5"))
+
+	// Assert
+	records := dlog.FilterRecords(h.log.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: opSelections})
+	if len(records) != 1 || records[0].Context["control"] != "context_usage" || records[0].Context["cause"] != "disk full" {
+		t.Fatalf("records = %+v, want one ERROR naming the context reading and its cause", h.log.Records())
+	}
+}
+
+func TestAFailedContextReadIsAnErrorAndSeedsNothing(t *testing.T) {
+	// Arrange
+	store := newFakeSelections()
+	store.contexts[testWS] = wsm.ContextUsageRecord{Usage: keptReading(50_000, 200_000)}
+	store.readErr = errors.New("locked")
+	h := newHarness(t, WithSelectionStore(store))
+
+	// Act
+	sessionless(t, h)
+
+	// Assert
+	records := dlog.FilterRecords(h.log.Records(), dlog.RecordQuery{
+		Level: dlog.LevelError, Operation: opSelections,
+		Message: "could not read the remembered context reading; the chip is drawn from the next one",
+	})
+	if len(records) != 1 || records[0].Context["cause"] != "locked" || h.view(t).GetContext().GetText() != "0" {
+		t.Fatalf("records %+v, chip %q: want an ERROR and nothing seeded", h.log.Records(), h.view(t).GetContext().GetText())
 	}
 }
