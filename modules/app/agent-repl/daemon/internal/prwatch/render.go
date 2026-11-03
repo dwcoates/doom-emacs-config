@@ -209,9 +209,6 @@ func failureSentence(f wsm.PullRequestFailure) string {
 	return "The daemon's reads of this pull request are failing: " + f.Detail + ". It keeps reading on its schedule."
 }
 
-// recoveredSentence says reads work again.
-const recoveredSentence = "The daemon's reads of this pull request work again; what follows is everything since they failed."
-
 // endedSentence closes a subscription's last notice.
 const endedSentence = "The pull request has ended, so this subscription ended with this notice."
 

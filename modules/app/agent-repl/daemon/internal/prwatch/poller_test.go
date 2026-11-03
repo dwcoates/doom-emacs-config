@@ -94,8 +94,8 @@ func TestAFailingReadIsToldOnceThenItsRecovery(t *testing.T) {
 	if len(told) != 2 || !contains(told[0], "reads of this pull request are failing: no route to host") {
 		t.Fatalf("told = %q, want the failure once, then the recovery", told)
 	}
-	if !contains(told[1], recoveredSentence) || !contains(told[1], "@bob") {
-		t.Fatalf("second notice = %q, want the recovery and the comment it missed", told[1])
+	if !contains(told[1], "@bob") || contains(told[1], "work again") {
+		t.Fatalf("second notice = %q, want the comment it missed and no word of recovery", told[1])
 	}
 	if _, ok := dlog.FindRecord(r.log.Records(), dlog.RecordQuery{Level: "info", Operation: opPoll, Message: "the pull request could not be read; its subscriptions are failing"}); !ok {
 		t.Fatalf("no record of the failed read: %+v", r.log.Records())
