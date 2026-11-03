@@ -145,14 +145,26 @@ Either kind:
   - CRITICAL: hard-stop ONLY when the user asks to stop the queue's work now.
 - `merge-queue disable-racing` and `merge-queue enable-racing`: on AC power the
   top two merges race at the tests; disabled, every queue works its head alone.
-- A head whose WHOLE test suite finishes with any failure STEPS ASIDE: the
-  next merge in line takes the head at once, and the failed merge fixes its
-  failures out of line (`merge-queue status` lists it `remediating`; the
-  sidebar draws it under the head). Once its fixing turn ends it goes back
-  in line next after the merge being worked on, never evicting it, and
-  reruns its whole suite when it heads the queue. It still has one fixing
-  attempt: a second failing suite fails it out. A head with nobody behind it
-  fixes in place.
+- A merge whose next step waits on an agent turn of its own STEPS ASIDE, for
+  one of two reasons: its WHOLE test suite finished with any failure (its
+  session fixes them), or its rebase onto the target's tip hit conflicts (its
+  session resolves them).
+  - The head steps aside for either reason. With racing on, a member racing
+    behind the head steps aside for conflicts too, and the next merge in line
+    takes its place in the race.
+  - The repairing prompt is delivered first. The next merge in line takes the
+    head (or the racing spot) at once while the repair runs out of line.
+  - `merge-queue status` lists it `remediating` with its reason (`tests` or
+    `conflicts`). The sidebar draws it under the head with "remediating
+    tests" or "resolving conflicts".
+  - Once its turn ends it goes back in line at the first waiting place, next
+    after the merge being worked on, never evicting it. It then rebases onto
+    the tip and reruns its whole suite when it heads the queue.
+  - A test step aside is its one fixing attempt: a second failing suite fails
+    it out. A conflict step aside spends no fixing attempt, and if its rebase
+    on return conflicts again it steps aside again.
+  - A merge with nobody in line behind it repairs in place.
+  - It survives a daemon restart.
 - `merge-queue subscribe [-repository here|DIR]` has this workspace told as
   the queue changes (to land after it drains, to report a landing) instead of
   polling it. It is told, in one short line each, a merge put in line, a
