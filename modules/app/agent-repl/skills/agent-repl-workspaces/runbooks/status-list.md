@@ -7,10 +7,12 @@
   whether it awaits another workspace, and a cold gate it is parked at.
 - `workspace list` prints `workspace find`'s record, one compact JSON object a
   line, for every workspace the sidebar draws (open, hidden and recently merged)
-  in every repository, most recently active first. Its one narrowing flag is
-  `-login here|WS`: only the workspaces whose repository is routed to the same
-  login (Claude config dir) as WS's repository, plus the direct children of
-  those workspaces in any repository. Narrow, filter and sort everything else
+  in every repository, most recently active first. Its one narrowing is a
+  login, named either way: `-login here|WS` is the login (Claude config dir)
+  WS's repository is routed to, and `-login-root ROOT` is the login whose
+  config dir is ROOT (e.g. `~/.claude-chesscom`; a leading `~/` is expanded).
+  Either keeps the workspaces whose repository is routed to that login, plus
+  the direct children of those workspaces in any repository. Narrow, filter and sort everything else
   yourself with `jq`, `head`, `sort`, `grep` and other shell utilities. Each line is one
   `agentrepl.v1.FoundWorkspace` in protojson field names, and a field that is
   unset or false is absent:
@@ -28,6 +30,12 @@
     `permission`, `question`, `done`, `interrupted`, `turn_failed`, `ready`,
     `idle_async`, `cold_gate`, `init`.
   - `calling`: `true` only on the record of the workspace the command runs from.
+  - `configDir`: the Claude config dir the workspace's session last came up
+    under; absent when it never came up. It is the session's own, not what
+    the login narrowing matches.
+  - `lastTurnAtMs`: when its last AGENT TURN started (`workspace find`'s
+    `-turned-since` says which turns count), as a JSON string; absent when it
+    never took one.
   - Recipes, each one command:
     - the 5 most recently active: `agent-repld workspace list | head -n 5`
     - by live status: `agent-repld workspace list | jq -c 'select(.roster.status.arm == "thinking")'`
