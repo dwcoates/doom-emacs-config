@@ -1,6 +1,7 @@
 package sessionwatcher
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"slices"
@@ -706,6 +707,194 @@ func TestAReplayedTerminalNeverEndsTheOpenTurn(t *testing.T) {
 				t.Fatal("the dropped replay has no info record")
 			}
 		})
+	}
+}
+
+// stampedPageEntryAt is one page entry carrying an agent frame at a pointer,
+// stamped with the turn it was produced within ("" leaves it unstamped).
+func stampedPageEntryAt(pointer, turn string, frame *conversationv1.AgentFrame) *conversationv1.HistoryEntryAt {
+	at := frameEntryAt(pointer, frame)
+	if turn != "" {
+		at.Turn = &conversationv1.TurnId{Value: turn}
+	}
+	return at
+}
+
+// A HANDOVER'S SUCCESSOR SEES A TURN'S CLOSE ON ITS MAIN WATCH, wherever the
+// close fell. The successor attaches purely, resuming from its predecessor's
+// main pointer; the shim's re-announcement names the merge's turn in flight;
+// the main watch then catches up from that pointer. The 2026-11-02 18:43:44
+// interleaving is the first case: the turn closed between the re-announcement
+// and the main watch serving, so its terminal is on the opening page, and the
+// merge reattaching to the turn afterwards (AwaitTurnEnd) must be answered.
+func TestAHandoverSeesTheTurnCloseWhereverItFell(t *testing.T) {
+	terminal := func(pointer, turn string) *conversationv1.HistoryEntryAt {
+		return stampedPageEntryAt(pointer, turn, frameSuccess("main-1", completed()))
+	}
+	tests := []struct {
+		name string
+		// inFlight is the turn the re-announcement names in flight.
+		inFlight string
+		// page is the main watch's opening catch-up page.
+		page []*conversationv1.HistoryEntryAt
+		// live is a stamped terminal the tail serves after the page, if any.
+		live string
+		// wantEnded is the turn the lifecycle is told ended, "" for none.
+		wantEnded ids.TurnID
+		// wantUnobserved is what the reconciliation closed as unobserved.
+		wantUnobserved []ids.TurnID
+		// wantRecord is the INFO record the close is explained by.
+		wantRecord string
+	}{
+		{
+			name:       "the turn closed between the adopt and the main watch serving",
+			inFlight:   "turn-merge",
+			page:       []*conversationv1.HistoryEntryAt{terminal("ptr-close", "turn-merge")},
+			wantEnded:  "turn-merge",
+			wantRecord: "daemon.sessionwatcher.turn_closed_on_catch_up",
+		},
+		{
+			name:       "the turn still open at attach closes on the tail",
+			inFlight:   "turn-merge",
+			live:       "turn-merge",
+			wantEnded:  "turn-merge",
+			wantRecord: "daemon.sessionwatcher.turn_open_at_attach",
+		},
+		{
+			name:           "no turn at attach closes the snapshot's turn once and ends nothing more",
+			page:           []*conversationv1.HistoryEntryAt{terminal("ptr-close", "turn-merge")},
+			wantUnobserved: []ids.TurnID{"turn-merge"},
+			wantRecord:     "daemon.sessionwatcher.turn_ended_unobserved",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: a pure attach resuming from its predecessor's mark, with
+			// the merge's turn open in the adoption's snapshot.
+			h := startHarness(t, Session{
+				Opening:      ResumeFrom(Pointers{Main: &conversationv1.HistoryPointer{Value: "ptr-main"}}),
+				OpenAtAttach: openRows("turn-merge"),
+			}, nil)
+			h.session = h.client.nextSessionOpen(t)
+			h.sendSessionStarted(t, sessionStarted(tt.inFlight))
+			open := h.client.nextAgentOpenFor(t, "")
+			if got := open.req.GetKnownThrough().GetValue(); got != "ptr-main" {
+				t.Fatalf("the main watch caught up from %q, want ptr-main", got)
+			}
+
+			// Act.
+			seen := h.route(open.stream, pageFrame(tt.page...))
+			if tt.live != "" {
+				seen = append(seen, h.route(open.stream, stampedFrameAt(frameSuccess("main-1", completed()), "ptr-live", tt.live))...)
+			}
+
+			// Assert.
+			var ended []ids.TurnID
+			for _, e := range seen {
+				if e.name() == "lifecycle.OnTurnEnded" && e.turn != nil {
+					ended = append(ended, *e.turn)
+				}
+			}
+			var wantEnded []ids.TurnID
+			if tt.wantEnded != "" {
+				wantEnded = []ids.TurnID{tt.wantEnded}
+			}
+			if !sameTurns(ended, wantEnded) {
+				t.Fatalf("turns told ended = %v, want %v", ended, wantEnded)
+			}
+			if got := append(unobservedTurns(seen), unobservedTurns(h.rec.drain())...); !sameTurns(got, tt.wantUnobserved) {
+				t.Fatalf("turns ended unobserved = %v, want %v", got, tt.wantUnobserved)
+			}
+			if turn := h.w.TurnInFlight(); turn != nil {
+				t.Fatalf("TurnInFlight() = %q, want none once the close is seen", *turn)
+			}
+			if tt.wantEnded != "" {
+				how, err := h.w.AwaitTurnEnd(context.Background(), tt.wantEnded)
+				if err != nil || how != wsm.CloseCompleted {
+					t.Fatalf("AwaitTurnEnd(%s) = %v, %v; want CloseCompleted, the merge's resume", tt.wantEnded, how, err)
+				}
+			}
+			if got := h.recordContext(t, "info", tt.wantRecord)["turn_id"]; got != "turn-merge" {
+				t.Fatalf("the %s record names turn %v, want turn-merge", tt.wantRecord, got)
+			}
+		})
+	}
+}
+
+// A TERMINAL FIRST SERVED ON THE MAIN WATCH'S OPENING PAGE closes only the
+// open turn its stamp names. Each case routes one page while turn-1 is in
+// flight.
+func TestAPageTerminalClosesOnlyTheOpenTurnItsStampNames(t *testing.T) {
+	tests := []struct {
+		name string
+		// turn stamps the page's terminal; "" leaves it unstamped.
+		turn string
+		// agent is the terminal's own agent.
+		agent      string
+		wantEnded  bool
+		wantLevel  string
+		wantRecord string
+	}{
+		{
+			name: "stamped with the turn in flight it ends that turn", turn: "turn-1", agent: "main-1",
+			wantEnded: true, wantLevel: "info", wantRecord: "daemon.sessionwatcher.turn_closed_on_catch_up",
+		},
+		{
+			name: "unstamped it is not charged to the turn in flight", agent: "main-1",
+			wantLevel: "info", wantRecord: "daemon.sessionwatcher.page_terminal_history",
+		},
+		{
+			name: "stamped with a turn not open it ends nothing", turn: "turn-0", agent: "main-1",
+			wantLevel: "debug", wantRecord: "daemon.sessionwatcher.page_terminal_history",
+		},
+		{
+			name: "another agent's terminal ends nothing", turn: "turn-1", agent: "sub-9",
+			wantLevel: "info", wantRecord: "daemon.sessionwatcher.page_terminal_history",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t, Session{Started: sessionStarted("turn-1")})
+			h.w.SetMainAgent(agentID("main-1"))
+			h.quiet()
+
+			// Act.
+			got := h.route(h.main, pageFrame(stampedPageEntryAt("ptr-close", tt.turn, frameSuccess(tt.agent, completed()))))
+
+			// Assert.
+			if ended := hasEvent(got, "lifecycle.OnTurnEnded"); ended != tt.wantEnded {
+				t.Fatalf("lifecycle.OnTurnEnded told = %v, want %v (events %v)", ended, tt.wantEnded, names(got))
+			}
+			if tt.wantEnded && hasEvent(got, "feed.OnAgentTerminal") {
+				t.Fatal("the feed was handed the page's terminal again; it drew it from the page")
+			}
+			if open := h.w.TurnInFlight() != nil; open == tt.wantEnded {
+				t.Fatalf("turn in flight = %v, want open %v", h.w.TurnInFlight(), !tt.wantEnded)
+			}
+			if !h.hasRecord(tt.wantLevel, tt.wantRecord) {
+				t.Fatalf("no %s/%s record was logged", tt.wantLevel, tt.wantRecord)
+			}
+		})
+	}
+}
+
+// A CATCH-UP TERMINAL ALREADY SERVED is a replay, and the turn's live
+// re-serving after the page closes nothing twice.
+func TestAPageTerminalClosesItsTurnOnce(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("turn-1")})
+	h.w.SetMainAgent(agentID("main-1"))
+	h.quiet()
+	h.route(h.main, pageFrame(stampedPageEntryAt("ptr-close", "turn-1", frameSuccess("main-1", completed()))))
+
+	// Act.
+	got := h.route(h.main, stampedFrameAt(frameSuccess("main-1", completed()), "ptr-close", "turn-1"))
+
+	// Assert.
+	assertNames(t, got, nil)
+	if !h.hasRecord("info", "daemon.sessionwatcher.terminal_replayed") {
+		t.Fatal("the dropped replay has no info record")
 	}
 }
 

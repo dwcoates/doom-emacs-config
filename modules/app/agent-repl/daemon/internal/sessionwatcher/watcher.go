@@ -1760,6 +1760,15 @@ func (w *watcher) openAgentStreamLocked(a *agentWatch) {
 		return
 	}
 	req := watchRequest(a.id, w.known[watchKey(a.id)])
+	if a.id == nil && req.GetTailOnly() != nil && w.turn != nil && *w.turn == w.factsTurn {
+		// THE ONE OPENING NO CATCH-UP COVERS. A turn the session facts stood
+		// open at attach closes on this watch, and with no mark held the watch
+		// serves only what is written once its tail stands: a close written
+		// between the facts and that instant reaches no stream.
+		w.log.Info("daemon.sessionwatcher.main_watch_tail_only_at_attach", "the main agent's watch opens with no mark while a turn the session facts named is open; its close is seen only if written after the tail stands", dlog.Context{
+			"turn_id": string(*w.turn),
+		})
+	}
 	a.opening = t
 	go w.openAgent(t, a, req)
 }
@@ -2320,7 +2329,7 @@ func (w *watcher) reconcileOpenAtAttachLocked(started *conversationv1.SessionSta
 	for _, open := range w.openAtAttach {
 		turn := open.ID
 		if _, ok := held[turn]; ok {
-			w.log.Info("daemon.sessionwatcher.turn_open_at_attach", "a turn open when this daemon attached is still held by the shim; it stays open", dlog.Context{
+			w.log.Info("daemon.sessionwatcher.turn_open_at_attach", "a turn open when this daemon attached was still held by the shim when its facts were read; it stays open until the main agent's watch carries its close", dlog.Context{
 				"turn_id": string(turn), "turn_in_flight": string(inFlight),
 			})
 			continue
