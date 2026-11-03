@@ -9,7 +9,7 @@ repository's autonomous preamble and appends, behind one literal framing
 sentence, the daemon's own COMPLETION DIRECTIVE, which tells the agent to run
 `agent-repld workspace finished here` when the work is done. WHAT FINISHING
 DOES is a policy decision about your repository, stated in its
-`.agent-repl/deploy.yaml` (the deploy config `/agent-repl-workspaces`
+`.agent-repl/lifecycle.yaml` (the lifecycle config `/agent-repl-workspaces`
 documents): whether a local merge lands the work, whether a pull request is
 opened, what runs after.
 

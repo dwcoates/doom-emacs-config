@@ -1,5 +1,11 @@
 # Slack origin and link ownership (2026-10-30)
 
+SUPERSEDED IN PART by `2026-11-03-lifecycle-hooks.md`: the daemon no longer
+posts into the originating thread. Its "work began" post, its end post and
+the `slack_post_failed` footer line are retired; what the thread is told is
+the repository's lifecycle hooks' (the emoji-ack defaults included). The
+thread's record and its reference link, and link ownership, stand as below.
+
 A workspace created for a Slack message (the `:agent-ack:` and
 `:oneshot-ack:` reactions) is spoken for in that thread by the daemon, not by
 its agent. Only `:sockets-ack:` keeps a `gns-sockets` subscription, so for

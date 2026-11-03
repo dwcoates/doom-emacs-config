@@ -1,6 +1,6 @@
 ---
 name: agent-repl-workspaces
-description: 'Work with agent-repl workspaces through the agent API: create a workspace (a child of this one or of another, or a peer, with its landing target (its parent''s branch or the main branch), a fresh context or one forked from a workspace''s conversation, as a one-shot or not), prompt another workspace, read a workspace''s status, list them all, or find workspaces open or closed by repository, time, standing or text with their summaries, mark this workspace a one-shot or as awaiting another workspace''s answer (which draws it in the background, yellow), store its links (owned or a reference; an owned pull request is followed for its comments, reviews and checks; the topbar summary''s menu), reply on a pull request it owns (`pr-comment`), send a desktop notification on behalf of a workspace whose click opens it in Emacs (`workspace notify`), rename a workspace, hide or show a workspace, set its priority, turn a workspace''s remote control on or off, retarget its parent, adopt an existing workspace as this one''s child, reorganize this workspace''s work across repositories (move to the repository the work principally belongs to and govern one workspace in each other repository it touches, proactively and without asking), read its repository''s sidebar subsections and file it into one, finish a workspace (deploy it as its repository''s `.agent-repl/deploy.yaml` says), open, close, kill, compact, restart (on its own, to unstick a workspace or refresh its harness), interrupt or select one, answer a cold gate, and subscribe this workspace to another''s turns, asks, landing and close, and register a repository with agent-repl (`repository register`). Use whenever work should be split off into another workspace, handed to one, or followed; whenever this workspace commits to finishing the rest of its work unattended, or is told to one-shot itself or to land its work when done (mark it a one-shot); whenever a one-shot is reopened or prompted for more work after it finished (take the mark back); whenever this workspace ends a turn to wait for another workspace (mark it awaiting) and when that answer arrives (clear the mark); whenever this workspace''s task has clearly moved away from its name (rename it, without asking); whenever a child created with a note to its owner must be landed or closed by its owner; whenever a repository''s deploy config or a deploy hook is written or read; whenever work is in a repository agent-repl does not know yet (register it before creating workspaces there); whenever this workspace''s work principally belongs to another repository or touches several (reorganize it); and whenever a workspace must be closed, compacted, killed or have its gate answered. Replaces /create-or-update-workspace and the workspace command files.'
+description: 'Work with agent-repl workspaces through the agent API: create a workspace (a child of this one or of another, or a peer, with its landing target (its parent''s branch or the main branch), a fresh context or one forked from a workspace''s conversation, as a one-shot or not), prompt another workspace, read a workspace''s status, list them all, or find workspaces open or closed by repository, time, standing or text with their summaries, mark this workspace a one-shot or as awaiting another workspace''s answer (which draws it in the background, yellow), store its links (owned or a reference; an owned pull request is followed for its comments, reviews and checks; the topbar summary''s menu), reply on a pull request it owns (`pr-comment`), send a desktop notification on behalf of a workspace whose click opens it in Emacs (`workspace notify`), rename a workspace, hide or show a workspace, set its priority, turn a workspace''s remote control on or off, retarget its parent, adopt an existing workspace as this one''s child, reorganize this workspace''s work across repositories (move to the repository the work principally belongs to and govern one workspace in each other repository it touches, proactively and without asking), read its repository''s sidebar subsections and file it into one, finish a workspace (deploy it as its repository''s `.agent-repl/lifecycle.yaml` says), open, close, kill, compact, restart (on its own, to unstick a workspace or refresh its harness), interrupt or select one, answer a cold gate, and subscribe this workspace to another''s turns, asks, landing and close, and register a repository with agent-repl (`repository register`). Use whenever work should be split off into another workspace, handed to one, or followed; whenever this workspace commits to finishing the rest of its work unattended, or is told to one-shot itself or to land its work when done (mark it a one-shot); whenever a one-shot is reopened or prompted for more work after it finished (take the mark back); whenever this workspace ends a turn to wait for another workspace (mark it awaiting) and when that answer arrives (clear the mark); whenever this workspace''s task has clearly moved away from its name (rename it, without asking); whenever a child created with a note to its owner must be landed or closed by its owner; whenever a repository''s lifecycle config (`.agent-repl/lifecycle.yaml`) or one of its hooks is written or read; whenever work is in a repository agent-repl does not know yet (register it before creating workspaces there); whenever this workspace''s work principally belongs to another repository or touches several (reorganize it); and whenever a workspace must be closed, compacted, killed or have its gate answered. Replaces /create-or-update-workspace and the workspace command files.'
 argument-hint: "create | async-merge | prompt | status | list | find | set | link | finished | open | close | kill | compact | restart | interrupt | select | gate | subscribe | unsubscribe | subsections | place | repository register"
 allowed-tools: Bash(~/.claude/skills/agent-repl-workspaces/agent-repld:*)
 ---
@@ -123,6 +123,14 @@ one repository, except the move below):
   land itself; unmarking it hands its landing back to the parent.
 - A child forked from its parent has the parent's whole context and lands
   itself; it takes no notice. A peer never takes a notice.
+- `-originator emoji-ack|user-or-workspace` states who is creating the
+  workspace, which decides the kind of workspace it is (below, "Repository
+  lifecycle"). The default is `user-or-workspace`. `emoji-ack` is only for
+  the Slack emoji-ack reaction system's dispatch (gns-sockets), requires
+  `-slack-thread URL`, and is refused beside an async merge.
+  - The daemon never infers the kind: `-slack-thread` alone does not make a
+    workspace emoji-ack. It records the thread and stores it as a reference
+    link labelled "Originating Slack thread".
 - `-one-shot -prompt TEXT` makes a workspace that finishes its commission
   unattended and then runs `workspace finished here`, as the daemon's
   completion directive tells it.
@@ -358,7 +366,8 @@ creating workspaces there with `-repository DIR`.
   it opens the one shown link, or drops a menu of the shown links' labels,
   most recently set first, when there are several.
   - The metaprompt says when to store one ("Workspace links").
-  - `workspace link here -url URL -label TEXT -owned|-reference` stores a
+  - `workspace link here -url URL -label TEXT (-owned [-announces URL] |
+    -reference)` stores a
     link, or relabels one already stored. The label is two to eight words
     in one sentence; any other is refused `invalid_label` with the reason.
   - Exactly one of `-owned` and `-reference` is named on every set, and a
@@ -368,22 +377,14 @@ creating workspaces there with `-repository DIR`.
     - `-reference`: it exists apart from the work, which only points at it
       (the thread or ticket the task came from, a doc it read, a pull
       request it did not open, even one its work amends).
-    - The daemon reads the ownership for a workspace created for a Slack
-      message (`create -slack-thread URL`), one-shot or not:
-      - It speaks for the workspace in that thread itself; the agent posts
-        none of it.
-      - Once the workspace's one-sentence summary (the one the topbar
-        shows) first exists, the daemon posts it into the thread as the
-        opening, once.
-      - Every link set `-owned` is posted into the thread as it is stored: a
-        pull request by its label and its `#<number>` link, anything else by
-        its label. A link is posted once; setting it again, a relabel among
-        them, never posts it again.
-      - When an owned pull request the daemon follows merges, the daemon
-        adds the `:merged:` reaction to the message that posted it.
-      - A finish whose deploy fails is posted to the thread with where to
-        look (the workspace, and every owned link). A deploy that lands
-        posts nothing more.
+    - `-announces URL2` (only with `-owned`) names the stored link this one
+      announces, such as a Slack post announcing a pull request. URL2 must
+      already be one of this workspace's links, else it is refused
+      `unknown_announced_link`. A relabel sets the announcement anew.
+      `workspace status here` shows it as `ownership.owned.announces.url`.
+    - The daemon posts nothing to Slack. What a Slack thread is told is the
+      repository's lifecycle hooks'. The emoji-ack finish default stores the
+      announcing link, and the emoji-ack post-deploy default reacts on it.
     - The daemon follows an owned github.com pull request: every comment,
       review, line comment, edit, deletion, state change and finished check
       arrives as a notice (a deferred prompt the feed draws no row for). It
@@ -470,7 +471,8 @@ creating workspaces there with `-repository DIR`.
 ## Finishing, opening, closing
 
 - `workspace finished WS -placement back|front` says WS's work is done and
-  queues its DEPLOY, which its repository's deploy config decides (below). Run
+  runs its repository's finish hooks once the turn ends, then queues its
+  DEPLOY; its repository's lifecycle config decides both (below). Run
   it on `here` when this workspace is done (see `/agent-repl-merge-queue` for
   when, and for the version increment a deploy onto a versioned main branch
   carries), or on a child whose owner you are, after reviewing its work
@@ -495,24 +497,78 @@ creating workspaces there with `-repository DIR`.
   context is likewise never done on an agent's own judgment, and is asked for
   the same way.
 
-## Deploying (`.agent-repl/deploy.yaml`)
+## Repository lifecycle (`.agent-repl/lifecycle.yaml`)
 
-- **What a finished workspace's deploy does is its repository's, never the
-  caller's.** The repository commits `.agent-repl/deploy.yaml` at its main
-  checkout root. A repository with no such file refuses `workspace finished`
-  and `workspace async-merge` (`no_deploy_config`); a file that does not parse
-  or leaves a required field unset is refused naming the field
-  (`deploy_config_invalid`). The file is read at every deploy, so an edit
-  applies to the next one.
-- A deploy runs THREE STAGES in order, in the deploying workspace's own feed
-  bubble, one tab per hook. Each stage runs one deploy at a time, in queue
-  order, unless `concurrent:` names it:
+- **What happens at each point of a workspace's life is its repository's,
+  never the caller's.** The repository commits `.agent-repl/lifecycle.yaml`
+  at its main checkout root. `.agent-repl/deploy.yaml` is no longer read.
+  - A repository with no such file refuses `workspace finished` and
+    `workspace async-merge` (`no_deploy_config`, naming lifecycle.yaml). A
+    create there is fine and runs only the built-in defaults.
+  - A file that does not parse or leaves a required field unset is refused
+    naming the field: `deploy_config_invalid` for a deploy, and
+    `lifecycle_config_invalid` for a create, before anything is built.
+  - The file is read at every use, so an edit applies to the next create or
+    deploy.
+- A workspace meets FIVE STAGES in order. The deploy stages run in the
+  deploying workspace's own feed bubble, one tab per hook, one deploy at a
+  time in queue order unless `concurrent:` names them:
 
 | stage | holds | runs | may be concurrent |
 |---|---|---|---|
-| `pre_deploy` | `hooks` (a list), then the optional built-in `local_merge` | before anything lands | yes, without a `local_merge` |
-| `deploy` | one hook, optional | after the local merge landed | yes, with `pre_deploy` |
-| `post_deploy` | `hooks` (a list) | last | no |
+| `creation` | hooks, per kind | once, when the workspace first comes online | no |
+| `finish` | hooks, per kind | when the workspace calls `workspace finished`, once that turn ends, before the deploy is put in the queue | no |
+| `pre_deploy` | hooks, per kind, then the optional built-in `local_merge` | before anything lands | yes, without a `local_merge` |
+| `deploy` | one hook per kind, optional | after the local merge landed | yes, with `pre_deploy` |
+| `post_deploy` | hooks, per kind | last | no |
+
+- `queue_drained:` follows them (below), for no kind of workspace.
+- **Creation.** Prompt hooks' text is appended to the initial prompt, after
+  the commission and before a one-shot's completion directive, costing no
+  turn. A workspace created with no initial prompt runs none of them. Script
+  hooks run once the worktree is registered, before the session's first
+  prompt.
+  - A failed creation script, or a creation prompt naming `{{slack_thread}}`
+    for a workspace with no Slack origin, FAILS THE CREATE: it is undone and
+    reported to the repository's main workspace (`creation_hook_failed`).
+  - An async merge's hidden merge workspace runs no creation stage.
+- **Finish.** Nothing is drawn as a bubble meanwhile. Prompt hooks are turns
+  of the workspace, drawn in its own feed; scripts keep their log among the
+  queue's logs. A failed hook withdraws the deploy before it is ever in line
+  and hands the failure back to the workspace. It is durable across restarts.
+  - An async merge has no finish stage.
+  - A user-requested finish of a workspace whose kind has finish hooks waits
+    for any turn in flight, then runs them.
+- **TWO KINDS OF WORKSPACE, decided only by who created it**: `emoji_ack`
+  (created by the Slack emoji-ack reaction system) and `user_or_workspace`
+  (created by the user or another workspace). The creator states it with
+  `create -originator`; the daemon never infers it from `-slack-thread`.
+  - `creation`, `finish` and `post_deploy` each hold `emoji_ack: {hooks:
+    [...]}` and/or `user_or_workspace: {hooks: [...]}`. `pre_deploy` holds
+    the same two lists beside its `local_merge`. `deploy` holds `emoji_ack:`
+    and/or `user_or_workspace:`, each ONE hook entry (`hook:` + `runs_for:`).
+  - A workspace runs only its own kind's list.
+  - A kind's list LEFT UNSET runs the stage's BUILT-IN DEFAULT for that kind;
+    SET, even `hooks: []`, it replaces the default.
+  - YAML anchors (`&x` / `*x`) let both kinds share one entry.
+- **Built-in defaults exist only for `emoji_ack`:**
+  - `creation`: a prompt asking the agent to post a brief reply in the
+    originating thread, in its own words, that work started (the
+    send-to-slack skill).
+  - `finish`: a prompt asking the agent to post to the thread that its pull
+    request was created, with a hyperlink, then store that post's permalink
+    as an owned link announcing the pull request: `agent-repld workspace
+    link here -url <permalink> -label <two to eight words> -owned -announces
+    <PR url>`. It posts nothing if no pull request was opened.
+  - `post_deploy`: the script `bin/hooks/slack-merged-reaction.sh` in the
+    daemon's agent-repl checkout. It adds `:merged:` to every Slack message
+    whose stored owned link announces a pull request GitHub reports merged,
+    found through the workspace's links alone, never by searching the
+    thread.
+  - `builtin: {}` stands for the stage's default in an `emoji_ack` list of
+    creation, finish or post_deploy, so a repository can keep the default
+    beside its own hooks. It is refused anywhere else, and in a request's own
+    `-pre-deploy-*` or `-post-deploy-*` hooks.
 
 - **`concurrent:` names a leading run of stages that every deploy waiting in
   the repository's queue runs side by side, ahead of its turn.** Its one key
@@ -531,27 +587,36 @@ creating workspaces there with `-repository DIR`.
     (`deploy_config_invalid`), because a local merge lands on the target,
     which one deploy at a time moves. So is `concurrent: {}` with no stage.
 
-- Every hook entry is `hook:` (exactly one of `script:` or `prompt:`) plus
-  `runs_for:` (`main: {}`, only when the deploy lands on the repository's main
-  branch in its main checkout, or `any_target: {}`, also when it lands in a
-  parent workspace's checkout).
+- Every hook entry is `hook:` (exactly one of `script:`, `prompt:` or
+  `builtin: {}`) plus `runs_for:` (`main: {}`, only when the workspace lands
+  on the repository's main branch in its main checkout, or `any_target: {}`,
+  also when it lands in a parent workspace's checkout). For creation and
+  finish it reads the workspace's landing target.
   - A **script** hook is `path:` (relative to the main checkout root) and
     `timeout_seconds:`. It runs from the main checkout root, with
-    `AGENT_REPL_CALLING_WORKSPACE` (the deploying workspace's worktree),
-    `AGENT_REPL_DEPLOY_LEDGER` (the deploy's ledger) and
-    `AGENT_REPL_DEPLOY_STAGE` (`pre_deploy`, `deploy` or `post_deploy`) set.
-    Its tab shows the tail of its output, its exit and its log's path.
-  - A **prompt** hook is `text:`. It is sent to the deploying workspace's own
-    session, and to no other workspace, ever; its tab is that turn.
+    `AGENT_REPL_CALLING_WORKSPACE` (the workspace's worktree),
+    `AGENT_REPL_HOOK_STAGE` (`creation`, `finish`, `pre_deploy`, `deploy` or
+    `post_deploy`; it replaces the old `AGENT_REPL_DEPLOY_STAGE`) and
+    `AGENT_REPL_SLACK_THREAD` (only for a workspace with a Slack origin) set.
+    In deploy stages it also has `AGENT_REPL_DEPLOY_LEDGER` (the deploy's
+    ledger) and `AGENT_REPL_DEPLOY_DAEMON`. In a deploy stage its tab shows
+    the tail of its output, its exit and its log's path.
+  - A **prompt** hook is `text:`. It is sent to the workspace's own session,
+    and to no other workspace, ever. In a deploy stage its tab is that turn.
+    Its text carries one placeholder, `{{slack_thread}}`, the link of the
+    Slack message the workspace was created for. A workspace without a Slack
+    origin cannot resolve it and the hook fails; any other `{{...}}` is
+    refused when the config is read.
 - `local_merge:` is the built-in local landing: `tests:` names the test
   runner (`agent_repl_suites: {script_path: ...}`), and `version_tag: {}`
   makes every agent's deploy onto main carry a version increment and tag the
   landing. Only a repository with a local merge races its queue; a
   repository with `concurrent:` runs its concurrent stages ahead of its turn
   instead.
-- **A failed hook fails the deploy**: a script that exits non-zero, runs past
-  its timeout or cannot start, or a prompt whose turn does not complete. The
-  workspace stays open and is handed the failure to investigate. A failure
+- **A failed hook fails what its stage belongs to** (the create, the finish
+  or the deploy): a script that exits non-zero, runs past its timeout or
+  cannot start, or a prompt whose turn does not complete. A failed deploy
+  leaves the workspace open, handed the failure to investigate. A failure
   after the local merge landed keeps the landing.
 - **Hooks act on the repository as it stands when they run** (its current
   tip), not on a snapshot of the deploy that queued them. A script hook a
@@ -559,7 +624,8 @@ creating workspaces there with `-repository DIR`.
 - **A repository's deploy stage can be HELD** (`/agent-repl-runtime`,
   `runtime deploy-hold`): its deploys still run `pre_deploy` (agent-repl's
   merges still land on master) and `post_deploy`, and SKIP their deploy hook.
-  Releasing the hold runs a skipped script deploy hook once.
+  Releasing the hold runs the deploy stage's `user_or_workspace` main-scoped
+  script, else the `emoji_ack` one, once.
 - **`queue_drained:` lists scripts the daemon runs once the repository's
   queue FULLY DEPLETES**: nothing waits in it or runs, it is not paused, and a
   merge was admitted since the scripts last all succeeded. Each entry is a
@@ -587,12 +653,25 @@ pre_deploy:
         script_path: modules/app/agent-repl/bin/test-all.sh
     version_tag: {}
 deploy:
-  hook:
-    script:
-      path: modules/app/agent-repl/bin/deploy-landing.sh
-      timeout_seconds: 60
-  runs_for:
-    main: {}
+  emoji_ack: &redeploy
+    hook:
+      script:
+        path: modules/app/agent-repl/bin/deploy-landing.sh
+        timeout_seconds: 60
+    runs_for:
+      main: {}
+  user_or_workspace: *redeploy
+finish:
+  emoji_ack:
+    hooks: []
+post_deploy:
+  emoji_ack:
+    hooks:
+      - hook:
+          prompt:
+            text: "Your work has landed on master. Post one brief reply in the thread of the Slack message this workspace was created for ({{slack_thread}}), in your own words, saying the work is done and what it changed. Post it with the send-to-slack skill."
+        runs_for:
+          main: {}
 # Once the queue fully depletes, master is pushed to origin as a release.
 queue_drained:
   - path: modules/app/agent-repl/bin/push-release.sh
@@ -603,12 +682,13 @@ queue_drained:
 
 | configured per repository | fixed in the daemon |
 |---|---|
-| every pre-deploy, deploy and post-deploy hook, and each one's scope | the queue: its order, placement, pause, eviction and racing window |
+| every creation, finish, pre-deploy, deploy and post-deploy hook, per kind of workspace, and each one's scope | the queue: its order, placement, pause, eviction and racing window |
 | which leading stages run concurrently (`concurrent`) | that the rest are entered one deploy at a time, in queue order |
 | whether a local merge runs, and its test runner | the local merge's own steps: rebase with conflict resolution, the test gate with fixing attempts, the non-fast-forward merge commit |
 | whether the repository is versioned (`version_tag`) | the version arithmetic and the tag's form |
 | the rollout, as a deploy hook calling `roll-out-landing` | when a requested rollout fires (after the deploy's report) |
 | what runs once the queue fully depletes (`queue_drained`) | when it is owed, that it runs with the queue's admissions held, and that a failure leaves it owed |
+| whether a kind keeps its built-in default, replaces it, or keeps it beside its own hooks (`builtin: {}`) | the defaults' text, and that the originator is the creator's to state, never inferred |
 | | holding the deploy stage, the hand-back of a failure, closing the workspace on success, the bubble, footer and roster |
 
 ## Restarting, interrupting, selecting
