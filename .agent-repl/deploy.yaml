@@ -1,3 +1,8 @@
+# THE PREVIOUS SCHEMA, KEPT FOR THE DAEMON BUILDS THAT PREDATE
+# .agent-repl/lifecycle.yaml. No current build reads this file: a daemon
+# built before lifecycle.yaml reads it to gate and land the change that
+# introduces lifecycle.yaml. Delete it once no running daemon predates that
+# change (org/todo.md).
 # agent-repl's own deploy (repoconfig.v1.DeployConfig, documented in the
 # /agent-repl-workspaces skill). A finished workspace's branch is rebased onto
 # master, tested by agent-repl's suites, landed as a merge commit and tagged;
