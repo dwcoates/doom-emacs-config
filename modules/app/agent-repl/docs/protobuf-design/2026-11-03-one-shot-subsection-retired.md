@@ -44,3 +44,9 @@ This change ran as a one-shot workspace with contract changes pre-approved by th
 - Consequences:
   - `workspace.Verbs.TakeBackOneShot` answers only an error, and `PendingPlacement` and `SubmitPlacement` are deleted.
   - The enum value stays, so prompt rows already stored with it still decode and still draw as no row.
+
+### 6. A workspace a fold spares runs under the fold at boot
+
+- What: `wsm.Workspace.Runs` runs a workspace whose tab a fold withholds when the fold spares it (`wsm.Workspace.FoldSpare`: a one-shot, or a pending merge). No shape change.
+- Why: the one-shot subsection never collapsed, so a one-shot's tab was never folded. Filed in a collapsed subsection, a one-shot would be withheld at the next daemon start, though a fold never stands a running one down.
+- Consequences: boot and fold agree on which sessions a fold leaves running.
