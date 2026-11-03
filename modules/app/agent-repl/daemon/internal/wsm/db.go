@@ -656,6 +656,14 @@ type DB interface {
 	// SetRemoteControlBridgeSession records the claude.ai session a
 	// workspace's bridge answered, keeping its mode.
 	SetRemoteControlBridgeSession(ctx context.Context, id WorkspaceID, bridge string) error
+	// WorkspaceContextUsage answers a workspace's last-known context fact,
+	// false when none was recorded (contextusage.go).
+	WorkspaceContextUsage(ctx context.Context, id WorkspaceID) (ContextUsageRecord, bool, error)
+	// PutWorkspaceContextUsage records a workspace's last context reading.
+	PutWorkspaceContextUsage(ctx context.Context, id WorkspaceID, usage *conversationv1.SessionContextUsage) error
+	// PutWorkspaceContextCut records that a cut discarded a workspace's last
+	// context reading.
+	PutWorkspaceContextCut(ctx context.Context, id WorkspaceID) error
 	// AccountModelCatalog answers the catalog an account root last served.
 	AccountModelCatalog(ctx context.Context, configDir string) (*conversationv1.ModelCatalog, bool, error)
 	// PutAccountModelCatalog records the catalog an account root served.
