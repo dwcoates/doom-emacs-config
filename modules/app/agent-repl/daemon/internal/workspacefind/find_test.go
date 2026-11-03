@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	conversationv1 "agentrepl/proto/conversation/v1"
+
 	"agent-repld/internal/wsm"
 )
 
@@ -37,9 +39,22 @@ func ids(r Result) []string {
 	return out
 }
 
+const (
+	workRoot     = "/home/u/.claude-work"
+	personalRoot = "/home/u/.claude"
+)
+
+// turn is a turn of WS of ORIGIN with TEXT, started on day DAY.
+func turn(ws string, origin conversationv1.PromptOrigin, text string, day int) wsm.TurnStart {
+	return wsm.TurnStart{Workspace: wsm.WorkspaceID(ws), StartedAt: at(day), Origin: origin, CommandText: text}
+}
+
 // fixture is three workspaces of two repositories: one open, one closed, one
-// landed, with summaries on two.
-func fixture() ([]wsm.Workspace, map[wsm.WorkspaceID]string) {
+// landed, with summaries on two. The open one runs under the work root and
+// took an agent turn on day 9; the landed one runs under the personal root and
+// took one on day 5; the closed one never came up, and its only turns are a
+// restart's re-drive and a typed /clear.
+func fixture() Records {
 	open := record("open", "footer-fix", doom, 0)
 	open.LastActivityAt = ptr(at(9))
 	closed := record("closed", "topbar-title", doom, 2)
@@ -54,7 +69,24 @@ func fixture() ([]wsm.Workspace, map[wsm.WorkspaceID]string) {
 		"open":   "Fix the footer's clock",
 		"landed": "Prune the store's old rows",
 	}
-	return []wsm.Workspace{open, closed, landed}, summaries
+	return Records{
+		Workspaces:   []wsm.Workspace{open, closed, landed},
+		Repositories: []wsm.Repository{doom, other},
+		Summaries:    summaries,
+		Sessions: map[wsm.WorkspaceID]wsm.Session{
+			"open":   {Workspace: "open", ConfigDir: workRoot},
+			"landed": {Workspace: "landed", ConfigDir: personalRoot},
+			"closed": {Workspace: "closed", SelectedConfigDir: workRoot},
+		},
+		Turns: []wsm.TurnStart{
+			turn("open", conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, "", 1),
+			turn("open", conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, "", 9),
+			turn("open", conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_COMPACT, "/compact", 10),
+			turn("landed", conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT, "", 5),
+			turn("closed", conversationv1.PromptOrigin_PROMPT_ORIGIN_RESUME_AFTER_RESTART, "", 3),
+			turn("closed", conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, "/clear", 3),
+		},
+	}
 }
 
 func TestFindNarrowsByEveryCriterion(t *testing.T) {
@@ -78,14 +110,22 @@ func TestFindNarrowsByEveryCriterion(t *testing.T) {
 		{name: "criteria combine", query: Query{Repository: ptr(doom.ID), Standing: ClosedStanding}, want: []string{"closed"}},
 		{name: "a creator keeps only what it asked for", query: Query{CreatedBy: ptr(wsm.WorkspaceID("open"))}, want: []string{"landed"}},
 		{name: "a creator that asked for nothing finds nothing", query: Query{CreatedBy: ptr(wsm.WorkspaceID("closed"))}, want: nil},
+		{name: "a turn window keeps a workspace with an agent turn inside it", query: Query{Turned: &TurnWindow{Since: ptr(at(4)), Until: ptr(at(6))}}, want: []string{"landed"}},
+		{name: "a turn window is inclusive at both ends", query: Query{Turned: &TurnWindow{Since: ptr(at(5)), Until: ptr(at(9))}}, want: []string{"open", "landed"}},
+		{name: "a turn window since alone is open-ended up to now", query: Query{Turned: &TurnWindow{Since: ptr(at(6))}}, want: []string{"open"}},
+		{name: "a turn window until alone is open-ended into the past", query: Query{Turned: &TurnWindow{Until: ptr(at(4))}}, want: []string{"open"}},
+		{name: "a turn window with neither end keeps every workspace that took an agent turn", query: Query{Turned: &TurnWindow{}}, want: []string{"open", "landed"}},
+		{name: "a compaction inside a turn window is no agent turn", query: Query{Turned: &TurnWindow{Since: ptr(at(10))}}, want: nil},
+		{name: "a restart re-drive and a typed clear are no agent turns", query: Query{Turned: &TurnWindow{Since: ptr(at(3)), Until: ptr(at(3))}}, want: nil},
+		{name: "a login and a turn window combine", query: Query{LoginRepos: map[wsm.RepoID]bool{other.ID: true}, Turned: &TurnWindow{Since: ptr(at(6))}}, want: nil},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
-			workspaces, summaries := fixture()
+			records := fixture()
 
 			// Act
-			got, err := Find(workspaces, []wsm.Repository{doom, other}, summaries, nil, tt.query)
+			got, err := Find(records, tt.query)
 
 			// Assert
 			if err != nil {
@@ -112,10 +152,10 @@ func TestFindLimitsAndCountsWhatItOmitted(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
-			workspaces, summaries := fixture()
+			records := fixture()
 
 			// Act
-			got, err := Find(workspaces, []wsm.Repository{doom, other}, summaries, nil, Query{Limit: ptr(tt.limit)})
+			got, err := Find(records, Query{Limit: ptr(tt.limit)})
 
 			// Assert
 			if err != nil {
@@ -130,10 +170,10 @@ func TestFindLimitsAndCountsWhatItOmitted(t *testing.T) {
 
 func TestFindAnswersEachWorkspacesRepositoryAndSummary(t *testing.T) {
 	// Arrange
-	workspaces, summaries := fixture()
+	records := fixture()
 
 	// Act
-	got, err := Find(workspaces, []wsm.Repository{doom, other}, summaries, nil, Query{})
+	got, err := Find(records, Query{})
 
 	// Assert
 	if err != nil {
@@ -149,6 +189,12 @@ func TestFindAnswersEachWorkspacesRepositoryAndSummary(t *testing.T) {
 	if f := byID["closed"]; f.Summary != nil || !f.LastActiveAt.Equal(at(4)) {
 		t.Fatalf("closed = %+v, want no summary and last active at its close", f)
 	}
+	if f := byID["open"]; f.ConfigDir == nil || *f.ConfigDir != workRoot || f.LastTurnAt == nil || !f.LastTurnAt.Equal(at(9)) {
+		t.Fatalf("open = %+v, want the work root and its last agent turn on day 9", f)
+	}
+	if f := byID["closed"]; f.ConfigDir != nil || f.LastTurnAt != nil {
+		t.Fatalf("closed = %+v, want no config dir and no agent turn", f)
+	}
 }
 
 func TestFindLeavesOutThreadsAndAnswersMergeWorkspaces(t *testing.T) {
@@ -160,7 +206,7 @@ func TestFindLeavesOutThreadsAndAnswersMergeWorkspaces(t *testing.T) {
 	agent := record("agent", "footer", doom, 1)
 
 	// Act
-	got, err := Find([]wsm.Workspace{thread, merge, agent}, []wsm.Repository{doom}, nil, nil, Query{})
+	got, err := Find(Records{Workspaces: []wsm.Workspace{thread, merge, agent}, Repositories: []wsm.Repository{doom}}, Query{})
 
 	// Assert
 	if err != nil {
@@ -176,7 +222,7 @@ func TestFindFailsOnAWorkspaceOfAnUnregisteredRepository(t *testing.T) {
 	orphan := record("orphan", "lost", other, 1)
 
 	// Act
-	got, err := Find([]wsm.Workspace{orphan}, []wsm.Repository{doom}, nil, nil, Query{})
+	got, err := Find(Records{Workspaces: []wsm.Workspace{orphan}, Repositories: []wsm.Repository{doom}}, Query{})
 
 	// Assert
 	if err == nil || !strings.Contains(err.Error(), "repo-other") {
@@ -249,14 +295,14 @@ func TestFindOnRosterKeepsOnlyDrawnWorkspacesAndAnswersHowEachIsDrawn(t *testing
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
-			workspaces, summaries := fixture()
-			drawn := map[wsm.WorkspaceID]Drawn{
+			records := fixture()
+			records.Drawn = map[wsm.WorkspaceID]Drawn{
 				"open":   {Section: OpenSection, Status: "thinking"},
 				"landed": {Section: MergedSection, Status: "done"},
 			}
 
 			// Act
-			got, err := Find(workspaces, []wsm.Repository{doom, other}, summaries, drawn, tt.query)
+			got, err := Find(records, tt.query)
 
 			// Assert
 			if err != nil {
@@ -304,7 +350,7 @@ func TestFindNarrowsToALogin(t *testing.T) {
 			workspaces := loginFixture()
 
 			// Act
-			got, err := Find(workspaces, []wsm.Repository{doom, other}, nil, nil, Query{LoginRepos: tc.repos})
+			got, err := Find(Records{Workspaces: workspaces, Repositories: []wsm.Repository{doom, other}}, Query{LoginRepos: tc.repos})
 
 			// Assert
 			if err != nil {
@@ -354,5 +400,32 @@ func TestFindByLoginPanicsOnAParentTheListingDoesNotHold(t *testing.T) {
 	}()
 
 	// Act
-	_, _ = Find([]wsm.Workspace{orphan}, []wsm.Repository{doom, other}, nil, nil, Query{LoginRepos: map[wsm.RepoID]bool{doom.ID: true}})
+	_, _ = Find(Records{Workspaces: []wsm.Workspace{orphan}, Repositories: []wsm.Repository{doom, other}}, Query{LoginRepos: map[wsm.RepoID]bool{doom.ID: true}})
+}
+
+func TestIsAgentTurn(t *testing.T) {
+	tests := []struct {
+		name string
+		turn wsm.TurnStart
+		want bool
+	}{
+		{name: "a user prompt", turn: turn("w", conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, "", 0), want: true},
+		{name: "a prompt another workspace sent", turn: turn("w", conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT, "", 0), want: true},
+		{name: "a daemon brief", turn: turn("w", conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_CREATED, "", 0), want: true},
+		{name: "a skill the user typed", turn: turn("w", conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, "/agent-repl-install", 0), want: true},
+		{name: "a typed compaction", turn: turn("w", conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, "/compact keep the plan", 0), want: false},
+		{name: "the daemon's compaction", turn: turn("w", conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_COMPACT, "", 0), want: false},
+		{name: "a restart's re-drive", turn: turn("w", conversationv1.PromptOrigin_PROMPT_ORIGIN_RESUME_AFTER_RESTART, "", 0), want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := IsAgentTurn(tt.turn)
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("IsAgentTurn(%+v) = %v, want %v", tt.turn, got, tt.want)
+			}
+		})
+	}
 }

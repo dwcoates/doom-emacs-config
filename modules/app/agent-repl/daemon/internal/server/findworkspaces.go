@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -17,8 +18,8 @@ import (
 )
 
 // FindWorkspaces answers the registry's agent workspaces, open or closed,
-// narrowed as the request asks (internal/workspacefind), each with its name
-// and its stored summary.
+// narrowed as the request asks (internal/workspacefind), each with its name,
+// its stored summary, its config dir and its last agent turn.
 func (s *server) FindWorkspaces(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.FindWorkspacesRequest],
@@ -71,14 +72,34 @@ func (s *server) FindWorkspaces(
 		caller = &record.ID
 	}
 	if login := req.Msg.Login; login != nil {
-		ref := login.GetOfWorkspace()
-		record, ok := registeredRef(byID, ref)
-		if !ok {
-			return answer(resp, s.refuse(s.log, rpc, resp, s.fill(refusal{
-				Arm: "unknown_login_workspace", Reason: fmt.Sprintf("no registered workspace is named by id %q dir %q", ref.GetId(), ref.GetDir()), Info: true,
-			})))
+		var root string
+		switch arm := login.GetLogin().(type) {
+		case *agentreplv1.FindWorkspacesLogin_OfWorkspace:
+			ref := arm.OfWorkspace
+			record, ok := registeredRef(byID, ref)
+			if !ok {
+				return answer(resp, s.refuse(s.log, rpc, resp, s.fill(refusal{
+					Arm: "unknown_login_workspace", Reason: fmt.Sprintf("no registered workspace is named by id %q dir %q", ref.GetId(), ref.GetDir()), Info: true,
+				})))
+			}
+			own, ok := wsm.RepositoryWithID(repositories, record.Repo)
+			if !ok {
+				panic(fmt.Sprintf("server: workspace %s names repository %s, which the registry listing does not hold", record.ID, record.Repo))
+			}
+			root = s.deps.AccountRootFor(own.Dir)
+		case *agentreplv1.FindWorkspacesLogin_AccountRoot:
+			known := s.deps.KnownAccountRoots()
+			if !slices.Contains(known, arm.AccountRoot) {
+				return answer(resp, s.refuse(s.log, rpc, resp, s.fill(refusal{
+					Arm: "unknown_login_root", Reason: fmt.Sprintf("%q is not one of the account roots this daemon knows (%s)", arm.AccountRoot, strings.Join(known, ", ")),
+					Fields: map[string]any{"known": known}, Info: true,
+				})))
+			}
+			root = arm.AccountRoot
+		default:
+			panic(fmt.Sprintf("server: find login arm %T has no root", arm))
 		}
-		query.LoginRepos = s.loginRepos(repositories, record)
+		query.LoginRepos = s.loginRepos(repositories, root)
 	}
 	// THE MERGED ROWS AND THE PUSH ARE READ TOGETHER, under the sidebar's one
 	// lock, so no workspace that merged between two reads is drawn twice.
@@ -98,7 +119,18 @@ func (s *server) FindWorkspaces(
 	if err != nil {
 		return nil, fail(s.log, rpc, fmt.Errorf("list the vendor titles: %w", err))
 	}
-	result, err := workspacefind.Find(records, repositories, workspacefind.Summaries(summaries, titles), drawn, query)
+	sessions, err := wsm.SessionsByWorkspace(ctx, s.deps.DB)
+	if err != nil {
+		return nil, fail(s.log, rpc, fmt.Errorf("list the sessions: %w", err))
+	}
+	turns, err := s.deps.DB.TurnStarts(ctx)
+	if err != nil {
+		return nil, fail(s.log, rpc, fmt.Errorf("list the turn starts: %w", err))
+	}
+	result, err := workspacefind.Find(workspacefind.Records{
+		Workspaces: records, Repositories: repositories, Summaries: workspacefind.Summaries(summaries, titles),
+		Drawn: drawn, Sessions: sessions, Turns: turns,
+	}, query)
 	if err != nil {
 		return nil, fail(s.log, rpc, err)
 	}
@@ -117,22 +149,15 @@ func (s *server) FindWorkspaces(
 		"found": len(found), "omitted": result.Omitted, "repository": req.Msg.GetRepository().GetId() + req.Msg.GetRepository().GetDir(),
 		"text": req.Msg.GetText(), "standing": fmt.Sprint(query.Standing), "created_by": req.Msg.GetCreatedBy().GetId(),
 		"on_roster": query.OnRoster, "caller": req.Msg.GetCaller().GetId(), "login_workspace": req.Msg.GetLogin().GetOfWorkspace().GetId(),
-		"login_repositories": len(query.LoginRepos), "roster_revision": roster.GetRevision()})
+		"login_root": req.Msg.GetLogin().GetAccountRoot(), "login_repositories": len(query.LoginRepos), "roster_revision": roster.GetRevision(),
+		"turned": req.Msg.Turned != nil, "turned_since_ms": req.Msg.GetTurned().GetSinceMs(), "turned_until_ms": req.Msg.GetTurned().GetUntilMs()})
 	resp.Result = &agentreplv1.FindWorkspacesResponse_Success{Success: success}
 	return connect.NewResponse(resp), nil
 }
 
-// loginRepos answers the repositories routed to the same login as WS's own
-// repository: the repositories whose main checkout AccountRootFor routes to
-// the config dir WS's repository is routed to. A workspace naming a
-// repository the listing does not hold is an invariant violation (the
-// registry's foreign key forbids it) and panics.
-func (s *server) loginRepos(repositories []wsm.Repository, ws wsm.Workspace) map[wsm.RepoID]bool {
-	own, ok := wsm.RepositoryWithID(repositories, ws.Repo)
-	if !ok {
-		panic(fmt.Sprintf("server: workspace %s names repository %s, which the registry listing does not hold", ws.ID, ws.Repo))
-	}
-	root := s.deps.AccountRootFor(own.Dir)
+// loginRepos answers the repositories of the login whose config dir is ROOT:
+// the repositories whose main checkout AccountRootFor routes to it.
+func (s *server) loginRepos(repositories []wsm.Repository, root string) map[wsm.RepoID]bool {
 	repos := map[wsm.RepoID]bool{}
 	for _, repo := range repositories {
 		if s.deps.AccountRootFor(repo.Dir) == root {
@@ -186,9 +211,21 @@ func validateFindWorkspacesRequest(req *agentreplv1.FindWorkspacesRequest) *conn
 		if req.GetLogin().GetLogin() == nil {
 			return invalid("login", "a login names its arm")
 		}
-		if err := validateWorkspaceRef("login.of_workspace", req.GetLogin().GetOfWorkspace()); err != nil {
-			return err
+		switch arm := req.GetLogin().GetLogin().(type) {
+		case *agentreplv1.FindWorkspacesLogin_OfWorkspace:
+			if err := validateWorkspaceRef("login.of_workspace", arm.OfWorkspace); err != nil {
+				return err
+			}
+		case *agentreplv1.FindWorkspacesLogin_AccountRoot:
+			if strings.TrimSpace(arm.AccountRoot) == "" {
+				return invalid("login.account_root", "an account root is not blank")
+			}
+		default:
+			panic(fmt.Sprintf("server: find login arm %T is not validated", arm))
 		}
+	}
+	if w := req.Turned; w != nil && w.SinceMs != nil && w.UntilMs != nil && w.GetUntilMs() < w.GetSinceMs() {
+		return invalid("turned", "a turn window's end precedes its start")
 	}
 	return nil
 }
@@ -198,14 +235,7 @@ func validateFindWorkspacesRequest(req *agentreplv1.FindWorkspacesRequest) *conn
 func findQueryOf(req *agentreplv1.FindWorkspacesRequest) workspacefind.Query {
 	var q workspacefind.Query
 	if w := req.Window; w != nil {
-		if w.SinceMs != nil {
-			since := time.UnixMilli(w.GetSinceMs())
-			q.Since = &since
-		}
-		if w.UntilMs != nil {
-			until := time.UnixMilli(w.GetUntilMs())
-			q.Until = &until
-		}
+		q.Since, q.Until = instantOf(w.SinceMs), instantOf(w.UntilMs)
 	}
 	if req.Standing != nil {
 		switch req.GetStanding().GetStanding().(type) {
@@ -228,7 +258,19 @@ func findQueryOf(req *agentreplv1.FindWorkspacesRequest) workspacefind.Query {
 		q.Limit = &limit
 	}
 	q.OnRoster = req.OnRoster != nil
+	if w := req.Turned; w != nil {
+		q.Turned = &workspacefind.TurnWindow{Since: instantOf(w.SinceMs), Until: instantOf(w.UntilMs)}
+	}
 	return q
+}
+
+// instantOf reads an optional unix-millisecond bound, nil when unset.
+func instantOf(ms *int64) *time.Time {
+	if ms == nil {
+		return nil
+	}
+	at := time.UnixMilli(*ms)
+	return &at
 }
 
 // foundWorkspaceOf renders one found workspace, naming its creator and its
@@ -273,6 +315,11 @@ func foundWorkspaceOf(f workspacefind.Found, byID map[wsm.WorkspaceID]wsm.Worksp
 			merge.Requester = requester.Ref()
 		}
 	}
+	var lastTurnAtMs *int64
+	if f.LastTurnAt != nil {
+		ms := f.LastTurnAt.UnixMilli()
+		lastTurnAtMs = &ms
+	}
 	return &agentreplv1.FoundWorkspace{
 		Merge:          merge,
 		CreatedBy:      refOf(ws.RequestedBy),
@@ -287,6 +334,8 @@ func foundWorkspaceOf(f workspacefind.Found, byID map[wsm.WorkspaceID]wsm.Worksp
 		Standing:       standing,
 		Roster:         foundRosterOf(f.Roster),
 		Calling:        caller != nil && *caller == ws.ID,
+		ConfigDir:      f.ConfigDir,
+		LastTurnAtMs:   lastTurnAtMs,
 	}
 }
 
