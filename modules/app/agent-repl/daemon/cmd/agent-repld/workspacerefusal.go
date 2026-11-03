@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 )
@@ -308,7 +309,7 @@ func describeLinksRefusal(ws string, e *agentreplv1.ChangeWorkspaceLinksError) (
 // describeFindRefusal says in one plain sentence why no workspaces were
 // found. Every FindWorkspacesError arm has its own sentence.
 func describeFindRefusal(e *agentreplv1.FindWorkspacesError) (string, error) {
-	switch e.GetCause().(type) {
+	switch r := e.GetCause().(type) {
 	case *agentreplv1.FindWorkspacesError_UnknownRepository:
 		return "the daemon has no repository by the one -repository named", nil
 	case *agentreplv1.FindWorkspacesError_UnknownCreator:
@@ -317,6 +318,8 @@ func describeFindRefusal(e *agentreplv1.FindWorkspacesError) (string, error) {
 		return "the daemon has no workspace for the calling directory", nil
 	case *agentreplv1.FindWorkspacesError_UnknownLoginWorkspace:
 		return "the daemon has no workspace by the one -login named", nil
+	case *agentreplv1.FindWorkspacesError_UnknownLoginRoot:
+		return fmt.Sprintf("the -login-root root is not an account root the daemon knows; it knows %s", strings.Join(r.UnknownLoginRoot.GetKnown(), ", ")), nil
 	}
 	return "", undescribed("finding workspaces", e)
 }

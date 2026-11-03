@@ -302,6 +302,8 @@ var workspaceSettingRefusals = func() []describedRefusal {
 				{name: "unknown_creator", err: armed(find, "unknown_creator", nil), want: "the daemon has no workspace by the one -created-by named"},
 				{name: "unknown_caller", err: armed(find, "unknown_caller", nil), want: "the daemon has no workspace for the calling directory"},
 				{name: "unknown_login_workspace", err: armed(find, "unknown_login_workspace", nil), want: "the daemon has no workspace by the one -login named"},
+				{name: "unknown_login_root", err: armed(find, "unknown_login_root", &agentreplv1.FindWorkspacesUnknownLoginRoot{Known: []string{"/home/u/.claude", "/home/u/.claude-chesscom"}}),
+					want: "the -login-root root is not an account root the daemon knows; it knows /home/u/.claude, /home/u/.claude-chesscom"},
 			},
 			describe: func(e proto.Message) (string, error) {
 				return describeFindRefusal(e.(*agentreplv1.FindWorkspacesError))
