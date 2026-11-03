@@ -126,6 +126,9 @@ func TestRuns(t *testing.T) {
 		{name: "a hidden workspace with a merge queued runs", ws: Workspace{Hidden: true}, mergeQueued: true, want: true},
 		{name: "a closed workspace with a merge queued runs", ws: Workspace{Closed: true}, mergeQueued: true, want: true},
 		{name: "a collapsed workspace with a merge queued runs", ws: Workspace{}, repoFolded: true, mergeQueued: true, want: true},
+		{name: "a collapsed one-shot runs, as the fold spares it", ws: Workspace{OneShot: true}, repoFolded: true, want: true},
+		{name: "a collapsed workspace with a merge pending runs, as the fold spares it", ws: Workspace{MergePending: true}, repoFolded: true, want: true},
+		{name: "a hidden one-shot does not run, as only a fold spares", ws: Workspace{OneShot: true, Hidden: true}, want: false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
