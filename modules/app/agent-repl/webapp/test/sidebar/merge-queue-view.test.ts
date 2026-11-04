@@ -535,6 +535,16 @@ describe("drawRosterMergeQueueWaiting", () => {
     ]);
   });
 
+  it("ticks a racing merge's clock from when it took its racing slot, not when it was put in line", () => {
+    const { sc } = daemon();
+    const line = drawRosterMergeQueueWaiting(
+      waitingMerge("w1", { queuedAtMs: BigInt(NOW - 3_600_000), racingSinceMs: BigInt(NOW - 4_000) }),
+      sc,
+      "w",
+    );
+    expect(line.querySelector(".sb-mq-clock")?.textContent).toBe(formatTickedElapsed(4_000));
+  });
+
   it("draws its bullet in its name's own color", () => {
     const { sc } = daemon();
     const line = drawRosterMergeQueueWaiting(waitingMerge("w1"), sc, "w");

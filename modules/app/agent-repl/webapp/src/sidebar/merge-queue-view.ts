@@ -422,7 +422,8 @@ export function drawRosterMergeQueueRemediating(u: RosterMergeQueueRemediating, 
  * One merge waiting behind the head, indented under the head's name: a bullet
  * in the name's own color (owner request, 2026-10-27), the credited
  * workspace's name, a front mark when it was put in line at the front, and how
- * long it has waited. Its place is the line's order; it is not numbered (owner
+ * long it has waited -- or, for a merge racing the head, how long it has
+ * raced. Its place is the line's order; it is not numbered (owner
  * request, 2026-10-27).
  */
 export function drawRosterMergeQueueWaiting(
@@ -444,7 +445,13 @@ export function drawRosterMergeQueueWaiting(
     front.title = "put in line at the front";
     line.appendChild(front);
   }
-  line.appendChild(drawClock(sc, msOf(u.queuedAtMs, `${path}.queued_at_ms`)));
+  // A MERGE RACING THE HEAD HOLDS AN ACTIVE SLOT: its clock reads how long it
+  // has held that slot, never how long ago it was put in line.
+  const startedMs =
+    u.racing === undefined
+      ? msOf(u.queuedAtMs, `${path}.queued_at_ms`)
+      : msOf(u.racing.sinceMs, `${path}.racing.since_ms`);
+  line.appendChild(drawClock(sc, startedMs));
   return line;
 }
 
