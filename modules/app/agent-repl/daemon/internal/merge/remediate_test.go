@@ -1171,11 +1171,11 @@ func TestAsideReasonFor(t *testing.T) {
 		want    AsideReason
 	}{
 		{name: "a record at its fixing step remediates its tests", want: AsideForTests,
-			arrange: func(h *harness) { putProgressAt(t, h, TabFixes) }},
+			arrange: func(h *harness) { putProgressAt(t, h, theWorkspace, TabFixes) }},
 		{name: "a record at its conflicts step remediates its conflicts", want: AsideForConflicts,
-			arrange: func(h *harness) { putProgressAt(t, h, TabConflicts) }},
+			arrange: func(h *harness) { putProgressAt(t, h, theWorkspace, TabConflicts) }},
 		{name: "a record at a step that waits on no turn is a defect",
-			arrange: func(h *harness) { putProgressAt(t, h, TabTests) }},
+			arrange: func(h *harness) { putProgressAt(t, h, theWorkspace, TabTests) }},
 		{name: "no record is a defect", arrange: func(*harness) {}},
 		{name: "a record that cannot be read is answered", arrange: func(h *harness) {
 			h.db.mu.Lock()
@@ -1200,15 +1200,15 @@ func TestAsideReasonFor(t *testing.T) {
 	}
 }
 
-// putProgressAt stores a progress record of the harness's merge at STEP.
-func putProgressAt(t *testing.T, h *harness, step string) {
+// putProgressAt stores a progress record of WS's merge at STEP.
+func putProgressAt(t *testing.T, h *harness, ws ids.WorkspaceID, step string) {
 	t.Helper()
 	encoded, err := json.Marshal(progressDoc{Version: progressVersion, Step: step, Repo: string(h.repoKey()),
 		Subject: subjectDoc{TargetDir: h.targetD}, Active: roundDoc{Kind: step, N: 1}})
 	if err != nil {
 		t.Fatalf("encoding the record: %v", err)
 	}
-	if err := h.db.PutMergeProgress(context.Background(), wsm.MergeProgress{Workspace: theWorkspace, Lease: deadLease, Document: encoded}); err != nil {
+	if err := h.db.PutMergeProgress(context.Background(), wsm.MergeProgress{Workspace: ws, Lease: deadLease, Document: encoded}); err != nil {
 		t.Fatalf("PutMergeProgress: %v", err)
 	}
 }
@@ -1221,7 +1221,7 @@ func TestATakeBackOfARemediatingMergeWhoseRecordWaitsOnNoTurnIsRefused(t *testin
 	if _, err := h.db.AcquireLeaseAs(ctx, theWorkspace, deadLease, wsm.HolderMerge, wsm.PolicyHold); err != nil {
 		t.Fatalf("taking the lease: %v", err)
 	}
-	putProgressAt(t, h, TabTests)
+	putProgressAt(t, h, theWorkspace, TabTests)
 	entry, err := h.o.entryOf(ctx, h.repoKey(), theWorkspace)
 	if err != nil {
 		t.Fatalf("entryOf: %v", err)

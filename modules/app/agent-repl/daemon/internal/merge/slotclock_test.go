@@ -39,6 +39,9 @@ func TestTheRosterClockOfEveryMergeIsItsEntrysSlotMoment(t *testing.T) {
 				{Repo: h.repoKey(), EnqueuedAt: head, Workspace: names[3], State: wsm.MergeRemediating, Slot: wsm.MergeSlotRemediating, SlotSince: aside},
 			}
 			h.db.mu.Unlock()
+			// A MERGE REMEDIATING OUT OF LINE HAS ITS PROGRESS RECORD, which
+			// names the turn it repairs in (asideReasonFor).
+			putProgressAt(t, h, names[3], TabFixes)
 
 			// Act
 			if err := h.o.republishQueue(context.Background(), h.repoKey()); err != nil {
