@@ -617,9 +617,11 @@ type MergeQueueStatusEntryStage_Running struct {
 }
 
 type MergeQueueStatusEntryStage_Remediating struct {
-	// Out of line, fixing the failures its test suite finished with; it
-	// returns to the line once its fixing turn ends (owner ruling,
-	// 2026-10-31). Listed after every entry in line.
+	// Out of line: it stepped aside from the head (or from the race behind
+	// it) while an agent turn of its own repairs it -- the failures its test
+	// suite finished with, or the conflicts its rebase met -- and returns to
+	// the line once that turn ends, at the first waiting place. Listed after
+	// every entry in line.
 	Remediating *MergeQueueStatusEntryStageRemediating `protobuf:"bytes,3,opt,name=remediating,proto3,oneof"`
 }
 
@@ -629,9 +631,13 @@ func (*MergeQueueStatusEntryStage_Running) isMergeQueueStatusEntryStage_Stage() 
 
 func (*MergeQueueStatusEntryStage_Remediating) isMergeQueueStatusEntryStage_Stage() {}
 
-// Remediating out of line. No fields.
+// Remediating out of line, and why.
 type MergeQueueStatusEntryStageRemediating struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// What the merge's turn out of line repairs. Always set by the daemon; a
+	// set reason whose arm this schema revision does not name is a reason a
+	// newer daemon added.
+	Reason        *MergeQueueStatusEntryStageRemediatingReason `protobuf:"bytes,1,opt,name=reason,proto3" json:"reason,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -666,6 +672,181 @@ func (*MergeQueueStatusEntryStageRemediating) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_merge_queue_status_proto_rawDescGZIP(), []int{9}
 }
 
+func (x *MergeQueueStatusEntryStageRemediating) GetReason() *MergeQueueStatusEntryStageRemediatingReason {
+	if x != nil {
+		return x.Reason
+	}
+	return nil
+}
+
+// WHY A MERGE STEPPED ASIDE. THE ARM IS THE REASON: each is a step that waits
+// on an agent turn, and the merge returns to the line once that turn ends.
+type MergeQueueStatusEntryStageRemediatingReason struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Which repair the turn out of line makes.
+	//
+	// Types that are valid to be assigned to Reason:
+	//
+	//	*MergeQueueStatusEntryStageRemediatingReason_Tests
+	//	*MergeQueueStatusEntryStageRemediatingReason_Conflicts
+	Reason        isMergeQueueStatusEntryStageRemediatingReason_Reason `protobuf_oneof:"reason"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MergeQueueStatusEntryStageRemediatingReason) Reset() {
+	*x = MergeQueueStatusEntryStageRemediatingReason{}
+	mi := &file_agentrepl_v1_merge_queue_status_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MergeQueueStatusEntryStageRemediatingReason) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MergeQueueStatusEntryStageRemediatingReason) ProtoMessage() {}
+
+func (x *MergeQueueStatusEntryStageRemediatingReason) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_merge_queue_status_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MergeQueueStatusEntryStageRemediatingReason.ProtoReflect.Descriptor instead.
+func (*MergeQueueStatusEntryStageRemediatingReason) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_merge_queue_status_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *MergeQueueStatusEntryStageRemediatingReason) GetReason() isMergeQueueStatusEntryStageRemediatingReason_Reason {
+	if x != nil {
+		return x.Reason
+	}
+	return nil
+}
+
+func (x *MergeQueueStatusEntryStageRemediatingReason) GetTests() *MergeQueueStatusEntryStageRemediatingTests {
+	if x != nil {
+		if x, ok := x.Reason.(*MergeQueueStatusEntryStageRemediatingReason_Tests); ok {
+			return x.Tests
+		}
+	}
+	return nil
+}
+
+func (x *MergeQueueStatusEntryStageRemediatingReason) GetConflicts() *MergeQueueStatusEntryStageRemediatingConflicts {
+	if x != nil {
+		if x, ok := x.Reason.(*MergeQueueStatusEntryStageRemediatingReason_Conflicts); ok {
+			return x.Conflicts
+		}
+	}
+	return nil
+}
+
+type isMergeQueueStatusEntryStageRemediatingReason_Reason interface {
+	isMergeQueueStatusEntryStageRemediatingReason_Reason()
+}
+
+type MergeQueueStatusEntryStageRemediatingReason_Tests struct {
+	// Its whole test suite finished with failures; its fixing turn repairs
+	// them, and on its return it runs its suite again as its one fixing
+	// attempt.
+	Tests *MergeQueueStatusEntryStageRemediatingTests `protobuf:"bytes,1,opt,name=tests,proto3,oneof"`
+}
+
+type MergeQueueStatusEntryStageRemediatingReason_Conflicts struct {
+	// Its rebase onto the target's tip met conflicts; its session resolves
+	// them, and on its return it rebases onto the tip again. Spends no
+	// fixing attempt, and may step aside again if it conflicts again.
+	Conflicts *MergeQueueStatusEntryStageRemediatingConflicts `protobuf:"bytes,2,opt,name=conflicts,proto3,oneof"`
+}
+
+func (*MergeQueueStatusEntryStageRemediatingReason_Tests) isMergeQueueStatusEntryStageRemediatingReason_Reason() {
+}
+
+func (*MergeQueueStatusEntryStageRemediatingReason_Conflicts) isMergeQueueStatusEntryStageRemediatingReason_Reason() {
+}
+
+// Remediating its failing tests. No fields.
+type MergeQueueStatusEntryStageRemediatingTests struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MergeQueueStatusEntryStageRemediatingTests) Reset() {
+	*x = MergeQueueStatusEntryStageRemediatingTests{}
+	mi := &file_agentrepl_v1_merge_queue_status_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MergeQueueStatusEntryStageRemediatingTests) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MergeQueueStatusEntryStageRemediatingTests) ProtoMessage() {}
+
+func (x *MergeQueueStatusEntryStageRemediatingTests) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_merge_queue_status_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MergeQueueStatusEntryStageRemediatingTests.ProtoReflect.Descriptor instead.
+func (*MergeQueueStatusEntryStageRemediatingTests) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_merge_queue_status_proto_rawDescGZIP(), []int{11}
+}
+
+// Resolving its rebase's conflicts. No fields.
+type MergeQueueStatusEntryStageRemediatingConflicts struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MergeQueueStatusEntryStageRemediatingConflicts) Reset() {
+	*x = MergeQueueStatusEntryStageRemediatingConflicts{}
+	mi := &file_agentrepl_v1_merge_queue_status_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MergeQueueStatusEntryStageRemediatingConflicts) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MergeQueueStatusEntryStageRemediatingConflicts) ProtoMessage() {}
+
+func (x *MergeQueueStatusEntryStageRemediatingConflicts) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_merge_queue_status_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MergeQueueStatusEntryStageRemediatingConflicts.ProtoReflect.Descriptor instead.
+func (*MergeQueueStatusEntryStageRemediatingConflicts) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_merge_queue_status_proto_rawDescGZIP(), []int{12}
+}
+
 // Waiting. No fields.
 type MergeQueueStatusEntryStageWaiting struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -675,7 +856,7 @@ type MergeQueueStatusEntryStageWaiting struct {
 
 func (x *MergeQueueStatusEntryStageWaiting) Reset() {
 	*x = MergeQueueStatusEntryStageWaiting{}
-	mi := &file_agentrepl_v1_merge_queue_status_proto_msgTypes[10]
+	mi := &file_agentrepl_v1_merge_queue_status_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -687,7 +868,7 @@ func (x *MergeQueueStatusEntryStageWaiting) String() string {
 func (*MergeQueueStatusEntryStageWaiting) ProtoMessage() {}
 
 func (x *MergeQueueStatusEntryStageWaiting) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_merge_queue_status_proto_msgTypes[10]
+	mi := &file_agentrepl_v1_merge_queue_status_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -700,7 +881,7 @@ func (x *MergeQueueStatusEntryStageWaiting) ProtoReflect() protoreflect.Message 
 
 // Deprecated: Use MergeQueueStatusEntryStageWaiting.ProtoReflect.Descriptor instead.
 func (*MergeQueueStatusEntryStageWaiting) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_merge_queue_status_proto_rawDescGZIP(), []int{10}
+	return file_agentrepl_v1_merge_queue_status_proto_rawDescGZIP(), []int{13}
 }
 
 // Running, at a step.
@@ -717,7 +898,7 @@ type MergeQueueStatusEntryStageRunning struct {
 
 func (x *MergeQueueStatusEntryStageRunning) Reset() {
 	*x = MergeQueueStatusEntryStageRunning{}
-	mi := &file_agentrepl_v1_merge_queue_status_proto_msgTypes[11]
+	mi := &file_agentrepl_v1_merge_queue_status_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -729,7 +910,7 @@ func (x *MergeQueueStatusEntryStageRunning) String() string {
 func (*MergeQueueStatusEntryStageRunning) ProtoMessage() {}
 
 func (x *MergeQueueStatusEntryStageRunning) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_merge_queue_status_proto_msgTypes[11]
+	mi := &file_agentrepl_v1_merge_queue_status_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -742,7 +923,7 @@ func (x *MergeQueueStatusEntryStageRunning) ProtoReflect() protoreflect.Message 
 
 // Deprecated: Use MergeQueueStatusEntryStageRunning.ProtoReflect.Descriptor instead.
 func (*MergeQueueStatusEntryStageRunning) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_merge_queue_status_proto_rawDescGZIP(), []int{11}
+	return file_agentrepl_v1_merge_queue_status_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *MergeQueueStatusEntryStageRunning) GetStepDescription() string {
@@ -789,8 +970,15 @@ const file_agentrepl_v1_merge_queue_status_proto_rawDesc = "" +
 	"\awaiting\x18\x01 \x01(\v2/.agentrepl.v1.MergeQueueStatusEntryStageWaitingH\x00R\awaiting\x12K\n" +
 	"\arunning\x18\x02 \x01(\v2/.agentrepl.v1.MergeQueueStatusEntryStageRunningH\x00R\arunning\x12W\n" +
 	"\vremediating\x18\x03 \x01(\v23.agentrepl.v1.MergeQueueStatusEntryStageRemediatingH\x00R\vremediatingB\a\n" +
-	"\x05stage\"'\n" +
-	"%MergeQueueStatusEntryStageRemediating\"#\n" +
+	"\x05stage\"z\n" +
+	"%MergeQueueStatusEntryStageRemediating\x12Q\n" +
+	"\x06reason\x18\x01 \x01(\v29.agentrepl.v1.MergeQueueStatusEntryStageRemediatingReasonR\x06reason\"\xe7\x01\n" +
+	"+MergeQueueStatusEntryStageRemediatingReason\x12P\n" +
+	"\x05tests\x18\x01 \x01(\v28.agentrepl.v1.MergeQueueStatusEntryStageRemediatingTestsH\x00R\x05tests\x12\\\n" +
+	"\tconflicts\x18\x02 \x01(\v2<.agentrepl.v1.MergeQueueStatusEntryStageRemediatingConflictsH\x00R\tconflictsB\b\n" +
+	"\x06reason\",\n" +
+	"*MergeQueueStatusEntryStageRemediatingTests\"0\n" +
+	".MergeQueueStatusEntryStageRemediatingConflicts\"#\n" +
 	"!MergeQueueStatusEntryStageWaiting\"N\n" +
 	"!MergeQueueStatusEntryStageRunning\x12)\n" +
 	"\x10step_description\x18\x01 \x01(\tR\x0fstepDescriptionB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
@@ -807,43 +995,49 @@ func file_agentrepl_v1_merge_queue_status_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_merge_queue_status_proto_rawDescData
 }
 
-var file_agentrepl_v1_merge_queue_status_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
+var file_agentrepl_v1_merge_queue_status_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
 var file_agentrepl_v1_merge_queue_status_proto_goTypes = []any{
-	(*MergeQueueStatus)(nil),                      // 0: agentrepl.v1.MergeQueueStatus
-	(*MergeQueueStatusAdvance)(nil),               // 1: agentrepl.v1.MergeQueueStatusAdvance
-	(*MergeQueueStatusAdvanceRunning)(nil),        // 2: agentrepl.v1.MergeQueueStatusAdvanceRunning
-	(*MergeQueueStatusAdvancePaused)(nil),         // 3: agentrepl.v1.MergeQueueStatusAdvancePaused
-	(*MergeQueueStatusEntry)(nil),                 // 4: agentrepl.v1.MergeQueueStatusEntry
-	(*MergeQueueStatusEntryKind)(nil),             // 5: agentrepl.v1.MergeQueueStatusEntryKind
-	(*MergeQueueStatusEntryKindOwnBranch)(nil),    // 6: agentrepl.v1.MergeQueueStatusEntryKindOwnBranch
-	(*MergeQueueStatusEntryKindAsyncMerge)(nil),   // 7: agentrepl.v1.MergeQueueStatusEntryKindAsyncMerge
-	(*MergeQueueStatusEntryStage)(nil),            // 8: agentrepl.v1.MergeQueueStatusEntryStage
-	(*MergeQueueStatusEntryStageRemediating)(nil), // 9: agentrepl.v1.MergeQueueStatusEntryStageRemediating
-	(*MergeQueueStatusEntryStageWaiting)(nil),     // 10: agentrepl.v1.MergeQueueStatusEntryStageWaiting
-	(*MergeQueueStatusEntryStageRunning)(nil),     // 11: agentrepl.v1.MergeQueueStatusEntryStageRunning
-	(*v1.RepositoryRef)(nil),                      // 12: workspace.v1.RepositoryRef
-	(*v1.WorkspaceRef)(nil),                       // 13: workspace.v1.WorkspaceRef
+	(*MergeQueueStatus)(nil),                               // 0: agentrepl.v1.MergeQueueStatus
+	(*MergeQueueStatusAdvance)(nil),                        // 1: agentrepl.v1.MergeQueueStatusAdvance
+	(*MergeQueueStatusAdvanceRunning)(nil),                 // 2: agentrepl.v1.MergeQueueStatusAdvanceRunning
+	(*MergeQueueStatusAdvancePaused)(nil),                  // 3: agentrepl.v1.MergeQueueStatusAdvancePaused
+	(*MergeQueueStatusEntry)(nil),                          // 4: agentrepl.v1.MergeQueueStatusEntry
+	(*MergeQueueStatusEntryKind)(nil),                      // 5: agentrepl.v1.MergeQueueStatusEntryKind
+	(*MergeQueueStatusEntryKindOwnBranch)(nil),             // 6: agentrepl.v1.MergeQueueStatusEntryKindOwnBranch
+	(*MergeQueueStatusEntryKindAsyncMerge)(nil),            // 7: agentrepl.v1.MergeQueueStatusEntryKindAsyncMerge
+	(*MergeQueueStatusEntryStage)(nil),                     // 8: agentrepl.v1.MergeQueueStatusEntryStage
+	(*MergeQueueStatusEntryStageRemediating)(nil),          // 9: agentrepl.v1.MergeQueueStatusEntryStageRemediating
+	(*MergeQueueStatusEntryStageRemediatingReason)(nil),    // 10: agentrepl.v1.MergeQueueStatusEntryStageRemediatingReason
+	(*MergeQueueStatusEntryStageRemediatingTests)(nil),     // 11: agentrepl.v1.MergeQueueStatusEntryStageRemediatingTests
+	(*MergeQueueStatusEntryStageRemediatingConflicts)(nil), // 12: agentrepl.v1.MergeQueueStatusEntryStageRemediatingConflicts
+	(*MergeQueueStatusEntryStageWaiting)(nil),              // 13: agentrepl.v1.MergeQueueStatusEntryStageWaiting
+	(*MergeQueueStatusEntryStageRunning)(nil),              // 14: agentrepl.v1.MergeQueueStatusEntryStageRunning
+	(*v1.RepositoryRef)(nil),                               // 15: workspace.v1.RepositoryRef
+	(*v1.WorkspaceRef)(nil),                                // 16: workspace.v1.WorkspaceRef
 }
 var file_agentrepl_v1_merge_queue_status_proto_depIdxs = []int32{
-	12, // 0: agentrepl.v1.MergeQueueStatus.repository:type_name -> workspace.v1.RepositoryRef
+	15, // 0: agentrepl.v1.MergeQueueStatus.repository:type_name -> workspace.v1.RepositoryRef
 	1,  // 1: agentrepl.v1.MergeQueueStatus.advance:type_name -> agentrepl.v1.MergeQueueStatusAdvance
 	4,  // 2: agentrepl.v1.MergeQueueStatus.entries:type_name -> agentrepl.v1.MergeQueueStatusEntry
 	2,  // 3: agentrepl.v1.MergeQueueStatusAdvance.running:type_name -> agentrepl.v1.MergeQueueStatusAdvanceRunning
 	3,  // 4: agentrepl.v1.MergeQueueStatusAdvance.paused:type_name -> agentrepl.v1.MergeQueueStatusAdvancePaused
-	13, // 5: agentrepl.v1.MergeQueueStatusEntry.workspace:type_name -> workspace.v1.WorkspaceRef
+	16, // 5: agentrepl.v1.MergeQueueStatusEntry.workspace:type_name -> workspace.v1.WorkspaceRef
 	5,  // 6: agentrepl.v1.MergeQueueStatusEntry.kind:type_name -> agentrepl.v1.MergeQueueStatusEntryKind
 	8,  // 7: agentrepl.v1.MergeQueueStatusEntry.stage:type_name -> agentrepl.v1.MergeQueueStatusEntryStage
 	6,  // 8: agentrepl.v1.MergeQueueStatusEntryKind.own_branch:type_name -> agentrepl.v1.MergeQueueStatusEntryKindOwnBranch
 	7,  // 9: agentrepl.v1.MergeQueueStatusEntryKind.async_merge:type_name -> agentrepl.v1.MergeQueueStatusEntryKindAsyncMerge
-	13, // 10: agentrepl.v1.MergeQueueStatusEntryKindAsyncMerge.requester:type_name -> workspace.v1.WorkspaceRef
-	10, // 11: agentrepl.v1.MergeQueueStatusEntryStage.waiting:type_name -> agentrepl.v1.MergeQueueStatusEntryStageWaiting
-	11, // 12: agentrepl.v1.MergeQueueStatusEntryStage.running:type_name -> agentrepl.v1.MergeQueueStatusEntryStageRunning
+	16, // 10: agentrepl.v1.MergeQueueStatusEntryKindAsyncMerge.requester:type_name -> workspace.v1.WorkspaceRef
+	13, // 11: agentrepl.v1.MergeQueueStatusEntryStage.waiting:type_name -> agentrepl.v1.MergeQueueStatusEntryStageWaiting
+	14, // 12: agentrepl.v1.MergeQueueStatusEntryStage.running:type_name -> agentrepl.v1.MergeQueueStatusEntryStageRunning
 	9,  // 13: agentrepl.v1.MergeQueueStatusEntryStage.remediating:type_name -> agentrepl.v1.MergeQueueStatusEntryStageRemediating
-	14, // [14:14] is the sub-list for method output_type
-	14, // [14:14] is the sub-list for method input_type
-	14, // [14:14] is the sub-list for extension type_name
-	14, // [14:14] is the sub-list for extension extendee
-	0,  // [0:14] is the sub-list for field type_name
+	10, // 14: agentrepl.v1.MergeQueueStatusEntryStageRemediating.reason:type_name -> agentrepl.v1.MergeQueueStatusEntryStageRemediatingReason
+	11, // 15: agentrepl.v1.MergeQueueStatusEntryStageRemediatingReason.tests:type_name -> agentrepl.v1.MergeQueueStatusEntryStageRemediatingTests
+	12, // 16: agentrepl.v1.MergeQueueStatusEntryStageRemediatingReason.conflicts:type_name -> agentrepl.v1.MergeQueueStatusEntryStageRemediatingConflicts
+	17, // [17:17] is the sub-list for method output_type
+	17, // [17:17] is the sub-list for method input_type
+	17, // [17:17] is the sub-list for extension type_name
+	17, // [17:17] is the sub-list for extension extendee
+	0,  // [0:17] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_merge_queue_status_proto_init() }
@@ -864,13 +1058,17 @@ func file_agentrepl_v1_merge_queue_status_proto_init() {
 		(*MergeQueueStatusEntryStage_Running)(nil),
 		(*MergeQueueStatusEntryStage_Remediating)(nil),
 	}
+	file_agentrepl_v1_merge_queue_status_proto_msgTypes[10].OneofWrappers = []any{
+		(*MergeQueueStatusEntryStageRemediatingReason_Tests)(nil),
+		(*MergeQueueStatusEntryStageRemediatingReason_Conflicts)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_merge_queue_status_proto_rawDesc), len(file_agentrepl_v1_merge_queue_status_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   12,
+			NumMessages:   15,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

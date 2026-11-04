@@ -921,16 +921,16 @@ message RosterRepoMergeQueue {
   // PRESENT while the queue is paused: merges still join it, but nothing
   // runs until it is resumed.
   optional RosterMergeQueuePaused paused = 4;
-  // THE SECOND SPOT (owner ruling, 2026-10-31): every merge that headed the
-  // queue, finished its test suite with failures and stepped aside to fix
-  // them out of line, oldest first. It is in no place in line until its
-  // fixing turn ends, when it returns next after the merge being worked on.
-  // Drawn under the head, less prominent than it and more than the merges
-  // waiting.
+  // THE SECOND SPOT (owner rulings, 2026-10-31 and 2026-11-03): every merge
+  // that stepped aside from the head (or from the race behind it) to repair
+  // itself out of line -- its failing tests, or its rebase's conflicts --
+  // oldest first. It is in no place in line until its repairing turn ends,
+  // when it returns next after the merge being worked on. Drawn under the
+  // head, less prominent than it and more than the merges waiting.
   repeated RosterMergeQueueRemediating remediating = 5;
 }
 
-// One merge remediating its failing tests out of line.
+// One merge remediating out of line.
 message RosterMergeQueueRemediating {
   RosterMergeQueueSubject subject = 1;
   // WHEN THE MERGE TOOK ITS REMEDIATING SLOT, epoch ms: the moment its queue
@@ -939,7 +939,26 @@ message RosterMergeQueueRemediating {
   // ticks from here, starting at zero as it steps aside however long it
   // headed the queue before. Never zero.
   int64 since_ms = 2;
+  // The line beneath its name saying what it repairs. Always set by the
+  // daemon; a set reason whose arm this schema revision does not name is
+  // drawn as a bare "remediating".
+  RosterMergeQueueRemediatingReason reason = 3;
 }
+
+// WHAT A REMEDIATING MERGE'S CARD SAYS IT REPAIRS. THE ARM IS THE REASON.
+message RosterMergeQueueRemediatingReason {
+  // Which repair its turn out of line makes.
+  oneof reason {
+    // Its whole test suite finished with failures; its session fixes them.
+    RosterMergeQueueRemediatingTests tests = 1;
+    // Its rebase met conflicts; its session resolves them.
+    RosterMergeQueueRemediatingConflicts conflicts = 2;
+  }
+}
+// Fixing its failing tests. No fields.
+message RosterMergeQueueRemediatingTests {}
+// Resolving its rebase's conflicts. No fields.
+message RosterMergeQueueRemediatingConflicts {}
 
 // The queue is paused: when, by whom, and whether the pause was a hard stop.
 // The sidebar draws the repository's label in the error red and the queue's

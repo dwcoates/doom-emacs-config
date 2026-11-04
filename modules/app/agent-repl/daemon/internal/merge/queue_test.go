@@ -1520,6 +1520,10 @@ func admittedEntry(ws ids.WorkspaceID) wsm.MergeQueueEntry {
 	return wsm.MergeQueueEntry{Workspace: ws, State: wsm.MergeAdmitted}
 }
 
+func queuedEntry(ws ids.WorkspaceID) wsm.MergeQueueEntry {
+	return wsm.MergeQueueEntry{Workspace: ws, State: wsm.MergeQueued}
+}
+
 func TestAfterARestartTheFirstAdmittedMergeInQueueOrderResumesAsTheHead(t *testing.T) {
 	// Arrange: both admitted merges taken back, the second one first.
 	h := resumeWorld(t, []wsm.MergeQueueEntry{admittedEntry("ws-head"), admittedEntry("ws-behind")}, "ws-behind", "ws-head")

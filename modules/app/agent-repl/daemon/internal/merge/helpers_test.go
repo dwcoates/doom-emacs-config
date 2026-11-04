@@ -192,8 +192,10 @@ type fakeDB struct {
 	progress      map[ids.WorkspaceID]wsm.MergeProgress
 	progressSteps []string
 	progressErr   error
-	adopted       []wsm.LeaseID
-	held          map[wsm.TurnID]wsm.HeldPrompt
+	// progressReadErr, when set, fails every MergeProgressOf read.
+	progressReadErr error
+	adopted         []wsm.LeaseID
+	held            map[wsm.TurnID]wsm.HeldPrompt
 }
 
 // bindHeldPrompt stands for wsm.bindMergeHold: a prompt held under the
@@ -327,6 +329,9 @@ func (f *fakeDB) PutMergeProgress(_ context.Context, p wsm.MergeProgress) error 
 func (f *fakeDB) MergeProgressOf(_ context.Context, id ids.WorkspaceID) (wsm.MergeProgress, bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.progressReadErr != nil {
+		return wsm.MergeProgress{}, false, f.progressReadErr
+	}
 	p, ok := f.progress[id]
 	return p, ok, nil
 }

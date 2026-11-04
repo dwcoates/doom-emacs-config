@@ -1980,10 +1980,34 @@ stepped aside."
                          (plist-get
                           (agent-repl-test-wire-roster--decode
                            #'agent-repl-wire-decode-roster-repo-merge-queue
-                           (format "{\"remediating\":[{\"subject\":%s,\"sinceMs\":\"9\"}]}"
+                           (format "{\"remediating\":[{\"subject\":%s,\"sinceMs\":\"9\",\"reason\":{\"tests\":{}}}]}"
                                    agent-repl-test-wire-roster--subject))
                           :remediating))
                  '(9))))
+
+(ert-deftest agent-repl-test-wire-roster-a-remediating-merge-decodes-what-it-repairs ()
+  "A remediating merge's reason decodes as the arm it names: its tests or
+its conflicts."
+  (should (equal (mapcar (lambda (reason)
+                           (plist-get (agent-repl-test-wire-roster--decode
+                                       #'agent-repl-wire-decode-roster-merge-queue-remediating
+                                       (format "{\"subject\":%s,\"sinceMs\":\"9\",\"reason\":%s}"
+                                               agent-repl-test-wire-roster--subject reason))
+                                      :reason))
+                         '("{\"tests\":{}}" "{\"conflicts\":{}}"))
+                 '(:tests :conflicts))))
+
+(ert-deftest agent-repl-test-wire-roster-a-remediating-reason-naming-no-arm-decodes-nil ()
+  "A reason set with no arm this build names is no breach: it decodes nil."
+  (should (null (agent-repl-test-wire-roster--decode
+                 #'agent-repl-wire-decode-roster-merge-queue-remediating-reason "{}"))))
+
+(ert-deftest agent-repl-test-wire-roster-a-remediating-merge-without-reason-is-a-breach ()
+  "What a remediating merge repairs is a required message."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-merge-queue-remediating
+                  (format "{\"subject\":%s,\"sinceMs\":\"9\"}" agent-repl-test-wire-roster--subject))
+                 '("RosterMergeQueueRemediating" reason "required message field is absent"))))
 
 (ert-deftest agent-repl-test-wire-roster-every-merge-queue-stage-state-decodes ()
   "A stage decodes each of its three states with its span."

@@ -12,8 +12,6 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
-	"agent-repld/internal/promptqueue"
-	"agent-repld/internal/wsm"
 )
 
 // behindWins runs the race the merge behind the head wins: the head's first
@@ -77,52 +75,39 @@ func TestTheHeadWinsTheRaceWhenItsGatePassesFirst(t *testing.T) {
 	}
 }
 
-func TestAHeadThatLosesTheRaceMidConflictFinishesItsStepThenRebasesOntoTheNewTip(t *testing.T) {
-	// Arrange: master moved, and A's commit conflicts with the move; A's
-	// session is still resolving it when B, behind it, passes its gate.
+func TestAHeadThatConflictsWithAMergeRacingBehindItStepsAsideThenRebasesOntoTheNewTip(t *testing.T) {
+	// Arrange: master moved, and A's commit conflicts with the move; B races
+	// behind A on the two-merge window.
 	c := newChain(t)
+	c.keepMergeTurns()
 	c.git.commitOn("master", "m1")
 	c.git.conflict("a1", "m1", "x.go")
 	enqueue(t, c.h)
 	c.queue(t, "ws-b", "b1")
-	turnRuns := make(chan struct{})
-	conflictPrompted := make(chan struct{}, 1)
-	c.h.mu.Lock()
-	c.h.awaitGate = turnRuns
-	c.h.mu.Unlock()
-	c.h.queue.mu.Lock()
-	c.h.queue.onSubmit = func(sub promptqueue.Submission) {
-		if sub.WS != theWorkspace || sub.Origin != conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR {
-			return
-		}
-		// THE SESSION HAS THE TURN: a resume reattaches to it.
-		c.h.db.mu.Lock()
-		c.h.db.turns[theWorkspace] = append(c.h.db.turns[theWorkspace], wsm.Turn{ID: sub.Turn, Workspace: theWorkspace})
-		c.h.db.mu.Unlock()
-		conflictPrompted <- struct{}{}
-	}
-	c.h.queue.mu.Unlock()
-	// B's gate holds until A is in its turn, so B overtakes A mid-turn and
-	// never before A reached it.
-	behindGate, releaseBehind := c.runner.hold(c.dirs["ws-b"])
-	done := admitAsync(c.h, context.Background())
-	<-conflictPrompted
-	<-behindGate
+	// B's ask for the test turn is parked until A stepped aside, so B never
+	// overtakes A before A meets its conflict.
+	releaseBehind := c.parkTurn("ws-b")
+	defer releaseBehind()
+	aside := c.steppedAside(theWorkspace)
 
-	// Act: B overtakes A mid-turn and lands; A's turn then ends, and A, at
-	// the head again, resumes.
-	close(releaseBehind)
-	if err := <-done; err != nil {
-		t.Fatalf("the overtaken head's admission ended on: %v", err)
+	// Act: A steps aside to resolve its conflict out of line and B lands; A's
+	// resolving turn ends, and A, back at the head, resumes.
+	if err := receiveWithin(t, admitAsync(c.h, context.Background()), "A's admission ending"); err != nil {
+		t.Fatalf("A's admission ended on: %v", err)
 	}
-	c.promote(t)
+	receiveWithin(t, aside, "A stepping aside")
+	releaseBehind()
+	c.drainUntil(t, "B landing", func() bool { return len(c.git.landedOwn()) == 1 })
+	c.settle(t, "A's step aside settling")
 	landedFirst := c.git.landedOwn()
-	close(turnRuns)
+	if err := c.h.o.returnRemediated(context.Background(), theWorkspace, c.h.repoKey()); err != nil {
+		t.Fatalf("returnRemediated: %v", err)
+	}
 	c.drain(t)
 
 	// Assert.
 	if len(landedFirst) != 1 || !slices.Equal(landedFirst[0], []string{"b1"}) {
-		t.Fatalf("landings while A was suspended = %v, want B's alone", landedFirst)
+		t.Fatalf("landings while A was out of line = %v, want B's alone", landedFirst)
 	}
 	if got := c.prompts(theWorkspace, conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR); got != 1 {
 		t.Fatalf("A's session got %d conflict prompts, want 1: its resume reattaches to the turn it was on", got)

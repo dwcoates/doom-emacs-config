@@ -88,14 +88,40 @@ message MergeQueueStatusEntryStage {
     MergeQueueStatusEntryStageWaiting waiting = 1;
     // Running.
     MergeQueueStatusEntryStageRunning running = 2;
-    // Out of line, fixing the failures its test suite finished with; it
-    // returns to the line once its fixing turn ends (owner ruling,
-    // 2026-10-31). Listed after every entry in line.
+    // Out of line: it stepped aside from the head (or from the race behind
+    // it) while an agent turn of its own repairs it -- the failures its test
+    // suite finished with, or the conflicts its rebase met -- and returns to
+    // the line once that turn ends, at the first waiting place. Listed after
+    // every entry in line.
     MergeQueueStatusEntryStageRemediating remediating = 3;
   }
 }
-// Remediating out of line. No fields.
-message MergeQueueStatusEntryStageRemediating {}
+// Remediating out of line, and why.
+message MergeQueueStatusEntryStageRemediating {
+  // What the merge's turn out of line repairs. Always set by the daemon; a
+  // set reason whose arm this schema revision does not name is a reason a
+  // newer daemon added.
+  MergeQueueStatusEntryStageRemediatingReason reason = 1;
+}
+// WHY A MERGE STEPPED ASIDE. THE ARM IS THE REASON: each is a step that waits
+// on an agent turn, and the merge returns to the line once that turn ends.
+message MergeQueueStatusEntryStageRemediatingReason {
+  // Which repair the turn out of line makes.
+  oneof reason {
+    // Its whole test suite finished with failures; its fixing turn repairs
+    // them, and on its return it runs its suite again as its one fixing
+    // attempt.
+    MergeQueueStatusEntryStageRemediatingTests tests = 1;
+    // Its rebase onto the target's tip met conflicts; its session resolves
+    // them, and on its return it rebases onto the tip again. Spends no
+    // fixing attempt, and may step aside again if it conflicts again.
+    MergeQueueStatusEntryStageRemediatingConflicts conflicts = 2;
+  }
+}
+// Remediating its failing tests. No fields.
+message MergeQueueStatusEntryStageRemediatingTests {}
+// Resolving its rebase's conflicts. No fields.
+message MergeQueueStatusEntryStageRemediatingConflicts {}
 // Waiting. No fields.
 message MergeQueueStatusEntryStageWaiting {}
 // Running, at a step.

@@ -17,7 +17,10 @@ import {
 import {
   RosterMergeQueueHeadSchema,
   RosterMergeQueuePausedSchema,
+  RosterMergeQueueRemediatingConflictsSchema,
+  RosterMergeQueueRemediatingReasonSchema,
   RosterMergeQueueRemediatingSchema,
+  RosterMergeQueueRemediatingTestsSchema,
   RosterMergeQueueStageSchema,
   RosterRepoMergeQueueSchema,
 } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
@@ -112,7 +115,7 @@ describe("queueLine", () => {
   it("lists the head, then each merge remediating, then each waiting, by workspace", () => {
     const queue = create(RosterRepoMergeQueueSchema, {
       head: mergingHead("w1"),
-      remediating: [create(RosterMergeQueueRemediatingSchema, { subject: queueSubject("w2"), sinceMs: BigInt(NOW) })],
+      remediating: [remediatingMerge("w2", NOW)],
       waiting: [waitingMerge("w3"), waitingMerge("w4")],
     });
     expect(queueLine(queue)).toBe("w1 w2 w3 w4");
@@ -231,7 +234,7 @@ describe("drawRosterMergeQueue", () => {
     const body = drawRosterMergeQueue(
       create(RosterRepoMergeQueueSchema, {
         head: mergingHead("w1"),
-        remediating: [create(RosterMergeQueueRemediatingSchema, { subject: queueSubject("w2"), sinceMs: BigInt(NOW) })],
+        remediating: [remediatingMerge("w2", NOW)],
         waiting: [waitingMerge("w3")],
       }),
       sc,
@@ -248,7 +251,7 @@ describe("drawRosterMergeQueue", () => {
     const { sc } = daemon();
     const body = drawRosterMergeQueue(
       create(RosterRepoMergeQueueSchema, {
-        remediating: [create(RosterMergeQueueRemediatingSchema, { subject: queueSubject("w2"), sinceMs: BigInt(NOW) })],
+        remediating: [remediatingMerge("w2", NOW)],
       }),
       sc,
       "queue",
@@ -262,16 +265,38 @@ describe("drawRosterMergeQueue", () => {
     const body = drawRosterMergeQueue(
       create(RosterRepoMergeQueueSchema, {
         head: mergingHead("w1"),
-        remediating: [create(RosterMergeQueueRemediatingSchema, { subject: queueSubject("w2"), sinceMs: BigInt(NOW - 4_000) })],
+        remediating: [remediatingMerge("w2", NOW - 4_000)],
       }),
       sc,
       "queue",
     );
     const card = body.querySelector(`.${MERGE_QUEUE_REMEDIATING_CLASS}`);
     expect([card?.querySelector(".sb-mq-detail")?.textContent, card?.querySelector(".sb-mq-clock")?.textContent]).toEqual([
-      "remediating",
+      "remediating tests",
       formatTickedElapsed(4_000),
     ]);
+  });
+
+  it.each([
+    ["its failing tests", testsReason(), "remediating tests"],
+    ["its rebase's conflicts", conflictsReason(), "resolving conflicts"],
+    ["a reason this build does not name", create(RosterMergeQueueRemediatingReasonSchema, {}), "remediating"],
+  ])("says what a remediating merge repairs: %s", (_name, reason, want) => {
+    const { sc } = daemon();
+    const body = drawRosterMergeQueue(
+      create(RosterRepoMergeQueueSchema, { head: mergingHead("w1"), remediating: [remediatingMerge("w2", NOW, reason)] }),
+      sc,
+      "queue",
+    );
+    expect(body.querySelector(`.${MERGE_QUEUE_REMEDIATING_CLASS} .sb-mq-detail`)?.textContent).toBe(want);
+  });
+
+  it("refuses a remediating merge that carries no reason as malformed", () => {
+    const { sc } = daemon();
+    const unreasoned = create(RosterMergeQueueRemediatingSchema, { subject: queueSubject("w2"), sinceMs: BigInt(NOW) });
+    expect(() =>
+      drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { head: mergingHead("w1"), remediating: [unreasoned] }), sc, "queue"),
+    ).toThrow(MalformedView);
   });
 
   it("numbers no waiting merge: each opens with the same bullet, then its name", () => {
@@ -596,3 +621,22 @@ describe("a click on a merge in the queue", () => {
     expect(asked.map((r) => [r.$typeName, r.workspace?.id])).toEqual([["agentrepl.v1.SelectInEditorRequest", "w2"]]);
   });
 });
+
+/** A merge remediating out of line, stepped aside at SINCE for REASON (its tests by default). */
+function remediatingMerge(ws: string, since: number, reason = testsReason()) {
+  return create(RosterMergeQueueRemediatingSchema, { subject: queueSubject(ws), sinceMs: BigInt(since), reason });
+}
+
+/** The reason of a merge fixing its failing tests. */
+function testsReason() {
+  return create(RosterMergeQueueRemediatingReasonSchema, {
+    reason: { case: "tests", value: create(RosterMergeQueueRemediatingTestsSchema, {}) },
+  });
+}
+
+/** The reason of a merge resolving its rebase's conflicts. */
+function conflictsReason() {
+  return create(RosterMergeQueueRemediatingReasonSchema, {
+    reason: { case: "conflicts", value: create(RosterMergeQueueRemediatingConflictsSchema, {}) },
+  });
+}

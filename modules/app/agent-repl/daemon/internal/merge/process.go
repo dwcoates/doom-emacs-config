@@ -626,7 +626,11 @@ func (r *run) promptConflict(ctx context.Context, p *replay, commit gitclient.Co
 	}); err != nil {
 		return nil, err
 	}
-	close, err := r.submit(ctx, turn, text, conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR)
+	// A HEAD WITH A MERGE IN LINE BEHIND IT, or a member racing behind the
+	// head with one waiting behind it, steps aside to resolve out of line, so
+	// that merge takes its place (remediate.go); otherwise it resolves in
+	// place.
+	close, err := r.o.submitThen(ctx, r.ws, turn, text, conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR, r.asideOn(ctx, AsideForConflicts))
 	if err != nil {
 		return nil, err
 	}
@@ -900,11 +904,7 @@ func (r *run) testAndFix(ctx context.Context, tip, targetBranch string, fromAtte
 		// THE WHOLE SUITE RAN AND FAILED: a head with a merge in line behind it
 		// steps aside to fix out of line, so that merge takes the head
 		// (remediate.go); otherwise it fixes in place.
-		var aside func()
-		if r.o.stepsAside(ctx, r) {
-			aside = func() { r.o.stepAside(r) }
-		}
-		if gaveUp, err := r.fixThen(ctx, attempt+1, verdict.result, targetBranch, aside); err != nil || gaveUp != nil {
+		if gaveUp, err := r.fixThen(ctx, attempt+1, verdict.result, targetBranch, r.asideOn(ctx, AsideForTests)); err != nil || gaveUp != nil {
 			return "", gaveUp, err
 		}
 		r.fixesUsed = attempt + 1

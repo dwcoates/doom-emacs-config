@@ -196,6 +196,17 @@ func (o *orchestrator) publishRosterQueue(ctx context.Context, repo wsm.RepoKey)
 			dlog.Context{"repo": string(repo), "entries": len(entries)}, err)
 		return
 	}
+	for i := range remediating {
+		ws := remediating[i].Workspace
+		why, err := asideReasonFor(ctx, o.deps.DB, ws)
+		if err != nil {
+			recordFailed(o.deps.Log.Global(), op, "could not read why a merge remediating out of line stepped aside, so the roster is not told the queue",
+				"the remediating merge's reason read ended when its context was cancelled; the roster is not told the queue",
+				dlog.Context{"repo": string(repo), "workspace": string(ws)}, err)
+			return
+		}
+		remediating[i].RemediatingFor = why.roster()
+	}
 	queue.Remediating = remediating
 	fields := dlog.Context{"repo": string(repo), "entries": len(entries), "line": ids.Strings(queue.LineWorkspaces()), "paused": pause != nil, "requesters": ids.Strings(requesters)}
 	o.deps.Log.Global().Debug(op, "told the roster the merge queue", fields)
