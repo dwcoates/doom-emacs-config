@@ -4,6 +4,7 @@ import (
 	repoconfigv1 "agentrepl/proto/repoconfig/v1"
 
 	"context"
+	"database/sql"
 	"errors"
 	"strings"
 	"testing"
@@ -207,5 +208,69 @@ func TestDeleteCreationJob(t *testing.T) {
 				t.Fatalf("CreationJob = found %v, %v; want found %v", found, err, tt.wantFound)
 			}
 		})
+	}
+}
+
+func TestWriteCreationJobReplacesTheRowWholesale(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testLinkedWorkspace(t, s)
+	none, err := encodeHooks(nil)
+	if err != nil {
+		t.Fatalf("encodeHooks: %v", err)
+	}
+	write := func(job CreationJob) {
+		t.Helper()
+		if err := s.write(context.Background(), "test", nil, func(ctx context.Context, tx *sql.Tx) error {
+			return writeCreationJob(ctx, tx, job, none, none)
+		}); err != nil {
+			t.Fatalf("writeCreationJob: %v", err)
+		}
+	}
+	write(CreationJob{Workspace: ws.ID, BaseRef: "old", OneShot: true, CreatedAt: instant})
+
+	// Act
+	write(CreationJob{Workspace: ws.ID, Layout: MergeLayout{SourceBranch: "b", SourceDir: ws.Dir, TargetDir: "/t", Origin: "o"}, Materialized: true, CreatedAt: instant})
+
+	// Assert
+	got, found, err := s.CreationJob(context.Background(), ws.ID)
+	if err != nil || !found {
+		t.Fatalf("CreationJob = found %v, %v", found, err)
+	}
+	if got.BaseRef != "" || got.OneShot || !got.Materialized || got.Layout.TargetDir != "/t" {
+		t.Fatalf("job = %+v, want the second write whole", got)
+	}
+}
+
+// TestBothCreationJobWritersWriteOneShape pins that PutCreationJob and a
+// restated landing write the same row for the same facts: both go through
+// writeCreationJob, so a writer spelling its own INSERT fails here.
+func TestBothCreationJobWritersWriteOneShape(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	f := newParentFamily(t, s)
+	restated := registerInRepo(t, s, f.repoDir, "restated", false)
+	put := registerInRepo(t, s, f.repoDir, "put", false)
+	if _, err := s.SetParent(context.Background(), restated.ID, Retarget{KeepParent: true, Landing: &LandingChoice{}}); err != nil {
+		t.Fatalf("SetParent: %v", err)
+	}
+	want, _, err := s.CreationJob(context.Background(), restated.ID)
+	if err != nil {
+		t.Fatalf("CreationJob: %v", err)
+	}
+
+	// Act
+	mirror := want
+	mirror.Workspace = put.ID
+	if err := s.PutCreationJob(context.Background(), mirror); err != nil {
+		t.Fatalf("PutCreationJob: %v", err)
+	}
+
+	// Assert
+	row := func(id WorkspaceID) string {
+		return scalar[string](t, s, `SELECT source_branch||'|'||source_dir||'|'||target_dir||'|'||layout_origin||'|'||pre_deploy_hooks||'|'||post_deploy_hooks||'|'||base_ref||'|'||materialized||'|'||one_shot||'|'||initial_prompt||'|'||consented_ungated_mode||'|'||created_at FROM creation_jobs WHERE workspace_id = ?`, id)
+	}
+	if got, restatedRow := row(put.ID), row(restated.ID); got != restatedRow {
+		t.Fatalf("PutCreationJob wrote %q, the restated landing %q; want one shape", got, restatedRow)
 	}
 }

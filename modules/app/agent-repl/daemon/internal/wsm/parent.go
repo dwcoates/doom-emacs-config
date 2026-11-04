@@ -496,12 +496,12 @@ func insertRestatedJob(ctx context.Context, tx *sql.Tx, id WorkspaceID, source r
 	if err != nil {
 		return err
 	}
-	_, err = tx.ExecContext(ctx,
-		`INSERT INTO creation_jobs (workspace_id, source_branch, source_dir, target_dir, layout_origin, pre_deploy_hooks, post_deploy_hooks,
-		   base_ref, materialized, one_shot, initial_prompt, consented_ungated_mode, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, '', 1, 0, '', '', ?)`,
-		id, source.branch, source.dir, targetDir, LayoutOriginRestatedLanding, none, none, nanos(time.Now().UTC()))
-	return err
+	return writeCreationJob(ctx, tx, CreationJob{
+		Workspace:    id,
+		Layout:       MergeLayout{SourceBranch: source.branch, SourceDir: source.dir, TargetDir: targetDir, Origin: LayoutOriginRestatedLanding},
+		Materialized: true,
+		CreatedAt:    time.Now().UTC(),
+	}, none, none)
 }
 
 // repositoryTarget reads a repository's main checkout and default branch. A

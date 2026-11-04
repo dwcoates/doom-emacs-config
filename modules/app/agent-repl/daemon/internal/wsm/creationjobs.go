@@ -29,21 +29,30 @@ func (s *store) PutCreationJob(ctx context.Context, job CreationJob) error {
 		if err := refuseMainWorkspaceOneShot(ctx, tx, job.Workspace, job.OneShot); err != nil {
 			return err
 		}
-		_, err := tx.ExecContext(ctx,
-			`INSERT INTO creation_jobs (workspace_id, source_branch, source_dir, target_dir, layout_origin, pre_deploy_hooks, post_deploy_hooks,
-			   base_ref, materialized, one_shot, initial_prompt, consented_ungated_mode, created_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-			 ON CONFLICT(workspace_id) DO UPDATE SET
-			   source_branch = excluded.source_branch, source_dir = excluded.source_dir, target_dir = excluded.target_dir,
-			   layout_origin = excluded.layout_origin, pre_deploy_hooks = excluded.pre_deploy_hooks, post_deploy_hooks = excluded.post_deploy_hooks,
-			   base_ref = excluded.base_ref, materialized = excluded.materialized, one_shot = excluded.one_shot,
-			   initial_prompt = excluded.initial_prompt, consented_ungated_mode = excluded.consented_ungated_mode,
-			   created_at = excluded.created_at`,
-			job.Workspace, job.Layout.SourceBranch, job.Layout.SourceDir, job.Layout.TargetDir, job.Layout.Origin,
-			before, after, job.BaseRef, job.Materialized, job.OneShot, job.InitialPrompt, job.ConsentedUngatedMode,
-			nanos(job.CreatedAt))
-		return err
+		return writeCreationJob(ctx, tx, job, before, after)
 	})
+}
+
+// writeCreationJob is THE ONE WRITE of a creation_jobs row, inside the
+// caller's transaction: it replaces the workspace's job wholesale. Every
+// writer (PutCreationJob, a restated landing) goes through it, so the row's
+// columns are spelled once. BEFORE and AFTER are the job's hooks, encoded
+// (encodeHooks) by the caller, which records an unencodable one.
+func writeCreationJob(ctx context.Context, tx *sql.Tx, job CreationJob, before, after string) error {
+	_, err := tx.ExecContext(ctx,
+		`INSERT INTO creation_jobs (workspace_id, source_branch, source_dir, target_dir, layout_origin, pre_deploy_hooks, post_deploy_hooks,
+		   base_ref, materialized, one_shot, initial_prompt, consented_ungated_mode, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 ON CONFLICT(workspace_id) DO UPDATE SET
+		   source_branch = excluded.source_branch, source_dir = excluded.source_dir, target_dir = excluded.target_dir,
+		   layout_origin = excluded.layout_origin, pre_deploy_hooks = excluded.pre_deploy_hooks, post_deploy_hooks = excluded.post_deploy_hooks,
+		   base_ref = excluded.base_ref, materialized = excluded.materialized, one_shot = excluded.one_shot,
+		   initial_prompt = excluded.initial_prompt, consented_ungated_mode = excluded.consented_ungated_mode,
+		   created_at = excluded.created_at`,
+		job.Workspace, job.Layout.SourceBranch, job.Layout.SourceDir, job.Layout.TargetDir, job.Layout.Origin,
+		before, after, job.BaseRef, job.Materialized, job.OneShot, job.InitialPrompt, job.ConsentedUngatedMode,
+		nanos(job.CreatedAt))
+	return err
 }
 
 // DeleteCreationJob removes the creation job a create recorded under ID before
