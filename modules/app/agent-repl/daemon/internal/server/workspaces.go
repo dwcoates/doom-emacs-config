@@ -139,6 +139,7 @@ func (s *server) CreateWorkspace(
 	if oneShot := req.Msg.GetOneShot(); oneShot != nil {
 		spec.OneShot = true
 		spec.InitialPrompt = s.saidText(s.log, "one_shot.prompt", oneShot.GetPrompt())
+		spec.Name = oneShot.GetName()
 		spec.Parent = relationshipParent(oneShot.GetRelationship())
 		spec.Landing, spec.FromOrigin = landingChoice(oneShot.LandingTarget)
 		if about := oneShot.GetContext(); about != nil {

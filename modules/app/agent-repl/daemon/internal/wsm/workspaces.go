@@ -238,7 +238,9 @@ func scanWorkspace(row interface{ Scan(...any) error }) (Workspace, error) {
 }
 
 // RegisterWorkspace records a workspace, idempotent by normalized dir. It mints
-// the WorkspaceID and, on first sight of the repository, the RepoID. The bool
+// the WorkspaceID (or takes facts.CreationJob's, marking that creation job
+// materialized in the same transaction) and, on first sight of the
+// repository, the RepoID. The bool
 // reports whether the record was created. A new workspace whose parent is not
 // open is refused with ParentNotOpenError, nothing written (family.go); a
 // merge workspace is exempt, being drawn nowhere until it is revealed.
@@ -271,6 +273,11 @@ func (s *store) RegisterWorkspace(ctx context.Context, dir string, facts Registe
 	err = s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
 		existing, err := scanWorkspace(tx.QueryRowContext(ctx, `SELECT `+workspaceColumns+` FROM workspaces WHERE dir = ?`, normalized))
 		switch {
+		case err == nil && facts.CreationJob != "":
+			// A CREATE MATERIALIZED A FRESH WORKTREE HERE, so no row can
+			// already stand at its directory: git refuses `worktree add`
+			// into one that exists.
+			return fmt.Errorf("wsm: register %s: a create's directory is already registered as workspace %s", normalized, existing.ID)
 		case err == nil:
 			out, created = existing, false
 			return nil
@@ -307,8 +314,12 @@ func (s *store) RegisterWorkspace(ctx context.Context, dir string, facts Registe
 		if name == "" {
 			name = filepath.Base(normalized)
 		}
+		id := facts.CreationJob
+		if id == "" {
+			id = NewWorkspaceID()
+		}
 		out = Workspace{
-			ID:           NewWorkspaceID(),
+			ID:           id,
 			Kind:         WorkspaceKindRepository,
 			Repo:         repo,
 			Dir:          normalized,
@@ -362,6 +373,20 @@ func (s *store) RegisterWorkspace(ctx context.Context, dir string, facts Registe
 			out.ID, out.Repo, out.Dir, out.Name, out.Branch, out.ParentBranch, nullWorkspace(out.Parent), out.Closed, priority, nanos(out.CreatedAt), mergeOf, request, forkHead, compactAfter, closeOnLanding, cleanupWorktree, cleanupDir, out.Place, facts.LacksParentContext, nullWorkspace(out.ContextFrom), nullWorkspace(out.RequestedBy), closureAt, closureBy)
 		if err != nil {
 			return err
+		}
+		// A CREATED WORKSPACE IS BORN WITH ITS CREATION JOB. The job was
+		// recorded under this id before the worktree was made; marking it
+		// materialized here, in the insert's own transaction, makes the row
+		// and its merge geometry one write. A create whose job is missing is
+		// refused with nothing written.
+		if facts.CreationJob != "" {
+			res, err := tx.ExecContext(ctx, `UPDATE creation_jobs SET materialized = 1 WHERE workspace_id = ?`, out.ID)
+			if err != nil {
+				return err
+			}
+			if err := requireOneRow(res, fmt.Sprintf("wsm: register %s: the creation job of %s", normalized, out.ID)); err != nil {
+				return err
+			}
 		}
 		// A CHILD SITS WHEREVER ITS PARENT DOES (arrange.go): the record
 		// answered reads its subsection the way every read does.

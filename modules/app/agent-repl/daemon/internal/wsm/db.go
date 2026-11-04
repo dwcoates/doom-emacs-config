@@ -191,6 +191,10 @@ type DB interface {
 	// PutCreationJob records a workspace's merge geometry, configured actions
 	// and materialization state.
 	PutCreationJob(ctx context.Context, job CreationJob) error
+	// DeleteCreationJob removes the job of a create that failed before
+	// registering a workspace under its id; a registered workspace's job is
+	// refused.
+	DeleteCreationJob(ctx context.Context, id WorkspaceID) error
 	// CreationJob loads one workspace's creation job; the bool reports
 	// existence. Merge refuses rather than guessing when it is absent.
 	CreationJob(ctx context.Context, id WorkspaceID) (CreationJob, bool, error)

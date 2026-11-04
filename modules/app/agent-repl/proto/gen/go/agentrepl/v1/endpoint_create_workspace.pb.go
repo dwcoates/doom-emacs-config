@@ -425,8 +425,8 @@ func (x *CreateWorkspaceStandard) GetDeployHooks() *CreateWorkspaceDeployHooks {
 	return nil
 }
 
-// A one-shot: repo-pinned, off the repo's default branch, daemon-named —
-// the caller supplies only the prompt (and the shared facts outside the
+// A one-shot: repo-pinned, off the repo's default branch, named by the caller or the daemon —
+// the caller supplies the prompt and optionally a name (and the shared facts outside the
 // form arm); the daemon owns decoration.
 //
 // THE CALLER CHOOSES NOTHING ABOUT COMPLETION (owner ruling, 2026-09-12). A
@@ -459,7 +459,13 @@ type CreateWorkspaceOneShot struct {
 	// selection, so the request carries nothing more. The context workspace is neither the
 	// one-shot's owner nor its context origin: nothing of its conversation or
 	// worktree is carried over by naming it here.
-	Context       *CreateWorkspaceOneShotContext `protobuf:"bytes,4,opt,name=context,proto3,oneof" json:"context,omitempty"`
+	Context *CreateWorkspaceOneShotContext `protobuf:"bytes,4,opt,name=context,proto3,oneof" json:"context,omitempty"`
+	// A caller-supplied workspace name, under the same rule as
+	// CreateWorkspaceStandard.name. UNSET = the daemon mints the name from the
+	// prompt. Carried here because a one-shot's caller names the subject as
+	// often as a standard create's does, and a name the CLI took but the form
+	// could not carry was dropped silently (2026-11-03).
+	Name          *string `protobuf:"bytes,8,opt,name=name,proto3,oneof" json:"name,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -520,6 +526,13 @@ func (x *CreateWorkspaceOneShot) GetContext() *CreateWorkspaceOneShotContext {
 		return x.Context
 	}
 	return nil
+}
+
+func (x *CreateWorkspaceOneShot) GetName() string {
+	if x != nil && x.Name != nil {
+		return *x.Name
+	}
+	return ""
 }
 
 // The workspace a one-shot's commission concerns.
@@ -4592,15 +4605,17 @@ const file_agentrepl_v1_endpoint_create_workspace_proto_rawDesc = "" +
 	"\x0f_landing_targetB\x0f\n" +
 	"\r_owner_noticeB\a\n" +
 	"\x05_nameB\x0f\n" +
-	"\r_deploy_hooksJ\x04\b\x05\x10\x06J\x04\b\x02\x10\x03J\x04\b\x04\x10\x05R\btopologyR\bbase_refR\rmerge_actions\"\x82\x03\n" +
+	"\r_deploy_hooksJ\x04\b\x05\x10\x06J\x04\b\x02\x10\x03J\x04\b\x04\x10\x05R\btopologyR\bbase_refR\rmerge_actions\"\xa4\x03\n" +
 	"\x16CreateWorkspaceOneShot\x121\n" +
 	"\x06prompt\x18\x01 \x01(\v2\x19.conversation.v1.UserSaidR\x06prompt\x12G\n" +
 	"\frelationship\x18\x06 \x01(\v2#.agentrepl.v1.WorkspaceRelationshipR\frelationship\x12P\n" +
 	"\x0elanding_target\x18\a \x01(\v2$.agentrepl.v1.WorkspaceLandingTargetH\x00R\rlandingTarget\x88\x01\x01\x12J\n" +
-	"\acontext\x18\x04 \x01(\v2+.agentrepl.v1.CreateWorkspaceOneShotContextH\x01R\acontext\x88\x01\x01B\x11\n" +
+	"\acontext\x18\x04 \x01(\v2+.agentrepl.v1.CreateWorkspaceOneShotContextH\x01R\acontext\x88\x01\x01\x12\x17\n" +
+	"\x04name\x18\b \x01(\tH\x02R\x04name\x88\x01\x01B\x11\n" +
 	"\x0f_landing_targetB\n" +
 	"\n" +
-	"\b_contextJ\x04\b\x02\x10\x03J\x04\b\x03\x10\x04J\x04\b\x05\x10\x06R\n" +
+	"\b_contextB\a\n" +
+	"\x05_nameJ\x04\b\x02\x10\x03J\x04\b\x03\x10\x04J\x04\b\x05\x10\x06R\n" +
 	"self_mergeR\aopen_prR\btopology\"Y\n" +
 	"\x1dCreateWorkspaceOneShotContext\x128\n" +
 	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\"\x1f\n" +

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"time"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
@@ -18,6 +19,16 @@ import (
 // both in ONE transaction, so one notice says both, and the workspace the merge
 // lands into is read back from the target directory (Workspace.LandsInto),
 // never stored a second time.
+//
+// A RETARGET THAT RESTATES THE LANDING RECORDS GEOMETRY THAT WAS MISSING. A
+// workspace with no creation job (registered by the editor, or stranded by a
+// create cut short before its job was keyed to it) has no merge geometry, and
+// geometry is never inferred (merge.orchestrator.layoutFor). A retarget that
+// NAMES where the workspace lands is the explicit statement it lacked: the job
+// is recorded from it, the workspace's own branch and worktree as its source,
+// in the same transaction as the retarget (LayoutOriginRestatedLanding). A
+// retarget that keeps the landing it does not name still refuses
+// (ParentNoMergeLayout), since there is nothing to keep.
 //
 // A RETARGET KEEPS THE LANDING IT DOES NOT NAME. The workspace's branch was
 // cut from where it lands now; moving the landing because the relationship
@@ -36,8 +47,10 @@ const (
 	// ParentCycle is a new parent that is the workspace or one of its
 	// descendants.
 	ParentCycle
-	// ParentNoMergeLayout is a workspace with no creation job: the editor
-	// registered it, so it has no merge geometry to retarget.
+	// ParentNoMergeLayout is a workspace with no creation job whose retarget
+	// does not restate where it lands, or that cannot be given one at all:
+	// its repository's main workspace, a workspace of a kind git does not
+	// describe, or one with no branch checked out.
 	ParentNoMergeLayout
 	// ParentUnknownLandingTarget is a workspace to land into that the
 	// registry does not hold, that is of another repository, or that is the
@@ -149,7 +162,16 @@ type MergeTarget struct {
 	// DefaultBranch is the repository's default branch, which a top-level
 	// workspace's merge lands on.
 	DefaultBranch string
+	// Unrecorded is a side with no merge geometry at all: the Before of a
+	// retarget that recorded the workspace's first creation job. Dir,
+	// LandsInto and LandsIntoName are then empty.
+	Unrecorded bool
 }
+
+// LayoutOriginRestatedLanding is the creation job origin (MergeLayout.Origin)
+// of geometry recorded by a retarget that restated a landing for a workspace
+// that had none.
+const LayoutOriginRestatedLanding = "workspace.set_parent.restated_landing"
 
 // ParentChange is what a retarget changed: the target before and after.
 type ParentChange struct {
@@ -205,6 +227,19 @@ func (s *store) RestoreParent(ctx context.Context, change ParentChange) (stale b
 			stale = true
 			return nil
 		}
+		// A RETARGET THAT RECORDED THE FIRST JOB IS UNDONE BY REMOVING IT:
+		// the workspace goes back to having no geometry, never to an empty
+		// target.
+		if change.Before.Unrecorded {
+			if err := writeParent(ctx, tx, change.Workspace, change.Before.Parent); err != nil {
+				return err
+			}
+			res, err := tx.ExecContext(ctx, `DELETE FROM creation_jobs WHERE workspace_id = ?`, change.Workspace)
+			if err != nil {
+				return err
+			}
+			return requireOneRow(res, fmt.Sprintf("wsm: creation job of %s", change.Workspace))
+		}
 		return writeTarget(ctx, tx, change.Workspace, change.Before.Parent, change.Before.Dir)
 	})
 	return stale, err
@@ -227,16 +262,34 @@ func setParent(ctx context.Context, tx *sql.Tx, id WorkspaceID, retarget Retarge
 	refused := func(r ParentRefusal) error {
 		return &ParentRefusedError{Refusal: r, Workspace: id, Asked: retarget}
 	}
-	if current.targetDir == "" {
+	unrecorded := current.targetDir == ""
+	if unrecorded && retarget.Landing == nil {
 		return ParentChange{}, refused(ParentNoMergeLayout)
 	}
 	repoDir, defaultBranch, err := repositoryTarget(ctx, tx, current.repo)
 	if err != nil {
 		return ParentChange{}, err
 	}
-	before, err := describeTarget(ctx, tx, current.repo, current.parent, current.targetDir, repoDir, defaultBranch)
-	if err != nil {
-		return ParentChange{}, err
+	var before MergeTarget
+	var source restatedSource
+	if unrecorded {
+		source, err = readRestatedSource(ctx, tx, id, repoDir)
+		if err != nil {
+			return ParentChange{}, err
+		}
+		if !source.landable {
+			return ParentChange{}, refused(ParentNoMergeLayout)
+		}
+		before, err = describeTarget(ctx, tx, current.repo, current.parent, repoDir, repoDir, defaultBranch)
+		if err != nil {
+			return ParentChange{}, err
+		}
+		before.Dir, before.Unrecorded = "", true
+	} else {
+		before, err = describeTarget(ctx, tx, current.repo, current.parent, current.targetDir, repoDir, defaultBranch)
+		if err != nil {
+			return ParentChange{}, err
+		}
 	}
 	parent := retarget.Parent
 	if retarget.KeepParent {
@@ -303,6 +356,11 @@ func setParent(ctx context.Context, tx *sql.Tx, id WorkspaceID, retarget Retarge
 			return ParentChange{}, err
 		}
 		after.Dir, after.LandsInto, after.LandsIntoName = dir, &into, name
+	}
+	if unrecorded {
+		if err := insertRestatedJob(ctx, tx, id, source, after.Dir); err != nil {
+			return ParentChange{}, err
+		}
 	}
 	if err := writeTarget(ctx, tx, id, after.Parent, after.Dir); err != nil {
 		return ParentChange{}, err
@@ -380,6 +438,19 @@ func readTarget(ctx context.Context, tx *sql.Tx, id WorkspaceID) (storedTarget, 
 // All in the same statement as the parent, evaluated against the row as it
 // stood.
 func writeTarget(ctx context.Context, tx *sql.Tx, id WorkspaceID, parent *WorkspaceID, targetDir string) error {
+	if err := writeParent(ctx, tx, id, parent); err != nil {
+		return err
+	}
+	res, err := tx.ExecContext(ctx, `UPDATE creation_jobs SET target_dir = ? WHERE workspace_id = ?`, targetDir, id)
+	if err != nil {
+		return err
+	}
+	return requireOneRow(res, fmt.Sprintf("wsm: creation job of %s", id))
+}
+
+// writeParent is writeTarget's parent half: the recorded parent, with the
+// subsection and the owner_lands half that follow it.
+func writeParent(ctx context.Context, tx *sql.Tx, id WorkspaceID, parent *WorkspaceID) error {
 	owner := nullWorkspace(parent)
 	res, err := tx.ExecContext(ctx, `UPDATE workspaces SET parent_id = ?,
 		subsection_id = CASE WHEN ? IS NULL THEN `+rootSubsectionColumn+` ELSE NULL END,
@@ -389,14 +460,48 @@ func writeTarget(ctx context.Context, tx *sql.Tx, id WorkspaceID, parent *Worksp
 	if err != nil {
 		return err
 	}
-	if err := requireOneRow(res, fmt.Sprintf("wsm: workspace %s", id)); err != nil {
-		return err
+	return requireOneRow(res, fmt.Sprintf("wsm: workspace %s", id))
+}
+
+// restatedSource is the source half of the geometry a restated landing
+// records: the workspace's own branch and worktree, as the registry holds
+// them. landable is false for a workspace no geometry can ever describe: its
+// repository's main workspace (which lands nothing), a workspace of a kind git
+// does not describe, or one with no branch.
+type restatedSource struct {
+	branch, dir string
+	landable    bool
+}
+
+// readRestatedSource reads the workspace's source facts for a restated
+// landing.
+func readRestatedSource(ctx context.Context, tx *sql.Tx, id WorkspaceID, repoDir string) (restatedSource, error) {
+	var (
+		out  restatedSource
+		kind string
+	)
+	if err := scanWorkspaceRow(ctx, tx, id, "branch, dir, kind", &out.branch, &out.dir, &kind); err != nil {
+		return restatedSource{}, err
 	}
-	res, err = tx.ExecContext(ctx, `UPDATE creation_jobs SET target_dir = ? WHERE workspace_id = ?`, targetDir, id)
+	out.landable = WorkspaceKind(kind) == WorkspaceKindRepository && out.branch != "" && !IsMainWorktree(out.dir, repoDir)
+	return out, nil
+}
+
+// insertRestatedJob records the creation job a restated landing states: the
+// workspace's branch and worktree merging into TARGETDIR, its repository's
+// own hooks (none recorded), no base (nobody stated where the branch was cut
+// from, and it is not guessed), and not a one-shot until it is marked one.
+func insertRestatedJob(ctx context.Context, tx *sql.Tx, id WorkspaceID, source restatedSource, targetDir string) error {
+	none, err := encodeHooks(nil)
 	if err != nil {
 		return err
 	}
-	return requireOneRow(res, fmt.Sprintf("wsm: creation job of %s", id))
+	return writeCreationJob(ctx, tx, CreationJob{
+		Workspace:    id,
+		Layout:       MergeLayout{SourceBranch: source.branch, SourceDir: source.dir, TargetDir: targetDir, Origin: LayoutOriginRestatedLanding},
+		Materialized: true,
+		CreatedAt:    time.Now().UTC(),
+	}, none, none)
 }
 
 // repositoryTarget reads a repository's main checkout and default branch. A

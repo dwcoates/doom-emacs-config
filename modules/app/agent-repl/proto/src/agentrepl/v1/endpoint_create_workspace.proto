@@ -178,8 +178,8 @@ message CreateWorkspaceStandard {
   reserved "merge_actions";
 }
 
-// A one-shot: repo-pinned, off the repo's default branch, daemon-named —
-// the caller supplies only the prompt (and the shared facts outside the
+// A one-shot: repo-pinned, off the repo's default branch, named by the caller or the daemon —
+// the caller supplies the prompt and optionally a name (and the shared facts outside the
 // form arm); the daemon owns decoration.
 //
 // THE CALLER CHOOSES NOTHING ABOUT COMPLETION (owner ruling, 2026-09-12). A
@@ -227,6 +227,13 @@ message CreateWorkspaceOneShot {
   // one-shot's owner nor its context origin: nothing of its conversation or
   // worktree is carried over by naming it here.
   optional CreateWorkspaceOneShotContext context = 4;
+
+  // A caller-supplied workspace name, under the same rule as
+  // CreateWorkspaceStandard.name. UNSET = the daemon mints the name from the
+  // prompt. Carried here because a one-shot's caller names the subject as
+  // often as a standard create's does, and a name the CLI took but the form
+  // could not carry was dropped silently (2026-11-03).
+  optional string name = 8;
 }
 
 // The workspace a one-shot's commission concerns.

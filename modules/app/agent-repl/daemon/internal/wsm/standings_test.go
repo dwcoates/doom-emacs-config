@@ -159,3 +159,26 @@ func TestUnmarkingAMainWorkspaceIsNotRefusedAsAOneShot(t *testing.T) {
 		t.Fatalf("SetOneShot(false) = %v, want ErrNotFound (no creation to unmark), never the main-workspace refusal", err)
 	}
 }
+
+func TestSetOneShotMarksAWorkspaceWhoseLandingWasRestated(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testLinkedWorkspace(t, s)
+	if err := s.SetOneShot(context.Background(), ws.ID, true); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("SetOneShot before the restatement = %v, want ErrNotFound", err)
+	}
+	if _, err := s.SetParent(context.Background(), ws.ID, Retarget{KeepParent: true, Landing: &LandingChoice{}}); err != nil {
+		t.Fatalf("SetParent: %v", err)
+	}
+
+	// Act
+	err := s.SetOneShot(context.Background(), ws.ID, true)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("SetOneShot = %v, want the mark recorded", err)
+	}
+	if marked, _ := s.Workspace(context.Background(), ws.ID); !marked.OneShot {
+		t.Fatalf("one-shot = false, want the restated workspace marked")
+	}
+}

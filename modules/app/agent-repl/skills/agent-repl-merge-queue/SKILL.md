@@ -206,3 +206,8 @@ it; it discards the running merge's test progress.
   subscription.** The queue is the only path into master.
 - **CRITICAL: On a failed or refused merge, report and stop.** Never retry by
   hand or work around the queue.
+  - The one refusal answered in place is `no_layout_facts`: the workspace
+    records no merge geometry. Restate its landing target with
+    `workspace set WS -lands-into main` (or `-lands-into W`), as the refusal
+    says, then finish it again. That records the geometry explicitly, and
+    nothing is ever inferred (`/agent-repl-workspaces`, "NO MERGE GEOMETRY").

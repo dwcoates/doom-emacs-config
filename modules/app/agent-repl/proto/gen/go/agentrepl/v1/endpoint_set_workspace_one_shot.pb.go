@@ -406,8 +406,10 @@ type SetWorkspaceOneShotError_Closed struct {
 }
 
 type SetWorkspaceOneShotError_NoCreationJob struct {
-	// The workspace was registered rather than created, so it records no
-	// creation to mark. A repository's main workspace is answered
+	// The workspace records no creation job to mark: the editor registered
+	// it, or its create was cut short. Restating where it lands
+	// (SetWorkspaceParentRequest.landing_target) records one, after which
+	// the mark is taken. A repository's main workspace is answered
 	// `main_workspace` instead, which says why it can never be marked.
 	NoCreationJob *SetWorkspaceOneShotNoCreationJob `protobuf:"bytes,4,opt,name=no_creation_job,json=noCreationJob,proto3,oneof"`
 }

@@ -20,13 +20,13 @@ func describePromptRefusal(ws string, e *agentreplv1.SubmitPromptError) (string,
 	case *agentreplv1.SubmitPromptError_Merging:
 		return fmt.Sprintf("%s is being merged; send the prompt again once the merge resolves", ws), nil
 	case *agentreplv1.SubmitPromptError_UnknownWorkspace:
-		return fmt.Sprintf("the daemon has no workspace %s", ws), nil
+		return sayNoWorkspace(ws), nil
 	case *agentreplv1.SubmitPromptError_WorkspaceRefMismatch:
-		return fmt.Sprintf("%s lives at %s, not at the directory the prompt named", ws, r.WorkspaceRefMismatch.GetRegistryDir()), nil
+		return sayLivesElsewhere(ws, r.WorkspaceRefMismatch.GetRegistryDir(), "the prompt"), nil
 	case *agentreplv1.SubmitPromptError_TransferringAway:
-		return fmt.Sprintf("the daemon is restarting and handed %s to its successor at %s; send the prompt again", ws, r.TransferringAway.GetAddress()), nil
+		return sayHandedOver(ws, r.TransferringAway.GetAddress(), "send the prompt again"), nil
 	case *agentreplv1.SubmitPromptError_NotYetAdopted:
-		return fmt.Sprintf("the daemon is restarting and has not taken %s over yet; send the prompt again once the restart finishes", ws), nil
+		return sayNotYetAdopted(ws, "send the prompt again"), nil
 	case *agentreplv1.SubmitPromptError_FeedNotInWorkspace:
 		return fmt.Sprintf("the prompt named a feed that is not %s's", ws), nil
 	case *agentreplv1.SubmitPromptError_FeedUndecodable:

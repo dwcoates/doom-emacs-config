@@ -501,7 +501,9 @@ type FinishWorkspaceError_NotYetAdopted struct {
 }
 
 type FinishWorkspaceError_NoLayoutFacts struct {
-	// The daemon holds no layout facts for this workspace to deploy with.
+	// The daemon holds no layout facts for this workspace to deploy with,
+	// and never infers them. Restating where it lands
+	// (SetWorkspaceParentRequest.landing_target) records them.
 	NoLayoutFacts *FinishWorkspaceNoLayoutFacts `protobuf:"bytes,5,opt,name=no_layout_facts,json=noLayoutFacts,proto3,oneof"`
 }
 

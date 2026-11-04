@@ -196,7 +196,9 @@ export type FinishWorkspaceError = Message<"agentrepl.v1.FinishWorkspaceError"> 
     case: "notYetAdopted";
   } | {
     /**
-     * The daemon holds no layout facts for this workspace to deploy with.
+     * The daemon holds no layout facts for this workspace to deploy with,
+     * and never infers them. Restating where it lands
+     * (SetWorkspaceParentRequest.landing_target) records them.
      *
      * @generated from field: agentrepl.v1.FinishWorkspaceNoLayoutFacts no_layout_facts = 5;
      */

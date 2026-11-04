@@ -384,6 +384,13 @@ type RegisterFacts struct {
 	// registered whenever the repository is known, and is not opened by
 	// that). An announcement of an already-registered workspace ignores it.
 	Closure *Closure
+	// CreationJob is the id the creation path minted and recorded the
+	// workspace's creation job under before materializing it, empty for every
+	// other registration. A row registered with it TAKES that id, and its job
+	// is marked materialized in the SAME transaction as the insert, so a
+	// created workspace never exists without its job and full merge geometry
+	// (RegisterWorkspace). There is no re-keying step for a failure to cut.
+	CreationJob WorkspaceID
 }
 
 // Priority is the roster's ordering priority, mirroring
