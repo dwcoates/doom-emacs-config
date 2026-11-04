@@ -556,7 +556,13 @@ func (r *run) closeLanded(ctx context.Context, log dlog.Logger, closes ids.Works
 	// target checkout now holds (landedbranch.Retire): a branch left behind
 	// refuses every later create of the same name. Retire records its own
 	// outcome and failure; a branch it cannot judge is kept.
-	_, _ = landedbranch.Retire(ctx, r.git, log, op, job.Layout.TargetDir, job.Layout.SourceBranch, "HEAD",
+	//
+	// ANCESTRY IS THIS LANDING'S OWN FACT, so no landed head is passed: an
+	// in-place merge rebases the branch itself, in its own worktree, and the
+	// merge commit's second parent is the branch's tip. Only a detached
+	// merge lands rebased copies the branch never points at, and its
+	// requester's retirement passes the head it recorded (RetireLanded).
+	_, _ = landedbranch.Retire(ctx, r.git, log, op, job.Layout.TargetDir, job.Layout.SourceBranch, landedbranch.Landing{Into: "HEAD"},
 		dlog.Context{"workspace": string(closes)})
 }
 

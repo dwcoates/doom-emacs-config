@@ -1458,6 +1458,11 @@ type fakeGit struct {
 	// heads is what ResolveRef answers for HEAD in a directory; a directory
 	// absent from it answers the default "sha-of-HEAD".
 	heads map[string]string
+	// refs is what ResolveRef answers for a ref other than HEAD in any
+	// directory; a ref absent from it answers "sha-of-REF".
+	refs map[string]string
+	// resolveErrFor fails ResolveRef for one ref alone.
+	resolveErrFor map[string]error
 	// dirty makes IsClean answer false; isCleanErr fails it.
 	dirty      bool
 	isCleanErr error
@@ -1483,7 +1488,13 @@ func (g *fakeGit) ResolveRef(_ context.Context, dir, ref string) (string, error)
 	if g.resolveErr != nil {
 		return "", g.resolveErr
 	}
+	if err := g.resolveErrFor[ref]; err != nil {
+		return "", err
+	}
 	if head, ok := g.heads[dir]; ok && ref == "HEAD" {
+		return head, nil
+	}
+	if head, ok := g.refs[ref]; ok && ref != "HEAD" {
 		return head, nil
 	}
 	return "sha-of-" + ref, nil

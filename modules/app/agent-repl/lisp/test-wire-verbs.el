@@ -2330,7 +2330,7 @@ and the temporary root it carries."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_create_workspace.pb.go" "CreateWorkspaceError")
                        #'string<)
-                 (sort (list "ungatedWithoutConsent" "noSlug" "briefMissing" "unknownRepository" "worktreeCreationFailed" "spawnFailed" "oneShotPolicyMissing" "namingFailed" "insideTemporaryDirectory" "unknownForkSource" "forkSourceHasNoConversation" "forkSourceHasNoFinishedTurn" "nameReserved" "nameHeld" "invalidName" "unknownContextWorkspace" "unknownOwner" "ownerNoticeRequired" "ownerNoticeUnexpected" "unknownRequester" "asyncMergeUnknownBranch" "asyncMergeBranchOwned" "asyncMergeUnknownSubagent" "asyncMergeUnknownMaker" "asyncMergeContextNotMaker" "asyncMergeNameTaken" "asyncMergeUnknownCloseAfter" "opIdWithAsyncMerge" "versionIncrementRequired" "versionIncrementUnexpected" "asyncMergeRequesterQueued" "asyncMergeRequesterMerging" "asyncMergeRequesterSessionDeleted" "parentNotOpen" "originFetchFailed" "asyncMergeNoDeployConfig" "asyncMergeDeployConfigInvalid" "transferringAway" "standingDown" "placementBehindNotInLine" "unknownLandingTarget" "modelNotInCatalog" "modelCatalogUnknown")
+                 (sort (list "ungatedWithoutConsent" "noSlug" "briefMissing" "unknownRepository" "worktreeCreationFailed" "spawnFailed" "oneShotPolicyMissing" "namingFailed" "insideTemporaryDirectory" "unknownForkSource" "forkSourceHasNoConversation" "forkSourceHasNoFinishedTurn" "nameReserved" "nameHeld" "nameBranchExists" "invalidName" "unknownContextWorkspace" "unknownOwner" "ownerNoticeRequired" "ownerNoticeUnexpected" "unknownRequester" "asyncMergeUnknownBranch" "asyncMergeBranchOwned" "asyncMergeUnknownSubagent" "asyncMergeUnknownMaker" "asyncMergeContextNotMaker" "asyncMergeNameTaken" "asyncMergeUnknownCloseAfter" "opIdWithAsyncMerge" "versionIncrementRequired" "versionIncrementUnexpected" "asyncMergeRequesterQueued" "asyncMergeRequesterMerging" "asyncMergeRequesterSessionDeleted" "parentNotOpen" "originFetchFailed" "asyncMergeNoDeployConfig" "asyncMergeDeployConfigInvalid" "transferringAway" "standingDown" "placementBehindNotInLine" "unknownLandingTarget" "modelNotInCatalog" "modelCatalogUnknown")
                        #'string<))))
 
 (ert-deftest agent-repl-test-wire-verbs-create-error-model-not-in-catalog-arm ()
@@ -2488,6 +2488,15 @@ workspace's ref and whether it is open."
                      "{\"nameHeld\":{\"branch\":\"agent-1/fix\",\"workspace\":{\"id\":\"ws-2\",\"dir\":\"/w/two\"},\"open\":true}}"))
                    '(:cause (:arm :name-held
                              :value (:branch "agent-1/fix" :workspace (:id "ws-2" :dir "/w/two") :open t)))))))
+
+(ert-deftest agent-repl-test-wire-verbs-create-error-name-branch-exists-arm ()
+  "CreateWorkspaceError's `name_branch_exists' arm decodes the branch and its tip."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-create-workspace-error
+                    (agent-repl-test-wire-verbs--parse
+                     "{\"nameBranchExists\":{\"branch\":\"agent-1/fix\",\"head\":\"7fdd54832a\"}}"))
+                   '(:cause (:arm :name-branch-exists
+                             :value (:branch "agent-1/fix" :head "7fdd54832a")))))))
 
 (ert-deftest agent-repl-test-wire-verbs-create-error-name-reserved-arm ()
   "CreateWorkspaceError's `name_reserved' arm decodes the branch the name resolves to."

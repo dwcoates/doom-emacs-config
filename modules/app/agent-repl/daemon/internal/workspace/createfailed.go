@@ -155,6 +155,10 @@ var createRefusalArms = map[string]bool{
 	ArmOriginFetchFailed:                false,
 	"async_merge_no_deploy_config":      false,
 	"async_merge_deploy_config_invalid": false,
+	// A branch nothing the daemon serves owns is the repository's state: most
+	// often a landed branch the landed-branch sweep kept, whose record says
+	// why, which the main worktree investigates.
+	ArmNameBranchExists: false,
 	// A handover.
 	ArmTransferringAway: false,
 	ArmStandingDown:     false,

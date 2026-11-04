@@ -721,9 +721,9 @@ func TestCreateDoesNotSuffixAnUncollidedName(t *testing.T) {
 	}
 }
 
-// TestCreateDoesNotDisambiguateASuppliedName pins that the user's own name is
-// taken as it stands: they typed it, and are owed git's own refusal if it is
-// taken rather than a silently different workspace.
+// TestCreateDoesNotDisambiguateASuppliedName covers a supplied name whose
+// branch already exists: it is never suffixed into a free one, and is refused
+// as name_branch_exists (refuseBranchExistsLocked) with nothing built.
 func TestCreateDoesNotDisambiguateASuppliedName(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
@@ -734,13 +734,15 @@ func TestCreateDoesNotDisambiguateASuppliedName(t *testing.T) {
 	spec.Name = "chosen-name"
 
 	// Act.
-	if _, err := f.verbs.Create(context.Background(), spec); err != nil {
-		t.Fatalf("Create: %v", err)
-	}
+	_, err := f.verbs.Create(context.Background(), spec)
 
 	// Assert.
-	if f.git.created[0].Branch != "chosen-name" {
-		t.Fatalf("branch = %q, want the supplied name unchanged", f.git.created[0].Branch)
+	refusal, ok := AsRefusal(err)
+	if !ok || refusal.Arm != ArmNameBranchExists || refusal.Fields["branch"] != "chosen-name" {
+		t.Fatalf("Create = %v, want the supplied name refused unchanged as %s", err, ArmNameBranchExists)
+	}
+	if len(f.git.created) != 0 {
+		t.Fatalf("created = %+v, want no branch built, suffixed or not", f.git.created)
 	}
 }
 

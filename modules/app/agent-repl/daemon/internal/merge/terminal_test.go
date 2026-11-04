@@ -2409,13 +2409,13 @@ func TestALandingDeletesItsMergedBranch(t *testing.T) {
 			inside:      true,
 			wantDeleted: []string{"feature@feat1"},
 			wantLevel:   dlog.LevelInfo,
-			wantMessage: "deleted the landed branch: its tip is inside the ref it landed into",
+			wantMessage: "deleted the landed branch",
 		},
 		{
-			name:        "a branch holding commits the target does not is kept",
+			name:        "a branch holding commits the target does not is kept at INFO",
 			inside:      false,
-			wantLevel:   dlog.LevelDebug,
-			wantMessage: "kept the branch: it holds commits the ref it landed into does not",
+			wantLevel:   dlog.LevelInfo,
+			wantMessage: "kept the branch: its tip is neither the head its landing recorded nor inside the ref it landed into",
 		},
 		{
 			name:        "a deletion git refuses keeps the branch and is recorded",
@@ -2456,8 +2456,8 @@ func TestALandingDeletesItsMergedBranch(t *testing.T) {
 			if !ok {
 				t.Fatalf("no %s daemon.merge.teardown record %q: %+v", tc.wantLevel, tc.wantMessage, h.logs.Records())
 			}
-			if record.Context["branch"] != "feature" || record.Context["into"] != "HEAD" {
-				t.Fatalf("the record's context is %v, want branch feature into HEAD", record.Context)
+			if record.Context["branch"] != "feature" || record.Context["into"] != "HEAD" || record.Context["landed_head"] != "" {
+				t.Fatalf("the record's context is %v, want branch feature into HEAD judged with no landed head", record.Context)
 			}
 		})
 	}
