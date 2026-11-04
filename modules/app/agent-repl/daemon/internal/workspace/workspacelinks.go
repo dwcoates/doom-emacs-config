@@ -73,10 +73,6 @@ func (v *verbs) SetLink(ctx context.Context, ws ids.WorkspaceID, url, label stri
 		}
 		return v.deps.DB.SetWorkspaceLink(ctx, ws, set)
 	})
-	if err == nil && owned {
-		v.postOwnedLink(ctx, ws, url, label)
-	}
-	return links, err
 }
 
 // ownedSubscription answers the subscription an owned link to PR takes: nil

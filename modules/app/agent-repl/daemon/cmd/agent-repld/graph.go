@@ -753,7 +753,6 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		ConfigDirs: configDirs,
 		Titles:     topbarResolver,
 		Store:      p.DB,
-		Installed:  verbsRef,
 		PromptsDir: paths.PromptsDir,
 		Log:        log,
 	})
@@ -1431,7 +1430,6 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	pullRequests, err := prwatch.New(prwatch.Deps{
 		Store:   p.DB,
 		GH:      gh,
-		Merges:  verbsRef,
 		Holds:   queue,
 		Briefs:  merge.BriefsFrom(paths.PromptsDir),
 		MintKey: prompthandler.MintKey,

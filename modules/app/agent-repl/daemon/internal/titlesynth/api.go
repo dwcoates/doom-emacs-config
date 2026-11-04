@@ -88,15 +88,6 @@ type TitleSink interface {
 	SetSynthesizedTitle(ws ids.WorkspaceID, title string)
 }
 
-// SummaryObserver is told every summary a distillation installs, so the
-// daemon can tell the Slack thread a workspace was created for its task
-// (workspace.SummaryInstalled). A summary restored at boot is not a new
-// distillation and is not told.
-type SummaryObserver interface {
-	// SummaryInstalled is told the summary TITLE was installed on WS.
-	SummaryInstalled(ctx context.Context, ws ids.WorkspaceID, title string)
-}
-
 // Deps are the synthesizer's collaborators. Every one is an interface or a
 // value so the whole flow is exercised with a mocked model and a mocked shim.
 type Deps struct {
@@ -113,8 +104,6 @@ type Deps struct {
 	Titles TitleSink
 	// Store keeps the summary and its cadence across daemon restarts.
 	Store SummaryStore
-	// Installed is told every summary a distillation installs.
-	Installed SummaryObserver
 	// PromptsDir is where the headless brief is read from AT USE TIME, so an
 	// edit takes effect without a daemon bounce.
 	PromptsDir string
