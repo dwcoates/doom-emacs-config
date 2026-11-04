@@ -6271,6 +6271,20 @@ describe("the row indent", () => {
     ]).toEqual([false, true, expect.stringMatching(/--row-indent:\s*calc\(var\(--row-indent-parent\) \+ 1\.2rem\)/)]);
   });
 
+  it("steps a row under a repository divider back so its mark lines up with the divider", () => {
+    expect(declarationsOf("#ws-sidebar .kids > .sb-repo-divider ~ .ws")).toMatch(/--row-indent:\s*calc\(var\(--row-indent-parent\) \+ 1\.2rem - 1rem\)/);
+  });
+
+  it("keeps the divider itself at one generation step, as a same-repository row", () => {
+    expect([
+      declarationsOf("#ws-sidebar .kids > .sb-repo-divider"),
+      declarationsOf("#ws-sidebar .kids > .ws"),
+    ]).toEqual([
+      expect.stringMatching(/--row-indent:\s*calc\(var\(--row-indent-parent\) \+ 1\.2rem\)/),
+      expect.stringMatching(/--row-indent:\s*calc\(var\(--row-indent-parent\) \+ 1\.2rem\)/),
+    ]);
+  });
+
   it("draws the family guide where the generation's box once began", () => {
     expect(declarationsOf("#ws-sidebar .kids::before")).toMatch(/left:\s*calc\(var\(--row-indent-parent\) \+ 1\.55rem\)/);
   });
