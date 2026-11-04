@@ -77,6 +77,44 @@
 (defvar agent-repl-test-host--adopt-answer nil
   "What the stubbed AdoptHostWorkspace answers; see the harness.")
 
+(defvar agent-repl-test-host--register-all-answer nil
+  "What the stubbed RegisterWorkspaces answers, or nil to derive it.
+Nil derives each dir\='s outcome from `agent-repl-test-host--register-answer'
+\(`agent-repl-test-host--batch-answer'), so a test steers a lone walk and a
+batched one the same way.")
+
+(defun agent-repl-test-host--batch-answer (request)
+  "The RegisterWorkspaces answer REQUEST gets, derived from the lone answer.
+A success registers every dir with its ref, a refusal refuses every dir,
+and a transport failure or a held call is the batch\='s own."
+  (or agent-repl-test-host--register-all-answer
+      (let ((answer agent-repl-test-host--register-answer))
+        (if (not (eq (car answer) :response))
+            answer
+          (let ((single (cadr answer)))
+            (list :response
+                  (list :outcomes
+                        (mapcar (lambda (dir)
+                                  (list :dir dir
+                                        :outcome
+                                        (pcase (plist-get single :arm)
+                                          (:success (list :arm :registered
+                                                          :value (plist-get single :value)))
+                                          (:error (list :arm :refused
+                                                        :value (plist-get single :value)))
+                                          (arm (list :arm arm :value nil)))))
+                                (plist-get request :dirs)))))))))
+
+(defun agent-repl-test-host--registered-dirs (conn)
+  "Every dir registered on CONN, lone or batched, oldest first."
+  (apply #'append
+         (mapcar (lambda (call)
+                   (pcase (car call)
+                     ("RegisterWorkspace" (list (plist-get (nth 2 call) :dir)))
+                     ("RegisterWorkspaces" (plist-get (nth 2 call) :dirs))))
+                 (reverse (cl-remove-if-not (lambda (call) (eq (nth 1 call) conn))
+                                            agent-repl-test-host--calls)))))
+
 (defvar agent-repl-test-host--evaluation-answer nil
   "What the stubbed AnswerEditorEvaluation answers; see the harness.")
 
@@ -230,6 +268,7 @@ unary rpc can produce, which the contract never collapses into one."
          (agent-repl-test-host--register-answer
           (list :response (list :arm :success
                                 :value (list :workspace (agent-repl-test-host--ref)))))
+         (agent-repl-test-host--register-all-answer nil)
          (agent-repl-test-host--select-answer
           (list :response (list :arm :success :value (list :roster-revision 0))))
          (agent-repl-test-host--mark-viewed-answer
@@ -248,6 +287,12 @@ unary rpc can produce, which the contract never collapses into one."
                 (lambda (conn request &rest keys)
                   (push (list "RegisterWorkspace" conn request) agent-repl-test-host--calls)
                   (agent-repl-test-host--answer agent-repl-test-host--register-answer
+                                                (plist-get keys :on-response)
+                                                (plist-get keys :on-failure))))
+               ((symbol-function 'agent-repl-rpc-register-workspaces)
+                (lambda (conn request &rest keys)
+                  (push (list "RegisterWorkspaces" conn request keys) agent-repl-test-host--calls)
+                  (agent-repl-test-host--answer (agent-repl-test-host--batch-answer request)
                                                 (plist-get keys :on-response)
                                                 (plist-get keys :on-failure))))
                ((symbol-function 'agent-repl-rpc-select-workspace)
@@ -3100,8 +3145,7 @@ connection BEFORE the answer lands, which is the order a promotion makes."
         ;; Act
         (agent-repl-host-on-link-up conn))
       ;; Assert
-      (should (member (list "RegisterWorkspace" conn '(:dir "/tmp/ws-1"))
-                      agent-repl-test-host--calls)))))
+      (should (member "/tmp/ws-1" (agent-repl-test-host--registered-dirs conn))))))
 
 (ert-deftest agent-repl-test-host-link-up-does-not-warn-about-a-pseudo-perspective ()
   "persp-mode's own `none' is not a workspace, so skipping it is not a fault.
@@ -3134,8 +3178,7 @@ registry rather than a stub: a pseudo perspective cannot reach the walk."
       ;; Act
       (agent-repl-host-on-link-up conn)
       ;; Assert
-      (should (member (list "RegisterWorkspace" conn '(:dir "/tmp/ws-1"))
-                      agent-repl-test-host--calls)))))
+      (should (member "/tmp/ws-1" (agent-repl-test-host--registered-dirs conn))))))
 
 (ert-deftest agent-repl-test-host-link-up-still-warns-about-a-real-workspace-with-no-dir ()
   "A REAL workspace missing its directory is an anomaly and keeps warning."
@@ -4229,7 +4272,7 @@ promotion and refused with `not-a-worktree'."
       ;; Act
       (agent-repl-host-on-link-promote old new)
       ;; Assert
-      (should-not (assoc "RegisterWorkspace" agent-repl-test-host--calls)))))
+      (should-not (agent-repl-test-host--registered-dirs new)))))
 
 ;;;; ---- Rename ----
 
@@ -5329,3 +5372,334 @@ afresh."
   (agent-repl-test-host--with-harness
     (agent-repl-test-host--subscribe "ws-1")
     (should-not (agent-repl-host-standing-ask "ws-1"))))
+
+;;;; ---- The batched link-edge walk, and a detached workspace's armed walk ----
+
+(defmacro agent-repl-test-host--with-dirs (names &rest body)
+  "Run BODY with NAMES the live workspaces, each WS\\='s dir /tmp/WS."
+  (declare (indent 1))
+  `(cl-letf (((symbol-function 'agent-repl--live-ws-names) (lambda () ,names))
+             ((symbol-function 'agent-repl--ws-get)
+              (lambda (ws key) (and (eq key :project-dir) (concat "/tmp/" ws)))))
+     ,@body))
+
+(defun agent-repl-test-host--batch-of (conn)
+  "Every RegisterWorkspaces call recorded on CONN, oldest first."
+  (reverse (agent-repl-test-host--calls-to "RegisterWorkspaces" conn)))
+
+(ert-deftest agent-repl-test-host-link-up-registers-every-workspace-in-one-call ()
+  "Link-up re-announces every workspace in ONE RegisterWorkspaces, never N.
+2026-11-03: N concurrent RegisterWorkspace calls raced a booting daemon\\='s
+one state-database connection and timed out."
+  (agent-repl-test-host--with-harness
+    (agent-repl-test-host--with-dirs '("ws-1" "ws-2")
+      ;; Arrange
+      (let ((conn (agent-repl-connect-open "127.0.0.1:9001")))
+        ;; Act
+        (agent-repl-host-on-link-up conn)
+        ;; Assert
+        (should (equal (mapcar (lambda (call) (nth 2 call)) (agent-repl-test-host--batch-of conn))
+                       '((:dirs ("/tmp/ws-1" "/tmp/ws-2")))))
+        (should-not (agent-repl-test-host--calls-to "RegisterWorkspace" conn))))))
+
+(ert-deftest agent-repl-test-host-link-up-batch-arms-no-unary-timer ()
+  "The batch waits on the daemon\\='s answer, never on a budget it would outgrow."
+  (agent-repl-test-host--with-harness
+    (agent-repl-test-host--with-dirs '("ws-1")
+      ;; Arrange
+      (let ((conn (agent-repl-connect-open "127.0.0.1:9001")))
+        ;; Act
+        (agent-repl-host-on-link-up conn)
+        ;; Assert
+        (should (eq :none (plist-get (nth 3 (car (agent-repl-test-host--batch-of conn)))
+                                     :timeout)))))))
+
+(ert-deftest agent-repl-test-host-link-up-batch-attaches-each-workspace ()
+  "Each workspace a batch registered is subscribed on the daemon that came up."
+  (agent-repl-test-host--with-harness
+    (agent-repl-test-host--with-dirs '("ws-1" "ws-2")
+      ;; Arrange
+      (let ((conn (agent-repl-connect-open "127.0.0.1:9001")))
+        ;; Act
+        (agent-repl-host-on-link-up conn)
+        ;; Assert
+        (should (eq conn (agent-repl-host-conn "ws-1")))
+        (should (eq conn (agent-repl-host-conn "ws-2")))))))
+
+(ert-deftest agent-repl-test-host-link-up-batch-reasserts-the-selection-once ()
+  "The selection is re-asserted once, after every outcome of the batch."
+  (agent-repl-test-host--with-harness
+    (agent-repl-test-host--with-dirs '("ws-1" "ws-2")
+      ;; Arrange
+      (let ((conn (agent-repl-connect-open "127.0.0.1:9001"))
+            (reasserted 0))
+        (cl-letf (((symbol-function 'agent-repl-host--reassert-selection)
+                   (lambda (_dir) (cl-incf reasserted))))
+          ;; Act
+          (agent-repl-host-on-link-up conn))
+        ;; Assert
+        (should (= reasserted 1))))))
+
+(ert-deftest agent-repl-test-host-link-up-batch-failure-leaves-every-walk-armed ()
+  "A batch that failed in transport leaves each workspace detached and armed.
+2026-11-03: a failed walk cleared itself and left nothing armed, and seven
+workspaces stayed severed."
+  (agent-repl-test-host--with-harness
+    (agent-repl-test-host--with-dirs '("ws-1" "ws-2")
+      ;; Arrange
+      (let ((conn (agent-repl-connect-open "127.0.0.1:9001")))
+        (setq agent-repl-test-host--register-answer
+              (list :failure (list :kind :transport :message "reset")))
+        ;; Act
+        (agent-repl-host-on-link-up conn)
+        ;; Assert
+        (should (agent-repl-host-detached-p "ws-1"))
+        (should (agent-repl-host-detached-p "ws-2"))
+        (should (agent-repl-test-host--logged-p
+                 :error "elisp.host.register-all-failed dirs=2"))
+        (should (agent-repl-test-host--logged-p
+                 :info "elisp.host.reattach-armed ws=ws-1 trigger=link-up edges=link-up,promotion,select"))))))
+
+(ert-deftest agent-repl-test-host-link-up-batch-refusal-costs-only-its-own-workspace ()
+  "One dir refused in a batch arms its own walk and attaches the rest."
+  (agent-repl-test-host--with-harness
+    (agent-repl-test-host--with-dirs '("ws-1" "ws-2")
+      ;; Arrange
+      (let ((conn (agent-repl-connect-open "127.0.0.1:9001")))
+        (setq agent-repl-test-host--register-all-answer
+              (list :response
+                    (list :outcomes
+                          (list (list :dir "/tmp/ws-1"
+                                      :outcome (list :arm :refused
+                                                     :value '(:cause (:arm :not-a-worktree :value nil))))
+                                (list :dir "/tmp/ws-2"
+                                      :outcome (list :arm :registered
+                                                     :value (list :workspace (agent-repl-test-host--ref "id-2" "/tmp/ws-2"))))))))
+        ;; Act
+        (agent-repl-host-on-link-up conn)
+        ;; Assert
+        (should (agent-repl-host-detached-p "ws-1"))
+        (should (agent-repl-test-host--logged-p :error "elisp.host.register-refused dir=\"/tmp/ws-1\""))
+        (should (eq conn (agent-repl-host-conn "ws-2")))
+        (should-not (agent-repl-host-detached-p "ws-2"))))))
+
+(ert-deftest agent-repl-test-host-link-up-batch-failed-dir-is-recorded-with-its-cause ()
+  "A dir the daemon could not register is recorded at ERROR with its cause."
+  (agent-repl-test-host--with-harness
+    (agent-repl-test-host--with-dirs '("ws-1")
+      ;; Arrange
+      (let ((conn (agent-repl-connect-open "127.0.0.1:9001")))
+        (setq agent-repl-test-host--register-all-answer
+              (list :response
+                    (list :outcomes
+                          (list (list :dir "/tmp/ws-1"
+                                      :outcome (list :arm :failed :value '(:cause "git broke")))))))
+        ;; Act
+        (agent-repl-host-on-link-up conn)
+        ;; Assert
+        (should (agent-repl-test-host--logged-p
+                 :error "elisp.host.register-failed dir=\"/tmp/ws-1\" detail=\"git broke\""))
+        (should (agent-repl-host-detached-p "ws-1"))))))
+
+(ert-deftest agent-repl-test-host-link-up-batch-unpaired-answer-fails-hard ()
+  "An answer whose outcomes do not pair with the dirs is a broken contract."
+  (agent-repl-test-host--with-harness
+    (agent-repl-test-host--with-dirs '("ws-1" "ws-2")
+      ;; Arrange
+      (let ((conn (agent-repl-connect-open "127.0.0.1:9001"))
+            fatals)
+        (setq agent-repl-test-host--register-all-answer
+              (list :response (list :outcomes (list (list :dir "/tmp/ws-1"
+                                                          :outcome (list :arm :failed :value nil))))))
+        (cl-letf (((symbol-function 'agent-repl--fatal) (agent-repl-test--fatal-into fatals)))
+          ;; Act / Assert
+          (should-error (agent-repl-host-on-link-up conn)))
+        (should (string-match-p "elisp.host.register-all-unpaired" (car fatals)))))))
+
+(ert-deftest agent-repl-test-host-a-failed-link-up-walk-is-walked-again-at-promotion ()
+  "A workspace a failed link-up left detached is walked onto the next promotion."
+  (agent-repl-test-host--with-harness
+    (agent-repl-test-host--with-dirs '("ws-1")
+      ;; Arrange
+      (let ((up (agent-repl-connect-open "127.0.0.1:9001"))
+            (next (agent-repl-connect-open "127.0.0.1:9002")))
+        (setq agent-repl-test-host--register-answer
+              (list :failure (list :kind :transport :message "reset")))
+        (agent-repl-host-on-link-up up)
+        (setq agent-repl-test-host--register-answer
+              (list :response (list :arm :success :value (list :workspace (agent-repl-test-host--ref)))))
+        ;; Act
+        (agent-repl-host-on-link-promote up next)
+        ;; Assert
+        (should (equal (agent-repl-test-host--registered-dirs next) '("/tmp/ws-1")))
+        (should (eq next (agent-repl-host-conn "ws-1")))))))
+
+(ert-deftest agent-repl-test-host-selecting-a-detached-workspace-walks-it-onto-the-live-daemon ()
+  "Selecting a detached workspace starts its walk onto the live daemon."
+  (agent-repl-test-host--with-harness
+    (agent-repl-test-host--with-dirs '("ws-1")
+      ;; Arrange
+      (let ((up (agent-repl-connect-open "127.0.0.1:9001"))
+            (live (agent-repl-connect-open "127.0.0.1:9002")))
+        (setq agent-repl-test-host--register-answer
+              (list :failure (list :kind :transport :message "reset")))
+        (agent-repl-host-on-link-up up)
+        (agent-repl-host--put "ws-1" :ref (agent-repl-test-host--ref))
+        (setq agent-repl-test-host--register-answer
+              (list :response (list :arm :success :value (list :workspace (agent-repl-test-host--ref))))
+              agent-repl-test-host--live live
+              agent-repl-test-host--calls nil)
+        ;; Act
+        (agent-repl-host-select "ws-1")
+        ;; Assert
+        (should (equal (agent-repl-test-host--calls-to "RegisterWorkspace" live)
+                       (list (list "RegisterWorkspace" live '(:dir "/tmp/ws-1")))))
+        (should-not (agent-repl-host-detached-p "ws-1"))))))
+
+(ert-deftest agent-repl-test-host-selecting-a-detached-workspace-with-a-walk-in-flight-adds-none ()
+  "A selection while the walk onto the live daemon is in flight starts no second."
+  (agent-repl-test-host--with-harness
+    (agent-repl-test-host--with-dirs '("ws-1")
+      ;; Arrange
+      (let ((live (agent-repl-connect-open "127.0.0.1:9002")))
+        (setq agent-repl-test-host--register-answer '(:held)
+              agent-repl-test-host--live live)
+        (agent-repl-host-on-link-up live)
+        (agent-repl-host--put "ws-1" :detached t)
+        (agent-repl-host--put "ws-1" :ref (agent-repl-test-host--ref))
+        (setq agent-repl-test-host--calls nil)
+        ;; Act
+        (agent-repl-host-select "ws-1")
+        ;; Assert
+        (should-not (agent-repl-test-host--registered-dirs live))
+        (should (agent-repl-test-host--logged-p :log "elisp.host.reattach-in-flight ws=ws-1 trigger=select"))))))
+
+(ert-deftest agent-repl-test-host-selecting-an-attached-workspace-walks-nothing ()
+  "A selection of a workspace its daemon serves registers nothing."
+  (agent-repl-test-host--with-harness
+    (agent-repl-test-host--with-dir
+      ;; Arrange
+      (let ((conn (agent-repl-connect-open "127.0.0.1:9001")))
+        (agent-repl-test-host--subscribe "ws-1" conn)
+        (setq agent-repl-test-host--live conn
+              agent-repl-test-host--calls nil)
+        ;; Act
+        (agent-repl-host-select "ws-1")
+        ;; Assert
+        (should-not (agent-repl-test-host--registered-dirs conn))))))
+
+(ert-deftest agent-repl-test-host-page-conn-is-the-own-connection-while-attached ()
+  "An attached workspace\\='s page loads from the daemon that serves it."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (let ((own (agent-repl-connect-open "127.0.0.1:9001")))
+      (agent-repl-test-host--subscribe "ws-1" own)
+      (setq agent-repl-test-host--live (agent-repl-connect-open "127.0.0.1:9002"))
+      ;; Act / Assert
+      (should (eq own (agent-repl-host-page-conn "ws-1"))))))
+
+(ert-deftest agent-repl-test-host-page-conn-of-a-detached-workspace-is-the-live-link ()
+  "A detached workspace with no connection loads its page from the live link."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (let ((live (agent-repl-connect-open "127.0.0.1:9002")))
+      (agent-repl-host--put "ws-1" :ref (agent-repl-test-host--ref))
+      (agent-repl-host--put "ws-1" :detached t)
+      (setq agent-repl-test-host--live live)
+      ;; Act / Assert
+      (should (eq live (agent-repl-host-page-conn "ws-1")))
+      (should (agent-repl-test-host--logged-p
+               :info "elisp.host.page-conn-from-live-link ws=ws-1 address=\"127.0.0.1:9002\" walk=none")))))
+
+(ert-deftest agent-repl-test-host-page-conn-of-a-detached-workspace-is-nil-with-no-link ()
+  "With no link standing there is no daemon to load a page from."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-host--put "ws-1" :ref (agent-repl-test-host--ref))
+    (agent-repl-host--put "ws-1" :detached t)
+    (setq agent-repl-test-host--live nil)
+    ;; Act / Assert
+    (should-not (agent-repl-host-page-conn "ws-1"))))
+
+(ert-deftest agent-repl-test-host-page-conn-of-an-attached-workspace-without-a-connection-is-nil ()
+  "A workspace that is not detached never borrows the live link."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-host--put "ws-1" :ref (agent-repl-test-host--ref))
+    (setq agent-repl-test-host--live (agent-repl-connect-open "127.0.0.1:9002"))
+    ;; Act / Assert
+    (should-not (agent-repl-host-page-conn "ws-1"))))
+
+(ert-deftest agent-repl-test-host-switching-to-a-detached-workspace-walks-it-and-loads-its-page ()
+  "A switch to a detached workspace walks it onto the live daemon and reloads its page.
+2026-11-03: the switch selected the workspace, loaded no page and started
+no walk."
+  (agent-repl-test-host--with-harness
+    (agent-repl-test-host--with-dirs '("ws-1")
+      ;; Arrange
+      (let ((live (agent-repl-connect-open "127.0.0.1:9002")))
+        (agent-repl-host--put "ws-1" :ref (agent-repl-test-host--ref))
+        (agent-repl-host--put "ws-1" :detached t)
+        (setq agent-repl-test-host--live live
+              agent-repl-test-host--current-ws "ws-1")
+        (cl-letf (((symbol-function 'agent-repl-link-primary) (lambda () live)))
+          ;; Act
+          (agent-repl-host-request-switch "ws-1" 'cycle))
+        ;; Assert
+        (should (equal (agent-repl-test-host--registered-dirs live) '("/tmp/ws-1")))
+        (should (equal (cdr (assq :reload agent-repl-test-host--effects)) "ws-1"))
+        (should (equal (cdr (assq :reload-conn agent-repl-test-host--effects)) live))))))
+
+;;;; ---- The one record of a registration's fate ----
+
+(ert-deftest agent-repl-test-host-record-registration-answers-a-registered-ref ()
+  "A registered dir is recorded at INFO with its id, and its ref answered."
+  (agent-repl-test-host--with-harness
+    ;; Act
+    (let ((ref (agent-repl-host--record-registration nil "/w" :registered '(:id "ws-7" :dir "/w"))))
+      ;; Assert
+      (should (equal ref '(:id "ws-7" :dir "/w")))
+      (should (agent-repl-test-host--logged-p :info "elisp.host.registered dir=\"/w\" id=\"ws-7\"")))))
+
+(ert-deftest agent-repl-test-host-record-registration-records-a-refusal-and-answers-nil ()
+  "A refused dir is recorded at ERROR with the refusal, and answers no ref."
+  (agent-repl-test-host--with-harness
+    ;; Act / Assert
+    (should-not (agent-repl-host--record-registration nil "/w" :refused '(:cause (:arm :not-a-worktree))))
+    (should (agent-repl-test-host--logged-p :error "elisp.host.register-refused dir=\"/w\" error="))))
+
+(ert-deftest agent-repl-test-host-record-registration-records-a-failure-and-answers-nil ()
+  "A dir whose registration broke is recorded at ERROR with what broke."
+  (agent-repl-test-host--with-harness
+    ;; Act / Assert
+    (should-not (agent-repl-host--record-registration nil "/w" :failed "git broke"))
+    (should (agent-repl-test-host--logged-p :error "elisp.host.register-failed dir=\"/w\" detail=\"git broke\""))))
+
+(ert-deftest agent-repl-test-host-record-registration-fails-hard-on-an-unknown-arm ()
+  "An arm the recorder does not know is a caller bug."
+  (agent-repl-test-host--with-harness
+    (let (fatals)
+      (cl-letf (((symbol-function 'agent-repl--fatal) (agent-repl-test--fatal-into fatals)))
+        ;; Act / Assert
+        (should-error (agent-repl-host--record-registration nil "/w" :teleported nil))
+        (should (string-match-p "record-registration-unknown-arm" (car fatals)))))))
+
+(ert-deftest agent-repl-test-host-lone-and-batched-registrations-share-one-record ()
+  "A lone register and a batch record a failed dir through the one recorder."
+  (agent-repl-test-host--with-harness
+    (agent-repl-test-host--with-dirs '("ws-1")
+      ;; Arrange
+      (let ((conn (agent-repl-connect-open "127.0.0.1:9001"))
+            recorded)
+        (setq agent-repl-test-host--register-answer
+              (list :failure "boom")
+              agent-repl-test-host--register-all-answer
+              (list :response (list :outcomes (list (list :dir "/tmp/ws-1"
+                                                          :outcome (list :arm :failed :value '(:cause "boom")))))))
+        (cl-letf (((symbol-function 'agent-repl-host--record-registration)
+                   (lambda (_scope dir arm value) (push (list dir arm value) recorded) nil)))
+          ;; Act
+          (agent-repl-host-register conn "/tmp/ws-1" #'ignore)
+          (agent-repl-host-on-link-up conn))
+        ;; Assert
+        (should (equal recorded '(("/tmp/ws-1" :failed "boom") ("/tmp/ws-1" :failed "boom"))))))))

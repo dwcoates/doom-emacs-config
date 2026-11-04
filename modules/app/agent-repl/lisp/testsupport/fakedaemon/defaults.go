@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"path/filepath"
 
+	workspacev1 "agentrepl/proto/workspace/v1"
+
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 )
@@ -162,6 +164,24 @@ func specializeDefault(method string, req, out proto.Message) error {
 			return fmt.Errorf("RegisterWorkspace: %w", err)
 		}
 		return setWorkspaceRef(success, "workspace", workspaceID(dir), dir)
+	case "RegisterWorkspaces":
+		// Every dir is answered as RegisterWorkspace answers it, in request
+		// order: registered, with the id its cleaned dir always mints.
+		batch, ok := req.(*agentreplv1.RegisterWorkspacesRequest)
+		if !ok {
+			return fmt.Errorf("RegisterWorkspaces: request is %T", req)
+		}
+		answer := out.(*agentreplv1.RegisterWorkspacesResponse)
+		for _, dir := range batch.GetDirs() {
+			cleaned := filepath.Clean(dir)
+			answer.Outcomes = append(answer.Outcomes, &agentreplv1.RegisterWorkspacesOutcome{
+				Dir: dir,
+				Outcome: &agentreplv1.RegisterWorkspacesOutcome_Registered{Registered: &agentreplv1.RegisterWorkspaceSuccess{
+					Workspace: &workspacev1.WorkspaceRef{Id: workspaceID(cleaned), Dir: cleaned},
+				}},
+			})
+		}
+		return nil
 	case "RegisterRepository":
 		// RegisterRepository is IDEMPOTENT BY THE RESOLVED DIR, and the fake
 		// has no git: the path IS the repository here, cleaned, so the same

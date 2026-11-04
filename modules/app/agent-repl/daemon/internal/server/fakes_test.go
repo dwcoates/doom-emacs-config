@@ -439,6 +439,10 @@ type fakeVerbs struct {
 	createThread    wsm.Workspace
 	createThreadErr error
 	threadQuestions []string
+	// registerAllDirs records every dir list RegisterAll was handed, and
+	// registerAllAnswers is what it answers.
+	registerAllDirs    [][]string
+	registerAllAnswers []workspace.Registered
 	// registeredPaths records every RegisterRepository path the verb received.
 	registeredPaths []string
 	// arrangements records every ArrangeSidebar verb call, spelled
@@ -816,6 +820,12 @@ func (f *fakeVerbs) SetName(_ context.Context, _ ids.WorkspaceID, name string) (
 		return "", f.setNameErr
 	}
 	return name, nil
+}
+
+// RegisterAll answers registerAllAnswers, recording the dirs it was handed.
+func (f *fakeVerbs) RegisterAll(_ context.Context, dirs []string) []workspace.Registered {
+	f.registerAllDirs = append(f.registerAllDirs, dirs)
+	return f.registerAllAnswers
 }
 
 func (f *fakeVerbs) RegisterRepository(_ context.Context, path string) (workspace.RegisteredRepository, error) {

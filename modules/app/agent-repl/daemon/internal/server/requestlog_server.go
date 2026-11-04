@@ -579,6 +579,13 @@ func (s *requestLoggingServer) RegisterWorkspace(
 	return serveUnary(s, ctx, "RegisterWorkspace", req, s.server.RegisterWorkspace)
 }
 
+func (s *requestLoggingServer) RegisterWorkspaces(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.RegisterWorkspacesRequest],
+) (*connect.Response[agentreplv1.RegisterWorkspacesResponse], error) {
+	return serveUnary(s, ctx, "RegisterWorkspaces", req, s.server.RegisterWorkspaces)
+}
+
 func (s *requestLoggingServer) RegisterRepository(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.RegisterRepositoryRequest],

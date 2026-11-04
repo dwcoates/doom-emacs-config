@@ -1584,6 +1584,24 @@ accessor would not reach the code under test."
       ;; Act / Assert
       (should-error (agent-repl-frontend-webview-url "alpha")))))
 
+(ert-deftest agent-repl-test-frontend-url-of-a-detached-workspace-names-the-live-daemon ()
+  "A detached workspace\='s page loads from the live daemon its walk re-attaches to.
+2026-11-03: every switch to a detached workspace recorded `no connection'
+and loaded no page."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl-host--by-name (make-hash-table :test 'equal))
+          (live (agent-repl-connect-connection-create :address "127.0.0.1:50074"))
+          (process-environment
+           (append '("AGENT_REPL_LOG_LEVEL" "AGENT_REPL_LOG_LEVEL_UNTIL") process-environment)))
+      (agent-repl-host--put "alpha" :detached t)
+      (cl-letf (((symbol-function 'agent-repl-host-ref) (lambda (_ws) '(:id "ws-1" :dir "/w")))
+                ((symbol-function 'agent-repl-host-conn) (lambda (_ws) nil))
+                ((symbol-function 'agent-repl-link-live) (lambda () live)))
+        ;; Act / Assert
+        (should (equal (agent-repl-frontend-webview-url "alpha")
+                       "http://ws-ws-1.localhost:50074/?workspace=ws-1&dir=%2Fw&log_level=info"))))))
+
 ;;;; ---- Reloading the webview -------------------------------------------
 
 (ert-deftest agent-repl-test-frontend-reload-asks-the-host-to-reload-the-page ()

@@ -66,6 +66,9 @@ would abort the very branch a test is asserting."
   '(("RegisterWorkspace" agent-repl-rpc-register-workspace
      agent-repl-wire-encode-register-workspace-request
      agent-repl-wire-decode-register-workspace-response)
+    ("RegisterWorkspaces" agent-repl-rpc-register-workspaces
+     agent-repl-wire-encode-register-workspaces-request
+     agent-repl-wire-decode-register-workspaces-response)
     ("SelectWorkspace" agent-repl-rpc-select-workspace
      agent-repl-wire-encode-select-workspace-request
      agent-repl-wire-decode-select-workspace-response)

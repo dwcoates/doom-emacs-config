@@ -630,3 +630,31 @@ func TestEveryWebappStreamHandlerIsTheSharedOne(t *testing.T) {
 		t.Fatalf("handlers.go answers %d webapp streams through webappStreamNotMocked, want every one (at least 7)", shared)
 	}
 }
+
+func TestRegisterWorkspacesMintsEachDirAsRegisterWorkspaceWould(t *testing.T) {
+	// Arrange.
+	_, baseURL := newTestServer(t)
+	client := newTestClient(t, baseURL)
+	single, err := client.RegisterWorkspace(context.Background(),
+		connect.NewRequest(&agentreplv1.RegisterWorkspaceRequest{Dir: "/tmp/ws/one"}))
+	if err != nil {
+		t.Fatalf("RegisterWorkspace: %v", err)
+	}
+
+	// Act.
+	batch, err := client.RegisterWorkspaces(context.Background(),
+		connect.NewRequest(&agentreplv1.RegisterWorkspacesRequest{Dirs: []string{"/tmp/ws/./one", "/tmp/ws/two"}}))
+	if err != nil {
+		t.Fatalf("RegisterWorkspaces: %v", err)
+	}
+
+	// Assert: one outcome per dir, in order, echoing the dir, and the same id
+	// the single registration minted.
+	outcomes := batch.Msg.GetOutcomes()
+	if len(outcomes) != 2 || outcomes[0].GetDir() != "/tmp/ws/./one" || outcomes[1].GetDir() != "/tmp/ws/two" {
+		t.Fatalf("outcomes = %v, want one per dir in request order", outcomes)
+	}
+	if got, want := outcomes[0].GetRegistered().GetWorkspace().GetId(), single.Msg.GetSuccess().GetWorkspace().GetId(); got != want {
+		t.Fatalf("batch minted %q, want the single registration's %q", got, want)
+	}
+}

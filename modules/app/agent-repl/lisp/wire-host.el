@@ -41,6 +41,7 @@
 (declare-function agent-repl-wire--decode-string "wire-common")
 (declare-function agent-repl-wire--decode-required-string "wire-common")
 (declare-function agent-repl-wire--require-string "wire-common")
+(declare-function agent-repl-wire-decode-not-yet-adopted "wire-common" (message-name value))
 (declare-function agent-repl-wire--decoded "wire-common")
 (declare-function agent-repl-wire--encode-empty "wire-common")
 (declare-function agent-repl-wire--encode-oneof "wire-common")
@@ -1108,6 +1109,54 @@ arm this codec does not know is refused as an unknown field."
     (agent-repl-wire--decoded
      "RegisterWorkspaceResponse"
      (agent-repl-wire-decode-register-workspace-response-result object))))
+
+;;;; ---- RegisterWorkspaces ----
+
+(defun agent-repl-wire-encode-register-workspaces-request (value)
+  "Encode the RegisterWorkspacesRequest plist VALUE `(:dirs DIRS)'.
+DIRS is the list of every directory re-announced in one call, PATHS the
+daemon normalizes, in the order the answer\='s outcomes follow."
+  (let ((message "RegisterWorkspacesRequest"))
+    (agent-repl-wire--encoded
+     message
+     (list (cons 'dirs (agent-repl-wire--encode-repeated
+                        message 'dirs (plist-get value :dirs)
+                        (lambda (dir) (agent-repl-wire--encode-string message 'dirs dir))))))))
+
+(defun agent-repl-wire-decode-register-workspaces-failed (value)
+  "Decode VALUE as `RegisterWorkspacesFailed', a plist `(:cause TEXT)'.
+The registration broke on the daemon\='s side; TEXT is for the record."
+  (let ((object (agent-repl-wire--object "RegisterWorkspacesFailed" value)))
+    (agent-repl-wire--check-keys "RegisterWorkspacesFailed" object '(cause))
+    (list :cause (agent-repl-wire--decode-string "RegisterWorkspacesFailed" 'cause object))))
+
+(defun agent-repl-wire-decode-register-workspaces-outcome (value)
+  "Decode VALUE as `RegisterWorkspacesOutcome', `(:dir DIR :outcome ONEOF)'.
+DIR echoes the request; THE ARM IS THE OUTCOME (`:registered',
+`:refused' or `:failed'), and exactly one is set."
+  (let* ((message "RegisterWorkspacesOutcome")
+         (object (agent-repl-wire--object message value)))
+    (agent-repl-wire--check-keys "RegisterWorkspacesOutcome" object '(dir registered refused failed))
+    (agent-repl-wire--decoded
+     message
+     (list :dir (agent-repl-wire--decode-required-string message 'dir object)
+           :outcome (agent-repl-wire--decode-oneof
+                     message 'outcome object
+                     '((registered :registered agent-repl-wire-decode-register-workspace-success)
+                       (refused :refused agent-repl-wire-decode-register-workspace-error)
+                       (failed :failed agent-repl-wire-decode-register-workspaces-failed)))))))
+
+(defun agent-repl-wire-decode-register-workspaces-response (value)
+  "Decode VALUE as `RegisterWorkspacesResponse', `(:outcomes OUTCOMES)'.
+One outcome per requested dir, in request order; the batch itself has no
+failure arm, since every failure is one dir\='s."
+  (let ((object (agent-repl-wire--object "RegisterWorkspacesResponse" value)))
+    (agent-repl-wire--check-keys "RegisterWorkspacesResponse" object '(outcomes))
+    (agent-repl-wire--decoded
+     "RegisterWorkspacesResponse"
+     (list :outcomes (agent-repl-wire--decode-repeated
+                      "RegisterWorkspacesResponse" 'outcomes object
+                      #'agent-repl-wire-decode-register-workspaces-outcome)))))
 
 ;;;; ---- SelectWorkspace ----
 

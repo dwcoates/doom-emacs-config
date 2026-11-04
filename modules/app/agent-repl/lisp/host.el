@@ -63,6 +63,7 @@
 (declare-function agent-repl-connect-connection-alive-p "connect" (conn))
 
 (declare-function agent-repl-rpc-register-workspace "rpc" (conn request &rest keys))
+(declare-function agent-repl-rpc-register-workspaces "rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-select-workspace "rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-mark-workspace-viewed "rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-report-page-residency "rpc" (conn request &rest keys))
@@ -196,6 +197,34 @@ treats as having no connection."
         (if (and now (agent-repl-connect-connection-alive-p now))
             now
           (agent-repl-link-live))))))
+
+(defun agent-repl-host-detached-p (ws)
+  "Non-nil while WS has lost its daemon and no walk has re-attached it yet.
+Set by the walks that find WS without a daemon
+\(`agent-repl-host--follow-live-daemon', a failed registration) and
+cleared only by a finished walk (`agent-repl-host--reattached')."
+  (plist-get (agent-repl-host--entry ws) :detached))
+
+(defun agent-repl-host-page-conn (ws)
+  "Return the connection WS\='s page is loaded from, or nil.
+WS\='s own (`agent-repl-host-conn') while it has one.  A DETACHED WORKSPACE
+LOADS ITS PAGE FROM THE LIVE LINK (`agent-repl-link-live'), the daemon its
+pending walk is re-attaching it to: the ref\='s id is the durable one the
+registry keeps, so the page\='s URL there is the URL it has once the walk
+lands, and the walk\='s own reload (`agent-repl-host--register-settled')
+reloads it in place.  Regression, 2026-11-03: a switch to a detached
+workspace selected it and loaded no page, every switch recording
+`elisp.frontend.webview-url: no connection'.  Nil only when no link
+stands at all."
+  (or (agent-repl-host-conn ws)
+      (and (agent-repl-host-detached-p ws)
+           (let ((live (agent-repl-link-live)))
+             (when live
+               (agent-repl--info ws "elisp.host.page-conn-from-live-link ws=%s address=%S walk=%s"
+                                 ws (agent-repl-connect-connection-address live)
+                                 (if (plist-get (agent-repl-host--entry ws) :reattach)
+                                     "in-flight" "none")))
+             live))))
 
 (defun agent-repl-host-conn-or-primary (ws)
   "Return the connection a per-workspace call for WS goes out on, or nil.
@@ -437,26 +466,101 @@ there to say it."
      (lambda (response)
        (pcase (plist-get response :arm)
          (:success
-          (let ((ref (plist-get (plist-get response :value) :workspace)))
-            (agent-repl--info log-scope "elisp.host.registered dir=%S id=%S" dir
-                              (plist-get ref :id))
-            (funcall on-done ref)))
+          (funcall on-done (agent-repl-host--record-registration
+                            log-scope dir :registered
+                            (plist-get (plist-get response :value) :workspace))))
          (:error
           (if on-refused
               (progn
                 (agent-repl--info log-scope "elisp.host.register-refused dir=%S error=%S"
                                   dir (plist-get response :value))
                 (funcall on-refused (plist-get response :value)))
-            (agent-repl--error log-scope "elisp.host.register-refused dir=%S error=%S"
-                               dir (plist-get response :value))
-            (funcall on-done nil)))
+            (funcall on-done (agent-repl-host--record-registration
+                              log-scope dir :refused (plist-get response :value)))))
          (arm
           (agent-repl--error log-scope "elisp.host.register-unknown-arm dir=%S arm=%S" dir arm)
           (funcall on-done nil))))
      :on-failure
      (lambda (detail)
-       (agent-repl--error log-scope "elisp.host.register-failed dir=%S detail=%S" dir detail)
-       (funcall on-done nil)))))
+       (funcall on-done (agent-repl-host--record-registration log-scope dir :failed detail))))))
+
+(defun agent-repl-host--record-registration (scope dir arm value)
+  "Record on SCOPE how DIR\='s registration ended; answer its ref, or nil.
+ARM is `:registered' (VALUE the minted ref), `:refused' (VALUE the
+daemon\='s `RegisterWorkspaceError') or `:failed' (VALUE what broke).
+THE ONE RECORD of a registration\='s fate, a lone RegisterWorkspace
+\(`agent-repl-host-register') and each dir of a RegisterWorkspaces
+\(`agent-repl-host--outcome-ref') alike, so a reader asks for one
+registration\='s outcome the same way however it was sent."
+  (pcase arm
+    (:registered
+     (agent-repl--info scope "elisp.host.registered dir=%S id=%S" dir (plist-get value :id))
+     value)
+    (:refused
+     (agent-repl--error scope "elisp.host.register-refused dir=%S error=%S" dir value)
+     nil)
+    (:failed
+     (agent-repl--error scope "elisp.host.register-failed dir=%S detail=%S" dir value)
+     nil)
+    (_ (agent-repl--fatal scope "elisp.host.record-registration-unknown-arm dir=%S arm=%S"
+                          dir arm))))
+
+(defun agent-repl-host-register-all (conn dirs on-done)
+  "Register every dir of DIRS on CONN in ONE call; call ON-DONE with the outcomes.
+ON-DONE receives the decoded `RegisterWorkspacesOutcome' plists, one per
+dir in DIRS\=' order, or a list of nil, one per dir, when the call failed
+in transport (recorded here at ERROR).  Each outcome is read by
+`agent-repl-host--outcome-ref', which records it on its workspace.
+
+THE CALL ARMS NO UNARY TIMER.  The daemon registers the dirs one after
+another, so the answer\='s length scales with how many workspaces Emacs
+holds, and the 10s budget a single call has would be a bound on the
+workspace count rather than on a fault.  A dead daemon still ends it:
+the connection\='s close is a transport failure, and the link\='s down and
+up edges walk every workspace again.
+
+AN ANSWER THAT DOES NOT PAIR WITH DIRS IS A BROKEN CONTRACT, and fails
+hard: one outcome per dir, in order, each echoing its dir."
+  (let ((scope '(:agent-repl-central "a batched registration spans every workspace")))
+    (agent-repl--info scope "elisp.host.register-all dirs=%d address=%S"
+                      (length dirs) (agent-repl-connect-connection-address conn))
+    (agent-repl-rpc-register-workspaces
+     conn (list :dirs dirs)
+     :timeout :none
+     :on-response
+     (lambda (response)
+       (let ((outcomes (plist-get response :outcomes)))
+         (unless (and (= (length outcomes) (length dirs))
+                      (cl-every (lambda (outcome dir) (equal (plist-get outcome :dir) dir))
+                                outcomes dirs))
+           (agent-repl--fatal scope "elisp.host.register-all-unpaired dirs=%S outcomes=%S"
+                              dirs outcomes))
+         (agent-repl--info scope "elisp.host.registered-all dirs=%d" (length dirs))
+         (funcall on-done outcomes)))
+     :on-failure
+     (lambda (detail)
+       (agent-repl--error scope "elisp.host.register-all-failed dirs=%d address=%S detail=%S"
+                          (length dirs) (agent-repl-connect-connection-address conn) detail)
+       (funcall on-done (make-list (length dirs) nil))))))
+
+(defun agent-repl-host--outcome-ref (ws dir outcome)
+  "Return the ref OUTCOME registered WS\='s DIR as, or nil; record it on WS.
+OUTCOME is one `RegisterWorkspacesOutcome' plist, or nil when the batch
+failed in transport (already recorded by `agent-repl-host-register-all').
+The record is `agent-repl-host--record-registration\='s, a lone
+registration\='s own."
+  (let* ((arm (plist-get outcome :outcome))
+         (value (plist-get arm :value)))
+    (pcase (plist-get arm :arm)
+      ('nil nil)
+      (:registered
+       (agent-repl-host--record-registration ws dir :registered (plist-get value :workspace)))
+      (:refused
+       (agent-repl-host--record-registration ws dir :refused value))
+      (:failed
+       (agent-repl-host--record-registration ws dir :failed (plist-get value :cause)))
+      (other
+       (agent-repl--fatal ws "elisp.host.register-unknown-arm dir=%S arm=%S" dir other)))))
 
 (defconst agent-repl-host--handover-arms '(:transferring-away :not-yet-adopted)
   "Refusal arms that are HANDOVER NEWS rather than user-facing failures.
@@ -660,7 +764,14 @@ waiting, and is sent when the one in flight is answered.  Answers t when
 the selection was sent or queued, nil when it was not sent: WS has no ref
 yet (an unregistered workspace has no identity to select, and it is
 skipped), or there is no connection to send it on (it is recorded for the
-next link-up to re-assert, and settled `:standing-down')."
+next link-up to re-assert, and settled `:standing-down').
+
+A SELECTION OF A DETACHED WORKSPACE STARTS ITS WALK onto the live daemon
+\(`agent-repl-host--follow-live-daemon'), so a workspace the user turns to
+is never left without one: selection is one of the three edges a failed
+walk is armed on (`agent-repl-host--register-settled')."
+  (when (agent-repl-host-detached-p ws)
+    (agent-repl-host--follow-live-daemon ws "select"))
   (if agent-repl-host--select-in-flight
       (let ((older agent-repl-host--select-queued))
         (setq agent-repl-host--select-queued (list ws on-settled keep-history))
@@ -1570,16 +1681,63 @@ EACH WALK TAKES A TOKEN, and only the newest walk for WS may finish: a
 promotion or link-up that starts a walk onto the live daemon supersedes
 one still waiting on a daemon that has since died, and the older walk\='s
 late answer is dropped rather than moving WS back."
-  (let ((token (setq agent-repl-host--reattach-tokens
-                     (1+ agent-repl-host--reattach-tokens))))
-    (agent-repl-host--put ws :reattach (list :token token :conn new :claim claim :trigger trigger))
-    (agent-repl--info ws "elisp.host.reattach ws=%s address=%S claim=%s trigger=%s"
-                      ws (agent-repl-connect-connection-address new) claim trigger)
+  (let ((token (agent-repl-host--begin-walk ws new claim trigger)))
     (pcase claim
       (:adopt (agent-repl-host--adopt-onto ws new token trigger))
       (:register (agent-repl-host--register-onto ws new token trigger on-settled))
       (_ (agent-repl--fatal ws "elisp.host.reattach-unknown-claim ws=%s claim=%S trigger=%s"
                             ws claim trigger)))))
+
+(defun agent-repl-host--begin-walk (ws new claim trigger)
+  "Record WS\='s newest reattach walk onto NEW by CLAIM, and answer its token.
+Every walk starts here, a lone one (`agent-repl-host--reattach') and each
+of a batch (`agent-repl-host--reattach-all') alike, so a walk is recorded
+and superseded one way.  TRIGGER is recorded."
+  (let ((token (setq agent-repl-host--reattach-tokens
+                     (1+ agent-repl-host--reattach-tokens))))
+    (agent-repl-host--put ws :reattach (list :token token :conn new :claim claim :trigger trigger))
+    (agent-repl--info ws "elisp.host.reattach ws=%s address=%S claim=%s trigger=%s"
+                      ws (agent-repl-connect-connection-address new) claim trigger)
+    token))
+
+(defun agent-repl-host--reattach-all (names new trigger &optional on-settled)
+  "Re-attach every workspace of NAMES onto NEW in ONE registration call.
+THE LINK EDGES\=' WALK.  A link that came up, or a promotion onto a
+successor, re-attaches every workspace Emacs holds, and as one
+RegisterWorkspace each that was dozens of concurrent calls racing a
+booting daemon\='s ONE state-database connection: each registration
+republished the roster, the calls queued behind each other\='s
+republications past the unary budget, and every workspace whose call
+timed out was left detached (2026-11-03, `elisp.host.link-up-register-failed'
+for nearly every workspace at 16:21:14).  So the batch registers every
+directory in one RegisterWorkspaces (`agent-repl-host-register-all'),
+which the daemon answers one dir after another with the roster
+republished once, and nothing about the outcome can be a contention
+timeout.
+
+Each workspace still walks as its own: it takes its own token
+\(`agent-repl-host--begin-walk'), so a newer walk supersedes it alone, and
+its own outcome finishes it (`agent-repl-host--register-settled').  A
+workspace with no directory takes the lone walk, which records why it
+cannot register.  ON-SETTLED is called once, after every outcome."
+  (let (walks)
+    (dolist (ws names)
+      (let ((dir (agent-repl--ws-get ws :project-dir)))
+        (if dir
+            (push (list ws dir (agent-repl-host--begin-walk ws new :register trigger)) walks)
+          (agent-repl-host--reattach ws new :register trigger))))
+    (setq walks (nreverse walks))
+    (if (null walks)
+        (when on-settled (funcall on-settled))
+      (agent-repl-host-register-all
+       new (mapcar #'cadr walks)
+       (lambda (outcomes)
+         (cl-loop for (ws dir token) in walks
+                  for outcome in outcomes
+                  do (agent-repl-host--register-settled
+                      ws new token trigger dir
+                      (agent-repl-host--outcome-ref ws dir outcome)))
+         (when on-settled (funcall on-settled)))))))
 
 (defun agent-repl-host-adopting-p (ws)
   "Non-nil while WS\='s reattach walk is an adopt still waiting on its answer.
@@ -1624,10 +1782,9 @@ daemon that died, took it over at a promotion, or is a fresh daemon after
 an outage.  On success the walk finishes (`agent-repl-host--reattached')
 and the webview is reloaded AFTER the subscribe, because frontend.el
 derives the page URL from `agent-repl-host-conn' and the subscribe is what
-moved it.  A refusal or a transport failure leaves WS detached: the next
-link edge (`agent-repl-host-on-link-up', `agent-repl-host-on-link-promote')
-or the next call that finds its connection dead walks it again.  TRIGGER
-is recorded; ON-SETTLED is called once the walk has an outcome."
+moved it.  A refusal or a transport failure leaves WS detached with its
+next walk armed (`agent-repl-host--register-settled').  TRIGGER is recorded;
+ON-SETTLED is called once the walk has an outcome."
   (let ((dir (agent-repl--ws-get ws :project-dir))
         (settle (lambda () (when on-settled (funcall on-settled)))))
     (if (null dir)
@@ -1638,23 +1795,43 @@ is recorded; ON-SETTLED is called once the walk has an outcome."
       (agent-repl-host-register
        new dir
        (lambda (ref)
-         (cond
-          ((not (agent-repl-host--reattach-current-p ws token))
-           (agent-repl--log ws "elisp.host.reattach-superseded ws=%s trigger=%s" ws trigger))
-          ;; THE SLUG NAMES THE TRIGGER (`elisp.host.link-up-register-failed',
-          ;; `elisp.host.stream-lost-webview-repointed', ...), a closed
-          ;; vocabulary, so a reader can ask for one edge's walks alone.
-          ((null ref)
-           (agent-repl-host--put ws :reattach nil)
-           (agent-repl--error ws (format "elisp.host.%s-register-failed ws=%%s dir=%%S address=%%S" trigger)
-                              ws dir (agent-repl-connect-connection-address new)))
-          (t
-           (agent-repl-host--reattached ws new ref trigger)
-           (agent-repl-frontend-reload-webview ws)
-           (agent-repl--info ws (format "elisp.host.%s-webview-repointed ws=%%s address=%%S" trigger)
-                             ws (agent-repl-connect-connection-address new))))
+         (agent-repl-host--register-settled ws new token trigger dir ref)
          (funcall settle))
        ws))))
+
+(defun agent-repl-host--register-settled (ws new token trigger dir ref)
+  "Finish WS\='s `:register' walk TOKEN onto NEW, which answered DIR with REF.
+REF nil is a registration that did not land (a refusal, a fault, a
+transport failure), already recorded by whoever read it.  Shared by the
+lone walk (`agent-repl-host--register-onto') and each workspace of a
+batch (`agent-repl-host--reattach-all').
+
+A WALK THAT FAILED LEAVES WS DETACHED WITH ITS NEXT WALK ARMED.  WS is
+marked `:detached', and every `:detached' workspace is walked again by
+each of three edges it is certain to meet before it is used: the next
+link-up (`agent-repl-host-on-link-up'), the next promotion
+\(`agent-repl-host-on-link-promote') and its own selection
+\(`agent-repl-host-select').  Regression, 2026-11-03: a failed walk
+cleared its walk and left nothing armed, and seven workspaces stayed
+severed until a hand-triggered walk."
+  (cond
+   ((not (agent-repl-host--reattach-current-p ws token))
+    (agent-repl--log ws "elisp.host.reattach-superseded ws=%s trigger=%s" ws trigger))
+   ;; THE SLUG NAMES THE TRIGGER (`elisp.host.link-up-register-failed',
+   ;; `elisp.host.stream-lost-webview-repointed', ...), a closed
+   ;; vocabulary, so a reader can ask for one edge's walks alone.
+   ((null ref)
+    (agent-repl-host--put ws :reattach nil)
+    (agent-repl-host--put ws :detached t)
+    (agent-repl--error ws (format "elisp.host.%s-register-failed ws=%%s dir=%%S address=%%S" trigger)
+                       ws dir (agent-repl-connect-connection-address new))
+    (agent-repl--info ws "elisp.host.reattach-armed ws=%s trigger=%s edges=link-up,promotion,select"
+                      ws trigger))
+   (t
+    (agent-repl-host--reattached ws new ref trigger)
+    (agent-repl-frontend-reload-webview ws)
+    (agent-repl--info ws (format "elisp.host.%s-webview-repointed ws=%%s address=%%S" trigger)
+                      ws (agent-repl-connect-connection-address new)))))
 
 (defun agent-repl-host--follow-live-daemon (ws trigger)
   "Re-attach WS, which lost its daemon, to the LIVE one -- or wait for it.
@@ -2249,35 +2426,25 @@ nothing."
          ;; pseudo perspective, so this walk cannot see one.
          (names (agent-repl--live-ws-names))
          (wanted (agent-repl-host--selected-dir))
-         (eligible (seq-filter (lambda (ws) (agent-repl--ws-get ws :project-dir)) names))
-         (outstanding (length eligible))
-         (settle (lambda ()
-                   (setq outstanding (1- outstanding))
-                   ;; EXACTLY zero, once: a register callback that answers
-                   ;; synchronously walks this counter down past every
-                   ;; workspace, and a re-assertion fired twice would select
-                   ;; twice for one relink.
-                   (when (zerop outstanding)
-                     (agent-repl-host--reassert-selection wanted)))))
+         (eligible (seq-filter (lambda (ws) (agent-repl--ws-get ws :project-dir)) names)))
     (setq agent-repl-host-reselect-pending wanted)
     (agent-repl--info '(:agent-repl-central "link recovery spans every workspace")
                       "elisp.host.link-up workspaces=%d selection=%S"
                       (length names) wanted)
     (dolist (ws names)
-      (let ((dir (agent-repl--ws-get ws :project-dir)))
-        (if (null dir)
-            ;; A name with no registered project directory owns no durable
-            ;; workspace sink.  This refusal belongs to process-wide link
-            ;; repair; preserve the candidate name in the record body.
-            (agent-repl--warn '(:agent-repl-central
-                                "a link-repair candidate without a directory owns no sink")
-                              "elisp.host.link-up-skipped ws=%s reason=no-dir" ws)
-          ;; THE ONE REATTACH PATH, the same walk a lost stream takes.
-          (agent-repl-host--reattach ws conn :register "link-up" settle))))
-    ;; Nothing to wait for: no workspace had a dir to re-register, so the
-    ;; selection is settled here rather than in a callback that never runs.
-    (when (null eligible)
-      (agent-repl-host--reassert-selection wanted))))
+      (unless (agent-repl--ws-get ws :project-dir)
+        ;; A name with no registered project directory owns no durable
+        ;; workspace sink.  This refusal belongs to process-wide link
+        ;; repair; preserve the candidate name in the record body.
+        (agent-repl--warn '(:agent-repl-central
+                            "a link-repair candidate without a directory owns no sink")
+                          "elisp.host.link-up-skipped ws=%s reason=no-dir" ws)))
+    ;; ONE BATCHED WALK for every workspace (`agent-repl-host--reattach-all'),
+    ;; and the selection is re-asserted once, after every outcome -- at
+    ;; once when no workspace had a dir to re-register.
+    (agent-repl-host--reattach-all
+     eligible conn "link-up"
+     (lambda () (agent-repl-host--reassert-selection wanted)))))
 
 (defun agent-repl-host-on-link-down (conn)
   "Forget the streams CONN carried, keeping every workspace's last state.
@@ -2312,7 +2479,8 @@ without transferring a workspace -- measured 2026-09-27: a restart that
 ran in the transfer\='s place, and a daemon that exited with the workspace
 still its own -- and such a workspace is still on OLD, whose connection
 this promotion is about to close.  Each one, and each one already
-detached, is walked onto NEW through the one reattach path.  Runs from
+detached, is walked onto NEW in one batched registration
+\(`agent-repl-host--reattach-all').  Runs from
 `agent-repl-link-promote-functions', BEFORE OLD is closed."
   (let (left)
     (maphash (lambda (ws entry)
@@ -2323,8 +2491,7 @@ detached, is walked onto NEW through the one reattach path.  Runs from
     (agent-repl--info '(:agent-repl-central "link promotion spans every workspace")
                       "elisp.host.link-promote left-behind=%d address=%S"
                       (length left) (agent-repl-connect-connection-address new))
-    (dolist (ws (nreverse left))
-      (agent-repl-host--reattach ws new :register "promotion"))))
+    (agent-repl-host--reattach-all (nreverse left) new "promotion")))
 
 ;; A TORN-DOWN WORKSPACE LEAVES NOTHING BEHIND HERE.  Every teardown of a
 ;; tab tombstones it through `agent-repl--ws-del', so that is where its host
