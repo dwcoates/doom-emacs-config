@@ -609,6 +609,7 @@ func TestALocalMergeIntoAParentWorktreeRunsNoDeployHook(t *testing.T) {
 	parent := mergeCreateChild(t, d, repoRef, "sibling7a-parent", "the parent work", nil)
 
 	childResp, err := d.Client().CreateWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.CreateWorkspaceRequest{
+		Originator:    &agentreplv1.WorkspaceOriginator{Originator: &agentreplv1.WorkspaceOriginator_UserOrWorkspace{UserOrWorkspace: &agentreplv1.WorkspaceOriginatorUserOrWorkspace{}}},
 		Repository:    repoRef,
 		Requester:     harness.User(),
 		ContextOrigin: harness.Fresh(),
@@ -669,6 +670,7 @@ func TestAHooksOnlyDeployNeverTriggersTheRollout(t *testing.T) {
 	d := harness.StartDaemon(t, harness.Opts{})
 	repository := createRepositoryRef(t, d, repo)
 	resp, err := d.Client().CreateWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.CreateWorkspaceRequest{
+		Originator:    &agentreplv1.WorkspaceOriginator{Originator: &agentreplv1.WorkspaceOriginator_UserOrWorkspace{UserOrWorkspace: &agentreplv1.WorkspaceOriginatorUserOrWorkspace{}}},
 		Repository:    repository,
 		Requester:     harness.User(),
 		ContextOrigin: harness.Fresh(),
@@ -1177,6 +1179,7 @@ func mergeFindRepoKey(r *frontendv1.WorkspaceRoster, dir string) *workspacev1.Re
 func mergeCreateChild(t *testing.T, d *harness.Daemon, repoRef *workspacev1.RepositoryRef, name, prompt string, hooks *agentreplv1.CreateWorkspaceDeployHooks) *fixture {
 	t.Helper()
 	resp, err := d.Client().CreateWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.CreateWorkspaceRequest{
+		Originator:    &agentreplv1.WorkspaceOriginator{Originator: &agentreplv1.WorkspaceOriginator_UserOrWorkspace{UserOrWorkspace: &agentreplv1.WorkspaceOriginatorUserOrWorkspace{}}},
 		Repository:    repoRef,
 		Requester:     harness.User(),
 		ContextOrigin: harness.Fresh(),

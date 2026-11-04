@@ -146,11 +146,11 @@ refusals, (6) the announcing link relation, (7) the finish-hook prompt origin.
 
 ### 5. Two create refusals
 
-- `CreateWorkspaceError.lifecycle_config_invalid` (51, `LifecycleConfigInvalid`):
+- `CreateWorkspaceError.lifecycle_config_invalid` (52, `LifecycleConfigInvalid`):
   the repository's config is unusable when the create reads it for its
   creation stage. A MISSING config is no refusal at create: the stage then
   runs only the built-in defaults.
-- `CreateWorkspaceError.creation_hook_failed` (52,
+- `CreateWorkspaceError.creation_hook_failed` (53,
   `CreateWorkspaceCreationHookFailed`: the hook's account and its log path): a
   creation script hook failed. The create is undone (worktree, branch and
   registration removed) and the failure is reported to the repository's main
@@ -210,3 +210,5 @@ refusals, (6) the announcing link relation, (7) the finish-hook prompt origin.
   `slack-origin-pr-posts` landed layout 100 first; layout 102
   (`drop_workspace_slack_posts`, BREAKING, a stop-then-start deploy) drops
   what layout 100 added, with the posts that wrote it.
+- The two create refusals are tags 52 and 53: `name_branch_exists` landed as
+  51 first.
