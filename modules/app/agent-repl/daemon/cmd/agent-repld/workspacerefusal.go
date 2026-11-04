@@ -44,7 +44,7 @@ func describeFinishRefusal(ws string, e *agentreplv1.FinishWorkspaceError) (stri
 	case *agentreplv1.FinishWorkspaceError_VersionIncrementUnexpected:
 		return fmt.Sprintf("%s does not land on a versioned main branch; finish it again without -version-part or -changelog-line", ws), nil
 	case *agentreplv1.FinishWorkspaceError_HasOpenChildren:
-		return fmt.Sprintf("%s has %d open children; resolve and close each before finishing it", ws, len(r.HasOpenChildren.GetChildren())), nil
+		return fmt.Sprintf("%s has %d open children; resolve and close each before finishing it", ws, len(r.HasOpenChildren.Children)), nil
 	case *agentreplv1.FinishWorkspaceError_OwnerLands:
 		return fmt.Sprintf("%s is landed by its owner %s, not by itself", ws, r.OwnerLands.GetOwner().GetDir()), nil
 	case *agentreplv1.FinishWorkspaceError_RequesterMayNotLand:
