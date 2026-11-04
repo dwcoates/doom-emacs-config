@@ -5649,3 +5649,57 @@ no walk."
         (should (equal (agent-repl-test-host--registered-dirs live) '("/tmp/ws-1")))
         (should (equal (cdr (assq :reload agent-repl-test-host--effects)) "ws-1"))
         (should (equal (cdr (assq :reload-conn agent-repl-test-host--effects)) live))))))
+
+;;;; ---- The one record of a registration's fate ----
+
+(ert-deftest agent-repl-test-host-record-registration-answers-a-registered-ref ()
+  "A registered dir is recorded at INFO with its id, and its ref answered."
+  (agent-repl-test-host--with-harness
+    ;; Act
+    (let ((ref (agent-repl-host--record-registration nil "/w" :registered '(:id "ws-7" :dir "/w"))))
+      ;; Assert
+      (should (equal ref '(:id "ws-7" :dir "/w")))
+      (should (agent-repl-test-host--logged-p :info "elisp.host.registered dir=\"/w\" id=\"ws-7\"")))))
+
+(ert-deftest agent-repl-test-host-record-registration-records-a-refusal-and-answers-nil ()
+  "A refused dir is recorded at ERROR with the refusal, and answers no ref."
+  (agent-repl-test-host--with-harness
+    ;; Act / Assert
+    (should-not (agent-repl-host--record-registration nil "/w" :refused '(:cause (:arm :not-a-worktree))))
+    (should (agent-repl-test-host--logged-p :error "elisp.host.register-refused dir=\"/w\" error="))))
+
+(ert-deftest agent-repl-test-host-record-registration-records-a-failure-and-answers-nil ()
+  "A dir whose registration broke is recorded at ERROR with what broke."
+  (agent-repl-test-host--with-harness
+    ;; Act / Assert
+    (should-not (agent-repl-host--record-registration nil "/w" :failed "git broke"))
+    (should (agent-repl-test-host--logged-p :error "elisp.host.register-failed dir=\"/w\" detail=\"git broke\""))))
+
+(ert-deftest agent-repl-test-host-record-registration-fails-hard-on-an-unknown-arm ()
+  "An arm the recorder does not know is a caller bug."
+  (agent-repl-test-host--with-harness
+    (let (fatals)
+      (cl-letf (((symbol-function 'agent-repl--fatal) (agent-repl-test--fatal-into fatals)))
+        ;; Act / Assert
+        (should-error (agent-repl-host--record-registration nil "/w" :teleported nil))
+        (should (string-match-p "record-registration-unknown-arm" (car fatals)))))))
+
+(ert-deftest agent-repl-test-host-lone-and-batched-registrations-share-one-record ()
+  "A lone register and a batch record a failed dir through the one recorder."
+  (agent-repl-test-host--with-harness
+    (agent-repl-test-host--with-dirs '("ws-1")
+      ;; Arrange
+      (let ((conn (agent-repl-connect-open "127.0.0.1:9001"))
+            recorded)
+        (setq agent-repl-test-host--register-answer
+              (list :failure "boom")
+              agent-repl-test-host--register-all-answer
+              (list :response (list :outcomes (list (list :dir "/tmp/ws-1"
+                                                          :outcome (list :arm :failed :value '(:cause "boom")))))))
+        (cl-letf (((symbol-function 'agent-repl-host--record-registration)
+                   (lambda (_scope dir arm value) (push (list dir arm value) recorded) nil)))
+          ;; Act
+          (agent-repl-host-register conn "/tmp/ws-1" #'ignore)
+          (agent-repl-host-on-link-up conn))
+        ;; Assert
+        (should (equal recorded '(("/tmp/ws-1" :failed "boom") ("/tmp/ws-1" :failed "boom"))))))))

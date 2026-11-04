@@ -466,26 +466,44 @@ there to say it."
      (lambda (response)
        (pcase (plist-get response :arm)
          (:success
-          (let ((ref (plist-get (plist-get response :value) :workspace)))
-            (agent-repl--info log-scope "elisp.host.registered dir=%S id=%S" dir
-                              (plist-get ref :id))
-            (funcall on-done ref)))
+          (funcall on-done (agent-repl-host--record-registration
+                            log-scope dir :registered
+                            (plist-get (plist-get response :value) :workspace))))
          (:error
           (if on-refused
               (progn
                 (agent-repl--info log-scope "elisp.host.register-refused dir=%S error=%S"
                                   dir (plist-get response :value))
                 (funcall on-refused (plist-get response :value)))
-            (agent-repl--error log-scope "elisp.host.register-refused dir=%S error=%S"
-                               dir (plist-get response :value))
-            (funcall on-done nil)))
+            (funcall on-done (agent-repl-host--record-registration
+                              log-scope dir :refused (plist-get response :value)))))
          (arm
           (agent-repl--error log-scope "elisp.host.register-unknown-arm dir=%S arm=%S" dir arm)
           (funcall on-done nil))))
      :on-failure
      (lambda (detail)
-       (agent-repl--error log-scope "elisp.host.register-failed dir=%S detail=%S" dir detail)
-       (funcall on-done nil)))))
+       (funcall on-done (agent-repl-host--record-registration log-scope dir :failed detail))))))
+
+(defun agent-repl-host--record-registration (scope dir arm value)
+  "Record on SCOPE how DIR\='s registration ended; answer its ref, or nil.
+ARM is `:registered' (VALUE the minted ref), `:refused' (VALUE the
+daemon\='s `RegisterWorkspaceError') or `:failed' (VALUE what broke).
+THE ONE RECORD of a registration\='s fate, a lone RegisterWorkspace
+\(`agent-repl-host-register') and each dir of a RegisterWorkspaces
+\(`agent-repl-host--outcome-ref') alike, so a reader asks for one
+registration\='s outcome the same way however it was sent."
+  (pcase arm
+    (:registered
+     (agent-repl--info scope "elisp.host.registered dir=%S id=%S" dir (plist-get value :id))
+     value)
+    (:refused
+     (agent-repl--error scope "elisp.host.register-refused dir=%S error=%S" dir value)
+     nil)
+    (:failed
+     (agent-repl--error scope "elisp.host.register-failed dir=%S detail=%S" dir value)
+     nil)
+    (_ (agent-repl--fatal scope "elisp.host.record-registration-unknown-arm dir=%S arm=%S"
+                          dir arm))))
 
 (defun agent-repl-host-register-all (conn dirs on-done)
   "Register every dir of DIRS on CONN in ONE call; call ON-DONE with the outcomes.
@@ -529,22 +547,18 @@ hard: one outcome per dir, in order, each echoing its dir."
   "Return the ref OUTCOME registered WS\='s DIR as, or nil; record it on WS.
 OUTCOME is one `RegisterWorkspacesOutcome' plist, or nil when the batch
 failed in transport (already recorded by `agent-repl-host-register-all').
-The records are RegisterWorkspace\='s own (`agent-repl-host-register'), so a
-reader asks for one registration\='s fate the same way, lone or batched."
-  (let ((arm (plist-get outcome :outcome)))
+The record is `agent-repl-host--record-registration\='s, a lone
+registration\='s own."
+  (let* ((arm (plist-get outcome :outcome))
+         (value (plist-get arm :value)))
     (pcase (plist-get arm :arm)
       ('nil nil)
       (:registered
-       (let ((ref (plist-get (plist-get arm :value) :workspace)))
-         (agent-repl--info ws "elisp.host.registered dir=%S id=%S" dir (plist-get ref :id))
-         ref))
+       (agent-repl-host--record-registration ws dir :registered (plist-get value :workspace)))
       (:refused
-       (agent-repl--error ws "elisp.host.register-refused dir=%S error=%S" dir (plist-get arm :value))
-       nil)
+       (agent-repl-host--record-registration ws dir :refused value))
       (:failed
-       (agent-repl--error ws "elisp.host.register-failed dir=%S detail=%S"
-                          dir (plist-get (plist-get arm :value) :cause))
-       nil)
+       (agent-repl-host--record-registration ws dir :failed (plist-get value :cause)))
       (other
        (agent-repl--fatal ws "elisp.host.register-unknown-arm dir=%S arm=%S" dir other)))))
 
