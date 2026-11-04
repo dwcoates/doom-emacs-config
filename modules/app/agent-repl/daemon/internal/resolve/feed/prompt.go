@@ -412,6 +412,10 @@ func AuthorLabel(origin conversationv1.PromptOrigin) string {
 		return "Merge"
 	case conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_REVERT:
 		return "Merge revert"
+	case conversationv1.PromptOrigin_PROMPT_ORIGIN_FINISH_HOOK:
+		// The repository's finish-stage hook, sent before the deploy has a
+		// bubble to draw it in, so it is drawn in the feed under its own name.
+		return "Finish hook"
 	case conversationv1.PromptOrigin_PROMPT_ORIGIN_RESUME_AFTER_RESTART:
 		return "Resumed after restart"
 	case conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_QUEUE_NOTICE:

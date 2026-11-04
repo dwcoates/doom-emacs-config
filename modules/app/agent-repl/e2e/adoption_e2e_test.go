@@ -281,6 +281,7 @@ func adAwaitAnyTurnEnded(t *testing.T, w *World, ws *workspacev1.WorkspaceRef) {
 func adCreateAndFinishChild(t *testing.T, w *World, repoRef *workspacev1.RepositoryRef, name string) *workspacev1.WorkspaceRef {
 	t.Helper()
 	resp, err := w.Client().CreateWorkspace(w.Ctx(), connect.NewRequest(&agentreplv1.CreateWorkspaceRequest{
+		Originator:    &agentreplv1.WorkspaceOriginator{Originator: &agentreplv1.WorkspaceOriginator_UserOrWorkspace{UserOrWorkspace: &agentreplv1.WorkspaceOriginatorUserOrWorkspace{}}},
 		Repository:    repoRef,
 		Requester:     harness.User(),
 		ContextOrigin: harness.Fresh(),

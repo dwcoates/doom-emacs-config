@@ -244,6 +244,7 @@ var Suites = []Suite{
 	{Name: "store-reset-harness", Kind: Script, Path: "bin/test-store-reset.sh", Harness: true},
 	{Name: "requirements-harness", Kind: Script, Path: "bin/test-requirements.sh", Harness: true},
 	{Name: "push-release-harness", Kind: Script, Path: "bin/test-push-release.sh", Harness: true},
+	{Name: "slack-merged-reaction-harness", Kind: Script, Path: "bin/test-slack-merged-reaction.sh", Harness: true},
 	{Name: "worktrees-lib-harness", Kind: Script, Path: "bin/test-lib-worktrees.sh", Harness: true},
 	{Name: "fake-git-fixture-lib-harness", Kind: Script, Path: "bin/test-lib-fake-git-fixture.sh", Harness: true},
 	{Name: "harness-report-lib-harness", Kind: Script, Path: "bin/test-lib-harness-report.sh", Harness: true},
@@ -294,9 +295,9 @@ var Suites = []Suite{
 			"skills/", "bin/agent-repld",
 			// gitclient pins the markers the merge queue's hook spells.
 			"/.githooks/reference-transaction",
-			// deployconfig pins the repository's own deploy config to the
+			// lifecycleconfig pins the repository's own lifecycle config to the
 			// pipeline its queue runs, and to the scripts it names.
-			"/.agent-repl/", "bin/test-all.sh", "bin/deploy-landing.sh", "bin/push-release.sh",
+			"/.agent-repl/", "bin/test-all.sh", "bin/deploy-landing.sh", "bin/push-release.sh", "bin/hooks/",
 			// The daemon half of every mocked-vendor scenario
 			// (integration/scenariogoldens_test.go) reads the shim's goldens
 			// and keeps its own feed.json beside them.

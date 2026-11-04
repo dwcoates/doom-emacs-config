@@ -14,7 +14,7 @@ import (
 )
 
 // deploy_concurrent_test.go drives a repository whose deploy runs its leading
-// stages concurrently (repoconfig.v1.DeployConfig.concurrent), end to end:
+// stages concurrently (repoconfig.v1.LifecycleConfig.concurrent), end to end:
 // two deploys queued in one repository, each with a prompt deploy hook that
 // waits on something outside the daemon (the fake shim holds the turn open),
 // and a prompt post-deploy hook run one deploy at a time.
@@ -26,17 +26,20 @@ const concurrentDeploy = `pre_deploy: {}
 concurrent:
   through_deploy: {}
 deploy:
-  hook:
-    prompt:
-      text: open the pull request and wait for it to merge
-  runs_for:
-    any_target: {}
-post_deploy:
-  - hook:
+  user_or_workspace:
+    hook:
       prompt:
-        text: update the main checkout
+        text: open the pull request and wait for it to merge
     runs_for:
       any_target: {}
+post_deploy:
+  user_or_workspace:
+    hooks:
+      - hook:
+          prompt:
+            text: update the main checkout
+        runs_for:
+          any_target: {}
 `
 
 func TestConcurrentDeploysRunTheirDeployHooksTogetherAndPostDeployInQueueOrder(t *testing.T) {

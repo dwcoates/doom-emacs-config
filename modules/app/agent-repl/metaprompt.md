@@ -294,7 +294,7 @@
   - It is owned when the work made it, such as a pull request the workspace opened or a doc it wrote.
   - It is a reference when it exists apart from the work, such as the thread or ticket the task came from.
   - A pull request the workspace did not open is a reference, even one its work amends, such as an already merged one.
-  - The daemon posts every owned link into the Slack thread a workspace was created for (`/agent-repl-workspaces`), so a wrong ownership shows the thread the wrong things.
+  - An owned link may name the stored link it announces, such as a Slack post saying a pull request was created, which hooks read to find that post again.
   - The daemon follows an owned pull request, telling the workspace about every comment, review and finished check on it until it merges or closes.
 - Two kinds of link MUST always be stored, whatever else the menu holds.
   - A link the workspace was created to investigate or act on, such as a Slack thread, a Jira ticket, an issue, or a pull request to review, is stored before any other work on it begins.

@@ -42,12 +42,13 @@ type PullRequestAnchor interface {
 // first successful read tells what is already on the pull request. A url the
 // external browser would refuse to open is refused invalid_link, and a label
 // that is not two to eight words in one sentence invalid_label, before
-// anything is written. A stored OWNED link is posted into the Slack thread
-// the workspace was created for, once ever (slackorigin.go). It answers every
-// link the workspace then holds.
-func (v *verbs) SetLink(ctx context.Context, ws ids.WorkspaceID, url, label string, owned bool) ([]wsm.WorkspaceLink, error) {
-	fields := dlog.Context{"url": url, "label": label, "owned": owned}
-	links, err := v.changeLinks(ctx, ws, fields, "set a link", func(log dlog.Logger) ([]wsm.WorkspaceLink, error) {
+// anything is written. An owned link may name ANNOUNCES, a link the workspace
+// already holds that it announces (agentrepl.v1.WorkspaceLinkOwned.announces);
+// an announced url it does not hold is refused unknown_announced_link. It
+// answers every link the workspace then holds.
+func (v *verbs) SetLink(ctx context.Context, ws ids.WorkspaceID, url, label string, owned bool, announces string) ([]wsm.WorkspaceLink, error) {
+	fields := dlog.Context{"url": url, "label": label, "owned": owned, "announces": announces}
+	return v.changeLinks(ctx, ws, fields, "set a link", func(log dlog.Logger) ([]wsm.WorkspaceLink, error) {
 		if err := externalbrowser.Validate(url); err != nil {
 			return nil, refuseWith(log, rpcChangeWorkspaceLinks, ArmInvalidLink,
 				fmt.Sprintf("%q is not a link the external browser opens: %v", url, err), false,
@@ -58,7 +59,7 @@ func (v *verbs) SetLink(ctx context.Context, ws ids.WorkspaceID, url, label stri
 				fmt.Sprintf("%q is not a label the menu draws: %v", label, err), false,
 				map[string]any{"label": label, "reason": err.Error()})
 		}
-		set := wsm.LinkSet{URL: url, Label: label, Owned: owned}
+		set := wsm.LinkSet{URL: url, Label: label, Owned: owned, Announces: announces}
 		if pr, ok := prwatch.ParseURL(url); ok {
 			set.PullRequest = &pr
 			fields["pull_request"] = pr.String()
@@ -72,10 +73,6 @@ func (v *verbs) SetLink(ctx context.Context, ws ids.WorkspaceID, url, label stri
 		}
 		return v.deps.DB.SetWorkspaceLink(ctx, ws, set)
 	})
-	if err == nil && owned {
-		v.postOwnedLink(ctx, ws, url, label)
-	}
-	return links, err
 }
 
 // ownedSubscription answers the subscription an owned link to PR takes: nil
@@ -141,11 +138,15 @@ func (v *verbs) changeLinks(ctx context.Context, ws ids.WorkspaceID, fields dlog
 	}
 	links, err := change(log)
 	var unknown *wsm.UnknownLinkError
+	var unannounced *wsm.UnknownAnnouncedLinkError
 	_, refused := AsRefusal(err)
 	switch {
 	case errors.As(err, &unknown):
 		return nil, refuseWith(log, rpcChangeWorkspaceLinks, ArmUnknownLink,
 			fmt.Sprintf("the workspace holds no link %q", unknown.URL), false, map[string]any{"url": unknown.URL})
+	case errors.As(err, &unannounced):
+		return nil, refuseWith(log, rpcChangeWorkspaceLinks, ArmUnknownAnnouncedLink,
+			fmt.Sprintf("the workspace holds no link %q for this one to announce", unannounced.URL), false, map[string]any{"url": unannounced.URL})
 	case refused:
 		return nil, err
 	case err != nil:
@@ -238,6 +239,9 @@ func ownershipView(link wsm.WorkspaceLink) *agentreplv1.WorkspaceLinkOwnership {
 	view := LinkOwnershipView(link.Owned)
 	if owned := view.GetOwned(); owned != nil {
 		owned.Follow = followView(link)
+		if link.Announces != "" {
+			owned.Announces = &agentreplv1.WorkspaceLinkAnnouncement{Url: link.Announces}
+		}
 	}
 	return view
 }

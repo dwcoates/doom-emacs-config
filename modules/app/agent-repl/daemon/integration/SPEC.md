@@ -385,7 +385,7 @@ the vendor (`AGENT_REPL_FORBID_VENDOR_CALLS=1` in every process).
   `disconnected.severed` and the roster to `severed`; the daemon redials
   forever with backoff; the fake exiting flips to `dead` and stops redials
 
-### merge_test.go (fake git; each fixture repository commits a `.agent-repl/deploy.yaml`, hooks alone by default and agent-repl's own through `Repo.DeploysAsAgentRepl`)
+### merge_test.go (fake git; each fixture repository commits a `.agent-repl/lifecycle.yaml`, hooks alone by default and agent-repl's own through `Repo.DeploysAsAgentRepl`)
 - FinishWorkspace on a workspace without layout facts is refused pre-state
 - enqueue: queue tab row on the merge bubble's sub-feed, footer
   `merging.queued{position,depth}`, roster `merge_queued`; a second

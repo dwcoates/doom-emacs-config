@@ -28,6 +28,7 @@ import (
 	"agent-repld/internal/headless"
 	"agent-repld/internal/health"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/lifecycleconfig"
 	"agent-repld/internal/merge"
 	"agent-repld/internal/netstate"
 	"agent-repld/internal/promptqueue"
@@ -39,7 +40,6 @@ import (
 	"agent-repld/internal/resolve/topbar"
 	"agent-repld/internal/rollout"
 	"agent-repld/internal/sessionwatcher"
-	"agent-repld/internal/slackpost"
 	"agent-repld/internal/wsm"
 )
 
@@ -114,6 +114,10 @@ type CreateSpec struct {
 	// to act on (agentrepl.v1.CreateWorkspaceSlackOrigin), empty for a create
 	// no Slack message started. The request's validation parsed it.
 	SlackThread string
+	// Originator is who created the workspace (agentrepl.v1.WorkspaceOriginator),
+	// which decides which kind's hooks its stages run. REQUIRED: every creator
+	// states it, and the zero value is no kind.
+	Originator lifecycleconfig.Originator
 	// Model is the model the session starts under, empty for the vendor's
 	// default.
 	Model string
@@ -485,19 +489,7 @@ type Verbs interface {
 	// stored one (agentrepl.v1.ChangeWorkspaceLinksSet), subscribing the
 	// workspace to an owned pull request, answering every link the workspace
 	// then holds and republishing the summary's menu.
-	SetLink(ctx context.Context, ws ids.WorkspaceID, url, label string, owned bool) ([]wsm.WorkspaceLink, error)
-	// MergeEnded is told how a merge run in WS left the queue for good
-	// (merge.EndObserver). A workspace created for a Slack message posts a
-	// finish's FAILED deploy into that thread, with where to look.
-	MergeEnded(ctx context.Context, ws ids.WorkspaceID, out merge.DetachedOutcome)
-	// SummaryInstalled is told every summary a distillation installs
-	// (titlesynth.SummaryObserver). A workspace created for a Slack message
-	// posts its first summary into that thread as the opening.
-	SummaryInstalled(ctx context.Context, ws ids.WorkspaceID, title string)
-	// PullRequestMerged is told that a pull request WS follows merged
-	// (prwatch.MergeObserver). The message that posted it into the Slack
-	// thread WS was created for gets the :merged: reaction.
-	PullRequestMerged(ctx context.Context, ws ids.WorkspaceID, pr wsm.PullRequestKey)
+	SetLink(ctx context.Context, ws ids.WorkspaceID, url, label string, owned bool, announces string) ([]wsm.WorkspaceLink, error)
 	// RemoveLink removes one stored link, answering the rest.
 	RemoveLink(ctx context.Context, ws ids.WorkspaceID, url string) ([]wsm.WorkspaceLink, error)
 	// ShowLinks names exactly the links the summary's menu shows, answering
@@ -790,9 +782,15 @@ type Deps struct {
 	ColdGateAnswers ColdGateAnswerTelemetry
 	// Browser opens a clicked link in the pinned external browser.
 	Browser externalbrowser.Opener
-	// Slack posts into the Slack thread a workspace was created for, and
-	// reacts to its own posts there (slackorigin.go). Required.
-	Slack slackpost.Poster
+	// Lifecycle reads a repository's `.agent-repl/lifecycle.yaml` at every
+	// create, for its creation stage. nil means the real filesystem
+	// (lifecycleconfig.OnDisk).
+	Lifecycle lifecycleconfig.Files
+	// HookRunner runs a creation stage's script hooks. Required.
+	HookRunner merge.HookScriptRunner
+	// StateDir is the state root, among whose merge queue logs a creation
+	// script hook keeps its output (merge.LifecycleLogPath). Required.
+	StateDir string
 	// Headless is the daemon's own one-shot vendor run. A create that supplies
 	// no name asks it for one; nothing else in this package uses it. nil is a
 	// build with no naming call at all, which REFUSES an unnamed create rather
@@ -1226,8 +1224,10 @@ func New(deps Deps) (Verbs, error) {
 		return nil, missing("the hidden workspaces' cache keeper")
 	case deps.Summaries == nil:
 		return nil, missing("a summary restorer")
-	case deps.Slack == nil:
-		return nil, missing("a slack poster")
+	case deps.HookRunner == nil:
+		return nil, missing("a hook script runner")
+	case deps.StateDir == "":
+		return nil, missing("a state directory")
 	case deps.Cards == nil:
 		return nil, missing("a served-card store")
 	case deps.PromptsDir == "":
@@ -1255,6 +1255,9 @@ func New(deps Deps) (Verbs, error) {
 	}
 	if deps.Policy == nil {
 		deps.Policy = prompts.OnDisk{}
+	}
+	if deps.Lifecycle == nil {
+		deps.Lifecycle = lifecycleconfig.OnDisk{}
 	}
 	if deps.ReadEffortSettings == nil {
 		deps.ReadEffortSettings = claudesettings.ReadEffort

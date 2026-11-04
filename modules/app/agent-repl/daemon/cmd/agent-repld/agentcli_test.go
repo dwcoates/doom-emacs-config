@@ -467,6 +467,51 @@ func TestCreateSendsTheSlackOriginItNames(t *testing.T) {
 	}
 }
 
+func TestCreateStatesItsOriginator(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want *agentreplv1.WorkspaceOriginator
+	}{
+		{name: "the emoji-ack system says so", args: []string{"-originator", "emoji-ack", "-slack-thread", "https://w.slack.com/archives/C1/p1730000000123456"},
+			want: &agentreplv1.WorkspaceOriginator{Originator: &agentreplv1.WorkspaceOriginator_EmojiAck{EmojiAck: &agentreplv1.WorkspaceOriginatorEmojiAck{}}}},
+		{name: "unnamed is the user or a workspace", args: nil,
+			want: &agentreplv1.WorkspaceOriginator{Originator: &agentreplv1.WorkspaceOriginator_UserOrWorkspace{UserOrWorkspace: &agentreplv1.WorkspaceOriginatorUserOrWorkspace{}}}},
+		{name: "a slack thread alone is still the user or a workspace", args: []string{"-slack-thread", "https://w.slack.com/archives/C1/p1730000000123456"},
+			want: &agentreplv1.WorkspaceOriginator{Originator: &agentreplv1.WorkspaceOriginator_UserOrWorkspace{UserOrWorkspace: &agentreplv1.WorkspaceOriginatorUserOrWorkspace{}}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newCLIFixture()
+
+			// Act
+			code := f.run(workspaceNoun, append([]string{"create", "-repository", "here", "-relationship", "peer", "-context", "fresh"}, tt.args...)...)
+
+			// Assert
+			if code != exitSuccess {
+				t.Fatalf("exit %d, stderr %q", code, f.errOut.String())
+			}
+			if req := only[*agentreplv1.CreateWorkspaceRequest](t, f); !proto.Equal(req.GetOriginator(), tt.want) {
+				t.Fatalf("originator = %v, want %v", req.GetOriginator(), tt.want)
+			}
+		})
+	}
+}
+
+func TestCreateRefusesAnUnknownOriginator(t *testing.T) {
+	// Arrange
+	f := newCLIFixture()
+
+	// Act
+	code := f.run(workspaceNoun, "create", "-repository", "here", "-relationship", "peer", "-context", "fresh", "-originator", "emoji")
+
+	// Assert
+	if code != exitFailure || len(f.client.requests) != 0 || !strings.Contains(f.errOut.String(), "-originator is emoji-ack or user-or-workspace") {
+		t.Fatalf("exit %d, requests %v, stderr %q; want a usage failure naming the spellings", code, f.client.requests, f.errOut.String())
+	}
+}
+
 func TestCreateRefusesAnUnnamedChoice(t *testing.T) {
 	tests := []struct {
 		name string
@@ -837,6 +882,10 @@ func TestLinkSendsTheChange(t *testing.T) {
 		{name: "-url with -label and -reference sets a reference", args: []string{"-url", "https://example.com/t/3", "-label", "The tracking ticket", "-reference"},
 			want: &agentreplv1.ChangeWorkspaceLinksRequest{Change: &agentreplv1.ChangeWorkspaceLinksRequest_Set{
 				Set: &agentreplv1.ChangeWorkspaceLinksSet{Url: "https://example.com/t/3", Label: "The tracking ticket", Ownership: workspace.LinkOwnershipView(false)}}}},
+		{name: "-announces with -owned names the link it announces", args: []string{"-url", "https://w.slack.com/archives/C1/p1", "-label", "The pull request's announcement", "-owned", "-announces", "https://example.com/pr/3"},
+			want: &agentreplv1.ChangeWorkspaceLinksRequest{Change: &agentreplv1.ChangeWorkspaceLinksRequest_Set{
+				Set: &agentreplv1.ChangeWorkspaceLinksSet{Url: "https://w.slack.com/archives/C1/p1", Label: "The pull request's announcement", Ownership: &agentreplv1.WorkspaceLinkOwnership{
+					Ownership: &agentreplv1.WorkspaceLinkOwnership_Owned{Owned: &agentreplv1.WorkspaceLinkOwned{Announces: &agentreplv1.WorkspaceLinkAnnouncement{Url: "https://example.com/pr/3"}}}}}}}},
 		{name: "-remove removes one", args: []string{"-remove", "https://example.com/pr/3"},
 			want: &agentreplv1.ChangeWorkspaceLinksRequest{Change: &agentreplv1.ChangeWorkspaceLinksRequest_Remove{
 				Remove: &agentreplv1.ChangeWorkspaceLinksRemove{Url: "https://example.com/pr/3"}}}},
@@ -883,6 +932,8 @@ func TestLinkRefusesAMalformedChange(t *testing.T) {
 		{name: "an ownership beside a removal", args: []string{"-remove", "https://a", "-owned"}},
 		{name: "a label with no url", args: []string{"-label", "The design doc"}},
 		{name: "two changes at once", args: []string{"-remove", "https://a", "-clear"}},
+		{name: "a reference that announces", args: []string{"-url", "https://w.slack.com/archives/C1/p1", "-label", "The announcement", "-reference", "-announces", "https://example.com/pr/3"}},
+		{name: "an announcement beside a removal", args: []string{"-remove", "https://a", "-announces", "https://b"}},
 		{name: "a positional argument", args: []string{"-clear", "extra"}},
 	}
 	for _, tt := range tests {

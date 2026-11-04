@@ -4,13 +4,11 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
-	"time"
 
 	repoconfigv1 "agentrepl/proto/repoconfig/v1"
 
-	"agent-repld/internal/deployconfig"
 	"agent-repld/internal/dlog"
-	"agent-repld/internal/scriptrunner"
+	"agent-repld/internal/lifecycleconfig"
 )
 
 // A repository's DEPLOY HOLD (agentrepl.v1.UpdateDeployHold) skips its
@@ -118,12 +116,13 @@ func (o *orchestrator) ReleaseDeploys(ctx context.Context, scope RepositoryScope
 		log.Warn(opReleaseDeploys, "released the repository's deploy stage, but its deploy config cannot be read; the skipped deploy hook is not run", withField(fields, "cause", err.Error()))
 		return release, nil
 	}
-	if cfg.GetDeploy() == nil || !deployconfig.RunsFor(cfg.GetDeploy(), true) {
-		release.Kind, release.Detail = ReleaseNoDeployHook, "the repository's deploy config has no deploy hook for its main branch"
+	if lifecycleconfig.DeployHook(cfg, lifecycleconfig.OriginatorUserOrWorkspace, true) == nil &&
+		lifecycleconfig.DeployHook(cfg, lifecycleconfig.OriginatorEmojiAck, true) == nil {
+		release.Kind, release.Detail = ReleaseNoDeployHook, "the repository's lifecycle config has no deploy hook for its main branch"
 		log.Info(opReleaseDeploys, "released the repository's deploy stage; its config has no deploy hook to run for the skipped deploys", fields)
 		return release, nil
 	}
-	script := cfg.GetDeploy().GetHook().GetScript()
+	script := lifecycleconfig.ReleaseScript(cfg)
 	if script == nil {
 		release.Kind = ReleasePromptNotRun
 		log.Info(opReleaseDeploys, "released the repository's deploy stage; its deploy hook is a prompt, which has no owner to run in now, so the skipped deploys are not deployed", fields)
@@ -136,65 +135,30 @@ func (o *orchestrator) ReleaseDeploys(ctx context.Context, scope RepositoryScope
 // deploys its hold skipped, with no owner: AGENT_REPL_CALLING_WORKSPACE and
 // AGENT_REPL_DEPLOY_LEDGER are unset, so a script that calls back into the
 // daemon names no deploy.
-func (o *orchestrator) runReleasedScript(ctx context.Context, repoDir string, script *repoconfigv1.DeployHookScript, release DeployRelease, fields dlog.Context) DeployRelease {
+func (o *orchestrator) runReleasedScript(ctx context.Context, repoDir string, script *repoconfigv1.HookScript, release DeployRelease, fields dlog.Context) DeployRelease {
 	log := o.deps.Log.Global()
 	release.Path = script.GetPath()
 	release.LogPath = filepath.Join(LogsDir(o.deps.StateDir), fmt.Sprintf("release-%d.log", o.deps.Now().UnixNano()))
 	fields["script"], fields["log"] = release.Path, release.LogPath
-	ran := o.runOwnerlessScript(ctx, repoDir, script, []string{EnvDeployStage + "=deploy"}, release.LogPath)
-	if ran.logErr != nil {
-		log.Error(opReleaseDeploys, "could not write the released deploy hook's log", withField(fields, "error", ran.logErr.Error()))
+	ran := RunKeptScript(ctx, o.deps.HookRunner, repoDir, script, []string{lifecycleconfig.EnvHookStage + "=" + lifecycleconfig.StageDeploy.Key()}, release.LogPath)
+	if ran.LogErr != nil {
+		log.Error(opReleaseDeploys, "could not write the released deploy hook's log", withField(fields, "error", ran.LogErr.Error()))
 	}
 	switch {
-	case ran.err != nil:
-		release.Kind, release.Detail = ReleaseScriptFailed, ran.failure(script)
-		log.Error(opReleaseDeploys, "the released deploy hook could not be run", withField(fields, "error", ran.err.Error()))
-	case ran.run.TimedOut:
-		release.Kind, release.Detail = ReleaseScriptFailed, ran.failure(script)
+	case ran.Err != nil:
+		release.Kind, release.Detail = ReleaseScriptFailed, ran.Failure(script)
+		log.Error(opReleaseDeploys, "the released deploy hook could not be run", withField(fields, "error", ran.Err.Error()))
+	case ran.Run.TimedOut:
+		release.Kind, release.Detail = ReleaseScriptFailed, ran.Failure(script)
 		log.Warn(opReleaseDeploys, "the released deploy hook ran past its timeout", fields)
-	case ran.run.ExitCode != 0:
-		release.Kind, release.Detail = ReleaseScriptFailed, ran.failure(script)
-		log.Warn(opReleaseDeploys, "the released deploy hook exited non-zero", withField(fields, "exit_code", ran.run.ExitCode))
+	case ran.Run.ExitCode != 0:
+		release.Kind, release.Detail = ReleaseScriptFailed, ran.Failure(script)
+		log.Warn(opReleaseDeploys, "the released deploy hook exited non-zero", withField(fields, "exit_code", ran.Run.ExitCode))
 	default:
 		release.Kind = ReleaseScriptRan
 		log.Info(opReleaseDeploys, "released the repository's deploy stage and ran its deploy hook once for the skipped deploys", fields)
 	}
 	return release
-}
-
-// ownerlessRun is how one script run with no deploy owner ended.
-type ownerlessRun struct {
-	// run is the script's run: its exit, its timeout and its output.
-	run scriptrunner.Run
-	// err is why the script could not be run at all; nil when it ran.
-	err error
-	// logErr is why its log could not be written; nil when it was.
-	logErr error
-}
-
-// failure is how the run failed, in the words a reader is told, or "" when the
-// script exited 0.
-func (r ownerlessRun) failure(script *repoconfigv1.DeployHookScript) string {
-	switch {
-	case r.err != nil:
-		return r.err.Error()
-	case r.run.TimedOut:
-		return fmt.Sprintf("it ran past its %ds timeout", script.GetTimeoutSeconds())
-	case r.run.ExitCode != 0:
-		return fmt.Sprintf("it exited %d", r.run.ExitCode)
-	}
-	return ""
-}
-
-// runOwnerlessScript runs a repository's SCRIPT once from repoDir, outside
-// any deploy run, bounded by its timeout and with ENV beside the daemon's own,
-// and keeps its whole output at logPath. EVERY SCRIPT RUN WITH NO OWNER (a
-// hold's release, a queue's drain) runs through it, so each is bounded, kept
-// and judged one way.
-func (o *orchestrator) runOwnerlessScript(ctx context.Context, repoDir string, script *repoconfigv1.DeployHookScript, env []string, logPath string) ownerlessRun {
-	run, err := o.deps.HookRunner.RunLinesWith(ctx, repoDir, []string{"bash", filepath.Join(repoDir, script.GetPath())},
-		scriptrunner.Options{Env: env, Timeout: time.Duration(script.GetTimeoutSeconds()) * time.Second}, nil)
-	return ownerlessRun{run: run, err: err, logErr: writeLog(logPath, run.Output)}
 }
 
 // recordInheritedHolds records, at boot, every repository whose deploy stage

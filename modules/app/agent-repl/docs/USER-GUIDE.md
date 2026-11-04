@@ -207,10 +207,10 @@ A workspace keeps every link that bears on its task, such as its pull request, t
   - `agent-repld workspace link WS -remove URL` removes one, and `-clear` removes them all.
   - Only `http` and `https` links are accepted.
 - `agent-repld workspace status WS` shows every link as `links`, with whether the menu shows it and whether it is owned.
-- A workspace created for a Slack message (`agent-repld workspace create ... -slack-thread URL`) is spoken for in that thread by agent-repl itself.
-  - Once the workspace is created, the thread gets a one-line reply that work began.
-  - Once a finish's deploy ends, the thread gets a reply saying whether it landed or failed, listing every owned link.
-  - The thread itself is stored among the links as a reference.
+- A workspace created for a Slack message (`agent-repld workspace create ... -slack-thread URL`) stores the thread among its links as a reference.
+  - What the thread is told is the repository's hooks' to say (`.agent-repl/lifecycle.yaml`), never agent-repl's own.
+  - A workspace the Slack emoji-ack reactions create (`-originator emoji-ack`) runs built-in hooks unless its repository replaces them: it says in the thread that work started, announces its pull request there, and reacts `:merged:` on that announcement once the pull request merges.
+- `agent-repld workspace link WS -url URL -label TEXT -owned -announces URL2` stores an owned link that announces URL2, another of the workspace's links, such as the Slack post announcing a pull request.
 - The links are kept across restarts.
 
 ### Pull requests a workspace owns
@@ -272,7 +272,7 @@ A rename changes the workspace's name and nothing else.
   - An async merge lands a named branch in a hidden merge workspace forked from yours, and your workspace stays free; the agent is told how it ended.
   - "Sync" and "in place" mean the same thing, and so do "async" and "detached".
 - **An agent finishes its own workspace (`agent-repld workspace finished here`, through `/agent-repl-merge-queue`) only when your workspace is done once it deploys.**
-  - What finishing does is the repository's own `.agent-repl/deploy.yaml`: for agent-repl, the branch lands on master and the runtime rolls out. A repository without the file refuses it (see `/agent-repl-workspaces`).
+  - What finishing does is the repository's own `.agent-repl/lifecycle.yaml`: for agent-repl, the branch lands on master and the runtime rolls out. A repository without the file refuses it (see `/agent-repl-workspaces`).
   - The workspace is marked a one-shot at once, so its tab and its sidebar row show the one-shot mark (a red-and-white target) while the agent keeps working.
   - When the turn ends, the workspace's branch merges in place, and the workspace closes once the merge lands.
   - Work left uncommitted when the turn ends fails the merge, and the workspace stays open.
@@ -596,7 +596,7 @@ The input window underlines misspelled words as you type.
 - It asks for the commission alone, and the daemon names the workspace.
   - `SPC TAB C-o` asks for the model too.
 - It is cut from the repository's primary branch and merges back into it.
-- What happens when the work is done is the repository's own deploy, in `.agent-repl/deploy.yaml` at its main checkout.
+- What happens when the work is done is the repository's own deploy, in `.agent-repl/lifecycle.yaml` at its main checkout.
   - agent-repl's deploy tests the branch, lands it on master one deploy at a time, and rolls out what landed.
 
 ## A one-shot that fixes the current workspace
@@ -626,7 +626,7 @@ The input window underlines misspelled words as you type.
   - It must be on the roster. If it is not, the command says so. Add it with `SPC TAB p`.
 - Otherwise it is an ordinary `SPC TAB o` one-shot.
   - `SPC TAB C-S-o` asks for the model too.
-- What happens when the work is done is explanation-engine's own deploy, in `.agent-repl/deploy.yaml` at its main checkout.
+- What happens when the work is done is explanation-engine's own deploy, in `.agent-repl/lifecycle.yaml` at its main checkout.
   - Its deploy hook is a prompt to the one-shot: open a pull request, and wait for it to merge on GitHub.
   - Its post-deploy hook then updates the main checkout.
 - explanation-engine's deploys run their pre-deploy and deploy stages concurrently.

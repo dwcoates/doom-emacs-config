@@ -10,6 +10,7 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	repoconfigv1 "agentrepl/proto/repoconfig/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"agent-repld/internal/workspace"
@@ -590,6 +591,25 @@ func TestEachRequestValidatorNamesTheFieldItRefusesWithTargetsAndSources(t *test
 			req.SlackOrigin = &agentreplv1.CreateWorkspaceSlackOrigin{ThreadUrl: "https://w.slack.com/archives/C1/p1730000000123456"}
 			return validateCreateWorkspaceRequest(req)
 		}, field: "slack_origin"},
+		{name: "create naming no originator", check: func() *connect.Error {
+			return validateCreateWorkspaceRequest(validCreate(func(r *agentreplv1.CreateWorkspaceRequest) { r.Originator = nil }))
+		}, field: "originator"},
+		{name: "create with an originator naming no arm", check: func() *connect.Error {
+			return validateCreateWorkspaceRequest(validCreate(func(r *agentreplv1.CreateWorkspaceRequest) { r.Originator = &agentreplv1.WorkspaceOriginator{} }))
+		}, field: "originator"},
+		{name: "an emoji-ack create naming no slack message", check: func() *connect.Error {
+			return validateCreateWorkspaceRequest(validCreate(func(r *agentreplv1.CreateWorkspaceRequest) { r.Originator = emojiAckOriginator() }))
+		}, field: "originator.emoji_ack"},
+		{name: "an emoji-ack async merge", check: func() *connect.Error {
+			req := validAsyncMerge(nil)
+			req.Originator = emojiAckOriginator()
+			return validateCreateWorkspaceRequest(req)
+		}, field: "originator.emoji_ack"},
+		{name: "create with a builtin deploy hook", check: func() *connect.Error {
+			return validateCreateWorkspaceRequest(validCreate(func(r *agentreplv1.CreateWorkspaceRequest) {
+				r.GetStandard().DeployHooks = &agentreplv1.CreateWorkspaceDeployHooks{PreDeploy: []*repoconfigv1.Hook{{Hook: &repoconfigv1.Hook_Builtin{Builtin: &repoconfigv1.HookBuiltIn{}}}}}
+			}))
+		}, field: "standard.deploy_hooks.pre_deploy[0]"},
 		{name: "create with a slack origin that links no message", check: func() *connect.Error {
 			return validateCreateWorkspaceRequest(validCreate(func(r *agentreplv1.CreateWorkspaceRequest) {
 				r.SlackOrigin = &agentreplv1.CreateWorkspaceSlackOrigin{ThreadUrl: "https://w.slack.com/archives/C1"}

@@ -5,13 +5,13 @@ import (
 	"errors"
 	"math"
 
-	"agent-repld/internal/deployconfig"
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/lifecycleconfig"
 	"agent-repld/internal/resolve/footer"
 	"agent-repld/internal/wsm"
 )
 
-// This file is a deploy's CONCURRENT STAGES (repoconfig.v1.DeployConfig
+// This file is a deploy's CONCURRENT STAGES (repoconfig.v1.LifecycleConfig
 // .concurrent): the leading run of stages that the deploys waiting in one
 // repository's queue run side by side, ahead of their turn, before each runs
 // the rest one at a time, in queue order.
@@ -30,7 +30,7 @@ import (
 // on the chain's own signal, closed under the orchestrator's mutex at every
 // change, so a promotion is never missed and nothing polls.
 //
-// A LOCAL MERGE IS NEVER CONCURRENT (deployconfig refuses the combination):
+// A LOCAL MERGE IS NEVER CONCURRENT (lifecycleconfig refuses the combination):
 // it lands on the target, which only the head moves. A config with a local
 // merge runs as it always has: its chain races (racesIn), within the window.
 
@@ -46,7 +46,7 @@ func (o *orchestrator) chainsIn(repo wsm.RepoKey, head *run) bool {
 func (r *run) concurrentStages() bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.target.cfg != nil && deployconfig.AnyConcurrent(r.target.cfg)
+	return r.target.cfg != nil && lifecycleconfig.AnyConcurrent(r.target.cfg)
 }
 
 // windowFor is how many runs the chain behind HEAD may hold: every deploy in
@@ -65,11 +65,11 @@ func (o *orchestrator) windowFor(head *run) int {
 // stage the config runs concurrently, and every stage of a config with no
 // concurrent stages, passes at once: a racing chain's members are held at the
 // landing (race.go), never here.
-func (r *run) awaitTurnFor(ctx context.Context, stage deployconfig.Stage) error {
+func (r *run) awaitTurnFor(ctx context.Context, stage lifecycleconfig.Stage) error {
 	r.mu.Lock()
 	cfg := r.target.cfg
 	r.mu.Unlock()
-	if cfg == nil || !deployconfig.AnyConcurrent(cfg) || deployconfig.Concurrent(cfg, stage) {
+	if cfg == nil || !lifecycleconfig.AnyConcurrent(cfg) || lifecycleconfig.Concurrent(cfg, stage) {
 		return nil
 	}
 	return r.awaitTurn(ctx)

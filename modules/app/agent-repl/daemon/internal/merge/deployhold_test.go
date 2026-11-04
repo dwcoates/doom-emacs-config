@@ -3,7 +3,6 @@ package merge
 import (
 	"context"
 	"errors"
-	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -12,9 +11,8 @@ import (
 
 	repoconfigv1 "agentrepl/proto/repoconfig/v1"
 
-	"agent-repld/internal/deployconfig"
 	"agent-repld/internal/dlog"
-	"agent-repld/internal/scriptrunner"
+	"agent-repld/internal/lifecycleconfig"
 	"agent-repld/internal/wsm"
 )
 
@@ -139,14 +137,14 @@ func TestReleaseDeploysAnswersWhatRanForTheSkippedDeploys(t *testing.T) {
 		{name: "a prompt deploy hook", skipped: 1, arrange: func(h *harness) {
 			h.emacsRepo()
 			h.mu.Lock()
-			h.config.Deploy = mainOnly(promptHookOf("open the pull request"))
+			h.config.Deploy = forUsers(mainOnly(promptHookOf("open the pull request")))
 			h.mu.Unlock()
 		}, wantKind: ReleasePromptNotRun},
 		{name: "no deploy hook", skipped: 1, arrange: func(h *harness) { h.emacsRepo() }, wantKind: ReleaseNoDeployHook,
 			wantDetail: "has no deploy hook for its main branch"},
 		{name: "a config that cannot be read", skipped: 1, arrange: func(h *harness) {
 			h.mu.Lock()
-			h.configErr = &deployconfig.InvalidError{Path: "deploy.yaml", Detail: "broken"}
+			h.configErr = &lifecycleconfig.InvalidError{Path: "lifecycle.yaml", Detail: "broken"}
 			h.mu.Unlock()
 		}, wantKind: ReleaseNoDeployHook, wantDetail: "broken"},
 	}
@@ -194,7 +192,7 @@ func TestAReleasedScriptRunsWithNoOwnerAndKeepsARetainedLog(t *testing.T) {
 	if len(runs) != 1 || runs[0].dir != h.repoRoot {
 		t.Fatalf("script runs = %+v, want one in the repository root %s", runs, h.repoRoot)
 	}
-	if !slices.Equal(runs[0].env, []string{EnvDeployStage + "=deploy"}) {
+	if !slices.Equal(runs[0].env, []string{lifecycleconfig.EnvHookStage + "=deploy"}) {
 		t.Fatalf("env = %v, want the stage alone: a release has no calling workspace and no ledger", runs[0].env)
 	}
 	if release.Path != deployScript || filepath.Dir(release.LogPath) != LogsDir(h.o.deps.StateDir) || !IsLog(filepath.Base(release.LogPath)) {
@@ -215,8 +213,8 @@ func TestAReleaseReadsTheDeployHooksScope(t *testing.T) {
 	h := newHarness(t)
 	h.emacsRepo()
 	h.mu.Lock()
-	h.config.Deploy = &repoconfigv1.DeployHookEntry{Hook: scriptHookOf(deployScript), RunsFor: &repoconfigv1.DeployHookRunsFor{
-		Scope: &repoconfigv1.DeployHookRunsFor_AnyTarget{AnyTarget: &repoconfigv1.DeployHookRunsForAnyTarget{}}}}
+	h.config.Deploy = forUsers(&repoconfigv1.HookEntry{Hook: scriptHookOf(deployScript), RunsFor: &repoconfigv1.HookRunsFor{
+		Scope: &repoconfigv1.HookRunsFor_AnyTarget{AnyTarget: &repoconfigv1.HookRunsForAnyTarget{}}}})
 	h.mu.Unlock()
 	h.heldWith(1)
 
@@ -226,112 +224,6 @@ func TestAReleaseReadsTheDeployHooksScope(t *testing.T) {
 	// Assert
 	if err != nil || release.Kind != ReleaseScriptRan {
 		t.Fatalf("ReleaseDeploys = (%+v, %v), want an any-target deploy hook run", release, err)
-	}
-}
-
-func TestOwnerlessRunFailureNamesHowTheScriptEnded(t *testing.T) {
-	script := deployconfig.ScriptHook("bin/x.sh", 7).GetScript()
-	tests := []struct {
-		name string
-		ran  ownerlessRun
-		want string
-	}{
-		{name: "an exit of zero", ran: ownerlessRun{run: scriptrunner.Run{ExitCode: 0}}, want: ""},
-		{name: "a script that could not be run", ran: ownerlessRun{err: errors.New("no bash")}, want: "no bash"},
-		{name: "a script killed at its timeout", ran: ownerlessRun{run: scriptrunner.Run{ExitCode: -1, TimedOut: true}}, want: "it ran past its 7s timeout"},
-		{name: "a non-zero exit", ran: ownerlessRun{run: scriptrunner.Run{ExitCode: 3}}, want: "it exited 3"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Act
-			got := tt.ran.failure(script)
-
-			// Assert
-			if got != tt.want {
-				t.Fatalf("failure = %q, want %q", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestRunOwnerlessScriptRunsTheScriptFromTheRepositoryBoundedByItsTimeout(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	script := deployconfig.ScriptHook("bin/x.sh", 7).GetScript()
-
-	// Act
-	h.o.runOwnerlessScript(context.Background(), h.repoRoot, script, []string{"A=b"}, filepath.Join(t.TempDir(), "x.log"))
-
-	// Assert
-	runs := h.hooks.ran()
-	want := hookRun{dir: h.repoRoot, argv: []string{"bash", filepath.Join(h.repoRoot, "bin/x.sh")}, env: []string{"A=b"}, timeout: 7 * time.Second}
-	if len(runs) != 1 || runs[0].dir != want.dir || !slices.Equal(runs[0].argv, want.argv) || !slices.Equal(runs[0].env, want.env) || runs[0].timeout != want.timeout {
-		t.Fatalf("runs = %+v, want one %+v", runs, want)
-	}
-}
-
-func TestRunOwnerlessScriptKeepsTheScriptsWholeOutput(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	script := deployconfig.ScriptHook("bin/x.sh", 7).GetScript()
-	h.hooks.outputs[filepath.Join(h.repoRoot, "bin/x.sh")] = "one\ntwo\n"
-	path := filepath.Join(t.TempDir(), "x.log")
-
-	// Act
-	ran := h.o.runOwnerlessScript(context.Background(), h.repoRoot, script, nil, path)
-
-	// Assert
-	body, err := os.ReadFile(path)
-	if ran.logErr != nil || err != nil || string(body) != "one\ntwo\n" {
-		t.Fatalf("log = %q, %v (log error %v), want the script's whole output", body, err, ran.logErr)
-	}
-}
-
-func TestRunOwnerlessScriptReportsALogThatCannotBeWritten(t *testing.T) {
-	// Arrange: the log's directory is a file.
-	h := newHarness(t)
-	script := deployconfig.ScriptHook("bin/x.sh", 7).GetScript()
-	blocker := filepath.Join(t.TempDir(), "file")
-	if err := os.WriteFile(blocker, nil, 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	// Act
-	ran := h.o.runOwnerlessScript(context.Background(), h.repoRoot, script, nil, filepath.Join(blocker, "x.log"))
-
-	// Assert
-	if ran.logErr == nil || ran.err != nil || ran.failure(script) != "" {
-		t.Fatalf("run = %+v, want a script that ran and a log error", ran)
-	}
-}
-
-func TestEveryOwnerlessScriptRunsThroughRunOwnerlessScript(t *testing.T) {
-	// Arrange: a deploy's own hooks run in deploy.go with their owner; every
-	// other script run is runOwnerlessScript's.
-	entries, err := os.ReadDir(".")
-	if err != nil {
-		t.Fatal(err)
-	}
-	calls := map[string]int{}
-
-	// Act
-	for _, entry := range entries {
-		name := entry.Name()
-		if !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
-			continue
-		}
-		raw, err := os.ReadFile(name)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if n := strings.Count(string(raw), "HookRunner.RunLinesWith("); n > 0 {
-			calls[name] = n
-		}
-	}
-
-	// Assert
-	if len(calls) != 2 || calls["deploy.go"] != 1 || calls["deployhold.go"] != 1 {
-		t.Fatalf("HookRunner.RunLinesWith is called in %v, want once in deploy.go (a deploy's own hooks) and once in deployhold.go (runOwnerlessScript)", calls)
 	}
 }
 

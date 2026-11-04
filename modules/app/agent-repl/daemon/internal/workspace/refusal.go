@@ -268,6 +268,9 @@ const (
 	// ArmTooManyShown is a ChangeWorkspaceLinks show naming more links than
 	// the summary's menu shows.
 	ArmTooManyShown = "too_many_shown"
+	// ArmUnknownAnnouncedLink is a ChangeWorkspaceLinks set whose owned link
+	// announces a url the workspace does not hold. Its `url` field names it.
+	ArmUnknownAnnouncedLink = "unknown_announced_link"
 	// ArmNoBrowserConfigured is an OpenExternal on a daemon that resolved no
 	// external browser launcher at all.
 	ArmNoBrowserConfigured = "no_browser_configured"

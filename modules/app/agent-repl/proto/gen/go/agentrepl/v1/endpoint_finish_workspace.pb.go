@@ -1,10 +1,17 @@
 // endpoint_finish_workspace.proto — FinishWorkspace. SIDEBAR section. A
 // workspace says its work is FINISHED, and the daemon runs its repository's
 // DEPLOY on the workspace's own branch, in its own worktree, by its own
-// session: the stages `.agent-repl/deploy.yaml` describes
-// (repoconfig.v1.DeployConfig), its feed held and its bubble pinned until the
-// deploy ends, and the workspace closed once the deploy succeeds. Success means
-// ENQUEUED; everything after rides the streams.
+// session: the stages `.agent-repl/lifecycle.yaml` describes
+// (repoconfig.v1.LifecycleConfig), its feed held and its bubble pinned until
+// the deploy ends, and the workspace closed once the deploy succeeds. Success
+// means ENQUEUED; everything after rides the streams.
+//
+// THE FINISH STAGE RUNS FIRST. Once the turn that asked has ended, the
+// repository's finish-stage hooks for the workspace's kind run in the
+// workspace (repoconfig.v1.LifecycleConfig.finish), and only then is the
+// deploy put in the queue. A failed finish hook withdraws the deploy before it
+// is put in line, and the failure is handed back to the workspace's
+// conversation.
 //
 // WHAT HAPPENS IS THE REPOSITORY'S, NEVER THE CALLER'S. The request names no
 // destination, no tests and no hooks: the daemon reads them from the
@@ -449,7 +456,7 @@ func (x *FinishWorkspaceError) GetNoBranchCheckedOut() *FinishWorkspaceNoBranchC
 	return nil
 }
 
-func (x *FinishWorkspaceError) GetNoDeployConfig() *DeployConfigMissing {
+func (x *FinishWorkspaceError) GetNoDeployConfig() *LifecycleConfigMissing {
 	if x != nil {
 		if x, ok := x.Cause.(*FinishWorkspaceError_NoDeployConfig); ok {
 			return x.NoDeployConfig
@@ -458,7 +465,7 @@ func (x *FinishWorkspaceError) GetNoDeployConfig() *DeployConfigMissing {
 	return nil
 }
 
-func (x *FinishWorkspaceError) GetDeployConfigInvalid() *DeployConfigInvalid {
+func (x *FinishWorkspaceError) GetDeployConfigInvalid() *LifecycleConfigInvalid {
 	if x != nil {
 		if x, ok := x.Cause.(*FinishWorkspaceError_DeployConfigInvalid); ok {
 			return x.DeployConfigInvalid
@@ -562,15 +569,15 @@ type FinishWorkspaceError_NoBranchCheckedOut struct {
 }
 
 type FinishWorkspaceError_NoDeployConfig struct {
-	// The repository has no `.agent-repl/deploy.yaml`, so nothing says what
+	// The repository has no `.agent-repl/lifecycle.yaml`, so nothing says what
 	// finishing does there. Nothing was recorded.
-	NoDeployConfig *DeployConfigMissing `protobuf:"bytes,15,opt,name=no_deploy_config,json=noDeployConfig,proto3,oneof"`
+	NoDeployConfig *LifecycleConfigMissing `protobuf:"bytes,15,opt,name=no_deploy_config,json=noDeployConfig,proto3,oneof"`
 }
 
 type FinishWorkspaceError_DeployConfigInvalid struct {
-	// The repository's `.agent-repl/deploy.yaml` could not be read or does not
-	// decode as repoconfig.v1.DeployConfig. Nothing was recorded.
-	DeployConfigInvalid *DeployConfigInvalid `protobuf:"bytes,16,opt,name=deploy_config_invalid,json=deployConfigInvalid,proto3,oneof"`
+	// The repository's `.agent-repl/lifecycle.yaml` could not be read or does
+	// not decode as repoconfig.v1.LifecycleConfig. Nothing was recorded.
+	DeployConfigInvalid *LifecycleConfigInvalid `protobuf:"bytes,16,opt,name=deploy_config_invalid,json=deployConfigInvalid,proto3,oneof"`
 }
 
 type FinishWorkspaceError_PlacementBehindNotInLine struct {
@@ -1076,7 +1083,7 @@ var File_agentrepl_v1_endpoint_finish_workspace_proto protoreflect.FileDescripto
 
 const file_agentrepl_v1_endpoint_finish_workspace_proto_rawDesc = "" +
 	"\n" +
-	",agentrepl/v1/endpoint_finish_workspace.proto\x12\fagentrepl.v1\x1a(agentrepl/v1/deploy_config_refusal.proto\x1a\x19agentrepl/v1/family.proto\x1a*agentrepl/v1/merge_version_increment.proto\x1a%agentrepl/v1/workspace_topology.proto\x1a\x1cworkspace/v1/workspace.proto\"\xc9\x02\n" +
+	",agentrepl/v1/endpoint_finish_workspace.proto\x12\fagentrepl.v1\x1a+agentrepl/v1/lifecycle_config_refusal.proto\x1a\x19agentrepl/v1/family.proto\x1a*agentrepl/v1/merge_version_increment.proto\x1a%agentrepl/v1/workspace_topology.proto\x1a\x1cworkspace/v1/workspace.proto\"\xc9\x02\n" +
 	"\x16FinishWorkspaceRequest\x128\n" +
 	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\x12>\n" +
 	"\trequester\x18\x02 \x01(\v2 .agentrepl.v1.WorkspaceRequesterR\trequester\x12^\n" +
@@ -1087,7 +1094,7 @@ const file_agentrepl_v1_endpoint_finish_workspace_proto_rawDesc = "" +
 	"\asuccess\x18\x01 \x01(\v2$.agentrepl.v1.FinishWorkspaceSuccessH\x00R\asuccess\x12:\n" +
 	"\x05error\x18\x02 \x01(\v2\".agentrepl.v1.FinishWorkspaceErrorH\x00R\x05errorB\b\n" +
 	"\x06result\"\x18\n" +
-	"\x16FinishWorkspaceSuccess\"\xfc\f\n" +
+	"\x16FinishWorkspaceSuccess\"\x82\r\n" +
 	"\x14FinishWorkspaceError\x12\\\n" +
 	"\x11unknown_workspace\x18\x01 \x01(\v2-.agentrepl.v1.FinishWorkspaceUnknownWorkspaceH\x00R\x10unknownWorkspace\x12i\n" +
 	"\x16workspace_ref_mismatch\x18\x02 \x01(\v21.agentrepl.v1.FinishWorkspaceWorkspaceRefMismatchH\x00R\x14workspaceRefMismatch\x12\\\n" +
@@ -1104,9 +1111,9 @@ const file_agentrepl_v1_endpoint_finish_workspace_proto_rawDesc = "" +
 	"\vowner_lands\x18\f \x01(\v2'.agentrepl.v1.FinishWorkspaceOwnerLandsH\x00R\n" +
 	"ownerLands\x12g\n" +
 	"\x16requester_may_not_land\x18\r \x01(\v20.agentrepl.v1.FinishWorkspaceRequesterMayNotLandH\x00R\x13requesterMayNotLand\x12d\n" +
-	"\x15no_branch_checked_out\x18\x0e \x01(\v2/.agentrepl.v1.FinishWorkspaceNoBranchCheckedOutH\x00R\x12noBranchCheckedOut\x12M\n" +
-	"\x10no_deploy_config\x18\x0f \x01(\v2!.agentrepl.v1.DeployConfigMissingH\x00R\x0enoDeployConfig\x12W\n" +
-	"\x15deploy_config_invalid\x18\x10 \x01(\v2!.agentrepl.v1.DeployConfigInvalidH\x00R\x13deployConfigInvalid\x12r\n" +
+	"\x15no_branch_checked_out\x18\x0e \x01(\v2/.agentrepl.v1.FinishWorkspaceNoBranchCheckedOutH\x00R\x12noBranchCheckedOut\x12P\n" +
+	"\x10no_deploy_config\x18\x0f \x01(\v2$.agentrepl.v1.LifecycleConfigMissingH\x00R\x0enoDeployConfig\x12Z\n" +
+	"\x15deploy_config_invalid\x18\x10 \x01(\v2$.agentrepl.v1.LifecycleConfigInvalidH\x00R\x13deployConfigInvalid\x12r\n" +
 	"\x1cplacement_behind_not_in_line\x18\x11 \x01(\v20.agentrepl.v1.MergeQueuePlacementBehindNotInLineH\x00R\x18placementBehindNotInLineB\a\n" +
 	"\x05cause\"!\n" +
 	"\x1fFinishWorkspaceUnknownWorkspace\"H\n" +
@@ -1164,8 +1171,8 @@ var file_agentrepl_v1_endpoint_finish_workspace_proto_goTypes = []any{
 	(*MergeWorkspaceVersionIncrementRequired)(nil),   // 19: agentrepl.v1.MergeWorkspaceVersionIncrementRequired
 	(*MergeWorkspaceVersionIncrementUnexpected)(nil), // 20: agentrepl.v1.MergeWorkspaceVersionIncrementUnexpected
 	(*WorkspaceHasOpenChildren)(nil),                 // 21: agentrepl.v1.WorkspaceHasOpenChildren
-	(*DeployConfigMissing)(nil),                      // 22: agentrepl.v1.DeployConfigMissing
-	(*DeployConfigInvalid)(nil),                      // 23: agentrepl.v1.DeployConfigInvalid
+	(*LifecycleConfigMissing)(nil),                   // 22: agentrepl.v1.LifecycleConfigMissing
+	(*LifecycleConfigInvalid)(nil),                   // 23: agentrepl.v1.LifecycleConfigInvalid
 	(*MergeQueuePlacementBehindNotInLine)(nil),       // 24: agentrepl.v1.MergeQueuePlacementBehindNotInLine
 }
 var file_agentrepl_v1_endpoint_finish_workspace_proto_depIdxs = []int32{
@@ -1189,8 +1196,8 @@ var file_agentrepl_v1_endpoint_finish_workspace_proto_depIdxs = []int32{
 	12, // 17: agentrepl.v1.FinishWorkspaceError.owner_lands:type_name -> agentrepl.v1.FinishWorkspaceOwnerLands
 	13, // 18: agentrepl.v1.FinishWorkspaceError.requester_may_not_land:type_name -> agentrepl.v1.FinishWorkspaceRequesterMayNotLand
 	14, // 19: agentrepl.v1.FinishWorkspaceError.no_branch_checked_out:type_name -> agentrepl.v1.FinishWorkspaceNoBranchCheckedOut
-	22, // 20: agentrepl.v1.FinishWorkspaceError.no_deploy_config:type_name -> agentrepl.v1.DeployConfigMissing
-	23, // 21: agentrepl.v1.FinishWorkspaceError.deploy_config_invalid:type_name -> agentrepl.v1.DeployConfigInvalid
+	22, // 20: agentrepl.v1.FinishWorkspaceError.no_deploy_config:type_name -> agentrepl.v1.LifecycleConfigMissing
+	23, // 21: agentrepl.v1.FinishWorkspaceError.deploy_config_invalid:type_name -> agentrepl.v1.LifecycleConfigInvalid
 	24, // 22: agentrepl.v1.FinishWorkspaceError.placement_behind_not_in_line:type_name -> agentrepl.v1.MergeQueuePlacementBehindNotInLine
 	15, // 23: agentrepl.v1.FinishWorkspaceOwnerLands.owner:type_name -> workspace.v1.WorkspaceRef
 	24, // [24:24] is the sub-list for method output_type
@@ -1205,7 +1212,7 @@ func file_agentrepl_v1_endpoint_finish_workspace_proto_init() {
 	if File_agentrepl_v1_endpoint_finish_workspace_proto != nil {
 		return
 	}
-	file_agentrepl_v1_deploy_config_refusal_proto_init()
+	file_agentrepl_v1_lifecycle_config_refusal_proto_init()
 	file_agentrepl_v1_family_proto_init()
 	file_agentrepl_v1_merge_version_increment_proto_init()
 	file_agentrepl_v1_workspace_topology_proto_init()

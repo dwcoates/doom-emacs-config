@@ -19,12 +19,12 @@ import (
 func TestDeployHooksRoundTripEveryHookKind(t *testing.T) {
 	tests := []struct {
 		name  string
-		hooks []*repoconfigv1.DeployHook
+		hooks []*repoconfigv1.Hook
 	}{
 		{name: "no hook", hooks: nil},
-		{name: "a prompt", hooks: []*repoconfigv1.DeployHook{promptHook("run the linters")}},
-		{name: "a script", hooks: []*repoconfigv1.DeployHook{scriptHook("bin/notify.sh", 30)}},
-		{name: "both, in order", hooks: []*repoconfigv1.DeployHook{scriptHook("bin/a.sh", 1), promptHook("b")}},
+		{name: "a prompt", hooks: []*repoconfigv1.Hook{promptHook("run the linters")}},
+		{name: "a script", hooks: []*repoconfigv1.Hook{scriptHook("bin/notify.sh", 30)}},
+		{name: "both, in order", hooks: []*repoconfigv1.Hook{scriptHook("bin/a.sh", 1), promptHook("b")}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -48,7 +48,7 @@ func TestDeployHooksRoundTripEveryHookKind(t *testing.T) {
 
 func TestDeployHooksAreStoredWithTheirProtoFieldNames(t *testing.T) {
 	// Act
-	raw, err := encodeHooks([]*repoconfigv1.DeployHook{scriptHook("bin/x.sh", 7)})
+	raw, err := encodeHooks([]*repoconfigv1.Hook{scriptHook("bin/x.sh", 7)})
 
 	// Assert
 	if err != nil || raw != `[{"script":{"path":"bin/x.sh","timeout_seconds":7}}]` {
@@ -109,7 +109,7 @@ func TestTheMigrationRewritesStoredActionsAsPromptHooks(t *testing.T) {
 		t.Fatalf("queued post-deploy hooks = %s, want the prompt as a prompt hook", queued)
 	}
 	hooks, err := decodeHooks("creation_jobs", "ws-1", "pre_deploy_hooks", pre)
-	if err != nil || !(DeployHooks{PreDeploy: hooks}).Equal(DeployHooks{PreDeploy: []*repoconfigv1.DeployHook{promptHook("lint"), promptHook("check")}}) {
+	if err != nil || !(DeployHooks{PreDeploy: hooks}).Equal(DeployHooks{PreDeploy: []*repoconfigv1.Hook{promptHook("lint"), promptHook("check")}}) {
 		t.Fatalf("decoded migrated hooks = %v, %v", hooks, err)
 	}
 }
@@ -229,12 +229,12 @@ func TestDeployHooksEqual(t *testing.T) {
 		want bool
 	}{
 		{name: "both empty", want: true},
-		{name: "equal hooks held by different pointers", a: DeployHooks{PreDeploy: []*repoconfigv1.DeployHook{promptHook("lint")}, PostDeploy: []*repoconfigv1.DeployHook{notify}},
-			b: DeployHooks{PreDeploy: []*repoconfigv1.DeployHook{lint}, PostDeploy: []*repoconfigv1.DeployHook{scriptHook("bin/notify.sh", 30)}}, want: true},
-		{name: "a hook in another stage", a: DeployHooks{PreDeploy: []*repoconfigv1.DeployHook{lint}}, b: DeployHooks{PostDeploy: []*repoconfigv1.DeployHook{lint}}},
-		{name: "a stage of a different length", a: DeployHooks{PreDeploy: []*repoconfigv1.DeployHook{lint}}, b: DeployHooks{PreDeploy: []*repoconfigv1.DeployHook{lint, lint}}},
-		{name: "the same hooks in another order", a: DeployHooks{PostDeploy: []*repoconfigv1.DeployHook{lint, notify}}, b: DeployHooks{PostDeploy: []*repoconfigv1.DeployHook{notify, lint}}},
-		{name: "a script of another timeout", a: DeployHooks{PostDeploy: []*repoconfigv1.DeployHook{notify}}, b: DeployHooks{PostDeploy: []*repoconfigv1.DeployHook{scriptHook("bin/notify.sh", 31)}}},
+		{name: "equal hooks held by different pointers", a: DeployHooks{PreDeploy: []*repoconfigv1.Hook{promptHook("lint")}, PostDeploy: []*repoconfigv1.Hook{notify}},
+			b: DeployHooks{PreDeploy: []*repoconfigv1.Hook{lint}, PostDeploy: []*repoconfigv1.Hook{scriptHook("bin/notify.sh", 30)}}, want: true},
+		{name: "a hook in another stage", a: DeployHooks{PreDeploy: []*repoconfigv1.Hook{lint}}, b: DeployHooks{PostDeploy: []*repoconfigv1.Hook{lint}}},
+		{name: "a stage of a different length", a: DeployHooks{PreDeploy: []*repoconfigv1.Hook{lint}}, b: DeployHooks{PreDeploy: []*repoconfigv1.Hook{lint, lint}}},
+		{name: "the same hooks in another order", a: DeployHooks{PostDeploy: []*repoconfigv1.Hook{lint, notify}}, b: DeployHooks{PostDeploy: []*repoconfigv1.Hook{notify, lint}}},
+		{name: "a script of another timeout", a: DeployHooks{PostDeploy: []*repoconfigv1.Hook{notify}}, b: DeployHooks{PostDeploy: []*repoconfigv1.Hook{scriptHook("bin/notify.sh", 31)}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

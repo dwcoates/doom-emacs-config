@@ -321,6 +321,8 @@ func exemptFromLease(lease wsm.Lease, origin conversationv1.PromptOrigin) bool {
 //     to send them again.
 //   - The brief asking a workspace that left its one-shot state to file
 //     itself into a subsection, for the same reason.
+//   - A finish-stage prompt hook, which the daemon sends for the
+//     repository's config once the workspace asked to finish.
 //
 // A prompt the user types is still refused, so the user knows it did not go,
 // and so is one an agent sent, whose refusal its command prints.
@@ -332,7 +334,8 @@ func waitsOutColdGate(origin conversationv1.PromptOrigin) bool {
 		conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_NOTICE,
 		conversationv1.PromptOrigin_PROMPT_ORIGIN_DERIVED_WORKSPACE_NOTICE,
 		conversationv1.PromptOrigin_PROMPT_ORIGIN_OWNER_NOTICE,
-		conversationv1.PromptOrigin_PROMPT_ORIGIN_SUBSECTION_PLACEMENT:
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_SUBSECTION_PLACEMENT,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_FINISH_HOOK:
 		return true
 	}
 	return false

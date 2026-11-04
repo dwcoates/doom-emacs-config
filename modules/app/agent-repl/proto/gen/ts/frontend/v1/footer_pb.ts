@@ -2179,7 +2179,7 @@ export type FooterStatusMerging = Message<"frontend.v1.FooterStatusMerging"> & {
   } | {
     /**
      * The deploy finished the stages its repository runs concurrently
-     * (repoconfig.v1.DeployConfig.concurrent) and waits for the deploys queued
+     * (repoconfig.v1.LifecycleConfig.concurrent) and waits for the deploys queued
      * ahead of it to finish their one-at-a-time stages.
      *
      * @generated from field: frontend.v1.FooterSubStatusMergingAwaitingTurn awaiting_turn = 26;

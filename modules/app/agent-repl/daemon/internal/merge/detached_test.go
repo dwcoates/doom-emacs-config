@@ -1079,7 +1079,7 @@ func detachedRunFor(intoMaker bool, hooks wsm.DeployHooks) *DetachedRun {
 }
 
 func TestAnAsyncRequestsHandOffForksWithTheLandingTheQueueDecided(t *testing.T) {
-	actions := wsm.DeployHooks{PreDeploy: []*repoconfigv1.DeployHook{promptHookOf("run the linters")}, PostDeploy: []*repoconfigv1.DeployHook{promptHookOf("post the summary")}}
+	actions := wsm.DeployHooks{PreDeploy: []*repoconfigv1.Hook{promptHookOf("run the linters")}, PostDeploy: []*repoconfigv1.Hook{promptHookOf("post the summary")}}
 	tests := []struct {
 		name          string
 		arrange       func(h *harness)
@@ -1127,7 +1127,7 @@ func TestAnAsyncRequestWithNoHooksForksWithNoneEvenWhenItsRequesterHasSome(t *te
 	h := newHarness(t)
 	h.db.mu.Lock()
 	job := h.db.jobs[theWorkspace]
-	job.Hooks = wsm.DeployHooks{PreDeploy: []*repoconfigv1.DeployHook{promptHookOf("the requester's own pre-deploy")}, PostDeploy: []*repoconfigv1.DeployHook{promptHookOf("the requester's own post-deploy")}}
+	job.Hooks = wsm.DeployHooks{PreDeploy: []*repoconfigv1.Hook{promptHookOf("the requester's own pre-deploy")}, PostDeploy: []*repoconfigv1.Hook{promptHookOf("the requester's own post-deploy")}}
 	h.db.jobs[theWorkspace] = job
 	h.db.mu.Unlock()
 
@@ -1149,7 +1149,7 @@ func TestAnAsyncRequestRecordsItsDeployHooksOnItsEntry(t *testing.T) {
 	h.mu.Lock()
 	h.inFlight = "turn-asking"
 	h.mu.Unlock()
-	actions := wsm.DeployHooks{PreDeploy: []*repoconfigv1.DeployHook{promptHookOf("run the linters")}}
+	actions := wsm.DeployHooks{PreDeploy: []*repoconfigv1.Hook{promptHookOf("run the linters")}}
 
 	// Act: an agent's request, still waiting on the turn that asked.
 	_, err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: asyncSource,

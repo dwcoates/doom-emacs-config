@@ -38,6 +38,7 @@ func newRetargetFamily(t *testing.T, opts harness.Opts, repo *harness.Repo) *ret
 	repository := createRepositoryRef(t, d, repo)
 	create := func(parent *workspacev1.WorkspaceRef) *workspacev1.WorkspaceRef {
 		req := &agentreplv1.CreateWorkspaceRequest{
+			Originator:    &agentreplv1.WorkspaceOriginator{Originator: &agentreplv1.WorkspaceOriginator_UserOrWorkspace{UserOrWorkspace: &agentreplv1.WorkspaceOriginatorUserOrWorkspace{}}},
 			Repository:    repository,
 			Requester:     harness.User(),
 			ContextOrigin: harness.Fresh(),

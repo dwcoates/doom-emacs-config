@@ -19,6 +19,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/lifecycleconfig"
 	"agent-repld/internal/netstate"
 	"agent-repld/internal/wsm"
 )
@@ -236,15 +237,9 @@ func (v *verbs) RunCreate(ctx context.Context, ticket *CreateTicket) (wsm.Worksp
 	return result.created, result.err
 }
 
-// attemptCreate is one run of the create. A workspace created for a Slack
-// message then takes its thread up (adoptSlackOrigin), once the create-gate
-// ticket is released, so a slow post never holds a stand-down back.
+// attemptCreate is one run of the create.
 func (v *verbs) attemptCreate(ctx context.Context, spec CreateSpec) (wsm.Workspace, error) {
-	created, err := v.attemptHeldCreate(ctx, spec)
-	if err == nil {
-		v.adoptSlackOrigin(ctx, created, spec.SlackThread)
-	}
-	return created, err
+	return v.attemptHeldCreate(ctx, spec)
 }
 
 // attemptHeldCreate is one run of the create, under a create-gate ticket. A
@@ -552,11 +547,13 @@ func createKey(spec CreateSpec) string {
 		ContextSelection                                                  *heldSelection
 		FromOrigin, OneShot                                               bool
 		Name, Model, Priority, PermissionMode, Consent, Prompt            string
-		SlackThread                                                       string
+		SlackThread, Originator                                           string
 		PreDeploy, PostDeploy                                             []string
 	}{
-		SlackThread: spec.SlackThread,
-		RepoDir:     filepath.Clean(spec.RepoDir), Parent: ids.Optional(spec.Parent), OwnerNotice: strings.TrimSpace(spec.OwnerNotice),
+		// THE KEY SPELLS THE KIND BY NUMBER, so a spec that names none still
+		// keys, and is refused by the create's validation rather than here.
+		SlackThread: spec.SlackThread, Originator: fmt.Sprint(int(spec.Originator)),
+		RepoDir: filepath.Clean(spec.RepoDir), Parent: ids.Optional(spec.Parent), OwnerNotice: strings.TrimSpace(spec.OwnerNotice),
 		Landing:          landingKey(spec.Landing),
 		ContextWorkspace: ids.Optional(spec.ContextWorkspace), ForkFrom: ids.Optional(spec.ForkFrom),
 		ContextSelection: heldSelectionOf(spec.ContextSelection),
@@ -575,7 +572,7 @@ func createKey(spec CreateSpec) string {
 }
 
 // hookBytes is each hook's deterministic wire encoding, hex.
-func hookBytes(hooks []*repoconfigv1.DeployHook) []string {
+func hookBytes(hooks []*repoconfigv1.Hook) []string {
 	out := make([]string, 0, len(hooks))
 	for _, h := range hooks {
 		b, err := proto.MarshalOptions{Deterministic: true}.Marshal(h)
@@ -612,6 +609,10 @@ type heldSpec struct {
 	PermissionMode       string         `json:"permission_mode,omitempty"`
 	Priority             *int           `json:"priority,omitempty"`
 	SlackThread          string         `json:"slack_thread,omitempty"`
+	// Originator is the spec's kind (lifecycleconfig.Originator.String). A
+	// create held by a build before originators were recorded carries none,
+	// and resumes as user_or_workspace: that build had no emoji-ack kind.
+	Originator string `json:"originator,omitempty"`
 	// Landing is the explicit landing target, absent for the relationship's
 	// default; a held row written before landing targets existed has none,
 	// which is what its create meant.
@@ -670,7 +671,7 @@ func encodeHeldSpec(spec CreateSpec) (string, error) {
 		ForkFrom: ids.Optional(spec.ForkFrom), Requester: ids.Optional(spec.Requester), OwnerNotice: spec.OwnerNotice,
 		ConsentedUngatedMode: spec.ConsentedUngatedMode, PreDeploy: hookBytes(spec.DeployHooks.PreDeploy),
 		PostDeploy: hookBytes(spec.DeployHooks.PostDeploy), Name: spec.Name, Model: spec.Model, PermissionMode: spec.PermissionMode,
-		SlackThread: spec.SlackThread,
+		SlackThread: spec.SlackThread, Originator: spec.Originator.String(),
 	}
 	if spec.Priority != nil {
 		p := int(*spec.Priority)
@@ -707,6 +708,12 @@ func decodeHeldSpec(encoded string) (CreateSpec, error) {
 		ForkFrom: optionalID(held.ForkFrom), Requester: optionalID(held.Requester), OwnerNotice: held.OwnerNotice,
 		ConsentedUngatedMode: held.ConsentedUngatedMode, DeployHooks: wsm.DeployHooks{PreDeploy: pre, PostDeploy: post},
 		Name: held.Name, Model: held.Model, PermissionMode: held.PermissionMode, SlackThread: held.SlackThread,
+		Originator: lifecycleconfig.OriginatorUserOrWorkspace,
+	}
+	if held.Originator != "" {
+		if spec.Originator, err = lifecycleconfig.ParseOriginator(held.Originator); err != nil {
+			return CreateSpec{}, fmt.Errorf("decode a held create's request: %w", err)
+		}
 	}
 	if held.Priority != nil {
 		p := wsm.Priority(*held.Priority)
@@ -718,14 +725,14 @@ func decodeHeldSpec(encoded string) (CreateSpec, error) {
 	return spec, nil
 }
 
-func decodeHooks(encoded []string) ([]*repoconfigv1.DeployHook, error) {
-	var out []*repoconfigv1.DeployHook
+func decodeHooks(encoded []string) ([]*repoconfigv1.Hook, error) {
+	var out []*repoconfigv1.Hook
 	for _, e := range encoded {
 		raw, err := hex.DecodeString(e)
 		if err != nil {
 			return nil, fmt.Errorf("decode a held create's deploy hook: %w", err)
 		}
-		hook := &repoconfigv1.DeployHook{}
+		hook := &repoconfigv1.Hook{}
 		if err := proto.Unmarshal(raw, hook); err != nil {
 			return nil, fmt.Errorf("decode a held create's deploy hook: %w", err)
 		}

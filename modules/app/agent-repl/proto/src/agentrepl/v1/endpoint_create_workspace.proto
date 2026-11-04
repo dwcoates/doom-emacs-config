@@ -34,14 +34,14 @@ syntax = "proto3";
 
 package agentrepl.v1;
 
-import "agentrepl/v1/deploy_config_refusal.proto";
+import "agentrepl/v1/lifecycle_config_refusal.proto";
 import "agentrepl/v1/family.proto";
 import "agentrepl/v1/merge_version_increment.proto";
 import "agentrepl/v1/workspace_priority.proto";
 import "agentrepl/v1/workspace_topology.proto";
 import "conversation/v1/api.proto";
 import "conversation/v1/user.proto";
-import "repoconfig/v1/deploy_config.proto";
+import "repoconfig/v1/lifecycle_config.proto";
 import "workspace/v1/workspace.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
@@ -122,19 +122,46 @@ message CreateWorkspaceRequest {
   // for every other create. Refused as invalid beside `async_merge`, whose
   // workspace the queue creates.
   optional CreateWorkspaceSlackOrigin slack_origin = 13;
+
+  // WHO CREATED THE WORKSPACE, stated by the creator and recorded on the
+  // workspace for its life: it decides which kind's hooks every stage of the
+  // repository's lifecycle config runs for it (repoconfig.v1.LifecycleConfig).
+  // REQUIRED: an unset originator, or one with no arm, is a malformed request
+  // (Connect InvalidArgument). The daemon never infers it, from `slack_origin`
+  // or anything else: a creator that passes a Slack thread still says who it
+  // is.
+  WorkspaceOriginator originator = 14;
 }
 
-// THE DAEMON SPEAKS FOR THE WORKSPACE IN ITS ORIGINATING THREAD. A workspace
-// created for a Slack message records the message's thread and stores it
-// among its links as a reference (WorkspaceLinkReference), labelled
-// "Originating Slack thread". The daemon then posts into that thread itself,
-// never the agent:
-//   - once the workspace is created, a one-line reply that work on it began;
-//   - once a finish's deploy ends (FinishWorkspace), a reply saying whether it
-//     landed or failed, with every link the workspace OWNS
-//     (WorkspaceLinkOwned) as a bullet.
-// A post that fails is recorded and drawn as a transient footer line on the
-// workspace; it never fails the create or the finish.
+// Who created a workspace. THE ARM IS THE ORIGINATOR.
+message WorkspaceOriginator {
+  // The two kinds of workspace a repository's hooks tell apart.
+  oneof originator {
+    // The Slack emoji-ack reaction system (gns-sockets' dispatch of a bound
+    // emoji). REQUIRES `slack_origin`, the message it was dispatched for, and
+    // is refused beside `async_merge` (Connect InvalidArgument for both).
+    WorkspaceOriginatorEmojiAck emoji_ack = 1;
+    // The user, or another workspace's agent: every create that is not the
+    // emoji-ack system's.
+    WorkspaceOriginatorUserOrWorkspace user_or_workspace = 2;
+  }
+}
+
+// Created by the Slack emoji-ack reaction system. DELIBERATELY EMPTY: the
+// message it acts on is `CreateWorkspaceRequest.slack_origin`.
+message WorkspaceOriginatorEmojiAck {}
+
+// Created by the user or by another workspace. DELIBERATELY EMPTY: who asked is
+// `CreateWorkspaceRequest.requester`.
+message WorkspaceOriginatorUserOrWorkspace {}
+
+// THE ORIGINATING THREAD. A workspace created for a Slack message records the
+// message's link and stores it among its links as a reference
+// (WorkspaceLinkReference), labelled "Originating Slack thread". The daemon
+// itself never posts there: what the thread is told is the repository's hooks'
+// to say (repoconfig.v1.LifecycleConfig), and every script hook of the
+// workspace sees the link as AGENT_REPL_SLACK_THREAD and every prompt hook as
+// `{{slack_thread}}`.
 message CreateWorkspaceSlackOrigin {
   // The message's Slack link, as Slack's "Copy link" gives it: an https
   // `<workspace>.slack.com/archives/<channel>/p<timestamp>` link, with
@@ -383,17 +410,19 @@ message CreateWorkspaceAsyncMergeCloseAfter {
 }
 
 // Deploy hooks a request supplies. A stage given here REPLACES the
-// repository's own hooks for that stage (repoconfig.v1.DeployConfig) for the
-// deploys the request covers; a stage left empty runs the repository's. Each
-// hook is a script or a prompt, exactly as in the repository's config, and a
-// failed one fails the deploy. The `deploy` stage is the repository's alone.
+// repository's own hooks for that stage (repoconfig.v1.LifecycleConfig), of
+// whichever kind of workspace, for the deploys the request covers; a stage
+// left empty runs the repository's. Each hook is a script or a prompt, exactly
+// as in the repository's config, and a failed one fails the deploy; a
+// `builtin` hook is refused (Connect InvalidArgument), since a request names
+// no stage default. The `deploy` stage is the repository's alone.
 message CreateWorkspaceDeployHooks {
   // Run in place of the repository's `pre_deploy` hooks, before the local
   // merge.
-  repeated repoconfig.v1.DeployHook pre_deploy = 1;
+  repeated repoconfig.v1.Hook pre_deploy = 1;
   // Run in place of the repository's `post_deploy` hooks, after the deploy
   // stage.
-  repeated repoconfig.v1.DeployHook post_deploy = 2;
+  repeated repoconfig.v1.Hook post_deploy = 2;
 }
 
 // THE ARM IS THE OUTCOME.
@@ -612,12 +641,12 @@ message CreateWorkspaceError {
     // A primary create cut from origin (WorkspaceLandingTargetPrimary.from_origin)
     // could not fetch origin's primary branch. Nothing was created.
     CreateWorkspaceOriginFetchFailed origin_fetch_failed = 39;
-    // The async merge's repository has no `.agent-repl/deploy.yaml`, so
+    // The async merge's repository has no `.agent-repl/lifecycle.yaml`, so
     // nothing says what its deploy does. Nothing was recorded.
-    DeployConfigMissing async_merge_no_deploy_config = 40;
-    // The async merge's repository's `.agent-repl/deploy.yaml` is unusable.
+    LifecycleConfigMissing async_merge_no_deploy_config = 40;
+    // The async merge's repository's `.agent-repl/lifecycle.yaml` is unusable.
     // Nothing was recorded.
-    DeployConfigInvalid async_merge_deploy_config_invalid = 41;
+    LifecycleConfigInvalid async_merge_deploy_config_invalid = 41;
     // This daemon is handing its workspaces to a successor and admits no new
     // create: a create admitted now could still be materializing when the
     // handover snapshots what it serves. Nothing was created; the same
@@ -635,6 +664,15 @@ message CreateWorkspaceError {
     // was named or built; the same create without a model runs under the
     // daemon's default.
     CreateWorkspaceModelCatalogUnknown model_catalog_unknown = 50;
+    // The repository's `.agent-repl/lifecycle.yaml` is unusable, so the
+    // create's creation stage cannot be read. Nothing was named or built. A
+    // repository with NO config is no refusal: its creates run only the
+    // built-in creation defaults.
+    LifecycleConfigInvalid lifecycle_config_invalid = 52;
+    // A creation-stage script hook failed. The create was UNDONE (its
+    // worktree, branch and registration removed), as every failed create is,
+    // and the repository's main workspace was asked to find out why.
+    CreateWorkspaceCreationHookFailed creation_hook_failed = 53;
   }
 }
 // A requested model the creating login does not offer.
@@ -888,4 +926,19 @@ message CreateWorkspaceNamingFailed {
 message CreateWorkspaceOriginFetchFailed {
   // The fetch's own failure, as git stated it.
   string detail = 1;
+}
+
+// A creation-stage hook failed, which fails the create: a script that did
+// not exit 0, or a prompt naming the originating Slack thread of a workspace
+// created for none.
+message CreateWorkspaceCreationHookFailed {
+  // The script, relative to the repository's main checkout root, as the
+  // config names it. Empty for a prompt hook, which has no path.
+  string path = 1;
+  // How it failed, in one line: its exit status, its timeout, why it could
+  // not be run, or the placeholder it could not resolve.
+  string detail = 2;
+  // The file a script's whole output was kept in. Empty for a prompt hook,
+  // which ran nothing.
+  string log_path = 3;
 }

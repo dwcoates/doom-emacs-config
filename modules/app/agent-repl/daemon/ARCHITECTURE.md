@@ -453,8 +453,8 @@ type Orchestrator interface {
   Drain(ctx); Recover(ctx) error                 // orderly exit suspends mid-step merges; boot resumes them from their progress record
 }
 ```
-What a deploy runs is its repository's `.agent-repl/deploy.yaml`
-(`repoconfig.v1.DeployConfig`, read by `internal/deployconfig` at every use):
+What a deploy runs is its repository's `.agent-repl/lifecycle.yaml`
+(`repoconfig.v1.LifecycleConfig`, read by `internal/lifecycleconfig` at every use):
 pre-deploy hooks → the LOCAL MERGE, when the config has one → the deploy hook
 (skipped while the repository is held) → post-deploy hooks. Each hook is a
 script (`internal/scriptrunner`, from the main checkout root) or a prompt to

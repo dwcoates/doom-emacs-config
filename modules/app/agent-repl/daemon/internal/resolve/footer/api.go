@@ -105,7 +105,7 @@ const (
 	StepDeploying          MergeStep = "deploying"
 	StepPostDeploy         MergeStep = "post_deploy"
 	// StepAwaitingTurn is a deploy that finished its concurrent stages
-	// (repoconfig.v1.DeployConfig.concurrent) and waits for the deploys queued
+	// (repoconfig.v1.LifecycleConfig.concurrent) and waits for the deploys queued
 	// ahead of it to finish their one-at-a-time stages.
 	StepAwaitingTurn MergeStep = "awaiting_turn"
 )

@@ -6,8 +6,8 @@ import (
 
 	repoconfigv1 "agentrepl/proto/repoconfig/v1"
 
-	"agent-repld/internal/deployconfig"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/lifecycleconfig"
 	"agent-repld/internal/resolve/footer"
 )
 
@@ -21,11 +21,11 @@ const (
 // concurrentThrough is a hooks-only deploy whose leading stages run
 // concurrently through THROUGH: a script deploy hook and a script post-deploy
 // hook, explanation-engine's shape.
-func concurrentThrough(through string) *repoconfigv1.DeployConfig {
-	cfg := &repoconfigv1.DeployConfig{
+func concurrentThrough(through string) *repoconfigv1.LifecycleConfig {
+	cfg := &repoconfigv1.LifecycleConfig{
 		PreDeploy:  &repoconfigv1.DeployPreDeployStage{},
-		Deploy:     anyTarget(scriptHookOf(prScript)),
-		PostDeploy: []*repoconfigv1.DeployHookEntry{anyTarget(scriptHookOf(updateScript))},
+		Deploy:     forUsers(anyTarget(scriptHookOf(prScript))),
+		PostDeploy: usersList(anyTarget(scriptHookOf(updateScript))),
 	}
 	switch through {
 	case "pre_deploy":
@@ -205,7 +205,7 @@ func TestANarrowedWindowEvictsNoMemberOfAConcurrentChain(t *testing.T) {
 func TestAConfigWithoutConcurrentStagesKeepsItsWindowAndItsChain(t *testing.T) {
 	tests := []struct {
 		name   string
-		cfg    *repoconfigv1.DeployConfig
+		cfg    *repoconfigv1.LifecycleConfig
 		chains bool
 	}{
 		{name: "a local merge races in the window, as agent-repl's does", cfg: localMergeConfig(), chains: true},
@@ -235,14 +235,14 @@ func TestOnlyAOneAtATimeStageOfAConcurrentConfigWaitsForItsTurn(t *testing.T) {
 	// once, which is what this asserts.
 	tests := []struct {
 		name  string
-		cfg   *repoconfigv1.DeployConfig
-		stage deployconfig.Stage
+		cfg   *repoconfigv1.LifecycleConfig
+		stage lifecycleconfig.Stage
 	}{
-		{name: "pre_deploy of a config through deploy", cfg: concurrentThrough("deploy"), stage: deployconfig.StagePreDeploy},
-		{name: "deploy of a config through deploy", cfg: concurrentThrough("deploy"), stage: deployconfig.StageDeploy},
-		{name: "pre_deploy of a config through pre_deploy", cfg: concurrentThrough("pre_deploy"), stage: deployconfig.StagePreDeploy},
-		{name: "post_deploy of a config with no concurrent stages", cfg: concurrentThrough(""), stage: deployconfig.StagePostDeploy},
-		{name: "post_deploy of agent-repl's local merge", cfg: localMergeConfig(), stage: deployconfig.StagePostDeploy},
+		{name: "pre_deploy of a config through deploy", cfg: concurrentThrough("deploy"), stage: lifecycleconfig.StagePreDeploy},
+		{name: "deploy of a config through deploy", cfg: concurrentThrough("deploy"), stage: lifecycleconfig.StageDeploy},
+		{name: "pre_deploy of a config through pre_deploy", cfg: concurrentThrough("pre_deploy"), stage: lifecycleconfig.StagePreDeploy},
+		{name: "post_deploy of a config with no concurrent stages", cfg: concurrentThrough(""), stage: lifecycleconfig.StagePostDeploy},
+		{name: "post_deploy of agent-repl's local merge", cfg: localMergeConfig(), stage: lifecycleconfig.StagePostDeploy},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -267,7 +267,7 @@ func TestADeployBehindTheHeadInNoChainCannotTakeItsTurn(t *testing.T) {
 	r := &run{o: h.o, ws: behind, repo: h.repoKey(), speculative: true, target: deployTarget{cfg: concurrentThrough("deploy")}}
 
 	// Act
-	err := r.awaitTurnFor(context.Background(), deployconfig.StagePostDeploy)
+	err := r.awaitTurnFor(context.Background(), lifecycleconfig.StagePostDeploy)
 
 	// Assert
 	if err == nil {

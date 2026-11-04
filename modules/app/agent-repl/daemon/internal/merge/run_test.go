@@ -15,43 +15,15 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
-	"agent-repld/internal/deployconfig"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/gitclient"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/lifecycleconfig"
 	"agent-repld/internal/resolve/footer"
 	"agent-repld/internal/resolve/sidebar"
 	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
-
-// TestSameDirExcludesASiblingWorktree covers the self-reload's extra condition:
-// two checkouts of one repository are not one directory.
-func TestSameDirExcludesASiblingWorktree(t *testing.T) {
-	tests := []struct {
-		name string
-		a, b string
-		want bool
-	}{
-		{name: "the same directory", a: "/checkout", b: "/checkout", want: true},
-		{name: "an unclean spelling of it", a: "/checkout", b: "/checkout/x/..", want: true},
-		{name: "a sibling worktree", a: "/checkout", b: "/checkout-2", want: false},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			// Arrange: two directory spellings.
-			a, b := tc.a, tc.b
-
-			// Act.
-			got := sameDir(a, b)
-
-			// Assert.
-			if got != tc.want {
-				t.Fatalf("sameDir(%q, %q) = %v, want %v", a, b, got, tc.want)
-			}
-		})
-	}
-}
 
 // TestHookTabsCannotPark covers the tab family's legality: the hook tabs have
 // no parked arm, because a failed hook fails the deploy.
@@ -764,7 +736,7 @@ func TestTakeSessionFailsOnAnUnusableDeployConfig(t *testing.T) {
 	h := newHarness(t)
 	r := ledgeredRun(t, h)
 	h.mu.Lock()
-	h.configErr = &deployconfig.InvalidError{Path: "/repo/.agent-repl/deploy.yaml", Detail: "pre_deploy is required"}
+	h.configErr = &lifecycleconfig.InvalidError{Path: "/repo/.agent-repl/lifecycle.yaml", Detail: "pre_deploy is required"}
 	h.mu.Unlock()
 
 	// Act.

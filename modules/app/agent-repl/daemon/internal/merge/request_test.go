@@ -470,7 +470,7 @@ func TestARequestWhoseFlushFailsIsRefusedWithNothingRecorded(t *testing.T) {
 }
 
 func TestNewDetachedRunTrimsTheNameAndTheInstructionAndKeepsTheAsks(t *testing.T) {
-	hooks := wsm.DeployHooks{PreDeploy: []*repoconfigv1.DeployHook{promptHookOf("lint")}, PostDeploy: []*repoconfigv1.DeployHook{scriptHookOf("bin/announce.sh")}}
+	hooks := wsm.DeployHooks{PreDeploy: []*repoconfigv1.Hook{promptHookOf("lint")}, PostDeploy: []*repoconfigv1.Hook{scriptHookOf("bin/announce.sh")}}
 	tests := []struct {
 		name             string
 		inName, instruct string

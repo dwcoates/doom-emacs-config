@@ -68,7 +68,8 @@ message ChangeWorkspaceLinksSet {
   // every stored link says which it is. A relabel sets it anew. A pull
   // request the workspace opened is OWNED, and storing it owned subscribes
   // the workspace to it; changing it to a reference, or removing it, ends
-  // that subscription.
+  // that subscription. An owned link may name the stored link it announces
+  // (WorkspaceLinkOwned.announces).
   WorkspaceLinkOwnership ownership = 3;
 }
 
@@ -131,6 +132,9 @@ message ChangeWorkspaceLinksError {
     ChangeWorkspaceLinksUnknownLink unknown_link = 7;
     // A show named more links than the menu shows.
     ChangeWorkspaceLinksTooManyShown too_many_shown = 8;
+    // A set's owned link announces a url the workspace does not hold
+    // (WorkspaceLinkOwned.announces).
+    ChangeWorkspaceLinksUnknownAnnouncedLink unknown_announced_link = 9;
   }
 }
 
@@ -192,4 +196,10 @@ message ChangeWorkspaceLinksTooManyShown {
   uint32 named = 1;
   // How many the menu shows: five.
   uint32 limit = 2;
+}
+
+// The announced url is not a link the workspace holds.
+message ChangeWorkspaceLinksUnknownAnnouncedLink {
+  // The url the set's announcement named.
+  string url = 1;
 }

@@ -76,8 +76,8 @@ type wsState struct {
 // New builds a synthesizer. It panics on a missing collaborator, because a
 // half-wired synthesizer is a boot defect, not a runtime condition.
 func New(deps Deps) *Synthesizer {
-	if deps.Digester == nil || deps.Headless == nil || deps.ConfigDirs == nil || deps.Titles == nil || deps.Store == nil || deps.Installed == nil || deps.Log == nil {
-		panic("titlesynth: New requires Digester, Headless, ConfigDirs, Titles, Store, Installed and Log")
+	if deps.Digester == nil || deps.Headless == nil || deps.ConfigDirs == nil || deps.Titles == nil || deps.Store == nil || deps.Log == nil {
+		panic("titlesynth: New requires Digester, Headless, ConfigDirs, Titles, Store and Log")
 	}
 	if deps.GatherTimeout == 0 {
 		deps.GatherTimeout = DefaultGatherTimeout
@@ -344,7 +344,6 @@ func (s *Synthesizer) synthesizeOnce(ctx context.Context, ws ids.WorkspaceID) {
 	s.deps.Log.Info(opSynth, "installed a synthesized workspace title", dlog.Context{
 		"workspace": string(ws), "boundary": digest.GetBoundary().String(), "prompts": len(prompts),
 	})
-	s.deps.Installed.SummaryInstalled(ctx, ws, title)
 }
 
 // cadenceDue reports whether a changed digest is due a model call, and why.

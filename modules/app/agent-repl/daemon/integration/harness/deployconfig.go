@@ -7,11 +7,11 @@ import (
 	"strings"
 	"testing"
 
-	"agent-repld/internal/deployconfig"
+	"agent-repld/internal/lifecycleconfig"
 )
 
 // EVERY FIXTURE REPOSITORY STATES ITS DEPLOY. A repository with no
-// `.agent-repl/deploy.yaml` refuses every deploy (no_deploy_config), so a
+// `.agent-repl/lifecycle.yaml` refuses every deploy (no_deploy_config), so a
 // fixture repository carries one exactly as a real repository's author would
 // write one: HooksOnlyDeploy by default, AgentReplDeploy once a test makes the
 // repository agent-repl's own (DeploysAsAgentRepl).
@@ -34,25 +34,26 @@ const AgentReplDeploy = `pre_deploy:
         script_path: bin/test-all.sh
     version_tag: {}
 deploy:
-  hook:
-    script:
-      path: ` + DeployLandingScript + `
-      timeout_seconds: 60
-  runs_for:
-    main: {}
+  user_or_workspace:
+    hook:
+      script:
+        path: ` + DeployLandingScript + `
+        timeout_seconds: 60
+    runs_for:
+      main: {}
 `
 
 // WriteDeployConfig replaces the repository's deploy config with BODY.
 func (r *Repo) WriteDeployConfig(body string) {
 	r.t.Helper()
-	writeFile(r.t, deployconfig.Path(r.Dir), body)
+	writeFile(r.t, lifecycleconfig.Path(r.Dir), body)
 }
 
 // RemoveDeployConfig leaves the repository stating no deploy.
 func (r *Repo) RemoveDeployConfig() {
 	r.t.Helper()
-	if err := os.Remove(deployconfig.Path(r.Dir)); err != nil {
-		r.t.Fatalf("harness: remove %s: %v", deployconfig.Path(r.Dir), err)
+	if err := os.Remove(lifecycleconfig.Path(r.Dir)); err != nil {
+		r.t.Fatalf("harness: remove %s: %v", lifecycleconfig.Path(r.Dir), err)
 	}
 }
 

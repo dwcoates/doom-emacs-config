@@ -49,7 +49,7 @@ enum PromptOrigin {
   // hooks, or a request's own before prompts), run as a turn of the deploy's
   // owner.
   PROMPT_ORIGIN_MERGE_BEFORE_ACTION = 24;
-  // A deploy's `post_deploy` prompt hook (repoconfig.v1.DeployConfig
+  // A deploy's `post_deploy` prompt hook (repoconfig.v1.LifecycleConfig
   // post_deploy, or a request's own after prompts), run as a turn of the
   // deploy's owner.
   PROMPT_ORIGIN_MERGE_AFTER_ACTION = 25;
@@ -204,7 +204,7 @@ enum PromptOrigin {
   // The compaction CompactWorkspace submitted. Waits behind a running turn
   // like any deferred prompt; drawn as the context cut it produces.
   PROMPT_ORIGIN_WORKSPACE_COMPACT = 42;
-  // A deploy's `deploy` stage prompt hook (repoconfig.v1.DeployConfig.deploy),
+  // A deploy's `deploy` stage prompt hook (repoconfig.v1.LifecycleConfig.deploy),
   // run as a turn of the deploy's owner. Drawn, like the other two hook
   // origins, inside the deploy bubble's hook tab rather than as a prompt the
   // user said.
@@ -245,4 +245,10 @@ enum PromptOrigin {
   // the frame stays where it is. Its one Emacs send site is
   // `agent-repl-thread-send-background`.
   PROMPT_ORIGIN_COMMAND_THREAD_BACKGROUND = 48;
+  // A finish-stage prompt hook (repoconfig.v1.LifecycleConfig.finish), run as
+  // a turn of the workspace that called `workspace finished`, once that call's
+  // turn has ended and before its deploy is put in the queue. No deploy bubble
+  // exists yet, so it is drawn in the workspace's own feed as an ordinary
+  // prompt bubble the daemon sent, never as a prompt the user said.
+  PROMPT_ORIGIN_FINISH_HOOK = 49;
 }

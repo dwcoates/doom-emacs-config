@@ -1,0 +1,39 @@
+# agent-repl's own lifecycle (repoconfig.v1.LifecycleConfig, documented in the
+# /agent-repl-workspaces skill). A finished workspace's branch is rebased onto
+# master, tested by agent-repl's suites, landed as a merge commit and tagged;
+# then the running runtime is redeployed by the deploy hook. Both kinds of
+# workspace deploy the same way.
+pre_deploy:
+  local_merge:
+    tests:
+      agent_repl_suites:
+        script_path: modules/app/agent-repl/bin/test-all.sh
+    version_tag: {}
+deploy:
+  emoji_ack: &redeploy
+    hook:
+      script:
+        path: modules/app/agent-repl/bin/deploy-landing.sh
+        timeout_seconds: 60
+    runs_for:
+      main: {}
+  user_or_workspace: *redeploy
+# agent-repl lands locally and opens no pull request, so an emoji-ack
+# workspace's finish has nothing to announce, and its thread is told the work
+# landed once it has, in place of the default `:merged:` reaction (which
+# reacts on announced pull requests only).
+finish:
+  emoji_ack:
+    hooks: []
+post_deploy:
+  emoji_ack:
+    hooks:
+      - hook:
+          prompt:
+            text: "Your work has landed on master. Post one brief reply in the thread of the Slack message this workspace was created for ({{slack_thread}}), in your own words, saying the work is done and what it changed. Post it with the send-to-slack skill."
+        runs_for:
+          main: {}
+# Once the queue fully depletes, master is pushed to origin as a release.
+queue_drained:
+  - path: modules/app/agent-repl/bin/push-release.sh
+    timeout_seconds: 120

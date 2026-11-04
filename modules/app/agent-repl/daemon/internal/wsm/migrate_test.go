@@ -1119,3 +1119,56 @@ func TestAnIncumbentHandleKeepsWritingAcrossTheJoiningMigration(t *testing.T) {
 		t.Fatalf("the incumbent's write after the join: %v", err)
 	}
 }
+
+func TestTheMigrationAddsTheLifecycleHooksFacts(t *testing.T) {
+	// Arrange -- a file written before a workspace recorded who created it, a
+	// link what it announces, or a finish stage its progress.
+	path := layout3Fixture(t)
+
+	// Act
+	handle, err := Open(context.Background(), path, WithUnsyncedWrites())
+	if err != nil {
+		t.Fatalf("Open on a layout-3 database: %v", err)
+	}
+	defer handle.Close()
+
+	// Assert
+	s := handle.(*store)
+	originators := scalar[int](t, s, `SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'workspace_originators'`)
+	announces := scalar[int](t, s, `SELECT count(*) FROM pragma_table_info('workspace_links') WHERE name = 'announces' AND "notnull" = 0`)
+	finish := scalar[int](t, s, `SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'merge_finish_progress'`)
+	if originators != 1 || announces != 1 || finish != 1 {
+		t.Fatalf("workspace_originators %d, workspace_links.announces (nullable) %d, merge_finish_progress %d; want 1 each", originators, announces, finish)
+	}
+}
+
+func TestTheMigrationDropsTheDaemonsSlackPosts(t *testing.T) {
+	// Arrange -- a file written before the daemon stopped posting to Slack.
+	path := layout3Fixture(t)
+
+	// Act
+	handle, err := Open(context.Background(), path, WithUnsyncedWrites())
+	if err != nil {
+		t.Fatalf("Open on a layout-3 database: %v", err)
+	}
+	defer handle.Close()
+
+	// Assert
+	s := handle.(*store)
+	posts := scalar[int](t, s, `SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'workspace_slack_link_posts'`)
+	opened := scalar[int](t, s, `SELECT count(*) FROM pragma_table_info('workspace_slack_origins') WHERE name = 'opened'`)
+	origins := scalar[int](t, s, `SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'workspace_slack_origins'`)
+	if posts != 0 || opened != 0 || origins != 1 {
+		t.Fatalf("workspace_slack_link_posts %d, workspace_slack_origins.opened %d, workspace_slack_origins %d; want the posts gone and the origins kept", posts, opened, origins)
+	}
+}
+
+func TestTheDropOfTheSlackPostsIsBreaking(t *testing.T) {
+	// Arrange / Act
+	last := migrations[len(migrations)-1]
+
+	// Assert
+	if last.To != 103 || last.Name != "drop_workspace_slack_posts" || last.Kind != MigrationBreaking {
+		t.Fatalf("the last migration = %+v, want layout 103 dropping the Slack posts, breaking", last)
+	}
+}

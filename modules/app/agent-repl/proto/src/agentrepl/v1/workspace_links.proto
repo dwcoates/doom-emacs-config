@@ -14,10 +14,15 @@
 // OWNED OR REFERENCED. Every link says whether the workspace's work MADE the
 // thing it points at (a pull request it opened, a doc it wrote) or only
 // points at something that exists apart from it (the thread it was asked in,
-// a ticket, a dashboard). The daemon reads the owned links, and only those,
-// when it tells the Slack thread a workspace was created for that the work is
-// done, so the thread is shown what the work produced and nothing it was
-// merely shown.
+// a ticket, a dashboard). The daemon follows an owned pull request for the
+// workspace.
+//
+// AN OWNED LINK MAY ANNOUNCE ANOTHER. A post the workspace's work made (a
+// Slack message telling its originating thread a pull request was created)
+// names the link it announces (WorkspaceLinkAnnouncement), so a hook finds the
+// announcing post from the stored links alone: the built-in post-deploy hook
+// of an emoji-ack workspace reacts `:merged:` on every post announcing a pull
+// request that merged (repoconfig.v1.LifecycleConfig).
 
 syntax = "proto3";
 
@@ -58,9 +63,8 @@ message WorkspaceLink {
 message WorkspaceLinkOwnership {
   oneof ownership {
     // The workspace's work made it: a pull request it opened, a branch it
-    // pushed, a doc or a ticket it wrote. The Slack thread a workspace was
-    // created for is shown every owned link when the work is done, and the
-    // daemon follows an owned pull request for the workspace.
+    // pushed, a doc or a ticket it wrote, a Slack post it made. The daemon
+    // follows an owned pull request for the workspace.
     WorkspaceLinkOwned owned = 1;
     // It exists apart from the workspace's work, which only points at it: the
     // thread or ticket the task came from, a design doc it read, a dashboard.
@@ -75,6 +79,19 @@ message WorkspaceLinkOwned {
   // notices). Set on every answer; ignored on a request, where only the arm
   // is read.
   optional WorkspaceLinkOwnedFollow follow = 1;
+  // The stored link this one announces: a Slack post saying a pull request
+  // was created names that pull request's link. UNSET for a link that
+  // announces nothing. On a request, the url must be a link the workspace
+  // already holds (ChangeWorkspaceLinksError.unknown_announced_link
+  // otherwise); a relabel sets it anew, and removing the announced link
+  // leaves the announcement naming the url it was set with.
+  optional WorkspaceLinkAnnouncement announces = 2;
+}
+
+// The link an owned link announces.
+message WorkspaceLinkAnnouncement {
+  // The announced link's url, exactly as it was stored.
+  string url = 1;
 }
 
 // The workspace's work only points at it. DELIBERATELY EMPTY: the arm is the

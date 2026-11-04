@@ -11,8 +11,8 @@ import (
 
 	repoconfigv1 "agentrepl/proto/repoconfig/v1"
 
-	"agent-repld/internal/deployconfig"
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/lifecycleconfig"
 	"agent-repld/internal/wsm"
 )
 
@@ -30,7 +30,7 @@ func drainOwedHarness(t *testing.T, scripts ...string) *harness {
 	h := newHarness(t)
 	h.registerRepo("repo-target", h.targetD)
 	for _, path := range scripts {
-		h.config.QueueDrained = append(h.config.QueueDrained, deployconfig.ScriptHook(path, 9).GetScript())
+		h.config.QueueDrained = append(h.config.QueueDrained, lifecycleconfig.ScriptHook(path, 9).GetScript())
 	}
 	h.db.mu.Lock()
 	h.db.drainOwed[h.repoKey()] = true
@@ -257,7 +257,7 @@ func TestTheDrainRecordsEveryFailureToStartAndLeavesTheDebtOwed(t *testing.T) {
 			h.db.repos = h.db.repos[:1]
 			h.db.mu.Unlock()
 		}, message: "could not resolve the repository whose queue owes its drain; the drain stays owed"},
-		{name: "the deploy config cannot be read", arrange: func(h *harness) { h.configErr = errors.New("deploy.yaml: unknown field") },
+		{name: "the deploy config cannot be read", arrange: func(h *harness) { h.configErr = errors.New("lifecycle.yaml: unknown field") },
 			message: "could not read the deploy config of the repository whose queue owes its drain; the drain stays owed"},
 	}
 	for _, tt := range tests {
@@ -381,7 +381,7 @@ func TestAdmittingAMergeOwesTheDrainThePumpThenRuns(t *testing.T) {
 	// Arrange: a merge that lands, then an empty queue.
 	h := newHarness(t)
 	h.registerRepo("repo-target", h.targetD)
-	h.config.QueueDrained = []*repoconfigv1.DeployHookScript{deployconfig.ScriptHook(releaseScript, 9).GetScript()}
+	h.config.QueueDrained = []*repoconfigv1.HookScript{lifecycleconfig.ScriptHook(releaseScript, 9).GetScript()}
 	h.landsCleanly("abc123")
 	enqueueWorkspace(t, h, theWorkspace)
 

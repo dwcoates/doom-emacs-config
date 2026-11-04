@@ -23,11 +23,11 @@ import (
 
 	"agent-repld/internal/bounce"
 	"agent-repld/internal/cpugov"
-	"agent-repld/internal/deployconfig"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/gitclient"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/lifecycleconfig"
 	"agent-repld/internal/paint"
 	"agent-repld/internal/promptqueue"
 	"agent-repld/internal/resolve/feed"
@@ -54,6 +54,16 @@ type fakeDB struct {
 	progressHistory []wsm.MergeProgress
 
 	wsm.DB
+
+	// originators and slackOrigins are what a create recorded of each
+	// workspace (setOriginator); none recorded is a user_or_workspace one.
+	originators  map[ids.WorkspaceID]string
+	slackOrigins map[ids.WorkspaceID]string
+	// finish is each workspace's finish-stage progress, finishHistory every
+	// record written in order, and finishErr fails a record.
+	finish        map[ids.WorkspaceID]wsm.FinishProgress
+	finishHistory []wsm.FinishProgress
+	finishErr     error
 
 	// sweeps counts SweepOrphanedMergeState calls; swept and sweepErr are
 	// what it answers.
@@ -199,8 +209,60 @@ func (f *fakeDB) bindHeldPrompt(id ids.WorkspaceID) {
 	}
 }
 
+// SetOriginator records who created WS, as a create does.
+func (d *fakeDB) setOriginator(ws ids.WorkspaceID, originator, thread string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.originators[ws] = originator
+	if thread != "" {
+		d.slackOrigins[ws] = thread
+	}
+}
+
+func (d *fakeDB) WorkspaceOriginator(_ context.Context, ws ids.WorkspaceID) (string, bool, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	originator, found := d.originators[ws]
+	return originator, found, nil
+}
+
+func (d *fakeDB) WorkspaceSlackOrigin(_ context.Context, ws ids.WorkspaceID) (string, bool, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	thread, found := d.slackOrigins[ws]
+	return thread, found, nil
+}
+
+func (d *fakeDB) PutFinishProgress(_ context.Context, ws ids.WorkspaceID, progress wsm.FinishProgress) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.finishErr != nil {
+		return d.finishErr
+	}
+	d.finish[ws] = progress
+	d.finishHistory = append(d.finishHistory, progress)
+	return nil
+}
+
+func (d *fakeDB) WorkspaceFinishProgress(_ context.Context, ws ids.WorkspaceID) (wsm.FinishProgress, bool, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	progress, found := d.finish[ws]
+	return progress, found, nil
+}
+
+func (d *fakeDB) ClearFinishProgress(_ context.Context, ws ids.WorkspaceID) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	delete(d.finish, ws)
+	return nil
+}
+
 func newFakeDB() *fakeDB {
 	return &fakeDB{
+		originators:   map[ids.WorkspaceID]string{},
+		slackOrigins:  map[ids.WorkspaceID]string{},
+		finish:        map[ids.WorkspaceID]wsm.FinishProgress{},
 		workspaces:    map[ids.WorkspaceID]wsm.Workspace{},
 		jobs:          map[ids.WorkspaceID]wsm.CreationJob{},
 		jobDecodeErrs: map[ids.WorkspaceID]error{},
@@ -2451,7 +2513,6 @@ type harness struct {
 	db *fakeDB
 	// events records every queue change the orchestrator reports.
 	events  *fakeQueueEvents
-	ends    *fakeEnds
 	git     *fakeGit
 	queue   *fakeQueue
 	feed    *fakeFeed
@@ -2476,7 +2537,7 @@ type harness struct {
 	// config is the repository's deploy config every read answers, and
 	// configErr fails the read instead. The default is a repository with no
 	// local merge and no hook: a deploy that runs nothing but its terminal.
-	config    *repoconfigv1.DeployConfig
+	config    *repoconfigv1.LifecycleConfig
 	configErr error
 	// hooks is the scripted hook runner, and every script hook it ran.
 	hooks *fakeHookRunner
@@ -2639,13 +2700,13 @@ const theRepository = ids.RepoID("repo-1")
 // exactly the config the harness holds, and nothing touches a disk.
 type harnessConfig struct{ h *harness }
 
-func (c harnessConfig) Load(string) (*repoconfigv1.DeployConfig, error) {
+func (c harnessConfig) Load(string) (*repoconfigv1.LifecycleConfig, error) {
 	c.h.mu.Lock()
 	defer c.h.mu.Unlock()
 	if c.h.configErr != nil {
 		return nil, c.h.configErr
 	}
-	return proto.Clone(c.h.config).(*repoconfigv1.DeployConfig), nil
+	return proto.Clone(c.h.config).(*repoconfigv1.LifecycleConfig), nil
 }
 
 // hookRun is one script hook the fake runner ran.
@@ -2741,31 +2802,31 @@ func (f *fakeHookRunner) ran() []hookRun {
 }
 
 // promptHookOf is a prompt hook of TEXT.
-func promptHookOf(text string) *repoconfigv1.DeployHook {
-	return deployconfig.PromptHook(text)
+func promptHookOf(text string) *repoconfigv1.Hook {
+	return lifecycleconfig.PromptHook(text)
 }
 
 // scriptHookOf is a script hook of PATH bounded at 30 seconds.
-func scriptHookOf(path string) *repoconfigv1.DeployHook {
-	return deployconfig.ScriptHook(path, 30)
+func scriptHookOf(path string) *repoconfigv1.Hook {
+	return lifecycleconfig.ScriptHook(path, 30)
 }
 
 // entryOf is a hook entry running for every target.
-func anyTarget(hook *repoconfigv1.DeployHook) *repoconfigv1.DeployHookEntry {
-	return &repoconfigv1.DeployHookEntry{Hook: hook, RunsFor: &repoconfigv1.DeployHookRunsFor{
-		Scope: &repoconfigv1.DeployHookRunsFor_AnyTarget{AnyTarget: &repoconfigv1.DeployHookRunsForAnyTarget{}}}}
+func anyTarget(hook *repoconfigv1.Hook) *repoconfigv1.HookEntry {
+	return &repoconfigv1.HookEntry{Hook: hook, RunsFor: &repoconfigv1.HookRunsFor{
+		Scope: &repoconfigv1.HookRunsFor_AnyTarget{AnyTarget: &repoconfigv1.HookRunsForAnyTarget{}}}}
 }
 
 // mainOnly is a hook entry running only for landings on the main branch.
-func mainOnly(hook *repoconfigv1.DeployHook) *repoconfigv1.DeployHookEntry {
-	return &repoconfigv1.DeployHookEntry{Hook: hook, RunsFor: &repoconfigv1.DeployHookRunsFor{
-		Scope: &repoconfigv1.DeployHookRunsFor_Main{Main: &repoconfigv1.DeployHookRunsForMain{}}}}
+func mainOnly(hook *repoconfigv1.Hook) *repoconfigv1.HookEntry {
+	return &repoconfigv1.HookEntry{Hook: hook, RunsFor: &repoconfigv1.HookRunsFor{
+		Scope: &repoconfigv1.HookRunsFor_Main{Main: &repoconfigv1.HookRunsForMain{}}}}
 }
 
 // localMergeConfig is agent-repl's own config without its deploy hook: the
 // local merge, tested by agent-repl's suites and tagged.
-func localMergeConfig() *repoconfigv1.DeployConfig {
-	return &repoconfigv1.DeployConfig{PreDeploy: &repoconfigv1.DeployPreDeployStage{LocalMerge: &repoconfigv1.DeployLocalMerge{
+func localMergeConfig() *repoconfigv1.LifecycleConfig {
+	return &repoconfigv1.LifecycleConfig{PreDeploy: &repoconfigv1.DeployPreDeployStage{LocalMerge: &repoconfigv1.DeployLocalMerge{
 		Tests:      &repoconfigv1.DeployLocalMergeTests{Kind: &repoconfigv1.DeployLocalMergeTests_AgentReplSuites{AgentReplSuites: &repoconfigv1.DeployTestsAgentReplSuites{ScriptPath: "modules/app/agent-repl/bin/test-all.sh"}}},
 		VersionTag: &repoconfigv1.DeployVersionTag{},
 	}}}
@@ -2780,8 +2841,12 @@ const deployScript = "modules/app/agent-repl/bin/deploy-landing.sh"
 func (h *harness) repoPreHooks(texts ...string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	if h.config.PreDeploy.UserOrWorkspace == nil {
+		h.config.PreDeploy.UserOrWorkspace = &repoconfigv1.LifecycleHookList{}
+	}
+	list := h.config.PreDeploy.UserOrWorkspace
 	for _, text := range texts {
-		h.config.PreDeploy.Hooks = append(h.config.PreDeploy.Hooks, anyTarget(promptHookOf(text)))
+		list.Hooks = append(list.Hooks, anyTarget(promptHookOf(text)))
 	}
 }
 
@@ -2790,9 +2855,32 @@ func (h *harness) repoPreHooks(texts ...string) {
 func (h *harness) repoPostHooks(texts ...string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	for _, text := range texts {
-		h.config.PostDeploy = append(h.config.PostDeploy, anyTarget(promptHookOf(text)))
+	if h.config.PostDeploy == nil {
+		h.config.PostDeploy = &repoconfigv1.LifecycleStageHooks{}
 	}
+	if h.config.PostDeploy.UserOrWorkspace == nil {
+		h.config.PostDeploy.UserOrWorkspace = &repoconfigv1.LifecycleHookList{}
+	}
+	list := h.config.PostDeploy.UserOrWorkspace
+	for _, text := range texts {
+		list.Hooks = append(list.Hooks, anyTarget(promptHookOf(text)))
+	}
+}
+
+// harnessCheckoutRoot is the agent-repl checkout the built-in defaults'
+// script lives in, for the harness's orchestrator.
+const harnessCheckoutRoot = "/agent-repl"
+
+// forUsers is a deploy stage whose one hook ENTRY is a user_or_workspace
+// workspace's: every harness workspace is one, as nothing records an
+// originator for it.
+func forUsers(entry *repoconfigv1.HookEntry) *repoconfigv1.LifecycleDeployStage {
+	return &repoconfigv1.LifecycleDeployStage{UserOrWorkspace: entry}
+}
+
+// usersList is a stage whose user_or_workspace list is ENTRIES.
+func usersList(entries ...*repoconfigv1.HookEntry) *repoconfigv1.LifecycleStageHooks {
+	return &repoconfigv1.LifecycleStageHooks{UserOrWorkspace: &repoconfigv1.LifecycleHookList{Hooks: entries}}
 }
 
 // newHarness builds an orchestrator whose admission is driven a step at a time,
@@ -2817,14 +2905,13 @@ func newHarness(t *testing.T) *harness {
 		stateDir: t.TempDir(),
 		now:      time.Unix(1700000000, 0).UTC(),
 		briefs:   map[string][]string{},
-		config:   &repoconfigv1.DeployConfig{PreDeploy: &repoconfigv1.DeployPreDeployStage{}},
+		config:   &repoconfigv1.LifecycleConfig{PreDeploy: &repoconfigv1.DeployPreDeployStage{}},
 		freeness: &fakeFreeness{},
 		timings:  &fakeTimings{},
 	}
 	h.detached = &fakeDetached{h: h}
 	h.hooks = &fakeHookRunner{h: h, exits: map[string]int{}, timeouts: map[string]bool{}, lines: map[string][]string{}, outputs: map[string]string{}}
 	h.events = &fakeQueueEvents{}
-	h.ends = &fakeEnds{}
 	h.names = &fakeNames{}
 	h.banners = &fakeBanners{told: func() int { return len(h.detached.sent()) }}
 	h.queue = &fakeQueue{db: h.db}
@@ -2885,6 +2972,7 @@ func (h *harness) deps() Deps {
 		DB:          h.db, Git: h.git, Queue: h.queue, Feed: h.feed, Footer: h.footer,
 		Sidebar: h.sidebar, Asks: h.asks, Banners: h.banners, PromptsDir: "prompts",
 		DeployConfig: harnessConfig{h: h},
+		Builtins:     lifecycleconfig.Builtins{CheckoutRoot: harnessCheckoutRoot},
 		HookRunner:   h.hooks,
 		SelfAddress:  harnessSelfAddress,
 		Briefs:       h.loadBrief,
@@ -2984,7 +3072,6 @@ func (h *harness) deps() Deps {
 		},
 		Home:     "/home/tester",
 		Detached: h.detached,
-		Ends:     h.ends,
 		Names:    h.names,
 		InterruptTurn: func(_ context.Context, ws ids.WorkspaceID) (bool, error) {
 			h.mu.Lock()
@@ -3111,7 +3198,7 @@ func (h *harness) emacsRepo() {
 func (h *harness) ownCheckout() {
 	h.emacsRepo()
 	h.mu.Lock()
-	h.config.Deploy = mainOnly(scriptHookOf(deployScript))
+	h.config.Deploy = forUsers(mainOnly(scriptHookOf(deployScript)))
 	h.mu.Unlock()
 }
 
@@ -3501,30 +3588,6 @@ func attemptsUpTo(n int) []int {
 		out[i] = i + 1
 	}
 	return out
-}
-
-// fakeEnds records every merge resolution the orchestrator reported, in order.
-type fakeEnds struct {
-	mu   sync.Mutex
-	seen []endSeen
-}
-
-// endSeen is one resolution fakeEnds was told.
-type endSeen struct {
-	ws  ids.WorkspaceID
-	out DetachedOutcome
-}
-
-func (f *fakeEnds) MergeEnded(_ context.Context, ws ids.WorkspaceID, out DetachedOutcome) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.seen = append(f.seen, endSeen{ws: ws, out: out})
-}
-
-func (f *fakeEnds) told() []endSeen {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return append([]endSeen(nil), f.seen...)
 }
 
 // fakeQueueEvents records every reported queue change, in order.

@@ -260,8 +260,9 @@ func startedByMerge(origin string) bool {
 // mergeQueueOrigins are the origins of EVERY turn the merge queue causes: the
 // turns it starts in its own tabs (mergeStartedOrigins), and the handback that
 // tells a detached merge's requester how its merge ended, the compaction a
-// landed detached merge asked for after it, and a subscription's notice of a
-// queue change. The merge queue's
+// landed detached merge asked for after it, a subscription's notice of a
+// queue change, and a finish-stage prompt hook run before a deploy is put in
+// line. The merge queue's
 // own two banners -- put in line, and resolved (merge.Banners) -- are all it
 // raises, so none of these turns raises a banner at its end.
 var mergeQueueOrigins = func() map[string]bool {
@@ -269,6 +270,7 @@ var mergeQueueOrigins = func() map[string]bool {
 	origins[conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_HANDBACK.String()] = true
 	origins[conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_COMPACT_AFTER.String()] = true
 	origins[conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_QUEUE_NOTICE.String()] = true
+	origins[conversationv1.PromptOrigin_PROMPT_ORIGIN_FINISH_HOOK.String()] = true
 	return origins
 }()
 

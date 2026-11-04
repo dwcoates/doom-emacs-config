@@ -13,7 +13,7 @@ import (
 )
 
 // This file is a repository's QUEUE DRAIN: the scripts its deploy config runs
-// once its merge queue fully depletes (repoconfig.v1.DeployConfig.queue_drained),
+// once its merge queue fully depletes (repoconfig.v1.LifecycleConfig.queue_drained),
 // which for agent-repl push master to origin as a release.
 //
 // THE DEBT IS DURABLE. The store owes a repository its drain in the write that
@@ -70,7 +70,7 @@ func (o *orchestrator) settleDrained(ctx context.Context, repo wsm.RepoKey) {
 // held for them. They run only when the repository owes them, its queue is
 // not paused, nothing is in it, and no run of it stands in this process. Its
 // store reads are ONE admission step, as the pump's own are.
-func (o *orchestrator) drainDue(ctx context.Context, repo wsm.RepoKey) (string, []*repoconfigv1.DeployHookScript, bool) {
+func (o *orchestrator) drainDue(ctx context.Context, repo wsm.RepoKey) (string, []*repoconfigv1.HookScript, bool) {
 	if !o.enterAdmission() {
 		return "", nil, false
 	}
@@ -143,16 +143,16 @@ func (o *orchestrator) drainDue(ctx context.Context, repo wsm.RepoKey) (string, 
 // main checkout root ROOT, with no deploy environment, and reports whether it
 // succeeded. Its whole output is kept among the queue's logs, and a failure's
 // record carries the log's path and how the script ended.
-func (o *orchestrator) runDrainedScript(ctx context.Context, repo wsm.RepoKey, root string, i int, script *repoconfigv1.DeployHookScript) bool {
+func (o *orchestrator) runDrainedScript(ctx context.Context, repo wsm.RepoKey, root string, i int, script *repoconfigv1.HookScript) bool {
 	log := o.deps.Log.Global()
 	logPath := filepath.Join(LogsDir(o.deps.StateDir), fmt.Sprintf("queue_drained-%d-%d.log", o.deps.Now().UnixNano(), i))
 	fields := dlog.Context{"repo": string(repo), "repo_root": root, "index": i, "script": script.GetPath(),
 		"timeout_seconds": script.GetTimeoutSeconds(), "log": logPath}
-	ran := o.runOwnerlessScript(ctx, root, script, nil, logPath)
-	fields["exit_code"], fields["wall_ms"] = ran.run.ExitCode, ran.run.Wall.Milliseconds()
-	failure := ran.failure(script)
-	if failure == "" && ran.logErr != nil {
-		failure = ran.logErr.Error()
+	ran := RunKeptScript(ctx, o.deps.HookRunner, root, script, nil, logPath)
+	fields["exit_code"], fields["wall_ms"] = ran.Run.ExitCode, ran.Run.Wall.Milliseconds()
+	failure := ran.Failure(script)
+	if failure == "" && ran.LogErr != nil {
+		failure = ran.LogErr.Error()
 	}
 	if failure != "" {
 		log.Error(opQueueDrained, "a queue_drained script failed; the scripts after it do not run, and the drain stays owed",

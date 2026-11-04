@@ -8,6 +8,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/health"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/lifecycleconfig"
 	"agent-repld/internal/wsm"
 )
 
@@ -53,6 +54,8 @@ func (v *verbs) RequestCommandSupport(ctx context.Context, ws ids.WorkspaceID, c
 		"command": command, "repo_dir": repoDir,
 	})
 	created, err := v.Create(ctx, CreateSpec{
+		// A SUPPORT WORKSPACE IS ONE THE USER ASKED FOR, through a command.
+		Originator:    lifecycleconfig.OriginatorUserOrWorkspace,
 		RepoDir:       repoDir,
 		InitialPrompt: prompt,
 		// The name is the daemon's, not the brief's: a slug derived from a

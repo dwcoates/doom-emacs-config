@@ -10,9 +10,9 @@ import (
 	"sync"
 	"time"
 
-	"agent-repld/internal/deployconfig"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/lifecycleconfig"
 	"agent-repld/internal/wsm"
 )
 
@@ -322,7 +322,7 @@ func newOrchestrator(deps Deps) (*orchestrator, error) {
 		deps.Now = time.Now
 	}
 	if deps.DeployConfig == nil {
-		deps.DeployConfig = deployconfig.OnDisk{}
+		deps.DeployConfig = lifecycleconfig.OnDisk{}
 	}
 	if deps.Home == "" {
 		home, err := os.UserHomeDir()
@@ -442,10 +442,10 @@ func (d Deps) validate() error {
 	check(d.TurnInFlight != nil, "TurnInFlight")
 	check(d.Rollout != nil, "Rollout")
 	check(d.QueueEvents != nil, "QueueEvents")
-	check(d.Ends != nil, "Ends")
 	check(d.Log != nil, "Log")
 	check(d.StateDir != "", "StateDir")
 	check(d.HookRunner != nil, "HookRunner")
+	check(d.Builtins.CheckoutRoot != "", "Builtins.CheckoutRoot")
 	check(d.TestCommand != nil, "TestCommand")
 	if len(missing) > 0 {
 		return fmt.Errorf("merge: the orchestrator is missing %v", missing)

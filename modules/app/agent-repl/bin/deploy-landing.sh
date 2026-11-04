@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# deploy-landing.sh — agent-repl's deploy hook (.agent-repl/deploy.yaml).
+# deploy-landing.sh — agent-repl's deploy hook (.agent-repl/lifecycle.yaml).
 #
 # It asks the daemon to roll out what the deploy landed
 # (agentrepl.v1.RollOutLanding). The daemon owns the rollout itself: run by a

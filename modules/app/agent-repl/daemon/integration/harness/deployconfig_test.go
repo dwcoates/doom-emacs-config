@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"agent-repld/internal/deployconfig"
+	"agent-repld/internal/lifecycleconfig"
 )
 
 func TestAFixtureRepositoryDeploysItsHooksAlone(t *testing.T) {
@@ -16,11 +16,11 @@ func TestAFixtureRepositoryDeploysItsHooksAlone(t *testing.T) {
 	repo := NewRepo(t)
 
 	// Assert
-	cfg, err := deployconfig.OnDisk{}.Load(repo.Dir)
+	cfg, err := lifecycleconfig.OnDisk{}.Load(repo.Dir)
 	if err != nil {
 		t.Fatalf("Load = %v, want the fixture's config", err)
 	}
-	if cfg.GetPreDeploy().GetLocalMerge() != nil || cfg.GetDeploy() != nil || len(cfg.GetPostDeploy()) != 0 {
+	if cfg.GetPreDeploy().GetLocalMerge() != nil || cfg.GetDeploy() != nil || cfg.GetPostDeploy() != nil {
 		t.Fatalf("config = %v, want hooks alone", cfg)
 	}
 }
@@ -33,12 +33,12 @@ func TestAgentReplDeployStatesAgentReplsPipeline(t *testing.T) {
 	repo.WriteDeployConfig(AgentReplDeploy)
 
 	// Assert
-	cfg, err := deployconfig.OnDisk{}.Load(repo.Dir)
+	cfg, err := lifecycleconfig.OnDisk{}.Load(repo.Dir)
 	if err != nil {
 		t.Fatalf("Load = %v, want agent-repl's config", err)
 	}
-	if cfg.GetPreDeploy().GetLocalMerge().GetVersionTag() == nil || cfg.GetDeploy().GetRunsFor().GetMain() == nil ||
-		cfg.GetDeploy().GetHook().GetScript().GetPath() != DeployLandingScript {
+	if cfg.GetPreDeploy().GetLocalMerge().GetVersionTag() == nil || cfg.GetDeploy().GetUserOrWorkspace().GetRunsFor().GetMain() == nil ||
+		cfg.GetDeploy().GetUserOrWorkspace().GetHook().GetScript().GetPath() != DeployLandingScript {
 		t.Fatalf("config = %v, want a tagged local merge and the deploy script for main", cfg)
 	}
 }
@@ -155,8 +155,8 @@ func TestRemoveDeployConfigLeavesNoDeploy(t *testing.T) {
 	repo.RemoveDeployConfig()
 
 	// Assert
-	var missing *deployconfig.MissingError
-	if _, err := (deployconfig.OnDisk{}).Load(repo.Dir); !errors.As(err, &missing) {
+	var missing *lifecycleconfig.MissingError
+	if _, err := (lifecycleconfig.OnDisk{}).Load(repo.Dir); !errors.As(err, &missing) {
 		t.Fatalf("Load = %v, want the config missing", err)
 	}
 }

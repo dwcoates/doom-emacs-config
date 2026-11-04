@@ -153,6 +153,7 @@ func forkIndexOf(texts []string, want string) int {
 func forkOf(t *testing.T, f *fixture) *workspacev1.WorkspaceRef {
 	t.Helper()
 	resp, err := f.d.Client().CreateWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.CreateWorkspaceRequest{
+		Originator:    &agentreplv1.WorkspaceOriginator{Originator: &agentreplv1.WorkspaceOriginator_UserOrWorkspace{UserOrWorkspace: &agentreplv1.WorkspaceOriginatorUserOrWorkspace{}}},
 		Repository:    createRepositoryRef(t, f.d, f.repo),
 		Requester:     harness.User(),
 		ContextOrigin: harness.Fork(f.ws),

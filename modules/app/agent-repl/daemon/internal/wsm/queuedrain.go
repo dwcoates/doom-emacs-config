@@ -10,7 +10,7 @@ import (
 
 // queueDrainOwedDDL is the layout-94 addition: whether a repository owes the
 // scripts its deploy config runs once its queue fully depletes
-// (repoconfig.v1.DeployConfig.queue_drained), on the row that already holds
+// (repoconfig.v1.LifecycleConfig.queue_drained), on the row that already holds
 // its queue's pause. AdmitMerge sets it in the write that admits a merge, so
 // no admitted merge can leave the repository without it, whatever restart
 // follows; ClearQueueDrainOwed clears it once the scripts have all succeeded.

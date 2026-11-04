@@ -51,7 +51,7 @@ UPDATE merge_queue SET
 var hookJSON = protojson.MarshalOptions{UseProtoNames: true}
 
 // encodeHooks renders one stage's hooks as the JSON array the column holds.
-func encodeHooks(hooks []*repoconfigv1.DeployHook) (string, error) {
+func encodeHooks(hooks []*repoconfigv1.Hook) (string, error) {
 	items := make([]json.RawMessage, 0, len(hooks))
 	for i, hook := range hooks {
 		raw, err := hookJSON.Marshal(hook)
@@ -69,7 +69,7 @@ func encodeHooks(hooks []*repoconfigv1.DeployHook) (string, error) {
 
 // decodeHooks parses one stored stage of TABLE's, failing the whole read when
 // the column is not a JSON array of hooks.
-func decodeHooks(table, row, field, raw string) ([]*repoconfigv1.DeployHook, error) {
+func decodeHooks(table, row, field, raw string) ([]*repoconfigv1.Hook, error) {
 	var items []json.RawMessage
 	if err := json.Unmarshal([]byte(raw), &items); err != nil {
 		return nil, &DecodeError{Table: table, Row: row, Field: field, Err: err}
@@ -77,9 +77,9 @@ func decodeHooks(table, row, field, raw string) ([]*repoconfigv1.DeployHook, err
 	if len(items) == 0 {
 		return nil, nil
 	}
-	out := make([]*repoconfigv1.DeployHook, 0, len(items))
+	out := make([]*repoconfigv1.Hook, 0, len(items))
 	for i, item := range items {
-		hook := &repoconfigv1.DeployHook{}
+		hook := &repoconfigv1.Hook{}
 		if err := protojson.Unmarshal(item, hook); err != nil {
 			return nil, &DecodeError{Table: table, Row: row, Field: fmt.Sprintf("%s[%d]", field, i), Err: err}
 		}

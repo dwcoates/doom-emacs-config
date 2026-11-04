@@ -19,8 +19,8 @@ import (
 	testrunv1 "agentrepl/proto/testrun/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
-	"agent-repld/internal/deployconfig"
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/lifecycleconfig"
 	"agent-repld/internal/merge"
 	"agent-repld/internal/scriptrunner"
 )
@@ -279,13 +279,13 @@ func (s *server) testWorktreeOf(ctx context.Context, rpc, op string, ref *worksp
 
 // testScriptOf is the test script the worktree's own deploy config names.
 func testScriptOf(dir string) (string, error) {
-	cfg, err := deployconfig.OnDisk{}.Load(dir)
+	cfg, err := lifecycleconfig.OnDisk{}.Load(dir)
 	if err != nil {
 		return "", fmt.Errorf("read the worktree's deploy config: %w", err)
 	}
-	script := deployconfig.TestScript(cfg)
+	script := lifecycleconfig.TestScript(cfg)
 	if script == "" {
-		return "", fmt.Errorf("the worktree's deploy config %s names no agent_repl_suites test script, so this repository's tests are not the daemon's to run", deployconfig.Path(dir))
+		return "", fmt.Errorf("the worktree's deploy config %s names no agent_repl_suites test script, so this repository's tests are not the daemon's to run", lifecycleconfig.Path(dir))
 	}
 	return script, nil
 }

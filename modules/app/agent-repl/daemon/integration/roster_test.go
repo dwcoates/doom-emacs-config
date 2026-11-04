@@ -345,6 +345,7 @@ func TestAOneShotIsDrawnInTheOneShotSubsectionUntilItIsPlaced(t *testing.T) {
 	roster := d.WatchRoster()
 	harness.Register(t, d, worktreeOf(t, repo, "a"))
 	resp, err := d.Client().CreateWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.CreateWorkspaceRequest{
+		Originator:    &agentreplv1.WorkspaceOriginator{Originator: &agentreplv1.WorkspaceOriginator_UserOrWorkspace{UserOrWorkspace: &agentreplv1.WorkspaceOriginatorUserOrWorkspace{}}},
 		Repository:    createRepositoryRef(t, d, repo),
 		Requester:     harness.User(),
 		ContextOrigin: harness.Fresh(),

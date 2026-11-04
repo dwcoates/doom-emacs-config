@@ -9,8 +9,8 @@
 // deploys is the request's SOURCE: its own branch, another workspace's, or a
 // branch that is no workspace.
 //
-// WHAT A DEPLOY DOES IS THE REPOSITORY'S. Its `.agent-repl/deploy.yaml`
-// (repoconfig.v1.DeployConfig, read at every use by deployconfig) names three
+// WHAT A DEPLOY DOES IS THE REPOSITORY'S. Its `.agent-repl/lifecycle.yaml`
+// (repoconfig.v1.LifecycleConfig, read at every use by lifecycleconfig) names three
 // stages: pre-deploy hooks and, optionally, the built-in local merge (rebase
 // with conflict resolution, tests with fixing, the non-fast-forward merge
 // commit and its version tag); the deploy hook, which a repository's deploy
@@ -29,12 +29,12 @@ import (
 	"time"
 
 	"agent-repld/internal/cpugov"
-	"agent-repld/internal/deployconfig"
 	"agent-repld/internal/desktopnotify"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/gitclient"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/lifecycleconfig"
 	"agent-repld/internal/paint"
 	"agent-repld/internal/promptqueue"
 	"agent-repld/internal/prompts"
@@ -387,14 +387,6 @@ type DetachedMerges interface {
 	Reveal(ctx context.Context, mergeWS ids.WorkspaceID) (bool, error)
 }
 
-// EndObserver is told how every merge left the queue for good.
-type EndObserver interface {
-	// MergeEnded is told that the merge run in WS resolved as OUT: landed,
-	// failed, or abandoned. It records its own failures; nothing it does
-	// changes the merge's terminal.
-	MergeEnded(ctx context.Context, ws ids.WorkspaceID, out DetachedOutcome)
-}
-
 // Names is the slice of workspace naming an async request needs: its merge
 // workspace's name is checked and reserved when the request is recorded, so
 // the fork can never collide.
@@ -585,10 +577,6 @@ type Deps struct {
 	// Detached forks a detached request's merge workspace and hands its
 	// outcome back to the requester.
 	Detached DetachedMerges
-	// Ends is told every merge's resolution, once, after the workspaces it
-	// is handed back to were told (ended): the workspace verbs, which post a
-	// finished workspace's end into the Slack thread it was created for.
-	Ends EndObserver
 	// QueueEvents is told every change of every queue this daemon makes, with
 	// the queue as it stands after it: the merge queue subscriptions' notices
 	// (internal/mergenotice).
@@ -608,9 +596,12 @@ type Deps struct {
 	// Prompts reads the briefs at use time. The field holds the directory,
 	// not a cached brief, because a brief is never cached across a use.
 	PromptsDir string
-	// DeployConfig reads a repository's `.agent-repl/deploy.yaml`, at every
-	// deploy. nil means the real filesystem (deployconfig.OnDisk).
-	DeployConfig deployconfig.Files
+	// DeployConfig reads a repository's `.agent-repl/lifecycle.yaml`, at every
+	// deploy. nil means the real filesystem (lifecycleconfig.OnDisk).
+	DeployConfig lifecycleconfig.Files
+	// Builtins is what the stages' built-in defaults need: where the
+	// emoji-ack post-deploy script lives.
+	Builtins lifecycleconfig.Builtins
 	// SelfAddress is the address this daemon serves on: a deploy's script
 	// hooks are told it (EnvDeployDaemon) so they call back the daemon that
 	// runs their deploy.

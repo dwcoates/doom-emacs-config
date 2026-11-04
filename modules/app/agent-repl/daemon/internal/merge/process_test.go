@@ -13,11 +13,11 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
-	"agent-repld/internal/deployconfig"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/gitclient"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/lifecycleconfig"
 	"agent-repld/internal/promptqueue"
 	"agent-repld/internal/resolve/footer"
 	"agent-repld/internal/wsm"
@@ -670,7 +670,7 @@ func TestAConfigThatBreaksAfterEnqueueFailsTheDeploy(t *testing.T) {
 	h.emacsRepo()
 	enqueue(t, h)
 	h.mu.Lock()
-	h.configErr = &deployconfig.InvalidError{Path: "/repo/.agent-repl/deploy.yaml", Detail: "pre_deploy is required"}
+	h.configErr = &lifecycleconfig.InvalidError{Path: "/repo/.agent-repl/lifecycle.yaml", Detail: "pre_deploy is required"}
 	h.mu.Unlock()
 
 	// Act.

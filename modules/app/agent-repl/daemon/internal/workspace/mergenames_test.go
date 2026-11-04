@@ -12,6 +12,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/lifecycleconfig"
 	"agent-repld/internal/wsm"
 )
 
@@ -221,7 +222,7 @@ func TestCreateRefusesASuppliedNameAnAsyncMergeReserved(t *testing.T) {
 	f.db.reserved = map[string]ids.WorkspaceID{"reconnect-fix": "ws-other"}
 
 	// Act
-	_, err := f.verbs.Create(context.Background(), CreateSpec{RepoDir: mainWorktree(t, f), Name: "reconnect-fix"})
+	_, err := f.verbs.Create(context.Background(), CreateSpec{Originator: lifecycleconfig.OriginatorUserOrWorkspace, RepoDir: mainWorktree(t, f), Name: "reconnect-fix"})
 
 	// Assert
 	refusal, ok := AsRefusal(err)
@@ -292,7 +293,7 @@ func TestCreateRefusesASuppliedNameThatBreaksTheNamingRule(t *testing.T) {
 	supplied := "let's look at how we can see file edit diffs"
 
 	// Act
-	_, err := f.verbs.Create(context.Background(), CreateSpec{RepoDir: mainWorktree(t, f), Name: "  " + supplied + " "})
+	_, err := f.verbs.Create(context.Background(), CreateSpec{Originator: lifecycleconfig.OriginatorUserOrWorkspace, RepoDir: mainWorktree(t, f), Name: "  " + supplied + " "})
 
 	// Assert
 	refusal, ok := AsRefusal(err)
@@ -318,7 +319,7 @@ func TestCreateLeavesTheNameFreeAfterRefusingABadSuppliedName(t *testing.T) {
 	t.Setenv(PrefixEnv, "ABC")
 	t.Setenv(LegacyPrefixEnv, "")
 	repo := mainWorktree(t, f)
-	_, _ = f.verbs.Create(context.Background(), CreateSpec{RepoDir: repo, Name: "ABC/Bad Name"})
+	_, _ = f.verbs.Create(context.Background(), CreateSpec{Originator: lifecycleconfig.OriginatorUserOrWorkspace, RepoDir: repo, Name: "ABC/Bad Name"})
 
 	// Act
 	claimed := f.verbs.(*verbs).names.claimed
@@ -377,7 +378,7 @@ func TestCreateRefusesASuppliedNameAnUnlandedWorkspaceHolds(t *testing.T) {
 			f.db.with(holder)
 
 			// Act
-			_, err := f.verbs.Create(context.Background(), CreateSpec{RepoDir: mainWorktree(t, f), Name: "ramdisk-leak-investigation"})
+			_, err := f.verbs.Create(context.Background(), CreateSpec{Originator: lifecycleconfig.OriginatorUserOrWorkspace, RepoDir: mainWorktree(t, f), Name: "ramdisk-leak-investigation"})
 
 			// Assert
 			if tc.wantBuilt {
@@ -416,7 +417,7 @@ func TestCreateFailsLoudlyWhenTheHeldNameCheckCannotReadTheRegistry(t *testing.T
 	f.db.listWorkspacesErr = errors.New("database is locked")
 
 	// Act
-	_, err := f.verbs.Create(context.Background(), CreateSpec{RepoDir: repoDir, Name: "ramdisk-leak-investigation"})
+	_, err := f.verbs.Create(context.Background(), CreateSpec{Originator: lifecycleconfig.OriginatorUserOrWorkspace, RepoDir: repoDir, Name: "ramdisk-leak-investigation"})
 
 	// Assert
 	if err == nil {
@@ -480,7 +481,7 @@ func TestCreateRefusesASuppliedNameWhoseBranchExistsUnheld(t *testing.T) {
 			}
 
 			// Act
-			_, err := f.verbs.Create(context.Background(), CreateSpec{RepoDir: repo, Name: "ramdisk-leak-investigation"})
+			_, err := f.verbs.Create(context.Background(), CreateSpec{Originator: lifecycleconfig.OriginatorUserOrWorkspace, RepoDir: repo, Name: "ramdisk-leak-investigation"})
 
 			// Assert
 			if len(f.git.created) != 0 {

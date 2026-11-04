@@ -405,6 +405,9 @@ const (
 	// causeDetachedForkFailed is an async request that could not be handed
 	// to a merge workspace.
 	causeDetachedForkFailed = "detached_fork_failed"
+	// causeFinishFailed is a deploy whose finish stage failed before it was
+	// put in line (finish.go).
+	causeFinishFailed = "finish_failed"
 )
 
 // abandonSummaries is the resolved sentence each cause draws as the bubble's

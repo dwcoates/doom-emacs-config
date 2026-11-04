@@ -10,9 +10,9 @@ import (
 	repoconfigv1 "agentrepl/proto/repoconfig/v1"
 
 	"agent-repld/internal/account"
-	"agent-repld/internal/deployconfig"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/lifecycleconfig"
 	"agent-repld/internal/wsm"
 )
 
@@ -57,13 +57,14 @@ func mergeWorkspaceSpec(t *testing.T, f *fixture, requester ids.WorkspaceID) Cre
 	origin := landedOrigin(requester)
 	origin.ForkHead = "fork-head"
 	return CreateSpec{
-		RepoDir:   mainWorktree(t, f),
-		BaseRef:   "ABC/sample",
-		Parent:    &requester,
-		ForkFrom:  &requester,
-		Requester: &requester,
-		MergeOf:   &origin,
-		MergeName: "reconnect-fix",
+		Originator: lifecycleconfig.OriginatorUserOrWorkspace,
+		RepoDir:    mainWorktree(t, f),
+		BaseRef:    "ABC/sample",
+		Parent:     &requester,
+		ForkFrom:   &requester,
+		Requester:  &requester,
+		MergeOf:    &origin,
+		MergeName:  "reconnect-fix",
 	}
 }
 
@@ -432,10 +433,10 @@ func TestCreateLeavesAMergeWorkspacesSessionForItsFirstTurn(t *testing.T) {
 }
 
 // promptHooks are TEXTS as prompt hooks, in order.
-func promptHooks(texts ...string) []*repoconfigv1.DeployHook {
-	var out []*repoconfigv1.DeployHook
+func promptHooks(texts ...string) []*repoconfigv1.Hook {
+	var out []*repoconfigv1.Hook
 	for _, text := range texts {
-		out = append(out, deployconfig.PromptHook(text))
+		out = append(out, lifecycleconfig.PromptHook(text))
 	}
 	return out
 }

@@ -264,44 +264,6 @@ func (f *verbsForwarder) ClaimMergeName(ctx context.Context, repoDir, name strin
 	return verbs.ClaimMergeName(ctx, repoDir, name)
 }
 
-// MergeEnded is the merge orchestrator's end observer (merge.EndObserver),
-// read out of the verbs, which are built after the orchestrator. An end told
-// before they are bound is a wiring defect, since the verbs are bound before
-// any merge can run, so it fails hard.
-func (f *verbsForwarder) MergeEnded(ctx context.Context, ws ids.WorkspaceID, out merge.DetachedOutcome) {
-	verbs, err := f.bound("a merge ended")
-	if err != nil {
-		panic(err)
-	}
-	verbs.MergeEnded(ctx, ws, out)
-}
-
-// SummaryInstalled is the title synthesizer's summary observer
-// (titlesynth.SummaryObserver), read out of the verbs, which are built after
-// the synthesizer. A summary is distilled only for a served workspace, which
-// the verbs are bound before, so one told before they are bound is a wiring
-// defect and fails hard.
-func (f *verbsForwarder) SummaryInstalled(ctx context.Context, ws ids.WorkspaceID, title string) {
-	verbs, err := f.bound("a summary was installed")
-	if err != nil {
-		panic(err)
-	}
-	verbs.SummaryInstalled(ctx, ws, title)
-}
-
-// PullRequestMerged is the pull-request watcher's merge observer
-// (prwatch.MergeObserver), read out of the verbs, which are built after the
-// watcher. The watcher polls only once the daemon serves, after the verbs
-// are bound, so a merge told before they are bound is a wiring defect and
-// fails hard.
-func (f *verbsForwarder) PullRequestMerged(ctx context.Context, ws ids.WorkspaceID, pr wsm.PullRequestKey) {
-	verbs, err := f.bound("a followed pull request merged")
-	if err != nil {
-		panic(err)
-	}
-	verbs.PullRequestMerged(ctx, ws, pr)
-}
-
 // interruptTurn is the merge orchestrator's turn stop (merge.InterruptTurnFunc):
 // the user's own turn interrupt, confirmed, so the agent's detached work stops
 // with it. It reads the verbs out of the forwarder when it runs.

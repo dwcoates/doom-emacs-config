@@ -58,6 +58,10 @@ type WorkspaceLink struct {
 	// Follow is the workspace's subscription to PullRequest, ended or not;
 	// nil when it holds none.
 	Follow *PullRequestSubscription
+	// Announces is the url of the stored link this owned link announces
+	// (agentrepl.v1.WorkspaceLinkOwned.announces), empty when it announces
+	// nothing.
+	Announces string
 }
 
 // LinkSet is one store or relabel of a link (SetWorkspaceLink).
@@ -66,6 +70,10 @@ type LinkSet struct {
 	Label string
 	// Owned is the link's ownership.
 	Owned bool
+	// Announces is the url of the link this owned link announces, which
+	// must be a link the workspace already holds (an
+	// *UnknownAnnouncedLinkError otherwise); empty for none.
+	Announces string
 	// PullRequest is the GitHub pull request the url names; nil for any
 	// other url.
 	PullRequest *PullRequestKey
@@ -114,9 +122,14 @@ func (s *store) WorkspaceLinks(ctx context.Context, id WorkspaceID) ([]Workspace
 func (s *store) SetWorkspaceLink(ctx context.Context, id WorkspaceID, set LinkSet) ([]WorkspaceLink, error) {
 	const op = "daemon.wsm.set_workspace_link"
 	url, label := set.URL, set.Label
-	fields := dlog.Context{"workspace": string(id), "url": url, "label": label, "owned": set.Owned}
+	fields := dlog.Context{"workspace": string(id), "url": url, "label": label, "owned": set.Owned, "announces": set.Announces}
 	if set.Subscribe != nil && (!set.Owned || set.PullRequest == nil || set.Subscribe.PullRequest != *set.PullRequest || set.Subscribe.Subscriber != id) {
 		err := fmt.Errorf("wsm: link of %s: a subscription is taken only for the owned pull request the link names", id)
+		s.log.Error(op, "refused a link its caller should never have made", withError(fields, err))
+		return nil, err
+	}
+	if set.Announces != "" && (!set.Owned || set.Announces == url) {
+		err := fmt.Errorf("wsm: link of %s: only an owned link announces, and never itself", id)
 		s.log.Error(op, "refused a link its caller should never have made", withError(fields, err))
 		return nil, err
 	}
@@ -136,14 +149,25 @@ func (s *store) SetWorkspaceLink(ctx context.Context, id WorkspaceID, set LinkSe
 			id).Scan(&next, &shown); err != nil {
 			return err
 		}
+		var announces any
+		if set.Announces != "" {
+			var held int
+			if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM workspace_links WHERE workspace_id = ? AND url = ?`, id, set.Announces).Scan(&held); err != nil {
+				return err
+			}
+			if held == 0 {
+				return &UnknownAnnouncedLinkError{URL: set.Announces}
+			}
+			announces = set.Announces
+		}
 		var owner, repo, number any
 		if pr := set.PullRequest; pr != nil {
 			owner, repo, number = pr.Owner, pr.Repo, pr.Number
 		}
 		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO workspace_links (workspace_id, url, label, set_seq, shown, owned, pr_owner, pr_repo, pr_number) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-			 ON CONFLICT(workspace_id, url) DO UPDATE SET label = excluded.label, set_seq = excluded.set_seq, owned = excluded.owned`,
-			id, url, label, next, shown < ShownLinkLimit, set.Owned, owner, repo, number); err != nil {
+			`INSERT INTO workspace_links (workspace_id, url, label, set_seq, shown, owned, pr_owner, pr_repo, pr_number, announces) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			 ON CONFLICT(workspace_id, url) DO UPDATE SET label = excluded.label, set_seq = excluded.set_seq, owned = excluded.owned, announces = excluded.announces`,
+			id, url, label, next, shown < ShownLinkLimit, set.Owned, owner, repo, number, announces); err != nil {
 			return err
 		}
 		if err := s.followLinkInTx(ctx, tx, id, set); err != nil {
@@ -291,14 +315,15 @@ func endOwnedFollowsInTx(ctx context.Context, tx *sql.Tx, id WorkspaceID, where 
 // linksOf reads ID's links, most recently set first, each owned pull request
 // with the workspace's subscription to it.
 func linksOf(ctx context.Context, q querier, id WorkspaceID) ([]WorkspaceLink, error) {
-	links, err := listRows(ctx, q, `SELECT url, label, shown, owned, pr_owner, pr_repo, pr_number FROM workspace_links WHERE workspace_id = ? ORDER BY set_seq DESC`,
+	links, err := listRows(ctx, q, `SELECT url, label, shown, owned, pr_owner, pr_repo, pr_number, announces FROM workspace_links WHERE workspace_id = ? ORDER BY set_seq DESC`,
 		func(row interface{ Scan(...any) error }) (WorkspaceLink, error) {
 			var (
-				link        WorkspaceLink
-				owner, repo sql.NullString
-				number      sql.NullInt64
+				link                   WorkspaceLink
+				owner, repo, announces sql.NullString
+				number                 sql.NullInt64
 			)
-			err := row.Scan(&link.URL, &link.Label, &link.Shown, &link.Owned, &owner, &repo, &number)
+			err := row.Scan(&link.URL, &link.Label, &link.Shown, &link.Owned, &owner, &repo, &number, &announces)
+			link.Announces = announces.String
 			if number.Valid {
 				link.PullRequest = &PullRequestKey{Owner: owner.String, Repo: repo.String, Number: uint32(number.Int64)}
 			}

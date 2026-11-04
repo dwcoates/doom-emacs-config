@@ -117,6 +117,7 @@ func mqFindRepoKey(r *frontendv1.WorkspaceRoster, dir string) *workspacev1.Repos
 func mqCreateTopLevelChild(t *testing.T, w *World, repoRef *workspacev1.RepositoryRef, name string) *workspacev1.WorkspaceRef {
 	t.Helper()
 	resp, err := w.Client().CreateWorkspace(w.Ctx(), connect.NewRequest(&agentreplv1.CreateWorkspaceRequest{
+		Originator:    &agentreplv1.WorkspaceOriginator{Originator: &agentreplv1.WorkspaceOriginator_UserOrWorkspace{UserOrWorkspace: &agentreplv1.WorkspaceOriginatorUserOrWorkspace{}}},
 		Repository:    repoRef,
 		Requester:     harness.User(),
 		ContextOrigin: harness.Fresh(),
@@ -715,6 +716,7 @@ const mqMarkedAction = "run the release checks before landing (e2e-fail-this-tur
 func mqCreateChildWithHooks(t *testing.T, w *World, repoRef *workspacev1.RepositoryRef, name string, hooks *agentreplv1.CreateWorkspaceDeployHooks) *workspacev1.WorkspaceRef {
 	t.Helper()
 	resp, err := w.Client().CreateWorkspace(w.Ctx(), connect.NewRequest(&agentreplv1.CreateWorkspaceRequest{
+		Originator:    &agentreplv1.WorkspaceOriginator{Originator: &agentreplv1.WorkspaceOriginator_UserOrWorkspace{UserOrWorkspace: &agentreplv1.WorkspaceOriginatorUserOrWorkspace{}}},
 		Repository:    repoRef,
 		Requester:     harness.User(),
 		ContextOrigin: harness.Fresh(),
