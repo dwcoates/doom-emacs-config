@@ -1136,7 +1136,7 @@ DIR echoes the request; THE ARM IS THE OUTCOME (`:registered',
 `:refused' or `:failed'), and exactly one is set."
   (let* ((message "RegisterWorkspacesOutcome")
          (object (agent-repl-wire--object message value)))
-    (agent-repl-wire--check-keys message object '(dir registered refused failed))
+    (agent-repl-wire--check-keys "RegisterWorkspacesOutcome" object '(dir registered refused failed))
     (agent-repl-wire--decoded
      message
      (list :dir (agent-repl-wire--decode-required-string message 'dir object)
