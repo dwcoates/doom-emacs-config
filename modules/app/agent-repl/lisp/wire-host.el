@@ -41,6 +41,7 @@
 (declare-function agent-repl-wire--decode-string "wire-common")
 (declare-function agent-repl-wire--decode-required-string "wire-common")
 (declare-function agent-repl-wire--require-string "wire-common")
+(declare-function agent-repl-wire-decode-not-yet-adopted "wire-common" (message-name value))
 (declare-function agent-repl-wire--decoded "wire-common")
 (declare-function agent-repl-wire--encode-empty "wire-common")
 (declare-function agent-repl-wire--encode-oneof "wire-common")

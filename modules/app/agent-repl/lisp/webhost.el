@@ -249,7 +249,8 @@ other stage does nothing."
       (funcall replay))))
 
 (defun agent-repl--webview-boot-script (global)
-  "The script answering whether the page that defines GLOBAL started, and its earliest errors.
+  "The script answering whether the page defining GLOBAL started, and its errors.
+The errors are the page\='s earliest ones.
 GLOBAL names the object the page hands Emacs once it has started
 \(`agentReplHost', `agentReplSidebar').  `hooked' is false for a page from
 a build before the error hook (webapp/index.html), which has kept none."
@@ -298,7 +299,8 @@ names the web view in the record (`host', `sidebar')."
 
 (defun agent-repl--webhost-on-boot (raw)
   "Record the host's RAW boot answer (`agent-repl--webview-record-boot').
-Called BY SYMBOL from the read channel (`agent-repl--frontend-webview-read-script')."
+Called BY SYMBOL from the read channel
+\(`agent-repl--frontend-webview-read-script')."
   (agent-repl--webview-record-boot agent-repl--webhost-central "host" raw))
 
 (defun agent-repl--webhost-blank-uri-p (uri)
@@ -317,7 +319,7 @@ into.  The host's own page commits after it."
     (xwidget-webkit-uri xw)))
 
 (defun agent-repl--webview-strayed-uri (own-url uri)
-  "Return URI when a web view loaded at OWN-URL committed it outside that origin.
+  "Return URI when a web view loaded at OWN-URL committed it outside its origin.
 Each of Emacs's web views (the host, and the sidebar, sidebar-view.el) only
 ever loads its own page; any other origin is an outward link that navigated
 the whole web view.  Nil when OWN-URL is nil, URI is empty, or URI is on
@@ -425,7 +427,8 @@ the host buffer is never displayed itself; workspace slots display it."
   "Create a hidden web view buffer NAME at URL, guarded by REFUSE-KILL.
 The shape every one of Emacs's own web views shares (the host, and the
 sidebar, sidebar-view.el): no window is touched, the buffer has no header or
-mode line and no fringes (dividers.el), and REFUSE-KILL stands on its `kill-buffer-query-functions'.
+mode line and no fringes (dividers.el), and REFUSE-KILL stands on its
+`kill-buffer-query-functions'.
 A buffer created without a live xwidget is killed through KILL, a function
 of the buffer, and signals an error naming WHAT.  Returns the buffer."
   (let ((buf (save-window-excursion (agent-repl--frontend-make-webview-buffer url))))
