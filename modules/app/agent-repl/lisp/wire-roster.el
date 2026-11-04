@@ -1278,7 +1278,8 @@ workspace the merge is credited to, its name, the bubble a click reveals
                   "RosterMergeQueueSubject" 'mode object #'agent-repl-wire-decode-roster-merge-queue-mode)))))
 
 (defconst agent-repl-wire--roster-merge-queue-instants
-  '((startedAtMs . :started-at-ms) (endedAtMs . :ended-at-ms) (queuedAtMs . :queued-at-ms))
+  '((startedAtMs . :started-at-ms) (endedAtMs . :ended-at-ms) (queuedAtMs . :queued-at-ms)
+    (sinceMs . :since-ms))
   "Each epoch-ms field a merge queue's span messages carry, and its keyword.")
 
 (defun agent-repl-wire--decode-roster-merge-queue-span (message-name value fields)
@@ -1350,15 +1351,25 @@ reached the head.  The standing is never unset."
 
 (defun agent-repl-wire-decode-roster-merge-queue-waiting (value)
   "Decode VALUE as `RosterMergeQueueWaiting'.
-A plist `(:subject SUBJECT :queued-at-ms MS :placed-at-front BOOL)'."
+A plist `(:subject SUBJECT :queued-at-ms MS :placed-at-front BOOL :racing
+RACING)'.  RACING is nil while the merge waits, and `(:since-ms MS)' while
+it is worked on behind the head, MS when it took that slot."
   (let ((object (agent-repl-wire--object "RosterMergeQueueWaiting" value)))
-    (agent-repl-wire--check-keys "RosterMergeQueueWaiting" object '(subject queuedAtMs placedAtFront))
+    (agent-repl-wire--check-keys "RosterMergeQueueWaiting" object '(subject queuedAtMs placedAtFront racing))
     (agent-repl-wire--decoded
      "RosterMergeQueueWaiting"
      (list :subject (agent-repl-wire--decode-message
                      "RosterMergeQueueWaiting" 'subject object #'agent-repl-wire-decode-roster-merge-queue-subject)
            :queued-at-ms (agent-repl-wire--decode-int64 "RosterMergeQueueWaiting" 'queuedAtMs object)
-           :placed-at-front (agent-repl-wire--decode-bool "RosterMergeQueueWaiting" 'placedAtFront object)))))
+           :placed-at-front (agent-repl-wire--decode-bool "RosterMergeQueueWaiting" 'placedAtFront object)
+           :racing (agent-repl-wire--decode-optional-message
+                    "RosterMergeQueueWaiting" 'racing object
+                    #'agent-repl-wire-decode-roster-merge-queue-waiting-racing)))))
+
+(defun agent-repl-wire-decode-roster-merge-queue-waiting-racing (value)
+  "Decode VALUE as `RosterMergeQueueWaitingRacing'.
+A plist `(:since-ms MS)': when the merge took its racing slot."
+  (agent-repl-wire--decode-roster-merge-queue-span "RosterMergeQueueWaitingRacing" value '(sinceMs)))
 
 (defun agent-repl-wire-decode-roster-merge-queue-pauser (value)
   "Decode VALUE as `RosterMergeQueuePauser', `(:arm ARM :value V)'.
