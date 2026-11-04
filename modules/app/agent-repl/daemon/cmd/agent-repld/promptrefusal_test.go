@@ -8,7 +8,7 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
-	"google.golang.org/protobuf/reflect/protoreflect"
+	"google.golang.org/protobuf/proto"
 )
 
 // promptRefusalCase is one SubmitPromptError arm and the sentence the prompt
@@ -78,48 +78,35 @@ func TestDescribePromptRefusalSaysEachArm(t *testing.T) {
 	}
 }
 
-// casedArms answers the set arm's name of every case, and the set kind's name
-// of every bubble_refused case.
-func casedArms() (arms, kinds map[protoreflect.Name]bool) {
-	arms, kinds = map[protoreflect.Name]bool{}, map[protoreflect.Name]bool{}
-	reason := (&agentreplv1.SubmitPromptError{}).ProtoReflect().Descriptor().Oneofs().ByName("reason")
-	kind := (&agentreplv1.SubmitPromptBubbleRefused{}).ProtoReflect().Descriptor().Oneofs().ByName("kind")
+// promptCased answers every case's error, and every bubble_refused case's
+// bubble, for uncasedArms.
+func promptCased() (errs, bubbles []proto.Message) {
 	for _, tt := range promptRefusalCases {
-		if set := tt.err.ProtoReflect().WhichOneof(reason); set != nil {
-			arms[set.Name()] = true
-		}
+		errs = append(errs, tt.err)
 		if b := tt.err.GetBubbleRefused(); b != nil {
-			if set := b.ProtoReflect().WhichOneof(kind); set != nil {
-				kinds[set.Name()] = true
-			}
+			bubbles = append(bubbles, b)
 		}
 	}
-	return arms, kinds
+	return errs, bubbles
 }
 
 func TestDescribePromptRefusalCoversEveryArm(t *testing.T) {
 	// Arrange
-	arms, _ := casedArms()
-	fields := (&agentreplv1.SubmitPromptError{}).ProtoReflect().Descriptor().Oneofs().ByName("reason").Fields()
+	errs, _ := promptCased()
 
 	// Act / Assert
-	for i := range fields.Len() {
-		if name := fields.Get(i).Name(); !arms[name] {
-			t.Errorf("SubmitPromptError arm %s has no case: give describePromptRefusal a sentence for it and a case here", name)
-		}
+	for _, name := range uncasedArms(&agentreplv1.SubmitPromptError{}, "reason", errs) {
+		t.Errorf("SubmitPromptError arm %s has no case: give describePromptRefusal a sentence for it and a case here", name)
 	}
 }
 
 func TestDescribePromptRefusalCoversEveryBubbleKind(t *testing.T) {
 	// Arrange
-	_, kinds := casedArms()
-	fields := (&agentreplv1.SubmitPromptBubbleRefused{}).ProtoReflect().Descriptor().Oneofs().ByName("kind").Fields()
+	_, bubbles := promptCased()
 
 	// Act / Assert
-	for i := range fields.Len() {
-		if name := fields.Get(i).Name(); !kinds[name] {
-			t.Errorf("SubmitPromptBubbleRefused kind %s has no case: give describePromptRefusal a sentence for it and a case here", name)
-		}
+	for _, name := range uncasedArms(&agentreplv1.SubmitPromptBubbleRefused{}, "kind", bubbles) {
+		t.Errorf("SubmitPromptBubbleRefused kind %s has no case: give describePromptRefusal a sentence for it and a case here", name)
 	}
 }
 

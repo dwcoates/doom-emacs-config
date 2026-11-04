@@ -24,13 +24,13 @@ var errUndescribedWorkspaceRefusal = errors.New("the daemon refused with an arm 
 func describeFinishRefusal(ws string, e *agentreplv1.FinishWorkspaceError) (string, error) {
 	switch r := e.GetCause().(type) {
 	case *agentreplv1.FinishWorkspaceError_UnknownWorkspace:
-		return fmt.Sprintf("the daemon has no workspace %s", ws), nil
+		return sayNoWorkspace(ws), nil
 	case *agentreplv1.FinishWorkspaceError_WorkspaceRefMismatch:
-		return fmt.Sprintf("%s lives at %s, not at the directory the request named", ws, r.WorkspaceRefMismatch.GetRegistryDir()), nil
+		return sayLivesElsewhere(ws, r.WorkspaceRefMismatch.GetRegistryDir(), "the request"), nil
 	case *agentreplv1.FinishWorkspaceError_TransferringAway:
-		return fmt.Sprintf("the daemon is restarting and handed %s to its successor at %s; finish it again", ws, r.TransferringAway.GetAddress()), nil
+		return sayHandedOver(ws, r.TransferringAway.GetAddress(), "finish it again"), nil
 	case *agentreplv1.FinishWorkspaceError_NotYetAdopted:
-		return fmt.Sprintf("the daemon is restarting and has not taken %s over yet; finish it again once the restart finishes", ws), nil
+		return sayNotYetAdopted(ws, "finish it again"), nil
 	case *agentreplv1.FinishWorkspaceError_NoLayoutFacts:
 		return fmt.Sprintf("%s records no merge geometry, so nothing says where it lands; "+restateLanding+", then finish it again", ws, ws), nil
 	case *agentreplv1.FinishWorkspaceError_SessionDeleted:
@@ -66,9 +66,9 @@ func describeFinishRefusal(ws string, e *agentreplv1.FinishWorkspaceError) (stri
 func describeOneShotRefusal(ws string, e *agentreplv1.SetWorkspaceOneShotError) (string, error) {
 	switch r := e.GetCause().(type) {
 	case *agentreplv1.SetWorkspaceOneShotError_UnknownWorkspace:
-		return fmt.Sprintf("the daemon has no workspace %s", ws), nil
+		return sayNoWorkspace(ws), nil
 	case *agentreplv1.SetWorkspaceOneShotError_WorkspaceRefMismatch:
-		return fmt.Sprintf("%s lives at %s, not at the directory the request named", ws, r.WorkspaceRefMismatch.GetRegistryDir()), nil
+		return sayLivesElsewhere(ws, r.WorkspaceRefMismatch.GetRegistryDir(), "the request"), nil
 	case *agentreplv1.SetWorkspaceOneShotError_Closed:
 		return fmt.Sprintf("%s is closed", ws), nil
 	case *agentreplv1.SetWorkspaceOneShotError_NoCreationJob:
@@ -86,13 +86,13 @@ func describeOneShotRefusal(ws string, e *agentreplv1.SetWorkspaceOneShotError) 
 func describeRetargetRefusal(ws string, e *agentreplv1.SetWorkspaceParentError) (string, error) {
 	switch r := e.GetCause().(type) {
 	case *agentreplv1.SetWorkspaceParentError_UnknownWorkspace:
-		return fmt.Sprintf("the daemon has no workspace %s", ws), nil
+		return sayNoWorkspace(ws), nil
 	case *agentreplv1.SetWorkspaceParentError_WorkspaceRefMismatch:
-		return fmt.Sprintf("%s lives at %s, not at the directory the request named", ws, r.WorkspaceRefMismatch.GetRegistryDir()), nil
+		return sayLivesElsewhere(ws, r.WorkspaceRefMismatch.GetRegistryDir(), "the request"), nil
 	case *agentreplv1.SetWorkspaceParentError_TransferringAway:
-		return fmt.Sprintf("the daemon is restarting and handed %s to its successor at %s; retarget it again", ws, r.TransferringAway.GetAddress()), nil
+		return sayHandedOver(ws, r.TransferringAway.GetAddress(), "retarget it again"), nil
 	case *agentreplv1.SetWorkspaceParentError_NotYetAdopted:
-		return fmt.Sprintf("the daemon is restarting and has not taken %s over yet; retarget it again once the restart finishes", ws), nil
+		return sayNotYetAdopted(ws, "retarget it again"), nil
 	case *agentreplv1.SetWorkspaceParentError_UnknownParent:
 		return "the daemon has no workspace by the new parent's name", nil
 	case *agentreplv1.SetWorkspaceParentError_ParentRefMismatch:
