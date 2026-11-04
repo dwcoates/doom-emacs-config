@@ -206,9 +206,10 @@ refusals, (6) the announcing link relation, (7) the finish-hook prompt origin.
 
 - `PROMPT_ORIGIN_FINISH_HOOK` is tag 49: tag 48 landed first as
   `PROMPT_ORIGIN_COMMAND_THREAD_BACKGROUND`.
-- The store additions are layout 101 (`lifecycle_hooks`), since
-  `slack-origin-pr-posts` landed layout 100 first; layout 102
-  (`drop_workspace_slack_posts`, BREAKING, a stop-then-start deploy) drops
-  what layout 100 added, with the posts that wrote it.
+- The store additions are layout 102 (`lifecycle_hooks`), since
+  `slack-origin-pr-posts` landed layout 100 and `merge_queue_slot` layout 101
+  first; layout 103 (`drop_workspace_slack_posts`, BREAKING, a
+  stop-then-start deploy) drops what layout 100 added, with the posts that
+  wrote it.
 - The two create refusals are tags 52 and 53: `name_branch_exists` landed as
   51 first.

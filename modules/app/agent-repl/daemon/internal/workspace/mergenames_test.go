@@ -481,7 +481,7 @@ func TestCreateRefusesASuppliedNameWhoseBranchExistsUnheld(t *testing.T) {
 			}
 
 			// Act
-			_, err := f.verbs.Create(context.Background(), CreateSpec{RepoDir: repo, Name: "ramdisk-leak-investigation"})
+			_, err := f.verbs.Create(context.Background(), CreateSpec{Originator: lifecycleconfig.OriginatorUserOrWorkspace, RepoDir: repo, Name: "ramdisk-leak-investigation"})
 
 			// Assert
 			if len(f.git.created) != 0 {
