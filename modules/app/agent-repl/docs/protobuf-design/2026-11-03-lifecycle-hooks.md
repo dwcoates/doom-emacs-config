@@ -174,7 +174,7 @@ refusals, (6) the announcing link relation, (7) the finish-hook prompt origin.
   merged pull request from stored facts alone. Putting the relation inside the
   `owned` arm makes a reference that announces something unrepresentable.
 
-### 7. `conversation.v1.PromptOrigin.PROMPT_ORIGIN_FINISH_HOOK` (48)
+### 7. `conversation.v1.PromptOrigin.PROMPT_ORIGIN_FINISH_HOOK` (49)
 
 - A finish-stage prompt hook's turn. The finish stage runs after the
   requesting turn ends and BEFORE the deploy is put in line, so it has no
@@ -201,3 +201,12 @@ refusals, (6) the announcing link relation, (7) the finish-hook prompt origin.
   `internal/slackfmt` where nothing else uses them, and the footer fault kind
   `slack_post_failed`. The originating thread is still recorded and stored as
   a reference link.
+
+## Renumbered at rebase
+
+- `PROMPT_ORIGIN_FINISH_HOOK` is tag 49: tag 48 landed first as
+  `PROMPT_ORIGIN_COMMAND_THREAD_BACKGROUND`.
+- The store additions are layout 101 (`lifecycle_hooks`), since
+  `slack-origin-pr-posts` landed layout 100 first; layout 102
+  (`drop_workspace_slack_posts`, BREAKING, a stop-then-start deploy) drops
+  what layout 100 added, with the posts that wrote it.
