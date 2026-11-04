@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -197,11 +196,6 @@ type run struct {
 	// queueRound is the ledger round of the QUEUE tab, opened at admission and
 	// closed when the run leaves the queue for its first step.
 	queueRound tabRound
-
-	// headMS is when the run reached its queue's head, epoch ms, zero while
-	// it has not: the roster's head clock ticks from it (headSince). Atomic,
-	// because the orchestrator stamps it under its own lock.
-	headMS atomic.Int64
 
 	mu sync.Mutex
 	// rounds counts each tab kind's opened rounds, which is what makes a second

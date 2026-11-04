@@ -471,7 +471,7 @@ func (o *orchestrator) recoverRemediating(ctx context.Context, repo wsm.RepoKey,
 		return fmt.Errorf("merge: the remediating merge of %q has no progress record", ws)
 	}
 	o.mu.Lock()
-	o.remediating[ws] = &remediation{repo: repo, cancel: func() {}, since: o.deps.Now()}
+	o.remediating[ws] = &remediation{repo: repo, cancel: func() {}}
 	o.mu.Unlock()
 	if err := o.recoverResumable(ctx, repo, lease, doc, true); err != nil {
 		o.mu.Lock()

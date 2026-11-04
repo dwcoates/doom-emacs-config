@@ -200,7 +200,7 @@ func TestTheRosterIsToldTheMergeRemediatingOutOfLine(t *testing.T) {
 
 	// Assert
 	queue := c.h.sidebar.queueOf(c.h.repoKey())
-	if len(queue.Remediating) != 1 || queue.Remediating[0].Workspace != theWorkspace || queue.Remediating[0].RemediatingSince.IsZero() {
+	if len(queue.Remediating) != 1 || queue.Remediating[0].Workspace != theWorkspace || queue.Remediating[0].SlotSince.IsZero() {
 		t.Fatalf("remediating = %+v, want the failed head with when it stepped aside", queue.Remediating)
 	}
 	if slices.ContainsFunc(queue.Line, func(e sidebar.QueueEntry) bool { return e.Workspace == theWorkspace }) {

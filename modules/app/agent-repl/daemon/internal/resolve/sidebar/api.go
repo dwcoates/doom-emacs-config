@@ -268,14 +268,12 @@ type QueueEntry struct {
 	// (frontend.v1.RosterMergeQueueHead.stages). Only the front of the line
 	// carries them.
 	Stages []*frontendv1.RosterMergeQueueStage
-	// HeadSince is when the merge reached the head of the line
-	// (frontend.v1.RosterMergeQueueHead.head_since_ms). Only the front of the
-	// line carries it.
-	HeadSince time.Time
-	// RemediatingSince is when a merge remediating out of line stepped aside
-	// (frontend.v1.RosterMergeQueueRemediating.since_ms). Only a remediating
-	// merge carries it.
-	RemediatingSince time.Time
+	// SlotSince is when the merge took the slot it holds, durable on its
+	// queue entry (wsm.MergeQueueEntry.SlotSince): the clock of every active
+	// slot ticks from it (frontend.v1.RosterMergeQueueHead.head_since_ms,
+	// frontend.v1.RosterMergeQueueWaitingRacing.since_ms,
+	// frontend.v1.RosterMergeQueueRemediating.since_ms).
+	SlotSince time.Time
 }
 
 // FooterStatus is the footer resolver's answers to what a workspace's strip
