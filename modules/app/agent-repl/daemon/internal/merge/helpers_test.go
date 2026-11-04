@@ -817,7 +817,9 @@ func (f *fakeDB) StepAsideMerge(_ context.Context, repo wsm.RepoKey, id ids.Work
 		if entry.State != wsm.MergeAdmitted {
 			return fmt.Errorf("step aside %s while %s, not admitted", id, entry.State)
 		}
-		entry.State = wsm.MergeRemediating
+		// THE SLOT MOMENT IS WRITTEN WITH THE STEP ASIDE, as the durable
+		// queue writes it (wsm.MergeQueueEntry.SlotSince).
+		entry.State, entry.Slot, entry.SlotSince = wsm.MergeRemediating, wsm.MergeSlotRemediating, time.Now()
 		f.queues[repo] = append(append(queue[:i:i], queue[i+1:]...), entry)
 		f.renumber(repo)
 		return nil

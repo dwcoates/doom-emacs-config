@@ -85,7 +85,7 @@ func (s *store) requestMerge(ctx context.Context, op string, repo RepoKey, id Wo
 		s.log.Error(op, "refused a merge request whose source contradicts itself", withError(fields, err))
 		return fmt.Errorf("wsm: merge request for %s: %w", id, err)
 	}
-	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
+	return s.writeQueue(ctx, op, fields, key, func(ctx context.Context, tx *sql.Tx) error {
 		var (
 			seq   int64
 			state int64
@@ -174,7 +174,7 @@ func (s *store) QueueMerge(ctx context.Context, repo RepoKey, id WorkspaceID, le
 		return 0, err
 	}
 	var position int
-	err = s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
+	err = s.writeQueue(ctx, op, fields, key, func(ctx context.Context, tx *sql.Tx) error {
 		next, err := placeInLine(ctx, tx, key, id)
 		if err != nil {
 			return err
@@ -356,7 +356,7 @@ func (s *store) MoveMerge(ctx context.Context, repo RepoKey, id WorkspaceID, mov
 	}
 	fields["repo"] = string(key)
 	var moved bool
-	err = s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
+	err = s.writeQueue(ctx, op, fields, key, func(ctx context.Context, tx *sql.Tx) error {
 		seq, state, err := entryPlace(ctx, tx, key, id)
 		if err != nil || state != MergeQueued {
 			return err
@@ -412,7 +412,7 @@ func (s *store) MoveMergeTo(ctx context.Context, repo RepoKey, id WorkspaceID, a
 	}
 	fields["repo"] = string(key)
 	var moved bool
-	err = s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
+	err = s.writeQueue(ctx, op, fields, key, func(ctx context.Context, tx *sql.Tx) error {
 		_, state, err := entryPlace(ctx, tx, key, id)
 		if err != nil {
 			return err
@@ -543,7 +543,7 @@ func (s *store) PrioritizeMerge(ctx context.Context, repo RepoKey, id WorkspaceI
 	}
 	fields["repo"] = string(key)
 	var moved bool
-	err = s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
+	err = s.writeQueue(ctx, op, fields, key, func(ctx context.Context, tx *sql.Tx) error {
 		seq, state, err := entryPlace(ctx, tx, key, id)
 		if err != nil || state != MergeQueued {
 			return err
@@ -664,7 +664,7 @@ func (s *store) setMergeQueueState(ctx context.Context, op string, repo RepoKey,
 		s.log.Error(op, "refused an undeclared merge queue state", withError(fields, err))
 		return err
 	}
-	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
+	return s.writeQueue(ctx, op, fields, key, func(ctx context.Context, tx *sql.Tx) error {
 		res, err := tx.ExecContext(ctx, `UPDATE merge_queue SET state = ? WHERE repo_key = ? AND workspace_id = ?`, int(state), key, id)
 		if err != nil {
 			return err
@@ -693,7 +693,7 @@ func (s *store) YieldMergeHead(ctx context.Context, repo RepoKey, loser, winner 
 		return err
 	}
 	fields := dlog.Context{"repo": string(key), "loser": string(loser), "winner": string(winner)}
-	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
+	return s.writeQueue(ctx, op, fields, key, func(ctx context.Context, tx *sql.Tx) error {
 		seqOf := func(id WorkspaceID) (int64, error) {
 			seq, state, err := entryPlace(ctx, tx, key, id)
 			if err != nil {
@@ -735,7 +735,7 @@ func (s *store) StepAsideMerge(ctx context.Context, repo RepoKey, id WorkspaceID
 		return err
 	}
 	fields := dlog.Context{"repo": string(key), "workspace": string(id)}
-	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
+	return s.writeQueue(ctx, op, fields, key, func(ctx context.Context, tx *sql.Tx) error {
 		_, state, err := entryPlace(ctx, tx, key, id)
 		if err != nil {
 			return err
@@ -772,7 +772,7 @@ func (s *store) ReturnRemediatedMerge(ctx context.Context, repo RepoKey, id Work
 		return err
 	}
 	fields := dlog.Context{"repo": string(key), "workspace": string(id)}
-	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
+	return s.writeQueue(ctx, op, fields, key, func(ctx context.Context, tx *sql.Tx) error {
 		_, state, err := entryPlace(ctx, tx, key, id)
 		if err != nil {
 			return err
@@ -832,7 +832,7 @@ func (s *store) ReturnAdmittedMerge(ctx context.Context, repo RepoKey, id Worksp
 		s.log.Error(op, "refused to return a merge to its line with no ledger identity", withError(fields, err))
 		return err
 	}
-	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
+	return s.writeQueue(ctx, op, fields, key, func(ctx context.Context, tx *sql.Tx) error {
 		res, err := tx.ExecContext(ctx, `UPDATE merge_queue SET state = ?, ledger_id = ? WHERE repo_key = ? AND workspace_id = ? AND state = ?`,
 			int(MergeQueued), ledger, key, id, int(MergeAdmitted))
 		if err != nil {
@@ -853,7 +853,7 @@ func (s *store) RemoveMergeQueueEntry(ctx context.Context, repo RepoKey, id Work
 		return err
 	}
 	fields := dlog.Context{"repo": string(key), "workspace": string(id), "cause": cause}
-	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
+	return s.writeQueue(ctx, op, fields, key, func(ctx context.Context, tx *sql.Tx) error {
 		res, err := tx.ExecContext(ctx, `DELETE FROM merge_queue WHERE repo_key = ? AND workspace_id = ?`, key, id)
 		if err != nil {
 			return err
@@ -879,7 +879,7 @@ func (s *store) DropAdmittedMerge(ctx context.Context, repo RepoKey, id Workspac
 		return err
 	}
 	fields := dlog.Context{"repo": string(key), "workspace": string(id), "lease": string(lease), "cause": cause}
-	err = s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
+	err = s.writeQueue(ctx, op, fields, key, func(ctx context.Context, tx *sql.Tx) error {
 		// A REMEDIATING MERGE IS ADMITTED WORK OUT OF LINE: it holds its lease
 		// and its progress record just as an admitted one does, and ends the
 		// same way.
@@ -952,7 +952,7 @@ func (s *store) AllMergeQueues(ctx context.Context) (map[RepoKey][]MergeQueueEnt
 // mergeQueueColumns are the merge_queue columns every queue read selects, in
 // the order scanMergeQueue scans them: the one list, so a read cannot select
 // columns its scan does not expect.
-const mergeQueueColumns = `repo_key, workspace_id, state, enqueued_at, source_kind, source_keep_open, source_workspace, source_branch, source_detach_id, ledger_id, source_front, source_detach_name, source_pick, pick_started_at, pick_turn, source_compact_after, source_close_on_landing, source_cleanup_worktree, source_cleanup_dir, source_version_part, source_changelog_line, source_pre_deploy_hooks, source_post_deploy_hooks, source_detach_maker, source_detach_target_maker, source_behind`
+const mergeQueueColumns = `repo_key, workspace_id, state, enqueued_at, source_kind, source_keep_open, source_workspace, source_branch, source_detach_id, ledger_id, source_front, source_detach_name, source_pick, pick_started_at, pick_turn, source_compact_after, source_close_on_landing, source_cleanup_worktree, source_cleanup_dir, source_version_part, source_changelog_line, source_pre_deploy_hooks, source_post_deploy_hooks, source_detach_maker, source_detach_target_maker, source_behind, slot, slot_since`
 
 // scanMergeQueue is the one queue-decoding path, so both readers reject an
 // undeclared state identically and number positions the same way. TAIL is the
@@ -992,8 +992,10 @@ func (s *store) scanMergeQueue(ctx context.Context, tail string, args ...any) (m
 			maker     sql.NullString
 			toMaker   bool
 			behind    sql.NullString
+			slot      int64
+			slotSince int64
 		)
-		if err := rows.Scan(&entry.Repo, &entry.Workspace, &state, &enqueued, &kind, &keepOpen, &sourceWS, &sourceRef, &detach, &ledger, &front, &name, &pick, &picked, &pickTurn, &compact, &closes, &cleanup, &cleanDir, &verPart, &verLine, &before, &after, &maker, &toMaker, &behind); err != nil {
+		if err := rows.Scan(&entry.Repo, &entry.Workspace, &state, &enqueued, &kind, &keepOpen, &sourceWS, &sourceRef, &detach, &ledger, &front, &name, &pick, &picked, &pickTurn, &compact, &closes, &cleanup, &cleanDir, &verPart, &verLine, &before, &after, &maker, &toMaker, &behind, &slot, &slotSince); err != nil {
 			return nil, err
 		}
 		row := fmt.Sprintf("%s/%s", entry.Repo, entry.Workspace)
@@ -1024,6 +1026,11 @@ func (s *store) scanMergeQueue(ctx context.Context, tail string, args ...any) (m
 		}
 		entry.EnqueuedAt = fromNanos(enqueued)
 		entry.Ledger = LeaseID(ledger.String)
+		entry.Slot = MergeSlot(slot)
+		if !entry.Slot.valid() {
+			return nil, &DecodeError{Table: "merge_queue", Row: row, Field: "slot", Err: fmt.Errorf("unknown merge slot %d", slot)}
+		}
+		entry.SlotSince = fromNanos(slotSince)
 		entry.Position = len(loaded[entry.Repo]) + 1
 		loaded[entry.Repo] = append(loaded[entry.Repo], entry)
 	}

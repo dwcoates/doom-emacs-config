@@ -93,7 +93,7 @@ func (s *store) HandOffDetachedMerge(ctx context.Context, repo RepoKey, requeste
 		return err
 	}
 	fields := dlog.Context{"repo": string(key), "requester": string(requester), "request": string(request), "merge_workspace": string(mergeWS), "branch": branch}
-	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
+	return s.writeQueue(ctx, op, fields, key, func(ctx context.Context, tx *sql.Tx) error {
 		var (
 			state   int64
 			detach  sql.NullString

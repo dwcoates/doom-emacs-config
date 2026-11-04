@@ -594,10 +594,14 @@ export function mergingHead(
 }
 
 /** A merge waiting in line, credited to ID, queued at QUEUED_AT_MS. */
-export function waitingMerge(id: string, init: { queuedAtMs?: bigint; front?: boolean; subject?: RosterMergeQueueSubject } = {}): RosterMergeQueueWaiting {
+export function waitingMerge(
+  id: string,
+  init: { queuedAtMs?: bigint; front?: boolean; subject?: RosterMergeQueueSubject; racingSinceMs?: bigint } = {},
+): RosterMergeQueueWaiting {
   return create(RosterMergeQueueWaitingSchema, {
     subject: init.subject ?? queueSubject(id),
     queuedAtMs: init.queuedAtMs ?? 0n,
     placedAtFront: init.front ?? false,
+    racing: init.racingSinceMs === undefined ? undefined : { sinceMs: init.racingSinceMs },
   });
 }

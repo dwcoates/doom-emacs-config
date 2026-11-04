@@ -1665,7 +1665,7 @@ func TestTheMergeQueueHeadCarriesWhenItReachedTheHead(t *testing.T) {
 	r, _ := newResolver(t)
 	line := inLine("w1")
 	line[0].QueuedAt = time.UnixMilli(1_700_000_000_000)
-	line[0].HeadSince = time.UnixMilli(1_700_000_900_000)
+	line[0].SlotSince = time.UnixMilli(1_700_000_900_000)
 	r.SetMergeQueue(theRepo, sidebar.MergeQueue{Workspaces: []ids.WorkspaceID{"w1"}, Line: line})
 
 	// Act.
@@ -1684,7 +1684,7 @@ func TestTheMergeQueueDrawsAMergeRemediatingOutOfLineAsItsSecondSpot(t *testing.
 	r.SetMergeQueue(theRepo, sidebar.MergeQueue{
 		Workspaces:  []ids.WorkspaceID{"w2", "w1"},
 		Line:        inLine("w2"),
-		Remediating: []sidebar.QueueEntry{{Workspace: "w1", Credited: "w1", RemediatingSince: time.UnixMilli(1_700_000_000_000)}},
+		Remediating: []sidebar.QueueEntry{{Workspace: "w1", Credited: "w1", SlotSince: time.UnixMilli(1_700_000_000_000)}},
 	})
 
 	// Act.
@@ -1706,7 +1706,7 @@ func TestAQueueWhoseOnlyMergeRemediatesIsListedWithNoHead(t *testing.T) {
 	r, _ := newResolver(t)
 	r.SetMergeQueue(theRepo, sidebar.MergeQueue{
 		Workspaces:  []ids.WorkspaceID{"w1"},
-		Remediating: []sidebar.QueueEntry{{Workspace: "w1", Credited: "w1", RemediatingSince: time.UnixMilli(1)}},
+		Remediating: []sidebar.QueueEntry{{Workspace: "w1", Credited: "w1", SlotSince: time.UnixMilli(1)}},
 	})
 
 	// Act.
@@ -1719,5 +1719,42 @@ func TestAQueueWhoseOnlyMergeRemediatesIsListedWithNoHead(t *testing.T) {
 	}
 	if queue := groups[0].GetQueue(); queue.Head != nil || len(queue.GetRemediating()) != 1 {
 		t.Fatalf("queue = %v, want no head and the remediating merge", queue)
+	}
+}
+
+func TestTheMergeQueueRacingMergeCarriesWhenItTookItsRacingSlot(t *testing.T) {
+	// Arrange: w2, admitted behind the head, races it.
+	r, _ := newResolver(t)
+	line := inLine("w1", "w2")
+	line[0].Admitted = true
+	line[1].Admitted = true
+	line[1].QueuedAt = time.UnixMilli(1_700_000_000_000)
+	line[1].SlotSince = time.UnixMilli(1_700_000_900_000)
+	r.SetMergeQueue(theRepo, sidebar.MergeQueue{Workspaces: []ids.WorkspaceID{"w1", "w2"}, Line: line})
+
+	// Act.
+	r.SetRegistry(queueView(workspace("w1", "one"), workspace("w2", "two")))
+
+	// Assert.
+	waiting := queuedGroups(latest(t, r))[0].GetQueue().GetWaiting()
+	if len(waiting) != 1 || waiting[0].GetRacing().GetSinceMs() != 1_700_000_900_000 {
+		t.Fatalf("waiting = %v, want two racing since 1700000900000", waiting)
+	}
+}
+
+func TestTheMergeQueueWaitingMergeCarriesNoRacingSlot(t *testing.T) {
+	// Arrange: w2 waits its turn behind the head.
+	r, _ := newResolver(t)
+	line := inLine("w1", "w2")
+	line[1].SlotSince = time.UnixMilli(1_700_000_900_000)
+	r.SetMergeQueue(theRepo, sidebar.MergeQueue{Workspaces: []ids.WorkspaceID{"w1", "w2"}, Line: line})
+
+	// Act.
+	r.SetRegistry(queueView(workspace("w1", "one"), workspace("w2", "two")))
+
+	// Assert.
+	waiting := queuedGroups(latest(t, r))[0].GetQueue().GetWaiting()
+	if len(waiting) != 1 || waiting[0].Racing != nil {
+		t.Fatalf("waiting = %v, want two waiting with no racing slot", waiting)
 	}
 }

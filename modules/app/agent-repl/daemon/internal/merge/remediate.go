@@ -5,7 +5,6 @@ import (
 	"errors"
 	"slices"
 	"sync"
-	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
@@ -57,9 +56,6 @@ const opRemediate = "daemon.merge.remediate"
 type remediation struct {
 	repo   wsm.RepoKey
 	cancel context.CancelFunc
-	// since is when this daemon took the merge as remediating: its step
-	// aside, or a restart's take-back of it (the sidebar's clock).
-	since time.Time
 }
 
 // stepsAside reports whether R, whose suite just finished with failures,
@@ -159,12 +155,10 @@ func (o *orchestrator) takeBackSteppedAside(r *run, fields dlog.Context) {
 func (o *orchestrator) awaitRemediation(ws ids.WorkspaceID, repo wsm.RepoKey, turn ids.TurnID) {
 	ctx, cancel := context.WithCancel(context.Background())
 	o.mu.Lock()
-	since := o.deps.Now()
 	if standing, ok := o.remediating[ws]; ok {
 		standing.cancel()
-		since = standing.since
 	}
-	o.remediating[ws] = &remediation{repo: repo, cancel: cancel, since: since}
+	o.remediating[ws] = &remediation{repo: repo, cancel: cancel}
 	o.mu.Unlock()
 	if !o.async {
 		return
@@ -300,17 +294,6 @@ func (o *orchestrator) workedOn(repo wsm.RepoKey) []ids.WorkspaceID {
 func (o *orchestrator) isRemediatingLocked(ws ids.WorkspaceID) bool {
 	_, ok := o.remediating[ws]
 	return ok
-}
-
-// remediatingSince answers when WS took up remediating out of line here, the
-// zero time when it does not remediate.
-func (o *orchestrator) remediatingSince(ws ids.WorkspaceID) time.Time {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	if standing, ok := o.remediating[ws]; ok {
-		return standing.since
-	}
-	return time.Time{}
 }
 
 // forgetRemediation withdraws WS's wait on its fixing turn, when one stands.

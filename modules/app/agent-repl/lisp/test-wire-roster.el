@@ -1871,6 +1871,23 @@ A hand-rolled list decoder would skip the shared helper and fail here."
                      (:arm :merging :value (:step "testing" :suspended t)) 9 t
                      (:paused-at-ms 7 :by (:arm :workspace :value "doom") :hard t))))))
 
+(ert-deftest agent-repl-test-wire-roster-merge-queue-waiting-decodes-its-racing-slot ()
+  "A merge racing behind the head carries when it took its racing slot."
+  (should (equal (plist-get (agent-repl-test-wire-roster--decode
+                             #'agent-repl-wire-decode-roster-merge-queue-waiting
+                             (format "{\"subject\":%s,\"queuedAtMs\":\"9\",\"racing\":{\"sinceMs\":\"12\"}}"
+                                     agent-repl-test-wire-roster--subject))
+                            :racing)
+                 '(:since-ms 12))))
+
+(ert-deftest agent-repl-test-wire-roster-merge-queue-waiting-without-racing-decodes-nil ()
+  "A merge only waiting its turn carries no racing slot."
+  (should-not (plist-get (agent-repl-test-wire-roster--decode
+                          #'agent-repl-wire-decode-roster-merge-queue-waiting
+                          (format "{\"subject\":%s,\"queuedAtMs\":\"9\"}"
+                                  agent-repl-test-wire-roster--subject))
+                         :racing)))
+
 (ert-deftest agent-repl-test-wire-roster-merged-section-with-the-retired-merged-label-is-a-breach ()
   "Tag 7, the merged groups' heading, is retired: a section carrying it is an unknown field."
   (should (equal (agent-repl-test-wire-roster--breach

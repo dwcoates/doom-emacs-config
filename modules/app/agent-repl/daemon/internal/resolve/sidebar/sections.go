@@ -133,14 +133,14 @@ func (r *resolver) drawMergeQueue(q repoQueue, log dlog.Logger) *frontendv1.Rost
 			continue
 		}
 		out.Remediating = append(out.Remediating, &frontendv1.RosterMergeQueueRemediating{
-			Subject: sub, SinceMs: entry.RemediatingSince.UnixMilli()})
+			Subject: sub, SinceMs: entry.SlotSince.UnixMilli()})
 	}
 	if len(q.line) == 0 {
 		return out
 	}
 	front := q.line[0]
 	if sub, ok := subject(front); ok {
-		head := &frontendv1.RosterMergeQueueHead{Subject: sub, Stages: front.Stages, HeadSinceMs: front.HeadSince.UnixMilli()}
+		head := &frontendv1.RosterMergeQueueHead{Subject: sub, Stages: front.Stages, HeadSinceMs: front.SlotSince.UnixMilli()}
 		if front.Admitted {
 			merging := &frontendv1.RosterMergeQueueHeadMerging{}
 			if words, ok := mergeStepWords(r.mergeFacts(front.Workspace)); ok {
@@ -160,8 +160,14 @@ func (r *resolver) drawMergeQueue(q repoQueue, log dlog.Logger) *frontendv1.Rost
 		if !ok {
 			continue
 		}
-		out.Waiting = append(out.Waiting, &frontendv1.RosterMergeQueueWaiting{
-			Subject: sub, QueuedAtMs: entry.QueuedAt.UnixMilli(), PlacedAtFront: entry.PlacedAtFront})
+		waiting := &frontendv1.RosterMergeQueueWaiting{
+			Subject: sub, QueuedAtMs: entry.QueuedAt.UnixMilli(), PlacedAtFront: entry.PlacedAtFront}
+		// A MERGE ADMITTED BEHIND THE HEAD RACES IT: an active slot, whose
+		// clock ticks from the moment it took that slot.
+		if entry.Admitted {
+			waiting.Racing = &frontendv1.RosterMergeQueueWaitingRacing{SinceMs: entry.SlotSince.UnixMilli()}
+		}
+		out.Waiting = append(out.Waiting, waiting)
 	}
 	return out
 }
