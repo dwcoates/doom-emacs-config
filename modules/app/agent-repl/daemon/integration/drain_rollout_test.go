@@ -989,8 +989,13 @@ func TestABusyWorkspaceIsTransferredMidTurnAndItsHeldIntakeDrainsInOrderOnTheSuc
 // its unit tests in internal/rollout and internal/promptqueue pin it.)
 func TestARestartAskedOfAMovedWorkspaceIsAnsweredTransferringAway(t *testing.T) {
 	t.Parallel()
-	// Arrange: a busy workspace, moved mid-turn.
-	selfRepo, d := drainSelfRepoDaemon(t)
+	// Arrange: a busy workspace, moved mid-turn. THE SUCCESSOR'S ADOPTION IS
+	// HELD FOR THE PARTICIPANTS (adoptAwaitsParticipantsEnv): the restart is
+	// asked in the transferred-but-not-adopted gap, which a live successor
+	// closes within milliseconds, after which the incumbent exits -- without
+	// the seam the call raced that exit and read `unexpected EOF`
+	// (2026-11-03, a queue merge's gate).
+	selfRepo, d := drainSelfRepoDaemon(t, adoptAwaitsParticipantsEnv)
 	// The standing refusal is recorded as the transport's unlanded arm, as
 	// every refusal of a workspace this daemon no longer serves is.
 	d.ExpectWarnings("daemon.refusal.unlanded_arm.standing")
@@ -998,6 +1003,7 @@ func TestARestartAskedOfAMovedWorkspaceIsAnsweredTransferringAway(t *testing.T) 
 	f.shim.ExpectStartSession()
 	f.shim.ExpectWatchSession()
 	host := d.WatchHost(f.ws)
+	web := d.WatchWeb(f.ws)
 	harness.AwaitNext(t, d.Ctx(), host, "the fresh host push")
 	f.submit("long running work", "k-moved-restart", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	f.shim.ExpectStartTurn()
@@ -1005,6 +1011,9 @@ func TestARestartAskedOfAMovedWorkspaceIsAnsweredTransferringAway(t *testing.T) 
 	harness.AwaitView(t, d.Ctx(), host, "transferred", func(r *agentreplv1.WatchHostWorkspaceResponse) bool {
 		return r.GetTransferred() != nil
 	})
+	moved := harness.AwaitView(t, d.Ctx(), web, "transferred", func(r *agentreplv1.WatchWebWorkspaceResponse) bool {
+		return r.GetTransferred() != nil
+	}).GetTransferred()
 
 	// Act
 	resp, err := d.Client().RestartWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.RestartWorkspaceRequest{Workspace: f.ws}))
@@ -1018,6 +1027,14 @@ func TestARestartAskedOfAMovedWorkspaceIsAnsweredTransferringAway(t *testing.T) 
 	}
 	if got := f.shim.Count(harness.RPCKillTurn); got != 0 {
 		t.Fatalf("KillTurn was called %d time(s); the incumbent must not run a restart it has moved away", got)
+	}
+
+	// The participants adopt on the successor, and the incumbent leaves.
+	if o := adoptBothParticipants(d, drainDial(moved.GetAddress()), f.ws); o.hostErr != nil || o.webErr != nil {
+		t.Fatalf("adopting on the successor = (%v, %v), want both to succeed", o.hostErr, o.webErr)
+	}
+	if code := d.AwaitExit(); code != 0 {
+		t.Fatalf("the incumbent's exit code = %d, want an orderly 0", code)
 	}
 }
 
