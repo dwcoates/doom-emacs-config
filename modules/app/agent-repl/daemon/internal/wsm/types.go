@@ -1393,4 +1393,10 @@ type MergeQueueEntry struct {
 	// was put in line; empty while it is only requested, and on a row an
 	// earlier build queued.
 	Ledger LeaseID
+	// Slot is the place the entry holds (MergeSlot), and SlotSince the
+	// moment it took it: written in the same store write that moved it there,
+	// so a restart or a handover reads the same moment. The roster's clock for
+	// every active slot ticks from SlotSince.
+	Slot      MergeSlot
+	SlotSince time.Time
 }

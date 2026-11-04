@@ -1223,12 +1223,24 @@ func (s *store) Forget(ctx context.Context, id WorkspaceID) (ForgetReport, error
 		if _, err := tx.ExecContext(ctx, `DELETE FROM creation_jobs WHERE workspace_id = ?`, id); err != nil {
 			return err
 		}
+		// THE WORKSPACE'S QUEUE ENTRIES GO WITH IT (a cascade), which can
+		// hand the head of a line to the merge behind it: each queue it stood
+		// on is restamped in this transaction, as writeQueue does.
+		queues, err := queueKeysOf(ctx, tx, id)
+		if err != nil {
+			return err
+		}
 		res, err := tx.ExecContext(ctx, `DELETE FROM workspaces WHERE id = ?`, id)
 		if err != nil {
 			return err
 		}
 		if err := requireOneRow(res, fmt.Sprintf("wsm: workspace %s", id)); err != nil {
 			return err
+		}
+		for _, key := range queues {
+			if err := restampMergeSlots(ctx, tx, key, s.now()); err != nil {
+				return err
+			}
 		}
 		var remaining int
 		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM workspaces WHERE repo_id = ?`, repo).Scan(&remaining); err != nil {

@@ -201,6 +201,7 @@ var migrations = []migration{
 	{To: 98, Name: "walk_landing", Kind: MigrationAdditive, DDL: walkLandingDDL},
 	{To: 99, Name: "persistent_wifi_lid_dim", Kind: MigrationAdditive, DDL: persistentWifiLidDimDDL},
 	{To: 100, Name: "workspace_slack_posts", Kind: MigrationAdditive, DDL: slackPostsDDL},
+	{To: 101, Name: "merge_queue_slot", Kind: MigrationAdditive, DDL: mergeQueueSlotDDL},
 }
 
 // mergeQueueLookupIndexesDDL keys the two lookups every workspace read makes
