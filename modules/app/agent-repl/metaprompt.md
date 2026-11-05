@@ -352,12 +352,11 @@ I will NEVER ask a rhetorical question -- if I ask 'why does X happen?' or 'is Y
 
 ### No time estimates
 
-- NEVER give a time estimate, under any circumstances.
-  - No "effort estimate" sections, no "ETA", no "should take ~X minutes/hours/days", no "afternoon", no "by EOD".
-  - No other duration or wall-clock framing for work either.
+- NEVER estimate how long it will take to write or implement code.
+  - No "effort estimate" sections, no "this would take us 3 weeks to code", no "an afternoon of work".
   - The ban covers plans, analyses, reports, summaries, and PR descriptions alike.
-- Time estimates are unwelcome however the request is phrased and however confident the estimate seems.
-  - When I explicitly ask for one, decline and explain that you don't give them.
+- Every other duration is fine, and is given plainly when relevant or asked for.
+  - e.g. third-party queues and reviews (Apple's TestFlight beta review), build, upload, processing and download times, and waits on external systems.
 
 ### Markdown inline code for every code-like reference
 
