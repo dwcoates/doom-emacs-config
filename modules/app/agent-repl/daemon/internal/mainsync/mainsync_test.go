@@ -128,7 +128,7 @@ func newRig(t *testing.T) *rig {
 }
 
 func behind(ahead, behind int) repodivergence.Counted {
-	return repodivergence.Counted{Branch: "master", Upstream: "origin/master", Ahead: ahead, Behind: behind}
+	return repodivergence.Counted{Branch: "master", Upstream: "origin/master", Fetched: "refs/agent-repl/origin/master", Ahead: ahead, Behind: behind}
 }
 
 func (r *rig) sync(m repodivergence.Counted) { r.s.Sync(context.Background(), r.prompts, repoID, m) }
@@ -141,7 +141,7 @@ func TestABranchBehindAndNotAheadIsFastForwardedUnderBothHolds(t *testing.T) {
 	r.sync(behind(0, 3))
 
 	// Assert
-	if len(r.git.ffs) != 1 || r.git.ffs[0] != "/repos/main origin/master" {
+	if len(r.git.ffs) != 1 || r.git.ffs[0] != "/repos/main refs/agent-repl/origin/master" {
 		t.Fatalf("fast-forwards = %v, want one to the upstream", r.git.ffs)
 	}
 	if len(r.turns.held) != 1 || r.turns.held[0] != "main-ws main sync" || r.target.released != 1 {
@@ -201,7 +201,7 @@ func TestAClosedMainWorkspaceIsFastForwardedWithoutItsTurnHold(t *testing.T) {
 }
 
 func TestAFailedFastForwardIsToldToTheMainWorkspaceOnce(t *testing.T) {
-	localChanges := &gitclient.Error{Args: []string{"merge", "--ff-only", "origin/master"}, ExitCode: 1,
+	localChanges := &gitclient.Error{Args: []string{"merge", "--ff-only", "refs/agent-repl/origin/master"}, ExitCode: 1,
 		Stderr: "error: Your local changes to the following files would be overwritten by merge:\n\tconfig.el\n\tlisp/a.el\nPlease commit your changes or stash them before you merge.\nAborting\n"}
 	tests := []struct {
 		name  string
@@ -211,8 +211,8 @@ func TestAFailedFastForwardIsToldToTheMainWorkspaceOnce(t *testing.T) {
 	}{
 		{name: "a diverged branch", m: behind(2, 3), want: "holds 2 commit(s) the upstream lacks, and lacks 3"},
 		{name: "local changes in the way", m: behind(0, 3), ffErr: localChanges, want: "- `config.el`\n- `lisp/a.el`"},
-		{name: "git failing otherwise", m: behind(0, 3), ffErr: &gitclient.Error{Args: []string{"merge", "--ff-only", "origin/master"}, ExitCode: 128, Stderr: "fatal: index.lock exists"},
-			want: "`git merge --ff-only origin/master` exited 128:\n~~~text\nfatal: index.lock exists\n~~~"},
+		{name: "git failing otherwise", m: behind(0, 3), ffErr: &gitclient.Error{Args: []string{"merge", "--ff-only", "refs/agent-repl/origin/master"}, ExitCode: 128, Stderr: "fatal: index.lock exists"},
+			want: "`git merge --ff-only refs/agent-repl/origin/master` exited 128:\n~~~text\nfatal: index.lock exists\n~~~"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -225,7 +225,7 @@ func TestAFailedFastForwardIsToldToTheMainWorkspaceOnce(t *testing.T) {
 			r.sync(tt.m)
 
 			// Assert
-			if len(r.prompts.got) != 1 || !strings.Contains(r.prompts.got[0], tt.want) || !strings.Contains(r.prompts.got[0], "sha-of-origin/master") {
+			if len(r.prompts.got) != 1 || !strings.Contains(r.prompts.got[0], tt.want) || !strings.Contains(r.prompts.got[0], "sha-of-refs/agent-repl/origin/master") {
 				t.Fatalf("told %q, want one repair prompt saying %q", r.prompts.got, tt.want)
 			}
 			if r.prompts.origin != Origin {
@@ -247,7 +247,7 @@ func TestANewUpstreamCommitIsToldAgain(t *testing.T) {
 	r.sync(behind(1, 1))
 
 	// Assert
-	if len(r.prompts.got) != 1 || r.store.told[repoID].UpstreamSHA != "sha-of-origin/master" {
+	if len(r.prompts.got) != 1 || r.store.told[repoID].UpstreamSHA != "sha-of-refs/agent-repl/origin/master" {
 		t.Fatalf("told %q, record %+v; want the new commit told and recorded", r.prompts.got, r.store.told[repoID])
 	}
 }

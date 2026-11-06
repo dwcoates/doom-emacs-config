@@ -820,3 +820,68 @@ func workspaceStatus(t *testing.T, d *harness.Daemon, ws *workspacev1.WorkspaceR
 	}
 	return resp.Msg.GetSuccess().GetStatus()
 }
+
+// createFromOrigin asks for a peer cut from origin's primary branch.
+func createFromOrigin(t *testing.T, d *harness.Daemon, repository *workspacev1.RepositoryRef) (*connect.Response[agentreplv1.CreateWorkspaceResponse], error) {
+	t.Helper()
+	return d.Client().CreateWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.CreateWorkspaceRequest{
+		Originator:    &agentreplv1.WorkspaceOriginator{Originator: &agentreplv1.WorkspaceOriginator_UserOrWorkspace{UserOrWorkspace: &agentreplv1.WorkspaceOriginatorUserOrWorkspace{}}},
+		Repository:    repository,
+		Requester:     harness.User(),
+		ContextOrigin: harness.Fresh(),
+		Form: &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{
+			Relationship:  harness.Peer(),
+			InitialPrompt: said("cut me from origin"),
+			LandingTarget: &agentreplv1.WorkspaceLandingTarget{Target: &agentreplv1.WorkspaceLandingTarget_Primary{Primary: &agentreplv1.WorkspaceLandingTargetPrimary{
+				FromOrigin: &agentreplv1.WorkspaceLandingTargetPrimaryFromOrigin{}}}},
+		}},
+	}))
+}
+
+func TestCreateWorkspaceFromOriginIsCutFromOriginsPrimaryDespiteARaceOnAnotherRemoteRef(t *testing.T) {
+	t.Parallel()
+	// Arrange: origin's main moved on, and another process's fetch is writing
+	// an unrelated remote-tracking ref (2026-11-05, explanation-engine).
+	d := newDaemon(t, harness.Opts{})
+	repo := harness.NewRepo(t)
+	repository := createRepositoryRef(t, d, repo)
+	pushed := repo.AdvanceOrigin(harness.DefaultBranch)
+	repo.AddOriginBranch("kimmy/kqkr-atypes")
+	repo.RaceFetchOf("refs/remotes/origin/kimmy/kqkr-atypes")
+
+	// Act.
+	resp, err := createFromOrigin(t, d, repository)
+
+	// Assert: created, at origin's tip, read from the daemon's private ref.
+	if err != nil || resp.Msg.GetSuccess() == nil {
+		t.Fatalf("CreateWorkspace(from origin) = (%v, %v), want a success", resp, err)
+	}
+	if got := repo.WorktreeHead(resp.Msg.GetSuccess().GetWorkspace().GetDir()); got != pushed {
+		t.Fatalf("the new worktree is at %s, want origin's main %s", got, pushed)
+	}
+	if got, ok := repo.Ref("refs/agent-repl/origin/" + harness.DefaultBranch); !ok || got != pushed {
+		t.Fatalf("the private ref = %q (exists %v), want origin's main %s", got, ok, pushed)
+	}
+}
+
+func TestCreateWorkspaceFromOriginWhoseFetchFailsAnswersOriginFetchFailed(t *testing.T) {
+	t.Parallel()
+	// Arrange: the remote cannot be read.
+	d := newDaemon(t, harness.Opts{})
+	repo := harness.NewRepo(t)
+	repository := createRepositoryRef(t, d, repo)
+	repo.AdvanceOrigin(harness.DefaultBranch)
+	repo.ScriptFailure("", 128, "fatal: could not read from remote repository\n", "fetch")
+	d.ExpectWarnings("daemon.gitclient.fetch_branch")
+
+	// Act.
+	resp, err := createFromOrigin(t, d, repository)
+
+	// Assert.
+	if err != nil || !strings.Contains(resp.Msg.GetError().GetOriginFetchFailed().GetDetail(), "could not read from remote repository") {
+		t.Fatalf("CreateWorkspace(from origin) = (%v, %v), want origin_fetch_failed carrying git's words", resp, err)
+	}
+	if got := len(repo.Worktrees()); got != 1 {
+		t.Fatalf("the repository's worktrees = %v, want none created", repo.Worktrees())
+	}
+}

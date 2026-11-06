@@ -103,10 +103,15 @@ type Repo struct {
 	// RemoteHeads maps a branch of the `origin` remote to the commit a fetch
 	// brings in; `refs/remotes/origin/<branch>` resolves to it.
 	RemoteHeads map[string]string `json:"remote_heads,omitempty"`
-	// Refs maps every other full ref `update-ref` created (the reaper's
-	// preservations under refs/agent-repl/) to its commit.
-	Refs      map[string]string `json:"refs,omitempty"`
-	Worktrees []*Worktree       `json:"worktrees"`
+	// Refs maps every other full ref `update-ref` or a one-branch fetch
+	// created (the reaper's preservations and the daemon's private fetched
+	// refs under refs/agent-repl/) to its commit.
+	Refs map[string]string `json:"refs,omitempty"`
+	// RacingRefs are full refs another process's fetch is writing right now:
+	// a fetch that would write one fails as real git does when it loses that
+	// race ("cannot lock ref ... is at X but expected Y").
+	RacingRefs []string    `json:"racing_refs,omitempty"`
+	Worktrees  []*Worktree `json:"worktrees"`
 	// Tags maps every annotated tag to what it names: the version tags the
 	// merge queue creates and the seed a test places.
 	Tags map[string]*Tag `json:"tags,omitempty"`

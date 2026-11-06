@@ -14,7 +14,9 @@ on) counted against the remote branch it tracks (`<branch>@{upstream}`, e.g.
 so counting the checkout against itself would always read zero; the upstream is
 the only comparison that carries information. A count against a stale
 remote-tracking ref would never move "behind", so every measurement fetches the
-upstream's remote first. The owner gave the go-ahead to execute without a design
+upstream's one branch first, into the daemon's private ref for it
+(`refs/agent-repl/<remote>/<branch>`, `gitclient.FetchBranch`), and counts
+against that ref. The owner gave the go-ahead to execute without a design
 round, so this reading was taken as a judgment call, not a ruling.
 
 ## Landed changes
@@ -36,8 +38,12 @@ round, so this reading was taken as a judgment call, not a ruling.
      ordinary answer (a repository with no remote), not a measurement that broke.
    - Consumers: the webapp draws the arm as the label's `title`; Emacs decodes
      and validates it (its codec refuses unknown fields) and draws nothing.
-   - Consequences accepted: one `git fetch <remote>` per registered repository
-     every five minutes (network traffic, and remote-tracking refs move under
-     the user's feet as any IDE's background fetch would); a repository
-     registered after a sweep shows `pending` until the next one.
+   - Consequences accepted: one fetch of the upstream's branch per registered
+     repository every sweep (network traffic); a repository registered after a
+     sweep shows `pending` until the next one.
+   - Amended 2026-11-06: the sweep first ran a whole-remote `git fetch
+     <remote>`, which moved every remote-tracking ref under the user's feet and
+     raced every other fetch in the repository ("cannot lock ref"). It now
+     writes only its private ref, which no other process writes, so
+     `refs/remotes/*` is the user's alone and no outside fetch can race it.
    - Sweep: nothing obviated; the change is purely additive.

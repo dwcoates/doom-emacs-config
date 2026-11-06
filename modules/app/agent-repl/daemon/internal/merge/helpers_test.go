@@ -1340,10 +1340,6 @@ type fakeGit struct {
 	// worktrees answers ListWorktrees; addedWorktrees records AddWorktree.
 	worktrees      []gitclient.Worktree
 	addedWorktrees []string
-	// fetches records every Fetch; fetchErr fails them.
-	fetches  []string
-	fetchErr error
-
 	// calls records what was asked of git, in order.
 	calls []string
 	// removedWorktrees records the teardown's removals of a workspace's
@@ -1743,12 +1739,10 @@ func (g *fakeGit) UnregisterMissingWorktree(context.Context, string, string) err
 	return errors.New("fakeGit: the merge never unregisters a missing worktree")
 }
 
-func (g *fakeGit) Fetch(_ context.Context, dir, remote string) error {
-	g.record("fetch")
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	g.fetches = append(g.fetches, dir+"<"+remote)
-	return g.fetchErr
+// FetchBranch is never the merge's to call: a merge runs no network git.
+func (g *fakeGit) FetchBranch(context.Context, string, string, string) (string, error) {
+	g.record("fetch_branch")
+	return "", errors.New("fakeGit: the merge never fetches")
 }
 
 // THE REAPER'S OPERATIONS are no part of a merge. Each one fails loudly, so a

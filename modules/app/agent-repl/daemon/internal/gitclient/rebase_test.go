@@ -552,35 +552,3 @@ func TestAddWorktreeChecksTheExistingBranchOut(t *testing.T) {
 	// Assert.
 	fake.assertSubject(0, "worktree", "add", "/state/wt", "feature")
 }
-
-func TestFetchFetchesTheRemote(t *testing.T) {
-	// Arrange.
-	git, _ := newTestClient(t)
-	fake := newFakeGit(t, ok(""))
-
-	// Act.
-	if err := git.Fetch(context.Background(), "/repo", "origin"); err != nil {
-		t.Fatalf("Fetch: %v", err)
-	}
-
-	// Assert.
-	fake.assertSubject(0, "fetch", "origin")
-}
-
-func TestFetchFailurePropagatesTheGitEvidence(t *testing.T) {
-	// Arrange.
-	git, surfaces := newTestClient(t)
-	newFakeGit(t, fails(128, "fatal: could not read from remote\n", "fetch"))
-
-	// Act.
-	err := git.Fetch(context.Background(), "/repo", "origin")
-
-	// Assert.
-	var failure *Error
-	if !errors.As(err, &failure) || !strings.Contains(failure.Stderr, "could not read") {
-		t.Fatalf("Fetch error = %v, want git's own evidence", err)
-	}
-	if _, found := recordFor(surfaces.records(), "error", "daemon.gitclient.fetch"); !found {
-		t.Fatalf("the failure was not logged at ERROR: %+v", surfaces.records())
-	}
-}

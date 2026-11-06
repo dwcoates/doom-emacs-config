@@ -158,8 +158,10 @@ type Git interface {
 	AbortRebase(ctx context.Context, dir string) error
 	// AddWorktree checks an existing branch out at worktreeDir.
 	AddWorktree(ctx context.Context, repoDir, worktreeDir, branch string) error
-	// Fetch fetches remote into dir's repository.
-	Fetch(ctx context.Context, dir, remote string) error
+	// FetchBranch fetches one branch of remote into the daemon's private ref
+	// for it (PrivateRemoteRef) and answers that ref. It writes no other ref:
+	// never refs/remotes/*, a tag or FETCH_HEAD.
+	FetchBranch(ctx context.Context, repoDir, remote, branch string) (string, error)
 	// Upstream reports the remote branch a local branch tracks. It is a
 	// PROBE: a branch that tracks nothing is an ordinary answer (false, nil
 	// error); a branch that does not exist is a failure.

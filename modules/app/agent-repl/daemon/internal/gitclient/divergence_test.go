@@ -10,7 +10,7 @@ import (
 func TestUpstreamAsksForEachRefForTheBranch(t *testing.T) {
 	// Arrange.
 	git, _ := newTestClient(t)
-	fake := newFakeGit(t, ok("refs/heads/master\x00origin\x00origin/master\n"))
+	fake := newFakeGit(t, ok("refs/heads/master\x00origin\x00origin/master\x00refs/heads/master\n"))
 
 	// Act.
 	if _, _, err := git.Upstream(context.Background(), "/repo", "master"); err != nil {
@@ -29,14 +29,20 @@ func TestUpstreamAnswers(t *testing.T) {
 		wantFound bool
 	}{
 		{
-			name:      "a tracked branch answers its remote and ref",
-			stdout:    "refs/heads/master\x00origin\x00origin/master\n",
-			want:      Upstream{Remote: "origin", Ref: "origin/master"},
+			name:      "a tracked branch answers its remote, ref and remote branch",
+			stdout:    "refs/heads/master\x00origin\x00origin/master\x00refs/heads/master\n",
+			want:      Upstream{Remote: "origin", Ref: "origin/master", Branch: "master"},
+			wantFound: true,
+		},
+		{
+			name:      "a branch tracking a differently named remote branch answers the remote's name",
+			stdout:    "refs/heads/master\x00origin\x00origin/main\x00refs/heads/main\n",
+			want:      Upstream{Remote: "origin", Ref: "origin/main", Branch: "main"},
 			wantFound: true,
 		},
 		{
 			name:      "a branch that tracks nothing is an ordinary answer",
-			stdout:    "refs/heads/master\x00\x00\n",
+			stdout:    "refs/heads/master\x00\x00\x00\n",
 			wantFound: false,
 		},
 	}
@@ -67,9 +73,12 @@ func TestUpstreamRefusals(t *testing.T) {
 		wantCause string
 	}{
 		{name: "a missing branch", stdout: "", wantCause: "does not exist"},
-		{name: "a half-configured upstream", stdout: "refs/heads/master\x00origin\x00\n", wantCause: "half-configured"},
-		{name: "an answer naming another ref", stdout: "refs/heads/main\x00\x00\n", wantCause: "want one line naming the branch"},
-		{name: "an answer with two lines", stdout: "refs/heads/master\x00\x00\nrefs/heads/master\x00\x00\n", wantCause: "want one line naming the branch"},
+		{name: "a half-configured upstream", stdout: "refs/heads/master\x00origin\x00\x00\n", wantCause: "half-configured"},
+		{name: "an upstream with no remote ref", stdout: "refs/heads/master\x00origin\x00origin/master\x00\n", wantCause: "half-configured"},
+		{name: "an upstream whose remote ref is no branch", stdout: "refs/heads/master\x00origin\x00origin/v1\x00refs/tags/v1\n", wantCause: "half-configured"},
+		{name: "an answer of the old three fields", stdout: "refs/heads/master\x00origin\x00origin/master\n", wantCause: "want one line naming the branch"},
+		{name: "an answer naming another ref", stdout: "refs/heads/main\x00\x00\x00\n", wantCause: "want one line naming the branch"},
+		{name: "an answer with two lines", stdout: "refs/heads/master\x00\x00\x00\nrefs/heads/master\x00\x00\x00\n", wantCause: "want one line naming the branch"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

@@ -418,6 +418,56 @@ func (r *Repo) BranchHead(branch string) string {
 	return r.state(r.w.read()).BranchHeads[branch]
 }
 
+// AdvanceOrigin puts one commit on origin's BRANCH that the local branch
+// lacks, as a push to origin from elsewhere does, and answers it.
+func (r *Repo) AdvanceOrigin(branch string) string {
+	r.t.Helper()
+	var sha string
+	r.edit(func(s *fakegit.State) {
+		repo := r.state(s)
+		sha = s.AddCommit(repo, "", "pushed to origin", []string{repo.BranchHeads[branch]}, []string{"origin.txt"}).SHA
+		if repo.RemoteHeads == nil {
+			repo.RemoteHeads = map[string]string{}
+		}
+		repo.RemoteHeads[branch] = sha
+	})
+	return sha
+}
+
+// AddOriginBranch puts a branch on origin that the repository has no local
+// branch of, as another person's push does.
+func (r *Repo) AddOriginBranch(branch string) {
+	r.t.Helper()
+	r.edit(func(s *fakegit.State) {
+		repo := r.state(s)
+		if repo.RemoteHeads == nil {
+			repo.RemoteHeads = map[string]string{}
+		}
+		repo.RemoteHeads[branch] = s.AddCommit(repo, "", "someone else's work", []string{repo.BranchHeads[DefaultBranch]}, []string{"other.txt"}).SHA
+	})
+}
+
+// RaceFetchOf makes another process's fetch be writing the full ref REF: a
+// fetch that would write it loses the race, as real git's does.
+func (r *Repo) RaceFetchOf(ref string) {
+	r.t.Helper()
+	r.edit(func(s *fakegit.State) {
+		repo := r.state(s)
+		repo.RacingRefs = append(repo.RacingRefs, ref)
+	})
+}
+
+// WorktreeHead answers the commit a worktree of the repository has checked
+// out.
+func (r *Repo) WorktreeHead(dir string) string {
+	r.t.Helper()
+	wt := r.state(r.w.read()).Worktree(dir)
+	if wt == nil {
+		r.t.Fatalf("harness: %s is not a worktree of %s", dir, r.Dir)
+	}
+	return wt.Head
+}
+
 // AddBranchWorktree adds a branch cut from the default branch, carrying one
 // commit of work, checked out in a sibling worktree, and answers the worktree.
 func (r *Repo) AddBranchWorktree(name string) string {

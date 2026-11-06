@@ -5,9 +5,15 @@
 //
 // ONE SWEEP AT STARTUP, THEN ONE EVERY MINUTE. A sweep walks every
 // registered repository in turn: it resolves the primary branch, probes its
-// upstream, fetches the upstream's remote (a count against a stale
-// remote-tracking ref would never move "behind"), and counts the two against
-// each other. Each repository's outcome is handed to the sink the moment it is
+// upstream, fetches the upstream's ONE branch into the daemon's private ref for
+// it (a count against a stale ref would never move "behind"), and counts the
+// primary branch against that ref.
+//
+// THE SWEEP NEVER WRITES refs/remotes/*. A whole-remote fetch would update
+// every remote-tracking ref behind the user's back and race every other fetch
+// in the repository; gitclient.FetchBranch writes only
+// refs/agent-repl/<remote>/<branch>, which nothing else writes, and serializes
+// the daemon's own fetches of one repository. Each repository's outcome is handed to the sink the moment it is
 // known, so one slow remote never holds back the others' hovers.
 package repodivergence
 
@@ -49,8 +55,13 @@ type Measure interface{ isMeasure() }
 type Counted struct {
 	// Branch is the primary branch's short name.
 	Branch string
-	// Upstream is the upstream's short name, e.g. "origin/master".
+	// Upstream is the upstream's short name, e.g. "origin/master": what the
+	// hover names.
 	Upstream string
+	// Fetched is the daemon's private ref the count was made against, e.g.
+	// "refs/agent-repl/origin/master": what a fast-forward to the upstream
+	// names (internal/mainsync).
+	Fetched string
 	// Ahead is the commits on Branch that Upstream lacks.
 	Ahead int
 	// Behind is the commits on Upstream that Branch lacks.
@@ -77,7 +88,7 @@ func (Failed) isMeasure()     {}
 type Git interface {
 	DefaultBranch(ctx context.Context, repoDir string) (string, error)
 	Upstream(ctx context.Context, repoDir, branch string) (gitclient.Upstream, bool, error)
-	Fetch(ctx context.Context, dir, remote string) error
+	FetchBranch(ctx context.Context, repoDir, remote, branch string) (string, error)
 	AheadBehind(ctx context.Context, dir, local, upstream string) (int, int, error)
 }
 
@@ -203,15 +214,17 @@ func (m *Measurer) measure(parent context.Context, repo wsm.Repository) (measure
 		return NoUpstream{Branch: branch}, false
 	}
 	fields["upstream"] = upstream.Ref
-	if err := m.deps.Git.Fetch(ctx, repo.Dir, upstream.Remote); err != nil {
-		return fail("fetching "+upstream.Remote, err)
+	fetched, err := m.deps.Git.FetchBranch(ctx, repo.Dir, upstream.Remote, upstream.Branch)
+	if err != nil {
+		return fail("fetching "+upstream.Ref, err)
 	}
-	ahead, behind, err := m.deps.Git.AheadBehind(ctx, repo.Dir, branch, upstream.Ref)
+	fields["fetched"] = fetched
+	ahead, behind, err := m.deps.Git.AheadBehind(ctx, repo.Dir, branch, fetched)
 	if err != nil {
 		return fail("counting "+branch+" against "+upstream.Ref, err)
 	}
 	fields["ahead"] = ahead
 	fields["behind"] = behind
 	m.deps.Log.Debug(opMeasure, "measured the repository's divergence", fields)
-	return Counted{Branch: branch, Upstream: upstream.Ref, Ahead: ahead, Behind: behind}, false
+	return Counted{Branch: branch, Upstream: upstream.Ref, Fetched: fetched, Ahead: ahead, Behind: behind}, false
 }
