@@ -5845,3 +5845,193 @@ was called for, :said the echo-area messages, :text the composer after."
   (should (string-match-p "The composer's words are sent in its place."
                           (agent-repl--input-rollback-confirmation
                            (agent-repl-test-input--plan) (agent-repl-test-input--resend-of "x")))))
+
+;;;; ---- A question about a final response ----
+
+(defmacro agent-repl-test-input--with-question (&rest body)
+  "Run BODY with a real composer `ws-q' and real history, focus recorded.
+Inside BODY, `buf' is the composer and `focused' lists each workspace
+the composer took the keyboard for."
+  (declare (indent 0))
+  `(agent-repl-test-input--with-composers '("ws-q")
+     (let ((buf (cdr (assoc "ws-q" composers)))
+           (focused nil))
+       (cl-letf (((symbol-function 'agent-repl-input-focus-for-reply)
+                  (lambda (ws) (push ws focused) nil)))
+         ,@body))))
+
+(defun agent-repl-test-input--question-history (buf)
+  "BUF's history ring, newest first, as plain strings."
+  (mapcar #'substring-no-properties (buffer-local-value 'agent-repl--input-history buf)))
+
+(ert-deftest agent-repl-input-a-question-sets-the-draft-aside-into-history ()
+  "An asked question saves the draft to history and clears the composer."
+  (agent-repl-test-input--with-question
+    ;; Arrange
+    (with-current-buffer buf (insert "my draft"))
+    ;; Act
+    (agent-repl-input-response-question "ws-q" :asked)
+    ;; Assert
+    (should (equal (with-current-buffer buf (buffer-string)) ""))
+    (should (equal (car (agent-repl-test-input--question-history buf)) "my draft"))
+    (should (agent-repl--input-question-standing-p "ws-q"))))
+
+(ert-deftest agent-repl-input-a-question-takes-the-keyboard ()
+  "An asked question puts the keyboard in the composer."
+  (agent-repl-test-input--with-question
+    ;; Act
+    (agent-repl-input-response-question "ws-q" :asked)
+    ;; Assert
+    (should (equal focused '("ws-q")))))
+
+(ert-deftest agent-repl-input-withdrawing-the-question-puts-the-draft-back ()
+  "A withdrawn question restores the draft it set aside."
+  (agent-repl-test-input--with-question
+    ;; Arrange
+    (with-current-buffer buf (insert "my draft"))
+    (agent-repl-input-response-question "ws-q" :asked)
+    (with-current-buffer buf (insert "half a question"))
+    ;; Act
+    (agent-repl-input-response-question "ws-q" :withdrawn)
+    ;; Assert
+    (should (equal (with-current-buffer buf (buffer-string)) "my draft"))
+    (should (member "half a question" (agent-repl-test-input--question-history buf)))
+    (should-not (agent-repl--input-question-standing-p "ws-q"))))
+
+(ert-deftest agent-repl-input-withdrawing-a-question-with-no-draft-leaves-the-composer-empty ()
+  "A question asked over an empty composer restores nothing."
+  (agent-repl-test-input--with-question
+    ;; Arrange
+    (agent-repl-input-response-question "ws-q" :asked)
+    (with-current-buffer buf (insert "why?"))
+    ;; Act
+    (agent-repl-input-response-question "ws-q" :withdrawn)
+    ;; Assert
+    (should (equal (with-current-buffer buf (buffer-string)) ""))))
+
+(ert-deftest agent-repl-input-a-moved-question-keeps-the-composer-and-the-draft ()
+  "A question moving to another response edits nothing."
+  (agent-repl-test-input--with-question
+    ;; Arrange
+    (with-current-buffer buf (insert "my draft"))
+    (agent-repl-input-response-question "ws-q" :asked)
+    (with-current-buffer buf (insert "why?"))
+    ;; Act
+    (agent-repl-input-response-question "ws-q" :moved)
+    ;; Assert
+    (should (equal (with-current-buffer buf (buffer-string)) "why?"))
+    (should (equal (buffer-local-value 'agent-repl--input-question-draft buf) "my draft"))))
+
+(ert-deftest agent-repl-input-a-taken-question-lets-the-draft-go ()
+  "A sent question lets the set-aside draft go, untouched in history."
+  (agent-repl-test-input--with-question
+    ;; Arrange
+    (with-current-buffer buf (insert "my draft"))
+    (agent-repl-input-response-question "ws-q" :asked)
+    (setq focused nil)
+    ;; Act
+    (agent-repl-input-response-question "ws-q" :taken)
+    ;; Assert
+    (should-not (buffer-local-value 'agent-repl--input-question-draft buf))
+    (should-not (agent-repl--input-question-standing-p "ws-q"))
+    (should (equal (car (agent-repl-test-input--question-history buf)) "my draft"))
+    (should-not focused)))
+
+(ert-deftest agent-repl-input-a-question-with-no-composer-is-recorded ()
+  "A workspace with no composer records the change and edits nothing."
+  (let (warns)
+    (cl-letf (((symbol-function 'agent-repl--input-buffer) (lambda (_ws) nil))
+              ((symbol-function 'agent-repl--warn) (agent-repl-test--record-into warns)))
+      ;; Act
+      (agent-repl-input-response-question "ws-none" :asked))
+    ;; Assert
+    (should (member "elisp.input.response-question-no-composer ws=ws-none change=:asked" warns))))
+
+(ert-deftest agent-repl-input-an-unknown-question-change-is-fatal ()
+  "A change this composer does not know is a broken decoder."
+  (let (fatals)
+    (cl-letf (((symbol-function 'agent-repl--fatal)
+               (lambda (ws fmt &rest args) (push (apply #'format fmt args) fatals)
+                 (error "fatal %s" ws))))
+      ;; Act / Assert
+      (should-error (agent-repl-input-response-question "ws-q" :sideways))
+      (should (equal fatals '("elisp.input.response-question-unknown-change ws=ws-q change=:sideways"))))))
+
+(defconst agent-repl-test-input--question-forked-answer
+  '(:response (:arm :success
+               :value (:arm :question-forked :value (:row (:value "row-1") :op-id "k")))))
+
+(ert-deftest agent-repl-input-a-send-while-a-question-stands-registers-the-fork-progress ()
+  "The fork's create progress is registered under the send's key before it goes."
+  (agent-repl-test-input--with
+    ;; Arrange
+    (let (registered)
+      (with-current-buffer agent-repl-test-input--buffer
+        (setq agent-repl--input-question-standing t))
+      (setq agent-repl-test-input--answer agent-repl-test-input--question-forked-answer)
+      (agent-repl-test-input--type "why?")
+      (cl-letf (((symbol-function 'agent-repl-verbs-register-create-progress)
+                 (lambda (op reason &rest _) (push (list op reason (length agent-repl-test-input--submitted)) registered))))
+        ;; Act
+        (agent-repl--send :user-sent))
+      ;; Assert
+      (let ((key (plist-get (agent-repl-test-input--request) :idempotency-key)))
+        (should (equal registered (list (list key "forked" 0))))))))
+
+(ert-deftest agent-repl-input-a-forked-question-is-accepted-and-said ()
+  "A `question_forked' answer clears the composer and says where the answer is."
+  (agent-repl-test-input--with
+    ;; Arrange
+    (setq agent-repl-test-input--answer agent-repl-test-input--question-forked-answer)
+    (agent-repl-test-input--type "why?")
+    ;; Act
+    (agent-repl--send :user-sent)
+    ;; Assert
+    (should (equal (agent-repl-test-input--composer-text) ""))
+    (should (member "[agent-repl] Asking in a new workspace…" agent-repl-test-input--messages))))
+
+(ert-deftest agent-repl-input-a-send-with-no-question-registers-nothing ()
+  "An ordinary send registers no fork progress."
+  (agent-repl-test-input--with
+    ;; Arrange
+    (let (registered)
+      (agent-repl-test-input--type "hello")
+      (cl-letf (((symbol-function 'agent-repl-verbs-register-create-progress)
+                 (lambda (&rest args) (push args registered))))
+        ;; Act
+        (agent-repl--send :user-sent))
+      ;; Assert
+      (should-not registered))))
+
+(ert-deftest agent-repl-input-a-question-send-answered-otherwise-forgets-the-op ()
+  "A send that was no fork after all forgets the op it registered."
+  (agent-repl-test-input--with
+    ;; Arrange
+    (let (forgotten)
+      (with-current-buffer agent-repl-test-input--buffer
+        (setq agent-repl--input-question-standing t))
+      (agent-repl-test-input--type "hello")
+      (cl-letf (((symbol-function 'agent-repl-verbs-register-create-progress) #'ignore)
+                ((symbol-function 'agent-repl-mutation-progress-forget)
+                 (lambda (op) (push op forgotten))))
+        ;; Act
+        (agent-repl--send :user-sent))
+      ;; Assert
+      (should (equal forgotten (list (plist-get (agent-repl-test-input--request) :idempotency-key)))))))
+
+(ert-deftest agent-repl-input-a-question-send-that-fails-forgets-the-op ()
+  "A transport failure forgets the op the send registered."
+  (agent-repl-test-input--with
+    ;; Arrange
+    (let (forgotten)
+      (with-current-buffer agent-repl-test-input--buffer
+        (setq agent-repl--input-question-standing t))
+      (setq agent-repl-test-input--answer '(:failure (:kind :transport :message "down")))
+      (agent-repl-test-input--type "why?")
+      (cl-letf (((symbol-function 'agent-repl-verbs-register-create-progress) #'ignore)
+                ((symbol-function 'agent-repl-mutation-progress-forget)
+                 (lambda (op) (push op forgotten))))
+        ;; Act
+        (agent-repl--send :user-sent))
+      ;; Assert
+      (should (equal forgotten (list (plist-get (agent-repl-test-input--request) :idempotency-key)))))))

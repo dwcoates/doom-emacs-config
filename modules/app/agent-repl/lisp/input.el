@@ -132,6 +132,8 @@
 (declare-function agent-repl-rpc-update-held-prompt "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-verbs--send "verbs" (rpc conn request &rest keys))
 (declare-function agent-repl-verbs--conn "verbs" (&optional ws))
+(declare-function agent-repl-verbs-register-create-progress "verbs" (op-id arrival-reason &optional on-progress))
+(declare-function agent-repl-mutation-progress-forget "mutation-progress" (op-id))
 (declare-function agent-repl-rpc-select-feed-row "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-open-feed-image "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-plan-rollback-sync "agent-repl-rpc" (conn request &optional timeout))
@@ -878,6 +880,80 @@ alone.  Returns the composer window when it took the keyboard, else nil."
         (when (fboundp 'evil-insert-state) (evil-insert-state)))
       (agent-repl--info ws "elisp.input.focus-for-reply ws=%s outcome=focused window=%S" ws win)
       win)))
+
+;;;; ---- A question about a final response ----
+;;
+;; A FINAL RESPONSE'S QUESTION-MARK CONTROL in the webview toggles the
+;; daemon's question about it (AskAboutResponse).  The daemon holds the
+;; question, and a prompt sent while it stands is forked into a child
+;; workspace that answers it (SubmitPromptQuestionForked).  The composer
+;; follows each transition the host stream pushes
+;; (HostWorkspaceResponseQuestion):
+;;
+;;   asked      the draft is saved to history (as the discard saves it, so
+;;              the up arrow brings it back), set aside, and cleared;
+;;   moved      the question moved to another response: nothing changes;
+;;   withdrawn  what the composer holds is saved to history and the draft
+;;              set aside is put back;
+;;   taken      a sent prompt took the question: the draft set aside is let
+;;              go (it is already in history) and the composer is untouched.
+;;
+;; The keyboard goes to the composer, in insert state, on every transition
+;; but `taken'.  The composer's copy of whether a question stands is used for
+;; ONE thing only: registering for the fork's create progress before a send
+;; (`agent-repl--input-submit'), so the create's stages are shown.  Where the
+;; prompt goes is the daemon's call alone.
+
+(defvar-local agent-repl--input-question-standing nil
+  "Non-nil while the daemon holds a question about a final response, as pushed.")
+
+(defvar-local agent-repl--input-question-draft nil
+  "The composer contents the standing question set aside, nil when none were.
+Kept with its text properties, so an image in the draft comes back too.")
+
+(defun agent-repl--input-question-standing-p (ws)
+  "Non-nil while WS's composer knows a question about a final response stands."
+  (let ((buf (agent-repl--input-buffer ws)))
+    (and buf (buffer-local-value 'agent-repl--input-question-standing buf))))
+
+(defun agent-repl-input-response-question (ws change)
+  "Follow CHANGE of WS's question about a final response in its composer.
+CHANGE is the host push's arm: `:asked', `:moved', `:withdrawn' or `:taken'
+\(see the commentary above).  A workspace with no composer has nothing to
+follow: recorded, and nothing changes.  An arm this function does not know
+is a broken decoder, and is fatal."
+  (unless (memq change '(:asked :moved :withdrawn :taken))
+    (agent-repl--fatal ws "elisp.input.response-question-unknown-change ws=%s change=%S" ws change))
+  (let ((buf (agent-repl--input-buffer ws)))
+    (if (null buf)
+        (agent-repl--warn ws "elisp.input.response-question-no-composer ws=%s change=%S" ws change)
+      (with-current-buffer buf
+        (pcase change
+          (:asked
+           (let ((draft (unless (string-blank-p (buffer-string)) (buffer-string))))
+             (agent-repl--input-save-to-history ws t)
+             (erase-buffer)
+             (setq agent-repl--input-question-draft draft
+                   agent-repl--input-question-standing t)))
+          (:moved
+           (setq agent-repl--input-question-standing t))
+          (:withdrawn
+           (let ((draft agent-repl--input-question-draft))
+             (agent-repl--input-save-to-history ws t)
+             (erase-buffer)
+             (when draft
+               (insert draft))
+             (setq agent-repl--input-question-draft nil
+                   agent-repl--input-question-standing nil)))
+          (:taken
+           (setq agent-repl--input-question-draft nil
+                 agent-repl--input-question-standing nil))))
+      (agent-repl--info ws "elisp.input.response-question ws=%s change=%S composer-len=%d"
+                        ws change (with-current-buffer buf (buffer-size)))
+      (unless (eq change :taken)
+        (let ((win (agent-repl-input-focus-for-reply ws)))
+          (when win
+            (set-window-point win (with-current-buffer buf (point-max)))))))))
 
 ;;;; ---- The response view: the selected bubble, searched with real Evil ----
 
@@ -2057,6 +2133,17 @@ it."
                        (plist-get (plist-get (plist-get success :value) :row) :value)
                        (length raw))
      (agent-repl--input-accepted ws raw :response-revising from-buffer))
+    (:question-forked
+     ;; The send was the question about a final response: the daemon is
+     ;; forking it into a child workspace whose create reports on the op
+     ;; the send registered for (`agent-repl--input-submit'), so its stages
+     ;; and its arrival are said there.  Nothing is awaited here.
+     (let ((value (plist-get success :value)))
+       (agent-repl--info ws "elisp.input.question-forked ws=%s origin=%S row=%S op-id=%s raw-len=%d"
+                         ws origin (plist-get (plist-get value :row) :value)
+                         (plist-get value :op-id) (length raw)))
+     (message "[agent-repl] Asking in a new workspace…")
+     (agent-repl--input-accepted ws raw :question-forked from-buffer))
     (arm
      (agent-repl--error ws "elisp.input.unknown-success-arm ws=%s arm=%S" ws arm))))
 
@@ -2353,7 +2440,8 @@ value Emacs constructs from a path."
   (let ((ref (agent-repl-host-ref ws))
         (conn (agent-repl-host-conn-or-primary ws))
         (first-attempt (null key))
-        (key (or key (agent-repl--uuid))))
+        (key (or key (agent-repl--uuid)))
+        (question-op nil))
     (agent-repl--with-log-context
      ws key
      (lambda ()
@@ -2372,6 +2460,14 @@ value Emacs constructs from a path."
        (agent-repl--info ws "elisp.input.submit ws=%s origin=%S key=%s blocks=%d selection=%S delivery=%S"
                          ws origin key (length (plist-get (plist-get said :content) :blocks))
                          (agent-repl-host-selection ws) delivery)
+       ;; A STANDING QUESTION FORKS THIS SEND into a child workspace whose
+       ;; create reports on the send's own key (SubmitPromptQuestionForked),
+       ;; so the progress is registered for BEFORE the send and no event can
+       ;; outrun it.  An answer that is no fork forgets it again.
+       (when (and first-attempt (agent-repl--input-question-standing-p ws))
+         (agent-repl--info ws "elisp.input.submit-question-registered ws=%s key=%s" ws key)
+         (agent-repl-verbs-register-create-progress key "forked")
+         (setq question-op key))
        (agent-repl-rpc-submit-prompt
         conn
         ;; No reply target rides the request: the daemon applies its own
@@ -2388,6 +2484,7 @@ value Emacs constructs from a path."
           (agent-repl--with-log-context
            ws key
            (lambda ()
+             (agent-repl--input-forget-unforked ws question-op response)
              (pcase (plist-get response :arm)
                (:success (agent-repl--input-on-success
                           ws raw origin (plist-get response :value) from-buffer))
@@ -2401,8 +2498,22 @@ value Emacs constructs from a path."
           (agent-repl--with-log-context
            ws key
            (lambda ()
+             (agent-repl--input-forget-unforked ws question-op nil)
              (agent-repl--input-on-failure ws said origin raw detail key delivery)))))
        key))))
+
+(defun agent-repl--input-forget-unforked (ws question-op response)
+  "Forget QUESTION-OP when RESPONSE is no `question_forked' answer.
+QUESTION-OP is the key a send registered a fork's create progress under,
+nil when it registered none.  RESPONSE is the decoded SubmitPrompt answer,
+nil for a transport failure: anything but the fork means no create will
+report on the op."
+  (when (and question-op
+             (not (and (eq (plist-get response :arm) :success)
+                       (eq (plist-get (plist-get response :value) :arm) :question-forked))))
+    (agent-repl--info ws "elisp.input.submit-question-forgotten ws=%s key=%s answer=%S"
+                      ws question-op (plist-get response :arm))
+    (agent-repl-mutation-progress-forget question-op)))
 
 ;;;; ---- The send pipeline ------------------------------------------------
 

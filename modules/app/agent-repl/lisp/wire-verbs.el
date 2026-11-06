@@ -2845,6 +2845,22 @@ decoded FeedId; the revision itself arrives on the feed."
     (list :row (agent-repl-wire-verbs--decode-required-message
                 message 'row json #'agent-repl-wire-decode-feed-id))))
 
+(defun agent-repl-wire-decode-submit-prompt-question-forked (json)
+  "Decode SubmitPromptQuestionForked from JSON into a plist (`:row' `:op-id').
+A question about a final response stood as the prompt was sent, so the
+daemon began forking it into a child workspace that answers it.  ROW is
+the response's decoded FeedId; OP-ID is the op the child's create reports
+on, always the prompt's own idempotency key."
+  (let ((message "SubmitPromptQuestionForked"))
+    (agent-repl-wire-verbs--check-keys message json '(row opId))
+    (list :row (agent-repl-wire-verbs--decode-required-message
+                message 'row json #'agent-repl-wire-decode-feed-id)
+          :op-id (agent-repl-wire-verbs--decode-required-string message 'opId json))))
+
+(defun agent-repl-wire-decode-submit-prompt-success-question-forked (json)
+  "Decode SubmitPromptSuccess's `question_forked' outcome arm from JSON."
+  (agent-repl-wire-decode-submit-prompt-question-forked json))
+
 (defun agent-repl-wire-decode-submit-prompt-success-response-revising (json)
   "Decode SubmitPromptSuccess's `response_revising' outcome arm from JSON."
   (agent-repl-wire-decode-submit-prompt-response-revising json))
@@ -2871,13 +2887,14 @@ decoded FeedId; the revision itself arrives on the feed."
 
 (defun agent-repl-wire-decode-submit-prompt-success (json)
   "Decode SubmitPromptSuccess from JSON into (:arm ARM :value V).
-All six arms are ANSWERS: a minted turn, a resolved panel, a
+All seven arms are ANSWERS: a minted turn, a resolved panel, a
 recognized-but-unsupported command, a session-acting command the daemon
-acted on, a typed answer to a standing ask, or a revision of the final
-response whose words were highlighted.  Only the turn arm means there is
+acted on, a typed answer to a standing ask, a revision of the final
+response whose words were highlighted, or a question about a final
+response forked into a child workspace.  Only the turn arm means there is
 anything to await."
   (let ((message "SubmitPromptSuccess"))
-    (agent-repl-wire-verbs--check-keys message json '(turn commandPanel commandRefused commandActed askAnswered responseRevising))
+    (agent-repl-wire-verbs--check-keys message json '(turn commandPanel commandRefused commandActed askAnswered responseRevising questionForked))
     (agent-repl-wire-verbs--decode-oneof
      message "outcome" json
      (list (list 'turn :turn #'agent-repl-wire-decode-submit-prompt-success-turn)
@@ -2890,7 +2907,9 @@ anything to await."
            (list 'askAnswered :ask-answered
                  #'agent-repl-wire-decode-submit-prompt-success-ask-answered)
            (list 'responseRevising :response-revising
-                 #'agent-repl-wire-decode-submit-prompt-success-response-revising)))))
+                 #'agent-repl-wire-decode-submit-prompt-success-response-revising)
+           (list 'questionForked :question-forked
+                 #'agent-repl-wire-decode-submit-prompt-success-question-forked)))))
 
 (defun agent-repl-wire-decode-submit-prompt-refused-merging (json)
   "Decode SubmitPromptRefusedMerging from JSON.  Empty: a merge is in flight

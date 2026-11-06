@@ -372,6 +372,8 @@ unary rpc can produce, which the contract never collapses into one."
                 (lambda (ws) (push (cons :focus-for-reply ws) agent-repl-test-host--effects)))
                ((symbol-function 'agent-repl-input-compose-entry)
                 (lambda (ws label) (push (list :compose-entry ws label) agent-repl-test-host--effects)))
+               ((symbol-function 'agent-repl-input-response-question)
+                (lambda (ws change) (push (list :response-question ws change) agent-repl-test-host--effects)))
                ((symbol-function 'agent-repl-roster-apply-current)
                 (lambda () (cl-incf agent-repl-test-host--reapplied)))
                ((symbol-function 'agent-repl-frontend-reload-webapp)
@@ -2480,6 +2482,28 @@ answers `:unknown' and records the breach rather than opening."
     (agent-repl-test-host--push "ws-1" (list :arm :compose-entry :value '(:label "3.1")))
     ;; Assert
     (should (agent-repl-test-host--logged-p :info "elisp.host.compose-entry ws=ws-1 label=3.1"))))
+
+;;;; ---- The question about a response ----
+
+(ert-deftest agent-repl-test-host-response-question-reaches-this-workspaces-composer ()
+  "A `response_question' push hands its transition to its stream's composer."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    ;; Act
+    (agent-repl-test-host--push "ws-1" (list :arm :response-question :value '(:arm :withdrawn :value nil)))
+    ;; Assert
+    (should (equal (car agent-repl-test-host--effects) '(:response-question "ws-1" :withdrawn)))))
+
+(ert-deftest agent-repl-test-host-response-question-is-logged ()
+  "The question's change reaching Emacs leaves an INFO record naming it."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    ;; Act
+    (agent-repl-test-host--push "ws-1" (list :arm :response-question :value '(:arm :asked :value nil)))
+    ;; Assert
+    (should (agent-repl-test-host--logged-p :info "elisp.host.response-question ws=ws-1 change=:asked"))))
 
 ;;;; ---- The handover ----
 
