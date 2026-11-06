@@ -174,3 +174,32 @@ implementation lists both origins in all three.
 ### Obviated-declaration sweep
 
 Every change is additive, so nothing is obviated.
+
+## Implementation notes (2026-11-06)
+
+- Reads (`daemon/internal/prwatch/queueread.go`): each tick, the queue facts
+  of every followed pull request asking for the merge queue are read in
+  ONE GraphQL query per repository, each pull request under its own alias.
+  Unlike REST reads, which a 304 makes free, every GraphQL query spends the
+  `gh` login's rate limit. A queue's entries are read once a tick for every
+  pull-request and queue subscription that needs them (`queueReads`).
+- `ghclient.Client.GraphQL` posts the query and variables as a JSON body on
+  stdin (`gh api graphql --input -`). A field GitHub nulled comes back as a
+  per-path error that the caller maps to that pull request's own failure, so
+  one deleted pull request does not fail its repository's batch.
+- Timeline window: the latest 100 merge-queue events per pull request. The
+  told snapshot keeps the ids in the current window, so it stays bounded.
+- The told snapshot's new fields are `omitempty`. A subscription that never
+  asks for the queue therefore encodes exactly as before, and its
+  compare-and-set is unaffected.
+- Store (`wsm`): layout 104 (additive) adds the two queue tables. Layout 105
+  (BREAKING) gives every owned-link subscription the new event bit (64),
+  because an owned link asks for every event. The previous build refuses a
+  row holding an event it does not declare, so that deploy restarts. The
+  owed-notice SQL and read health are shared by both kinds through
+  `githubTables`.
+- Delivery: one `owedNotice` path delivers both notices. The queue notice
+  uses the brief `prompts/github-merge-queue-notice.md` and
+  `PROMPT_ORIGIN_GITHUB_MERGE_QUEUE_NOTICE`.
+- CLI: `pr-subscribe -events` spellings derive from `wsm`'s event list, so
+  no second list of names exists.
