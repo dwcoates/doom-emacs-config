@@ -32,6 +32,14 @@ is loaded."
 
 (+dwc/bind-minibuffer-kill-line)
 
+(defconst +dwc/vterm-popup-rule
+  '("\\.*doom:vterm\\.*"
+    :actions (agent-repl-sibling-popup-display-fn)
+    :size 0.4 :side bottom :select t :quit nil :ttl nil)
+  "Arguments for `set-popup-rule!' placing the vterm popup at the bottom.
+`:actions' is the agent-repl sibling-popup display function, which stops
+the popup at the agent panel boundary when the panels are open.")
+
 (defun +dwc/vterm-toggle (arg)
   "Toggle the project vterm popup, ready to type when it opens.
 Passes ARG to `+vterm/toggle'.  A sole vterm window is un-fullscreened

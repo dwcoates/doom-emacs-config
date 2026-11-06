@@ -222,9 +222,7 @@
   ;; the bottom vterm popup stops at the claude panel boundary when
   ;; claude is open; when claude is closed the fn falls back to the
   ;; standard `:side 'bottom' frame-wide popup.
-  (set-popup-rule! "\\.*doom:vterm\\.*"
-    :actions '(agent-repl-sibling-popup-display-fn)
-    :size 0.4 :side 'right :select t :quit nil :ttl nil)
+  (apply #'set-popup-rule! +dwc/vterm-popup-rule)
 
   ;; `evil-collection-vterm' plants `C-k' -> `vterm--self-insert' on the
   ;; insert-state aux map of `vterm-mode-map', so the key is sent to the

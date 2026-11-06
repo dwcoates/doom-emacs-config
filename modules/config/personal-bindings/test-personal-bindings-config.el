@@ -179,3 +179,18 @@ in order as (NAME . ARGS)."
     (let ((result (+dwc/vterm-toggle nil)))
       ;; Assert
       (should (eq result probe)))))
+
+(ert-deftest test-personal-bindings-vterm-popup-rule-opens-at-bottom ()
+  "The vterm popup rule places the terminal on the bottom side."
+  ;; Arrange / Act
+  (let ((plist (cdr +dwc/vterm-popup-rule)))
+    ;; Assert
+    (should (eq (plist-get plist :side) 'bottom))))
+
+(ert-deftest test-personal-bindings-vterm-popup-rule-uses-sibling-popup-action ()
+  "The vterm popup rule keeps the agent-repl sibling-popup display action."
+  ;; Arrange / Act
+  (let ((plist (cdr +dwc/vterm-popup-rule)))
+    ;; Assert
+    (should (equal (plist-get plist :actions)
+                   '(agent-repl-sibling-popup-display-fn)))))
