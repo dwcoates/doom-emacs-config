@@ -55,6 +55,7 @@ var parseText = parse
 
 // parse is Parse without the record: a failure panics.
 func parse(text string, stage Stage) *frontendv1.ParsedProse {
+	text = apply(text, repairFencedResponseTree(text, stage))
 	d := mustRead(text)
 	// Labelling a root can let the grammar see a tree that only now begins or
 	// continues, and so a further unlabelled root under it; each round repairs

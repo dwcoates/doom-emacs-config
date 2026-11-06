@@ -57,9 +57,107 @@ func nextNonBlank(items []item, from int) int {
 	return -1
 }
 
+// repairFencedResponseTree drops the fence a model wrapped its whole response
+// tree in: a fence opened on the first line after the `Response (…)` header,
+// whatever its language, whose body holds a tree. The response's own tree is
+// never fenced, so such a fence is a mistake, never a code block. Left in
+// place, it breaks: the grammar closes a fence at any delimiter, a railed one
+// included, so the first code block nested under a branch would close it and
+// the fences after that would open and close out of step. Answers the edits
+// that drop the wrapper's open and close lines; none when there is nothing to
+// repair.
+//
+// The wrapper's close is matched on column-0 delimiters only: one with a
+// language opens a code block nested in the tree, a bare one closes the
+// innermost. A delimiter after a rail or an indent is the tree's own code and
+// never closes the wrapper. While a response is ARRIVING, its last line,
+// still unterminated, may be a delimiter whose language has not arrived, so it
+// is never taken as the close; an unclosed wrapper loses only its open line.
+func repairFencedResponseTree(text string, stage Stage) []edit {
+	ls := rawLines(text)
+	header := nextNonBlankLine(ls, 0)
+	if header < 0 {
+		return nil
+	}
+	open := nextNonBlankLine(ls, header+1)
+	if open < 0 || !strings.HasPrefix(ls[open].text, "```") || !onlyHeader(text[:ls[open].start]) {
+		return nil
+	}
+	closing, depth := -1, 0
+	for j := open + 1; j < len(ls) && closing < 0; j++ {
+		l := ls[j]
+		if !strings.HasPrefix(l.text, "```") || (stage == Arriving && l.end == len(text) && !strings.HasSuffix(text, "\n")) {
+			continue
+		}
+		switch {
+		case strings.TrimSpace(strings.TrimLeft(l.text, "`")) != "":
+			depth++
+		case depth > 0:
+			depth--
+		default:
+			closing = j
+		}
+	}
+	bodyEnd := len(text)
+	if closing >= 0 {
+		bodyEnd = ls[closing].start
+	}
+	if !holdsTree(strings.TrimSuffix(text[ls[open].end:bodyEnd], "\n")) {
+		return nil
+	}
+	edits := []edit{{start: ls[open].start, end: ls[open].end}}
+	if closing >= 0 {
+		edits = append(edits, edit{start: ls[closing].start, end: ls[closing].end})
+	}
+	return edits
+}
+
 // holdsTree is whether BODY, a fence's body, reads as a metaprompt tree: the
 // one test of whether a fence wraps a tree rather than code.
 func holdsTree(body string) bool {
 	d := mustRead(body)
 	return d.region != nil && isMetapromptTree(d)
+}
+
+// onlyHeader is whether TEXT's one non-blank line is the `Response (…)` header.
+func onlyHeader(text string) bool {
+	var classes []lineClass
+	for _, c := range lineClassesOf(mustRead(text).items) {
+		if c != classBlank {
+			classes = append(classes, c)
+		}
+	}
+	return len(classes) == 1 && classes[0] == classHeader
+}
+
+// rawLine is one physical line of a text: its byte span, its final newline
+// included when it has one, and its text without the newline.
+type rawLine struct {
+	start, end int
+	text       string
+}
+
+// rawLines is every physical line of TEXT, in order, fences or not.
+func rawLines(text string) []rawLine {
+	var out []rawLine
+	for at := 0; at < len(text); {
+		end := len(text)
+		if nl := strings.IndexByte(text[at:], '\n'); nl >= 0 {
+			end = at + nl + 1
+		}
+		out = append(out, rawLine{start: at, end: end, text: strings.TrimSuffix(text[at:end], "\n")})
+		at = end
+	}
+	return out
+}
+
+// nextNonBlankLine is the index of the first of LS at or after FROM that is
+// not blank, or -1.
+func nextNonBlankLine(ls []rawLine, from int) int {
+	for i := from; i < len(ls); i++ {
+		if strings.TrimSpace(ls[i].text) != "" {
+			return i
+		}
+	}
+	return -1
 }
