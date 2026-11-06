@@ -18,7 +18,8 @@ import (
 // answer and records the arguments it was given.
 
 // fakeGH writes a `gh` that prints STDOUT, writes STDERR, records its
-// arguments one per line, and exits CODE. It answers the binary and where the
+// arguments one per line and its stdin beside them (stdinOf), and exits
+// CODE. It answers the binary and where the
 // arguments are recorded.
 func fakeGH(t *testing.T, stdout, stderr string, code int) (string, string) {
 	t.Helper()
@@ -29,7 +30,7 @@ func fakeGH(t *testing.T, stdout, stderr string, code int) (string, string) {
 			t.Fatal(err)
 		}
 	}
-	script := "#!/bin/sh\nfor a in \"$@\"; do printf '%s\\n' \"$a\" >> '" + argsFile + "'; done\ncat '" + out + "'\ncat '" + errOut + "' >&2\nexit " + strconv.Itoa(code) + "\n"
+	script := "#!/bin/sh\nfor a in \"$@\"; do printf '%s\\n' \"$a\" >> '" + argsFile + "'; done\ncat > '" + filepath.Join(dir, "stdin") + "'\ncat '" + out + "'\ncat '" + errOut + "' >&2\nexit " + strconv.Itoa(code) + "\n"
 	bin := filepath.Join(dir, "gh")
 	if err := os.WriteFile(bin, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
@@ -176,5 +177,109 @@ func TestACallTheDaemonStoppedIsNoFailure(t *testing.T) {
 	// Assert
 	if !errors.Is(err, context.Canceled) || len(log.Records()) != 0 {
 		t.Fatalf("Get = %v with records %+v, want the cancellation and nothing recorded", err, log.Records())
+	}
+}
+
+// stdinOf is what the fake `gh` whose arguments ARGSFILE records read.
+func stdinOf(t *testing.T, argsFile string) string {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join(filepath.Dir(argsFile), "stdin"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}
+
+func TestGraphQLPostsItsQueryAndVariablesOnStdin(t *testing.T) {
+	// Arrange
+	bin, argsFile := fakeGH(t, answer("200 OK", nil, `{"data":{"viewer":{"login":"u"}}}`), "", 0)
+	c, _ := newClient(t, bin)
+
+	// Act
+	_, err := c.GraphQL(context.Background(), "query($n:Int!){viewer{login}}", map[string]any{"n": 7, "owner": "o"})
+
+	// Assert
+	args, _ := os.ReadFile(argsFile)
+	wantArgs := "api\n--include\n--method\nPOST\ngraphql\n--input\n-\n"
+	wantBody := `{"query":"query($n:Int!){viewer{login}}","variables":{"n":7,"owner":"o"}}`
+	if err != nil || string(args) != wantArgs || stdinOf(t, argsFile) != wantBody {
+		t.Fatalf("GraphQL = %v ran %q reading %q, want %q reading %q", err, args, stdinOf(t, argsFile), wantArgs, wantBody)
+	}
+}
+
+func TestGraphQLAnswersItsDataAndEveryErrorBesideIt(t *testing.T) {
+	tests := []struct {
+		name       string
+		body       string
+		wantData   string
+		wantErrors []GraphQLError
+	}{
+		{name: "a whole answer carries no errors", body: `{"data":{"a":1}}`, wantData: `{"a":1}`},
+		{name: "a partial answer carries each error with its path", body: `{"data":{"repository":{"pr1":null,"pr2":{"n":2}}},"errors":[{"type":"NOT_FOUND","message":"gone","path":["repository","pr1"]}]}`,
+			wantData: `{"repository":{"pr1":null,"pr2":{"n":2}}}`, wantErrors: []GraphQLError{{Type: "NOT_FOUND", Message: "gone", Path: []string{"repository", "pr1"}}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			bin, _ := fakeGH(t, answer("200 OK", nil, tt.body), "", 0)
+			c, log := newClient(t, bin)
+
+			// Act
+			got, err := c.GraphQL(context.Background(), "{a}", nil)
+
+			// Assert
+			if err != nil || string(got.Data) != tt.wantData || !reflect.DeepEqual(got.Errors, tt.wantErrors) {
+				t.Fatalf("GraphQL = %+v, %v, want data %s errors %+v", got, err, tt.wantData, tt.wantErrors)
+			}
+			for _, e := range tt.wantErrors {
+				record, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "error", Operation: "daemon.ghclient.graphql", Message: "GitHub nulled a field of the GraphQL answer"})
+				if !ok || record.Context["type"] != e.Type || record.Context["field"] != strings.Join(e.Path, ".") {
+					t.Fatalf("no error record naming the nulled field: %+v", log.Records())
+				}
+			}
+		})
+	}
+}
+
+func TestAGraphQLCallThatFailsIsTypedAndRecorded(t *testing.T) {
+	tests := []struct {
+		name    string
+		out     string
+		want    Failure
+		message string
+	}{
+		{name: "no data and a NOT_FOUND error is not found", out: answer("200 OK", nil, `{"data":null,"errors":[{"type":"NOT_FOUND","message":"Could not resolve"}]}`),
+			want: Failure{Kind: KindNotFound, Status: 200, Message: "Could not resolve"}, message: "GitHub refused the GraphQL call"},
+		{name: "no data and a RATE_LIMITED error is rate limited", out: answer("200 OK", nil, `{"errors":[{"type":"RATE_LIMITED","message":"API rate limit exceeded"}]}`),
+			want: Failure{Kind: KindRateLimited, Status: 200, Message: "API rate limit exceeded"}, message: "GitHub refused the GraphQL call"},
+		{name: "no data and an error of another type is a refusal", out: answer("200 OK", nil, `{"errors":[{"message":"Parse error"}]}`),
+			want: Failure{Kind: KindRefused, Status: 200, Message: "Parse error"}, message: "GitHub refused the GraphQL call"},
+		{name: "no data and no error is a refusal", out: answer("200 OK", nil, `{}`),
+			want: Failure{Kind: KindRefused, Status: 200, Message: "GitHub's GraphQL answer carries no data"}, message: "GitHub refused the GraphQL call"},
+		{name: "a body that is not JSON is unreachable", out: answer("200 OK", nil, `<html>`),
+			want: Failure{Kind: KindUnreachable, Status: 200, Message: "GitHub's GraphQL answer is not JSON: invalid character '<' looking for beginning of value"}, message: "GitHub's GraphQL answer cannot be read"},
+		{name: "a 401 is unauthorized", out: answer("401 Unauthorized", nil, `{"message":"Bad credentials"}`),
+			want: Failure{Kind: KindUnauthorized, Status: 401, Message: "Bad credentials"}, message: "GitHub refused the call"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			bin, _ := fakeGH(t, tt.out, "", 0)
+			c, log := newClient(t, bin)
+			tt.want.Method, tt.want.Path = "POST", "graphql"
+
+			// Act
+			_, err := c.GraphQL(context.Background(), "{a}", nil)
+
+			// Assert
+			var f *Failure
+			if !errors.As(err, &f) || !reflect.DeepEqual(*f, tt.want) {
+				t.Fatalf("GraphQL = %v, want %+v", err, tt.want)
+			}
+			record, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "error", Operation: "daemon.ghclient.graphql", Message: tt.message})
+			if !ok || record.Context["path"] != "graphql" || record.Context["kind"] != string(tt.want.Kind) {
+				t.Fatalf("no error record naming the path and kind: %+v", log.Records())
+			}
+		})
 	}
 }

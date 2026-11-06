@@ -1,6 +1,7 @@
 // Package ghclient is the daemon's ONE way to GitHub: it runs `gh api` as the
 // user's own `gh` login and answers the HTTP status, headers and body GitHub
-// sent, or a typed failure.
+// sent, or a typed failure. It reaches both of GitHub's APIs: REST (Get,
+// Post) and GraphQL (GraphQL), which alone exposes merge queues.
 //
 // THE STATUS LINE IS THE ANSWER, NEVER THE EXIT CODE. `gh api --include`
 // writes GitHub's status line, headers and body to stdout whatever GitHub
@@ -99,7 +100,7 @@ func (f *Failure) Error() string {
 	return fmt.Sprintf("ghclient: %s %s: HTTP %d (%s): %s", f.Method, f.Path, f.Status, f.Kind, f.Message)
 }
 
-// Client calls GitHub's REST API.
+// Client calls GitHub's REST and GraphQL APIs.
 type Client interface {
 	// Get reads PATH (relative to the API root, query included). A non-empty
 	// ETAG makes the read conditional, and an unchanged resource answers a
@@ -107,7 +108,47 @@ type Client interface {
 	Get(ctx context.Context, path, etag string) (Response, error)
 	// Post creates under PATH with the string FIELDS as its JSON body.
 	Post(ctx context.Context, path string, fields map[string]string) (Response, error)
+	// GraphQL runs QUERY with VARIABLES against GitHub's GraphQL API. GitHub
+	// answers a GraphQL error with an HTTP 200 beside whatever data it could
+	// resolve, so an answer with data carries its errors for the caller to
+	// judge per path, and only an answer with no data at all is a *Failure.
+	GraphQL(ctx context.Context, query string, variables map[string]any) (GraphQLResponse, error)
 }
+
+// GraphQLResponse is GitHub's answer to a GraphQL call that resolved data.
+type GraphQLResponse struct {
+	// Data is the `data` object, never null.
+	Data json.RawMessage
+	// Errors is every error GitHub reported beside the data: each names the
+	// path of the field it nulled. Empty when the whole query resolved.
+	Errors []GraphQLError
+}
+
+// GraphQLError is one error GitHub reported for a GraphQL call.
+type GraphQLError struct {
+	// Type is GitHub's error type (`NOT_FOUND`, `RATE_LIMITED`, `FORBIDDEN`);
+	// empty when GitHub named none.
+	Type string
+	// Message is GitHub's message.
+	Message string
+	// Path is the field the error nulled, from the query's root, each step
+	// spelled as text (`repository`, `pr12`).
+	Path []string
+}
+
+// Kind is the failure kind the error's type is.
+func (e GraphQLError) Kind() Kind {
+	switch e.Type {
+	case "NOT_FOUND":
+		return KindNotFound
+	case "RATE_LIMITED":
+		return KindRateLimited
+	}
+	return KindRefused
+}
+
+// graphqlPath is the one path every GraphQL call posts to.
+const graphqlPath = "graphql"
 
 // Config is a client's collaborators.
 type Config struct {
@@ -137,7 +178,7 @@ func (c *client) Get(ctx context.Context, path, etag string) (Response, error) {
 	if etag != "" {
 		args = append(args, "--header", "If-None-Match: "+etag)
 	}
-	return c.call(ctx, "daemon.ghclient.get", http.MethodGet, path, args)
+	return c.call(ctx, "daemon.ghclient.get", http.MethodGet, path, args, nil)
 }
 
 func (c *client) Post(ctx context.Context, path string, fields map[string]string) (Response, error) {
@@ -145,12 +186,67 @@ func (c *client) Post(ctx context.Context, path string, fields map[string]string
 	for _, name := range sortedKeys(fields) {
 		args = append(args, "--raw-field", name+"="+fields[name])
 	}
-	return c.call(ctx, "daemon.ghclient.post", http.MethodPost, path, args)
+	return c.call(ctx, "daemon.ghclient.post", http.MethodPost, path, args, nil)
 }
 
-// call runs `gh ARGS` and judges its answer.
-func (c *client) call(ctx context.Context, op, method, path string, args []string) (Response, error) {
+// GraphQL posts the query and its variables as the JSON body `gh` reads from
+// stdin, so no variable passes through an argument's quoting or `gh`'s
+// guessing of a field's type.
+func (c *client) GraphQL(ctx context.Context, query string, variables map[string]any) (GraphQLResponse, error) {
+	const op = "daemon.ghclient.graphql"
+	body, err := json.Marshal(map[string]any{"query": query, "variables": variables})
+	if err != nil {
+		// Variables are the daemon's own strings and numbers; one that does
+		// not encode is a defect.
+		panic(fmt.Sprintf("ghclient: encode a GraphQL request: %v", err))
+	}
+	resp, err := c.call(ctx, op, http.MethodPost, graphqlPath, []string{"api", "--include", "--method", "POST", graphqlPath, "--input", "-"}, body)
+	if err != nil {
+		return GraphQLResponse{}, err
+	}
+	var shaped struct {
+		Data   json.RawMessage `json:"data"`
+		Errors []struct {
+			Type    string `json:"type"`
+			Message string `json:"message"`
+			Path    []any  `json:"path"`
+		} `json:"errors"`
+	}
+	fields := dlog.Context{"method": http.MethodPost, "path": graphqlPath, "status": resp.Status}
+	if err := json.Unmarshal(resp.Body, &shaped); err != nil {
+		f := &Failure{Kind: KindUnreachable, Method: http.MethodPost, Path: graphqlPath, Status: resp.Status, Message: "GitHub's GraphQL answer is not JSON: " + err.Error()}
+		c.cfg.Log.Error(op, "GitHub's GraphQL answer cannot be read", dlog.Merge(fields, dlog.Context{"kind": string(f.Kind), "cause": err.Error()}))
+		return GraphQLResponse{}, f
+	}
+	out := GraphQLResponse{Data: shaped.Data}
+	for _, e := range shaped.Errors {
+		g := GraphQLError{Type: e.Type, Message: e.Message}
+		for _, step := range e.Path {
+			g.Path = append(g.Path, fmt.Sprint(step))
+		}
+		out.Errors = append(out.Errors, g)
+	}
+	if len(shaped.Data) == 0 || string(shaped.Data) == "null" {
+		f := &Failure{Kind: KindRefused, Method: http.MethodPost, Path: graphqlPath, Status: resp.Status, Message: "GitHub's GraphQL answer carries no data"}
+		if len(out.Errors) > 0 {
+			f.Kind, f.Message = out.Errors[0].Kind(), out.Errors[0].Message
+		}
+		c.cfg.Log.Error(op, "GitHub refused the GraphQL call", dlog.Merge(fields, dlog.Context{"kind": string(f.Kind), "message": f.Message, "errors": len(out.Errors)}))
+		return GraphQLResponse{}, f
+	}
+	for _, e := range out.Errors {
+		c.cfg.Log.Error(op, "GitHub nulled a field of the GraphQL answer", dlog.Merge(fields, dlog.Context{"type": e.Type, "message": e.Message, "field": strings.Join(e.Path, ".")}))
+	}
+	return out, nil
+}
+
+// call runs `gh ARGS`, with STDIN as its input when set, and judges its
+// answer.
+func (c *client) call(ctx context.Context, op, method, path string, args []string, stdin []byte) (Response, error) {
 	cmd := childproc.CommandContext(ctx, childproc.Stable, c.cfg.Binary, args...)
+	if stdin != nil {
+		cmd.Stdin = bytes.NewReader(stdin)
+	}
 	cmd.Env = append(os.Environ(), "GH_PROMPT_DISABLED=1", "NO_COLOR=1", "GH_NO_UPDATE_NOTIFIER=1")
 	fields := dlog.Context{"method": method, "path": path}
 	// The output goes to files, never pipes, as every captured child's does
