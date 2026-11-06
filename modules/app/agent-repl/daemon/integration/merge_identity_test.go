@@ -24,26 +24,27 @@ func TestALandingCarryingAnOutsideAuthorFailsAndLeavesMainUnmoved(t *testing.T) 
 	script := harness.NewTestAllScript(t, repo.Dir)
 	script.SetExitCode(0)
 	script.SetStdout("daemon: passed in 1s\n")
+	repo.DeploysAsAgentRepl()
 	// A merge-spanning wait chains dozens of subprocesses; see harness.MergeChainTimeout.
-	d := harness.StartDaemon(t, harness.Opts{SelfRepo: repo.Dir, Timeout: harness.MergeChainTimeout, ExtraEnv: []string{harness.TestAllScriptEnv(script.Path)}})
+	d := harness.StartDaemon(t, harness.Opts{Timeout: harness.MergeChainTimeout, ExtraEnv: []string{harness.TestAllScriptEnv(script.Path)}})
 	repoRef := mergeRepositoryRef(t, d, repo)
 	f := mergeCreateChild(t, d, repoRef, "outsideauthor", "land the contribution", nil)
 	root := f.watchRootFeed()
 	sha := harness.CommitWork(t, f.ws.GetDir())
 	repo.SetCommitAuthor(sha, "Outside Contributor", "oc@example.org")
-	mainBefore := repo.BranchHead("main")
+	mainBefore := repo.BranchHead(harness.DefaultBranch)
 	d.RequireWarnings("daemon.merge.identity")
 
 	// Act.
-	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(harness.MergeRequest(f.ws, harness.OneShot()))); err != nil {
-		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
+	if _, err := d.Client().FinishWorkspace(d.Ctx(), connect.NewRequest(harness.FinishRequest(f.ws))); err != nil {
+		t.Fatalf("FinishWorkspace = error %v, want the deploy enqueued", err)
 	}
 
 	// Assert: the merge fails, and main never moved.
 	awaitRow(t, f, root, "the merge's failed terminal", func(row *frontendv1.FeedRow) bool {
 		return row.GetActivity().GetMerge().GetError() != nil
 	})
-	if got := repo.BranchHead("main"); got != mainBefore {
+	if got := repo.BranchHead(harness.DefaultBranch); got != mainBefore {
 		t.Fatalf("main moved to %s after a refused landing, want it still at %s", got, mainBefore)
 	}
 	// The failure is handed back to the requester as a turn of its own.
