@@ -5,6 +5,7 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -99,6 +100,43 @@ func TestSitesOfAnAbsentPatternIsEmpty(t *testing.T) {
 	// Assert
 	if len(sites) != 0 {
 		t.Fatalf("Sites = %v, want none", sites)
+	}
+}
+
+func TestSitesMatchingNamesEachMatchsFileInOrderAndIgnoresTests(t *testing.T) {
+	// Arrange
+	packageDir(t, map[string]string{"b.go": "at += ttl", "a.go": "at += ttl; at.Add(ttl); read(ttl)", "a_test.go": "at += ttl"})
+
+	// Act
+	sites := SitesMatching(t, regexp.MustCompile(`(\+= |\.Add\()ttl`))
+
+	// Assert
+	if !slices.Equal(sites, []string{"a.go", "a.go", "b.go"}) {
+		t.Fatalf("SitesMatching = %v, want a.go twice then b.go, from production files only", sites)
+	}
+}
+
+func TestSitesMatchingAnAbsentPatternIsEmpty(t *testing.T) {
+	// Arrange
+	packageDir(t, map[string]string{"a.go": "read(ttl)"})
+
+	// Act
+	sites := SitesMatching(t, regexp.MustCompile(`\+= ttl`))
+
+	// Assert
+	if len(sites) != 0 {
+		t.Fatalf("SitesMatching = %v, want none", sites)
+	}
+}
+
+func TestSitesAndSitesMatchingShareOneList(t *testing.T) {
+	// Act
+	shared := Count(t, "return sitesBy(t, ")
+	own := Count(t, "sites = append(sites, f.Name)")
+
+	// Assert
+	if shared != 2 || own != 1 {
+		t.Fatalf("sitesBy is returned %d times and a site appended %d times; want Sites and SitesMatching both through sitesBy's one loop", shared, own)
 	}
 }
 
