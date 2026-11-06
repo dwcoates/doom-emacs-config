@@ -56,3 +56,10 @@ func nextNonBlank(items []item, from int) int {
 	}
 	return -1
 }
+
+// holdsTree is whether BODY, a fence's body, reads as a metaprompt tree: the
+// one test of whether a fence wraps a tree rather than code.
+func holdsTree(body string) bool {
+	d := mustRead(body)
+	return d.region != nil && isMetapromptTree(d)
+}

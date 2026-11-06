@@ -125,8 +125,7 @@ func plainBlocks(d document, first, last int, stage Stage) []*frontendv1.ProseBl
 		undecided := stage == Arriving && fenceUndecided(d.items, i)
 		if it.fence != nil && it.fence.closed && !undecided && it.fence.lang == "" {
 			body := strings.Join(it.fence.code, "\n")
-			inner := mustRead(body)
-			if inner.region != nil && isMetapromptTree(inner) {
+			if holdsTree(body) {
 				flush(it.start)
 				out = append(out, parse(body, Settled).Blocks...)
 				continue
