@@ -44,6 +44,7 @@ import {
   SECTION_LABEL_CLASS,
   todaysMerges,
   mergedTodayCountText,
+  mergedGroupFacts,
 } from "../../src/sidebar/roster.js";
 import { HOLDS_CURRENT_ATTRIBUTE } from "../../src/sidebar/section-fold.js";
 import { REARRANGED_ATTRIBUTE } from "../../src/sidebar/drag.js";
@@ -943,7 +944,7 @@ describe("a section's folded count", () => {
     );
     const [hidden, merged] = inRail(drawn, () => [
       cascadedValue(countOf(drawn, ".hidden-section"), property),
-      cascadedValue(countOf(drawn, ".merged-section"), property),
+      cascadedValue(countOf(drawn, ".merged-section .merged-group-head"), property),
     ]);
     expect(hidden).toBe(merged);
   });
@@ -954,13 +955,13 @@ describe("a section's folded count", () => {
     expect([countOf(drawn, ".hidden-section").textContent, pane(drawn).querySelectorAll(".hidden-section .row").length]).toEqual(["(3)", 3]);
   });
 
-  it("draws the Recently Merged section's label with no count", () => {
+  it("draws the Recently Merged section's label with no folded count", () => {
     const drawn = drawWorkspaceRoster(
       roster({ merged: mergedSection([row({ id: "ws-9", status: { case: "merged", value: {} } })]) }),
       sidebarContext(),
     );
     const head = pane(drawn).querySelector(".merged-section > .repo-head") as HTMLElement;
-    expect([head.querySelector(".sb-label")?.textContent, head.querySelector(".sb-count")]).toEqual(["Recently Merged", null]);
+    expect([head.querySelector(".sb-label")?.textContent, head.querySelector("[data-section-count]")]).toEqual(["Recently Merged", null]);
   });
 
   it("draws the count a step smaller than the label", () => {
@@ -1021,20 +1022,65 @@ describe("the Recently Merged section's header", () => {
     expect(head(drawn).querySelector(".sb-label")?.textContent).toBe("Recently Merged");
   });
 
-  it("counts nothing: each group's header carries its own summary", () => {
+  const todayCount = (drawn: HTMLElement): HTMLElement => head(drawn).querySelector(`.${MERGED_TODAY_COUNT_CLASS}`) as HTMLElement;
+  const twoGroups = (collapsed = false) =>
+    mergedBand(
+      [
+        mergedGroup({ id: "repo-1", rows: [mergedAt("ws-1", NOW - 60_000), mergedAt("ws-2", startOfToday() - 1)] }),
+        mergedGroup({ id: "repo-2", rows: [mergedAt("ws-3", NOW - 5 * 60_000), mergedAt("ws-4", startOfToday())] }),
+      ],
+      collapsed,
+    );
+
+  it("draws the today count as its only count", () => {
     const drawn = drawBand();
-    expect(head(drawn).querySelector(".sb-count")).toBeNull();
+    expect([...head(drawn).querySelectorAll(".sb-count")].map((c) => c.className)).toEqual([`sb-count ${MERGED_TODAY_COUNT_CLASS}`]);
+  });
+
+  it("sums every group's merges of today, aged by the latest of them", () => {
+    const drawn = drawWorkspaceRoster(roster({ merged: twoGroups() }), sidebarContext());
+    expect(todayCount(drawn).textContent).toBe("(3 today, last 1m ago)");
+  });
+
+  it("counts the latest merge's age up as the shared ticker ticks", () => {
+    // Arrange
+    const ticker = fakeTicker();
+    const drawn = drawWorkspaceRoster(roster({ merged: twoGroups() }), sidebarContext(appContext({}, ticker)));
+    // Act
+    ticker.tick(NOW + 30_000);
+    // Assert
+    expect(todayCount(drawn).textContent).toBe("(3 today, last 1m 30s ago)");
+  });
+
+  it("recounts today's merges once the shared ticker crosses midnight", () => {
+    const ticker = fakeTicker();
+    const drawn = drawWorkspaceRoster(roster({ merged: twoGroups() }), sidebarContext(appContext({}, ticker)));
+    ticker.tick(startOfTomorrow());
+    expect(todayCount(drawn).textContent).toBe(`(0 today, last ${formatAge(startOfTomorrow() - (NOW - 60_000))} ago)`);
+  });
+
+  it.each([
+    { property: "display", want: "inline" },
+    { property: "font-size", want: "calc(var(--merged-group-head-font-size) * 0.85)" },
+    { property: "color", want: "var(--muted)" },
+    { property: "text-transform", want: "none" },
+    { property: "letter-spacing", want: "normal" },
+  ])("draws the today count's $property as a group's, folded or not", ({ property, want }) => {
+    for (const collapsed of [false, true]) {
+      const drawn = drawWorkspaceRoster(roster({ merged: twoGroups(collapsed) }), sidebarContext());
+      expect(inRail(drawn, () => cascadedValue(todayCount(drawn), property))).toBe(want);
+    }
+  });
+
+  it("draws its today count through the one helper the groups draw theirs with", () => {
+    // A section header formatting its own summary could drift from the groups'.
+    expect(rosterSource.match(/appendChild\(drawMergedTodayCount\(/g)?.length).toBe(2);
   });
 
   it("refuses a header that carries a count as a malformed view", () => {
     const band = mergedSection([mergedAt("ws-1", NOW)], false);
     band.header = create(RosterSectionHeaderSchema, { label: { text: "Recently Merged" }, count: { workspaces: 1 } });
     expect(() => drawWorkspaceRoster(roster({ merged: band }), sidebarContext())).toThrow(MalformedView);
-  });
-
-  it("draws no count of today's merges", () => {
-    const drawn = drawBand([mergedAt("ws-1", NOW), mergedAt("ws-2", NOW)]);
-    expect(head(drawn).textContent).not.toMatch(/today/);
   });
 
   it.each([
@@ -1136,6 +1182,30 @@ describe("todaysMerges", () => {
     { name: "drops a merge that landed yesterday", atMs: () => startOfToday() - 1, kept: 0 },
   ])("$name", ({ atMs, kept }) => {
     expect(todaysMerges([{ atMs: atMs(), commits: 1 }], NOW)).toHaveLength(kept);
+  });
+});
+
+describe("mergedGroupFacts", () => {
+  const merged = (id: string, atMs: number, commits?: number) =>
+    row({
+      id,
+      closed: true,
+      status: { case: "merged", value: {} },
+      when: { case: "merged", value: { atMs: BigInt(atMs) } },
+      detail: commits === undefined ? {} : { commits: { count: commits } },
+    });
+
+  it("reads each merged row's instant and commits, in the rows' order", () => {
+    const group = mergedGroup({ id: "repo-1", rows: [merged("ws-1", NOW, 3), merged("ws-2", NOW - 60_000)] });
+    expect(mergedGroupFacts(group, "p")).toEqual([
+      { atMs: NOW, commits: 3 },
+      { atMs: NOW - 60_000, commits: undefined },
+    ]);
+  });
+
+  it("refuses a row on another when arm than merged as a malformed view", () => {
+    const bad = row({ id: "ws-1", closed: true, when: { case: "turnRunning", value: { startedAtMs: BigInt(NOW) } } });
+    expect(() => mergedGroupFacts(mergedGroup({ id: "repo-1", rows: [bad] }), "p")).toThrow(MalformedView);
   });
 });
 
@@ -2685,6 +2755,12 @@ describe("drawGroupedSection", () => {
     const u = wire();
     u.header = create(RosterSectionHeaderSchema, { label: { text: "x" }, count: { workspaces: 1 } });
     expect(() => drawGroupedSection(u, sidebarContext(), "p", shape, [groupEl("a")])).toThrow(MalformedView);
+  });
+
+  it("appends what DECORATE_HEADER adds to the header", () => {
+    const decorated = { ...shape, decorateHeader: (header: HTMLElement) => header.appendChild(groupEl("extra")) };
+    const section = drawGroupedSection(wire(), sidebarContext(), "p", decorated, [groupEl("a")]);
+    expect(section.querySelector(":scope > .repo-head > #extra")).not.toBeNull();
   });
 
   it("is the one shape both group sections are drawn through", () => {
