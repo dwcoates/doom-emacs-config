@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { createDropdowns, type Dropdowns } from "../../src/sidebar/dropdowns.js";
 import { createRowMenus, rowMenuKey, type RowMenus } from "../../src/sidebar/row-menu.js";
-import type { PopupMirror } from "../../src/host/sidebar-popups.js";
+import { recordingPopupMirror } from "../host/popup-channel.js";
 import { captureLogRecords } from "../log-capture.js";
 
 const SRC = path.join(path.dirname(fileURLToPath(import.meta.url)), "../../src");
@@ -30,24 +30,6 @@ function drawnRow(top = 40) {
   ws.append(line, menu);
   document.body.append(ws);
   return { ws, line, more, menu };
-}
-
-/** A mirror that records what it was told, as `kind:key`. */
-function recordingMirror() {
-  const told: string[] = [];
-  const shown: Array<[HTMLElement, HTMLElement]> = [];
-  const mirror: PopupMirror = {
-    show: (key, detail, line) => {
-      told.push(`show:${key}`);
-      shown.push([detail, line]);
-    },
-    place: (key) => void told.push(`place:${key}`),
-    hide: (key) => void told.push(`hide:${key}`),
-    onDismissed: () => () => undefined,
-    pointerOnCopy: () => false,
-    dispose: () => undefined,
-  };
-  return { mirror, told, shown };
 }
 
 afterEach(() => {
@@ -166,15 +148,16 @@ describe("a row's verb menu, in a page drawing its own sidebar", () => {
 describe("a row's verb menu, in the sidebar page", () => {
   function setUp() {
     const dropdowns = createDropdowns();
-    const recorded = recordingMirror();
-    const menus = createRowMenus(dropdowns, recorded.mirror);
-    return { dropdowns, menus, ...recorded, ...drawnRow() };
+    const told: string[] = [];
+    const shown: HTMLElement[] = [];
+    const menus = createRowMenus(dropdowns, recordingPopupMirror(told, shown));
+    return { dropdowns, menus, told, shown, ...drawnRow() };
   }
 
   it("is handed to the host to draw over the feed, beside its row's line", () => {
     const { menus, ws, menu, line, told, shown } = setUp();
     menus.toggle("ws-1", ws);
-    expect([told, shown]).toEqual([["show:row-menu:ws-1"], [[menu, line]]]);
+    expect([told, shown]).toEqual([["show:row-menu:ws-1"], [menu, line]]);
   });
 
   it("leaves its own placement to the host", () => {
