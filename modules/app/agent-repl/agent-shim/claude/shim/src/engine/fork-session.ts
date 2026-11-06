@@ -183,6 +183,25 @@ export function openerIsFirstDetail(token: string): string {
   return `the turn-opening record ${token} is the parent's first; no finished turn precedes it`;
 }
 
+/** Where a fork's copy ends, or why the point names nothing the parent transcript holds. */
+type ResolvedUpTo = { readonly kind: "ok"; readonly upTo: string | undefined } | { readonly kind: "absent"; readonly detail: string };
+
+/** The last record a fork cut just before the turn-opening record TOKEN carries. */
+function upToBefore(
+  records: readonly ForkableRecord[],
+  token: string,
+): ResolvedUpTo {
+  const place = openerPlace(records, token);
+  switch (place.kind) {
+    case "absent":
+      return { kind: "absent", detail: `the turn-opening record ${token} is not in the parent transcript` };
+    case "first":
+      return { kind: "absent", detail: openerIsFirstDetail(token) };
+    case "after":
+      return { kind: "ok", upTo: place.previous };
+  }
+}
+
 /**
  * The last record the fork carries, from the point: undefined for the whole
  * transcript, or the refusal when the point's record is not in it.
@@ -190,7 +209,7 @@ export function openerIsFirstDetail(token: string): string {
 export function resolveUpTo(
   records: readonly ForkableRecord[],
   point: shimv1.ForkPoint,
-): { readonly kind: "ok"; readonly upTo: string | undefined } | { readonly kind: "absent"; readonly detail: string } {
+): ResolvedUpTo {
   switch (point.extent.case) {
     case "whole":
       return { kind: "ok", upTo: undefined };
@@ -201,18 +220,8 @@ export function resolveUpTo(
         ? { kind: "ok", upTo: record }
         : { kind: "absent", detail: `the fork point's record ${token} is not in the parent transcript` };
     }
-    case "beforeRecord": {
-      const token = point.extent.value.record?.value ?? "";
-      const place = openerPlace(records, token);
-      switch (place.kind) {
-        case "absent":
-          return { kind: "absent", detail: `the turn-opening record ${token} is not in the parent transcript` };
-        case "first":
-          return { kind: "absent", detail: openerIsFirstDetail(token) };
-        case "after":
-          return { kind: "ok", upTo: place.previous };
-      }
-    }
+    case "beforeRecord":
+      return upToBefore(records, point.extent.value.record?.value ?? "");
     case undefined:
       break;
   }
@@ -387,7 +396,7 @@ export function removeImport(imported: ParentImport, context: Record<string, str
       { ...context, destination: imported.transcript, session_dir: imported.sessionDir ?? "", cause },
       "the imported parent transcript could not be removed after the fork",
     );
-    throw new Error(`fork session: remove the imported parent transcript ${imported.transcript}: ${cause}`);
+    throw new Error(`fork session: remove the imported parent transcript ${imported.transcript}: ${cause}`, { cause: err });
   }
   LOGGER.info({ ...context, destination: imported.transcript }, "removed the imported parent transcript after the fork");
 }
