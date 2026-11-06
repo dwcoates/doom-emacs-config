@@ -3,6 +3,7 @@ package cachelapse
 import (
 	"context"
 	"errors"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -892,17 +893,21 @@ func TestAGateIsDatedOnlyByGateLapsedAt(t *testing.T) {
 	// Arrange
 	files := sourcescan.Production(t)
 
+	// A cache lifetime ADDED to an instant is a gate being dated; naming the
+	// lifetime's tier (telemetry's coldGateOutcome) dates nothing.
+	dating := regexp.MustCompile(`(\+=|\.Add\().*GetCacheTtlMs\(\)`)
+
 	// Act
 	var sites []string
 	for _, file := range files {
-		for range strings.Count(string(file.Source), "GetCacheTtlMs()") {
+		for range dating.FindAllIndex(file.Source, -1) {
 			sites = append(sites, file.Name)
 		}
 	}
 
 	// Assert
 	if len(sites) != 1 || sites[0] != "keeper.go" {
-		t.Fatalf("a gate's cache lifetime is read at %v, want only GateLapsedAt in keeper.go", sites)
+		t.Fatalf("a gate is dated by its cache lifetime at %v, want only GateLapsedAt in keeper.go", sites)
 	}
 }
 
