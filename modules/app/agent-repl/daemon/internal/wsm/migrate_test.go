@@ -1203,3 +1203,24 @@ func TestTheGithubMergeQueuesStepIsAdditiveAndCreatesBothTables(t *testing.T) {
 		}
 	}
 }
+
+func TestOwnedLinksSubscribedBeforeTheMergeQueueEventGainIt(t *testing.T) {
+	// Arrange
+	step := migrationTo(t, 105)
+	path := fixtureAt(t, 104)
+	execRaw(t, path, `INSERT INTO pull_request_subscriptions (subscriber, owner, repo, number, events, origin, subscribed_at, told) VALUES
+		('w1', 'o', 'r', 1, 62, 'owned_link', 0, ''), ('w1', 'o', 'r', 2, 2, 'requested', 0, '')`)
+
+	// Act
+	execRaw(t, path, step.DDL)
+
+	// Assert
+	if step.Name != "owned_links_follow_the_merge_queue" || step.Kind != MigrationBreaking {
+		t.Fatalf("migration 105 = %+v, want the owned links' merge queue, breaking", step)
+	}
+	owned := rawScalar[int](t, path, `SELECT events FROM pull_request_subscriptions WHERE number = 1`)
+	requested := rawScalar[int](t, path, `SELECT events FROM pull_request_subscriptions WHERE number = 2`)
+	if owned != 126 || requested != 2 {
+		t.Fatalf("events = owned %d, requested %d; want the owned link's every event (126) and the request untouched (2)", owned, requested)
+	}
+}

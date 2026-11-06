@@ -52,6 +52,16 @@ CREATE TABLE github_merge_queue_untold_notices (
 );
 `
 
+// ownedLinksFollowTheMergeQueueDDL is the layout-105 step: every
+// subscription taken for an owned link asks for every event
+// (AllPullRequestEvents), which now includes PullRequestEventMergeQueue (bit
+// 6, 64), so the ones taken before it gain it. IT IS BREAKING: the previous
+// build refuses a row holding an event it does not declare
+// (scanPullRequestSubscription), so it must be gone before the step runs.
+const ownedLinksFollowTheMergeQueueDDL = `
+UPDATE pull_request_subscriptions SET events = events | 64 WHERE origin = 'owned_link';
+`
+
 // githubMergeQueueTables are a merge-queue subscription's.
 var githubMergeQueueTables = githubTables{
 	noun:          "merge-queue",

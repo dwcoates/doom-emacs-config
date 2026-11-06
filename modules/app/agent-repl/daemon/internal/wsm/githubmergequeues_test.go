@@ -322,3 +322,10 @@ func TestClosingASubscriberEndsItsGithubMergeQueueSubscriptionsAndNotices(t *tes
 		t.Fatalf("owed = %+v, %v; want only the other workspace's", owed, err)
 	}
 }
+
+func TestTheOwnedLinkBitIsTheMergeQueueEvent(t *testing.T) {
+	// Assert
+	if got := NewPullRequestEvents(PullRequestEventMergeQueue); got != 64 {
+		t.Fatalf("the merge queue event's bit = %d, want the 64 layout 105 sets", got)
+	}
+}
