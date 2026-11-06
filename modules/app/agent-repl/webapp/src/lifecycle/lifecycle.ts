@@ -93,6 +93,11 @@ export interface LifecycleDeps {
   reveals: Pick<RevealRelay, "request">;
   /** Where the web stream's `prompt_echo` submit instants go (prompt-echo.ts). */
   promptEcho: Pick<PromptEcho, "echoed">;
+  /**
+   * The sidebar rail, whose title pulses for as long as a deploy is in
+   * flight (`data-deploying`, styles.css). A deploy draws no banner.
+   */
+  deployPulseHost: HTMLElement;
 }
 
 /** The adoption retry shape, injected by tests running on fake timers. */
@@ -156,7 +161,9 @@ export function startLifecycle(ctx: AppContext, deps: LifecycleDeps): Handle {
   // into, rather than re-parsed from the DOM on every reconnect.
   const webappBuild = readWebappBuild();
 
-  const banner = mountBanner(deps.drainBannerHost, ctx);
+  const banner = mountBanner(deps.drainBannerHost, ctx, (deploying) => {
+    deps.deployPulseHost.toggleAttribute("data-deploying", deploying);
+  });
 
   const onMoved = (address: string): void => {
     // THE TERMINAL STATE. The notice goes up first, so the reader has the
@@ -305,6 +312,8 @@ export function announceShutdown(
       operation: "lifecycle.deploy-handover",
       context: { address: announced.address ?? "" },
     });
+    // No notice is drawn, but the sidebar title's pulse stands until the page moves.
+    banner.showRestarting(announced, nowMs + quietMs);
     return;
   }
   banner.showRestarting(announced, nowMs + quietMs);
@@ -361,7 +370,11 @@ export interface BannerHandle {
  * nothing may draw over it, and an announced restart is nearer than a schedule
  * that has not fired.
  */
-export function mountBanner(host: HTMLElement, ctx: AppContext): BannerHandle {
+export function mountBanner(
+  host: HTMLElement,
+  ctx: AppContext,
+  onDeploying: (deploying: boolean) => void = () => {},
+): BannerHandle {
   let moved: string | null = null;
   let restarting: { announced: DaemonShutdownAnnounced; untilMs: number } | null = null;
   let drain: DaemonDrainScheduled | null = null;
@@ -371,18 +384,26 @@ export function mountBanner(host: HTMLElement, ctx: AppContext): BannerHandle {
   const redraw = (): void => {
     untick?.();
     untick = null;
+    // A DEPLOY DRAWS NO BANNER: the sidebar title's pulse says it instead, for
+    // exactly as long as the deploy's restart or drain stands. `moved` is
+    // terminal and the page is going away, so the pulse stops with it.
+    const deploying =
+      moved === null &&
+      ((restarting !== null && isDeployShutdown(restarting.announced)) ||
+        (drain !== null && isDeployDrain(drain)));
+    onDeploying(deploying);
     if (moved !== null) {
       host.replaceChildren(drawMovedNotice(moved));
       return;
     }
-    if (restarting !== null) {
+    if (restarting !== null && !isDeployShutdown(restarting.announced)) {
       const { element, tick } = drawRestartingNotice(restarting.announced, restarting.untilMs);
       host.replaceChildren(element);
       tick(ctx.ticker.now());
       untick = ctx.ticker.subscribe(tick);
       return;
     }
-    if (drain !== null) {
+    if (drain !== null && !isDeployDrain(drain)) {
       const { element, tick } = drawDrainNotice(drain);
       host.replaceChildren(element);
       tick(ctx.ticker.now());
@@ -432,6 +453,35 @@ export function mountBanner(host: HTMLElement, ctx: AppContext): BannerHandle {
       host.replaceChildren();
     },
   };
+}
+
+/** Whether a standing drain schedule is a deploy's. */
+export function isDeployDrain(scheduled: DaemonDrainScheduled): boolean {
+  const reason = requireMessage(scheduled.reason, "DaemonDrainScheduled.reason");
+  return requireCase(reason.kind, "DaemonDrainScheduled.reason.kind").case === "deploy";
+}
+
+/**
+ * Whether an announced shutdown is a deploy's: a rollout handing over to a
+ * successor (the same cause with no address is a plain bounce), or a drain or
+ * immediate stop for a deploy.
+ */
+export function isDeployShutdown(announced: DaemonShutdownAnnounced): boolean {
+  const cause = requireMessage(announced.cause, "DaemonShutdownAnnounced.cause");
+  const arm = requireCase(cause.kind, "DaemonShutdownCause.kind");
+  switch (arm.case) {
+    case "selfMergeRollout":
+      return announced.address !== undefined;
+    case "scheduledDrain":
+    case "immediate": {
+      const reason = requireMessage(arm.value.reason, `DaemonShutdown.${arm.case}.reason`);
+      return requireCase(reason.kind, `DaemonShutdown.${arm.case}.reason.kind`).case === "deploy";
+    }
+    default: {
+      const other: { case: string } = arm;
+      return unreachableArm("DaemonShutdownCause.kind", other.case);
+    }
+  }
 }
 
 /** The base element every notice wears, so the three read as one register. */

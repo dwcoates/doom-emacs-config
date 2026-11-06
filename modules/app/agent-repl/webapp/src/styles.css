@@ -9928,3 +9928,19 @@ ar-button.merge-queue-move[aria-disabled="true"] {
   pointer-events: none;
 }
 .link-hover-popup[hidden] { display: none; }
+
+/* ---- sidebar title deploy pulse (src/lifecycle/lifecycle.ts) -------------
+
+   WHILE A DEPLOY IS IN FLIGHT the rail's title ("Workspaces" / "Chats") slowly
+   pulses in greyscale intensity, replacing the amber banner a deploy used to
+   draw in the feed. `data-deploying` stands on #ws-sidebar for exactly as long
+   as the deploy's restart or drain does. */
+@keyframes sb-deploy-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  #ws-sidebar[data-deploying] .sb-title > :first-child {
+    animation: sb-deploy-pulse 2.6s ease-in-out infinite;
+  }
+}

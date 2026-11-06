@@ -314,7 +314,7 @@ export async function boot(): Promise<void> {
     // merge's bubble here) can arrive before the feed below is mounted; the
     // relay holds it until the feed binds its reveal.
     const reveals = createRevealRelay();
-    startLifecycle(ctx, { drainBannerHost: shell.drainBanner, newsDigest, reveals, promptEcho });
+    startLifecycle(ctx, { drainBannerHost: shell.drainBanner, deployPulseHost: shell.sidebar, newsDigest, reveals, promptEcho });
 
     // The dev-mode composer is the only shell element the boot itself reveals;
     // production runs composer-less, so the host ships hidden.
