@@ -1038,12 +1038,6 @@ A hand-rolled list decoder would skip the shared helper and fail here."
           "\"openRows\":{\"rows\":[]},\"expanded\":{\"collapsible\":{}}}")
   "One empty subsection named later, expanded.")
 
-(defconst agent-repl-test-wire-roster--one-shot-subsection
-  (concat "{\"oneShot\":{},"
-          "\"header\":{\"label\":{\"text\":\"one-shot\"},\"count\":{\"workspaces\":0}},"
-          "\"openRows\":{\"rows\":[]},\"expanded\":{\"neverCollapses\":{}}}")
-  "A repository's one-shot subsection, expanded and never collapsing.")
-
 (defun agent-repl-test-wire-roster--section-with-entries (&rest entries)
   "Return a repository section JSON whose body is ENTRIES, each a JSON object."
   (concat "{\"key\":{\"repository\":{\"id\":\"r1\",\"dir\":\"/src\"}},\"divergence\":{\"pending\":{}},"
@@ -1120,18 +1114,18 @@ A hand-rolled list decoder would skip the shared helper and fail here."
                  '("RosterSubsection" fold "oneof is unset"))))
 
 (ert-deftest agent-repl-test-wire-roster-subsection-without-a-kind-is-a-breach ()
-  "A subsection is named or the one-shot subsection, never neither."
+  "A subsection is named, never kindless."
   (should (equal (agent-repl-test-wire-roster--breach
                   #'agent-repl-wire-decode-roster-subsection
                   "{\"header\":{\"label\":{\"text\":\"later\"},\"count\":{\"workspaces\":0}},\"openRows\":{\"rows\":[]},\"expanded\":{\"collapsible\":{}}}")
                  '("RosterSubsection" kind "oneof is unset"))))
 
-(ert-deftest agent-repl-test-wire-roster-subsection-with-both-kinds-is-a-breach ()
-  "A subsection is never both named and the one-shot subsection."
+(ert-deftest agent-repl-test-wire-roster-subsection-with-the-retired-one-shot-kind-is-a-breach ()
+  "The retired `oneShot' kind is refused as an unknown field, never read."
   (should (equal (agent-repl-test-wire-roster--breach
                   #'agent-repl-wire-decode-roster-subsection
                   (replace-regexp-in-string "^{" "{\"oneShot\":{}," agent-repl-test-wire-roster--subsection t t))
-                 '("RosterSubsection" kind "oneof has more than one arm set"))))
+                 '("RosterSubsection" oneShot "unknown field"))))
 
 (ert-deftest agent-repl-test-wire-roster-subsection-with-the-retired-key-is-a-breach ()
   "The retired top-level `key' is refused as an unknown field, never read."
@@ -1146,21 +1140,19 @@ A hand-rolled list decoder would skip the shared helper and fail here."
                   #'agent-repl-wire-decode-roster-subsection-named "{}")
                  '("RosterSubsectionNamed" key "required message field is absent"))))
 
-(ert-deftest agent-repl-test-wire-roster-subsection-decodes-the-one-shot-subsection ()
-  "The one-shot subsection decodes its kind and its never-collapsing fold."
-  (let ((decoded (agent-repl-test-wire-roster--decode
-                  #'agent-repl-wire-decode-roster-subsection
-                  agent-repl-test-wire-roster--one-shot-subsection)))
-    (should (equal (list (plist-get decoded :kind) (plist-get decoded :fold))
-                   '((:arm :one-shot :value nil)
-                     (:arm :expanded :value (:collapse (:arm :never-collapses :value nil))))))))
-
 (ert-deftest agent-repl-test-wire-roster-a-repository-section-never-collapses-is-a-breach ()
-  "Only a subsection may never collapse; a repository section's fold refuses the arm."
+  "A repository section's fold refuses the never-collapses arm as unknown."
   (should (equal (agent-repl-test-wire-roster--breach
                   #'agent-repl-wire-decode-roster-repo-section-expanded
                   "{\"neverCollapses\":{}}")
                  '("RosterRepoSectionExpanded" neverCollapses "unknown field"))))
+
+(ert-deftest agent-repl-test-wire-roster-a-subsection-never-collapses-is-a-breach ()
+  "The retired never-collapses arm is refused as unknown on a subsection too."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-subsection-expanded
+                  "{\"neverCollapses\":{}}")
+                 '("RosterSubsectionExpanded" neverCollapses "unknown field"))))
 
 (ert-deftest agent-repl-test-wire-roster-subsection-with-an-unknown-field-is-a-breach ()
   "The codec refuses a field the contract does not spell."
@@ -1257,14 +1249,6 @@ A hand-rolled list decoder would skip the shared helper and fail here."
                         "{\"holdsCurrent\":{}}"))
                  '((:collapse (:arm :collapsible :value c))
                    (:collapse (:arm :holds-current :value h))))))
-
-(ert-deftest agent-repl-test-wire-roster-expanded-collapse-hands-never-collapses-its-decoder ()
-  "A third decoder, when handed, decodes the never-collapses arm."
-  (should (equal (agent-repl-test-wire-roster--decode
-                  (lambda (v) (agent-repl-wire--decode-expanded-collapse
-                               "Probe" v #'ignore #'ignore (lambda (_) 'n)))
-                  "{\"neverCollapses\":{}}")
-                 '(:collapse (:arm :never-collapses :value n)))))
 
 (ert-deftest agent-repl-test-wire-roster-expanded-collapse-names-its-message-in-a-breach ()
   "A breach names the message the helper was handed."

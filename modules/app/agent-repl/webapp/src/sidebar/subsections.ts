@@ -12,16 +12,9 @@
  * subsection still draws its header, and a row dropped onto it lands in its
  * (empty) rows list.
  *
- * THE ONE-SHOT SUBSECTION (frontend.v1.RosterSubsectionOneShot) is the
- * daemon's, not the user's: it holds every family with an open workspace
- * marked one-shot, except a repository's main workspace's family (its
- * one-shot children stay nested under it), and stands last in its
- * repository while it has any. It
- * is drawn as a subsection is, without the rename or the delete, and it never
- * collapses. A row dragged into it marks its workspace one-shot
- * (SetWorkspaceOneShot), and a row dragged out of it is placed where it was
- * dropped (ArrangeSidebar), which clears the mark. Its own header does not
- * drag, and nothing is dropped before it: it is always last.
+ * A ONE-SHOT IS FILED LIKE ANY OTHER WORKSPACE (owner request, 2026-11-03):
+ * no subsection is derived from the one-shot mark, and a drag places it
+ * without touching the mark.
  *
  * A SUBSECTION FOLDS AS A REPOSITORY SECTION DOES (`section-fold.ts`): its
  * triangle asks UpdateSidebarView for the other fold, a collapsed
@@ -57,21 +50,13 @@ import type { RosterOpenRows, RosterSubsection } from "../../../proto/gen/ts/fro
 import type { RepositoryRef, WorkspaceRef } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import { queryAll } from "../dom.js";
 import { EMPTY_SUBSECTION_ATTRIBUTE, OPEN_REGION_CLASS } from "./band-fit.js";
-import { log } from "../log.js";
 import { requireMessage } from "../rpc/strict.js";
-import {
-  SetWorkspaceOneShotResponseSchema,
-  type SetWorkspaceOneShotError,
-  type SetWorkspaceOneShotResponse,
-} from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_workspace_one_shot_pb";
-import { MalformedView } from "../rpc/malformed.js";
 import { requireCase, unreachableArm } from "../rpc/strict.js";
-import { sendArrangement, sendHeld } from "./arrange.js";
+import { sendArrangement } from "./arrange.js";
 import { openNamePopup } from "./name-popup.js";
 import { subsectionFoldKey, type SidebarContext } from "./context.js";
-import { drawRosterSectionFold, foldOnClick, neverFolds, sectionFold, trackDaemonFold } from "./section-fold.js";
+import { drawRosterSectionFold, foldOnClick, sectionFold, trackDaemonFold } from "./section-fold.js";
 import { pressToDrag, type DragSpec } from "./drag.js";
-import { userRequester } from "../rpc/requester.js";
 
 /** The class of one subsection. */
 export const SUBSECTION_CLASS = "sb-subsection";
@@ -82,22 +67,14 @@ export const SUBSECTION_HEAD_CLASS = "sb-subsection-head";
 /** The attribute a rows list states its subsection on; empty for the section's own. */
 export const BUCKET_ATTRIBUTE = "data-subsection";
 
-/**
- * The attribute the one-shot subsection and its rows list carry, in place of
- * `BUCKET_ATTRIBUTE`: the one-shot subsection has no subsection id, so no id
- * could ever be mistaken for it.
- */
-export const ONE_SHOT_ATTRIBUTE = "data-one-shot";
-
 /** Every rows list a top-level row may stand in: the section's own and each subsection's. */
-export const BUCKET_LIST_SELECTOR = `.rows[${BUCKET_ATTRIBUTE}], .rows[${ONE_SHOT_ATTRIBUTE}]`;
+export const BUCKET_LIST_SELECTOR = `.rows[${BUCKET_ATTRIBUTE}]`;
 
 /**
  * Which list of a repository's section a rows list or subsection element is:
- * the section's own (`none`), a subsection the user named, or the one-shot
- * subsection.
+ * the section's own (`none`), or a subsection the user named.
  */
-export type Bucket = { case: "none" } | { case: "named"; id: string } | { case: "oneShot" };
+export type Bucket = { case: "none" } | { case: "named"; id: string };
 
 /** Stamp BUCKET on ELEMENT, a rows list or subsection, as `bucketOf` reads it. */
 export function stampBucket(element: HTMLElement, bucket: Bucket): void {
@@ -108,18 +85,11 @@ export function stampBucket(element: HTMLElement, bucket: Bucket): void {
     case "named":
       element.setAttribute(BUCKET_ATTRIBUTE, bucket.id);
       return;
-    case "oneShot":
-      element.setAttribute(ONE_SHOT_ATTRIBUTE, "");
-      return;
   }
 }
 
 /** The bucket ELEMENT, a rows list or subsection, was stamped with (`stampBucket`). */
 export function bucketOf(element: HTMLElement): Bucket {
-  if (element.hasAttribute(ONE_SHOT_ATTRIBUTE)) {
-    if (element.hasAttribute(BUCKET_ATTRIBUTE)) throw new Error("invariant: a one-shot list states no subsection id");
-    return { case: "oneShot" };
-  }
   const id = element.getAttribute(BUCKET_ATTRIBUTE);
   if (id === null) throw new Error("invariant: a drop list states its subsection");
   return id === "" ? { case: "none" } : { case: "named", id };
@@ -127,17 +97,15 @@ export function bucketOf(element: HTMLElement): Bucket {
 
 /** Whether ELEMENT is stamped with a bucket: a rows list a row may stand in, or a subsection. */
 function isBucketed(element: Element | null): boolean {
-  return element !== null && (element.hasAttribute(BUCKET_ATTRIBUTE) || element.hasAttribute(ONE_SHOT_ATTRIBUTE));
+  return element !== null && element.hasAttribute(BUCKET_ATTRIBUTE);
 }
 
-/** The bucket subsection U is: named by its id, or the one-shot subsection. EVERY kind is named; unset is malformed. */
+/** The bucket subsection U is: named by its id. EVERY kind is named; unset is malformed. */
 export function subsectionBucket(u: RosterSubsection, path: string): Bucket {
   const kind = requireCase(u.kind, `${path}.kind`);
   switch (kind.case) {
     case "named":
       return { case: "named", id: requireMessage(kind.value.key, `${path}.kind.named.key`).subsectionId };
-    case "oneShot":
-      return { case: "oneShot" };
     default: {
       const other: { case: string } = kind;
       return unreachableArm(`${path}.kind`, other.case);
@@ -152,8 +120,6 @@ function bucketName(bucket: Bucket): string {
       return "the section's own rows";
     case "named":
       return bucket.id;
-    case "oneShot":
-      return "the one-shot subsection";
   }
 }
 
@@ -177,9 +143,8 @@ export interface DrawnSubsection {
 }
 
 /**
- * One subsection: its header (fold, name, count, and for a named one the
- * delete) and its rows. A named subsection renames on a double-click of its
- * name; the one-shot subsection's name is the daemon's, and it never folds.
+ * One subsection: its header (fold, name, count and delete) and its rows. It
+ * renames on a double-click of its name.
  */
 export function drawRosterSubsection(
   u: RosterSubsection,
@@ -203,41 +168,34 @@ export function drawRosterSubsection(
   const shown = document.createElement("span");
   shown.className = "sb-count";
   shown.textContent = `(${count})`;
-  const neverCollapses = u.fold.case === "expanded" && u.fold.value.collapse.case === "neverCollapses";
-  if (bucket.case === "named") {
-    if (neverCollapses) throw new MalformedView(`${path}.fold`, "a named subsection is never one that never collapses");
-    const id = bucket.id;
-    const foldKey = subsectionFoldKey(id);
-    trackDaemonFold(element, foldKey, drawRosterSectionFold(u.fold, `${path}.fold`), sc);
-    foldOnClick(head, element, sectionFold(sc, foldKey, { case: "subsection", value: { id } }));
-    label.title = "double-click to rename";
-    label.addEventListener("dblclick", (event) => {
-      event.preventDefault();
-      openNamePopup(sc, label, {
-        subject: "subsection",
-        placeholder: "subsection name",
-        value: name,
-        submitLabel: "Rename",
-        send: (newName, control) =>
-          sendArrangement(sc, control, { case: "renameSubsection", value: { subsection: { id }, name: newName } }),
-      });
+  if (bucket.case !== "named") throw new Error("invariant: a drawn subsection is a named one");
+  const id = bucket.id;
+  const foldKey = subsectionFoldKey(id);
+  trackDaemonFold(element, foldKey, drawRosterSectionFold(u.fold, `${path}.fold`), sc);
+  foldOnClick(head, element, sectionFold(sc, foldKey, { case: "subsection", value: { id } }));
+  label.title = "double-click to rename";
+  label.addEventListener("dblclick", (event) => {
+    event.preventDefault();
+    openNamePopup(sc, label, {
+      subject: "subsection",
+      placeholder: "subsection name",
+      value: name,
+      submitLabel: "Rename",
+      send: (newName, control) =>
+        sendArrangement(sc, control, { case: "renameSubsection", value: { subsection: { id }, name: newName } }),
     });
-    const remove = createControl();
-    remove.className = "sb-subsection-delete";
-    remove.setAttribute("data-subsection-delete", id);
-    remove.textContent = "×";
-    remove.title = "remove this subsection; its workspaces return to the repository";
-    remove.addEventListener("click", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      void sendArrangement(sc, sc.arrange.status, { case: "deleteSubsection", value: { subsection: { id } } });
-    });
-    head.append(label, shown, remove);
-  } else {
-    if (!neverCollapses) throw new MalformedView(`${path}.fold`, "the one-shot subsection is always expanded and never collapses");
-    foldOnClick(head, element, neverFolds(ONE_SHOT_FOLD_KEY));
-    head.append(label, shown);
-  }
+  });
+  const remove = createControl();
+  remove.className = "sb-subsection-delete";
+  remove.setAttribute("data-subsection-delete", id);
+  remove.textContent = "×";
+  remove.title = "remove this subsection; its workspaces return to the repository";
+  remove.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    void sendArrangement(sc, sc.arrange.status, { case: "deleteSubsection", value: { subsection: { id } } });
+  });
+  head.append(label, shown, remove);
   element.appendChild(head);
 
   const rows = drawRows(requireMessage(u.openRows, `${path}.open_rows`), `${path}.open_rows`);
@@ -245,49 +203,6 @@ export function drawRosterSubsection(
   element.appendChild(rows);
   if (rows.children.length === 0) element.setAttribute(EMPTY_SUBSECTION_ATTRIBUTE, "");
   return { element, rows };
-}
-
-/** The fold key the one-shot subsection's gesture names in its records; it holds no view state. */
-const ONE_SHOT_FOLD_KEY = "one-shot";
-
-/**
- * SetWorkspaceOneShot's arms of its own. `unknown_workspace` and
- * `workspace_ref_mismatch` are cross-cutting, worded once in `rpc/refusal.ts`.
- */
-export function setWorkspaceOneShotRefusal(cause: NonNullable<SetWorkspaceOneShotError["cause"]> & { case: string }): string {
-  switch (cause.case) {
-    case "closed":
-      return "the workspace is closed";
-    case "noCreationJob":
-      return "a registered workspace cannot be a one-shot";
-    case "requesterMayNotSet":
-      return "only the workspace, its owner or the user may mark it";
-    default: {
-      const other: { case: string } = cause;
-      return unreachableArm("SetWorkspaceOneShotError.cause", other.case);
-    }
-  }
-}
-
-/**
- * Mark WORKSPACE a one-shot, as the user asks by dropping its row into the
- * one-shot subsection. Its family is drawn there once the daemon's push
- * carries the mark, so the drawing is held until then (`sendHeld`).
- */
-export function markOneShot(sc: SidebarContext, workspace: WorkspaceRef): Promise<boolean> {
-  log.info("marking a workspace one-shot from the sidebar", {
-    operation: "sidebar.one-shot.mark",
-    context: { workspace: workspace.id },
-  });
-  return sendHeld(sc, sc.arrange.status, {
-    rpc: "SetWorkspaceOneShot",
-    call: (client) =>
-      client.setWorkspaceOneShot({ workspace, requester: userRequester(), oneShot: true }),
-    schema: SetWorkspaceOneShotResponseSchema,
-    refusalText: (cause) => setWorkspaceOneShotRefusal(cause as never),
-    revision: (response: SetWorkspaceOneShotResponse) =>
-      response.result.case === "success" ? response.result.value.rosterRevision : null,
-  });
 }
 
 /**
@@ -400,8 +315,6 @@ function rowDrag(sc: SidebarContext, target: Element, refs: ArrangeRefs): DragSp
   const section = row.closest<HTMLElement>(`[${REPOSITORY_ATTRIBUTE}]`);
   if (section === null) throw new Error("invariant: a bucketed row sits in its repository's section");
   const workspace = refs.workspace(rowId(row));
-  // Read at the press: the drag moves ROW itself into the list it would join.
-  const fromOneShot = bucketOf(row.parentElement as HTMLElement).case === "oneShot";
   return {
     kind: "workspace",
     item: row,
@@ -413,23 +326,6 @@ function rowDrag(sc: SidebarContext, target: Element, refs: ArrangeRefs): DragSp
     targetOf: subsectionOf,
     dropped: (l, before) => {
       const bucket = bucketOf(l);
-      if (bucket.case === "oneShot") {
-        // INTO THE ONE-SHOT SUBSECTION IS A MARK, never a placement: its
-        // rows stand in roster order, so where among them it fell says
-        // nothing, and a row already there was not moved out of it.
-        if (fromOneShot) {
-          log.debug("a row was reordered inside the one-shot subsection; its order is the roster's", {
-            operation: "sidebar.one-shot.reorder",
-            context: { workspace: workspace.id },
-          });
-          sc.arrange.hold.cancel();
-          return;
-        }
-        void markOneShot(sc, workspace);
-        return;
-      }
-      // OUT OF THE ONE-SHOT SUBSECTION IS A PLACEMENT, which clears the
-      // family's one-shot marks (ArrangePlaceWorkspace).
       void sendArrangement(sc, sc.arrange.status, {
         case: "placeWorkspace",
         value: {
@@ -461,14 +357,11 @@ export function familyTop(row: HTMLElement): HTMLElement | null {
 
 /**
  * A list's entries, in order: its top-level rows and, in a section's list,
- * its named subsections. The one-shot subsection is no entry: it is always
- * last, so nothing stands before it, and a drop below every entry lands at the
- * end, just above it.
+ * its subsections.
  */
 function entryItems(list: HTMLElement): HTMLElement[] {
   return [...list.children].filter(
-    (el): el is HTMLElement =>
-      el.hasAttribute("data-roster-row") || (el.classList.contains(SUBSECTION_CLASS) && !el.hasAttribute(ONE_SHOT_ATTRIBUTE)),
+    (el): el is HTMLElement => el.hasAttribute("data-roster-row") || el.classList.contains(SUBSECTION_CLASS),
   );
 }
 

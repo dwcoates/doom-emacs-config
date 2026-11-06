@@ -88,7 +88,7 @@ func TestOnlyVisibleReadsTheSubsectionFolds(t *testing.T) {
 	}{
 		{name: "a workspace in a collapsed subsection is withheld", ws: wsm.Workspace{ID: "a", Repo: "r", Place: 1, Dir: "/worktrees/a", Subsection: &folded}},
 		{name: "a workspace in an expanded subsection runs", ws: wsm.Workspace{ID: "a", Repo: "r", Place: 1, Dir: "/worktrees/a", Subsection: &open}, wantRun: true},
-		{name: "a one-shot filed in a collapsed subsection runs, its tab drawn in the one-shot subsection", ws: wsm.Workspace{ID: "a", Repo: "r", Place: 1, Dir: "/worktrees/a", Subsection: &folded, OneShot: true}, wantRun: true},
+		{name: "a one-shot filed in a collapsed subsection runs", ws: wsm.Workspace{ID: "a", Repo: "r", Place: 1, Dir: "/worktrees/a", Subsection: &folded, OneShot: true}, wantRun: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

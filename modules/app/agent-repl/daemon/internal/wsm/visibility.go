@@ -88,6 +88,12 @@ func (ws Workspace) LetsCacheLapse() bool {
 // hidden or collapsed: selecting one revives it, and a rule that withheld it
 // stood that session down the moment it came up, so its cold gate stood again
 // after every answer. Moving off it withholds it again.
+//
+// A WORKSPACE A FOLD SPARES RUNS UNDER THE FOLD (FoldSpare): a fold never
+// stands a one-shot down, so a boot never withholds one a fold hides either.
+// A one-shot is filed in subsections like any other workspace (owner request,
+// 2026-11-03), so a folded one-shot's unattended work would otherwise stop at
+// the next daemon start.
 func (ws Workspace) Runs(folded, mergeQueued bool) bool {
 	if ws.Current || mergeQueued {
 		return true
@@ -95,7 +101,15 @@ func (ws Workspace) Runs(folded, mergeQueued bool) bool {
 	if ws.MergeHidden() {
 		return false
 	}
-	return ws.Withheld(folded) == Drawn
+	switch ws.Withheld(folded) {
+	case Drawn:
+		return true
+	case WithheldCollapsed:
+		_, spared := ws.FoldSpare()
+		return spared
+	default:
+		return false
+	}
 }
 
 // KeepaliveHeld reports whether the workspace's keep-alives are held from

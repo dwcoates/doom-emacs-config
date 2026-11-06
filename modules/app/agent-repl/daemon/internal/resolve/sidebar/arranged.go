@@ -13,12 +13,10 @@ type ArrangedRepository struct {
 }
 
 // ArrangedEntry is one entry of a repository: a family in no subsection
-// (Subsection and OneShot nil), a subsection and its families, or the
-// repository's one-shot subsection's families (OneShot).
+// (Subsection nil), or a subsection and its families.
 type ArrangedEntry struct {
 	Workspace  ArrangedWorkspace
 	Subsection *ArrangedSubsection
-	OneShot    []ArrangedWorkspace
 }
 
 // ArrangedSubsection is one subsection and its families.
@@ -51,10 +49,6 @@ func Arranged(reg Registry, log dlog.Logger) []ArrangedRepository {
 	for _, placed := range arranged {
 		repo := ArrangedRepository{Repository: placed.repo}
 		for _, b := range placed.buckets {
-			if b.oneShot {
-				repo.Entries = append(repo.Entries, ArrangedEntry{OneShot: families(b.workspaces, log)})
-				continue
-			}
 			if b.subsection != nil {
 				repo.Entries = append(repo.Entries, ArrangedEntry{Subsection: &ArrangedSubsection{Subsection: *b.subsection, Workspaces: families(b.workspaces, log)}})
 				continue

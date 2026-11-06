@@ -321,32 +321,6 @@ func requireAnchorOfRepository(ctx context.Context, tx *sql.Tx, at Anchor, repo 
 	return nil
 }
 
-// OneShotMarks says what a placement does to its families' one-shot marks
-// (agentrepl.v1.ArrangePlaceWorkspace.keep_one_shot).
-type OneShotMarks int
-
-const (
-	// ClearOneShotMarks clears every open member's mark, so the family leaves
-	// the sidebar's one-shot subsection for the place it was put: the drag.
-	ClearOneShotMarks OneShotMarks = iota
-	// KeepOneShotMarks clears none: the place is recorded, and a marked
-	// family keeps drawing in the one-shot subsection until its marks clear.
-	// An agent filing its own workspace places this way.
-	KeepOneShotMarks
-)
-
-// String names the marks' fate for the log.
-func (m OneShotMarks) String() string {
-	switch m {
-	case ClearOneShotMarks:
-		return "clear"
-	case KeepOneShotMarks:
-		return "keep"
-	default:
-		panic(fmt.Sprintf("wsm: unknown one-shot marks %d", int(m)))
-	}
-}
-
 // AnchorField is an anchor as a log field.
 func AnchorField(at Anchor) string {
 	switch a := at.(type) {
@@ -396,8 +370,9 @@ func (s *store) MoveRepository(ctx context.Context, id RepoID, before *RepoID) e
 // ordinary drag; several are an agent filing a batch. It is applied whole or
 // not at all.
 //
-// MARKS says whether the families' one-shot marks are cleared
-// (ClearOneShotMarks, the drag) or kept (KeepOneShotMarks).
+// A PLACEMENT LEAVES EVERY ONE-SHOT MARK AS IT IS (owner request,
+// 2026-11-03): a one-shot is drawn where it is placed, like any other
+// workspace, so moving it says nothing about whether it finishes unattended.
 //
 // Only the repository's roots' places move (writeWalk): their descendants
 // are drawn, and walked by the tab bar, under them whatever their places,
@@ -410,9 +385,9 @@ func (s *store) MoveRepository(ctx context.Context, id RepoID, before *RepoID) e
 // repository ErrOtherRepository, an unknown subsection ErrUnknownSubsection,
 // and a workspace anchor that is not a root in the destination
 // ErrAnchorElsewhere.
-func (s *store) PlaceWorkspaces(ctx context.Context, ws []WorkspaceID, into *SubsectionID, at Anchor, marks OneShotMarks) error {
+func (s *store) PlaceWorkspaces(ctx context.Context, ws []WorkspaceID, into *SubsectionID, at Anchor) error {
 	const op = "daemon.wsm.place_workspaces"
-	fields := dlog.Context{"workspaces": ws, "into": ids.Optional(into), "at": AnchorField(at), "one_shot_marks": marks.String()}
+	fields := dlog.Context{"workspaces": ws, "into": ids.Optional(into), "at": AnchorField(at)}
 	if err := malformedPlacement(ws, into, at); err != nil {
 		s.log.Error(op, "refused a malformed placement", withError(fields, err))
 		return err
@@ -420,7 +395,7 @@ func (s *store) PlaceWorkspaces(ctx context.Context, ws []WorkspaceID, into *Sub
 	var expanded bool
 	err := s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
-		expanded, err = placeFamilies(ctx, tx, ws, into, at, marks)
+		expanded, err = placeFamilies(ctx, tx, ws, into, at)
 		return err
 	})
 	if err == nil && expanded {
@@ -437,7 +412,7 @@ func (s *store) PlaceWorkspaces(ctx context.Context, ws []WorkspaceID, into *Sub
 // 2026-10-31): placing into a collapsed subsection expands it
 // (expandSubsection), answering whether it did. The repository's own fold is
 // the user's alone and is left as it is.
-func placeFamilies(ctx context.Context, tx *sql.Tx, ws []WorkspaceID, into *SubsectionID, at Anchor, marks OneShotMarks) (bool, error) {
+func placeFamilies(ctx context.Context, tx *sql.Tx, ws []WorkspaceID, into *SubsectionID, at Anchor) (bool, error) {
 	// A FAMILY MOVES WHOLE (familyRoot): each workspace named places
 	// its root, and so its every ancestor and descendant.
 	ws, err := familyRoots(ctx, tx, ws)
@@ -472,11 +447,6 @@ func placeFamilies(ctx context.Context, tx *sql.Tx, ws []WorkspaceID, into *Subs
 			return false, err
 		}
 	}
-	if marks == ClearOneShotMarks {
-		if err := clearFamilyOneShot(ctx, tx, ws); err != nil {
-			return false, err
-		}
-	}
 	walk, err := readWalk(ctx, tx, repo)
 	if err != nil {
 		return false, err
@@ -502,38 +472,6 @@ func placeFamilies(ctx context.Context, tx *sql.Tx, ws []WorkspaceID, into *Subs
 		return false, err
 	}
 	return expandSubsection(ctx, tx, *into)
-}
-
-// clearFamilyOneShot clears the one-shot mark (CreationJob.OneShot) of every
-// member of ROOTS' families that is not closed, so a placed family leaves the
-// sidebar's one-shot subsection, which is derived from those marks, for the
-// place it was put. A closed member keeps its mark: a finished one-shot is
-// still one, and its mark draws the family nowhere.
-//
-// THE MAIN WORKSPACE'S FAMILY KEEPS ITS MARKS. That family is never drawn in
-// the one-shot subsection (the sidebar's oneShotHeld), so moving it moves no
-// one out of it, and its marks are its one-shot children's, which must still
-// finish unattended wherever their parent is dragged.
-func clearFamilyOneShot(ctx context.Context, tx *sql.Tx, roots []WorkspaceID) error {
-	for _, root := range roots {
-		main, err := isMainWorkspace(ctx, tx, root)
-		if err != nil {
-			return err
-		}
-		if main {
-			continue
-		}
-		if _, err := tx.ExecContext(ctx, `WITH RECURSIVE family(id) AS (
-  SELECT ?
-  UNION
-  SELECT child.id FROM workspaces AS child JOIN family ON child.parent_id = family.id
-)
-UPDATE creation_jobs SET one_shot = 0
-WHERE one_shot AND workspace_id IN (SELECT family.id FROM family JOIN workspaces USING (id) WHERE NOT workspaces.closed)`, root); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 // MoveWorkspace moves workspace WS onto TARGET's tab in the arrangement's
@@ -826,18 +764,4 @@ func nullSubsection(v sql.NullString) *SubsectionID {
 	}
 	id := SubsectionID(v.String)
 	return &id
-}
-
-// isMainWorkspace reports whether workspace ID is its repository's main
-// workspace (IsMainWorktree), read inside TX.
-func isMainWorkspace(ctx context.Context, tx *sql.Tx, id WorkspaceID) (bool, error) {
-	var dir, repoDir string
-	err := tx.QueryRowContext(ctx, `SELECT workspaces.dir, repositories.dir FROM workspaces JOIN repositories ON repositories.id = workspaces.repo_id WHERE workspaces.id = ?`, id).Scan(&dir, &repoDir)
-	if errors.Is(err, sql.ErrNoRows) {
-		return false, fmt.Errorf("wsm: workspace %s: %w", id, ErrNotFound)
-	}
-	if err != nil {
-		return false, fmt.Errorf("wsm: workspace %s's main-worktree standing: %w", id, err)
-	}
-	return IsMainWorktree(dir, repoDir), nil
 }

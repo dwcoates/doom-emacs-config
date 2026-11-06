@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 
-	conversationv1 "agentrepl/proto/conversation/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"agent-repld/internal/dlog"
@@ -59,52 +58,20 @@ const (
 // ask (wsm.Workspace.MayAct). Any created workspace may be marked, a child
 // whose owner would otherwise land it included: a one-shot always lands
 // itself, so the mark moves who lands it (wsm.Workspace.OwnerLands).
+//
+// THE MARK NEVER MOVES THE WORKSPACE IN THE SIDEBAR (owner request,
+// 2026-11-03): a one-shot files itself into a subsection like any other
+// workspace, so an unmark leaves it where it is arranged and asks it to file
+// nothing.
 func (v *verbs) SetOneShot(ctx context.Context, ws ids.WorkspaceID, asker *ids.WorkspaceID, oneShot bool) (string, error) {
-	directive, placement, err := v.setOneShot(ctx, ws, asker, oneShot)
-	if err != nil {
-		return "", err
-	}
-	if err := v.SubmitPlacement(ctx, placement); err != nil {
-		return "", fmt.Errorf("set one-shot on %q: %w", ws, err)
-	}
-	return directive, nil
-}
-
-// PendingPlacement is the placement brief a workspace that left its one-shot
-// state is owed (BriefSubsectionPlacement), not yet queued: the zero value
-// owes none. It is handed back rather than queued at once wherever a prompt
-// took the workspace back, so the brief is queued AFTER that prompt and the
-// user's own words run first (SubmitPlacement).
-type PendingPlacement struct {
-	ws   ids.WorkspaceID
-	text string
-	// log is the workspace's logger the take-back recorded under.
-	log dlog.Logger
-}
-
-// Owed reports whether the placement owes a brief.
-func (p PendingPlacement) Owed() bool { return p.text != "" }
-
-// SubmitPlacement queues PLACEMENT's brief to its workspace's own session, and
-// does nothing for one that owes none.
-func (v *verbs) SubmitPlacement(ctx context.Context, placement PendingPlacement) error {
-	if !placement.Owed() {
-		return nil
-	}
-	return v.submitPlacement(ctx, placement.log, placement.ws, placement.text)
-}
-
-// setOneShot is SetOneShot without queuing the placement brief it owes,
-// which it answers instead.
-func (v *verbs) setOneShot(ctx context.Context, ws ids.WorkspaceID, asker *ids.WorkspaceID, oneShot bool) (string, PendingPlacement, error) {
 	const rpc = "SetWorkspaceOneShot"
 	record, log, err := v.owned(ctx, rpc, ws)
 	if err != nil {
-		return "", PendingPlacement{}, err
+		return "", err
 	}
 	fields := dlog.Context{"one_shot": oneShot, "asker": optionalAsker(asker)}
 	if err := v.standingOpen(log, rpc, record); err != nil {
-		return "", PendingPlacement{}, err
+		return "", err
 	}
 	// A MAIN WORKSPACE IS NEVER A ONE-SHOT: it sits on the main branch,
 	// lands nothing itself and splits its work off into created workspaces.
@@ -113,15 +80,15 @@ func (v *verbs) setOneShot(ctx context.Context, ws ids.WorkspaceID, asker *ids.W
 		main, err := isMainWorkspace(ctx, v.deps.DB, record)
 		if err != nil {
 			log.Error(opSetOneShot, "could not resolve whether the workspace is its repository's main workspace", dlog.WithCause(fields, err))
-			return "", PendingPlacement{}, fmt.Errorf("set one-shot on %q: %w", ws, err)
+			return "", fmt.Errorf("set one-shot on %q: %w", ws, err)
 		}
 		if main {
-			return "", PendingPlacement{}, refuse(log, rpc, ArmMainWorkspace,
+			return "", refuse(log, rpc, ArmMainWorkspace,
 				fmt.Sprintf("workspace %q (%s) is its repository's main workspace, which lands nothing itself and is never a one-shot; asked by %s", ws, record.Dir, optionalAsker(asker)), false)
 		}
 	}
 	if !record.MayAct(optionalAsker(asker)) {
-		return "", PendingPlacement{}, refuse(log, rpc, ArmRequesterMayNotSet, fmt.Sprintf("workspace %s is neither the workspace nor its owner", optionalAsker(asker)), false)
+		return "", refuse(log, rpc, ArmRequesterMayNotSet, fmt.Sprintf("workspace %s is neither the workspace nor its owner", optionalAsker(asker)), false)
 	}
 	var directive string
 	if oneShot {
@@ -131,106 +98,57 @@ func (v *verbs) setOneShot(ctx context.Context, ws ids.WorkspaceID, asker *ids.W
 		directive, err = v.completionDirective()
 		if err != nil {
 			log.Error(opSetOneShot, "could not read the daemon's one-shot completion directive", dlog.WithCause(fields, err))
-			return "", PendingPlacement{}, fmt.Errorf("set one-shot on %q: %w", ws, err)
-		}
-	}
-	// LEAVING THE ONE-SHOT STATE asks the workspace's own agent to file it
-	// into a subsection (BriefSubsectionPlacement). The brief is composed
-	// BEFORE the mark is written, so a corpus that cannot give it changes
-	// nothing.
-	var placement string
-	if record.OneShot && !oneShot {
-		if placement, err = v.oneShotExitPlacement(ctx, log, record); err != nil {
-			return "", PendingPlacement{}, fmt.Errorf("set one-shot on %q: %w", ws, err)
+			return "", fmt.Errorf("set one-shot on %q: %w", ws, err)
 		}
 	}
 	err = v.deps.DB.SetOneShot(ctx, ws, oneShot)
 	if errors.Is(err, wsm.ErrNotFound) {
-		return "", PendingPlacement{}, refuse(log, rpc, ArmNoCreationJob, "the workspace was registered rather than created, so it records no creation to mark", false)
+		return "", refuse(log, rpc, ArmNoCreationJob, "the workspace was registered rather than created, so it records no creation to mark", false)
 	}
 	if err != nil {
 		log.Error(opSetOneShot, "could not record the workspace's one-shot standing", dlog.WithCause(fields, err))
-		return "", PendingPlacement{}, fmt.Errorf("set one-shot on %q: %w", ws, err)
+		return "", fmt.Errorf("set one-shot on %q: %w", ws, err)
 	}
 	log.Info(opSetOneShot, "recorded the workspace's one-shot standing", fields)
 	v.republishRegistry(ctx, log, opSetOneShot)
-	return directive, PendingPlacement{ws: ws, text: placement, log: log}, nil
-}
-
-// opOneShotExitPlacement records the placement brief a workspace leaving its
-// one-shot state is sent, or why it is sent none.
-const opOneShotExitPlacement = "daemon.workspace.one_shot_exit_placement"
-
-// oneShotExitPlacement answers the placement brief RECORD is owed as it leaves
-// its one-shot state, "" when it is owed none: a child sits wherever its root
-// does and a merge workspace has its own brief (filesItself), and a
-// repository with nothing to file into asks nothing (placementOwed).
-func (v *verbs) oneShotExitPlacement(ctx context.Context, log dlog.Logger, record wsm.Workspace) (string, error) {
-	fields := dlog.Context{"brief": BriefSubsectionPlacement, "repo_id": string(record.Repo)}
-	if !filesItself(record.Parent, record.MergeOf != nil) {
-		log.Debug(opOneShotExitPlacement, "the workspace sits wherever its family's root does, so it is not asked to file itself", fields)
-		return "", nil
-	}
-	owed, err := v.placementOwed(ctx, log, record)
-	if err != nil || !owed {
-		return "", err
-	}
-	return v.corpusNote(log, opOneShotExitPlacement, fields, BriefSubsectionPlacement, nil)
-}
-
-// submitPlacement queues the placement brief TEXT to workspace WS's own
-// session as a deferred prompt: it waits behind a running turn and wakes an
-// idle agent, so the workspace's agent files the workspace itself.
-func (v *verbs) submitPlacement(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, text string) error {
-	submission := deferredBrief(ws, text, conversationv1.PromptOrigin_PROMPT_ORIGIN_SUBSECTION_PLACEMENT)
-	disposition, err := v.queueBrief(ctx, log, opOneShotExitPlacement, "the workspace's", "its placement brief", submission)
-	if err != nil {
-		return err
-	}
-	log.Info(opOneShotExitPlacement, "asked the workspace that left its one-shot state to file itself into a subsection", dlog.Context{
-		"turn": string(submission.Turn), "delivered": disposition.Delivered, "parked": disposition.Parked()})
-	return nil
+	return directive, nil
 }
 
 // TakeBackOneShot clears WS's one-shot mark because the user took the
 // workspace back, as BY says: the agent no longer finishes it unattended, so
 // no agent has to remember to unmark itself. A workspace that is not marked is
 // left as it is, and so is a closed one, whose mark records the one-shot it
-// finished: a reopen clears it once the row is open. The clear IS SetOneShot(not one-shot) asked by the user, so
-// it republishes the roster, and the sidebar's one-shot subsection lets the
-// family go, with no code of its own.
+// finished: a reopen clears it once the row is open. The clear IS
+// SetOneShot(not one-shot) asked by the user, so it republishes the roster,
+// and the row stops drawing the one-shot mark with no code of its own.
 //
 // THE PROMPT THAT FOLLOWS THE USER'S OWN STOP OF A TURN TAKES NOTHING BACK: the
 // user interrupting and prompting again is steering the unattended work, not
 // stepping in to finish it. That prompt consumes the stop, so the next user
 // prompt takes the one-shot back as usual. A reopen is not a prompt and
 // neither consumes nor honors a stop.
-//
-// IT ANSWERS THE PLACEMENT BRIEF THE TAKE-BACK OWES rather than queuing it:
-// the caller queues it (SubmitPlacement) once the prompt that took the
-// workspace back is queued, so the user's words run before it.
-func (v *verbs) TakeBackOneShot(ctx context.Context, ws ids.WorkspaceID, by OneShotTakeBack) (PendingPlacement, error) {
+func (v *verbs) TakeBackOneShot(ctx context.Context, ws ids.WorkspaceID, by OneShotTakeBack) error {
 	record, log, err := v.owned(ctx, "TakeBackOneShot", ws)
 	if err != nil {
-		return PendingPlacement{}, err
+		return err
 	}
 	if !record.OneShot || record.Closed {
-		return PendingPlacement{}, nil
+		return nil
 	}
 	if by == TakenBackByUserPrompt {
 		if _, stopped := v.stopped.LoadAndDelete(ws); stopped {
 			log.Info(opTakeBackOneShot, "the prompt followed the user's own stop of a turn; the one-shot is kept", nil)
-			return PendingPlacement{}, nil
+			return nil
 		}
 	}
-	_, placement, err := v.setOneShot(ctx, ws, nil, false)
+	_, err = v.SetOneShot(ctx, ws, nil, false)
 	if err != nil {
 		log.Error(opTakeBackOneShot, "could not clear the one-shot mark of a workspace the user took back", dlog.Context{
 			"cleared_by": string(by), "cause": err.Error()})
-		return PendingPlacement{}, fmt.Errorf("take back one-shot %q: %w", ws, err)
+		return fmt.Errorf("take back one-shot %q: %w", ws, err)
 	}
 	log.Info(opTakeBackOneShot, "the user took the one-shot back; its mark is cleared", dlog.Context{"cleared_by": string(by)})
-	return placement, nil
+	return nil
 }
 
 // SetCorrespondence marks WS awaiting correspondence from AWAITED, or clears

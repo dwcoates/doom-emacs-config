@@ -17,16 +17,10 @@
 // prompt another workspace's agent sent, or one the daemon submits, leaves
 // it. The clear is this verb's unmark, asked by the user.
 //
-// LEAVING THE ONE-SHOT STATE ASKS THE WORKSPACE TO FILE ITSELF (owner
-// request, 2026-10-26). An unmark of a marked workspace, by any asker or by
-// the user taking it back, queues the daemon's placement brief to the
-// workspace's own session as a deferred prompt
-// (conversation.v1.PromptOrigin.PROMPT_ORIGIN_SUBSECTION_PLACEMENT): its
-// agent reads the repository's subsections and files the workspace, as a new
-// workspace is asked to in its first message. A child, which sits wherever
-// its root does, and a repository with nothing to file into are asked
-// nothing. A brief that cannot be composed fails the unmark with nothing
-// changed.
+// THE MARK NEVER MOVES THE WORKSPACE IN THE SIDEBAR (owner request,
+// 2026-11-03). A one-shot files itself into its repository's subsections like
+// any other workspace, so marking or unmarking it leaves it where it is
+// arranged, and an unmark asks it to file nothing.
 //
 // A ONE-SHOT ALWAYS LANDS ITSELF, whatever its context: any created workspace
 // may be marked, a child included. Marking a child whose context is not forked
@@ -77,13 +71,9 @@ message SetWorkspaceOneShotSuccess {
   optional string completion_directive = 1;
   // The revision of the roster the daemon resolved after the change
   // (frontend.v1.WorkspaceRoster.revision): every roster at or above it draws
-  // the workspace's family in, or out of, its repository's one-shot
-  // subsection (frontend.v1.RosterSubsectionOneShot), except a family rooted
-  // at the repository's MAIN workspace, which a mark never moves: its
-  // one-shot child stays nested under the main workspace. A sidebar that drew a
-  // drag into that subsection at once holds its drawing until a push at or
-  // above it arrives, as it does for ArrangeSidebarSuccess.roster_revision.
-  // 0 when the daemon has resolved no roster yet.
+  // the workspace's row with its one-shot mark as asked
+  // (frontend.v1.RosterRowOneShot). 0 when the daemon has resolved no roster
+  // yet.
   uint64 roster_revision = 2;
 }
 

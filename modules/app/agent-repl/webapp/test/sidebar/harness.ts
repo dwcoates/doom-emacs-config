@@ -328,8 +328,6 @@ export function repoSection(init: {
    * just before the row BEFORE names, or after every row unless said.
    */
   subsections?: Array<{ id: string; label?: string; rows?: RosterRow[]; collapsed?: boolean; holdsCurrent?: boolean; before?: string }>;
-  /** The rows of the repository's one-shot subsection, drawn last; none unless said. */
-  oneShot?: RosterRow[];
 }): RosterRepoSection {
   const rows = init.rows ?? [];
   const entries = rowEntries(rows);
@@ -348,21 +346,6 @@ export function repoSection(init: {
     const at = sub.before === undefined ? -1 : entries.findIndex((e) => e.entry.case === "row" && e.entry.value.row?.workspace?.workspace?.id === sub.before);
     if (sub.before !== undefined && at < 0) throw new Error(`harness: no row ${sub.before} for subsection ${sub.id} to stand before`);
     entries.splice(at < 0 ? entries.length : at, 0, entry);
-  }
-  if (init.oneShot !== undefined) {
-    entries.push(
-      create(RosterRepoEntrySchema, {
-        entry: {
-          case: "subsection",
-          value: {
-            kind: { case: "oneShot", value: {} },
-            header: { label: { text: "one-shot" }, count: { workspaces: init.oneShot.length } },
-            openRows: { rows: init.oneShot.map(openRow) },
-            fold: { case: "expanded", value: { collapse: { case: "neverCollapses", value: {} } } },
-          },
-        },
-      }),
-    );
   }
   return create(RosterRepoSectionSchema, {
     key: { repository: { id: init.id, dir: `/repo/${init.id}` } },

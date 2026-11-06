@@ -859,11 +859,6 @@ type agentAPI struct {
 	awaitErr     error
 	takeBacks    []fakeTakeBack
 	takeBackErr  error
-	// placementsQueued is, for each SubmitPlacement, how many prompts had
-	// been handed on when it was asked for (-1 when the test wired no
-	// prompts); placementErr fails it.
-	placementsQueued []int
-	placementErr     error
 	// prompts, when set, is read at each take-back, so a test can tell
 	// whether the take-back came before the prompt was handed on.
 	prompts *fakePrompts
@@ -909,14 +904,9 @@ func (f *fakeVerbs) SetOneShot(_ context.Context, ws ids.WorkspaceID, asker *ids
 	return "", f.api.oneShotErr
 }
 
-func (f *fakeVerbs) TakeBackOneShot(_ context.Context, ws ids.WorkspaceID, by workspace.OneShotTakeBack) (workspace.PendingPlacement, error) {
+func (f *fakeVerbs) TakeBackOneShot(_ context.Context, ws ids.WorkspaceID, by workspace.OneShotTakeBack) error {
 	f.api.takeBacks = append(f.api.takeBacks, fakeTakeBack{ws: ws, by: by, submitsBefore: f.promptsHandedOn()})
-	return workspace.PendingPlacement{}, f.api.takeBackErr
-}
-
-func (f *fakeVerbs) SubmitPlacement(context.Context, workspace.PendingPlacement) error {
-	f.api.placementsQueued = append(f.api.placementsQueued, f.promptsHandedOn())
-	return f.api.placementErr
+	return f.api.takeBackErr
 }
 
 // promptsHandedOn is how many prompts the wired fake prompts had handed on,
@@ -2424,8 +2414,8 @@ func (v *fakeVerbs) MoveRepository(_ context.Context, id ids.RepoID, before *ids
 	return v.arrange("MoveRepository " + string(id) + " " + ids.Optional(before))
 }
 
-func (v *fakeVerbs) PlaceWorkspaces(_ context.Context, ws []ids.WorkspaceID, into *ids.SubsectionID, at wsm.Anchor, marks wsm.OneShotMarks) error {
-	return v.arrange(fmt.Sprintf("PlaceWorkspaces %v %s %s %s", ws, ids.Optional(into), wsm.AnchorField(at), marks))
+func (v *fakeVerbs) PlaceWorkspaces(_ context.Context, ws []ids.WorkspaceID, into *ids.SubsectionID, at wsm.Anchor) error {
+	return v.arrange(fmt.Sprintf("PlaceWorkspaces %v %s %s", ws, ids.Optional(into), wsm.AnchorField(at)))
 }
 
 func (v *fakeVerbs) SidebarArrangement(context.Context) ([]sidebar.ArrangedRepository, error) {

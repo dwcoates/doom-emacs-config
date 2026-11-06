@@ -45,29 +45,19 @@ message ArrangedRepository {
   repeated ArrangedEntry entries = 5;
 }
 
-// One entry of a repository's arrangement: a family in no subsection, a
-// subsection, or the repository's one-shot subsection.
+// One entry of a repository's arrangement: a family in no subsection, or a
+// subsection.
 message ArrangedEntry {
+  // `one_shot` (field 3) is RETIRED and reserved with ArrangedOneShot (owner
+  // request, 2026-11-03): one-shots file themselves into subsections like any
+  // other workspace, so a marked family is listed where it is arranged.
+  reserved 3;
+  reserved "one_shot";
   // THE ARM IS WHAT STANDS AT THIS POINT OF THE REPOSITORY. Never unset.
   oneof entry {
     ArrangedWorkspace workspace = 1;
     ArrangedSubsection subsection = 2;
-    ArrangedOneShot one_shot = 3;
   }
-}
-
-// The repository's ONE-SHOT subsection (frontend.v1.RosterSubsectionOneShot):
-// every family holding an open workspace marked one-shot, except the
-// repository's MAIN workspace's family, whose one-shot children stay nested
-// under it where it stands. It is derived from
-// the marks, so it is listed only while it has families, and always as the
-// repository's last entry. It has no SubsectionRef, so ArrangeSidebar can
-// neither name it as a destination or anchor nor rename, move or delete it.
-// A family enters it when a member is marked (SetWorkspaceOneShot) and leaves
-// it when its marks are cleared, which placing the family anywhere does.
-message ArrangedOneShot {
-  // The families, root by root in drawn order.
-  repeated ArrangedWorkspace workspaces = 1;
 }
 
 // One subsection: its name and its families.

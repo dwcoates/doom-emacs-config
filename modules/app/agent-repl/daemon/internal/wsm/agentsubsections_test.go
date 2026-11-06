@@ -97,7 +97,7 @@ func TestAnAgentSubsectionGoesWithItsLastOpenConstituent(t *testing.T) {
 			closeWorkspace(t, s, b.ID)
 		}},
 		{name: "its members are placed elsewhere", empty: func(t *testing.T, s *store, a, b Workspace) {
-			if err := s.PlaceWorkspaces(context.Background(), []WorkspaceID{a.ID, b.ID}, nil, AtEnd{}, ClearOneShotMarks); err != nil {
+			if err := s.PlaceWorkspaces(context.Background(), []WorkspaceID{a.ID, b.ID}, nil, AtEnd{}); err != nil {
 				t.Fatalf("PlaceWorkspaces: %v", err)
 			}
 		}},

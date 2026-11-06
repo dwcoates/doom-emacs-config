@@ -406,12 +406,12 @@ export enum PromptOrigin {
 
   /**
    * The daemon's brief asking a workspace that just LEFT its one-shot state
-   * (its mark cleared through agentrepl.v1.SetWorkspaceOneShot: by its own
-   * agent, its owner, or the user taking it back) to file itself into its
-   * repository's sidebar subsections, as a new workspace is asked to in its
-   * first message. Submitted as a deferred prompt, so it waits behind a
-   * running turn and wakes an idle agent, and drawn as NO row: it is the
-   * daemon's word to the agent, as a workspace notice is.
+   * to file itself into its repository's sidebar subsections. Drawn as NO
+   * row: it is the daemon's word to the agent, as a workspace notice is.
+   * THE DAEMON NO LONGER SENDS IT (owner request, 2026-11-03): a one-shot
+   * files itself like any other workspace and an unmark moves nothing, so
+   * there is nothing left to file. The value stays so the prompt rows already
+   * stored with it still decode and still draw as no row.
    *
    * @generated from enum value: PROMPT_ORIGIN_SUBSECTION_PLACEMENT = 44;
    */

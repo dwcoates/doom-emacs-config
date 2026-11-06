@@ -211,8 +211,7 @@ DECISIONS AND WHY ALTERNATIVES LOST.
   and re-decided by `wsm/parent.go` `writeTarget`), and the daemon's
   `wsm.Workspace.OwnerLands` is that column AND NOT one-shot, computed where
   the row is decoded. Every write of the one-shot mark (SetWorkspaceOneShot,
-  the sidebar's drag out of the One-shot subsection, a take-back, a one-shot
-  merge) therefore moves who lands the workspace with no second write to keep
+  a take-back, a one-shot merge) therefore moves who lands the workspace with no second write to keep
   in step. Alternatives lost: writing `owner_lands` at every one-shot write
   site (four sites, any new one silently drifting), and storing the effective
   value only at create (a fresh child marked later would stay owner-landed,

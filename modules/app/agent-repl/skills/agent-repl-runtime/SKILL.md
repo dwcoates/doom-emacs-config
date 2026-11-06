@@ -170,8 +170,8 @@ through `run.sh --call` (a typed `agent-repld` verb comes once they land on mast
   noSubsection|subsection, before|beforeSubsection|end}` (`beforeSubsection`
   only into `noSubsection`; `end` into `noSubsection` is the bottom of the
   repository), or the all-or-nothing `placeWorkspaces {workspaces: [...],
-  ...}`, which keeps the given order. A placement clears the placed families'
-  one-shot marks unless it sets `keepOneShot: true`.
+  ...}`, which keeps the given order. A placement never touches a one-shot
+  mark.
 - `createAgentSubsection {createdBy, name, workspaces: [...]}` creates a
   subsection as a workspace's agent, with its workspaces, in one change; the
   daemon removes it once none of its workspaces is open.

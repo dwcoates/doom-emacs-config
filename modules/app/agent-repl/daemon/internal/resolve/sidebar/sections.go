@@ -62,10 +62,6 @@ func (r *resolver) repositoryView(rc rowContext, log dlog.Logger) *frontendv1.Ro
 			rows := r.openRows(region.rows, region.folded(placed.repo), numbers, rc, regionLog)
 			regionCount := len(rosterwalk.FlattenOpen(rows.GetRows()))
 			count += regionCount
-			if region.oneShot {
-				section.Entries = append(section.Entries, oneShotEntry(rows, regionCount))
-				continue
-			}
 			if region.subsection == nil {
 				section.Entries = append(section.Entries, rosterwalk.RowEntries(rows.GetRows())...)
 				continue
@@ -358,25 +354,6 @@ func (r *resolver) repositoryDivider(ws wsm.Workspace, log dlog.Logger) *fronten
 	log.Error("daemon.sidebar.repository_divider", "a nested workspace names a repository the registry does not carry",
 		dlog.Context{"workspace_id": string(ws.ID), "repo_id": string(ws.Repo), "invariant_violation": "workspace.Repo names no registered repository"})
 	panic(fmt.Sprintf("sidebar: workspace %s names repository %s, which the registry does not carry", ws.ID, ws.Repo))
-}
-
-// OneShotSubsectionTitle is the one-shot subsection's header label.
-const OneShotSubsectionTitle = "one-shot"
-
-// oneShotEntry is a repository's one-shot subsection
-// (frontend.v1.RosterSubsectionOneShot) holding ROWS, COUNT of them shown. It
-// is always expanded and never collapses, so its fold names that and nothing
-// the user set.
-func oneShotEntry(rows *frontendv1.RosterOpenRows, count int) *frontendv1.RosterRepoEntry {
-	sub := &frontendv1.RosterSubsection{
-		Kind:     &frontendv1.RosterSubsection_OneShot{OneShot: &frontendv1.RosterSubsectionOneShot{}},
-		Header:   sectionHeader(OneShotSubsectionTitle, count),
-		OpenRows: rows,
-		Fold: &frontendv1.RosterSubsection_Expanded{Expanded: &frontendv1.RosterSubsectionExpanded{
-			Collapse: &frontendv1.RosterSubsectionExpanded_NeverCollapses{NeverCollapses: &frontendv1.RosterSubsectionNeverCollapses{}},
-		}},
-	}
-	return &frontendv1.RosterRepoEntry{Entry: &frontendv1.RosterRepoEntry_Subsection{Subsection: sub}}
 }
 
 // repoKey is a repository's join key, as its section and its merged group

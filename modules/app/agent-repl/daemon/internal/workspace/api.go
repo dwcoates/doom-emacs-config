@@ -409,10 +409,7 @@ type Verbs interface {
 	SetOneShot(ctx context.Context, ws ids.WorkspaceID, asker *ids.WorkspaceID, oneShot bool) (string, error)
 	// TakeBackOneShot clears a marked workspace's one-shot mark because the
 	// user took it back, as BY says (standings.go).
-	TakeBackOneShot(ctx context.Context, ws ids.WorkspaceID, by OneShotTakeBack) (PendingPlacement, error)
-	// SubmitPlacement queues the placement brief a take-back owes to its
-	// workspace's own session, once the prompt that took it back is queued.
-	SubmitPlacement(ctx context.Context, placement PendingPlacement) error
+	TakeBackOneShot(ctx context.Context, ws ids.WorkspaceID, by OneShotTakeBack) error
 	// SetCorrespondence marks a workspace awaiting another, or clears the mark
 	// with nil, as the asker (nil for the user) asks (standings.go).
 	SetCorrespondence(ctx context.Context, ws ids.WorkspaceID, asker *ids.WorkspaceID, awaited *ids.WorkspaceID) error
@@ -561,7 +558,7 @@ type Verbs interface {
 	// subsection of their repository (nil: none) as one block at an anchor
 	// (before a root there, before a subsection when into none, or last), and
 	// republishes the roster.
-	PlaceWorkspaces(ctx context.Context, ws []ids.WorkspaceID, into *ids.SubsectionID, at wsm.Anchor, marks wsm.OneShotMarks) error
+	PlaceWorkspaces(ctx context.Context, ws []ids.WorkspaceID, into *ids.SubsectionID, at wsm.Anchor) error
 	// SidebarArrangement reads the repository grouping's arrangement, for an
 	// agent organizing it (GetSidebarArrangement).
 	SidebarArrangement(ctx context.Context) ([]sidebar.ArrangedRepository, error)
