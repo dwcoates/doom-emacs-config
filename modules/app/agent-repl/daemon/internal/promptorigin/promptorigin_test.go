@@ -15,10 +15,12 @@ import (
 // unseenOrigins are the notices the contract says no row is drawn for: the
 // daemon's word to an agent, which the user neither said nor needs to read.
 var unseenOrigins = map[conversationv1.PromptOrigin]bool{
-	conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_QUEUE_NOTICE:       true,
-	conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_NOTICE:         true,
-	conversationv1.PromptOrigin_PROMPT_ORIGIN_DERIVED_WORKSPACE_NOTICE: true,
-	conversationv1.PromptOrigin_PROMPT_ORIGIN_SUBSECTION_PLACEMENT:     true,
+	conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_QUEUE_NOTICE:        true,
+	conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_NOTICE:          true,
+	conversationv1.PromptOrigin_PROMPT_ORIGIN_DERIVED_WORKSPACE_NOTICE:  true,
+	conversationv1.PromptOrigin_PROMPT_ORIGIN_PULL_REQUEST_NOTICE:       true,
+	conversationv1.PromptOrigin_PROMPT_ORIGIN_GITHUB_MERGE_QUEUE_NOTICE: true,
+	conversationv1.PromptOrigin_PROMPT_ORIGIN_SUBSECTION_PLACEMENT:      true,
 }
 
 func TestOnlyTheAgentNoticesAreUnseen(t *testing.T) {

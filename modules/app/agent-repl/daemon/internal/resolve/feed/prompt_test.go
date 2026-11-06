@@ -138,6 +138,29 @@ func TestTheAuthorLabelOfAMergeQueueNoticeIsTheMergeQueue(t *testing.T) {
 	}
 }
 
+// A GitHub notice draws no row, and its author is still never the user, for
+// any reader that asks.
+func TestTheAuthorLabelOfAGitHubNoticeIsItsSubject(t *testing.T) {
+	tests := []struct {
+		origin conversationv1.PromptOrigin
+		want   string
+	}{
+		{conversationv1.PromptOrigin_PROMPT_ORIGIN_PULL_REQUEST_NOTICE, "Pull request"},
+		{conversationv1.PromptOrigin_PROMPT_ORIGIN_GITHUB_MERGE_QUEUE_NOTICE, "GitHub merge queue"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.origin.String(), func(t *testing.T) {
+			// Act.
+			got := AuthorLabel(tt.origin)
+
+			// Assert.
+			if got != tt.want {
+				t.Fatalf("author = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 // The merge-revert brief is the daemon's, drawn under its own author.
 func TestTheAuthorLabelOfAMergeRevertBriefIsMergeRevert(t *testing.T) {
 	// Arrange, Act.
