@@ -15381,6 +15381,141 @@ describe("RollBackSession", () => {
     expect(h.queries.map((created) => created.spec.resumeSessionAt ?? "plain")).toEqual(["plain", "a1", "a0", "a1"]);
   });
 
+  describe("a prompt the vendor dropped unrecorded", () => {
+    /** The interrupt marker a stop leaves when the vendor dropped `turn`'s prompt unrecorded. */
+    const droppingMarker = (uuid: string, parent: string, turn: string): Record<string, unknown> => ({
+      type: "user",
+      uuid,
+      parentUuid: parent,
+      message: { role: "user", content: [{ type: "text", text: "[Request interrupted by user]" }] },
+      droppedPromptUuids: [promptVendorUuid(turn)],
+    });
+
+    /** Three answered turns, then turn-3's prompt dropped by a stop. */
+    const droppedTurn3 = (): Record<string, unknown>[] => [...threeTurns(), droppingMarker("m3", "a2", "turn-3")];
+
+    /**
+     * A started session whose transcript holds three answered turns while
+     * turn-3 runs, its prompt delivered and not yet recorded; the rollback of
+     * turn-3 is under way and has interrupted the vendor, which then writes
+     * `afterStop` and answers the stop.
+     */
+    async function rollingBackUnrecorded(afterStop: Record<string, unknown>[]): Promise<{
+      h: Harness;
+      response: shimv1.RollBackSessionResponse;
+      from: number;
+    }> {
+      const h = await withTranscript(threeTurns());
+      await realPrompt(h, "turn-3");
+      const before = h.queries[0]?.query;
+      if (before === undefined) throw new Error("no query");
+      const from = logSinkMark();
+      const pending = settleRollBack(h, rollBack("turn-3", ["turn-3"]));
+      await settledUntil(() => before.calls.includes("interrupt"));
+      writeTranscript(h.configDir, h.cwd, freshSessionId((await untilQuery(h, 0)).spec), afterStop);
+      await h.engine.onSdkMessage(answering(h, errorResultMessage({ errors: ["Interrupted by user"] })));
+      return { h, response: await pending, from };
+    }
+
+    it("resumes at the parent of the marker that names it", async () => {
+      // Arrange
+      const h = await withTranscript(droppedTurn3());
+
+      // Act
+      const response = await settleRollBack(h, rollBack("turn-3", ["turn-3"]));
+
+      // Assert
+      expect({ outcome: outcome(response), spec: h.queries[1]?.spec.resumeSessionAt }).toEqual({ outcome: "success", spec: "a2" });
+    });
+
+    it("leaves the vendor's guard unarmed, since no record names the turn", async () => {
+      // Arrange
+      const h = await withTranscript(droppedTurn3());
+
+      // Act
+      await settleRollBack(h, rollBack("turn-3", ["turn-3"]));
+
+      // Assert
+      expect(h.queries[1]?.spec).not.toHaveProperty("resumeDropsTurn");
+    });
+
+    it("records why the vendor's guard was left unarmed", async () => {
+      // Arrange
+      const h = await withTranscript(droppedTurn3());
+      const from = logSinkMark();
+
+      // Act
+      await settleRollBack(h, rollBack("turn-3", ["turn-3"]));
+
+      // Assert
+      expect(logContextFor(from, "the vendor dropped the prompt unrecorded, so no record names the turn")).toMatchObject({
+        guard: "prompt_dropped",
+        prompt_place: "dropped",
+      });
+    });
+
+    it("restores no files and asks the vendor for no rewind when nothing follows the marker", async () => {
+      // Arrange
+      const h = await withTranscript(droppedTurn3());
+      const before = h.queries[0]?.query;
+      if (before === undefined) throw new Error("no query");
+
+      // Act
+      const response = await settleRollBack(h, rollBack("turn-3", ["turn-3"], "restore"));
+
+      // Assert
+      expect({
+        outcome: outcome(response),
+        restored: response.result.case === "success" ? response.result.value.filesRestored?.paths : undefined,
+        rewound: before.calls.filter((call) => call.startsWith("rewindFiles")),
+      }).toEqual({ outcome: "success", restored: [], rewound: [] });
+    });
+
+    it("plans the open turn's unrecorded prompt after stopping the vendor, and resumes before it", async () => {
+      // Arrange, Act
+      const { h, response } = await rollingBackUnrecorded(droppedTurn3());
+
+      // Assert
+      expect({ outcome: outcome(response), spec: h.queries[1]?.spec.resumeSessionAt }).toEqual({ outcome: "success", spec: "a2" });
+    });
+
+    it("records that it stopped the vendor before planning the open turn's unrecorded prompt", async () => {
+      // Arrange, Act
+      const { from } = await rollingBackUnrecorded(droppedTurn3());
+
+      // Assert
+      expect(logContextFor(from, "stopping the vendor so the rollback is planned on its settled transcript")).toMatchObject({
+        to_before: "turn-3",
+        outcome: "prompt_not_recorded",
+      });
+    });
+
+    it("refuses prompt_not_recorded when the stopped vendor recorded the prompt nowhere", async () => {
+      // Arrange, Act
+      const { h, response } = await rollingBackUnrecorded(threeTurns());
+
+      // Assert
+      expect({ outcome: outcome(response), queries: h.queries.length }).toEqual({ outcome: "promptNotRecorded", queries: 1 });
+    });
+
+    it("does not stop a running turn to plan a prompt that is not the open turn's", async () => {
+      // Arrange
+      const h = await withTranscript(threeTurns());
+      await realPrompt(h, "turn-3");
+      const before = h.queries[0]?.query;
+      if (before === undefined) throw new Error("no query");
+
+      // Act
+      const response = await settleRollBack(h, rollBack("turn-9", ["turn-9", "turn-3"]));
+
+      // Assert
+      expect({ outcome: outcome(response), interrupted: before.calls.includes("interrupt") }).toEqual({
+        outcome: "promptNotRecorded",
+        interrupted: false,
+      });
+    });
+  });
+
   describe("a resume after a rollback (StartSessionResume.rolled_back_turns)", () => {
     /** Resume `resume-1`, whose transcript holds `lines`, naming `rolledBack`; answers the first query's spec. */
     async function resumed(lines: Record<string, unknown>[], rolledBack: readonly string[]): Promise<QuerySpec> {
