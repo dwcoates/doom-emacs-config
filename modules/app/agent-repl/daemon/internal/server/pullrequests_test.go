@@ -24,6 +24,10 @@ type fakePullRequests struct {
 	posted    prwatch.Posted
 	postErr   error
 	comments  []string
+	// queueAnchorErr fails AnchorQueue; anchoredQueues records each anchor's
+	// `owner/repo@branch` as asked.
+	queueAnchorErr error
+	anchoredQueues []string
 }
 
 func (f *fakePullRequests) Anchor(_ context.Context, ws ids.WorkspaceID, pr wsm.PullRequestKey, events wsm.PullRequestEvents, origin wsm.PullRequestOrigin) (wsm.PullRequestSubscription, *agentreplv1.PullRequestStatus, error) {
@@ -32,6 +36,18 @@ func (f *fakePullRequests) Anchor(_ context.Context, ws ids.WorkspaceID, pr wsm.
 		return sub, nil, f.anchorErr
 	}
 	return sub, &agentreplv1.PullRequestStatus{Title: "Fix it"}, nil
+}
+
+func (f *fakePullRequests) AnchorQueue(_ context.Context, ws ids.WorkspaceID, owner, repo, branch string) (wsm.GithubMergeQueueSubscription, *agentreplv1.GithubMergeQueueStatus, wsm.GithubMergeQueueKey, error) {
+	f.anchoredQueues = append(f.anchoredQueues, owner+"/"+repo+"@"+branch)
+	if branch == "" {
+		branch = "main"
+	}
+	key := wsm.GithubMergeQueueKey{Owner: owner, Repo: repo, Branch: branch}
+	if f.queueAnchorErr != nil {
+		return wsm.GithubMergeQueueSubscription{}, nil, key, f.queueAnchorErr
+	}
+	return wsm.GithubMergeQueueSubscription{Subscriber: ws, Queue: key, Told: "anchored"}, &agentreplv1.GithubMergeQueueStatus{Url: "queue-url"}, key, nil
 }
 
 func (f *fakePullRequests) Comment(_ context.Context, _ ids.WorkspaceID, _ wsm.PullRequestKey, inReplyTo *uint64, markdown string) (prwatch.Posted, error) {

@@ -24,6 +24,7 @@ import (
 type PullRequests interface {
 	Anchor(ctx context.Context, subscriber ids.WorkspaceID, pr wsm.PullRequestKey, events wsm.PullRequestEvents, origin wsm.PullRequestOrigin) (wsm.PullRequestSubscription, *agentreplv1.PullRequestStatus, error)
 	Comment(ctx context.Context, ws ids.WorkspaceID, pr wsm.PullRequestKey, inReplyTo *uint64, markdown string) (prwatch.Posted, error)
+	AnchorQueue(ctx context.Context, subscriber ids.WorkspaceID, owner, repo, branch string) (wsm.GithubMergeQueueSubscription, *agentreplv1.GithubMergeQueueStatus, wsm.GithubMergeQueueKey, error)
 }
 
 // opPullRequests is the operation every record of these rpcs carries.
