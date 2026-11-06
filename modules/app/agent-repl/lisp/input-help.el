@@ -125,6 +125,7 @@
                 (agent-repl-frontend-reload-webview "Reload the feed's page, after a rebuilt bundle.")
                 (agent-repl-frontend-rescue-webview "Bring a page that navigated away back to the feed."))
      :features ("The zoom changes the feed's text only, never Emacs's own font, and is saved by the daemon."
+                "A final response's question mark makes the next prompt a question about it, answered in a new child workspace; click it again to get your draft back."
                 "The bubble search keys work while a bubble is selected (Edit sent prompts)."))
     ;; ---- Workspaces ----
     (:id switching
