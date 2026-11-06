@@ -702,22 +702,29 @@ func lapseOf(stated *conversationv1.SessionCacheLapse) wsm.CacheLapse {
 	return lapse
 }
 
-// gateLapse is the lapse a standing cold gate states: the conversation went
-// cold when its cache's lifetime passed after the last request, or at the
-// last request itself when the gate is a model switch (a cache is per model,
-// so the requested model's never held it). A gate always asks, so the verdict
-// is gated at the context the resume re-reads; a gate raised over no context
-// is a broken shim.
+// gateLapse is the lapse a standing cold gate states, at GateLapsedAt. A gate
+// always asks, so the verdict is gated at the context the resume re-reads; a
+// gate raised over no context is a broken shim.
 func gateLapse(cold *conversationv1.SessionCold) wsm.CacheLapse {
 	tokens := cold.GetContextTokens()
 	if tokens == 0 {
 		panic("cachelapse: a cold gate stands over no context; the shim's cold gate asks only above its floor")
 	}
+	return wsm.CacheLapse{LapsesAt: GateLapsedAt(cold), GatedTokens: &tokens}
+}
+
+// GateLapsedAt is when the conversation behind a standing cold gate went
+// cold: when its cache's lifetime passed after the last request, or at the
+// last request itself when the gate is a model switch (a cache is per model,
+// so the requested model's never held it). It is THE ONE READING of a gate's
+// age: the hidden section's lapse (gateLapse) and the cold-gate backlog
+// (coldbacklog.Sweeper) both date the gate by it.
+func GateLapsedAt(cold *conversationv1.SessionCold) time.Time {
 	at := cold.GetLastRequestAtMs()
 	if lapsed := cold.GetLapsed(); lapsed != nil {
 		at += lapsed.GetCacheTtlMs()
 	}
-	return wsm.CacheLapse{LapsesAt: time.UnixMilli(at).UTC(), GatedTokens: &tokens}
+	return time.UnixMilli(at).UTC()
 }
 
 // sameLapse reports whether A and B record the same lapse.

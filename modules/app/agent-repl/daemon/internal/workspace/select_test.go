@@ -1559,3 +1559,109 @@ func TestSelectLeavesAParkedWorkspacesParkDrawn(t *testing.T) {
 		t.Fatalf("topbar park edges = %v, want the park left as it is", f.topbarParked)
 	}
 }
+
+var backlogGate = time.Unix(1_700_000_000, 0).UTC()
+
+func TestBacklogColdGateMovesAShownWorkspaceIntoTheBacklog(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+
+	// Act
+	err := f.verbs.BacklogColdGate(context.Background(), "w1", backlogGate)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("BacklogColdGate: %v", err)
+	}
+	got := f.db.workspaces["w1"]
+	if !got.Hidden || got.BackloggedGateAt == nil || !got.BackloggedGateAt.Equal(backlogGate) {
+		t.Fatalf("hidden = %v for gate %v, want hidden for %v", got.Hidden, got.BackloggedGateAt, backlogGate)
+	}
+	if len(f.sidebar.registries) != 1 {
+		t.Fatalf("roster republications = %d, want exactly one", len(f.sidebar.registries))
+	}
+	if !slices.Equal(f.visibilityEdges, []ids.WorkspaceID{"w1"}) {
+		t.Fatalf("visibility edges = %v, want the workspace", f.visibilityEdges)
+	}
+	if !loggedAt(f, dlog.LevelInfo, opBacklogColdGate) {
+		t.Fatal("the move was not recorded at info")
+	}
+}
+
+func TestBacklogColdGateLeavesAWorkspaceTheStoreDeclines(t *testing.T) {
+	// Arrange: the user is looking at it, which the store judges.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	current := f.db.workspaces["w1"]
+	current.Current = true
+	f.db.workspaces["w1"] = current
+
+	// Act
+	err := f.verbs.BacklogColdGate(context.Background(), "w1", backlogGate)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("BacklogColdGate: %v", err)
+	}
+	if f.db.workspaces["w1"].Hidden {
+		t.Fatal("the workspace the user is looking at was backlogged")
+	}
+	if len(f.sidebar.registries) != 0 || len(f.visibilityEdges) != 0 {
+		t.Fatalf("republications %d, edges %v; want none for a declined move", len(f.sidebar.registries), f.visibilityEdges)
+	}
+}
+
+func TestBacklogColdGateAnswersAFamilyRefusalAsNoMove(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.db.backlogErr = errOpenChildren
+
+	// Act
+	err := f.verbs.BacklogColdGate(context.Background(), "w1", backlogGate)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("BacklogColdGate = %v, want nil: a parent with open children stays shown", err)
+	}
+	if !loggedAt(f, dlog.LevelDebug, opBacklogColdGate) || loggedAtError(f, opBacklogColdGate) {
+		t.Fatalf("the refusal was not recorded at debug alone: %v", f.log.logger.Records())
+	}
+	if len(f.sidebar.registries) != 0 || len(f.visibilityEdges) != 0 {
+		t.Fatalf("republications %d, edges %v; want none for a refused move", len(f.sidebar.registries), f.visibilityEdges)
+	}
+}
+
+func TestBacklogColdGateSurfacesAFailedWriteAtError(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.db.backlogErr = errors.New("disk I/O error")
+
+	// Act
+	err := f.verbs.BacklogColdGate(context.Background(), "w1", backlogGate)
+
+	// Assert
+	if err == nil {
+		t.Fatal("a failed backlog write was answered as success")
+	}
+	if !loggedAtError(f, opBacklogColdGate) {
+		t.Fatal("the failed write was not recorded at error")
+	}
+	if len(f.sidebar.registries) != 0 || len(f.visibilityEdges) != 0 {
+		t.Fatalf("republications %d, edges %v; want none for a failed write", len(f.sidebar.registries), f.visibilityEdges)
+	}
+}
+
+// TestEveryHiddenSectionMoveEndsInHiddenRecorded fails when a move into or
+// out of the hidden section republishes or raises the keeper's edge by hand.
+func TestEveryHiddenSectionMoveEndsInHiddenRecorded(t *testing.T) {
+	// Act
+	sites := sourcescan.Sites(t, "v.hiddenRecorded(ctx, log, ws, ")
+
+	// Assert
+	if !slices.Equal(sites, []string{"select.go", "select.go"}) {
+		t.Fatalf("hiddenRecorded is called at %v, want recordHidden and BacklogColdGate in select.go", sites)
+	}
+}

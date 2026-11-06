@@ -3,6 +3,7 @@ package cachelapse
 import (
 	"context"
 	"errors"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -863,6 +864,42 @@ func TestGateLapseIsWhenTheConversationWentCold(t *testing.T) {
 				t.Fatalf("gateLapse = %+v, want lapsing at %v gated at 139359", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestGateLapsedAt(t *testing.T) {
+	tests := []struct {
+		name string
+		cold *conversationv1.SessionCold
+		want time.Time
+	}{
+		{name: "a lapsed cache went cold a lifetime after the last request", cold: coldLapsed(), want: now.Add(-time.Hour)},
+		{name: "a model switch went cold at the last request", cold: coldModelSwitch(), want: now.Add(-2 * time.Hour)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := GateLapsedAt(tt.cold)
+
+			// Assert
+			if !got.Equal(tt.want) || got.Location() != time.UTC {
+				t.Fatalf("GateLapsedAt = %v, want %v in UTC", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAGateIsDatedOnlyByGateLapsedAt(t *testing.T) {
+	// Arrange: a cache lifetime ADDED to an instant is a gate being dated; naming the
+	// lifetime's tier (telemetry's coldGateOutcome) dates nothing.
+	dating := regexp.MustCompile(`(\+=|\.Add\().*GetCacheTtlMs\(\)`)
+
+	// Act
+	sites := sourcescan.SitesMatching(t, dating)
+
+	// Assert
+	if len(sites) != 1 || sites[0] != "keeper.go" {
+		t.Fatalf("a gate is dated by its cache lifetime at %v, want only GateLapsedAt in keeper.go", sites)
 	}
 }
 

@@ -131,6 +131,11 @@ type Workspace struct {
 	// HiddenAt is when the user moved the workspace into the hidden section,
 	// set exactly while Hidden is (SetHidden).
 	HiddenAt *time.Time
+	// BackloggedGateAt is the lapse instant of the cold gate the daemon last
+	// moved the workspace into the backlog for (BacklogColdGate); nil when it
+	// never has. A workspace is backlogged at most once per gate, so one the
+	// user shows again stays shown.
+	BackloggedGateAt *time.Time
 	// CacheLapse is a HIDDEN workspace's projected cache lapse, as its shim
 	// last stated it (SetCacheLapse); nil when none is known. Never set on a
 	// workspace that is not hidden.

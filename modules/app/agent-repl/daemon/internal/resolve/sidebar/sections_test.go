@@ -860,7 +860,7 @@ func TestRepoDivergenceRefusesAMissingMeasure(t *testing.T) {
 	r.SetRepoDivergence(repo.ID, nil)
 }
 
-func TestTheHiddenSectionIsLabelledHidden(t *testing.T) {
+func TestTheHiddenSectionIsLabelledBacklog(t *testing.T) {
 	// Arrange.
 	r, _ := newResolver(t)
 
@@ -868,8 +868,8 @@ func TestTheHiddenSectionIsLabelledHidden(t *testing.T) {
 	r.SetRegistry(registry(hiddenWorkspace("w-hidden", "hidden")))
 
 	// Assert.
-	if got := latest(t, r).GetHidden().GetHeader().GetLabel().GetText(); got != "Hidden" {
-		t.Fatalf("hidden label = %q, want %q", got, "Hidden")
+	if got := latest(t, r).GetHidden().GetHeader().GetLabel().GetText(); got != "Backlog" {
+		t.Fatalf("hidden label = %q, want %q", got, "Backlog")
 	}
 }
 

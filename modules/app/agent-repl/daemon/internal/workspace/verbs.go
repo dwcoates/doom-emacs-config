@@ -38,6 +38,7 @@ const (
 	opChangeLinks          = "daemon.workspace.change_links"
 	opSetName              = "daemon.workspace.set_name"
 	opSetHidden            = "daemon.workspace.set_hidden"
+	opBacklogColdGate      = "daemon.workspace.backlog_cold_gate"
 	opRevealMergeWorkspace = "daemon.workspace.reveal_merge_workspace"
 	opSwap                 = "daemon.workspace.swap"
 	opMove                 = "daemon.workspace.move"

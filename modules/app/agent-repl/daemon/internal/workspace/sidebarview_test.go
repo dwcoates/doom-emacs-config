@@ -12,12 +12,13 @@ import (
 // loggedAtError reports whether the fixture's log carries an ERROR record
 // under operation.
 func loggedAtError(f *fixture, operation string) bool {
-	for _, r := range f.log.logger.Records() {
-		if r.Level == dlog.LevelError && r.Operation == operation {
-			return true
-		}
-	}
-	return false
+	return loggedAt(f, dlog.LevelError, operation)
+}
+
+// loggedAt reports whether OPERATION was recorded at LEVEL.
+func loggedAt(f *fixture, level, operation string) bool {
+	_, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: level, Operation: operation})
+	return ok
 }
 
 func TestFoldMergedSectionRecordsTheFoldAndRepublishesTheRoster(t *testing.T) {

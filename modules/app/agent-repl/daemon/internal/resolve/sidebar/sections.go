@@ -24,8 +24,9 @@ const MergedSectionLabel = "Recently Merged"
 // request, 2026-11-01).
 const MergeQueueSectionLabel = "Merge Queue"
 
-// HiddenSectionLabel is the hidden-workspaces section's heading.
-const HiddenSectionLabel = "Hidden"
+// HiddenSectionLabel is the hidden-workspaces section's heading. The section
+// is drawn as the BACKLOG (owner request, 2026-10-26).
+const HiddenSectionLabel = "Backlog"
 
 // OpenSectionLabel is the open-workspaces section's heading.
 const OpenSectionLabel = "Open"

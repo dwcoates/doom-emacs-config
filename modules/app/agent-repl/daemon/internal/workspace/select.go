@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"time"
 
 	"agent-repld/internal/ctxend"
 	"agent-repld/internal/dlog"
@@ -264,10 +265,51 @@ func (v *verbs) recordHidden(ctx context.Context, log dlog.Logger, ws ids.Worksp
 		return fmt.Errorf("set hidden on %q: %w", ws, err)
 	}
 	log.Info(opSetHidden, "recorded whether the workspace is hidden", dlog.Context{"hidden": hidden})
-	v.republishRegistry(ctx, log, opSetHidden)
+	v.hiddenRecorded(ctx, log, ws, opSetHidden)
+	return nil
+}
+
+// hiddenRecorded is what follows every recorded move into or out of the
+// hidden section (recordHidden, BacklogColdGate): the roster push and the
+// cache keeper's visibility edge.
+func (v *verbs) hiddenRecorded(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, op string) {
+	v.republishRegistry(ctx, log, op)
 	// THE ROW IS WRITTEN BEFORE THE EDGE IS QUEUED, which is what lets the
 	// keeper's reconcile catch a hide that races a session coming up.
 	v.deps.CacheLapses.VisibilityChanged(ws)
+}
+
+// BacklogColdGate moves a shown workspace whose cold gate has stood too long
+// into the hidden section, drawn as the Backlog (owner request, 2026-10-26;
+// coldbacklog.Sweeper), once for the gate whose cache lapsed at GATELAPSEDAT.
+// It is a hide in every other respect: the roster drops its tab, and the cache
+// keeper takes the gate's lapse and stands the parked session down.
+//
+// THE STORE JUDGES IN THE SAME TRANSACTION AS IT WRITES (wsm.BacklogColdGate),
+// so a workspace the user selected, hid or closed meanwhile is left as it is.
+// A workspace with open children stays where it is, as a hide would; that is
+// an answer, not a failure, so it answers nil.
+func (v *verbs) BacklogColdGate(ctx context.Context, ws ids.WorkspaceID, gateLapsedAt time.Time) error {
+	_, log, err := v.owned(ctx, "BacklogColdGate", ws)
+	if err != nil {
+		return err
+	}
+	log = log.With(dlog.Context{"gate_lapsed_at": gateLapsedAt})
+	moved, err := v.deps.DB.BacklogColdGate(ctx, ws, gateLapsedAt, v.now())
+	if err != nil {
+		if wsm.IsFamilyRefusal(err) {
+			log.Debug(opBacklogColdGate, "the workspace has open children, so it stays shown as a hide would", dlog.Context{"cause": err.Error()})
+			return nil
+		}
+		log.Error(opBacklogColdGate, "could not move the workspace into the backlog", dlog.Context{"cause": err.Error()})
+		return fmt.Errorf("backlog %q: %w", ws, err)
+	}
+	if !moved {
+		log.Debug(opBacklogColdGate, "the workspace was selected, hidden, closed or already backlogged for this gate; it is left as it is", nil)
+		return nil
+	}
+	log.Info(opBacklogColdGate, "moved the workspace into the backlog: its cold gate stood for over a weekday", nil)
+	v.hiddenRecorded(ctx, log, ws, opBacklogColdGate)
 	return nil
 }
 

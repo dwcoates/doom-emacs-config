@@ -842,6 +842,26 @@ func (f *Fleet) EndColdGate(ws ids.WorkspaceID, vendorSessionID string) {
 func (f *Fleet) StandingColdGate(ws ids.WorkspaceID) (*conversationv1.SessionCold, bool) {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
+	return f.standingColdGateLocked(ws)
+}
+
+// StandingColdGates answers the cold facts of EVERY standing cold gate, by
+// workspace, as StandingColdGate answers each (coldbacklog.Sweeper dates them).
+func (f *Fleet) StandingColdGates() map[ids.WorkspaceID]*conversationv1.SessionCold {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	standing := make(map[ids.WorkspaceID]*conversationv1.SessionCold, len(f.coldGates))
+	for ws := range f.coldGates {
+		if cold, ok := f.standingColdGateLocked(ws); ok {
+			standing[ws] = cold
+		}
+	}
+	return standing
+}
+
+// standingColdGateLocked is StandingColdGate under the fleet's lock, which
+// the caller holds.
+func (f *Fleet) standingColdGateLocked(ws ids.WorkspaceID) (*conversationv1.SessionCold, bool) {
 	held, ok := f.coldGates[ws]
 	if !ok || held.answering {
 		return nil, false

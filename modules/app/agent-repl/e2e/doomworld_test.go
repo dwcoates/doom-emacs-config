@@ -309,7 +309,7 @@ func rosterJSON(repoDir string, rows []map[string]any, current string) json.RawM
 			"openCount": map[string]any{"workspaces": len(rows)},
 		},
 		"open":           map[string]any{"label": map[string]any{"text": "Open"}, "expanded": map[string]any{}},
-		"hidden":         map[string]any{"header": map[string]any{"label": map[string]any{"text": "Hidden"}, "count": map[string]any{"workspaces": 0}}, "hiddenRows": map[string]any{"rows": []any{}}, "expanded": map[string]any{}},
+		"hidden":         map[string]any{"header": map[string]any{"label": map[string]any{"text": "Backlog"}, "count": map[string]any{"workspaces": 0}}, "hiddenRows": map[string]any{"rows": []any{}}, "expanded": map[string]any{}},
 		"recentlyMerged": map[string]any{"header": map[string]any{"label": map[string]any{"text": "Recently Merged"}}, "groups": []any{}, "collapsed": map[string]any{}},
 		"mergeQueue":     map[string]any{"header": map[string]any{"label": map[string]any{"text": "Merge Queue"}}, "groups": []any{}, "expanded": map[string]any{}},
 		"closed":         map[string]any{"rows": []any{}},

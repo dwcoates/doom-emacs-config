@@ -25,6 +25,7 @@ import (
 	"agent-repld/internal/classifier"
 	"agent-repld/internal/classifierupdate"
 	"agent-repld/internal/clock"
+	"agent-repld/internal/coldbacklog"
 	"agent-repld/internal/commandcatalog"
 	"agent-repld/internal/cpugov"
 	"agent-repld/internal/creategate"
@@ -1513,6 +1514,20 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	if err != nil {
 		return nil, fmt.Errorf("agent-repld: build the prompt handler: %w", err)
 	}
+	// THE COLD-GATE BACKLOG (owner request, 2026-10-26): a shown workspace
+	// whose cold gate has stood over a day of weekday time is moved into the
+	// hidden section, drawn as the Backlog, once per gate.
+	coldBacklog, err := coldbacklog.New(coldbacklog.Deps{
+		DB:       p.DB,
+		Gates:    fleet.StandingColdGates,
+		Backlog:  verbs.BacklogColdGate,
+		Clock:    clock.System{},
+		Location: time.Local,
+		Log:      p.Surfaces,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("agent-repld: build the cold-gate backlog: %w", err)
+	}
 	detached := mergeworkspace.New(mergeworkspace.Deps{
 		DB:         p.DB,
 		Workspaces: verbs,
@@ -1740,6 +1755,9 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		}},
 		{Name: "branch_commits", Run: commitRecounter.Run},
 		{Name: "cache_lapse", Run: cacheKeeper.Run},
+		{Name: "cold_gate_backlog", Run: func(ctx context.Context) error {
+			return coldBacklog.Run(ctx, coldbacklog.DefaultEvery)
+		}},
 		{Name: "news_digest", Run: digest.Run},
 		{Name: "chess_boards", Run: func(ctx context.Context) error {
 			chessBoards.Run(ctx, feedResolver.RefreshChessBoards)

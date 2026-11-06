@@ -14,6 +14,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -72,9 +73,25 @@ func Count(t testing.TB, substr string) int {
 // not.
 func Sites(t testing.TB, substr string) []string {
 	t.Helper()
+	return sitesBy(t, func(source []byte) int { return strings.Count(string(source), substr) })
+}
+
+// SitesMatching is Sites for a pattern: the production file of each match of
+// re, once per match and in file order. It is for a one-home rule whose
+// shape is not one literal string (an instant a lifetime is ADDED to, say,
+// rather than every read of the lifetime).
+func SitesMatching(t testing.TB, re *regexp.Regexp) []string {
+	t.Helper()
+	return sitesBy(t, func(source []byte) int { return len(re.FindAllIndex(source, -1)) })
+}
+
+// sitesBy is the one sites list Sites and SitesMatching share: each production
+// file named once per occurrence COUNT finds in it, in file order.
+func sitesBy(t testing.TB, count func(source []byte) int) []string {
+	t.Helper()
 	var sites []string
 	for _, f := range Production(t) {
-		for range strings.Count(string(f.Source), substr) {
+		for range count(f.Source) {
 			sites = append(sites, f.Name)
 		}
 	}
