@@ -283,3 +283,27 @@ func TestAGraphQLCallThatFailsIsTypedAndRecorded(t *testing.T) {
 		})
 	}
 }
+
+func TestAGraphQLErrorIsTheFailureItsTypeNames(t *testing.T) {
+	tests := []struct {
+		typ  string
+		want Kind
+	}{
+		{typ: "NOT_FOUND", want: KindNotFound},
+		{typ: "RATE_LIMITED", want: KindRateLimited},
+		{typ: "FORBIDDEN", want: KindRefused},
+		{typ: "", want: KindRefused},
+	}
+	for _, tt := range tests {
+		t.Run(tt.typ, func(t *testing.T) {
+			// Act
+			got := GraphQLError{Type: tt.typ, Message: "m", Path: []string{"repository"}}.Failure()
+
+			// Assert
+			want := Failure{Kind: tt.want, Method: "POST", Path: "graphql", Status: 200, Message: "m"}
+			if !reflect.DeepEqual(*got, want) {
+				t.Fatalf("Failure = %+v, want %+v", *got, want)
+			}
+		})
+	}
+}

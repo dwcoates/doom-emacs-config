@@ -147,6 +147,12 @@ func (e GraphQLError) Kind() Kind {
 	return KindRefused
 }
 
+// Failure is the error as the typed failure every caller judges: a field
+// GitHub nulled is that field's failure to be read.
+func (e GraphQLError) Failure() *Failure {
+	return &Failure{Kind: e.Kind(), Method: http.MethodPost, Path: graphqlPath, Status: http.StatusOK, Message: e.Message}
+}
+
 // graphqlPath is the one path every GraphQL call posts to.
 const graphqlPath = "graphql"
 
