@@ -138,6 +138,15 @@ message WatchHostWorkspaceResponse {
     // An event, never replayed to a late subscriber: a click belongs to the
     // moment it was made.
     OpenInEditorTerminalCommand run_in_terminal = 19;
+    // THE WORKSPACE'S QUESTION ABOUT A FINAL RESPONSE CHANGED
+    // (AskAboutResponse, or a prompt that took the question): Emacs sets the
+    // composer's draft aside when a question begins, puts it back when the
+    // question is withdrawn, and lets it go when a sent prompt took the
+    // question. An event, not state: never replayed to a late subscriber,
+    // because each arm asks for an edit of the composer made at that moment,
+    // and replaying one would repeat the edit; the daemon's own question is
+    // what a sent prompt reads.
+    HostWorkspaceResponseQuestion response_question = 20;
   }
   // Retired: desktop notifications are posted by the daemon and never cross
   // this stream, and the tab blink is drawn from the roster's attention
@@ -201,6 +210,48 @@ message HostWorkspaceChatTextHighlighted {}
 // holds the highlight, so focusing the composer in insert state is the whole
 // of Emacs's obligation.
 message HostWorkspaceResponseTextHighlighted {}
+
+// One change of the workspace's question about a final response, the set arm
+// naming which. The arms are the four transitions a question makes, so Emacs
+// never compares a before and an after to learn which edit of the composer is
+// owed.
+message HostWorkspaceResponseQuestion {
+  // Which transition the question made.
+  oneof change {
+    // A question began where none stood: the composer's contents are saved to
+    // its history, cleared, and remembered as the draft the question set
+    // aside, and the keyboard goes to the composer in insert state.
+    HostWorkspaceResponseQuestionAsked asked = 1;
+    // A standing question moved to another response: the draft set aside
+    // stays set aside and whatever the composer holds stays, and the keyboard
+    // goes to the composer in insert state.
+    HostWorkspaceResponseQuestionMoved moved = 2;
+    // The reader withdrew the question: what the composer holds is saved to
+    // its history, and the draft the question set aside, if any, is put back.
+    HostWorkspaceResponseQuestionWithdrawn withdrawn = 3;
+    // A sent prompt took the question (forked into its child workspace, or
+    // refused because the response could no longer be quoted): the draft the
+    // question set aside is let go, left in the composer's history where the
+    // question put it, and the composer is not touched.
+    HostWorkspaceResponseQuestionTaken taken = 4;
+  }
+}
+
+// A question began where none stood. Empty: the stream names the workspace,
+// and setting the draft aside is the whole of Emacs's obligation.
+message HostWorkspaceResponseQuestionAsked {}
+
+// A standing question moved to another response. Empty: nothing about the
+// composer changes beyond taking the keyboard.
+message HostWorkspaceResponseQuestionMoved {}
+
+// The reader withdrew the question. Empty: putting the set-aside draft back
+// is the whole of Emacs's obligation.
+message HostWorkspaceResponseQuestionWithdrawn {}
+
+// A sent prompt took the question. Empty: letting the set-aside draft go is
+// the whole of Emacs's obligation.
+message HostWorkspaceResponseQuestionTaken {}
 
 // The user clicked this workspace's row in a page's rail. Empty: the stream
 // it rides names the workspace, and requesting the switch to it is the whole

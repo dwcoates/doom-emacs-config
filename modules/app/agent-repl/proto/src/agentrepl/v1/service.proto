@@ -103,6 +103,7 @@ import "agentrepl/v1/endpoint_select_chat_text.proto";
 import "agentrepl/v1/endpoint_select_feed_row.proto";
 import "agentrepl/v1/endpoint_select_in_editor.proto";
 import "agentrepl/v1/endpoint_load_page_in_editor.proto";
+import "agentrepl/v1/endpoint_ask_about_response.proto";
 import "agentrepl/v1/endpoint_select_response_text.proto";
 import "agentrepl/v1/endpoint_select_workspace.proto";
 import "agentrepl/v1/endpoint_send_hidden_keepalives.proto";
@@ -170,6 +171,11 @@ service AgentRepl {
   // held, the next prompt revises that response instead of starting a turn.
   // See endpoint_select_response_text.proto.
   rpc SelectResponseText(SelectResponseTextRequest) returns (SelectResponseTextResponse);
+
+  // Toggle a question about one final response: while it stands, the next
+  // prompt is answered in a new child workspace forked from this one instead
+  // of starting a turn here. See endpoint_ask_about_response.proto.
+  rpc AskAboutResponse(AskAboutResponseRequest) returns (AskAboutResponseResponse);
 
   // The entries the composer holds while the person types, and the one point
   // is on: the daemon pushes the node it answers to the webapp, and the labels

@@ -4324,6 +4324,34 @@ message FeedMergeQueueWaiting {
 // PENDING — old bodies, verbatim, judged one kind at a time.
 // ==========================================================================
 
+// ---- The question about a response ----------------------------------------
+
+// The workspace's question about a final response (agentrepl.v1
+// .AskAboutResponse): which response's question-mark control the webapp draws
+// pressed. STATE, not an event: the root feed's watch carries it whenever it
+// changes and the moment a root watch is accepted, so a page that opens while
+// a question stands draws it. The daemon is its only holder; the webapp never
+// presses or releases a control on its own, only as this says.
+message FeedResponseQuestion {
+  // THE ARM IS THE STATE.
+  oneof state {
+    // No question stands: every response's control is drawn at rest.
+    FeedResponseQuestionNone none = 1;
+    // A question about one response stands: that response's control is drawn
+    // pressed, and every other one at rest.
+    FeedResponseQuestionAsking asking = 2;
+  }
+}
+
+// No question stands.
+message FeedResponseQuestionNone {}
+
+// A question about this response stands.
+message FeedResponseQuestionAsking {
+  // The final response's row on the root feed, as its bubble carries it.
+  FeedId row = 1;
+}
+
 // ---- The composer's entry ---------------------------------------------------
 
 // The node of a response's tree the entry point is on in the composer answers,

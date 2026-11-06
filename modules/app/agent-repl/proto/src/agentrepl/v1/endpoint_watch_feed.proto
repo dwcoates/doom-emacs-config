@@ -37,8 +37,9 @@ message WatchFeedRequest {
 //
 // A frame carries EXACTLY ONE of a row upsert (`row`), a response-selection
 // push (`selection`), a feed-text-scale push (`feed_text_scale`), a
-// held-section change (`held`), an image-overlay push (`image_overlay`), or a
-// composer-entry push (`composer_entry`), never more than one. The selection push is the daemon's per-workspace
+// held-section change (`held`), an image-overlay push (`image_overlay`), a
+// composer-entry push (`composer_entry`), or a response-question push
+// (`response_question`), never more than one. The selection push is the daemon's per-workspace
 // reply-to-a-past-response state (reply-to-a-past-response mode), pushed on
 // the ROOT feed's watch so the webapp recolors the selected final-response
 // bubble, center-scrolls it, and suppresses tail-follow while a selection is
@@ -72,6 +73,11 @@ message WatchFeedResponse {
   // composer-entry frame; unset otherwise. Carried on the ROOT feed's watch
   // only, and the current state is sent the moment a root watch is accepted.
   optional frontend.v1.FeedComposerEntry composer_entry = 6;
+  // The workspace's question about a final response, whole. Set on a
+  // response-question frame; unset otherwise. Carried on the ROOT feed's
+  // watch only, and the current state is sent the moment a root watch is
+  // accepted, so a page that opens while a question stands draws it.
+  optional frontend.v1.FeedResponseQuestion response_question = 7;
 }
 
 // One change of the root feed's held section: the section as it now stands,
