@@ -592,6 +592,27 @@ its label, and the composer says so."
   (interactive)
   (agent-repl-prompt-entries--step :previous "%s is the first node to answer"))
 
+(defun agent-repl-prompt-entries--entry-empty-p ()
+  "Non-nil when point's entry line holds nothing after its label but ` -' and blanks."
+  (let ((label (agent-repl-prompt-entries--label-at-point)))
+    (and label
+         (string-match-p "\\`[ \t]*-?[ \t]*\\'"
+                         (buffer-substring-no-properties
+                          (+ (line-beginning-position) (length label)) (line-end-position))))))
+
+(defun agent-repl-prompt-entries-advance-or-open-sibling ()
+  "Advance an empty entry to its next sibling, else open the next sibling below.
+The composer's `C-SPC' in insert mode on an entry line.  An entry with
+nothing after its label (`1.2 - ') is relabeled to the next sibling in the
+tree the entry targets, else its nearest ancestor's next sibling
+\(`1.2 - ' becomes `1.3 - ', or `2 - ' when 1 has no later child), as
+`agent-repl-prompt-entries-step-on' relabels.  A filled entry opens its
+next sibling below, as `M-k' does."
+  (interactive)
+  (if (agent-repl-prompt-entries--entry-empty-p)
+      (agent-repl-prompt-entries--step :next "%s is the last sibling to answer")
+    (agent-repl-prompt-entries-open-sibling-below)))
+
 (defun agent-repl-prompt-entries--on-entry-filter (command)
   "COMMAND on an entry line, else nil, so the key off one keeps its own binding."
   (and (agent-repl-prompt-entries--label-at-point) command))
@@ -614,10 +635,11 @@ binding for it stands, so `TAB' keeps its own meaning.")
 (defconst agent-repl-prompt-entries--insert-entry-keys
   `((,(kbd "M-j") . ,(agent-repl-prompt-entries--on-entry-binding #'agent-repl-prompt-entries-open-sibling-above))
     (,(kbd "M-k") . ,(agent-repl-prompt-entries--on-entry-binding #'agent-repl-prompt-entries-open-sibling-below))
-    (,(kbd "C-SPC") . ,(agent-repl-prompt-entries--on-entry-binding #'agent-repl-prompt-entries-open-sibling-below)))
+    (,(kbd "C-SPC") . ,(agent-repl-prompt-entries--on-entry-binding #'agent-repl-prompt-entries-advance-or-open-sibling)))
   "The composer's entry-only keys in insert mode, as (KEY . BINDING).
-`M-j' opens the previous sibling above, `M-k' and `C-SPC' the next one
-below, on an entry line, and both fall through elsewhere.")
+`M-j' opens the previous sibling above, `M-k' the next one below, and
+`C-SPC' advances an empty entry to its next sibling (else opens it below),
+on an entry line, and all fall through elsewhere.")
 
 (defun agent-repl-prompt-entries-bind-keys ()
   "Bind the composer's entry-aware keys.
