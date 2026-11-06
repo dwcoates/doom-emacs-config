@@ -1830,6 +1830,15 @@ describe("the Merge Queue section's queues", () => {
     expect(inRail(drawn, (rail) => cascadedValue(rail, "--inside-rule-gap").replace(/\s+/g, ""))).toBe("calc(var(--rule-gap)*0.6)");
   });
 
+  it("leaves a group under an open queue group where its queue's last card stands it", () => {
+    const drawn = drawWorkspaceRoster(
+      withQueues([queueGroup({ id: "a", queue: { head: mergingHead("w1") } }), queueGroup({ id: "b", queue: { head: mergingHead("w2") } })]),
+      sidebarContext(),
+    );
+    const second = queueRegion(drawn).querySelectorAll<HTMLElement>(`.${MERGED_GROUP_CLASS}`)[1];
+    expect(inRail(drawn, () => cascadedValue(second, "margin-top"))).toBe("0");
+  });
+
   it.each([
     { name: "draws a group under an open group's last row nearer by a row's reach below its baseline", folded: false, want: "-4.5px" },
     { name: "draws a group under a folded group a pixel further", folded: true, want: "1px" },
