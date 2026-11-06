@@ -613,10 +613,11 @@ binding for it stands, so `TAB' keeps its own meaning.")
 
 (defconst agent-repl-prompt-entries--insert-entry-keys
   `((,(kbd "M-j") . ,(agent-repl-prompt-entries--on-entry-binding #'agent-repl-prompt-entries-open-sibling-above))
-    (,(kbd "M-k") . ,(agent-repl-prompt-entries--on-entry-binding #'agent-repl-prompt-entries-open-sibling-below)))
+    (,(kbd "M-k") . ,(agent-repl-prompt-entries--on-entry-binding #'agent-repl-prompt-entries-open-sibling-below))
+    (,(kbd "C-SPC") . ,(agent-repl-prompt-entries--on-entry-binding #'agent-repl-prompt-entries-open-sibling-below)))
   "The composer's entry-only keys in insert mode, as (KEY . BINDING).
-`M-j' opens the previous sibling above and `M-k' the next one below on an
-entry line, and both fall through elsewhere.")
+`M-j' opens the previous sibling above, `M-k' and `C-SPC' the next one
+below, on an entry line, and both fall through elsewhere.")
 
 (defun agent-repl-prompt-entries-bind-keys ()
   "Bind the composer's entry-aware keys.
