@@ -3,7 +3,6 @@ package wsm
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -349,7 +348,7 @@ func (s *store) AdvancePullRequestTold(ctx context.Context, a PullRequestAdvance
 				endedKind, mergeSHA = "merged", a.End.MergeSHA
 			}
 		}
-		health := `, last_read = ?, failing_since = NULL, failure_kind = NULL, failure_detail = NULL, failure_resets_at = NULL`
+		health := `, ` + healthyColumns
 		args := []any{a.To, endedKind, mergeSHA, nanos(a.ReadAt)}
 		if a.ReadAt.IsZero() {
 			health, args = ``, args[:3]
@@ -364,7 +363,7 @@ func (s *store) AdvancePullRequestTold(ctx context.Context, a PullRequestAdvance
 		if applied, err = touchedRow(res); err != nil || !applied || len(a.Owed) == 0 {
 			return err
 		}
-		return appendOwedInTx(ctx, tx, a.Subscriber, a.PullRequest, a.Owed, a.Status)
+		return appendOwedInTx(ctx, tx, pullRequestTables, a.Subscriber, a.PullRequest.String(), a.Owed, a.Status)
 	})
 	return applied, err
 }
@@ -375,7 +374,7 @@ func (s *store) AdvancePullRequestTold(ctx context.Context, a PullRequestAdvance
 func (s *store) OwePullRequestNotice(ctx context.Context, subscriber WorkspaceID, pr PullRequestKey, sentences []string) error {
 	const op = "daemon.wsm.owe_pull_request_notice"
 	return s.write(ctx, op, dlog.Context{"subscriber": string(subscriber), "pull_request": pr.String(), "owed": len(sentences)}, func(ctx context.Context, tx *sql.Tx) error {
-		return appendOwedInTx(ctx, tx, subscriber, pr, sentences, "")
+		return appendOwedInTx(ctx, tx, pullRequestTables, subscriber, pr.String(), sentences, "")
 	})
 }
 
@@ -387,23 +386,7 @@ func (s *store) RecordPullRequestReadFailure(ctx context.Context, pr PullRequest
 	var began []WorkspaceID
 	err := s.write(ctx, op, dlog.Context{"pull_request": pr.String(), "kind": string(f.Kind)}, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
-		began, err = listRows(ctx, tx, `SELECT subscriber FROM pull_request_subscriptions
-			WHERE owner = ? AND repo = ? AND number = ? AND ended IS NULL AND failing_since IS NULL ORDER BY subscriber`,
-			func(row interface{ Scan(...any) error }) (WorkspaceID, error) {
-				var id WorkspaceID
-				return id, row.Scan(&id)
-			}, pr.Owner, pr.Repo, pr.Number)
-		if err != nil {
-			return err
-		}
-		var resets any
-		if !f.ResetsAt.IsZero() {
-			resets = nanos(f.ResetsAt)
-		}
-		_, err = tx.ExecContext(ctx, `UPDATE pull_request_subscriptions SET
-			  failing_since = COALESCE(failing_since, ?), failure_kind = ?, failure_detail = ?, failure_resets_at = ?
-			WHERE owner = ? AND repo = ? AND number = ? AND ended IS NULL`,
-			nanos(f.Since), string(f.Kind), f.Detail, resets, pr.Owner, pr.Repo, pr.Number)
+		began, err = recordGithubReadFailureInTx(ctx, tx, pullRequestTables, []any{pr.Owner, pr.Repo, pr.Number}, f)
 		return err
 	})
 	return began, err
@@ -427,35 +410,19 @@ type PullRequestOwed struct {
 
 // OwedPullRequestNotices loads every notice with sentences still pending.
 func (s *store) OwedPullRequestNotices(ctx context.Context) ([]PullRequestOwed, error) {
-	var out []PullRequestOwed
-	err := s.read(ctx, "daemon.wsm.owed_pull_request_notices", nil, func(ctx context.Context) error {
-		var err error
-		out, err = listRows(ctx, s.q(ctx), `SELECT subscriber, pull_request, turn_id, sentences, pending, status FROM pull_request_untold_notices
-			WHERE pending != '[]' ORDER BY subscriber, pull_request`,
-			func(row interface{ Scan(...any) error }) (PullRequestOwed, error) {
-				var (
-					o                       PullRequestOwed
-					key, sentences, pending string
-				)
-				if err := row.Scan(&o.Subscriber, &key, &o.Turn, &sentences, &pending, &o.Status); err != nil {
-					return o, err
-				}
-				pr, err := ParsePullRequestKey(key)
-				if err != nil {
-					return o, err
-				}
-				o.PullRequest = pr
-				if err := json.Unmarshal([]byte(sentences), &o.Sentences); err != nil {
-					return o, fmt.Errorf("wsm: the untold pull-request notice of %s about %s holds unreadable sentences: %w", o.Subscriber, key, err)
-				}
-				if err := json.Unmarshal([]byte(pending), &o.Pending); err != nil {
-					return o, fmt.Errorf("wsm: the untold pull-request notice of %s about %s holds unreadable pending sentences: %w", o.Subscriber, key, err)
-				}
-				return o, nil
-			})
-		return err
-	})
-	return out, err
+	rows, err := s.owedGithubNotices(ctx, "daemon.wsm.owed_pull_request_notices", pullRequestTables)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]PullRequestOwed, 0, len(rows))
+	for _, o := range rows {
+		pr, err := ParsePullRequestKey(o.Subject)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, PullRequestOwed{Subscriber: o.Subscriber, PullRequest: pr, Turn: o.Turn, Sentences: o.Sentences, Pending: o.Pending, Status: o.Status})
+	}
+	return out, nil
 }
 
 // RecordPullRequestNoticeSubmitted records that SUBSCRIBER was submitted a
@@ -463,38 +430,7 @@ func (s *store) OwedPullRequestNotices(ctx context.Context) ([]PullRequestOwed, 
 // sentences; any appended since stay pending. TURN is empty when the
 // submission failed, so the next notice says SENTENCES again.
 func (s *store) RecordPullRequestNoticeSubmitted(ctx context.Context, subscriber WorkspaceID, pr PullRequestKey, turn TurnID, sentences []string, took int) error {
-	const op = "daemon.wsm.record_pull_request_notice_submitted"
-	fields := dlog.Context{"subscriber": string(subscriber), "pull_request": pr.String(), "turn": string(turn), "sentences": len(sentences), "took": took}
-	if len(sentences) == 0 {
-		err := fmt.Errorf("wsm: the untold pull-request notice of %s about %s says no change", subscriber, pr)
-		s.log.Error(op, "refused an untold pull-request notice that says no change", withError(fields, err))
-		return err
-	}
-	said, err := json.Marshal(sentences)
-	if err != nil {
-		return err
-	}
-	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
-		var raw string
-		if err := tx.QueryRowContext(ctx, `SELECT pending FROM pull_request_untold_notices WHERE subscriber = ? AND pull_request = ?`,
-			subscriber, pr.String()).Scan(&raw); err != nil {
-			return err
-		}
-		var pending []string
-		if err := json.Unmarshal([]byte(raw), &pending); err != nil {
-			return err
-		}
-		if took > len(pending) {
-			return fmt.Errorf("wsm: the notice of %s about %s took %d pending sentences of %d", subscriber, pr, took, len(pending))
-		}
-		rest, err := json.Marshal(append([]string{}, pending[took:]...))
-		if err != nil {
-			return err
-		}
-		_, err = tx.ExecContext(ctx, `UPDATE pull_request_untold_notices SET turn_id = ?, sentences = ?, pending = ? WHERE subscriber = ? AND pull_request = ?`,
-			turn, string(said), string(rest), subscriber, pr.String())
-		return err
-	})
+	return s.recordGithubNoticeSubmitted(ctx, "daemon.wsm.record_pull_request_notice_submitted", pullRequestTables, subscriber, pr.String(), turn, sentences, took)
 }
 
 // ParsePullRequestKey reads a key spelled `owner/repo#number`.
@@ -510,35 +446,6 @@ func ParsePullRequestKey(text string) (PullRequestKey, error) {
 		return PullRequestKey{}, fmt.Errorf("wsm: %q is not a pull request key", text)
 	}
 	return key, nil
-}
-
-// appendOwedInTx appends SENTENCES to SUBSCRIBER's owed notice about PR,
-// creating the notice row when none stands, and sets its status when STATUS
-// is not empty.
-func appendOwedInTx(ctx context.Context, tx *sql.Tx, subscriber WorkspaceID, pr PullRequestKey, sentences []string, status string) error {
-	var raw string
-	err := tx.QueryRowContext(ctx, `SELECT pending FROM pull_request_untold_notices WHERE subscriber = ? AND pull_request = ?`,
-		subscriber, pr.String()).Scan(&raw)
-	var pending []string
-	switch {
-	case errors.Is(err, sql.ErrNoRows):
-	case err != nil:
-		return err
-	default:
-		if err := json.Unmarshal([]byte(raw), &pending); err != nil {
-			return fmt.Errorf("wsm: the untold pull-request notice of %s about %s holds unreadable pending sentences: %w", subscriber, pr, err)
-		}
-	}
-	encoded, err := json.Marshal(append(pending, sentences...))
-	if err != nil {
-		return err
-	}
-	_, err = tx.ExecContext(ctx,
-		`INSERT INTO pull_request_untold_notices (subscriber, pull_request, turn_id, sentences, pending, status) VALUES (?, ?, '', '[]', ?, ?)
-		 ON CONFLICT(subscriber, pull_request) DO UPDATE SET pending = excluded.pending,
-		   status = CASE WHEN excluded.status = '' THEN status ELSE excluded.status END`,
-		subscriber, pr.String(), string(encoded), status)
-	return err
 }
 
 // deletePullRequestSubscription deletes SUBSCRIBER's subscription to PR, of
@@ -603,14 +510,6 @@ func scanPullRequestSubscription(row interface{ Scan(...any) error }) (PullReque
 			return sub, fmt.Errorf("wsm: pull-request subscription of %s to %s holds undeclared end %q", sub.Subscriber, sub.PullRequest, ended.String)
 		}
 	}
-	if lastRead.Valid {
-		sub.LastRead = fromNanos(lastRead.Int64)
-	}
-	if failingSince.Valid {
-		sub.Failing = &PullRequestFailure{Since: fromNanos(failingSince.Int64), Kind: PullRequestFailureKind(kind.String), Detail: detail.String}
-		if resetsAt.Valid {
-			sub.Failing.ResetsAt = fromNanos(resetsAt.Int64)
-		}
-	}
+	sub.LastRead, sub.Failing = scanGithubHealth(lastRead, failingSince, kind, detail, resetsAt)
 	return sub, nil
 }
