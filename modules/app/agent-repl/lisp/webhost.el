@@ -48,9 +48,8 @@
 (declare-function agent-repl--warn "core" (ws fmt &rest args))
 (declare-function agent-repl--error "core" (ws fmt &rest args))
 (declare-function agent-repl-host-ref "host" (ws))
-(declare-function agent-repl-host-conn "host" (ws))
-(declare-function agent-repl-host-page-conn "host" (ws))
 (declare-function agent-repl-link-live "daemon-link" ())
+(declare-function agent-repl-link-successor "daemon-link" ())
 (declare-function agent-repl-connect-connection-address "connect" (conn))
 (declare-function agent-repl--frontend-make-webview-buffer "frontend" (url))
 (declare-function agent-repl-dividers-fix-fringes "dividers" (buf width))
@@ -106,12 +105,6 @@ Kept while the workspace\='s page is unloaded: the host draws the gate
 itself (webapp/src/host/gate.ts), and every slot is replayed to a host
 that loads.")
 
-(defvar agent-repl--webhost-follow-conn nil
-  "The connection to the daemon the host's calls were last pointed at, or nil.
-The daemon the host belongs on once a handover moved it: a host found
-stale after that is reloaded there, never on a link still naming the
-daemon being left.  Nil until a handover first moves the host.")
-
 (defvar agent-repl--webhost-daemon-origin nil
   "The daemon origin the host's own calls were last pointed at, or nil.
 Nil until a handover first moves them; a host load starts on the daemon
@@ -158,9 +151,8 @@ Nil too after any other reload, whose build nobody named
 
 (defvar agent-repl--webhost-url nil
   "The URL the host was last loaded at, which names the daemon it talks to.
-The host draws the sidebar over its own connection to that daemon, so when
-the workspaces move to another daemon the host must move with them
-\(`agent-repl-webhost-reload-page').")
+A handover moves the host's calls off it without a reload
+\(`agent-repl-webhost-follow-daemon').")
 
 (defvar agent-repl--webhost-killing nil
   "Non-nil only while this module itself kills the host buffer.")
@@ -197,6 +189,20 @@ connection budget with any workspace's page (frontend.el's page origin)."
   "Return the host page's URL on CONN's daemon.
   http://host.localhost:<daemon port>/?host=1"
   (concat (agent-repl-webhost-origin conn) "/?host=1"))
+
+(defun agent-repl-webhost-daemon-conn ()
+  "Return the connection to the daemon the host and the sidebar belong on, or nil.
+THE NEWEST DAEMON THE LINK KNOWS: the accepted successor during a
+handover, else the live primary (`agent-repl-link-live').  The host and
+the sidebar are daemon-wide, like the roster (roster.el), so they follow
+the link and never a workspace\='s own connection.  Mid-handover the
+workspaces are split across the daemon being left and its successor, and
+the host used to follow whichever one\='s page reloaded last: on
+2026-11-03 22:43:05 a page reloaded on the daemon being left pointed the
+sidebar at a daemon that had exited 240ms before, and every stream it
+held failed for four seconds.  Every load and move of the host and the
+sidebar is decided here.  Nil only when no link stands."
+  (or (agent-repl-link-successor) (agent-repl-link-live)))
 
 (defun agent-repl--webhost-refuse-kill ()
   "Keep the host buffer alive against every kill but this module's own.
@@ -404,12 +410,14 @@ handler is the prior one again."
         (agent-repl--info agent-repl--webhost-central "elisp.webhost.rewatched replaced=%s"
                           (if (symbolp installed) installed (type-of installed)))))))
 
-(defun agent-repl-webhost-ensure (conn)
-  "Return the host's live xwidget, creating the host on CONN's daemon if needed.
-The host is created once and lives for the session.  No window is touched:
-the host buffer is never displayed itself; workspace slots display it."
+(defun agent-repl-webhost-ensure ()
+  "Return the host's live xwidget, creating the host if needed.
+The host is created on the daemon it belongs on
+\(`agent-repl-webhost-daemon-conn'), once, and lives for the session.  No
+window is touched: the host buffer is never displayed itself; workspace
+slots display it."
   (or (agent-repl-webhost-xwidget)
-      (let* ((url (agent-repl-webhost-url conn))
+      (let* ((url (agent-repl-webhost-url (agent-repl-webhost-daemon-conn)))
              (buf (agent-repl--webview-make-hidden
                    url agent-repl-webhost-buffer-name #'agent-repl--webhost-refuse-kill
                    (lambda (buf)
@@ -487,13 +495,11 @@ See `agent-repl--webview-script'; an unknown call is handled by
 (defun agent-repl--webhost-predates-call (op)
   "The host has no OP: it was loaded from a build older than this elisp.
 EMACS AND THE HOST SPEAK ONE PROTOCOL.  A host that predates a call Emacs
-makes is reloaded on the daemon it belongs on: the one a handover pointed
-it at (`agent-repl--webhost-follow-conn'), else the one serving Emacs.
-Mid-handover the link can still name the daemon being left, and a host
-reloaded there dials a daemon about to exit.  One that still lacks the call
-after that reload is a daemon serving an older webapp than this elisp, an
-ERROR no reload heals."
-  (let* ((conn (or agent-repl--webhost-follow-conn (agent-repl-link-live)))
+makes is reloaded on the daemon it belongs on
+\(`agent-repl-webhost-daemon-conn'), never on the daemon a handover is
+leaving.  One that still lacks the call after that reload is a daemon
+serving an older webapp than this elisp, an ERROR no reload heals."
+  (let* ((conn (agent-repl-webhost-daemon-conn))
          (url (and conn (agent-repl-webhost-url conn))))
     (cond
      (agent-repl--webhost-predates-reload-pending
@@ -511,7 +517,7 @@ ERROR no reload heals."
             agent-repl--webhost-predates-reload-pending t)
       (agent-repl--info agent-repl--webhost-central
                         "elisp.webhost.predates-call op=%s action=reload url=%s" op url)
-      (agent-repl-webhost-reload conn)))))
+      (agent-repl-webhost-reload)))))
 
 (defun agent-repl--webhost-answer-ws (answer)
   "The log scope for ANSWER: the workspace it names, or the central scope."
@@ -606,7 +612,7 @@ Answers WS's id.  Signals when WS has no ref or no connection: its URL cannot
 be built (`agent-repl-frontend-webview-url')."
   (let* ((url (agent-repl-frontend-webview-url ws))
          (id (agent-repl--webhost-id ws)))
-    (agent-repl-webhost-ensure (agent-repl-host-page-conn ws))
+    (agent-repl-webhost-ensure)
     (unless (equal (gethash id agent-repl--webhost-pages) url)
       (puthash id url agent-repl--webhost-pages)
       (agent-repl--info ws "elisp.webhost.page-ensured ws=%s id=%s" ws id))
@@ -699,34 +705,50 @@ unloaded page's workspace still shows its gate at the composer's height
 
 A HANDOVER NEVER RELOADS THE HOST.  Reloading it replaced every page at
 once, and the page on screen stood blank for seconds (4.8s on the
-2026-10-23 14:38 deploy).  Instead the host's own calls (its services')
-are pointed at the daemon WS moved to (`setDaemon'), and WS's page is
-re-pointed there: the host keeps a shown page on screen until its
-replacement has drawn (host.ts), so nobody sees it blank."
+2026-10-23 14:38 deploy).  WS's page alone is re-pointed at the daemon
+WS moved to: the host keeps a shown page on screen until its replacement
+has drawn (host.ts), so nobody sees it blank.  THE HOST\='S OWN CALLS DO
+NOT MOVE WITH A PAGE: they follow the link (`agent-repl-webhost-follow-daemon')."
   (let* ((url (agent-repl-frontend-webview-url ws))
          (id (agent-repl--webhost-id ws))
          (started (agent-repl--now-unix-ms)))
     (if (equal (gethash id agent-repl--webhost-pages) url)
         (agent-repl--webhost-call "reload" id started)
       (puthash id url agent-repl--webhost-pages)
-      (agent-repl-webhost-follow-daemon ws (agent-repl-host-page-conn ws))
       (agent-repl--webhost-call "ensure" id url nil started))
     (agent-repl--info ws "elisp.webhost.page-reloaded ws=%s id=%s" ws id)
     id))
 
-(defun agent-repl-webhost-follow-daemon (ws conn)
-  "Point the host's own calls at CONN's daemon, the one WS moved to.
-The host keeps its page and every workspace's; only where its services'
-calls, and the sidebar's (sidebar-view.el), go moves (`setDaemon')."
-  (let ((origin (agent-repl-webhost-origin conn)))
+(defun agent-repl-webhost-follow-daemon ()
+  "Point the host's own calls, and the sidebar's, at the daemon they belong on.
+That daemon is the link\='s newest (`agent-repl-webhost-daemon-conn').
+The host keeps its page and every workspace\='s; only where its services\='
+calls, and the sidebar\='s (sidebar-view.el), go moves (`setDaemon').
+Run by the link\='s handover and promotion edges, never by a page: a
+handover moves the host once, onto the successor, and nothing moves it
+back onto the daemon being left."
+  (let ((origin (agent-repl-webhost-origin (agent-repl-webhost-daemon-conn))))
     (unless (equal origin (or agent-repl--webhost-daemon-origin
                               (and agent-repl--webhost-url
                                    (agent-repl--webhost-url-origin agent-repl--webhost-url))))
-      (setq agent-repl--webhost-daemon-origin origin
-            agent-repl--webhost-follow-conn conn)
-      (agent-repl--info ws "elisp.webhost.follows-daemon ws=%s to=%s" ws origin)
+      (setq agent-repl--webhost-daemon-origin origin)
+      (agent-repl--info agent-repl--webhost-central "elisp.webhost.follows-daemon to=%s" origin)
       (agent-repl--webhost-call "setDaemon" origin)
       (agent-repl-sidebar-view-follow-daemon origin))))
+
+(defun agent-repl-webhost-on-link-handover (_old _new)
+  "Move the host and the sidebar onto the successor the link just accepted."
+  (agent-repl-webhost-follow-daemon))
+
+(defun agent-repl-webhost-on-link-promote (_old _new)
+  "Keep the host and the sidebar on the successor the link just promoted.
+Already there since its acceptance (`agent-repl-webhost-on-link-handover'),
+so this moves nothing unless the host was loaded on the daemon being left
+in between."
+  (agent-repl-webhost-follow-daemon))
+
+(add-hook 'agent-repl-link-handover-functions #'agent-repl-webhost-on-link-handover)
+(add-hook 'agent-repl-link-promote-functions #'agent-repl-webhost-on-link-promote)
 
 (defun agent-repl--webhost-url-origin (url)
   "The scheme, host and port of URL, as the host page reads its own origin."
@@ -905,13 +927,8 @@ out (`agent-repl-host-adopting-p')."
     (agent-repl--webhost-call "setLogLevel" (symbol-name (car agent-repl--webhost-log-level))
                               (cdr agent-repl--webhost-log-level))))
 
-(defvar agent-repl--webhost-retiring-conn nil
-  "The connection a reload navigates the host onto once its pages are retired.
-Set while the host's `retireAll' is out; its answer's handler, which the
-read channel calls by symbol, takes it (`agent-repl--webhost-on-retired').")
-
-(defun agent-repl--webhost-reload-now (conn)
-  "Reload the host onto CONN's daemon: retire its pages, then navigate.
+(defun agent-repl--webhost-reload-now ()
+  "Reload the host: retire its pages, then navigate.
 THE PAGES END BEFORE THE NAVIGATION, by the host's own act (its
 `retireAll'): a navigation cancels every frame's loads before their
 documents see `pagehide', and each page read its streams' ends as a cut
@@ -921,7 +938,7 @@ the host's answer (`agent-repl--webhost-on-retired')."
   (if (agent-repl-webhost-xwidget)
       (agent-repl--webhost-report-pages-unloading
        (agent-repl--webhost-page-workspaces)
-       (lambda () (agent-repl--webhost-retire conn)))
+       #'agent-repl--webhost-retire)
     (agent-repl--log agent-repl--webhost-central "elisp.webhost.reload-skipped reason=no-host")))
 
 (defun agent-repl--webhost-page-workspaces ()
@@ -954,14 +971,12 @@ the deploy's, and a page whose report did not land is recorded."
              (agent-repl--info ws "elisp.webhost.reload-unloading-unreported ws=%s" ws)
              (funcall answered))))))))
 
-(defun agent-repl--webhost-retire (conn)
-  "Ask the host to end every page, navigating onto CONN on its answer."
-  (setq agent-repl--webhost-retiring-conn conn)
+(defun agent-repl--webhost-retire ()
+  "Ask the host to end every page, navigating it on its answer."
   (if (agent-repl-webhost-read "retireAll" nil 'agent-repl--webhost-on-retired)
       (agent-repl--log agent-repl--webhost-central "elisp.webhost.retiring pages=%d"
                        (hash-table-count agent-repl--webhost-pages))
-    (setq agent-repl--webhost-retiring-conn nil)
-    (agent-repl--webhost-navigate conn)))
+    (agent-repl--webhost-navigate)))
 
 (defun agent-repl--webhost-on-retired (raw)
   "Navigate the host now that RAW, its `retireAll' answer, says its pages ended.
@@ -974,9 +989,7 @@ three navigations in 20ms, each cutting off the last (2026-10-24).  A host
 still booting answers `queued' and holds no page yet, so it is navigated.
 An answer that cannot be read is recorded at ERROR and still navigates: it
 is the reload asked for."
-  (let ((conn agent-repl--webhost-retiring-conn)
-        (outcome nil))
-    (setq agent-repl--webhost-retiring-conn nil)
+  (let ((outcome nil))
     (condition-case err
         (let ((answer (agent-repl-webhost-parse-answer raw)))
           (agent-repl--webhost-answered raw)
@@ -989,36 +1002,47 @@ is the reload asked for."
     (if (equal outcome "unknown-call")
         (agent-repl--info agent-repl--webhost-central
                           "elisp.webhost.retire-predated: the host predates retireAll; its reload is the predates call's")
-      (agent-repl--webhost-navigate conn))))
+      (agent-repl--webhost-navigate))))
 
-(defun agent-repl--webhost-navigate (conn)
-  "Navigate the host to its URL on CONN's daemon; its load replays the rest."
-  (if-let ((xw (agent-repl-webhost-xwidget)))
-      (progn
-        (setq agent-repl--webhost-url (agent-repl-webhost-url conn)
-              agent-repl--webhost-daemon-origin nil
-              agent-repl--webhost-follow-conn nil
-              agent-repl--webhost-reload-started-ms (agent-repl--now-unix-ms))
-        (agent-repl--frontend-webview-navigate-widget xw agent-repl--webhost-url)
-        ;; THE SIDEBAR RELOADS WITH THE HOST, onto the same daemon, so the
-        ;; two documents run one build (sidebar-view.el).
-        (agent-repl-sidebar-view-navigate conn)
-        (agent-repl--info agent-repl--webhost-central "elisp.webhost.reloaded pages=%d"
-                          (hash-table-count agent-repl--webhost-pages)))
-    (agent-repl--log agent-repl--webhost-central "elisp.webhost.reload-skipped reason=no-host")))
+(defun agent-repl--webhost-navigate ()
+  "Navigate the host to its URL on its daemon; its load replays the rest.
+Its daemon is the one it belongs on (`agent-repl-webhost-daemon-conn'),
+read as the navigation runs, never when the reload was asked for, so a
+handover in between cannot land the host on the daemon it left.  With no
+link standing the host is left where it is, at WARN: the daemon the link
+next reaches pushes the host\='s reload itself when the host runs another
+webapp than it serves."
+  (let ((xw (agent-repl-webhost-xwidget))
+        (conn (agent-repl-webhost-daemon-conn)))
+    (cond
+     ((null xw)
+      (agent-repl--log agent-repl--webhost-central "elisp.webhost.reload-skipped reason=no-host"))
+     ((null conn)
+      (agent-repl--warn agent-repl--webhost-central "elisp.webhost.reload-skipped reason=no-link pages=%d"
+                        (hash-table-count agent-repl--webhost-pages)))
+     (t
+      (setq agent-repl--webhost-url (agent-repl-webhost-url conn)
+            agent-repl--webhost-daemon-origin nil
+            agent-repl--webhost-reload-started-ms (agent-repl--now-unix-ms))
+      (agent-repl--frontend-webview-navigate-widget xw agent-repl--webhost-url)
+      ;; THE SIDEBAR RELOADS WITH THE HOST, onto the same daemon, so the
+      ;; two documents run one build (sidebar-view.el).
+      (agent-repl-sidebar-view-navigate conn)
+      (agent-repl--info agent-repl--webhost-central "elisp.webhost.reloaded pages=%d"
+                        (hash-table-count agent-repl--webhost-pages))))))
 
-(defun agent-repl-webhost-reload (conn)
-  "Reload the host, and so every page, on CONN's daemon, once per turn.
+(defun agent-repl-webhost-reload ()
+  "Reload the host, and so every page, on the daemon it belongs on, once per turn.
 Every page re-pointed in one turn of the command loop reloads the host
 once, on the next turn.  The build the host comes onto is nobody's to
 name, so the build a deploy brought is forgotten."
   (setq agent-repl--webhost-build nil)
   (unless agent-repl--webhost-reload-timer
     (setq agent-repl--webhost-reload-timer
-          (run-at-time 0 nil #'agent-repl--webhost-reload-now conn))))
+          (run-at-time 0 nil #'agent-repl--webhost-reload-now))))
 
-(defun agent-repl-webhost-reload-onto (conn build)
-  "Reload the host onto the webapp BUILD a deploy brings, on CONN's daemon.
+(defun agent-repl-webhost-reload-onto (build)
+  "Reload the host onto the webapp BUILD a deploy brings.
 THE HOST RELOADS ONCE PER BUILD.  A deploy tells every workspace with a
 stale page, each on its own stream, so the pushes arrive over several
 turns of the command loop (eight in 100ms, 2026-10-17), and each reload
@@ -1027,7 +1051,7 @@ serves, which is BUILD from the first push on, so a push naming the build
 the host was last reloaded onto is already met."
   (if (equal build agent-repl--webhost-build)
       (agent-repl--info agent-repl--webhost-central "elisp.webhost.reload-met build=%s" build)
-    (agent-repl-webhost-reload conn)
+    (agent-repl-webhost-reload)
     (setq agent-repl--webhost-build build)
     (agent-repl--info agent-repl--webhost-central "elisp.webhost.reload-onto build=%s" build)))
 

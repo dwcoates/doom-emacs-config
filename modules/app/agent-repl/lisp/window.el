@@ -50,7 +50,7 @@
 (declare-function agent-repl--info "core")
 (declare-function agent-repl-host-state "host")
 (declare-function agent-repl-webhost-set-gate-dock "webhost" (ws pixels))
-(declare-function agent-repl-sidebar-view-show "sidebar-view" (conn))
+(declare-function agent-repl-sidebar-view-show "sidebar-view" ())
 (declare-function agent-repl-sidebar-view-window "sidebar-view" (&optional frame))
 (declare-function agent-repl-sidebar-view-window-p "sidebar-view" (win))
 (declare-function agent-repl-host-conn "host" (ws))
@@ -720,7 +720,7 @@ without it) gets it back.  Non-nil when it was shown; nil when there is no
 view on screen or the sidebar already stands."
   (when (and view-win (not (agent-repl-sidebar-view-window)))
     (agent-repl--log ws "window--ensure-layout: ws=%s the sidebar's window is missing beside the panels; showing it" ws)
-    (agent-repl-sidebar-view-show (agent-repl-host-conn ws))
+    (agent-repl-sidebar-view-show)
     t))
 
 (defvar agent-repl-window--ensure-layout-in-progress nil

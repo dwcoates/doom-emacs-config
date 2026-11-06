@@ -48,6 +48,7 @@
 (declare-function agent-repl--frontend-webview-navigate-widget "frontend" (xwidget uri))
 (declare-function agent-repl--frontend-kill-webview "frontend" (buf))
 (declare-function agent-repl-webhost-origin "webhost" (conn))
+(declare-function agent-repl-webhost-daemon-conn "webhost" ())
 (declare-function agent-repl--webview-answered "webhost" (raw prefix scope-of central predates))
 (declare-function agent-repl--webview-script "webhost" (global pending method args))
 (declare-function agent-repl--webview-on-commit "webhost" (status own-url uri take-back replay))
@@ -138,11 +139,13 @@ On `kill-buffer-query-functions' in the sidebar buffer only."
   (let ((agent-repl--sidebar-view-killing t))
     (agent-repl--frontend-kill-webview buf)))
 
-(defun agent-repl-sidebar-view-ensure (conn)
-  "Return the sidebar's live xwidget, creating it on CONN's daemon if needed.
-Created once and kept for the session.  No window is touched."
+(defun agent-repl-sidebar-view-ensure ()
+  "Return the sidebar's live xwidget, creating it if needed.
+Created on the daemon the host belongs on (`agent-repl-webhost-daemon-conn'),
+never on a workspace\='s own: the sidebar is daemon-wide.  Created once and
+kept for the session.  No window is touched."
   (or (agent-repl-sidebar-view-xwidget)
-      (let* ((url (agent-repl-sidebar-view-url conn))
+      (let* ((url (agent-repl-sidebar-view-url (agent-repl-webhost-daemon-conn)))
              (buf (agent-repl--webview-make-hidden
                    url agent-repl-sidebar-view-buffer-name #'agent-repl--sidebar-view-refuse-kill
                    #'agent-repl--sidebar-view-kill-buffer "the sidebar's web view"))
@@ -331,12 +334,13 @@ The window itself is kept by webhost.el (`agent-repl--webhost-log-level')."
   (max window-min-width
        (round (* agent-repl-sidebar-view-width-fraction (frame-width frame)))))
 
-(defun agent-repl-sidebar-view-show (conn)
-  "Show the sidebar, on CONN's daemon, in its window at the frame's left edge.
+(defun agent-repl-sidebar-view-show ()
+  "Show the sidebar in its window at the frame's left edge.
 A left side window: the frame's whole height, one for every workspace,
 whose mode line is the composer's border run on under it
-\(`agent-repl--sidebar-view-draw-bottom-border').  Nothing is changed when it already stands.  Returns the window."
-  (agent-repl-sidebar-view-ensure conn)
+\(`agent-repl--sidebar-view-draw-bottom-border').  Nothing is changed
+when it already stands.  Returns the window."
+  (agent-repl-sidebar-view-ensure)
   (or (agent-repl-sidebar-view-window)
       (let* ((buf (agent-repl-sidebar-view-buffer))
              (width (agent-repl--sidebar-view-width (selected-frame)))

@@ -516,7 +516,7 @@ Returns the list of workspaces a repair was dispatched for."
                                (and win (window-total-height win))))))
                       ((symbol-function 'agent-repl-host-conn) (lambda (_ws) 'conn))
                       ((symbol-function 'agent-repl-sidebar-view-show)
-                       (lambda (conn) (when sidebar-shown (funcall sidebar-shown conn)))))
+                       (lambda () (when sidebar-shown (funcall sidebar-shown)))))
               (let ((agent-repl--eager-open-in-progress eager)
                     (agent-repl-window--ensure-layout-in-progress in-progress))
                 (agent-repl-window--ensure-layout)))
@@ -585,28 +585,27 @@ repair is dispatched."
 ;; THE SIDEBAR STANDS WITH THE PANELS (sidebar-view.el).
 
 (ert-deftest agent-repl-window-test-ensure-layout-shows-a-missing-sidebar-beside-the-panels ()
-  "Both panels on screen without the sidebar's window → the sidebar is shown
-on the workspace's connection."
+  "Both panels on screen without the sidebar's window → the sidebar is shown."
   (let ((shown nil))
     (agent-repl-window-test--run-ensure-layout
      :show-view t :show-input t :sidebar nil
-     :sidebar-shown (lambda (conn) (push conn shown)))
-    (should (equal shown '(conn)))))
+     :sidebar-shown (lambda () (push 'shown shown)))
+    (should (equal shown '(shown)))))
 
 (ert-deftest agent-repl-window-test-ensure-layout-shows-a-missing-sidebar-beside-a-gated-view ()
   "A gated view standing alone without the sidebar's window → the sidebar is shown."
   (let ((shown nil))
     (agent-repl-window-test--run-ensure-layout
      :show-view t :sidebar nil :gate '(:arm :cold-gate :value nil)
-     :sidebar-shown (lambda (conn) (push conn shown)))
-    (should (equal shown '(conn)))))
+     :sidebar-shown (lambda () (push 'shown shown)))
+    (should (equal shown '(shown)))))
 
 (ert-deftest agent-repl-window-test-ensure-layout-leaves-a-standing-sidebar-alone ()
   "Panels and sidebar all on screen → the sidebar is not shown again."
   (let ((shown nil))
     (agent-repl-window-test--run-ensure-layout
      :show-view t :show-input t
-     :sidebar-shown (lambda (conn) (push conn shown)))
+     :sidebar-shown (lambda () (push 'shown shown)))
     (should-not shown)))
 
 (ert-deftest agent-repl-window-test-ensure-layout-shows-no-sidebar-without-panels ()
@@ -614,7 +613,7 @@ on the workspace's connection."
   (let ((shown nil))
     (agent-repl-window-test--run-ensure-layout
      :sidebar nil
-     :sidebar-shown (lambda (conn) (push conn shown)))
+     :sidebar-shown (lambda () (push 'shown shown)))
     (should-not shown)))
 
 (ert-deftest agent-repl-window-test-ensure-layout-noop-when-neither-present ()
