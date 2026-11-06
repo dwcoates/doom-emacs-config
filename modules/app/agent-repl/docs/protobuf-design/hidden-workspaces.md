@@ -13,7 +13,7 @@ daemon moves workspaces into it on its own: a shown workspace whose cold gate
 has stood for over a day of weekday time (weekends never count) is moved in as
 a hide would move it (`coldbacklog.Sweeper`, `workspace.Verbs.BacklogColdGate`),
 once per gate. The row records the gate it was moved for
-(`workspaces.cold_gate_backlogged_at`, layout 80), so a workspace the user
+(`workspaces.cold_gate_backlogged_at`, layout 106), so a workspace the user
 shows again stays shown until a new conversation goes cold into a new gate.
 The workspace the user is looking at is never moved from under them; the first
 sweep after they move off it moves it. Answering the gate shows it again, as
