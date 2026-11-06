@@ -2548,6 +2548,13 @@ says where the create stopped, and the caller still sees it stop."
                        command read (car err) (error-message-string err))
      (signal (car err) (cdr err)))))
 
+(defconst agent-repl-verbs--oneshot-default-model "sonnet"
+  "The model a model-picking one-shot (`SPC TAB C-o\=', `SPC TAB C-O\=') answers on a blank.")
+
+(defvar agent-repl-verbs--model-default nil
+  "When non-nil, the model `agent-repl-verbs--read-model\=' answers on a blank.
+Bound by the model-picking one-shots; nil leaves a blank to the daemon.")
+
 (defconst agent-repl-verbs--name-question "Workspace name (%s) (slug, no prompt): "
   "The format of the question a named fork reads its REQUIRED name with.
 Its argument is the repository the workspace lands in.  It says what it
@@ -2913,6 +2920,9 @@ to choose.
 The prompt opens BLANK: nothing is seeded, so a bare RET asks the daemon
 to choose and every model is picked on purpose.
 
+When `agent-repl-verbs--model-default\=' names a model the catalog offers,
+a blank answer returns that model instead and the prompt says so.
+
 A login no session has served a catalog for has no models to offer: the
 picker still opens, says so in its question, and accepts only a blank
 answer, the daemon\='s default, which every login can run.  Every model
@@ -2926,14 +2936,19 @@ question opens with \"Model\", whatever the catalog holds."
       (agent-repl--info agent-repl-verbs--create-log-scope
                         "elisp.verbs.read-model-offers-nothing config-dir=%s cause=catalog-unknown"
                         config-dir))
-    (let ((value (string-trim
-                  (completing-read
-                   (if known
-                       (format "Model for %s (blank = daemon default): " config-dir)
-                     (format "Model for %s (none known yet; blank = daemon default): " config-dir))
-                   (agent-repl-verbs--model-completion-table options)
-                   nil t))))
-      (unless (string-empty-p value) value))))
+    (let* ((default (and agent-repl-verbs--model-default
+                         (member agent-repl-verbs--model-default
+                                 (agent-repl-verbs--model-names options))
+                         agent-repl-verbs--model-default))
+           (blank (or default "daemon default"))
+           (value (string-trim
+                   (completing-read
+                    (if known
+                        (format "Model for %s (blank = %s): " config-dir blank)
+                      (format "Model for %s (none known yet; blank = %s): " config-dir blank))
+                    (agent-repl-verbs--model-completion-table options)
+                    nil t))))
+      (if (string-empty-p value) default value))))
 
 (defun agent-repl-create-oneshot (&optional pick-model)
   "Create a ONE-SHOT workspace for a commission read from the minibuffer.
@@ -3069,7 +3084,11 @@ repository says so before the commission is typed."
          (about (and about-current (agent-repl--ws-current-name)))
          (model (and pick-model
                      (agent-repl-verbs--read-for
-                      command 'model (lambda () (agent-repl-verbs--read-model repository)))))
+                      command 'model
+                      (lambda ()
+                        (let ((agent-repl-verbs--model-default
+                               agent-repl-verbs--oneshot-default-model))
+                          (agent-repl-verbs--read-model repository))))))
          (prompt (agent-repl-verbs--read-for
                   command 'prompt
                   (lambda ()

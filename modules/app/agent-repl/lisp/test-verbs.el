@@ -4791,6 +4791,35 @@ that answers or signals.  INFO and ERROR records land in
         (should-not (agent-repl-verbs--read-model (agent-repl-test-verbs--repo-ref)))
         (should-not seen-initial)))))
 
+(ert-deftest agent-repl-verbs-read-model-blank-answers-the-bound-default ()
+  "A blank answer returns the bound default when the catalog offers it, and the prompt says so."
+  (agent-repl-test-verbs--with-catalog agent-repl-test-verbs--catalog
+    (let (seen-prompt (agent-repl-verbs--model-default "sonnet"))
+      (cl-letf (((symbol-function 'completing-read)
+                 (lambda (prompt &rest _) (setq seen-prompt prompt) "")))
+        (should (equal (agent-repl-verbs--read-model (agent-repl-test-verbs--repo-ref)) "sonnet"))
+        (should (string-match-p "blank = sonnet" seen-prompt))))))
+
+(ert-deftest agent-repl-verbs-read-model-ignores-a-default-the-catalog-lacks ()
+  "A bound default the catalog does not offer leaves a blank to the daemon."
+  (agent-repl-test-verbs--with-catalog agent-repl-test-verbs--catalog
+    (let ((agent-repl-verbs--model-default "nonexistent"))
+      (cl-letf (((symbol-function 'completing-read) (lambda (&rest _) "")))
+        (should-not (agent-repl-verbs--read-model (agent-repl-test-verbs--repo-ref)))))))
+
+(ert-deftest agent-repl-verbs-oneshot-with-model-binds-sonnet-as-the-blank-default ()
+  "The one-shot model picker binds sonnet as the default while it reads the model."
+  (let (seen)
+    (agent-repl-test-verbs--with nil
+      (cl-letf (((symbol-function 'agent-repl-verbs--agent-repl-repository)
+                 (lambda () (agent-repl-test-verbs--repo-ref)))
+                ((symbol-function 'agent-repl-verbs--read-model)
+                 (lambda (_repository) (setq seen agent-repl-verbs--model-default) nil))
+                ((symbol-function 'agent-repl-verbs--read-prompt)
+                 (lambda (&rest _) "fix")))
+        (agent-repl-create-oneshot-with-model)
+        (should (equal seen "sonnet"))))))
+
 (ert-deftest agent-repl-verbs-read-model-answers-the-typed-model ()
   "A picked model is returned trimmed."
   (agent-repl-test-verbs--with-catalog agent-repl-test-verbs--catalog
