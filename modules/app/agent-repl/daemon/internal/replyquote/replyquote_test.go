@@ -406,3 +406,36 @@ func TestSplitTakesAHighlightApart(t *testing.T) {
 		t.Fatalf("Split = %+v, want %+v", got, want)
 	}
 }
+
+func TestQuestionText(t *testing.T) {
+	tests := []struct {
+		name     string
+		markdown string
+		words    string
+		want     string
+	}{
+		{
+			name:     "plain response",
+			markdown: "1 🔎 the answer",
+			words:    "why?",
+			want:     "⟢ A question about an earlier response of yours:\n\n```\n1 🔎 the answer\n```\n\n⟢ My message:\nwhy?",
+		},
+		{
+			name:     "a fence inside the response is outrun",
+			markdown: "```go\nx\n```",
+			words:    "what is x?",
+			want:     "⟢ A question about an earlier response of yours:\n\n````\n```go\nx\n```\n````\n\n⟢ My message:\nwhat is x?",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act.
+			got := QuestionText(tc.markdown, tc.words)
+
+			// Assert.
+			if got != tc.want {
+				t.Fatalf("QuestionText = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

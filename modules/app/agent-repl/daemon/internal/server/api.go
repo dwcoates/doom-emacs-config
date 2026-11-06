@@ -432,6 +432,13 @@ type server struct {
 	// (response_text.go): while one is held, the next prompt revises the
 	// highlighted final response.
 	highlights responseHighlights
+	// questions is each workspace's held question about a final response
+	// (response_question.go): while one stands, the next prompt is forked into
+	// a child workspace that answers it.
+	questions responseQuestions
+	// responseQuestionTopics is one FeedResponseQuestion push topic per
+	// workspace, carried on its root feed's watch.
+	responseQuestionTopics map[ids.WorkspaceID]*publish.Topic[*frontendv1.FeedResponseQuestion]
 	// fanOut bounds how many unrelated workspaces an agent prompts
 	// (fanout.go).
 	fanOut *fanOut
@@ -603,39 +610,41 @@ func New(deps Deps) (Server, error) {
 
 	life, cancel := context.WithCancel(context.Background())
 	s := &server{
-		deps:                deps,
-		log:                 deps.Log.Global(),
-		life:                life,
-		cancel:              cancel,
-		hostNoticeTopics:    make(map[ids.WorkspaceID]*publish.Topic[*agentreplv1.WatchHostWorkspaceResponse]),
-		hostEvents:          make(map[ids.WorkspaceID]*publish.Events[*agentreplv1.WatchHostWorkspaceResponse]),
-		hostStateTopics:     make(map[ids.WorkspaceID]*publish.Topic[*agentreplv1.HostWorkspace]),
-		webStateTopics:      make(map[ids.WorkspaceID]*publish.Topic[*agentreplv1.WebWorkspaceSessionIdentity]),
-		webTopics:           make(map[ids.WorkspaceID]*publish.Topic[*agentreplv1.WatchWebWorkspaceResponse]),
-		webEvents:           make(map[ids.WorkspaceID]*publish.Events[*agentreplv1.WatchWebWorkspaceResponse]),
-		webReveals:          make(map[ids.WorkspaceID]*webReveal),
-		daemonWatchers:      make(map[*daemonWatcher]struct{}),
-		webBuilds:           make(map[ids.WorkspaceID]map[string]string),
-		webhostBuilds:       make(map[string]string),
-		hostHeld:            make(map[ids.WorkspaceID]int),
-		evals:               newEditorEvals("eval-" + string(deps.Instance)),
-		evalDeadline:        evaluationDeadline,
-		webHeld:             make(map[ids.WorkspaceID]int),
-		webSeen:             make(map[ids.WorkspaceID]bool),
-		movedAway:           make(map[ids.WorkspaceID]bool),
-		watchTokens:         make(map[string]tokenTarget),
-		pages:               make(map[string]*pageStream),
-		hostIdentityAwaited: make(map[ids.WorkspaceID]time.Time),
-		now:                 time.Now,
-		selections:          make(map[ids.WorkspaceID]*selectionState),
-		rollbackPlans:       make(map[string]rollbackPlan),
-		selectionTopics:     make(map[ids.WorkspaceID]*publish.Topic[*selectionState]),
-		imageOverlayTopics:  make(map[ids.WorkspaceID]*publish.Topic[*frontendv1.FeedImageOverlay]),
-		composerReports:     make(map[ids.WorkspaceID]composerReport),
-		highlights:          responseHighlights{held: map[ids.WorkspaceID]responseHighlight{}},
-		fanOut:              newFanOut(),
-		composerUnanswered:  make(map[ids.WorkspaceID][]string),
-		composerEntryTopics: make(map[ids.WorkspaceID]*publish.Topic[*frontendv1.FeedComposerEntry]),
+		deps:                   deps,
+		log:                    deps.Log.Global(),
+		life:                   life,
+		cancel:                 cancel,
+		hostNoticeTopics:       make(map[ids.WorkspaceID]*publish.Topic[*agentreplv1.WatchHostWorkspaceResponse]),
+		hostEvents:             make(map[ids.WorkspaceID]*publish.Events[*agentreplv1.WatchHostWorkspaceResponse]),
+		hostStateTopics:        make(map[ids.WorkspaceID]*publish.Topic[*agentreplv1.HostWorkspace]),
+		webStateTopics:         make(map[ids.WorkspaceID]*publish.Topic[*agentreplv1.WebWorkspaceSessionIdentity]),
+		webTopics:              make(map[ids.WorkspaceID]*publish.Topic[*agentreplv1.WatchWebWorkspaceResponse]),
+		webEvents:              make(map[ids.WorkspaceID]*publish.Events[*agentreplv1.WatchWebWorkspaceResponse]),
+		webReveals:             make(map[ids.WorkspaceID]*webReveal),
+		daemonWatchers:         make(map[*daemonWatcher]struct{}),
+		webBuilds:              make(map[ids.WorkspaceID]map[string]string),
+		webhostBuilds:          make(map[string]string),
+		hostHeld:               make(map[ids.WorkspaceID]int),
+		evals:                  newEditorEvals("eval-" + string(deps.Instance)),
+		evalDeadline:           evaluationDeadline,
+		webHeld:                make(map[ids.WorkspaceID]int),
+		webSeen:                make(map[ids.WorkspaceID]bool),
+		movedAway:              make(map[ids.WorkspaceID]bool),
+		watchTokens:            make(map[string]tokenTarget),
+		pages:                  make(map[string]*pageStream),
+		hostIdentityAwaited:    make(map[ids.WorkspaceID]time.Time),
+		now:                    time.Now,
+		selections:             make(map[ids.WorkspaceID]*selectionState),
+		rollbackPlans:          make(map[string]rollbackPlan),
+		selectionTopics:        make(map[ids.WorkspaceID]*publish.Topic[*selectionState]),
+		imageOverlayTopics:     make(map[ids.WorkspaceID]*publish.Topic[*frontendv1.FeedImageOverlay]),
+		composerReports:        make(map[ids.WorkspaceID]composerReport),
+		highlights:             responseHighlights{held: map[ids.WorkspaceID]responseHighlight{}},
+		questions:              responseQuestions{held: map[ids.WorkspaceID]*frontendv1.FeedId{}},
+		responseQuestionTopics: make(map[ids.WorkspaceID]*publish.Topic[*frontendv1.FeedResponseQuestion]),
+		fanOut:                 newFanOut(),
+		composerUnanswered:     make(map[ids.WorkspaceID][]string),
+		composerEntryTopics:    make(map[ids.WorkspaceID]*publish.Topic[*frontendv1.FeedComposerEntry]),
 		// The zoom starts at the persistence default; Prime seeds the stored
 		// value onto the topic before anything is served.
 		feedTextScale: wsm.DefaultFeedTextScale,
