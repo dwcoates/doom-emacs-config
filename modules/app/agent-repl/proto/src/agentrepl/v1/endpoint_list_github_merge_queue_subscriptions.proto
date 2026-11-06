@@ -1,0 +1,40 @@
+// endpoint_list_github_merge_queue_subscriptions.proto —
+// ListGithubMergeQueueSubscriptions: the GitHub merge queues one workspace
+// follows, each with its subscription's health. AGENT API section. A READ.
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/github_merge_queue.proto";
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message ListGithubMergeQueueSubscriptionsRequest {
+  // The workspace whose subscriptions are listed.
+  workspace.v1.WorkspaceRef subscriber = 1;
+}
+
+// THE ARM IS THE OUTCOME.
+message ListGithubMergeQueueSubscriptionsResponse {
+  oneof result {
+    ListGithubMergeQueueSubscriptionsSuccess success = 1;
+    ListGithubMergeQueueSubscriptionsError error = 2;
+  }
+}
+
+// The workspace's subscriptions.
+message ListGithubMergeQueueSubscriptionsSuccess {
+  // Every subscription the workspace holds. Empty when it holds none.
+  repeated GithubMergeQueueSubscription subscriptions = 1;
+}
+
+message ListGithubMergeQueueSubscriptionsError {
+  oneof cause {
+    // The workspace is not in the daemon's registry.
+    ListGithubMergeQueueSubscriptionsUnknownSubscriber unknown_subscriber = 1;
+  }
+}
+
+// The workspace id is not in the daemon's registry. DELIBERATELY EMPTY.
+message ListGithubMergeQueueSubscriptionsUnknownSubscriber {}

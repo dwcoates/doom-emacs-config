@@ -1,0 +1,173 @@
+// github_merge_queue.proto — A GITHUB MERGE QUEUE AS THE DAEMON FOLLOWS IT
+// for a workspace: which queue, the subscription that follows it, what the
+// queue holds now, and each change the daemon tells the subscriber about.
+// Shared by the merge-queue endpoints (SubscribeGithubMergeQueue,
+// UnsubscribeGithubMergeQueue, ListGithubMergeQueueSubscriptions) and by the
+// notice the daemon delivers (GithubMergeQueueNotice).
+//
+// THIS IS GITHUB'S MERGE QUEUE, the queue a repository's branch protection
+// runs on github.com, and nothing of agent-repl's own landing queue
+// (merge_queue_status.proto, SubscribeMergeQueue), which shares only the
+// words.
+//
+// FOLLOWING ONE PULL REQUEST through its queue needs none of this: it is the
+// pull-request subscription's PULL_REQUEST_NOTICE_EVENT_MERGE_QUEUE event
+// (pull_request.proto). This file is for a workspace that watches a whole
+// queue move, whoever's pull requests are in it.
+//
+// THE DAEMON READS, THE AGENT IS TOLD, as for a pull request. The daemon
+// reads the queue's entries in order on its pull-request cadence, compares
+// them with what it last told each subscriber, and tells only the
+// difference. An entry that left is read once more, to tell whether it
+// merged or was removed, and why. A read missed while the daemon was down is
+// made up by the next one, which compares against what was last told: an
+// entry can be told late, never lost. An entry that joined and left between
+// two reads is never seen by this subscription, which follows the queue's
+// standing order; following one pull request (the event above) reads its
+// timeline instead and misses no joining.
+//
+// TOLD ONCE. What a subscriber was told is recorded with the subscription in
+// the same transaction as its notice, as for a pull request.
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/pull_request.proto";
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// ---- Identity: which queue ----
+
+// One repository on github.com.
+message GithubRepositoryRef {
+  // The repository's owner: a user or an organization login.
+  string owner = 1;
+  // The repository's name on GitHub.
+  string repo = 2;
+}
+
+// One branch's merge queue. GitHub keeps at most one queue per branch, so
+// the repository and branch name it exactly.
+message GithubMergeQueueRef {
+  // The repository.
+  GithubRepositoryRef repository = 1;
+  // The branch the queue merges into, by its short name (`main`).
+  string branch = 2;
+}
+
+// ---- The subscription: who follows which queue, and how it fares ----
+
+// One workspace's subscription to one merge queue. A workspace holds at most
+// one per queue. It ends only when the subscriber unsubscribes or closes: a
+// queue never ends on its own.
+message GithubMergeQueueSubscription {
+  // The workspace whose agent is told.
+  workspace.v1.WorkspaceRef subscriber = 1;
+  // The queue followed.
+  GithubMergeQueueRef merge_queue = 2;
+  // Whether the daemon's reads of the queue are succeeding: the same health
+  // a pull-request subscription reports, since both are reads of GitHub
+  // through the same `gh` login and fail for the same causes.
+  PullRequestSubscriptionHealth health = 3;
+}
+
+// ---- The queue now ----
+
+// A followed queue as the daemon last read it: what a subscriber is given
+// when it subscribes, and with every notice.
+message GithubMergeQueueStatus {
+  // The queue's web address.
+  string url = 1;
+  // Every entry, head first: the first entry merges next. Empty when the
+  // queue holds none.
+  repeated GithubMergeQueueEntry entries = 2;
+}
+
+// One pull request in a queue.
+message GithubMergeQueueEntry {
+  // The pull request.
+  PullRequestRef pull_request = 1;
+  // Its title.
+  string title = 2;
+  // Its web address.
+  string url = 3;
+  // What its entry is doing.
+  PullRequestMergeQueueEntryState state = 4;
+}
+
+// ---- Activity: what a notice tells ----
+
+// What the daemon tells one subscriber about one queue, delivered as a
+// deferred prompt of origin
+// conversation.v1.PromptOrigin.PROMPT_ORIGIN_GITHUB_MERGE_QUEUE_NOTICE. A
+// subscriber holds at most one untold notice per queue: a newer read
+// supersedes it with a notice listing everything since the subscriber was
+// last told.
+message GithubMergeQueueNotice {
+  // The queue.
+  GithubMergeQueueRef merge_queue = 1;
+  // Every change since the subscriber was last told, departures before
+  // arrivals, each in queue order. Empty only when the notice exists to tell
+  // `health`.
+  repeated GithubMergeQueueActivity activity = 2;
+  // The queue as it stands after the activity.
+  GithubMergeQueueStatus status = 3;
+  // The subscription's health. SET only when the health changed since the
+  // subscriber was last told: the first failure of a stretch.
+  optional PullRequestSubscriptionHealth health = 4;
+}
+
+// One change to a followed queue. THE ARM IS THE KIND.
+message GithubMergeQueueActivity {
+  oneof activity {
+    // A pull request joined the queue.
+    GithubMergeQueueActivityJoined joined = 1;
+    // A pull request left the queue because the queue merged it.
+    GithubMergeQueueActivityMerged merged = 2;
+    // A pull request left the queue without merging.
+    GithubMergeQueueActivityRemoved removed = 3;
+    // A different entry now heads the queue, and merges next.
+    GithubMergeQueueActivityHeadChanged head_changed = 4;
+    // The queue, which held entries when last told, now holds none.
+    GithubMergeQueueActivityEmptied emptied = 5;
+  }
+}
+
+// A pull request joined the queue.
+message GithubMergeQueueActivityJoined {
+  // The entry as read.
+  GithubMergeQueueEntry entry = 1;
+  // Where it stands.
+  PullRequestMergeQueuePosition position = 2;
+}
+
+// The queue merged a pull request.
+message GithubMergeQueueActivityMerged {
+  // The pull request.
+  PullRequestRef pull_request = 1;
+  // Its title.
+  string title = 2;
+  // The commit the merge produced on the queue's branch.
+  string merge_commit_sha = 3;
+}
+
+// A pull request left the queue without merging.
+message GithubMergeQueueActivityRemoved {
+  // The pull request.
+  PullRequestRef pull_request = 1;
+  // Its title.
+  string title = 2;
+  // GitHub's reason, verbatim, from the pull request's latest
+  // `RemovedFromMergeQueueEvent`. UNSET when GitHub gives none.
+  optional string reason = 3;
+}
+
+// A new head of the queue.
+message GithubMergeQueueActivityHeadChanged {
+  // The entry now at the head.
+  GithubMergeQueueEntry entry = 1;
+}
+
+// The queue emptied. DELIBERATELY EMPTY: the arm is the change.
+message GithubMergeQueueActivityEmptied {}

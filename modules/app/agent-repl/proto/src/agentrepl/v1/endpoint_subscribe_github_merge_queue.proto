@@ -1,0 +1,134 @@
+// endpoint_subscribe_github_merge_queue.proto — SubscribeGithubMergeQueue:
+// tell one workspace's agent each time a repository branch's GITHUB merge
+// queue moves: an entry joined, merged, or was removed, or the head changed.
+// AGENT API section.
+//
+// TO FOLLOW ONE PULL REQUEST through its queue, subscribe to the pull request
+// with PULL_REQUEST_NOTICE_EVENT_MERGE_QUEUE instead (an owned link already
+// does). This rpc is for watching the whole queue.
+//
+// DELIVERY. Each notice (GithubMergeQueueNotice) is submitted to the
+// subscriber's session as a deferred prompt of origin
+// conversation.v1.PromptOrigin.PROMPT_ORIGIN_GITHUB_MERGE_QUEUE_NOTICE: it
+// waits behind a running turn, wakes an idle agent, and the feed draws no row
+// for it.
+//
+// NOTHING SLIPS BETWEEN READING AND FOLLOWING. The answer carries the queue
+// as it stands when the subscription is taken, and every change after that
+// read is told.
+//
+// SCOPE AND LIFETIME. A subscriber holds at most one subscription per queue;
+// subscribing again is an answer (`already_subscribed`) that keeps what it
+// was told. A subscription ends when the subscriber unsubscribes or closes
+// however it closes. It is DURABLE across a daemon restart and a handover.
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/github_merge_queue.proto";
+import "agentrepl/v1/pull_request.proto";
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message SubscribeGithubMergeQueueRequest {
+  // The workspace whose agent is told: the caller's own when an agent
+  // subscribes itself. Must be open (`subscriber_closed`).
+  workspace.v1.WorkspaceRef subscriber = 1;
+  // Which repository. THE ARM IS HOW IT IS NAMED. Unset is a malformed
+  // request (Connect InvalidArgument).
+  oneof repository {
+    // Named exactly.
+    GithubRepositoryRef named = 2;
+    // The subscriber's own repository, resolved through its `origin` remote.
+    SubscribeGithubMergeQueueSubscribersRepository subscribers = 3;
+  }
+  // The branch whose queue is followed, by its short name. UNSET is the
+  // repository's default branch, as GitHub names it.
+  optional string branch = 4;
+}
+
+// The subscriber's own repository. DELIBERATELY EMPTY: the arm is the
+// choice.
+message SubscribeGithubMergeQueueSubscribersRepository {}
+
+// THE ARM IS THE OUTCOME.
+message SubscribeGithubMergeQueueResponse {
+  oneof result {
+    SubscribeGithubMergeQueueSuccess success = 1;
+    SubscribeGithubMergeQueueError error = 2;
+  }
+}
+
+// The request was served.
+message SubscribeGithubMergeQueueSuccess {
+  // The queue the request named, resolved: the repository and the branch
+  // (the default branch's name when the request named none).
+  GithubMergeQueueRef merge_queue = 1;
+  // The queue as the daemon read it in serving the request.
+  GithubMergeQueueStatus status = 2;
+  // What the request came to. THE ARM IS WHICH.
+  oneof taken {
+    // The subscriber held no subscription to this queue, and now does.
+    SubscribeGithubMergeQueueSuccessSubscribed subscribed = 3;
+    // The subscriber already held one; it stands unchanged.
+    SubscribeGithubMergeQueueSuccessAlreadySubscribed already_subscribed = 4;
+  }
+}
+
+// A new subscription.
+message SubscribeGithubMergeQueueSuccessSubscribed {
+  // The subscription as taken.
+  GithubMergeQueueSubscription subscription = 1;
+}
+
+// A subscription already held.
+message SubscribeGithubMergeQueueSuccessAlreadySubscribed {
+  // The subscription as it stands.
+  GithubMergeQueueSubscription subscription = 1;
+}
+
+// The daemon's refusals; nothing was subscribed. Validation failures (an
+// unset arm, an empty owner, repository or branch) are Connect
+// InvalidArgument.
+message SubscribeGithubMergeQueueError {
+  oneof cause {
+    // The subscriber is not in the daemon's registry.
+    SubscribeGithubMergeQueueUnknownSubscriber unknown_subscriber = 1;
+    // The subscriber is closed: it runs no agent to tell, and a close is
+    // what ends a subscription, so one taken while closed would never end.
+    SubscribeGithubMergeQueueSubscriberClosed subscriber_closed = 2;
+    // The subscriber's repository is not on github.com.
+    SubscribeGithubMergeQueueNotOnGithub not_on_github = 3;
+    // The branch has no merge queue: GitHub runs none for it, so there is
+    // nothing to follow.
+    SubscribeGithubMergeQueueNoMergeQueue no_merge_queue = 4;
+    // The queue could not be read, so its standing to subscribe from is
+    // unknown.
+    SubscribeGithubMergeQueueUnreadable unreadable = 5;
+  }
+}
+
+// The subscriber id is not in the daemon's registry. DELIBERATELY EMPTY.
+message SubscribeGithubMergeQueueUnknownSubscriber {}
+
+// The subscriber is closed. DELIBERATELY EMPTY.
+message SubscribeGithubMergeQueueSubscriberClosed {}
+
+// The subscriber's repository names no github.com repository.
+message SubscribeGithubMergeQueueNotOnGithub {
+  // The repository's `origin` remote, verbatim.
+  string origin = 1;
+}
+
+// No merge queue runs for the branch.
+message SubscribeGithubMergeQueueNoMergeQueue {
+  // The queue the request named, resolved.
+  GithubMergeQueueRef merge_queue = 1;
+}
+
+// The read that would anchor the subscription failed.
+message SubscribeGithubMergeQueueUnreadable {
+  // Why.
+  PullRequestGitHubFailure cause = 1;
+}

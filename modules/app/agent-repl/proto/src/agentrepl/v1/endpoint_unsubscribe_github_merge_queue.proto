@@ -1,0 +1,54 @@
+// endpoint_unsubscribe_github_merge_queue.proto —
+// UnsubscribeGithubMergeQueue: end one workspace's subscription to a GitHub
+// merge queue. AGENT API section.
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/github_merge_queue.proto";
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message UnsubscribeGithubMergeQueueRequest {
+  // The workspace whose subscription ends.
+  workspace.v1.WorkspaceRef subscriber = 1;
+  // The queue it follows.
+  GithubMergeQueueRef merge_queue = 2;
+}
+
+// THE ARM IS THE OUTCOME.
+message UnsubscribeGithubMergeQueueResponse {
+  oneof result {
+    UnsubscribeGithubMergeQueueSuccess success = 1;
+    UnsubscribeGithubMergeQueueError error = 2;
+  }
+}
+
+// The request was served. Holding no such subscription is an answer, not a
+// failure: either way the subscriber now holds none.
+message UnsubscribeGithubMergeQueueSuccess {
+  // THE ARM IS WHAT WAS FOUND.
+  oneof ended {
+    // The subscription ended.
+    UnsubscribeGithubMergeQueueSuccessUnsubscribed unsubscribed = 1;
+    // There was no subscription to end.
+    UnsubscribeGithubMergeQueueSuccessNotSubscribed not_subscribed = 2;
+  }
+}
+
+// Ended. DELIBERATELY EMPTY.
+message UnsubscribeGithubMergeQueueSuccessUnsubscribed {}
+
+// None held. DELIBERATELY EMPTY.
+message UnsubscribeGithubMergeQueueSuccessNotSubscribed {}
+
+message UnsubscribeGithubMergeQueueError {
+  oneof cause {
+    // The subscriber is not in the daemon's registry.
+    UnsubscribeGithubMergeQueueUnknownSubscriber unknown_subscriber = 1;
+  }
+}
+
+// The subscriber id is not in the daemon's registry. DELIBERATELY EMPTY.
+message UnsubscribeGithubMergeQueueUnknownSubscriber {}
