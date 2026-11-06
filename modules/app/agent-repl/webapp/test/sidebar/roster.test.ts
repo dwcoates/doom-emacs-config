@@ -944,7 +944,7 @@ describe("a section's folded count", () => {
     );
     const [hidden, merged] = inRail(drawn, () => [
       cascadedValue(countOf(drawn, ".hidden-section"), property),
-      cascadedValue(countOf(drawn, ".merged-section"), property),
+      cascadedValue(countOf(drawn, ".merged-section .merged-group-head"), property),
     ]);
     expect(hidden).toBe(merged);
   });
@@ -955,13 +955,13 @@ describe("a section's folded count", () => {
     expect([countOf(drawn, ".hidden-section").textContent, pane(drawn).querySelectorAll(".hidden-section .row").length]).toEqual(["(3)", 3]);
   });
 
-  it("draws the Recently Merged section's label with no count", () => {
+  it("draws the Recently Merged section's label with no folded count", () => {
     const drawn = drawWorkspaceRoster(
       roster({ merged: mergedSection([row({ id: "ws-9", status: { case: "merged", value: {} } })]) }),
       sidebarContext(),
     );
     const head = pane(drawn).querySelector(".merged-section > .repo-head") as HTMLElement;
-    expect([head.querySelector(".sb-label")?.textContent, head.querySelector(".sb-count")]).toEqual(["Recently Merged", null]);
+    expect([head.querySelector(".sb-label")?.textContent, head.querySelector("[data-section-count]")]).toEqual(["Recently Merged", null]);
   });
 
   it("draws the count a step smaller than the label", () => {
