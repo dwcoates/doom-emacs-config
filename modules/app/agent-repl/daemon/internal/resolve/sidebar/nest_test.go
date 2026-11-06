@@ -339,6 +339,52 @@ func TestRosterDividesAFamilyWhereItsRepositoryChanges(t *testing.T) {
 	}
 }
 
+// mixedFamily is a parent of repo with an own-repository child first, then
+// (when foreign) one child of otherRepo.
+func mixedFamily(foreign bool) sidebar.Registry {
+	parent := placed(workspace("w-p", "parent"), 1)
+	own := placed(workspace("w-a1", "alpha-one"), 2)
+	other := placed(workspace("w-b1", "beta-one"), 3)
+	other.Repo, other.Dir = otherRepo.ID, "/repos/two/w-b1"
+	own.Parent, other.Parent = &parent.ID, &parent.ID
+	if !foreign {
+		return registry(parent, own)
+	}
+	reg := registry(parent, own, other)
+	reg.Repositories = append(reg.Repositories, otherRepo)
+	return reg
+}
+
+func TestRosterHeadsTheParentsRepositoryOnceAChildIsOfAnotherRepository(t *testing.T) {
+	tests := []struct {
+		name    string
+		foreign bool
+		want    []string
+	}{
+		{name: "the parent's own children are headed beside a foreign child", foreign: true, want: []string{"alpha", "beta"}},
+		{name: "no header is drawn once no child is of another repository", foreign: false, want: []string{""}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			r, _ := newResolver(t)
+
+			// Act.
+			r.SetRegistry(mixedFamily(tc.foreign))
+
+			// Assert.
+			parent := rosterwalk.UnsectionedRows(latest(t, r).GetRepository().GetSections()[0])[0]
+			var got []string
+			for _, child := range parent.GetChildren() {
+				got = append(got, child.GetRepositoryDivider().GetName())
+			}
+			if !equal(got, tc.want) {
+				t.Fatalf("dividers = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestTheTabBarWalksAChildOfAnotherRepositoryWithItsFamily(t *testing.T) {
 	// Act.
 	got := sidebar.Tabs(crossRepositoryFamily(), dlog.NewTestLogger())
