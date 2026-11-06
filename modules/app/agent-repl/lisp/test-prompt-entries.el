@@ -575,7 +575,7 @@ ANSWER is a response plist, or (:signal ERR) to signal it.  Binds
     (agent-repl-prompt-entries-open-below)
     ;; Assert
     (should (equal (list (agent-repl-test-prompt-entries--line) (plist-get (car asked) :direction) (plist-get (car asked) :label))
-                   '("1.2 - " (:arm :next) "1.1")))))
+                   '("1.2 -    " (:arm :next) "1.1")))))
 
 (ert-deftest agent-repl-test-prompt-entries-O-on-an-entry-opens-the-previous-nodes-entry ()
   "`O' on an entry line opens a line above filled with the previous node's label."
@@ -689,7 +689,7 @@ ANSWER is a response plist, or (:signal ERR) to signal it.  Binds
                          (list 'insert t (list (kbd "M-k") (agent-repl-prompt-entries--on-entry-binding
                                                           #'agent-repl-prompt-entries-open-sibling-below)))
                          (list 'insert t (list (kbd "C-SPC") (agent-repl-prompt-entries--on-entry-binding
-                                                            #'agent-repl-prompt-entries-open-sibling-below))))))))
+                                                            #'agent-repl-prompt-entries-advance-or-open-sibling))))))))
 
 ;;;; ---- Opening an entry's sibling ----
 
@@ -1015,3 +1015,51 @@ is recorded on `flashed'."
 (provide 'test-prompt-entries)
 
 ;;; test-prompt-entries.el ends here
+
+;;;; ---- C-SPC advances an empty entry ----
+
+(ert-deftest agent-repl-test-prompt-entries-C-SPC-on-an-empty-entry-relabels-to-the-next-sibling ()
+  "`C-SPC' on `1.1 - ' relabels it to the daemon's `:next' node, `1.2 - '."
+  (agent-repl-test-prompt-entries--stepping (agent-repl-test-prompt-entries--found "1.2")
+    ;; Arrange
+    (save-excursion (goto-char 7) (delete-char 3) (insert "   "))
+    (goto-char (line-end-position))
+    ;; Act
+    (agent-repl-prompt-entries-advance-or-open-sibling)
+    ;; Assert
+    (should (equal (list (agent-repl-test-prompt-entries--line) (plist-get (car asked) :direction) (plist-get (car asked) :label))
+                   '("1.2 -    " (:arm :next) "1.1")))))
+
+(ert-deftest agent-repl-test-prompt-entries-C-SPC-on-a-bare-label-relabels-too ()
+  "`C-SPC' on `1.1' with no dash is empty as well."
+  (agent-repl-test-prompt-entries--stepping (agent-repl-test-prompt-entries--found "2")
+    ;; Arrange
+    (save-excursion (goto-char 4) (delete-char 6) (insert "      "))
+    (goto-char (line-end-position))
+    ;; Act
+    (agent-repl-prompt-entries-advance-or-open-sibling)
+    ;; Assert
+    (should (equal (agent-repl-test-prompt-entries--line) "2      "))))
+
+(ert-deftest agent-repl-test-prompt-entries-C-SPC-on-an-empty-last-sibling-flashes ()
+  "With no later sibling or aunt the entry keeps its label and the composer says so."
+  (agent-repl-test-prompt-entries--stepping agent-repl-test-prompt-entries--none
+    ;; Arrange
+    (save-excursion (goto-char 7) (delete-char 3) (insert "   "))
+    (goto-char (line-end-position))
+    ;; Act
+    (agent-repl-prompt-entries-advance-or-open-sibling)
+    ;; Assert
+    (should (equal (list (agent-repl-test-prompt-entries--line) flashed)
+                   '("1.1 -    " (("ws-1" "1.1 is the last sibling to answer")))))))
+
+(ert-deftest agent-repl-test-prompt-entries-C-SPC-on-a-filled-entry-opens-the-sibling-below ()
+  "`C-SPC' on `1.1 - yes' opens `1.2 - ' below, as `M-k' does."
+  (agent-repl-test-prompt-entries--siblings "2.1"
+    ;; Arrange
+    (goto-char 3)
+    ;; Act
+    (agent-repl-prompt-entries-advance-or-open-sibling)
+    ;; Assert
+    (should (equal (list (agent-repl-test-prompt-entries--line) (line-number-at-pos) asked)
+                   '("1.2 - " 2 nil)))))
