@@ -292,5 +292,13 @@ func endWorkspaceSubscriptionsInTx(ctx context.Context, tx *sql.Tx, ws Workspace
 	if _, err := tx.ExecContext(ctx, `DELETE FROM pull_request_untold_notices WHERE subscriber = ?`, ws); err != nil {
 		return 0, err
 	}
+	// So do its GitHub merge-queue subscriptions and their owed notices
+	// (githubmergequeues.go).
+	if _, err := tx.ExecContext(ctx, `DELETE FROM github_merge_queue_subscriptions WHERE subscriber = ?`, ws); err != nil {
+		return 0, err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM github_merge_queue_untold_notices WHERE subscriber = ?`, ws); err != nil {
+		return 0, err
+	}
 	return res.RowsAffected()
 }

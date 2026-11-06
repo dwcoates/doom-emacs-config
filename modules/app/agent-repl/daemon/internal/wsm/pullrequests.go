@@ -99,10 +99,11 @@ const (
 	PullRequestEventReviewComment
 	PullRequestEventState
 	PullRequestEventChecks
+	PullRequestEventMergeQueue
 )
 
 // pullRequestEvents is every declared event, in order.
-var pullRequestEvents = []PullRequestEvent{PullRequestEventComment, PullRequestEventReview, PullRequestEventReviewComment, PullRequestEventState, PullRequestEventChecks}
+var pullRequestEvents = []PullRequestEvent{PullRequestEventComment, PullRequestEventReview, PullRequestEventReviewComment, PullRequestEventState, PullRequestEventChecks, PullRequestEventMergeQueue}
 
 // String names the event in records.
 func (e PullRequestEvent) String() string {
@@ -117,6 +118,8 @@ func (e PullRequestEvent) String() string {
 		return "state"
 	case PullRequestEventChecks:
 		return "checks"
+	case PullRequestEventMergeQueue:
+		return "merge_queue"
 	}
 	return fmt.Sprintf("PullRequestEvent(%d)", int(e))
 }
@@ -145,13 +148,22 @@ func (s PullRequestEvents) Valid() bool {
 	return s != 0 && s&^AllPullRequestEvents() == 0
 }
 
+// Members is every member, in declaration order.
+func (s PullRequestEvents) Members() []PullRequestEvent {
+	var out []PullRequestEvent
+	for _, e := range pullRequestEvents {
+		if s.Has(e) {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
 // String names the members in order, comma-separated.
 func (s PullRequestEvents) String() string {
 	var names []string
-	for _, e := range pullRequestEvents {
-		if s.Has(e) {
-			names = append(names, e.String())
-		}
+	for _, e := range s.Members() {
+		names = append(names, e.String())
 	}
 	return strings.Join(names, ",")
 }

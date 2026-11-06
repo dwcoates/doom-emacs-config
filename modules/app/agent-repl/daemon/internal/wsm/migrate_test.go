@@ -1163,12 +1163,43 @@ func TestTheMigrationDropsTheDaemonsSlackPosts(t *testing.T) {
 	}
 }
 
+// migrationTo is the step that carries a file to layout TO.
+func migrationTo(t *testing.T, to int) migration {
+	t.Helper()
+	for _, m := range migrations {
+		if m.To == to {
+			return m
+		}
+	}
+	t.Fatalf("no migration carries a file to layout %d", to)
+	return migration{}
+}
+
 func TestTheDropOfTheSlackPostsIsBreaking(t *testing.T) {
 	// Arrange / Act
-	last := migrations[len(migrations)-1]
+	step := migrationTo(t, 103)
 
 	// Assert
-	if last.To != 103 || last.Name != "drop_workspace_slack_posts" || last.Kind != MigrationBreaking {
-		t.Fatalf("the last migration = %+v, want layout 103 dropping the Slack posts, breaking", last)
+	if step.Name != "drop_workspace_slack_posts" || step.Kind != MigrationBreaking {
+		t.Fatalf("migration 103 = %+v, want the drop of the Slack posts, breaking", step)
+	}
+}
+
+func TestTheGithubMergeQueuesStepIsAdditiveAndCreatesBothTables(t *testing.T) {
+	// Arrange
+	step := migrationTo(t, 104)
+	path := fixtureAt(t, 103)
+
+	// Act
+	execRaw(t, path, step.DDL)
+
+	// Assert
+	if step.Name != "github_merge_queues" || step.Kind != MigrationAdditive {
+		t.Fatalf("migration 104 = %+v, want the GitHub merge queues, additive", step)
+	}
+	for _, table := range []string{"github_merge_queue_subscriptions", "github_merge_queue_untold_notices"} {
+		if got := rawScalar[int](t, path, `SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = ?`, table); got != 1 {
+			t.Fatalf("table %s exists %d times, want once", table, got)
+		}
 	}
 }

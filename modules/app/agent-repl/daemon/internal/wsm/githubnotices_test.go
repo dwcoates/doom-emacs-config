@@ -14,7 +14,7 @@ import (
 // githubKinds is every GitHub subscription kind the shared helpers serve. A
 // kind added without its entry here goes unchecked by
 // TestEveryGithubKindsTablesFitTheSharedHelpers.
-var githubKinds = []githubTables{pullRequestTables}
+var githubKinds = []githubTables{pullRequestTables, githubMergeQueueTables}
 
 func TestKeyWhereMatchesEveryKeyColumn(t *testing.T) {
 	// Act

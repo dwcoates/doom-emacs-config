@@ -204,6 +204,7 @@ var migrations = []migration{
 	{To: 101, Name: "merge_queue_slot", Kind: MigrationAdditive, DDL: mergeQueueSlotDDL},
 	{To: 102, Name: "lifecycle_hooks", Kind: MigrationAdditive, DDL: lifecycleHooksDDL},
 	{To: 103, Name: "drop_workspace_slack_posts", Kind: MigrationBreaking, DDL: slackPostsDropDDL},
+	{To: 104, Name: "github_merge_queues", Kind: MigrationAdditive, DDL: githubMergeQueuesDDL},
 }
 
 // mergeQueueLookupIndexesDDL keys the two lookups every workspace read makes
