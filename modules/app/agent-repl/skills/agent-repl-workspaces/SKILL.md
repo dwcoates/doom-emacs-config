@@ -32,8 +32,9 @@ not the relationship's default, its landing target:
   - `child -parent WS` works on part of WS's work and keeps coordinating
     with it. WS is its parent and OWNER: the sidebar nests it under WS (under
     a divider naming its repository when that is not WS's), WS FOLLOWS it
-    automatically without `workspace subscribe` (WS is told its turn ends,
-    its questions, its landing and its close), and WS reviews it and closes
+    automatically without `workspace subscribe` (WS is told its questions,
+    its landing and its close; NOT its turn ends, see "turn-end
+    subscriptions" below), and WS reviews it and closes
     it. WS cannot be closed, hidden, finished or merged away while the child
     is open.
   - `peer` is tangential, self-sufficient, fire-and-forget: top level,
@@ -290,12 +291,27 @@ user in the same response what it reorganized and why.
 - `workspace subscribe WS -events ...` has this workspace's agent told, as a
   prompt drawn nowhere, when WS's turn starts or ends, it needs input, it lands
   or it closes. Subscribe instead of polling, to follow a peer or an unrelated
-  workspace (a parent already follows its children); `workspace unsubscribe WS`
+  workspace (a parent already follows its children's questions, landing and
+  close); `workspace unsubscribe WS`
   ends it. A subscription ends with this workspace's close (re-opening does not
   restore it) and when WS is forgotten; WS closing is an event it tells, and
   it goes on following WS if WS is opened again. A notice that waited
   behind your turns lists every change since the last one you were told,
   oldest first, and its status is WS as it stands when the notice is made.
+
+- TURN-END SUBSCRIPTIONS (`-events turn_ended`) ARE THE TIGHTEST LEVEL, and
+  nothing grants one automatically, not even `create -relationship child`:
+  each notice wakes this workspace's agent at the end of every turn of WS.
+  Subscribe so only when this workspace truly needs very tight coordination
+  with WS: a SUBTASK it dispatched and builds on turn by turn (it integrates
+  each result, answers each handoff, or cannot proceed until WS's turn is
+  over), right after the create (`workspace subscribe NEW -events
+  turn_ended`; the answer carries WS's status, so no turn end slips between).
+  Never for a tangential one-shot, a side task, a peer, or a child whose
+  landing or close is all this workspace waits for: those are told their
+  landing, close and questions already (a child) or by subscribing to
+  `landed,closed` (anything else). Unsubscribe once the tight coordination
+  ends.
 
 ## Registering a repository (`repository register`)
 
