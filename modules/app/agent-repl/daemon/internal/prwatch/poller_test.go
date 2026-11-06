@@ -9,6 +9,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ghclient"
+	"agent-repld/internal/ids"
 	"agent-repld/internal/wsm"
 )
 
@@ -248,5 +249,197 @@ func TestNewRefusesAMissingCollaborator(t *testing.T) {
 	// Assert
 	if err == nil {
 		t.Fatal("New(Deps{}) = nil, want refused")
+	}
+}
+
+func TestAPullRequestNoticeIsDeliveredUnderItsOwnBriefAndOrigin(t *testing.T) {
+	// Arrange
+	r := newRig(t)
+	r.subscribe(t, wsm.PullRequestEventComment)
+	owed := wsm.PullRequestOwed{Subscriber: r.ws, PullRequest: prK, Pending: []string{"one."}, Status: "open"}
+	if err := r.db.OwePullRequestNotice(context.Background(), r.ws, prK, []string{"one."}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	n := pullRequestNotice(r.db, owed)
+	errRecord := n.record(context.Background(), "turn-1", []string{"one."}, 1)
+
+	// Assert
+	if n.label != "pull request `o/r#7`" || n.brief != BriefNotice || n.origin != Origin || n.noun != "pull-request" || n.subject != "pull request" ||
+		n.fields["pull_request"] != "o/r#7" || n.fields["subscriber"] != string(r.ws) {
+		t.Fatalf("notice = %+v", n)
+	}
+	left, err := r.db.OwedPullRequestNotices(context.Background())
+	if errRecord != nil || err != nil || len(left) != 0 {
+		t.Fatalf("record = %v, owed after = %+v, %v; want it recorded in the store", errRecord, left, err)
+	}
+}
+
+// queuedPR is the rig's pull request queued on main at its place among
+// ENTRIES, with its timeline EVENTS.
+func queuedPR(g *gql, state, group string, entries []remoteQueueEntry, events ...remoteQueueEvent) {
+	g.setFacts(prK.Number, factsJSON("main", &remoteEntryFacts{State: state, GroupHead: group}, events...))
+	g.setQueue("main", queueJSON(entries...))
+}
+
+func TestAPullRequestIsFollowedThroughItsMergeQueue(t *testing.T) {
+	joined := remoteQueueEvent{ID: "a1", Actor: "dodge", At: t0}
+	tests := []struct {
+		name    string
+		arrange func(g *gql, r *rig)
+		want    []string
+	}{
+		{name: "joining the queue", arrange: func(g *gql, r *rig) {
+			queuedPR(g, "QUEUED", "", []remoteQueueEntry{entry(3, "QUEUED"), entry(prK.Number, "QUEUED")}, joined)
+		}, want: []string{"The pull request joined the merge queue by @dodge: it is 2 of 2 in the merge queue, 1 entry ahead of it.",
+			"It now stands open, 2 of 2 in the merge queue, 1 entry ahead of it, waiting its turn"}},
+		{name: "moving up to the head", arrange: func(g *gql, r *rig) {
+			queuedPR(g, "QUEUED", "", []remoteQueueEntry{entry(3, "QUEUED"), entry(prK.Number, "QUEUED")}, joined)
+			r.tick()
+			queuedPR(g, "AWAITING_CHECKS", "", []remoteQueueEntry{entry(prK.Number, "AWAITING_CHECKS")}, joined)
+		}, want: []string{"The pull request moved up the merge queue: it was 2 of 2 in the merge queue, 1 entry ahead of it, and is now at the head of the merge queue (of 1), merging next.",
+			"The pull request's merge queue entry is now running its merge group's checks."}},
+		{name: "a merge group check failing and the removal", arrange: func(g *gql, r *rig) {
+			queuedPR(g, "AWAITING_CHECKS", "group1", []remoteQueueEntry{entry(prK.Number, "AWAITING_CHECKS")}, joined)
+			r.tick()
+			r.gh.set(pathChecks("group1"), mustJSON(map[string]any{"check_runs": []map[string]any{{"id": 9, "name": "ci", "status": "completed", "conclusion": "failure"}}}))
+			g.setFacts(prK.Number, factsJSON("main", nil, joined, remoteQueueEvent{ID: "r1", Removed: true, Reason: ptr("the merge group's checks failed"), At: t0.Add(1)}))
+		}, want: []string{"The pull request was removed from the merge queue: the merge group's checks failed."}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			r := newRig(t)
+			g := r.withGQL()
+			g.setFacts(prK.Number, factsJSON("main", nil))
+			r.subscribe(t, wsm.PullRequestEventMergeQueue)
+			tt.arrange(g, r)
+
+			// Act
+			r.tick()
+
+			// Assert
+			told := r.told()
+			if len(told) == 0 {
+				t.Fatal("nothing was told")
+			}
+			last := told[len(told)-1]
+			for _, want := range tt.want {
+				if !strings.Contains(last, want) {
+					t.Fatalf("notice %q lacks %q", last, want)
+				}
+			}
+		})
+	}
+}
+
+func TestAMergeGroupsFinishedCheckIsToldOnce(t *testing.T) {
+	// Arrange
+	r := newRig(t)
+	g := r.withGQL()
+	joined := remoteQueueEvent{ID: "a1", At: t0}
+	queuedPR(g, "AWAITING_CHECKS", "group1", []remoteQueueEntry{entry(prK.Number, "AWAITING_CHECKS")}, joined)
+	r.subscribe(t, wsm.PullRequestEventMergeQueue)
+	r.gh.set(pathChecks("group1"), mustJSON(map[string]any{"check_runs": []map[string]any{{"id": 9, "name": "ci", "status": "completed", "conclusion": "failure"}}}))
+
+	// Act
+	r.tick()
+	r.tick()
+
+	// Assert
+	told := r.told()
+	if len(told) != 1 || !strings.Contains(told[0], "Merge group check `ci`: failed.") {
+		t.Fatalf("told = %v, want the merge group's check once", told)
+	}
+}
+
+func TestAPullRequestNotAskingForTheQueueNeverReadsIt(t *testing.T) {
+	// Arrange
+	r := newRig(t)
+	r.withGQL()
+	r.subscribe(t, wsm.PullRequestEventComment)
+
+	// Act
+	r.tick()
+
+	// Assert
+	if n := r.gqlCalls("PullRequestQueues") + r.gqlCalls("MergeQueue"); n != 0 {
+		t.Fatalf("%d GraphQL calls, want none", n)
+	}
+}
+
+func TestAPullRequestWhoseQueueCannotBeReadIsFailing(t *testing.T) {
+	// Arrange
+	r := newRig(t)
+	g := r.withGQL()
+	g.setFacts(prK.Number, factsJSON("main", nil))
+	r.subscribe(t, wsm.PullRequestEventMergeQueue)
+	g.fail["PullRequestQueues"] = &ghclient.Failure{Kind: ghclient.KindUnreachable, Method: "POST", Path: "graphql", Message: "down"}
+
+	// Act
+	r.tick()
+
+	// Assert
+	subs, _ := r.db.WorkspacePullRequestSubscriptions(context.Background(), r.ws)
+	if len(subs) != 1 || subs[0].Failing == nil || subs[0].Failing.Detail != "down" {
+		t.Fatalf("subscriptions = %+v, want one failing", subs)
+	}
+	if told := r.told(); len(told) != 1 || !strings.Contains(told[0], "reads of this pull request are failing: down") {
+		t.Fatalf("told = %v, want the failure", told)
+	}
+}
+
+func TestOneTickReadsAQueueOnceForEveryoneFollowingIt(t *testing.T) {
+	// Arrange
+	r := newRig(t)
+	g := r.withGQL()
+	queuedPR(g, "QUEUED", "", []remoteQueueEntry{entry(prK.Number, "QUEUED")}, remoteQueueEvent{ID: "a1", At: t0})
+	r.subscribe(t, wsm.PullRequestEventMergeQueue)
+	r.subscribeQueue(t)
+	before := r.gqlCalls("MergeQueue")
+
+	// Act
+	r.tick()
+
+	// Assert
+	if got := r.gqlCalls("MergeQueue") - before; got != 1 {
+		t.Fatalf("the queue was read %d times in one tick, want once", got)
+	}
+}
+
+func TestRecordReadFailureRecordsWhatItCouldNotDo(t *testing.T) {
+	boom := errors.New("store down")
+	tests := []struct {
+		name      string
+		recordErr error
+		oweErr    error
+		wantLog   string
+		wantOwed  int
+	}{
+		{name: "a failure it could not record owes nothing", recordErr: boom, wantLog: "could not record the merge queue's failed read"},
+		{name: "a notice it could not owe is recorded", oweErr: boom, wantLog: "could not owe the subscriber the failure's notice", wantOwed: 1},
+		{name: "a stretch it began owes its subscriber the failure", wantLog: "the merge queue could not be read; its subscriptions are failing", wantOwed: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			r := newRig(t)
+			var owed [][]string
+
+			// Act
+			r.w.recordReadFailure(context.Background(), opQueuePoll, "merge queue", errors.New("dns"), dlog.Context{"merge_queue": "o/r@main"},
+				func(wsm.PullRequestFailure) ([]ids.WorkspaceID, error) { return []ids.WorkspaceID{r.ws}, tt.recordErr },
+				func(_ ids.WorkspaceID, sentences []string) error { owed = append(owed, sentences); return tt.oweErr })
+
+			// Assert
+			if len(owed) != tt.wantOwed || (tt.wantOwed == 1 && !strings.Contains(owed[0][0], "this merge queue are failing: dns")) {
+				t.Fatalf("owed = %v, want %d", owed, tt.wantOwed)
+			}
+			record, ok := dlog.FindRecord(r.log.Records(), dlog.RecordQuery{Operation: opQueuePoll, Message: tt.wantLog})
+			if !ok || record.Context["merge_queue"] != "o/r@main" {
+				t.Fatalf("no record %q naming the queue: %+v", tt.wantLog, r.log.Records())
+			}
+		})
 	}
 }

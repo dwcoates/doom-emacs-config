@@ -9,8 +9,11 @@
 // THE DAEMON READS, THE AGENT IS TOLD. No GitHub event is ever pushed to the
 // laptop. The daemon reads each followed pull request's authoritative lists
 // (conversation comments, line comments, reviews, the pull request itself,
-// and its head commit's check runs) with conditional requests, compares them
-// with what it already told each subscriber, and tells only the difference. A
+// and its head commit's check runs) with conditional requests, and, for a
+// subscriber that asks for the merge queue, the pull request's place in its
+// base branch's GitHub merge queue and the timeline events GitHub records as
+// it joins and leaves it. It compares them with what it already told each
+// subscriber, and tells only the difference. A
 // read the daemon missed while it was down, asleep or offline is made up by
 // the next read, because the next read covers everything since the last one
 // told: no activity can be lost, only told late.
@@ -36,7 +39,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/pull_request.proto.
  */
 export const file_agentrepl_v1_pull_request: GenFile = /*@__PURE__*/
-  fileDesc("Ch9hZ2VudHJlcGwvdjEvcHVsbF9yZXF1ZXN0LnByb3RvEgxhZ2VudHJlcGwudjEiPQoOUHVsbFJlcXVlc3RSZWYSDQoFb3duZXIYASABKAkSDAoEcmVwbxgCIAEoCRIOCgZudW1iZXIYAyABKA0irQIKF1B1bGxSZXF1ZXN0U3Vic2NyaXB0aW9uEi4KCnN1YnNjcmliZXIYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmEjIKDHB1bGxfcmVxdWVzdBgCIAEoCzIcLmFnZW50cmVwbC52MS5QdWxsUmVxdWVzdFJlZhI0CgZldmVudHMYAyADKA4yJC5hZ2VudHJlcGwudjEuUHVsbFJlcXVlc3ROb3RpY2VFdmVudBI7CgZvcmlnaW4YBCABKAsyKy5hZ2VudHJlcGwudjEuUHVsbFJlcXVlc3RTdWJzY3JpcHRpb25PcmlnaW4SOwoGaGVhbHRoGAUgASgLMisuYWdlbnRyZXBsLnYxLlB1bGxSZXF1ZXN0U3Vic2NyaXB0aW9uSGVhbHRoIsABCh1QdWxsUmVxdWVzdFN1YnNjcmlwdGlvbk9yaWdpbhJKCgpvd25lZF9saW5rGAEgASgLMjQuYWdlbnRyZXBsLnYxLlB1bGxSZXF1ZXN0U3Vic2NyaXB0aW9uT3JpZ2luT3duZWRMaW5rSAASSQoJcmVxdWVzdGVkGAIgASgLMjQuYWdlbnRyZXBsLnYxLlB1bGxSZXF1ZXN0U3Vic2NyaXB0aW9uT3JpZ2luUmVxdWVzdGVkSABCCAoGb3JpZ2luIigKJlB1bGxSZXF1ZXN0U3Vic2NyaXB0aW9uT3JpZ2luT3duZWRMaW5rIigKJlB1bGxSZXF1ZXN0U3Vic2NyaXB0aW9uT3JpZ2luUmVxdWVzdGVkIqsBCh1QdWxsUmVxdWVzdFN1YnNjcmlwdGlvbkhlYWx0aBI/CgdoZWFsdGh5GAEgASgLMiwuYWdlbnRyZXBsLnYxLlB1bGxSZXF1ZXN0U3Vic2NyaXB0aW9uSGVhbHRoeUgAEj8KB2ZhaWxpbmcYAiABKAsyLC5hZ2VudHJlcGwudjEuUHVsbFJlcXVlc3RTdWJzY3JpcHRpb25GYWlsaW5nSABCCAoGaGVhbHRoImIKHlB1bGxSZXF1ZXN0U3Vic2NyaXB0aW9uSGVhbHRoeRIyCglsYXN0X3JlYWQYASABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wSACIAQFCDAoKX2xhc3RfcmVhZCKCAQoeUHVsbFJlcXVlc3RTdWJzY3JpcHRpb25GYWlsaW5nEikKBXNpbmNlGAEgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBI1CgVjYXVzZRgCIAEoCzImLmFnZW50cmVwbC52MS5QdWxsUmVxdWVzdEdpdEh1YkZhaWx1cmUiiwMKGFB1bGxSZXF1ZXN0R2l0SHViRmFpbHVyZRJKCgx1bmF1dGhvcml6ZWQYASABKAsyMi5hZ2VudHJlcGwudjEuUHVsbFJlcXVlc3RHaXRIdWJGYWlsdXJlVW5hdXRob3JpemVkSAASQwoJbm90X2ZvdW5kGAIgASgLMi4uYWdlbnRyZXBsLnYxLlB1bGxSZXF1ZXN0R2l0SHViRmFpbHVyZU5vdEZvdW5kSAASSQoMcmF0ZV9saW1pdGVkGAMgASgLMjEuYWdlbnRyZXBsLnYxLlB1bGxSZXF1ZXN0R2l0SHViRmFpbHVyZVJhdGVMaW1pdGVkSAASSAoLdW5yZWFjaGFibGUYBCABKAsyMS5hZ2VudHJlcGwudjEuUHVsbFJlcXVlc3RHaXRIdWJGYWlsdXJlVW5yZWFjaGFibGVIABJACgdyZWZ1c2VkGAUgASgLMi0uYWdlbnRyZXBsLnYxLlB1bGxSZXF1ZXN0R2l0SHViRmFpbHVyZVJlZnVzZWRIAEIHCgVjYXVzZSImCiRQdWxsUmVxdWVzdEdpdEh1YkZhaWx1cmVVbmF1dGhvcml6ZWQiIgogUHVsbFJlcXVlc3RHaXRIdWJGYWlsdXJlTm90Rm91bmQiVAojUHVsbFJlcXVlc3RHaXRIdWJGYWlsdXJlUmF0ZUxpbWl0ZWQSLQoJcmVzZXRzX2F0GAEgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcCJHCh9QdWxsUmVxdWVzdEdpdEh1YkZhaWx1cmVSZWZ1c2VkEhMKC2h0dHBfc3RhdHVzGAEgASgNEg8KB21lc3NhZ2UYAiABKAkiNQojUHVsbFJlcXVlc3RHaXRIdWJGYWlsdXJlVW5yZWFjaGFibGUSDgoGZGV0YWlsGAEgASgJInAKEVB1bGxSZXF1ZXN0U3RhdHVzEg0KBXRpdGxlGAEgASgJEgsKA3VybBgCIAEoCRItCgVzdGF0ZRgDIAEoCzIeLmFnZW50cmVwbC52MS5QdWxsUmVxdWVzdFN0YXRlEhAKCGhlYWRfc2hhGAQgASgJIvUBChBQdWxsUmVxdWVzdFN0YXRlEjQKBWRyYWZ0GAEgASgLMiMuYWdlbnRyZXBsLnYxLlB1bGxSZXF1ZXN0U3RhdGVEcmFmdEgAEjIKBG9wZW4YAiABKAsyIi5hZ2VudHJlcGwudjEuUHVsbFJlcXVlc3RTdGF0ZU9wZW5IABI2CgZtZXJnZWQYAyABKAsyJC5hZ2VudHJlcGwudjEuUHVsbFJlcXVlc3RTdGF0ZU1lcmdlZEgAEjYKBmNsb3NlZBgEIAEoCzIkLmFnZW50cmVwbC52MS5QdWxsUmVxdWVzdFN0YXRlQ2xvc2VkSABCBwoFc3RhdGUiFwoVUHVsbFJlcXVlc3RTdGF0ZURyYWZ0IhYKFFB1bGxSZXF1ZXN0U3RhdGVPcGVuIjIKFlB1bGxSZXF1ZXN0U3RhdGVNZXJnZWQSGAoQbWVyZ2VfY29tbWl0X3NoYRgBIAEoCSIYChZQdWxsUmVxdWVzdFN0YXRlQ2xvc2VkIr4CChFQdWxsUmVxdWVzdE5vdGljZRIyCgxwdWxsX3JlcXVlc3QYASABKAsyHC5hZ2VudHJlcGwudjEuUHVsbFJlcXVlc3RSZWYSMwoIYWN0aXZpdHkYAiADKAsyIS5hZ2VudHJlcGwudjEuUHVsbFJlcXVlc3RBY3Rpdml0eRIvCgZzdGF0dXMYAyABKAsyHy5hZ2VudHJlcGwudjEuUHVsbFJlcXVlc3RTdGF0dXMSQAoGaGVhbHRoGAQgASgLMisuYWdlbnRyZXBsLnYxLlB1bGxSZXF1ZXN0U3Vic2NyaXB0aW9uSGVhbHRoSACIAQESOAoFZW5kZWQYBSABKAsyJC5hZ2VudHJlcGwudjEuUHVsbFJlcXVlc3ROb3RpY2VFbmRlZEgBiAEBQgkKB19oZWFsdGhCCAoGX2VuZGVkIhgKFlB1bGxSZXF1ZXN0Tm90aWNlRW5kZWQi7QMKE1B1bGxSZXF1ZXN0QWN0aXZpdHkSOwoHY29tbWVudBgBIAEoCzIoLmFnZW50cmVwbC52MS5QdWxsUmVxdWVzdEFjdGl2aXR5Q29tbWVudEgAEjkKBnJldmlldxgCIAEoCzInLmFnZW50cmVwbC52MS5QdWxsUmVxdWVzdEFjdGl2aXR5UmV2aWV3SAASSAoOcmV2aWV3X2NvbW1lbnQYAyABKAsyLi5hZ2VudHJlcGwudjEuUHVsbFJlcXVlc3RBY3Rpdml0eVJldmlld0NvbW1lbnRIABI5CgZlZGl0ZWQYBCABKAsyJy5hZ2VudHJlcGwudjEuUHVsbFJlcXVlc3RBY3Rpdml0eUVkaXRlZEgAEjsKB2RlbGV0ZWQYBSABKAsyKC5hZ2VudHJlcGwudjEuUHVsbFJlcXVlc3RBY3Rpdml0eURlbGV0ZWRIABJGCg1zdGF0ZV9jaGFuZ2VkGAYgASgLMi0uYWdlbnRyZXBsLnYxLlB1bGxSZXF1ZXN0QWN0aXZpdHlTdGF0ZUNoYW5nZWRIABJICg5jaGVja19maW5pc2hlZBgHIAEoCzIuLmFnZW50cmVwbC52MS5QdWxsUmVxdWVzdEFjdGl2aXR5Q2hlY2tGaW5pc2hlZEgAQgoKCGFjdGl2aXR5ImsKGVB1bGxSZXF1ZXN0QWN0aXZpdHlBdXRob3ISDQoFbG9naW4YASABKAkSPwoLYXNzb2NpYXRpb24YAiABKA4yKi5hZ2VudHJlcGwudjEuUHVsbFJlcXVlc3RBdXRob3JBc3NvY2lhdGlvbiIrChdQdWxsUmVxdWVzdEFjdGl2aXR5VGV4dBIQCghtYXJrZG93bhgBIAEoCSLaAQoaUHVsbFJlcXVlc3RBY3Rpdml0eUNvbW1lbnQSEgoKY29tbWVudF9pZBgBIAEoBBI3CgZhdXRob3IYAiABKAsyJy5hZ2VudHJlcGwudjEuUHVsbFJlcXVlc3RBY3Rpdml0eUF1dGhvchIzCgR0ZXh0GAMgASgLMiUuYWdlbnRyZXBsLnYxLlB1bGxSZXF1ZXN0QWN0aXZpdHlUZXh0EgsKA3VybBgEIAEoCRItCglwb3N0ZWRfYXQYBSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wIqICChlQdWxsUmVxdWVzdEFjdGl2aXR5UmV2aWV3EhEKCXJldmlld19pZBgBIAEoBBI3CgZhdXRob3IYAiABKAsyJy5hZ2VudHJlcGwudjEuUHVsbFJlcXVlc3RBY3Rpdml0eUF1dGhvchI3Cgd2ZXJkaWN0GAMgASgLMiYuYWdlbnRyZXBsLnYxLlB1bGxSZXF1ZXN0UmV2aWV3VmVyZGljdBI4CgR0ZXh0GAQgASgLMiUuYWdlbnRyZXBsLnYxLlB1bGxSZXF1ZXN0QWN0aXZpdHlUZXh0SACIAQESCwoDdXJsGAUgASgJEjAKDHN1Ym1pdHRlZF9hdBgGIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBCBwoFX3RleHQiygIKGFB1bGxSZXF1ZXN0UmV2aWV3VmVyZGljdBJCCghhcHByb3ZlZBgBIAEoCzIuLmFnZW50cmVwbC52MS5QdWxsUmVxdWVzdFJldmlld1ZlcmRpY3RBcHByb3ZlZEgAElMKEWNoYW5nZXNfcmVxdWVzdGVkGAIgASgLMjYuYWdlbnRyZXBsLnYxLlB1bGxSZXF1ZXN0UmV2aWV3VmVyZGljdENoYW5nZXNSZXF1ZXN0ZWRIABJECgljb21tZW50ZWQYAyABKAsyLy5hZ2VudHJlcGwudjEuUHVsbFJlcXVlc3RSZXZpZXdWZXJkaWN0Q29tbWVudGVkSAASRAoJZGlzbWlzc2VkGAQgASgLMi8uYWdlbnRyZXBsLnYxLlB1bGxSZXF1ZXN0UmV2aWV3VmVyZGljdERpc21pc3NlZEgAQgkKB3ZlcmRpY3QiIgogUHVsbFJlcXVlc3RSZXZpZXdWZXJkaWN0QXBwcm92ZWQiKgooUHVsbFJlcXVlc3RSZXZpZXdWZXJkaWN0Q2hhbmdlc1JlcXVlc3RlZCIjCiFQdWxsUmVxdWVzdFJldmlld1ZlcmRpY3RDb21tZW50ZWQiIwohUHVsbFJlcXVlc3RSZXZpZXdWZXJkaWN0RGlzbWlzc2VkIpADCiBQdWxsUmVxdWVzdEFjdGl2aXR5UmV2aWV3Q29tbWVudBISCgpjb21tZW50X2lkGAEgASgEEjcKBmF1dGhvchgCIAEoCzInLmFnZW50cmVwbC52MS5QdWxsUmVxdWVzdEFjdGl2aXR5QXV0aG9yEjMKBHRleHQYAyABKAsyJS5hZ2VudHJlcGwudjEuUHVsbFJlcXVlc3RBY3Rpdml0eVRleHQSSAoIbG9jYXRpb24YBCABKAsyNi5hZ2VudHJlcGwudjEuUHVsbFJlcXVlc3RBY3Rpdml0eVJldmlld0NvbW1lbnRMb2NhdGlvbhIjChZpbl9yZXBseV90b19jb21tZW50X2lkGAUgASgESACIAQESFgoJcmV2aWV3X2lkGAYgASgESAGIAQESCwoDdXJsGAcgASgJEi0KCXBvc3RlZF9hdBgIIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBCGQoXX2luX3JlcGx5X3RvX2NvbW1lbnRfaWRCDAoKX3Jldmlld19pZCJUCihQdWxsUmVxdWVzdEFjdGl2aXR5UmV2aWV3Q29tbWVudExvY2F0aW9uEgwKBHBhdGgYASABKAkSEQoEbGluZRgCIAEoDUgAiAEBQgcKBV9saW5lIpQCChlQdWxsUmVxdWVzdEFjdGl2aXR5RWRpdGVkEjsKB2NvbW1lbnQYASABKAsyKC5hZ2VudHJlcGwudjEuUHVsbFJlcXVlc3RBY3Rpdml0eUNvbW1lbnRIABI5CgZyZXZpZXcYAiABKAsyJy5hZ2VudHJlcGwudjEuUHVsbFJlcXVlc3RBY3Rpdml0eVJldmlld0gAEkgKDnJldmlld19jb21tZW50GAMgASgLMi4uYWdlbnRyZXBsLnYxLlB1bGxSZXF1ZXN0QWN0aXZpdHlSZXZpZXdDb21tZW50SAASLQoJZWRpdGVkX2F0GAQgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcEIGCgRpdGVtIrkBChpQdWxsUmVxdWVzdEFjdGl2aXR5RGVsZXRlZBJCCgdjb21tZW50GAEgASgLMi8uYWdlbnRyZXBsLnYxLlB1bGxSZXF1ZXN0QWN0aXZpdHlEZWxldGVkQ29tbWVudEgAEk8KDnJldmlld19jb21tZW50GAIgASgLMjUuYWdlbnRyZXBsLnYxLlB1bGxSZXF1ZXN0QWN0aXZpdHlEZWxldGVkUmV2aWV3Q29tbWVudEgAQgYKBGl0ZW0iNwohUHVsbFJlcXVlc3RBY3Rpdml0eURlbGV0ZWRDb21tZW50EhIKCmNvbW1lbnRfaWQYASABKAQiPQonUHVsbFJlcXVlc3RBY3Rpdml0eURlbGV0ZWRSZXZpZXdDb21tZW50EhIKCmNvbW1lbnRfaWQYASABKAQilwEKH1B1bGxSZXF1ZXN0QWN0aXZpdHlTdGF0ZUNoYW5nZWQSLQoFc3RhdGUYASABKAsyHi5hZ2VudHJlcGwudjEuUHVsbFJlcXVlc3RTdGF0ZRI7CgVhY3RvchgCIAEoCzInLmFnZW50cmVwbC52MS5QdWxsUmVxdWVzdEFjdGl2aXR5QXV0aG9ySACIAQFCCAoGX2FjdG9yIm4KIFB1bGxSZXF1ZXN0QWN0aXZpdHlDaGVja0ZpbmlzaGVkEgwKBG5hbWUYASABKAkSPAoKY29uY2x1c2lvbhgCIAEoCzIoLmFnZW50cmVwbC52MS5QdWxsUmVxdWVzdENoZWNrQ29uY2x1c2lvbiKcBAoaUHVsbFJlcXVlc3RDaGVja0NvbmNsdXNpb24SQgoHc3VjY2VzcxgBIAEoCzIvLmFnZW50cmVwbC52MS5QdWxsUmVxdWVzdENoZWNrQ29uY2x1c2lvblN1Y2Nlc3NIABJCCgdmYWlsdXJlGAIgASgLMi8uYWdlbnRyZXBsLnYxLlB1bGxSZXF1ZXN0Q2hlY2tDb25jbHVzaW9uRmFpbHVyZUgAEkYKCWNhbmNlbGxlZBgDIAEoCzIxLmFnZW50cmVwbC52MS5QdWxsUmVxdWVzdENoZWNrQ29uY2x1c2lvbkNhbmNlbGxlZEgAEkUKCXRpbWVkX291dBgEIAEoCzIwLmFnZW50cmVwbC52MS5QdWxsUmVxdWVzdENoZWNrQ29uY2x1c2lvblRpbWVkT3V0SAASQgoHc2tpcHBlZBgFIAEoCzIvLmFnZW50cmVwbC52MS5QdWxsUmVxdWVzdENoZWNrQ29uY2x1c2lvblNraXBwZWRIABJCCgduZXV0cmFsGAYgASgLMi8uYWdlbnRyZXBsLnYxLlB1bGxSZXF1ZXN0Q2hlY2tDb25jbHVzaW9uTmV1dHJhbEgAElEKD2FjdGlvbl9yZXF1aXJlZBgHIAEoCzI2LmFnZW50cmVwbC52MS5QdWxsUmVxdWVzdENoZWNrQ29uY2x1c2lvbkFjdGlvblJlcXVpcmVkSABCDAoKY29uY2x1c2lvbiIjCiFQdWxsUmVxdWVzdENoZWNrQ29uY2x1c2lvblN1Y2Nlc3MiIwohUHVsbFJlcXVlc3RDaGVja0NvbmNsdXNpb25GYWlsdXJlIiUKI1B1bGxSZXF1ZXN0Q2hlY2tDb25jbHVzaW9uQ2FuY2VsbGVkIiQKIlB1bGxSZXF1ZXN0Q2hlY2tDb25jbHVzaW9uVGltZWRPdXQiIwohUHVsbFJlcXVlc3RDaGVja0NvbmNsdXNpb25Ta2lwcGVkIiMKIVB1bGxSZXF1ZXN0Q2hlY2tDb25jbHVzaW9uTmV1dHJhbCIqCihQdWxsUmVxdWVzdENoZWNrQ29uY2x1c2lvbkFjdGlvblJlcXVpcmVkKokCChZQdWxsUmVxdWVzdE5vdGljZUV2ZW50EikKJVBVTExfUkVRVUVTVF9OT1RJQ0VfRVZFTlRfVU5TUEVDSUZJRUQQABIlCiFQVUxMX1JFUVVFU1RfTk9USUNFX0VWRU5UX0NPTU1FTlQQARIkCiBQVUxMX1JFUVVFU1RfTk9USUNFX0VWRU5UX1JFVklFVxACEiwKKFBVTExfUkVRVUVTVF9OT1RJQ0VfRVZFTlRfUkVWSUVXX0NPTU1FTlQQAxIjCh9QVUxMX1JFUVVFU1RfTk9USUNFX0VWRU5UX1NUQVRFEAQSJAogUFVMTF9SRVFVRVNUX05PVElDRV9FVkVOVF9DSEVDS1MQBSrvAgocUHVsbFJlcXVlc3RBdXRob3JBc3NvY2lhdGlvbhIvCitQVUxMX1JFUVVFU1RfQVVUSE9SX0FTU09DSUFUSU9OX1VOU1BFQ0lGSUVEEAASKQolUFVMTF9SRVFVRVNUX0FVVEhPUl9BU1NPQ0lBVElPTl9PV05FUhABEioKJlBVTExfUkVRVUVTVF9BVVRIT1JfQVNTT0NJQVRJT05fTUVNQkVSEAISMAosUFVMTF9SRVFVRVNUX0FVVEhPUl9BU1NPQ0lBVElPTl9DT0xMQUJPUkFUT1IQAxIvCitQVUxMX1JFUVVFU1RfQVVUSE9SX0FTU09DSUFUSU9OX0NPTlRSSUJVVE9SEAQSOgo2UFVMTF9SRVFVRVNUX0FVVEhPUl9BU1NPQ0lBVElPTl9GSVJTVF9USU1FX0NPTlRSSUJVVE9SEAUSKAokUFVMTF9SRVFVRVNUX0FVVEhPUl9BU1NPQ0lBVElPTl9OT05FEAZCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_google_protobuf_timestamp, file_workspace_v1_workspace]);
+  fileDesc("Ch9hZ2VudHJlcGwvdjEvcHVsbF9yZXF1ZXN0LnByb3RvEgxhZ2VudHJlcGwudjEiPQoOUHVsbFJlcXVlc3RSZWYSDQoFb3duZXIYASABKAkSDAoEcmVwbxgCIAEoCRIOCgZudW1iZXIYAyABKA0irQIKF1B1bGxSZXF1ZXN0U3Vic2NyaXB0aW9uEi4KCnN1YnNjcmliZXIYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmEjIKDHB1bGxfcmVxdWVzdBgCIAEoCzIcLmFnZW50cmVwbC52MS5QdWxsUmVxdWVzdFJlZhI0CgZldmVudHMYAyADKA4yJC5hZ2VudHJlcGwudjEuUHVsbFJlcXVlc3ROb3RpY2VFdmVudBI7CgZvcmlnaW4YBCABKAsyKy5hZ2VudHJlcGwudjEuUHVsbFJlcXVlc3RTdWJzY3JpcHRpb25PcmlnaW4SOwoGaGVhbHRoGAUgASgLMisuYWdlbnRyZXBsLnYxLlB1bGxSZXF1ZXN0U3Vic2NyaXB0aW9uSGVhbHRoIsABCh1QdWxsUmVxdWVzdFN1YnNjcmlwdGlvbk9yaWdpbhJKCgpvd25lZF9saW5rGAEgASgLMjQuYWdlbnRyZXBsLnYxLlB1bGxSZXF1ZXN0U3Vic2NyaXB0aW9uT3JpZ2luT3duZWRMaW5rSAASSQoJcmVxdWVzdGVkGAIgASgLMjQuYWdlbnRyZXBsLnYxLlB1bGxSZXF1ZXN0U3Vic2NyaXB0aW9uT3JpZ2luUmVxdWVzdGVkSABCCAoGb3JpZ2luIigKJlB1bGxSZXF1ZXN0U3Vic2NyaXB0aW9uT3JpZ2luT3duZWRMaW5rIigKJlB1bGxSZXF1ZXN0U3Vic2NyaXB0aW9uT3JpZ2luUmVxdWVzdGVkIqsBCh1QdWxsUmVxdWVzdFN1YnNjcmlwdGlvbkhlYWx0aBI/CgdoZWFsdGh5GAEgASgLMiwuYWdlbnRyZXBsLnYxLlB1bGxSZXF1ZXN0U3Vic2NyaXB0aW9uSGVhbHRoeUgAEj8KB2ZhaWxpbmcYAiABKAsyLC5hZ2VudHJlcGwudjEuUHVsbFJlcXVlc3RTdWJzY3JpcHRpb25GYWlsaW5nSABCCAoGaGVhbHRoImIKHlB1bGxSZXF1ZXN0U3Vic2NyaXB0aW9uSGVhbHRoeRIyCglsYXN0X3JlYWQYASABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wSACIAQFCDAoKX2xhc3RfcmVhZCKCAQoeUHVsbFJlcXVlc3RTdWJzY3JpcHRpb25GYWlsaW5nEikKBXNpbmNlGAEgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBI1CgVjYXVzZRgCIAEoCzImLmFnZW50cmVwbC52MS5QdWxsUmVxdWVzdEdpdEh1YkZhaWx1cmUiiwMKGFB1bGxSZXF1ZXN0R2l0SHViRmFpbHVyZRJKCgx1bmF1dGhvcml6ZWQYASABKAsyMi5hZ2VudHJlcGwudjEuUHVsbFJlcXVlc3RHaXRIdWJGYWlsdXJlVW5hdXRob3JpemVkSAASQwoJbm90X2ZvdW5kGAIgASgLMi4uYWdlbnRyZXBsLnYxLlB1bGxSZXF1ZXN0R2l0SHViRmFpbHVyZU5vdEZvdW5kSAASSQoMcmF0ZV9saW1pdGVkGAMgASgLMjEuYWdlbnRyZXBsLnYxLlB1bGxSZXF1ZXN0R2l0SHViRmFpbHVyZVJhdGVMaW1pdGVkSAASSAoLdW5yZWFjaGFibGUYBCABKAsyMS5hZ2VudHJlcGwudjEuUHVsbFJlcXVlc3RHaXRIdWJGYWlsdXJlVW5yZWFjaGFibGVIABJACgdyZWZ1c2VkGAUgASgLMi0uYWdlbnRyZXBsLnYxLlB1bGxSZXF1ZXN0R2l0SHViRmFpbHVyZVJlZnVzZWRIAEIHCgVjYXVzZSImCiRQdWxsUmVxdWVzdEdpdEh1YkZhaWx1cmVVbmF1dGhvcml6ZWQiIgogUHVsbFJlcXVlc3RHaXRIdWJGYWlsdXJlTm90Rm91bmQiVAojUHVsbFJlcXVlc3RHaXRIdWJGYWlsdXJlUmF0ZUxpbWl0ZWQSLQoJcmVzZXRzX2F0GAEgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcCJHCh9QdWxsUmVxdWVzdEdpdEh1YkZhaWx1cmVSZWZ1c2VkEhMKC2h0dHBfc3RhdHVzGAEgASgNEg8KB21lc3NhZ2UYAiABKAkiNQojUHVsbFJlcXVlc3RHaXRIdWJGYWlsdXJlVW5yZWFjaGFibGUSDgoGZGV0YWlsGAEgASgJIsUBChFQdWxsUmVxdWVzdFN0YXR1cxINCgV0aXRsZRgBIAEoCRILCgN1cmwYAiABKAkSLQoFc3RhdGUYAyABKAsyHi5hZ2VudHJlcGwudjEuUHVsbFJlcXVlc3RTdGF0ZRIQCghoZWFkX3NoYRgEIAEoCRJDCgttZXJnZV9xdWV1ZRgFIAEoCzIpLmFnZW50cmVwbC52MS5QdWxsUmVxdWVzdFN0YXR1c01lcmdlUXVldWVIAIgBAUIOCgxfbWVyZ2VfcXVldWUimgEKG1B1bGxSZXF1ZXN0U3RhdHVzTWVyZ2VRdWV1ZRI9Cghwb3NpdGlvbhgBIAEoCzIrLmFnZW50cmVwbC52MS5QdWxsUmVxdWVzdE1lcmdlUXVldWVQb3NpdGlvbhI8CgVzdGF0ZRgCIAEoCzItLmFnZW50cmVwbC52MS5QdWxsUmVxdWVzdE1lcmdlUXVldWVFbnRyeVN0YXRlIvUBChBQdWxsUmVxdWVzdFN0YXRlEjQKBWRyYWZ0GAEgASgLMiMuYWdlbnRyZXBsLnYxLlB1bGxSZXF1ZXN0U3RhdGVEcmFmdEgAEjIKBG9wZW4YAiABKAsyIi5hZ2VudHJlcGwudjEuUHVsbFJlcXVlc3RTdGF0ZU9wZW5IABI2CgZtZXJnZWQYAyABKAsyJC5hZ2VudHJlcGwudjEuUHVsbFJlcXVlc3RTdGF0ZU1lcmdlZEgAEjYKBmNsb3NlZBgEIAEoCzIkLmFnZW50cmVwbC52MS5QdWxsUmVxdWVzdFN0YXRlQ2xvc2VkSABCBwoFc3RhdGUiFwoVUHVsbFJlcXVlc3RTdGF0ZURyYWZ0IhYKFFB1bGxSZXF1ZXN0U3RhdGVPcGVuIjIKFlB1bGxSZXF1ZXN0U3RhdGVNZXJnZWQSGAoQbWVyZ2VfY29tbWl0X3NoYRgBIAEoCSIYChZQdWxsUmVxdWVzdFN0YXRlQ2xvc2VkIr4CChFQdWxsUmVxdWVzdE5vdGljZRIyCgxwdWxsX3JlcXVlc3QYASABKAsyHC5hZ2VudHJlcGwudjEuUHVsbFJlcXVlc3RSZWYSMwoIYWN0aXZpdHkYAiADKAsyIS5hZ2VudHJlcGwudjEuUHVsbFJlcXVlc3RBY3Rpdml0eRIvCgZzdGF0dXMYAyABKAsyHy5hZ2VudHJlcGwudjEuUHVsbFJlcXVlc3RTdGF0dXMSQAoGaGVhbHRoGAQgASgLMisuYWdlbnRyZXBsLnYxLlB1bGxSZXF1ZXN0U3Vic2NyaXB0aW9uSGVhbHRoSACIAQESOAoFZW5kZWQYBSABKAsyJC5hZ2VudHJlcGwudjEuUHVsbFJlcXVlc3ROb3RpY2VFbmRlZEgBiAEBQgkKB19oZWFsdGhCCAoGX2VuZGVkIhgKFlB1bGxSZXF1ZXN0Tm90aWNlRW5kZWQioQcKE1B1bGxSZXF1ZXN0QWN0aXZpdHkSOwoHY29tbWVudBgBIAEoCzIoLmFnZW50cmVwbC52MS5QdWxsUmVxdWVzdEFjdGl2aXR5Q29tbWVudEgAEjkKBnJldmlldxgCIAEoCzInLmFnZW50cmVwbC52MS5QdWxsUmVxdWVzdEFjdGl2aXR5UmV2aWV3SAASSAoOcmV2aWV3X2NvbW1lbnQYAyABKAsyLi5hZ2VudHJlcGwudjEuUHVsbFJlcXVlc3RBY3Rpdml0eVJldmlld0NvbW1lbnRIABI5CgZlZGl0ZWQYBCABKAsyJy5hZ2VudHJlcGwudjEuUHVsbFJlcXVlc3RBY3Rpdml0eUVkaXRlZEgAEjsKB2RlbGV0ZWQYBSABKAsyKC5hZ2VudHJlcGwudjEuUHVsbFJlcXVlc3RBY3Rpdml0eURlbGV0ZWRIABJGCg1zdGF0ZV9jaGFuZ2VkGAYgASgLMi0uYWdlbnRyZXBsLnYxLlB1bGxSZXF1ZXN0QWN0aXZpdHlTdGF0ZUNoYW5nZWRIABJICg5jaGVja19maW5pc2hlZBgHIAEoCzIuLmFnZW50cmVwbC52MS5QdWxsUmVxdWVzdEFjdGl2aXR5Q2hlY2tGaW5pc2hlZEgAElEKE21lcmdlX3F1ZXVlX2VudGVyZWQYCCABKAsyMi5hZ2VudHJlcGwudjEuUHVsbFJlcXVlc3RBY3Rpdml0eU1lcmdlUXVldWVFbnRlcmVkSAASTQoRbWVyZ2VfcXVldWVfbW92ZWQYCSABKAsyMC5hZ2VudHJlcGwudjEuUHVsbFJlcXVlc3RBY3Rpdml0eU1lcmdlUXVldWVNb3ZlZEgAEmcKH21lcmdlX3F1ZXVlX2VudHJ5X3N0YXRlX2NoYW5nZWQYCiABKAsyPC5hZ2VudHJlcGwudjEuUHVsbFJlcXVlc3RBY3Rpdml0eU1lcmdlUXVldWVFbnRyeVN0YXRlQ2hhbmdlZEgAElEKE21lcmdlX3F1ZXVlX3JlbW92ZWQYCyABKAsyMi5hZ2VudHJlcGwudjEuUHVsbFJlcXVlc3RBY3Rpdml0eU1lcmdlUXVldWVSZW1vdmVkSAASVAoabWVyZ2VfZ3JvdXBfY2hlY2tfZmluaXNoZWQYDCABKAsyLi5hZ2VudHJlcGwudjEuUHVsbFJlcXVlc3RBY3Rpdml0eUNoZWNrRmluaXNoZWRIAEIKCghhY3Rpdml0eSJrChlQdWxsUmVxdWVzdEFjdGl2aXR5QXV0aG9yEg0KBWxvZ2luGAEgASgJEj8KC2Fzc29jaWF0aW9uGAIgASgOMiouYWdlbnRyZXBsLnYxLlB1bGxSZXF1ZXN0QXV0aG9yQXNzb2NpYXRpb24iKwoXUHVsbFJlcXVlc3RBY3Rpdml0eVRleHQSEAoIbWFya2Rvd24YASABKAki2gEKGlB1bGxSZXF1ZXN0QWN0aXZpdHlDb21tZW50EhIKCmNvbW1lbnRfaWQYASABKAQSNwoGYXV0aG9yGAIgASgLMicuYWdlbnRyZXBsLnYxLlB1bGxSZXF1ZXN0QWN0aXZpdHlBdXRob3ISMwoEdGV4dBgDIAEoCzIlLmFnZW50cmVwbC52MS5QdWxsUmVxdWVzdEFjdGl2aXR5VGV4dBILCgN1cmwYBCABKAkSLQoJcG9zdGVkX2F0GAUgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcCKiAgoZUHVsbFJlcXVlc3RBY3Rpdml0eVJldmlldxIRCglyZXZpZXdfaWQYASABKAQSNwoGYXV0aG9yGAIgASgLMicuYWdlbnRyZXBsLnYxLlB1bGxSZXF1ZXN0QWN0aXZpdHlBdXRob3ISNwoHdmVyZGljdBgDIAEoCzImLmFnZW50cmVwbC52MS5QdWxsUmVxdWVzdFJldmlld1ZlcmRpY3QSOAoEdGV4dBgEIAEoCzIlLmFnZW50cmVwbC52MS5QdWxsUmVxdWVzdEFjdGl2aXR5VGV4dEgAiAEBEgsKA3VybBgFIAEoCRIwCgxzdWJtaXR0ZWRfYXQYBiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wQgcKBV90ZXh0IsoCChhQdWxsUmVxdWVzdFJldmlld1ZlcmRpY3QSQgoIYXBwcm92ZWQYASABKAsyLi5hZ2VudHJlcGwudjEuUHVsbFJlcXVlc3RSZXZpZXdWZXJkaWN0QXBwcm92ZWRIABJTChFjaGFuZ2VzX3JlcXVlc3RlZBgCIAEoCzI2LmFnZW50cmVwbC52MS5QdWxsUmVxdWVzdFJldmlld1ZlcmRpY3RDaGFuZ2VzUmVxdWVzdGVkSAASRAoJY29tbWVudGVkGAMgASgLMi8uYWdlbnRyZXBsLnYxLlB1bGxSZXF1ZXN0UmV2aWV3VmVyZGljdENvbW1lbnRlZEgAEkQKCWRpc21pc3NlZBgEIAEoCzIvLmFnZW50cmVwbC52MS5QdWxsUmVxdWVzdFJldmlld1ZlcmRpY3REaXNtaXNzZWRIAEIJCgd2ZXJkaWN0IiIKIFB1bGxSZXF1ZXN0UmV2aWV3VmVyZGljdEFwcHJvdmVkIioKKFB1bGxSZXF1ZXN0UmV2aWV3VmVyZGljdENoYW5nZXNSZXF1ZXN0ZWQiIwohUHVsbFJlcXVlc3RSZXZpZXdWZXJkaWN0Q29tbWVudGVkIiMKIVB1bGxSZXF1ZXN0UmV2aWV3VmVyZGljdERpc21pc3NlZCKQAwogUHVsbFJlcXVlc3RBY3Rpdml0eVJldmlld0NvbW1lbnQSEgoKY29tbWVudF9pZBgBIAEoBBI3CgZhdXRob3IYAiABKAsyJy5hZ2VudHJlcGwudjEuUHVsbFJlcXVlc3RBY3Rpdml0eUF1dGhvchIzCgR0ZXh0GAMgASgLMiUuYWdlbnRyZXBsLnYxLlB1bGxSZXF1ZXN0QWN0aXZpdHlUZXh0EkgKCGxvY2F0aW9uGAQgASgLMjYuYWdlbnRyZXBsLnYxLlB1bGxSZXF1ZXN0QWN0aXZpdHlSZXZpZXdDb21tZW50TG9jYXRpb24SIwoWaW5fcmVwbHlfdG9fY29tbWVudF9pZBgFIAEoBEgAiAEBEhYKCXJldmlld19pZBgGIAEoBEgBiAEBEgsKA3VybBgHIAEoCRItCglwb3N0ZWRfYXQYCCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wQhkKF19pbl9yZXBseV90b19jb21tZW50X2lkQgwKCl9yZXZpZXdfaWQiVAooUHVsbFJlcXVlc3RBY3Rpdml0eVJldmlld0NvbW1lbnRMb2NhdGlvbhIMCgRwYXRoGAEgASgJEhEKBGxpbmUYAiABKA1IAIgBAUIHCgVfbGluZSKUAgoZUHVsbFJlcXVlc3RBY3Rpdml0eUVkaXRlZBI7Cgdjb21tZW50GAEgASgLMiguYWdlbnRyZXBsLnYxLlB1bGxSZXF1ZXN0QWN0aXZpdHlDb21tZW50SAASOQoGcmV2aWV3GAIgASgLMicuYWdlbnRyZXBsLnYxLlB1bGxSZXF1ZXN0QWN0aXZpdHlSZXZpZXdIABJICg5yZXZpZXdfY29tbWVudBgDIAEoCzIuLmFnZW50cmVwbC52MS5QdWxsUmVxdWVzdEFjdGl2aXR5UmV2aWV3Q29tbWVudEgAEi0KCWVkaXRlZF9hdBgEIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBCBgoEaXRlbSK5AQoaUHVsbFJlcXVlc3RBY3Rpdml0eURlbGV0ZWQSQgoHY29tbWVudBgBIAEoCzIvLmFnZW50cmVwbC52MS5QdWxsUmVxdWVzdEFjdGl2aXR5RGVsZXRlZENvbW1lbnRIABJPCg5yZXZpZXdfY29tbWVudBgCIAEoCzI1LmFnZW50cmVwbC52MS5QdWxsUmVxdWVzdEFjdGl2aXR5RGVsZXRlZFJldmlld0NvbW1lbnRIAEIGCgRpdGVtIjcKIVB1bGxSZXF1ZXN0QWN0aXZpdHlEZWxldGVkQ29tbWVudBISCgpjb21tZW50X2lkGAEgASgEIj0KJ1B1bGxSZXF1ZXN0QWN0aXZpdHlEZWxldGVkUmV2aWV3Q29tbWVudBISCgpjb21tZW50X2lkGAEgASgEIpcBCh9QdWxsUmVxdWVzdEFjdGl2aXR5U3RhdGVDaGFuZ2VkEi0KBXN0YXRlGAEgASgLMh4uYWdlbnRyZXBsLnYxLlB1bGxSZXF1ZXN0U3RhdGUSOwoFYWN0b3IYAiABKAsyJy5hZ2VudHJlcGwudjEuUHVsbFJlcXVlc3RBY3Rpdml0eUF1dGhvckgAiAEBQggKBl9hY3RvciJuCiBQdWxsUmVxdWVzdEFjdGl2aXR5Q2hlY2tGaW5pc2hlZBIMCgRuYW1lGAEgASgJEjwKCmNvbmNsdXNpb24YAiABKAsyKC5hZ2VudHJlcGwudjEuUHVsbFJlcXVlc3RDaGVja0NvbmNsdXNpb24inAQKGlB1bGxSZXF1ZXN0Q2hlY2tDb25jbHVzaW9uEkIKB3N1Y2Nlc3MYASABKAsyLy5hZ2VudHJlcGwudjEuUHVsbFJlcXVlc3RDaGVja0NvbmNsdXNpb25TdWNjZXNzSAASQgoHZmFpbHVyZRgCIAEoCzIvLmFnZW50cmVwbC52MS5QdWxsUmVxdWVzdENoZWNrQ29uY2x1c2lvbkZhaWx1cmVIABJGCgljYW5jZWxsZWQYAyABKAsyMS5hZ2VudHJlcGwudjEuUHVsbFJlcXVlc3RDaGVja0NvbmNsdXNpb25DYW5jZWxsZWRIABJFCgl0aW1lZF9vdXQYBCABKAsyMC5hZ2VudHJlcGwudjEuUHVsbFJlcXVlc3RDaGVja0NvbmNsdXNpb25UaW1lZE91dEgAEkIKB3NraXBwZWQYBSABKAsyLy5hZ2VudHJlcGwudjEuUHVsbFJlcXVlc3RDaGVja0NvbmNsdXNpb25Ta2lwcGVkSAASQgoHbmV1dHJhbBgGIAEoCzIvLmFnZW50cmVwbC52MS5QdWxsUmVxdWVzdENoZWNrQ29uY2x1c2lvbk5ldXRyYWxIABJRCg9hY3Rpb25fcmVxdWlyZWQYByABKAsyNi5hZ2VudHJlcGwudjEuUHVsbFJlcXVlc3RDaGVja0NvbmNsdXNpb25BY3Rpb25SZXF1aXJlZEgAQgwKCmNvbmNsdXNpb24iIwohUHVsbFJlcXVlc3RDaGVja0NvbmNsdXNpb25TdWNjZXNzIiMKIVB1bGxSZXF1ZXN0Q2hlY2tDb25jbHVzaW9uRmFpbHVyZSIlCiNQdWxsUmVxdWVzdENoZWNrQ29uY2x1c2lvbkNhbmNlbGxlZCIkCiJQdWxsUmVxdWVzdENoZWNrQ29uY2x1c2lvblRpbWVkT3V0IiMKIVB1bGxSZXF1ZXN0Q2hlY2tDb25jbHVzaW9uU2tpcHBlZCIjCiFQdWxsUmVxdWVzdENoZWNrQ29uY2x1c2lvbk5ldXRyYWwiKgooUHVsbFJlcXVlc3RDaGVja0NvbmNsdXNpb25BY3Rpb25SZXF1aXJlZCLuAQokUHVsbFJlcXVlc3RBY3Rpdml0eU1lcmdlUXVldWVFbnRlcmVkEjsKBWFjdG9yGAEgASgLMicuYWdlbnRyZXBsLnYxLlB1bGxSZXF1ZXN0QWN0aXZpdHlBdXRob3JIAIgBARJCCghwb3NpdGlvbhgCIAEoCzIrLmFnZW50cmVwbC52MS5QdWxsUmVxdWVzdE1lcmdlUXVldWVQb3NpdGlvbkgBiAEBEi4KCmVudGVyZWRfYXQYAyABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wQggKBl9hY3RvckILCglfcG9zaXRpb24imAEKIlB1bGxSZXF1ZXN0QWN0aXZpdHlNZXJnZVF1ZXVlTW92ZWQSOQoEZnJvbRgBIAEoCzIrLmFnZW50cmVwbC52MS5QdWxsUmVxdWVzdE1lcmdlUXVldWVQb3NpdGlvbhI3CgJ0bxgCIAEoCzIrLmFnZW50cmVwbC52MS5QdWxsUmVxdWVzdE1lcmdlUXVldWVQb3NpdGlvbiJuCi5QdWxsUmVxdWVzdEFjdGl2aXR5TWVyZ2VRdWV1ZUVudHJ5U3RhdGVDaGFuZ2VkEjwKBXN0YXRlGAEgASgLMi0uYWdlbnRyZXBsLnYxLlB1bGxSZXF1ZXN0TWVyZ2VRdWV1ZUVudHJ5U3RhdGUivQEKJFB1bGxSZXF1ZXN0QWN0aXZpdHlNZXJnZVF1ZXVlUmVtb3ZlZBI7CgVhY3RvchgBIAEoCzInLmFnZW50cmVwbC52MS5QdWxsUmVxdWVzdEFjdGl2aXR5QXV0aG9ySACIAQESEwoGcmVhc29uGAIgASgJSAGIAQESLgoKcmVtb3ZlZF9hdBgDIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBCCAoGX2FjdG9yQgkKB19yZWFzb24iTQodUHVsbFJlcXVlc3RNZXJnZVF1ZXVlUG9zaXRpb24SFQoNZW50cmllc19haGVhZBgBIAEoDRIVCg1lbnRyaWVzX3RvdGFsGAIgASgNIq4DCh9QdWxsUmVxdWVzdE1lcmdlUXVldWVFbnRyeVN0YXRlEkUKBnF1ZXVlZBgBIAEoCzIzLmFnZW50cmVwbC52MS5QdWxsUmVxdWVzdE1lcmdlUXVldWVFbnRyeVN0YXRlUXVldWVkSAASVgoPYXdhaXRpbmdfY2hlY2tzGAIgASgLMjsuYWdlbnRyZXBsLnYxLlB1bGxSZXF1ZXN0TWVyZ2VRdWV1ZUVudHJ5U3RhdGVBd2FpdGluZ0NoZWNrc0gAEksKCW1lcmdlYWJsZRgDIAEoCzI2LmFnZW50cmVwbC52MS5QdWxsUmVxdWVzdE1lcmdlUXVldWVFbnRyeVN0YXRlTWVyZ2VhYmxlSAASTwoLdW5tZXJnZWFibGUYBCABKAsyOC5hZ2VudHJlcGwudjEuUHVsbFJlcXVlc3RNZXJnZVF1ZXVlRW50cnlTdGF0ZVVubWVyZ2VhYmxlSAASRQoGbG9ja2VkGAUgASgLMjMuYWdlbnRyZXBsLnYxLlB1bGxSZXF1ZXN0TWVyZ2VRdWV1ZUVudHJ5U3RhdGVMb2NrZWRIAEIHCgVzdGF0ZSInCiVQdWxsUmVxdWVzdE1lcmdlUXVldWVFbnRyeVN0YXRlUXVldWVkIi8KLVB1bGxSZXF1ZXN0TWVyZ2VRdWV1ZUVudHJ5U3RhdGVBd2FpdGluZ0NoZWNrcyIqCihQdWxsUmVxdWVzdE1lcmdlUXVldWVFbnRyeVN0YXRlTWVyZ2VhYmxlIiwKKlB1bGxSZXF1ZXN0TWVyZ2VRdWV1ZUVudHJ5U3RhdGVVbm1lcmdlYWJsZSInCiVQdWxsUmVxdWVzdE1lcmdlUXVldWVFbnRyeVN0YXRlTG9ja2VkKrQCChZQdWxsUmVxdWVzdE5vdGljZUV2ZW50EikKJVBVTExfUkVRVUVTVF9OT1RJQ0VfRVZFTlRfVU5TUEVDSUZJRUQQABIlCiFQVUxMX1JFUVVFU1RfTk9USUNFX0VWRU5UX0NPTU1FTlQQARIkCiBQVUxMX1JFUVVFU1RfTk9USUNFX0VWRU5UX1JFVklFVxACEiwKKFBVTExfUkVRVUVTVF9OT1RJQ0VfRVZFTlRfUkVWSUVXX0NPTU1FTlQQAxIjCh9QVUxMX1JFUVVFU1RfTk9USUNFX0VWRU5UX1NUQVRFEAQSJAogUFVMTF9SRVFVRVNUX05PVElDRV9FVkVOVF9DSEVDS1MQBRIpCiVQVUxMX1JFUVVFU1RfTk9USUNFX0VWRU5UX01FUkdFX1FVRVVFEAYq7wIKHFB1bGxSZXF1ZXN0QXV0aG9yQXNzb2NpYXRpb24SLworUFVMTF9SRVFVRVNUX0FVVEhPUl9BU1NPQ0lBVElPTl9VTlNQRUNJRklFRBAAEikKJVBVTExfUkVRVUVTVF9BVVRIT1JfQVNTT0NJQVRJT05fT1dORVIQARIqCiZQVUxMX1JFUVVFU1RfQVVUSE9SX0FTU09DSUFUSU9OX01FTUJFUhACEjAKLFBVTExfUkVRVUVTVF9BVVRIT1JfQVNTT0NJQVRJT05fQ09MTEFCT1JBVE9SEAMSLworUFVMTF9SRVFVRVNUX0FVVEhPUl9BU1NPQ0lBVElPTl9DT05UUklCVVRPUhAEEjoKNlBVTExfUkVRVUVTVF9BVVRIT1JfQVNTT0NJQVRJT05fRklSU1RfVElNRV9DT05UUklCVVRPUhAFEigKJFBVTExfUkVRVUVTVF9BVVRIT1JfQVNTT0NJQVRJT05fTk9ORRAGQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_google_protobuf_timestamp, file_workspace_v1_workspace]);
 
 /**
  * One pull request on github.com, by its repository and number. The daemon
@@ -485,6 +488,18 @@ export type PullRequestStatus = Message<"agentrepl.v1.PullRequestStatus"> & {
    * @generated from field: string head_sha = 4;
    */
   headSha: string;
+
+  /**
+   * Where the pull request stands in its base branch's GitHub merge queue.
+   * SET while it is in the queue, as of the read. UNSET when it is not in
+   * the queue, and whenever the read did not look at the queue, which it
+   * does only for a subscription asking for
+   * PULL_REQUEST_NOTICE_EVENT_MERGE_QUEUE: UNSET never means "not queued" to
+   * a subscriber that did not ask.
+   *
+   * @generated from field: optional agentrepl.v1.PullRequestStatusMergeQueue merge_queue = 5;
+   */
+  mergeQueue?: PullRequestStatusMergeQueue | undefined;
 };
 
 /**
@@ -493,6 +508,34 @@ export type PullRequestStatus = Message<"agentrepl.v1.PullRequestStatus"> & {
  */
 export const PullRequestStatusSchema: GenMessage<PullRequestStatus> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_pull_request, 14);
+
+/**
+ * A pull request's place in its merge queue, as a status states it.
+ *
+ * @generated from message agentrepl.v1.PullRequestStatusMergeQueue
+ */
+export type PullRequestStatusMergeQueue = Message<"agentrepl.v1.PullRequestStatusMergeQueue"> & {
+  /**
+   * How far it is from merging.
+   *
+   * @generated from field: agentrepl.v1.PullRequestMergeQueuePosition position = 1;
+   */
+  position?: PullRequestMergeQueuePosition | undefined;
+
+  /**
+   * What its entry is doing.
+   *
+   * @generated from field: agentrepl.v1.PullRequestMergeQueueEntryState state = 2;
+   */
+  state?: PullRequestMergeQueueEntryState | undefined;
+};
+
+/**
+ * Describes the message agentrepl.v1.PullRequestStatusMergeQueue.
+ * Use `create(PullRequestStatusMergeQueueSchema)` to create a new message.
+ */
+export const PullRequestStatusMergeQueueSchema: GenMessage<PullRequestStatusMergeQueue> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_pull_request, 15);
 
 /**
  * Where a pull request stands. THE ARM IS THE STATE.
@@ -544,7 +587,7 @@ export type PullRequestState = Message<"agentrepl.v1.PullRequestState"> & {
  * Use `create(PullRequestStateSchema)` to create a new message.
  */
 export const PullRequestStateSchema: GenMessage<PullRequestState> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_pull_request, 15);
+  messageDesc(file_agentrepl_v1_pull_request, 16);
 
 /**
  * Open, draft. DELIBERATELY EMPTY: the arm is the state.
@@ -559,7 +602,7 @@ export type PullRequestStateDraft = Message<"agentrepl.v1.PullRequestStateDraft"
  * Use `create(PullRequestStateDraftSchema)` to create a new message.
  */
 export const PullRequestStateDraftSchema: GenMessage<PullRequestStateDraft> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_pull_request, 16);
+  messageDesc(file_agentrepl_v1_pull_request, 17);
 
 /**
  * Open, ready. DELIBERATELY EMPTY: the arm is the state.
@@ -574,7 +617,7 @@ export type PullRequestStateOpen = Message<"agentrepl.v1.PullRequestStateOpen"> 
  * Use `create(PullRequestStateOpenSchema)` to create a new message.
  */
 export const PullRequestStateOpenSchema: GenMessage<PullRequestStateOpen> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_pull_request, 17);
+  messageDesc(file_agentrepl_v1_pull_request, 18);
 
 /**
  * Merged.
@@ -595,7 +638,7 @@ export type PullRequestStateMerged = Message<"agentrepl.v1.PullRequestStateMerge
  * Use `create(PullRequestStateMergedSchema)` to create a new message.
  */
 export const PullRequestStateMergedSchema: GenMessage<PullRequestStateMerged> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_pull_request, 18);
+  messageDesc(file_agentrepl_v1_pull_request, 19);
 
 /**
  * Closed without merging. DELIBERATELY EMPTY: the arm is the state.
@@ -610,7 +653,7 @@ export type PullRequestStateClosed = Message<"agentrepl.v1.PullRequestStateClose
  * Use `create(PullRequestStateClosedSchema)` to create a new message.
  */
 export const PullRequestStateClosedSchema: GenMessage<PullRequestStateClosed> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_pull_request, 19);
+  messageDesc(file_agentrepl_v1_pull_request, 20);
 
 /**
  * What the daemon tells one subscriber about one pull request, delivered as a
@@ -668,7 +711,7 @@ export type PullRequestNotice = Message<"agentrepl.v1.PullRequestNotice"> & {
  * Use `create(PullRequestNoticeSchema)` to create a new message.
  */
 export const PullRequestNoticeSchema: GenMessage<PullRequestNotice> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_pull_request, 20);
+  messageDesc(file_agentrepl_v1_pull_request, 21);
 
 /**
  * The subscription ended with this notice. DELIBERATELY EMPTY: the pull
@@ -684,7 +727,7 @@ export type PullRequestNoticeEnded = Message<"agentrepl.v1.PullRequestNoticeEnde
  * Use `create(PullRequestNoticeEndedSchema)` to create a new message.
  */
 export const PullRequestNoticeEndedSchema: GenMessage<PullRequestNoticeEnded> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_pull_request, 21);
+  messageDesc(file_agentrepl_v1_pull_request, 22);
 
 /**
  * One piece of activity on a followed pull request. THE ARM IS THE KIND.
@@ -754,6 +797,52 @@ export type PullRequestActivity = Message<"agentrepl.v1.PullRequestActivity"> & 
      */
     value: PullRequestActivityCheckFinished;
     case: "checkFinished";
+  } | {
+    /**
+     * The pull request joined its base branch's merge queue.
+     *
+     * @generated from field: agentrepl.v1.PullRequestActivityMergeQueueEntered merge_queue_entered = 8;
+     */
+    value: PullRequestActivityMergeQueueEntered;
+    case: "mergeQueueEntered";
+  } | {
+    /**
+     * The pull request's place in the merge queue changed: entries ahead of
+     * it merged or left, or an entry jumped ahead of it.
+     *
+     * @generated from field: agentrepl.v1.PullRequestActivityMergeQueueMoved merge_queue_moved = 9;
+     */
+    value: PullRequestActivityMergeQueueMoved;
+    case: "mergeQueueMoved";
+  } | {
+    /**
+     * The pull request's merge queue entry changed state.
+     *
+     * @generated from field: agentrepl.v1.PullRequestActivityMergeQueueEntryStateChanged merge_queue_entry_state_changed = 10;
+     */
+    value: PullRequestActivityMergeQueueEntryStateChanged;
+    case: "mergeQueueEntryStateChanged";
+  } | {
+    /**
+     * The pull request was removed from the merge queue. A pull request the
+     * queue merged is told by `state_changed` instead.
+     *
+     * @generated from field: agentrepl.v1.PullRequestActivityMergeQueueRemoved merge_queue_removed = 11;
+     */
+    value: PullRequestActivityMergeQueueRemoved;
+    case: "mergeQueueRemoved";
+  } | {
+    /**
+     * A check run on the pull request's merge group commit (the commit the
+     * queue tests, on a `gh-readonly-queue/...` branch) finished. A separate
+     * arm from `check_finished` because the two run on different commits and
+     * only this one decides whether the queue merges or removes the pull
+     * request.
+     *
+     * @generated from field: agentrepl.v1.PullRequestActivityCheckFinished merge_group_check_finished = 12;
+     */
+    value: PullRequestActivityCheckFinished;
+    case: "mergeGroupCheckFinished";
   } | { case: undefined; value?: undefined };
 };
 
@@ -762,7 +851,7 @@ export type PullRequestActivity = Message<"agentrepl.v1.PullRequestActivity"> & 
  * Use `create(PullRequestActivitySchema)` to create a new message.
  */
 export const PullRequestActivitySchema: GenMessage<PullRequestActivity> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_pull_request, 22);
+  messageDesc(file_agentrepl_v1_pull_request, 23);
 
 /**
  * Who wrote a piece of activity.
@@ -791,7 +880,7 @@ export type PullRequestActivityAuthor = Message<"agentrepl.v1.PullRequestActivit
  * Use `create(PullRequestActivityAuthorSchema)` to create a new message.
  */
 export const PullRequestActivityAuthorSchema: GenMessage<PullRequestActivityAuthor> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_pull_request, 23);
+  messageDesc(file_agentrepl_v1_pull_request, 24);
 
 /**
  * The text someone wrote, as GitHub stores it. The notice renders it as
@@ -814,7 +903,7 @@ export type PullRequestActivityText = Message<"agentrepl.v1.PullRequestActivityT
  * Use `create(PullRequestActivityTextSchema)` to create a new message.
  */
 export const PullRequestActivityTextSchema: GenMessage<PullRequestActivityText> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_pull_request, 24);
+  messageDesc(file_agentrepl_v1_pull_request, 25);
 
 /**
  * A conversation comment.
@@ -863,7 +952,7 @@ export type PullRequestActivityComment = Message<"agentrepl.v1.PullRequestActivi
  * Use `create(PullRequestActivityCommentSchema)` to create a new message.
  */
 export const PullRequestActivityCommentSchema: GenMessage<PullRequestActivityComment> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_pull_request, 25);
+  messageDesc(file_agentrepl_v1_pull_request, 26);
 
 /**
  * A submitted review.
@@ -920,7 +1009,7 @@ export type PullRequestActivityReview = Message<"agentrepl.v1.PullRequestActivit
  * Use `create(PullRequestActivityReviewSchema)` to create a new message.
  */
 export const PullRequestActivityReviewSchema: GenMessage<PullRequestActivityReview> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_pull_request, 26);
+  messageDesc(file_agentrepl_v1_pull_request, 27);
 
 /**
  * A review's verdict. THE ARM IS THE VERDICT. A set wrapper whose oneof is
@@ -972,7 +1061,7 @@ export type PullRequestReviewVerdict = Message<"agentrepl.v1.PullRequestReviewVe
  * Use `create(PullRequestReviewVerdictSchema)` to create a new message.
  */
 export const PullRequestReviewVerdictSchema: GenMessage<PullRequestReviewVerdict> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_pull_request, 27);
+  messageDesc(file_agentrepl_v1_pull_request, 28);
 
 /**
  * Approved. DELIBERATELY EMPTY: the arm is the verdict.
@@ -987,7 +1076,7 @@ export type PullRequestReviewVerdictApproved = Message<"agentrepl.v1.PullRequest
  * Use `create(PullRequestReviewVerdictApprovedSchema)` to create a new message.
  */
 export const PullRequestReviewVerdictApprovedSchema: GenMessage<PullRequestReviewVerdictApproved> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_pull_request, 28);
+  messageDesc(file_agentrepl_v1_pull_request, 29);
 
 /**
  * Changes requested. DELIBERATELY EMPTY: the arm is the verdict.
@@ -1002,7 +1091,7 @@ export type PullRequestReviewVerdictChangesRequested = Message<"agentrepl.v1.Pul
  * Use `create(PullRequestReviewVerdictChangesRequestedSchema)` to create a new message.
  */
 export const PullRequestReviewVerdictChangesRequestedSchema: GenMessage<PullRequestReviewVerdictChangesRequested> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_pull_request, 29);
+  messageDesc(file_agentrepl_v1_pull_request, 30);
 
 /**
  * Commented. DELIBERATELY EMPTY: the arm is the verdict.
@@ -1017,7 +1106,7 @@ export type PullRequestReviewVerdictCommented = Message<"agentrepl.v1.PullReques
  * Use `create(PullRequestReviewVerdictCommentedSchema)` to create a new message.
  */
 export const PullRequestReviewVerdictCommentedSchema: GenMessage<PullRequestReviewVerdictCommented> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_pull_request, 30);
+  messageDesc(file_agentrepl_v1_pull_request, 31);
 
 /**
  * Dismissed. DELIBERATELY EMPTY: the arm is the verdict.
@@ -1032,7 +1121,7 @@ export type PullRequestReviewVerdictDismissed = Message<"agentrepl.v1.PullReques
  * Use `create(PullRequestReviewVerdictDismissedSchema)` to create a new message.
  */
 export const PullRequestReviewVerdictDismissedSchema: GenMessage<PullRequestReviewVerdictDismissed> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_pull_request, 31);
+  messageDesc(file_agentrepl_v1_pull_request, 32);
 
 /**
  * A line comment, or a reply in a review thread.
@@ -1105,7 +1194,7 @@ export type PullRequestActivityReviewComment = Message<"agentrepl.v1.PullRequest
  * Use `create(PullRequestActivityReviewCommentSchema)` to create a new message.
  */
 export const PullRequestActivityReviewCommentSchema: GenMessage<PullRequestActivityReviewComment> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_pull_request, 32);
+  messageDesc(file_agentrepl_v1_pull_request, 33);
 
 /**
  * Where a line comment sits.
@@ -1134,7 +1223,7 @@ export type PullRequestActivityReviewCommentLocation = Message<"agentrepl.v1.Pul
  * Use `create(PullRequestActivityReviewCommentLocationSchema)` to create a new message.
  */
 export const PullRequestActivityReviewCommentLocationSchema: GenMessage<PullRequestActivityReviewCommentLocation> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_pull_request, 33);
+  messageDesc(file_agentrepl_v1_pull_request, 34);
 
 /**
  * Something already told was edited. Told with its new text, never a diff,
@@ -1187,7 +1276,7 @@ export type PullRequestActivityEdited = Message<"agentrepl.v1.PullRequestActivit
  * Use `create(PullRequestActivityEditedSchema)` to create a new message.
  */
 export const PullRequestActivityEditedSchema: GenMessage<PullRequestActivityEdited> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_pull_request, 34);
+  messageDesc(file_agentrepl_v1_pull_request, 35);
 
 /**
  * Something already told was deleted. The daemon learns of a deletion by the
@@ -1225,7 +1314,7 @@ export type PullRequestActivityDeleted = Message<"agentrepl.v1.PullRequestActivi
  * Use `create(PullRequestActivityDeletedSchema)` to create a new message.
  */
 export const PullRequestActivityDeletedSchema: GenMessage<PullRequestActivityDeleted> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_pull_request, 35);
+  messageDesc(file_agentrepl_v1_pull_request, 36);
 
 /**
  * A deleted conversation comment.
@@ -1246,7 +1335,7 @@ export type PullRequestActivityDeletedComment = Message<"agentrepl.v1.PullReques
  * Use `create(PullRequestActivityDeletedCommentSchema)` to create a new message.
  */
 export const PullRequestActivityDeletedCommentSchema: GenMessage<PullRequestActivityDeletedComment> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_pull_request, 36);
+  messageDesc(file_agentrepl_v1_pull_request, 37);
 
 /**
  * A deleted line comment.
@@ -1267,7 +1356,7 @@ export type PullRequestActivityDeletedReviewComment = Message<"agentrepl.v1.Pull
  * Use `create(PullRequestActivityDeletedReviewCommentSchema)` to create a new message.
  */
 export const PullRequestActivityDeletedReviewCommentSchema: GenMessage<PullRequestActivityDeletedReviewComment> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_pull_request, 37);
+  messageDesc(file_agentrepl_v1_pull_request, 38);
 
 /**
  * The pull request changed state.
@@ -1296,7 +1385,7 @@ export type PullRequestActivityStateChanged = Message<"agentrepl.v1.PullRequestA
  * Use `create(PullRequestActivityStateChangedSchema)` to create a new message.
  */
 export const PullRequestActivityStateChangedSchema: GenMessage<PullRequestActivityStateChanged> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_pull_request, 38);
+  messageDesc(file_agentrepl_v1_pull_request, 39);
 
 /**
  * A check run finished: its name and its result, and nothing else, so many
@@ -1325,7 +1414,7 @@ export type PullRequestActivityCheckFinished = Message<"agentrepl.v1.PullRequest
  * Use `create(PullRequestActivityCheckFinishedSchema)` to create a new message.
  */
 export const PullRequestActivityCheckFinishedSchema: GenMessage<PullRequestActivityCheckFinished> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_pull_request, 39);
+  messageDesc(file_agentrepl_v1_pull_request, 40);
 
 /**
  * How a check run finished. THE ARM IS THE CONCLUSION. A set wrapper whose
@@ -1401,7 +1490,7 @@ export type PullRequestCheckConclusion = Message<"agentrepl.v1.PullRequestCheckC
  * Use `create(PullRequestCheckConclusionSchema)` to create a new message.
  */
 export const PullRequestCheckConclusionSchema: GenMessage<PullRequestCheckConclusion> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_pull_request, 40);
+  messageDesc(file_agentrepl_v1_pull_request, 41);
 
 /**
  * Passed. DELIBERATELY EMPTY: the arm is the conclusion.
@@ -1416,7 +1505,7 @@ export type PullRequestCheckConclusionSuccess = Message<"agentrepl.v1.PullReques
  * Use `create(PullRequestCheckConclusionSuccessSchema)` to create a new message.
  */
 export const PullRequestCheckConclusionSuccessSchema: GenMessage<PullRequestCheckConclusionSuccess> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_pull_request, 41);
+  messageDesc(file_agentrepl_v1_pull_request, 42);
 
 /**
  * Failed. DELIBERATELY EMPTY: the arm is the conclusion.
@@ -1431,7 +1520,7 @@ export type PullRequestCheckConclusionFailure = Message<"agentrepl.v1.PullReques
  * Use `create(PullRequestCheckConclusionFailureSchema)` to create a new message.
  */
 export const PullRequestCheckConclusionFailureSchema: GenMessage<PullRequestCheckConclusionFailure> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_pull_request, 42);
+  messageDesc(file_agentrepl_v1_pull_request, 43);
 
 /**
  * Cancelled. DELIBERATELY EMPTY: the arm is the conclusion.
@@ -1446,7 +1535,7 @@ export type PullRequestCheckConclusionCancelled = Message<"agentrepl.v1.PullRequ
  * Use `create(PullRequestCheckConclusionCancelledSchema)` to create a new message.
  */
 export const PullRequestCheckConclusionCancelledSchema: GenMessage<PullRequestCheckConclusionCancelled> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_pull_request, 43);
+  messageDesc(file_agentrepl_v1_pull_request, 44);
 
 /**
  * Timed out. DELIBERATELY EMPTY: the arm is the conclusion.
@@ -1461,7 +1550,7 @@ export type PullRequestCheckConclusionTimedOut = Message<"agentrepl.v1.PullReque
  * Use `create(PullRequestCheckConclusionTimedOutSchema)` to create a new message.
  */
 export const PullRequestCheckConclusionTimedOutSchema: GenMessage<PullRequestCheckConclusionTimedOut> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_pull_request, 44);
+  messageDesc(file_agentrepl_v1_pull_request, 45);
 
 /**
  * Skipped. DELIBERATELY EMPTY: the arm is the conclusion.
@@ -1476,7 +1565,7 @@ export type PullRequestCheckConclusionSkipped = Message<"agentrepl.v1.PullReques
  * Use `create(PullRequestCheckConclusionSkippedSchema)` to create a new message.
  */
 export const PullRequestCheckConclusionSkippedSchema: GenMessage<PullRequestCheckConclusionSkipped> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_pull_request, 45);
+  messageDesc(file_agentrepl_v1_pull_request, 46);
 
 /**
  * Neutral. DELIBERATELY EMPTY: the arm is the conclusion.
@@ -1491,7 +1580,7 @@ export type PullRequestCheckConclusionNeutral = Message<"agentrepl.v1.PullReques
  * Use `create(PullRequestCheckConclusionNeutralSchema)` to create a new message.
  */
 export const PullRequestCheckConclusionNeutralSchema: GenMessage<PullRequestCheckConclusionNeutral> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_pull_request, 46);
+  messageDesc(file_agentrepl_v1_pull_request, 47);
 
 /**
  * Action required. DELIBERATELY EMPTY: the arm is the conclusion.
@@ -1506,7 +1595,302 @@ export type PullRequestCheckConclusionActionRequired = Message<"agentrepl.v1.Pul
  * Use `create(PullRequestCheckConclusionActionRequiredSchema)` to create a new message.
  */
 export const PullRequestCheckConclusionActionRequiredSchema: GenMessage<PullRequestCheckConclusionActionRequired> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_pull_request, 47);
+  messageDesc(file_agentrepl_v1_pull_request, 48);
+
+/**
+ * The pull request joined the merge queue, told from GitHub's
+ * `AddedToMergeQueueEvent` timeline event. Each joining is its own event, so
+ * a pull request removed and queued again is told joining twice.
+ *
+ * @generated from message agentrepl.v1.PullRequestActivityMergeQueueEntered
+ */
+export type PullRequestActivityMergeQueueEntered = Message<"agentrepl.v1.PullRequestActivityMergeQueueEntered"> & {
+  /**
+   * Who queued it. UNSET when GitHub names no actor. Its `association` is
+   * UNSPECIFIED: the timeline names only the login.
+   *
+   * @generated from field: optional agentrepl.v1.PullRequestActivityAuthor actor = 1;
+   */
+  actor?: PullRequestActivityAuthor | undefined;
+
+  /**
+   * Where it stood when the daemon read it. UNSET when it had already left
+   * the queue by the read that told the joining, which `merge_queue_removed`
+   * or `state_changed` in the same notice then tells.
+   *
+   * @generated from field: optional agentrepl.v1.PullRequestMergeQueuePosition position = 2;
+   */
+  position?: PullRequestMergeQueuePosition | undefined;
+
+  /**
+   * When it was queued.
+   *
+   * @generated from field: google.protobuf.Timestamp entered_at = 3;
+   */
+  enteredAt?: Timestamp | undefined;
+};
+
+/**
+ * Describes the message agentrepl.v1.PullRequestActivityMergeQueueEntered.
+ * Use `create(PullRequestActivityMergeQueueEnteredSchema)` to create a new message.
+ */
+export const PullRequestActivityMergeQueueEnteredSchema: GenMessage<PullRequestActivityMergeQueueEntered> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_pull_request, 49);
+
+/**
+ * The pull request's place in the queue changed between two reads.
+ *
+ * @generated from message agentrepl.v1.PullRequestActivityMergeQueueMoved
+ */
+export type PullRequestActivityMergeQueueMoved = Message<"agentrepl.v1.PullRequestActivityMergeQueueMoved"> & {
+  /**
+   * Where it stood when last told.
+   *
+   * @generated from field: agentrepl.v1.PullRequestMergeQueuePosition from = 1;
+   */
+  from?: PullRequestMergeQueuePosition | undefined;
+
+  /**
+   * Where it stands now.
+   *
+   * @generated from field: agentrepl.v1.PullRequestMergeQueuePosition to = 2;
+   */
+  to?: PullRequestMergeQueuePosition | undefined;
+};
+
+/**
+ * Describes the message agentrepl.v1.PullRequestActivityMergeQueueMoved.
+ * Use `create(PullRequestActivityMergeQueueMovedSchema)` to create a new message.
+ */
+export const PullRequestActivityMergeQueueMovedSchema: GenMessage<PullRequestActivityMergeQueueMoved> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_pull_request, 50);
+
+/**
+ * The pull request's queue entry changed state between two reads.
+ *
+ * @generated from message agentrepl.v1.PullRequestActivityMergeQueueEntryStateChanged
+ */
+export type PullRequestActivityMergeQueueEntryStateChanged = Message<"agentrepl.v1.PullRequestActivityMergeQueueEntryStateChanged"> & {
+  /**
+   * The state it moved to.
+   *
+   * @generated from field: agentrepl.v1.PullRequestMergeQueueEntryState state = 1;
+   */
+  state?: PullRequestMergeQueueEntryState | undefined;
+};
+
+/**
+ * Describes the message agentrepl.v1.PullRequestActivityMergeQueueEntryStateChanged.
+ * Use `create(PullRequestActivityMergeQueueEntryStateChangedSchema)` to create a new message.
+ */
+export const PullRequestActivityMergeQueueEntryStateChangedSchema: GenMessage<PullRequestActivityMergeQueueEntryStateChanged> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_pull_request, 51);
+
+/**
+ * The pull request was removed from the queue without merging, told from
+ * GitHub's `RemovedFromMergeQueueEvent` timeline event.
+ *
+ * @generated from message agentrepl.v1.PullRequestActivityMergeQueueRemoved
+ */
+export type PullRequestActivityMergeQueueRemoved = Message<"agentrepl.v1.PullRequestActivityMergeQueueRemoved"> & {
+  /**
+   * Who removed it. UNSET when GitHub names no actor, as when the queue
+   * removes it itself. Its `association` is UNSPECIFIED: the timeline names
+   * only the login.
+   *
+   * @generated from field: optional agentrepl.v1.PullRequestActivityAuthor actor = 1;
+   */
+  actor?: PullRequestActivityAuthor | undefined;
+
+  /**
+   * GitHub's reason, verbatim (for example that the merge group's checks
+   * failed). UNSET when GitHub gives none.
+   *
+   * @generated from field: optional string reason = 2;
+   */
+  reason?: string | undefined;
+
+  /**
+   * When it was removed.
+   *
+   * @generated from field: google.protobuf.Timestamp removed_at = 3;
+   */
+  removedAt?: Timestamp | undefined;
+};
+
+/**
+ * Describes the message agentrepl.v1.PullRequestActivityMergeQueueRemoved.
+ * Use `create(PullRequestActivityMergeQueueRemovedSchema)` to create a new message.
+ */
+export const PullRequestActivityMergeQueueRemovedSchema: GenMessage<PullRequestActivityMergeQueueRemoved> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_pull_request, 52);
+
+/**
+ * How far a queued pull request is from merging. Derived from the order of
+ * the queue's entries, never from GitHub's own `position` number, whose base
+ * GitHub does not document.
+ *
+ * @generated from message agentrepl.v1.PullRequestMergeQueuePosition
+ */
+export type PullRequestMergeQueuePosition = Message<"agentrepl.v1.PullRequestMergeQueuePosition"> & {
+  /**
+   * How many entries are ahead of it: 0 is the head of the queue, the entry
+   * merged next.
+   *
+   * @generated from field: uint32 entries_ahead = 1;
+   */
+  entriesAhead: number;
+
+  /**
+   * How many entries the queue holds, this one included.
+   *
+   * @generated from field: uint32 entries_total = 2;
+   */
+  entriesTotal: number;
+};
+
+/**
+ * Describes the message agentrepl.v1.PullRequestMergeQueuePosition.
+ * Use `create(PullRequestMergeQueuePositionSchema)` to create a new message.
+ */
+export const PullRequestMergeQueuePositionSchema: GenMessage<PullRequestMergeQueuePosition> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_pull_request, 53);
+
+/**
+ * What a merge queue entry is doing, as GitHub's `MergeQueueEntryState`
+ * names it. THE ARM IS THE STATE. A set wrapper whose oneof is unassigned is
+ * a state this schema revision does not name.
+ *
+ * @generated from message agentrepl.v1.PullRequestMergeQueueEntryState
+ */
+export type PullRequestMergeQueueEntryState = Message<"agentrepl.v1.PullRequestMergeQueueEntryState"> & {
+  /**
+   * @generated from oneof agentrepl.v1.PullRequestMergeQueueEntryState.state
+   */
+  state: {
+    /**
+     * Waiting its turn.
+     *
+     * @generated from field: agentrepl.v1.PullRequestMergeQueueEntryStateQueued queued = 1;
+     */
+    value: PullRequestMergeQueueEntryStateQueued;
+    case: "queued";
+  } | {
+    /**
+     * Its merge group's checks are running.
+     *
+     * @generated from field: agentrepl.v1.PullRequestMergeQueueEntryStateAwaitingChecks awaiting_checks = 2;
+     */
+    value: PullRequestMergeQueueEntryStateAwaitingChecks;
+    case: "awaitingChecks";
+  } | {
+    /**
+     * Its checks passed; the queue will merge it.
+     *
+     * @generated from field: agentrepl.v1.PullRequestMergeQueueEntryStateMergeable mergeable = 3;
+     */
+    value: PullRequestMergeQueueEntryStateMergeable;
+    case: "mergeable";
+  } | {
+    /**
+     * It cannot be merged; the queue will remove it.
+     *
+     * @generated from field: agentrepl.v1.PullRequestMergeQueueEntryStateUnmergeable unmergeable = 4;
+     */
+    value: PullRequestMergeQueueEntryStateUnmergeable;
+    case: "unmergeable";
+  } | {
+    /**
+     * Locked by the queue while it merges.
+     *
+     * @generated from field: agentrepl.v1.PullRequestMergeQueueEntryStateLocked locked = 5;
+     */
+    value: PullRequestMergeQueueEntryStateLocked;
+    case: "locked";
+  } | { case: undefined; value?: undefined };
+};
+
+/**
+ * Describes the message agentrepl.v1.PullRequestMergeQueueEntryState.
+ * Use `create(PullRequestMergeQueueEntryStateSchema)` to create a new message.
+ */
+export const PullRequestMergeQueueEntryStateSchema: GenMessage<PullRequestMergeQueueEntryState> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_pull_request, 54);
+
+/**
+ * Waiting. DELIBERATELY EMPTY: the arm is the state.
+ *
+ * @generated from message agentrepl.v1.PullRequestMergeQueueEntryStateQueued
+ */
+export type PullRequestMergeQueueEntryStateQueued = Message<"agentrepl.v1.PullRequestMergeQueueEntryStateQueued"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.PullRequestMergeQueueEntryStateQueued.
+ * Use `create(PullRequestMergeQueueEntryStateQueuedSchema)` to create a new message.
+ */
+export const PullRequestMergeQueueEntryStateQueuedSchema: GenMessage<PullRequestMergeQueueEntryStateQueued> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_pull_request, 55);
+
+/**
+ * Checks running. DELIBERATELY EMPTY: the arm is the state.
+ *
+ * @generated from message agentrepl.v1.PullRequestMergeQueueEntryStateAwaitingChecks
+ */
+export type PullRequestMergeQueueEntryStateAwaitingChecks = Message<"agentrepl.v1.PullRequestMergeQueueEntryStateAwaitingChecks"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.PullRequestMergeQueueEntryStateAwaitingChecks.
+ * Use `create(PullRequestMergeQueueEntryStateAwaitingChecksSchema)` to create a new message.
+ */
+export const PullRequestMergeQueueEntryStateAwaitingChecksSchema: GenMessage<PullRequestMergeQueueEntryStateAwaitingChecks> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_pull_request, 56);
+
+/**
+ * Will merge. DELIBERATELY EMPTY: the arm is the state.
+ *
+ * @generated from message agentrepl.v1.PullRequestMergeQueueEntryStateMergeable
+ */
+export type PullRequestMergeQueueEntryStateMergeable = Message<"agentrepl.v1.PullRequestMergeQueueEntryStateMergeable"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.PullRequestMergeQueueEntryStateMergeable.
+ * Use `create(PullRequestMergeQueueEntryStateMergeableSchema)` to create a new message.
+ */
+export const PullRequestMergeQueueEntryStateMergeableSchema: GenMessage<PullRequestMergeQueueEntryStateMergeable> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_pull_request, 57);
+
+/**
+ * Will be removed. DELIBERATELY EMPTY: the arm is the state.
+ *
+ * @generated from message agentrepl.v1.PullRequestMergeQueueEntryStateUnmergeable
+ */
+export type PullRequestMergeQueueEntryStateUnmergeable = Message<"agentrepl.v1.PullRequestMergeQueueEntryStateUnmergeable"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.PullRequestMergeQueueEntryStateUnmergeable.
+ * Use `create(PullRequestMergeQueueEntryStateUnmergeableSchema)` to create a new message.
+ */
+export const PullRequestMergeQueueEntryStateUnmergeableSchema: GenMessage<PullRequestMergeQueueEntryStateUnmergeable> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_pull_request, 58);
+
+/**
+ * Locked. DELIBERATELY EMPTY: the arm is the state.
+ *
+ * @generated from message agentrepl.v1.PullRequestMergeQueueEntryStateLocked
+ */
+export type PullRequestMergeQueueEntryStateLocked = Message<"agentrepl.v1.PullRequestMergeQueueEntryStateLocked"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.PullRequestMergeQueueEntryStateLocked.
+ * Use `create(PullRequestMergeQueueEntryStateLockedSchema)` to create a new message.
+ */
+export const PullRequestMergeQueueEntryStateLockedSchema: GenMessage<PullRequestMergeQueueEntryStateLocked> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_pull_request, 59);
 
 /**
  * A kind of pull-request activity a subscription may ask to be told. A closed
@@ -1558,6 +1942,16 @@ export enum PullRequestNoticeEvent {
    * @generated from enum value: PULL_REQUEST_NOTICE_EVENT_CHECKS = 5;
    */
   CHECKS = 5,
+
+  /**
+   * The pull request joined, moved within, or was removed from its base
+   * branch's GitHub merge queue, its queue entry changed state, or a check
+   * run on its merge group commit finished. Its landing is told by STATE, as
+   * any merge is.
+   *
+   * @generated from enum value: PULL_REQUEST_NOTICE_EVENT_MERGE_QUEUE = 6;
+   */
+  MERGE_QUEUE = 6,
 }
 
 /**

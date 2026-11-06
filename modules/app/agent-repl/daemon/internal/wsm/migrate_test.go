@@ -1163,12 +1163,64 @@ func TestTheMigrationDropsTheDaemonsSlackPosts(t *testing.T) {
 	}
 }
 
+// migrationTo is the step that carries a file to layout TO.
+func migrationTo(t *testing.T, to int) migration {
+	t.Helper()
+	for _, m := range migrations {
+		if m.To == to {
+			return m
+		}
+	}
+	t.Fatalf("no migration carries a file to layout %d", to)
+	return migration{}
+}
+
 func TestTheDropOfTheSlackPostsIsBreaking(t *testing.T) {
 	// Arrange / Act
-	last := migrations[len(migrations)-1]
+	step := migrationTo(t, 103)
 
 	// Assert
-	if last.To != 103 || last.Name != "drop_workspace_slack_posts" || last.Kind != MigrationBreaking {
-		t.Fatalf("the last migration = %+v, want layout 103 dropping the Slack posts, breaking", last)
+	if step.Name != "drop_workspace_slack_posts" || step.Kind != MigrationBreaking {
+		t.Fatalf("migration 103 = %+v, want the drop of the Slack posts, breaking", step)
+	}
+}
+
+func TestTheGithubMergeQueuesStepIsAdditiveAndCreatesBothTables(t *testing.T) {
+	// Arrange
+	step := migrationTo(t, 104)
+	path := fixtureAt(t, 103)
+
+	// Act
+	execRaw(t, path, step.DDL)
+
+	// Assert
+	if step.Name != "github_merge_queues" || step.Kind != MigrationAdditive {
+		t.Fatalf("migration 104 = %+v, want the GitHub merge queues, additive", step)
+	}
+	for _, table := range []string{"github_merge_queue_subscriptions", "github_merge_queue_untold_notices"} {
+		if got := rawScalar[int](t, path, `SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = ?`, table); got != 1 {
+			t.Fatalf("table %s exists %d times, want once", table, got)
+		}
+	}
+}
+
+func TestOwnedLinksSubscribedBeforeTheMergeQueueEventGainIt(t *testing.T) {
+	// Arrange
+	step := migrationTo(t, 105)
+	path := fixtureAt(t, 104)
+	execRaw(t, path, `INSERT INTO pull_request_subscriptions (subscriber, owner, repo, number, events, origin, subscribed_at, told) VALUES
+		('w1', 'o', 'r', 1, 62, 'owned_link', 0, ''), ('w1', 'o', 'r', 2, 2, 'requested', 0, '')`)
+
+	// Act
+	execRaw(t, path, step.DDL)
+
+	// Assert
+	if step.Name != "owned_links_follow_the_merge_queue" || step.Kind != MigrationBreaking {
+		t.Fatalf("migration 105 = %+v, want the owned links' merge queue, breaking", step)
+	}
+	owned := rawScalar[int](t, path, `SELECT events FROM pull_request_subscriptions WHERE number = 1`)
+	requested := rawScalar[int](t, path, `SELECT events FROM pull_request_subscriptions WHERE number = 2`)
+	if owned != 126 || requested != 2 {
+		t.Fatalf("events = owned %d, requested %d; want the owned link's every event (126) and the request untouched (2)", owned, requested)
 	}
 }

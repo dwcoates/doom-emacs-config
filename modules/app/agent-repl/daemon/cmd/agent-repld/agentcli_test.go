@@ -21,8 +21,10 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
+	"agent-repld/internal/prwatch"
 	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/workspace"
+	"agent-repld/internal/wsm"
 )
 
 // cliClient is a daemon client that records every request and answers the
@@ -197,6 +199,18 @@ func (c *cliClient) SubscribePullRequest(_ context.Context, req *connect.Request
 
 func (c *cliClient) UnsubscribePullRequest(_ context.Context, req *connect.Request[agentreplv1.UnsubscribePullRequestRequest]) (*connect.Response[agentreplv1.UnsubscribePullRequestResponse], error) {
 	return connect.NewResponse(&agentreplv1.UnsubscribePullRequestResponse{}), c.record(req.Msg)
+}
+
+func (c *cliClient) SubscribeGithubMergeQueue(_ context.Context, req *connect.Request[agentreplv1.SubscribeGithubMergeQueueRequest]) (*connect.Response[agentreplv1.SubscribeGithubMergeQueueResponse], error) {
+	return connect.NewResponse(&agentreplv1.SubscribeGithubMergeQueueResponse{}), c.record(req.Msg)
+}
+
+func (c *cliClient) UnsubscribeGithubMergeQueue(_ context.Context, req *connect.Request[agentreplv1.UnsubscribeGithubMergeQueueRequest]) (*connect.Response[agentreplv1.UnsubscribeGithubMergeQueueResponse], error) {
+	return connect.NewResponse(&agentreplv1.UnsubscribeGithubMergeQueueResponse{}), c.record(req.Msg)
+}
+
+func (c *cliClient) ListGithubMergeQueueSubscriptions(_ context.Context, req *connect.Request[agentreplv1.ListGithubMergeQueueSubscriptionsRequest]) (*connect.Response[agentreplv1.ListGithubMergeQueueSubscriptionsResponse], error) {
+	return connect.NewResponse(&agentreplv1.ListGithubMergeQueueSubscriptionsResponse{}), c.record(req.Msg)
 }
 
 func (c *cliClient) ListPullRequestSubscriptions(_ context.Context, req *connect.Request[agentreplv1.ListPullRequestSubscriptionsRequest]) (*connect.Response[agentreplv1.ListPullRequestSubscriptionsResponse], error) {
@@ -2583,7 +2597,7 @@ func TestPullRequestVerbsSendTheirRequests(t *testing.T) {
 		{name: "pr-subscribe sends #N for the daemon to resolve, asking every event by default", args: []string{"pr-subscribe", "here", "-pr", "#7"},
 			check: func(t *testing.T, f *cliFixture) {
 				req := only[*agentreplv1.SubscribePullRequestRequest](t, f)
-				if req.GetText() != "#7" || len(req.GetEvents()) != 5 {
+				if req.GetText() != "#7" || len(req.GetEvents()) != 6 {
 					t.Errorf("request = %v, want #7 with every event", req)
 				}
 			}},
@@ -2603,6 +2617,41 @@ func TestPullRequestVerbsSendTheirRequests(t *testing.T) {
 		{name: "pr-subscriptions lists", args: []string{"pr-subscriptions", "here"},
 			check: func(t *testing.T, f *cliFixture) {
 				if req := only[*agentreplv1.ListPullRequestSubscriptionsRequest](t, f); req.GetSubscriber() == nil {
+					t.Errorf("request = %v, want the subscriber", req)
+				}
+			}},
+		{name: "pr-subscribe asks for the merge queue", args: []string{"pr-subscribe", "here", "-pr", "o/r#7", "-events", "merge_queue,state"},
+			check: func(t *testing.T, f *cliFixture) {
+				req := only[*agentreplv1.SubscribePullRequestRequest](t, f)
+				want := []agentreplv1.PullRequestNoticeEvent{agentreplv1.PullRequestNoticeEvent_PULL_REQUEST_NOTICE_EVENT_MERGE_QUEUE, agentreplv1.PullRequestNoticeEvent_PULL_REQUEST_NOTICE_EVENT_STATE}
+				if !slices.Equal(req.GetEvents(), want) {
+					t.Errorf("events = %v, want %v", req.GetEvents(), want)
+				}
+			}},
+		{name: "gh-queue-subscribe follows the workspace's own repository's default branch", args: []string{"gh-queue-subscribe", "here"},
+			check: func(t *testing.T, f *cliFixture) {
+				req := only[*agentreplv1.SubscribeGithubMergeQueueRequest](t, f)
+				if req.GetSubscribers() == nil || req.Branch != nil {
+					t.Errorf("request = %v, want the subscriber's repository and no branch", req)
+				}
+			}},
+		{name: "gh-queue-subscribe follows a named repository's branch", args: []string{"gh-queue-subscribe", "here", "-repository", "o/r", "-branch", "release"},
+			check: func(t *testing.T, f *cliFixture) {
+				req := only[*agentreplv1.SubscribeGithubMergeQueueRequest](t, f)
+				if req.GetNamed().GetOwner() != "o" || req.GetNamed().GetRepo() != "r" || req.GetBranch() != "release" {
+					t.Errorf("request = %v, want o/r on release", req)
+				}
+			}},
+		{name: "gh-queue-unsubscribe sends the queue", args: []string{"gh-queue-unsubscribe", "here", "-queue", "o/r@main"},
+			check: func(t *testing.T, f *cliFixture) {
+				req := only[*agentreplv1.UnsubscribeGithubMergeQueueRequest](t, f)
+				if req.GetMergeQueue().GetRepository().GetOwner() != "o" || req.GetMergeQueue().GetRepository().GetRepo() != "r" || req.GetMergeQueue().GetBranch() != "main" {
+					t.Errorf("request = %v, want o/r@main", req)
+				}
+			}},
+		{name: "gh-queue-subscriptions lists", args: []string{"gh-queue-subscriptions", "here"},
+			check: func(t *testing.T, f *cliFixture) {
+				if req := only[*agentreplv1.ListGithubMergeQueueSubscriptionsRequest](t, f); req.GetSubscriber() == nil {
 					t.Errorf("request = %v, want the subscriber", req)
 				}
 			}},
@@ -2631,6 +2680,19 @@ func TestPullRequestVerbsSendTheirRequests(t *testing.T) {
 	}
 }
 
+func TestPullRequestEventSpellingsAreTheStoresEvents(t *testing.T) {
+	// Assert
+	members := wsm.AllPullRequestEvents().Members()
+	if len(pullRequestEvents) != len(members) || allPullRequestEvents != wsm.AllPullRequestEvents().String() {
+		t.Fatalf("spellings %v and default %q; want one per store event, %v", pullRequestEvents, allPullRequestEvents, members)
+	}
+	for _, e := range members {
+		if pullRequestEvents[e.String()] != prwatch.EventProto(e) {
+			t.Fatalf("%s spells %v, want %v", e, pullRequestEvents[e.String()], prwatch.EventProto(e))
+		}
+	}
+}
+
 func TestPullRequestVerbsRefuseAMalformedCall(t *testing.T) {
 	tests := []struct {
 		name string
@@ -2638,6 +2700,8 @@ func TestPullRequestVerbsRefuseAMalformedCall(t *testing.T) {
 	}{
 		{name: "pr-subscribe naming no pull request", args: []string{"pr-subscribe", "here"}},
 		{name: "pr-subscribe naming an unknown event", args: []string{"pr-subscribe", "here", "-pr", "#7", "-events", "pushes"}},
+		{name: "gh-queue-subscribe naming a malformed repository", args: []string{"gh-queue-subscribe", "here", "-repository", "o"}},
+		{name: "gh-queue-unsubscribe naming no branch", args: []string{"gh-queue-unsubscribe", "here", "-queue", "o/r"}},
 		{name: "pr-unsubscribe naming #N", args: []string{"pr-unsubscribe", "here", "-pr", "#7"}},
 		{name: "pr-comment with no body", args: []string{"pr-comment", "here", "-pr", "o/r#7"}},
 		{name: "pr-comment with both bodies", args: []string{"pr-comment", "here", "-pr", "o/r#7", "-body", "x", "-body-file", "/f"}},

@@ -65,7 +65,8 @@ func TestPullRequestEventsAreASet(t *testing.T) {
 		wantValid bool
 		wantName  string
 	}{
-		{name: "every event", set: AllPullRequestEvents(), wantValid: true, wantName: "comment,review,review_comment,state,checks"},
+		{name: "every event", set: AllPullRequestEvents(), wantValid: true, wantName: "comment,review,review_comment,state,checks,merge_queue"},
+		{name: "the merge queue is a member", set: NewPullRequestEvents(PullRequestEventMergeQueue, PullRequestEventState), wantValid: true, wantName: "state,merge_queue"},
 		{name: "a repeat is one member", set: NewPullRequestEvents(PullRequestEventChecks, PullRequestEventChecks), wantValid: true, wantName: "checks"},
 		{name: "no event", set: NewPullRequestEvents(), wantValid: false},
 		{name: "an undeclared event", set: NewPullRequestEvents(9), wantValid: false},

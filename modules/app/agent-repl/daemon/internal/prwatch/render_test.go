@@ -85,11 +85,11 @@ func TestFailureSentenceSaysWhatTheUserCanDo(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(string(tt.f.Kind), func(t *testing.T) {
 			// Act
-			got := failureSentence(tt.f)
+			got := failureSentence(tt.f, "merge queue")
 
 			// Assert
-			if !strings.Contains(got, tt.want) {
-				t.Fatalf("failureSentence = %q, want it to say %q", got, tt.want)
+			if !strings.Contains(got, tt.want) || !strings.Contains(got, "this merge queue") {
+				t.Fatalf("failureSentence = %q, want it to say %q of this merge queue", got, tt.want)
 			}
 		})
 	}
@@ -97,10 +97,60 @@ func TestFailureSentenceSaysWhatTheUserCanDo(t *testing.T) {
 
 func TestStatusWordsSayWhereThePullRequestStands(t *testing.T) {
 	// Act
-	got := statusWords(statusProto(remotePR{URL: "u", Merged: true, MergeSHA: "0123456789abcdef", Head: "fedcba9876543210"}))
+	got := statusWords(statusProto(snapshot{PR: remotePR{URL: "u", Merged: true, MergeSHA: "0123456789abcdef", Head: "fedcba9876543210"}}))
 
 	// Assert
 	if got != "It now stands merged as 0123456789ab, its head at fedcba987654: u" {
 		t.Fatalf("statusWords = %q", got)
+	}
+}
+
+func TestTheMergeQueueActivityIsSaid(t *testing.T) {
+	queued := &agentreplv1.PullRequestMergeQueueEntryState{State: &agentreplv1.PullRequestMergeQueueEntryState_Locked{Locked: &agentreplv1.PullRequestMergeQueueEntryStateLocked{}}}
+	at := &agentreplv1.PullRequestMergeQueuePosition{EntriesAhead: 2, EntriesTotal: 4}
+	head := &agentreplv1.PullRequestMergeQueuePosition{EntriesAhead: 0, EntriesTotal: 3}
+	tests := []struct {
+		name string
+		a    *agentreplv1.PullRequestActivity
+		want string
+	}{
+		{name: "joined by no one named, already gone", a: &agentreplv1.PullRequestActivity{Activity: &agentreplv1.PullRequestActivity_MergeQueueEntered{MergeQueueEntered: &agentreplv1.PullRequestActivityMergeQueueEntered{}}},
+			want: "The pull request joined the merge queue."},
+		{name: "moved down", a: &agentreplv1.PullRequestActivity{Activity: &agentreplv1.PullRequestActivity_MergeQueueMoved{MergeQueueMoved: &agentreplv1.PullRequestActivityMergeQueueMoved{From: head, To: at}}},
+			want: "The pull request moved down the merge queue: it was at the head of the merge queue (of 3), merging next, and is now 3 of 4 in the merge queue, 2 entries ahead of it."},
+		{name: "an entry state", a: &agentreplv1.PullRequestActivity{Activity: &agentreplv1.PullRequestActivity_MergeQueueEntryStateChanged{MergeQueueEntryStateChanged: &agentreplv1.PullRequestActivityMergeQueueEntryStateChanged{State: queued}}},
+			want: "The pull request's merge queue entry is now locked while the queue merges it."},
+		{name: "an unnamed entry state", a: &agentreplv1.PullRequestActivity{Activity: &agentreplv1.PullRequestActivity_MergeQueueEntryStateChanged{MergeQueueEntryStateChanged: &agentreplv1.PullRequestActivityMergeQueueEntryStateChanged{State: &agentreplv1.PullRequestMergeQueueEntryState{}}}},
+			want: "The pull request's merge queue entry is now in a state this daemon does not name."},
+		{name: "removed by someone without a reason", a: &agentreplv1.PullRequestActivity{Activity: &agentreplv1.PullRequestActivity_MergeQueueRemoved{MergeQueueRemoved: &agentreplv1.PullRequestActivityMergeQueueRemoved{
+			Actor: &agentreplv1.PullRequestActivityAuthor{Login: "dodge"}}}}, want: "The pull request was removed from the merge queue by @dodge."},
+		{name: "a merge group check", a: &agentreplv1.PullRequestActivity{Activity: &agentreplv1.PullRequestActivity_MergeGroupCheckFinished{MergeGroupCheckFinished: &agentreplv1.PullRequestActivityCheckFinished{
+			Name: "ci", Conclusion: &agentreplv1.PullRequestCheckConclusion{Conclusion: &agentreplv1.PullRequestCheckConclusion_Success{Success: &agentreplv1.PullRequestCheckConclusionSuccess{}}}}}},
+			want: "Merge group check `ci`: passed."},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := activitySentence(tt.a)
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("sentence = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestStatusWordsSayWhereAQueuedPullRequestStands(t *testing.T) {
+	// Arrange
+	snap := snapshot{PR: remotePR{URL: "u", Open: true, Head: "fedcba9876543210"},
+		Queue: &prQueueSnapshot{Entry: &remoteEntryFacts{State: "MERGEABLE"}, Position: &position{Ahead: 0, Total: 2}}}
+
+	// Act
+	got := statusWords(statusProto(snap))
+
+	// Assert
+	if want := "It now stands open, at the head of the merge queue (of 2), merging next, mergeable, so the queue will merge it, its head at fedcba987654: u"; got != want {
+		t.Fatalf("statusWords = %q, want %q", got, want)
 	}
 }

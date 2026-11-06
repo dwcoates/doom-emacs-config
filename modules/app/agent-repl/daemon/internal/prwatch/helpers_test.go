@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -39,6 +41,8 @@ type fakeGH struct {
 	posts map[string]any
 	calls []string
 	sent  []map[string]string
+	// graphql answers every GraphQL call; nil fails it.
+	graphql func(query string, variables map[string]any) (ghclient.GraphQLResponse, error)
 }
 
 func newGH() *fakeGH { return &fakeGH{gets: map[string]any{}, posts: map[string]any{}} }
@@ -82,6 +86,30 @@ func (g *fakeGH) Post(_ context.Context, path string, fields map[string]string) 
 		return ghclient.Response{Status: 201, Body: []byte(a)}, nil
 	}
 	panic("fakeGH: no scripted post for " + path)
+}
+
+// GraphQL answers from graphql, which a test scripts; unscripted, no
+// GraphQL call is expected and one fails the read.
+func (g *fakeGH) GraphQL(ctx context.Context, query string, variables map[string]any) (ghclient.GraphQLResponse, error) {
+	g.mu.Lock()
+	answer := g.graphql
+	g.calls = append(g.calls, "GRAPHQL "+queryName(query))
+	g.mu.Unlock()
+	if answer == nil {
+		return ghclient.GraphQLResponse{}, fmt.Errorf("fakeGH: no scripted GraphQL answer for %s", queryName(query))
+	}
+	return answer(query, variables)
+}
+
+// queryName is the name a query declares (`query PullRequestQueues(...)`).
+func queryName(query string) string {
+	rest, ok := strings.CutPrefix(strings.TrimSpace(query), "query ")
+	if !ok {
+		return "anonymous"
+	}
+	name, _, _ := strings.Cut(rest, "(")
+	name, _, _ = strings.Cut(name, " ")
+	return strings.TrimSpace(name)
 }
 
 func (g *fakeGH) set(path string, answer any) {
@@ -203,6 +231,11 @@ func newRig(t *testing.T) *rig {
 		t.Fatal(err)
 	}
 	r.gh.set(pathPull(), pullJSON("open", false, false, "head1"))
+	// Every subscription asking for every event reads the merge queue, so
+	// by default the pull request is in none; a test scripts more with
+	// withGQL.
+	g := r.withGQL()
+	g.setFacts(prK.Number, factsJSON("main", nil))
 	return r
 }
 
@@ -237,3 +270,160 @@ func (r *rig) told() []string {
 }
 
 func contains(s, sub string) bool { return strings.Contains(s, sub) }
+
+// gql is a scripted GraphQL GitHub: each query is answered from the facts a
+// test sets, by the query's name.
+type gql struct {
+	mu sync.Mutex
+	// prFacts answers PullRequestQueues: each pull request's raw facts. One
+	// absent is nulled, with a NOT_FOUND error naming it.
+	prFacts map[uint32]string
+	// queues answers MergeQueue: each branch's raw `mergeQueue`, "null" for
+	// none; the empty branch is the default branch.
+	queues map[string]string
+	// defaultBranch is the repository's default branch's name.
+	defaultBranch string
+	// departures answers MergeQueueDepartures, as prFacts does.
+	departures map[uint32]string
+	// fail fails every query of a name with its error.
+	fail map[string]error
+}
+
+func newGQL() *gql {
+	return &gql{prFacts: map[uint32]string{}, queues: map[string]string{}, defaultBranch: "main", departures: map[uint32]string{}, fail: map[string]error{}}
+}
+
+// aliasNumber reads the pull request numbers a batched query asks.
+var aliasNumber = regexp.MustCompile(`pr(\d+): pullRequest`)
+
+func (g *gql) answer(query string, vars map[string]any) (ghclient.GraphQLResponse, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	name := queryName(query)
+	if err := g.fail[name]; err != nil {
+		return ghclient.GraphQLResponse{}, err
+	}
+	switch name {
+	case "PullRequestQueues", "MergeQueueDepartures":
+		facts := g.prFacts
+		if name == "MergeQueueDepartures" {
+			facts = g.departures
+		}
+		repo := map[string]json.RawMessage{}
+		var errs []ghclient.GraphQLError
+		for _, m := range aliasNumber.FindAllStringSubmatch(query, -1) {
+			n, _ := strconv.ParseUint(m[1], 10, 32)
+			raw, ok := facts[uint32(n)]
+			if !ok {
+				raw = "null"
+				errs = append(errs, ghclient.GraphQLError{Type: "NOT_FOUND", Message: "no pull request " + m[1], Path: []string{"repository", "pr" + m[1]}})
+			}
+			repo["pr"+m[1]] = json.RawMessage(raw)
+		}
+		return ghclient.GraphQLResponse{Data: json.RawMessage(mustJSON(map[string]any{"repository": repo})), Errors: errs}, nil
+	case "MergeQueue":
+		branch, _ := vars["branch"].(string)
+		raw, ok := g.queues[branch]
+		if !ok {
+			raw = "null"
+		}
+		return ghclient.GraphQLResponse{Data: json.RawMessage(`{"repository":{"defaultBranchRef":{"name":"` + g.defaultBranch + `"},"mergeQueue":` + raw + `}}`)}, nil
+	}
+	panic("gql: no answer for " + name)
+}
+
+func (g *gql) setFacts(n uint32, raw string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.prFacts[n] = raw
+}
+
+func (g *gql) setQueue(branch, raw string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.queues[branch] = raw
+}
+
+func (g *gql) setDeparture(n uint32, raw string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.departures[n] = raw
+}
+
+// withGQL scripts the rig's GitHub's GraphQL answers.
+func (r *rig) withGQL() *gql {
+	g := newGQL()
+	r.gh.mu.Lock()
+	r.gh.graphql = g.answer
+	r.gh.mu.Unlock()
+	return g
+}
+
+// factsJSON is one pull request's queue facts: its base, its entry (nil for
+// none) and its timeline events.
+func factsJSON(base string, entry *remoteEntryFacts, events ...remoteQueueEvent) string {
+	m := map[string]any{"baseRefName": base, "mergeQueueEntry": nil}
+	if entry != nil {
+		e := map[string]any{"state": entry.State, "headCommit": nil}
+		if entry.GroupHead != "" {
+			e["headCommit"] = map[string]string{"oid": entry.GroupHead}
+		}
+		m["mergeQueueEntry"] = e
+	}
+	nodes := []map[string]any{}
+	for _, ev := range events {
+		node := map[string]any{"__typename": "AddedToMergeQueueEvent", "id": ev.ID, "createdAt": ev.At, "actor": nil}
+		if ev.Removed {
+			node["__typename"], node["reason"] = "RemovedFromMergeQueueEvent", ev.Reason
+		}
+		if ev.Actor != "" {
+			node["actor"] = map[string]string{"login": ev.Actor}
+		}
+		nodes = append(nodes, node)
+	}
+	m["timelineItems"] = map[string]any{"nodes": nodes}
+	return mustJSON(m)
+}
+
+// queueJSON is a one-page `mergeQueue` holding ENTRIES, head first.
+func queueJSON(entries ...remoteQueueEntry) string {
+	nodes := []map[string]any{}
+	for _, e := range entries {
+		node := map[string]any{"state": e.State, "headCommit": nil, "pullRequest": map[string]any{"number": e.Number, "title": e.Title, "url": e.URL}}
+		if e.GroupHead != "" {
+			node["headCommit"] = map[string]string{"oid": e.GroupHead}
+		}
+		nodes = append(nodes, node)
+	}
+	return mustJSON(map[string]any{"url": "https://github.com/o/r/queue/main", "entries": map[string]any{"pageInfo": map[string]any{"hasNextPage": false, "endCursor": ""}, "nodes": nodes}})
+}
+
+// departureJSON is what became of a departed entry.
+func departureJSON(title string, merged bool, sha string, reason *string) string {
+	m := map[string]any{"title": title, "merged": merged, "mergeCommit": nil, "timelineItems": map[string]any{"nodes": []any{}}}
+	if sha != "" {
+		m["mergeCommit"] = map[string]string{"oid": sha}
+	}
+	if reason != nil {
+		m["timelineItems"] = map[string]any{"nodes": []any{map[string]any{"reason": *reason}}}
+	}
+	return mustJSON(m)
+}
+
+// entry is a queue entry of pull request N of the rig's repository.
+func entry(n uint32, state string) remoteQueueEntry {
+	return remoteQueueEntry{Number: n, Title: fmt.Sprintf("Change %d", n), URL: fmt.Sprintf("https://github.com/o/r/pull/%d", n), State: state}
+}
+
+// gqlCalls counts the GraphQL calls of NAME the rig's GitHub took.
+func (r *rig) gqlCalls(name string) int {
+	r.gh.mu.Lock()
+	defer r.gh.mu.Unlock()
+	n := 0
+	for _, c := range r.gh.calls {
+		if c == "GRAPHQL "+name {
+			n++
+		}
+	}
+	return n
+}

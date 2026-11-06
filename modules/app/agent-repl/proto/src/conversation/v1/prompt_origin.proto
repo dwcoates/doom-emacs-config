@@ -251,4 +251,9 @@ enum PromptOrigin {
   // exists yet, so it is drawn in the workspace's own feed as an ordinary
   // prompt bubble the daemon sent, never as a prompt the user said.
   PROMPT_ORIGIN_FINISH_HOOK = 49;
+  // A notice of a followed GitHub merge queue's movement
+  // (agentrepl.v1.GithubMergeQueueNotice): entries that joined, merged or
+  // were removed, and the new head, since the subscriber was last told.
+  // Submitted and drawn as a workspace notice is: no row, no held card.
+  PROMPT_ORIGIN_GITHUB_MERGE_QUEUE_NOTICE = 50;
 }

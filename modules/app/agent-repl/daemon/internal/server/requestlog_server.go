@@ -1057,6 +1057,27 @@ func (s *requestLoggingServer) CommentOnPullRequest(
 	return serveUnary(s, ctx, "CommentOnPullRequest", req, s.server.CommentOnPullRequest)
 }
 
+func (s *requestLoggingServer) SubscribeGithubMergeQueue(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.SubscribeGithubMergeQueueRequest],
+) (*connect.Response[agentreplv1.SubscribeGithubMergeQueueResponse], error) {
+	return serveUnary(s, ctx, "SubscribeGithubMergeQueue", req, s.server.SubscribeGithubMergeQueue)
+}
+
+func (s *requestLoggingServer) UnsubscribeGithubMergeQueue(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.UnsubscribeGithubMergeQueueRequest],
+) (*connect.Response[agentreplv1.UnsubscribeGithubMergeQueueResponse], error) {
+	return serveUnary(s, ctx, "UnsubscribeGithubMergeQueue", req, s.server.UnsubscribeGithubMergeQueue)
+}
+
+func (s *requestLoggingServer) ListGithubMergeQueueSubscriptions(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.ListGithubMergeQueueSubscriptionsRequest],
+) (*connect.Response[agentreplv1.ListGithubMergeQueueSubscriptionsResponse], error) {
+	return serveUnary(s, ctx, "ListGithubMergeQueueSubscriptions", req, s.server.ListGithubMergeQueueSubscriptions)
+}
+
 func (s *requestLoggingServer) NotifyWorkspace(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.NotifyWorkspaceRequest],

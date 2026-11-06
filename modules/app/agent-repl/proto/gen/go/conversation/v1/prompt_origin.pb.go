@@ -262,6 +262,11 @@ const (
 	// exists yet, so it is drawn in the workspace's own feed as an ordinary
 	// prompt bubble the daemon sent, never as a prompt the user said.
 	PromptOrigin_PROMPT_ORIGIN_FINISH_HOOK PromptOrigin = 49
+	// A notice of a followed GitHub merge queue's movement
+	// (agentrepl.v1.GithubMergeQueueNotice): entries that joined, merged or
+	// were removed, and the new head, since the subscriber was last told.
+	// Submitted and drawn as a workspace notice is: no row, no held card.
+	PromptOrigin_PROMPT_ORIGIN_GITHUB_MERGE_QUEUE_NOTICE PromptOrigin = 50
 )
 
 // Enum value maps for PromptOrigin.
@@ -316,6 +321,7 @@ var (
 		47: "PROMPT_ORIGIN_PULL_REQUEST_NOTICE",
 		48: "PROMPT_ORIGIN_COMMAND_THREAD_BACKGROUND",
 		49: "PROMPT_ORIGIN_FINISH_HOOK",
+		50: "PROMPT_ORIGIN_GITHUB_MERGE_QUEUE_NOTICE",
 	}
 	PromptOrigin_value = map[string]int32{
 		"PROMPT_ORIGIN_UNSPECIFIED":                 0,
@@ -367,6 +373,7 @@ var (
 		"PROMPT_ORIGIN_PULL_REQUEST_NOTICE":         47,
 		"PROMPT_ORIGIN_COMMAND_THREAD_BACKGROUND":   48,
 		"PROMPT_ORIGIN_FINISH_HOOK":                 49,
+		"PROMPT_ORIGIN_GITHUB_MERGE_QUEUE_NOTICE":   50,
 	}
 )
 
@@ -401,7 +408,7 @@ var File_conversation_v1_prompt_origin_proto protoreflect.FileDescriptor
 
 const file_conversation_v1_prompt_origin_proto_rawDesc = "" +
 	"\n" +
-	"#conversation/v1/prompt_origin.proto\x12\x0fconversation.v1*\xbe\x0e\n" +
+	"#conversation/v1/prompt_origin.proto\x12\x0fconversation.v1*\xeb\x0e\n" +
 	"\fPromptOrigin\x12\x1d\n" +
 	"\x19PROMPT_ORIGIN_UNSPECIFIED\x10\x00\x12\x1b\n" +
 	"\x17PROMPT_ORIGIN_USER_SENT\x10\x01\x12$\n" +
@@ -452,7 +459,8 @@ const file_conversation_v1_prompt_origin_proto_rawDesc = "" +
 	"\x1ePROMPT_ORIGIN_MAIN_SYNC_REPAIR\x10.\x12%\n" +
 	"!PROMPT_ORIGIN_PULL_REQUEST_NOTICE\x10/\x12+\n" +
 	"'PROMPT_ORIGIN_COMMAND_THREAD_BACKGROUND\x100\x12\x1d\n" +
-	"\x19PROMPT_ORIGIN_FINISH_HOOK\x101B0Z.agentrepl/proto/conversation/v1;conversationv1b\x06proto3"
+	"\x19PROMPT_ORIGIN_FINISH_HOOK\x101\x12+\n" +
+	"'PROMPT_ORIGIN_GITHUB_MERGE_QUEUE_NOTICE\x102B0Z.agentrepl/proto/conversation/v1;conversationv1b\x06proto3"
 
 var (
 	file_conversation_v1_prompt_origin_proto_rawDescOnce sync.Once

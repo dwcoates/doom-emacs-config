@@ -9,8 +9,11 @@
 // THE DAEMON READS, THE AGENT IS TOLD. No GitHub event is ever pushed to the
 // laptop. The daemon reads each followed pull request's authoritative lists
 // (conversation comments, line comments, reviews, the pull request itself,
-// and its head commit's check runs) with conditional requests, compares them
-// with what it already told each subscriber, and tells only the difference. A
+// and its head commit's check runs) with conditional requests, and, for a
+// subscriber that asks for the merge queue, the pull request's place in its
+// base branch's GitHub merge queue and the timeline events GitHub records as
+// it joins and leaves it. It compares them with what it already told each
+// subscriber, and tells only the difference. A
 // read the daemon missed while it was down, asleep or offline is made up by
 // the next read, because the next read covers everything since the last one
 // told: no activity can be lost, only told late.
@@ -64,6 +67,11 @@ const (
 	PullRequestNoticeEvent_PULL_REQUEST_NOTICE_EVENT_STATE PullRequestNoticeEvent = 4
 	// A check run on the pull request's head commit finished.
 	PullRequestNoticeEvent_PULL_REQUEST_NOTICE_EVENT_CHECKS PullRequestNoticeEvent = 5
+	// The pull request joined, moved within, or was removed from its base
+	// branch's GitHub merge queue, its queue entry changed state, or a check
+	// run on its merge group commit finished. Its landing is told by STATE, as
+	// any merge is.
+	PullRequestNoticeEvent_PULL_REQUEST_NOTICE_EVENT_MERGE_QUEUE PullRequestNoticeEvent = 6
 )
 
 // Enum value maps for PullRequestNoticeEvent.
@@ -75,6 +83,7 @@ var (
 		3: "PULL_REQUEST_NOTICE_EVENT_REVIEW_COMMENT",
 		4: "PULL_REQUEST_NOTICE_EVENT_STATE",
 		5: "PULL_REQUEST_NOTICE_EVENT_CHECKS",
+		6: "PULL_REQUEST_NOTICE_EVENT_MERGE_QUEUE",
 	}
 	PullRequestNoticeEvent_value = map[string]int32{
 		"PULL_REQUEST_NOTICE_EVENT_UNSPECIFIED":    0,
@@ -83,6 +92,7 @@ var (
 		"PULL_REQUEST_NOTICE_EVENT_REVIEW_COMMENT": 3,
 		"PULL_REQUEST_NOTICE_EVENT_STATE":          4,
 		"PULL_REQUEST_NOTICE_EVENT_CHECKS":         5,
+		"PULL_REQUEST_NOTICE_EVENT_MERGE_QUEUE":    6,
 	}
 )
 
@@ -1063,7 +1073,14 @@ type PullRequestStatus struct {
 	// Where the pull request stands.
 	State *PullRequestState `protobuf:"bytes,3,opt,name=state,proto3" json:"state,omitempty"`
 	// The commit at the head of the pull request's branch.
-	HeadSha       string `protobuf:"bytes,4,opt,name=head_sha,json=headSha,proto3" json:"head_sha,omitempty"`
+	HeadSha string `protobuf:"bytes,4,opt,name=head_sha,json=headSha,proto3" json:"head_sha,omitempty"`
+	// Where the pull request stands in its base branch's GitHub merge queue.
+	// SET while it is in the queue, as of the read. UNSET when it is not in
+	// the queue, and whenever the read did not look at the queue, which it
+	// does only for a subscription asking for
+	// PULL_REQUEST_NOTICE_EVENT_MERGE_QUEUE: UNSET never means "not queued" to
+	// a subscriber that did not ask.
+	MergeQueue    *PullRequestStatusMergeQueue `protobuf:"bytes,5,opt,name=merge_queue,json=mergeQueue,proto3,oneof" json:"merge_queue,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1126,6 +1143,68 @@ func (x *PullRequestStatus) GetHeadSha() string {
 	return ""
 }
 
+func (x *PullRequestStatus) GetMergeQueue() *PullRequestStatusMergeQueue {
+	if x != nil {
+		return x.MergeQueue
+	}
+	return nil
+}
+
+// A pull request's place in its merge queue, as a status states it.
+type PullRequestStatusMergeQueue struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// How far it is from merging.
+	Position *PullRequestMergeQueuePosition `protobuf:"bytes,1,opt,name=position,proto3" json:"position,omitempty"`
+	// What its entry is doing.
+	State         *PullRequestMergeQueueEntryState `protobuf:"bytes,2,opt,name=state,proto3" json:"state,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PullRequestStatusMergeQueue) Reset() {
+	*x = PullRequestStatusMergeQueue{}
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PullRequestStatusMergeQueue) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PullRequestStatusMergeQueue) ProtoMessage() {}
+
+func (x *PullRequestStatusMergeQueue) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PullRequestStatusMergeQueue.ProtoReflect.Descriptor instead.
+func (*PullRequestStatusMergeQueue) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_pull_request_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *PullRequestStatusMergeQueue) GetPosition() *PullRequestMergeQueuePosition {
+	if x != nil {
+		return x.Position
+	}
+	return nil
+}
+
+func (x *PullRequestStatusMergeQueue) GetState() *PullRequestMergeQueueEntryState {
+	if x != nil {
+		return x.State
+	}
+	return nil
+}
+
 // Where a pull request stands. THE ARM IS THE STATE.
 type PullRequestState struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -1142,7 +1221,7 @@ type PullRequestState struct {
 
 func (x *PullRequestState) Reset() {
 	*x = PullRequestState{}
-	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[15]
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1154,7 +1233,7 @@ func (x *PullRequestState) String() string {
 func (*PullRequestState) ProtoMessage() {}
 
 func (x *PullRequestState) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[15]
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1167,7 +1246,7 @@ func (x *PullRequestState) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PullRequestState.ProtoReflect.Descriptor instead.
 func (*PullRequestState) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_pull_request_proto_rawDescGZIP(), []int{15}
+	return file_agentrepl_v1_pull_request_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *PullRequestState) GetState() isPullRequestState_State {
@@ -1255,7 +1334,7 @@ type PullRequestStateDraft struct {
 
 func (x *PullRequestStateDraft) Reset() {
 	*x = PullRequestStateDraft{}
-	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[16]
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1267,7 +1346,7 @@ func (x *PullRequestStateDraft) String() string {
 func (*PullRequestStateDraft) ProtoMessage() {}
 
 func (x *PullRequestStateDraft) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[16]
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1280,7 +1359,7 @@ func (x *PullRequestStateDraft) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PullRequestStateDraft.ProtoReflect.Descriptor instead.
 func (*PullRequestStateDraft) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_pull_request_proto_rawDescGZIP(), []int{16}
+	return file_agentrepl_v1_pull_request_proto_rawDescGZIP(), []int{17}
 }
 
 // Open, ready. DELIBERATELY EMPTY: the arm is the state.
@@ -1292,7 +1371,7 @@ type PullRequestStateOpen struct {
 
 func (x *PullRequestStateOpen) Reset() {
 	*x = PullRequestStateOpen{}
-	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[17]
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1304,7 +1383,7 @@ func (x *PullRequestStateOpen) String() string {
 func (*PullRequestStateOpen) ProtoMessage() {}
 
 func (x *PullRequestStateOpen) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[17]
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1317,7 +1396,7 @@ func (x *PullRequestStateOpen) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PullRequestStateOpen.ProtoReflect.Descriptor instead.
 func (*PullRequestStateOpen) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_pull_request_proto_rawDescGZIP(), []int{17}
+	return file_agentrepl_v1_pull_request_proto_rawDescGZIP(), []int{18}
 }
 
 // Merged.
@@ -1331,7 +1410,7 @@ type PullRequestStateMerged struct {
 
 func (x *PullRequestStateMerged) Reset() {
 	*x = PullRequestStateMerged{}
-	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[18]
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1343,7 +1422,7 @@ func (x *PullRequestStateMerged) String() string {
 func (*PullRequestStateMerged) ProtoMessage() {}
 
 func (x *PullRequestStateMerged) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[18]
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1356,7 +1435,7 @@ func (x *PullRequestStateMerged) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PullRequestStateMerged.ProtoReflect.Descriptor instead.
 func (*PullRequestStateMerged) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_pull_request_proto_rawDescGZIP(), []int{18}
+	return file_agentrepl_v1_pull_request_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *PullRequestStateMerged) GetMergeCommitSha() string {
@@ -1375,7 +1454,7 @@ type PullRequestStateClosed struct {
 
 func (x *PullRequestStateClosed) Reset() {
 	*x = PullRequestStateClosed{}
-	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[19]
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1387,7 +1466,7 @@ func (x *PullRequestStateClosed) String() string {
 func (*PullRequestStateClosed) ProtoMessage() {}
 
 func (x *PullRequestStateClosed) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[19]
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1400,7 +1479,7 @@ func (x *PullRequestStateClosed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PullRequestStateClosed.ProtoReflect.Descriptor instead.
 func (*PullRequestStateClosed) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_pull_request_proto_rawDescGZIP(), []int{19}
+	return file_agentrepl_v1_pull_request_proto_rawDescGZIP(), []int{20}
 }
 
 // What the daemon tells one subscriber about one pull request, delivered as a
@@ -1431,7 +1510,7 @@ type PullRequestNotice struct {
 
 func (x *PullRequestNotice) Reset() {
 	*x = PullRequestNotice{}
-	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[20]
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1443,7 +1522,7 @@ func (x *PullRequestNotice) String() string {
 func (*PullRequestNotice) ProtoMessage() {}
 
 func (x *PullRequestNotice) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[20]
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1456,7 +1535,7 @@ func (x *PullRequestNotice) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PullRequestNotice.ProtoReflect.Descriptor instead.
 func (*PullRequestNotice) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_pull_request_proto_rawDescGZIP(), []int{20}
+	return file_agentrepl_v1_pull_request_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *PullRequestNotice) GetPullRequest() *PullRequestRef {
@@ -1504,7 +1583,7 @@ type PullRequestNoticeEnded struct {
 
 func (x *PullRequestNoticeEnded) Reset() {
 	*x = PullRequestNoticeEnded{}
-	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[21]
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1516,7 +1595,7 @@ func (x *PullRequestNoticeEnded) String() string {
 func (*PullRequestNoticeEnded) ProtoMessage() {}
 
 func (x *PullRequestNoticeEnded) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[21]
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1529,7 +1608,7 @@ func (x *PullRequestNoticeEnded) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PullRequestNoticeEnded.ProtoReflect.Descriptor instead.
 func (*PullRequestNoticeEnded) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_pull_request_proto_rawDescGZIP(), []int{21}
+	return file_agentrepl_v1_pull_request_proto_rawDescGZIP(), []int{22}
 }
 
 // One piece of activity on a followed pull request. THE ARM IS THE KIND.
@@ -1546,6 +1625,11 @@ type PullRequestActivity struct {
 	//	*PullRequestActivity_Deleted
 	//	*PullRequestActivity_StateChanged
 	//	*PullRequestActivity_CheckFinished
+	//	*PullRequestActivity_MergeQueueEntered
+	//	*PullRequestActivity_MergeQueueMoved
+	//	*PullRequestActivity_MergeQueueEntryStateChanged
+	//	*PullRequestActivity_MergeQueueRemoved
+	//	*PullRequestActivity_MergeGroupCheckFinished
 	Activity      isPullRequestActivity_Activity `protobuf_oneof:"activity"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1553,7 +1637,7 @@ type PullRequestActivity struct {
 
 func (x *PullRequestActivity) Reset() {
 	*x = PullRequestActivity{}
-	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[22]
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1565,7 +1649,7 @@ func (x *PullRequestActivity) String() string {
 func (*PullRequestActivity) ProtoMessage() {}
 
 func (x *PullRequestActivity) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[22]
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1578,7 +1662,7 @@ func (x *PullRequestActivity) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PullRequestActivity.ProtoReflect.Descriptor instead.
 func (*PullRequestActivity) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_pull_request_proto_rawDescGZIP(), []int{22}
+	return file_agentrepl_v1_pull_request_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *PullRequestActivity) GetActivity() isPullRequestActivity_Activity {
@@ -1651,6 +1735,51 @@ func (x *PullRequestActivity) GetCheckFinished() *PullRequestActivityCheckFinish
 	return nil
 }
 
+func (x *PullRequestActivity) GetMergeQueueEntered() *PullRequestActivityMergeQueueEntered {
+	if x != nil {
+		if x, ok := x.Activity.(*PullRequestActivity_MergeQueueEntered); ok {
+			return x.MergeQueueEntered
+		}
+	}
+	return nil
+}
+
+func (x *PullRequestActivity) GetMergeQueueMoved() *PullRequestActivityMergeQueueMoved {
+	if x != nil {
+		if x, ok := x.Activity.(*PullRequestActivity_MergeQueueMoved); ok {
+			return x.MergeQueueMoved
+		}
+	}
+	return nil
+}
+
+func (x *PullRequestActivity) GetMergeQueueEntryStateChanged() *PullRequestActivityMergeQueueEntryStateChanged {
+	if x != nil {
+		if x, ok := x.Activity.(*PullRequestActivity_MergeQueueEntryStateChanged); ok {
+			return x.MergeQueueEntryStateChanged
+		}
+	}
+	return nil
+}
+
+func (x *PullRequestActivity) GetMergeQueueRemoved() *PullRequestActivityMergeQueueRemoved {
+	if x != nil {
+		if x, ok := x.Activity.(*PullRequestActivity_MergeQueueRemoved); ok {
+			return x.MergeQueueRemoved
+		}
+	}
+	return nil
+}
+
+func (x *PullRequestActivity) GetMergeGroupCheckFinished() *PullRequestActivityCheckFinished {
+	if x != nil {
+		if x, ok := x.Activity.(*PullRequestActivity_MergeGroupCheckFinished); ok {
+			return x.MergeGroupCheckFinished
+		}
+	}
+	return nil
+}
+
 type isPullRequestActivity_Activity interface {
 	isPullRequestActivity_Activity()
 }
@@ -1691,6 +1820,37 @@ type PullRequestActivity_CheckFinished struct {
 	CheckFinished *PullRequestActivityCheckFinished `protobuf:"bytes,7,opt,name=check_finished,json=checkFinished,proto3,oneof"`
 }
 
+type PullRequestActivity_MergeQueueEntered struct {
+	// The pull request joined its base branch's merge queue.
+	MergeQueueEntered *PullRequestActivityMergeQueueEntered `protobuf:"bytes,8,opt,name=merge_queue_entered,json=mergeQueueEntered,proto3,oneof"`
+}
+
+type PullRequestActivity_MergeQueueMoved struct {
+	// The pull request's place in the merge queue changed: entries ahead of
+	// it merged or left, or an entry jumped ahead of it.
+	MergeQueueMoved *PullRequestActivityMergeQueueMoved `protobuf:"bytes,9,opt,name=merge_queue_moved,json=mergeQueueMoved,proto3,oneof"`
+}
+
+type PullRequestActivity_MergeQueueEntryStateChanged struct {
+	// The pull request's merge queue entry changed state.
+	MergeQueueEntryStateChanged *PullRequestActivityMergeQueueEntryStateChanged `protobuf:"bytes,10,opt,name=merge_queue_entry_state_changed,json=mergeQueueEntryStateChanged,proto3,oneof"`
+}
+
+type PullRequestActivity_MergeQueueRemoved struct {
+	// The pull request was removed from the merge queue. A pull request the
+	// queue merged is told by `state_changed` instead.
+	MergeQueueRemoved *PullRequestActivityMergeQueueRemoved `protobuf:"bytes,11,opt,name=merge_queue_removed,json=mergeQueueRemoved,proto3,oneof"`
+}
+
+type PullRequestActivity_MergeGroupCheckFinished struct {
+	// A check run on the pull request's merge group commit (the commit the
+	// queue tests, on a `gh-readonly-queue/...` branch) finished. A separate
+	// arm from `check_finished` because the two run on different commits and
+	// only this one decides whether the queue merges or removes the pull
+	// request.
+	MergeGroupCheckFinished *PullRequestActivityCheckFinished `protobuf:"bytes,12,opt,name=merge_group_check_finished,json=mergeGroupCheckFinished,proto3,oneof"`
+}
+
 func (*PullRequestActivity_Comment) isPullRequestActivity_Activity() {}
 
 func (*PullRequestActivity_Review) isPullRequestActivity_Activity() {}
@@ -1704,6 +1864,16 @@ func (*PullRequestActivity_Deleted) isPullRequestActivity_Activity() {}
 func (*PullRequestActivity_StateChanged) isPullRequestActivity_Activity() {}
 
 func (*PullRequestActivity_CheckFinished) isPullRequestActivity_Activity() {}
+
+func (*PullRequestActivity_MergeQueueEntered) isPullRequestActivity_Activity() {}
+
+func (*PullRequestActivity_MergeQueueMoved) isPullRequestActivity_Activity() {}
+
+func (*PullRequestActivity_MergeQueueEntryStateChanged) isPullRequestActivity_Activity() {}
+
+func (*PullRequestActivity_MergeQueueRemoved) isPullRequestActivity_Activity() {}
+
+func (*PullRequestActivity_MergeGroupCheckFinished) isPullRequestActivity_Activity() {}
 
 // Who wrote a piece of activity.
 type PullRequestActivityAuthor struct {
@@ -1719,7 +1889,7 @@ type PullRequestActivityAuthor struct {
 
 func (x *PullRequestActivityAuthor) Reset() {
 	*x = PullRequestActivityAuthor{}
-	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[23]
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1731,7 +1901,7 @@ func (x *PullRequestActivityAuthor) String() string {
 func (*PullRequestActivityAuthor) ProtoMessage() {}
 
 func (x *PullRequestActivityAuthor) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[23]
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1744,7 +1914,7 @@ func (x *PullRequestActivityAuthor) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PullRequestActivityAuthor.ProtoReflect.Descriptor instead.
 func (*PullRequestActivityAuthor) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_pull_request_proto_rawDescGZIP(), []int{23}
+	return file_agentrepl_v1_pull_request_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *PullRequestActivityAuthor) GetLogin() string {
@@ -1774,7 +1944,7 @@ type PullRequestActivityText struct {
 
 func (x *PullRequestActivityText) Reset() {
 	*x = PullRequestActivityText{}
-	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[24]
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1786,7 +1956,7 @@ func (x *PullRequestActivityText) String() string {
 func (*PullRequestActivityText) ProtoMessage() {}
 
 func (x *PullRequestActivityText) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[24]
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1799,7 +1969,7 @@ func (x *PullRequestActivityText) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PullRequestActivityText.ProtoReflect.Descriptor instead.
 func (*PullRequestActivityText) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_pull_request_proto_rawDescGZIP(), []int{24}
+	return file_agentrepl_v1_pull_request_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *PullRequestActivityText) GetMarkdown() string {
@@ -1828,7 +1998,7 @@ type PullRequestActivityComment struct {
 
 func (x *PullRequestActivityComment) Reset() {
 	*x = PullRequestActivityComment{}
-	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[25]
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1840,7 +2010,7 @@ func (x *PullRequestActivityComment) String() string {
 func (*PullRequestActivityComment) ProtoMessage() {}
 
 func (x *PullRequestActivityComment) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[25]
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1853,7 +2023,7 @@ func (x *PullRequestActivityComment) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PullRequestActivityComment.ProtoReflect.Descriptor instead.
 func (*PullRequestActivityComment) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_pull_request_proto_rawDescGZIP(), []int{25}
+	return file_agentrepl_v1_pull_request_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *PullRequestActivityComment) GetCommentId() uint64 {
@@ -1913,7 +2083,7 @@ type PullRequestActivityReview struct {
 
 func (x *PullRequestActivityReview) Reset() {
 	*x = PullRequestActivityReview{}
-	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[26]
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1925,7 +2095,7 @@ func (x *PullRequestActivityReview) String() string {
 func (*PullRequestActivityReview) ProtoMessage() {}
 
 func (x *PullRequestActivityReview) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[26]
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1938,7 +2108,7 @@ func (x *PullRequestActivityReview) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PullRequestActivityReview.ProtoReflect.Descriptor instead.
 func (*PullRequestActivityReview) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_pull_request_proto_rawDescGZIP(), []int{26}
+	return file_agentrepl_v1_pull_request_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *PullRequestActivityReview) GetReviewId() uint64 {
@@ -2000,7 +2170,7 @@ type PullRequestReviewVerdict struct {
 
 func (x *PullRequestReviewVerdict) Reset() {
 	*x = PullRequestReviewVerdict{}
-	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[27]
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2012,7 +2182,7 @@ func (x *PullRequestReviewVerdict) String() string {
 func (*PullRequestReviewVerdict) ProtoMessage() {}
 
 func (x *PullRequestReviewVerdict) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[27]
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2025,7 +2195,7 @@ func (x *PullRequestReviewVerdict) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PullRequestReviewVerdict.ProtoReflect.Descriptor instead.
 func (*PullRequestReviewVerdict) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_pull_request_proto_rawDescGZIP(), []int{27}
+	return file_agentrepl_v1_pull_request_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *PullRequestReviewVerdict) GetVerdict() isPullRequestReviewVerdict_Verdict {
@@ -2112,7 +2282,7 @@ type PullRequestReviewVerdictApproved struct {
 
 func (x *PullRequestReviewVerdictApproved) Reset() {
 	*x = PullRequestReviewVerdictApproved{}
-	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[28]
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2124,7 +2294,7 @@ func (x *PullRequestReviewVerdictApproved) String() string {
 func (*PullRequestReviewVerdictApproved) ProtoMessage() {}
 
 func (x *PullRequestReviewVerdictApproved) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[28]
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2137,7 +2307,7 @@ func (x *PullRequestReviewVerdictApproved) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PullRequestReviewVerdictApproved.ProtoReflect.Descriptor instead.
 func (*PullRequestReviewVerdictApproved) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_pull_request_proto_rawDescGZIP(), []int{28}
+	return file_agentrepl_v1_pull_request_proto_rawDescGZIP(), []int{29}
 }
 
 // Changes requested. DELIBERATELY EMPTY: the arm is the verdict.
@@ -2149,7 +2319,7 @@ type PullRequestReviewVerdictChangesRequested struct {
 
 func (x *PullRequestReviewVerdictChangesRequested) Reset() {
 	*x = PullRequestReviewVerdictChangesRequested{}
-	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[29]
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2161,7 +2331,7 @@ func (x *PullRequestReviewVerdictChangesRequested) String() string {
 func (*PullRequestReviewVerdictChangesRequested) ProtoMessage() {}
 
 func (x *PullRequestReviewVerdictChangesRequested) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[29]
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2174,7 +2344,7 @@ func (x *PullRequestReviewVerdictChangesRequested) ProtoReflect() protoreflect.M
 
 // Deprecated: Use PullRequestReviewVerdictChangesRequested.ProtoReflect.Descriptor instead.
 func (*PullRequestReviewVerdictChangesRequested) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_pull_request_proto_rawDescGZIP(), []int{29}
+	return file_agentrepl_v1_pull_request_proto_rawDescGZIP(), []int{30}
 }
 
 // Commented. DELIBERATELY EMPTY: the arm is the verdict.
@@ -2186,7 +2356,7 @@ type PullRequestReviewVerdictCommented struct {
 
 func (x *PullRequestReviewVerdictCommented) Reset() {
 	*x = PullRequestReviewVerdictCommented{}
-	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[30]
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2198,7 +2368,7 @@ func (x *PullRequestReviewVerdictCommented) String() string {
 func (*PullRequestReviewVerdictCommented) ProtoMessage() {}
 
 func (x *PullRequestReviewVerdictCommented) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[30]
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2211,7 +2381,7 @@ func (x *PullRequestReviewVerdictCommented) ProtoReflect() protoreflect.Message 
 
 // Deprecated: Use PullRequestReviewVerdictCommented.ProtoReflect.Descriptor instead.
 func (*PullRequestReviewVerdictCommented) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_pull_request_proto_rawDescGZIP(), []int{30}
+	return file_agentrepl_v1_pull_request_proto_rawDescGZIP(), []int{31}
 }
 
 // Dismissed. DELIBERATELY EMPTY: the arm is the verdict.
@@ -2223,7 +2393,7 @@ type PullRequestReviewVerdictDismissed struct {
 
 func (x *PullRequestReviewVerdictDismissed) Reset() {
 	*x = PullRequestReviewVerdictDismissed{}
-	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[31]
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2235,7 +2405,7 @@ func (x *PullRequestReviewVerdictDismissed) String() string {
 func (*PullRequestReviewVerdictDismissed) ProtoMessage() {}
 
 func (x *PullRequestReviewVerdictDismissed) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[31]
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2248,7 +2418,7 @@ func (x *PullRequestReviewVerdictDismissed) ProtoReflect() protoreflect.Message 
 
 // Deprecated: Use PullRequestReviewVerdictDismissed.ProtoReflect.Descriptor instead.
 func (*PullRequestReviewVerdictDismissed) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_pull_request_proto_rawDescGZIP(), []int{31}
+	return file_agentrepl_v1_pull_request_proto_rawDescGZIP(), []int{32}
 }
 
 // A line comment, or a reply in a review thread.
@@ -2279,7 +2449,7 @@ type PullRequestActivityReviewComment struct {
 
 func (x *PullRequestActivityReviewComment) Reset() {
 	*x = PullRequestActivityReviewComment{}
-	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[32]
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2291,7 +2461,7 @@ func (x *PullRequestActivityReviewComment) String() string {
 func (*PullRequestActivityReviewComment) ProtoMessage() {}
 
 func (x *PullRequestActivityReviewComment) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[32]
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2304,7 +2474,7 @@ func (x *PullRequestActivityReviewComment) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PullRequestActivityReviewComment.ProtoReflect.Descriptor instead.
 func (*PullRequestActivityReviewComment) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_pull_request_proto_rawDescGZIP(), []int{32}
+	return file_agentrepl_v1_pull_request_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *PullRequestActivityReviewComment) GetCommentId() uint64 {
@@ -2377,7 +2547,7 @@ type PullRequestActivityReviewCommentLocation struct {
 
 func (x *PullRequestActivityReviewCommentLocation) Reset() {
 	*x = PullRequestActivityReviewCommentLocation{}
-	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[33]
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2389,7 +2559,7 @@ func (x *PullRequestActivityReviewCommentLocation) String() string {
 func (*PullRequestActivityReviewCommentLocation) ProtoMessage() {}
 
 func (x *PullRequestActivityReviewCommentLocation) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[33]
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2402,7 +2572,7 @@ func (x *PullRequestActivityReviewCommentLocation) ProtoReflect() protoreflect.M
 
 // Deprecated: Use PullRequestActivityReviewCommentLocation.ProtoReflect.Descriptor instead.
 func (*PullRequestActivityReviewCommentLocation) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_pull_request_proto_rawDescGZIP(), []int{33}
+	return file_agentrepl_v1_pull_request_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *PullRequestActivityReviewCommentLocation) GetPath() string {
@@ -2439,7 +2609,7 @@ type PullRequestActivityEdited struct {
 
 func (x *PullRequestActivityEdited) Reset() {
 	*x = PullRequestActivityEdited{}
-	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[34]
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2451,7 +2621,7 @@ func (x *PullRequestActivityEdited) String() string {
 func (*PullRequestActivityEdited) ProtoMessage() {}
 
 func (x *PullRequestActivityEdited) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[34]
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2464,7 +2634,7 @@ func (x *PullRequestActivityEdited) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PullRequestActivityEdited.ProtoReflect.Descriptor instead.
 func (*PullRequestActivityEdited) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_pull_request_proto_rawDescGZIP(), []int{34}
+	return file_agentrepl_v1_pull_request_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *PullRequestActivityEdited) GetItem() isPullRequestActivityEdited_Item {
@@ -2550,7 +2720,7 @@ type PullRequestActivityDeleted struct {
 
 func (x *PullRequestActivityDeleted) Reset() {
 	*x = PullRequestActivityDeleted{}
-	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[35]
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2562,7 +2732,7 @@ func (x *PullRequestActivityDeleted) String() string {
 func (*PullRequestActivityDeleted) ProtoMessage() {}
 
 func (x *PullRequestActivityDeleted) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[35]
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2575,7 +2745,7 @@ func (x *PullRequestActivityDeleted) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PullRequestActivityDeleted.ProtoReflect.Descriptor instead.
 func (*PullRequestActivityDeleted) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_pull_request_proto_rawDescGZIP(), []int{35}
+	return file_agentrepl_v1_pull_request_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *PullRequestActivityDeleted) GetItem() isPullRequestActivityDeleted_Item {
@@ -2632,7 +2802,7 @@ type PullRequestActivityDeletedComment struct {
 
 func (x *PullRequestActivityDeletedComment) Reset() {
 	*x = PullRequestActivityDeletedComment{}
-	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[36]
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2644,7 +2814,7 @@ func (x *PullRequestActivityDeletedComment) String() string {
 func (*PullRequestActivityDeletedComment) ProtoMessage() {}
 
 func (x *PullRequestActivityDeletedComment) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[36]
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2657,7 +2827,7 @@ func (x *PullRequestActivityDeletedComment) ProtoReflect() protoreflect.Message 
 
 // Deprecated: Use PullRequestActivityDeletedComment.ProtoReflect.Descriptor instead.
 func (*PullRequestActivityDeletedComment) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_pull_request_proto_rawDescGZIP(), []int{36}
+	return file_agentrepl_v1_pull_request_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *PullRequestActivityDeletedComment) GetCommentId() uint64 {
@@ -2678,7 +2848,7 @@ type PullRequestActivityDeletedReviewComment struct {
 
 func (x *PullRequestActivityDeletedReviewComment) Reset() {
 	*x = PullRequestActivityDeletedReviewComment{}
-	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[37]
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2690,7 +2860,7 @@ func (x *PullRequestActivityDeletedReviewComment) String() string {
 func (*PullRequestActivityDeletedReviewComment) ProtoMessage() {}
 
 func (x *PullRequestActivityDeletedReviewComment) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[37]
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2703,7 +2873,7 @@ func (x *PullRequestActivityDeletedReviewComment) ProtoReflect() protoreflect.Me
 
 // Deprecated: Use PullRequestActivityDeletedReviewComment.ProtoReflect.Descriptor instead.
 func (*PullRequestActivityDeletedReviewComment) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_pull_request_proto_rawDescGZIP(), []int{37}
+	return file_agentrepl_v1_pull_request_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *PullRequestActivityDeletedReviewComment) GetCommentId() uint64 {
@@ -2727,7 +2897,7 @@ type PullRequestActivityStateChanged struct {
 
 func (x *PullRequestActivityStateChanged) Reset() {
 	*x = PullRequestActivityStateChanged{}
-	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[38]
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2739,7 +2909,7 @@ func (x *PullRequestActivityStateChanged) String() string {
 func (*PullRequestActivityStateChanged) ProtoMessage() {}
 
 func (x *PullRequestActivityStateChanged) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[38]
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2752,7 +2922,7 @@ func (x *PullRequestActivityStateChanged) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PullRequestActivityStateChanged.ProtoReflect.Descriptor instead.
 func (*PullRequestActivityStateChanged) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_pull_request_proto_rawDescGZIP(), []int{38}
+	return file_agentrepl_v1_pull_request_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *PullRequestActivityStateChanged) GetState() *PullRequestState {
@@ -2783,7 +2953,7 @@ type PullRequestActivityCheckFinished struct {
 
 func (x *PullRequestActivityCheckFinished) Reset() {
 	*x = PullRequestActivityCheckFinished{}
-	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[39]
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2795,7 +2965,7 @@ func (x *PullRequestActivityCheckFinished) String() string {
 func (*PullRequestActivityCheckFinished) ProtoMessage() {}
 
 func (x *PullRequestActivityCheckFinished) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[39]
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2808,7 +2978,7 @@ func (x *PullRequestActivityCheckFinished) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PullRequestActivityCheckFinished.ProtoReflect.Descriptor instead.
 func (*PullRequestActivityCheckFinished) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_pull_request_proto_rawDescGZIP(), []int{39}
+	return file_agentrepl_v1_pull_request_proto_rawDescGZIP(), []int{40}
 }
 
 func (x *PullRequestActivityCheckFinished) GetName() string {
@@ -2845,7 +3015,7 @@ type PullRequestCheckConclusion struct {
 
 func (x *PullRequestCheckConclusion) Reset() {
 	*x = PullRequestCheckConclusion{}
-	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[40]
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2857,7 +3027,7 @@ func (x *PullRequestCheckConclusion) String() string {
 func (*PullRequestCheckConclusion) ProtoMessage() {}
 
 func (x *PullRequestCheckConclusion) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[40]
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2870,7 +3040,7 @@ func (x *PullRequestCheckConclusion) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PullRequestCheckConclusion.ProtoReflect.Descriptor instead.
 func (*PullRequestCheckConclusion) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_pull_request_proto_rawDescGZIP(), []int{40}
+	return file_agentrepl_v1_pull_request_proto_rawDescGZIP(), []int{41}
 }
 
 func (x *PullRequestCheckConclusion) GetConclusion() isPullRequestCheckConclusion_Conclusion {
@@ -3005,7 +3175,7 @@ type PullRequestCheckConclusionSuccess struct {
 
 func (x *PullRequestCheckConclusionSuccess) Reset() {
 	*x = PullRequestCheckConclusionSuccess{}
-	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[41]
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[42]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3017,7 +3187,7 @@ func (x *PullRequestCheckConclusionSuccess) String() string {
 func (*PullRequestCheckConclusionSuccess) ProtoMessage() {}
 
 func (x *PullRequestCheckConclusionSuccess) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[41]
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[42]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3030,7 +3200,7 @@ func (x *PullRequestCheckConclusionSuccess) ProtoReflect() protoreflect.Message 
 
 // Deprecated: Use PullRequestCheckConclusionSuccess.ProtoReflect.Descriptor instead.
 func (*PullRequestCheckConclusionSuccess) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_pull_request_proto_rawDescGZIP(), []int{41}
+	return file_agentrepl_v1_pull_request_proto_rawDescGZIP(), []int{42}
 }
 
 // Failed. DELIBERATELY EMPTY: the arm is the conclusion.
@@ -3042,7 +3212,7 @@ type PullRequestCheckConclusionFailure struct {
 
 func (x *PullRequestCheckConclusionFailure) Reset() {
 	*x = PullRequestCheckConclusionFailure{}
-	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[42]
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[43]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3054,7 +3224,7 @@ func (x *PullRequestCheckConclusionFailure) String() string {
 func (*PullRequestCheckConclusionFailure) ProtoMessage() {}
 
 func (x *PullRequestCheckConclusionFailure) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[42]
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[43]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3067,7 +3237,7 @@ func (x *PullRequestCheckConclusionFailure) ProtoReflect() protoreflect.Message 
 
 // Deprecated: Use PullRequestCheckConclusionFailure.ProtoReflect.Descriptor instead.
 func (*PullRequestCheckConclusionFailure) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_pull_request_proto_rawDescGZIP(), []int{42}
+	return file_agentrepl_v1_pull_request_proto_rawDescGZIP(), []int{43}
 }
 
 // Cancelled. DELIBERATELY EMPTY: the arm is the conclusion.
@@ -3079,7 +3249,7 @@ type PullRequestCheckConclusionCancelled struct {
 
 func (x *PullRequestCheckConclusionCancelled) Reset() {
 	*x = PullRequestCheckConclusionCancelled{}
-	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[43]
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[44]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3091,7 +3261,7 @@ func (x *PullRequestCheckConclusionCancelled) String() string {
 func (*PullRequestCheckConclusionCancelled) ProtoMessage() {}
 
 func (x *PullRequestCheckConclusionCancelled) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[43]
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[44]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3104,7 +3274,7 @@ func (x *PullRequestCheckConclusionCancelled) ProtoReflect() protoreflect.Messag
 
 // Deprecated: Use PullRequestCheckConclusionCancelled.ProtoReflect.Descriptor instead.
 func (*PullRequestCheckConclusionCancelled) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_pull_request_proto_rawDescGZIP(), []int{43}
+	return file_agentrepl_v1_pull_request_proto_rawDescGZIP(), []int{44}
 }
 
 // Timed out. DELIBERATELY EMPTY: the arm is the conclusion.
@@ -3116,7 +3286,7 @@ type PullRequestCheckConclusionTimedOut struct {
 
 func (x *PullRequestCheckConclusionTimedOut) Reset() {
 	*x = PullRequestCheckConclusionTimedOut{}
-	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[44]
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[45]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3128,7 +3298,7 @@ func (x *PullRequestCheckConclusionTimedOut) String() string {
 func (*PullRequestCheckConclusionTimedOut) ProtoMessage() {}
 
 func (x *PullRequestCheckConclusionTimedOut) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[44]
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[45]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3141,7 +3311,7 @@ func (x *PullRequestCheckConclusionTimedOut) ProtoReflect() protoreflect.Message
 
 // Deprecated: Use PullRequestCheckConclusionTimedOut.ProtoReflect.Descriptor instead.
 func (*PullRequestCheckConclusionTimedOut) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_pull_request_proto_rawDescGZIP(), []int{44}
+	return file_agentrepl_v1_pull_request_proto_rawDescGZIP(), []int{45}
 }
 
 // Skipped. DELIBERATELY EMPTY: the arm is the conclusion.
@@ -3153,7 +3323,7 @@ type PullRequestCheckConclusionSkipped struct {
 
 func (x *PullRequestCheckConclusionSkipped) Reset() {
 	*x = PullRequestCheckConclusionSkipped{}
-	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[45]
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[46]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3165,7 +3335,7 @@ func (x *PullRequestCheckConclusionSkipped) String() string {
 func (*PullRequestCheckConclusionSkipped) ProtoMessage() {}
 
 func (x *PullRequestCheckConclusionSkipped) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[45]
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[46]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3178,7 +3348,7 @@ func (x *PullRequestCheckConclusionSkipped) ProtoReflect() protoreflect.Message 
 
 // Deprecated: Use PullRequestCheckConclusionSkipped.ProtoReflect.Descriptor instead.
 func (*PullRequestCheckConclusionSkipped) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_pull_request_proto_rawDescGZIP(), []int{45}
+	return file_agentrepl_v1_pull_request_proto_rawDescGZIP(), []int{46}
 }
 
 // Neutral. DELIBERATELY EMPTY: the arm is the conclusion.
@@ -3190,7 +3360,7 @@ type PullRequestCheckConclusionNeutral struct {
 
 func (x *PullRequestCheckConclusionNeutral) Reset() {
 	*x = PullRequestCheckConclusionNeutral{}
-	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[46]
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[47]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3202,7 +3372,7 @@ func (x *PullRequestCheckConclusionNeutral) String() string {
 func (*PullRequestCheckConclusionNeutral) ProtoMessage() {}
 
 func (x *PullRequestCheckConclusionNeutral) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[46]
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[47]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3215,7 +3385,7 @@ func (x *PullRequestCheckConclusionNeutral) ProtoReflect() protoreflect.Message 
 
 // Deprecated: Use PullRequestCheckConclusionNeutral.ProtoReflect.Descriptor instead.
 func (*PullRequestCheckConclusionNeutral) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_pull_request_proto_rawDescGZIP(), []int{46}
+	return file_agentrepl_v1_pull_request_proto_rawDescGZIP(), []int{47}
 }
 
 // Action required. DELIBERATELY EMPTY: the arm is the conclusion.
@@ -3227,7 +3397,7 @@ type PullRequestCheckConclusionActionRequired struct {
 
 func (x *PullRequestCheckConclusionActionRequired) Reset() {
 	*x = PullRequestCheckConclusionActionRequired{}
-	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[47]
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[48]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3239,7 +3409,7 @@ func (x *PullRequestCheckConclusionActionRequired) String() string {
 func (*PullRequestCheckConclusionActionRequired) ProtoMessage() {}
 
 func (x *PullRequestCheckConclusionActionRequired) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[47]
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[48]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3252,7 +3422,626 @@ func (x *PullRequestCheckConclusionActionRequired) ProtoReflect() protoreflect.M
 
 // Deprecated: Use PullRequestCheckConclusionActionRequired.ProtoReflect.Descriptor instead.
 func (*PullRequestCheckConclusionActionRequired) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_pull_request_proto_rawDescGZIP(), []int{47}
+	return file_agentrepl_v1_pull_request_proto_rawDescGZIP(), []int{48}
+}
+
+// The pull request joined the merge queue, told from GitHub's
+// `AddedToMergeQueueEvent` timeline event. Each joining is its own event, so
+// a pull request removed and queued again is told joining twice.
+type PullRequestActivityMergeQueueEntered struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Who queued it. UNSET when GitHub names no actor. Its `association` is
+	// UNSPECIFIED: the timeline names only the login.
+	Actor *PullRequestActivityAuthor `protobuf:"bytes,1,opt,name=actor,proto3,oneof" json:"actor,omitempty"`
+	// Where it stood when the daemon read it. UNSET when it had already left
+	// the queue by the read that told the joining, which `merge_queue_removed`
+	// or `state_changed` in the same notice then tells.
+	Position *PullRequestMergeQueuePosition `protobuf:"bytes,2,opt,name=position,proto3,oneof" json:"position,omitempty"`
+	// When it was queued.
+	EnteredAt     *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=entered_at,json=enteredAt,proto3" json:"entered_at,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PullRequestActivityMergeQueueEntered) Reset() {
+	*x = PullRequestActivityMergeQueueEntered{}
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[49]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PullRequestActivityMergeQueueEntered) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PullRequestActivityMergeQueueEntered) ProtoMessage() {}
+
+func (x *PullRequestActivityMergeQueueEntered) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[49]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PullRequestActivityMergeQueueEntered.ProtoReflect.Descriptor instead.
+func (*PullRequestActivityMergeQueueEntered) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_pull_request_proto_rawDescGZIP(), []int{49}
+}
+
+func (x *PullRequestActivityMergeQueueEntered) GetActor() *PullRequestActivityAuthor {
+	if x != nil {
+		return x.Actor
+	}
+	return nil
+}
+
+func (x *PullRequestActivityMergeQueueEntered) GetPosition() *PullRequestMergeQueuePosition {
+	if x != nil {
+		return x.Position
+	}
+	return nil
+}
+
+func (x *PullRequestActivityMergeQueueEntered) GetEnteredAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.EnteredAt
+	}
+	return nil
+}
+
+// The pull request's place in the queue changed between two reads.
+type PullRequestActivityMergeQueueMoved struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Where it stood when last told.
+	From *PullRequestMergeQueuePosition `protobuf:"bytes,1,opt,name=from,proto3" json:"from,omitempty"`
+	// Where it stands now.
+	To            *PullRequestMergeQueuePosition `protobuf:"bytes,2,opt,name=to,proto3" json:"to,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PullRequestActivityMergeQueueMoved) Reset() {
+	*x = PullRequestActivityMergeQueueMoved{}
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[50]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PullRequestActivityMergeQueueMoved) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PullRequestActivityMergeQueueMoved) ProtoMessage() {}
+
+func (x *PullRequestActivityMergeQueueMoved) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[50]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PullRequestActivityMergeQueueMoved.ProtoReflect.Descriptor instead.
+func (*PullRequestActivityMergeQueueMoved) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_pull_request_proto_rawDescGZIP(), []int{50}
+}
+
+func (x *PullRequestActivityMergeQueueMoved) GetFrom() *PullRequestMergeQueuePosition {
+	if x != nil {
+		return x.From
+	}
+	return nil
+}
+
+func (x *PullRequestActivityMergeQueueMoved) GetTo() *PullRequestMergeQueuePosition {
+	if x != nil {
+		return x.To
+	}
+	return nil
+}
+
+// The pull request's queue entry changed state between two reads.
+type PullRequestActivityMergeQueueEntryStateChanged struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The state it moved to.
+	State         *PullRequestMergeQueueEntryState `protobuf:"bytes,1,opt,name=state,proto3" json:"state,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PullRequestActivityMergeQueueEntryStateChanged) Reset() {
+	*x = PullRequestActivityMergeQueueEntryStateChanged{}
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[51]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PullRequestActivityMergeQueueEntryStateChanged) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PullRequestActivityMergeQueueEntryStateChanged) ProtoMessage() {}
+
+func (x *PullRequestActivityMergeQueueEntryStateChanged) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[51]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PullRequestActivityMergeQueueEntryStateChanged.ProtoReflect.Descriptor instead.
+func (*PullRequestActivityMergeQueueEntryStateChanged) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_pull_request_proto_rawDescGZIP(), []int{51}
+}
+
+func (x *PullRequestActivityMergeQueueEntryStateChanged) GetState() *PullRequestMergeQueueEntryState {
+	if x != nil {
+		return x.State
+	}
+	return nil
+}
+
+// The pull request was removed from the queue without merging, told from
+// GitHub's `RemovedFromMergeQueueEvent` timeline event.
+type PullRequestActivityMergeQueueRemoved struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Who removed it. UNSET when GitHub names no actor, as when the queue
+	// removes it itself. Its `association` is UNSPECIFIED: the timeline names
+	// only the login.
+	Actor *PullRequestActivityAuthor `protobuf:"bytes,1,opt,name=actor,proto3,oneof" json:"actor,omitempty"`
+	// GitHub's reason, verbatim (for example that the merge group's checks
+	// failed). UNSET when GitHub gives none.
+	Reason *string `protobuf:"bytes,2,opt,name=reason,proto3,oneof" json:"reason,omitempty"`
+	// When it was removed.
+	RemovedAt     *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=removed_at,json=removedAt,proto3" json:"removed_at,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PullRequestActivityMergeQueueRemoved) Reset() {
+	*x = PullRequestActivityMergeQueueRemoved{}
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[52]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PullRequestActivityMergeQueueRemoved) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PullRequestActivityMergeQueueRemoved) ProtoMessage() {}
+
+func (x *PullRequestActivityMergeQueueRemoved) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[52]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PullRequestActivityMergeQueueRemoved.ProtoReflect.Descriptor instead.
+func (*PullRequestActivityMergeQueueRemoved) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_pull_request_proto_rawDescGZIP(), []int{52}
+}
+
+func (x *PullRequestActivityMergeQueueRemoved) GetActor() *PullRequestActivityAuthor {
+	if x != nil {
+		return x.Actor
+	}
+	return nil
+}
+
+func (x *PullRequestActivityMergeQueueRemoved) GetReason() string {
+	if x != nil && x.Reason != nil {
+		return *x.Reason
+	}
+	return ""
+}
+
+func (x *PullRequestActivityMergeQueueRemoved) GetRemovedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.RemovedAt
+	}
+	return nil
+}
+
+// How far a queued pull request is from merging. Derived from the order of
+// the queue's entries, never from GitHub's own `position` number, whose base
+// GitHub does not document.
+type PullRequestMergeQueuePosition struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// How many entries are ahead of it: 0 is the head of the queue, the entry
+	// merged next.
+	EntriesAhead uint32 `protobuf:"varint,1,opt,name=entries_ahead,json=entriesAhead,proto3" json:"entries_ahead,omitempty"`
+	// How many entries the queue holds, this one included.
+	EntriesTotal  uint32 `protobuf:"varint,2,opt,name=entries_total,json=entriesTotal,proto3" json:"entries_total,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PullRequestMergeQueuePosition) Reset() {
+	*x = PullRequestMergeQueuePosition{}
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[53]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PullRequestMergeQueuePosition) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PullRequestMergeQueuePosition) ProtoMessage() {}
+
+func (x *PullRequestMergeQueuePosition) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[53]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PullRequestMergeQueuePosition.ProtoReflect.Descriptor instead.
+func (*PullRequestMergeQueuePosition) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_pull_request_proto_rawDescGZIP(), []int{53}
+}
+
+func (x *PullRequestMergeQueuePosition) GetEntriesAhead() uint32 {
+	if x != nil {
+		return x.EntriesAhead
+	}
+	return 0
+}
+
+func (x *PullRequestMergeQueuePosition) GetEntriesTotal() uint32 {
+	if x != nil {
+		return x.EntriesTotal
+	}
+	return 0
+}
+
+// What a merge queue entry is doing, as GitHub's `MergeQueueEntryState`
+// names it. THE ARM IS THE STATE. A set wrapper whose oneof is unassigned is
+// a state this schema revision does not name.
+type PullRequestMergeQueueEntryState struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to State:
+	//
+	//	*PullRequestMergeQueueEntryState_Queued
+	//	*PullRequestMergeQueueEntryState_AwaitingChecks
+	//	*PullRequestMergeQueueEntryState_Mergeable
+	//	*PullRequestMergeQueueEntryState_Unmergeable
+	//	*PullRequestMergeQueueEntryState_Locked
+	State         isPullRequestMergeQueueEntryState_State `protobuf_oneof:"state"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PullRequestMergeQueueEntryState) Reset() {
+	*x = PullRequestMergeQueueEntryState{}
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[54]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PullRequestMergeQueueEntryState) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PullRequestMergeQueueEntryState) ProtoMessage() {}
+
+func (x *PullRequestMergeQueueEntryState) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[54]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PullRequestMergeQueueEntryState.ProtoReflect.Descriptor instead.
+func (*PullRequestMergeQueueEntryState) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_pull_request_proto_rawDescGZIP(), []int{54}
+}
+
+func (x *PullRequestMergeQueueEntryState) GetState() isPullRequestMergeQueueEntryState_State {
+	if x != nil {
+		return x.State
+	}
+	return nil
+}
+
+func (x *PullRequestMergeQueueEntryState) GetQueued() *PullRequestMergeQueueEntryStateQueued {
+	if x != nil {
+		if x, ok := x.State.(*PullRequestMergeQueueEntryState_Queued); ok {
+			return x.Queued
+		}
+	}
+	return nil
+}
+
+func (x *PullRequestMergeQueueEntryState) GetAwaitingChecks() *PullRequestMergeQueueEntryStateAwaitingChecks {
+	if x != nil {
+		if x, ok := x.State.(*PullRequestMergeQueueEntryState_AwaitingChecks); ok {
+			return x.AwaitingChecks
+		}
+	}
+	return nil
+}
+
+func (x *PullRequestMergeQueueEntryState) GetMergeable() *PullRequestMergeQueueEntryStateMergeable {
+	if x != nil {
+		if x, ok := x.State.(*PullRequestMergeQueueEntryState_Mergeable); ok {
+			return x.Mergeable
+		}
+	}
+	return nil
+}
+
+func (x *PullRequestMergeQueueEntryState) GetUnmergeable() *PullRequestMergeQueueEntryStateUnmergeable {
+	if x != nil {
+		if x, ok := x.State.(*PullRequestMergeQueueEntryState_Unmergeable); ok {
+			return x.Unmergeable
+		}
+	}
+	return nil
+}
+
+func (x *PullRequestMergeQueueEntryState) GetLocked() *PullRequestMergeQueueEntryStateLocked {
+	if x != nil {
+		if x, ok := x.State.(*PullRequestMergeQueueEntryState_Locked); ok {
+			return x.Locked
+		}
+	}
+	return nil
+}
+
+type isPullRequestMergeQueueEntryState_State interface {
+	isPullRequestMergeQueueEntryState_State()
+}
+
+type PullRequestMergeQueueEntryState_Queued struct {
+	// Waiting its turn.
+	Queued *PullRequestMergeQueueEntryStateQueued `protobuf:"bytes,1,opt,name=queued,proto3,oneof"`
+}
+
+type PullRequestMergeQueueEntryState_AwaitingChecks struct {
+	// Its merge group's checks are running.
+	AwaitingChecks *PullRequestMergeQueueEntryStateAwaitingChecks `protobuf:"bytes,2,opt,name=awaiting_checks,json=awaitingChecks,proto3,oneof"`
+}
+
+type PullRequestMergeQueueEntryState_Mergeable struct {
+	// Its checks passed; the queue will merge it.
+	Mergeable *PullRequestMergeQueueEntryStateMergeable `protobuf:"bytes,3,opt,name=mergeable,proto3,oneof"`
+}
+
+type PullRequestMergeQueueEntryState_Unmergeable struct {
+	// It cannot be merged; the queue will remove it.
+	Unmergeable *PullRequestMergeQueueEntryStateUnmergeable `protobuf:"bytes,4,opt,name=unmergeable,proto3,oneof"`
+}
+
+type PullRequestMergeQueueEntryState_Locked struct {
+	// Locked by the queue while it merges.
+	Locked *PullRequestMergeQueueEntryStateLocked `protobuf:"bytes,5,opt,name=locked,proto3,oneof"`
+}
+
+func (*PullRequestMergeQueueEntryState_Queued) isPullRequestMergeQueueEntryState_State() {}
+
+func (*PullRequestMergeQueueEntryState_AwaitingChecks) isPullRequestMergeQueueEntryState_State() {}
+
+func (*PullRequestMergeQueueEntryState_Mergeable) isPullRequestMergeQueueEntryState_State() {}
+
+func (*PullRequestMergeQueueEntryState_Unmergeable) isPullRequestMergeQueueEntryState_State() {}
+
+func (*PullRequestMergeQueueEntryState_Locked) isPullRequestMergeQueueEntryState_State() {}
+
+// Waiting. DELIBERATELY EMPTY: the arm is the state.
+type PullRequestMergeQueueEntryStateQueued struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PullRequestMergeQueueEntryStateQueued) Reset() {
+	*x = PullRequestMergeQueueEntryStateQueued{}
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[55]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PullRequestMergeQueueEntryStateQueued) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PullRequestMergeQueueEntryStateQueued) ProtoMessage() {}
+
+func (x *PullRequestMergeQueueEntryStateQueued) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[55]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PullRequestMergeQueueEntryStateQueued.ProtoReflect.Descriptor instead.
+func (*PullRequestMergeQueueEntryStateQueued) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_pull_request_proto_rawDescGZIP(), []int{55}
+}
+
+// Checks running. DELIBERATELY EMPTY: the arm is the state.
+type PullRequestMergeQueueEntryStateAwaitingChecks struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PullRequestMergeQueueEntryStateAwaitingChecks) Reset() {
+	*x = PullRequestMergeQueueEntryStateAwaitingChecks{}
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[56]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PullRequestMergeQueueEntryStateAwaitingChecks) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PullRequestMergeQueueEntryStateAwaitingChecks) ProtoMessage() {}
+
+func (x *PullRequestMergeQueueEntryStateAwaitingChecks) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[56]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PullRequestMergeQueueEntryStateAwaitingChecks.ProtoReflect.Descriptor instead.
+func (*PullRequestMergeQueueEntryStateAwaitingChecks) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_pull_request_proto_rawDescGZIP(), []int{56}
+}
+
+// Will merge. DELIBERATELY EMPTY: the arm is the state.
+type PullRequestMergeQueueEntryStateMergeable struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PullRequestMergeQueueEntryStateMergeable) Reset() {
+	*x = PullRequestMergeQueueEntryStateMergeable{}
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[57]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PullRequestMergeQueueEntryStateMergeable) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PullRequestMergeQueueEntryStateMergeable) ProtoMessage() {}
+
+func (x *PullRequestMergeQueueEntryStateMergeable) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[57]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PullRequestMergeQueueEntryStateMergeable.ProtoReflect.Descriptor instead.
+func (*PullRequestMergeQueueEntryStateMergeable) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_pull_request_proto_rawDescGZIP(), []int{57}
+}
+
+// Will be removed. DELIBERATELY EMPTY: the arm is the state.
+type PullRequestMergeQueueEntryStateUnmergeable struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PullRequestMergeQueueEntryStateUnmergeable) Reset() {
+	*x = PullRequestMergeQueueEntryStateUnmergeable{}
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[58]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PullRequestMergeQueueEntryStateUnmergeable) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PullRequestMergeQueueEntryStateUnmergeable) ProtoMessage() {}
+
+func (x *PullRequestMergeQueueEntryStateUnmergeable) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[58]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PullRequestMergeQueueEntryStateUnmergeable.ProtoReflect.Descriptor instead.
+func (*PullRequestMergeQueueEntryStateUnmergeable) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_pull_request_proto_rawDescGZIP(), []int{58}
+}
+
+// Locked. DELIBERATELY EMPTY: the arm is the state.
+type PullRequestMergeQueueEntryStateLocked struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PullRequestMergeQueueEntryStateLocked) Reset() {
+	*x = PullRequestMergeQueueEntryStateLocked{}
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[59]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PullRequestMergeQueueEntryStateLocked) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PullRequestMergeQueueEntryStateLocked) ProtoMessage() {}
+
+func (x *PullRequestMergeQueueEntryStateLocked) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_pull_request_proto_msgTypes[59]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PullRequestMergeQueueEntryStateLocked.ProtoReflect.Descriptor instead.
+func (*PullRequestMergeQueueEntryStateLocked) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_pull_request_proto_rawDescGZIP(), []int{59}
 }
 
 var File_agentrepl_v1_pull_request_proto protoreflect.FileDescriptor
@@ -3306,12 +4095,18 @@ const file_agentrepl_v1_pull_request_proto_rawDesc = "" +
 	"httpStatus\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\"=\n" +
 	"#PullRequestGitHubFailureUnreachable\x12\x16\n" +
-	"\x06detail\x18\x01 \x01(\tR\x06detail\"\x8c\x01\n" +
+	"\x06detail\x18\x01 \x01(\tR\x06detail\"\xed\x01\n" +
 	"\x11PullRequestStatus\x12\x14\n" +
 	"\x05title\x18\x01 \x01(\tR\x05title\x12\x10\n" +
 	"\x03url\x18\x02 \x01(\tR\x03url\x124\n" +
 	"\x05state\x18\x03 \x01(\v2\x1e.agentrepl.v1.PullRequestStateR\x05state\x12\x19\n" +
-	"\bhead_sha\x18\x04 \x01(\tR\aheadSha\"\x92\x02\n" +
+	"\bhead_sha\x18\x04 \x01(\tR\aheadSha\x12O\n" +
+	"\vmerge_queue\x18\x05 \x01(\v2).agentrepl.v1.PullRequestStatusMergeQueueH\x00R\n" +
+	"mergeQueue\x88\x01\x01B\x0e\n" +
+	"\f_merge_queue\"\xab\x01\n" +
+	"\x1bPullRequestStatusMergeQueue\x12G\n" +
+	"\bposition\x18\x01 \x01(\v2+.agentrepl.v1.PullRequestMergeQueuePositionR\bposition\x12C\n" +
+	"\x05state\x18\x02 \x01(\v2-.agentrepl.v1.PullRequestMergeQueueEntryStateR\x05state\"\x92\x02\n" +
 	"\x10PullRequestState\x12;\n" +
 	"\x05draft\x18\x01 \x01(\v2#.agentrepl.v1.PullRequestStateDraftH\x00R\x05draft\x128\n" +
 	"\x04open\x18\x02 \x01(\v2\".agentrepl.v1.PullRequestStateOpenH\x00R\x04open\x12>\n" +
@@ -3331,7 +4126,7 @@ const file_agentrepl_v1_pull_request_proto_rawDesc = "" +
 	"\x05ended\x18\x05 \x01(\v2$.agentrepl.v1.PullRequestNoticeEndedH\x01R\x05ended\x88\x01\x01B\t\n" +
 	"\a_healthB\b\n" +
 	"\x06_ended\"\x18\n" +
-	"\x16PullRequestNoticeEnded\"\xbb\x04\n" +
+	"\x16PullRequestNoticeEnded\"\xdd\b\n" +
 	"\x13PullRequestActivity\x12D\n" +
 	"\acomment\x18\x01 \x01(\v2(.agentrepl.v1.PullRequestActivityCommentH\x00R\acomment\x12A\n" +
 	"\x06review\x18\x02 \x01(\v2'.agentrepl.v1.PullRequestActivityReviewH\x00R\x06review\x12W\n" +
@@ -3339,7 +4134,13 @@ const file_agentrepl_v1_pull_request_proto_rawDesc = "" +
 	"\x06edited\x18\x04 \x01(\v2'.agentrepl.v1.PullRequestActivityEditedH\x00R\x06edited\x12D\n" +
 	"\adeleted\x18\x05 \x01(\v2(.agentrepl.v1.PullRequestActivityDeletedH\x00R\adeleted\x12T\n" +
 	"\rstate_changed\x18\x06 \x01(\v2-.agentrepl.v1.PullRequestActivityStateChangedH\x00R\fstateChanged\x12W\n" +
-	"\x0echeck_finished\x18\a \x01(\v2..agentrepl.v1.PullRequestActivityCheckFinishedH\x00R\rcheckFinishedB\n" +
+	"\x0echeck_finished\x18\a \x01(\v2..agentrepl.v1.PullRequestActivityCheckFinishedH\x00R\rcheckFinished\x12d\n" +
+	"\x13merge_queue_entered\x18\b \x01(\v22.agentrepl.v1.PullRequestActivityMergeQueueEnteredH\x00R\x11mergeQueueEntered\x12^\n" +
+	"\x11merge_queue_moved\x18\t \x01(\v20.agentrepl.v1.PullRequestActivityMergeQueueMovedH\x00R\x0fmergeQueueMoved\x12\x84\x01\n" +
+	"\x1fmerge_queue_entry_state_changed\x18\n" +
+	" \x01(\v2<.agentrepl.v1.PullRequestActivityMergeQueueEntryStateChangedH\x00R\x1bmergeQueueEntryStateChanged\x12d\n" +
+	"\x13merge_queue_removed\x18\v \x01(\v22.agentrepl.v1.PullRequestActivityMergeQueueRemovedH\x00R\x11mergeQueueRemoved\x12m\n" +
+	"\x1amerge_group_check_finished\x18\f \x01(\v2..agentrepl.v1.PullRequestActivityCheckFinishedH\x00R\x17mergeGroupCheckFinishedB\n" +
 	"\n" +
 	"\bactivity\"\x7f\n" +
 	"\x19PullRequestActivityAuthor\x12\x14\n" +
@@ -3430,14 +4231,49 @@ const file_agentrepl_v1_pull_request_proto_rawDesc = "" +
 	"\"PullRequestCheckConclusionTimedOut\"#\n" +
 	"!PullRequestCheckConclusionSkipped\"#\n" +
 	"!PullRequestCheckConclusionNeutral\"*\n" +
-	"(PullRequestCheckConclusionActionRequired*\x89\x02\n" +
+	"(PullRequestCheckConclusionActionRequired\"\x8a\x02\n" +
+	"$PullRequestActivityMergeQueueEntered\x12B\n" +
+	"\x05actor\x18\x01 \x01(\v2'.agentrepl.v1.PullRequestActivityAuthorH\x00R\x05actor\x88\x01\x01\x12L\n" +
+	"\bposition\x18\x02 \x01(\v2+.agentrepl.v1.PullRequestMergeQueuePositionH\x01R\bposition\x88\x01\x01\x129\n" +
+	"\n" +
+	"entered_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\tenteredAtB\b\n" +
+	"\x06_actorB\v\n" +
+	"\t_position\"\xa2\x01\n" +
+	"\"PullRequestActivityMergeQueueMoved\x12?\n" +
+	"\x04from\x18\x01 \x01(\v2+.agentrepl.v1.PullRequestMergeQueuePositionR\x04from\x12;\n" +
+	"\x02to\x18\x02 \x01(\v2+.agentrepl.v1.PullRequestMergeQueuePositionR\x02to\"u\n" +
+	".PullRequestActivityMergeQueueEntryStateChanged\x12C\n" +
+	"\x05state\x18\x01 \x01(\v2-.agentrepl.v1.PullRequestMergeQueueEntryStateR\x05state\"\xd7\x01\n" +
+	"$PullRequestActivityMergeQueueRemoved\x12B\n" +
+	"\x05actor\x18\x01 \x01(\v2'.agentrepl.v1.PullRequestActivityAuthorH\x00R\x05actor\x88\x01\x01\x12\x1b\n" +
+	"\x06reason\x18\x02 \x01(\tH\x01R\x06reason\x88\x01\x01\x129\n" +
+	"\n" +
+	"removed_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\tremovedAtB\b\n" +
+	"\x06_actorB\t\n" +
+	"\a_reason\"i\n" +
+	"\x1dPullRequestMergeQueuePosition\x12#\n" +
+	"\rentries_ahead\x18\x01 \x01(\rR\fentriesAhead\x12#\n" +
+	"\rentries_total\x18\x02 \x01(\rR\fentriesTotal\"\xe6\x03\n" +
+	"\x1fPullRequestMergeQueueEntryState\x12M\n" +
+	"\x06queued\x18\x01 \x01(\v23.agentrepl.v1.PullRequestMergeQueueEntryStateQueuedH\x00R\x06queued\x12f\n" +
+	"\x0fawaiting_checks\x18\x02 \x01(\v2;.agentrepl.v1.PullRequestMergeQueueEntryStateAwaitingChecksH\x00R\x0eawaitingChecks\x12V\n" +
+	"\tmergeable\x18\x03 \x01(\v26.agentrepl.v1.PullRequestMergeQueueEntryStateMergeableH\x00R\tmergeable\x12\\\n" +
+	"\vunmergeable\x18\x04 \x01(\v28.agentrepl.v1.PullRequestMergeQueueEntryStateUnmergeableH\x00R\vunmergeable\x12M\n" +
+	"\x06locked\x18\x05 \x01(\v23.agentrepl.v1.PullRequestMergeQueueEntryStateLockedH\x00R\x06lockedB\a\n" +
+	"\x05state\"'\n" +
+	"%PullRequestMergeQueueEntryStateQueued\"/\n" +
+	"-PullRequestMergeQueueEntryStateAwaitingChecks\"*\n" +
+	"(PullRequestMergeQueueEntryStateMergeable\",\n" +
+	"*PullRequestMergeQueueEntryStateUnmergeable\"'\n" +
+	"%PullRequestMergeQueueEntryStateLocked*\xb4\x02\n" +
 	"\x16PullRequestNoticeEvent\x12)\n" +
 	"%PULL_REQUEST_NOTICE_EVENT_UNSPECIFIED\x10\x00\x12%\n" +
 	"!PULL_REQUEST_NOTICE_EVENT_COMMENT\x10\x01\x12$\n" +
 	" PULL_REQUEST_NOTICE_EVENT_REVIEW\x10\x02\x12,\n" +
 	"(PULL_REQUEST_NOTICE_EVENT_REVIEW_COMMENT\x10\x03\x12#\n" +
 	"\x1fPULL_REQUEST_NOTICE_EVENT_STATE\x10\x04\x12$\n" +
-	" PULL_REQUEST_NOTICE_EVENT_CHECKS\x10\x05*\xef\x02\n" +
+	" PULL_REQUEST_NOTICE_EVENT_CHECKS\x10\x05\x12)\n" +
+	"%PULL_REQUEST_NOTICE_EVENT_MERGE_QUEUE\x10\x06*\xef\x02\n" +
 	"\x1cPullRequestAuthorAssociation\x12/\n" +
 	"+PULL_REQUEST_AUTHOR_ASSOCIATION_UNSPECIFIED\x10\x00\x12)\n" +
 	"%PULL_REQUEST_AUTHOR_ASSOCIATION_OWNER\x10\x01\x12*\n" +
@@ -3460,63 +4296,75 @@ func file_agentrepl_v1_pull_request_proto_rawDescGZIP() []byte {
 }
 
 var file_agentrepl_v1_pull_request_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_agentrepl_v1_pull_request_proto_msgTypes = make([]protoimpl.MessageInfo, 48)
+var file_agentrepl_v1_pull_request_proto_msgTypes = make([]protoimpl.MessageInfo, 60)
 var file_agentrepl_v1_pull_request_proto_goTypes = []any{
-	(PullRequestNoticeEvent)(0),                      // 0: agentrepl.v1.PullRequestNoticeEvent
-	(PullRequestAuthorAssociation)(0),                // 1: agentrepl.v1.PullRequestAuthorAssociation
-	(*PullRequestRef)(nil),                           // 2: agentrepl.v1.PullRequestRef
-	(*PullRequestSubscription)(nil),                  // 3: agentrepl.v1.PullRequestSubscription
-	(*PullRequestSubscriptionOrigin)(nil),            // 4: agentrepl.v1.PullRequestSubscriptionOrigin
-	(*PullRequestSubscriptionOriginOwnedLink)(nil),   // 5: agentrepl.v1.PullRequestSubscriptionOriginOwnedLink
-	(*PullRequestSubscriptionOriginRequested)(nil),   // 6: agentrepl.v1.PullRequestSubscriptionOriginRequested
-	(*PullRequestSubscriptionHealth)(nil),            // 7: agentrepl.v1.PullRequestSubscriptionHealth
-	(*PullRequestSubscriptionHealthy)(nil),           // 8: agentrepl.v1.PullRequestSubscriptionHealthy
-	(*PullRequestSubscriptionFailing)(nil),           // 9: agentrepl.v1.PullRequestSubscriptionFailing
-	(*PullRequestGitHubFailure)(nil),                 // 10: agentrepl.v1.PullRequestGitHubFailure
-	(*PullRequestGitHubFailureUnauthorized)(nil),     // 11: agentrepl.v1.PullRequestGitHubFailureUnauthorized
-	(*PullRequestGitHubFailureNotFound)(nil),         // 12: agentrepl.v1.PullRequestGitHubFailureNotFound
-	(*PullRequestGitHubFailureRateLimited)(nil),      // 13: agentrepl.v1.PullRequestGitHubFailureRateLimited
-	(*PullRequestGitHubFailureRefused)(nil),          // 14: agentrepl.v1.PullRequestGitHubFailureRefused
-	(*PullRequestGitHubFailureUnreachable)(nil),      // 15: agentrepl.v1.PullRequestGitHubFailureUnreachable
-	(*PullRequestStatus)(nil),                        // 16: agentrepl.v1.PullRequestStatus
-	(*PullRequestState)(nil),                         // 17: agentrepl.v1.PullRequestState
-	(*PullRequestStateDraft)(nil),                    // 18: agentrepl.v1.PullRequestStateDraft
-	(*PullRequestStateOpen)(nil),                     // 19: agentrepl.v1.PullRequestStateOpen
-	(*PullRequestStateMerged)(nil),                   // 20: agentrepl.v1.PullRequestStateMerged
-	(*PullRequestStateClosed)(nil),                   // 21: agentrepl.v1.PullRequestStateClosed
-	(*PullRequestNotice)(nil),                        // 22: agentrepl.v1.PullRequestNotice
-	(*PullRequestNoticeEnded)(nil),                   // 23: agentrepl.v1.PullRequestNoticeEnded
-	(*PullRequestActivity)(nil),                      // 24: agentrepl.v1.PullRequestActivity
-	(*PullRequestActivityAuthor)(nil),                // 25: agentrepl.v1.PullRequestActivityAuthor
-	(*PullRequestActivityText)(nil),                  // 26: agentrepl.v1.PullRequestActivityText
-	(*PullRequestActivityComment)(nil),               // 27: agentrepl.v1.PullRequestActivityComment
-	(*PullRequestActivityReview)(nil),                // 28: agentrepl.v1.PullRequestActivityReview
-	(*PullRequestReviewVerdict)(nil),                 // 29: agentrepl.v1.PullRequestReviewVerdict
-	(*PullRequestReviewVerdictApproved)(nil),         // 30: agentrepl.v1.PullRequestReviewVerdictApproved
-	(*PullRequestReviewVerdictChangesRequested)(nil), // 31: agentrepl.v1.PullRequestReviewVerdictChangesRequested
-	(*PullRequestReviewVerdictCommented)(nil),        // 32: agentrepl.v1.PullRequestReviewVerdictCommented
-	(*PullRequestReviewVerdictDismissed)(nil),        // 33: agentrepl.v1.PullRequestReviewVerdictDismissed
-	(*PullRequestActivityReviewComment)(nil),         // 34: agentrepl.v1.PullRequestActivityReviewComment
-	(*PullRequestActivityReviewCommentLocation)(nil), // 35: agentrepl.v1.PullRequestActivityReviewCommentLocation
-	(*PullRequestActivityEdited)(nil),                // 36: agentrepl.v1.PullRequestActivityEdited
-	(*PullRequestActivityDeleted)(nil),               // 37: agentrepl.v1.PullRequestActivityDeleted
-	(*PullRequestActivityDeletedComment)(nil),        // 38: agentrepl.v1.PullRequestActivityDeletedComment
-	(*PullRequestActivityDeletedReviewComment)(nil),  // 39: agentrepl.v1.PullRequestActivityDeletedReviewComment
-	(*PullRequestActivityStateChanged)(nil),          // 40: agentrepl.v1.PullRequestActivityStateChanged
-	(*PullRequestActivityCheckFinished)(nil),         // 41: agentrepl.v1.PullRequestActivityCheckFinished
-	(*PullRequestCheckConclusion)(nil),               // 42: agentrepl.v1.PullRequestCheckConclusion
-	(*PullRequestCheckConclusionSuccess)(nil),        // 43: agentrepl.v1.PullRequestCheckConclusionSuccess
-	(*PullRequestCheckConclusionFailure)(nil),        // 44: agentrepl.v1.PullRequestCheckConclusionFailure
-	(*PullRequestCheckConclusionCancelled)(nil),      // 45: agentrepl.v1.PullRequestCheckConclusionCancelled
-	(*PullRequestCheckConclusionTimedOut)(nil),       // 46: agentrepl.v1.PullRequestCheckConclusionTimedOut
-	(*PullRequestCheckConclusionSkipped)(nil),        // 47: agentrepl.v1.PullRequestCheckConclusionSkipped
-	(*PullRequestCheckConclusionNeutral)(nil),        // 48: agentrepl.v1.PullRequestCheckConclusionNeutral
-	(*PullRequestCheckConclusionActionRequired)(nil), // 49: agentrepl.v1.PullRequestCheckConclusionActionRequired
-	(*v1.WorkspaceRef)(nil),                          // 50: workspace.v1.WorkspaceRef
-	(*timestamppb.Timestamp)(nil),                    // 51: google.protobuf.Timestamp
+	(PullRequestNoticeEvent)(0),                            // 0: agentrepl.v1.PullRequestNoticeEvent
+	(PullRequestAuthorAssociation)(0),                      // 1: agentrepl.v1.PullRequestAuthorAssociation
+	(*PullRequestRef)(nil),                                 // 2: agentrepl.v1.PullRequestRef
+	(*PullRequestSubscription)(nil),                        // 3: agentrepl.v1.PullRequestSubscription
+	(*PullRequestSubscriptionOrigin)(nil),                  // 4: agentrepl.v1.PullRequestSubscriptionOrigin
+	(*PullRequestSubscriptionOriginOwnedLink)(nil),         // 5: agentrepl.v1.PullRequestSubscriptionOriginOwnedLink
+	(*PullRequestSubscriptionOriginRequested)(nil),         // 6: agentrepl.v1.PullRequestSubscriptionOriginRequested
+	(*PullRequestSubscriptionHealth)(nil),                  // 7: agentrepl.v1.PullRequestSubscriptionHealth
+	(*PullRequestSubscriptionHealthy)(nil),                 // 8: agentrepl.v1.PullRequestSubscriptionHealthy
+	(*PullRequestSubscriptionFailing)(nil),                 // 9: agentrepl.v1.PullRequestSubscriptionFailing
+	(*PullRequestGitHubFailure)(nil),                       // 10: agentrepl.v1.PullRequestGitHubFailure
+	(*PullRequestGitHubFailureUnauthorized)(nil),           // 11: agentrepl.v1.PullRequestGitHubFailureUnauthorized
+	(*PullRequestGitHubFailureNotFound)(nil),               // 12: agentrepl.v1.PullRequestGitHubFailureNotFound
+	(*PullRequestGitHubFailureRateLimited)(nil),            // 13: agentrepl.v1.PullRequestGitHubFailureRateLimited
+	(*PullRequestGitHubFailureRefused)(nil),                // 14: agentrepl.v1.PullRequestGitHubFailureRefused
+	(*PullRequestGitHubFailureUnreachable)(nil),            // 15: agentrepl.v1.PullRequestGitHubFailureUnreachable
+	(*PullRequestStatus)(nil),                              // 16: agentrepl.v1.PullRequestStatus
+	(*PullRequestStatusMergeQueue)(nil),                    // 17: agentrepl.v1.PullRequestStatusMergeQueue
+	(*PullRequestState)(nil),                               // 18: agentrepl.v1.PullRequestState
+	(*PullRequestStateDraft)(nil),                          // 19: agentrepl.v1.PullRequestStateDraft
+	(*PullRequestStateOpen)(nil),                           // 20: agentrepl.v1.PullRequestStateOpen
+	(*PullRequestStateMerged)(nil),                         // 21: agentrepl.v1.PullRequestStateMerged
+	(*PullRequestStateClosed)(nil),                         // 22: agentrepl.v1.PullRequestStateClosed
+	(*PullRequestNotice)(nil),                              // 23: agentrepl.v1.PullRequestNotice
+	(*PullRequestNoticeEnded)(nil),                         // 24: agentrepl.v1.PullRequestNoticeEnded
+	(*PullRequestActivity)(nil),                            // 25: agentrepl.v1.PullRequestActivity
+	(*PullRequestActivityAuthor)(nil),                      // 26: agentrepl.v1.PullRequestActivityAuthor
+	(*PullRequestActivityText)(nil),                        // 27: agentrepl.v1.PullRequestActivityText
+	(*PullRequestActivityComment)(nil),                     // 28: agentrepl.v1.PullRequestActivityComment
+	(*PullRequestActivityReview)(nil),                      // 29: agentrepl.v1.PullRequestActivityReview
+	(*PullRequestReviewVerdict)(nil),                       // 30: agentrepl.v1.PullRequestReviewVerdict
+	(*PullRequestReviewVerdictApproved)(nil),               // 31: agentrepl.v1.PullRequestReviewVerdictApproved
+	(*PullRequestReviewVerdictChangesRequested)(nil),       // 32: agentrepl.v1.PullRequestReviewVerdictChangesRequested
+	(*PullRequestReviewVerdictCommented)(nil),              // 33: agentrepl.v1.PullRequestReviewVerdictCommented
+	(*PullRequestReviewVerdictDismissed)(nil),              // 34: agentrepl.v1.PullRequestReviewVerdictDismissed
+	(*PullRequestActivityReviewComment)(nil),               // 35: agentrepl.v1.PullRequestActivityReviewComment
+	(*PullRequestActivityReviewCommentLocation)(nil),       // 36: agentrepl.v1.PullRequestActivityReviewCommentLocation
+	(*PullRequestActivityEdited)(nil),                      // 37: agentrepl.v1.PullRequestActivityEdited
+	(*PullRequestActivityDeleted)(nil),                     // 38: agentrepl.v1.PullRequestActivityDeleted
+	(*PullRequestActivityDeletedComment)(nil),              // 39: agentrepl.v1.PullRequestActivityDeletedComment
+	(*PullRequestActivityDeletedReviewComment)(nil),        // 40: agentrepl.v1.PullRequestActivityDeletedReviewComment
+	(*PullRequestActivityStateChanged)(nil),                // 41: agentrepl.v1.PullRequestActivityStateChanged
+	(*PullRequestActivityCheckFinished)(nil),               // 42: agentrepl.v1.PullRequestActivityCheckFinished
+	(*PullRequestCheckConclusion)(nil),                     // 43: agentrepl.v1.PullRequestCheckConclusion
+	(*PullRequestCheckConclusionSuccess)(nil),              // 44: agentrepl.v1.PullRequestCheckConclusionSuccess
+	(*PullRequestCheckConclusionFailure)(nil),              // 45: agentrepl.v1.PullRequestCheckConclusionFailure
+	(*PullRequestCheckConclusionCancelled)(nil),            // 46: agentrepl.v1.PullRequestCheckConclusionCancelled
+	(*PullRequestCheckConclusionTimedOut)(nil),             // 47: agentrepl.v1.PullRequestCheckConclusionTimedOut
+	(*PullRequestCheckConclusionSkipped)(nil),              // 48: agentrepl.v1.PullRequestCheckConclusionSkipped
+	(*PullRequestCheckConclusionNeutral)(nil),              // 49: agentrepl.v1.PullRequestCheckConclusionNeutral
+	(*PullRequestCheckConclusionActionRequired)(nil),       // 50: agentrepl.v1.PullRequestCheckConclusionActionRequired
+	(*PullRequestActivityMergeQueueEntered)(nil),           // 51: agentrepl.v1.PullRequestActivityMergeQueueEntered
+	(*PullRequestActivityMergeQueueMoved)(nil),             // 52: agentrepl.v1.PullRequestActivityMergeQueueMoved
+	(*PullRequestActivityMergeQueueEntryStateChanged)(nil), // 53: agentrepl.v1.PullRequestActivityMergeQueueEntryStateChanged
+	(*PullRequestActivityMergeQueueRemoved)(nil),           // 54: agentrepl.v1.PullRequestActivityMergeQueueRemoved
+	(*PullRequestMergeQueuePosition)(nil),                  // 55: agentrepl.v1.PullRequestMergeQueuePosition
+	(*PullRequestMergeQueueEntryState)(nil),                // 56: agentrepl.v1.PullRequestMergeQueueEntryState
+	(*PullRequestMergeQueueEntryStateQueued)(nil),          // 57: agentrepl.v1.PullRequestMergeQueueEntryStateQueued
+	(*PullRequestMergeQueueEntryStateAwaitingChecks)(nil),  // 58: agentrepl.v1.PullRequestMergeQueueEntryStateAwaitingChecks
+	(*PullRequestMergeQueueEntryStateMergeable)(nil),       // 59: agentrepl.v1.PullRequestMergeQueueEntryStateMergeable
+	(*PullRequestMergeQueueEntryStateUnmergeable)(nil),     // 60: agentrepl.v1.PullRequestMergeQueueEntryStateUnmergeable
+	(*PullRequestMergeQueueEntryStateLocked)(nil),          // 61: agentrepl.v1.PullRequestMergeQueueEntryStateLocked
+	(*v1.WorkspaceRef)(nil),                                // 62: workspace.v1.WorkspaceRef
+	(*timestamppb.Timestamp)(nil),                          // 63: google.protobuf.Timestamp
 }
 var file_agentrepl_v1_pull_request_proto_depIdxs = []int32{
-	50, // 0: agentrepl.v1.PullRequestSubscription.subscriber:type_name -> workspace.v1.WorkspaceRef
+	62, // 0: agentrepl.v1.PullRequestSubscription.subscriber:type_name -> workspace.v1.WorkspaceRef
 	2,  // 1: agentrepl.v1.PullRequestSubscription.pull_request:type_name -> agentrepl.v1.PullRequestRef
 	0,  // 2: agentrepl.v1.PullRequestSubscription.events:type_name -> agentrepl.v1.PullRequestNoticeEvent
 	4,  // 3: agentrepl.v1.PullRequestSubscription.origin:type_name -> agentrepl.v1.PullRequestSubscriptionOrigin
@@ -3525,69 +4373,90 @@ var file_agentrepl_v1_pull_request_proto_depIdxs = []int32{
 	6,  // 6: agentrepl.v1.PullRequestSubscriptionOrigin.requested:type_name -> agentrepl.v1.PullRequestSubscriptionOriginRequested
 	8,  // 7: agentrepl.v1.PullRequestSubscriptionHealth.healthy:type_name -> agentrepl.v1.PullRequestSubscriptionHealthy
 	9,  // 8: agentrepl.v1.PullRequestSubscriptionHealth.failing:type_name -> agentrepl.v1.PullRequestSubscriptionFailing
-	51, // 9: agentrepl.v1.PullRequestSubscriptionHealthy.last_read:type_name -> google.protobuf.Timestamp
-	51, // 10: agentrepl.v1.PullRequestSubscriptionFailing.since:type_name -> google.protobuf.Timestamp
+	63, // 9: agentrepl.v1.PullRequestSubscriptionHealthy.last_read:type_name -> google.protobuf.Timestamp
+	63, // 10: agentrepl.v1.PullRequestSubscriptionFailing.since:type_name -> google.protobuf.Timestamp
 	10, // 11: agentrepl.v1.PullRequestSubscriptionFailing.cause:type_name -> agentrepl.v1.PullRequestGitHubFailure
 	11, // 12: agentrepl.v1.PullRequestGitHubFailure.unauthorized:type_name -> agentrepl.v1.PullRequestGitHubFailureUnauthorized
 	12, // 13: agentrepl.v1.PullRequestGitHubFailure.not_found:type_name -> agentrepl.v1.PullRequestGitHubFailureNotFound
 	13, // 14: agentrepl.v1.PullRequestGitHubFailure.rate_limited:type_name -> agentrepl.v1.PullRequestGitHubFailureRateLimited
 	15, // 15: agentrepl.v1.PullRequestGitHubFailure.unreachable:type_name -> agentrepl.v1.PullRequestGitHubFailureUnreachable
 	14, // 16: agentrepl.v1.PullRequestGitHubFailure.refused:type_name -> agentrepl.v1.PullRequestGitHubFailureRefused
-	51, // 17: agentrepl.v1.PullRequestGitHubFailureRateLimited.resets_at:type_name -> google.protobuf.Timestamp
-	17, // 18: agentrepl.v1.PullRequestStatus.state:type_name -> agentrepl.v1.PullRequestState
-	18, // 19: agentrepl.v1.PullRequestState.draft:type_name -> agentrepl.v1.PullRequestStateDraft
-	19, // 20: agentrepl.v1.PullRequestState.open:type_name -> agentrepl.v1.PullRequestStateOpen
-	20, // 21: agentrepl.v1.PullRequestState.merged:type_name -> agentrepl.v1.PullRequestStateMerged
-	21, // 22: agentrepl.v1.PullRequestState.closed:type_name -> agentrepl.v1.PullRequestStateClosed
-	2,  // 23: agentrepl.v1.PullRequestNotice.pull_request:type_name -> agentrepl.v1.PullRequestRef
-	24, // 24: agentrepl.v1.PullRequestNotice.activity:type_name -> agentrepl.v1.PullRequestActivity
-	16, // 25: agentrepl.v1.PullRequestNotice.status:type_name -> agentrepl.v1.PullRequestStatus
-	7,  // 26: agentrepl.v1.PullRequestNotice.health:type_name -> agentrepl.v1.PullRequestSubscriptionHealth
-	23, // 27: agentrepl.v1.PullRequestNotice.ended:type_name -> agentrepl.v1.PullRequestNoticeEnded
-	27, // 28: agentrepl.v1.PullRequestActivity.comment:type_name -> agentrepl.v1.PullRequestActivityComment
-	28, // 29: agentrepl.v1.PullRequestActivity.review:type_name -> agentrepl.v1.PullRequestActivityReview
-	34, // 30: agentrepl.v1.PullRequestActivity.review_comment:type_name -> agentrepl.v1.PullRequestActivityReviewComment
-	36, // 31: agentrepl.v1.PullRequestActivity.edited:type_name -> agentrepl.v1.PullRequestActivityEdited
-	37, // 32: agentrepl.v1.PullRequestActivity.deleted:type_name -> agentrepl.v1.PullRequestActivityDeleted
-	40, // 33: agentrepl.v1.PullRequestActivity.state_changed:type_name -> agentrepl.v1.PullRequestActivityStateChanged
-	41, // 34: agentrepl.v1.PullRequestActivity.check_finished:type_name -> agentrepl.v1.PullRequestActivityCheckFinished
-	1,  // 35: agentrepl.v1.PullRequestActivityAuthor.association:type_name -> agentrepl.v1.PullRequestAuthorAssociation
-	25, // 36: agentrepl.v1.PullRequestActivityComment.author:type_name -> agentrepl.v1.PullRequestActivityAuthor
-	26, // 37: agentrepl.v1.PullRequestActivityComment.text:type_name -> agentrepl.v1.PullRequestActivityText
-	51, // 38: agentrepl.v1.PullRequestActivityComment.posted_at:type_name -> google.protobuf.Timestamp
-	25, // 39: agentrepl.v1.PullRequestActivityReview.author:type_name -> agentrepl.v1.PullRequestActivityAuthor
-	29, // 40: agentrepl.v1.PullRequestActivityReview.verdict:type_name -> agentrepl.v1.PullRequestReviewVerdict
-	26, // 41: agentrepl.v1.PullRequestActivityReview.text:type_name -> agentrepl.v1.PullRequestActivityText
-	51, // 42: agentrepl.v1.PullRequestActivityReview.submitted_at:type_name -> google.protobuf.Timestamp
-	30, // 43: agentrepl.v1.PullRequestReviewVerdict.approved:type_name -> agentrepl.v1.PullRequestReviewVerdictApproved
-	31, // 44: agentrepl.v1.PullRequestReviewVerdict.changes_requested:type_name -> agentrepl.v1.PullRequestReviewVerdictChangesRequested
-	32, // 45: agentrepl.v1.PullRequestReviewVerdict.commented:type_name -> agentrepl.v1.PullRequestReviewVerdictCommented
-	33, // 46: agentrepl.v1.PullRequestReviewVerdict.dismissed:type_name -> agentrepl.v1.PullRequestReviewVerdictDismissed
-	25, // 47: agentrepl.v1.PullRequestActivityReviewComment.author:type_name -> agentrepl.v1.PullRequestActivityAuthor
-	26, // 48: agentrepl.v1.PullRequestActivityReviewComment.text:type_name -> agentrepl.v1.PullRequestActivityText
-	35, // 49: agentrepl.v1.PullRequestActivityReviewComment.location:type_name -> agentrepl.v1.PullRequestActivityReviewCommentLocation
-	51, // 50: agentrepl.v1.PullRequestActivityReviewComment.posted_at:type_name -> google.protobuf.Timestamp
-	27, // 51: agentrepl.v1.PullRequestActivityEdited.comment:type_name -> agentrepl.v1.PullRequestActivityComment
-	28, // 52: agentrepl.v1.PullRequestActivityEdited.review:type_name -> agentrepl.v1.PullRequestActivityReview
-	34, // 53: agentrepl.v1.PullRequestActivityEdited.review_comment:type_name -> agentrepl.v1.PullRequestActivityReviewComment
-	51, // 54: agentrepl.v1.PullRequestActivityEdited.edited_at:type_name -> google.protobuf.Timestamp
-	38, // 55: agentrepl.v1.PullRequestActivityDeleted.comment:type_name -> agentrepl.v1.PullRequestActivityDeletedComment
-	39, // 56: agentrepl.v1.PullRequestActivityDeleted.review_comment:type_name -> agentrepl.v1.PullRequestActivityDeletedReviewComment
-	17, // 57: agentrepl.v1.PullRequestActivityStateChanged.state:type_name -> agentrepl.v1.PullRequestState
-	25, // 58: agentrepl.v1.PullRequestActivityStateChanged.actor:type_name -> agentrepl.v1.PullRequestActivityAuthor
-	42, // 59: agentrepl.v1.PullRequestActivityCheckFinished.conclusion:type_name -> agentrepl.v1.PullRequestCheckConclusion
-	43, // 60: agentrepl.v1.PullRequestCheckConclusion.success:type_name -> agentrepl.v1.PullRequestCheckConclusionSuccess
-	44, // 61: agentrepl.v1.PullRequestCheckConclusion.failure:type_name -> agentrepl.v1.PullRequestCheckConclusionFailure
-	45, // 62: agentrepl.v1.PullRequestCheckConclusion.cancelled:type_name -> agentrepl.v1.PullRequestCheckConclusionCancelled
-	46, // 63: agentrepl.v1.PullRequestCheckConclusion.timed_out:type_name -> agentrepl.v1.PullRequestCheckConclusionTimedOut
-	47, // 64: agentrepl.v1.PullRequestCheckConclusion.skipped:type_name -> agentrepl.v1.PullRequestCheckConclusionSkipped
-	48, // 65: agentrepl.v1.PullRequestCheckConclusion.neutral:type_name -> agentrepl.v1.PullRequestCheckConclusionNeutral
-	49, // 66: agentrepl.v1.PullRequestCheckConclusion.action_required:type_name -> agentrepl.v1.PullRequestCheckConclusionActionRequired
-	67, // [67:67] is the sub-list for method output_type
-	67, // [67:67] is the sub-list for method input_type
-	67, // [67:67] is the sub-list for extension type_name
-	67, // [67:67] is the sub-list for extension extendee
-	0,  // [0:67] is the sub-list for field type_name
+	63, // 17: agentrepl.v1.PullRequestGitHubFailureRateLimited.resets_at:type_name -> google.protobuf.Timestamp
+	18, // 18: agentrepl.v1.PullRequestStatus.state:type_name -> agentrepl.v1.PullRequestState
+	17, // 19: agentrepl.v1.PullRequestStatus.merge_queue:type_name -> agentrepl.v1.PullRequestStatusMergeQueue
+	55, // 20: agentrepl.v1.PullRequestStatusMergeQueue.position:type_name -> agentrepl.v1.PullRequestMergeQueuePosition
+	56, // 21: agentrepl.v1.PullRequestStatusMergeQueue.state:type_name -> agentrepl.v1.PullRequestMergeQueueEntryState
+	19, // 22: agentrepl.v1.PullRequestState.draft:type_name -> agentrepl.v1.PullRequestStateDraft
+	20, // 23: agentrepl.v1.PullRequestState.open:type_name -> agentrepl.v1.PullRequestStateOpen
+	21, // 24: agentrepl.v1.PullRequestState.merged:type_name -> agentrepl.v1.PullRequestStateMerged
+	22, // 25: agentrepl.v1.PullRequestState.closed:type_name -> agentrepl.v1.PullRequestStateClosed
+	2,  // 26: agentrepl.v1.PullRequestNotice.pull_request:type_name -> agentrepl.v1.PullRequestRef
+	25, // 27: agentrepl.v1.PullRequestNotice.activity:type_name -> agentrepl.v1.PullRequestActivity
+	16, // 28: agentrepl.v1.PullRequestNotice.status:type_name -> agentrepl.v1.PullRequestStatus
+	7,  // 29: agentrepl.v1.PullRequestNotice.health:type_name -> agentrepl.v1.PullRequestSubscriptionHealth
+	24, // 30: agentrepl.v1.PullRequestNotice.ended:type_name -> agentrepl.v1.PullRequestNoticeEnded
+	28, // 31: agentrepl.v1.PullRequestActivity.comment:type_name -> agentrepl.v1.PullRequestActivityComment
+	29, // 32: agentrepl.v1.PullRequestActivity.review:type_name -> agentrepl.v1.PullRequestActivityReview
+	35, // 33: agentrepl.v1.PullRequestActivity.review_comment:type_name -> agentrepl.v1.PullRequestActivityReviewComment
+	37, // 34: agentrepl.v1.PullRequestActivity.edited:type_name -> agentrepl.v1.PullRequestActivityEdited
+	38, // 35: agentrepl.v1.PullRequestActivity.deleted:type_name -> agentrepl.v1.PullRequestActivityDeleted
+	41, // 36: agentrepl.v1.PullRequestActivity.state_changed:type_name -> agentrepl.v1.PullRequestActivityStateChanged
+	42, // 37: agentrepl.v1.PullRequestActivity.check_finished:type_name -> agentrepl.v1.PullRequestActivityCheckFinished
+	51, // 38: agentrepl.v1.PullRequestActivity.merge_queue_entered:type_name -> agentrepl.v1.PullRequestActivityMergeQueueEntered
+	52, // 39: agentrepl.v1.PullRequestActivity.merge_queue_moved:type_name -> agentrepl.v1.PullRequestActivityMergeQueueMoved
+	53, // 40: agentrepl.v1.PullRequestActivity.merge_queue_entry_state_changed:type_name -> agentrepl.v1.PullRequestActivityMergeQueueEntryStateChanged
+	54, // 41: agentrepl.v1.PullRequestActivity.merge_queue_removed:type_name -> agentrepl.v1.PullRequestActivityMergeQueueRemoved
+	42, // 42: agentrepl.v1.PullRequestActivity.merge_group_check_finished:type_name -> agentrepl.v1.PullRequestActivityCheckFinished
+	1,  // 43: agentrepl.v1.PullRequestActivityAuthor.association:type_name -> agentrepl.v1.PullRequestAuthorAssociation
+	26, // 44: agentrepl.v1.PullRequestActivityComment.author:type_name -> agentrepl.v1.PullRequestActivityAuthor
+	27, // 45: agentrepl.v1.PullRequestActivityComment.text:type_name -> agentrepl.v1.PullRequestActivityText
+	63, // 46: agentrepl.v1.PullRequestActivityComment.posted_at:type_name -> google.protobuf.Timestamp
+	26, // 47: agentrepl.v1.PullRequestActivityReview.author:type_name -> agentrepl.v1.PullRequestActivityAuthor
+	30, // 48: agentrepl.v1.PullRequestActivityReview.verdict:type_name -> agentrepl.v1.PullRequestReviewVerdict
+	27, // 49: agentrepl.v1.PullRequestActivityReview.text:type_name -> agentrepl.v1.PullRequestActivityText
+	63, // 50: agentrepl.v1.PullRequestActivityReview.submitted_at:type_name -> google.protobuf.Timestamp
+	31, // 51: agentrepl.v1.PullRequestReviewVerdict.approved:type_name -> agentrepl.v1.PullRequestReviewVerdictApproved
+	32, // 52: agentrepl.v1.PullRequestReviewVerdict.changes_requested:type_name -> agentrepl.v1.PullRequestReviewVerdictChangesRequested
+	33, // 53: agentrepl.v1.PullRequestReviewVerdict.commented:type_name -> agentrepl.v1.PullRequestReviewVerdictCommented
+	34, // 54: agentrepl.v1.PullRequestReviewVerdict.dismissed:type_name -> agentrepl.v1.PullRequestReviewVerdictDismissed
+	26, // 55: agentrepl.v1.PullRequestActivityReviewComment.author:type_name -> agentrepl.v1.PullRequestActivityAuthor
+	27, // 56: agentrepl.v1.PullRequestActivityReviewComment.text:type_name -> agentrepl.v1.PullRequestActivityText
+	36, // 57: agentrepl.v1.PullRequestActivityReviewComment.location:type_name -> agentrepl.v1.PullRequestActivityReviewCommentLocation
+	63, // 58: agentrepl.v1.PullRequestActivityReviewComment.posted_at:type_name -> google.protobuf.Timestamp
+	28, // 59: agentrepl.v1.PullRequestActivityEdited.comment:type_name -> agentrepl.v1.PullRequestActivityComment
+	29, // 60: agentrepl.v1.PullRequestActivityEdited.review:type_name -> agentrepl.v1.PullRequestActivityReview
+	35, // 61: agentrepl.v1.PullRequestActivityEdited.review_comment:type_name -> agentrepl.v1.PullRequestActivityReviewComment
+	63, // 62: agentrepl.v1.PullRequestActivityEdited.edited_at:type_name -> google.protobuf.Timestamp
+	39, // 63: agentrepl.v1.PullRequestActivityDeleted.comment:type_name -> agentrepl.v1.PullRequestActivityDeletedComment
+	40, // 64: agentrepl.v1.PullRequestActivityDeleted.review_comment:type_name -> agentrepl.v1.PullRequestActivityDeletedReviewComment
+	18, // 65: agentrepl.v1.PullRequestActivityStateChanged.state:type_name -> agentrepl.v1.PullRequestState
+	26, // 66: agentrepl.v1.PullRequestActivityStateChanged.actor:type_name -> agentrepl.v1.PullRequestActivityAuthor
+	43, // 67: agentrepl.v1.PullRequestActivityCheckFinished.conclusion:type_name -> agentrepl.v1.PullRequestCheckConclusion
+	44, // 68: agentrepl.v1.PullRequestCheckConclusion.success:type_name -> agentrepl.v1.PullRequestCheckConclusionSuccess
+	45, // 69: agentrepl.v1.PullRequestCheckConclusion.failure:type_name -> agentrepl.v1.PullRequestCheckConclusionFailure
+	46, // 70: agentrepl.v1.PullRequestCheckConclusion.cancelled:type_name -> agentrepl.v1.PullRequestCheckConclusionCancelled
+	47, // 71: agentrepl.v1.PullRequestCheckConclusion.timed_out:type_name -> agentrepl.v1.PullRequestCheckConclusionTimedOut
+	48, // 72: agentrepl.v1.PullRequestCheckConclusion.skipped:type_name -> agentrepl.v1.PullRequestCheckConclusionSkipped
+	49, // 73: agentrepl.v1.PullRequestCheckConclusion.neutral:type_name -> agentrepl.v1.PullRequestCheckConclusionNeutral
+	50, // 74: agentrepl.v1.PullRequestCheckConclusion.action_required:type_name -> agentrepl.v1.PullRequestCheckConclusionActionRequired
+	26, // 75: agentrepl.v1.PullRequestActivityMergeQueueEntered.actor:type_name -> agentrepl.v1.PullRequestActivityAuthor
+	55, // 76: agentrepl.v1.PullRequestActivityMergeQueueEntered.position:type_name -> agentrepl.v1.PullRequestMergeQueuePosition
+	63, // 77: agentrepl.v1.PullRequestActivityMergeQueueEntered.entered_at:type_name -> google.protobuf.Timestamp
+	55, // 78: agentrepl.v1.PullRequestActivityMergeQueueMoved.from:type_name -> agentrepl.v1.PullRequestMergeQueuePosition
+	55, // 79: agentrepl.v1.PullRequestActivityMergeQueueMoved.to:type_name -> agentrepl.v1.PullRequestMergeQueuePosition
+	56, // 80: agentrepl.v1.PullRequestActivityMergeQueueEntryStateChanged.state:type_name -> agentrepl.v1.PullRequestMergeQueueEntryState
+	26, // 81: agentrepl.v1.PullRequestActivityMergeQueueRemoved.actor:type_name -> agentrepl.v1.PullRequestActivityAuthor
+	63, // 82: agentrepl.v1.PullRequestActivityMergeQueueRemoved.removed_at:type_name -> google.protobuf.Timestamp
+	57, // 83: agentrepl.v1.PullRequestMergeQueueEntryState.queued:type_name -> agentrepl.v1.PullRequestMergeQueueEntryStateQueued
+	58, // 84: agentrepl.v1.PullRequestMergeQueueEntryState.awaiting_checks:type_name -> agentrepl.v1.PullRequestMergeQueueEntryStateAwaitingChecks
+	59, // 85: agentrepl.v1.PullRequestMergeQueueEntryState.mergeable:type_name -> agentrepl.v1.PullRequestMergeQueueEntryStateMergeable
+	60, // 86: agentrepl.v1.PullRequestMergeQueueEntryState.unmergeable:type_name -> agentrepl.v1.PullRequestMergeQueueEntryStateUnmergeable
+	61, // 87: agentrepl.v1.PullRequestMergeQueueEntryState.locked:type_name -> agentrepl.v1.PullRequestMergeQueueEntryStateLocked
+	88, // [88:88] is the sub-list for method output_type
+	88, // [88:88] is the sub-list for method input_type
+	88, // [88:88] is the sub-list for extension type_name
+	88, // [88:88] is the sub-list for extension extendee
+	0,  // [0:88] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_pull_request_proto_init() }
@@ -3611,14 +4480,15 @@ func file_agentrepl_v1_pull_request_proto_init() {
 		(*PullRequestGitHubFailure_Unreachable)(nil),
 		(*PullRequestGitHubFailure_Refused)(nil),
 	}
-	file_agentrepl_v1_pull_request_proto_msgTypes[15].OneofWrappers = []any{
+	file_agentrepl_v1_pull_request_proto_msgTypes[14].OneofWrappers = []any{}
+	file_agentrepl_v1_pull_request_proto_msgTypes[16].OneofWrappers = []any{
 		(*PullRequestState_Draft)(nil),
 		(*PullRequestState_Open)(nil),
 		(*PullRequestState_Merged)(nil),
 		(*PullRequestState_Closed)(nil),
 	}
-	file_agentrepl_v1_pull_request_proto_msgTypes[20].OneofWrappers = []any{}
-	file_agentrepl_v1_pull_request_proto_msgTypes[22].OneofWrappers = []any{
+	file_agentrepl_v1_pull_request_proto_msgTypes[21].OneofWrappers = []any{}
+	file_agentrepl_v1_pull_request_proto_msgTypes[23].OneofWrappers = []any{
 		(*PullRequestActivity_Comment)(nil),
 		(*PullRequestActivity_Review)(nil),
 		(*PullRequestActivity_ReviewComment)(nil),
@@ -3626,27 +4496,32 @@ func file_agentrepl_v1_pull_request_proto_init() {
 		(*PullRequestActivity_Deleted)(nil),
 		(*PullRequestActivity_StateChanged)(nil),
 		(*PullRequestActivity_CheckFinished)(nil),
+		(*PullRequestActivity_MergeQueueEntered)(nil),
+		(*PullRequestActivity_MergeQueueMoved)(nil),
+		(*PullRequestActivity_MergeQueueEntryStateChanged)(nil),
+		(*PullRequestActivity_MergeQueueRemoved)(nil),
+		(*PullRequestActivity_MergeGroupCheckFinished)(nil),
 	}
-	file_agentrepl_v1_pull_request_proto_msgTypes[26].OneofWrappers = []any{}
-	file_agentrepl_v1_pull_request_proto_msgTypes[27].OneofWrappers = []any{
+	file_agentrepl_v1_pull_request_proto_msgTypes[27].OneofWrappers = []any{}
+	file_agentrepl_v1_pull_request_proto_msgTypes[28].OneofWrappers = []any{
 		(*PullRequestReviewVerdict_Approved)(nil),
 		(*PullRequestReviewVerdict_ChangesRequested)(nil),
 		(*PullRequestReviewVerdict_Commented)(nil),
 		(*PullRequestReviewVerdict_Dismissed)(nil),
 	}
-	file_agentrepl_v1_pull_request_proto_msgTypes[32].OneofWrappers = []any{}
 	file_agentrepl_v1_pull_request_proto_msgTypes[33].OneofWrappers = []any{}
-	file_agentrepl_v1_pull_request_proto_msgTypes[34].OneofWrappers = []any{
+	file_agentrepl_v1_pull_request_proto_msgTypes[34].OneofWrappers = []any{}
+	file_agentrepl_v1_pull_request_proto_msgTypes[35].OneofWrappers = []any{
 		(*PullRequestActivityEdited_Comment)(nil),
 		(*PullRequestActivityEdited_Review)(nil),
 		(*PullRequestActivityEdited_ReviewComment)(nil),
 	}
-	file_agentrepl_v1_pull_request_proto_msgTypes[35].OneofWrappers = []any{
+	file_agentrepl_v1_pull_request_proto_msgTypes[36].OneofWrappers = []any{
 		(*PullRequestActivityDeleted_Comment)(nil),
 		(*PullRequestActivityDeleted_ReviewComment)(nil),
 	}
-	file_agentrepl_v1_pull_request_proto_msgTypes[38].OneofWrappers = []any{}
-	file_agentrepl_v1_pull_request_proto_msgTypes[40].OneofWrappers = []any{
+	file_agentrepl_v1_pull_request_proto_msgTypes[39].OneofWrappers = []any{}
+	file_agentrepl_v1_pull_request_proto_msgTypes[41].OneofWrappers = []any{
 		(*PullRequestCheckConclusion_Success)(nil),
 		(*PullRequestCheckConclusion_Failure)(nil),
 		(*PullRequestCheckConclusion_Cancelled)(nil),
@@ -3655,13 +4530,22 @@ func file_agentrepl_v1_pull_request_proto_init() {
 		(*PullRequestCheckConclusion_Neutral)(nil),
 		(*PullRequestCheckConclusion_ActionRequired)(nil),
 	}
+	file_agentrepl_v1_pull_request_proto_msgTypes[49].OneofWrappers = []any{}
+	file_agentrepl_v1_pull_request_proto_msgTypes[52].OneofWrappers = []any{}
+	file_agentrepl_v1_pull_request_proto_msgTypes[54].OneofWrappers = []any{
+		(*PullRequestMergeQueueEntryState_Queued)(nil),
+		(*PullRequestMergeQueueEntryState_AwaitingChecks)(nil),
+		(*PullRequestMergeQueueEntryState_Mergeable)(nil),
+		(*PullRequestMergeQueueEntryState_Unmergeable)(nil),
+		(*PullRequestMergeQueueEntryState_Locked)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_pull_request_proto_rawDesc), len(file_agentrepl_v1_pull_request_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   48,
+			NumMessages:   60,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

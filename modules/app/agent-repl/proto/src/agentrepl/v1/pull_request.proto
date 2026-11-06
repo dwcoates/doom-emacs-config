@@ -9,8 +9,11 @@
 // THE DAEMON READS, THE AGENT IS TOLD. No GitHub event is ever pushed to the
 // laptop. The daemon reads each followed pull request's authoritative lists
 // (conversation comments, line comments, reviews, the pull request itself,
-// and its head commit's check runs) with conditional requests, compares them
-// with what it already told each subscriber, and tells only the difference. A
+// and its head commit's check runs) with conditional requests, and, for a
+// subscriber that asks for the merge queue, the pull request's place in its
+// base branch's GitHub merge queue and the timeline events GitHub records as
+// it joins and leaves it. It compares them with what it already told each
+// subscriber, and tells only the difference. A
 // read the daemon missed while it was down, asleep or offline is made up by
 // the next read, because the next read covers everything since the last one
 // told: no activity can be lost, only told late.
@@ -79,6 +82,11 @@ enum PullRequestNoticeEvent {
   PULL_REQUEST_NOTICE_EVENT_STATE = 4;
   // A check run on the pull request's head commit finished.
   PULL_REQUEST_NOTICE_EVENT_CHECKS = 5;
+  // The pull request joined, moved within, or was removed from its base
+  // branch's GitHub merge queue, its queue entry changed state, or a check
+  // run on its merge group commit finished. Its landing is told by STATE, as
+  // any merge is.
+  PULL_REQUEST_NOTICE_EVENT_MERGE_QUEUE = 6;
 }
 
 // How a subscription came to be. THE ARM IS THE ORIGIN.
@@ -192,6 +200,21 @@ message PullRequestStatus {
   PullRequestState state = 3;
   // The commit at the head of the pull request's branch.
   string head_sha = 4;
+  // Where the pull request stands in its base branch's GitHub merge queue.
+  // SET while it is in the queue, as of the read. UNSET when it is not in
+  // the queue, and whenever the read did not look at the queue, which it
+  // does only for a subscription asking for
+  // PULL_REQUEST_NOTICE_EVENT_MERGE_QUEUE: UNSET never means "not queued" to
+  // a subscriber that did not ask.
+  optional PullRequestStatusMergeQueue merge_queue = 5;
+}
+
+// A pull request's place in its merge queue, as a status states it.
+message PullRequestStatusMergeQueue {
+  // How far it is from merging.
+  PullRequestMergeQueuePosition position = 1;
+  // What its entry is doing.
+  PullRequestMergeQueueEntryState state = 2;
 }
 
 // Where a pull request stands. THE ARM IS THE STATE.
@@ -273,6 +296,22 @@ message PullRequestActivity {
     // A check run on the head commit finished. Told in one line, since a
     // pull request can run many.
     PullRequestActivityCheckFinished check_finished = 7;
+    // The pull request joined its base branch's merge queue.
+    PullRequestActivityMergeQueueEntered merge_queue_entered = 8;
+    // The pull request's place in the merge queue changed: entries ahead of
+    // it merged or left, or an entry jumped ahead of it.
+    PullRequestActivityMergeQueueMoved merge_queue_moved = 9;
+    // The pull request's merge queue entry changed state.
+    PullRequestActivityMergeQueueEntryStateChanged merge_queue_entry_state_changed = 10;
+    // The pull request was removed from the merge queue. A pull request the
+    // queue merged is told by `state_changed` instead.
+    PullRequestActivityMergeQueueRemoved merge_queue_removed = 11;
+    // A check run on the pull request's merge group commit (the commit the
+    // queue tests, on a `gh-readonly-queue/...` branch) finished. A separate
+    // arm from `check_finished` because the two run on different commits and
+    // only this one decides whether the queue merges or removes the pull
+    // request.
+    PullRequestActivityCheckFinished merge_group_check_finished = 12;
   }
 }
 
@@ -501,3 +540,88 @@ message PullRequestCheckConclusionNeutral {}
 
 // Action required. DELIBERATELY EMPTY: the arm is the conclusion.
 message PullRequestCheckConclusionActionRequired {}
+
+// ---- Merge queue: the pull request's way through its base branch's GitHub merge queue ----
+
+// The pull request joined the merge queue, told from GitHub's
+// `AddedToMergeQueueEvent` timeline event. Each joining is its own event, so
+// a pull request removed and queued again is told joining twice.
+message PullRequestActivityMergeQueueEntered {
+  // Who queued it. UNSET when GitHub names no actor. Its `association` is
+  // UNSPECIFIED: the timeline names only the login.
+  optional PullRequestActivityAuthor actor = 1;
+  // Where it stood when the daemon read it. UNSET when it had already left
+  // the queue by the read that told the joining, which `merge_queue_removed`
+  // or `state_changed` in the same notice then tells.
+  optional PullRequestMergeQueuePosition position = 2;
+  // When it was queued.
+  google.protobuf.Timestamp entered_at = 3;
+}
+
+// The pull request's place in the queue changed between two reads.
+message PullRequestActivityMergeQueueMoved {
+  // Where it stood when last told.
+  PullRequestMergeQueuePosition from = 1;
+  // Where it stands now.
+  PullRequestMergeQueuePosition to = 2;
+}
+
+// The pull request's queue entry changed state between two reads.
+message PullRequestActivityMergeQueueEntryStateChanged {
+  // The state it moved to.
+  PullRequestMergeQueueEntryState state = 1;
+}
+
+// The pull request was removed from the queue without merging, told from
+// GitHub's `RemovedFromMergeQueueEvent` timeline event.
+message PullRequestActivityMergeQueueRemoved {
+  // Who removed it. UNSET when GitHub names no actor, as when the queue
+  // removes it itself. Its `association` is UNSPECIFIED: the timeline names
+  // only the login.
+  optional PullRequestActivityAuthor actor = 1;
+  // GitHub's reason, verbatim (for example that the merge group's checks
+  // failed). UNSET when GitHub gives none.
+  optional string reason = 2;
+  // When it was removed.
+  google.protobuf.Timestamp removed_at = 3;
+}
+
+// How far a queued pull request is from merging. Derived from the order of
+// the queue's entries, never from GitHub's own `position` number, whose base
+// GitHub does not document.
+message PullRequestMergeQueuePosition {
+  // How many entries are ahead of it: 0 is the head of the queue, the entry
+  // merged next.
+  uint32 entries_ahead = 1;
+  // How many entries the queue holds, this one included.
+  uint32 entries_total = 2;
+}
+
+// What a merge queue entry is doing, as GitHub's `MergeQueueEntryState`
+// names it. THE ARM IS THE STATE. A set wrapper whose oneof is unassigned is
+// a state this schema revision does not name.
+message PullRequestMergeQueueEntryState {
+  oneof state {
+    // Waiting its turn.
+    PullRequestMergeQueueEntryStateQueued queued = 1;
+    // Its merge group's checks are running.
+    PullRequestMergeQueueEntryStateAwaitingChecks awaiting_checks = 2;
+    // Its checks passed; the queue will merge it.
+    PullRequestMergeQueueEntryStateMergeable mergeable = 3;
+    // It cannot be merged; the queue will remove it.
+    PullRequestMergeQueueEntryStateUnmergeable unmergeable = 4;
+    // Locked by the queue while it merges.
+    PullRequestMergeQueueEntryStateLocked locked = 5;
+  }
+}
+
+// Waiting. DELIBERATELY EMPTY: the arm is the state.
+message PullRequestMergeQueueEntryStateQueued {}
+// Checks running. DELIBERATELY EMPTY: the arm is the state.
+message PullRequestMergeQueueEntryStateAwaitingChecks {}
+// Will merge. DELIBERATELY EMPTY: the arm is the state.
+message PullRequestMergeQueueEntryStateMergeable {}
+// Will be removed. DELIBERATELY EMPTY: the arm is the state.
+message PullRequestMergeQueueEntryStateUnmergeable {}
+// Locked. DELIBERATELY EMPTY: the arm is the state.
+message PullRequestMergeQueueEntryStateLocked {}

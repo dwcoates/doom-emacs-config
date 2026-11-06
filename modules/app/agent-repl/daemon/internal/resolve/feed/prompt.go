@@ -426,6 +426,12 @@ func AuthorLabel(origin conversationv1.PromptOrigin) string {
 		conversationv1.PromptOrigin_PROMPT_ORIGIN_DERIVED_WORKSPACE_NOTICE:
 		// promptorigin.Unseen, as the merge queue's notice is.
 		return "Workspace notice"
+	case conversationv1.PromptOrigin_PROMPT_ORIGIN_PULL_REQUEST_NOTICE:
+		// promptorigin.Unseen, as a workspace notice is.
+		return "Pull request"
+	case conversationv1.PromptOrigin_PROMPT_ORIGIN_GITHUB_MERGE_QUEUE_NOTICE:
+		// promptorigin.Unseen, as a workspace notice is.
+		return "GitHub merge queue"
 	case conversationv1.PromptOrigin_PROMPT_ORIGIN_OWNER_NOTICE:
 		return "Owner notice"
 	case conversationv1.PromptOrigin_PROMPT_ORIGIN_SUBSECTION_PLACEMENT:

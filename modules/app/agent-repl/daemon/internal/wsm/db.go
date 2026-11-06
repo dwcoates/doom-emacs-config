@@ -731,6 +731,27 @@ type DB interface {
 	OwedPullRequestNotices(ctx context.Context) ([]PullRequestOwed, error)
 	// RecordPullRequestNoticeSubmitted records a submitted notice.
 	RecordPullRequestNoticeSubmitted(ctx context.Context, subscriber WorkspaceID, pr PullRequestKey, turn TurnID, sentences []string, took int) error
+	// SubscribeGithubMergeQueue records a GitHub merge-queue subscription,
+	// answering whether one was already held (githubmergequeues.go).
+	SubscribeGithubMergeQueue(ctx context.Context, sub GithubMergeQueueSubscription) (bool, error)
+	// UnsubscribeGithubMergeQueue ends one, answering whether one stood.
+	UnsubscribeGithubMergeQueue(ctx context.Context, subscriber WorkspaceID, queue GithubMergeQueueKey) (bool, error)
+	// LiveGithubMergeQueueSubscriptions loads every one.
+	LiveGithubMergeQueueSubscriptions(ctx context.Context) ([]GithubMergeQueueSubscription, error)
+	// WorkspaceGithubMergeQueueSubscriptions loads a workspace's.
+	WorkspaceGithubMergeQueueSubscriptions(ctx context.Context, subscriber WorkspaceID) ([]GithubMergeQueueSubscription, error)
+	// AdvanceGithubMergeQueueTold compares and sets one's told snapshot with
+	// the notice it owes.
+	AdvanceGithubMergeQueueTold(ctx context.Context, a GithubMergeQueueAdvance) (bool, error)
+	// RecordGithubMergeQueueReadFailure records a failed read of a queue.
+	RecordGithubMergeQueueReadFailure(ctx context.Context, queue GithubMergeQueueKey, f PullRequestFailure) ([]WorkspaceID, error)
+	// OweGithubMergeQueueNotice appends sentences about a subscription
+	// itself to its owed notice.
+	OweGithubMergeQueueNotice(ctx context.Context, subscriber WorkspaceID, queue GithubMergeQueueKey, sentences []string) error
+	// OwedGithubMergeQueueNotices loads every notice with sentences pending.
+	OwedGithubMergeQueueNotices(ctx context.Context) ([]GithubMergeQueueOwed, error)
+	// RecordGithubMergeQueueNoticeSubmitted records a submitted notice.
+	RecordGithubMergeQueueNoticeSubmitted(ctx context.Context, subscriber WorkspaceID, queue GithubMergeQueueKey, turn TurnID, sentences []string, took int) error
 
 	// OpenFault records a fault and returns its id.
 	OpenFault(ctx context.Context, f Fault) (FaultID, error)

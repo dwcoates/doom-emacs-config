@@ -15,6 +15,9 @@ import "agentrepl/v1/endpoint_subscribe_pull_request.proto";
 import "agentrepl/v1/endpoint_unsubscribe_pull_request.proto";
 import "agentrepl/v1/endpoint_list_pull_request_subscriptions.proto";
 import "agentrepl/v1/endpoint_comment_on_pull_request.proto";
+import "agentrepl/v1/endpoint_subscribe_github_merge_queue.proto";
+import "agentrepl/v1/endpoint_unsubscribe_github_merge_queue.proto";
+import "agentrepl/v1/endpoint_list_github_merge_queue_subscriptions.proto";
 import "agentrepl/v1/endpoint_adjust_feed_text_scale.proto";
 import "agentrepl/v1/endpoint_adopt_host_workspace.proto";
 import "agentrepl/v1/endpoint_adopt_web_workspace.proto";
@@ -725,6 +728,20 @@ service AgentRepl {
   // Post a comment on a pull request for a workspace, recorded as its own so
   // it is never told back to it. See endpoint_comment_on_pull_request.proto.
   rpc CommentOnPullRequest(CommentOnPullRequestRequest) returns (CommentOnPullRequestResponse);
+  // Tell one workspace's agent each time a repository branch's GITHUB merge
+  // queue moves, answering with the queue now. Following one pull request
+  // through its queue is SubscribePullRequest's merge-queue event instead.
+  // See endpoint_subscribe_github_merge_queue.proto.
+  rpc SubscribeGithubMergeQueue(SubscribeGithubMergeQueueRequest) returns (SubscribeGithubMergeQueueResponse);
+  // End a GitHub merge-queue subscription. See
+  // endpoint_unsubscribe_github_merge_queue.proto.
+  rpc UnsubscribeGithubMergeQueue(UnsubscribeGithubMergeQueueRequest) returns (UnsubscribeGithubMergeQueueResponse);
+  // The GitHub merge queues one workspace follows. See
+  // endpoint_list_github_merge_queue_subscriptions.proto.
+  rpc ListGithubMergeQueueSubscriptions(ListGithubMergeQueueSubscriptionsRequest) returns (ListGithubMergeQueueSubscriptionsResponse) {
+    // A READ: it changes nothing (`agent-repld -dry-run` lets it through).
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
   // Post a desktop banner attributed to a workspace, whose click brings Emacs
   // forward and selects that workspace. See endpoint_notify_workspace.proto.
   rpc NotifyWorkspace(NotifyWorkspaceRequest) returns (NotifyWorkspaceResponse);

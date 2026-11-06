@@ -136,6 +136,11 @@ type fakeDB struct {
 	prSubs         []wsm.PullRequestSubscription
 	prSubscribeErr error
 	prReplaced     bool
+	// queueSubs are the GitHub merge-queue subscriptions recorded;
+	// queueSubscribeErr answers SubscribeGithubMergeQueue
+	// (githubmergequeues_test.go).
+	queueSubs         []wsm.GithubMergeQueueSubscription
+	queueSubscribeErr error
 	// mergeQueues are the merge queues AllMergeQueues answers.
 	mergeQueues map[wsm.RepoKey][]wsm.MergeQueueEntry
 	wsm.DB
