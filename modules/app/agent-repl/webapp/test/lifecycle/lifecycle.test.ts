@@ -554,7 +554,7 @@ const NO_ECHO: Pick<PromptEcho, "echoed"> = { echoed: () => undefined };
 
 /** The deps a lifecycle needs, drawing on HOST, with none of them observed. */
 function lifecycleDeps(host: HTMLElement): LifecycleDeps {
-  return { drainBannerHost: host, newsDigest: NO_DIGEST, reveals: createRevealRelay(), promptEcho: NO_ECHO };
+  return { drainBannerHost: host, deployPulseHost: document.createElement("div"), newsDigest: NO_DIGEST, reveals: createRevealRelay(), promptEcho: NO_ECHO };
 }
 
 /** Let the transport's zero-delay frames land without moving the clock. */
