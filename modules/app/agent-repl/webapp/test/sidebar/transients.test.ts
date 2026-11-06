@@ -20,6 +20,8 @@ describe("the rail's transients", () => {
   let focusLeft: ReturnType<typeof createListeners<[string]>>;
   /** The popup mirror's dismissals, fired by hand. */
   let dismissals: ReturnType<typeof createListeners<[string]>>;
+  /** Whether the popup mirror says the pointer is on the host's copy. */
+  let onCopy: boolean;
 
   beforeEach(() => {
     host = document.createElement("nav");
@@ -28,11 +30,12 @@ describe("the rail's transients", () => {
     rowHover = createRowHover(dropdowns, new Set());
     focusLeft = createListeners<[string]>();
     dismissals = createListeners<[string]>();
+    onCopy = false;
     transients = installTransients(host, {
       dropdowns,
       rowHover,
       focusLeft: { onLeft: (listener) => focusLeft.add(listener) },
-      popupMirror: { onDismissed: (listener) => dismissals.add(listener) },
+      popupMirror: { onDismissed: (listener) => dismissals.add(listener), pointerOnCopy: () => onCopy },
     });
     closes = [];
   });
@@ -65,6 +68,50 @@ describe("the rail's transients", () => {
   }
 
   const suspended = (): boolean => host.classList.contains(HOVER_SUSPENDED_CLASS);
+
+  describe("the page losing focus to the popup over the feed", () => {
+    it("closes no dropdown while the pointer is on the host's copy", () => {
+      // ARRANGE
+      openDropdown();
+      onCopy = true;
+      // ACT
+      leave();
+      // ASSERT
+      expect(closes).toEqual([]);
+    });
+
+    it("leaves the hover highlight answering", () => {
+      // ARRANGE
+      onCopy = true;
+      // ACT
+      leave();
+      // ASSERT
+      expect(suspended()).toBe(false);
+    });
+
+    it("records that it let go of nothing", () => {
+      // ARRANGE
+      const debug = vi.spyOn(log, "debug");
+      onCopy = true;
+      // ACT
+      leave();
+      // ASSERT
+      expect(debug).toHaveBeenCalledWith(expect.any(String), {
+        operation: "sidebar.transients.focus-to-popup",
+        context: { why: FOCUS_LEFT_BLUR },
+      });
+    });
+
+    it("still closes every dropdown for Emacs moving its focus", () => {
+      // ARRANGE
+      openDropdown();
+      onCopy = true;
+      // ACT
+      leave(FOCUS_LEFT_EMACS);
+      // ASSERT
+      expect(closes).toEqual([FOCUS_LEFT_EMACS]);
+    });
+  });
 
   describe("the page losing focus", () => {
     it("closes every open dropdown", () => {

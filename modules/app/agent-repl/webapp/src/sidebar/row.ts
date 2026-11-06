@@ -82,8 +82,8 @@ import { drawTabNumberSlot } from "./tab-numbers.js";
 import { toneClass } from "../vocab.js";
 import { applyNameTint, nameTint } from "./name-tint.js";
 import { guardMalformed, guardMalformedNow } from "../rpc/guard.js";
-import { clampBeside, type Rect } from "../topbar/clamp.js";
-import { applyPlacement, viewportOf } from "../placement.js";
+import type { Rect } from "../topbar/clamp.js";
+import { placeBeside, viewportOf } from "../placement.js";
 import {
   closeDetails,
   detailsPanel,
@@ -997,10 +997,7 @@ export function placeRowDetail(ws: HTMLElement): void {
   const line = ws.querySelector<HTMLElement>(":scope > .row");
   const detail = ws.querySelector<HTMLElement>(":scope > .detail");
   if (line === null || detail === null) return;
-  // Measured at its natural height: a cap the last placement applied would
-  // otherwise hold a panel that moved up the window at its old, shorter size.
-  detail.style.maxHeight = "";
-  const placement = clampBeside(line.getBoundingClientRect(), detail.getBoundingClientRect(), viewportOf());
+  const placement = placeBeside(detail, line.getBoundingClientRect(), viewportOf());
   log.debug("placing a row's detail panel", {
     operation: "sidebar.row.detail-place",
     verbosity: "verbose",
@@ -1011,7 +1008,6 @@ export function placeRowDetail(ws: HTMLElement): void {
       max_height: placement.maxHeight,
     },
   });
-  applyPlacement(detail, placement);
   // Its details popup, when open, stands beside it wherever it now stands.
   placeDetailsPanel(detail, measureBox, viewportOf());
 }
@@ -1043,17 +1039,14 @@ export function drawMenuControl(ws: HTMLElement, target: VerbTarget): HTMLElemen
 }
 
 /**
- * Open (or close) the row's verb menu.
- *
- * It is appended INSIDE the row's own box, after the line, so it opens
- * DOWNWARD from the control and can never clip off the top of the rail; the
- * stylesheet caps its height and scrolls it if the rail is short.
+ * Open (or close) the row's verb menu: a popup beside the row's line, where
+ * its hover panel stands, held by the page's one menu owner (`row-menu.ts`).
+ * The row's pending hover open is cancelled, so the panel the pointer resting
+ * on the line would open does not take the menu's place.
  */
 export function toggleRowMenu(ws: HTMLElement, target: VerbTarget): void {
-  const menu = ws.querySelector<HTMLElement>(":scope > .sb-menu");
-  if (menu === null) return;
-  const more = ws.querySelector<HTMLElement>(":scope > .row .sb-more");
-  toggleHiddenDropdown(target.sc.dropdowns, "row-menu", menu, more === null ? [] : [more]);
+  target.sc.rowHover.cancelOpening(target.workspace.id);
+  target.sc.rowMenus.toggle(target.workspace.id, ws);
 }
 
 /**

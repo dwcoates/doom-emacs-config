@@ -97,6 +97,12 @@ export interface RowHover {
   enter(id: string, part: HoverPart): void;
   /** The pointer left PART of workspace ID's row. */
   leave(id: string, part: HoverPart): void;
+  /**
+   * Workspace ID's row opened its verb menu where its panel stands
+   * (row-menu.ts): the panel the pointer resting on the line was about to
+   * open stays shut, until the pointer arrives on the row again.
+   */
+  cancelOpening(id: string): void;
   /** The keyboard focus arrived in workspace ID's row line. */
   focusIn(id: string): void;
   /** The focus left workspace ID's row line for NEXT. */
@@ -255,6 +261,9 @@ export function createRowHover(dropdowns: Dropdowns, openDetails: Set<string>, m
       if (!at.line && !at.panel) pointers.delete(id);
       if (part === "line") openTimers.cancel(id);
       scheduleClose(id);
+    },
+    cancelOpening(id: string): void {
+      openTimers.cancel(id);
     },
     focusIn(id: string): void {
       if (!suspended) setOpen(id, true, "focus");

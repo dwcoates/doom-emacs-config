@@ -32,7 +32,7 @@ import {
 } from "../../src/sidebar/memory.js";
 import type { SidebarContext } from "../../src/sidebar/context.js";
 import { createDropdowns } from "../../src/sidebar/dropdowns.js";
-import type { PopupMirror } from "../../src/host/sidebar-popups.js";
+import { recordingPopupMirror } from "../host/popup-channel.js";
 import { appContext, fakeTicker } from "./harness.js";
 
 const MIB = 1024 * 1024;
@@ -245,26 +245,13 @@ describe("the version hover", () => {
     expect(panel.classList.contains("open")).toBe(true);
   });
 
-  /** A mirror that records what it is told, as "show:KEY", "place:KEY", "hide:KEY". */
-  function recordingMirror(told: string[], shown: HTMLElement[] = []): PopupMirror {
-    return {
-      show: (key, detail, line) => {
-        told.push(`show:${key}`);
-        shown.push(detail, line);
-      },
-      place: (key) => void told.push(`place:${key}`),
-      hide: (key) => void told.push(`hide:${key}`),
-      onDismissed: () => () => undefined,
-      dispose: () => undefined,
-    };
-  }
 
   describe("drawn over the feed by a popup mirror", () => {
     it("hands the mirror its panel beside the version's line when it opens", () => {
       // ARRANGE
       const told: string[] = [];
       const shown: HTMLElement[] = [];
-      const { version, panel } = mounted(measured, { mirror: recordingMirror(told, shown) });
+      const { version, panel } = mounted(measured, { mirror: recordingPopupMirror(told, shown) });
       // ACT
       version.dispatchEvent(new MouseEvent("mouseenter"));
       // ASSERT
@@ -274,7 +261,7 @@ describe("the version hover", () => {
     it("has the mirror place the panel again once the overview is drawn", async () => {
       // ARRANGE
       const told: string[] = [];
-      const { version } = mounted(measured, { mirror: recordingMirror(told) });
+      const { version } = mounted(measured, { mirror: recordingPopupMirror(told) });
       // ACT
       version.dispatchEvent(new MouseEvent("mouseenter"));
       await settle();
@@ -285,7 +272,7 @@ describe("the version hover", () => {
     it("takes the panel off the feed when the pointer leaves", async () => {
       // ARRANGE
       const told: string[] = [];
-      const { version } = mounted(measured, { mirror: recordingMirror(told) });
+      const { version } = mounted(measured, { mirror: recordingPopupMirror(told) });
       version.dispatchEvent(new MouseEvent("mouseenter"));
       await settle();
       // ACT
@@ -320,7 +307,7 @@ describe("the version hover", () => {
       // ARRANGE
       const dropdowns = createDropdowns();
       const told: string[] = [];
-      const { version } = mounted(measured, { dropdowns, mirror: recordingMirror(told) });
+      const { version } = mounted(measured, { dropdowns, mirror: recordingPopupMirror(told) });
       version.dispatchEvent(new MouseEvent("mouseenter"));
       await settle();
       // ACT

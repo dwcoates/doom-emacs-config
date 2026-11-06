@@ -1516,12 +1516,29 @@ describe("the verb menu", () => {
     expect((drawn.querySelector(".sb-menu") as HTMLElement).hidden).toBe(false);
   });
 
-  it("opens DOWNWARD, under the row line, so it cannot clip off the top", async () => {
+  it("opens beside the row line, where the row's panel opens", async () => {
+    // ARRANGE
     const drawn = drawRosterRow(row({ id: "ws-1" }), sidebarContext(), "R");
+    document.body.append(drawn);
+    const line = drawn.querySelector<HTMLElement>(":scope > .row")!;
+    line.getBoundingClientRect = () => DOMRect.fromRect({ x: 0, y: 40, width: 220, height: 22 });
+    // ACT
     await click(drawn.querySelector(".sb-more") as Element);
-    expect(drawn.querySelector(".row")?.nextElementSibling?.classList.contains("sb-menu")).toBe(
-      true,
-    );
+    // ASSERT
+    const menu = drawn.querySelector<HTMLElement>(":scope > .sb-menu")!;
+    expect([menu.style.left, menu.style.top]).toEqual(["220px", "40px"]);
+  });
+
+  it("cancels the panel a pointer resting on the line was about to open", async () => {
+    // ARRANGE
+    const sc = sidebarContext();
+    const drawn = drawRosterRow(row({ id: "ws-1" }), sc, "R");
+    const cancelled: string[] = [];
+    sc.rowHover.cancelOpening = (id) => void cancelled.push(id);
+    // ACT
+    await click(drawn.querySelector(".sb-more") as Element);
+    // ASSERT
+    expect(cancelled).toEqual(["ws-1"]);
   });
 
   it("closes on a second click rather than stacking a second menu", async () => {
@@ -1681,11 +1698,14 @@ describe("the row menu toggle", () => {
   };
 
   it("reveals the menu the row owns", () => {
+    // The menu stands beside the row's own line (row-menu.ts), so the row draws one.
     const ws = document.createElement("div");
+    const line = document.createElement("div");
+    line.className = "row";
     const menu = document.createElement("div");
     menu.className = "sb-menu";
     menu.hidden = true;
-    ws.appendChild(menu);
+    ws.append(line, menu);
     toggleRowMenu(ws, TARGET);
     expect(menu.hidden).toBe(false);
   });
