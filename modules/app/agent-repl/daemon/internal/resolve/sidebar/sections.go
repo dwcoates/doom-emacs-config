@@ -328,9 +328,19 @@ func (r *resolver) openRows(nodes []openNode, folded bool, numbers *tabNumberer,
 // child of another repository than the row drawn just before it in the
 // family (its parent, or its previous sibling) begins a repository divider
 // naming its repository (frontend.v1.RosterOpenRow.repository_divider).
+// Once any child is of another repository than its parent, the parent's own
+// repository is headed too: its children that come first get a divider as
+// well, so every run is grouped under a header. With no other-repository
+// child left, no divider is drawn.
 func (r *resolver) openRow(node openNode, folded bool, numbers *tabNumberer, rc rowContext, log dlog.Logger) *frontendv1.RosterOpenRow {
 	out := &frontendv1.RosterOpenRow{Row: r.row(node.ws, rc, log), Tab: numbers.tab(folded)}
 	before := node.ws.Repo
+	for _, child := range node.children {
+		if child.ws.Repo != node.ws.Repo {
+			before = ""
+			break
+		}
+	}
 	for _, child := range node.children {
 		row := r.openRow(child, folded, numbers, rc, log)
 		if child.ws.Repo != before {
