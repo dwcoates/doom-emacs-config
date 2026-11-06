@@ -250,3 +250,27 @@ func TestNewRefusesAMissingCollaborator(t *testing.T) {
 		t.Fatal("New(Deps{}) = nil, want refused")
 	}
 }
+
+func TestAPullRequestNoticeIsDeliveredUnderItsOwnBriefAndOrigin(t *testing.T) {
+	// Arrange
+	r := newRig(t)
+	r.subscribe(t, wsm.PullRequestEventComment)
+	owed := wsm.PullRequestOwed{Subscriber: r.ws, PullRequest: prK, Pending: []string{"one."}, Status: "open"}
+	if err := r.db.OwePullRequestNotice(context.Background(), r.ws, prK, []string{"one."}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	n := pullRequestNotice(r.db, owed)
+	errRecord := n.record(context.Background(), "turn-1", []string{"one."}, 1)
+
+	// Assert
+	if n.label != "pull request `o/r#7`" || n.brief != BriefNotice || n.origin != Origin || n.noun != "pull-request" || n.subject != "pull request" ||
+		n.fields["pull_request"] != "o/r#7" || n.fields["subscriber"] != string(r.ws) {
+		t.Fatalf("notice = %+v", n)
+	}
+	left, err := r.db.OwedPullRequestNotices(context.Background())
+	if errRecord != nil || err != nil || len(left) != 0 {
+		t.Fatalf("record = %v, owed after = %+v, %v; want it recorded in the store", errRecord, left, err)
+	}
+}

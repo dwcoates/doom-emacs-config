@@ -39,6 +39,8 @@ type fakeGH struct {
 	posts map[string]any
 	calls []string
 	sent  []map[string]string
+	// graphql answers every GraphQL call; nil fails it.
+	graphql func(query string, variables map[string]any) (ghclient.GraphQLResponse, error)
 }
 
 func newGH() *fakeGH { return &fakeGH{gets: map[string]any{}, posts: map[string]any{}} }
@@ -82,6 +84,30 @@ func (g *fakeGH) Post(_ context.Context, path string, fields map[string]string) 
 		return ghclient.Response{Status: 201, Body: []byte(a)}, nil
 	}
 	panic("fakeGH: no scripted post for " + path)
+}
+
+// GraphQL answers from graphql, which a test scripts; unscripted, no
+// GraphQL call is expected and one fails the read.
+func (g *fakeGH) GraphQL(ctx context.Context, query string, variables map[string]any) (ghclient.GraphQLResponse, error) {
+	g.mu.Lock()
+	answer := g.graphql
+	g.calls = append(g.calls, "GRAPHQL "+queryName(query))
+	g.mu.Unlock()
+	if answer == nil {
+		return ghclient.GraphQLResponse{}, fmt.Errorf("fakeGH: no scripted GraphQL answer for %s", queryName(query))
+	}
+	return answer(query, variables)
+}
+
+// queryName is the name a query declares (`query PullRequestQueues(...)`).
+func queryName(query string) string {
+	rest, ok := strings.CutPrefix(strings.TrimSpace(query), "query ")
+	if !ok {
+		return "anonymous"
+	}
+	name, _, _ := strings.Cut(rest, "(")
+	name, _, _ = strings.Cut(name, " ")
+	return strings.TrimSpace(name)
 }
 
 func (g *fakeGH) set(path string, answer any) {

@@ -264,51 +264,89 @@ func (w *Watcher) deliverOwed(ctx context.Context, prompts prompthandler.Submitt
 		return
 	}
 	for _, o := range owed {
-		w.deliver(ctx, prompts, o)
+		w.deliver(ctx, prompts, pullRequestNotice(w.deps.Store, o))
 	}
 }
 
-// deliver submits O to its subscriber and records what was submitted.
-func (w *Watcher) deliver(ctx context.Context, prompts prompthandler.Submitter, o wsm.PullRequestOwed) {
-	fields := dlog.Context{"subscriber": string(o.Subscriber), "pull_request": o.PullRequest.String(), "pending": len(o.Pending)}
-	prev := untoldnotice.Notice{Turn: o.Turn, Sentences: o.Sentences}
-	carried := untoldnotice.Carried(ctx, w.deps.Holds, w.deps.Log, opNotice, o.Subscriber, prev, o.Turn != "" || len(o.Sentences) > 0, fields)
-	sentences := append(append([]string{}, carried...), o.Pending...)
+// owedNotice is one notice owed to one subscriber, whatever GitHub subject
+// it is about: what it was last submitted as, the sentences owed since, and
+// how to compose it and record its submission.
+type owedNotice struct {
+	subscriber ids.WorkspaceID
+	// turn and sentences are the last submitted notice; turn is empty when
+	// its submission failed.
+	turn      ids.TurnID
+	sentences []string
+	// pending is every sentence owed and not yet submitted, oldest first.
+	pending []string
+	// status is the subject as it last stood, in words.
+	status string
+	// label names the subject on the notice's first line.
+	label string
+	// noun names the notice's kind in records (`pull-request`), and subject
+	// what it is about (`pull request`).
+	noun, subject string
+	// brief and origin are the notice's brief and prompt origin.
+	brief  string
+	origin conversationv1.PromptOrigin
+	// fields identify the notice in every record.
+	fields dlog.Context
+	// record records that TURN said SENTENCES, taking the first TOOK pending
+	// ones.
+	record func(ctx context.Context, turn ids.TurnID, sentences []string, took int) error
+}
+
+// pullRequestNotice is O as the notice delivery submits it.
+func pullRequestNotice(store Store, o wsm.PullRequestOwed) owedNotice {
+	return owedNotice{subscriber: o.Subscriber, turn: o.Turn, sentences: o.Sentences, pending: o.Pending, status: o.Status,
+		label: "pull request `" + o.PullRequest.String() + "`", noun: "pull-request", subject: "pull request", brief: BriefNotice, origin: Origin,
+		fields: dlog.Context{"subscriber": string(o.Subscriber), "pull_request": o.PullRequest.String()},
+		record: func(ctx context.Context, turn ids.TurnID, sentences []string, took int) error {
+			return store.RecordPullRequestNoticeSubmitted(ctx, o.Subscriber, o.PullRequest, turn, sentences, took)
+		}}
+}
+
+// deliver submits N to its subscriber and records what was submitted.
+func (w *Watcher) deliver(ctx context.Context, prompts prompthandler.Submitter, n owedNotice) {
+	fields := dlog.Merge(n.fields, dlog.Context{"pending": len(n.pending)})
+	prev := untoldnotice.Notice{Turn: n.turn, Sentences: n.sentences}
+	carried := untoldnotice.Carried(ctx, w.deps.Holds, w.deps.Log, opNotice, n.subscriber, prev, n.turn != "" || len(n.sentences) > 0, fields)
+	sentences := append(append([]string{}, carried...), n.pending...)
 	fields["sentences"] = len(sentences)
-	turn, failure, err := w.submit(ctx, prompts, o, sentences)
+	turn, failure, err := w.submit(ctx, prompts, n, sentences)
 	if err != nil {
 		w.deps.Log.Error(opNotice, failure, dlog.WithCause(fields, err))
 		// What the superseded notice said is kept to be said again; the
 		// pending sentences stay pending for the next tick.
 		if len(carried) > 0 {
-			if rerr := w.deps.Store.RecordPullRequestNoticeSubmitted(ctx, o.Subscriber, o.PullRequest, "", carried, 0); rerr != nil {
+			if rerr := n.record(ctx, "", carried, 0); rerr != nil {
 				w.deps.Log.Error(opNotice, "could not keep the superseded notice's sentences; they are not said again", dlog.WithCause(fields, rerr))
 			}
 		}
 		return
 	}
-	if err := w.deps.Store.RecordPullRequestNoticeSubmitted(ctx, o.Subscriber, o.PullRequest, turn, sentences, len(o.Pending)); err != nil {
+	if err := n.record(ctx, turn, sentences, len(n.pending)); err != nil {
 		w.deps.Log.Error(opNotice, "could not record the submitted notice; its sentences may be told again", dlog.WithCause(fields, err))
 		return
 	}
-	w.deps.Log.Info(opNotice, "told a subscriber about its pull request", dlog.Merge(fields, dlog.Context{"turn": string(turn)}))
+	w.deps.Log.Info(opNotice, "told a subscriber about its "+n.subject, dlog.Merge(fields, dlog.Context{"turn": string(turn)}))
 }
 
 // submit composes and submits one notice, answering its turn, or the record a
 // failure is written with and why.
-func (w *Watcher) submit(ctx context.Context, prompts prompthandler.Submitter, o wsm.PullRequestOwed, sentences []string) (ids.TurnID, string, error) {
-	turn, err := briefprompt.Composer{Briefs: w.deps.Briefs, MintKey: w.deps.MintKey}.Submit(ctx, prompts, o.Subscriber, BriefNotice, map[string]string{
-		"label":    "pull request `" + o.PullRequest.String() + "`",
+func (w *Watcher) submit(ctx context.Context, prompts prompthandler.Submitter, n owedNotice, sentences []string) (ids.TurnID, string, error) {
+	turn, err := briefprompt.Composer{Briefs: w.deps.Briefs, MintKey: w.deps.MintKey}.Submit(ctx, prompts, n.subscriber, n.brief, map[string]string{
+		"label":    n.label,
 		"activity": untoldnotice.Sentences(sentences),
-		"status":   o.Status,
-	}, "pull-request-notice", Origin)
+		"status":   n.status,
+	}, n.brief, n.origin)
 	switch briefprompt.StepOf(err) {
 	case briefprompt.StepCompose:
-		return "", "could not compose a pull-request notice; the subscriber is told on a later tick", err
+		return "", "could not compose a " + n.noun + " notice; the subscriber is told on a later tick", err
 	case briefprompt.StepMint:
-		return "", "could not mint a pull-request notice's idempotency key; the subscriber is told on a later tick", err
+		return "", "could not mint a " + n.noun + " notice's idempotency key; the subscriber is told on a later tick", err
 	case briefprompt.StepSubmit:
-		return "", "could not submit a pull-request notice to its subscriber; it is told on a later tick", err
+		return "", "could not submit a " + n.noun + " notice to its subscriber; it is told on a later tick", err
 	}
 	return turn, "", nil
 }
