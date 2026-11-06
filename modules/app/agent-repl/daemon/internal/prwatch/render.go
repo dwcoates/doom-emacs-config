@@ -73,6 +73,31 @@ func activitySentence(a *agentreplv1.PullRequestActivity) string {
 		return stateChangeWords(arm.StateChanged)
 	case *agentreplv1.PullRequestActivity_CheckFinished:
 		return fmt.Sprintf("Check `%s`: %s.", arm.CheckFinished.GetName(), conclusionWords(arm.CheckFinished.GetConclusion()))
+	case *agentreplv1.PullRequestActivity_MergeQueueEntered:
+		e := arm.MergeQueueEntered
+		s := "The pull request joined the merge queue" + byWords(e.GetActor())
+		if e.GetPosition() != nil {
+			s += ": it is " + positionWords(e.GetPosition())
+		}
+		return s + "."
+	case *agentreplv1.PullRequestActivity_MergeQueueMoved:
+		m := arm.MergeQueueMoved
+		way := "up"
+		if m.GetTo().GetEntriesAhead() > m.GetFrom().GetEntriesAhead() {
+			way = "down"
+		}
+		return fmt.Sprintf("The pull request moved %s the merge queue: it was %s, and is now %s.", way, positionWords(m.GetFrom()), positionWords(m.GetTo()))
+	case *agentreplv1.PullRequestActivity_MergeQueueEntryStateChanged:
+		return "The pull request's merge queue entry is now " + entryStateWords(arm.MergeQueueEntryStateChanged.GetState()) + "."
+	case *agentreplv1.PullRequestActivity_MergeQueueRemoved:
+		r := arm.MergeQueueRemoved
+		s := "The pull request was removed from the merge queue" + byWords(r.GetActor())
+		if r.Reason != nil {
+			s += ": " + r.GetReason()
+		}
+		return s + "."
+	case *agentreplv1.PullRequestActivity_MergeGroupCheckFinished:
+		return fmt.Sprintf("Merge group check `%s`: %s.", arm.MergeGroupCheckFinished.GetName(), conclusionWords(arm.MergeGroupCheckFinished.GetConclusion()))
 	}
 	panic(fmt.Sprintf("prwatch: activity %T has no words", a.GetActivity()))
 }
@@ -193,20 +218,61 @@ func statusWords(s *agentreplv1.PullRequestStatus) string {
 	default:
 		state = "open"
 	}
+	if q := s.GetMergeQueue(); q != nil {
+		state += ", " + positionWords(q.GetPosition()) + ", " + entryStateWords(q.GetState())
+	}
 	return fmt.Sprintf("It now stands %s, its head at %s: %s", state, short(s.GetHeadSha()), s.GetUrl())
 }
 
-// failureSentence says that reads of a pull request began failing, and why.
-func failureSentence(f wsm.PullRequestFailure) string {
+// positionWords says how far a queued pull request is from merging.
+func positionWords(p *agentreplv1.PullRequestMergeQueuePosition) string {
+	if p.GetEntriesAhead() == 0 {
+		return fmt.Sprintf("at the head of the merge queue (of %d), merging next", p.GetEntriesTotal())
+	}
+	ahead := "entries"
+	if p.GetEntriesAhead() == 1 {
+		ahead = "entry"
+	}
+	return fmt.Sprintf("%d of %d in the merge queue, %d %s ahead of it", p.GetEntriesAhead()+1, p.GetEntriesTotal(), p.GetEntriesAhead(), ahead)
+}
+
+// entryStateWords says what a queue entry is doing.
+func entryStateWords(s *agentreplv1.PullRequestMergeQueueEntryState) string {
+	switch s.GetState().(type) {
+	case *agentreplv1.PullRequestMergeQueueEntryState_Queued:
+		return "waiting its turn"
+	case *agentreplv1.PullRequestMergeQueueEntryState_AwaitingChecks:
+		return "running its merge group's checks"
+	case *agentreplv1.PullRequestMergeQueueEntryState_Mergeable:
+		return "mergeable, so the queue will merge it"
+	case *agentreplv1.PullRequestMergeQueueEntryState_Unmergeable:
+		return "unmergeable, so the queue will remove it"
+	case *agentreplv1.PullRequestMergeQueueEntryState_Locked:
+		return "locked while the queue merges it"
+	}
+	return "in a state this daemon does not name"
+}
+
+// byWords names who acted, or nothing when GitHub named no one.
+func byWords(a *agentreplv1.PullRequestActivityAuthor) string {
+	if a == nil {
+		return ""
+	}
+	return " by @" + a.GetLogin()
+}
+
+// failureSentence says that reads of a SUBJECT (`pull request`, `merge
+// queue`) began failing, and why.
+func failureSentence(f wsm.PullRequestFailure, subject string) string {
 	switch f.Kind {
 	case wsm.PullRequestFailureUnauthorized:
-		return "The daemon can no longer read this pull request: GitHub refused the `gh` login's credentials. Ask the user to run `gh auth login`; reads resume on their own after."
+		return "The daemon can no longer read this " + subject + ": GitHub refused the `gh` login's credentials. Ask the user to run `gh auth login`; reads resume on their own after."
 	case wsm.PullRequestFailureNotFound:
-		return "The daemon can no longer read this pull request: GitHub answers that it does not exist, or is not visible to the `gh` login."
+		return "The daemon can no longer read this " + subject + ": GitHub answers that it does not exist, or is not visible to the `gh` login."
 	case wsm.PullRequestFailureRateLimited:
-		return "The daemon's reads of this pull request are paused: GitHub's rate limit is spent until " + f.ResetsAt.Format(time.RFC3339) + "."
+		return "The daemon's reads of this " + subject + " are paused: GitHub's rate limit is spent until " + f.ResetsAt.Format(time.RFC3339) + "."
 	}
-	return "The daemon's reads of this pull request are failing: " + f.Detail + ". It keeps reading on its schedule."
+	return "The daemon's reads of this " + subject + " are failing: " + f.Detail + ". It keeps reading on its schedule."
 }
 
 // endedSentence closes a subscription's last notice.

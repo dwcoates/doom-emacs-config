@@ -38,6 +38,19 @@ type told struct {
 	// Checks maps each check run's name to the latest finished run's id and
 	// conclusion.
 	Checks map[string]string `json:"checks"`
+	// QueueEvents maps each merge-queue timeline event in the latest read's
+	// window to its kind (`added`, `removed`): an id it does not hold is an
+	// event not yet told. Empty, and left out of the encoding, for a
+	// subscription whose pull request's queue was never read.
+	QueueEvents map[string]string `json:"queue_events,omitempty"`
+	// Queue is the pull request's place in the queue as last told
+	// (`ahead/total/state`); empty while it is not in the queue.
+	Queue string `json:"queue,omitempty"`
+	// GroupHead is the merge group commit GroupChecks were told for; a new
+	// group starts its checks afresh.
+	GroupHead string `json:"group_head,omitempty"`
+	// GroupChecks is Checks' meaning, for the merge group commit.
+	GroupChecks map[string]string `json:"group_checks,omitempty"`
 }
 
 // decodeTold reads a row's snapshot. Empty is a subscription never anchored:
@@ -50,7 +63,7 @@ func decodeTold(raw string) (told, bool, error) {
 	if err := json.Unmarshal([]byte(raw), &t); err != nil {
 		return t, false, fmt.Errorf("prwatch: the told snapshot is unreadable: %w", err)
 	}
-	for _, m := range []*map[string]string{&t.Comments, &t.ReviewComments, &t.Reviews, &t.Checks} {
+	for _, m := range []*map[string]string{&t.Comments, &t.ReviewComments, &t.Reviews, &t.Checks, &t.QueueEvents, &t.GroupChecks} {
 		if *m == nil {
 			*m = map[string]string{}
 		}
@@ -173,38 +186,27 @@ func diff(snap snapshot, prev told, anchored bool) (told, []*agentreplv1.PullReq
 	var checks []*agentreplv1.PullRequestActivity
 	next.Head, next.Checks = prev.Head, prev.Checks
 	if snap.ChecksRead {
-		if snap.PR.Head != prev.Head {
-			next.Head, next.Checks = snap.PR.Head, map[string]string{}
-		} else {
-			next.Checks = copyMap(prev.Checks)
-		}
-		latest := map[string]remoteCheck{}
-		for _, c := range snap.Checks {
-			if cur, ok := latest[c.Name]; !ok || c.ID > cur.ID {
-				latest[c.Name] = c
-			}
-		}
-		for _, name := range sortedNames(latest) {
-			c := latest[name]
-			if !c.Completed {
-				continue
-			}
-			value := strconv.FormatUint(c.ID, 10) + ":" + c.Conclusion
-			if was := next.Checks[name]; was == value {
-				continue
-			}
-			next.Checks[name] = value
-			checks = append(checks, &agentreplv1.PullRequestActivity{Activity: &agentreplv1.PullRequestActivity_CheckFinished{CheckFinished: &agentreplv1.PullRequestActivityCheckFinished{
-				Name: c.Name, Conclusion: conclusionProto(c.Conclusion)}}})
+		var finished []*agentreplv1.PullRequestActivityCheckFinished
+		next.Head, next.Checks, finished = diffChecks(prev.Head, prev.Checks, snap.PR.Head, snap.Checks)
+		for _, c := range finished {
+			checks = append(checks, &agentreplv1.PullRequestActivity{Activity: &agentreplv1.PullRequestActivity_CheckFinished{CheckFinished: c}})
 		}
 	}
 
+	var queued []*agentreplv1.PullRequestActivity
+	next.QueueEvents, next.Queue, next.GroupHead, next.GroupChecks = prev.QueueEvents, prev.Queue, prev.GroupHead, prev.GroupChecks
+	if q := snap.Queue; q != nil {
+		var timed []timedActivity
+		next.QueueEvents, next.Queue, next.GroupHead, next.GroupChecks, timed, queued = diffQueue(*q, snap.PR.Merged, prev)
+		items = append(items, timed...)
+	}
+
 	sort.SliceStable(items, func(i, j int) bool { return items[i].at.Before(items[j].at) })
-	out := make([]*agentreplv1.PullRequestActivity, 0, len(items)+len(deleted)+len(checks)+len(stateChanged))
+	out := make([]*agentreplv1.PullRequestActivity, 0, len(items)+len(deleted)+len(checks)+len(queued)+len(stateChanged))
 	for _, item := range items {
 		out = append(out, item.activity)
 	}
-	out = append(append(append(out, deleted...), checks...), stateChanged...)
+	out = append(append(append(append(out, deleted...), checks...), queued...), stateChanged...)
 	return next, out
 }
 
@@ -243,6 +245,12 @@ func eventOf(a *agentreplv1.PullRequestActivity) wsm.PullRequestEvent {
 		return wsm.PullRequestEventState
 	case *agentreplv1.PullRequestActivity_CheckFinished:
 		return wsm.PullRequestEventChecks
+	case *agentreplv1.PullRequestActivity_MergeQueueEntered,
+		*agentreplv1.PullRequestActivity_MergeQueueMoved,
+		*agentreplv1.PullRequestActivity_MergeQueueEntryStateChanged,
+		*agentreplv1.PullRequestActivity_MergeQueueRemoved,
+		*agentreplv1.PullRequestActivity_MergeGroupCheckFinished:
+		return wsm.PullRequestEventMergeQueue
 	}
 	panic(fmt.Sprintf("prwatch: activity %T has no event", a.GetActivity()))
 }
@@ -342,9 +350,15 @@ func stateProto(pr remotePR) *agentreplv1.PullRequestState {
 	return &agentreplv1.PullRequestState{State: &agentreplv1.PullRequestState_Open{Open: &agentreplv1.PullRequestStateOpen{}}}
 }
 
-// statusProto is the pull request as it stands.
-func statusProto(pr remotePR) *agentreplv1.PullRequestStatus {
-	return &agentreplv1.PullRequestStatus{Title: pr.Title, Url: pr.URL, State: stateProto(pr), HeadSha: pr.Head}
+// statusProto is the pull request as SNAP found it, its place in the merge
+// queue included when the read looked at the queue and found it there.
+func statusProto(snap snapshot) *agentreplv1.PullRequestStatus {
+	pr := snap.PR
+	out := &agentreplv1.PullRequestStatus{Title: pr.Title, Url: pr.URL, State: stateProto(pr), HeadSha: pr.Head}
+	if q := snap.Queue; q != nil && q.Entry != nil && q.Position != nil {
+		out.MergeQueue = &agentreplv1.PullRequestStatusMergeQueue{Position: positionProto(*q.Position), State: entryStateProto(q.Entry.State)}
+	}
+	return out
 }
 
 // endOf is how the pull request ended; nil while it is open.

@@ -274,3 +274,135 @@ func TestAPullRequestNoticeIsDeliveredUnderItsOwnBriefAndOrigin(t *testing.T) {
 		t.Fatalf("record = %v, owed after = %+v, %v; want it recorded in the store", errRecord, left, err)
 	}
 }
+
+// queuedPR is the rig's pull request queued on main at its place among
+// ENTRIES, with its timeline EVENTS.
+func queuedPR(g *gql, state, group string, entries []remoteQueueEntry, events ...remoteQueueEvent) {
+	g.setFacts(prK.Number, factsJSON("main", &remoteEntryFacts{State: state, GroupHead: group}, events...))
+	g.setQueue("main", queueJSON(entries...))
+}
+
+func TestAPullRequestIsFollowedThroughItsMergeQueue(t *testing.T) {
+	joined := remoteQueueEvent{ID: "a1", Actor: "dodge", At: t0}
+	tests := []struct {
+		name    string
+		arrange func(g *gql, r *rig)
+		want    []string
+	}{
+		{name: "joining the queue", arrange: func(g *gql, r *rig) {
+			queuedPR(g, "QUEUED", "", []remoteQueueEntry{entry(3, "QUEUED"), entry(prK.Number, "QUEUED")}, joined)
+		}, want: []string{"The pull request joined the merge queue by @dodge: it is 2 of 2 in the merge queue, 1 entry ahead of it.",
+			"It now stands open, 2 of 2 in the merge queue, 1 entry ahead of it, waiting its turn"}},
+		{name: "moving up to the head", arrange: func(g *gql, r *rig) {
+			queuedPR(g, "QUEUED", "", []remoteQueueEntry{entry(3, "QUEUED"), entry(prK.Number, "QUEUED")}, joined)
+			r.tick()
+			queuedPR(g, "AWAITING_CHECKS", "", []remoteQueueEntry{entry(prK.Number, "AWAITING_CHECKS")}, joined)
+		}, want: []string{"The pull request moved up the merge queue: it was 2 of 2 in the merge queue, 1 entry ahead of it, and is now at the head of the merge queue (of 1), merging next.",
+			"The pull request's merge queue entry is now running its merge group's checks."}},
+		{name: "a merge group check failing and the removal", arrange: func(g *gql, r *rig) {
+			queuedPR(g, "AWAITING_CHECKS", "group1", []remoteQueueEntry{entry(prK.Number, "AWAITING_CHECKS")}, joined)
+			r.tick()
+			r.gh.set(pathChecks("group1"), mustJSON(map[string]any{"check_runs": []map[string]any{{"id": 9, "name": "ci", "status": "completed", "conclusion": "failure"}}}))
+			g.setFacts(prK.Number, factsJSON("main", nil, joined, remoteQueueEvent{ID: "r1", Removed: true, Reason: ptr("the merge group's checks failed"), At: t0.Add(1)}))
+		}, want: []string{"The pull request was removed from the merge queue: the merge group's checks failed."}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			r := newRig(t)
+			g := r.withGQL()
+			g.setFacts(prK.Number, factsJSON("main", nil))
+			r.subscribe(t, wsm.PullRequestEventMergeQueue)
+			tt.arrange(g, r)
+
+			// Act
+			r.tick()
+
+			// Assert
+			told := r.told()
+			if len(told) == 0 {
+				t.Fatal("nothing was told")
+			}
+			last := told[len(told)-1]
+			for _, want := range tt.want {
+				if !strings.Contains(last, want) {
+					t.Fatalf("notice %q lacks %q", last, want)
+				}
+			}
+		})
+	}
+}
+
+func TestAMergeGroupsFinishedCheckIsToldOnce(t *testing.T) {
+	// Arrange
+	r := newRig(t)
+	g := r.withGQL()
+	joined := remoteQueueEvent{ID: "a1", At: t0}
+	queuedPR(g, "AWAITING_CHECKS", "group1", []remoteQueueEntry{entry(prK.Number, "AWAITING_CHECKS")}, joined)
+	r.subscribe(t, wsm.PullRequestEventMergeQueue)
+	r.gh.set(pathChecks("group1"), mustJSON(map[string]any{"check_runs": []map[string]any{{"id": 9, "name": "ci", "status": "completed", "conclusion": "failure"}}}))
+
+	// Act
+	r.tick()
+	r.tick()
+
+	// Assert
+	told := r.told()
+	if len(told) != 1 || !strings.Contains(told[0], "Merge group check `ci`: failed.") {
+		t.Fatalf("told = %v, want the merge group's check once", told)
+	}
+}
+
+func TestAPullRequestNotAskingForTheQueueNeverReadsIt(t *testing.T) {
+	// Arrange
+	r := newRig(t)
+	r.withGQL()
+	r.subscribe(t, wsm.PullRequestEventComment)
+
+	// Act
+	r.tick()
+
+	// Assert
+	if n := r.gqlCalls("PullRequestQueues") + r.gqlCalls("MergeQueue"); n != 0 {
+		t.Fatalf("%d GraphQL calls, want none", n)
+	}
+}
+
+func TestAPullRequestWhoseQueueCannotBeReadIsFailing(t *testing.T) {
+	// Arrange
+	r := newRig(t)
+	g := r.withGQL()
+	g.setFacts(prK.Number, factsJSON("main", nil))
+	r.subscribe(t, wsm.PullRequestEventMergeQueue)
+	g.fail["PullRequestQueues"] = &ghclient.Failure{Kind: ghclient.KindUnreachable, Method: "POST", Path: "graphql", Message: "down"}
+
+	// Act
+	r.tick()
+
+	// Assert
+	subs, _ := r.db.WorkspacePullRequestSubscriptions(context.Background(), r.ws)
+	if len(subs) != 1 || subs[0].Failing == nil || subs[0].Failing.Detail != "down" {
+		t.Fatalf("subscriptions = %+v, want one failing", subs)
+	}
+	if told := r.told(); len(told) != 1 || !strings.Contains(told[0], "reads of this pull request are failing: down") {
+		t.Fatalf("told = %v, want the failure", told)
+	}
+}
+
+func TestOneTickReadsAQueueOnceForEveryoneFollowingIt(t *testing.T) {
+	// Arrange
+	r := newRig(t)
+	g := r.withGQL()
+	queuedPR(g, "QUEUED", "", []remoteQueueEntry{entry(prK.Number, "QUEUED")}, remoteQueueEvent{ID: "a1", At: t0})
+	r.subscribe(t, wsm.PullRequestEventMergeQueue)
+	r.subscribeQueue(t)
+	before := r.gqlCalls("MergeQueue")
+
+	// Act
+	r.tick()
+
+	// Assert
+	if got := r.gqlCalls("MergeQueue") - before; got != 1 {
+		t.Fatalf("the queue was read %d times in one tick, want once", got)
+	}
+}

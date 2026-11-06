@@ -26,13 +26,17 @@ import (
 // the pull request once, and the failure's error, for the caller to report.
 func (w *Watcher) Anchor(ctx context.Context, subscriber ids.WorkspaceID, pr wsm.PullRequestKey, events wsm.PullRequestEvents, origin wsm.PullRequestOrigin) (wsm.PullRequestSubscription, *agentreplv1.PullRequestStatus, error) {
 	sub := wsm.PullRequestSubscription{Subscriber: subscriber, PullRequest: pr, Events: events, Origin: origin, SubscribedAt: w.deps.Clock.Now()}
-	snap, err := w.reader.read(ctx, pr, events.Has(wsm.PullRequestEventChecks))
+	var queue *queueAsk
+	if events.Has(wsm.PullRequestEventMergeQueue) {
+		queue = w.readQueueFacts(ctx, []wsm.PullRequestKey{pr}).ask(pr)
+	}
+	snap, err := w.readSnapshot(ctx, pr, events.Has(wsm.PullRequestEventChecks), queue, newQueueReads(w.deps.GH))
 	if err != nil {
 		return sub, nil, err
 	}
 	sub.Told = encodeTold(anchor(snap))
 	sub.Ended = endOf(snap.PR)
-	return sub, statusProto(snap.PR), nil
+	return sub, statusProto(snap), nil
 }
 
 // FailureProto is a call's error as the contract's GitHub failure.
@@ -68,29 +72,31 @@ func SubscriptionProto(sub wsm.PullRequestSubscription) *agentreplv1.PullRequest
 		Subscriber:  &workspacev1.WorkspaceRef{Id: string(sub.Subscriber)},
 		PullRequest: RefProto(sub.PullRequest),
 		Origin:      &agentreplv1.PullRequestSubscriptionOrigin{},
-		Health:      &agentreplv1.PullRequestSubscriptionHealth{},
 	}
-	for _, e := range []wsm.PullRequestEvent{wsm.PullRequestEventComment, wsm.PullRequestEventReview, wsm.PullRequestEventReviewComment, wsm.PullRequestEventState, wsm.PullRequestEventChecks} {
-		if sub.Events.Has(e) {
-			out.Events = append(out.Events, EventProto(e))
-		}
+	for _, e := range sub.Events.Members() {
+		out.Events = append(out.Events, EventProto(e))
 	}
 	if sub.Origin == wsm.PullRequestOriginOwnedLink {
 		out.Origin.Origin = &agentreplv1.PullRequestSubscriptionOrigin_OwnedLink{OwnedLink: &agentreplv1.PullRequestSubscriptionOriginOwnedLink{}}
 	} else {
 		out.Origin.Origin = &agentreplv1.PullRequestSubscriptionOrigin_Requested{Requested: &agentreplv1.PullRequestSubscriptionOriginRequested{}}
 	}
-	if f := sub.Failing; f != nil {
-		out.Health.Health = &agentreplv1.PullRequestSubscriptionHealth_Failing{Failing: &agentreplv1.PullRequestSubscriptionFailing{
-			Since: timestamppb.New(f.Since), Cause: failureProtoOf(*f, nil)}}
-	} else {
-		healthy := &agentreplv1.PullRequestSubscriptionHealthy{}
-		if !sub.LastRead.IsZero() {
-			healthy.LastRead = timestamppb.New(sub.LastRead)
-		}
-		out.Health.Health = &agentreplv1.PullRequestSubscriptionHealth_Healthy{Healthy: healthy}
-	}
+	out.Health = healthProto(sub.LastRead, sub.Failing)
 	return out
+}
+
+// healthProto is a GitHub subscription's read health as the contract spells
+// it: failing while FAILING is set, healthy since LASTREAD otherwise.
+func healthProto(lastRead time.Time, failing *wsm.PullRequestFailure) *agentreplv1.PullRequestSubscriptionHealth {
+	if failing != nil {
+		return &agentreplv1.PullRequestSubscriptionHealth{Health: &agentreplv1.PullRequestSubscriptionHealth_Failing{Failing: &agentreplv1.PullRequestSubscriptionFailing{
+			Since: timestamppb.New(failing.Since), Cause: failureProtoOf(*failing, nil)}}}
+	}
+	healthy := &agentreplv1.PullRequestSubscriptionHealthy{}
+	if !lastRead.IsZero() {
+		healthy.LastRead = timestamppb.New(lastRead)
+	}
+	return &agentreplv1.PullRequestSubscriptionHealth{Health: &agentreplv1.PullRequestSubscriptionHealth_Healthy{Healthy: healthy}}
 }
 
 // RefProto is a key as the contract spells it.
@@ -116,6 +122,8 @@ func EventProto(e wsm.PullRequestEvent) agentreplv1.PullRequestNoticeEvent {
 		return agentreplv1.PullRequestNoticeEvent_PULL_REQUEST_NOTICE_EVENT_STATE
 	case wsm.PullRequestEventChecks:
 		return agentreplv1.PullRequestNoticeEvent_PULL_REQUEST_NOTICE_EVENT_CHECKS
+	case wsm.PullRequestEventMergeQueue:
+		return agentreplv1.PullRequestNoticeEvent_PULL_REQUEST_NOTICE_EVENT_MERGE_QUEUE
 	}
 	panic(fmt.Sprintf("prwatch: event %d has no contract spelling", int(e)))
 }
@@ -137,6 +145,8 @@ func EventsOf(events []agentreplv1.PullRequestNoticeEvent) wsm.PullRequestEvents
 			out = append(out, wsm.PullRequestEventState)
 		case agentreplv1.PullRequestNoticeEvent_PULL_REQUEST_NOTICE_EVENT_CHECKS:
 			out = append(out, wsm.PullRequestEventChecks)
+		case agentreplv1.PullRequestNoticeEvent_PULL_REQUEST_NOTICE_EVENT_MERGE_QUEUE:
+			out = append(out, wsm.PullRequestEventMergeQueue)
 		default:
 			panic(fmt.Sprintf("prwatch: notice event %s has no store event", e))
 		}

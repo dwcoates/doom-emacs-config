@@ -49,6 +49,12 @@ type Store interface {
 	OwePullRequestNotice(ctx context.Context, subscriber ids.WorkspaceID, pr wsm.PullRequestKey, sentences []string) error
 	OwedPullRequestNotices(ctx context.Context) ([]wsm.PullRequestOwed, error)
 	RecordPullRequestNoticeSubmitted(ctx context.Context, subscriber ids.WorkspaceID, pr wsm.PullRequestKey, turn ids.TurnID, sentences []string, took int) error
+	LiveGithubMergeQueueSubscriptions(ctx context.Context) ([]wsm.GithubMergeQueueSubscription, error)
+	AdvanceGithubMergeQueueTold(ctx context.Context, a wsm.GithubMergeQueueAdvance) (bool, error)
+	RecordGithubMergeQueueReadFailure(ctx context.Context, queue wsm.GithubMergeQueueKey, f wsm.PullRequestFailure) ([]ids.WorkspaceID, error)
+	OweGithubMergeQueueNotice(ctx context.Context, subscriber ids.WorkspaceID, queue wsm.GithubMergeQueueKey, sentences []string) error
+	OwedGithubMergeQueueNotices(ctx context.Context) ([]wsm.GithubMergeQueueOwed, error)
+	RecordGithubMergeQueueNoticeSubmitted(ctx context.Context, subscriber ids.WorkspaceID, queue wsm.GithubMergeQueueKey, turn ids.TurnID, sentences []string, took int) error
 }
 
 // Deps are the watcher's collaborators: everything but the prompt handler,
@@ -99,19 +105,22 @@ func (w *Watcher) Run(ctx context.Context, prompts prompthandler.Submitter) {
 	w.deps.Log.Debug(opPoll, "the pull-request watcher stopped with its context", nil)
 }
 
-// Tick polls every followed pull request once, then submits every notice
-// owed, when this daemon serves.
+// Tick polls every followed pull request and every followed merge queue
+// once, then submits every notice owed, when this daemon serves. A queue
+// both kinds need is read once (queueReads).
 func (w *Watcher) Tick(ctx context.Context, prompts prompthandler.Submitter) {
 	if !w.gate.Admits() {
 		return
 	}
-	w.poll(ctx)
+	queues := newQueueReads(w.deps.GH)
+	w.poll(ctx, queues)
+	w.pollQueues(ctx, queues)
 	w.deliverOwed(ctx, prompts)
 }
 
 // poll reads each followed pull request once and advances every subscription
 // to it.
-func (w *Watcher) poll(ctx context.Context) {
+func (w *Watcher) poll(ctx context.Context, queues *queueReads) {
 	subs, err := w.deps.Store.LivePullRequestSubscriptions(ctx)
 	if err != nil && ctx.Err() != nil {
 		// The daemon is stopping: no fact about the store.
@@ -130,28 +139,67 @@ func (w *Watcher) poll(ctx context.Context) {
 		}
 		byPR[sub.PullRequest] = append(byPR[sub.PullRequest], sub)
 	}
+	var read, queued []wsm.PullRequestKey
 	for _, pr := range order {
+		if resets, waiting := w.rateLimitWait(byPR[pr]); waiting {
+			w.deps.Log.Debug(opPoll, "the rate limit is spent; the pull request is read once it resets", dlog.Context{"pull_request": pr.String(), "resets_at": resets})
+			continue
+		}
+		read = append(read, pr)
+		if wantsQueue(byPR[pr]) {
+			queued = append(queued, pr)
+		}
+	}
+	facts := w.readQueueFacts(ctx, queued)
+	for _, pr := range read {
 		if ctx.Err() != nil {
 			return
 		}
-		w.pollOne(ctx, pr, byPR[pr])
+		w.pollOne(ctx, pr, byPR[pr], facts.ask(pr), queues)
 	}
 }
 
-// pollOne reads PR and advances SUBS.
-func (w *Watcher) pollOne(ctx context.Context, pr wsm.PullRequestKey, subs []wsm.PullRequestSubscription) {
+// rateLimitWait answers when a spent rate limit resets, and true while any
+// of SUBS waits on one. A SPENT RATE LIMIT IS WAITED OUT: no read is made
+// before GitHub resets it, since every one would be refused.
+func (w *Watcher) rateLimitWait(subs []wsm.PullRequestSubscription) (time.Time, bool) {
+	failing := make([]*wsm.PullRequestFailure, len(subs))
+	for i, sub := range subs {
+		failing[i] = sub.Failing
+	}
+	return w.rateLimitWaitOf(failing)
+}
+
+// rateLimitWaitOf is rateLimitWait over the failing stretches of any GitHub
+// subscriptions.
+func (w *Watcher) rateLimitWaitOf(failing []*wsm.PullRequestFailure) (time.Time, bool) {
+	for _, f := range failing {
+		if f != nil && f.Kind == wsm.PullRequestFailureRateLimited && w.deps.Clock.Now().Before(f.ResetsAt) {
+			return f.ResetsAt, true
+		}
+	}
+	return time.Time{}, false
+}
+
+// wantsQueue reports whether any of SUBS asks for the merge queue.
+func wantsQueue(subs []wsm.PullRequestSubscription) bool {
+	for _, sub := range subs {
+		if sub.Events.Has(wsm.PullRequestEventMergeQueue) {
+			return true
+		}
+	}
+	return false
+}
+
+// pollOne reads PR, its merge queue facts when QUEUE is set, and advances
+// SUBS.
+func (w *Watcher) pollOne(ctx context.Context, pr wsm.PullRequestKey, subs []wsm.PullRequestSubscription, queue *queueAsk, queues *queueReads) {
 	fields := dlog.Context{"pull_request": pr.String(), "subscribers": len(subs)}
 	checks := false
 	for _, sub := range subs {
 		checks = checks || sub.Events.Has(wsm.PullRequestEventChecks)
-		// A SPENT RATE LIMIT IS WAITED OUT: no read is made before GitHub
-		// resets it, since every one would be refused.
-		if f := sub.Failing; f != nil && f.Kind == wsm.PullRequestFailureRateLimited && w.deps.Clock.Now().Before(f.ResetsAt) {
-			w.deps.Log.Debug(opPoll, "the rate limit is spent; the pull request is read once it resets", dlog.Merge(fields, dlog.Context{"resets_at": f.ResetsAt}))
-			return
-		}
 	}
-	snap, err := w.reader.read(ctx, pr, checks)
+	snap, err := w.readSnapshot(ctx, pr, checks, queue, queues)
 	if err != nil {
 		if ctx.Err() != nil {
 			return
@@ -163,6 +211,81 @@ func (w *Watcher) pollOne(ctx context.Context, pr wsm.PullRequestKey, subs []wsm
 	for _, sub := range subs {
 		w.advance(ctx, sub, snap, now)
 	}
+}
+
+// queueAsk is what a tick read of one pull request's merge queue facts
+// found: the facts, or why they could not be read.
+type queueAsk struct {
+	facts remotePRQueue
+	err   error
+}
+
+// queueFacts is one tick's reads of the merge queue facts of the pull
+// requests that ask for them.
+type queueFacts map[wsm.PullRequestKey]*queueAsk
+
+// ask is PR's; nil when PR does not ask for the queue.
+func (f queueFacts) ask(pr wsm.PullRequestKey) *queueAsk { return f[pr] }
+
+// readQueueFacts reads the merge queue facts of PRS, one query per
+// repository. A query that fails is every one of its pull requests' failure.
+func (w *Watcher) readQueueFacts(ctx context.Context, prs []wsm.PullRequestKey) queueFacts {
+	out := queueFacts{}
+	byRepo := map[repository][]uint32{}
+	var order []repository
+	for _, pr := range prs {
+		repo := repository{pr.Owner, pr.Repo}
+		if _, seen := byRepo[repo]; !seen {
+			order = append(order, repo)
+		}
+		byRepo[repo] = append(byRepo[repo], pr.Number)
+	}
+	for _, repo := range order {
+		facts, failures, err := readPRQueues(ctx, w.deps.GH, repo, byRepo[repo])
+		for _, n := range byRepo[repo] {
+			key := wsm.PullRequestKey{Owner: repo.Owner, Repo: repo.Repo, Number: n}
+			switch {
+			case err != nil:
+				out[key] = &queueAsk{err: err}
+			case failures[n] != nil:
+				out[key] = &queueAsk{err: failures[n]}
+			default:
+				out[key] = &queueAsk{facts: facts[n]}
+			}
+		}
+	}
+	return out
+}
+
+// readSnapshot reads PR's lists, its head's checks when CHECKS, and, when
+// QUEUE is set, its place in its merge queue, reading the queue through
+// QUEUES and its merge group's checks.
+func (w *Watcher) readSnapshot(ctx context.Context, pr wsm.PullRequestKey, checks bool, queue *queueAsk, queues *queueReads) (snapshot, error) {
+	snap, err := w.reader.read(ctx, pr, checks)
+	if err != nil || queue == nil {
+		return snap, err
+	}
+	if queue.err != nil {
+		return snap, queue.err
+	}
+	facts := queue.facts
+	q := &prQueueSnapshot{Events: facts.Events, Entry: facts.Entry}
+	if facts.Entry != nil {
+		read, err := queues.get(ctx, wsm.GithubMergeQueueKey{Owner: pr.Owner, Repo: pr.Repo, Branch: facts.Base})
+		if err != nil {
+			return snap, err
+		}
+		if p, ok := positionOf(read, pr.Number); ok {
+			q.Position = &p
+		}
+		if head := facts.Entry.GroupHead; head != "" {
+			if q.GroupChecks, err = w.reader.readChecks(ctx, fmt.Sprintf("repos/%s/%s/commits/%s/check-runs", pr.Owner, pr.Repo, head)); err != nil {
+				return snap, err
+			}
+		}
+	}
+	snap.Queue = q
+	return snap, nil
 }
 
 // advance tells SUB what SNAP holds that it was not told.
@@ -197,7 +320,7 @@ func (w *Watcher) advance(ctx context.Context, sub wsm.PullRequestSubscription, 
 	}
 	applied, err := w.deps.Store.AdvancePullRequestTold(ctx, wsm.PullRequestAdvance{
 		Subscriber: sub.Subscriber, PullRequest: sub.PullRequest, From: sub.Told, To: to,
-		Owed: owed, Status: statusWords(statusProto(snap.PR)), End: end, ReadAt: now})
+		Owed: owed, Status: statusWords(statusProto(snap)), End: end, ReadAt: now})
 	fields["owed"], fields["ends"] = len(owed), end != nil
 	switch {
 	case err != nil:
@@ -225,7 +348,7 @@ func (w *Watcher) recordFailure(ctx context.Context, pr wsm.PullRequestKey, err 
 	// The leaf recorded the failure itself; this records what it cost.
 	w.deps.Log.Info(opPoll, "the pull request could not be read; its subscriptions are failing", dlog.Merge(fields, dlog.Context{"kind": string(f.Kind), "began": len(began)}))
 	for _, subscriber := range began {
-		if err := w.deps.Store.OwePullRequestNotice(ctx, subscriber, pr, []string{failureSentence(f)}); err != nil {
+		if err := w.deps.Store.OwePullRequestNotice(ctx, subscriber, pr, []string{failureSentence(f, "pull request")}); err != nil {
 			w.deps.Log.Error(opPoll, "could not owe the subscriber the failure's notice", dlog.WithCause(dlog.Merge(fields, dlog.Context{"subscriber": string(subscriber)}), err))
 		}
 	}
@@ -234,6 +357,10 @@ func (w *Watcher) recordFailure(ctx context.Context, pr wsm.PullRequestKey, err 
 // failureOf is a read's error as the store records it.
 func failureOf(err error, now time.Time) wsm.PullRequestFailure {
 	f := wsm.PullRequestFailure{Since: now, Kind: wsm.PullRequestFailureUnreachable, Detail: err.Error()}
+	if errors.Is(err, ErrNoMergeQueue) {
+		f.Kind, f.Detail = wsm.PullRequestFailureNotFound, ""
+		return f
+	}
 	var gh *ghclient.Failure
 	if errors.As(err, &gh) {
 		f.Detail = gh.Message
@@ -265,6 +392,18 @@ func (w *Watcher) deliverOwed(ctx context.Context, prompts prompthandler.Submitt
 	}
 	for _, o := range owed {
 		w.deliver(ctx, prompts, pullRequestNotice(w.deps.Store, o))
+	}
+	queued, err := w.deps.Store.OwedGithubMergeQueueNotices(ctx)
+	if err != nil && ctx.Err() != nil {
+		w.deps.Log.Debug(opNotice, "the delivery stopped with its context", nil)
+		return
+	}
+	if err != nil {
+		w.deps.Log.Error(opNotice, "could not read the owed merge-queue notices; none is told this tick", dlog.WithCause(nil, err))
+		return
+	}
+	for _, o := range queued {
+		w.deliver(ctx, prompts, githubMergeQueueNotice(w.deps.Store, o))
 	}
 }
 

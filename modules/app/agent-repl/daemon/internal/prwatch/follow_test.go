@@ -152,3 +152,18 @@ func TestEventsOfFailsHardOnAnUnmappedEvent(t *testing.T) {
 }
 
 func ptr[T any](v T) *T { return &v }
+
+func TestTheMergeQueueEventRoundTripsThroughTheContract(t *testing.T) {
+	// Act
+	spelled := EventProto(wsm.PullRequestEventMergeQueue)
+	stored := EventsOf([]agentreplv1.PullRequestNoticeEvent{spelled})
+	sub := SubscriptionProto(wsm.PullRequestSubscription{Subscriber: "ws1", PullRequest: prK, Events: wsm.AllPullRequestEvents(), Origin: wsm.PullRequestOriginOwnedLink})
+
+	// Assert
+	if spelled != agentreplv1.PullRequestNoticeEvent_PULL_REQUEST_NOTICE_EVENT_MERGE_QUEUE || stored != wsm.NewPullRequestEvents(wsm.PullRequestEventMergeQueue) {
+		t.Fatalf("spelled %v, stored %v", spelled, stored)
+	}
+	if got := sub.GetEvents(); len(got) != 6 || got[5] != spelled {
+		t.Fatalf("an owned link's events = %v, want every event, the merge queue last", got)
+	}
+}

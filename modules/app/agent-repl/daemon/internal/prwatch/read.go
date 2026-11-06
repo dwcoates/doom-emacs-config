@@ -79,6 +79,9 @@ type snapshot struct {
 	// whether it was.
 	Checks     []remoteCheck
 	ChecksRead bool
+	// Queue is read only when a subscriber asks for the merge queue; nil
+	// when it was not.
+	Queue *prQueueSnapshot
 }
 
 // cachedPage is one page as GitHub last answered it, so an unchanged page's
