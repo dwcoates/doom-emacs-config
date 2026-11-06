@@ -2146,16 +2146,8 @@ func TestHideColumns(t *testing.T) {
 }
 
 func TestHideColumnsAreTheOneHideShape(t *testing.T) {
-	// Arrange
-	files := sourcescan.Production(t)
-
 	// Act
-	var sites []string
-	for _, file := range files {
-		for range strings.Count(string(file.Source), `name: "hidden_at"`) {
-			sites = append(sites, file.Name)
-		}
-	}
+	sites := sourcescan.Sites(t, `name: "hidden_at"`)
 
 	// Assert
 	if len(sites) != 1 || sites[0] != "workspaces.go" {

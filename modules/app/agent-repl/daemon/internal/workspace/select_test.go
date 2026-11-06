@@ -1657,16 +1657,8 @@ func TestBacklogColdGateSurfacesAFailedWriteAtError(t *testing.T) {
 // TestEveryHiddenSectionMoveEndsInHiddenRecorded fails when a move into or
 // out of the hidden section republishes or raises the keeper's edge by hand.
 func TestEveryHiddenSectionMoveEndsInHiddenRecorded(t *testing.T) {
-	// Arrange
-	files := sourcescan.Production(t)
-
 	// Act
-	var sites []string
-	for _, file := range files {
-		for range strings.Count(string(file.Source), "v.hiddenRecorded(ctx, log, ws, ") {
-			sites = append(sites, file.Name)
-		}
-	}
+	sites := sourcescan.Sites(t, "v.hiddenRecorded(ctx, log, ws, ")
 
 	// Assert
 	if !slices.Equal(sites, []string{"select.go", "select.go"}) {

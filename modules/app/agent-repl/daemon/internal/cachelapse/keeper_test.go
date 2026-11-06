@@ -890,20 +890,12 @@ func TestGateLapsedAt(t *testing.T) {
 }
 
 func TestAGateIsDatedOnlyByGateLapsedAt(t *testing.T) {
-	// Arrange
-	files := sourcescan.Production(t)
-
-	// A cache lifetime ADDED to an instant is a gate being dated; naming the
+	// Arrange: a cache lifetime ADDED to an instant is a gate being dated; naming the
 	// lifetime's tier (telemetry's coldGateOutcome) dates nothing.
 	dating := regexp.MustCompile(`(\+=|\.Add\().*GetCacheTtlMs\(\)`)
 
 	// Act
-	var sites []string
-	for _, file := range files {
-		for range dating.FindAllIndex(file.Source, -1) {
-			sites = append(sites, file.Name)
-		}
-	}
+	sites := sourcescan.SitesMatching(t, dating)
 
 	// Assert
 	if len(sites) != 1 || sites[0] != "keeper.go" {
