@@ -474,9 +474,11 @@ type WorkspaceRelationship_Child struct {
 	// A CHILD works on part of its parent's work and keeps coordinating with
 	// it. The roster nests it under its parent (under a repository divider
 	// when the parent is of another repository); the parent follows its
-	// turns, its questions, its landing and its close without subscribing
+	// questions, its landing and its close without subscribing
 	// (SubscribeWorkspace's events arrive as though the parent had asked for
-	// them); the parent reviews it and closes it; and the parent cannot be
+	// them). Its TURN ENDS are not followed that way: they are the tightest
+	// coordination, so a parent that needs them subscribes to TURN_ENDED
+	// itself; the parent reviews it and closes it; and the parent cannot be
 	// closed, hidden, finished or merged away while the child is open
 	// (WorkspaceHasOpenChildren). Its landing target defaults to its parent's
 	// branch.

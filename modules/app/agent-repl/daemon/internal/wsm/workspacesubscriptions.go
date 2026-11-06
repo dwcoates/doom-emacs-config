@@ -124,10 +124,17 @@ type WorkspaceSubscription struct {
 }
 
 // ParentFollowedEvents are the edges a child's open parent is told without
-// subscribing (agentrepl.v1.WorkspaceRelationship.child): the child's turns
-// ending, its questions, its landing and its close. A turn's start is left
-// out: the end that follows it says everything the parent acts on.
-var ParentFollowedEvents = NewWorkspaceEvents(WorkspaceEventTurnEnded, WorkspaceEventNeedsInput, WorkspaceEventLanded, WorkspaceEventClosed)
+// subscribing (agentrepl.v1.WorkspaceRelationship.child): the child's
+// questions, its landing and its close.
+//
+// A TURN'S END IS NOT AMONG THEM. Telling a parent every time a child's turn
+// ends is the tightest coordination there is: it wakes the parent's agent on
+// every turn of the child. A parent that truly needs it (a subtask it
+// dispatched and builds on turn by turn) subscribes to WorkspaceEventTurnEnded
+// explicitly, and its explicit subscription then widens this following. A
+// turn's start is left out as well: the end that follows it says everything
+// the parent acts on.
+var ParentFollowedEvents = NewWorkspaceEvents(WorkspaceEventNeedsInput, WorkspaceEventLanded, WorkspaceEventClosed)
 
 // ErrUnknownFollowed is a subscription refused because the workspace it
 // follows is not registered.
