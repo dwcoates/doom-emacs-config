@@ -11,6 +11,9 @@
  *     focus, such as to its composer, which the web view never sees;
  *   - the reader presses anywhere outside a popup the webhost draws over the
  *     feed (host/sidebar-popups.ts `dismiss`), the rail's focus or no;
+ *     a press ON that popup takes the rail's focus without leaving it: the
+ *     page's `blur` while the host says the pointer is on its copy lets go
+ *     of nothing (`pointerOnCopy`);
  *   - the selection moves: whichever workspace the rail highlights changed,
  *     by a click, by Emacs (`M-{`), or by the daemon, even with the pointer
  *     still resting on another row.
@@ -33,7 +36,7 @@
  */
 import { log } from "../log.js";
 import { createPointerRest } from "../pointer-rest.js";
-import type { FocusLeft } from "../focus-left.js";
+import { FOCUS_LEFT_BLUR, type FocusLeft } from "../focus-left.js";
 import type { PopupMirror } from "../host/sidebar-popups.js";
 import type { Dropdowns } from "./dropdowns.js";
 import type { RowHover } from "./row-hover.js";
@@ -48,7 +51,7 @@ export interface TransientsDeps {
   /** The page's focus-left signal: the focus gone, the page hidden, Emacs's focus moved. */
   focusLeft: FocusLeft;
   /** The mirror drawing the rail's popups over the feed, whose host asks to dismiss them; none for a page's own rail. */
-  popupMirror: Pick<PopupMirror, "onDismissed"> | null;
+  popupMirror: Pick<PopupMirror, "onDismissed" | "pointerOnCopy"> | null;
 }
 
 export interface Transients {
@@ -106,7 +109,16 @@ export function installTransients(host: HTMLElement, deps: TransientsDeps): Tran
   host.addEventListener("mousemove", moved);
   host.addEventListener("mouseleave", left);
   host.addEventListener("keydown", keyed);
-  const stopFocusLeft = focusLeft.onLeft(dismiss);
+  const stopFocusLeft = focusLeft.onLeft((why) => {
+    if (why === FOCUS_LEFT_BLUR && popupMirror?.pointerOnCopy() === true) {
+      log.debug("the rail's focus went to the popup the webhost draws over the feed; letting go of nothing", {
+        operation: "sidebar.transients.focus-to-popup",
+        context: { why },
+      });
+      return;
+    }
+    dismiss(why);
+  });
   const stopDismissals = popupMirror?.onDismissed(dismiss) ?? ((): void => undefined);
 
   return {

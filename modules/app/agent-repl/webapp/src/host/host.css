@@ -121,7 +121,7 @@ html.agent-repl-host .webhost-load-button[aria-disabled="true"] {
   pointer-events: auto;
 }
 
-/* THE SIDEBAR'S OPEN ROW PANELS (host/sidebar-popups.ts), drawn over the
+/* THE SIDEBAR'S OPEN ROW PANELS AND VERB MENUS (host/sidebar-popups.ts), drawn over the
    pages beside the sidebar's window. The layer wears the rail's id so the
    page stylesheet's panel rules draw the copy exactly as the rail drew it;
    these rules take back everything the rail's id gives a box of its own, so
@@ -145,6 +145,7 @@ html.agent-repl-host #ws-sidebar.sidebar-popups {
 html.agent-repl-host #ws-sidebar.sidebar-popups > .ws {
   display: contents;
 }
-html.agent-repl-host #ws-sidebar.sidebar-popups .detail {
+html.agent-repl-host #ws-sidebar.sidebar-popups .detail,
+html.agent-repl-host #ws-sidebar.sidebar-popups .sb-menu {
   pointer-events: auto;
 }

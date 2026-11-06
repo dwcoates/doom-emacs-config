@@ -255,6 +255,7 @@ describe("the version hover", () => {
       place: (key) => void told.push(`place:${key}`),
       hide: (key) => void told.push(`hide:${key}`),
       onDismissed: () => () => undefined,
+      pointerOnCopy: () => false,
       dispose: () => undefined,
     };
   }

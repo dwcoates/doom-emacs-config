@@ -135,6 +135,28 @@ describe("the row hover gesture", () => {
       expect(isOpen(a)).toBe(false);
     });
 
+    it("opens nothing once the row's menu cancelled the opening a resting pointer had armed", () => {
+      // ARRANGE
+      const a = draw("ws-1");
+      hover.enter("ws-1", "line");
+      // ACT
+      hover.cancelOpening("ws-1");
+      vi.advanceTimersByTime(HOVER_OPEN_DELAY_MS);
+      // ASSERT
+      expect(isOpen(a)).toBe(false);
+    });
+
+    it("leaves another row's opening armed when one row's menu cancels its own", () => {
+      // ARRANGE
+      const a = draw("ws-1");
+      hover.enter("ws-1", "line");
+      // ACT
+      hover.cancelOpening("ws-2");
+      vi.advanceTimersByTime(HOVER_OPEN_DELAY_MS);
+      // ASSERT
+      expect(isOpen(a)).toBe(true);
+    });
+
     it("waits three quarters of a second on the line, one named delay", () => {
       expect(HOVER_OPEN_DELAY_MS).toBe(750);
     });
@@ -839,6 +861,7 @@ describe("the row hover gesture with a popup mirror", () => {
       place: (key) => void told.push(`place:${key}`),
       hide: (key) => void told.push(`hide:${key}`),
       onDismissed: () => () => undefined,
+      pointerOnCopy: () => false,
       dispose: () => undefined,
     };
   }
@@ -902,6 +925,7 @@ describe("the row hover gesture with a popup mirror", () => {
       place: () => undefined,
       hide: () => undefined,
       onDismissed: () => () => undefined,
+      pointerOnCopy: () => false,
       dispose: () => undefined,
     });
     hover.drawn("ws-a", hidden);

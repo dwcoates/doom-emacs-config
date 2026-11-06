@@ -15,6 +15,7 @@ import type { DaemonContext } from "../rpc/context.js";
 import type { ArrangeHold } from "./arrange.js";
 import type { Dropdowns } from "./dropdowns.js";
 import type { RowHover } from "./row-hover.js";
+import type { RowMenus } from "./row-menu.js";
 import type { RowReveal } from "./reveal.js";
 import type { SelectionFade } from "./selection-fade.js";
 import type { DrawnView, SidebarView } from "./view.js";
@@ -54,6 +55,8 @@ export interface RailContext {
    * thrown-away row (`row-hover.ts`).
    */
   rowHover: RowHover;
+  /** The page's one owner of the open row's "⋯" verb menu (`row-menu.ts`). */
+  rowMenus: RowMenus;
   /** Where a drawn row's attention marker is registered (`attention.ts`). */
   attention: AttentionMarks;
   /** Draws a row the first time it comes into view (`reveal.ts`). */

@@ -59,6 +59,7 @@ import type { RailContext, SidebarContext } from "../../src/sidebar/context.js";
 import { createSidebarView, type DrawnView, type SidebarView } from "../../src/sidebar/view.js";
 import { createDropdowns } from "../../src/sidebar/dropdowns.js";
 import { createRowHover } from "../../src/sidebar/row-hover.js";
+import { createRowMenus } from "../../src/sidebar/row-menu.js";
 import { createArrangeHold } from "../../src/sidebar/arrange.js";
 import type { RowReveal } from "../../src/sidebar/reveal.js";
 import { createSelectionFade } from "../../src/sidebar/selection-fade.js";
@@ -225,6 +226,7 @@ export function sidebarContext(
     drawnStatus: createDrawnStatusLog("sidebar row", "sidebar.drawn-status"),
     dropdowns,
     rowHover: createRowHover(dropdowns, openDetails),
+    rowMenus: createRowMenus(dropdowns),
     attention: new AttentionRegistry(timers),
     reveal,
     selectionFade: createSelectionFade(document),

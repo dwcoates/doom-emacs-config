@@ -34,6 +34,7 @@ import { watchStream } from "../rpc/streams.js";
 import { WINDOW_TIMERS, type Timers } from "../timers.js";
 import { AttentionRegistry } from "./attention.js";
 import { createDropdowns } from "./dropdowns.js";
+import { createRowMenus } from "./row-menu.js";
 import { createRowHover } from "./row-hover.js";
 import { createDeploysFold, installDeploysFoldReset } from "./deploys-fold.js";
 import { createDeploysMore } from "./deploys-more.js";
@@ -246,6 +247,7 @@ function mountSidebarIn(
     chatSearch.changed(search.query(), chatShown);
     chatSearch.apply(body);
     placeOpenRowDetails(body);
+    rail.rowMenus.placeOpen();
   });
   const body = document.createElement("div");
   body.className = RAIL_BODY_CLASS;
@@ -263,6 +265,7 @@ function mountSidebarIn(
     drawnStatus: createDrawnStatusLog("sidebar row", "sidebar.drawn-status"),
     dropdowns,
     rowHover: createRowHover(dropdowns, openDetails, deps.popupMirror ?? null),
+    rowMenus: createRowMenus(dropdowns, deps.popupMirror ?? null),
     attention,
     reveal,
     selectionFade: createSelectionFade(body),
@@ -346,6 +349,7 @@ function mountSidebarIn(
   const replace = (): void => {
     placeOpenRowDetails(body);
     rail.rowHover.mirrorOpen();
+    rail.rowMenus.placeOpen();
   };
   window.addEventListener("resize", replace);
   window.addEventListener("scroll", replace, true);
@@ -486,8 +490,10 @@ function mountSidebarIn(
     // means it can only be measured once it is ON the page: a row drawn
     // already-expanded is placed here, after the draw is in the document.
     placeOpenRowDetails(body);
-    // A PANEL DRAWN OVER THE FEED follows its row's new drawing (sidebar-popups.ts).
+    // A PANEL DRAWN OVER THE FEED follows its row's new drawing (sidebar-popups.ts),
+    // and so does the open verb menu, or goes with its row (row-menu.ts).
     rail.rowHover.mirrorOpen();
+    rail.rowMenus.placeOpen();
     // THE FIRST PUSH REVEALS THE RAIL, and nothing else ever does.
     if (host.hidden) {
       host.hidden = false;

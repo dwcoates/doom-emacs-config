@@ -1039,17 +1039,14 @@ export function drawMenuControl(ws: HTMLElement, target: VerbTarget): HTMLElemen
 }
 
 /**
- * Open (or close) the row's verb menu.
- *
- * It is appended INSIDE the row's own box, after the line, so it opens
- * DOWNWARD from the control and can never clip off the top of the rail; the
- * stylesheet caps its height and scrolls it if the rail is short.
+ * Open (or close) the row's verb menu: a popup beside the row's line, where
+ * its hover panel stands, held by the page's one menu owner (`row-menu.ts`).
+ * The row's pending hover open is cancelled, so the panel the pointer resting
+ * on the line would open does not take the menu's place.
  */
 export function toggleRowMenu(ws: HTMLElement, target: VerbTarget): void {
-  const menu = ws.querySelector<HTMLElement>(":scope > .sb-menu");
-  if (menu === null) return;
-  const more = ws.querySelector<HTMLElement>(":scope > .row .sb-more");
-  toggleHiddenDropdown(target.sc.dropdowns, "row-menu", menu, more === null ? [] : [more]);
+  target.sc.rowHover.cancelOpening(target.workspace.id);
+  target.sc.rowMenus.toggle(target.workspace.id, ws);
 }
 
 /**

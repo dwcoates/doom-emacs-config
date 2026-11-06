@@ -37,6 +37,7 @@ export function openScope(rail: RailContext): DrawScope {
     drawnStatus: rail.drawnStatus,
     dropdowns: rail.dropdowns,
     rowHover: rail.rowHover,
+    rowMenus: rail.rowMenus,
     reveal: rail.reveal,
     selectionFade: rail.selectionFade,
     shownAhead: () => rail.shownAhead(),

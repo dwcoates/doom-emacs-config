@@ -1836,8 +1836,13 @@ html.sb-dragging * { -webkit-user-select: none; user-select: none; }
 /* THE VERSION'S MEMORY HOVER (sidebar/memory.ts) is a detail panel of its own,
    placed under the version by `clampReveal`. */
 #ws-sidebar .ws.open > .detail,
-#ws-sidebar .detail.sb-memory.open {
-  display: block;
+#ws-sidebar .detail.sb-memory.open { display: block; }
+/* THE ROW'S "⋯" VERB MENU (sidebar/row-menu.ts) IS A POPUP OF THE SAME CARD,
+   standing where the row's panel stands and placed by the same
+   `placeBeside`; its `hidden` alone shuts it. */
+#ws-sidebar .ws.open > .detail,
+#ws-sidebar .detail.sb-memory.open,
+#ws-sidebar .ws > .sb-menu {
   position: fixed;
   z-index: 40;
   width: max-content;
@@ -6869,10 +6874,13 @@ bubble-body.bubble-body { display: block; }
 #ws-sidebar .sb-more:focus-visible { opacity: 1; }
 #ws-sidebar:not(.sb-hover-suspended) .sb-more:hover { color: var(--fg); }
 
-/* THE VERB MENU opens DOWNWARD, inside the row's own box, so it can never
-   clip off the top of the rail; it caps its height and scrolls if the rail is
-   short. Delimited by the shared `.list-rows` rule, like every other list. */
-#ws-sidebar .sb-menu,
+/* THE VERB MENU stands beside its row in the detail panel's card (see the
+   panel's rule); its entries reach the card's edges, their words on the
+   panel's own inset. A band row's choices open DOWNWARD, inside the row's own
+   box, so they can never clip off the top of the rail; they cap their height
+   and scroll if the rail is short. Delimited by the shared `.list-rows` rule,
+   like every other list. */
+#ws-sidebar .ws > .sb-menu { padding: 0.25rem 0; }
 #ws-sidebar .sb-band-choices,
 #ws-sidebar .sb-submenu {
   margin: 0.15rem 0.7rem 0.3rem 2rem;
