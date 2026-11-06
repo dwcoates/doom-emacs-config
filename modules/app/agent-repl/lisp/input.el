@@ -2950,6 +2950,56 @@ has nothing under `<return>'."
 (define-key agent-repl-input-mode-map (kbd "C-c C-<return>") #'agent-repl-rollback-keep-files)
 (define-key agent-repl-input-mode-map (kbd "C-c M-<return>") #'agent-repl-rollback-restore-files)
 
+;; SIBLING LABEL.  `C-SPC' starts the next line of a reply that follows a numbered
+;; response tree: from a line led by a dotted label ("2.1 - blah") it opens a
+;; line below carrying the next label that exists in the composer, preferring
+;; the next sibling ("2.2"), then the next aunt ("3"), recursively.
+(defconst agent-repl--input-label-regexp
+  "^\\([ \t]*\\)\\([0-9]+\\(?:\\.[0-9]+\\)*\\)\\([ \t]*[-:.)]?[ \t]*\\)"
+  "Matches a line's indent (1), dotted label (2) and separator (3).")
+
+(defun agent-repl--input-label-exists-p (label)
+  "Non-nil when some line of the buffer is led by the dotted LABEL."
+  (save-excursion
+    (goto-char (point-min))
+    (let (found)
+      (while (and (not found) (re-search-forward agent-repl--input-label-regexp nil t))
+        (setq found (string= (match-string 2) label)))
+      found)))
+
+(defun agent-repl--input-next-label (label)
+  "The nearest existing label after LABEL: next sibling, else next aunt, else nil."
+  (let ((parts (mapcar #'string-to-number (split-string label "\\."))))
+    (catch 'found
+      (while parts
+        (let ((candidate (mapconcat #'number-to-string
+                                    (append (butlast parts) (list (1+ (car (last parts)))))
+                                    ".")))
+          (when (agent-repl--input-label-exists-p candidate)
+            (throw 'found candidate)))
+        (setq parts (butlast parts)))
+      nil)))
+
+(defun agent-repl-input-next-sibling-line ()
+  "Open a line below with the next sibling label of the current line's label.
+With no label on the line, or no later label in the buffer, open a plain line."
+  (interactive)
+  (let* ((label-p (save-excursion
+                    (beginning-of-line)
+                    (looking-at agent-repl--input-label-regexp)))
+         (indent (and label-p (match-string 1)))
+         (separator (and label-p (match-string 3)))
+         (next (and label-p (agent-repl--input-next-label (match-string 2)))))
+    (end-of-line)
+    (newline)
+    (when next
+      (insert indent next (if (string-empty-p separator) " " separator)))))
+
+(define-key agent-repl-input-mode-map (kbd "C-SPC") #'agent-repl-input-next-sibling-line)
+(with-eval-after-load 'evil
+  (evil-define-key* 'insert agent-repl-input-mode-map
+    (kbd "C-SPC") #'agent-repl-input-next-sibling-line))
+
 ;; A load (and a reload) finds the composers already made, each drawn by the
 ;; code it was made under, so each is drawn as this load's code draws it.
 (agent-repl--input-draw-border-all)
