@@ -1030,9 +1030,10 @@ body {
      section under OPEN shows it folded or not (owner request, 2026-10-15),
      and so does Hidden Workspaces, whose count is every row it holds,
      scrolled out of its viewport or not (owner request, 2026-10-19).
-   - The Merge Queue and Recently Merged sections' headers count nothing
+   - The Merge Queue and Recently Merged sections' headers carry no "(N)"
      (owner requests, 2026-10-27 and 2026-11-01): each Recently Merged group
-     counts its merges of today on its own header (the rules with the
+     counts its merges of today on its own header, and the Recently Merged
+     header sums them (owner request, 2026-11-06; the rules with the
      repository groups, below).
    - The open workspaces section's "(N)" takes the same grey and shows whether
      the section is folded or not (owner request, 2026-10-13;
@@ -1534,6 +1535,16 @@ html.sb-dragging * { -webkit-user-select: none; user-select: none; }
 #ws-sidebar .merged-group-head .sb-count {
   flex: 0 0 auto;
   font-size: 0.85em;
+  color: var(--muted);
+  text-transform: none;
+  letter-spacing: normal;
+}
+/* THE SECTION'S "(K today, last D ago)" (owner request, 2026-11-06) sums
+   every group's merges and reads exactly as a group's does: the group
+   count's size, grey, weight and case, shown folded or not. */
+#ws-sidebar .repo.merged-section > .repo-head .sb-today-count {
+  display: inline;
+  font-size: calc(var(--merged-group-head-font-size) * 0.85);
   color: var(--muted);
   text-transform: none;
   letter-spacing: normal;

@@ -717,9 +717,11 @@ export function drawRosterRepoKey(u: RosterRepoKey, path: string): RepositoryRef
  * above Hidden: ONE GROUP PER REPOSITORY with a merge, each its merged
  * workspaces hoisted out of every grouping.
  *
- * ITS HEADER COUNTS NOTHING: each group's header carries its repository's
- * "(K today, last D ago)", with the commits today's merges brought in on its
- * hover. Its label is always the purple of a merge in progress.
+ * ITS HEADER CARRIES NO WIRE COUNT: each group's header carries its
+ * repository's "(K today, last D ago)", with the commits today's merges
+ * brought in on its hover, and the section's header carries the same
+ * "(K today, last D ago)" summed over every group (owner request,
+ * 2026-11-06). Its label is always the purple of a merge in progress.
  *
  * A SECTION WITH NO GROUPS IS NOT DRAWN (frontend.v1.RosterMergedSection).
  *
@@ -733,12 +735,20 @@ export function drawRosterMergedSection(
   path: string,
 ): HTMLElement {
   const drawnNow = { left: MERGED_DRAWN_AT_ONCE };
-  const groups = u.groups.map((group, index) => drawRosterMergedRepoGroup(group, sc, `${path}.groups[${index}]`, drawnNow));
+  const facts = u.groups.map((group, index) => mergedGroupFacts(group, `${path}.groups[${index}]`));
+  const groups = u.groups.map((group, index) =>
+    drawRosterMergedRepoGroup(group, facts[index], sc, `${path}.groups[${index}]`, drawnNow),
+  );
   return drawGroupedSection(
     u,
     sc,
     path,
-    { foldKey: MERGED_FOLD_KEY, className: MERGED_SECTION_CLASS, target: { case: "recentlyMerged", value: {} } },
+    {
+      foldKey: MERGED_FOLD_KEY,
+      className: MERGED_SECTION_CLASS,
+      target: { case: "recentlyMerged", value: {} },
+      decorateHeader: (header) => header.appendChild(drawMergedTodayCount(facts.flat(), sc)),
+    },
     groups,
   );
 }
@@ -749,14 +759,15 @@ export const GROUPLESS_ATTRIBUTE = "data-groupless";
 /**
  * A section of repository GROUPS under the shared header: the one shape the
  * Merge Queue and Recently Merged sections share, so the two draw alike.
- * ITS HEADER COUNTS NOTHING, and A SECTION WITH NO GROUPS IS LEFT OUT of the
+ * ITS HEADER CARRIES NO WIRE COUNT (DECORATE_HEADER may add the kind's own),
+ * and A SECTION WITH NO GROUPS IS LEFT OUT of the
  * rail (`GROUPLESS_ATTRIBUTE`).
  */
 export function drawGroupedSection(
   u: HeadedBoxWire,
   sc: SidebarContext,
   path: string,
-  shape: Pick<HeadedBoxShape, "foldKey" | "className" | "target">,
+  shape: Pick<HeadedBoxShape, "foldKey" | "className" | "target" | "decorateHeader">,
   groups: HTMLElement[],
 ): HTMLElement {
   return drawHeadedBox(
@@ -873,26 +884,13 @@ export function drawRosterMergeQueueRepoGroup(u: RosterMergeQueueRepoGroup, sc: 
 }
 
 /**
- * One repository's group inside the Recently Merged section: its header,
- * then its merged rows, most recently merged first.
- *
- * THE GROUP SHOWS ITS TEN MOST RECENT MERGES (owner request, 2026-10-31;
- * `deploys-more.ts`): every older one waits in a hidden page of ten, which
- * the arrow under the group shows.
- *
- * Each row carries its merged instant (`data-merged-at`), the one the row
- * already draws. A merged row is always on the `when.merged` arm; one that is
- * not is malformed.
+ * The facts of every merged row in a Recently Merged group U at PATH, the
+ * ones its header and the section's header count. A merged row is always
+ * on the `when.merged` arm; one that is not is malformed.
  */
-export function drawRosterMergedRepoGroup(
-  u: RosterMergedRepoGroup,
-  sc: SidebarContext,
-  path: string,
-  drawnNow: { left: number },
-): HTMLElement {
-  const key = drawRosterRepoKey(requireMessage(u.key, `${path}.key`), `${path}.key`);
+export function mergedGroupFacts(u: RosterMergedRepoGroup, path: string): MergedRowFacts[] {
   const rows = requireMessage(u.mergedRows, `${path}.merged_rows`);
-  const merges = rows.rows.map((merged, i): MergedRowFacts => {
+  return rows.rows.map((merged, i): MergedRowFacts => {
     const rowPath = `${path}.merged_rows.rows[${i}].row`;
     const row = requireMessage(merged.row, rowPath);
     const when = requireMessage(row.when, `${rowPath}.when`);
@@ -904,6 +902,29 @@ export function drawRosterMergedRepoGroup(
       commits: commits === undefined ? undefined : drawRosterRowDetailCommits(commits, `${rowPath}.detail.commits`),
     };
   });
+}
+
+/**
+ * One repository's group inside the Recently Merged section: its header,
+ * then its merged rows, most recently merged first. MERGES are the group's
+ * row facts (`mergedGroupFacts`), in the rows' order.
+ *
+ * THE GROUP SHOWS ITS TEN MOST RECENT MERGES (owner request, 2026-10-31;
+ * `deploys-more.ts`): every older one waits in a hidden page of ten, which
+ * the arrow under the group shows.
+ *
+ * Each row carries its merged instant (`data-merged-at`), the one the row
+ * already draws.
+ */
+export function drawRosterMergedRepoGroup(
+  u: RosterMergedRepoGroup,
+  merges: MergedRowFacts[],
+  sc: SidebarContext,
+  path: string,
+  drawnNow: { left: number },
+): HTMLElement {
+  const key = drawRosterRepoKey(requireMessage(u.key, `${path}.key`), `${path}.key`);
+  const rows = requireMessage(u.mergedRows, `${path}.merged_rows`);
   const head = drawRosterMergedRepoGroupHeader(requireMessage(u.header, `${path}.header`), `${path}.header`);
   head.appendChild(drawMergedTodayCount(merges, sc));
   tickGroupHover(head, merges, sc);
@@ -953,7 +974,8 @@ export function drawRosterMergedRepoGroupHeader(u: RosterMergedRepoGroupHeader, 
 export const MERGED_TODAY_COUNT_CLASS = "sb-today-count";
 
 /**
- * A group header's "(K today, last D ago)": how many of its merges landed
+ * A group header's, or the Recently Merged section header's (every group's
+ * merges together), "(K today, last D ago)": how many of its merges landed
  * TODAY (local date), counted over every row the daemon sent, including those
  * scrolled out of view or folded away, and how long ago the latest of them
  * landed (`mergedTodayCountText`). The shared ticker repaints it, so the age
