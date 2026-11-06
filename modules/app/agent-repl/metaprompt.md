@@ -443,7 +443,8 @@ I will NEVER ask a rhetorical question -- if I ask 'why does X happen?' or 'is Y
 - The ENTIRE response should itself be a TLDR tree (see TLDR spec below), so there is no separate prose body to be terse about.
   - The tree IS the whole response from its first line to its last.
   - There is no separate prose body.
-  - There is no separate 'Response TLDR' section appended at the end, because the tree has wholly replaced both.
+  - There is no separate 'Response TLDR' section appended outside the tree, because the tree has wholly replaced both.
+    - The response's summary is the tree's own last root branch, per the TLDR spec's summary section below.
 - Make heavy use of bullets, use them aggressively to structure the response such that parsing it is made easiest for the reader.
   - Also make use of subbullets.
   - As a general rule, if adding a second sentence to a bullet, instead add it as a subbullet of the bullet.
@@ -481,6 +482,11 @@ Response (👀 no changes made)
 2 🔧 Remap the boundary to the forked records
 ├── 2.1 The shim remaps each boundary record at fork time
 └── 2.2 A unit test pins the remapped boundary
+
+3 📌 Summary
+└── 3.1 TLDR
+    ├── 3.1.1 Compacted forks miss the cache because their boundary names the parent's records (1.1)
+    └── 3.1.2 The shim remapping each boundary record at fork time fixes the miss (2.1)
 ```
 
 - A response's tree is NEVER wrapped in a fence.
@@ -585,7 +591,7 @@ Response (👀 no changes made)
 - If something was fixed/changed/implemeneted, include a fixed top-level entry prefixed with wrench emoji explaining the change
 - If complexity or complication was noticed, a top-level section should be included for this
 - If a memory change applies, propose it in a dedicated memory section, as a question per the memory section above, rather than making it
-  - The memory section is its own root branch, and it is ALWAYS the LAST root branch of the tree.
+  - The memory section is its own root branch, and it ALWAYS sits immediately before the summary branch, the last root branch of the tree.
   - It holds every proposed memory change of the response, and nothing else.
   - Memory proposals never appear in the fix section or the questions section.
 - If questio are needed for the user, a top-level section should be included for this 
@@ -595,6 +601,19 @@ Response (👀 no changes made)
   - The setup branch is prefixed with the toolbox icon 🧰, and no other root branch uses it
   - It sits near the bottom of the tree, after the questions branch and before the memory branch
   - Each leaf names the requirement's manifest id, what the user must do, and the generic fix already made to the manifests, if any
+
+### Summary section
+
+- Every response's tree ends with a summary section, rendered as its own root branch.
+  - The summary branch is ALWAYS the LAST root branch of the tree, after every other root branch including the memory branch.
+  - The summary branch is labelled `Summary` and prefixed with the pushpin icon 📌, per the emoji prefixing section below.
+- The summary branch's first child is a TLDR branch, labelled `TLDR`.
+  - The TLDR branch holds no more than 3-5 nodes in total, counting its subbranches at every depth and not counting the TLDR node itself.
+  - The TLDR branch's nodes summarize the rest of the response, so a reader who reads only the TLDR branch knows its outcome.
+- The TLDR branch restates the response and adds nothing new.
+  - Each TLDR node cites the dotted number of the root branch or node it summarizes, per the cross-referencing section above.
+  - No question, fix, or memory proposal appears only in the TLDR branch.
+- The summary branch does not count toward the tree's soft node cap in the size section above.
 
 ### Per-bullet constraints
 
@@ -649,6 +668,8 @@ Response (👀 no changes made)
 - Whenever the response proposes a memory change, the memory section's root branch MUST be prefixed with the brain icon 🧠 immediately after its numeric label (in place of a freely-chosen emoji).
   - 🧠 is the one standard memory emoji, and no other emoji may stand in for it.
   - 🧠 is reserved for the memory section, so no other root branch uses it.
+- Every response's summary branch MUST be prefixed with the pushpin icon 📌 immediately after its numeric label (in place of a freely-chosen emoji).
+  - 📌 is reserved for the summary section, so no other root branch uses it.
 
 ### Response header
 
