@@ -137,6 +137,19 @@ describe("this repository's committed metaprompt", () => {
     expect(text).toContain("without asking me any questions or for permission");
   });
 
+  it("ends every response tree with a summary branch holding a 3-5 node TLDR branch", () => {
+    // Arrange
+    const home = homeOnThisRepository();
+    // Act
+    const text = readMetaprompt(home);
+    // Assert
+    expect(text).toContain("Every response's tree ends with a summary section, rendered as its own root branch.");
+    expect(text).toContain("The summary branch is ALWAYS the LAST root branch of the tree");
+    expect(text).toContain("The TLDR branch holds no more than 3-5 nodes in total");
+    expect(text).toContain("immediately before the summary branch, the last root branch of the tree");
+    expect(text).not.toContain("it is ALWAYS the LAST root branch of the tree.");
+  });
+
   it("requires a shell command to be one runnable block fenced as bash", () => {
     // Arrange
     const home = homeOnThisRepository();
