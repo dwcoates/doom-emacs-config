@@ -231,6 +231,11 @@ func newRig(t *testing.T) *rig {
 		t.Fatal(err)
 	}
 	r.gh.set(pathPull(), pullJSON("open", false, false, "head1"))
+	// Every subscription asking for every event reads the merge queue, so
+	// by default the pull request is in none; a test scripts more with
+	// withGQL.
+	g := r.withGQL()
+	g.setFacts(prK.Number, factsJSON("main", nil))
 	return r
 }
 

@@ -120,9 +120,9 @@ func aliasOf(number uint32) string { return fmt.Sprintf("pr%d", number) }
 // NUMBERS, each under its alias, in one repository.
 func batchedPullRequests(name string, numbers []uint32, fragment string) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "query %s($owner: String!, $repo: String!) {\n  repository(owner: $owner, name: $repo) {\n", name)
+	b.WriteString(fmt.Sprintf("query %s($owner: String!, $repo: String!) {\n  repository(owner: $owner, name: $repo) {\n", name))
 	for _, n := range numbers {
-		fmt.Fprintf(&b, "    %s: pullRequest(number: %d) { ...facts }\n", aliasOf(n), n)
+		b.WriteString(fmt.Sprintf("    %s: pullRequest(number: %d) { ...facts }\n", aliasOf(n), n))
 	}
 	b.WriteString("  }\n}\n")
 	b.WriteString(fragment)
