@@ -46,8 +46,8 @@ import { pageMutationObserver, queryAll } from "../dom.js";
 import { createListeners } from "../listeners.js";
 import { log } from "../log.js";
 import { scrollKept } from "../scroll.js";
-import { clampBeside, type Rect } from "../topbar/clamp.js";
-import { applyPlacement, viewportOf } from "../placement.js";
+import type { Rect } from "../topbar/clamp.js";
+import { placeBeside, viewportOf } from "../placement.js";
 import { detailsEntry, placeDetailsPanel, wireDetailsEntry } from "../sidebar/detail-more.js";
 
 /** The channel both documents open, on the host origin. */
@@ -264,12 +264,10 @@ export function installPopupLayer(env: PopupLayerEnv): PopupLayer {
       return;
     }
     key = message.key;
-    drawn.style.maxHeight = "";
     last = message;
     // THE ROW'S HEIGHT IN THE HOST is its height in the sidebar plus how far
     // below the host's top the sidebar's window starts, which Emacs measures.
-    const placement = clampBeside(hostAnchor(message.top + offset, message.bottom + offset), measure(drawn), viewportOf(win));
-    applyPlacement(drawn, placement);
+    const placement = placeBeside(drawn, hostAnchor(message.top + offset, message.bottom + offset), viewportOf(win), measure);
     drawn.addEventListener("mouseenter", entered);
     drawn.addEventListener("mouseleave", left);
     // THE DETAILS POPUP STANDS BESIDE THIS COPY as the copy stands beside the

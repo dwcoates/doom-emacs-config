@@ -82,8 +82,8 @@ import { drawTabNumberSlot } from "./tab-numbers.js";
 import { toneClass } from "../vocab.js";
 import { applyNameTint, nameTint } from "./name-tint.js";
 import { guardMalformed, guardMalformedNow } from "../rpc/guard.js";
-import { clampBeside, type Rect } from "../topbar/clamp.js";
-import { applyPlacement, viewportOf } from "../placement.js";
+import type { Rect } from "../topbar/clamp.js";
+import { placeBeside, viewportOf } from "../placement.js";
 import {
   closeDetails,
   detailsPanel,
@@ -997,10 +997,7 @@ export function placeRowDetail(ws: HTMLElement): void {
   const line = ws.querySelector<HTMLElement>(":scope > .row");
   const detail = ws.querySelector<HTMLElement>(":scope > .detail");
   if (line === null || detail === null) return;
-  // Measured at its natural height: a cap the last placement applied would
-  // otherwise hold a panel that moved up the window at its old, shorter size.
-  detail.style.maxHeight = "";
-  const placement = clampBeside(line.getBoundingClientRect(), detail.getBoundingClientRect(), viewportOf());
+  const placement = placeBeside(detail, line.getBoundingClientRect(), viewportOf());
   log.debug("placing a row's detail panel", {
     operation: "sidebar.row.detail-place",
     verbosity: "verbose",
@@ -1011,7 +1008,6 @@ export function placeRowDetail(ws: HTMLElement): void {
       max_height: placement.maxHeight,
     },
   });
-  applyPlacement(detail, placement);
   // Its details popup, when open, stands beside it wherever it now stands.
   placeDetailsPanel(detail, measureBox, viewportOf());
 }

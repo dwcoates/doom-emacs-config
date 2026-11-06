@@ -18,7 +18,7 @@
  * leaves the panel, which closes both.
  */
 import { log } from "../log.js";
-import { applyPlacement } from "../placement.js";
+import { placeBeside } from "../placement.js";
 import { clampBeside, type Rect, type RevealPlacement, type Viewport } from "../topbar/clamp.js";
 
 /** The class of a row panel's "details" entry. */
@@ -126,7 +126,12 @@ export function syncDetailsEntry(detail: HTMLElement): void {
  * the anchor's.
  */
 export function detailsPlacement(panel: Rect, entry: Rect, sub: Rect, viewport: Viewport): RevealPlacement {
-  const anchor: Rect = {
+  return clampBeside(detailsAnchor(panel, entry), sub, viewport);
+}
+
+/** What the details popup stands beside: PANEL's right edge, on ENTRY's line. */
+export function detailsAnchor(panel: Rect, entry: Rect): Rect {
+  return {
     left: panel.left,
     right: panel.right,
     width: panel.width,
@@ -134,17 +139,13 @@ export function detailsPlacement(panel: Rect, entry: Rect, sub: Rect, viewport: 
     bottom: entry.bottom,
     height: entry.bottom - entry.top,
   };
-  return clampBeside(anchor, sub, viewport);
 }
 
 /** Place DETAIL's open details popup beside it, measuring with MEASURE inside VIEWPORT. Nothing while it is shut. */
 export function placeDetailsPanel(detail: HTMLElement, measure: (el: Element) => Rect, viewport: Viewport): void {
   const entry = detailsEntry(detail);
   if (entry === null || !entry.classList.contains("open")) return;
-  const sub = entryPanel(entry);
-  // Measured at its natural height, as the row panel is.
-  sub.style.maxHeight = "";
-  applyPlacement(sub, detailsPlacement(measure(detail), measure(entry), measure(sub), viewport));
+  placeBeside(entryPanel(entry), detailsAnchor(measure(detail), measure(entry)), viewport, measure);
 }
 
 /** Open DETAIL's details popup (a drawn entry only) and place it with PLACE. */
