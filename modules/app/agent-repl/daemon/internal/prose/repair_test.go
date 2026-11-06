@@ -4,9 +4,9 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
-	"path/filepath"
-	"strings"
 	"testing"
+
+	"agent-repld/internal/sourcescan"
 )
 
 func TestRepairFencedResponseTree(t *testing.T) {
@@ -165,17 +165,10 @@ func TestEveryFencedTreeTestGoesThroughHoldsTree(t *testing.T) {
 	// Arrange.
 	fset := token.NewFileSet()
 	calls := map[string]map[string]bool{}
-	files, err := filepath.Glob("*.go")
-	if err != nil {
-		t.Fatalf("glob the package's files: %v", err)
-	}
-	for _, file := range files {
-		if strings.HasSuffix(file, "_test.go") {
-			continue
-		}
-		f, err := parser.ParseFile(fset, file, nil, 0)
+	for _, src := range sourcescan.Production(t) {
+		f, err := parser.ParseFile(fset, src.Name, src.Source, 0)
 		if err != nil {
-			t.Fatalf("parse %s: %v", file, err)
+			t.Fatalf("parse %s: %v", src.Name, err)
 		}
 		for _, decl := range f.Decls {
 			fn, ok := decl.(*ast.FuncDecl)
