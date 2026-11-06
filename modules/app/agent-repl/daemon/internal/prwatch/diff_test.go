@@ -124,6 +124,7 @@ func TestDiffTellsEachChecksLatestFinishedRunOnce(t *testing.T) {
 	}{
 		{name: "a run that finished", checks: []remoteCheck{{ID: 1, Name: "test", Completed: true, Conclusion: "success"}}, head: "h",
 			want: []string{"test:passed"}},
+		{name: "a finished run waits for a sibling still going", checks: []remoteCheck{{ID: 1, Name: "test", Completed: true, Conclusion: "success"}, {ID: 2, Name: "lint"}}, head: "h"},
 		{name: "a run still going is not told", checks: []remoteCheck{{ID: 1, Name: "test"}}, head: "h"},
 		{name: "a re-run's latest result is told", prev: []remoteCheck{{ID: 1, Name: "test", Completed: true, Conclusion: "failure"}}, head: "h",
 			checks: []remoteCheck{{ID: 1, Name: "test", Completed: true, Conclusion: "failure"}, {ID: 2, Name: "test", Completed: true, Conclusion: "success"}},
