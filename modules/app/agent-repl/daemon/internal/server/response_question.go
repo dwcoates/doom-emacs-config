@@ -243,21 +243,14 @@ func (s *server) submitQuestion(
 		return answer(resp, s.refuseUnadmitted(rpc, resp, err))
 	}
 	opID := req.GetIdempotencyKey()
-	reporter := s.CreateProgress(opID)
 	spec := workspace.CreateSpec{
 		RepoDir:       repository.Dir,
 		ForkFrom:      &ws,
 		Parent:        &ws,
 		InitialPrompt: replyquote.QuestionText(quoted.Markdown, s.saidText(subject.Log, "said", req.GetSaid())),
-		Progress:      reporter,
 	}
-	ticket := s.deps.Verbs.EnterCreate(spec)
 	bgCtx, cancel := s.backgroundContext(admitted)
-	go func() {
-		defer cancel()
-		defer release()
-		s.runBackgroundCreate(bgCtx, ticket, reporter)
-	}()
+	ticket := s.startBackgroundCreate(bgCtx, cancel, release, spec, opID)
 	subject.Log.Info(opResponseQuestion, "the prompt asks about a final response; forking it into a child workspace", dlog.Context{
 		"row": row.GetValue(), "op_id": opID, "create_id": string(ticket.ID()),
 	})

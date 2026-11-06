@@ -202,18 +202,7 @@ func (s *server) CreateWorkspace(
 	// create already running or held for the network; the joined op then
 	// receives that create's progress and outcome.
 	if opID := req.Msg.GetOpId(); opID != "" {
-		reporter := s.CreateProgress(opID)
-		spec.Progress = reporter
-		ticket := s.deps.Verbs.EnterCreate(spec)
-		go func() {
-			// The goroutine OWNS the cancel: cancelling in the handler would
-			// tear bgCtx down the instant the ack returns, which is the very
-			// cancellation this detaches from. It owns the ticket too, which is
-			// released after the outcome is published.
-			defer cancel()
-			defer release()
-			s.runBackgroundCreate(bgCtx, ticket, reporter)
-		}()
+		ticket := s.startBackgroundCreate(bgCtx, cancel, release, spec, opID)
 		accepted := &agentreplv1.CreateWorkspaceAccepted{OpId: opID}
 		if ticket.Joined() {
 			accepted.Joined = &agentreplv1.CreateWorkspaceJoined{Create: pendingCreateRef(ticket.ID())}
@@ -314,6 +303,31 @@ func landingChoice(t *agentreplv1.WorkspaceLandingTarget) (*wsm.LandingChoice, b
 		return &wsm.LandingChoice{Into: &id}, false
 	}
 	return &wsm.LandingChoice{}, t.GetPrimary().GetFromOrigin() != nil
+}
+
+// startBackgroundCreate enters SPEC as a create reporting on OPID and runs it
+// to completion in its own goroutine under BGCTX, answering its ticket at once.
+// The goroutine OWNS CANCEL and RELEASE: cancelling in the caller would tear
+// bgCtx down the instant the caller returns, which is the very cancellation
+// this detaches from, and the admission ticket is released only after the
+// outcome is published. Every op-carrying create starts here, so none can
+// drift into running under the request's context.
+func (s *server) startBackgroundCreate(
+	bgCtx context.Context,
+	cancel context.CancelFunc,
+	release func(),
+	spec workspace.CreateSpec,
+	opID string,
+) *workspace.CreateTicket {
+	reporter := s.CreateProgress(opID)
+	spec.Progress = reporter
+	ticket := s.deps.Verbs.EnterCreate(spec)
+	go func() {
+		defer cancel()
+		defer release()
+		s.runBackgroundCreate(bgCtx, ticket, reporter)
+	}()
+	return ticket
 }
 
 // runBackgroundCreate performs an option-B create to completion and publishes
