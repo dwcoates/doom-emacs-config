@@ -136,7 +136,10 @@ accident."
 (defmacro agent-repl-itest-host--with-subscription (daemon ref &rest body)
   "Register and subscribe the suite's workspace on DAEMON, then run BODY.
 REF is bound to the WorkspaceRef the daemon minted.  The subscription is
-always cancelled afterwards — a client cancel IS the graceful close."
+always cancelled afterwards — a client cancel IS the graceful close.
+No link stands in this suite, so the daemon the web view host belongs on
+\(`agent-repl-webhost-daemon-conn') is DAEMON, the one the workspace
+registered on."
   (declare (indent 2) (debug (form symbolp body)))
   `(let ((conn (agent-repl-connect-open (agent-repl-itest-daemon-address ,daemon))))
      (unwind-protect
@@ -150,7 +153,8 @@ always cancelled afterwards — a client cancel IS the graceful close."
            (agent-repl-host-subscribe conn agent-repl-itest-host--ws ,ref)
            (agent-repl-itest--await-subscriber
             ,daemon "host" (plist-get ,ref :id))
-           ,@body)
+           (cl-letf (((symbol-function 'agent-repl-webhost-daemon-conn) (lambda () conn)))
+             ,@body))
        ;; FORGET, not merely unsubscribe: host state is keyed by workspace
        ;; name and outlives a subscription by design, so leaving it behind
        ;; would let one scenario's pushed state answer the next scenario's
@@ -1380,8 +1384,7 @@ the observable is the URL the host is asked to hold."
                         ;; a symbol rather than an xwidget.  The watcher is the
                         ;; host's replay, not the redial under test.
                         ((symbol-function 'agent-repl--webhost-watch-load) #'ignore)
-                        ;; THE WEBHOST FOLLOWS THE PAGE TO THE SUCCESSOR: it is
-                        ;; navigated there, and its load replays every page.
+                        ;; A host navigation, which a handover never makes.
                         ((symbol-function 'agent-repl--frontend-webview-navigate-widget)
                          (agent-repl-itest-host--navigate-and-load (lambda (url) (push url host-moved))))
                         ((symbol-function 'agent-repl--frontend-webview-execute-script-value)
@@ -1402,12 +1405,11 @@ the observable is the URL the host is asked to hold."
                 (agent-repl-itest--wait-until (lambda () navigated) nil
                                               "the webview redial")
                 (should (equal 1 (length navigated)))
-                ;; THE WEBHOST STAYS: a handover never reloads it, and its
-                ;; own calls follow the workspace to the successor.
+                ;; THE WEBHOST STAYS: a handover never reloads it, and the
+                ;; page's re-point leaves its own calls alone -- the link's
+                ;; handover edge moves those (webhost.el, test-webhost.el).
                 (should (null host-moved))
-                (should (equal calls-moved
-                               (list (format "http://host.localhost:%s"
-                                             (car (last (split-string (agent-repl-itest-daemon-address successor) ":")))))))
+                (should (null calls-moved))
                 (should (equal (car navigated)
                                (format "http://ws-%s.localhost:%s/?workspace=%s&dir=%s&log_level=info"
                                        (agent-repl--frontend-page-host-label (plist-get ref :id))
@@ -2148,11 +2150,11 @@ the page is re-pointed in the one host web view rather than remounted."
                          (format "\\`http://ws-[a-z0-9-]+\\.localhost:%s/"
                                  (car (last (split-string (agent-repl-itest-daemon-address successor) ":"))))
                          (car navigated)))
-                ;; The webhost stays, its own calls moved to the new daemon.
+                ;; The webhost stays, and the page's re-point leaves its own
+                ;; calls alone: the link's up edge moves those (webhost.el,
+                ;; test-webhost.el).
                 (should (null host-moved))
-                (should (equal calls-moved
-                               (list (format "http://host.localhost:%s"
-                                             (car (last (split-string (agent-repl-itest-daemon-address successor) ":"))))))))
+                (should (null calls-moved)))
             (agent-repl-connect-close fresh)))))))
 
 ;; audit-3 #24

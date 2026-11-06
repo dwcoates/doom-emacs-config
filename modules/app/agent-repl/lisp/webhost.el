@@ -724,9 +724,10 @@ NOT MOVE WITH A PAGE: they follow the link (`agent-repl-webhost-follow-daemon').
 That daemon is the link\='s newest (`agent-repl-webhost-daemon-conn').
 The host keeps its page and every workspace\='s; only where its services\='
 calls, and the sidebar\='s (sidebar-view.el), go moves (`setDaemon').
-Run by the link\='s handover and promotion edges, never by a page: a
-handover moves the host once, onto the successor, and nothing moves it
-back onto the daemon being left."
+Run by the link\='s up, handover and promotion edges, never by a page: a
+handover moves the host once, onto the successor, nothing moves it back
+onto the daemon being left, and a daemon Emacs relinked to after a
+restart (on a fresh port) takes the host\='s calls at its link-up."
   (let ((origin (agent-repl-webhost-origin (agent-repl-webhost-daemon-conn))))
     (unless (equal origin (or agent-repl--webhost-daemon-origin
                               (and agent-repl--webhost-url
@@ -735,6 +736,12 @@ back onto the daemon being left."
       (agent-repl--info agent-repl--webhost-central "elisp.webhost.follows-daemon to=%s" origin)
       (agent-repl--webhost-call "setDaemon" origin)
       (agent-repl-sidebar-view-follow-daemon origin))))
+
+(defun agent-repl-webhost-on-link-up (_conn)
+  "Move the host and the sidebar onto the daemon the link just came up on.
+A restarted daemon listens on a fresh port, and the host\='s page still
+names the one that exited."
+  (agent-repl-webhost-follow-daemon))
 
 (defun agent-repl-webhost-on-link-handover (_old _new)
   "Move the host and the sidebar onto the successor the link just accepted."
@@ -747,6 +754,7 @@ so this moves nothing unless the host was loaded on the daemon being left
 in between."
   (agent-repl-webhost-follow-daemon))
 
+(add-hook 'agent-repl-link-up-functions #'agent-repl-webhost-on-link-up)
 (add-hook 'agent-repl-link-handover-functions #'agent-repl-webhost-on-link-handover)
 (add-hook 'agent-repl-link-promote-functions #'agent-repl-webhost-on-link-promote)
 

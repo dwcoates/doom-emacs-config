@@ -945,8 +945,32 @@ pointed the host and the sidebar back at it, and it had exited 240ms before."
     ;; Assert
     (should-not (agent-repl-test-wh--sent "setDaemon"))))
 
+(ert-deftest agent-repl-test-wh-a-link-up-moves-the-hosts-calls-to-the-restarted-daemon ()
+  "A daemon relinked to after a restart, on a fresh port, takes the host's calls."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (setq agent-repl--webhost-url "http://host.localhost:1/?host=1")
+    (let ((restarted (agent-repl-test-wh--conn "127.0.0.1:5")))
+      (setq agent-repl-test-wh--primary restarted)
+      ;; Act
+      (agent-repl-webhost-on-link-up restarted)
+      ;; Assert
+      (should (equal (agent-repl-test-wh--sent "setDaemon")
+                     (list (agent-repl--webhost-script "setDaemon" "http://host.localhost:5")))))))
+
+(ert-deftest agent-repl-test-wh-a-link-up-on-the-hosts-own-daemon-moves-nothing ()
+  "A link-up on the daemon that served the host tells the host nothing."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (setq agent-repl--webhost-url "http://host.localhost:1/?host=1")
+    ;; Act
+    (agent-repl-webhost-on-link-up agent-repl-test-wh--primary)
+    ;; Assert
+    (should-not (agent-repl-test-wh--sent "setDaemon"))))
+
 (ert-deftest agent-repl-test-wh-the-host-follows-the-links-handover-and-promotion ()
   "The host's calls are moved by the link's own edges, as the roster's are (roster.el)."
+  (should (memq #'agent-repl-webhost-on-link-up agent-repl-link-up-functions))
   (should (memq #'agent-repl-webhost-on-link-handover agent-repl-link-handover-functions))
   (should (memq #'agent-repl-webhost-on-link-promote agent-repl-link-promote-functions)))
 
