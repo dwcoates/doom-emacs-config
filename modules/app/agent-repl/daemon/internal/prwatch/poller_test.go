@@ -9,6 +9,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ghclient"
+	"agent-repld/internal/ids"
 	"agent-repld/internal/wsm"
 )
 
@@ -404,5 +405,41 @@ func TestOneTickReadsAQueueOnceForEveryoneFollowingIt(t *testing.T) {
 	// Assert
 	if got := r.gqlCalls("MergeQueue") - before; got != 1 {
 		t.Fatalf("the queue was read %d times in one tick, want once", got)
+	}
+}
+
+func TestRecordReadFailureRecordsWhatItCouldNotDo(t *testing.T) {
+	boom := errors.New("store down")
+	tests := []struct {
+		name      string
+		recordErr error
+		oweErr    error
+		wantLog   string
+		wantOwed  int
+	}{
+		{name: "a failure it could not record owes nothing", recordErr: boom, wantLog: "could not record the merge queue's failed read"},
+		{name: "a notice it could not owe is recorded", oweErr: boom, wantLog: "could not owe the subscriber the failure's notice", wantOwed: 1},
+		{name: "a stretch it began owes its subscriber the failure", wantLog: "the merge queue could not be read; its subscriptions are failing", wantOwed: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			r := newRig(t)
+			var owed [][]string
+
+			// Act
+			r.w.recordReadFailure(context.Background(), opQueuePoll, "merge queue", errors.New("dns"), dlog.Context{"merge_queue": "o/r@main"},
+				func(wsm.PullRequestFailure) ([]ids.WorkspaceID, error) { return []ids.WorkspaceID{r.ws}, tt.recordErr },
+				func(_ ids.WorkspaceID, sentences []string) error { owed = append(owed, sentences); return tt.oweErr })
+
+			// Assert
+			if len(owed) != tt.wantOwed || (tt.wantOwed == 1 && !strings.Contains(owed[0][0], "this merge queue are failing: dns")) {
+				t.Fatalf("owed = %v, want %d", owed, tt.wantOwed)
+			}
+			record, ok := dlog.FindRecord(r.log.Records(), dlog.RecordQuery{Operation: opQueuePoll, Message: tt.wantLog})
+			if !ok || record.Context["merge_queue"] != "o/r@main" {
+				t.Fatalf("no record %q naming the queue: %+v", tt.wantLog, r.log.Records())
+			}
+		})
 	}
 }

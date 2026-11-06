@@ -184,7 +184,7 @@ func TestAQueueThatCannotBeReadIsToldFailingOnce(t *testing.T) {
 	if f := r.queueSub(t).Failing; f == nil || f.Kind != wsm.PullRequestFailureUnauthorized {
 		t.Fatalf("failing = %+v, want unauthorized", f)
 	}
-	if _, ok := dlog.FindRecord(r.log.Records(), dlog.RecordQuery{Level: "info", Operation: opQueuePoll, Message: "the queue could not be read; its subscriptions are failing"}); !ok {
+	if _, ok := dlog.FindRecord(r.log.Records(), dlog.RecordQuery{Level: "info", Operation: opQueuePoll, Message: "the merge queue could not be read; its subscriptions are failing"}); !ok {
 		t.Fatalf("no failure record: %+v", r.log.Records())
 	}
 }

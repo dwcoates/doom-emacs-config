@@ -339,17 +339,32 @@ func (w *Watcher) advance(ctx context.Context, sub wsm.PullRequestSubscription, 
 // recordFailure records a failed read for every subscription to PR, and owes
 // the subscribers whose failing stretch it began one sentence saying so.
 func (w *Watcher) recordFailure(ctx context.Context, pr wsm.PullRequestKey, err error, fields dlog.Context) {
+	w.recordReadFailure(ctx, opPoll, "pull request", err, fields,
+		func(f wsm.PullRequestFailure) ([]ids.WorkspaceID, error) {
+			return w.deps.Store.RecordPullRequestReadFailure(ctx, pr, f)
+		},
+		func(subscriber ids.WorkspaceID, sentences []string) error {
+			return w.deps.Store.OwePullRequestNotice(ctx, subscriber, pr, sentences)
+		})
+}
+
+// recordReadFailure records a failed read of a SUBJECT (`pull request`,
+// `merge queue`) through RECORD for every subscription to it, and owes each
+// subscriber whose failing stretch the read began one sentence saying so,
+// through OWE.
+func (w *Watcher) recordReadFailure(ctx context.Context, op, subject string, err error, fields dlog.Context,
+	record func(wsm.PullRequestFailure) ([]ids.WorkspaceID, error), owe func(ids.WorkspaceID, []string) error) {
 	f := failureOf(err, w.deps.Clock.Now())
-	began, rerr := w.deps.Store.RecordPullRequestReadFailure(ctx, pr, f)
+	began, rerr := record(f)
 	if rerr != nil {
-		w.deps.Log.Error(opPoll, "could not record the pull request's failed read", dlog.WithCause(dlog.Merge(fields, dlog.Context{"read_error": err.Error()}), rerr))
+		w.deps.Log.Error(op, "could not record the "+subject+"'s failed read", dlog.WithCause(dlog.Merge(fields, dlog.Context{"read_error": err.Error()}), rerr))
 		return
 	}
-	// The leaf recorded the failure itself; this records what it cost.
-	w.deps.Log.Info(opPoll, "the pull request could not be read; its subscriptions are failing", dlog.Merge(fields, dlog.Context{"kind": string(f.Kind), "began": len(began)}))
+	// The leaf recorded a GitHub failure itself; this records what it cost.
+	w.deps.Log.Info(op, "the "+subject+" could not be read; its subscriptions are failing", dlog.Merge(fields, dlog.Context{"kind": string(f.Kind), "began": len(began), "cause": err.Error()}))
 	for _, subscriber := range began {
-		if err := w.deps.Store.OwePullRequestNotice(ctx, subscriber, pr, []string{failureSentence(f, "pull request")}); err != nil {
-			w.deps.Log.Error(opPoll, "could not owe the subscriber the failure's notice", dlog.WithCause(dlog.Merge(fields, dlog.Context{"subscriber": string(subscriber)}), err))
+		if err := owe(subscriber, []string{failureSentence(f, subject)}); err != nil {
+			w.deps.Log.Error(op, "could not owe the subscriber the failure's notice", dlog.WithCause(dlog.Merge(fields, dlog.Context{"subscriber": string(subscriber)}), err))
 		}
 	}
 }

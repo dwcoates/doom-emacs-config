@@ -288,19 +288,13 @@ func (w *Watcher) advanceQueue(ctx context.Context, sub wsm.GithubMergeQueueSubs
 // and owes the subscribers whose failing stretch it began one sentence
 // saying so.
 func (w *Watcher) recordQueueFailure(ctx context.Context, key wsm.GithubMergeQueueKey, err error, fields dlog.Context) {
-	f := failureOf(err, w.deps.Clock.Now())
-	began, rerr := w.deps.Store.RecordGithubMergeQueueReadFailure(ctx, key, f)
-	if rerr != nil {
-		w.deps.Log.Error(opQueuePoll, "could not record the queue's failed read", dlog.WithCause(dlog.Merge(fields, dlog.Context{"read_error": err.Error()}), rerr))
-		return
-	}
-	// The leaf recorded a GitHub failure itself; this records what it cost.
-	w.deps.Log.Info(opQueuePoll, "the queue could not be read; its subscriptions are failing", dlog.Merge(fields, dlog.Context{"kind": string(f.Kind), "began": len(began), "cause": err.Error()}))
-	for _, subscriber := range began {
-		if err := w.deps.Store.OweGithubMergeQueueNotice(ctx, subscriber, key, []string{failureSentence(f, "merge queue")}); err != nil {
-			w.deps.Log.Error(opQueuePoll, "could not owe the subscriber the failure's notice", dlog.WithCause(dlog.Merge(fields, dlog.Context{"subscriber": string(subscriber)}), err))
-		}
-	}
+	w.recordReadFailure(ctx, opQueuePoll, "merge queue", err, fields,
+		func(f wsm.PullRequestFailure) ([]ids.WorkspaceID, error) {
+			return w.deps.Store.RecordGithubMergeQueueReadFailure(ctx, key, f)
+		},
+		func(subscriber ids.WorkspaceID, sentences []string) error {
+			return w.deps.Store.OweGithubMergeQueueNotice(ctx, subscriber, key, sentences)
+		})
 }
 
 // githubMergeQueueNotice is O as the notice delivery submits it.
