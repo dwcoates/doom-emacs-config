@@ -483,6 +483,9 @@ Response (👀 no changes made)
 └── 2.2 A unit test pins the remapped boundary
 ```
 
+- A response's tree is NEVER wrapped in a fence.
+  - The fence above exists only so this document can show the example.
+  - A real response writes its header line and its tree as plain lines, so the feed draws the tree.
 - Connectors MUST emanate from the column where the parent's dotted hierarchical label begins rather than from the emoji or any other character that follows that label.
   - Each child's ├──, └──, and │ connector aligns vertically beneath the first character of the parent's dotted hierarchical label.
   - This connector-alignment rule governs ONLY the horizontal column at which connectors are drawn.
