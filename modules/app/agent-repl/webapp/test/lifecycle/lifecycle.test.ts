@@ -739,9 +739,10 @@ describe("startLifecycle: the daemon stream", () => {
     vi.useRealTimers();
   });
 
-  it("draws the standing drain banner", async () => {
+  it("sets data-deploying on the pulse host for a deploy's drain, drawing no banner", async () => {
     // ARRANGE
     const host = document.createElement("div");
+    const pulseHost = document.createElement("div");
     const { client } = lifecycleClient({
       daemon: async function* () {
         yield create(WatchDaemonResponseSchema, {
@@ -751,10 +752,30 @@ describe("startLifecycle: the daemon stream", () => {
     });
     const ctx = lifecycleContext(client, new RecordingSink(), fakeTicker());
     // ACT
+    const handle = startLifecycle(ctx, { ...lifecycleDeps(host), deployPulseHost: pulseHost });
+    await settle();
+    // ASSERT
+    expect(pulseHost.hasAttribute("data-deploying")).toBe(true);
+    expect(host.children.length).toBe(0);
+    handle.dispose();
+  });
+
+  it("draws the standing drain banner", async () => {
+    // ARRANGE
+    const host = document.createElement("div");
+    const { client } = lifecycleClient({
+      daemon: async function* () {
+        yield create(WatchDaemonResponseSchema, {
+          push: { case: "drainScheduled", value: drain(NOW + 60_000, reason("maintenance")) },
+        });
+      },
+    });
+    const ctx = lifecycleContext(client, new RecordingSink(), fakeTicker());
+    // ACT
     const handle = startLifecycle(ctx, lifecycleDeps(host));
     await settle();
     // ASSERT (before dispose: disposing takes the banner down by design)
-    expect(host.textContent).toContain("daemon restart scheduled · deploy");
+    expect(host.textContent).toContain("daemon restart scheduled · maintenance");
     handle.dispose();
   });
 
