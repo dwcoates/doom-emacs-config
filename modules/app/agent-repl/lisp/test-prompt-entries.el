@@ -575,7 +575,7 @@ ANSWER is a response plist, or (:signal ERR) to signal it.  Binds
     (agent-repl-prompt-entries-open-below)
     ;; Assert
     (should (equal (list (agent-repl-test-prompt-entries--line) (plist-get (car asked) :direction) (plist-get (car asked) :label))
-                   '("1.2 -    " (:arm :next) "1.1")))))
+                   '("1.2 - " (:arm :next) "1.1")))))
 
 (ert-deftest agent-repl-test-prompt-entries-O-on-an-entry-opens-the-previous-nodes-entry ()
   "`O' on an entry line opens a line above filled with the previous node's label."
@@ -1023,7 +1023,7 @@ is recorded on `flashed'."
   (agent-repl-test-prompt-entries--stepping (agent-repl-test-prompt-entries--found "1.2")
     ;; Arrange
     (save-excursion (goto-char 7) (delete-char 3) (insert "   "))
-    (goto-char (line-end-position))
+    (goto-char 6)
     ;; Act
     (agent-repl-prompt-entries-advance-or-open-sibling)
     ;; Assert
@@ -1035,7 +1035,7 @@ is recorded on `flashed'."
   (agent-repl-test-prompt-entries--stepping (agent-repl-test-prompt-entries--found "2")
     ;; Arrange
     (save-excursion (goto-char 4) (delete-char 6) (insert "      "))
-    (goto-char (line-end-position))
+    (goto-char 6)
     ;; Act
     (agent-repl-prompt-entries-advance-or-open-sibling)
     ;; Assert
@@ -1046,7 +1046,7 @@ is recorded on `flashed'."
   (agent-repl-test-prompt-entries--stepping agent-repl-test-prompt-entries--none
     ;; Arrange
     (save-excursion (goto-char 7) (delete-char 3) (insert "   "))
-    (goto-char (line-end-position))
+    (goto-char 6)
     ;; Act
     (agent-repl-prompt-entries-advance-or-open-sibling)
     ;; Assert
