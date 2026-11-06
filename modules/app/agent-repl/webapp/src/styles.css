@@ -1101,9 +1101,6 @@ body {
   font-size: 0.9em;
   padding-left: var(--mq-list-indent);
 }
-/* The bullet takes the line's color and holds its place in the indent; the
-   line's gap sets the name off it. */
-#ws-sidebar .sb-mq-bullet { flex: 0 0 auto; }
 /* THE STAGES wear the bubble's tab glyphs, and their colours from the
    bubble's own rules (".merge-tab-glyph.is-live" and its siblings). */
 #ws-sidebar .sb-mq-stages {

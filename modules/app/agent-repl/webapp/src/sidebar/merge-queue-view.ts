@@ -391,9 +391,6 @@ export function drawRosterMergeQueueStage(u: RosterMergeQueueStage, path: string
   return el;
 }
 
-/** The class of the bullet a waiting merge's line opens with. */
-export const MERGE_QUEUE_BULLET_CLASS = "sb-mq-bullet";
-
 /**
  * THE SECOND SPOT (owner rulings, 2026-10-31 and 2026-11-03): one merge that
  * stepped aside to repair out of line -- its failing tests, or its rebase's
@@ -436,9 +433,8 @@ export function remediatingDetail(reason: RosterMergeQueueRemediatingReason): st
 }
 
 /**
- * One merge waiting behind the head, indented under the head's name: a bullet
- * in the name's own color (owner request, 2026-10-27), the credited
- * workspace's name, a front mark when it was put in line at the front, and how
+ * One merge waiting behind the head, indented under the head's name, with no
+ * bullet (owner request, 2026-11-06): the credited workspace's name, a front mark when it was put in line at the front, and how
  * long it has waited -- or, for a merge racing the head, how long it has
  * raced. Its place is the line's order; it is not numbered (owner
  * request, 2026-10-27).
@@ -450,11 +446,7 @@ export function drawRosterMergeQueueWaiting(
 ): HTMLElement {
   const subject = requireMessage(u.subject, `${path}.subject`);
   const line = drawSubjectControl(subject, sc, MERGE_QUEUE_WAITING_CLASS, `${path}.subject`);
-  const bullet = document.createElement("span");
-  bullet.className = MERGE_QUEUE_BULLET_CLASS;
-  bullet.setAttribute("aria-hidden", "true");
-  bullet.textContent = "•";
-  line.append(bullet, drawSubjectName(subject, `${path}.subject`));
+  line.append(drawSubjectName(subject, `${path}.subject`));
   if (u.placedAtFront) {
     const front = document.createElement("span");
     front.className = "sb-mq-front";
