@@ -87,6 +87,13 @@ export interface ChainRecord extends TitleDigestRecord {
   readonly uuid: string;
   readonly parentUuid?: unknown;
   readonly origin?: { readonly kind?: unknown };
+  /**
+   * The prompts the vendor DROPPED unrecorded, on the interrupt marker it
+   * writes when a stop lands before it took a delivered prompt in: such a
+   * prompt never gets a user record of its own, and the marker stands in its
+   * place on the chain ({@link promptPlace}).
+   */
+  readonly droppedPromptUuids?: unknown;
 }
 
 /** The transcript as a conversation: its chain, oldest first. */
@@ -190,6 +197,7 @@ export function chainRecordOf(record: Partial<ChainRecord>): ChainRecord {
   if (record.isSidechain !== undefined) slice.isSidechain = record.isSidechain;
   if (record.isCompactSummary !== undefined) slice.isCompactSummary = record.isCompactSummary;
   if (record.origin !== undefined) slice.origin = { kind: (record.origin as { kind?: unknown } | null)?.kind };
+  if (record.droppedPromptUuids !== undefined) slice.droppedPromptUuids = record.droppedPromptUuids;
   const message = record.message as { role?: unknown; content?: unknown } | null | undefined;
   if (message !== undefined && message !== null) {
     const content = message.content;
@@ -339,6 +347,31 @@ function walkChain(file: string, byUuid: ReadonlyMap<string, ChainRecord>, start
   return { kind: "ok", transcript: { byUuid, chain, walked: chain } };
 }
 
+/** How a chain record stands for a prompt: its own user record, or the marker that dropped it. */
+export type PromptPlace = "recorded" | "dropped";
+
+/**
+ * THE ONE RULE for where a prompt sits on the chain: how RECORD stands for one
+ * of PROMPT_UUIDS, or absence when it stands for none of them.
+ *
+ * A prompt the vendor took in is its own `type:"user"` record. A prompt the
+ * vendor DROPPED, because a stop landed after the prompt was delivered and
+ * before the vendor took it in, has no record of its own: the interrupt
+ * marker the stop left names it in `droppedPromptUuids` (seen in the 2.1.311
+ * CLI's transcripts, 2026-11-06), and that marker is the prompt's place.
+ * Rolling such a prompt back cuts at the marker's parent, so the conversation
+ * resumes exactly as it stood before the prompt was sent.
+ */
+export function promptPlace(record: ChainRecord, promptUuids: ReadonlySet<string>): PromptPlace | undefined {
+  if (record.type !== "user") return undefined;
+  if (promptUuids.has(record.uuid)) return "recorded";
+  const dropped = record.droppedPromptUuids;
+  if (Array.isArray(dropped) && dropped.some((uuid) => typeof uuid === "string" && promptUuids.has(uuid))) {
+    return "dropped";
+  }
+  return undefined;
+}
+
 /**
  * A record's predecessor in the conversation. A compaction's boundary has
  * none: the chain starts there (see the module comment).
@@ -428,7 +461,12 @@ export type GuardArming =
    * rollback dropped, still on the chain the vendor loads): arming it would
    * only have the vendor refuse a cut the shim's own check allowed.
    */
-  | { readonly kind: "unattributable"; readonly recordUuid: string };
+  | { readonly kind: "unattributable"; readonly recordUuid: string }
+  /**
+   * The vendor dropped the prompt unrecorded ({@link promptPlace}): the guard
+   * names the dropped turn by its prompt's record, and there is none.
+   */
+  | { readonly kind: "promptDropped" };
 
 /** Why the plan refuses `unseen_prompt`. */
 export type UnseenWhy =
@@ -442,7 +480,14 @@ export type UnseenWhy =
 
 /** Where the conversation is cut, or why it cannot be. THE ARM IS THE OUTCOME. */
 export type CutPlan =
-  | { readonly kind: "cut"; readonly promptUuid: string; readonly forkPoint: string; readonly guard: GuardArming }
+  | {
+      readonly kind: "cut";
+      readonly promptUuid: string;
+      readonly forkPoint: string;
+      readonly guard: GuardArming;
+      /** How the prompt sits on the chain; a dropped prompt has no files to restore to. */
+      readonly place: PromptPlace;
+    }
   | { readonly kind: "promptNotRecorded"; readonly detail: string }
   | { readonly kind: "firstPrompt" }
   | { readonly kind: "unseenPrompt"; readonly vendorPromptUuid: string; readonly why: UnseenWhy };
@@ -455,7 +500,12 @@ export type RollbackFiles = "keep" | "restore";
  * the prompts of `droppedPromptUuids` (the derived uuids of `dropped_turns`).
  *
  *   - the prompt must be a `type:"user"` record ON THE LIVE CHAIN: one on a
- *     branch an earlier rollback dropped is no longer in the conversation;
+ *     branch an earlier rollback dropped is no longer in the conversation. A
+ *     prompt the vendor dropped unrecorded sits at the interrupt marker that
+ *     names it ({@link promptPlace}), and is cut at that marker's parent;
+ *   - restoring files to a dropped prompt is possible only with nothing after
+ *     its marker: the vendor holds no checkpoint for a prompt it never took
+ *     in, and with nothing after it nothing changed the files since;
  *   - with no predecessor it is the conversation's first, and nothing precedes
  *     it to resume at;
  *   - every later prompt on the chain must be one the caller named (the
@@ -477,10 +527,15 @@ export function planCut(
   droppedPromptUuids: readonly string[],
   files: RollbackFiles,
 ): CutPlan {
-  const record = transcript.byUuid.get(promptUuid);
-  if (record === undefined || record.type !== "user") {
+  const own = new Set([promptUuid]);
+  const recorded = transcript.byUuid.get(promptUuid);
+  const record =
+    recorded?.type === "user" ? recorded : transcript.walked.find((entry) => promptPlace(entry, own) === "dropped");
+  if (record === undefined) {
     return { kind: "promptNotRecorded", detail: `the vendor transcript holds no user record ${promptUuid}` };
   }
+  const place = promptPlace(record, own);
+  if (place === undefined) throw new Error(`rollback: record ${record.uuid} was found for prompt ${promptUuid} and stands for none`);
   const at = transcript.chain.indexOf(record);
   if (at < 0) {
     return {
@@ -494,12 +549,20 @@ export function planCut(
   const later = transcript.chain.slice(at + 1);
   const unseen = later.find((entry) => isPromptRecord(entry) && !named.has(entry.uuid));
   if (unseen !== undefined) return { kind: "unseenPrompt", vendorPromptUuid: unseen.uuid, why: "unnamedPrompt" };
+  if (files === "restore" && place === "dropped" && later.length > 0) {
+    return {
+      kind: "promptNotRecorded",
+      detail: `the vendor dropped prompt ${promptUuid} unrecorded, so the files cannot be restored to it past the records after it`,
+    };
+  }
   if (files === "restore") {
     const refused = later.find((entry) => !guardAttributes(entry, named) && !isKeepaliveRecord(entry));
     if (refused !== undefined) return { kind: "unseenPrompt", vendorPromptUuid: refused.uuid, why: "guardWouldRefuse" };
   }
   const discarded = transcript.walked.slice(transcript.walked.indexOf(record) + 1);
-  return { kind: "cut", promptUuid, forkPoint, guard: guardArming(discarded, promptUuid, droppedPromptUuids.length) };
+  const guard: GuardArming =
+    place === "dropped" ? { kind: "promptDropped" } : guardArming(discarded, promptUuid, droppedPromptUuids.length);
+  return { kind: "cut", promptUuid, forkPoint, guard, place };
 }
 
 /** Whether to arm the guard for a cut whose resume discards `discarded`. */
@@ -515,7 +578,7 @@ function guardArming(discarded: readonly ChainRecord[], promptUuid: string, drop
 export type LiveEnd =
   /** No rolled-back prompt is on the newest record's chain: it ends there. */
   | { readonly kind: "whole" }
-  /** It ends at `forkPoint`, just before the rolled-back prompt `promptUuid`. */
+  /** It ends at `forkPoint`, just before `promptUuid`: the rolled-back prompt's record, or the marker of one the vendor dropped. */
   | { readonly kind: "cut"; readonly promptUuid: string; readonly forkPoint: string }
   /** A rolled-back prompt opens the chain, so nothing precedes it to end at. */
   | { readonly kind: "firstPrompt"; readonly promptUuid: string };
@@ -524,11 +587,11 @@ export type LiveEnd =
  * THE ONE RULE for where the conversation ends after its rollbacks
  * (`StartSessionResume.rolled_back_turns`): the newest record's chain, unless
  * it holds the prompt of a rolled-back turn; then the entry just before the
- * EARLIEST such prompt on it. A branch the next prompt started holds none of
+ * EARLIEST such prompt on it, a dropped prompt at its marker ({@link promptPlace}). A branch the next prompt started holds none of
  * them, so the rule never needs clearing.
  */
 export function liveEnd(transcript: TranscriptChain, rolledBackPromptUuids: ReadonlySet<string>): LiveEnd {
-  const earliest = transcript.chain.find((entry) => entry.type === "user" && rolledBackPromptUuids.has(entry.uuid));
+  const earliest = transcript.chain.find((entry) => promptPlace(entry, rolledBackPromptUuids) !== undefined);
   if (earliest === undefined) return { kind: "whole" };
   const forkPoint = parentOf(earliest);
   if (forkPoint === undefined) return { kind: "firstPrompt", promptUuid: earliest.uuid };

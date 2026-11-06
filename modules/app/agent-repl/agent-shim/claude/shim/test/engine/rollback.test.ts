@@ -12,6 +12,7 @@ import {
   isPromptRecord,
   liveEnd,
   planCut,
+  promptPlace,
   chainRecordOf,
   createTranscriptIndex,
   readLiveChain,
@@ -44,6 +45,12 @@ const assistant = (uuid: string, parentUuid: string): Record<string, unknown> =>
   uuid,
   parentUuid,
   message: { role: "assistant", content: [{ type: "text", text: "ok" }] },
+});
+
+/** The interrupt marker a stop leaves when the vendor dropped `dropped` unrecorded. */
+const droppingMarker = (uuid: string, parentUuid: string, ...dropped: string[]): Record<string, unknown> => ({
+  ...user(uuid, parentUuid, [{ type: "text", text: "[Request interrupted by user]" }]),
+  droppedPromptUuids: dropped,
 });
 
 /** The chain the file holds, or a thrown failure naming why it holds none. */
@@ -259,7 +266,7 @@ describe("planCut", () => {
     const plan = planCut(conversation(), "p1", ["p1", "p2"], "keep");
 
     // Assert.
-    expect(plan).toEqual({ kind: "cut", promptUuid: "p1", forkPoint: "a0", guard: { kind: "severalTurns" } });
+    expect(plan).toEqual({ kind: "cut", promptUuid: "p1", forkPoint: "a0", guard: { kind: "severalTurns" }, place: "recorded" });
   });
 
   it("refuses an unnamed later prompt, naming the first", () => {
@@ -327,6 +334,98 @@ describe("planCut", () => {
   });
 });
 
+describe("promptPlace", () => {
+  it.each([
+    { name: "a prompt's own user record is recorded", record: user("p1", "a0"), want: "recorded" },
+    { name: "an interrupt marker naming the prompt is dropped", record: droppingMarker("m1", "a0", "p1"), want: "dropped" },
+    { name: "an interrupt marker naming other prompts stands for none", record: droppingMarker("m1", "a0", "p9"), want: undefined },
+    { name: "another user record stands for none", record: user("p2", "a0"), want: undefined },
+    { name: "a record that is not a user record stands for none", record: { ...assistant("p1", "a0"), droppedPromptUuids: ["p1"] }, want: undefined },
+    { name: "a malformed dropped list stands for none", record: { ...user("m1", "a0"), droppedPromptUuids: "p1" }, want: undefined },
+  ])("$name", ({ record, want }) => {
+    // Act.
+    const place = promptPlace(chainRecordOf(record), new Set(["p1"]));
+
+    // Assert.
+    expect(place).toBe(want);
+  });
+});
+
+describe("planCut, a prompt the vendor dropped unrecorded", () => {
+  /** p0 and p1 answered; p2 delivered and dropped by a stop, its marker m2 in its place. */
+  const lines = (): Record<string, unknown>[] => [
+    user("p0", null),
+    assistant("a0", "p0"),
+    user("p1", "a0"),
+    assistant("a1", "p1"),
+    droppingMarker("m2", "a1", "p2"),
+  ];
+
+  it("cuts at the parent of the marker that names it, with the guard unarmed", () => {
+    // Arrange, Act.
+    const plan = planCut(chainOf(transcript(lines())), "p2", ["p2"], "keep");
+
+    // Assert.
+    expect(plan).toEqual({ kind: "cut", promptUuid: "p2", forkPoint: "a1", guard: { kind: "promptDropped" }, place: "dropped" });
+  });
+
+  it("cuts a files-restoring rollback when nothing follows the marker", () => {
+    // Arrange, Act.
+    const plan = planCut(chainOf(transcript(lines())), "p2", ["p2"], "restore");
+
+    // Assert.
+    expect(plan).toMatchObject({ kind: "cut", forkPoint: "a1", place: "dropped" });
+  });
+
+  it("refuses a files-restoring rollback when records follow the marker", () => {
+    // Arrange.
+    const chain = chainOf(transcript([...lines(), user("p3", "m2"), assistant("a3", "p3")]));
+
+    // Act.
+    const plan = planCut(chain, "p2", ["p2", "p3"], "restore");
+
+    // Assert.
+    expect(plan.kind).toBe("promptNotRecorded");
+  });
+
+  it("refuses an unnamed prompt after the marker", () => {
+    // Arrange.
+    const chain = chainOf(transcript([...lines(), user("p3", "m2")]));
+
+    // Act.
+    const plan = planCut(chain, "p2", ["p2"], "keep");
+
+    // Assert.
+    expect(plan).toEqual({ kind: "unseenPrompt", vendorPromptUuid: "p3", why: "unnamedPrompt" });
+  });
+
+  it("refuses a dropped prompt whose marker is on a branch the conversation no longer holds", () => {
+    // Arrange: the next prompt p3 was sent at a1, past the marker.
+    const chain = chainOf(transcript([...lines(), user("p3", "a1")]));
+
+    // Act.
+    const plan = planCut(chain, "p2", ["p2", "p3"], "keep");
+
+    // Assert.
+    expect(plan.kind).toBe("promptNotRecorded");
+  });
+
+  it("ends the live chain where the cut is planned, the two reading one place", () => {
+    // Arrange.
+    const chain = chainOf(transcript(lines()));
+
+    // Act.
+    const plan = planCut(chain, "p2", ["p2"], "keep");
+    const end = liveEnd(chain, new Set(["p2"]));
+
+    // Assert.
+    expect({ plan: plan.kind === "cut" ? plan.forkPoint : plan.kind, end: end.kind === "cut" ? end.forkPoint : end.kind }).toEqual({
+      plan: "a1",
+      end: "a1",
+    });
+  });
+});
+
 describe("isKeepaliveRecord", () => {
   it("recognizes the shim's own keep-alive by its marker", () => {
     // Arrange.
@@ -387,7 +486,7 @@ describe("planCut, the vendor's guard and the files", () => {
     const plan = planCut(chain, "p1", ["p1"], "keep");
 
     // Assert.
-    expect(plan).toEqual({ kind: "cut", promptUuid: "p1", forkPoint: "a0", guard: { kind: "armed", resumeDropsTurn: "p1" } });
+    expect(plan).toEqual({ kind: "cut", promptUuid: "p1", forkPoint: "a0", guard: { kind: "armed", resumeDropsTurn: "p1" }, place: "recorded" });
   });
 
   /** p0, p1 and p2 answered, then p2 rolled back: the file's newest record is still p2's answer. */
@@ -414,7 +513,7 @@ describe("planCut, the vendor's guard and the files", () => {
     const plan = planCut(live, "p1", ["p1"], "keep");
 
     // Assert.
-    expect(plan).toEqual({ kind: "cut", promptUuid: "p1", forkPoint: "a0", guard: { kind: "unattributable", recordUuid: "p2" } });
+    expect(plan).toEqual({ kind: "cut", promptUuid: "p1", forkPoint: "a0", guard: { kind: "unattributable", recordUuid: "p2" }, place: "recorded" });
   });
 
   it("plans a cut past an earlier rollback that the mocked vendor boots", () => {
@@ -436,7 +535,7 @@ describe("planCut, the vendor's guard and the files", () => {
     const plan = planCut(withAfter(keepalive), "p1", ["p1"], "keep");
 
     // Assert.
-    expect(plan).toEqual({ kind: "cut", promptUuid: "p1", forkPoint: "a0", guard: { kind: "unattributable", recordUuid: "k1" } });
+    expect(plan).toEqual({ kind: "cut", promptUuid: "p1", forkPoint: "a0", guard: { kind: "unattributable", recordUuid: "k1" }, place: "recorded" });
   });
 
   it("does not refuse a restore over a keep-alive past the fork point", () => {
@@ -460,7 +559,7 @@ describe("planCut, the vendor's guard and the files", () => {
     const plan = planCut(withAfter(notification), "p1", ["p1"], "keep");
 
     // Assert.
-    expect(plan).toEqual({ kind: "cut", promptUuid: "p1", forkPoint: "a0", guard: { kind: "unattributable", recordUuid: "n1" } });
+    expect(plan).toEqual({ kind: "cut", promptUuid: "p1", forkPoint: "a0", guard: { kind: "unattributable", recordUuid: "n1" }, place: "recorded" });
   });
 });
 
@@ -508,6 +607,16 @@ describe("liveEnd", () => {
 
     // Act, Assert.
     expect(liveEnd(chain, rolledBack("p1"))).toEqual({ kind: "whole" });
+  });
+
+  it("ends just before the marker of a rolled-back prompt the vendor dropped", () => {
+    // Arrange.
+    const chain = chainOf(
+      transcript([user("p0", null), assistant("a0", "p0"), user("p1", "a0"), assistant("a1", "p1"), droppingMarker("m2", "a1", "p2")]),
+    );
+
+    // Act, Assert.
+    expect(liveEnd(chain, rolledBack("p2"))).toEqual({ kind: "cut", promptUuid: "m2", forkPoint: "a1" });
   });
 
   it("answers firstPrompt when a rolled-back prompt opens the chain", () => {
@@ -783,6 +892,17 @@ describe("chainRecordOf", () => {
       name: "a text block keeps its text",
       record: user("p1", "a0", [{ type: "text", text: "hi", cache_control: {} }]),
       want: { type: "user", uuid: "p1", parentUuid: "a0", message: { role: "user", content: [{ type: "text", text: "hi" }] } },
+    },
+    {
+      name: "an interrupt marker keeps the prompts it dropped",
+      record: { ...user("m0", "a0", "[Request interrupted by user]"), droppedPromptUuids: ["p1"] },
+      want: {
+        type: "user",
+        uuid: "m0",
+        parentUuid: "a0",
+        message: { role: "user", content: "[Request interrupted by user]" },
+        droppedPromptUuids: ["p1"],
+      },
     },
     {
       name: "the chain's own fields are kept",

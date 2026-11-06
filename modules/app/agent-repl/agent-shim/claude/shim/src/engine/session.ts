@@ -128,7 +128,15 @@ import {
 import type { Engine } from "./engine.js";
 import { readTitleDigest } from "./title-digest.js";
 import { readTranscripts } from "./transcripts.js";
-import { createTranscriptIndex, planCut, readLiveChain, vendorCutRefusal, type GuardArming, type TranscriptIndex } from "./rollback.js";
+import {
+  createTranscriptIndex,
+  planCut,
+  readLiveChain,
+  vendorCutRefusal,
+  type CutPlan,
+  type GuardArming,
+  type TranscriptIndex,
+} from "./rollback.js";
 import { settleable, type Settleable } from "./settleable.js";
 import { profileFromProto, type SessionProfile } from "./profile.js";
 import type { EngineFold, FoldContext, LastChange } from "./fold-context.js";
@@ -4648,19 +4656,24 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     restartBegins: () => void,
   ): Promise<shimv1.RollBackSessionResponse> {
     const restore = request.files.case === "restoreFiles";
-    const index = transcriptIndexOf(current.vendorSessionId);
-    const file = index.file;
-    const read = readLiveChain(index, rolledBackPromptUuids());
-    if (read.kind === "unreadable") {
-      throw new Error(`shim session: the vendor transcript ${file} could not be read to plan the rollback: ${read.detail}`);
-    }
     const prompt = promptUuid(context.to_before);
-    const plan =
-      read.kind === "no_transcript"
-        ? { kind: "promptNotRecorded" as const, detail: `no vendor transcript exists at ${file}` }
-        : planCut(read.transcript, prompt, context.dropped_turns.map((turn) => promptUuid(turn)), restore ? "restore" : "keep");
-    const head = read.kind === "ok" && read.end.kind === "cut" ? read.end.forkPoint : "";
-    const planned = { ...context, vendor_prompt_uuid: prompt, chain_head: head };
+    let { plan, planned } = planRollBack(current, prompt, context, restore);
+    // THE OPEN TURN'S PROMPT IS PLANNED ON A SETTLED TRANSCRIPT. A stop that
+    // lands right after the prompt was delivered finds the vendor not yet
+    // done taking it in, so its record may not be written. Stopping the
+    // vendor settles it either way: the prompt is recorded, or the stop's
+    // interrupt marker names it dropped (engine/rollback.ts, `promptPlace`).
+    // The rollback drops the open turn, so stopping it is the rollback's own
+    // first step, taken before the plan rather than after.
+    if (plan.kind === "promptNotRecorded" && open !== undefined && !open.keepalive && open.id.value === context.to_before) {
+      requireNothingInFlight();
+      LOGGER.info(
+        { ...planned, outcome: "prompt_not_recorded", detail: plan.detail },
+        "the open turn's prompt is not recorded yet; stopping the vendor so the rollback is planned on its settled transcript",
+      );
+      await interruptForRollback();
+      ({ plan, planned } = planRollBack(current, prompt, context, restore));
+    }
     switch (plan.kind) {
       case "promptNotRecorded":
         LOGGER.info({ ...planned, outcome: "prompt_not_recorded", detail: plan.detail }, "refused RollBackSession: the prompt is not in the conversation");
@@ -4693,18 +4706,14 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       case "cut":
         break;
     }
-    const cut = { ...planned, fork_point: plan.forkPoint };
-    // NOTHING THE ROLLBACK MUST NOT INTERRUPT. A start still being processed or
-    // a prompt waiting to join the running turn would be sent onto the query
-    // this replaces, and lost with it.
-    if (turns.startInFlight()) {
-      throw new Error("shim session: RollBackSession arrived while a StartTurn is being processed");
-    }
-    if (joins.length > 0) {
-      throw new Error(`shim session: RollBackSession arrived while turn ${joins[0]?.turn.id.value ?? ""} waits to join the running turn`);
-    }
+    const cut = { ...planned, fork_point: plan.forkPoint, prompt_place: plan.place };
+    requireNothingInFlight();
+    // A DROPPED PROMPT RESTORES NO FILES: the plan allows it only with nothing
+    // after its marker, so nothing changed the files since it was sent, and
+    // the vendor holds no checkpoint for a prompt it never took in.
+    const rewinds = restore && plan.place === "recorded";
     const before = requireQuery();
-    if (restore) {
+    if (rewinds) {
       const dry = await before.rewindFiles(plan.promptUuid, { dryRun: true });
       if (!dry.canRewind) {
         const vendorMessage = dry.error ?? "";
@@ -4721,8 +4730,12 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     LOGGER.info(cut, "ROLLING BACK the vendor conversation to just before the prompt");
     await interruptForRollback();
     let restored: readonly string[] | undefined;
-    if (restore) {
-      await turns.stopWorkSpawnedBy(context.dropped_turns);
+    if (restore) await turns.stopWorkSpawnedBy(context.dropped_turns);
+    if (restore && !rewinds) {
+      restored = [];
+      LOGGER.info(cut, "restored no files: the vendor dropped the prompt, and nothing after it changed them");
+    }
+    if (rewinds) {
       const done = await requireQuery().rewindFiles(plan.promptUuid);
       if (!done.canRewind) {
         const vendorMessage = done.error ?? "";
@@ -4757,6 +4770,44 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       "CUT MADE: the rollback is answered; the vendor restarts at the fork point behind the answer",
     );
     return rollBackSessionSucceeded(restored);
+  }
+
+  /**
+   * Plan the rollback before PROMPT on the transcript as it stands now, with
+   * the context every outcome is logged with.
+   */
+  function planRollBack(
+    current: SessionIdentity,
+    prompt: string,
+    context: { to_before: string; dropped_turns: string[]; files: string },
+    restore: boolean,
+  ): { plan: CutPlan; planned: Record<string, unknown> } {
+    const index = transcriptIndexOf(current.vendorSessionId);
+    const file = index.file;
+    const read = readLiveChain(index, rolledBackPromptUuids());
+    if (read.kind === "unreadable") {
+      throw new Error(`shim session: the vendor transcript ${file} could not be read to plan the rollback: ${read.detail}`);
+    }
+    const plan: CutPlan =
+      read.kind === "no_transcript"
+        ? { kind: "promptNotRecorded", detail: `no vendor transcript exists at ${file}` }
+        : planCut(read.transcript, prompt, context.dropped_turns.map((turn) => promptUuid(turn)), restore ? "restore" : "keep");
+    const head = read.kind === "ok" && read.end.kind === "cut" ? read.end.forkPoint : "";
+    return { plan, planned: { ...context, vendor_prompt_uuid: prompt, chain_head: head } };
+  }
+
+  /**
+   * NOTHING THE ROLLBACK MUST NOT INTERRUPT. A start still being processed or
+   * a prompt waiting to join the running turn would be sent onto the query
+   * the rollback replaces, and lost with it.
+   */
+  function requireNothingInFlight(): void {
+    if (turns.startInFlight()) {
+      throw new Error("shim session: RollBackSession arrived while a StartTurn is being processed");
+    }
+    if (joins.length > 0) {
+      throw new Error(`shim session: RollBackSession arrived while turn ${joins[0]?.turn.id.value ?? ""} waits to join the running turn`);
+    }
   }
 
   /**
@@ -4854,6 +4905,12 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         LOGGER.info(
           { ...cut, guard: "unattributable", record_uuid: guard.recordUuid },
           "the vendor's guard is not armed: an entry past the fork point it would refuse is one the shim knows",
+        );
+        return undefined;
+      case "promptDropped":
+        LOGGER.info(
+          { ...cut, guard: "prompt_dropped" },
+          "the vendor's guard is not armed: the vendor dropped the prompt unrecorded, so no record names the turn",
         );
         return undefined;
     }
