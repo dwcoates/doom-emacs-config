@@ -4634,45 +4634,6 @@ The record is bound as `ran'."
         ;; Assert
         (should-not asked)))))
 
-;;;; ---- Sibling label on C-SPC ----
-
-(defun agent-repl-test-input--sibling (text line-regexp)
-  "Press the sibling chord at the line of TEXT matching LINE-REGEXP; return the buffer."
-  (with-temp-buffer
-    (insert text)
-    (goto-char (point-min))
-    (re-search-forward line-regexp)
-    (agent-repl-input-next-sibling-line)
-    (buffer-string)))
-
-(ert-deftest agent-repl-test-input-sibling-line-uses-next-sibling ()
-  (should (equal "2.1 - a\n2.2 - \n2.2 - b"
-                 (agent-repl-test-input--sibling "2.1 - a\n2.2 - b" "2.1 - a"))))
-
-(ert-deftest agent-repl-test-input-sibling-line-falls-back-to-next-aunt ()
-  (should (equal "2.2 - b\n3 - \n3 - c"
-                 (agent-repl-test-input--sibling "2.2 - b\n3 - c" "2.2 - b"))))
-
-(ert-deftest agent-repl-test-input-sibling-line-recurses-to-grand-aunt ()
-  (should (equal "1.2.1 x\n2 \n2 y"
-                 (agent-repl-test-input--sibling "1.2.1 x\n2 y" "1.2.1 x"))))
-
-(ert-deftest agent-repl-test-input-sibling-line-plain-newline-without-later-label ()
-  (should (equal "2.1 - a\n"
-                 (agent-repl-test-input--sibling "2.1 - a" "2.1 - a"))))
-
-(ert-deftest agent-repl-test-input-sibling-line-plain-newline-without-label ()
-  (should (equal "hello\n"
-                 (agent-repl-test-input--sibling "hello" "hello"))))
-
-(ert-deftest agent-repl-test-input-sibling-line-keeps-indent ()
-  (should (equal "  1.1 - a\n  1.2 - \n  1.2 - b"
-                 (agent-repl-test-input--sibling "  1.1 - a\n  1.2 - b" "1.1 - a"))))
-
-(ert-deftest agent-repl-test-input-sibling-chord-is-bound ()
-  (should (eq #'agent-repl-input-next-sibling-line
-              (lookup-key agent-repl-input-mode-map (kbd "C-SPC")))))
-
 (provide 'test-input)
 
 

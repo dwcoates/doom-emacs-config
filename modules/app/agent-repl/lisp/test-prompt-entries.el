@@ -687,7 +687,9 @@ ANSWER is a response plist, or (:signal ERR) to signal it.  Binds
                          (list 'insert t (list (kbd "M-j") (agent-repl-prompt-entries--on-entry-binding
                                                           #'agent-repl-prompt-entries-open-sibling-above)))
                          (list 'insert t (list (kbd "M-k") (agent-repl-prompt-entries--on-entry-binding
-                                                          #'agent-repl-prompt-entries-open-sibling-below))))))))
+                                                          #'agent-repl-prompt-entries-open-sibling-below)))
+                         (list 'insert t (list (kbd "C-SPC") (agent-repl-prompt-entries--on-entry-binding
+                                                            #'agent-repl-prompt-entries-open-sibling-below))))))))
 
 ;;;; ---- Opening an entry's sibling ----
 
