@@ -1249,32 +1249,8 @@ and the new workspace\'s tab arrives through the roster push."
         ;; later in the sequence has been shown, the ack has nothing left to
         ;; say and would only put an older line over a newer one.
         (progressed nil))
-    (agent-repl-mutation-progress-register
-     op-id
-     :on-stage
-     (lambda (stage)
-       (setq progressed t)
-       (agent-repl-verbs--create-stage-message stage))
-     ;; A CREATE HELD FOR THE NETWORK IS WAITING, NOT FAILED: it is said as a
-     ;; wait, and its creation arrives later on this same op.
-     :on-waiting-for-network
-     (lambda (_waiting)
-       (setq progressed t)
-       (agent-repl-workspace-progress-report :create :waiting-for-network))
-     :on-succeeded
-     (lambda (value)
-       (setq progressed t)
-       (let ((ref (plist-get value :workspace))
-             (name (plist-get value :name)))
-         (agent-repl-workspace-progress-report :create :completed name)
-         ;; The minted ref is the FIRST place this workspace has an identity;
-         ;; the arrival reason is claimed here so the workspace, which is
-         ;; never selected, still opens its panels when its tab arrives.
-         (agent-repl--panels-note-arrival-reason (plist-get ref :id) arrival-reason)))
-     :on-failed
-     (lambda (arm detail)
-       (setq progressed t)
-       (agent-repl-verbs--create-failure arm detail)))
+    (agent-repl-verbs-register-create-progress
+     op-id arrival-reason (lambda () (setq progressed t)))
     ;; THE ACK UX IS IMMEDIATE: the minibuffer reflects the create the instant
     ;; the command runs, not when the slow work finishes -- the owner's rule
     ;; that phases are messages, not only a mode line.
@@ -1355,6 +1331,44 @@ failure."
               (agent-repl--info scope "elisp.verbs.create-awaiting-successor address=%S" address)
               (agent-repl-link-on-successor-accepted resend)))))
       t)))
+
+(defun agent-repl-verbs-register-create-progress (op-id arrival-reason &optional on-progress)
+  "Register the editor\='s create callbacks for the create reporting on OP-ID.
+THE ONE WAY A CREATE\='S PROGRESS IS SHOWN, whoever started it: every
+stage, a wait for the network, the completion and a failure are said in
+the minibuffer, and the created workspace\='s ARRIVAL-REASON (\"created\"
+or \"forked\") is claimed so it opens its panels when its tab arrives,
+never being selected.  ON-PROGRESS, when given, is called before each of
+them, so a caller can tell its own ack line apart from later news.  Call
+it BEFORE the request that starts the create is sent, so no progress
+event can outrun it."
+  (cl-flet ((progressed () (when on-progress (funcall on-progress))))
+    (agent-repl-mutation-progress-register
+     op-id
+     :on-stage
+     (lambda (stage)
+       (progressed)
+       (agent-repl-verbs--create-stage-message stage))
+     ;; A CREATE HELD FOR THE NETWORK IS WAITING, NOT FAILED: it is said as a
+     ;; wait, and its creation arrives later on this same op.
+     :on-waiting-for-network
+     (lambda (_waiting)
+       (progressed)
+       (agent-repl-workspace-progress-report :create :waiting-for-network))
+     :on-succeeded
+     (lambda (value)
+       (progressed)
+       (let ((ref (plist-get value :workspace))
+             (name (plist-get value :name)))
+         (agent-repl-workspace-progress-report :create :completed name)
+         ;; The minted ref is the FIRST place this workspace has an identity;
+         ;; the arrival reason is claimed here so the workspace, which is
+         ;; never selected, still opens its panels when its tab arrives.
+         (agent-repl--panels-note-arrival-reason (plist-get ref :id) arrival-reason)))
+     :on-failed
+     (lambda (arm detail)
+       (progressed)
+       (agent-repl-verbs--create-failure arm detail)))))
 
 (defun agent-repl-verbs--create-stage-message (stage)
   "Echo the minibuffer line for a create STAGE keyword.
