@@ -108,6 +108,7 @@ import { drawOutcomeCard } from "../marker.js";
 import { linkAnswers } from "../entries.js";
 import { linkWorkspaceMentions } from "../workspace-mentions.js";
 import { bubbleCopyControl, reserveCopyRoom } from "../../bubble/copy-room.js";
+import { questionControl } from "../response-question.js";
 import { readResponseUsage, setResponseUsage } from "../response-usage.js";
 import { markComposerEntry } from "../composer-entry.js";
 import { markRevealedNode } from "../revealed-node.js";
@@ -274,6 +275,9 @@ export function drawFeedResponse(u: FeedResponse, rc: RowContext): HTMLElement {
   // THE SUBTREE THE COMPOSER IS ANSWERING is boxed on every paint too
   // (composer-entry.ts).
   const rowId = rc.row.id?.value ?? "";
+  // A RESPONSE THAT CAN BE COPIED CAN BE ASKED ABOUT: its question control
+  // sits just left of the copy control (response-question.ts).
+  const question = copy === undefined ? undefined : questionControl(rowId);
   const prose = markdownSlot(RESPONSE_PROSE_CLASS, served, (rendered) => {
     if (answers.length > 0) linkAnswers(rendered, answers);
     // A WORKSPACE'S NAME IN THE TREE switches to it (workspace-mentions.ts).
@@ -296,7 +300,7 @@ export function drawFeedResponse(u: FeedResponse, rc: RowContext): HTMLElement {
       variant: u.thinking ? "thinking" : "response",
       state: result.case,
       hooks,
-      corner: copy === undefined ? [] : [copy],
+      corner: copy === undefined || question === undefined ? [] : [question, copy],
       content: [prose],
       footer:
         result.case === "error"

@@ -643,6 +643,25 @@ The reader highlighted words of a final response, so focusing the composer
 for the revision is all that is left."
   (agent-repl-wire--decode-empty "HostWorkspaceResponseTextHighlighted" value))
 
+;;;; ---- The response question push ----
+
+(defun agent-repl-wire-decode-host-workspace-response-question (value)
+  "Decode VALUE as `HostWorkspaceResponseQuestion', (:arm CHANGE :value nil).
+CHANGE is `:asked', `:moved', `:withdrawn' or `:taken': the transition the
+workspace's question about a final response made, each naming the edit of
+the composer it asks for.  Every arm is an empty message."
+  (let ((object (agent-repl-wire--object "HostWorkspaceResponseQuestion" value)))
+    (agent-repl-wire--check-keys "HostWorkspaceResponseQuestion" object '(asked moved withdrawn taken))
+    (agent-repl-wire--decoded
+     "HostWorkspaceResponseQuestion"
+     (agent-repl-wire--decode-oneof
+      "HostWorkspaceResponseQuestion" 'change object
+      (mapcar (lambda (arm)
+                (let ((name (format "HostWorkspaceResponseQuestion%s" (capitalize (symbol-name arm)))))
+                  (list arm (intern (format ":%s" arm))
+                        (lambda (v) (agent-repl-wire--decode-empty name v)))))
+              '(asked moved withdrawn taken))))))
+
 ;;;; ---- The rail's row click push ----
 
 (defun agent-repl-wire-decode-host-workspace-select-requested (value)
@@ -932,6 +951,10 @@ VALUE is (:workspace REF :token TOKEN :outcome OUTCOME), all required."
   "Decode the `response_text_highlighted' push arm VALUE."
   (agent-repl-wire-decode-host-workspace-response-text-highlighted value))
 
+(defun agent-repl-wire-decode-watch-host-workspace-response-response-question (value)
+  "Decode the `response_question' push arm VALUE."
+  (agent-repl-wire-decode-host-workspace-response-question value))
+
 (defun agent-repl-wire-decode-watch-host-workspace-response-select-requested (value)
   "Decode the `select_requested' push arm VALUE."
   (agent-repl-wire-decode-host-workspace-select-requested value))
@@ -1022,7 +1045,9 @@ Returns a plist (:command STRING)."
      (chatTextHighlighted :chat-text-highlighted
                           agent-repl-wire-decode-watch-host-workspace-response-chat-text-highlighted)
      (responseTextHighlighted :response-text-highlighted
-                              agent-repl-wire-decode-watch-host-workspace-response-response-text-highlighted))))
+                              agent-repl-wire-decode-watch-host-workspace-response-response-text-highlighted)
+     (responseQuestion :response-question
+                       agent-repl-wire-decode-watch-host-workspace-response-response-question))))
 
 (defun agent-repl-wire-decode-watch-host-workspace-response (value)
   "Decode VALUE as `WatchHostWorkspaceResponse', the push oneof plist."
@@ -1031,7 +1056,7 @@ Returns a plist (:command STRING)."
      "WatchHostWorkspaceResponse" object
      '(host transferred reloadWebapp openInEditor openCommitLog runInTerminal ending notificationClicked selection evaluate
        finalResponseClicked selectRequested loadPageRequested composeEntry chatTextHighlighted
-       transferWithdrawn responseTextHighlighted))
+       transferWithdrawn responseTextHighlighted responseQuestion))
     (agent-repl-wire--decoded
      "WatchHostWorkspaceResponse"
      (agent-repl-wire-decode-watch-host-workspace-response-push object))))

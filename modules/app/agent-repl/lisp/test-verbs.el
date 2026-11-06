@@ -5767,3 +5767,67 @@ and the create is sent once then."
         (agent-repl-verb-merge-queue '(:arm :pause :repository nil))
         ;; Assert.
         (should (equal (plist-get sent :requester) '(:arm :user)))))))
+
+;;;; ---- The one registration of a create's progress ----
+
+(ert-deftest agent-repl-verbs-register-create-progress-claims-the-arrival-on-success ()
+  "A succeeded create claims its arrival reason and says it completed."
+  ;; Arrange.
+  (agent-repl-test--with-clean-state
+    (agent-repl-test-verbs--with nil
+      (let (progressed)
+        (agent-repl-verbs-register-create-progress "op-reg" "forked" (lambda () (setq progressed t)))
+        ;; Act.
+        (agent-repl-mutation-progress-handle
+         (list :op-id "op-reg"
+               :event (list :arm :create
+                            :value (list :arm :succeeded
+                                         :value (list :workspace (agent-repl-test-verbs--ref "q" "/tmp/q")
+                                                      :name "q")))))
+        ;; Assert.
+        (should progressed)
+        (should (equal (agent-repl--panels-take-arrival-reason "q") "forked"))
+        (should-not (gethash "op-reg" agent-repl-mutation-progress--pending))))))
+
+(ert-deftest agent-repl-verbs-register-create-progress-says-a-failure ()
+  "A failed create is worded as every create's failure is, and calls back."
+  ;; Arrange.
+  (agent-repl-test--with-clean-state
+    (agent-repl-test-verbs--with nil
+      (let (progressed failures)
+        (cl-letf (((symbol-function 'agent-repl-verbs--create-failure)
+                   (lambda (arm detail) (push (list arm detail) failures))))
+          (agent-repl-verbs-register-create-progress "op-fail" "forked" (lambda () (setq progressed t)))
+          ;; Act.
+          (agent-repl-mutation-progress-handle
+           '(:op-id "op-fail" :event (:arm :create :value (:arm :failed :value (:arm :internal :value "boom"))))))
+        ;; Assert.
+        (should progressed)
+        (should (equal failures '((:internal "boom"))))))))
+
+(ert-deftest agent-repl-verbs-register-create-progress-needs-no-progress-callback ()
+  "Without ON-PROGRESS a stage is still said."
+  ;; Arrange.
+  (agent-repl-test--with-clean-state
+    (agent-repl-test-verbs--with nil
+      (let (stages)
+        (cl-letf (((symbol-function 'agent-repl-verbs--create-stage-message)
+                   (lambda (stage) (push stage stages))))
+          (agent-repl-verbs-register-create-progress "op-stage" "created")
+          ;; Act.
+          (agent-repl-mutation-progress-handle
+           '(:op-id "op-stage" :event (:arm :create :value (:arm :entered-stage :value :naming)))))
+        ;; Assert.
+        (should (equal stages '(:naming)))))))
+
+(ert-deftest agent-repl-verbs-every-create-progress-is-registered-by-the-one-helper ()
+  "Only the shared registration renders a create's stages."
+  (let ((count 0))
+    (dolist (file (directory-files agent-repl-test--module-dir t "\\`[^.].*\\.el\\'"))
+      (unless (string-prefix-p "test-" (file-name-nondirectory file))
+       (with-temp-buffer
+        (insert-file-contents file)
+        (goto-char (point-min))
+        (while (search-forward "(agent-repl-verbs--create-stage-message stage)" nil t)
+          (setq count (1+ count))))))
+    (should (= count 1))))

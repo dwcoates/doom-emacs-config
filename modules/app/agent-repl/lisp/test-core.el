@@ -438,6 +438,9 @@ Each result is `(RELATIVE-FILE OWNER FORM)'."
     ("input.el" agent-repl-input-selection-escape
      "%s"
      "warns, in the minibuffer, that a second consecutive command-mode escape clears the feed selection")
+    ("input.el" agent-repl--input-on-success
+     "[agent-repl] Asking in a new workspace…"
+     "tells the user their question about a response is being answered in a new child workspace")
     ("input.el" agent-repl--input-on-bubble-refusal
      "agent-repl: the prompt was refused for this agent (%S)"
      "reports a prompt refusal requiring user action")

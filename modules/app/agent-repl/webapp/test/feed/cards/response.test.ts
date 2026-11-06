@@ -65,6 +65,7 @@ import { orderFor } from "../../feed-order.js";
 import { plainProse, servedProse, treeProse } from "../../prose.js";
 import { boundCopyText } from "../../../src/copy-control.js";
 import { BUBBLE_COPY_CLASS, COPY_ROOM_CLASS } from "../../../src/bubble/copy-room.js";
+import { BUBBLE_QUESTION_CLASS, QUESTION_ROW_ATTRIBUTE } from "../../../src/feed/response-question.js";
 import { responseUsageOf } from "../../../src/feed/response-usage.js";
 import { COMPOSER_ENTRY_CLASS, createComposerEntryHighlight } from "../../../src/feed/composer-entry.js";
 import { applyMentionTargets, resetMentionTargets, WORKSPACE_MENTION_ATTRIBUTE } from "../../../src/feed/workspace-mentions.js";
@@ -173,7 +174,7 @@ describe("a final response's copy control", () => {
     ]);
   });
 
-  it("stands alone in the box's corner, before the body", () => {
+  it("shares the box's corner only with the question control, before the body", () => {
     // Act
     const el = drawFeedResponse(
       response({
@@ -185,7 +186,31 @@ describe("a final response's copy control", () => {
     );
     // Assert
     const box = el.querySelector(`:scope > .${BUBBLE_BOX_CLASS}`);
-    expect([...(box?.children ?? [])].map((c) => c.classList.contains(BUBBLE_COPY_CLASS))).toEqual([true, false]);
+    expect(
+      [...(box?.children ?? [])].map((c) =>
+        c.classList.contains(BUBBLE_QUESTION_CLASS) ? "question" : c.classList.contains(BUBBLE_COPY_CLASS) ? "copy" : "body",
+      ),
+    ).toEqual(["question", "copy", "body"]);
+  });
+
+  it("is joined by a question control asking about the response's row", () => {
+    // Act
+    const el = drawFeedResponse(
+      response({ finalAnswer: true, result: { case: "success", value: { prose: { prose: plainProse("done") } } } }),
+      rowContext(),
+    );
+    // Assert
+    expect(el.querySelector(`.${BUBBLE_QUESTION_CLASS}`)?.getAttribute(QUESTION_ROW_ATTRIBUTE)).toBe("row-1");
+  });
+
+  it("draws no question control on a response that is not the final answer", () => {
+    // Act
+    const el = drawFeedResponse(
+      response({ finalAnswer: false, result: { case: "success", value: { prose: { prose: plainProse("done") } } } }),
+      rowContext(),
+    );
+    // Assert
+    expect(el.querySelector(`.${BUBBLE_QUESTION_CLASS}`)).toBeNull();
   });
 
   it("opens the prose's first line with the room it takes", () => {

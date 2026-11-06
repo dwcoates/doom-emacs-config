@@ -151,7 +151,32 @@ message SubmitPromptSuccess {
     // appears in the feed: the response's bubble shows the revision pending,
     // then the revised prose.
     SubmitPromptResponseRevising response_revising = 6;
+    // It ASKED A QUESTION ABOUT A FINAL RESPONSE instead of minting a turn: a
+    // question stood as it was sent (AskAboutResponse), so the daemon began
+    // forking this workspace's conversation into a new CHILD workspace whose
+    // first prompt is the response, quoted, followed by these words, and
+    // ended the question. Nothing appears in this workspace's feed: the
+    // answer is read in the child, whose tab arrives once it is created.
+    SubmitPromptQuestionForked question_forked = 7;
   }
+}
+
+// The asked-a-question answer.
+//
+// THE FORK IS CREATED IN THE BACKGROUND, like every create that carries an op
+// id (CreateWorkspaceRequest.op_id): naming the child and adding its worktree
+// are slow, so this answer returns at once and the create's stages and its
+// terminal outcome ride WatchDaemon's mutation progress keyed on `op_id`.
+// THE OP ID IS THE PROMPT'S OWN IDEMPOTENCY KEY (SubmitPromptRequest
+// .idempotency_key), so a client that sends while it knows a question stands
+// registers for the create's progress under the key BEFORE the send, and no
+// progress event can outrun its registration.
+message SubmitPromptQuestionForked {
+  // The response the question was about.
+  frontend.v1.FeedId row = 1;
+  // The op id the child's create reports its progress and outcome under:
+  // always the request's idempotency key.
+  string op_id = 2;
 }
 
 // The revising-a-response answer.

@@ -446,7 +446,8 @@ A hand-rolled copy of either would drift from the shared shape and fail here."
                       (list "{\"loadPageRequested\":{}}" :load-page-requested)
                       (list "{\"composeEntry\":{\"label\":\"3.1\"}}" :compose-entry)
                       (list "{\"chatTextHighlighted\":{}}" :chat-text-highlighted)
-                      (list "{\"responseTextHighlighted\":{}}" :response-text-highlighted)))
+                      (list "{\"responseTextHighlighted\":{}}" :response-text-highlighted)
+                      (list "{\"responseQuestion\":{\"asked\":{}}}" :response-question)))
     (should (equal (plist-get (agent-repl-test-wire-host--decode
                                #'agent-repl-wire-decode-watch-host-workspace-response
                                (nth 0 case))
@@ -1748,7 +1749,8 @@ opens are OpenTabs streams."
                  (sort (list "evaluate" "host" "transferred" "reloadWebapp"
                              "openInEditor" "openCommitLog" "runInTerminal" "ending" "notificationClicked" "selection"
                              "finalResponseClicked" "selectRequested" "loadPageRequested" "composeEntry"
-                             "chatTextHighlighted" "transferWithdrawn" "responseTextHighlighted")
+                             "chatTextHighlighted" "transferWithdrawn" "responseTextHighlighted"
+                             "responseQuestion")
                        #'string<))))
 
 (ert-deftest agent-repl-test-wire-host-host-ending-decodes-to-its-arm ()
@@ -2593,3 +2595,32 @@ replaces it."
                   #'agent-repl-wire-decode-list-slash-commands-response
                   "{\"success\":{\"stated\":{\"catalog\":{\"commands\":[{\"name\":\"a\",\"aliases\":[7]}]}}}}")
                  '("SessionCommandCatalogEntry" aliases "expected a string"))))
+
+;;;; ---- The response question push ----
+
+(ert-deftest agent-repl-test-wire-host-response-question-decodes-each-change ()
+  "Each transition of the question decodes to its own arm."
+  (dolist (case '(("asked" :asked) ("moved" :moved) ("withdrawn" :withdrawn) ("taken" :taken)))
+    (should (equal (agent-repl-test-wire-host--decode
+                    #'agent-repl-wire-decode-host-workspace-response-question
+                    (format "{\"%s\":{}}" (nth 0 case)))
+                   (list :arm (nth 1 case) :value nil)))))
+
+(ert-deftest agent-repl-test-wire-host-response-question-unset-is-a-breach ()
+  "A question change naming no transition is a breach."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-host-workspace-response-question "{}")
+                 '("HostWorkspaceResponseQuestion" change "oneof is unset"))))
+
+(ert-deftest agent-repl-test-wire-host-response-question-unknown-field-is-refused ()
+  "A question change with a field the message does not declare is refused."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-host-workspace-response-question
+                  "{\"asked\":{},\"extra\":1}")
+                 '("HostWorkspaceResponseQuestion" extra "unknown field"))))
+
+(ert-deftest agent-repl-test-wire-host-response-question-arm-with-a-field-is-refused ()
+  "An empty transition arm carrying a field is a breach."
+  (should (car (agent-repl-test-wire-host--breach
+                #'agent-repl-wire-decode-host-workspace-response-question
+                "{\"taken\":{\"x\":1}}"))))

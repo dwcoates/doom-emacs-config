@@ -192,6 +192,14 @@ func (s *server) watchFeed(
 		composerEntries = s.composerEntryTopic(target.WS).Subscribe(streamCtx)
 	}
 
+	// THE QUESTION ABOUT A RESPONSE RIDES THE ROOT FEED'S WATCH ONLY, like the
+	// selection: it names a row of the root feed. The topic replays its latest
+	// value, so a page opening while a question stands draws it.
+	var questions <-chan *frontendv1.FeedResponseQuestion
+	if target.Feed.Root {
+		questions = s.responseQuestionTopic(target.WS).Subscribe(streamCtx)
+	}
+
 	s.acceptStream(ctx, rpc)
 	log.Debug(rpc, "accepted a feed tail", dlog.Context{"token": token.GetValue()})
 	for {
@@ -271,6 +279,21 @@ func (s *server) watchFeed(
 				continue
 			}
 			if err := out.Send(&agentreplv1.WatchFeedResponse{ComposerEntry: entry}); err != nil {
+				log.Debug(rpc, "the feed tail's client went away", dlog.Context{"cause": err.Error()})
+				return nil
+			}
+		case question, ok := <-questions:
+			if !ok {
+				// Closes only on streamCtx cancellation, which the Done case
+				// handles.
+				questions = nil
+				continue
+			}
+			if question == nil {
+				log.Error(rpc, "the response-question topic raised an empty question; it was not sent", nil)
+				continue
+			}
+			if err := out.Send(&agentreplv1.WatchFeedResponse{ResponseQuestion: question}); err != nil {
 				log.Debug(rpc, "the feed tail's client went away", dlog.Context{"cause": err.Error()})
 				return nil
 			}

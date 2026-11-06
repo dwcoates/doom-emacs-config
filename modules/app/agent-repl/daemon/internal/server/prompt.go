@@ -105,6 +105,17 @@ func (s *server) SubmitPrompt(
 		target = &ref
 	}
 
+	// A QUESTION ABOUT A FINAL RESPONSE STANDS: the user's prompt to the root
+	// feed is that question, forked into a child workspace that answers it
+	// (response_question.go), and takes the question. It outranks a highlight
+	// and the selection: the question is the one thing the user pressed for
+	// this prompt. An agent's prompt never does: the question is the user's.
+	if sentBy == nil && target == nil {
+		if row, ok := s.questions.take(subject.Record.ID); ok {
+			return s.submitQuestion(ctx, subject, req.Msg, resp, row)
+		}
+	}
+
 	// WORDS OF A FINAL RESPONSE HIGHLIGHTED: the user's prompt to the root
 	// feed revises that response instead of starting a turn, and takes the
 	// highlight (response_text.go). An agent's prompt never does: the

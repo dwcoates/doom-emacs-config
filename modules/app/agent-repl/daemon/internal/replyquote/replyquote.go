@@ -32,6 +32,9 @@ const (
 	// HeadingHighlight names words the person highlighted in a response of
 	// the agent's, to ask about them (a zettel chat thread's quote).
 	HeadingHighlight = "⟢ Asking about these words from an earlier response of yours"
+	// HeadingQuestion names a response of the agent's the person asks a
+	// question about, in the workspace forked to answer it.
+	HeadingQuestion = "⟢ A question about an earlier response of yours"
 	// LabelResponse is how a prompt bubble NAMES a quoted response of the
 	// agent's (owner request, 2026-10-20): shorter than HeadingResponse, which
 	// stays what the agent is told, so the bubble's label can change without
@@ -46,6 +49,8 @@ const (
 	openingPrompt = HeadingPrompt + ":\n\n"
 	// openingHighlight introduces highlighted words.
 	openingHighlight = HeadingHighlight + ":\n\n"
+	// openingQuestion introduces a response asked about.
+	openingQuestion = HeadingQuestion + ":\n\n"
 	// closing introduces the person's own words. It ENDS IN A NEWLINE because
 	// the blocks of a prompt are delivered joined by one, so the person's words
 	// follow it after a blank line.
@@ -78,6 +83,13 @@ func Fence(quoted string) string {
 func Fenced(text string) string {
 	fence := Fence(text)
 	return fence + "\n" + text + "\n" + fence
+}
+
+// QuestionText is the first prompt of a workspace forked to answer a question
+// about a response of the agent's: the preamble naming it, MARKDOWN inside its
+// code fence, the marker introducing the person's words, and WORDS.
+func QuestionText(markdown, words string) string {
+	return openingQuestion + Fenced(markdown) + closing + words
 }
 
 // Block composes the quote of a selected bubble: the preamble naming what is

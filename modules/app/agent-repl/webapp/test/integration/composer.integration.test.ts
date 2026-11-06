@@ -520,6 +520,7 @@ describe("command panels", () => {
       "commandActed",
       "askAnswered",
       "responseRevising",
+      "questionForked",
     ]);
   });
 
@@ -792,6 +793,38 @@ describe("a response-revising answer", () => {
   it("draws no refusal and no feed row of its own", async () => {
     // Arrange / Act: the revised bubble's redraw is the visible effect.
     await submitRevising();
+    // Assert
+    expect([harness.refusalArms(), harness.rowIds()]).toEqual([[], []]);
+  });
+});
+
+describe("a question-forked answer", () => {
+  /** Submit words the daemon forked as a question about a final response. */
+  const submitQuestion = async (): Promise<void> => {
+    harness = await startHarness({ composer: true });
+    harness.fake.answer(
+      "submitPrompt",
+      create(SubmitPromptResponseSchema, {
+        result: {
+          case: "success",
+          value: { outcome: { case: "questionForked", value: { row: { value: "row-1" }, opId: "k1" } } },
+        },
+      }),
+    );
+    await type("why this order?");
+    await send();
+  };
+
+  it("clears the draft", async () => {
+    // Arrange / Act
+    await submitQuestion();
+    // Assert
+    expect((harness.$('[data-component="composer"] textarea') as HTMLTextAreaElement).value).toBe("");
+  });
+
+  it("draws no refusal and no feed row of its own", async () => {
+    // Arrange / Act: the child workspace's tab is the visible effect.
+    await submitQuestion();
     // Assert
     expect([harness.refusalArms(), harness.rowIds()]).toEqual([[], []]);
   });

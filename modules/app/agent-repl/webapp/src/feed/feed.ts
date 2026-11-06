@@ -42,6 +42,7 @@ import {
 import { installBackgroundClear } from "./background-click.js";
 import { installBranchHover } from "./branch-hover.js";
 import { installResponseHighlight } from "./response-highlight.js";
+import { applyResponseQuestion, installResponseQuestion } from "./response-question.js";
 import { installImageOpen } from "./feed-image.js";
 import type { ImageOverlayHandle } from "../image-overlay/image-overlay.js";
 import type { FeedImageOverlay } from "../../../proto/gen/ts/frontend/v1/feed_image_overlay_pb";
@@ -362,6 +363,10 @@ export function mountFeed(
   // them: the next prompt revises that response (response-highlight.ts).
   const uninstallResponseHighlight = installResponseHighlight(host, ctx);
 
+  // A RESPONSE'S QUESTION CONTROL asks the daemon, which holds the question:
+  // the next prompt is answered in a child workspace (response-question.ts).
+  const uninstallResponseQuestion = installResponseQuestion(host, ctx);
+
   // A CLICK ON THE FEED OUTSIDE ANY BUBBLE ends the feed's selection
   // (owner ruling, 2026-09-23). It asks the daemon, which owns the selection;
   // the daemon's cleared push then parks the tail through `applySelection`.
@@ -507,6 +512,10 @@ export function mountFeed(
         }
         if (response.composerEntry !== undefined) {
           composerEntry.apply(response.composerEntry);
+          return;
+        }
+        if (response.responseQuestion !== undefined) {
+          applyResponseQuestion(host.ownerDocument, response.responseQuestion);
           return;
         }
         root.upsert(requireMessage(response.row, "WatchFeedResponse.row"));
@@ -1190,6 +1199,7 @@ export function mountFeed(
     uninstallSelect();
     uninstallBranchHover();
     uninstallResponseHighlight();
+    uninstallResponseQuestion();
     host.removeEventListener(READER_TOGGLE_EVENT, onReaderToggle);
     held?.dispose();
     uninstallClear?.();

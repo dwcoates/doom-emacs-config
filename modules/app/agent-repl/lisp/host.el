@@ -98,6 +98,7 @@
 (declare-function agent-repl--notification-activate "notifications" (ws))
 (declare-function agent-repl-input-focus-for-reply "input" (ws))
 (declare-function agent-repl-input-compose-entry "input" (ws label))
+(declare-function agent-repl-input-response-question "input" (ws change))
 
 ;; W2-B's surfaces.  NAMED HERE, NEVER DEFINED HERE: status.el owns the
 ;; blink (whose cadence is frontend.v1 `RosterRowAttention''s), frontend.el
@@ -1491,6 +1492,7 @@ re-create bookkeeping for a workspace whose tab is gone (measured
     (:select-requested (agent-repl-host--select-requested ws))
     (:load-page-requested (agent-repl-host--load-page-requested ws))
     (:compose-entry (agent-repl-host--compose-entry ws value))
+    (:response-question (agent-repl-host--response-question ws value))
     (:transferred (agent-repl-host--transferred ws value))
     (:transfer-withdrawn (agent-repl-host--transfer-withdrawn ws))
     (:reload-webapp (agent-repl-host--reload-webapp ws value))
@@ -1603,6 +1605,15 @@ insert state (`agent-repl-input-focus-for-reply').  Both are events,
 never replayed, so a reconnect never moves the keyboard."
   (agent-repl--info ws "elisp.host.%s ws=%s" event ws)
   (agent-repl-input-focus-for-reply ws))
+
+(defun agent-repl-host--response-question (ws change)
+  "Follow WS's question about a final response changing as CHANGE says.
+CHANGE is the decoded `HostWorkspaceResponseQuestion', whose arm names the
+transition; the composer makes the edit it asks for
+\(`agent-repl-input-response-question').  An event, never replayed, so a
+reconnect never edits the composer again."
+  (agent-repl--info ws "elisp.host.response-question ws=%s change=%S" ws (plist-get change :arm))
+  (agent-repl-input-response-question ws (plist-get change :arm)))
 
 ;;;; ---- The rail's row click ----
 

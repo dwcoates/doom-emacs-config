@@ -3067,7 +3067,8 @@ html[data-page-unshown] {
    small muted icon that copies a piece of the feed. Once it copied, the check
    mark replaces the copy icon for a moment (`data-copied`). Each kind's rule
    below places it. A shell block's run control (src/run-control.ts) wears the
-   same look, beside it. */
+   same look, beside it, and so does a final response's question control
+   (src/feed/response-question.ts). */
 /* The control's size: its padding, and its square box `--copy-control-box` on
    a side, the icon filling the box inside the padding. A code block's control
    is sized from its own text (`1em` of icon); a bubble's is one line tall
@@ -3077,7 +3078,7 @@ html[data-page-unshown] {
   --copy-control-pad: 3px;
   --copy-control-box: calc(1em + 2 * var(--copy-control-pad));
 }
-.copy-control, .run-control {
+.copy-control, .run-control, .question-control {
   display: inline-flex;
   padding: var(--copy-control-pad);
   border: none;
@@ -3087,9 +3088,9 @@ html[data-page-unshown] {
   opacity: var(--copy-control-rest, 0.7);
   cursor: pointer;
 }
-.copy-control:hover, .run-control:hover { opacity: 1; background: color-mix(in srgb, var(--fg) 8%, transparent); }
+.copy-control:hover, .run-control:hover, .question-control:hover { opacity: 1; background: color-mix(in srgb, var(--fg) 8%, transparent); }
 .copy-control[data-copied] { opacity: 1; color: var(--ok); }
-.copy-control svg, .run-control svg {
+.copy-control svg, .run-control svg, .question-control svg {
   width: calc(var(--copy-control-box) - 2 * var(--copy-control-pad));
   height: calc(var(--copy-control-box) - 2 * var(--copy-control-pad));
   fill: none;
@@ -3143,6 +3144,7 @@ html[data-page-unshown] {
   --bubble-copy-pad: 0.2em;
   --bubble-copy-gap: var(--bubble-pad-y);
   --bubble-copy-text-gap: 0.6em;
+  --bubble-question-gap: 0.15em;
   --bubble-copy-room: calc(var(--bubble-copy-gap) + var(--bubble-copy-box) + var(--bubble-copy-text-gap) - var(--bubble-scroll-gap));
 }
 /* The readers set in a size of their own (the control's is a code block's
@@ -3168,6 +3170,26 @@ html[data-page-unshown] {
    still go to full opacity. */
 .bubble[data-role="prompt"] .bubble-copy { --copy-control-rest: 0.3; }
 .bubble[data-role="response"] .bubble-copy { --copy-control-rest: 0.6; }
+/* A FINAL RESPONSE'S QUESTION CONTROL (src/feed/response-question.ts) sits
+   just left of its copy control, in the copy control's look and size, so the
+   pair reads as one corner. PRESSED, while the question about its response
+   stands, it is drawn subtly: full opacity in the accent color over a faint
+   accent tint, so the reader sees the next prompt is a question. */
+.bubble-question {
+  --copy-control-pad: var(--bubble-copy-pad);
+  --copy-control-box: var(--bubble-copy-box);
+  font-size: calc(var(--bubble-font-rem) * 1rem * var(--feed-text-scale));
+  position: absolute;
+  top: var(--bubble-copy-gap);
+  right: calc(var(--bubble-copy-gap) + var(--bubble-copy-box) + var(--bubble-question-gap));
+  --copy-control-rest: 0.6;
+}
+.question-control[data-asking] { opacity: 1; color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.question-control .question-control-dot { fill: currentColor; stroke: none; }
+/* A bubble with a question control reserves room for both controls. */
+.bubble:has(> .bubble-scroll > .bubble-question) {
+  --bubble-copy-room: calc(var(--bubble-copy-gap) + 2 * var(--bubble-copy-box) + var(--bubble-question-gap) + var(--bubble-copy-text-gap) - var(--bubble-scroll-gap));
+}
 /* The reservation is half a line tall: any height inside the first line
    narrows that line alone, so the second line can never be narrowed too. */
 .bubble > :has(> .bubble-copy)::before {
