@@ -2295,6 +2295,30 @@ describe("the roster drawer: a push redraws only what it changed", () => {
     expect([repoElement(drawn, "a"), drawn.querySelector(`.${OPEN_COUNT_CLASS}`)?.textContent]).toEqual([before, "(2)"]);
   });
 
+  it("keeps the open section's own box, and so its scroll position, when only its count changes", () => {
+    // Arrange
+    const drawer = createRosterDrawer(sidebarContext());
+    const before = drawer.draw(roster({ repos: [ticking("a")], openCount: 1 })).querySelector(`.${OPEN_SECTION_CLASS}`);
+
+    // Act
+    const after = drawer.draw(roster({ repos: [ticking("a")], openCount: 2 })).querySelector(`.${OPEN_SECTION_CLASS}`);
+
+    // Assert
+    expect(after).toBe(before);
+  });
+
+  it("keeps the open section's rows region across a count change", () => {
+    // Arrange
+    const drawer = createRosterDrawer(sidebarContext());
+    const before = drawer.draw(roster({ repos: [ticking("a")], openCount: 1 })).querySelector(".sb-sections");
+
+    // Act
+    const after = drawer.draw(roster({ repos: [ticking("a")], openCount: 3 })).querySelector(".sb-sections");
+
+    // Assert
+    expect(after).toBe(before);
+  });
+
   it("keeps the recently-merged band the push leaves unchanged", () => {
     // Arrange
     const band = mergedSection([row({ id: "ws-m", when: { case: "merged", value: { atMs: BigInt(NOW) } } })], false);
