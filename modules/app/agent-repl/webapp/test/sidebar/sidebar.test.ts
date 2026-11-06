@@ -1749,12 +1749,34 @@ describe("the rail scrolls the selected row into its section's view", () => {
     const before = host.querySelector(".sb-sections");
     (before as HTMLElement).scrollTop = 40;
 
-    // Act: a changed open count draws the Open section anew.
-    stream.push(sixRows("ws-0", 7));
+    // Act: a changed heading draws the Open section anew.
+    const relabeled = sixRows("ws-0");
+    relabeled.open!.label!.text = "Open now";
+    stream.push(relabeled);
     await settle();
 
     // Assert
     expect([host.querySelector(".sb-sections") === before, laid.scrollTop()]).toEqual([false, 40]);
+    sidebar.dispose();
+  });
+
+  it("keeps the Open section's own box, scrolled where it was, on a push that changes only the open count", async () => {
+    // Arrange
+    const host = document.createElement("nav");
+    const stream = pushedRosters();
+    const sidebar = mountWebhostSidebar(host, ctxFor([], stream.impl), { storage: null, timers: fakeTimers() });
+    const laid = layOpenSection(host);
+    stream.push(sixRows("ws-0"));
+    await settle();
+    const before = host.querySelector(".sb-sections");
+    (before as HTMLElement).scrollTop = 40;
+
+    // Act
+    stream.push(sixRows("ws-0", 7));
+    await settle();
+
+    // Assert
+    expect([host.querySelector(".sb-sections") === before, laid.scrollTop()]).toEqual([true, 40]);
     sidebar.dispose();
   });
 });
