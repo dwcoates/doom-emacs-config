@@ -2366,12 +2366,20 @@ func TestCreateFailsWhenTheOwnerItMustReopenWillNotOpen(t *testing.T) {
 	}
 }
 
-func TestCreateFromOriginCutsFromOriginsPrimaryBranch(t *testing.T) {
-	// Arrange.
-	f := newFixture(t)
+// fromOriginSpec is a create cut from origin in a repository whose primary
+// branch is main.
+func fromOriginSpec(t *testing.T, f *fixture) CreateSpec {
+	t.Helper()
 	f.git.defaultBranch = "main"
 	spec := standardSpec(t, f)
 	spec.FromOrigin, spec.Landing = true, &wsm.LandingChoice{}
+	return spec
+}
+
+func TestCreateFromOriginFetchesOnlyThePrimaryBranch(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	spec := fromOriginSpec(t, f)
 
 	// Act.
 	if _, err := f.verbs.Create(context.Background(), spec); err != nil {
@@ -2379,11 +2387,42 @@ func TestCreateFromOriginCutsFromOriginsPrimaryBranch(t *testing.T) {
 	}
 
 	// Assert.
-	if len(f.git.fetched) != 1 || f.git.fetched[0] != spec.RepoDir+" origin" {
-		t.Fatalf("fetched %v, want origin fetched once in %s", f.git.fetched, spec.RepoDir)
+	if len(f.git.fetched) != 1 || f.git.fetched[0] != spec.RepoDir+" origin main" {
+		t.Fatalf("fetched %v, want origin's main alone fetched once in %s", f.git.fetched, spec.RepoDir)
 	}
-	if f.git.created[0].BaseRef != "origin/main" {
-		t.Fatalf("base ref = %q, want origin/main", f.git.created[0].BaseRef)
+}
+
+func TestCreateFromOriginCutsFromThePrivateRef(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	spec := fromOriginSpec(t, f)
+
+	// Act.
+	if _, err := f.verbs.Create(context.Background(), spec); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Assert: the cut point is the ref only the daemon writes, never
+	// refs/remotes/origin/main.
+	if f.git.created[0].BaseRef != "refs/agent-repl/origin/main" {
+		t.Fatalf("base ref = %q, want refs/agent-repl/origin/main", f.git.created[0].BaseRef)
+	}
+}
+
+func TestCreateFromOriginRecordsThePrivateRefAsItsParentBranch(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	spec := fromOriginSpec(t, f)
+
+	// Act.
+	if _, err := f.verbs.Create(context.Background(), spec); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Assert.
+	created := f.db.registered[len(f.db.registered)-1]
+	if created.Branch != f.git.created[0].Branch || created.ParentBranch != "refs/agent-repl/origin/main" {
+		t.Fatalf("registered %+v, want the created workspace's parent branch refs/agent-repl/origin/main", created)
 	}
 }
 
@@ -2406,8 +2445,7 @@ func TestCreateFromOriginWhoseFetchFailsIsRefusedAndBuildsNothing(t *testing.T) 
 	// Arrange.
 	f := newFixture(t)
 	f.git.fetchErr = errors.New("could not resolve host")
-	spec := standardSpec(t, f)
-	spec.FromOrigin, spec.Landing = true, &wsm.LandingChoice{}
+	spec := fromOriginSpec(t, f)
 
 	// Act.
 	_, err := f.verbs.Create(context.Background(), spec)
@@ -2422,10 +2460,12 @@ func TestCreateFromOriginWhoseFetchFailsIsRefusedAndBuildsNothing(t *testing.T) 
 	}
 	logged := false
 	for _, r := range f.log.logger.Records() {
-		logged = logged || (r.Context["arm"] == ArmOriginFetchFailed && r.Context["arm_detail"] == "could not resolve host")
+		logged = logged || (r.Context["arm"] == ArmOriginFetchFailed && r.Context["arm_detail"] == "could not resolve host" &&
+			r.Context["arm_repo_dir"] == spec.RepoDir && r.Context["arm_remote"] == "origin" && r.Context["arm_branch"] == "main" &&
+			r.Context["arm_ref"] == "refs/agent-repl/origin/main")
 	}
 	if !logged {
-		t.Fatalf("records = %+v, want the refusal recorded with git's failure", f.log.logger.Records())
+		t.Fatalf("records = %+v, want the refusal recorded with git's failure, the repository and what was fetched", f.log.logger.Records())
 	}
 }
 

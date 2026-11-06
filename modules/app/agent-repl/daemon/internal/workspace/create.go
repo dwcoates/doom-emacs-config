@@ -12,6 +12,7 @@ import (
 	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/gitclient"
 	"agent-repld/internal/headless"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/lifecycleconfig"
@@ -280,17 +281,23 @@ func (v *verbs) create(ctx context.Context, spec CreateSpec) (_ wsm.Workspace, e
 	}
 	// A WORKSPACE CUT FROM ORIGIN starts at origin's primary branch, fetched
 	// now, and lands onto the local primary branch like any workspace landing
-	// there.
+	// there. ONLY THE PRIMARY BRANCH IS FETCHED, into the daemon's private ref
+	// for it (gitclient.FetchBranch), and the workspace is cut from that ref:
+	// no other fetch in the repository writes it, so none racing this one on
+	// any branch can refuse the create. refs/remotes/origin/* is the user's,
+	// and is never the cut point.
 	if spec.FromOrigin {
 		if landsInto != nil {
 			panic(fmt.Sprintf("workspace: create %q lands into %q and is cut from origin; only a workspace landing on the primary branch is cut from it", branch, landsInto.ID))
 		}
-		if err := v.deps.Git.Fetch(ctx, repoDir, originRemote); err != nil {
+		fetched, err := v.deps.Git.FetchBranch(ctx, repoDir, originRemote, defaultBranch)
+		if err != nil {
 			return wsm.Workspace{}, refuseWith(global, "CreateWorkspace", ArmOriginFetchFailed,
 				fmt.Sprintf("origin's primary branch could not be fetched in %s", repoDir), false,
-				map[string]any{"detail": err.Error()})
+				map[string]any{"detail": err.Error(), "repo_dir": repoDir, "remote": originRemote, "branch": defaultBranch,
+					"ref": gitclient.PrivateRemoteRef(originRemote, defaultBranch)})
 		}
-		baseRef = originRemote + "/" + defaultBranch
+		baseRef = fetched
 	}
 	// A base ref that does not resolve is REFUSED before anything is recorded
 	// or materialized: git would otherwise fail halfway through `worktree add`

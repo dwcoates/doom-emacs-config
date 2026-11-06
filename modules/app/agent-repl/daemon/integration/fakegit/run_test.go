@@ -1895,6 +1895,118 @@ func TestAWorktreeOfAnExistingBranchChecksItOut(t *testing.T) {
 	}
 }
 
+// oneBranchFetch is the daemon's fetch of origin's BRANCH into its private ref.
+func oneBranchFetch(dir, branch string) []string {
+	return []string{"-C", dir, "fetch", "--no-tags", "--no-write-fetch-head", "--recurse-submodules=no", "--no-auto-maintenance",
+		"origin", "+refs/heads/" + branch + ":refs/agent-repl/origin/" + branch}
+}
+
+func TestAOneBranchFetchWritesThePrivateRefItResolvesTo(t *testing.T) {
+	// Arrange.
+	s, repo, dir := world(t)
+	repo.RemoteHeads = map[string]string{"main": "abcdefabcdefabcdefabcdefabcdefabcdefabcd"}
+
+	// Act.
+	fetched := Run(s, "/", oneBranchFetch(dir, "main"))
+	got := Run(s, "/", []string{"-C", dir, "rev-parse", "refs/agent-repl/origin/main"})
+
+	// Assert.
+	if fetched.Exit != 0 || strings.TrimSpace(got.Stdout) != repo.RemoteHeads["main"] {
+		t.Fatalf("fetch %+v, rev-parse %+v; want the private ref at origin's main", fetched, got)
+	}
+}
+
+func TestAWholeRemoteFetchLosesARaceOnAnUnrelatedRemoteRef(t *testing.T) {
+	// Arrange: another fetch is writing origin/kimmy/x.
+	s, repo, dir := world(t)
+	repo.RemoteHeads = map[string]string{"main": "abcdefabcdefabcdefabcdefabcdefabcdefabcd", "kimmy/x": "1234561234561234561234561234561234561234"}
+	repo.RacingRefs = []string{"refs/remotes/origin/kimmy/x"}
+
+	// Act.
+	got := Run(s, "/", []string{"-C", dir, "fetch", "origin"})
+
+	// Assert.
+	if got.Exit != 1 || !strings.Contains(got.Stderr, "cannot lock ref 'refs/remotes/origin/kimmy/x'") {
+		t.Fatalf("`fetch origin` = %+v, want real git's lost race", got)
+	}
+}
+
+func TestAOneBranchFetchIsUntouchedByARaceOnAnotherRef(t *testing.T) {
+	// Arrange: another fetch is writing origin/kimmy/x.
+	s, repo, dir := world(t)
+	repo.RemoteHeads = map[string]string{"main": "abcdefabcdefabcdefabcdefabcdefabcdefabcd", "kimmy/x": "1234561234561234561234561234561234561234"}
+	repo.RacingRefs = []string{"refs/remotes/origin/kimmy/x"}
+
+	// Act.
+	got := Run(s, "/", oneBranchFetch(dir, "main"))
+
+	// Assert.
+	if got.Exit != 0 || repo.Refs["refs/agent-repl/origin/main"] != repo.RemoteHeads["main"] {
+		t.Fatalf("one-branch fetch = %+v, refs %v; want the private ref written", got, repo.Refs)
+	}
+}
+
+func TestAOneBranchFetchLosesARaceOnItsOwnRef(t *testing.T) {
+	// Arrange.
+	s, repo, dir := world(t)
+	repo.RemoteHeads = map[string]string{"main": "abcdefabcdefabcdefabcdefabcdefabcdefabcd"}
+	repo.RacingRefs = []string{"refs/agent-repl/origin/main"}
+
+	// Act.
+	got := Run(s, "/", oneBranchFetch(dir, "main"))
+
+	// Assert.
+	if got.Exit != 1 || len(repo.Refs) != 0 {
+		t.Fatalf("one-branch fetch = %+v, refs %v; want the lost race and nothing written", got, repo.Refs)
+	}
+}
+
+func TestAOneBranchFetchOfABranchOriginLacksFails(t *testing.T) {
+	// Arrange.
+	s, repo, dir := world(t)
+	repo.RemoteHeads = map[string]string{}
+
+	// Act.
+	got := Run(s, "/", oneBranchFetch(dir, "main"))
+
+	// Assert.
+	if got.Exit != 128 || !strings.Contains(got.Stderr, "couldn't find remote ref refs/heads/main") || len(repo.Refs) != 0 {
+		t.Fatalf("one-branch fetch = %+v, refs %v; want real git's refusal", got, repo.Refs)
+	}
+}
+
+func TestAOneBranchFetchIntoAnyOtherRefIsUnmodeled(t *testing.T) {
+	// Arrange.
+	s, repo, dir := world(t)
+	repo.RemoteHeads = map[string]string{"main": "abcdefabcdefabcdefabcdefabcdefabcdefabcd"}
+	args := oneBranchFetch(dir, "main")
+	args[len(args)-1] = "+refs/heads/main:refs/remotes/origin/main"
+
+	// Act.
+	got := Run(s, "/", args)
+
+	// Assert.
+	if got.Exit != 128 || len(repo.Refs) != 0 {
+		t.Fatalf("fetch into refs/remotes = %+v, want it refused as unmodeled", got)
+	}
+}
+
+func TestWorktreeAddCutsANewBranchFromAFetchedPrivateRef(t *testing.T) {
+	// Arrange.
+	s, repo, dir := world(t)
+	repo.RemoteHeads = map[string]string{"main": "abcdefabcdefabcdefabcdefabcdefabcdefabcd"}
+	Run(s, "/", oneBranchFetch(dir, "main"))
+	wt := filepath.Join(t.TempDir(), "wt")
+
+	// Act.
+	got := Run(s, "/", []string{"-C", dir, "worktree", "add", "-b", "feature", wt, "refs/agent-repl/origin/main"})
+
+	// Assert.
+	if got.Exit != 0 || repo.BranchHeads["feature"] != repo.RemoteHeads["main"] {
+		t.Fatalf("worktree add = %+v, feature at %q; want it cut at origin's main", got, repo.BranchHeads["feature"])
+	}
+}
+
 func TestAnUpstreamBranchResolvesToWhatTheFetchBringsIn(t *testing.T) {
 	// Arrange.
 	s, repo, dir := world(t)
@@ -2016,7 +2128,7 @@ func TestForEachRefAnswersABranchWithNoUpstream(t *testing.T) {
 		branch string
 		want   string
 	}{
-		{name: "an existing branch tracks nothing", branch: "main", want: "refs/heads/main\x00\x00\n"},
+		{name: "an existing branch tracks nothing", branch: "main", want: "refs/heads/main\x00\x00\x00\n"},
 		{name: "a missing branch answers no line", branch: "gone", want: ""},
 	}
 	for _, tc := range tests {

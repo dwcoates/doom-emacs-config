@@ -13,16 +13,19 @@ import (
 type Upstream struct {
 	// Remote is the remote's name, e.g. "origin": what a fetch names.
 	Remote string
-	// Ref is the upstream's short name, e.g. "origin/master": what a count
-	// names.
+	// Ref is the upstream's short name, e.g. "origin/master": what the
+	// hover names.
 	Ref string
+	// Branch is the branch's name ON THE REMOTE, e.g. "master": what a
+	// fetch of that one branch names (FetchBranch).
+	Branch string
 }
 
-// upstreamFormat prints a branch's ref name, its upstream's remote and its
-// upstream's short name, NUL-separated. The ref name is printed so a branch
+// upstreamFormat prints a branch's ref name, its upstream's remote, its
+// upstream's short name and the upstream's ref on the remote, NUL-separated. The ref name is printed so a branch
 // that does not exist (no line at all) is told apart from one that tracks
 // nothing (a line with both upstream fields empty).
-const upstreamFormat = "%(refname)%00%(upstream:remotename)%00%(upstream:short)"
+const upstreamFormat = "%(refname)%00%(upstream:remotename)%00%(upstream:short)%00%(upstream:remoteref)"
 
 // Upstream reports the remote branch a local branch tracks. It is a PROBE: a
 // branch that tracks nothing is an ordinary answer (false, nil error), never an
@@ -35,7 +38,7 @@ func (c *client) Upstream(ctx context.Context, repoDir, branch string) (Upstream
 		return Upstream{}, false, err
 	}
 	fields := strings.Split(out, "\x00")
-	if out == "" || strings.Contains(out, "\n") || len(fields) != 3 || fields[0] != "refs/heads/"+branch {
+	if out == "" || strings.Contains(out, "\n") || len(fields) != 4 || fields[0] != "refs/heads/"+branch {
 		cause := fmt.Errorf("gitclient: branch %q in %s: for-each-ref answered %q, want one line naming the branch", branch, repoDir, out)
 		if out == "" {
 			cause = fmt.Errorf("gitclient: branch %q does not exist in %s", branch, repoDir)
@@ -45,18 +48,19 @@ func (c *client) Upstream(ctx context.Context, repoDir, branch string) (Upstream
 		})
 		return Upstream{}, false, cause
 	}
-	remote, ref := fields[1], fields[2]
-	if remote == "" && ref == "" {
+	remote, ref, remoteRef := fields[1], fields[2], fields[3]
+	if remote == "" && ref == "" && remoteRef == "" {
 		return Upstream{}, false, nil
 	}
-	if remote == "" || ref == "" {
-		cause := fmt.Errorf("gitclient: branch %q in %s has a half-configured upstream (remote %q, ref %q)", branch, repoDir, remote, ref)
+	remoteBranch, isBranch := strings.CutPrefix(remoteRef, "refs/heads/")
+	if remote == "" || ref == "" || !isBranch || remoteBranch == "" {
+		cause := fmt.Errorf("gitclient: branch %q in %s has a half-configured upstream (remote %q, ref %q, remote ref %q)", branch, repoDir, remote, ref, remoteRef)
 		c.log.Global().Error(operation, "the branch's upstream is half configured", dlog.Context{
-			"dir": repoDir, "branch": branch, "remote": remote, "ref": ref, "cause": cause.Error(),
+			"dir": repoDir, "branch": branch, "remote": remote, "ref": ref, "remote_ref": remoteRef, "cause": cause.Error(),
 		})
 		return Upstream{}, false, cause
 	}
-	return Upstream{Remote: remote, Ref: ref}, true, nil
+	return Upstream{Remote: remote, Ref: ref, Branch: remoteBranch}, true, nil
 }
 
 // AheadBehind counts the commits reachable from local and not from upstream

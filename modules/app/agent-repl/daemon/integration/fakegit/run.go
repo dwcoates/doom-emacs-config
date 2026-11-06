@@ -254,8 +254,9 @@ func updateIndex(wt *Worktree, subject []string) Result {
 }
 
 // forEachRef answers the one for-each-ref the daemon asks: a branch's upstream
-// (gitclient.Upstream), printed as `refname NUL remote NUL upstream`. No fake
-// branch tracks a remote, so an existing branch answers both upstream fields
+// (gitclient.Upstream), printed as `refname NUL remote NUL upstream NUL
+// remote ref`. No fake branch tracks a remote, so an existing branch answers
+// every upstream field
 // empty and a missing one answers no line, exactly as real git does.
 func forEachRef(repo *Repo, subject []string) Result {
 	if len(subject) != 3 || !strings.HasPrefix(subject[1], "--format=") || !strings.HasPrefix(subject[2], "refs/heads/") {
@@ -264,7 +265,7 @@ func forEachRef(repo *Repo, subject []string) Result {
 	if !repo.HasBranch(strings.TrimPrefix(subject[2], "refs/heads/")) {
 		return Result{}
 	}
-	return Result{Stdout: subject[2] + "\x00\x00\n"}
+	return Result{Stdout: subject[2] + "\x00\x00\x00\n"}
 }
 
 func showRef(repo *Repo, subject []string) Result {
@@ -479,6 +480,10 @@ func (s *State) resolve(repo *Repo, wt *Worktree, ref string) (string, bool) {
 		sha, ok := repo.RemoteHeads[name]
 		return sha, ok && sha != ""
 	}
+	// A ref update-ref or a one-branch fetch wrote resolves to its commit.
+	if sha, ok := repo.Refs[ref]; ok {
+		return sha, true
+	}
 	// A FULL branch ref names the same branch its short name does.
 	if name, full := strings.CutPrefix(ref, "refs/heads/"); full {
 		if sha, ok := repo.BranchHeads[name]; ok {
@@ -537,13 +542,11 @@ func worktree(s *State, repo *Repo, subject []string) Result {
 		if repo.HasBranch(branchName) {
 			return Result{Stderr: fmt.Sprintf("fatal: a branch named '%s' already exists\n", branchName), Exit: 128}
 		}
-		head, ok := repo.BranchHeads[base]
+		// The base is any ref the fixture resolves: a branch, a commit, or a
+		// full ref such as the daemon's private fetched ref.
+		head, ok := s.resolve(repo, nil, base)
 		if !ok {
-			if len(base) == 40 {
-				head = base
-			} else {
-				return Result{Stderr: fmt.Sprintf("fatal: invalid reference: %s\n", base), Exit: 128}
-			}
+			return Result{Stderr: fmt.Sprintf("fatal: invalid reference: %s\n", base), Exit: 128}
 		}
 		if res, ok := addWorktree(repo, &Worktree{Dir: dir, Branch: branchName, Head: head}); !ok {
 			return res
@@ -1436,13 +1439,53 @@ func addExisting(repo *Repo, dir, branch string) Result {
 	return Result{Stdout: "Preparing worktree (checking out '" + branch + "')\n"}
 }
 
-// fetch implements `fetch origin`: the fixture's upstream heads are already
-// what a fetch brings in, so it answers success and changes nothing.
+// fetch implements the two fetches of origin: the daemon's one-branch fetch
+// (`fetch --no-tags --no-write-fetch-head --recurse-submodules=no
+// --no-auto-maintenance origin +refs/heads/<b>:refs/agent-repl/origin/<b>`),
+// which writes that one private ref from RemoteHeads, and a whole-remote
+// `fetch origin`, which updates every `refs/remotes/origin/<b>`. Either fails,
+// as real git does, when a ref it would write is one of RacingRefs.
 func fetch(repo *Repo, subject []string) Result {
-	if len(subject) != 2 || subject[1] != "origin" {
-		return Result{Stderr: "fatal: fakegit: only `fetch origin` is modeled\n", Exit: 128}
+	if len(subject) == 2 && subject[1] == "origin" {
+		for name := range repo.RemoteHeads {
+			if lost, ok := lostRace(repo, "refs/remotes/origin/"+name); ok {
+				return lost
+			}
+		}
+		return Result{}
 	}
+	flags := []string{"fetch", "--no-tags", "--no-write-fetch-head", "--recurse-submodules=no", "--no-auto-maintenance", "origin"}
+	if len(subject) != len(flags)+1 || !hasPrefix(subject, flags) {
+		return Result{Stderr: "fatal: fakegit: only `fetch origin` and the daemon's one-branch fetch of origin are modeled\n", Exit: 128}
+	}
+	src, dst, ok := strings.Cut(strings.TrimPrefix(subject[len(flags)], "+"), ":")
+	branch, isBranch := strings.CutPrefix(src, "refs/heads/")
+	if !ok || !isBranch || !strings.HasPrefix(subject[len(flags)], "+") || dst != "refs/agent-repl/origin/"+branch {
+		return Result{Stderr: "fatal: fakegit: the one-branch fetch takes +refs/heads/<b>:refs/agent-repl/origin/<b>\n", Exit: 128}
+	}
+	sha, found := repo.RemoteHeads[branch]
+	if !found || sha == "" {
+		return Result{Stderr: "fatal: couldn't find remote ref " + src + "\n", Exit: 128}
+	}
+	if lost, ok := lostRace(repo, dst); ok {
+		return lost
+	}
+	if repo.Refs == nil {
+		repo.Refs = map[string]string{}
+	}
+	repo.Refs[dst] = sha
 	return Result{}
+}
+
+// lostRace is the failure of a fetch writing REF while another fetch writes
+// it, when it is one of RacingRefs.
+func lostRace(repo *Repo, ref string) (Result, bool) {
+	for _, racing := range repo.RacingRefs {
+		if racing == ref {
+			return Result{Stderr: "error: cannot lock ref '" + ref + "': is at another commit but expected the one this fetch read\n", Exit: 1}, true
+		}
+	}
+	return Result{}, false
 }
 
 // rerere implements `rerere remaining`: the conflicted paths rerere did not

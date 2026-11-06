@@ -1391,7 +1391,8 @@ type fakeGit struct {
 	// duringCreate, when set, runs inside CreateWorktree, while the create
 	// is mid-flight.
 	duringCreate func()
-	// fetched records each Fetch as "dir remote"; fetchErr fails every one.
+	// fetched records each FetchBranch as "dir remote branch"; fetchErr
+	// fails every one.
 	fetched  []string
 	fetchErr error
 	nuked    []nukedWorktree
@@ -1545,9 +1546,12 @@ func (g *fakeGit) DefaultBranch(context.Context, string) (string, error) {
 	return g.defaultBranch, g.defaultErr
 }
 
-func (g *fakeGit) Fetch(_ context.Context, dir, remote string) error {
-	g.fetched = append(g.fetched, dir+" "+remote)
-	return g.fetchErr
+func (g *fakeGit) FetchBranch(_ context.Context, dir, remote, branch string) (string, error) {
+	g.fetched = append(g.fetched, dir+" "+remote+" "+branch)
+	if g.fetchErr != nil {
+		return "", g.fetchErr
+	}
+	return gitclient.PrivateRemoteRef(remote, branch), nil
 }
 
 func (g *fakeGit) CreateWorktree(ctx context.Context, repoDir, branch, baseRef, worktreeDir string) error {

@@ -62,15 +62,18 @@ func (g *fakeGit) Upstream(ctx context.Context, dir, branch string) (gitclient.U
 	return g.upstream, g.tracked, g.upstreamErr
 }
 
-func (g *fakeGit) Fetch(ctx context.Context, dir, remote string) error {
-	g.record("fetch " + dir + " " + remote)
+func (g *fakeGit) FetchBranch(ctx context.Context, dir, remote, branch string) (string, error) {
+	g.record("fetch_branch " + dir + " " + remote + " " + branch)
 	if ctx.Err() != nil {
-		return ctx.Err()
+		return "", ctx.Err()
 	}
 	if err := g.fetchErrIn[dir]; err != nil {
-		return err
+		return "", err
 	}
-	return g.fetchErr
+	if g.fetchErr != nil {
+		return "", g.fetchErr
+	}
+	return gitclient.PrivateRemoteRef(remote, branch), nil
 }
 
 func (g *fakeGit) AheadBehind(ctx context.Context, dir, local, upstream string) (int, int, error) {
@@ -85,7 +88,7 @@ func (g *fakeGit) AheadBehind(ctx context.Context, dir, local, upstream string) 
 func tracking() *fakeGit {
 	return &fakeGit{
 		branch:   "master",
-		upstream: gitclient.Upstream{Remote: "origin", Ref: "origin/master"},
+		upstream: gitclient.Upstream{Remote: "origin", Ref: "origin/master", Branch: "master"},
 		tracked:  true,
 		ahead:    2,
 		behind:   7,
@@ -210,17 +213,39 @@ func TestATrackedBranchIsFetchedThenCounted(t *testing.T) {
 	want := []string{
 		"default_branch /src/a",
 		"upstream /src/a master",
-		"fetch /src/a origin",
-		"ahead_behind /src/a master origin/master",
+		"fetch_branch /src/a origin master",
+		"ahead_behind /src/a master refs/agent-repl/origin/master",
 	}
 	if !reflect.DeepEqual(w.git.calls, want) {
 		t.Fatalf("git calls = %v, want %v", w.git.calls, want)
 	}
-	wantTold := []told{{repo: "a", measure: Counted{Branch: "master", Upstream: "origin/master", Ahead: 2, Behind: 7}}}
+	wantTold := []told{{repo: "a", measure: Counted{Branch: "master", Upstream: "origin/master",
+		Fetched: "refs/agent-repl/origin/master", Ahead: 2, Behind: 7}}}
 	if got := w.told(); !reflect.DeepEqual(got, wantTold) {
 		t.Fatalf("sink told %+v, want %+v", got, wantTold)
 	}
 	w.assertNoWarnings()
+}
+
+func TestAnUpstreamOfAnotherNameFetchesTheRemotesOwnBranch(t *testing.T) {
+	// Arrange: master tracks origin's main.
+	git := tracking()
+	git.upstream = gitclient.Upstream{Remote: "origin", Ref: "origin/main", Branch: "main"}
+	w := newWorld(t, git, repo("a"))
+
+	// Act.
+	w.measurer().Sweep(context.Background())
+
+	// Assert.
+	want := []string{
+		"default_branch /src/a",
+		"upstream /src/a master",
+		"fetch_branch /src/a origin main",
+		"ahead_behind /src/a master refs/agent-repl/origin/main",
+	}
+	if !reflect.DeepEqual(w.git.calls, want) {
+		t.Fatalf("git calls = %v, want %v", w.git.calls, want)
+	}
 }
 
 func TestAnUntrackedBranchIsNoUpstreamAndNothingIsFetched(t *testing.T) {
@@ -259,11 +284,11 @@ func TestAFailedStepIsAFailedMeasureAndStopsTheRepository(t *testing.T) {
 		{name: "upstream", breakGit: func(g *fakeGit) { g.upstreamErr = errScripted },
 			wantReason: "reading master's upstream failed: scripted failure", wantCalls: 2, wantStep: "reading master's upstream"},
 		{name: "fetch", breakGit: func(g *fakeGit) { g.fetchErr = errScripted },
-			wantReason: "fetching origin failed: scripted failure", wantCalls: 3, wantStep: "fetching origin"},
+			wantReason: "fetching origin/master failed: scripted failure", wantCalls: 3, wantStep: "fetching origin/master"},
 		{name: "count", breakGit: func(g *fakeGit) { g.countErr = errScripted },
 			wantReason: "counting master against origin/master failed: scripted failure", wantCalls: 4, wantStep: "counting master against origin/master"},
 		{name: "a step that runs out of time", breakGit: func(g *fakeGit) { g.fetchErr = context.DeadlineExceeded },
-			wantReason: "fetching origin did not finish within 2m0s", wantCalls: 3, wantStep: "fetching origin"},
+			wantReason: "fetching origin/master did not finish within 2m0s", wantCalls: 3, wantStep: "fetching origin/master"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

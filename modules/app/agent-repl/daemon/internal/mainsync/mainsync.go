@@ -181,7 +181,7 @@ func (s *Syncer) take() []observed {
 // behind and not ahead, and tells the main workspace a fast-forward that
 // cannot be made.
 func (s *Syncer) Sync(ctx context.Context, prompts prompthandler.Submitter, repoID ids.RepoID, m repodivergence.Counted) {
-	fields := dlog.Context{"repo_id": string(repoID), "branch": m.Branch, "upstream": m.Upstream, "ahead": m.Ahead, "behind": m.Behind}
+	fields := dlog.Context{"repo_id": string(repoID), "branch": m.Branch, "upstream": m.Upstream, "fetched": m.Fetched, "ahead": m.Ahead, "behind": m.Behind}
 	if !s.gate.Admits() {
 		return
 	}
@@ -197,7 +197,10 @@ func (s *Syncer) Sync(ctx context.Context, prompts prompthandler.Submitter, repo
 		s.deps.Log.Info(opSync, "the primary branch could not be resolved; the next sweep tries again", dlog.WithCause(fields, err))
 		return
 	}
-	upstream, err := s.deps.Git.ResolveRef(ctx, repo.Dir, m.Upstream)
+	// THE UPSTREAM IS READ FROM THE REF THE COUNT WAS MADE AGAINST: the
+	// daemon's private ref (repodivergence.Counted.Fetched), which its own
+	// fetch wrote, never refs/remotes/*, which the daemon does not fetch.
+	upstream, err := s.deps.Git.ResolveRef(ctx, repo.Dir, m.Fetched)
 	if err != nil {
 		s.deps.Log.Info(opSync, "the upstream could not be resolved; the next sweep tries again", dlog.WithCause(fields, err))
 		return
@@ -227,14 +230,14 @@ func (s *Syncer) Sync(ctx context.Context, prompts prompthandler.Submitter, repo
 		return
 	}
 	defer release()
-	ffErr, deferred := s.fastForward(ctx, main, repo.Dir, m.Upstream)
+	ffErr, deferred := s.fastForward(ctx, main, repo.Dir, m.Fetched)
 	switch {
 	case deferred:
 		s.deps.Log.Debug(opSync, "the main workspace is running a turn; the sync waits for the next sweep", fields)
 	case ffErr == nil:
 		s.deps.Log.Info(opSync, "fast-forwarded the main checkout to its upstream", fields)
 	default:
-		failure.Cause = causeOf(ffErr, m.Upstream)
+		failure.Cause = causeOf(ffErr, m.Fetched)
 		s.tell(ctx, prompts, main, failure, fields)
 	}
 }

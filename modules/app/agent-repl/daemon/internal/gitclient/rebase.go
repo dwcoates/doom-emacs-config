@@ -11,8 +11,8 @@ import (
 	"agent-repld/internal/shellword"
 )
 
-// This file holds the merge queue's REBASE and the two other gits the queue's
-// rebase-first method needs: a worktree of an existing branch, and a fetch.
+// This file holds the merge queue's REBASE and the other git the queue's
+// rebase-first method needs: a worktree of an existing branch.
 //
 // THE REBASE REPLAYS ONE COMMIT PER COMMAND. The queue reports "rebasing k/n"
 // and the command running for each commit, so the rebase is driven as an
@@ -263,15 +263,6 @@ func (c *client) RebaseInProgress(ctx context.Context, dir string) (bool, error)
 // sink is attached to it.
 func (c *client) AddWorktree(ctx context.Context, repoDir, worktreeDir, branch string) error {
 	_, err := c.run(ctx, "daemon.gitclient.add_worktree", repoDir, "worktree", "add", worktreeDir, branch)
-	return err
-}
-
-// Fetch fetches remote into dir's repository. It is the ONE network git the
-// daemon runs: a branch already merged upstream is landed locally by fetching
-// the default branch and fast-forwarding to it. GIT_TERMINAL_PROMPT=0 (pinned
-// on every git) makes a remote that wants a credential fail rather than wait.
-func (c *client) Fetch(ctx context.Context, dir, remote string) error {
-	_, err := c.run(ctx, "daemon.gitclient.fetch", dir, "fetch", remote)
 	return err
 }
 

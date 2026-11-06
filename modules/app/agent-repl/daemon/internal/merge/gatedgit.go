@@ -35,9 +35,7 @@ var errMergeStopping = errors.New("merge: the daemon is exiting; no further git 
 // THE BOUND IS A LARGE MULTIPLE OF THE WORK IT COVERS. A merge's git commands
 // are local and short -- one replayed commit, a merge commit in a scratch
 // tree, a fast-forward checkout -- each well under a second on a healthy
-// machine; the one network command (the merged-upstream fetch) is the long
-// tail, and GIT_TERMINAL_PROMPT=0 keeps it from waiting on a credential. Ten
-// seconds is an order of magnitude over the local commands. A command still
+// machine, and a merge runs no network git. Ten seconds is an order of magnitude over the local commands. A command still
 // running at the bound is recorded at ERROR, naming it: the next boot's
 // resume then reads the tree that command left.
 const MergeGitStopBound = 10 * time.Second
@@ -467,12 +465,12 @@ func (g *gatedGit) AddWorktree(ctx context.Context, repoDir, worktreeDir, branch
 	return g.inner.AddWorktree(ctx, repoDir, worktreeDir, branch)
 }
 
-func (g *gatedGit) Fetch(ctx context.Context, dir, remote string) error {
-	if err := g.enter("Fetch"); err != nil {
-		return err
+func (g *gatedGit) FetchBranch(ctx context.Context, repoDir, remote, branch string) (string, error) {
+	if err := g.enter("FetchBranch"); err != nil {
+		return "", err
 	}
 	defer g.leave()
-	return g.inner.Fetch(ctx, dir, remote)
+	return g.inner.FetchBranch(ctx, repoDir, remote, branch)
 }
 
 func (g *gatedGit) Upstream(ctx context.Context, repoDir, branch string) (gitclient.Upstream, bool, error) {
