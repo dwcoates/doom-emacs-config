@@ -33,12 +33,31 @@ import (
 // world (nothing spawns one today).
 const EnvStateFile = "FAKEGIT_STATE"
 
+// HarnessName and HarnessEmail are the identity every fixture commit carries
+// unless a test scripts another, and the world's global identity.
+const (
+	HarnessName  = "Integration Harness"
+	HarnessEmail = "harness@example.com"
+)
+
+// Identity is a git identity.
+type Identity struct {
+	Name  string `json:"name"`
+	Email string `json:"email"`
+}
+
 // Commit is one commit in the fake world.
 type Commit struct {
 	SHA     string `json:"sha"`
 	Subject string `json:"subject"`
 	Author  string `json:"author"`
-	AtRFC   string `json:"at"`
+	// AuthorEmail, Committer and CommitterEmail script an identity other than
+	// the harness's: an empty AuthorEmail is HarnessEmail, and an empty
+	// Committer or CommitterEmail is the author's.
+	AuthorEmail    string `json:"author_email,omitempty"`
+	Committer      string `json:"committer,omitempty"`
+	CommitterEmail string `json:"committer_email,omitempty"`
+	AtRFC          string `json:"at"`
 	// Parents are the commit's parents, first-parent first. A merge commit has
 	// two, which is what the landed-range walk reads.
 	Parents []string `json:"parents"`
@@ -49,6 +68,26 @@ type Commit struct {
 	// distinct from every other commit's (TreeOf); a test sets it to script a
 	// squash, whose one commit records exactly what merging a branch would.
 	Tree string `json:"tree,omitempty"`
+}
+
+// authorEmail answers the commit's author email.
+func (c *Commit) authorEmail() string {
+	if c.AuthorEmail != "" {
+		return c.AuthorEmail
+	}
+	return HarnessEmail
+}
+
+// committer answers the commit's committer name and email.
+func (c *Commit) committer() (string, string) {
+	name, email := c.Committer, c.CommitterEmail
+	if name == "" {
+		name = c.Author
+	}
+	if email == "" {
+		email = c.authorEmail()
+	}
+	return name, email
 }
 
 // TreeOf answers the tree a commit records.
@@ -180,11 +219,14 @@ type State struct {
 	Calls     []Call             `json:"calls"`
 	// Seq mints deterministic commit shas.
 	Seq int `json:"seq"`
+	// Global is `git config --global user.name` / `user.email`; nil is
+	// neither set. A new world's is the harness identity.
+	Global *Identity `json:"global_identity"`
 }
 
 // NewState is an empty world.
 func NewState() *State {
-	return &State{Commits: map[string]*Commit{}}
+	return &State{Commits: map[string]*Commit{}, Global: &Identity{Name: HarnessName, Email: HarnessEmail}}
 }
 
 // Load reads the fixture file. A missing file is an empty world, so a test that
@@ -362,7 +404,7 @@ func (s *State) AddCommit(repo *Repo, branch, subject string, parents, paths []s
 	c := &Commit{
 		SHA:     s.MintSHA(),
 		Subject: subject,
-		Author:  "Integration Harness",
+		Author:  HarnessName,
 		AtRFC:   time.Unix(1_700_000_000+int64(s.Seq), 0).UTC().Format(time.RFC3339),
 		Parents: parents,
 		Paths:   paths,

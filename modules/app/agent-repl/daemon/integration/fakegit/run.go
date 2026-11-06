@@ -86,7 +86,7 @@ func answer(s *State, cwd string, args []string) Result {
 	case "symbolic-ref":
 		return symbolicRef(repo, wt, subject)
 	case "config":
-		return config(repo, subject)
+		return config(s, repo, subject)
 	case "show-ref":
 		return showRef(repo, subject)
 	case "rev-parse":
@@ -190,7 +190,10 @@ func symbolicRef(repo *Repo, wt *Worktree, subject []string) Result {
 	return Result{Stdout: repo.OriginHead + "\n"}
 }
 
-func config(repo *Repo, subject []string) Result {
+func config(s *State, repo *Repo, subject []string) Result {
+	if len(subject) == 3 && subject[1] == "--global" {
+		return globalConfig(s, subject[2])
+	}
 	if contains(subject, "--list") {
 		return configList(repo, subject)
 	}
@@ -206,6 +209,27 @@ func config(repo *Repo, subject []string) Result {
 		return Result{Stdout: "false\n"}
 	}
 	return Result{Exit: 1}
+}
+
+// globalConfig answers `config --global user.name|user.email` from the world's
+// global identity; an unset one is real git's empty exit 1.
+func globalConfig(s *State, key string) Result {
+	if s.Global == nil {
+		return Result{Exit: 1}
+	}
+	value := ""
+	switch key {
+	case "user.name":
+		value = s.Global.Name
+	case "user.email":
+		value = s.Global.Email
+	default:
+		return Result{Stderr: "fatal: fakegit: only `config --global user.name|user.email` is modeled\n", Exit: 128}
+	}
+	if value == "" {
+		return Result{Exit: 1}
+	}
+	return Result{Stdout: value + "\n"}
 }
 
 // configList answers `config --list [-z]`: every key of the fixture
@@ -1242,16 +1266,17 @@ func (s *State) renderCommit(format string, c *Commit, decor string) string {
 // format it consumed, or a zero width when the placeholder is not one the fake
 // models.
 func (s *State) commitToken(rest string, c *Commit, decor string) (string, int) {
+	committerName, committerEmail := c.committer()
 	for _, tok := range []struct {
 		name  string
 		value string
 	}{
 		{"aN", c.Author},
-		{"cN", c.Author},
+		{"cN", committerName},
 		{"an", c.Author},
-		{"cn", c.Author},
-		{"ae", authorEmail},
-		{"ce", authorEmail},
+		{"cn", committerName},
+		{"ae", c.authorEmail()},
+		{"ce", committerEmail},
 		{"aI", c.AtRFC},
 		{"cI", c.AtRFC},
 		{"ad", c.AtRFC},
@@ -1275,9 +1300,6 @@ func (s *State) commitToken(rest string, c *Commit, decor string) (string, int) 
 	}
 	return "", 0
 }
-
-// authorEmail is the one address every fixture commit carries.
-const authorEmail = "harness@example.com"
 
 // epoch is the seconds-since-the-epoch form of a commit's RFC 3339 time, which
 // is what `%at` and `%ct` print.
@@ -1572,6 +1594,10 @@ func rebase(s *State, repo *Repo, wt *Worktree, subject []string) Result {
 		}
 		original := s.Commits[r.Todo[r.Done]]
 		replayed := s.AddCommit(repo, "", original.Subject, []string{r.NewHead}, original.Paths)
+		// A REPLAY KEEPS ITS AUTHOR, as git's does; its committer is the
+		// harness's identity, the one doing the replaying.
+		replayed.Author, replayed.AuthorEmail = original.Author, original.AuthorEmail
+		replayed.Committer, replayed.CommitterEmail = HarnessName, HarnessEmail
 		r.NewHead = replayed.SHA
 		r.Done = k
 		wt.Head = r.NewHead

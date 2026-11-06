@@ -412,6 +412,20 @@ func (r *Repo) RebaseInProgress(worktreeDir string) bool {
 	return wt != nil && wt.Rebase != nil
 }
 
+// SetCommitAuthor scripts commit sha as authored (and, the replay aside,
+// committed) by name <email> instead of the harness identity: what a commit
+// made under another identity, or an outside contributor's, carries.
+func (r *Repo) SetCommitAuthor(sha, name, email string) {
+	r.t.Helper()
+	r.edit(func(s *fakegit.State) {
+		c := s.Commits[sha]
+		if c == nil {
+			r.t.Fatalf("harness: no commit %s to set the author of", sha)
+		}
+		c.Author, c.AuthorEmail = name, email
+	})
+}
+
 // BranchHead answers the commit a branch points at.
 func (r *Repo) BranchHead(branch string) string {
 	r.t.Helper()

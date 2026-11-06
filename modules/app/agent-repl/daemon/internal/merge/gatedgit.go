@@ -417,6 +417,22 @@ func (g *gatedGit) CommitsBetween(ctx context.Context, dir, base, tip string) ([
 	return g.inner.CommitsBetween(ctx, dir, base, tip)
 }
 
+func (g *gatedGit) GlobalIdentity(ctx context.Context, dir string) (gitclient.Identity, error) {
+	if err := g.enter("GlobalIdentity"); err != nil {
+		return gitclient.Identity{}, err
+	}
+	defer g.leave()
+	return g.inner.GlobalIdentity(ctx, dir)
+}
+
+func (g *gatedGit) CommitIdentities(ctx context.Context, dir, base, tip string) ([]gitclient.CommitIdentity, error) {
+	if err := g.enter("CommitIdentities"); err != nil {
+		return nil, err
+	}
+	defer g.leave()
+	return g.inner.CommitIdentities(ctx, dir, base, tip)
+}
+
 func (g *gatedGit) CountCommits(ctx context.Context, dir, base, tip string) (uint32, error) {
 	if err := g.enter("CountCommits"); err != nil {
 		return 0, err

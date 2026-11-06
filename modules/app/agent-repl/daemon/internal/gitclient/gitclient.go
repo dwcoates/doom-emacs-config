@@ -833,27 +833,17 @@ func (c *client) commitAt(ctx context.Context, operation, dir, ref string) (Comm
 // is a LOUD failure: silently dropping it would hand the caller a landed range
 // that is quietly short.
 func (c *client) parseCommits(operation, dir, out string) ([]Commit, error) {
-	trimmed := strings.TrimRight(out, "\n")
-	if trimmed == "" {
-		return nil, nil
+	records, err := c.formattedRecords(operation, dir, out, 4, nil)
+	if err != nil || records == nil {
+		return nil, err
 	}
-	lines := strings.Split(trimmed, "\n")
-	commits := make([]Commit, 0, len(lines))
-	for _, line := range lines {
-		fields := strings.Split(line, fieldSep)
-		if len(fields) != 4 {
-			c.log.Global().Error(operation, "a commit line did not carry every field", dlog.Context{
-				"dir":    dir,
-				"line":   line,
-				"fields": len(fields),
-			})
-			return nil, fmt.Errorf("gitclient: unreadable commit line %q in %s", line, dir)
-		}
+	commits := make([]Commit, 0, len(records))
+	for _, fields := range records {
 		at, err := time.Parse(time.RFC3339, fields[3])
 		if err != nil {
 			c.log.Global().Error(operation, "a commit's author date was unreadable", dlog.Context{
 				"dir":   dir,
-				"line":  line,
+				"line":  strings.Join(fields, fieldSep),
 				"cause": err.Error(),
 			})
 			return nil, fmt.Errorf("gitclient: unreadable author date %q in %s: %w", fields[3], dir, err)
@@ -866,6 +856,33 @@ func (c *client) parseCommits(operation, dir, out string) ([]Commit, error) {
 		})
 	}
 	return commits, nil
+}
+
+// formattedRecords splits the output of a --format template whose fields are
+// joined by fieldSep, one record a line, into each record's fields; empty
+// output is no records. A line carrying any other number of fields than want
+// is unreadable: it is recorded at ERROR, with context and the line, and
+// refused.
+func (c *client) formattedRecords(operation, dir, out string, want int, context dlog.Context) ([][]string, error) {
+	trimmed := strings.TrimRight(out, "\n")
+	if trimmed == "" {
+		return nil, nil
+	}
+	lines := strings.Split(trimmed, "\n")
+	records := make([][]string, 0, len(lines))
+	for _, line := range lines {
+		fields := strings.Split(line, fieldSep)
+		if len(fields) != want {
+			record := dlog.Context{"dir": dir, "line": line, "fields": len(fields)}
+			for k, v := range context {
+				record[k] = v
+			}
+			c.log.Global().Error(operation, "a commit line did not carry every field", record)
+			return nil, fmt.Errorf("gitclient: unreadable commit line %q in %s", line, dir)
+		}
+		records = append(records, fields)
+	}
+	return records, nil
 }
 
 // splitNUL splits git's `-z` output into paths, dropping the trailing empty

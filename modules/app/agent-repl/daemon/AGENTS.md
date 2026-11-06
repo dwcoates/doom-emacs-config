@@ -1243,8 +1243,12 @@ Owner rulings, 2026-09-30 (`internal/merge`; the contract is
   fixing attempts x/y under ONE bound (`MaxFixAttempts`), the last failing
   attempt failing the merge in tests (the gate and remediation contract below); committing -- a moved target STARTS
   OVER, else the non-ff merge commit is made in a detached scratch tree
-  (`<state>/merge-trees/`) and the target fast-forwarded; postprocessing;
-  landed.
+  (`<state>/merge-trees/`), every commit from the tip to it is checked to be
+  authored and committed by the global git identity (`identity.go`; any other
+  identity, an outside contributor's included, FAILS the merge in other with
+  the target unmoved; a deploy with no local merge lands nothing here and is not
+  checked), and the target
+  fast-forwarded; postprocessing; landed.
 - **THE TEST GATE AND REMEDIATION CONTRACT IS OWNER-RULED** (2026-10-12; the
   intended design, changed only after a conversation with the owner; in full
   in the module's AGENTS.md, "The merge queue's test gate and remediation

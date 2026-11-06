@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 # test-pre-commit.sh — hermetic tests for .githooks/pre-commit.
 #
-# The hook's ONLY gate is the static external-boundary lint.  The unified
+# The hook's gates are the identity guard (every commit carries the global git
+# identity; the identity fixtures below) and the static external-boundary
+# lint.  The unified
 # agent-repl test suite is deliberately NOT run here any more: that gate moved
 # into the workspace-merge machinery (merge.Driver's per-commit pick loop plus
 # merge.SuiteRunner), which tests each cherry-picked commit as it lands on the
-# target.  Every fixture below therefore asserts BOTH halves — the lint ran,
-# and the suite runner was never invoked.
+# target.  Every lint fixture below therefore asserts BOTH halves — the lint
+# ran, and the suite runner was never invoked.
 #
 # NO REAL GIT (owner rule: no test of any form runs real git).  Every fixture
 # repository is a bin/fake-git.sh repository, `git` on the hook's PATH is that
@@ -42,6 +44,13 @@ ln -s "$FAKE_GIT" "$FAKE_BIN/git"
 export PATH="$FAKE_BIN:$PATH"
 PASS=0
 FAIL=0
+
+# The fixtures' GLOBAL identity: the file GIT_CONFIG_GLOBAL names for every
+# hook run (the fake git reads no other global config).  A test that needs a
+# different global config points GLOBAL_CONFIG at its own file.
+DEFAULT_GLOBAL_CONFIG="$TMP/global-config"
+printf 'user.name=Pat Example\nuser.email=pat@example.com\n' >"$DEFAULT_GLOBAL_CONFIG"
+GLOBAL_CONFIG="$DEFAULT_GLOBAL_CONFIG"
 
 pass() {
   printf '  PASS: %s\n' "$1"
@@ -99,8 +108,10 @@ stage_module_file() {
 }
 
 # run_hook WORKTREE HOOK [LINT_EXIT [SUITE_EXIT]] — run HOOK as git runs a
-# pre-commit hook for a commit in WORKTREE: from the worktree's top.  RUN_RC
-# and RUN_OUT hold its outcome and GIT_CALLS the git calls it made.
+# pre-commit hook for a commit in WORKTREE: from the worktree's top, with the
+# extra environment bindings RUN_ENV holds (none unless a test sets it).
+# RUN_RC and RUN_OUT hold its outcome and GIT_CALLS the git calls it made.
+RUN_ENV=()
 run_hook() {
   local worktree="$1"
   local hook="$2"
@@ -113,7 +124,9 @@ run_hook() {
   set +e
   RUN_OUT="$(
     cd "$worktree" &&
-      FAKE_GIT_LOG="$git_log" \
+      env ${RUN_ENV[@]+"${RUN_ENV[@]}"} \
+        FAKE_GIT_LOG="$git_log" \
+        GIT_CONFIG_GLOBAL="$GLOBAL_CONFIG" \
         HOOK_TEST_RUN_LOG="$RUN_LOG" \
         HOOK_TEST_RUN_EXIT="$suite_exit" \
         HOOK_TEST_LINT_LOG="$LINT_LOG" \
@@ -131,10 +144,15 @@ run_commit() {
 
 # The git calls a hook that reaches its gate makes, in order: where the
 # repository is, which repository owns the hook, whether a cherry-pick is
-# being replayed, and what is staged.  Nothing else -- no branch, no history.
+# being replayed, the global identity and the identity the commit carries,
+# and what is staged.  Nothing else -- no branch, no history.
 GATED_CALLS="git rev-parse --show-toplevel
 git rev-parse --git-common-dir
 git rev-parse --git-dir
+git config --global user.name
+git config --global user.email
+git var GIT_COMMITTER_IDENT
+git var GIT_AUTHOR_IDENT
 git diff --cached --name-only"
 
 # assert_gated NAME — the commit succeeded, the lint ran, the suite did not,
@@ -326,6 +344,146 @@ test_a_failing_suite_no_longer_blocks_commit() {
   rm -rf "$repo"
 }
 
+# --- identity guard ----------------------------------------------------------
+
+# run_identity_commit REPO [ENV...] — run the hook for a commit of an
+# unrelated file in REPO with the extra environment bindings ENV: the guard
+# runs for every commit, whatever it stages.
+run_identity_commit() {
+  local repo="$1"
+  shift
+  printf 'docs\n' >"$repo/README.md"
+  git -C "$repo" add "$repo/README.md"
+  RUN_ENV=("$@")
+  run_commit "$repo"
+  RUN_ENV=()
+}
+
+# global_config_file NAME LINE... — a global config file of LINEs, for one
+# run: GLOBAL_CONFIG="$(global_config_file ...)" run_identity_commit ...
+global_config_file() {
+  local file="$TMP/$1"
+  shift
+  printf '%s\n' "$@" >"$file"
+  printf '%s\n' "$file"
+}
+
+# assert_refused NAME WANT... — the commit was refused, the output carries
+# every WANT, and the boundary lint never ran.
+assert_refused() {
+  local name="$1" want missing=""
+  shift
+  for want in "$@"; do
+    grep_in "$RUN_OUT" -qF "$want" || missing+="missing: $want"$'\n'
+  done
+  if [ "$RUN_RC" -ne 0 ] && [ -z "$missing" ] && grep_in "$RUN_OUT" -qF "refusing to commit under an identity other than the global one" &&
+    ! grep_in "$GIT_CALLS" -q "^git diff"; then
+    pass "$name"
+  else
+    fail "$name" "exit=$RUN_RC" "$missing" "$RUN_OUT"
+  fi
+}
+
+test_identity_matching_the_global_one_commits() {
+  local repo
+  repo="$(mkrepo)"
+  run_identity_commit "$repo"
+  if [ "$RUN_RC" -eq 0 ] && grep_in "$GIT_CALLS" -q "^git var GIT_AUTHOR_IDENT"; then
+    pass "a commit under the global identity is allowed"
+  else
+    fail "a commit under the global identity is allowed" "exit=$RUN_RC" "$RUN_OUT"
+  fi
+  rm -rf "$repo"
+}
+
+test_identity_name_mismatch_is_refused() {
+  # The global file's own committer.name outranks its user.name.
+  local repo
+  repo="$(mkrepo)"
+  GLOBAL_CONFIG="$(global_config_file global-committer-name 'user.name=Pat Example' 'user.email=pat@example.com' 'committer.name=Someone Else')" \
+    run_identity_commit "$repo"
+  assert_refused "a committer name other than the global one is refused" \
+    'the commit'"'"'s committer would be "Someone Else <pat@example.com>", not the global identity "Pat Example <pat@example.com>"' \
+    "committer.name=Someone Else  (file:$TMP/global-committer-name)"
+  rm -rf "$repo"
+}
+
+test_identity_email_mismatch_is_refused() {
+  local repo
+  repo="$(mkrepo)"
+  GLOBAL_CONFIG="$(global_config_file global-author-email 'user.name=Pat Example' 'user.email=pat@example.com' 'author.email=pat@elsewhere.example')" \
+    run_identity_commit "$repo"
+  assert_refused "an author email other than the global one is refused" \
+    'the commit'"'"'s author would be "Pat Example <pat@elsewhere.example>", not the global identity "Pat Example <pat@example.com>"' \
+    "author.email=pat@elsewhere.example  (file:$TMP/global-author-email)"
+  rm -rf "$repo"
+}
+
+test_identity_env_override_is_refused() {
+  local repo
+  repo="$(mkrepo)"
+  run_identity_commit "$repo" GIT_AUTHOR_NAME="Claude"
+  assert_refused "an author named by GIT_AUTHOR_NAME is refused, naming the variable" \
+    'the commit'"'"'s author would be "Claude <pat@example.com>"' \
+    "GIT_AUTHOR_NAME=Claude  (environment variable)"
+  rm -rf "$repo"
+}
+
+test_identity_repo_local_override_is_refused() {
+  # The 2026-10-14 incident: user.* written into the repository's own config.
+  local repo
+  repo="$(mkrepo)"
+  git -C "$repo" config user.name Test
+  git -C "$repo" config user.email test@example.com
+  run_identity_commit "$repo"
+  assert_refused "a repository-local user.* is refused, naming the repository's config" \
+    'the commit'"'"'s committer would be "Test <test@example.com>", not the global identity "Pat Example <pat@example.com>"' \
+    "user.name=Pat Example  (file:$DEFAULT_GLOBAL_CONFIG)" \
+    "user.name=Test  (file:" "$(basename "$repo")/.fakegit/config)"
+  rm -rf "$repo"
+}
+
+test_missing_global_identity_is_refused() {
+  local repo
+  repo="$(mkrepo)"
+  git -C "$repo" config user.name Test
+  git -C "$repo" config user.email test@example.com
+  GLOBAL_CONFIG="$(global_config_file global-empty)" run_identity_commit "$repo"
+  assert_refused "a commit with no global identity configured is refused" \
+    'no global git identity is configured (user.name="", user.email="")'
+  if grep_in "$GIT_CALLS" -q "^git var"; then
+    fail "no global identity refuses before resolving the commit's identity" "$GIT_CALLS"
+  fi
+  rm -rf "$repo"
+}
+
+test_replay_keeps_its_authors_identity() {
+  # A cherry-pick hands the hook the replayed commit's author; only the
+  # committer is the person committing.
+  local repo
+  repo="$(mkrepo)"
+  touch "$repo/.fakegit/CHERRY_PICK_HEAD"
+  run_identity_commit "$repo" GIT_AUTHOR_NAME="Outside Contributor" GIT_AUTHOR_EMAIL="oc@example.org"
+  if [ "$RUN_RC" -eq 0 ] && grep_in "$GIT_CALLS" -q "^git var GIT_COMMITTER_IDENT" &&
+    ! grep_in "$GIT_CALLS" -q "^git var GIT_AUTHOR_IDENT"; then
+    pass "a replay checks its committer and keeps its author"
+  else
+    fail "a replay checks its committer and keeps its author" "exit=$RUN_RC" "$GIT_CALLS" "$RUN_OUT"
+  fi
+  rm -rf "$repo"
+}
+
+test_replay_with_a_foreign_committer_is_refused() {
+  local repo
+  repo="$(mkrepo)"
+  mkdir -p "$repo/.fakegit/rebase-merge"
+  run_identity_commit "$repo" GIT_COMMITTER_EMAIL="test@example.com"
+  assert_refused "a replay committed under another identity is refused" \
+    'the commit'"'"'s committer would be "Pat Example <test@example.com>"' \
+    "GIT_COMMITTER_EMAIL=test@example.com  (environment variable)"
+  rm -rf "$repo"
+}
+
 test_cherry_pick_skips_the_gate
 test_direct_master_commit_runs_the_lint
 test_elisp_change_runs_the_lint
@@ -340,6 +498,14 @@ test_foreign_repo_skips_shared_hook
 test_lint_failure_blocks_commit
 test_missing_lint_blocks_commit
 test_a_failing_suite_no_longer_blocks_commit
+test_identity_matching_the_global_one_commits
+test_identity_name_mismatch_is_refused
+test_identity_email_mismatch_is_refused
+test_identity_env_override_is_refused
+test_identity_repo_local_override_is_refused
+test_missing_global_identity_is_refused
+test_replay_keeps_its_authors_identity
+test_replay_with_a_foreign_committer_is_refused
 
 printf 'Passed: %d  Failed: %d\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

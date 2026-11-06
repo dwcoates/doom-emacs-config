@@ -241,6 +241,38 @@ parsed:
 		return r.lsRemote(out, opts[0])
 	case strings.HasPrefix(joined, "tag "), strings.HasPrefix(joined, "update-ref "):
 		return r.refCommand(out, cmd, opts, argsJoined)
+	case strings.HasPrefix(joined, "config --global "):
+		if len(opts) != 2 || strings.HasPrefix(opts[1], "-") {
+			return die(2, "unmodelled config form: %s", argsJoined)
+		}
+		origins, err := r.configOrigins(opts[1], true)
+		if err != nil {
+			return err
+		}
+		if len(origins) == 0 {
+			return die(1, "")
+		}
+		fmt.Fprintf(out, "%s\n", origins[len(origins)-1].value)
+	case strings.HasPrefix(joined, "config --show-origin --get-all "):
+		if len(opts) != 3 {
+			return die(2, "unmodelled config form: %s", argsJoined)
+		}
+		origins, err := r.configOrigins(opts[2], false)
+		if err != nil {
+			return err
+		}
+		if len(origins) == 0 {
+			return die(1, "")
+		}
+		for _, o := range origins {
+			fmt.Fprintf(out, "file:%s\t%s\n", o.file, o.value)
+		}
+	case joined == "var GIT_AUTHOR_IDENT", joined == "var GIT_COMMITTER_IDENT":
+		ident, err := r.ident(strings.TrimSuffix(strings.TrimPrefix(opts[0], "GIT_"), "_IDENT"))
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "%s 1700000000 +0000\n", ident)
 	case strings.HasPrefix(joined, "config --type=bool --get "):
 		if len(opts) != 3 {
 			return die(2, "unmodelled config form: %s", argsJoined)
@@ -736,6 +768,85 @@ func (r *repo) configGet(key string) (string, bool, error) {
 		}
 	}
 	return value, found, nil
+}
+
+// ---- identity -------------------------------------------------------------------
+//
+// The GLOBAL config is the file $GIT_CONFIG_GLOBAL names, in the repository
+// config's one-`key=value`-a-line form: the fake never reads the person's own
+// ~/.gitconfig, and a harness that forgot to name one fails loudly rather than
+// resolving against nothing. The repository's config is .fakegit/config.
+
+// configOrigin is one value of a key and the file that set it.
+type configOrigin struct {
+	file, value string
+}
+
+// configOrigins answers every value of key, in git's read order (global, then
+// the repository's), each with its file. globalOnly limits it to the global
+// file, as `config --global` does.
+func (r *repo) configOrigins(key string, globalOnly bool) ([]configOrigin, error) {
+	global, ok := os.LookupEnv("GIT_CONFIG_GLOBAL")
+	if !ok {
+		return nil, die(2, "the fake models the global config only through GIT_CONFIG_GLOBAL, which is unset")
+	}
+	files := []string{global}
+	if !globalOnly {
+		files = append(files, r.g+"/config")
+	}
+	var out []configOrigin
+	for _, file := range files {
+		lines, err := readLines(file)
+		if err != nil {
+			return nil, err
+		}
+		for _, line := range lines {
+			if k, v, _ := strings.Cut(line, "="); k == key {
+				out = append(out, configOrigin{file: file, value: v})
+			}
+		}
+	}
+	return out, nil
+}
+
+// lastConfig is the value git uses for key: the last one read.
+func (r *repo) lastConfig(key string) (string, bool, error) {
+	origins, err := r.configOrigins(key, false)
+	if err != nil || len(origins) == 0 {
+		return "", false, err
+	}
+	return origins[len(origins)-1].value, true, nil
+}
+
+// ident resolves side's (AUTHOR or COMMITTER) "Name <email>" in git's order:
+// GIT_<SIDE>_NAME/EMAIL, then <side>.name/email, then user.name/email, and for
+// the email last $EMAIL. Git's guess from the system's account is not
+// modelled: an identity nothing names exits 128, as a strict git does.
+func (r *repo) ident(side string) (string, error) {
+	field := func(f, fallbackEnv string) (string, error) {
+		if v, ok := os.LookupEnv("GIT_" + side + "_" + strings.ToUpper(f)); ok {
+			return v, nil
+		}
+		for _, key := range []string{strings.ToLower(side) + "." + f, "user." + f} {
+			v, found, err := r.lastConfig(key)
+			if err != nil || found {
+				return v, err
+			}
+		}
+		if v, ok := os.LookupEnv(fallbackEnv); fallbackEnv != "" && ok {
+			return v, nil
+		}
+		return "", die(128, "unable to auto-detect the %s %s", strings.ToLower(side), f)
+	}
+	name, err := field("name", "")
+	if err != nil {
+		return "", err
+	}
+	email, err := field("email", "EMAIL")
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%s <%s>", name, email), nil
 }
 
 func (r *repo) resolve(rev string) (string, bool) {

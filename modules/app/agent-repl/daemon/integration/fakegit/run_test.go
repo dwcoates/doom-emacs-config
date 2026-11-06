@@ -2241,3 +2241,123 @@ func TestRerereRefusesWhatItDoesNotModel(t *testing.T) {
 		t.Fatalf("rerere status = %+v, want a refusal", got)
 	}
 }
+
+func TestConfigGlobalAnswersTheWorldsGlobalIdentity(t *testing.T) {
+	// Arrange.
+	s, _, dir := world(t)
+
+	// Act.
+	name := Run(s, "/", []string{"-C", dir, "config", "--global", "user.name"})
+	email := Run(s, "/", []string{"-C", dir, "config", "--global", "user.email"})
+
+	// Assert.
+	if name.Stdout != HarnessName+"\n" || email.Stdout != HarnessEmail+"\n" {
+		t.Fatalf("config --global = %+v, %+v; want the harness identity", name, email)
+	}
+}
+
+func TestConfigGlobalReportsAnUnsetIdentityAsRealGitDoes(t *testing.T) {
+	// Arrange.
+	s, _, dir := world(t)
+	s.Global = nil
+
+	// Act.
+	got := Run(s, "/", []string{"-C", dir, "config", "--global", "user.name"})
+
+	// Assert.
+	if got.Exit != 1 || got.Stdout != "" || got.Stderr != "" {
+		t.Fatalf("config --global user.name = %+v, want an empty exit 1", got)
+	}
+}
+
+func TestConfigGlobalReportsAnEmptyFieldAsUnset(t *testing.T) {
+	// Arrange.
+	s, _, dir := world(t)
+	s.Global = &Identity{Name: HarnessName}
+
+	// Act.
+	got := Run(s, "/", []string{"-C", dir, "config", "--global", "user.email"})
+
+	// Assert.
+	if got.Exit != 1 || got.Stdout != "" {
+		t.Fatalf("config --global user.email = %+v, want an empty exit 1", got)
+	}
+}
+
+func TestConfigGlobalRefusesAnUnmodeledKey(t *testing.T) {
+	// Arrange.
+	s, _, dir := world(t)
+
+	// Act.
+	got := Run(s, "/", []string{"-C", dir, "config", "--global", "core.editor"})
+
+	// Assert.
+	if got.Exit != 128 || !strings.Contains(got.Stderr, "only `config --global user.name|user.email` is modeled") {
+		t.Fatalf("config --global core.editor = %+v, want a loud refusal", got)
+	}
+}
+
+func TestTheGlobalIdentitySurvivesTheFixtureFile(t *testing.T) {
+	// Arrange.
+	path := filepath.Join(t.TempDir(), "state.json")
+	s := NewState()
+	s.Global = nil
+
+	// Act.
+	if err := Save(path, s); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	loaded, err := Load(path)
+
+	// Assert.
+	if err != nil || loaded.Global != nil {
+		t.Fatalf("Load = %+v, %v; want the unset identity kept unset", loaded.Global, err)
+	}
+}
+
+func TestRevListRendersEachCommitsAuthorAndCommitter(t *testing.T) {
+	// Arrange.
+	s, repo, dir := world(t)
+	base := repo.BranchHeads["main"]
+	harness := s.AddCommit(repo, "main", "harness", []string{base}, nil)
+	scripted := s.AddCommit(repo, "main", "scripted", []string{harness.SHA}, nil)
+	scripted.Author, scripted.AuthorEmail = "Test", "test@example.com"
+	scripted.Committer, scripted.CommitterEmail = "Other", "other@example.com"
+
+	// Act.
+	got := Run(s, "/", []string{"-C", dir, "rev-list", "--reverse",
+		"--format=%s" + FieldSep + "%an" + FieldSep + "%ae" + FieldSep + "%cn" + FieldSep + "%ce",
+		"--no-commit-header", base + ".." + scripted.SHA})
+
+	// Assert.
+	want := strings.Join([]string{"harness", HarnessName, HarnessEmail, HarnessName, HarnessEmail}, FieldSep) + "\n" +
+		strings.Join([]string{"scripted", "Test", "test@example.com", "Other", "other@example.com"}, FieldSep) + "\n"
+	if got.Stdout != want {
+		t.Fatalf("rev-list = %q, want %q", got.Stdout, want)
+	}
+}
+
+func TestARebaseReplayKeepsItsAuthorAndIsCommittedByTheHarness(t *testing.T) {
+	// Arrange: feature's one commit is an outside contributor's.
+	s, repo, _ := world(t)
+	wt := filepath.Join(t.TempDir(), "feature")
+	if res := Run(s, "/", []string{"-C", repo.Dir, "worktree", "add", "-b", "feature", wt, "main"}); res.Exit != 0 {
+		t.Fatalf("worktree add: %+v", res)
+	}
+	original := s.AddCommit(repo, "feature", "contribution", []string{repo.Worktree(wt).Head}, []string{"a.go"})
+	original.Author, original.AuthorEmail = "Outside Contributor", "oc@example.org"
+	tip := s.AddCommit(repo, "main", "main moved", []string{repo.BranchHeads["main"]}, []string{"c.go"}).SHA
+
+	// Act.
+	Run(s, "/", []string{"-C", wt, "rebase", "-i", "--empty=drop", tip})
+
+	// Assert.
+	replayed := s.Commits[repo.Worktree(wt).Head]
+	if replayed == nil || replayed.SHA == original.SHA {
+		t.Fatalf("no replayed commit stands in the worktree")
+	}
+	name, email := replayed.committer()
+	if replayed.Author != "Outside Contributor" || replayed.authorEmail() != "oc@example.org" || name != HarnessName || email != HarnessEmail {
+		t.Fatalf("replayed = %+v, want the contributor's author and the harness's committer", replayed)
+	}
+}

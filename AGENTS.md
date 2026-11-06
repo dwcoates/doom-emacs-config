@@ -505,6 +505,8 @@ To hand uncommitted edits to another worktree of this repo (e.g. a spawned works
 
 When asked to make changes, commit your work when done. Commit freely and often. **Never** rebase, pull, merge, push, or run any other mutating git commands without explicit instruction from the user.
 
+Every commit is authored and committed by the committing user's global git identity (`git config --global user.name` / `user.email`). Never hardcode one, set `GIT_AUTHOR_*` / `GIT_COMMITTER_*`, or write `user.*` into a repository's config; a throwaway repository passes its identity per command with `git -c` after dropping inherited `GIT_DIR` / `GIT_WORK_TREE` / `GIT_INDEX_FILE`. `.githooks/pre-commit` refuses a commit under any other identity, and the merge queue refuses to land one (`modules/app/agent-repl/daemon/internal/merge/identity.go`).
+
 ## AGENTS.md Updates
 
 Keep entries minimal — one short sentence or a brief code block per rule.

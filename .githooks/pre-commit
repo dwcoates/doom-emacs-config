@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# pre-commit — enforce the CHEAP static external-boundary lint whenever
-# agent-repl source, test, protocol, or local verification files are staged.
+# pre-commit — refuse any commit not made under the user's global git identity,
+# and enforce the CHEAP static external-boundary lint whenever agent-repl
+# source, test, protocol, or local verification files are staged.
 #
 # THE TEST SUITE IS NO LONGER RUN HERE.  It used to be: every commit that
 # staged an agent-repl file ran the whole unified suite
@@ -13,8 +14,8 @@
 # HEAD) when the failure survives that attempt.  Testing therefore gates
 # what lands on the TARGET, not what an agent commits on its own branch.
 #
-# What remains here is the external-boundary lint: it is grep-only, so it
-# costs nothing, and it catches a policy violation at the moment it is
+# What remains here is the identity guard (below) and the external-boundary
+# lint: both are cheap, and both catch a policy violation at the moment it is
 # authored rather than at merge time.
 #
 # Do not bypass with --no-verify; fix the violations.
@@ -57,11 +58,92 @@ elif [ "$(basename "$HOOK_DIR")" = "hooks" ]; then
   fi
 fi
 
+GIT_DIR_PATH="$(git rev-parse --git-dir)"
+
+# IDENTITY GUARD: every commit in this repository, whatever it stages, is
+# authored and committed by the user's GLOBAL git identity
+# (`git config --global user.name` / `user.email`).  See AGENTS.md "Commits
+# carry the running user's own git identity".  A repository-local user.*, a
+# GIT_AUTHOR_* / GIT_COMMITTER_* binding, or `git commit --author` (git hands
+# the hook the author as GIT_AUTHOR_*) is refused, naming where it came from.
+# A cherry-pick or rebase replays its commit's author by design, so a replay
+# checks only the committer; the merge queue still checks every landed
+# commit's author before master moves.
+refuse_identity() {
+  printf '%s\n' "$@" | sed 's/^/[pre-commit] /' >&2
+  echo "[pre-commit] ✗ refusing to commit under an identity other than the global one. Do not use --no-verify." >&2
+  exit 1
+}
+
+# global_identity_field KEY VAR — VAR := `git config --global KEY`, empty when
+# unset.  Any other failure to read it refuses the commit.
+global_identity_field() {
+  local value rc=0
+  value="$(git config --global "$1")" || rc=$?
+  case "$rc" in
+    0) printf -v "$2" '%s' "$value" ;;
+    1) printf -v "$2" '%s' "" ;;
+    *) refuse_identity "could not read the global $1: git config --global $1 exited $rc." ;;
+  esac
+}
+
+# identity_origins SIDE LOWER — every binding that can set SIDE's (AUTHOR or
+# COMMITTER; LOWER is its config section) name or email, each with where it
+# comes from.
+identity_origins() {
+  local side="$1" lower="$2" var key out rc origin value
+  for var in "GIT_${side}_NAME" "GIT_${side}_EMAIL" EMAIL; do
+    if [ -n "${!var+set}" ]; then
+      printf '    %s=%s  (environment variable)\n' "$var" "${!var}"
+    fi
+  done
+  for key in "$lower.name" "$lower.email" user.name user.email; do
+    rc=0
+    out="$(git config --show-origin --get-all "$key")" || rc=$?
+    case "$rc" in
+      0)
+        while IFS=$'\t' read -r origin value; do
+          printf '    %s=%s  (%s)\n' "$key" "$value" "$origin"
+        done <<<"$out"
+        ;;
+      1) ;;
+      *) refuse_identity "could not read where $key comes from: git config --show-origin --get-all $key exited $rc." ;;
+    esac
+  done
+}
+
+# check_identity SIDE — refuse unless SIDE's identity is the global one.
+check_identity() {
+  local side="$1" ident lower
+  if ! ident="$(git var "GIT_${side}_IDENT")"; then
+    refuse_identity "git could not resolve the commit's $side identity (git var GIT_${side}_IDENT failed)."
+  fi
+  ident="${ident% * *}"
+  if [ "$ident" != "$GLOBAL_IDENTITY" ]; then
+    lower="$(printf '%s' "$side" | tr '[:upper:]' '[:lower:]')"
+    refuse_identity "the commit's $lower would be \"$ident\", not the global identity \"$GLOBAL_IDENTITY\"." \
+      "where the $lower identity comes from (git uses the environment first, then $lower.*, then the last user.*):" \
+      "$(identity_origins "$side" "$lower")"
+  fi
+}
+
+global_identity_field user.name GLOBAL_NAME
+global_identity_field user.email GLOBAL_EMAIL
+if [ -z "$GLOBAL_NAME" ] || [ -z "$GLOBAL_EMAIL" ]; then
+  refuse_identity "no global git identity is configured (user.name=\"$GLOBAL_NAME\", user.email=\"$GLOBAL_EMAIL\")." \
+    "set it with: git config --global user.name ... and git config --global user.email ..."
+fi
+GLOBAL_IDENTITY="$GLOBAL_NAME <$GLOBAL_EMAIL>"
+check_identity COMMITTER
+if [ ! -f "$GIT_DIR_PATH/CHERRY_PICK_HEAD" ] && [ ! -d "$GIT_DIR_PATH/rebase-merge" ] &&
+  [ ! -d "$GIT_DIR_PATH/rebase-apply" ]; then
+  check_identity AUTHOR
+fi
+
 # Skip the gate entirely during cherry-picks.  The commit being replayed was
 # already linted on its source branch, and workspace merge uses automated
 # cherry-picks to land that exact commit — a hook that refused one of them
 # would wedge a merge the daemon has no path to un-wedge.
-GIT_DIR_PATH="$(git rev-parse --git-dir)"
 if [ -f "$GIT_DIR_PATH/CHERRY_PICK_HEAD" ]; then
   echo "[pre-commit] Cherry-pick detected — skipping the agent-repl boundary lint."
   exit 0
@@ -78,7 +160,7 @@ fi
 
 # Static lint: no raw external-process invocations outside the wrapper layer.
 # See AGENTS.md "No External Processes or External State in Tests".  It is the
-# ONLY gate this hook still runs, so a missing or non-executable lint script
+# ONLY staged-content gate this hook runs, so a missing or non-executable lint script
 # is a hard refusal rather than a quiet skip: a silently ungated commit is
 # indistinguishable from a passing one.
 BOUNDARY_LINT="$REPO_ROOT/.claude/check-external-boundaries.sh"

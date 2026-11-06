@@ -166,3 +166,18 @@ func TestThePinnedCheckoutLeavesItsDirectoryUntouched(t *testing.T) {
 		t.Fatalf("stat %s = %v, want the shared directory never written", pinned, err)
 	}
 }
+
+func TestSetCommitAuthorScriptsTheCommitsAuthor(t *testing.T) {
+	// Arrange.
+	repo := NewRepo(t)
+	sha := repo.CommitIn(repo.Dir, "a.txt", "a\n")
+
+	// Act.
+	repo.SetCommitAuthor(sha, "Outside Contributor", "oc@example.org")
+
+	// Assert.
+	c := repo.w.read().Commits[sha]
+	if c.Author != "Outside Contributor" || c.AuthorEmail != "oc@example.org" {
+		t.Fatalf("commit = %+v, want the scripted author", c)
+	}
+}

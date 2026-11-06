@@ -1427,6 +1427,12 @@ func TestSessionStartedRestoredLiveWorkRoutesToTheRootFeed(t *testing.T) {
 	// serves the call that launched it — the card the head is drawn in place
 	// of, on the feed of the agent that owns the work.
 	f.open()
+	// THE PUSH WAITS FOR THE MAIN AGENT'S WATCH TO SERVE. A fresh session's
+	// watch opens tail-only (its book is known empty), so a frame the fake
+	// shim takes before the watch subscribes is never delivered; the daemon
+	// records main_watching once the watch's opening page arrived, which the
+	// shim sends only after subscribing.
+	f.d.AwaitWorkspaceLogOperation(f.repo.Dir, "daemon.sessionwatcher.main_watching")
 	f.shim.PushAgentFrame(mainAgent, shellCallFrame("restored-shell-1", "sleep 100"))
 
 	// Assert: the restored item's row lands on the ROOT feed. A shell's row
