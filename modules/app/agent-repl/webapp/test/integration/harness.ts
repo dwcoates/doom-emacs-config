@@ -657,7 +657,7 @@ async function mountApp(
   // nowhere, since no test here reads the page's latencies.
   const promptEcho = createPromptEcho(() => Date.now(), () => undefined);
   handles.push({ dispose: installPromptEcho(promptEcho) });
-  handles.push(startLifecycle(ctx, { drainBannerHost: shell.drainBanner, newsDigest, reveals: createRevealRelay(), promptEcho }));
+  handles.push(startLifecycle(ctx, { drainBannerHost: shell.drainBanner, deployPulseHost: shell.sidebar, newsDigest, reveals: createRevealRelay(), promptEcho }));
 
   const feed = mountFeed(shell.feed, ctx, {
     renderers: createRowRenderers(ctx),

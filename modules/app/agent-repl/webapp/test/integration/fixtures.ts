@@ -2895,7 +2895,7 @@ export function shutdownAnnounced(init?: {
           kind:
             cause === "selfMergeRollout"
               ? { case: "selfMergeRollout", value: {} }
-              : { case: cause, value: { reason: drainReason(init?.reason ?? "deploy") } },
+              : { case: cause, value: { reason: drainReason(init?.reason ?? "maintenance") } },
         },
         expectedOutageMs: init?.expectedOutageMs ?? 4_000n,
         mintedAtMs: init?.mintedAtMs ?? 1_000n,

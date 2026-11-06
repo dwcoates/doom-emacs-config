@@ -324,6 +324,92 @@ function bannerContext(ticker: Ticker, failures: FailureSink = new RecordingSink
   });
 }
 
+describe("mountBanner: a deploy draws no banner, it pulses the sidebar title", () => {
+  const handover = () =>
+    announced({
+      address: "127.0.0.1:9",
+      cause: { kind: { case: "selfMergeRollout", value: {} } },
+      outageMs: 8000,
+      mintedAtMs: NOW,
+    });
+  let host: HTMLElement;
+  let states: boolean[];
+  const mount = () => mountBanner(host, bannerContext(fakeTicker()), (d) => states.push(d));
+  beforeEach(() => {
+    host = document.createElement("div");
+    states = [];
+  });
+
+  it("pulses and draws nothing for a deploy-reasoned drain schedule", () => {
+    const banner = mount();
+    banner.showDrain(drain(NOW + 60_000, reason("deploy")));
+    expect(host.children.length).toBe(0);
+    expect(states.at(-1)).toBe(true);
+  });
+
+  it("stops pulsing when the deploy's drain schedule is cancelled", () => {
+    const banner = mount();
+    banner.showDrain(drain(NOW + 60_000, reason("deploy")));
+    banner.clearDrain();
+    expect(states.at(-1)).toBe(false);
+  });
+
+  it("pulses and draws nothing for a deploy's handover restart", () => {
+    const banner = mount();
+    banner.showRestarting(handover(), NOW + 8000);
+    expect(host.children.length).toBe(0);
+    expect(states.at(-1)).toBe(true);
+  });
+
+  it("stops pulsing when the daemon answers again", () => {
+    const banner = mount();
+    banner.showRestarting(handover(), NOW + 8000);
+    banner.clearRestarting();
+    expect(states.at(-1)).toBe(false);
+  });
+
+  it("pulses for an immediate stop whose reason is a deploy", () => {
+    const banner = mount();
+    banner.showRestarting(
+      announced({
+        cause: { kind: { case: "immediate", value: { reason: reason("deploy") } } },
+        outageMs: 8000,
+        mintedAtMs: NOW,
+      }),
+      NOW + 8000,
+    );
+    expect(host.children.length).toBe(0);
+    expect(states.at(-1)).toBe(true);
+  });
+
+  it("does not pulse for a maintenance drain, which keeps its banner", () => {
+    const banner = mount();
+    banner.showDrain(drain(NOW + 60_000, reason("maintenance")));
+    expect(host.textContent).toContain("daemon restart scheduled");
+    expect(states.at(-1)).toBe(false);
+  });
+
+  it("does not pulse for a rollout with no successor, a plain bounce", () => {
+    const banner = mount();
+    banner.showRestarting(
+      announced({
+        cause: { kind: { case: "selfMergeRollout", value: {} } },
+        outageMs: 8000,
+        mintedAtMs: NOW,
+      }),
+      NOW + 8000,
+    );
+    expect(states.at(-1)).toBe(false);
+  });
+
+  it("stops pulsing once the workspace has moved", () => {
+    const banner = mount();
+    banner.showDrain(drain(NOW + 60_000, reason("deploy")));
+    banner.showMoved("127.0.0.1:9");
+    expect(states.at(-1)).toBe(false);
+  });
+});
+
 describe("mountBanner", () => {
   let host: HTMLElement;
   beforeEach(() => {
@@ -337,28 +423,28 @@ describe("mountBanner", () => {
 
   it("draws the drain notice on a schedule", () => {
     const banner = mountBanner(host, bannerContext(fakeTicker()));
-    banner.showDrain(drain(NOW + 60_000, reason("deploy")));
+    banner.showDrain(drain(NOW + 60_000, reason("maintenance")));
     expect(host.textContent).toContain("daemon restart scheduled");
   });
 
   it("ticks the drain countdown from the shared ticker", () => {
     const ticker = fakeTicker();
     const banner = mountBanner(host, bannerContext(ticker));
-    banner.showDrain(drain(NOW + 60_000, reason("deploy")));
+    banner.showDrain(drain(NOW + 60_000, reason("maintenance")));
     ticker.set(NOW + 30_000);
     expect(host.textContent).toContain("in 30s");
   });
 
   it("takes the banner down when the schedule is cancelled", () => {
     const banner = mountBanner(host, bannerContext(fakeTicker()));
-    banner.showDrain(drain(NOW + 60_000, reason("deploy")));
+    banner.showDrain(drain(NOW + 60_000, reason("maintenance")));
     banner.clearDrain();
     expect(host.children.length).toBe(0);
   });
 
   it("lets an announced restart win over a schedule that has not fired", () => {
     const banner = mountBanner(host, bannerContext(fakeTicker()));
-    banner.showDrain(drain(NOW + 60_000, reason("deploy")));
+    banner.showDrain(drain(NOW + 60_000, reason("maintenance")));
     banner.showRestarting(
       announced({
         cause: { kind: { case: "selfMergeRollout", value: {} } },
@@ -372,7 +458,7 @@ describe("mountBanner", () => {
 
   it("falls back to the standing schedule when the restart notice clears", () => {
     const banner = mountBanner(host, bannerContext(fakeTicker()));
-    banner.showDrain(drain(NOW + 60_000, reason("deploy")));
+    banner.showDrain(drain(NOW + 60_000, reason("maintenance")));
     banner.showRestarting(
       announced({
         cause: { kind: { case: "selfMergeRollout", value: {} } },
@@ -388,14 +474,14 @@ describe("mountBanner", () => {
   it("lets the moved notice win over everything, since nothing follows it", () => {
     const banner = mountBanner(host, bannerContext(fakeTicker()));
     banner.showMoved("127.0.0.1:9");
-    banner.showDrain(drain(NOW + 60_000, reason("deploy")));
+    banner.showDrain(drain(NOW + 60_000, reason("maintenance")));
     expect(host.textContent).toBe("workspace moved to 127.0.0.1:9");
   });
 
   it("unsubscribes the previous notice's clock on dispose", () => {
     const ticker = fakeTicker();
     const banner = mountBanner(host, bannerContext(ticker));
-    banner.showDrain(drain(NOW + 60_000, reason("deploy")));
+    banner.showDrain(drain(NOW + 60_000, reason("maintenance")));
     banner.dispose();
     ticker.set(NOW + 30_000);
     expect(host.children.length).toBe(0);
@@ -468,7 +554,7 @@ const NO_ECHO: Pick<PromptEcho, "echoed"> = { echoed: () => undefined };
 
 /** The deps a lifecycle needs, drawing on HOST, with none of them observed. */
 function lifecycleDeps(host: HTMLElement): LifecycleDeps {
-  return { drainBannerHost: host, newsDigest: NO_DIGEST, reveals: createRevealRelay(), promptEcho: NO_ECHO };
+  return { drainBannerHost: host, deployPulseHost: document.createElement("div"), newsDigest: NO_DIGEST, reveals: createRevealRelay(), promptEcho: NO_ECHO };
 }
 
 /** Let the transport's zero-delay frames land without moving the clock. */
@@ -653,9 +739,10 @@ describe("startLifecycle: the daemon stream", () => {
     vi.useRealTimers();
   });
 
-  it("draws the standing drain banner", async () => {
+  it("sets data-deploying on the pulse host for a deploy's drain, drawing no banner", async () => {
     // ARRANGE
     const host = document.createElement("div");
+    const pulseHost = document.createElement("div");
     const { client } = lifecycleClient({
       daemon: async function* () {
         yield create(WatchDaemonResponseSchema, {
@@ -665,10 +752,30 @@ describe("startLifecycle: the daemon stream", () => {
     });
     const ctx = lifecycleContext(client, new RecordingSink(), fakeTicker());
     // ACT
+    const handle = startLifecycle(ctx, { ...lifecycleDeps(host), deployPulseHost: pulseHost });
+    await settle();
+    // ASSERT
+    expect(pulseHost.hasAttribute("data-deploying")).toBe(true);
+    expect(host.children.length).toBe(0);
+    handle.dispose();
+  });
+
+  it("draws the standing drain banner", async () => {
+    // ARRANGE
+    const host = document.createElement("div");
+    const { client } = lifecycleClient({
+      daemon: async function* () {
+        yield create(WatchDaemonResponseSchema, {
+          push: { case: "drainScheduled", value: drain(NOW + 60_000, reason("maintenance")) },
+        });
+      },
+    });
+    const ctx = lifecycleContext(client, new RecordingSink(), fakeTicker());
+    // ACT
     const handle = startLifecycle(ctx, lifecycleDeps(host));
     await settle();
     // ASSERT (before dispose: disposing takes the banner down by design)
-    expect(host.textContent).toContain("daemon restart scheduled · deploy");
+    expect(host.textContent).toContain("daemon restart scheduled · maintenance");
     handle.dispose();
   });
 
