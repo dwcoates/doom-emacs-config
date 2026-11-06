@@ -195,10 +195,10 @@ describe("a WatchDaemon push arm this build has no case for", () => {
     harness.fake.pushMutationProgress("op-1");
     await harness.settle();
     // Act
-    harness.fake.scheduleDrain(60_000n, drainReason("deploy"));
+    harness.fake.scheduleDrain(60_000n, drainReason("maintenance"));
     await harness.settle();
     // Assert
-    expect(harness.$('[data-component="drain-banner"] [data-arm]')?.dataset.arm).toBe("deploy");
+    expect(harness.$('[data-component="drain-banner"] [data-arm]')?.dataset.arm).toBe("maintenance");
   });
 });
 
@@ -224,10 +224,10 @@ describe("a reload_elisp push reaching a webview", () => {
     harness.fake.pushReloadElisp("/checkout", "elisp-build");
     await harness.settle();
     // Act
-    harness.fake.scheduleDrain(60_000n, drainReason("deploy"));
+    harness.fake.scheduleDrain(60_000n, drainReason("maintenance"));
     await harness.settle();
     // Assert
-    expect(harness.$('[data-component="drain-banner"] [data-arm]')?.dataset.arm).toBe("deploy");
+    expect(harness.$('[data-component="drain-banner"] [data-arm]')?.dataset.arm).toBe("maintenance");
   });
 });
 
@@ -259,15 +259,15 @@ describe.each(EMACS_ONLY_PUSHES)("a %s push reaching a webview", (_arm, push) =>
     push(harness);
     await harness.settle();
     // Act
-    harness.fake.scheduleDrain(60_000n, drainReason("deploy"));
+    harness.fake.scheduleDrain(60_000n, drainReason("maintenance"));
     await harness.settle();
     // Assert
-    expect(harness.$('[data-component="drain-banner"] [data-arm]')?.dataset.arm).toBe("deploy");
+    expect(harness.$('[data-component="drain-banner"] [data-arm]')?.dataset.arm).toBe("maintenance");
   });
 });
 
 describe("the drain banner", () => {
-  it.each(DRAIN_REASON_ARMS)("draws a scheduled drain for the %s reason", async (arm) => {
+  it.each(DRAIN_REASON_ARMS.filter((arm) => arm !== "deploy"))("draws a scheduled drain for the %s reason", async (arm) => {
     // Arrange
     harness = await startHarness();
     await harness.fake.awaitStream("watchDaemon");
@@ -276,6 +276,18 @@ describe("the drain banner", () => {
     await harness.settle();
     // Assert
     expect(harness.$('[data-component="drain-banner"] [data-arm]')?.dataset.arm).toBe(arm);
+  });
+
+  it("draws no banner for the deploy reason, pulsing the sidebar title instead", async () => {
+    // Arrange
+    harness = await startHarness();
+    await harness.fake.awaitStream("watchDaemon");
+    // Act
+    harness.fake.scheduleDrain(60_000n, drainReason("deploy"));
+    await harness.settle();
+    // Assert
+    expect(harness.$('[data-component="drain-banner"]')?.textContent?.trim() ?? "").toBe("");
+    expect(harness.shell.sidebar.hasAttribute("data-deploying")).toBe(true);
   });
 
   it("draws the operator's own note verbatim", async () => {
@@ -293,7 +305,7 @@ describe("the drain banner", () => {
     // Arrange
     harness = await startHarness();
     await harness.fake.awaitStream("watchDaemon");
-    harness.fake.scheduleDrain(60_000n, drainReason("deploy"));
+    harness.fake.scheduleDrain(60_000n, drainReason("maintenance"));
     await harness.settle();
     const before = harness.$('[data-component="drain-banner"]')?.textContent;
     // Act
