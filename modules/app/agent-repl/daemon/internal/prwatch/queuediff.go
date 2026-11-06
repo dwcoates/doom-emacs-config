@@ -26,7 +26,8 @@ type prQueueSnapshot struct {
 // diffChecks answers the check runs RUNS on HEAD finished that PREVCHECKS,
 // told for PREVHEAD, did not tell, and the head and checks after them. A new
 // head starts its checks afresh; of several runs of one name the latest
-// counts, and an unfinished one is told once it finishes.
+// counts. Nothing is told while any of those latest runs is unfinished: the
+// set's finished runs are told together, once the whole set has finished.
 func diffChecks(prevHead string, prevChecks map[string]string, head string, runs []remoteCheck) (string, map[string]string, []*agentreplv1.PullRequestActivityCheckFinished) {
 	next := map[string]string{}
 	if head == prevHead {
@@ -38,12 +39,14 @@ func diffChecks(prevHead string, prevChecks map[string]string, head string, runs
 			latest[c.Name] = c
 		}
 	}
+	for _, c := range latest {
+		if !c.Completed {
+			return head, next, nil
+		}
+	}
 	var out []*agentreplv1.PullRequestActivityCheckFinished
 	for _, name := range sortedNames(latest) {
 		c := latest[name]
-		if !c.Completed {
-			continue
-		}
 		value := strconv.FormatUint(c.ID, 10) + ":" + c.Conclusion
 		if next[name] == value {
 			continue
