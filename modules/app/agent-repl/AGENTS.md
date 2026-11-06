@@ -1848,7 +1848,7 @@ Every commit, whether made by an agent, a merge, or a hook, is authored and comm
 - Two guards enforce it, both comparing against `git config --global user.name` / `user.email` and refusing when no global identity is set.
   - `.githooks/pre-commit` refuses a commit whose `git var GIT_AUTHOR_IDENT` or `GIT_COMMITTER_IDENT` differs, naming every environment variable and `git config --show-origin` value that could have set it. A cherry-pick or rebase keeps its replayed author, so the hook checks only its committer.
   - The merge queue checks every commit from the target's tip to the merge commit just before the fast-forward (`daemon/internal/merge/identity.go`), and a mismatch fails the merge with the target unmoved.
-  - An outside contributor's commit is refused on the queue's rebase-and-merge path, which lands only local work. It reaches master through its upstream instead, and a branch merged upstream is not checked.
+  - An outside contributor's commit is refused by the local merge (`pre_deploy.local_merge` in `.agent-repl/lifecycle.yaml`), which lands only this machine's work. A repository whose deploy has no local merge lands its commits through its own upstream, which recorded their identities, so its deploys are not checked.
 
 ## Requirements: the manifests are the one record of what a machine needs
 

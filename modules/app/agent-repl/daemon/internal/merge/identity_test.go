@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"agent-repld/internal/gitclient"
-	"agent-repld/internal/wsm"
 )
 
 var (
@@ -220,25 +219,24 @@ func TestALandingWhoseMergeCommitBringsInNothingFails(t *testing.T) {
 	}
 }
 
-func TestABranchMergedUpstreamIsNotIdentityChecked(t *testing.T) {
-	// Arrange: the remote recorded these identities, not this machine.
+func TestADeployWithNoLocalMergeIsNotIdentityChecked(t *testing.T) {
+	// Arrange: a repository whose deploy is hooks alone lands nothing here; its
+	// commits reach the main branch through the repository's own upstream, which
+	// recorded their identities.
 	h := newHarness(t)
-	mergedUpstream(h)
+	h.configurePromptHooks(nil, []string{"after"})
+	h.briefs["after"] = nil
 	h.git.globalIdentity = gitclient.Identity{}
+	enqueue(t, h)
 
 	// Act.
-	if err := h.request(t, wsm.MergeSource{Kind: wsm.MergeSourceMergedUpstream}, RequestedByUser); err != nil {
-		t.Fatalf("Enqueue: %v", err)
-	}
-	if err := h.admit(context.Background()); err != nil {
-		t.Fatalf("admit: %v", err)
-	}
+	_ = h.admit(context.Background())
 
 	// Assert.
 	if h.git.seen("global_identity") || h.git.seen("commit_identities") {
-		t.Fatalf("the upstream path read identities: %v", h.git.calls)
+		t.Fatalf("a deploy with no local merge read identities: %v", h.git.calls)
 	}
-	if !slices.Equal(h.git.fastForwards, []string{h.sourceD + "@upstream00000"}) {
-		t.Fatalf("fast-forwards = %v, want the default branch to upstream", h.git.fastForwards)
+	if facts, _ := h.o.Facts(theWorkspace); facts.State == StateFailed {
+		t.Fatalf("the deploy failed: %+v, want no identity refusal without a local merge", facts)
 	}
 }

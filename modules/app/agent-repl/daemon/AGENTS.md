@@ -1246,7 +1246,8 @@ Owner rulings, 2026-09-30 (`internal/merge`; the contract is
   (`<state>/merge-trees/`), every commit from the tip to it is checked to be
   authored and committed by the global git identity (`identity.go`; any other
   identity, an outside contributor's included, FAILS the merge in other with
-  the target unmoved; a branch merged upstream is not checked), and the target
+  the target unmoved; a deploy with no local merge lands nothing here and is not
+  checked), and the target
   fast-forwarded; postprocessing; landed.
 - **THE TEST GATE AND REMEDIATION CONTRACT IS OWNER-RULED** (2026-10-12; the
   intended design, changed only after a conversation with the owner; in full

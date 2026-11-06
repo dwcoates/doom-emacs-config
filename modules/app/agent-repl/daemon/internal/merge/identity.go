@@ -21,14 +21,13 @@ import (
 // every fixing attempt, just before the target is fast-forwarded to it: its
 // range from the tip is exactly what would land, the merge commit included.
 //
-// OUTSIDE AUTHORS ARE REFUSED HERE. The queue's rebase-and-merge path lands
-// LOCAL work (a workspace's branch, a named branch), and nothing in a commit
-// tells a contributor apart from this user under a wrong identity: `Test
-// <test@example.com>` names nobody the user knows either. An outside
-// contributor's commit reaches a target through its upstream instead (a
-// branch merged upstream, which only fast-forwards main to the remote's own
-// history in updateMain), and that path is not checked: the remote recorded
-// those identities, not this machine.
+// OUTSIDE AUTHORS ARE REFUSED HERE. The local merge (a lifecycle's
+// pre_deploy.local_merge) lands LOCAL work (a workspace's branch, a named
+// branch), and nothing in a commit tells a contributor apart from this user
+// under a wrong identity: `Test <test@example.com>` names nobody the user knows
+// either. A repository whose deploy has no local merge lands its commits
+// through its own upstream, and its deploys are not checked: the upstream
+// recorded those identities, not this machine.
 
 // checkIdentities reads the global identity and every commit tip..commit
 // would land, and answers the refusal's one-line summary, empty when every
