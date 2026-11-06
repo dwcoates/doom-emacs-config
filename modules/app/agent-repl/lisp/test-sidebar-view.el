@@ -297,6 +297,9 @@ Binds `made' to that buffer; it is killed afterwards."
      (let ((made (generate-new-buffer " *test-sidebar-view*")))
        (unwind-protect
            (cl-letf (((symbol-function 'agent-repl--frontend-make-webview-buffer) (lambda (_url) made))
+                     ;; The daemon the host and the sidebar belong on (webhost.el).
+                     ((symbol-function 'agent-repl-webhost-daemon-conn)
+                      (lambda () (agent-repl-test-sv--conn "127.0.0.1:5")))
                      ((symbol-function 'agent-repl--frontend-webview-live-widget)
                       (lambda (buf) (and (buffer-live-p buf) 'sidebar-xwidget)))
                      ((symbol-function 'xwidget-get) (lambda (_xw _prop) nil))
@@ -309,22 +312,22 @@ Binds `made' to that buffer; it is killed afterwards."
 (ert-deftest agent-repl-test-sv-ensuring-creates-the-sidebar-at-its-url ()
   "Ensuring a sidebar creates its web view at the sidebar page's URL."
   (agent-repl-test-sv--with-created
-    (should (eq (agent-repl-sidebar-view-ensure (agent-repl-test-sv--conn "127.0.0.1:5")) 'sidebar-xwidget))
+    (should (eq (agent-repl-sidebar-view-ensure) 'sidebar-xwidget))
     (should (eq (agent-repl-sidebar-view-buffer) made))
     (should (equal agent-repl--sidebar-view-url "http://host.localhost:5/?sidebar=1"))))
 
 (ert-deftest agent-repl-test-sv-ensuring-again-creates-nothing ()
   "A sidebar already standing is answered, never made twice."
   (agent-repl-test-sv--with-created
-    (agent-repl-sidebar-view-ensure (agent-repl-test-sv--conn "127.0.0.1:5"))
+    (agent-repl-sidebar-view-ensure)
     (cl-letf (((symbol-function 'agent-repl--frontend-make-webview-buffer)
                (lambda (_url) (error "made twice"))))
-      (should (eq (agent-repl-sidebar-view-ensure (agent-repl-test-sv--conn "127.0.0.1:5")) 'sidebar-xwidget)))))
+      (should (eq (agent-repl-sidebar-view-ensure) 'sidebar-xwidget)))))
 
 (ert-deftest agent-repl-test-sv-the-sidebar-mode-line-is-the-composers-border ()
   "The sidebar's buffer draws the composer's border line as its mode line, one source for both."
   (agent-repl-test-sv--with-created
-    (agent-repl-sidebar-view-ensure (agent-repl-test-sv--conn "127.0.0.1:5"))
+    (agent-repl-sidebar-view-ensure)
     (should (eq (buffer-local-value 'mode-line-format made) agent-repl--input-border-line-format))))
 
 (ert-deftest agent-repl-test-sv-the-sidebar-bottom-border-is-logged ()
@@ -354,14 +357,14 @@ Binds `made' to that buffer; it is killed afterwards."
 (ert-deftest agent-repl-test-sv-the-sidebar-buffer-refuses-a-foreign-kill ()
   "Only this module kills the sidebar buffer."
   (agent-repl-test-sv--with-created
-    (agent-repl-sidebar-view-ensure (agent-repl-test-sv--conn "127.0.0.1:5"))
+    (agent-repl-sidebar-view-ensure)
     (cl-letf (((symbol-function 'agent-repl--warn) #'ignore))
       (should-not (with-current-buffer made (agent-repl--sidebar-view-refuse-kill))))))
 
 (ert-deftest agent-repl-test-sv-a-refused-kill-is-recorded ()
   "A refused kill is recorded at warn."
   (agent-repl-test-sv--with-created
-    (agent-repl-sidebar-view-ensure (agent-repl-test-sv--conn "127.0.0.1:5"))
+    (agent-repl-sidebar-view-ensure)
     (let ((warned nil))
       (cl-letf (((symbol-function 'agent-repl--warn)
                  (agent-repl-test--record-into warned)))
@@ -371,14 +374,14 @@ Binds `made' to that buffer; it is killed afterwards."
 (ert-deftest agent-repl-test-sv-the-sidebar-buffer-allows-its-own-kill ()
   "This module's own kill passes the guard."
   (agent-repl-test-sv--with-created
-    (agent-repl-sidebar-view-ensure (agent-repl-test-sv--conn "127.0.0.1:5"))
+    (agent-repl-sidebar-view-ensure)
     (let ((agent-repl--sidebar-view-killing t))
       (should (with-current-buffer made (agent-repl--sidebar-view-refuse-kill))))))
 
 (ert-deftest agent-repl-test-sv-killing-the-sidebar-forgets-it ()
   "Killing the sidebar kills its buffer and forgets its URL."
   (agent-repl-test-sv--with-created
-    (agent-repl-sidebar-view-ensure (agent-repl-test-sv--conn "127.0.0.1:5"))
+    (agent-repl-sidebar-view-ensure)
     (cl-letf (((symbol-function 'agent-repl--frontend-kill-webview) #'kill-buffer))
       (agent-repl-sidebar-view-kill))
     (should-not (agent-repl-sidebar-view-buffer))
@@ -400,7 +403,7 @@ Binds `made' to that buffer; it is killed afterwards."
     (agent-repl-test-sv--with-frame
       (let ((main (selected-window)))
         (split-window main nil 'below)
-        (let ((win (agent-repl-sidebar-view-show (agent-repl-test-sv--conn "127.0.0.1:5"))))
+        (let ((win (agent-repl-sidebar-view-show)))
           (should (eq (window-parameter win 'window-side) 'left))
           (should (= (window-total-height win) (window-total-height (frame-root-window)))))))))
 
@@ -408,7 +411,7 @@ Binds `made' to that buffer; it is killed afterwards."
   "The sidebar's window sets no mode line of its own, so the buffer's border line shows."
   (agent-repl-test-sv--with-created
     (agent-repl-test-sv--with-frame
-      (let ((win (agent-repl-sidebar-view-show (agent-repl-test-sv--conn "127.0.0.1:5"))))
+      (let ((win (agent-repl-sidebar-view-show)))
         (should-not (window-parameter win 'mode-line-format))))))
 
 (ert-deftest agent-repl-test-sv-showing-opens-at-the-configured-width ()
@@ -416,16 +419,15 @@ Binds `made' to that buffer; it is killed afterwards."
   (agent-repl-test-sv--with-created
     (agent-repl-test-sv--with-frame
       (let ((agent-repl-sidebar-view-width-fraction 0.25))
-        (let ((win (agent-repl-sidebar-view-show (agent-repl-test-sv--conn "127.0.0.1:5"))))
+        (let ((win (agent-repl-sidebar-view-show)))
           (should (= (window-total-width win) (round (* 0.25 (frame-width))))))))))
 
 (ert-deftest agent-repl-test-sv-showing-again-keeps-the-window-standing ()
   "Showing a sidebar already on screen answers its window and makes no other."
   (agent-repl-test-sv--with-created
     (agent-repl-test-sv--with-frame
-      (let* ((conn (agent-repl-test-sv--conn "127.0.0.1:5"))
-             (first (agent-repl-sidebar-view-show conn)))
-        (should (eq (agent-repl-sidebar-view-show conn) first))
+      (let ((first (agent-repl-sidebar-view-show)))
+        (should (eq (agent-repl-sidebar-view-show) first))
         (should (= (length (get-buffer-window-list made nil t)) 1))))))
 
 (ert-deftest agent-repl-test-sv-the-window-survives-delete-other-windows ()
@@ -433,7 +435,7 @@ Binds `made' to that buffer; it is killed afterwards."
   (agent-repl-test-sv--with-created
     (agent-repl-test-sv--with-frame
       (let ((main (selected-window))
-            (win (agent-repl-sidebar-view-show (agent-repl-test-sv--conn "127.0.0.1:5"))))
+            (win (agent-repl-sidebar-view-show)))
         (split-window main nil 'below)
         (select-window main)
         (delete-other-windows)
@@ -443,7 +445,7 @@ Binds `made' to that buffer; it is killed afterwards."
   "The sidebar's window answers as the sidebar's; another window does not."
   (agent-repl-test-sv--with-created
     (agent-repl-test-sv--with-frame
-      (let ((win (agent-repl-sidebar-view-show (agent-repl-test-sv--conn "127.0.0.1:5"))))
+      (let ((win (agent-repl-sidebar-view-show)))
         (should (agent-repl-sidebar-view-window-p win))
         (should-not (agent-repl-sidebar-view-window-p (window-main-window)))))))
 
@@ -451,7 +453,7 @@ Binds `made' to that buffer; it is killed afterwards."
   "Hiding the sidebar deletes its window and keeps its web view."
   (agent-repl-test-sv--with-created
     (agent-repl-test-sv--with-frame
-      (agent-repl-sidebar-view-show (agent-repl-test-sv--conn "127.0.0.1:5"))
+      (agent-repl-sidebar-view-show)
       (should (agent-repl-sidebar-view-hide))
       (should-not (agent-repl-sidebar-view-window))
       (should (buffer-live-p made)))))
@@ -502,7 +504,7 @@ Binds `made' to that buffer; it is killed afterwards."
     (agent-repl-test-sv--with-frame
       (let ((told 0))
         (cl-letf (((symbol-function 'agent-repl-sidebar-view-tell-offset) (lambda (&rest _) (cl-incf told))))
-          (agent-repl-sidebar-view-show (agent-repl-test-sv--conn "127.0.0.1:5"))
+          (agent-repl-sidebar-view-show)
           (should (= told 1)))))))
 
 (provide 'test-sidebar-view)

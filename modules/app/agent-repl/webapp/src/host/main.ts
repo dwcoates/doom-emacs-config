@@ -88,7 +88,7 @@ export function startHost(doc: Document, win: Window, deps: StartHostDeps): Host
   doc.body.append(frames, load, gate);
   // THE WEBHOST'S OWN LOG LEVEL, raised with every page's by a profiling
   // session (`Host.setLogLevel`), and ITS DAEMON, which starts as the one that
-  // served it and moves with its workspaces at a handover (`Host.setDaemon`):
+  // served it and moves to the successor at a handover (`Host.setDaemon`):
   // both made with its logger, before its code loaded (boot.ts).
   const { level, daemon } = runtime;
   const host = createHost({ doc, win, frames, level, daemon });

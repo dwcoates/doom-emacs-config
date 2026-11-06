@@ -105,7 +105,7 @@ export function startSidebarPage(doc: Document, win: Window, deps: StartSidebarP
   doc.body.append(nav);
 
   // THE PAGE'S LOG LEVEL, and ITS DAEMON, which starts as the one that served
-  // it and moves with its workspaces at a handover (`setDaemon`): both made
+  // it and moves to the successor at a handover (`setDaemon`): both made
   // with its logger, before its code loaded (boot.ts).
   const { level, daemon } = runtime;
   const notices = deps.notices ?? createSidebarNotices();

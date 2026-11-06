@@ -1257,18 +1257,18 @@ as if it were understood."
       ;; Assert
       (should (equal handled '((:wifi nil :mode (:arm :on :value nil))))))))
 
-(ert-deftest agent-repl-test-link-a-reload-webhost-push-reloads-the-host-on-its-daemon ()
-  "A `reload_webhost' push reloads the host onto its build, on the daemon that pushed it."
+(ert-deftest agent-repl-test-link-a-reload-webhost-push-reloads-the-host-onto-its-build ()
+  "A `reload_webhost' push reloads the host onto the build it names."
   (agent-repl-test-link--with-harness
     ;; Arrange
     (let ((conn (agent-repl-test-link--connect "127.0.0.1:9001"))
           (reloaded nil))
       (cl-letf (((symbol-function 'agent-repl-webhost-reload-onto)
-                 (lambda (on build) (push (list on build) reloaded))))
+                 (lambda (build) (push build reloaded))))
         ;; Act
         (agent-repl-test-link--push conn (list :arm :reload-webhost :value '(:build "Web2"))))
       ;; Assert
-      (should (equal reloaded (list (list conn "Web2")))))))
+      (should (equal reloaded '("Web2"))))))
 
 (ert-deftest agent-repl-test-link-a-new-thread-request-opens-the-prompt ()
   "A `new_thread_requested' push asks threads.el for the new-thread prompt."

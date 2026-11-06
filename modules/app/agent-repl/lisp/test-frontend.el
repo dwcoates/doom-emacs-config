@@ -39,7 +39,7 @@ a missing one are covered directly, against the real file, by
 test-frontend-client.el, which is where that boundary belongs.")
 
 (defvar agent-repl-test--frontend-sidebar-shown nil
-  "The connections a mount showed the sidebar on, newest first.")
+  "One `shown' for every time a mount showed the sidebar.")
 
 (defmacro agent-repl-test--with-frontend-ws (ws plist &rest body)
   "Register workspace WS with PLIST for BODY, cleaning buffers after.
@@ -54,7 +54,7 @@ independent of whether the webapp has been built in this checkout."
                    ;; The sidebar's web view is its own boundary
                    ;; (sidebar-view.el); a mount records that it was shown.
                    ((symbol-function 'agent-repl-sidebar-view-show)
-                    (lambda (conn) (push conn agent-repl-test--frontend-sidebar-shown))))
+                    (lambda () (push 'shown agent-repl-test--frontend-sidebar-shown))))
            (setq agent-repl-test--frontend-sidebar-shown nil)
            (puthash ,ws (copy-sequence ,plist) agent-repl--workspaces)
            ,@body)
@@ -125,7 +125,7 @@ agent panel it is, with no special-casing left to carve out."
 The host, the page call and every decoration are stubbed: what is under
 test is the mount's own binding of the slot to its workspace."
   (declare (indent 1))
-  `(cl-letf (((symbol-function 'agent-repl-webhost-ensure) (lambda (_conn) 'host-xwidget))
+  `(cl-letf (((symbol-function 'agent-repl-webhost-ensure) (lambda () 'host-xwidget))
              ((symbol-function 'agent-repl-host-conn) (lambda (_ws) 'conn))
              ((symbol-function 'agent-repl-webhost-ensure-page) (lambda (_ws) "id"))
              ((symbol-function 'agent-repl--frontend-adopt-webview-buffer) (lambda (&rest _) nil))
@@ -425,7 +425,7 @@ EFFECTS collects what the rescue did: (:page WS) for a page reload and
                        ((symbol-function 'agent-repl-webhost-reload-page)
                         (lambda (ws) (push (list :page ws) ,effects) "ws-1"))
                        ((symbol-function 'agent-repl-webhost-reload)
-                        (lambda (_conn) (push (list :host) ,effects)))
+                        (lambda () (push (list :host) ,effects)))
                        ((symbol-function 'agent-repl--emit-message) #'ignore))
                ,@body)))
        (kill-buffer slot))))
@@ -1211,19 +1211,18 @@ conversation from its own record."
     (should-not (agent-repl--gui-durable-session-id "ws1"))))
 
 (ert-deftest agent-repl-test-frontend-display-shows-the-sidebar-beside-the-panels ()
-  "Mounting the panels shows the sidebar on the workspace's connection."
+  "Mounting the panels shows the sidebar."
   (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
     (let ((buf (generate-new-buffer "*fake-webview-sb*")))
       (unwind-protect
           (cl-letf (((symbol-function 'agent-repl--panels-visible-p) (lambda () nil))
                     ((symbol-function 'agent-repl-window--harden) (lambda (&rest _) nil))
                     ((symbol-function 'agent-repl--ensure-input-buffer)
-                     (lambda (_ws) (get-buffer-create "*sb-input*")))
-                    ((symbol-function 'agent-repl-host-conn) (lambda (_ws) 'conn-ws1)))
+                     (lambda (_ws) (get-buffer-create "*sb-input*"))))
             ;; Act
             (agent-repl--frontend-display-webview "ws1" buf)
             ;; Assert
-            (should (equal agent-repl-test--frontend-sidebar-shown '(conn-ws1))))
+            (should (equal agent-repl-test--frontend-sidebar-shown '(shown))))
         (delete-other-windows)
         (kill-buffer buf)
         (kill-buffer "*sb-input*")))))
@@ -1638,15 +1637,14 @@ and loaded no page."
   ;; Arrange
   (agent-repl-test--with-clean-state
     (let ((reloaded nil))
-      (cl-letf (((symbol-function 'agent-repl-host-conn) (lambda (_ws) 'conn))
-                ((symbol-function 'agent-repl-webhost-reload-onto)
-                 (lambda (conn build) (setq reloaded (list conn build))))
+      (cl-letf (((symbol-function 'agent-repl-webhost-reload-onto)
+                 (lambda (build) (setq reloaded build)))
                 ((symbol-function 'agent-repl-frontend-reload-webview)
                  (lambda (ws) (error "Reloaded the page of %s" ws))))
         ;; Act
         (agent-repl-frontend-reload-webapp "alpha" "Web2")
         ;; Assert
-        (should (equal reloaded '(conn "Web2")))))))
+        (should (equal reloaded "Web2"))))))
 
 (ert-deftest agent-repl-test-frontend-reload-webapp-without-a-build-reloads-the-page ()
   "A push naming no build (a restart's) reloads that workspace's page alone."

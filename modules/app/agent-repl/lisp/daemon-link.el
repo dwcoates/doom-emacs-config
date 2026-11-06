@@ -78,7 +78,7 @@
 (declare-function agent-repl-rpc-watch-daemon "rpc" (conn on-push on-close &optional on-open))
 (declare-function agent-repl-mutation-progress-handle "mutation-progress" (progress))
 (declare-function agent-repl-elisp-reload-handle "elisp-build" (reload))
-(declare-function agent-repl-webhost-reload-onto "webhost" (conn build))
+(declare-function agent-repl-webhost-reload-onto "webhost" (build))
 
 ;;;; ---- Customization ----
 
@@ -773,8 +773,8 @@ non-nil says the daemon announced the ending first; the hooks read it as
       ;; root and schedules the load OUT of this process filter.
       (:reload-elisp (agent-repl-elisp-reload-handle value))
       ;; A deploy found the web view host on an older webapp: the host is
-      ;; reloaded onto it on the daemon that told us (webhost.el).
-      (:reload-webhost (agent-repl-webhost-reload-onto conn (plist-get value :build)))
+      ;; reloaded onto it, on the daemon it belongs on (webhost.el).
+      (:reload-webhost (agent-repl-webhost-reload-onto (plist-get value :build)))
       ;; The daemon's standing loud faults (a failed deploy, whoever started
       ;; it): each one not yet surfaced is echoed and recorded at ERROR.
       (:faults-standing (agent-repl-link--faults-standing value))

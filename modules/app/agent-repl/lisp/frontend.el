@@ -125,8 +125,8 @@
 (defvar agent-repl--owning-workspace)
 
 ;; The one web view holding every workspace's page (webhost.el).
-(declare-function agent-repl-webhost-ensure "webhost" (conn))
-(declare-function agent-repl-sidebar-view-show "sidebar-view" (conn))
+(declare-function agent-repl-webhost-ensure "webhost" ())
+(declare-function agent-repl-sidebar-view-show "sidebar-view" ())
 (declare-function agent-repl-sidebar-view-hide "sidebar-view" ())
 (declare-function agent-repl-webhost-xwidget "webhost" ())
 (declare-function agent-repl-page-unload-note-mounted "page-unload" (ws))
@@ -141,8 +141,8 @@
 (declare-function agent-repl-webhost-buffer "webhost" ())
 (declare-function agent-repl-webhost-url "webhost" (conn))
 (defvar agent-repl--webhost-url)
-(declare-function agent-repl-webhost-reload "webhost" (conn))
-(declare-function agent-repl-webhost-reload-onto "webhost" (conn build))
+(declare-function agent-repl-webhost-reload "webhost" ())
+(declare-function agent-repl-webhost-reload-onto "webhost" (build))
 (declare-function agent-repl--ws-resolve-persp "workspace" (ws))
 (declare-function agent-repl--ws-add-buffer "workspace" (buffer persp &optional switch))
 
@@ -967,7 +967,7 @@ webview window resolves against the worktree the REPL is attached to."
                                      (buffer-name existing))
                     existing)
                 (agent-repl--with-deferred-quit "frontend-ensure-webview"
-                  (let* ((xw (agent-repl-webhost-ensure (agent-repl-host-page-conn ws)))
+                  (let* ((xw (agent-repl-webhost-ensure))
                          (name (agent-repl--frontend-webview-buffer-name ws))
                          (buf (agent-repl--frontend-make-slot-buffer name xw)))
                     (agent-repl--frontend-adopt-webview-buffer buf name ws)
@@ -1157,7 +1157,7 @@ panels — the extra-windows-on-first-switch bug."
     ;; THE SIDEBAR STANDS BESIDE THE PANELS, in a full-height window of its
     ;; own at the frame's left edge (sidebar-view.el).  One for every
     ;; workspace: a switch leaves the standing one where it is.
-    (agent-repl-sidebar-view-show (agent-repl-host-conn ws)))
+    (agent-repl-sidebar-view-show))
   buf)
 
 ;;;; ---- Entry point ----------------------------------------------------------------
@@ -1426,7 +1426,7 @@ code onto it.  A push naming no build reloads WS's page alone, on the
 build it runs (a restart replaced its shim)."
   (agent-repl--info ws "elisp.frontend.reload-webapp ws=%s build=%s" ws build)
   (if build
-      (agent-repl-webhost-reload-onto (agent-repl-host-conn ws) build)
+      (agent-repl-webhost-reload-onto build)
     (agent-repl-frontend-reload-webview ws)))
 
 ;;;; ---- Rescuing a webview that navigated away --------------------------------
@@ -1495,7 +1495,7 @@ name directly.  Signals when the workspace has no webview open at all."
             (prog1 (agent-repl-frontend-reload-webview ws)
               (agent-repl--user-message ws "webview reloaded" nil)))
         (agent-repl--log ws "rescue-webview: outcome=host-astray url=%s" uri)
-        (agent-repl-webhost-reload (agent-repl-host-conn ws))
+        (agent-repl-webhost-reload)
         (agent-repl--user-message
          ws "webview brought home from %s"
          (list (agent-repl--frontend-webview-host uri))
