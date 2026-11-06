@@ -287,6 +287,9 @@
 ### Every link the workspace's task is about, or that its work creates, is stored as one of its links
 
 - Whenever a link is supplied in the conversation, the workspace stores it as one of its links, under a label of two to eight words in one sentence.
+  - A link the prompt references is always stored, however briefly or incidentally the prompt mentions it.
+    - The workspace is never hesitant to store a link: whether it is "important enough" is not a test, and the menu's cap is handled by choosing the five shown, never by skipping a link.
+    - A link the prompt references is stored at the start of the turn, before any other work.
   - The links are what the topbar's summary opens: one shown link opens on a click, and several drop a menu of their labels.
   - Examples are a pull request, a ticket, a design doc, or a dashboard.
   - A link already stored is relabeled rather than stored twice.
