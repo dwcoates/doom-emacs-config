@@ -251,6 +251,11 @@ func TestParseRepairsAndShapesTrees(t *testing.T) {
 			want: lines(`plain "`+"```text\\n1 🔧 A\\n└── 1.1 a\\n```"+`"`, ""),
 		},
 		{
+			name: "a response's tree fenced after its header is drawn as the tree with its code",
+			text: lines("Response (👀 no changes made)", "", "```text", "1 🔧 A", "├── 1.1 a", "│   ```bash", "│   ls", "│   ```", "├── 1.2 c", "├── 1.3 d", "└── 1.4 b", "```"),
+			want: lines("tree", `  header "Response (👀 no changes made)"`, `  1 🔧 ^- "A"`, `  1.1 ^0 "a"`, `    code bash: "ls"`, `  1.2 ^0 "c"`, `  1.3 ^0 "d"`, `  1.4 ^0 "b"`, ""),
+		},
+		{
 			name: "a marker with a variation selector is one marker",
 			text: lines("1 ✏️ Edited", "└── 1.1 a"),
 			want: lines("tree", `  1 ✏️ ^- "Edited"`, `  1.1 ^0 "a"`, ""),
