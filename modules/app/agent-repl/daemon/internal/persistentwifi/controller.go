@@ -80,6 +80,9 @@ type Controller struct {
 	// failoverCause is why the hotspot failover last could not take; empty
 	// while it has nothing standing against it (failoverLocked).
 	failoverCause string
+	// failover is the hotspot failover's retry schedule since Wi-Fi was lost;
+	// the zero value while the failover stands down (failoverLocked).
+	failover failoverSchedule
 	// lid is the lid as last heard (WatchLid), or why it is not heard.
 	lid lidFact
 	// dim mirrors the kept pre-close brightness (LidDims): nil while no

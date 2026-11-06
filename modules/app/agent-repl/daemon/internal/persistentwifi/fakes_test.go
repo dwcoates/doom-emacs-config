@@ -74,14 +74,31 @@ func (f *fakeRunner) count(argv string) int {
 	return n
 }
 
-// fakeClock hands out an After channel the test fires.
+// fakeClock hands out an After channel the test fires, and stands at the
+// instant the test last set (set), the epoch before.
 type fakeClock struct {
 	afters chan chan time.Time
+
+	mu  sync.Mutex
+	now time.Time
 }
 
-func newFakeClock() *fakeClock { return &fakeClock{afters: make(chan chan time.Time, 8)} }
+func newFakeClock() *fakeClock {
+	return &fakeClock{afters: make(chan chan time.Time, 8), now: time.Unix(0, 0)}
+}
 
-func (c *fakeClock) Now() time.Time { return time.Unix(0, 0) }
+func (c *fakeClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.now
+}
+
+// set moves Now to d past the epoch, firing nothing.
+func (c *fakeClock) set(d time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.now = time.Unix(0, 0).Add(d)
+}
 
 func (c *fakeClock) After(time.Duration) <-chan time.Time {
 	ch := make(chan time.Time, 1)

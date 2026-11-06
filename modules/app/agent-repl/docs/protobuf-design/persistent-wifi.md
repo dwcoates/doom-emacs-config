@@ -127,3 +127,20 @@ that every protobuf decision be made without their input (2026-10-01).
     failover at INFO.
   - The standing it publishes is the existing `PersistentWifiState`, so Emacs
     echoes the rejoin and the topbar chip turns green with no new message.
+
+### 7. The hotspot failover backs off (2026-11-06, no wire change)
+
+- WHAT: a failed failover join is retried on a schedule measured from the
+  beat that first found Wi-Fi lost (`failoverBackoff` in
+  `daemon/internal/persistentwifi/failover.go`): five seconds after the failure
+  for the first five minutes, then a minute, then an hour from thirty minutes,
+  and no join is started once three hours have passed.
+- WHY: the owner asked that the hotspot be tried continually right after the
+  loss, then less often, and not at all after three hours.
+- Consequences:
+  - The retry runs on the re-read beat, which waits five seconds after the
+    previous beat returns, so the first tier's retry is exactly five seconds
+    after the failure, and a later tier's within one beat of its due time.
+  - The schedule restarts from nothing once a network is joined or the mode is
+    off, so a give-up lasts until then.
+  - Each back-off is recorded once at INFO, and the give-up once at WARN.
