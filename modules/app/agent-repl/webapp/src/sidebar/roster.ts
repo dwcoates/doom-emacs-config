@@ -293,6 +293,20 @@ export function createRosterDrawer(rail: RailContext): RosterDrawer {
       for (const gone of repos.values()) discarded.push(gone);
       repos = nextRepos;
 
+      // THE OPEN SECTION'S COUNT IS PATCHED IN PLACE (owner report, 2026-11-06):
+      // a workspace opened or closed changes only the heading's count, and
+      // drawing the section anew brings a new rows region that starts at its
+      // top, so the rail scrolled to the top and back (`scrollKept`) and
+      // flashed its bar. The section keeps its box and its scroll position.
+      if (
+        open !== null &&
+        open.wire.count !== openCount &&
+        !open.drawn.element.hasAttribute(REARRANGED_ATTRIBUTE) &&
+        equals(RosterOpenSectionSchema, open.wire.open, openWire)
+      ) {
+        paintOpenCount(open.drawn.element, openCount);
+        open.wire = { open: openWire, count: openCount };
+      }
       open = keepOrDraw(
         open,
         { open: openWire, count: openCount },
@@ -500,11 +514,22 @@ export function drawRosterOpenSection(
   );
   const count = document.createElement("span");
   count.className = OPEN_COUNT_CLASS;
-  count.textContent = `(${view.openCount})`;
+  paintOpenCountText(count, view.openCount);
   header.appendChild(count);
   section.appendChild(header);
   section.appendChild(view.body);
   return section;
+}
+
+function paintOpenCountText(count: HTMLElement, openCount: number): void {
+  count.textContent = `(${openCount})`;
+}
+
+/** Repaint the open SECTION's heading count to OPEN_COUNT, in place. */
+export function paintOpenCount(section: HTMLElement, openCount: number): void {
+  const count = section.querySelector<HTMLElement>(`.${OPEN_COUNT_CLASS}`);
+  if (count === null) throw new Error("sidebar roster: the open section draws no heading count");
+  paintOpenCountText(count, openCount);
 }
 
 /**
