@@ -687,120 +687,21 @@ describe("the strip's layout", () => {
   });
 });
 
-/**
- * THE STRIP'S GEOMETRY, WORKED FROM THE TRACKS THE STYLESHEET DECLARES.
- *
- * jsdom lays out nothing, so the boxes are stubbed and placed here by the rule
- * `grid-template-columns: auto minmax(0, 1fr) auto` states: each flank sized
- * to the group it holds, and the middle track taking everything between them,
- * floored at zero so it compresses instead of pushing a flank off the strip.
- * The title's TEXT is then centered inside that track (`text-align: center`),
- * which is the owner's rule of 2026-09-14: equal clear space either side of
- * the visible text, not a shared midpoint with the strip. The template itself
- * is asserted alongside, so a change to it fails these tests rather than
- * quietly leaving them measuring a layout the app no longer has.
- */
-interface StubWidths {
-  readonly row: number;
-  readonly padding: number;
-  readonly gap: number;
-  /** What each group WANTS; it gets exactly that while the strip has room. */
-  readonly left: number;
-  readonly right: number;
-  /** What the title wants; the space between the groups is what it gets. */
-  readonly title: number;
-}
-
-interface Placed {
-  readonly left: { start: number; width: number };
-  /** The middle TRACK: the space between the two groups. */
-  readonly title: { start: number; width: number };
-  /** The visible TEXT, centered inside that track. */
-  readonly text: { start: number; width: number };
-  readonly right: { start: number; width: number };
-}
-
-function placeTracks(w: StubWidths): Placed {
-  const content = w.row - 2 * w.padding;
-  const inner = content - 2 * w.gap;
-  // THE FLANKS ARE `auto`: each takes its own content, compressing only when
-  // the two of them together outgrow the strip.
-  const flankRoom = Math.max(0, inner);
-  const scale = w.left + w.right > flankRoom ? flankRoom / (w.left + w.right) : 1;
-  const left = w.left * scale;
-  const right = w.right * scale;
-  // THE MIDDLE TRACK IS WHAT IS LEFT, floored at zero.
-  const track = Math.max(0, inner - left - right);
-  const trackStart = w.padding + left + w.gap;
-  // `text-align: center` inside it; a title wider than the track fills it and
-  // ellipsizes.
-  const text = Math.min(w.title, track);
-  return {
-    left: { start: w.padding, width: left },
-    title: { start: trackStart, width: track },
-    text: { start: trackStart + (track - text) / 2, width: text },
-    right: { start: trackStart + track + w.gap, width: right },
-  };
-}
-
 describe("the strip's geometry", () => {
-  it("lays the row out with content-sized flanks and a floorless middle track", () => {
-    expect(declaration(".topbar-row", "grid-template-columns")).toBe("auto minmax(0, 1fr) auto");
-  });
-
-  // THE RULING. The clear space to the left of the visible text and the clear
-  // space to its right are the same measure, whatever the groups hold.
-  it("leaves equal clear space either side of the title with unequal groups", () => {
-    // ARRANGE
-    const w: StubWidths = { row: 1000, padding: 8, gap: 8, left: 120, right: 340, title: 60 };
-    // ACT
-    const placed = placeTracks(w);
-    // ASSERT
-    expect(placed.text.start - placed.title.start).toBe(
-      placed.title.start + placed.title.width - (placed.text.start + placed.text.width),
+  // jsdom lays out nothing, so the rules that make the centering hold are
+  // asserted as declarations; test/webkit/topbar.webkit.test.ts measures it.
+  it("lays the row out with equal side tracks around a shrinkable middle track", () => {
+    expect(declaration(".topbar-row", "grid-template-columns")).toBe(
+      "minmax(min-content, 1fr) minmax(0, auto) minmax(min-content, 1fr)",
     );
   });
 
-  // ...and that is SUBTLY DIFFERENT from centering on the strip: with a wider
-  // right group the text sits left of the strip's midpoint, on purpose.
-  it("centers the title between the groups rather than on the whole strip", () => {
-    // ARRANGE
-    const w: StubWidths = { row: 1000, padding: 8, gap: 8, left: 120, right: 340, title: 60 };
-    // ACT
-    const placed = placeTracks(w);
-    // ASSERT
-    expect(placed.text.start + placed.text.width / 2).toBeLessThan(w.row / 2);
+  it("centers every cell of the row vertically in the strip", () => {
+    expect(declaration(".topbar-row", "align-items")).toBe("center");
   });
 
-  // Each flank gets exactly the group it holds; neither spreads.
-  it("sizes each flank track to its own group", () => {
-    // ARRANGE
-    const w: StubWidths = { row: 600, padding: 8, gap: 8, left: 90, right: 320, title: 240 };
-    // ACT
-    const placed = placeTracks(w);
-    // ASSERT
-    expect([placed.left.width, placed.right.width]).toEqual([w.left, w.right]);
-  });
-
-  // The title can never reach a group: it gets what they left and no more.
-  it("gives an over-wide title exactly the space between the two groups", () => {
-    // ARRANGE
-    const w: StubWidths = { row: 600, padding: 8, gap: 8, left: 200, right: 300, title: 900 };
-    // ACT
-    const placed = placeTracks(w);
-    // ASSERT
-    expect(placed.text.width).toBe(w.row - 2 * w.padding - 2 * w.gap - w.left - w.right);
-  });
-
-  // ...and an over-wide title still clips symmetrically, because the box it
-  // clips in IS the space between the groups.
-  it("clips an over-wide title symmetrically inside the middle track", () => {
-    // ARRANGE
-    const w: StubWidths = { row: 600, padding: 8, gap: 8, left: 200, right: 300, title: 900 };
-    // ACT
-    const placed = placeTracks(w);
-    // ASSERT
-    expect(placed.text.start).toBe(placed.title.start);
+  it.each([".topbar-left", ".topbar-right"])("leaves %s no height of its own", (selector) => {
+    expect(withoutBlockComments(ruleBody(selector))).not.toMatch(/(?:^|;|\n)\s*height\s*:/);
   });
 
   it.each(["topbar-title", "topbar-workspace-name"])(

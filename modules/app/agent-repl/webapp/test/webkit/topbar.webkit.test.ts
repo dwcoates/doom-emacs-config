@@ -182,14 +182,27 @@ describe.each([1, 2])("the topbar in WebKit at %ix", (dpr) => {
     expect([m.name.top >= m.title!.bottom - 1, m.name.bottom <= m.row.bottom]).toEqual([true, true]);
   });
 
-  // THE EXTRA HEIGHT IS DOWNWARD: the flanks keep the band they always had,
-  // at the strip's top, and the strip grows below them.
-  it("keeps both flanks in the strip's top band", async () => {
+  // OWNER REQUEST, 2026-11-07: the heading (summary and name as one unit) is
+  // centered on the strip whatever the two groups measure, and every other
+  // cell is centered in the strip's full height on its own.
+  it("centers the heading on the strip although the groups differ in width", async () => {
     const m = await rig.page.evaluate(() => window.topbarPage.drawStrip(true));
-    const band = 2.75 * 16;
-    expect([m.left.top, m.left.bottom, m.right.top, m.right.bottom].map((v) => v - m.row.top)).toEqual([
-      0, band, 0, band,
+    const mid = (b: { left: number; right: number }): number => (b.left + b.right) / 2;
+    expect([m.right.right - m.right.left > m.left.right - m.left.left, Math.abs(mid(m.title!) - mid(m.row)) <= 0.5]).toEqual([
+      true,
+      true,
     ]);
+  });
+
+  it("centers the heading on the strip when there is no summary", async () => {
+    const m = await rig.page.evaluate(() => window.topbarPage.drawStrip(true, false));
+    expect(Math.abs((m.name.left + m.name.right) / 2 - (m.row.left + m.row.right) / 2)).toBeLessThanOrEqual(0.5);
+  });
+
+  it.each(["left", "right"] as const)("centers the %s group vertically in the strip", async (side) => {
+    const m = await rig.page.evaluate(() => window.topbarPage.drawStrip(true));
+    const box = m[side];
+    expect(Math.abs((box.top + box.bottom) / 2 - (m.row.top + m.row.bottom) / 2)).toBeLessThanOrEqual(0.5);
   });
 
   // WITH NO SUMMARY THE NAME TAKES THE SUMMARY'S PLACE on the band.
