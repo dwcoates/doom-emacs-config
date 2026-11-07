@@ -8047,38 +8047,30 @@ html.webhost-gate #feed [data-row-kind="coldGate"]:has(.cold-gate[data-state="st
   position: relative;
 }
 
-/* THREE TRACKS: THE FLANKS TAKE THEIR CONTENT, THE TITLE TAKES WHAT IS
-   BETWEEN THEM (owner ruling, 2026-09-14, superseding the "true center" rule
-   of 2026-09-13). Verbatim: "the whitespace/padding on the left and right of
-   the center text should be equal, which is subtly different than it being
-   centered. Currently it is centered in the topbar's full span, but it'd be
-   better if it was centered in the space between the login section (left) and
-   the chips section (right)."
+/* THREE TRACKS: EQUAL SIDES, THE HEADING TRUE CENTER (owner request,
+   2026-11-07, superseding the "equal clear space" rule of 2026-09-14). The
+   heading, summary and workspace name together, sits at the midpoint of the
+   strip rather than of the space left between the flanks, and the flanks no
+   longer decide where it goes.
 
-   So the rule is EQUAL CLEAR SPACE, not a shared midpoint. `auto` on each
-   flank sizes it to the group it holds; `minmax(0, 1fr)` in the middle hands
-   the title everything left over, and `text-align: center` on `.topbar-title`
-   centers the text INSIDE that middle track. The clear space either side of
-   the text is then the same measure by construction — half the track's slack
-   each — whatever the two groups measure, and the title's midpoint is the
-   midpoint of the space between the flanks rather than of the strip.
+   The side tracks are `minmax(min-content, 1fr)`, which makes them EQUAL by
+   construction: both take the same share of what the middle track leaves, so
+   the middle track's midpoint is the strip's midpoint whatever the two groups
+   measure. The floor is the group's own content, so a flank is never squeezed
+   below what it holds. The middle track is `minmax(0, auto)`: it takes the
+   heading's full width when there is room, and when there is not it is the
+   track that gives, so a long summary or name ellipsizes before a flank loses
+   anything.
 
-   The zero floor on the middle track is what makes it honest at every width:
-   below its content the title compresses and ellipsizes symmetrically instead
-   of pushing a flank off the strip. No clamp is needed on it either — a
-   `1fr` track takes only the space the two `auto` flanks left, so the title
-   can never grow into a group, and no measured cap is needed on top of the
-   grid because the grid now knows exactly what the groups measure.
+   Past the point where the bigger flank no longer fits beside half the
+   heading, the sides cannot both stay equal and keep the heading whole; the
+   heading then ellipsizes in the space the flanks leave rather than pushing a
+   flank off the strip.
 
-   The groups take `min-width: 0` so that in the last resort — a strip too
-   narrow for both groups — each cell clips by its own rule (the account chip
-   already ellipsizes) rather than spilling over the title.
-
-   Grid rather than an absolutely centered title layer: absolute positioning
-   cannot know either group's width, so it can only guess a max-width and
-   still overlap an asymmetric strip, where the tracks make both the spacing
-   and the non-overlap facts of the layout. The reveal layer is unaffected
-   either way — it is the row's SIBLING inside the host, not a descendant. */
+   The groups keep `min-width: 0` so that in the last resort, a strip too
+   narrow for both groups, each cell clips by its own rule (the account chip
+   already ellipsizes) rather than spilling over the heading. The reveal layer
+   is unaffected: it is the row's SIBLING inside the host, not a descendant. */
 /* The strip wrapper `mountTopbar` puts inside the header, and the header's
    ONE in-flow child. It is a flex item, so it is told to take the header's
    whole inline size rather than shrink-wrap the row it holds. */
@@ -8091,13 +8083,13 @@ html.webhost-gate #feed [data-row-kind="coldGate"]:has(.cold-gate[data-state="st
    grid sizes to its content and everything packs to the left. */
 .topbar-row {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: minmax(min-content, 1fr) minmax(0, auto) minmax(min-content, 1fr);
   width: 100%;
   min-width: 0;
-  /* THE EXTRA HEIGHT IS DOWNWARD. Every cell hangs from the top, and the
-     flanks keep the band's height, so they sit exactly where they sat before
-     the strip grew; only the heading reaches into the name line below. */
-  align-items: start;
+  /* EVERY CELL IS CENTERED IN THE STRIP'S FULL HEIGHT, independently of the
+     others (owner request, 2026-11-07). The heading is as tall as the strip,
+     so centering leaves its two lines where they were. */
+  align-items: center;
   /* ONE TOKEN, BOTH FRAME DISTANCES (owner ruling 1). The gap between the
      three TRACKS and the inset at the strip's edges are the same measure by
      definition, so a change to one is a change to both and they cannot drift
@@ -8121,7 +8113,6 @@ html.webhost-gate #feed [data-row-kind="coldGate"]:has(.cold-gate[data-state="st
 .topbar-left {
   display: flex;
   align-items: center;
-  height: var(--topbar-band-h);
   gap: var(--topbar-chip-gap);
   justify-self: start;
   min-width: 0;
@@ -8129,7 +8120,6 @@ html.webhost-gate #feed [data-row-kind="coldGate"]:has(.cold-gate[data-state="st
 .topbar-right {
   display: flex;
   align-items: center;
-  height: var(--topbar-band-h);
   gap: var(--topbar-right-chip-gap);
   justify-self: end;
   min-width: 0;
