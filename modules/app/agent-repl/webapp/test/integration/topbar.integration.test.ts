@@ -1350,17 +1350,14 @@ describe("the detached-unmodeled detail", () => {
 /**
  * THE STRIP'S SPACING, ON THE WHOLE MOUNTED PAGE.
  *
- * The owner's ruling, 2026-09-14, verbatim: "the whitespace/padding on the
- * left and right of the center text should be equal, which is subtly
- * different than it being centered. Currently it is centered in the topbar's
- * full span, but it'd be better if it was centered in the space between the
- * login section (left) and the chips section (right)." It supersedes the
- * "true center" rule of 2026-09-13 and the measured cap that served it.
+ * The owner's request, 2026-11-07: the heading is centered on the strip as
+ * one unit, whatever the two groups measure. It supersedes the "equal clear
+ * space" ruling of 2026-09-14.
  *
- * The flanks are `auto` — each sized to its own group — and the middle track
- * is `minmax(0, 1fr)`, so the title takes exactly what is between them and
- * `text-align: center` centers the text in that. jsdom lays nothing out, so
- * what is assertable here is the rule the cascade hands the mounted row.
+ * The side tracks are equal (`minmax(min-content, 1fr)` each), so the middle
+ * track's midpoint is the strip's, and the middle track is `minmax(0, auto)`
+ * so it is the one that gives when the strip is tight. jsdom lays nothing out,
+ * so what is assertable here is the rule the cascade hands the mounted row.
  */
 describe("the strip's spacing", () => {
   /** The row as the mounted page has it, with the real stylesheet installed. */
@@ -1403,21 +1400,21 @@ describe("the strip's spacing", () => {
     return parts;
   }
 
-  it("sizes each flank track to its own group", async () => {
+  it("gives the two flank tracks the same equal-share rule", async () => {
     // Arrange
     const teardown = installStylesheet();
     try {
       const row = await mountedRow();
       // Act
       const declared = tracks(cascadedValue(row, "grid-template-columns"));
-      // Assert: `auto`, so neither flank spreads past what it holds.
-      expect([declared[0], declared[2]]).toEqual(["auto", "auto"]);
+      // Assert: equal shares, each floored at what its group holds.
+      expect([declared[0], declared[2]]).toEqual(["minmax(min-content, 1fr)", "minmax(min-content, 1fr)"]);
     } finally {
       teardown();
     }
   });
 
-  it("gives the title the space between the two groups and no more", async () => {
+  it("lets the middle track shrink below the heading's width", async () => {
     // Arrange
     const teardown = installStylesheet();
     try {
@@ -1425,7 +1422,7 @@ describe("the strip's spacing", () => {
       // Act
       const declared = tracks(cascadedValue(row, "grid-template-columns"));
       // Assert
-      expect(declared[1]).toBe("minmax(0, 1fr)");
+      expect(declared[1]).toBe("minmax(0, auto)");
     } finally {
       teardown();
     }
