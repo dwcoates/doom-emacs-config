@@ -1,8 +1,9 @@
 # Codegen for the agent-shim protobuf protocol.
 #
 # Outputs:
-#   Go  → gen/go/...   (consumed by daemon/, agent-shim/shim-store/, agent-shim/claude/shim-sidecar/)
-#   TS  → gen/ts/...   (consumed by agent-shim/claude/shim/, webapp/)
+#   Go    → gen/go/...    (consumed by daemon/, agent-shim/shim-store/, agent-shim/claude/shim-sidecar/)
+#   TS    → gen/ts/...    (consumed by agent-shim/claude/shim/, webapp/)
+#   Swift → gen/swift/... (consumed by notifier/, the Zettel app; SWIFT_PROTOS only)
 #
 # Requires: protoc, protoc-gen-go, protoc-gen-connect-go (Connect service
 # handler interfaces — message types alone cannot serve an rpc), and
@@ -69,9 +70,9 @@ ISOLATION_ROOT ?= ..
 # regenerate into a scratch tree and never write the committed one.
 GEN ?= gen
 
-.PHONY: all go ts lint codegen-gate conversation-isolation check-gen-version test-check-conversation-isolation test-check-generated check-generated validate clean
+.PHONY: all go ts swift lint codegen-gate conversation-isolation check-gen-version test-check-conversation-isolation test-check-generated check-generated validate clean
 
-all: go ts
+all: go ts swift
 
 # EVERY path that emits bindings passes through this target. The structural
 # invariants below are not review notes, they are preconditions on codegen: a
@@ -84,6 +85,31 @@ go: codegen-gate
 	mkdir -p $(GEN)/go
 	protoc -I src --go_out=$(GEN)/go --go_opt=paths=source_relative \
 	  --connect-go_out=$(GEN)/go --connect-go_opt=paths=source_relative $(PROTOS)
+
+# THE SWIFT BINDINGS ARE THE NOTIFIER APP'S, AND ONLY WHAT IT SPEAKS: the
+# DESKTOP NOTIFIER section of agentrepl.v1 and that section's imports, never
+# the whole tree. The app (../notifier, Zettel.app) is a small resident
+# client of three rpcs; compiling every surface into it would be thousands of
+# types it never touches. A file the section comes to import is added here.
+# protoc-gen-swift is BUILT FROM THE APP'S OWN PINNED swift-protobuf
+# (../notifier/Package.resolved), never taken from PATH, so the generator and
+# the runtime library the app links are one version by construction.
+# PROTOC_GEN_SWIFT is overridable so the check-generated self-test can stub it.
+PROTOC_GEN_SWIFT ?= ../notifier/.build/release/protoc-gen-swift
+SWIFT_PROTOS ?= agentrepl/v1/daemon_stream_ending.proto \
+	agentrepl/v1/desktop_banner.proto \
+	agentrepl/v1/endpoint_watch_desktop_banners.proto \
+	agentrepl/v1/endpoint_report_desktop_banner_posted.proto \
+	agentrepl/v1/endpoint_report_desktop_banner_clicked.proto \
+	workspace/v1/workspace.proto
+
+../notifier/.build/release/protoc-gen-swift: ../notifier/Package.swift ../notifier/Package.resolved
+	cd ../notifier && swift build -c release --product protoc-gen-swift
+
+swift: codegen-gate $(PROTOC_GEN_SWIFT)
+	mkdir -p $(GEN)/swift
+	protoc -I src --plugin=protoc-gen-swift=$(PROTOC_GEN_SWIFT) \
+	  --swift_out=$(GEN)/swift --swift_opt=Visibility=Public $(SWIFT_PROTOS)
 
 node_modules/.package-lock.json: package.json package-lock.json
 	npm ci
