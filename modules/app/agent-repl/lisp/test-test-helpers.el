@@ -773,6 +773,28 @@ signatures this looks for."
     ;; Assert
     (should-not hand-rolled)))
 
+;;;; ---- agent-repl-test--composer-marked ----
+
+(ert-deftest agent-repl-test-test-helpers-composer-marked-reads-a-tags-words-in-order ()
+  "Only TAG's overlays are read, as their text, in buffer order."
+  (with-temp-buffer
+    ;; Arrange
+    (insert "aa bb cc")
+    (overlay-put (make-overlay 7 9) 'tag-a t)
+    (overlay-put (make-overlay 1 3) 'tag-a t)
+    (overlay-put (make-overlay 4 6) 'tag-b t)
+    ;; Act / Assert
+    (should (equal (agent-repl-test--composer-marked 'tag-a) '("aa" "cc")))))
+
+(ert-deftest agent-repl-test-test-helpers-composer-marked-is-every-kinds-reader ()
+  "Every composer mark kind's suite reads its marks through the one reader."
+  (dolist (file '("test-command-completion.el" "test-workspace-completion.el"))
+    (with-temp-buffer
+      (insert-file-contents (expand-file-name file agent-repl-test-helpers--dir))
+      (should (search-forward "(agent-repl-test--composer-marked '" nil t))
+      (goto-char (point-min))
+      (should-not (search-forward "(overlays-in" nil t)))))
+
 (provide 'test-test-helpers)
 
 ;;; test-test-helpers.el ends here

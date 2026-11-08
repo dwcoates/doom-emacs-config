@@ -332,11 +332,7 @@ in `completion-category-overrides', with the `substring' then `flex' styles."
 
 (defun agent-repl-test-command-completion--marked ()
   "Return the strings the current buffer marks as known commands, in order."
-  (mapcar (lambda (ov) (buffer-substring-no-properties (overlay-start ov) (overlay-end ov)))
-          (sort (cl-remove-if-not
-                 (lambda (ov) (overlay-get ov 'agent-repl-command-completion-known))
-                 (overlays-in (point-min) (point-max)))
-                (lambda (a b) (< (overlay-start a) (overlay-start b))))))
+  (agent-repl-test--composer-marked 'agent-repl-command-completion-known))
 
 (defmacro agent-repl-test-command-completion--marking (&rest body)
   "Run BODY in a buffer holding the fixture catalog and marking on change."

@@ -114,11 +114,7 @@
 
 (defun agent-repl-test-workspace-completion--marked ()
   "Return the strings the current buffer marks as open workspaces' names, in order."
-  (mapcar (lambda (ov) (buffer-substring-no-properties (overlay-start ov) (overlay-end ov)))
-          (sort (cl-remove-if-not
-                 (lambda (ov) (overlay-get ov 'agent-repl-workspace-completion-known))
-                 (overlays-in (point-min) (point-max)))
-                (lambda (a b) (< (overlay-start a) (overlay-start b))))))
+  (agent-repl-test--composer-marked 'agent-repl-workspace-completion-known))
 
 (defmacro agent-repl-test-workspace-completion--marking (names &rest body)
   "Run BODY in a buffer marking on change, with NAMES open."
