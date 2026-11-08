@@ -41,6 +41,7 @@ new_case() {
   write_stub brew '
 case "$1" in
   list) [ -f "$STUB_DIR/.brew-has-$3" ] ;;
+  --prefix) printf "/brew%s\n" "${2:+/opt/$2}" ;;
   tap) ;;
   install|upgrade)
     shift
@@ -434,13 +435,19 @@ test_an_unset_variable_needs_the_user() {
 
 EMACS_ENTRY='{"id": "emacs", "kind": "emacs", "why": "w", "profile": "run", "platforms": ["darwin"], "command": "emacs", "min": "30.1", "features": ["xwidget-internal"], "install": {"brew": "emacs-plus@30"}}'
 
-# fake_emacs VERSION LACKING: an emacs stub answering --batch's two questions.
+# fake_emacs VERSION LACKING [REVISION [CONFIGURED]]: an emacs stub answering
+# --batch's questions: its version, the features it lacks, the commit it was
+# built from (the one a source install's `make install` records in
+# .emacs-revision, once there is one), and its configuration features.
 fake_emacs() {
   cat >"$CASE/stubs/emacs" <<EOF
 #!/bin/sh
 case "\$3" in
   *emacs-version*) printf '%s' "$1" ;;
   *featurep*) printf '%s' "$2" ;;
+  *emacs-repository-version*)
+    if [ -f "\$STUB_DIR/.emacs-revision" ]; then cat "\$STUB_DIR/.emacs-revision"; else printf '%s' "${3:-}"; fi ;;
+  *system-configuration-features*) printf '%s' "${4:-}" ;;
 esac
 EOF
   chmod +x "$CASE/stubs/emacs"
@@ -462,6 +469,147 @@ test_an_old_emacs_is_outdated() {
   new_case; manifest "[$EMACS_ENTRY]"; fake_emacs 29.4 ""
   run check
   if [ "$RC" -eq 1 ] && has "is Emacs 29.4, older than 30.1"; then pass "an old emacs is outdated"; else fail "old emacs" "rc=$RC" "$OUT"; fi
+}
+
+PINNED=cc023ace88da219c9e77740b9e180ea648fc4759
+
+# source_emacs_entry: an emacs entry built from a source repository at PINNED,
+# its app under the case's own Applications dir.
+source_emacs_entry() {
+  printf '%s' '{"id": "emacs", "kind": "emacs", "why": "w", "profile": "run", "platforms": ["darwin"], "command": "emacs", "min": "30.2", "features": ["xwidget-internal"], "revision": "'"$PINNED"'", "configuration_features": ["XWIDGETS", "NATIVE_COMP"], "install": {"source": {"repo": "https://example.test/fork/zettel-emacs.git", "brew_deps": ["autoconf", "tree-sitter"], "configure": ["--with-xwidgets", "LIBS={brew:tree-sitter}/lib/x.a", "CPPFLAGS=-I{brew}/include"], "app": "'"$CASE"'/Applications/Emacs.app"}}}'
+}
+
+# fake_source_build: git, make and the checkout's own autogen.sh and configure
+# as stubs. The checkout writes autogen.sh and configure into the work tree;
+# configure exits STUB_CONFIGURE_EXIT; `make install` makes the app (unless
+# STUB_MAKE_NO_APP) and records the checked-out revision as the one the fake
+# emacs was built from.
+fake_source_build() {
+  write_stub git '
+dir="$2"; shift 2
+case "$1" in
+  checkout)
+    printf "%s" "$4" >"$dir/.checked-out"
+    for s in autogen.sh configure; do
+      printf "#!/bin/bash\nprintf \"%%s %%s\\\\n\" \"%s\" \"\$*\" >>\"\$STUB_DIR/../transcript\"\n" "$s" >"$dir/$s"
+      chmod +x "$dir/$s"
+    done
+    printf "exit \${STUB_CONFIGURE_EXIT:-0}\n" >>"$dir/configure" ;;
+esac'
+  write_stub make '
+if [ "$1" = install ] && [ -z "${STUB_MAKE_NO_APP:-}" ]; then
+  mkdir -p nextstep/Emacs.app && echo new >nextstep/Emacs.app/marker
+  cp .checked-out "$STUB_DIR/.emacs-revision"
+fi'
+  mkdir -p "$CASE/Applications/Emacs.app" && echo old >"$CASE/Applications/Emacs.app/marker"
+}
+
+# no_backup: whether the case's Applications dir holds no moved-aside app.
+no_backup() { ! ls -d "$CASE/Applications/Emacs-"*.app >/dev/null 2>&1; }
+
+test_an_emacs_at_its_pinned_revision_is_ok() {
+  new_case; manifest "[$(source_emacs_entry)]"; fake_emacs 30.2 "" "$PINNED" "NS XWIDGETS NATIVE_COMP"
+  run check
+  if [ "$RC" -eq 0 ] && has "ok          emacs: $CASE/stubs/emacs Emacs 30.2 at $PINNED"; then pass "an emacs built from its pinned revision with its configuration is ok"; else fail "pinned emacs ok" "rc=$RC" "$OUT"; fi
+}
+
+test_an_emacs_built_from_another_revision_is_outdated() {
+  new_case; manifest "[$(source_emacs_entry)]"; fake_emacs 30.2 "" 636f166cfc86 "XWIDGETS NATIVE_COMP"
+  run check
+  if [ "$RC" -eq 1 ] && has "outdated    emacs: $CASE/stubs/emacs (Emacs 30.2) was built from 636f166cfc86, not the pinned $PINNED"; then pass "an emacs built from another revision is outdated, naming both"; else fail "other revision" "rc=$RC" "$OUT"; fi
+}
+
+test_an_emacs_with_no_recorded_revision_is_outdated() {
+  new_case; manifest "[$(source_emacs_entry)]"; fake_emacs 30.2 "" "" "XWIDGETS NATIVE_COMP"
+  run check
+  if [ "$RC" -eq 1 ] && has "was built from no recorded commit, not the pinned $PINNED"; then pass "an emacs with no recorded commit is outdated"; else fail "no revision" "rc=$RC" "$OUT"; fi
+}
+
+test_an_emacs_configured_without_a_feature_is_outdated() {
+  new_case; manifest "[$(source_emacs_entry)]"; fake_emacs 30.2 "" "$PINNED" "XWIDGETS NATIVE_COMP_X"
+  run check
+  if [ "$RC" -eq 1 ] && has "outdated    emacs: $CASE/stubs/emacs (Emacs 30.2) was configured without: NATIVE_COMP"; then pass "an emacs configured without a feature is outdated, naming it"; else fail "configuration feature" "rc=$RC" "$OUT"; fi
+}
+
+test_an_emacs_source_fix_names_the_build() {
+  new_case; manifest "[$(source_emacs_entry)]"; fake_emacs 30.2 "" 636f166cfc86 "XWIDGETS NATIVE_COMP"
+  run check
+  if has "Fix: build https://example.test/fork/zettel-emacs.git at the pinned revision and install it as $CASE/Applications/Emacs.app"; then pass "a source emacs's fix names the build"; else fail "source fix" "$OUT"; fi
+}
+
+test_an_emacs_source_without_a_revision_is_refused() {
+  new_case; manifest "[$(source_emacs_entry | jq -c 'del(.revision)')]"
+  run check
+  if [ "$RC" -eq 2 ] && has 'emacs: emacs needs "revision"'; then pass "an emacs source without a revision is refused"; else fail "source no revision" "rc=$RC" "$OUT"; fi
+}
+
+test_an_emacs_source_lacking_a_field_is_refused() {
+  new_case; manifest "[$(source_emacs_entry | jq -c 'del(.install.source.app)')]"
+  run check
+  if [ "$RC" -eq 2 ] && has 'emacs: an emacs install.source needs "app"'; then pass "an emacs source lacking a field is refused, naming it"; else fail "source field" "rc=$RC" "$OUT"; fi
+}
+
+test_installing_an_emacs_source_builds_and_replaces_the_app() {
+  new_case; manifest "[$(source_emacs_entry)]"; fake_emacs 30.2 "" 636f166cfc86 "XWIDGETS NATIVE_COMP"; fake_source_build
+  : >"$CASE/stubs/.brew-has-autoconf"
+  run install
+  local src="$CASE/home/.cache/agent-repl/src/zettel-emacs" backup
+  backup="$(ls -d "$CASE/Applications/Emacs-"*.app 2>/dev/null || true)"
+  if [ "$RC" -eq 0 ] && ran "brew install tree-sitter" && ! ran "brew install autoconf" \
+     && ran "git -C $src fetch -q --depth 1 https://example.test/fork/zettel-emacs.git $PINNED" \
+     && ran "git -C $src checkout -q --force $PINNED" && ran "autogen.sh " \
+     && ran "configure --with-xwidgets LIBS=/brew/opt/tree-sitter/lib/x.a CPPFLAGS=-I/brew/include" \
+     && ran "make install" && [ "$(cat "$CASE/Applications/Emacs.app/marker")" = new ] \
+     && [ -n "$backup" ] && [ "$(cat "$backup/marker")" = old ] \
+     && has "restart Emacs to run it" && has "ok          emacs: $CASE/stubs/emacs Emacs 30.2 at $PINNED"; then
+    pass "installing a source emacs builds the pinned revision and moves the old app aside"
+  else fail "source install" "rc=$RC" "$OUT" "$(cat "$CASE/transcript")"; fi
+}
+
+test_a_failed_emacs_source_configure_leaves_the_app() {
+  new_case; manifest "[$(source_emacs_entry)]"; fake_emacs 30.2 "" 636f166cfc86 "XWIDGETS NATIVE_COMP"; fake_source_build
+  EXTRA_ENV="STUB_CONFIGURE_EXIT=1" run install
+  if [ "$RC" -eq 1 ] && has "ERROR: install: emacs: configure in $CASE/home/.cache/agent-repl/src/zettel-emacs failed; config.log there says why" \
+     && ! ran "make " && [ "$(cat "$CASE/Applications/Emacs.app/marker")" = old ] && no_backup; then
+    pass "a failed configure stops the build and leaves the installed app"
+  else fail "configure failure" "rc=$RC" "$OUT"; fi
+}
+
+test_a_source_build_that_makes_no_app_leaves_the_app() {
+  new_case; manifest "[$(source_emacs_entry)]"; fake_emacs 30.2 "" 636f166cfc86 "XWIDGETS NATIVE_COMP"; fake_source_build
+  EXTRA_ENV="STUB_MAKE_NO_APP=1" run install
+  if [ "$RC" -eq 1 ] && has "ERROR: install: emacs: the build made no $CASE/home/.cache/agent-repl/src/zettel-emacs/nextstep/Emacs.app" \
+     && [ "$(cat "$CASE/Applications/Emacs.app/marker")" = old ] && no_backup; then
+    pass "a build that makes no app leaves the installed app"
+  else fail "no app" "rc=$RC" "$OUT"; fi
+}
+
+test_a_failed_emacs_source_fetch_stops_the_build() {
+  new_case; manifest "[$(source_emacs_entry)]"; fake_emacs 30.2 "" 636f166cfc86 "XWIDGETS NATIVE_COMP"; fake_source_build
+  write_stub git '[ "$3" = fetch ] && exit 1; exit 0'
+  run install
+  if [ "$RC" -eq 1 ] && has "ERROR: install: emacs: fetching $PINNED from https://example.test/fork/zettel-emacs.git failed" \
+     && ! ran "make " && [ "$(cat "$CASE/Applications/Emacs.app/marker")" = old ] && no_backup; then
+    pass "a failed fetch stops the build and leaves the installed app"
+  else fail "fetch failure" "rc=$RC" "$OUT"; fi
+}
+
+test_expand_brew_prefixes() {
+  local bad="" in want got
+  # shellcheck source=/dev/null
+  REQUIREMENTS_SH_LIB=1 source "$RUNNER"
+  brew() { if [ -n "${2:-}" ]; then echo "/hb/opt/$2"; else echo /hb; fi; }
+  while IFS='|' read -r in want; do
+    got="$(expand_brew_prefixes "$in")"
+    [ "$got" = "$want" ] || bad="$bad [$in -> $got, want $want]"
+  done <<'CASES'
+--with-ns|--with-ns
+CPPFLAGS=-I{brew}/include|CPPFLAGS=-I/hb/include
+X={brew:tree-sitter}/lib/a.a|X=/hb/opt/tree-sitter/lib/a.a
+{brew}:{brew:gmp}|/hb:/hb/opt/gmp
+CASES
+  unset -f brew
+  if [ -z "$bad" ]; then pass "expand_brew_prefixes replaces every Homebrew prefix token"; else fail "expand_brew_prefixes:$bad"; fi
 }
 
 # ---------------------------------------------------------------------------

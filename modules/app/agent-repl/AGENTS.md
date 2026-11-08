@@ -1868,6 +1868,12 @@ manifest, and `bin/requirements.sh` is the one program that reads them.
   - `build_target` and `binary`: built here by `bin/build-frontend.sh` into the cache (the store, the sidecar).
   - `command`: an installed program, declared by its own `program` entry that installs it (VictoriaMetrics, `victoria-metrics`). The plist reaches it through `/usr/bin/env` with a `PATH` that includes Homebrew's prefixes, since launchd's own `PATH` does not.
   - `files`: config copied from the module into the cache (`from` module-relative, `to` cache-relative). A copy that differs reads as `outdated`, and install copies it again and restarts the service.
+- **The `emacs` entry pins zettel-emacs, a fork of Emacs carrying the patches agent-repl needs.**
+  - `revision` is the fork's commit, and check compares it to the installed Emacs's `emacs-repository-version`; `configuration_features` must all appear in its `system-configuration-features`.
+  - `install.source` builds that commit: `brew_deps` first, then `autogen.sh`, `configure` with its arguments, `make` and `make install`, in a checkout under the cache (`src/<repo>`). The new app replaces `app` only once it is built, and the previous one is moved aside, never deleted.
+  - A `configure` argument names a Homebrew path as `{brew}` or `{brew:FORMULA}`, never a machine's literal prefix.
+  - tree-sitter is linked statically (`TREE_SITTER_LIBS`), so a Homebrew upgrade of it cannot stop the app from starting.
+  - A change to the fork's patches is a new commit there and a new `revision` here, in the same change.
 - **A retired skill stays in the manifest, marked `"retired": true`.**
   - Install then removes the link it once made on every machine, and leaves a file of the user's at that name alone.
   - Deleting the entry instead would leave every other machine with a dangling link.
