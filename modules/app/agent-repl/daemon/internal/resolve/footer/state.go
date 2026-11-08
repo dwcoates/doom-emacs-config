@@ -552,9 +552,15 @@ type wsState struct {
 	// heardAt is when the vendor was last heard from in the turn in flight:
 	// its opening, or any agent's activity frame (heardFromVendor).
 	heardAt time.Time
+	// heard is what the vendor was last heard saying at heardAt: the waiting
+	// step's line names it (vendorsilence.go).
+	heard lastHeard
 	// silence republishes the strip once the vendor-silence threshold passes
 	// after heardAt.
 	silence Timer
+	// silenceDrawn reports that the strip turned to `waiting` for the current
+	// silence, so its end is recorded (endSilence).
+	silenceDrawn bool
 
 	// transient is THE NEWEST TRANSIENT: the one slot every transient source
 	// fills, each raise replacing the last (transient.go). It carries its own

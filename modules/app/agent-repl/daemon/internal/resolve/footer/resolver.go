@@ -719,6 +719,14 @@ func (s *wsState) endTurn(at time.Time) {
 	s.turn = nil
 }
 
+// endTurn ends the turn in flight now (wsState.endTurn) and, with it, the
+// vendor's silence; CAUSE names the edge for that record. Every edge that
+// ends a turn goes through it, so no silence outlives its turn unrecorded.
+func (r *resolver) endTurn(ws ids.WorkspaceID, s *wsState, cause string) {
+	s.endTurn(r.opts.clock.Now())
+	r.endSilence(ws, s, cause)
+}
+
 // noteServed records a turn's edge crossing the link while a client hop is
 // down: proof the hop is not severed (status.go).
 func (s *wsState) noteServed() {
@@ -730,10 +738,11 @@ func (s *wsState) noteServed() {
 func (r *resolver) applyTurnStarted(ws ids.WorkspaceID, s *wsState, turn *TurnStarted) {
 	s.turn = turn
 	if turn == nil {
+		r.endSilence(ws, s, "turn_cleared")
 		return
 	}
 	s.noteServed()
-	r.heardFromVendor(ws, s)
+	r.heardFromVendor(ws, s, heardTurnOpened)
 	s.turnEverRan = true
 	// A NEW TURN ENDS THE LAST ONE'S CLOCK, as its reset ends the last one's
 	// tokens figure.
@@ -954,41 +963,6 @@ func (r *resolver) SetInterrupting(ws ids.WorkspaceID, on bool) {
 		})
 }
 
-// ---- the vendor's silence ---------------------------------------------------
-
-// heardFromVendor records that the vendor was last heard from now (a turn
-// opened, or any agent's activity frame landed) and arms the one timer that
-// republishes the strip once the vendor-silence threshold passes with nothing
-// more, when the `thinking` step reads `waiting` (vendorSilent). Nothing on
-// the wire ticks: the timer's only effect is one more whole-view publication.
-func (r *resolver) heardFromVendor(ws ids.WorkspaceID, s *wsState) {
-	s.heardAt = r.opts.clock.Now()
-	if s.silence != nil {
-		s.silence.Stop()
-	}
-	s.silence = r.opts.clock.AfterFunc(r.opts.vendorSilence, func() { r.vendorSilenceElapsed(ws) })
-}
-
-// vendorSilenceElapsed republishes the strip once the vendor has been silent
-// past the threshold, and records the step turning to `waiting`.
-func (r *resolver) vendorSilenceElapsed(ws ids.WorkspaceID) {
-	r.mutate(ws, "daemon.footer.vendor_silence",
-		"the vendor-silence threshold passed; the footer republished its working step",
-		nil, func(s *wsState) {
-			s.silence = nil
-			if s.turn != nil && r.vendorSilent(s) {
-				r.logOf(ws, s).Info("daemon.footer.vendor_silence",
-					"nothing has come back from the vendor past the silence threshold; the thinking step reads waiting",
-					dlog.Context{"heard_at": s.heardAt, "silence_ms": r.opts.vendorSilence.Milliseconds()})
-			}
-		})
-}
-
-// vendorSilent reports whether the vendor has been silent past the threshold.
-func (r *resolver) vendorSilent(s *wsState) bool {
-	return !r.opts.clock.Now().Before(s.heardAt.Add(r.opts.vendorSilence))
-}
-
 // ---- the R1 dwell ---------------------------------------------------------
 
 // armMomentary schedules the one-shot successor push that retires a momentary
@@ -1047,7 +1021,7 @@ func (r *resolver) OnLink(ws ids.WorkspaceID, link sessionwatcher.LinkState) {
 			// with it and no terminal will ever arrive for it. Kept, it drew
 			// `thinking` over the session brought back in its place.
 			if link == shimclient.LinkDead && s.turn != nil {
-				s.endTurn(r.opts.clock.Now())
+				r.endTurn(ws, s, "shim_dead")
 			}
 		})
 }
@@ -1108,7 +1082,7 @@ func (r *resolver) sessionArm(ws ids.WorkspaceID, update *conversationv1.Session
 			if s.turn != nil {
 				s.recordQueryDeath(u.QueryDied)
 			}
-			s.endTurn(r.opts.clock.Now())
+			r.endTurn(ws, s, "query_died")
 			// NO RETRY SURVIVES THE QUERY EITHER.
 			s.retrying = nil
 			// NO COMPACTION SURVIVES THE QUERY IT RAN IN.

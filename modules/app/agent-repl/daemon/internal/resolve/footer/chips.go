@@ -29,10 +29,13 @@ func (r *resolver) OnActivity(ws ids.WorkspaceID, agent *conversationv1.AgentId,
 	r.mutate(ws, "daemon.footer.on_activity", "the footer took an activity frame",
 		dlog.Context{"arm": arm, "activity_id": unit}, func(s *wsState) {
 			s.sawActivity = true
+			frame := r.classify(ws, s, act)
 			// ANY AGENT'S FRAME IS THE VENDOR ANSWERING: a step that read
-			// `waiting` reads its own again, and the silence counts afresh.
+			// `waiting` reads its own again, and the silence counts afresh
+			// from what this frame said.
 			if s.turn != nil {
-				r.heardFromVendor(ws, s)
+				subagent := s.mainAgent != "" && agent.GetValue() != s.mainAgent
+				r.heardFromVendor(ws, s, heardOf(frame, subagent))
 			}
 			// FILED BEFORE THE USAGE IS FOLDED IN: the ledger needs to know
 			// whether THIS frame carried usage to decide which API response
@@ -45,7 +48,7 @@ func (r *resolver) OnActivity(ws ids.WorkspaceID, agent *conversationv1.AgentId,
 			r.clearRetry(ws, s, agent.GetValue(), act)
 			r.recordSpawnOwner(s, agent, act)
 			r.applyActivity(ws, s, agent, label, unit, act)
-			r.trackFeed(ws, s, agent, unit, act)
+			r.trackFeed(s, agent, unit, frame)
 		})
 }
 
@@ -474,7 +477,7 @@ func (r *resolver) OnAgentTerminal(ws ids.WorkspaceID, agent *conversationv1.Age
 			if turn == nil {
 				return
 			}
-			s.endTurn(r.opts.clock.Now())
+			r.endTurn(ws, s, "agent_terminal")
 			// THE TURN'S END IS THE RETRY'S END: nothing is left to retry for.
 			s.retrying = nil
 			r.endTurnMotion(s)
