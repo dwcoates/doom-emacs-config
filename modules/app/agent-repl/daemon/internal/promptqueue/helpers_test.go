@@ -21,6 +21,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/netstate"
 	"agent-repld/internal/pullrefs"
 	"agent-repld/internal/resolve/feed"
 	"agent-repld/internal/resolve/footer"
@@ -1400,6 +1401,21 @@ func (f *fakeSidebar) rosterEnds() []sessionwatcher.TurnClose {
 	return append([]sessionwatcher.TurnClose(nil), f.ends...)
 }
 
+// fakeNetwork answers the network's state with a scripted verdict, and
+// records the words it was asked about.
+type fakeNetwork struct {
+	mu      sync.Mutex
+	verdict netstate.Verdict
+	asked   []string
+}
+
+func (n *fakeNetwork) Classify(_ context.Context, words string) netstate.Verdict {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.asked = append(n.asked, words)
+	return n.verdict
+}
+
 type fakeFooter struct {
 	footer.Resolver
 	mu           sync.Mutex
@@ -1697,6 +1713,7 @@ type harness struct {
 	leases  *fakeLeases
 	holds   *fakeHolds
 	judge   *scriptedJudge
+	network *fakeNetwork
 	// elapsed advances the queue's clock past instant; zero unless a test
 	// moves it (the classifier's measured latency).
 	elapsed atomic.Int64
@@ -1762,6 +1779,7 @@ func newHarness(t *testing.T) *harness {
 		leases:  &fakeLeases{},
 		holds:   &fakeHolds{},
 		judge:   &scriptedJudge{},
+		network: &fakeNetwork{},
 		drain:   &noteRecorder{},
 		banners: &fakeTurnBanners{},
 		commits: &fakeRecounter{},
@@ -1780,6 +1798,7 @@ func newHarness(t *testing.T) *harness {
 		},
 		DB:      h.db,
 		Judge:   h.judge,
+		Network: h.network,
 		Feed:    h.feed,
 		Footer:  h.footer,
 		Sidebar: h.sidebar,

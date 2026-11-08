@@ -23,7 +23,7 @@ func TestNewRefusesEachMissingCollaborator(t *testing.T) {
 		h := &harness{db: newFakeDB(), sender: newFakeSender(), watcher: &fakeWatcher{},
 			feed: &fakeFeed{}, footer: &fakeFooter{}, sidebar: &fakeSidebar{}, holds: &fakeHolds{}, judge: &scriptedJudge{}}
 		return Deps{
-			DB: h.db, Judge: h.judge, Feed: h.feed, Footer: h.footer, Sidebar: h.sidebar, Holds: h.holds,
+			DB: h.db, Judge: h.judge, Network: &fakeNetwork{}, Feed: h.feed, Footer: h.footer, Sidebar: h.sidebar, Holds: h.holds,
 			Edges:       &fakeEdges{},
 			Leases:      &fakeLeases{},
 			Merges:      &fakeLeases{},
@@ -50,6 +50,7 @@ func TestNewRefusesEachMissingCollaborator(t *testing.T) {
 		{"commit recounter", func(d *Deps) { d.Commits = nil }},
 		{"keep-alive keeper's cache clocks", func(d *Deps) { d.CacheClocks = nil }},
 		{"footer resolver", func(d *Deps) { d.Footer = nil }},
+		{"network's state", func(d *Deps) { d.Network = nil }},
 		{"roster resolver", func(d *Deps) { d.Sidebar = nil }},
 		{"turn edges' observer", func(d *Deps) { d.Edges = nil }},
 		{"lease watcher", func(d *Deps) { d.Leases = nil }},

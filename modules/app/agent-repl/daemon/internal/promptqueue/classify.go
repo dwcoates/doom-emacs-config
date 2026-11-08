@@ -399,8 +399,7 @@ func (q *queue) verdictFor(ctx context.Context, sub Submission, running ids.Turn
 	verdict, err := q.deps.Judge.Judge(ctx, runningText, saidText(sub.Said))
 	judgeMS := q.deps.Now().Sub(judgeStarted).Milliseconds()
 	if err != nil {
-		log.Error(opClassify, "the classifier failed; the prompt waits for the running turn to end",
-			dlog.Context{"running_turn": string(running), "cause": err.Error(), "judge_ms": judgeMS})
+		q.logJudgeFailure(ctx, running, err, judgeMS, log)
 		return wsm.Classification{
 			Arm:    wsm.ArmHoldForTurnEnd,
 			Reason: "the classifier could not decide, so the prompt waits for the running turn to end",
@@ -411,6 +410,25 @@ func (q *queue) verdictFor(ctx context.Context, sub Submission, running ids.Turn
 		"route": verdict.Route.String(), "reason": verdict.Reason, "judge_ms": judgeMS,
 	})
 	return wsm.Classification{Arm: routeArm(verdict.Route), Reason: verdict.Reason, At: q.deps.Now()}, verdict.Route
+}
+
+// logJudgeFailure records a classifier that failed, at the level its cause
+// earns. A CLASSIFIER THE NETWORK FAILED is the expected consequence of an
+// outage this machine is in (2026-11-08: a 16-minute DNS outage killed two
+// `claude -p` runs at their timeout), not an agent-repl defect, so it is
+// recorded at info with the network's evidence; any other cause is a defect,
+// at error. The verdict is the same either way: the prompt waits for the
+// running turn to end.
+func (q *queue) logJudgeFailure(ctx context.Context, running ids.TurnID, err error, judgeMS int64, log dlog.Logger) {
+	fields := dlog.Context{"running_turn": string(running), "cause": err.Error(), "judge_ms": judgeMS}
+	network := q.deps.Network.Classify(ctx, err.Error())
+	if network.Network {
+		fields["network_evidence"] = string(network.Evidence)
+		fields["network_detail"] = network.Detail
+		log.Info(opClassify, "the classifier failed because this machine cannot reach the network; the prompt waits for the running turn to end", fields)
+		return
+	}
+	log.Error(opClassify, "the classifier failed; the prompt waits for the running turn to end", fields)
 }
 
 // settle records a verdict and, on an interject, runs the interjection — but

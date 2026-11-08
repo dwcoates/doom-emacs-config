@@ -21,6 +21,7 @@ import (
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/lockwatch"
+	"agent-repld/internal/netstate"
 	"agent-repld/internal/resolve/feed"
 	"agent-repld/internal/resolve/footer"
 	"agent-repld/internal/resolve/holds"
@@ -447,6 +448,14 @@ type MergeRequests interface {
 }
 
 // Deps are the queue's collaborators.
+// Network is the daemon's network state (netstate.Monitor), as the queue
+// asks it about a classifier that failed.
+type Network interface {
+	// Classify decides whether a failure whose own account is WORDS was the
+	// network's.
+	Classify(ctx context.Context, words string) netstate.Verdict
+}
+
 type Deps struct {
 	// DB is the durable hold store and the lease's policy metadata.
 	DB wsm.DB
@@ -460,6 +469,10 @@ type Deps struct {
 	Merges MergeRequests
 	// Judge classifies interjection.
 	Judge classifier.Judge
+	// Network says whether a failed classification was the network's, so an
+	// outage this machine is in is recorded as the expected condition it is
+	// rather than as a defect (netstate.Monitor). REQUIRED.
+	Network Network
 	// Feed mirrors an accepted prompt as a user_prompt row.
 	Feed feed.Resolver
 	// Footer carries the waiting-interrupting status, which fires the MOMENT
