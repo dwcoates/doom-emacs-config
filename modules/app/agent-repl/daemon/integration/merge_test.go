@@ -403,11 +403,11 @@ func TestALandedMergeIsSeenByEveryObserver(t *testing.T) {
 	})
 	t.Run("only the queued and landed banners rose", func(t *testing.T) {
 		var merges [][]string
-		for _, inv := range bannerRuns(f) {
-			argv := [][]string{inv.Argv}
-			if bannerCarrying(argv, "🔀") || bannerCarrying(argv, "🎉") ||
-				bannerCarrying(argv, "❌") || bannerCarrying(argv, "⛔") {
-				merges = append(merges, inv.Argv)
+		for _, words := range f.d.PostedBanners() {
+			banner := [][]string{words}
+			if bannerCarrying(banner, "🔀") || bannerCarrying(banner, "🎉") ||
+				bannerCarrying(banner, "❌") || bannerCarrying(banner, "⛔") {
+				merges = append(merges, words)
 			}
 		}
 		if len(merges) != 2 || !bannerCarrying(merges[:1], "🔀") || !bannerCarrying(merges[1:], "🎉", "Merged into main") {

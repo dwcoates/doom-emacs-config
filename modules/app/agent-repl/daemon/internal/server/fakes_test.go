@@ -2465,6 +2465,9 @@ type harness struct {
 	Emacs *fakeEmacsMeasure
 	// Banners is the desktop banners a ReportEditorFocus gain claims.
 	Banners *fakeBanners
+	// NotifierApp is the real notifier app's side: in-memory, so a test opens
+	// its stream and answers its posts over the wire.
+	NotifierApp *desktopnotify.App
 	// PersistentWifi is the persistent-wifi controller the rpc delegates to.
 	PersistentWifi *fakePersistentWifi
 	// HiddenKeepalives is the cache keeper SendHiddenKeepalives delegates to.
@@ -2523,6 +2526,8 @@ type fakeBanners struct {
 	// noProgramCause is what NoProgramCause answers.
 	noProgramCause string
 	notified       []fakeNotify
+	// clickedWS is every workspace a reported click named.
+	clickedWS []ids.WorkspaceID
 }
 
 // fakeNotify is one Notify a fakeBanners was handed.
@@ -2542,6 +2547,18 @@ func (b *fakeBanners) notifies() []fakeNotify {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return append([]fakeNotify(nil), b.notified...)
+}
+
+func (b *fakeBanners) Clicked(ws ids.WorkspaceID) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.clickedWS = append(b.clickedWS, ws)
+}
+
+func (b *fakeBanners) clicks() []ids.WorkspaceID {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return append([]ids.WorkspaceID(nil), b.clickedWS...)
 }
 
 func (b *fakeBanners) NoProgramCause() string {
@@ -2596,35 +2613,36 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		DB: &fakeDB{workspaces: map[ids.WorkspaceID]wsm.Workspace{
 			testWorkspaceID: {ID: testWorkspaceID, Dir: testWorkspaceDir, Name: "test"},
 		}},
-		Ownership:  &fakeOwnership{standing: workspace.StandingOwned},
-		Verbs:      &fakeVerbs{},
-		PRs:        &fakePullRequests{},
-		Remotes:    &fakeRemotes{},
-		Creates:    creategate.New(),
-		Retarget:   &fakeRetarget{},
-		Prompts:    &fakePrompts{},
-		Queue:      &fakeQueue{},
-		Merge:      &fakeMerge{},
-		Makers:     &fakeMakers{},
-		Drain:      &fakeDrain{},
-		Rollout:    &fakeRollout{},
-		Deployer:   &fakeDeployer{},
-		Health:     &fakeHealth{},
-		Facts:      &fakeSessionFacts{facts: map[ids.WorkspaceID]HostFacts{}},
-		Login:      &fakeLogin{},
-		Feed:       &fakeFeed{},
-		Images:     &fakeImageSources{},
-		Footer:     &fakeFooter{},
-		Topbar:     &fakeTopbar{},
-		Sidebar:    &fakeSidebar{},
-		Memory:     &fakeMemory{},
-		Chat:       &fakeChat{},
-		Gathers:    &fakeGathers{},
-		Surfaces:   &fakeSurfaces{},
-		Focus:      desktopnotify.NewFocus(dlog.NewTestLogger()),
-		Emacs:      &fakeEmacsMeasure{},
-		Banners:    &fakeBanners{},
-		WebappDist: dist,
+		Ownership:   &fakeOwnership{standing: workspace.StandingOwned},
+		Verbs:       &fakeVerbs{},
+		PRs:         &fakePullRequests{},
+		Remotes:     &fakeRemotes{},
+		Creates:     creategate.New(),
+		Retarget:    &fakeRetarget{},
+		Prompts:     &fakePrompts{},
+		Queue:       &fakeQueue{},
+		Merge:       &fakeMerge{},
+		Makers:      &fakeMakers{},
+		Drain:       &fakeDrain{},
+		Rollout:     &fakeRollout{},
+		Deployer:    &fakeDeployer{},
+		Health:      &fakeHealth{},
+		Facts:       &fakeSessionFacts{facts: map[ids.WorkspaceID]HostFacts{}},
+		Login:       &fakeLogin{},
+		Feed:        &fakeFeed{},
+		Images:      &fakeImageSources{},
+		Footer:      &fakeFooter{},
+		Topbar:      &fakeTopbar{},
+		Sidebar:     &fakeSidebar{},
+		Memory:      &fakeMemory{},
+		Chat:        &fakeChat{},
+		Gathers:     &fakeGathers{},
+		Surfaces:    &fakeSurfaces{},
+		Focus:       desktopnotify.NewFocus(dlog.NewTestLogger()),
+		Emacs:       &fakeEmacsMeasure{},
+		Banners:     &fakeBanners{},
+		NotifierApp: desktopnotify.NewApp(dlog.NewTestLogger(), time.Minute),
+		WebappDist:  dist,
 
 		PersistentWifi:   &fakePersistentWifi{},
 		HiddenKeepalives: &fakeHiddenKeepalives{},
@@ -2712,6 +2730,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		Focus:             h.Focus,
 		Emacs:             h.Emacs,
 		Banners:           h.Banners,
+		NotifierApp:       h.NotifierApp,
 		PersistentWifi:    h.PersistentWifi,
 		HiddenKeepalives:  h.HiddenKeepalives,
 		KeepLives:         h.KeepLives,

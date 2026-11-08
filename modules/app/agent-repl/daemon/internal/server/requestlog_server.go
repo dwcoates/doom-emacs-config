@@ -768,6 +768,28 @@ func (s *requestLoggingServer) ReportEditorFocus(
 	return serveUnary(s, ctx, "ReportEditorFocus", req, s.server.ReportEditorFocus)
 }
 
+func (s *requestLoggingServer) WatchDesktopBanners(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.WatchDesktopBannersRequest],
+	stream *connect.ServerStream[agentreplv1.WatchDesktopBannersResponse],
+) error {
+	return serveStream(s, ctx, "WatchDesktopBanners", req, stream, s.server.WatchDesktopBanners)
+}
+
+func (s *requestLoggingServer) ReportDesktopBannerPosted(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.ReportDesktopBannerPostedRequest],
+) (*connect.Response[agentreplv1.ReportDesktopBannerPostedResponse], error) {
+	return serveUnary(s, ctx, "ReportDesktopBannerPosted", req, s.server.ReportDesktopBannerPosted)
+}
+
+func (s *requestLoggingServer) ReportDesktopBannerClicked(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.ReportDesktopBannerClickedRequest],
+) (*connect.Response[agentreplv1.ReportDesktopBannerClickedResponse], error) {
+	return serveUnary(s, ctx, "ReportDesktopBannerClicked", req, s.server.ReportDesktopBannerClicked)
+}
+
 func (s *requestLoggingServer) WatchHostWorkspace(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.WatchHostWorkspaceRequest],

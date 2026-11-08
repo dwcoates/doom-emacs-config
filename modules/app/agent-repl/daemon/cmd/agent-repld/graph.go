@@ -1071,13 +1071,16 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 
 	// THE DAEMON POSTS EVERY DESKTOP BANNER. Emacs's focus rides its
 	// WatchDaemon stream (server.Deps.Focus) and decides each one; a click is
-	// relayed to the host stream through the server, bound late.
+	// relayed to the host stream through the server, bound late. On macOS the
+	// Zettel notifier app posts every banner, over the stream the server
+	// attaches it on (server.Deps.NotifierApp).
 	selfExe, err := os.Executable()
 	if err != nil {
 		return nil, fmt.Errorf("agent-repld: resolve this daemon's own binary: %w", err)
 	}
 	focus := desktopnotify.NewFocus(log)
-	backend, backendErr := resolveBannerBackend(ctx, log, selectWorkspaceClick(selfExe, p.Layout.Dir()))
+	notifierApp := desktopnotify.NewApp(log, desktopnotify.AppAnswerBound)
+	backend, backendErr := resolveBannerBackend(log, notifierApp)
 	chime, chimeErr := resolveChime(log)
 	clicks := &clickForwarder{}
 	// A MADE BANNER IS READ ALOUD with persistent wifi mode on and a private
@@ -2019,6 +2022,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			Focus:             focus,
 			Emacs:             p.Metrics,
 			Banners:           notifier,
+			NotifierApp:       notifierApp,
 			PersistentWifi:    wifi,
 			HiddenKeepalives:  cacheKeeper,
 			KeepLives:         cacheKeeper,

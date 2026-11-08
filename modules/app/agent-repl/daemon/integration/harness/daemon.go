@@ -505,9 +505,13 @@ type Daemon struct {
 	// Services is this platform's fake service manager
 	// (NewFakeServiceManager); PlatformServiceVerbs names its verbs.
 	Services *Recorder
-	// Notifier records every desktop banner the daemon posted
-	// (AGENT_REPL_NOTIFIER_CMD), so no test ever raises a real one.
+	// Notifier records every desktop banner the daemon posted through the
+	// platform's banner program (AGENT_REPL_NOTIFIER_CMD, Linux), so no test
+	// ever raises a real one.
 	Notifier *Recorder
+	// NotifierApp is the fake Zettel app every macOS banner is handed to,
+	// attached once the daemon serves. Nil elsewhere.
+	NotifierApp *FakeNotifierApp
 	// Chime records every banner chime the daemon rang
 	// (AGENT_REPL_CHIME_CMD), so no test ever plays a real sound.
 	Chime *Recorder
@@ -1076,6 +1080,11 @@ func StartDaemon(t testing.TB, opts Opts) *Daemon {
 		d.PrivateAddr = AddrAdvertisement(d.awaitFile(d.AddrFile())).Daemon()
 		d.dial(opts.JSONCodec)
 		d.awaitServing()
+		// ON MACOS THE ZETTEL APP POSTS EVERY BANNER, over its own stream: the
+		// fake one attaches before the test acts, so every banner reaches it.
+		if runtime.GOOS == "darwin" {
+			d.NotifierApp = StartFakeNotifierApp(t, d.ctx, d.client)
+		}
 	}
 	return d
 }

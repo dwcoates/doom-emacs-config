@@ -56,21 +56,12 @@ func noLookPath(string) (string, error) { return "", errors.New("not on PATH") }
 
 func onPath(name string) (string, error) { return "/usr/bin/" + name, nil }
 
-// clickCommand is the fixture's click action: it names the target so a test
-// can see which workspace the stored command selects.
-func clickCommand(target Target) string {
-	return "select " + string(target.ID) + " in " + target.Dir
-}
-
 // target is the fixture's banner target.
 var target = Target{ID: "ws1", Dir: "/work/ws1"}
 
-// version3 is what terminal-notifier 3.1.0 answers -version with.
-const version3 = "terminal-notifier 3.1.0.\n"
-
 func mustPlatform(t *testing.T, goos string) Platform {
 	t.Helper()
-	p, err := PlatformFor(goos, clickCommand)
+	p, err := PlatformFor(goos)
 	if err != nil {
 		t.Fatalf("PlatformFor(%s): %v", goos, err)
 	}
@@ -82,13 +73,12 @@ func TestPlatformForNamesEachPlatformsProgram(t *testing.T) {
 		goos string
 		want string
 	}{
-		{goos: "darwin", want: "terminal-notifier"},
 		{goos: "linux", want: "notify-send"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.goos, func(t *testing.T) {
 			// Act
-			p, err := PlatformFor(tc.goos, clickCommand)
+			p, err := PlatformFor(tc.goos)
 
 			// Assert
 			if err != nil {
@@ -101,31 +91,23 @@ func TestPlatformForNamesEachPlatformsProgram(t *testing.T) {
 	}
 }
 
-func TestPlatformForRefusesAnUnsupportedPlatform(t *testing.T) {
-	// Act
-	_, err := PlatformFor("windows", clickCommand)
+func TestPlatformForRefusesAPlatformWithNoBannerProgram(t *testing.T) {
+	for _, goos := range []string{"windows", "darwin"} {
+		t.Run(goos, func(t *testing.T) {
+			// Act
+			_, err := PlatformFor(goos)
 
-	// Assert
-	if err == nil {
-		t.Fatal("an unsupported platform was given a banner program")
+			// Assert
+			if err == nil {
+				t.Fatalf("%s was given a banner program; macOS banners are the Zettel app's and Windows has none", goos)
+			}
+		})
 	}
-}
-
-func TestPlatformForRefusesAMacOSBannerWithNoClickAction(t *testing.T) {
-	// Assert
-	defer func() {
-		if recover() == nil {
-			t.Fatal("a macOS banner was built with no click action")
-		}
-	}()
-
-	// Act
-	_, _ = PlatformFor("darwin", nil)
 }
 
 func TestNewBackendTakesTheOverride(t *testing.T) {
 	// Act
-	b, err := NewBackend(context.Background(), mustPlatform(t, "darwin"), "/tmp/fake-notifier", noLookPath, &fakeRunner{stdout: version3})
+	b, err := NewBackend(mustPlatform(t, "linux"), "/tmp/fake-notifier", noLookPath, &fakeRunner{})
 
 	// Assert
 	if err != nil {
@@ -138,7 +120,7 @@ func TestNewBackendTakesTheOverride(t *testing.T) {
 
 func TestNewBackendLooksTheProgramUpOnPath(t *testing.T) {
 	// Act
-	b, err := NewBackend(context.Background(), mustPlatform(t, "linux"), "", onPath, &fakeRunner{})
+	b, err := NewBackend(mustPlatform(t, "linux"), "", onPath, &fakeRunner{})
 
 	// Assert
 	if err != nil {
@@ -151,7 +133,7 @@ func TestNewBackendLooksTheProgramUpOnPath(t *testing.T) {
 
 func TestNewBackendRefusesAMissingProgram(t *testing.T) {
 	// Act
-	_, err := NewBackend(context.Background(), mustPlatform(t, "darwin"), "", noLookPath, &fakeRunner{stdout: version3})
+	_, err := NewBackend(mustPlatform(t, "linux"), "", noLookPath, &fakeRunner{})
 
 	// Assert
 	if err == nil {
@@ -159,100 +141,10 @@ func TestNewBackendRefusesAMissingProgram(t *testing.T) {
 	}
 }
 
-func TestNewBackendChecksTheMinimumVersion(t *testing.T) {
-	cases := []struct {
-		name    string
-		stdout  string
-		err     error
-		wantErr string
-	}{
-		{name: "version 3 is accepted", stdout: version3},
-		{name: "a later major is accepted", stdout: "terminal-notifier 4.0.2."},
-		{name: "version 2 is refused", stdout: "terminal-notifier 2.0.0.",
-			wantErr: `the banner program /usr/bin/terminal-notifier is version 2, older than the 3 this platform needs: "terminal-notifier 2.0.0."`},
-		{name: "an answer with no version is refused", stdout: "usage: terminal-notifier",
-			wantErr: `the banner program /usr/bin/terminal-notifier answered no version: "usage: terminal-notifier"`},
-		{name: "a failed query is refused", err: errors.New("exit status 1"),
-			wantErr: "ask the banner program /usr/bin/terminal-notifier its version: exit status 1"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			// Arrange
-			runner := &fakeRunner{stdout: tc.stdout, err: tc.err}
-
-			// Act
-			_, err := NewBackend(context.Background(), mustPlatform(t, "darwin"), "", onPath, runner)
-
-			// Assert
-			if !reflect.DeepEqual(runner.args, []string{"-version"}) {
-				t.Fatalf("asked the version with %q, want -version", runner.args)
-			}
-			if tc.wantErr == "" {
-				if err != nil {
-					t.Fatalf("NewBackend: %v", err)
-				}
-				return
-			}
-			if err == nil || err.Error() != tc.wantErr {
-				t.Fatalf("err = %v, want %q", err, tc.wantErr)
-			}
-		})
-	}
-}
-
-func TestNewBackendAsksNoVersionOfAProgramWithNoMinimum(t *testing.T) {
-	// Arrange
-	runner := &fakeRunner{}
-
-	// Act
-	_, err := NewBackend(context.Background(), mustPlatform(t, "linux"), "", onPath, runner)
-
-	// Assert
-	if err != nil || runner.args != nil {
-		t.Fatalf("NewBackend = %v after running %q, want no version query", err, runner.args)
-	}
-}
-
-func TestTerminalNotifierBackendSpeaksTerminalNotifiersArgv(t *testing.T) {
-	cases := []struct {
-		name   string
-		banner Banner
-		want   []string
-	}{
-		{name: "a banner carries no sound of its own", banner: Banner{Title: "T", Body: "B"}, want: []string{
-			"-title", `\T`, "-message", `\B`,
-			"-group", `\agent-repl:ws1`, "-activate", EmacsBundleID, "-execute", `\select ws1 in /work/ws1`}},
-		{name: "a value NSUserDefaults would parse stays text", banner: Banner{Title: "[ws] {x}", Body: `"quoted" (y)`}, want: []string{
-			"-title", `\[ws] {x}`, "-message", `\"quoted" (y)`,
-			"-group", `\agent-repl:ws1`, "-activate", EmacsBundleID, "-execute", `\select ws1 in /work/ws1`}},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			// Arrange
-			runner := &fakeRunner{stdout: version3}
-			b, err := NewBackend(context.Background(), mustPlatform(t, "darwin"), "", onPath, runner)
-			if err != nil {
-				t.Fatalf("NewBackend: %v", err)
-			}
-
-			// Act
-			_, err = b.Post(context.Background(), target, tc.banner, func() {})
-
-			// Assert
-			if err != nil {
-				t.Fatalf("Post: %v", err)
-			}
-			if runner.bin != "/usr/bin/terminal-notifier" || !reflect.DeepEqual(runner.args, tc.want) {
-				t.Fatalf("ran %s %q, want /usr/bin/terminal-notifier %q", runner.bin, runner.args, tc.want)
-			}
-		})
-	}
-}
-
 func TestNotifySendBackendSpeaksNotifySendsArgv(t *testing.T) {
 	// Arrange
 	runner := &fakeRunner{}
-	b, _ := NewBackend(context.Background(), mustPlatform(t, "linux"), "", onPath, runner)
+	b, _ := NewBackend(mustPlatform(t, "linux"), "", onPath, runner)
 
 	// Act
 	_, err := b.Post(context.Background(), target, Banner{Title: "T", Body: "B"}, func() {})
@@ -274,16 +166,14 @@ func TestBackendReadsTheOutcome(t *testing.T) {
 		stdout string
 		want   Outcome
 	}{
-		{name: "a macOS banner is handed whatever the program prints", goos: "darwin", stdout: version3, want: Handed},
-		{name: "a macOS banner is handed when the program prints nothing", goos: "darwin", stdout: "", want: Handed},
 		{name: "notify-send action", goos: "linux", stdout: "default\n", want: Clicked},
 		{name: "notify-send dismissed", goos: "linux", stdout: "", want: Unclicked},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange
-			runner := &fakeRunner{stdout: version3}
-			b, err := NewBackend(context.Background(), mustPlatform(t, tc.goos), "", onPath, runner)
+			runner := &fakeRunner{}
+			b, err := NewBackend(mustPlatform(t, tc.goos), "", onPath, runner)
 			if err != nil {
 				t.Fatalf("NewBackend: %v", err)
 			}
@@ -306,8 +196,8 @@ func TestBackendReadsTheOutcome(t *testing.T) {
 func TestBackendSurfacesAFailedProgram(t *testing.T) {
 	// Arrange
 	cause := errors.New("exit status 3: notifications are not authorized")
-	runner := &fakeRunner{stdout: version3}
-	b, err := NewBackend(context.Background(), mustPlatform(t, "darwin"), "", onPath, runner)
+	runner := &fakeRunner{}
+	b, err := NewBackend(mustPlatform(t, "linux"), "", onPath, runner)
 	if err != nil {
 		t.Fatalf("NewBackend: %v", err)
 	}
@@ -323,9 +213,8 @@ func TestBackendSurfacesAFailedProgram(t *testing.T) {
 }
 
 // TestBackendReportsTheBannerMadeExactlyWhenItIsMade pins the made edge the
-// chime rings from: a handed banner is made once its program exits cleanly, a
-// read-back banner once its program is up showing it, and a banner whose
-// program failed or never started is never made.
+// chime rings from: a read-back banner is made once its program is up showing
+// it, and a banner whose program never started is never made.
 func TestBackendReportsTheBannerMadeExactlyWhenItIsMade(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -335,16 +224,14 @@ func TestBackendReportsTheBannerMadeExactlyWhenItIsMade(t *testing.T) {
 		wantMade  bool
 		wantAfter bool
 	}{
-		{name: "a handed banner is made once its program exits", goos: "darwin", wantMade: true, wantAfter: true},
-		{name: "a handed banner whose program failed is not made", goos: "darwin", err: errors.New("exit status 1")},
 		{name: "a read-back banner is made once its program is up", goos: "linux", wantMade: true, wantAfter: false},
 		{name: "a read-back banner whose program never started is not made", goos: "linux", startErr: errors.New("exec: no such file")},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange
-			runner := &fakeRunner{stdout: version3}
-			b, err := NewBackend(context.Background(), mustPlatform(t, tc.goos), "", onPath, runner)
+			runner := &fakeRunner{}
+			b, err := NewBackend(mustPlatform(t, tc.goos), "", onPath, runner)
 			if err != nil {
 				t.Fatalf("NewBackend: %v", err)
 			}
@@ -367,31 +254,6 @@ func TestBackendReportsTheBannerMadeExactlyWhenItIsMade(t *testing.T) {
 			}
 			if tc.wantMade && madeAfterExit != tc.wantAfter {
 				t.Fatalf("made after the program exited = %v, want %v", madeAfterExit, tc.wantAfter)
-			}
-		})
-	}
-}
-
-func TestFirstNumber(t *testing.T) {
-	cases := []struct {
-		in     string
-		want   int
-		wantOK bool
-	}{
-		{in: "terminal-notifier 3.1.0.", want: 3, wantOK: true},
-		{in: "12", want: 12, wantOK: true},
-		{in: "v10.2", want: 10, wantOK: true},
-		{in: "no digits", wantOK: false},
-		{in: "", wantOK: false},
-	}
-	for _, tc := range cases {
-		t.Run(tc.in, func(t *testing.T) {
-			// Act
-			got, ok := firstNumber(tc.in)
-
-			// Assert
-			if got != tc.want || ok != tc.wantOK {
-				t.Fatalf("firstNumber(%q) = (%d, %v), want (%d, %v)", tc.in, got, ok, tc.want, tc.wantOK)
 			}
 		})
 	}
@@ -433,7 +295,7 @@ func TestResolveProgram(t *testing.T) {
 // resolveProgram's rule: a missing one is refused with its role named.
 func TestBannerAndChimeResolveThroughOneHelper(t *testing.T) {
 	// Act
-	_, bannerErr := NewBackend(context.Background(), mustPlatform(t, "darwin"), "", noLookPath, &fakeRunner{})
+	_, bannerErr := NewBackend(mustPlatform(t, "linux"), "", noLookPath, &fakeRunner{})
 	_, chimeErr := NewChime(mustChimePlatform(t, "darwin"), "", noLookPath, &fakeRunner{})
 
 	// Assert
