@@ -193,3 +193,15 @@ func TestPlanUsageFilesEachWindowUnderItsOwnField(t *testing.T) {
 		t.Fatalf("plan usage = %+v, want seven_day and opus as given and sonnet unset", got)
 	}
 }
+
+// A PLAN-USAGE READ HAS ONE SPELLING in the daemon's tests, as an event does:
+// a test file that builds one by hand fails here.
+func TestNoTestHandRollsAPlanUsageRead(t *testing.T) {
+	// Act
+	offenders := offendingTestFiles(t, "SessionUpdate_PlanUsage{", "SessionPlanUsageWindow{")
+
+	// Assert
+	if len(offenders) != 0 {
+		t.Fatalf("test files build a plan-usage read by hand instead of through ratelimittest.PlanUsage: %v", offenders)
+	}
+}

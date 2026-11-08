@@ -7,7 +7,9 @@
 // under that window alone (ladder.RateLimitRejections, the footer's
 // allowances). So every fixture names its window through these builders
 // rather than spelling the oneof by hand, and a test file that hand-rolls a
-// window is refused (TestNoTestHandRollsARateLimitWindow).
+// window is refused (TestNoTestHandRollsARateLimitWindow). The account's
+// plan-usage read, which figures the same weekly windows, is built here too
+// (PlanUsage, TestNoTestHandRollsAPlanUsageRead).
 package ratelimittest
 
 import (
