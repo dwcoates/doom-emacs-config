@@ -401,7 +401,7 @@ func TestFooterAllowanceDrawnFromARateLimitEvent(t *testing.T) {
 	f.shim.PushSessionUpdate(ratelimittest.Update(status))
 
 	// Assert: the weekly allowance carries the event's figure, reset and
-	// verdict: the account's usage is never sampled, so the event is the one
+	// verdict: no plan-usage read is pushed here, so the event is the one
 	// source of all three.
 	got := awaitFooter(t, f, footer, "the weekly allowance drawn from the event", func(v *frontendv1.FooterView) bool {
 		return v.GetStrip().GetStatus().GetIdle().GetActivity().GetUnpinned().GetEnduring().GetUsage().GetWeekly().GetOverall().GetAllowed() != nil

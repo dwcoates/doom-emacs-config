@@ -867,10 +867,11 @@ Rulings already binding; code swaps to the generated arms when it lands:
 
 ## FooterAllowance sourcing (project lead ruling, supersedes the landing-4 adaptation)
 
-- The account's usage is never sampled (2026-10-30), and the
-  `conversation.v1.SessionUpdate.account_usage` arm is retired with it (tag 6
-  reserved). FIGURES (utilization, resets_at) come from the rate-limit
-  event's own: seven_day → `weekly.overall`,
+- The `conversation.v1.SessionUpdate.account_usage` arm is retired (tag 6
+  reserved, 2026-10-30). FIGURES (utilization, resets_at) come from the
+  newer of the rate-limit event's own and the plan-usage read's
+  (`conversation.v1.SessionUpdate.plan_usage`, 2026-11-08, which retires a
+  weekly window it leaves unset): seven_day → `weekly.overall`,
   seven_day_opus → `weekly.models.opus`, seven_day_sonnet →
   `weekly.models.sonnet`, overage → `overage`. The five-hour window is not
   drawn (owner ruling, 2026-10-30) and has no slot in the footer's state or

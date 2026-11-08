@@ -2331,7 +2331,9 @@ message FooterActivityEnduringUnobserved {}
 
 // The account's usage allowances. The vendor bills independent allowances
 // (seven-day weekly, and an overage window beyond them); every figure its
-// rate-limit events report is shown, WHETHER OR NOT any is near its limit, so
+// rate-limit events and the account's plan-usage reads
+// (conversation.v1.SessionPlanUsage) report is shown, WHETHER OR NOT any is
+// near its limit, so
 // the reader always knows how close the account is. SET only when at least
 // one of its elements is.
 message FooterActivityEnduringUsage {
@@ -2350,7 +2352,8 @@ message FooterActivityEnduringUsage {
   // never drawn.
   optional FooterWeeklyAllowance weekly = 6;
   // Tag 3 (`sample`, what the newest account-usage sample managed to read)
-  // is RETIRED: the account's usage is never sampled.
+  // is RETIRED: the plan-usage read (conversation.v1.SessionPlanUsage)
+  // figures the weekly windows themselves, and carries no outcome of its own.
   reserved 3;
   reserved "sample";
   // The overage allowance — the window the vendor bills BEYOND the weekly

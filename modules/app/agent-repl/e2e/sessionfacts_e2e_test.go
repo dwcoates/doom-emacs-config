@@ -34,7 +34,8 @@
 //     names, and no salient line stands. `!rate-limit-seven-day` and
 //     `!rate-limit` each send an `allowed_warning`, so each draws that
 //     verdict on its allowance. The five-hour window is not drawn (owner
-//     ruling, 2026-10-30), and the account's usage is never sampled.
+//     ruling, 2026-10-30). The fake's plan-usage read follows the events it
+//     emitted, so the turn-end read restates the event's figure.
 //
 // Every scenario here runs against the scripted fake git (harness.NewRepo)
 // and the fake-SDK vendor inside the real shim: no real git, no vendor

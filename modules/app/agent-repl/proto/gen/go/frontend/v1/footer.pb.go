@@ -13032,7 +13032,9 @@ func (*FooterActivityEnduringUnobserved) Descriptor() ([]byte, []int) {
 
 // The account's usage allowances. The vendor bills independent allowances
 // (seven-day weekly, and an overage window beyond them); every figure its
-// rate-limit events report is shown, WHETHER OR NOT any is near its limit, so
+// rate-limit events and the account's plan-usage reads
+// (conversation.v1.SessionPlanUsage) report is shown, WHETHER OR NOT any is
+// near its limit, so
 // the reader always knows how close the account is. SET only when at least
 // one of its elements is.
 type FooterActivityEnduringUsage struct {

@@ -3124,12 +3124,16 @@ drawn by every workspace on the account at once. Each change is kept in the
 state store's `account_usage` table (created at layout 24; layout 91 dropped
 the columns nothing produces) and read back at boot, so a
 restarted daemon draws the last figures before any session speaks. THE
-ACCOUNT'S USAGE IS NEVER SAMPLED (2026-10-30): a per-session sample of the
-vendor's experimental usage verb cost each idle session's CLI about 18
-CPU-seconds every five minutes. The figures are the vendor's rate-limit
-events, which state a window's utilization only near that window's limit, so
-a weekly figure is drawn once the account nears it. The five-hour window is
-not drawn (owner ruling, 2026-10-30: the plan has none).
+FIGURES ARE THE PLAN-USAGE READS AND THE RATE-LIMIT EVENTS (2026-11-08), the
+newer drawn. Each session reads the vendor's usage verb with its transcript
+scan skipped once it is up and at every turn end
+(`conversation.v1.SessionUpdate.plan_usage`), which states every weekly
+window whatever its figure; the rate-limit events state a window's
+utilization only near its limit, and alone carry its verdict. The retired
+sample (2026-10-30) left the scan on, which is what cost each idle session's
+CLI about 18 CPU-seconds every five minutes, and with only the events left a
+weekly figure stood as "reset since last seen" most of the week. The
+five-hour window is not drawn (owner ruling, 2026-10-30: the plan has none).
 
 **A TIMER MAY END ONLY A TRANSIENT.** A salient line with no clearing
 event is a missing end signal, and the fix is the end signal, not an expiry.
