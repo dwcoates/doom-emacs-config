@@ -198,11 +198,12 @@ with (`agent-repl-window--layout-parameters').  WS names the workspace
 for the record only."
   (agent-repl-window--with-layout-parameters
    (lambda () (set-window-configuration config)))
-  (agent-repl--log (agent-repl--ws-log-scope (or ws (agent-repl--ws-current-name)))
-                   "window--restore-configuration: frame=%S windows=%d selected=%S"
-                   (window-configuration-frame config)
-                   (length (window-list (window-configuration-frame config) 'nomini))
-                   (selected-window))
+  ;; The record reads the frame the restore left selected, never CONFIG:
+  ;; CONFIG is opaque to everything but `set-window-configuration'.
+  (let ((frame (selected-frame)))
+    (agent-repl--log (agent-repl--ws-log-scope (or ws (agent-repl--ws-current-name)))
+                     "window--restore-configuration: frame=%S windows=%d selected=%S"
+                     frame (length (window-list frame 'nomini)) (selected-window)))
   t)
 
 ;;;; --- Per-window hardening ----------------------------------------------

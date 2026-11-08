@@ -4747,8 +4747,10 @@ it is covered by the mount, not by the user's work."
 (ert-deftest agent-repl-test-panels-every-mount-saves-through-the-one-helper ()
   "No mount site records `:fullscreen-config' by hand.
 The layout under the mount is saved by `agent-repl--save-pre-panel-layout'
-alone; a site writing `current-window-configuration' into the key itself
-would save whatever the mount had already put on the frame."
+alone; a site writing a configuration into the key itself would save
+whatever the mount had already put on the frame.  The helper saves through
+`agent-repl-window--save-configuration', which keeps the side and panel
+window parameters a restore must put back."
   (let ((dir agent-repl-test-panels--dir))
     (dolist (file '("frontend.el" "open-progress.el" "panels.el"))
       (with-temp-buffer
@@ -4756,7 +4758,7 @@ would save whatever the mount had already put on the frame."
         (goto-char (point-min))
         (let ((hits 0))
           (while (re-search-forward
-                  ":fullscreen-config (current-window-configuration)" nil t)
+                  ":fullscreen-config (agent-repl-window--save-configuration)" nil t)
             (setq hits (1+ hits)))
           (should (= hits (if (equal file "panels.el") 1 0))))))))
 
