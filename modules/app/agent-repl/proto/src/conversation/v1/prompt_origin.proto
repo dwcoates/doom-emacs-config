@@ -256,4 +256,10 @@ enum PromptOrigin {
   // were removed, and the new head, since the subscriber was last told.
   // Submitted and drawn as a workspace notice is: no row, no held card.
   PROMPT_ORIGIN_GITHUB_MERGE_QUEUE_NOTICE = 50;
+  // The outcome of a shell command a person ran from a bubble's code block
+  // run control, sent to that workspace's agent once the command exited
+  // (success or failure alike): the command's output when it is short, or the
+  // path of a file holding it, its size and the exit status when it is long.
+  // Its one Emacs send site is `agent-repl-terminal-finished`.
+  PROMPT_ORIGIN_COMMAND_TERMINAL_OUTPUT = 51;
 }
