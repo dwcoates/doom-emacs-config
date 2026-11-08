@@ -292,6 +292,12 @@ var Suites = []Suite{
 	{Name: "profile-agent-repl-harness", Kind: Script, Path: "bin/test-profile-agent-repl.sh", Harness: true, Reuse: scripts(moduleScripts, "proto/vocab/")},
 	{Name: "metrics-skill-harness", Kind: Script, Path: "skills/agent-repl-metrics/test-run.sh", Reuse: scripts(moduleScripts, "skills/agent-repl-metrics/", "proto/vocab/latencies.json")},
 	{Name: "gns-auth-renew-skill-harness", Kind: Script, Path: "skills/gns-auth-renew/test-run.sh", Reuse: scripts(moduleScripts, "skills/gns-auth-renew/")},
+	// The Zettel notifier app (notifier/, Swift): its XCTest cases through
+	// SwiftPM. It reads its generated bindings and the shared timestamp
+	// contract from outside its package.
+	{Name: "notifier", Kind: Script, Path: "notifier/test.sh",
+		Reuse: &Reuse{Inputs: []string{"notifier/", "proto/gen/swift/", "proto/vocab/"},
+			Generated: []string{"notifier/.build/"}}},
 	{Name: "go-deps-harness", Kind: Script, Path: "bin/test-check-go-deps.sh", Harness: true, Reuse: harness("bin/", ".")},
 	{Name: "personal-values-harness", Kind: Script, Path: "bin/test-check-personal-values.sh", Harness: true, NeverReused: "it walks the whole module for every personal value a tracked file may carry"},
 	{Name: "realtest-harness", Kind: Script, Path: "bin/test-realtest.sh", Harness: true, Reuse: scripts(moduleScripts, "e2e/realtest/")},
