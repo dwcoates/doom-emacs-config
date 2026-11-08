@@ -392,6 +392,11 @@ Answers the outcomes, newest first: (dropped) or (kept WHY)."
       (should-error (agent-repl-page-unload-bucket :never-seen))
       (should (seq-some (lambda (text) (string-search "unknown-status arm=:never-seen" text)) errors)))))
 
+(ert-deftest agent-repl-test-pu-a-silent-vendor-is-working ()
+  "A turn whose vendor has gone silent still runs, so its page is held."
+  ;; Act / Assert
+  (should (eq (agent-repl-page-unload-bucket :vendor-silent) 'working)))
+
 (ert-deftest agent-repl-test-pu-no-status-has-no-bucket ()
   "A workspace with no roster row yet is in no bucket."
   (should-not (agent-repl-page-unload-bucket nil)))

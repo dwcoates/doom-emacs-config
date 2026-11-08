@@ -230,7 +230,8 @@ the same push as `agent-repl-roster--tab-order'.")
 ;;;; ---- The status vocabulary --------------------------------------------
 
 (defconst agent-repl-roster-running-statuses
-  '(:submitting :thinking :clearing :compacting :permission :question :waiting)
+  '(:submitting :thinking :vendor-silent :clearing :compacting :permission
+    :question :waiting)
   "The RUNNING half of the finish edge — the agent holds the turn.
 A permission or question gate is RUNNING: the turn has not ended, it is
 waiting on the user, so permission -> thinking is a move within this set

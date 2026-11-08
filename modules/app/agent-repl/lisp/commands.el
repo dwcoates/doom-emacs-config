@@ -1552,7 +1552,8 @@ neighbours (`agent-repl--step-workspace')."
   (interactive)
   (agent-repl--workspace-cycle 1))
 
-(defconst agent-repl--working-states '(:thinking :submitting :clearing :compacting)
+(defconst agent-repl--working-states
+  '(:thinking :vendor-silent :submitting :clearing :compacting)
   "Roster status arms that paint a tab red: a turn is running in the workspace.")
 
 (defconst agent-repl--recently-prompted-seconds 900

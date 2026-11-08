@@ -553,6 +553,12 @@ repeated field: absent (protojson omits an empty list) decodes to nil."
   "Decode VALUE as the empty `RosterRowStatusThinking'."
   (agent-repl-wire--decode-empty "RosterRowStatusThinking" value))
 
+(defun agent-repl-wire-decode-roster-row-status-vendor-silent (value)
+  "Decode VALUE as the empty `RosterRowStatusVendorSilent'.
+A turn runs but the vendor has been silent past the daemon's
+vendor-silence threshold: the footer's `working · waiting' step."
+  (agent-repl-wire--decode-empty "RosterRowStatusVendorSilent" value))
+
 (defun agent-repl-wire-decode-roster-row-status-clearing (value)
   "Decode VALUE as the empty `RosterRowStatusClearing'."
   (agent-repl-wire--decode-empty "RosterRowStatusClearing" value))
@@ -687,6 +693,8 @@ The session is parked on its cold gate's answer."
 (defconst agent-repl-wire-roster-row-status-arms
   '((submitting :submitting agent-repl-wire-decode-roster-row-status-submitting)
     (thinking :thinking agent-repl-wire-decode-roster-row-status-thinking)
+    (vendorSilent :vendor-silent
+                  agent-repl-wire-decode-roster-row-status-vendor-silent)
     (clearing :clearing agent-repl-wire-decode-roster-row-status-clearing)
     (compacting :compacting agent-repl-wire-decode-roster-row-status-compacting)
     (permission :permission agent-repl-wire-decode-roster-row-status-permission)

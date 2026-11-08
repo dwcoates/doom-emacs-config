@@ -145,8 +145,8 @@ back within it keeps the page; leaving again starts it afresh."
   "The buckets held only while shown however recently their last turn ended.")
 
 (defconst agent-repl-page-unload-buckets
-  '((working :submitting :thinking :clearing :compacting :permission :question
-             :idle-async :api-retrying)
+  '((working :submitting :thinking :vendor-silent :clearing :compacting
+             :permission :question :idle-async :api-retrying)
     (idle :ready :done :interrupted :none)
     (merging :merging :merge-queued)
     (faulted :vendor-blocked :vendor-fault :network-fault :severed :start-failed

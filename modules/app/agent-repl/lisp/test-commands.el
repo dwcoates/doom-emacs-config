@@ -1373,6 +1373,12 @@ CURRENT is shown.  Binds `requests' to the (WS TRIGGER) pairs requested."
     (agent-repl-switch-working-right)
     (should (equal agent-repl-test-commands--switched "d"))))
 
+(ert-deftest agent-repl-test-commands-switch-working-lands-on-a-silent-vendor ()
+  "A tab whose vendor went silent is still working: the walk lands on it."
+  (agent-repl-test-commands--with-working '(("a" . :thinking) ("b" . :done) ("c" . :vendor-silent)) "a"
+    (agent-repl-switch-working-right)
+    (should (equal agent-repl-test-commands--switched "c"))))
+
 (ert-deftest agent-repl-test-commands-switch-working-left-wraps ()
   "`M-s-[' from the first working tab wraps to the last."
   (agent-repl-test-commands--with-working '(("b" . :thinking) ("d" . :submitting)) "b"
