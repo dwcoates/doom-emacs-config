@@ -233,6 +233,9 @@ export function armMotion(arm: RosterStatusCase): MarkMotion {
   switch (arm) {
     case "submitting":
     case "thinking":
+    // A SILENT VENDOR still breathes (owner ruling, 2026-11-08): the turn is
+    // still trying, though its dot is inked blue.
+    case "vendorSilent":
     case "clearing":
     case "compacting":
     case "idleAsync":

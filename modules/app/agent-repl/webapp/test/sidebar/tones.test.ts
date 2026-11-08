@@ -111,6 +111,17 @@ describe("the status mark", () => {
     expect(rosterArmMark("compacting")).toEqual({ toneClass: "tone-red", glyph: "dot", image: "", ink: "orange", motion: "breathes" });
   });
 
+  // THE VENDOR-SILENT HYBRID (owner ruling, 2026-11-08): progress is still
+  // attempted, so the workspace stays red and breathes; the session may
+  // detach, so its dot is inked blue.
+  it("draws a silent vendor as a breathing red workspace with a blue dot", () => {
+    expect(rosterArmMark("vendorSilent")).toEqual({ toneClass: "tone-red", glyph: "dot", image: "", ink: "blue", motion: "breathes" });
+  });
+
+  it("keeps a silent vendor's blue dot on a one-shot, rather than the target", () => {
+    expect(rosterRowMark("vendorSilent", ONE_SHOT)).toEqual(rosterArmMark("vendorSilent"));
+  });
+
   it("draws a failed turn end as a turquoise dot", () => {
     expect(rosterArmMark("turnFailed")).toEqual({ toneClass: "tone-turquoise", glyph: "dot", image: "", ink: undefined, motion: "still" });
   });
@@ -156,7 +167,7 @@ describe("the status mark", () => {
 // ONE ANIMATION, ONE CLAIM (owner ruling, 2026-10-13): a breath is something
 // in progress; a gate or an interrupt landing waits on the user and is still.
 describe("the rail's one animation", () => {
-  it.each(["submitting", "thinking", "clearing", "compacting", "idleAsync", "init", "merging"] as const)(
+  it.each(["submitting", "thinking", "vendorSilent", "clearing", "compacting", "idleAsync", "init", "merging"] as const)(
     "breathes on %s",
     (arm) => {
       expect(armMotion(arm)).toBe("breathes");
