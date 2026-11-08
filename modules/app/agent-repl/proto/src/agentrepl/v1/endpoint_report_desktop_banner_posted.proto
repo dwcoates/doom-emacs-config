@@ -1,0 +1,80 @@
+// endpoint_report_desktop_banner_posted.proto — ReportDesktopBannerPosted:
+// the notifier app answers whether the platform took one banner it was
+// handed. DESKTOP NOTIFIER section.
+//
+// The app calls it exactly once per banner WatchDesktopBanners hands it, as
+// soon as macOS's notification center accepts or refuses the banner. The
+// daemon rings the banner's chime and holds it for a focus gain's claim only
+// once it is POSTED, so a banner the platform refused never makes a sound or
+// steers the user anywhere. A post that no answer reaches in time is recorded
+// as failed by the daemon; an answer arriving after that is refused with
+// `unknown_post`.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/desktop_banner.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message ReportDesktopBannerPostedRequest {
+  // The banner's post, exactly as WatchDesktopBanners handed it. REQUIRED.
+  DesktopBannerPostId post_id = 1;
+  // What the platform did with it. REQUIRED.
+  DesktopBannerPostOutcome outcome = 2;
+}
+
+// What the platform's notification center did with one banner.
+message DesktopBannerPostOutcome {
+  // THE ARM IS THE OUTCOME. REQUIRED — unset is InvalidArgument.
+  oneof outcome {
+    // The notification center accepted the banner. Whether macOS then shows
+    // it at once, or files it in Notification Center because a Focus is on,
+    // is the user's setting and not reported.
+    DesktopBannerPostOutcomePosted posted = 1;
+    // The user has not allowed Zettel to post notifications, so the banner
+    // was refused. Remedied only in System Settings → Notifications → Zettel.
+    DesktopBannerPostOutcomeNotAllowed not_allowed = 2;
+    // The notification center refused the banner for another reason.
+    DesktopBannerPostOutcomeFailed failed = 3;
+  }
+}
+
+// The notification center accepted the banner.
+message DesktopBannerPostOutcomePosted {}
+
+// The user has not allowed Zettel to post notifications.
+message DesktopBannerPostOutcomeNotAllowed {}
+
+// The notification center refused the banner for a reason other than
+// permission.
+message DesktopBannerPostOutcomeFailed {
+  // The platform's own description of the error, verbatim, for the record.
+  string platform_error = 1;
+}
+
+// THE ARM IS THE OUTCOME.
+message ReportDesktopBannerPostedResponse {
+  oneof result {
+    ReportDesktopBannerPostedSuccess success = 1;
+    ReportDesktopBannerPostedError error = 2;
+  }
+}
+
+// The daemon settled the post with the reported outcome.
+message ReportDesktopBannerPostedSuccess {}
+
+// Validation failures (an unset field or oneof) are Connect InvalidArgument,
+// never an arm.
+message ReportDesktopBannerPostedError {
+  // Why the answer was refused.
+  oneof cause {
+    // No post with that id awaits an answer on this daemon: it was already
+    // answered, its wait ran out, or another daemon handed it.
+    ReportDesktopBannerPostedUnknownPost unknown_post = 1;
+  }
+}
+
+// No post with the reported id awaits an answer on this daemon.
+message ReportDesktopBannerPostedUnknownPost {}

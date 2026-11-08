@@ -1,0 +1,66 @@
+// endpoint_watch_desktop_banners.proto — WatchDesktopBanners: the notifier
+// app's one standing stream, over which the daemon hands it each desktop
+// banner to post. DESKTOP NOTIFIER section.
+//
+// Zettel.app is the only caller. It is a resident background app (no window,
+// no Dock icon) that posts every agent-repl desktop banner through macOS's
+// notification center under its own name and icon. It opens this stream on
+// the daemon `daemon.addr` advertises, and opens it again whenever a new
+// daemon is advertised.
+//
+// ONE STREAM STANDS AT A TIME. A later stream SUPERSEDES an earlier one: the
+// earlier is told `superseded` and ended, so two app instances never both
+// post. While no stream stands, every banner the daemon wants is recorded as
+// unposted, with the reason, and none is queued for later: a banner is about
+// a moment, and a late one would steer the user to a stale workspace.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/daemon_stream_ending.proto";
+import "agentrepl/v1/desktop_banner.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// The app is connecting. The stream is daemon-scoped and the app is its only
+// kind of caller, so there is nothing to address.
+message WatchDesktopBannersRequest {
+  // The process holding the stream, for the daemon's record of which app
+  // instance posts its banners. REQUIRED.
+  DesktopNotifierProcess process = 1;
+}
+
+// The operating-system process the notifier app runs as.
+message DesktopNotifierProcess {
+  // Its pid on the daemon's host. Positive; anything else is
+  // InvalidArgument.
+  int32 pid = 1;
+}
+
+// One frame of the stream. THE ARM IS THE FRAME.
+message WatchDesktopBannersResponse {
+  // What this frame tells the app.
+  oneof frame {
+    // The FIRST frame: this stream now stands, and every banner the daemon
+    // wants from here on arrives on it.
+    WatchDesktopBannersAttached attached = 1;
+    // A banner to post now. The app answers it with exactly one
+    // ReportDesktopBannerPosted naming its post_id.
+    DesktopBanner banner = 2;
+    // A later stream took this one's place (another app instance connected).
+    // The LAST frame: the app holding this stream stops posting and exits.
+    WatchDesktopBannersSuperseded superseded = 3;
+    // The daemon is standing down in a planned exit and this is the stream's
+    // last frame; the app reattaches when the next daemon is advertised,
+    // without treating the end as a fault.
+    DaemonStreamEnding ending = 4;
+  }
+}
+
+// The stream stands: the daemon will hand this app its banners.
+message WatchDesktopBannersAttached {}
+
+// Another app instance's stream took this one's place, so this stream ends
+// and its app exits rather than reconnecting and taking the place back.
+message WatchDesktopBannersSuperseded {}

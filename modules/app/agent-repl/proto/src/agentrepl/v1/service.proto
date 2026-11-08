@@ -161,6 +161,9 @@ import "agentrepl/v1/endpoint_validate_workspace_name.proto";
 import "agentrepl/v1/endpoint_list_creation_models.proto";
 import "agentrepl/v1/endpoint_watch_chat.proto";
 import "agentrepl/v1/endpoint_watch_daemon.proto";
+import "agentrepl/v1/endpoint_watch_desktop_banners.proto";
+import "agentrepl/v1/endpoint_report_desktop_banner_posted.proto";
+import "agentrepl/v1/endpoint_report_desktop_banner_clicked.proto";
 import "agentrepl/v1/endpoint_watch_feed.proto";
 import "agentrepl/v1/endpoint_watch_footer.proto";
 import "agentrepl/v1/endpoint_watch_host_workspace.proto";
@@ -605,6 +608,23 @@ service AgentRepl {
   // Turn persistent wifi mode (lid-closed operation) on, off, or over. See
   // endpoint_update_persistent_wifi_mode.proto.
   rpc UpdatePersistentWifiMode(UpdatePersistentWifiModeRequest) returns (UpdatePersistentWifiModeResponse);
+
+  // ---- DESKTOP NOTIFIER ----
+  // Zettel.app, the resident app that posts every desktop banner under its
+  // own name and icon: the stream it receives banners on, and its two
+  // answers about them.
+
+  // The notifier app's standing stream of banners to post. See
+  // endpoint_watch_desktop_banners.proto.
+  rpc WatchDesktopBanners(WatchDesktopBannersRequest) returns (stream WatchDesktopBannersResponse);
+
+  // Whether the platform took one banner the stream handed the app. See
+  // endpoint_report_desktop_banner_posted.proto.
+  rpc ReportDesktopBannerPosted(ReportDesktopBannerPostedRequest) returns (ReportDesktopBannerPostedResponse);
+
+  // The user clicked a banner; Emacs selects its workspace. See
+  // endpoint_report_desktop_banner_clicked.proto.
+  rpc ReportDesktopBannerClicked(ReportDesktopBannerClickedRequest) returns (ReportDesktopBannerClickedResponse);
 
   // ---- HOST ----
 

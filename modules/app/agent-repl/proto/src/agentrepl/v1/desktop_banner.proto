@@ -1,0 +1,76 @@
+// desktop_banner.proto — the desktop banner the daemon hands its notifier
+// app (Zettel.app) to post, and the identities the app echoes back about it.
+// DESKTOP NOTIFIER section. Shared by WatchDesktopBanners (which carries each
+// banner), ReportDesktopBannerPosted (which answers whether one was posted)
+// and ReportDesktopBannerClicked (which reports one's click).
+//
+// THE DAEMON OWNS EVERY BANNER. It decides whether a banner is wanted (Emacs
+// unfocused), composes its text, and resolves what its click selects; the app
+// only posts what it is handed through the platform's notification center and
+// relays the two things only it can observe: whether the platform took the
+// banner, and the user's click on it.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// One banner for the app to post, as the user sees it, plus what the app
+// needs to replace an earlier one and to report back on it.
+message DesktopBanner {
+  // Which post this is, echoed on ReportDesktopBannerPosted so the daemon
+  // knows which of its waiting posts the answer settles. REQUIRED.
+  DesktopBannerPostId post_id = 1;
+  // The banner's first, bold line. REQUIRED, never empty.
+  DesktopBannerTitle title = 2;
+  // The banner's text below its title. REQUIRED, never empty.
+  DesktopBannerBody body = 3;
+  // The replacement group: a banner REPLACES the banner already shown with
+  // the same group, so one workspace never stacks a pile of stale banners.
+  // The app uses it as the platform notification's identifier. REQUIRED.
+  DesktopBannerGroup group = 4;
+  // What the banner's click selects, stored on the platform notification and
+  // echoed verbatim on ReportDesktopBannerClicked. REQUIRED.
+  DesktopBannerClickToken click = 5;
+}
+
+// The identity of one post, minted by the daemon per banner and unique for
+// the daemon's lifetime. Opaque to the app, which only echoes it.
+message DesktopBannerPostId {
+  // Increasing per post within one daemon process; never zero.
+  uint64 value = 1;
+}
+
+// The banner's title line, as macOS draws it in bold.
+message DesktopBannerTitle {
+  // The resolved title: a status mark and the workspace's name, or the
+  // workspace's name alone.
+  string text = 1;
+}
+
+// The banner's body text, as macOS draws it below the title.
+message DesktopBannerBody {
+  // The resolved body, plain text; macOS truncates it to the banner's lines.
+  string text = 1;
+}
+
+// The group banners of one subject share. Two banners with the same group
+// replace each other on the desktop and in Notification Center.
+message DesktopBannerGroup {
+  // Opaque to the app; the daemon keys it by workspace.
+  string id = 1;
+}
+
+// A TYPED ECHO TOKEN: what a banner's click selects. Minted by the daemon,
+// stored by the app on the platform notification as serialized bytes, and
+// returned unchanged when the user clicks the banner, however long after the
+// post and whichever daemon serves by then. It names the workspace rather
+// than a post, so a click on a banner a previous daemon posted still selects
+// its workspace on the daemon serving at the click.
+message DesktopBannerClickToken {
+  // The workspace the click selects.
+  workspace.v1.WorkspaceRef workspace = 1;
+}
