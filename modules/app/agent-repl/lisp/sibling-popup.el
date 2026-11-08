@@ -3,76 +3,57 @@
 ;;; Commentary:
 
 ;; Display-buffer helpers for "sibling" popups that should NOT span
-;; under the agent panels (the webview + input column on the right)
-;; when those panels are open.
+;; under the sidebar when the agent panels are open.
 ;;
-;; The Doom popup default for `:side 'bottom' uses a frame-wide side
-;; window, so a bottom popup (e.g. the normal `*doom:vterm*' opened by
-;; `SPC o t') spans the entire frame width — overlapping the agent
-;; view / input column on the right.
+;; With the panels open, the frame is the sidebar (a left side window,
+;; sidebar-view.el) beside the agent column: the feed's window over the
+;; composer's.  The Doom popup default for `:side 'bottom' is a
+;; frame-wide side window, and with `window-sides-vertical' nil a bottom
+;; side window runs under the left one, so a bottom popup (e.g. the
+;; `*doom:vterm*' opened by `SPC o t') would span under the sidebar too.
 ;;
 ;; `agent-repl-sibling-popup-display-fn' is a `display-buffer' action
-;; that, when agent panels are visible, instead splits BELOW the
-;; leftmost non-side, non-agent-panel "work" window.  The new popup
-;; window inherits the work window's column width, so it stops on the
-;; right edge of the work area rather than spanning under the agent.  When
-;; agent panels are NOT visible, it falls back to the standard Doom
-;; bottom side-window behavior so callers can install it as a
-;; drop-in replacement for `:side 'bottom'.
+;; that, when the agent view is visible, instead splits BELOW the agent
+;; column: the window holding the feed over the composer.  The new popup
+;; window inherits the column's width, so it sits under the composer
+;; alone and the sidebar keeps the frame's whole height.  When the agent
+;; panels are NOT visible, it falls back to the standard Doom bottom
+;; side-window behavior so callers can install it as a drop-in
+;; replacement for `:side 'bottom'.
 
 ;;; Code:
 
 (require 'cl-lib)
 
-(declare-function agent-repl-window--panel-buffer "window")
-(declare-function agent-repl-window--side-window-p "window")
+(declare-function agent-repl-window--panel-window "window")
 (declare-function agent-repl--ws-current-name "workspace")
 (declare-function agent-repl--log "core")
 (declare-function agent-repl--log-verbose "core")
 (declare-function +popup-display-buffer-stacked-side-window-fn "ext:popup")
 
 (defun agent-repl-sibling-popup--target-window (&optional frame ws)
-  "Return the work window to split below for a sibling bottom popup.
+  "Return the window to split below for a sibling bottom popup.
 
-Returns the leftmost live, non-side, non-agent-panel window on FRAME
-\(defaults to the selected frame\) when the agent view panel is
-visible — that is the work column whose width the popup should match.
+When WS's agent view is visible on FRAME \(defaults to the selected
+frame\), returns the agent column: the composer's window when it
+stands, else the view's (a standing gate hides the composer), widened
+to its parent when that parent stacks it vertically \(the feed over the
+composer\).  Splitting that window below puts the popup under the
+composer, as wide as the column, and never under the sidebar.
 
-Returns nil when agent panels are not visible, signalling to callers
+Returns nil when the agent view is not visible, signalling to callers
 that the default frame-wide bottom popup behavior should apply."
-  (let* ((view-buf (agent-repl-window--panel-buffer :view ws))
-         (view-win (and view-buf
-                        (buffer-live-p view-buf)
-                        (get-buffer-window view-buf frame))))
-    (agent-repl--log ws
-                     "sibling-popup target: frame=%S view-buffer=%S view-buffer-live=%s view-window=%S view-window-live=%s"
-                     frame view-buf (buffer-live-p view-buf) view-win
-                     (window-live-p view-win))
-    (when (window-live-p view-win)
-      (let* ((input-buf (agent-repl-window--panel-buffer :input ws))
-             (best nil)
-             (best-x most-positive-fixnum))
-        (dolist (win (window-list frame 'no-mini))
-          (let* ((buf (window-buffer win))
-                 (x (car (window-edges win nil nil t)))
-                 (is-side (agent-repl-window--side-window-p win))
-                 (is-agent (or (eq buf view-buf)
-                                (and input-buf (eq buf input-buf)))))
-            (agent-repl--log-verbose
-             ws
-             "sibling-popup target: candidate=%S buffer=%S x=%s side=%s agent=%s current-best=%S current-best-x=%s"
-             win buf x is-side is-agent best best-x)
-            (when (and (not is-side) (not is-agent) (< x best-x))
-              (setq best win
-                    best-x x)
-              (agent-repl--log ws
-                               "sibling-popup target: selected candidate=%S buffer=%S x=%s"
-                               best buf best-x))))
+  (let ((view-win (agent-repl-window--panel-window :view ws frame)))
+    (agent-repl--log ws "sibling-popup target: frame=%S view-window=%S" frame view-win)
+    (when view-win
+      (let* ((input-win (agent-repl-window--panel-window :input ws frame))
+             (anchor (or input-win view-win))
+             (stacked (window-combined-p anchor))
+             (target (if stacked (window-parent anchor) anchor)))
         (agent-repl--log ws
-                         "sibling-popup target: result=%S result-buffer=%S result-x=%s input-buffer=%S"
-                         best (and (window-live-p best) (window-buffer best))
-                         best-x input-buf)
-        best))))
+                         "sibling-popup target: result=%S input-window=%S anchor=%S stacked=%s"
+                         target input-win anchor stacked)
+        target))))
 
 (defun agent-repl-sibling-popup--popup-height (target alist &optional ws)
   "Compute the popup height in lines for TARGET window given ALIST.
@@ -102,7 +83,7 @@ at `window-min-height' so the split is always valid."
       height-lines)))
 
 (defun agent-repl-sibling-popup--fallback (buffer alist &optional ws)
-  "Fallback display when no claude work window is found.
+  "Fallback display when the agent view is not visible.
 Prefers `+popup-display-buffer-stacked-side-window-fn' (Doom's
 stacked-side-window helper) so vslot/slot semantics are preserved
 when the popup module is loaded; otherwise uses the plain
@@ -123,12 +104,12 @@ when the popup module is loaded; otherwise uses the plain
 
 ;;;###autoload
 (defun agent-repl-sibling-popup-display-fn (buffer alist)
-  "`display-buffer' action that respects claude panels for bottom popups.
+  "`display-buffer' action that keeps bottom popups out from under the sidebar.
 
-When the claude agent view panel is visible, splits BELOW the leftmost
-work (non-side, non-agent-panel) window and displays BUFFER there;
-the popup width matches the work column, leaving claude panels
-untouched.  When claude panels are absent, defers to the Doom
+When the agent view panel is visible, splits BELOW the agent column
+\(`agent-repl-sibling-popup--target-window') and displays BUFFER there;
+the popup sits under the composer, as wide as the column, leaving the
+sidebar its whole height.  When the agent panels are absent, defers to the Doom
 stacked-side-window action so the default frame-wide bottom-popup
 behavior is preserved.
 
@@ -138,9 +119,9 @@ vterm popup rule for the canonical caller."
   (let* ((ws (agent-repl--ws-current-name))
          (target (agent-repl-sibling-popup--target-window nil ws)))
     (agent-repl--log ws
-                     "sibling-popup display: buffer=%S alist=%S target=%S target-live=%s"
-                     buffer alist target (window-live-p target))
-    (if (window-live-p target)
+                     "sibling-popup display: buffer=%S alist=%S target=%S target-valid=%s"
+                     buffer alist target (window-valid-p target))
+    (if (window-valid-p target)
         (let* ((height-lines (agent-repl-sibling-popup--popup-height target alist ws))
                (new-win (split-window target (- height-lines) 'below)))
           (set-window-buffer new-win buffer)

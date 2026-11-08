@@ -38,6 +38,34 @@ isolation is preserved."
                   (_ nil)))))
      ,@body))
 
+;; The panels' layout: the sidebar, a left side window, beside the view over
+;; the input.  WORK, when non-nil, adds an editor window left of the view.
+(defmacro agent-repl-sibling-popup-test--with-panel-layout (work &rest body)
+  "Run BODY with the sidebar beside the view over the input, all mocked.
+Binds `side-win', `view-win', `input-win' and, when WORK is non-nil,
+`work-win', plus `view-buf' and `input-buf'; kills every buffer on exit."
+  (declare (indent 1))
+  `(agent-repl-sibling-popup-test--with-temp-frame
+     (let* ((side-buf  (generate-new-buffer " *test-sidebar*"))
+            (work-buf  (generate-new-buffer " *test-work*"))
+            (view-buf  (generate-new-buffer " *test-cv*"))
+            (input-buf (generate-new-buffer " *test-ci*")))
+       (unwind-protect
+           (let* ((work-win (and ,work (selected-window)))
+                  (view-win (if work-win
+                                (split-window work-win nil 'right)
+                              (selected-window)))
+                  (input-win (split-window view-win nil 'below))
+                  (side-win (display-buffer-in-side-window
+                             side-buf '((side . left) (slot . -1)))))
+             (when work-win (set-window-buffer work-win work-buf))
+             (set-window-buffer view-win view-buf)
+             (set-window-buffer input-win input-buf)
+             (ignore work-win side-win)
+             (agent-repl-sibling-popup-test--with-mocked-panels view-buf input-buf
+               ,@body))
+         (mapc #'kill-buffer (list side-buf work-buf view-buf input-buf))))))
+
 ;;;; ---- target-window selection ----
 
 (ert-deftest agent-repl-sibling-popup-test-target-nil-when-view-not-visible ()
@@ -64,70 +92,44 @@ must not crash on the nil."
     (agent-repl-sibling-popup-test--with-mocked-panels nil nil
       (should-not (agent-repl-sibling-popup--target-window)))))
 
-(ert-deftest agent-repl-sibling-popup-test-target-picks-leftmost-work-window ()
-  "Picks the leftmost non-agent, non-side work window when the agent view
-is shown.  Layout: [work] [agent-view] horizontally.  Target must be the
-work window (left), NOT the agent view window (right), because the popup
-is meant to drop below the work column only."
-  (agent-repl-sibling-popup-test--with-temp-frame
-    (let* ((work-buf (generate-new-buffer " *test-work*"))
-           (view-buf (generate-new-buffer " *test-cv*"))
-           (input-buf (generate-new-buffer " *test-ci*")))
-      (unwind-protect
-          (let* ((work-win (selected-window))
-                 (_ (set-window-buffer work-win work-buf))
-                 (view-win (split-window work-win nil 'right)))
-            (set-window-buffer view-win view-buf)
-            (agent-repl-sibling-popup-test--with-mocked-panels view-buf input-buf
-              (should (eq (agent-repl-sibling-popup--target-window) work-win))))
-        (kill-buffer work-buf)
-        (kill-buffer view-buf)
-        (kill-buffer input-buf)))))
+(ert-deftest agent-repl-sibling-popup-test-target-is-agent-column ()
+  "Targets the window holding the view over the input when both stand.
+That column sits beside the sidebar, so a popup split below it never
+runs under the sidebar."
+  (agent-repl-sibling-popup-test--with-panel-layout nil
+    (let ((target (agent-repl-sibling-popup--target-window)))
+      (should (eq target (window-parent input-win)))
+      (should (eq target (window-parent view-win))))))
 
-(ert-deftest agent-repl-sibling-popup-test-target-excludes-side-windows ()
-  "Skips side windows even if they are the leftmost.
-Side windows shouldn't be split — they're frame-level UI.  Layout: a
-left side window + a regular work window + agent view; target must
-be the regular work window, not the side window."
+(ert-deftest agent-repl-sibling-popup-test-target-is-not-sidebar ()
+  "Never targets the sidebar's side window, though it is leftmost."
+  (agent-repl-sibling-popup-test--with-panel-layout nil
+    (should (window-live-p side-win))
+    (should-not (eq (agent-repl-sibling-popup--target-window) side-win))))
+
+(ert-deftest agent-repl-sibling-popup-test-target-ignores-work-window ()
+  "Targets the agent column even with an editor window beside it.
+The popup belongs under the composer, not under whatever window is
+leftmost."
+  (agent-repl-sibling-popup-test--with-panel-layout t
+    (let ((target (agent-repl-sibling-popup--target-window)))
+      (should (eq target (window-parent input-win)))
+      (should-not (eq target work-win)))))
+
+(ert-deftest agent-repl-sibling-popup-test-target-is-view-when-input-hidden ()
+  "Targets the view window when a standing gate hides the input.
+The view then stands alone beside the sidebar, so it is the column."
   (agent-repl-sibling-popup-test--with-temp-frame
-    (let* ((side-buf  (generate-new-buffer " *test-side*"))
-           (work-buf  (generate-new-buffer " *test-work*"))
+    (let* ((side-buf  (generate-new-buffer " *test-sidebar*"))
            (view-buf  (generate-new-buffer " *test-cv*"))
            (input-buf (generate-new-buffer " *test-ci*")))
       (unwind-protect
-          (let* ((work-win  (selected-window))
-                 (_ (set-window-buffer work-win work-buf))
-                 (view-win (split-window work-win nil 'right))
-                 (_ (set-window-buffer view-win view-buf))
-                 (side-win (display-buffer-in-side-window
-                            side-buf '((side . left) (slot . 0)))))
-            (should (window-live-p side-win))
+          (let ((view-win (selected-window)))
+            (set-window-buffer view-win view-buf)
+            (display-buffer-in-side-window side-buf '((side . left) (slot . -1)))
             (agent-repl-sibling-popup-test--with-mocked-panels view-buf input-buf
-              (let ((target (agent-repl-sibling-popup--target-window)))
-                (should (eq target work-win))
-                (should-not (agent-repl-window--side-window-p target)))))
-        (kill-buffer side-buf)
-        (kill-buffer work-buf)
-        (kill-buffer view-buf)
-        (kill-buffer input-buf)))))
-
-(ert-deftest agent-repl-sibling-popup-test-target-excludes-claude-input-panel ()
-  "Doesn't pick the agent input panel even when it's leftmost.
-A degenerate frame where only agent buffers are shown (no editor
-window) must still return nil — splitting below the input would
-deform the agent column."
-  (agent-repl-sibling-popup-test--with-temp-frame
-    (let* ((view-buf  (generate-new-buffer " *test-cv*"))
-           (input-buf (generate-new-buffer " *test-ci*")))
-      (unwind-protect
-          (let* ((view-win (selected-window))
-                 (_ (set-window-buffer view-win view-buf))
-                 (input-win (split-window view-win nil 'below)))
-            (set-window-buffer input-win input-buf)
-            (agent-repl-sibling-popup-test--with-mocked-panels view-buf input-buf
-              (should-not (agent-repl-sibling-popup--target-window))))
-        (kill-buffer view-buf)
-        (kill-buffer input-buf)))))
+              (should (eq (agent-repl-sibling-popup--target-window) view-win))))
+        (mapc #'kill-buffer (list side-buf view-buf input-buf))))))
 
 ;;;; ---- height computation ----
 
@@ -166,73 +168,44 @@ and `split-window' would signal `window-too-small'."
 
 ;;;; ---- display-fn integration ----
 
-(ert-deftest agent-repl-sibling-popup-test-display-fn-splits-below-work-window ()
-  "When the agent view is visible, the display fn splits BELOW the work
-window and places BUFFER there.  Layout invariants verified:
-  • new popup window is a child of (or successor below) the work-win edge
-  • popup buffer is the supplied buffer
-  • agent view window is left untouched (still showing view-buf)"
-  (agent-repl-sibling-popup-test--with-temp-frame
-    (let* ((work-buf  (generate-new-buffer " *test-work*"))
-           (view-buf  (generate-new-buffer " *test-cv*"))
-           (input-buf (generate-new-buffer " *test-ci*"))
-           (popup-buf (generate-new-buffer " *test-popup*")))
+(ert-deftest agent-repl-sibling-popup-test-display-fn-splits-below-composer ()
+  "When the agent view is visible, the popup opens below the composer.
+It is a split of the agent column, not a side window; its top edge is
+the composer's bottom edge after the split; and the view and input
+windows keep their buffers."
+  (agent-repl-sibling-popup-test--with-panel-layout nil
+    (let* ((popup-buf (generate-new-buffer " *test-popup*"))
+           (new-win (agent-repl-sibling-popup-display-fn
+                     popup-buf '((window-height . 0.3)))))
       (unwind-protect
-          (let* ((work-win (selected-window))
-                 (_ (set-window-buffer work-win work-buf))
-                 (view-win (split-window work-win nil 'right))
-                 (_ (set-window-buffer view-win view-buf))
-                 (work-bottom-before (cadddr (window-edges work-win))))
-            (agent-repl-sibling-popup-test--with-mocked-panels view-buf input-buf
-              (let ((new-win (agent-repl-sibling-popup-display-fn
-                              popup-buf '((window-height . 0.3)))))
-                (should (window-live-p new-win))
-                (should (eq (window-buffer new-win) popup-buf))
-                ;; Agent view window survives untouched.
-                (should (window-live-p view-win))
-                (should (eq (window-buffer view-win) view-buf))
-                ;; New window sits below the original work-win region:
-                ;; its top edge is <= the work-win's pre-split bottom.
-                (should (<= (cadr (window-edges new-win)) work-bottom-before)))))
-        (kill-buffer work-buf)
-        (kill-buffer view-buf)
-        (kill-buffer input-buf)
+          (progn
+            (should (window-live-p new-win))
+            (should (eq (window-buffer new-win) popup-buf))
+            ;; A split, not the frame-wide bottom side window of the fallback.
+            (should-not (window-parameter new-win 'window-side))
+            (should (eq (window-buffer view-win) view-buf))
+            (should (eq (window-buffer input-win) input-buf))
+            (should (= (cadr (window-edges new-win))
+                       (cadddr (window-edges input-win)))))
         (kill-buffer popup-buf)))))
 
-(ert-deftest agent-repl-sibling-popup-test-display-fn-popup-width-matches-work-column ()
-  "The popup width matches the work column (not the full frame).
-This is the core promise of the feature: the popup must stop on the
-right side at the agent window edge.  Verify the popup's right edge
-equals the work window's right edge BEFORE the popup was opened (the
-column width is preserved by `split-window' below)."
-  (agent-repl-sibling-popup-test--with-temp-frame
-    (let* ((work-buf  (generate-new-buffer " *test-work*"))
-           (view-buf  (generate-new-buffer " *test-cv*"))
-           (input-buf (generate-new-buffer " *test-ci*"))
-           (popup-buf (generate-new-buffer " *test-popup*")))
+(ert-deftest agent-repl-sibling-popup-test-display-fn-popup-width-matches-composer ()
+  "The popup spans the composer's columns and none of the sidebar's.
+This is the core promise of the feature: the sidebar keeps the frame's
+whole height while the popup is open."
+  (agent-repl-sibling-popup-test--with-panel-layout nil
+    (let* ((popup-buf (generate-new-buffer " *test-popup*"))
+           (input-left (car (window-edges input-win)))
+           (input-right (caddr (window-edges input-win)))
+           (side-bottom-before (cadddr (window-edges side-win))))
       (unwind-protect
-          (let* ((work-win (selected-window))
-                 (_ (set-window-buffer work-win work-buf))
-                 (view-win (split-window work-win nil 'right))
-                 (_ (set-window-buffer view-win view-buf))
-                 ;; Capture work window's horizontal extent before split.
-                 (work-left   (car (window-edges work-win)))
-                 (work-right  (caddr (window-edges work-win)))
-                 (frame-right (caddr (window-edges (frame-root-window)))))
-            ;; Sanity: work window does NOT span the full frame width
-            ;; (otherwise there's nothing to assert).
-            (should (< work-right frame-right))
-            (agent-repl-sibling-popup-test--with-mocked-panels view-buf input-buf
-              (let ((new-win (agent-repl-sibling-popup-display-fn
-                              popup-buf '((window-height . 0.3)))))
-                (should (window-live-p new-win))
-                (should (= (car (window-edges new-win)) work-left))
-                (should (= (caddr (window-edges new-win)) work-right))
-                ;; And — explicitly — it does NOT reach the frame's right edge.
-                (should (< (caddr (window-edges new-win)) frame-right)))))
-        (kill-buffer work-buf)
-        (kill-buffer view-buf)
-        (kill-buffer input-buf)
+          (let ((new-win (agent-repl-sibling-popup-display-fn
+                          popup-buf '((window-height . 0.3)))))
+            (should (= (car (window-edges new-win)) input-left))
+            (should (= (caddr (window-edges new-win)) input-right))
+            (should (>= (car (window-edges new-win))
+                        (caddr (window-edges side-win))))
+            (should (= (cadddr (window-edges side-win)) side-bottom-before)))
         (kill-buffer popup-buf)))))
 
 (ert-deftest agent-repl-sibling-popup-test-display-fn-falls-back-when-claude-absent ()
