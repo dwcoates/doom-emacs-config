@@ -177,7 +177,13 @@
     "ruling, 2026-10-08), and so is 'waiting' (an interrupt landing). Every",
     "roster arm takes the color of the footer status it projects. An async",
     "merge of the workspace's own branch is no arm: it is the row's",
-    "RosterRowAsyncMerging marker, drawn per 'async_merge_mark'."
+    "RosterRowAsyncMerging marker, drawn per 'async_merge_mark'.",
+    "",
+    "'vendor_silent' (a turn whose vendor has been silent past the daemon's",
+    "vendor-silence threshold, the footer's 'working · waiting') is a HYBRID",
+    "(owner ruling, 2026-11-08): the workspace is RED, as 'thinking' is,",
+    "since progress is still being attempted, and its mark is inked BLUE",
+    "('glyph_inks'), since the session may be about to detach for good."
   ],
   "roster_status": {
     "none": "none",
@@ -199,6 +205,7 @@
     "turn_failed": "turquoise",
     "submitting": "red",
     "thinking": "red",
+    "vendor_silent": "red",
     "clearing": "red",
     "compacting": "red",
     "idle_async": "yellow",
@@ -275,7 +282,10 @@
     "name -- while the mark drawn beside the name takes this ink: a failed",
     "merge is a green workspace whose merge glyph is red, and a compacting",
     "turn is a red workspace whose dot is the orange of the feed's",
-    "compaction rule. An arm absent here inks its mark in its own color.",
+    "compaction rule. A turn whose vendor has gone silent is a red workspace",
+    "whose dot is blue: progress is attempted, but the session may detach",
+    "(owner ruling, 2026-11-08). An arm absent here inks its mark in its own",
+    "color.",
     "",
     "An ink is one of the six colors or one of 'glyph_only_colors', which no",
     "status may take: each renderer keeps its own value for them as it does",
@@ -283,7 +293,8 @@
   ],
   "glyph_inks": {
     "merge_failed": "red",
-    "compacting": "orange"
+    "compacting": "orange",
+    "vendor_silent": "blue"
   },
   "glyph_only_colors": [
     "orange",

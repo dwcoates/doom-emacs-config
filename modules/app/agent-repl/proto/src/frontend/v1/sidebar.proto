@@ -1696,6 +1696,17 @@ message RosterRow {
     RosterRowStatusSubmitting submitting = 3;
     // A turn is in flight.
     RosterRowStatusThinking thinking = 4;
+    // A turn is in flight but the VENDOR HAS GONE SILENT: an inference call
+    // runs and nothing has come back for the daemon's vendor-silence
+    // threshold — the same decision that draws the footer's `working ·
+    // waiting` step (FooterSubStatusWorkingWaiting), and only that step. It
+    // stands where `thinking` would and clears with the vendor's next
+    // update. A HYBRID (owner ruling, 2026-11-08): the WORKSPACE is RED and
+    // its name breathes, as `thinking`'s does, because progress is still
+    // being attempted; the status DOT is inked BLUE, because the session may
+    // be about to detach for good. The colors are render-colors.json's
+    // `roster_status` and `glyph_inks` rows for this arm.
+    RosterRowStatusVendorSilent vendor_silent = 72;
     // The conversation is being cleared.
     RosterRowStatusClearing clearing = 5;
     // The context is being compacted.
@@ -2223,6 +2234,10 @@ message RosterRowClosed {
 message RosterRowStatusSubmitting {}
 
 message RosterRowStatusThinking {}
+
+// The row's status while a turn runs and the vendor has been silent past the
+// daemon's vendor-silence threshold.
+message RosterRowStatusVendorSilent {}
 
 message RosterRowStatusClearing {}
 
