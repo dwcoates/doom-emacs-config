@@ -84,18 +84,18 @@ func TestFiguredSetsTheFiguresAndKeepsTheVerdict(t *testing.T) {
 	}
 }
 
-// THE FIGURES HAVE ONE SPELLING in the daemon's tests, as the windows do: a
-// test file that sets an event's utilization by hand fails here.
-func TestNoTestHandRollsAnEventsFigures(t *testing.T) {
-	// Arrange
+// offendingTestFiles answers every daemon test file outside this package
+// whose text contains any of NEEDLES: the one walk every spelling guard
+// below shares. A test runs in its package's directory (runtime.Caller's file
+// carries no absolute path under -trimpath).
+func offendingTestFiles(t *testing.T, needles ...string) []string {
+	t.Helper()
 	here, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("the working directory, which is this package's: %v", err)
 	}
 	root := filepath.Join(here, "..", "..")
 	var offenders []string
-
-	// Act
 	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -108,16 +108,27 @@ func TestNoTestHandRollsAnEventsFigures(t *testing.T) {
 			return err
 		}
 		text := string(body)
-		if strings.Contains(text, "UtilizationPercent = &") || strings.Contains(text, "UtilizationPercent: &") {
-			offenders = append(offenders, path)
+		for _, needle := range needles {
+			if strings.Contains(text, needle) {
+				offenders = append(offenders, path)
+				break
+			}
 		}
 		return nil
 	})
-
-	// Assert
 	if err != nil {
 		t.Fatalf("walk the daemon's tests: %v", err)
 	}
+	return offenders
+}
+
+// THE FIGURES HAVE ONE SPELLING in the daemon's tests, as the windows do: a
+// test file that sets an event's utilization by hand fails here.
+func TestNoTestHandRollsAnEventsFigures(t *testing.T) {
+	// Act
+	offenders := offendingTestFiles(t, "UtilizationPercent = &", "UtilizationPercent: &")
+
+	// Assert
 	if len(offenders) != 0 {
 		t.Fatalf("test files set a rate-limit event's figures by hand instead of through ratelimittest.Figured: %v", offenders)
 	}
@@ -139,40 +150,24 @@ func TestUpdateWrapsTheStatus(t *testing.T) {
 // THE BUILDERS ARE THE ONE SPELLING of a rate-limit window in the daemon's
 // tests: a test file that builds a window's oneof arm by hand fails here.
 func TestNoTestHandRollsARateLimitWindow(t *testing.T) {
-	// Arrange
-	// A test runs in its package's directory (runtime.Caller's file carries
-	// no absolute path under -trimpath).
-	here, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("the working directory, which is this package's: %v", err)
-	}
-	root := filepath.Join(here, "..", "..")
-	var offenders []string
-
 	// Act
-	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() || !strings.HasSuffix(path, "_test.go") || filepath.Dir(path) == here {
-			return nil
-		}
-		body, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		if strings.Contains(string(body), "SessionRateLimitType_") {
-			offenders = append(offenders, path)
-		}
-		return nil
-	})
+	offenders := offendingTestFiles(t, "SessionRateLimitType_")
 
 	// Assert
-	if err != nil {
-		t.Fatalf("walk the daemon's tests: %v", err)
-	}
 	if len(offenders) != 0 {
 		t.Fatalf("test files build a rate-limit window by hand instead of through ratelimittest: %v", offenders)
+	}
+}
+
+// THE WALK FINDS A FILE THAT HOLDS A NEEDLE, so a guard above cannot pass by
+// walking nothing.
+func TestOffendingTestFilesFindsAFileHoldingTheNeedle(t *testing.T) {
+	// Act: every daemon test file names the testing package.
+	offenders := offendingTestFiles(t, "\"testing\"")
+
+	// Assert
+	if len(offenders) == 0 {
+		t.Fatalf("the walk found no daemon test file importing testing; it walked nothing")
 	}
 }
 
