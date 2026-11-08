@@ -140,6 +140,11 @@ func projectArm(status *frontendv1.FooterStatus, log dlog.Logger) string {
 			return "clearing"
 		case arm.Working.GetCompacting() != nil:
 			return "compacting"
+		case arm.Working.GetWaiting() != nil:
+			// THE VENDOR HAS GONE SILENT (owner ruling, 2026-11-08): the
+			// footer's own vendor-silence decision, so the row needs no
+			// timer of its own.
+			return "vendor_silent"
 		default:
 			return "thinking"
 		}
@@ -416,6 +421,9 @@ func setStatus(row *frontendv1.RosterRow, arm string, log dlog.Logger) {
 	case "daemon_impaired":
 		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case \"daemon_impaired\""})
 		row.Status = &frontendv1.RosterRow_DaemonImpaired{DaemonImpaired: &frontendv1.RosterRowStatusDaemonImpaired{}}
+	case "vendor_silent":
+		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case \"vendor_silent\""})
+		row.Status = &frontendv1.RosterRow_VendorSilent{VendorSilent: &frontendv1.RosterRowStatusVendorSilent{}}
 	case "waiting":
 		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case \"waiting\""})
 		row.Status = &frontendv1.RosterRow_Waiting{Waiting: &frontendv1.RosterRowStatusWaiting{}}

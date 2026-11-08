@@ -465,6 +465,8 @@ func statusName(row *frontendv1.RosterRow) string {
 		return "cold_gate"
 	case *frontendv1.RosterRow_Waiting:
 		return "waiting"
+	case *frontendv1.RosterRow_VendorSilent:
+		return "vendor_silent"
 	case *frontendv1.RosterRow_Question:
 		return "question"
 	default:
