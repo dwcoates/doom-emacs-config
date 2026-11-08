@@ -1918,10 +1918,10 @@ type FooterStatusWorkingSalient struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// When this line began standing; the client ticks the relative age.
 	At *FooterStatusActivityAt `protobuf:"bytes,1,opt,name=at,proto3" json:"at,omitempty"`
-	// The one salient line. A compaction ranks first, because it explains the
-	// `compacting` step; a retry next; then the vendor's silence, which explains
-	// the `waiting` step; then a deploy's progress and the push notification, in
-	// that order.
+	// The one salient line. Under the `waiting` step it is ALWAYS the vendor's
+	// silence, the line that explains that step. Otherwise a compaction ranks
+	// first, because it explains the `compacting` step; a retry next; then a
+	// deploy's progress and the push notification, in that order.
 	//
 	// Types that are valid to be assigned to Kind:
 	//
@@ -2065,10 +2065,10 @@ type FooterStatusWorkingSalient_VendorSilence struct {
 	// standing EXACTLY while that step does, so the step never stands without
 	// it. The salient's `at` is the instant the vendor was last heard from,
 	// so the age the client ticks IS the time since the last API response.
-	// A retry outranks it: a call the vendor retries draws the vendor fault
-	// status's `api_retrying` step with the retrying line instead. It
-	// outranks a deploy's progress and the push notification, which explain
-	// no step.
+	// A retry outranks it: a call the vendor retries leaves `working` for the
+	// vendor fault status's `api_retrying` step, whose line is the retry's.
+	// It outranks a deploy's progress, the push notification and a standing
+	// compaction line, none of which explains the `waiting` step.
 	VendorSilence *FooterStatusActivityVendorSilence `protobuf:"bytes,8,opt,name=vendor_silence,json=vendorSilence,proto3,oneof"`
 }
 

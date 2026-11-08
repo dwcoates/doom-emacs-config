@@ -40,7 +40,7 @@ and its leaf messages.
   words nothing under figma→idl, and the daemon already names every item arm
   (`footer.feedKinds`), so a composed sentence carries the same fact with no
   second vocabulary to keep aligned.
-- Rank: compaction, retrying, vendor_silence, update, notification. In practice
+- Rank: under the `waiting` step the silence line always stands; otherwise compaction, retrying, update, notification. In practice
   a retry never meets it: a retried call draws `vendor_fault · api_retrying`,
   which outranks the thinking rung on the ladder. A standing compaction line
   under the waiting step (the cold gate's answer narrating a compaction while
