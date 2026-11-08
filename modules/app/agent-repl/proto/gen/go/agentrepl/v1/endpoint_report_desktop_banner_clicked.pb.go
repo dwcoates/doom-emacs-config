@@ -210,6 +210,9 @@ type ReportDesktopBannerClickedError struct {
 	// Types that are valid to be assigned to Cause:
 	//
 	//	*ReportDesktopBannerClickedError_UnknownWorkspace
+	//	*ReportDesktopBannerClickedError_WorkspaceRefMismatch
+	//	*ReportDesktopBannerClickedError_TransferringAway
+	//	*ReportDesktopBannerClickedError_NotYetAdopted
 	Cause         isReportDesktopBannerClickedError_Cause `protobuf_oneof:"cause"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -261,6 +264,33 @@ func (x *ReportDesktopBannerClickedError) GetUnknownWorkspace() *ReportDesktopBa
 	return nil
 }
 
+func (x *ReportDesktopBannerClickedError) GetWorkspaceRefMismatch() *ReportDesktopBannerClickedWorkspaceRefMismatch {
+	if x != nil {
+		if x, ok := x.Cause.(*ReportDesktopBannerClickedError_WorkspaceRefMismatch); ok {
+			return x.WorkspaceRefMismatch
+		}
+	}
+	return nil
+}
+
+func (x *ReportDesktopBannerClickedError) GetTransferringAway() *ReportDesktopBannerClickedTransferringAway {
+	if x != nil {
+		if x, ok := x.Cause.(*ReportDesktopBannerClickedError_TransferringAway); ok {
+			return x.TransferringAway
+		}
+	}
+	return nil
+}
+
+func (x *ReportDesktopBannerClickedError) GetNotYetAdopted() *ReportDesktopBannerClickedNotYetAdopted {
+	if x != nil {
+		if x, ok := x.Cause.(*ReportDesktopBannerClickedError_NotYetAdopted); ok {
+			return x.NotYetAdopted
+		}
+	}
+	return nil
+}
+
 type isReportDesktopBannerClickedError_Cause interface {
 	isReportDesktopBannerClickedError_Cause()
 }
@@ -271,7 +301,32 @@ type ReportDesktopBannerClickedError_UnknownWorkspace struct {
 	UnknownWorkspace *ReportDesktopBannerClickedUnknownWorkspace `protobuf:"bytes,1,opt,name=unknown_workspace,json=unknownWorkspace,proto3,oneof"`
 }
 
+type ReportDesktopBannerClickedError_WorkspaceRefMismatch struct {
+	// The token's directory disagrees with the registry's for its workspace
+	// (the workspace moved since the banner was posted).
+	WorkspaceRefMismatch *ReportDesktopBannerClickedWorkspaceRefMismatch `protobuf:"bytes,2,opt,name=workspace_ref_mismatch,json=workspaceRefMismatch,proto3,oneof"`
+}
+
+type ReportDesktopBannerClickedError_TransferringAway struct {
+	// This daemon released the workspace to a successor; the app reports the
+	// click again to `address`.
+	TransferringAway *ReportDesktopBannerClickedTransferringAway `protobuf:"bytes,3,opt,name=transferring_away,json=transferringAway,proto3,oneof"`
+}
+
+type ReportDesktopBannerClickedError_NotYetAdopted struct {
+	// A joining daemon has not finished adopting the workspace yet; the app
+	// reports the click to `address`, the daemon serving it meanwhile.
+	NotYetAdopted *ReportDesktopBannerClickedNotYetAdopted `protobuf:"bytes,4,opt,name=not_yet_adopted,json=notYetAdopted,proto3,oneof"`
+}
+
 func (*ReportDesktopBannerClickedError_UnknownWorkspace) isReportDesktopBannerClickedError_Cause() {}
+
+func (*ReportDesktopBannerClickedError_WorkspaceRefMismatch) isReportDesktopBannerClickedError_Cause() {
+}
+
+func (*ReportDesktopBannerClickedError_TransferringAway) isReportDesktopBannerClickedError_Cause() {}
+
+func (*ReportDesktopBannerClickedError_NotYetAdopted) isReportDesktopBannerClickedError_Cause() {}
 
 // The clicked banner's workspace is not in the daemon's registry.
 type ReportDesktopBannerClickedUnknownWorkspace struct {
@@ -310,6 +365,146 @@ func (*ReportDesktopBannerClickedUnknownWorkspace) Descriptor() ([]byte, []int) 
 	return file_agentrepl_v1_endpoint_report_desktop_banner_clicked_proto_rawDescGZIP(), []int{4}
 }
 
+// The token's directory disagrees with the registry's for its workspace.
+type ReportDesktopBannerClickedWorkspaceRefMismatch struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The directory the registry holds for the workspace.
+	RegistryDir   string `protobuf:"bytes,1,opt,name=registry_dir,json=registryDir,proto3" json:"registry_dir,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReportDesktopBannerClickedWorkspaceRefMismatch) Reset() {
+	*x = ReportDesktopBannerClickedWorkspaceRefMismatch{}
+	mi := &file_agentrepl_v1_endpoint_report_desktop_banner_clicked_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReportDesktopBannerClickedWorkspaceRefMismatch) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReportDesktopBannerClickedWorkspaceRefMismatch) ProtoMessage() {}
+
+func (x *ReportDesktopBannerClickedWorkspaceRefMismatch) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_report_desktop_banner_clicked_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReportDesktopBannerClickedWorkspaceRefMismatch.ProtoReflect.Descriptor instead.
+func (*ReportDesktopBannerClickedWorkspaceRefMismatch) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_report_desktop_banner_clicked_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *ReportDesktopBannerClickedWorkspaceRefMismatch) GetRegistryDir() string {
+	if x != nil {
+		return x.RegistryDir
+	}
+	return ""
+}
+
+// This daemon released the workspace to a successor.
+type ReportDesktopBannerClickedTransferringAway struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The successor's `127.0.0.1:<port>`.
+	Address       string `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReportDesktopBannerClickedTransferringAway) Reset() {
+	*x = ReportDesktopBannerClickedTransferringAway{}
+	mi := &file_agentrepl_v1_endpoint_report_desktop_banner_clicked_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReportDesktopBannerClickedTransferringAway) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReportDesktopBannerClickedTransferringAway) ProtoMessage() {}
+
+func (x *ReportDesktopBannerClickedTransferringAway) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_report_desktop_banner_clicked_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReportDesktopBannerClickedTransferringAway.ProtoReflect.Descriptor instead.
+func (*ReportDesktopBannerClickedTransferringAway) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_report_desktop_banner_clicked_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *ReportDesktopBannerClickedTransferringAway) GetAddress() string {
+	if x != nil {
+		return x.Address
+	}
+	return ""
+}
+
+// A joining daemon has not finished adopting the workspace.
+type ReportDesktopBannerClickedNotYetAdopted struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The `127.0.0.1:<port>` of the daemon serving the workspace until the
+	// adoption. UNSET when none serves it (a takeover after the incumbent
+	// died); the click then selects nothing, and the app records why.
+	Address       *string `protobuf:"bytes,1,opt,name=address,proto3,oneof" json:"address,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReportDesktopBannerClickedNotYetAdopted) Reset() {
+	*x = ReportDesktopBannerClickedNotYetAdopted{}
+	mi := &file_agentrepl_v1_endpoint_report_desktop_banner_clicked_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReportDesktopBannerClickedNotYetAdopted) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReportDesktopBannerClickedNotYetAdopted) ProtoMessage() {}
+
+func (x *ReportDesktopBannerClickedNotYetAdopted) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_report_desktop_banner_clicked_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReportDesktopBannerClickedNotYetAdopted.ProtoReflect.Descriptor instead.
+func (*ReportDesktopBannerClickedNotYetAdopted) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_report_desktop_banner_clicked_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *ReportDesktopBannerClickedNotYetAdopted) GetAddress() string {
+	if x != nil && x.Address != nil {
+		return *x.Address
+	}
+	return ""
+}
+
 var File_agentrepl_v1_endpoint_report_desktop_banner_clicked_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_report_desktop_banner_clicked_proto_rawDesc = "" +
@@ -321,11 +516,22 @@ const file_agentrepl_v1_endpoint_report_desktop_banner_clicked_proto_rawDesc = "
 	"\asuccess\x18\x01 \x01(\v2/.agentrepl.v1.ReportDesktopBannerClickedSuccessH\x00R\asuccess\x12E\n" +
 	"\x05error\x18\x02 \x01(\v2-.agentrepl.v1.ReportDesktopBannerClickedErrorH\x00R\x05errorB\b\n" +
 	"\x06result\"#\n" +
-	"!ReportDesktopBannerClickedSuccess\"\x93\x01\n" +
+	"!ReportDesktopBannerClickedSuccess\"\xd3\x03\n" +
 	"\x1fReportDesktopBannerClickedError\x12g\n" +
-	"\x11unknown_workspace\x18\x01 \x01(\v28.agentrepl.v1.ReportDesktopBannerClickedUnknownWorkspaceH\x00R\x10unknownWorkspaceB\a\n" +
+	"\x11unknown_workspace\x18\x01 \x01(\v28.agentrepl.v1.ReportDesktopBannerClickedUnknownWorkspaceH\x00R\x10unknownWorkspace\x12t\n" +
+	"\x16workspace_ref_mismatch\x18\x02 \x01(\v2<.agentrepl.v1.ReportDesktopBannerClickedWorkspaceRefMismatchH\x00R\x14workspaceRefMismatch\x12g\n" +
+	"\x11transferring_away\x18\x03 \x01(\v28.agentrepl.v1.ReportDesktopBannerClickedTransferringAwayH\x00R\x10transferringAway\x12_\n" +
+	"\x0fnot_yet_adopted\x18\x04 \x01(\v25.agentrepl.v1.ReportDesktopBannerClickedNotYetAdoptedH\x00R\rnotYetAdoptedB\a\n" +
 	"\x05cause\",\n" +
-	"*ReportDesktopBannerClickedUnknownWorkspaceB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"*ReportDesktopBannerClickedUnknownWorkspace\"S\n" +
+	".ReportDesktopBannerClickedWorkspaceRefMismatch\x12!\n" +
+	"\fregistry_dir\x18\x01 \x01(\tR\vregistryDir\"F\n" +
+	"*ReportDesktopBannerClickedTransferringAway\x12\x18\n" +
+	"\aaddress\x18\x01 \x01(\tR\aaddress\"T\n" +
+	"'ReportDesktopBannerClickedNotYetAdopted\x12\x1d\n" +
+	"\aaddress\x18\x01 \x01(\tH\x00R\aaddress\x88\x01\x01B\n" +
+	"\n" +
+	"\b_addressB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_endpoint_report_desktop_banner_clicked_proto_rawDescOnce sync.Once
@@ -339,25 +545,31 @@ func file_agentrepl_v1_endpoint_report_desktop_banner_clicked_proto_rawDescGZIP(
 	return file_agentrepl_v1_endpoint_report_desktop_banner_clicked_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_report_desktop_banner_clicked_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
+var file_agentrepl_v1_endpoint_report_desktop_banner_clicked_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
 var file_agentrepl_v1_endpoint_report_desktop_banner_clicked_proto_goTypes = []any{
-	(*ReportDesktopBannerClickedRequest)(nil),          // 0: agentrepl.v1.ReportDesktopBannerClickedRequest
-	(*ReportDesktopBannerClickedResponse)(nil),         // 1: agentrepl.v1.ReportDesktopBannerClickedResponse
-	(*ReportDesktopBannerClickedSuccess)(nil),          // 2: agentrepl.v1.ReportDesktopBannerClickedSuccess
-	(*ReportDesktopBannerClickedError)(nil),            // 3: agentrepl.v1.ReportDesktopBannerClickedError
-	(*ReportDesktopBannerClickedUnknownWorkspace)(nil), // 4: agentrepl.v1.ReportDesktopBannerClickedUnknownWorkspace
-	(*DesktopBannerClickToken)(nil),                    // 5: agentrepl.v1.DesktopBannerClickToken
+	(*ReportDesktopBannerClickedRequest)(nil),              // 0: agentrepl.v1.ReportDesktopBannerClickedRequest
+	(*ReportDesktopBannerClickedResponse)(nil),             // 1: agentrepl.v1.ReportDesktopBannerClickedResponse
+	(*ReportDesktopBannerClickedSuccess)(nil),              // 2: agentrepl.v1.ReportDesktopBannerClickedSuccess
+	(*ReportDesktopBannerClickedError)(nil),                // 3: agentrepl.v1.ReportDesktopBannerClickedError
+	(*ReportDesktopBannerClickedUnknownWorkspace)(nil),     // 4: agentrepl.v1.ReportDesktopBannerClickedUnknownWorkspace
+	(*ReportDesktopBannerClickedWorkspaceRefMismatch)(nil), // 5: agentrepl.v1.ReportDesktopBannerClickedWorkspaceRefMismatch
+	(*ReportDesktopBannerClickedTransferringAway)(nil),     // 6: agentrepl.v1.ReportDesktopBannerClickedTransferringAway
+	(*ReportDesktopBannerClickedNotYetAdopted)(nil),        // 7: agentrepl.v1.ReportDesktopBannerClickedNotYetAdopted
+	(*DesktopBannerClickToken)(nil),                        // 8: agentrepl.v1.DesktopBannerClickToken
 }
 var file_agentrepl_v1_endpoint_report_desktop_banner_clicked_proto_depIdxs = []int32{
-	5, // 0: agentrepl.v1.ReportDesktopBannerClickedRequest.click:type_name -> agentrepl.v1.DesktopBannerClickToken
+	8, // 0: agentrepl.v1.ReportDesktopBannerClickedRequest.click:type_name -> agentrepl.v1.DesktopBannerClickToken
 	2, // 1: agentrepl.v1.ReportDesktopBannerClickedResponse.success:type_name -> agentrepl.v1.ReportDesktopBannerClickedSuccess
 	3, // 2: agentrepl.v1.ReportDesktopBannerClickedResponse.error:type_name -> agentrepl.v1.ReportDesktopBannerClickedError
 	4, // 3: agentrepl.v1.ReportDesktopBannerClickedError.unknown_workspace:type_name -> agentrepl.v1.ReportDesktopBannerClickedUnknownWorkspace
-	4, // [4:4] is the sub-list for method output_type
-	4, // [4:4] is the sub-list for method input_type
-	4, // [4:4] is the sub-list for extension type_name
-	4, // [4:4] is the sub-list for extension extendee
-	0, // [0:4] is the sub-list for field type_name
+	5, // 4: agentrepl.v1.ReportDesktopBannerClickedError.workspace_ref_mismatch:type_name -> agentrepl.v1.ReportDesktopBannerClickedWorkspaceRefMismatch
+	6, // 5: agentrepl.v1.ReportDesktopBannerClickedError.transferring_away:type_name -> agentrepl.v1.ReportDesktopBannerClickedTransferringAway
+	7, // 6: agentrepl.v1.ReportDesktopBannerClickedError.not_yet_adopted:type_name -> agentrepl.v1.ReportDesktopBannerClickedNotYetAdopted
+	7, // [7:7] is the sub-list for method output_type
+	7, // [7:7] is the sub-list for method input_type
+	7, // [7:7] is the sub-list for extension type_name
+	7, // [7:7] is the sub-list for extension extendee
+	0, // [0:7] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_report_desktop_banner_clicked_proto_init() }
@@ -372,14 +584,18 @@ func file_agentrepl_v1_endpoint_report_desktop_banner_clicked_proto_init() {
 	}
 	file_agentrepl_v1_endpoint_report_desktop_banner_clicked_proto_msgTypes[3].OneofWrappers = []any{
 		(*ReportDesktopBannerClickedError_UnknownWorkspace)(nil),
+		(*ReportDesktopBannerClickedError_WorkspaceRefMismatch)(nil),
+		(*ReportDesktopBannerClickedError_TransferringAway)(nil),
+		(*ReportDesktopBannerClickedError_NotYetAdopted)(nil),
 	}
+	file_agentrepl_v1_endpoint_report_desktop_banner_clicked_proto_msgTypes[7].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_report_desktop_banner_clicked_proto_rawDesc), len(file_agentrepl_v1_endpoint_report_desktop_banner_clicked_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   5,
+			NumMessages:   8,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

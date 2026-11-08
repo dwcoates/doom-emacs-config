@@ -45,8 +45,37 @@ message ReportDesktopBannerClickedError {
     // The token's workspace is not in the daemon's registry (it was
     // forgotten since the banner was posted).
     ReportDesktopBannerClickedUnknownWorkspace unknown_workspace = 1;
+    // The token's directory disagrees with the registry's for its workspace
+    // (the workspace moved since the banner was posted).
+    ReportDesktopBannerClickedWorkspaceRefMismatch workspace_ref_mismatch = 2;
+    // This daemon released the workspace to a successor; the app reports the
+    // click again to `address`.
+    ReportDesktopBannerClickedTransferringAway transferring_away = 3;
+    // A joining daemon has not finished adopting the workspace yet; the app
+    // reports the click to `address`, the daemon serving it meanwhile.
+    ReportDesktopBannerClickedNotYetAdopted not_yet_adopted = 4;
   }
 }
 
 // The clicked banner's workspace is not in the daemon's registry.
 message ReportDesktopBannerClickedUnknownWorkspace {}
+
+// The token's directory disagrees with the registry's for its workspace.
+message ReportDesktopBannerClickedWorkspaceRefMismatch {
+  // The directory the registry holds for the workspace.
+  string registry_dir = 1;
+}
+
+// This daemon released the workspace to a successor.
+message ReportDesktopBannerClickedTransferringAway {
+  // The successor's `127.0.0.1:<port>`.
+  string address = 1;
+}
+
+// A joining daemon has not finished adopting the workspace.
+message ReportDesktopBannerClickedNotYetAdopted {
+  // The `127.0.0.1:<port>` of the daemon serving the workspace until the
+  // adoption. UNSET when none serves it (a takeover after the incumbent
+  // died); the click then selects nothing, and the app records why.
+  optional string address = 1;
+}

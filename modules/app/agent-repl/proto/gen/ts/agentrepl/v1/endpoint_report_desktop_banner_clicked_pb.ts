@@ -26,7 +26,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_report_desktop_banner_clicked.proto.
  */
 export const file_agentrepl_v1_endpoint_report_desktop_banner_clicked: GenFile = /*@__PURE__*/
-  fileDesc("CjlhZ2VudHJlcGwvdjEvZW5kcG9pbnRfcmVwb3J0X2Rlc2t0b3BfYmFubmVyX2NsaWNrZWQucHJvdG8SDGFnZW50cmVwbC52MSJZCiFSZXBvcnREZXNrdG9wQmFubmVyQ2xpY2tlZFJlcXVlc3QSNAoFY2xpY2sYASABKAsyJS5hZ2VudHJlcGwudjEuRGVza3RvcEJhbm5lckNsaWNrVG9rZW4isgEKIlJlcG9ydERlc2t0b3BCYW5uZXJDbGlja2VkUmVzcG9uc2USQgoHc3VjY2VzcxgBIAEoCzIvLmFnZW50cmVwbC52MS5SZXBvcnREZXNrdG9wQmFubmVyQ2xpY2tlZFN1Y2Nlc3NIABI+CgVlcnJvchgCIAEoCzItLmFnZW50cmVwbC52MS5SZXBvcnREZXNrdG9wQmFubmVyQ2xpY2tlZEVycm9ySABCCAoGcmVzdWx0IiMKIVJlcG9ydERlc2t0b3BCYW5uZXJDbGlja2VkU3VjY2VzcyKBAQofUmVwb3J0RGVza3RvcEJhbm5lckNsaWNrZWRFcnJvchJVChF1bmtub3duX3dvcmtzcGFjZRgBIAEoCzI4LmFnZW50cmVwbC52MS5SZXBvcnREZXNrdG9wQmFubmVyQ2xpY2tlZFVua25vd25Xb3Jrc3BhY2VIAEIHCgVjYXVzZSIsCipSZXBvcnREZXNrdG9wQmFubmVyQ2xpY2tlZFVua25vd25Xb3Jrc3BhY2VCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_agentrepl_v1_desktop_banner]);
+  fileDesc("CjlhZ2VudHJlcGwvdjEvZW5kcG9pbnRfcmVwb3J0X2Rlc2t0b3BfYmFubmVyX2NsaWNrZWQucHJvdG8SDGFnZW50cmVwbC52MSJZCiFSZXBvcnREZXNrdG9wQmFubmVyQ2xpY2tlZFJlcXVlc3QSNAoFY2xpY2sYASABKAsyJS5hZ2VudHJlcGwudjEuRGVza3RvcEJhbm5lckNsaWNrVG9rZW4isgEKIlJlcG9ydERlc2t0b3BCYW5uZXJDbGlja2VkUmVzcG9uc2USQgoHc3VjY2VzcxgBIAEoCzIvLmFnZW50cmVwbC52MS5SZXBvcnREZXNrdG9wQmFubmVyQ2xpY2tlZFN1Y2Nlc3NIABI+CgVlcnJvchgCIAEoCzItLmFnZW50cmVwbC52MS5SZXBvcnREZXNrdG9wQmFubmVyQ2xpY2tlZEVycm9ySABCCAoGcmVzdWx0IiMKIVJlcG9ydERlc2t0b3BCYW5uZXJDbGlja2VkU3VjY2VzcyKKAwofUmVwb3J0RGVza3RvcEJhbm5lckNsaWNrZWRFcnJvchJVChF1bmtub3duX3dvcmtzcGFjZRgBIAEoCzI4LmFnZW50cmVwbC52MS5SZXBvcnREZXNrdG9wQmFubmVyQ2xpY2tlZFVua25vd25Xb3Jrc3BhY2VIABJeChZ3b3Jrc3BhY2VfcmVmX21pc21hdGNoGAIgASgLMjwuYWdlbnRyZXBsLnYxLlJlcG9ydERlc2t0b3BCYW5uZXJDbGlja2VkV29ya3NwYWNlUmVmTWlzbWF0Y2hIABJVChF0cmFuc2ZlcnJpbmdfYXdheRgDIAEoCzI4LmFnZW50cmVwbC52MS5SZXBvcnREZXNrdG9wQmFubmVyQ2xpY2tlZFRyYW5zZmVycmluZ0F3YXlIABJQCg9ub3RfeWV0X2Fkb3B0ZWQYBCABKAsyNS5hZ2VudHJlcGwudjEuUmVwb3J0RGVza3RvcEJhbm5lckNsaWNrZWROb3RZZXRBZG9wdGVkSABCBwoFY2F1c2UiLAoqUmVwb3J0RGVza3RvcEJhbm5lckNsaWNrZWRVbmtub3duV29ya3NwYWNlIkYKLlJlcG9ydERlc2t0b3BCYW5uZXJDbGlja2VkV29ya3NwYWNlUmVmTWlzbWF0Y2gSFAoMcmVnaXN0cnlfZGlyGAEgASgJIj0KKlJlcG9ydERlc2t0b3BCYW5uZXJDbGlja2VkVHJhbnNmZXJyaW5nQXdheRIPCgdhZGRyZXNzGAEgASgJIksKJ1JlcG9ydERlc2t0b3BCYW5uZXJDbGlja2VkTm90WWV0QWRvcHRlZBIUCgdhZGRyZXNzGAEgASgJSACIAQFCCgoIX2FkZHJlc3NCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_agentrepl_v1_desktop_banner]);
 
 /**
  * @generated from message agentrepl.v1.ReportDesktopBannerClickedRequest
@@ -115,6 +115,33 @@ export type ReportDesktopBannerClickedError = Message<"agentrepl.v1.ReportDeskto
      */
     value: ReportDesktopBannerClickedUnknownWorkspace;
     case: "unknownWorkspace";
+  } | {
+    /**
+     * The token's directory disagrees with the registry's for its workspace
+     * (the workspace moved since the banner was posted).
+     *
+     * @generated from field: agentrepl.v1.ReportDesktopBannerClickedWorkspaceRefMismatch workspace_ref_mismatch = 2;
+     */
+    value: ReportDesktopBannerClickedWorkspaceRefMismatch;
+    case: "workspaceRefMismatch";
+  } | {
+    /**
+     * This daemon released the workspace to a successor; the app reports the
+     * click again to `address`.
+     *
+     * @generated from field: agentrepl.v1.ReportDesktopBannerClickedTransferringAway transferring_away = 3;
+     */
+    value: ReportDesktopBannerClickedTransferringAway;
+    case: "transferringAway";
+  } | {
+    /**
+     * A joining daemon has not finished adopting the workspace yet; the app
+     * reports the click to `address`, the daemon serving it meanwhile.
+     *
+     * @generated from field: agentrepl.v1.ReportDesktopBannerClickedNotYetAdopted not_yet_adopted = 4;
+     */
+    value: ReportDesktopBannerClickedNotYetAdopted;
+    case: "notYetAdopted";
   } | { case: undefined; value?: undefined };
 };
 
@@ -139,4 +166,69 @@ export type ReportDesktopBannerClickedUnknownWorkspace = Message<"agentrepl.v1.R
  */
 export const ReportDesktopBannerClickedUnknownWorkspaceSchema: GenMessage<ReportDesktopBannerClickedUnknownWorkspace> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_report_desktop_banner_clicked, 4);
+
+/**
+ * The token's directory disagrees with the registry's for its workspace.
+ *
+ * @generated from message agentrepl.v1.ReportDesktopBannerClickedWorkspaceRefMismatch
+ */
+export type ReportDesktopBannerClickedWorkspaceRefMismatch = Message<"agentrepl.v1.ReportDesktopBannerClickedWorkspaceRefMismatch"> & {
+  /**
+   * The directory the registry holds for the workspace.
+   *
+   * @generated from field: string registry_dir = 1;
+   */
+  registryDir: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.ReportDesktopBannerClickedWorkspaceRefMismatch.
+ * Use `create(ReportDesktopBannerClickedWorkspaceRefMismatchSchema)` to create a new message.
+ */
+export const ReportDesktopBannerClickedWorkspaceRefMismatchSchema: GenMessage<ReportDesktopBannerClickedWorkspaceRefMismatch> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_report_desktop_banner_clicked, 5);
+
+/**
+ * This daemon released the workspace to a successor.
+ *
+ * @generated from message agentrepl.v1.ReportDesktopBannerClickedTransferringAway
+ */
+export type ReportDesktopBannerClickedTransferringAway = Message<"agentrepl.v1.ReportDesktopBannerClickedTransferringAway"> & {
+  /**
+   * The successor's `127.0.0.1:<port>`.
+   *
+   * @generated from field: string address = 1;
+   */
+  address: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.ReportDesktopBannerClickedTransferringAway.
+ * Use `create(ReportDesktopBannerClickedTransferringAwaySchema)` to create a new message.
+ */
+export const ReportDesktopBannerClickedTransferringAwaySchema: GenMessage<ReportDesktopBannerClickedTransferringAway> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_report_desktop_banner_clicked, 6);
+
+/**
+ * A joining daemon has not finished adopting the workspace.
+ *
+ * @generated from message agentrepl.v1.ReportDesktopBannerClickedNotYetAdopted
+ */
+export type ReportDesktopBannerClickedNotYetAdopted = Message<"agentrepl.v1.ReportDesktopBannerClickedNotYetAdopted"> & {
+  /**
+   * The `127.0.0.1:<port>` of the daemon serving the workspace until the
+   * adoption. UNSET when none serves it (a takeover after the incumbent
+   * died); the click then selects nothing, and the app records why.
+   *
+   * @generated from field: optional string address = 1;
+   */
+  address?: string | undefined;
+};
+
+/**
+ * Describes the message agentrepl.v1.ReportDesktopBannerClickedNotYetAdopted.
+ * Use `create(ReportDesktopBannerClickedNotYetAdoptedSchema)` to create a new message.
+ */
+export const ReportDesktopBannerClickedNotYetAdoptedSchema: GenMessage<ReportDesktopBannerClickedNotYetAdopted> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_report_desktop_banner_clicked, 7);
 

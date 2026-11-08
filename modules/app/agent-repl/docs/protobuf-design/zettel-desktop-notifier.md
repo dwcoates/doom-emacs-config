@@ -62,3 +62,15 @@ Consequences and reasoning:
 - **Permission is an outcome arm, not a stream fact.** `not_allowed` is
   reported per post, since the user can change it at any moment; the daemon
   logs it with the remedy.
+
+### 2. The click's refusals follow the registry's resolution
+
+What: `ReportDesktopBannerClickedError` gained `workspace_ref_mismatch`,
+`transferring_away` and `not_yet_adopted` beside `unknown_workspace`.
+
+Why: the daemon resolves the click token's workspace through the same
+registered-workspace resolution every workspace-addressed rpc uses, which can
+answer any of the four; an arm the endpoint lacked would surface as an
+unlanded-arm transport error instead of a typed answer. A click lands at any
+moment, including mid-handover, so the app needs `transferring_away`'s address
+to report the click to the successor.
