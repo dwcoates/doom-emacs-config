@@ -556,8 +556,8 @@ func TestTheRetryLineCountsDownOnlyToAnInstantStillAhead(t *testing.T) {
 
 			// Assert
 			retry := h.view(t).GetStrip().GetStatus().GetVendorFault().GetActivity().GetSalient().GetRetrying()
-			if (retry.NextAttempt != nil) != tt.wantNext {
-				t.Fatalf("next attempt = %v, want drawn %v", retry.NextAttempt, tt.wantNext)
+			if (retry.GetNextAttempt() != nil) != tt.wantNext {
+				t.Fatalf("next attempt = %v, want drawn %v", retry.GetNextAttempt(), tt.wantNext)
 			}
 		})
 	}
@@ -609,7 +609,7 @@ func TestAnUnscheduledFailureCarriesNoNextAttempt(t *testing.T) {
 
 	// Assert
 	retry := h.view(t).GetStrip().GetStatus().GetVendorFault().GetActivity().GetSalient().GetRetrying()
-	if retry.NextAttempt != nil || retry.MaxAttempt != nil {
+	if retry.GetNextAttempt() != nil || retry.MaxAttempt != nil {
 		t.Fatalf("retry = %+v, want no schedule the vendor never stated", retry)
 	}
 }

@@ -139,6 +139,10 @@ type retryState struct {
 	// now is agent-repl's own retry being made at this moment, drawn as
 	// "retrying now" in place of a countdown.
 	now bool
+	// awaitingNetwork is agent-repl's own retry waiting for the network to
+	// return, drawn as "waits for the network" in place of a countdown: it
+	// has no instant (conversation.v1.SessionVendorErrorRetryAwaitingNetwork).
+	awaitingNetwork bool
 }
 
 // wakeupState is a pending self-scheduled wakeup.

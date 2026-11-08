@@ -12,12 +12,16 @@ import (
 // AGENT-REPL'S RETRY OF A TURN THE VENDOR FAILED (owner ruling, 2026-10-20).
 //
 // The shim runs the vendor with its own API retries off and retries a turn
-// that failed retryably itself, every 30 seconds or at an exhausted usage
-// window's reset, stating the schedule whole on the session stream
-// (`SessionUpdate.vendor_error_retry`). While a retry is scheduled the footer:
+// that failed retryably itself, every 30 seconds, at an exhausted usage
+// window's reset, or -- for a turn that never reached the API -- when the
+// network fault resolves, stating the schedule whole on the session stream
+// (`SessionUpdate.vendor_error_retry`). While a retry is pending the footer:
 //
-//   - draws the `retrying` line, counting down to the shim's instant, in
-//     place of the failed turn's own sentence;
+//   - draws the `retrying` line, counting down to the shim's instant (or
+//     saying the retry waits for the network, which has none), in place of
+//     the failed turn's own sentence; under a standing network fault the
+//     network fault's own line stands instead, since that rung outranks this
+//     one;
 //   - stands as `vendor_fault · api_retrying` unless a standing account block
 //     names a finer step (a usage limit keeps `usage_limit`, under the same
 //     countdown);
@@ -51,6 +55,25 @@ func (r *resolver) observeVendorRetry(ws ids.WorkspaceID, s *wsState, stated *co
 		}
 		r.logOf(ws, s).Info("daemon.footer.vendor_retry", "agent-repl is making its vendor-error retry now; the line says so",
 			dlog.Context{"attempt": attempting.GetAttempt()})
+		return
+	}
+	// THE RETRY WAITING FOR THE NETWORK has no instant: the shim makes it when
+	// the network fault resolves, so the line counts down to nothing.
+	if awaiting := stated.GetAwaitingNetwork(); awaiting != nil {
+		if awaiting.GetAttempt() == 0 {
+			r.logOf(ws, s).Error("daemon.footer.vendor_retry_refused",
+				"a vendor-error retry waiting for the network names no attempt; the statement is refused and the schedule on hand stands",
+				dlog.Context{"invariant_violation": "a vendor-error retry waiting for the network names its attempt"})
+			return
+		}
+		s.vendorRetry = &retryState{
+			attempt:         attemptOfRetry(awaiting.GetAttempt()),
+			status:          truncate(awaiting.GetStatus(), DefaultWarningRowWidth),
+			at:              r.opts.clock.Now(),
+			awaitingNetwork: true,
+		}
+		r.logOf(ws, s).Info("daemon.footer.vendor_retry", "agent-repl's vendor-error retry waits for the network; the line counts down to nothing",
+			dlog.Context{"attempt": awaiting.GetAttempt()})
 		return
 	}
 	scheduled := stated.GetScheduled()
