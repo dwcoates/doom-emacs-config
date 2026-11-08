@@ -68,7 +68,9 @@ import {
   FAKE_PLAN_USAGE_RESETS_IN_MS,
   FAKE_PLAN_USAGE_SEVEN_DAY_PERCENT,
   fakePlanUsage,
+  isFakePlanUsageWindowName,
   type FakePlanUsageWindow,
+  type FakePlanUsageWindowName,
   fakeAppliedEffort,
   FAKE_INITIALIZATION_RESULT,
   FAKE_MCP_SERVERS,
@@ -689,7 +691,7 @@ export function createFakeQuery(
   // The weekly windows the plan-usage verb answers. A rate-limit event the
   // mock emits for one of them moves its figure, so the verb and the stream
   // never disagree about the account (`emitWithUuid`).
-  const planUsageWindows = new Map<"seven_day" | "seven_day_opus" | "seven_day_sonnet", FakePlanUsageWindow>([
+  const planUsageWindows = new Map<FakePlanUsageWindowName, FakePlanUsageWindow>([
     ["seven_day", { utilizationPercent: FAKE_PLAN_USAGE_SEVEN_DAY_PERCENT, resetsAtMs: nowMs() + FAKE_PLAN_USAGE_RESETS_IN_MS }],
   ]);
   // The session's fast-mode state, which `init` and every `result` report.
@@ -830,7 +832,7 @@ export function createFakeQuery(
   /** A weekly rate-limit event's figure becomes the plan-usage verb's. */
   function notePlanUsageEvent(info: Record<string, unknown>): void {
     const name = info.rateLimitType;
-    if (name !== "seven_day" && name !== "seven_day_opus" && name !== "seven_day_sonnet") return;
+    if (!isFakePlanUsageWindowName(name)) return;
     if (typeof info.utilization !== "number" || typeof info.resetsAt !== "number") return;
     planUsageWindows.set(name, { utilizationPercent: info.utilization * 100, resetsAtMs: info.resetsAt * 1000 });
   }

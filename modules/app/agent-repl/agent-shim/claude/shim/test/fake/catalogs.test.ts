@@ -4,6 +4,7 @@ import {
   FAKE_DEFAULT_EFFORT,
   fakeAppliedEffort,
   fakePlanUsage,
+  isFakePlanUsageWindowName,
 } from "../../src/fake/catalogs.js";
 
 describe("fakeAppliedEffort", () => {
@@ -42,5 +43,19 @@ describe("fakePlanUsage", () => {
 
     // Assert
     expect({ plan: usage.subscription_type, available: usage.rate_limits_available }).toEqual({ plan: "max", available: true });
+  });
+});
+
+describe("isFakePlanUsageWindowName", () => {
+  it.each([
+    ["the account-wide weekly window", "seven_day", true],
+    ["the Opus weekly window", "seven_day_opus", true],
+    ["the Sonnet weekly window", "seven_day_sonnet", true],
+    ["the five-hour window, which the verb's weekly figures do not follow", "five_hour", false],
+    ["the overage window", "overage", false],
+    ["a window named by no string", undefined, false],
+  ])("%s", (_name, window, want) => {
+    // Act + Assert
+    expect(isFakePlanUsageWindowName(window)).toBe(want);
   });
 });

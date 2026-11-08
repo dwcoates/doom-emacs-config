@@ -152,7 +152,17 @@ export interface FakePlanUsageWindow {
 }
 
 /** The weekly windows the plan-usage verb answers, by the vendor's own names. */
-export type FakePlanUsageWindows = ReadonlyMap<"seven_day" | "seven_day_opus" | "seven_day_sonnet", FakePlanUsageWindow>;
+export const FAKE_PLAN_USAGE_WINDOW_NAMES = ["seven_day", "seven_day_opus", "seven_day_sonnet"] as const;
+/** One of FAKE_PLAN_USAGE_WINDOW_NAMES. */
+export type FakePlanUsageWindowName = (typeof FAKE_PLAN_USAGE_WINDOW_NAMES)[number];
+
+/** Whether NAME is a weekly window the plan-usage verb answers. */
+export function isFakePlanUsageWindowName(name: unknown): name is FakePlanUsageWindowName {
+  return FAKE_PLAN_USAGE_WINDOW_NAMES.some((known) => known === name);
+}
+
+/** The figures the plan-usage verb answers, by window. */
+export type FakePlanUsageWindows = ReadonlyMap<FakePlanUsageWindowName, FakePlanUsageWindow>;
 
 /** The account-wide weekly figure a session answers before any rate-limit event moves it. */
 export const FAKE_PLAN_USAGE_SEVEN_DAY_PERCENT = 8;
@@ -165,7 +175,7 @@ export const FAKE_PLAN_USAGE_RESETS_IN_MS = 5 * 24 * 60 * 60 * 1000;
  * window the account is not metered on stated null.
  */
 export function fakePlanUsage(windows: FakePlanUsageWindows): PlanUsageLike {
-  const window = (name: "seven_day" | "seven_day_opus" | "seven_day_sonnet") => {
+  const window = (name: FakePlanUsageWindowName) => {
     const figure = windows.get(name);
     return figure === undefined
       ? null
