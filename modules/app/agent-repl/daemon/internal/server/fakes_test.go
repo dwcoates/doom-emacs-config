@@ -375,6 +375,9 @@ type fakeVerbs struct {
 	// for the network under that ref.
 	createJoined workspace.PendingCreateID
 	createHeld   workspace.PendingCreateID
+	// createTurnHeld makes RunCreate answer the create held for its
+	// requester's turn under this ref, telling its reporter.
+	createTurnHeld workspace.PendingCreateID
 	// swaps records every Swap pair; swapErr is what it answers.
 	swaps   [][2]ids.WorkspaceID
 	swapErr error
@@ -653,6 +656,13 @@ func (f *fakeVerbs) EnterCreate(spec workspace.CreateSpec) *workspace.CreateTick
 // held for the network when createHeld names one, telling its reporter.
 func (f *fakeVerbs) RunCreate(ctx context.Context, ticket *workspace.CreateTicket) (wsm.Workspace, error) {
 	spec := ticket.Spec()
+	if f.createTurnHeld != "" {
+		f.createSpecs = append(f.createSpecs, spec)
+		if spec.Progress != nil {
+			spec.Progress.WaitingForRequesterTurn(f.createTurnHeld)
+		}
+		return wsm.Workspace{}, &workspace.RequesterTurnWaitError{ID: f.createTurnHeld, Requester: "ws-requester"}
+	}
 	if f.createHeld != "" {
 		f.createSpecs = append(f.createSpecs, spec)
 		if spec.Progress != nil {

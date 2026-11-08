@@ -491,7 +491,7 @@ func (v *verbs) create(ctx context.Context, spec CreateSpec) (_ wsm.Workspace, e
 	if spec.ForkFrom != nil {
 		// A FORK IS REFUSED HERE, before anything else is written for it, when
 		// its parent holds no conversation.
-		if _, err := v.forkableParentSession(ctx, log, *spec.ForkFrom, spec.forkRefusalArm()); err != nil {
+		if _, err := v.forkableParentSession(ctx, log, *spec.ForkFrom, spec.Requester, spec.forkRefusalArm()); err != nil {
 			return wsm.Workspace{}, err
 		}
 	}
@@ -697,6 +697,15 @@ func (v *verbs) branchFor(ctx context.Context, log dlog.Logger, spec CreateSpec,
 		if err := refuseSuppliedName(log, "CreateWorkspace", supplied); err != nil {
 			return "", nil, err
 		}
+		// A FORK IS DECIDED BEFORE ITS NAME IS CLAIMED, as the naming call's
+		// path decides it below: a parent with nothing to fork is refused, and
+		// a requester forking itself in its first turn holds the create, before
+		// anything is built.
+		if spec.ForkFrom != nil {
+			if _, err := v.forkableParentSession(ctx, log, *spec.ForkFrom, spec.Requester, spec.forkRefusalArm()); err != nil {
+				return "", nil, err
+			}
+		}
 		return v.claimSupplied(ctx, log, repoDir, supplied, "")
 	}
 	// A FORK IS NAMED FROM ITS PROMPT PLUS THE CONVERSATION IT CONTINUES (owner
@@ -872,7 +881,7 @@ func (v *verbs) forkNamingConversation(ctx context.Context, log dlog.Logger, spe
 		return "", nil
 	}
 	parent := *spec.ForkFrom
-	if _, err := v.forkableParentSession(ctx, log, parent, spec.forkRefusalArm()); err != nil {
+	if _, err := v.forkableParentSession(ctx, log, parent, spec.Requester, spec.forkRefusalArm()); err != nil {
 		return "", err
 	}
 	rows, err := v.deps.DB.RecentConversationPrompts(ctx, parent, namingdigest.MaxPrompts)
@@ -900,8 +909,11 @@ func (v *verbs) forkNamingConversation(ctx context.Context, log dlog.Logger, spe
 // forkableParentSession answers the parent's session when it holds a
 // conversation to fork (recordedSession.hasConversation), and the refusal ARM
 // names (forkRefusalArm) when it does not. Read by the naming step (before a
-// model call is paid for) and by the create itself.
-func (v *verbs) forkableParentSession(ctx context.Context, log dlog.Logger, parent ids.WorkspaceID, arm string) (wsm.Session, error) {
+// model call is paid for) and by the create itself. A parent that is the
+// create's REQUESTER, still in its conversation's first turn, answers
+// *requesterTurnInFlight: the create waits for that turn rather than being
+// refused.
+func (v *verbs) forkableParentSession(ctx context.Context, log dlog.Logger, parent ids.WorkspaceID, requester *ids.WorkspaceID, arm string) (wsm.Session, error) {
 	parentConv, err := readRecordedSession(ctx, v.deps.DB, parent)
 	if err != nil {
 		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "err != nil"})
@@ -917,6 +929,14 @@ func (v *verbs) forkableParentSession(ctx context.Context, log dlog.Logger, pare
 	// parent's shim's own account, before a worktree exists for a fork the
 	// child's shim would refuse at its bring-up.
 	if err := v.deps.Sessions.ProbeForkPoint(ctx, log, parent); err != nil {
+		if errors.Is(err, ErrForkNothingFinished) && requester != nil && *requester == parent {
+			// A WORKSPACE FORKING ITSELF IN ITS FIRST TURN WAITS FOR THAT
+			// TURN: the fork is made once it ends, and carries it.
+			log.Info(opCreate, "the requester forks itself from inside its conversation's first turn; the create waits for that turn to end", dlog.Context{
+				"parent": string(parent),
+			})
+			return wsm.Session{}, &requesterTurnInFlight{requester: parent}
+		}
 		if errors.Is(err, ErrForkNothingFinished) {
 			return wsm.Session{}, refuseNamingWorkspace(log, "CreateWorkspace", ArmForkSourceHasNoFinishedTurn,
 				fmt.Sprintf("workspace %q is still in its conversation's first turn, and a fork carries only finished turns, so this fork would carry nothing: "+

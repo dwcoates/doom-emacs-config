@@ -35,11 +35,17 @@ import (
 // same way (wsm.QueuedCreate), so a successor daemon holds the same create
 // under the same key and the same pending ref.
 //
-// A HELD CREATE RESUMES ON THE NETWORK-RESTORED SIGNAL (netstate.Monitor's
-// Restored latch), never on a timer. It resumes from the start of the create,
-// whose first expensive step is the naming call, and completes exactly as it
-// would have. A held create holds no create-gate ticket while it waits, so a
-// stand-down never waits on the network; each resumed attempt holds one.
+// A HELD CREATE RESUMES ON A LATCH, never on a timer: the network-restored
+// signal (netstate.Monitor's Restored latch) for a create held for the
+// network, or its requester's next turn end (turnlatch) for a workspace that
+// forked itself from inside its conversation's first turn. It resumes from the
+// start of the create and completes exactly as it would have; an attempt that
+// meets the same wait again is held again. A held create holds no create-gate
+// ticket while it waits, so a stand-down never waits on it; each resumed
+// attempt holds one. A previous daemon's held row is resumed by the next
+// daemon as a create held for the network (RecoverQueuedCreates): with the
+// network up that latch is already closed, so the attempt runs at once and,
+// should its requester's turn still be running, is held for that turn again.
 
 // opPendingCreate is the operation the pending-create set's records carry.
 const opPendingCreate = "daemon.workspace.pending_create"
@@ -79,6 +85,47 @@ func (e *NetworkWaitError) Error() string {
 func IsNetworkWait(err error) bool {
 	var wait *NetworkWaitError
 	return errors.As(err, &wait)
+}
+
+// RequesterTurnWaitError is a create held until its requesting workspace's
+// turn ends: the requester forked its own conversation from inside that
+// conversation's first turn, which has nothing finished to carry yet. Like
+// NetworkWaitError it is the create's ANSWER, never its failure.
+type RequesterTurnWaitError struct {
+	// ID is the held create.
+	ID PendingCreateID
+	// Requester is the workspace whose turn the create waits for.
+	Requester ids.WorkspaceID
+}
+
+func (e *RequesterTurnWaitError) Error() string {
+	return fmt.Sprintf("the create %s waits for the turn of its requester %s to end", e.ID, e.Requester)
+}
+
+// IsRequesterTurnWait reports whether ERR is a create held for its
+// requester's turn.
+func IsRequesterTurnWait(err error) bool {
+	var wait *RequesterTurnWaitError
+	return errors.As(err, &wait)
+}
+
+// requesterTurnInFlight is a create whose requester forks itself from inside
+// its conversation's first turn (forkableParentSession): the create's attempt
+// ends with it, and the set holds the create until that turn ends.
+type requesterTurnInFlight struct {
+	requester ids.WorkspaceID
+}
+
+func (e *requesterTurnInFlight) Error() string {
+	return fmt.Sprintf("the requester %q forks itself from inside its conversation's first turn, which has nothing finished to carry yet", e.requester)
+}
+
+// isHeldWait reports whether ERR ends an attempt with a wait the set holds the
+// create for, rather than with a failure.
+func isHeldWait(err error) bool {
+	var network *namingNetworkError
+	var turn *requesterTurnInFlight
+	return errors.As(err, &network) || errors.As(err, &turn)
 }
 
 // namingNetworkError is a naming call that could not run because the network
@@ -141,8 +188,14 @@ type pendingCreate struct {
 	attempt chan struct{}
 	// result is the ended attempt's outcome, read once attempt is closed.
 	result attemptResult
-	// held is true while the create waits for the network.
+	// held is true while the create waits for what it was held for.
 	held bool
+	// tellHeld says to a joining caller's reporter that the create waits, as
+	// the reason it was last held for words it (holdReason.tell).
+	tellHeld func(r CreateProgress, id PendingCreateID)
+	// heldFor is the reason it was last held for (holdReason.cause), which
+	// its requester's notice names.
+	heldFor string
 	// persisted is true while its durable row stands.
 	persisted bool
 	// waiters are the reporters of the callers waiting on the attempt in
@@ -210,14 +263,14 @@ func (v *verbs) RunCreate(ctx context.Context, ticket *CreateTicket) (wsm.Worksp
 	log := v.deps.Log.Global().With(dlog.Context{"create_id": string(entry.id), "repo_dir": entry.spec.RepoDir})
 	if ticket.joined {
 		v.pending.mu.Lock()
-		held, attempt, standingResult := entry.held, entry.attempt, entry.result
+		held, attempt, standingResult, tellHeld := entry.held, entry.attempt, entry.result, entry.tellHeld
 		v.pending.mu.Unlock()
 		log.Info(opPendingCreate, "the request is identical to a pending create; it joined that create", dlog.Context{
 			"held": held, "requester": ids.Optional(ticket.spec.Requester),
 		})
 		if held {
 			if ticket.progress != nil {
-				ticket.progress.WaitingForNetwork(entry.id)
+				tellHeld(ticket.progress, entry.id)
 			}
 			return wsm.Workspace{}, standingResult.err
 		}
@@ -256,20 +309,93 @@ func (v *verbs) attemptHeldCreate(ctx context.Context, spec CreateSpec) (wsm.Wor
 	}
 	defer release()
 	created, err := v.create(ctx, spec)
-	var network *namingNetworkError
-	if err != nil && !errors.As(err, &network) {
+	if err != nil && !isHeldWait(err) {
 		v.reportCreateFailure(ctx, spec, err)
 	}
 	return created, err
+}
+
+// holdReason is what a held create waits for.
+type holdReason struct {
+	// cause names the wait in records: "network" or "requester_turn".
+	cause string
+	// fields are the wait's own diagnostic context.
+	fields dlog.Context
+	// latch answers the latch the create resumes on. It is taken BEFORE
+	// anyone is told the create waits, so a release after that answer is
+	// never missed.
+	latch func(ctx context.Context, log dlog.Logger) <-chan struct{}
+	// answer is the create's answer while it waits.
+	answer func(id PendingCreateID) error
+	// tell says to one reporter that the create waits.
+	tell func(r CreateProgress, id PendingCreateID)
+	// waits is the record a hold is announced with.
+	waits string
+}
+
+// networkHold is the wait for the network a naming call failed on.
+func (v *verbs) networkHold(network *namingNetworkError) holdReason {
+	return holdReason{
+		cause: "network",
+		fields: dlog.Context{
+			"evidence": string(network.verdict.Evidence), "detail": network.verdict.Detail, "naming_cause": network.cause,
+		},
+		latch: func(context.Context, dlog.Logger) <-chan struct{} { return v.deps.Network.Restored() },
+		answer: func(id PendingCreateID) error {
+			return &NetworkWaitError{ID: id, Evidence: network.verdict.Evidence}
+		},
+		tell:  func(r CreateProgress, id PendingCreateID) { r.WaitingForNetwork(id) },
+		waits: "the create waits for the network; it resumes from the naming call when the network is restored",
+	}
+}
+
+// requesterTurnHold is the wait for the requester's turn a self-fork met.
+func (v *verbs) requesterTurnHold(turn *requesterTurnInFlight) holdReason {
+	return holdReason{
+		cause:  "requester_turn",
+		fields: dlog.Context{"requester": string(turn.requester)},
+		latch: func(ctx context.Context, log dlog.Logger) <-chan struct{} {
+			// THE LATCH IS TAKEN, THEN THE TURN IS LOOKED AT AGAIN: a turn
+			// that ended after the attempt looked, and before the latch was
+			// taken, would otherwise never release it.
+			latch := v.deps.TurnEnds.Next(turn.requester)
+			if err := v.deps.Sessions.ProbeForkPoint(ctx, log, turn.requester); !errors.Is(err, ErrForkNothingFinished) {
+				log.Info(opPendingCreate, "the requester's first turn ended before the create was held; it resumes at once", dlog.Context{
+					"requester": string(turn.requester), "probe": errText(err),
+				})
+				done := make(chan struct{})
+				close(done)
+				return done
+			}
+			return latch
+		},
+		answer: func(id PendingCreateID) error {
+			return &RequesterTurnWaitError{ID: id, Requester: turn.requester}
+		},
+		tell:  func(r CreateProgress, id PendingCreateID) { r.WaitingForRequesterTurn(id) },
+		waits: "the create waits for its requester's turn to end; it resumes from the start once that turn has ended",
+	}
+}
+
+// heldReason answers the wait ERR ends an attempt with, and whether it is one.
+func (v *verbs) heldReason(err error) (holdReason, bool) {
+	var network *namingNetworkError
+	if errors.As(err, &network) {
+		return v.networkHold(network), true
+	}
+	var turn *requesterTurnInFlight
+	if errors.As(err, &turn) {
+		return v.requesterTurnHold(turn), true
+	}
+	return holdReason{}, false
 }
 
 // settle ends ENTRY's attempt with its outcome: a network failure holds the
 // create, durably, and starts its wait for the network; anything else ends
 // the create and takes it out of the set.
 func (v *verbs) settle(ctx context.Context, log dlog.Logger, entry *pendingCreate, created wsm.Workspace, err error) attemptResult {
-	var network *namingNetworkError
-	if errors.As(err, &network) {
-		held, holdErr := v.hold(ctx, log, entry, network)
+	if why, waits := v.heldReason(err); waits {
+		held, holdErr := v.hold(ctx, log, entry, why)
 		if holdErr == nil {
 			return held
 		}
@@ -281,7 +407,7 @@ func (v *verbs) settle(ctx context.Context, log dlog.Logger, entry *pendingCreat
 	v.pending.mu.Lock()
 	delete(v.pending.byKey, entry.key)
 	entry.result = attemptResult{created: created, err: err}
-	subscribers, persisted, wasHeld := entry.subscribers, entry.persisted, entry.wasHeld
+	subscribers, persisted, wasHeld, heldFor := entry.subscribers, entry.persisted, entry.wasHeld, entry.heldFor
 	close(entry.attempt)
 	v.pending.mu.Unlock()
 	if persisted {
@@ -291,6 +417,19 @@ func (v *verbs) settle(ctx context.Context, log dlog.Logger, entry *pendingCreat
 			})
 		}
 	}
+	// THE ENDING IS RECORDED AND THE REQUESTER TOLD BEFORE ANY OP IS: a
+	// caller that learns the outcome on its op can then read both.
+	if wasHeld {
+		fields := dlog.Context{"subscribers": len(subscribers)}
+		if err != nil {
+			fields["cause"] = err.Error()
+			log.Info(opPendingCreate, "the held create ended without a workspace", fields)
+		} else {
+			fields["workspace"] = string(created.ID)
+			log.Info(opPendingCreate, "the held create was created", fields)
+		}
+		v.tellRequesterDequeued(context.WithoutCancel(ctx), log, entry.spec, heldFor, created, err)
+	}
 	for _, s := range subscribers {
 		if err != nil {
 			s.Failed(err)
@@ -298,78 +437,67 @@ func (v *verbs) settle(ctx context.Context, log dlog.Logger, entry *pendingCreat
 			s.Created(created)
 		}
 	}
-	if wasHeld {
-		fields := dlog.Context{"subscribers": len(subscribers)}
-		if err != nil {
-			fields["cause"] = err.Error()
-			log.Info(opPendingCreate, "the create held for the network ended without a workspace", fields)
-		} else {
-			fields["workspace"] = string(created.ID)
-			log.Info(opPendingCreate, "the create held for the network was created", fields)
-		}
-		v.tellRequesterDequeued(context.WithoutCancel(ctx), log, entry.spec, created, err)
-	}
 	return entry.result
 }
 
-// hold records ENTRY as waiting for the network, durably, answers every
-// caller waiting on its attempt that it waits, and starts its wait.
-func (v *verbs) hold(ctx context.Context, log dlog.Logger, entry *pendingCreate, network *namingNetworkError) (attemptResult, error) {
+// hold records ENTRY as waiting for WHY, durably, answers every caller waiting
+// on its attempt that it waits, and starts its wait.
+func (v *verbs) hold(ctx context.Context, log dlog.Logger, entry *pendingCreate, why holdReason) (attemptResult, error) {
 	v.pending.mu.Lock()
 	reporters := append(append([]CreateProgress(nil), entry.subscribers...), entry.waiters...)
 	v.pending.mu.Unlock()
 	encoded, err := encodeHeldSpec(entry.spec)
 	if err != nil {
-		log.Error(opPendingCreate, "the create held for the network could not be encoded; it fails instead", dlog.Context{"cause": err.Error()})
-		return attemptResult{}, fmt.Errorf("hold the create for the network: %w", err)
+		log.Error(opPendingCreate, "the held create could not be encoded; it fails instead", dlog.Context{"cause": err.Error(), "held_for": why.cause})
+		return attemptResult{}, fmt.Errorf("hold the create for %s: %w", why.cause, err)
 	}
 	if err := v.deps.DB.PutQueuedCreate(context.WithoutCancel(ctx), wsm.QueuedCreate{
 		Key: entry.key, ID: string(entry.id), Spec: encoded, OpIDs: opIDsOf(reporters), QueuedAt: v.now(),
 	}); err != nil {
-		log.Error(opPendingCreate, "the create held for the network could not be recorded; it fails instead", dlog.Context{"cause": err.Error()})
-		return attemptResult{}, fmt.Errorf("hold the create for the network: %w", err)
+		log.Error(opPendingCreate, "the held create could not be recorded; it fails instead", dlog.Context{"cause": err.Error(), "held_for": why.cause})
+		return attemptResult{}, fmt.Errorf("hold the create for %s: %w", why.cause, err)
 	}
 	// THE LATCH IS TAKEN BEFORE ANYONE IS TOLD THE CREATE WAITS, so a
-	// restoration that comes after that answer is never missed.
-	restored := v.deps.Network.Restored()
-	wait := &NetworkWaitError{ID: entry.id, Evidence: network.verdict.Evidence}
+	// release that comes after that answer is never missed.
+	released := why.latch(context.WithoutCancel(ctx), log)
+	wait := why.answer(entry.id)
 	v.pending.mu.Lock()
 	entry.held, entry.persisted, entry.wasHeld = true, true, true
+	entry.tellHeld, entry.heldFor = why.tell, why.cause
 	entry.subscribers, entry.waiters = mergeReporters(entry.subscribers, entry.waiters), nil
 	entry.result = attemptResult{err: wait}
 	attempt := entry.attempt
 	entry.attempt = nil
 	v.pending.mu.Unlock()
-	log.Info(opPendingCreate, "the create waits for the network; it resumes from the naming call when the network is restored", dlog.Context{
-		"cause": "network", "evidence": string(network.verdict.Evidence), "detail": network.verdict.Detail,
-		"naming_cause": network.cause, "subscribers": len(reporters),
-	})
+	log.Info(opPendingCreate, why.waits, dlog.Merge(why.fields, dlog.Context{
+		"cause": why.cause, "subscribers": len(reporters),
+	}))
 	for _, r := range reporters {
-		r.WaitingForNetwork(entry.id)
+		why.tell(r, entry.id)
 	}
 	close(attempt)
-	v.resumeOnRestore(entry, restored)
+	v.resumeOn(entry, released, why.cause)
 	return entry.result, nil
 }
 
-// resumeOnRestore waits, on its own goroutine, for RESTORED -- the
-// network-restored latch, taken when the create was held -- then runs ENTRY
+// resumeOn waits, on its own goroutine, for RELEASED -- the latch of what the
+// create was held for (CAUSE), taken when it was held -- then runs ENTRY
 // again. It ends with the daemon, leaving the held row for the next one.
-func (v *verbs) resumeOnRestore(entry *pendingCreate, restored <-chan struct{}) {
+func (v *verbs) resumeOn(entry *pendingCreate, released <-chan struct{}, cause string) {
 	life := v.deps.Lifetime
 	inflight.Standing(func() {
-		log := v.deps.Log.Global().With(dlog.Context{"create_id": string(entry.id), "repo_dir": entry.spec.RepoDir})
+		log := v.deps.Log.Global().With(dlog.Context{"create_id": string(entry.id), "repo_dir": entry.spec.RepoDir, "held_for": cause})
 		select {
-		case <-restored:
+		case <-released:
 		case <-life.Done():
-			log.Info(opPendingCreate, "the daemon ended while the create waited for the network; the next daemon resumes it", nil)
+			log.Info(opPendingCreate, "the daemon ended while the create was held; the next daemon resumes it", nil)
 			return
 		}
 		v.pending.mu.Lock()
 		entry.held = false
 		entry.attempt = make(chan struct{})
 		v.pending.mu.Unlock()
-		log.Info(opPendingCreate, "the network is restored; the held create resumes from the naming call", nil)
+		log.Info(opPendingCreate, "what the create was held for is over; the held create resumes from the start", nil)
 		spec := entry.spec
 		spec.Progress = entryProgress{set: &v.pending, entry: entry}
 		created, err := v.attemptCreate(life, spec)
@@ -427,32 +555,54 @@ func (v *verbs) RecoverQueuedCreates(ctx context.Context) error {
 		entry := &pendingCreate{
 			id: PendingCreateID(row.ID), key: row.Key, spec: spec,
 			held: true, persisted: true, wasHeld: true, subscribers: reporters,
+			tellHeld: func(r CreateProgress, id PendingCreateID) { r.WaitingForNetwork(id) }, heldFor: "network",
 		}
 		v.pending.byKey[row.Key] = entry
 		v.pending.mu.Unlock()
 		restored := v.deps.Network.Restored()
-		log.Info(opPendingCreate, "took up a create a previous daemon held for the network", dlog.Merge(fields, dlog.Context{
+		log.Info(opPendingCreate, "took up a create a previous daemon held", dlog.Merge(fields, dlog.Context{
 			"queued_at": row.QueuedAt, "repo_dir": spec.RepoDir,
 		}))
-		v.resumeOnRestore(entry, restored)
+		v.resumeOn(entry, restored, "network")
 	}
 	return nil
 }
 
+// heldWhy words, for the requester's notice, why a create was held for
+// HELDFOR (holdReason.cause).
+func heldWhy(heldFor string) string {
+	if heldFor == "requester_turn" {
+		return "because it forked your own conversation from inside its first turn, which had nothing finished to carry yet, so agent-repl held it until that turn ended"
+	}
+	return "because this machine could not reach the network, so agent-repl held it until the network was back"
+}
+
 // tellRequesterDequeued tells a held create's requesting workspace how it
-// ended: the requester was answered only that it waits.
-func (v *verbs) tellRequesterDequeued(ctx context.Context, log dlog.Logger, spec CreateSpec, created wsm.Workspace, cause error) {
+// ended, held for HELDFOR: the requester was answered only that it waits. A
+// requester that has closed since is told nothing: nothing of it reads the
+// notice.
+func (v *verbs) tellRequesterDequeued(ctx context.Context, log dlog.Logger, spec CreateSpec, heldFor string, created wsm.Workspace, cause error) {
 	if spec.Requester == nil {
+		return
+	}
+	log = log.With(dlog.Context{"requester": string(*spec.Requester), "held_for": heldFor})
+	requester, err := v.deps.DB.Workspace(ctx, *spec.Requester)
+	if err != nil {
+		log.Error(opPendingCreate, "the held create's requester could not be read; it is not told how the create ended", dlog.Context{"cause": err.Error()})
+		return
+	}
+	if requester.Closed {
+		log.Info(opPendingCreate, "the held create's requester has closed; it is not told how the create ended", nil)
 		return
 	}
 	outcome := fmt.Sprintf("It has now been created as `%s`, in `%s`.", created.Name, created.Dir)
 	if cause != nil {
 		outcome = "It could not be created after all:\n\n" + cause.Error()
 	}
-	log = log.With(dlog.Context{"requester": string(*spec.Requester)})
 	notice, err := v.composeBrief(ctx, log, opPendingCreate, BriefCreateDequeued, map[string]string{
 		"request": describeCreateRequest(spec),
 		"outcome": outcome,
+		"why":     heldWhy(heldFor),
 	})
 	if err != nil {
 		return
@@ -461,7 +611,7 @@ func (v *verbs) tellRequesterDequeued(ctx context.Context, log dlog.Logger, spec
 	if _, err := v.queueBrief(ctx, log, opPendingCreate, "the requesting workspace's", "the held create's outcome", submission); err != nil {
 		return
 	}
-	log.Info(opPendingCreate, "told the requesting workspace how the create held for the network ended", dlog.Context{"turn": string(submission.Turn)})
+	log.Info(opPendingCreate, "told the requesting workspace how the held create ended", dlog.Context{"turn": string(submission.Turn)})
 }
 
 // entryProgress relays a pending create's stages to every caller attached to
@@ -486,6 +636,12 @@ func (p entryProgress) Stage(stage CreateStage) {
 func (p entryProgress) WaitingForNetwork(id PendingCreateID) {
 	for _, r := range p.reporters() {
 		r.WaitingForNetwork(id)
+	}
+}
+
+func (p entryProgress) WaitingForRequesterTurn(id PendingCreateID) {
+	for _, r := range p.reporters() {
+		r.WaitingForRequesterTurn(id)
 	}
 }
 

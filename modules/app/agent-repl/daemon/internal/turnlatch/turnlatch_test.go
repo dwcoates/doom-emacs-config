@@ -30,6 +30,7 @@ func TestALatchIsReleasedOnlyByItsWorkspacesTurnEndOrClose(t *testing.T) {
 		{name: "a turn starting", edge: func(l *Latches) { l.TurnStarted(ws) }},
 		{name: "an ask opening", edge: func(l *Latches) { l.NeedsInput(ws) }},
 		{name: "a landing", edge: func(l *Latches) { l.Landed(ws) }},
+		{name: "an owned pull request", edge: func(l *Latches) { l.PullRequestOwned(ws, wsm.PullRequestKey{}) }},
 		{name: "another workspace's turn ending", edge: func(l *Latches) { l.TurnEnded(other) }},
 	}
 	for _, tc := range tests {

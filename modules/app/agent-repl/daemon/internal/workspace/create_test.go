@@ -1003,9 +1003,12 @@ type recordingProgress struct {
 	op      string
 	stages  []CreateStage
 	waiting []PendingCreateID
-	created []wsm.Workspace
-	failed  []error
-	ended   chan struct{}
+	// turnWaiting are the pending refs it was told wait for their
+	// requester's turn.
+	turnWaiting []PendingCreateID
+	created     []wsm.Workspace
+	failed      []error
+	ended       chan struct{}
 	// held, when set, is sent each pending ref the reporter is told waits.
 	held chan PendingCreateID
 }
@@ -1020,6 +1023,15 @@ func (r *recordingProgress) WaitingForNetwork(id PendingCreateID) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.waiting = append(r.waiting, id)
+	if r.held != nil {
+		r.held <- id
+	}
+}
+
+func (r *recordingProgress) WaitingForRequesterTurn(id PendingCreateID) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.turnWaiting = append(r.turnWaiting, id)
 	if r.held != nil {
 		r.held <- id
 	}
@@ -3071,6 +3083,50 @@ func TestCreateRefusesAForkOfAParentStillInItsFirstTurn(t *testing.T) {
 	}
 	if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: opRefusal}); !ok {
 		t.Fatalf("records = %+v, want the refusal recorded at info", f.log.logger.Records())
+	}
+}
+
+func TestCreateDecidesAForkOfAParentInItsFirstTurnBeforeAnythingIsBuilt(t *testing.T) {
+	tests := []struct {
+		name      string
+		requester func(f *fixture, parent ids.WorkspaceID, repoDir string) *ids.WorkspaceID
+		supplied  string
+		wantHeld  bool
+	}{
+		{name: "another workspace's fork is refused", requester: func(f *fixture, _ ids.WorkspaceID, repoDir string) *ids.WorkspaceID {
+			other := f.workspaceInRepo(t, "other", repoDir)
+			return &other.ID
+		}},
+		{name: "a named fork of another workspace is refused", supplied: "named-fork", requester: func(*fixture, ids.WorkspaceID, string) *ids.WorkspaceID { return nil }},
+		{name: "the requester's own fork waits for its turn", wantHeld: true, requester: func(_ *fixture, parent ids.WorkspaceID, _ string) *ids.WorkspaceID {
+			return &parent
+		}},
+		{name: "the requester's own named fork waits for its turn", supplied: "named-fork", wantHeld: true, requester: func(_ *fixture, parent ids.WorkspaceID, _ string) *ids.WorkspaceID {
+			return &parent
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: the parent's shim answers that its turn in flight is its first.
+			f, parent, spec := forkFixture(t, nil)
+			f.fleet.forkProbeErr = fmt.Errorf("%w: %w: the turn-opening record r1 is the parent's first", ErrForkRefused, ErrForkNothingFinished)
+			spec.Requester = tc.requester(f, parent, spec.RepoDir)
+			spec.Name = tc.supplied
+
+			// Act.
+			_, err := f.verbs.Create(context.Background(), spec)
+
+			// Assert: held or refused, and in either case nothing built.
+			if held := IsRequesterTurnWait(err); held != tc.wantHeld {
+				t.Fatalf("Create = %v, held = %v, want held = %v", err, held, tc.wantHeld)
+			}
+			if !tc.wantHeld {
+				asRefusal(t, err, ArmForkSourceHasNoFinishedTurn)
+			}
+			if len(f.git.created) != 0 || len(f.db.registered) != 0 || len(f.db.pendingForks) != 0 {
+				t.Fatalf("worktrees %v registrations %v pending forks %v, want nothing made", f.git.created, f.db.registered, f.db.pendingForks)
+			}
+		})
 	}
 }
 

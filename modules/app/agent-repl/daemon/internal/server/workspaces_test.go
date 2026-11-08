@@ -3048,6 +3048,61 @@ func TestABackgroundCreateHeldForTheNetworkSaysSoOnItsOp(t *testing.T) {
 	}
 }
 
+// TestCreateWorkspaceAnswersACreateHeldForItsRequestersTurn pins the
+// synchronous form's answer for a workspace forking itself in its first turn:
+// the waiting_for_requester_turn arm naming the pending create, never an
+// error.
+func TestCreateWorkspaceAnswersACreateHeldForItsRequestersTurn(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	repoRef := registeredRepoRef(h)
+	h.Verbs.createTurnHeld = "create-turn"
+	log := dlog.NewTestLogger()
+	h.Server.(*server).log = log
+
+	// Act
+	resp, err := h.Client.CreateWorkspace(context.Background(), connect.NewRequest(standardCreate(repoRef, "")))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	if got := resp.Msg.GetWaitingForRequesterTurn().GetCreate().GetId(); got != "create-turn" {
+		t.Fatalf("result = %v, want waiting_for_requester_turn naming create-turn", resp.Msg.GetResult())
+	}
+	record, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: "daemon.server.create_workspace",
+		Message: "the create waits for its requester's turn to end; it completes once that turn has ended"})
+	if !ok || record.Context["requester"] != "ws-requester" {
+		t.Fatalf("record = %+v, want the wait recorded naming the requester", record)
+	}
+}
+
+// TestABackgroundCreateHeldForItsRequestersTurnSaysSoOnItsOp pins the
+// option-B form: the op is told the create waits for the requester's turn,
+// and no terminal step follows it.
+func TestABackgroundCreateHeldForItsRequestersTurnSaysSoOnItsOp(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	repoRef := registeredRepoRef(h)
+	h.Verbs.createTurnHeld = "create-turn"
+	stream := proveDaemonSubscription(t, h)
+
+	// Act
+	resp, err := h.Client.CreateWorkspace(context.Background(), connect.NewRequest(standardCreate(repoRef, "op-turn")))
+
+	// Assert
+	if err != nil || resp.Msg.GetAccepted() == nil {
+		t.Fatalf("CreateWorkspace = %v, %v; want an ack", resp.Msg.GetResult(), err)
+	}
+	if !stream.Receive() {
+		t.Fatalf("receive the wait: %v", stream.Err())
+	}
+	prog := stream.Msg().GetMutationProgress()
+	if prog.GetOpId() != "op-turn" || prog.GetCreate().GetWaitingForRequesterTurn().GetCreate().GetId() != "create-turn" {
+		t.Fatalf("progress = %v, want op-turn waiting for its requester's turn as create-turn", prog)
+	}
+}
+
 // TestCreateWorkspaceAcksAJoinedRequestWithTheCreateItJoined pins that an
 // identical request is acked naming the pending create it joined.
 func TestCreateWorkspaceAcksAJoinedRequestWithTheCreateItJoined(t *testing.T) {
@@ -3082,6 +3137,11 @@ func TestACreatesReporterPublishesEveryStepOnItsOp(t *testing.T) {
 			report: func(r workspace.CreateProgress) { r.WaitingForNetwork("create-1") },
 			check: func(p *agentreplv1.WorkspaceCreateProgress) bool {
 				return p.GetWaitingForNetwork().GetCreate().GetId() == "create-1"
+			}},
+		{name: "waiting for the requester's turn",
+			report: func(r workspace.CreateProgress) { r.WaitingForRequesterTurn("create-1") },
+			check: func(p *agentreplv1.WorkspaceCreateProgress) bool {
+				return p.GetWaitingForRequesterTurn().GetCreate().GetId() == "create-1"
 			}},
 		{name: "created",
 			report: func(r workspace.CreateProgress) { r.Created(wsm.Workspace{ID: "ws-1", Dir: "/d", Name: "minted"}) },

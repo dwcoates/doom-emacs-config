@@ -62,3 +62,6 @@ func (l *Latches) NeedsInput(ids.WorkspaceID) {}
 
 // Landed implements wsedges.Observer: no latch waits on a landing.
 func (l *Latches) Landed(ids.WorkspaceID) {}
+
+// PullRequestOwned implements wsedges.Observer: no latch waits on a link.
+func (l *Latches) PullRequestOwned(ids.WorkspaceID, wsm.PullRequestKey) {}
