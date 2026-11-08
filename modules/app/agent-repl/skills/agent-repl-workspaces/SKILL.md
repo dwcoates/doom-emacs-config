@@ -267,8 +267,17 @@ user in the same response what it reorganized and why.
   (`primary` or `workspace{workspace}`), its repository, its `relationship`
   (child{parent} or peer), its `owner` (the workspace and `ownerLands`; absent
   for a peer), `createdBy`, its open `children`, whether it is a one-shot,
-  whether it awaits another workspace, and a cold gate it is parked at. `workspace list` reads every
-  workspace the daemon serves.
+  whether it awaits another workspace, and a cold gate it is parked at.
+- `workspace list` prints `workspace find`'s record, one compact JSON object a
+  line, for every workspace the sidebar draws (open, hidden and recently merged)
+  in every repository, most recently active first. Each line carries `name`,
+  `workspace` (`id`, `dir`), `branch`, `repository` (`id`, `dir`), `summary`
+  (absent when none was ever distilled), `createdAtMs`, `lastActiveAtMs`,
+  `standing`, `createdBy` and `parent` when set, `roster` (`section`: `open`,
+  `hidden` or `merged`; `status.arm`: the live status, e.g. `thinking`,
+  `cold_gate`, `done`, `ready`), and `calling: true` on the record of the
+  workspace the command runs from. To read names with summaries and live status:
+  `agent-repld workspace list | jq -r '[.name, .roster.status.arm, .summary // ""] | @tsv'`.
 - `workspace find [-repository here|DIR] [-since WHEN] [-until WHEN]
   [-standing open|closed|landed] [-text TEXT] [-created-by WS] [-limit N|-all]` lists the
   workspaces the daemon's registry holds, OPEN OR CLOSED (including ones
@@ -276,7 +285,9 @@ user in the same response what it reorganized and why.
   branch, repository, its summary (the one-sentence task summary the
   webapp's topbar draws as the workspace's title), when it was created and
   last active, whether it is open, closed or landed, its `createdBy` and,
-  for a child, its `parent`, most recently active first. WHEN is an age (`90m`, `36h`, `7d`), a date (`2026-10-20`) or
+  for a child, its `parent`, most recently active first. Each record also
+  carries `roster` (section and live status `arm`) when the sidebar draws the
+  workspace, and `calling` true for the caller's own record. WHEN is an age (`90m`, `36h`, `7d`), a date (`2026-10-20`) or
   an RFC 3339 instant: `-since` keeps workspaces active at or after WHEN,
   `-until` keeps workspaces created at or before WHEN. `-text` matches name,
   branch or summary case-insensitively. `-created-by WS` (`-created-by here`)
@@ -287,7 +298,8 @@ user in the same response what it reorganized and why.
   many were omitted. Zettel chat threads and async-merge workspaces are not
   answered. Use it whenever the agent needs to find the workspace that did
   some piece of work, or what ran in a repository or a timeframe, including
-  closed workspaces; `workspace list` reads only what the daemon serves now.
+  closed workspaces; `workspace list` answers the same record for just the
+  workspaces the sidebar draws now.
 - `workspace subscribe WS -events ...` has this workspace's agent told, as a
   prompt drawn nowhere, when WS's turn starts or ends, it needs input, it lands
   or it closes. Subscribe instead of polling, to follow a peer or an unrelated
