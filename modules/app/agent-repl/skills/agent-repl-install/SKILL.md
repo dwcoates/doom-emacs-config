@@ -65,7 +65,7 @@ Every skill agent-repl ships, and where agents can load it. A GLOBAL skill is li
     - b. For an environment variable, have the user add it to their shell profile; it reaches Emacs at step 5.
     - c. For a notification permission, have the user allow the named program in System Settings → Notifications.
     - d. For a bin dir that is not on PATH, have the user add the printed `export PATH=...` line to their shell profile; it reaches Emacs at step 5.
-    - e. For Emacs, after install replaced the app, have the user restart Emacs so the new build runs. If fetching the fork failed for lack of GitHub access, give the user that as a needs-user step (sign in with `gh auth login`, or add an SSH key with access to the fork), NEVER as a manifest defect.
+    - e. For Emacs, after install replaced the app, have the user restart Emacs so the new build runs.
   - For each `failed` line, and each line whose install ran but left it unmet, go to step 4 with that line as the failure.
   - After the user reports each one done, return to step 0.
 
