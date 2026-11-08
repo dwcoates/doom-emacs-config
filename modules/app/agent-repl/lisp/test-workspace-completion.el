@@ -110,5 +110,153 @@
     (should (memq #'agent-repl-workspace-completion-at-point completion-at-point-functions))
     (should (memq #'agent-repl-command-completion-at-point completion-at-point-functions))))
 
+;;;; ---- Marking open workspaces' names ----
+
+(defun agent-repl-test-workspace-completion--marked ()
+  "Return the strings the current buffer marks as open workspaces' names, in order."
+  (mapcar (lambda (ov) (buffer-substring-no-properties (overlay-start ov) (overlay-end ov)))
+          (sort (cl-remove-if-not
+                 (lambda (ov) (overlay-get ov 'agent-repl-workspace-completion-known))
+                 (overlays-in (point-min) (point-max)))
+                (lambda (a b) (< (overlay-start a) (overlay-start b))))))
+
+(defmacro agent-repl-test-workspace-completion--marking (names &rest body)
+  "Run BODY in a buffer marking on change, with NAMES open."
+  (declare (indent 1))
+  `(with-temp-buffer
+     (cl-letf (((symbol-function 'agent-repl-roster-open-workspace-names) (lambda () ,names)))
+       (add-hook 'after-change-functions #'agent-repl--workspace-completion-on-change nil t)
+       ,@body)))
+
+(ert-deftest agent-repl-test-workspace-completion-mark-a-typed-open-name ()
+  "A typed word naming an open workspace is marked."
+  (agent-repl-test-workspace-completion--marking '("parser-fix" "other")
+    ;; Act
+    (insert "ask parser-fix now")
+    ;; Assert
+    (should (equal (agent-repl-test-workspace-completion--marked) '("parser-fix")))))
+
+(ert-deftest agent-repl-test-workspace-completion-mark-wears-the-known-commands-face ()
+  "A marked workspace name wears the very face a known slash command wears."
+  (agent-repl-test-workspace-completion--marking '("parser-fix")
+    ;; Arrange
+    (setq agent-repl--command-completion-catalog
+          '((:name "merge-queue" :aliases nil :description nil :argument-hint nil)))
+    (add-hook 'after-change-functions #'agent-repl--command-completion-on-change nil t)
+    ;; Act
+    (insert "/merge-queue parser-fix")
+    ;; Assert
+    (should (eq (get-char-property 2 'face) 'agent-repl-composer-known))
+    (should (eq (get-char-property 15 'face) (get-char-property 2 'face)))))
+
+(ert-deftest agent-repl-test-workspace-completion-mark-skips-a-part-of-a-name ()
+  "A word that only begins an open workspace's name is not marked."
+  (agent-repl-test-workspace-completion--marking '("parser-fix")
+    ;; Act
+    (insert "ask parser now")
+    ;; Assert
+    (should-not (agent-repl-test-workspace-completion--marked))))
+
+(ert-deftest agent-repl-test-workspace-completion-mark-skips-a-longer-word ()
+  "A word an open workspace's name is only part of is not marked."
+  (agent-repl-test-workspace-completion--marking '("parser-fix")
+    ;; Act
+    (insert "ask parser-fix-two now")
+    ;; Assert
+    (should-not (agent-repl-test-workspace-completion--marked))))
+
+(ert-deftest agent-repl-test-workspace-completion-mark-skips-a-closed-name ()
+  "A word naming no open workspace is not marked."
+  (agent-repl-test-workspace-completion--marking '()
+    ;; Act
+    (insert "ask parser-fix now")
+    ;; Assert
+    (should-not (agent-repl-test-workspace-completion--marked))))
+
+(ert-deftest agent-repl-test-workspace-completion-mark-skips-a-slash-word ()
+  "A name inside a slash word is the command completion's, never marked here."
+  (agent-repl-test-workspace-completion--marking '("parser-fix")
+    ;; Act
+    (insert "run /parser-fix now")
+    ;; Assert
+    (should-not (agent-repl-test-workspace-completion--marked))))
+
+(ert-deftest agent-repl-test-workspace-completion-mark-before-a-period ()
+  "A name ending a sentence is marked without the period."
+  (agent-repl-test-workspace-completion--marking '("parser-fix")
+    ;; Act
+    (insert "ask parser-fix.")
+    ;; Assert
+    (should (equal (agent-repl-test-workspace-completion--marked) '("parser-fix")))))
+
+(ert-deftest agent-repl-test-workspace-completion-mark-a-name-ending-in-a-period ()
+  "A name that itself ends in a period is marked whole."
+  (agent-repl-test-workspace-completion--marking '("v1." "v1")
+    ;; Act
+    (insert "ask v1.")
+    ;; Assert
+    (should (equal (agent-repl-test-workspace-completion--marked) '("v1.")))))
+
+(ert-deftest agent-repl-test-workspace-completion-mark-skips-bare-periods ()
+  "A run of periods alone names nothing, even past the trailing-period trim."
+  (agent-repl-test-workspace-completion--marking '("parser-fix")
+    ;; Act
+    (insert "wait...")
+    ;; Assert
+    (should-not (agent-repl-test-workspace-completion--marked))))
+
+(ert-deftest agent-repl-test-workspace-completion-mark-inside-parens ()
+  "A name wrapped in parens is marked without them."
+  (agent-repl-test-workspace-completion--marking '("parser-fix")
+    ;; Act
+    (insert "(parser-fix)")
+    ;; Assert
+    (should (equal (agent-repl-test-workspace-completion--marked) '("parser-fix")))))
+
+(ert-deftest agent-repl-test-workspace-completion-mark-is-removed-when-the-word-changes ()
+  "Typing on past an open workspace's name unmarks it."
+  (agent-repl-test-workspace-completion--marking '("parser-fix")
+    ;; Arrange
+    (insert "parser-fix")
+    ;; Act
+    (insert "es")
+    ;; Assert
+    (should-not (agent-repl-test-workspace-completion--marked))))
+
+(defmacro agent-repl-test-workspace-completion--composer (text names &rest body)
+  "Run BODY in the one composer, holding TEXT, while NAMES (a place) are open."
+  (declare (indent 2))
+  `(with-temp-buffer
+     (insert ,text)
+     (let ((composer (current-buffer)))
+       (cl-letf (((symbol-function 'agent-repl-roster-open-workspace-names) (lambda () ,names))
+                 ((symbol-function 'agent-repl--input-composers) (lambda () (list composer))))
+         ,@body))))
+
+(ert-deftest agent-repl-test-workspace-completion-mark-composers-marks-a-newly-open-name ()
+  "A roster push that opens a workspace marks its name in every composer."
+  (agent-repl-test-workspace-completion--composer "ask parser-fix" '("parser-fix")
+    ;; Act
+    (agent-repl--workspace-completion-mark-composers nil)
+    ;; Assert
+    (should (equal (agent-repl-test-workspace-completion--marked) '("parser-fix")))))
+
+(ert-deftest agent-repl-test-workspace-completion-mark-composers-unmarks-a-closed-name ()
+  "A roster push that closes a workspace unmarks its name in every composer."
+  (let ((names '("parser-fix")))
+    (agent-repl-test-workspace-completion--composer "ask parser-fix" names
+      ;; Arrange
+      (agent-repl--workspace-completion-mark-composers nil)
+      (setq names '())
+      ;; Act
+      (agent-repl--workspace-completion-mark-composers nil)
+      ;; Assert
+      (should-not (agent-repl-test-workspace-completion--marked)))))
+
+(ert-deftest agent-repl-test-workspace-completion-mark-composers-is-on-the-roster-hook ()
+  "The re-mark runs on every roster push."
+  (should (memq #'agent-repl--workspace-completion-mark-composers
+                (default-value 'agent-repl-roster-update-functions))))
+
 (provide 'test-workspace-completion)
 ;;; test-workspace-completion.el ends here

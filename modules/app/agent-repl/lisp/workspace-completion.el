@@ -29,6 +29,15 @@
 ;; own table (`agent-repl-completion-match-capf', completion-match.el), never
 ;; by Emacs's prefix-only `:exclusive no' test, which would drop every match
 ;; past a name's first part.
+;;
+;; AN OPEN WORKSPACE'S NAME IS PURPLE IN THE COMPOSER, as a known slash
+;; command is: every name word that names an open workspace exactly -- typed,
+;; completed or pasted -- takes `agent-repl-composer-known' through an overlay
+;; (composer-mark.el), the one face the known commands wear.  A name word
+;; ending a sentence is matched without its trailing periods, as a slash word
+;; is matched without its closing punctuation.  An edit re-marks the lines it
+;; touched; a roster push, which may open or close a workspace, re-marks every
+;; composer whole.
 
 ;;; Code:
 
@@ -38,6 +47,10 @@
 (declare-function agent-repl-roster-open-workspace-names "agent-repl-roster" ())
 (declare-function agent-repl-completion-match-capf "completion-match" (beg end table &rest props))
 (declare-function agent-repl-completion-match-table "completion-match" (category collection))
+(declare-function agent-repl-composer-mark-lines "composer-mark" (beg end tag find))
+(declare-function agent-repl--input-composers "input" ())
+
+(defvar agent-repl-roster-update-functions)
 
 (defconst agent-repl--workspace-completion-name-chars "-a-zA-Z0-9_."
   "The characters a workspace name word is made of, as a `skip-chars' set.")
@@ -93,6 +106,58 @@ name.  Deliberately unlogged: completion runs per keystroke."
     (agent-repl-completion-match-capf
      (car bounds) (cdr bounds) (agent-repl--workspace-completion-table names)
      :annotation-function (lambda (_candidate) " workspace"))))
+
+;;;; ---- Marking open workspaces' names ----
+
+(defun agent-repl--workspace-completion-known-word (start end names)
+  "Return (START . END'), the name word START to END naming one of NAMES, or nil.
+END' is END, or END less the word's trailing periods when only the shorter
+word names one."
+  (let* ((word (buffer-substring-no-properties start end))
+         (bare (string-trim-right word "\\.+")))
+    (cond
+     ((member word names) (cons start end))
+     ((and (not (string-empty-p bare)) (member bare names))
+      (cons start (+ start (length bare)))))))
+
+(defun agent-repl--workspace-completion-next-known (names)
+  "Return a finder of the next name word naming one of NAMES, for marking.
+The finder takes a LIMIT and answers the next such word before it as
+\(START . END), or nil, leaving point past it.  A name word is
+`agent-repl--workspace-completion-bounds''s: a word that is part of a slash
+word is never one."
+  (let ((re (concat "[" agent-repl--workspace-completion-name-chars "]+")))
+    (lambda (limit)
+      (let (found)
+        (while (and names (not found) (re-search-forward re limit t))
+          (unless (eq (char-before (match-beginning 0)) ?/)
+            (setq found (agent-repl--workspace-completion-known-word
+                         (match-beginning 0) (match-end 0) names))))
+        found))))
+
+(defun agent-repl--workspace-completion-mark (beg end)
+  "Mark every open workspace's name on the lines BEG to END, and unmark the rest.
+Marked through `agent-repl-composer-mark-lines', in the face known slash
+commands wear."
+  (agent-repl-composer-mark-lines
+   beg end 'agent-repl-workspace-completion-known
+   (agent-repl--workspace-completion-next-known (agent-repl-roster-open-workspace-names))))
+
+(defun agent-repl--workspace-completion-on-change (beg end _len)
+  "Re-mark the composer's lines BEG to END after an edit.
+The composer's `after-change-functions' entry; unlogged, as it runs per
+keystroke."
+  (agent-repl--workspace-completion-mark beg end))
+
+(defun agent-repl--workspace-completion-mark-composers (_roster)
+  "Re-mark every composer whole, as a roster push may open or close a workspace.
+Installed on `agent-repl-roster-update-functions'; unlogged, as the roster
+push it follows is logged."
+  (dolist (buf (agent-repl--input-composers))
+    (with-current-buffer buf
+      (agent-repl--workspace-completion-mark (point-min) (point-max)))))
+
+(add-hook 'agent-repl-roster-update-functions #'agent-repl--workspace-completion-mark-composers)
 
 (provide 'workspace-completion)
 ;;; workspace-completion.el ends here

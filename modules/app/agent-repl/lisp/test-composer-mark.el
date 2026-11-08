@@ -103,7 +103,7 @@
 (ert-deftest agent-repl-test-composer-mark-every-kind-marks-through-the-helper ()
   "Every composer mark function calls `agent-repl-composer-mark-lines', none hand-rolls one."
   (let ((dir agent-repl-test-composer-mark--dir))
-    (dolist (file '("command-completion.el"))
+    (dolist (file '("command-completion.el" "workspace-completion.el"))
       (with-temp-buffer
         (insert-file-contents (expand-file-name file dir))
         (should (search-forward "(agent-repl-composer-mark-lines" nil t))

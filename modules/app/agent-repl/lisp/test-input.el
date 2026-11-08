@@ -5110,6 +5110,13 @@ This is what an Emacs restart does to it.  Returns the new buffer."
     (should (memq #'agent-repl-command-completion-at-point completion-at-point-functions))
     (should (local-variable-p 'completion-at-point-functions))))
 
+(ert-deftest agent-repl-test-input-mode-installs-workspace-name-marking ()
+  "The composer's mode marks open workspaces' names on every edit, buffer-locally."
+  (with-temp-buffer
+    (agent-repl-input-mode)
+    (should (memq #'agent-repl--workspace-completion-on-change after-change-functions))
+    (should (local-variable-p 'after-change-functions))))
+
 ;;;; ---- The composer verb call (`agent-repl--input-call') -----------------
 
 (defvar agent-repl-test-input--call-log nil
