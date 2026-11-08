@@ -1161,8 +1161,8 @@ func TestTheWorkspaceNameIsItsOwnElement(t *testing.T) {
 		{name: "beside the vendor's summary", summarize: func(h *harness) {
 			h.r.OnSessionUpdate(testWS, sessionTitle("Add SPC j keybinding support"))
 		}},
-		{name: "beside the daemon's synthesis", summarize: func(h *harness) {
-			h.r.SetSynthesizedTitle(testWS, "Wire up the reconnect backoff")
+		{name: "beside the agent-set summary", summarize: func(h *harness) {
+			h.r.SetSummary(testWS, "Wire up the reconnect backoff")
 		}},
 	}
 	for _, tt := range tests {
@@ -1232,13 +1232,13 @@ func TestASummaryTheVendorRestatesReplacesTheOneBeforeIt(t *testing.T) {
 	}
 }
 
-func TestTheTitleIsTheDaemonsSynthesis(t *testing.T) {
+func TestTheTitleIsTheAgentSetSummary(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	h.ready(t)
 
 	// Act
-	h.r.SetSynthesizedTitle(testWS, "Wire up the reconnect backoff")
+	h.r.SetSummary(testWS, "Wire up the reconnect backoff")
 
 	// Assert: the daemon's own summary beats the bare workspace name.
 	if got, want := h.view(t).GetTitle().GetText(), "Wire up the reconnect backoff"; got != want {
@@ -1246,26 +1246,26 @@ func TestTheTitleIsTheDaemonsSynthesis(t *testing.T) {
 	}
 }
 
-func TestTheDaemonsSynthesisOutranksTheVendorsSummary(t *testing.T) {
+func TestTheAgentSetSummaryOutranksTheVendorsSummary(t *testing.T) {
 	// Arrange: the vendor stated its ai-title first.
 	h := newHarness(t)
 	h.ready(t)
 	h.r.OnSessionUpdate(testWS, sessionTitle("the vendor's own summary"))
 
 	// Act
-	h.r.SetSynthesizedTitle(testWS, "Distill the prompts into a summary")
+	h.r.SetSummary(testWS, "Distill the prompts into a summary")
 
-	// Assert: the distillation of the user's prompts is the workspace summary.
+	// Assert: the summary the agent set is the title.
 	if got, want := h.view(t).GetTitle().GetText(), "Distill the prompts into a summary"; got != want {
 		t.Fatalf("title = %q, want %q", got, want)
 	}
 }
 
-func TestALaterVendorSummaryDoesNotDisplaceTheDaemonsSynthesis(t *testing.T) {
+func TestALaterVendorSummaryDoesNotDisplaceTheAgentSetSummary(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	h.ready(t)
-	h.r.SetSynthesizedTitle(testWS, "Distill the prompts into a summary")
+	h.r.SetSummary(testWS, "Distill the prompts into a summary")
 
 	// Act
 	h.r.OnSessionUpdate(testWS, sessionTitle("the vendor's own summary"))
@@ -1276,15 +1276,15 @@ func TestALaterVendorSummaryDoesNotDisplaceTheDaemonsSynthesis(t *testing.T) {
 	}
 }
 
-func TestAnEmptySynthesizedTitleFallsBackToTheVendorsSummary(t *testing.T) {
+func TestARetractedSummaryFallsBackToTheVendorsSummary(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	h.ready(t)
 	h.r.OnSessionUpdate(testWS, sessionTitle("the vendor's own summary"))
-	h.r.SetSynthesizedTitle(testWS, "a title to be retracted")
+	h.r.SetSummary(testWS, "a title to be retracted")
 
-	// Act: retract it, as the synthesizer does after a /clear.
-	h.r.SetSynthesizedTitle(testWS, "")
+	// Act: retract it, as a /clear does.
+	h.r.SetSummary(testWS, "")
 
 	// Assert
 	if got, want := h.view(t).GetTitle().GetText(), "the vendor's own summary"; got != want {
@@ -1292,14 +1292,14 @@ func TestAnEmptySynthesizedTitleFallsBackToTheVendorsSummary(t *testing.T) {
 	}
 }
 
-func TestARetractedSynthesisWithNoVendorSummaryLeavesNoTitle(t *testing.T) {
+func TestARetractedSummaryWithNoVendorSummaryLeavesNoTitle(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	h.ready(t)
-	h.r.SetSynthesizedTitle(testWS, "a title to be retracted")
+	h.r.SetSummary(testWS, "a title to be retracted")
 
-	// Act: retract it, as the synthesizer does after a /clear.
-	h.r.SetSynthesizedTitle(testWS, "")
+	// Act: retract it, as a /clear does.
+	h.r.SetSummary(testWS, "")
 
 	// Assert
 	if got := h.view(t).GetTitle(); got != nil {
@@ -1327,11 +1327,11 @@ func TestTheShownLinksRideTheTitle(t *testing.T) {
 		noTitle   bool
 	}{
 		{name: "one shown link is opened directly", arrange: func(h *harness) {
-			h.r.SetSynthesizedTitle(testWS, "Wire up the reconnect backoff")
+			h.r.SetSummary(testWS, "Wire up the reconnect backoff")
 			h.r.SetLinks(testWS, []Link{docLink})
 		}, wantText: "Wire up the reconnect backoff", wantLinks: single},
 		{name: "two shown links drop a menu in the order given", arrange: func(h *harness) {
-			h.r.SetSynthesizedTitle(testWS, "Wire up the reconnect backoff")
+			h.r.SetSummary(testWS, "Wire up the reconnect backoff")
 			h.r.SetLinks(testWS, []Link{ticketLink, docLink})
 		}, wantText: "Wire up the reconnect backoff", wantLinks: menu},
 		{name: "links set before the summary land with it", arrange: func(h *harness) {
@@ -1339,7 +1339,7 @@ func TestTheShownLinksRideTheTitle(t *testing.T) {
 			h.r.OnSessionUpdate(testWS, sessionTitle("the vendor's own summary"))
 		}, wantText: "the vendor's own summary", wantLinks: single},
 		{name: "cleared links leave plain text", arrange: func(h *harness) {
-			h.r.SetSynthesizedTitle(testWS, "Wire up the reconnect backoff")
+			h.r.SetSummary(testWS, "Wire up the reconnect backoff")
 			h.r.SetLinks(testWS, []Link{docLink})
 			h.r.SetLinks(testWS, nil)
 		}, wantText: "Wire up the reconnect backoff"},
@@ -1378,13 +1378,13 @@ func TestSetLinksKeepsItsOwnCopy(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	h.ready(t)
-	h.r.SetSynthesizedTitle(testWS, "Wire up the reconnect backoff")
+	h.r.SetSummary(testWS, "Wire up the reconnect backoff")
 	shown := []Link{docLink}
 
 	// Act: the caller reuses its slice after handing it over.
 	h.r.SetLinks(testWS, shown)
 	shown[0] = ticketLink
-	h.r.SetSynthesizedTitle(testWS, "Wire up the reconnect backoff again")
+	h.r.SetSummary(testWS, "Wire up the reconnect backoff again")
 
 	// Assert
 	if got := h.view(t).GetTitle().GetLinks().GetSingle().GetUrl(); got != docLink.URL {
@@ -1396,7 +1396,7 @@ func TestSettingTheLinksRepublishesTheStrip(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	h.ready(t)
-	h.r.SetSynthesizedTitle(testWS, "Wire up the reconnect backoff")
+	h.r.SetSummary(testWS, "Wire up the reconnect backoff")
 	before := h.view(t)
 
 	// Act

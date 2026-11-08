@@ -4,33 +4,25 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"fmt"
-
-	shimv1 "agentrepl/proto/shim/v1"
 
 	"agent-repld/internal/dlog"
 )
 
-// THE WORKSPACE SUMMARY the topbar draws (internal/titlesynth), kept so a
-// daemon restart does not drop every workspace back to its bare name until its
-// session comes up and a new summary is distilled.
+// THE WORKSPACE SUMMARY the topbar draws: the one sentence the workspace's own
+// agent set to state its task (agentrepl.v1.SetWorkspaceSummary). It is kept
+// here so a daemon restart draws every workspace's summary at once.
 //
-// THE SUMMARY AND ITS CADENCE ARE ONE RECORD. The synthesizer decides whether a
-// digest is due a model call from the digest it last summarized (its hash, its
-// prompt count, its boundary). Keeping the title without that state would make
-// every restart a "first title" and spend a model call per workspace on a
-// summary that was already standing; keeping it in the same row makes the two
-// unable to disagree.
-//
-// A /clear KEEPS THE TITLE AND FORGETS THE DIGEST (ResetWorkspaceSummaryDigest):
-// the title stands until the next distillation replaces it, and a NULL digest
-// is what makes that next trigger due at once, across a restart as within one.
+// NO ROW IS THE SUMMARY OWED. A new workspace has none, and a /clear drops the
+// one that stood (DropWorkspaceSummary), because the conversation it described
+// is gone. While none stands the daemon asks the workspace's agent for one, so
+// "owed" is never a second fact that could disagree with the row.
 
-// workspaceSummariesDDL is the layout-56 addition. A new table, so the step is
-// additive: the build before it never names it. The fresh-file schema appends
-// this same text (schema.go), so a migrated file and a created one cannot
-// differ.
-const workspaceSummariesDDL = `
+// workspaceSummariesLayout56DDL is the layout-56 step exactly as it shipped,
+// when the daemon distilled the summary itself and kept the digest it was
+// distilled from beside it. Layout 110 dropped those columns
+// (workspaceSummariesDropDigestDDL); a test pins that the migrated table
+// matches a fresh one.
+const workspaceSummariesLayout56DDL = `
 CREATE TABLE workspace_summaries (
   workspace_id    TEXT PRIMARY KEY REFERENCES workspaces(id) ON DELETE CASCADE,
   title           TEXT NOT NULL,
@@ -42,69 +34,43 @@ CREATE TABLE workspace_summaries (
 );
 `
 
-// WorkspaceSummary is one workspace's synthesized summary and the digest it
-// was distilled from.
-type WorkspaceSummary struct {
-	// Title is the summary the topbar draws. Never empty: an empty summary is
-	// a retraction, which deletes the row.
-	Title string
-	// Digest is the digest Title was distilled from, or nil once a /clear has
-	// reset the cadence and the next trigger is due a new summary at once.
-	Digest *SummaryDigest
-}
+// workspaceSummariesDDL is the table as a fresh file creates it (schema.go).
+const workspaceSummariesDDL = `
+CREATE TABLE workspace_summaries (
+  workspace_id    TEXT PRIMARY KEY REFERENCES workspaces(id) ON DELETE CASCADE,
+  title           TEXT NOT NULL
+);
+`
 
-// SummaryDigest is the cadence state of one distillation.
-type SummaryDigest struct {
-	// Hash fingerprints the digest's boundary and prompts.
-	Hash string
-	// Prompts is how many prompts the digest held.
-	Prompts int
-	// Boundary is the context boundary the digest was measured from.
-	Boundary shimv1.TitleDigestBoundary
-}
+// workspaceSummariesDropDigestDDL is the layout-110 step: the summary is the
+// workspace agent's own, so no digest stands beside it.
+//
+// THE TABLE IS REBUILT, NOT ALTERED. SQLite's DROP COLUMN rewrites the
+// table's stored CREATE text, and the comment layout 56 wrote inside it
+// leaves that text unparsable once the digest columns go. So the old table
+// steps aside, the fresh one is created from the very text a fresh file uses,
+// and every title is copied across.
+const workspaceSummariesDropDigestDDL = `
+ALTER TABLE workspace_summaries RENAME TO workspace_summaries_layout56;
+` + workspaceSummariesDDL + `
+INSERT INTO workspace_summaries (workspace_id, title) SELECT workspace_id, title FROM workspace_summaries_layout56;
+DROP TABLE workspace_summaries_layout56;
+`
 
-// validSummaryBoundary reports whether b is a boundary a digest is measured
-// from. UNSPECIFIED is a malformed frame, and anything else is no boundary the
-// shim states.
-func validSummaryBoundary(b shimv1.TitleDigestBoundary) bool {
-	return b == shimv1.TitleDigestBoundary_TITLE_DIGEST_BOUNDARY_NONE ||
-		b == shimv1.TitleDigestBoundary_TITLE_DIGEST_BOUNDARY_CLEAR
-}
-
-// validateSummary refuses a summary no distillation produces.
-func validateSummary(sum WorkspaceSummary) error {
-	if sum.Title == "" {
-		return errors.New("a summary has a title; an empty one is a retraction")
-	}
-	if d := sum.Digest; d != nil {
-		if d.Hash == "" || d.Prompts < 0 || !validSummaryBoundary(d.Boundary) {
-			return fmt.Errorf("a summary's digest has a hash, a non-negative prompt count and a known boundary, got %+v", *d)
-		}
-	}
-	return nil
-}
+// errEmptySummary refuses an empty summary: no summary is the absence of a
+// row, never an empty one.
+var errEmptySummary = errors.New("a summary is never empty; no summary is no row")
 
 // PutWorkspaceSummary records a workspace's summary, replacing any it had. An
-// unknown workspace is ErrNotFound: a summary distilled for a workspace
-// forgotten mid-flight has nothing to belong to. A summary no distillation
-// produces is a defect in the caller and is refused rather than stored.
-func (s *store) PutWorkspaceSummary(ctx context.Context, id WorkspaceID, sum WorkspaceSummary) error {
+// unknown workspace is ErrNotFound. The summary's FORMAT is the caller's to
+// validate (the workspace verbs); an empty summary is a defect in the caller
+// and is refused rather than stored.
+func (s *store) PutWorkspaceSummary(ctx context.Context, id WorkspaceID, summary string) error {
 	const op = "daemon.wsm.put_workspace_summary"
-	fields := dlog.Context{"workspace": string(id), "title": sum.Title, "reset": sum.Digest == nil}
-	if err := validateSummary(sum); err != nil {
-		err = fmt.Errorf("wsm: workspace summary of %s: %w", id, err)
-		s.log.Error(op, "refused a malformed workspace summary", withError(fields, err))
-		return err
-	}
-	var (
-		hash     sql.NullString
-		prompts  sql.NullInt64
-		boundary sql.NullInt64
-	)
-	if d := sum.Digest; d != nil {
-		hash = sql.NullString{String: d.Hash, Valid: true}
-		prompts = sql.NullInt64{Int64: int64(d.Prompts), Valid: true}
-		boundary = sql.NullInt64{Int64: int64(d.Boundary), Valid: true}
+	fields := dlog.Context{"workspace": string(id), "summary": summary}
+	if summary == "" {
+		s.log.Error(op, "refused an empty workspace summary", withError(fields, errEmptySummary))
+		return errEmptySummary
 	}
 	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
 		var existing string
@@ -112,90 +78,80 @@ func (s *store) PutWorkspaceSummary(ctx context.Context, id WorkspaceID, sum Wor
 			return err
 		}
 		_, err := tx.ExecContext(ctx,
-			`INSERT INTO workspace_summaries (workspace_id, title, digest_hash, digest_prompts, digest_boundary) VALUES (?, ?, ?, ?, ?)
-			 ON CONFLICT(workspace_id) DO UPDATE SET
-			   title = excluded.title, digest_hash = excluded.digest_hash,
-			   digest_prompts = excluded.digest_prompts, digest_boundary = excluded.digest_boundary`,
-			id, sum.Title, hash, prompts, boundary)
+			`INSERT INTO workspace_summaries (workspace_id, title) VALUES (?, ?)
+			 ON CONFLICT(workspace_id) DO UPDATE SET title = excluded.title`,
+			id, summary)
 		return err
 	})
 }
 
-// ResetWorkspaceSummaryDigest forgets the digest a workspace's summary was
-// distilled from, keeping the title: a /clear leaves the summary standing
-// until the next distillation, which the reset makes due at once. A workspace
-// with no summary has no digest to forget, which is not an error.
-func (s *store) ResetWorkspaceSummaryDigest(ctx context.Context, id WorkspaceID) error {
-	return s.write(ctx, "daemon.wsm.reset_workspace_summary_digest", dlog.Context{"workspace": string(id)}, func(ctx context.Context, tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx,
-			`UPDATE workspace_summaries SET digest_hash = NULL, digest_prompts = NULL, digest_boundary = NULL WHERE workspace_id = ?`, id)
+// DropWorkspaceSummary deletes a workspace's summary, reporting whether one
+// stood: the conversation it described is gone. A workspace with no summary
+// is not an error.
+func (s *store) DropWorkspaceSummary(ctx context.Context, id WorkspaceID) (bool, error) {
+	var dropped bool
+	err := s.write(ctx, "daemon.wsm.drop_workspace_summary", dlog.Context{"workspace": string(id)}, func(ctx context.Context, tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx, `DELETE FROM workspace_summaries WHERE workspace_id = ?`, id)
+		if err != nil {
+			return err
+		}
+		n, err := res.RowsAffected()
+		dropped = n > 0
 		return err
 	})
+	return dropped, err
 }
 
-// DropWorkspaceSummary deletes a workspace's summary: the conversation it
-// described is gone. A workspace with no summary is not an error.
-func (s *store) DropWorkspaceSummary(ctx context.Context, id WorkspaceID) error {
-	return s.write(ctx, "daemon.wsm.drop_workspace_summary", dlog.Context{"workspace": string(id)}, func(ctx context.Context, tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx, `DELETE FROM workspace_summaries WHERE workspace_id = ?`, id)
-		return err
-	})
-}
+// summaryColumns is every column a summary row is read from, in scanSummary's
+// order: the ONE column list both summary reads share.
+const summaryColumns = `workspace_id, title`
 
-// summaryColumns is every column a WorkspaceSummary is read from, in
-// scanSummary's order: the ONE column list both summary reads share.
-const summaryColumns = `workspace_id, title, digest_hash, digest_prompts, digest_boundary`
-
-// scanSummary reads one stored summary row of summaryColumns. A row no
-// distillation produces is a DecodeError naming its workspace.
-func scanSummary(row interface{ Scan(...any) error }) (WorkspaceID, WorkspaceSummary, error) {
+// scanSummary reads one stored summary row of summaryColumns. An empty stored
+// summary is a DecodeError naming its workspace.
+func scanSummary(row interface{ Scan(...any) error }) (WorkspaceID, string, error) {
 	var (
-		id       WorkspaceID
-		title    string
-		hash     sql.NullString
-		prompts  sql.NullInt64
-		boundary sql.NullInt64
+		id      WorkspaceID
+		summary string
 	)
-	if err := row.Scan(&id, &title, &hash, &prompts, &boundary); err != nil {
-		return "", WorkspaceSummary{}, err
+	if err := row.Scan(&id, &summary); err != nil {
+		return "", "", err
 	}
-	sum, err := decodeSummary(title, hash, prompts, boundary)
-	if err != nil {
-		return "", WorkspaceSummary{}, &DecodeError{Table: "workspace_summaries", Row: string(id), Err: err}
+	if summary == "" {
+		return "", "", &DecodeError{Table: "workspace_summaries", Row: string(id), Err: errEmptySummary}
 	}
-	return id, sum, nil
+	return id, summary, nil
 }
 
 // WorkspaceSummaryOf loads a workspace's summary; the bool is false when none
-// stands. A stored row no distillation produces is a DecodeError.
-func (s *store) WorkspaceSummaryOf(ctx context.Context, id WorkspaceID) (WorkspaceSummary, bool, error) {
+// stands. A stored empty summary is a DecodeError.
+func (s *store) WorkspaceSummaryOf(ctx context.Context, id WorkspaceID) (string, bool, error) {
 	var (
-		out   WorkspaceSummary
+		out   string
 		found bool
 	)
 	err := s.read(ctx, "daemon.wsm.workspace_summary", dlog.Context{"workspace": string(id)}, func(ctx context.Context) error {
-		_, sum, err := scanSummary(s.q(ctx).QueryRowContext(ctx,
+		_, summary, err := scanSummary(s.q(ctx).QueryRowContext(ctx,
 			`SELECT `+summaryColumns+` FROM workspace_summaries WHERE workspace_id = ?`, id))
 		if errors.Is(err, sql.ErrNoRows) {
-			out, found = WorkspaceSummary{}, false
+			out, found = "", false
 			return nil
 		}
 		if err != nil {
 			return err
 		}
-		out, found = sum, true
+		out, found = summary, true
 		return nil
 	})
 	if err != nil {
-		return WorkspaceSummary{}, false, err
+		return "", false, err
 	}
 	return out, found, nil
 }
 
 // summaryRow is one workspace's stored summary, as listRows reads it.
 type summaryRow struct {
-	id  WorkspaceID
-	sum WorkspaceSummary
+	id      WorkspaceID
+	summary string
 }
 
 // ListWorkspaceSummaries loads every stored summary by workspace,
@@ -203,20 +159,20 @@ type summaryRow struct {
 // corrupt row fails the whole read as a DecodeError rather than being skipped.
 // It is what a read over many workspaces (FindWorkspaces) takes, open and
 // closed alike, in one query.
-func (s *store) ListWorkspaceSummaries(ctx context.Context) (map[WorkspaceID]WorkspaceSummary, error) {
-	var out map[WorkspaceID]WorkspaceSummary
+func (s *store) ListWorkspaceSummaries(ctx context.Context) (map[WorkspaceID]string, error) {
+	var out map[WorkspaceID]string
 	err := s.read(ctx, "daemon.wsm.list_workspace_summaries", dlog.Context{}, func(ctx context.Context) error {
 		rows, err := listRows(ctx, s.q(ctx), `SELECT `+summaryColumns+` FROM workspace_summaries`,
 			func(row interface{ Scan(...any) error }) (summaryRow, error) {
-				id, sum, err := scanSummary(row)
-				return summaryRow{id: id, sum: sum}, err
+				id, summary, err := scanSummary(row)
+				return summaryRow{id: id, summary: summary}, err
 			})
 		if err != nil {
 			return err
 		}
-		out = make(map[WorkspaceID]WorkspaceSummary, len(rows))
+		out = make(map[WorkspaceID]string, len(rows))
 		for _, r := range rows {
-			out[r.id] = r.sum
+			out[r.id] = r.summary
 		}
 		return nil
 	})
@@ -224,28 +180,4 @@ func (s *store) ListWorkspaceSummaries(ctx context.Context) (map[WorkspaceID]Wor
 		return nil, err
 	}
 	return out, nil
-}
-
-// decodeSummary reads one stored row: the digest columns are all NULL or all
-// set, and the whole record passes the same validation a put does.
-func decodeSummary(title string, hash sql.NullString, prompts, boundary sql.NullInt64) (WorkspaceSummary, error) {
-	sum := WorkspaceSummary{Title: title}
-	switch {
-	case !hash.Valid && !prompts.Valid && !boundary.Valid:
-	case hash.Valid && prompts.Valid && boundary.Valid:
-		if boundary.Int64 < 0 || boundary.Int64 > int64(^uint32(0)>>1) {
-			return WorkspaceSummary{}, fmt.Errorf("a stored boundary is an enum value, got %d", boundary.Int64)
-		}
-		sum.Digest = &SummaryDigest{
-			Hash:     hash.String,
-			Prompts:  int(prompts.Int64),
-			Boundary: shimv1.TitleDigestBoundary(boundary.Int64),
-		}
-	default:
-		return WorkspaceSummary{}, errors.New("a stored digest is all NULL or all set")
-	}
-	if err := validateSummary(sum); err != nil {
-		return WorkspaceSummary{}, err
-	}
-	return sum, nil
 }

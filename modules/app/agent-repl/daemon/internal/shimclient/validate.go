@@ -624,17 +624,6 @@ func validateResolveVendorTaskRequest(req *shimv1.ResolveVendorTaskRequest) erro
 	return nil
 }
 
-// validateGatherTitleDigestRequest is GatherTitleDigestRequest's base function.
-// The message carries no fields (the shim resolves its own transcript), so the
-// only illegal shape is a nil request.
-func validateGatherTitleDigestRequest(req *shimv1.GatherTitleDigestRequest) error {
-	const m = "GatherTitleDigestRequest"
-	if req == nil {
-		return invalid(m, m, "request is nil")
-	}
-	return nil
-}
-
 // validateGetForkPointRequest is GetForkPointRequest's base function.
 func validateGetForkPointRequest(req *shimv1.GetForkPointRequest) error {
 	const m = "GetForkPointRequest"

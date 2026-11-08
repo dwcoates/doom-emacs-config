@@ -60,6 +60,11 @@ var errFake = errors.New("workspace test: arranged failure")
 type fakeDB struct {
 	wsm.DB
 
+	// storedSummaries are the summaries WorkspaceSummaryOf answers;
+	// summaryErr fails that read.
+	storedSummaries map[ids.WorkspaceID]string
+	summaryErr      error
+
 	// deletedJobs is every creation job DeleteCreationJob removed, in order;
 	// deleteJobErr fails the delete.
 	deletedJobs  []ids.WorkspaceID
@@ -3899,11 +3904,43 @@ func (f standDownsFunc) StandDownFolded(ws ids.WorkspaceID) { f(ws) }
 type fakeSummaries struct {
 	restored []ids.WorkspaceID
 	err      error
+	// set is every summary Set recorded, by workspace, in order; setErr fails
+	// the write.
+	set    []setSummary
+	setErr error
+	// owedNote is the note OwedNote answers as owed; empty answers that a
+	// summary stands. owedErr fails the read; owedAsked is every workspace
+	// asked about.
+	owedNote  string
+	owedErr   error
+	owedAsked []ids.WorkspaceID
+}
+
+// setSummary is one summary fakeSummaries.Set recorded.
+type setSummary struct {
+	ws      ids.WorkspaceID
+	summary string
 }
 
 func (s *fakeSummaries) Restore(_ context.Context, ws ids.WorkspaceID) error {
 	s.restored = append(s.restored, ws)
 	return s.err
+}
+
+func (s *fakeSummaries) Set(_ context.Context, ws ids.WorkspaceID, summary string) error {
+	if s.setErr != nil {
+		return s.setErr
+	}
+	s.set = append(s.set, setSummary{ws: ws, summary: summary})
+	return nil
+}
+
+func (s *fakeSummaries) OwedNote(_ context.Context, ws ids.WorkspaceID) (string, bool, error) {
+	s.owedAsked = append(s.owedAsked, ws)
+	if s.owedErr != nil {
+		return "", false, s.owedErr
+	}
+	return s.owedNote, s.owedNote != "", nil
 }
 
 // fakeCacheLapses adapts two functions to CacheLapses.
@@ -4323,4 +4360,13 @@ func (a *fakeAnchors) Anchor(_ context.Context, ws ids.WorkspaceID, pr wsm.PullR
 	}
 	sub.Told = "anchored"
 	return sub, &agentreplv1.PullRequestStatus{}, nil
+}
+
+// WorkspaceSummaryOf answers the stored summary, or summaryErr.
+func (d *fakeDB) WorkspaceSummaryOf(_ context.Context, ws ids.WorkspaceID) (string, bool, error) {
+	if d.summaryErr != nil {
+		return "", false, d.summaryErr
+	}
+	summary, ok := d.storedSummaries[ws]
+	return summary, ok, nil
 }

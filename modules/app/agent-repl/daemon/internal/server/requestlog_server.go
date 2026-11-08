@@ -331,6 +331,13 @@ func (s *requestLoggingServer) ChangeWorkspaceLinks(
 	return serveUnary(s, ctx, "ChangeWorkspaceLinks", req, s.server.ChangeWorkspaceLinks)
 }
 
+func (s *requestLoggingServer) SetWorkspaceSummary(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.SetWorkspaceSummaryRequest],
+) (*connect.Response[agentreplv1.SetWorkspaceSummaryResponse], error) {
+	return serveUnary(s, ctx, "SetWorkspaceSummary", req, s.server.SetWorkspaceSummary)
+}
+
 func (s *requestLoggingServer) SetWorkspaceName(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.SetWorkspaceNameRequest],

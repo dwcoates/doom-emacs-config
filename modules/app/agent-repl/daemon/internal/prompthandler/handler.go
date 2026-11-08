@@ -52,6 +52,8 @@ func newHandler(deps Deps) (*handler, error) {
 		return nil, fmt.Errorf("the prompt handler needs a panel source")
 	case deps.Asks == nil:
 		return nil, fmt.Errorf("the prompt handler needs a standing-ask answerer")
+	case deps.Summaries == nil:
+		return nil, fmt.Errorf("the prompt handler needs the workspace summaries' keeper")
 	}
 	if deps.MintTurn == nil {
 		deps.MintTurn = wsm.NewTurnID
@@ -155,6 +157,10 @@ func (h *handler) submit(ctx context.Context, ws ids.WorkspaceID, said *conversa
 	if isRedrive(ctx) && c.key != "" {
 		h.deps.Feed.ClaimIngress(ws, c.key, turn)
 	}
+	said, err = h.askForOwedSummary(ctx, ws, said, origin, sentBy, target, ask)
+	if err != nil {
+		return Outcome{}, err
+	}
 	disposition, err := h.deps.Queue.Submit(ctx, promptqueue.Submission{
 		WS: ws, Turn: turn, Said: said, Origin: origin, SentBy: sentBy, Target: target, Delivery: delivery, Ask: ask,
 	})
@@ -170,6 +176,29 @@ func (h *handler) submit(ctx context.Context, ws ids.WorkspaceID, said *conversa
 		"thread_question": ask != nil,
 	})
 	return Outcome{Recognition: RecognizedNone, Turn: turn, Disposition: disposition}, nil
+}
+
+// askForOwedSummary closes SAID with the note asking the workspace's agent for
+// its summary while none stands (wssummary): a new workspace, or one whose
+// /clear dropped it. Only a prompt that carries a directive asks — the user's
+// own, or another workspace's agent's — and only one to the main agent: a
+// thread question, a bubble-addressed prompt and a daemon-born brief are
+// never anyone's statement of the workspace's task. The note rides as its own
+// text block, wholly a meta span, so the bubble draws the user's words alone.
+func (h *handler) askForOwedSummary(ctx context.Context, ws ids.WorkspaceID, said *conversationv1.UserSaid, origin conversationv1.PromptOrigin, sentBy *ids.WorkspaceID, target *feedid.Ref, ask *wsm.ThreadAsk) (*conversationv1.UserSaid, error) {
+	if target != nil || ask != nil || (sentBy == nil && !promptorigin.UserSent(origin)) {
+		return said, nil
+	}
+	note, owed, err := h.deps.Summaries.OwedNote(ctx, ws)
+	if err != nil || !owed {
+		return said, err
+	}
+	blocks := make([]*conversationv1.UserContentBlock, 0, len(said.GetContent().GetBlocks())+1)
+	blocks = append(blocks, said.GetContent().GetBlocks()...)
+	blocks = append(blocks, &conversationv1.UserContentBlock{
+		Block: &conversationv1.UserContentBlock_Text{Text: &conversationv1.TextBlock{Text: note}},
+	})
+	return &conversationv1.UserSaid{Content: &conversationv1.UserContent{Blocks: blocks}}, nil
 }
 
 // answerPanel resolves a recognized panel and MIRRORS it into the root feed as

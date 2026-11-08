@@ -727,6 +727,63 @@ func (c *cliClient) SetWorkspaceName(_ context.Context, req *connect.Request[age
 	return connect.NewResponse(&agentreplv1.SetWorkspaceNameResponse{}), c.record(req.Msg)
 }
 
+func (c *cliClient) SetWorkspaceSummary(_ context.Context, req *connect.Request[agentreplv1.SetWorkspaceSummaryRequest]) (*connect.Response[agentreplv1.SetWorkspaceSummaryResponse], error) {
+	return connect.NewResponse(&agentreplv1.SetWorkspaceSummaryResponse{}), c.record(req.Msg)
+}
+
+func TestSummarySendsTheSummaryForTheNamedWorkspace(t *testing.T) {
+	tests := []struct {
+		name   string
+		ws     string
+		wantID string
+	}{
+		{name: "the calling workspace, as here", ws: "here", wantID: "ws-caller"},
+		{name: "a workspace named by its roster name", ws: "peer", wantID: "ws-peer"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newCLIFixture()
+
+			// Act
+			code := f.run(workspaceNoun, "summary", tt.ws, "-text", "Fix the footer")
+
+			// Assert
+			if code != exitSuccess {
+				t.Fatalf("exit %d, stderr %q", code, f.errOut.String())
+			}
+			req := only[*agentreplv1.SetWorkspaceSummaryRequest](t, f)
+			if req.GetWorkspace().GetId() != tt.wantID || req.GetSummary() != "Fix the footer" {
+				t.Errorf("request = %v, want %s summarized as Fix the footer", req, tt.wantID)
+			}
+		})
+	}
+}
+
+func TestSummaryRefusesAMisspelledCall(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{name: "no text", args: []string{"summary", "here"}},
+		{name: "a positional word", args: []string{"summary", "here", "-text", "Fix the footer", "extra"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newCLIFixture()
+
+			// Act
+			code := f.run(workspaceNoun, tt.args...)
+
+			// Assert
+			if code != exitFailure || len(f.client.requests) != 0 {
+				t.Fatalf("exit %d, requests %v; want a usage failure and nothing sent", code, f.client.requests)
+			}
+		})
+	}
+}
+
 func TestSetNameSendsTheRename(t *testing.T) {
 	tests := []struct {
 		name   string

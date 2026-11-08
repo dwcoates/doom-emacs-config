@@ -2187,12 +2187,6 @@ func (w *watcher) applySessionStartedLocked(started *conversationv1.SessionStart
 	w.sinks.Footer.OnSessionStarted(w.ws, started)
 	w.sinks.Sidebar.OnSessionStarted(w.ws, started)
 	w.sinks.Feed.OnSessionStarted(w.ws, started)
-	// A RESUMED OR ADOPTED SESSION may already carry prompts with no vendor
-	// title, so the synthesizer is triggered at the session's naming — not only
-	// at turn ends, which a resumed conversation would not produce on its own.
-	if w.sinks.Title != nil {
-		w.sinks.Title.OnSessionStarted(w.ws)
-	}
 	if t := started.GetTurnInFlight(); t != nil {
 		ahead := ids.TurnID(t.GetValue())
 		ownTurn := w.turn != nil && *w.turn == ahead
@@ -2461,12 +2455,6 @@ func (w *watcher) flushTurnEnds() {
 	}
 	for _, ended := range pending {
 		w.sinks.Lifecycle.OnTurnEnded(w.ws, ended.turn, ended.how)
-		// A COMPLETED TURN means a new prompt was processed, so the title
-		// digest may have changed; the synthesizer re-synthesizes only when it
-		// actually did. Non-blocking (it dispatches its own goroutine).
-		if w.sinks.Title != nil {
-			w.sinks.Title.OnTurnEnded(w.ws)
-		}
 	}
 	// THE DEATH IS TOLD AFTER THE TURNS IT ENDED, so the queue has closed them
 	// before anything is asked to restart the session they ran in.

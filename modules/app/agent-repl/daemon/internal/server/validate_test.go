@@ -372,6 +372,20 @@ func TestEachRequestValidatorNamesTheFieldItRefusesWithTargetsAndSources(t *test
 			field: "name",
 		},
 		{
+			name: "set workspace summary with no workspace",
+			check: func() *connect.Error {
+				return validateSetWorkspaceSummaryRequest(&agentreplv1.SetWorkspaceSummaryRequest{Summary: "Fix the footer"})
+			},
+			field: "workspace",
+		},
+		{
+			name: "set workspace summary with a blank summary",
+			check: func() *connect.Error {
+				return validateSetWorkspaceSummaryRequest(&agentreplv1.SetWorkspaceSummaryRequest{Workspace: ref(), Summary: " "})
+			},
+			field: "summary",
+		},
+		{
 			name: "validate workspace name with a blank name",
 			check: func() *connect.Error {
 				return validateValidateWorkspaceNameRequest(&agentreplv1.ValidateWorkspaceNameRequest{Name: " "})

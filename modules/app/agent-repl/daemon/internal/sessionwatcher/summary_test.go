@@ -7,35 +7,25 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"agent-repld/internal/ids"
-	"agent-repld/internal/wsm"
 )
 
-// recordingTitleSink records every TitleSink trigger it receives.
-type recordingTitleSink struct {
-	mu    sync.Mutex
-	calls []string
+// recordingSummarySink records every /clear the summary keeper is told of.
+type recordingSummarySink struct {
+	mu     sync.Mutex
+	resets []ids.WorkspaceID
 }
 
-func (t *recordingTitleSink) OnSessionStarted(ids.WorkspaceID) { t.record("OnSessionStarted") }
-func (t *recordingTitleSink) OnPrompt(ids.WorkspaceID)         { t.record("OnPrompt") }
-func (t *recordingTitleSink) OnTurnEnded(ids.WorkspaceID)      { t.record("OnTurnEnded") }
-func (t *recordingTitleSink) OnContextReset(ids.WorkspaceID)   { t.record("OnContextReset") }
-
-func (t *recordingTitleSink) record(name string) {
+func (t *recordingSummarySink) OnContextReset(ws ids.WorkspaceID) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	t.calls = append(t.calls, name)
+	t.resets = append(t.resets, ws)
 }
 
-func (t *recordingTitleSink) has(name string) bool {
+// reset reports whether any /clear reached the sink.
+func (t *recordingSummarySink) reset() bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	for _, c := range t.calls {
-		if c == name {
-			return true
-		}
-	}
-	return false
+	return len(t.resets) > 0
 }
 
 // clearedCutUpdate is an agent-plane update carrying a /clear context cut.
@@ -49,60 +39,11 @@ func clearedCutUpdate() *conversationv1.AgentUpdate {
 	}
 }
 
-func TestTheVendorsTitleTellsTheSynthesizerNothing(t *testing.T) {
+func TestACompactionLeavesTheSummaryStanding(t *testing.T) {
 	// Arrange.
 	h := newHarness(t, Session{Started: sessionStarted("")})
 	h.quiet()
-	ts := h.withTitle()
-
-	// Act.
-	h.routeNow(func(w *watcher) { w.routeSessionUpdateLocked(titleUpdate()) })
-
-	// Assert: the daemon's own summary outranks the vendor's, so it stops nothing.
-	if len(ts.calls) != 0 {
-		t.Fatalf("the vendor's title reached the synthesizer (calls = %v), want none", ts.calls)
-	}
-}
-
-func TestAMainPromptTriggersSynthesis(t *testing.T) {
-	// Arrange.
-	h := newHarness(t, Session{Started: sessionStarted("")})
-	h.quiet()
-	ts := h.withTitle()
-
-	// Act.
-	h.routeNow(func(w *watcher) {
-		w.routePromptLocked(&agentWatch{}, promptEntry("ptr-1", "turn-1", "agent-1").GetEntry().GetUserPrompt(), nil)
-	})
-
-	// Assert.
-	if !ts.has("OnPrompt") {
-		t.Fatalf("a main-agent prompt did not trigger synthesis (calls = %v)", ts.calls)
-	}
-}
-
-func TestASubagentPromptDoesNotTriggerSynthesis(t *testing.T) {
-	// Arrange.
-	h := newHarness(t, Session{Started: sessionStarted("")})
-	h.quiet()
-	ts := h.withTitle()
-
-	// Act.
-	h.routeNow(func(w *watcher) {
-		w.routePromptLocked(&agentWatch{id: agentID("sub-1")}, promptEntry("ptr-1", "turn-1", "sub-1").GetEntry().GetUserPrompt(), nil)
-	})
-
-	// Assert: a subagent's commission is not the user's prompt.
-	if ts.has("OnPrompt") {
-		t.Fatalf("a subagent prompt triggered synthesis (calls = %v)", ts.calls)
-	}
-}
-
-func TestACompactionDoesNotResetTheSynthesizer(t *testing.T) {
-	// Arrange.
-	h := newHarness(t, Session{Started: sessionStarted("")})
-	h.quiet()
-	ts := h.withTitle()
+	ts := h.withSummary()
 
 	// Act.
 	h.routeNow(func(w *watcher) {
@@ -111,17 +52,17 @@ func TestACompactionDoesNotResetTheSynthesizer(t *testing.T) {
 		}, nil, nil, nil)
 	})
 
-	// Assert: a compaction cuts no prompt from the digest.
-	if ts.has("OnContextReset") {
-		t.Fatalf("a /compact reset the synthesizer (calls = %v)", ts.calls)
+	// Assert: a compaction keeps the conversation the summary describes.
+	if ts.reset() {
+		t.Fatalf("a /compact reset the summary (resets = %v)", ts.resets)
 	}
 }
 
-func TestAClearResetsTheSynthesizer(t *testing.T) {
+func TestAClearTellsTheSummaryKeeperItsWorkspace(t *testing.T) {
 	// Arrange.
 	h := newHarness(t, Session{Started: sessionStarted("")})
 	h.quiet()
-	ts := h.withTitle()
+	ts := h.withSummary()
 
 	// Act.
 	h.routeNow(func(w *watcher) {
@@ -129,39 +70,7 @@ func TestAClearResetsTheSynthesizer(t *testing.T) {
 	})
 
 	// Assert.
-	if !ts.has("OnContextReset") {
-		t.Fatalf("a /clear did not reset the synthesizer (calls = %v)", ts.calls)
-	}
-}
-
-func TestATurnEndTriggersSynthesis(t *testing.T) {
-	// Arrange.
-	h := newHarness(t, Session{Started: sessionStarted("")})
-	h.quiet()
-	ts := h.withTitle()
-
-	// Act — a pending turn end flushes to both the lifecycle and title sinks.
-	h.routeNow(func(w *watcher) {
-		w.pendingTurnEnds = append(w.pendingTurnEnds, endedTurn{turn: ids.TurnID("t1"), how: wsm.CloseCompleted})
-	})
-
-	// Assert.
-	if !ts.has("OnTurnEnded") {
-		t.Fatalf("a turn end did not trigger synthesis (calls = %v)", ts.calls)
-	}
-}
-
-func TestASessionStartTriggersSynthesis(t *testing.T) {
-	// Arrange.
-	h := newHarness(t, Session{Started: sessionStarted("")})
-	h.quiet()
-	ts := h.withTitle()
-
-	// Act — a resumed/adopted session names itself; the synthesizer is told.
-	h.routeNow(func(w *watcher) { w.applySessionStartedLocked(sessionStarted("")) })
-
-	// Assert.
-	if !ts.has("OnSessionStarted") {
-		t.Fatalf("a session start did not trigger synthesis (calls = %v)", ts.calls)
+	if len(ts.resets) != 1 || ts.resets[0] != h.w.ws {
+		t.Fatalf("resets = %v, want exactly the watched workspace %q", ts.resets, h.w.ws)
 	}
 }

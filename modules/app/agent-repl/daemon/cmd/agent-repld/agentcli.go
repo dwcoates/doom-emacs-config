@@ -149,6 +149,7 @@ var cliNouns = map[string]map[string]cliCommand{
 		"async-merge":            {usage: "async-merge -name NAME -branch BRANCH (-maker WS | -maker-subagent ID) -context-fork WS -target primary|maker -placement back|front|behind=MERGE [-instruction TEXT] [-close-after WS] [-cleanup-worktree] [-compact-after] [-pre-deploy-prompt TEXT] [-pre-deploy-script PATH:SECONDS] [-post-deploy-prompt TEXT] [-post-deploy-script PATH:SECONDS] [-version-part minor|patch -changelog-line TEXT]", run: workspaceAsyncMerge},
 		"prompt":                 {usage: "prompt [-as-user] WS TEXT", run: workspacePrompt},
 		"set":                    {usage: "set WS [-hidden|-shown] [-priority p05|p1|p2|p3|none] [-parent WS|-top-level] [-lands-into WS|main] [-one-shot|-not-one-shot] [-await WS|-not-awaiting] [-name NAME] [-remote-control on|off] [-as-user]", run: workspaceSet},
+		"summary":                {usage: "summary WS -text SUMMARY", run: workspaceSummary},
 		"link":                   {usage: "link WS (-url URL -label TEXT -owned [-announces URL]|-reference | -remove URL | -show URL [-show URL]... | -clear)", run: workspaceLink},
 		"finished":               {usage: "finished WS -placement back|front|behind=MERGE [-version-part minor|patch -changelog-line TEXT] [-as-user]", run: workspaceFinished},
 		"open":                   {usage: "open WS", run: workspaceOpen},
@@ -1049,6 +1050,25 @@ func originatorFlag(spelled string) (*agentreplv1.WorkspaceOriginator, bool) {
 		return &agentreplv1.WorkspaceOriginator{Originator: &agentreplv1.WorkspaceOriginator_UserOrWorkspace{UserOrWorkspace: &agentreplv1.WorkspaceOriginatorUserOrWorkspace{}}}, true
 	}
 	return nil, false
+}
+
+// workspaceSummary sets the one-sentence summary of a workspace's task that
+// its topbar draws (agentrepl.v1.SetWorkspaceSummary).
+func workspaceSummary(c *cliCall, args []string) int {
+	fs, stateDir := c.flags()
+	text := fs.String("text", "", "the summary: one imperative sentence of at most fifteen words")
+	ref, rest, ok := c.workspaceArg(fs, stateDir, args)
+	if !ok {
+		return exitFailure
+	}
+	if len(rest) != 0 {
+		return c.usageFailed("nothing is positional")
+	}
+	if *text == "" {
+		return c.usageFailed("-text names the summary")
+	}
+	resp, err := c.client.SetWorkspaceSummary(c.ctx, connect.NewRequest(&agentreplv1.SetWorkspaceSummaryRequest{Workspace: ref, Summary: *text}))
+	return answer(c, resp, err)
 }
 
 // workspaceLink changes one of a workspace's links, the topbar summary's

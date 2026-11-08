@@ -38,7 +38,7 @@ func ids(r Result) []string {
 
 // fixture is three workspaces of two repositories: one open, one closed, one
 // landed, with summaries on two.
-func fixture() ([]wsm.Workspace, map[wsm.WorkspaceID]wsm.WorkspaceSummary) {
+func fixture() ([]wsm.Workspace, map[wsm.WorkspaceID]string) {
 	open := record("open", "footer-fix", doom, 0)
 	open.LastActivityAt = ptr(at(9))
 	closed := record("closed", "topbar-title", doom, 2)
@@ -49,9 +49,9 @@ func fixture() ([]wsm.Workspace, map[wsm.WorkspaceID]wsm.WorkspaceSummary) {
 	landed.MergedAt = ptr(at(6))
 	creator := wsm.WorkspaceID("open")
 	landed.RequestedBy = &creator
-	summaries := map[wsm.WorkspaceID]wsm.WorkspaceSummary{
-		"open":   {Title: "Fix the footer's clock"},
-		"landed": {Title: "Prune the store's old rows"},
+	summaries := map[wsm.WorkspaceID]string{
+		"open":   "Fix the footer's clock",
+		"landed": "Prune the store's old rows",
 	}
 	return []wsm.Workspace{open, closed, landed}, summaries
 }

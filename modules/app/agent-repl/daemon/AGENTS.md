@@ -2186,7 +2186,7 @@ blank) PLUS the conversation it continues as the brief's `{{conversation}}`
 (owner ruling, 2026-09-27). The conversation is the daemon's own record of
 the parent's requests -- `RecentConversationPrompts`, its own turns and the
 ones it inherited through its lineage -- composed by
-`titlesynth.ComposeDigest`, so it needs no live parent shim
+`namingdigest.Compose`, so it needs no live parent shim
 and "what the conversation is about" has one spelling. A fork of a parent
 with no conversation is refused on `fork_parent_has_no_conversation` before
 the naming call is paid for (`forkableParentSession`, shared with the

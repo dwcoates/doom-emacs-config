@@ -573,10 +573,6 @@ func (c *fakeClient) ResolveVendorTask(context.Context, *shimv1.ResolveVendorTas
 	panic("sessionwatcher must not call ResolveVendorTask")
 }
 
-func (c *fakeClient) GatherTitleDigest(context.Context, *shimv1.GatherTitleDigestRequest) (*shimv1.GatherTitleDigestResponse, error) {
-	panic("sessionwatcher must not call GatherTitleDigest")
-}
-
 func (c *fakeClient) GetForkPoint(context.Context, *shimv1.GetForkPointRequest) (*shimv1.GetForkPointResponse, error) {
 	panic("sessionwatcher must not call GetForkPoint")
 }
@@ -2343,12 +2339,12 @@ func (h *harness) relink(t *testing.T) *shimv1.WatchAgentRequest {
 	return open.req
 }
 
-// withTitle installs a recording title sink, under the watcher's own lock
+// withSummary installs a recording summary sink, under the watcher's own lock
 // because the stream goroutines read the sink set under it.
-func (h *harness) withTitle() *recordingTitleSink {
-	ts := &recordingTitleSink{}
+func (h *harness) withSummary() *recordingSummarySink {
+	ts := &recordingSummarySink{}
 	h.w.mu.Lock()
-	h.w.sinks.Title = ts
+	h.w.sinks.Summary = ts
 	h.w.mu.Unlock()
 	return ts
 }

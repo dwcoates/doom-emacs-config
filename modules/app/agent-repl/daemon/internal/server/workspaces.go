@@ -1287,6 +1287,31 @@ func (s *server) SetWorkspaceName(
 	return connect.NewResponse(resp), nil
 }
 
+// SetWorkspaceSummary records the one-sentence summary of a workspace's task
+// its agent set, and draws it in the workspace's topbar.
+func (s *server) SetWorkspaceSummary(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.SetWorkspaceSummaryRequest],
+) (*connect.Response[agentreplv1.SetWorkspaceSummaryResponse], error) {
+	const rpc = "SetWorkspaceSummary"
+	if err := validateSetWorkspaceSummaryRequest(req.Msg); err != nil {
+		return nil, err
+	}
+	resp := &agentreplv1.SetWorkspaceSummaryResponse{}
+	subject, cerr, done := s.subjectFor(ctx, rpc, req.Msg.GetWorkspace(), resp)
+	if done {
+		return answer(resp, cerr)
+	}
+	summary, err := s.deps.Verbs.SetSummary(ctx, subject.Record.ID, req.Msg.GetSummary())
+	if err != nil {
+		return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
+	}
+	resp.Result = &agentreplv1.SetWorkspaceSummaryResponse_Success{
+		Success: &agentreplv1.SetWorkspaceSummarySuccess{Summary: summary},
+	}
+	return connect.NewResponse(resp), nil
+}
+
 // ValidateWorkspaceName judges a supplied name by the naming rule a create and
 // a rename refuse with (workspace.ValidateSuppliedName), so a client asks
 // while the user can still edit the name and holds no copy of the rule. A

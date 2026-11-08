@@ -98,7 +98,9 @@ func (k MigrationKind) String() string {
 // file and a created one cannot drift into two different shapes. The one
 // exception is a table a later step reshapes (agent_repl_session: layout 21
 // created it, layout 26 dropped two of its columns; account_usage: layout 24
-// created it, layout 91 dropped the columns nothing produces), whose earlier
+// created it, layout 91 dropped the columns nothing produces;
+// workspace_summaries: layout 56 created it, layout 110 dropped its digest
+// columns), whose earlier
 // steps keep their text as shipped; a test pins that each migrated table
 // matches a fresh one.
 var migrations = []migration{
@@ -154,7 +156,7 @@ var migrations = []migration{
 	{To: 53, Name: "merge_racing_disabled", Kind: MigrationAdditive, DDL: racingDisabledDDL},
 	{To: 54, Name: "workspaces_status_changed_at", Kind: MigrationAdditive, DDL: statusChangedAtDDL},
 	{To: 55, Name: "merge_queue_subscriptions", Kind: MigrationAdditive, DDL: mergeQueueSubscriptionsDDL},
-	{To: 56, Name: "workspace_summaries", Kind: MigrationAdditive, DDL: workspaceSummariesDDL},
+	{To: 56, Name: "workspace_summaries", Kind: MigrationAdditive, DDL: workspaceSummariesLayout56DDL},
 	{To: 57, Name: "cold_read_payments", Kind: MigrationAdditive, DDL: coldReadPaymentsDDL},
 	{To: 58, Name: "sidebar_arrangement", Kind: MigrationAdditive, DDL: arrangementDDL},
 	{To: 59, Name: "subsection_folds", Kind: MigrationAdditive, DDL: subsectionFoldsDDL},
@@ -210,6 +212,7 @@ var migrations = []migration{
 	{To: 107, Name: "parked_terminal", Kind: MigrationBreaking, DDL: parkedTerminalDDL},
 	{To: 108, Name: "children_folded", Kind: MigrationAdditive, DDL: childrenFoldedDDL},
 	{To: 109, Name: "workspace_context_usage", Kind: MigrationAdditive, DDL: workspaceContextUsageDDL},
+	{To: 110, Name: "workspace_summaries_drop_digest", Kind: MigrationBreaking, DDL: workspaceSummariesDropDigestDDL},
 }
 
 // mergeQueueLookupIndexesDDL keys the two lookups every workspace read makes

@@ -160,17 +160,15 @@ type wsState struct {
 
 	// sessionTitle is the vendor's OWN summary of this conversation, as the
 	// session last stated it (conversation.v1 SessionUpdate.title). It is the
-	// MIDDLE precedence in title(): drawn only until the synthesizer's summary
-	// lands, and always in preference to the workspace name.
+	// MIDDLE precedence in title(): drawn only while the workspace's agent has
+	// set no summary, and always in preference to the workspace name.
 	sessionTitle string
 
-	// synthesizedTitle is the daemon's OWN one-sentence imperative summary of
-	// this workspace's task, distilled by a cheap headless call from every
-	// prompt the user sent since the last /clear. It is the FIRST precedence
-	// in title(), ahead of the vendor's ai-title and the workspace name. Empty
-	// until the synthesizer has produced one; its sole writer is
-	// SetSynthesizedTitle.
-	synthesizedTitle string
+	// summary is the one-sentence imperative summary of this workspace's task
+	// that its own agent set. It is the FIRST precedence in title(), ahead of
+	// the vendor's ai-title and the workspace name. Empty while none stands;
+	// its sole writer is SetSummary.
+	summary string
 
 	// links are the links the summary's menu shows, most recently set first,
 	// which title() attaches to the title; empty while none is shown. Its

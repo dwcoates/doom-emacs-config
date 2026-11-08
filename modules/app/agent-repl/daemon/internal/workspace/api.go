@@ -499,6 +499,10 @@ type Verbs interface {
 	// the workspace now has, with the workspace-name prefix applied, and
 	// republishes every surface that draws the name.
 	SetName(ctx context.Context, ws ids.WorkspaceID, name string) (string, error)
+	// SetSummary records the workspace's one-sentence summary of its task and
+	// draws it in the topbar (agentrepl.v1.SetWorkspaceSummary), answering the
+	// summary the workspace now has.
+	SetSummary(ctx context.Context, ws ids.WorkspaceID, summary string) (string, error)
 	// SetHidden moves the workspace into the roster's hidden section, or back
 	// out of it, and republishes the roster.
 	SetHidden(ctx context.Context, ws ids.WorkspaceID, hidden bool) error
@@ -839,8 +843,9 @@ type Deps struct {
 	// CacheLapses holds a hidden workspace's keep-alives and stands its
 	// session down once its cache lapses (cachelapse.Keeper).
 	CacheLapses CacheLapses
-	// Summaries installs a workspace's persisted summary into the topbar when
-	// the workspace is registered (titlesynth.Synthesizer.Restore).
+	// Summaries keeps every workspace's summary (wssummary.Keeper): it draws
+	// a workspace's stored summary at its registration, records the one its
+	// agent sets, and asks a workspace that has none for one.
 	Summaries Summaries
 	// Cards answers what the daemon SERVED for a permission ask, a question
 	// batch or a cold gate. Every answer verb echoes against it: an answer
@@ -900,11 +905,16 @@ type CacheLapses interface {
 	ColdGateAnswered(ctx context.Context, ws ids.WorkspaceID) error
 }
 
-// Summaries restores a workspace's persisted summary (titlesynth.Synthesizer):
-// registration is the one edge every workspace passes before any session
-// trigger, so a restarted daemon draws the summary at once.
+// Summaries keeps every workspace's summary (wssummary.Keeper).
 type Summaries interface {
+	// Restore draws the workspace's stored summary. Registration is the one
+	// edge every workspace passes, so a restarted daemon draws it at once.
 	Restore(ctx context.Context, ws ids.WorkspaceID) error
+	// Set records the summary the workspace's agent set and draws it.
+	Set(ctx context.Context, ws ids.WorkspaceID, summary string) error
+	// OwedNote answers the note a prompt closes with while the workspace has
+	// no summary, and false while one stands.
+	OwedNote(ctx context.Context, ws ids.WorkspaceID) (string, bool, error)
 }
 
 // StandDowns stands a withheld workspace's session down as the idle sweep
