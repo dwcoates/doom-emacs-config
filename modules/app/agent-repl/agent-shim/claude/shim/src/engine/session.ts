@@ -118,15 +118,12 @@ import {
   setSessionRemoteControlSucceeded,
   startSessionRefused,
   startSessionStarted,
-  titleDigestGathered,
   transcriptsRead,
   transcriptsRefused,
-  titleDigestRefused,
   type VendorStartCause,
   type VendorStartRetry,
 } from "../service/failures.js";
 import type { Engine } from "./engine.js";
-import { readTitleDigest } from "./title-digest.js";
 import { readTranscripts } from "./transcripts.js";
 import {
   createTranscriptIndex,
@@ -2033,34 +2030,6 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         },
       ),
     );
-  }
-
-  /**
-   * The title digest: the material the daemon summarizes into a workspace
-   * title of its own when the vendor has stated no ai-title.
-   *
-   * It reads the CURRENT transcript — the same file `pushSessionTitle` tails —
-   * and returns the prompts since the last boundary plus, after a /compact, the
-   * compaction summary. A session with no identity yet has no transcript, which
-   * is the no_transcript arm rather than an empty digest: there is a difference
-   * between "asked before the session named itself" and "a real conversation
-   * with no prompts".
-   */
-  function gatherTitleDigest(): shimv1.GatherTitleDigestResponse {
-    const current = identity;
-    if (current === undefined) {
-      return titleDigestRefused({ kind: "noTranscript" }, "the session has not named a transcript yet");
-    }
-    const file = transcriptPath(deps.env.configDir, deps.env.cwd, current.vendorSessionId);
-    const read = readTitleDigest(file);
-    switch (read.kind) {
-      case "ok":
-        return titleDigestGathered(read.digest);
-      case "no_transcript":
-        return titleDigestRefused({ kind: "noTranscript" }, `no transcript exists at ${file}`);
-      case "unreadable":
-        return titleDigestRefused({ kind: "unreadable" }, read.detail);
-    }
   }
 
   /**
@@ -8283,7 +8252,6 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     readTranscripts: () => Promise.resolve(readTranscriptsHere()),
     resolvePeerDelivery: (request) => resolvePeerDeliveryHere(request),
     resolveVendorTask: (request) => resolveVendorTaskHere(request),
-    gatherTitleDigest: () => Promise.resolve(gatherTitleDigest()),
     getForkPoint: () => Promise.resolve(getForkPoint()),
     reviseResponse: afterRestart(reviseSettledResponse),
     forkSession: afterRestart(forkSession),

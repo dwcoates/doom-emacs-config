@@ -23,7 +23,6 @@ const UNARY_VERBS = [
   "killTurn",
   "stopBash",
   "detachForeground",
-  "gatherTitleDigest",
 ] as const;
 
 const STREAM_VERBS = ["watchSession", "watchAgent", "watchBash"] as const;

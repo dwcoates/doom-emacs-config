@@ -165,10 +165,6 @@ export function detachForegroundRequest(): shimv1.DetachForegroundRequest {
   });
 }
 
-export function gatherTitleDigestRequest(): shimv1.GatherTitleDigestRequest {
-  return create(shimv1.GatherTitleDigestRequestSchema, {});
-}
-
 export function resolvePeerDeliveryRequest(): shimv1.ResolvePeerDeliveryRequest {
   return create(shimv1.ResolvePeerDeliveryRequestSchema, {
     deliveryId: create(conversationv1.PeerDeliveryIdSchema, { value: "m-1" }),

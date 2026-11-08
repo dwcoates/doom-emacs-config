@@ -26,7 +26,6 @@ import { internalFromUnknown, unimplemented } from "./failures.js";
 import {
   validateDetachForegroundRequest,
   validateForkSessionRequest,
-  validateGatherTitleDigestRequest,
   validateGetForkPointRequest,
   validateHibernateRequest,
   validateRetryVendorErrorNowRequest,
@@ -372,14 +371,6 @@ export function shimRoutes(engine: Engine): (router: ConnectRouter) => void {
         entered("ResolveVendorTask");
         validateResolveVendorTaskRequest(request);
         return answering("ResolveVendorTask", () => engine.resolveVendorTask(request));
-      },
-
-      // ---- Title digest ----
-
-      async gatherTitleDigest(request) {
-        entered("GatherTitleDigest");
-        validateGatherTitleDigestRequest(request);
-        return answering("GatherTitleDigest", () => engine.gatherTitleDigest(request));
       },
 
       // ---- Fork ----

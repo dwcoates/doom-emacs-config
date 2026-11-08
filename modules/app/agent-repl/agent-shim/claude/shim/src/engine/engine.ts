@@ -179,17 +179,6 @@ export interface Engine {
     request: shimv1.ResolveVendorTaskRequest,
   ): Promise<shimv1.ResolveVendorTaskResponse>;
 
-  // ---- Title digest ----
-
-  /**
-   * The material for a synthesized workspace title: the user's prompts since
-   * the last context boundary, plus the compaction summary when that boundary
-   * was a /compact. Read from the transcript the shim owns.
-   */
-  gatherTitleDigest(
-    request: shimv1.GatherTitleDigestRequest,
-  ): Promise<shimv1.GatherTitleDigestResponse>;
-
   // ---- Fork ----
 
   /**
@@ -328,10 +317,6 @@ export class NotImplementedEngine implements Engine {
 
   resolveVendorTask(): Promise<shimv1.ResolveVendorTaskResponse> {
     return Promise.reject(unimplemented("ResolveVendorTask"));
-  }
-
-  gatherTitleDigest(): Promise<shimv1.GatherTitleDigestResponse> {
-    return Promise.reject(unimplemented("GatherTitleDigest"));
   }
 
   getForkPoint(): Promise<shimv1.GetForkPointResponse> {

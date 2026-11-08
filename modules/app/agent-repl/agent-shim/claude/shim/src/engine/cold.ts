@@ -40,8 +40,8 @@ import {
   isClearEnvelope,
   isCompactBoundary,
   promptText,
-  type TitleDigestRecord,
-} from "../convert/title-digest.js";
+  type PromptRecord,
+} from "../convert/transcript-prompt.js";
 
 const LOGGER = bindLog({ component: "shim-engine-cold", operation: "shim.engine.cold" });
 
@@ -95,8 +95,8 @@ export interface TranscriptFacts {
   /**
    * When the most recent context boundary was a CLEAR, the instant of that
    * clear in epoch milliseconds. Absent when the most recent boundary is a
-   * compaction, or when there is no boundary at all — the same last-writer-wins
-   * rule `computeTitleDigest` applies to the same records.
+   * compaction, or when there is no boundary at all: the most recent boundary
+   * in file order wins.
    */
   readonly clearedAtMs?: number;
 }
@@ -188,7 +188,7 @@ function writtenCacheTtlMs(usage: TranscriptUsage): number | undefined {
  * chooser's facts in the same pass. The two views of a record are different
  * fields of one line, never two reads of one file.
  */
-type TranscriptRecord = TranscriptLine & TitleDigestRecord;
+type TranscriptRecord = TranscriptLine & PromptRecord;
 
 /**
  * Read the transcript's facts, or answer absence when there is no transcript.
@@ -236,9 +236,8 @@ export function readTranscriptFacts(file: string): TranscriptFacts | undefined {
     if (record.type === "user" && typeof record.permissionMode === "string") {
       lastPermissionMode = record.permissionMode;
     }
-    // The boundary is LAST-WRITER-WINS in file order, exactly as the title
-    // digest reads it: a compaction after a clear means the conversation is no
-    // longer resuming empty.
+    // The boundary is LAST-WRITER-WINS in file order: a compaction after a
+    // clear means the conversation is no longer resuming empty.
     if (isCompactBoundary(record)) {
       clearedAtMs = undefined;
     } else if (isClearEnvelope(record)) {

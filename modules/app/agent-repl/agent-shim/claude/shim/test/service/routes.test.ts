@@ -134,10 +134,6 @@ function recordingEngine(): { engine: Engine; calls: Array<{ verb: string; reque
       record("resolveVendorTask")(request);
       return create(shimv1.ResolveVendorTaskResponseSchema, {});
     },
-    async gatherTitleDigest(request) {
-      record("gatherTitleDigest")(request);
-      return create(shimv1.GatherTitleDigestResponseSchema, {});
-    },
     async standDown() {
       record("standDown")(undefined);
       return 0;
@@ -179,7 +175,6 @@ describe("shimRoutes unary delegation", () => {
     ["rollBackSession", requests.rollBackSessionRequest],
     ["stopBash", requests.stopBashRequest],
     ["detachForeground", requests.detachForegroundRequest],
-    ["gatherTitleDigest", requests.gatherTitleDigestRequest],
     ["resolvePeerDelivery", requests.resolvePeerDeliveryRequest],
     ["resolveVendorTask", requests.resolveVendorTaskRequest],
     ["getForkPoint", requests.getForkPointRequest],
