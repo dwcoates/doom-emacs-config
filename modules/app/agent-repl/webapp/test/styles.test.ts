@@ -6704,7 +6704,7 @@ describe("the canonical orange (owner ruling, 2026-10-30)", () => {
 });
 
 describe("the feed content's text cursor (owner ruling, 2026-11-08)", () => {
-  const TEXT_BLOCKS = ["p", "li", "h1", "h2", "h3", "h4", "h5", "h6", "blockquote", "pre", "td", "th", "dt", "dd"].map(
+  const TEXT_BLOCKS = ["p", "li", "h1", "h2", "h3", "h4", "h5", "h6", "blockquote", "pre", "td", "th", "dt", "dd", ".mp-content"].map(
     (element) => `:where(#feed) ${element}`,
   );
 
@@ -6723,7 +6723,7 @@ describe("the feed content's text cursor (owner ruling, 2026-11-08)", () => {
     expect(cursors).toEqual(["text"]);
   });
 
-  it("gives the text blocks' rule only an element's specificity, so a class's own cursor rule wins", () => {
+  it("declares the text cursor in the feed only through its one rule", () => {
     // Arrange / Act
     const selectors = rulesOf(stylesheet)
       .filter((rule) => /(?:^|;)\s*cursor\s*:\s*text/.test(rule.declarations))
@@ -6732,6 +6732,14 @@ describe("the feed content's text cursor (owner ruling, 2026-11-08)", () => {
 
     // Assert
     expect(selectors).toEqual(TEXT_BLOCKS);
+  });
+
+  it("keeps the pointer on a hovered tree line, so its rails and label still say a click answers it", () => {
+    // Arrange / Act
+    const cursors = cursorsOf(".mp-line.mp-line-hovered");
+
+    // Assert
+    expect(cursors).toEqual(["pointer"]);
   });
 
   it("keeps the expand cursor on a capped box", () => {

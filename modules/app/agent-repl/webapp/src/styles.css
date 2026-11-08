@@ -2497,7 +2497,9 @@ pre {
    `zoom-in` and an expanded one's `zoom-out` still show in the space between
    blocks, and a click on the text still expands the box. `:where` leaves the
    rule an element's specificity alone, so any element whose own rule names a cursor keeps
-   it, a capped `pre` box's `zoom-in` included. */
+   it, a capped `pre` box's `zoom-in` included. A tree line's words
+   (`.mp-content`) show the I-beam too, while its rails and label keep the
+   hovered line's pointer, which says a click answers the node. */
 :where(#feed) p,
 :where(#feed) li,
 :where(#feed) h1,
@@ -2511,7 +2513,8 @@ pre {
 :where(#feed) td,
 :where(#feed) th,
 :where(#feed) dt,
-:where(#feed) dd { cursor: text; }
+:where(#feed) dd,
+:where(#feed) .mp-content { cursor: text; }
 /* THE TYPE-OUT HIDES WHAT IT HAS NOT REACHED (src/bubble/text-reveal.ts): an
    element none of whose text is revealed yet draws no box at all, so a bullet,
    a code block's frame or a table row never appears ahead of its text. */
