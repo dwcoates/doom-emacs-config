@@ -58,10 +58,15 @@ not the relationship's default, its landing target:
   - A fork carries only FINISHED turns, never the one in flight. Forking
     `here` mid-turn leaves out everything this turn has found so far, so a
     diagnosis made in this turn goes into the `-prompt`.
-  - A fork of a workspace still in its FIRST turn would carry nothing, so the
-    daemon refuses it (`fork_source_has_no_finished_turn`) before anything is
-    made. Use `-context fresh` with everything the new workspace needs in the
-    `-prompt`.
+  - A fork of ANOTHER workspace still in its FIRST turn would carry nothing,
+    so the daemon refuses it (`fork_source_has_no_finished_turn`) before
+    anything is made. Use `-context fresh` with everything the new workspace
+    needs in the `-prompt`.
+  - Forking `here` from inside this workspace's FIRST turn is not refused: the
+    create waits until this turn ends (the answer is
+    `waiting_for_requester_turn`, not an error), then the fork is made and
+    carries this whole turn. Nothing is built until then. So a workspace can
+    read and decide in its first turn, run the fork create, and end its turn.
 - **A workspace created in another repository forks only to MOVE this
   workspace.** `-context fork -fork here` with another `-repository` is the
   move in "Reorganizing across repositories" below, where this workspace's
