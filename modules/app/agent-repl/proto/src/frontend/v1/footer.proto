@@ -1948,18 +1948,35 @@ message FooterStatusActivityRetrying {
   int32 attempt = 1;
   // The retry's status summary, verbatim.
   string status = 2;
-  // When the vendor said the next attempt starts, so the line counts down to
-  // it, holding at zero once it passes. Unset when the vendor stated no
-  // schedule.
-  optional FooterStatusActivityAt next_attempt = 3;
   // The last attempt the vendor will make before it gives up. Unset when the
   // vendor stated no schedule.
   optional int32 max_attempt = 4;
-  // The attempt is being made at this moment: agent-repl's own retry, stated
-  // as it is made (conversation.v1.SessionVendorErrorRetryAttempting). Drawn
-  // as "retrying now" in place of a countdown; next_attempt is then unset.
-  bool now = 5;
+  // WHEN THE NEXT ATTEMPT IS MADE. The arms are exclusive because each draws
+  // a different clause in the same place: a countdown, "retrying now", or
+  // "waits for the network". UNSET when the vendor stated no schedule, and
+  // the line then draws no clause there.
+  oneof next {
+    // When the next attempt starts, so the line counts down to it, holding at
+    // zero once it passes.
+    FooterStatusActivityAt next_attempt = 3;
+    // The attempt is being made at this moment: agent-repl's own retry,
+    // stated as it is made (conversation.v1.SessionVendorErrorRetryAttempting).
+    FooterStatusActivityRetryingNow retrying_now = 6;
+    // agent-repl's own retry waits for the network to return
+    // (conversation.v1.SessionVendorErrorRetryAwaitingNetwork): no instant
+    // exists to count down to.
+    FooterStatusActivityRetryingAwaitingNetwork awaiting_network = 7;
+  }
+  reserved 5;
+  reserved "now";
 }
+
+// The retrying line's "retrying now" clause: the attempt is being made.
+message FooterStatusActivityRetryingNow {}
+
+// The retrying line's "waits for the network" clause: the retry is made the
+// moment the network fault resolves, so it draws no countdown.
+message FooterStatusActivityRetryingAwaitingNetwork {}
 
 // An auth prompt is up.
 message FooterStatusActivityAuthenticating {
