@@ -337,11 +337,16 @@ message SessionUpdate {
     // it changes and restated on every WatchSession open. See
     // SessionVendorActivity, which carries the level's whole contract.
     SessionVendorActivity vendor_activity = 41;
+    // THE ACCOUNT'S PLAN USAGE, AS THE VENDOR'S USAGE ENDPOINT ANSWERS IT. An
+    // EVENT, stated on every read that answered plan figures. See
+    // SessionPlanUsage, which carries the arm's whole contract.
+    SessionPlanUsage plan_usage = 42;
   }
-  // Tag 6 (`account_usage`, the account's sampled usage allowance) is
-  // RETIRED: the account's usage is never sampled, so the arm had no
-  // producer. A window's figure and verdict both come from
-  // `rate_limit_status`.
+  // Tag 6 (`account_usage`, the account's sampled usage allowance, with its
+  // outcomes, unavailability reasons and seat spend) is RETIRED: its sample
+  // read the vendor's usage verb WITH the scan of local transcripts, which
+  // cost each CLI about 18 CPU-seconds a read. `plan_usage` (tag 42) is the
+  // plan figures alone, read with the scan skipped.
   reserved 6;
   reserved "account_usage";
 }
@@ -742,6 +747,51 @@ message SessionRateLimitOverage {
   // Why overage is disabled, verbatim: the vendor declares thirteen values
   // but none is observed, so no typed arms yet.
   optional string disabled_reason = 5;
+}
+
+// THE ACCOUNT'S PLAN USAGE (SDK `usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET`
+// with `skipBehaviors`, the `get_usage` control request with
+// `skip_behaviors`). The vendor's rate-limit events state a window's
+// utilization only near its limit, so without this read a weekly figure is
+// seen once a week at best and stands as "reset since last seen" the rest of
+// the time.
+//
+// PRODUCER OBLIGATIONS (the shim):
+//   - Read once the session is up, and again at every turn end that is not a
+//     keep-alive's: the figures move only when the account spends, and an idle
+//     session spends nothing.
+//   - ALWAYS skip the transcript scan. The scan fills a section nobody reads
+//     and is what made the retired `account_usage` sample cost 18
+//     CPU-seconds; the plan figures alone cost a fraction of a CPU-second, and
+//     the vendor answers a repeat from its cache.
+//   - State the arm only when the vendor answered plan figures. An account the
+//     plan limits do not apply to (an API key, a third-party provider) states
+//     nothing; a read that fails is a SessionFault on the
+//     `vendor-plan-usage` component and states nothing.
+//
+// CONSUMER CONTRACT (the daemon's footer): the arm is the WHOLE TRUTH about
+// the three weekly windows it carries, so a window it leaves unset retires
+// that window's figure. The newest statement is drawn; it carries no verdict,
+// so a window's verdict stays the rate-limit event's.
+message SessionPlanUsage {
+  // The account-wide seven-day window. UNSET when the vendor stated none.
+  optional SessionPlanUsageWindow seven_day = 1;
+  // The seven-day window metered for the Opus model family. UNSET when the
+  // vendor meters none.
+  optional SessionPlanUsageWindow seven_day_opus = 2;
+  // The seven-day window metered for the Sonnet model family. UNSET when the
+  // vendor meters none.
+  optional SessionPlanUsageWindow seven_day_sonnet = 3;
+}
+
+// One window of the plan usage. SET only when the vendor stated both its
+// utilization and its reset: a window with either one null is unset, never
+// defaulted.
+message SessionPlanUsageWindow {
+  // How much of the window is used, 0–100, the vendor's own unit.
+  double utilization_percent = 1;
+  // When the window resets, unix millis (the vendor's ISO 8601, converted).
+  int64 resets_at_ms = 2;
 }
 
 // The vendor rotated the session's identity. The store scopes by this id, so
