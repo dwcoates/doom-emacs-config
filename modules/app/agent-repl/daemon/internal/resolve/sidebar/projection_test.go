@@ -8,8 +8,8 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/health"
-	"agent-repld/internal/resolve/sidebar"
 	"agent-repld/internal/resolve/footer"
+	"agent-repld/internal/resolve/sidebar"
 )
 
 // footerOf answers the footer the fanned resolver projects, so a test can
