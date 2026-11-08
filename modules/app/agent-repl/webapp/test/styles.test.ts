@@ -6702,3 +6702,51 @@ describe("the canonical orange (owner ruling, 2026-10-30)", () => {
     expect([decls.includes("--answer-label: var(--canonical-orange);"), darkThemeBlock().includes("--answer-label:")]).toEqual([true, false]);
   });
 });
+
+describe("the feed content's text cursor (owner ruling, 2026-11-08)", () => {
+  const TEXT_BLOCKS = ["p", "li", "h1", "h2", "h3", "h4", "h5", "h6", "blockquote", "pre", "td", "th", "dt", "dd"].map(
+    (element) => `:where(#feed) ${element}`,
+  );
+
+  /** Every cursor declared in a rule whose selector list holds SELECTOR. */
+  function cursorsOf(selector: string): string[] {
+    return rulesOf(stylesheet)
+      .filter((rule) => rule.selectors.includes(selector))
+      .flatMap((rule) => [...rule.declarations.matchAll(/(?:^|;)\s*cursor\s*:\s*([^;]+)/g)].map((m) => m[1].trim()));
+  }
+
+  it.each(TEXT_BLOCKS)("shows the I-beam over %s", (selector) => {
+    // Arrange / Act
+    const cursors = cursorsOf(selector);
+
+    // Assert
+    expect(cursors).toEqual(["text"]);
+  });
+
+  it("gives the text blocks' rule only an element's specificity, so a class's own cursor rule wins", () => {
+    // Arrange / Act
+    const selectors = rulesOf(stylesheet)
+      .filter((rule) => /(?:^|;)\s*cursor\s*:\s*text/.test(rule.declarations))
+      .flatMap((rule) => rule.selectors)
+      .filter((selector) => selector.includes("#feed"));
+
+    // Assert
+    expect(selectors).toEqual(TEXT_BLOCKS);
+  });
+
+  it("keeps the expand cursor on a capped box", () => {
+    // Arrange / Act
+    const cursors = cursorsOf(".tool-output");
+
+    // Assert
+    expect(cursors).toEqual(["zoom-in"]);
+  });
+
+  it("keeps the page's default arrow everywhere else", () => {
+    // Arrange / Act
+    const cursors = cursorsOf("body");
+
+    // Assert
+    expect(cursors).toEqual(["default"]);
+  });
+});
