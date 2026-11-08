@@ -6770,9 +6770,8 @@ bubble-body.bubble-body { display: block; }
 #ws-sidebar .ws.tone-yellow, #ws-sidebar .row .name.tone-yellow { --name-tone: var(--async); }
 #ws-sidebar .ws.tone-green, #ws-sidebar .row .name.tone-green { --name-tone: var(--ok); }
 /* A TURN RUNNING HOLDS THE NAME AT ITS TONE, a turn ended FADES it from the
-   tone to the name's resting grey over the page hold (src/sidebar/name-tint.ts
-   sets `--name-fade` from proto/vocab/page-hold.json, the window Emacs holds
-   the page for, and the delay to minus the time since the turn ended). The
+   tone to the name's resting grey after a static hold (src/sidebar/name-tint.ts
+   sets `--name-fade` from proto/vocab/name-fade.json, hold plus fade, and the delay to minus the time since the turn ended). The
    resting grey is whichever `--name-rest` the name's own state declares
    above. A viewed name never fades: it draws at the viewed grey at once. A
    breathing name's loop is declared after and wins. */
@@ -6785,23 +6784,24 @@ bubble-body.bubble-body { display: block; }
 #ws-sidebar .row .name.fading {
   animation: name-fade var(--name-fade) linear var(--name-fade-delay, 0s) 1 both;
 }
-/* THE FADE HOLDS, THEN ACCELERATES (owner request, 2026-10-29): the name keeps
-   its tone for the first half of the window, then fades along a logarithmic
-   progression, -ln(1 - 0.86 u) / -ln(0.14) over the second half: gentle at
+/* THE NAME HOLDS 20 MINUTES, THEN FADES OVER 10 (owner request, 2026-11-08):
+   the animation spans both (proto/vocab/name-fade.json, 1800s), so the name
+   keeps its tone for the first two thirds, then fades along a logarithmic
+   progression, -ln(1 - 0.86 u) / -ln(0.14) over the last third: gentle at
    first and steepening at the end, so the last 15% of the fade carries about
    a third of the color change. The stops are that curve sampled every tenth,
    each a mix of the tone and the resting grey. */
 @keyframes name-fade {
-  0%, 50% { color: var(--name-tone); }
-  55% { color: color-mix(in srgb, var(--name-tone) 95.4%, var(--name-rest)); }
-  60% { color: color-mix(in srgb, var(--name-tone) 90.4%, var(--name-rest)); }
-  65% { color: color-mix(in srgb, var(--name-tone) 84.8%, var(--name-rest)); }
-  70% { color: color-mix(in srgb, var(--name-tone) 78.6%, var(--name-rest)); }
-  75% { color: color-mix(in srgb, var(--name-tone) 71.4%, var(--name-rest)); }
-  80% { color: color-mix(in srgb, var(--name-tone) 63.1%, var(--name-rest)); }
-  85% { color: color-mix(in srgb, var(--name-tone) 53.1%, var(--name-rest)); }
-  90% { color: color-mix(in srgb, var(--name-tone) 40.8%, var(--name-rest)); }
-  95% { color: color-mix(in srgb, var(--name-tone) 24.4%, var(--name-rest)); }
+  0%, 66.667% { color: var(--name-tone); }
+  70.000% { color: color-mix(in srgb, var(--name-tone) 95.4%, var(--name-rest)); }
+  73.334% { color: color-mix(in srgb, var(--name-tone) 90.4%, var(--name-rest)); }
+  76.667% { color: color-mix(in srgb, var(--name-tone) 84.8%, var(--name-rest)); }
+  80.000% { color: color-mix(in srgb, var(--name-tone) 78.6%, var(--name-rest)); }
+  83.334% { color: color-mix(in srgb, var(--name-tone) 71.4%, var(--name-rest)); }
+  86.667% { color: color-mix(in srgb, var(--name-tone) 63.1%, var(--name-rest)); }
+  90.000% { color: color-mix(in srgb, var(--name-tone) 53.1%, var(--name-rest)); }
+  93.333% { color: color-mix(in srgb, var(--name-tone) 40.8%, var(--name-rest)); }
+  96.667% { color: color-mix(in srgb, var(--name-tone) 24.4%, var(--name-rest)); }
   100% { color: var(--name-rest); }
 }
 /* The glyph statuses are not discs: a box that centers a picture, so a

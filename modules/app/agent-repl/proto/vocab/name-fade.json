@@ -1,0 +1,13 @@
+{
+  "_comment": [
+    "THE SIDEBAR NAME'S TINT SCHEDULE (owner request, 2026-11-08). A finished",
+    "workspace's name holds its status tone unchanged for hold_seconds after",
+    "its last turn ended, then fades to its resting grey over fade_seconds",
+    "(webapp/src/sidebar/name-tint.ts, the name-fade keyframes in",
+    "webapp/src/styles.css). The keyframe percentages are hold/(hold+fade) =",
+    "66.667% static; change the numbers here and the keyframes together.",
+    "This is independent of the page hold (proto/vocab/page-hold.json)."
+  ],
+  "hold_seconds": 1200,
+  "fade_seconds": 600
+}
