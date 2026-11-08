@@ -1764,9 +1764,11 @@ html.sb-dragging * { -webkit-user-select: none; user-select: none; }
    brightness, meeting in the middle at 69% (owner request, 2026-10-26):
    the selected row a bit brighter, a hovered row a bit dimmer, in the
    workspaces and chat lists alike. Hovering the selected row therefore
-   changes nothing. */
+   changes nothing. The fill was then made 25% brighter (owner request,
+   2026-11-08): 4.4% white over the 69% mix takes the dark theme's #262626
+   to #303030. */
 #ws-sidebar {
-  --row-highlight-tint: color-mix(in srgb, var(--card) 69%, var(--sidebar-base));
+  --row-highlight-tint: color-mix(in srgb, white 4.4%, color-mix(in srgb, var(--card) 69%, var(--sidebar-base)));
 }
 #ws-sidebar .ws.current > .row { background-color: var(--row-highlight-tint); }
 /* A REFUSED COLLAPSE FLASHES THE SELECTED ROW (owner request, 2026-10-27): the
