@@ -398,7 +398,7 @@ export function mergedBand(groups: RosterMergedRepoGroup[], collapsed: boolean =
 /**
  * The Merge Queue section carrying GROUPS, none unless said, and its fold
  * stated: EXPANDED unless said, as the daemon draws a section nobody has
- * folded. Its header counts nothing, as the daemon draws it.
+ * folded. Its header's count is the web app's, summed over GROUPS' queues.
  */
 export function mergeQueueBand(groups: RosterMergeQueueRepoGroup[] = [], collapsed: boolean = false): RosterMergeQueueSection {
   return create(RosterMergeQueueSectionSchema, {
