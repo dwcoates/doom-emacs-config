@@ -220,6 +220,24 @@ func TestAChangedUsageIsKeptForItsRoot(t *testing.T) {
 	}
 }
 
+func TestAPlanUsageReadIsKeptForItsRoot(t *testing.T) {
+	// Arrange
+	kept := &keptUsage{}
+	h := newHarness(t, WithAccountUsageSink(kept.sink))
+	connected(h)
+	h.r.SetAccount(testWS, personalRoot)
+
+	// Act
+	h.r.OnSessionUpdate(testWS, ratelimittest.PlanUsage(planWeek(8), nil, nil))
+
+	// Assert
+	got := kept.last(t)
+	if got.ConfigDir != personalRoot || got.Weekly == nil || got.Weekly.Utilization != 0.08 ||
+		got.Weekly.ResetsAtS != instant.Add(week).Unix() {
+		t.Fatalf("kept = %+v, want the read's figures under the root", got)
+	}
+}
+
 func TestAnUnboundWorkspacesUsageIsNotKept(t *testing.T) {
 	// Arrange
 	kept := &keptUsage{}

@@ -416,6 +416,135 @@ func TestAnEventAloneFiguresAWeeklyWindow(t *testing.T) {
 	}
 }
 
+// planWeek is a plan-usage window figured at UTILIZATION percent, resetting a
+// week from the harness's instant.
+func planWeek(utilization float64) *conversationv1.SessionPlanUsageWindow {
+	return ratelimittest.PlanWindow(utilization, instant.Add(week).UnixMilli())
+}
+
+func TestAPlanUsageReadFiguresEachWeeklyWindow(t *testing.T) {
+	tests := []struct {
+		name  string
+		read  *conversationv1.SessionUpdate
+		drawn func(*frontendv1.FooterActivityEnduringUsage) *frontendv1.FooterAllowance
+	}{
+		{"seven day", ratelimittest.PlanUsage(planWeek(8), nil, nil), func(u *frontendv1.FooterActivityEnduringUsage) *frontendv1.FooterAllowance {
+			return u.GetWeekly().GetOverall()
+		}},
+		{"seven day opus", ratelimittest.PlanUsage(nil, planWeek(8), nil), func(u *frontendv1.FooterActivityEnduringUsage) *frontendv1.FooterAllowance {
+			return u.GetWeekly().GetModels().GetOpus()
+		}},
+		{"seven day sonnet", ratelimittest.PlanUsage(nil, nil, planWeek(8)), func(u *frontendv1.FooterActivityEnduringUsage) *frontendv1.FooterAllowance {
+			return u.GetWeekly().GetModels().GetSonnet()
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			connected(h)
+
+			// Act
+			h.r.OnSessionUpdate(testWS, tc.read)
+
+			// Assert
+			got := tc.drawn(enduringUsageOf(h))
+			if got.GetUtilization() != 0.08 || got.GetResetsAtS() != instant.Add(week).Unix() {
+				t.Fatalf("allowance = %+v, want the read's 0.08 resetting in a week", got)
+			}
+		})
+	}
+}
+
+func TestAPlanUsageReadRetiresAWindowItLeavesUnset(t *testing.T) {
+	// Arrange: an event figured the Opus window.
+	h := newHarness(t)
+	connected(h)
+	h.r.OnSessionUpdate(testWS, rateLimitStatus(ratelimittest.SevenDayOpus(), 50, week))
+
+	// Act: the read states the overall window alone.
+	h.r.OnSessionUpdate(testWS, ratelimittest.PlanUsage(planWeek(8), nil, nil))
+
+	// Assert
+	if models := enduringUsageOf(h).GetWeekly().GetModels(); models != nil {
+		t.Fatalf("models = %+v, want none: the read stated no per-model window", models)
+	}
+}
+
+func TestAPlanUsageReadStatingNoWindowDrawsUnobserved(t *testing.T) {
+	// Arrange: an event figured the overall window.
+	h := newHarness(t)
+	connected(h)
+	fileWeekly(h, 90)
+
+	// Act
+	h.r.OnSessionUpdate(testWS, ratelimittest.PlanUsage(nil, nil, nil))
+
+	// Assert
+	if got := enduringOf(t, h); got.GetUnobserved() == nil {
+		t.Fatalf("enduring = %+v, want unobserved: no window is figured", got)
+	}
+}
+
+func TestAPlanUsageReadKeepsTheEventsVerdict(t *testing.T) {
+	// Arrange: the vendor refused the week.
+	h := newHarness(t)
+	connected(h)
+	h.r.OnSessionUpdate(testWS, withVerdict(rateLimitStatus(ratelimittest.SevenDay(), 100, week), ratelimittest.Rejected))
+
+	// Act
+	h.r.OnSessionUpdate(testWS, ratelimittest.PlanUsage(planWeek(99), nil, nil))
+
+	// Assert
+	got := enduringUsageOf(h).GetWeekly().GetOverall()
+	if got.GetUtilization() != 0.99 || got.GetRejected() == nil {
+		t.Fatalf("allowance = %+v, want the read's 0.99 under the event's rejection", got)
+	}
+}
+
+func TestAPlanUsageReadLeavesTheOverageWindow(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.OnSessionUpdate(testWS, rateLimitStatus(ratelimittest.Overage(), 12, 3*time.Hour))
+
+	// Act
+	h.r.OnSessionUpdate(testWS, ratelimittest.PlanUsage(planWeek(8), nil, nil))
+
+	// Assert
+	if got := enduringUsageOf(h).GetOverage().GetUtilization(); got != 0.12 {
+		t.Fatalf("overage utilization = %v, want the event's 0.12 untouched", got)
+	}
+}
+
+func TestTheNewerOfAnEventAndAPlanUsageReadIsDrawn(t *testing.T) {
+	tests := []struct {
+		name   string
+		first  *conversationv1.SessionUpdate
+		second *conversationv1.SessionUpdate
+		want   float64
+	}{
+		{"a read after an event", rateLimitStatus(ratelimittest.SevenDay(), 91, week), ratelimittest.PlanUsage(planWeek(8), nil, nil), 0.08},
+		{"an event after a read", ratelimittest.PlanUsage(planWeek(8), nil, nil), rateLimitStatus(ratelimittest.SevenDay(), 91, week), 0.91},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			connected(h)
+			h.r.OnSessionUpdate(testWS, tc.first)
+
+			// Act
+			h.r.OnSessionUpdate(testWS, tc.second)
+
+			// Assert
+			if got := enduringUsageOf(h).GetWeekly().GetOverall().GetUtilization(); got != tc.want {
+				t.Fatalf("utilization = %v, want the newer's %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestAnEventNeverFiguresTheFiveHourWindow(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
@@ -458,6 +587,16 @@ func TestEveryFigureTheFooterReceivesIsRecorded(t *testing.T) {
 			want:    dlog.RecordQuery{Level: dlog.LevelInfo, Operation: "daemon.footer.account_usage_figure", Message: "a rate-limit event figured the window"},
 			source:  "rate_limit_event",
 			percent: 12,
+		},
+		{
+			name:    "a plan-usage read on a weekly window",
+			arrange: func(*harness) {},
+			act: func(h *harness) {
+				h.r.OnSessionUpdate(testWS, ratelimittest.PlanUsage(planWeek(8), nil, nil))
+			},
+			want:    dlog.RecordQuery{Level: dlog.LevelInfo, Operation: "daemon.footer.account_usage_figure", Message: "a plan-usage read figured the window"},
+			source:  "plan_usage",
+			percent: 8,
 		},
 	}
 	for _, tc := range tests {

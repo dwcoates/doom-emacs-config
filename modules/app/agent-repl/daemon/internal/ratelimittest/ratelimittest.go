@@ -86,3 +86,19 @@ func Figured(status *conversationv1.SessionRateLimitStatus, utilizationPercent f
 func Update(status *conversationv1.SessionRateLimitStatus) *conversationv1.SessionUpdate {
 	return &conversationv1.SessionUpdate{Update: &conversationv1.SessionUpdate_RateLimitStatus{RateLimitStatus: status}}
 }
+
+// PlanWindow is one weekly window of a plan-usage read: the vendor's
+// utilization percentage and its reset instant in unix millis.
+func PlanWindow(utilizationPercent float64, resetsAtMs int64) *conversationv1.SessionPlanUsageWindow {
+	return &conversationv1.SessionPlanUsageWindow{UtilizationPercent: utilizationPercent, ResetsAtMs: resetsAtMs}
+}
+
+// PlanUsage wraps one plan-usage read as the session update the shim pushes.
+// A nil window is one the read left unset.
+func PlanUsage(sevenDay, opus, sonnet *conversationv1.SessionPlanUsageWindow) *conversationv1.SessionUpdate {
+	return &conversationv1.SessionUpdate{Update: &conversationv1.SessionUpdate_PlanUsage{PlanUsage: &conversationv1.SessionPlanUsage{
+		SevenDay:       sevenDay,
+		SevenDayOpus:   opus,
+		SevenDaySonnet: sonnet,
+	}}}
+}

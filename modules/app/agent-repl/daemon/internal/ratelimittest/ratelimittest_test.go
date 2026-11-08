@@ -175,3 +175,26 @@ func TestNoTestHandRollsARateLimitWindow(t *testing.T) {
 		t.Fatalf("test files build a rate-limit window by hand instead of through ratelimittest: %v", offenders)
 	}
 }
+
+func TestPlanWindowCarriesItsFigures(t *testing.T) {
+	// Act
+	got := PlanWindow(8, 1_800_000_000_000)
+
+	// Assert
+	if got.GetUtilizationPercent() != 8 || got.GetResetsAtMs() != 1_800_000_000_000 {
+		t.Fatalf("window = %+v, want 8%% resetting at 1800000000000", got)
+	}
+}
+
+func TestPlanUsageFilesEachWindowUnderItsOwnField(t *testing.T) {
+	// Arrange
+	sevenDay, opus := PlanWindow(40, 1), PlanWindow(12, 2)
+
+	// Act
+	got := PlanUsage(sevenDay, opus, nil).GetPlanUsage()
+
+	// Assert
+	if got.GetSevenDay() != sevenDay || got.GetSevenDayOpus() != opus || got.SevenDaySonnet != nil {
+		t.Fatalf("plan usage = %+v, want seven_day and opus as given and sonnet unset", got)
+	}
+}
