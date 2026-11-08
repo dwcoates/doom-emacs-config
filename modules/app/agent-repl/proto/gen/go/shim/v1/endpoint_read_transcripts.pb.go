@@ -4,8 +4,8 @@
 //
 // WHY IT LIVES ON THE SHIM. The shim owns the transcript, and this is a fact
 // ABOUT the transcripts: where the vendor files them, how they are named, and
-// what their lines mean are the vendor adapter's knowledge, exactly as
-// GatherTitleDigest's is. The daemon asks the one process that can read them.
+// what their lines mean are the vendor adapter's knowledge. The daemon asks
+// the one process that can read them.
 //
 // IT READS, AND IT SPENDS NOTHING. No query is started and no model is
 // called, the same discipline the cold gate's own read follows: every figure

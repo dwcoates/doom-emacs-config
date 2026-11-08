@@ -30,7 +30,7 @@ var File_shim_v1_service_proto protoreflect.FileDescriptor
 
 const file_shim_v1_service_proto_rawDesc = "" +
 	"\n" +
-	"\x15shim/v1/service.proto\x12\ashim.v1\x1a(shim/v1/endpoint_detach_foreground.proto\x1a-shim/v1/endpoint_retry_vendor_error_now.proto\x1a&shim/v1/endpoint_network_changed.proto\x1a#shim/v1/endpoint_fork_session.proto\x1a*shim/v1/endpoint_gather_title_digest.proto\x1a%shim/v1/endpoint_get_fork_point.proto\x1a shim/v1/endpoint_hibernate.proto\x1a)shim/v1/endpoint_hold_parked_bridge.proto\x1a#shim/v1/endpoint_kill_session.proto\x1a shim/v1/endpoint_kill_turn.proto\x1a(shim/v1/endpoint_roll_back_session.proto\x1a'shim/v1/endpoint_read_transcripts.proto\x1a,shim/v1/endpoint_resolve_peer_delivery.proto\x1a*shim/v1/endpoint_resolve_vendor_task.proto\x1a&shim/v1/endpoint_revise_response.proto\x1a(shim/v1/endpoint_set_session_model.proto\x1a)shim/v1/endpoint_set_session_effort.proto\x1a1shim/v1/endpoint_set_session_remote_control.proto\x1a2shim/v1/endpoint_set_session_permission_mode.proto\x1a%shim/v1/endpoint_send_keepalive.proto\x1a$shim/v1/endpoint_start_session.proto\x1a!shim/v1/endpoint_start_turn.proto\x1a shim/v1/endpoint_stop_bash.proto\x1a\"shim/v1/endpoint_watch_agent.proto\x1a#shim/v1/endpoint_update_agent.proto\x1a#shim/v1/endpoint_get_workflow.proto\x1a$shim/v1/endpoint_stop_workflow.proto\x1a!shim/v1/endpoint_watch_bash.proto\x1a$shim/v1/endpoint_watch_session.proto\x1a%shim/v1/endpoint_watch_workflow.proto2\xaf\x13\n" +
+	"\x15shim/v1/service.proto\x12\ashim.v1\x1a(shim/v1/endpoint_detach_foreground.proto\x1a-shim/v1/endpoint_retry_vendor_error_now.proto\x1a&shim/v1/endpoint_network_changed.proto\x1a#shim/v1/endpoint_fork_session.proto\x1a%shim/v1/endpoint_get_fork_point.proto\x1a shim/v1/endpoint_hibernate.proto\x1a)shim/v1/endpoint_hold_parked_bridge.proto\x1a#shim/v1/endpoint_kill_session.proto\x1a shim/v1/endpoint_kill_turn.proto\x1a(shim/v1/endpoint_roll_back_session.proto\x1a'shim/v1/endpoint_read_transcripts.proto\x1a,shim/v1/endpoint_resolve_peer_delivery.proto\x1a*shim/v1/endpoint_resolve_vendor_task.proto\x1a&shim/v1/endpoint_revise_response.proto\x1a(shim/v1/endpoint_set_session_model.proto\x1a)shim/v1/endpoint_set_session_effort.proto\x1a1shim/v1/endpoint_set_session_remote_control.proto\x1a2shim/v1/endpoint_set_session_permission_mode.proto\x1a%shim/v1/endpoint_send_keepalive.proto\x1a$shim/v1/endpoint_start_session.proto\x1a!shim/v1/endpoint_start_turn.proto\x1a shim/v1/endpoint_stop_bash.proto\x1a\"shim/v1/endpoint_watch_agent.proto\x1a#shim/v1/endpoint_update_agent.proto\x1a#shim/v1/endpoint_get_workflow.proto\x1a$shim/v1/endpoint_stop_workflow.proto\x1a!shim/v1/endpoint_watch_bash.proto\x1a$shim/v1/endpoint_watch_session.proto\x1a%shim/v1/endpoint_watch_workflow.proto2\xd3\x12\n" +
 	"\x04Shim\x12K\n" +
 	"\fStartSession\x12\x1c.shim.v1.StartSessionRequest\x1a\x1d.shim.v1.StartSessionResponse\x12M\n" +
 	"\fWatchSession\x12\x1c.shim.v1.WatchSessionRequest\x1a\x1d.shim.v1.WatchSessionResponse0\x01\x12T\n" +
@@ -59,8 +59,7 @@ const file_shim_v1_service_proto_rawDesc = "" +
 	"\x10DetachForeground\x12 .shim.v1.DetachForegroundRequest\x1a!.shim.v1.DetachForegroundResponse\x12T\n" +
 	"\x0fReadTranscripts\x12\x1f.shim.v1.ReadTranscriptsRequest\x1a .shim.v1.ReadTranscriptsResponse\x12`\n" +
 	"\x13ResolvePeerDelivery\x12#.shim.v1.ResolvePeerDeliveryRequest\x1a$.shim.v1.ResolvePeerDeliveryResponse\x12Z\n" +
-	"\x11ResolveVendorTask\x12!.shim.v1.ResolveVendorTaskRequest\x1a\".shim.v1.ResolveVendorTaskResponse\x12Z\n" +
-	"\x11GatherTitleDigest\x12!.shim.v1.GatherTitleDigestRequest\x1a\".shim.v1.GatherTitleDigestResponse\x12K\n" +
+	"\x11ResolveVendorTask\x12!.shim.v1.ResolveVendorTaskRequest\x1a\".shim.v1.ResolveVendorTaskResponse\x12K\n" +
 	"\fGetForkPoint\x12\x1c.shim.v1.GetForkPointRequest\x1a\x1d.shim.v1.GetForkPointResponse\x12H\n" +
 	"\vForkSession\x12\x1b.shim.v1.ForkSessionRequest\x1a\x1c.shim.v1.ForkSessionResponseB Z\x1eagentrepl/proto/shim/v1;shimv1b\x06proto3"
 
@@ -92,39 +91,37 @@ var file_shim_v1_service_proto_goTypes = []any{
 	(*ReadTranscriptsRequest)(nil),           // 24: shim.v1.ReadTranscriptsRequest
 	(*ResolvePeerDeliveryRequest)(nil),       // 25: shim.v1.ResolvePeerDeliveryRequest
 	(*ResolveVendorTaskRequest)(nil),         // 26: shim.v1.ResolveVendorTaskRequest
-	(*GatherTitleDigestRequest)(nil),         // 27: shim.v1.GatherTitleDigestRequest
-	(*GetForkPointRequest)(nil),              // 28: shim.v1.GetForkPointRequest
-	(*ForkSessionRequest)(nil),               // 29: shim.v1.ForkSessionRequest
-	(*StartSessionResponse)(nil),             // 30: shim.v1.StartSessionResponse
-	(*WatchSessionResponse)(nil),             // 31: shim.v1.WatchSessionResponse
-	(*SetSessionModelResponse)(nil),          // 32: shim.v1.SetSessionModelResponse
-	(*SetSessionEffortResponse)(nil),         // 33: shim.v1.SetSessionEffortResponse
-	(*SetSessionPermissionModeResponse)(nil), // 34: shim.v1.SetSessionPermissionModeResponse
-	(*SetSessionRemoteControlResponse)(nil),  // 35: shim.v1.SetSessionRemoteControlResponse
-	(*HoldParkedBridgeResponse)(nil),         // 36: shim.v1.HoldParkedBridgeResponse
-	(*HibernateResponse)(nil),                // 37: shim.v1.HibernateResponse
-	(*SendKeepaliveResponse)(nil),            // 38: shim.v1.SendKeepaliveResponse
-	(*RetryVendorErrorNowResponse)(nil),      // 39: shim.v1.RetryVendorErrorNowResponse
-	(*NetworkChangedResponse)(nil),           // 40: shim.v1.NetworkChangedResponse
-	(*KillSessionResponse)(nil),              // 41: shim.v1.KillSessionResponse
-	(*StartTurnResponse)(nil),                // 42: shim.v1.StartTurnResponse
-	(*WatchAgentResponse)(nil),               // 43: shim.v1.WatchAgentResponse
-	(*UpdateAgentResponse)(nil),              // 44: shim.v1.UpdateAgentResponse
-	(*KillTurnResponse)(nil),                 // 45: shim.v1.KillTurnResponse
-	(*RollBackSessionResponse)(nil),          // 46: shim.v1.RollBackSessionResponse
-	(*ReviseResponseResponse)(nil),           // 47: shim.v1.ReviseResponseResponse
-	(*WatchBashResponse)(nil),                // 48: shim.v1.WatchBashResponse
-	(*StopBashResponse)(nil),                 // 49: shim.v1.StopBashResponse
-	(*GetWorkflowResponse)(nil),              // 50: shim.v1.GetWorkflowResponse
-	(*WatchWorkflowResponse)(nil),            // 51: shim.v1.WatchWorkflowResponse
-	(*StopWorkflowResponse)(nil),             // 52: shim.v1.StopWorkflowResponse
-	(*DetachForegroundResponse)(nil),         // 53: shim.v1.DetachForegroundResponse
-	(*ReadTranscriptsResponse)(nil),          // 54: shim.v1.ReadTranscriptsResponse
-	(*ResolvePeerDeliveryResponse)(nil),      // 55: shim.v1.ResolvePeerDeliveryResponse
-	(*ResolveVendorTaskResponse)(nil),        // 56: shim.v1.ResolveVendorTaskResponse
-	(*GatherTitleDigestResponse)(nil),        // 57: shim.v1.GatherTitleDigestResponse
-	(*GetForkPointResponse)(nil),             // 58: shim.v1.GetForkPointResponse
-	(*ForkSessionResponse)(nil),              // 59: shim.v1.ForkSessionResponse
+	(*GetForkPointRequest)(nil),              // 27: shim.v1.GetForkPointRequest
+	(*ForkSessionRequest)(nil),               // 28: shim.v1.ForkSessionRequest
+	(*StartSessionResponse)(nil),             // 29: shim.v1.StartSessionResponse
+	(*WatchSessionResponse)(nil),             // 30: shim.v1.WatchSessionResponse
+	(*SetSessionModelResponse)(nil),          // 31: shim.v1.SetSessionModelResponse
+	(*SetSessionEffortResponse)(nil),         // 32: shim.v1.SetSessionEffortResponse
+	(*SetSessionPermissionModeResponse)(nil), // 33: shim.v1.SetSessionPermissionModeResponse
+	(*SetSessionRemoteControlResponse)(nil),  // 34: shim.v1.SetSessionRemoteControlResponse
+	(*HoldParkedBridgeResponse)(nil),         // 35: shim.v1.HoldParkedBridgeResponse
+	(*HibernateResponse)(nil),                // 36: shim.v1.HibernateResponse
+	(*SendKeepaliveResponse)(nil),            // 37: shim.v1.SendKeepaliveResponse
+	(*RetryVendorErrorNowResponse)(nil),      // 38: shim.v1.RetryVendorErrorNowResponse
+	(*NetworkChangedResponse)(nil),           // 39: shim.v1.NetworkChangedResponse
+	(*KillSessionResponse)(nil),              // 40: shim.v1.KillSessionResponse
+	(*StartTurnResponse)(nil),                // 41: shim.v1.StartTurnResponse
+	(*WatchAgentResponse)(nil),               // 42: shim.v1.WatchAgentResponse
+	(*UpdateAgentResponse)(nil),              // 43: shim.v1.UpdateAgentResponse
+	(*KillTurnResponse)(nil),                 // 44: shim.v1.KillTurnResponse
+	(*RollBackSessionResponse)(nil),          // 45: shim.v1.RollBackSessionResponse
+	(*ReviseResponseResponse)(nil),           // 46: shim.v1.ReviseResponseResponse
+	(*WatchBashResponse)(nil),                // 47: shim.v1.WatchBashResponse
+	(*StopBashResponse)(nil),                 // 48: shim.v1.StopBashResponse
+	(*GetWorkflowResponse)(nil),              // 49: shim.v1.GetWorkflowResponse
+	(*WatchWorkflowResponse)(nil),            // 50: shim.v1.WatchWorkflowResponse
+	(*StopWorkflowResponse)(nil),             // 51: shim.v1.StopWorkflowResponse
+	(*DetachForegroundResponse)(nil),         // 52: shim.v1.DetachForegroundResponse
+	(*ReadTranscriptsResponse)(nil),          // 53: shim.v1.ReadTranscriptsResponse
+	(*ResolvePeerDeliveryResponse)(nil),      // 54: shim.v1.ResolvePeerDeliveryResponse
+	(*ResolveVendorTaskResponse)(nil),        // 55: shim.v1.ResolveVendorTaskResponse
+	(*GetForkPointResponse)(nil),             // 56: shim.v1.GetForkPointResponse
+	(*ForkSessionResponse)(nil),              // 57: shim.v1.ForkSessionResponse
 }
 var file_shim_v1_service_proto_depIdxs = []int32{
 	0,  // 0: shim.v1.Shim.StartSession:input_type -> shim.v1.StartSessionRequest
@@ -154,41 +151,39 @@ var file_shim_v1_service_proto_depIdxs = []int32{
 	24, // 24: shim.v1.Shim.ReadTranscripts:input_type -> shim.v1.ReadTranscriptsRequest
 	25, // 25: shim.v1.Shim.ResolvePeerDelivery:input_type -> shim.v1.ResolvePeerDeliveryRequest
 	26, // 26: shim.v1.Shim.ResolveVendorTask:input_type -> shim.v1.ResolveVendorTaskRequest
-	27, // 27: shim.v1.Shim.GatherTitleDigest:input_type -> shim.v1.GatherTitleDigestRequest
-	28, // 28: shim.v1.Shim.GetForkPoint:input_type -> shim.v1.GetForkPointRequest
-	29, // 29: shim.v1.Shim.ForkSession:input_type -> shim.v1.ForkSessionRequest
-	30, // 30: shim.v1.Shim.StartSession:output_type -> shim.v1.StartSessionResponse
-	31, // 31: shim.v1.Shim.WatchSession:output_type -> shim.v1.WatchSessionResponse
-	32, // 32: shim.v1.Shim.SetSessionModel:output_type -> shim.v1.SetSessionModelResponse
-	33, // 33: shim.v1.Shim.SetSessionEffort:output_type -> shim.v1.SetSessionEffortResponse
-	34, // 34: shim.v1.Shim.SetSessionPermissionMode:output_type -> shim.v1.SetSessionPermissionModeResponse
-	35, // 35: shim.v1.Shim.SetSessionRemoteControl:output_type -> shim.v1.SetSessionRemoteControlResponse
-	36, // 36: shim.v1.Shim.HoldParkedBridge:output_type -> shim.v1.HoldParkedBridgeResponse
-	37, // 37: shim.v1.Shim.Hibernate:output_type -> shim.v1.HibernateResponse
-	38, // 38: shim.v1.Shim.SendKeepalive:output_type -> shim.v1.SendKeepaliveResponse
-	39, // 39: shim.v1.Shim.RetryVendorErrorNow:output_type -> shim.v1.RetryVendorErrorNowResponse
-	40, // 40: shim.v1.Shim.NetworkChanged:output_type -> shim.v1.NetworkChangedResponse
-	41, // 41: shim.v1.Shim.KillSession:output_type -> shim.v1.KillSessionResponse
-	42, // 42: shim.v1.Shim.StartTurn:output_type -> shim.v1.StartTurnResponse
-	43, // 43: shim.v1.Shim.WatchAgent:output_type -> shim.v1.WatchAgentResponse
-	44, // 44: shim.v1.Shim.UpdateAgent:output_type -> shim.v1.UpdateAgentResponse
-	45, // 45: shim.v1.Shim.KillTurn:output_type -> shim.v1.KillTurnResponse
-	46, // 46: shim.v1.Shim.RollBackSession:output_type -> shim.v1.RollBackSessionResponse
-	47, // 47: shim.v1.Shim.ReviseResponse:output_type -> shim.v1.ReviseResponseResponse
-	48, // 48: shim.v1.Shim.WatchBash:output_type -> shim.v1.WatchBashResponse
-	49, // 49: shim.v1.Shim.StopBash:output_type -> shim.v1.StopBashResponse
-	50, // 50: shim.v1.Shim.GetWorkflow:output_type -> shim.v1.GetWorkflowResponse
-	51, // 51: shim.v1.Shim.WatchWorkflow:output_type -> shim.v1.WatchWorkflowResponse
-	52, // 52: shim.v1.Shim.StopWorkflow:output_type -> shim.v1.StopWorkflowResponse
-	53, // 53: shim.v1.Shim.DetachForeground:output_type -> shim.v1.DetachForegroundResponse
-	54, // 54: shim.v1.Shim.ReadTranscripts:output_type -> shim.v1.ReadTranscriptsResponse
-	55, // 55: shim.v1.Shim.ResolvePeerDelivery:output_type -> shim.v1.ResolvePeerDeliveryResponse
-	56, // 56: shim.v1.Shim.ResolveVendorTask:output_type -> shim.v1.ResolveVendorTaskResponse
-	57, // 57: shim.v1.Shim.GatherTitleDigest:output_type -> shim.v1.GatherTitleDigestResponse
-	58, // 58: shim.v1.Shim.GetForkPoint:output_type -> shim.v1.GetForkPointResponse
-	59, // 59: shim.v1.Shim.ForkSession:output_type -> shim.v1.ForkSessionResponse
-	30, // [30:60] is the sub-list for method output_type
-	0,  // [0:30] is the sub-list for method input_type
+	27, // 27: shim.v1.Shim.GetForkPoint:input_type -> shim.v1.GetForkPointRequest
+	28, // 28: shim.v1.Shim.ForkSession:input_type -> shim.v1.ForkSessionRequest
+	29, // 29: shim.v1.Shim.StartSession:output_type -> shim.v1.StartSessionResponse
+	30, // 30: shim.v1.Shim.WatchSession:output_type -> shim.v1.WatchSessionResponse
+	31, // 31: shim.v1.Shim.SetSessionModel:output_type -> shim.v1.SetSessionModelResponse
+	32, // 32: shim.v1.Shim.SetSessionEffort:output_type -> shim.v1.SetSessionEffortResponse
+	33, // 33: shim.v1.Shim.SetSessionPermissionMode:output_type -> shim.v1.SetSessionPermissionModeResponse
+	34, // 34: shim.v1.Shim.SetSessionRemoteControl:output_type -> shim.v1.SetSessionRemoteControlResponse
+	35, // 35: shim.v1.Shim.HoldParkedBridge:output_type -> shim.v1.HoldParkedBridgeResponse
+	36, // 36: shim.v1.Shim.Hibernate:output_type -> shim.v1.HibernateResponse
+	37, // 37: shim.v1.Shim.SendKeepalive:output_type -> shim.v1.SendKeepaliveResponse
+	38, // 38: shim.v1.Shim.RetryVendorErrorNow:output_type -> shim.v1.RetryVendorErrorNowResponse
+	39, // 39: shim.v1.Shim.NetworkChanged:output_type -> shim.v1.NetworkChangedResponse
+	40, // 40: shim.v1.Shim.KillSession:output_type -> shim.v1.KillSessionResponse
+	41, // 41: shim.v1.Shim.StartTurn:output_type -> shim.v1.StartTurnResponse
+	42, // 42: shim.v1.Shim.WatchAgent:output_type -> shim.v1.WatchAgentResponse
+	43, // 43: shim.v1.Shim.UpdateAgent:output_type -> shim.v1.UpdateAgentResponse
+	44, // 44: shim.v1.Shim.KillTurn:output_type -> shim.v1.KillTurnResponse
+	45, // 45: shim.v1.Shim.RollBackSession:output_type -> shim.v1.RollBackSessionResponse
+	46, // 46: shim.v1.Shim.ReviseResponse:output_type -> shim.v1.ReviseResponseResponse
+	47, // 47: shim.v1.Shim.WatchBash:output_type -> shim.v1.WatchBashResponse
+	48, // 48: shim.v1.Shim.StopBash:output_type -> shim.v1.StopBashResponse
+	49, // 49: shim.v1.Shim.GetWorkflow:output_type -> shim.v1.GetWorkflowResponse
+	50, // 50: shim.v1.Shim.WatchWorkflow:output_type -> shim.v1.WatchWorkflowResponse
+	51, // 51: shim.v1.Shim.StopWorkflow:output_type -> shim.v1.StopWorkflowResponse
+	52, // 52: shim.v1.Shim.DetachForeground:output_type -> shim.v1.DetachForegroundResponse
+	53, // 53: shim.v1.Shim.ReadTranscripts:output_type -> shim.v1.ReadTranscriptsResponse
+	54, // 54: shim.v1.Shim.ResolvePeerDelivery:output_type -> shim.v1.ResolvePeerDeliveryResponse
+	55, // 55: shim.v1.Shim.ResolveVendorTask:output_type -> shim.v1.ResolveVendorTaskResponse
+	56, // 56: shim.v1.Shim.GetForkPoint:output_type -> shim.v1.GetForkPointResponse
+	57, // 57: shim.v1.Shim.ForkSession:output_type -> shim.v1.ForkSessionResponse
+	29, // [29:58] is the sub-list for method output_type
+	0,  // [0:29] is the sub-list for method input_type
 	0,  // [0:0] is the sub-list for extension type_name
 	0,  // [0:0] is the sub-list for extension extendee
 	0,  // [0:0] is the sub-list for field type_name
@@ -203,7 +198,6 @@ func file_shim_v1_service_proto_init() {
 	file_shim_v1_endpoint_retry_vendor_error_now_proto_init()
 	file_shim_v1_endpoint_network_changed_proto_init()
 	file_shim_v1_endpoint_fork_session_proto_init()
-	file_shim_v1_endpoint_gather_title_digest_proto_init()
 	file_shim_v1_endpoint_get_fork_point_proto_init()
 	file_shim_v1_endpoint_hibernate_proto_init()
 	file_shim_v1_endpoint_hold_parked_bridge_proto_init()

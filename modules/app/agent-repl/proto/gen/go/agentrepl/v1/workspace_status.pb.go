@@ -79,7 +79,11 @@ type WorkspaceStatus struct {
 	// Every OPEN child of this workspace, hidden ones included, in the roster's
 	// order: the workspaces this one coordinates and must account for before it
 	// can be finished or closed. Empty for a workspace with no open child.
-	Children      []*v1.WorkspaceRef `protobuf:"bytes,15,rep,name=children,proto3" json:"children,omitempty"`
+	Children []*v1.WorkspaceRef `protobuf:"bytes,15,rep,name=children,proto3" json:"children,omitempty"`
+	// The one-sentence summary of the workspace's task its topbar draws
+	// (SetWorkspaceSummary). UNSET while none stands: the workspace owes one,
+	// and its agent sets it.
+	Summary       *string `protobuf:"bytes,16,opt,name=summary,proto3,oneof" json:"summary,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -210,6 +214,13 @@ func (x *WorkspaceStatus) GetChildren() []*v1.WorkspaceRef {
 		return x.Children
 	}
 	return nil
+}
+
+func (x *WorkspaceStatus) GetSummary() string {
+	if x != nil && x.Summary != nil {
+		return *x.Summary
+	}
+	return ""
 }
 
 // How a workspace stands to other work.
@@ -1368,7 +1379,7 @@ var File_agentrepl_v1_workspace_status_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_workspace_status_proto_rawDesc = "" +
 	"\n" +
-	"#agentrepl/v1/workspace_status.proto\x12\fagentrepl.v1\x1a\"agentrepl/v1/workspace_links.proto\x1a\x16frontend/v1/feed.proto\x1a\x1cworkspace/v1/workspace.proto\"\xaa\x06\n" +
+	"#agentrepl/v1/workspace_status.proto\x12\fagentrepl.v1\x1a\"agentrepl/v1/workspace_links.proto\x1a\x16frontend/v1/feed.proto\x1a\x1cworkspace/v1/workspace.proto\"\xd5\x06\n" +
 	"\x0fWorkspaceStatus\x128\n" +
 	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x16\n" +
@@ -1386,10 +1397,13 @@ const file_agentrepl_v1_workspace_status_proto_rawDesc = "" +
 	"\x05owner\x18\r \x01(\v2\".agentrepl.v1.WorkspaceStatusOwnerH\x01R\x05owner\x88\x01\x01\x12>\n" +
 	"\n" +
 	"created_by\x18\x0e \x01(\v2\x1a.workspace.v1.WorkspaceRefH\x02R\tcreatedBy\x88\x01\x01\x126\n" +
-	"\bchildren\x18\x0f \x03(\v2\x1a.workspace.v1.WorkspaceRefR\bchildrenB\v\n" +
+	"\bchildren\x18\x0f \x03(\v2\x1a.workspace.v1.WorkspaceRefR\bchildren\x12\x1d\n" +
+	"\asummary\x18\x10 \x01(\tH\x03R\asummary\x88\x01\x01B\v\n" +
 	"\t_awaitingB\b\n" +
 	"\x06_ownerB\r\n" +
-	"\v_created_byJ\x04\b\n" +
+	"\v_created_byB\n" +
+	"\n" +
+	"\b_summaryJ\x04\b\n" +
 	"\x10\vR\x0eprincipal_link\"\xb2\x01\n" +
 	"\x1bWorkspaceStatusRelationship\x12F\n" +
 	"\x05child\x18\x01 \x01(\v2..agentrepl.v1.WorkspaceStatusRelationshipChildH\x00R\x05child\x12C\n" +

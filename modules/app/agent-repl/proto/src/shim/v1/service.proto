@@ -12,7 +12,6 @@ import "shim/v1/endpoint_detach_foreground.proto";
 import "shim/v1/endpoint_retry_vendor_error_now.proto";
 import "shim/v1/endpoint_network_changed.proto";
 import "shim/v1/endpoint_fork_session.proto";
-import "shim/v1/endpoint_gather_title_digest.proto";
 import "shim/v1/endpoint_get_fork_point.proto";
 import "shim/v1/endpoint_hibernate.proto";
 import "shim/v1/endpoint_hold_parked_bridge.proto";
@@ -174,14 +173,6 @@ service Shim {
   // gave it, so a message one agent of the session sent another is headed by
   // its sender. See endpoint_resolve_vendor_task.proto.
   rpc ResolveVendorTask(ResolveVendorTaskRequest) returns (ResolveVendorTaskResponse);
-
-  // ---- Title digest: the material for a synthesized workspace title ----
-
-  // The prompts (and, after a /compact, the compaction summary) the daemon
-  // summarizes into a workspace title of its own when the vendor has written
-  // no ai-title. Reads the transcript the shim owns; produces nothing and ends
-  // nothing.
-  rpc GatherTitleDigest(GatherTitleDigestRequest) returns (GatherTitleDigestResponse);
 
   // ---- Fork: one conversation continued in another workspace ----
 

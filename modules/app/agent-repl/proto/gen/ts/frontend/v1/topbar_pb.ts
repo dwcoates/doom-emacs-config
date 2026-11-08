@@ -798,8 +798,8 @@ export const TopbarAccountOptionSchema: GenMessage<TopbarAccountOption> = /*@__P
 /**
  * The title line the topbar shows: the workspace's generated summary, one
  * imperative sentence stating the workspace's task. It is a summary ONLY —
- * the daemon's own distillation of the user's prompts, or the vendor's own
- * conversation title until the first distillation lands — and never carries
+ * the one the workspace's own agent set (agentrepl.v1.SetWorkspaceSummary),
+ * or the vendor's own conversation title while none stands — and never carries
  * the workspace's name or its branch, as a suffix or as a stand-in; the name
  * is TopbarWorkspaceName's, drawn on its own line.
  *

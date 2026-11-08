@@ -117,6 +117,7 @@ import "agentrepl/v1/endpoint_set_permission_mode.proto";
 import "agentrepl/v1/endpoint_set_workspace_correspondence.proto";
 import "agentrepl/v1/endpoint_set_workspace_hidden.proto";
 import "agentrepl/v1/endpoint_set_workspace_name.proto";
+import "agentrepl/v1/endpoint_set_workspace_summary.proto";
 import "agentrepl/v1/endpoint_set_workspace_one_shot.proto";
 import "agentrepl/v1/endpoint_set_workspace_parent.proto";
 import "agentrepl/v1/endpoint_set_workspace_priority.proto";
@@ -361,6 +362,9 @@ service AgentRepl {
   // Rename a workspace: its name only, never its branch or its worktree
   // directory. See endpoint_set_workspace_name.proto.
   rpc SetWorkspaceName(SetWorkspaceNameRequest) returns (SetWorkspaceNameResponse);
+  // Set the one-sentence summary of a workspace's task that its topbar
+  // draws. See endpoint_set_workspace_summary.proto.
+  rpc SetWorkspaceSummary(SetWorkspaceSummaryRequest) returns (SetWorkspaceSummaryResponse);
 
 
 

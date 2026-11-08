@@ -97,8 +97,6 @@ const (
 	ShimResolvePeerDeliveryProcedure = "/shim.v1.Shim/ResolvePeerDelivery"
 	// ShimResolveVendorTaskProcedure is the fully-qualified name of the Shim's ResolveVendorTask RPC.
 	ShimResolveVendorTaskProcedure = "/shim.v1.Shim/ResolveVendorTask"
-	// ShimGatherTitleDigestProcedure is the fully-qualified name of the Shim's GatherTitleDigest RPC.
-	ShimGatherTitleDigestProcedure = "/shim.v1.Shim/GatherTitleDigest"
 	// ShimGetForkPointProcedure is the fully-qualified name of the Shim's GetForkPoint RPC.
 	ShimGetForkPointProcedure = "/shim.v1.Shim/GetForkPoint"
 	// ShimForkSessionProcedure is the fully-qualified name of the Shim's ForkSession RPC.
@@ -135,7 +133,6 @@ var (
 	shimReadTranscriptsMethodDescriptor          = shimServiceDescriptor.Methods().ByName("ReadTranscripts")
 	shimResolvePeerDeliveryMethodDescriptor      = shimServiceDescriptor.Methods().ByName("ResolvePeerDelivery")
 	shimResolveVendorTaskMethodDescriptor        = shimServiceDescriptor.Methods().ByName("ResolveVendorTask")
-	shimGatherTitleDigestMethodDescriptor        = shimServiceDescriptor.Methods().ByName("GatherTitleDigest")
 	shimGetForkPointMethodDescriptor             = shimServiceDescriptor.Methods().ByName("GetForkPoint")
 	shimForkSessionMethodDescriptor              = shimServiceDescriptor.Methods().ByName("ForkSession")
 )
@@ -238,11 +235,6 @@ type ShimClient interface {
 	// gave it, so a message one agent of the session sent another is headed by
 	// its sender. See endpoint_resolve_vendor_task.proto.
 	ResolveVendorTask(context.Context, *connect.Request[v1.ResolveVendorTaskRequest]) (*connect.Response[v1.ResolveVendorTaskResponse], error)
-	// The prompts (and, after a /compact, the compaction summary) the daemon
-	// summarizes into a workspace title of its own when the vendor has written
-	// no ai-title. Reads the transcript the shim owns; produces nothing and ends
-	// nothing.
-	GatherTitleDigest(context.Context, *connect.Request[v1.GatherTitleDigestRequest]) (*connect.Response[v1.GatherTitleDigestResponse], error)
 	// Where a fork of this shim's conversation would end if taken now, and which
 	// of its stored rows the fork carries. Asked of the PARENT's shim under the
 	// parent's delivery lock; spends nothing. See endpoint_get_fork_point.proto.
@@ -425,12 +417,6 @@ func NewShimClient(httpClient connect.HTTPClient, baseURL string, opts ...connec
 			connect.WithSchema(shimResolveVendorTaskMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
-		gatherTitleDigest: connect.NewClient[v1.GatherTitleDigestRequest, v1.GatherTitleDigestResponse](
-			httpClient,
-			baseURL+ShimGatherTitleDigestProcedure,
-			connect.WithSchema(shimGatherTitleDigestMethodDescriptor),
-			connect.WithClientOptions(opts...),
-		),
 		getForkPoint: connect.NewClient[v1.GetForkPointRequest, v1.GetForkPointResponse](
 			httpClient,
 			baseURL+ShimGetForkPointProcedure,
@@ -475,7 +461,6 @@ type shimClient struct {
 	readTranscripts          *connect.Client[v1.ReadTranscriptsRequest, v1.ReadTranscriptsResponse]
 	resolvePeerDelivery      *connect.Client[v1.ResolvePeerDeliveryRequest, v1.ResolvePeerDeliveryResponse]
 	resolveVendorTask        *connect.Client[v1.ResolveVendorTaskRequest, v1.ResolveVendorTaskResponse]
-	gatherTitleDigest        *connect.Client[v1.GatherTitleDigestRequest, v1.GatherTitleDigestResponse]
 	getForkPoint             *connect.Client[v1.GetForkPointRequest, v1.GetForkPointResponse]
 	forkSession              *connect.Client[v1.ForkSessionRequest, v1.ForkSessionResponse]
 }
@@ -615,11 +600,6 @@ func (c *shimClient) ResolveVendorTask(ctx context.Context, req *connect.Request
 	return c.resolveVendorTask.CallUnary(ctx, req)
 }
 
-// GatherTitleDigest calls shim.v1.Shim.GatherTitleDigest.
-func (c *shimClient) GatherTitleDigest(ctx context.Context, req *connect.Request[v1.GatherTitleDigestRequest]) (*connect.Response[v1.GatherTitleDigestResponse], error) {
-	return c.gatherTitleDigest.CallUnary(ctx, req)
-}
-
 // GetForkPoint calls shim.v1.Shim.GetForkPoint.
 func (c *shimClient) GetForkPoint(ctx context.Context, req *connect.Request[v1.GetForkPointRequest]) (*connect.Response[v1.GetForkPointResponse], error) {
 	return c.getForkPoint.CallUnary(ctx, req)
@@ -728,11 +708,6 @@ type ShimHandler interface {
 	// gave it, so a message one agent of the session sent another is headed by
 	// its sender. See endpoint_resolve_vendor_task.proto.
 	ResolveVendorTask(context.Context, *connect.Request[v1.ResolveVendorTaskRequest]) (*connect.Response[v1.ResolveVendorTaskResponse], error)
-	// The prompts (and, after a /compact, the compaction summary) the daemon
-	// summarizes into a workspace title of its own when the vendor has written
-	// no ai-title. Reads the transcript the shim owns; produces nothing and ends
-	// nothing.
-	GatherTitleDigest(context.Context, *connect.Request[v1.GatherTitleDigestRequest]) (*connect.Response[v1.GatherTitleDigestResponse], error)
 	// Where a fork of this shim's conversation would end if taken now, and which
 	// of its stored rows the fork carries. Asked of the PARENT's shim under the
 	// parent's delivery lock; spends nothing. See endpoint_get_fork_point.proto.
@@ -911,12 +886,6 @@ func NewShimHandler(svc ShimHandler, opts ...connect.HandlerOption) (string, htt
 		connect.WithSchema(shimResolveVendorTaskMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
-	shimGatherTitleDigestHandler := connect.NewUnaryHandler(
-		ShimGatherTitleDigestProcedure,
-		svc.GatherTitleDigest,
-		connect.WithSchema(shimGatherTitleDigestMethodDescriptor),
-		connect.WithHandlerOptions(opts...),
-	)
 	shimGetForkPointHandler := connect.NewUnaryHandler(
 		ShimGetForkPointProcedure,
 		svc.GetForkPoint,
@@ -985,8 +954,6 @@ func NewShimHandler(svc ShimHandler, opts ...connect.HandlerOption) (string, htt
 			shimResolvePeerDeliveryHandler.ServeHTTP(w, r)
 		case ShimResolveVendorTaskProcedure:
 			shimResolveVendorTaskHandler.ServeHTTP(w, r)
-		case ShimGatherTitleDigestProcedure:
-			shimGatherTitleDigestHandler.ServeHTTP(w, r)
 		case ShimGetForkPointProcedure:
 			shimGetForkPointHandler.ServeHTTP(w, r)
 		case ShimForkSessionProcedure:
@@ -1106,10 +1073,6 @@ func (UnimplementedShimHandler) ResolvePeerDelivery(context.Context, *connect.Re
 
 func (UnimplementedShimHandler) ResolveVendorTask(context.Context, *connect.Request[v1.ResolveVendorTaskRequest]) (*connect.Response[v1.ResolveVendorTaskResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("shim.v1.Shim.ResolveVendorTask is not implemented"))
-}
-
-func (UnimplementedShimHandler) GatherTitleDigest(context.Context, *connect.Request[v1.GatherTitleDigestRequest]) (*connect.Response[v1.GatherTitleDigestResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("shim.v1.Shim.GatherTitleDigest is not implemented"))
 }
 
 func (UnimplementedShimHandler) GetForkPoint(context.Context, *connect.Request[v1.GetForkPointRequest]) (*connect.Response[v1.GetForkPointResponse], error) {
