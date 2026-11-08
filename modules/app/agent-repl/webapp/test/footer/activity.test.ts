@@ -639,7 +639,7 @@ describe("the salient kinds", () => {
       {
         attempt: 9,
         status: "overloaded",
-        nextAttempt: { atMs: BigInt(NOW + 12_000) },
+        next: { case: "nextAttempt", value: { atMs: BigInt(NOW + 12_000) } },
       },
       "working",
     );
@@ -651,11 +651,22 @@ describe("the salient kinds", () => {
   it("draws agent-repl's retry being made as retrying now", () => {
     const cell = salientCell(
       "retrying",
-      { attempt: 2, status: "overloaded", now: true },
+      { attempt: 2, status: "overloaded", next: { case: "retryingNow", value: {} } },
       "working",
     );
     expect(cell.querySelector(".footer-activity-retrying")?.textContent).toBe(
       "attempt 2 · retrying now · overloaded",
+    );
+  });
+
+  it("draws agent-repl's retry waiting for the network with no countdown", () => {
+    const cell = salientCell(
+      "retrying",
+      { attempt: 3, status: "ENOTFOUND", next: { case: "awaitingNetwork", value: {} } },
+      "working",
+    );
+    expect(cell.querySelector(".footer-activity-retrying")?.textContent).toBe(
+      "attempt 3 · waits for the network · ENOTFOUND",
     );
   });
 
@@ -665,7 +676,7 @@ describe("the salient kinds", () => {
       {
         attempt: 9,
         status: "overloaded",
-        nextAttempt: { atMs: BigInt(NOW + 12_000) },
+        next: { case: "nextAttempt", value: { atMs: BigInt(NOW + 12_000) } },
       },
       "working",
     );
@@ -681,7 +692,7 @@ describe("the salient kinds", () => {
       {
         attempt: 9,
         status: "overloaded",
-        nextAttempt: { atMs: BigInt(NOW - 120_000) },
+        next: { case: "nextAttempt", value: { atMs: BigInt(NOW - 120_000) } },
       },
       "working",
     );
@@ -696,7 +707,7 @@ describe("the salient kinds", () => {
       {
         attempt: 9,
         status: "overloaded",
-        nextAttempt: { atMs: BigInt(NOW + 1000) },
+        next: { case: "nextAttempt", value: { atMs: BigInt(NOW + 1000) } },
       },
       "working",
     );

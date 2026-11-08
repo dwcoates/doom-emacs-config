@@ -1167,7 +1167,8 @@ export function drawFooterStatusActivityAuthenticating(
  * ticker. The line is always a countdown (owner ruling, 2026-10-20): once the
  * instant passes with no newer attempt pushed, it holds at "next try in 0s"
  * rather than counting up how late the vendor is. Agent-repl's own retry
- * reads "retrying now" in its place from the moment it is made.
+ * reads "retrying now" in its place from the moment it is made, and "waits
+ * for the network" while it waits for the network fault to resolve.
  */
 export function drawFooterStatusActivityRetrying(
   u: FooterStatusActivityRetrying,
@@ -1185,15 +1186,26 @@ export function drawFooterStatusActivityRetrying(
   if (u.maxAttempt !== undefined) {
     line.appendChild(document.createTextNode(` of ${u.maxAttempt}`));
   }
-  // AGENT-REPL'S OWN RETRY BEING MADE says so, stated where the retry is made
-  // (owner ruling, 2026-10-21); it carries no countdown.
-  if (u.now) {
-    line.appendChild(document.createTextNode(" · retrying now"));
-  } else if (u.nextAttempt !== undefined) {
-    line.appendChild(document.createTextNode(" · "));
-    line.appendChild(
-      drawNextAttempt(u.nextAttempt, deps, `${path}.next_attempt`),
-    );
+  // THE NEXT-ATTEMPT CLAUSE, as the daemon resolved it. Agent-repl's own retry
+  // being made says so, stated where the retry is made (owner ruling,
+  // 2026-10-21); one waiting for the network says that instead, since it has
+  // no instant to count down to. An unset clause is a vendor that stated no
+  // schedule, which draws nothing there.
+  switch (u.next.case) {
+    case "retryingNow":
+      line.appendChild(document.createTextNode(" · retrying now"));
+      break;
+    case "awaitingNetwork":
+      line.appendChild(document.createTextNode(" · waits for the network"));
+      break;
+    case "nextAttempt":
+      line.appendChild(document.createTextNode(" · "));
+      line.appendChild(
+        drawNextAttempt(u.next.value, deps, `${path}.next_attempt`),
+      );
+      break;
+    case undefined:
+      break;
   }
   line.appendChild(document.createTextNode(` · ${u.status}`));
   return line;
