@@ -360,6 +360,38 @@ cost up to seven cores per summary."
                          nil "auth failed" 3)))
         (should (member '(:last-prompt-summary-pending) agent-repl-test-ps--state))))))
 
+(ert-deftest agent-repl-ps-callback-logs-a-run-the-network-failed-without-warning ()
+  "A failed run while the workspace stands in its network fault logs, never warns."
+  (agent-repl-test-ps--with
+    (let ((warned nil) (logged nil))
+      (cl-letf (((symbol-function 'agent-repl--ws-get) (lambda (_ws _key) "raw"))
+                ((symbol-function 'agent-repl--ws-known-p) (lambda (_ws) t))
+                ((symbol-function 'agent-repl--ws-render-status) (lambda (_ws) :network-fault))
+                ((symbol-function 'agent-repl--warn)
+                 (lambda (&rest args) (push args warned)))
+                ((symbol-function 'agent-repl--log)
+                 (lambda (&rest args) (push args logged))))
+        (funcall (agent-repl--prompt-summary-make-callback "ws" "raw") nil "getaddrinfo ENOTFOUND api.anthropic.com\n")
+        (should-not warned)
+        (should (member '("ws" "prompt-summary: run rejected result while the network fault stands; clearing pending cause=network-fault ok=%s output=%S current-raw-len=%d"
+                          nil "getaddrinfo ENOTFOUND api.anthropic.com" 3)
+                        logged))
+        (should (member '(:last-prompt-summary-pending) agent-repl-test-ps--state))))))
+
+(ert-deftest agent-repl-ps-network-faulted-p-reads-the-roster-arm ()
+  "A workspace is network-faulted exactly when its roster arm says so."
+  (dolist (case '((:network-fault . t) (:done . nil) (nil . nil)))
+    (cl-letf (((symbol-function 'agent-repl--ws-known-p) (lambda (_ws) t))
+              ((symbol-function 'agent-repl--ws-render-status) (lambda (_ws) (car case))))
+      (should (eq (and (agent-repl--prompt-summary-network-faulted-p "ws") t) (cdr case))))))
+
+(ert-deftest agent-repl-ps-network-faulted-p-is-nil-for-an-unknown-workspace ()
+  "A workspace this Emacs no longer knows is not network-faulted."
+  (cl-letf (((symbol-function 'agent-repl--ws-known-p) (lambda (_ws) nil))
+            ((symbol-function 'agent-repl--ws-render-status)
+             (lambda (_ws) (error "the status of an unknown workspace is never read"))))
+    (should-not (agent-repl--prompt-summary-network-faulted-p "gone"))))
+
 (ert-deftest agent-repl-ps-callback-rejects-an-empty-summary ()
   "A run that succeeded with nothing to say applies nothing."
   (agent-repl-test-ps--with
