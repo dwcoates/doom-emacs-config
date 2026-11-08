@@ -4,7 +4,10 @@
 // answered inside the caller's turn: for an agent looking for the workspace
 // that did some piece of work (which one fixed the footer last week? what ran
 // in this repository yesterday?), including workspaces closed long ago, which
-// the roster no longer shows.
+// the roster no longer shows. It is ALSO the one record of a workspace the
+// agent API answers for the workspaces the sidebar draws now (on_roster):
+// each such record carries the roster section and live status it is drawn
+// with, so one record shape serves `workspace find` and `workspace list`.
 //
 // AGENT WORKSPACES ONLY. A zettel chat thread and a merge workspace (the
 // hidden workspace an async merge runs in) are registry rows too, but neither
@@ -25,7 +28,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_find_workspaces.proto.
  */
 export const file_agentrepl_v1_endpoint_find_workspaces: GenFile = /*@__PURE__*/
-  fileDesc("CithZ2VudHJlcGwvdjEvZW5kcG9pbnRfZmluZF93b3Jrc3BhY2VzLnByb3RvEgxhZ2VudHJlcGwudjEi6AIKFUZpbmRXb3Jrc3BhY2VzUmVxdWVzdBI0CgpyZXBvc2l0b3J5GAEgASgLMhsud29ya3NwYWNlLnYxLlJlcG9zaXRvcnlSZWZIAIgBARI3CgZ3aW5kb3cYAiABKAsyIi5hZ2VudHJlcGwudjEuRmluZFdvcmtzcGFjZXNXaW5kb3dIAYgBARI7CghzdGFuZGluZxgDIAEoCzIkLmFnZW50cmVwbC52MS5GaW5kV29ya3NwYWNlc1N0YW5kaW5nSAKIAQESEQoEdGV4dBgEIAEoCUgDiAEBEhIKBWxpbWl0GAUgASgNSASIAQESMwoKY3JlYXRlZF9ieRgGIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWZIBYgBAUINCgtfcmVwb3NpdG9yeUIJCgdfd2luZG93QgsKCV9zdGFuZGluZ0IHCgVfdGV4dEIICgZfbGltaXRCDQoLX2NyZWF0ZWRfYnkiXgoURmluZFdvcmtzcGFjZXNXaW5kb3cSFQoIc2luY2VfbXMYASABKANIAIgBARIVCgh1bnRpbF9tcxgCIAEoA0gBiAEBQgsKCV9zaW5jZV9tc0ILCglfdW50aWxfbXMi2gEKFkZpbmRXb3Jrc3BhY2VzU3RhbmRpbmcSOAoEb3BlbhgBIAEoCzIoLmFnZW50cmVwbC52MS5GaW5kV29ya3NwYWNlc1N0YW5kaW5nT3BlbkgAEjwKBmNsb3NlZBgCIAEoCzIqLmFnZW50cmVwbC52MS5GaW5kV29ya3NwYWNlc1N0YW5kaW5nQ2xvc2VkSAASPAoGbGFuZGVkGAMgASgLMiouYWdlbnRyZXBsLnYxLkZpbmRXb3Jrc3BhY2VzU3RhbmRpbmdMYW5kZWRIAEIKCghzdGFuZGluZyIcChpGaW5kV29ya3NwYWNlc1N0YW5kaW5nT3BlbiIeChxGaW5kV29ya3NwYWNlc1N0YW5kaW5nQ2xvc2VkIh4KHEZpbmRXb3Jrc3BhY2VzU3RhbmRpbmdMYW5kZWQijgEKFkZpbmRXb3Jrc3BhY2VzUmVzcG9uc2USNgoHc3VjY2VzcxgBIAEoCzIjLmFnZW50cmVwbC52MS5GaW5kV29ya3NwYWNlc1N1Y2Nlc3NIABIyCgVlcnJvchgCIAEoCzIhLmFnZW50cmVwbC52MS5GaW5kV29ya3NwYWNlc0Vycm9ySABCCAoGcmVzdWx0IqEBChVGaW5kV29ya3NwYWNlc1N1Y2Nlc3MSPwoIY29tcGxldGUYASABKAsyKy5hZ2VudHJlcGwudjEuRmluZFdvcmtzcGFjZXNTdWNjZXNzQ29tcGxldGVIABI9CgdwYXJ0aWFsGAIgASgLMiouYWdlbnRyZXBsLnYxLkZpbmRXb3Jrc3BhY2VzU3VjY2Vzc1BhcnRpYWxIAEIICgZleHRlbnQiUQodRmluZFdvcmtzcGFjZXNTdWNjZXNzQ29tcGxldGUSMAoKd29ya3NwYWNlcxgBIAMoCzIcLmFnZW50cmVwbC52MS5Gb3VuZFdvcmtzcGFjZSJhChxGaW5kV29ya3NwYWNlc1N1Y2Nlc3NQYXJ0aWFsEjAKCndvcmtzcGFjZXMYASADKAsyHC5hZ2VudHJlcGwudjEuRm91bmRXb3Jrc3BhY2USDwoHb21pdHRlZBgCIAEoDSKaAwoORm91bmRXb3Jrc3BhY2USLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZhIMCgRuYW1lGAIgASgJEg4KBmJyYW5jaBgDIAEoCRIvCgpyZXBvc2l0b3J5GAQgASgLMhsud29ya3NwYWNlLnYxLlJlcG9zaXRvcnlSZWYSFAoHc3VtbWFyeRgFIAEoCUgAiAEBEhUKDWNyZWF0ZWRfYXRfbXMYBiABKAMSGQoRbGFzdF9hY3RpdmVfYXRfbXMYByABKAMSNgoIc3RhbmRpbmcYCCABKAsyJC5hZ2VudHJlcGwudjEuRm91bmRXb3Jrc3BhY2VTdGFuZGluZxIzCgpjcmVhdGVkX2J5GAkgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZkgBiAEBEi8KBnBhcmVudBgKIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWZIAogBAUIKCghfc3VtbWFyeUINCgtfY3JlYXRlZF9ieUIJCgdfcGFyZW50ItoBChZGb3VuZFdvcmtzcGFjZVN0YW5kaW5nEjgKBG9wZW4YASABKAsyKC5hZ2VudHJlcGwudjEuRm91bmRXb3Jrc3BhY2VTdGFuZGluZ09wZW5IABI8CgZjbG9zZWQYAiABKAsyKi5hZ2VudHJlcGwudjEuRm91bmRXb3Jrc3BhY2VTdGFuZGluZ0Nsb3NlZEgAEjwKBmxhbmRlZBgDIAEoCzIqLmFnZW50cmVwbC52MS5Gb3VuZFdvcmtzcGFjZVN0YW5kaW5nTGFuZGVkSABCCgoIc3RhbmRpbmciHAoaRm91bmRXb3Jrc3BhY2VTdGFuZGluZ09wZW4iSgocRm91bmRXb3Jrc3BhY2VTdGFuZGluZ0Nsb3NlZBIZCgxjbG9zZWRfYXRfbXMYASABKANIAIgBAUIPCg1fY2xvc2VkX2F0X21zIjQKHEZvdW5kV29ya3NwYWNlU3RhbmRpbmdMYW5kZWQSFAoMbGFuZGVkX2F0X21zGAEgASgDIrIBChNGaW5kV29ya3NwYWNlc0Vycm9yEksKEnVua25vd25fcmVwb3NpdG9yeRgBIAEoCzItLmFnZW50cmVwbC52MS5GaW5kV29ya3NwYWNlc1Vua25vd25SZXBvc2l0b3J5SAASRQoPdW5rbm93bl9jcmVhdG9yGAIgASgLMiouYWdlbnRyZXBsLnYxLkZpbmRXb3Jrc3BhY2VzVW5rbm93bkNyZWF0b3JIAEIHCgVjYXVzZSIhCh9GaW5kV29ya3NwYWNlc1Vua25vd25SZXBvc2l0b3J5Ih4KHEZpbmRXb3Jrc3BhY2VzVW5rbm93bkNyZWF0b3JCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_workspace_v1_workspace]);
+  fileDesc("CithZ2VudHJlcGwvdjEvZW5kcG9pbnRfZmluZF93b3Jrc3BhY2VzLnByb3RvEgxhZ2VudHJlcGwudjEi8AMKFUZpbmRXb3Jrc3BhY2VzUmVxdWVzdBI0CgpyZXBvc2l0b3J5GAEgASgLMhsud29ya3NwYWNlLnYxLlJlcG9zaXRvcnlSZWZIAIgBARI3CgZ3aW5kb3cYAiABKAsyIi5hZ2VudHJlcGwudjEuRmluZFdvcmtzcGFjZXNXaW5kb3dIAYgBARI7CghzdGFuZGluZxgDIAEoCzIkLmFnZW50cmVwbC52MS5GaW5kV29ya3NwYWNlc1N0YW5kaW5nSAKIAQESEQoEdGV4dBgEIAEoCUgDiAEBEhIKBWxpbWl0GAUgASgNSASIAQESMwoKY3JlYXRlZF9ieRgGIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWZIBYgBARI8Cglvbl9yb3N0ZXIYByABKAsyJC5hZ2VudHJlcGwudjEuRmluZFdvcmtzcGFjZXNPblJvc3RlckgGiAEBEi8KBmNhbGxlchgIIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWZIB4gBAUINCgtfcmVwb3NpdG9yeUIJCgdfd2luZG93QgsKCV9zdGFuZGluZ0IHCgVfdGV4dEIICgZfbGltaXRCDQoLX2NyZWF0ZWRfYnlCDAoKX29uX3Jvc3RlckIJCgdfY2FsbGVyIhgKFkZpbmRXb3Jrc3BhY2VzT25Sb3N0ZXIiXgoURmluZFdvcmtzcGFjZXNXaW5kb3cSFQoIc2luY2VfbXMYASABKANIAIgBARIVCgh1bnRpbF9tcxgCIAEoA0gBiAEBQgsKCV9zaW5jZV9tc0ILCglfdW50aWxfbXMi2gEKFkZpbmRXb3Jrc3BhY2VzU3RhbmRpbmcSOAoEb3BlbhgBIAEoCzIoLmFnZW50cmVwbC52MS5GaW5kV29ya3NwYWNlc1N0YW5kaW5nT3BlbkgAEjwKBmNsb3NlZBgCIAEoCzIqLmFnZW50cmVwbC52MS5GaW5kV29ya3NwYWNlc1N0YW5kaW5nQ2xvc2VkSAASPAoGbGFuZGVkGAMgASgLMiouYWdlbnRyZXBsLnYxLkZpbmRXb3Jrc3BhY2VzU3RhbmRpbmdMYW5kZWRIAEIKCghzdGFuZGluZyIcChpGaW5kV29ya3NwYWNlc1N0YW5kaW5nT3BlbiIeChxGaW5kV29ya3NwYWNlc1N0YW5kaW5nQ2xvc2VkIh4KHEZpbmRXb3Jrc3BhY2VzU3RhbmRpbmdMYW5kZWQijgEKFkZpbmRXb3Jrc3BhY2VzUmVzcG9uc2USNgoHc3VjY2VzcxgBIAEoCzIjLmFnZW50cmVwbC52MS5GaW5kV29ya3NwYWNlc1N1Y2Nlc3NIABIyCgVlcnJvchgCIAEoCzIhLmFnZW50cmVwbC52MS5GaW5kV29ya3NwYWNlc0Vycm9ySABCCAoGcmVzdWx0IqEBChVGaW5kV29ya3NwYWNlc1N1Y2Nlc3MSPwoIY29tcGxldGUYASABKAsyKy5hZ2VudHJlcGwudjEuRmluZFdvcmtzcGFjZXNTdWNjZXNzQ29tcGxldGVIABI9CgdwYXJ0aWFsGAIgASgLMiouYWdlbnRyZXBsLnYxLkZpbmRXb3Jrc3BhY2VzU3VjY2Vzc1BhcnRpYWxIAEIICgZleHRlbnQiUQodRmluZFdvcmtzcGFjZXNTdWNjZXNzQ29tcGxldGUSMAoKd29ya3NwYWNlcxgBIAMoCzIcLmFnZW50cmVwbC52MS5Gb3VuZFdvcmtzcGFjZSJhChxGaW5kV29ya3NwYWNlc1N1Y2Nlc3NQYXJ0aWFsEjAKCndvcmtzcGFjZXMYASADKAsyHC5hZ2VudHJlcGwudjEuRm91bmRXb3Jrc3BhY2USDwoHb21pdHRlZBgCIAEoDSLvAwoORm91bmRXb3Jrc3BhY2USLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZhIMCgRuYW1lGAIgASgJEg4KBmJyYW5jaBgDIAEoCRIvCgpyZXBvc2l0b3J5GAQgASgLMhsud29ya3NwYWNlLnYxLlJlcG9zaXRvcnlSZWYSFAoHc3VtbWFyeRgFIAEoCUgAiAEBEhUKDWNyZWF0ZWRfYXRfbXMYBiABKAMSGQoRbGFzdF9hY3RpdmVfYXRfbXMYByABKAMSNgoIc3RhbmRpbmcYCCABKAsyJC5hZ2VudHJlcGwudjEuRm91bmRXb3Jrc3BhY2VTdGFuZGluZxIzCgpjcmVhdGVkX2J5GAkgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZkgBiAEBEi8KBnBhcmVudBgKIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWZIAogBARI3CgZyb3N0ZXIYCyABKAsyIi5hZ2VudHJlcGwudjEuRm91bmRXb3Jrc3BhY2VSb3N0ZXJIA4gBARIPCgdjYWxsaW5nGAwgASgIQgoKCF9zdW1tYXJ5Qg0KC19jcmVhdGVkX2J5QgkKB19wYXJlbnRCCQoHX3Jvc3RlciKMAQoURm91bmRXb3Jrc3BhY2VSb3N0ZXISOgoHc2VjdGlvbhgBIAEoCzIpLmFnZW50cmVwbC52MS5Gb3VuZFdvcmtzcGFjZVJvc3RlclNlY3Rpb24SOAoGc3RhdHVzGAIgASgLMiguYWdlbnRyZXBsLnYxLkZvdW5kV29ya3NwYWNlUm9zdGVyU3RhdHVzIu0BChtGb3VuZFdvcmtzcGFjZVJvc3RlclNlY3Rpb24SPQoEb3BlbhgBIAEoCzItLmFnZW50cmVwbC52MS5Gb3VuZFdvcmtzcGFjZVJvc3RlclNlY3Rpb25PcGVuSAASQQoGaGlkZGVuGAIgASgLMi8uYWdlbnRyZXBsLnYxLkZvdW5kV29ya3NwYWNlUm9zdGVyU2VjdGlvbkhpZGRlbkgAEkEKBm1lcmdlZBgDIAEoCzIvLmFnZW50cmVwbC52MS5Gb3VuZFdvcmtzcGFjZVJvc3RlclNlY3Rpb25NZXJnZWRIAEIJCgdzZWN0aW9uIiEKH0ZvdW5kV29ya3NwYWNlUm9zdGVyU2VjdGlvbk9wZW4iIwohRm91bmRXb3Jrc3BhY2VSb3N0ZXJTZWN0aW9uSGlkZGVuIiMKIUZvdW5kV29ya3NwYWNlUm9zdGVyU2VjdGlvbk1lcmdlZCIpChpGb3VuZFdvcmtzcGFjZVJvc3RlclN0YXR1cxILCgNhcm0YASABKAki2gEKFkZvdW5kV29ya3NwYWNlU3RhbmRpbmcSOAoEb3BlbhgBIAEoCzIoLmFnZW50cmVwbC52MS5Gb3VuZFdvcmtzcGFjZVN0YW5kaW5nT3BlbkgAEjwKBmNsb3NlZBgCIAEoCzIqLmFnZW50cmVwbC52MS5Gb3VuZFdvcmtzcGFjZVN0YW5kaW5nQ2xvc2VkSAASPAoGbGFuZGVkGAMgASgLMiouYWdlbnRyZXBsLnYxLkZvdW5kV29ya3NwYWNlU3RhbmRpbmdMYW5kZWRIAEIKCghzdGFuZGluZyIcChpGb3VuZFdvcmtzcGFjZVN0YW5kaW5nT3BlbiJKChxGb3VuZFdvcmtzcGFjZVN0YW5kaW5nQ2xvc2VkEhkKDGNsb3NlZF9hdF9tcxgBIAEoA0gAiAEBQg8KDV9jbG9zZWRfYXRfbXMiNAocRm91bmRXb3Jrc3BhY2VTdGFuZGluZ0xhbmRlZBIUCgxsYW5kZWRfYXRfbXMYASABKAMi9wEKE0ZpbmRXb3Jrc3BhY2VzRXJyb3ISSwoSdW5rbm93bl9yZXBvc2l0b3J5GAEgASgLMi0uYWdlbnRyZXBsLnYxLkZpbmRXb3Jrc3BhY2VzVW5rbm93blJlcG9zaXRvcnlIABJFCg91bmtub3duX2NyZWF0b3IYAiABKAsyKi5hZ2VudHJlcGwudjEuRmluZFdvcmtzcGFjZXNVbmtub3duQ3JlYXRvckgAEkMKDnVua25vd25fY2FsbGVyGAMgASgLMikuYWdlbnRyZXBsLnYxLkZpbmRXb3Jrc3BhY2VzVW5rbm93bkNhbGxlckgAQgcKBWNhdXNlIiEKH0ZpbmRXb3Jrc3BhY2VzVW5rbm93blJlcG9zaXRvcnkiHgocRmluZFdvcmtzcGFjZXNVbmtub3duQ3JlYXRvciIdChtGaW5kV29ya3NwYWNlc1Vua25vd25DYWxsZXJCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_workspace_v1_workspace]);
 
 /**
  * What to find. EVERY SET CRITERION MUST HOLD, and an unset one narrows
@@ -82,6 +85,26 @@ export type FindWorkspacesRequest = Message<"agentrepl.v1.FindWorkspacesRequest"
    * @generated from field: optional workspace.v1.WorkspaceRef created_by = 6;
    */
   createdBy?: WorkspaceRef | undefined;
+
+  /**
+   * Only workspaces the sidebar roster draws a row for in its open, hidden or
+   * recently merged section (FoundWorkspace.roster set): the workspaces
+   * `workspace list` answers. UNSET = drawn or not.
+   *
+   * @generated from field: optional agentrepl.v1.FindWorkspacesOnRoster on_roster = 7;
+   */
+  onRoster?: FindWorkspacesOnRoster | undefined;
+
+  /**
+   * The workspace asking. Its own record, and only its own, answers
+   * FoundWorkspace.calling true, so an agent reading the answer tells itself
+   * apart from every other workspace. UNSET = the caller is no workspace (the
+   * user, or a shell outside every worktree), and no record answers calling.
+   * A ref naming no registered workspace is the unknown_caller answer.
+   *
+   * @generated from field: optional workspace.v1.WorkspaceRef caller = 8;
+   */
+  caller?: WorkspaceRef | undefined;
 };
 
 /**
@@ -90,6 +113,22 @@ export type FindWorkspacesRequest = Message<"agentrepl.v1.FindWorkspacesRequest"
  */
 export const FindWorkspacesRequestSchema: GenMessage<FindWorkspacesRequest> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_find_workspaces, 0);
+
+/**
+ * Narrows a find to the workspaces the sidebar roster draws. No fields: its
+ * presence is the criterion.
+ *
+ * @generated from message agentrepl.v1.FindWorkspacesOnRoster
+ */
+export type FindWorkspacesOnRoster = Message<"agentrepl.v1.FindWorkspacesOnRoster"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.FindWorkspacesOnRoster.
+ * Use `create(FindWorkspacesOnRosterSchema)` to create a new message.
+ */
+export const FindWorkspacesOnRosterSchema: GenMessage<FindWorkspacesOnRoster> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_find_workspaces, 1);
 
 /**
  * A window of time a workspace's life must overlap: the workspace was created
@@ -124,7 +163,7 @@ export type FindWorkspacesWindow = Message<"agentrepl.v1.FindWorkspacesWindow"> 
  * Use `create(FindWorkspacesWindowSchema)` to create a new message.
  */
 export const FindWorkspacesWindowSchema: GenMessage<FindWorkspacesWindow> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_find_workspaces, 1);
+  messageDesc(file_agentrepl_v1_endpoint_find_workspaces, 2);
 
 /**
  * The standing to narrow to. THE ARM IS THE STANDING ASKED FOR. The arms
@@ -169,7 +208,7 @@ export type FindWorkspacesStanding = Message<"agentrepl.v1.FindWorkspacesStandin
  * Use `create(FindWorkspacesStandingSchema)` to create a new message.
  */
 export const FindWorkspacesStandingSchema: GenMessage<FindWorkspacesStanding> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_find_workspaces, 2);
+  messageDesc(file_agentrepl_v1_endpoint_find_workspaces, 3);
 
 /**
  * Open workspaces. No fields.
@@ -184,7 +223,7 @@ export type FindWorkspacesStandingOpen = Message<"agentrepl.v1.FindWorkspacesSta
  * Use `create(FindWorkspacesStandingOpenSchema)` to create a new message.
  */
 export const FindWorkspacesStandingOpenSchema: GenMessage<FindWorkspacesStandingOpen> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_find_workspaces, 3);
+  messageDesc(file_agentrepl_v1_endpoint_find_workspaces, 4);
 
 /**
  * Closed workspaces, landed or not. No fields.
@@ -199,7 +238,7 @@ export type FindWorkspacesStandingClosed = Message<"agentrepl.v1.FindWorkspacesS
  * Use `create(FindWorkspacesStandingClosedSchema)` to create a new message.
  */
 export const FindWorkspacesStandingClosedSchema: GenMessage<FindWorkspacesStandingClosed> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_find_workspaces, 4);
+  messageDesc(file_agentrepl_v1_endpoint_find_workspaces, 5);
 
 /**
  * Landed workspaces. No fields.
@@ -214,7 +253,7 @@ export type FindWorkspacesStandingLanded = Message<"agentrepl.v1.FindWorkspacesS
  * Use `create(FindWorkspacesStandingLandedSchema)` to create a new message.
  */
 export const FindWorkspacesStandingLandedSchema: GenMessage<FindWorkspacesStandingLanded> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_find_workspaces, 5);
+  messageDesc(file_agentrepl_v1_endpoint_find_workspaces, 6);
 
 /**
  * THE ARM IS THE OUTCOME.
@@ -245,7 +284,7 @@ export type FindWorkspacesResponse = Message<"agentrepl.v1.FindWorkspacesRespons
  * Use `create(FindWorkspacesResponseSchema)` to create a new message.
  */
 export const FindWorkspacesResponseSchema: GenMessage<FindWorkspacesResponse> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_find_workspaces, 6);
+  messageDesc(file_agentrepl_v1_endpoint_find_workspaces, 7);
 
 /**
  * The workspaces found. FINDING NONE IS AN ANSWER: it is a complete extent
@@ -280,7 +319,7 @@ export type FindWorkspacesSuccess = Message<"agentrepl.v1.FindWorkspacesSuccess"
  * Use `create(FindWorkspacesSuccessSchema)` to create a new message.
  */
 export const FindWorkspacesSuccessSchema: GenMessage<FindWorkspacesSuccess> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_find_workspaces, 7);
+  messageDesc(file_agentrepl_v1_endpoint_find_workspaces, 8);
 
 /**
  * Every match, the most recently active first.
@@ -299,7 +338,7 @@ export type FindWorkspacesSuccessComplete = Message<"agentrepl.v1.FindWorkspaces
  * Use `create(FindWorkspacesSuccessCompleteSchema)` to create a new message.
  */
 export const FindWorkspacesSuccessCompleteSchema: GenMessage<FindWorkspacesSuccessComplete> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_find_workspaces, 8);
+  messageDesc(file_agentrepl_v1_endpoint_find_workspaces, 9);
 
 /**
  * The `limit` most recently active matches, the most recently active first,
@@ -326,7 +365,7 @@ export type FindWorkspacesSuccessPartial = Message<"agentrepl.v1.FindWorkspacesS
  * Use `create(FindWorkspacesSuccessPartialSchema)` to create a new message.
  */
 export const FindWorkspacesSuccessPartialSchema: GenMessage<FindWorkspacesSuccessPartial> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_find_workspaces, 9);
+  messageDesc(file_agentrepl_v1_endpoint_find_workspaces, 10);
 
 /**
  * One workspace found: what it is called, what it did, where and when.
@@ -412,6 +451,25 @@ export type FoundWorkspace = Message<"agentrepl.v1.FoundWorkspace"> & {
    * @generated from field: optional workspace.v1.WorkspaceRef parent = 10;
    */
   parent?: WorkspaceRef | undefined;
+
+  /**
+   * Where the sidebar roster draws the workspace and the live status it draws
+   * it with, as the roster last resolved stands. UNSET when the roster draws
+   * no row of it in its open, hidden or recently merged section: a closed
+   * workspace, or one landed longer ago than the recently merged band keeps.
+   *
+   * @generated from field: optional agentrepl.v1.FoundWorkspaceRoster roster = 11;
+   */
+  roster?: FoundWorkspaceRoster | undefined;
+
+  /**
+   * TRUE for the record of the workspace the request names as its caller
+   * (FindWorkspacesRequest.caller), false for every other record and for every
+   * record of a request naming no caller.
+   *
+   * @generated from field: bool calling = 12;
+   */
+  calling: boolean;
 };
 
 /**
@@ -419,7 +477,158 @@ export type FoundWorkspace = Message<"agentrepl.v1.FoundWorkspace"> & {
  * Use `create(FoundWorkspaceSchema)` to create a new message.
  */
 export const FoundWorkspaceSchema: GenMessage<FoundWorkspace> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_find_workspaces, 10);
+  messageDesc(file_agentrepl_v1_endpoint_find_workspaces, 11);
+
+/**
+ * A found workspace as the sidebar roster draws it right now: which section
+ * carries its row, and that row's status. Both are read off the one roster
+ * the daemon publishes (frontend.v1.WorkspaceRoster), so the answer agrees
+ * with what the user sees in the sidebar at the moment of the call.
+ *
+ * @generated from message agentrepl.v1.FoundWorkspaceRoster
+ */
+export type FoundWorkspaceRoster = Message<"agentrepl.v1.FoundWorkspaceRoster"> & {
+  /**
+   * The roster section the workspace's row is drawn in.
+   *
+   * @generated from field: agentrepl.v1.FoundWorkspaceRosterSection section = 1;
+   */
+  section?: FoundWorkspaceRosterSection | undefined;
+
+  /**
+   * The live status the row draws.
+   *
+   * @generated from field: agentrepl.v1.FoundWorkspaceRosterStatus status = 2;
+   */
+  status?: FoundWorkspaceRosterStatus | undefined;
+};
+
+/**
+ * Describes the message agentrepl.v1.FoundWorkspaceRoster.
+ * Use `create(FoundWorkspaceRosterSchema)` to create a new message.
+ */
+export const FoundWorkspaceRosterSchema: GenMessage<FoundWorkspaceRoster> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_find_workspaces, 12);
+
+/**
+ * Which roster section draws a found workspace's row. THE ARM IS THE
+ * SECTION, and exactly one holds: the roster draws each workspace once.
+ *
+ * @generated from message agentrepl.v1.FoundWorkspaceRosterSection
+ */
+export type FoundWorkspaceRosterSection = Message<"agentrepl.v1.FoundWorkspaceRosterSection"> & {
+  /**
+   * @generated from oneof agentrepl.v1.FoundWorkspaceRosterSection.section
+   */
+  section: {
+    /**
+     * The open section (frontend.v1.WorkspaceRoster.repository): an open,
+     * shown workspace, child rows included.
+     *
+     * @generated from field: agentrepl.v1.FoundWorkspaceRosterSectionOpen open = 1;
+     */
+    value: FoundWorkspaceRosterSectionOpen;
+    case: "open";
+  } | {
+    /**
+     * The hidden section (frontend.v1.WorkspaceRoster.hidden): open but
+     * hidden by the user.
+     *
+     * @generated from field: agentrepl.v1.FoundWorkspaceRosterSectionHidden hidden = 2;
+     */
+    value: FoundWorkspaceRosterSectionHidden;
+    case: "hidden";
+  } | {
+    /**
+     * The recently merged band (frontend.v1.WorkspaceRoster.recently_merged):
+     * landed and closed, recently enough that the band still draws it.
+     *
+     * @generated from field: agentrepl.v1.FoundWorkspaceRosterSectionMerged merged = 3;
+     */
+    value: FoundWorkspaceRosterSectionMerged;
+    case: "merged";
+  } | { case: undefined; value?: undefined };
+};
+
+/**
+ * Describes the message agentrepl.v1.FoundWorkspaceRosterSection.
+ * Use `create(FoundWorkspaceRosterSectionSchema)` to create a new message.
+ */
+export const FoundWorkspaceRosterSectionSchema: GenMessage<FoundWorkspaceRosterSection> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_find_workspaces, 13);
+
+/**
+ * Drawn in the open section. No fields.
+ *
+ * @generated from message agentrepl.v1.FoundWorkspaceRosterSectionOpen
+ */
+export type FoundWorkspaceRosterSectionOpen = Message<"agentrepl.v1.FoundWorkspaceRosterSectionOpen"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.FoundWorkspaceRosterSectionOpen.
+ * Use `create(FoundWorkspaceRosterSectionOpenSchema)` to create a new message.
+ */
+export const FoundWorkspaceRosterSectionOpenSchema: GenMessage<FoundWorkspaceRosterSectionOpen> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_find_workspaces, 14);
+
+/**
+ * Drawn in the hidden section. No fields.
+ *
+ * @generated from message agentrepl.v1.FoundWorkspaceRosterSectionHidden
+ */
+export type FoundWorkspaceRosterSectionHidden = Message<"agentrepl.v1.FoundWorkspaceRosterSectionHidden"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.FoundWorkspaceRosterSectionHidden.
+ * Use `create(FoundWorkspaceRosterSectionHiddenSchema)` to create a new message.
+ */
+export const FoundWorkspaceRosterSectionHiddenSchema: GenMessage<FoundWorkspaceRosterSectionHidden> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_find_workspaces, 15);
+
+/**
+ * Drawn in the recently merged band. No fields.
+ *
+ * @generated from message agentrepl.v1.FoundWorkspaceRosterSectionMerged
+ */
+export type FoundWorkspaceRosterSectionMerged = Message<"agentrepl.v1.FoundWorkspaceRosterSectionMerged"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.FoundWorkspaceRosterSectionMerged.
+ * Use `create(FoundWorkspaceRosterSectionMergedSchema)` to create a new message.
+ */
+export const FoundWorkspaceRosterSectionMergedSchema: GenMessage<FoundWorkspaceRosterSectionMerged> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_find_workspaces, 16);
+
+/**
+ * The live status a found workspace's roster row draws: its lifecycle dot
+ * (thinking, done, ready, cold_gate, ...).
+ *
+ * @generated from message agentrepl.v1.FoundWorkspaceRosterStatus
+ */
+export type FoundWorkspaceRosterStatus = Message<"agentrepl.v1.FoundWorkspaceRosterStatus"> & {
+  /**
+   * The proto field name of the row's frontend.v1.RosterRow.status arm, as
+   * the roster resolved it (for example "thinking", "cold_gate", "ready").
+   * It NAMES the one vocabulary frontend.v1.RosterRow.status declares rather
+   * than re-declaring it as a second oneof, so a status arm the roster gains
+   * is answered here with no change to this message. The daemon only ever
+   * answers an arm the row actually set; a row with no status arm is a
+   * roster contract breach and fails the call rather than answering a blank.
+   *
+   * @generated from field: string arm = 1;
+   */
+  arm: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.FoundWorkspaceRosterStatus.
+ * Use `create(FoundWorkspaceRosterStatusSchema)` to create a new message.
+ */
+export const FoundWorkspaceRosterStatusSchema: GenMessage<FoundWorkspaceRosterStatus> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_find_workspaces, 17);
 
 /**
  * Whether a found workspace is open, closed, or landed. THE ARM IS THE
@@ -458,7 +667,7 @@ export type FoundWorkspaceStanding = Message<"agentrepl.v1.FoundWorkspaceStandin
  * Use `create(FoundWorkspaceStandingSchema)` to create a new message.
  */
 export const FoundWorkspaceStandingSchema: GenMessage<FoundWorkspaceStanding> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_find_workspaces, 11);
+  messageDesc(file_agentrepl_v1_endpoint_find_workspaces, 18);
 
 /**
  * Open now. No fields.
@@ -473,7 +682,7 @@ export type FoundWorkspaceStandingOpen = Message<"agentrepl.v1.FoundWorkspaceSta
  * Use `create(FoundWorkspaceStandingOpenSchema)` to create a new message.
  */
 export const FoundWorkspaceStandingOpenSchema: GenMessage<FoundWorkspaceStandingOpen> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_find_workspaces, 12);
+  messageDesc(file_agentrepl_v1_endpoint_find_workspaces, 19);
 
 /**
  * Closed without its branch landing.
@@ -495,7 +704,7 @@ export type FoundWorkspaceStandingClosed = Message<"agentrepl.v1.FoundWorkspaceS
  * Use `create(FoundWorkspaceStandingClosedSchema)` to create a new message.
  */
 export const FoundWorkspaceStandingClosedSchema: GenMessage<FoundWorkspaceStandingClosed> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_find_workspaces, 13);
+  messageDesc(file_agentrepl_v1_endpoint_find_workspaces, 20);
 
 /**
  * Its branch landed, and the workspace is closed.
@@ -516,7 +725,7 @@ export type FoundWorkspaceStandingLanded = Message<"agentrepl.v1.FoundWorkspaceS
  * Use `create(FoundWorkspaceStandingLandedSchema)` to create a new message.
  */
 export const FoundWorkspaceStandingLandedSchema: GenMessage<FoundWorkspaceStandingLanded> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_find_workspaces, 14);
+  messageDesc(file_agentrepl_v1_endpoint_find_workspaces, 21);
 
 /**
  * Validation failures (a blank text, a zero limit, a reversed window) are
@@ -544,6 +753,14 @@ export type FindWorkspacesError = Message<"agentrepl.v1.FindWorkspacesError"> & 
      */
     value: FindWorkspacesUnknownCreator;
     case: "unknownCreator";
+  } | {
+    /**
+     * `caller` names a workspace the daemon's registry does not hold.
+     *
+     * @generated from field: agentrepl.v1.FindWorkspacesUnknownCaller unknown_caller = 3;
+     */
+    value: FindWorkspacesUnknownCaller;
+    case: "unknownCaller";
   } | { case: undefined; value?: undefined };
 };
 
@@ -552,7 +769,7 @@ export type FindWorkspacesError = Message<"agentrepl.v1.FindWorkspacesError"> & 
  * Use `create(FindWorkspacesErrorSchema)` to create a new message.
  */
 export const FindWorkspacesErrorSchema: GenMessage<FindWorkspacesError> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_find_workspaces, 15);
+  messageDesc(file_agentrepl_v1_endpoint_find_workspaces, 22);
 
 /**
  * Empty: the echoed ref is the only identity involved.
@@ -567,7 +784,7 @@ export type FindWorkspacesUnknownRepository = Message<"agentrepl.v1.FindWorkspac
  * Use `create(FindWorkspacesUnknownRepositorySchema)` to create a new message.
  */
 export const FindWorkspacesUnknownRepositorySchema: GenMessage<FindWorkspacesUnknownRepository> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_find_workspaces, 16);
+  messageDesc(file_agentrepl_v1_endpoint_find_workspaces, 23);
 
 /**
  * Empty: the echoed ref is the only identity involved.
@@ -582,5 +799,20 @@ export type FindWorkspacesUnknownCreator = Message<"agentrepl.v1.FindWorkspacesU
  * Use `create(FindWorkspacesUnknownCreatorSchema)` to create a new message.
  */
 export const FindWorkspacesUnknownCreatorSchema: GenMessage<FindWorkspacesUnknownCreator> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_find_workspaces, 17);
+  messageDesc(file_agentrepl_v1_endpoint_find_workspaces, 24);
+
+/**
+ * Empty: the echoed ref is the only identity involved.
+ *
+ * @generated from message agentrepl.v1.FindWorkspacesUnknownCaller
+ */
+export type FindWorkspacesUnknownCaller = Message<"agentrepl.v1.FindWorkspacesUnknownCaller"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.FindWorkspacesUnknownCaller.
+ * Use `create(FindWorkspacesUnknownCallerSchema)` to create a new message.
+ */
+export const FindWorkspacesUnknownCallerSchema: GenMessage<FindWorkspacesUnknownCaller> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_find_workspaces, 25);
 

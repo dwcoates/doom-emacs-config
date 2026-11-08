@@ -4,7 +4,10 @@
 // answered inside the caller's turn: for an agent looking for the workspace
 // that did some piece of work (which one fixed the footer last week? what ran
 // in this repository yesterday?), including workspaces closed long ago, which
-// the roster no longer shows.
+// the roster no longer shows. It is ALSO the one record of a workspace the
+// agent API answers for the workspaces the sidebar draws now (on_roster):
+// each such record carries the roster section and live status it is drawn
+// with, so one record shape serves `workspace find` and `workspace list`.
 //
 // AGENT WORKSPACES ONLY. A zettel chat thread and a merge workspace (the
 // hidden workspace an async merge runs in) are registry rows too, but neither
@@ -41,7 +44,21 @@ message FindWorkspacesRequest {
   // made. UNSET = whoever asked. A ref naming no registered workspace is the
   // unknown_creator answer.
   optional workspace.v1.WorkspaceRef created_by = 6;
+  // Only workspaces the sidebar roster draws a row for in its open, hidden or
+  // recently merged section (FoundWorkspace.roster set): the workspaces
+  // `workspace list` answers. UNSET = drawn or not.
+  optional FindWorkspacesOnRoster on_roster = 7;
+  // The workspace asking. Its own record, and only its own, answers
+  // FoundWorkspace.calling true, so an agent reading the answer tells itself
+  // apart from every other workspace. UNSET = the caller is no workspace (the
+  // user, or a shell outside every worktree), and no record answers calling.
+  // A ref naming no registered workspace is the unknown_caller answer.
+  optional workspace.v1.WorkspaceRef caller = 8;
 }
+
+// Narrows a find to the workspaces the sidebar roster draws. No fields: its
+// presence is the criterion.
+message FindWorkspacesOnRoster {}
 
 // A window of time a workspace's life must overlap: the workspace was created
 // no later than its end, and was last active no earlier than its start. A
@@ -139,6 +156,61 @@ message FoundWorkspace {
   // The workspace's parent when it is a child (WorkspaceRelationship.child).
   // UNSET for a peer.
   optional workspace.v1.WorkspaceRef parent = 10;
+  // Where the sidebar roster draws the workspace and the live status it draws
+  // it with, as the roster last resolved stands. UNSET when the roster draws
+  // no row of it in its open, hidden or recently merged section: a closed
+  // workspace, or one landed longer ago than the recently merged band keeps.
+  optional FoundWorkspaceRoster roster = 11;
+  // TRUE for the record of the workspace the request names as its caller
+  // (FindWorkspacesRequest.caller), false for every other record and for every
+  // record of a request naming no caller.
+  bool calling = 12;
+}
+
+// A found workspace as the sidebar roster draws it right now: which section
+// carries its row, and that row's status. Both are read off the one roster
+// the daemon publishes (frontend.v1.WorkspaceRoster), so the answer agrees
+// with what the user sees in the sidebar at the moment of the call.
+message FoundWorkspaceRoster {
+  // The roster section the workspace's row is drawn in.
+  FoundWorkspaceRosterSection section = 1;
+  // The live status the row draws.
+  FoundWorkspaceRosterStatus status = 2;
+}
+
+// Which roster section draws a found workspace's row. THE ARM IS THE
+// SECTION, and exactly one holds: the roster draws each workspace once.
+message FoundWorkspaceRosterSection {
+  oneof section {
+    // The open section (frontend.v1.WorkspaceRoster.repository): an open,
+    // shown workspace, child rows included.
+    FoundWorkspaceRosterSectionOpen open = 1;
+    // The hidden section (frontend.v1.WorkspaceRoster.hidden): open but
+    // hidden by the user.
+    FoundWorkspaceRosterSectionHidden hidden = 2;
+    // The recently merged band (frontend.v1.WorkspaceRoster.recently_merged):
+    // landed and closed, recently enough that the band still draws it.
+    FoundWorkspaceRosterSectionMerged merged = 3;
+  }
+}
+// Drawn in the open section. No fields.
+message FoundWorkspaceRosterSectionOpen {}
+// Drawn in the hidden section. No fields.
+message FoundWorkspaceRosterSectionHidden {}
+// Drawn in the recently merged band. No fields.
+message FoundWorkspaceRosterSectionMerged {}
+
+// The live status a found workspace's roster row draws: its lifecycle dot
+// (thinking, done, ready, cold_gate, ...).
+message FoundWorkspaceRosterStatus {
+  // The proto field name of the row's frontend.v1.RosterRow.status arm, as
+  // the roster resolved it (for example "thinking", "cold_gate", "ready").
+  // It NAMES the one vocabulary frontend.v1.RosterRow.status declares rather
+  // than re-declaring it as a second oneof, so a status arm the roster gains
+  // is answered here with no change to this message. The daemon only ever
+  // answers an arm the row actually set; a row with no status arm is a
+  // roster contract breach and fails the call rather than answering a blank.
+  string arm = 1;
 }
 
 // Whether a found workspace is open, closed, or landed. THE ARM IS THE
@@ -173,9 +245,13 @@ message FindWorkspacesError {
     FindWorkspacesUnknownRepository unknown_repository = 1;
     // `created_by` names a workspace the daemon's registry does not hold.
     FindWorkspacesUnknownCreator unknown_creator = 2;
+    // `caller` names a workspace the daemon's registry does not hold.
+    FindWorkspacesUnknownCaller unknown_caller = 3;
   }
 }
 // Empty: the echoed ref is the only identity involved.
 message FindWorkspacesUnknownRepository {}
 // Empty: the echoed ref is the only identity involved.
 message FindWorkspacesUnknownCreator {}
+// Empty: the echoed ref is the only identity involved.
+message FindWorkspacesUnknownCaller {}
