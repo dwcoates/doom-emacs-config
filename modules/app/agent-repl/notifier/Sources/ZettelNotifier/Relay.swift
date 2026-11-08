@@ -184,7 +184,7 @@ public actor Relay {
             switch response.result {
             case .success:
                 return
-            case .error(let refusal) where refusal.unknownPost != nil:
+            case .error(let refusal) where refusal.cause == .unknownPost(.init()):
                 log.info(Op.post, "the daemon no longer awaited the post's answer", ["post": id])
             default:
                 log.error(Op.post, "the daemon answered the post's report with nothing this app knows", ["post": id])

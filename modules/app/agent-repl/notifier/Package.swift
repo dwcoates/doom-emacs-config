@@ -17,6 +17,7 @@ let package = Package(
     platforms: [.macOS(.v14)],
     products: [
         .executable(name: "Zettel", targets: ["Zettel"]),
+        .executable(name: "ZettelIcon", targets: ["ZettelIcon"]),
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-protobuf.git", exact: "1.39.0"),
@@ -31,6 +32,7 @@ let package = Package(
             dependencies: ["ZettelProto", .product(name: "SwiftProtobuf", package: "swift-protobuf")]
         ),
         .executableTarget(name: "Zettel", dependencies: ["ZettelNotifier"]),
+        .executableTarget(name: "ZettelIcon"),
         .testTarget(name: "ZettelNotifierTests", dependencies: ["ZettelNotifier", "ZettelProto"]),
     ]
 )
