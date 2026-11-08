@@ -1972,3 +1972,53 @@ describe("the footer's countdowns share one builder", () => {
     expect(handPainted).toEqual(["activity.ts: textContent = `${label}${remainingLabel("]);
   });
 });
+
+describe("the vendor's silence line", () => {
+  /** The working cell's vendor-silence line, last heard SILENTMS before NOW. */
+  function silenceCell(response: Record<string, unknown>, silentMs = 72_000): HTMLElement {
+    return drawCell(
+      "working",
+      salientInit("working", "vendorSilence", { response }, BigInt(NOW - silentMs)),
+    ).cell;
+  }
+
+  it("draws a response that never started with what was last heard", () => {
+    const cell = silenceCell({ case: "notStarted", value: { lastHeard: { text: "read finished" } } });
+    expect(cell.querySelector(".footer-activity-vendor-silence")?.textContent).toBe(
+      "no API response for 1m 12s · response not started · last heard: read finished",
+    );
+  });
+
+  it("draws a response that started and went quiet as stalled", () => {
+    const cell = silenceCell({ case: "stalled", value: { lastHeard: { text: "thinking" } } });
+    expect(cell.querySelector(".footer-activity-vendor-silence")?.textContent).toBe(
+      "no API response for 1m 12s · response stalled · last heard: thinking",
+    );
+  });
+
+  it("counts the silence up on the shared tick", () => {
+    const cell = silenceCell({ case: "stalled", value: { lastHeard: { text: "thinking" } } });
+    vi.advanceTimersByTime(1000);
+    expect(cell.querySelector(".footer-vendor-silence-for")?.textContent).toBe(
+      "no API response for 1m 13s",
+    );
+  });
+
+  it("draws no trailing age, because the line is its own age", () => {
+    const cell = silenceCell({ case: "notStarted", value: { lastHeard: { text: "read finished" } } });
+    expect(cell.querySelector(".footer-activity-age")).toBeNull();
+  });
+
+  it("names the silence on the cell", () => {
+    const cell = silenceCell({ case: "notStarted", value: { lastHeard: { text: "read finished" } } });
+    expect(cell.getAttribute("data-arm")).toBe("vendorSilence");
+  });
+
+  it("refuses a silence line that says nothing of the response", () => {
+    expect(() => silenceCell({})).toThrow(MalformedView);
+  });
+
+  it("refuses a silence line with nothing last heard", () => {
+    expect(() => silenceCell({ case: "stalled", value: {} })).toThrow(MalformedView);
+  });
+});
