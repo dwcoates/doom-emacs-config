@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"os"
 	"regexp"
@@ -20,6 +19,7 @@ import (
 	"agentrepl/proto/agentrepl/v1/agentreplv1connect"
 	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
+	"agentrepl/protohelpers/rosterwalk"
 
 	"agent-repld/internal/prwatch"
 	"agent-repld/internal/sourcescan"
@@ -45,7 +45,7 @@ type cliClient struct {
 	// SetWorkspaceOneShot's answers; nil answers an empty success.
 	retargeted *agentreplv1.SetWorkspaceParentResponse
 	oneShot    *agentreplv1.SetWorkspaceOneShotResponse
-	queues    *agentreplv1.GetMergeQueueStatusResponse
+	queues     *agentreplv1.GetMergeQueueStatusResponse
 	// found answers FindWorkspaces, an empty complete find when nil.
 	found *agentreplv1.FindWorkspacesResponse
 	// arrangement answers GetSidebarArrangement; arrange answers
@@ -1369,20 +1369,176 @@ func TestAsyncMergeSendsItsMakerTargetAndPlacement(t *testing.T) {
 	}
 }
 
-func TestListPrintsEveryWorkspaceOneALine(t *testing.T) {
+// listedRecords is a complete find answering two records: the caller's own,
+// drawn thinking in the open section with its summary, and a peer's drawn
+// done in the hidden section.
+func listedRecords() *agentreplv1.FindWorkspacesResponse {
+	summary := "Fix the footer"
+	return &agentreplv1.FindWorkspacesResponse{Result: &agentreplv1.FindWorkspacesResponse_Success{Success: &agentreplv1.FindWorkspacesSuccess{
+		Extent: &agentreplv1.FindWorkspacesSuccess_Complete{Complete: &agentreplv1.FindWorkspacesSuccessComplete{Workspaces: []*agentreplv1.FoundWorkspace{
+			{Workspace: &workspacev1.WorkspaceRef{Id: "ws-caller", Dir: "/wt/caller"}, Name: "caller", Summary: &summary, Calling: true,
+				Roster: &agentreplv1.FoundWorkspaceRoster{
+					Section: &agentreplv1.FoundWorkspaceRosterSection{Section: &agentreplv1.FoundWorkspaceRosterSection_Open{Open: &agentreplv1.FoundWorkspaceRosterSectionOpen{}}},
+					Status:  &agentreplv1.FoundWorkspaceRosterStatus{Arm: "thinking"}}},
+			{Workspace: &workspacev1.WorkspaceRef{Id: "ws-peer", Dir: "/wt/peer"}, Name: "peer",
+				Roster: &agentreplv1.FoundWorkspaceRoster{
+					Section: &agentreplv1.FoundWorkspaceRosterSection{Section: &agentreplv1.FoundWorkspaceRosterSection_Hidden{Hidden: &agentreplv1.FoundWorkspaceRosterSectionHidden{}}},
+					Status:  &agentreplv1.FoundWorkspaceRosterStatus{Arm: "done"}}},
+		}}}}}}
+}
+
+// printedRecords decodes OUT as one agentrepl.v1.FoundWorkspace a line.
+func printedRecords(t *testing.T, out string) []*agentreplv1.FoundWorkspace {
+	t.Helper()
+	var records []*agentreplv1.FoundWorkspace
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		record := &agentreplv1.FoundWorkspace{}
+		if err := protojson.Unmarshal([]byte(line), record); err != nil {
+			t.Fatalf("line %q is no FoundWorkspace: %v", line, err)
+		}
+		records = append(records, record)
+	}
+	return records
+}
+
+func TestListAsksForTheRosterAsTheCaller(t *testing.T) {
+	tests := []struct {
+		name       string
+		cwd        string
+		wantCaller string
+	}{
+		{name: "inside a workspace names it the caller", cwd: "/wt/caller/src", wantCaller: "ws-caller"},
+		{name: "outside every workspace names no caller", cwd: "/elsewhere", wantCaller: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newCLIFixture()
+			f.cwd = tt.cwd
+
+			// Act
+			code := f.run(workspaceNoun, "list")
+
+			// Assert
+			req := only[*agentreplv1.FindWorkspacesRequest](t, f)
+			if code != exitSuccess || req.OnRoster == nil || req.GetCaller().GetId() != tt.wantCaller ||
+				req.Limit != nil || req.Repository != nil || req.Standing != nil {
+				t.Fatalf("exit %d, sent %v; want on_roster, caller %q and nothing else", code, req, tt.wantCaller)
+			}
+		})
+	}
+}
+
+func TestListPrintsEveryRecordOneALine(t *testing.T) {
 	// Arrange
 	f := newCLIFixture()
+	f.client.found = listedRecords()
 
 	// Act
 	code := f.run(workspaceNoun, "list")
 
 	// Assert
-	lines := strings.Split(strings.TrimSpace(f.out.String()), "\n")
-	if code != exitSuccess || len(lines) != 4 {
-		t.Fatalf("exit %d, lines %q; want four workspaces", code, lines)
+	if code != exitSuccess {
+		t.Fatalf("exit %d, stderr %q", code, f.errOut.String())
 	}
-	if !strings.Contains(lines[0], `"name":"caller"`) || !strings.Contains(lines[0], `"calling":true`) || strings.Contains(lines[1], `"calling"`) {
-		t.Fatalf("lines = %q, want the caller first and marked", lines)
+	got := printedRecords(t, f.out.String())
+	want := f.client.found.GetSuccess().GetComplete().GetWorkspaces()
+	if len(got) != len(want) {
+		t.Fatalf("printed %d records, want %d", len(got), len(want))
+	}
+	for i := range want {
+		if !proto.Equal(got[i], want[i]) {
+			t.Fatalf("line %d = %v, want %v", i, got[i], want[i])
+		}
+	}
+}
+
+// EVERY FACT A LIST LINE CARRIED BEFORE IT ANSWERED THE FIND RECORD is still
+// on the line, under the record's JSON names: name, id, dir, live status,
+// section and calling, and the summary it gained.
+func TestListLinesCarryEveryLegacyFactAndTheSummary(t *testing.T) {
+	// Arrange
+	f := newCLIFixture()
+	f.client.found = listedRecords()
+
+	// Act
+	f.run(workspaceNoun, "list")
+
+	// Assert
+	lines := strings.Split(strings.TrimSpace(f.out.String()), "\n")
+	for i, want := range [][]string{
+		{`"name":"caller"`, `"id":"ws-caller"`, `"dir":"/wt/caller"`, `"arm":"thinking"`, `"section":{"open":{}}`, `"calling":true`, `"summary":"Fix the footer"`},
+		{`"name":"peer"`, `"id":"ws-peer"`, `"dir":"/wt/peer"`, `"arm":"done"`, `"section":{"hidden":{}}`},
+	} {
+		for _, fact := range want {
+			if !strings.Contains(lines[i], fact) {
+				t.Fatalf("line %d %q lacks %s", i, lines[i], fact)
+			}
+		}
+	}
+	if strings.Contains(lines[1], `"calling"`) {
+		t.Fatalf("line 1 %q marks a workspace that is not the caller", lines[1])
+	}
+}
+
+// LIST AND FIND ANSWER ONE RECORD SHAPE: over the same daemon answer, every
+// line `list` prints is exactly a record `find -all` prints.
+func TestListAndFindPrintTheSameRecords(t *testing.T) {
+	// Arrange
+	listed, found := newCLIFixture(), newCLIFixture()
+	listed.client.found, found.client.found = listedRecords(), listedRecords()
+
+	// Act
+	listCode := listed.run(workspaceNoun, "list")
+	findCode := found.run(workspaceNoun, "find", "-all")
+
+	// Assert
+	if listCode != exitSuccess || findCode != exitSuccess {
+		t.Fatalf("list exit %d, find exit %d", listCode, findCode)
+	}
+	var printed agentreplv1.FindWorkspacesResponse
+	if err := protojson.Unmarshal(found.out.Bytes(), &printed); err != nil {
+		t.Fatalf("find printed no FindWorkspacesResponse: %v", err)
+	}
+	fromFind := printed.GetSuccess().GetComplete().GetWorkspaces()
+	fromList := printedRecords(t, listed.out.String())
+	if len(fromList) != len(fromFind) {
+		t.Fatalf("list printed %d records, find %d", len(fromList), len(fromFind))
+	}
+	for i := range fromFind {
+		if !proto.Equal(fromList[i], fromFind[i]) {
+			t.Fatalf("record %d: list %v, find %v", i, fromList[i], fromFind[i])
+		}
+	}
+}
+
+func TestListExitsRefusedOnARefusedFind(t *testing.T) {
+	// Arrange
+	f := newCLIFixture()
+	f.client.found = &agentreplv1.FindWorkspacesResponse{Result: &agentreplv1.FindWorkspacesResponse_Error{Error: &agentreplv1.FindWorkspacesError{
+		Cause: &agentreplv1.FindWorkspacesError_UnknownCaller{UnknownCaller: &agentreplv1.FindWorkspacesUnknownCaller{}}}}}
+
+	// Act
+	code := f.run(workspaceNoun, "list")
+
+	// Assert
+	if code != exitRefused || !strings.Contains(f.errOut.String(), "the daemon refused") {
+		t.Fatalf("exit %d, stderr %q; want the refusal", code, f.errOut.String())
+	}
+}
+
+func TestListFailsOnAPartialAnswer(t *testing.T) {
+	// Arrange
+	f := newCLIFixture()
+	f.client.found = &agentreplv1.FindWorkspacesResponse{Result: &agentreplv1.FindWorkspacesResponse_Success{Success: &agentreplv1.FindWorkspacesSuccess{
+		Extent: &agentreplv1.FindWorkspacesSuccess_Partial{Partial: &agentreplv1.FindWorkspacesSuccessPartial{Omitted: 1}}}}}
+
+	// Act
+	code := f.run(workspaceNoun, "list")
+
+	// Assert
+	if code != exitFailure || !strings.Contains(f.errOut.String(), "not a complete extent") || f.out.Len() != 0 {
+		t.Fatalf("exit %d, stdout %q, stderr %q; want a failure printing nothing", code, f.out.String(), f.errOut.String())
 	}
 }
 
@@ -1536,18 +1692,11 @@ func TestParkNamesItsWorkspace(t *testing.T) {
 func TestParkAllAsksEveryOpenWorkspace(t *testing.T) {
 	// Arrange
 	f := newCLIFixture()
-	f.run(workspaceNoun, "list")
 	var open []string
-	for _, line := range strings.Split(strings.TrimSpace(f.out.String()), "\n") {
-		var ws listedWorkspace
-		if err := json.Unmarshal([]byte(line), &ws); err != nil {
-			t.Fatalf("decode %q: %v", line, err)
-		}
-		if ws.Section == "open" {
-			open = append(open, ws.ID)
-		}
+	for _, row := range rosterwalk.OpenRows(roster(cliRow("ws-caller", "/wt/caller", "caller"), cliRow("ws-peer", "/wt/peer", "peer"),
+		cliRow("ws-twin-1", "/wt/twin-1", "twin"), cliRow("ws-twin-2", "/wt/twin-2", "twin"))) {
+		open = append(open, row.GetRow().GetWorkspace().GetWorkspace().GetId())
 	}
-	f.client.requests = nil
 
 	// Act
 	code := f.run(workspaceNoun, "park", "-all")
@@ -2353,6 +2502,9 @@ func TestFindSendsEveryNarrowingItNames(t *testing.T) {
 		{name: "-text", args: []string{"-text", "footer"}, check: func(r *agentreplv1.FindWorkspacesRequest) bool { return r.GetText() == "footer" }},
 		{name: "-created-by here is the caller", args: []string{"-created-by", "here"}, check: func(r *agentreplv1.FindWorkspacesRequest) bool {
 			return r.GetCreatedBy().GetId() == "ws-caller"
+		}},
+		{name: "the calling workspace is named the caller", args: nil, check: func(r *agentreplv1.FindWorkspacesRequest) bool {
+			return r.GetCaller().GetId() == "ws-caller" && r.OnRoster == nil
 		}},
 	}
 	for _, tt := range tests {
