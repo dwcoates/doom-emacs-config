@@ -2374,20 +2374,25 @@ not started yet — states that IN ITS OWN SLOT:
 publication; they fill in as they arrive. Gating on one is what left the strip
 BLANK for as long as a session-less state stood.
 
-**The title is the workspace SUMMARY the daemon distills from the user's
-prompts** (owner ruling, 2026-10-14). `daemon/internal/titlesynth` asks the
-shim for every prompt the user sent since the last `/clear` (a `/compact` cuts
-none of them; `shim.v1 GatherTitleDigest`), strips agent-repl's injected meta
-spans, and has headless Haiku distill them into ONE imperative sentence stating
-the workspace's task (`prompts/synthesized-title-from-digest.md`). It runs at
-the first prompt, whether the workspace's preliminary prompt or one the user
-typed, and again every `titlesynth.SynthesizeEvery` (5) prompts after it. The
-resolver composes `TopbarTitle.text` from that summary first; the vendor's own
-`ai-title` (the shim reads it in `convert/session-title.ts` and
-`engine/title.ts` and states it as `conversation.v1 SessionUpdate.title`)
-stands in only until the first distillation lands, and the workspace name only
-when neither exists. The branch suffix is a different fact and its rule is
-unchanged.
+**The title is the workspace SUMMARY its own agent sets**
+(`agentrepl.v1.SetWorkspaceSummary`, `agent-repld workspace summary`). The
+daemon distills nothing: `daemon/internal/wssummary` stores what the agent
+set (`wsm` `workspace_summaries`), draws it in the topbar
+(`topbar.Resolver.SetSummary`), draws it again at every registration, and
+drops it at a `/clear`, which ends the conversation it described (a
+`/compact` keeps it). NO ROW IS THE SUMMARY OWED: while none stands, a new
+workspace's first message (`internal/workspace/create.go`) and every user's
+or agent's prompt after it (`internal/prompthandler`, never a daemon brief,
+a thread question or a bubble-addressed prompt) close with the meta-wrapped
+`prompts/workspace-summary-owed.md` note, which holds the format. The verb
+refuses any summary that is not one plain imperative sentence of two to
+fifteen words (`wssummary.Validate`, which shares `textline.OneSentence`
+with the link label's rule). The resolver composes `TopbarTitle.text` from
+that summary first; the vendor's own `ai-title` (the shim reads it in
+`convert/session-title.ts` and `engine/title.ts` and states it as
+`conversation.v1 SessionUpdate.title`) stands in while none stands, and the
+workspace name only when neither exists. The branch suffix is a different
+fact and its rule is unchanged.
 
 ## A merge bubble never collapses automatically, save a success
 
