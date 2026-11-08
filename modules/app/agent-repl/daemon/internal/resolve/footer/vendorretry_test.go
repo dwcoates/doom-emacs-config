@@ -348,3 +348,17 @@ func TestNoFooterSourceConvertsARetryCountByHand(t *testing.T) {
 		t.Fatalf("hand-converted retry counts = %d, want every site through attemptOfRetry", n)
 	}
 }
+
+func TestEveryUntimedRetryArmGoesThroughObserveUntimedRetry(t *testing.T) {
+	// Arrange, Act: the one retryState built with a now or awaitingNetwork
+	// clause is observeUntimedRetry's.
+	nows := sourcescan.Count(t, "now:             u.now,")
+	awaits := sourcescan.Count(t, "awaitingNetwork: u.awaitingNetwork,")
+	handNows := sourcescan.Count(t, "now:     true,")
+	handAwaits := sourcescan.Count(t, "awaitingNetwork: true,\n\t\t}")
+
+	// Assert.
+	if nows != 1 || awaits != 1 || handNows != 0 || handAwaits != 0 {
+		t.Fatalf("untimed retry builds = %d/%d, hand-built = %d/%d, want every untimed arm through observeUntimedRetry", nows, awaits, handNows, handAwaits)
+	}
+}

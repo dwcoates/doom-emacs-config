@@ -41,39 +41,21 @@ func (r *resolver) observeVendorRetry(ws ids.WorkspaceID, s *wsState, stated *co
 	// 2026-10-21). One naming no attempt is a producer defect, refused as a
 	// scheduled one is.
 	if attempting := stated.GetAttempting(); attempting != nil {
-		if attempting.GetAttempt() == 0 {
-			r.logOf(ws, s).Error("daemon.footer.vendor_retry_refused",
-				"a vendor-error retry being made names no attempt; the statement is refused and the schedule on hand stands",
-				dlog.Context{"invariant_violation": "a vendor-error retry being made names its attempt"})
-			return
-		}
-		s.vendorRetry = &retryState{
-			attempt: attemptOfRetry(attempting.GetAttempt()),
-			status:  truncate(attempting.GetStatus(), DefaultWarningRowWidth),
-			at:      r.opts.clock.Now(),
-			now:     true,
-		}
-		r.logOf(ws, s).Info("daemon.footer.vendor_retry", "agent-repl is making its vendor-error retry now; the line says so",
-			dlog.Context{"attempt": attempting.GetAttempt()})
+		r.observeUntimedRetry(ws, s, untimedRetry{
+			attempt: attempting.GetAttempt(), status: attempting.GetStatus(), now: true,
+			what:    "a vendor-error retry being made",
+			drawn:   "agent-repl is making its vendor-error retry now; the line says so",
+		})
 		return
 	}
 	// THE RETRY WAITING FOR THE NETWORK has no instant: the shim makes it when
 	// the network fault resolves, so the line counts down to nothing.
 	if awaiting := stated.GetAwaitingNetwork(); awaiting != nil {
-		if awaiting.GetAttempt() == 0 {
-			r.logOf(ws, s).Error("daemon.footer.vendor_retry_refused",
-				"a vendor-error retry waiting for the network names no attempt; the statement is refused and the schedule on hand stands",
-				dlog.Context{"invariant_violation": "a vendor-error retry waiting for the network names its attempt"})
-			return
-		}
-		s.vendorRetry = &retryState{
-			attempt:         attemptOfRetry(awaiting.GetAttempt()),
-			status:          truncate(awaiting.GetStatus(), DefaultWarningRowWidth),
-			at:              r.opts.clock.Now(),
-			awaitingNetwork: true,
-		}
-		r.logOf(ws, s).Info("daemon.footer.vendor_retry", "agent-repl's vendor-error retry waits for the network; the line counts down to nothing",
-			dlog.Context{"attempt": awaiting.GetAttempt()})
+		r.observeUntimedRetry(ws, s, untimedRetry{
+			attempt: awaiting.GetAttempt(), status: awaiting.GetStatus(), awaitingNetwork: true,
+			what:    "a vendor-error retry waiting for the network",
+			drawn:   "agent-repl's vendor-error retry waits for the network; the line counts down to nothing",
+		})
 		return
 	}
 	scheduled := stated.GetScheduled()
@@ -104,6 +86,38 @@ func (r *resolver) observeVendorRetry(ws ids.WorkspaceID, s *wsState, stated *co
 	}
 	r.logOf(ws, s).Info("daemon.footer.vendor_retry", "the footer counts down to agent-repl's scheduled vendor-error retry",
 		dlog.Context{"attempt": scheduled.GetAttempt(), "next_attempt_at_ms": scheduled.GetNextAttemptAtMs()})
+}
+
+// untimedRetry is one statement of a retry with no instant to count down to:
+// the one being made, or the one waiting for the network.
+type untimedRetry struct {
+	// attempt and status are the statement's, as the shim stated them.
+	attempt uint32
+	status  string
+	// now and awaitingNetwork pick the clause the line draws; exactly one is set.
+	now, awaitingNetwork bool
+	// what names the statement in its refusal; drawn is the record of its drawing.
+	what, drawn string
+}
+
+// observeUntimedRetry takes one untimed retry statement. One naming no
+// attempt is a producer defect, refused at ERROR so the schedule on hand
+// stands, as a scheduled one is.
+func (r *resolver) observeUntimedRetry(ws ids.WorkspaceID, s *wsState, u untimedRetry) {
+	if u.attempt == 0 {
+		r.logOf(ws, s).Error("daemon.footer.vendor_retry_refused",
+			u.what+" names no attempt; the statement is refused and the schedule on hand stands",
+			dlog.Context{"invariant_violation": u.what + " names its attempt"})
+		return
+	}
+	s.vendorRetry = &retryState{
+		attempt:         attemptOfRetry(u.attempt),
+		status:          truncate(u.status, DefaultWarningRowWidth),
+		at:              r.opts.clock.Now(),
+		now:             u.now,
+		awaitingNetwork: u.awaitingNetwork,
+	}
+	r.logOf(ws, s).Info("daemon.footer.vendor_retry", u.drawn, dlog.Context{"attempt": u.attempt})
 }
 
 // attemptOfRetry is the footer's attempt number for the RETRY-th retry
