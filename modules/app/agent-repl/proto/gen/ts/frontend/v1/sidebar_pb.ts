@@ -3446,7 +3446,7 @@ export const RosterMergedSectionCollapsedSchema: GenMessage<RosterMergedSectionC
 
 /**
  * ONE REPOSITORY inside the Recently Merged band: its header and its merged
- * workspaces of the last 24 hours.
+ * workspaces.
  *
  * THE GROUP IS OPEN UNTIL ITS HEADER IS CLICKED: a click folds or opens it
  * on that page alone, until the user leaves the rail. The fold is the page's
@@ -3474,7 +3474,7 @@ export type RosterMergedRepoGroup = Message<"frontend.v1.RosterMergedRepoGroup">
   header?: RosterMergedRepoGroupHeader | undefined;
 
   /**
-   * The repository's merged workspaces of the last 24 hours, most recently
+   * The repository's merged workspaces, most recently
    * merged first. FLAT: a settled merge has no family left to draw. Never
    * empty: a repository with no merge has no group.
    *

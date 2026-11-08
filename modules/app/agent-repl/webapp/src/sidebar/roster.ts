@@ -102,7 +102,7 @@ import {
   DEPLOYS_SECTION_ATTRIBUTE,
   type DeploysGroupSection,
 } from "./deploys-fold.js";
-import { DEPLOYS_PAGE_CLASS, DEPLOYS_PAGE_SIZE, drawDeploysMoreArrow } from "./deploys-more.js";
+import { DEPLOYS_PAGE_CLASS, DEPLOYS_PAGE_SIZE, drawDeploysMoreSpinner } from "./deploys-more.js";
 import { drawQueuedGroupHead, drawRosterMergeQueue, queueHoverText, queueLine } from "./merge-queue-view.js";
 import { foldViewKey } from "./view.js";
 import {
@@ -981,7 +981,7 @@ export function drawRosterMergedRepoGroup(
     }
     drawRosterRowWhenShown(body, row, sc, rowPath, "merged", stamp);
   });
-  if (rows.rows.length > DEPLOYS_PAGE_SIZE) body.appendChild(drawDeploysMoreArrow(group, sc.deploysMore));
+  if (rows.rows.length > DEPLOYS_PAGE_SIZE) body.appendChild(drawDeploysMoreSpinner());
   sc.deploysFold.paint(group);
   sc.deploysMore.paint(group);
   return group;

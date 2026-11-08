@@ -209,7 +209,7 @@ export function sidebarContext(
   openDetails: Set<string> = new Set(),
   reveal: RowReveal = drawsAtOnce,
   deploysFold: DeploysFold = createDeploysFold(document, () => undefined),
-  deploysMore: DeploysMore = createDeploysMore(document, timers, () => undefined),
+  deploysMore: DeploysMore = createDeploysMore(document, () => undefined),
 ): SidebarContext & RailContext & { view: DrawnView & SidebarView; attention: AttentionRegistry; disposers: Array<() => void> } {
   const disposers: Array<() => void> = [];
   const dropdowns = createDropdowns();

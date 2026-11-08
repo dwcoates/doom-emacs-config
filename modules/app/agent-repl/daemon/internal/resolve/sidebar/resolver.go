@@ -60,15 +60,8 @@ type resolver struct {
 	// the lock is released.
 	pendingStatusChanges []statusChange
 
-	// now is the clock the Recently Merged window is measured against and a
-	// status change is stamped by, and after arms the re-render that drops a
-	// merge the moment it ages out of that window (WithClock). agingOut stops
-	// the one armed re-render and agingOutAt is the instant it fires for, both
-	// nil when none is armed.
-	now        func() time.Time
-	after      AfterFunc
-	agingOut   func() bool
-	agingOutAt *time.Time
+	// now is the clock a status change is stamped by (WithClock).
+	now func() time.Time
 }
 
 // resultChange is one workspace's changed last turn result.
@@ -99,7 +92,7 @@ func newResolver(colors vocab.RenderColors, log dlog.Surfaces, footer FooterStat
 	}
 	return &resolver{
 		colors: colors, log: log, footer: footer, state: newRosterState(),
-		now: time.Now, after: timerAfter,
+		now: time.Now,
 	}, nil
 }
 
@@ -272,8 +265,7 @@ func (r *resolver) render(log dlog.Logger, cause string) *frontendv1.WorkspaceRo
 	// EVERY WORKSPACE IS IN ONE LIST (taborder.go). OPEN is neither closed nor
 	// hidden, whatever its merge time (OPEN BEATS MERGED: a merged workspace
 	// that was reopened is open); HIDDEN is open but hidden; MERGED is merged
-	// AND closed; CLOSED is closed and never merged. A merge older than the
-	// band's MergedWindow is listed NOWHERE (owner request, 2026-10-31). A HIDDEN MERGE WORKSPACE IS DRAWN NOWHERE until it
+	// AND closed; CLOSED is closed and never merged. A HIDDEN MERGE WORKSPACE IS DRAWN NOWHERE until it
 	// needs the user (owner ruling, 2026-10-11): not even in the hidden
 	// section. A CHAT THREAD is listed only in the thread section.
 	var hidden, settled, closed, threads []wsm.Workspace
@@ -291,8 +283,7 @@ func (r *resolver) render(log dlog.Logger, cause string) *frontendv1.WorkspaceRo
 		}
 	}
 
-	merged, agesOut := recentMerges(settled, r.now())
-	r.armAgingOut(agesOut, log)
+	merged := recentMerges(settled)
 
 	out := &frontendv1.WorkspaceRoster{
 		Repository:     r.repositoryView(rc, log),
