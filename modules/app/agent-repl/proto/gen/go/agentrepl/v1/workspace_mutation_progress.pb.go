@@ -949,6 +949,7 @@ type WorkspaceCreateProgress struct {
 	//	*WorkspaceCreateProgress_Succeeded
 	//	*WorkspaceCreateProgress_Failed
 	//	*WorkspaceCreateProgress_WaitingForNetwork
+	//	*WorkspaceCreateProgress_WaitingForRequesterTurn
 	Step          isWorkspaceCreateProgress_Step `protobuf_oneof:"step"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1027,6 +1028,15 @@ func (x *WorkspaceCreateProgress) GetWaitingForNetwork() *CreateWorkspaceWaiting
 	return nil
 }
 
+func (x *WorkspaceCreateProgress) GetWaitingForRequesterTurn() *CreateWorkspaceWaitingForRequesterTurn {
+	if x != nil {
+		if x, ok := x.Step.(*WorkspaceCreateProgress_WaitingForRequesterTurn); ok {
+			return x.WaitingForRequesterTurn
+		}
+	}
+	return nil
+}
+
 type isWorkspaceCreateProgress_Step interface {
 	isWorkspaceCreateProgress_Step()
 }
@@ -1066,6 +1076,15 @@ type WorkspaceCreateProgress_WaitingForNetwork struct {
 	WaitingForNetwork *CreateWorkspaceWaitingForNetwork `protobuf:"bytes,5,opt,name=waiting_for_network,json=waitingForNetwork,proto3,oneof"`
 }
 
+type WorkspaceCreateProgress_WaitingForRequesterTurn struct {
+	// NOT TERMINAL: a workspace forks its own conversation from inside its
+	// conversation's first turn, so the daemon holds the create until that
+	// turn ends (CreateWorkspaceResponse.waiting_for_requester_turn). Later
+	// steps arrive on this same op_id. A client draws it as waiting, never
+	// as a failure, and keeps the op registered.
+	WaitingForRequesterTurn *CreateWorkspaceWaitingForRequesterTurn `protobuf:"bytes,6,opt,name=waiting_for_requester_turn,json=waitingForRequesterTurn,proto3,oneof"`
+}
+
 func (*WorkspaceCreateProgress_EnteredStage) isWorkspaceCreateProgress_Step() {}
 
 func (*WorkspaceCreateProgress_Succeeded) isWorkspaceCreateProgress_Step() {}
@@ -1073,6 +1092,8 @@ func (*WorkspaceCreateProgress_Succeeded) isWorkspaceCreateProgress_Step() {}
 func (*WorkspaceCreateProgress_Failed) isWorkspaceCreateProgress_Step() {}
 
 func (*WorkspaceCreateProgress_WaitingForNetwork) isWorkspaceCreateProgress_Step() {}
+
+func (*WorkspaceCreateProgress_WaitingForRequesterTurn) isWorkspaceCreateProgress_Step() {}
 
 // The terminal failure of a background create. THE ARM IS THE KIND OF FAILURE,
 // mirroring the synchronous form: a typed refusal it would have answered on its
@@ -1495,12 +1516,13 @@ const file_agentrepl_v1_workspace_mutation_progress_proto_rawDesc = "" +
 	"!WorkspaceOpenStageStartingSession\"\"\n" +
 	" WorkspaceOpenStageClearingClosed\"!\n" +
 	"\x1fWorkspaceOpenStageCheckingBuild\"%\n" +
-	"#WorkspaceOpenStageRestoringWorktree\"\xe2\x02\n" +
+	"#WorkspaceOpenStageRestoringWorktree\"\xd7\x03\n" +
 	"\x17WorkspaceCreateProgress\x12I\n" +
 	"\rentered_stage\x18\x04 \x01(\v2\".agentrepl.v1.WorkspaceCreateStageH\x00R\fenteredStage\x12F\n" +
 	"\tsucceeded\x18\x02 \x01(\v2&.agentrepl.v1.WorkspaceCreateSucceededH\x00R\tsucceeded\x12=\n" +
 	"\x06failed\x18\x03 \x01(\v2#.agentrepl.v1.WorkspaceCreateFailedH\x00R\x06failed\x12`\n" +
-	"\x13waiting_for_network\x18\x05 \x01(\v2..agentrepl.v1.CreateWorkspaceWaitingForNetworkH\x00R\x11waitingForNetworkB\x06\n" +
+	"\x13waiting_for_network\x18\x05 \x01(\v2..agentrepl.v1.CreateWorkspaceWaitingForNetworkH\x00R\x11waitingForNetwork\x12s\n" +
+	"\x1awaiting_for_requester_turn\x18\x06 \x01(\v24.agentrepl.v1.CreateWorkspaceWaitingForRequesterTurnH\x00R\x17waitingForRequesterTurnB\x06\n" +
 	"\x04stepJ\x04\b\x01\x10\x02R\x05stage\"~\n" +
 	"\x15WorkspaceCreateFailed\x12>\n" +
 	"\arefusal\x18\x01 \x01(\v2\".agentrepl.v1.CreateWorkspaceErrorH\x00R\arefusal\x12\x1c\n" +
@@ -1532,31 +1554,32 @@ func file_agentrepl_v1_workspace_mutation_progress_proto_rawDescGZIP() []byte {
 
 var file_agentrepl_v1_workspace_mutation_progress_proto_msgTypes = make([]protoimpl.MessageInfo, 21)
 var file_agentrepl_v1_workspace_mutation_progress_proto_goTypes = []any{
-	(*WorkspaceMutationProgress)(nil),            // 0: agentrepl.v1.WorkspaceMutationProgress
-	(*WorkspaceKillProgress)(nil),                // 1: agentrepl.v1.WorkspaceKillProgress
-	(*WorkspaceKillSucceeded)(nil),               // 2: agentrepl.v1.WorkspaceKillSucceeded
-	(*WorkspaceKillFailed)(nil),                  // 3: agentrepl.v1.WorkspaceKillFailed
-	(*WorkspaceNukeProgress)(nil),                // 4: agentrepl.v1.WorkspaceNukeProgress
-	(*WorkspaceNukeSucceeded)(nil),               // 5: agentrepl.v1.WorkspaceNukeSucceeded
-	(*WorkspaceNukeFailed)(nil),                  // 6: agentrepl.v1.WorkspaceNukeFailed
-	(*WorkspaceOpenProgress)(nil),                // 7: agentrepl.v1.WorkspaceOpenProgress
-	(*WorkspaceOpenStage)(nil),                   // 8: agentrepl.v1.WorkspaceOpenStage
-	(*WorkspaceOpenStageCheckingWorktree)(nil),   // 9: agentrepl.v1.WorkspaceOpenStageCheckingWorktree
-	(*WorkspaceOpenStageStartingSession)(nil),    // 10: agentrepl.v1.WorkspaceOpenStageStartingSession
-	(*WorkspaceOpenStageClearingClosed)(nil),     // 11: agentrepl.v1.WorkspaceOpenStageClearingClosed
-	(*WorkspaceOpenStageCheckingBuild)(nil),      // 12: agentrepl.v1.WorkspaceOpenStageCheckingBuild
-	(*WorkspaceOpenStageRestoringWorktree)(nil),  // 13: agentrepl.v1.WorkspaceOpenStageRestoringWorktree
-	(*WorkspaceCreateProgress)(nil),              // 14: agentrepl.v1.WorkspaceCreateProgress
-	(*WorkspaceCreateFailed)(nil),                // 15: agentrepl.v1.WorkspaceCreateFailed
-	(*WorkspaceCreateStage)(nil),                 // 16: agentrepl.v1.WorkspaceCreateStage
-	(*WorkspaceCreateStageDerivingName)(nil),     // 17: agentrepl.v1.WorkspaceCreateStageDerivingName
-	(*WorkspaceCreateStageCreatingWorktree)(nil), // 18: agentrepl.v1.WorkspaceCreateStageCreatingWorktree
-	(*WorkspaceCreateStageStartingSession)(nil),  // 19: agentrepl.v1.WorkspaceCreateStageStartingSession
-	(*WorkspaceCreateSucceeded)(nil),             // 20: agentrepl.v1.WorkspaceCreateSucceeded
-	(*NukeWorkspaceError)(nil),                   // 21: agentrepl.v1.NukeWorkspaceError
-	(*CreateWorkspaceWaitingForNetwork)(nil),     // 22: agentrepl.v1.CreateWorkspaceWaitingForNetwork
-	(*CreateWorkspaceError)(nil),                 // 23: agentrepl.v1.CreateWorkspaceError
-	(*v1.WorkspaceRef)(nil),                      // 24: workspace.v1.WorkspaceRef
+	(*WorkspaceMutationProgress)(nil),              // 0: agentrepl.v1.WorkspaceMutationProgress
+	(*WorkspaceKillProgress)(nil),                  // 1: agentrepl.v1.WorkspaceKillProgress
+	(*WorkspaceKillSucceeded)(nil),                 // 2: agentrepl.v1.WorkspaceKillSucceeded
+	(*WorkspaceKillFailed)(nil),                    // 3: agentrepl.v1.WorkspaceKillFailed
+	(*WorkspaceNukeProgress)(nil),                  // 4: agentrepl.v1.WorkspaceNukeProgress
+	(*WorkspaceNukeSucceeded)(nil),                 // 5: agentrepl.v1.WorkspaceNukeSucceeded
+	(*WorkspaceNukeFailed)(nil),                    // 6: agentrepl.v1.WorkspaceNukeFailed
+	(*WorkspaceOpenProgress)(nil),                  // 7: agentrepl.v1.WorkspaceOpenProgress
+	(*WorkspaceOpenStage)(nil),                     // 8: agentrepl.v1.WorkspaceOpenStage
+	(*WorkspaceOpenStageCheckingWorktree)(nil),     // 9: agentrepl.v1.WorkspaceOpenStageCheckingWorktree
+	(*WorkspaceOpenStageStartingSession)(nil),      // 10: agentrepl.v1.WorkspaceOpenStageStartingSession
+	(*WorkspaceOpenStageClearingClosed)(nil),       // 11: agentrepl.v1.WorkspaceOpenStageClearingClosed
+	(*WorkspaceOpenStageCheckingBuild)(nil),        // 12: agentrepl.v1.WorkspaceOpenStageCheckingBuild
+	(*WorkspaceOpenStageRestoringWorktree)(nil),    // 13: agentrepl.v1.WorkspaceOpenStageRestoringWorktree
+	(*WorkspaceCreateProgress)(nil),                // 14: agentrepl.v1.WorkspaceCreateProgress
+	(*WorkspaceCreateFailed)(nil),                  // 15: agentrepl.v1.WorkspaceCreateFailed
+	(*WorkspaceCreateStage)(nil),                   // 16: agentrepl.v1.WorkspaceCreateStage
+	(*WorkspaceCreateStageDerivingName)(nil),       // 17: agentrepl.v1.WorkspaceCreateStageDerivingName
+	(*WorkspaceCreateStageCreatingWorktree)(nil),   // 18: agentrepl.v1.WorkspaceCreateStageCreatingWorktree
+	(*WorkspaceCreateStageStartingSession)(nil),    // 19: agentrepl.v1.WorkspaceCreateStageStartingSession
+	(*WorkspaceCreateSucceeded)(nil),               // 20: agentrepl.v1.WorkspaceCreateSucceeded
+	(*NukeWorkspaceError)(nil),                     // 21: agentrepl.v1.NukeWorkspaceError
+	(*CreateWorkspaceWaitingForNetwork)(nil),       // 22: agentrepl.v1.CreateWorkspaceWaitingForNetwork
+	(*CreateWorkspaceWaitingForRequesterTurn)(nil), // 23: agentrepl.v1.CreateWorkspaceWaitingForRequesterTurn
+	(*CreateWorkspaceError)(nil),                   // 24: agentrepl.v1.CreateWorkspaceError
+	(*v1.WorkspaceRef)(nil),                        // 25: workspace.v1.WorkspaceRef
 }
 var file_agentrepl_v1_workspace_mutation_progress_proto_depIdxs = []int32{
 	14, // 0: agentrepl.v1.WorkspaceMutationProgress.create:type_name -> agentrepl.v1.WorkspaceCreateProgress
@@ -1578,16 +1601,17 @@ var file_agentrepl_v1_workspace_mutation_progress_proto_depIdxs = []int32{
 	20, // 16: agentrepl.v1.WorkspaceCreateProgress.succeeded:type_name -> agentrepl.v1.WorkspaceCreateSucceeded
 	15, // 17: agentrepl.v1.WorkspaceCreateProgress.failed:type_name -> agentrepl.v1.WorkspaceCreateFailed
 	22, // 18: agentrepl.v1.WorkspaceCreateProgress.waiting_for_network:type_name -> agentrepl.v1.CreateWorkspaceWaitingForNetwork
-	23, // 19: agentrepl.v1.WorkspaceCreateFailed.refusal:type_name -> agentrepl.v1.CreateWorkspaceError
-	17, // 20: agentrepl.v1.WorkspaceCreateStage.deriving_name:type_name -> agentrepl.v1.WorkspaceCreateStageDerivingName
-	18, // 21: agentrepl.v1.WorkspaceCreateStage.creating_worktree:type_name -> agentrepl.v1.WorkspaceCreateStageCreatingWorktree
-	19, // 22: agentrepl.v1.WorkspaceCreateStage.starting_session:type_name -> agentrepl.v1.WorkspaceCreateStageStartingSession
-	24, // 23: agentrepl.v1.WorkspaceCreateSucceeded.workspace:type_name -> workspace.v1.WorkspaceRef
-	24, // [24:24] is the sub-list for method output_type
-	24, // [24:24] is the sub-list for method input_type
-	24, // [24:24] is the sub-list for extension type_name
-	24, // [24:24] is the sub-list for extension extendee
-	0,  // [0:24] is the sub-list for field type_name
+	23, // 19: agentrepl.v1.WorkspaceCreateProgress.waiting_for_requester_turn:type_name -> agentrepl.v1.CreateWorkspaceWaitingForRequesterTurn
+	24, // 20: agentrepl.v1.WorkspaceCreateFailed.refusal:type_name -> agentrepl.v1.CreateWorkspaceError
+	17, // 21: agentrepl.v1.WorkspaceCreateStage.deriving_name:type_name -> agentrepl.v1.WorkspaceCreateStageDerivingName
+	18, // 22: agentrepl.v1.WorkspaceCreateStage.creating_worktree:type_name -> agentrepl.v1.WorkspaceCreateStageCreatingWorktree
+	19, // 23: agentrepl.v1.WorkspaceCreateStage.starting_session:type_name -> agentrepl.v1.WorkspaceCreateStageStartingSession
+	25, // 24: agentrepl.v1.WorkspaceCreateSucceeded.workspace:type_name -> workspace.v1.WorkspaceRef
+	25, // [25:25] is the sub-list for method output_type
+	25, // [25:25] is the sub-list for method input_type
+	25, // [25:25] is the sub-list for extension type_name
+	25, // [25:25] is the sub-list for extension extendee
+	0,  // [0:25] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_workspace_mutation_progress_proto_init() }
@@ -1627,6 +1651,7 @@ func file_agentrepl_v1_workspace_mutation_progress_proto_init() {
 		(*WorkspaceCreateProgress_Succeeded)(nil),
 		(*WorkspaceCreateProgress_Failed)(nil),
 		(*WorkspaceCreateProgress_WaitingForNetwork)(nil),
+		(*WorkspaceCreateProgress_WaitingForRequesterTurn)(nil),
 	}
 	file_agentrepl_v1_workspace_mutation_progress_proto_msgTypes[15].OneofWrappers = []any{
 		(*WorkspaceCreateFailed_Refusal)(nil),

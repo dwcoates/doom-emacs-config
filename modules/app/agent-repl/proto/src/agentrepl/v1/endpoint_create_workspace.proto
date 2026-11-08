@@ -450,7 +450,25 @@ message CreateWorkspaceResponse {
     // completes it, from the naming call, once the network is restored. The
     // requesting workspace, if one asked, is told when it was created.
     CreateWorkspaceWaitingForNetwork waiting_for_network = 5;
+    // THE CREATE WAITS FOR THE REQUESTER'S TURN. Answered -- instead of
+    // `success` or `error` -- by the synchronous form when a WORKSPACE forks
+    // ITS OWN conversation from inside its conversation's first turn, which
+    // has nothing finished to carry yet. Nothing was refused and nothing
+    // failed: the daemon holds the create durably and makes it once that turn
+    // ends, so the fork carries the requesting turn. The requester is told
+    // when it was created. Only ever answered to a workspace requester (a
+    // user's create never forks itself).
+    CreateWorkspaceWaitingForRequesterTurn waiting_for_requester_turn = 6;
   }
+}
+
+// A create held until its requesting workspace's turn ends. Like
+// CreateWorkspaceWaitingForNetwork it is an ANSWER, not a failure: the create
+// completes exactly as it would have once the turn has ended.
+message CreateWorkspaceWaitingForRequesterTurn {
+  // The pending create that waits. An identical request asked while it waits
+  // is answered with this same ref.
+  PendingCreateRef create = 1;
 }
 
 // The typed identity of one pending create: a create the daemon is running or
@@ -558,7 +576,9 @@ message CreateWorkspaceError {
     // never the one in flight, and this fork would carry nothing. Decided
     // before anything is named, recorded or materialized. The caller creates
     // the workspace with a fresh context, carrying what it meant to hand over
-    // in the initial prompt, or forks once that first turn has ended.
+    // in the initial prompt, or forks once that first turn has ended. A
+    // requesting workspace forking ITSELF is never refused on this arm: its
+    // create waits for its turn (`waiting_for_requester_turn`).
     CreateWorkspaceForkSourceHasNoFinishedTurn fork_source_has_no_finished_turn = 48;
     // The supplied name is reserved by a pending async merge, whose merge
     // workspace will be created under it when the merge starts
