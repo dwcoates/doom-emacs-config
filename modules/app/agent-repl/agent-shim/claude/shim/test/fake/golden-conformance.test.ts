@@ -124,7 +124,7 @@ function comparableSessionArms(run: GoldenRun): string[] {
  */
 const EXCLUDED: Readonly<Record<string, string>> = {
   "account-usage":
-    "the account's usage is never sampled (2026-10-30), so no scenario switches a usage answer; the capture's turn is plain thinking and prose",
+    "the capture's sample is the retired per-session `account_usage` arm; no scenario switches the plan-usage answer, and the capture's turn is plain thinking and prose",
   "ctrl-b-detach-of-foreground-subagent":
     "PARKING: `!ctrl-b` waits on DetachForeground, a caller verb this harness does not issue; exercised in test/integration/detached.test.ts",
   "ctrl-b-detach-of-foreground-work":

@@ -12,6 +12,7 @@ import type {
   AccountInfoLike,
   AppliedSettingsLike,
   ContextUsageLike,
+  PlanUsageLike,
   EffortLevelLike,
   InitializationResultLike,
   InterruptReceipt,
@@ -246,6 +247,17 @@ export class ScriptedQuery implements QueryLike {
   getContextUsage(): Promise<ContextUsageLike> {
     this.calls.push("getContextUsage");
     return Promise.resolve(this.contextUsage);
+  }
+  /** What the plan-usage verb answers; a thrown Error makes the read fail. */
+  planUsage: PlanUsageLike | Error = { subscription_type: null, rate_limits_available: false, rate_limits: null };
+  /**
+   * The options every plan-usage read was made with, in order. Kept apart
+   * from `calls`, so the suites that pin `calls` exactly are not about it.
+   */
+  planUsageOptions: Array<{ skipBehaviors: true }> = [];
+  usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET(opts: { skipBehaviors: true }): Promise<PlanUsageLike> {
+    this.planUsageOptions.push(opts);
+    return this.planUsage instanceof Error ? Promise.reject(this.planUsage) : Promise.resolve(this.planUsage);
   }
   accountInfo(): Promise<AccountInfoLike> {
     return Promise.resolve({} as AccountInfoLike);

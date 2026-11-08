@@ -142,6 +142,7 @@ import { TRUST_KEY, VENDOR_CONFIG_FILE, trustRoot } from "../trust.js";
 import { recordTimestampMs } from "../convert/place.js";
 import { compactionIdField, compactionTracker, fastModeUpdate } from "../convert/session-updates.js";
 import { SerialProbe } from "./serial-probe.js";
+import { planUsageUpdate } from "../convert/plan-usage.js";
 import { backupTranscript } from "./backup.js";
 import {
   appendCompactionLines,
@@ -637,6 +638,8 @@ const LOG_SINK_COMPONENT = "log-sink";
 const VENDOR_QUERY_COMPONENT = "vendor-query";
 /** The context-usage probe: transient, recovered by the next sample. */
 const CONTEXT_USAGE_COMPONENT = "vendor-context-usage";
+/** The account's plan-usage read: transient, recovered by the next read. */
+const PLAN_USAGE_COMPONENT = "vendor-plan-usage";
 /** The mcp health probe: transient, recovered by the next probe. */
 const MCP_STATUS_COMPONENT = "vendor-mcp-status";
 /** The applied-effort read: transient, recovered by the next read. */
@@ -2204,6 +2207,33 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   }
 
   /**
+   * THE PLAN USAGE READINGS ARE SERIAL like the context's, so a slow read
+   * can never land after a later one and leave the older figure drawn.
+   */
+  const planUsageProbe = new SerialProbe(() => probePlanUsage());
+
+  function pushPlanUsage(): Promise<void> {
+    return planUsageProbe.run();
+  }
+
+  /**
+   * Read the account's plan usage (conversation.v1.SessionPlanUsage). The
+   * transcript scan is ALWAYS skipped: it is what made the retired
+   * `account_usage` sample cost each CLI about 18 CPU-seconds a read.
+   */
+  async function probePlanUsage(): Promise<void> {
+    await probeVendorFact(pushes, query, {
+      component: PLAN_USAGE_COMPONENT,
+      call: "usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET",
+      read: (active) => active.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET({ skipBehaviors: true }),
+      take: (answer) => {
+        const update = planUsageUpdate(answer);
+        if (update !== undefined) pushes.push(update);
+      },
+    }, closedBySession);
+  }
+
+  /**
    * Re-read the pulled session facts, after something that could have changed
    * them.
    *
@@ -2277,10 +2307,8 @@ export function createEngine(deps: EngineDeps): SessionEngine {
 
   /**
    * THE NEWEST RATE-LIMIT EVENT OF EACH WINDOW, which the usage-limit retry
-   * reads its schedule from. The account's usage is never sampled: the daemon
-   * draws each login's allowances from these events, and a usage sample in
-   * every session cost each idle session's CLI tens of CPU-seconds every five
-   * minutes (2026-10-30).
+   * reads its schedule from: only an event names the window that refused and
+   * its verdict, which the plan-usage read (`probePlanUsage`) never states.
    */
   const rateLimitReadings = new Map<string, RateLimitReading>();
 
@@ -3677,6 +3705,8 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       return;
     }
     await pushContextUsage();
+    // THE TURN SPENT FROM THE ACCOUNT, so its plan usage is re-read.
+    await pushPlanUsage();
     pushSessionTitle();
     // A TURN CAN CHANGE WHAT THE PROBES ANSWER. Account usage and mcp health
     // are PULLED from the vendor rather than folded out of the stream, so a
@@ -5827,6 +5857,9 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // start and left the workspace start_failed. The reading reaches every
     // watch through the push table whenever the vendor answers it.
     void pushContextUsage();
+    // THE PLAN USAGE IS NOT AWAITED, for the context reading's reason: it is a
+    // vendor round-trip, and the opening owes nobody the figures.
+    void pushPlanUsage();
     pushSessionTitle();
     // THE COMMAND CATALOG IS NOT AWAITED: the opening owes nobody the list,
     // and the push table replays it to every watch that opens after it lands.

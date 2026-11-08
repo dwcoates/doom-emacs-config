@@ -1537,6 +1537,24 @@ every shim-authored prompt shares, `src/engine/shim-prompt.ts`).
 | `AGENT_REPL_FAKE_NETWORK_RESUME_INTERVAL_MS` | the probe beat |
 | `AGENT_REPL_FAKE_NETWORK_RESUME_WINDOW_MS` | the give-up window |
 
+## The account's plan usage is read with the transcript scan skipped (2026-11-08)
+
+`probePlanUsage` in `src/engine/session.ts` reads the vendor's usage verb
+(`usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET`) once the session
+is up and at every turn end that is not a keep-alive's, and pushes
+`SessionUpdate.plan_usage` (`src/convert/plan-usage.ts`).
+
+- **`skipBehaviors: true`, always.** Without it the CLI scans every
+  transcript touched in the last seven days, which is what made the retired
+  five-minute `account_usage` sample cost each CLI about 18 CPU-seconds a
+  read (2026-10-30). With it, a read measured 0.21 CPU-seconds and a repeat,
+  served from the CLI's cache, nothing measurable (2026-11-08).
+- **No timer.** The figures move only when the account spends, so a turn end
+  is when they are re-read, and an idle session reads nothing.
+- **An account the plan limits do not apply to states nothing**, and a failed
+  read is a fault on the `vendor-plan-usage` component, cleared by the next
+  read that answers.
+
 ## A main turn the vendor failed is retried by agent-repl (2026-10-14, 2026-10-20)
 
 Owner rulings. `src/engine/vendor-error-retry.ts` owns the rule, and
@@ -1557,7 +1575,8 @@ network resume uses.
 - **An exhausted usage allowance waits for its reset instead.** A usage-limit
   terminal (a 429, `blocking_limit`, `rapid_refill_breaker`: the set the
   footer calls `usage_limit`) reads the newest `rate_limit_event` of each
-  window the session saw: the account's usage is never sampled. The retry is
+  window the session saw, which names the refusing window and its reset (the
+  plan-usage read carries no verdict). The retry is
   made when the window whose newest event refused resets (the latest reset
   when several refused). Should the vendor still refuse after
   that reset, the retry repeats every thirty seconds for thirty minutes. A 429

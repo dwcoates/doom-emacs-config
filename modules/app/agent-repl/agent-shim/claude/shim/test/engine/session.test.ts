@@ -30,6 +30,7 @@ import { sessionFault } from "../../src/service/failures.js";
 import { SYNTHETIC_MODEL } from "../../src/model.js";
 import type {
   ContextUsageLike,
+  PlanUsageLike,
   McpServerStatusLike,
   ModelInfoLike,
   SlashCommandLike,
@@ -8354,6 +8355,91 @@ describe("the context usage the vendor states, mapped field by field", () => {
   });
 });
 
+describe("the account's plan usage, read from the vendor", () => {
+  const FIGURED: PlanUsageLike = {
+    subscription_type: "max",
+    rate_limits_available: true,
+    rate_limits: { seven_day: { utilization: 8, resets_at: "2026-11-13T08:00:00Z" } },
+  };
+
+  /** Drive one prompt to its `result`, which is what re-reads the plan usage. */
+  async function closeTurn(h: Harness): Promise<void> {
+    await h.engine.startTurn(
+      create(shimv1.StartTurnRequestSchema, {
+        turn: create(conversationv1.TurnIdSchema, { value: "turn-1" }),
+        said: textSaid("go"),
+        origin: conversationv1.PromptOrigin.USER_SENT,
+      }),
+    );
+    h.queries[0]?.query.emit(answering(h, resultMessage()));
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+
+  it("reads the plan usage at the session's start with the transcript scan skipped", async () => {
+    // Arrange.
+    const h = harness({ onQueryCreated: (query) => (query.planUsage = FIGURED) });
+
+    // Act.
+    await started(h);
+
+    // Assert.
+    await vi.waitFor(() => {
+      expect(h.queries[0]?.query.planUsageOptions).toEqual([{ skipBehaviors: true }]);
+    });
+  });
+
+  it("pushes the figures the start's read answered", async () => {
+    // Arrange.
+    const h = harness({ onQueryCreated: (query) => (query.planUsage = FIGURED) });
+
+    // Act.
+    const seen = await pushedUpdates(
+      h,
+      (update) => (update.case === "planUsage" ? update.value.sevenDay?.utilizationPercent : undefined),
+      async () => {
+        await started(h);
+        await vi.waitFor(() => expect(h.queries[0]?.query.planUsageOptions.length).toBe(1));
+      },
+    );
+
+    // Assert.
+    expect(seen).toEqual([8]);
+  });
+
+  it("re-reads the plan usage at the turn's end", async () => {
+    // Arrange.
+    const h = harness({ onQueryCreated: (query) => (query.planUsage = FIGURED) });
+    await started(h);
+    await vi.waitFor(() => expect(h.queries[0]?.query.planUsageOptions.length).toBe(1));
+
+    // Act.
+    await closeTurn(h);
+
+    // Assert.
+    await vi.waitFor(() => {
+      expect(h.queries[0]?.query.planUsageOptions).toEqual([{ skipBehaviors: true }, { skipBehaviors: true }]);
+    });
+  });
+
+  it("pushes nothing for an account the plan limits do not apply to", async () => {
+    // Arrange: the scripted vendor answers rate_limits_available false.
+    const h = harness();
+
+    // Act.
+    const seen = await pushedUpdates(
+      h,
+      (update) => (update.case === "planUsage" ? update.value : undefined),
+      async () => {
+        await started(h);
+        await vi.waitFor(() => expect(h.queries[0]?.query.planUsageOptions.length).toBe(1));
+      },
+    );
+
+    // Assert.
+    expect(seen).toEqual([]);
+  });
+});
+
 describe("mcp server health, arm by arm", () => {
   /** The health arm the engine pushed for one declared server. */
   async function healthFor(status: McpServerStatusLike["status"]): Promise<string | undefined> {
@@ -13011,6 +13097,35 @@ describe("a component that recovers", () => {
     // Assert.
     await vi.waitFor(() => {
       expect(faultyComponents(h)).not.toContain("vendor-context-usage");
+    });
+  });
+
+  it("raises the plan-usage read's fault when the vendor refuses it, and clears it when the next read answers", async () => {
+    // Arrange: the vendor refuses the first read only.
+    let reads = 0;
+    const h = harness({
+      onQueryCreated: (query) => {
+        query.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET = async (): Promise<PlanUsageLike> => {
+          reads += 1;
+          if (reads === 1) throw new Error("the usage endpoint is busy");
+          return { subscription_type: null, rate_limits_available: false, rate_limits: null };
+        };
+      },
+    });
+    await started(h);
+    await vi.waitFor(() => {
+      expect(standingFaults(h)).toContainEqual({
+        component: "vendor-plan-usage",
+        detail: "usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET failed: the usage endpoint is busy",
+      });
+    });
+
+    // Act.
+    await closeATurn(h, "turn-1");
+
+    // Assert.
+    await vi.waitFor(() => {
+      expect(faultyComponents(h)).not.toContain("vendor-plan-usage");
     });
   });
 

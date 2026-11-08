@@ -38,6 +38,7 @@ import type {
   SDKBackgroundTasksChangedMessage,
   SDKCompactBoundaryMessage,
   SDKControlGetContextUsageResponse,
+  SDKControlGetUsageResponse,
   SDKControlInitializeResponse,
   SDKControlInterruptResponse,
   SDKConversationResetMessage,
@@ -163,6 +164,12 @@ export type EffortLevelLike = EffortLevel;
 
 /** `query.getContextUsage()` — the source of SessionUpdate.context_usage. */
 export type ContextUsageLike = SDKControlGetContextUsageResponse;
+/**
+ * `query.usage_EXPERIMENTAL_...({ skipBehaviors: true })` — the source of
+ * SessionUpdate.plan_usage. The shim reads only `rate_limits_available`,
+ * `subscription_type` and `rate_limits`.
+ */
+export type PlanUsageLike = Pick<SDKControlGetUsageResponse, "rate_limits_available" | "subscription_type" | "rate_limits">;
 /** `query.initializationResult()` — commands, models, account, binary version. */
 export type InitializationResultLike = SDKControlInitializeResponse;
 /** `query.accountInfo()`. */
@@ -281,6 +288,12 @@ export interface QueryLike extends AsyncIterable<SdkMessage> {
   mcpServerStatus(): Promise<McpServerStatusLike[]>;
   /** The context window's current occupancy. */
   getContextUsage(): Promise<ContextUsageLike>;
+  /**
+   * The account's plan usage. Experimental vendor-side; read-only here, and
+   * ALWAYS with `skipBehaviors: true`: the transcript scan it otherwise runs
+   * cost each CLI about 18 CPU-seconds a read.
+   */
+  usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET(opts: { skipBehaviors: true }): Promise<PlanUsageLike>;
   /** Who this session is authenticated as. */
   accountInfo(): Promise<AccountInfoLike>;
   /** The cached first-connect initialize response. */
