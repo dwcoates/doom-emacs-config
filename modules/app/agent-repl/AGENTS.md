@@ -1874,6 +1874,8 @@ manifest, and `bin/requirements.sh` is the one program that reads them.
   - A `configure` argument names a Homebrew path as `{brew}` or `{brew:FORMULA}`, never a machine's literal prefix.
   - tree-sitter is linked statically (`TREE_SITTER_LIBS`), so a Homebrew upgrade of it cannot stop the app from starting.
   - A change to the fork's patches is a new commit there and a new `revision` here, in the same change.
+  - The commit is pushed to the fork's `zettel-30.2` branch before the change that moves `revision` lands, because install fetches the pinned commit from the fork; a pin to a commit the fork lacks fails every install.
+  - `zettel-30.2` only ever moves forward: it is never rebased or force-pushed, so every revision agent-repl ever pinned stays fetchable.
 - **A retired skill stays in the manifest, marked `"retired": true`.**
   - Install then removes the link it once made on every machine, and leaves a file of the user's at that name alone.
   - Deleting the entry instead would leave every other machine with a dangling link.
