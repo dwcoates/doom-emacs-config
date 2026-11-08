@@ -53,7 +53,7 @@
 ;;
 ;; A KNOWN COMMAND IS PURPLE IN THE COMPOSER.  Every slash word naming a
 ;; command in the catalog in hand -- typed, completed or pasted -- takes
-;; `agent-repl-command-completion-known' through an overlay.  An edit
+;; `agent-repl-composer-known' through an overlay (composer-mark.el).  An edit
 ;; re-marks the lines it touched; a newly installed catalog re-marks the
 ;; whole composer.
 
@@ -72,16 +72,12 @@
 (declare-function agent-repl-host-route-handover "agent-repl-host" (ws arm slug))
 (declare-function agent-repl-completion-match-capf "completion-match" (beg end table &rest props))
 (declare-function agent-repl-completion-match-table "completion-match" (category collection))
+(declare-function agent-repl-composer-mark-lines "composer-mark" (beg end tag find))
 (declare-function agent-repl-rpc-list-slash-commands "agent-repl-rpc" (conn request &rest keys))
 
 (defcustom agent-repl-command-completion-annotation-width 25
   "Columns a completion candidate's annotation may take in the popup."
   :type 'natnum
-  :group 'agent-repl)
-
-(defface agent-repl-command-completion-known
-  '((t :foreground "#7d4bcf"))
-  "Face of a slash word in the composer that names a known command."
   :group 'agent-repl)
 
 (defvar-local agent-repl--command-completion-catalog nil
@@ -213,27 +209,28 @@ an ellipsis when cut.  Empty when the runtime stated neither."
 
 ;;;; ---- Marking known commands ----
 
+(defun agent-repl--command-completion-next-known (limit)
+  "Return (START . END) of the next known slash word before LIMIT, or nil.
+A known slash word -- as `agent-repl--command-completion-bounds' finds it --
+names a command in the composer's catalog, by its name or an alias.  Point
+is left past the word answered."
+  (let ((catalog agent-repl--command-completion-catalog)
+        found)
+    (while (and catalog (not found) (search-forward "/" limit t))
+      (when-let* ((bounds (agent-repl--command-completion-bounds)))
+        (when (and (= (car bounds) (1- (point)))
+                   (agent-repl--command-completion-entry
+                    catalog (buffer-substring-no-properties (car bounds) (cdr bounds))))
+          (setq found bounds))
+        (goto-char (cdr bounds))))
+    found))
+
 (defun agent-repl--command-completion-mark (beg end)
   "Mark every known slash word on the lines BEG to END, and unmark the rest.
-A known slash word -- as `agent-repl--command-completion-bounds' finds it --
-names a command in the composer's catalog, by its name or an alias, and
-takes `agent-repl-command-completion-known'."
-  (save-excursion
-    (let ((beg (progn (goto-char beg) (line-beginning-position)))
-          (end (progn (goto-char end) (line-end-position)))
-          (catalog agent-repl--command-completion-catalog))
-      (remove-overlays beg end 'agent-repl-command-completion-known t)
-      (when catalog
-        (goto-char beg)
-        (while (search-forward "/" end t)
-          (when-let* ((bounds (agent-repl--command-completion-bounds)))
-            (when (and (= (car bounds) (1- (point)))
-                       (agent-repl--command-completion-entry
-                        catalog (buffer-substring-no-properties (car bounds) (cdr bounds))))
-              (let ((ov (make-overlay (car bounds) (cdr bounds))))
-                (overlay-put ov 'agent-repl-command-completion-known t)
-                (overlay-put ov 'face 'agent-repl-command-completion-known)))
-            (goto-char (cdr bounds))))))))
+The words are `agent-repl--command-completion-next-known''s, marked
+through `agent-repl-composer-mark-lines'."
+  (agent-repl-composer-mark-lines beg end 'agent-repl-command-completion-known
+                                  #'agent-repl--command-completion-next-known))
 
 (defun agent-repl--command-completion-on-change (beg end _len)
   "Re-mark the composer's lines BEG to END after an edit.

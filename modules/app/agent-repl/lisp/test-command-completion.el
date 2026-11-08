@@ -353,7 +353,7 @@ in `completion-category-overrides', with the `substring' then `flex' styles."
     (insert "please /merge-queue now")
     ;; Assert
     (should (equal (agent-repl-test-command-completion--marked) '("/merge-queue")))
-    (should (eq (get-char-property 9 'face) 'agent-repl-command-completion-known))))
+    (should (eq (get-char-property 9 'face) 'agent-repl-composer-known))))
 
 (ert-deftest agent-repl-test-command-completion-mark-an-alias ()
   "A slash word naming an alias is marked."
