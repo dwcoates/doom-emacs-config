@@ -1553,8 +1553,11 @@ neighbours (`agent-repl--step-workspace')."
   (agent-repl--workspace-cycle 1))
 
 (defconst agent-repl--working-states
-  '(:thinking :vendor-silent :submitting :clearing :compacting)
-  "Roster status arms that paint a tab red: a turn is running in the workspace.")
+  (mapcar #'car (seq-filter (lambda (row) (equal (cdr row) "red"))
+                            agent-repl-status-color-table))
+  "Roster status arms that paint a tab red: a turn is running in the workspace.
+Read off `agent-repl-status-color-table\=' rather than restated, so an arm the
+shared vocabulary paints red joins the working ring by itself.")
 
 (defconst agent-repl--recently-prompted-seconds 900
   "How long a workspace stays in the working ring after a composer send.")

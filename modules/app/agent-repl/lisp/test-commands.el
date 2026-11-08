@@ -1373,6 +1373,21 @@ CURRENT is shown.  Binds `requests' to the (WS TRIGGER) pairs requested."
     (agent-repl-switch-working-right)
     (should (equal agent-repl-test-commands--switched "d"))))
 
+(ert-deftest agent-repl-test-commands-working-states-are-the-red-arms ()
+  "The working ring\='s arms are exactly the arms the color table paints red."
+  ;; Act / Assert
+  (should (equal (sort (copy-sequence agent-repl--working-states) #'string<)
+                 (sort (mapcar #'car (seq-filter (lambda (row) (equal (cdr row) "red"))
+                                                 agent-repl-status-color-table))
+                       #'string<))))
+
+(ert-deftest agent-repl-test-commands-working-states-hold-every-turn-in-flight ()
+  "Every arm of a turn in flight is a working state, and no other arm is."
+  ;; Act / Assert
+  (should (equal (sort (copy-sequence agent-repl--working-states) #'string<)
+                 (sort (list :submitting :thinking :vendor-silent :clearing :compacting)
+                       #'string<))))
+
 (ert-deftest agent-repl-test-commands-switch-working-lands-on-a-silent-vendor ()
   "A tab whose vendor went silent is still working: the walk lands on it."
   (agent-repl-test-commands--with-working '(("a" . :thinking) ("b" . :done) ("c" . :vendor-silent)) "a"
