@@ -17020,6 +17020,69 @@ describe("the vendor-error retry", () => {
     expect([delivered.filter(isVendorErrorRetryPrompt).length, h.retryScheduler.pendingTimeout()]).toEqual([1, undefined]);
   });
 
+  const UNREACHABLE = failure({
+    case: "apiRequestFailed",
+    value: create(conversationv1.ApiRequestFailedSchema, {
+      message: "API Error: Can't reach the API server (ENOTFOUND)",
+      kind: { case: "unreachable", value: create(conversationv1.ApiUnreachableSchema, { code: "ENOTFOUND" }) },
+    }),
+  });
+
+  it("schedules no timer after a turn that never reached the API", async () => {
+    // Arrange
+    const delivered: string[] = [];
+    const h = harness({ drainPrompts: delivered });
+    await started(h);
+
+    // Act
+    await failedTurn(h, "turn-1", [], UNREACHABLE);
+
+    // Assert
+    expect([h.retryScheduler.pendingTimeout(), delivered.filter(isVendorErrorRetryPrompt).length]).toEqual([undefined, 0]);
+  });
+
+  it("states the retry as waiting for the network on the session stream", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+
+    // Act
+    await failedTurn(h, "turn-1", [], UNREACHABLE);
+
+    // Assert
+    expect((await replayedSchedule(h))?.stated.case).toBe("awaitingNetwork");
+  });
+
+  it("makes the retry that waited for the network once the probe finds the API reachable", async () => {
+    // Arrange
+    const delivered: string[] = [];
+    const h = harness({ drainPrompts: delivered });
+    await started(h);
+    await failedTurn(h, "turn-1", [], UNREACHABLE);
+
+    // Act
+    h.networkScheduler.fire(0);
+    await settledUntil(() => delivered.some(isVendorErrorRetryPrompt));
+
+    // Assert
+    expect(delivered.filter(isVendorErrorRetryPrompt)).toHaveLength(1);
+  });
+
+  it("makes the retry that waited for the network once a request reaches the vendor", async () => {
+    // Arrange
+    const delivered: string[] = [];
+    const h = harness({ drainPrompts: delivered });
+    await started(h);
+    await failedTurn(h, "turn-1", [], UNREACHABLE);
+
+    // Act
+    await h.engine.onSdkMessage({ type: "stream_event" } as unknown as SdkMessage);
+    await settledUntil(() => delivered.some(isVendorErrorRetryPrompt));
+
+    // Assert
+    expect(delivered.filter(isVendorErrorRetryPrompt)).toHaveLength(1);
+  });
+
   it("yields to a prompt submitted before the retry is due", async () => {
     // Arrange
     const h = harness();
@@ -17088,13 +17151,14 @@ describe("the vendor-error retry", () => {
     await failedTurn(h, "turn-1", [], OVERLOADED);
 
     // Assert
-    expect((await replayedSchedule(h))?.scheduled).toEqual(
-      create(conversationv1.SessionVendorErrorRetryScheduledSchema, {
+    expect((await replayedSchedule(h))?.stated).toEqual({
+      case: "scheduled",
+      value: create(conversationv1.SessionVendorErrorRetryScheduledSchema, {
         attempt: 1,
         nextAttemptAtMs: BigInt(1_000_100 + VENDOR_ERROR_RETRY_INTERVAL_MS),
         status: "API Error: overloaded",
       }),
-    );
+    });
   });
 
   it("retries at once when RetryVendorErrorNow asks", async () => {

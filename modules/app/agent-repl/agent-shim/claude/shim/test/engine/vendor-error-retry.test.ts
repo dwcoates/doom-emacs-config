@@ -54,6 +54,7 @@ const unmodeled = (type: string): conversationv1.AgentFrame =>
   apiFailed({ case: "unmodeled", value: create(conversationv1.ApiUnmodeledErrorSchema, { type }) });
 
 const OVERLOADED = apiFailed({ case: "overloaded", value: create(conversationv1.ApiOverloadedSchema, {}) });
+const UNREACHABLE = apiFailed({ case: "unreachable", value: create(conversationv1.ApiUnreachableSchema, { code: "ENOTFOUND" }) });
 const RATE_LIMITED = apiFailed({ case: "rateLimited", value: create(conversationv1.ApiRateLimitedSchema, {}) });
 const INVALID_REQUEST = apiFailed({ case: "invalidRequest", value: create(conversationv1.ApiInvalidRequestSchema, {}) });
 const BLOCKING_LIMIT = failed({ case: "blockingLimit", value: create(conversationv1.AgentStoppedAtBlockingLimitSchema, {}) });
@@ -95,6 +96,10 @@ interface Harness {
   delivery: ShimPromptDelivery | Error;
   reading: readonly RateLimitReading[];
   readings: number;
+  /** Whether the session's network fault stands, as the retry reads it. */
+  faultStanding: boolean;
+  /** Every network fault the retry stood, by its detail. */
+  readonly stoodFaults: string[];
 }
 
 function harness(): Harness {
@@ -112,6 +117,8 @@ function harness(): Harness {
     delivery: { kind: "delivered", turnId: "retry-1" },
     reading: usage({}),
     readings: 0,
+    faultStanding: false,
+    stoodFaults: [],
     retry: new VendorErrorRetry({
       deliver: (prompt) => {
         prompts.push(prompt);
@@ -125,6 +132,13 @@ function harness(): Harness {
       readLimits: () => {
         h.readings += 1;
         return h.reading;
+      },
+      network: {
+        faultStands: () => h.faultStanding,
+        standFault: (detail) => {
+          h.stoodFaults.push(detail);
+          h.faultStanding = true;
+        },
       },
       nowMs: () => clock.now,
       scheduler,
@@ -554,6 +568,7 @@ describe("delivering a retry", () => {
       deliver: () => pending,
       state: () => undefined,
       readLimits: () => [],
+      network: { faultStands: () => false, standFault: () => undefined },
       nowMs: () => START,
       scheduler,
     });
@@ -1058,6 +1073,283 @@ describe("networkRecovered", () => {
 });
 
 // ---------------------------------------------------------------------------
+// The retry that waits for the network (the latch)
+// ---------------------------------------------------------------------------
+
+describe("a failure that never reached the API", () => {
+  it("schedules no timer for an unreachable failure", async () => {
+    // Arrange
+    const h = harness();
+    h.faultStanding = true;
+
+    // Act
+    await failedTurnEnds(h, "turn-1", UNREACHABLE);
+
+    // Assert
+    expect([h.scheduler.pendingTimeout(), h.retry.awaitingNetwork()]).toEqual([undefined, true]);
+  });
+
+  it("schedules no timer for a retryable failure while the network fault stands", async () => {
+    // Arrange
+    const h = harness();
+    h.faultStanding = true;
+
+    // Act
+    await failedTurnEnds(h, "turn-1", unmodeled("unknown"));
+
+    // Assert
+    expect([h.scheduler.pendingTimeout(), h.retry.awaitingNetwork()]).toEqual([undefined, true]);
+  });
+
+  it("keeps the interval for a vendor error while no network fault stands", async () => {
+    // Arrange
+    const h = harness();
+
+    // Act
+    await failedTurnEnds(h, "turn-1", OVERLOADED);
+
+    // Assert
+    expect([h.scheduler.pendingTimeout()?.delayMs, h.retry.awaitingNetwork()]).toEqual([VENDOR_ERROR_RETRY_INTERVAL_MS, false]);
+  });
+
+  it("delivers no retry however long the fault stands", async () => {
+    // Arrange
+    const h = harness();
+    h.faultStanding = true;
+    await failedTurnEnds(h, "turn-1", UNREACHABLE);
+
+    // Act
+    h.clock.now += 3 * VENDOR_ERROR_RETRY_WINDOW_MS;
+    await settle();
+
+    // Assert
+    expect(h.prompts).toEqual([]);
+  });
+
+  it("stands the network fault when the unreachable failure found none standing", async () => {
+    // Arrange
+    const h = harness();
+
+    // Act
+    await failedTurnEnds(h, "turn-1", UNREACHABLE);
+
+    // Assert
+    expect(h.stoodFaults).toEqual(["API Error"]);
+  });
+
+  it("stands no second fault when one already stands", async () => {
+    // Arrange
+    const h = harness();
+    h.faultStanding = true;
+
+    // Act
+    await failedTurnEnds(h, "turn-1", UNREACHABLE);
+
+    // Assert
+    expect(h.stoodFaults).toEqual([]);
+  });
+
+  it("states the retry as waiting for the network, with no instant", async () => {
+    // Arrange
+    const h = harness();
+    h.faultStanding = true;
+
+    // Act
+    await failedTurnEnds(h, "turn-1", UNREACHABLE);
+
+    // Assert
+    expect(h.states).toEqual([{ awaitingNetwork: true, attempt: 1, status: "API Error" }]);
+  });
+
+  it("makes the retry exactly once when the probe answers", async () => {
+    // Arrange
+    const h = harness();
+    h.faultStanding = true;
+    await failedTurnEnds(h, "turn-1", UNREACHABLE);
+
+    // Act
+    h.retry.networkRecovered();
+    h.retry.networkRecovered();
+    await settle();
+
+    // Assert
+    expect(h.prompts).toEqual([vendorErrorRetryPrompt(1)]);
+  });
+
+  it("makes the retry when a request reaching the vendor resolves the fault", async () => {
+    // Arrange
+    const h = harness();
+    h.faultStanding = true;
+    await failedTurnEnds(h, "turn-1", UNREACHABLE);
+
+    // Act
+    h.retry.networkFaultResolved();
+    await settle();
+
+    // Assert
+    expect(h.prompts).toEqual([vendorErrorRetryPrompt(1)]);
+  });
+
+  it("leaves a vendor error on its interval when a request reaches the vendor", async () => {
+    // Arrange
+    const h = harness();
+    await failedTurnEnds(h, "turn-1", OVERLOADED);
+
+    // Act
+    h.retry.networkFaultResolved();
+    await settle();
+
+    // Assert
+    expect([h.prompts.length, h.scheduler.pendingTimeout()?.delayMs]).toEqual([0, VENDOR_ERROR_RETRY_INTERVAL_MS]);
+  });
+
+  it("states the retry being made when the latch fires", async () => {
+    // Arrange
+    const h = harness();
+    h.faultStanding = true;
+    await failedTurnEnds(h, "turn-1", UNREACHABLE);
+
+    // Act
+    h.retry.networkRecovered();
+    await settle();
+
+    // Assert
+    expect(h.statedAtDelivery).toEqual([{ attempting: true, attempt: 1, status: "API Error" }]);
+  });
+
+  it("waits on the latch again when the retried turn fails to reach the API", async () => {
+    // Arrange
+    const h = harness();
+    h.faultStanding = true;
+    await failedTurnEnds(h, "turn-1", UNREACHABLE);
+    h.retry.networkRecovered();
+    await settle();
+
+    // Act
+    await failedTurnEnds(h, "retry-1", UNREACHABLE);
+
+    // Assert
+    expect([h.scheduler.pendingTimeout(), h.states.at(-1)]).toEqual([undefined, { awaitingNetwork: true, attempt: 2, status: "API Error" }]);
+  });
+
+  it("starts a fresh vendor-error window at the first failure that reached the API", async () => {
+    // Arrange
+    const h = harness();
+    h.faultStanding = true;
+    await failedTurnEnds(h, "turn-1", UNREACHABLE);
+    h.clock.now += 3 * VENDOR_ERROR_RETRY_WINDOW_MS;
+    h.faultStanding = false;
+    h.retry.networkRecovered();
+    await settle();
+
+    // Act
+    await failedTurnEnds(h, "retry-1", OVERLOADED);
+
+    // Assert
+    expect(h.scheduler.pendingTimeout()?.delayMs).toBe(VENDOR_ERROR_RETRY_INTERVAL_MS);
+  });
+
+  it("yields to a prompt submitted while it waits, and the prompt's own failure waits on the latch", async () => {
+    // Arrange
+    const h = harness();
+    h.faultStanding = true;
+    await failedTurnEnds(h, "turn-1", UNREACHABLE);
+    h.retry.promptSubmitted("turn-2");
+
+    // Act
+    await failedTurnEnds(h, "turn-2", UNREACHABLE);
+    h.retry.networkRecovered();
+    await settle();
+
+    // Assert
+    expect({ prompts: h.prompts, states: h.states.slice(1, 3) }).toEqual({
+      prompts: [vendorErrorRetryPrompt(1)],
+      states: [undefined, { awaitingNetwork: true, attempt: 1, status: "API Error" }],
+    });
+  });
+
+  it("makes nothing on the latch once a submitted prompt ended the chain", async () => {
+    // Arrange
+    const h = harness();
+    h.faultStanding = true;
+    await failedTurnEnds(h, "turn-1", UNREACHABLE);
+    h.retry.promptSubmitted("turn-2");
+
+    // Act
+    h.retry.networkRecovered();
+    await settle();
+
+    // Assert
+    expect(h.prompts).toEqual([]);
+  });
+
+  it("makes nothing on the latch after stand-down", async () => {
+    // Arrange
+    const h = harness();
+    h.faultStanding = true;
+    await failedTurnEnds(h, "turn-1", UNREACHABLE);
+    h.retry.stop("the session stood down");
+
+    // Act
+    h.retry.networkRecovered();
+    await settle();
+
+    // Assert
+    expect(h.prompts).toEqual([]);
+  });
+
+  it("is made at once when asked for now", async () => {
+    // Arrange
+    const h = harness();
+    h.faultStanding = true;
+    await failedTurnEnds(h, "turn-1", UNREACHABLE);
+
+    // Act
+    const outcome = await h.retry.retryNow();
+
+    // Assert
+    expect({ outcome, prompts: h.prompts, latched: h.retry.awaitingNetwork() }).toEqual({
+      outcome: { kind: "retried" },
+      prompts: [vendorErrorRetryPrompt(1)],
+      latched: false,
+    });
+  });
+
+  it("records the wait with the network cause", async () => {
+    // Arrange
+    const h = harness();
+    h.faultStanding = true;
+    const before = logSinkMark();
+
+    // Act
+    await failedTurnEnds(h, "turn-1", UNREACHABLE);
+
+    // Assert
+    const records = recordsSaying(
+      logRecordsSince(before),
+      "the turn failed because the API could not be reached; agent-repl retries it when the network fault resolves, on no timer",
+    );
+    expect(records.map((record) => [record.level, record.context["unreachable"], record.context["fault_stood"]])).toEqual([["info", true, true]]);
+  });
+
+  it("records the latch firing and what fired it", async () => {
+    // Arrange
+    const h = harness();
+    h.faultStanding = true;
+    await failedTurnEnds(h, "turn-1", UNREACHABLE);
+    const before = logSinkMark();
+
+    // Act
+    h.retry.networkRecovered();
+    await settle();
+
+    // Assert
+    const records = recordsSaying(logRecordsSince(before), "the network fault resolved; agent-repl makes the retry that waited for the network");
+    expect(records.map((record) => [record.context["attempt"], record.context["how"]])).toEqual([[1, "the reachability probe answered"]]);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // The retry asked for now
 // ---------------------------------------------------------------------------
 
@@ -1193,7 +1485,7 @@ describe("vendorErrorRetryUpdate", () => {
     const update = vendorErrorRetryUpdate({ attempt: 3, atMs: START, status: "Overloaded" });
 
     // Assert
-    expect(update.update.case === "vendorErrorRetry" ? update.update.value.scheduled : undefined).toEqual(
+    expect(update.update.case === "vendorErrorRetry" && update.update.value.stated.case === "scheduled" ? update.update.value.stated.value : undefined).toEqual(
       create(conversationv1.SessionVendorErrorRetryScheduledSchema, { attempt: 3, nextAttemptAtMs: BigInt(START), status: "Overloaded" }),
     );
   });
@@ -1203,11 +1495,11 @@ describe("vendorErrorRetryUpdate", () => {
     const update = vendorErrorRetryUpdate({ attempting: true, attempt: 2, status: "Overloaded" });
 
     // Assert
-    const stated = update.update.case === "vendorErrorRetry" ? update.update.value : undefined;
-    expect([stated?.attempting, stated?.scheduled]).toEqual([
-      create(conversationv1.SessionVendorErrorRetryAttemptingSchema, { attempt: 2, status: "Overloaded" }),
-      undefined,
-    ]);
+    const stated = update.update.case === "vendorErrorRetry" ? update.update.value.stated : undefined;
+    expect(stated).toEqual({
+      case: "attempting",
+      value: create(conversationv1.SessionVendorErrorRetryAttemptingSchema, { attempt: 2, status: "Overloaded" }),
+    });
   });
 
   it("states no schedule when none is due", () => {
@@ -1215,7 +1507,18 @@ describe("vendorErrorRetryUpdate", () => {
     const update = vendorErrorRetryUpdate(undefined);
 
     // Assert
-    expect(update.update.case === "vendorErrorRetry" ? update.update.value.scheduled : "wrong arm").toBeUndefined();
+    expect(update.update.case === "vendorErrorRetry" ? update.update.value.stated.case : "wrong arm").toBeUndefined();
+  });
+
+  it("carries a retry waiting for the network whole, with no instant", () => {
+    // Act
+    const update = vendorErrorRetryUpdate({ awaitingNetwork: true, attempt: 4, status: "ENOTFOUND" });
+
+    // Assert
+    expect(update.update.case === "vendorErrorRetry" ? update.update.value.stated : undefined).toEqual({
+      case: "awaitingNetwork",
+      value: create(conversationv1.SessionVendorErrorRetryAwaitingNetworkSchema, { attempt: 4, status: "ENOTFOUND" }),
+    });
   });
 });
 
