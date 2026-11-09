@@ -52,6 +52,8 @@
                   (workspace request-id function))
 (defvar agent-repl--global-log-scope)
 (defvar agent-repl--workspace-history)
+(defvar agent-repl--panels-arrivals-armed)
+(declare-function agent-repl--note-workspace-created "workspace" (name))
 (defvar agent-repl--log-context-request-id)
 (defvar agent-repl--log-context-workspace)
 (declare-function agent-repl--current-ws-p "core" (ws))
@@ -712,6 +714,13 @@ this file's verb — so the tab's whole birth is a perspective plus the
     (agent-repl--info name "elisp.roster.tab-open: ws=%s id=%s dir=%s"
                       name (plist-get desired :id) dir)
     (agent-repl-roster--subscribe-host name ref)
+    ;; A WORKSPACE THAT BECAME OPEN WITH THIS EDITOR WATCHING is the most
+    ;; recent one in the selection history, so `s-]' reaches it at once.  The
+    ;; startup roster is exempt: its tabs were open before this session and
+    ;; the durable last-selected instants order them
+    ;; (`agent-repl-roster-selection-recency-order').
+    (when agent-repl--panels-arrivals-armed
+      (agent-repl--note-workspace-created name))
     ;; A TAB BORN HERE IS A WORKSPACE THAT JUST BECAME OPEN, and opening a
     ;; workspace opens its panels before it is switched to (owner ruling,
     ;; 2026-09-13, item 6).  This is the one landing every open takes --

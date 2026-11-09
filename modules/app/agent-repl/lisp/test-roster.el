@@ -743,6 +743,41 @@ it, not the first tab: one rule for every close (owner ruling, 2026-09-30)."
     ;; Assert
     (should (equal agent-repl-test-roster--switched '("second")))))
 
+;;; --- A workspace opened after startup leads the selection history
+
+(ert-deftest agent-repl-test-roster-a-tab-opened-after-startup-leads-the-history ()
+  "A workspace that became open with the editor watching is the most recent."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (let ((agent-repl--workspace-history '("shown" "older"))
+          (agent-repl--panels-arrivals-armed t))
+      ;; Act
+      (agent-repl-roster--open-tab (list :id "n" :name "newborn" :ref (list :id "n" :dir "/w/n")))
+      ;; Assert
+      (should (equal agent-repl--workspace-history '("newborn" "shown" "older"))))))
+
+(ert-deftest agent-repl-test-roster-a-creation-is-not-stamped-viewed ()
+  "Leading the history is not a view, so no `:last-viewed-at' is written."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (let ((agent-repl--workspace-history nil)
+          (agent-repl--panels-arrivals-armed t))
+      ;; Act
+      (agent-repl-roster--open-tab (list :id "n" :name "newborn" :ref (list :id "n" :dir "/w/n")))
+      ;; Assert
+      (should-not (agent-repl--ws-get "newborn" :last-viewed-at)))))
+
+(ert-deftest agent-repl-test-roster-a-startup-tab-leaves-the-history-alone ()
+  "Before the startup roster is delivered, opening tabs does not reorder the history."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (let ((agent-repl--workspace-history '("shown"))
+          (agent-repl--panels-arrivals-armed nil))
+      ;; Act
+      (agent-repl-roster--open-tab (list :id "n" :name "old-tab" :ref (list :id "n" :dir "/w/n")))
+      ;; Assert
+      (should (equal agent-repl--workspace-history '("shown"))))))
+
 ;;; --- The one selection-recency order
 
 (defmacro agent-repl-test-roster--with-instants (instants history &rest body)
