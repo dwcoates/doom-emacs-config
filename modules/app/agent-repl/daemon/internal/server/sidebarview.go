@@ -83,6 +83,8 @@ func (s *server) foldSection(
 		return false, nil, s.deps.Verbs.FoldOpenSection(ctx, folded)
 	case *agentreplv1.SidebarViewFoldSection_Subsection:
 		return false, nil, s.deps.Verbs.FoldSubsection(ctx, ids.SubsectionID(section.Subsection.GetId()), folded, requester)
+	case *agentreplv1.SidebarViewFoldSection_Workspace:
+		return false, nil, s.deps.Verbs.FoldChildren(ctx, ids.WorkspaceID(section.Workspace.GetId()), folded, requester)
 	default:
 		panic(fmt.Sprintf("UpdateSidebarView: section arm %T passed validation that no case handles", section))
 	}

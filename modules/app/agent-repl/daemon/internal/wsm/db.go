@@ -74,6 +74,12 @@ type DB interface {
 	// ExpandSubsectionHolding expands the subsection a workspace's family sits
 	// in, answering whether it was collapsed (workspaces.go).
 	ExpandSubsectionHolding(ctx context.Context, id WorkspaceID) (bool, error)
+	// SetChildrenFolded records whether a workspace's children are folded; an
+	// unknown workspace is ErrNotFound (childrenfolds.go).
+	SetChildrenFolded(ctx context.Context, id WorkspaceID, folded bool) error
+	// ExpandChildrenFoldsHolding expands the collapsed folds of a workspace's
+	// ancestors' children, answering whether any was collapsed.
+	ExpandChildrenFoldsHolding(ctx context.Context, id WorkspaceID) (bool, error)
 	// MarkClosed records that a workspace's editor state is torn down, when,
 	// and by whom; the first close's record stands (see the store's doc).
 	MarkClosed(ctx context.Context, id WorkspaceID, closure Closure) error

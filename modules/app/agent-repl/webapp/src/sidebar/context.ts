@@ -109,6 +109,11 @@ export function subsectionFoldKey(subsectionId: string): string {
   return `subsection:${subsectionId}`;
 }
 
+/** The key one workspace's children fold is identified by on this page. */
+export function workspaceChildrenFoldKey(workspaceId: string): string {
+  return `children:${workspaceId}`;
+}
+
 /**
  * The recently-merged section's fold key.
  *

@@ -333,3 +333,67 @@ func TestUpdateSidebarViewAnswersACollapseThatHoldsTheCurrentWorkspace(t *testin
 		})
 	}
 }
+
+func workspaceSection(id string) *agentreplv1.SidebarViewFoldSection_Workspace {
+	return &agentreplv1.SidebarViewFoldSection_Workspace{Workspace: &workspacev1.WorkspaceRef{Id: id}}
+}
+
+func TestUpdateSidebarViewHandsAWorkspaceChildrenFoldToTheVerb(t *testing.T) {
+	tests := []struct {
+		name string
+		fold *agentreplv1.SidebarViewFoldSection
+		want string
+	}{
+		{"collapse", &agentreplv1.SidebarViewFoldSection{Section: workspaceSection("w-1"), Fold: collapseFold()}, `FoldChildren w-1 true by UpdateSidebarView ""`},
+		{"expand", &agentreplv1.SidebarViewFoldSection{Section: workspaceSection("w-1"), Fold: expandFold()}, `FoldChildren w-1 false by UpdateSidebarView ""`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+
+			// Act
+			sent(t, h, foldChange(tt.fold))
+
+			// Assert
+			if len(h.Verbs.arrangements) != 1 || h.Verbs.arrangements[0] != tt.want {
+				t.Fatalf("verb calls = %v, want [%s]", h.Verbs.arrangements, tt.want)
+			}
+		})
+	}
+}
+
+func TestUpdateSidebarViewAnswersAnUnknownWorkspace(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.Verbs.arrangeErr = &workspace.Refusal{Rpc: "UpdateSidebarView", Arm: workspace.ArmUnknownWorkspace, Reason: "gone", NotFound: true}
+
+	// Act
+	resp, err := h.Client.UpdateSidebarView(context.Background(), connect.NewRequest(
+		foldChange(&agentreplv1.SidebarViewFoldSection{Section: workspaceSection("gone"), Fold: collapseFold()})))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("UpdateSidebarView: %v", err)
+	}
+	if resp.Msg.GetError().GetUnknownWorkspace() == nil {
+		t.Fatalf("result = %v, want unknown_workspace", resp.Msg.GetResult())
+	}
+}
+
+func TestUpdateSidebarViewRefusesAWorkspaceChildrenFoldWithNoId(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	_, err := h.Client.UpdateSidebarView(context.Background(), connect.NewRequest(
+		foldChange(&agentreplv1.SidebarViewFoldSection{Section: workspaceSection(""), Fold: collapseFold()})))
+
+	// Assert
+	if connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Fatalf("UpdateSidebarView = %v, want InvalidArgument", err)
+	}
+	if len(h.Verbs.arrangements) != 0 {
+		t.Fatalf("verb calls = %v, want none for a malformed request", h.Verbs.arrangements)
+	}
+}

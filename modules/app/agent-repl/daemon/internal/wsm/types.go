@@ -115,6 +115,10 @@ type Workspace struct {
 	// hidden section (agentrepl.v1.SetWorkspaceHidden): off every grouping and
 	// off the editor's tab bar, its session and tab untouched.
 	Hidden bool
+	// ChildrenFolded reports whether the workspace's children are folded: their
+	// rows hidden in the sidebar and their tabs folded off the tab bar
+	// (SetChildrenFolded).
+	ChildrenFolded bool
 	// Current reports whether the workspace is the user's selection
 	// (SetCurrent): the one they are looking at. At most one workspace is.
 	Current bool

@@ -527,6 +527,11 @@ type Verbs interface {
 	// the roster, and on a collapse hides its open workspaces, standing down
 	// those it does not spare.
 	FoldSubsection(ctx context.Context, sub ids.SubsectionID, folded bool, requester FoldRequester) error
+	// FoldChildren records whether a workspace's children are collapsed,
+	// republishes the roster, and on a collapse hides the open workspaces
+	// below it as FoldSubsection does. A collapse over the current workspace
+	// is refused holds_current, an unknown workspace unknown_workspace.
+	FoldChildren(ctx context.Context, ws ids.WorkspaceID, folded bool, requester FoldRequester) error
 	// FoldMergedSection records whether the Recently Merged section is
 	// collapsed and republishes the roster.
 	FoldMergedSection(ctx context.Context, folded bool) error

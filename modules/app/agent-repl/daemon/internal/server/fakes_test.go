@@ -2794,6 +2794,12 @@ func (v *fakeVerbs) FoldSubsection(_ context.Context, sub ids.SubsectionID, fold
 	return v.arrange(fmt.Sprintf("FoldSubsection %s %v by %s %q", sub, folded, requester.RPC, requester.RequestID))
 }
 
+// FoldChildren records the workspace's children fold as an arrangement call
+// and answers arrangeErr.
+func (v *fakeVerbs) FoldChildren(_ context.Context, ws ids.WorkspaceID, folded bool, requester workspace.FoldRequester) error {
+	return v.arrange(fmt.Sprintf("FoldChildren %s %v by %s %q", ws, folded, requester.RPC, requester.RequestID))
+}
+
 // reconnects answers the harness's reconnect tracker, building it on first
 // use over ReconnectRecords and the wall clock.
 func (h *harness) reconnects() *restarttiming.Reconnects {

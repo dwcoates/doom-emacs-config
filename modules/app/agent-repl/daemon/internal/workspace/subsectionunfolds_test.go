@@ -122,3 +122,26 @@ func TestSubsectionUnfoldsRecordsAnUnfoldItCannotCarryOut(t *testing.T) {
 		t.Fatalf("no error record naming the workspace: %+v", log.Records())
 	}
 }
+
+func TestUnfoldSubsectionForWorkExpandsTheCollapsedChildrenOfTheWorkspacesAncestors(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	childFamily(t, f)
+	p := f.db.workspaces["p1"]
+	p.ChildrenFolded = true
+	f.db.workspaces["p1"] = p
+
+	// Act
+	err := f.verbs.UnfoldSubsectionForWork(context.Background(), "g1")
+
+	// Assert
+	if err != nil {
+		t.Fatalf("UnfoldSubsectionForWork: %v", err)
+	}
+	if f.db.workspaces["p1"].ChildrenFolded {
+		t.Fatal("the collapsed fold over a working descendant stands")
+	}
+	if len(f.sidebar.registries) != 1 {
+		t.Fatalf("roster republications = %d, want 1", len(f.sidebar.registries))
+	}
+}

@@ -28,6 +28,7 @@
 import { addRowMemory, showRowMemory } from "./memory.js";
 import { createControl } from "../control.js";
 import { renameOnDoubleClick } from "./rename.js";
+import { wireChildrenFold } from "./children-fold.js";
 import type {
   RosterRow,
   RosterRowAttention,
@@ -58,6 +59,7 @@ import type {
   RosterRowViewed,
   RosterRowWorkspace,
   RosterOpenRowRepositoryDivider,
+  RosterOpenRowChildrenFold,
 } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import {
   SelectInEditorResponseSchema,
@@ -127,6 +129,8 @@ export interface RowFamily {
    * the row drawn just before it (frontend.v1.RosterOpenRow.repository_divider).
    */
   repositoryDivider?: RosterOpenRowRepositoryDivider;
+  /** Whether the row's children are folded, set on an open row with children (frontend.v1.RosterOpenRow.children_fold). */
+  childrenFold?: RosterOpenRowChildrenFold;
 }
 
 /** One family of a rows region, with its message path. */
@@ -142,7 +146,7 @@ export function pathedFamilies(rows: readonly RowFamily[], path: string): Pathed
 
 /** Draw FAMILY, a row of one list and its family, at PATH (`drawRosterRow`). */
 export function drawRosterFamily(family: RowFamily, sc: SidebarContext, path: string, place: RowPlace = "grouping"): HTMLElement {
-  return drawRosterRow(requireMessage(family.row, `${path}.row`), sc, `${path}.row`, place, family.children ?? [], path);
+  return drawRosterRow(requireMessage(family.row, `${path}.row`), sc, `${path}.row`, place, family.children ?? [], path, family.childrenFold);
 }
 
 /**
@@ -176,6 +180,7 @@ export function drawRosterRow(
   place: RowPlace = "grouping",
   children: readonly RowFamily[] = [],
   familyPath: string = path,
+  childrenFold?: RosterOpenRowChildrenFold,
 ): HTMLElement {
   const merged = place === "merged";
   const hidden = place === "hidden";
@@ -282,9 +287,11 @@ export function drawRosterRow(
   // struck through only at a cold gate.
   // AN OPEN ROW LEADS WITH ITS EMACS TAB NUMBER (owner request, 2026-10-17),
   // filled in by the roster drawer once the push is drawn (`tab-numbers.ts`).
+  let statusMark: HTMLElement | undefined;
   if (place === "grouping") {
     line.appendChild(drawTabNumberSlot());
-    line.appendChild(drawStatusMark(status.case, `${path}.status`, markers));
+    statusMark = drawStatusMark(status.case, `${path}.status`, markers);
+    line.appendChild(statusMark);
   }
 
   const label = document.createElement("span");
@@ -378,6 +385,11 @@ export function drawRosterRow(
   installHoverPanel(ws, line, { duration, more }, detail, sc, workspace.id);
 
   appendRowKids(ws, children, familyPath, (child, childPath) => drawRosterFamily(child, sc, childPath, place));
+  // THE STATUS MARK OF A ROW WITH CHILDREN FOLDS THEM (owner request,
+  // 2026-11-09): one more access point to a fold the daemon holds.
+  if (childrenFold !== undefined && statusMark !== undefined) {
+    wireChildrenFold(ws, statusMark, sc, workspace, childrenFold, `${familyPath}.childrenFold`);
+  }
   return ws;
 }
 
