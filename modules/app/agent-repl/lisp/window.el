@@ -46,7 +46,7 @@
 (declare-function agent-repl--warn "core")
 (declare-function agent-repl--ws-current-name "workspace")
 (declare-function agent-repl--ws-get "workspace")
-(declare-function agent-repl--ws-log-name "workspace")
+(declare-function agent-repl--ws-log-scope "workspace" (ws))
 (declare-function agent-repl--info "core")
 (declare-function agent-repl-host-state "host")
 (declare-function agent-repl-webhost-set-gate-dock "webhost" (ws pixels))
@@ -91,12 +91,18 @@ pattern this helper replaces).  Returns nil when the panel has not
 been initialized.  Signals an error for an unknown KIND so typos
 surface at call time.
 
-WS is caller-supplied and may name any perspective — the persp activation
-path asks this helper about persp-mode's own \"main\" and \"none\", which own
-no durable log sink.  Lookups use the resolved name; records use
-`agent-repl--ws-log-name' and carry the name in their text."
+WS is caller-supplied and may name any perspective, or none at all.  The
+persp activation path asks this helper about persp-mode's own \"main\" and
+\"none\", which own no durable log sink, and so does a caller that runs
+outside every log context with no agent workspace current (the sidebar's
+offset on `window-size-change-functions', right after startup activates
+\"main\").  Lookups use the resolved name.  Records are scoped by
+`agent-repl--ws-log-scope': a workspace's own sink when it has one, and an
+explicit central request otherwise, with the name kept in their text.  A
+bare nil scope would leave the record to the ambient context, and outside
+one it has nowhere to go."
   (let* ((resolved-ws (or ws (agent-repl--ws-current-name)))
-         (log-ws (agent-repl--ws-log-name resolved-ws)))
+         (log-ws (agent-repl--ws-log-scope resolved-ws)))
     (pcase kind
       (:view
        (let ((buf (agent-repl--ws-get resolved-ws :frontend-buffer)))
@@ -131,7 +137,7 @@ rather than tripping `get-buffer-window' with a dead buffer."
          (live (and buf (buffer-live-p buf)))
          (win (and live (get-buffer-window buf frame))))
     (agent-repl--log-verbose
-     (agent-repl--ws-log-name resolved-ws)
+     (agent-repl--ws-log-scope resolved-ws)
      "window--panel-window: ws=%s kind=%S buffer=%S live=%s frame=%S found=%S"
      resolved-ws kind buf live frame win)
     win))
@@ -153,6 +159,52 @@ frame-level side-window UI elements."
                              "window--side-window-p: window=%S live=%s side=%S"
                              win live side)
     side))
+
+;;;; --- Saving and restoring a layout -------------------------------------
+
+(defconst agent-repl-window--layout-parameters
+  '(window-side window-slot no-other-window no-delete-other-windows
+    mode-line-format window-size-fixed window-preserved-size)
+  "Window parameters a saved layout records and its restore puts back.
+The parameters a window gains when it becomes a side window (the
+sidebar's `display-buffer-in-side-window' and its window parameters) or
+a hardened panel (`agent-repl-window--harden').  `set-window-configuration'
+REUSES the window objects a configuration names, and by default it saves
+and restores no parameter but `window-persistent-parameters''s own.  So a
+frame saved as one plain window, whose window then became the sidebar's
+left side window, came back as that one window still carrying
+`window-side' = left, and the frame then refused every split and every
+`delete-other-windows' (2026-11-02).  Listed as persistent around both
+the save and the restore, each comes back as it was saved, nil included.")
+
+(defun agent-repl-window--with-layout-parameters (fn)
+  "Call FN with `agent-repl-window--layout-parameters' persistent."
+  (let ((window-persistent-parameters
+         (append (mapcar (lambda (param) (cons param t))
+                         agent-repl-window--layout-parameters)
+                 window-persistent-parameters)))
+    (funcall fn)))
+
+(defun agent-repl-window--save-configuration ()
+  "Return the selected frame's window configuration, for a later restore.
+Saved with `agent-repl-window--layout-parameters' persistent; restore it
+with `agent-repl-window--restore-configuration'."
+  (agent-repl-window--with-layout-parameters #'current-window-configuration))
+
+(defun agent-repl-window--restore-configuration (config &optional ws)
+  "Restore CONFIG, saved by `agent-repl-window--save-configuration'.
+Every window CONFIG names gets back the layout parameters it was saved
+with (`agent-repl-window--layout-parameters').  WS names the workspace
+for the record only."
+  (agent-repl-window--with-layout-parameters
+   (lambda () (set-window-configuration config)))
+  ;; The record reads the frame the restore left selected, never CONFIG:
+  ;; CONFIG is opaque to everything but `set-window-configuration'.
+  (let ((frame (selected-frame)))
+    (agent-repl--log (agent-repl--ws-log-scope (or ws (agent-repl--ws-current-name)))
+                     "window--restore-configuration: frame=%S windows=%d selected=%S"
+                     frame (length (window-list frame 'nomini)) (selected-window)))
+  t)
 
 ;;;; --- Per-window hardening ----------------------------------------------
 
@@ -312,7 +364,7 @@ frame — including a remount, a layout repair, and a restored workspace
 — receives the same number.  Never smaller than
 `agent-repl-window--input-height-minimum'."
   (let* ((frame (or frame (selected-frame)))
-         (log-ws (agent-repl--ws-log-name (or ws (agent-repl--ws-current-name))))
+         (log-ws (agent-repl--ws-log-scope (or ws (agent-repl--ws-current-name))))
          (key (frame-height frame))
          (cached (frame-parameter frame agent-repl-window--input-height-parameter)))
     (if (and (consp cached) (eql (car cached) key) (integerp (cdr cached)))
@@ -345,7 +397,7 @@ error it refused with (at debug — a composer a line short is cosmetic
 and must not abort the mount that carries the user's session) and the
 height WIN really has is returned, so the caller's record is the truth
 and never the request."
-  (let ((log-ws (agent-repl--ws-log-name (or ws (agent-repl--ws-current-name)))))
+  (let ((log-ws (agent-repl--ws-log-scope (or ws (agent-repl--ws-current-name)))))
     (unless (window-live-p win)
       (error "agent-repl-window--apply-height: window %S is not live" win))
     (let ((actual (window-total-height win)))
@@ -643,11 +695,11 @@ frame reclaim (`agent-repl--reclaim-frame-fullscreen') — so their
 eligibility checks cannot drift."
   (let* ((view-buf (agent-repl-window--panel-buffer :view ws))
          (restorable (buffer-live-p view-buf)))
-    ;; Screened through `--ws-log-name': the panels-open default now
+    ;; Scoped through `--ws-log-scope': the panels-open default now
     ;; consults this for the workspace a persp switch just activated, which
     ;; includes persp-mode's own "main"/"none" placeholders that own no
     ;; durable sink — an unscreened record for one is unroutable.
-    (agent-repl--log-verbose (agent-repl--ws-log-name ws)
+    (agent-repl--log-verbose (agent-repl--ws-log-scope ws)
                              "window--panels-restorable-p: ws=%s view-buffer=%S live=%s"
                              ws view-buf restorable)
     restorable))
