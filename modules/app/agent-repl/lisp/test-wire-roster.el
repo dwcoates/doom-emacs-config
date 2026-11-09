@@ -984,20 +984,46 @@ message."
                   (agent-repl-test-wire-roster--open-row ""))
                  '("RosterOpenRowTab" tab "oneof is unset"))))
 
-(ert-deftest agent-repl-test-wire-roster-open-row-decodes-its-repository-divider ()
-  "An open row that begins another repository in its family names it."
-  (let ((decoded (agent-repl-test-wire-roster--decode
-                  #'agent-repl-wire-decode-roster-open-row
-                  (format "{\"row\":%s,\"tab\":{\"numbered\":{\"number\":2}},\"repositoryDivider\":{\"name\":\"beta\"}}"
-                          (agent-repl-test-wire-roster--row "\"ready\":{}")))))
-    (should (equal (plist-get decoded :repository-divider) '(:name "beta")))))
+(defun agent-repl-test-wire-roster--block (repo name &rest rows)
+  "Return a `RosterOpenRowRepositoryBlock' JSON of REPO headed NAME holding ROWS."
+  (format "{\"repository\":{\"id\":\"%s\",\"dir\":\"/r/%s\"},\"divider\":{\"name\":\"%s\"},\"rows\":[%s]}"
+          repo repo name (mapconcat #'identity rows ",")))
 
-(ert-deftest agent-repl-test-wire-roster-open-row-without-a-divider-decodes-none ()
-  "An open row of the same repository as the row before it carries no divider."
+(ert-deftest agent-repl-test-wire-roster-open-row-decodes-its-repository-blocks ()
+  "An open row's other-repository children decode as one block per repository."
+  (let* ((child (agent-repl-test-wire-roster--open-row "\"numbered\":{\"number\":2}"))
+         (decoded (agent-repl-test-wire-roster--decode
+                   #'agent-repl-wire-decode-roster-open-row
+                   (format "{\"row\":%s,\"tab\":{\"numbered\":{\"number\":1}},\"repositoryBlocks\":[%s]}"
+                           (agent-repl-test-wire-roster--row "\"ready\":{}")
+                           (agent-repl-test-wire-roster--block "repo-2" "beta" child))))
+         (block (car (plist-get decoded :repository-blocks))))
+    (should (equal (list (plist-get (plist-get block :repository) :id)
+                         (plist-get block :divider)
+                         (length (plist-get block :rows)))
+                   '("repo-2" (:name "beta") 1)))))
+
+(ert-deftest agent-repl-test-wire-roster-open-row-without-blocks-decodes-none ()
+  "An open row whose children are all of its own repository carries no block."
   (should-not (plist-get (agent-repl-test-wire-roster--decode
                           #'agent-repl-wire-decode-roster-open-row
                           (agent-repl-test-wire-roster--open-row "\"numbered\":{\"number\":1}"))
-                         :repository-divider)))
+                         :repository-blocks)))
+
+(ert-deftest agent-repl-test-wire-roster-the-retired-divider-field-is-a-breach ()
+  "An open row naming the retired `repositoryDivider' is refused as unknown."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-open-row
+                  (format "{\"row\":%s,\"tab\":{\"numbered\":{\"number\":2}},\"repositoryDivider\":{\"name\":\"beta\"}}"
+                          (agent-repl-test-wire-roster--row "\"ready\":{}")))
+                 '("RosterOpenRow" repositoryDivider "unknown field"))))
+
+(ert-deftest agent-repl-test-wire-roster-a-block-with-an-unknown-field-is-a-breach ()
+  "The block's keys are checked like every other message's."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-open-row-repository-block
+                  "{\"repository\":{\"id\":\"r\",\"dir\":\"/r\"},\"divider\":{\"name\":\"beta\"},\"rows\":[],\"color\":\"red\"}")
+                 '("RosterOpenRowRepositoryBlock" color "unknown field"))))
 
 (ert-deftest agent-repl-test-wire-roster-a-divider-with-an-unknown-field-is-a-breach ()
   "The divider's keys are checked like every other message's."

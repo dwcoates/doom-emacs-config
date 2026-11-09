@@ -977,15 +977,34 @@ It is never unset: every open row has a tab."
                   '((expanded :expanded agent-repl-wire-decode-roster-open-row-children-expanded)
                     (collapsed :collapsed agent-repl-wire-decode-roster-open-row-children-collapsed)))))))
 
+(defun agent-repl-wire-decode-roster-open-row-repository-block (value)
+  "Decode VALUE as `RosterOpenRowRepositoryBlock'.
+The plist is `(:repository REF :divider DIVIDER :rows ROWS)': one other
+repository's children of an open row, ROWS each an open row in drawn order."
+  (let ((object (agent-repl-wire--object "RosterOpenRowRepositoryBlock" value)))
+    (agent-repl-wire--check-keys "RosterOpenRowRepositoryBlock" object '(repository divider rows))
+    (agent-repl-wire--decoded
+     "RosterOpenRowRepositoryBlock"
+     (list :repository (agent-repl-wire--decode-message
+                        "RosterOpenRowRepositoryBlock" 'repository object
+                        #'agent-repl-wire-decode-repository-ref)
+           :divider (agent-repl-wire--decode-message
+                     "RosterOpenRowRepositoryBlock" 'divider object
+                     #'agent-repl-wire-decode-roster-open-row-repository-divider)
+           :rows (agent-repl-wire--decode-repeated
+                  "RosterOpenRowRepositoryBlock" 'rows object
+                  #'agent-repl-wire-decode-roster-open-row)))))
+
 (defun agent-repl-wire-decode-roster-open-row (value)
   "Decode VALUE as `RosterOpenRow'.
-The plist is `(:row ROW :tab TAB :children ROWS :repository-divider DIVIDER
-:children-fold FOLD)'.  FOLD is set exactly when the row has children.
-CHILDREN are the row's open family, each itself an open row, in drawn order.
-DIVIDER names the repository the row begins within its family, nil when it
-is of the same repository as the row drawn before it."
+The plist is `(:row ROW :tab TAB :children ROWS :repository-blocks BLOCKS
+:children-fold FOLD)'.  CHILDREN are the row's open children of its own
+repository, each itself an open row, in drawn order; BLOCKS are its children
+of other repositories, one `RosterOpenRowRepositoryBlock' per repository,
+drawn after CHILDREN.  FOLD is set exactly when the row has a child of either
+kind, and folds them all."
   (let ((object (agent-repl-wire--object "RosterOpenRow" value)))
-    (agent-repl-wire--check-keys "RosterOpenRow" object '(row tab children repositoryDivider childrenFold))
+    (agent-repl-wire--check-keys "RosterOpenRow" object '(row tab children repositoryBlocks childrenFold))
     (agent-repl-wire--decoded
      "RosterOpenRow"
      (list :row (agent-repl-wire--decode-message
@@ -994,9 +1013,9 @@ is of the same repository as the row drawn before it."
                  "RosterOpenRow" 'tab object #'agent-repl-wire-decode-roster-open-row-tab)
            :children (agent-repl-wire--decode-repeated
                       "RosterOpenRow" 'children object #'agent-repl-wire-decode-roster-open-row)
-           :repository-divider (agent-repl-wire--decode-optional-message
-                                "RosterOpenRow" 'repositoryDivider object
-                                #'agent-repl-wire-decode-roster-open-row-repository-divider)
+           :repository-blocks (agent-repl-wire--decode-repeated
+                               "RosterOpenRow" 'repositoryBlocks object
+                               #'agent-repl-wire-decode-roster-open-row-repository-block)
            :children-fold (agent-repl-wire--decode-optional-message
                            "RosterOpenRow" 'childrenFold object
                            #'agent-repl-wire-decode-roster-open-row-children-fold)))))
