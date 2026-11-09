@@ -1304,15 +1304,13 @@ A plist `(:label LABEL :round ROUND :state (:arm ARM :value SPAN))', ARM
 
 (defun agent-repl-wire-decode-roster-merge-queue-head-merging (value)
   "Decode VALUE as `RosterMergeQueueHeadMerging'.
-A plist `(:step STEP :suspended SUSPENDED)': STEP is the daemon's words
-for the step, nil while none is named, and SUSPENDED is t while nothing
-of the merge's work runs."
+A plist `(:suspended SUSPENDED)': SUSPENDED is t while nothing of the
+merge's work runs."
   (let ((object (agent-repl-wire--object "RosterMergeQueueHeadMerging" value)))
-    (agent-repl-wire--check-keys "RosterMergeQueueHeadMerging" object '(step suspended))
+    (agent-repl-wire--check-keys "RosterMergeQueueHeadMerging" object '(suspended))
     (agent-repl-wire--decoded
      "RosterMergeQueueHeadMerging"
-     (list :step (agent-repl-wire--decode-optional-string "RosterMergeQueueHeadMerging" 'step object)
-           :suspended (and (agent-repl-wire--present-p object 'suspended)
+     (list :suspended (and (agent-repl-wire--present-p object 'suspended)
                            (progn (agent-repl-wire--decode-empty
                                    "RosterMergeQueueHeadSuspended" (agent-repl-wire--raw object 'suspended))
                                   t))))))

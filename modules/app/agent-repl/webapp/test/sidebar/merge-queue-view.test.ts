@@ -17,10 +17,8 @@ import {
 import {
   RosterMergeQueueHeadSchema,
   RosterMergeQueuePausedSchema,
-  RosterMergeQueueRemediatingConflictsSchema,
   RosterMergeQueueRemediatingReasonSchema,
   RosterMergeQueueRemediatingSchema,
-  RosterMergeQueueRemediatingTestsSchema,
   RosterMergeQueueStageSchema,
   RosterRepoMergeQueueSchema,
 } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
@@ -39,6 +37,7 @@ import {
   MERGE_QUEUE_CLASS,
   MERGE_QUEUE_HEAD_CLASS,
   MERGE_QUEUE_PAUSED_ATTRIBUTE,
+  MERGE_QUEUE_REASON_CLASS,
   MERGE_QUEUE_REMEDIATING_CLASS,
   MERGE_QUEUE_SUSPENDED_ATTRIBUTE,
   MERGE_QUEUE_WAITING_CLASS,
@@ -53,13 +52,16 @@ import { drawRosterMergeQueueSection } from "../../src/sidebar/roster.js";
 import { BUCKET_ATTRIBUTE } from "../../src/sidebar/subsections.js";
 import {
   appContext,
+  conflictsReason,
   fakeTicker,
   mergeQueueBand,
   mergingHead,
   NOW,
   queueGroup,
   queueSubject,
+  remediatingMerge,
   sidebarContext,
+  testsReason,
   waitingMerge,
 } from "./harness.js";
 
@@ -299,7 +301,7 @@ describe("drawRosterMergeQueue", () => {
     expect([body.querySelector(`.${MERGE_QUEUE_HEAD_CLASS}`), body.querySelectorAll(`.${MERGE_QUEUE_REMEDIATING_CLASS}`).length]).toEqual([null, 1]);
   });
 
-  it("says a remediating merge is remediating and ticks its clock from when it stepped aside", () => {
+  it("draws a remediating merge on one line: its name, what it repairs, then its clock from when it stepped aside", () => {
     const ticker = fakeTicker(NOW);
     const sc = sidebarContext(appContext({}, ticker));
     const body = drawRosterMergeQueue(
@@ -310,25 +312,29 @@ describe("drawRosterMergeQueue", () => {
       sc,
       "queue",
     );
-    const card = body.querySelector(`.${MERGE_QUEUE_REMEDIATING_CLASS}`);
-    expect([card?.querySelector(".sb-mq-detail")?.textContent, card?.querySelector(".sb-mq-clock")?.textContent]).toEqual([
-      "remediating tests",
-      formatTickedElapsed(4_000),
+    const card = body.querySelector(`.${MERGE_QUEUE_REMEDIATING_CLASS}`)!;
+    expect([...card.children].map((line) => [...line.children].map((el) => [el.className, el.textContent]))).toEqual([
+      [
+        ["sb-mq-glyph", MERGE_GLYPH],
+        ["sb-mq-name", "w2"],
+        [MERGE_QUEUE_REASON_CLASS, "(fixing tests)"],
+        ["sb-mq-clock", formatTickedElapsed(4_000)],
+      ],
     ]);
   });
 
   it.each([
-    ["its failing tests", testsReason(), "remediating tests"],
-    ["its rebase's conflicts", conflictsReason(), "resolving conflicts"],
-    ["a reason this build does not name", create(RosterMergeQueueRemediatingReasonSchema, {}), "remediating"],
-  ])("says what a remediating merge repairs: %s", (_name, reason, want) => {
+    ["its failing tests", testsReason(), "(fixing tests)"],
+    ["its rebase's conflicts", conflictsReason(), "(resolving conflicts)"],
+    ["a reason this build does not name", create(RosterMergeQueueRemediatingReasonSchema, {}), undefined],
+  ])("says what a remediating merge repairs after its name: %s", (_name, reason, want) => {
     const { sc } = daemon();
     const body = drawRosterMergeQueue(
       create(RosterRepoMergeQueueSchema, { head: mergingHead("w1"), remediating: [remediatingMerge("w2", NOW, reason)] }),
       sc,
       "queue",
     );
-    expect(body.querySelector(`.${MERGE_QUEUE_REMEDIATING_CLASS} .sb-mq-detail`)?.textContent).toBe(want);
+    expect(body.querySelector(`.${MERGE_QUEUE_REMEDIATING_CLASS} .${MERGE_QUEUE_REASON_CLASS}`)?.textContent).toBe(want);
   });
 
   it("refuses a remediating merge that carries no reason as malformed", () => {
@@ -349,15 +355,6 @@ describe("drawRosterMergeQueue", () => {
     ]);
   });
 
-  it.each([
-    { name: "paused", pause: paused(), want: "paused" },
-    { name: "stopped", pause: paused({ hard: true }), want: "stopped" },
-  ])("says a $name queue's waiting head is $name", ({ pause, want }) => {
-    const { sc } = daemon();
-    const head = create(RosterMergeQueueHeadSchema, { subject: queueSubject("w1"), standing: { case: "waiting", value: { queuedAtMs: BigInt(NOW) } } });
-    const body = drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { head, paused: pause }), sc, "queue");
-    expect(body.querySelector(".sb-mq-detail")?.textContent).toBe(want);
-  });
 });
 
 describe("dragging a waiting merge", () => {
@@ -447,25 +444,24 @@ describe("drawRosterMergeQueueHead", () => {
   });
 
   it.each([
-    { name: "a merging head draws its step", head: () => mergingHead("w1", { step: "rebasing 3/7" }), paused: false, want: "rebasing 3/7" },
-    { name: "a merging head on a paused queue says so after its step", head: () => mergingHead("w1", { step: "testing" }), paused: true, want: "testing · paused" },
-    { name: "a merging head with no step on a paused queue says paused", head: () => mergingHead("w1"), paused: true, want: "paused" },
+    { name: "a merging head", head: () => mergingHead("w1", { stages: [stage("queue", "succeeded"), stage("tests", "live")] }), pause: undefined, want: ["sb-mq-head-line", "sb-mq-stages"] },
+    { name: "a merging head on a paused queue", head: () => mergingHead("w1", { stages: [stage("tests", "live")] }), pause: paused(), want: ["sb-mq-head-line", "sb-mq-stages"] },
+    { name: "a merging head on a stopped queue", head: () => mergingHead("w1", { stages: [stage("tests", "live")] }), pause: paused({ hard: true }), want: ["sb-mq-head-line", "sb-mq-stages"] },
     {
-      name: "a waiting head says it is next",
+      name: "a waiting head",
       head: () => create(RosterMergeQueueHeadSchema, { subject: queueSubject("w1"), standing: { case: "waiting", value: { queuedAtMs: BigInt(NOW) } } }),
-      paused: false,
-      want: "next",
+      pause: undefined,
+      want: ["sb-mq-head-line"],
     },
-  ])("$name", ({ head, paused: isPaused, want }) => {
+    {
+      name: "a waiting head on a paused queue",
+      head: () => create(RosterMergeQueueHeadSchema, { subject: queueSubject("w1"), standing: { case: "waiting", value: { queuedAtMs: BigInt(NOW) } } }),
+      pause: paused(),
+      want: ["sb-mq-head-line"],
+    },
+  ])("draws no status line under $name: its card is its name line and its stages", ({ head, pause, want }) => {
     const { sc } = daemon();
-    expect(drawRosterMergeQueueHead(head(), isPaused ? paused() : undefined, sc, "head").querySelector(".sb-mq-detail")?.textContent).toBe(want);
-  });
-
-  it("says a merging head on a stopped queue is stopped", () => {
-    const { sc } = daemon();
-    expect(drawRosterMergeQueueHead(mergingHead("w1", { step: "deploying" }), paused({ hard: true }), sc, "head").querySelector(".sb-mq-detail")?.textContent).toBe(
-      "deploying · stopped",
-    );
+    expect([...drawRosterMergeQueueHead(head(), pause, sc, "head").children].map((el) => el.className)).toEqual(want);
   });
 
   it.each([
@@ -489,11 +485,6 @@ describe("drawRosterMergeQueueHead", () => {
     const { sc } = daemon();
     const head = mergingHead("w1", { stages: [stage("tests", "live", 1, BigInt(NOW - 5_000))] });
     expect(drawRosterMergeQueueHead(head, create(RosterMergeQueuePausedSchema, {}), sc, "head").querySelector(".sb-mq-clock")).toBeNull();
-  });
-
-  it("draws no detail line for a merging head with no step", () => {
-    const { sc } = daemon();
-    expect(drawRosterMergeQueueHead(mergingHead("w1"), undefined, sc, "head").querySelector(".sb-mq-detail")).toBeNull();
   });
 
   it.each([
@@ -653,22 +644,3 @@ describe("a click on a merge in the queue", () => {
     expect(asked.map((r) => [r.$typeName, r.workspace?.id])).toEqual([["agentrepl.v1.SelectInEditorRequest", "w2"]]);
   });
 });
-
-/** A merge remediating out of line, stepped aside at SINCE for REASON (its tests by default). */
-function remediatingMerge(ws: string, since: number, reason = testsReason()) {
-  return create(RosterMergeQueueRemediatingSchema, { subject: queueSubject(ws), sinceMs: BigInt(since), reason });
-}
-
-/** The reason of a merge fixing its failing tests. */
-function testsReason() {
-  return create(RosterMergeQueueRemediatingReasonSchema, {
-    reason: { case: "tests", value: create(RosterMergeQueueRemediatingTestsSchema, {}) },
-  });
-}
-
-/** The reason of a merge resolving its rebase's conflicts. */
-function conflictsReason() {
-  return create(RosterMergeQueueRemediatingReasonSchema, {
-    reason: { case: "conflicts", value: create(RosterMergeQueueRemediatingConflictsSchema, {}) },
-  });
-}

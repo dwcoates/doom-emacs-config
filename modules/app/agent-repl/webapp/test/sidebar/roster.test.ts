@@ -63,13 +63,14 @@ import {
   hiddenSection,
   manualReveal,
   mergedBand,
-  mergeQueueBand,
   mergedGroup,
   mergedSection,
+  mergeQueueBand,
   mergingHead,
   NOW,
   openSection,
   queueGroup,
+  remediatingMerge,
   repoSection,
   roster,
   row,
@@ -2000,9 +2001,11 @@ describe("the Merge Queue section's queues", () => {
     { name: "indents a waiting merge's name under the head's", selector: ".sb-mq-waiting", property: "padding-left", want: "var(--mq-list-indent)" },
     { name: "draws the head's card in the foreground colour", selector: ".sb-mq-head", property: "color", want: "var(--fg)" },
     { name: "names the head's merge in the open repository names' ink", selector: ".sb-mq-head .sb-mq-name", property: "color", want: "var(--repo-head-expanded)" },
+    { name: "draws a remediating merge's reason in the rail's secondary grey", selector: ".sb-mq-remediating .sb-mq-reason", property: "color", want: "var(--muted)" },
+    { name: "never truncates a remediating merge's reason: its name gives way", selector: ".sb-mq-remediating .sb-mq-reason", property: "flex", want: "0 0 auto" },
   ])("$name", ({ selector, property, want }) => {
     const drawn = drawWorkspaceRoster(
-      withQueues([queueGroup({ id: "a", queue: { head: mergingHead("w1"), waiting: [waitingMerge("w2")] } })]),
+      withQueues([queueGroup({ id: "a", queue: { head: mergingHead("w1"), remediating: [remediatingMerge("w3", NOW)], waiting: [waitingMerge("w2")] } })]),
       sidebarContext(),
     );
     expect(inRail(drawn, () => cascadedValue(drawn.querySelector(selector)!, property))).toBe(want);
@@ -2024,14 +2027,15 @@ describe("the Merge Queue section's queues", () => {
   it("redraws a queue whose head the push changed", () => {
     // Arrange
     const drawer = createRosterDrawer(sidebarContext());
-    const at = (step: string) => withQueues([queueGroup({ id: "a", queue: { head: mergingHead("w1", { step }) } })]);
-    drawer.draw(at("rebasing 1/2"));
+    const at = (label: string) =>
+      withQueues([queueGroup({ id: "a", queue: { head: mergingHead("w1", { stages: [{ label, round: 1, state: { case: "live", value: { startedAtMs: 1n } } }] }) } })]);
+    drawer.draw(at("rebasing"));
 
     // Act
-    const drawn = drawer.draw(at("testing"));
+    const drawn = drawer.draw(at("tests"));
 
     // Assert
-    expect(drawn.querySelector(".merge-queue-section .sb-mq-detail")?.textContent).toBe("testing");
+    expect(drawn.querySelector(".merge-queue-section .sb-mq-stage-label")?.textContent).toBe("tests");
   });
 
   it.each([

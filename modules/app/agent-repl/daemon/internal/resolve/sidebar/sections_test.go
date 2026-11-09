@@ -1443,14 +1443,10 @@ func TestTheHeadStatesItsStanding(t *testing.T) {
 		admitted bool
 		facts    *footer.MergeFacts
 		want     string
-		wantStep *string
 	}{
 		{name: "a front not yet admitted waits", want: "waiting"},
-		{name: "an admitted front with no step yet merges with no step", admitted: true, want: "merging"},
-		{name: "a rebasing front states its replay", admitted: true, facts: &footer.MergeFacts{State: "merging", Step: footer.StepRebasing, Replayed: 3, Total: 7}, want: "merging", wantStep: ptr("rebasing 3/7")},
-		{name: "a fixing front states its attempt", admitted: true, facts: &footer.MergeFacts{State: "merging", Step: footer.StepFixing, Attempt: 2, MaxAttempts: 3}, want: "merging", wantStep: ptr("fixing attempt 2/3")},
-		{name: "a testing front states its step", admitted: true, facts: &footer.MergeFacts{State: "merging", Step: footer.StepTesting}, want: "merging", wantStep: ptr("testing")},
-		{name: "facts of no merge in flight state no step", admitted: true, facts: &footer.MergeFacts{State: "failed", Step: footer.StepTesting}, want: "merging"},
+		{name: "an admitted front merges", admitted: true, want: "merging"},
+		{name: "an admitted front merges without naming the step its facts stand on", admitted: true, facts: &footer.MergeFacts{State: "merging", Step: footer.StepRebasing, Replayed: 3, Total: 7}, want: "merging"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1473,12 +1469,8 @@ func TestTheHeadStatesItsStanding(t *testing.T) {
 					t.Fatalf("head = %v, want waiting since %d", head, queued.UnixMilli())
 				}
 			case "merging":
-				merging := head.GetMerging()
-				if merging == nil {
-					t.Fatalf("head = %v, want merging", head)
-				}
-				if (merging.Step == nil) != (tt.wantStep == nil) || (tt.wantStep != nil && merging.GetStep() != *tt.wantStep) {
-					t.Fatalf("step = %v, want %v", merging.Step, tt.wantStep)
+				if merging := head.GetMerging(); merging == nil || !proto.Equal(merging, &frontendv1.RosterMergeQueueHeadMerging{}) {
+					t.Fatalf("head = %v, want merging with nothing suspended", head)
 				}
 			}
 		})

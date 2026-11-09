@@ -301,10 +301,11 @@ function moveInLine(sc: SidebarContext, workspace: WorkspaceRef, place: UpdateMe
  * The head's card: a small merge bubble. Its head line is the merge glyph, the
  * credited workspace's name and how long it has run or waited -- stopped at
  * the pause while its queue is PAUSED, and not drawn for a pause whose
- * instant was not recorded; then its stages so far; then where it stands:
- * its step, or that it waits, and that its queue is paused or stopped. A
- * head nothing of whose work runs is marked suspended, and the stylesheet
- * stills its live stage.
+ * instant was not recorded; then its stages so far. IT DRAWS NO STATUS LINE
+ * (owner request, 2026-11-09): the stage strip already names the step it
+ * stands on, and a pause is drawn on the group's label. A head nothing of
+ * whose work runs is marked suspended, and the stylesheet stills its live
+ * stage.
  */
 export function drawRosterMergeQueueHead(
   u: RosterMergeQueueHead,
@@ -333,9 +334,6 @@ export function drawRosterMergeQueueHead(
     card.appendChild(strip);
   }
 
-  const detail = document.createElement("div");
-  detail.className = "sb-mq-detail";
-  const pauseWord = paused === undefined ? undefined : paused.hard ? "stopped" : "paused";
   const clock = (startedMs: number): void => {
     const drawn = drawHeadClock(sc, startedMs, paused, `${path}.paused`);
     if (drawn !== null) line.appendChild(drawn);
@@ -345,22 +343,16 @@ export function drawRosterMergeQueueHead(
   // rebased in the background and waited hours in line reads zero here.
   clock(msOf(u.headSinceMs, `${path}.head_since_ms`));
   switch (standing.case) {
-    case "waiting": {
-      detail.textContent = pauseWord ?? "next";
+    case "waiting":
       break;
-    }
-    case "merging": {
-      detail.textContent = standing.value.step ?? "";
-      if (pauseWord !== undefined) detail.append(detail.textContent === "" ? pauseWord : ` · ${pauseWord}`);
+    case "merging":
       card.toggleAttribute(MERGE_QUEUE_SUSPENDED_ATTRIBUTE, standing.value.suspended !== undefined);
       break;
-    }
     default: {
       const other: { case: string } = standing;
       return unreachableArm(`${path}.standing`, other.case);
     }
   }
-  if (detail.textContent !== "") card.appendChild(detail);
   return card;
 }
 
@@ -401,13 +393,17 @@ export function drawRosterMergeQueueStage(u: RosterMergeQueueStage, path: string
   return el;
 }
 
+/** The class of a remediating merge's parenthetical: what it repairs, in grey after its name. */
+export const MERGE_QUEUE_REASON_CLASS = "sb-mq-reason";
+
 /**
  * THE SECOND SPOT (owner rulings, 2026-10-31 and 2026-11-03): one merge that
  * stepped aside to repair out of line -- its failing tests, or its rebase's
  * conflicts. Drawn under the head as a smaller, quieter card than the head's
- * -- the merge glyph, its name, how long it has remediated -- and above the
- * merges waiting, with a line beneath saying what it repairs. A click
- * reveals its merge bubble, as the head's does.
+ * and above the merges waiting, on ONE LINE (owner request, 2026-11-09): the
+ * merge glyph, its name, what it repairs as a grey parenthetical after the
+ * name, and how long it has remediated. A click reveals its merge bubble, as
+ * the head's does.
  */
 export function drawRosterMergeQueueRemediating(u: RosterMergeQueueRemediating, sc: SidebarContext, path: string): HTMLElement {
   const subject = requireMessage(u.subject, `${path}.subject`);
@@ -418,27 +414,33 @@ export function drawRosterMergeQueueRemediating(u: RosterMergeQueueRemediating, 
   glyph.className = "sb-mq-glyph";
   glyph.setAttribute("aria-hidden", "true");
   glyph.textContent = MERGE_GLYPH;
-  line.append(glyph, drawSubjectName(subject, `${path}.subject`), drawClock(sc, msOf(u.sinceMs, `${path}.since_ms`)));
-  const detail = document.createElement("div");
-  detail.className = "sb-mq-detail";
-  detail.textContent = remediatingDetail(requireMessage(u.reason, `${path}.reason`));
-  card.append(line, detail);
+  line.append(glyph, drawSubjectName(subject, `${path}.subject`));
+  const words = remediatingWords(requireMessage(u.reason, `${path}.reason`));
+  if (words !== null) {
+    const reason = document.createElement("span");
+    reason.className = MERGE_QUEUE_REASON_CLASS;
+    reason.textContent = `(${words})`;
+    line.appendChild(reason);
+  }
+  line.appendChild(drawClock(sc, msOf(u.sinceMs, `${path}.since_ms`)));
+  card.appendChild(line);
   return card;
 }
 
 /**
- * The line beneath a remediating merge's name: what its turn out of line
- * repairs. A reason this build does not name is drawn as a bare
- * "remediating", per frontend.v1.RosterMergeQueueRemediating.reason.
+ * What a remediating merge's turn out of line repairs, in the words its
+ * parenthetical draws (owner request, 2026-11-09). A reason this build does
+ * not name draws no parenthetical (null), per
+ * frontend.v1.RosterMergeQueueRemediating.reason.
  */
-export function remediatingDetail(reason: RosterMergeQueueRemediatingReason): string {
+export function remediatingWords(reason: RosterMergeQueueRemediatingReason): string | null {
   switch (reason.reason.case) {
     case "tests":
-      return "remediating tests";
+      return "fixing tests";
     case "conflicts":
       return "resolving conflicts";
     default:
-      return "remediating";
+      return null;
   }
 }
 

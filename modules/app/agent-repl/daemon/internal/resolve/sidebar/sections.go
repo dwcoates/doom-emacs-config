@@ -11,7 +11,6 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/repodivergence"
-	"agent-repld/internal/resolve/footer"
 	"agent-repld/internal/wsm"
 )
 
@@ -140,9 +139,6 @@ func (r *resolver) drawMergeQueue(q repoQueue, log dlog.Logger) *frontendv1.Rost
 		head := &frontendv1.RosterMergeQueueHead{Subject: sub, Stages: front.Stages, HeadSinceMs: front.SlotSince.UnixMilli()}
 		if front.Admitted {
 			merging := &frontendv1.RosterMergeQueueHeadMerging{}
-			if words, ok := mergeStepWords(r.mergeFacts(front.Workspace)); ok {
-				merging.Step = &words
-			}
 			if r.headSuspended(q, front.Workspace) {
 				merging.Suspended = &frontendv1.RosterMergeQueueHeadSuspended{}
 			}
@@ -211,32 +207,6 @@ func queueSubject(credited wsm.Workspace, entry QueueEntry) *frontendv1.RosterMe
 		mode.Mode = &frontendv1.RosterMergeQueueMode_Async{Async: &frontendv1.RosterMergeQueueModeAsync{}}
 	}
 	return &frontendv1.RosterMergeQueueSubject{Workspace: credited.Ref(), Name: credited.Name, Reveal: entry.Reveal, Mode: mode}
-}
-
-// mergeFacts answers the merge facts the roster holds for WS, the zero facts
-// when it holds none.
-func (r *resolver) mergeFacts(ws ids.WorkspaceID) footer.MergeFacts {
-	if s, ok := r.state.workspaces[ws]; ok {
-		return s.merge
-	}
-	return footer.MergeFacts{}
-}
-
-// mergeStepWords is the step a merge being worked on stands on and its
-// figure, in the footer's plain words ("rebasing 3/7", "fixing attempt
-// 2/3"), and false when FACTS name no step of a merge being worked on.
-func mergeStepWords(facts footer.MergeFacts) (string, bool) {
-	if facts.State != "merging" || facts.Step == "" {
-		return "", false
-	}
-	words := facts.Step.Words()
-	switch facts.Step {
-	case footer.StepRebasing:
-		words += fmt.Sprintf(" %d/%d", facts.Replayed, facts.Total)
-	case footer.StepFixing:
-		words += fmt.Sprintf(" attempt %d/%d", facts.Attempt, facts.MaxAttempts)
-	}
-	return words, true
 }
 
 // workspacesByID indexes the registry's workspaces by id.

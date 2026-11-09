@@ -1834,7 +1834,7 @@ A hand-rolled list decoder would skip the shared helper and fail here."
                        #'agent-repl-wire-decode-roster-merge-queue-section
                        (concat
                         "{\"header\":{\"label\":{\"text\":\"Merge Queue\"}},\"expanded\":{}"
-                        (format ",\"groups\":[{\"key\":{\"repository\":{\"id\":\"r1\",\"dir\":\"/src\"}},\"header\":{\"label\":{\"text\":\"doom\"}},\"queue\":{\"head\":{\"subject\":%s,\"stages\":[{\"label\":\"queue\",\"round\":1,\"live\":{\"startedAtMs\":\"5\"}}],\"merging\":{\"step\":\"testing\",\"suspended\":{}}},\"waiting\":[{\"subject\":%s,\"queuedAtMs\":\"9\",\"placedAtFront\":true}],\"paused\":{\"pausedAtMs\":\"7\",\"by\":{\"workspace\":{\"name\":\"doom\"}},\"hard\":true}}}]"
+                        (format ",\"groups\":[{\"key\":{\"repository\":{\"id\":\"r1\",\"dir\":\"/src\"}},\"header\":{\"label\":{\"text\":\"doom\"}},\"queue\":{\"head\":{\"subject\":%s,\"stages\":[{\"label\":\"queue\",\"round\":1,\"live\":{\"startedAtMs\":\"5\"}}],\"merging\":{\"suspended\":{}}},\"waiting\":[{\"subject\":%s,\"queuedAtMs\":\"9\",\"placedAtFront\":true}],\"paused\":{\"pausedAtMs\":\"7\",\"by\":{\"workspace\":{\"name\":\"doom\"}},\"hard\":true}}}]"
                                 agent-repl-test-wire-roster--subject agent-repl-test-wire-roster--subject)
                         "}"))
                       :groups)))
@@ -1852,7 +1852,7 @@ A hand-rolled list decoder would skip the shared helper and fail here."
                          (plist-get (car (plist-get queue :waiting)) :placed-at-front)
                          (plist-get queue :paused))
                    '((:id "r1" :dir "/src") (:text "doom") "one" :async "b1" "queue" (:started-at-ms 5)
-                     (:arm :merging :value (:step "testing" :suspended t)) 9 t
+                     (:arm :merging :value (:suspended t)) 9 t
                      (:paused-at-ms 7 :by (:arm :workspace :value "doom") :hard t))))))
 
 (ert-deftest agent-repl-test-wire-roster-merge-queue-waiting-decodes-its-racing-slot ()
