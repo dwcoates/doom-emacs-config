@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -56,11 +57,17 @@ func TestADeployOfWhatAlreadyRunsDecidesEveryComponentUpToDate(t *testing.T) {
 	outcomes := deployOutcomes(t, d, false)
 
 	// Assert
-	for _, component := range []agentreplv1.DeployComponent{
+	components := []agentreplv1.DeployComponent{
 		agentreplv1.DeployComponent_DEPLOY_COMPONENT_STORE, agentreplv1.DeployComponent_DEPLOY_COMPONENT_SIDECAR,
 		agentreplv1.DeployComponent_DEPLOY_COMPONENT_ELISP, agentreplv1.DeployComponent_DEPLOY_COMPONENT_DAEMON,
 		agentreplv1.DeployComponent_DEPLOY_COMPONENT_SHIM, agentreplv1.DeployComponent_DEPLOY_COMPONENT_WEBAPP,
-	} {
+	}
+	// On macOS the attached (fake) Zettel app reports the build the deploy
+	// stages, so it too is up to date and nothing kickstarts it.
+	if runtime.GOOS == "darwin" {
+		components = append(components, agentreplv1.DeployComponent_DEPLOY_COMPONENT_NOTIFIER)
+	}
+	for _, component := range components {
 		o := outcomes[component]
 		if o.GetUpToDate() == nil || o.GetBuild() == "" {
 			t.Fatalf("%s = %v, want up to date and naming the fresh build", component, o)
