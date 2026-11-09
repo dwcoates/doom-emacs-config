@@ -3,6 +3,8 @@ package server
 import (
 	"context"
 	"errors"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -432,5 +434,51 @@ func TestFindWorkspacesFailsAndRecordsAnUnreadableRoster(t *testing.T) {
 				t.Fatalf("ERROR record = %v (%v), want cause %q", rec.Context, ok, tt.cause)
 			}
 		})
+	}
+}
+
+func TestRegisteredRefAnswersTheRecordARefNames(t *testing.T) {
+	tests := []struct {
+		name   string
+		ref    *workspacev1.WorkspaceRef
+		wantOK bool
+	}{
+		{name: "an id the registry holds, no dir", ref: &workspacev1.WorkspaceRef{Id: "ws-1"}, wantOK: true},
+		{name: "an id and its own dir", ref: &workspacev1.WorkspaceRef{Id: "ws-1", Dir: "/src/one"}, wantOK: true},
+		{name: "an id the registry does not hold", ref: &workspacev1.WorkspaceRef{Id: "ws-gone"}, wantOK: false},
+		{name: "a dir that disagrees with the id's", ref: &workspacev1.WorkspaceRef{Id: "ws-1", Dir: "/src/other"}, wantOK: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			byID := map[wsm.WorkspaceID]wsm.Workspace{"ws-1": {ID: "ws-1", Dir: "/src/one"}}
+
+			// Act
+			got, ok := registeredRef(byID, tt.ref)
+
+			// Assert
+			if ok != tt.wantOK || (ok && got.ID != "ws-1") || (!ok && got.ID != "") {
+				t.Fatalf("registeredRef = %+v, %v; want ok %v", got, ok, tt.wantOK)
+			}
+		})
+	}
+}
+
+// BOTH REF CRITERIA RESOLVE THROUGH registeredRef: a handler that resolves
+// created_by or caller by hand fails here.
+func TestFindWorkspacesResolvesEveryWorkspaceRefThroughRegisteredRef(t *testing.T) {
+	// Arrange
+	src, err := os.ReadFile("findworkspaces.go")
+	if err != nil {
+		t.Fatalf("read the handler: %v", err)
+	}
+
+	// Act
+	calls := strings.Count(string(src), "registeredRef(byID, ref)")
+	byHand := strings.Count(string(src), "byID[wsm.WorkspaceID(ref.GetId())]")
+
+	// Assert
+	if calls != 2 || byHand != 1 {
+		t.Fatalf("registeredRef calls = %d, hand lookups = %d; want both refs through the helper and its own one lookup", calls, byHand)
 	}
 }

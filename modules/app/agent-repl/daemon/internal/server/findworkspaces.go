@@ -51,8 +51,8 @@ func (s *server) FindWorkspaces(
 		byID[ws.ID] = ws
 	}
 	if ref := req.Msg.CreatedBy; ref != nil {
-		creator, ok := byID[wsm.WorkspaceID(ref.GetId())]
-		if !ok || (ref.GetDir() != "" && ref.GetDir() != creator.Dir) {
+		creator, ok := registeredRef(byID, ref)
+		if !ok {
 			return answer(resp, s.refuse(s.log, rpc, resp, s.fill(refusal{
 				Arm: "unknown_creator", Reason: fmt.Sprintf("no registered workspace is named by id %q dir %q", ref.GetId(), ref.GetDir()), Info: true,
 			})))
@@ -61,8 +61,8 @@ func (s *server) FindWorkspaces(
 	}
 	var caller *wsm.WorkspaceID
 	if ref := req.Msg.Caller; ref != nil {
-		record, ok := byID[wsm.WorkspaceID(ref.GetId())]
-		if !ok || (ref.GetDir() != "" && ref.GetDir() != record.Dir) {
+		record, ok := registeredRef(byID, ref)
+		if !ok {
 			return answer(resp, s.refuse(s.log, rpc, resp, s.fill(refusal{
 				Arm: "unknown_caller", Reason: fmt.Sprintf("no registered workspace is named by id %q dir %q", ref.GetId(), ref.GetDir()), Info: true,
 			})))
@@ -102,6 +102,17 @@ func (s *server) FindWorkspaces(
 		"on_roster": query.OnRoster, "caller": req.Msg.GetCaller().GetId(), "roster_revision": roster.GetRevision()})
 	resp.Result = &agentreplv1.FindWorkspacesResponse_Success{Success: success}
 	return connect.NewResponse(resp), nil
+}
+
+// registeredRef answers the record in BYID that REF names: its id held, and
+// its dir, when REF states one, the record's own. A ref the registry does not
+// hold by both answers false, which the caller refuses with its own arm.
+func registeredRef(byID map[wsm.WorkspaceID]wsm.Workspace, ref *workspacev1.WorkspaceRef) (wsm.Workspace, bool) {
+	record, ok := byID[wsm.WorkspaceID(ref.GetId())]
+	if !ok || (ref.GetDir() != "" && ref.GetDir() != record.Dir) {
+		return wsm.Workspace{}, false
+	}
+	return record, true
 }
 
 // validateFindWorkspacesRequest is FindWorkspacesRequest's base function.
