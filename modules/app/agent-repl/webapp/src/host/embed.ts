@@ -14,6 +14,7 @@ import { CONVERSATION_DRAWN_ATTRIBUTE } from "../feed/conversation-drawn.js";
 import { LEVEL_WINDOW_OPERATION, log } from "../log.js";
 import type { AppliedLevel, LevelWindow, WindowLevel } from "../../../agent-shim/logging/ts/level-window.js";
 import { BUBBLE_OVERLAY_ATTRIBUTE, closeStandingBubbleOverlay } from "../bubble/overlay.js";
+import { closeStandingImageOverlay } from "../image-overlay/image-overlay.js";
 import { closeStandingNewsDigest } from "../news-digest/news-digest.js";
 import type { PresenceSource } from "../presence.js";
 import { FOCUS_LEFT_EMACS, type FocusLeftSource } from "../focus-left.js";
@@ -135,10 +136,16 @@ export function connectToHost(env: EmbedEnv): HostLink | null {
         // Escape in Emacs's composer (or a sent prompt) closing the digest is
         // a person's action, recorded at INFO; a page with none standing has
         // nothing to record above DEBUG.
-        // The same escape closes a bubble expanded over the webapp.
+        // The same escape closes a bubble expanded over the webapp, and an image opened large over the feed.
         if (closeStandingBubbleOverlay(doc)) {
           log.info("escape in Emacs closed the standing bubble overlay", {
             operation: "page.host-dismissed-bubble-overlay",
+            context: {},
+          });
+        }
+        if (closeStandingImageOverlay(doc)) {
+          log.info("escape in Emacs closed the standing image overlay", {
+            operation: "page.host-dismissed-image-overlay",
             context: {},
           });
         }

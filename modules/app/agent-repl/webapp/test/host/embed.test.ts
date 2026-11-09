@@ -241,6 +241,45 @@ describe("commands", () => {
   });
 });
 
+describe("an image opened large over the feed", () => {
+  it("dismissDigest clicks a standing image overlay, which asks the daemon to close it", () => {
+    // Arrange
+    const overlay = pageDoc.createElement("div");
+    overlay.id = "image-overlay";
+    let clicked = false;
+    overlay.addEventListener("click", () => {
+      clicked = true;
+    });
+    pageDoc.body.append(overlay);
+
+    // Act
+    fromHost({ channel: HOST_CHANNEL, kind: "dismissDigest" });
+
+    // Assert
+    expect(clicked).toBe(true);
+    overlay.remove();
+  });
+
+  it("dismissDigest leaves a hidden image overlay alone", () => {
+    // Arrange
+    const overlay = pageDoc.createElement("div");
+    overlay.id = "image-overlay";
+    overlay.hidden = true;
+    let clicked = false;
+    overlay.addEventListener("click", () => {
+      clicked = true;
+    });
+    pageDoc.body.append(overlay);
+
+    // Act
+    fromHost({ channel: HOST_CHANNEL, kind: "dismissDigest" });
+
+    // Assert
+    expect(clicked).toBe(false);
+    overlay.remove();
+  });
+});
+
 describe("a bubble expanded over the webapp", () => {
   it("dismissDigest closes a standing bubble overlay", () => {
     // Arrange

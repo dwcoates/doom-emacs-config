@@ -4,7 +4,7 @@ import { create } from "@bufbuild/protobuf";
 import { FeedImageOverlaySchema } from "../../../proto/gen/ts/frontend/v1/feed_image_overlay_pb";
 import stylesheet from "../../src/styles.css?raw";
 import { IMAGE_MISSING_TEXT } from "../../src/feed/rows/blocks.js";
-import { IMAGE_OVERLAY_FRAME_CLASS, mountImageOverlay } from "../../src/image-overlay/image-overlay.js";
+import { closeStandingImageOverlay, IMAGE_OVERLAY_FRAME_CLASS, mountImageOverlay } from "../../src/image-overlay/image-overlay.js";
 import { isMalformedView } from "../../src/rpc/malformed.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 import { harness } from "../feed/harness.js";
@@ -177,5 +177,29 @@ describe("the image overlay's own rules in the stylesheet", () => {
       true,
       true,
     ]);
+  });
+});
+
+describe("closeStandingImageOverlay", () => {
+  it("asks the daemon to close a standing overlay and says so", async () => {
+    // Arrange
+    const { h, host, overlay } = mounted();
+    host.id = "image-overlay";
+    overlay.apply(opened());
+    // Act
+    const stood = closeStandingImageOverlay(document);
+    await vi.runAllTimersAsync();
+    // Assert
+    expect([stood, h.calls.closeFeedImage]).toEqual([true, expect.arrayContaining([expect.anything()])]);
+    overlay.dispose();
+  });
+
+  it("answers false when none stands", () => {
+    // Arrange
+    const { host, overlay } = mounted();
+    host.id = "image-overlay";
+    // Act + Assert
+    expect(closeStandingImageOverlay(document)).toBe(false);
+    overlay.dispose();
   });
 });

@@ -23,6 +23,9 @@ import type { AppContext } from "../rpc/context.js";
 import { guardMalformed } from "../rpc/guard.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 
+/** The id of the overlay's mount point (shell.ts `imageOverlay`). */
+export const IMAGE_OVERLAY_HOST_ID = "image-overlay";
+
 /** The class the overlay's frame wears: the box the image is drawn in. */
 export const IMAGE_OVERLAY_FRAME_CLASS = "image-overlay-frame";
 
@@ -117,4 +120,15 @@ export function mountImageOverlay(host: HTMLElement, ctx: AppContext, deps: Imag
       host.replaceChildren();
     },
   };
+}
+
+/**
+ * Close the page's standing image overlay, as Emacs's escape asks of it.
+ * Answers whether one stood. The one dismissal path is the overlay's own click.
+ */
+export function closeStandingImageOverlay(doc: Document): boolean {
+  const host = doc.getElementById(IMAGE_OVERLAY_HOST_ID);
+  if (host === null || host.hidden) return false;
+  host.click();
+  return true;
 }
