@@ -62,11 +62,9 @@ func (q *queue) SubmitSessionAct(ctx context.Context, ws ids.WorkspaceID, act Ac
 	// a session whose start had timed out held the workspace's one shim call
 	// with no end, and every stop and restart after it waited behind it.
 	cut := act.Kind == ActClear || act.Kind == ActCompact
-	if cut && q.deps.ColdGate != nil {
-		if detail, gated := q.deps.ColdGate(ws); gated {
-			refusalLevel(ctx, log, log.Info)(opAct, "the session is parked at its cold gate, so the context cut is refused by the gate's own name",
-				dlog.Context{"detail": detail})
-			return &ColdGateRefusal{Detail: detail}
+	if cut {
+		if err := q.refuseAtColdGate(ctx, ws, opAct, "the context cut", log); err != nil {
+			return err
 		}
 	}
 
@@ -134,12 +132,8 @@ func (q *queue) holdActForRevival(ctx context.Context, ws ids.WorkspaceID, act A
 		refusalLevel(ctx, log, log.Warn)(opAct, "the workspace has no session to act on and none can be started", nil)
 		return ErrNoSession
 	}
-	if q.deps.ColdGate != nil {
-		if detail, gated := q.deps.ColdGate(ws); gated {
-			refusalLevel(ctx, log, log.Info)(opAct, "the session is parked at its cold gate, so the act is refused by the gate's own name",
-				dlog.Context{"detail": detail})
-			return &ColdGateRefusal{Detail: detail}
-		}
+	if err := q.refuseAtColdGate(ctx, ws, opAct, "the act", log); err != nil {
+		return err
 	}
 	sub := heldActSubmission(ws, act)
 	cause, status := revivalSettings, footer.ActPrompt

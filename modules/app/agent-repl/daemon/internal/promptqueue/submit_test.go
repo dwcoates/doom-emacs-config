@@ -1660,3 +1660,65 @@ func TestEveryShimlessEntryWaitsThroughHoldAndRevive(t *testing.T) {
 		t.Fatalf("holdAndRevive call sites = %v, want %v", sites, want)
 	}
 }
+
+func TestRefuseAtColdGate(t *testing.T) {
+	const message = "the session is parked at its cold gate, so the act is refused by the gate's own name"
+	tests := []struct {
+		name      string
+		gate      string
+		noProbe   bool
+		redrive   bool
+		wantGate  bool
+		wantLevel string
+	}{
+		{name: "no gate stands", gate: ""},
+		{name: "no gate probe is wired", gate: "cold for 2h", noProbe: true},
+		{name: "a standing gate refuses by its name at info", gate: "cold for 2h", wantGate: true, wantLevel: "info"},
+		{name: "a re-driven refusal is debug", gate: "cold for 2h", redrive: true, wantGate: true, wantLevel: "debug"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.coldGate = tc.gate
+			if tc.noProbe {
+				h.q.deps.ColdGate = nil
+			}
+			ctx := context.Background()
+			if tc.redrive {
+				ctx = WithRedrive(ctx)
+			}
+			log, err := h.q.logger(ctx, theWorkspace)
+			if err != nil {
+				t.Fatalf("logger: %v", err)
+			}
+
+			// Act
+			err = h.q.refuseAtColdGate(ctx, theWorkspace, opAct, "the act", log)
+
+			// Assert
+			var gate *ColdGateRefusal
+			if gated := errors.As(err, &gate); gated != tc.wantGate {
+				t.Fatalf("refuseAtColdGate = %v, want a gate refusal %t", err, tc.wantGate)
+			}
+			if tc.wantGate && gate.Detail != tc.gate {
+				t.Fatalf("detail = %q, want %q", gate.Detail, tc.gate)
+			}
+			if tc.wantGate && !logged(h.log.Records(), tc.wantLevel, opAct, message) {
+				t.Fatalf("records = %+v, want %q at %s", h.log.Records(), message, tc.wantLevel)
+			}
+		})
+	}
+}
+
+// TestEveryColdGateRefusalGoesThroughRefuseAtColdGate pins that no entry
+// hand-rolls its own cold-gate refusal.
+func TestEveryColdGateRefusalGoesThroughRefuseAtColdGate(t *testing.T) {
+	// Act
+	sites := sourcescan.Sites(t, "&ColdGateRefusal{")
+
+	// Assert
+	if want := []string{"submit.go"}; !reflect.DeepEqual(sites, want) {
+		t.Fatalf("ColdGateRefusal construction sites = %v, want %v", sites, want)
+	}
+}

@@ -70,11 +70,9 @@ func (q *queue) Submit(ctx context.Context, sub Submission) (Disposition, error)
 	// refused: it falls through to the session wait below, which holds it
 	// under wsm.HoldColdGate, and the gate's answer settles it as it settles
 	// every prompt held there (gatefate.go).
-	if q.deps.ColdGate != nil && !waitsOutColdGate(sub.Origin) {
-		if detail, gated := q.deps.ColdGate(sub.WS); gated {
-			refusalLevel(ctx, log, log.Info)(opSubmit, "the session is parked at its cold gate, so the submission is refused by the gate's own name",
-				dlog.Context{"detail": detail})
-			return Disposition{}, &ColdGateRefusal{Detail: detail}
+	if !waitsOutColdGate(sub.Origin) {
+		if err := q.refuseAtColdGate(ctx, sub.WS, opSubmit, "the submission", log); err != nil {
+			return Disposition{}, err
 		}
 	}
 
@@ -374,6 +372,23 @@ func holderName(h wsm.LeaseHolder) string {
 	default:
 		return fmt.Sprintf("holder(%d)", h)
 	}
+}
+
+// refuseAtColdGate answers the refusal a standing cold gate gives WHAT (the
+// submission, the act) on WS, recorded under OP at INFO (DEBUG for a
+// re-drive), or nil when no gate stands. It is the one cold-gate refusal, so
+// every entry names the gate the same way.
+func (q *queue) refuseAtColdGate(ctx context.Context, ws ids.WorkspaceID, op, what string, log dlog.Logger) error {
+	if q.deps.ColdGate == nil {
+		return nil
+	}
+	detail, gated := q.deps.ColdGate(ws)
+	if !gated {
+		return nil
+	}
+	refusalLevel(ctx, log, log.Info)(op, "the session is parked at its cold gate, so "+what+" is refused by the gate's own name",
+		dlog.Context{"detail": detail})
+	return &ColdGateRefusal{Detail: detail}
 }
 
 // holdForRevival parks a submission whose workspace has no live session and
