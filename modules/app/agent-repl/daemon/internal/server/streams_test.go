@@ -20,6 +20,7 @@ import (
 	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
 	"agent-repld/internal/workspace"
 )
 
@@ -1588,5 +1589,88 @@ func TestEmacsHoldingALoadedPageLeavesABrokenWebHopBroken(t *testing.T) {
 	// Assert
 	if !edge.Web {
 		t.Fatalf("first edge after a loaded statement = %+v, want the not-loaded statement's: a loaded page published an edge", edge)
+	}
+}
+
+// TestParticipantHopsLockedAnswersTheStreamsAndTheirHops pins the one reading
+// of a workspace's participant set: the streams as held, and the web hop
+// awaited until a page that connected goes away.
+func TestParticipantHopsLockedAnswersTheStreamsAndTheirHops(t *testing.T) {
+	tests := []struct {
+		name    string
+		hostN   int
+		webN    int
+		webSeen bool
+		want    participantHops
+	}{
+		{name: "nothing held and no page seen", want: participantHops{webHop: true}},
+		{name: "the host alone, its page awaited", hostN: 1,
+			want: participantHops{hostStream: true, webHop: true}},
+		{name: "both held", hostN: 1, webN: 1, webSeen: true,
+			want: participantHops{hostStream: true, webStream: true, webHop: true}},
+		{name: "a page seen and gone", hostN: 1, webSeen: true,
+			want: participantHops{hostStream: true}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			s := &server{
+				hostHeld: map[ids.WorkspaceID]int{testWorkspaceID: tt.hostN},
+				webHeld:  map[ids.WorkspaceID]int{testWorkspaceID: tt.webN},
+				webSeen:  map[ids.WorkspaceID]bool{testWorkspaceID: tt.webSeen},
+			}
+
+			// Act.
+			got := s.participantHopsLocked(testWorkspaceID)
+
+			// Assert.
+			if got != tt.want {
+				t.Fatalf("participantHopsLocked = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestParticipantHopsFieldsCarryEveryStreamAndHop pins the record shape every
+// `daemon.server.participants` record shares, so a drawn status is traced to
+// its hop from the log alone.
+func TestParticipantHopsFieldsCarryEveryStreamAndHop(t *testing.T) {
+	// Arrange.
+	hops := participantHops{hostStream: true, webStream: false, webHop: true}
+
+	// Act.
+	got := hops.fields()
+
+	// Assert.
+	want := dlog.Context{"host_stream": true, "web_stream": false, "web_hop": true}
+	if !maps.Equal(got, want) {
+		t.Fatalf("fields = %v, want %v", got, want)
+	}
+}
+
+// TestEveryParticipantEdgeStatesItsHopsThroughOneShape pins the shared shape:
+// the hops are recorded only by participantHops.fields and stated to the
+// resolvers only by publishParticipants, so a hand-rolled site that reads the
+// held counts itself fails here rather than drawing its own connectivity.
+func TestEveryParticipantEdgeStatesItsHopsThroughOneShape(t *testing.T) {
+	tests := []struct {
+		name   string
+		substr string
+		want   []string
+	}{
+		{name: "the hop record", substr: `"web_hop":`, want: []string{"streams.go"}},
+		{name: "the footer's hops", substr: "Footer.SetParticipants(", want: []string{"streams.go"}},
+		{name: "the topbar's hops", substr: "Topbar.SetParticipants(", want: []string{"streams.go"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act.
+			sites := sourcescan.Sites(t, tt.substr)
+
+			// Assert.
+			if !slices.Equal(sites, tt.want) {
+				t.Fatalf("%q sites = %v, want %v; read the hops through participantHopsLocked", tt.substr, sites, tt.want)
+			}
+		})
 	}
 }

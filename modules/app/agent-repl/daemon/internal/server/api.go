@@ -964,12 +964,12 @@ func (s *server) RetractTransferred(ws ids.WorkspaceID) {
 	// from before the notice.
 	s.mu.Lock()
 	delete(s.movedAway, ws)
-	hostLive, webLive, webHop := s.participantHopsLocked(ws)
+	hops := s.participantHopsLocked(ws)
 	s.mu.Unlock()
-	s.log.Info("daemon.server.transfer_retracted", "withdrew the workspace's transfer notice; it is served here again",
-		dlog.Context{"workspace": string(ws), "host_retracted": host, "web_retracted": web,
-			"host_stream": hostLive, "web_stream": webLive, "web_hop": webHop})
-	s.publishParticipants(ws, hostLive, webHop)
+	fields := hops.fields()
+	fields["workspace"], fields["host_retracted"], fields["web_retracted"] = string(ws), host, web
+	s.log.Info("daemon.server.transfer_retracted", "withdrew the workspace's transfer notice; it is served here again", fields)
+	s.publishParticipants(ws, hops)
 }
 
 // Participants reports which of a workspace's two per-workspace streams are
