@@ -935,32 +935,32 @@ A pending create's identity, minted by the daemon and handed back as is."
     (list :id (agent-repl-wire-verbs--require-string
                message "id" (agent-repl-wire-verbs--decode-string message 'id json)))))
 
+(defun agent-repl-wire-verbs--decode-pending-create-arm (message json)
+  "Decode JSON as MESSAGE, a message whose one field names a pending create.
+Answers (:create REF), REF the decoded `PendingCreateRef'.  Every create
+arm that answers with a pending create, rather than a workspace, has this
+shape, and a missing ref is a breach."
+  (agent-repl-wire-verbs--check-keys message json '(create))
+  (list :create (agent-repl-wire-decode-pending-create-ref
+                 (agent-repl-wire-verbs--require message "create" (cdr (assq 'create json))))))
+
 (defun agent-repl-wire-decode-create-workspace-waiting-for-network (json)
   "Decode CreateWorkspaceWaitingForNetwork from JSON into (:create REF).
 The create is held until the network is restored: an answer, never a
 failure.  REF is the pending create's `PendingCreateRef'."
-  (let ((message "CreateWorkspaceWaitingForNetwork"))
-    (agent-repl-wire-verbs--check-keys message json '(create))
-    (list :create (agent-repl-wire-decode-pending-create-ref
-                   (agent-repl-wire-verbs--require message "create" (cdr (assq 'create json)))))))
+  (agent-repl-wire-verbs--decode-pending-create-arm "CreateWorkspaceWaitingForNetwork" json))
 
 (defun agent-repl-wire-decode-create-workspace-waiting-for-requester-turn (json)
   "Decode CreateWorkspaceWaitingForRequesterTurn from JSON into (:create REF).
 A workspace forked itself in its first turn, so the create is held until
 that turn ends: an answer, never a failure.  REF is the pending create's
 `PendingCreateRef'."
-  (let ((message "CreateWorkspaceWaitingForRequesterTurn"))
-    (agent-repl-wire-verbs--check-keys message json '(create))
-    (list :create (agent-repl-wire-decode-pending-create-ref
-                   (agent-repl-wire-verbs--require message "create" (cdr (assq 'create json)))))))
+  (agent-repl-wire-verbs--decode-pending-create-arm "CreateWorkspaceWaitingForRequesterTurn" json))
 
 (defun agent-repl-wire-decode-create-workspace-joined (json)
   "Decode CreateWorkspaceJoined from JSON into (:create REF).
 The request was identical to a pending create, which it joined."
-  (let ((message "CreateWorkspaceJoined"))
-    (agent-repl-wire-verbs--check-keys message json '(create))
-    (list :create (agent-repl-wire-decode-pending-create-ref
-                   (agent-repl-wire-verbs--require message "create" (cdr (assq 'create json)))))))
+  (agent-repl-wire-verbs--decode-pending-create-arm "CreateWorkspaceJoined" json))
 
 (defun agent-repl-wire-decode-create-workspace-accepted (json)
   "Decode CreateWorkspaceAccepted from JSON into (:op-id ID :joined J).

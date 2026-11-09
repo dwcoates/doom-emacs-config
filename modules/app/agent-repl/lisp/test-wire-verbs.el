@@ -490,6 +490,34 @@ THE ARM IS THE REFUSAL, so a bare error says nothing the caller can act on."
                    (agent-repl-test-wire-verbs--parse "{\"waitingForNetwork\":{}}"))
                   :type 'agent-repl-wire-error)))
 
+(ert-deftest agent-repl-test-wire-verbs-pending-create-arm-decodes-its-ref ()
+  "The shared pending-create arm decodes its one field into (:create REF)."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-verbs--decode-pending-create-arm
+                    "Held" (agent-repl-test-wire-verbs--parse "{\"create\":{\"id\":\"c\"}}"))
+                   '(:create (:id "c"))))))
+
+(ert-deftest agent-repl-test-wire-verbs-pending-create-arm-refuses-an-extra-key ()
+  "The shared pending-create arm refuses a field its message does not have."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-verbs--decode-pending-create-arm
+                   "Held" (agent-repl-test-wire-verbs--parse "{\"create\":{\"id\":\"c\"},\"x\":1}"))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-pending-create-arms-share-one-decoder ()
+  "Every create arm that answers a pending create decodes through the shared
+helper, so a hand-rolled divergent decoder fails here."
+  (agent-repl-test-wire-verbs--with-common
+    (dolist (decoder '(agent-repl-wire-decode-create-workspace-waiting-for-network
+                       agent-repl-wire-decode-create-workspace-waiting-for-requester-turn
+                       agent-repl-wire-decode-create-workspace-joined))
+      (let ((real (symbol-function 'agent-repl-wire-verbs--decode-pending-create-arm))
+            seen)
+        (cl-letf (((symbol-function 'agent-repl-wire-verbs--decode-pending-create-arm)
+                   (lambda (message json) (setq seen message) (funcall real message json))))
+          (funcall decoder (agent-repl-test-wire-verbs--parse "{\"create\":{\"id\":\"c\"}}")))
+        (should seen)))))
+
 (ert-deftest agent-repl-test-wire-verbs-pending-create-ref-without-an-id-is-a-breach ()
   "A pending ref with no id is no identity at all."
   (agent-repl-test-wire-verbs--with-common
