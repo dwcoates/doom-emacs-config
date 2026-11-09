@@ -281,17 +281,36 @@ it leaves `:pending'."
   "Return non-nil when ROW is CLOSED: no tab, whatever its lifecycle."
   (eq (plist-get (plist-get row :closed) :closed) t))
 
-(defun agent-repl-roster-open-workspace-names ()
-  "Return the name of every OPEN workspace the last accepted push carried.
-Open is every row not closed (`agent-repl-roster-row-closed-p'), hidden
-ones included, in no particular order.  The composer completes workspace
-names against it (workspace-completion.el)."
-  (let (names)
+(defun agent-repl-roster-row-repository-name (row)
+  "Return the name of the repository ROW's workspace belongs to, or nil.
+The daemon states it on every row (`frontend.v1.RosterRow.repository'),
+whichever list the row sits in.  Nil only for a workspace whose repository
+the daemon's registry does not carry, which the daemon logs."
+  (plist-get (plist-get row :repository) :name))
+
+(defun agent-repl-roster-open-workspaces ()
+  "Return every OPEN workspace the last accepted push carried, by name.
+Each element is (NAME . REPOSITORIES): REPOSITORIES are the names of the
+repositories the open workspaces called NAME belong to
+\(`agent-repl-roster-row-repository-name'), sorted and without repeats.
+Names collide across repositories, so one NAME may name several.  Open is
+every row not closed (`agent-repl-roster-row-closed-p'), hidden ones
+included, in no particular order.  The composer completes workspace names
+against it (workspace-completion.el)."
+  (let ((by-name (make-hash-table :test 'equal))
+        (out nil))
     (maphash (lambda (_id row)
-               (unless (agent-repl-roster-row-closed-p row)
-                 (push (agent-repl-roster-row-name row) names)))
+               (when-let* (((not (agent-repl-roster-row-closed-p row)))
+                           (name (agent-repl-roster-row-name row)))
+                 (let ((repositories (gethash name by-name)))
+                   (when-let* ((repository (agent-repl-roster-row-repository-name row)))
+                     (push repository repositories))
+                   (puthash name repositories by-name))))
              agent-repl-roster--rows-by-id)
-    (delete-dups (delq nil names))))
+    (maphash (lambda (name repositories)
+               (push (cons name (sort (delete-dups repositories) #'string<)) out))
+             by-name)
+    out))
 
 (defun agent-repl-roster-row-closed-by-user-at (row)
   "Return the epoch-ms instant the USER closed ROW, or nil.

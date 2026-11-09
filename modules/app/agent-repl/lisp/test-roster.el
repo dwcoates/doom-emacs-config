@@ -34,7 +34,7 @@ row's family, recorded through `agent-repl-test--with-family'),
 arm keyword), `:detached-live', `:one-shot'
 \(non-nil for a one-shot), `:async-merging' (non-nil while the branch
 merges async), `:current', `:dir', `:availability' (an arm keyword,
-default `:available')."
+default `:available'), `:repository' (the repository's name, default none)."
   (let ((dir (or (plist-get overrides :dir) (concat "/w/" id))))
     (agent-repl-test--with-family
      (list :workspace (list :workspace (list :id id :dir dir))
@@ -48,6 +48,8 @@ default `:available')."
           :availability (list :arm (or (plist-get overrides :availability) :available)
                               :value nil)
           :name (list :text name)
+          :repository (when-let* ((repository (plist-get overrides :repository)))
+                        (list :name repository))
           :status (list :arm status :value nil)
           :current (list :current (or (plist-get overrides :current) :false))
           :when (list :arm nil :value nil)
@@ -3992,24 +3994,50 @@ judged as any roster is."
        (puthash (agent-repl-roster-row-id row) row agent-repl-roster--rows-by-id))
      ,@body))
 
-(ert-deftest agent-repl-test-roster-open-workspace-names-answers-every-open-row ()
-  "Every row not closed is named, hidden or not."
+(ert-deftest agent-repl-test-roster-open-workspaces-answers-every-open-row ()
+  "Every row not closed is named, hidden or not, with its repository."
   (agent-repl-test-roster--with-rows
-      (list (agent-repl-test-roster--row "a" "alpha" :ready)
-            (agent-repl-test-roster--row "b" "beta" :thinking))
-    (should (equal (sort (agent-repl-roster-open-workspace-names) #'string<) '("alpha" "beta")))))
+      (list (agent-repl-test-roster--row "a" "alpha" :ready :repository "doom")
+            (agent-repl-test-roster--row "b" "beta" :thinking :repository "zettel"))
+    (should (equal (sort (agent-repl-roster-open-workspaces) (lambda (x y) (string< (car x) (car y))))
+                   '(("alpha" "doom") ("beta" "zettel"))))))
 
-(ert-deftest agent-repl-test-roster-open-workspace-names-leaves-out-a-closed-row ()
+(ert-deftest agent-repl-test-roster-open-workspaces-leaves-out-a-closed-row ()
   "A closed row's name is not an open workspace's."
   (agent-repl-test-roster--with-rows
-      (list (agent-repl-test-roster--row "a" "alpha" :ready)
-            (agent-repl-test-roster--row "b" "beta" :ready :closed t))
-    (should (equal (agent-repl-roster-open-workspace-names) '("alpha")))))
+      (list (agent-repl-test-roster--row "a" "alpha" :ready :repository "doom")
+            (agent-repl-test-roster--row "b" "beta" :ready :closed t :repository "doom"))
+    (should (equal (agent-repl-roster-open-workspaces) '(("alpha" "doom"))))))
 
-(ert-deftest agent-repl-test-roster-open-workspace-names-is-empty-before-any-push ()
-  "No push carried, no names."
+(ert-deftest agent-repl-test-roster-open-workspaces-joins-a-name-open-in-several-repositories ()
+  "One name open in two repositories is one entry naming both, sorted, once each."
+  (agent-repl-test-roster--with-rows
+      (list (agent-repl-test-roster--row "a" "fix" :ready :repository "zettel")
+            (agent-repl-test-roster--row "b" "fix" :ready :repository "doom")
+            (agent-repl-test-roster--row "c" "fix" :ready :repository "doom"))
+    (should (equal (agent-repl-roster-open-workspaces) '(("fix" "doom" "zettel"))))))
+
+(ert-deftest agent-repl-test-roster-open-workspaces-keeps-a-name-whose-repository-is-unstated ()
+  "A row the daemon states no repository for is still open, naming none."
+  (agent-repl-test-roster--with-rows
+      (list (agent-repl-test-roster--row "a" "alpha" :ready))
+    (should (equal (agent-repl-roster-open-workspaces) '(("alpha"))))))
+
+(ert-deftest agent-repl-test-roster-open-workspaces-is-empty-before-any-push ()
+  "No push carried, no workspaces."
   (agent-repl-test-roster--with-rows nil
-    (should-not (agent-repl-roster-open-workspace-names))))
+    (should-not (agent-repl-roster-open-workspaces))))
+
+(ert-deftest agent-repl-test-roster-row-repository-name-reads-the-row ()
+  "The accessor answers the name the row's repository carries."
+  (should (equal (agent-repl-roster-row-repository-name
+                  (agent-repl-test-roster--row "a" "alpha" :ready :repository "doom"))
+                 "doom")))
+
+(ert-deftest agent-repl-test-roster-row-repository-name-is-nil-when-unstated ()
+  "A row carrying no repository answers nil."
+  (should-not (agent-repl-roster-row-repository-name
+               (agent-repl-test-roster--row "a" "alpha" :ready))))
 ;;;; ---- Threads are workspaces off the bar ----
 
 (ert-deftest agent-repl-test-roster-reconcile-opens-a-thread-off-the-drawing ()
