@@ -54,6 +54,7 @@ import (
 	"agentrepl/testrun/internal/testtimes"
 	"agentrepl/testrun/reap"
 	"agentrepl/testrun/roster"
+	"agentrepl/testrun/seatwait"
 )
 
 func main() {
@@ -175,7 +176,14 @@ func runnerCmd(argv []string) int {
 		log.Errorf("resolve the module root %s: %v", args.Module, err)
 		return 1
 	}
-	parent, prefix, release := runParent(ctx, log, module, runner)
+	// THE RUN'S RANK orders both of the host's shares it waits for: its RAM
+	// disk's memory seat and its units' core seats (cores.Rank).
+	rank, err := cores.Rank(os.Getenv)
+	if err != nil {
+		log.Errorf("rank the run for the host's memory and cores: %v", err)
+		return runner.Finish(1, gone, func() error { return nil })
+	}
+	parent, prefix, release := runParent(ctx, log, module, runner, rank)
 	if ctx.Err() != nil {
 		// CUT BEFORE IT RAN: nothing is planned or run for a caller that is
 		// gone; Finish reaps, releases and says the run was cut.
@@ -186,7 +194,7 @@ func runnerCmd(argv []string) int {
 		log.Errorf("%v", err)
 		return runner.Finish(1, gone, release)
 	}
-	code := runRooted(ctx, log, args, self, histPath, parent, prefix, runner)
+	code := runRooted(ctx, log, args, self, histPath, parent, prefix, runner, rank)
 	return runner.Finish(code, gone, release)
 }
 
@@ -212,7 +220,7 @@ func wardenCmd(argv []string) int {
 
 // runRooted runs in a fresh temp root under parent and removes it after,
 // once every process of the run is reaped.
-func runRooted(ctx context.Context, log *run.Log, args cli.Args, self, histPath, parent string, prefix []string, runner *life.Runner) int {
+func runRooted(ctx context.Context, log *run.Log, args cli.Args, self, histPath, parent string, prefix []string, runner *life.Runner, rank int) int {
 	// THE RUN LIVES IN ITS OWN TEMP ROOT, and so does each unit under it
 	// (run.OSExec). TMPDIR moves to the root, so even planning's
 	// `go list`/`vitest list` write nothing in the user's temp directory.
@@ -225,7 +233,7 @@ func runRooted(ctx context.Context, log *run.Log, args cli.Args, self, histPath,
 		log.Errorf("%v", err)
 		return 1
 	}
-	code := runIn(ctx, log, args, self, histPath, root, prefix)
+	code := runIn(ctx, log, args, self, histPath, root, prefix, rank)
 	// NOTHING OF THE RUN OUTLIVES IT: a unit's leftover (a test daemon, its
 	// shim) dies here, and a root is never removed from under one.
 	if err := runner.ReapSession(); err != nil {
@@ -245,7 +253,7 @@ func runRooted(ctx context.Context, log *run.Log, args cli.Args, self, histPath,
 // roots make them in instead of /tmp. A leaked RAM disk or a disk manager that
 // does not answer puts the run on the disk and opens the one workspace that
 // investigates it.
-func runParent(ctx context.Context, log *run.Log, module string, runner *life.Runner) (string, []string, func() error) {
+func runParent(ctx context.Context, log *run.Log, module string, runner *life.Runner, rank int) (string, []string, func() error) {
 	disk := func() error { return nil }
 	if runtime.GOOS != "darwin" {
 		return run.DefaultTmpParent, nil, disk
@@ -253,6 +261,7 @@ func runParent(ctx context.Context, log *run.Log, module string, runner *life.Ru
 	m := ramdisk.Default(log)
 	m.Own = runner.Members()
 	m.Cut = ctx.Done()
+	m.Rank, m.Workspace = rank, os.Getenv(seatwait.EnvWorkspace)
 	m.Run = ramdisk.Timed(m.Run, func(call string, took time.Duration, err error) {
 		if err != nil {
 			log.Infof("ramdisk: %s failed after %s", call, took.Round(time.Millisecond))
@@ -328,7 +337,7 @@ func investigate(log *run.Log, m ramdisk.Manager, module string, trouble *ramdis
 	}
 }
 
-func runIn(ctx context.Context, log *run.Log, args cli.Args, self, histPath, root string, prefix []string) int {
+func runIn(ctx context.Context, log *run.Log, args cli.Args, self, histPath, root string, prefix []string, rank int) int {
 	// THE PUSH'S TARGET LEAVES THE ENVIRONMENT before any unit starts, so a
 	// test that runs testrun again never pushes into the owner's store.
 	metricsTarget, err := testtimes.TakeTarget()
@@ -364,11 +373,6 @@ func runIn(ctx context.Context, log *run.Log, args cli.Args, self, histPath, roo
 	slots, err := cores.Budget(runtime.NumCPU())
 	if err != nil {
 		log.Errorf("size the run: %v", err)
-		return 1
-	}
-	rank, err := cores.Rank(os.Getenv)
-	if err != nil {
-		log.Errorf("rank the run for the host's cores: %v", err)
 		return 1
 	}
 	if err := os.Setenv(cores.NestedEnv, strconv.Itoa(os.Getpid())); err != nil {

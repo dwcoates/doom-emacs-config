@@ -214,7 +214,9 @@ func newManager(t *testing.T, h *fakeHost) Manager {
 		Log:       &fakeLog{},
 		Now:       tickingClock(),
 		LockBound: 10 * time.Second,
-		Memory:    func() (uint64, error) { return 64 << 30, nil },
+		Memory:    func() (Memory, error) { return Memory{TotalBytes: 64 << 30, AvailableBytes: 64 << 30}, nil },
+		Recheck:   func() <-chan time.Time { return nil },
+		Rank:      19,
 	}
 }
 
@@ -1053,7 +1055,7 @@ func TestAcquireLogsItsEdgesWithTimings(t *testing.T) {
 	t.Cleanup(func() { v.Release() })
 	want := []string{
 		"INFO RAM disk acquire: begin at 2026-10-12T00:00:01.000Z, 16 MiB",
-		"INFO RAM disk seat: took seat 0 of 512",
+		"INFO RAM disk seat: took seat 0 of 1706; holders=[pid 4242]; available=65536MiB wired=16MiB ceiling=27306MiB floor=10240MiB rank=19",
 		"INFO RAM disk acquire: /dev/disk9 mounted at " + h.mount + " in 3s (attach 1s, format 1s, mount 1s)",
 	}
 	if strings.Join(log.lines, "\n") != strings.Join(want, "\n") {

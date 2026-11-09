@@ -329,3 +329,58 @@ func TestParseHolder(t *testing.T) {
 		})
 	}
 }
+
+func TestACutTakerStopsWaitingAndTakesNoSeat(t *testing.T) {
+	cases := []struct {
+		name string
+		// n is the pool's size; the other run holds seat 0.
+		n int
+		// refuse makes the check refuse the free seat.
+		refuse bool
+		// outranked puts a better-ranked taker in its lane.
+		outranked bool
+		want      Why
+	}{
+		{name: "behind a full pool", n: 1, want: Full},
+		{name: "refused for the check", n: 2, refuse: true, want: Refused},
+		{name: "behind a better rank", n: 2, outranked: true, want: Outranked},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			p := Pool{Dir: t.TempDir(), Prefix: "ram", N: tc.n, What: "test"}
+			other := admitted(t, p, runA)
+			defer other.Release()
+			if tc.outranked {
+				better, err := p.lock(p.lanePath(0), syscall.LOCK_SH)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer better.Close()
+			}
+			cut := make(chan struct{})
+			waits := make(chan Wait, 1)
+			a := Admission{
+				Me:      gate,
+				Check:   func([]Holder) (bool, error) { return !tc.refuse, nil },
+				Waiting: func(w Wait) error { waits <- w; return nil },
+				Recheck: func() <-chan time.Time { return nil },
+				Cut:     cut,
+			}
+
+			// Act
+			done := admitAsync(p, a)
+			w := <-waits
+			close(cut)
+			got := <-done
+
+			// Assert
+			if w.Why != tc.want {
+				t.Fatalf("the wait was %v, want %v", w.Why, tc.want)
+			}
+			if !errors.Is(got.err, ErrCut) || got.s != nil {
+				t.Fatalf("Admit = %v, %v; want the cut and no seat", got.s, got.err)
+			}
+		})
+	}
+}

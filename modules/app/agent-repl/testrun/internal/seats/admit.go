@@ -86,6 +86,9 @@ type Admission struct {
 	// Recheck answers a channel that fires when a refused taker should check
 	// again with no seat let go.
 	Recheck func() <-chan time.Time
+	// Cut closes once the taker's run is cut: its wait ends with ErrCut and
+	// it takes no seat. A nil Cut never closes.
+	Cut <-chan struct{}
 }
 
 // Seat is one admitted seat; Release gives it back.
@@ -149,23 +152,29 @@ func (p Pool) Admit(a Admission) (*Seat, error) {
 		if err := a.Waiting(wait); err != nil {
 			return nil, err
 		}
-		switch wait.Why {
-		case Outranked:
-			empty, err := p.lock(p.lanePath(above), syscall.LOCK_EX)
-			if err != nil {
-				return nil, err
+		// A CUT RUN STOPS WAITING (seats.ErrCut), whichever wait it is in.
+		if err := untilCut(a.Cut, p, func() error {
+			switch wait.Why {
+			case Outranked:
+				empty, err := p.lock(p.lanePath(above), syscall.LOCK_EX)
+				if err != nil {
+					return err
+				}
+				if err := empty.Close(); err != nil {
+					return fmt.Errorf("close the %s seats' lane %s: %w", p.What, p.lanePath(above), err)
+				}
+			case Full:
+				if err := w.untilLetGo(wait.at, nil); err != nil {
+					return err
+				}
+			case Refused:
+				if err := w.untilLetGo(wait.at, a.Recheck()); err != nil {
+					return err
+				}
 			}
-			if err := empty.Close(); err != nil {
-				return nil, fmt.Errorf("close the %s seats' lane %s: %w", p.What, p.lanePath(above), err)
-			}
-		case Full:
-			if err := w.untilLetGo(wait.at, nil); err != nil {
-				return nil, err
-			}
-		case Refused:
-			if err := w.untilLetGo(wait.at, a.Recheck()); err != nil {
-				return nil, err
-			}
+			return nil
+		}); err != nil {
+			return nil, err
 		}
 	}
 }
@@ -363,4 +372,18 @@ func (w *watcher) untilLetGo(held []int, recheck <-chan time.Time) error {
 	case <-recheck:
 	}
 	return nil
+}
+
+// untilCut runs wait, one of Admit's waits, answering what it answers, or
+// ErrCut as soon as cut closes. A wait abandoned to a cut runs on until what
+// it waits for comes, and then holds nothing: every lock it takes it lets go.
+func untilCut(cut <-chan struct{}, p Pool, wait func() error) error {
+	done := make(chan error, 1)
+	go func() { done <- wait() }()
+	select {
+	case err := <-done:
+		return err
+	case <-cut:
+		return fmt.Errorf("stop waiting for a %s seat in %s: %w", p.What, p.Dir, ErrCut)
+	}
 }
