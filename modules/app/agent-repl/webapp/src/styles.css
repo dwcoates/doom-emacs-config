@@ -1089,7 +1089,7 @@ body {
    2026-10-27): ever so slightly under the group header above it, and every
    waiting merge's name is the head's size (owner request, 2026-10-27). */
 #ws-sidebar .sb-mq-head .sb-mq-name,
-#ws-sidebar .sb-mq-waiting .sb-mq-name { font-size: calc(var(--merged-group-head-font-size) * 0.96); }
+#ws-sidebar .sb-mq-waiting .sb-mq-name { font-size: var(--mq-name-font-size); }
 /* A WAITING MERGE'S LINE AND A RECENTLY MERGED ROW START AT ONE INDENT
    (owner request, 2026-11-01): a merged row's name stands where a waiting
    merge's bullet does, so the two sections' lists read alike. */
@@ -1468,6 +1468,7 @@ html.dragging * { -webkit-user-select: none; user-select: none; }
   /* The repository group header's text size, which the queue's head name is
      held just under. */
   --merged-group-head-font-size: 0.68rem;
+  --mq-name-font-size: calc(var(--merged-group-head-font-size) * 0.96);
 }
 /* A REPOSITORY'S GROUP inside Merge Queue or Recently Merged (owner
    requests, 2026-10-31 and 2026-11-01;
@@ -1600,8 +1601,12 @@ html.dragging * { -webkit-user-select: none; user-select: none; }
 #ws-sidebar .repo.merged-section .row .name.band-name {
   --name-rest: color-mix(in srgb, var(--repo-head-expanded) 70%, var(--repo-head-collapsed));
   color: var(--name-rest);
-  font-size: calc(var(--merged-group-head-font-size) * 0.96);
+  font-size: var(--mq-name-font-size);
 }
+/* THE DURATION ON THE RIGHT READS IN THE NAME'S SIZE (owner request,
+   2026-11-09), in a waiting merge's line and a merged row alike. */
+#ws-sidebar .sb-mq-waiting .sb-mq-clock,
+#ws-sidebar .repo.merged-section .row .when { font-size: var(--mq-name-font-size); }
 /* THE SPINNER UNDER A GROUP is the feed's loading spinner
    (src/sidebar/deploys-more.ts, src/feed/walk-control.ts), standing while the
    group has older merges still to load as the reader scrolls down to it. */
