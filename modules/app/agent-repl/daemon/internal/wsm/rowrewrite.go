@@ -5,7 +5,10 @@ import (
 	"database/sql"
 	"fmt"
 
+	frontendv1 "agentrepl/proto/frontend/v1"
+
 	"google.golang.org/protobuf/encoding/protowire"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
 	"agent-repld/internal/dlog"
@@ -90,6 +93,30 @@ func rewriteDurableRows(ctx context.Context, tx *sql.Tx, log dlog.Logger, done s
 	}
 	log.Info("daemon.wsm.open", done, dlog.Context{"rows": rewritten})
 	return nil
+}
+
+// editFeedRow decodes RAW as a stored frontend.v1.FeedRow, hands it to EDIT,
+// and re-encodes it when EDIT reports it changed the row, answering the bytes
+// and whether it did. A row EDIT left alone is answered as RAW, byte for byte,
+// so a step never rewrites a row it did not touch. It is the ONE decode and
+// re-encode every row rewrite runs on.
+func editFeedRow(raw []byte, edit func(row *frontendv1.FeedRow) (bool, error)) ([]byte, bool, error) {
+	row := &frontendv1.FeedRow{}
+	if err := proto.Unmarshal(raw, row); err != nil {
+		return nil, false, err
+	}
+	changed, err := edit(row)
+	if err != nil {
+		return nil, false, err
+	}
+	if !changed {
+		return raw, false, nil
+	}
+	out, err := proto.Marshal(row)
+	if err != nil {
+		return nil, false, err
+	}
+	return out, true, nil
 }
 
 // dropDurableRows deletes every stored row DROP answers true for, recording

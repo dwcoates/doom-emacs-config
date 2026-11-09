@@ -7,7 +7,6 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"google.golang.org/protobuf/encoding/protowire"
-	"google.golang.org/protobuf/proto"
 
 	"agent-repld/internal/dlog"
 )
@@ -35,21 +34,11 @@ func dropRetiredConflictSectionRows(ctx context.Context, tx *sql.Tx, log dlog.Lo
 // rebase commit tab carries the retired conflict section without it, and
 // reports whether it did.
 func dropRetiredConflictSection(raw []byte) ([]byte, bool, error) {
-	row := &frontendv1.FeedRow{}
-	if err := proto.Unmarshal(raw, row); err != nil {
-		return nil, false, err
-	}
-	commit := row.GetMergeTab().GetRebaseCommit()
-	if commit == nil {
-		return raw, false, nil
-	}
-	dropped, err := dropUnknown(commit.ProtoReflect(), retiredRebaseCommitConflictTag)
-	if err != nil || !dropped {
-		return raw, false, err
-	}
-	out, err := proto.Marshal(row)
-	if err != nil {
-		return nil, false, err
-	}
-	return out, true, nil
+	return editFeedRow(raw, func(row *frontendv1.FeedRow) (bool, error) {
+		commit := row.GetMergeTab().GetRebaseCommit()
+		if commit == nil {
+			return false, nil
+		}
+		return dropUnknown(commit.ProtoReflect(), retiredRebaseCommitConflictTag)
+	})
 }

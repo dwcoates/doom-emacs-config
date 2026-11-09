@@ -7,7 +7,6 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"google.golang.org/protobuf/encoding/protowire"
-	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
 	"agent-repld/internal/dlog"
@@ -39,19 +38,9 @@ func rewriteParsedProseRows(ctx context.Context, tx *sql.Tx, log dlog.Logger) er
 // text blocks, wherever they sit in it, carry the retired raw text, and
 // reports whether it did.
 func rewriteRetiredTextBlocks(log dlog.Logger, raw []byte) ([]byte, bool, error) {
-	row := &frontendv1.FeedRow{}
-	if err := proto.Unmarshal(raw, row); err != nil {
-		return nil, false, err
-	}
-	changed, err := upgradeTextBlocks(log, row.ProtoReflect())
-	if err != nil || !changed {
-		return raw, false, err
-	}
-	out, err := proto.Marshal(row)
-	if err != nil {
-		return nil, false, err
-	}
-	return out, true, nil
+	return editFeedRow(raw, func(row *frontendv1.FeedRow) (bool, error) {
+		return upgradeTextBlocks(log, row.ProtoReflect())
+	})
 }
 
 // textBlockName is the message whose retired field the rewrite carries over.
