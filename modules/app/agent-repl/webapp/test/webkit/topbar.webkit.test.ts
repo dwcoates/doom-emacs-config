@@ -13,8 +13,10 @@
  * test reads the painted pixels at fractional placements and both screen
  * densities, and compares the glyph's horizontal centroid with the disc's.
  *
- * THE RIGHT-HAND CHIPS STAND ONE MEASURE APART, and the wifi chip is centered
- * between its neighbors by being one of them. Measured before the change:
+ * EVERY CHIP STANDS ONE MEASURE FROM THE NEXT, in the right group and in the
+ * left group's status run alike (owner request, 2026-11-09: the status chips
+ * moved left), and the wifi chip is centered between its neighbors by being
+ * one of them. Measured before the change:
  * 21.2px between most chips' text, 13px from the context figure to the wifi
  * disc and 21px from the disc to the warning chip.
  *
@@ -27,7 +29,7 @@ import { webkit, type Browser, type Page } from "playwright-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { bootPage, pageAssets } from "./boot-page";
 import { screenshotPixels } from "./pixels";
-import type { StripMeasure } from "./topbar-page";
+import type { CellMeasure, StripMeasure } from "./topbar-page";
 
 /**
  * The painted glyph may sit this far from the disc's center, in CSS px. The
@@ -39,9 +41,12 @@ const CENTERING_TOLERANCE_PX = 0.1;
 /** Fractional placements of the chip, in CSS px past a whole pixel. */
 const OFFSETS = [0, 0.25, 0.5, 0.75];
 
-/** The space between each right-hand cell's visible content and the next one's. */
-const spacings = (m: StripMeasure): number[] =>
-  m.cells.slice(1).map((cell, i) => Math.round((cell.left - (m.cells[i]?.right ?? Number.NaN)) * 100) / 100);
+/** The space between each chip's visible content and the next one's in RUN. */
+const runSpacings = (run: CellMeasure[]): number[] =>
+  run.slice(1).map((cell, i) => Math.round((cell.left - (run[i]?.right ?? Number.NaN)) * 100) / 100);
+
+/** The spacings of both chip runs: the right group's, then the status run's. */
+const spacings = (m: StripMeasure): number[] => [...runSpacings(m.cells), ...runSpacings(m.status)];
 
 /** The right group's spacing before the 2026-10-02 change, between text chips. */
 const OLD_SPACING_PX = 21.2;
@@ -109,7 +114,7 @@ describe.each([1, 2])("the topbar in WebKit at %ix", (dpr) => {
     expect(Math.abs(c.glyph - c.disc)).toBeLessThanOrEqual(CENTERING_TOLERANCE_PX);
   });
 
-  it.each([true, false])("stands every right-hand chip the same distance from the next (session %s)", async (session) => {
+  it.each([true, false])("stands every chip the same distance from the next (session %s)", async (session) => {
     // Arrange / Act
     const m = await rig.page.evaluate((s) => window.topbarPage.drawStrip(s), session);
 
@@ -119,15 +124,12 @@ describe.each([1, 2])("the topbar in WebKit at %ix", (dpr) => {
 
   it("draws one cell of every right-hand kind", async () => {
     const m = await rig.page.evaluate(() => window.topbarPage.drawStrip(true));
-    expect(m.cells.map((c) => c.cell)).toEqual([
-      "topbar-model",
-      "topbar-effort",
-      "topbar-mode",
-      "topbar-context",
-      "topbar-remote-control",
-      "topbar-wifi",
-      "topbar-warnings",
-    ]);
+    expect(m.cells.map((c) => c.cell)).toEqual(["topbar-model", "topbar-effort", "topbar-mode", "topbar-context"]);
+  });
+
+  it("draws one cell of every status kind in the left group", async () => {
+    const m = await rig.page.evaluate(() => window.topbarPage.drawStrip(true));
+    expect(m.status.map((c) => c.cell)).toEqual(["topbar-remote-control", "topbar-wifi", "topbar-warnings"]);
   });
 
   it("stands the right-hand chips 30% closer than before", async () => {
@@ -141,7 +143,7 @@ describe.each([1, 2])("the topbar in WebKit at %ix", (dpr) => {
   it("centers the wifi chip between the remote-control chip and the warning chip", async () => {
     // Arrange
     const m = await rig.page.evaluate(() => window.topbarPage.drawStrip(true));
-    const at = (name: string) => m.cells.find((c) => c.cell === name);
+    const at = (name: string) => m.status.find((c) => c.cell === name);
     const [remote, wifi, warnings] = [at("topbar-remote-control"), at("topbar-wifi"), at("topbar-warnings")];
 
     // Act
@@ -152,12 +154,14 @@ describe.each([1, 2])("the topbar in WebKit at %ix", (dpr) => {
     expect(before).toBeCloseTo(after, 2);
   });
 
-  it("draws every right-hand cell's text at the account label's size", async () => {
+  it("draws every chip's text at the account label's size", async () => {
     // Arrange / Act
     const m = await rig.page.evaluate(() => window.topbarPage.drawStrip(true));
 
     // Assert
-    expect(new Set([m.accountFontSize, ...m.cells.map((c) => c.fontSize)])).toEqual(new Set([m.accountFontSize]));
+    expect(new Set([m.accountFontSize, ...[...m.cells, ...m.status].map((c) => c.fontSize)])).toEqual(
+      new Set([m.accountFontSize]),
+    );
   });
 
   it("draws the yellow context figure at the account label's size", async () => {
@@ -166,9 +170,8 @@ describe.each([1, 2])("the topbar in WebKit at %ix", (dpr) => {
   });
 
   // THE HEADING (owner ruling, 2026-10-17): the workspace's name sits on a
-  // line of its own below the summary, centered under the SUMMARY'S TEXT. The
-  // right group is far wider than the left, so a name centered on the strip
-  // would miss the summary's midpoint by a wide margin.
+  // line of its own below the summary, centered under the SUMMARY'S TEXT,
+  // whatever the two groups measure.
   it("centers the workspace name under the summary's text", async () => {
     // ACT
     const m = await rig.page.evaluate(() => window.topbarPage.drawStrip(true));
@@ -188,7 +191,7 @@ describe.each([1, 2])("the topbar in WebKit at %ix", (dpr) => {
   it("centers the heading on the strip although the groups differ in width", async () => {
     const m = await rig.page.evaluate(() => window.topbarPage.drawStrip(true));
     const mid = (b: { left: number; right: number }): number => (b.left + b.right) / 2;
-    expect([m.right.right - m.right.left > m.left.right - m.left.left, Math.abs(mid(m.title!) - mid(m.row)) <= 0.5]).toEqual([
+    expect([m.right.right - m.right.left !== m.left.right - m.left.left, Math.abs(mid(m.title!) - mid(m.row)) <= 0.5]).toEqual([
       true,
       true,
     ]);

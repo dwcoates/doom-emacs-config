@@ -1362,7 +1362,7 @@ describe("the detached-unmodeled detail", () => {
 describe("the strip's spacing", () => {
   /** The row as the mounted page has it, with the real stylesheet installed. */
   async function mountedRow(): Promise<Element> {
-    // A WIDE RIGHT GROUP AND A NARROW LEFT ONE: the asymmetry the owner saw.
+    // FLANK GROUPS OF UNEQUAL WIDTH: the asymmetry the owner saw.
     await withTopbar({
       title: "port the webapp",
       email: "d@e.io",
@@ -1454,16 +1454,50 @@ describe("the strip's spacing", () => {
     ]);
   });
 
-  it("lets the wide right group compress into its track", async () => {
+  it.each([".topbar-left", ".topbar-status", ".topbar-right"])("lets %s compress into its track", async (selector) => {
     // Arrange
     const teardown = installStylesheet();
     try {
       const row = await mountedRow();
-      const right = row.querySelector(".topbar-right");
-      if (!right) throw new Error("the topbar drew no right group");
+      const group = row.querySelector(selector);
+      if (!group) throw new Error(`the topbar drew no ${selector}`);
       // Act / Assert: without this the group spills out of its floorless
       // track and over the title.
-      expect(cascadedValue(right, "min-width")).toBe("0px");
+      expect(cascadedValue(group, "min-width")).toBe("0px");
+    } finally {
+      teardown();
+    }
+  });
+
+  // THE STATUS CHIPS RIDE THE LEFT (owner request, 2026-11-09), so the flank
+  // groups balance around the centered heading.
+  it("draws the status chips in the left group after the account cell", async () => {
+    const row = await mountedRow();
+    const kinds = [...(row.querySelector(".topbar-left")?.querySelectorAll(":scope > *, .topbar-status > *") ?? [])].map(
+      (el) => el.className.split(" ")[0],
+    );
+    expect(kinds).toEqual(["topbar-account-cell", "topbar-status", "topbar-remote-control", "topbar-wifi", "topbar-warnings"]);
+  });
+
+  it("leaves the model, effort, permission mode and context in the right group", async () => {
+    const row = await mountedRow();
+    const kinds = [...(row.querySelector(".topbar-right")?.children ?? [])].map((el) => el.className.split(" ")[0]);
+    expect(kinds).toEqual(["topbar-model", "topbar-effort", "topbar-mode", "topbar-context"]);
+  });
+
+  it("spaces both chip runs by one gap", async () => {
+    // Arrange
+    const teardown = installStylesheet();
+    try {
+      const row = await mountedRow();
+      // Act
+      const gaps = [".topbar-status", ".topbar-right"].map((selector) => {
+        const run = row.querySelector(selector);
+        if (!run) throw new Error(`the topbar drew no ${selector}`);
+        return cascadedValue(run, "gap");
+      });
+      // Assert: one gap, and a declared one.
+      expect([new Set(gaps).size, gaps[0] !== ""]).toEqual([1, true]);
     } finally {
       teardown();
     }

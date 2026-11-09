@@ -6,7 +6,7 @@ import { TopbarViewSchema, type TopbarView } from "../../../proto/gen/ts/fronten
 import { createControl } from "../../src/control.js";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import STYLESHEET from "../../src/styles.css?raw";
-import { drawTopbarView, mountTopbar } from "../../src/topbar/topbar.js";
+import { drawChipRun, drawTopbarView, mountTopbar } from "../../src/topbar/topbar.js";
 import { createLocalFailures, type LocalFailures } from "../../src/failure/local.js";
 import { pagePresence } from "../../src/presence.js";
 import type { AppContext } from "../../src/rpc/context.js";
@@ -76,6 +76,28 @@ function sessionlessView(reason: string, context = "0"): TopbarView {
   });
 }
 
+/** An element's first class: the cell's kind. */
+const firstClass = (el: Element): string => el.className.split(" ")[0] ?? "";
+
+/** The kinds of the cells directly inside ROW's SELECTOR, in order. */
+const childClasses = (row: Element, selector: string): string[] =>
+  [...(row.querySelector(selector)?.children ?? [])].map(firstClass);
+
+describe("drawChipRun", () => {
+  it("names the run by its own class and the shared chip-run class", () => {
+    expect(drawChipRun("topbar-status", []).className).toBe("topbar-status topbar-chips");
+  });
+
+  it("holds the chips it is given, in order", () => {
+    const [a, b] = [document.createElement("span"), document.createElement("i")];
+    expect([...drawChipRun("topbar-right", [a, b]).children]).toEqual([a, b]);
+  });
+
+  it("draws an empty run when given no chips", () => {
+    expect(drawChipRun("topbar-right", []).children.length).toBe(0);
+  });
+});
+
 describe("drawTopbarView", () => {
   it("draws the three groups", () => {
     const { tc } = topbarContext();
@@ -115,26 +137,38 @@ describe("drawTopbarView", () => {
     expect(openPanel(host)?.textContent).toBe("session abc");
   });
 
-  it("places the warning chip immediately right of the persistent-wifi chip", () => {
+  // THE STATUS CHIPS RIDE THE LEFT (owner request, 2026-11-09): after the
+  // account cell, the remote-control chip, the persistent-wifi chip, then the
+  // warning chip, which ends the run so its arrival moves no other chip.
+  it("draws the left group as the account cell and then the status run", () => {
+    const { tc } = topbarContext();
+    const left = drawTopbarView(view(), tc).querySelector(".topbar-left");
+    expect([...(left?.children ?? [])].map(firstClass)).toEqual(["topbar-account-cell", "topbar-status"]);
+  });
+
+  it("orders the status run remote control, persistent wifi, warnings", () => {
     const { tc } = topbarContext();
     const row = drawTopbarView(view({ warnings: sessionlessView("parked").warnings }), tc);
-    const right = [...(row.querySelector(".topbar-right")?.children ?? [])];
-    const at = (cls: string): number => right.findIndex((el) => el.classList.contains(cls));
-    expect(at("topbar-warnings")).toBe(at("topbar-wifi") + 1);
+    expect(childClasses(row, ".topbar-status")).toEqual(["topbar-remote-control", "topbar-wifi", "topbar-warnings"]);
   });
 
-  it("places the remote-control chip immediately left of the persistent-wifi chip", () => {
+  it("orders the right group model, effort, permission mode, context", () => {
     const { tc } = topbarContext();
-    const right = [...(drawTopbarView(view(), tc).querySelector(".topbar-right")?.children ?? [])];
-    const at = (cls: string): number => right.findIndex((el) => el.classList.contains(cls));
-    expect(at("topbar-remote-control")).toBe(at("topbar-wifi") - 1);
+    const row = drawTopbarView(view({ warnings: sessionlessView("parked").warnings }), tc);
+    expect(childClasses(row, ".topbar-right")).toEqual(["topbar-model", "topbar-effort", "topbar-mode", "topbar-context"]);
   });
 
-  it("places the remote-control chip right of the context chip", () => {
+  it("draws the status run without a warning chip while nothing is wrong", () => {
     const { tc } = topbarContext();
-    const right = [...(drawTopbarView(view(), tc).querySelector(".topbar-right")?.children ?? [])];
-    const at = (cls: string): number => right.findIndex((el) => el.classList.contains(cls));
-    expect(at("topbar-remote-control")).toBe(at("topbar-context") + 1);
+    expect(childClasses(drawTopbarView(view(), tc), ".topbar-status")).toEqual(["topbar-remote-control", "topbar-wifi"]);
+  });
+
+  // THE ONE SHAPE OF A CHIP RUN: every run the strip draws comes from
+  // `drawChipRun`, so each carries the class the stylesheet spaces chips by.
+  it("draws both chip runs as chip runs", () => {
+    const { tc } = topbarContext();
+    const row = drawTopbarView(view(), tc);
+    expect([...row.querySelectorAll(".topbar-chips")].map(firstClass)).toEqual(["topbar-status", "topbar-right"]);
   });
 
   it("draws the remote-control chip for a workspace with no session", () => {
@@ -181,9 +215,7 @@ describe("drawTopbarView", () => {
     // point of the fixed schema.
     const { tc } = topbarContext();
     const classOf = (v: TopbarView): string[] =>
-      [...(drawTopbarView(v, tc).querySelector(".topbar-right")?.children ?? [])].map((el) =>
-        el.className.split(" ")[0],
-      );
+      [...drawTopbarView(v, tc).querySelectorAll(".topbar-chips > *")].map(firstClass);
     const warned = view({
       warnings: create(TopbarViewSchema, {
         warnings: { warnings: [{ line: { text: "a" }, detail: { case: "accounting", value: { lines: [] } } }] },
@@ -507,11 +539,19 @@ describe("mountTopbar: the chip's client-local failures", () => {
     handle.dispose();
   });
 
-  it("draws the chip at the strip's right edge before any push", () => {
+  it("draws the chip in the left group's status run before any push", () => {
     const failures = createLocalFailures();
     const { host, handle } = mountUnwatched(failures);
     failures.report(staleBundle("drift"));
-    expect(host.querySelector(".topbar-row > .topbar-right > .topbar-warnings")).not.toBeNull();
+    expect(host.querySelector(".topbar-row > .topbar-left > .topbar-status > .topbar-warnings")).not.toBeNull();
+    handle.dispose();
+  });
+
+  it("draws the right group as an empty chip run before any push", () => {
+    const failures = createLocalFailures();
+    const { host, handle } = mountUnwatched(failures);
+    failures.report(staleBundle("drift"));
+    expect(host.querySelector(".topbar-row > .topbar-right.topbar-chips")?.children.length).toBe(0);
     handle.dispose();
   });
 
@@ -623,14 +663,20 @@ describe("the strip's layout", () => {
   // the cell gap, so the room the chips give back falls to the title.
   it("gaps the chips inside a flank with a tighter token than the row's frame", () => {
     // ARRANGE / ACT
-    const flanks = [declaration(".topbar-left", "gap"), declaration(".topbar-right", "gap")];
+    const flanks = [declaration(".topbar-left", "gap"), declaration(".topbar-chips", "gap")];
     const row = declaration(".topbar-row", "gap");
     // ASSERT
     expect([...flanks, row]).toEqual([
       "var(--topbar-chip-gap)",
-      "var(--topbar-right-chip-gap)",
+      "var(--topbar-chips-gap)",
       "var(--topbar-cell-gap)",
     ]);
+  });
+
+  // The chip runs are spaced by their shared class alone, so neither flank
+  // group may carry a chip gap of its own that would compete with it.
+  it("gaps the right group's chips from the chip run's rule alone", () => {
+    expect(withoutBlockComments(ruleBody(".topbar-right"))).not.toMatch(/(?:^|;|\n)\s*gap\s*:/);
   });
 
   // THE 2026-10-02 REQUEST: the right-hand chips "30% closer". The space a
@@ -640,21 +686,21 @@ describe("the strip's layout", () => {
     // ARRANGE
     const root = 16;
     // ACT
-    const spacing = (token("--topbar-right-chip-gap") + 2 * token("--topbar-right-chip-inset")) * root + 2;
+    const spacing = (token("--topbar-chips-gap") + 2 * token("--topbar-chips-inset")) * root + 2;
     // ASSERT
     expect(spacing).toBeLessThanOrEqual(21.2 * 0.7);
   });
 
   it("spaces the right-hand chips no closer than 30%", () => {
-    const spacing = (token("--topbar-right-chip-gap") + 2 * token("--topbar-right-chip-inset")) * 16 + 2;
+    const spacing = (token("--topbar-chips-gap") + 2 * token("--topbar-chips-inset")) * 16 + 2;
     expect(spacing).toBeGreaterThan(21.2 * 0.69);
   });
 
-  // ONE RULE FOR EVERY RIGHT-HAND CELL, keyed on the group: a button inside a
-  // control's wrap, or a cell that holds no button.
-  it("insets every right-hand cell from the group's one rule", () => {
-    expect(declaration(".topbar-right ar-button,\n.topbar-right > :not(:has(ar-button))", "padding-inline")).toBe(
-      "var(--topbar-right-chip-inset)",
+  // ONE RULE FOR EVERY CHIP, keyed on its run: a button inside a control's
+  // wrap, or a cell that holds no button.
+  it("insets every chip from the chip run's one rule", () => {
+    expect(declaration(".topbar-chips ar-button,\n.topbar-chips > :not(:has(ar-button))", "padding-inline")).toBe(
+      "var(--topbar-chips-inset)",
     );
   });
 
@@ -839,9 +885,7 @@ describe("the effort selector's place and form", () => {
       }).effortSelector,
     });
     // Act
-    const classes = [...(drawTopbarView(withEffort, tc).querySelector(".topbar-right")?.children ?? [])].map(
-      (el) => el.className.split(" ")[0],
-    );
+    const classes = childClasses(drawTopbarView(withEffort, tc), ".topbar-right");
     // Assert
     expect(classes.slice(classes.indexOf("topbar-model"), classes.indexOf("topbar-model") + 3)).toEqual([
       "topbar-model",
