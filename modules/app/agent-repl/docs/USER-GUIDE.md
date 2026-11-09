@@ -727,7 +727,7 @@ The top bar's effort selector sits between the model selector and the permission
   - Before the session first reports it, the selector shows the level your account's Claude `settings.json` (or `CLAUDE_CODE_EFFORT_LEVEL`) sets for the model.
   - It shows a dash only while nothing has stated a level yet.
 - **Clicking it lists the levels the session's model accepts; clicking a level switches to it.**
-  - The new level applies from the next turn on and holds for the rest of the session in this workspace, across hibernation.
+  - The new level applies from the next turn on and holds for the rest of the session in this workspace, across its session being parked and brought back.
   - Nothing is added to the feed for the switch.
   - Switching causes token cache misses, as switching the model does; both selectors say so on hover.
 - **A model that takes no effort level shows a dash and offers no list.**
@@ -738,7 +738,7 @@ The top bar's phone chip, just left of the wifi chip, makes the workspace's sess
 
 - **A green disc means on, a white disc means off.** Clicking the chip, or `SPC j C` in Emacs, turns it over. The chip pulses until the daemon answers.
 - **Main workspaces start on, every other workspace starts off.** Whatever you set is kept for that workspace, across restarts.
-- **While it is on, the workspace's session stays up between keep-alives.** It is not parked, so claude.ai always finds it. The workspace still hibernates once it has been idle for its cutoff, and is unreachable until something starts it again.
+- **While it is on, the workspace's session stays up between keep-alives.** It is not parked, so claude.ai always finds it. Once it has been idle for its cutoff (24 hours by default) its session is parked anyway, and it is unreachable until something starts it again.
 - **What you do on claude.ai lands here.**
   - A prompt typed there runs as a turn here and is drawn as a prompt you said.
   - A permission answered there closes the card here, marked as answered on claude.ai.

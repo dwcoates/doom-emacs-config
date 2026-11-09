@@ -97,14 +97,14 @@ id).
   in force on every vendor process it opens after that, and reattaches with the
   id it last learned.
 
-## Keep-alives and hibernation
+## Keep-alives and the idle cutoff
 
 A workspace in remote control keeps its shim up between keep-alives (owner
 ruling, 2026-10-31). Its beats go on as every workspace's do, but no beat is
 followed by the keep-alive cycle's park, and no settings visit stands it down.
 Since it is never parked, it never needs the restore before a beat. The idle
-cutoff still hibernates it as it does any workspace, and the bridge goes down
-with the shim. A workspace parked at its cold gate keeps its bridge (see "A
+sweep still parks it once it has been idle past the cutoff, as it does any
+workspace, and the bridge goes down with the shim. A workspace parked at its cold gate keeps its bridge (see "A
 parked workspace"). The mode is read when each stand-down is decided, so turning it
 off lets the next beat park the shim as usual. See `shim-lifecycle.md`,
 "Keep-alives".
