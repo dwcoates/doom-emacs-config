@@ -59,6 +59,12 @@ var (
 // Standalones is every standalone service, in the order a deploy reports them.
 var Standalones = []Standalone{Zettel, Tests}
 
+// restartWith is S's restart through services, in the one shape a deploy's
+// restartOnto and its rollbackRestart take.
+func (s Standalone) restartWith(services Services) func(context.Context) error {
+	return func(ctx context.Context) error { return services.RestartStandalone(ctx, s) }
+}
+
 const opServices = "daemon.deploy.services"
 
 // ServiceManager is the slice of the host's service manager a service restart

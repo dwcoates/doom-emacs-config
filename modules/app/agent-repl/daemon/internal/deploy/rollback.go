@@ -168,31 +168,17 @@ func (d *Deployer) rollback(ctx context.Context, p *previous, nonce string, caus
 			d.log.Info(opRollback, "restarted the store and the sidecar onto the restored build", nil)
 		}
 	case p.sidecar:
-		if err := d.deps.Services.RestartSidecar(ctx); err != nil {
-			d.log.Error(opRollback, "could not restart the sidecar onto the restored build", dlog.WithCause(nil, err))
-			fail(ComponentSidecar, "restart the sidecar", err)
-		} else {
-			d.log.Info(opRollback, "restarted the sidecar onto the restored build", nil)
-		}
+		d.rollbackRestart(ctx, ComponentSidecar, "the sidecar", d.deps.Services.RestartSidecar, fail)
 	}
 	for _, sv := range Standalones {
 		if !p.standalone[sv.Component] {
 			continue
 		}
-		if err := d.deps.Services.RestartStandalone(ctx, sv); err != nil {
-			d.log.Error(opRollback, "could not restart "+sv.Display+" onto the restored build", dlog.WithCause(nil, err))
-			fail(sv.Component, "restart "+sv.Display, err)
-		} else {
-			d.log.Info(opRollback, "restarted "+sv.Display+" onto the restored build", nil)
-		}
+		d.rollbackRestart(ctx, sv.Component, sv.Display,
+			sv.restartWith(d.deps.Services), fail)
 	}
 	if p.notifier {
-		if err := d.deps.Services.RestartNotifier(ctx); err != nil {
-			d.log.Error(opRollback, "could not restart the notifier app onto the restored build", dlog.WithCause(nil, err))
-			fail(ComponentNotifier, "restart the notifier app", err)
-		} else {
-			d.log.Info(opRollback, "restarted the notifier app onto the restored build", nil)
-		}
+		d.rollbackRestart(ctx, ComponentNotifier, "the notifier app", d.deps.Services.RestartNotifier, fail)
 	}
 	if len(failures) > 0 {
 		failed := &RollbackFailed{Component: first, Detail: strings.Join(failures, "; ")}
@@ -314,4 +300,17 @@ func treeFiles(root string) (map[string]struct{}, error) {
 		return nil
 	})
 	return out, err
+}
+
+// rollbackRestart restarts one service (named `what` in the record) onto the
+// restored build, handing a failure to fail: the one shape every single
+// service's rollback restart takes.
+func (d *Deployer) rollbackRestart(ctx context.Context, component Component, what string,
+	restart func(context.Context) error, fail func(Component, string, error)) {
+	if err := restart(ctx); err != nil {
+		d.log.Error(opRollback, "could not restart "+what+" onto the restored build", dlog.WithCause(nil, err))
+		fail(component, "restart "+what, err)
+		return
+	}
+	d.log.Info(opRollback, "restarted "+what+" onto the restored build", nil)
 }

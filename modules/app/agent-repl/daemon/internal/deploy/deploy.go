@@ -1127,18 +1127,12 @@ func (d *Deployer) services(ctx context.Context, fresh builds, prev *previous) (
 			"store_build": fresh.store, "sidecar_build": fresh.sidecar,
 		})
 	case sidecarStale:
-		d.progress(&deployprogress.Progress{Phase: deployprogress.RestartingServices,
-			Components: []deployprogress.Component{deployprogress.Sidecar}})
-		prev.sidecar = true
 		d.deps.HotReload.ServiceCurrent(hotreload.ServiceStore)
-		d.deps.HotReload.ServiceRestarting(hotreload.ServiceSidecar)
-		if err := d.deps.Services.RestartSidecar(ctx); err != nil {
-			d.log.Error(opDecide, "the sidecar restart failed", dlog.WithCause(dlog.Context{"component": string(ComponentSidecar)}, err))
-			return outcomes(), &ServiceRestartFailed{Component: ComponentSidecar, Detail: err.Error()}
+		if err := d.restartOnto(ctx, ComponentSidecar, "the sidecar", "the sidecar", deployprogress.Sidecar, func() { prev.sidecar = true },
+			d.deps.Services.RestartSidecar, dlog.Context{"sidecar_build": fresh.sidecar}); err != nil {
+			return outcomes(), err
 		}
 		sidecar.Kind = Restarted
-		d.deps.HotReload.ServiceRestarted(hotreload.ServiceSidecar)
-		d.log.Info(opDecide, "restarted the sidecar onto the fresh build", dlog.Context{"sidecar_build": fresh.sidecar})
 	default:
 		d.deps.HotReload.ServiceCurrent(hotreload.ServiceStore)
 		d.deps.HotReload.ServiceCurrent(hotreload.ServiceSidecar)
@@ -1149,17 +1143,13 @@ func (d *Deployer) services(ctx context.Context, fresh builds, prev *previous) (
 			d.deps.HotReload.ServiceCurrent(hotReloadService(sv.Component))
 			continue
 		}
-		d.progress(&deployprogress.Progress{Phase: deployprogress.RestartingServices,
-			Components: []deployprogress.Component{sv.Progress}})
-		prev.restartedStandalone(sv.Component)
-		d.deps.HotReload.ServiceRestarting(hotReloadService(sv.Component))
-		if err := d.deps.Services.RestartStandalone(ctx, sv); err != nil {
-			d.log.Error(opDecide, "the "+sv.Short+" restart failed", dlog.WithCause(dlog.Context{"component": string(sv.Component)}, err))
-			return outcomes(), &ServiceRestartFailed{Component: sv.Component, Detail: err.Error()}
+		if err := d.restartOnto(ctx, sv.Component, "the "+sv.Short, sv.Display, sv.Progress,
+			func() { prev.restartedStandalone(sv.Component) },
+			sv.restartWith(d.deps.Services),
+			dlog.Context{string(sv.Component) + "_build": build}); err != nil {
+			return outcomes(), err
 		}
 		standalone[i].Kind = Restarted
-		d.deps.HotReload.ServiceRestarted(hotReloadService(sv.Component))
-		d.log.Info(opDecide, "restarted "+sv.Display+" onto the fresh build", dlog.Context{string(sv.Component) + "_build": build})
 	}
 	if d.deps.Notifier == nil {
 		return outcomes(), nil
@@ -1175,20 +1165,35 @@ func (d *Deployer) services(ctx context.Context, fresh builds, prev *previous) (
 		d.deps.HotReload.ServiceCurrent(hotreload.ServiceNotifier)
 		return withNotifier(), nil
 	}
-	d.progress(&deployprogress.Progress{Phase: deployprogress.RestartingServices,
-		Components: []deployprogress.Component{deployprogress.Notifier}})
-	prev.notifier = true
-	d.deps.HotReload.ServiceRestarting(hotreload.ServiceNotifier)
-	if err := d.deps.Services.RestartNotifier(ctx); err != nil {
-		d.log.Error(opDecide, "the notifier app restart failed", dlog.WithCause(dlog.Context{"component": string(ComponentNotifier)}, err))
-		return withNotifier(), &ServiceRestartFailed{Component: ComponentNotifier, Detail: err.Error()}
+	if err := d.restartOnto(ctx, ComponentNotifier, "the notifier app", "the notifier app", deployprogress.Notifier, func() { prev.notifier = true },
+		d.deps.Services.RestartNotifier, dlog.Context{
+			"notifier_build": fresh.notifier, "was_attached": attached, "running_build": running,
+		}); err != nil {
+		return withNotifier(), err
 	}
 	notifier.Kind = Restarted
-	d.deps.HotReload.ServiceRestarted(hotreload.ServiceNotifier)
-	d.log.Info(opDecide, "restarted the notifier app onto the fresh build", dlog.Context{
-		"notifier_build": fresh.notifier, "was_attached": attached, "running_build": running,
-	})
 	return withNotifier(), nil
+}
+
+// restartOnto restarts one service onto the fresh build (named `failed` in
+// the failure record, "<failed> restart failed", and `what` in the success
+// record, "restarted <what> onto the fresh build"): it states the phase on the update line, records that the
+// deploy asked for the restart (ask, so a rollback restarts it too, even
+// after a failure), and answers a failure as the deploy's
+// ServiceRestartFailed. done is the success record's fields.
+func (d *Deployer) restartOnto(ctx context.Context, component Component, failed, what string, progress deployprogress.Component,
+	ask func(), restart func(context.Context) error, done dlog.Context) error {
+	d.progress(&deployprogress.Progress{Phase: deployprogress.RestartingServices,
+		Components: []deployprogress.Component{progress}})
+	ask()
+	d.deps.HotReload.ServiceRestarting(hotReloadService(component))
+	if err := restart(ctx); err != nil {
+		d.log.Error(opDecide, failed+" restart failed", dlog.WithCause(dlog.Context{"component": string(component)}, err))
+		return &ServiceRestartFailed{Component: component, Detail: err.Error()}
+	}
+	d.deps.HotReload.ServiceRestarted(hotReloadService(component))
+	d.log.Info(opDecide, "restarted "+what+" onto the fresh build", done)
+	return nil
 }
 
 // serviceStale reports whether the process launchd runs for a service is not
