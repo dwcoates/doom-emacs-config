@@ -6,8 +6,8 @@
 # agent-repld through the module's own launcher, and asserts on Emacs's own
 # buffers, windows, tab-bar, modeline and roster. See e2e/EMACS-LAYER-SPEC.md.
 #
-# The sandbox, its preflight and its decline (exit 77) are
-# bin/lib-sandbox-suite.sh's.
+# The sandbox, its preflight and its failure when the sandbox is unusable
+# are bin/lib-sandbox-suite.sh's.
 
 # Tests run only at background priority: re-exec once through bin/background.sh.
 [[ -n ${AGENT_REPL_BACKGROUND_PRIORITY:-} ]] || exec "$(dirname "${BASH_SOURCE[0]}")/background.sh" bash "${BASH_SOURCE[0]}" "$@"
