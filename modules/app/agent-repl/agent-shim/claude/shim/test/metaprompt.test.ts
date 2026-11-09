@@ -137,16 +137,18 @@ describe("this repository's committed metaprompt", () => {
     expect(text).toContain("without asking me any questions or for permission");
   });
 
-  it("ends every response tree with a summary branch holding a 3-5 node TLDR branch", () => {
+  it("ends every response tree with a summary branch holding a 3-5 node TLDR branch, followed only by the questions branch", () => {
     // Arrange
     const home = homeOnThisRepository();
     // Act
     const text = readMetaprompt(home);
     // Assert
     expect(text).toContain("Every response's tree ends with a summary section, rendered as its own root branch.");
-    expect(text).toContain("The summary branch is ALWAYS the LAST root branch of the tree");
+    expect(text).toContain("The summary branch is ALWAYS the root branch immediately before the questions branch");
+    expect(text).toContain("When the response has no questions branch, the summary branch is the LAST root branch of the tree.");
+    expect(text).toContain("The questions branch is ALWAYS the LAST root branch of the tree, after the summary branch.");
     expect(text).toContain("The TLDR branch holds no more than 3-5 nodes in total");
-    expect(text).toContain("immediately before the summary branch, the last root branch of the tree");
+    expect(text).toContain("it ALWAYS sits immediately before the summary branch.");
     expect(text).not.toContain("it is ALWAYS the LAST root branch of the tree.");
   });
 
