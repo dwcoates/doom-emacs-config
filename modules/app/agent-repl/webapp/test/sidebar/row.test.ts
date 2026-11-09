@@ -306,7 +306,7 @@ describe("the highlight and the receded styling", () => {
     expect(row).toMatch(/border-radius:\s*5px/);
   });
 
-  it("fills the current row's line midway from --card toward the rail", () => {
+  it("fills the current row's line midway from --card toward the rail, 4.4% brighter", () => {
     // Arrange / Act
     const declarations = currentRowDeclarations();
     const token = (name: string): string | undefined =>
@@ -318,7 +318,7 @@ describe("the highlight and the receded styling", () => {
     expect([
       declarations.some((d) => /background-color:\s*var\(--row-highlight-tint\)/.test(d)),
       token("--row-highlight-tint"),
-    ]).toEqual([true, "color-mix(in srgb, var(--card) 69%, var(--sidebar-base))"]);
+    ]).toEqual([true, "color-mix(in srgb, white 4.4%, color-mix(in srgb, var(--card) 69%, var(--sidebar-base)))"]);
   });
 
   it("paints the current row's tint through the cascade", () => {
