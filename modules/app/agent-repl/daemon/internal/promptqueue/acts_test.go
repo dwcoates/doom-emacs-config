@@ -3,12 +3,14 @@ package promptqueue
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"agent-repld/internal/bounce"
 	"agent-repld/internal/classifier"
+	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/resolve/footer"
 	"agent-repld/internal/shimlife"
@@ -290,19 +292,6 @@ func TestARefusedClearRetiresItsDivider(t *testing.T) {
 	// Assert
 	if got := h.feed.cutAbortedTurns(); len(got) != 1 || got[0] != "cut-1" {
 		t.Fatalf("cut-aborted = %v, want the optimistic divider retired", got)
-	}
-}
-
-func TestSubmitSessionActRefusesAWorkspaceWithNoSessionAndNoRevival(t *testing.T) {
-	// Arrange: with a revival wired, a pick with no shim starts one instead
-	// (TestAPickWithNoShimIsHeldAndStartsTheShim).
-	h := newHarnessWithoutRevival(t)
-	h.noSession = true
-	// Act
-	err := h.q.SubmitSessionAct(context.Background(), theWorkspace, Act{Kind: ActSetModel, Value: "opus"})
-	// Assert
-	if !errors.Is(err, ErrNoSession) {
-		t.Fatalf("err = %v, want ErrNoSession", err)
 	}
 }
 
@@ -620,7 +609,7 @@ func TestAContextCutBehindAnotherRunningTurnStillQueues(t *testing.T) {
 
 func TestSubmitSessionActRecordsAStandingRefusalAtItsLevelOrDebugForARedrive(t *testing.T) {
 	const (
-		noSession = "the workspace has no session to act on"
+		noSession = "the workspace has no session to act on and none can be started"
 		movedAway = "the workspace's move has sealed what it carries; the act is refused so it is asked of the daemon the workspace moves to"
 	)
 	tests := []struct {
@@ -639,6 +628,9 @@ func TestSubmitSessionActRecordsAStandingRefusalAtItsLevelOrDebugForARedrive(t *
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange
 			h := newHarness(t)
+			if !tc.sealed {
+				h = newHarnessWithoutRevival(t)
+			}
 			var transfer *gate
 			if tc.sealed {
 				busy(t, h)
@@ -733,18 +725,69 @@ func TestSubmitSessionActGatesAContextCutOnTheSession(t *testing.T) {
 	}
 }
 
-func TestAPickWithNoShimIsHeldAndStartsTheShim(t *testing.T) {
-	tests := []struct {
-		name string
-		act  Act
-		kind string
-	}{
-		{"a model pick", Act{Kind: ActSetModel, Value: "opus"}, wsm.ActModel},
-		{"a permission-mode pick", Act{Kind: ActSetPermissionMode, Value: "plan"}, wsm.ActPermissionMode},
+// noShimAct is one session-act kind sent to a workspace with no shim: the
+// act, the start cause its revival states, and how its delivery shows on the
+// fake sender once the session serves.
+type noShimAct struct {
+	act       Act
+	cause     shimlife.StartCause
+	delivered func(h *harness) bool
+}
+
+// noShimActs is every kind in actKinds, keyed by kind; TestNoShimActsCoverEveryActKind
+// pins that it names them all, so a kind added to the path cannot escape the
+// walks below.
+var noShimActs = map[string]noShimAct{
+	ActClear: {
+		act:   Act{Kind: ActClear, Turn: "act-1", Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT},
+		cause: shimlife.StartPrompt,
+		delivered: func(h *harness) bool {
+			started := h.sender.started()
+			return len(started) == 1 && started[0] == "act-1"
+		},
+	},
+	ActCompact: {
+		act:   Act{Kind: ActCompact, Turn: "act-1", Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT},
+		cause: shimlife.StartPrompt,
+		delivered: func(h *harness) bool {
+			started := h.sender.started()
+			return len(started) == 1 && started[0] == "act-1"
+		},
+	},
+	ActSetModel: {
+		act:       Act{Kind: ActSetModel, Value: "opus", Turn: "act-1"},
+		cause:     shimlife.StartSettings,
+		delivered: func(h *harness) bool { return slices.Equal(h.sender.models, []string{"opus"}) },
+	},
+	ActSetPermissionMode: {
+		act:       Act{Kind: ActSetPermissionMode, Value: "plan", Turn: "act-1"},
+		cause:     shimlife.StartSettings,
+		delivered: func(h *harness) bool { return slices.Equal(h.sender.modes, []string{"plan"}) },
+	},
+}
+
+func TestNoShimActsCoverEveryActKind(t *testing.T) {
+	for _, kind := range actKinds {
+		t.Run(kind, func(t *testing.T) {
+			// Act
+			_, ok := noShimActs[kind]
+
+			// Assert
+			if !ok {
+				t.Fatalf("noShimActs names no case for act kind %q", kind)
+			}
+		})
 	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
+}
+
+// A HIBERNATED SESSION IS IDLE, NOT DEAD, for every act kind (2026-11-09: a
+// /compact sent to a hibernated workspace was refused no_session and never
+// woke it).
+func TestAnActWithNoShimIsHeldAndStartsTheShim(t *testing.T) {
+	for _, kind := range actKinds {
+		t.Run(kind, func(t *testing.T) {
 			// Arrange
+			tc := noShimActs[kind]
 			h := newHarness(t)
 			h.noSession = true
 
@@ -756,13 +799,128 @@ func TestAPickWithNoShimIsHeldAndStartsTheShim(t *testing.T) {
 			if err != nil {
 				t.Fatalf("SubmitSessionAct: %v", err)
 			}
-			standing, _ := h.db.HeldPrompts(context.Background(), theWorkspace)
-			if len(standing) != 1 || standing[0].Act == nil || standing[0].Act.Kind != tc.kind ||
-				standing[0].Hold == nil || *standing[0].Hold != wsm.HoldReconnect {
-				t.Fatalf("standing = %+v, want the pick held under the reconnect hold", standing)
+			held := h.db.held["act-1"]
+			if held == nil || held.Hold == nil || *held.Hold != wsm.HoldReconnect {
+				t.Fatalf("held = %+v, want the act held under the reconnect hold", held)
 			}
-			if len(h.reviveCauses) != 1 || h.reviveCauses[0] != shimlife.StartSettings {
-				t.Fatalf("revival causes = %v, want one settings start", h.reviveCauses)
+			if !slices.Equal(h.reviveCauses, []shimlife.StartCause{tc.cause}) {
+				t.Fatalf("revival causes = %v, want one %v start", h.reviveCauses, tc.cause)
+			}
+		})
+	}
+}
+
+func TestAnActWithNoShimIsRecordedAtInfoNeverWarn(t *testing.T) {
+	for _, kind := range actKinds {
+		t.Run(kind, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.noSession = true
+			h.reviveHook = func() { h.noSession = false }
+
+			// Act
+			_ = h.q.SubmitSessionAct(context.Background(), theWorkspace, noShimActs[kind].act)
+			h.waitRevivals()
+
+			// Assert
+			if !logged(h.log.Records(), "info", opAct, "the workspace has no shim; the act is held and the shim started for it") {
+				t.Fatalf("records = %+v, want the hold recorded at info", h.log.Records())
+			}
+			if _, warned := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: "warn"}); warned {
+				t.Fatalf("records = %+v, want no warn", h.log.Records())
+			}
+		})
+	}
+}
+
+func TestAnActWithNoShimIsDeliveredOnceTheSessionServes(t *testing.T) {
+	for _, kind := range actKinds {
+		t.Run(kind, func(t *testing.T) {
+			// Arrange
+			tc := noShimActs[kind]
+			h := newHarness(t)
+			h.noSession = true
+			h.reviveHook = func() { h.noSession = false }
+
+			// Act
+			if err := h.q.SubmitSessionAct(context.Background(), theWorkspace, tc.act); err != nil {
+				t.Fatalf("SubmitSessionAct: %v", err)
+			}
+			h.waitRevivals()
+
+			// Assert
+			if !tc.delivered(h) {
+				t.Fatalf("turns %v, models %v, modes %v: want the %s act delivered", h.sender.started(), h.sender.models, h.sender.modes, kind)
+			}
+		})
+	}
+}
+
+func TestAnActWithNoShimAndNoRevivalIsRefused(t *testing.T) {
+	for _, kind := range actKinds {
+		t.Run(kind, func(t *testing.T) {
+			// Arrange
+			h := newHarnessWithoutRevival(t)
+			h.noSession = true
+
+			// Act
+			err := h.q.SubmitSessionAct(context.Background(), theWorkspace, noShimActs[kind].act)
+
+			// Assert
+			if !errors.Is(err, ErrNoSession) {
+				t.Fatalf("err = %v, want ErrNoSession", err)
+			}
+			if !logged(h.log.Records(), "warn", opAct, "the workspace has no session to act on and none can be started") {
+				t.Fatalf("records = %+v, want the refusal recorded at warn", h.log.Records())
+			}
+			if standing, _ := h.db.HeldPrompts(context.Background(), theWorkspace); len(standing) != 0 {
+				t.Fatalf("standing = %+v, want nothing held for a refused act", standing)
+			}
+		})
+	}
+}
+
+func TestAnActWithNoShimAtAColdGateIsRefusedByTheGate(t *testing.T) {
+	for _, kind := range actKinds {
+		t.Run(kind, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.noSession = true
+			h.coldGate = "cold for 2h"
+
+			// Act
+			err := h.q.SubmitSessionAct(context.Background(), theWorkspace, noShimActs[kind].act)
+
+			// Assert
+			var gate *ColdGateRefusal
+			if !errors.As(err, &gate) || h.revivals != 0 {
+				t.Fatalf("err = %v, revivals %d: want the gate's refusal and no start", err, h.revivals)
+			}
+		})
+	}
+}
+
+func TestAContextCutWithNoShimTellsTheFooterWhatItCarries(t *testing.T) {
+	tests := []struct {
+		kind string
+		want footer.SessionAct
+	}{
+		{kind: ActClear, want: footer.ActClear},
+		{kind: ActCompact, want: footer.ActCompact},
+	}
+	for _, tc := range tests {
+		t.Run(tc.kind, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.noSession = true
+
+			// Act
+			_ = h.q.SubmitSessionAct(context.Background(), theWorkspace, noShimActs[tc.kind].act)
+			h.waitRevivals()
+
+			// Assert
+			if len(h.footer.turns) == 0 || h.footer.turns[0] == nil || h.footer.turns[0].Act != tc.want {
+				t.Fatalf("footer turns = %+v, want the cut first told as %v", h.footer.turns, tc.want)
 			}
 		})
 	}
@@ -780,22 +938,6 @@ func TestAPickWithNoShimTellsTheSettingsStart(t *testing.T) {
 	// Assert
 	if len(h.settingsStarts) != 1 || !h.settingsStarts[0].Equal(instant) {
 		t.Fatalf("settings starts = %v, want one at the queue's now", h.settingsStarts)
-	}
-}
-
-func TestAPickWithNoShimAtAColdGateIsRefusedByTheGate(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	h.noSession = true
-	h.coldGate = "cold for 2h"
-
-	// Act
-	err := h.q.SubmitSessionAct(context.Background(), theWorkspace, Act{Kind: ActSetModel, Value: "opus"})
-
-	// Assert
-	var gate *ColdGateRefusal
-	if !errors.As(err, &gate) || h.revivals != 0 {
-		t.Fatalf("err = %v, revivals %d: want the gate's refusal and no start", err, h.revivals)
 	}
 }
 
