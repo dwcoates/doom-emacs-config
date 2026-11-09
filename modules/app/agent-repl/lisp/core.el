@@ -3285,6 +3285,15 @@ side never spell the same span two ways."
      ((< seconds 86400) (format "%dh ago" (/ seconds 3600)))
      (t (format "%dd ago" (/ seconds 86400))))))
 
+;;;; ---- User-facing copy: the annotation column ----
+
+(defun agent-repl-annotation-column (names gap)
+  "Return the column a completion line's annotations start at.
+GAP columns past the widest of NAMES, measured by `string-width', so
+every line's annotations line up whatever names the list offers.  THE ONE
+MEASURE every completion list that aligns a column past its names uses."
+  (+ gap (apply #'max 0 (mapcar #'string-width names))))
+
 ;;;; ---- Completion reads that tune ivy ----
 
 (defun agent-repl--completing-read-under-ivy (alist entry prompt table)

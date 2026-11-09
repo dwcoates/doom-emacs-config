@@ -7607,6 +7607,28 @@ A module with a PATH lookup of its own is a boundary the harness cannot guard."
 
 ;;;; ---- Tests: how long ago ----
 
+(ert-deftest agent-repl-test-core-annotation-column-is-gap-past-the-widest-name ()
+  "The column is GAP past the widest name."
+  (should (= (agent-repl-annotation-column '("ab" "abcd" "a") 2) 6)))
+
+(ert-deftest agent-repl-test-core-annotation-column-measures-display-width ()
+  "A wide character counts its display width, not its length."
+  (should (= (agent-repl-annotation-column '("日本") 1) 5)))
+
+(ert-deftest agent-repl-test-core-annotation-column-of-no-names-is-the-gap ()
+  "No names, and the column is the gap alone."
+  (should (= (agent-repl-annotation-column nil 4) 4)))
+
+(ert-deftest agent-repl-test-core-annotation-column-callers-share-the-measure ()
+  "Every completion list aligning a column past its names measures it through
+the helper, never a hand-rolled widest-name measure."
+  (dolist (file '("commands.el" "workspace-completion.el"))
+    (with-temp-buffer
+      (insert-file-contents (expand-file-name file agent-repl-test-core--lisp-dir))
+      (should (search-forward "(agent-repl-annotation-column " nil t))
+      (goto-char (point-min))
+      (should-not (re-search-forward "(apply #'max 0 (mapcar (lambda ([a-z]+) (string-width" nil t)))))
+
 (ert-deftest agent-repl-test-core-format-age-reads-seconds ()
   "A span under a minute reads in seconds."
   ;; Arrange, Act, Assert.

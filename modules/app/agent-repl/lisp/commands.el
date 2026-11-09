@@ -46,6 +46,7 @@
 (declare-function agent-repl-status-tab-state "status" (ws))
 (declare-function agent-repl--log "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--now-unix-ms "agent-repl-core" ())
+(declare-function agent-repl-annotation-column "agent-repl-core" (names gap))
 (defvar agent-repl--color-merging-purple)
 (declare-function agent-repl--info "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--warn "agent-repl-core" (ws fmt &rest args))
@@ -1078,10 +1079,8 @@ The name is the candidate's visible part (`agent-repl--switch-visible-name').
 The columns take `completions-annotations' beneath any face a column
 states itself, so the merged label and the summary keep their purple
 \(`agent-repl--switch-state-label')."
-  (let ((column (+ 4 (apply #'max 0 (mapcar (lambda (cell)
-                                              (string-width
-                                               (agent-repl--switch-visible-name (car cell))))
-                                            alist)))))
+  (let* ((names (mapcar (lambda (cell) (agent-repl--switch-visible-name (car cell))) alist))
+         (column (agent-repl-annotation-column names 4)))
     (lambda (candidates)
       (mapcar
        (lambda (candidate)

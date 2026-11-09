@@ -51,6 +51,7 @@
 (require 'subr-x)
 
 (declare-function agent-repl-roster-open-workspaces "agent-repl-roster" ())
+(declare-function agent-repl-annotation-column "agent-repl-core" (names gap))
 (declare-function agent-repl-completion-match-capf "completion-match" (beg end table &rest props))
 (declare-function agent-repl-completion-match-table "completion-match" (category collection))
 (declare-function agent-repl-composer-mark-lines "composer-mark" (beg end tag find))
@@ -112,8 +113,7 @@ Each name's annotation is its repositories' names, comma-joined, in
 `agent-repl-workspace-completion-repository', padded so the column starts
 two spaces past the longest name in WORKSPACES.  Empty for a name whose
 repository the daemon did not state."
-  (let ((column (+ 2 (apply #'max 0 (mapcar (lambda (ws) (string-width (car ws)))
-                                            workspaces)))))
+  (let ((column (agent-repl-annotation-column (mapcar #'car workspaces) 2)))
     (lambda (candidate)
       (let ((repositories (cdr (assoc candidate workspaces))))
         (if repositories
