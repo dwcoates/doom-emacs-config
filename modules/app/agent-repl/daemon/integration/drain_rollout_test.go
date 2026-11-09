@@ -307,7 +307,7 @@ func TestUpdateShutdownScheduleNowLeavesNoShimBehindThatIsStillBringingUp(t *tes
 	if err != nil || resp.Msg.GetSuccess() == nil {
 		t.Fatalf("UpdateShutdownSchedule{now} with a spawn in flight = (%v, %v), want a success", resp, err)
 	}
-	harness.AwaitProcessGone(t, f.d.Ctx(), shimPID)
+	f.d.AwaitProcessExit(shimPID)
 	f.d.AwaitExit()
 	// ONE READ, NO POLL: the stand-down waited for every spawn's exit before
 	// the daemon did, and the listing skips a process that has exited.
@@ -952,7 +952,9 @@ func TestABusyWorkspaceIsTransferredMidTurnAndItsHeldIntakeDrainsInOrderOnTheSuc
 	}
 
 	// Assert: the adopted turn is still running, so nothing held has gone.
-	expectRPCCount(t, f.shim, harness.RPCStartTurn, 1, harness.ProbeWindow)
+	// The barrier is the successor's: the workspace is its now.
+	successorIdle := func() map[string]uint64 { return harness.AwaitIdleAt(t, d.Ctx(), successor) }
+	expectRPCCountAfter(t, successorIdle, f.shim, harness.RPCStartTurn, 1)
 
 	// Act: the turn ends on the successor's watch.
 	f.shim.PushAgentFrame(mainAgent, successFrame(mainAgent, nil))
@@ -967,7 +969,7 @@ func TestABusyWorkspaceIsTransferredMidTurnAndItsHeldIntakeDrainsInOrderOnTheSuc
 	if text(req1.GetSaid()) != "second" || text(req2.GetSaid()) != "third" {
 		t.Fatalf("held intake drained as (%q, %q), want (\"second\", \"third\") in order", text(req1.GetSaid()), text(req2.GetSaid()))
 	}
-	expectRPCCount(t, f.shim, harness.RPCStartTurn, 3, harness.ProbeWindow)
+	expectRPCCountAfter(t, successorIdle, f.shim, harness.RPCStartTurn, 3)
 
 	// Assert: nothing was interrupted, and the incumbent left.
 	for _, rpc := range []string{harness.RPCKillTurn, harness.RPCKillSession, harness.RPCStopBash} {

@@ -432,7 +432,7 @@ func expectNoShellSpool(t *testing.T, f *fixture, head *frontendv1.FeedRow, what
 			t.Fatalf("the shell sub-feed's page carries a spool body %v, want none: %s", r.GetDetachedShell(), what)
 		}
 	}
-	harness.ExpectNoPush(t, f.d.WatchFeed(token), harness.ProbeWindow, what)
+	harness.ExpectNoPush(t, f.d.WatchFeed(token), what)
 }
 
 // awaitFooter reads footer pushes until one satisfies the predicate.

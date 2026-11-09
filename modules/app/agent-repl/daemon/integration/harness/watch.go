@@ -2,12 +2,8 @@ package harness
 
 import (
 	"context"
-	"errors"
 	"net/http"
-	"os"
-	"syscall"
 	"testing"
-	"time"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	"agentrepl/proto/agentrepl/v1/agentreplv1connect"
@@ -29,6 +25,11 @@ type Stream[T any] struct {
 	cancel  context.CancelFunc
 	errCh   chan error
 	headers chan http.Header
+	// tag is the stream's barrier tag, read the frames it has read, and
+	// daemon the daemon it was opened against (nil for none).
+	tag    string
+	read   *received
+	daemon *Daemon
 }
 
 // AwaitHeaders answers the stream's response headers, which Connect delivers
@@ -139,33 +140,33 @@ func AwaitNext[T any](t testing.TB, ctx context.Context, s *Stream[T], what stri
 	return AwaitView(t, ctx, s, what, func(T) bool { return true })
 }
 
-// ExpectNoPush asserts that nothing arrives before the probe deadline. It is a
-// negative assertion, so it necessarily waits out a bound rather than
-// synchronizing on an event.
-func ExpectNoPush[T any](t testing.TB, s *Stream[T], probe time.Duration, what string) {
+// ExpectNoPush asserts that no push followed what the test did: once the
+// daemon is idle and the stream has read every frame it wrote (settle), the
+// stream holds nothing undelivered. It waits on the barrier, never on a
+// window.
+func ExpectNoPush[T any](t testing.TB, s *Stream[T], what string) {
 	t.Helper()
-	if v, ok := firstPushMatching(s, probe, func(T) bool { return true }); ok {
+	s.settle(t)
+	if v, ok := pendingPushMatching(s, func(T) bool { return true }); ok {
 		t.Fatalf("got a push %v, want none: %s", v, what)
 	}
 }
 
-// ExpectNoPushMatching asserts that no push MATCH accepts arrives before the
-// probe deadline. A push it rejects is passed over: a view republished for
-// an unrelated fact (a bring-up's restated context reading, landing a moment
-// late) is not the change the assertion is about.
-func ExpectNoPushMatching[T any](t *testing.T, s *Stream[T], probe time.Duration, what string, match func(T) bool) {
+// ExpectNoPushMatching asserts that no push MATCH accepts followed what the
+// test did (ExpectNoPush). A push it rejects is passed over: a view
+// republished for an unrelated fact is not the change the assertion is about.
+func ExpectNoPushMatching[T any](t *testing.T, s *Stream[T], what string, match func(T) bool) {
 	t.Helper()
-	if v, ok := firstPushMatching(s, probe, match); ok {
+	s.settle(t)
+	if v, ok := pendingPushMatching(s, match); ok {
 		t.Fatalf("got a push %v, want none like it: %s", v, what)
 	}
 }
 
-// firstPushMatching answers the first push on S that MATCH accepts before
-// PROBE ends, passing over the rest; ok is false when none came, or the
-// stream closed first.
-func firstPushMatching[T any](s *Stream[T], probe time.Duration, match func(T) bool) (T, bool) {
-	timer := time.NewTimer(probe)
-	defer timer.Stop()
+// pendingPushMatching answers the first push already delivered on S that
+// MATCH accepts, taking every delivered push it passes over; ok is false when
+// none is there.
+func pendingPushMatching[T any](s *Stream[T], match func(T) bool) (T, bool) {
 	var zero T
 	for {
 		select {
@@ -176,15 +177,11 @@ func firstPushMatching[T any](s *Stream[T], probe time.Duration, match func(T) b
 			if match(v) {
 				return v, true
 			}
-		case <-timer.C:
+		default:
 			return zero, false
 		}
 	}
 }
-
-// ProbeWindow is how long a negative assertion waits before concluding that
-// nothing is coming.
-const ProbeWindow = 500 * time.Millisecond
 
 // runStream pumps a Connect server stream onto a channel, carrying every
 // frame the stream delivers.
@@ -229,6 +226,10 @@ func runStreamExpanding[Resp any, Push any](t testing.TB, ctx context.Context, s
 	t.Helper()
 	streamCtx, cancel := context.WithCancel(ctx)
 	t.Cleanup(cancel)
+	tag := newStreamTag()
+	streamCtx = context.WithValue(streamCtx, streamTagKey{}, tag)
+	read := &received{}
+	d, _ := ctx.Value(daemonKey{}).(*Daemon)
 
 	stream, err := open(streamCtx)
 	if err != nil {
@@ -256,10 +257,13 @@ func runStreamExpanding[Resp any, Push any](t testing.TB, ctx context.Context, s
 					return
 				}
 			}
+			// COUNTED ONCE ITS PUSHES ARE ON THE CHANNEL, so a barrier
+			// that waited for this count finds them there.
+			read.add()
 		}
 		errCh <- stream.Err()
 	}()
-	return &Stream[Push]{C: ch, t: t, cancel: cancel, errCh: errCh, headers: headers}
+	return &Stream[Push]{C: ch, t: t, cancel: cancel, errCh: errCh, headers: headers, tag: tag, read: read, daemon: d}
 }
 
 // WatchFooter opens the workspace's footer stream.
@@ -522,23 +526,13 @@ func (d *Daemon) WatchLogin(ws *workspacev1.WorkspaceRef) *Stream[*agentreplv1.L
 		func(r *agentreplv1.LoginTerminalOutput) *agentreplv1.LoginTerminalOutput { return r })
 }
 
-// AwaitProcessGone waits for a pid to leave, bounded by the context.
-func AwaitProcessGone(t testing.TB, ctx context.Context, pid int) {
-	t.Helper()
-	ticker := time.NewTicker(pollInterval)
-	defer ticker.Stop()
-	for {
-		if err := syscall.Kill(pid, 0); err != nil {
-			if errors.Is(err, syscall.ESRCH) || errors.Is(err, os.ErrProcessDone) {
-				return
-			}
-		}
-		select {
-		case <-ticker.C:
-		case <-ctx.Done():
-			t.Fatalf("process %d did not exit: %v", pid, grantedclock.Explain(ctx))
-		}
-	}
+// AwaitProcessExit waits for pid's exit on the kernel's own exit event,
+// bounded by ONE wait (DefaultTimeout), never by the run's whole budget.
+func (d *Daemon) AwaitProcessExit(pid int) {
+	d.t.Helper()
+	ctx, cancel := d.waitCtx()
+	defer cancel()
+	AwaitProcessExit(d.t, ctx, pid)
 }
 
 // UnfocusedEditor is the focus a harness Emacs stream connects with: the

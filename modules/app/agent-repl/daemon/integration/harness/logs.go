@@ -136,40 +136,40 @@ func (d *Daemon) AwaitRunLogRecordFromAnyProcess(what string, pred func(LogRecor
 	return awaitLogRecord(d.t, wait, d.RunLogPath(), what, pred)
 }
 
-// awaitLogRecord polls path for the first record pred accepts, failing t when
-// wait ends first.
+// awaitLogRecord waits for the first record pred accepts in path, failing t
+// when wait ends first.
 func awaitLogRecord(t testing.TB, wait context.Context, path, what string, pred func(LogRecord) bool) LogRecord {
 	t.Helper()
 	return awaitLogRecordAfter(t, wait, path, what, func(LogRecord) bool { return true }, pred)
 }
 
-// awaitLogRecordAfter polls path for the first record pred accepts among the
-// records from the first one after accepts onward (that anchor included, so
-// an anchor that is itself the awaited record is found), failing t when wait
-// ends first. Each poll re-reads the log from its start and re-finds the
-// anchor, so the order judged is always the file's own.
+// awaitLogRecordAfter waits for the first record pred accepts in path among
+// the records from the first one after accepts onward (that anchor included,
+// so an anchor that is itself the awaited record is found), failing t when
+// wait ends first. Each look, at every change the kernel reports to the log,
+// re-reads it from its start and re-finds the anchor, so the order judged is
+// always the file's own.
 func awaitLogRecordAfter(t testing.TB, wait context.Context, path, what string, after, pred func(LogRecord) bool) LogRecord {
 	t.Helper()
-	ticker := time.NewTicker(pollInterval)
-	defer ticker.Stop()
-	for {
+	var found LogRecord
+	check := func() bool {
 		anchored := false
 		for _, r := range readLog(t, path) {
 			if !anchored && after(r) {
 				anchored = true
 			}
 			if anchored && pred(r) {
-				return r
+				found = r
+				return true
 			}
 		}
-		select {
-		case <-ticker.C:
-		case <-wait.Done():
-			records := readLog(t, path)
-			t.Fatalf("waiting for %s in %s: %v\n%s\n%s", what, path, grantedclock.Explain(wait), anchorAccount(records, after, pred), logTail(records, failureTailRecords))
-			return LogRecord{}
-		}
+		return false
 	}
+	if !awaitChange(t, wait, check, followFiles(path)) {
+		records := readLog(t, path)
+		t.Fatalf("waiting for %s in %s: %v\n%s\n%s", what, path, grantedclock.Explain(wait), anchorAccount(records, after, pred), logTail(records, failureTailRecords))
+	}
+	return found
 }
 
 // anchorAccount says, for a failed ordered wait, whether its anchor was ever
@@ -560,20 +560,23 @@ func (d *Daemon) AwaitWorkspaceLogRecordInState(what string, pred func(LogRecord
 	d.t.Helper()
 	wait, cancelWait := d.waitCtx()
 	defer cancelWait()
-	ticker := time.NewTicker(pollInterval)
-	defer ticker.Stop()
-	for {
+	var found LogRecord
+	check := func() bool {
 		for _, r := range d.WorkspaceLogRecords() {
 			if pred(r) {
-				return r
+				found = r
+				return true
 			}
 		}
-		select {
-		case <-ticker.C:
-		case <-wait.Done():
-			d.t.Fatalf("waiting for %s in this daemon's workspace log targets: %v", what, grantedclock.Explain(wait))
-		}
+		return false
 	}
+	targets := func() []string {
+		return followFiles(append([]string{filepath.Join(d.StateDir, "logs", ".")}, d.WorkspaceLogTargets()...)...)()
+	}
+	if !awaitChange(d.t, wait, check, targets) {
+		d.t.Fatalf("waiting for %s in this daemon's workspace log targets: %v", what, grantedclock.Explain(wait))
+	}
+	return found
 }
 
 // ShimLoggedRequest recovers the LAST request the fake shim recorded for a verb
@@ -618,17 +621,9 @@ func (d *Daemon) AwaitShimLoggedRequestMatching(workspaceDir, rpc, what string, 
 	d.t.Helper()
 	wait, cancelWait := d.waitCtx()
 	defer cancelWait()
-	ticker := time.NewTicker(pollInterval)
-	defer ticker.Stop()
-	for {
-		if ShimLoggedRequest(d.t, workspaceDir, rpc, into) && pred() {
-			return
-		}
-		select {
-		case <-ticker.C:
-		case <-wait.Done():
-			d.t.Fatalf("waiting for %s (the shim's last logged %s request): %v", what, rpc, grantedclock.Explain(wait))
-		}
+	check := func() bool { return ShimLoggedRequest(d.t, workspaceDir, rpc, into) && pred() }
+	if !awaitChange(d.t, wait, check, followFiles(WorkspaceLogPath(workspaceDir, "shim"))) {
+		d.t.Fatalf("waiting for %s (the shim's last logged %s request): %v", what, rpc, grantedclock.Explain(wait))
 	}
 }
 
@@ -638,17 +633,9 @@ func (d *Daemon) AwaitShimLoggedRequest(workspaceDir, rpc string, into proto.Mes
 	d.t.Helper()
 	wait, cancelWait := d.waitCtx()
 	defer cancelWait()
-	ticker := time.NewTicker(pollInterval)
-	defer ticker.Stop()
-	for {
-		if ShimLoggedRequest(d.t, workspaceDir, rpc, into) {
-			return
-		}
-		select {
-		case <-ticker.C:
-		case <-wait.Done():
-			d.t.Fatalf("waiting for the shim to log a %s request: %v", rpc, grantedclock.Explain(wait))
-		}
+	check := func() bool { return ShimLoggedRequest(d.t, workspaceDir, rpc, into) }
+	if !awaitChange(d.t, wait, check, followFiles(WorkspaceLogPath(workspaceDir, "shim"))) {
+		d.t.Fatalf("waiting for the shim to log a %s request: %v", rpc, grantedclock.Explain(wait))
 	}
 }
 
@@ -683,18 +670,13 @@ func (d *Daemon) AwaitWorkspaceLogOperationCount(workspaceDir, operation string,
 	wait, cancelWait := d.waitCtx()
 	defer cancelWait()
 	path := WorkspaceLogPath(workspaceDir, "daemon")
-	ticker := time.NewTicker(pollInterval)
-	defer ticker.Stop()
-	for {
-		seen := d.WorkspaceLogOperationCount(workspaceDir, operation)
-		if seen >= n {
-			return
-		}
-		select {
-		case <-ticker.C:
-		case <-wait.Done():
-			d.t.Fatalf("waiting for %d records under %s in %s (saw %d): %v", n, operation, path, seen, grantedclock.Explain(wait))
-		}
+	seen := 0
+	check := func() bool {
+		seen = d.WorkspaceLogOperationCount(workspaceDir, operation)
+		return seen >= n
+	}
+	if !awaitChange(d.t, wait, check, followFiles(path)) {
+		d.t.Fatalf("waiting for %d records under %s in %s (saw %d): %v", n, operation, path, seen, grantedclock.Explain(wait))
 	}
 }
 
@@ -801,18 +783,23 @@ func (d *Daemon) AwaitCumulativeWorkspaceLogOperationCount(workspaceDir, operati
 	d.t.Helper()
 	wait, cancelWait := d.waitCtx()
 	defer cancelWait()
-	ticker := time.NewTicker(pollInterval)
-	defer ticker.Stop()
-	for {
-		seen := d.CumulativeWorkspaceLogOperationCount(workspaceDir, operation)
-		if seen >= n {
-			return
-		}
-		select {
-		case <-ticker.C:
-		case <-wait.Done():
-			d.t.Fatalf("waiting for %d cumulative records under %s for workspace %s (saw %d): %v", n, operation, workspaceDir, seen, grantedclock.Explain(wait))
-		}
+	seen := 0
+	check := func() bool {
+		seen = d.CumulativeWorkspaceLogOperationCount(workspaceDir, operation)
+		return seen >= n
+	}
+	if !awaitChange(d.t, wait, check, d.cumulativeLogFiles(workspaceDir, "daemon")) {
+		d.t.Fatalf("waiting for %d cumulative records under %s for workspace %s (saw %d): %v", n, operation, workspaceDir, seen, grantedclock.Explain(wait))
+	}
+}
+
+// cumulativeLogFiles answers what a wait on a workspace sink across every
+// runtime follows: the sink's link, its state-root targets and their
+// directory.
+func (d *Daemon) cumulativeLogFiles(workspaceDir, sink string) func() []string {
+	return func() []string {
+		files := append([]string{WorkspaceLogPath(workspaceDir, sink)}, WorkspaceLogTargets(d.t, workspaceDir, sink)...)
+		return followFiles(files...)()
 	}
 }
 
@@ -844,18 +831,15 @@ func (d *Daemon) CumulativeWorkspaceLogMessageCount(workspaceDir, operation, sub
 // count, and "took the session facts" was still on its way.
 func (d *Daemon) AwaitCumulativeWorkspaceLogMessageCount(workspaceDir, operation, substr string, n int) {
 	d.t.Helper()
-	ticker := time.NewTicker(pollInterval)
-	defer ticker.Stop()
-	for {
-		seen := d.CumulativeWorkspaceLogMessageCount(workspaceDir, operation, substr)
-		if seen >= n {
-			return
-		}
-		select {
-		case <-ticker.C:
-		case <-d.ctx.Done():
-			d.t.Fatalf("waiting for %d cumulative %q records under %s for workspace %s (saw %d): %v", n, substr, operation, workspaceDir, seen, grantedclock.Explain(d.ctx))
-		}
+	wait, cancelWait := d.waitCtx()
+	defer cancelWait()
+	seen := 0
+	check := func() bool {
+		seen = d.CumulativeWorkspaceLogMessageCount(workspaceDir, operation, substr)
+		return seen >= n
+	}
+	if !awaitChange(d.t, wait, check, d.cumulativeLogFiles(workspaceDir, "daemon")) {
+		d.t.Fatalf("waiting for %d cumulative %q records under %s for workspace %s (saw %d): %v", n, substr, operation, workspaceDir, seen, grantedclock.Explain(wait))
 	}
 }
 
@@ -891,19 +875,15 @@ func (d *Daemon) AwaitShimVerbOrder(workspaceDir string, verbs ...string) []stri
 	d.t.Helper()
 	wait, cancelWait := d.waitCtx()
 	defer cancelWait()
-	ticker := time.NewTicker(pollInterval)
-	defer ticker.Stop()
-	for {
-		order := ShimVerbOrder(d.t, workspaceDir)
-		if containsAll(order, verbs) {
-			return order
-		}
-		select {
-		case <-ticker.C:
-		case <-wait.Done():
-			d.t.Fatalf("waiting for the shim to receive %v (saw %v): %v", verbs, order, grantedclock.Explain(wait))
-		}
+	var order []string
+	check := func() bool {
+		order = ShimVerbOrder(d.t, workspaceDir)
+		return containsAll(order, verbs)
 	}
+	if !awaitChange(d.t, wait, check, followFiles(WorkspaceLogPath(workspaceDir, "shim"))) {
+		d.t.Fatalf("waiting for the shim to receive %v (saw %v): %v", verbs, order, grantedclock.Explain(wait))
+	}
+	return order
 }
 
 // containsAll reports whether every verb appears at least once in the order.

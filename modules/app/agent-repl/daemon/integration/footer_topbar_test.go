@@ -34,7 +34,7 @@ func TestFooterPushesAreWholeViewsDeduplicated(t *testing.T) {
 	f.shim.PushHealthy()
 
 	// Assert
-	harness.ExpectNoPush(t, footer, harness.ProbeWindow, "an identical consecutive push is not sent")
+	harness.ExpectNoPush(t, footer, "an identical consecutive push is not sent")
 	// Sanity: the first push really was whole (strip present).
 	if first.GetStrip() == nil {
 		t.Fatalf("footer push = %v, want a whole strip", first)
@@ -466,7 +466,7 @@ func TestDenyAndContinueKeepsTheFooterThinkingUntilTheFakesOwnTerminal(t *testin
 	if got.GetStrip().GetStatus().GetIdle() != nil {
 		t.Fatalf("footer status = %v after a permission deny, want the turn still in flight", got.GetStrip().GetStatus())
 	}
-	harness.ExpectNoPush(t, tail, harness.ProbeWindow, "no turn_ended row until the fake's own terminal")
+	harness.ExpectNoPush(t, tail, "no turn_ended row until the fake's own terminal")
 
 	// Act: the fake concludes the turn on its own.
 	f.shim.PushAgentFrame(mainAgent, successFrame(mainAgent, nil))
@@ -617,7 +617,10 @@ func TestFooterLinkDeathFlipsToSeveredAndTheDaemonRedials(t *testing.T) {
 func TestFooterShimExitFlipsToDeadAndStopsRedials(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	// THE REVIVAL'S HELD START IS BOUNDED SHORT, so the daemon settles on its
+	// failure and the test barrier can say nothing more is coming (the
+	// suite's default bound is the production minute).
+	f := newOpened(t, harness.Opts{ExtraEnv: []string{"AGENT_REPL_START_SESSION_BOUND=300ms"}})
 	// The exit was not attributed to a daemon-requested kill, so
 	// publishExit's ELSE branch fires: daemon.shimclient.exit at ERROR
 	// ("shim died"). Nothing else observes this exit (no query_died update
@@ -636,7 +639,9 @@ func TestFooterShimExitFlipsToDeadAndStopsRedials(t *testing.T) {
 	// records are failure-path evidence and stay loud.
 	f.d.ExpectWarnings("daemon.sessionwatcher.reopen", "daemon.shimclient.exit", "daemon.shimclient.redial",
 		"daemon.sessionwatcher.watch_session", "daemon.sessionwatcher.watch_agent",
-		"daemon.sessionwatcher.link_fault", "daemon.health.open_fault")
+		"daemon.sessionwatcher.link_fault", "daemon.health.open_fault",
+		// The revival's start, held until its bound fails it.
+		"daemon.workspace.bring_up", "daemon.promptqueue.revive", "daemon.promptqueue.submit")
 	footer := f.d.WatchFooter(f.ws)
 	roster := f.d.WatchRoster()
 	awaitFooter(t, f, footer, "idle before the shim exits", func(v *frontendv1.FooterView) bool {
@@ -660,23 +665,14 @@ func TestFooterShimExitFlipsToDeadAndStopsRedials(t *testing.T) {
 		return row != nil && row.GetDead() != nil
 	})
 
-	// Assert: no further churn — a dead shim gets no more redial attempts, so
-	// the footer settles on dead rather than cycling. The revival the daemon
-	// starts for it may retract the death's fault line as its new shim
-	// attaches (held at StartSession above), so a push may come; none of
-	// them leaves dead for a redial's severed or dialing step.
-	probe := time.NewTimer(harness.ProbeWindow)
-	defer probe.Stop()
-	for waiting := true; waiting; {
-		select {
-		case v, ok := <-footer.C:
-			if ok && v.GetStrip().GetStatus().GetAgentReplFault().GetDead() == nil {
-				t.Fatalf("footer push %v, want it still disconnected.dead: no further churn once the shim is dead (redials stop)", v.GetStrip().GetStatus())
-			}
-		case <-probe.C:
-			waiting = false
-		}
-	}
+	// Assert: no further churn — a dead shim gets no more redial attempts.
+	// The revival the daemon starts for it may retract the death's fault line
+	// as its new shim attaches (held at StartSession above, until the start's
+	// bound fails it), so pushes may come; once the daemon is idle, none of
+	// them is a redial's severed step.
+	harness.ExpectNoPushMatching(t, footer,
+		"no redial once the shim is dead: the footer never steps to severed",
+		func(v *frontendv1.FooterView) bool { return v.GetStrip().GetStatus().GetAgentReplFault().GetSevered() != nil })
 }
 
 // ---------------------------------------------------------------------------

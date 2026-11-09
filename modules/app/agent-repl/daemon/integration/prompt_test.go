@@ -376,7 +376,7 @@ func TestAPromptHeldBehindAnUninterruptibleContextCutSkipsClassifyingAndRefusesR
 	if relResp.Msg.GetError().GetReleaseRefused() == nil {
 		t.Fatalf("UpdateHeldPrompt{release} on an uninterruptible_turn entry = %v, want error.release_refused", relResp.Msg)
 	}
-	expectNoRPC(t, f.shim, harness.RPCKillTurn, harness.ProbeWindow)
+	expectNoRPC(t, f.shim, harness.RPCKillTurn)
 
 	// Act: the cut's own turn ends naturally.
 	f.shim.PushAgentFrame(mainAgent, successFrame(mainAgent, nil))
@@ -1112,7 +1112,7 @@ func TestSetModelWithACatalogTokenSendsSetSessionModelAndUpdatesTheTopbarOnlyOnM
 	// Assert: the unary answer alone must not move the topbar's model. A push
 	// for an unrelated fact (the bring-up's restated context reading, landing
 	// a moment late) may still arrive, and is not what this asserts.
-	harness.ExpectNoPushMatching(t, topbar, harness.ProbeWindow, "the topbar must not show sonnet before the shim pushes model_changed",
+	harness.ExpectNoPushMatching(t, topbar, "the topbar must not show sonnet before the shim pushes model_changed",
 		func(v *frontendv1.TopbarView) bool {
 			return v.GetModelSelector().GetSelected().GetModel().GetName() == "sonnet"
 		})
@@ -1206,7 +1206,7 @@ func TestSetPermissionModeWithAServedModeSendsSetSessionPermissionModeAndUpdates
 	req := f.shim.ExpectSetSessionPermissionMode()
 
 	// Assert: the topbar does not show the new mode yet.
-	harness.ExpectNoPushMatching(t, topbar, harness.ProbeWindow, "the topbar must not show the new mode before the shim pushes permission_mode_changed",
+	harness.ExpectNoPushMatching(t, topbar, "the topbar must not show the new mode before the shim pushes permission_mode_changed",
 		func(v *frontendv1.TopbarView) bool {
 			return v.GetPermissionModePicker().GetCurrent().GetMode() == target
 		})
@@ -1783,7 +1783,7 @@ func TestADeferredPromptIsNeverInterjectedAndRunsAsItsOwnTurn(t *testing.T) {
 	if p := promptHeldEntry(tray, turn); p.GetHoldForTurnEnd() == nil {
 		t.Fatalf("held entry for the deferred prompt = %v, want hold_for_turn_end from the start", p)
 	}
-	expectNoRPC(t, f.shim, harness.RPCKillTurn, harness.ProbeWindow)
+	expectNoRPC(t, f.shim, harness.RPCKillTurn)
 
 	// Act: the running turn ends on its own.
 	f.shim.PushAgentFrame(mainAgent, successFrame(mainAgent, nil))

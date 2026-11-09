@@ -137,7 +137,7 @@ func TestAHandoverWhoseSuccessorDiesAtBootTransfersNothingAndKeepsServing(t *tes
 		t.Fatalf("the abandonment's cause = %q, want the successor's exit named", cause)
 	}
 	// Assert: nothing was announced or transferred.
-	harness.ExpectNoPush(t, daemonStream, harness.ProbeWindow, "shutdown_announced for a successor that never served")
+	harness.ExpectNoPush(t, daemonStream, "shutdown_announced for a successor that never served")
 	// Assert: no lease was left behind.
 	if leases := heldLeases(t, d); len(leases) != 0 {
 		t.Fatalf("leases after the abandoned handover = %v, want none", leases)

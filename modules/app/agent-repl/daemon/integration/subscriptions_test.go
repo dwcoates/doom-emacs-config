@@ -347,7 +347,7 @@ func TestFlushOnAcceptAcrossWatchKinds(t *testing.T) {
 				// late — always has a complete roster to receive.
 				harness.AwaitNext(t, d.Ctx(), s, k.Name+": the roster the boot primed")
 			default:
-				harness.ExpectNoPush(t, s, harness.ProbeWindow, k.Name+" carries no frame before anything is ever published")
+				harness.ExpectNoPush(t, s, k.Name+" carries no frame before anything is ever published")
 			}
 		})
 	}
@@ -375,7 +375,7 @@ func TestWatchDaemonFlushesHeadersBeforeAnyFrameWhenNoDrainWasEverScheduled(t *t
 	if first.GetNewsDigest().GetNone() == nil {
 		t.Fatalf("the first frame = %v, want the news digest standing none", first)
 	}
-	harness.ExpectNoPush(t, s, harness.ProbeWindow, "WatchDaemon with no drain ever scheduled carries no other frame")
+	harness.ExpectNoPush(t, s, "WatchDaemon with no drain ever scheduled carries no other frame")
 }
 
 // TestARegisteredWorkspacesRootFeedOpensWithTheEmptyHeldSection: the held
@@ -452,7 +452,7 @@ func TestTopbarIdenticalContextUsagePushProducesNoSecondPush(t *testing.T) {
 	f.shim.PushSessionUpdate(usage)
 
 	// Assert
-	harness.ExpectNoPush(t, topbar, harness.ProbeWindow, "an identical consecutive context_usage push is not sent")
+	harness.ExpectNoPush(t, topbar, "an identical consecutive context_usage push is not sent")
 }
 
 // TestHostStreamIdenticalRepublishedViewProducesNoSecondPush opens a SECOND
@@ -474,7 +474,7 @@ func TestHostStreamIdenticalRepublishedViewProducesNoSecondPush(t *testing.T) {
 	harness.AwaitNext(t, f.d.Ctx(), second, "the second subscriber's own initial push")
 
 	// Assert: the witness, already caught up, gets nothing further.
-	harness.ExpectNoPush(t, witness, harness.ProbeWindow, "a re-published identical host view produces no second push")
+	harness.ExpectNoPush(t, witness, "a re-published identical host view produces no second push")
 }
 
 // ---------------------------------------------------------------------------

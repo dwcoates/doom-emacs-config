@@ -829,7 +829,8 @@ func StartDaemon(t testing.TB, opts Opts) *Daemon {
 	d.ExpectWarnings(opts.ExpectWarnings...)
 	ctx, cancel := grantedclock.WithBound(d.watchRecords(t, d.fault.ctx), timeout*runBudgetWaits)
 	t.Cleanup(cancel)
-	d.ctx = ctx
+	// A stream opened on this context can ask this daemon for the barrier.
+	d.ctx = context.WithValue(ctx, daemonKey{}, d)
 
 	node := opts.ShimNode
 	if node == "" {
@@ -946,6 +947,8 @@ func StartDaemon(t testing.TB, opts Opts) *Daemon {
 		env = append(env, daemonCov...)
 		env = append(env, nodeCov...)
 	}
+	// THE TEST BARRIER is served to this daemon alone (server.Deps.TestBarrier).
+	env = append(env, "AGENT_REPL_TEST_BARRIER=1")
 	env = append(env, opts.ExtraEnv...)
 
 	// A NON-JOINING START THAT EXPECTS TO SERVE OWNS daemon.addr. A crash-restart test reuses a state
@@ -1142,33 +1145,37 @@ func (d *Daemon) staleFor(path string) string {
 	return ""
 }
 
-// awaitFile polls for a file, bounded by ONE wait's bound off the run budget.
+// awaitFile waits for a file the daemon writes, bounded by ONE wait's bound
+// off the run budget, re-reading it at each change the kernel reports to it
+// or its directory. A daemon that exits unasked ends the wait through the
+// fault latch, which cancels the run's context.
 func (d *Daemon) awaitFile(path string) string {
 	d.t.Helper()
 	wait, cancelWait := d.waitCtx()
 	defer cancelWait()
-	ticker := time.NewTicker(pollInterval)
-	defer ticker.Stop()
-	for {
-		if body, err := os.ReadFile(path); err == nil && len(body) > 0 && string(body) != d.staleFor(path) {
-			return string(body)
+	var body string
+	check := func() bool {
+		raw, err := os.ReadFile(path)
+		if err == nil && len(raw) > 0 && string(raw) != d.staleFor(path) {
+			body = string(raw)
+			return true
 		}
-		if d.Exited() && !d.expectedExit() {
-			d.t.Fatalf("daemon exited before writing %s (exit %v)\nstderr:\n%s", filepath.Base(path), d.exitErr, d.Stderr())
-		}
-		select {
-		case <-ticker.C:
-		case <-wait.Done():
-			// A DAEMON THAT IS ALIVE AND NOT DOING WHAT IT WAS WAITED FOR IS
-			// ASKED WHERE IT IS, before the failure is written. Three processes
-			// starting at one instant (two stores and this boot) once each
-			// logged their first record and then nothing for 5s (2026-10-06,
-			// a full-suite run), where a quiet boot measures 50-160ms; only a
-			// stack names a stall like that.
-			dump := d.dumpOnStall(reapGrace)
-			d.t.Fatalf("waiting for %s: %v (%s)\nstderr:\n%s", path, grantedclock.Explain(wait), dump, d.Stderr())
-		}
+		return false
 	}
+	if awaitChange(d.t, wait, check, followFiles(path)) {
+		return body
+	}
+	if d.Exited() && !d.expectedExit() {
+		d.t.Fatalf("daemon exited before writing %s (exit %v)\nstderr:\n%s", filepath.Base(path), d.exitErr, d.Stderr())
+	}
+	// A DAEMON THAT IS ALIVE AND NOT DOING WHAT IT WAS WAITED FOR IS ASKED
+	// WHERE IT IS, before the failure is written. Three processes starting at
+	// one instant (two stores and this boot) once each logged their first
+	// record and then nothing for 5s (2026-10-06, a full-suite run), where a
+	// quiet boot measures 50-160ms; only a stack names a stall like that.
+	dump := d.dumpOnStall(reapGrace)
+	d.t.Fatalf("waiting for %s: %v (%s)\nstderr:\n%s", path, grantedclock.Explain(wait), dump, d.Stderr())
+	return ""
 }
 
 // dumpOnStall asks a live daemon to dump every goroutine and exit -- its
@@ -1199,41 +1206,33 @@ func (d *Daemon) dumpOnStall(bound time.Duration) string {
 	return "SIGQUIT sent; the daemon.cmd.sigquit record below holds its goroutine dump"
 }
 
-// AwaitFileGone waits for a path to disappear.
+// AwaitFileGone waits for a path to disappear, bounded by ONE wait's bound,
+// at the kernel's report of its directory changing.
 func (d *Daemon) AwaitFileGone(path string) {
 	d.t.Helper()
 	wait, cancelWait := d.waitCtx()
 	defer cancelWait()
-	ticker := time.NewTicker(pollInterval)
-	defer ticker.Stop()
-	for {
-		if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
-			return
-		}
-		select {
-		case <-ticker.C:
-		case <-wait.Done():
-			d.t.Fatalf("waiting for %s to be removed: %v", path, grantedclock.Explain(wait))
-		}
+	gone := func() bool {
+		_, err := os.Stat(path)
+		return errors.Is(err, os.ErrNotExist)
+	}
+	if !awaitChange(d.t, wait, gone, followFiles(path)) {
+		d.t.Fatalf("waiting for %s to be removed: %v", path, grantedclock.Explain(wait))
 	}
 }
 
-// AwaitFileExists waits for a path to appear, bounded by ONE wait's bound.
+// AwaitFileExists waits for a path to appear, bounded by ONE wait's bound, at
+// the kernel's report of its directory changing.
 func (d *Daemon) AwaitFileExists(path string) {
 	d.t.Helper()
 	wait, cancelWait := d.waitCtx()
 	defer cancelWait()
-	ticker := time.NewTicker(pollInterval)
-	defer ticker.Stop()
-	for {
-		if _, err := os.Stat(path); err == nil {
-			return
-		}
-		select {
-		case <-ticker.C:
-		case <-wait.Done():
-			d.t.Fatalf("waiting for %s to appear: %v", path, grantedclock.Explain(wait))
-		}
+	exists := func() bool {
+		_, err := os.Stat(path)
+		return err == nil
+	}
+	if !awaitChange(d.t, wait, exists, followFiles(path)) {
+		d.t.Fatalf("waiting for %s to appear: %v", path, grantedclock.Explain(wait))
 	}
 }
 
@@ -1252,6 +1251,8 @@ func (d *Daemon) dial(jsonCodec bool) {
 	if jsonCodec {
 		opts = append(opts, connect.WithProtoJSON())
 	}
+	// Every stream this client opens carries its barrier tag (barrier.go).
+	opts = append(opts, connect.WithInterceptors(tagInterceptor{}))
 	d.client = agentreplv1connect.NewAgentReplClient(d.http, "http://"+d.Addr, opts...)
 }
 
@@ -1355,20 +1356,26 @@ func (d *Daemon) standDownStraysForCoverage() {
 	if len(pids) == 0 {
 		return
 	}
+	// EACH EXIT EVENT IS TAKEN BEFORE ITS SIGTERM, so the wait sees the exit
+	// itself; the wait is bounded as a whole, and a stray still running past it
+	// is ReapStrays' to kill and to report.
+	held := map[int]*exitEvent{}
 	for _, pid := range pids {
+		if ev, err := takeExitEvent(pid); err == nil && ev != nil {
+			held[pid] = ev
+		}
 		_ = syscall.Kill(pid, syscall.SIGTERM)
 	}
-	deadline := time.After(DefaultTimeout)
-	ticker := time.NewTicker(20 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-deadline:
-			return
-		case <-ticker.C:
-			if len(d.strayPIDs()) == 0 {
-				return
+	ctx, cancel := context.WithTimeout(context.Background(), DefaultTimeout)
+	defer cancel()
+	for _, ev := range held {
+		err := ev.Await(ctx)
+		ev.Close()
+		if err != nil {
+			for _, rest := range held {
+				rest.Close()
 			}
+			return
 		}
 	}
 }
@@ -1582,7 +1589,7 @@ func (h heldExits) wait(ctx context.Context, pid int) (bool, error) {
 	if !ok {
 		return awaitExitEvent(ctx, pid)
 	}
-	if err := ev.await(ctx); err != nil {
+	if err := ev.Await(ctx); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -1591,7 +1598,7 @@ func (h heldExits) wait(ctx context.Context, pid int) (bool, error) {
 // close releases every held event.
 func (h heldExits) close() {
 	for _, ev := range h {
-		ev.close()
+		ev.Close()
 	}
 }
 
@@ -2022,27 +2029,22 @@ func (d *Daemon) WriteDefaultShimProfile(profile any) {
 	writeJSON(d.t, filepath.Join(d.ProfileDir, "default.json"), profile)
 }
 
-// ExpectFileUnchanged asserts a file still holds exactly `want` after the
-// probe window. It is a negative assertion, so it necessarily waits out a
-// bound rather than synchronizing on an event.
-func (d *Daemon) ExpectFileUnchanged(path, want string, probe time.Duration) {
+// ExpectFileUnchanged asserts a file still holds exactly `want` once the
+// daemon is idle (AwaitIdle): every write the daemon was going to make as a
+// consequence of what the test did has been made. An empty want accepts a
+// file that does not exist.
+func (d *Daemon) ExpectFileUnchanged(path, want string) {
 	d.t.Helper()
-	deadline := time.Now().Add(probe)
-	ticker := time.NewTicker(pollInterval)
-	defer ticker.Stop()
-	for time.Now().Before(deadline) {
-		body, err := os.ReadFile(path)
-		if err != nil {
-			if want == "" {
-				<-ticker.C
-				continue
-			}
-			d.t.Fatalf("read %s: %v, want it to still hold %q", path, err, want)
+	d.AwaitIdle()
+	body, err := os.ReadFile(path)
+	if err != nil {
+		if want == "" && errors.Is(err, os.ErrNotExist) {
+			return
 		}
-		if string(body) != want {
-			d.t.Fatalf("%s = %q, want it unchanged at %q", path, body, want)
-		}
-		<-ticker.C
+		d.t.Fatalf("read %s: %v, want it to still hold %q", path, err, want)
+	}
+	if string(body) != want {
+		d.t.Fatalf("%s = %q, want it unchanged at %q", path, body, want)
 	}
 }
 

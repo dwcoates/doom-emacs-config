@@ -1275,7 +1275,7 @@ func TestRestartWorkspaceReapsTheOldShimBeforeResumingOnTheNew(t *testing.T) {
 	// gone. internal/rollout/relaunch.go's standDown passes the reap gate
 	// (<-exited) before Install and Resume are ever called, so this is a
 	// near-instant confirmation of an already-settled fact, not a wait.
-	harness.AwaitProcessGone(t, shortTimeout(t, f.d.Ctx(), 200*time.Millisecond), oldPID)
+	harness.AwaitProcessExit(t, shortTimeout(t, f.d.Ctx(), 200*time.Millisecond), oldPID)
 }
 
 // TestRestartWorkspaceForcedContinuesTheInterruptedTurnWithoutResubmittingIt
@@ -1320,7 +1320,7 @@ func TestRestartWorkspaceForcedContinuesTheInterruptedTurnWithoutResubmittingIt(
 	if st := second.ExpectStartTurn(); st.GetOrigin() != conversationv1.PromptOrigin_PROMPT_ORIGIN_RESUME_AFTER_RESTART {
 		t.Fatalf("the resumed shim's turn has origin %v, want the resumption, never the cut prompt again", st.GetOrigin())
 	}
-	expectRPCCount(t, second, harness.RPCStartTurn, 1, harness.ProbeWindow)
+	expectRPCCount(t, second, harness.RPCStartTurn, 1)
 }
 
 // ---- critique 13: bounce accountability ----
@@ -1385,7 +1385,7 @@ func TestCrashBootWithADeadManifestPidTakesTheOrdinaryDeadShimPath(t *testing.T)
 	if proc, err := os.FindProcess(oldPID); err == nil {
 		_ = proc.Signal(syscall.SIGKILL)
 	}
-	harness.AwaitProcessGone(t, f.d.Ctx(), oldPID)
+	f.d.AwaitProcessExit(oldPID)
 
 	// A manifest naming this session as one the outgoing daemon meant to
 	// PRESERVE, whose pid is now gone: disposition(preserve, free) = DIED.
@@ -1628,7 +1628,7 @@ func TestHibernateTransportFailureDefersTheStandDown(t *testing.T) {
 
 	// Assert: the daemon never forces the session down over the refused
 	// hibernate.
-	expectNoRPC(t, f.shim, harness.RPCKillSession, harness.ProbeWindow)
+	expectNoRPC(t, f.shim, harness.RPCKillSession)
 }
 
 // ---------------------------------------------------------------------------

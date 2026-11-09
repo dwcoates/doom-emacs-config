@@ -220,7 +220,7 @@ func TestDuringAHandoverOnlyTheServingDaemonIngestsAHeldPrompt(t *testing.T) {
 	}
 
 	// Assert: neither daemon takes it.
-	d.ExpectFileUnchanged(path, string(body), harness.ProbeWindow)
+	d.ExpectFileUnchanged(path, string(body))
 
 	// Act: the participants adopt, and the successor serves.
 	successor := drainDial(announced.GetAddress())
@@ -247,7 +247,8 @@ func TestDuringAHandoverOnlyTheServingDaemonIngestsAHeldPrompt(t *testing.T) {
 	if st := f.shim.ExpectStartTurn(); text(st.GetSaid()) != "written mid-handover" {
 		t.Fatalf("delivered = %q, want the prompt written mid-handover", text(st.GetSaid()))
 	}
-	expectRPCCount(t, f.shim, harness.RPCStartTurn, 2, harness.ProbeWindow)
+	// The barrier is the successor's: the workspace is its now.
+	expectRPCCountAfter(t, func() map[string]uint64 { return harness.AwaitIdleAt(t, d.Ctx(), successor) }, f.shim, harness.RPCStartTurn, 2)
 	if code := d.AwaitExit(); code != 0 {
 		t.Fatalf("the incumbent's exit code = %d, want an orderly 0", code)
 	}

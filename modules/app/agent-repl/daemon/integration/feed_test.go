@@ -104,7 +104,7 @@ func TestAFeedTextScaleFrameIsNotARowOnTheFeedTail(t *testing.T) {
 	}
 
 	// Assert: the zoom reached the watch, and NO row was drawn by it.
-	harness.ExpectNoPush(t, tail, harness.ProbeWindow, "a feed text scale frame is not a feed row")
+	harness.ExpectNoPush(t, tail, "a feed text scale frame is not a feed row")
 }
 
 func TestWatchFeedWithAnUnmintedTokenIsRefusedAtTheTransport(t *testing.T) {
@@ -1436,7 +1436,7 @@ func TestArtifactListDrawsNothing(t *testing.T) {
 	}))
 
 	// Assert
-	harness.ExpectNoPush(t, tail, harness.ProbeWindow, "a list act produces no feed row")
+	harness.ExpectNoPush(t, tail, "a list act produces no feed row")
 }
 
 // ==========================================================================
@@ -1863,7 +1863,7 @@ func TestADetachedBashTailPastTheCapIsRefusedAndLogged(t *testing.T) {
 
 	// Assert: refused — the BODY row it would have drawn never appears.
 	expectNoShellSpool(t, f, head, "an over-cap tail must not draw the shell's spool body")
-	harness.ExpectNoPush(t, tail, harness.ProbeWindow, "an over-cap tail must not upsert the shell's head")
+	harness.ExpectNoPush(t, tail, "an over-cap tail must not upsert the shell's head")
 }
 
 // olderThanOldestOf asks for the page above the oldest row PAGE served, as a
