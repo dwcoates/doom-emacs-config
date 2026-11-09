@@ -254,14 +254,24 @@ func (p Pool) TakeN(n, rank int, waiting func()) (Held, error) {
 			return nil, fmt.Errorf("let the %s seats' turnstile go: %w", p.What, err)
 		}
 		wait()
-		empty, err := p.lock(p.lanePath(above), syscall.LOCK_EX)
-		if err != nil {
+		if err := p.awaitLaneEmpty(above); err != nil {
 			return nil, err
 		}
-		if err := empty.Close(); err != nil {
-			return nil, fmt.Errorf("close the %s seats' lane %s: %w", p.What, p.lanePath(above), err)
-		}
 	}
+}
+
+// awaitLaneEmpty waits, on the kernel's lock, until no taker waits at rank:
+// every taker that waits holds its rank's lane shared, so an exclusive hold
+// of it is granted only once the last has its seats or gave up.
+func (p Pool) awaitLaneEmpty(rank int) error {
+	empty, err := p.lock(p.lanePath(rank), syscall.LOCK_EX)
+	if err != nil {
+		return err
+	}
+	if err := empty.Close(); err != nil {
+		return fmt.Errorf("close the %s seats' lane %s: %w", p.What, p.lanePath(rank), err)
+	}
+	return nil
 }
 
 // gather takes n seats one at a time; on any failure it gives back what it

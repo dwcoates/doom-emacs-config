@@ -600,3 +600,60 @@ func TestExclusiveHandsTheRoleToTheNextWaiter(t *testing.T) {
 		t.Fatalf("Exclusive after the first holder let go = %v", err)
 	}
 }
+
+func TestAwaitLaneEmpty(t *testing.T) {
+	cases := []struct {
+		name   string
+		waiter bool
+	}{
+		{name: "an empty lane answers at once", waiter: false},
+		{name: "a lane with a taker waiting answers once it leaves", waiter: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			p := Pool{Dir: t.TempDir(), Prefix: "core", N: 1, What: "test"}
+			var waiter *os.File
+			if tc.waiter {
+				var err error
+				if waiter, err = p.lock(p.lanePath(3), syscall.LOCK_SH); err != nil {
+					t.Fatal(err)
+				}
+			}
+			done := make(chan error, 1)
+
+			// Act
+			go func() { done <- p.awaitLaneEmpty(3) }()
+			if waiter != nil {
+				if err := waiter.Close(); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			// Assert
+			if err := <-done; err != nil {
+				t.Fatalf("awaitLaneEmpty = %v", err)
+			}
+		})
+	}
+}
+
+// Both rank-ordered takers wait out a better rank through the one helper, so
+// neither hand-rolls the lane's exclusive lock.
+func TestRankOrderedTakersShareTheLaneWait(t *testing.T) {
+	for _, file := range []string{"seats.go", "admit.go"} {
+		// Arrange
+		src, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		// Act
+		body := string(src)
+
+		// Assert
+		if !strings.Contains(body, "p.awaitLaneEmpty(above)") || strings.Contains(body, "p.lock(p.lanePath(above)") {
+			t.Fatalf("%s waits out a better rank by hand; use awaitLaneEmpty", file)
+		}
+	}
+}

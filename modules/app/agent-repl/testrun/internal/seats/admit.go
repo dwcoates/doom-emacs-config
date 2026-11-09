@@ -156,12 +156,8 @@ func (p Pool) Admit(a Admission) (*Seat, error) {
 		if err := untilCut(a.Cut, p, func() error {
 			switch wait.Why {
 			case Outranked:
-				empty, err := p.lock(p.lanePath(above), syscall.LOCK_EX)
-				if err != nil {
+				if err := p.awaitLaneEmpty(above); err != nil {
 					return err
-				}
-				if err := empty.Close(); err != nil {
-					return fmt.Errorf("close the %s seats' lane %s: %w", p.What, p.lanePath(above), err)
 				}
 			case Full:
 				if err := w.untilLetGo(wait.at, nil); err != nil {
