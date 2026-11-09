@@ -29,6 +29,8 @@ import {
 } from "../../proto/gen/ts/agentrepl/v1/endpoint_report_latencies_pb";
 import type { WorkspaceRef } from "../../proto/gen/ts/workspace/v1/workspace_pb";
 import { log } from "./log.js";
+import type { DaemonContext } from "./rpc/context.js";
+import { callUnary } from "./rpc/unary.js";
 
 /** How long after a latency is recorded the batch is sent. */
 export const REPORT_DELAY_MS = 2_000;
@@ -142,6 +144,24 @@ export function installLatencyReport(deps: LatencyReportDeps): LatencyReporter {
       stopAttached();
     },
   };
+}
+
+/**
+ * Report WORKSPACE's page's latencies to the daemon CTX talks to. Every page
+ * that reports latencies installs its reporter here, so each sends its
+ * batch, waits before sending, and resends on a re-attach alike.
+ */
+export function installDaemonLatencyReport(ctx: DaemonContext, workspace: WorkspaceRef): LatencyReporter {
+  return installLatencyReport({
+    workspace,
+    send: (batch) =>
+      callUnary(ctx, "ReportLatencies", (client) => client.reportLatencies(reportLatenciesRequest(batch)), REPORT_LATENCIES_RESPONSE),
+    after: (ms, fn) => {
+      const timer = window.setTimeout(fn, ms);
+      return () => window.clearTimeout(timer);
+    },
+    onAttached: (fn) => ctx.streams.onAttached(fn),
+  });
 }
 
 /** The request a batch is sent as. */

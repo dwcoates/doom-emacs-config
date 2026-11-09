@@ -83,8 +83,7 @@ import { createEditorNotices, type EditorNotices } from "./footer/editor-notice.
 import { createStreamCostMeter, regionNodes } from "./stream-cost.js";
 import { pagePresence } from "./presence.js";
 import { installPageDrawnReport } from "./page-drawn-report.js";
-import { installLatencyReport, REPORT_LATENCIES_RESPONSE, reportLatenciesRequest } from "./latency-report.js";
-import { callUnary } from "./rpc/unary.js";
+import { installDaemonLatencyReport } from "./latency-report.js";
 import { pageSwitchLatencyEnv, watchPageBoot, watchSwitchLatency } from "./switch-latency.js";
 import { watchReloadBlank } from "./reload-blank.js";
 import { watchPageStall } from "./page-stall.js";
@@ -241,16 +240,7 @@ export async function boot(): Promise<void> {
     // metrics: its boot from here to its conversation drawn, and every switch
     // to it Emacs stamped.
     const bootedAtMs = performance.now();
-    const latencies = installLatencyReport({
-      workspace: ctx.workspace,
-      send: (batch) =>
-        callUnary(ctx, "ReportLatencies", (client) => client.reportLatencies(reportLatenciesRequest(batch)), REPORT_LATENCIES_RESPONSE),
-      after: (ms, fn) => {
-        const timer = window.setTimeout(fn, ms);
-        return () => window.clearTimeout(timer);
-      },
-      onAttached: (fn) => ctx.streams.onAttached(fn),
-    });
+    const latencies = installDaemonLatencyReport(ctx, ctx.workspace);
     const latencyEnv = pageSwitchLatencyEnv(document);
     // EACH WATCHER LIVES AS LONG AS THE PAGE, so each stop is the page's
     // (page-teardown.ts): a page-stall sampler left running after a boot test
