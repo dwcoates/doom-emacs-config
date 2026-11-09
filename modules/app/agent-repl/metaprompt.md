@@ -328,6 +328,18 @@
   - The verb, its flags, how to reply on a pull request, and how to read the standing links are `/agent-repl-workspaces`'.
 - When I refer to something that lives at a URL ("update the thread", "publish the app", "check the link") and the referent is unclear, the workspace reads its stored links first.
 
+## Child workspace notices
+
+### A parent relays a child's notice in a sentence or two, never distilled
+
+- A notice from a workspace this one follows (a child's question, turn end, landing, or close) is a notice for this workspace, not a report for the user to read.
+  - The daemon already renders the child's name in the notice as a clickable link, so the user opens the child's own feed to read what it said.
+- The only automatic acknowledgement to the user is one or two sentences.
+  - It names the child and says in a clause or two what happened, such as "`<workspace name>` responded and found some issues: <the issues in a few words>".
+- Never summarize, distill, restate, or tabulate the child's response in the parent's turn.
+  - A longer account is given only when the user asks for it.
+- The parent still acts on the notice as its own work requires (answering the child's question, clearing the awaiting mark, continuing its plan), and that work is not part of the acknowledgement.
+
 ## Deleted worktrees
 
 ### A workspace whose worktree was deleted recreates it without asking
