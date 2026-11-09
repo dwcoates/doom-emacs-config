@@ -3,6 +3,7 @@ package sidebar_test
 import (
 	"strings"
 	"testing"
+	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
@@ -429,7 +430,7 @@ func TestARegistryWithTheSelectionIsOnePush(t *testing.T) {
 	<-ch
 
 	// Act.
-	r.SetRegistrySelected(registry(workspace("w1", "one"), workspace("w2", "two")), ids.WorkspaceID("w2"))
+	r.SetRegistrySelected(registry(workspace("w1", "one"), workspace("w2", "two")), ids.WorkspaceID("w2"), sidebar.SelectStamp{})
 	r.SetRegistry(registry(workspace("w1", "one"), workspace("w2", "two"), workspace("w3", "three")))
 
 	// Assert.
@@ -458,7 +459,7 @@ func TestARegistryWithTheSelectionMarksTheSelection(t *testing.T) {
 			reg.Current = tc.durable
 
 			// Act.
-			r.SetRegistrySelected(reg, ids.WorkspaceID("w2"))
+			r.SetRegistrySelected(reg, ids.WorkspaceID("w2"), sidebar.SelectStamp{})
 
 			// Assert: the selection is installed after the registry, as the
 			// two separate calls did.
@@ -499,7 +500,7 @@ func TestSelectedAnswersTheRostersSelection(t *testing.T) {
 		{
 			name: "a select names the selected workspace",
 			arrange: func(r sidebar.Resolver) {
-				r.SetRegistrySelected(registry(workspace("w1", "one"), workspace("w2", "two")), ids.WorkspaceID("w2"))
+				r.SetRegistrySelected(registry(workspace("w1", "one"), workspace("w2", "two")), ids.WorkspaceID("w2"), sidebar.SelectStamp{})
 			},
 			want: "w2", wantOK: true,
 		},
@@ -526,7 +527,7 @@ func TestARegistryWithASelectionItDoesNotCarryLeavesNoCurrent(t *testing.T) {
 	r, _ := newResolver(t)
 
 	// Act.
-	r.SetRegistrySelected(registry(workspace("w1", "one")), ids.WorkspaceID("w2"))
+	r.SetRegistrySelected(registry(workspace("w1", "one")), ids.WorkspaceID("w2"), sidebar.SelectStamp{})
 
 	// Assert.
 	if got := latest(t, r).GetCurrent(); got != nil {
@@ -618,5 +619,238 @@ func TestAVersionBeforeAnyRegistryIsDrawnOnceOneArrives(t *testing.T) {
 	// Assert
 	if got := latest(t, r).GetVersion().GetText(); got != "0.129.0" {
 		t.Fatalf("version = %q, want 0.129.0", got)
+	}
+}
+
+// selectionOf builds a select's change making CURRENT current, its row first
+// and stamped at epoch, with the rows LEFT that stopped being current.
+func selectionOf(current wsm.Workspace, left ...wsm.Workspace) wsm.Selection {
+	stamped := epoch
+	current.Current, current.LastSelectedAt = true, &stamped
+	sel := wsm.Selection{Current: current.ID, Workspaces: []wsm.Workspace{current}, Repository: repo}
+	for _, ws := range left {
+		ws.Current = false
+		sel.Workspaces = append(sel.Workspaces, ws)
+		previous := ws.ID
+		sel.Previous = &previous
+	}
+	return sel
+}
+
+func TestASelectionInstallsTheStoresRowsAndTheStampedSelection(t *testing.T) {
+	started := epoch.Add(-30 * time.Millisecond)
+	tests := []struct {
+		name        string
+		stamp       sidebar.SelectStamp
+		wantStarted *int64
+	}{
+		{name: "a stamp with a switch instant states both", stamp: sidebar.SelectStamp{ID: "sel-1", SwitchStartedAt: &started}, wantStarted: proto.Int64(started.UnixMilli())},
+		{name: "a stamp with no switch instant states the id alone", stamp: sidebar.SelectStamp{ID: "sel-1"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			r, _ := newResolver(t)
+			w1 := workspace("w1", "one")
+			w1.Current = true
+			reg := registry(w1, workspace("w2", "two"))
+			reg.Current = &w1.ID
+			r.SetRegistry(reg)
+
+			// Act.
+			ok := r.SetSelection(selectionOf(workspace("w2", "two"), w1), tt.stamp)
+
+			// Assert.
+			if !ok {
+				t.Fatal("SetSelection refused a change the registry carries")
+			}
+			roster := latest(t, r)
+			current := roster.GetCurrent()
+			if current.GetWorkspace().GetId() != "w2" || current.GetSelectionId() != "sel-1" {
+				t.Fatalf("current = %v, want w2 under sel-1", current)
+			}
+			if !proto.Equal(wrapInt64(current.SwitchStartedAtMs), wrapInt64(tt.wantStarted)) {
+				t.Fatalf("switch_started_at_ms = %v, want %v", current.SwitchStartedAtMs, tt.wantStarted)
+			}
+			if got := rowFor(repoRows(t, roster), "w2").GetLastSelected().GetAtMs(); got != epoch.UnixMilli() {
+				t.Fatalf("w2's last-selected = %d, want the store's %d", got, epoch.UnixMilli())
+			}
+			if got, _ := r.Selected(); got != "w2" {
+				t.Fatalf("Selected() = %q, want w2", got)
+			}
+		})
+	}
+}
+
+// wrapInt64 makes an optional int64 comparable with proto.Equal.
+func wrapInt64(v *int64) proto.Message {
+	if v == nil {
+		return (*frontendv1.RosterCurrentWorkspace)(nil)
+	}
+	return &frontendv1.RosterCurrentWorkspace{SwitchStartedAtMs: v}
+}
+
+func TestASelectionTheRegistryCannotTakeInstallsAndPublishesNothing(t *testing.T) {
+	sub := wsm.Subsection{ID: "sub-1", Repo: repo.ID, Name: "later", Place: 1}
+	tests := []struct {
+		name string
+		// seed installs the roster's registry, or nothing.
+		seed func(r sidebar.Resolver)
+		sel  func() wsm.Selection
+	}{
+		{
+			name: "no registry was installed yet",
+			seed: func(sidebar.Resolver) {},
+			sel:  func() wsm.Selection { return selectionOf(workspace("w1", "one")) },
+		},
+		{
+			name: "the registry carries no row the change names",
+			seed: func(r sidebar.Resolver) { r.SetRegistry(registry(workspace("w1", "one"))) },
+			sel:  func() wsm.Selection { return selectionOf(workspace("w9", "nine")) },
+		},
+		{
+			name: "the registry carries no repository the change names",
+			seed: func(r sidebar.Resolver) { r.SetRegistry(registry(workspace("w1", "one"))) },
+			sel: func() wsm.Selection {
+				sel := selectionOf(workspace("w1", "one"))
+				sel.Repository = wsm.Repository{ID: "repo-9"}
+				return sel
+			},
+		},
+		{
+			name: "the registry carries no subsection the change names",
+			seed: func(r sidebar.Resolver) { r.SetRegistry(registry(workspace("w1", "one"))) },
+			sel: func() wsm.Selection {
+				sel := selectionOf(workspace("w1", "one"))
+				sel.Subsection = &sub
+				return sel
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			r, surfaces := newResolver(t)
+			tt.seed(r)
+			before := r.Revision()
+
+			// Act.
+			ok := r.SetSelection(tt.sel(), sidebar.SelectStamp{ID: "sel-1"})
+
+			// Assert.
+			if ok {
+				t.Fatal("SetSelection took a change the registry cannot carry")
+			}
+			if got := r.Revision(); got != before {
+				t.Fatalf("revision = %d, want %d: a refused change published a roster", got, before)
+			}
+			if _, selected := r.Selected(); selected {
+				t.Fatal("a refused change installed a selection")
+			}
+			rec, found := dlog.FindRecord(surfaces.Records(), dlog.RecordQuery{
+				Operation: "daemon.sidebar.set_selection", Message: "the roster's registry cannot take the select's change; the caller installs a whole registry"})
+			if !found || rec.Level != "info" || rec.Context["selection_id"] != "sel-1" {
+				t.Fatalf("the refusal's record = %+v (found %v), want info naming sel-1", rec, found)
+			}
+		})
+	}
+}
+
+func TestTheSelectStampIsStatedOnlyWhileItsSelectionStands(t *testing.T) {
+	w1, w2 := ids.WorkspaceID("w1"), ids.WorkspaceID("w2")
+	tests := []struct {
+		name string
+		// then runs after a select stamped sel-1 made w2 current.
+		then   func(r sidebar.Resolver)
+		wantID string
+	}{
+		{
+			name:   "the select's own roster states it",
+			then:   func(sidebar.Resolver) {},
+			wantID: "sel-1",
+		},
+		{
+			name: "a registry carrying the same selection keeps it",
+			then: func(r sidebar.Resolver) {
+				reg := registry(workspace("w1", "one"), workspace("w2", "two"))
+				reg.Current = &w2
+				r.SetRegistry(reg)
+			},
+			wantID: "sel-1",
+		},
+		{
+			name: "a registry moving the selection away and back drops it",
+			then: func(r sidebar.Resolver) {
+				reg := registry(workspace("w1", "one"), workspace("w2", "two"))
+				reg.Current = &w1
+				r.SetRegistry(reg)
+				reg.Current = &w2
+				r.SetRegistry(reg)
+			},
+		},
+		{
+			name: "an unstamped selection of the same workspace drops it",
+			then: func(r sidebar.Resolver) {
+				r.SetRegistrySelected(registry(workspace("w1", "one"), workspace("w2", "two")), w2, sidebar.SelectStamp{})
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			r, _ := newResolver(t)
+			r.SetRegistry(registry(workspace("w1", "one"), workspace("w2", "two")))
+			if !r.SetSelection(selectionOf(workspace("w2", "two")), sidebar.SelectStamp{ID: "sel-1"}) {
+				t.Fatal("SetSelection refused")
+			}
+
+			// Act.
+			tt.then(r)
+
+			// Assert.
+			current := latest(t, r).GetCurrent()
+			if current.GetWorkspace().GetId() != "w2" || current.GetSelectionId() != tt.wantID {
+				t.Fatalf("current = %v, want w2 under %q", current, tt.wantID)
+			}
+		})
+	}
+}
+
+func TestAPatchedRegistryTakesTheStoresRowsWhole(t *testing.T) {
+	// Arrange.
+	stale := workspace("w3", "three")
+	stale.Current = true
+	folded := repo
+	folded.Folded = true
+	sub := wsm.Subsection{ID: "sub-1", Repo: repo.ID, Name: "later", Place: 1, Folded: true}
+	reg := registry(workspace("w1", "one"), workspace("w2", "two"), stale)
+	reg.Repositories = []wsm.Repository{folded}
+	reg.Subsections = []wsm.Subsection{sub}
+	sel := selectionOf(workspace("w2", "two"), workspace("w1", "one"))
+	sel.Subsection = &wsm.Subsection{ID: "sub-1", Repo: repo.ID, Name: "later", Place: 1}
+
+	// Act.
+	got, ok := sidebar.PatchedRegistry(reg, true, sel)
+
+	// Assert.
+	if !ok {
+		t.Fatal("PatchedRegistry refused a change the registry carries")
+	}
+	if got.Current == nil || *got.Current != "w2" {
+		t.Fatalf("current = %v, want w2", got.Current)
+	}
+	for _, ws := range got.Workspaces {
+		if want := ws.ID == "w2"; ws.Current != want {
+			t.Fatalf("%s current = %v, want %v: the store makes one workspace current", ws.ID, ws.Current, want)
+		}
+	}
+	if got.Workspaces[1].LastSelectedAt == nil {
+		t.Fatal("w2 did not take the store's row")
+	}
+	if got.Repositories[0].Folded || got.Subsections[0].Folded {
+		t.Fatalf("folds = %v/%v, want the store's expanded repository and subsection", got.Repositories[0].Folded, got.Subsections[0].Folded)
+	}
+	if !reg.Workspaces[2].Current || !reg.Repositories[0].Folded || !reg.Subsections[0].Folded {
+		t.Fatal("PatchedRegistry wrote through to the registry it was handed")
 	}
 }

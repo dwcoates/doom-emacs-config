@@ -98,9 +98,9 @@ func (f *fanned) SetRegistry(reg sidebar.Registry) {
 }
 
 // SetRegistrySelected binds the registry exactly as SetRegistry does.
-func (f *fanned) SetRegistrySelected(reg sidebar.Registry, ws ids.WorkspaceID) {
+func (f *fanned) SetRegistrySelected(reg sidebar.Registry, ws ids.WorkspaceID, stamp sidebar.SelectStamp) {
 	f.bindRegistry(reg)
-	f.Resolver.SetRegistrySelected(reg, ws)
+	f.Resolver.SetRegistrySelected(reg, ws, stamp)
 }
 
 // bindRegistry is the footer binding both registry installs share.

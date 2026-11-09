@@ -1067,11 +1067,7 @@ func (s *server) SelectWorkspace(
 	if done {
 		return answer(resp, cerr)
 	}
-	history := workspace.RecordSelection
-	if req.Msg.GetKeepSelectionHistory() {
-		history = workspace.KeepSelectionHistory
-	}
-	selected, cerr := s.selectSubject(ctx, rpc, subject, history, req.Msg.GetReveal(), resp)
+	selected, cerr := s.selectSubject(ctx, rpc, subject, selectSwitch(req.Msg), req.Msg.GetReveal(), resp)
 	if selected == nil {
 		return answer(resp, cerr)
 	}
@@ -1107,7 +1103,7 @@ func (s *server) SelectInEditor(
 		return connect.NewResponse(resp), nil
 	}
 	subject.Log.Info(rpc, "no host stream holds the workspace; the daemon selects it", nil)
-	selected, cerr := s.selectSubject(ctx, rpc, subject, workspace.RecordSelection, nil, resp)
+	selected, cerr := s.selectSubject(ctx, rpc, subject, workspace.Switch{History: workspace.RecordSelection}, nil, resp)
 	if selected == nil {
 		return answer(resp, cerr)
 	}
@@ -1146,16 +1142,30 @@ func (s *server) LoadPageInEditor(
 	return connect.NewResponse(resp), nil
 }
 
+// selectSwitch is what a SelectWorkspace request states about the user's
+// switch: whether it keeps the selection history, and when it began.
+func selectSwitch(req *agentreplv1.SelectWorkspaceRequest) workspace.Switch {
+	sw := workspace.Switch{History: workspace.RecordSelection}
+	if req.GetKeepSelectionHistory() {
+		sw.History = workspace.KeepSelectionHistory
+	}
+	if req.SwitchStartedAtMs != nil {
+		at := time.UnixMilli(req.GetSwitchStartedAtMs())
+		sw.StartedAt = &at
+	}
+	return sw
+}
+
 // selectSubject is THE ONE SELECT a client's request makes of the daemon:
 // SelectWorkspace's, and SelectInEditor's for a workspace no editor holds. It
-// selects SUBJECT under HISTORY and reveals REVEAL's row when it is set, and
+// selects SUBJECT under SW and reveals REVEAL's row when it is set, and
 // answers the success to send. A nil success is no selection: a refusal set
 // onto RESP's error arm with a nil error, or the error to answer.
 func (s *server) selectSubject(
 	ctx context.Context,
 	rpc string,
 	subject resolved,
-	history workspace.SelectionHistory,
+	sw workspace.Switch,
 	reveal *frontendv1.FeedId,
 	resp proto.Message,
 ) (*agentreplv1.SelectWorkspaceSuccess, *connect.Error) {
@@ -1166,7 +1176,7 @@ func (s *server) selectSubject(
 			return nil, fail(subject.Log, rpc, err)
 		}
 	}
-	if err := s.deps.Verbs.Select(ctx, subject.Record.ID, history); err != nil {
+	if err := s.deps.Verbs.Select(ctx, subject.Record.ID, sw); err != nil {
 		// A CALLER THAT LEFT IS NOT A FAILURE. A user switching workspaces
 		// quickly cancels the select of the one they switched away from while
 		// its revival runs; the revival goes on without it, and the answer

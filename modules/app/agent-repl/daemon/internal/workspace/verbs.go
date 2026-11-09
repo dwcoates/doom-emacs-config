@@ -72,11 +72,15 @@ type verbs struct {
 	// worktreeBound bounds a create's worktree step; see DefaultWorktreeBound.
 	worktreeBound time.Duration
 
-	// selection serializes Select's selection section — the read of the
-	// current workspace through the roster push — so two concurrent selects
-	// land whole, one after the other, and WSM's current and the roster's
-	// selection can never be left naming different workspaces.
+	// selection serializes Select's selection section — the store's write
+	// through the roster push — and EVERY WHOLE REGISTRY READ AND ITS INSTALL
+	// (installRegistry), so two concurrent selects land whole, one after the
+	// other, a registry read before a select's write is never installed after
+	// that select's push, and WSM's current and the roster's selection can
+	// never be left naming different workspaces.
 	selection sync.Mutex
+	// mintSelection mints each select's id (wsm.NewSelectionID).
+	mintSelection func() string
 	// names are the workspace names claimed in this process (mergenames.go).
 	names nameClaims
 	// pending is the pending-create set: every create running or held for
@@ -143,12 +147,27 @@ func (v *verbs) owned(ctx context.Context, rpc string, ws ids.WorkspaceID) (wsm.
 // durable registry fact calls it, which is what keeps the roster from needing
 // its own copy of the registry.
 func (v *verbs) republishRegistry(ctx context.Context, log dlog.Logger, operation string) {
+	v.installRegistry(ctx, log, operation, func(reg sidebar.Registry) {
+		v.deps.Sidebar.SetRegistry(reg)
+		logRepublished(log, operation, reg)
+	})
+}
+
+// installRegistry reads the roster's registry from WSM and hands it to
+// INSTALL, the read and the install together under the selection lock: a
+// select's store write and roster push (selectCurrent) take the same lock,
+// so a registry read before a select's write can never be installed after
+// it, putting the selection it left back on the roster. Every whole registry
+// install goes through here. A read that fails is recorded by readRegistry
+// and installs nothing.
+func (v *verbs) installRegistry(ctx context.Context, log dlog.Logger, operation string, install func(sidebar.Registry)) {
+	v.selection.Lock()
+	defer v.selection.Unlock()
 	reg, ok := v.readRegistry(ctx, log, operation)
 	if !ok {
 		return
 	}
-	v.deps.Sidebar.SetRegistry(reg)
-	logRepublished(log, operation, reg)
+	install(reg)
 }
 
 // readRegistry reads the roster's registry from WSM. A read that fails is

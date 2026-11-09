@@ -57,6 +57,17 @@ type Registry struct {
 	View wsm.SidebarView
 }
 
+// SelectStamp is what the roster states about the select that made a
+// workspace current (frontend.v1.RosterCurrentWorkspace.selection_id and
+// .switch_started_at_ms). The zero stamp states nothing.
+type SelectStamp struct {
+	// ID is the select's own id, minted per select.
+	ID string
+	// SwitchStartedAt is when the user's switch began, nil when the select
+	// carried no instant.
+	SwitchStartedAt *time.Time
+}
+
 // TurnStarted is the daemon's own fact that StartTurn was ACCEPTED. It aliases
 // the footer's spelling so the two views cannot disagree about what a turn is
 // or what it carries; nothing on the shim's streams states it, because the
@@ -105,8 +116,19 @@ type Resolver interface {
 	SetSelected(ws ids.WorkspaceID)
 	// SetRegistrySelected is SetRegistry and then SetSelected in ONE
 	// mutation and ONE push: a select's republished registry and the
-	// selection reach every client together.
-	SetRegistrySelected(reg Registry, ws ids.WorkspaceID)
+	// selection reach every client together. STAMP is what the roster
+	// states about the select that made ws current; the zero stamp is a
+	// selection no select of this daemon's made.
+	SetRegistrySelected(reg Registry, ws ids.WorkspaceID, stamp SelectStamp)
+	// SetSelection installs a select's change, read back in the store's own
+	// write (wsm.Selection), into the registry the roster holds, and the
+	// selection with STAMP, in ONE mutation and ONE push, with NO registry
+	// read: a switch reaches every client without waiting on the whole
+	// registry. It answers false, installing nothing, when the registry the
+	// roster holds cannot take the change -- none installed yet, or one
+	// carrying no row, repository or subsection the change names -- and the
+	// caller installs a whole registry instead (SetRegistrySelected).
+	SetSelection(sel wsm.Selection, stamp SelectStamp) bool
 	// Selected answers the workspace the roster's selection names right now,
 	// and false when it names none. It lets a caller ask whether the roster
 	// already agrees with the selection WSM stores before pushing a roster

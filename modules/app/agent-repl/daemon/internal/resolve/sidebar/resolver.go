@@ -1,6 +1,7 @@
 package sidebar
 
 import (
+	"slices"
 	"time"
 
 	"google.golang.org/protobuf/proto"
@@ -174,8 +175,21 @@ func (r *resolver) assertArm(arm string, log dlog.Logger) {
 // roster built from live frames alone would name no workspaces, which is not a
 // smaller roster but a wrong one.
 func (r *resolver) mutate(operation, message string, ctx dlog.Context, log dlog.Logger, apply func()) {
+	r.mutateIf(operation, message, ctx, log, func() bool {
+		apply()
+		return true
+	})
+}
+
+// mutateIf is mutate for a change that may decline under the lock: when
+// APPLY answers false it changed nothing, and nothing is rendered,
+// published or recorded.
+func (r *resolver) mutateIf(operation, message string, ctx dlog.Context, log dlog.Logger, apply func() bool) {
 	r.mu.Lock()
-	apply()
+	if !apply() {
+		r.mu.Unlock()
+		return
+	}
 	ready := r.state.regSeen
 	var roster *frontendv1.WorkspaceRoster
 	if ready {
@@ -313,8 +327,15 @@ func (r *resolver) currentWorkspace() *frontendv1.RosterCurrentWorkspace {
 	if ws == nil {
 		return nil
 	}
-	return &frontendv1.RosterCurrentWorkspace{
-		Workspace: ws.Ref()}
+	out := &frontendv1.RosterCurrentWorkspace{Workspace: ws.Ref()}
+	if st := r.state.stamp; st != nil && st.ws == ws.ID {
+		out.SelectionId = st.stamp.ID
+		if at := st.stamp.SwitchStartedAt; at != nil {
+			ms := at.UnixMilli()
+			out.SwitchStartedAtMs = &ms
+		}
+	}
+	return out
 }
 
 // selectedWorkspace is the registry's record of the selection, or nil when
@@ -352,17 +373,112 @@ func (r *resolver) SetRegistry(reg Registry) {
 // applied and repainted both (2026-10-08, the laggy-switch report). The
 // selection is installed AFTER the registry, exactly as the two calls did, so
 // a registry that no longer carries ws leaves the roster with no current.
-func (r *resolver) SetRegistrySelected(reg Registry, ws ids.WorkspaceID) {
+func (r *resolver) SetRegistrySelected(reg Registry, ws ids.WorkspaceID, stamp SelectStamp) {
 	r.assertArrangement(reg)
-	ctx := registryContext(reg)
+	ctx := stampContext(registryContext(reg), stamp)
 	ctx["workspace_id"] = string(ws)
 	r.mutate("daemon.sidebar.set_registry_selected",
 		"the roster took a registry snapshot and the selection, and cleared the workspace's attention marker",
 		ctx, r.log.Global(), func() {
 			r.installRegistry(reg)
-			selected := ws
-			r.state.selected = &selected
+			r.installSelected(ws, stamp)
 		})
+}
+
+// SetSelection installs a select's change into the registry the roster
+// holds, and the selection, with no registry read.
+//
+// THE CHANGE IS THE STORE'S OWN READ-BACK (wsm.Store.Select): the rows its
+// write left, read in the same transaction, replace the roster's copies
+// whole, so the registry held here and the store can never disagree about
+// a selection. The store makes at most one workspace current, and the
+// change names it, so every other row the roster holds stops being current.
+//
+// THE CALLER ORDERS IT AGAINST EVERY WHOLE REGISTRY READ (the workspace
+// verbs' selection lock): a read taken before this select's write can
+// never be installed after it.
+func (r *resolver) SetSelection(sel wsm.Selection, stamp SelectStamp) bool {
+	ctx := stampContext(dlog.Context{"workspace_id": string(sel.Current), "again": sel.Again, "rows": len(sel.Workspaces)}, stamp)
+	applied := false
+	r.mutateIf("daemon.sidebar.set_selection",
+		"the roster took the select's change and the selection, and cleared the workspace's attention marker",
+		ctx, r.log.Global(), func() bool {
+			reg, ok := patchedRegistry(r.state.reg, r.state.regSeen, sel)
+			if !ok {
+				return false
+			}
+			r.state.reg = reg
+			r.installSelected(sel.Current, stamp)
+			applied = true
+			return true
+		})
+	if !applied {
+		r.log.Global().Info("daemon.sidebar.set_selection",
+			"the roster's registry cannot take the select's change; the caller installs a whole registry", ctx)
+	}
+	return applied
+}
+
+// patchedRegistry answers REG with the select's change SEL installed, or
+// false when REG cannot take it: none was installed yet (SEEN), or it
+// carries no row, repository or subsection SEL names. It copies every slice
+// it changes: the registry it was handed is shared.
+func patchedRegistry(reg Registry, seen bool, sel wsm.Selection) (Registry, bool) {
+	if !seen {
+		return Registry{}, false
+	}
+	rows := make(map[ids.WorkspaceID]wsm.Workspace, len(sel.Workspaces))
+	for _, row := range sel.Workspaces {
+		rows[row.ID] = row
+	}
+	workspaces := slices.Clone(reg.Workspaces)
+	for i := range workspaces {
+		if row, ok := rows[workspaces[i].ID]; ok {
+			workspaces[i] = row
+			delete(rows, row.ID)
+			continue
+		}
+		workspaces[i].Current = false
+	}
+	if len(rows) > 0 {
+		return Registry{}, false
+	}
+	repositories := slices.Clone(reg.Repositories)
+	at := slices.IndexFunc(repositories, func(repo wsm.Repository) bool { return repo.ID == sel.Repository.ID })
+	if at < 0 {
+		return Registry{}, false
+	}
+	repositories[at] = sel.Repository
+	subsections := reg.Subsections
+	if sel.Subsection != nil {
+		subsections = slices.Clone(reg.Subsections)
+		at := slices.IndexFunc(subsections, func(sub wsm.Subsection) bool { return sub.ID == sel.Subsection.ID })
+		if at < 0 {
+			return Registry{}, false
+		}
+		subsections[at] = *sel.Subsection
+	}
+	current := sel.Current
+	reg.Workspaces, reg.Repositories, reg.Subsections, reg.Current = workspaces, repositories, subsections, &current
+	return reg, true
+}
+
+// installSelected makes WS the selection under STAMP; it runs under the lock.
+func (r *resolver) installSelected(ws ids.WorkspaceID, stamp SelectStamp) {
+	selected := ws
+	r.state.selected = &selected
+	r.state.stamp = &stampedSelection{ws: ws, stamp: stamp}
+}
+
+// stampContext adds a select's stamp to a record's context.
+func stampContext(ctx dlog.Context, stamp SelectStamp) dlog.Context {
+	if stamp.ID != "" {
+		ctx["selection_id"] = stamp.ID
+	}
+	if stamp.SwitchStartedAt != nil {
+		ctx["switch_started_at"] = stamp.SwitchStartedAt.UTC()
+	}
+	return ctx
 }
 
 // Selected answers the roster's selection, read under the lock every mutation
@@ -396,6 +512,11 @@ func (r *resolver) installRegistry(reg Registry) {
 	if reg.Current != nil {
 		current := *reg.Current
 		r.state.selected = &current
+		// A SELECTION THE REGISTRY MOVED is one no select of this daemon's
+		// stamped, so the stamp of the one it left is not stated for it.
+		if r.state.stamp != nil && r.state.stamp.ws != current {
+			r.state.stamp = nil
+		}
 	}
 	r.forgetNuked()
 }
@@ -418,6 +539,7 @@ func (r *resolver) forgetNuked() {
 	if r.state.selected != nil {
 		if _, ok := known[*r.state.selected]; !ok {
 			r.state.selected = nil
+			r.state.stamp = nil
 		}
 	}
 }

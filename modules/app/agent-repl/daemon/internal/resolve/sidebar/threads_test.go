@@ -112,7 +112,7 @@ func TestArchivedThreadsFollowEveryOpenThread(t *testing.T) {
 func TestAThreadRowCarriesItsSummaryAndCurrent(t *testing.T) {
 	// Arrange
 	r, _ := newResolver(t)
-	r.SetRegistrySelected(withThreads(thread("t-1", "why", nil)), "t-1")
+	r.SetRegistrySelected(withThreads(thread("t-1", "why", nil)), "t-1", sidebar.SelectStamp{})
 
 	// Act
 	r.SetSummary("t-1", "Rayleigh scattering")
@@ -140,7 +140,7 @@ func TestTheAppSwitcherShowsTheSelectedWorkspacesApp(t *testing.T) {
 			r, _ := newResolver(t)
 
 			// Act
-			r.SetRegistrySelected(withThreads(thread("t-1", "why", nil)), tc.selected)
+			r.SetRegistrySelected(withThreads(thread("t-1", "why", nil)), tc.selected, sidebar.SelectStamp{})
 
 			// Assert
 			switcher := latest(t, r).GetAppSwitcher()
@@ -209,7 +209,7 @@ func TestTheCurrentThreadsRowCarriesItsOutline(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange
 			r, _ := newResolver(t)
-			r.SetRegistrySelected(withThreads(thread("t-1", "why", nil)), ids.WorkspaceID(tc.selected))
+			r.SetRegistrySelected(withThreads(thread("t-1", "why", nil)), ids.WorkspaceID(tc.selected), sidebar.SelectStamp{})
 			outline := &frontendv1.RosterThreadOutline{Rows: []*frontendv1.RosterThreadOutlineRow{{Label: &frontendv1.RosterThreadOutlineLabel{Text: "why"}}}}
 
 			// Act
@@ -227,7 +227,7 @@ func TestTheCurrentThreadsRowCarriesItsOutline(t *testing.T) {
 func TestATakenBackOutlineLeavesTheRow(t *testing.T) {
 	// Arrange
 	r, _ := newResolver(t)
-	r.SetRegistrySelected(withThreads(thread("t-1", "why", nil)), "t-1")
+	r.SetRegistrySelected(withThreads(thread("t-1", "why", nil)), "t-1", sidebar.SelectStamp{})
 	r.SetThreadOutline("t-1", &frontendv1.RosterThreadOutline{Rows: []*frontendv1.RosterThreadOutlineRow{{}}})
 
 	// Act

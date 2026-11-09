@@ -67,3 +67,9 @@ func NewFaultID() ids.FaultID { return ids.FaultID(mint()) }
 // NewNewsDigestID mints a news digest's identity: the opaque echo token a
 // dismiss names (frontend.v1.NewsDigestId).
 func NewNewsDigestID() string { return mint() }
+
+// NewSelectionID mints one select's identity, which the roster states with
+// the selection it made (frontend.v1.RosterCurrentWorkspace.selection_id) so
+// a client's record of painting it is keyed to that select. It is stored
+// nowhere: it lives as long as the selection it names.
+func NewSelectionID() string { return mint() }

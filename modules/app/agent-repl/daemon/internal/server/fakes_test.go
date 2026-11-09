@@ -443,6 +443,9 @@ type fakeVerbs struct {
 	// lastSelectHistory is the workspace.SelectionHistory the newest Select
 	// was asked for.
 	lastSelectHistory atomic.Int32
+	// lastSelectStartedAt is the switch instant the newest Select was
+	// handed, nil for none; guarded by selectedMu.
+	lastSelectStartedAt *time.Time
 	// selected is every workspace Select was handed, in order.
 	selectedMu sync.Mutex
 	selected   []ids.WorkspaceID
@@ -776,11 +779,12 @@ func (f *fakeVerbs) CreateTask(context.Context, string) (wsm.Task, error) {
 	return f.createTask, f.createTaskErr
 }
 
-func (f *fakeVerbs) Select(ctx context.Context, ws ids.WorkspaceID, history workspace.SelectionHistory) error {
+func (f *fakeVerbs) Select(ctx context.Context, ws ids.WorkspaceID, sw workspace.Switch) error {
 	f.selects.Add(1)
-	f.lastSelectHistory.Store(int32(history))
+	f.lastSelectHistory.Store(int32(sw.History))
 	f.selectedMu.Lock()
 	f.selected = append(f.selected, ws)
+	f.lastSelectStartedAt = sw.StartedAt
 	f.selectedMu.Unlock()
 	if f.selectEntered != nil {
 		close(f.selectEntered)
