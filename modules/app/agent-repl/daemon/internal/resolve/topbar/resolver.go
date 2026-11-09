@@ -161,7 +161,7 @@ func (r *resolver) mutate(ws ids.WorkspaceID, operation, message string, ctx dlo
 	}
 	log := r.logOf(ws, s)
 	edges := sourceEdges(s, view)
-	park, coldGate, started := s.park(), s.coldGate, s.started
+	park, coldGate, started := s.park.Park(), s.coldGate, s.started
 	// PUBLISHED UNDER THE LOCK THAT RENDERED IT, so views reach the topic in
 	// the order the changes were made. Published after the unlock, a change
 	// rendered first could be published second, and a stale view overwrote a
@@ -218,7 +218,7 @@ func (r *resolver) mutate(ws ids.WorkspaceID, operation, message string, ctx dlo
 // strip by their own content — the chip carrying the context the session held
 // with the reason in its hover, the strip carrying the state as one line.
 func (r *resolver) render(s *wsState) (*frontendv1.TopbarView, error) {
-	connectivity, err := r.connectivity(connectivityKey(s.linkSeen, s.link, s.hostStream && s.webStream, s.park(), s.coldGate))
+	connectivity, err := r.connectivity(connectivityKey(s.linkSeen, s.link, s.hostStream && s.webStream, s.park.Park(), s.coldGate))
 	if err != nil {
 		return nil, err
 	}
@@ -768,21 +768,21 @@ func (r *resolver) OnLink(ws ids.WorkspaceID, link sessionwatcher.LinkState) {
 			// more on it, so the next link state belongs to the shim the
 			// reviving prompt spawned, and a spawn that then dies must hollow
 			// the indicator like any other death.
-			s.parked = false
+			s.park.SetParked(false)
 		})
 }
 
 // SetParked installs, or lifts, the daemon's park.
 func (r *resolver) SetParked(ws ids.WorkspaceID, parked bool) {
 	r.mutate(ws, "daemon.topbar.set_parked", "the topbar took the daemon's park",
-		dlog.Context{"parked": parked}, func(s *wsState) { s.parked = parked })
+		dlog.Context{"parked": parked}, func(s *wsState) { s.park.SetParked(parked) })
 }
 
 // SetNextKeepalive takes the cache keeper's next scheduled keep-alive, the
 // zero time for none. A standing park carries it (wsState.park).
 func (r *resolver) SetNextKeepalive(ws ids.WorkspaceID, next time.Time) {
 	r.mutate(ws, "daemon.topbar.set_next_keepalive", "the topbar took the next scheduled keep-alive",
-		dlog.Context{"next_keepalive": next}, func(s *wsState) { s.nextKeepalive = next })
+		dlog.Context{"next_keepalive": next}, func(s *wsState) { s.park.SetNextKeepalive(next) })
 }
 
 // SetColdGate installs, or retires, the standing cold gate — the same fact,

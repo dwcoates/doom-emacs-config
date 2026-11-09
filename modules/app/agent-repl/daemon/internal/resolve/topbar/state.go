@@ -1,8 +1,6 @@
 package topbar
 
 import (
-	"time"
-
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
@@ -219,16 +217,15 @@ type wsState struct {
 	link shimclient.LinkState
 	// linkSeen reports whether any link state has been observed.
 	linkSeen bool
-	// parked is the daemon's deliberate stand-down of an idle session, the
+	// park holds the daemon's deliberate stand-down of an idle session, the
 	// same fact the footer and the roster key their idle arms on. There is
 	// one park, drawn as the live idle session it stands in for. It is
 	// cleared by the next link state of any kind, which belongs to the
 	// revival's own spawn.
-	parked bool
-	// nextKeepalive is the cache keeper's next scheduled keep-alive for this
-	// workspace, the zero time for none. The keeper states it whether or not
-	// a park stands, so a park raised later carries the current one (park).
-	nextKeepalive time.Time
+	// It also holds the cache keeper's next scheduled keep-alive, stated
+	// whether or not a park stands, so a park raised later carries the
+	// current one (wsm.ParkState).
+	park wsm.ParkState
 	// coldGate reports that this workspace is STANDING AT THE COLD GATE: the
 	// shim answered `cold` to the session start, so no session was ever
 	// created and the feed is showing the gate card the reader has to answer.
@@ -385,13 +382,4 @@ func (s *wsState) missing() []string {
 		out = append(out, "account")
 	}
 	return out
-}
-
-// park is the workspace's park as one fact: whether one stands, with the
-// session's next scheduled keep-alive (wsm.Park).
-func (s *wsState) park() wsm.Park {
-	if !s.parked {
-		return wsm.ParkNone
-	}
-	return wsm.Parked(s.nextKeepalive)
 }

@@ -93,3 +93,44 @@ func TestParkString(t *testing.T) {
 		})
 	}
 }
+
+func TestParkState(t *testing.T) {
+	at := time.Date(2026, 11, 9, 14, 3, 0, 0, time.UTC)
+	tests := []struct {
+		name    string
+		arrange func(s *ParkState)
+		want    Park
+	}{
+		{name: "nothing held is no park", arrange: func(*ParkState) {}, want: ParkNone},
+		{name: "a schedule alone raises no park", arrange: func(s *ParkState) { s.SetNextKeepalive(at) }, want: ParkNone},
+		{name: "a park raised after the schedule carries it", arrange: func(s *ParkState) {
+			s.SetNextKeepalive(at)
+			s.SetParked(true)
+		}, want: Parked(at)},
+		{name: "a park raised before the schedule carries it once stated", arrange: func(s *ParkState) {
+			s.SetParked(true)
+			s.SetNextKeepalive(at)
+		}, want: Parked(at)},
+		{name: "a park with none scheduled carries none", arrange: func(s *ParkState) { s.SetParked(true) }, want: Parked(time.Time{})},
+		{name: "a lifted park is no park, whatever is scheduled", arrange: func(s *ParkState) {
+			s.SetNextKeepalive(at)
+			s.SetParked(true)
+			s.SetParked(false)
+		}, want: ParkNone},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			var s ParkState
+			tt.arrange(&s)
+
+			// Act
+			got := s.Park()
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("Park() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

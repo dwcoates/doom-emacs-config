@@ -1,6 +1,7 @@
 package footer
 
 import (
+	"reflect"
 	"testing"
 
 	"agent-repld/internal/wsm"
@@ -66,5 +67,23 @@ func TestAllowanceWindowObserveVerdict(t *testing.T) {
 				t.Fatalf("window = %+v, want rejected scoped to reset %d", w, tc.wantResetS)
 			}
 		})
+	}
+}
+
+// TestTheParkIsHeldInTheSharedState pins that this view holds its park in the
+// shared wsm.ParkState, so it composes a park exactly as the other
+// session-scoped view does rather than through fields of its own.
+func TestTheParkIsHeldInTheSharedState(t *testing.T) {
+	// Act
+	field, ok := reflect.TypeOf(wsState{}).FieldByName("park")
+
+	// Assert
+	if !ok || field.Type != reflect.TypeOf(wsm.ParkState{}) {
+		t.Fatalf("wsState.park = %v (found %v), want a wsm.ParkState", field.Type, ok)
+	}
+	for _, retired := range []string{"parked", "nextKeepalive"} {
+		if _, ok := reflect.TypeOf(wsState{}).FieldByName(retired); ok {
+			t.Errorf("wsState carries its own %q, want the park only in wsm.ParkState", retired)
+		}
 	}
 }

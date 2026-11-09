@@ -1722,7 +1722,7 @@ func TestThePublishedParkCarriesTheNextKeepalive(t *testing.T) {
 			tt.arrange(h.r)
 
 			// Assert
-			if got := h.state(t).park(); got != tt.want {
+			if got := h.state(t).park.Park(); got != tt.want {
 				t.Fatalf("park = %v, want %v", got, tt.want)
 			}
 		})

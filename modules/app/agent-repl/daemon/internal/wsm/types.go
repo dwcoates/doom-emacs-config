@@ -598,6 +598,31 @@ func (p Park) NextKeepalive() (time.Time, bool) {
 	return p.next, true
 }
 
+// ParkState is a session-scoped view's two halves of a park, each written by
+// its own owner (Park): whether a park stands, and the cache keeper's next
+// scheduled keep-alive, held whether or not one stands. The footer and the
+// topbar each keep one per workspace, so the two compose a park alike.
+type ParkState struct {
+	parked bool
+	next   time.Time
+}
+
+// SetParked raises, or lifts, the park.
+func (s *ParkState) SetParked(parked bool) { s.parked = parked }
+
+// SetNextKeepalive holds the keeper's next scheduled keep-alive, the zero
+// time for none.
+func (s *ParkState) SetNextKeepalive(next time.Time) { s.next = next }
+
+// Park is the park as one fact: ParkNone while none stands, else a park
+// carrying the next keep-alive held.
+func (s ParkState) Park() Park {
+	if !s.parked {
+		return ParkNone
+	}
+	return Parked(s.next)
+}
+
 // String names the park for the records.
 func (p Park) String() string {
 	if !p.standing {

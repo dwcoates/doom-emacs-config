@@ -1,6 +1,8 @@
 package topbar
 
 import (
+	"agent-repld/internal/wsm"
+	"reflect"
 	"testing"
 )
 
@@ -105,7 +107,7 @@ func TestReadinessGatesAParkedWorkspaceOnTheWorkspaceFactsAlone(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange
 			s := newWSState()
-			s.parked = true
+			s.park.SetParked(true)
 			tc.state(s)
 
 			// Act
@@ -122,7 +124,7 @@ func TestReadinessGatesAParkedWorkspaceOnTheWorkspaceFactsAlone(t *testing.T) {
 func TestAParkedWorkspaceIsNeverReportedAsAwaitingASessionFact(t *testing.T) {
 	// Arrange
 	s := newWSState()
-	s.parked = true
+	s.park.SetParked(true)
 
 	// Act
 	got := s.missing()
@@ -212,7 +214,7 @@ func TestSessionlessUnderAPark(t *testing.T) {
 			// Arrange
 			s := newWSState()
 			s.started = true
-			s.parked = tt.parked
+			s.park.SetParked(tt.parked)
 
 			// Act
 			got := s.sessionless()
@@ -222,5 +224,23 @@ func TestSessionlessUnderAPark(t *testing.T) {
 				t.Fatalf("sessionless() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+// TestTheParkIsHeldInTheSharedState pins that this view holds its park in the
+// shared wsm.ParkState, so it composes a park exactly as the other
+// session-scoped view does rather than through fields of its own.
+func TestTheParkIsHeldInTheSharedState(t *testing.T) {
+	// Act
+	field, ok := reflect.TypeOf(wsState{}).FieldByName("park")
+
+	// Assert
+	if !ok || field.Type != reflect.TypeOf(wsm.ParkState{}) {
+		t.Fatalf("wsState.park = %v (found %v), want a wsm.ParkState", field.Type, ok)
+	}
+	for _, retired := range []string{"parked", "nextKeepalive"} {
+		if _, ok := reflect.TypeOf(wsState{}).FieldByName(retired); ok {
+			t.Errorf("wsState carries its own %q, want the park only in wsm.ParkState", retired)
+		}
 	}
 }

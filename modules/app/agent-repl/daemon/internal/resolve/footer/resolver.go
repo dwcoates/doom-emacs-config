@@ -816,14 +816,14 @@ func (r *resolver) SetUpdating(ws ids.WorkspaceID, updating bool) {
 // status, never a dead link.
 func (r *resolver) SetParked(ws ids.WorkspaceID, parked bool) {
 	r.mutate(ws, "daemon.footer.set_parked", "the footer took the daemon's park",
-		dlog.Context{"parked": parked}, func(s *wsState) { s.parked = parked })
+		dlog.Context{"parked": parked}, func(s *wsState) { s.park.SetParked(parked) })
 }
 
 // SetNextKeepalive takes the cache keeper's next scheduled keep-alive, the
 // zero time for none. A standing park carries it (wsState.park).
 func (r *resolver) SetNextKeepalive(ws ids.WorkspaceID, next time.Time) {
 	r.mutate(ws, "daemon.footer.set_next_keepalive", "the footer took the next scheduled keep-alive",
-		dlog.Context{"next_keepalive": next}, func(s *wsState) { s.nextKeepalive = next })
+		dlog.Context{"next_keepalive": next}, func(s *wsState) { s.park.SetNextKeepalive(next) })
 }
 
 // SetAwaiting installs, or lifts with an empty name, the workspace this one
@@ -1021,7 +1021,7 @@ func (r *resolver) OnLink(ws ids.WorkspaceID, link sessionwatcher.LinkState) {
 			// reviving prompt spawned. Clearing it here — rather than only on
 			// LinkConnected — is what makes a revival whose spawn then DIES
 			// read `dead` again instead of staying masked as a park.
-			s.parked = false
+			s.park.SetParked(false)
 			// A DEAD SHIM RUNS NO TURN. The process that ran the vendor
 			// query is gone, so whatever turn the strip was drawing ended
 			// with it and no terminal will ever arrive for it. Kept, it drew

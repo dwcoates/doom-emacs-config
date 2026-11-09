@@ -398,9 +398,9 @@ type wsState struct {
 	linkSeen bool
 	// everConnected distinguishes a shim that died from one that never started.
 	everConnected bool
-	// parked reports the daemon's deliberate stand-down of this workspace's
-	// idle shim, recorded as the `parked` session terminal. It is the SAME fact the roster keys its
-	// idle arm on (resolve/sidebar/status.go's `parked`), handed to both
+	// park holds the daemon's deliberate stand-down of this workspace's
+	// idle shim, recorded as the `parked` session terminal. It is the SAME fact
+	// the roster keys its idle arm on (resolve/sidebar/status.go's `parked`), handed to both
 	// surfaces from the one site that writes the terminal, so the dot and the
 	// strip cannot disagree about the same park.
 	//
@@ -408,11 +408,11 @@ type wsState struct {
 	// dead link and publishes nothing further on it, so the next OnLink this
 	// workspace sees belongs to the revival's own spawn, and a spawn that then
 	// FAILS must read `dead` like any other.
-	parked bool
-	// nextKeepalive is the cache keeper's next scheduled keep-alive for this
-	// workspace, the zero time for none. The keeper states it whether or not
-	// a park stands, so a park raised later carries the current one (park).
-	nextKeepalive time.Time
+	//
+	// It also holds the cache keeper's next scheduled keep-alive, stated
+	// whether or not a park stands, so a park raised later carries the
+	// current one (wsm.ParkState).
+	park wsm.ParkState
 	// awaiting is the name of the workspace this one awaits correspondence
 	// from (SetAwaiting), empty while it awaits none: it stands the
 	// background arm while no turn runs, as live detached work does.
@@ -845,13 +845,4 @@ func (s *wsState) retryBlocks() bool {
 type turnSpan struct {
 	startedAt time.Time
 	endedAt   time.Time
-}
-
-// park is the workspace's park as one fact: whether one stands, with the
-// session's next scheduled keep-alive (wsm.Park).
-func (s *wsState) park() wsm.Park {
-	if !s.parked {
-		return wsm.ParkNone
-	}
-	return wsm.Parked(s.nextKeepalive)
 }
