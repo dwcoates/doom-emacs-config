@@ -65,6 +65,7 @@ import type {
   FooterStatusActivityQueryDied,
   FooterStatusActivityQuestionLead,
   FooterStatusActivityRetrying,
+  FooterStatusActivityVendorSilence,
   FooterStatusActivityStartFailed,
   FooterStatusActivityTurnEnded,
   FooterStatusActivityVendorStart,
@@ -105,7 +106,7 @@ import type {
   FooterStatusQuestionActivity,
   FooterStatusQuestionSalient,
 } from "../../../proto/gen/ts/frontend/v1/footer_pb";
-import { formatAge, formatCountdown } from "../duration.js";
+import { formatAge, formatCountdown, formatTickedElapsed } from "../duration.js";
 import type { Ticker } from "../clock.js";
 import { tick } from "../feed/ticking.js";
 import { log } from "../log.js";
@@ -319,15 +320,23 @@ function drawTier(
     case "salient": {
       const salientPath = `${path}.salient`;
       const kind = requireCase(tier.value.kind, `${salientPath}.kind`);
+      const at = requireMessage(tier.value.at, `${salientPath}.at`);
+      // THE VENDOR'S SILENCE IS ITS OWN AGE: the line reads "no API response
+      // for 1m 12s" off the same instant, so a trailing "· 1m 12s ago" would
+      // say it twice.
+      if (kind.case === "vendorSilence") {
+        return {
+          tier: "salient",
+          arm: kind.case,
+          line: drawFooterStatusActivityVendorSilence(kind.value, at, deps, `${salientPath}.${kind.case}`),
+          age: null,
+        };
+      }
       return {
         tier: "salient",
         arm: kind.case,
         line: drawSalientKind(kind, deps, `${salientPath}.${kind.case}`),
-        age: drawFooterStatusActivityAt(
-          requireMessage(tier.value.at, `${salientPath}.at`),
-          deps,
-          `${salientPath}.at`,
-        ),
+        age: drawFooterStatusActivityAt(at, deps, `${salientPath}.at`),
       };
     }
     case "unpinned":
@@ -1208,6 +1217,49 @@ export function drawFooterStatusActivityRetrying(
       break;
   }
   line.appendChild(document.createTextNode(` · ${u.status}`));
+  return line;
+}
+
+/**
+ * The vendor's silence under the `waiting` step: "no API response for 1m 12s
+ * · response not started · last heard: read finished". The silence counts up
+ * from the salient's instant, the moment the vendor was last heard from, on
+ * the shared ticker. Where the response stands is the arm the daemon set; what
+ * was last heard is the daemon's words, drawn verbatim.
+ */
+export function drawFooterStatusActivityVendorSilence(
+  u: FooterStatusActivityVendorSilence,
+  at: FooterStatusActivityAt,
+  deps: AllowanceDeps,
+  path: string,
+): HTMLElement {
+  const heardMs = msOf(at.atMs, `${path}.at.at_ms`);
+  const response = requireCase(u.response, `${path}.response`);
+  let stage: string;
+  switch (response.case) {
+    case "notStarted":
+      stage = "response not started";
+      break;
+    case "stalled":
+      stage = "response stalled";
+      break;
+    default: {
+      const other: { case: string } = response;
+      return unreachableArm(`${path}.response`, other.case);
+    }
+  }
+  const lastHeard = requireMessage(
+    response.value.lastHeard,
+    `${path}.response.${response.case}.last_heard`,
+  );
+  const line = document.createElement("span");
+  line.className = "footer-activity-vendor-silence";
+  line.appendChild(
+    footerClockSpan(deps.ctx.ticker, "age", "footer-vendor-silence-for", (span, nowMs) => {
+      span.textContent = `no API response for ${formatTickedElapsed(nowMs - heardMs)}`;
+    }),
+  );
+  line.appendChild(document.createTextNode(` · ${stage} · last heard: ${lastHeard.text}`));
   return line;
 }
 

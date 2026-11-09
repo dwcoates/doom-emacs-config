@@ -566,9 +566,10 @@ message FooterStatusWorkingActivity {
 message FooterStatusWorkingSalient {
   // When this line began standing; the client ticks the relative age.
   FooterStatusActivityAt at = 1;
-  // The one salient line. A compaction ranks first, because it explains the
-  // `compacting` step; a retry next; then a deploy's progress and the push
-  // notification, in that order.
+  // The one salient line. Under the `waiting` step it is ALWAYS the vendor's
+  // silence, the line that explains that step. Otherwise a compaction ranks
+  // first, because it explains the `compacting` step; a retry next; then a
+  // deploy's progress and the push notification, in that order.
   oneof kind {
     // A COMPACTION'S OWN PROGRESS, phase by phase, standing while the
     // compaction RUNS and ending with the cut (or the turn's terminal) that
@@ -589,6 +590,16 @@ message FooterStatusWorkingSalient {
     // submitted. STATUS-INDEPENDENT: every status arm's salient oneof carries
     // it.
     FooterStatusActivityNotification notification = 6;
+    // NOTHING HAS COME BACK FROM THE VENDOR past the silence threshold: the
+    // line that explains the `waiting` step (FooterSubStatusWorkingWaiting),
+    // standing EXACTLY while that step does, so the step never stands without
+    // it. The salient's `at` is the instant the vendor was last heard from,
+    // so the age the client ticks IS the time since the last API response.
+    // A retry outranks it: a call the vendor retries leaves `working` for the
+    // vendor fault status's `api_retrying` step, whose line is the retry's.
+    // It outranks a deploy's progress, the push notification and a standing
+    // compaction line, none of which explains the `waiting` step.
+    FooterStatusActivityVendorSilence vendor_silence = 8;
   }
   // Tag 7 (`context_budget`) is RETIRED: no footer line warns that the
   // context is nearly full (owner ruling, 2026-10-06). A failed compaction
@@ -613,6 +624,44 @@ message FooterStatusActivityCompaction {
   // exactly.
   optional FooterColdGateFiguredLine parts = 2;
 }
+// The vendor's silence line: how the turn's wait on the vendor API stands.
+// The time since the vendor was last heard from is the enclosing salient's
+// `at`, ticked by the client; this message says what was last heard and what
+// that means for the response the turn waits on.
+message FooterStatusActivityVendorSilence {
+  // WHERE THE RESPONSE STANDS, read from the last frame heard. The two are
+  // exclusive: the last frame either closed out an exchange (so a fresh
+  // request is out) or was part of a response still streaming.
+  oneof response {
+    // The last frame closed out an exchange — a tool call returned, a hook
+    // ran, injected context landed — so the next request is out and nothing
+    // of its response has come back. Drawn "response not started".
+    FooterStatusActivityVendorSilenceNotStarted not_started = 1;
+    // The last frame was part of a response still streaming — thinking, the
+    // reply's text, a tool call surfacing — and the stream then went quiet.
+    // A tool call's arguments stream without a frame of their own, so a long
+    // tool call being written reads as this. Drawn "response stalled".
+    FooterStatusActivityVendorSilenceStalled stalled = 2;
+  }
+}
+// The next request is out and its response has not started.
+message FooterStatusActivityVendorSilenceNotStarted {
+  // The frame that closed out the previous exchange. ALWAYS SET.
+  FooterStatusActivityVendorSilenceLastHeard last_heard = 1;
+}
+// A response started streaming and then went quiet.
+message FooterStatusActivityVendorSilenceStalled {
+  // The last frame of the stalled response. ALWAYS SET.
+  FooterStatusActivityVendorSilenceLastHeard last_heard = 1;
+}
+// The last thing heard from the vendor, worded by the daemon from the frame's
+// item and phase ("thinking", "reply text", "bash returned", "a subagent's
+// read started"). Drawn verbatim; a client words nothing.
+message FooterStatusActivityVendorSilenceLastHeard {
+  // The composed words, drawn after "last heard".
+  string text = 1;
+}
+
 // The prompt is being delivered.
 message FooterSubStatusWorkingSubmitting {}
 // An inference call is running and no tool call of the main agent is.

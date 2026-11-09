@@ -658,7 +658,7 @@ func (r *resolver) coldGateAnswer(s *wsState, log dlog.Logger) *frontendv1.Foote
 	if s.coldAnswer == nil {
 		return nil
 	}
-	arm := &frontendv1.FooterStatusWorking{Activity: r.workingActivity(s)}
+	arm := &frontendv1.FooterStatusWorking{}
 	switch s.coldAnswer.Choice {
 	case ChoiceCompact, ChoiceCompactAndResume:
 		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "cold gate answered with compact"})
@@ -676,6 +676,7 @@ func (r *resolver) coldGateAnswer(s *wsState, log dlog.Logger) *frontendv1.Foote
 		arm.Substatus = &frontendv1.FooterStatusWorking_Submitting{
 			Submitting: &frontendv1.FooterSubStatusWorkingSubmitting{}}
 	}
+	arm.Activity = r.workingActivity(s, arm)
 	return &frontendv1.FooterStatus{Status: &frontendv1.FooterStatus_Working{Working: arm}}
 }
 
@@ -715,7 +716,7 @@ func (r *resolver) thinking(s *wsState, log dlog.Logger) *frontendv1.FooterStatu
 	if s.turn == nil && !s.compacting {
 		return nil
 	}
-	arm := &frontendv1.FooterStatusWorking{Activity: r.workingActivity(s)}
+	arm := &frontendv1.FooterStatusWorking{}
 	switch {
 	case s.turn == nil:
 		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "case s.turn == nil (vendor compaction)"})
@@ -737,6 +738,7 @@ func (r *resolver) thinking(s *wsState, log dlog.Logger) *frontendv1.FooterStatu
 		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "default"})
 		arm.Substatus = workingStep(s, r.vendorSilent(s)).Substatus
 	}
+	arm.Activity = r.workingActivity(s, arm)
 	return &frontendv1.FooterStatus{Status: &frontendv1.FooterStatus_Working{Working: arm}}
 }
 

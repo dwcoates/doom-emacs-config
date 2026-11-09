@@ -431,6 +431,13 @@ describe("the activity cell", () => {
     expect(harness.$(".footer-activity [data-datum='count']")?.textContent).toBe("3");
   });
 
+  it("draws the vendor's silence under the waiting step", async () => {
+    // Arrange / Act
+    await withFooter({ status: "working", substatus: "waiting", activity: "vendorSilence" });
+    // Assert
+    expect(harness.text(".footer-activity")).toContain("response stalled · last heard: thinking");
+  });
+
   it("colors the retry attempt as a typed datum", async () => {
     // Arrange / Act
     await withFooter({ status: "working", activity: "retrying" });

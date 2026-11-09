@@ -162,15 +162,31 @@ func (r *resolver) OnMainAgent(ws ids.WorkspaceID, agent *conversationv1.AgentId
 		})
 }
 
-// classify reads one activity frame: the item's kind and the phase the frame
-// puts it in. ok is false for a frame the footer cannot read, which is
-// recorded at ERROR: the tables above must cover the whole contract.
-func (r *resolver) classify(ws ids.WorkspaceID, s *wsState, act *conversationv1.AgentActivity) (feedKind, itemPhase, bool) {
+// classifiedFrame is one activity frame as the footer reads it.
+type classifiedFrame struct {
+	// arm is the frame's item arm, empty when none is set.
+	arm protoreflect.Name
+	// phaseArm is the item's own oneof arm, empty when unread.
+	phaseArm protoreflect.Name
+	// kind is the item's working-step reading.
+	kind feedKind
+	// phase is where the frame puts its item.
+	phase itemPhase
+	// ok is false for a frame the footer cannot read.
+	ok bool
+}
+
+// classify reads one activity frame: the item's arm, its kind, and the phase
+// the frame puts it in. ok is false for a frame the footer cannot read, which
+// is recorded at ERROR: the tables above must cover the whole contract.
+func (r *resolver) classify(ws ids.WorkspaceID, s *wsState, act *conversationv1.AgentActivity) classifiedFrame {
+	f := classifiedFrame{phase: phaseNone}
 	msg := act.ProtoReflect()
 	field, ok := protoarm.Set(msg, "item")
 	if !ok {
-		return feedKind{}, phaseNone, false
+		return f
 	}
+	f.arm = field.Name()
 	kind, known := feedKinds[field.Name()]
 	if !known {
 		r.logOf(ws, s).Error("daemon.footer.work_step_unknown_item",
@@ -179,8 +195,9 @@ func (r *resolver) classify(ws ids.WorkspaceID, s *wsState, act *conversationv1.
 				"invariant_violation": "every AgentActivity item arm is in feedKinds",
 				"remediation":         "add the arm to footer.feedKinds",
 			})
-		return feedKind{}, phaseNone, false
+		return f
 	}
+	f.kind = kind
 	item := msg.Get(field).Message()
 	oneofs := item.Descriptor().Oneofs()
 	if oneofs.Len() != 1 {
@@ -189,12 +206,13 @@ func (r *resolver) classify(ws ids.WorkspaceID, s *wsState, act *conversationv1.
 				"arm": string(field.Name()), "oneofs": oneofs.Len(),
 				"invariant_violation": "every AgentActivity item message has exactly one oneof",
 			})
-		return feedKind{}, phaseNone, false
+		return f
 	}
 	arm := item.WhichOneof(oneofs.Get(0))
 	if arm == nil {
-		return kind, phaseNone, false
+		return f
 	}
+	f.phaseArm = arm.Name()
 	phase, known := itemPhases[arm.Name()]
 	if !known {
 		r.logOf(ws, s).Error("daemon.footer.work_step_unknown_phase",
@@ -203,16 +221,17 @@ func (r *resolver) classify(ws ids.WorkspaceID, s *wsState, act *conversationv1.
 				"invariant_violation": "every item oneof arm is in footer.itemPhases",
 				"remediation":         "add the arm to footer.itemPhases",
 			})
-		return kind, phaseNone, false
+		return f
 	}
-	return kind, phase, true
+	f.phase, f.ok = phase, true
+	return f
 }
 
-// trackFeed folds one activity frame into the working step. It runs inside
-// OnActivity's mutation. Every frame is classified, so an arm the tables do
-// not cover is recorded whatever the status; only the main agent's frames
-// while a turn runs move the step.
-func (r *resolver) trackFeed(ws ids.WorkspaceID, s *wsState, agent *conversationv1.AgentId, unit string, act *conversationv1.AgentActivity) {
+// trackFeed folds one classified activity frame into the working step. It
+// runs inside OnActivity's mutation, which classifies every frame once, so an
+// arm the tables do not cover is recorded whatever the status; only the main
+// agent's frames while a turn runs move the step.
+func (r *resolver) trackFeed(s *wsState, agent *conversationv1.AgentId, unit string, f classifiedFrame) {
 	if unit == "" {
 		return
 	}
@@ -220,8 +239,8 @@ func (r *resolver) trackFeed(ws ids.WorkspaceID, s *wsState, agent *conversation
 	if _, gone := m.left[unit]; gone {
 		return
 	}
-	kind, phase, ok := r.classify(ws, s, act)
-	if !ok || phase == phaseNone {
+	kind, phase := f.kind, f.phase
+	if !f.ok || phase == phaseNone {
 		return
 	}
 	if s.turn == nil || s.mainAgent == "" || agent.GetValue() != s.mainAgent {

@@ -69,10 +69,16 @@ func (r *resolver) idleActivity(s *wsState) *frontendv1.FooterStatusIdleActivity
 	return &frontendv1.FooterStatusIdleActivity{Tier: &frontendv1.FooterStatusIdleActivity_Unpinned{Unpinned: r.unpinned(s)}}
 }
 
-// workingActivity resolves the cell while a turn runs: a compaction first,
-// because it explains the `compacting` step; then a retry; then the shared
-// salient lines; then unpinned, which is most of a turn.
-func (r *resolver) workingActivity(s *wsState) *frontendv1.FooterStatusWorkingActivity {
+// workingActivity resolves the cell under STEP, the working status's step
+// already resolved. THE STEP AND THE LINE THAT EXPLAINS IT ARE ONE DECISION:
+// under `waiting` the cell is the vendor-silence line, always, so the step can
+// never stand without it. Otherwise a compaction first, because it explains
+// the `compacting` step; then the shared salient lines; then unpinned, which
+// is most of a turn.
+func (r *resolver) workingActivity(s *wsState, step *frontendv1.FooterStatusWorking) *frontendv1.FooterStatusWorkingActivity {
+	if step.GetWaiting() != nil {
+		return silenceActivity(s)
+	}
 	salient := func(at time.Time) *frontendv1.FooterStatusWorkingSalient {
 		return &frontendv1.FooterStatusWorkingSalient{At: stamp(at)}
 	}
