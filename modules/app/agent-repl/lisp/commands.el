@@ -115,6 +115,7 @@
 (declare-function agent-repl-roster-row-merged-at "agent-repl-roster" (row))
 (declare-function agent-repl-roster-row-closed-by-user-at "agent-repl-roster" (row))
 (declare-function agent-repl-roster-row-commit-count "agent-repl-roster" (row))
+(declare-function agent-repl-roster-row-summary "agent-repl-roster" (row))
 (declare-function agent-repl-status-roster-mark "agent-repl-status" (arm &optional glyph))
 (declare-function agent-repl-status--glyph-char "agent-repl-status" (name))
 (declare-function agent-repl-format-age "core" (at-ms now-ms))
@@ -856,7 +857,11 @@ first every time.  A colliding name is qualified by its directory, which
 is the one thing that cannot collide; a name that is already unique is
 left alone rather than qualified for the sake of uniformity.  Everything
 else a line shows rides beside the string, in its affixes
-\(`agent-repl--switch-affixation'), so it never makes two names differ."
+\(`agent-repl--switch-affixation'), so it never makes two names differ.
+
+THE SUMMARY IS SEARCHABLE: a workspace's summary rides in its string,
+invisible (`agent-repl--switch-candidate'), so the input narrows by name
+and summary alike while the summary is drawn as the last column."
   (let ((counts (make-hash-table :test 'equal)))
     (dolist (entry entries)
       (let ((name (plist-get entry :name)))
@@ -868,8 +873,27 @@ else a line shows rides beside the string, in its affixes
               (base (if (and (> (gethash name counts 0) 1) dir)
                         (format "%s [%s]" name dir)
                       name)))
-         (cons base entry)))
+         (cons (agent-repl--switch-candidate base entry) entry)))
      entries)))
+
+(defun agent-repl--switch-candidate (base entry)
+  "Return ENTRY's candidate string, displayed as BASE.
+ENTRY's summary (`agent-repl-roster-row-summary') follows BASE as
+INVISIBLE text, so completion matches against it while the line draws
+it in its own column (`agent-repl--switch-summary').  A workspace with
+no summary is BASE alone.  The summary never makes two strings differ
+that BASE did not: BASE is already unique."
+  (let ((summary (agent-repl-roster-row-summary (plist-get entry :row))))
+    (if summary
+        (concat base (propertize (concat " " summary) 'invisible t))
+      base)))
+
+(defun agent-repl--switch-visible-name (candidate)
+  "Return the part of CANDIDATE a line draws as the name.
+Everything up to the invisible summary `agent-repl--switch-candidate'
+appends, or the whole of CANDIDATE when it carries none."
+  (substring candidate 0 (or (text-property-any 0 (length candidate) 'invisible t candidate)
+                             (length candidate))))
 
 
 (defun agent-repl--switch-entry-invariant-failed (operation entry missing)
@@ -1034,15 +1058,29 @@ Empty when the daemon states no count; zero is a real count and says so."
           ((= count 1) "1 commit")
           (t (format "%d commits" count)))))
 
+(defun agent-repl--switch-summary (entry)
+  "Return the summary column for ENTRY: its summary, purple, or empty.
+The workspace's generated summary, the text the topbar draws over its
+name, in `agent-repl--color-merging-purple' -- the tool title's purple
+the topbar draws it in (render-colors.json)."
+  (let ((summary (agent-repl-roster-row-summary (plist-get entry :row))))
+    (if summary
+        (propertize summary 'face (list :foreground agent-repl--color-merging-purple))
+      "")))
+
 (defun agent-repl--switch-affixation (alist now-ms)
   "Return the `affixation-function' for the switcher over ALIST, read at NOW-MS.
 ALIST is `agent-repl--switch-display-alist''s.  Each line is its status
-mark, the name, and three columns aligned past the longest name: the
-state, how long ago its last turn ended, and how many commits its branch
-holds past its merge-base.  The columns take `completions-annotations'
-beneath any face a column states itself, so the merged label keeps its
-purple (`agent-repl--switch-state-label')."
-  (let ((column (+ 4 (apply #'max 0 (mapcar (lambda (cell) (string-width (car cell)))
+mark, the name, and four columns aligned past the longest name: the
+state, how long ago its last turn ended, how many commits its branch
+holds past its merge-base, and its summary (`agent-repl--switch-summary').
+The name is the candidate's visible part (`agent-repl--switch-visible-name').
+The columns take `completions-annotations' beneath any face a column
+states itself, so the merged label and the summary keep their purple
+\(`agent-repl--switch-state-label')."
+  (let ((column (+ 4 (apply #'max 0 (mapcar (lambda (cell)
+                                              (string-width
+                                               (agent-repl--switch-visible-name (car cell))))
                                             alist)))))
     (lambda (candidates)
       (mapcar
@@ -1051,10 +1089,11 @@ purple (`agent-repl--switch-state-label')."
            (list candidate
                  (concat (agent-repl--switch-mark entry) " ")
                  (concat (propertize " " 'display `(space :align-to ,column))
-                         (let ((columns (format "%-14s %-12s %s"
+                         (let ((columns (format "%-14s %-12s %-11s %s"
                                                 (agent-repl--switch-state-label entry)
                                                 (agent-repl--switch-turn-age entry now-ms)
-                                                (agent-repl--switch-commits entry))))
+                                                (agent-repl--switch-commits entry)
+                                                (agent-repl--switch-summary entry))))
                            (add-face-text-property 0 (length columns)
                                                    'completions-annotations t columns)
                            columns)))))

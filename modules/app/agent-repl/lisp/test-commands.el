@@ -2551,6 +2551,124 @@ and `--switched' to the workspace whose switch was requested of the daemon."
     (should (equal (with-count 1) "1 commit"))
     (should (equal (with-count 7) "7 commits"))))
 
+;;;; ---- The switcher's summary column ----
+
+(defun agent-repl-test-commands--summarized-row (name id summary)
+  "Return a roster row for NAME, ID whose detail states SUMMARY."
+  (let ((row (agent-repl-test-commands--row name id 1)))
+    (plist-put row :detail (list :branch nil :parent-branch nil
+                                 :summary (list :text summary)))))
+
+(ert-deftest agent-repl-test-commands-switch-candidate-carries-the-summary-invisibly ()
+  "A summarized workspace's candidate is its name, then its summary, invisible."
+  ;; Arrange
+  (let ((entry (list :row (agent-repl-test-commands--summarized-row "ws" "id-ws" "Fix the footer"))))
+    ;; Act
+    (let ((candidate (agent-repl--switch-candidate "ws" entry)))
+      ;; Assert
+      (should (equal (substring-no-properties candidate) "ws Fix the footer"))
+      (should-not (get-text-property 0 'invisible candidate))
+      (should (eq (get-text-property 2 'invisible candidate) t))
+      (should (eq (get-text-property (1- (length candidate)) 'invisible candidate) t)))))
+
+(ert-deftest agent-repl-test-commands-switch-candidate-without-a-summary-is-the-name ()
+  "A workspace with no summary, or no row at all, is its name alone."
+  ;; Arrange
+  (let ((summaryless (list :row (agent-repl-test-commands--row "ws" "id-ws" 1)))
+        (rowless (list :row nil)))
+    ;; Act / Assert
+    (should (equal-including-properties (agent-repl--switch-candidate "ws" summaryless) "ws"))
+    (should (equal-including-properties (agent-repl--switch-candidate "ws" rowless) "ws"))))
+
+(ert-deftest agent-repl-test-commands-switch-visible-name-drops-the-summary ()
+  "The visible name is the candidate up to its invisible summary."
+  ;; Arrange
+  (let ((entry (list :row (agent-repl-test-commands--summarized-row "ws" "id-ws" "Fix it"))))
+    ;; Act / Assert
+    (should (equal (agent-repl--switch-visible-name
+                    (agent-repl--switch-candidate "ws" entry))
+                   "ws"))
+    (should (equal (agent-repl--switch-visible-name "plain") "plain"))))
+
+(ert-deftest agent-repl-test-commands-switch-display-alist-makes-the-summary-searchable ()
+  "The display alist's string carries the summary, so input on it narrows."
+  ;; Arrange
+  (let* ((row (agent-repl-test-commands--summarized-row "ws" "id-ws" "Fix the footer"))
+         (alist (agent-repl--switch-display-alist
+                 (list (list :name "ws" :dir "/tmp/ws" :row row :state :open)
+                       (list :name "other" :dir "/tmp/other" :state :open))))
+         (table (agent-repl--switch-table alist 0)))
+    ;; Act
+    (let ((completion-styles '(substring)))
+      (let ((matches (completion-all-completions "footer" table nil 6)))
+        ;; Assert
+        (when (consp matches) (setcdr (last matches) nil))
+        (should (equal (mapcar #'substring-no-properties matches)
+                       '("ws Fix the footer")))))))
+
+(ert-deftest agent-repl-test-commands-switch-summary-column-is-the-canonical-purple ()
+  "The summary column draws the summary in the purple the topbar draws it in."
+  ;; Arrange
+  (let ((entry (list :row (agent-repl-test-commands--summarized-row "ws" "id-ws" "Fix it"))))
+    ;; Act
+    (let ((column (agent-repl--switch-summary entry)))
+      ;; Assert
+      (should (equal (substring-no-properties column) "Fix it"))
+      (should (equal (get-text-property 0 'face column)
+                     (list :foreground agent-repl--color-merging-purple))))))
+
+(ert-deftest agent-repl-test-commands-switch-summary-column-without-a-summary-is-empty ()
+  "A workspace with no summary draws an empty summary column."
+  (should (equal (agent-repl--switch-summary
+                  (list :row (agent-repl-test-commands--row "ws" "id-ws" 1)))
+                 ""))
+  (should (equal (agent-repl--switch-summary (list :row nil)) "")))
+
+(ert-deftest agent-repl-test-commands-switch-affixation-draws-the-summary-last ()
+  "The summary is the line's last column, purple over the annotation face."
+  ;; Arrange
+  (let* ((row (agent-repl-test-commands--summarized-row "ws" "id-ws" "Fix it"))
+         (alist (agent-repl--switch-display-alist
+                 (list (list :name "ws" :dir "/tmp/ws" :row row :section :repository
+                             :state :open))))
+         (affix (agent-repl--switch-affixation alist 0)))
+    ;; Act
+    (let* ((columns (nth 2 (car (funcall affix (list (caar alist))))))
+           (at (string-match "Fix it\\'" columns)))
+      ;; Assert
+      (should at)
+      (should (equal (get-text-property at 'face columns)
+                     (list (list :foreground agent-repl--color-merging-purple)
+                           'completions-annotations))))))
+
+(ert-deftest agent-repl-test-commands-switch-affixation-aligns-past-the-visible-name ()
+  "The columns align past the longest visible name, never past a summary."
+  ;; Arrange
+  (let* ((row (agent-repl-test-commands--summarized-row "ws" "id-ws" "A very long summary"))
+         (alist (agent-repl--switch-display-alist
+                 (list (list :name "ws" :dir "/tmp/ws" :row row :section :repository
+                             :state :open))))
+         (affix (agent-repl--switch-affixation alist 0)))
+    ;; Act
+    (let ((columns (nth 2 (car (funcall affix (list (caar alist)))))))
+      ;; Assert
+      (should (equal (get-text-property 0 'display columns)
+                     `(space :align-to ,(+ 4 (string-width "ws"))))))))
+
+(ert-deftest agent-repl-test-commands-switcher-chooses-a-summarized-workspace ()
+  "Choosing a summarized workspace's line switches to that workspace."
+  ;; Arrange
+  (agent-repl-test-commands--switcher
+      (list (agent-repl-test-commands--summarized-row "here" "id-here" "Fix it")) nil
+    (cl-letf (((symbol-function 'agent-repl--ws-by-ref-id) (lambda (_id) "here"))
+              ((symbol-function 'completing-read)
+               (agent-repl-test-commands--pick "here Fix it")))
+      ;; Act
+      (agent-repl-switch-to-project)
+      ;; Assert
+      (should (equal agent-repl-test-commands--offered '("here Fix it")))
+      (should (equal agent-repl-test-commands--switched "here")))))
+
 (ert-deftest agent-repl-test-commands-switch-affixation-draws-mark-and-columns ()
   "Each line is its mark, its name, and its columns past the longest name."
   ;; Arrange
