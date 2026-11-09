@@ -1,17 +1,20 @@
 // topbar.proto — THE TOPBAR: one THIN strip, edge to edge. Left, tight: the
 // connectivity dot and, right beside it, the account label it qualifies —
-// one cell. Center: the heading — the workspace's generated summary, and on a
-// line beneath it the workspace's name — centered in the space between the
-// flank groups, which never spread and never push it. Right, tight, in order:
-// model selector, context chip, persistent-wifi chip, warning chip at the far
-// edge. The strip stands off the window's edges exactly as far as its cells
+// one cell — then the status chips in order: remote-control chip,
+// persistent-wifi chip, warning chip. Center: the heading — the workspace's
+// generated summary, and on a line beneath it the workspace's name — centered
+// on the strip between the flank groups, which never spread and never push
+// it. Right, tight, in order: model selector, effort selector,
+// permission-mode picker, context chip at the far edge. The status chips ride
+// the left so the two flanks balance (owner request, 2026-11-09). The strip
+// stands off the window's edges exactly as far as its cells
 // stand off each other. The flanks and the summary share the strip's top
 // band; the name line is a band below it, and is centered under the summary
 // text rather than under the strip. A workspace with no summary draws its
 // name in the summary's place on the top band.
 //
-//   │● work@…com    Fix the flaky reconnect backoff    haiku 4.5 ▾  142.3k  ᯤ  ⚠ 2│
-//   │                    fix-flaky-reconnect                                      │
+//   │● work@…com  ☎  ᯤ  ⚠ 2    Fix the flaky reconnect backoff    haiku 4.5 ▾  142.3k│
+//   │                              fix-flaky-reconnect                              │
 //
 // REVEAL CONVENTION: every strip element's detail (session line, model
 // options, the context chip's usage breakdown, the warning dropdown and
@@ -89,7 +92,8 @@ type TopbarView struct {
 	ModelSelector *TopbarModelSelector `protobuf:"bytes,3,opt,name=model_selector,json=modelSelector,proto3,oneof" json:"model_selector,omitempty"`
 	// The connectivity glyph.
 	Connectivity *TopbarConnectivity `protobuf:"bytes,4,opt,name=connectivity,proto3" json:"connectivity,omitempty"`
-	// The warning strip. ALWAYS SET, session or no session: a session-less
+	// The warning strip, last in the left group's status run, so its chip's
+	// arrival moves no other chip. ALWAYS SET, session or no session: a session-less
 	// workspace's state rides it as one warning line, so the fact the retired
 	// whole-view states used to carry is still stated. An EMPTY list remains
 	// the daemon saying nothing is wrong, and the client still draws no chip
@@ -106,7 +110,8 @@ type TopbarView struct {
 	// The permission-mode picker, the model selector's sibling. OPTIONAL BY
 	// PRESENCE, for the same reason and with the same no-session drawing.
 	PermissionModePicker *TopbarPermissionModePicker `protobuf:"bytes,9,opt,name=permission_mode_picker,json=permissionModePicker,proto3,oneof" json:"permission_mode_picker,omitempty"`
-	// The persistent-wifi chip, between the context chip and the warning chip.
+	// The persistent-wifi chip, in the left group's status run between the
+	// remote-control chip and the warning chip.
 	// ALWAYS SET: the machine's standing is a daemon fact that every workspace's
 	// strip draws alike, session or no session, and a fact the daemon could not
 	// read is stated INSIDE the chip rather than by its absence.
@@ -121,7 +126,8 @@ type TopbarView struct {
 	// the title is unset. ALWAYS SET: every workspace has a name, summarized or
 	// not.
 	WorkspaceName *TopbarWorkspaceName `protobuf:"bytes,15,opt,name=workspace_name,json=workspaceName,proto3" json:"workspace_name,omitempty"`
-	// The remote-control chip, immediately left of the persistent-wifi chip.
+	// The remote-control chip, first in the left group's status run,
+	// immediately left of the persistent-wifi chip.
 	// ALWAYS SET: every workspace has a remote-control mode, on or off.
 	RemoteControl *TopbarRemoteControl `protobuf:"bytes,16,opt,name=remote_control,json=remoteControl,proto3" json:"remote_control,omitempty"`
 	unknownFields protoimpl.UnknownFields

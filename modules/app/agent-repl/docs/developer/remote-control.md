@@ -149,7 +149,8 @@ parked bridge:
 ## Surfaces
 
 - **Topbar.** `frontend.v1.TopbarView.remote_control` is always set. The chip
-  sits immediately left of the persistent-wifi chip and is drawn the way that
+  opens the left group's status run, after the account cell and immediately
+  left of the persistent-wifi chip, and is drawn the way that
   chip is: a black phone glyph on a green disc when the mode is on and a white
   disc when it is off. It pulses while a toggle is in flight, and the tooltip
   is worded by the daemon.
