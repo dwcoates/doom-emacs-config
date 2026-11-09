@@ -25,6 +25,11 @@
  * THE RUN'S FULL LOG IS A LINK (owner, 2026-09-30), drawn under the suites
  * once the daemon has written it: the shared editor-link verb with the log's
  * token, in the response bubble's link blue (`renderMergeTestLogLink`).
+ *
+ * A RUN WAITING FOR A RAM DISK SEAT SAYS SO (owner ruling, 2026-11-09): while
+ * the runner waits, before it plans a suite, the output leads with one line
+ * naming why and who holds the seats, by workspace name, and ticking how long
+ * it has waited (`drawFeedMergeTestsRunSeatWait`), so the tab is never empty.
  */
 import { log } from "../../log.js";
 import { childrenMatching, placeChildren, placeOptional, repaintMark } from "../../dom.js";
@@ -36,7 +41,10 @@ import { create, equals } from "@bufbuild/protobuf";
 import {
   FeedMergeTestCountsSchema,
   FeedMergeTestLogSchema,
+  FeedMergeTestsRunSeatWaitSchema,
   type FeedMergeTestsRunOutput,
+  type FeedMergeTestsRunSeatHolder,
+  type FeedMergeTestsRunSeatWait,
   type FeedMergeTestCounts,
   type FeedMergeTestLog,
   type FeedMergeTestSpan,
@@ -45,6 +53,8 @@ import {
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import { renderMergeTestLogLink } from "../../link.js";
 import type { AppContext } from "../../rpc/context.js";
+import type { Ticker } from "../../clock.js";
+import { liveElapsedClock } from "../../elapsed-clock.js";
 
 const PATH = "FeedMergeTestSuite";
 
@@ -56,20 +66,25 @@ const SUITE_GLYPHS = {
   reused: "✓",
 } as const satisfies Record<string, string>;
 
-/** A run's output: its suites, then its log link once the daemon has written it. */
+/**
+ * A run's output: the runner's seat wait while it waits, its suites, then its
+ * log link once the daemon has written it.
+ */
 export function drawFeedMergeTestsRunOutput(
   u: FeedMergeTestsRunOutput,
   ctx: AppContext,
   path: string,
 ): HTMLElement[] {
   const parts = [drawTestSuites(u.suites)];
+  if (u.seatWait !== undefined) parts.unshift(drawFeedMergeTestsRunSeatWait(u.seatWait, ctx.ticker));
   if (u.log !== undefined) parts.push(drawFeedMergeTestLog(u.log, ctx, `${path}.log`));
   return parts;
 }
 
 /**
  * Bring HOST, a run's output as `drawFeedMergeTestsRunOutput` drew it from
- * PREVIOUS, to U IN PLACE: the suites updated where they stand
+ * PREVIOUS, to U IN PLACE: the seat wait redrawn only when it changed (so its
+ * clock keeps ticking), the suites updated where they stand
  * (`updateTestSuites`), and the log line redrawn only when it changed.
  */
 export function updateFeedMergeTestsRunOutput(
@@ -81,6 +96,14 @@ export function updateFeedMergeTestsRunOutput(
 ): void {
   const suites = host.querySelector<HTMLElement>(":scope > .merge-suites");
   if (suites === null) throw new Error("merge: a drawn run's output lost its suites");
+  const wait = host.querySelector(":scope > .merge-seat-wait");
+  if (u.seatWait === undefined) {
+    wait?.remove();
+  } else if (wait === null || previous.seatWait === undefined || !equals(FeedMergeTestsRunSeatWaitSchema, previous.seatWait, u.seatWait)) {
+    const next = drawFeedMergeTestsRunSeatWait(u.seatWait, ctx.ticker);
+    if (wait === null) suites.before(next);
+    else wait.replaceWith(next);
+  }
   updateTestSuites(suites, u.suites);
   const logLine = host.querySelector(":scope > .merge-test-log");
   if (u.log === undefined) {
@@ -91,6 +114,64 @@ export function updateFeedMergeTestsRunOutput(
   const next = drawFeedMergeTestLog(u.log, ctx, `${path}.log`);
   if (logLine === null) host.append(next);
   else logLine.replaceWith(next);
+}
+
+/**
+ * The runner's wait for a RAM disk seat: what it waits for, in words
+ * (`seatWaitText`), then how long it has waited, ticking from the wait's start.
+ */
+export function drawFeedMergeTestsRunSeatWait(u: FeedMergeTestsRunSeatWait, ticker: Ticker): HTMLElement {
+  const el = document.createElement("div");
+  el.className = "merge-seat-wait";
+  el.append(
+    document.createTextNode(`${seatWaitText(u)} `),
+    liveElapsedClock(ticker, "merge-seat-wait-elapsed", Number(u.startedAtMs)),
+  );
+  return el;
+}
+
+/**
+ * The seat wait in words: "waiting for a RAM disk seat (held by fix-footer)",
+ * naming the memory figures when memory holds it back and the better rank when
+ * one goes first. A reason this build does not name is still a wait for a seat.
+ */
+export function seatWaitText(u: FeedMergeTestsRunSeatWait): string {
+  const holders = u.holders.map(seatHolderName);
+  const held = holders.length > 0 ? `held by ${holders.join(", ")}` : "";
+  const within = (...parts: string[]): string => {
+    const shown = parts.filter((part) => part !== "");
+    return shown.length > 0 ? ` (${shown.join("; ")})` : "";
+  };
+  switch (u.reason.case) {
+    case "ceiling":
+      return `waiting for a RAM disk seat${within(held, `all ${gib(u.reason.value.ceilingMib)} in use`)}`;
+    case "memory":
+      return `waiting for memory for a RAM disk seat${within(
+        held,
+        `${gib(u.reason.value.availableMib)} free, ${gib(u.reason.value.floorMib)} must stay free`,
+      )}`;
+    case "outranked":
+      return `waiting for a RAM disk seat behind a run that ranks above this one${within(held)}`;
+    default:
+      return `waiting for a RAM disk seat${within(held)}`;
+  }
+}
+
+/** A holding run as the wait names it: its workspace, or a run started by hand. */
+function seatHolderName(h: FeedMergeTestsRunSeatHolder): string {
+  switch (h.holder.case) {
+    case "workspace":
+      return h.holder.value.workspaceName;
+    case "outside":
+      return `a run outside agent-repl (pid ${h.holder.value.pid})`;
+    default:
+      return "a run";
+  }
+}
+
+/** MIB as GiB, one decimal place. */
+function gib(mib: bigint): string {
+  return `${(Number(mib) / 1024).toFixed(1)} GiB`;
 }
 
 /** The log line: "log:" and the link, whose text is the daemon's label. */

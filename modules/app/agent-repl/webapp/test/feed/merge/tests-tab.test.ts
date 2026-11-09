@@ -4,6 +4,7 @@ import { create } from "@bufbuild/protobuf";
 import {
   FeedMergeTestCountsSchema,
   FeedMergeTestsRunOutputSchema,
+  FeedMergeTestsRunSeatWaitSchema,
   FeedMergeTestLogSchema,
   FeedMergeTestSuiteRunningSchema,
   FeedMergeTestSuiteSchema,
@@ -15,6 +16,7 @@ import { PAINT_CLASS_NAMES } from "../../../src/vocab.js";
 import {
   drawFeedMergeTestCounts,
   drawFeedMergeTestsRunOutput,
+  drawFeedMergeTestsRunSeatWait,
   drawFeedMergeTestsRunTally,
   drawFeedMergeTestLog,
   drawFeedMergeTestSpan,
@@ -27,6 +29,7 @@ import {
   updateFeedMergeTestsRunTally,
   updateTestSuites,
 } from "../../../src/feed/merge/tests-tab.js";
+import type { Ticker } from "../../../src/clock.js";
 import TESTS_TAB from "../../../src/feed/merge/tests-tab.ts?raw";
 import { oneofArms } from "../../arms.js";
 import STYLESHEET from "../../../src/styles.css?raw";
@@ -628,5 +631,101 @@ describe("a reused suite names the earlier run that passed its inputs", () => {
   it("styles the source quieter than the name", () => {
     const rules = rulesOf(STYLESHEET).filter((rule) => rule.selectors.includes(".merge-suite-reused"));
     expect(rules.map((rule) => rule.declarations)).toEqual([expect.stringContaining("var(--muted)")]);
+  });
+});
+
+describe("drawFeedMergeTestsRunSeatWait: a run waiting for a RAM disk seat says so", () => {
+  /** A ticker frozen 1m 40s after the wait began, which never ticks. */
+  const STARTED = 1_000_000;
+  const frozen: Ticker = { now: () => STARTED + 100_000, subscribe: () => () => {} };
+
+  const workspace = (name: string) => ({ holder: { case: "workspace" as const, value: { workspaceName: name } } });
+  const outside = (pid: number) => ({ holder: { case: "outside" as const, value: { pid } } });
+
+  it.each([
+    [
+      "every seat held, by workspace name",
+      create(FeedMergeTestsRunSeatWaitSchema, {
+        startedAtMs: BigInt(STARTED),
+        holders: [workspace("fix-footer"), workspace("sidebar-counts")],
+        reason: { case: "ceiling", value: { ceilingMib: 20480n } },
+      }),
+      "waiting for a RAM disk seat (held by fix-footer, sidebar-counts; all 20.0 GiB in use) 1m 40s",
+    ],
+    [
+      "memory holding it back, behind a run started by hand",
+      create(FeedMergeTestsRunSeatWaitSchema, {
+        startedAtMs: BigInt(STARTED),
+        holders: [outside(4242)],
+        reason: { case: "memory", value: { availableMib: 17408n, floorMib: 10240n } },
+      }),
+      "waiting for memory for a RAM disk seat (held by a run outside agent-repl (pid 4242); 17.0 GiB free, 10.0 GiB must stay free) 1m 40s",
+    ],
+    [
+      "a better rank going first, with no seat held",
+      create(FeedMergeTestsRunSeatWaitSchema, { startedAtMs: BigInt(STARTED), reason: { case: "outranked", value: {} } }),
+      "waiting for a RAM disk seat behind a run that ranks above this one 1m 40s",
+    ],
+    [
+      "a reason this build does not name",
+      create(FeedMergeTestsRunSeatWaitSchema, { startedAtMs: BigInt(STARTED), holders: [workspace("fix-footer")] }),
+      "waiting for a RAM disk seat (held by fix-footer) 1m 40s",
+    ],
+  ])("draws %s", (_name, wait, want) => {
+    expect(drawFeedMergeTestsRunSeatWait(wait, frozen).textContent).toBe(want);
+  });
+
+  it("holds to the schema: the cases above draw every reason arm", () => {
+    expect([...oneofArms(FeedMergeTestsRunSeatWaitSchema, "reason")].sort()).toEqual(["ceiling", "memory", "outranked"]);
+  });
+});
+
+describe("drawFeedMergeTestsRunOutput: the seat wait leads the run's output", () => {
+  const waiting = (holder: string) =>
+    create(FeedMergeTestsRunOutputSchema, {
+      seatWait: {
+        startedAtMs: 1n,
+        holders: [{ holder: { case: "workspace", value: { workspaceName: holder } } }],
+        reason: { case: "ceiling", value: { ceilingMib: 20480n } },
+      },
+    });
+
+  it("draws the wait before the suites while the runner waits", () => {
+    const parts = drawFeedMergeTestsRunOutput(waiting("fix-footer"), harness().ctx, "p");
+    expect(parts.map((part) => part.classList[0])).toEqual(["merge-seat-wait", "merge-suites"]);
+  });
+
+  it("draws no wait for a run that is not waiting", () => {
+    const parts = drawFeedMergeTestsRunOutput(create(FeedMergeTestsRunOutputSchema, {}), harness().ctx, "p");
+    expect(parts.map((part) => part.classList[0])).toEqual(["merge-suites"]);
+  });
+
+  it.each([
+    ["keeps the drawn wait while it is unchanged", "fix-footer", "same"],
+    ["redraws the wait when its holders change", "sidebar-counts", "replaced"],
+  ] as const)("%s", (_name, holder, want) => {
+    const { ctx } = harness();
+    const first = waiting("fix-footer");
+    const host = document.createElement("div");
+    host.append(...drawFeedMergeTestsRunOutput(first, ctx, "p"));
+    const before = host.querySelector(".merge-seat-wait");
+
+    updateFeedMergeTestsRunOutput(host, waiting(holder), first, ctx, "p");
+
+    const after = host.querySelector(".merge-seat-wait");
+    expect(after === before ? "same" : "replaced").toBe(want);
+    expect(after?.textContent).toContain(holder);
+  });
+
+  it("drops the wait once the runner has its seat", () => {
+    const { ctx } = harness();
+    const first = waiting("fix-footer");
+    const host = document.createElement("div");
+    host.append(...drawFeedMergeTestsRunOutput(first, ctx, "p"));
+
+    updateFeedMergeTestsRunOutput(host, create(FeedMergeTestsRunOutputSchema, {}), first, ctx, "p");
+
+    expect(host.querySelector(".merge-seat-wait")).toBeNull();
+    expect(host.firstElementChild?.classList.contains("merge-suites")).toBe(true);
   });
 });
