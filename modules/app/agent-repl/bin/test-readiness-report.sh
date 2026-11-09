@@ -92,7 +92,7 @@ make_repo() {
              "$root/agent-shim/shim-store" \
              "$root/agent-shim/claude/shim/dist" \
              "$root/agent-shim/claude/shim-sidecar" \
-             "$root/agent-shim/shim-lock" "$root/zettel" \
+             "$root/agent-shim/shim-lock" "$root/zettel" "$root/notifier" \
              "$root/webapp/dist" "$root/home/.cache/agent-repl/bin"
     cp "$SCRIPT_UNDER_TEST" "$root/bin/readiness-report.sh"
     cp "$LIB_UNDER_TEST" "$root/bin/lib-deploy-stamp.sh"
@@ -105,7 +105,7 @@ make_repo() {
     git_c "$root" init -q
     for d in proto agent-shim/shim-store \
              agent-shim/claude/shim agent-shim/claude/shim-sidecar \
-             agent-shim/shim-lock zettel webapp daemon; do
+             agent-shim/shim-lock zettel notifier webapp daemon; do
         echo "rev0" > "$root/$d/file.txt"
         git_c "$root" add -A
         n=$((n + 1))
