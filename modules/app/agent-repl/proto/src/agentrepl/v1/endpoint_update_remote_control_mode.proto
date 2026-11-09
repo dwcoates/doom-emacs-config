@@ -11,8 +11,8 @@
 //
 // A WORKSPACE IN REMOTE CONTROL KEEPS ITS SHIM UP BETWEEN KEEP-ALIVES. Its
 // keep-alives go on as every workspace's do, but none is followed by a stand-
-// down, so claude.ai always finds it served; its idle cutoff still hibernates
-// it. Turning the mode on for a workspace with no shim starts one; turning it
+// down, so claude.ai always finds it served; the idle sweep still parks it
+// past its cutoff. Turning the mode on for a workspace with no shim starts one; turning it
 // off leaves the shim up, and the next keep-alive parks it as usual.
 
 syntax = "proto3";
