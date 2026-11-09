@@ -999,7 +999,11 @@ fields, another version, a relative directory, a missing key, an unspecified
 origin, a delivery this reader does not honor or a `queued_at` that is not an
 RFC 3339 instant make the file malformed.
 
-The daemon sweeps the directory at start and every 250ms, in name order, and
+The daemon sweeps the directory at start and at every change that can let an
+entry in -- an entry written or removed, which the kernel reports on its watch
+of the directory; this daemon starting or stopping to take the intake
+(`rollout.Controller.IntakeChanged`); a change of the fleet while an entry
+waits (the sidebar roster's topic) -- never on a timer, in name order, and
 hands each entry to `prompthandler.Handler.Submit` — the rpc's own body — under
 the entry's key. So the queue holds, classifies and delivers it by its ordinary
 rules and it appears in the held tray like any held prompt. An entry leaves the
