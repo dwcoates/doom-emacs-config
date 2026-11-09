@@ -1864,6 +1864,12 @@ manifest, and `bin/requirements.sh` is the one program that reads them.
   - `requirements.json` at the module root holds agent-repl-wide entries: Emacs, Doom, the Claude CLI, the banner program, environment variables, skills, the pre-commit hook, and module-wide dev tools.
   - Each system keeps its own `requirements.json` beside its code (`lisp/`, `daemon/`, `webapp/`, `proto/`, `e2e/`, `agent-shim/claude/shim/`, `agent-shim/shim-lock/`, `agent-shim/shim-store/`, `agent-shim/claude/shim-sidecar/`, `zettel/`), and the root's `includes` names every one of them.
   - An id two systems share (a toolchain like `go` or `node`) is declared identically in each, and the runner refuses any difference.
+- **Packages come from the platform's own package manager.**
+  - macOS uses Homebrew (`brew`, `brew_cask`).
+  - Linux uses the distribution's, the first of `apt`, `dnf`, `pacman` and `zypper` on PATH, so no distribution is singled out.
+  - A `program` names its package for each under `install` (a name, or a list when one tool takes several packages), and `go_install` or `manual` only where no package manager carries it.
+  - A Linux install runs through sudo, which asks for a password only on a terminal; an install it cannot run says so, with the command for the user to run.
+  - A Linux machine whose package manager an entry has no package for reports the entry `missing` with "add install.<manager>": the manifest is inadequate, and the fix is the missing package name.
 - **The runner names no requirement.** It knows only the kinds an entry may be (`program`, `emacs`, `env`, `notification_permission`, `skill_link`, `command_link`, `git_hook`, `launchd_service`, `download`), and checks and installs each kind one way.
   - A new dependency is a manifest entry, never a script edit.
   - A dependency no kind can express is a new kind, added to the runner with its tests in `bin/test-requirements.sh`. It is never shell embedded in a manifest.
