@@ -14,6 +14,8 @@ import (
 	"agent-repld/internal/ids"
 	"agent-repld/internal/lifecycleconfig"
 	"agent-repld/internal/wsm"
+
+	"agentrepl/testrun/seatwait"
 )
 
 // This file holds the orchestrator's shape: its state, its construction, and
@@ -656,14 +658,16 @@ const TestRunMarkerEnv = "AGENT_REPL_TEST_RUN_BY_DAEMON"
 // run through bash so a fixture script needs no execute bit. The command
 // carries TestRunMarkerEnv, so every test run the daemon starts (the merge
 // queue's gates, RunTests, RunRedundancy) is one bin/background.sh admits;
-// this is the one place it is set. The script is the LAST element, which is
-// what the gate's preflight reads.
-func TestCommandFor(tree, script string) []string {
+// this is the one place it is set. It also names WORKSPACE, the workspace
+// the run is for (seatwait.EnvWorkspace), which the runner writes into the
+// RAM disk seat it holds, so a run waiting behind it names it. The script is
+// the LAST element, which is what the gate's preflight reads.
+func TestCommandFor(tree, script, workspace string) []string {
 	path := os.Getenv("AGENT_REPL_TEST_ALL_SCRIPT")
 	if path == "" {
 		path = filepath.Join(tree, script)
 	}
-	return []string{"env", TestRunMarkerEnv + "=1", "bash", path}
+	return []string{"env", TestRunMarkerEnv + "=1", seatwait.EnvWorkspace + "=" + workspace, "bash", path}
 }
 
 // errNoRun is returned when a verb addresses an in-flight merge that is not

@@ -15,6 +15,8 @@ import (
 	"agent-repld/internal/cpugov"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/resolve/footer"
+
+	"agentrepl/testrun/seatwait"
 )
 
 // This file is the gate's RUN: the selected suites run on the rebased branch
@@ -122,7 +124,7 @@ func (r *run) gate(ctx context.Context, round tabRound, tip, head string, adm *g
 		"since_gate_start_seconds": g.since()})
 	r.publishRun(round, round.live(), nil, nil)
 
-	argv := r.o.deps.TestCommand(dir, r.target.testScript())
+	argv := r.o.deps.TestCommand(dir, r.target.testScript(), r.o.workspaceName(ctx, r.ws))
 	if len(argv) == 0 {
 		return g.brokenGate(ctx, GateResult{}, "no test command is configured for it"), nil
 	}
@@ -310,6 +312,18 @@ type gateRun struct {
 	sources map[string]string
 	// counts are each suite's unit counts as the lines have reported them.
 	counts *suiteCounts
+	// seatWait is the runner's wait for a RAM disk seat while it waits, nil
+	// otherwise (seatEdge).
+	seatWait *frontendv1.FeedMergeTestsRunSeatWait
+}
+
+// publishLive publishes the live run drawing SUITES, with the log link and
+// the runner's seat wait as they stand.
+func (g *gateRun) publishLive(suites []*frontendv1.FeedMergeTestSuite) {
+	g.mu.Lock()
+	wait := g.seatWait
+	g.mu.Unlock()
+	g.r.publishRunOutput(g.round, g.round.live(), &frontendv1.FeedMergeTestsRunOutput{Suites: suites, Log: g.link(), SeatWait: wait})
 }
 
 // link is the round's log link, nil until the run has written the log.
@@ -332,7 +346,7 @@ func (g *gateRun) run(ctx context.Context, dir string, argv, selected []string) 
 	g.written = true
 	writer := bufio.NewWriter(file)
 	var writeErr error
-	g.r.publishRun(g.round, g.round.live(), nil, g.link())
+	g.publishLive(nil)
 	measured, runErr := g.r.o.deps.TestRunner.RunLinesMeasured(ctx, dir, argv, func(line string) {
 		if _, err := writer.WriteString(line + "\n"); err != nil && writeErr == nil {
 			writeErr = err
@@ -378,6 +392,9 @@ func (g *gateRun) run(ctx context.Context, dir string, argv, selected []string) 
 // or a suite's planned total moves the suite's counts.
 func (g *gateRun) edge(line string) {
 	g.runnerEdge(line)
+	if g.seatEdge(line) {
+		return
+	}
 	if name, counted := g.countLine(line); counted {
 		g.mu.Lock()
 		state, started := g.states[name]
@@ -387,7 +404,7 @@ func (g *gateRun) edge(line string) {
 		suites := append([]*frontendv1.FeedMergeTestSuite(nil), g.suites...)
 		g.mu.Unlock()
 		if started {
-			g.r.publishRun(g.round, g.round.live(), suites, g.link())
+			g.publishLive(suites)
 		}
 		return
 	}
@@ -410,7 +427,67 @@ func (g *gateRun) edge(line string) {
 			f.Line = suiteLine(name, state)
 		})
 	}
-	g.r.publishRun(g.round, g.round.live(), suites, g.link())
+	g.publishLive(suites)
+}
+
+// seatEdge follows the runner's RAM disk seat lines (seatwait), answering
+// whether line was one: a wait stands the run's seat wait in the tests tab,
+// keeping the start of a wait already drawn, and the seat taken (or none)
+// clears it. A wait line that does not read is recorded at ERROR and moves
+// nothing: the runner wrote it with the one spelling this reads.
+func (g *gateRun) seatEdge(line string) bool {
+	w, waiting, err := seatwait.Parse(line)
+	if err != nil {
+		g.r.o.log(context.Background(), g.r.ws).Error("daemon.merge.tests", "a test runner's RAM disk seat line could not be read",
+			dlog.Context{"workspace": string(g.r.ws), "round": g.round.n, "line": line, "error": err.Error()})
+		return true
+	}
+	if !waiting && !seatwait.Ended(line) {
+		return false
+	}
+	g.mu.Lock()
+	was := g.seatWait
+	switch {
+	case waiting && was != nil:
+		g.seatWait = seatWaitView(w, was.GetStartedAtMs())
+	case waiting:
+		g.seatWait = seatWaitView(w, g.r.o.nowMS())
+	default:
+		g.seatWait = nil
+	}
+	suites := append([]*frontendv1.FeedMergeTestSuite(nil), g.suites...)
+	g.mu.Unlock()
+	if !waiting && was == nil {
+		return true
+	}
+	g.publishLive(suites)
+	return true
+}
+
+// seatWaitView is a runner's seat wait as the tests tab draws it, begun at
+// startedMS.
+func seatWaitView(w seatwait.Wait, startedMS int64) *frontendv1.FeedMergeTestsRunSeatWait {
+	view := &frontendv1.FeedMergeTestsRunSeatWait{StartedAtMs: startedMS}
+	switch w.Reason {
+	case seatwait.Ceiling:
+		view.Reason = &frontendv1.FeedMergeTestsRunSeatWait_Ceiling{Ceiling: &frontendv1.FeedMergeTestsRunSeatWaitCeiling{CeilingMib: w.CeilingMiB}}
+	case seatwait.Memory:
+		view.Reason = &frontendv1.FeedMergeTestsRunSeatWait_Memory{Memory: &frontendv1.FeedMergeTestsRunSeatWaitMemory{AvailableMib: w.AvailableMiB, FloorMib: w.FloorMiB}}
+	case seatwait.Outranked:
+		view.Reason = &frontendv1.FeedMergeTestsRunSeatWait_Outranked{Outranked: &frontendv1.FeedMergeTestsRunSeatWaitOutranked{}}
+	default:
+		panic("merge: a seat wait with a reason seatwait.Parse does not answer: " + string(w.Reason))
+	}
+	for _, h := range w.Holders {
+		holder := &frontendv1.FeedMergeTestsRunSeatHolder{}
+		if h.Workspace != "" {
+			holder.Holder = &frontendv1.FeedMergeTestsRunSeatHolder_Workspace{Workspace: &frontendv1.FeedMergeTestsRunSeatHolderWorkspace{WorkspaceName: h.Workspace}}
+		} else {
+			holder.Holder = &frontendv1.FeedMergeTestsRunSeatHolder_Outside{Outside: &frontendv1.FeedMergeTestsRunSeatHolderOutside{Pid: uint32(h.Pid)}}
+		}
+		view.Holders = append(view.Holders, holder)
+	}
+	return view
 }
 
 // runnerEdge records, once, the test runner's first line: the moment the

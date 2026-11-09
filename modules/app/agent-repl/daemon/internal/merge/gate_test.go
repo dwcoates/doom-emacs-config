@@ -8,6 +8,11 @@ import (
 	"strings"
 	"testing"
 
+	"google.golang.org/protobuf/proto"
+
+	frontendv1 "agentrepl/proto/frontend/v1"
+	"agentrepl/testrun/seatwait"
+
 	"agent-repld/internal/dlog"
 )
 
@@ -577,5 +582,142 @@ func TestAGateAnEvictionCutNamesTheAbandonment(t *testing.T) {
 	}
 	if gateRecords(c.h, "it does not run again") != 1 {
 		t.Fatal("the cut does not say the gate does not run again")
+	}
+}
+
+func TestSeatWaitView(t *testing.T) {
+	reading := seatwait.Reading{
+		Holders:      []seatwait.Holder{{Workspace: "fix-footer"}, {Pid: 4242}},
+		AvailableMiB: 17408, WiredMiB: 8192, CeilingMiB: 20480, FloorMiB: 10240, Rank: 10,
+	}
+	holders := []*frontendv1.FeedMergeTestsRunSeatHolder{
+		{Holder: &frontendv1.FeedMergeTestsRunSeatHolder_Workspace{Workspace: &frontendv1.FeedMergeTestsRunSeatHolderWorkspace{WorkspaceName: "fix-footer"}}},
+		{Holder: &frontendv1.FeedMergeTestsRunSeatHolder_Outside{Outside: &frontendv1.FeedMergeTestsRunSeatHolderOutside{Pid: 4242}}},
+	}
+	cases := []struct {
+		name   string
+		reason seatwait.Reason
+		want   *frontendv1.FeedMergeTestsRunSeatWait
+	}{
+		{name: "every seat held names the ceiling", reason: seatwait.Ceiling, want: &frontendv1.FeedMergeTestsRunSeatWait{StartedAtMs: 7, Holders: holders,
+			Reason: &frontendv1.FeedMergeTestsRunSeatWait_Ceiling{Ceiling: &frontendv1.FeedMergeTestsRunSeatWaitCeiling{CeilingMib: 20480}}}},
+		{name: "a memory wait names what is available and the floor", reason: seatwait.Memory, want: &frontendv1.FeedMergeTestsRunSeatWait{StartedAtMs: 7, Holders: holders,
+			Reason: &frontendv1.FeedMergeTestsRunSeatWait_Memory{Memory: &frontendv1.FeedMergeTestsRunSeatWaitMemory{AvailableMib: 17408, FloorMib: 10240}}}},
+		{name: "a wait behind a better rank", reason: seatwait.Outranked, want: &frontendv1.FeedMergeTestsRunSeatWait{StartedAtMs: 7, Holders: holders,
+			Reason: &frontendv1.FeedMergeTestsRunSeatWait_Outranked{Outranked: &frontendv1.FeedMergeTestsRunSeatWaitOutranked{}}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got := seatWaitView(seatwait.Wait{Reason: tc.reason, Reading: reading}, 7)
+
+			// Assert
+			if !proto.Equal(got, tc.want) {
+				t.Fatalf("seatWaitView = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// seatWaitGate scripts one passing gate whose runner waits for a RAM disk
+// seat (all held by fix-footer, then for memory behind fix-footer and a run
+// started by hand), takes one, and runs the daemon suite.
+func (h *harness) seatWaitGate() {
+	full := seatwait.Wait{Reason: seatwait.Ceiling, Reading: seatwait.Reading{Holders: []seatwait.Holder{{Workspace: "fix-footer"}}, AvailableMiB: 30720, WiredMiB: 20480, CeilingMiB: 20480, FloorMiB: 10240, Rank: 10}}
+	memory := seatwait.Wait{Reason: seatwait.Memory, Reading: seatwait.Reading{Holders: []seatwait.Holder{{Workspace: "fix-footer"}, {Pid: 99}}, AvailableMiB: 17408, WiredMiB: 8192, CeilingMiB: 20480, FloorMiB: 10240, Rank: 10}}
+	out := "[agent-repl-tests] " + full.Line() + "\n" +
+		"[agent-repl-tests] " + memory.Line() + "\n" +
+		"[agent-repl-tests] " + seatwait.TookLine(1, 5, "1m40s", memory.Reading) + "\n" +
+		"[agent-repl-tests] daemon: starting\n" +
+		"[agent-repl-tests] daemon: passed in 2s\n"
+	h.runner.runs = append(h.runner.runs, scriptedRun{Output: out, Code: 0})
+}
+
+func TestTheTestsTabDrawsTheRunnersSeatWaitUntilItTakesASeat(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	landing(h, 1)
+	h.runner.runs = nil
+	h.seatWaitGate()
+
+	// Act
+	admitted(t, h)
+
+	// Assert: the waits drawn, in order, each run's live output once.
+	type drawn struct {
+		reason  string
+		holders int
+		started int64
+	}
+	var waits []drawn
+	clearedAfterWait := false
+	h.feed.mu.Lock()
+	for _, row := range h.feed.rows {
+		run := row.Row.GetMergeTab().GetTestsRun()
+		if run == nil || run.GetLive() == nil {
+			continue
+		}
+		w := run.GetOutput().GetSeatWait()
+		if w == nil {
+			clearedAfterWait = clearedAfterWait || len(waits) > 0
+			continue
+		}
+		reason := "memory"
+		if w.GetCeiling() != nil {
+			reason = "ceiling"
+		}
+		d := drawn{reason: reason, holders: len(w.GetHolders()), started: w.GetStartedAtMs()}
+		if len(waits) == 0 || waits[len(waits)-1] != d {
+			waits = append(waits, d)
+		}
+	}
+	h.feed.mu.Unlock()
+	if len(waits) != 2 || waits[0].reason != "ceiling" || waits[0].holders != 1 || waits[1].reason != "memory" || waits[1].holders != 2 {
+		t.Fatalf("drawn waits = %+v, want the ceiling wait behind one holder, then the memory wait behind two", waits)
+	}
+	if waits[0].started != waits[1].started || waits[0].started == 0 {
+		t.Fatalf("the waits began at %d and %d; want one wait, one start", waits[0].started, waits[1].started)
+	}
+	if !clearedAfterWait {
+		t.Fatal("the seat wait was never cleared once the runner took its seat")
+	}
+}
+
+func TestAnUnreadableSeatWaitLineIsRecordedAtError(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	g := &gateRun{r: &run{o: h.o, ws: theWorkspace}, states: map[string]suiteState{}, counts: newSuiteCounts()}
+	line := "[agent-repl-tests] " + seatwait.Marker + "waiting, reason=gremlins (x); holders=[]; available=1MiB wired=0MiB ceiling=1MiB floor=1MiB rank=0"
+
+	// Act
+	g.edge(line)
+
+	// Assert
+	recorded := false
+	for _, rec := range h.logs.Records() {
+		if rec.Operation == "daemon.merge.tests" && rec.Level == "error" && strings.Contains(fmt.Sprint(rec.Context["error"]), "gremlins") {
+			recorded = true
+		}
+	}
+	if !recorded || g.seatWait != nil {
+		t.Fatalf("recorded %v, seat wait %v; want the line recorded at ERROR and no wait drawn", recorded, g.seatWait)
+	}
+}
+
+// THE GATE NAMES ITS REQUESTING WORKSPACE TO ITS RUNNER, which writes the name
+// into the RAM disk seat it holds, so a run waiting behind it names it.
+func TestAGatesCommandNamesTheRequestingWorkspace(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	landing(h, 1)
+
+	// Act
+	admitted(t, h)
+
+	// Assert
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if len(h.gateWorkspaces) == 0 || h.gateWorkspaces[0] != "ws-one" {
+		t.Fatalf("the gate's commands named %v, want the requesting workspace ws-one", h.gateWorkspaces)
 	}
 }

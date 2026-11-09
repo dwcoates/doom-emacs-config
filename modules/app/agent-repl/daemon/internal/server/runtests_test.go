@@ -427,7 +427,7 @@ func TestRunTestsRunsTheMarkedTestCommand(t *testing.T) {
 	runTests(t, h, &agentreplv1.RunTestsRequest{Workspace: ref, Run: oneHarness(), Requester: agent()})
 
 	// Assert
-	if want := merge.TestCommandFor(ref.GetDir(), "bin/test-all.sh"); !slices.Equal(h.Tests.argv[:len(want)], want) {
+	if want := merge.TestCommandFor(ref.GetDir(), "bin/test-all.sh", "tests"); !slices.Equal(h.Tests.argv[:len(want)], want) {
 		t.Fatalf("argv = %q, want it to begin with the daemon's test command %q", h.Tests.argv, want)
 	}
 }

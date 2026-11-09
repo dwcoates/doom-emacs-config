@@ -629,8 +629,9 @@ type Deps struct {
 	// resolved per tree from the deploy config's script path (TestCommandFor;
 	// AGENT_REPL_TEST_ALL_SCRIPT overrides the script). Its LAST element is the
 	// script, which the gate checks is there before it runs; `--suites <a,b>`
-	// is appended.
-	TestCommand func(tree, script string) []string
+	// is appended. WORKSPACE is the requesting workspace's name, which the
+	// run names itself by in the RAM disk seat it holds.
+	TestCommand func(tree, script, workspace string) []string
 	// TestMetricsRoot is the metrics root every gate's test runner pushes its
 	// tests' times under (gateArgv); empty when the daemon records no metrics.
 	TestMetricsRoot string

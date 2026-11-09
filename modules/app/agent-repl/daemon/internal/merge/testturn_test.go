@@ -478,7 +478,7 @@ func TestARunWaitingForItsTurnIsDrawnWithItsHolder(t *testing.T) {
 	round := tabRound{kind: TabTests, n: 2, started: time.UnixMilli(1000)}
 
 	// Act.
-	tab := runTab(2, round.waitingForTurn("alpha"), nil, nil)
+	tab := runTab(2, round.waitingForTurn("alpha"), &frontendv1.FeedMergeTestsRunOutput{})
 
 	// Assert.
 	waiting := tab.GetTestsRun().GetWaitingForTurn()

@@ -99,7 +99,7 @@ func (s *server) RunTests(
 		return sendRunnerFailed(stream, 1, -1, err.Error())
 	}
 	defer os.Remove(selection) //nolint:errcheck // a temp file the run is done with
-	argv := runTestsArgv(merge.TestCommandFor(dir, script), msg.GetCpuLoad().GetLoops(), selection)
+	argv := runTestsArgv(merge.TestCommandFor(dir, script, w.name), msg.GetCpuLoad().GetLoops(), selection)
 	runs := max(msg.GetRuns(), 1)
 	for run := uint32(1); run <= runs; run++ {
 		outcome, err := s.relayTestRun(ctx, log, stream, dir, argv, run)
@@ -254,6 +254,9 @@ type testWorktree struct {
 	log    dlog.Logger
 	dir    string
 	script string
+	// name is the workspace's name, which its run names itself by in the RAM
+	// disk seat it holds (merge.TestCommandFor).
+	name string
 }
 
 // testWorktreeOf resolves ref to the worktree its test run runs in, recording
@@ -270,7 +273,7 @@ func (s *server) testWorktreeOf(ctx context.Context, rpc, op string, ref *worksp
 			"workspace_id": ref.GetId(), "arm": refused.Arm, "reason": refused.Reason})
 		return testWorktree{}, errUnknownTestWorkspace
 	}
-	w := testWorktree{log: subject.Log, dir: subject.Record.Dir}
+	w := testWorktree{log: subject.Log, dir: subject.Record.Dir, name: subject.Record.Name}
 	if w.script, err = testScriptOf(w.dir); err != nil {
 		w.log.Error(op, "a test run has no test script to run", dlog.Context{"dir": w.dir, "cause": err.Error()})
 		return testWorktree{}, &noTestScriptError{cause: err}

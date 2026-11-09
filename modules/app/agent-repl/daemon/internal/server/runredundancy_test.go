@@ -56,7 +56,7 @@ func TestRunRedundancyRelaysTheMeasurementsOutputAndEnd(t *testing.T) {
 	if !proto.Equal(h.Tests.request, aReport()) || h.Tests.dir != ref.GetDir() {
 		t.Fatalf("the runner ran in %s with %v, want the worktree and the request", h.Tests.dir, h.Tests.request)
 	}
-	want := merge.TestCommandFor(ref.GetDir(), "bin/test-all.sh")
+	want := merge.TestCommandFor(ref.GetDir(), "bin/test-all.sh", "tests")
 	if !slices.Equal(h.Tests.argv[:len(want)], want) || h.Tests.argv[len(want)] != "--redundancy" {
 		t.Fatalf("argv = %q, want the daemon's marked test command with --redundancy", h.Tests.argv)
 	}

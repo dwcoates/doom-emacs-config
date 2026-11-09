@@ -386,7 +386,7 @@ func TestEveryTabBuilderShipsTheBadgeItWasGiven(t *testing.T) {
 			v := testsView{Span: spanOf(s)}
 			return v.testsTab(false)
 		},
-		rowTestsRun:       func(s tabState) *frontendv1.FeedMergeTab { return runTab(1, s, nil, nil) },
+		rowTestsRun:       func(s tabState) *frontendv1.FeedMergeTab { return runTab(1, s, &frontendv1.FeedMergeTestsRunOutput{}) },
 		rowTestsRunFixing: func(s tabState) *frontendv1.FeedMergeTab { return fixingTab(s, 1) },
 		TabCommitting:     func(s tabState) *frontendv1.FeedMergeTab { return committingTab(s, "x") },
 		TabDeploy:         func(s tabState) *frontendv1.FeedMergeTab { return hookScriptTab(s, scriptView{path: "bin/deploy.sh"}) },
