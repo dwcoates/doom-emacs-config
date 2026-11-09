@@ -477,6 +477,28 @@ t_service_fingerprint_mismatch_is_stale() {
     rm -rf "$root"
 }
 
+# --- the notifier app (macOS) is reported from its cache-bin stamps ---------
+t_notifier_is_reported_on_macos_from_its_stamps() {
+    if [ "$(uname)" != Darwin ]; then
+        pass "the notifier app is reported only on macOS (skipped elsewhere)"
+        return
+    fi
+    local root cache; root="$(new_root)"
+    cache="$root/home/.cache/agent-repl/bin"
+    mkdir -p "$cache"
+    stamp "$cache/.Zettel.app.built-sha" "$(head_sha "$root")"
+    write_source_tree "$cache/.Zettel.app.source-tree" \
+        "$(source_tree_id "$root" $(deploy_stamp_system_paths notifier ""))"
+    run_report "$root"
+    if [ "$(jq_get "$OUT" 'sysmap["notifier"]["ready"]')" = "True" ] \
+       && [ "$(jq_get "$OUT" 'sysmap["notifier"]["deployed_sha"]')" = "$(head_sha "$root")" ]; then
+        pass "the notifier app is reported from its .Zettel.app stamps"
+    else
+        fail "the notifier app is reported from its .Zettel.app stamps" "rc=$RC out: $(cat "$OUT") err: $(cat "$root/err.txt")"
+    fi
+    rm -rf "$root"
+}
+
 # --- 11. a live service reporting the installed build is not stale ---------
 t_service_fingerprint_match_is_fresh() {
     local root cache; root="$(new_root)"
@@ -839,6 +861,7 @@ readiness_group_processes() {
     t_daemon_started_after_binary_is_fresh
     t_service_fingerprint_mismatch_is_stale
     t_service_fingerprint_match_is_fresh
+    t_notifier_is_reported_on_macos_from_its_stamps
     t_processless_systems_report_null_running
     t_elisp_is_not_reported
 }
