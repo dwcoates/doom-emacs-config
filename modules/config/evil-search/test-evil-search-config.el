@@ -203,3 +203,10 @@ real `/' prompt's `evil-ex-search-start-session' does."
   "The all-matches highlight still goes away on `RET', as before."
   ;; Act / Assert
   (should (null evil-ex-search-persistent-highlight)))
+
+(ert-deftest test-evil-search-other-matches-draw-no-color ()
+  "Matches other than the current one wear a face with no color."
+  ;; Act / Assert
+  (should (equal (mapcar (lambda (attr) (face-attribute 'evil-ex-lazy-highlight attr nil))
+                         '(:foreground :background :inherit))
+                 '(unspecified unspecified nil))))
