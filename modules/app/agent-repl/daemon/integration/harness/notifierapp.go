@@ -2,6 +2,8 @@ package harness
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"os"
 	"runtime"
 	"sync"
@@ -12,6 +14,18 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	"agentrepl/proto/agentrepl/v1/agentreplv1connect"
 )
+
+// fakeNotifierExecutable is the bytes the fake deploy build stages as the
+// notifier app's executable (NewFakeDeployBuilder).
+const fakeNotifierExecutable = "harness notifier\n"
+
+// FakeNotifierBuild is the build the fake notifier app reports on its stream:
+// the content hash of the executable the fake deploy build stages, so a
+// deploy judges the attached app up to date and restarts nothing.
+var FakeNotifierBuild = func() string {
+	sum := sha256.Sum256([]byte(fakeNotifierExecutable))
+	return hex.EncodeToString(sum[:])
+}()
 
 // FakeNotifierApp stands in for Zettel.app, macOS's banner poster: it holds
 // the daemon's WatchDesktopBanners stream, records every banner it is handed,
@@ -32,6 +46,7 @@ func StartFakeNotifierApp(t testing.TB, ctx context.Context, client agentreplv1c
 	app := &FakeNotifierApp{client: client}
 	stream, err := client.WatchDesktopBanners(ctx, connect.NewRequest(&agentreplv1.WatchDesktopBannersRequest{
 		Process: &agentreplv1.DesktopNotifierProcess{Pid: int32(os.Getpid())},
+		Build:   &agentreplv1.DesktopNotifierBuild{Sha256: FakeNotifierBuild},
 	}))
 	if err != nil {
 		t.Fatalf("harness: open the fake notifier app's banner stream: %v", err)

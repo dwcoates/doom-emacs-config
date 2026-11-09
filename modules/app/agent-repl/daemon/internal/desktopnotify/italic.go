@@ -1,8 +1,8 @@
 package desktopnotify
 
 // Italic answers s with every ASCII letter in Unicode's Mathematical
-// Sans-Serif Italic, the one italic a banner can carry: neither
-// terminal-notifier nor every notify-send server renders markup, so the slant
+// Sans-Serif Italic, the one italic a banner can carry: neither macOS's
+// notification center nor every notify-send server renders markup, so the slant
 // is in the characters themselves. Every other character, digits included, is
 // left as it is (the block has no italic digits).
 func Italic(s string) string {

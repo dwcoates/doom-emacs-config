@@ -45,7 +45,7 @@ func TestAppPostWithNoStreamFailsAtOnce(t *testing.T) {
 func TestAppPostHandsTheBannerAndIsMadeOnceThePlatformTookIt(t *testing.T) {
 	// Arrange
 	app := NewApp(dlog.NewTestLogger(), time.Minute)
-	stream, release := app.Attach(42)
+	stream, release := app.Attach(42, "build-42")
 	defer release()
 	handed := appAnswer(t, app, stream, PostOutcome{Posted: true})
 	made := 0
@@ -81,7 +81,7 @@ func TestAppPostSurfacesThePlatformsRefusal(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange
 			app := NewApp(dlog.NewTestLogger(), time.Minute)
-			stream, release := app.Attach(42)
+			stream, release := app.Attach(42, "build-42")
 			defer release()
 			appAnswer(t, app, stream, tc.outcome)
 			made := false
@@ -100,7 +100,7 @@ func TestAppPostSurfacesThePlatformsRefusal(t *testing.T) {
 func TestAppPostFailsWhenNoAnswerArrivesWithinTheBound(t *testing.T) {
 	// Arrange
 	app := NewApp(dlog.NewTestLogger(), 50*time.Millisecond)
-	stream, release := app.Attach(42)
+	stream, release := app.Attach(42, "build-42")
 	defer release()
 	taken := make(chan AppBanner, 1)
 	go func() { taken <- <-stream.Banners() }()
@@ -121,7 +121,7 @@ func TestAppPostFailsWhenNoAnswerArrivesWithinTheBound(t *testing.T) {
 func TestAppPostFailsWhenItsStreamEndsBeforeTheAnswer(t *testing.T) {
 	// Arrange
 	app := NewApp(dlog.NewTestLogger(), time.Minute)
-	stream, release := app.Attach(42)
+	stream, release := app.Attach(42, "build-42")
 	go func() {
 		<-stream.Banners()
 		release()
@@ -158,10 +158,10 @@ func TestAppALaterStreamSupersedesTheEarlierOne(t *testing.T) {
 	// Arrange
 	log := dlog.NewTestLogger()
 	app := NewApp(log, time.Minute)
-	first, releaseFirst := app.Attach(1)
+	first, releaseFirst := app.Attach(1, "build-1")
 
 	// Act
-	second, releaseSecond := app.Attach(2)
+	second, releaseSecond := app.Attach(2, "build-2")
 	defer releaseSecond()
 
 	// Assert
@@ -190,7 +190,7 @@ func TestAppReleaseOfTheStandingStreamEmptiesTheSlot(t *testing.T) {
 	// Arrange
 	log := dlog.NewTestLogger()
 	app := NewApp(log, time.Minute)
-	_, release := app.Attach(1)
+	_, release := app.Attach(1, "build-1")
 
 	// Act
 	release()
@@ -207,7 +207,7 @@ func TestAppReleaseOfTheStandingStreamEmptiesTheSlot(t *testing.T) {
 func TestAppPostHonorsItsContext(t *testing.T) {
 	// Arrange
 	app := NewApp(dlog.NewTestLogger(), time.Minute)
-	_, release := app.Attach(1)
+	_, release := app.Attach(1, "build-1")
 	defer release()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -231,4 +231,26 @@ func TestPostOutcomeErrPanicsOnAnEmptyOutcome(t *testing.T) {
 
 	// Act
 	_ = PostOutcome{}.err()
+}
+
+func TestAppRunningBuildIsTheStandingStreamsBuild(t *testing.T) {
+	// Arrange
+	app := NewApp(dlog.NewTestLogger(), time.Minute)
+	_, releaseFirst := app.Attach(1, "build-a")
+
+	// Act
+	_, releaseSecond := app.Attach(2, "build-b")
+	build, attached := app.RunningBuild()
+	releaseFirst()
+	stillSecond, stillAttached := app.RunningBuild()
+	releaseSecond()
+	_, afterRelease := app.RunningBuild()
+
+	// Assert
+	if !attached || build != "build-b" || !stillAttached || stillSecond != "build-b" {
+		t.Fatalf("RunningBuild = %q,%v then %q,%v; want the successor's build-b throughout", build, attached, stillSecond, stillAttached)
+	}
+	if afterRelease {
+		t.Fatal("RunningBuild answered a build after every stream ended")
+	}
 }

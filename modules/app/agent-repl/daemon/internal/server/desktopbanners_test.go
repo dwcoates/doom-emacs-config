@@ -19,6 +19,7 @@ func bannerStream(t *testing.T, h *harness, ctx context.Context, pid int32) *con
 	t.Helper()
 	stream, err := h.Client.WatchDesktopBanners(ctx, connect.NewRequest(&agentreplv1.WatchDesktopBannersRequest{
 		Process: &agentreplv1.DesktopNotifierProcess{Pid: pid},
+		Build:   &agentreplv1.DesktopNotifierBuild{Sha256: "build-1"},
 	}))
 	if err != nil {
 		t.Fatalf("open the banner stream: %v", err)
@@ -88,7 +89,9 @@ func TestWatchDesktopBannersRefusesAStreamWithNoPid(t *testing.T) {
 		h := newHarness(t)
 
 		// Act
-		stream, err := h.Client.WatchDesktopBanners(context.Background(), connect.NewRequest(&agentreplv1.WatchDesktopBannersRequest{Process: process}))
+		stream, err := h.Client.WatchDesktopBanners(context.Background(), connect.NewRequest(&agentreplv1.WatchDesktopBannersRequest{
+			Process: process, Build: &agentreplv1.DesktopNotifierBuild{Sha256: "b"},
+		}))
 		if err == nil {
 			stream.Receive()
 			err = stream.Err()
@@ -98,6 +101,42 @@ func TestWatchDesktopBannersRefusesAStreamWithNoPid(t *testing.T) {
 		if connect.CodeOf(err) != connect.CodeInvalidArgument {
 			t.Fatalf("process %v: err = %v, want InvalidArgument", process, err)
 		}
+	}
+}
+
+func TestWatchDesktopBannersRefusesAStreamWithNoBuild(t *testing.T) {
+	for _, build := range []*agentreplv1.DesktopNotifierBuild{nil, {Sha256: ""}} {
+		// Arrange
+		h := newHarness(t)
+
+		// Act
+		stream, err := h.Client.WatchDesktopBanners(context.Background(), connect.NewRequest(&agentreplv1.WatchDesktopBannersRequest{
+			Process: &agentreplv1.DesktopNotifierProcess{Pid: 1}, Build: build,
+		}))
+		if err == nil {
+			stream.Receive()
+			err = stream.Err()
+		}
+
+		// Assert
+		if connect.CodeOf(err) != connect.CodeInvalidArgument {
+			t.Fatalf("build %v: err = %v, want InvalidArgument", build, err)
+		}
+	}
+}
+
+func TestWatchDesktopBannersStandsTheReportedBuild(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Act
+	bannerStream(t, h, ctx, 9)
+
+	// Assert
+	if build, attached := h.NotifierApp.RunningBuild(); !attached || build != "build-1" {
+		t.Fatalf("RunningBuild = %q, %v; want the stream's build-1", build, attached)
 	}
 }
 

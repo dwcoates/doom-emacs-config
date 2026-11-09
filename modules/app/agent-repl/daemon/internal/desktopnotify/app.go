@@ -78,6 +78,7 @@ func (o PostOutcome) err() error {
 type AppStream struct {
 	generation uint64
 	pid        int
+	build      string
 	banners    chan AppBanner
 	superseded chan struct{}
 	gone       chan struct{}
@@ -117,14 +118,16 @@ func NewApp(log dlog.Logger, bound time.Duration) *App {
 	return &App{log: log, bound: bound, waiting: map[uint64]chan PostOutcome{}}
 }
 
-// Attach stands pid's stream, superseding any earlier one, and answers it
-// with the release its handler calls when the stream ends.
-func (a *App) Attach(pid int) (*AppStream, func()) {
+// Attach stands the stream of the app pid running build, superseding any
+// earlier one, and answers it with the release its handler calls when the
+// stream ends.
+func (a *App) Attach(pid int, build string) (*AppStream, func()) {
 	a.mu.Lock()
 	a.generation++
 	stream := &AppStream{
 		generation: a.generation,
 		pid:        pid,
+		build:      build,
 		banners:    make(chan AppBanner),
 		superseded: make(chan struct{}),
 		gone:       make(chan struct{}),
@@ -135,7 +138,7 @@ func (a *App) Attach(pid int) (*AppStream, func()) {
 		close(previous.superseded)
 	}
 	a.mu.Unlock()
-	ctx := dlog.Context{"pid": pid, "generation": stream.generation}
+	ctx := dlog.Context{"pid": pid, "build": build, "generation": stream.generation}
 	if previous != nil {
 		ctx["superseded_pid"] = previous.pid
 		ctx["superseded_generation"] = previous.generation
@@ -163,6 +166,17 @@ func (a *App) release(stream *AppStream) {
 	a.log.Info(opApp, "the notifier app's banner stream ended; no app posts banners until one attaches", dlog.Context{
 		"pid": stream.pid, "generation": stream.generation,
 	})
+}
+
+// RunningBuild is the build the standing stream's app reported; false when
+// no app holds the stream. A deploy judges the app stale on it.
+func (a *App) RunningBuild() (string, bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.stream == nil {
+		return "", false
+	}
+	return a.stream.build, true
 }
 
 // Program implements Backend.

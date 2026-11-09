@@ -21,9 +21,10 @@ const opDesktopBanners = "daemon.server.desktop_banners"
 // (desktopnotify.App): the stream its banners ride, and the posts awaiting
 // its answers.
 type NotifierApp interface {
-	// Attach stands pid's stream, superseding any earlier one, answering the
-	// release its handler calls when the stream ends.
-	Attach(pid int) (*desktopnotify.AppStream, func())
+	// Attach stands the stream of the app pid running build, superseding
+	// any earlier one, answering the release its handler calls when the
+	// stream ends.
+	Attach(pid int, build string) (*desktopnotify.AppStream, func())
 	// Answer settles one post with the app's report.
 	Answer(postID uint64, outcome desktopnotify.PostOutcome) error
 }
@@ -60,9 +61,13 @@ func (s *server) watchDesktopBanners(
 	if msg.GetProcess() == nil || pid <= 0 {
 		return invalid("process.pid", "the notifier app's positive pid is required")
 	}
+	build := msg.GetBuild().GetSha256()
+	if build == "" {
+		return invalid("build.sha256", "the notifier app's build is required: every process reports its build when it connects")
+	}
 	streamCtx, cancel := s.streamContext(ctx)
 	defer cancel()
-	stream, release := s.deps.NotifierApp.Attach(int(pid))
+	stream, release := s.deps.NotifierApp.Attach(int(pid), build)
 	defer release()
 	s.acceptStream(ctx, rpc)
 	log := s.log.With(dlog.Context{"rpc": rpc, "pid": pid})
