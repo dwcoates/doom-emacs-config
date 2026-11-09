@@ -7,6 +7,7 @@
  * it (`agentrepl.v1.UpdateMergeQueueMoveTo`).
  */
 import type { UpdateMergeQueueMoveTo } from "../../proto/gen/ts/agentrepl/v1/endpoint_update_merge_queue_pb";
+import type { DragSpec } from "./drag.js";
 import type { WorkspaceRef } from "../../proto/gen/ts/workspace/v1/workspace_pb";
 
 /**
@@ -36,4 +37,45 @@ export function placeBeside(
 /** The `UpdateMergeQueue` action that moves WORKSPACE's waiting merge to PLACE. */
 export function moveToAction(workspace: WorkspaceRef, place: UpdateMergeQueueMoveTo["place"]) {
   return { case: "moveTo" as const, value: { workspace, place } };
+}
+
+/** What a queue lends the drag of one of its waiting merges. */
+export interface WaitingMergeDrag {
+  /** Which queue this is, for the records. */
+  kind: string;
+  /** The waiting merge pressed. */
+  item: HTMLElement;
+  /** The element whose children are the queue's merges. */
+  list: HTMLElement;
+  /** The drawn box the drag rearranges (`DragSpec.box`). */
+  box: HTMLElement;
+  /** The region the queue scrolls in, when it follows the pointer. */
+  scroller?: HTMLElement;
+  /** Each waiting merge's workspace; a child of LIST it does not name is no waiting merge. */
+  refs: ReadonlyMap<HTMLElement, WorkspaceRef>;
+  /** Dress the dragged merge's copy (`DragSpec.dressGhost`). */
+  dressGhost?: DragSpec["dressGhost"];
+  /** Ask to move WORKSPACE's merge to PLACE. */
+  move: (workspace: WorkspaceRef, place: UpdateMergeQueueMoveTo["place"]) => void;
+}
+
+/**
+ * THE DRAG OF A WAITING MERGE, both queues' one: ITEM moves among the
+ * waiting merges of its list alone, and a drop elsewhere than where it
+ * started asks to move it beside the waiting merge it now stands next to.
+ */
+export function waitingMergeDrag(d: WaitingMergeDrag): DragSpec {
+  const workspace = d.refs.get(d.item);
+  if (workspace === undefined) throw new Error(`invariant: a dragged ${d.kind} merge names its workspace`);
+  const waiting = (): HTMLElement[] => [...d.list.children].filter((el): el is HTMLElement => d.refs.has(el as HTMLElement));
+  return {
+    kind: d.kind,
+    item: d.item,
+    box: d.box,
+    scroller: d.scroller,
+    lists: () => [d.list],
+    itemsOf: waiting,
+    dressGhost: d.dressGhost,
+    dropped: (_list, before) => d.move(workspace, placeBeside(waiting(), d.item, before, d.refs)),
+  };
 }

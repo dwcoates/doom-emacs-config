@@ -52,7 +52,7 @@ import { pressToDrag, type DragSpec } from "../../drag.js";
 import { liveElapsedClock } from "../../elapsed-clock.js";
 import { createDrawingHold, type DrawingHold } from "../../hold.js";
 import { log } from "../../log.js";
-import { moveToAction, placeBeside } from "../../merge-queue-move.js";
+import { moveToAction, waitingMergeDrag } from "../../merge-queue-move.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
 import { guardMalformed } from "../../rpc/guard.js";
 import { UPDATE_MERGE_QUEUE_SENTENCES } from "../../rpc/merge-queue-refusal.js";
@@ -203,21 +203,16 @@ export function queueEntryDrag(
   if (target === null || target.closest(".refusal") !== null) return null;
   const item = target.closest<HTMLElement>(".merge-queue-entry");
   if (item === null || item.parentElement !== table) return null;
-  const workspace = refs.get(item);
-  if (workspace === undefined) return null;
-  const waiting = (): HTMLElement[] => [...table.children].filter((el): el is HTMLElement => refs.has(el as HTMLElement));
-  return {
+  if (!refs.has(item)) return null;
+  return waitingMergeDrag({
     kind: QUEUE_DRAG_KIND,
     item,
+    list: table,
     box: table,
-    lists: () => [table],
-    itemsOf: waiting,
+    refs,
     dressGhost: (ghost) => dressQueueGhost(ghost, item, table),
-    dropped: (_list, before) => {
-      const place = placeBeside(waiting(), item, before, refs);
-      void guardMalformed(rc.ctx, "feed.merge.queue.move", moveInQueue(rc, arrange, workspace, place));
-    },
-  };
+    move: (workspace, place) => void guardMalformed(rc.ctx, "feed.merge.queue.move", moveInQueue(rc, arrange, workspace, place)),
+  });
 }
 
 /**

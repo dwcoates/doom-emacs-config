@@ -4,7 +4,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { moveToAction, placeBeside } from "../src/merge-queue-move.js";
+import { moveToAction, placeBeside, waitingMergeDrag } from "../src/merge-queue-move.js";
 
 /** Waiting merges named NAMES, each a line with its workspace ref. */
 function waitingLines(names: string[]) {
@@ -61,6 +61,49 @@ describe("moveToAction", () => {
   });
 });
 
+describe("waitingMergeDrag", () => {
+  /** A list of a head, then waiting merges named NAMES. */
+  function queueList(names: string[]) {
+    const list = document.createElement("div");
+    const head = document.createElement("div");
+    const { lines, refs } = waitingLines(names);
+    list.append(head, ...lines);
+    return { list, head, lines, refs };
+  }
+
+  it("moves the pressed merge among the waiting merges of its list alone", () => {
+    // Arrange
+    const { list, lines, refs } = queueList(["w1", "w2"]);
+
+    // Act
+    const spec = waitingMergeDrag({ kind: "q", item: lines[1], list, box: list, refs: refs as never, move: () => {} });
+
+    // Assert
+    expect([spec.kind, spec.item, spec.box, spec.scroller, spec.lists(), spec.itemsOf(list)]).toEqual(["q", lines[1], list, undefined, [list], lines]);
+  });
+
+  it("asks to move the dropped merge beside the waiting merge it now stands next to", () => {
+    // Arrange
+    const { list, lines, refs } = queueList(["w1", "w2"]);
+    const moves: unknown[] = [];
+    const spec = waitingMergeDrag({ kind: "q", item: lines[1], list, box: list, refs: refs as never, move: (w, p) => moves.push([w.id, p.case, p.value?.id]) });
+
+    // Act
+    spec.dropped(list, lines[0]);
+
+    // Assert
+    expect(moves).toEqual([["w2", "aheadOf", "w1"]]);
+  });
+
+  it("refuses a pressed merge whose workspace was never named", () => {
+    // Arrange
+    const { list, head, refs } = queueList(["w1"]);
+
+    // Act / Assert
+    expect(() => waitingMergeDrag({ kind: "q", item: head, list, box: list, refs: refs as never, move: () => {} })).toThrow(/invariant/);
+  });
+});
+
 describe("every queue a reader drags places its drop through this module", () => {
   /** Every TypeScript source under src/. */
   function sources(dir: string): string[] {
@@ -79,10 +122,10 @@ describe("every queue a reader drags places its drop through this module", () =>
     expect(builders.map((file) => path.relative(src, file))).toEqual(["merge-queue-move.ts"]);
   });
 
-  it("is the placing of both the sidebar's Merge Queue and the feed's queue tab", () => {
+  it("is the drag of both the sidebar's Merge Queue and the feed's queue tab", () => {
     // Act
     const users = ["sidebar/merge-queue-view.ts", "feed/merge/queue.ts"].map((file) =>
-      /import \{[^}]*\bplaceBeside\b[^}]*\} from "[./]+merge-queue-move\.js"/.test(readFileSync(path.join(src, file), "utf8")),
+      /import \{[^}]*\bwaitingMergeDrag\b[^}]*\} from "[./]+merge-queue-move\.js"/.test(readFileSync(path.join(src, file), "utf8")),
     );
 
     // Assert

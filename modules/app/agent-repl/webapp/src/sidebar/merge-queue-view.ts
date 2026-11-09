@@ -51,7 +51,7 @@ import { guardMalformed } from "../rpc/guard.js";
 import { updateMergeQueueRefusal } from "../rpc/merge-queue-refusal.js";
 import { userRequester } from "../rpc/requester.js";
 import { SELECT_WORKSPACE_EXPECTED_ARMS } from "../rpc/refusal.js";
-import { moveToAction, placeBeside } from "../merge-queue-move.js";
+import { moveToAction, waitingMergeDrag } from "../merge-queue-move.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import type { SidebarContext } from "./context.js";
 import { pressToDrag, type DragSpec } from "../drag.js";
@@ -231,24 +231,18 @@ export function queueDrag(
 ): DragSpec | null {
   const item = target?.closest<HTMLElement>(`.${MERGE_QUEUE_WAITING_CLASS}`) ?? null;
   if (item === null || item.parentElement !== body) return null;
-  const workspace = refs.get(item);
-  if (workspace === undefined) throw new Error("invariant: every waiting merge drawn names its workspace");
   const section = body.closest<HTMLElement>(".repo");
   const scroller = section?.querySelector<HTMLElement>(":scope > .rows") ?? null;
   if (section === null || scroller === null) throw new Error("invariant: a queue is drawn inside the Deploys section's rows");
-  const waiting = (): HTMLElement[] => [...body.children].filter((el): el is HTMLElement => refs.has(el as HTMLElement));
-  return {
+  return waitingMergeDrag({
     kind: "merge",
     item,
+    list: body,
     box: section,
     scroller,
-    lists: () => [body],
-    itemsOf: waiting,
-    dropped: (_list, before) => {
-      const place = placeBeside(waiting(), item, before, refs);
-      void moveInLine(sc, workspace, place);
-    },
-  };
+    refs,
+    move: (workspace, place) => void moveInLine(sc, workspace, place),
+  });
 }
 
 /**
