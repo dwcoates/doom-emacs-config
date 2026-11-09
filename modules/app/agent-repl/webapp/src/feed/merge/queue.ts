@@ -34,33 +34,42 @@
  * "queue paused" banner in the paused amber, while the snapshot carries
  * `frontend.v1.FeedMergeQueue.paused`.
  *
- * EVERY WAITING ROW CARRIES TWO MOVE CONTROLS (owner request, 2026-10-12), a
- * subtle up chevron and down chevron left of the workspace's name, which ask
- * `UpdateMergeQueue` to move that merge one place up or down. The merge
- * running carries none, and an empty slot of the same width keeps every name
- * in one column. A chevron with no waiting merge on its side is disabled: the
- * snapshot's order is read, the first waiting row's neighbor above it is the
- * merge running, and the last row has nothing below it. Success draws nothing:
- * the daemon republishes the snapshot in its new order. A refusal lands at the
- * row, as the jump's does.
+ * A WAITING MERGE IS DRAGGED TO ANOTHER PLACE IN ITS LINE (owner request,
+ * 2026-11-09; it was a pair of up and down chevrons), through the webapp's
+ * one drag gesture (`drag.ts`), exactly as the sidebar's Merge Queue drags
+ * one: the row lifts, its slot travels among the waiting rows, and the drop
+ * asks `UpdateMergeQueue` to move it beside the waiting merge it now stands
+ * next to (`UpdateMergeQueueMoveTo`, placed by `merge-queue-move.ts`). The
+ * merge running is no grip. THE TABLE IS HELD WHILE THE ROW IS CARRIED AND
+ * ASKED ABOUT (`createFeedMergeQueueTable`, the shared `hold.ts`), so a
+ * snapshot pushed meanwhile never throws the dragged row away; the hold lets
+ * go with the answer, drawing the newest snapshot. A refusal is drawn above
+ * the table, outside the drawing the hold redraws.
  */
-import { createControl, labelledControl, type Control } from "../../control.js";
+import { createControl } from "../../control.js";
 import { columnHeader, COLUMNS_ROW_CLASS } from "../../columns.js";
+import { pressToDrag, type DragSpec } from "../../drag.js";
 import { liveElapsedClock } from "../../elapsed-clock.js";
+import { createDrawingHold, type DrawingHold } from "../../hold.js";
 import { log } from "../../log.js";
+import { moveToAction, placeBeside } from "../../merge-queue-move.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
 import { guardMalformed } from "../../rpc/guard.js";
 import { UPDATE_MERGE_QUEUE_SENTENCES } from "../../rpc/merge-queue-refusal.js";
-import { drawMalformedRefusal, drawTransportRefusal, drawTypedRefusal } from "../../rpc/refuse.js";
+import { clearRefusals, drawMalformedRefusal, drawTransportRefusal, drawTypedRefusal } from "../../rpc/refuse.js";
 import { userRequester } from "../../rpc/requester.js";
 import { callUnary } from "../../rpc/unary.js";
-import { UpdateMergeQueueResponseSchema } from "../../../../proto/gen/ts/agentrepl/v1/endpoint_update_merge_queue_pb";
+import {
+  UpdateMergeQueueResponseSchema,
+  type UpdateMergeQueueMoveTo,
+} from "../../../../proto/gen/ts/agentrepl/v1/endpoint_update_merge_queue_pb";
 import type {
   FeedMergeQueue,
   FeedMergeQueueBubble,
   FeedMergeQueueEntry,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import type { WorkspaceRef } from "../../../../proto/gen/ts/workspace/v1/workspace_pb";
+import { stopTicking } from "../ticking.js";
 import { armName } from "../renderers.js";
 import type { RowContext } from "../renderers.js";
 import { jumpToWorkspace, type JumpSite } from "./jump.js";
@@ -82,23 +91,70 @@ export function workspaceHeaderText(count: number): string {
   return `workspace (${count})`;
 }
 
-/** Which way a move control moves its row's merge. */
-export type QueueMove = "up" | "down";
+/** The class every waiting row's drag lifts, and the table's drag kind. */
+export const QUEUE_DRAG_KIND = "feed-merge-queue";
 
-/** Each move control's accessible name, by its direction. */
-export const MOVE_LABELS: Readonly<Record<QueueMove, string>> = {
-  up: "move up the merge queue",
-  down: "move down the merge queue",
-};
+/** The class of the line a refused move is drawn in, above the table. */
+export const QUEUE_STATUS_CLASS = "merge-queue-status";
 
-/** Whether a row's merge has a waiting merge to pass above it and below it. */
-export interface QueueMoves {
-  up: boolean;
-  down: boolean;
+/**
+ * What a queue table's drags need from the panel the table is drawn in: the
+ * hold on its drawing, the layer the dragged row's copy is drawn in, and the
+ * line a refused move is drawn in. All of it outlives every redraw.
+ */
+export interface QueueArrange {
+  hold: DrawingHold<FeedMergeQueue>;
+  readonly layer: HTMLElement;
+  status: HTMLElement;
 }
 
-/** The whole snapshot: ahead front-first, this workspace, behind nearest-first. */
-export function drawFeedMergeQueue(queue: FeedMergeQueue, rc: RowContext): HTMLElement {
+/** A queue tab's drawing: its element, and the snapshot to draw, held while a row is dragged. */
+export interface FeedMergeQueueTable {
+  readonly element: HTMLElement;
+  offer(queue: FeedMergeQueue): void;
+}
+
+/**
+ * The queue tab's drawing: the line a refused move is drawn in, then the
+ * table, redrawn in place from each snapshot offered unless a row is being
+ * dragged or its move asked about (file comment).
+ */
+export function createFeedMergeQueueTable(rc: RowContext): FeedMergeQueueTable {
+  const element = document.createElement("div");
+  element.className = "merge-queue-panel";
+  const status = document.createElement("div");
+  status.className = QUEUE_STATUS_CLASS;
+  let table: HTMLElement | null = null;
+  const arrange: QueueArrange = {
+    hold: createDrawingHold<FeedMergeQueue>({
+      draw: (queue) => {
+        const next = drawFeedMergeQueue(queue, rc, arrange);
+        if (table === null) element.append(next);
+        else {
+          stopTicking(table);
+          table.replaceWith(next);
+        }
+        table = next;
+      },
+      operation: "merge.queue-hold-released",
+    }),
+    // THE COPY IS DRAWN ON THE PAGE'S BODY, outside every bubble's scroll
+    // and transform, read when a row lifts.
+    get layer(): HTMLElement {
+      return element.ownerDocument.body;
+    },
+    status,
+  };
+  element.append(status);
+  return { element, offer: (queue) => arrange.hold.offer(queue) };
+}
+
+/**
+ * The whole snapshot: ahead front-first, this workspace, behind
+ * nearest-first. A press on a waiting row drags it among the waiting, through
+ * ARRANGE (`queueEntryDrag`).
+ */
+export function drawFeedMergeQueue(queue: FeedMergeQueue, rc: RowContext, arrange: QueueArrange): HTMLElement {
   log.debug("drawing a merge queue snapshot", {
     operation: "merge.draw-queue",
     context: { ahead: queue.ahead.length, behind: queue.behind.length },
@@ -115,15 +171,73 @@ export function drawFeedMergeQueue(queue: FeedMergeQueue, rc: RowContext): HTMLE
     el.append(drawPausedMark("merge-queue-paused", QUEUE_PAUSED_TEXT));
   }
   el.append(drawQueueHeader(rows.length));
-  const waiting = rows.map(({ entry }) => entry.status.case === "waiting");
+  const refs = new Map<HTMLElement, WorkspaceRef>();
   rows.forEach(({ entry, place }, i) => {
-    const moves: QueueMoves = {
-      up: waiting[i] && i > 0 && waiting[i - 1],
-      down: waiting[i] && i < rows.length - 1 && waiting[i + 1],
-    };
-    el.append(drawFeedMergeQueueEntry(entry, rc, place, moves));
+    const drawn = drawFeedMergeQueueEntry(entry, rc, place);
+    if (entry.status.case === "waiting") {
+      refs.set(drawn, requireMessage(requireMessage(entry.workspace, `${PATH}.rows[${i}].workspace`).ref, `${PATH}.rows[${i}].workspace.ref`));
+    }
+    el.append(drawn);
+  });
+  el.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0 || !event.isPrimary) return;
+    const spec = queueEntryDrag(rc, arrange, el, event.target as Element | null, refs);
+    if (spec !== null) pressToDrag(arrange, spec, event);
   });
   return el;
+}
+
+/**
+ * A press on a waiting row of TABLE drags it among the waiting rows there; a
+ * drop elsewhere than where it started moves it beside the waiting merge it
+ * now stands next to. The merge running is no grip, nor is a refusal drawn
+ * in a row. REFS names each waiting row's workspace.
+ */
+export function queueEntryDrag(
+  rc: RowContext,
+  arrange: QueueArrange,
+  table: HTMLElement,
+  target: Element | null,
+  refs: ReadonlyMap<HTMLElement, WorkspaceRef>,
+): DragSpec | null {
+  if (target === null || target.closest(".refusal") !== null) return null;
+  const item = target.closest<HTMLElement>(".merge-queue-entry");
+  if (item === null || item.parentElement !== table) return null;
+  const workspace = refs.get(item);
+  if (workspace === undefined) return null;
+  const waiting = (): HTMLElement[] => [...table.children].filter((el): el is HTMLElement => refs.has(el as HTMLElement));
+  return {
+    kind: QUEUE_DRAG_KIND,
+    item,
+    box: table,
+    lists: () => [table],
+    itemsOf: waiting,
+    dressGhost: (ghost) => dressQueueGhost(ghost, item, table),
+    dropped: (_list, before) => {
+      const place = placeBeside(waiting(), item, before, refs);
+      void guardMalformed(rc.ctx, "feed.merge.queue.move", moveInQueue(rc, arrange, workspace, place));
+    },
+  };
+}
+
+/**
+ * Dress GHOST, the copy of ITEM, for the page's body: a row of TABLE takes
+ * its columns from the table it no longer stands in, so the copy is laid out
+ * at the widths the row was drawn at, in the table's own font.
+ */
+export function dressQueueGhost(ghost: HTMLElement, item: HTMLElement, table: HTMLElement): void {
+  const line = item.querySelector<HTMLElement>(":scope > .merge-queue-line");
+  if (line === null) throw new Error("invariant: every merge queue row draws its line");
+  const tableStyle = getComputedStyle(table);
+  ghost.style.display = "grid";
+  ghost.style.gridTemplateColumns = [...line.children].map((cell) => `${cell.getBoundingClientRect().width}px`).join(" ");
+  ghost.style.columnGap = tableStyle.columnGap;
+  ghost.style.font = tableStyle.font;
+  const ghostLine = ghost.querySelector<HTMLElement>(":scope > .merge-queue-line");
+  if (ghostLine === null) throw new Error("invariant: a merge queue row's copy draws its line");
+  ghostLine.style.display = "grid";
+  ghostLine.style.gridTemplateColumns = "subgrid";
+  ghostLine.style.gridColumn = "1 / -1";
 }
 
 /**
@@ -142,16 +256,10 @@ function drawQueueHeader(count: number): HTMLElement {
 }
 
 /**
- * One entry: its move controls and name, the worktree it lands in, how long it
- * has been in its stage, and its jump. MOVES says which of a waiting entry's
- * chevrons have a waiting merge to pass.
+ * One entry: its name, the worktree it lands in, how long it has been in its
+ * stage, and its jump.
  */
-export function drawFeedMergeQueueEntry(
-  entry: FeedMergeQueueEntry,
-  rc: RowContext,
-  place: QueuePlace,
-  moves: QueueMoves,
-): HTMLElement {
+export function drawFeedMergeQueueEntry(entry: FeedMergeQueueEntry, rc: RowContext, place: QueuePlace): HTMLElement {
   const status = requireCase(entry.status, `${PATH}Entry.status`);
   const ref = requireMessage(
     requireMessage(entry.workspace, `${PATH}Entry.workspace`).ref,
@@ -170,12 +278,10 @@ export function drawFeedMergeQueueEntry(
 
   const workspace = document.createElement("span");
   workspace.className = "merge-queue-workspace";
-  const moveSlot = document.createElement("span");
-  moveSlot.className = "merge-queue-moves";
   const label = document.createElement("span");
   label.className = "merge-queue-label";
   label.textContent = requireMessage(entry.label, `${PATH}Entry.label`).text;
-  workspace.append(moveSlot, label);
+  workspace.append(label);
   line.append(workspace);
 
   const target = requireMessage(entry.target, `${PATH}Entry.target`);
@@ -191,7 +297,6 @@ export function drawFeedMergeQueueEntry(
       enteredMs = msOf(status.value.stageEnteredAtMs, `${PATH}Merging.stage_entered_at_ms`);
       break;
     case "waiting":
-      moveSlot.append(drawMoveControl(el, rc, ref, "up", moves.up), drawMoveControl(el, rc, ref, "down", moves.down));
       enteredMs = msOf(status.value.stageEnteredAtMs, `${PATH}Waiting.stage_entered_at_ms`);
       break;
     default:
@@ -248,57 +353,19 @@ export function openQueueEntryBubble(
 }
 
 /**
- * One move control: a chevron pointing MOVE's way, named for screen readers
- * and hover by its label, disabled when there is no waiting merge to pass
- * (ENABLED false). It sits inside the row's jump, so its click is kept from
- * reaching the jump.
- */
-function drawMoveControl(
-  entry: HTMLElement,
-  rc: RowContext,
-  workspace: WorkspaceRef,
-  move: QueueMove,
-  enabled: boolean,
-): Control {
-  const control = labelledControl({
-    className: "merge-queue-move",
-    hook: ["data-merge-move", move],
-    label: "",
-    onClick: (clicked) => {
-      void guardMalformed(rc.ctx, "feed.merge.queue.move", moveInQueue(entry, rc, workspace, move, clicked));
-    },
-  });
-  control.setAttribute("aria-label", MOVE_LABELS[move]);
-  control.title = MOVE_LABELS[move];
-  control.disabled = !enabled;
-  control.addEventListener("click", (event: MouseEvent) => event.stopPropagation());
-  return control;
-}
-
-/** The `UpdateMergeQueue` action that moves WORKSPACE's merge MOVE's way. */
-function moveAction(workspace: WorkspaceRef, move: QueueMove) {
-  return move === "up"
-    ? { case: "moveUp" as const, value: { workspace } }
-    : { case: "moveDown" as const, value: { workspace } };
-}
-
-/**
- * Ask the daemon to move WORKSPACE's merge one place MOVE's way, drawing a
- * refusal at ENTRY. The control is disabled while the call is out, and given
- * back when it was refused.
+ * Ask the daemon to move WORKSPACE's waiting merge to PLACE, the table held
+ * by ARRANGE until the answer: the hold then lets go, drawing the newest
+ * snapshot, and a refusal is drawn at ARRANGE's status line.
  */
 export async function moveInQueue(
-  entry: HTMLElement,
   rc: RowContext,
+  arrange: QueueArrange,
   workspace: WorkspaceRef,
-  move: QueueMove,
-  control: Control,
+  place: UpdateMergeQueueMoveTo["place"],
 ): Promise<void> {
-  log.info("moving a merge one place in its queue", {
-    operation: "merge.queue-move",
-    context: { workspace: workspace.id, move },
-  });
-  control.disabled = true;
+  const context = { workspace: workspace.id, side: place.case, anchor: place.value?.id };
+  log.info("moving a merge in its queue from the feed", { operation: "merge.queue-move", context });
+  arrange.hold.await();
   try {
     const response = await callUnary(
       rc.ctx,
@@ -307,7 +374,7 @@ export async function moveInQueue(
       // queue action names who asked.
       (client) =>
         client.updateMergeQueue({
-          action: moveAction(workspace, move),
+          action: moveToAction(workspace, place),
           requester: userRequester(),
         }),
       UpdateMergeQueueResponseSchema,
@@ -315,11 +382,12 @@ export async function moveInQueue(
     const result = requireCase(response.result, "UpdateMergeQueueResponse.result");
     switch (result.case) {
       case "success":
-        // Nothing is drawn: the snapshot is republished in its new order.
+        // The snapshot is republished in its new order.
+        clearRefusals(arrange.status);
         return;
       case "error": {
         const arm = drawTypedRefusal(
-          entry,
+          arrange.status,
           "UpdateMergeQueueError.cause",
           "UpdateMergeQueue",
           result.value.cause,
@@ -327,21 +395,23 @@ export async function moveInQueue(
         );
         log.warn(`UpdateMergeQueue refused a move request: ${arm}`, {
           operation: "merge.queue-move-refused",
-          context: { arm, workspace: workspace.id, move },
+          context: { arm, ...context },
         });
-        control.disabled = false;
         return;
       }
       default:
         return unreachableArm("UpdateMergeQueueResponse.result", armName(result));
     }
   } catch (err) {
-    if (drawMalformedRefusal(rc.ctx, entry, "merge.queue-move-unreadable", err)) return;
-    drawTransportRefusal(entry, err);
+    if (drawMalformedRefusal(rc.ctx, arrange.status, "merge.queue-move-unreadable", err)) return;
+    drawTransportRefusal(arrange.status, err);
     log.error(`UpdateMergeQueue failed for a move request: ${String(err)}`, {
       operation: "merge.queue-move-failed",
-      context: { workspace: workspace.id, move, cause: err },
+      context: { ...context, cause: err },
     });
-    control.disabled = false;
+  } finally {
+    // EVERY ANSWER LETS GO: the drop rearranged the table's DOM, which only
+    // the newest snapshot may stand in for.
+    arrange.hold.settle(null);
   }
 }

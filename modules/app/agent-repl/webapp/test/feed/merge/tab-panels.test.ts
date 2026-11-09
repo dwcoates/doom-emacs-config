@@ -252,6 +252,51 @@ describe("mergeTabPanel", () => {
   });
 });
 
+describe("the queue tab's panel", () => {
+  /** A queue tab whose snapshot's one entry is named NAME. */
+  const queueTab = (name: string) =>
+    tabOf(
+      tabRow("q1", {
+        kind: "queue",
+        state: "live",
+        payload: {
+          queue: {
+            ahead: [],
+            current: {
+              workspace: { ref: { id: name, dir: `/w/${name}` } },
+              label: { text: name },
+              target: { text: "doom", dir: "/src/doom" },
+              status: { case: "waiting", value: { stageEnteredAtMs: 1_000n } },
+            },
+            behind: [],
+          },
+        },
+      }),
+    );
+
+  /** The names PANEL's table draws now. */
+  const namesIn = (panel: ReturnType<typeof mergeTabPanel>) =>
+    [...panel.nodes[0].querySelectorAll(".merge-queue-label")].map((el) => el.textContent);
+
+  it("draws the snapshot's table", () => {
+    const panel = mergeTabPanel(queueTab("mine"), new FakeSubfeed(), rc());
+    expect(namesIn(panel)).toEqual(["mine"]);
+  });
+
+  it("redraws a changed snapshot in place rather than asking to be drawn afresh", () => {
+    const panel = mergeTabPanel(queueTab("mine"), new FakeSubfeed(), rc());
+    const updated = panel.update(queueTab("theirs"));
+    expect([updated, namesIn(panel)]).toEqual([true, ["theirs"]]);
+  });
+
+  it("keeps its table standing while the snapshot is unchanged", () => {
+    const panel = mergeTabPanel(queueTab("mine"), new FakeSubfeed(), rc());
+    const table = panel.nodes[0].querySelector(".merge-queue");
+    panel.update(queueTab("mine"));
+    expect(panel.nodes[0].querySelector(".merge-queue")).toBe(table);
+  });
+});
+
 describe("a panel's opening shows its newest output", () => {
   afterEach(() => {
     document.body.innerHTML = "";

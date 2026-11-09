@@ -2,8 +2,10 @@
  * tab-panels — what a selected merge tab shows beneath its strip, one panel per
  * kind, at every level of the bubble's nested strips.
  *
- * FIVE SHAPES, ONE FACTORY. RESOLVED tabs (queue, committing, a script hook,
- * and updating main in a bubble recorded before deploys) draw their own row.
+ * SIX SHAPES, ONE FACTORY. RESOLVED tabs (committing, a script hook, and
+ * updating main in a bubble recorded before deploys) draw their own row. The
+ * QUEUE tab draws its snapshot in place, held while a waiting merge is
+ * dragged (`queue.ts`).
  * AGENTIC tabs (a prompt hook, a conflict resolution, a fixing attempt)
  * are containers: their content is the sub-feed rows parented to them, drawn
  * through `view.drawRow` — the ordinary row path, chrome included — which is
@@ -43,7 +45,7 @@ import type { Ticker } from "../../clock.js";
 import { stopTicking } from "../ticking.js";
 import { AGENTIC_KINDS, childTabsOf, drawTabDuration, drawTabStateGlyph, type MergeTab } from "./tab-strip.js";
 import { createTabSet, drawSummary, type TabPanel } from "./tab-set.js";
-import { drawFeedMergeQueue } from "./queue.js";
+import { createFeedMergeQueueTable } from "./queue.js";
 import {
   drawFeedMergeTestsRunOutput,
   updateFeedMergeTestsRunOutput,
@@ -78,7 +80,7 @@ export function mergeTabPanel(tab: MergeTab, view: SubfeedView, rc: RowContext):
   const kind = requireCase(tab.tab.kind, PATH).case;
   switch (kind) {
     case "queue":
-      return rowPanel(tab, () => drawFeedMergeQueue(requireMessage(armOf(tab, "queue").queue, "FeedMergeTabQueue.queue"), rc));
+      return queuePanel(tab, rc);
     case "committing":
       return rowPanel(tab, () => drawFeedMergeTabCommitting(armOf(tab, "committing"), `${PATH}.committing`));
     case "updatingMain":
@@ -113,6 +115,27 @@ function armOf<K extends string>(tab: MergeTab, kase: K): Extract<NonNullable<Me
   const kind = requireCase(tab.tab.kind, PATH);
   if (kind.case !== kase) throw new Error(`merge: a ${kind.case} tab was drawn as ${kase}`);
   return kind.value as never;
+}
+
+/**
+ * The QUEUE tab's panel: its snapshot, redrawn IN PLACE from each changed
+ * push, so a drag of one of its waiting merges outlives every push
+ * (`createFeedMergeQueueTable`).
+ */
+function queuePanel(tab: MergeTab, rc: RowContext): TabPanel {
+  const queueOf = (t: MergeTab) => requireMessage(armOf(t, "queue").queue, "FeedMergeTabQueue.queue");
+  const table = createFeedMergeQueueTable(rc);
+  table.offer(queueOf(tab));
+  let shown = tab.row;
+  return {
+    nodes: [table.element],
+    update(next: MergeTab): boolean {
+      if (equals(FeedRowSchema, shown, next.row)) return true;
+      shown = next.row;
+      table.offer(queueOf(next));
+      return true;
+    },
+  };
 }
 
 /**

@@ -79,13 +79,13 @@ describe("every queue a reader drags places its drop through this module", () =>
     expect(builders.map((file) => path.relative(src, file))).toEqual(["merge-queue-move.ts"]);
   });
 
-  it("is the placing of the sidebar's Merge Queue", () => {
+  it("is the placing of both the sidebar's Merge Queue and the feed's queue tab", () => {
     // Act
-    const users = ["sidebar/merge-queue-view.ts"].map((file) =>
+    const users = ["sidebar/merge-queue-view.ts", "feed/merge/queue.ts"].map((file) =>
       /import \{[^}]*\bplaceBeside\b[^}]*\} from "[./]+merge-queue-move\.js"/.test(readFileSync(path.join(src, file), "utf8")),
     );
 
     // Assert
-    expect(users).toEqual([true]);
+    expect(users).toEqual([true, true]);
   });
 });

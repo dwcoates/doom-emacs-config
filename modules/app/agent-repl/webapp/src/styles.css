@@ -9014,61 +9014,19 @@ html.webhost-gate #feed [data-row-kind="coldGate"]:has(.cold-gate[data-state="st
 .merge-queue-entry[data-queue-place="current"] {
   background: color-mix(in srgb, var(--accent) 9%, transparent);
 }
-/* The workspace cell is the move chevrons, then the name. The name is the one
-   elastic part, so a long one ends in an ellipsis rather than widening the
-   table. */
-.merge-queue-workspace { gap: 0.35em; }
+/* The workspace cell is the name. The name is the one elastic part, so a
+   long one ends in an ellipsis rather than widening the table. */
 .merge-queue-workspace > .merge-queue-label {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-/* THE MOVE CHEVRONS (owner request, 2026-10-12): two small, muted chevrons
-   left of a waiting merge's name, brightening under the pointer. The slot is
-   the same width on every row, the merge running's empty, so every name
-   starts in one column. Each chevron is drawn by its borders, so up and down
-   are the same shape in every font. */
-.merge-queue-moves {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  width: 2.2em;
-}
-ar-button.merge-queue-move {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 1.1em;
-  height: 1.1em;
-  padding: 0;
-  border: none;
-  border-radius: 3px;
-  background: none;
-  font: inherit;
-  color: var(--muted);
-  opacity: 0.55;
-  cursor: pointer;
-}
-ar-button.merge-queue-move::before {
-  content: "";
-  width: 0.32em;
-  height: 0.32em;
-  border-top: 1.5px solid currentColor;
-  border-left: 1.5px solid currentColor;
-}
-ar-button.merge-queue-move[data-merge-move="up"]::before { transform: translateY(0.08em) rotate(45deg); }
-ar-button.merge-queue-move[data-merge-move="down"]::before { transform: translateY(-0.08em) rotate(225deg); }
-ar-button.merge-queue-move:hover {
-  opacity: 1;
-  color: var(--fg);
-  background: rgba(128, 128, 128, 0.18);
-}
-ar-button.merge-queue-move[aria-disabled="true"] {
-  opacity: 0.18;
-  color: var(--muted);
-  background: none;
-  cursor: default;
-}
+/* A WAITING ROW IS A DRAG GRIP (owner request, 2026-11-09; src/drag.ts): it
+   leaves the pointer's moves to the page rather than to a touch scroll. */
+.merge-queue-entry[data-queue-status="waiting"] { touch-action: none; }
+/* A REFUSED MOVE is drawn above the table, outside the drawing a push
+   replaces. */
+.merge-queue-status > .refusal { font-size: 0.85em; }
 /* THE MERGE RUNNING WEARS THE ONE PURPLE, every merge waiting is greyed
    (owner request, 2026-10-23): the row's workspace and target are drawn in
    --blocked at the front and in --muted behind it. */
