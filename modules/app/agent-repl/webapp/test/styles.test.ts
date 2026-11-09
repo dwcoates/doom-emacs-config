@@ -6644,7 +6644,7 @@ describe("the workspace name's status tint (owner request, 2026-10-29)", () => {
     expect(decls).toMatch(/color:\s*var\(--name-tone\)/);
   });
 
-  it("fades a fading name from its tone to its resting grey over the page hold, from minus the time since the turn ended", () => {
+  it("fades a fading name from its tone to its resting grey over the 20 minute hold and 10 minute fade, from minus the time since the turn ended", () => {
     // Arrange / Act
     const decls = ruleFor("#ws-sidebar .row .name.fading");
     const keyframes = keyframesOf("name-fade");
@@ -6652,7 +6652,7 @@ describe("the workspace name's status tint (owner request, 2026-10-29)", () => {
     // Assert
     expect(decls).toMatch(/animation:\s*name-fade var\(--name-fade\) linear var\(--name-fade-delay, 0s\) 1 both/);
     expect(stylesheet).not.toMatch(/--name-fade:/);
-    expect(keyframes.replace(/\s+/g, " ")).toMatch(/0%, 50% \{ color: var\(--name-tone\); \}.*100% \{ color: var\(--name-rest\); \}/);
+    expect(keyframes.replace(/\s+/g, " ")).toMatch(/0%, 66\.667% \{ color: var\(--name-tone\); \}.*100% \{ color: var\(--name-rest\); \}/);
   });
 
   it.each([
@@ -6666,7 +6666,7 @@ describe("the workspace name's status tint (owner request, 2026-10-29)", () => {
     expect(decls).toMatch(new RegExp(`--name-rest:\\s*var\\(${token}\\)`));
   });
 
-  it("holds the tone for the first half of the window, then accelerates (owner request, 2026-10-29)", () => {
+  it("holds the tone for the first two thirds of the window, then accelerates (owner request, 2026-11-08)", () => {
     // Arrange
     const keyframes = keyframesOf("name-fade");
     const remaining = [...keyframes.matchAll(/(\d+(?:\.\d+)?)% \{ color: color-mix\(in srgb, var\(--name-tone\) ([\d.]+)%/g)].map((m) => [Number(m[1]), Number(m[2])]);
@@ -6675,7 +6675,7 @@ describe("the workspace name's status tint (owner request, 2026-10-29)", () => {
     const steps = remaining.slice(1).map(([, tone], i) => remaining[i][1] - tone);
 
     // Assert — the tone only falls after the hold, and each step is larger than the last.
-    expect([remaining[0][0] > 50, steps.every((step, i) => i === 0 || step > steps[i - 1])]).toEqual([true, true]);
+    expect([remaining[0][0] > 66.667, steps.every((step, i) => i === 0 || step > steps[i - 1])]).toEqual([true, true]);
   });
 
   it("breathes a colored name both darker and brighter about its tone", () => {
