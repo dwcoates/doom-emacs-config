@@ -49,6 +49,12 @@ func placeBeforeSubsection(ws *workspacev1.WorkspaceRef, sub string) *agentreplv
 	}}}
 }
 
+// byAgent marks REQ as an agent's request (ArrangeSidebarRequest.by_agent).
+func byAgent(req *agentreplv1.ArrangeSidebarRequest) *agentreplv1.ArrangeSidebarRequest {
+	req.ByAgent = true
+	return req
+}
+
 func placeWorkspace(ws *workspacev1.WorkspaceRef, into string, before *workspacev1.WorkspaceRef) *agentreplv1.ArrangeSidebarRequest {
 	place := &agentreplv1.ArrangePlaceWorkspace{Workspace: ws}
 	if into == "" {
@@ -116,6 +122,15 @@ func TestArrangeSidebarHandsEachChangeToItsVerb(t *testing.T) {
 				}}}},
 		{name: "create an agent's subsection", want: "CreateAgentSubsection " + string(testWorkspaceID) + " auth [" + string(testWorkspaceID) + " ws-2]",
 			req: createAgentSubsection(ref(), "auth", ref(), other)},
+		{name: "place a workspace as an agent", want: "PlaceWorkspacesByAgent [" + string(testWorkspaceID) + "]  end",
+			req: byAgent(placeWorkspace(ref(), "", nil))},
+		{name: "place several workspaces as an agent", want: "PlaceWorkspacesByAgent [ws-2] sub-1 end",
+			req: byAgent(&agentreplv1.ArrangeSidebarRequest{Change: &agentreplv1.ArrangeSidebarRequest_PlaceWorkspaces{
+				PlaceWorkspaces: &agentreplv1.ArrangePlaceWorkspaces{
+					Workspaces: []*workspacev1.WorkspaceRef{other},
+					Into:       &agentreplv1.ArrangePlaceWorkspaces_Subsection{Subsection: subRef("sub-1")},
+					At:         &agentreplv1.ArrangePlaceWorkspaces_End{End: endPlace()},
+				}}})},
 		{name: "place several workspaces as one block", want: "PlaceWorkspaces [ws-2 " + string(testWorkspaceID) + "] sub-1 end",
 			req: &agentreplv1.ArrangeSidebarRequest{Change: &agentreplv1.ArrangeSidebarRequest_PlaceWorkspaces{
 				PlaceWorkspaces: &agentreplv1.ArrangePlaceWorkspaces{
@@ -228,6 +243,7 @@ func TestArrangeSidebarMapsAVerbRefusalOntoItsArm(t *testing.T) {
 		{arm: workspace.ArmOtherRepository, check: func(e *agentreplv1.ArrangeSidebarError) bool { return e.GetOtherRepository() != nil }},
 		{arm: workspace.ArmAnchorElsewhere, check: func(e *agentreplv1.ArrangeSidebarError) bool { return e.GetAnchorElsewhere() != nil }},
 		{arm: workspace.ArmNoOpenWorkspace, check: func(e *agentreplv1.ArrangeSidebarError) bool { return e.GetNoOpenWorkspace() != nil }},
+		{arm: workspace.ArmMainWorkspaceNotSortable, check: func(e *agentreplv1.ArrangeSidebarError) bool { return e.GetMainWorkspaceNotSortable() != nil }},
 		{arm: workspace.ArmTransferringAway, check: func(e *agentreplv1.ArrangeSidebarError) bool { return e.GetTransferringAway() != nil }},
 		{arm: workspace.ArmNotYetAdopted, check: func(e *agentreplv1.ArrangeSidebarError) bool { return e.GetNotYetAdopted() != nil }},
 	}

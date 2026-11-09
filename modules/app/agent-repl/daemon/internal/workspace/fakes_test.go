@@ -754,6 +754,10 @@ func (d *fakeDB) PlaceWorkspaces(_ context.Context, ws []ids.WorkspaceID, into *
 	return d.arrange(fmt.Sprintf("PlaceWorkspaces %v %s %s", ws, ids.Optional(into), wsm.AnchorField(at)))
 }
 
+func (d *fakeDB) PlaceWorkspacesByAgent(_ context.Context, ws []ids.WorkspaceID, into *ids.SubsectionID, at wsm.Anchor) error {
+	return d.arrange(fmt.Sprintf("PlaceWorkspacesByAgent %v %s %s", ws, ids.Optional(into), wsm.AnchorField(at)))
+}
+
 func (d *fakeDB) MoveWorkspace(_ context.Context, ws, target ids.WorkspaceID) error {
 	if d.moveErr != nil {
 		return d.moveErr

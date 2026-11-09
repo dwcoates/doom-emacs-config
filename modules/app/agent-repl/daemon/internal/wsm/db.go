@@ -169,6 +169,7 @@ type DB interface {
 	// subsection of their repository (nil: none) as one block at an anchor
 	// there: before a root, before a subsection (into none only), or last.
 	PlaceWorkspaces(ctx context.Context, ws []WorkspaceID, into *SubsectionID, at Anchor) error
+	PlaceWorkspacesByAgent(ctx context.Context, ws []WorkspaceID, into *SubsectionID, at Anchor) error
 	// SetAttention sets or clears the roster's attention marker.
 	SetAttention(ctx context.Context, id WorkspaceID, on bool) error
 	// SetResult records, or clears with nil, the roster's last turn result.

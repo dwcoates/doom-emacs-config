@@ -30,6 +30,8 @@ const (
 	opMoveSubsection        = "daemon.workspace.move_subsection"
 	opMoveRepository        = "daemon.workspace.move_repository"
 	opPlaceWorkspace        = "daemon.workspace.place_workspaces"
+	// opPlaceWorkspaceByAgent is an agent's placement.
+	opPlaceWorkspaceByAgent = "daemon.workspace.place_workspaces_by_agent"
 	// opSidebarArrangement is the operation GetSidebarArrangement's reads carry.
 	opSidebarArrangement = "daemon.workspace.sidebar_arrangement"
 )
@@ -121,6 +123,19 @@ func (v *verbs) MoveRepository(ctx context.Context, id ids.RepoID, before *ids.R
 // workspace named must be this daemon's to serve, as every per-workspace
 // verb's are.
 func (v *verbs) PlaceWorkspaces(ctx context.Context, ws []ids.WorkspaceID, into *ids.SubsectionID, at wsm.Anchor) error {
+	return v.place(ctx, opPlaceWorkspace, ws, into, at, v.deps.DB.PlaceWorkspaces)
+}
+
+// PlaceWorkspacesByAgent is PlaceWorkspaces for an agent's request: it never
+// moves a main workspace's family (wsm.ErrMainWorkspaceNotSortable), which
+// only the user arranges.
+func (v *verbs) PlaceWorkspacesByAgent(ctx context.Context, ws []ids.WorkspaceID, into *ids.SubsectionID, at wsm.Anchor) error {
+	return v.place(ctx, opPlaceWorkspaceByAgent, ws, into, at, v.deps.DB.PlaceWorkspacesByAgent)
+}
+
+// place is the verb behind both placements; WRITE is the store's.
+func (v *verbs) place(ctx context.Context, op string, ws []ids.WorkspaceID, into *ids.SubsectionID, at wsm.Anchor,
+	write func(context.Context, []ids.WorkspaceID, *ids.SubsectionID, wsm.Anchor) error) error {
 	named := slices.Clone(ws)
 	if before, ok := at.(wsm.BeforeWorkspace); ok {
 		named = append(named, before.ID)
@@ -131,8 +146,8 @@ func (v *verbs) PlaceWorkspaces(ctx context.Context, ws []ids.WorkspaceID, into 
 		}
 	}
 	log := v.deps.Log.Global().With(dlog.Context{"workspaces": ws, "into": ids.Optional(into), "at": wsm.AnchorField(at)})
-	return v.arrange(ctx, log, opPlaceWorkspace, "place the workspaces", func() error {
-		return v.deps.DB.PlaceWorkspaces(ctx, ws, into, at)
+	return v.arrange(ctx, log, op, "place the workspaces", func() error {
+		return write(ctx, ws, into, at)
 	})
 }
 
@@ -186,6 +201,8 @@ func arrangementRefusal(log dlog.Logger, err error) *Refusal {
 		return refuse(log, arrangeRPC, ArmAnchorElsewhere, err.Error(), false)
 	case errors.Is(err, wsm.ErrNoOpenConstituent):
 		return refuse(log, arrangeRPC, ArmNoOpenWorkspace, err.Error(), false)
+	case errors.Is(err, wsm.ErrMainWorkspaceNotSortable):
+		return refuse(log, arrangeRPC, ArmMainWorkspaceNotSortable, err.Error(), false)
 	default:
 		return nil
 	}

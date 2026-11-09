@@ -72,7 +72,7 @@ func (s *server) ArrangeSidebar(
 			answered bool
 			cerr     *connect.Error
 		)
-		answered, cerr, err = s.placeWorkspaces(ctx, rpc, resp, []*workspacev1.WorkspaceRef{place.GetWorkspace()}, place.GetSubsection(), place.GetBefore(), place.GetBeforeSubsection())
+		answered, cerr, err = s.placeWorkspaces(ctx, rpc, resp, req.Msg.GetByAgent(), []*workspacev1.WorkspaceRef{place.GetWorkspace()}, place.GetSubsection(), place.GetBefore(), place.GetBeforeSubsection())
 		if answered {
 			return answer(resp, cerr)
 		}
@@ -82,7 +82,7 @@ func (s *server) ArrangeSidebar(
 			answered bool
 			cerr     *connect.Error
 		)
-		answered, cerr, err = s.placeWorkspaces(ctx, rpc, resp, place.GetWorkspaces(), place.GetSubsection(), place.GetBefore(), place.GetBeforeSubsection())
+		answered, cerr, err = s.placeWorkspaces(ctx, rpc, resp, req.Msg.GetByAgent(), place.GetWorkspaces(), place.GetSubsection(), place.GetBefore(), place.GetBeforeSubsection())
 		if answered {
 			return answer(resp, cerr)
 		}
@@ -172,13 +172,15 @@ func (s *server) moveRepository(
 
 // placeWorkspaces resolves the placed workspaces and their anchor (a
 // workspace BEFORE, a subsection BEFORE_SUBSECTION, or neither: the end),
-// then places them as one block.
+// then places them as one block. BYAGENT is an agent's request
+// (ArrangeSidebarRequest.by_agent), which never moves a main workspace.
 // `answered` says a resolution refused and the caller answers at once with
 // cerr; otherwise err is the verb's.
 func (s *server) placeWorkspaces(
 	ctx context.Context,
 	rpc string,
 	resp *agentreplv1.ArrangeSidebarResponse,
+	byAgent bool,
 	refs []*workspacev1.WorkspaceRef,
 	into *agentreplv1.SubsectionRef,
 	before *workspacev1.WorkspaceRef,
@@ -207,6 +209,9 @@ func (s *server) placeWorkspaces(
 	if into != nil {
 		id := ids.SubsectionID(into.GetId())
 		destination = &id
+	}
+	if byAgent {
+		return false, nil, s.deps.Verbs.PlaceWorkspacesByAgent(ctx, placed, destination, at)
 	}
 	return false, nil, s.deps.Verbs.PlaceWorkspaces(ctx, placed, destination, at)
 }

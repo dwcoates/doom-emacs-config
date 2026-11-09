@@ -74,6 +74,10 @@ const (
 	// ArmNoOpenWorkspace is an agent-created subsection none of whose
 	// workspaces is open (ArrangeSidebarError.no_open_workspace).
 	ArmNoOpenWorkspace = "no_open_workspace"
+	// ArmMainWorkspaceNotSortable is an agent's placement that would move a
+	// repository's main workspace
+	// (ArrangeSidebarError.main_workspace_not_sortable).
+	ArmMainWorkspaceNotSortable = "main_workspace_not_sortable"
 	// ArmNotSiblings is a move between two workspaces that are not siblings
 	// in the arrangement's walk (MoveWorkspaceError.not_siblings).
 	ArmNotSiblings = "not_siblings"

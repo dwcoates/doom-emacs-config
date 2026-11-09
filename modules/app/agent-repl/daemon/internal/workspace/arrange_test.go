@@ -58,6 +58,10 @@ func TestTheArrangementVerbsWriteAndRepublish(t *testing.T) {
 				_, err := v.CreateAgentSubsection(ctx, "w1", "auth", []ids.WorkspaceID{"w1", "w2"})
 				return err
 			}},
+		{name: "place workspaces as an agent", op: opPlaceWorkspaceByAgent, want: "PlaceWorkspacesByAgent [w1] sub-1 end",
+			act: func(ctx context.Context, v Verbs) error {
+				return v.PlaceWorkspacesByAgent(ctx, []ids.WorkspaceID{"w1"}, subsectionID("sub-1"), wsm.AtEnd{})
+			}},
 		{name: "place workspaces at a subsection's end", op: opPlaceWorkspace, want: "PlaceWorkspaces [w1] sub-1 end",
 			act: func(ctx context.Context, v Verbs) error {
 				return v.PlaceWorkspaces(ctx, []ids.WorkspaceID{"w1"}, subsectionID("sub-1"), wsm.AtEnd{})
@@ -103,6 +107,7 @@ func TestTheArrangementVerbsAnswerTheStoresRefusalsOnTheirArms(t *testing.T) {
 		{name: "two repositories", err: wsm.ErrOtherRepository, arm: ArmOtherRepository},
 		{name: "an anchor elsewhere", err: wsm.ErrAnchorElsewhere, arm: ArmAnchorElsewhere},
 		{name: "no open workspace", err: wsm.ErrNoOpenConstituent, arm: ArmNoOpenWorkspace},
+		{name: "a main workspace an agent may not sort", err: fmt.Errorf("x: %w", wsm.ErrMainWorkspaceNotSortable), arm: ArmMainWorkspaceNotSortable},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

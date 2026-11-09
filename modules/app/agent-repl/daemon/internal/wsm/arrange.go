@@ -386,7 +386,21 @@ func (s *store) MoveRepository(ctx context.Context, id RepoID, before *RepoID) e
 // and a workspace anchor that is not a root in the destination
 // ErrAnchorElsewhere.
 func (s *store) PlaceWorkspaces(ctx context.Context, ws []WorkspaceID, into *SubsectionID, at Anchor) error {
-	const op = "daemon.wsm.place_workspaces"
+	return s.placeWorkspaces(ctx, "daemon.wsm.place_workspaces", ws, into, at, false)
+}
+
+// PlaceWorkspacesByAgent is PlaceWorkspaces as a workspace's agent asks it:
+// MAIN WORKSPACES ARE NEVER SORTED AGENTICALLY (owner request, 2026-11-09),
+// so a placement that would move a main workspace's family is refused
+// ErrMainWorkspaceNotSortable, writing nothing. The user's own placement
+// (a drag) goes through PlaceWorkspaces and is not so limited.
+func (s *store) PlaceWorkspacesByAgent(ctx context.Context, ws []WorkspaceID, into *SubsectionID, at Anchor) error {
+	return s.placeWorkspaces(ctx, "daemon.wsm.place_workspaces_by_agent", ws, into, at, true)
+}
+
+// placeWorkspaces is the one write behind both placements; BYAGENT adds the
+// main-workspace refusal inside the same transaction.
+func (s *store) placeWorkspaces(ctx context.Context, op string, ws []WorkspaceID, into *SubsectionID, at Anchor, byAgent bool) error {
 	fields := dlog.Context{"workspaces": ws, "into": ids.Optional(into), "at": AnchorField(at)}
 	if err := malformedPlacement(ws, into, at); err != nil {
 		s.log.Error(op, "refused a malformed placement", withError(fields, err))
@@ -394,6 +408,11 @@ func (s *store) PlaceWorkspaces(ctx context.Context, ws []WorkspaceID, into *Sub
 	}
 	var expanded bool
 	err := s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
+		if byAgent {
+			if err := refuseMainFamilies(ctx, tx, ws); err != nil {
+				return err
+			}
+		}
 		var err error
 		expanded, err = placeFamilies(ctx, tx, ws, into, at)
 		return err
@@ -764,4 +783,26 @@ func nullSubsection(v sql.NullString) *SubsectionID {
 	}
 	id := SubsectionID(v.String)
 	return &id
+}
+
+// refuseMainFamilies answers ErrMainWorkspaceNotSortable when the family of
+// any of WS has a repository's main workspace for its root, the entry a
+// placement would move. An unknown workspace passes: the placement itself
+// answers ErrNotFound.
+func refuseMainFamilies(ctx context.Context, tx *sql.Tx, ws []WorkspaceID) error {
+	roots, err := familyRoots(ctx, tx, ws)
+	if err != nil {
+		return err
+	}
+	for _, root := range roots {
+		var dir, repoDir string
+		if err := tx.QueryRowContext(ctx,
+			`SELECT w.dir, r.dir FROM workspaces w JOIN repositories r ON r.id = w.repo_id WHERE w.id = ?`, root).Scan(&dir, &repoDir); err != nil {
+			return err
+		}
+		if IsMainWorktree(dir, repoDir) {
+			return fmt.Errorf("wsm: workspace %s is the main workspace of %s: %w", root, repoDir, ErrMainWorkspaceNotSortable)
+		}
+	}
+	return nil
 }

@@ -1544,3 +1544,95 @@ func registerOpenMain(t *testing.T, s *store, repoDir string) Workspace {
 	}
 	return ws
 }
+
+func TestAnAgentNeverSortsAMainWorkspace(t *testing.T) {
+	tests := []struct {
+		name string
+		ask  func(t *testing.T, s *store, repoDir string, main, other Workspace) error
+	}{
+		{name: "placing the main workspace", ask: func(t *testing.T, s *store, repoDir string, main, other Workspace) error {
+			sub := mustSubsection(t, s, main.Repo, "later")
+			return s.PlaceWorkspacesByAgent(context.Background(), []WorkspaceID{main.ID}, &sub.ID, AtEnd{})
+		}},
+		{name: "placing a child of the main workspace, which moves its family", ask: func(t *testing.T, s *store, repoDir string, main, other Workspace) error {
+			if err := s.Reopen(context.Background(), main.ID, testServing); err != nil {
+				t.Fatalf("Reopen(main): %v", err)
+			}
+			if err := s.Reopen(context.Background(), main.ID, testServing); err != nil {
+				t.Fatalf("Reopen(main): %v", err)
+			}
+			child := registerChild(t, s, repoDir, "kid", main.ID)
+			sub := mustSubsection(t, s, main.Repo, "later")
+			return s.PlaceWorkspacesByAgent(context.Background(), []WorkspaceID{child.ID}, &sub.ID, AtEnd{})
+		}},
+		{name: "placing a batch that includes the main workspace", ask: func(t *testing.T, s *store, repoDir string, main, other Workspace) error {
+			sub := mustSubsection(t, s, main.Repo, "later")
+			return s.PlaceWorkspacesByAgent(context.Background(), []WorkspaceID{other.ID, main.ID}, &sub.ID, AtEnd{})
+		}},
+		{name: "gathering the main workspace into an agent subsection", ask: func(t *testing.T, s *store, repoDir string, main, other Workspace) error {
+			_, err := s.CreateAgentSubsection(context.Background(), other.ID, "pair", []WorkspaceID{other.ID, main.ID})
+			return err
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			repoDir := arrangeRepo(t, "repo")
+			other := registerIn(t, s, repoDir, "other", nil)
+			main := registerMain(t, s, repoDir)
+
+			// Act
+			err := tt.ask(t, s, repoDir, main, other)
+
+			// Assert
+			if !errors.Is(err, ErrMainWorkspaceNotSortable) {
+				t.Fatalf("err = %v, want ErrMainWorkspaceNotSortable", err)
+			}
+			if got := subsectionOf(t, s, other.ID); got != nil {
+				t.Errorf("the refused write still placed %s in %s", other.ID, *got)
+			}
+			if got := subsectionOf(t, s, main.ID); got != nil {
+				t.Errorf("the refused write still placed the main workspace in %s", *got)
+			}
+		})
+	}
+}
+
+func TestAnAgentStillSortsAWorkspaceThatIsNotMain(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	other := registerIn(t, s, arrangeRepo(t, "repo"), "other", nil)
+	sub := mustSubsection(t, s, other.Repo, "later")
+
+	// Act
+	err := s.PlaceWorkspacesByAgent(context.Background(), []WorkspaceID{other.ID}, &sub.ID, AtEnd{})
+
+	// Assert
+	if err != nil {
+		t.Fatalf("PlaceWorkspacesByAgent = %v, want success", err)
+	}
+	if got := subsectionOf(t, s, other.ID); got == nil || *got != sub.ID {
+		t.Fatalf("workspace sits in %v, want %s", got, sub.ID)
+	}
+}
+
+func TestTheUserStillSortsAMainWorkspace(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	repoDir := arrangeRepo(t, "repo")
+	registerIn(t, s, repoDir, "other", nil)
+	main := registerMain(t, s, repoDir)
+	sub := mustSubsection(t, s, main.Repo, "later")
+
+	// Act
+	err := s.PlaceWorkspaces(context.Background(), []WorkspaceID{main.ID}, &sub.ID, AtEnd{})
+
+	// Assert
+	if err != nil {
+		t.Fatalf("PlaceWorkspaces = %v, want success", err)
+	}
+	if got := subsectionOf(t, s, main.ID); got == nil || *got != sub.ID {
+		t.Fatalf("main workspace sits in %v, want %s", got, sub.ID)
+	}
+}
