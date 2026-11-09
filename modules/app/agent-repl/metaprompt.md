@@ -178,6 +178,23 @@
 - When surfacing a decision, present the correct design as the recommendation and justify any alternative on merit alone.
   - Do not offer the user a "quick option" as a kindness; it is a false economy that spends their design budget to save an implementation cost that does not exist.
 
+## Timeouts
+
+### Every timeout is two to three times the measured expected time of what it bounds
+
+- Every timeout, deadline, wait bound and poll limit is sized at two to three times the expected time of the operation it bounds.
+  - This holds in production code, tests, harnesses, scripts and configuration alike.
+  - The expected time is MEASURED: the healthy worst case under realistic load, not an idle-host average.
+  - The site names the operation it bounds, the measurement, and when it was taken.
+- NEVER pick a round or arbitrary number ("60s should be plenty").
+  - A bound far above the expected time makes every hang cost the whole bound, and a hung test once held the merge queue for 38 minutes (2026-11-09).
+  - A bound with no headroom over the expected time makes the operation flaky.
+- When the expected time is not yet measured, instrument the operation and measure it before choosing the bound.
+  - A bound derived from data the system already keeps, such as a test runner's per-unit history, counts as measured.
+- Every blocking wait has a bound: no unbounded channel receive, process wait, network read or poll loop.
+  - A third-party call that offers no timeout of its own runs under one imposed from outside, such as a killed process or a cancelled context.
+- A bound that fires is a failure, surfaced loudly with the operation, the bound and its expected time, never retried or silently extended.
+
 ## Noticed deficiencies
 
 ### Every deficiency the current work leaves unaddressed is recorded in the todo table
