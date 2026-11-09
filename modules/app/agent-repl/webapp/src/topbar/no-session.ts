@@ -5,8 +5,8 @@
  * THE STRIP HAS ONE SHAPE (topbar.proto, FIXED SCHEMA AND ORGANIZATION; owner
  * ruling 2026-09-13). A control the daemon left ABSENT is not a control the
  * strip omits: the slot stays, and it draws a dash. Omitting it would move
- * every cell to its right the moment a workspace hibernated and move them all
- * back when it woke, which is the strip rearranging itself under the reader —
+ * every cell to its right the moment a workspace lost its session and move them
+ * all back when it came back, which is the strip rearranging itself under the reader —
  * the exact thing the fixed schema exists to forbid.
  *
  * ONE IMPLEMENTATION FOR FOUR CELLS. The model selector, the effort selector,

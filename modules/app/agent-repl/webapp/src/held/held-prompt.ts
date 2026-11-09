@@ -1209,7 +1209,7 @@ export type HeldBadgeTone = "ok" | "err" | "run" | "muted" | "amber" | "teal";
  *   - a classification error: a failure, the error red;
  *   - a shutdown, build-refresh or merge hold: coordinated daemon work, amber;
  *   - a reconnect or loading hold: the machinery bringing a session up, the
- *     hibernation teal;
+ *     revival teal;
  *   - a cold-gate hold: the session is not up either, waiting on the gate's
  *     answer, so the same teal;
  *   - awaiting delivery: nothing is acting on the entry, muted;

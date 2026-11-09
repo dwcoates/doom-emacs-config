@@ -412,7 +412,7 @@ export function heldRowName(row: Element | null): string {
  * upward by looking at the number. So a movement ends the follow ONLY once a
  * real user input has reached the box (`onInput`): the clamp arrives with
  * nothing behind it and is inert, and the gesture arrives with an input and
- * ends the follow on its first upward pixel. Measured, from the hibernated
+ * ends the follow on its first upward pixel. Measured, from the parked
  * tab's playbook under load: `scrollTop=52` with `scrollHeight=853
  * clientHeight=637` and again `scrollHeight=1099` -- a clamp, held while 400px
  * of new rows arrived beneath it.

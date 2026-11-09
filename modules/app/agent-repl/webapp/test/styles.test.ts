@@ -3925,7 +3925,7 @@ describe("the held status badges' colors", () => {
     run: "--thinking",
     muted: "--muted",
     amber: "--merge-border",
-    teal: "--hibernated",
+    teal: "--revival",
   };
 
   /**
@@ -4511,7 +4511,7 @@ describe("the persistent-wifi glyph button", () => {
 describe("the cold gate's lead sentence", () => {
   it("is drawn in the ordinary foreground, leaving color to its token figure alone", () => {
     // Arrange
-    const rule = rulesOf(stylesheet).find((r) => r.selectors.includes(".hibernation-context"));
+    const rule = rulesOf(stylesheet).find((r) => r.selectors.includes(".cold-gate-context"));
 
     // Act
     const declarations = rule?.declarations ?? "";
