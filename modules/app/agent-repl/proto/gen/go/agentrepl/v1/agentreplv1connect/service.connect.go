@@ -973,7 +973,9 @@ type AgentReplClient interface {
 	// Merge queues' status, now. See endpoint_get_merge_queue_status.proto.
 	GetMergeQueueStatus(context.Context, *connect.Request[v1.GetMergeQueueStatusRequest]) (*connect.Response[v1.GetMergeQueueStatusResponse], error)
 	// The registry's agent workspaces, open or closed, narrowed by repository,
-	// activity window, standing and text, each with its name and summary. See
+	// activity window, standing, text and whether the sidebar draws them, each
+	// with its name, summary and, when drawn, its roster section and live
+	// status. `workspace find` and `workspace list` both answer its records. See
 	// endpoint_find_workspaces.proto.
 	FindWorkspaces(context.Context, *connect.Request[v1.FindWorkspacesRequest]) (*connect.Response[v1.FindWorkspacesResponse], error)
 	// Tell one workspace's agent when another workspace changes, answering with
@@ -3166,7 +3168,9 @@ type AgentReplHandler interface {
 	// Merge queues' status, now. See endpoint_get_merge_queue_status.proto.
 	GetMergeQueueStatus(context.Context, *connect.Request[v1.GetMergeQueueStatusRequest]) (*connect.Response[v1.GetMergeQueueStatusResponse], error)
 	// The registry's agent workspaces, open or closed, narrowed by repository,
-	// activity window, standing and text, each with its name and summary. See
+	// activity window, standing, text and whether the sidebar draws them, each
+	// with its name, summary and, when drawn, its roster section and live
+	// status. `workspace find` and `workspace list` both answer its records. See
 	// endpoint_find_workspaces.proto.
 	FindWorkspaces(context.Context, *connect.Request[v1.FindWorkspacesRequest]) (*connect.Response[v1.FindWorkspacesResponse], error)
 	// Tell one workspace's agent when another workspace changes, answering with

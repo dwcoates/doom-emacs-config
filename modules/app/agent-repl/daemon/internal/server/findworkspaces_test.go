@@ -3,21 +3,58 @@ package server
 import (
 	"context"
 	"errors"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
 	"connectrpc.com/connect"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
+	"agentrepl/protohelpers/rosterwalk"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/wsm"
 )
 
+// findRosterRow is a roster row of the workspace REF, drawn with STATUS.
+func findRosterRow(ref *workspacev1.WorkspaceRef, status func(*frontendv1.RosterRow)) *frontendv1.RosterRow {
+	row := &frontendv1.RosterRow{Workspace: &frontendv1.RosterRowWorkspace{Workspace: ref}}
+	if status != nil {
+		status(row)
+	}
+	return row
+}
+
+// findRoster is the roster the find harness publishes: the open workspace
+// drawn thinking in the open section, the landed one drawn done in the
+// recently merged band. OPENSTATUS overrides the open row's status, nil
+// drawing it with none.
+func findRoster(openStatus func(*frontendv1.RosterRow)) *frontendv1.WorkspaceRoster {
+	open := findRosterRow(&workspacev1.WorkspaceRef{Id: "ws-open", Dir: "/src/open"}, openStatus)
+	landed := findRosterRow(&workspacev1.WorkspaceRef{Id: "ws-landed", Dir: "/src/landed"}, func(r *frontendv1.RosterRow) {
+		r.Status = &frontendv1.RosterRow_Done{Done: &frontendv1.RosterRowStatusDone{}}
+	})
+	return &frontendv1.WorkspaceRoster{
+		Revision: 7,
+		Repository: &frontendv1.RosterRepositoryView{Sections: []*frontendv1.RosterRepoSection{{
+			Entries: rosterwalk.RowEntries([]*frontendv1.RosterOpenRow{{Row: open}})}}},
+		RecentlyMerged: &frontendv1.RosterMergedSection{Groups: []*frontendv1.RosterMergedRepoGroup{{
+			MergedRows: &frontendv1.RosterMergedRows{Rows: []*frontendv1.RosterMergedRow{{Row: landed}}}}}},
+	}
+}
+
+// thinking draws a roster row with the thinking status.
+func thinking(r *frontendv1.RosterRow) {
+	r.Status = &frontendv1.RosterRow_Thinking{Thinking: &frontendv1.RosterRowStatusThinking{}}
+}
+
 // findHarness is a harness whose registry holds one repository with an open
-// workspace (summarized) and a landed one, in place of the default workspace.
+// workspace (summarized) and a landed one, in place of the default workspace,
+// and whose roster draws both (findRoster).
 func findHarness(t *testing.T, opts ...option) *harness {
 	t.Helper()
 	h := newHarness(t, opts...)
@@ -30,6 +67,7 @@ func findHarness(t *testing.T, opts ...option) *harness {
 		"ws-landed": {ID: "ws-landed", Repo: repo.ID, Dir: "/src/landed", Name: "landed-one", Branch: "landed-one", CreatedAt: created, Closed: true, MergedAt: &merged},
 	}
 	h.DB.summaries = map[ids.WorkspaceID]wsm.WorkspaceSummary{"ws-open": {Title: "Fix the footer"}}
+	h.Sidebar.topic.Publish(findRoster(thinking))
 	return h
 }
 
@@ -200,6 +238,7 @@ func TestFindWorkspacesRefusesAMalformedRequest(t *testing.T) {
 		{name: "a blank text", req: &agentreplv1.FindWorkspacesRequest{Text: ptrTo("  ")}},
 		{name: "a zero limit", req: &agentreplv1.FindWorkspacesRequest{Limit: ptrTo(uint32(0))}},
 		{name: "a creator ref naming no workspace", req: &agentreplv1.FindWorkspacesRequest{CreatedBy: &workspacev1.WorkspaceRef{}}},
+		{name: "a caller ref naming no workspace", req: &agentreplv1.FindWorkspacesRequest{Caller: &workspacev1.WorkspaceRef{}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -248,5 +287,198 @@ func TestFindWorkspacesFailsAndRecordsAFailedRead(t *testing.T) {
 				t.Fatalf("ERROR record = %v (%v), want cause %q", rec.Context, ok, tt.cause)
 			}
 		})
+	}
+}
+
+// closedUndrawn adds a closed workspace the roster draws no row of.
+func closedUndrawn(h *harness) {
+	h.DB.workspaces["ws-closed"] = wsm.Workspace{ID: "ws-closed", Repo: "repo-1", Dir: "/src/closed", Name: "closed-one",
+		CreatedAt: time.UnixMilli(1_000), Closed: true}
+}
+
+// foundByName answers RESP's records by name.
+func foundByName(resp *connect.Response[agentreplv1.FindWorkspacesResponse]) map[string]*agentreplv1.FoundWorkspace {
+	out := map[string]*agentreplv1.FoundWorkspace{}
+	for _, f := range resp.Msg.GetSuccess().GetComplete().GetWorkspaces() {
+		out[f.GetName()] = f
+	}
+	return out
+}
+
+func TestFindWorkspacesAnswersHowTheRosterDrawsEachWorkspace(t *testing.T) {
+	// Arrange
+	h := findHarness(t)
+	closedUndrawn(h)
+
+	// Act
+	resp, err := h.Client.FindWorkspaces(context.Background(), connect.NewRequest(&agentreplv1.FindWorkspacesRequest{}))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("FindWorkspaces: %v", err)
+	}
+	found := foundByName(resp)
+	if r := found["open-one"].GetRoster(); r.GetSection().GetOpen() == nil || r.GetStatus().GetArm() != "thinking" {
+		t.Fatalf("open-one roster = %v, want the open section, thinking", r)
+	}
+	if r := found["landed-one"].GetRoster(); r.GetSection().GetMerged() == nil || r.GetStatus().GetArm() != "done" {
+		t.Fatalf("landed-one roster = %v, want the merged section, done", r)
+	}
+	if f := found["closed-one"]; f == nil || f.Roster != nil {
+		t.Fatalf("closed-one = %v, want it answered with no roster", f)
+	}
+}
+
+func TestFindWorkspacesOnRosterAnswersOnlyTheDrawnWorkspaces(t *testing.T) {
+	// Arrange
+	h := findHarness(t)
+	closedUndrawn(h)
+
+	// Act
+	resp, err := h.Client.FindWorkspaces(context.Background(), connect.NewRequest(&agentreplv1.FindWorkspacesRequest{
+		OnRoster: &agentreplv1.FindWorkspacesOnRoster{}}))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("FindWorkspaces: %v", err)
+	}
+	found := foundByName(resp)
+	if len(found) != 2 || found["open-one"] == nil || found["landed-one"] == nil {
+		t.Fatalf("found = %v, want only the two drawn workspaces", resp.Msg)
+	}
+}
+
+func TestFindWorkspacesAnswersCallingOnlyForTheCaller(t *testing.T) {
+	tests := []struct {
+		name        string
+		caller      *workspacev1.WorkspaceRef
+		wantCalling map[string]bool
+	}{
+		{name: "the caller's own record", caller: &workspacev1.WorkspaceRef{Id: "ws-open", Dir: "/src/open"},
+			wantCalling: map[string]bool{"open-one": true, "landed-one": false}},
+		{name: "no caller", caller: nil, wantCalling: map[string]bool{"open-one": false, "landed-one": false}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := findHarness(t)
+
+			// Act
+			resp, err := h.Client.FindWorkspaces(context.Background(), connect.NewRequest(&agentreplv1.FindWorkspacesRequest{Caller: tt.caller}))
+
+			// Assert
+			if err != nil {
+				t.Fatalf("FindWorkspaces: %v", err)
+			}
+			found := foundByName(resp)
+			for name, want := range tt.wantCalling {
+				if got := found[name].GetCalling(); got != want {
+					t.Fatalf("%s calling = %v, want %v", name, got, want)
+				}
+			}
+		})
+	}
+}
+
+func TestFindWorkspacesByAnUnknownCallerIsAnAnswer(t *testing.T) {
+	tests := []struct {
+		name string
+		ref  *workspacev1.WorkspaceRef
+	}{
+		{name: "an id the registry does not hold", ref: &workspacev1.WorkspaceRef{Id: "ws-gone"}},
+		{name: "a dir that disagrees with the id's", ref: &workspacev1.WorkspaceRef{Id: "ws-open", Dir: "/src/elsewhere"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := findHarness(t)
+
+			// Act
+			resp, err := h.Client.FindWorkspaces(context.Background(), connect.NewRequest(&agentreplv1.FindWorkspacesRequest{Caller: tt.ref}))
+
+			// Assert
+			if err != nil || resp.Msg.GetError().GetUnknownCaller() == nil {
+				t.Fatalf("FindWorkspaces = %v, %v; want unknown_caller", resp, err)
+			}
+		})
+	}
+}
+
+func TestFindWorkspacesFailsAndRecordsAnUnreadableRoster(t *testing.T) {
+	tests := []struct {
+		name    string
+		publish func(*harness)
+		cause   string
+	}{
+		{name: "no roster published yet", publish: func(h *harness) { h.Sidebar.topic.ClearIf(func(*frontendv1.WorkspaceRoster) bool { return true }) },
+			cause: "read the roster: the daemon has published no roster yet"},
+		{name: "a row with no status arm", publish: func(h *harness) { h.Sidebar.topic.Publish(findRoster(nil)) },
+			cause: "workspacefind: the roster's open row of workspace ws-open sets no status arm"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			log := dlog.NewTestLogger()
+			h := findHarness(t, func(deps *Deps) { deps.Log = &fakeSurfaces{global: log, workspace: log} })
+			tt.publish(h)
+
+			// Act
+			resp, err := h.Client.FindWorkspaces(context.Background(), connect.NewRequest(&agentreplv1.FindWorkspacesRequest{}))
+
+			// Assert
+			if connectCode(t, err) != connect.CodeInternal || resp != nil {
+				t.Fatalf("FindWorkspaces = %v, %v; want an internal failure and no answer", resp, err)
+			}
+			rec, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "error", Operation: "FindWorkspaces"})
+			if !ok || rec.Context["cause"] != tt.cause {
+				t.Fatalf("ERROR record = %v (%v), want cause %q", rec.Context, ok, tt.cause)
+			}
+		})
+	}
+}
+
+func TestRegisteredRefAnswersTheRecordARefNames(t *testing.T) {
+	tests := []struct {
+		name   string
+		ref    *workspacev1.WorkspaceRef
+		wantOK bool
+	}{
+		{name: "an id the registry holds, no dir", ref: &workspacev1.WorkspaceRef{Id: "ws-1"}, wantOK: true},
+		{name: "an id and its own dir", ref: &workspacev1.WorkspaceRef{Id: "ws-1", Dir: "/src/one"}, wantOK: true},
+		{name: "an id the registry does not hold", ref: &workspacev1.WorkspaceRef{Id: "ws-gone"}, wantOK: false},
+		{name: "a dir that disagrees with the id's", ref: &workspacev1.WorkspaceRef{Id: "ws-1", Dir: "/src/other"}, wantOK: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			byID := map[wsm.WorkspaceID]wsm.Workspace{"ws-1": {ID: "ws-1", Dir: "/src/one"}}
+
+			// Act
+			got, ok := registeredRef(byID, tt.ref)
+
+			// Assert
+			if ok != tt.wantOK || (ok && got.ID != "ws-1") || (!ok && got.ID != "") {
+				t.Fatalf("registeredRef = %+v, %v; want ok %v", got, ok, tt.wantOK)
+			}
+		})
+	}
+}
+
+// BOTH REF CRITERIA RESOLVE THROUGH registeredRef: a handler that resolves
+// created_by or caller by hand fails here.
+func TestFindWorkspacesResolvesEveryWorkspaceRefThroughRegisteredRef(t *testing.T) {
+	// Arrange
+	src, err := os.ReadFile("findworkspaces.go")
+	if err != nil {
+		t.Fatalf("read the handler: %v", err)
+	}
+
+	// Act
+	calls := strings.Count(string(src), "registeredRef(byID, ref)")
+	byHand := strings.Count(string(src), "byID[wsm.WorkspaceID(ref.GetId())]")
+
+	// Assert
+	if calls != 2 || byHand != 1 {
+		t.Fatalf("registeredRef calls = %d, hand lookups = %d; want both refs through the helper and its own one lookup", calls, byHand)
 	}
 }

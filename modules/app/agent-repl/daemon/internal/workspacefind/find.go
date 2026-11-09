@@ -46,6 +46,8 @@ type Query struct {
 	// CreatedBy keeps only the workspaces this workspace's agent asked for
 	// (wsm.Workspace.RequestedBy).
 	CreatedBy *wsm.WorkspaceID
+	// OnRoster keeps only the workspaces the roster draws (Found.Roster set).
+	OnRoster bool
 }
 
 // Found is one workspace a find answered.
@@ -58,6 +60,9 @@ type Found struct {
 	Summary *string
 	// LastActiveAt is LastActiveAt(Workspace), which the answer is ordered by.
 	LastActiveAt time.Time
+	// Roster is how the roster draws the workspace, nil when it draws no row
+	// of it in its open, hidden or recently merged section.
+	Roster *Drawn
 }
 
 // Result is a find's answer.
@@ -97,10 +102,11 @@ func IsAgentWorkspace(ws wsm.Workspace) bool {
 }
 
 // Find answers the agent workspaces among WORKSPACES that match Q, each with
-// its repository from REPOSITORIES and its summary from SUMMARIES. A workspace
+// its repository from REPOSITORIES, its summary from SUMMARIES and how the
+// roster draws it from DRAWN (Placements). A workspace
 // whose repository REPOSITORIES does not hold is an invariant violation (the
 // registry's foreign key forbids it) and fails the find.
-func Find(workspaces []wsm.Workspace, repositories []wsm.Repository, summaries map[wsm.WorkspaceID]wsm.WorkspaceSummary, q Query) (Result, error) {
+func Find(workspaces []wsm.Workspace, repositories []wsm.Repository, summaries map[wsm.WorkspaceID]wsm.WorkspaceSummary, drawn map[wsm.WorkspaceID]Drawn, q Query) (Result, error) {
 	repos := make(map[wsm.RepoID]wsm.Repository, len(repositories))
 	for _, repo := range repositories {
 		repos[repo.ID] = repo
@@ -118,6 +124,9 @@ func Find(workspaces []wsm.Workspace, repositories []wsm.Repository, summaries m
 		if sum, ok := summaries[ws.ID]; ok {
 			title := sum.Title
 			found.Summary = &title
+		}
+		if d, ok := drawn[ws.ID]; ok {
+			found.Roster = &d
 		}
 		if matches(found, q) {
 			matched = append(matched, found)
@@ -160,6 +169,9 @@ func matches(f Found, q Query) bool {
 		return false
 	}
 	if q.CreatedBy != nil && (ws.RequestedBy == nil || *ws.RequestedBy != *q.CreatedBy) {
+		return false
+	}
+	if q.OnRoster && f.Roster == nil {
 		return false
 	}
 	return true

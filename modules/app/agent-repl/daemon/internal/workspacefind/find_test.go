@@ -84,7 +84,7 @@ func TestFindNarrowsByEveryCriterion(t *testing.T) {
 			workspaces, summaries := fixture()
 
 			// Act
-			got, err := Find(workspaces, []wsm.Repository{doom, other}, summaries, tt.query)
+			got, err := Find(workspaces, []wsm.Repository{doom, other}, summaries, nil, tt.query)
 
 			// Assert
 			if err != nil {
@@ -114,7 +114,7 @@ func TestFindLimitsAndCountsWhatItOmitted(t *testing.T) {
 			workspaces, summaries := fixture()
 
 			// Act
-			got, err := Find(workspaces, []wsm.Repository{doom, other}, summaries, Query{Limit: ptr(tt.limit)})
+			got, err := Find(workspaces, []wsm.Repository{doom, other}, summaries, nil, Query{Limit: ptr(tt.limit)})
 
 			// Assert
 			if err != nil {
@@ -132,7 +132,7 @@ func TestFindAnswersEachWorkspacesRepositoryAndSummary(t *testing.T) {
 	workspaces, summaries := fixture()
 
 	// Act
-	got, err := Find(workspaces, []wsm.Repository{doom, other}, summaries, Query{})
+	got, err := Find(workspaces, []wsm.Repository{doom, other}, summaries, nil, Query{})
 
 	// Assert
 	if err != nil {
@@ -159,7 +159,7 @@ func TestFindLeavesOutThreadsAndMergeWorkspaces(t *testing.T) {
 	agent := record("agent", "footer", doom, 1)
 
 	// Act
-	got, err := Find([]wsm.Workspace{thread, merge, agent}, []wsm.Repository{doom}, nil, Query{})
+	got, err := Find([]wsm.Workspace{thread, merge, agent}, []wsm.Repository{doom}, nil, nil, Query{})
 
 	// Assert
 	if err != nil {
@@ -175,7 +175,7 @@ func TestFindFailsOnAWorkspaceOfAnUnregisteredRepository(t *testing.T) {
 	orphan := record("orphan", "lost", other, 1)
 
 	// Act
-	got, err := Find([]wsm.Workspace{orphan}, []wsm.Repository{doom}, nil, Query{})
+	got, err := Find([]wsm.Workspace{orphan}, []wsm.Repository{doom}, nil, nil, Query{})
 
 	// Assert
 	if err == nil || !strings.Contains(err.Error(), "repo-other") {
@@ -213,6 +213,61 @@ func TestLastActiveAtIsTheLatestEdge(t *testing.T) {
 			// Assert
 			if !got.Equal(tt.want) {
 				t.Fatalf("LastActiveAt = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestFindOnRosterKeepsOnlyDrawnWorkspacesAndAnswersHowEachIsDrawn(t *testing.T) {
+	tests := []struct {
+		name       string
+		query      Query
+		want       []string
+		wantRoster map[string]*Drawn
+	}{
+		{
+			name:  "on roster keeps only the drawn workspaces",
+			query: Query{OnRoster: true},
+			want:  []string{"open", "landed"},
+			wantRoster: map[string]*Drawn{
+				"open":   {Section: OpenSection, Status: "thinking"},
+				"landed": {Section: MergedSection, Status: "done"},
+			},
+		},
+		{
+			name:  "unset answers drawn and undrawn alike, the undrawn with no roster",
+			query: Query{},
+			want:  []string{"open", "landed", "closed"},
+			wantRoster: map[string]*Drawn{
+				"open":   {Section: OpenSection, Status: "thinking"},
+				"landed": {Section: MergedSection, Status: "done"},
+				"closed": nil,
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			workspaces, summaries := fixture()
+			drawn := map[wsm.WorkspaceID]Drawn{
+				"open":   {Section: OpenSection, Status: "thinking"},
+				"landed": {Section: MergedSection, Status: "done"},
+			}
+
+			// Act
+			got, err := Find(workspaces, []wsm.Repository{doom, other}, summaries, drawn, tt.query)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("Find: %v", err)
+			}
+			if !reflect.DeepEqual(ids(got), tt.want) {
+				t.Fatalf("Find = %v, want %v", ids(got), tt.want)
+			}
+			for _, f := range got.Found {
+				if want := tt.wantRoster[string(f.Workspace.ID)]; !reflect.DeepEqual(f.Roster, want) {
+					t.Fatalf("%s roster = %+v, want %+v", f.Workspace.ID, f.Roster, want)
+				}
 			}
 		})
 	}

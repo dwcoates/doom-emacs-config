@@ -1700,7 +1700,9 @@ export const AgentRepl: GenService<{
   },
   /**
    * The registry's agent workspaces, open or closed, narrowed by repository,
-   * activity window, standing and text, each with its name and summary. See
+   * activity window, standing, text and whether the sidebar draws them, each
+   * with its name, summary and, when drawn, its roster section and live
+   * status. `workspace find` and `workspace list` both answer its records. See
    * endpoint_find_workspaces.proto.
    *
    * @generated from rpc agentrepl.v1.AgentRepl.FindWorkspaces

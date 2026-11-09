@@ -51,25 +51,43 @@ func (s *server) FindWorkspaces(
 		byID[ws.ID] = ws
 	}
 	if ref := req.Msg.CreatedBy; ref != nil {
-		creator, ok := byID[wsm.WorkspaceID(ref.GetId())]
-		if !ok || (ref.GetDir() != "" && ref.GetDir() != creator.Dir) {
+		creator, ok := registeredRef(byID, ref)
+		if !ok {
 			return answer(resp, s.refuse(s.log, rpc, resp, s.fill(refusal{
 				Arm: "unknown_creator", Reason: fmt.Sprintf("no registered workspace is named by id %q dir %q", ref.GetId(), ref.GetDir()), Info: true,
 			})))
 		}
 		query.CreatedBy = &creator.ID
 	}
+	var caller *wsm.WorkspaceID
+	if ref := req.Msg.Caller; ref != nil {
+		record, ok := registeredRef(byID, ref)
+		if !ok {
+			return answer(resp, s.refuse(s.log, rpc, resp, s.fill(refusal{
+				Arm: "unknown_caller", Reason: fmt.Sprintf("no registered workspace is named by id %q dir %q", ref.GetId(), ref.GetDir()), Info: true,
+			})))
+		}
+		caller = &record.ID
+	}
+	roster, ok := s.deps.Sidebar.Topic().Latest()
+	if !ok {
+		return nil, fail(s.log, rpc, fmt.Errorf("read the roster: the daemon has published no roster yet"))
+	}
+	drawn, err := workspacefind.Placements(roster)
+	if err != nil {
+		return nil, fail(s.log, rpc, err)
+	}
 	summaries, err := s.deps.DB.ListWorkspaceSummaries(ctx)
 	if err != nil {
 		return nil, fail(s.log, rpc, fmt.Errorf("list the workspace summaries: %w", err))
 	}
-	result, err := workspacefind.Find(records, repositories, summaries, query)
+	result, err := workspacefind.Find(records, repositories, summaries, drawn, query)
 	if err != nil {
 		return nil, fail(s.log, rpc, err)
 	}
 	found := make([]*agentreplv1.FoundWorkspace, 0, len(result.Found))
 	for _, f := range result.Found {
-		found = append(found, foundWorkspaceOf(f, byID))
+		found = append(found, foundWorkspaceOf(f, byID, caller))
 	}
 	success := &agentreplv1.FindWorkspacesSuccess{}
 	if result.Omitted > 0 {
@@ -80,9 +98,21 @@ func (s *server) FindWorkspaces(
 	}
 	s.log.Debug("daemon.server.find_workspaces", "answered a workspace find", dlog.Context{
 		"found": len(found), "omitted": result.Omitted, "repository": req.Msg.GetRepository().GetId() + req.Msg.GetRepository().GetDir(),
-		"text": req.Msg.GetText(), "standing": fmt.Sprint(query.Standing), "created_by": req.Msg.GetCreatedBy().GetId()})
+		"text": req.Msg.GetText(), "standing": fmt.Sprint(query.Standing), "created_by": req.Msg.GetCreatedBy().GetId(),
+		"on_roster": query.OnRoster, "caller": req.Msg.GetCaller().GetId(), "roster_revision": roster.GetRevision()})
 	resp.Result = &agentreplv1.FindWorkspacesResponse_Success{Success: success}
 	return connect.NewResponse(resp), nil
+}
+
+// registeredRef answers the record in BYID that REF names: its id held, and
+// its dir, when REF states one, the record's own. A ref the registry does not
+// hold by both answers false, which the caller refuses with its own arm.
+func registeredRef(byID map[wsm.WorkspaceID]wsm.Workspace, ref *workspacev1.WorkspaceRef) (wsm.Workspace, bool) {
+	record, ok := byID[wsm.WorkspaceID(ref.GetId())]
+	if !ok || (ref.GetDir() != "" && ref.GetDir() != record.Dir) {
+		return wsm.Workspace{}, false
+	}
+	return record, true
 }
 
 // validateFindWorkspacesRequest is FindWorkspacesRequest's base function.
@@ -106,6 +136,11 @@ func validateFindWorkspacesRequest(req *agentreplv1.FindWorkspacesRequest) *conn
 	}
 	if req.CreatedBy != nil {
 		if err := validateWorkspaceRef("created_by", req.GetCreatedBy()); err != nil {
+			return err
+		}
+	}
+	if req.Caller != nil {
+		if err := validateWorkspaceRef("caller", req.GetCaller()); err != nil {
 			return err
 		}
 	}
@@ -146,14 +181,16 @@ func findQueryOf(req *agentreplv1.FindWorkspacesRequest) workspacefind.Query {
 		limit := int(req.GetLimit())
 		q.Limit = &limit
 	}
+	q.OnRoster = req.OnRoster != nil
 	return q
 }
 
 // foundWorkspaceOf renders one found workspace, naming its creator and its
-// parent by their records in BYID, the same listing. Both references are SET
+// parent by their records in BYID, the same listing, and answering calling
+// for the record of CALLER, nil when the request names none. Both references are SET
 // NULL when their row is forgotten, so one the listing does not hold is an
 // invariant violation and panics.
-func foundWorkspaceOf(f workspacefind.Found, byID map[wsm.WorkspaceID]wsm.Workspace) *agentreplv1.FoundWorkspace {
+func foundWorkspaceOf(f workspacefind.Found, byID map[wsm.WorkspaceID]wsm.Workspace, caller *wsm.WorkspaceID) *agentreplv1.FoundWorkspace {
 	ws := f.Workspace
 	standing := &agentreplv1.FoundWorkspaceStanding{}
 	switch {
@@ -190,5 +227,27 @@ func foundWorkspaceOf(f workspacefind.Found, byID map[wsm.WorkspaceID]wsm.Worksp
 		CreatedAtMs:    ws.CreatedAt.UnixMilli(),
 		LastActiveAtMs: f.LastActiveAt.UnixMilli(),
 		Standing:       standing,
+		Roster:         foundRosterOf(f.Roster),
+		Calling:        caller != nil && *caller == ws.ID,
 	}
+}
+
+// foundRosterOf renders how the roster draws a found workspace, nil when it
+// draws no row of it.
+func foundRosterOf(drawn *workspacefind.Drawn) *agentreplv1.FoundWorkspaceRoster {
+	if drawn == nil {
+		return nil
+	}
+	section := &agentreplv1.FoundWorkspaceRosterSection{}
+	switch drawn.Section {
+	case workspacefind.OpenSection:
+		section.Section = &agentreplv1.FoundWorkspaceRosterSection_Open{Open: &agentreplv1.FoundWorkspaceRosterSectionOpen{}}
+	case workspacefind.HiddenSection:
+		section.Section = &agentreplv1.FoundWorkspaceRosterSection_Hidden{Hidden: &agentreplv1.FoundWorkspaceRosterSectionHidden{}}
+	case workspacefind.MergedSection:
+		section.Section = &agentreplv1.FoundWorkspaceRosterSection_Merged{Merged: &agentreplv1.FoundWorkspaceRosterSectionMerged{}}
+	default:
+		panic(fmt.Sprintf("server: roster section %d has no FoundWorkspaceRosterSection arm", int(drawn.Section)))
+	}
+	return &agentreplv1.FoundWorkspaceRoster{Section: section, Status: &agentreplv1.FoundWorkspaceRosterStatus{Arm: drawn.Status}}
 }

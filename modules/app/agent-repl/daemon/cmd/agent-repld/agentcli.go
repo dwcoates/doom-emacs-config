@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -31,7 +30,6 @@ import (
 	"agent-repld/internal/envc"
 	"agent-repld/internal/lifecycleconfig"
 	"agent-repld/internal/prompthandler"
-	"agent-repld/internal/protoarm"
 	"agent-repld/internal/prwatch"
 	"agent-repld/internal/resolve/feed"
 	"agent-repld/internal/stateroot"
@@ -326,19 +324,38 @@ func (c *cliCall) readRoster() (*frontendv1.WorkspaceRoster, bool) {
 // calling answers the calling workspace's ref: the workspace whose worktree
 // contains the working directory.
 func (c *cliCall) calling() (*workspacev1.WorkspaceRef, bool) {
+	ref, cwd, ok := c.callingRef()
+	if ok && ref == nil {
+		return nil, c.failed("%s is inside no workspace the daemon serves; run this from a workspace, or pass -as-user when the user asks", cwd)
+	}
+	return ref, ok
+}
+
+// callerIfAny answers the calling workspace's ref as calling does, and nil
+// when the working directory is inside no workspace the daemon serves: a
+// read that marks the caller's own record (FindWorkspacesRequest.caller)
+// answers for a caller outside every worktree too.
+func (c *cliCall) callerIfAny() (*workspacev1.WorkspaceRef, bool) {
+	ref, _, ok := c.callingRef()
+	return ref, ok
+}
+
+// callingRef answers the ref of the workspace whose worktree contains the
+// working directory, nil when none does, with that directory.
+func (c *cliCall) callingRef() (*workspacev1.WorkspaceRef, string, bool) {
 	cwd, err := c.deps.getwd()
 	if err != nil {
-		return nil, c.failed("read the working directory: %v", err)
+		return nil, "", c.failed("read the working directory: %v", err)
 	}
 	roster, ok := c.readRoster()
 	if !ok {
-		return nil, false
+		return nil, cwd, false
 	}
 	row := callingRow(roster, canonicalDir(cwd))
 	if row == nil {
-		return nil, c.failed("%s is inside no workspace the daemon serves; run this from a workspace, or pass -as-user when the user asks", cwd)
+		return nil, cwd, true
 	}
-	return row.GetWorkspace().GetWorkspace(), true
+	return row.GetWorkspace().GetWorkspace(), cwd, true
 }
 
 // named answers the workspace NAME names: `here`, a directory, or a roster
@@ -1440,6 +1457,9 @@ func workspaceFind(c *cliCall, args []string) int {
 			return exitFailure
 		}
 	}
+	if req.Caller, ok = c.callerIfAny(); !ok {
+		return exitFailure
+	}
 	resp, err := c.client.FindWorkspaces(c.ctx, connect.NewRequest(req))
 	return answer(c, resp, err)
 }
@@ -1570,19 +1590,12 @@ func (c *cliCall) subsectionNamed(arranged *agentreplv1.ArrangedRepository, name
 	return nil, c.failed("repository %s has %d subsections named %q; rename one so the name picks one", arranged.GetName(), count, name)
 }
 
-// listedWorkspace is one workspace as `workspace list` prints it.
-type listedWorkspace struct {
-	Name    string `json:"name"`
-	ID      string `json:"id"`
-	Dir     string `json:"dir"`
-	Status  string `json:"status"`
-	Section string `json:"section"`
-	Calling bool   `json:"calling,omitempty"`
-}
-
-// workspaceList prints every workspace the roster carries, one JSON object a
-// line: its name, id, directory, the roster status it draws, and the section
-// it is drawn in (open, hidden, or merged). `status WS` reads one in full.
+// workspaceList prints every workspace the sidebar roster draws, in every
+// repository, one agentrepl.v1.FoundWorkspace a line: the record `workspace
+// find` answers, asked for with on_roster, so the line carries the
+// workspace's name, ref, branch, repository, summary, standing, timestamps,
+// the roster section and live status it is drawn with, and calling for the
+// caller's own record. `status WS` reads one in full.
 func workspaceList(c *cliCall, args []string) int {
 	fs, stateDir := c.flags()
 	positionals, ok := c.parse(fs, args)
@@ -1595,50 +1608,29 @@ func workspaceList(c *cliCall, args []string) int {
 	if !c.dial(*stateDir) {
 		return exitFailure
 	}
-	roster, ok := c.readRoster()
+	caller, ok := c.callerIfAny()
 	if !ok {
 		return exitFailure
 	}
-	callingID := ""
-	if cwd, err := c.deps.getwd(); err == nil {
-		if row := callingRow(roster, canonicalDir(cwd)); row != nil {
-			callingID = row.GetWorkspace().GetWorkspace().GetId()
-		}
+	resp, err := c.client.FindWorkspaces(c.ctx, connect.NewRequest(&agentreplv1.FindWorkspacesRequest{
+		OnRoster: &agentreplv1.FindWorkspacesOnRoster{}, Caller: caller}))
+	if err != nil || resp.Msg.GetError() != nil {
+		return answer(c, resp, err)
 	}
-	section := func(rows []*frontendv1.RosterRow, name string) []listedWorkspace {
-		var out []listedWorkspace
-		for _, row := range rows {
-			ref := row.GetWorkspace().GetWorkspace()
-			out = append(out, listedWorkspace{Name: row.GetName().GetText(), ID: ref.GetId(), Dir: ref.GetDir(),
-				Status: rowStatus(row), Section: name, Calling: ref.GetId() == callingID})
-		}
-		return out
+	complete := resp.Msg.GetSuccess().GetComplete()
+	if complete == nil {
+		c.failed("the daemon answered a find with no limit as %v, not a complete extent", resp.Msg)
+		return exitFailure
 	}
-	var open []*frontendv1.RosterRow
-	for _, row := range rosterwalk.OpenRows(roster) {
-		open = append(open, row.GetRow())
-	}
-	listed := section(open, "open")
-	listed = append(listed, section(rosterwalk.HiddenRows(roster), "hidden")...)
-	listed = append(listed, section(rosterwalk.MergedRows(roster), "merged")...)
-	encoder := json.NewEncoder(c.out)
-	for _, ws := range listed {
-		if err := encoder.Encode(ws); err != nil {
-			c.failed("print the list: %v", err)
+	for _, ws := range complete.GetWorkspaces() {
+		text, err := protojson.Marshal(ws)
+		if err != nil {
+			c.failed("render workspace %s: %v", ws.GetName(), err)
 			return exitFailure
 		}
+		say(c.out, "%s\n", text)
 	}
 	return exitSuccess
-}
-
-// rowStatus names a row's status arm by its proto field name, "unset" when it
-// states none.
-func rowStatus(row *frontendv1.RosterRow) string {
-	arm, ok := protoarm.Name(row.ProtoReflect(), "status")
-	if !ok {
-		return "unset"
-	}
-	return string(arm)
 }
 
 // noticeEvents are the -events spellings.
