@@ -219,35 +219,47 @@ func (o *orchestrator) publishRosterQueue(ctx context.Context, repo wsm.RepoKey)
 func (o *orchestrator) asyncRequesters(ctx context.Context, entries []wsm.MergeQueueEntry) ([]ids.WorkspaceID, error) {
 	var out []ids.WorkspaceID
 	for _, entry := range entries {
-		credited, async, err := o.creditOf(ctx, entry.Workspace, entry.Source.Detach != "")
+		c, err := o.creditOf(ctx, entry)
 		if err != nil {
 			return nil, err
 		}
-		if async {
-			out = append(out, credited)
+		if c.async {
+			out = append(out, c.workspace)
 		}
 	}
 	return out, nil
 }
 
-// creditOf answers the workspace the roster credits the merge running in WS
-// to, and whether that merge is ASYNC: a detached request (DETACHED) is
-// credited to its own workspace, a merge workspace to its requester, and
-// every other merge to WS itself. It is the one place the roster's credit is
-// decided, so the async-merging marker and the merge queue view never
-// disagree on who a merge is drawn as.
-func (o *orchestrator) creditOf(ctx context.Context, ws ids.WorkspaceID, detached bool) (ids.WorkspaceID, bool, error) {
-	if detached {
-		return ws, true, nil
+// credit is who the roster credits a merge to and the name it draws it under.
+type credit struct {
+	// workspace is the workspace the merge is credited to.
+	workspace ids.WorkspaceID
+	// async reports an async merge.
+	async bool
+	// asyncName is an async merge's own name (sidebar.QueueEntry.AsyncName),
+	// empty for a sync merge.
+	asyncName string
+}
+
+// creditOf answers how the roster credits the merge ENTRY stands for: a
+// detached request is credited to its own workspace and named by the name it
+// reserved for its merge workspace, a merge workspace is credited to its
+// requester and named by its own name, and every other merge is credited to
+// the workspace it runs in, under that workspace's name. It is the one place
+// the roster's credit is decided, so the async-merging marker and the merge
+// queue view never disagree on who a merge is drawn as.
+func (o *orchestrator) creditOf(ctx context.Context, entry wsm.MergeQueueEntry) (credit, error) {
+	if entry.Source.Detach != "" {
+		return credit{workspace: entry.Workspace, async: true, asyncName: entry.Source.DetachName}, nil
 	}
-	record, err := o.deps.DB.Workspace(ctx, ws)
+	record, err := o.deps.DB.Workspace(ctx, entry.Workspace)
 	if err != nil {
-		return "", false, err
+		return credit{}, err
 	}
 	if record.MergeOf != nil {
-		return record.MergeOf.Requester, true, nil
+		return credit{workspace: record.MergeOf.Requester, async: true, asyncName: record.Name}, nil
 	}
-	return ws, false, nil
+	return credit{workspace: entry.Workspace}, nil
 }
 
 // rosterLine answers the merges of LINE as the roster draws them, front
@@ -259,14 +271,15 @@ func (o *orchestrator) creditOf(ctx context.Context, ws ids.WorkspaceID, detache
 func (o *orchestrator) rosterLine(ctx context.Context, line []wsm.MergeQueueEntry, headed bool) ([]sidebar.QueueEntry, error) {
 	out := make([]sidebar.QueueEntry, 0, len(line))
 	for i, entry := range line {
-		credited, async, err := o.creditOf(ctx, entry.Workspace, entry.Source.Detach != "")
+		c, err := o.creditOf(ctx, entry)
 		if err != nil {
 			return nil, err
 		}
 		drawn := sidebar.QueueEntry{
 			Workspace:     entry.Workspace,
-			Credited:      credited,
-			Async:         async,
+			Credited:      c.workspace,
+			Async:         c.async,
+			AsyncName:     c.asyncName,
 			QueuedAt:      entry.EnqueuedAt,
 			PlacedAtFront: entry.Source.Front,
 			Admitted:      entry.State != wsm.MergeQueued,

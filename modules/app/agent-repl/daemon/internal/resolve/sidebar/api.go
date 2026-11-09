@@ -248,12 +248,19 @@ type QueueEntry struct {
 	// Workspace is the workspace the merge runs in: an async merge's merge
 	// workspace once it exists. The roster reads its merge facts.
 	Workspace ids.WorkspaceID
-	// Credited is the workspace the roster credits the merge to: Workspace
-	// itself for a workspace landing its own branch, and the requester for
-	// an async merge, which is never drawn as its hidden merge workspace.
+	// Credited is the workspace the roster credits the merge to, which a
+	// click on it selects: Workspace itself for a workspace landing its own
+	// branch, and the requester for an async merge, which is never drawn as
+	// its hidden merge workspace's row.
 	Credited ids.WorkspaceID
-	// Async reports whether the merge runs in a hidden merge workspace.
+	// Async reports whether the merge is an async merge.
 	Async bool
+	// AsyncName is an async merge's OWN name, which it is drawn under in
+	// place of Credited's (frontend.v1.RosterMergeQueueSubject.name): its
+	// merge workspace's name, or before that workspace is forked, the name
+	// its request reserved for it. Set iff Async is: a sync merge is drawn
+	// under Credited's name.
+	AsyncName string
 	// Reveal is the merge bubble's head row on Credited's root feed, nil when
 	// the merge has no bubble identity in this daemon.
 	Reveal *frontendv1.FeedId

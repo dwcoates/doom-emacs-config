@@ -114,8 +114,12 @@ func TestTheSplitSectionsComposeTheirHeadings(t *testing.T) {
 		section func(*frontendv1.WorkspaceRoster) *frontendv1.RosterSectionHeader
 		want    string
 	}{
-		{"the Recently Merged section", func(r *frontendv1.WorkspaceRoster) *frontendv1.RosterSectionHeader { return r.GetRecentlyMerged().GetHeader() }, "Recently Merged"},
-		{"the Merge Queue section", func(r *frontendv1.WorkspaceRoster) *frontendv1.RosterSectionHeader { return r.GetMergeQueue().GetHeader() }, "Merge Queue"},
+		{"the Recently Merged section", func(r *frontendv1.WorkspaceRoster) *frontendv1.RosterSectionHeader {
+			return r.GetRecentlyMerged().GetHeader()
+		}, "Recently Merged"},
+		{"the Merge Queue section", func(r *frontendv1.WorkspaceRoster) *frontendv1.RosterSectionHeader {
+			return r.GetMergeQueue().GetHeader()
+		}, "Merge Queue"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1369,50 +1373,111 @@ func TestAQueuedMergeLeavesTheOpenCountsAlone(t *testing.T) {
 	}
 }
 
-func TestAnAsyncMergeIsDrawnAsItsRequesterNeverItsMergeWorkspace(t *testing.T) {
-	// Arrange: an async merge's hidden merge workspace at the front, and
-	// another waiting behind it.
-	r, _ := newResolver(t)
-	mergeWS := workspace("w-merge", "land-one")
-	mergeWS.MergeOf = &wsm.MergeOrigin{Requester: "w1"}
-	waitWS := workspace("w-merge2", "land-two")
-	waitWS.MergeOf = &wsm.MergeOrigin{Requester: "w2"}
-	r.SetMergeQueue(theRepo, sidebar.MergeQueue{
-		Workspaces: []ids.WorkspaceID{"w-merge", "w-merge2"},
-		Line: []sidebar.QueueEntry{
-			{Workspace: "w-merge", Credited: "w1", Async: true, Admitted: true},
-			{Workspace: "w-merge2", Credited: "w2", Async: true},
-		},
-		AsyncRequesters: []ids.WorkspaceID{"w1", "w2"},
-	})
-
-	// Act.
-	r.SetRegistry(queueView(workspace("w1", "one"), workspace("w2", "two"), mergeWS, waitWS))
-
-	// Assert.
-	queue := firstQueue(t, r)
-	head := queue.GetHead().GetSubject()
-	if head.GetWorkspace().GetId() != "w1" || head.GetName() != "one" || head.GetMode().GetAsync() == nil {
-		t.Fatalf("head = %v, want the requester one, async", head)
+func TestEachMergeInTheQueueIsDrawnUnderItsOwnName(t *testing.T) {
+	type drawn struct {
+		credited, name string
+		async          bool
 	}
-	waiting := queue.GetWaiting()[0].GetSubject()
-	if waiting.GetWorkspace().GetId() != "w2" || waiting.GetName() != "two" || waiting.GetMode().GetAsync() == nil {
-		t.Fatalf("waiting = %v, want the requester two, async", waiting)
+	tests := []struct {
+		name       string
+		line       []sidebar.QueueEntry
+		workspaces []wsm.Workspace
+		want       []drawn
+	}{
+		{
+			name:       "a sync merge is drawn under the landing workspace's name",
+			line:       []sidebar.QueueEntry{{Workspace: "w1", Credited: "w1", Admitted: true}},
+			workspaces: []wsm.Workspace{workspace("w1", "one")},
+			want:       []drawn{{credited: "w1", name: "one"}},
+		},
+		{
+			name:       "an async merge is drawn under its own name, credited to its requester",
+			line:       []sidebar.QueueEntry{{Workspace: "w-merge", Credited: "w1", Async: true, AsyncName: "land-one", Admitted: true}},
+			workspaces: []wsm.Workspace{workspace("w1", "one"), mergeWorkspace("w-merge", "land-one", "w1")},
+			want:       []drawn{{credited: "w1", name: "land-one", async: true}},
+		},
+		{
+			name: "several async merges from one requester are drawn apart",
+			line: []sidebar.QueueEntry{
+				{Workspace: "w-merge", Credited: "w1", Async: true, AsyncName: "land-one", Admitted: true},
+				{Workspace: "w-merge2", Credited: "w1", Async: true, AsyncName: "land-two"},
+				{Workspace: "w1", Credited: "w1", Async: true, AsyncName: "land-three"},
+			},
+			workspaces: []wsm.Workspace{workspace("w1", "one"), mergeWorkspace("w-merge", "land-one", "w1"), mergeWorkspace("w-merge2", "land-two", "w1")},
+			want: []drawn{
+				{credited: "w1", name: "land-one", async: true},
+				{credited: "w1", name: "land-two", async: true},
+				{credited: "w1", name: "land-three", async: true},
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			r, _ := newResolver(t)
+			r.SetMergeQueue(theRepo, sidebar.MergeQueue{Line: tc.line})
+
+			// Act.
+			r.SetRegistry(queueView(tc.workspaces...))
+
+			// Assert.
+			queue := firstQueue(t, r)
+			subjects := []*frontendv1.RosterMergeQueueSubject{queue.GetHead().GetSubject()}
+			for _, waiting := range queue.GetWaiting() {
+				subjects = append(subjects, waiting.GetSubject())
+			}
+			got := make([]drawn, 0, len(subjects))
+			for _, sub := range subjects {
+				got = append(got, drawn{credited: sub.GetWorkspace().GetId(), name: sub.GetName(), async: sub.GetMode().GetAsync() != nil})
+			}
+			if !slices.Equal(got, tc.want) {
+				t.Fatalf("drawn = %+v, want %+v", got, tc.want)
+			}
+		})
 	}
 }
 
-func TestASyncMergeIsDrawnAsItsOwnWorkspace(t *testing.T) {
-	// Arrange.
-	r, _ := newResolver(t)
-	r.SetMergeQueue(theRepo, sidebar.MergeQueue{Workspaces: []ids.WorkspaceID{"w1"}, Line: inLine("w1")})
-
-	// Act.
-	r.SetRegistry(queueView(workspace("w1", "one")))
-
-	// Assert.
-	if head := firstQueue(t, r).GetHead().GetSubject(); head.GetName() != "one" || head.GetMode().GetSync() == nil {
-		t.Fatalf("head = %v, want one, sync", head)
+func TestAMergeWhoseOwnNameContradictsItsModeIsRecordedAndNotDrawn(t *testing.T) {
+	tests := []struct {
+		name  string
+		entry sidebar.QueueEntry
+	}{
+		{name: "an async merge without its own name", entry: sidebar.QueueEntry{Workspace: "w1", Credited: "w1", Async: true}},
+		{name: "a sync merge carrying an async name", entry: sidebar.QueueEntry{Workspace: "w1", Credited: "w1", AsyncName: "land-one"}},
 	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: the front contradicts itself; w2 waits behind it.
+			r, logs := newResolver(t)
+			line := inLine("w1", "w2")
+			line[0] = tc.entry
+			r.SetMergeQueue(theRepo, sidebar.MergeQueue{Line: line})
+
+			// Act.
+			r.SetRegistry(queueView(workspace("w1", "one"), workspace("w2", "two")))
+
+			// Assert.
+			if got := queueSubjectIDs(queueGroup(latest(t, r), repo)); !slices.Equal(got, []string{"w2"}) {
+				t.Fatalf("queue = %v, want the consistent merge alone", got)
+			}
+			var found bool
+			for _, rec := range logs.Records() {
+				if rec.Level == dlog.LevelError && rec.Operation == "daemon.sidebar.merge_queue" && rec.Context["invariant_violation"] == "a merge queue entry carries its own name iff it is async" {
+					found = rec.Context["workspace_id"] == "w1" && rec.Context["async"] == tc.entry.Async && rec.Context["async_name"] == tc.entry.AsyncName
+				}
+			}
+			if !found {
+				t.Fatalf("the contradicting merge was not recorded with its context: %+v", logs.Records())
+			}
+		})
+	}
+}
+
+// mergeWorkspace is a hidden merge workspace named NAME, forked for REQUESTER.
+func mergeWorkspace(id, name string, requester ids.WorkspaceID) wsm.Workspace {
+	ws := workspace(id, name)
+	ws.MergeOf = &wsm.MergeOrigin{Requester: requester}
+	return ws
 }
 
 func TestEveryMergeInTheQueueCarriesTheBubbleItReveals(t *testing.T) {

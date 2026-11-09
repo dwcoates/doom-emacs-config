@@ -3992,7 +3992,14 @@ func (*RosterRepoSection_Collapsed) isRosterRepoSection_Fold() {}
 // workspace landing its own branch, or, for an async merge, to the workspace
 // that asked for it, which carries the `async_merging` marker in the
 // workspaces view (RosterRow.async_merging). A hidden merge workspace is never
-// named, drawn or selected here.
+// drawn as a row or selected here.
+//
+// EVERY MERGE IS NAMED BY WHAT IT IS (owner request, 2026-11-09): a workspace
+// landing its own branch (a `workspace finished` included) by the landing
+// workspace's name, and an async merge by ITS OWN NAME (the `-name` given to
+// `agent-repld workspace async-merge`, its merge workspace's name), never its
+// requester's: one workspace may have many async merges in flight, and each
+// must be told apart in the queue (RosterMergeQueueSubject.name).
 //
 // A queue whose line holds no merge and that remediates nothing is not drawn:
 // its repository has no group in the Merge Queue section, paused or not.
@@ -4552,19 +4559,30 @@ func (x *RosterMergeQueuePauserWorkspace) GetName() string {
 	return ""
 }
 
-// Which workspace a merge in the queue is credited to, and where a click on
-// it goes.
+// The name a merge in the queue is drawn under, which workspace it is
+// credited to, and where a click on it goes.
 type RosterMergeQueueSubject struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The workspace the merge is credited to (see RosterRepoMergeQueue). A
-	// click selects it.
+	// click selects it: for an async merge that is its REQUESTER, whose root
+	// feed draws the merge's bubble, never the hidden merge workspace, which a
+	// click would otherwise have to reveal for good.
 	Workspace *v1.WorkspaceRef `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
-	// That workspace's name, drawn verbatim.
+	// The merge's name, drawn verbatim. A sync merge (a workspace landing its
+	// own branch, a `workspace finished` included) is named by the credited
+	// workspace's name. An ASYNC merge is named by its own name, never its
+	// requester's: its merge workspace's name, and before that workspace is
+	// forked, the name its request reserved for it (the `-name` given to
+	// `agent-repld workspace async-merge`), so several async merges from one
+	// requester are drawn apart.
 	Name string `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
-	// The merge bubble's head row on that workspace's root feed, which a click
-	// brings on screen and opens once the workspace is selected
-	// (agentrepl.v1.SelectWorkspaceRequest.reveal). UNSET for a merge this
-	// daemon holds no bubble identity for; a click then only selects.
+	// The merge bubble's head row on the credited workspace's root feed, which
+	// a click brings on screen and opens once that workspace is selected
+	// (agentrepl.v1.SelectWorkspaceRequest.reveal). For an async merge the
+	// bubble is the one its requester's feed draws for that very merge, so a
+	// click lands on the merge named, not just on its requester. UNSET for a
+	// merge this daemon holds no bubble identity for; a click then only
+	// selects.
 	Reveal *FeedId `protobuf:"bytes,3,opt,name=reveal,proto3,oneof" json:"reveal,omitempty"`
 	// How the merge runs: in place, or in a hidden merge workspace.
 	Mode          *RosterMergeQueueMode `protobuf:"bytes,4,opt,name=mode,proto3" json:"mode,omitempty"`
