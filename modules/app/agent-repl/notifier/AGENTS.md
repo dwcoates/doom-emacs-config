@@ -3,7 +3,9 @@
 Zettel.app posts every agent-repl desktop banner on macOS, under its own name
 and icon, the way any Mac app posts its own notifications. It is a resident
 background app (`LSUIElement`: no window, no Dock icon) run by launchd as
-`com.agentrepl.notifier` (`launchd/com.agentrepl.notifier.plist`) and
+`com.agentrepl.notifier` (the `service-notifier` entry of
+`notifier/requirements.json`, rendered by `bin/requirements.sh`;
+`services/AGENTS.md`) and
 installed at `~/Applications/Zettel.app`, where Spotlight and Finder find it.
 Linux has no app: there the daemon's banner program (`notify-send`) posts.
 

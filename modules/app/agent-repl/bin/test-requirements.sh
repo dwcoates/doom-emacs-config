@@ -128,7 +128,7 @@ test_the_real_manifests_honor_the_contract() {
   OUT="$(env -i HOME="$TMP" PATH="/usr/bin:/bin" AGENT_REPL_REQUIREMENTS_PLATFORM=darwin /bin/bash "$RUNNER" list 2>&1)"
   RC=$?
   set -e
-  if [ "$RC" -eq 0 ] && grep -q '^terminal-notifier	' <<<"$OUT" && grep -q '^service-shim-store	' <<<"$OUT"; then
+  if [ "$RC" -eq 0 ] && grep -q '^service-notifier	' <<<"$OUT" && grep -q '^service-shim-store	' <<<"$OUT"; then
     pass "the real manifests load, validate and list"
   else
     fail "the real manifests" "rc=$RC" "$OUT"
@@ -165,11 +165,12 @@ test_the_real_manifests_load_on_linux_with_every_service() {
 }
 
 # A service is one entry rendered for either service manager, so none may be
-# left to one platform.
+# left to one platform. The one exception is the notifier: Zettel.app is a
+# macOS app, and Linux's banners are notify-send's (services/AGENTS.md).
 test_every_real_service_runs_on_macos_and_linux() {
   local bad
   bad="$(find "$MODULE" -name requirements.json -not -path '*/node_modules/*' -not -path '*/testdata/*' -print0 \
-    | xargs -0 jq -r '.requirements[]? | select(.kind == "service") | select((.platforms | index("darwin") and index("linux")) | not) | .id')"
+    | xargs -0 jq -r '.requirements[]? | select(.kind == "service") | select(.id != "service-notifier") | select((.platforms | index("darwin") and index("linux")) | not) | .id')"
   if [ -z "$bad" ]; then pass "every real service runs on macOS and Linux"; else fail "services left to one platform:" "$bad"; fi
 }
 
@@ -957,21 +958,32 @@ test_skills_dirs_are_the_config_roots_skills_dirs() {
 # notification_permission.
 # ---------------------------------------------------------------------------
 
-PERMISSION='{"id": "notify", "kind": "notification_permission", "why": "w", "profile": "run", "platforms": ["darwin"], "command": "terminal-notifier"}'
+PERMISSION='{"id": "notify", "kind": "notification_permission", "why": "w", "profile": "run", "platforms": ["darwin"], "command": "zettel"}'
 
 test_an_authorized_notifier_is_ok() {
-  new_case; manifest "[$PERMISSION]"; tool terminal-notifier "No problems found."
+  new_case; manifest "[$PERMISSION]"
+  write_stub zettel 'case "$1" in --check-notifications) echo "Zettel may notify" ;; esac'
   run check
-  if [ "$RC" -eq 0 ] && has "ok          notify: terminal-notifier may notify"; then pass "an authorized notifier is ok"; else fail "authorized notifier" "rc=$RC" "$OUT"; fi
+  if [ "$RC" -eq 0 ] && has "ok          notify: Zettel may notify"; then pass "an authorized notifier is ok"; else fail "authorized notifier" "rc=$RC" "$OUT"; fi
 }
 
 test_install_asks_for_an_unauthorized_notifiers_permission() {
   new_case; manifest "[$PERMISSION]"
-  write_stub terminal-notifier 'case "$1" in -diagnose) echo "authorization not determined"; exit 3 ;; esac'
+  write_stub zettel 'case "$1" in --check-notifications) echo "Zettel may not notify: not asked yet"; exit 1 ;; esac'
   run install
-  if [ "$RC" -eq 1 ] && ran "terminal-notifier -title agent-repl" && has "may not notify: authorization not determined"; then
-    pass "install posts one banner to ask, and reports the still-missing permission"
+  if [ "$RC" -eq 1 ] && ran "zettel --request-notifications" && has "Zettel may not notify: not asked yet"; then
+    pass "install asks macOS, and reports the still-missing permission"
   else fail "unauthorized notifier" "rc=$RC" "$OUT" "$(cat "$CASE/transcript")"; fi
+}
+
+test_a_notifier_at_a_home_path_is_found() {
+  new_case
+  manifest '[{"id": "notify", "kind": "notification_permission", "why": "w", "profile": "run", "platforms": ["darwin"], "command": "~/Applications/Zettel.app/Contents/MacOS/Zettel"}]'
+  mkdir -p "$CASE/home/Applications/Zettel.app/Contents/MacOS"
+  printf '#!/bin/sh\necho "Zettel may notify"\n' >"$CASE/home/Applications/Zettel.app/Contents/MacOS/Zettel"
+  chmod +x "$CASE/home/Applications/Zettel.app/Contents/MacOS/Zettel"
+  run check
+  if [ "$RC" -eq 0 ] && has "ok          notify: Zettel may notify"; then pass "a ~/ command is the user's home"; else fail "home-path notifier" "rc=$RC" "$OUT"; fi
 }
 
 # ---------------------------------------------------------------------------
@@ -1752,6 +1764,47 @@ test_uninstall_removes_a_command_services_files_and_leaves_its_command() {
      && [ ! -e "$CASE/home/Library/LaunchAgents/com.example.svcd.plist" ]; then
     pass "uninstall removes a command service's plist and files and leaves the installed command alone"
   else fail "command service uninstall" "rc=$RC" "$OUT"; fi
+}
+
+# A built service whose build installs its program outside the cache (the
+# notifier's app bundle) runs from the entry's `program`.
+PROGRAM_SVC_ENTRY='{"id": "svc", "kind": "service", "why": "w", "profile": "run", "platforms": ["darwin"], "label": "com.example.svc", "args": ["--resident"], "log": {"stdout": "svc.out.log", "stderr": "svc.err.log"}, "build_target": "svc", "binary": "Svc.app/Contents/MacOS/Svc", "program": "~/Applications/Svc.app/Contents/MacOS/Svc"}'
+
+program_service_case() {
+  new_case
+  manifest "[$PROGRAM_SVC_ENTRY]"
+  write_stub build "$1"
+}
+
+test_a_service_with_a_program_runs_from_it() {
+  program_service_case 'for d in "$HOME/.cache/agent-repl/bin/Svc.app/Contents/MacOS" "$HOME/Applications/Svc.app/Contents/MacOS"; do mkdir -p "$d" && printf "#!/bin/sh\n" >"$d/Svc" && chmod +x "$d/Svc"; done'
+  run install
+  local plist="$CASE/home/Library/LaunchAgents/com.example.svc.plist" h="$CASE/home"
+  if [ "$RC" -eq 0 ] && has "ok          svc: com.example.svc running from $plist" \
+     && grep -qF "<string>$h/Applications/Svc.app/Contents/MacOS/Svc</string>" "$plist" \
+     && ! grep -qF "$h/.cache/agent-repl/bin/Svc.app" "$plist"; then
+    pass "a service with a program runs from it, not from the cache"
+  else fail "service program" "rc=$RC" "$OUT" "$(cat "$plist" 2>/dev/null)"; fi
+}
+
+test_a_service_whose_program_is_not_installed_is_missing() {
+  program_service_case ''
+  mkdir -p "$CASE/home/.cache/agent-repl/bin/Svc.app/Contents/MacOS"
+  printf '#!/bin/sh\n' >"$CASE/home/.cache/agent-repl/bin/Svc.app/Contents/MacOS/Svc"
+  chmod +x "$CASE/home/.cache/agent-repl/bin/Svc.app/Contents/MacOS/Svc"
+  run check
+  if [ "$RC" -eq 1 ] && has "missing     svc: $CASE/home/Applications/Svc.app/Contents/MacOS/Svc is not installed"; then
+    pass "a built service whose program is not installed is missing, naming the program"
+  else fail "uninstalled program" "rc=$RC" "$OUT"; fi
+}
+
+test_a_service_program_without_a_build_is_refused() {
+  new_case
+  manifest '[{"id": "x", "kind": "service", "why": "w", "profile": "run", "platforms": ["darwin"], "label": "l", "args": [], "log": {"stdout": "o", "stderr": "e"}, "command": "c", "program": "~/p"}]'
+  run check
+  if [ "$RC" -eq 2 ] && has 'x: a service "program" is where its build installs it, so it needs "build_target"'; then
+    pass "a service program without a build is refused"
+  else fail "program without build" "rc=$RC" "$OUT"; fi
 }
 
 test_a_service_with_both_a_command_and_a_build_is_refused() {

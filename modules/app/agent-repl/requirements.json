@@ -13,7 +13,8 @@
     "webapp/requirements.json",
     "e2e/requirements.json",
     "lisp/requirements.json",
-    "metrics/requirements.json"
+    "metrics/requirements.json",
+    "notifier/requirements.json"
   ],
   "requirements": [
     {
@@ -335,35 +336,6 @@
       "install": {
         "manual": "Install Claude Code (https://docs.claude.com/en/docs/claude-code) and sign in once with `claude`."
       }
-    },
-    {
-      "id": "terminal-notifier",
-      "kind": "program",
-      "why": "the daemon's desktop banners on macOS (daemon/internal/desktopnotify); version 3 posts through UserNotifications, which macOS 26 requires",
-      "profile": "run",
-      "platforms": [
-        "darwin"
-      ],
-      "command": "terminal-notifier",
-      "version": {
-        "args": [
-          "-version"
-        ],
-        "min": "3.0"
-      },
-      "install": {
-        "brew": "terminal-notifier"
-      }
-    },
-    {
-      "id": "terminal-notifier-permission",
-      "kind": "notification_permission",
-      "why": "macOS shows terminal-notifier's banners only once it is allowed to notify",
-      "profile": "run",
-      "platforms": [
-        "darwin"
-      ],
-      "command": "terminal-notifier"
     },
     {
       "id": "wifi-helper-signing",
