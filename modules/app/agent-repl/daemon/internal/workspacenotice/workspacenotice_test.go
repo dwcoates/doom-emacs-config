@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"reflect"
 	"slices"
 	"strings"
@@ -45,6 +46,17 @@ func (f fakeWorkspaces) Workspace(_ context.Context, id wsm.WorkspaceID) (wsm.Wo
 		return wsm.Workspace{}, wsm.ErrNotFound
 	}
 	return ws, nil
+}
+
+func (f fakeWorkspaces) ListWorkspaces(context.Context) ([]wsm.Workspace, error) {
+	if err := f.failFor["list"]; err != nil {
+		return nil, err
+	}
+	var out []wsm.Workspace
+	for _, id := range slices.Sorted(maps.Keys(f.byID)) {
+		out = append(out, f.byID[id])
+	}
+	return out, nil
 }
 
 // submission is one captured notice.
@@ -96,6 +108,10 @@ func newFixture() *fixture {
 			switch name {
 			case BriefDerived:
 				return "derived|" + values["label"] + "|" + values["relation"] + "|" + values["event"], nil
+			case BriefSibling:
+				return "sibling|" + values["sibling"] + "|" + values["parent"], nil
+			case BriefChild:
+				return "child|" + values["parent"] + "|" + values["siblings"], nil
 			}
 			return "", fmt.Errorf("unknown brief %q", name)
 		},
@@ -448,5 +464,120 @@ func TestALandingWhoseWorkspaceCannotBeReadTellsNobody(t *testing.T) {
 	}
 	if _, ok := dlog.FindRecord(f.logs.Records(), dlog.RecordQuery{Level: "error", Operation: op, Message: "could not read the workspace a derived event is about; its sources are not told"}); !ok {
 		t.Errorf("no error record: %+v", f.logs.Records())
+	}
+}
+
+// withSiblings registers two open children of owner besides the new child.
+func (f *fixture) withSiblings() {
+	f.reg.byID["ws-sib1"] = wsm.Workspace{ID: "ws-sib1", Name: "sib1", Parent: idp(owner)}
+	f.reg.byID["ws-sib2"] = wsm.Workspace{ID: "ws-sib2", Name: "sib2", Parent: idp(owner)}
+}
+
+func TestDeliverTellsASiblingAboutANewChildAndTheChildItsFamily(t *testing.T) {
+	// Arrange
+	f := newFixture()
+	f.withSiblings()
+	f.reg.byID[child] = derived(idp(owner), nil, nil)
+
+	// Act
+	f.deliverNow(Event{Kind: Created, Workspace: derived(idp(owner), nil, nil)})
+
+	// Assert
+	want := []submission{
+		{ws: owner, text: "derived|workspace `child`: created|is a child of this workspace and was cut from this workspace's branch and lands into it|It was just created, at branch `b-child`.", origin: OriginDerived, defer_: true},
+		{ws: "ws-sib1", text: "sibling|child|owner", origin: OriginDerived, defer_: true},
+		{ws: "ws-sib2", text: "sibling|child|owner", origin: OriginDerived, defer_: true},
+		{ws: child, text: "child|owner|`sib1`, `sib2`", origin: OriginDerived, defer_: true},
+	}
+	if !reflect.DeepEqual(f.prompts.got, want) {
+		t.Errorf("submissions = %+v, want %+v", f.prompts.got, want)
+	}
+}
+
+func TestDeliverAdoptedTellsOnlyTheSiblings(t *testing.T) {
+	// Arrange
+	f := newFixture()
+	f.withSiblings()
+	f.reg.byID[child] = derived(idp(owner), nil, nil)
+
+	// Act
+	f.deliverNow(Event{Kind: Adopted, Workspace: wsm.Workspace{ID: child}, unread: true})
+
+	// Assert
+	want := []submission{
+		{ws: "ws-sib1", text: "sibling|child|owner", origin: OriginDerived, defer_: true},
+		{ws: "ws-sib2", text: "sibling|child|owner", origin: OriginDerived, defer_: true},
+	}
+	if !reflect.DeepEqual(f.prompts.got, want) {
+		t.Errorf("submissions = %+v, want %+v", f.prompts.got, want)
+	}
+}
+
+func TestDeliverAChildWithNoSiblingsTellsNoFamily(t *testing.T) {
+	// Arrange
+	f := newFixture()
+	f.reg.byID[child] = derived(idp(owner), nil, nil)
+
+	// Act
+	f.deliverNow(Event{Kind: Created, Workspace: derived(idp(owner), nil, nil)})
+
+	// Assert
+	if len(f.prompts.got) != 1 || f.prompts.got[0].ws != owner {
+		t.Errorf("submissions = %+v, want only the owner's", f.prompts.got)
+	}
+}
+
+func TestDeliverAChildWhoseFamilyCannotBeListedLogsAnError(t *testing.T) {
+	// Arrange
+	f := newFixture()
+	f.reg.failFor["list"] = errors.New("db down")
+
+	// Act
+	f.deliverNow(Event{Kind: Created, Workspace: derived(idp(owner), nil, nil)})
+
+	// Assert
+	if len(f.prompts.got) != 1 || f.prompts.got[0].ws != owner {
+		t.Errorf("submissions = %+v, want only the owner's", f.prompts.got)
+	}
+	logged := false
+	for _, r := range f.logs.Records() {
+		logged = logged || (r.Level == dlog.LevelError && r.Operation == op)
+	}
+	if !logged {
+		t.Errorf("records = %+v, want an error under %s", f.logs.Records(), op)
+	}
+}
+
+func TestSiblingNamesListsOpenSiblingsInBackticks(t *testing.T) {
+	// Arrange
+	f := newFixture()
+	f.withSiblings()
+	f.reg.byID[child] = derived(idp(owner), nil, nil)
+
+	// Act
+	got, err := f.s.SiblingNames(context.Background(), child)
+
+	// Assert
+	if err != nil || !reflect.DeepEqual(got, []string{"`sib1`", "`sib2`"}) {
+		t.Errorf("SiblingNames = %v, %v", got, err)
+	}
+}
+
+func TestSiblingNamesRefusesAnUnknownWorkspace(t *testing.T) {
+	// Arrange
+	f := newFixture()
+
+	// Act
+	_, err := f.s.SiblingNames(context.Background(), "ws-nobody")
+
+	// Assert
+	if !errors.Is(err, wsm.ErrNotFound) {
+		t.Errorf("err = %v, want ErrNotFound", err)
+	}
+}
+
+func TestRecipientsOfAnAdoptedChildIsNobody(t *testing.T) {
+	if got := Recipients(derived(idp(owner), nil, nil), Adopted); got != nil {
+		t.Errorf("Recipients = %+v, want none", got)
 	}
 }
