@@ -177,6 +177,7 @@ func (s *server) relayTestRun(ctx context.Context, log dlog.Logger, stream *conn
 	}
 	done := make(chan ran, 1)
 	log.Info(opRunTests, "running a workspace's selected tests", dlog.Context{"dir": dir, "run": run, "argv": strings.Join(argv, " ")})
+	// inflight: joined: the function that starts it waits for it.
 	go func() {
 		result, err := s.deps.Tests.RunLinesWith(runCtx, dir, argv, scriptrunner.Options{ExtraFiles: []*os.File{pipe}}, tail.add)
 		// THE WRITE END CLOSES WITH THE RUN, so the read below ends once

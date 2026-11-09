@@ -12,6 +12,7 @@ import (
 	"agent-repld/internal/deploy"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/inflight"
 	"agent-repld/internal/publish"
 	"agent-repld/internal/restarttiming"
 )
@@ -55,13 +56,13 @@ type streamSink[R any] interface {
 // the daemon's Close, so nothing outlives the surface that serves it.
 func (s *server) streamContext(ctx context.Context) (context.Context, context.CancelFunc) {
 	streamCtx, cancel := context.WithCancel(ctx)
-	go func() {
+	inflight.Standing(func() {
 		select {
 		case <-s.life.Done():
 			cancel()
 		case <-streamCtx.Done():
 		}
-	}()
+	})
 	return streamCtx, cancel
 }
 
@@ -75,13 +76,13 @@ func (s *server) streamContext(ctx context.Context) (context.Context, context.Ca
 // returned cancel, or the s.life watcher goroutine leaks.
 func (s *server) backgroundContext(ctx context.Context) (context.Context, context.CancelFunc) {
 	bgCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
-	go func() {
+	inflight.Standing(func() {
 		select {
 		case <-s.life.Done():
 			cancel()
 		case <-bgCtx.Done():
 		}
-	}()
+	})
 	return bgCtx, cancel
 }
 
@@ -126,7 +127,9 @@ func serveTopicWith[T comparable, R any](
 	streamCtx, cancel := s.streamContext(ctx)
 	defer cancel()
 
-	views := topic.Subscribe(streamCtx)
+	// EVERY VIEW COUNTS AS WORK IN FLIGHT UNTIL IT IS WRITTEN (ack, below):
+	// a push still on its way to the client is never "nothing in flight".
+	views, ack := topic.SubscribeCounted(streamCtx)
 	if hooks.attached != nil {
 		detach := hooks.attached()
 		defer detach()
@@ -150,6 +153,7 @@ func serveTopicWith[T comparable, R any](
 				// a PARTIAL view, which the invariant forbids. It is raised
 				// rather than forwarded.
 				log.Error(rpc, "a publisher raised an empty view; it was not sent", nil)
+				ack()
 				continue
 			}
 			if err := out.Send(wrap(view)); err != nil {
@@ -160,6 +164,7 @@ func serveTopicWith[T comparable, R any](
 			if hooks.sent != nil {
 				hooks.sent(view)
 			}
+			ack()
 		}
 	}
 }
@@ -360,19 +365,21 @@ func (s *server) serveHost(
 	streamCtx, cancel := s.streamContext(ctx)
 	defer cancel()
 
-	states := s.hostStateTopic(ws).Subscribe(streamCtx)
-	notices := s.hostNoticeTopic(ws).Subscribe(streamCtx)
-	events := s.hostEventStream(ws).Subscribe(streamCtx)
+	// Every push counts as work in flight until it is written (internal/inflight).
+	states, ackState := s.hostStateTopic(ws).SubscribeCounted(streamCtx)
+	notices, ackNotice := s.hostNoticeTopic(ws).SubscribeCounted(streamCtx)
+	events, ackEvent := s.hostEventStream(ws).SubscribeCounted(streamCtx)
 	// THE FEED'S SELECTION reaches Emacs from the one topic the webapp's root
 	// feed watch reads, mapped to the kind of row and its text (hostSelectionOf), so
 	// Emacs and the webapp see one sequence of selections. The topic replays
 	// the selection in force, so a late subscriber is handed it first.
-	selections := s.selectionTopic(ws).Subscribe(streamCtx)
+	selections, ackSelection := s.selectionTopic(ws).SubscribeCounted(streamCtx)
 	s.acceptStream(ctx, rpc)
 	log.Debug(rpc, "accepted a standing stream", nil)
 
 	for {
 		var push *agentreplv1.WatchHostWorkspaceResponse
+		var ack func()
 		select {
 		case <-streamCtx.Done():
 			log.Debug(rpc, "the standing stream ended on cancellation", nil)
@@ -384,11 +391,12 @@ func (s *server) serveHost(
 			}
 			if view == nil {
 				log.Error(rpc, "the host composer raised an empty view; it was not sent", nil)
+				ackState()
 				continue
 			}
-			push = &agentreplv1.WatchHostWorkspaceResponse{
+			push, ack = &agentreplv1.WatchHostWorkspaceResponse{
 				Push: &agentreplv1.WatchHostWorkspaceResponse_Host{Host: view},
-			}
+			}, ackState
 		case notice, ok := <-notices:
 			if !ok {
 				log.Debug(rpc, "the standing stream's subscription closed", nil)
@@ -396,9 +404,10 @@ func (s *server) serveHost(
 			}
 			if notice == nil {
 				log.Error(rpc, "a publisher raised an empty notice; it was not sent", nil)
+				ackNotice()
 				continue
 			}
-			push = notice
+			push, ack = notice, ackNotice
 		case event, ok := <-events:
 			if !ok {
 				log.Debug(rpc, "the standing stream's subscription closed", nil)
@@ -406,23 +415,25 @@ func (s *server) serveHost(
 			}
 			if event == nil {
 				log.Error(rpc, "a publisher raised an empty event; it was not sent", nil)
+				ackEvent()
 				continue
 			}
-			push = event
+			push, ack = event, ackEvent
 		case sel, ok := <-selections:
 			if !ok {
 				log.Debug(rpc, "the standing stream's subscription closed", nil)
 				return nil
 			}
-			push = &agentreplv1.WatchHostWorkspaceResponse{
+			push, ack = &agentreplv1.WatchHostWorkspaceResponse{
 				Push: &agentreplv1.WatchHostWorkspaceResponse_Selection{Selection: hostSelectionOf(sel)},
-			}
+			}, ackSelection
 		}
 		if err := out.Send(push); err != nil {
 			log.Debug(rpc, "the standing stream's client went away",
 				dlog.Context{"cause": err.Error()})
 			return nil
 		}
+		ack()
 	}
 }
 
@@ -487,10 +498,11 @@ func (s *server) serveWeb(
 	streamCtx, cancel := s.streamContext(ctx)
 	defer cancel()
 
-	states := s.webStateTopic(ws).Subscribe(streamCtx)
-	events := s.webTopic(ws).Subscribe(streamCtx)
-	echoes := s.webEventStream(ws).Subscribe(streamCtx)
-	reveals, pending := s.subscribeReveals(streamCtx, ws)
+	// Every push counts as work in flight until it is written (internal/inflight).
+	states, ackState := s.webStateTopic(ws).SubscribeCounted(streamCtx)
+	events, ackEvent := s.webTopic(ws).SubscribeCounted(streamCtx)
+	echoes, ackEcho := s.webEventStream(ws).SubscribeCounted(streamCtx)
+	reveals, ackReveal, pending := s.subscribeReveals(streamCtx, ws)
 	s.acceptStream(ctx, rpc)
 	log.Debug(rpc, "accepted a standing stream", nil)
 	// A REVEAL ASKED WHILE NO PAGE LISTENED is this page's first push: the
@@ -505,6 +517,7 @@ func (s *server) serveWeb(
 
 	for {
 		var push *agentreplv1.WatchWebWorkspaceResponse
+		var ack func()
 		select {
 		case <-streamCtx.Done():
 			log.Debug(rpc, "the standing stream ended on cancellation", nil)
@@ -516,13 +529,14 @@ func (s *server) serveWeb(
 			}
 			if identity == nil {
 				log.Error(rpc, "the web identity composer raised an empty identity; it was not sent", nil)
+				ackState()
 				continue
 			}
-			push = &agentreplv1.WatchWebWorkspaceResponse{
+			push, ack = &agentreplv1.WatchWebWorkspaceResponse{
 				Push: &agentreplv1.WatchWebWorkspaceResponse_SessionIdentity{
 					SessionIdentity: identity,
 				},
-			}
+			}, ackState
 		case event, ok := <-events:
 			if !ok {
 				log.Debug(rpc, "the standing stream's subscription closed", nil)
@@ -530,27 +544,29 @@ func (s *server) serveWeb(
 			}
 			if event == nil {
 				log.Error(rpc, "a publisher raised an empty push; it was not sent", nil)
+				ackEvent()
 				continue
 			}
-			push = event
+			push, ack = event, ackEvent
 		case echo, ok := <-echoes:
 			if !ok {
 				log.Debug(rpc, "the standing stream's subscription closed", nil)
 				return nil
 			}
-			push = echo
+			push, ack = echo, ackEcho
 		case row, ok := <-reveals:
 			if !ok {
 				log.Debug(rpc, "the standing stream's subscription closed", nil)
 				return nil
 			}
-			push = revealPush(row)
+			push, ack = revealPush(row), ackReveal
 		}
 		if err := out.Send(push); err != nil {
 			log.Debug(rpc, "the standing stream's client went away",
 				dlog.Context{"cause": err.Error()})
 			return nil
 		}
+		ack()
 	}
 }
 
@@ -593,8 +609,10 @@ func (s *server) watchDaemon(
 	streamCtx, cancel := s.streamContext(ctx)
 	defer cancel()
 
-	states := s.daemonTopic.Subscribe(streamCtx)
-	events := s.daemonEventTopic.Subscribe(streamCtx)
+	// Every push counts as work in flight until it is written (internal/inflight).
+	states, ackState := s.daemonTopic.SubscribeCounted(streamCtx)
+	events, ackEvent := s.daemonEventTopic.SubscribeCounted(streamCtx)
+	ackFault, ackWifi, ackDigest := func() {}, func() {}, func() {}
 
 	w := &daemonWatcher{sent: make(chan struct{}), elisp: make(chan *agentreplv1.WatchDaemonResponse, 4)}
 	// THE STANDING LOUD FAULTS ARE AN EMACS STREAM'S ALONE: a webview draws
@@ -608,15 +626,15 @@ func (s *server) watchDaemon(
 	// draws the overlay, so an Emacs stream's select never takes that case.
 	var digest <-chan *agentreplv1.NewsDigestStanding
 	if msg.GetWebview() != nil {
-		digest = s.deps.NewsDigest.Topic().Subscribe(streamCtx)
+		digest, ackDigest = s.deps.NewsDigest.Topic().SubscribeCounted(streamCtx)
 	}
 	if emacs := msg.GetEmacs(); emacs != nil {
 		if err := s.editorConnected(ctx, emacs); err != nil {
 			return err
 		}
 		w.emacs, w.elispBuild = true, emacs.GetElispBuild()
-		faults = s.deps.LoudFaults.Subscribe(streamCtx)
-		wifi = s.deps.PersistentWifi.Topic().Subscribe(streamCtx)
+		faults, ackFault = s.deps.LoudFaults.SubscribeCounted(streamCtx)
+		wifi, ackWifi = s.deps.PersistentWifi.Topic().SubscribeCounted(streamCtx)
 		// EMACS'S FOCUS LIVES AND DIES WITH THIS STREAM: attached from the
 		// request, so the daemon knows it from the stream's first instant,
 		// and released when the stream ends, after which Emacs reads as
@@ -654,6 +672,7 @@ func (s *server) watchDaemon(
 	for {
 		var push *agentreplv1.WatchDaemonResponse
 		var fromState bool
+		ack := func() {}
 		select {
 		case <-streamCtx.Done():
 			s.log.Debug("WatchDaemon", "the standing stream ended on cancellation", nil)
@@ -665,9 +684,10 @@ func (s *server) watchDaemon(
 			}
 			if state == nil {
 				s.log.Error("WatchDaemon", "a publisher raised an empty view; it was not sent", nil)
+				ackState()
 				continue
 			}
-			push, fromState = state, true
+			push, fromState, ack = state, true, ackState
 		case event, ok := <-events:
 			if !ok {
 				s.log.Debug("WatchDaemon", "the standing stream's subscription closed", nil)
@@ -675,9 +695,10 @@ func (s *server) watchDaemon(
 			}
 			if event == nil {
 				s.log.Error("WatchDaemon", "a publisher raised an empty push; it was not sent", nil)
+				ackEvent()
 				continue
 			}
-			push, fromState = event, false
+			push, fromState, ack = event, false, ackEvent
 		case addressed := <-w.elisp:
 			push, fromState = addressed, false
 		case standing, ok := <-faults:
@@ -691,9 +712,10 @@ func (s *server) watchDaemon(
 				return nil
 			}
 			if wrapped == nil {
+				ackFault()
 				continue
 			}
-			push, fromState = wrapped, false
+			push, fromState, ack = wrapped, false, ackFault
 		case standing, ok := <-wifi:
 			wrapped, ended := standingPush(s.log, standing, ok, "persistent-wifi standing",
 				func(v *agentreplv1.PersistentWifiState) *agentreplv1.WatchDaemonResponse {
@@ -705,9 +727,10 @@ func (s *server) watchDaemon(
 				return nil
 			}
 			if wrapped == nil {
+				ackWifi()
 				continue
 			}
-			push, fromState = wrapped, false
+			push, fromState, ack = wrapped, false, ackWifi
 		case standing, ok := <-digest:
 			wrapped, ended := standingPush(s.log, standing, ok, "news digest standing",
 				func(v *agentreplv1.NewsDigestStanding) *agentreplv1.WatchDaemonResponse {
@@ -719,15 +742,17 @@ func (s *server) watchDaemon(
 				return nil
 			}
 			if wrapped == nil {
+				ackDigest()
 				continue
 			}
-			push, fromState = wrapped, false
+			push, fromState, ack = wrapped, false, ackDigest
 		}
 		if err := out.Send(push); err != nil {
 			s.log.Debug("WatchDaemon", "the standing stream's client went away",
 				dlog.Context{"cause": err.Error()})
 			return nil
 		}
+		ack()
 		// The stand-down announcement rides the STATE topic; only it satisfies
 		// the announcer's latch, so a mutation-progress event can never make a
 		// departing daemon think its stand-down reached this client.

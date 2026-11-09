@@ -62,15 +62,16 @@ func (s *server) revealRow(log dlog.Logger, ws ids.WorkspaceID, row *frontendv1.
 }
 
 // subscribeReveals subscribes a web stream to ws's reveals for as long as ctx
-// stands, and takes the pending one, if any, which the stream sends first.
-func (s *server) subscribeReveals(ctx context.Context, ws ids.WorkspaceID) (<-chan *frontendv1.FeedId, *frontendv1.FeedId) {
+// stands, each counted until the stream acks it, and takes the pending one,
+// if any, which the stream sends first.
+func (s *server) subscribeReveals(ctx context.Context, ws ids.WorkspaceID) (<-chan *frontendv1.FeedId, func(), *frontendv1.FeedId) {
 	s.webRevealsMu.Lock()
 	defer s.webRevealsMu.Unlock()
 	r := s.webRevealOf(ws)
-	reveals := r.events.Subscribe(ctx)
+	reveals, ack := r.events.SubscribeCounted(ctx)
 	pending := r.pending
 	r.pending = nil
-	return reveals, pending
+	return reveals, ack, pending
 }
 
 // revealPush is the web stream's push asking the page to reveal ROW.

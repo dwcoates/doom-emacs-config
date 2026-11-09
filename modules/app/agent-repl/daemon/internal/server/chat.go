@@ -19,6 +19,7 @@ import (
 	"agent-repld/internal/ctxend"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/inflight"
 	"agent-repld/internal/publish"
 	"agent-repld/internal/replyquote"
 	"agent-repld/internal/resolve/feed"
@@ -164,7 +165,7 @@ func (s *server) watchChat(ctx context.Context, msg *agentreplv1.WatchChatReques
 	// or before it could reach zettel -- is learned again from the newest
 	// page's replay, which tells the chat service every concluded answer it
 	// draws (feed.ChatSink.TurnAnswered, recorded idempotently by turn).
-	go s.replayThreadAnswers(ctx, subject)
+	inflight.Go(func() { s.replayThreadAnswers(ctx, subject) })
 	return serveTopic(s, ctx, rpc, subject.Log, s.deps.Chat.Topic(subject.Record.ID), out,
 		func(view *frontendv1.ChatView) *agentreplv1.WatchChatResponse {
 			return &agentreplv1.WatchChatResponse{View: view}

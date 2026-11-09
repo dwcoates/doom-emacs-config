@@ -157,7 +157,9 @@ func (s *server) watchFeed(
 		return endStream(log, rpc, err)
 	}
 
-	pubs := tail.Publications(streamCtx)
+	// Every frame counts as work in flight until it is written (internal/inflight).
+	pubs, ackPub := tail.Publications(streamCtx)
+	ackSelection, ackScale, ackOverlay, ackComposerEntry, ackQuestion := func() {}, func() {}, func() {}, func() {}, func() {}
 
 	// THE RESPONSE-SELECTION PUSH RIDES THE ROOT FEED'S WATCH ONLY. The
 	// FeedSelection frame names rows of THIS feed (the selected/centered
@@ -166,7 +168,7 @@ func (s *server) watchFeed(
 	// the select below simply never fires, which is what a non-root feed wants.
 	var selections <-chan *selectionState
 	if target.Feed.Root {
-		selections = s.selectionTopic(target.WS).Subscribe(streamCtx)
+		selections, ackSelection = s.selectionTopic(target.WS).SubscribeCounted(streamCtx)
 	}
 
 	// THE FEED TEXT ZOOM RIDES EVERY FEED'S WATCH. Unlike the selection push,
@@ -174,14 +176,15 @@ func (s *server) watchFeed(
 	// watch subscribes too. The topic replays its latest value, so this delivers
 	// the current zoom the instant the tail is accepted (Prime seeded it before
 	// serving), then every later change.
-	scales := s.feedTextScaleTopic.Subscribe(streamCtx)
+	var scales <-chan *frontendv1.FeedTextScale
+	scales, ackScale = s.feedTextScaleTopic.SubscribeCounted(streamCtx)
 
 	// THE IMAGE OVERLAY RIDES THE ROOT FEED'S WATCH ONLY, like the selection:
 	// it lies over the workspace's root feed. The topic replays its latest
 	// value, so a page opening after the image was opened draws it at once.
 	var overlays <-chan *frontendv1.FeedImageOverlay
 	if target.Feed.Root {
-		overlays = s.imageOverlayTopic(target.WS).Subscribe(streamCtx)
+		overlays, ackOverlay = s.imageOverlayTopic(target.WS).SubscribeCounted(streamCtx)
 	}
 
 	// THE COMPOSER'S ENTRY RIDES THE ROOT FEED'S WATCH ONLY, like the
@@ -189,7 +192,7 @@ func (s *server) watchFeed(
 	// value, so a page opening mid-edit draws the highlight that stands.
 	var composerEntries <-chan *frontendv1.FeedComposerEntry
 	if target.Feed.Root {
-		composerEntries = s.composerEntryTopic(target.WS).Subscribe(streamCtx)
+		composerEntries, ackComposerEntry = s.composerEntryTopic(target.WS).SubscribeCounted(streamCtx)
 	}
 
 	// THE QUESTION ABOUT A RESPONSE RIDES THE ROOT FEED'S WATCH ONLY, like the
@@ -197,12 +200,13 @@ func (s *server) watchFeed(
 	// value, so a page opening while a question stands draws it.
 	var questions <-chan *frontendv1.FeedResponseQuestion
 	if target.Feed.Root {
-		questions = s.responseQuestionTopic(target.WS).Subscribe(streamCtx)
+		questions, ackQuestion = s.responseQuestionTopic(target.WS).SubscribeCounted(streamCtx)
 	}
 
 	s.acceptStream(ctx, rpc)
 	log.Debug(rpc, "accepted a feed tail", dlog.Context{"token": token.GetValue()})
 	for {
+		ack := func() {}
 		select {
 		case <-streamCtx.Done():
 			log.Debug(rpc, "the feed tail ended on cancellation", nil)
@@ -212,9 +216,11 @@ func (s *server) watchFeed(
 				log.Debug(rpc, "the feed tail's subscription closed", nil)
 				return nil
 			}
+			ack = ackPub
 			frame, sendable := feedFrame(pub)
 			if !sendable {
 				log.Error(rpc, "the feed resolver raised a publication carrying neither a row nor a held change; it was not sent", nil)
+				ack()
 				continue
 			}
 			if err := out.Send(frame); err != nil {
@@ -229,8 +235,10 @@ func (s *server) watchFeed(
 				selections = nil
 				continue
 			}
+			ack = ackSelection
 			if sel == nil {
 				log.Error(rpc, "the selection topic raised an empty selection; it was not sent", nil)
+				ack()
 				continue
 			}
 			if err := out.Send(&agentreplv1.WatchFeedResponse{Selection: sel.selection}); err != nil {
@@ -244,8 +252,10 @@ func (s *server) watchFeed(
 				scales = nil
 				continue
 			}
+			ack = ackScale
 			if sc == nil {
 				log.Error(rpc, "the feed-text-scale topic raised an empty scale; it was not sent", nil)
+				ack()
 				continue
 			}
 			if err := out.Send(&agentreplv1.WatchFeedResponse{FeedTextScale: sc}); err != nil {
@@ -259,8 +269,10 @@ func (s *server) watchFeed(
 				overlays = nil
 				continue
 			}
+			ack = ackOverlay
 			if overlay == nil {
 				log.Error(rpc, "the image overlay topic raised an empty overlay; it was not sent", nil)
+				ack()
 				continue
 			}
 			if err := out.Send(&agentreplv1.WatchFeedResponse{ImageOverlay: overlay}); err != nil {
@@ -274,8 +286,10 @@ func (s *server) watchFeed(
 				composerEntries = nil
 				continue
 			}
+			ack = ackComposerEntry
 			if entry == nil {
 				log.Error(rpc, "the composer-entry topic raised an empty entry; it was not sent", nil)
+				ack()
 				continue
 			}
 			if err := out.Send(&agentreplv1.WatchFeedResponse{ComposerEntry: entry}); err != nil {
@@ -289,8 +303,10 @@ func (s *server) watchFeed(
 				questions = nil
 				continue
 			}
+			ack = ackQuestion
 			if question == nil {
 				log.Error(rpc, "the response-question topic raised an empty question; it was not sent", nil)
+				ack()
 				continue
 			}
 			if err := out.Send(&agentreplv1.WatchFeedResponse{ResponseQuestion: question}); err != nil {
@@ -298,6 +314,7 @@ func (s *server) watchFeed(
 				return nil
 			}
 		}
+		ack()
 	}
 }
 

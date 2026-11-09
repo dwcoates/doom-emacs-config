@@ -14,6 +14,7 @@ import (
 	"golang.org/x/net/http2/h2c"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/inflight"
 )
 
 // RequestGate is what an orderly exit waits on before it stops serving: the
@@ -161,7 +162,7 @@ func (s *Serving) counted(inner http.Handler) http.Handler {
 				s.leave()
 				return
 			}
-			go func() {
+			inflight.Go(func() {
 				<-answered.Done()
 				if !s.barrier.AwaitWrittenSince(mark, answerWriteBound) && s.log != nil {
 					s.log.Error("daemon.server.answer_unwritten",
@@ -169,7 +170,7 @@ func (s *Serving) counted(inner http.Handler) http.Handler {
 						dlog.Context{"path": path, "bound_ms": answerWriteBound.Milliseconds()})
 				}
 				s.leave()
-			}()
+			})
 		}()
 		inner.ServeHTTP(w, r)
 	})
@@ -274,7 +275,7 @@ func (s *Serving) leaveStreamOnceEnded(r *http.Request) {
 	}
 	mark := s.barrier.Mark()
 	path := r.URL.Path
-	go func() {
+	inflight.Go(func() {
 		<-answered.Done()
 		if !s.barrier.AwaitWrittenSince(mark, time.Until(deadline)) && s.log != nil {
 			s.log.Error("daemon.server.stream_end_unwritten",
@@ -282,7 +283,7 @@ func (s *Serving) leaveStreamOnceEnded(r *http.Request) {
 				dlog.Context{"path": path, "deadline": deadline.Format(time.RFC3339Nano)})
 		}
 		s.leaveStream(path)
-	}()
+	})
 }
 
 // EndStreams marks the exit as ending the standing streams, then runs end,

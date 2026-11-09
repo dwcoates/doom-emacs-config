@@ -41,6 +41,20 @@ type acceptWriter struct {
 	// conflict records a disagreeing later WriteHeader so the handler that
 	// installed the writer can log it against its own workspace sink.
 	conflict *int
+	// frames is the registry an accepted stream is counted in, and counter
+	// its count once it is accepted (nil before, and for a unary call).
+	frames  *streamFrames
+	counter *frameCounter
+	tag     string
+}
+
+// Write counts the frames of an accepted stream as they are written.
+func (w *acceptWriter) Write(p []byte) (int, error) {
+	n, err := w.ResponseWriter.Write(p)
+	if w.counter != nil {
+		w.counter.observe(p[:n])
+	}
+	return n, err
 }
 
 // Unwrap lets http.NewResponseController — which connect-go uses to set write
@@ -80,6 +94,9 @@ func (w *acceptWriter) accept(contentType string) {
 	if contentType != "" {
 		w.Header().Set("Content-Type", contentType)
 	}
+	if w.frames != nil && w.tag != "" {
+		w.counter = w.frames.register(w.tag)
+	}
 	w.WriteHeader(http.StatusOK)
 	w.Flush()
 }
@@ -88,12 +105,15 @@ func (w *acceptWriter) accept(contentType string) {
 // subscription explicitly. It is harmless for unary calls: nothing calls
 // accept, so the first WriteHeader is connect-go's own and passes straight
 // through.
-func withAcceptWriter(next http.Handler) http.Handler {
+func withAcceptWriter(next http.Handler, frames *streamFrames) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		wrapped := &acceptWriter{ResponseWriter: w}
+		wrapped := &acceptWriter{ResponseWriter: w, frames: frames, tag: r.Header.Get(StreamTagHeader)}
 		ctx := context.WithValue(r.Context(), acceptWriterKey{}, wrapped)
 		ctx = context.WithValue(ctx, streamContentTypeKey{}, r.Header.Get("Content-Type"))
 		next.ServeHTTP(wrapped, r.WithContext(ctx))
+		if wrapped.counter != nil {
+			frames.forget(wrapped.tag)
+		}
 	})
 }
 
