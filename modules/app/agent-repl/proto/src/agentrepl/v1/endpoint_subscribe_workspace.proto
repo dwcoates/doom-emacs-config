@@ -58,6 +58,12 @@ enum WorkspaceNoticeEvent {
   WORKSPACE_NOTICE_EVENT_LANDED = 4;
   // The followed workspace closed, however it closed.
   WORKSPACE_NOTICE_EVENT_CLOSED = 5;
+  // The followed workspace took a GitHub pull request as its own: it stored
+  // an owned link to one (agentrepl.v1.WorkspaceLinkOwned). The notice names
+  // the pull request, so a follower in any repository can follow it to its
+  // merge (agentrepl.v1.SubscribePullRequestRequest) without knowing it
+  // beforehand.
+  WORKSPACE_NOTICE_EVENT_PULL_REQUEST = 6;
 }
 
 // THE ARM IS THE OUTCOME.

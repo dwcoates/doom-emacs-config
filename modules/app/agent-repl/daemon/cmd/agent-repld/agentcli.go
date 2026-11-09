@@ -163,7 +163,7 @@ var cliNouns = map[string]map[string]cliCommand{
 		"status":                 {usage: "status WS", run: workspaceStatus},
 		"list":                   {usage: "list", run: workspaceList},
 		"find":                   {usage: "find [-repository here|DIR] [-since WHEN] [-until WHEN] [-standing open|closed|landed] [-text TEXT] [-created-by WS] [-limit N|-all]", run: workspaceFind},
-		"subscribe":              {usage: "subscribe WS -events turn_started,turn_ended,needs_input,landed,closed", run: workspaceSubscribe},
+		"subscribe":              {usage: "subscribe WS -events turn_started,turn_ended,needs_input,landed,closed,pull_request", run: workspaceSubscribe},
 		"unsubscribe":            {usage: "unsubscribe WS", run: workspaceUnsubscribe},
 		"pr-subscribe":           {usage: "pr-subscribe WS -pr URL|#N|OWNER/REPO#N [-events " + allPullRequestEvents + "]", run: workspacePullRequestSubscribe},
 		"pr-unsubscribe":         {usage: "pr-unsubscribe WS -pr URL|OWNER/REPO#N", run: workspacePullRequestUnsubscribe},
@@ -1655,11 +1655,12 @@ var noticeEvents = map[string]agentreplv1.WorkspaceNoticeEvent{
 	"needs_input":  agentreplv1.WorkspaceNoticeEvent_WORKSPACE_NOTICE_EVENT_NEEDS_INPUT,
 	"landed":       agentreplv1.WorkspaceNoticeEvent_WORKSPACE_NOTICE_EVENT_LANDED,
 	"closed":       agentreplv1.WorkspaceNoticeEvent_WORKSPACE_NOTICE_EVENT_CLOSED,
+	"pull_request": agentreplv1.WorkspaceNoticeEvent_WORKSPACE_NOTICE_EVENT_PULL_REQUEST,
 }
 
 func workspaceSubscribe(c *cliCall, args []string) int {
 	fs, stateDir := c.flags()
-	events := fs.String("events", "", "comma-separated: turn_started, turn_ended, needs_input, landed, closed")
+	events := fs.String("events", "", "comma-separated: turn_started, turn_ended, needs_input, landed, closed, pull_request")
 	followed, rest, ok := c.workspaceArg(fs, stateDir, args)
 	if !ok || len(rest) != 0 {
 		return exitFailure

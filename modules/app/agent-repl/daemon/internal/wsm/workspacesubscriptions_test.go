@@ -35,6 +35,7 @@ func TestWorkspaceEventsAreASet(t *testing.T) {
 	}{
 		{name: "one event", events: []WorkspaceEvent{WorkspaceEventLanded}, wantValid: true, wantName: "landed"},
 		{name: "a repeat is one member", events: []WorkspaceEvent{WorkspaceEventClosed, WorkspaceEventClosed}, wantValid: true, wantName: "closed"},
+		{name: "the pull request event", events: []WorkspaceEvent{WorkspaceEventPullRequest}, wantValid: true, wantName: "pull_request"},
 		{name: "members name in order", events: []WorkspaceEvent{WorkspaceEventClosed, WorkspaceEventTurnStarted}, wantValid: true, wantName: "turn_started,closed"},
 		{name: "no event", wantValid: false},
 		{name: "an undeclared event", events: []WorkspaceEvent{9}, wantValid: false},

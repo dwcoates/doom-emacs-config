@@ -145,6 +145,8 @@ func workspaceEventsOf(events []agentreplv1.WorkspaceNoticeEvent) wsm.WorkspaceE
 			out = append(out, wsm.WorkspaceEventLanded)
 		case agentreplv1.WorkspaceNoticeEvent_WORKSPACE_NOTICE_EVENT_CLOSED:
 			out = append(out, wsm.WorkspaceEventClosed)
+		case agentreplv1.WorkspaceNoticeEvent_WORKSPACE_NOTICE_EVENT_PULL_REQUEST:
+			out = append(out, wsm.WorkspaceEventPullRequest)
 		default:
 			panic(fmt.Sprintf("server: workspace notice event %s has no store event", e))
 		}

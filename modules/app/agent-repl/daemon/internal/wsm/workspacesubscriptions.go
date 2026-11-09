@@ -52,10 +52,11 @@ const (
 	WorkspaceEventNeedsInput
 	WorkspaceEventLanded
 	WorkspaceEventClosed
+	WorkspaceEventPullRequest
 )
 
 // workspaceEvents is every declared event, in order.
-var workspaceEvents = []WorkspaceEvent{WorkspaceEventTurnStarted, WorkspaceEventTurnEnded, WorkspaceEventNeedsInput, WorkspaceEventLanded, WorkspaceEventClosed}
+var workspaceEvents = []WorkspaceEvent{WorkspaceEventTurnStarted, WorkspaceEventTurnEnded, WorkspaceEventNeedsInput, WorkspaceEventLanded, WorkspaceEventClosed, WorkspaceEventPullRequest}
 
 // String names the event in log records and in a notice.
 func (e WorkspaceEvent) String() string {
@@ -70,6 +71,8 @@ func (e WorkspaceEvent) String() string {
 		return "landed"
 	case WorkspaceEventClosed:
 		return "closed"
+	case WorkspaceEventPullRequest:
+		return "pull_request"
 	}
 	return fmt.Sprintf("WorkspaceEvent(%d)", int(e))
 }

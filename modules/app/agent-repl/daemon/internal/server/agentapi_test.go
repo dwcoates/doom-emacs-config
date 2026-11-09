@@ -408,6 +408,38 @@ func TestSubscribeWorkspaceRecordsTheEventsAndAnswersTheStatus(t *testing.T) {
 	}
 }
 
+func TestEveryDeclaredWorkspaceNoticeEventHasItsStoreEvent(t *testing.T) {
+	want := map[agentreplv1.WorkspaceNoticeEvent]wsm.WorkspaceEvent{
+		agentreplv1.WorkspaceNoticeEvent_WORKSPACE_NOTICE_EVENT_TURN_STARTED: wsm.WorkspaceEventTurnStarted,
+		agentreplv1.WorkspaceNoticeEvent_WORKSPACE_NOTICE_EVENT_TURN_ENDED:   wsm.WorkspaceEventTurnEnded,
+		agentreplv1.WorkspaceNoticeEvent_WORKSPACE_NOTICE_EVENT_NEEDS_INPUT:  wsm.WorkspaceEventNeedsInput,
+		agentreplv1.WorkspaceNoticeEvent_WORKSPACE_NOTICE_EVENT_LANDED:       wsm.WorkspaceEventLanded,
+		agentreplv1.WorkspaceNoticeEvent_WORKSPACE_NOTICE_EVENT_CLOSED:       wsm.WorkspaceEventClosed,
+		agentreplv1.WorkspaceNoticeEvent_WORKSPACE_NOTICE_EVENT_PULL_REQUEST: wsm.WorkspaceEventPullRequest,
+	}
+	for number := range agentreplv1.WorkspaceNoticeEvent_name {
+		event := agentreplv1.WorkspaceNoticeEvent(number)
+		if event == agentreplv1.WorkspaceNoticeEvent_WORKSPACE_NOTICE_EVENT_UNSPECIFIED {
+			continue
+		}
+		t.Run(event.String(), func(t *testing.T) {
+			// Arrange
+			stored, ok := want[event]
+			if !ok {
+				t.Fatalf("event %s is declared and this test names no store event for it", event)
+			}
+
+			// Act
+			got := workspaceEventsOf([]agentreplv1.WorkspaceNoticeEvent{event})
+
+			// Assert
+			if got != wsm.NewWorkspaceEvents(stored) {
+				t.Errorf("workspaceEventsOf(%s) = %s, want %s", event, got, stored)
+			}
+		})
+	}
+}
+
 func TestSubscribeWorkspaceIsRefused(t *testing.T) {
 	tests := []struct {
 		name    string

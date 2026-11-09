@@ -1114,6 +1114,7 @@ func TestSubscribeReadsItsEvents(t *testing.T) {
 		code   int
 	}{
 		{name: "known events", events: "landed, closed", code: exitSuccess},
+		{name: "the pull request event", events: "pull_request,landed", code: exitSuccess},
 		{name: "an unknown event", events: "landed,exploded", code: exitFailure},
 	}
 	for _, tt := range tests {

@@ -63,6 +63,12 @@ const (
 	WorkspaceNoticeEvent_WORKSPACE_NOTICE_EVENT_LANDED WorkspaceNoticeEvent = 4
 	// The followed workspace closed, however it closed.
 	WorkspaceNoticeEvent_WORKSPACE_NOTICE_EVENT_CLOSED WorkspaceNoticeEvent = 5
+	// The followed workspace took a GitHub pull request as its own: it stored
+	// an owned link to one (agentrepl.v1.WorkspaceLinkOwned). The notice names
+	// the pull request, so a follower in any repository can follow it to its
+	// merge (agentrepl.v1.SubscribePullRequestRequest) without knowing it
+	// beforehand.
+	WorkspaceNoticeEvent_WORKSPACE_NOTICE_EVENT_PULL_REQUEST WorkspaceNoticeEvent = 6
 )
 
 // Enum value maps for WorkspaceNoticeEvent.
@@ -74,6 +80,7 @@ var (
 		3: "WORKSPACE_NOTICE_EVENT_NEEDS_INPUT",
 		4: "WORKSPACE_NOTICE_EVENT_LANDED",
 		5: "WORKSPACE_NOTICE_EVENT_CLOSED",
+		6: "WORKSPACE_NOTICE_EVENT_PULL_REQUEST",
 	}
 	WorkspaceNoticeEvent_value = map[string]int32{
 		"WORKSPACE_NOTICE_EVENT_UNSPECIFIED":  0,
@@ -82,6 +89,7 @@ var (
 		"WORKSPACE_NOTICE_EVENT_NEEDS_INPUT":  3,
 		"WORKSPACE_NOTICE_EVENT_LANDED":       4,
 		"WORKSPACE_NOTICE_EVENT_CLOSED":       5,
+		"WORKSPACE_NOTICE_EVENT_PULL_REQUEST": 6,
 	}
 )
 
@@ -775,14 +783,15 @@ const file_agentrepl_v1_endpoint_subscribe_workspace_proto_rawDesc = "" +
 	"#SubscribeWorkspaceUnknownSubscriber\"#\n" +
 	"!SubscribeWorkspaceUnknownFollowed\"$\n" +
 	"\"SubscribeWorkspaceSubscriberClosed\"!\n" +
-	"\x1fSubscribeWorkspaceFollowsItself*\xfc\x01\n" +
+	"\x1fSubscribeWorkspaceFollowsItself*\xa5\x02\n" +
 	"\x14WorkspaceNoticeEvent\x12&\n" +
 	"\"WORKSPACE_NOTICE_EVENT_UNSPECIFIED\x10\x00\x12'\n" +
 	"#WORKSPACE_NOTICE_EVENT_TURN_STARTED\x10\x01\x12%\n" +
 	"!WORKSPACE_NOTICE_EVENT_TURN_ENDED\x10\x02\x12&\n" +
 	"\"WORKSPACE_NOTICE_EVENT_NEEDS_INPUT\x10\x03\x12!\n" +
 	"\x1dWORKSPACE_NOTICE_EVENT_LANDED\x10\x04\x12!\n" +
-	"\x1dWORKSPACE_NOTICE_EVENT_CLOSED\x10\x05B*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"\x1dWORKSPACE_NOTICE_EVENT_CLOSED\x10\x05\x12'\n" +
+	"#WORKSPACE_NOTICE_EVENT_PULL_REQUEST\x10\x06B*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_endpoint_subscribe_workspace_proto_rawDescOnce sync.Once

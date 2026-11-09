@@ -51,6 +51,10 @@ func (s *SubsectionUnfolds) Landed(ids.WorkspaceID) {}
 // Closed implements wsedges.Observer: no unfold waits on a close.
 func (s *SubsectionUnfolds) Closed(wsm.Workspace) {}
 
+// PullRequestOwned implements wsedges.Observer: no unfold waits on a pull
+// request.
+func (s *SubsectionUnfolds) PullRequestOwned(ids.WorkspaceID, wsm.PullRequestKey) {}
+
 // Run carries out every reported turn start's unfold, in order, until ctx
 // ends, then carries out every one still pending before it returns.
 func (s *SubsectionUnfolds) Run(ctx context.Context) {

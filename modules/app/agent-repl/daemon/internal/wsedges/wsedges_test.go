@@ -25,6 +25,11 @@ func (r *recorder) TurnEndedUnobserved(ws ids.WorkspaceID) {
 func (r *recorder) NeedsInput(ws ids.WorkspaceID) { r.got = append(r.got, "needs_input:"+string(ws)) }
 func (r *recorder) Landed(ws ids.WorkspaceID)     { r.got = append(r.got, "landed:"+string(ws)) }
 func (r *recorder) Closed(before wsm.Workspace)   { r.got = append(r.got, "closed:"+string(before.ID)) }
+func (r *recorder) PullRequestOwned(ws ids.WorkspaceID, pr wsm.PullRequestKey) {
+	r.got = append(r.got, "pull_request:"+string(ws)+":"+pr.String())
+}
+
+var pr = wsm.PullRequestKey{Owner: "acme", Repo: "definitions", Number: 7}
 
 func TestTheHubTellsEveryObserverEveryEdge(t *testing.T) {
 	tests := []struct {
@@ -38,6 +43,7 @@ func TestTheHubTellsEveryObserverEveryEdge(t *testing.T) {
 		{name: "an ask opening", edge: func(h *Hub) { h.NeedsInput(ws) }, want: "needs_input:ws-1"},
 		{name: "a landing", edge: func(h *Hub) { h.Landed(ws) }, want: "landed:ws-1"},
 		{name: "a close", edge: func(h *Hub) { h.Closed(wsm.Workspace{ID: ws}) }, want: "closed:ws-1"},
+		{name: "a pull request taken as the workspace's own", edge: func(h *Hub) { h.PullRequestOwned(ws, pr) }, want: "pull_request:ws-1:acme/definitions#7"},
 		{name: "a merge queue landing", edge: func(h *Hub) {
 			h.QueueChanged(merge.QueueChange{Kind: merge.QueueChangeLanded, Subject: merge.QueueMember{Workspace: ws}})
 		}, want: "landed:ws-1"},
@@ -99,7 +105,7 @@ func (d *closesDB) MarkClosed(context.Context, wsm.WorkspaceID, wsm.Closure) err
 	return nil
 }
 
-func TestReportingClosesTellsTheCloseOfAnOpenWorkspace(t *testing.T) {
+func TestReportingEdgesTellsTheCloseOfAnOpenWorkspace(t *testing.T) {
 	tests := []struct {
 		name string
 		ws   wsm.Workspace
@@ -113,7 +119,7 @@ func TestReportingClosesTellsTheCloseOfAnOpenWorkspace(t *testing.T) {
 			// Arrange
 			r := &recorder{}
 			inner := &closesDB{ws: tt.ws}
-			db := ReportingCloses(inner, New(r), dlog.NewTestLogger())
+			db := ReportingEdges(inner, New(r), dlog.NewTestLogger())
 
 			// Act
 			err := db.MarkClosed(context.Background(), ws, wsm.Closure{By: wsm.CloseByUser})
@@ -129,7 +135,7 @@ func TestReportingClosesTellsTheCloseOfAnOpenWorkspace(t *testing.T) {
 	}
 }
 
-func TestReportingClosesFails(t *testing.T) {
+func TestReportingEdgesCloseFails(t *testing.T) {
 	tests := []struct {
 		name    string
 		inner   *closesDB
@@ -145,7 +151,7 @@ func TestReportingClosesFails(t *testing.T) {
 			// Arrange
 			r := &recorder{}
 			log := dlog.NewTestLogger()
-			db := ReportingCloses(tt.inner, New(r), log)
+			db := ReportingEdges(tt.inner, New(r), log)
 
 			// Act
 			err := db.MarkClosed(context.Background(), ws, wsm.Closure{By: wsm.CloseByUser})
@@ -161,4 +167,89 @@ func TestReportingClosesFails(t *testing.T) {
 			}
 		})
 	}
+}
+
+// linksDB is a registry whose SetWorkspaceLink is recorded and may fail.
+type linksDB struct {
+	wsm.DB
+	err  error
+	sets []wsm.LinkSet
+}
+
+func (d *linksDB) SetWorkspaceLink(_ context.Context, _ wsm.WorkspaceID, set wsm.LinkSet) ([]wsm.WorkspaceLink, error) {
+	if d.err != nil {
+		return nil, d.err
+	}
+	d.sets = append(d.sets, set)
+	return []wsm.WorkspaceLink{{URL: set.URL, Label: set.Label}}, nil
+}
+
+func TestReportingEdgesTellsAPullRequestTakenAsTheWorkspacesOwn(t *testing.T) {
+	const url = "https://github.com/acme/definitions/pull/7"
+	tests := []struct {
+		name string
+		set  wsm.LinkSet
+		want []string
+	}{
+		{name: "an owned pull request taking a new subscription is told",
+			set:  wsm.LinkSet{URL: url, Label: "the definitions change", Owned: true, PullRequest: &pr, Subscribe: &wsm.PullRequestSubscription{Subscriber: ws, PullRequest: pr}},
+			want: []string{"pull_request:ws-1:acme/definitions#7"}},
+		{name: "an owned pull request already followed tells nothing",
+			set: wsm.LinkSet{URL: url, Label: "the definitions change", Owned: true, PullRequest: &pr}},
+		{name: "a referenced pull request tells nothing",
+			set: wsm.LinkSet{URL: url, Label: "the definitions change", PullRequest: &pr}},
+		{name: "an owned link that is no pull request tells nothing",
+			set: wsm.LinkSet{URL: "https://example.com/doc", Label: "the design doc", Owned: true}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			r := &recorder{}
+			inner := &linksDB{}
+			db := ReportingEdges(inner, New(r), dlog.NewTestLogger())
+
+			// Act
+			links, err := db.SetWorkspaceLink(context.Background(), ws, tt.set)
+
+			// Assert
+			if err != nil || len(inner.sets) != 1 || len(links) != 1 || links[0].URL != tt.set.URL {
+				t.Fatalf("SetWorkspaceLink = %v, %v; inner sets %d; want the link stored and answered", links, err, len(inner.sets))
+			}
+			if !slices.Equal(r.got, tt.want) {
+				t.Errorf("told %v, want %v", r.got, tt.want)
+			}
+		})
+	}
+}
+
+func TestReportingEdgesTellsNothingOfALinkThatFailsToStore(t *testing.T) {
+	// Arrange
+	r := &recorder{}
+	cause := errors.New("disk gone")
+	db := ReportingEdges(&linksDB{err: cause}, New(r), dlog.NewTestLogger())
+	set := wsm.LinkSet{URL: "https://github.com/acme/definitions/pull/7", Label: "the definitions change", Owned: true,
+		PullRequest: &pr, Subscribe: &wsm.PullRequestSubscription{Subscriber: ws, PullRequest: pr}}
+
+	// Act
+	_, err := db.SetWorkspaceLink(context.Background(), ws, set)
+
+	// Assert
+	if !errors.Is(err, cause) || len(r.got) != 0 {
+		t.Fatalf("SetWorkspaceLink = %v, told %v; want the store's failure and nothing told", err, r.got)
+	}
+}
+
+func TestReportingEdgesPanicsOnASubscriptionNamingNoPullRequest(t *testing.T) {
+	// Arrange
+	db := ReportingEdges(&linksDB{}, New(&recorder{}), dlog.NewTestLogger())
+	set := wsm.LinkSet{URL: "https://example.com/doc", Label: "the design doc", Owned: true, Subscribe: &wsm.PullRequestSubscription{Subscriber: ws}}
+	defer func() {
+		// Assert
+		if recover() == nil {
+			t.Fatal("SetWorkspaceLink did not panic on a subscription naming no pull request")
+		}
+	}()
+
+	// Act
+	_, _ = db.SetWorkspaceLink(context.Background(), ws, set)
 }

@@ -348,9 +348,10 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	})
 	// ---- the lifecycle edges, before anything holds the state client ----
 	//
-	// EVERY CLOSE IS AN EDGE: the state client every component below holds is
-	// the one whose MarkClosed tells the edges (wsedges.ReportingCloses), so
-	// no close path can close a workspace untold. Each observer only appends;
+	// EVERY CLOSE AND EVERY NEWLY OWNED PULL REQUEST IS AN EDGE: the state
+	// client every component below holds is the one whose MarkClosed and
+	// SetWorkspaceLink tell the edges (wsedges.ReportingEdges), so no path can
+	// close a workspace, or store an owned pull request, untold. Each observer only appends;
 	// its loop runs on the notice lifetime, handed the prompt handler built
 	// below.
 	derivedNotices := workspacenotice.New(workspacenotice.Deps{
@@ -373,7 +374,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	selfCloses := workspace.NewSelfCloses(verbsRef.carryOutSelfClose, log)
 	subsectionUnfolds := workspace.NewSubsectionUnfolds(verbsRef.unfoldSubsectionForWork, log)
 	edges := wsedges.New(derivedNotices, followNotices, selfCloses, subsectionUnfolds)
-	p.DB = wsedges.ReportingCloses(p.DB, edges, log)
+	p.DB = wsedges.ReportingEdges(p.DB, edges, log)
 
 	judge, err := buildJudge(p.Contracts, guard, headlessClient, paths.PromptsDir)
 	if err != nil {

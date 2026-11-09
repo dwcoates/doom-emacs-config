@@ -175,6 +175,10 @@ func TestEachEdgeIsToldToTheSubscribersThatAskedForIt(t *testing.T) {
 		{name: "an ask opening", edge: func(s *Service) { s.NeedsInput(followed) }, event: wsm.WorkspaceEventNeedsInput, words: "is waiting on the user"},
 		{name: "a landing", edge: func(s *Service) { s.Landed(followed) }, event: wsm.WorkspaceEventLanded, words: "landed its branch."},
 		{name: "a close", edge: func(s *Service) { s.Closed(wsm.Workspace{ID: followed}) }, event: wsm.WorkspaceEventClosed, words: "closed."},
+		{name: "a pull request taken as its own", edge: func(s *Service) {
+			s.PullRequestOwned(followed, wsm.PullRequestKey{Owner: "acme", Repo: "definitions", Number: 7})
+		}, event: wsm.WorkspaceEventPullRequest,
+			words: "owns pull request https://github.com/acme/definitions/pull/7; to be told when it merges, follow it with `agent-repld workspace pr-subscribe here -pr https://github.com/acme/definitions/pull/7`."},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -475,5 +479,30 @@ func TestBothNotifiersShareOneSupersession(t *testing.T) {
 	// Assert
 	if calls != 2 {
 		t.Fatalf("untoldnotice.Carried calls = %d, want one per notifier", calls)
+	}
+}
+
+func TestEventSentencePanicsOnAPullRequestMismatchedToItsEvent(t *testing.T) {
+	pr := wsm.PullRequestKey{Owner: "acme", Repo: "definitions", Number: 7}
+	tests := []struct {
+		name  string
+		event wsm.WorkspaceEvent
+		pr    wsm.PullRequestKey
+	}{
+		{name: "a pull request event naming no pull request", event: wsm.WorkspaceEventPullRequest},
+		{name: "another event naming a pull request", event: wsm.WorkspaceEventLanded, pr: pr},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			defer func() {
+				// Assert
+				if recover() == nil {
+					t.Fatalf("EventSentence(%s, %q) did not panic", tt.event, tt.pr)
+				}
+			}()
+
+			// Act
+			EventSentence("followed", tt.event, tt.pr)
+		})
 	}
 }
