@@ -667,16 +667,31 @@ func (d *Daemon) AwaitWorkspaceLogRecord(workspaceDir, what string, pred func(Lo
 // where every caller means "THIS daemon did".
 func (d *Daemon) AwaitWorkspaceLogOperationCount(workspaceDir, operation string, n int) {
 	d.t.Helper()
+	d.AwaitWorkspaceLogRecordCount(workspaceDir, "records under "+operation+" from this daemon", n, func(r LogRecord) bool {
+		return r.Operation == operation && r.PID == d.PID()
+	})
+}
+
+// AwaitWorkspaceLogRecordCount waits until a workspace's daemon log sink
+// holds at least n records pred accepts, checking at every change the kernel
+// reports to the sink.
+func (d *Daemon) AwaitWorkspaceLogRecordCount(workspaceDir, what string, n int, pred func(LogRecord) bool) {
+	d.t.Helper()
 	wait, cancelWait := d.waitCtx()
 	defer cancelWait()
 	path := WorkspaceLogPath(workspaceDir, "daemon")
 	seen := 0
 	check := func() bool {
-		seen = d.WorkspaceLogOperationCount(workspaceDir, operation)
+		seen = 0
+		for _, r := range readLog(d.t, path) {
+			if pred(r) {
+				seen++
+			}
+		}
 		return seen >= n
 	}
 	if !awaitChange(d.t, wait, check, followFiles(path)) {
-		d.t.Fatalf("waiting for %d records under %s in %s (saw %d): %v", n, operation, path, seen, grantedclock.Explain(wait))
+		d.t.Fatalf("waiting for %d %s in %s (saw %d): %v", n, what, path, seen, grantedclock.Explain(wait))
 	}
 }
 

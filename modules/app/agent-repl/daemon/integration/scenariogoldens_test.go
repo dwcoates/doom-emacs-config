@@ -12,7 +12,6 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
@@ -261,20 +260,7 @@ func countRouted(f *fixture, match func(harness.LogRecord) bool) int {
 // the watcher writes one after each entry or update it routed.
 func awaitRouted(t *testing.T, f *fixture, what string, match func(harness.LogRecord) bool, want int) {
 	t.Helper()
-	ctx, cancel := f.d.WaitCtx()
-	defer cancel()
-	ticker := time.NewTicker(10 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		if got := countRouted(f, match); got >= want {
-			return
-		}
-		select {
-		case <-ticker.C:
-		case <-ctx.Done():
-			t.Fatalf("waiting for %d routing records of %s, the log holds %d: %v", want, what, countRouted(f, match), ctx.Err())
-		}
-	}
+	f.d.AwaitWorkspaceLogRecordCount(f.repo.Dir, "routing records of "+what, want, match)
 }
 
 // goldenIDs maps a drive's identities to this fixture's.

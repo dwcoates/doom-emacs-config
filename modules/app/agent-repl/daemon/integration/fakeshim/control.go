@@ -63,6 +63,10 @@ const (
 	// waits on its own subscriber latch, so the push is one the daemon is
 	// guaranteed to see.
 	OpPushSessionUpdateWhenSubscribed = "push_session_update_when_subscribed"
+	// OpAwaitCount answers once RPC has received at least N requests in
+	// total: the recorder's own signal, so a test waits for a call rather
+	// than re-reading a count.
+	OpAwaitCount = "await_count"
 )
 
 // Stream names accepted by drop_stream.
@@ -113,6 +117,8 @@ type Command struct {
 	Fail string `json:"fail,omitempty"`
 	// Stderr is the failure evidence an `exit` leaves behind.
 	Stderr string `json:"stderr,omitempty"`
+	// N is the total `await_count` waits for.
+	N int `json:"n,omitempty"`
 	// TimeoutMS bounds a waiting op (`expect`) so a request that never arrives
 	// fails by name instead of hanging the suite. Zero means unbounded.
 	TimeoutMS int `json:"timeout_ms,omitempty"`
@@ -202,12 +208,15 @@ func ParseCommand(line []byte) (Command, error) {
 		if c.Payload == "" && c.Fail == "" {
 			return Command{}, fmt.Errorf("%s: payload or fail is required", c.Op)
 		}
-	case OpExpect, OpCount:
+	case OpExpect, OpCount, OpAwaitCount:
 		if c.RPC == "" {
 			return Command{}, fmt.Errorf("%s: rpc is required", c.Op)
 		}
 		if !knownRPC(c.RPC) {
 			return Command{}, fmt.Errorf("%s: unknown rpc %q", c.Op, c.RPC)
+		}
+		if c.Op == OpAwaitCount && c.N <= 0 {
+			return Command{}, fmt.Errorf("%s: n must be positive, got %d", c.Op, c.N)
 		}
 	case OpDropStream:
 		switch c.Stream {

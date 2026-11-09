@@ -611,7 +611,7 @@ func TestFooterLinkDeathFlipsToSeveredAndTheDaemonRedials(t *testing.T) {
 
 	// Assert: the daemon redials — a fresh WatchSession is opened without any
 	// client action.
-	ftAwaitTrue(t, f.d.Ctx(), func() bool { return f.shim.Count(harness.RPCWatchSession) > watchesBefore }, "a redialed WatchSession after the link is severed")
+	f.shim.AwaitCount(harness.RPCWatchSession, watchesBefore+1)
 }
 
 func TestFooterShimExitFlipsToDeadAndStopsRedials(t *testing.T) {
@@ -673,7 +673,9 @@ func TestFooterShimExitFlipsToDeadAndStopsRedials(t *testing.T) {
 	// them is a redial's severed step.
 	harness.ExpectNoPushMatching(t, footer,
 		"no redial once the shim is dead: the footer never steps to severed",
-		func(v *frontendv1.FooterView) bool { return v.GetStrip().GetStatus().GetAgentReplFault().GetSevered() != nil })
+		func(v *frontendv1.FooterView) bool {
+			return v.GetStrip().GetStatus().GetAgentReplFault().GetSevered() != nil
+		})
 }
 
 // ---------------------------------------------------------------------------
@@ -1016,24 +1018,6 @@ func ftFindBreakdownRow(v *frontendv1.TokenBreakdownView, label string) *fronten
 	return nil
 }
 
-// ftAwaitTrue polls a condition until it holds, bounded by ctx. Not a
-// time.Sleep synchronization device: a bounded poll for an eventually-true
-// fact, in the same style as the harness's own file/log waits.
-func ftAwaitTrue(t *testing.T, ctx interface{ Done() <-chan struct{} }, pred func() bool, what string) {
-	t.Helper()
-	ticker := time.NewTicker(5 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		if pred() {
-			return
-		}
-		select {
-		case <-ticker.C:
-		case <-ctx.Done():
-			t.Fatalf("waiting for %s: context done", what)
-		}
-	}
-}
 
 // ---------------------------------------------------------------------------
 // Connectivity truth per hop (daemon.md invariant 11): a workspace is

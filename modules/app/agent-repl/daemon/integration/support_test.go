@@ -12,7 +12,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -194,25 +193,26 @@ func (f *fixture) openFeed(feed *frontendv1.FeedId) (*frontendv1.FeedPage, *agen
 	return success.GetPage(), success.GetWatch()
 }
 
-// openFeedOnceCarrying re-opens the root feed until its page satisfies the
-// predicate, and answers that page and its token. It exists because a fake
-// shim push is fire-and-forget: nothing tells a test when the daemon has
-// finished routing a frame, and re-taking the open is how a test synchronizes
-// on the page without sleeping.
+// openFeedOnceCarrying answers the root feed's page and token once the page
+// satisfies the predicate. A fake shim push is fire-and-forget: nothing tells
+// a test when the daemon has finished routing a frame. Every change to the
+// feed's rows is published on its tail, so the page is opened again on each
+// row the tail delivers, never on a timer.
 func (f *fixture) openFeedOnceCarrying(what string, pred func(*frontendv1.FeedPage) bool) (*frontendv1.FeedPage, *agentreplv1.FeedWatchToken) {
 	f.t.Helper()
-	ticker := time.NewTicker(10 * time.Millisecond)
-	defer ticker.Stop()
+	page, token := f.openFeed(nil)
+	if pred(page) {
+		return page, token
+	}
+	changes := f.d.WatchFeed(token)
+	defer changes.Close()
+	wait, cancelWait := f.d.WaitCtx()
+	defer cancelWait()
 	for {
-		page, token := f.openFeed(nil)
+		harness.AwaitNext(f.t, wait, changes, "a feed change toward a page carrying "+what)
+		page, token = f.openFeed(nil)
 		if pred(page) {
 			return page, token
-		}
-		select {
-		case <-ticker.C:
-		case <-f.d.Ctx().Done():
-			f.t.Fatalf("waiting for a feed page carrying %s: %v", what, f.d.Ctx().Err())
-			return nil, nil
 		}
 	}
 }

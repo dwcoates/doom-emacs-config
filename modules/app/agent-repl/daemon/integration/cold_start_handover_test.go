@@ -117,9 +117,7 @@ func TestAColdStartedDaemonHandsOverTheSessionsItBroughtUp(t *testing.T) {
 			if resp.Msg.GetSuccess() == nil {
 				t.Fatalf("AdoptHostWorkspace on the successor = %v, want success", resp.Msg)
 			}
-			ftAwaitTrue(t, cold.Ctx(), func() bool {
-				return shim.Count(harness.RPCWatchSession) > watchesBefore
-			}, "the successor's WatchSession on the transferred shim")
+			shim.AwaitCount(harness.RPCWatchSession, watchesBefore+1)
 			if got := shim.Count(harness.RPCStartSession); got != startSessions {
 				t.Fatalf("StartSession across the handover = %d, want still %d: adoption dials, never re-starts", got, startSessions)
 			}

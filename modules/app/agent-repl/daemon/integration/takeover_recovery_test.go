@@ -42,7 +42,5 @@ func TestASuccessorHandedNothingRecoversTheShimNobodyServes(t *testing.T) {
 	successor.AwaitLogRecord(successor.RunLogPath(), "the takeover's recovery of the unserved shim", func(r harness.LogRecord) bool {
 		return r.Operation == "daemon.rollout.orphans" && r.Message == "adopted a shim a gone daemon left running"
 	})
-	ftAwaitTrue(t, successor.Ctx(), func() bool {
-		return f.shim.Count(harness.RPCWatchSession) > watchesBefore
-	}, "the successor's WatchSession on the recovered shim")
+	f.shim.AwaitCount(harness.RPCWatchSession, watchesBefore+1)
 }

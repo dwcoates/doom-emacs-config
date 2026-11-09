@@ -220,6 +220,7 @@ type controlCommand struct {
 	Payload   string `json:"payload,omitempty"`
 	Fail      string `json:"fail,omitempty"`
 	Stderr    string `json:"stderr,omitempty"`
+	N         int    `json:"n,omitempty"`
 	TimeoutMS int    `json:"timeout_ms,omitempty"`
 }
 
@@ -682,6 +683,13 @@ func (s *ShimControl) AnswerFailure(rpc, detail string) {
 // Count reports how many requests a verb has received.
 // Daemon is the daemon whose shim this controls.
 func (s *ShimControl) Daemon() *Daemon { return s.d }
+
+// AwaitCount returns once the fake has received at least n requests for the
+// verb in total, and answers the total: the fake's own recorder wakes it.
+func (s *ShimControl) AwaitCount(rpc string, n int) int {
+	s.t.Helper()
+	return s.send(controlCommand{Op: "await_count", RPC: rpc, N: n}).Count
+}
 
 func (s *ShimControl) Count(rpc string) int {
 	s.t.Helper()

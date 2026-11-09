@@ -79,3 +79,25 @@ func (r *Recorder) Expect(ctx context.Context, rpc string) (proto.Message, int, 
 		}
 	}
 }
+
+// AwaitCount waits until the verb has received at least n requests in total,
+// read or not, and answers the total. The context bounds the wait; its
+// cancellation is returned as an error and never swallowed.
+func (r *Recorder) AwaitCount(ctx context.Context, rpc string, n int) (int, error) {
+	for {
+		r.mu.Lock()
+		if total := len(r.received[rpc]); total >= n {
+			r.mu.Unlock()
+			return total, nil
+		}
+		wait := make(chan struct{})
+		r.waiters[rpc] = append(r.waiters[rpc], wait)
+		r.mu.Unlock()
+
+		select {
+		case <-wait:
+		case <-ctx.Done():
+			return 0, fmt.Errorf("fakeshim: waiting for %d %s request(s): %w", n, rpc, ctx.Err())
+		}
+	}
+}

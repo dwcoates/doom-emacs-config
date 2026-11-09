@@ -387,6 +387,15 @@ func (p *process) apply(line []byte) Reply {
 	case OpCount:
 		return Reply{OK: true, Count: p.rec.Count(cmd.RPC)}
 
+	case OpAwaitCount:
+		ctx, cancel := commandContext(cmd)
+		defer cancel()
+		total, err := p.rec.AwaitCount(ctx, cmd.RPC, cmd.N)
+		if err != nil {
+			return Reply{Error: err.Error()}
+		}
+		return Reply{OK: true, Count: total}
+
 	case OpAwaitAgentWatch:
 		ctx, cancel := commandContext(cmd)
 		defer cancel()

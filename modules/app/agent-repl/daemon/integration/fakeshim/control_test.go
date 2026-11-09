@@ -25,6 +25,11 @@ func TestParseCommandAcceptsWellFormedOps(t *testing.T) {
 			want: Command{Op: OpPushSessionUpdateWhenSubscribed, Payload: payload},
 		},
 		{
+			name: "await_count names a verb and a total",
+			line: `{"op":"await_count","rpc":"WatchSession","n":2}`,
+			want: Command{Op: OpAwaitCount, RPC: "WatchSession", N: 2},
+		},
+		{
 			name: "push_agent_frame addresses an agent",
 			line: `{"op":"push_agent_frame","agent":"sub-1","payload":"` + payload + `"}`,
 			want: Command{Op: OpPushAgentFrame, Agent: "sub-1", Payload: payload},
@@ -158,6 +163,8 @@ func TestParseCommandRejectsMalformedOps(t *testing.T) {
 		{name: "unknown op", line: `{"op":"teleport"}`, wantSub: "unknown control op"},
 		{name: "unknown field", line: `{"op":"hang","nonsense":1}`, wantSub: "malformed control line"},
 		{name: "push_session_update without payload", line: `{"op":"push_session_update"}`, wantSub: "payload is required"},
+		{name: "await_count without a total", line: `{"op":"await_count","rpc":"WatchSession"}`, wantSub: "n must be positive"},
+		{name: "await_count without an rpc", line: `{"op":"await_count","n":1}`, wantSub: "rpc is required"},
 		{name: "push_session_update_when_subscribed without payload", line: `{"op":"push_session_update_when_subscribed"}`, wantSub: "payload is required"},
 		{name: "push_user_prompt without payload", line: `{"op":"push_user_prompt"}`, wantSub: "payload is required"},
 		{name: "push_retired without payload", line: `{"op":"push_retired"}`, wantSub: "payload is required"},
