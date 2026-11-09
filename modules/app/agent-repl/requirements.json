@@ -39,7 +39,11 @@
       ],
       "command": "jq",
       "install": {
-        "brew": "jq"
+        "brew": "jq",
+        "apt": "jq",
+        "dnf": "jq",
+        "pacman": "jq",
+        "zypper": "jq"
       }
     },
     {
@@ -53,7 +57,11 @@
       ],
       "command": "git",
       "install": {
-        "manual": "Install the Xcode Command Line Tools with `xcode-select --install`."
+        "manual": "Install the Xcode Command Line Tools with `xcode-select --install`.",
+        "apt": "git",
+        "dnf": "git",
+        "pacman": "git",
+        "zypper": "git"
       }
     },
     {
@@ -270,7 +278,11 @@
       ],
       "command": "curl",
       "install": {
-        "manual": "Install curl with your distribution's package manager."
+        "manual": "Install curl with your distribution's package manager.",
+        "apt": "curl",
+        "dnf": "curl",
+        "pacman": "curl",
+        "zypper": "curl"
       }
     },
     {
@@ -284,7 +296,11 @@
       ],
       "command": "unzip",
       "install": {
-        "manual": "Install unzip with your distribution's package manager."
+        "manual": "Install unzip with your distribution's package manager.",
+        "apt": "unzip",
+        "dnf": "unzip",
+        "pacman": "unzip",
+        "zypper": "unzip"
       }
     },
     {
@@ -298,7 +314,11 @@
       ],
       "command": "shasum",
       "install": {
-        "manual": "Install perl's shasum with your distribution's package manager."
+        "manual": "Install perl's shasum with your distribution's package manager.",
+        "apt": "perl",
+        "dnf": "perl-Digest-SHA",
+        "pacman": "perl",
+        "zypper": "perl"
       }
     },
     {
@@ -354,7 +374,11 @@
       ],
       "command": "notify-send",
       "install": {
-        "manual": "Install libnotify's notify-send with your distribution's package manager."
+        "manual": "Install libnotify's notify-send with your distribution's package manager.",
+        "apt": "libnotify-bin",
+        "dnf": "libnotify",
+        "pacman": "libnotify",
+        "zypper": "libnotify-tools"
       }
     },
     {
@@ -368,7 +392,11 @@
       ],
       "command": "sqlite3",
       "install": {
-        "brew": "sqlite"
+        "brew": "sqlite",
+        "apt": "sqlite3",
+        "dnf": "sqlite",
+        "pacman": "sqlite",
+        "zypper": "sqlite3"
       }
     },
     {
@@ -725,7 +753,11 @@
       ],
       "command": "shellcheck",
       "install": {
-        "brew": "shellcheck"
+        "brew": "shellcheck",
+        "apt": "shellcheck",
+        "dnf": "ShellCheck",
+        "pacman": "shellcheck",
+        "zypper": "ShellCheck"
       }
     },
     {
@@ -739,7 +771,11 @@
       ],
       "command": "rg",
       "install": {
-        "brew": "ripgrep"
+        "brew": "ripgrep",
+        "apt": "ripgrep",
+        "dnf": "ripgrep",
+        "pacman": "ripgrep",
+        "zypper": "ripgrep"
       }
     },
     {
@@ -753,7 +789,11 @@
       ],
       "command": "python3",
       "install": {
-        "manual": "Install the Xcode Command Line Tools with `xcode-select --install`."
+        "manual": "Install the Xcode Command Line Tools with `xcode-select --install`.",
+        "apt": "python3",
+        "dnf": "python3",
+        "pacman": "python",
+        "zypper": "python3"
       }
     },
     {
@@ -767,7 +807,11 @@
       ],
       "command": "perl",
       "install": {
-        "brew": "perl"
+        "brew": "perl",
+        "apt": "perl",
+        "dnf": "perl",
+        "pacman": "perl",
+        "zypper": "perl"
       }
     }
   ]

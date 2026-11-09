@@ -125,6 +125,22 @@ launchd_service_plists() {
     | xargs -0 jq -r '.requirements[]? | select(.kind == "launchd_service") | .plist'
 }
 
+test_every_linux_program_names_its_package_for_each_main_linux_package_manager() {
+  # A Linux program comes from apt, dnf and pacman alike, so no distribution
+  # family is left with "add install.<manager>"; only a program no package
+  # manager carries (a go_install, or a manual step on every platform) names
+  # none of them.
+  local missing
+  missing="$(cd "$MODULE" && find . -name requirements.json -not -path '*/node_modules/*' -print0 \
+    | xargs -0 jq -r '.requirements[]
+        | select(.kind == "program" and ((.platforms // []) | index("linux")))
+        | select(.install.go_install == null)
+        | select((.install | keys | map(select(. == "apt" or . == "dnf" or . == "pacman" or . == "brew" or . == "brew_cask")) | length) > 0)
+        | select(.install.apt == null or .install.dnf == null or .install.pacman == null)
+        | .id' | sort -u)"
+  if [ -z "$missing" ]; then pass "every linux program names its apt, dnf and pacman packages"; else fail "linux programs missing a package:" "$missing"; fi
+}
+
 test_launchd_service_plists_names_every_service() {
   local got
   got="$(launchd_service_plists | sort | tr '\n' ' ')"

@@ -18,7 +18,11 @@
         "min": "1.24"
       },
       "install": {
-        "brew": "go"
+        "brew": "go",
+        "apt": "golang-go",
+        "dnf": "golang",
+        "pacman": "go",
+        "zypper": "go"
       }
     },
     {
@@ -32,7 +36,11 @@
       ],
       "command": "docker",
       "install": {
-        "brew_cask": "docker"
+        "brew_cask": "docker",
+        "apt": "docker.io",
+        "dnf": "moby-engine",
+        "pacman": "docker",
+        "zypper": "docker"
       }
     }
   ]
