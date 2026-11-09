@@ -1115,19 +1115,14 @@ body {
   color: var(--muted);
 }
 #ws-sidebar .sb-mq-stage { display: inline-flex; align-items: center; gap: 0.2rem; white-space: nowrap; }
-#ws-sidebar .sb-mq-detail {
-  font-size: 0.7rem;
-  color: var(--muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 /* THE SECOND SPOT (owner ruling, 2026-10-31): a merge remediating its
    failing tests out of line. It is a card like the head's, one step quieter
    -- its name in regular weight, a step smaller, in the waiting merges' grey
    lifted toward the head's ink, its glyph dimmed -- and it stands above the
    merges waiting, indented like them, so it reads as below the head and
-   above the line. */
+   above the line. WHAT IT REPAIRS FOLLOWS ITS NAME ON THE SAME LINE (owner
+   request, 2026-11-09), a parenthetical in the rail's secondary grey
+   (--muted) that never truncates: the name gives way first. */
 #ws-sidebar .sb-mq-remediating {
   display: flex;
   flex-direction: column;
@@ -1139,7 +1134,7 @@ body {
   color: color-mix(in srgb, var(--repo-head-expanded) 80%, var(--repo-head-collapsed));
 }
 #ws-sidebar .sb-mq-remediating .sb-mq-glyph { opacity: 0.6; }
-#ws-sidebar .sb-mq-remediating .sb-mq-detail { font-style: italic; }
+#ws-sidebar .sb-mq-reason { flex: 0 0 auto; color: var(--muted); white-space: nowrap; }
 /* A waiting merge's front mark. */
 #ws-sidebar .sb-mq-front { flex: 0 0 auto; color: var(--blocked); font-size: 0.65rem; }
 /* A folded open workspaces section folds away every grouping section it
@@ -1580,14 +1575,14 @@ html.sb-dragging * { -webkit-user-select: none; user-select: none; }
    GROUP'S NAME (owner request, 2026-11-06;
    test/webkit/queue-group-gap.webkit.test.ts), whatever its queue ends with.
    Each line a queue can end with states how far its card reaches below its
-   baseline (--mq-below-text, measured in WebKit): a step line, a stage strip
-   or a remediating card's line, all at 0.7rem; a head's name line alone; a
-   waiting merge's line. The queue's last card then stands off the next group
-   by what is left of the 6.25px a line must reach below its baseline for
-   the next name to hang by that gap. */
-#ws-sidebar .sb-mq-head,
-#ws-sidebar .sb-mq-remediating { --mq-below-text: 4.25px; }
-#ws-sidebar .sb-mq-head:has(> .sb-mq-head-line:last-child) { --mq-below-text: 7.75px; }
+   baseline (--mq-below-text, measured in WebKit): a stage strip, at 0.7rem;
+   a name line (a head's alone, or a remediating card's one line); a waiting
+   merge's line. The queue's last card then stands off the next group by
+   what is left of the 6.25px a line must reach below its baseline for the
+   next name to hang by that gap. */
+#ws-sidebar .sb-mq-head { --mq-below-text: 4.25px; }
+#ws-sidebar .sb-mq-head:has(> .sb-mq-head-line:last-child),
+#ws-sidebar .sb-mq-remediating { --mq-below-text: 7.75px; }
 #ws-sidebar .sb-mq-waiting { --mq-below-text: 4.75px; }
 #ws-sidebar .merged-group[data-group-section="merge-queue"]:not(.folded):has(+ .merged-group) > .rows > :last-child {
   margin-bottom: calc(6.25px - var(--mq-below-text));

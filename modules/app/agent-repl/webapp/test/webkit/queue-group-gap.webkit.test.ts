@@ -4,9 +4,8 @@
  *
  * Under the Merge Queue header, the gap from an open group's last line to the
  * next group's name equals the gap from a group's name to the first line of
- * its queue, whatever the queue ends with: the head card's step line, its
- * stage strip, its name line alone, a remediating card's line, or a waiting
- * merge's line. A gap is measured text to text, as the rules between the
+ * its queue, whatever the queue ends with: the head card's stage strip, its
+ * name line alone, a remediating card's line, or a waiting merge's line. A gap is measured text to text, as the rules between the
  * sections are: the upper line's baseline to the lower line's capital top.
  * jsdom lays nothing out, so this draws the section in the shape
  * `drawRosterMergeQueueRepoGroup` draws it (its classes pinned in
@@ -20,23 +19,23 @@ import { pageStylesheet } from "./stylesheets";
 /** The head card's merge glyph, as the sidebar draws it. */
 const GLYPH = `<span class="sb-mq-glyph" aria-hidden="true">⑂</span>`;
 
-/** A head-line: the glyph, a merge's NAME and its clock. */
-function headLine(name: string): string {
-  return `<div class="sb-mq-head-line">${GLYPH}<span class="sb-mq-name">${name}</span><span class="sb-mq-clock">4m</span></div>`;
+/** A head-line: the glyph, a merge's NAME, the parenthetical REASON when given, and its clock. */
+function headLine(name: string, reason?: string): string {
+  const why = reason === undefined ? "" : `<span class="sb-mq-reason">(${reason})</span>`;
+  return `<div class="sb-mq-head-line">${GLYPH}<span class="sb-mq-name">${name}</span>${why}<span class="sb-mq-clock">4m</span></div>`;
 }
 
-/** The head card, with a stage strip when STAGES and a step line when DETAIL, as `drawRosterMergeQueueHead` draws it. */
-function head(name: string, stages: boolean, detail: string | null): string {
+/** The head card, with a stage strip when STAGES, as `drawRosterMergeQueueHead` draws it. */
+function head(name: string, stages: boolean): string {
   const strip = stages
     ? `<div class="sb-mq-stages"><span class="sb-mq-stage" data-state="succeeded"><span class="sb-mq-stage-glyph">✓</span><span class="sb-mq-stage-label">tests</span></span><span class="sb-mq-stage" data-state="live"><span class="sb-mq-stage-glyph">●</span><span class="sb-mq-stage-label">deploy</span></span></div>`
     : "";
-  const step = detail === null ? "" : `<div class="sb-mq-detail">${detail}</div>`;
-  return `<div class="sb-mq-head" data-standing="merging">${headLine(name)}${strip}${step}</div>`;
+  return `<div class="sb-mq-head" data-standing="merging">${headLine(name)}${strip}</div>`;
 }
 
 /** A remediating card, as `drawRosterMergeQueueRemediating` draws it. */
 function remediating(name: string): string {
-  return `<div class="sb-mq-remediating">${headLine(name)}<div class="sb-mq-detail">remediating tests</div></div>`;
+  return `<div class="sb-mq-remediating">${headLine(name, "fixing tests")}</div>`;
 }
 
 /** A waiting merge's line, as `drawRosterMergeQueueWaiting` draws it. */
@@ -68,7 +67,7 @@ interface Gaps {
  * is the baseline less its font's capital height (canvas `measureText`).
  */
 async function measure(page: Page, body: string): Promise<Gaps> {
-  const html = rail(group("explanation-engine", body) + group("doom", head("next-up", false, "next")));
+  const html = rail(group("explanation-engine", body) + group("doom", head("next-up", false)));
   return page.evaluate((markup) => {
     document.body.innerHTML = markup;
     const ctx = document.createElement("canvas").getContext("2d");
@@ -86,16 +85,15 @@ async function measure(page: Page, body: string): Promise<Gaps> {
       ctx.font = `${c.fontStyle} ${c.fontWeight} ${c.fontSize} ${c.fontFamily}`;
       return baseline(el) - ctx.measureText("H").actualBoundingBoxAscent;
     };
-    // A line's text: a name or a step, or a stage's label on a strip.
+    // A line's text: a name, or a stage's label on a strip.
     const text = (line: Element): Element => {
-      const own = line.matches(".sb-mq-detail, .sb-mq-stages") ? line : line.querySelector(".sb-mq-name");
-      const found = line.matches(".sb-mq-stages") ? line.querySelector(".sb-mq-stage-label") : own;
+      const found = line.matches(".sb-mq-stages") ? line.querySelector(".sb-mq-stage-label") : line.querySelector(".sb-mq-name");
       if (found === null) throw new Error(`a queue line drew no text: ${line.className}`);
       return found;
     };
     const [first, second] = [...document.querySelectorAll(".merged-group")];
     const queue = first.querySelector(".sb-merge-queue") as HTMLElement;
-    const lines = [...queue.querySelectorAll(".sb-mq-head-line, .sb-mq-stages, .sb-mq-detail, .sb-mq-waiting")];
+    const lines = [...queue.querySelectorAll(".sb-mq-head-line, .sb-mq-stages, .sb-mq-waiting")];
     const label = (g: Element): Element => g.querySelector(".merged-group-head > .sb-label") as Element;
     return {
       under: capTop(text(lines[0])) - baseline(label(first)),
@@ -106,11 +104,10 @@ async function measure(page: Page, body: string): Promise<Gaps> {
 
 /** Every line a queue group can end with, each as the last line of a queue. */
 const ENDINGS = [
-  { ends: "the head card's step line", body: head("cee-head", true, "deploying") },
-  { ends: "the head card's stage strip", body: head("cee-head", true, null) },
-  { ends: "the head card's name line", body: head("cee-head", false, null) },
-  { ends: "a remediating card's line", body: head("cee-head", true, "deploying") + remediating("fixing") },
-  { ends: "a waiting merge's line", body: head("cee-head", true, "deploying") + waiting("behind") },
+  { ends: "the head card's stage strip", body: head("cee-head", true) },
+  { ends: "the head card's name line", body: head("cee-head", false) },
+  { ends: "a remediating card's line", body: head("cee-head", true) + remediating("fixing") },
+  { ends: "a waiting merge's line", body: head("cee-head", true) + waiting("behind") },
 ];
 
 describe("a queue group's gap to the next group in WebKit", () => {
@@ -135,7 +132,7 @@ describe("a queue group's gap to the next group in WebKit", () => {
   });
 
   it("leaves the section's last group's last card at its own reach", async () => {
-    await measure(page, head("cee-head", true, "deploying"));
+    await measure(page, head("cee-head", true));
     const margin = await page.evaluate(() => {
       const last = document.querySelector(".merged-group:last-child > .sb-merge-queue > :last-child") as Element;
       return getComputedStyle(last).marginBottom;

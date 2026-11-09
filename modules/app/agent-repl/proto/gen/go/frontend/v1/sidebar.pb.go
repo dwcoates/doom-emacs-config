@@ -4090,9 +4090,10 @@ type RosterMergeQueueRemediating struct {
 	// ticks from here, starting at zero as it steps aside however long it
 	// headed the queue before. Never zero.
 	SinceMs int64 `protobuf:"varint,2,opt,name=since_ms,json=sinceMs,proto3" json:"since_ms,omitempty"`
-	// The line beneath its name saying what it repairs. Always set by the
-	// daemon; a set reason whose arm this schema revision does not name is
-	// drawn as a bare "remediating".
+	// What it repairs, drawn as a grey parenthetical on its name's own line
+	// ("fixing tests", "resolving conflicts"). Always set by the daemon; a set
+	// reason whose arm this schema revision does not name draws no
+	// parenthetical.
 	Reason        *RosterMergeQueueRemediatingReason `protobuf:"bytes,3,opt,name=reason,proto3" json:"reason,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -4963,11 +4964,6 @@ func (x *RosterMergeQueueHeadWaiting) GetQueuedAtMs() int64 {
 // The head is being worked on.
 type RosterMergeQueueHeadMerging struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The step the merge stands on and its figure, in plain words, composed by
-	// the daemon from the merge's own facts ("rebasing 3/7", "fixing attempt
-	// 2/3") and drawn verbatim. UNSET while the merge's facts have not named a
-	// step yet.
-	Step *string `protobuf:"bytes,1,opt,name=step,proto3,oneof" json:"step,omitempty"`
 	// PRESENT while NOTHING of the merge's work runs: its queue is paused and
 	// no turn of the step it stands on is running. A pause suspends a merge's
 	// own steps but leaves a step's agent turn running until it ends or a hard
@@ -5008,13 +5004,6 @@ func (x *RosterMergeQueueHeadMerging) ProtoReflect() protoreflect.Message {
 // Deprecated: Use RosterMergeQueueHeadMerging.ProtoReflect.Descriptor instead.
 func (*RosterMergeQueueHeadMerging) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{80}
-}
-
-func (x *RosterMergeQueueHeadMerging) GetStep() string {
-	if x != nil && x.Step != nil {
-		return *x.Step
-	}
-	return ""
 }
 
 func (x *RosterMergeQueueHeadMerging) GetSuspended() *RosterMergeQueueHeadSuspended {
@@ -11547,13 +11536,11 @@ const file_frontend_v1_sidebar_proto_rawDesc = "" +
 	"\bstandingJ\x04\b\x05\x10\x06R\x06failed\"?\n" +
 	"\x1bRosterMergeQueueHeadWaiting\x12 \n" +
 	"\fqueued_at_ms\x18\x01 \x01(\x03R\n" +
-	"queuedAtMs\"\x9c\x01\n" +
-	"\x1bRosterMergeQueueHeadMerging\x12\x17\n" +
-	"\x04step\x18\x01 \x01(\tH\x00R\x04step\x88\x01\x01\x12M\n" +
-	"\tsuspended\x18\x02 \x01(\v2*.frontend.v1.RosterMergeQueueHeadSuspendedH\x01R\tsuspended\x88\x01\x01B\a\n" +
-	"\x05_stepB\f\n" +
+	"queuedAtMs\"\x86\x01\n" +
+	"\x1bRosterMergeQueueHeadMerging\x12M\n" +
+	"\tsuspended\x18\x02 \x01(\v2*.frontend.v1.RosterMergeQueueHeadSuspendedH\x00R\tsuspended\x88\x01\x01B\f\n" +
 	"\n" +
-	"_suspended\"\x1f\n" +
+	"_suspendedJ\x04\b\x01\x10\x02R\x04step\"\x1f\n" +
 	"\x1dRosterMergeQueueHeadSuspended\"\x9b\x02\n" +
 	"\x15RosterMergeQueueStage\x12\x14\n" +
 	"\x05label\x18\x01 \x01(\tR\x05label\x12\x14\n" +

@@ -24,6 +24,10 @@ import {
   RosterMergeQueueSectionSchema,
   RosterRepoEntrySchema,
   RosterMergeQueueHeadSchema,
+  RosterMergeQueueRemediatingConflictsSchema,
+  RosterMergeQueueRemediatingReasonSchema,
+  RosterMergeQueueRemediatingSchema,
+  RosterMergeQueueRemediatingTestsSchema,
   RosterMergeQueueSubjectSchema,
   RosterMergeQueueWaitingSchema,
   RosterRepoMergeQueueSchema,
@@ -559,11 +563,10 @@ export function queueSubject(id: string, init: { name?: string; async?: boolean;
   });
 }
 
-/** A merge queue head being worked on, credited to ID, at STEP when given, with STAGES, at the head since HEAD_SINCE_MS (NOW by default). */
+/** A merge queue head being worked on, credited to ID, with STAGES, at the head since HEAD_SINCE_MS (NOW by default). */
 export function mergingHead(
   id: string,
   init: {
-    step?: string;
     stages?: MessageInitShape<typeof RosterMergeQueueHeadSchema>["stages"];
     subject?: RosterMergeQueueSubject;
     suspended?: boolean;
@@ -574,7 +577,26 @@ export function mergingHead(
     subject: init.subject ?? queueSubject(id),
     stages: init.stages ?? [],
     headSinceMs: init.headSinceMs ?? BigInt(NOW),
-    standing: { case: "merging", value: { step: init.step, suspended: init.suspended === true ? {} : undefined } },
+    standing: { case: "merging", value: { suspended: init.suspended === true ? {} : undefined } },
+  });
+}
+
+/** A merge remediating out of line, stepped aside at SINCE for REASON (its tests by default). */
+export function remediatingMerge(ws: string, since: number, reason = testsReason()) {
+  return create(RosterMergeQueueRemediatingSchema, { subject: queueSubject(ws), sinceMs: BigInt(since), reason });
+}
+
+/** The reason of a merge fixing its failing tests. */
+export function testsReason() {
+  return create(RosterMergeQueueRemediatingReasonSchema, {
+    reason: { case: "tests", value: create(RosterMergeQueueRemediatingTestsSchema, {}) },
+  });
+}
+
+/** The reason of a merge resolving its rebase's conflicts. */
+export function conflictsReason() {
+  return create(RosterMergeQueueRemediatingReasonSchema, {
+    reason: { case: "conflicts", value: create(RosterMergeQueueRemediatingConflictsSchema, {}) },
   });
 }
 
