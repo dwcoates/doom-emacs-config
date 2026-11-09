@@ -1737,6 +1737,10 @@ func (c *client) RollBackSession(ctx context.Context, req *shimv1.RollBackSessio
 }
 
 // WatchBash opens one detached shell's stream.
+//
+// EVERY OPEN IS EXPECTED: the daemon opens a shell's watch only for a handle
+// it heard announced, so the request says so, and the shim waits for the
+// run's first row rather than refusing a run whose rows are still coming.
 func (c *client) WatchBash(ctx context.Context, work *conversationv1.DetachedWorkId) (Stream[*conversationv1.AgentBash], error) {
 	if err := validateDetachedWorkID("WatchBashRequest.work", work); err != nil {
 		c.log.Error("daemon.shimclient.watch_bash", "invalid request", dlog.Context{
@@ -1744,7 +1748,7 @@ func (c *client) WatchBash(ctx context.Context, work *conversationv1.DetachedWor
 		})
 		return nil, err
 	}
-	return openStream(ctx, c, "watch_bash", &shimv1.WatchBashRequest{Work: work}, nil, c.rpc.WatchBash,
+	return openStream(ctx, c, "watch_bash", &shimv1.WatchBashRequest{Work: work, Expected: true}, nil, c.rpc.WatchBash,
 		func(resp *shimv1.WatchBashResponse) (*conversationv1.AgentBash, error) {
 			bash := resp.GetBash()
 			if bash == nil {

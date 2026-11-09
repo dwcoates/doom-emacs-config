@@ -31,7 +31,13 @@ type WatchBashRequest struct {
 	// announced and has not concluded is FOLLOWED even before any of its rows is
 	// stored: the stream waits for the first. Any other handle whose run has no
 	// stored row is refused.
-	Work          *v1.DetachedWorkId `protobuf:"bytes,1,opt,name=work,proto3" json:"work,omitempty"`
+	Work *v1.DetachedWorkId `protobuf:"bytes,1,opt,name=work,proto3" json:"work,omitempty"`
+	// Whether the caller HEARD this handle announced (by this shim or one before
+	// it on the same session). When set, a run the store holds no row for yet is
+	// WAITED on, exactly as a live shell's is, whether or not this shim still
+	// holds it live: a shell that ended before the sidecar read its spool has no
+	// row yet and will have one. When unset, the rule above decides.
+	Expected      bool `protobuf:"varint,2,opt,name=expected,proto3" json:"expected,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -71,6 +77,13 @@ func (x *WatchBashRequest) GetWork() *v1.DetachedWorkId {
 		return x.Work
 	}
 	return nil
+}
+
+func (x *WatchBashRequest) GetExpected() bool {
+	if x != nil {
+		return x.Expected
+	}
+	return false
 }
 
 // One frame: the bash unit itself. Opens with `start` (the command, the
@@ -126,9 +139,10 @@ var File_shim_v1_endpoint_watch_bash_proto protoreflect.FileDescriptor
 
 const file_shim_v1_endpoint_watch_bash_proto_rawDesc = "" +
 	"\n" +
-	"!shim/v1/endpoint_watch_bash.proto\x12\ashim.v1\x1a$conversation/v1/agent_activity.proto\x1a#conversation/v1/detached_work.proto\"G\n" +
+	"!shim/v1/endpoint_watch_bash.proto\x12\ashim.v1\x1a$conversation/v1/agent_activity.proto\x1a#conversation/v1/detached_work.proto\"c\n" +
 	"\x10WatchBashRequest\x123\n" +
-	"\x04work\x18\x01 \x01(\v2\x1f.conversation.v1.DetachedWorkIdR\x04work\"C\n" +
+	"\x04work\x18\x01 \x01(\v2\x1f.conversation.v1.DetachedWorkIdR\x04work\x12\x1a\n" +
+	"\bexpected\x18\x02 \x01(\bR\bexpected\"C\n" +
 	"\x11WatchBashResponse\x12.\n" +
 	"\x04bash\x18\x01 \x01(\v2\x1a.conversation.v1.AgentBashR\x04bashB Z\x1eagentrepl/proto/shim/v1;shimv1b\x06proto3"
 

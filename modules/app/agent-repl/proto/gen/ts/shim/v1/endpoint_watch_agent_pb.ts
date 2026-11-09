@@ -20,7 +20,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file shim/v1/endpoint_watch_agent.proto.
  */
 export const file_shim_v1_endpoint_watch_agent: GenFile = /*@__PURE__*/
-  fileDesc("CiJzaGltL3YxL2VuZHBvaW50X3dhdGNoX2FnZW50LnByb3RvEgdzaGltLnYxItUBChFXYXRjaEFnZW50UmVxdWVzdBItCgZ0YXJnZXQYASABKAsyGC5jb252ZXJzYXRpb24udjEuQWdlbnRJZEgBiAEBEjgKDWtub3duX3Rocm91Z2gYAyABKAsyHy5jb252ZXJzYXRpb24udjEuSGlzdG9yeVBvaW50ZXJIABIwCgl0YWlsX29ubHkYBCABKAsyGy5zaGltLnYxLldhdGNoQWdlbnRUYWlsT25seUgAQgkKB29wZW5pbmdCCQoHX3RhcmdldEoECAIQA1IJcGFnZV9zaXplIrEBChJXYXRjaEFnZW50UmVzcG9uc2USLAoEcGFnZRgBIAEoCzIcLmNvbnZlcnNhdGlvbi52MS5IaXN0b3J5UGFnZUgAEjAKBWVudHJ5GAIgASgLMh8uY29udmVyc2F0aW9uLnYxLkhpc3RvcnlFbnRyeUF0SAASMgoHcmV0aXJlZBgDIAEoCzIfLmNvbnZlcnNhdGlvbi52MS5IaXN0b3J5RW50cnlBdEgAQgcKBWZyYW1lIhQKEldhdGNoQWdlbnRUYWlsT25seUIgWh5hZ2VudHJlcGwvcHJvdG8vc2hpbS92MTtzaGltdjFiBnByb3RvMw", [file_conversation_v1_agent_activity, file_conversation_v1_history]);
+  fileDesc("CiJzaGltL3YxL2VuZHBvaW50X3dhdGNoX2FnZW50LnByb3RvEgdzaGltLnYxIucBChFXYXRjaEFnZW50UmVxdWVzdBItCgZ0YXJnZXQYASABKAsyGC5jb252ZXJzYXRpb24udjEuQWdlbnRJZEgBiAEBEjgKDWtub3duX3Rocm91Z2gYAyABKAsyHy5jb252ZXJzYXRpb24udjEuSGlzdG9yeVBvaW50ZXJIABIwCgl0YWlsX29ubHkYBCABKAsyGy5zaGltLnYxLldhdGNoQWdlbnRUYWlsT25seUgAEhAKCGV4cGVjdGVkGAUgASgIQgkKB29wZW5pbmdCCQoHX3RhcmdldEoECAIQA1IJcGFnZV9zaXplIrEBChJXYXRjaEFnZW50UmVzcG9uc2USLAoEcGFnZRgBIAEoCzIcLmNvbnZlcnNhdGlvbi52MS5IaXN0b3J5UGFnZUgAEjAKBWVudHJ5GAIgASgLMh8uY29udmVyc2F0aW9uLnYxLkhpc3RvcnlFbnRyeUF0SAASMgoHcmV0aXJlZBgDIAEoCzIfLmNvbnZlcnNhdGlvbi52MS5IaXN0b3J5RW50cnlBdEgAQgcKBWZyYW1lIhQKEldhdGNoQWdlbnRUYWlsT25seUIgWh5hZ2VudHJlcGwvcHJvdG8vc2hpbS92MTtzaGltdjFiBnByb3RvMw", [file_conversation_v1_agent_activity, file_conversation_v1_history]);
 
 /**
  * Follow one agent.
@@ -67,6 +67,16 @@ export type WatchAgentRequest = Message<"shim.v1.WatchAgentRequest"> & {
     value: WatchAgentTailOnly;
     case: "tailOnly";
   } | { case: undefined; value?: undefined };
+
+  /**
+   * Whether the caller HEARD this agent announced (by this shim or one before
+   * it on the same session). When set, an agent the record holds no rows for
+   * yet is TAILED rather than refused: its rows are coming. When unset, an
+   * empty book under an id this shim never announced is a refused open.
+   *
+   * @generated from field: bool expected = 5;
+   */
+  expected: boolean;
 };
 
 /**

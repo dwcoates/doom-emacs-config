@@ -865,14 +865,15 @@ through `concludeLocked`, at a conclusion the shim states:
 
 A watch open that FAILS, is REFUSED or HANGS, and a stream that ENDS, never
 retire an item: a shell stays live with a stream-less entry its next
-announcement or the fleet re-open retries. A REFUSED open of expected work
-(the main agent, an announced subagent or shell) also arms its own re-open on
-the watcher's clock (`sessionwatcher/reopen.go`, `Sinks.Clock`): 250ms
-doubling per consecutive refusal to 30s, re-armed past `openRefusalLimit`
-(whose WARN and fault are unchanged), cancelled by the work concluding. An
-announcement that may never repeat is never the only edge (owner ruling,
-2026-10-08: a shell refused while its store rows were missing stood live for
-good and a merge waited on it forever). A subagent that names no agent is
+announcement or the fleet re-open retries. Every open of expected work (the
+main agent, an announced subagent or shell) carries `shim.v1` `expected`, so
+the shim WAITS for the handle's first row rather than refusing it, and nothing
+re-asks on a timer (owner ruling, 2026-10-08, made structural 2026-11-09: a
+shell refused while its store rows were missing stood live for good and a
+merge waited on it forever). A refused expected handle is the shim breaking
+that contract, recorded at ERROR with a fault; the main watch's refusal before
+the shim has a session is the bring-up race, re-opened by the session stream.
+A subagent that names no agent is
 still COUNTED (by its handle, unwatched; the announcement defect stays an
 ERROR). `concludeLocked` retires the handle, cancels an open in flight, closes
 an open stream off the lock, and records `daemon.sessionwatcher.live_work_retired`

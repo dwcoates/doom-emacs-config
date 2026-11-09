@@ -2502,3 +2502,24 @@ func TestHoldParkedBridgeValidatesItsRequest(t *testing.T) {
 		t.Fatalf("HoldParkedBridge calls = %d, want 0", got)
 	}
 }
+
+// TestEveryWatchBashOpenIsExpected pins the flag: the daemon opens a shell's
+// watch only for a handle it heard announced, so the shim waits for the run's
+// first row rather than refusing it.
+func TestEveryWatchBashOpenIsExpected(t *testing.T) {
+	// Arrange.
+	f, uds := startFakeShim(t, shortDir(t))
+	f.watchBashExpected = make(chan bool, 1)
+	c := newClient(dlog.NewTestLogger(), ids.WorkspaceID("ws-1"), uds, defaultBackoff, nil, nil)
+
+	// Act.
+	_, err := c.WatchBash(context.Background(), &conversationv1.DetachedWorkId{Value: "toolu_1"})
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("WatchBash() error = %v", err)
+	}
+	if expected := <-f.watchBashExpected; !expected {
+		t.Fatal("the WatchBash open did not carry expected")
+	}
+}

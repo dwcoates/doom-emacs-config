@@ -1870,7 +1870,7 @@ func TestARunOfRefusalsIsReportedOnce(t *testing.T) {
 		h.sendSessionUpdate(t, compactingUpdate())
 		h.client.awaitRefusedOpen(t, "WatchAgent")
 	}
-	h.awaitMessages(t, "debug", "the shim still refuses the watch open; its fault stands and the watch will be re-opened", 2)
+	h.awaitMessages(t, "debug", "the shim still refuses the watch open; its fault stands", 2)
 
 	// Assert.
 	for _, e := range h.rec.drain() {
@@ -3908,4 +3908,122 @@ func TestADeadLinksFaultIsRecordedAsTheDeathsEffect(t *testing.T) {
 		t.Fatalf("the dead link's fault was recorded at warn: %+v", h.log.Records())
 	}
 	h.rec.until(t, "lifecycle.OnLinkFault")
+}
+
+// TestTheMainWatchOpensExpected pins the flag on the main agent's watch: the
+// session always has it, so the shim tails its book rather than refusing it.
+func TestTheMainWatchOpensExpected(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+
+	// Act: newHarness took the main watch's open.
+	req := h.mainReq
+
+	// Assert.
+	if !req.GetExpected() {
+		t.Fatal("the main agent's watch opened without expected")
+	}
+}
+
+// TestAStrayAgentWatchOpensUnexpected pins the flag's other side: a watch on
+// an agent nothing announced does not vouch for it.
+func TestAStrayAgentWatchOpensUnexpected(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+	stray := &agentWatch{id: &conversationv1.AgentId{Value: "agent-stray"}}
+
+	// Act.
+	h.routeNow(func(w *watcher) { w.openAgentStreamLocked(stray) })
+	open := h.client.nextAgentOpenFor(t, "agent-stray")
+
+	// Assert.
+	if open.req.GetExpected() {
+		t.Fatal("a stray agent's watch opened with expected")
+	}
+}
+
+// refuseAnnouncedShell announces a shell the shim refuses to watch and waits
+// for the refusal to be ruled on.
+func refuseAnnouncedShell(t *testing.T, h *harness) {
+	t.Helper()
+	h.client.setBashErr(refusedOpenError("WatchBash", connect.CodeNotFound, "the store holds no rows for shell run w-1"))
+	h.route(h.main, entryFrame(frameDetached("main-1", createdWork("w-1", bashWork()))))
+	h.client.awaitRefusedOpen(t, "WatchBash")
+}
+
+// TestARefusedExpectedShellIsReportedAsABrokenContract pins the report: the
+// open carried expected, so the shim owed a wait, and its refusal is a fault.
+func TestARefusedExpectedShellIsReportedAsABrokenContract(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+
+	// Act.
+	refuseAnnouncedShell(t, h)
+	refusal := h.awaitRefusal(t)
+
+	// Assert.
+	if refusal.Operation != "watch_bash" || refusal.Handle != "w-1" {
+		t.Fatalf("refusal = %+v, want watch_bash on w-1", refusal)
+	}
+}
+
+// TestARefusedExpectedShellIsRecordedAtError pins the record's level.
+func TestARefusedExpectedShellIsRecordedAtError(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+
+	// Act.
+	refuseAnnouncedShell(t, h)
+
+	// Assert.
+	h.awaitMessages(t, "error", "the shim refused a watch opened with expected, which its contract says it waits on; the watch has no stream until an announcement or the fleet re-opens it", 1)
+}
+
+// TestARefusedShellArmsNothingOnTheClock pins the removal of the timer: no
+// refusal re-asks on a clock.
+func TestARefusedShellArmsNothingOnTheClock(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+
+	// Act.
+	refuseAnnouncedShell(t, h)
+	h.quiet()
+
+	// Assert.
+	h.clock.noneArmed(t)
+}
+
+// TestAnUnannouncedAgentRefusalIsRecordedAtWarn pins the other report: a
+// handle nothing announced is a disagreement, not a broken contract.
+func TestAnUnannouncedAgentRefusalIsRecordedAtWarn(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+	stray := &agentWatch{id: &conversationv1.AgentId{Value: "agent-stray"}}
+
+	// Act.
+	h.client.setAgentErr(refusedOpenError("WatchAgent", connect.CodeNotFound, "no such agent"))
+	h.routeNow(func(w *watcher) { w.openAgentStreamLocked(stray) })
+	h.client.awaitRefusedOpen(t, "WatchAgent")
+
+	// Assert.
+	h.awaitMessages(t, "warn", "the shim refused a watch open for a handle it will not serve", 1)
+}
+
+// TestARefusedMainWatchArmsNothingOnTheClock pins the main watch: the
+// session's own stream re-opens it, never a timer.
+func TestARefusedMainWatchArmsNothingOnTheClock(t *testing.T) {
+	// Arrange.
+	h := newHarnessRefusingAgents(t, Session{Started: sessionStarted("")},
+		refusedOpenError("WatchAgent", connect.CodeNotFound, "no such agent"))
+
+	// Act: newHarnessRefusingAgents joined the refused open, whose ruling
+	// is where a re-open would have been armed.
+
+	// Assert.
+	h.clock.noneArmed(t)
 }

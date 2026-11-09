@@ -1506,8 +1506,13 @@ export class TurnEngine {
     const target = request.target ?? identity.agentId;
     let opened;
     try {
-      opened = await this.session.persistence.openAgentPage(target, openingOf(request.opening), () =>
-        this.session.knowsAgent(target),
+      // A CALLER THAT HEARD THE AGENT ANNOUNCED VOUCHES FOR IT (`expected`):
+      // an announcement made by a shim before this one on the same session is
+      // one this shim never saw, and its rows are still coming.
+      opened = await this.session.persistence.openAgentPage(
+        target,
+        openingOf(request.opening),
+        () => request.expected || this.session.knowsAgent(target),
       );
     } catch (err) {
       throw err instanceof PersistenceError
@@ -1526,7 +1531,7 @@ export class TurnEngine {
     // THE BOOK, NOT THE PAGE, IS WHAT IS JUDGED: a tail-only page is empty by
     // request and says nothing about the book, so the open reports separately
     // whether it found anything to show.
-    if (opened.foundNothing && !this.session.knowsAgent(target)) {
+    if (opened.foundNothing && !request.expected && !this.session.knowsAgent(target)) {
       opened.close();
       LOGGER.debug(
         { agent_id: target.value },
@@ -1670,9 +1675,15 @@ export class TurnEngine {
       // as the contract says of anything that is not a live shell.
       const start = this.session.shellRunStart(work);
       if (start !== undefined) await this.session.persistence.writeDurable([start]);
-      // THE STORE WAITS FOR A RUN THIS SHIM HOLDS LIVE: its rows may all be
-      // the sidecar's, still to be read from its spool.
-      const awaitFirstRow = this.session.live.byToolUseId(work.value) !== undefined;
+      // THE STORE WAITS FOR A RUN WHOSE ROWS ARE COMING: one this shim holds
+      // live or watched retire (its rows may all be the sidecar's, still to be
+      // read from its spool), or one the caller heard announced (`expected`),
+      // possibly by a shim before this one. A wait, never a refusal the caller
+      // must re-ask on a timer.
+      const awaitFirstRow =
+        request.expected ||
+        this.session.live.byToolUseId(work.value) !== undefined ||
+        this.session.live.retired(work.value);
       const run = await this.session.persistence.openBashRun(work, { awaitFirstRow });
       for await (const frame of run) {
         yield create(shimv1.WatchBashResponseSchema, { bash: frame });

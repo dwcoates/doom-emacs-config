@@ -137,7 +137,7 @@ func TestAConcludedRestatementOfALiveShellLeavesItLive(t *testing.T) {
 // TestTheIncidentsConcludedFirstRefusedShellLeavesTheWorkspaceFree reproduces
 // 2026-10-08 18:15:27 deterministically: the shim announces a shell it first
 // saw conclude, the store refuses its watch (no rows yet), and the workspace is
-// free at once -- with the record read re-armed on the clock, not live.
+// free at once -- with nothing armed on the clock to re-ask.
 func TestTheIncidentsConcludedFirstRefusedShellLeavesTheWorkspaceFree(t *testing.T) {
 	// Arrange.
 	h := newHarness(t, Session{Started: sessionStarted("")})
@@ -152,7 +152,6 @@ func TestTheIncidentsConcludedFirstRefusedShellLeavesTheWorkspaceFree(t *testing
 	if !h.w.Free() {
 		t.Fatalf("the workspace is not free: live = %+v", h.w.LiveWork())
 	}
-	if delay := h.clock.awaitArmed(t); delay != reopenFloor {
-		t.Fatalf("the record read's re-open waits %v, want %v", delay, reopenFloor)
-	}
+	h.quiet()
+	h.clock.noneArmed(t)
 }

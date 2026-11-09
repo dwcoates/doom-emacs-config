@@ -16,7 +16,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file shim/v1/endpoint_watch_bash.proto.
  */
 export const file_shim_v1_endpoint_watch_bash: GenFile = /*@__PURE__*/
-  fileDesc("CiFzaGltL3YxL2VuZHBvaW50X3dhdGNoX2Jhc2gucHJvdG8SB3NoaW0udjEiQQoQV2F0Y2hCYXNoUmVxdWVzdBItCgR3b3JrGAEgASgLMh8uY29udmVyc2F0aW9uLnYxLkRldGFjaGVkV29ya0lkIj0KEVdhdGNoQmFzaFJlc3BvbnNlEigKBGJhc2gYASABKAsyGi5jb252ZXJzYXRpb24udjEuQWdlbnRCYXNoQiBaHmFnZW50cmVwbC9wcm90by9zaGltL3YxO3NoaW12MWIGcHJvdG8z", [file_conversation_v1_agent_activity, file_conversation_v1_detached_work]);
+  fileDesc("CiFzaGltL3YxL2VuZHBvaW50X3dhdGNoX2Jhc2gucHJvdG8SB3NoaW0udjEiUwoQV2F0Y2hCYXNoUmVxdWVzdBItCgR3b3JrGAEgASgLMh8uY29udmVyc2F0aW9uLnYxLkRldGFjaGVkV29ya0lkEhAKCGV4cGVjdGVkGAIgASgIIj0KEVdhdGNoQmFzaFJlc3BvbnNlEigKBGJhc2gYASABKAsyGi5jb252ZXJzYXRpb24udjEuQWdlbnRCYXNoQiBaHmFnZW50cmVwbC9wcm90by9zaGltL3YxO3NoaW12MWIGcHJvdG8z", [file_conversation_v1_agent_activity, file_conversation_v1_detached_work]);
 
 /**
  * Which command to follow.
@@ -33,6 +33,17 @@ export type WatchBashRequest = Message<"shim.v1.WatchBashRequest"> & {
    * @generated from field: conversation.v1.DetachedWorkId work = 1;
    */
   work?: DetachedWorkId | undefined;
+
+  /**
+   * Whether the caller HEARD this handle announced (by this shim or one before
+   * it on the same session). When set, a run the store holds no row for yet is
+   * WAITED on, exactly as a live shell's is, whether or not this shim still
+   * holds it live: a shell that ended before the sidecar read its spool has no
+   * row yet and will have one. When unset, the rule above decides.
+   *
+   * @generated from field: bool expected = 2;
+   */
+  expected: boolean;
 };
 
 /**

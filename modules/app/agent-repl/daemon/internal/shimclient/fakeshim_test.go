@@ -41,6 +41,8 @@ type fakeShim struct {
 	watchAgentRefusal   error
 	watchAgentFrames    []*shimv1.WatchAgentResponse
 	watchBashRefusal    error
+	// watchBashExpected is each WatchBash open's `expected`, in order.
+	watchBashExpected chan bool
 	watchSessionRefuse  error
 	// holdParkedBridgeFrames is what HoldParkedBridge sends before it stands
 	// until the caller lets go.
@@ -387,8 +389,11 @@ func (f *fakeShim) RollBackSession(_ context.Context, _ *connect.Request[shimv1.
 	return connect.NewResponse(&shimv1.RollBackSessionResponse{}), nil
 }
 
-func (f *fakeShim) WatchBash(_ context.Context, _ *connect.Request[shimv1.WatchBashRequest], stream *connect.ServerStream[shimv1.WatchBashResponse]) error {
+func (f *fakeShim) WatchBash(_ context.Context, req *connect.Request[shimv1.WatchBashRequest], stream *connect.ServerStream[shimv1.WatchBashResponse]) error {
 	f.record("WatchBash")
+	if f.watchBashExpected != nil {
+		f.watchBashExpected <- req.Msg.GetExpected()
+	}
 	if f.watchBashRefusal != nil {
 		return f.watchBashRefusal
 	}

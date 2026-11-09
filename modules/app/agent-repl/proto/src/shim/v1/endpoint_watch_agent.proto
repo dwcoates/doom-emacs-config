@@ -38,6 +38,11 @@ message WatchAgentRequest {
     // that way and also received on this stream is absorbed by its identity.
     WatchAgentTailOnly tail_only = 4;
   }
+  // Whether the caller HEARD this agent announced (by this shim or one before
+  // it on the same session). When set, an agent the record holds no rows for
+  // yet is TAILED rather than refused: its rows are coming. When unset, an
+  // empty book under an id this shim never announced is a refused open.
+  bool expected = 5;
 }
 
 // A STANDING stream: the opening page, then one frame per entry as written —

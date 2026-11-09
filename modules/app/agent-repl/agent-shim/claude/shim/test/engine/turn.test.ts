@@ -2476,6 +2476,28 @@ describe("WatchAgent", () => {
     expect(error instanceof ConnectError ? error.code : undefined).toBe(Code.NotFound);
   });
 
+  it("tails an unannounced target the caller expects, rather than refusing its empty book", async () => {
+    // Arrange: an agent announced by a shim before this one, with no rows yet.
+    const h = await harness();
+    h.knows = false;
+    h.persistence.foundNothing = true;
+    const frames: string[] = [];
+
+    // Act.
+    for await (const response of h.turns.watchAgent(
+      create(shimv1.WatchAgentRequestSchema, {
+        expected: true,
+        opening: { case: "tailOnly", value: create(shimv1.WatchAgentTailOnlySchema, {}) },
+      }),
+    )) {
+      frames.push(response.frame.case ?? "");
+      break;
+    }
+
+    // Assert.
+    expect(frames).toEqual(["page"]);
+  });
+
   it("then tails one entry per store write", async () => {
     const h = await harness();
     h.persistence.tail = [
@@ -3259,6 +3281,55 @@ describe("WatchBash's durability barrier", () => {
 
     // Assert.
     expect(h.persistence.bashRunAwaits).toEqual([false]);
+  });
+
+  it("asks the store to wait for the first row of a run the caller expects", async () => {
+    // Arrange: a run announced by a shim before this one, which this process never held.
+    const h = await harness();
+    h.persistence.bashFrames = [create(conversationv1.AgentBashSchema, {})];
+
+    // Act.
+    for await (const response of h.turns.watchBash(
+      create(shimv1.WatchBashRequestSchema, { work: WORK, expected: true }),
+    )) {
+      void response;
+      break;
+    }
+
+    // Assert.
+    expect(h.persistence.bashRunAwaits).toEqual([true]);
+  });
+
+  it("asks the store to wait for the first row of a run it watched retire", async () => {
+    // Arrange: a shell that ended before the sidecar read its spool.
+    const h = await harness();
+    h.live.onTaskStarted({
+      type: "system",
+      subtype: "task_started",
+      task_id: "b01",
+      tool_use_id: "t",
+      description: "",
+      is_backgrounded: true,
+      uuid: "00000000-0000-4000-8000-000000000000",
+      session_id: "s",
+    });
+    h.live.onTaskNotification({
+      type: "system",
+      subtype: "task_notification",
+      task_id: "b01",
+      status: "completed",
+      output_file: "/spool/b01.output",
+      summary: "",
+      uuid: "00000000-0000-4000-8000-000000000001",
+      session_id: "s",
+    });
+    h.persistence.bashFrames = [create(conversationv1.AgentBashSchema, {})];
+
+    // Act.
+    await openOnce(h);
+
+    // Assert.
+    expect(h.persistence.bashRunAwaits).toEqual([true]);
   });
 
   it("makes the run's remembered start durable before it opens the run", async () => {
