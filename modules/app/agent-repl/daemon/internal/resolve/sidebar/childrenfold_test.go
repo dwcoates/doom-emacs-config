@@ -73,7 +73,7 @@ func TestAFoldedParentsChildTabIsWithheldCollapsed(t *testing.T) {
 	// Assert.
 	for _, tab := range tabs {
 		want := wsm.Drawn
-		if tab.Workspace.ID == "k" {
+		if tab.Workspace.ID == "k" || tab.Workspace.ID == "c1" {
 			want = wsm.WithheldCollapsed
 		}
 		if tab.Withheld != want {
