@@ -19,6 +19,7 @@ import (
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/ghclient"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/merge"
 	"agent-repld/internal/prompthandler"
 	"agent-repld/internal/wsm"
 )
@@ -208,6 +209,25 @@ type rig struct {
 	log     *dlog.TestLogger
 	ws      ids.WorkspaceID
 	serves  bool
+	deploys *fakeDeployments
+}
+
+// fakeDeployments records every whole set of GitHub deployments told.
+type fakeDeployments struct {
+	told [][]merge.GithubDeployment
+}
+
+func (d *fakeDeployments) SetGithubDeployments(_ context.Context, deployments []merge.GithubDeployment) {
+	d.told = append(d.told, deployments)
+}
+
+// last is the latest set told; it fails the test when none was.
+func (d *fakeDeployments) last(t *testing.T) []merge.GithubDeployment {
+	t.Helper()
+	if len(d.told) == 0 {
+		t.Fatal("no GitHub deployments were told")
+	}
+	return d.told[len(d.told)-1]
 }
 
 func newRig(t *testing.T) *rig {
@@ -224,9 +244,9 @@ func newRig(t *testing.T) *rig {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := &rig{db: db, gh: newGH(), prompts: &fakePrompts{}, holds: &fakeHolds{}, clock: clocktest.New(t0), log: dlog.NewTestLogger(), ws: record.ID, serves: true}
+	r := &rig{db: db, gh: newGH(), prompts: &fakePrompts{}, holds: &fakeHolds{}, clock: clocktest.New(t0), log: dlog.NewTestLogger(), ws: record.ID, serves: true, deploys: &fakeDeployments{}}
 	r.w, err = New(Deps{Store: db, GH: r.gh, Holds: r.holds, Briefs: briefs, MintKey: func(p string) (string, error) { return p + "-key", nil },
-		Serves: func() bool { return r.serves }, Clock: r.clock, Every: DefaultEvery, Log: r.log})
+		Serves: func() bool { return r.serves }, Clock: r.clock, Every: DefaultEvery, Deployments: r.deploys, Log: r.log})
 	if err != nil {
 		t.Fatal(err)
 	}

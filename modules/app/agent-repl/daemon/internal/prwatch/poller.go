@@ -73,6 +73,9 @@ type Deps struct {
 	Serves func() bool
 	Clock  clock.Clock
 	Every  time.Duration
+	// Deployments is told, after every poll, each owned pull request standing
+	// in a GitHub merge queue (deployments.go).
+	Deployments DeploymentSink
 	// Log is the global logger: a pull request is no workspace's.
 	Log dlog.Logger
 }
@@ -82,17 +85,21 @@ type Watcher struct {
 	deps   Deps
 	reader *reader
 	gate   *intakegate.Gate
+	// places is each owned pull request's GitHub merge queue place as its
+	// latest successful read found it (deployments.go). Only the one Tick
+	// running at a time touches it.
+	places map[wsm.PullRequestKey]*placed
 }
 
 // New builds the watcher, refusing a missing collaborator.
 func New(deps Deps) (*Watcher, error) {
 	switch {
-	case deps.Store == nil, deps.GH == nil, deps.Holds == nil, deps.Briefs == nil, deps.MintKey == nil, deps.Serves == nil, deps.Clock == nil, deps.Log == nil:
+	case deps.Store == nil, deps.GH == nil, deps.Holds == nil, deps.Briefs == nil, deps.MintKey == nil, deps.Serves == nil, deps.Clock == nil, deps.Deployments == nil, deps.Log == nil:
 		return nil, errors.New("prwatch: every collaborator is required")
 	case deps.Every <= 0:
 		return nil, fmt.Errorf("prwatch: the cadence must be positive, not %v", deps.Every)
 	}
-	return &Watcher{deps: deps, reader: newReader(deps.GH),
+	return &Watcher{deps: deps, reader: newReader(deps.GH), places: map[wsm.PullRequestKey]*placed{},
 		gate: intakegate.NewFor(deps.Serves, deps.Log, opGate, "the pull-request polls")}, nil
 }
 
@@ -155,8 +162,12 @@ func (w *Watcher) poll(ctx context.Context, queues *queueReads) {
 		if ctx.Err() != nil {
 			return
 		}
-		w.pollOne(ctx, pr, byPR[pr], facts.ask(pr), queues)
+		snap, ok := w.pollOne(ctx, pr, byPR[pr], facts.ask(pr), queues)
+		if _, owned := ownerOf(byPR[pr]); owned && ok {
+			w.places[pr] = w.placeOf(pr, snap)
+		}
 	}
+	w.tellDeployments(ctx, order, byPR)
 }
 
 // rateLimitWait answers when a spent rate limit resets, and true while any
@@ -192,8 +203,8 @@ func wantsQueue(subs []wsm.PullRequestSubscription) bool {
 }
 
 // pollOne reads PR, its merge queue facts when QUEUE is set, and advances
-// SUBS.
-func (w *Watcher) pollOne(ctx context.Context, pr wsm.PullRequestKey, subs []wsm.PullRequestSubscription, queue *queueAsk, queues *queueReads) {
+// SUBS, answering the read and whether it succeeded.
+func (w *Watcher) pollOne(ctx context.Context, pr wsm.PullRequestKey, subs []wsm.PullRequestSubscription, queue *queueAsk, queues *queueReads) (snapshot, bool) {
 	fields := dlog.Context{"pull_request": pr.String(), "subscribers": len(subs)}
 	checks := false
 	for _, sub := range subs {
@@ -202,15 +213,16 @@ func (w *Watcher) pollOne(ctx context.Context, pr wsm.PullRequestKey, subs []wsm
 	snap, err := w.readSnapshot(ctx, pr, checks, queue, queues)
 	if err != nil {
 		if ctx.Err() != nil {
-			return
+			return snap, false
 		}
 		w.recordFailure(ctx, pr, err, fields)
-		return
+		return snap, false
 	}
 	now := w.deps.Clock.Now()
 	for _, sub := range subs {
 		w.advance(ctx, sub, snap, now)
 	}
+	return snap, true
 }
 
 // queueAsk is what a tick read of one pull request's merge queue facts

@@ -2415,6 +2415,21 @@ type fakeSidebar struct {
 	// queue told, in order.
 	queues map[wsm.RepoKey]sidebar.MergeQueue
 	told   []sidebar.MergeQueue
+	// github is every GitHub share told (SetGithubQueue), in order.
+	github [][]sidebar.GithubQueueEntry
+}
+
+func (s *fakeSidebar) SetGithubQueue(entries []sidebar.GithubQueueEntry) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.github = append(s.github, entries)
+}
+
+// githubTold answers every GitHub share told, in order.
+func (s *fakeSidebar) githubTold() [][]sidebar.GithubQueueEntry {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Clone(s.github)
 }
 
 func (s *fakeSidebar) SetMergeQueue(repo wsm.RepoKey, queue sidebar.MergeQueue) {

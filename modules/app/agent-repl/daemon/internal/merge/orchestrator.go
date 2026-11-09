@@ -91,6 +91,10 @@ type orchestrator struct {
 	// facts is every workspace's last published merge facts, which is what
 	// Facts answers from without re-deriving anything.
 	facts map[ids.WorkspaceID]MergeFacts
+	// github is every workspace standing in a GitHub merge queue, at the pull
+	// request nearest to merging (githubdeploy.go): the GitHub share of what
+	// the surfaces draw, never a merge this orchestrator runs.
+	github map[ids.WorkspaceID]GithubDeployment
 	// running is the run HOLDING each repository's slot: the HEAD, the one
 	// merge that may move the target. A second admission for one repository
 	// is impossible in this process as well as across processes (the
@@ -339,6 +343,7 @@ func newOrchestrator(deps Deps) (*orchestrator, error) {
 		openHookLog:        func(path string) (io.WriteCloser, error) { return createLog(path) },
 		lockDir:            filepath.Join(deps.StateDir, "merge-locks"),
 		facts:              map[ids.WorkspaceID]MergeFacts{},
+		github:             map[ids.WorkspaceID]GithubDeployment{},
 		running:            map[wsm.RepoKey]*run{},
 		chains:             map[wsm.RepoKey][]*run{},
 		chainSignals:       map[wsm.RepoKey]chan struct{}{},
@@ -491,8 +496,7 @@ func (o *orchestrator) publish(repo wsm.RepoKey, ws ids.WorkspaceID, facts Merge
 	_, hadFacts := o.facts[ws]
 	o.facts[ws] = facts
 	o.mu.Unlock()
-	o.footerSetMerge(ws, facts)
-	o.deps.Sidebar.SetMerge(ws, facts)
+	o.surface(ws)
 	o.publishHost(ws)
 	o.noteFacts(ws, repo, hadFacts, facts)
 }
@@ -537,8 +541,7 @@ func (o *orchestrator) forget(ws ids.WorkspaceID) {
 	// bubble its ledger identity addressed.
 	delete(o.ledgerOf, ws)
 	o.mu.Unlock()
-	o.footerSetMerge(ws, MergeFacts{State: "none"})
-	o.deps.Sidebar.SetMerge(ws, MergeFacts{State: "none"})
+	o.surface(ws)
 	o.publishHost(ws)
 }
 

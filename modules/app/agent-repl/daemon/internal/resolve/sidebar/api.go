@@ -89,6 +89,12 @@ type Resolver interface {
 	// orchestrator is the one caller, on every change of the queue's rows and
 	// of its pause.
 	SetMergeQueue(repo wsm.RepoKey, queue MergeQueue)
+	// SetGithubQueue installs, WHOLE, every workspace whose owned pull request
+	// stands in a GitHub merge queue, in queue order: each is drawn in its
+	// repository's Merge Queue group at its GitHub place
+	// (frontend.v1.RosterRepoMergeQueue.github). The merge orchestrator is
+	// the one caller (merge.GithubDeployment).
+	SetGithubQueue(entries []GithubQueueEntry)
 	// SetColdGate installs WS's shown cold gate as the webhost's dock draws
 	// it (WorkspaceRoster.cold_gates): its feed row id and standing card, or
 	// nil for both when none is shown. The fleet is the one caller, on every
@@ -240,6 +246,17 @@ func (q MergeQueue) LineWorkspaces() []ids.WorkspaceID {
 		out = append(out, entry.Workspace)
 	}
 	return out
+}
+
+// GithubQueueEntry is one workspace standing in a GitHub merge queue through
+// the pull request it owns.
+type GithubQueueEntry struct {
+	Workspace ids.WorkspaceID
+	// Place is the pull request's 1-based place in its GitHub queue; Total
+	// the queue's length, every pull request included.
+	Place, Total int
+	// QueuedAt is when the pull request joined the queue.
+	QueuedAt time.Time
 }
 
 // QueueEntry is one merge in line, as a repository section showing its merge
