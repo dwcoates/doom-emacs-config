@@ -1768,6 +1768,16 @@ message RosterRow {
   // The row's display name.
   RosterRowName name = 2;
 
+  // The repository the workspace belongs to, on every list's rows: a hidden,
+  // merged or closed row sits in no repository section, and an open child may
+  // be of another repository than the section it is drawn in, so no section
+  // can say it. The composer's workspace-name completion draws it beside each
+  // name. UNSET only for a workspace whose repository the registry does not
+  // carry: an invariant violation the daemon logs
+  // (daemon.sidebar.row_repository), as it logs leaving such a workspace out
+  // of its repository section.
+  RosterRowRepository repository = 73;
+
   // The workspace's lifecycle AS THE DAEMON RESOLVES IT: its own RenderState
   // coarsened onto the dot vocabulary (idle and ready draw as one dot), plus
   // the two states no session drives (`none`, `inactive`). ONE RESOLVER — this
@@ -1990,6 +2000,12 @@ message RosterRowWorkspace {
   reserved 2;
   reserved "repository";
   workspace.v1.WorkspaceRef workspace = 1;
+}
+
+// The repository a row's workspace belongs to (RosterRow.repository).
+message RosterRowRepository {
+  // The repository's name, as its section is headed.
+  string name = 1;
 }
 
 // A row's display name. Never an identity or a join key.
