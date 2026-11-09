@@ -493,7 +493,7 @@ Highlight words in a final response (drag across them, or extend a selection wit
 Every final response that has a copy icon also has a question-mark icon just left of it. Click it to make your next prompt a question about that response, answered in a new workspace instead of this one.
 
 - **Clicking the question mark sets your draft aside.** Whatever the input window held is saved to its history, so the up arrow brings it back, and the input window is cleared and takes the keyboard.
-- **The pressed question mark is tinted in the accent color** while the question stands. Only one response's question mark is pressed at a time: clicking another response's moves the question there.
+- **The pressed question mark is tinted in the orange a response tree's citations wear** while the question stands. Only one response's question mark is pressed at a time: clicking another response's moves the question there.
 - **Clicking the pressed question mark again withdraws the question.** The draft it set aside comes back into the input window, and anything you had typed since is saved to history.
 - **Sending answers the question in a new child workspace.** It is forked from this workspace's conversation, so the agent knows everything that led to the response. Its first prompt is the response, quoted, then your words. Its tab arrives once it is created, and you stay where you are.
   - Nothing is added to this workspace's feed, and no turn runs here.

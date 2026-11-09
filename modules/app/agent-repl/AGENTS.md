@@ -2839,6 +2839,34 @@ The rules that keep this true:
   does today. The sidebar's disc fill and merge-glyph ink are the arm's tone
   (`#ws-sidebar .st.tone-*`), and no later rule may recolor a mark.
 
+## The canonical orange
+
+Owner rulings, 2026-10-30 and 2026-11-09. The canonical orange is the one
+orange of agent-repl's surfaces, and every other use of orange is either a
+status signal or reads it.
+
+- **The token is `--canonical-orange`**, declared once in
+  `webapp/src/styles.css`: `#cc4d00` on the light page and `#c26404` on the
+  dark one.
+- **It marks what the reader can follow or has acted on**:
+  - a response tree's citations, such as `(2.1)`, and the box over the node a
+    hovered citation cites (`--reference`, `--reference-bg`);
+  - a response tree's answered labels and a prompt's entry labels
+    (`--answer-label`);
+  - a card's question mark while the question about that card stands
+    (`.question-control[data-asking]`, `webapp/src/feed/response-question.ts`).
+- **The lighter canonical orange is `--canonical-orange-light`**, derived
+  from the token rather than declared as a literal:
+  `color-mix(in srgb, var(--canonical-orange) 85%, #ffffff)`.
+  - It is the ground of every inline code span in the feed (`.md code`).
+  - Its ink is `--canonical-orange-light-ink` (black), chosen for WCAG AA
+    contrast on it in both themes and pinned by `webapp/test/styles.test.ts`.
+- **A new use of orange reads `var(--canonical-orange)`**, or a token that
+  reads it, and never declares a hue of its own.
+- **Status oranges are not the canonical orange** and stay as they are: the
+  status palette's orange (`render-colors.json`, `--compact-rule`) and the
+  thinking orange (`--thinking`).
+
 ## Status glyphs are one set of pictures, drawn as tall as a text row
 
 Every glyph a workspace's status draws before its name -- the merge glyph's

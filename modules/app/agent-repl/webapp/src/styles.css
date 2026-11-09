@@ -122,10 +122,11 @@
   --composer-entry-bg: color-mix(in srgb, var(--fg) 12%, transparent);
   /* A CITATION IN A RESPONSE'S TREE (`(1.3.1)`, metaprompt-tree.ts) and the
      box over the node it cites while the pointer is on it
-     (feed/branch-hover.ts): a light, subtle orange (owner request,
-     2026-10-26), so a citation reads as hoverable and its box never reads as
-     the pointer's own blue one. */
-  --reference: #f0883e;
+     (feed/branch-hover.ts): the canonical orange (owner request,
+     2026-11-09, after a light pastel orange of its own since 2026-10-26), so
+     a citation reads as hoverable and its box never reads as the pointer's
+     own blue one. */
+  --reference: var(--canonical-orange);
   --reference-bg: color-mix(in srgb, var(--reference) 18%, transparent);
   /* A link inside a blue prompt bubble wears the known command's purple
      (owner request, 2026-10-19), so a prompt's links and its skill names
@@ -267,11 +268,18 @@
      instead (--selected-bubble-bg, below). */
   --selected-entry: #2563eb;
   /* THE CANONICAL ORANGE (owner ruling, 2026-10-30): the one orange a new
-     use of orange reads, rather than a hue of its own (webapp/AGENTS.md
-     "THE CANONICAL ORANGE"). It began as the answered branch's pastel
+     use of orange reads, rather than a hue of its own (agent-repl/AGENTS.md
+     "The canonical orange"). It began as the answered branch's pastel
      orange and was taken darker and richer (owner request, 2026-10-30): in
      OKLCH, lightness -0.13, chroma x1.45, hue -3 degrees. */
   --canonical-orange: #cc4d00;
+  /* THE LIGHTER CANONICAL ORANGE (owner request, 2026-11-09): the ground of
+     an inline code span, a little lighter than the canonical orange and
+     derived from it, so each theme's own canonical orange carries through.
+     Its ink is black, which reads at WCAG AA on it in both themes (5.8:1
+     light, 6.4:1 dark). */
+  --canonical-orange-light: color-mix(in srgb, var(--canonical-orange) 85%, #ffffff);
+  --canonical-orange-light-ink: #000000;
   /* AN ANSWERED BRANCH'S LABEL (owner request, 2026-10-26): a pastel orange
      on both ends of an answer, the prompt's entry labels and the response's
      linked labels alike (feed/entries.ts). An entry's implied ancestor wears
@@ -450,12 +458,12 @@
      orange, so a stopped queue reads at a glance apart from the purple of a
      merge at work. */
   --merge-paused: #d97706;
-  /* THE ONE CODE WASH (owner request, 2026-10-28): inline code and a fenced
-     block alike, in every bubble, are this faint --fg wash over the bubble
-     that holds them. Transparent, so the code sits the same small step from
-     its own fill in any bubble: lighter than a dark bubble by 4% of the way
-     to the ink, a prompt's as much as a response's, and inline and block
-     code inside one bubble are one color by construction. Resolved where it
+  /* THE ONE CODE WASH (owner request, 2026-10-28): a fenced block, in every
+     bubble, is this faint --fg wash over the bubble that holds it (inline
+     code wears the lighter canonical orange instead, owner request,
+     2026-11-09). Transparent, so the code sits the same small step from its
+     own fill in any bubble: lighter than a dark bubble by 4% of the way to
+     the ink, a prompt's as much as a response's. Resolved where it
      is declared, on :root, so the dark theme's own --fg carries through. */
   --code-bg: color-mix(in srgb, var(--fg) 4%, transparent);
   /* A sidebar menu row's hover wash: the light theme sinks the row with a
@@ -529,7 +537,6 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --reference: #cf7b2d;
     /* THE GROUNDS FOLLOW THE CLAUDE DESKTOP APP'S DARKER SURFACES (owner
        requests, 2026-10-28), sampled from two screenshots of it, then the
        feed a touch lighter and the sidebar a touch darker (owner request, the
@@ -3119,9 +3126,12 @@ html[data-page-unshown] {
 .md eqn { display: block; text-align: center; }
 .md eqn .katex-display > .katex { white-space: normal; }
 .md .katex { color: inherit; background: none; }
-.md code, .q-text code, .q-opt code { background: var(--code-bg); border-radius: 4px; padding: 0.05em 0.35em; font-family: ui-monospace, monospace; font-size: 0.85em; }
+/* INLINE CODE wears the lighter canonical orange, in its own black ink so it
+   reads at WCAG AA (owner request, 2026-11-09). A fenced block's inner code
+   is unfilled and keeps the block's ink (below). */
+.md code, .q-text code, .q-opt code { background: var(--canonical-orange-light); color: var(--canonical-orange-light-ink); border-radius: 4px; padding: 0.05em 0.35em; font-family: ui-monospace, monospace; font-size: 0.85em; }
 .md pre.md-code { background: var(--code-bg); border: 1px solid var(--border); border-radius: 6px; padding: 0.6em 0.8em; margin: 0.5em 0; clear: right; }
-.md pre.md-code code { background: none; padding: 0; font-size: calc(0.85rem * var(--feed-text-scale)); }
+.md pre.md-code code { background: none; color: inherit; padding: 0; font-size: calc(0.85rem * var(--feed-text-scale)); }
 /* THE ONE COPY CONTROL (src/copy-control.ts, owner requests 2026-10-20): a
    small muted icon that copies a piece of the feed. Once it copied, the check
    mark replaces the copy icon for a moment (`data-copied`). Each kind's rule
@@ -3231,9 +3241,10 @@ html[data-page-unshown] {
 .bubble[data-role="response"] .bubble-copy { --copy-control-rest: 0.6; }
 /* A FINAL RESPONSE'S QUESTION CONTROL (src/feed/response-question.ts) sits
    just left of its copy control, in the copy control's look and size, so the
-   pair reads as one corner. PRESSED, while the question about its response
-   stands, it is drawn subtly: full opacity in the accent color over a faint
-   accent tint, so the reader sees the next prompt is a question. */
+   pair reads as one corner. PRESSED, while the question about its card
+   stands, it is drawn subtly: full opacity in the canonical orange over a
+   faint tint of it (owner request, 2026-11-09: the orange a response tree's
+   citations wear), so the reader sees the next prompt is a question. */
 .bubble-question {
   --copy-control-pad: var(--bubble-copy-pad);
   --copy-control-box: var(--bubble-copy-box);
@@ -3243,7 +3254,7 @@ html[data-page-unshown] {
   right: calc(var(--bubble-copy-gap) + var(--bubble-copy-box) + var(--bubble-question-gap));
   --copy-control-rest: 0.6;
 }
-.question-control[data-asking] { opacity: 1; color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.question-control[data-asking] { opacity: 1; color: var(--canonical-orange); background: color-mix(in srgb, var(--canonical-orange) 14%, transparent); }
 .question-control .question-control-dot { fill: currentColor; stroke: none; }
 /* A bubble with a question control reserves room for both controls. */
 .bubble:has(> .bubble-scroll > .bubble-question) {
