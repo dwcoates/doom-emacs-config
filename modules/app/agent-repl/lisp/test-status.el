@@ -3951,10 +3951,10 @@ arm: it paints only the tab's [N] run."
     (should (equal (cdr row) "merge"))))
 
 (ert-deftest agent-repl-test-status-red-is-the-agent-holding-the-turn ()
-  "Red is a turn in flight."
+  "Red is a turn in flight, a turn whose vendor went silent included."
   ;; Act / Assert
   (should (equal (sort (agent-repl-test-status--arms-taking "red") #'string<)
-                 (sort (list :submitting :thinking :clearing :compacting)
+                 (sort (list :submitting :thinking :vendor-silent :clearing :compacting)
                        #'string<))))
 
 (ert-deftest agent-repl-test-status-yellow-is-detached-work-alone ()

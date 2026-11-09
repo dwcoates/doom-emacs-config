@@ -809,7 +809,7 @@ func TestLoadRenderColorsRefusesABadComposerOpenSubstatuses(t *testing.T) {
 	}
 }
 
-func TestTheGlyphInksAreAFailedMergesRedAndCompactionsOrange(t *testing.T) {
+func TestTheGlyphInksAreAFailedMergesRedCompactionsOrangeAndASilentVendorsBlue(t *testing.T) {
 	// Arrange.
 	c := loadColors(t)
 
@@ -817,8 +817,8 @@ func TestTheGlyphInksAreAFailedMergesRedAndCompactionsOrange(t *testing.T) {
 	got := c.GlyphInks
 
 	// Assert.
-	if len(got) != 2 || got["merge_failed"] != "red" || got["compacting"] != "orange" {
-		t.Fatalf("glyph_inks = %v, want merge_failed: red and compacting: orange (owner ruling, 2026-10-13)", got)
+	if len(got) != 3 || got["merge_failed"] != "red" || got["compacting"] != "orange" || got["vendor_silent"] != "blue" {
+		t.Fatalf("glyph_inks = %v, want merge_failed: red, compacting: orange (owner ruling, 2026-10-13) and vendor_silent: blue (owner ruling, 2026-11-08)", got)
 	}
 }
 
