@@ -1253,26 +1253,8 @@ func TestEveryTestRunWithACauseIsBuiltByCausedRun(t *testing.T) {
 // ledger open shares: a run that opened the ledger by hand would number its
 // rounds from one again and overwrite an earlier run's intervals.
 func TestEveryRunOpensItsLedgerThroughOpenLedger(t *testing.T) {
-	// Arrange.
-	sources, err := filepath.Glob("*.go")
-	if err != nil {
-		t.Fatalf("listing the package's sources: %v", err)
-	}
-
 	// Act.
-	var callers []string
-	for _, source := range sources {
-		if strings.HasSuffix(source, "_test.go") {
-			continue
-		}
-		body, err := os.ReadFile(source)
-		if err != nil {
-			t.Fatalf("reading %s: %v", source, err)
-		}
-		for range strings.Count(string(body), "DB.OpenMergeLedger(") {
-			callers = append(callers, source)
-		}
-	}
+	callers := sourcescan.Sites(t, "DB.OpenMergeLedger(")
 
 	// Assert.
 	if !slices.Equal(callers, []string{"run.go"}) {
