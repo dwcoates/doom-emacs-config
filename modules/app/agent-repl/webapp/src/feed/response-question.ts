@@ -1,10 +1,15 @@
 /**
- * response-question — A FINAL RESPONSE'S QUESTION-MARK CONTROL: ask a
- * question about the response, answered in a workspace of its own.
+ * response-question — EVERY CARD'S QUESTION-MARK CONTROL: ask a question about
+ * the card, answered in a workspace of its own.
  *
- * Every final response that carries a copy control (cards/response.ts) also
- * carries this control, just left of it. A click asks the daemon to toggle the
- * workspace's question about that response (agentrepl.v1.AskAboutResponse):
+ * Every card the feed draws carries this control (owner request, 2026-11-09,
+ * extending it from final responses), through ONE helper: `withCardQuestion`
+ * wraps every card renderer the registry holds (renderers.ts), so a card kind
+ * added without it fails the registry's test. A final response that carries a
+ * copy control (cards/response.ts) draws it in its own corner, just left of
+ * the copy control; every other card wears it at its top right. A click asks
+ * the daemon to toggle the workspace's question about that card
+ * (agentrepl.v1.AskAboutResponse):
  * while a question stands, Emacs's composer has set its draft aside and the
  * next prompt sent is that question, forked into a child workspace that
  * answers it. A second click withdraws the question, and Emacs puts the draft
@@ -26,6 +31,7 @@ import {
   AskAboutResponseResponseSchema,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_ask_about_response_pb";
 import type { FeedResponseQuestion } from "../../../proto/gen/ts/frontend/v1/feed_pb";
+import type { RowContext } from "./cards/context.js";
 import { queryAll } from "../dom.js";
 import { log } from "../log.js";
 import { perDocument } from "../per-document.js";
@@ -39,6 +45,9 @@ export const QUESTION_CONTROL_CLASS = "question-control";
 /** The class placing a bubble's question control beside its copy control. */
 export const BUBBLE_QUESTION_CLASS = "bubble-question";
 
+/** The class placing every other card's question control at its top right. */
+export const CARD_QUESTION_CLASS = "card-question";
+
 /** The attribute naming the response row a question control asks about. */
 export const QUESTION_ROW_ATTRIBUTE = "data-asks-about";
 
@@ -47,7 +56,7 @@ export const ASKING_ATTRIBUTE = "data-asking";
 
 /** AskAboutResponse's own refusal arm, in the reader's words. */
 const ASK_ABOUT_RESPONSE_REFUSALS = {
-  notAFinalResponse: () => "the response is not a settled final response",
+  notACard: () => "the card is no longer in the feed",
 };
 
 /** A question mark in a circle: the control's icon. */
@@ -59,8 +68,8 @@ const QUESTION_ICON =
   `</svg>`;
 
 /** The label a control wears at rest, and while its question stands. */
-const ASK_LABEL = "Ask a question about this response";
-const WITHDRAW_LABEL = "Withdraw the question about this response";
+const ASK_LABEL = "Ask a question about this card";
+const WITHDRAW_LABEL = "Withdraw the question about this card";
 
 /** The row each page's question stands about, as the daemon last pushed it; null for none. */
 const standing = perDocument((): { row: string | null } => ({ row: null }));
@@ -76,17 +85,79 @@ function drawControl(control: Element, askedRow: string | null): void {
 }
 
 /**
- * The question control for the final response ROW on DOC (the page's own
- * document by default), drawn as the question standing on DOC says.
+ * The question control for the card ROW on DOC (the page's own document by
+ * default), placed by PLACEMENT (a bubble's corner by default), drawn as the
+ * question standing on DOC says.
  */
-export function questionControl(row: string, doc: Document = document): HTMLElement {
-  if (row === "") throw new Error("a question control names no response row");
+export function questionControl(
+  row: string,
+  doc: Document = document,
+  placement: string = BUBBLE_QUESTION_CLASS,
+): HTMLElement {
+  if (row === "") throw new Error("a question control names no card row");
   const control = doc.createElement("ar-button");
-  control.className = `${QUESTION_CONTROL_CLASS} ${BUBBLE_QUESTION_CLASS}`;
+  control.className = `${QUESTION_CONTROL_CLASS} ${placement}`;
   control.setAttribute(QUESTION_ROW_ATTRIBUTE, row);
   control.innerHTML = QUESTION_ICON;
   drawControl(control, standing(doc).row);
   return control;
+}
+
+/** A card renderer: a message and its row's context to the card's element. */
+type CardRenderer<U> = (unit: U, rc: RowContext) => HTMLElement;
+
+/** Every renderer `withCardQuestion` made, so the registry's test can ask. */
+const carrying = new WeakSet<object>();
+
+/** Whether RENDER is a card renderer `withCardQuestion` made. */
+export function carriesCardQuestion(render: unknown): boolean {
+  return typeof render === "function" && carrying.has(render);
+}
+
+/**
+ * THE ONE PATH BY WHICH A CARD CARRIES ITS QUESTION CONTROL: RENDER, with the
+ * card it draws given the control for its row (`placeCardQuestion`).
+ */
+export function withCardQuestion<U>(render: CardRenderer<U>): CardRenderer<U> {
+  const wrapped: CardRenderer<U> = (unit, rc) => {
+    const card = render(unit, rc);
+    placeCardQuestion(card, requireRow(rc));
+    return card;
+  };
+  carrying.add(wrapped);
+  return wrapped;
+}
+
+/** The id of the row RC draws; a row without one cannot be asked about. */
+function requireRow(rc: RowContext): string {
+  const row = rc.row.id?.value ?? "";
+  if (row === "") throw new Error("a card's row names no id, so its question control has nothing to ask about");
+  return row;
+}
+
+/**
+ * Give CARD the question control for ROW. A card that placed its own in its
+ * corner (a final response, beside its copy control) keeps it; any other card
+ * wears it at its top right, restated on a card its renderer redrew in place.
+ * A response redrawn in place as it settles gains its corner control, and the
+ * top-right one its earlier draw wore leaves.
+ */
+export function placeCardQuestion(card: HTMLElement, row: string): void {
+  const placed = card.querySelector(`:scope > .${CARD_QUESTION_CLASS}`);
+  const own = card.querySelector(`.${BUBBLE_QUESTION_CLASS}`);
+  if (own !== null) {
+    if (own.getAttribute(QUESTION_ROW_ATTRIBUTE) !== row) {
+      throw new Error(`a card's corner asks about ${own.getAttribute(QUESTION_ROW_ATTRIBUTE) ?? "nothing"}, not its own row ${row}`);
+    }
+    placed?.remove();
+    return;
+  }
+  if (placed !== null) {
+    placed.setAttribute(QUESTION_ROW_ATTRIBUTE, row);
+    drawControl(placed, standing(card.ownerDocument).row);
+    return;
+  }
+  card.append(questionControl(row, card.ownerDocument, CARD_QUESTION_CLASS));
 }
 
 /** The row QUESTION asks about, or null for none. A push with no state, or an ask naming no row, is refused. */
@@ -110,7 +181,7 @@ export function applyResponseQuestion(doc: Document, question: FeedResponseQuest
   standing(doc).row = row;
   const controls = queryAll<HTMLElement>(doc, `.${QUESTION_CONTROL_CLASS}`);
   for (const control of controls) drawControl(control, row);
-  log.debug("drew the question about a final response", {
+  log.debug("drew the question about a card", {
     operation: "feed.response-question.applied",
     context: { row, controls: controls.length },
   });
@@ -120,7 +191,7 @@ export function applyResponseQuestion(doc: Document, question: FeedResponseQuest
 async function askAboutResponse(ctx: AppContext, row: string): Promise<void> {
   const success = await controlCall(ctx, {
     rpc: "AskAboutResponse",
-    what: "toggle the question about the response",
+    what: "toggle the question about the card",
     send: (client) =>
       client.askAboutResponse(create(AskAboutResponseRequestSchema, { workspace: ctx.workspace, row: { value: row } })),
     schema: AskAboutResponseResponseSchema,
@@ -130,7 +201,7 @@ async function askAboutResponse(ctx: AppContext, row: string): Promise<void> {
     context: { row },
   });
   if (success === undefined) return;
-  log.debug("the daemon toggled the question about a final response", {
+  log.debug("the daemon toggled the question about a card", {
     operation: "feed.response-question.answered",
     context: { row },
   });
@@ -146,8 +217,8 @@ export function installResponseQuestion(host: HTMLElement, ctx: AppContext): () 
     const control = event.target.closest(`.${QUESTION_CONTROL_CLASS}`);
     if (control === null || !host.contains(control)) return;
     const row = control.getAttribute(QUESTION_ROW_ATTRIBUTE);
-    if (row === null || row === "") throw new Error("a question control names no response row");
-    log.info("the reader pressed a response's question control", {
+    if (row === null || row === "") throw new Error("a question control names no card row");
+    log.info("the reader pressed a card's question control", {
       operation: "feed.response-question.pressed",
       context: { row, asking: control.hasAttribute(ASKING_ATTRIBUTE) },
     });

@@ -488,19 +488,25 @@ Highlight words in a final response (drag across them, or extend a selection wit
   - A highlight that reaches across two bubbles is not a highlight of either, so the prompt is an ordinary turn.
   - Revisions of one workspace run one after another. A second revision of the same response revises the first one's result.
 
-## Asking a question about a final response in its own workspace
+## Asking a question about a card in its own workspace
 
-Every final response that has a copy icon also has a question-mark icon just left of it. Click it to make your next prompt a question about that response, answered in a new workspace instead of this one.
+Every card in the feed has a question-mark icon: responses, tool cards, merge bubbles, subagent and shell bubbles, permissions, questions, and every other card. Click it to make your next prompt a question about that card, answered in a new workspace instead of this one.
+
+- **Where the icon sits:**
+  - On a final response that has a copy icon, it sits just left of the copy icon.
+  - On every other card, it sits at the card's top right, and shows while the pointer is on the card or while its question stands.
 
 - **Clicking the question mark sets your draft aside.** Whatever the input window held is saved to its history, so the up arrow brings it back, and the input window is cleared and takes the keyboard.
-- **The pressed question mark is tinted in the orange a response tree's citations wear** while the question stands. Only one response's question mark is pressed at a time: clicking another response's moves the question there.
+- **The pressed question mark is tinted in the orange a response tree's citations wear** while the question stands. Only one card's question mark is pressed at a time: clicking another card's moves the question there.
 - **Clicking the pressed question mark again withdraws the question.** The draft it set aside comes back into the input window, and anything you had typed since is saved to history.
-- **Sending answers the question in a new child workspace.** It is forked from this workspace's conversation, so the agent knows everything that led to the response. Its first prompt is the response, quoted, then your words. Its tab arrives once it is created, and you stay where you are.
+- **Sending answers the question in a new child workspace.** It is forked from this workspace's conversation, so the agent knows everything that led to the card. Its first prompt is the card, quoted, then your words.
+  - A response or a prompt is quoted as its text.
+  - Every other card is quoted as the data agent-repl drew it from, in JSON. Its tab arrives once it is created, and you stay where you are.
   - Nothing is added to this workspace's feed, and no turn runs here.
   - The question mark is released, and the draft it set aside stays in history.
 - **Limits:**
   - A question outranks a highlight and a selected response: the prompt is the question either way.
-  - A response that a rollback has removed can no longer be asked about. The prompt is refused and the question ends.
+  - A card that a rollback has removed can no longer be asked about. The prompt is refused and the question ends.
 
 ## Rolling the conversation back
 

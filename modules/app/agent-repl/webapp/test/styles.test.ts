@@ -6694,6 +6694,28 @@ describe("the workspace name's status tint (owner request, 2026-10-29)", () => {
   });
 });
 
+describe("a card's question control (owner request, 2026-11-09)", () => {
+  it("sits at the card's top right, out of flow", () => {
+    // Arrange / Act
+    const decls = ownDeclarationsOf(".card-question") ?? "";
+
+    // Assert
+    expect([/position:\s*absolute/.test(decls), /top:\s*2px/.test(decls), /right:\s*2px/.test(decls)]).toEqual([true, true, true]);
+  });
+
+  it.each([
+    [".card-question", "0"],
+    [":hover > .card-question", "var(--copy-control-rest, 0.7)"],
+    [".card-question[data-asking]", "1"],
+  ])("rests unseen, and %s shows it at %s", (selector, want) => {
+    // Arrange / Act
+    const decls = (selector === ".card-question" ? ownDeclarationsOf(selector) : declarationsOf(selector)) ?? "";
+
+    // Assert
+    expect(/(?:^|;)\s*opacity:\s*([^;]+);/.exec(decls)?.[1]?.trim()).toBe(want);
+  });
+});
+
 describe("the canonical orange (owner ruling, 2026-10-30)", () => {
   it("is what an answered branch's label reads", () => {
     // Arrange / Act
