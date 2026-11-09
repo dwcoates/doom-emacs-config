@@ -637,6 +637,34 @@ name: each one's breach names that message exactly as the helper's does."
                       (lambda (v) (agent-repl-wire-roster--decode-instant (cdr pair) v))
                       json))))))
 
+;;;; ---- The shared repository-name decoder ----
+
+(ert-deftest agent-repl-test-wire-roster-decode-repository-name-reads-the-name ()
+  "The repository-name decoder answers the plist `(:name)'."
+  (should (equal (agent-repl-test-wire-roster--decode
+                  (lambda (v) (agent-repl-wire-roster--decode-repository-name "Some" v))
+                  "{\"name\":\"doom\"}")
+                 '(:name "doom"))))
+
+(ert-deftest agent-repl-test-wire-roster-decode-repository-name-refuses-an-extra-key ()
+  "An unknown field is a breach naming the MESSAGE the caller passed."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  (lambda (v) (agent-repl-wire-roster--decode-repository-name "Some" v))
+                  "{\"name\":\"doom\",\"extra\":1}")
+                 '("Some" extra "unknown field"))))
+
+(ert-deftest agent-repl-test-wire-roster-repository-name-decoders-share-the-helper ()
+  "Every roster repository-name decoder is the shared helper under its own
+message name: each one's breach names that message exactly as the helper's does."
+  (dolist (pair '((agent-repl-wire-decode-roster-row-repository . "RosterRowRepository")
+                  (agent-repl-wire-decode-roster-open-row-repository-divider
+                   . "RosterOpenRowRepositoryDivider")))
+    (let ((json "{\"name\":\"doom\",\"extra\":1}"))
+      (should (equal (agent-repl-test-wire-roster--breach (car pair) json)
+                     (agent-repl-test-wire-roster--breach
+                      (lambda (v) (agent-repl-wire-roster--decode-repository-name (cdr pair) v))
+                      json))))))
+
 ;;;; ---- The shared start decoder ----
 
 (ert-deftest agent-repl-test-wire-roster-decode-started-at-reads-started-at-ms ()

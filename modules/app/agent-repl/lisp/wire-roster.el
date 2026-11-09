@@ -75,14 +75,21 @@ How many workspaces the section holds; the webview draws it while folded."
      (list :workspaces (agent-repl-wire--decode-uint32
                         "RosterSectionCount" 'workspaces object)))))
 
+(defun agent-repl-wire-roster--decode-repository-name (message value)
+  "Decode VALUE as MESSAGE, a repository message whose only field is `name'.
+Answers the plist `(:name NAME)'.  Every roster message naming a repository
+as its section is headed (a row's repository, an open row's divider)
+shares this one shape."
+  (let ((object (agent-repl-wire--object message value)))
+    (agent-repl-wire--check-keys message object '(name))
+    (agent-repl-wire--decoded
+     message
+     (list :name (agent-repl-wire--decode-string message 'name object)))))
+
 (defun agent-repl-wire-decode-roster-row-repository (value)
   "Decode VALUE as `RosterRowRepository', a plist `(:name NAME)'.
 The repository the row's workspace belongs to, as its section is headed."
-  (let ((object (agent-repl-wire--object "RosterRowRepository" value)))
-    (agent-repl-wire--check-keys "RosterRowRepository" object '(name))
-    (agent-repl-wire--decoded
-     "RosterRowRepository"
-     (list :name (agent-repl-wire--decode-string "RosterRowRepository" 'name object)))))
+  (agent-repl-wire-roster--decode-repository-name "RosterRowRepository" value))
 
 (defun agent-repl-wire-decode-roster-row-name (value)
   "Decode VALUE as `RosterRowName', a plist `(:text)'.
@@ -932,12 +939,7 @@ It is never unset: every open row has a tab."
 
 (defun agent-repl-wire-decode-roster-open-row-repository-divider (value)
   "Decode VALUE as `RosterOpenRowRepositoryDivider', a plist `(:name NAME)'."
-  (let ((object (agent-repl-wire--object "RosterOpenRowRepositoryDivider" value)))
-    (agent-repl-wire--check-keys "RosterOpenRowRepositoryDivider" object '(name))
-    (agent-repl-wire--decoded
-     "RosterOpenRowRepositoryDivider"
-     (list :name (agent-repl-wire--decode-string
-                  "RosterOpenRowRepositoryDivider" 'name object)))))
+  (agent-repl-wire-roster--decode-repository-name "RosterOpenRowRepositoryDivider" value))
 
 (defun agent-repl-wire-decode-roster-open-row-children-collapsible (value)
   "Decode VALUE as the empty message `RosterOpenRowChildrenCollapsible'."
