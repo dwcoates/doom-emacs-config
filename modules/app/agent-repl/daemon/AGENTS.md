@@ -92,7 +92,7 @@ Read `ARCHITECTURE.md` first: the package map, the seams, the conventions.
   | the `harness.Daemon` context (`DefaultTimeout * runBudgetWaits`) | 35s | the WHOLE-RUN budget one daemon process's test shares, and the lifetime of every watch stream held across it | **it used to be `DefaultTimeout` itself**, so a test's whole run was as short as its single longest permitted wait, and the LAST call in a test answered `deadline_exceeded` for budget the earlier ones had spent. That is what made `TestHostRequestedStopLeavesNoProcessBehind` fail ~1 in 20 at ~5.09s on the stop -- a step measured at 9ms p50 and 15ms max across 104 runs. Sized as five `DefaultTimeout` waits (25s) plus one `drain.DefaultStandBound` stand-down (6s, now 7s) = 31s (32s), rounded up to the next whole multiple (7 x 5s = 35s); it is a MULTIPLE so an `Opts.Timeout` override widens the run in the same proportion it widens the wait |
   | `harness.HandoverChainTimeout` (`Opts.Timeout`) | 15s wait bound (3x default), 90s run budget | the handful of tests whose ONE daemon context must span an entire self-reload handover — a merge landing, the rollout trigger, a SECOND real `agent-repld`'s full boot and adoption, and the incumbent's orderly exit, all on the incumbent's own budget rather than a fresh one | structurally two real process lifecycles sharing one budget, not one; run 8 already saw this chain finish inside 1.7s, so 15s is headroom, not a measured need |
   | `harness.MergeChainTimeout` (`Opts.Timeout`) | 15s wait bound (3x default), 105s run budget | every daemon that runs a merge's test gate (`AGENT_REPL_TEST_ALL_SCRIPT`) outside a handover: `mergeCleanRepo` and its siblings in `merge_test.go`, and `create_test.go`'s parent-target merge | one wait spans the WHOLE merge, a sequential chain of 36-52 subprocesses (fake git per call, plus the gate script), so its cost scales with process-spawn latency. MEASURED 2026-10-06 from the daemon logs, `-test.parallel=1 GOMAXPROCS=2` chunks: ~0.1s unloaded; 2.82s max under 24 chunks + `with-cpu-load.sh 24`; 4.22s passing max under 48 chunks + `with-cpu-load.sh 32`, where 16 runs were cut at 5s while still advancing (no record gap over 1.54s, target fast-forwarded at +3.9-4.95s). A bound under the healthy chain, not a stall; 15s is ~3.5x the passing max |
-  | `harness.Daemon.AwaitIdle` (the test barrier) | none: a latch, never a window | `harness.ExpectNoPush`, `harness.ExpectNoPushMatching`, `harness.Daemon.ExpectFileUnchanged`, the suite's `expectRPCCount`/`expectNoRPC` | a NEGATIVE assertion waits on the daemon's own report that nothing it started is still in flight (the `AwaitIdle` rpc, `internal/inflight`), then on its stream having read every frame the daemon wrote on it (the frame counts the barrier answers per `Agent-Repl-Stream-Tag`), and then checks at once. It replaced `ProbeWindow`, a 500ms wait paid in full at every such site. Served only to a daemon the harness started (`AGENT_REPL_TEST_BARRIER=1`); its one wait is bounded by `DefaultTimeout` |
+  | `harness.Daemon.AwaitIdle` (the test barrier) | none: a latch, never a window | `harness.ExpectNoPush`, `harness.ExpectNoPushMatching`, `harness.Daemon.ExpectFileUnchanged`, the suite's `expectRPCCount`/`expectNoRPC` | a NEGATIVE assertion waits on the daemon's own report that nothing it started is still in flight (the `AwaitIdle` rpc, `internal/inflight`), then on its stream having read every frame the daemon wrote on it (the frame counts the barrier answers per `Agent-Repl-Stream-Tag`), and then checks at once. It replaced `ProbeWindow`, a 500ms wait paid in full at every such site. Served only to a daemon the harness started (`AGENT_REPL_TEST_BARRIER=1`); its one wait is bounded by `DefaultTimeout`. WHAT IT COUNTS: every goroutine the daemon starts (`inflight.Go`, pinned), every value from enqueue to its consumer's ack (`publish.Mailbox`, stream pushes on `publish.StreamPushes`, addressed `elisp` pushes, `publish.Changes` wakes). WHAT IT DOES NOT, by contract: an EXTERNAL event before the daemon takes it -- a file change the kernel reports, a fake shim's frame still on the wire, a process exit -- because the daemon has not started that work yet; a test that caused one awaits the daemon's own record of taking it first. Standing loops (`inflight.Standing`) wait between events and are never counted, and a merge run is standing: a test waits on its records |
   | `shortTimeout` (integration/support_session_test.go) | 200ms | `TestSessionSurvivesADaemonRestart`-style old-PID-gone probes | a structural "is it already true" check that should fail fast rather than ride the whole test's deadline |
   | inline `context.WithTimeout` (drain_rollout_test.go, the drain-schedule-survives-a-restart test) | 2s | asserting the drain banner does NOT reappear after a restart | an expected-to-time-out negative probe, deliberately tighter than `DefaultTimeout` |
   | `loopJoinBound` (cmd/agent-repld/run.go) | 2s | the orderly exit's wait for the background loops, and for the prompt queue's own goroutines, to leave their cancelled serving context | NOT a shutdown budget: every loop is a ticker whose iteration is itself bounded, so this covers one in-flight iteration finishing. An overrun is reported at ERROR and the teardown proceeds, because an unbounded wait is a daemon that does not exit |
@@ -123,39 +123,41 @@ Read `ARCHITECTURE.md` first: the package map, the seams, the conventions.
 
 ### An answer has left when the socket took it
 
-`server.WriteBarrier` (`internal/server/writebarrier.go`) is what both the
-daemon's orderly exit and the integration fake shim's stand-down wait on before
-ending the process. READ ITS DOC BEFORE REACHING FOR A SIMPLER SIGNAL: neither
+`server.WriteBarrier` (`internal/server/writebarrier.go`) is what the
+daemon's orderly exit waits on before ending the process. READ ITS DOC BEFORE REACHING FOR A SIMPLER SIGNAL: neither
 "the handler returned" nor "the request's context ended" means the answer has
 been written, because `golang.org/x/net/http2`'s `serverConn.runHandler` cancels
 that context in a defer that runs BEFORE the same defer produces the response's
 final frames. Both beliefs have been in this tree and both cost a run.
 
-| window | value | why |
-| --- | --- | --- |
-| `server.barrierSettle` | 1ms | how long the barrier lets pass with no write completing before it calls a connection quiet. NOT a delay: the loop ends on the condition and the ordinary case spends two of these. What it covers is one `write(2)` of a few dozen bytes onto a unix or loopback socket by an already-runnable goroutine — microseconds — so it is three orders of magnitude over the work |
-| `server.answerWriteBound` | 250ms | how long ONE answer has to reach the socket after its handler's goroutine has finished with it. A last resort, deliberately well under the exit's own 2s grace so a single stuck answer cannot spend all of it |
-| `fakeshim.killAnswerWriteBound` | 250ms | the same last resort on the fake's `KillSession` exit, far under the daemon's stand-down window so an overrun reads as a fake that took a moment rather than one that hung |
-| `writesQuietBound` (cmd/agent-repld/run.go) | 250ms | how long the exit gives the CONNECTIONS to stop writing once every counted call has been answered. `Serving.counted` skips `standingStreamPaths` on purpose, so `AwaitQuiet` sees nothing in flight while the daemon's LAST PUSH — `DaemonShutdownAnnounced`, sent on every WatchDaemon stream one line before `drain.fire` calls Exit — is still on its way to the socket. Same sizing and same last-resort role as `answerWriteBound`: the barrier ends on quiescence, so the ordinary exit spends about two `barrierSettle` ticks here |
-
-The barrier settles true on quiet OR on a connection that is still writing past
-the mark — one h2 connection multiplexes the standing pushes with the unary
-calls, and calling a busy link a lost answer would put an ERROR record, and a
-warning-sweep failure, against a healthy run. FALSE means one thing: nothing at
-all was written since the mark.
+The barrier waits on no clock and no quiet window. It reads the nine-byte
+header of every h2 frame on each counted connection: a client HEADERS frame
+opens a stream, and the server's DATA or HEADERS carrying END_STREAM (its
+header block complete), or a RST_STREAM from either side, ends it once the
+`Write` that carried it has returned. Frames on one stream are written in
+order, so a stream whose end is on the socket has its answer and every push
+before it there too. A connection that does not open with the h2 client
+preface is HTTP/1.1, which `http.Server.Shutdown` waits on exactly, and the
+h2c Upgrade route is refused (ERROR `daemon.server.h2c_upgrade_refused`), so
+no h2 stream is uncounted. Every push to a standing stream is counted from its
+enqueue until its stream sent it (`publish.StreamPushes`).
 
 ### Every exit ends each standing stream with its end frame
 
 No client stream ends without an end frame, on ANY exit path: a handover's
 last transfer, a layout restart's stand-down, a drain, a signal, a state-root
-loss. `serve` (cmd/agent-repld/run.go), once the owed answers
-(`AwaitQuiet`) and the last pushes (`AwaitWritesQuiet`) have left, calls
+loss. `serve` (cmd/agent-repld/run.go) takes ONE deadline, the exit's grace,
+and waits on events up to it: every unary handler returned (`AwaitQuiet`),
+every push owed to a standing stream sent (`AwaitPushesSent`), then
 `Serving.EndStreams` with the surface's `Close` (idempotent), which ends every
 `WatchHostWorkspace`, `WatchWorkspaceRoster`, `WatchDaemon`, `WatchPage` and
-every other standing stream, then `Serving.AwaitStreamsEnded(streamsEndBound)`:
-each stream the exit ended is counted until the socket has written past the
-moment its handler returned (its end frame; see `WriteBarrier`). A stream its
-client ended is uncounted at once. Only then does `http.Server.Shutdown` run.
+every other standing stream, then `Serving.AwaitStreamsEnded`: every standing
+handler returned and every h2 stream's end -- each answer and each end frame
+-- on the socket (`WriteBarrier`). An overrun is ERROR
+`daemon.server.await_streams_ended` (handlers, by procedure path) or
+`daemon.server.streams_unwritten` (ends not written, by connection). Only then
+does `http.Server.Shutdown` run, which waits for every HTTP/1.1 response to be
+flushed.
 
 Regression, 2026-09-27: the streams were left to `Shutdown`, which waits out
 its grace on an HTTP/1.1 stream that never goes idle and then closes the
@@ -166,9 +168,6 @@ transfer notice had reached and on its roster.
 `integration/exit_streams_test.go` holds all four stream kinds over HTTP/1.1
 and h2c through a real exit.
 
-| window | value | why |
-| --- | --- | --- |
-| `streamsEndBound` (cmd/agent-repld/run.go) | 500ms | contains one `server.answerWriteBound` (250ms, one end frame's write) plus as much again for the handlers to leave, each of which selects on the lifetime `Close` cancels. An overrun is ERROR `daemon.server.await_streams_ended` naming how many streams were left open and their procedure paths |
 
 The end frame is Connect's plain end-of-stream. `WatchHostWorkspace`,
 `WatchDaemon` and `WatchWorkspaceRoster` carry one more frame BEFORE it: the
@@ -865,14 +864,15 @@ through `concludeLocked`, at a conclusion the shim states:
 
 A watch open that FAILS, is REFUSED or HANGS, and a stream that ENDS, never
 retire an item: a shell stays live with a stream-less entry its next
-announcement or the fleet re-open retries. A REFUSED open of expected work
-(the main agent, an announced subagent or shell) also arms its own re-open on
-the watcher's clock (`sessionwatcher/reopen.go`, `Sinks.Clock`): 250ms
-doubling per consecutive refusal to 30s, re-armed past `openRefusalLimit`
-(whose WARN and fault are unchanged), cancelled by the work concluding. An
-announcement that may never repeat is never the only edge (owner ruling,
-2026-10-08: a shell refused while its store rows were missing stood live for
-good and a merge waited on it forever). A subagent that names no agent is
+announcement or the fleet re-open retries. Every open of expected work (the
+main agent, an announced subagent or shell) carries `shim.v1` `expected`, so
+the shim WAITS for the handle's first row rather than refusing it, and nothing
+re-asks on a timer (owner ruling, 2026-10-08, made structural 2026-11-09: a
+shell refused while its store rows were missing stood live for good and a
+merge waited on it forever). A refused expected handle is the shim breaking
+that contract, recorded at ERROR with a fault; the main watch's refusal before
+the shim has a session is the bring-up race, re-opened by the session stream.
+A subagent that names no agent is
 still COUNTED (by its handle, unwatched; the announcement defect stays an
 ERROR). `concludeLocked` retires the handle, cancels an open in flight, closes
 an open stream off the lock, and records `daemon.sessionwatcher.live_work_retired`

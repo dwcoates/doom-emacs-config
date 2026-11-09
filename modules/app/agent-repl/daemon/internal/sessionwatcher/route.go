@@ -1697,8 +1697,9 @@ func (w *watcher) takeDetachedLocked(announcer *conversationv1.AgentId, work *co
 //
 // A SHELL'S RECORD IS STILL READ TO ITS END. Its run's rows -- the sidecar's
 // output and terminal, the exit status the feed draws -- are opened as a
-// watch that is NOT live work: a refusal re-opens on the clock like any other
-// (reopen.go), and the terminal reaps it (routeBashLocked). Nothing about that
+// watch that is NOT live work: it opens `expected`, so the shim waits for the
+// run's rows rather than refusing it, and the terminal reaps it
+// (routeBashLocked). Nothing about that
 // watch counts toward freeness.
 //
 // Work the watcher already holds live (or pending) is not judged here: its

@@ -129,7 +129,7 @@ func serveTopicWith[T comparable, R any](
 
 	// EVERY VIEW COUNTS AS WORK IN FLIGHT UNTIL IT IS WRITTEN (ack, below):
 	// a push still on its way to the client is never "nothing in flight".
-	views, ack := topic.SubscribeCounted(streamCtx)
+	views, ack := topic.SubscribeStream(streamCtx)
 	if hooks.attached != nil {
 		detach := hooks.attached()
 		defer detach()
@@ -366,14 +366,14 @@ func (s *server) serveHost(
 	defer cancel()
 
 	// Every push counts as work in flight until it is written (internal/inflight).
-	states, ackState := s.hostStateTopic(ws).SubscribeCounted(streamCtx)
-	notices, ackNotice := s.hostNoticeTopic(ws).SubscribeCounted(streamCtx)
-	events, ackEvent := s.hostEventStream(ws).SubscribeCounted(streamCtx)
+	states, ackState := s.hostStateTopic(ws).SubscribeStream(streamCtx)
+	notices, ackNotice := s.hostNoticeTopic(ws).SubscribeStream(streamCtx)
+	events, ackEvent := s.hostEventStream(ws).SubscribeStream(streamCtx)
 	// THE FEED'S SELECTION reaches Emacs from the one topic the webapp's root
 	// feed watch reads, mapped to the kind of row and its text (hostSelectionOf), so
 	// Emacs and the webapp see one sequence of selections. The topic replays
 	// the selection in force, so a late subscriber is handed it first.
-	selections, ackSelection := s.selectionTopic(ws).SubscribeCounted(streamCtx)
+	selections, ackSelection := s.selectionTopic(ws).SubscribeStream(streamCtx)
 	s.acceptStream(ctx, rpc)
 	log.Debug(rpc, "accepted a standing stream", nil)
 
@@ -499,9 +499,9 @@ func (s *server) serveWeb(
 	defer cancel()
 
 	// Every push counts as work in flight until it is written (internal/inflight).
-	states, ackState := s.webStateTopic(ws).SubscribeCounted(streamCtx)
-	events, ackEvent := s.webTopic(ws).SubscribeCounted(streamCtx)
-	echoes, ackEcho := s.webEventStream(ws).SubscribeCounted(streamCtx)
+	states, ackState := s.webStateTopic(ws).SubscribeStream(streamCtx)
+	events, ackEvent := s.webTopic(ws).SubscribeStream(streamCtx)
+	echoes, ackEcho := s.webEventStream(ws).SubscribeStream(streamCtx)
 	reveals, ackReveal, pending := s.subscribeReveals(streamCtx, ws)
 	s.acceptStream(ctx, rpc)
 	log.Debug(rpc, "accepted a standing stream", nil)
@@ -610,11 +610,11 @@ func (s *server) watchDaemon(
 	defer cancel()
 
 	// Every push counts as work in flight until it is written (internal/inflight).
-	states, ackState := s.daemonTopic.SubscribeCounted(streamCtx)
-	events, ackEvent := s.daemonEventTopic.SubscribeCounted(streamCtx)
+	states, ackState := s.daemonTopic.SubscribeStream(streamCtx)
+	events, ackEvent := s.daemonEventTopic.SubscribeStream(streamCtx)
 	ackFault, ackWifi, ackDigest := func() {}, func() {}, func() {}
 
-	w := &daemonWatcher{sent: make(chan struct{}), elisp: make(chan *agentreplv1.WatchDaemonResponse, 4)}
+	w := &daemonWatcher{sent: make(chan struct{}), elisp: make(chan addressedPush, 4)}
 	// THE STANDING LOUD FAULTS ARE AN EMACS STREAM'S ALONE: a webview draws
 	// them on the topbar and footer views it already holds. A nil channel is
 	// never ready, so a webview's select never takes that case.
@@ -626,15 +626,15 @@ func (s *server) watchDaemon(
 	// draws the overlay, so an Emacs stream's select never takes that case.
 	var digest <-chan *agentreplv1.NewsDigestStanding
 	if msg.GetWebview() != nil {
-		digest, ackDigest = s.deps.NewsDigest.Topic().SubscribeCounted(streamCtx)
+		digest, ackDigest = s.deps.NewsDigest.Topic().SubscribeStream(streamCtx)
 	}
 	if emacs := msg.GetEmacs(); emacs != nil {
 		if err := s.editorConnected(ctx, emacs); err != nil {
 			return err
 		}
 		w.emacs, w.elispBuild = true, emacs.GetElispBuild()
-		faults, ackFault = s.deps.LoudFaults.SubscribeCounted(streamCtx)
-		wifi, ackWifi = s.deps.PersistentWifi.Topic().SubscribeCounted(streamCtx)
+		faults, ackFault = s.deps.LoudFaults.SubscribeStream(streamCtx)
+		wifi, ackWifi = s.deps.PersistentWifi.Topic().SubscribeStream(streamCtx)
 		// EMACS'S FOCUS LIVES AND DIES WITH THIS STREAM: attached from the
 		// request, so the daemon knows it from the stream's first instant,
 		// and released when the stream ends, after which Emacs reads as
@@ -700,7 +700,7 @@ func (s *server) watchDaemon(
 			}
 			push, fromState, ack = event, false, ackEvent
 		case addressed := <-w.elisp:
-			push, fromState = addressed, false
+			push, fromState, ack = addressed.push, false, addressed.sent
 		case standing, ok := <-faults:
 			wrapped, ended := standingPush(s.log, standing, ok, "fault set",
 				func(v *agentreplv1.DaemonFaultsStanding) *agentreplv1.WatchDaemonResponse {
@@ -750,6 +750,8 @@ func (s *server) watchDaemon(
 		if err := out.Send(push); err != nil {
 			s.log.Debug("WatchDaemon", "the standing stream's client went away",
 				dlog.Context{"cause": err.Error()})
+			// THE PUSH WILL NEVER BE WRITTEN, so its count ends here.
+			ack()
 			return nil
 		}
 		ack()

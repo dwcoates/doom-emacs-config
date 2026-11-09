@@ -229,24 +229,11 @@ func TestALayoutChangeRestartsTheDaemonAndItsReplacementServes(t *testing.T) {
 	}
 }
 
-// awaitNewAdvertisement polls daemon.addr until it names an address other than
-// old, bounded by the daemon's own context -- never a fixed sleep.
+// awaitNewAdvertisement waits for daemon.addr to name an address other than
+// old, following the file's changes.
 func awaitNewAdvertisement(t *testing.T, d *harness.Daemon, old string) string {
 	t.Helper()
-	ticker := time.NewTicker(5 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		if body, err := os.ReadFile(d.AddrFile()); err == nil {
-			if addr := harness.AddrLine(string(body)); addr != "" && addr != old {
-				return addr
-			}
-		}
-		select {
-		case <-ticker.C:
-		case <-d.Ctx().Done():
-			t.Fatalf("daemon.addr never named a replacement: %v", d.Ctx().Err())
-		}
-	}
+	return d.AwaitAddrMatching("a replacement for "+old, func(addr string) bool { return addr != "" && addr != old })
 }
 
 // AN ADDITIVE LAYOUT CHANGE IS HANDED OVER (owner ruling, 2026-09-30): the

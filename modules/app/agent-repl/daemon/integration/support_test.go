@@ -7,12 +7,12 @@ package integration
 
 import (
 	"agentrepl/protohelpers/rosterwalk"
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -96,6 +96,23 @@ func newOpened(t *testing.T, opts harness.Opts) *fixture {
 	// however healthy its shim link is. Holding both here is what makes this
 	// fixture the OPENED workspace it claims to be rather than a half-open one
 	// whose footer would read disconnected forever.
+	f.host = f.d.WatchHost(f.ws)
+	f.web = f.d.WatchWeb(f.ws)
+	return f
+}
+
+// newOpenedOn is newOpened on a view of a daemon another fixture owns
+// (harness.Daemon.View): t's own failures, run budget and warning sweep, over
+// a fresh repository and workspace t registers and opens. It is for cases that
+// share one expensive daemon under AGENTS.md "A case may share an expensive
+// fixture, never a slice another case reads".
+func newOpenedOn(t *testing.T, owner *harness.Daemon) *fixture {
+	t.Helper()
+	d := owner.View(t)
+	repo := harness.NewRepo(t)
+	ws := harness.Register(t, d, repo.Dir)
+	f := &fixture{d: d, repo: repo, ws: ws, t: t}
+	f.open()
 	f.host = f.d.WatchHost(f.ws)
 	f.web = f.d.WatchWeb(f.ws)
 	return f
@@ -194,27 +211,41 @@ func (f *fixture) openFeed(feed *frontendv1.FeedId) (*frontendv1.FeedPage, *agen
 	return success.GetPage(), success.GetWatch()
 }
 
-// openFeedOnceCarrying re-opens the root feed until its page satisfies the
-// predicate, and answers that page and its token. It exists because a fake
-// shim push is fire-and-forget: nothing tells a test when the daemon has
-// finished routing a frame, and re-taking the open is how a test synchronizes
-// on the page without sleeping.
+// openFeedOnceCarrying answers the root feed's page and token once the page
+// satisfies the predicate (openFeedUntil).
 func (f *fixture) openFeedOnceCarrying(what string, pred func(*frontendv1.FeedPage) bool) (*frontendv1.FeedPage, *agentreplv1.FeedWatchToken) {
 	f.t.Helper()
-	ticker := time.NewTicker(10 * time.Millisecond)
-	defer ticker.Stop()
+	return openFeedUntil(f.t, f.d, f.d.Client(), func() (*frontendv1.FeedPage, *agentreplv1.FeedWatchToken) { return f.openFeed(nil) }, what, pred)
+}
+
+// openFeedUntil opens a feed (open) until its page satisfies pred, and
+// answers that page and its token. A fake shim push is fire-and-forget:
+// nothing tells a test when the daemon has finished routing a frame. Every
+// change to a feed's rows is published on its tail, so the page is opened
+// again on each row the tail (client's WatchFeed of the first open's token)
+// delivers, never on a timer.
+func openFeedUntil(t *testing.T, d *harness.Daemon, client feedWatcher, open func() (*frontendv1.FeedPage, *agentreplv1.FeedWatchToken), what string, pred func(*frontendv1.FeedPage) bool) (*frontendv1.FeedPage, *agentreplv1.FeedWatchToken) {
+	t.Helper()
+	page, token := open()
+	if pred(page) {
+		return page, token
+	}
+	changes := d.WatchFeedOn(client, token)
+	defer changes.Close()
+	wait, cancelWait := d.WaitCtx()
+	defer cancelWait()
 	for {
-		page, token := f.openFeed(nil)
+		harness.AwaitNext(t, wait, changes, "a feed change toward a page carrying "+what)
+		page, token = open()
 		if pred(page) {
 			return page, token
 		}
-		select {
-		case <-ticker.C:
-		case <-f.d.Ctx().Done():
-			f.t.Fatalf("waiting for a feed page carrying %s: %v", what, f.d.Ctx().Err())
-			return nil, nil
-		}
 	}
+}
+
+// feedWatcher is the one call openFeedUntil makes of a client.
+type feedWatcher interface {
+	WatchFeed(context.Context, *connect.Request[agentreplv1.WatchFeedRequest]) (*connect.ServerStreamForClient[agentreplv1.WatchFeedResponse], error)
 }
 
 // awaitRowInFeed answers a row of a feed that satisfies the predicate, looking
@@ -778,5 +809,37 @@ func TestEveryScriptedClaudeIsWrittenByOneHelper(t *testing.T) {
 				t.Fatalf("%s writes its fake claude by hand", file)
 			}
 		})
+	}
+}
+
+// TestEveryFeedReopenLoopIsOpenFeedUntil pins the one home of "re-open the
+// feed on each row its tail delivers until the page matches": a test that
+// hand-rolls the loop beside openFeedUntil fails here.
+func TestEveryFeedReopenLoopIsOpenFeedUntil(t *testing.T) {
+	// Arrange.
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Act.
+	var sites []string
+	for _, e := range entries {
+		if !strings.HasSuffix(e.Name(), "_test.go") {
+			continue
+		}
+		src, err := os.ReadFile(e.Name())
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Spelled in two parts so this test's own source is not a site.
+		for range strings.Count(string(src), `"a feed change`+` toward `) {
+			sites = append(sites, e.Name())
+		}
+	}
+
+	// Assert.
+	if strings.Join(sites, ",") != "support_test.go" {
+		t.Fatalf("feed re-open loops in %v, want only openFeedUntil's in support_test.go", sites)
 	}
 }

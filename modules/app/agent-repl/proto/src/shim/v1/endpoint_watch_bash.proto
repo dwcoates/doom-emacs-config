@@ -16,6 +16,12 @@ message WatchBashRequest {
   // stored: the stream waits for the first. Any other handle whose run has no
   // stored row is refused.
   conversation.v1.DetachedWorkId work = 1;
+  // Whether the caller HEARD this handle announced (by this shim or one before
+  // it on the same session). When set, a run the store holds no row for yet is
+  // WAITED on, exactly as a live shell's is, whether or not this shim still
+  // holds it live: a shell that ended before the sidecar read its spool has no
+  // row yet and will have one. When unset, the rule above decides.
+  bool expected = 2;
 }
 
 // One frame: the bash unit itself. Opens with `start` (the command, the

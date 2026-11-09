@@ -594,8 +594,8 @@ type Sinks struct {
 	// Its call takes only its own lock, never the watcher's.
 	Measurements MeasurementsSink
 	// Clock is NOT A SINK but rides the same wiring: the one view of time the
-	// watcher waits on, for a refused watch's re-open (reopen.go). REQUIRED:
-	// production wires clock.System, and a test a clock it fires by hand.
+	// watcher stamps its recorded waits with (await.go). REQUIRED: production
+	// wires clock.System, and a test a clock it controls.
 	Clock clock.Clock
 }
 

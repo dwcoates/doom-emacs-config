@@ -851,9 +851,10 @@ type serveExit struct {
 	// reaches its client.
 	AwaitCreates func()
 	// EndStreams, when non-nil, ends every standing stream the surface serves
-	// (the server's Close); the shutdown runs it once the answers owed have
-	// left, and waits for every stream's end frame before the process can
-	// exit.
+	// (the server's Close); the shutdown runs it once the pushes owed were
+	// sent, and waits for every stream's end -- each answer and each end
+	// frame -- to be on the socket before the process can exit. Nil ends
+	// nothing, and the answers' ends are still waited on.
 	EndStreams func()
 	// Mark, when non-nil, is told each step of the shutdown and when it began,
 	// so the teardown record (teardownClock) names which step an exit spent
@@ -946,60 +947,53 @@ func serve(ctx context.Context, l net.Listener, h http.Handler, exit serveExit) 
 			exit.AwaitCreates()
 			mark("serve_await_creates", start)
 		}
-		// THE CALLS BEING ANSWERED GO FIRST, and this is the wait that
-		// actually happens. `UpdateShutdownSchedule{now}` ends the serving
-		// lifetime from inside its own handler, so the exit races its own
-		// answer unless something holds the exit until that answer is written.
-		// Measured in the e2e sandbox: the handler recorded "applied the
-		// shutdown schedule" and every open stream had been ended 211
-		// microseconds later, so the caller read `unexpected EOF` from a stop
-		// the daemon had performed. AwaitQuiet says so loudly when its own
-		// bound expires; nothing is swallowed.
+		// ONE DEADLINE, THE EXIT'S GRACE. Every wait below ends on its own
+		// event (a handler's return, a push sent, a stream's end on the
+		// socket); the deadline is only where something that never comes is
+		// given up on, so a loaded host spends more of the grace instead of
+		// tripping a bound sized for an idle one.
+		deadline := time.Now().Add(grace)
+		// THE CALLS BEING ANSWERED GO FIRST. `UpdateShutdownSchedule{now}`
+		// ends the serving lifetime from inside its own handler, so the exit
+		// races its own answer unless something holds the exit until that
+		// answer is produced and then written. Measured in the e2e sandbox:
+		// the handler recorded "applied the shutdown schedule" and every open
+		// stream had been ended 211 microseconds later, so the caller read
+		// `unexpected EOF` from a stop the daemon had performed. This waits
+		// for the handlers; the last wait below waits for their bytes.
 		start := time.Now()
-		gate.AwaitQuiet(grace)
+		gate.AwaitQuiet(time.Until(deadline))
 		mark("serve_await_quiet", start)
-		// AND THEN THE STANDING STREAMS' OWN LAST WORDS. The gate counts
-		// unary calls only — a Watch* handler does not return until its
-		// client goes away, so counting one would make every exit wait out
-		// its whole grace — but the daemon's last push goes out on exactly
-		// those streams. `drain.fire` pushes `DaemonShutdownAnnounced` onto
-		// every WatchDaemon stream and calls Exit on the next line, so
-		// AwaitQuiet sees nothing in flight, returns at once, and Shutdown
-		// closes the streams over an announcement that never reached the
-		// socket. The page then waits out its own budget for a banner the
-		// daemon did draw, which is `TestWebappLayerRoster`'s "the drain
-		// banner was never drawn within 5000ms".
-		//
-		// Bounded by writesQuietBound, and a link still speaking at the end
-		// of it says so through the gate's own logger rather than being
-		// treated as an error: one h2 connection multiplexes the pushes with
-		// everything else, so a genuinely busy link never falls silent and is
-		// not a lost announcement.
+		// AND THEN THE STANDING STREAMS' OWN LAST WORDS. `drain.fire` pushes
+		// `DaemonShutdownAnnounced` onto every WatchDaemon stream and calls
+		// Exit on the next line; ending the streams before each push is sent
+		// would close them over an announcement that never reached the page
+		// (`TestWebappLayerRoster`'s "the drain banner was never drawn"). Each
+		// push is counted until its stream sent it, so this waits for exactly
+		// the pushes owed and not for the link to fall silent.
 		start = time.Now()
-		gate.AwaitWritesQuiet(writesQuietBound)
-		mark("serve_writes_quiet", start)
+		gate.AwaitPushesSent(deadline)
+		mark("serve_pushes_sent", start)
 		// EVERY STANDING STREAM ENDS WITH ITS END FRAME, BEFORE THE PROCESS
 		// CAN EXIT. `Shutdown` below cannot do it: it neither closes nor waits
 		// for a hijacked h2c connection, and the surface's own Close used to
 		// run only as a deferred call the process exit raced -- so every client
 		// still watching (a workspace no transfer notice reached, the roster)
 		// read "producer closed without an end frame". The streams are ended
-		// here, after the last pushes have left, and the exit waits for each
-		// one's end frame to reach the socket. This holds on EVERY exit path:
-		// a handover's last transfer, a restart's stand-down, a drain, a
-		// signal, a state-root loss.
-		if exit.EndStreams != nil {
-			start = time.Now()
-			// ONE DEADLINE, THE EXIT'S GRACE. The streams end on their own
-			// events (each handler's return, each end frame's write); the
-			// deadline is only where a stream that never ends is given up on,
-			// so a loaded host spends more of the grace instead of tripping a
-			// bound sized for an idle one.
-			deadline := time.Now().Add(grace)
-			gate.EndStreams(deadline, exit.EndStreams)
-			gate.AwaitStreamsEnded(deadline)
-			mark("serve_end_streams", start)
+		// here, after the last pushes were sent, and the exit waits for every
+		// h2 stream's end -- each answer and each end frame -- to reach the
+		// socket. This holds on EVERY exit path: a handover's last transfer, a
+		// restart's stand-down, a drain, a signal, a state-root loss.
+		endStreams := exit.EndStreams
+		if endStreams == nil {
+			// NOTHING STANDING TO END, but every answer's end is still waited
+			// onto the socket.
+			endStreams = func() {}
 		}
+		start = time.Now()
+		gate.EndStreams(deadline, endStreams)
+		gate.AwaitStreamsEnded(deadline)
+		mark("serve_end_streams", start)
 		// THE GRACE IS BOUNDED. Graceful shutdown waits for every in-flight
 		// request, and this daemon's Watch* handlers are STANDING STREAMS that
 		// end only when their client goes away — so an unbounded wait is a
@@ -1248,18 +1242,6 @@ func (w *addrWithdrawal) finish() {
 		"address": w.claim.Address(),
 	})
 }
-
-// writesQuietBound is how long the exit gives the connections to stop writing
-// after every counted call has been answered.
-//
-// IT IS `server.answerWriteBound`'s SIBLING and is sized the same way: what it
-// covers is one `write(2)` of a few dozen bytes of a push onto a loopback or
-// unix socket by a goroutine that is already runnable, and the barrier ends on
-// quiescence rather than on this clock, so the ordinary exit spends about two
-// `barrierSettle` ticks here rather than this bound. 250ms is a last resort,
-// deliberately well under `shutdownGrace` so a link that never falls silent
-// cannot spend the exit's own budget on top of it.
-const writesQuietBound = 250 * time.Millisecond
 
 // testBarrierEnv is set to "1" by the integration harness for every daemon it
 // starts; it is what serves the test barrier (server.Deps.TestBarrier).

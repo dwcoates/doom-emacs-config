@@ -2,8 +2,7 @@ package server
 
 import (
 	"agent-repld/internal/dlog"
-	"context"
-	"crypto/tls"
+	"agent-repld/internal/inflight"
 	"io"
 	"net"
 	"net/http"
@@ -13,8 +12,6 @@ import (
 	"sync"
 	"testing"
 	"time"
-
-	"golang.org/x/net/http2"
 )
 
 // TestAwaitQuietWaitsForACallStillBeingAnswered pins the whole point of the
@@ -41,22 +38,16 @@ func TestAwaitQuietWaitsForACallStillBeingAnswered(t *testing.T) {
 	}()
 	<-entered
 
-	// Act: the exit's wait, on a bound the parked call will outlast.
-	quiet := make(chan int, 1)
-	go func() { quiet <- serving.AwaitQuiet(time.Minute) }()
-
-	// Assert: it does not settle while the call is being answered, and does
-	// the moment it has been.
-	select {
-	case left := <-quiet:
-		t.Fatalf("AwaitQuiet returned %d while a call was still being answered", left)
-	case <-time.After(50 * time.Millisecond):
-	}
+	// Act: the exit's wait while the call is parked, then once it returned.
+	parked := serving.AwaitQuiet(0)
 	close(release)
-	if left := <-quiet; left != 0 {
-		t.Fatalf("AwaitQuiet = %d after the call was answered, want 0", left)
-	}
 	<-answered
+	settled := serving.AwaitQuiet(time.Minute)
+
+	// Assert.
+	if parked != 1 || settled != 0 {
+		t.Fatalf("AwaitQuiet = (%d parked, %d answered), want (1, 0)", parked, settled)
+	}
 }
 
 // TestAwaitQuietReportsTheCallsItGaveUpOn pins the loud half: a bound that
@@ -85,7 +76,7 @@ func TestAwaitQuietReportsTheCallsItGaveUpOn(t *testing.T) {
 	<-entered
 
 	// Act
-	left := serving.AwaitQuiet(10 * time.Millisecond)
+	left := serving.AwaitQuiet(0)
 
 	// Assert
 	if left != 1 {
@@ -138,19 +129,15 @@ func TestStandingStreamPathsComeFromTheDescriptor(t *testing.T) {
 	}
 }
 
-// TestAwaitQuietWaitsForTheAnswerToLeaveNotForTheHandlerToReturn is the
-// difference this gate has twice got wrong: the handler had returned, the exit
-// proceeded, and the caller still read a cut connection because the response
-// had not been written yet.
+// TestAwaitStreamsEndedWaitsForTheAnswerToLeave is the difference this gate
+// has twice got wrong: the handler had returned, the exit proceeded, and the
+// caller still read a cut connection because the response had not been
+// written yet.
 //
-// IT DRIVES A REAL SOCKET, and it has to. The version this replaces asserted
-// against `httptest.NewRecorder` and a hand-made request context, on the belief
-// that the request context ends when the stream closes. It does not:
-// `serverConn.runHandler` cancels it BEFORE the same defer produces the
-// answer's frames, so that test passed over the very defect it was named for.
-// Here the connection's own writes are held, which is the only statement of
-// "the answer has not left" that is not a belief about http2's internals.
-func TestAwaitQuietWaitsForTheAnswerToLeaveNotForTheHandlerToReturn(t *testing.T) {
+// IT DRIVES A REAL SOCKET, and it has to: the connection's own writes are
+// held, which is the only statement of "the answer has not left" that is not
+// a belief about http2's internals.
+func TestAwaitStreamsEndedWaitsForTheAnswerToLeave(t *testing.T) {
 	// Arrange: one h2c call whose response frames cannot reach the socket
 	// until the test lets them.
 	var held writeHold
@@ -161,42 +148,141 @@ func TestAwaitQuietWaitsForTheAnswerToLeaveNotForTheHandlerToReturn(t *testing.T
 		held.hold()
 		close(returned)
 	}), nil)
-	tcp, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("listen: %v", err)
-	}
-	httpServer := &http.Server{Handler: serving}
+	url := serveHeld(t, serving, &held, release)
+	answered := make(chan struct{})
 	go func() {
-		_ = httpServer.Serve(serving.Listener(&heldWriteListener{Listener: tcp, held: &held, release: release}))
+		defer close(answered)
+		resp, err := h2cClient().Post(url+"/agentrepl.v1.AgentRepl/SelectWorkspace", "application/proto", nil)
+		if err == nil {
+			_, _ = io.Copy(io.Discard, resp.Body)
+			_ = resp.Body.Close()
+		}
 	}()
-	t.Cleanup(func() { _ = httpServer.Close() })
-	client := &http.Client{Transport: &http2.Transport{
-		AllowHTTP: true,
-		DialTLSContext: func(ctx context.Context, network, addr string, _ *tls.Config) (net.Conn, error) {
-			var d net.Dialer
-			return d.DialContext(ctx, network, addr)
-		},
-	}}
+	<-returned
+	serving.EndStreams(time.Now(), func() {})
+
+	// Act: the wait with the answer parked, then once the socket took it.
+	parked := serving.AwaitStreamsEnded(time.Now())
+	close(release)
+	<-answered
+	written := serving.AwaitStreamsEnded(time.Now().Add(time.Minute))
+
+	// Assert.
+	if parked != 1 || written != 0 {
+		t.Fatalf("AwaitStreamsEnded = (%d parked, %d written), want (1, 0)", parked, written)
+	}
+}
+
+// TestAnAnswerNotWrittenByTheExitsDeadlineIsRecordedAtError pins the loud
+// half: the record says how many streams were left and on which connection.
+func TestAnAnswerNotWrittenByTheExitsDeadlineIsRecordedAtError(t *testing.T) {
+	// Arrange.
+	var held writeHold
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	returned := make(chan struct{})
+	log := dlog.NewTestLogger()
+	serving := H2C(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, "ok")
+		held.hold()
+		close(returned)
+	}), log)
+	url := serveHeld(t, serving, &held, release)
 	go func() {
-		resp, err := client.Post("http://"+tcp.Addr().String()+"/agentrepl.v1.AgentRepl/SelectWorkspace", "application/proto", nil)
+		resp, err := h2cClient().Post(url+"/agentrepl.v1.AgentRepl/SelectWorkspace", "application/proto", nil)
 		if err == nil {
 			_ = resp.Body.Close()
 		}
 	}()
 	<-returned
+	deadline := time.Now()
 
-	// Act, Assert: the gate holds while the answer is still unwritten, and
-	// lets go once the socket has taken it.
-	quiet := make(chan int, 1)
-	go func() { quiet <- serving.AwaitQuiet(time.Minute) }()
-	select {
-	case left := <-quiet:
-		t.Fatalf("AwaitQuiet returned %d with the answer's own frames not yet written to the socket", left)
-	case <-time.After(50 * time.Millisecond):
+	// Act.
+	serving.AwaitStreamsEnded(deadline)
+
+	// Assert.
+	got := dlog.FilterRecords(log.Records(), dlog.RecordQuery{Operation: "daemon.server.streams_unwritten"})
+	if len(got) != 1 || got[0].Level != dlog.LevelError || got[0].Context["open"] != 1 ||
+		got[0].Context["deadline"] != deadline.Format(time.RFC3339Nano) {
+		t.Fatalf("records = %+v, want one ERROR naming the one unwritten stream and the deadline", got)
 	}
-	close(release)
-	if left := <-quiet; left != 0 {
-		t.Fatalf("AwaitQuiet = %d once the answer was written, want 0", left)
+}
+
+// TestAnH2cUpgradeIsRefused pins the one way an HTTP/1.1 connection could turn
+// into uncounted h2 streams.
+func TestAnH2cUpgradeIsRefused(t *testing.T) {
+	// Arrange.
+	reached := false
+	log := dlog.NewTestLogger()
+	serving := H2C(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { reached = true }), log)
+	req := httptest.NewRequest(http.MethodGet, "/agentrepl.v1.AgentRepl/SelectWorkspace", nil)
+	req.Header.Set("Connection", "Upgrade, HTTP2-Settings")
+	req.Header.Set("Upgrade", "h2c")
+	req.Header.Set("HTTP2-Settings", "")
+	rec := httptest.NewRecorder()
+
+	// Act.
+	serving.ServeHTTP(rec, req)
+
+	// Assert.
+	if rec.Code != http.StatusBadRequest || reached {
+		t.Fatalf("upgrade answered %d (handler reached %t), want 400 and no handler", rec.Code, reached)
+	}
+}
+
+// TestAnH2cUpgradeIsRecordedAtError pins the refusal's record.
+func TestAnH2cUpgradeIsRecordedAtError(t *testing.T) {
+	// Arrange.
+	log := dlog.NewTestLogger()
+	serving := H2C(http.NotFoundHandler(), log)
+	req := httptest.NewRequest(http.MethodGet, "/agentrepl.v1.AgentRepl/SelectWorkspace", nil)
+	req.Header.Set("Upgrade", "h2c")
+
+	// Act.
+	serving.ServeHTTP(httptest.NewRecorder(), req)
+
+	// Assert.
+	got := dlog.FilterRecords(log.Records(), dlog.RecordQuery{Operation: "daemon.server.h2c_upgrade_refused"})
+	if len(got) != 1 || got[0].Level != dlog.LevelError || got[0].Context["path"] != "/agentrepl.v1.AgentRepl/SelectWorkspace" {
+		t.Fatalf("records = %+v, want one ERROR naming the path", got)
+	}
+}
+
+// TestAwaitPushesSentWaitsForAPushNotYetSent pins the exit's wait on the
+// daemon's last words: a push counted on its way to a stream holds it.
+func TestAwaitPushesSentWaitsForAPushNotYetSent(t *testing.T) {
+	// Arrange.
+	serving := H2C(http.NotFoundHandler(), dlog.NewTestLogger())
+	serving.pushes = &inflight.Tracker{}
+	sent := serving.pushes.Begin()
+
+	// Act.
+	pending := serving.AwaitPushesSent(time.Now())
+	sent()
+	settled := serving.AwaitPushesSent(time.Now().Add(time.Minute))
+
+	// Assert.
+	if pending || !settled {
+		t.Fatalf("AwaitPushesSent = (%t pending, %t sent), want (false, true)", pending, settled)
+	}
+}
+
+// TestAPushNotSentByTheExitsDeadlineIsRecordedAtWarn pins the record of a
+// stream ended over a push.
+func TestAPushNotSentByTheExitsDeadlineIsRecordedAtWarn(t *testing.T) {
+	// Arrange.
+	log := dlog.NewTestLogger()
+	serving := H2C(http.NotFoundHandler(), log)
+	serving.pushes = &inflight.Tracker{}
+	defer serving.pushes.Begin()()
+
+	// Act.
+	serving.AwaitPushesSent(time.Now())
+
+	// Assert.
+	got := dlog.FilterRecords(log.Records(), dlog.RecordQuery{Operation: "daemon.server.await_pushes_sent"})
+	if len(got) != 1 || got[0].Level != dlog.LevelWarn || got[0].Context["pending"] != 1 {
+		t.Fatalf("records = %+v, want one WARN naming the one pending push", got)
 	}
 }
 
@@ -249,172 +335,31 @@ func (c *heldWriteConn) Write(p []byte) (int, error) {
 	return c.Conn.Write(p)
 }
 
+// serveHeld serves SERVING the way run.go serves the real one -- through the
+// gate's own listener -- over a socket whose writes park on held, and answers
+// its base URL.
+func serveHeld(t *testing.T, serving *Serving, held *writeHold, release chan struct{}) string {
+	t.Helper()
+	tcp, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	httpServer := &http.Server{Handler: serving}
+	go func() {
+		_ = httpServer.Serve(serving.Listener(&heldWriteListener{Listener: tcp, held: held, release: release}))
+	}()
+	t.Cleanup(func() { _ = httpServer.Close() })
+	return "http://" + tcp.Addr().String()
+}
+
 // servedThroughTheGate starts a test server the way run.go serves the real one:
-// through the gate's OWN listener, so a call counts as answered only once its
-// bytes have left the socket. A test that served the bare listener would be
-// testing a gate the daemon does not run.
+// through the gate's OWN listener. A test that served the bare listener would
+// be testing a gate the daemon does not run.
 func servedThroughTheGate(serving *Serving) *httptest.Server {
 	httpServer := httptest.NewUnstartedServer(serving)
 	httpServer.Listener = serving.Listener(httpServer.Listener)
 	httpServer.Start()
 	return httpServer
-}
-
-// TestWriteBarrierIsNotQuietUntilTheAnswerHasBeenWritten pins the fact the
-// whole barrier exists for: a handler that has returned has not yet spoken, and
-// the barrier says so until the socket has taken its bytes.
-func TestWriteBarrierIsNotQuietUntilTheAnswerHasBeenWritten(t *testing.T) {
-	// Arrange: a barrier that has seen no write at all.
-	barrier := &WriteBarrier{}
-	mark := barrier.Mark()
-
-	// Act.
-	quiet := barrier.AwaitWrittenSince(mark, 20*time.Millisecond)
-
-	// Assert.
-	if quiet {
-		t.Fatal("AwaitWrittenSince = true with nothing written since the mark; an exit would run over the answer")
-	}
-}
-
-// TestWriteBarrierSettlesOnceTheConnectionHasSpokenAndStopped pins the other
-// half: a write past the mark, followed by quiet, is the answer having left.
-func TestWriteBarrierSettlesOnceTheConnectionHasSpokenAndStopped(t *testing.T) {
-	// Arrange.
-	barrier := &WriteBarrier{}
-	inner, outer := net.Pipe()
-	t.Cleanup(func() { _ = inner.Close(); _ = outer.Close() })
-	drained := make(chan struct{})
-	go func() {
-		defer close(drained)
-		_, _ = io.ReadFull(outer, make([]byte, 4))
-	}()
-	counted := (&barrierListener{barrier: barrier}).count(inner)
-	mark := barrier.Mark()
-
-	// Act.
-	if _, err := counted.Write([]byte("done")); err != nil {
-		t.Fatalf("Write() = %v, want the bytes to go out", err)
-	}
-	<-drained
-	quiet := barrier.AwaitWrittenSince(mark, time.Second)
-
-	// Assert.
-	if !quiet {
-		t.Fatal("AwaitWrittenSince = false after the connection wrote and went quiet")
-	}
-}
-
-// TestWriteBarrierDoesNotCallABusyConnectionALostAnswer pins the second way the
-// barrier settles true: a connection that never falls silent within the bound
-// has still written past the mark, and reporting that as a lost answer would
-// put an ERROR record against a healthy run.
-func TestWriteBarrierDoesNotCallABusyConnectionALostAnswer(t *testing.T) {
-	// Arrange: a connection that writes without pause for the whole bound.
-	barrier := &WriteBarrier{}
-	inner, outer := net.Pipe()
-	t.Cleanup(func() { _ = inner.Close(); _ = outer.Close() })
-	stop := make(chan struct{})
-	go func() {
-		buf := make([]byte, 1)
-		for {
-			if _, err := outer.Read(buf); err != nil {
-				return
-			}
-		}
-	}()
-	counted := (&barrierListener{barrier: barrier}).count(inner)
-	go func() {
-		for {
-			select {
-			case <-stop:
-				return
-			default:
-			}
-			if _, err := counted.Write([]byte("x")); err != nil {
-				return
-			}
-		}
-	}()
-	mark := barrier.Mark()
-
-	// Act.
-	settled := barrier.AwaitWrittenSince(mark, 20*time.Millisecond)
-	close(stop)
-
-	// Assert.
-	if !settled {
-		t.Fatal("AwaitWrittenSince = false on a connection that wrote past the mark throughout; a busy link is not a lost answer")
-	}
-}
-
-// TestAwaitWritesQuietSettlesOnABarrierNothingHasWrittenTo covers the exit of a
-// daemon nothing is connected to: it owes nothing, so it must not spend the
-// bound proving that.
-func TestAwaitWritesQuietSettlesOnABarrierNothingHasWrittenTo(t *testing.T) {
-	// Arrange
-	barrier := &WriteBarrier{}
-
-	// Act
-	quiet := barrier.AwaitQuiescent(20 * time.Millisecond)
-
-	// Assert
-	if !quiet {
-		t.Fatal("AwaitQuiescent = false on a barrier no connection ever wrote to; the exit would wait out its bound for nothing")
-	}
-}
-
-// TestAwaitWritesQuietWaitsForAPushStillOnItsWayOut is the whole reason the
-// quiescent half exists: a push onto a STANDING stream is not a counted call,
-// so nothing else in the exit is holding it.
-func TestAwaitWritesQuietWaitsForAPushStillOnItsWayOut(t *testing.T) {
-	// Arrange: a connection whose Write is blocked mid-flight, exactly as a
-	// push whose bytes have not reached the socket is.
-	barrier := &WriteBarrier{}
-	inner, outer := net.Pipe()
-	t.Cleanup(func() { _ = inner.Close(); _ = outer.Close() })
-	counted := (&barrierListener{barrier: barrier}).count(inner)
-	writing := make(chan struct{})
-	go func() {
-		close(writing)
-		_, _ = counted.Write([]byte("push"))
-	}()
-	<-writing
-
-	// Act: the reader never takes the bytes, so the write stays in flight.
-	quiet := barrier.AwaitQuiescent(20 * time.Millisecond)
-
-	// Assert
-	if quiet {
-		t.Fatal("AwaitQuiescent = true while a write was still in flight; the exit would close the stream over the push")
-	}
-}
-
-// TestAwaitWritesQuietSettlesOnceThePushHasLeft is the other half: the bytes
-// are on the socket, so the exit may close the streams.
-func TestAwaitWritesQuietSettlesOnceThePushHasLeft(t *testing.T) {
-	// Arrange
-	barrier := &WriteBarrier{}
-	inner, outer := net.Pipe()
-	t.Cleanup(func() { _ = inner.Close(); _ = outer.Close() })
-	drained := make(chan struct{})
-	go func() {
-		defer close(drained)
-		_, _ = io.ReadFull(outer, make([]byte, 4))
-	}()
-	counted := (&barrierListener{barrier: barrier}).count(inner)
-	if _, err := counted.Write([]byte("push")); err != nil {
-		t.Fatalf("Write() = %v, want the bytes to go out", err)
-	}
-	<-drained
-
-	// Act
-	quiet := barrier.AwaitQuiescent(time.Second)
-
-	// Assert
-	if !quiet {
-		t.Fatal("AwaitQuiescent = false after the connection wrote and went quiet")
-	}
 }
 
 // standingStreamServing serves one standing stream whose handler flushes its
@@ -434,16 +379,7 @@ func standingStreamServingLogged(t *testing.T, ended <-chan struct{}, held *writ
 		<-ended
 		held.hold()
 	}), log)
-	tcp, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("listen: %v", err)
-	}
-	httpServer := &http.Server{Handler: serving}
-	go func() {
-		_ = httpServer.Serve(serving.Listener(&heldWriteListener{Listener: tcp, held: held, release: release}))
-	}()
-	t.Cleanup(func() { _ = httpServer.Close() })
-	return serving, "http://" + tcp.Addr().String() + "/agentrepl.v1.AgentRepl/WatchDaemon"
+	return serving, serveHeld(t, serving, held, release) + "/agentrepl.v1.AgentRepl/WatchDaemon"
 }
 
 // openStream opens the standing stream and answers once its headers arrived,
@@ -467,46 +403,44 @@ func openStream(t *testing.T, url string) {
 // returned from its handler before its end frame is written, and the wait
 // holds until the socket has taken it.
 func TestAwaitStreamsEndedWaitsForTheEndFrameToLeave(t *testing.T) {
-	// Arrange
+	// Arrange.
 	var held writeHold
 	ended, release := make(chan struct{}), make(chan struct{})
 	serving, url := standingStreamServing(t, ended, &held, release)
 	openStream(t, url)
-
-	// Act
 	serving.EndStreams(time.Now().Add(time.Minute), func() { close(ended) })
-	gone := make(chan int, 1)
-	go func() { gone <- serving.AwaitStreamsEnded(time.Now().Add(time.Minute)) }()
-
-	// Assert
-	select {
-	case left := <-gone:
-		t.Fatalf("AwaitStreamsEnded returned %d with the end frame not yet written to the socket", left)
-	case <-time.After(50 * time.Millisecond):
+	if left := serving.awaitStreamHandlers(time.Now().Add(time.Minute)); left != 0 {
+		t.Fatalf("the ended stream's handler never returned: %d left", left)
 	}
+
+	// Act: the wait with the end frame parked, then once the socket took it.
+	parked := serving.AwaitStreamsEnded(time.Now())
 	close(release)
-	if left := <-gone; left != 0 {
-		t.Fatalf("AwaitStreamsEnded = %d once the end frame was written, want 0", left)
+	written := serving.AwaitStreamsEnded(time.Now().Add(time.Minute))
+
+	// Assert.
+	if parked != 1 || written != 0 {
+		t.Fatalf("AwaitStreamsEnded = (%d parked, %d written), want (1, 0)", parked, written)
 	}
 }
 
 // TestAwaitStreamsEndedReportsTheStreamsStillOpen pins the loud half: a stream
-// that did not end within the bound is answered, because its client will read
+// that did not end by the deadline is answered, because its client will read
 // a cut connection rather than an end frame.
 func TestAwaitStreamsEndedReportsTheStreamsStillOpen(t *testing.T) {
-	// Arrange
+	// Arrange.
 	var held writeHold
 	ended, release := make(chan struct{}), make(chan struct{})
 	t.Cleanup(func() { close(ended); close(release) })
 	serving, url := standingStreamServing(t, ended, &held, release)
 	openStream(t, url)
 
-	// Act
-	deadline := time.Now().Add(20 * time.Millisecond)
+	// Act.
+	deadline := time.Now()
 	serving.EndStreams(deadline, func() {})
 	left := serving.AwaitStreamsEnded(deadline)
 
-	// Assert
+	// Assert.
 	if left != 1 {
 		t.Fatalf("AwaitStreamsEnded = %d, want the one stream that never ended", left)
 	}
@@ -516,29 +450,21 @@ func TestAwaitStreamsEndedReportsTheStreamsStillOpen(t *testing.T) {
 // of the exit's one deadline: the record names how many streams were left
 // open and the deadline that passed.
 func TestAStreamStillOpenAtTheExitsDeadlineIsRecordedAtError(t *testing.T) {
-	// Arrange
+	// Arrange.
 	var held writeHold
 	ended, release := make(chan struct{}), make(chan struct{})
 	t.Cleanup(func() { close(ended); close(release) })
 	log := dlog.NewTestLogger()
 	serving, url := standingStreamServingLogged(t, ended, &held, release, log)
 	openStream(t, url)
-	deadline := time.Now().Add(20 * time.Millisecond)
+	deadline := time.Now()
 
-	// Act
+	// Act.
 	serving.EndStreams(deadline, func() {})
-	left := serving.AwaitStreamsEnded(deadline)
+	serving.AwaitStreamsEnded(deadline)
 
-	// Assert
-	if left != 1 {
-		t.Fatalf("AwaitStreamsEnded = %d, want 1", left)
-	}
-	var got []dlog.Record
-	for _, r := range log.Records() {
-		if r.Operation == "daemon.server.await_streams_ended" {
-			got = append(got, r)
-		}
-	}
+	// Assert.
+	got := dlog.FilterRecords(log.Records(), dlog.RecordQuery{Operation: "daemon.server.await_streams_ended"})
 	if len(got) != 1 || got[0].Level != dlog.LevelError || got[0].Context["open"] != 1 ||
 		got[0].Context["deadline"] != deadline.Format(time.RFC3339Nano) {
 		t.Fatalf("records = %+v, want one ERROR naming the one open stream and the deadline", got)
@@ -558,7 +484,7 @@ func TestTheExitsStreamRecordsNameEachOpenStreamByItsPath(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Arrange
+			// Arrange.
 			var held writeHold
 			ended, release := make(chan struct{}), make(chan struct{})
 			t.Cleanup(func() { close(ended); close(release) })
@@ -569,13 +495,13 @@ func TestTheExitsStreamRecordsNameEachOpenStreamByItsPath(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			deadline := time.Now().Add(20 * time.Millisecond)
+			deadline := time.Now()
 
-			// Act
+			// Act.
 			serving.EndStreams(deadline, func() {})
 			serving.AwaitStreamsEnded(deadline)
 
-			// Assert
+			// Assert.
 			want := []string{parsed.Path + "=1"}
 			var got []any
 			for _, r := range log.Records() {
@@ -590,44 +516,10 @@ func TestTheExitsStreamRecordsNameEachOpenStreamByItsPath(t *testing.T) {
 	}
 }
 
-// TestAnEndFrameNotWrittenByTheExitsDeadlineIsRecordedAtError pins the
-// per-stream wait: a stream the exit ended whose end frame never reached the
-// socket is recorded once the exit's deadline passes, and is uncounted after.
-func TestAnEndFrameNotWrittenByTheExitsDeadlineIsRecordedAtError(t *testing.T) {
-	// Arrange
-	var held writeHold
-	ended, release := make(chan struct{}), make(chan struct{})
-	t.Cleanup(func() { close(release) })
-	log := dlog.NewTestLogger()
-	serving, url := standingStreamServingLogged(t, ended, &held, release, log)
-	openStream(t, url)
-	deadline := time.Now().Add(20 * time.Millisecond)
-
-	// Act: the handler returns, and its end frame stays parked past the deadline.
-	serving.EndStreams(deadline, func() { close(ended) })
-	serving.AwaitStreamsEnded(deadline)
-	// The per-stream wait records BEFORE it uncounts the stream, so a second
-	// wait settling at zero means the record is in.
-	if left := serving.AwaitStreamsEnded(time.Now().Add(time.Minute)); left != 0 {
-		t.Fatalf("the stream was never uncounted: %d left", left)
-	}
-
-	// Assert
-	var got []dlog.Record
-	for _, r := range log.Records() {
-		if r.Operation == "daemon.server.stream_end_unwritten" {
-			got = append(got, r)
-		}
-	}
-	if len(got) != 1 || got[0].Level != dlog.LevelError || got[0].Context["deadline"] != deadline.Format(time.RFC3339Nano) {
-		t.Fatalf("records = %+v, want one ERROR naming the deadline", got)
-	}
-}
-
 // TestAnEndFrameWrittenBeforeTheDeadlineRecordsNothing pins the quiet half:
 // an exit whose streams end within the deadline records no error.
 func TestAnEndFrameWrittenBeforeTheDeadlineRecordsNothing(t *testing.T) {
-	// Arrange
+	// Arrange.
 	var held writeHold
 	ended, release := make(chan struct{}), make(chan struct{})
 	log := dlog.NewTestLogger()
@@ -635,12 +527,12 @@ func TestAnEndFrameWrittenBeforeTheDeadlineRecordsNothing(t *testing.T) {
 	openStream(t, url)
 	deadline := time.Now().Add(time.Minute)
 
-	// Act
+	// Act.
 	serving.EndStreams(deadline, func() { close(ended) })
 	close(release)
 	left := serving.AwaitStreamsEnded(deadline)
 
-	// Assert
+	// Assert.
 	if left != 0 {
 		t.Fatalf("AwaitStreamsEnded = %d, want 0", left)
 	}
@@ -654,43 +546,15 @@ func TestAnEndFrameWrittenBeforeTheDeadlineRecordsNothing(t *testing.T) {
 // TestAwaitStreamsEndedWithNoStreamSettlesAtOnce pins that a daemon nothing
 // watches has no end frame to wait for.
 func TestAwaitStreamsEndedWithNoStreamSettlesAtOnce(t *testing.T) {
-	// Arrange
+	// Arrange.
 	serving := H2C(http.NotFoundHandler(), nil)
 
-	// Act
-	serving.EndStreams(time.Now().Add(time.Minute), func() {})
-	left := serving.AwaitStreamsEnded(time.Now().Add(time.Minute))
+	// Act.
+	serving.EndStreams(time.Now(), func() {})
+	left := serving.AwaitStreamsEnded(time.Now())
 
-	// Assert
+	// Assert.
 	if left != 0 {
 		t.Fatalf("AwaitStreamsEnded = %d with no stream open, want 0", left)
-	}
-}
-
-// TestAStreamItsClientEndedIsNotHeldForAnEndFrame pins that only a stream the
-// EXIT ended waits on the socket: one that ended without the exit is owed no
-// wait, so it is uncounted the moment its handler returns, even while the
-// connection's writes are parked.
-func TestAStreamItsClientEndedIsNotHeldForAnEndFrame(t *testing.T) {
-	// Arrange
-	var held writeHold
-	ended, release := make(chan struct{}), make(chan struct{})
-	t.Cleanup(func() { close(release) })
-	serving, url := standingStreamServing(t, ended, &held, release)
-	openStream(t, url)
-
-	// Act
-	close(ended)
-	gone := make(chan int, 1)
-	go func() { gone <- serving.AwaitStreamsEnded(time.Now().Add(time.Minute)) }()
-
-	// Assert
-	select {
-	case left := <-gone:
-		if left != 0 {
-			t.Fatalf("AwaitStreamsEnded = %d, want 0", left)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("a stream the exit did not end was held waiting on the socket")
 	}
 }

@@ -83,8 +83,9 @@ type Deps struct {
 	// a refused entry waits on -- a workspace registered, a merge ended, a
 	// cold gate answered, a session started -- is drawn on the roster, so its
 	// change is what lets the entry in, and Run sweeps again on it while any
-	// entry waits.
-	FleetChanges func(ctx context.Context) <-chan struct{}
+	// entry waits. Each change is counted until ack (publish.Changes), which
+	// Run calls once the sweep it woke has run, or at once when nothing waits.
+	FleetChanges func(ctx context.Context) (changes <-chan struct{}, ack func())
 	// Log is the ingress's logger.
 	Log dlog.Surfaces
 

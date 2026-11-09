@@ -50,9 +50,6 @@ type agentWatch struct {
 	// completion is judged against: a completion whose ticket is no longer
 	// this field is superseded and discarded.
 	opening *openTicket
-	// reopenArmed marks a refused open's re-open armed on the clock
-	// (reopen.go), so a second refusal never arms a second timer.
-	reopenArmed bool
 }
 
 // shellWatch is one open WatchBash stream for one detached shell.
@@ -69,8 +66,6 @@ type shellWatch struct {
 	refusals int
 	// opening is the open in flight, as on agentWatch.
 	opening *openTicket
-	// reopenArmed marks a refused open's re-open armed, as on agentWatch.
-	reopenArmed bool
 }
 
 // shellReopenLimit is how many times one detached shell's watch is re-opened
@@ -112,7 +107,7 @@ type watcher struct {
 	client shimclient.Client
 	sinks  Sinks
 	log    dlog.Logger
-	// clock is what a refused watch's re-open waits on (reopen.go).
+	// clock stamps the waits a turn's watchers record (await.go).
 	clock clock.Clock
 
 	ctx    context.Context
@@ -243,10 +238,6 @@ type watcher struct {
 	// mu on a fleet that is not closed, and Close marks the fleet closed under
 	// mu before it waits, so no open is counted after the wait begins.
 	opens sync.WaitGroup
-	// retries tracks every armed re-open's goroutine (reopen.go), which Close
-	// joins after cancelling them. One is only ever armed under mu on a fleet
-	// that is not closed, exactly as an open is.
-	retries sync.WaitGroup
 	// closedTurns remembers how the last few turns ended, so a wait that
 	// arrives after the terminal is still answered; closedTurnOrder is its
 	// eviction order.
@@ -451,7 +442,7 @@ func start(ctx context.Context, ws ids.WorkspaceID, client shimclient.Client, se
 		return nil, errors.New("sessionwatcher: every sink but Holds is required")
 	}
 	if sinks.Clock == nil {
-		return nil, errors.New("sessionwatcher: a clock is required: a refused watch's re-open waits on it")
+		return nil, errors.New("sessionwatcher: a clock is required: the waits a turn's watchers record are stamped with it")
 	}
 	if err := session.Opening.validate(); err != nil {
 		log.Error("daemon.sessionwatcher.start_refused", "a watcher was started without deciding whether it replays or resumes", dlog.Context{
@@ -1097,9 +1088,6 @@ func (w *watcher) Close() error {
 	// what it got. Nothing this watcher started touches the client after
 	// Close returns.
 	w.opens.Wait()
-	// EVERY ARMED RE-OPEN IS JOINED TOO: its goroutine leaves on the cancel
-	// above without touching the client.
-	w.retries.Wait()
 	// WORK RECORDED BUT NOT YET HANDED OFF IS HANDED OFF HERE. A route records
 	// under the mutex and dispatches after releasing it; a Close that took the
 	// mutex between the two found nothing in flight to join, returned, and the
@@ -1762,7 +1750,7 @@ func (w *watcher) openAgentStreamLocked(a *agentWatch) {
 	if !ok {
 		return
 	}
-	req := watchRequest(a.id, w.known[watchKey(a.id)])
+	req := watchRequest(a.id, w.known[watchKey(a.id)], w.agentExpectedLocked(a))
 	if a.id == nil && req.GetTailOnly() != nil && w.turn != nil && *w.turn == w.factsTurn {
 		// THE ONE OPENING NO CATCH-UP COVERS. A turn the session facts stood
 		// open at attach closes on this watch, and with no mark held the watch
@@ -1783,8 +1771,12 @@ func (w *watcher) openAgentStreamLocked(a *agentWatch) {
 // agent the daemon holds nothing of is opened tail_only, and one it holds a
 // pointer of catches up from exactly that pointer. History is loaded only when
 // a reader asks for it, by the feed (ReadHistory), never by a watch.
-func watchRequest(target *conversationv1.AgentId, held *conversationv1.HistoryPointer) *shimv1.WatchAgentRequest {
-	req := &shimv1.WatchAgentRequest{Target: target}
+//
+// EXPECTED IS SAID ALOUD: an agent the daemon heard announced is opened with
+// `expected`, so the shim TAILS its empty book rather than refusing it, and
+// nothing here re-asks on a timer for rows that are already on their way.
+func watchRequest(target *conversationv1.AgentId, held *conversationv1.HistoryPointer, expected bool) *shimv1.WatchAgentRequest {
+	req := &shimv1.WatchAgentRequest{Target: target, Expected: expected}
 	if held != nil {
 		req.Opening = &shimv1.WatchAgentRequest_KnownThrough{KnownThrough: held}
 		return req
@@ -1819,11 +1811,7 @@ func (w *watcher) openAgent(t *openTicket, a *agentWatch, req *shimv1.WatchAgent
 		case w.openEndedByTeardownLocked("agent", watchKey(a.id), err):
 		case w.openEndedByDeathLocked("watch_agent", "WatchAgent could not be opened because the shim died", err):
 		case refusedOpen(err):
-			expected := w.agentExpectedLocked(a)
-			w.openRefusedLocked("watch_agent", watchKey(a.id), expected, &a.refusals, err)
-			if expected {
-				w.scheduleReopenLocked("watch_agent", watchKey(a.id), a.refusals, &a.reopenArmed, func() { w.reopenRefusedAgentLocked(a) })
-			}
+			w.openRefusedLocked("watch_agent", watchKey(a.id), w.refusalStandingLocked(a), &a.refusals, err)
 		default:
 			w.severedLocked("watch_agent", "WatchAgent could not be opened", err)
 		}
@@ -1883,11 +1871,7 @@ func (w *watcher) openShell(t *openTicket, s *shellWatch) {
 		case w.openEndedByTeardownLocked("shell", key, err):
 		case w.openEndedByDeathLocked("watch_bash", "WatchBash could not be opened because the shim died", err):
 		case refusedOpen(err):
-			expected := w.shells[key] == s
-			w.openRefusedLocked("watch_bash", key, expected, &s.refusals, err)
-			if expected {
-				w.scheduleReopenLocked("watch_bash", key, s.refusals, &s.reopenArmed, func() { w.reopenRefusedShellLocked(s) })
-			}
+			w.openRefusedLocked("watch_bash", key, refusalBroken, &s.refusals, err)
 		default:
 			w.severedLocked("watch_bash", "WatchBash could not be opened", err)
 		}
@@ -1940,37 +1924,75 @@ func (w *watcher) agentExpectedLocked(a *agentWatch) bool {
 	return a.id != nil && w.agents[a.id.GetValue()] == a
 }
 
+// refusalStanding is what one REFUSED open says about the shim.
+type refusalStanding int
+
+const (
+	// refusalBringUp is the MAIN agent's watch refused before the shim has a
+	// session: the ordinary bring-up race. The session's own stream is what
+	// re-opens it (retryRefusedMainLocked).
+	refusalBringUp refusalStanding = iota
+	// refusalUnannounced is a handle nothing announced: a disagreement about
+	// what exists.
+	refusalUnannounced
+	// refusalBroken is a handle the daemon heard announced and opened with
+	// `expected`, which the shim's contract says it WAITS on and never
+	// refuses. The shim broke that contract.
+	refusalBroken
+)
+
+// refusalStandingLocked classifies a refused agent watch open.
+func (w *watcher) refusalStandingLocked(a *agentWatch) refusalStanding {
+	switch {
+	case a == w.main:
+		return refusalBringUp
+	case w.agentExpectedLocked(a):
+		return refusalBroken
+	default:
+		return refusalUnannounced
+	}
+}
+
 // openRefusedLocked records a REFUSED open. It never severs the link and never
 // raises a link fault: the shim answered, so the hop is serving.
 //
-// An EXPECTED handle's refusal is the ordinary fresh-bring-up race -- the book
-// or the shell's rows are not registered yet -- so it is logged at INFO and
-// left for the re-open path (a session frame for the main watch, a repeated
-// announcement for detached work, the fleet re-open for everything) to open
-// again. A handle NOTHING announced, or an expected one whose refusals ran out
-// of retries, is a disagreement about what exists and is reported as its own
-// fault at WARN.
-func (w *watcher) openRefusedLocked(operation, handle string, expected bool, refusals *int, err error) {
+// NOTHING IS RE-ASKED ON A TIMER. Every open of a handle the daemon heard
+// announced carries `expected`, so the shim waits for the handle's first row
+// instead of refusing it, and the re-open a timer used to make is the stream's
+// own first frame. What is left to refuse is reported:
+//
+//   - the MAIN watch before the shim has a session is the bring-up race,
+//     logged at INFO up to openRefusalLimit and re-opened by the session's own
+//     stream; past the limit it is reported as a fault at WARN;
+//   - a handle nothing announced is reported as a fault at WARN at once;
+//   - an expected handle refused is the shim breaking its contract, reported
+//     at ERROR and as a fault at once.
+func (w *watcher) openRefusedLocked(operation, handle string, standing refusalStanding, refusals *int, err error) {
 	*refusals++
-	ctx := dlog.Context{"handle": handle, "refusals": *refusals, "expected": expected}
+	ctx := dlog.Context{"handle": handle, "refusals": *refusals}
 	if err != nil {
 		ctx["error"] = err.Error()
 	}
-	if expected && *refusals <= openRefusalLimit {
+	if standing == refusalBringUp && *refusals <= openRefusalLimit {
 		w.log.Info("daemon.sessionwatcher."+operation,
-			"the shim refused a watch open for a handle it does not hold yet; it will be re-opened", ctx)
+			"the shim refused the main watch before its session stands; the session's stream re-opens it", ctx)
 		return
 	}
 	// REPORTED ONCE PER RUN OF REFUSALS: the fault the first report opened
 	// stands until the watch opens, so every later refusal of the same run is
-	// the same disagreement, re-opened and recorded at DEBUG.
-	if *refusals > openRefusalLimit+1 || (!expected && *refusals > 1) {
+	// the same disagreement, recorded at DEBUG.
+	if (standing == refusalBringUp && *refusals > openRefusalLimit+1) || (standing != refusalBringUp && *refusals > 1) {
 		w.log.Debug("daemon.sessionwatcher."+operation,
-			"the shim still refuses the watch open; its fault stands and the watch will be re-opened", ctx)
+			"the shim still refuses the watch open; its fault stands", ctx)
 		return
 	}
-	w.log.Warn("daemon.sessionwatcher.watch_open_refused",
-		"the shim refused a watch open for a handle it will not serve", ctx)
+	if standing == refusalBroken {
+		w.log.Error("daemon.sessionwatcher.watch_open_refused",
+			"the shim refused a watch opened with expected, which its contract says it waits on; the watch has no stream until an announcement or the fleet re-opens it", ctx)
+	} else {
+		w.log.Warn("daemon.sessionwatcher.watch_open_refused",
+			"the shim refused a watch open for a handle it will not serve", ctx)
+	}
 	w.sinks.Lifecycle.OnWatchOpenRefused(w.ws, WatchOpenRefusal{
 		Operation: operation,
 		Handle:    handle,

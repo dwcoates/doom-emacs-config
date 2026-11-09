@@ -1131,6 +1131,28 @@ func AddrAdvertisement(raw string) daemonaddr.Advertisement {
 
 // AddrLine is the bare address a daemon.addr payload advertises, for tests
 // that only need the address the file names.
+// AwaitAddrMatching waits for daemon.addr to name an address match accepts and
+// answers it, checking at every change the kernel reports to the file: a
+// handover's successor rewriting it, an exit withdrawing it.
+func (d *Daemon) AwaitAddrMatching(what string, match func(addr string) bool) string {
+	d.t.Helper()
+	wait, cancelWait := d.waitCtx()
+	defer cancelWait()
+	var addr string
+	matches := func() bool {
+		body, err := os.ReadFile(d.AddrFile())
+		if err != nil {
+			return false
+		}
+		addr = AddrLine(string(body))
+		return match(addr)
+	}
+	if !awaitChange(d.t, wait, matches, followFiles(d.AddrFile())) {
+		d.t.Fatalf("waiting for daemon.addr to name %s (it names %q): %v", what, addr, grantedclock.Explain(wait))
+	}
+	return addr
+}
+
 func AddrLine(raw string) string {
 	return daemonaddr.ParseAdvertisement(raw).Address
 }

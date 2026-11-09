@@ -56,6 +56,17 @@ const (
 	// TAIL-ONLY, so a frame pushed before its watch subscribes is never
 	// delivered; a test pushes after this answers.
 	OpAwaitAgentWatch = "await_agent_watch"
+	// OpPushSessionUpdateWhenSubscribed is push_session_update held until a
+	// WatchSession stream is subscribed to receive it: a push to a hub nobody
+	// subscribed to is dropped, and the daemon subscribes when its bring-up
+	// opens WatchSession, which a test cannot observe from the wire. The fake
+	// waits on its own subscriber latch, so the push is one the daemon is
+	// guaranteed to see.
+	OpPushSessionUpdateWhenSubscribed = "push_session_update_when_subscribed"
+	// OpAwaitCount answers once RPC has received at least N requests in
+	// total: the recorder's own signal, so a test waits for a call rather
+	// than re-reading a count.
+	OpAwaitCount = "await_count"
 )
 
 // Stream names accepted by drop_stream.
@@ -106,6 +117,8 @@ type Command struct {
 	Fail string `json:"fail,omitempty"`
 	// Stderr is the failure evidence an `exit` leaves behind.
 	Stderr string `json:"stderr,omitempty"`
+	// N is the total `await_count` waits for.
+	N int `json:"n,omitempty"`
 	// TimeoutMS bounds a waiting op (`expect`) so a request that never arrives
 	// fails by name instead of hanging the suite. Zero means unbounded.
 	TimeoutMS int `json:"timeout_ms,omitempty"`
@@ -159,7 +172,7 @@ func ParseCommand(line []byte) (Command, error) {
 		return Command{}, fmt.Errorf("fakeshim: malformed control line: %w", err)
 	}
 	switch c.Op {
-	case OpPushSessionUpdate:
+	case OpPushSessionUpdate, OpPushSessionUpdateWhenSubscribed:
 		if c.Payload == "" {
 			return Command{}, fmt.Errorf("%s: payload is required", c.Op)
 		}
@@ -195,12 +208,15 @@ func ParseCommand(line []byte) (Command, error) {
 		if c.Payload == "" && c.Fail == "" {
 			return Command{}, fmt.Errorf("%s: payload or fail is required", c.Op)
 		}
-	case OpExpect, OpCount:
+	case OpExpect, OpCount, OpAwaitCount:
 		if c.RPC == "" {
 			return Command{}, fmt.Errorf("%s: rpc is required", c.Op)
 		}
 		if !knownRPC(c.RPC) {
 			return Command{}, fmt.Errorf("%s: unknown rpc %q", c.Op, c.RPC)
+		}
+		if c.Op == OpAwaitCount && c.N <= 0 {
+			return Command{}, fmt.Errorf("%s: n must be positive, got %d", c.Op, c.N)
 		}
 	case OpDropStream:
 		switch c.Stream {

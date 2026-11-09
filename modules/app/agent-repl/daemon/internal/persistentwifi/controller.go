@@ -14,6 +14,7 @@ import (
 
 	"agent-repld/internal/clock"
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/kernelevent"
 	"agent-repld/internal/protoarm"
 	"agent-repld/internal/publish"
 )
@@ -24,23 +25,22 @@ const (
 	opUpdate = "daemon.persistentwifi.update"
 )
 
-// DefaultEvery is how often the standing is re-read. It bounds how long a
-// change made OUTSIDE agent-repl (a network dropping, `pmset` run by hand)
-// takes to reach the topbar and Emacs, and how long a dropped network goes
-// unanswered by the hotspot failover; a change made through Update is
-// published at once. Each read is three short-lived local tools.
-const DefaultEvery = 5 * time.Second
-
 // Deps are the controller's collaborators.
 type Deps struct {
 	// Config names the tools and the hotspot.
 	Config Config
 	// Runner runs every host tool. REQUIRED.
 	Runner Runner
-	// Clock paces the re-read. REQUIRED.
+	// Clock stamps the reads and paces the hotspot failover's retries.
+	// REQUIRED.
 	Clock clock.Clock
-	// Every is the re-read cadence; zero is DefaultEvery.
-	Every time.Duration
+	// NetworkChanged answers a channel closed at the host's next network
+	// change (netwatch.Watcher.Changed): the Wi-Fi link is re-read on it.
+	// REQUIRED.
+	NetworkChanged func() <-chan struct{}
+	// PowerChanges signals the power settings changing (Config.PowerChanges):
+	// the mode is re-read on it. REQUIRED.
+	PowerChanges kernelevent.Source
 	// Exists answers whether an optional tool is installed; nil is a stat of
 	// a regular file.
 	Exists func(path string) bool
@@ -62,7 +62,8 @@ type Controller struct {
 	cfg      Config
 	runner   Runner
 	clock    clock.Clock
-	every    time.Duration
+	network  func() <-chan struct{}
+	power    kernelevent.Source
 	exists   func(string) bool
 	onChange func(*agentreplv1.PersistentWifiState)
 	log      dlog.Logger
@@ -105,19 +106,18 @@ func New(d Deps) (*Controller, error) {
 		return nil, fmt.Errorf("persistentwifi: a lid watcher is required")
 	case d.LidDims == nil:
 		return nil, fmt.Errorf("persistentwifi: a store for the pre-close brightness is required")
-	case d.Every < 0:
-		return nil, fmt.Errorf("persistentwifi: the re-read cadence must not be negative, got %s", d.Every)
-	}
-	every := d.Every
-	if every == 0 {
-		every = DefaultEvery
+	case d.NetworkChanged == nil:
+		return nil, fmt.Errorf("persistentwifi: the network's change signal is required")
+	case d.PowerChanges == nil:
+		return nil, fmt.Errorf("persistentwifi: the power settings' change signal is required")
 	}
 	exists := d.Exists
 	if exists == nil {
 		exists = regularFile
 	}
 	return &Controller{
-		cfg: d.Config, runner: d.Runner, clock: d.Clock, every: every,
+		cfg: d.Config, runner: d.Runner, clock: d.Clock,
+		network: d.NetworkChanged, power: d.PowerChanges,
 		exists: exists, onChange: d.OnChange, log: d.Log,
 		lidWatch: d.Lid, dims: d.LidDims,
 	}, nil
@@ -145,12 +145,46 @@ func (c *Controller) Refresh(ctx context.Context) {
 	c.readLocked(ctx)
 }
 
-// Run re-reads the standing every cadence until ctx ends, and on each beat
-// holds the hotspot failover to what it read (tick): with the mode on and no
-// network joined, the hotspot is joined.
+// Run re-reads the standing on every change the host reports until ctx ends,
+// and on each read holds the hotspot failover to what it read (tick): with the
+// mode on and no network joined, the hotspot is joined.
+//
+// THE WATCHES ARE TAKEN FIRST, then the standing read once, so a change
+// between Refresh and the watches is never missed. Between changes nothing
+// runs, save the hotspot failover's own retry when one is due: that schedule
+// (failoverBackoff) is the failover's design, and its timer is armed only
+// while a failed join waits for its next try.
+//
+// A power-settings watch that fails is recorded at ERROR and the mode is then
+// re-read only on network changes and Update; the network keeps being heard.
 func (c *Controller) Run(ctx context.Context) error {
-	clock.Repeat(ctx, c.clock, c.every, c.every, c.tick)
-	return nil
+	power, stop := c.power(ctx)
+	defer stop()
+	network := c.network()
+	c.tick(ctx)
+	for {
+		var retry <-chan time.Time
+		if wait, ok := c.failoverRetryIn(); ok {
+			retry = c.clock.After(wait)
+		}
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-network:
+			network = c.network()
+			c.tick(ctx)
+		case err := <-power:
+			if err != nil {
+				c.log.Error(opProbe, "the power settings could not be followed; a mode changed outside agent-repl is heard only on the next network change",
+					dlog.Context{"dir": PowerPrefsDir, "cause": err.Error()})
+				power = nil
+				continue
+			}
+			c.tick(ctx)
+		case <-retry:
+			c.tick(ctx)
+		}
+	}
 }
 
 // readLocked reads, records a CHANGE in either fact's readability, and

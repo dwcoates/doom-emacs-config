@@ -75,7 +75,7 @@ func (r *resolver) Tail(ctx context.Context, ws ids.WorkspaceID, feed feedid.Fee
 
 	s := r.state(ws)
 	f := r.feed(s, feed)
-	sub := publish.NewMailbox[Publication](inflight.Default)
+	sub := publish.NewMailbox[Publication](publish.StreamPushes)
 
 	// The pin, honored exactly: every publication after the token's sequence
 	// is replayed before the tail follows, so the seam between the page and

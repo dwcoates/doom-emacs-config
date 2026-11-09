@@ -387,6 +387,15 @@ func (p *process) apply(line []byte) Reply {
 	case OpCount:
 		return Reply{OK: true, Count: p.rec.Count(cmd.RPC)}
 
+	case OpAwaitCount:
+		ctx, cancel := commandContext(cmd)
+		defer cancel()
+		total, err := p.rec.AwaitCount(ctx, cmd.RPC, cmd.N)
+		if err != nil {
+			return Reply{Error: err.Error()}
+		}
+		return Reply{OK: true, Count: total}
+
 	case OpAwaitAgentWatch:
 		ctx, cancel := commandContext(cmd)
 		defer cancel()
@@ -421,17 +430,15 @@ func (p *process) apply(line []byte) Reply {
 		return Reply{OK: true}
 
 	case OpPushSessionUpdate:
-		u := &conversationv1.SessionUpdate{}
-		if err := proto.Unmarshal(payload, u); err != nil {
-			return Reply{Error: fmt.Sprintf("fakeshim: decode session update: %v", err)}
+		return p.pushSessionUpdate(payload)
+
+	case OpPushSessionUpdateWhenSubscribed:
+		ctx, cancel := commandContext(cmd)
+		defer cancel()
+		if err := p.srv.sessions.awaitSubscriber(ctx); err != nil {
+			return Reply{Error: fmt.Sprintf("fakeshim: no WatchSession stream subscribed to receive the push: %v", err)}
 		}
-		// EVERY DIAGNOSTICS FRAME STATES THE SHIM'S BUILD, as the real shim's
-		// do: a test pushing a verdict need not restate it.
-		if diagnostics := u.GetDiagnostics(); diagnostics != nil && diagnostics.GetShimBuild() == "" {
-			diagnostics.ShimBuild = p.srv.buildSHA()
-		}
-		p.srv.sessions.publish(u)
-		return Reply{OK: true, Count: p.srv.sessions.count()}
+		return p.pushSessionUpdate(payload)
 
 	case OpPushAgentFrame:
 		f := &conversationv1.AgentFrame{}
@@ -557,6 +564,22 @@ func (p *process) apply(line []byte) Reply {
 		return Reply{OK: true}
 	}
 	return Reply{Error: fmt.Sprintf("%v: %s", ErrUnknownOp, cmd.Op)}
+}
+
+// pushSessionUpdate decodes one session update from payload and fans it out
+// to every WatchSession stream, answering how many received it.
+func (p *process) pushSessionUpdate(payload []byte) Reply {
+	u := &conversationv1.SessionUpdate{}
+	if err := proto.Unmarshal(payload, u); err != nil {
+		return Reply{Error: fmt.Sprintf("fakeshim: decode session update: %v", err)}
+	}
+	// EVERY DIAGNOSTICS FRAME STATES THE SHIM'S BUILD, as the real shim's do:
+	// a test pushing a verdict need not restate it.
+	if diagnostics := u.GetDiagnostics(); diagnostics != nil && diagnostics.GetShimBuild() == "" {
+		diagnostics.ShimBuild = p.srv.buildSHA()
+	}
+	p.srv.sessions.publish(u)
+	return Reply{OK: true, Count: p.srv.sessions.count()}
 }
 
 // commandContext bounds one command's wait by the deadline the caller stated,

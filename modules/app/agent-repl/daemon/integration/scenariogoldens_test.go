@@ -12,7 +12,6 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
@@ -106,29 +105,40 @@ type feedGolden struct {
 func TestEveryScenarioGoldenProjectsToItsFeedGolden(t *testing.T) {
 	t.Parallel()
 	write := os.Getenv(scenarioGoldensWriteEnv) == "1"
+	// ONE DAEMON SERVES EVERY SCENARIO WHOSE GOLDEN EXPECTS NO WARNING, each
+	// on its own view and its own workspace (AGENTS.md "A case may share an
+	// expensive fixture, never a slice another case reads"): a scenario reads
+	// only its own workspace's feed and records. A scenario whose golden
+	// names warnings, and every rewrite, keeps a daemon of its own, because
+	// those warnings are read from everything one daemon recorded.
+	var shared *harness.Daemon
+	if !write {
+		shared = harness.StartDaemon(t, harness.Opts{})
+	}
 	for _, name := range scenarioGoldens(t) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			rows := readGoldenRows(t, name)
 			path := filepath.Join(scenarioGoldensDir, name, "feed.json")
-			f := newOpened(t, harness.Opts{})
-			var want feedGolden
 			if write {
+				f := newOpened(t, harness.Opts{})
 				// The golden's warnings are read back undeclared.
 				f.d.SweepIsTheSubject()
-			} else {
-				want = readFeedGolden(t, path)
-				f.d.RequireWarnings(want.Warnings...)
-			}
-
-			got := projectScenario(t, f, name, rows)
-
-			if write {
+				got := projectScenario(t, f, name, rows)
 				warnings := warningOperations(f.d.UnexpectedWarnings())
 				f.d.ExpectWarnings(warnings...)
 				writeFeedGolden(t, path, feedGolden{Rows: got, Warnings: warnings})
 				return
 			}
+			want := readFeedGolden(t, path)
+			var f *fixture
+			if len(want.Warnings) == 0 {
+				f = newOpenedOn(t, shared)
+			} else {
+				f = newOpened(t, harness.Opts{})
+				f.d.RequireWarnings(want.Warnings...)
+			}
+			got := projectScenario(t, f, name, rows)
 			if string(got) != string(want.Rows) {
 				t.Fatalf("the daemon's feed for %s differs from its golden %s (rewrite with %s=1 if the change is intended):\ngot:\n%s\nwant:\n%s",
 					name, path, scenarioGoldensWriteEnv, got, want.Rows)
@@ -261,20 +271,7 @@ func countRouted(f *fixture, match func(harness.LogRecord) bool) int {
 // the watcher writes one after each entry or update it routed.
 func awaitRouted(t *testing.T, f *fixture, what string, match func(harness.LogRecord) bool, want int) {
 	t.Helper()
-	ctx, cancel := f.d.WaitCtx()
-	defer cancel()
-	ticker := time.NewTicker(10 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		if got := countRouted(f, match); got >= want {
-			return
-		}
-		select {
-		case <-ticker.C:
-		case <-ctx.Done():
-			t.Fatalf("waiting for %d routing records of %s, the log holds %d: %v", want, what, countRouted(f, match), ctx.Err())
-		}
-	}
+	f.d.AwaitWorkspaceLogRecordCount(f.repo.Dir, "routing records of "+what, want, match)
 }
 
 // goldenIDs maps a drive's identities to this fixture's.

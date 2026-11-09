@@ -710,14 +710,15 @@ func TestRepublishingAnUnchangedViewIsDropped(t *testing.T) {
 	views := surface.hostStateTopic(testWorkspaceID).Subscribe(ctx)
 	<-views
 
-	// Act.
+	// Act: an unchanged re-render, then a view that really moved.
 	surface.PublishHostWorkspace(ctx, testWorkspaceID)
+	sentinel := &agentreplv1.HostWorkspace{}
+	surface.hostStateTopic(testWorkspaceID).Publish(sentinel)
 
-	// Assert.
-	select {
-	case extra := <-views:
-		t.Fatalf("an unchanged re-render reached the wire: %v", extra)
-	case <-time.After(50 * time.Millisecond):
+	// Assert: the topic delivers in order, so the next value is the sentinel
+	// only if the unchanged re-render was dropped.
+	if next := <-views; next != sentinel {
+		t.Fatalf("an unchanged re-render reached the wire ahead of the sentinel: %v", next)
 	}
 }
 

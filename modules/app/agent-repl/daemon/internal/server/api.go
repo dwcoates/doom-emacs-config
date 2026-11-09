@@ -295,8 +295,11 @@ type Server interface {
 // daemon-level one, the feed watch-token memo, and the lifetime every open
 // stream hangs off.
 type server struct {
-	deps Deps
-	log  dlog.Logger
+	// addressedPushes counts each push addressed to one WatchDaemon stream
+	// until the stream sent it (publish.StreamPushes in the daemon).
+	addressedPushes *inflight.Tracker
+	deps            Deps
+	log             dlog.Logger
 
 	// frames counts every accepted standing stream's written frames, for the
 	// test barrier (AwaitIdle).
@@ -622,6 +625,7 @@ func New(deps Deps) (Server, error) {
 
 	life, cancel := context.WithCancel(context.Background())
 	s := &server{
+		addressedPushes:        publish.StreamPushes,
 		deps:                   deps,
 		log:                    deps.Log.Global(),
 		life:                   life,
@@ -1058,11 +1062,19 @@ type daemonWatcher struct {
 	// emacs reports that the client is Emacs, which states elispBuild.
 	emacs      bool
 	elispBuild string
-	// elisp carries the pushes addressed to this stream alone.
-	elisp chan *agentreplv1.WatchDaemonResponse
+	// elisp carries the pushes addressed to this stream alone, each counted
+	// on publish.StreamPushes until the stream sent it.
+	elisp chan addressedPush
 }
 
 func (w *daemonWatcher) done() { w.once.Do(func() { close(w.sent) }) }
+
+// addressedPush is one push addressed to a single WatchDaemon stream, and the
+// end of its count: the stream calls sent once it has sent it.
+type addressedPush struct {
+	push *agentreplv1.WatchDaemonResponse
+	sent func()
+}
 
 func (s *server) addDaemonWatcher(w *daemonWatcher) {
 	s.mu.Lock()
@@ -1077,6 +1089,17 @@ func (s *server) removeDaemonWatcher(w *daemonWatcher) {
 	delete(s.daemonWatchers, w)
 	s.mu.Unlock()
 	w.done()
+	// NOTHING IS SENT TO A REMOVED STREAM: pushes are queued under the lock
+	// the removal took, so what is queued now is all there will be, and none
+	// of it will be written. Its counts end here.
+	for {
+		select {
+		case pending := <-w.elisp:
+			pending.sent()
+		default:
+			return
+		}
+	}
 }
 
 // snapshotDaemonWatchers lists the streams an announcement must reach. It is

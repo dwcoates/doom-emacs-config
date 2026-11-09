@@ -1,6 +1,7 @@
 package server
 
 import (
+	"agent-repld/internal/inflight"
 	"context"
 	"errors"
 	"fmt"
@@ -597,5 +598,70 @@ func TestEveryEditorPushGoesThroughPushToEditors(t *testing.T) {
 	// Assert
 	if sites != 1 {
 		t.Fatalf("Emacs addressed pushes are written at %d sites, want 1: pushToEditors", sites)
+	}
+}
+
+// emacsWatcher registers one Emacs WatchDaemon stream on the surface, as an
+// accepted stream does, without a client.
+func emacsWatcher(s *server) *daemonWatcher {
+	w := &daemonWatcher{sent: make(chan struct{}), elisp: make(chan addressedPush, 4), emacs: true, id: "stream-1"}
+	s.addDaemonWatcher(w)
+	return w
+}
+
+// reloadPush is an addressed push for the tests.
+func reloadPush() *agentreplv1.WatchDaemonResponse {
+	return &agentreplv1.WatchDaemonResponse{Push: &agentreplv1.WatchDaemonResponse_ReloadElisp{ReloadElisp: &agentreplv1.DaemonReloadElisp{}}}
+}
+
+func TestAnAddressedPushIsCountedUntilItsStreamSendsIt(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	s := h.Server.(*server)
+	s.addressedPushes = &inflight.Tracker{}
+	w := emacsWatcher(s)
+
+	// Act.
+	reached := s.pushToEditors("daemon.test.push", reloadPush(), func(*daemonWatcher) bool { return true }, nil)
+	queued := s.addressedPushes.InFlight()
+	(<-w.elisp).sent()
+
+	// Assert.
+	if reached != 1 || queued != 1 || s.addressedPushes.InFlight() != 0 {
+		t.Fatalf("(reached %d, counted while queued %d, after sending %d), want (1, 1, 0)", reached, queued, s.addressedPushes.InFlight())
+	}
+}
+
+func TestARemovedStreamsQueuedPushesAreUncounted(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	s := h.Server.(*server)
+	s.addressedPushes = &inflight.Tracker{}
+	w := emacsWatcher(s)
+	s.pushToEditors("daemon.test.push", reloadPush(), func(*daemonWatcher) bool { return true }, nil)
+
+	// Act.
+	s.removeDaemonWatcher(w)
+
+	// Assert.
+	if n := s.addressedPushes.InFlight(); n != 0 {
+		t.Fatalf("%d push(es) still counted after their stream was removed, want 0", n)
+	}
+}
+
+func TestAPushAFullQueueRefusedIsUncounted(t *testing.T) {
+	// Arrange: a stream whose queue is full.
+	h := newHarness(t)
+	s := h.Server.(*server)
+	s.addressedPushes = &inflight.Tracker{}
+	w := &daemonWatcher{sent: make(chan struct{}), elisp: make(chan addressedPush), emacs: true, id: "stream-full"}
+	s.addDaemonWatcher(w)
+
+	// Act.
+	reached := s.pushToEditors("daemon.test.push", reloadPush(), func(*daemonWatcher) bool { return true }, nil)
+
+	// Assert.
+	if reached != 0 || s.addressedPushes.InFlight() != 0 {
+		t.Fatalf("(reached %d, counted %d), want (0, 0)", reached, s.addressedPushes.InFlight())
 	}
 }

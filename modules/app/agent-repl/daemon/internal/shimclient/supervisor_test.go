@@ -212,18 +212,23 @@ func TestSpawnIsNotReadyBeforeAnyDiagnosticsArm(t *testing.T) {
 	dir := shortDir(t)
 	f, uds := startFakeShim(t, dir)
 	spec, _ := newTestSpec(t, dir, uds, helperIdle)
-	sup := newSupervisor(t)
+	sup, surfaces := newSupervisorLogging(t)
 	done := spawnAsync(t, sup, spec)
 	waitForSessionOpen(t, f)
 
-	// Act.
+	// Act: the bring-up records the frame it took and passed over.
 	f.push(compactingUpdate())
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if _, err := surfaces.log.Await(ctx, dlog.RecordQuery{Operation: "daemon.shimclient.ready", Message: "a session frame that is not the health verdict arrived during bring-up; still waiting for the diagnostics"}); err != nil {
+		t.Fatalf("the bring-up never took the compacting frame: %v", err)
+	}
 
 	// Assert.
 	select {
 	case r := <-done:
-		t.Fatalf("Spawn() returned before any diagnostics push: %+v", r)
-	case <-time.After(bringUpProbeWindow):
+		t.Fatalf("Spawn() returned on a frame that is not diagnostics: %+v", r)
+	default:
 	}
 	f.push(healthyUpdate())
 	adoptTestClient(t, <-done)

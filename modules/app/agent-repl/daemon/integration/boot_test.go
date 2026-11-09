@@ -780,39 +780,29 @@ func TestAnUnhealthySurvivorIsAdoptedWithinTheBound(t *testing.T) {
 		return r.Operation == "daemon.shimclient.ready" &&
 			strings.Contains(r.Message, "adopted an unhealthy shim")
 	})
-	awaitSessionFault(t, nd, f.ws)
+	awaitSessionFault(t, nd, f.ws, f.repo.Dir)
 }
 
-// awaitSessionFault blocks until SessionHealth answers with a shim-reported
+// awaitSessionFault asserts that SessionHealth answers with a shim-reported
 // fault for the workspace. The fold from the adopted shim's opening
-// diagnostics runs on the session watcher's own goroutine, so the probe is
-// retried rather than read once.
-func awaitSessionFault(t *testing.T, d *harness.Daemon, ws *workspacev1.WorkspaceRef) {
+// diagnostics runs on the session watcher's own goroutine, which records once
+// every view the update reaches has taken it: the health read follows that
+// record, and is read once.
+func awaitSessionFault(t *testing.T, d *harness.Daemon, ws *workspacev1.WorkspaceRef, workspaceDir string) {
 	t.Helper()
-
-	wait, cancelWait := d.WaitCtx()
-	defer cancelWait()
-	poll := time.NewTicker(10 * time.Millisecond)
-	defer poll.Stop()
-	var last string
-	for {
-		resp, err := d.Client().SessionHealth(wait, connect.NewRequest(&agentreplv1.SessionHealthRequest{Workspace: ws}))
-		if err != nil {
-			last = err.Error()
-		} else {
-			for _, fault := range resp.Msg.GetSuccess().GetUnhealthy().GetFaults() {
-				if fault.GetShimReported() != nil {
-					return
-				}
-			}
-			last = resp.Msg.String()
-		}
-		select {
-		case <-wait.Done():
-			t.Fatalf("SessionHealth never carried the adopted shim's fault (%v); last answer %s", grantedclock.Explain(wait), last)
-		case <-poll.C:
+	d.AwaitWorkspaceLogRecord(workspaceDir, "the adopted shim's opening diagnostics routed", func(r harness.LogRecord) bool {
+		return r.PID == d.PID() && r.Operation == "daemon.sessionwatcher.session_update_routed" && r.Context["arm"] == "diagnostics"
+	})
+	resp, err := d.Client().SessionHealth(d.Ctx(), connect.NewRequest(&agentreplv1.SessionHealthRequest{Workspace: ws}))
+	if err != nil {
+		t.Fatalf("SessionHealth = error %v, want an answer carrying the adopted shim's fault", err)
+	}
+	for _, fault := range resp.Msg.GetSuccess().GetUnhealthy().GetFaults() {
+		if fault.GetShimReported() != nil {
+			return
 		}
 	}
+	t.Fatalf("SessionHealth = %v, want the adopted shim's reported fault", resp.Msg)
 }
 
 // TestBootClosesAWorkspaceWhoseDirectoryIsGone pins the owner's ruling. The

@@ -40,7 +40,12 @@ type WatchAgentRequest struct {
 	//
 	//	*WatchAgentRequest_KnownThrough
 	//	*WatchAgentRequest_TailOnly
-	Opening       isWatchAgentRequest_Opening `protobuf_oneof:"opening"`
+	Opening isWatchAgentRequest_Opening `protobuf_oneof:"opening"`
+	// Whether the caller HEARD this agent announced (by this shim or one before
+	// it on the same session). When set, an agent the record holds no rows for
+	// yet is TAILED rather than refused: its rows are coming. When unset, an
+	// empty book under an id this shim never announced is a refused open.
+	Expected      bool `protobuf:"varint,5,opt,name=expected,proto3" json:"expected,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -105,6 +110,13 @@ func (x *WatchAgentRequest) GetTailOnly() *WatchAgentTailOnly {
 		}
 	}
 	return nil
+}
+
+func (x *WatchAgentRequest) GetExpected() bool {
+	if x != nil {
+		return x.Expected
+	}
+	return false
 }
 
 type isWatchAgentRequest_Opening interface {
@@ -287,11 +299,12 @@ var File_shim_v1_endpoint_watch_agent_proto protoreflect.FileDescriptor
 
 const file_shim_v1_endpoint_watch_agent_proto_rawDesc = "" +
 	"\n" +
-	"\"shim/v1/endpoint_watch_agent.proto\x12\ashim.v1\x1a$conversation/v1/agent_activity.proto\x1a\x1dconversation/v1/history.proto\"\xf5\x01\n" +
+	"\"shim/v1/endpoint_watch_agent.proto\x12\ashim.v1\x1a$conversation/v1/agent_activity.proto\x1a\x1dconversation/v1/history.proto\"\x91\x02\n" +
 	"\x11WatchAgentRequest\x125\n" +
 	"\x06target\x18\x01 \x01(\v2\x18.conversation.v1.AgentIdH\x01R\x06target\x88\x01\x01\x12F\n" +
 	"\rknown_through\x18\x03 \x01(\v2\x1f.conversation.v1.HistoryPointerH\x00R\fknownThrough\x12:\n" +
-	"\ttail_only\x18\x04 \x01(\v2\x1b.shim.v1.WatchAgentTailOnlyH\x00R\btailOnlyB\t\n" +
+	"\ttail_only\x18\x04 \x01(\v2\x1b.shim.v1.WatchAgentTailOnlyH\x00R\btailOnly\x12\x1a\n" +
+	"\bexpected\x18\x05 \x01(\bR\bexpectedB\t\n" +
 	"\aopeningB\t\n" +
 	"\a_targetJ\x04\b\x02\x10\x03R\tpage_size\"\xc7\x01\n" +
 	"\x12WatchAgentResponse\x122\n" +

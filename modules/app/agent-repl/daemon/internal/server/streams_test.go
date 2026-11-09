@@ -239,7 +239,8 @@ func TestShutdownAnnouncedReachesAClientBeforeTheSurfaceCloses(t *testing.T) {
 // departed stream can never hold the orderly exit open for the flush bound.
 func TestShutdownAnnouncedDoesNotWaitOnAStreamThatHasGone(t *testing.T) {
 	// Arrange.
-	h := newHarness(t)
+	log := dlog.NewTestLogger()
+	h := newHarness(t, func(d *Deps) { d.Log = &fakeSurfaces{global: log, workspace: log} })
 	ctx, cancel := context.WithCancel(context.Background())
 	stream, dialErr := h.Client.WatchDaemon(ctx, connect.NewRequest(&agentreplv1.WatchDaemonRequest{Client: &agentreplv1.WatchDaemonRequest_Emacs{Emacs: &agentreplv1.WatchDaemonEmacs{Focus: unfocusedEditor(), ElispBuild: "elisp-test", Instance: testEditorInstance()}}}))
 	if dialErr != nil {
@@ -258,11 +259,11 @@ func TestShutdownAnnouncedDoesNotWaitOnAStreamThatHasGone(t *testing.T) {
 		h.Server.ShutdownAnnounced(&agentreplv1.DaemonShutdownAnnounced{MintedAtMs: 7})
 	}()
 
-	// Assert: it returns well inside the flush bound rather than riding it.
-	select {
-	case <-done:
-	case <-time.After(announcementFlush / 2):
-		t.Fatal("ShutdownAnnounced is still waiting on a stream whose client has gone")
+	// Assert: it returns, and not by riding the flush bound -- a ride is
+	// recorded as an undelivered announcement.
+	<-done
+	if rec, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "warn", Operation: "daemon.server.shutdown_announced"}); ok {
+		t.Fatalf("ShutdownAnnounced waited on a stream whose client has gone: %+v", rec)
 	}
 }
 

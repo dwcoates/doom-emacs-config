@@ -1,6 +1,7 @@
 package publish_test
 
 import (
+	"agent-repld/internal/inflight"
 	"context"
 	"errors"
 	"testing"
@@ -408,12 +409,14 @@ func TestChangesReceivesOncePerValueAndClosesWithItsContext(t *testing.T) {
 	var topic publish.Topic[int]
 	topic.Publish(1)
 	ctx, cancel := context.WithCancel(context.Background())
-	changes := publish.Changes(ctx, &topic)
+	changes, ack := publish.Changes(ctx, &topic)
 
 	// Act
 	<-changes // the latest value
+	ack()
 	topic.Publish(2)
 	<-changes // the later one
+	ack()
 	cancel()
 	_, open := <-changes
 	for open {
@@ -474,5 +477,42 @@ func TestAwaitSubscribersEndsWithItsContext(t *testing.T) {
 	// Assert
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("AwaitSubscribers = %v, want context.Canceled", err)
+	}
+}
+
+func TestAChangeIsCountedUntilItsAck(t *testing.T) {
+	// Arrange.
+	var topic publish.Topic[int]
+	tracker := &inflight.Tracker{}
+	changes, ack := publish.ChangesOn(t.Context(), &topic, tracker)
+
+	// Act.
+	topic.Publish(1)
+	<-changes
+	held := tracker.InFlight()
+	ack()
+
+	// Assert.
+	if held != 1 || tracker.InFlight() != 0 {
+		t.Fatalf("in flight = (%d held, %d acked), want (1, 0)", held, tracker.InFlight())
+	}
+}
+
+func TestAChangeNeverTakenEndsWithItsSubscription(t *testing.T) {
+	// Arrange.
+	var topic publish.Topic[int]
+	tracker := &inflight.Tracker{}
+	ctx, cancel := context.WithCancel(context.Background())
+	changes, _ := publish.ChangesOn(ctx, &topic, tracker)
+	topic.Publish(1)
+
+	// Act.
+	cancel()
+	for range changes {
+	}
+
+	// Assert.
+	if err := tracker.AwaitIdle(t.Context()); err != nil {
+		t.Fatalf("the untaken change is still counted: %v", err)
 	}
 }

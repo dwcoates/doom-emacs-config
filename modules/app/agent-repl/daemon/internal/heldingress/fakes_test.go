@@ -159,7 +159,7 @@ func (w *world) ingress() Ingress {
 		Log:         w.log,
 		Remove:      w.remove,
 		IntakeChanged: func() <-chan struct{} { return nil },
-		FleetChanges:  func(context.Context) <-chan struct{} { return nil },
+		FleetChanges:  func(context.Context) (<-chan struct{}, func()) { return nil, func() {} },
 		SubmitBound: w.submitBound,
 	})
 	if err != nil {

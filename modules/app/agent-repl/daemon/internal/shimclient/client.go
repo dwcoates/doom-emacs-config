@@ -24,6 +24,7 @@ import (
 	"agent-repld/internal/inflight"
 	"agent-repld/internal/kernelevent"
 	"agent-repld/internal/procgroup"
+	"agent-repld/internal/protoarm"
 	"agent-repld/internal/shimsocket"
 )
 
@@ -1215,6 +1216,9 @@ func (c *client) awaitDiagnostics(ctx context.Context, frames <-chan *shimv1.Wat
 		case frame := <-frames:
 			diagnostics := frame.GetUpdate().GetDiagnostics()
 			if diagnostics == nil {
+				c.log.Debug("daemon.shimclient.ready", "a session frame that is not the health verdict arrived during bring-up; still waiting for the diagnostics", dlog.Context{
+					"workspace_id": string(c.ws), "update": string(protoarm.Must(frame.GetUpdate().ProtoReflect(), "update", "shimclient.awaitDiagnostics")),
+				})
 				continue
 			}
 			if diagnostics.GetHealthy() != nil {
@@ -1737,6 +1741,10 @@ func (c *client) RollBackSession(ctx context.Context, req *shimv1.RollBackSessio
 }
 
 // WatchBash opens one detached shell's stream.
+//
+// EVERY OPEN IS EXPECTED: the daemon opens a shell's watch only for a handle
+// it heard announced, so the request says so, and the shim waits for the
+// run's first row rather than refusing a run whose rows are still coming.
 func (c *client) WatchBash(ctx context.Context, work *conversationv1.DetachedWorkId) (Stream[*conversationv1.AgentBash], error) {
 	if err := validateDetachedWorkID("WatchBashRequest.work", work); err != nil {
 		c.log.Error("daemon.shimclient.watch_bash", "invalid request", dlog.Context{
@@ -1744,7 +1752,7 @@ func (c *client) WatchBash(ctx context.Context, work *conversationv1.DetachedWor
 		})
 		return nil, err
 	}
-	return openStream(ctx, c, "watch_bash", &shimv1.WatchBashRequest{Work: work}, nil, c.rpc.WatchBash,
+	return openStream(ctx, c, "watch_bash", &shimv1.WatchBashRequest{Work: work, Expected: true}, nil, c.rpc.WatchBash,
 		func(resp *shimv1.WatchBashResponse) (*conversationv1.AgentBash, error) {
 			bash := resp.GetBash()
 			if bash == nil {

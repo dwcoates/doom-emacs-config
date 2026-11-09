@@ -168,7 +168,7 @@ func (s *server) watchFeed(
 	// the select below simply never fires, which is what a non-root feed wants.
 	var selections <-chan *selectionState
 	if target.Feed.Root {
-		selections, ackSelection = s.selectionTopic(target.WS).SubscribeCounted(streamCtx)
+		selections, ackSelection = s.selectionTopic(target.WS).SubscribeStream(streamCtx)
 	}
 
 	// THE FEED TEXT ZOOM RIDES EVERY FEED'S WATCH. Unlike the selection push,
@@ -177,14 +177,14 @@ func (s *server) watchFeed(
 	// the current zoom the instant the tail is accepted (Prime seeded it before
 	// serving), then every later change.
 	var scales <-chan *frontendv1.FeedTextScale
-	scales, ackScale = s.feedTextScaleTopic.SubscribeCounted(streamCtx)
+	scales, ackScale = s.feedTextScaleTopic.SubscribeStream(streamCtx)
 
 	// THE IMAGE OVERLAY RIDES THE ROOT FEED'S WATCH ONLY, like the selection:
 	// it lies over the workspace's root feed. The topic replays its latest
 	// value, so a page opening after the image was opened draws it at once.
 	var overlays <-chan *frontendv1.FeedImageOverlay
 	if target.Feed.Root {
-		overlays, ackOverlay = s.imageOverlayTopic(target.WS).SubscribeCounted(streamCtx)
+		overlays, ackOverlay = s.imageOverlayTopic(target.WS).SubscribeStream(streamCtx)
 	}
 
 	// THE COMPOSER'S ENTRY RIDES THE ROOT FEED'S WATCH ONLY, like the
@@ -192,7 +192,7 @@ func (s *server) watchFeed(
 	// value, so a page opening mid-edit draws the highlight that stands.
 	var composerEntries <-chan *frontendv1.FeedComposerEntry
 	if target.Feed.Root {
-		composerEntries, ackComposerEntry = s.composerEntryTopic(target.WS).SubscribeCounted(streamCtx)
+		composerEntries, ackComposerEntry = s.composerEntryTopic(target.WS).SubscribeStream(streamCtx)
 	}
 
 	// THE QUESTION ABOUT A RESPONSE RIDES THE ROOT FEED'S WATCH ONLY, like the
@@ -200,7 +200,7 @@ func (s *server) watchFeed(
 	// value, so a page opening while a question stands draws it.
 	var questions <-chan *frontendv1.FeedResponseQuestion
 	if target.Feed.Root {
-		questions, ackQuestion = s.responseQuestionTopic(target.WS).SubscribeCounted(streamCtx)
+		questions, ackQuestion = s.responseQuestionTopic(target.WS).SubscribeStream(streamCtx)
 	}
 
 	s.acceptStream(ctx, rpc)

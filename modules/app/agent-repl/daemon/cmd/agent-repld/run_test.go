@@ -385,8 +385,8 @@ func TestServeWithdrawsTheAdvertisementBeforeItStopsAccepting(t *testing.T) {
 
 	// Assert.
 	got := gate.recorded()
-	want := []string{"withdraw", "AwaitQuiet", "AwaitWritesQuiet"}
-	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] || got[2] != want[2] {
+	want := []string{"withdraw", "AwaitQuiet", "AwaitPushesSent"}
+	if !slices.Equal(got[:min(len(got), len(want))], want) {
 		t.Fatalf("the exit's steps = %v, want %v — the advertisement withdrawn first, before the listener stops accepting", got, want)
 	}
 }
@@ -978,10 +978,10 @@ func (g *recordingGate) AwaitQuiet(time.Duration) int {
 	return 0
 }
 
-func (g *recordingGate) AwaitWritesQuiet(time.Duration) bool {
+func (g *recordingGate) AwaitPushesSent(time.Time) bool {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	g.calls = append(g.calls, "AwaitWritesQuiet")
+	g.calls = append(g.calls, "AwaitPushesSent")
 	return true
 }
 
@@ -1031,9 +1031,9 @@ func TestTheExitWaitsForTheStandingStreamsPushesBeforeShuttingDown(t *testing.T)
 
 	// Assert
 	got := gate.recorded()
-	want := []string{"AwaitQuiet", "AwaitWritesQuiet"}
-	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
-		t.Fatalf("the exit's waits = %v, want %v — the answers being written first, then the standing streams' own last push", got, want)
+	want := []string{"AwaitQuiet", "AwaitPushesSent", "EndStreams", "AwaitStreamsEnded"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("the exit's waits = %v, want %v — the answers produced first, then the standing streams' own last pushes sent, then every stream's end awaited onto the socket", got, want)
 	}
 }
 
@@ -1068,7 +1068,7 @@ func TestTheExitEndsEveryStandingStreamBeforeShuttingDown(t *testing.T) {
 
 	// Assert
 	got := gate.recorded()
-	want := []string{"AwaitQuiet", "AwaitWritesQuiet", "EndStreams", "end", "AwaitStreamsEnded"}
+	want := []string{"AwaitQuiet", "AwaitPushesSent", "EndStreams", "end", "AwaitStreamsEnded"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("the exit's steps = %v, want %v — the last pushes out, then every stream ended and its end frame awaited", got, want)
 	}
@@ -1823,7 +1823,7 @@ func TestServeWaitsForTheCreatesBeforeAnyAnswerOrStreamIsEnded(t *testing.T) {
 
 	// Assert.
 	got := gate.recorded()
-	want := []string{"withdraw", "await_creates", "AwaitQuiet", "AwaitWritesQuiet"}
+	want := []string{"withdraw", "await_creates", "AwaitQuiet", "AwaitPushesSent"}
 	if !slices.Equal(got[:min(len(got), len(want))], want) {
 		t.Fatalf("the exit's steps = %v, want %v first", got, want)
 	}

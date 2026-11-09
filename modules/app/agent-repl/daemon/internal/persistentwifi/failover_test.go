@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"agent-repld/internal/usersetup"
+
+	agentreplv1 "agentrepl/proto/agentrepl/v1"
 )
 
 func TestTickJoinsTheHotspotWhenWifiIsLostWithTheModeOn(t *testing.T) {
@@ -193,31 +195,87 @@ func TestTickAbandonedByItsCallerJoinsNothing(t *testing.T) {
 	}
 }
 
-func TestRunJoinsTheHotspotOnTheBeatThatSeesWifiLost(t *testing.T) {
-	// Arrange: the boot read sees the hotspot joined, the beat sees it lost.
+func TestRunJoinsTheHotspotOnTheNetworkChangeThatLosesWifi(t *testing.T) {
+	// Arrange: Refresh and Run's opening read see the hotspot joined.
 	h := newHarness(t).standing(pmsetOn, summary(true, hotspot))
-	h.r.on(argSummary, answer{out: summary(true, hotspot)}, answer{out: summary(false, "")}, answer{out: summary(true, hotspot)})
+	h.r.on(argSummary, answer{out: summary(true, hotspot)}, answer{out: summary(true, hotspot)},
+		answer{out: summary(false, "")}, answer{out: summary(true, hotspot)})
 	h.r.on(argJoin, answer{})
-	h.c.Refresh(context.Background())
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan error, 1)
-	go func() { done <- h.c.Run(ctx) }()
+	stop := h.runController(t)
+	defer stop()
 
 	// Act.
-	(<-h.clock.afters) <- time.Unix(0, 0)
-	<-h.clock.afters // the second wait proves the beat finished
-	cancel()
+	h.network.fire()
+	lost := <-h.published
+	rejoined := <-h.published
 
 	// Assert.
-	if err := <-done; err != nil {
-		t.Fatalf("Run() = %v, want nil on cancellation", err)
+	if wifiArm(lost) != "not_joined" || wifiArm(rejoined) != "joined" {
+		t.Fatalf("standings = (%s, %s), want (not_joined, joined)", wifiArm(lost), wifiArm(rejoined))
 	}
 	if h.r.count(argJoin) != 1 {
-		t.Fatalf("joins = %d, want the beat's one", h.r.count(argJoin))
+		t.Fatalf("joins = %d, want the change's one", h.r.count(argJoin))
 	}
-	got, _ := h.c.Topic().Latest()
+}
+
+func TestRunRetriesAFailedJoinWhenItsRetryIsDue(t *testing.T) {
+	// Arrange: Run's opening read finds Wi-Fi lost and its join fails.
+	h := newHarness(t).standing(pmsetOn, summary(false, ""))
+	h.r.on(argSummary, answer{out: summary(false, "")}, answer{out: summary(false, "")},
+		answer{out: summary(false, "")}, answer{out: summary(true, hotspot)})
+	h.r.on(argJoin, answer{out: "Could not find network Test Hotspot."}, answer{})
+	stop := h.runController(t)
+	defer stop()
+	retry := <-h.clock.afters
+
+	// Act: the retry falls due.
+	h.clock.set(5 * time.Second)
+	retry <- time.Unix(5, 0)
+	got := <-h.published
+
+	// Assert.
 	if wifiArm(got) != "joined" {
-		t.Fatalf("wifi after the beat = %s, want joined", wifiArm(got))
+		t.Fatalf("wifi after the retry = %s, want joined", wifiArm(got))
+	}
+}
+
+func TestFailoverRetryInAnswersWhatIsWaiting(t *testing.T) {
+	lost := &agentreplv1.PersistentWifiState{
+		Mode: &agentreplv1.PersistentWifiState_On{On: &agentreplv1.PersistentWifiModeOn{}},
+		Wifi: &agentreplv1.PersistentWifiState_NotJoined{NotJoined: &agentreplv1.PersistentWifiNotJoined{}},
+	}
+	joined := &agentreplv1.PersistentWifiState{
+		Mode: &agentreplv1.PersistentWifiState_On{On: &agentreplv1.PersistentWifiModeOn{}},
+		Wifi: &agentreplv1.PersistentWifiState_Joined{Joined: &agentreplv1.PersistentWifiJoined{}},
+	}
+	waiting := failoverSchedule{lost: time.Unix(0, 0), next: time.Unix(5, 0), every: 5 * time.Second, attempts: 1}
+	cases := []struct {
+		name     string
+		last     *agentreplv1.PersistentWifiState
+		schedule failoverSchedule
+		wantWait time.Duration
+		wantOK   bool
+	}{
+		{name: "a failed join waits for its next try", last: lost, schedule: waiting, wantWait: 5 * time.Second, wantOK: true},
+		{name: "nothing was lost", last: lost, schedule: failoverSchedule{}, wantOK: false},
+		{name: "the failover gave up", last: lost, schedule: failoverSchedule{lost: time.Unix(0, 0), next: time.Unix(5, 0), gaveUp: true}, wantOK: false},
+		{name: "a network is joined again", last: joined, schedule: waiting, wantOK: false},
+		{name: "nothing was read yet", last: nil, schedule: waiting, wantOK: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			h.c.last, h.c.failover = tc.last, tc.schedule
+
+			// Act.
+			wait, ok := h.c.failoverRetryIn()
+
+			// Assert.
+			if wait != tc.wantWait || ok != tc.wantOK {
+				t.Fatalf("failoverRetryIn() = (%s, %t), want (%s, %t)", wait, ok, tc.wantWait, tc.wantOK)
+			}
+		})
 	}
 }
 

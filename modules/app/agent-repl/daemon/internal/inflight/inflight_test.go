@@ -201,3 +201,61 @@ func TestInFlightSitesNameWhereWorkBegan(t *testing.T) {
 		t.Fatalf("InFlightSites after the end = %v, want none", got)
 	}
 }
+
+func TestAChildsWorkIsCountedOnItsParent(t *testing.T) {
+	// Arrange.
+	parent := &Tracker{}
+	child := NewChild(parent)
+
+	// Act.
+	end := child.Begin()
+
+	// Assert.
+	if parent.InFlight() != 1 || child.InFlight() != 1 {
+		t.Fatalf("in flight = (parent %d, child %d), want (1, 1)", parent.InFlight(), child.InFlight())
+	}
+	end()
+}
+
+func TestAChildsEndUncountsItOnItsParent(t *testing.T) {
+	// Arrange.
+	parent := &Tracker{}
+	child := NewChild(parent)
+	end := child.Begin()
+
+	// Act.
+	end()
+
+	// Assert.
+	if parent.InFlight() != 0 || child.InFlight() != 0 {
+		t.Fatalf("in flight = (parent %d, child %d), want (0, 0)", parent.InFlight(), child.InFlight())
+	}
+}
+
+func TestAParentsOwnWorkIsNotTheChilds(t *testing.T) {
+	// Arrange.
+	parent := &Tracker{}
+	child := NewChild(parent)
+
+	// Act.
+	end := parent.Begin()
+	defer end()
+
+	// Assert.
+	if err := child.AwaitIdle(t.Context()); err != nil {
+		t.Fatalf("child AwaitIdle = %v, want idle: the parent's work is not the child's", err)
+	}
+}
+
+func TestNewChildRefusesNoParent(t *testing.T) {
+	// Arrange.
+	defer func() {
+		// Assert.
+		if recover() == nil {
+			t.Fatal("NewChild(nil) did not panic")
+		}
+	}()
+
+	// Act.
+	NewChild(nil)
+}

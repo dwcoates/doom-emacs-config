@@ -223,13 +223,15 @@ func (s *server) pushToEditors(op string, push *agentreplv1.WatchDaemonResponse,
 		if !w.emacs || !want(w) {
 			continue
 		}
+		sent := s.addressedPushes.Begin()
 		select {
-		case w.elisp <- push:
+		case w.elisp <- addressedPush{push: push, sent: sent}:
 			count++
 			if reached != nil {
 				reached(w)
 			}
 		default:
+			sent()
 			s.log.Error(op, "an Emacs stream's push queue is full; the push did not reach it", dlog.Context{
 				"stream": w.id, "push": pushArm(push),
 			})

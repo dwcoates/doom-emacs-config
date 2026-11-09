@@ -205,3 +205,69 @@ func TestExpectCountsARequestThatArrivesWhileWaiting(t *testing.T) {
 		t.Fatalf("Expect total = %d, want 1", got)
 	}
 }
+
+func TestRecorderAwaitCountAnswersATotalAlreadyReached(t *testing.T) {
+	// Arrange
+	rec := NewRecorder()
+	rec.Record(RPCStartTurn, turnRequest("t-1"))
+	rec.Record(RPCStartTurn, turnRequest("t-2"))
+
+	// Act
+	total, err := rec.AwaitCount(context.Background(), RPCStartTurn, 2)
+
+	// Assert
+	if err != nil || total != 2 {
+		t.Fatalf("AwaitCount = (%d, %v), want (2, nil)", total, err)
+	}
+}
+
+func TestRecorderAwaitCountWaitsForALaterRequest(t *testing.T) {
+	// Arrange
+	rec := NewRecorder()
+	rec.Record(RPCStartTurn, turnRequest("t-1"))
+	answered := make(chan int, 1)
+	go func() {
+		total, _ := rec.AwaitCount(context.Background(), RPCStartTurn, 2)
+		answered <- total
+	}()
+
+	// Act
+	rec.Record(RPCStartTurn, turnRequest("t-2"))
+
+	// Assert
+	if total := <-answered; total != 2 {
+		t.Fatalf("AwaitCount = %d, want 2", total)
+	}
+}
+
+func TestRecorderAwaitCountCountsReadRequestsToo(t *testing.T) {
+	// Arrange: the one request was already popped.
+	rec := NewRecorder()
+	rec.Record(RPCStartTurn, turnRequest("t-1"))
+	if _, _, err := rec.Expect(context.Background(), RPCStartTurn); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	total, err := rec.AwaitCount(context.Background(), RPCStartTurn, 1)
+
+	// Assert
+	if err != nil || total != 1 {
+		t.Fatalf("AwaitCount = (%d, %v), want (1, nil)", total, err)
+	}
+}
+
+func TestRecorderAwaitCountReturnsTheContextsEnd(t *testing.T) {
+	// Arrange
+	rec := NewRecorder()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// Act
+	_, err := rec.AwaitCount(ctx, RPCStartTurn, 1)
+
+	// Assert
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("AwaitCount = %v, want the context's cancellation", err)
+	}
+}

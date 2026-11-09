@@ -7,7 +7,6 @@ import (
 	"crypto/tls"
 	"net"
 	"net/http"
-	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -1070,9 +1069,7 @@ func TestAnEarlyAdoptionCallDuringATurnAdoptsTheWorkspaceWithoutEndingIt(t *test
 	if err != nil || resp.Msg.GetSuccess() == nil {
 		t.Fatalf("AdoptHostWorkspace = (%v, %v), want a success mid-turn", resp, err)
 	}
-	ftAwaitTrue(t, d.Ctx(), func() bool {
-		return f.shim.Count(harness.RPCWatchSession) > watchesBefore
-	}, "the successor's WatchSession on the adopted shim")
+	f.shim.AwaitCount(harness.RPCWatchSession, watchesBefore+1)
 	if got := f.shim.Count(harness.RPCKillTurn); got != 0 {
 		t.Fatalf("KillTurn was called %d time(s); an adoption never ends the turn it adopts", got)
 	}
@@ -1259,22 +1256,14 @@ func TestASessionlessWorkspaceHandedOverDrawsItsFeedWithNoPrompt(t *testing.T) {
 	})
 	// Assert: and its feed then draws the conversation's turn.
 	successor := drainDial(addr)
-	ticker := time.NewTicker(10 * time.Millisecond)
-	defer ticker.Stop()
-	for {
+	open := func() (*frontendv1.FeedPage, *agentreplv1.FeedWatchToken) {
 		resp, err := successor.OpenFeed(f.d.Ctx(), connect.NewRequest(&agentreplv1.OpenFeedRequest{Workspace: f.ws}))
 		if err != nil {
 			t.Fatalf("OpenFeed on the successor = error %v, want a page", err)
 		}
-		if pageCarriesTheConversation(resp.Msg.GetSuccess().GetPage()) {
-			return
-		}
-		select {
-		case <-ticker.C:
-		case <-f.d.Ctx().Done():
-			t.Fatalf("waiting for the successor's feed to carry the conversation: %v", f.d.Ctx().Err())
-		}
+		return resp.Msg.GetSuccess().GetPage(), resp.Msg.GetSuccess().GetWatch()
 	}
+	openFeedUntil(t, f.d, successor, open, "the conversation, on the successor", pageCarriesTheConversation)
 }
 
 // TestAdoptWebWorkspaceRefusesParticipantNotExpectedForAClientNotOpenAtAnnouncement
@@ -1543,22 +1532,11 @@ func drainTriggerDeploy(t *testing.T, d *harness.Daemon, selfRepo *harness.Repo,
 	}
 }
 
-// drainAwaitAddrFileChange polls daemon.addr until it holds exactly `want`,
-// bounded by the daemon's own context — never a fixed sleep.
+// drainAwaitAddrFileChange waits for daemon.addr to hold exactly `want`,
+// following the file's changes.
 func drainAwaitAddrFileChange(t *testing.T, d *harness.Daemon, want string) {
 	t.Helper()
-	ticker := time.NewTicker(5 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		if body, err := os.ReadFile(d.AddrFile()); err == nil && harness.AddrLine(string(body)) == want {
-			return
-		}
-		select {
-		case <-ticker.C:
-		case <-d.Ctx().Done():
-			t.Fatalf("daemon.addr never became %q after the handover: %v", want, d.Ctx().Err())
-		}
-	}
+	d.AwaitAddrMatching(want, func(addr string) bool { return addr == want })
 }
 
 // drainDial builds a raw Connect client against an arbitrary address, for the

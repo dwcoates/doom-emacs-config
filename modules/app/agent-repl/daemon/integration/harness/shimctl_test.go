@@ -220,10 +220,10 @@ func serveSessionPushes(t *testing.T, counts []int) (socket string, pushes <-cha
 	return socket, seen
 }
 
-// TestASessionPushIsRetriedUntilASessionStreamReceivesIt pins the shared
-// subscribed push: a push no stream received is sent again, and the first
-// one received ends it.
-func TestASessionPushIsRetriedUntilASessionStreamReceivesIt(t *testing.T) {
+// TestASubscribedSessionPushIsOneCommandTheFakeHolds pins the shared
+// subscribed push: it is ONE push_session_update_when_subscribed, which the
+// fake holds on its own subscriber latch, never a push the control re-sends.
+func TestASubscribedSessionPushIsOneCommandTheFakeHolds(t *testing.T) {
 	cases := []struct {
 		name string
 		push func(*ShimControl)
@@ -233,8 +233,8 @@ func TestASessionPushIsRetriedUntilASessionStreamReceivesIt(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			// Arrange: the first two pushes reach no stream, the third one does.
-			socket, pushes := serveSessionPushes(t, []int{0, 0, 1})
+			// Arrange: the push reaches one stream.
+			socket, pushes := serveSessionPushes(t, []int{1})
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			t.Cleanup(cancel)
 			s := &ShimControl{Socket: socket, t: t, d: &Daemon{t: t, ctx: ctx}}
@@ -245,13 +245,11 @@ func TestASessionPushIsRetriedUntilASessionStreamReceivesIt(t *testing.T) {
 			tc.push(s)
 
 			// Assert
-			if got := len(pushes); got != 3 {
-				t.Fatalf("pushes sent = %d, want 3: retried until one was received, then no more", got)
+			if got := len(pushes); got != 1 {
+				t.Fatalf("commands sent = %d, want the one push", got)
 			}
-			for range 3 {
-				if op := <-pushes; op != "push_session_update" {
-					t.Fatalf("op = %q, want push_session_update", op)
-				}
+			if op := <-pushes; op != "push_session_update_when_subscribed" {
+				t.Fatalf("op = %q, want push_session_update_when_subscribed", op)
 			}
 		})
 	}

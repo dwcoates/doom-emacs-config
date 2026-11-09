@@ -68,7 +68,7 @@ func (s *server) subscribeReveals(ctx context.Context, ws ids.WorkspaceID) (<-ch
 	s.webRevealsMu.Lock()
 	defer s.webRevealsMu.Unlock()
 	r := s.webRevealOf(ws)
-	reveals, ack := r.events.SubscribeCounted(ctx)
+	reveals, ack := r.events.SubscribeStream(ctx)
 	pending := r.pending
 	r.pending = nil
 	return reveals, ack, pending

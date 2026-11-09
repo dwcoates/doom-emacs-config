@@ -162,7 +162,7 @@ func (r *Repo) PolicyDir() string {
 func mintRepoDir(t testing.TB, w *GitWorld) string {
 	t.Helper()
 	for i := 0; ; i++ {
-		dir := filepath.Join(w.root, "repo-"+string(rune('a'+i)))
+		dir := filepath.Join(w.root, "repo-"+repoLetters(i))
 		err := os.Mkdir(dir, 0o755)
 		if err == nil {
 			return dir
@@ -171,6 +171,18 @@ func mintRepoDir(t testing.TB, w *GitWorld) string {
 			t.Fatalf("harness: mint a repository directory %s: %v", dir, err)
 		}
 	}
+}
+
+// repoLetters names the i-th repository (from 0) in letters alone: a..z,
+// then aa..zz, and so on. A shared daemon's world holds far more than 26
+// repositories, and a name past z must still be plain letters: the rune after
+// z runs into punctuation and then whitespace, which a path does not survive.
+func repoLetters(i int) string {
+	var out []byte
+	for i++; i > 0; i = (i - 1) / 26 {
+		out = append([]byte{byte('a' + (i-1)%26)}, out...)
+	}
+	return string(out)
 }
 
 // bindWorld makes w the git world of the test t: the world of the daemon t

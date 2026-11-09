@@ -1076,13 +1076,17 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		return nil, fmt.Errorf("agent-repld: resolve the persistent-wifi config: %w", err)
 	}
 	wifi, err := persistentwifi.New(persistentwifi.Deps{
-		Config:   wifiConfig,
-		Runner:   scripts,
-		Clock:    clock.System{},
-		OnChange: topbarResolver.SetPersistentWifi,
-		Log:      log,
-		Lid:      wifiConfig.Lid(),
-		LidDims:  p.DB,
+		Config: wifiConfig,
+		Runner: scripts,
+		Clock:  clock.System{},
+		// HEARD, NEVER RE-READ ON A BEAT: the Wi-Fi link on the daemon's
+		// one network listener, the mode on the power settings' files.
+		NetworkChanged: networkWatch.Changed,
+		PowerChanges:   wifiConfig.PowerChanges(),
+		OnChange:       topbarResolver.SetPersistentWifi,
+		Log:            log,
+		Lid:            wifiConfig.Lid(),
+		LidDims:        p.DB,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("agent-repld: build the persistent-wifi controller: %w", err)
@@ -1580,7 +1584,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		PublishHost:    relay.PublishHostWorkspace,
 		Serves:         rolloutController.ServesIntake,
 		IntakeChanged:  rolloutController.IntakeChanged,
-		FleetChanges: func(ctx context.Context) <-chan struct{} {
+		FleetChanges: func(ctx context.Context) (<-chan struct{}, func()) {
 			return publish.Changes(ctx, sidebarResolver.Topic())
 		},
 		Log: p.Surfaces,
@@ -1660,8 +1664,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	selectionFollower, err := selectionfollow.New(selectionfollow.Deps{
 		Versions: p.DB,
 		Follow:   verbs.FollowStoredSelection,
-		Clock:    clock.System{},
-		Every:    selectionfollow.DefaultEvery,
+		Changes:  p.DB.Changes,
 		Log:      log,
 	})
 	if err != nil {

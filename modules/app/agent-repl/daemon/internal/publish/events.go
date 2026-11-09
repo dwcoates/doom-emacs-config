@@ -53,6 +53,13 @@ func (e *Events[T]) SubscribeCounted(ctx context.Context) (values <-chan T, ack 
 	return e.register(ctx, s), s.ack
 }
 
+// SubscribeStream is SubscribeCounted for a stream handler: its values are
+// counted on StreamPushes (see Topic.SubscribeStream).
+func (e *Events[T]) SubscribeStream(ctx context.Context) (values <-chan T, ack func()) {
+	s := newSubscriber[T](false, StreamPushes)
+	return e.register(ctx, s), s.ack
+}
+
 // register adds S and starts its pump.
 func (e *Events[T]) register(ctx context.Context, s *Mailbox[T]) <-chan T {
 	e.mu.Lock()
