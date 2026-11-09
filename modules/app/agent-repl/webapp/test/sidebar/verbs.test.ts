@@ -1,5 +1,7 @@
 // @vitest-environment jsdom
 import { createControl, type Control } from "../../src/control.js";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
@@ -73,9 +75,11 @@ import {
   runOpenWorkspace,
   refusalCause,
   refusalDetail,
+  runSelectVerb,
   runVerb,
 } from "../../src/sidebar/verbs.js";
 import { oneofArms } from "../arms.js";
+import { codeOf } from "../source-text.js";
 import { appContext, sidebarContext } from "./harness.js";
 
 const TARGET_WS = create(WorkspaceRefSchema, { id: "ws-7", dir: "/w/seven" });
@@ -404,12 +408,11 @@ const VERBS: readonly VerbUnderTest[] = [
     responseSchema: SelectInEditorResponseSchema,
     errorSchema: SelectInEditorErrorSchema,
     call: (t, control) =>
-      runVerb(control, {
+      runSelectVerb(control, {
         sc: t.sc,
         rpc: "SelectInEditor",
         call: (client) => client.selectInEditor(buildSelectInEditorRequest(TARGET_WS)),
         schema: SelectInEditorResponseSchema,
-        expectedArms: SELECT_WORKSPACE_EXPECTED_ARMS,
       }),
     expected: SELECT_WORKSPACE_EXPECTED_ARMS,
   },
@@ -891,6 +894,111 @@ describe("a successful verb", () => {
       schema: OpenWorkspaceResponseSchema,
     });
     expect(ok).toBe(true);
+  });
+});
+
+describe("the in-flight lockout", () => {
+  const CLOSED = () => create(CloseWorkspaceResponseSchema, { result: { case: "success", value: {} } });
+  const SELECTED = () =>
+    create(SelectInEditorResponseSchema, { result: { case: "success", value: { route: { case: "relayed", value: {} } } } });
+
+  /** Start a select of TARGET_WS at CONTROL against IMPL, answering the verb's promise. */
+  function select(control: HTMLElement, impl = {}) {
+    return runSelectVerb(control, {
+      sc: target(impl).sc,
+      rpc: "SelectInEditor",
+      call: (client) => client.selectInEditor(buildSelectInEditorRequest(TARGET_WS)),
+      schema: SelectInEditorResponseSchema,
+    });
+  }
+
+  it("locks a harmful verb's control out while it is in flight", async () => {
+    // Arrange
+    const menu = drawRowMenu(target({ closeWorkspace: CLOSED }));
+    const button = menu.querySelector("[data-verb='close']") as Control;
+
+    // Act
+    const settled = click(button);
+    const busy = button.classList.contains("is-busy");
+    await settled;
+
+    // Assert
+    expect(busy).toBe(true);
+  });
+
+  it("re-enables a harmful verb's control once it succeeds", async () => {
+    const menu = drawRowMenu(target({ closeWorkspace: CLOSED }));
+    const button = menu.querySelector("[data-verb='close']") as Control;
+    await click(button);
+    expect([button.classList.contains("is-busy"), button.disabled]).toEqual([false, false]);
+  });
+
+  it("never locks a select's control out while it is in flight", async () => {
+    const control = createControl();
+    const done = select(control, { selectInEditor: SELECTED });
+    const busy = control.classList.contains("is-busy");
+    await done;
+    expect(busy).toBe(false);
+  });
+
+  it("leaves a select's control clickable once it succeeds", async () => {
+    const control = createControl();
+    await select(control, { selectInEditor: SELECTED });
+    expect([control.classList.contains("is-busy"), control.disabled]).toEqual([false, false]);
+  });
+
+  it("draws a select's refusal beside its control", async () => {
+    const host = document.createElement("div");
+    const control = createControl();
+    host.appendChild(control);
+    await select(control, {
+      selectInEditor: () =>
+        create(SelectInEditorResponseSchema, {
+          result: { case: "error", value: { cause: { case: "unknownWorkspace", value: {} } } },
+        }),
+    });
+    expect(host.querySelector(".refusal")?.getAttribute("data-arm")).toBe("unknownWorkspace");
+  });
+
+  it("records a select's refusal at WARN", async () => {
+    const capture = captureLogRecords();
+    await select(createControl(), {
+      selectInEditor: () =>
+        create(SelectInEditorResponseSchema, {
+          result: { case: "error", value: { cause: { case: "unknownWorkspace", value: {} } } },
+        }),
+    });
+    const record = await forwardedRecord(capture, "sidebar.verbs.refused");
+    expect([record.level.case, record.context?.rpc]).toEqual(["warn", "SelectInEditor"]);
+  });
+
+  // EVERY SELECT GOES THROUGH runSelectVerb: a select spelled through runVerb
+  // would lock its line out again, the stale lockout this pins against.
+  it("is skipped by every select the sidebar spells", () => {
+    // Arrange
+    const dir = join(__dirname, "..", "..", "src", "sidebar");
+    const spellers: string[] = [];
+
+    // Act
+    for (const name of readdirSync(dir).filter((file) => file.endsWith(".ts"))) {
+      const code = codeOf(readFileSync(join(dir, name), "utf8"));
+      for (const match of code.matchAll(/rpc: "Select(?:InEditor|Workspace)"/g)) {
+        const before = code.slice(0, match.index);
+        const opener = [...before.matchAll(/\b(runVerb|runSelectVerb|fireVerb|sendHeld)\(/g)].at(-1)?.[1];
+        spellers.push(`${name}:${opener ?? "none"}`);
+      }
+    }
+
+    // Assert
+    expect(spellers.filter((speller) => !speller.endsWith(":runSelectVerb"))).toEqual([]);
+  });
+
+  it("finds a select in both the row and the merge queue", () => {
+    const dir = join(__dirname, "..", "..", "src", "sidebar");
+    const found = ["row.ts", "merge-queue-view.ts"].map((name) =>
+      /rpc: "Select(?:InEditor|Workspace)"/.test(codeOf(readFileSync(join(dir, name), "utf8"))),
+    );
+    expect(found).toEqual([true, true]);
   });
 });
 

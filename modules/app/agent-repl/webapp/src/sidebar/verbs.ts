@@ -81,7 +81,7 @@ import { isMalformedView } from "../rpc/malformed.js";
 import { crossCuttingSentence, refusalOf, type SentenceTable } from "../rpc/refuse.js";
 import type { WorkspaceHasOpenChildren, WorkspaceParentNotOpen } from "../../../proto/gen/ts/agentrepl/v1/family_pb";
 import { hasOpenChildrenSentence, mergeHasOpenChildrenSentence, parentNotOpenSentence } from "../rpc/family-refusal.js";
-import type { RefusalCause } from "../rpc/refusal.js";
+import { SELECT_WORKSPACE_EXPECTED_ARMS, type RefusalCause } from "../rpc/refusal.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { callUnary, type UnaryContext } from "../rpc/unary.js";
 import type { SidebarContext } from "./context.js";
@@ -447,11 +447,13 @@ export interface VerbCall<Res extends VerbResponse> {
    */
   refusalText?: (cause: RefusalCause) => string;
   /**
-   * The control OUTLIVES the push: it is drawn once, outside the roster the
-   * push replaces (the grouping picker), so success re-enables it rather than
-   * leaving it for a redraw that never comes.
+   * The verb is IDEMPOTENT: a repeat click asks for what the first already
+   * asked (a select), so it does no harm and the control is never locked out,
+   * not even while the call is in flight. Every select runs through
+   * `runSelectVerb`, which sets this; a verb whose repeat does harm (close,
+   * finish, open) leaves it unset and is locked out until it answers.
    */
-  outlivesPush?: boolean;
+  idempotent?: true;
   /**
    * Arms of this endpoint's error that are EXPECTED ANSWERS rather than
    * refusals, each with the sentence recorded for it. Such an answer is logged
@@ -469,14 +471,14 @@ export interface VerbCall<Res extends VerbResponse> {
 
 
 /**
- * Issue one verb, disable its control while it is in flight, and draw the
- * answer beside it.
+ * Issue one verb, disable its control while it is in flight (unless the verb
+ * is `idempotent`), and draw the answer beside it.
  *
- * SUCCESS DRAWS NOTHING and leaves the control disabled: the roster push that
- * follows replaces the row outright, and re-enabling a button about to be
- * thrown away would only flicker — unless the control `outlivesPush`, which
- * re-enables. Every other outcome re-enables, because the user is going to
- * want to try again.
+ * EVERY OUTCOME RE-ENABLES THE CONTROL, success included. The lockout guards
+ * the call in flight and nothing after it: the roster keeps a section or row
+ * whose wire the push left unchanged (roster.ts, keyed-rows.ts), so a control
+ * left disabled for "the push that replaces it" stays locked for as long as
+ * its wire happens not to change. Success draws nothing.
  *
  * ANSWERS TRUE ON SUCCESS, so a caller with a form to dismiss can dismiss it
  * on the answer rather than by inspecting the DOM for a refusal.
@@ -486,7 +488,7 @@ export async function runVerb<Res extends VerbResponse>(
   spec: VerbCall<Res>,
 ): Promise<boolean> {
   clearRefusal(control);
-  setDisabled(control, true);
+  if (spec.idempotent !== true) setDisabled(control, true);
   try {
     let response = await callUnary(
       spec.sc.ctx,
@@ -505,7 +507,7 @@ export async function runVerb<Res extends VerbResponse>(
     }
     if (result.case === "success") {
       spec.took?.(response);
-      if (spec.outlivesPush === true) setDisabled(control, false);
+      setDisabled(control, false);
       return true;
     }
     const cause = refusalCause(spec.rpc, result.value);
@@ -580,6 +582,19 @@ export async function fireVerb<Res extends VerbResponse>(
     }),
   );
   return !malformed && took;
+}
+
+/**
+ * Issue a SELECT: a verb whose only effect is switching to a workspace
+ * (SelectInEditor, or SelectWorkspace with a reveal). The ONE spelling every
+ * select click runs through, so each is `idempotent` (its control never goes
+ * busy) and reads a daemon standing down as the expected answer it is.
+ */
+export function runSelectVerb<Res extends VerbResponse>(
+  control: HTMLElement,
+  spec: Omit<VerbCall<Res>, "idempotent" | "expectedArms" | "refusalText">,
+): Promise<boolean> {
+  return runVerb(control, { ...spec, idempotent: true, expectedArms: SELECT_WORKSPACE_EXPECTED_ARMS });
 }
 
 /**

@@ -29,8 +29,6 @@ export interface ViewChange<T extends ViewValue> {
   change: MessageInitShape<typeof UpdateSidebarViewRequestSchema>["change"];
   /** The control the gesture landed on, where a refusal is drawn. */
   control: HTMLElement;
-  /** True for a control drawn once, outside what a push replaces. */
-  outlivesPush?: boolean;
 }
 
 /**
@@ -52,7 +50,6 @@ export async function changeView<T extends ViewValue>(
     call: (client) => client.updateSidebarView(create(UpdateSidebarViewRequestSchema, { change: spec.change })),
     schema: UpdateSidebarViewResponseSchema,
     refusalText: (cause) => updateSidebarViewRefusal(cause as never),
-    outlivesPush: spec.outlivesPush,
   });
   if (!took) sc.view.abandon(spec.key, token);
   return took;

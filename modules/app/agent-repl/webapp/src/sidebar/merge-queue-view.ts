@@ -50,14 +50,13 @@ import { MERGE_GLYPH } from "../merge-glyph.js";
 import { guardMalformed } from "../rpc/guard.js";
 import { updateMergeQueueRefusal } from "../rpc/merge-queue-refusal.js";
 import { userRequester } from "../rpc/requester.js";
-import { SELECT_WORKSPACE_EXPECTED_ARMS } from "../rpc/refusal.js";
 import { moveToAction, waitingMergeDrag } from "../merge-queue-move.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import type { SidebarContext } from "./context.js";
 import { pressToDrag, type DragSpec } from "../drag.js";
 import { selectWorkspace, tickElapsed } from "./row.js";
 import { sendHeld } from "./arrange.js";
-import { fireVerb, runVerb } from "./verbs.js";
+import { fireVerb, runSelectVerb } from "./verbs.js";
 
 /**
  * The attribute a queue group carries while its queue is paused: `pause`, or
@@ -527,12 +526,11 @@ function drawSubjectControl(u: RosterMergeQueueSubject, sc: SidebarContext, clas
     void guardMalformed(
       sc.ctx,
       "sidebar.merge-queue.reveal",
-      runVerb(control, {
+      runSelectVerb(control, {
         sc,
         rpc: "SelectWorkspace",
         call: (client) => client.selectWorkspace(create(SelectWorkspaceRequestSchema, { workspace, reveal })),
         schema: SelectWorkspaceResponseSchema,
-        expectedArms: SELECT_WORKSPACE_EXPECTED_ARMS,
       }),
     );
   });

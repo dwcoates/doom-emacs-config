@@ -104,10 +104,10 @@ import {
   buildRevertMergeRequest,
   drawRowMenu,
   runOpenWorkspace,
+  runSelectVerb,
   runVerb,
   type VerbTarget,
 } from "./verbs.js";
-import { SELECT_WORKSPACE_EXPECTED_ARMS } from "../rpc/refusal.js";
 import { queryAll } from "../dom.js";
 
 /**
@@ -1083,12 +1083,11 @@ export async function selectWorkspace(
   });
   // The row LINE is the control: a refusal lands as its next sibling, inside
   // the row's own box, exactly where a menu item's refusal lands.
-  await runVerb(line, {
+  await runSelectVerb(line, {
     sc,
     rpc: "SelectInEditor",
     call: (client) => client.selectInEditor(buildSelectInEditorRequest(workspace)),
     schema: SelectInEditorResponseSchema,
-    expectedArms: SELECT_WORKSPACE_EXPECTED_ARMS,
     took: (response) => noteSelectRoute(response, workspace),
   });
 }

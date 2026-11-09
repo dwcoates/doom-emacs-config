@@ -628,6 +628,47 @@ describe("a click on a merge in the queue", () => {
     ]);
   });
 
+  // OWNER RULING: a select is idempotent, so its line never goes busy; a line
+  // the roster keeps (its wire unchanged by the select) stays clickable.
+  it.each([
+    ["the head card", (sc: ReturnType<typeof selecting>["sc"]) => drawRosterMergeQueueHead(mergingHead("w1"), undefined, sc, "head")],
+    [
+      "a remediating card",
+      (sc: ReturnType<typeof selecting>["sc"]) =>
+        drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { remediating: [remediatingMerge("w2", NOW)] }), sc, "queue").querySelector(
+          `.${MERGE_QUEUE_REMEDIATING_CLASS}`,
+        ) as HTMLElement,
+    ],
+    ["a waiting line", (sc: ReturnType<typeof selecting>["sc"]) => drawRosterMergeQueueWaiting(waitingMerge("w3"), sc, "w")],
+    [
+      "a head card opening its bubble",
+      (sc: ReturnType<typeof selecting>["sc"]) =>
+        drawRosterMergeQueueHead(mergingHead("w1", { subject: queueSubject("w1", { reveal: "bubble-1" }) }), undefined, sc, "head"),
+    ],
+  ])("leaves %s clickable after it selects", async (_name, draw) => {
+    // Arrange
+    const { asked, sc } = selecting();
+    const line = draw(sc);
+
+    // Act
+    line.click();
+    await settled();
+    line.click();
+    await settled();
+
+    // Assert
+    expect([line.classList.contains("is-busy"), asked.length]).toEqual([false, 2]);
+  });
+
+  it("never greys a line while its select is in flight", async () => {
+    const { sc } = selecting();
+    const line = drawRosterMergeQueueWaiting(waitingMerge("w3"), sc, "w");
+    line.click();
+    const busy = line.classList.contains("is-busy");
+    await settled();
+    expect(busy).toBe(false);
+  });
+
   it("selects as a row does when the merge has no bubble", async () => {
     const { asked, sc } = selecting();
     drawRosterMergeQueueWaiting(waitingMerge("w2"), sc, "w").click();
