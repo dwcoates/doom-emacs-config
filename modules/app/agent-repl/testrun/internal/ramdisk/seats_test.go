@@ -117,3 +117,34 @@ func TestAcquireWithoutTheHostsMemoryAttachesNothing(t *testing.T) {
 		t.Fatalf("the host was asked %v, want nothing attached", h.calls)
 	}
 }
+
+func TestASeatWaitTheRunCutAttachesNothing(t *testing.T) {
+	// Arrange: the host's one memory seat is another run's, and this run's
+	// caller is already gone.
+	h := &fakeHost{}
+	m := newManager(t, h)
+	m.Memory = func() (uint64, error) { return MemoryShare * 16 << 20, nil }
+	other, err := seatPool(m.Registry, 1).TryTake(0)
+	if err != nil || other == nil {
+		t.Fatalf("hold the one seat: %v, %v", other, err)
+	}
+	defer other.Close()
+	cut := make(chan struct{})
+	close(cut)
+	m.Cut = cut
+	log := m.Log.(*fakeLog)
+
+	// Act
+	v, err := m.Acquire(16)
+
+	// Assert
+	if !errors.Is(err, seats.ErrCut) || v != nil {
+		t.Fatalf("Acquire = %v, %v; want the cut and no volume", v, err)
+	}
+	if len(h.calls) != 0 {
+		t.Fatalf("the host was asked %v, want nothing attached", h.calls)
+	}
+	if !log.has("INFO RAM disk seat: the run was cut after waiting") {
+		t.Fatalf("log = %q, want the cut wait said", log.lines)
+	}
+}

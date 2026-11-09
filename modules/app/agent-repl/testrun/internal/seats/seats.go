@@ -47,12 +47,19 @@ func (p Pool) Open(i int) (*os.File, error) {
 // Take holds one of the pool's seats and answers its open lock file, which the
 // caller closes to give the seat back, and the seat's index. It takes a free
 // seat at once; when every seat is held it says so through waiting, then
-// waits, unbounded, for the first seat its holder lets go.
+// waits for the first seat its holder lets go, or until cut closes.
 //
 // THE WAIT IS THE KERNEL'S. One goroutine per seat blocks in flock on it; the
 // first to hold one wins, and every other, whenever it gets its seat, lets it
 // go again at once, so a waiter never holds more than the one seat it won.
-func (p Pool) Take(waiting func(held int)) (*os.File, int, error) {
+//
+// A CUT RUN STOPS WAITING. When cut closes first, Take answers ErrCut, and
+// every seat a goroutine still blocked in flock wins afterwards goes back at
+// once, so a run whose caller is gone neither waits on nor takes a seat
+// (2026-11-09: five runs whose callers had died kept waiting for the host's
+// one RAM disk seat, behind a merge gate that held it for 40 minutes). A nil
+// cut never closes.
+func (p Pool) Take(cut <-chan struct{}, waiting func(held int)) (*os.File, int, error) {
 	if p.N < 1 {
 		return nil, 0, fmt.Errorf("the %s seat pool %s has %d seats; it needs at least one", p.What, p.Dir, p.N)
 	}
@@ -72,7 +79,10 @@ func (p Pool) Take(waiting func(held int)) (*os.File, int, error) {
 		err error
 	}
 	first := make(chan won, 1)
-	var once sync.Once
+	// decided is set once a seat won or the wait was abandoned; after it,
+	// every seat a goroutine gets goes straight back.
+	var mu sync.Mutex
+	decided := false
 	for i := range p.N {
 		go func() {
 			f, err := p.Open(i)
@@ -82,24 +92,45 @@ func (p Pool) Take(waiting func(held int)) (*os.File, int, error) {
 					err = errors.Join(fmt.Errorf("lock the %s seat %s: %w", p.What, p.Path(i), err), f.Close())
 				}
 			}
-			taken := false
-			once.Do(func() {
-				taken = true
-				first <- won{f: f, i: i, err: err}
-			})
-			if !taken && err == nil {
-				// Another seat won: this one goes back at once. Closing the
-				// file drops the lock, so a failed close holds nothing.
-				_ = f.Close()
+			mu.Lock()
+			defer mu.Unlock()
+			if decided {
+				if err == nil {
+					// Another seat won, or the run was cut: this one goes
+					// back at once. Closing the file drops the lock, so a
+					// failed close holds nothing.
+					_ = f.Close()
+				}
+				return
 			}
+			decided = true
+			first <- won{f: f, i: i, err: err}
 		}()
 	}
-	w := <-first
-	if w.err != nil {
-		return nil, 0, w.err
+	select {
+	case w := <-first:
+		if w.err != nil {
+			return nil, 0, w.err
+		}
+		return w.f, w.i, nil
+	case <-cut:
+		mu.Lock()
+		decided = true
+		mu.Unlock()
+		// A seat won just before the cut is already in first: it goes back.
+		select {
+		case w := <-first:
+			if w.err == nil {
+				_ = w.f.Close()
+			}
+		default:
+		}
+		return nil, 0, fmt.Errorf("stop waiting for a %s seat in %s: %w", p.What, p.Dir, ErrCut)
 	}
-	return w.f, w.i, nil
 }
+
+// ErrCut is a seat wait that ended because its run was cut.
+var ErrCut = errors.New("the run was cut while it waited")
 
 // Held is the seats one TakeN holds; Release gives every one of them back.
 type Held []*os.File
@@ -238,7 +269,10 @@ func (p Pool) TakeN(n, rank int, waiting func()) (Held, error) {
 func (p Pool) gather(n int, wait func()) (Held, error) {
 	held := make(Held, 0, n)
 	for range n {
-		f, _, err := p.Take(func(int) { wait() })
+		// No cut: a core seat's taker (run.Runner) stops waiting on its
+		// hold itself when its run is cut, and the process's exit drops
+		// whatever the hold later took.
+		f, _, err := p.Take(nil, func(int) { wait() })
 		if err != nil {
 			return nil, errors.Join(err, held.Release())
 		}

@@ -49,6 +49,7 @@ import (
 	"agentrepl/testrun/internal/redundancy/vitestmeasure"
 	"agentrepl/testrun/internal/reuse"
 	"agentrepl/testrun/internal/run"
+	"agentrepl/testrun/internal/seats"
 	"agentrepl/testrun/internal/suites"
 	"agentrepl/testrun/internal/testtimes"
 	"agentrepl/testrun/reap"
@@ -174,7 +175,12 @@ func runnerCmd(argv []string) int {
 		log.Errorf("resolve the module root %s: %v", args.Module, err)
 		return 1
 	}
-	parent, prefix, release := runParent(log, module, runner)
+	parent, prefix, release := runParent(ctx, log, module, runner)
+	if ctx.Err() != nil {
+		// CUT BEFORE IT RAN: nothing is planned or run for a caller that is
+		// gone; Finish reaps, releases and says the run was cut.
+		return runner.Finish(1, gone, release)
+	}
 	histPath, err := history.DefaultPath(cli.RunConditions(prefix))
 	if err != nil {
 		log.Errorf("%v", err)
@@ -239,13 +245,14 @@ func runRooted(ctx context.Context, log *run.Log, args cli.Args, self, histPath,
 // roots make them in instead of /tmp. A leaked RAM disk or a disk manager that
 // does not answer puts the run on the disk and opens the one workspace that
 // investigates it.
-func runParent(log *run.Log, module string, runner *life.Runner) (string, []string, func() error) {
+func runParent(ctx context.Context, log *run.Log, module string, runner *life.Runner) (string, []string, func() error) {
 	disk := func() error { return nil }
 	if runtime.GOOS != "darwin" {
 		return run.DefaultTmpParent, nil, disk
 	}
 	m := ramdisk.Default(log)
 	m.Own = runner.Members()
+	m.Cut = ctx.Done()
 	m.Run = ramdisk.Timed(m.Run, func(call string, took time.Duration, err error) {
 		if err != nil {
 			log.Infof("ramdisk: %s failed after %s", call, took.Round(time.Millisecond))
@@ -262,6 +269,12 @@ func runParent(log *run.Log, module string, runner *life.Runner) (string, []stri
 		return run.DefaultTmpParent, nil, disk
 	}
 	v, trouble, err := m.Setup(size)
+	if errors.Is(err, seats.ErrCut) {
+		// Not a RAM disk failure: the run is ending, and its caller asks
+		// ctx.Err() before it plans anything.
+		log.Infof("the run was cut while it waited for a RAM disk seat; it runs nothing")
+		return run.DefaultTmpParent, nil, disk
+	}
 	if trouble != nil {
 		log.Errorf("RAM DISK REFUSED, this run's root falls back to the disk at %s: %s", run.DefaultTmpParent, trouble)
 		investigate(log, m, module, trouble)

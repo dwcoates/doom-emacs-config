@@ -1,6 +1,7 @@
 package ramdisk
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -51,10 +52,14 @@ func (m Manager) seat(sizeMiB int) (*os.File, error) {
 	n := MemorySeats(mem, sizeMiB)
 	var start time.Time
 	waited := false
-	f, i, err := seatPool(m.Registry, n).Take(func(held int) {
+	f, i, err := seatPool(m.Registry, n).Take(m.Cut, func(held int) {
 		waited, start = true, m.Now()
 		m.Log.Infof("RAM disk seat: all %d are held (an eighth of the host's %d MiB, %d MiB each); waiting for one", held, mem>>20, sizeMiB)
 	})
+	if errors.Is(err, seats.ErrCut) {
+		m.Log.Infof("RAM disk seat: the run was cut after waiting %s; it takes no seat and attaches no disk", m.Now().Sub(start).Round(time.Millisecond))
+		return nil, err
+	}
 	if err != nil {
 		return nil, err
 	}

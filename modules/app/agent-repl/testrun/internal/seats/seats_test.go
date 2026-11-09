@@ -1,6 +1,7 @@
 package seats
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -60,7 +61,7 @@ func TestTakeTakesTheFirstFreeSeat(t *testing.T) {
 			waited := false
 
 			// Act
-			f, got, err := p.Take(func(int) { waited = true })
+			f, got, err := p.Take(nil, func(int) { waited = true })
 
 			// Assert
 			if err != nil || got != tc.want || waited {
@@ -92,7 +93,7 @@ func TestTakeWaitsForTheFirstSeatLetGo(t *testing.T) {
 
 	// Act: the run waits, and seat 1's holder lets go.
 	go func() {
-		f, i, err := p.Take(func(held int) { waiting <- held })
+		f, i, err := p.Take(nil, func(held int) { waiting <- held })
 		done <- taken{f, i, err}
 	}()
 	if held := <-waiting; held != 2 {
@@ -112,12 +113,69 @@ func TestTakeWaitsForTheFirstSeatLetGo(t *testing.T) {
 	}
 }
 
+func TestTakeEndsItsWaitWhenTheRunIsCut(t *testing.T) {
+	// Arrange: the one seat is another run's, and this run waits for it.
+	p := Pool{Dir: t.TempDir(), Prefix: "seat", N: 1, What: "test"}
+	other := hold(t, p, 0)
+	defer other.Close()
+	cut := make(chan struct{})
+	waiting := make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		f, _, err := p.Take(cut, func(int) { close(waiting) })
+		if f != nil {
+			f.Close()
+		}
+		done <- err
+	}()
+	<-waiting
+
+	// Act: the run is cut while it waits.
+	close(cut)
+	err := <-done
+
+	// Assert
+	if !errors.Is(err, ErrCut) {
+		t.Fatalf("Take = %v; want ErrCut", err)
+	}
+}
+
+func TestACutWaitGivesBackTheSeatItWinsLater(t *testing.T) {
+	// Arrange: a run waiting for the one seat is cut.
+	p := Pool{Dir: t.TempDir(), Prefix: "seat", N: 1, What: "test"}
+	other := hold(t, p, 0)
+	cut := make(chan struct{})
+	waiting := make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		_, _, err := p.Take(cut, func(int) { close(waiting) })
+		done <- err
+	}()
+	<-waiting
+	close(cut)
+	if err := <-done; !errors.Is(err, ErrCut) {
+		t.Fatalf("Take = %v; want ErrCut", err)
+	}
+
+	// Act: the holder lets go, so the cut wait's flock wins the seat.
+	if err := other.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert: the seat goes back at once, so the next run takes it.
+	f, i, err := p.Take(nil, func(int) {})
+	if err != nil || i != 0 {
+		t.Fatalf("Take = seat %d, %v; want seat 0 given back by the cut wait", i, err)
+	}
+	f.Close()
+}
+
 func TestTakeRefusesAnEmptyPool(t *testing.T) {
 	// Arrange
 	p := Pool{Dir: t.TempDir(), Prefix: "seat", N: 0, What: "test"}
 
 	// Act
-	f, _, err := p.Take(func(int) { t.Fatal("an empty pool must never wait") })
+	f, _, err := p.Take(nil, func(int) { t.Fatal("an empty pool must never wait") })
 
 	// Assert
 	if err == nil || f != nil || !strings.Contains(err.Error(), "has 0 seats") {
@@ -134,7 +192,7 @@ func TestTakeSurfacesAnUnopenableSeat(t *testing.T) {
 	p := Pool{Dir: file, Prefix: "seat", N: 1, What: "test"}
 
 	// Act
-	_, _, err := p.Take(func(int) {})
+	_, _, err := p.Take(nil, func(int) {})
 
 	// Assert
 	if err == nil || !strings.Contains(err.Error(), "make the test seats directory") {
@@ -417,7 +475,7 @@ func TestHeldNeverHoldsTheSeatItself(t *testing.T) {
 	}
 
 	// Assert: a taker gets the seat at once.
-	f, _, err := p.Take(func(int) { t.Fatal("the probe left the seat held") })
+	f, _, err := p.Take(nil, func(int) { t.Fatal("the probe left the seat held") })
 	if err != nil {
 		t.Fatal(err)
 	}
