@@ -843,13 +843,13 @@ esac
 	// Act.
 	out, code := runE2EEmacs(t, script, e2eEmacsPattern)
 
-	// Assert: a failure, never the decline (77) and never a run.
-	if code == 0 || code == 77 || strings.Contains(out, "RAN\n") {
+	// Assert: a failure, never a run.
+	if code == 0 || strings.Contains(out, "RAN\n") {
 		t.Fatalf("test-e2e-emacs.sh exit %d, want a failure without a run:\n%s", code, out)
 	}
 }
 
-func TestE2EEmacsDeclinesAnUnusableSandboxWithoutBuilding(t *testing.T) {
+func TestE2EEmacsFailsAnUnusableSandboxWithoutBuilding(t *testing.T) {
 	t.Parallel()
 	// Arrange: the runtime is down.
 	script := e2eEmacsModule(t, `case $1 in
@@ -863,8 +863,8 @@ esac
 	out, code := runE2EEmacs(t, script, e2eEmacsPattern)
 
 	// Assert.
-	if code != 77 || strings.Contains(out, "BUILT\n") || strings.Contains(out, "RAN\n") {
-		t.Fatalf("test-e2e-emacs.sh exit %d, want the decline (77) with no build and no run:\n%s", code, out)
+	if code != 1 || !strings.Contains(out, "[e2e-emacs] FAILED") || strings.Contains(out, "BUILT\n") || strings.Contains(out, "RAN\n") {
+		t.Fatalf("test-e2e-emacs.sh exit %d, want a failure (1) with no build and no run:\n%s", code, out)
 	}
 }
 
@@ -999,7 +999,7 @@ func TestSourcingTheSandboxScriptDispatchesNothing(t *testing.T) {
 // TestEachSandboxedSuiteRunsItsOwnTestsInTheSandbox: every sandboxed suite
 // goes through lib-sandbox-suite.sh, running in the sandbox exactly the tests
 // its one argument (testrun's -test.run pattern) matches, refusing any other
-// argument list, and declining (77) when the sandbox is unusable.
+// argument list, and failing when the sandbox is unusable.
 func TestEachSandboxedSuiteRunsItsOwnTestsInTheSandbox(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -1050,7 +1050,7 @@ func TestEachSandboxedSuiteRunsItsOwnTestsInTheSandbox(t *testing.T) {
 				}
 			})
 		}
-		t.Run(tt.name+" declines an unusable sandbox", func(t *testing.T) {
+		t.Run(tt.name+" fails an unusable sandbox", func(t *testing.T) {
 			t.Parallel()
 			// Arrange
 			script := sandboxSuiteModule(t, tt.script, "[ \"$1\" = preflight ] && { echo 'docker is not running'; exit 3; }\necho RAN\n")
@@ -1059,15 +1059,15 @@ func TestEachSandboxedSuiteRunsItsOwnTestsInTheSandbox(t *testing.T) {
 			out, code := runE2EEmacs(t, script, tt.pattern)
 
 			// Assert
-			if code != 77 || strings.Contains(out, "RAN") || !strings.Contains(out, "docker is not running") {
-				t.Fatalf("%s exit %d, want a 77 decline naming the preflight's reason and nothing run:\n%s", tt.script, code, out)
+			if code != 1 || strings.Contains(out, "RAN") || !strings.Contains(out, "docker is not running") || !strings.Contains(out, "["+tt.label+"] FAILED") {
+				t.Fatalf("%s exit %d, want a failure (1) naming the preflight's reason and nothing run:\n%s", tt.script, code, out)
 			}
 		})
 	}
 }
 
 // TestNoSuiteScriptRunsTheSandboxItself: a suite that ran the sandbox on its
-// own would drift from the shared preflight, build and decline.
+// own would drift from the shared preflight, build and failure.
 func TestNoSuiteScriptRunsTheSandboxItself(t *testing.T) {
 	t.Parallel()
 	wd, err := os.Getwd()

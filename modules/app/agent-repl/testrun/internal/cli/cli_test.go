@@ -484,7 +484,7 @@ func newHarness(t *testing.T, exits map[string]int, buildErr map[string]error) h
 			if err := buildErr[s.Name]; err != nil {
 				return suites.Units{}, err
 			}
-			sp := run.Spec{Argv: []string{s.Name}, MayDecline: s.MayDecline}
+			sp := run.Spec{Argv: []string{s.Name}}
 			sp.ID, sp.Suite = s.Name, s.Name
 			return suites.Units{Atomic: []run.Spec{sp}}, nil
 		},
@@ -586,28 +586,22 @@ func TestRunWithAFailureContinuesAndExitsNonZero(t *testing.T) {
 	}
 }
 
-func TestRunWithADeclinedSuite(t *testing.T) {
-	// Arrange
-	h := newHarness(t, map[string]int{"e2e-emacs": run.ExitDeclined}, nil)
+func TestRunFailsTheSandboxSuiteWhenItCannotRun(t *testing.T) {
+	// Arrange: the sandboxed suite exits 77, the old "declined" status.
+	h := newHarness(t, map[string]int{"e2e-emacs": 77}, nil)
 
 	// Act
 	code := h.run(t)
 
-	// Assert
-	if code != 0 {
-		t.Fatalf("exit = %d, want 0: a decline is not a failure", code)
+	// Assert: no suite may skip a run, so 77 is a failure like any other.
+	if code != 1 {
+		t.Fatalf("exit = %d, want 1: a suite that cannot run fails the run", code)
 	}
-	for _, want := range []string{
-		"e2e-emacs: DECLINED after ",
-		"declined: e2e-emacs did not run (precondition unmet)",
-		"every agent-repl suite that could run passed; DECLINED: e2e-emacs",
-	} {
-		if !strings.Contains(h.out.String(), want) {
-			t.Errorf("stdout lacks %q", want)
-		}
+	if !strings.Contains(h.out.String()+h.errOut.String(), "e2e-emacs failed after ") {
+		t.Errorf("output lacks e2e-emacs's failure line:\n%s\n%s", h.out.String(), h.errOut.String())
 	}
-	if strings.Contains(h.out.String(), "e2e-emacs: passed") {
-		t.Error("a declined suite was called passed")
+	if strings.Contains(h.out.String(), "all agent-repl test suites passed") {
+		t.Error("a run with a suite that could not run was called passed")
 	}
 }
 

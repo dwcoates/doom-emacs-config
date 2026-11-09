@@ -54,16 +54,6 @@ func TestLookup(t *testing.T) {
 // (bin/lib-sandbox-suite.sh): the Emacs client layer, the Doom tier with it.
 var sandboxed = map[string]bool{"e2e-emacs": true}
 
-func TestOnlyTheSandboxSuiteMayDecline(t *testing.T) {
-	// The exit-77 disposition exists for a precondition the run cannot meet
-	// (the e2e sandbox image); any other suite exiting 77 is a failure.
-	for _, s := range Suites {
-		if s.MayDecline != sandboxed[s.Name] {
-			t.Errorf("%s MayDecline = %v", s.Name, s.MayDecline)
-		}
-	}
-}
-
 func TestEveryHarnessTestsAScriptInTheModulesBin(t *testing.T) {
 	// Arrange / Act
 	names := Harnesses()

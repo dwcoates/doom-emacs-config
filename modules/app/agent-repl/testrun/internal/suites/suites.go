@@ -174,7 +174,6 @@ func scriptUnits(l Layout, s roster.Suite) (Units, error) {
 	// and a run of named tests differ in nothing else.
 	unit := func(args ...string) run.Spec {
 		u := spec(s.Name, s.Name, filepath.Dir(path), append([]string{path}, args...))
-		u.MayDecline = s.MayDecline
 		u.Slots = s.Slots
 		u.Env = append(u.Env, fmt.Sprintf("%s=%d", UnitSlotsEnv, u.Width()))
 		if s.NeedsWebappDist {

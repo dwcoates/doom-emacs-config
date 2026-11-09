@@ -68,12 +68,6 @@ func TestParseSuiteStatesReadsTheScriptsOwnLines(t *testing.T) {
 			suite: "daemon",
 			want:  suiteStateReused,
 		},
-		{
-			name:  "a declined line",
-			line:  "[agent-repl-tests] e2e-emacs: DECLINED after 0.125s — its precondition is not met (exit 77); see its message above",
-			suite: "e2e-emacs",
-			want:  suiteStateDeclined,
-		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -111,33 +105,6 @@ func TestParseSuiteStatesLetsALaterLineWin(t *testing.T) {
 				t.Fatalf("the suite reads %v, want %v", states["daemon"], tt.want)
 			}
 		})
-	}
-}
-
-func TestDeclinedSuiteSettlesItsTabRow(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	output := "sandbox unavailable\n[agent-repl-tests] e2e-emacs: DECLINED after 0.125s — its precondition is not met (exit 77); see its message above\n"
-
-	// Act
-	rows, err := h.o.paintSuites([]string{"e2e-emacs"}, output)
-
-	// Assert
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(rows) != 1 {
-		t.Fatalf("rows = %d, want one", len(rows))
-	}
-	if _, passed := rows[0].GetState().(*frontendv1.FeedMergeTestSuite_Passed); !passed {
-		t.Fatalf("declined suite state = %T, want non-failure terminal", rows[0].GetState())
-	}
-	var painted string
-	for _, span := range rows[0].GetOutput() {
-		painted += span.GetText()
-	}
-	if !strings.Contains(painted, "DECLINED") {
-		t.Fatalf("declined suite output = %q", painted)
 	}
 }
 
@@ -319,11 +286,6 @@ func TestSuiteCountsReadTheRunnersUnitVerdicts(t *testing.T) {
 			name:   "a unit the runner did not run counts as failed",
 			output: "[agent-repl-tests] webapp: 1 units planned\n[agent-repl-tests] ERROR: unit webapp#00 [webapp] NOT RUN: its dependency x did not pass\n",
 			want:   &frontendv1.FeedMergeTestCounts{Failed: 1, Total: 1},
-		},
-		{
-			name:   "a declined unit counts as neither",
-			output: "[agent-repl-tests] webapp: 1 units planned\n[agent-repl-tests] unit webapp#00 [webapp] declined (exit 77) after 0.100s\n",
-			want:   &frontendv1.FeedMergeTestCounts{Total: 1},
 		},
 	}
 	for _, tc := range tests {

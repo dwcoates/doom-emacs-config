@@ -471,8 +471,8 @@ func (g *gateRun) setTabSuite(name string, state suiteState) {
 	g.suites = append(g.suites, suite)
 }
 
-// suiteEdge reads one line of the script as a suite's edge: starting, passed,
-// failed or declined.
+// suiteEdge reads one line of the script as a suite's edge: starting, passed
+// or failed.
 func suiteEdge(line string) (string, suiteState, bool) {
 	if m := suiteStarting.FindStringSubmatch(line); m != nil {
 		return m[1], suiteStateRunning, true
