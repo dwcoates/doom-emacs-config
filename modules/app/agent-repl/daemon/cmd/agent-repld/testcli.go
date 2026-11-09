@@ -39,6 +39,8 @@ import (
 //
 //	-coverage                instrument and report (whole suites only)
 //	-record                  append the timings (-every-suite alone)
+//	-remeasure               bound every unit as one never measured, so a
+//	                         unit that got slower passes and records its peak
 //	-runs N                  repeat the run N times, each its own run
 //	-stop-at-first-failure   stop repeating at the first failing run
 //	-cpu-load N              hold N busy loops for the run (with -as-user only)
@@ -82,6 +84,7 @@ func testRun(c *cliCall, args []string) int {
 	fs.BoolVar(&sel.every, "every-suite", false, "the whole roster (the merge queue's gate; only with a stated reason)")
 	coverage := fs.Bool("coverage", false, "instrument the run and report coverage (whole suites only)")
 	record := fs.Bool("record", false, "append the run's timings to the history (-every-suite alone)")
+	remeasure := fs.Bool("remeasure", false, "bound every unit as one never measured, so a unit that got slower passes and records its new peak")
 	runs := fs.Uint("runs", 1, "how many times the run repeats, each its own run")
 	stop := fs.Bool("stop-at-first-failure", false, "stop repeating at the first run that fails")
 	cpuLoad := fs.Uint("cpu-load", 0, "busy loops held for the run's length (the user's alone: needs -as-user)")
@@ -119,7 +122,7 @@ func testRun(c *cliCall, args []string) int {
 	if err != nil {
 		return c.usageFailed("%v", err)
 	}
-	run.Coverage, run.Record = *coverage, *record
+	run.Coverage, run.Record, run.Remeasure = *coverage, *record, *remeasure
 	req := &agentreplv1.RunTestsRequest{Workspace: ref, Run: run, Runs: uint32(*runs), StopAtFirstFailure: *stop, Requester: requester}
 	if *cpuLoad > 0 {
 		req.CpuLoad = &agentreplv1.RunTestsCpuLoad{Loops: uint32(*cpuLoad)}

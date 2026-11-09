@@ -32,10 +32,31 @@ import (
 // estimate only halfway.
 const Weight = 0.5
 
+// PeakDecay is how much of a key's peak survives each new measurement: the
+// peak is the larger of the new measurement and the old peak times PeakDecay.
+// A peak follows a unit that got slower at once, and forgets a one-off slow run
+// slowly: one decays by half over about 34 runs, so a cold build every few
+// dozen runs stays within it. Measured over 4,659 recorded runs (2026-11-09):
+// 0.95 let a cold build pass three times its peak four times, 0.98 twice, and
+// slower decay no less.
+const PeakDecay = 0.98
+
 // Entry is one key's running estimate.
 type Entry struct {
 	Seconds float64 `json:"seconds"`
 	Samples int     `json:"samples"`
+	// Peak is the key's decaying peak (PeakDecay): what a healthy run of it
+	// is expected to take at most, which its time limit is sized from. Nil in
+	// an entry recorded before peaks were kept.
+	Peak *float64 `json:"peak,omitempty"`
+}
+
+// Sample is one run's measurement of a key: its typical time, which the
+// estimate follows, and its longest, which the peak follows. They differ only
+// for a key measured several times in one run (a group's per-chunk overhead).
+type Sample struct {
+	Seconds float64
+	Peak    float64
 }
 
 type file struct {
@@ -99,12 +120,39 @@ func (s *Store) Get(key string) (float64, bool) {
 	return e.Seconds, ok
 }
 
+// Peak is a key's decaying peak, and whether one was measured.
+func (s *Store) Peak(key string) (float64, bool) {
+	e, ok := s.entries[key]
+	if !ok || e.Peak == nil {
+		return 0, false
+	}
+	return *e.Peak, true
+}
+
+// Longest is the longest any unit (a key under prefix) is known to take:
+// the largest of every such key's estimate and peak, and whether any is
+// known.
+func (s *Store) Longest(prefix string) (float64, bool) {
+	longest, known := 0.0, false
+	for key, e := range s.entries {
+		if !strings.HasPrefix(key, prefix) {
+			continue
+		}
+		known = true
+		longest = max(longest, e.Seconds)
+		if e.Peak != nil {
+			longest = max(longest, *e.Peak)
+		}
+	}
+	return longest, known
+}
+
 // Record folds measurements into the history on disk, re-reading it under the
 // lock first so a concurrent run's measurements are kept, never overwritten.
-func (s *Store) Record(measured map[string]float64) error {
-	for key, secs := range measured {
-		if secs < 0 {
-			return fmt.Errorf("history: refusing a negative measurement %v for %q", secs, key)
+func (s *Store) Record(measured map[string]Sample) error {
+	for key, m := range measured {
+		if m.Seconds < 0 || m.Peak < m.Seconds {
+			return fmt.Errorf("history: refusing the measurement %+v for %q: it is negative, or its peak is below its typical time", m, key)
 		}
 	}
 	if err := os.MkdirAll(filepath.Dir(s.path), 0o755); err != nil {
@@ -119,13 +167,17 @@ func (s *Store) Record(measured map[string]float64) error {
 	if err != nil {
 		return err
 	}
-	for key, secs := range measured {
+	for key, m := range measured {
+		peak := m.Peak
 		e, ok := entries[key]
 		if !ok {
-			entries[key] = Entry{Seconds: secs, Samples: 1}
+			entries[key] = Entry{Seconds: m.Seconds, Samples: 1, Peak: &peak}
 			continue
 		}
-		entries[key] = Entry{Seconds: (1-Weight)*e.Seconds + Weight*secs, Samples: e.Samples + 1}
+		if e.Peak != nil {
+			peak = max(peak, *e.Peak*PeakDecay)
+		}
+		entries[key] = Entry{Seconds: (1-Weight)*e.Seconds + Weight*m.Seconds, Samples: e.Samples + 1, Peak: &peak}
 	}
 	data, err := json.MarshalIndent(file{Version: version, Entries: entries}, "", " ")
 	if err != nil {

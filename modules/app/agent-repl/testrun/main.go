@@ -413,6 +413,7 @@ func runIn(ctx context.Context, log *run.Log, args cli.Args, self, histPath, roo
 		Log:               log,
 		Exec:              run.OSExec{Log: log, Grace: run.KillGrace, TmpParent: root, Prefix: prefix},
 		Clock:             run.WallClock{},
+		After:             time.After,
 		Slots:             slots,
 		Cores:             host,
 		HistoryPath:       histPath,

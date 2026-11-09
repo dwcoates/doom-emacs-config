@@ -23,6 +23,14 @@ type Spec struct {
 	Dir  string
 	// Env is added to the runner's own environment.
 	Env []string
+	// Bound is the unit's time limit: a unit still running at it is killed
+	// and fails. REQUIRED, positive: every unit is bounded (plan.Build sizes
+	// it from the unit's expected time), and a run refuses a unit without
+	// one.
+	Bound time.Duration
+	// Expected is the expected time Bound was sized from, which a unit that
+	// ran past its bound is reported against.
+	Expected time.Duration
 	// Items parses the unit's output into seconds per item, for the history.
 	// Nil for a unit that is not a chunk.
 	Items func(output []byte) (map[string]float64, error)
@@ -88,6 +96,8 @@ type Result struct {
 	Tests []testtimes.Test
 	// CancelledBy names the failed dependency of a cancelled unit.
 	CancelledBy string
+	// TimedOut is a unit killed because it ran past its Bound.
+	TimedOut bool
 }
 
 // Wall is the unit's wall time in seconds.
@@ -124,6 +134,9 @@ type Runner struct {
 	Cores Cores
 	Exec  Executor
 	Clock Clock
+	// After answers a channel that receives once d has passed: what a
+	// unit's time limit waits on (time.After in production).
+	After func(d time.Duration) <-chan time.Time
 	Log   *Log
 	// Ended, when set, is told each unit's result as its verdict is
 	// reported, with the unit's whole output (nil for a unit that never
@@ -144,6 +157,8 @@ type completion struct {
 	usage  Usage
 	err    error
 	output *bytes.Buffer
+	// timedOut is a unit killed at its time limit.
+	timedOut bool
 }
 
 // Run executes every spec and returns per-unit results in completion order
@@ -158,6 +173,14 @@ func (r *Runner) Run(ctx context.Context, specs []Spec) ([]Result, []SuiteResult
 	}
 	if r.Cores == nil {
 		return nil, nil, fmt.Errorf("run: no host core pool to hold the units' cores")
+	}
+	if r.After == nil {
+		return nil, nil, fmt.Errorf("run: no timer to hold the units to their time limits")
+	}
+	for _, s := range specs {
+		if s.Bound <= 0 {
+			return nil, nil, fmt.Errorf("run: unit %s (%s) has no time limit (bound %v); every unit is bounded", s.ID, s.Suite, s.Bound)
+		}
 	}
 	units := make([]sched.Unit, len(specs))
 	byID := map[string]Spec{}
@@ -241,10 +264,7 @@ func (r *Runner) Run(ctx context.Context, specs []Spec) ([]Result, []SuiteResult
 			return
 		}
 		running[s.ID] = p
-		go func() {
-			exit, usage, err := p.Wait()
-			done <- completion{id: s.ID, exit: exit, usage: usage, err: err, output: out}
-		}()
+		go r.await(s, p, out, done)
 	}
 
 	// ONE HOLD AT A TIME, IN THE QUEUE'S ORDER. The next unit the queue
@@ -309,8 +329,10 @@ func (r *Runner) Run(ctx context.Context, specs []Spec) ([]Result, []SuiteResult
 		}
 		spec := byID[c.id]
 		used -= spec.Width()
-		res := Result{Spec: spec, Exit: c.exit, Start: starts[c.id], End: r.Clock.Now(), Usage: c.usage}
+		res := Result{Spec: spec, Exit: c.exit, Start: starts[c.id], End: r.Clock.Now(), Usage: c.usage, TimedOut: c.timedOut}
 		switch {
+		case c.timedOut:
+			res.Outcome = Failed
 		case c.err != nil:
 			r.Log.Errorf("unit %s (%s) could not be waited on: %v", c.id, spec.Suite, c.err)
 			res.Outcome, res.Exit = Failed, -1
@@ -374,6 +396,39 @@ func (r *Runner) Run(ctx context.Context, specs []Spec) ([]Result, []SuiteResult
 	}
 	return results, r.suiteList(suites, order), nil
 }
+
+// await waits for a started unit to exit and reports it on done. A unit still
+// running at its time limit is killed, and reported as timed out.
+//
+// THE TIME LIMIT IS THE UNIT'S OWN. Its clock starts once the unit holds its
+// cores and has started, so a wait for CPU or seats never counts against it.
+func (r *Runner) await(s Spec, p Process, out *bytes.Buffer, done chan<- completion) {
+	waited := make(chan completion, 1)
+	go func() {
+		exit, usage, err := p.Wait()
+		waited <- completion{id: s.ID, exit: exit, usage: usage, err: err, output: out}
+	}()
+	select {
+	case c := <-waited:
+		done <- c
+	case <-r.After(s.Bound):
+		r.Log.Errorf("unit %s (%s) ran past its time limit of %s (%d times its expected %s) and is killed", s.ID, s.Suite, s.Bound, BoundFactor, s.Expected)
+		p.Kill()
+		c := <-waited
+		c.timedOut = true
+		fmt.Fprintf(c.output, "\n%s unit %s was KILLED: it ran past its time limit of %s (%d times its expected %s). A unit that legitimately got slower is re-measured with -remeasure.\n", Prefix, s.ID, s.Bound, BoundFactor, s.Expected)
+		done <- c
+	}
+}
+
+// BoundFactor is how many times its expected time a unit may run before it
+// is killed (owner ruling, 2026-11-09: every timeout is 2-3 times the
+// expected time of what it bounds). The expected time is the unit's peak
+// passing time (plan.Build), so 3 leaves room for a healthy run slower than
+// any yet seen: over 4,659 recorded runs of 260 units, 3 times a peak that
+// decays by history.PeakDecay per run was passed only twice, both by a cold
+// build early in its unit's history.
+const BoundFactor = 3
 
 // tellEnded tells the run's observer, if it has one, that a unit ended.
 func (r *Runner) tellEnded(res Result, output []byte) {

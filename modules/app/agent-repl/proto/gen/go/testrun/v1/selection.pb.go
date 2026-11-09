@@ -55,7 +55,13 @@ type TestRunRequest struct {
 	// (test_time.csv), once every suite has passed on an unmoved branch. Only a
 	// run of the whole roster records: the one selection must be `every_suite`.
 	// Refused with `coverage`, whose instrumentation changes the timings.
-	Record        bool `protobuf:"varint,3,opt,name=record,proto3" json:"record,omitempty"`
+	Record bool `protobuf:"varint,3,opt,name=record,proto3" json:"record,omitempty"`
+	// Bound every selected unit as one never measured: its time limit is three
+	// times the longest any unit on the host is known to take, instead of three
+	// times its own peak. A unit that legitimately got slower is killed at its
+	// old limit on every run, and records no time while it is; a remeasuring
+	// run lets it pass and record its new peak, which later runs are held to.
+	Remeasure     bool `protobuf:"varint,4,opt,name=remeasure,proto3" json:"remeasure,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -107,6 +113,13 @@ func (x *TestRunRequest) GetCoverage() bool {
 func (x *TestRunRequest) GetRecord() bool {
 	if x != nil {
 		return x.Record
+	}
+	return false
+}
+
+func (x *TestRunRequest) GetRemeasure() bool {
+	if x != nil {
+		return x.Remeasure
 	}
 	return false
 }
@@ -1306,13 +1319,14 @@ var File_testrun_v1_selection_proto protoreflect.FileDescriptor
 const file_testrun_v1_selection_proto_rawDesc = "" +
 	"\n" +
 	"\x1atestrun/v1/selection.proto\x12\n" +
-	"testrun.v1\"\x7f\n" +
+	"testrun.v1\"\x9d\x01\n" +
 	"\x0eTestRunRequest\x129\n" +
 	"\n" +
 	"selections\x18\x01 \x03(\v2\x19.testrun.v1.TestSelectionR\n" +
 	"selections\x12\x1a\n" +
 	"\bcoverage\x18\x02 \x01(\bR\bcoverage\x12\x16\n" +
-	"\x06record\x18\x03 \x01(\bR\x06record\"\xa3\x03\n" +
+	"\x06record\x18\x03 \x01(\bR\x06record\x12\x1c\n" +
+	"\tremeasure\x18\x04 \x01(\bR\tremeasure\"\xa3\x03\n" +
 	"\rTestSelection\x12C\n" +
 	"\n" +
 	"go_package\x18\x01 \x01(\v2\".testrun.v1.TestSelectionGoPackageH\x00R\tgoPackage\x12F\n" +

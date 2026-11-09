@@ -37,6 +37,12 @@ message TestRunRequest {
   // run of the whole roster records: the one selection must be `every_suite`.
   // Refused with `coverage`, whose instrumentation changes the timings.
   bool record = 3;
+  // Bound every selected unit as one never measured: its time limit is three
+  // times the longest any unit on the host is known to take, instead of three
+  // times its own peak. A unit that legitimately got slower is killed at its
+  // old limit on every run, and records no time while it is; a remeasuring
+  // run lets it pass and record its new peak, which later runs are held to.
+  bool remeasure = 4;
 }
 
 // One target and the tests within it to run.
