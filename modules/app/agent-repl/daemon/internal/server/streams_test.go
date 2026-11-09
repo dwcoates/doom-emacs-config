@@ -360,9 +360,9 @@ func TestAWebStreamOpenStatesTheWebHopToTheFooter(t *testing.T) {
 	openWebStream(t, h, ctx)
 	edge := h.Footer.AwaitEdge(t)
 
-	// Assert.
-	if !edge.Web || edge.Host || edge.WS != testWorkspaceID {
-		t.Fatalf("footer participant edge = %+v, want the web hop alone stated live", edge)
+	// Assert: the web hop is live, and the host hop, never held here, awaited.
+	if !edge.Web || !edge.Host || edge.WS != testWorkspaceID {
+		t.Fatalf("footer participant edge = %+v, want the web hop live and the unseen host awaited", edge)
 	}
 }
 
@@ -378,9 +378,9 @@ func TestAWebStreamOpenStatesTheWebHopToTheTopbar(t *testing.T) {
 	openWebStream(t, h, ctx)
 	edge := h.Topbar.AwaitEdge(t)
 
-	// Assert.
-	if !edge.Web || edge.Host || edge.WS != testWorkspaceID {
-		t.Fatalf("topbar participant edge = %+v, want the web hop alone stated live", edge)
+	// Assert: the web hop is live, and the host hop, never held here, awaited.
+	if !edge.Web || !edge.Host || edge.WS != testWorkspaceID {
+		t.Fatalf("topbar participant edge = %+v, want the web hop live and the unseen host awaited", edge)
 	}
 }
 
@@ -1593,23 +1593,28 @@ func TestEmacsHoldingALoadedPageLeavesABrokenWebHopBroken(t *testing.T) {
 }
 
 // TestParticipantHopsLockedAnswersTheStreamsAndTheirHops pins the one reading
-// of a workspace's participant set: the streams as held, and the web hop
-// awaited until a page that connected goes away.
+// of a workspace's participant set: the streams as held, and each hop awaited
+// until a stream of its own that connected goes away.
 func TestParticipantHopsLockedAnswersTheStreamsAndTheirHops(t *testing.T) {
 	tests := []struct {
-		name    string
-		hostN   int
-		webN    int
-		webSeen bool
-		want    participantHops
+		name     string
+		hostN    int
+		webN     int
+		hostSeen bool
+		webSeen  bool
+		want     participantHops
 	}{
-		{name: "nothing held and no page seen", want: participantHops{webHop: true}},
-		{name: "the host alone, its page awaited", hostN: 1,
-			want: participantHops{hostStream: true, webHop: true}},
-		{name: "both held", hostN: 1, webN: 1, webSeen: true,
-			want: participantHops{hostStream: true, webStream: true, webHop: true}},
-		{name: "a page seen and gone", hostN: 1, webSeen: true,
-			want: participantHops{hostStream: true}},
+		{name: "nothing held and nothing seen", want: participantHops{hostHop: true, webHop: true}},
+		{name: "the host alone, its page awaited", hostN: 1, hostSeen: true,
+			want: participantHops{hostStream: true, hostHop: true, webHop: true}},
+		{name: "both held", hostN: 1, webN: 1, hostSeen: true, webSeen: true,
+			want: participantHops{hostStream: true, webStream: true, hostHop: true, webHop: true}},
+		{name: "a page seen and gone", hostN: 1, hostSeen: true, webSeen: true,
+			want: participantHops{hostStream: true, hostHop: true}},
+		{name: "the page alone, the host never seen", webN: 1, webSeen: true,
+			want: participantHops{webStream: true, hostHop: true, webHop: true}},
+		{name: "a host seen and gone", hostSeen: true,
+			want: participantHops{webHop: true}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1617,6 +1622,7 @@ func TestParticipantHopsLockedAnswersTheStreamsAndTheirHops(t *testing.T) {
 			s := &server{
 				hostHeld: map[ids.WorkspaceID]int{testWorkspaceID: tt.hostN},
 				webHeld:  map[ids.WorkspaceID]int{testWorkspaceID: tt.webN},
+				hostSeen: map[ids.WorkspaceID]bool{testWorkspaceID: tt.hostSeen},
 				webSeen:  map[ids.WorkspaceID]bool{testWorkspaceID: tt.webSeen},
 			}
 
@@ -1636,13 +1642,13 @@ func TestParticipantHopsLockedAnswersTheStreamsAndTheirHops(t *testing.T) {
 // its hop from the log alone.
 func TestParticipantHopsFieldsCarryEveryStreamAndHop(t *testing.T) {
 	// Arrange.
-	hops := participantHops{hostStream: true, webStream: false, webHop: true}
+	hops := participantHops{hostStream: false, webStream: false, hostHop: true, webHop: true}
 
 	// Act.
 	got := hops.fields()
 
 	// Assert.
-	want := dlog.Context{"host_stream": true, "web_stream": false, "web_hop": true}
+	want := dlog.Context{"host_stream": false, "web_stream": false, "host_hop": true, "web_hop": true}
 	if !maps.Equal(got, want) {
 		t.Fatalf("fields = %v, want %v", got, want)
 	}
@@ -1672,5 +1678,67 @@ func TestEveryParticipantEdgeStatesItsHopsThroughOneShape(t *testing.T) {
 				t.Fatalf("%q sites = %v, want %v; read the hops through participantHopsLocked", tt.substr, sites, tt.want)
 			}
 		})
+	}
+}
+
+// TestAPageThatArrivesBeforeTheEditorIsNotSevered is the owner's report
+// (2026-11-09): after a handover the successor served a workspace whose page
+// re-dialed it before Emacs's host stream did, and the row was drawn severed,
+// blue, until the user switched to it. The 2026-11-06 sequence is replayed --
+// the page connects, Emacs unloads it, it goes -- with no host stream ever
+// held here, and neither hop is stated down on either resolver.
+func TestAPageThatArrivesBeforeTheEditorIsNotSevered(t *testing.T) {
+	tests := []struct {
+		name  string
+		await func(h *harness) participantEdge
+	}{
+		{name: "the footer", await: func(h *harness) participantEdge { return h.Footer.AwaitEdge(t) }},
+		{name: "the topbar", await: func(h *harness) participantEdge { return h.Topbar.AwaitEdge(t) }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			webCtx, closePage := context.WithCancel(ctx)
+			openWebStream(t, h, webCtx)
+			tt.await(h) // the web open
+			reportPageUnloading(t, h)
+			tt.await(h) // the report
+
+			// Act: the page goes away, the editor still not here.
+			closePage()
+			edge := tt.await(h)
+
+			// Assert.
+			if !edge.Host || !edge.Web {
+				t.Fatalf("participant edge = %+v, want both hops awaited: no editor or page here has gone", edge)
+			}
+		})
+	}
+}
+
+// TestAHostStreamThatLeftStaysBrokenWhenThePageArrives pins the fault the
+// host's awaiting must not hide: once a host stream this daemon held has
+// gone, a page connecting does not make the editor's hop stand again.
+func TestAHostStreamThatLeftStaysBrokenWhenThePageArrives(t *testing.T) {
+	// Arrange: the editor came and went.
+	h := newHarness(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	hostCtx, closeHost := context.WithCancel(ctx)
+	openHostStream(t, h, hostCtx)
+	h.Footer.AwaitEdge(t) // the host open
+	closeHost()
+	h.Footer.AwaitEdge(t) // the host close
+
+	// Act.
+	openWebStream(t, h, ctx)
+	edge := h.Footer.AwaitEdge(t)
+
+	// Assert.
+	if edge.Host || !edge.Web {
+		t.Fatalf("footer participant edge = %+v, want the gone editor's hop broken beside the live page", edge)
 	}
 }

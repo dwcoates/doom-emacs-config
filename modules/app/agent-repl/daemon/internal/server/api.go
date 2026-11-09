@@ -381,6 +381,12 @@ type server struct {
 	// (participantHops). Scoped to the host stream: the last host close
 	// forgets it.
 	webSeen map[ids.WorkspaceID]bool
+	// hostSeen marks the workspaces whose host stream this daemon has held.
+	// Only an editor that was seen can be MISSING; one not seen yet -- a
+	// successor whose page arrived before Emacs re-attached -- is awaited,
+	// and an awaited host hop is never drawn as a fault (participantHops).
+	// Never forgotten: the last host close is the editor going away.
+	hostSeen map[ids.WorkspaceID]bool
 	// movedAway is every workspace whose transfer notice this daemon pushed
 	// and has not retracted. Its stream edges from then on are the move, not
 	// its connectivity: they are counted, never published (holdParticipant).
@@ -645,6 +651,7 @@ func New(deps Deps) (Server, error) {
 		evalDeadline:           evaluationDeadline,
 		webHeld:                make(map[ids.WorkspaceID]int),
 		webSeen:                make(map[ids.WorkspaceID]bool),
+		hostSeen:               make(map[ids.WorkspaceID]bool),
 		movedAway:              make(map[ids.WorkspaceID]bool),
 		watchTokens:            make(map[string]tokenTarget),
 		pages:                  make(map[string]*pageStream),

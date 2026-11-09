@@ -817,6 +817,8 @@ func (s *server) holdParticipant(ws ids.WorkspaceID, host bool, delta int) {
 		s.webHeld[ws] += delta
 	}
 	switch {
+	case host && delta > 0:
+		s.hostSeen[ws] = true
 	case !host && delta > 0:
 		s.webSeen[ws] = true
 	case host && s.hostHeld[ws] <= 0:
@@ -908,34 +910,53 @@ func (s *server) awaitPage(ws ids.WorkspaceID, log dlog.Logger, message string) 
 type participantHops struct {
 	hostStream bool
 	webStream  bool
+	hostHop    bool
 	webHop     bool
 }
 
 // fields answers the hops as a record's context, the shape every
 // `daemon.server.participants` record carries; the caller adds its own keys.
 func (h participantHops) fields() dlog.Context {
-	return dlog.Context{"host_stream": h.hostStream, "web_stream": h.webStream, "web_hop": h.webHop}
+	return dlog.Context{"host_stream": h.hostStream, "web_stream": h.webStream,
+		"host_hop": h.hostHop, "web_hop": h.webHop}
 }
 
 // participantHopsLocked answers a workspace's host stream, its web stream, and
-// whether its WEB HOP stands: a web stream is held, or the page is AWAITED --
-// it has not connected since the host stream opened or since Emacs reported
-// unloading it (ReportPageUnloading). Only a page that connected and went
-// away unannounced breaks the hop.
+// whether each of their HOPS stands. A hop stands while its stream is held, or
+// while it is AWAITED:
+//
+//   - the WEB hop has not connected since the host stream opened or since
+//     Emacs reported unloading the page (ReportPageUnloading);
+//   - the HOST hop has not connected to THIS daemon yet.
+//
+// Only a stream that connected and went away unannounced breaks its hop.
 //
 // AN UNLOADED PAGE IS A PERFORMANCE MEASURE, NEVER A STATE THE USER SEES
 // (owner ruling, 2026-10-20): a working workspace whose page Emacs unloaded
-// was drawn severed, blue, until the user switched back to it. The caller
-// holds s.mu.
+// was drawn severed, blue, until the user switched back to it.
+//
+// NOR IS AN EDITOR NOT YET HERE (2026-11-09). On a handover the successor
+// serves a workspace whose page re-dials it before Emacs's host stream does
+// -- the host re-attaches at the adopt, at the promotion, or, when its walk
+// failed after the promotion passed, only at the workspace's next selection.
+// Read as a broken host hop, every such workspace was drawn severed, blue,
+// until the user switched to it, and then at once drew its real status. The
+// host hop is broken only once a host stream this daemon held has gone. The
+// caller holds s.mu.
 func (s *server) participantHopsLocked(ws ids.WorkspaceID) participantHops {
 	host, web := s.hostHeld[ws] > 0, s.webHeld[ws] > 0
-	return participantHops{hostStream: host, webStream: web, webHop: web || !s.webSeen[ws]}
+	return participantHops{
+		hostStream: host,
+		webStream:  web,
+		hostHop:    host || !s.hostSeen[ws],
+		webHop:     web || !s.webSeen[ws],
+	}
 }
 
 // publishParticipants states the participant hops to the two resolvers that
 // draw connectivity (daemon.md invariant 11). Every edge that moves them
 // publishes through here.
 func (s *server) publishParticipants(ws ids.WorkspaceID, hops participantHops) {
-	s.deps.Footer.SetParticipants(ws, hops.hostStream, hops.webHop)
-	s.deps.Topbar.SetParticipants(ws, hops.hostStream, hops.webHop)
+	s.deps.Footer.SetParticipants(ws, hops.hostHop, hops.webHop)
+	s.deps.Topbar.SetParticipants(ws, hops.hostHop, hops.webHop)
 }

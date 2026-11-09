@@ -380,10 +380,12 @@ type Resolver interface {
 	// either stream. Per daemon.md invariant 11 the workspace is connected
 	// only while all three hops are live, so a hop down is drawn as not
 	// connected however healthy the shim link is.
-	// WEB IS THE HOP, NOT THE STREAM: it is false only for a page that
-	// connected and went away unannounced. A page Emacs unloaded on purpose,
+	// EACH IS THE HOP, NOT THE STREAM: web is false only for a page that
+	// connected and went away unannounced; a page Emacs unloaded on purpose,
 	// or one not yet connected since the host stream opened, is awaited and
-	// passes as true (server.participantHopsLocked).
+	// passes as true. Host is false only once a host stream this daemon held
+	// has gone; an editor not yet attached here (a handover's successor) is
+	// awaited and passes as true (server.participantHopsLocked).
 	SetParticipants(ws ids.WorkspaceID, host, web bool)
 	// SetWorkspaceDir binds the workspace's directory, which is what resolves
 	// its durable log sink. The daemon calls it at registration, BEFORE any
