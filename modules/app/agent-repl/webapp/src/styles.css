@@ -8554,6 +8554,27 @@ html.webhost-gate #feed [data-row-kind="coldGate"]:has(.cold-gate[data-state="st
   font: inherit;
   text-decoration: none;
 }
+/* A summary link's service icon sits left of its label, sized to the text. */
+.topbar-title-link-option .external-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.topbar-title-link-icon {
+  width: 1em;
+  height: 1em;
+  flex: none;
+}
+/* AN OWNED LINK'S ROW (owner request, 2026-11-09): a link the workspace's
+   work made rides a slightly lighter ground than the reference rows, halfway
+   between the menu's own ground and the topbar's (--sidebar-ground), so it
+   reads as set apart without being as light as the topbar itself. */
+.topbar-title-link-option.is-owned {
+  background: color-mix(in srgb, var(--bg) 50%, var(--sidebar-ground));
+}
+.topbar-title-link-option.is-owned:hover {
+  background: var(--border);
+}
 /* A ROW'S SECOND LINE: what identifies the row rather than what the reader
    chooses by, dim and a step smaller, ONE look in every menu. An account
    row's root path, a model's description, a summary link's url. */

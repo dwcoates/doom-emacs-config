@@ -74,6 +74,68 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// The service icon a menu row draws before its label, decided by the daemon
+// from the url's host so the client never inspects a url.
+type TopbarTitleLinkIcon int32
+
+const (
+	// No known service: the row draws no icon.
+	TopbarTitleLinkIcon_TOPBAR_TITLE_LINK_ICON_UNSPECIFIED TopbarTitleLinkIcon = 0
+	// A GitHub pull request: the GitHub mark.
+	TopbarTitleLinkIcon_TOPBAR_TITLE_LINK_ICON_GITHUB TopbarTitleLinkIcon = 1
+	// A Slack workspace link: the Slack mark.
+	TopbarTitleLinkIcon_TOPBAR_TITLE_LINK_ICON_SLACK TopbarTitleLinkIcon = 2
+	// A GNS link: the GNS mark.
+	TopbarTitleLinkIcon_TOPBAR_TITLE_LINK_ICON_GNS TopbarTitleLinkIcon = 3
+	// A Notion link: the Notion mark.
+	TopbarTitleLinkIcon_TOPBAR_TITLE_LINK_ICON_NOTION TopbarTitleLinkIcon = 4
+)
+
+// Enum value maps for TopbarTitleLinkIcon.
+var (
+	TopbarTitleLinkIcon_name = map[int32]string{
+		0: "TOPBAR_TITLE_LINK_ICON_UNSPECIFIED",
+		1: "TOPBAR_TITLE_LINK_ICON_GITHUB",
+		2: "TOPBAR_TITLE_LINK_ICON_SLACK",
+		3: "TOPBAR_TITLE_LINK_ICON_GNS",
+		4: "TOPBAR_TITLE_LINK_ICON_NOTION",
+	}
+	TopbarTitleLinkIcon_value = map[string]int32{
+		"TOPBAR_TITLE_LINK_ICON_UNSPECIFIED": 0,
+		"TOPBAR_TITLE_LINK_ICON_GITHUB":      1,
+		"TOPBAR_TITLE_LINK_ICON_SLACK":       2,
+		"TOPBAR_TITLE_LINK_ICON_GNS":         3,
+		"TOPBAR_TITLE_LINK_ICON_NOTION":      4,
+	}
+)
+
+func (x TopbarTitleLinkIcon) Enum() *TopbarTitleLinkIcon {
+	p := new(TopbarTitleLinkIcon)
+	*p = x
+	return p
+}
+
+func (x TopbarTitleLinkIcon) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (TopbarTitleLinkIcon) Descriptor() protoreflect.EnumDescriptor {
+	return file_frontend_v1_topbar_proto_enumTypes[0].Descriptor()
+}
+
+func (TopbarTitleLinkIcon) Type() protoreflect.EnumType {
+	return &file_frontend_v1_topbar_proto_enumTypes[0]
+}
+
+func (x TopbarTitleLinkIcon) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use TopbarTitleLinkIcon.Descriptor instead.
+func (TopbarTitleLinkIcon) EnumDescriptor() ([]byte, []int) {
+	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{0}
+}
+
 // One workspace's topbar, resolved completely by the daemon. The client
 // renders each element verbatim and derives nothing.
 type TopbarView struct {
@@ -2536,7 +2598,14 @@ type TopbarTitleLinkMenuItem struct {
 	Label string `protobuf:"bytes,1,opt,name=label,proto3" json:"label,omitempty"`
 	// The absolute http or https url, verbatim as the agent set it, named in
 	// the row's tooltip.
-	Url           string `protobuf:"bytes,2,opt,name=url,proto3" json:"url,omitempty"`
+	Url string `protobuf:"bytes,2,opt,name=url,proto3" json:"url,omitempty"`
+	// Whether the workspace's work made what the link points at (a pull request
+	// it opened, a doc it wrote). Owned rows are served BEFORE every reference
+	// row and drawn on a slightly lighter ground than the reference rows, so
+	// the client draws the flag and never reorders.
+	Owned bool `protobuf:"varint,3,opt,name=owned,proto3" json:"owned,omitempty"`
+	// The service the url's host names, drawn as an icon on the row's left.
+	Icon          TopbarTitleLinkIcon `protobuf:"varint,4,opt,name=icon,proto3,enum=frontend.v1.TopbarTitleLinkIcon" json:"icon,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2583,6 +2652,20 @@ func (x *TopbarTitleLinkMenuItem) GetUrl() string {
 		return x.Url
 	}
 	return ""
+}
+
+func (x *TopbarTitleLinkMenuItem) GetOwned() bool {
+	if x != nil {
+		return x.Owned
+	}
+	return false
+}
+
+func (x *TopbarTitleLinkMenuItem) GetIcon() TopbarTitleLinkIcon {
+	if x != nil {
+		return x.Icon
+	}
+	return TopbarTitleLinkIcon_TOPBAR_TITLE_LINK_ICON_UNSPECIFIED
 }
 
 // The workspace's name as the registry holds it: drawn on the heading's
@@ -4736,10 +4819,12 @@ const file_frontend_v1_topbar_proto_rawDesc = "" +
 	"\x05label\x18\x01 \x01(\tR\x05label\x12\x10\n" +
 	"\x03url\x18\x02 \x01(\tR\x03url\"Q\n" +
 	"\x13TopbarTitleLinkMenu\x12:\n" +
-	"\x05items\x18\x01 \x03(\v2$.frontend.v1.TopbarTitleLinkMenuItemR\x05items\"A\n" +
+	"\x05items\x18\x01 \x03(\v2$.frontend.v1.TopbarTitleLinkMenuItemR\x05items\"\x8d\x01\n" +
 	"\x17TopbarTitleLinkMenuItem\x12\x14\n" +
 	"\x05label\x18\x01 \x01(\tR\x05label\x12\x10\n" +
-	"\x03url\x18\x02 \x01(\tR\x03url\")\n" +
+	"\x03url\x18\x02 \x01(\tR\x03url\x12\x14\n" +
+	"\x05owned\x18\x03 \x01(\bR\x05owned\x124\n" +
+	"\x04icon\x18\x04 \x01(\x0e2 .frontend.v1.TopbarTitleLinkIconR\x04icon\")\n" +
 	"\x13TopbarWorkspaceName\x12\x12\n" +
 	"\x04text\x18\x01 \x01(\tR\x04text\"'\n" +
 	"\x11TopbarSessionLine\x12\x12\n" +
@@ -4849,7 +4934,13 @@ const file_frontend_v1_topbar_proto_rawDesc = "" +
 	"emphasized\x18\x04 \x01(\bR\n" +
 	"emphasized\x12\x14\n" +
 	"\x05depth\x18\x05 \x01(\x05R\x05depthB\x11\n" +
-	"\x0f_share_permilleB(Z&agentrepl/proto/frontend/v1;frontendv1b\x06proto3"
+	"\x0f_share_permille*\xc5\x01\n" +
+	"\x13TopbarTitleLinkIcon\x12&\n" +
+	"\"TOPBAR_TITLE_LINK_ICON_UNSPECIFIED\x10\x00\x12!\n" +
+	"\x1dTOPBAR_TITLE_LINK_ICON_GITHUB\x10\x01\x12 \n" +
+	"\x1cTOPBAR_TITLE_LINK_ICON_SLACK\x10\x02\x12\x1e\n" +
+	"\x1aTOPBAR_TITLE_LINK_ICON_GNS\x10\x03\x12!\n" +
+	"\x1dTOPBAR_TITLE_LINK_ICON_NOTION\x10\x04B(Z&agentrepl/proto/frontend/v1;frontendv1b\x06proto3"
 
 var (
 	file_frontend_v1_topbar_proto_rawDescOnce sync.Once
@@ -4863,177 +4954,180 @@ func file_frontend_v1_topbar_proto_rawDescGZIP() []byte {
 	return file_frontend_v1_topbar_proto_rawDescData
 }
 
+var file_frontend_v1_topbar_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
 var file_frontend_v1_topbar_proto_msgTypes = make([]protoimpl.MessageInfo, 71)
 var file_frontend_v1_topbar_proto_goTypes = []any{
-	(*TopbarView)(nil),                                        // 0: frontend.v1.TopbarView
-	(*TopbarQueueBypass)(nil),                                 // 1: frontend.v1.TopbarQueueBypass
-	(*TopbarQueueBypassOn)(nil),                               // 2: frontend.v1.TopbarQueueBypassOn
-	(*TopbarQueueBypassOff)(nil),                              // 3: frontend.v1.TopbarQueueBypassOff
-	(*TopbarQueueBypassContextOption)(nil),                    // 4: frontend.v1.TopbarQueueBypassContextOption
-	(*TopbarQueueBypassContext)(nil),                          // 5: frontend.v1.TopbarQueueBypassContext
-	(*TopbarQueueBypassContextFullMain)(nil),                  // 6: frontend.v1.TopbarQueueBypassContextFullMain
-	(*TopbarQueueBypassContextCompactedMain)(nil),             // 7: frontend.v1.TopbarQueueBypassContextCompactedMain
-	(*TopbarQueueBypassContextExisting)(nil),                  // 8: frontend.v1.TopbarQueueBypassContextExisting
-	(*TopbarQueueBypassContextExistingPlusCompactedMain)(nil), // 9: frontend.v1.TopbarQueueBypassContextExistingPlusCompactedMain
-	(*TopbarQueueBypassHeldElsewhere)(nil),                    // 10: frontend.v1.TopbarQueueBypassHeldElsewhere
-	(*TopbarQueueBypassTooltip)(nil),                          // 11: frontend.v1.TopbarQueueBypassTooltip
-	(*TopbarRemoteControl)(nil),                               // 12: frontend.v1.TopbarRemoteControl
-	(*TopbarRemoteControlModeOn)(nil),                         // 13: frontend.v1.TopbarRemoteControlModeOn
-	(*TopbarRemoteControlModeOff)(nil),                        // 14: frontend.v1.TopbarRemoteControlModeOff
-	(*TopbarRemoteControlTooltip)(nil),                        // 15: frontend.v1.TopbarRemoteControlTooltip
-	(*TopbarPersistentWifi)(nil),                              // 16: frontend.v1.TopbarPersistentWifi
-	(*TopbarPersistentWifiJoined)(nil),                        // 17: frontend.v1.TopbarPersistentWifiJoined
-	(*TopbarPersistentWifiNotJoined)(nil),                     // 18: frontend.v1.TopbarPersistentWifiNotJoined
-	(*TopbarPersistentWifiModeOn)(nil),                        // 19: frontend.v1.TopbarPersistentWifiModeOn
-	(*TopbarPersistentWifiModeOff)(nil),                       // 20: frontend.v1.TopbarPersistentWifiModeOff
-	(*TopbarPersistentWifiLidOpen)(nil),                       // 21: frontend.v1.TopbarPersistentWifiLidOpen
-	(*TopbarPersistentWifiLidClosed)(nil),                     // 22: frontend.v1.TopbarPersistentWifiLidClosed
-	(*TopbarPersistentWifiNoLid)(nil),                         // 23: frontend.v1.TopbarPersistentWifiNoLid
-	(*TopbarPersistentWifiLidUnwatched)(nil),                  // 24: frontend.v1.TopbarPersistentWifiLidUnwatched
-	(*TopbarPersistentWifiTooltip)(nil),                       // 25: frontend.v1.TopbarPersistentWifiTooltip
-	(*TopbarPermissionModePicker)(nil),                        // 26: frontend.v1.TopbarPermissionModePicker
-	(*TopbarPermissionModeOption)(nil),                        // 27: frontend.v1.TopbarPermissionModeOption
-	(*TopbarContextChip)(nil),                                 // 28: frontend.v1.TopbarContextChip
-	(*TopbarAccount)(nil),                                     // 29: frontend.v1.TopbarAccount
-	(*TopbarAccountSignInRequest)(nil),                        // 30: frontend.v1.TopbarAccountSignInRequest
-	(*TopbarAccountLoggedIn)(nil),                             // 31: frontend.v1.TopbarAccountLoggedIn
-	(*TopbarAccountLoggedOut)(nil),                            // 32: frontend.v1.TopbarAccountLoggedOut
-	(*TopbarAccountOption)(nil),                               // 33: frontend.v1.TopbarAccountOption
-	(*TopbarTitle)(nil),                                       // 34: frontend.v1.TopbarTitle
-	(*TopbarTitleLinks)(nil),                                  // 35: frontend.v1.TopbarTitleLinks
-	(*TopbarTitleLink)(nil),                                   // 36: frontend.v1.TopbarTitleLink
-	(*TopbarTitleLinkMenu)(nil),                               // 37: frontend.v1.TopbarTitleLinkMenu
-	(*TopbarTitleLinkMenuItem)(nil),                           // 38: frontend.v1.TopbarTitleLinkMenuItem
-	(*TopbarWorkspaceName)(nil),                               // 39: frontend.v1.TopbarWorkspaceName
-	(*TopbarSessionLine)(nil),                                 // 40: frontend.v1.TopbarSessionLine
-	(*TopbarModelSelector)(nil),                               // 41: frontend.v1.TopbarModelSelector
-	(*TopbarEffortSelector)(nil),                              // 42: frontend.v1.TopbarEffortSelector
-	(*TopbarEffortSelectorSupported)(nil),                     // 43: frontend.v1.TopbarEffortSelectorSupported
-	(*TopbarEffortSelectorUnsupported)(nil),                   // 44: frontend.v1.TopbarEffortSelectorUnsupported
-	(*TopbarEffortOption)(nil),                                // 45: frontend.v1.TopbarEffortOption
-	(*TopbarConnectivity)(nil),                                // 46: frontend.v1.TopbarConnectivity
-	(*TopbarAgentReplSession)(nil),                            // 47: frontend.v1.TopbarAgentReplSession
-	(*TopbarSessionBeganLogin)(nil),                           // 48: frontend.v1.TopbarSessionBeganLogin
-	(*TopbarSessionBeganEditorStart)(nil),                     // 49: frontend.v1.TopbarSessionBeganEditorStart
-	(*TopbarWarningStrip)(nil),                                // 50: frontend.v1.TopbarWarningStrip
-	(*TopbarWarningStripSeverity)(nil),                        // 51: frontend.v1.TopbarWarningStripSeverity
-	(*TopbarWarningStripErrors)(nil),                          // 52: frontend.v1.TopbarWarningStripErrors
-	(*TopbarWarningStripWarningsOnly)(nil),                    // 53: frontend.v1.TopbarWarningStripWarningsOnly
-	(*TopbarWarning)(nil),                                     // 54: frontend.v1.TopbarWarning
-	(*TopbarWarningLine)(nil),                                 // 55: frontend.v1.TopbarWarningLine
-	(*TopbarAccountingWarningDetail)(nil),                     // 56: frontend.v1.TopbarAccountingWarningDetail
-	(*TopbarWarningDetailLine)(nil),                           // 57: frontend.v1.TopbarWarningDetailLine
-	(*TopbarUnmodeledToolWarningDetail)(nil),                  // 58: frontend.v1.TopbarUnmodeledToolWarningDetail
-	(*TopbarUnmodeledToolName)(nil),                           // 59: frontend.v1.TopbarUnmodeledToolName
-	(*TopbarDetachedUnmodeledWarningDetail)(nil),              // 60: frontend.v1.TopbarDetachedUnmodeledWarningDetail
-	(*TopbarSessionFaultWarningDetail)(nil),                   // 61: frontend.v1.TopbarSessionFaultWarningDetail
-	(*TopbarWarningComponent)(nil),                            // 62: frontend.v1.TopbarWarningComponent
-	(*TopbarDegradedWindowWarningDetail)(nil),                 // 63: frontend.v1.TopbarDegradedWindowWarningDetail
-	(*TopbarDeployFailedWarningDetail)(nil),                   // 64: frontend.v1.TopbarDeployFailedWarningDetail
-	(*TopbarDegradedWindowOpen)(nil),                          // 65: frontend.v1.TopbarDegradedWindowOpen
-	(*TopbarDegradedWindowClosed)(nil),                        // 66: frontend.v1.TopbarDegradedWindowClosed
-	(*TokenBreakdownView)(nil),                                // 67: frontend.v1.TokenBreakdownView
-	(*TokenBreakdownSection)(nil),                             // 68: frontend.v1.TokenBreakdownSection
-	(*TokenBreakdownHeading)(nil),                             // 69: frontend.v1.TokenBreakdownHeading
-	(*TokenBreakdownRow)(nil),                                 // 70: frontend.v1.TokenBreakdownRow
-	(*v1.ModelOption)(nil),                                    // 71: conversation.v1.ModelOption
-	(*v1.AgentModel)(nil),                                     // 72: conversation.v1.AgentModel
-	(v1.AgentEffortLevel)(0),                                  // 73: conversation.v1.AgentEffortLevel
+	(TopbarTitleLinkIcon)(0),                                  // 0: frontend.v1.TopbarTitleLinkIcon
+	(*TopbarView)(nil),                                        // 1: frontend.v1.TopbarView
+	(*TopbarQueueBypass)(nil),                                 // 2: frontend.v1.TopbarQueueBypass
+	(*TopbarQueueBypassOn)(nil),                               // 3: frontend.v1.TopbarQueueBypassOn
+	(*TopbarQueueBypassOff)(nil),                              // 4: frontend.v1.TopbarQueueBypassOff
+	(*TopbarQueueBypassContextOption)(nil),                    // 5: frontend.v1.TopbarQueueBypassContextOption
+	(*TopbarQueueBypassContext)(nil),                          // 6: frontend.v1.TopbarQueueBypassContext
+	(*TopbarQueueBypassContextFullMain)(nil),                  // 7: frontend.v1.TopbarQueueBypassContextFullMain
+	(*TopbarQueueBypassContextCompactedMain)(nil),             // 8: frontend.v1.TopbarQueueBypassContextCompactedMain
+	(*TopbarQueueBypassContextExisting)(nil),                  // 9: frontend.v1.TopbarQueueBypassContextExisting
+	(*TopbarQueueBypassContextExistingPlusCompactedMain)(nil), // 10: frontend.v1.TopbarQueueBypassContextExistingPlusCompactedMain
+	(*TopbarQueueBypassHeldElsewhere)(nil),                    // 11: frontend.v1.TopbarQueueBypassHeldElsewhere
+	(*TopbarQueueBypassTooltip)(nil),                          // 12: frontend.v1.TopbarQueueBypassTooltip
+	(*TopbarRemoteControl)(nil),                               // 13: frontend.v1.TopbarRemoteControl
+	(*TopbarRemoteControlModeOn)(nil),                         // 14: frontend.v1.TopbarRemoteControlModeOn
+	(*TopbarRemoteControlModeOff)(nil),                        // 15: frontend.v1.TopbarRemoteControlModeOff
+	(*TopbarRemoteControlTooltip)(nil),                        // 16: frontend.v1.TopbarRemoteControlTooltip
+	(*TopbarPersistentWifi)(nil),                              // 17: frontend.v1.TopbarPersistentWifi
+	(*TopbarPersistentWifiJoined)(nil),                        // 18: frontend.v1.TopbarPersistentWifiJoined
+	(*TopbarPersistentWifiNotJoined)(nil),                     // 19: frontend.v1.TopbarPersistentWifiNotJoined
+	(*TopbarPersistentWifiModeOn)(nil),                        // 20: frontend.v1.TopbarPersistentWifiModeOn
+	(*TopbarPersistentWifiModeOff)(nil),                       // 21: frontend.v1.TopbarPersistentWifiModeOff
+	(*TopbarPersistentWifiLidOpen)(nil),                       // 22: frontend.v1.TopbarPersistentWifiLidOpen
+	(*TopbarPersistentWifiLidClosed)(nil),                     // 23: frontend.v1.TopbarPersistentWifiLidClosed
+	(*TopbarPersistentWifiNoLid)(nil),                         // 24: frontend.v1.TopbarPersistentWifiNoLid
+	(*TopbarPersistentWifiLidUnwatched)(nil),                  // 25: frontend.v1.TopbarPersistentWifiLidUnwatched
+	(*TopbarPersistentWifiTooltip)(nil),                       // 26: frontend.v1.TopbarPersistentWifiTooltip
+	(*TopbarPermissionModePicker)(nil),                        // 27: frontend.v1.TopbarPermissionModePicker
+	(*TopbarPermissionModeOption)(nil),                        // 28: frontend.v1.TopbarPermissionModeOption
+	(*TopbarContextChip)(nil),                                 // 29: frontend.v1.TopbarContextChip
+	(*TopbarAccount)(nil),                                     // 30: frontend.v1.TopbarAccount
+	(*TopbarAccountSignInRequest)(nil),                        // 31: frontend.v1.TopbarAccountSignInRequest
+	(*TopbarAccountLoggedIn)(nil),                             // 32: frontend.v1.TopbarAccountLoggedIn
+	(*TopbarAccountLoggedOut)(nil),                            // 33: frontend.v1.TopbarAccountLoggedOut
+	(*TopbarAccountOption)(nil),                               // 34: frontend.v1.TopbarAccountOption
+	(*TopbarTitle)(nil),                                       // 35: frontend.v1.TopbarTitle
+	(*TopbarTitleLinks)(nil),                                  // 36: frontend.v1.TopbarTitleLinks
+	(*TopbarTitleLink)(nil),                                   // 37: frontend.v1.TopbarTitleLink
+	(*TopbarTitleLinkMenu)(nil),                               // 38: frontend.v1.TopbarTitleLinkMenu
+	(*TopbarTitleLinkMenuItem)(nil),                           // 39: frontend.v1.TopbarTitleLinkMenuItem
+	(*TopbarWorkspaceName)(nil),                               // 40: frontend.v1.TopbarWorkspaceName
+	(*TopbarSessionLine)(nil),                                 // 41: frontend.v1.TopbarSessionLine
+	(*TopbarModelSelector)(nil),                               // 42: frontend.v1.TopbarModelSelector
+	(*TopbarEffortSelector)(nil),                              // 43: frontend.v1.TopbarEffortSelector
+	(*TopbarEffortSelectorSupported)(nil),                     // 44: frontend.v1.TopbarEffortSelectorSupported
+	(*TopbarEffortSelectorUnsupported)(nil),                   // 45: frontend.v1.TopbarEffortSelectorUnsupported
+	(*TopbarEffortOption)(nil),                                // 46: frontend.v1.TopbarEffortOption
+	(*TopbarConnectivity)(nil),                                // 47: frontend.v1.TopbarConnectivity
+	(*TopbarAgentReplSession)(nil),                            // 48: frontend.v1.TopbarAgentReplSession
+	(*TopbarSessionBeganLogin)(nil),                           // 49: frontend.v1.TopbarSessionBeganLogin
+	(*TopbarSessionBeganEditorStart)(nil),                     // 50: frontend.v1.TopbarSessionBeganEditorStart
+	(*TopbarWarningStrip)(nil),                                // 51: frontend.v1.TopbarWarningStrip
+	(*TopbarWarningStripSeverity)(nil),                        // 52: frontend.v1.TopbarWarningStripSeverity
+	(*TopbarWarningStripErrors)(nil),                          // 53: frontend.v1.TopbarWarningStripErrors
+	(*TopbarWarningStripWarningsOnly)(nil),                    // 54: frontend.v1.TopbarWarningStripWarningsOnly
+	(*TopbarWarning)(nil),                                     // 55: frontend.v1.TopbarWarning
+	(*TopbarWarningLine)(nil),                                 // 56: frontend.v1.TopbarWarningLine
+	(*TopbarAccountingWarningDetail)(nil),                     // 57: frontend.v1.TopbarAccountingWarningDetail
+	(*TopbarWarningDetailLine)(nil),                           // 58: frontend.v1.TopbarWarningDetailLine
+	(*TopbarUnmodeledToolWarningDetail)(nil),                  // 59: frontend.v1.TopbarUnmodeledToolWarningDetail
+	(*TopbarUnmodeledToolName)(nil),                           // 60: frontend.v1.TopbarUnmodeledToolName
+	(*TopbarDetachedUnmodeledWarningDetail)(nil),              // 61: frontend.v1.TopbarDetachedUnmodeledWarningDetail
+	(*TopbarSessionFaultWarningDetail)(nil),                   // 62: frontend.v1.TopbarSessionFaultWarningDetail
+	(*TopbarWarningComponent)(nil),                            // 63: frontend.v1.TopbarWarningComponent
+	(*TopbarDegradedWindowWarningDetail)(nil),                 // 64: frontend.v1.TopbarDegradedWindowWarningDetail
+	(*TopbarDeployFailedWarningDetail)(nil),                   // 65: frontend.v1.TopbarDeployFailedWarningDetail
+	(*TopbarDegradedWindowOpen)(nil),                          // 66: frontend.v1.TopbarDegradedWindowOpen
+	(*TopbarDegradedWindowClosed)(nil),                        // 67: frontend.v1.TopbarDegradedWindowClosed
+	(*TokenBreakdownView)(nil),                                // 68: frontend.v1.TokenBreakdownView
+	(*TokenBreakdownSection)(nil),                             // 69: frontend.v1.TokenBreakdownSection
+	(*TokenBreakdownHeading)(nil),                             // 70: frontend.v1.TokenBreakdownHeading
+	(*TokenBreakdownRow)(nil),                                 // 71: frontend.v1.TokenBreakdownRow
+	(*v1.ModelOption)(nil),                                    // 72: conversation.v1.ModelOption
+	(*v1.AgentModel)(nil),                                     // 73: conversation.v1.AgentModel
+	(v1.AgentEffortLevel)(0),                                  // 74: conversation.v1.AgentEffortLevel
 }
 var file_frontend_v1_topbar_proto_depIdxs = []int32{
-	34, // 0: frontend.v1.TopbarView.title:type_name -> frontend.v1.TopbarTitle
-	40, // 1: frontend.v1.TopbarView.session_line:type_name -> frontend.v1.TopbarSessionLine
-	41, // 2: frontend.v1.TopbarView.model_selector:type_name -> frontend.v1.TopbarModelSelector
-	46, // 3: frontend.v1.TopbarView.connectivity:type_name -> frontend.v1.TopbarConnectivity
-	50, // 4: frontend.v1.TopbarView.warnings:type_name -> frontend.v1.TopbarWarningStrip
-	28, // 5: frontend.v1.TopbarView.context:type_name -> frontend.v1.TopbarContextChip
-	29, // 6: frontend.v1.TopbarView.account:type_name -> frontend.v1.TopbarAccount
-	26, // 7: frontend.v1.TopbarView.permission_mode_picker:type_name -> frontend.v1.TopbarPermissionModePicker
-	16, // 8: frontend.v1.TopbarView.persistent_wifi:type_name -> frontend.v1.TopbarPersistentWifi
-	42, // 9: frontend.v1.TopbarView.effort_selector:type_name -> frontend.v1.TopbarEffortSelector
-	39, // 10: frontend.v1.TopbarView.workspace_name:type_name -> frontend.v1.TopbarWorkspaceName
-	1,  // 11: frontend.v1.TopbarView.queue_bypass:type_name -> frontend.v1.TopbarQueueBypass
-	12, // 12: frontend.v1.TopbarView.remote_control:type_name -> frontend.v1.TopbarRemoteControl
-	2,  // 13: frontend.v1.TopbarQueueBypass.on:type_name -> frontend.v1.TopbarQueueBypassOn
-	3,  // 14: frontend.v1.TopbarQueueBypass.off:type_name -> frontend.v1.TopbarQueueBypassOff
-	10, // 15: frontend.v1.TopbarQueueBypass.held_elsewhere:type_name -> frontend.v1.TopbarQueueBypassHeldElsewhere
-	11, // 16: frontend.v1.TopbarQueueBypass.tooltip:type_name -> frontend.v1.TopbarQueueBypassTooltip
-	4,  // 17: frontend.v1.TopbarQueueBypassOff.options:type_name -> frontend.v1.TopbarQueueBypassContextOption
-	5,  // 18: frontend.v1.TopbarQueueBypassContextOption.context:type_name -> frontend.v1.TopbarQueueBypassContext
-	6,  // 19: frontend.v1.TopbarQueueBypassContext.full_main:type_name -> frontend.v1.TopbarQueueBypassContextFullMain
-	7,  // 20: frontend.v1.TopbarQueueBypassContext.compacted_main:type_name -> frontend.v1.TopbarQueueBypassContextCompactedMain
-	8,  // 21: frontend.v1.TopbarQueueBypassContext.existing:type_name -> frontend.v1.TopbarQueueBypassContextExisting
-	9,  // 22: frontend.v1.TopbarQueueBypassContext.existing_plus_compacted_main:type_name -> frontend.v1.TopbarQueueBypassContextExistingPlusCompactedMain
-	13, // 23: frontend.v1.TopbarRemoteControl.on:type_name -> frontend.v1.TopbarRemoteControlModeOn
-	14, // 24: frontend.v1.TopbarRemoteControl.off:type_name -> frontend.v1.TopbarRemoteControlModeOff
-	15, // 25: frontend.v1.TopbarRemoteControl.tooltip:type_name -> frontend.v1.TopbarRemoteControlTooltip
-	17, // 26: frontend.v1.TopbarPersistentWifi.joined:type_name -> frontend.v1.TopbarPersistentWifiJoined
-	18, // 27: frontend.v1.TopbarPersistentWifi.not_joined:type_name -> frontend.v1.TopbarPersistentWifiNotJoined
-	19, // 28: frontend.v1.TopbarPersistentWifi.on:type_name -> frontend.v1.TopbarPersistentWifiModeOn
-	20, // 29: frontend.v1.TopbarPersistentWifi.off:type_name -> frontend.v1.TopbarPersistentWifiModeOff
-	25, // 30: frontend.v1.TopbarPersistentWifi.tooltip:type_name -> frontend.v1.TopbarPersistentWifiTooltip
-	21, // 31: frontend.v1.TopbarPersistentWifi.lid_open:type_name -> frontend.v1.TopbarPersistentWifiLidOpen
-	22, // 32: frontend.v1.TopbarPersistentWifi.lid_closed:type_name -> frontend.v1.TopbarPersistentWifiLidClosed
-	23, // 33: frontend.v1.TopbarPersistentWifi.no_lid:type_name -> frontend.v1.TopbarPersistentWifiNoLid
-	24, // 34: frontend.v1.TopbarPersistentWifi.lid_unwatched:type_name -> frontend.v1.TopbarPersistentWifiLidUnwatched
-	27, // 35: frontend.v1.TopbarPermissionModePicker.current:type_name -> frontend.v1.TopbarPermissionModeOption
-	27, // 36: frontend.v1.TopbarPermissionModePicker.options:type_name -> frontend.v1.TopbarPermissionModeOption
-	67, // 37: frontend.v1.TopbarContextChip.breakdown:type_name -> frontend.v1.TokenBreakdownView
-	31, // 38: frontend.v1.TopbarAccount.logged_in:type_name -> frontend.v1.TopbarAccountLoggedIn
-	32, // 39: frontend.v1.TopbarAccount.logged_out:type_name -> frontend.v1.TopbarAccountLoggedOut
-	33, // 40: frontend.v1.TopbarAccount.options:type_name -> frontend.v1.TopbarAccountOption
-	30, // 41: frontend.v1.TopbarAccount.sign_in_request:type_name -> frontend.v1.TopbarAccountSignInRequest
-	31, // 42: frontend.v1.TopbarAccountOption.logged_in:type_name -> frontend.v1.TopbarAccountLoggedIn
-	32, // 43: frontend.v1.TopbarAccountOption.logged_out:type_name -> frontend.v1.TopbarAccountLoggedOut
-	35, // 44: frontend.v1.TopbarTitle.links:type_name -> frontend.v1.TopbarTitleLinks
-	36, // 45: frontend.v1.TopbarTitleLinks.single:type_name -> frontend.v1.TopbarTitleLink
-	37, // 46: frontend.v1.TopbarTitleLinks.menu:type_name -> frontend.v1.TopbarTitleLinkMenu
-	38, // 47: frontend.v1.TopbarTitleLinkMenu.items:type_name -> frontend.v1.TopbarTitleLinkMenuItem
-	71, // 48: frontend.v1.TopbarModelSelector.selected:type_name -> conversation.v1.ModelOption
-	71, // 49: frontend.v1.TopbarModelSelector.options:type_name -> conversation.v1.ModelOption
-	72, // 50: frontend.v1.TopbarModelSelector.default_model:type_name -> conversation.v1.AgentModel
-	43, // 51: frontend.v1.TopbarEffortSelector.supported:type_name -> frontend.v1.TopbarEffortSelectorSupported
-	44, // 52: frontend.v1.TopbarEffortSelector.unsupported:type_name -> frontend.v1.TopbarEffortSelectorUnsupported
-	45, // 53: frontend.v1.TopbarEffortSelectorSupported.current:type_name -> frontend.v1.TopbarEffortOption
-	45, // 54: frontend.v1.TopbarEffortSelectorSupported.options:type_name -> frontend.v1.TopbarEffortOption
-	73, // 55: frontend.v1.TopbarEffortOption.level:type_name -> conversation.v1.AgentEffortLevel
-	47, // 56: frontend.v1.TopbarConnectivity.session:type_name -> frontend.v1.TopbarAgentReplSession
-	48, // 57: frontend.v1.TopbarAgentReplSession.login:type_name -> frontend.v1.TopbarSessionBeganLogin
-	49, // 58: frontend.v1.TopbarAgentReplSession.editor_start:type_name -> frontend.v1.TopbarSessionBeganEditorStart
-	54, // 59: frontend.v1.TopbarWarningStrip.warnings:type_name -> frontend.v1.TopbarWarning
-	51, // 60: frontend.v1.TopbarWarningStrip.severity:type_name -> frontend.v1.TopbarWarningStripSeverity
-	52, // 61: frontend.v1.TopbarWarningStripSeverity.errors:type_name -> frontend.v1.TopbarWarningStripErrors
-	53, // 62: frontend.v1.TopbarWarningStripSeverity.warnings_only:type_name -> frontend.v1.TopbarWarningStripWarningsOnly
-	55, // 63: frontend.v1.TopbarWarning.line:type_name -> frontend.v1.TopbarWarningLine
-	56, // 64: frontend.v1.TopbarWarning.accounting:type_name -> frontend.v1.TopbarAccountingWarningDetail
-	58, // 65: frontend.v1.TopbarWarning.unmodeled_tool:type_name -> frontend.v1.TopbarUnmodeledToolWarningDetail
-	60, // 66: frontend.v1.TopbarWarning.detached_unmodeled:type_name -> frontend.v1.TopbarDetachedUnmodeledWarningDetail
-	61, // 67: frontend.v1.TopbarWarning.session_fault:type_name -> frontend.v1.TopbarSessionFaultWarningDetail
-	63, // 68: frontend.v1.TopbarWarning.degraded_window:type_name -> frontend.v1.TopbarDegradedWindowWarningDetail
-	64, // 69: frontend.v1.TopbarWarning.deploy_failed:type_name -> frontend.v1.TopbarDeployFailedWarningDetail
-	57, // 70: frontend.v1.TopbarAccountingWarningDetail.lines:type_name -> frontend.v1.TopbarWarningDetailLine
-	59, // 71: frontend.v1.TopbarUnmodeledToolWarningDetail.tool_name:type_name -> frontend.v1.TopbarUnmodeledToolName
-	57, // 72: frontend.v1.TopbarUnmodeledToolWarningDetail.argument_lines:type_name -> frontend.v1.TopbarWarningDetailLine
-	59, // 73: frontend.v1.TopbarDetachedUnmodeledWarningDetail.tool_name:type_name -> frontend.v1.TopbarUnmodeledToolName
-	62, // 74: frontend.v1.TopbarSessionFaultWarningDetail.component:type_name -> frontend.v1.TopbarWarningComponent
-	57, // 75: frontend.v1.TopbarSessionFaultWarningDetail.detail:type_name -> frontend.v1.TopbarWarningDetailLine
-	62, // 76: frontend.v1.TopbarDegradedWindowWarningDetail.component:type_name -> frontend.v1.TopbarWarningComponent
-	57, // 77: frontend.v1.TopbarDegradedWindowWarningDetail.reason:type_name -> frontend.v1.TopbarWarningDetailLine
-	65, // 78: frontend.v1.TopbarDegradedWindowWarningDetail.open:type_name -> frontend.v1.TopbarDegradedWindowOpen
-	66, // 79: frontend.v1.TopbarDegradedWindowWarningDetail.closed:type_name -> frontend.v1.TopbarDegradedWindowClosed
-	57, // 80: frontend.v1.TopbarDeployFailedWarningDetail.step:type_name -> frontend.v1.TopbarWarningDetailLine
-	62, // 81: frontend.v1.TopbarDeployFailedWarningDetail.component:type_name -> frontend.v1.TopbarWarningComponent
-	57, // 82: frontend.v1.TopbarDeployFailedWarningDetail.rollback:type_name -> frontend.v1.TopbarWarningDetailLine
-	57, // 83: frontend.v1.TopbarDeployFailedWarningDetail.detail:type_name -> frontend.v1.TopbarWarningDetailLine
-	57, // 84: frontend.v1.TopbarDeployFailedWarningDetail.log:type_name -> frontend.v1.TopbarWarningDetailLine
-	68, // 85: frontend.v1.TokenBreakdownView.sections:type_name -> frontend.v1.TokenBreakdownSection
-	69, // 86: frontend.v1.TokenBreakdownSection.heading:type_name -> frontend.v1.TokenBreakdownHeading
-	70, // 87: frontend.v1.TokenBreakdownSection.rows:type_name -> frontend.v1.TokenBreakdownRow
-	88, // [88:88] is the sub-list for method output_type
-	88, // [88:88] is the sub-list for method input_type
-	88, // [88:88] is the sub-list for extension type_name
-	88, // [88:88] is the sub-list for extension extendee
-	0,  // [0:88] is the sub-list for field type_name
+	35, // 0: frontend.v1.TopbarView.title:type_name -> frontend.v1.TopbarTitle
+	41, // 1: frontend.v1.TopbarView.session_line:type_name -> frontend.v1.TopbarSessionLine
+	42, // 2: frontend.v1.TopbarView.model_selector:type_name -> frontend.v1.TopbarModelSelector
+	47, // 3: frontend.v1.TopbarView.connectivity:type_name -> frontend.v1.TopbarConnectivity
+	51, // 4: frontend.v1.TopbarView.warnings:type_name -> frontend.v1.TopbarWarningStrip
+	29, // 5: frontend.v1.TopbarView.context:type_name -> frontend.v1.TopbarContextChip
+	30, // 6: frontend.v1.TopbarView.account:type_name -> frontend.v1.TopbarAccount
+	27, // 7: frontend.v1.TopbarView.permission_mode_picker:type_name -> frontend.v1.TopbarPermissionModePicker
+	17, // 8: frontend.v1.TopbarView.persistent_wifi:type_name -> frontend.v1.TopbarPersistentWifi
+	43, // 9: frontend.v1.TopbarView.effort_selector:type_name -> frontend.v1.TopbarEffortSelector
+	40, // 10: frontend.v1.TopbarView.workspace_name:type_name -> frontend.v1.TopbarWorkspaceName
+	2,  // 11: frontend.v1.TopbarView.queue_bypass:type_name -> frontend.v1.TopbarQueueBypass
+	13, // 12: frontend.v1.TopbarView.remote_control:type_name -> frontend.v1.TopbarRemoteControl
+	3,  // 13: frontend.v1.TopbarQueueBypass.on:type_name -> frontend.v1.TopbarQueueBypassOn
+	4,  // 14: frontend.v1.TopbarQueueBypass.off:type_name -> frontend.v1.TopbarQueueBypassOff
+	11, // 15: frontend.v1.TopbarQueueBypass.held_elsewhere:type_name -> frontend.v1.TopbarQueueBypassHeldElsewhere
+	12, // 16: frontend.v1.TopbarQueueBypass.tooltip:type_name -> frontend.v1.TopbarQueueBypassTooltip
+	5,  // 17: frontend.v1.TopbarQueueBypassOff.options:type_name -> frontend.v1.TopbarQueueBypassContextOption
+	6,  // 18: frontend.v1.TopbarQueueBypassContextOption.context:type_name -> frontend.v1.TopbarQueueBypassContext
+	7,  // 19: frontend.v1.TopbarQueueBypassContext.full_main:type_name -> frontend.v1.TopbarQueueBypassContextFullMain
+	8,  // 20: frontend.v1.TopbarQueueBypassContext.compacted_main:type_name -> frontend.v1.TopbarQueueBypassContextCompactedMain
+	9,  // 21: frontend.v1.TopbarQueueBypassContext.existing:type_name -> frontend.v1.TopbarQueueBypassContextExisting
+	10, // 22: frontend.v1.TopbarQueueBypassContext.existing_plus_compacted_main:type_name -> frontend.v1.TopbarQueueBypassContextExistingPlusCompactedMain
+	14, // 23: frontend.v1.TopbarRemoteControl.on:type_name -> frontend.v1.TopbarRemoteControlModeOn
+	15, // 24: frontend.v1.TopbarRemoteControl.off:type_name -> frontend.v1.TopbarRemoteControlModeOff
+	16, // 25: frontend.v1.TopbarRemoteControl.tooltip:type_name -> frontend.v1.TopbarRemoteControlTooltip
+	18, // 26: frontend.v1.TopbarPersistentWifi.joined:type_name -> frontend.v1.TopbarPersistentWifiJoined
+	19, // 27: frontend.v1.TopbarPersistentWifi.not_joined:type_name -> frontend.v1.TopbarPersistentWifiNotJoined
+	20, // 28: frontend.v1.TopbarPersistentWifi.on:type_name -> frontend.v1.TopbarPersistentWifiModeOn
+	21, // 29: frontend.v1.TopbarPersistentWifi.off:type_name -> frontend.v1.TopbarPersistentWifiModeOff
+	26, // 30: frontend.v1.TopbarPersistentWifi.tooltip:type_name -> frontend.v1.TopbarPersistentWifiTooltip
+	22, // 31: frontend.v1.TopbarPersistentWifi.lid_open:type_name -> frontend.v1.TopbarPersistentWifiLidOpen
+	23, // 32: frontend.v1.TopbarPersistentWifi.lid_closed:type_name -> frontend.v1.TopbarPersistentWifiLidClosed
+	24, // 33: frontend.v1.TopbarPersistentWifi.no_lid:type_name -> frontend.v1.TopbarPersistentWifiNoLid
+	25, // 34: frontend.v1.TopbarPersistentWifi.lid_unwatched:type_name -> frontend.v1.TopbarPersistentWifiLidUnwatched
+	28, // 35: frontend.v1.TopbarPermissionModePicker.current:type_name -> frontend.v1.TopbarPermissionModeOption
+	28, // 36: frontend.v1.TopbarPermissionModePicker.options:type_name -> frontend.v1.TopbarPermissionModeOption
+	68, // 37: frontend.v1.TopbarContextChip.breakdown:type_name -> frontend.v1.TokenBreakdownView
+	32, // 38: frontend.v1.TopbarAccount.logged_in:type_name -> frontend.v1.TopbarAccountLoggedIn
+	33, // 39: frontend.v1.TopbarAccount.logged_out:type_name -> frontend.v1.TopbarAccountLoggedOut
+	34, // 40: frontend.v1.TopbarAccount.options:type_name -> frontend.v1.TopbarAccountOption
+	31, // 41: frontend.v1.TopbarAccount.sign_in_request:type_name -> frontend.v1.TopbarAccountSignInRequest
+	32, // 42: frontend.v1.TopbarAccountOption.logged_in:type_name -> frontend.v1.TopbarAccountLoggedIn
+	33, // 43: frontend.v1.TopbarAccountOption.logged_out:type_name -> frontend.v1.TopbarAccountLoggedOut
+	36, // 44: frontend.v1.TopbarTitle.links:type_name -> frontend.v1.TopbarTitleLinks
+	37, // 45: frontend.v1.TopbarTitleLinks.single:type_name -> frontend.v1.TopbarTitleLink
+	38, // 46: frontend.v1.TopbarTitleLinks.menu:type_name -> frontend.v1.TopbarTitleLinkMenu
+	39, // 47: frontend.v1.TopbarTitleLinkMenu.items:type_name -> frontend.v1.TopbarTitleLinkMenuItem
+	0,  // 48: frontend.v1.TopbarTitleLinkMenuItem.icon:type_name -> frontend.v1.TopbarTitleLinkIcon
+	72, // 49: frontend.v1.TopbarModelSelector.selected:type_name -> conversation.v1.ModelOption
+	72, // 50: frontend.v1.TopbarModelSelector.options:type_name -> conversation.v1.ModelOption
+	73, // 51: frontend.v1.TopbarModelSelector.default_model:type_name -> conversation.v1.AgentModel
+	44, // 52: frontend.v1.TopbarEffortSelector.supported:type_name -> frontend.v1.TopbarEffortSelectorSupported
+	45, // 53: frontend.v1.TopbarEffortSelector.unsupported:type_name -> frontend.v1.TopbarEffortSelectorUnsupported
+	46, // 54: frontend.v1.TopbarEffortSelectorSupported.current:type_name -> frontend.v1.TopbarEffortOption
+	46, // 55: frontend.v1.TopbarEffortSelectorSupported.options:type_name -> frontend.v1.TopbarEffortOption
+	74, // 56: frontend.v1.TopbarEffortOption.level:type_name -> conversation.v1.AgentEffortLevel
+	48, // 57: frontend.v1.TopbarConnectivity.session:type_name -> frontend.v1.TopbarAgentReplSession
+	49, // 58: frontend.v1.TopbarAgentReplSession.login:type_name -> frontend.v1.TopbarSessionBeganLogin
+	50, // 59: frontend.v1.TopbarAgentReplSession.editor_start:type_name -> frontend.v1.TopbarSessionBeganEditorStart
+	55, // 60: frontend.v1.TopbarWarningStrip.warnings:type_name -> frontend.v1.TopbarWarning
+	52, // 61: frontend.v1.TopbarWarningStrip.severity:type_name -> frontend.v1.TopbarWarningStripSeverity
+	53, // 62: frontend.v1.TopbarWarningStripSeverity.errors:type_name -> frontend.v1.TopbarWarningStripErrors
+	54, // 63: frontend.v1.TopbarWarningStripSeverity.warnings_only:type_name -> frontend.v1.TopbarWarningStripWarningsOnly
+	56, // 64: frontend.v1.TopbarWarning.line:type_name -> frontend.v1.TopbarWarningLine
+	57, // 65: frontend.v1.TopbarWarning.accounting:type_name -> frontend.v1.TopbarAccountingWarningDetail
+	59, // 66: frontend.v1.TopbarWarning.unmodeled_tool:type_name -> frontend.v1.TopbarUnmodeledToolWarningDetail
+	61, // 67: frontend.v1.TopbarWarning.detached_unmodeled:type_name -> frontend.v1.TopbarDetachedUnmodeledWarningDetail
+	62, // 68: frontend.v1.TopbarWarning.session_fault:type_name -> frontend.v1.TopbarSessionFaultWarningDetail
+	64, // 69: frontend.v1.TopbarWarning.degraded_window:type_name -> frontend.v1.TopbarDegradedWindowWarningDetail
+	65, // 70: frontend.v1.TopbarWarning.deploy_failed:type_name -> frontend.v1.TopbarDeployFailedWarningDetail
+	58, // 71: frontend.v1.TopbarAccountingWarningDetail.lines:type_name -> frontend.v1.TopbarWarningDetailLine
+	60, // 72: frontend.v1.TopbarUnmodeledToolWarningDetail.tool_name:type_name -> frontend.v1.TopbarUnmodeledToolName
+	58, // 73: frontend.v1.TopbarUnmodeledToolWarningDetail.argument_lines:type_name -> frontend.v1.TopbarWarningDetailLine
+	60, // 74: frontend.v1.TopbarDetachedUnmodeledWarningDetail.tool_name:type_name -> frontend.v1.TopbarUnmodeledToolName
+	63, // 75: frontend.v1.TopbarSessionFaultWarningDetail.component:type_name -> frontend.v1.TopbarWarningComponent
+	58, // 76: frontend.v1.TopbarSessionFaultWarningDetail.detail:type_name -> frontend.v1.TopbarWarningDetailLine
+	63, // 77: frontend.v1.TopbarDegradedWindowWarningDetail.component:type_name -> frontend.v1.TopbarWarningComponent
+	58, // 78: frontend.v1.TopbarDegradedWindowWarningDetail.reason:type_name -> frontend.v1.TopbarWarningDetailLine
+	66, // 79: frontend.v1.TopbarDegradedWindowWarningDetail.open:type_name -> frontend.v1.TopbarDegradedWindowOpen
+	67, // 80: frontend.v1.TopbarDegradedWindowWarningDetail.closed:type_name -> frontend.v1.TopbarDegradedWindowClosed
+	58, // 81: frontend.v1.TopbarDeployFailedWarningDetail.step:type_name -> frontend.v1.TopbarWarningDetailLine
+	63, // 82: frontend.v1.TopbarDeployFailedWarningDetail.component:type_name -> frontend.v1.TopbarWarningComponent
+	58, // 83: frontend.v1.TopbarDeployFailedWarningDetail.rollback:type_name -> frontend.v1.TopbarWarningDetailLine
+	58, // 84: frontend.v1.TopbarDeployFailedWarningDetail.detail:type_name -> frontend.v1.TopbarWarningDetailLine
+	58, // 85: frontend.v1.TopbarDeployFailedWarningDetail.log:type_name -> frontend.v1.TopbarWarningDetailLine
+	69, // 86: frontend.v1.TokenBreakdownView.sections:type_name -> frontend.v1.TokenBreakdownSection
+	70, // 87: frontend.v1.TokenBreakdownSection.heading:type_name -> frontend.v1.TokenBreakdownHeading
+	71, // 88: frontend.v1.TokenBreakdownSection.rows:type_name -> frontend.v1.TokenBreakdownRow
+	89, // [89:89] is the sub-list for method output_type
+	89, // [89:89] is the sub-list for method input_type
+	89, // [89:89] is the sub-list for extension type_name
+	89, // [89:89] is the sub-list for extension extendee
+	0,  // [0:89] is the sub-list for field type_name
 }
 
 func init() { file_frontend_v1_topbar_proto_init() }
@@ -5114,13 +5208,14 @@ func file_frontend_v1_topbar_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_frontend_v1_topbar_proto_rawDesc), len(file_frontend_v1_topbar_proto_rawDesc)),
-			NumEnums:      0,
+			NumEnums:      1,
 			NumMessages:   71,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
 		GoTypes:           file_frontend_v1_topbar_proto_goTypes,
 		DependencyIndexes: file_frontend_v1_topbar_proto_depIdxs,
+		EnumInfos:         file_frontend_v1_topbar_proto_enumTypes,
 		MessageInfos:      file_frontend_v1_topbar_proto_msgTypes,
 	}.Build()
 	File_frontend_v1_topbar_proto = out.File

@@ -497,6 +497,28 @@ message TopbarTitleLinkMenuItem {
   // The absolute http or https url, verbatim as the agent set it, named in
   // the row's tooltip.
   string url = 2;
+  // Whether the workspace's work made what the link points at (a pull request
+  // it opened, a doc it wrote). Owned rows are served BEFORE every reference
+  // row and drawn on a slightly lighter ground than the reference rows, so
+  // the client draws the flag and never reorders.
+  bool owned = 3;
+  // The service the url's host names, drawn as an icon on the row's left.
+  TopbarTitleLinkIcon icon = 4;
+}
+
+// The service icon a menu row draws before its label, decided by the daemon
+// from the url's host so the client never inspects a url.
+enum TopbarTitleLinkIcon {
+  // No known service: the row draws no icon.
+  TOPBAR_TITLE_LINK_ICON_UNSPECIFIED = 0;
+  // A GitHub pull request: the GitHub mark.
+  TOPBAR_TITLE_LINK_ICON_GITHUB = 1;
+  // A Slack workspace link: the Slack mark.
+  TOPBAR_TITLE_LINK_ICON_SLACK = 2;
+  // A GNS link: the GNS mark.
+  TOPBAR_TITLE_LINK_ICON_GNS = 3;
+  // A Notion link: the Notion mark.
+  TOPBAR_TITLE_LINK_ICON_NOTION = 4;
 }
 
 // The workspace's name as the registry holds it: drawn on the heading's

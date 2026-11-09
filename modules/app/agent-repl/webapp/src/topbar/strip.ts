@@ -44,6 +44,7 @@ import type {
   TopbarWorkspaceName,
 } from "../../../proto/gen/ts/frontend/v1/topbar_pb";
 import { renderExternalLink } from "../link.js";
+import { drawLinkIcon } from "./link-icon.js";
 import { log } from "../log.js";
 import type { AppContext } from "../rpc/context.js";
 import { requireCase, unreachableArm } from "../rpc/strict.js";
@@ -182,6 +183,9 @@ export function drawHeadingLine(className: string, text: string): HTMLElement {
 /** The summary's menu's name in the strip's one reveal layer. */
 export const LINKS_REVEAL = "links";
 
+/** A menu row whose link the workspace's work made: drawn on a lighter ground. */
+export const OWNED_LINK_CLASS = "is-owned";
+
 /**
  * The title: the workspace's generated summary, drawn verbatim. With one shown
  * link the summary's text is that link, and the tooltip names its label and
@@ -230,6 +234,8 @@ export function bindTitleLinkMenu(element: HTMLElement, menu: TopbarTitleLinkMen
  * recently set first), each the label drawn as its link with the url beneath
  * it as the row's dim second line, the way a model's description sits under
  * its name. A click anywhere in a row closes the menu as it opens the link.
+ * The daemon serves the owned links first; an owned row is tinted, and a row
+ * whose host has a known service leads with that service's icon.
  */
 export function drawTitleLinkMenu(menu: TopbarTitleLinkMenu, tc: TopbarContext): HTMLElement {
   const list = document.createElement("div");
@@ -244,6 +250,10 @@ export function drawTitleLinkMenu(menu: TopbarTitleLinkMenu, tc: TopbarContext):
     row.title = item.url;
     const link = renderExternalLink(tc.ctx, { text: item.label, url: item.url });
     link.addEventListener("click", () => tc.reveals.close());
+    const icon = drawLinkIcon(item.icon);
+    if (icon !== null) link.prepend(icon);
+    // The daemon serves owned rows first and flags them: the flag only tints.
+    row.classList.toggle(OWNED_LINK_CLASS, item.owned);
     // The whole row opens its link: a click on the row's padding or its url
     // line is relayed to the label's own click, so the one open path (and its
     // refusal drawing) is the link's. A click on the label itself already

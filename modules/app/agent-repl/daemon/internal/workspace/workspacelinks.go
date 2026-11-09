@@ -196,7 +196,7 @@ func ShownLinks(links []wsm.WorkspaceLink) []topbar.Link {
 	var shown []topbar.Link
 	for _, link := range links {
 		if link.Shown {
-			shown = append(shown, topbar.Link{Label: link.Label, URL: link.URL})
+			shown = append(shown, topbar.Link{Label: link.Label, URL: link.URL, Owned: link.Owned})
 		}
 	}
 	return shown

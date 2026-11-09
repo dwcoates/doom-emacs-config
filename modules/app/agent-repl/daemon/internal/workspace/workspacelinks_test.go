@@ -36,7 +36,7 @@ func TestLinkVerbsRecordAndRepublish(t *testing.T) {
 			act: func(v Verbs) ([]wsm.WorkspaceLink, error) {
 				return v.SetLink(context.Background(), "w1", docLink.URL, docLink.Label, false, "")
 			},
-			want: []wsm.WorkspaceLink{docLink}, wantTopbar: []topbar.Link{{Label: docLink.Label, URL: docLink.URL}}, wantLine: "set a link"},
+			want: []wsm.WorkspaceLink{docLink}, wantTopbar: []topbar.Link{{Label: docLink.Label, URL: docLink.URL, Owned: true}}, wantLine: "set a link"},
 		{name: "an owned set stores the link owned",
 			act: func(v Verbs) ([]wsm.WorkspaceLink, error) {
 				return v.SetLink(context.Background(), "w1", docLink.URL, docLink.Label, true, "")
@@ -299,6 +299,20 @@ func TestShownLinksKeepsTheShownInOrder(t *testing.T) {
 
 	// Assert.
 	want := []topbar.Link{{Label: ticketLink.Label, URL: ticketLink.URL}, {Label: docLink.Label, URL: docLink.URL}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("ShownLinks = %+v, want %+v", got, want)
+	}
+}
+
+func TestShownLinksCarriesOwnership(t *testing.T) {
+	// Arrange.
+	owned := wsm.WorkspaceLink{URL: "https://github.com/a/b/pull/1", Label: "The pull request", Shown: true, Owned: true}
+
+	// Act.
+	got := ShownLinks([]wsm.WorkspaceLink{owned})
+
+	// Assert.
+	want := []topbar.Link{{Label: owned.Label, URL: owned.URL, Owned: true}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("ShownLinks = %+v, want %+v", got, want)
 	}
