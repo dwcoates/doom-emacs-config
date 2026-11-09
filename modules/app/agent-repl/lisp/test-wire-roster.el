@@ -656,9 +656,7 @@ name: each one's breach names that message exactly as the helper's does."
 (ert-deftest agent-repl-test-wire-roster-repository-name-decoders-share-the-helper ()
   "Every roster repository-name decoder is the shared helper under its own
 message name: each one's breach names that message exactly as the helper's does."
-  (dolist (pair '((agent-repl-wire-decode-roster-row-repository . "RosterRowRepository")
-                  (agent-repl-wire-decode-roster-open-row-repository-divider
-                   . "RosterOpenRowRepositoryDivider")))
+  (dolist (pair '((agent-repl-wire-decode-roster-row-repository . "RosterRowRepository")))
     (let ((json "{\"name\":\"doom\",\"extra\":1}"))
       (should (equal (agent-repl-test-wire-roster--breach (car pair) json)
                      (agent-repl-test-wire-roster--breach
@@ -999,9 +997,9 @@ message."
                            (agent-repl-test-wire-roster--block "repo-2" "beta" child))))
          (block (car (plist-get decoded :repository-blocks))))
     (should (equal (list (plist-get (plist-get block :repository) :id)
-                         (plist-get block :divider)
+                         (plist-get (plist-get block :divider) :name)
                          (length (plist-get block :rows)))
-                   '("repo-2" (:name "beta") 1)))))
+                   '("repo-2" "beta" 1)))))
 
 (ert-deftest agent-repl-test-wire-roster-open-row-without-blocks-decodes-none ()
   "An open row whose children are all of its own repository carries no block."
@@ -1024,6 +1022,22 @@ message."
                   #'agent-repl-wire-decode-roster-open-row-repository-block
                   "{\"repository\":{\"id\":\"r\",\"dir\":\"/r\"},\"divider\":{\"name\":\"beta\"},\"rows\":[],\"color\":\"red\"}")
                  '("RosterOpenRowRepositoryBlock" color "unknown field"))))
+
+(ert-deftest agent-repl-test-wire-roster-a-divider-decodes-its-main-workspace ()
+  "A divider naming its repository's main workspace decodes the ref."
+  (should (equal (plist-get (plist-get (agent-repl-test-wire-roster--decode
+                                        #'agent-repl-wire-decode-roster-open-row-repository-divider
+                                        "{\"name\":\"beta\",\"mainWorkspace\":{\"id\":\"ws-m\",\"dir\":\"/r/beta\"}}")
+                                       :main-workspace)
+                            :id)
+                 "ws-m")))
+
+(ert-deftest agent-repl-test-wire-roster-a-divider-without-a-main-workspace-decodes-none ()
+  "A divider naming no main workspace decodes nil for it."
+  (should-not (plist-get (agent-repl-test-wire-roster--decode
+                          #'agent-repl-wire-decode-roster-open-row-repository-divider
+                          "{\"name\":\"beta\"}")
+                         :main-workspace)))
 
 (ert-deftest agent-repl-test-wire-roster-a-divider-with-an-unknown-field-is-a-breach ()
   "The divider's keys are checked like every other message's."
