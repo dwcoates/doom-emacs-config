@@ -1248,3 +1248,34 @@ func TestEveryTestRunWithACauseIsBuiltByCausedRun(t *testing.T) {
 		t.Fatalf("%d sites read a run's cause, want causedRun's alone", sites-1)
 	}
 }
+
+// TestEveryRunOpensItsLedgerThroughOpenLedger pins the one shape every run's
+// ledger open shares: a run that opened the ledger by hand would number its
+// rounds from one again and overwrite an earlier run's intervals.
+func TestEveryRunOpensItsLedgerThroughOpenLedger(t *testing.T) {
+	// Arrange.
+	sources, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatalf("listing the package's sources: %v", err)
+	}
+
+	// Act.
+	var callers []string
+	for _, source := range sources {
+		if strings.HasSuffix(source, "_test.go") {
+			continue
+		}
+		body, err := os.ReadFile(source)
+		if err != nil {
+			t.Fatalf("reading %s: %v", source, err)
+		}
+		for range strings.Count(string(body), "DB.OpenMergeLedger(") {
+			callers = append(callers, source)
+		}
+	}
+
+	// Assert.
+	if !slices.Equal(callers, []string{"run.go"}) {
+		t.Fatalf("DB.OpenMergeLedger is called from %v, want run.go's openLedger alone", callers)
+	}
+}
