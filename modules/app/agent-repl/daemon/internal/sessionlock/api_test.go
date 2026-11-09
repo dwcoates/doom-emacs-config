@@ -1,6 +1,7 @@
 package sessionlock
 
 import (
+	"context"
 	"crypto/md5"
 	"encoding/hex"
 	"os"
@@ -8,6 +9,7 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 
 	"agent-repld/internal/dlog"
 )
@@ -449,5 +451,75 @@ func TestHolderBinaryIsTheLockHoldersInstalledName(t *testing.T) {
 	// Assert.
 	if got != "shim-lock" {
 		t.Fatalf("HolderBinary = %q, want %q", got, "shim-lock")
+	}
+}
+
+func TestAwaitFree(t *testing.T) {
+	cases := []struct {
+		name string
+		// held holds the lock before the wait; release lets it go once the
+		// wait has begun.
+		held, release bool
+		wantState     State
+	}{
+		{name: "a free lock answers at once", wantState: StateFree},
+		{name: "a held lock answers once its holder lets go", held: true, release: true, wantState: StateFree},
+		{name: "a lock still held when the wait ends answers held", held: true, wantState: StateHeld},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			path := filepath.Join(t.TempDir(), "workspace.lock")
+			var holder *os.File
+			if tc.held {
+				f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o600)
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { f.Close() })
+				if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+					t.Fatalf("hold the lock: %v", err)
+				}
+				holder = f
+			}
+			bound := 5 * time.Second
+			if tc.held && !tc.release {
+				bound = 50 * time.Millisecond
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), bound)
+			defer cancel()
+			type answer struct {
+				state State
+				err   error
+			}
+			got := make(chan answer, 1)
+
+			// Act
+			go func() {
+				state, err := AwaitFree(ctx, path)
+				got <- answer{state, err}
+			}()
+			if tc.release {
+				if err := syscall.Flock(int(holder.Fd()), syscall.LOCK_UN); err != nil {
+					t.Fatalf("release the lock: %v", err)
+				}
+			}
+			a := <-got
+
+			// Assert
+			if a.err != nil || a.state != tc.wantState {
+				t.Fatalf("AwaitFree = (%v, %v), want (%v, nil)", a.state, a.err, tc.wantState)
+			}
+		})
+	}
+}
+
+func TestAwaitFreeRefusesAnEmptyPath(t *testing.T) {
+	// Act
+	state, err := AwaitFree(context.Background(), " ")
+
+	// Assert
+	if err == nil || state != StateUnknown {
+		t.Fatalf("AwaitFree = (%v, %v), want StateUnknown with an error", state, err)
 	}
 }

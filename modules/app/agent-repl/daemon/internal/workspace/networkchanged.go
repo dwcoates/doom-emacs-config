@@ -38,6 +38,7 @@ func (f *Fleet) NetworkChanged(ctx context.Context) {
 	var wg sync.WaitGroup
 	for ws, client := range held {
 		wg.Add(1)
+		// inflight: joined: the function that starts it waits for it.
 		go func() {
 			defer wg.Done()
 			f.tellNetworkChanged(ctx, log.With(dlog.Context{"workspace": string(ws)}), client)

@@ -47,7 +47,7 @@ func TestAPromptDuringAUsageLimitIsHeldAfterReconnectAndDeliveredWhenTheVendorSe
 	if entry := promptHeldEntry(tray, turn); entry.GetDaemonHeld() == nil {
 		t.Fatalf("held entry = %v, want the daemon_held verdict: nothing classified it", entry)
 	}
-	expectRPCCount(t, f.shim, harness.RPCStartTurn, 0, harness.ProbeWindow)
+	expectRPCCount(t, f.shim, harness.RPCStartTurn, 0)
 
 	// Act: the vendor serves again.
 	f.shim.PushSessionUpdate(rateLimitVerdict(false))
@@ -77,7 +77,7 @@ func TestASubmissionWhileHeldAndIdleTriesTheOldestHeldPromptNow(t *testing.T) {
 	awaitView(t, f, holds, "the first prompt held after reconnect", func(tray *frontendv1.FeedHeld) bool {
 		return promptHeldEntry(tray, first).GetReconnect() != nil
 	})
-	expectRPCCount(t, f.shim, harness.RPCStartTurn, 0, harness.ProbeWindow)
+	expectRPCCount(t, f.shim, harness.RPCStartTurn, 0)
 
 	// Act: the user sends again with nothing running.
 	second := f.submit("try now", "k-try-2", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT).GetSuccess().GetTurn().GetTurn()

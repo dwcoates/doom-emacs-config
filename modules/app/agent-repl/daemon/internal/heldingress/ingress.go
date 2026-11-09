@@ -8,12 +8,12 @@ import (
 	"path/filepath"
 	"sort"
 	"sync"
-	"time"
 
 	"agent-repld/internal/bounce"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/intakegate"
+	"agent-repld/internal/kernelevent"
 	"agent-repld/internal/prompthandler"
 	"agent-repld/internal/promptqueue"
 	"agent-repld/internal/recordlock"
@@ -33,12 +33,11 @@ const (
 	opLock       = "daemon.heldingress.lock"
 )
 
-// retry is one refused entry's standing: how often it was refused, the
-// earliest instant it is submitted again, and the refusal kinds already
-// recorded at their own level.
+// retry is one refused entry's standing: how often it was refused and the
+// refusal kinds already recorded at their own level. A refused entry is
+// submitted again at the next sweep a change wakes (Run), never on a delay.
 type retry struct {
 	attempts int
-	next     time.Time
 	// recorded names every kind of refusal this entry was already recorded
 	// under. A kind is stated once at its own level; its repeats are DEBUG.
 	recorded map[string]bool
@@ -81,29 +80,83 @@ type ingress struct {
 
 func removeFile(path string) error { return os.Remove(path) }
 
-// Run sweeps until ctx is cancelled. The first sweep runs before the first
-// tick, so everything written while no daemon was serving is ingested as soon
-// as this one starts.
+// Run sweeps until ctx is cancelled: once at start, so everything written
+// while no daemon was serving is ingested as soon as this one starts, then at
+// every change that can let an entry in.
+//
+// NO SWEEP WAITS ON A TIMER. Three changes wake one:
+//   - an entry written into (or removed from) the directory, or the directory
+//     made, seen on a kernel watch of the directory and its parent;
+//   - this daemon starting or stopping to take the intake (IntakeChanged);
+//   - a change of the fleet while an entry waits (FleetChanges), which is
+//     what clears every condition a refused entry waits on.
+//
+// EVERY REGISTRATION IS TAKEN BEFORE THE SWEEP IT FOLLOWS, so a change that
+// lands during a sweep is already pending and wakes the next one at once.
 func (i *ingress) Run(ctx context.Context) error {
 	log := i.deps.Log.Global().With(dlog.Context{"dir": i.deps.Dir})
-	ticker := time.NewTicker(i.deps.Interval)
-	defer ticker.Stop()
-	log.Info(opRun, "watching the held-prompt ingress", dlog.Context{
-		"glob": Glob, "interval_ms": i.deps.Interval.Milliseconds(),
-	})
+	// The directory's parent is followed too: its change is the directory
+	// being made, which is never done here (see Sweep).
+	changes, stop := kernelevent.Follow(ctx, filepath.Dir(i.deps.Dir), i.deps.Dir)
+	defer stop()
+	fleet := i.deps.FleetChanges(ctx)
+	log.Info(opRun, "watching the held-prompt ingress", dlog.Context{"glob": Glob})
 	for {
+		intake := i.deps.IntakeChanged()
 		if err := i.Sweep(ctx); err != nil && ctx.Err() == nil {
-			// A sweep that fails is logged and retried: nothing is removed
-			// on a failed sweep, so the next one meets the same entries.
+			// A sweep that fails removes nothing, so the next change meets
+			// the same entries.
 			log.Error(opRun, "a sweep of the held-prompt ingress failed", dlog.Context{"cause": err.Error()})
 		}
-		select {
-		case <-ctx.Done():
+		woke, err := i.awaitWake(ctx, changes, intake, fleet)
+		if ctx.Err() != nil {
 			log.Info(opRun, "stopped watching the held-prompt ingress", nil)
 			return ctx.Err()
-		case <-ticker.C:
+		}
+		if err != nil {
+			log.Error(opRun, "could not watch the held-prompt ingress; it takes no entry until the daemon restarts", dlog.Context{"cause": err.Error()})
+			return err
+		}
+		log.Debug(opRun, "a change woke the held-prompt ingress", dlog.Context{"woke": woke})
+	}
+}
+
+// The changes awaitWake answers as having woken a sweep.
+const (
+	wokeByDir    = "directory"
+	wokeByIntake = "intake"
+	wokeByFleet  = "fleet"
+)
+
+// awaitWake waits for the next change that can let an entry in, answering
+// which one woke it, the directory watch's error, or nothing once ctx ends. A
+// fleet change wakes a sweep only while an entry waits; one with nothing
+// waiting is taken and waited past.
+func (i *ingress) awaitWake(ctx context.Context, dir <-chan error, intake, fleet <-chan struct{}) (string, error) {
+	for {
+		select {
+		case <-ctx.Done():
+			return "", nil
+		case err := <-dir:
+			return wokeByDir, err
+		case <-intake:
+			return wokeByIntake, nil
+		case _, ok := <-fleet:
+			if !ok {
+				return "", nil
+			}
+			if i.waiting() {
+				return wokeByFleet, nil
+			}
 		}
 	}
+}
+
+// waiting reports whether an entry the queue refused is still on disk.
+func (i *ingress) waiting() bool {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	return len(i.retries) > 0
 }
 
 // Sweep ingests every entry once, in name order.
@@ -262,15 +315,6 @@ func (i *ingress) ingest(ctx context.Context, path string, sw *sweep) {
 		}
 		return
 	}
-	if standing, ok := i.retries[path]; ok && i.deps.Now().Before(standing.next) {
-		sw.waiting[dir] = true
-		log.Debug(opDefer, "the entry's retry is not due yet", dlog.Context{"next": standing.next.Format(time.RFC3339Nano)})
-		if lookupErr == nil {
-			leavePending(sw, record.ID, entry, standing.wait)
-		}
-		return
-	}
-
 	if lookupErr != nil {
 		sw.waiting[dir] = true
 		level, kind := log.Error, kindLookupFailed
@@ -372,22 +416,14 @@ func refusalKind(err error) string {
 	}
 }
 
-// deferEntry records that an entry was left for a later sweep and schedules
-// its retry, doubling the delay up to the ceiling. The first deferral of an
-// entry under each KIND is recorded at the given level; a repeat of a kind
-// already stated is DEBUG, because the standing condition was already said
-// once and a record per retry would only repeat it.
+// deferEntry records that an entry was left for a later sweep, which the next
+// change of the fleet wakes (Run). The first deferral of an entry under each
+// KIND is recorded at the given level; a repeat of a kind already stated is
+// DEBUG, because the standing condition was already said once and a record
+// per retry would only repeat it.
 func (i *ingress) deferEntry(log dlog.Logger, level func(string, string, dlog.Context), path, kind, message string, cause error) {
 	standing := i.retries[path]
 	standing.attempts++
-	delay := i.deps.Interval
-	for n := 1; n < standing.attempts && delay < i.deps.RetryCeiling; n++ {
-		delay *= 2
-	}
-	if delay > i.deps.RetryCeiling {
-		delay = i.deps.RetryCeiling
-	}
-	standing.next = i.deps.Now().Add(delay)
 	standing.wait = waitOf(kind)
 	first := !standing.recorded[kind]
 	if first {
@@ -397,7 +433,7 @@ func (i *ingress) deferEntry(log dlog.Logger, level func(string, string, dlog.Co
 		standing.recorded[kind] = true
 	}
 	i.retries[path] = standing
-	fields := dlog.Context{"cause": cause.Error(), "kind": kind, "attempts": standing.attempts, "retry_in_ms": delay.Milliseconds()}
+	fields := dlog.Context{"cause": cause.Error(), "kind": kind, "attempts": standing.attempts}
 	if first {
 		level(opDefer, message, fields)
 		return

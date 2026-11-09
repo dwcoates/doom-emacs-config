@@ -38,9 +38,10 @@ func (r *resolver) HostAsk(ws ids.WorkspaceID) *agentreplv1.HostAsk {
 }
 
 // WatchHostAsks yields every workspace whose standing ask moved, from this
-// call on, until ctx is cancelled.
-func (r *resolver) WatchHostAsks(ctx context.Context) <-chan ids.WorkspaceID {
-	return r.askChanges.Subscribe(ctx)
+// call on, until ctx is cancelled, each counted as work in flight until the
+// reader acks it.
+func (r *resolver) WatchHostAsks(ctx context.Context) (<-chan ids.WorkspaceID, func()) {
+	return r.askChanges.SubscribeCounted(ctx)
 }
 
 // refreshHostAsk recomputes s's host-view ask and, when it moved, stores it

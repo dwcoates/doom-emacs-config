@@ -427,6 +427,12 @@ func newHarnessOn(t *testing.T, onFile bool, adjust ...func(*Deps, *harness)) *h
 	h.rollout.boundNow = func() bool { return h.binds.Load() > 0 }
 	h.queue.db = func() wsm.DB { return h.deps.DB }
 	h.deps = Deps{
+		// A recorded spawn the suite awaits lives until its wait ends: the
+		// pids it records are no process's.
+		ShimExit: func(ctx context.Context, _ int) error {
+			<-ctx.Done()
+			return ctx.Err()
+		},
 		BindViews: func(context.Context) error {
 			h.binds.Add(1)
 			return h.bindErr

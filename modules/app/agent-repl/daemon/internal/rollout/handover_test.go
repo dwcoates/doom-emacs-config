@@ -939,20 +939,18 @@ func TestTheIncumbentDoesNotExitBeforeTheSuccessorDrainsTheHandedHold(t *testing
 		t.Fatalf("Lease after the transfer = (held %v, %v), want the handed quiesce hold", held, err)
 	}
 
-	// Act: the successor claims the row, and the window looks at it twice
-	// while the hold it has yet to drain still stands.
+	// Act: the successor claims the row, and the window looks at it -- at the
+	// claim's own commit -- while the hold it has yet to drain still stands.
+	probe.armed.Store(true)
 	if err := h.db.ClaimServing(context.Background(), ws, ids.InstanceID("daemon-successor")); err != nil {
 		t.Fatalf("ClaimServing: %v", err)
 	}
-	probe.armed.Store(true)
-	for range 2 {
-		select {
-		case <-probe.looks:
-		case held := <-heldAtExit:
-			t.Fatalf("the incumbent exited after the successor's claim with the hold standing = %v, want it to wait for the drain", held)
-		case <-time.After(10 * time.Second):
-			t.Fatalf("the adoption window never looked at the claimed workspace")
-		}
+	select {
+	case <-probe.looks:
+	case held := <-heldAtExit:
+		t.Fatalf("the incumbent exited after the successor's claim with the hold standing = %v, want it to wait for the drain", held)
+	case <-time.After(10 * time.Second):
+		t.Fatalf("the adoption window never looked at the claimed workspace")
 	}
 	if err := h.db.ReleaseLease(context.Background(), hold.ID); err != nil {
 		t.Fatalf("ReleaseLease (the successor's drain): %v", err)

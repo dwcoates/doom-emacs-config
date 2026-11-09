@@ -14,8 +14,8 @@ import (
 // — so a hold that looks open stops behaving like one. Drain is what keeps the
 // reading going for the rest of the stream's life.
 //
-// The undrained arm is a NEGATIVE assertion (nothing more gets through), so it
-// necessarily waits out ProbeWindow rather than synchronizing on an event.
+// The undrained arm's "nothing more gets through" is read off the full buffer
+// at once: with no reader, a send onto a full channel cannot be taken.
 func TestStreamDrainKeepsAPumpFromWedging(t *testing.T) {
 	// The buffer under test is deliberately tiny: the property is "more pushes
 	// than the buffer holds", not the production capacity.
@@ -69,10 +69,19 @@ func TestStreamDrainKeepsAPumpFromWedging(t *testing.T) {
 				t.Fatalf("the pusher wedged before %d pushes with drain=%v", tc.want, tc.drain)
 			}
 			more := false
-			select {
-			case ch <- sent:
-				more = true
-			case <-time.After(ProbeWindow):
+			if tc.wantMore {
+				// The drain takes it; the bound only fails a drain that stopped.
+				select {
+				case ch <- sent:
+					more = true
+				case <-time.After(DefaultTimeout):
+				}
+			} else {
+				select {
+				case ch <- sent:
+					more = true
+				default:
+				}
 			}
 
 			// Assert.
@@ -86,7 +95,7 @@ func TestStreamDrainKeepsAPumpFromWedging(t *testing.T) {
 	}
 }
 
-func TestFirstPushMatching(t *testing.T) {
+func TestPendingPushMatching(t *testing.T) {
 	tests := []struct {
 		name   string
 		pushes []int
@@ -111,11 +120,11 @@ func TestFirstPushMatching(t *testing.T) {
 			s := &Stream[int]{C: ch, t: t, cancel: func() {}}
 
 			// Act
-			got, ok := firstPushMatching(s, 50*time.Millisecond, func(v int) bool { return v%2 == 0 })
+			got, ok := pendingPushMatching(s, func(v int) bool { return v%2 == 0 })
 
 			// Assert
 			if got != tc.want || ok != tc.wantOK {
-				t.Fatalf("firstPushMatching = (%d, %t), want (%d, %t)", got, ok, tc.want, tc.wantOK)
+				t.Fatalf("pendingPushMatching = (%d, %t), want (%d, %t)", got, ok, tc.want, tc.wantOK)
 			}
 		})
 	}

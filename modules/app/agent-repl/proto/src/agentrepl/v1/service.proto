@@ -38,6 +38,7 @@ import "agentrepl/v1/endpoint_compact_workspace.proto";
 import "agentrepl/v1/endpoint_create_task.proto";
 import "agentrepl/v1/endpoint_create_thread.proto";
 import "agentrepl/v1/endpoint_create_workspace.proto";
+import "agentrepl/v1/endpoint_await_idle.proto";
 import "agentrepl/v1/endpoint_daemon_health.proto";
 import "agentrepl/v1/endpoint_deploy.proto";
 import "agentrepl/v1/endpoint_dismiss_news_digest.proto";
@@ -530,6 +531,14 @@ service AgentRepl {
   // or take closed workspaces' worktrees without waiting. See
   // endpoint_reap_worktrees.proto.
   rpc ReapWorktrees(ReapWorktreesRequest) returns (ReapWorktreesResponse);
+
+  // The test barrier: answers once nothing the daemon started is still in
+  // flight, naming each standing stream's written frames. Refused by a
+  // daemon no test harness started. See endpoint_await_idle.proto.
+  rpc AwaitIdle(AwaitIdleRequest) returns (AwaitIdleResponse) {
+    // A READ: it changes nothing.
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
 
   // Is the daemon itself healthy? Unhealthy is an ANSWER. See
   // endpoint_daemon_health.proto.

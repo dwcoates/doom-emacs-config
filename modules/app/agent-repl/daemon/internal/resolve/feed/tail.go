@@ -3,13 +3,14 @@ package feed
 import (
 	"context"
 	"fmt"
-	"sync"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/inflight"
+	"agent-repld/internal/publish"
 )
 
 // The tail is publish's never-miss guarantee in the feed's spelling. The
@@ -17,39 +18,10 @@ import (
 // publication its page ended at, and the tail begins exactly after it — so no
 // row falls between the page and the stream, and none is drawn twice.
 
-// tailSub is one subscriber's queue: unbounded, drained by its own goroutine,
-// so a slow reader never blocks an upsert.
-type tailSub struct {
-	mu     sync.Mutex
-	queue  []Publication
-	signal chan struct{}
-	out    chan Publication
-}
-
-// enqueue appends a publication and wakes the pump. It never blocks.
-func (s *tailSub) enqueue(pub Publication) {
-	s.mu.Lock()
-	s.queue = append(s.queue, pub)
-	s.mu.Unlock()
-	select {
-	case s.signal <- struct{}{}:
-	default:
-	}
-}
-
-// dequeue removes the oldest queued publication, reporting false when the
-// queue is empty.
-func (s *tailSub) dequeue() (Publication, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if len(s.queue) == 0 {
-		return Publication{}, false
-	}
-	pub := s.queue[0]
-	s.queue[0] = Publication{}
-	s.queue = s.queue[1:]
-	return pub, true
-}
+// tailSub is one tail's delivery: a counted publish.Mailbox, unbounded and
+// drained by its own goroutine, so a slow reader never blocks an upsert, and
+// every publication counts as work in flight until the reader acks it.
+type tailSub = publish.Mailbox[Publication]
 
 // tail is one open tail: the subscriber and the token it answers to.
 type tail struct {
@@ -63,39 +35,20 @@ type tail struct {
 func (t *tail) Token() *agentreplv1.FeedWatchToken { return t.token }
 
 // Publications yields every publication from the pinned start, in order,
-// closing only when ctx is cancelled.
-func (t *tail) Publications(ctx context.Context) <-chan Publication {
-	go t.pump(ctx)
-	return t.sub.out
-}
-
-// pump drains the subscriber's queue onto its channel until ctx is cancelled,
-// then unregisters it and closes the channel. A tail ends ONLY on the reader's
-// cancellation: a stream ending any other way is a transport failure, which is
-// exactly the distinction the feed's liveness rests on.
-func (t *tail) pump(ctx context.Context) {
-	defer func() {
-		t.r.mu.Lock()
-		delete(t.f.subs, t.sub)
-		t.r.mu.Unlock()
-		close(t.sub.out)
-	}()
-	for {
-		pub, ok := t.sub.dequeue()
-		if ok {
-			select {
-			case t.sub.out <- pub:
-			case <-ctx.Done():
-				return
-			}
-			continue
-		}
-		select {
-		case <-t.sub.signal:
-		case <-ctx.Done():
-			return
-		}
-	}
+// closing only when ctx is cancelled. The reader calls ack once per
+// publication it received, once it has written it.
+func (t *tail) Publications(ctx context.Context) (<-chan Publication, func()) {
+	// A tail ends ONLY on the reader's cancellation: a stream ending any other
+	// way is a transport failure, which is exactly the distinction the feed's
+	// liveness rests on.
+	inflight.Standing(func() {
+		t.sub.Run(ctx, func() {
+			t.r.mu.Lock()
+			delete(t.f.subs, t.sub)
+			t.r.mu.Unlock()
+		})
+	})
+	return t.sub.Out(), t.sub.Ack
 }
 
 // Tail opens the live row stream for one feed, pinned to the token minted by
@@ -122,7 +75,7 @@ func (r *resolver) Tail(ctx context.Context, ws ids.WorkspaceID, feed feedid.Fee
 
 	s := r.state(ws)
 	f := r.feed(s, feed)
-	sub := &tailSub{signal: make(chan struct{}, 1), out: make(chan Publication)}
+	sub := publish.NewMailbox[Publication](inflight.Default)
 
 	// The pin, honored exactly: every publication after the token's sequence
 	// is replayed before the tail follows, so the seam between the page and
@@ -148,7 +101,7 @@ func (r *resolver) Tail(ctx context.Context, ws ids.WorkspaceID, feed feedid.Fee
 			withheld++
 			continue
 		}
-		sub.enqueue(entry.pub)
+		sub.Enqueue(entry.pub)
 		replayed++
 	}
 	f.subs[sub] = struct{}{}

@@ -9,7 +9,9 @@
 package publish
 
 import (
+	"agent-repld/internal/inflight"
 	"context"
+	"fmt"
 	"reflect"
 	"sync"
 
@@ -38,10 +40,13 @@ type Topic[T any] struct {
 	mu     sync.Mutex
 	latest T
 	has    bool
-	subs   map[*subscriber[T]]struct{}
+	subs   map[*Mailbox[T]]struct{}
 	// latestOnly makes every subscriber's queue hold at most the newest
 	// value. It is fixed at construction.
 	latestOnly bool
+	// subsChanged closes at the next change of the subscriber set and is
+	// replaced by it (AwaitSubscribers).
+	subsChanged chan struct{}
 }
 
 // NewLatestOnly builds a topic whose subscribers are handed only the newest
@@ -122,20 +127,76 @@ func (t *Topic[T]) Latest() (T, bool) {
 // every later value in order. The channel closes when ctx is cancelled, and
 // only then. The caller must cancel ctx or the subscriber leaks.
 func (t *Topic[T]) Subscribe(ctx context.Context) <-chan T {
-	s := newSubscriber[T](t.latestOnly)
+	return t.subscribe(ctx, nil)
+}
 
+// SubscribeCounted is Subscribe for a consumer whose handling of each value
+// is work in flight (internal/inflight): every value is counted on the
+// daemon's tracker from the instant it is published until the consumer calls
+// ack, once per value received, after it has written it. A stream that
+// writes each view to its client is the one consumer: a push the client has
+// not been sent yet is never "nothing in flight".
+func (t *Topic[T]) SubscribeCounted(ctx context.Context) (values <-chan T, ack func()) {
+	return t.subscribeCounted(ctx, inflight.Default)
+}
+
+// subscribeCounted is SubscribeCounted on TRACKER.
+func (t *Topic[T]) subscribeCounted(ctx context.Context, tracker *inflight.Tracker) (<-chan T, func()) {
+	s := newSubscriber[T](t.latestOnly, tracker)
+	return t.register(ctx, s), s.ack
+}
+
+// subscribe registers an uncounted subscriber.
+func (t *Topic[T]) subscribe(ctx context.Context, tracker *inflight.Tracker) <-chan T {
+	return t.register(ctx, newSubscriber[T](t.latestOnly, tracker))
+}
+
+// register queues the latest value for S, adds it, and starts its pump.
+func (t *Topic[T]) register(ctx context.Context, s *Mailbox[T]) <-chan T {
 	t.mu.Lock()
 	if t.has {
-		s.queue = append(s.queue, t.latest)
+		s.enqueue(t.latest)
 	}
 	if t.subs == nil {
-		t.subs = make(map[*subscriber[T]]struct{})
+		t.subs = make(map[*Mailbox[T]]struct{})
 	}
 	t.subs[s] = struct{}{}
+	t.noteSubsChangedLocked()
 	t.mu.Unlock()
 
-	go pump(ctx, s, t.remove)
+	inflight.Standing(func() { pump(ctx, s, t.remove) })
 	return s.out
+}
+
+// AwaitSubscribers waits until the topic is serving exactly want
+// subscriptions, or ctx ends. It wakes on each subscription added or ended,
+// never on a timer.
+func (t *Topic[T]) AwaitSubscribers(ctx context.Context, want int) error {
+	for {
+		t.mu.Lock()
+		got := len(t.subs)
+		if t.subsChanged == nil {
+			t.subsChanged = make(chan struct{})
+		}
+		changed := t.subsChanged
+		t.mu.Unlock()
+		if got == want {
+			return nil
+		}
+		select {
+		case <-changed:
+		case <-ctx.Done():
+			return fmt.Errorf("the topic serves %d subscriptions, want %d: %w", got, want, ctx.Err())
+		}
+	}
+}
+
+// noteSubsChangedLocked wakes every AwaitSubscribers. The caller holds mu.
+func (t *Topic[T]) noteSubsChangedLocked() {
+	if t.subsChanged != nil {
+		close(t.subsChanged)
+		t.subsChanged = nil
+	}
 }
 
 // Subscribers reports how many live subscriptions the topic is serving. It
@@ -146,19 +207,34 @@ func (t *Topic[T]) Subscribers() int {
 	return len(t.subs)
 }
 
+// Run pumps the mailbox onto its channel until ctx ends, then calls left,
+// ends the count of whatever it still held, and closes the channel. It is
+// the mailbox's one delivery loop, a long-running one.
+func (s *Mailbox[T]) Run(ctx context.Context, left func()) {
+	pump(ctx, s, func(*Mailbox[T]) { left() })
+}
+
+// Out is the channel the mailbox delivers on.
+func (s *Mailbox[T]) Out() <-chan T { return s.out }
+
 // pump drains one subscriber's queue onto its channel until ctx is cancelled,
-// then unregisters it through unregister and closes the channel. It is the one
-// delivery loop Topic and Events share.
-func pump[T any](ctx context.Context, s *subscriber[T], unregister func(*subscriber[T])) {
+// then unregisters it through unregister, ends the count of whatever it still
+// held, and closes the channel. It is the one delivery loop Topic and Events
+// share.
+func pump[T any](ctx context.Context, s *Mailbox[T], unregister func(*Mailbox[T])) {
 	defer func() {
 		unregister(s)
+		s.endAll()
 		close(s.out)
 	}()
 	for {
-		v, ok := s.dequeue()
+		it, ok := s.dequeue()
 		if ok {
+			// The value is the consumer's from here, so its count moves to
+			// the consumer's ack before the hand-over.
+			s.handedOver(it.end)
 			select {
-			case s.out <- v:
+			case s.out <- it.value:
 			case <-ctx.Done():
 				return
 			}
@@ -173,41 +249,79 @@ func pump[T any](ctx context.Context, s *subscriber[T], unregister func(*subscri
 }
 
 // remove unregisters a subscriber so Publish stops enqueuing to it.
-func (t *Topic[T]) remove(s *subscriber[T]) {
+func (t *Topic[T]) remove(s *Mailbox[T]) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	delete(t.subs, s)
+	t.noteSubsChangedLocked()
 }
 
-// subscriber is one live subscription: an unbounded queue, a wake-up signal,
-// and the channel the pump writes to.
-type subscriber[T any] struct {
+// Mailbox is one live subscription's delivery: an unbounded queue, a wake-up
+// signal, and the channel its pump writes to. Topic, Events and the feed's
+// tails all deliver through it, so a value's delivery -- and its count -- has
+// one implementation.
+//
+// A COUNTED subscriber (tracker set) counts every value on the tracker from
+// the instant it is enqueued until its consumer acknowledges it (ack): a
+// value on its way to a stream is work in flight exactly as a goroutine is.
+type Mailbox[T any] struct {
 	mu     sync.Mutex
-	queue  []T
+	queue  []item[T]
 	out    chan T
 	signal chan struct{}
 	// latestOnly replaces a value still queued rather than queuing behind it.
 	latestOnly bool
+	// tracker counts this subscription's values; nil counts nothing.
+	tracker *inflight.Tracker
+	// handed are the ends of the values the pump handed to the consumer and
+	// the consumer has not yet acknowledged, oldest first.
+	handed []func()
 }
 
-// newSubscriber builds an unregistered subscription with an empty queue.
-func newSubscriber[T any](latestOnly bool) *subscriber[T] {
-	return &subscriber[T]{
+// item is one queued value and the end of its count (nil when uncounted).
+type item[T any] struct {
+	value T
+	end   func()
+}
+
+// NewMailbox builds an empty mailbox, counting its values on tracker when it
+// is not nil: from Enqueue until the consumer's Ack.
+func NewMailbox[T any](tracker *inflight.Tracker) *Mailbox[T] {
+	return newSubscriber[T](false, tracker)
+}
+
+// newSubscriber builds an unregistered subscription with an empty queue,
+// counting its values on tracker when it is not nil.
+func newSubscriber[T any](latestOnly bool, tracker *inflight.Tracker) *Mailbox[T] {
+	return &Mailbox[T]{
 		out:        make(chan T),
 		signal:     make(chan struct{}, 1),
 		latestOnly: latestOnly,
+		tracker:    tracker,
 	}
 }
 
 // enqueue appends v and wakes the pump. It never blocks, which is what keeps a
 // slow subscriber off the publisher's back. On a latest-only subscriber a
-// value still waiting in the queue is replaced, so the queue holds at most one.
-func (s *subscriber[T]) enqueue(v T) {
+// value still waiting in the queue is replaced, so the queue holds at most one;
+// the replaced value's count ends with it.
+// Enqueue is enqueue for a mailbox outside this package.
+func (s *Mailbox[T]) Enqueue(v T) { s.enqueue(v) }
+
+func (s *Mailbox[T]) enqueue(v T) {
+	var end func()
+	if s.tracker != nil {
+		end = s.tracker.Begin()
+	}
 	s.mu.Lock()
 	if s.latestOnly && len(s.queue) > 0 {
-		s.queue[len(s.queue)-1] = v
+		last := &s.queue[len(s.queue)-1]
+		if last.end != nil {
+			last.end()
+		}
+		*last = item[T]{value: v, end: end}
 	} else {
-		s.queue = append(s.queue, v)
+		s.queue = append(s.queue, item[T]{value: v, end: end})
 	}
 	s.mu.Unlock()
 	select {
@@ -218,17 +332,62 @@ func (s *subscriber[T]) enqueue(v T) {
 
 // dequeue removes the oldest queued value, reporting false when the queue is
 // empty.
-func (s *subscriber[T]) dequeue() (T, bool) {
+func (s *Mailbox[T]) dequeue() (item[T], bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if len(s.queue) == 0 {
-		var zero T
-		return zero, false
+		return item[T]{}, false
 	}
 	v := s.queue[0]
-	s.queue[0] = *new(T)
+	s.queue[0] = item[T]{}
 	s.queue = s.queue[1:]
 	return v, true
+}
+
+// handedOver records that the consumer now holds a value whose count ends at
+// its ack.
+func (s *Mailbox[T]) handedOver(end func()) {
+	if end == nil {
+		return
+	}
+	s.mu.Lock()
+	s.handed = append(s.handed, end)
+	s.mu.Unlock()
+}
+
+// Ack ends the count of the oldest value the consumer holds.
+func (s *Mailbox[T]) Ack() { s.ack() }
+
+func (s *Mailbox[T]) ack() {
+	s.mu.Lock()
+	if len(s.handed) == 0 {
+		s.mu.Unlock()
+		if s.tracker != nil {
+			panic("publish: a counted subscription acknowledged a value it was never handed")
+		}
+		return
+	}
+	end := s.handed[0]
+	s.handed = s.handed[1:]
+	s.mu.Unlock()
+	end()
+}
+
+// endAll ends the count of every value still queued or unacknowledged: the
+// subscription is over, and nothing will be written for them.
+func (s *Mailbox[T]) endAll() {
+	s.mu.Lock()
+	queued, handed := s.queue, s.handed
+	s.queue, s.handed = nil, nil
+	s.mu.Unlock()
+	for _, it := range queued {
+		if it.end != nil {
+			it.end()
+		}
+	}
+	for _, end := range handed {
+		end()
+	}
 }
 
 // equalValues is the topic's deduplication rule: proto.Equal for proto
@@ -247,4 +406,24 @@ func equalValues[T any](a, b T) bool {
 		return false
 	}
 	return av == bv
+}
+
+// Changes answers a channel that receives once per value T delivers to a
+// subscription (the latest first, if one exists), until ctx ends, when it
+// closes: for a caller that waits on the view MOVING rather than reading what
+// it moved to.
+func Changes[T any](ctx context.Context, t *Topic[T]) <-chan struct{} {
+	values := t.Subscribe(ctx)
+	out := make(chan struct{})
+	inflight.Standing(func() {
+		defer close(out)
+		for range values {
+			select {
+			case out <- struct{}{}:
+			case <-ctx.Done():
+				return
+			}
+		}
+	})
+	return out
 }

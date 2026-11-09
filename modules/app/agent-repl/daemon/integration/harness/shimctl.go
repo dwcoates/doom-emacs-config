@@ -7,12 +7,10 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"net"
 	"path/filepath"
 	"strings"
 	"sync"
-	"syscall"
 	"testing"
 	"time"
 
@@ -21,6 +19,7 @@ import (
 	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"agent-repld/integration/grantedclock"
+	"agent-repld/internal/kernelevent"
 
 	"google.golang.org/protobuf/proto"
 )
@@ -329,24 +328,40 @@ func (d *Daemon) latestShimSpawn(workspaceDir, uds string) int {
 	return pid
 }
 
-// connectOrDeparted is connect for the shim with pid: it stops polling, with
-// the pid and no connection, once that shim has exited.
+// connectOrDeparted is connect for the shim with pid: it stops, with the pid
+// and no connection, once that shim has exited. It waits on the socket's
+// directory changing and on the shim's exit event, never on a timer.
 func (s *ShimControl) connectOrDeparted(pid int) {
 	s.t.Helper()
-	ticker := time.NewTicker(pollInterval)
-	defer ticker.Stop()
-	for {
-		if s.dialOpened() {
-			return
+	wait, cancel := s.d.waitCtx()
+	defer cancel()
+	exited := make(chan struct{})
+	go func() {
+		if kernelevent.WaitExit(wait, pid) == nil {
+			close(exited)
 		}
-		if err := syscall.Kill(pid, 0); errors.Is(err, syscall.ESRCH) || isZombie(pid) {
-			s.pid, s.departed = pid, true
+	}()
+	for {
+		changes, stop := kernelevent.Follow(wait, followFiles(s.Socket)()...)
+		if s.dialOpened() {
+			stop()
 			return
 		}
 		select {
-		case <-ticker.C:
-		case <-s.d.Ctx().Done():
-			s.t.Fatalf("waiting for the fake shim's control socket %s (pid %d, alive): %v\ndaemon stderr:\n%s", s.Socket, pid, grantedclock.Explain(s.d.Ctx()), s.d.Stderr())
+		case <-exited:
+			stop()
+			if !s.dialOpened() {
+				s.pid, s.departed = pid, true
+			}
+			return
+		case err := <-changes:
+			stop()
+			if err != nil && wait.Err() == nil {
+				s.t.Fatalf("harness: watch the fake shim's control socket %s: %v", s.Socket, err)
+			}
+		case <-wait.Done():
+			stop()
+			s.t.Fatalf("waiting for the fake shim's control socket %s (pid %d, alive): %v\ndaemon stderr:\n%s", s.Socket, pid, grantedclock.Explain(wait), s.d.Stderr())
 		}
 	}
 }
@@ -361,41 +376,17 @@ func (d *Daemon) ShimAt(socket string) *ShimControl {
 	return s
 }
 
-// connect polls for the control socket and dials it, bounded by the context.
+// connect waits for the control socket and dials it, bounded by ONE wait. It
+// dials again at each change of the socket's directory: the fake shim's socket
+// appears only once it accepts, and a dial that reached a shim on its way out
+// (no reply to its info) waits for the next one to appear.
 func (s *ShimControl) connect() {
 	s.t.Helper()
-	ticker := time.NewTicker(pollInterval)
-	defer ticker.Stop()
-	for {
-		if s.dial() {
-			return
-		}
-		select {
-		case <-ticker.C:
-		case <-s.d.Ctx().Done():
-			s.t.Fatalf("waiting for the fake shim's control socket %s: %v\ndaemon stderr:\n%s", s.Socket, grantedclock.Explain(s.d.Ctx()), s.d.Stderr())
-		}
+	wait, cancel := s.d.waitCtx()
+	defer cancel()
+	if !awaitChange(s.t, wait, s.dialOpened, followFiles(s.Socket)) {
+		s.t.Fatalf("waiting for the fake shim's control socket %s: %v\ndaemon stderr:\n%s", s.Socket, grantedclock.Explain(wait), s.d.Stderr())
 	}
-}
-
-// dial connects to the control socket once and reads the shim's identity,
-// answering false when the socket does not answer yet.
-func (s *ShimControl) dial() bool {
-	s.t.Helper()
-	conn, err := net.Dial("unix", s.Socket)
-	if err != nil {
-		return false
-	}
-	s.c = conn
-	s.dec = bufio.NewScanner(conn)
-	s.dec.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
-	s.enc = json.NewEncoder(conn)
-	reply := s.send(controlCommand{Op: "info"})
-	if reply.Info == nil || reply.Info.PID == 0 {
-		s.t.Fatalf("fake shim control %s: opening info carried no process identity", s.Socket)
-	}
-	s.pid = reply.Info.PID
-	return true
 }
 
 // dialOpened is dial for the shim an open brought up, which the idle sweep may
@@ -697,6 +688,9 @@ func (s *ShimControl) AnswerFailure(rpc, detail string) {
 }
 
 // Count reports how many requests a verb has received.
+// Daemon is the daemon whose shim this controls.
+func (s *ShimControl) Daemon() *Daemon { return s.d }
+
 func (s *ShimControl) Count(rpc string) int {
 	s.t.Helper()
 	return s.send(controlCommand{Op: "count", RPC: rpc}).Count
@@ -947,7 +941,7 @@ func (s *ShimControl) AwaitGone() {
 	// connect captured the process identity while the socket was known-live, so
 	// waiting never silently succeeds merely because the dying fake cannot
 	// answer one last info request.
-	AwaitProcessGone(s.t, s.d.Ctx(), s.pid)
+	s.d.AwaitProcessExit(s.pid)
 }
 
 func encode(t testing.TB, m proto.Message) string {

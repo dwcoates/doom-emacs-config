@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"agent-repld/internal/inflight"
 	"agent-repld/internal/recordlock"
 )
 
@@ -244,6 +245,7 @@ func acquireBootLockWithin(path string, wait time.Duration, mode BootMode, onRef
 		return nil, VerdictUndecided, err
 	}
 	settled := make(chan outcome, 1)
+	// inflight: joined: the function that starts it waits for it.
 	go func() {
 		l, e := blockForBootLock(f, path)
 		settled <- outcome{lock: l, err: e}
@@ -263,11 +265,11 @@ func acquireBootLockWithin(path string, wait time.Duration, mode BootMode, onRef
 		// THE LATE WINNER IS RELEASED, NEVER LEAKED. The blocking attempt is
 		// still queued in the kernel; if it lands after this answer it hands
 		// back a claim nobody asked for any more.
-		go func() {
+		inflight.Standing(func() {
 			if got := <-settled; got.lock != nil {
 				got.lock.release()
 			}
-		}()
+		})
 		return nil, VerdictHeldPastWait, &HeldError{Path: path, Holder: holder, Detail: fmt.Sprintf("still held after %s", wait)}
 	}
 }

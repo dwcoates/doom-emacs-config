@@ -1,6 +1,7 @@
 package shimclient
 
 import (
+	"agent-repld/internal/inflight"
 	"context"
 	"io"
 	"sync"
@@ -48,6 +49,9 @@ func (m *mappedStream[W, T]) Recv() (T, error) {
 func (m *mappedStream[W, T]) Close() {
 	m.closeOnce.Do(func() {
 		m.cancel()
-		go func() { _ = m.stream.Close() }()
+		// The close only releases a transport the caller already cancelled;
+		// it changes nothing anything observes, and a peer that never
+		// answers would hold it open, so it is not counted.
+		inflight.Standing(func() { _ = m.stream.Close() })
 	})
 }

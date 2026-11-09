@@ -1,6 +1,7 @@
 package main
 
 import (
+	"agent-repld/internal/inflight"
 	"context"
 	"sync"
 )
@@ -37,10 +38,10 @@ func (l *noticeLifetime) Start() {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	l.started, l.cancel, l.done = true, cancel, make(chan struct{})
-	go func() {
+	inflight.Standing(func() {
 		defer close(l.done)
 		l.run(ctx)
-	}()
+	})
 }
 
 // Stop ends the loop and waits for it to deliver what was pending and
@@ -61,6 +62,7 @@ func runNotifiers(ctx context.Context, runs ...func(ctx context.Context)) {
 	var wg sync.WaitGroup
 	for _, run := range runs {
 		wg.Add(1)
+		// inflight: joined: the function that starts it waits for it.
 		go func() {
 			defer wg.Done()
 			run(ctx)

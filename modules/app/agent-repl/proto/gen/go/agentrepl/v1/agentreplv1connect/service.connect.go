@@ -284,6 +284,8 @@ const (
 	AgentReplPruneStorageProcedure = "/agentrepl.v1.AgentRepl/PruneStorage"
 	// AgentReplReapWorktreesProcedure is the fully-qualified name of the AgentRepl's ReapWorktrees RPC.
 	AgentReplReapWorktreesProcedure = "/agentrepl.v1.AgentRepl/ReapWorktrees"
+	// AgentReplAwaitIdleProcedure is the fully-qualified name of the AgentRepl's AwaitIdle RPC.
+	AgentReplAwaitIdleProcedure = "/agentrepl.v1.AgentRepl/AwaitIdle"
 	// AgentReplDaemonHealthProcedure is the fully-qualified name of the AgentRepl's DaemonHealth RPC.
 	AgentReplDaemonHealthProcedure = "/agentrepl.v1.AgentRepl/DaemonHealth"
 	// AgentReplSessionHealthProcedure is the fully-qualified name of the AgentRepl's SessionHealth RPC.
@@ -522,6 +524,7 @@ var (
 	agentReplRollOutLandingMethodDescriptor                    = agentReplServiceDescriptor.Methods().ByName("RollOutLanding")
 	agentReplPruneStorageMethodDescriptor                      = agentReplServiceDescriptor.Methods().ByName("PruneStorage")
 	agentReplReapWorktreesMethodDescriptor                     = agentReplServiceDescriptor.Methods().ByName("ReapWorktrees")
+	agentReplAwaitIdleMethodDescriptor                         = agentReplServiceDescriptor.Methods().ByName("AwaitIdle")
 	agentReplDaemonHealthMethodDescriptor                      = agentReplServiceDescriptor.Methods().ByName("DaemonHealth")
 	agentReplSessionHealthMethodDescriptor                     = agentReplServiceDescriptor.Methods().ByName("SessionHealth")
 	agentReplClientLogMethodDescriptor                         = agentReplServiceDescriptor.Methods().ByName("ClientLog")
@@ -858,6 +861,10 @@ type AgentReplClient interface {
 	// or take closed workspaces' worktrees without waiting. See
 	// endpoint_reap_worktrees.proto.
 	ReapWorktrees(context.Context, *connect.Request[v1.ReapWorktreesRequest]) (*connect.Response[v1.ReapWorktreesResponse], error)
+	// The test barrier: answers once nothing the daemon started is still in
+	// flight, naming each standing stream's written frames. Refused by a
+	// daemon no test harness started. See endpoint_await_idle.proto.
+	AwaitIdle(context.Context, *connect.Request[v1.AwaitIdleRequest]) (*connect.Response[v1.AwaitIdleResponse], error)
 	// Is the daemon itself healthy? Unhealthy is an ANSWER. See
 	// endpoint_daemon_health.proto.
 	DaemonHealth(context.Context, *connect.Request[v1.DaemonHealthRequest]) (*connect.Response[v1.DaemonHealthResponse], error)
@@ -1592,6 +1599,13 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(agentReplReapWorktreesMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
+		awaitIdle: connect.NewClient[v1.AwaitIdleRequest, v1.AwaitIdleResponse](
+			httpClient,
+			baseURL+AgentReplAwaitIdleProcedure,
+			connect.WithSchema(agentReplAwaitIdleMethodDescriptor),
+			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+			connect.WithClientOptions(opts...),
+		),
 		daemonHealth: connect.NewClient[v1.DaemonHealthRequest, v1.DaemonHealthResponse](
 			httpClient,
 			baseURL+AgentReplDaemonHealthProcedure,
@@ -2007,6 +2021,7 @@ type agentReplClient struct {
 	rollOutLanding                    *connect.Client[v1.RollOutLandingRequest, v1.RollOutLandingResponse]
 	pruneStorage                      *connect.Client[v1.PruneStorageRequest, v1.PruneStorageResponse]
 	reapWorktrees                     *connect.Client[v1.ReapWorktreesRequest, v1.ReapWorktreesResponse]
+	awaitIdle                         *connect.Client[v1.AwaitIdleRequest, v1.AwaitIdleResponse]
 	daemonHealth                      *connect.Client[v1.DaemonHealthRequest, v1.DaemonHealthResponse]
 	sessionHealth                     *connect.Client[v1.SessionHealthRequest, v1.SessionHealthResponse]
 	clientLog                         *connect.Client[v1.ClientLogRequest, v1.ClientLogResponse]
@@ -2509,6 +2524,11 @@ func (c *agentReplClient) PruneStorage(ctx context.Context, req *connect.Request
 // ReapWorktrees calls agentrepl.v1.AgentRepl.ReapWorktrees.
 func (c *agentReplClient) ReapWorktrees(ctx context.Context, req *connect.Request[v1.ReapWorktreesRequest]) (*connect.Response[v1.ReapWorktreesResponse], error) {
 	return c.reapWorktrees.CallUnary(ctx, req)
+}
+
+// AwaitIdle calls agentrepl.v1.AgentRepl.AwaitIdle.
+func (c *agentReplClient) AwaitIdle(ctx context.Context, req *connect.Request[v1.AwaitIdleRequest]) (*connect.Response[v1.AwaitIdleResponse], error) {
+	return c.awaitIdle.CallUnary(ctx, req)
 }
 
 // DaemonHealth calls agentrepl.v1.AgentRepl.DaemonHealth.
@@ -3053,6 +3073,10 @@ type AgentReplHandler interface {
 	// or take closed workspaces' worktrees without waiting. See
 	// endpoint_reap_worktrees.proto.
 	ReapWorktrees(context.Context, *connect.Request[v1.ReapWorktreesRequest]) (*connect.Response[v1.ReapWorktreesResponse], error)
+	// The test barrier: answers once nothing the daemon started is still in
+	// flight, naming each standing stream's written frames. Refused by a
+	// daemon no test harness started. See endpoint_await_idle.proto.
+	AwaitIdle(context.Context, *connect.Request[v1.AwaitIdleRequest]) (*connect.Response[v1.AwaitIdleResponse], error)
 	// Is the daemon itself healthy? Unhealthy is an ANSWER. See
 	// endpoint_daemon_health.proto.
 	DaemonHealth(context.Context, *connect.Request[v1.DaemonHealthRequest]) (*connect.Response[v1.DaemonHealthResponse], error)
@@ -3783,6 +3807,13 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		connect.WithSchema(agentReplReapWorktreesMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
+	agentReplAwaitIdleHandler := connect.NewUnaryHandler(
+		AgentReplAwaitIdleProcedure,
+		svc.AwaitIdle,
+		connect.WithSchema(agentReplAwaitIdleMethodDescriptor),
+		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+		connect.WithHandlerOptions(opts...),
+	)
 	agentReplDaemonHealthHandler := connect.NewUnaryHandler(
 		AgentReplDaemonHealthProcedure,
 		svc.DaemonHealth,
@@ -4285,6 +4316,8 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplPruneStorageHandler.ServeHTTP(w, r)
 		case AgentReplReapWorktreesProcedure:
 			agentReplReapWorktreesHandler.ServeHTTP(w, r)
+		case AgentReplAwaitIdleProcedure:
+			agentReplAwaitIdleHandler.ServeHTTP(w, r)
 		case AgentReplDaemonHealthProcedure:
 			agentReplDaemonHealthHandler.ServeHTTP(w, r)
 		case AgentReplSessionHealthProcedure:
@@ -4756,6 +4789,10 @@ func (UnimplementedAgentReplHandler) PruneStorage(context.Context, *connect.Requ
 
 func (UnimplementedAgentReplHandler) ReapWorktrees(context.Context, *connect.Request[v1.ReapWorktreesRequest]) (*connect.Response[v1.ReapWorktreesResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.ReapWorktrees is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) AwaitIdle(context.Context, *connect.Request[v1.AwaitIdleRequest]) (*connect.Response[v1.AwaitIdleResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.AwaitIdle is not implemented"))
 }
 
 func (UnimplementedAgentReplHandler) DaemonHealth(context.Context, *connect.Request[v1.DaemonHealthRequest]) (*connect.Response[v1.DaemonHealthResponse], error) {

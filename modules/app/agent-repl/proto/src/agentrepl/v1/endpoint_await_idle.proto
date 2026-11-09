@@ -1,0 +1,69 @@
+// endpoint_await_idle.proto — AwaitIdle: the TEST barrier. It answers once
+// nothing the daemon started is still in flight, so a test that acted can
+// assert that something did NOT follow, at once, instead of waiting out a
+// window and hoping.
+//
+// DAEMON ADMIN section. Served only to a daemon its test harness started
+// (AGENT_REPL_TEST_BARRIER=1 in its environment); every other daemon refuses
+// it as not_testing, so no client of a real daemon can come to rely on it.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// "Are you done?", within a bound.
+message AwaitIdleRequest {
+  // How long the daemon waits for nothing to be in flight before it answers
+  // still_busy, naming what is. Kept inside the caller's own deadline, so a
+  // caller whose wait failed is told why rather than cut off. Zero waits
+  // until the request's own context ends.
+  uint32 bound_ms = 1;
+}
+
+// THE ARM IS THE OUTCOME.
+message AwaitIdleResponse {
+  oneof result {
+    AwaitIdleSuccess success = 1;
+    AwaitIdleError error = 2;
+  }
+}
+
+// NOTHING IS IN FLIGHT. Every piece of work the daemon counts
+// (internal/inflight) -- each consequence of a request, each push not yet
+// written to its stream -- had finished at the instant the answer was made.
+message AwaitIdleSuccess {
+  // EVERY TAGGED STANDING STREAM the daemon was serving at that instant,
+  // with how many frames it had written on it. A client reading one of them
+  // waits until it has RECEIVED that many before it asserts nothing else
+  // came: a frame written is not yet a frame read, and the count orders the
+  // two.
+  repeated StreamFramesWritten streams = 1;
+}
+
+// One standing stream's written frames.
+message StreamFramesWritten {
+  // The tag the client opened the stream with, in its `Agent-Repl-Stream-Tag`
+  // request header. Only a tagged stream is counted.
+  string stream_tag = 1;
+  // Frames written on it since it was accepted.
+  uint64 frames = 2;
+}
+
+message AwaitIdleError {
+  oneof cause {
+    // This daemon was not started by a test harness.
+    AwaitIdleNotTesting not_testing = 1;
+    // The request's own deadline ended while work was still in flight.
+    AwaitIdleStillBusy still_busy = 2;
+  }
+}
+// Empty: nothing more is known.
+message AwaitIdleNotTesting {}
+message AwaitIdleStillBusy {
+  // How much work was still in flight when the request ended.
+  uint64 in_flight = 1;
+  // Where each piece of it was begun, "package/file.go:line xN".
+  repeated string sites = 2;
+}

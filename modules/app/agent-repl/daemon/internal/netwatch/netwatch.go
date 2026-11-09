@@ -108,6 +108,7 @@ func (w *Watcher) Run(ctx context.Context) error {
 	defer closeSrc()
 	stopped := make(chan struct{})
 	defer close(stopped)
+	// inflight: joined: the function that starts it waits for it.
 	go func() {
 		select {
 		case <-ctx.Done():

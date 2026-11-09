@@ -2036,6 +2036,9 @@ func TestAStandDownDuringTheBringUpIsNotRecordedAsAnError(t *testing.T) {
 type bootStepClock struct {
 	mu  sync.Mutex
 	now time.Time
+	// held are the bounds that never elapse: a wait on one ends on its event
+	// alone.
+	held map[time.Duration]bool
 }
 
 func (c *bootStepClock) Now() time.Time {
@@ -2046,6 +2049,10 @@ func (c *bootStepClock) Now() time.Time {
 
 func (c *bootStepClock) After(d time.Duration) <-chan time.Time {
 	c.mu.Lock()
+	if c.held[d] {
+		c.mu.Unlock()
+		return nil
+	}
 	c.now = c.now.Add(d)
 	fired := c.now
 	c.mu.Unlock()
@@ -2057,9 +2064,21 @@ func (c *bootStepClock) After(d time.Duration) <-chan time.Time {
 // bindAfter makes one socket path read ABSENT for the first n probes and LIVE
 // from then on, which is a shim finishing its Node startup partway through the
 // wait. Every other path keeps the harness's scripted answer.
+//
+// Each of the n binds is a change of the socket's directory, which the
+// starting-shim wait probes again on, and the adoption bound is held so the
+// wait ends on the bind rather than racing it.
 func bindAfter(h *harness, path string, n int) func(*Deps, *harness) {
 	var seen int
 	return func(deps *Deps, _ *harness) {
+		changes := make(chan error, n+1)
+		for range n + 1 {
+			changes <- nil
+		}
+		deps.ShimSocketChanges = func(context.Context, string) (<-chan error, func()) { return changes, func() {} }
+		if clock, ok := deps.Clock.(*bootStepClock); ok {
+			clock.held = map[time.Duration]bool{deps.AdoptBound: true}
+		}
 		deps.SocketProbe = func(probed string) (shimsocket.State, error) {
 			if probed != path {
 				if state, ok := h.socketProbes[probed]; ok {

@@ -64,7 +64,7 @@ func (s Standing) String() string {
 // ordinary rpc.
 func (c *controller) Standing(ws ids.WorkspaceID) Standing {
 	c.mu.Lock()
-	defer c.mu.Unlock()
+	defer c.unlock()
 	if c.transferred[ws] != "" {
 		return StandingTransferringAway
 	}
@@ -96,7 +96,7 @@ func (c *controller) Created(ws ids.WorkspaceID) {
 	was := c.created[ws]
 	c.created[ws] = true
 	joining := c.joiningMode
-	c.mu.Unlock()
+	c.unlock()
 	if !was {
 		c.logTransition(opJoin, ws, "serving_standing", "unknown", "owned", dlog.Context{
 			"created_here": true, "joining": joining,
@@ -109,7 +109,7 @@ func (c *controller) Created(ws ids.WorkspaceID) {
 // when no handover is in flight.
 func (c *controller) SuccessorAddress() string {
 	c.mu.Lock()
-	defer c.mu.Unlock()
+	defer c.unlock()
 	if c.successor == "" && c.handover != nil {
 		return c.handover.servedSuccessor
 	}
@@ -124,7 +124,7 @@ func (c *controller) SuccessorAddress() string {
 // anything, so the arm names none and a client waits for the adoption.
 func (c *controller) IncumbentAddress() string {
 	c.mu.Lock()
-	defer c.mu.Unlock()
+	defer c.unlock()
 	if !c.joiningMode {
 		return ""
 	}
@@ -142,7 +142,7 @@ func (c *controller) recordTransfer(ws ids.WorkspaceID, successor string) {
 	previous := c.transferred[ws]
 	c.transferred[ws] = successor
 	c.successor = successor
-	c.mu.Unlock()
+	c.unlock()
 	c.logTransition(opTransfer, ws, "serving_standing", previous, successor, nil)
 	c.log.Debug(opTransfer, "the workspace's serving standing is transferring_away", dlog.Context{
 		"workspace": string(ws), "successor": successor,
@@ -159,7 +159,7 @@ func (c *controller) untransfer(ws ids.WorkspaceID) (wasTransferred bool) {
 	delete(c.transferred, ws)
 	e, armed := c.rendezvous[ws]
 	delete(c.rendezvous, ws)
-	c.mu.Unlock()
+	c.unlock()
 	if armed {
 		e.settle(ErrReclaimed)
 	}
@@ -180,6 +180,30 @@ func (c *controller) untransfer(ws ids.WorkspaceID) (wasTransferred bool) {
 // daemon that may not serve their workspace.
 func (c *controller) ServesIntake() bool {
 	c.mu.Lock()
-	defer c.mu.Unlock()
+	defer c.unlock()
+	return c.servesIntakeLocked()
+}
+
+// servesIntakeLocked is ServesIntake under the held lock.
+func (c *controller) servesIntakeLocked() bool {
 	return !c.stillJoiningLocked() && c.handover == nil
+}
+
+// IntakeChanged implements Controller.
+func (c *controller) IntakeChanged() <-chan struct{} {
+	c.mu.Lock()
+	defer c.unlock()
+	return c.intakeChanged
+}
+
+// unlock releases mu, first signaling a change of ServesIntake's answer that
+// the critical section made: the one place intake waiters are told, so every
+// mutation of the fields the answer reads tells them.
+func (c *controller) unlock() {
+	if serves := c.servesIntakeLocked(); serves != c.servesIntake {
+		c.servesIntake = serves
+		close(c.intakeChanged)
+		c.intakeChanged = make(chan struct{})
+	}
+	c.mu.Unlock()
 }

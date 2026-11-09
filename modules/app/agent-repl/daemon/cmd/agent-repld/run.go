@@ -18,6 +18,8 @@ import (
 	"agent-repld/internal/envc"
 	"agent-repld/internal/gitclient"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/inflight"
+	"agent-repld/internal/kernelevent"
 	"agent-repld/internal/pprofsurface"
 	"agent-repld/internal/procmetrics"
 	"agent-repld/internal/restarttiming"
@@ -92,10 +94,6 @@ type hooks struct {
 	// refuses a held claim on sight, so a suite proving the exclusivity ruling
 	// does not wait out an incumbent that is never going to depart.
 	ClaimWait time.Duration
-	// StateCheckEvery is the cadence of the serving daemon's check that its
-	// state root, daemon.lock and daemon.addr are still there; zero means
-	// stateRootCheckEvery.
-	StateCheckEvery time.Duration
 	// Started is when this process started, and Now reads the clock; the
 	// boot's phases are timed between them (restarttiming.BootTimer). Both
 	// REQUIRED.
@@ -478,10 +476,10 @@ func run(ctx context.Context, opts options, h hooks) error {
 	// the handover's last transfer both end the process through it.
 	serving, stopServing := context.WithCancel(ctx)
 	defer stopServing()
-	go func() {
+	inflight.Standing(func() {
 		<-serving.Done()
 		teardown.begin(time.Now())
-	}()
+	})
 	// WHY IT ENDED is recorded by whoever ends it, as a typed reason: only a
 	// state-root loss stops the shims on the way out (see standDownShims).
 	var ended standDownRecord
@@ -656,9 +654,9 @@ func run(ctx context.Context, opts options, h hooks) error {
 	// as an orderly one. It joins with the loops above.
 	loops.Go("state_root_watch", func() {
 		_ = rootWatch{
-			verify: claim.Verify,
-			every:  h.StateCheckEvery,
-			log:    log,
+			verify:  claim.Verify,
+			changes: kernelevent.FollowPaths(rootWatchPaths(layout.Dir(), layout.DaemonAddr())...),
+			log:     log,
 			standDown: func(cause error) {
 				ended.record(standDownStateRootLost, cause)
 				stopServing()
@@ -768,6 +766,7 @@ func reconcile(ctx context.Context, log dlog.Logger, sequence boot.Sequence, bou
 		err    error
 	}
 	finished := make(chan outcome, 1)
+	// inflight: joined: the function that starts it waits for it.
 	go func() {
 		report, err := sequence.Run(ctx)
 		finished <- outcome{report: report, err: err}
@@ -917,6 +916,7 @@ func serve(ctx context.Context, l net.Listener, h http.Handler, exit serveExit) 
 	// open until their bytes are on the socket. A handler returning is not its
 	// answer leaving, and neither is the request context's cancellation — see
 	// server.WriteBarrier.
+	// inflight: joined: the function that starts it waits for it.
 	go func() { done <- srv.Serve(gate.Listener(l)) }()
 	select {
 	case err := <-done:
@@ -1261,6 +1261,10 @@ func (w *addrWithdrawal) finish() {
 // cannot spend the exit's own budget on top of it.
 const writesQuietBound = 250 * time.Millisecond
 
+// testBarrierEnv is set to "1" by the integration harness for every daemon it
+// starts; it is what serves the test barrier (server.Deps.TestBarrier).
+const testBarrierEnv = "AGENT_REPL_TEST_BARRIER"
+
 // loopJoinBound is how long the exit waits for the background loops to leave
 // after their serving context ended. Every loop is a ticker whose iteration is
 // itself bounded, so this is not a shutdown budget: it covers one in-flight
@@ -1324,11 +1328,11 @@ func (r *runningLoops) Go(name string, run func()) {
 	r.running[name]++
 	r.mu.Unlock()
 	r.wg.Add(1)
-	go func() {
+	inflight.Standing(func() {
 		defer r.wg.Done()
 		defer r.left(name)
 		run()
-	}()
+	})
 }
 
 func (r *runningLoops) left(name string) {
@@ -1358,6 +1362,7 @@ func (r *runningLoops) outstanding() []string {
 // is blocked in.
 func joinBackgroundLoops(loops *runningLoops, bound time.Duration, log dlog.Logger) {
 	left := make(chan struct{})
+	// inflight: joined: the function that starts it waits for it.
 	go func() {
 		loops.wg.Wait()
 		close(left)

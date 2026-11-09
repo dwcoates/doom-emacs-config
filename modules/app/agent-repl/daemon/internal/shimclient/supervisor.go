@@ -15,6 +15,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/envc"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/inflight"
 )
 
 // The spawn environment's own names, beside envc's four contracts. They are
@@ -415,7 +416,7 @@ func (s *supervisor) Spawn(ctx context.Context, spec Spec) (Client, error) {
 		spec.Spawned(cmd.Process.Pid)
 	}
 	openGate(log, opener, cmd.Process.Pid)
-	go c.reap()
+	inflight.Standing(func() { c.reap() })
 
 	if err := c.awaitReady(ctx, readyR, s.readyBound); err != nil {
 		c.abandonBringUp(ctx, err)
@@ -454,6 +455,7 @@ func openGate(log dlog.Logger, opener *os.File, pid int) {
 func (c *client) awaitReady(ctx context.Context, ready io.ReadCloser, bound time.Duration) error {
 	start := time.Now()
 	read := make(chan error, 1)
+	// inflight: joined: the function that starts it waits for it.
 	go func() {
 		var b [1]byte
 		n, err := ready.Read(b[:])
@@ -750,7 +752,7 @@ func (c *client) bringUp(parent context.Context) error {
 		frames, errs := recvLoop(stream, c.monitorCtx.Done())
 		err = c.awaitDiagnostics(parent, frames, errs)
 		if err == nil {
-			go c.monitor(stream, frames, errs)
+			inflight.Standing(func() { c.monitor(stream, frames, errs) })
 			return nil
 		}
 		stream.Close()

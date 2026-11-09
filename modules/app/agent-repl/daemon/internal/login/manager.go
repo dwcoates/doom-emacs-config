@@ -13,6 +13,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/envc"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/inflight"
 )
 
 // guardSite is the name the vendor guard records for this call site.
@@ -98,7 +99,7 @@ func (m *manager) Open(ctx context.Context, ws ids.WorkspaceID) (string, error) 
 	// Told BEFORE the pump starts, under the lock the exit's forget takes, so
 	// the observer always hears the opening before the ending.
 	m.observer.LoginOpened(configDir)
-	go sess.pump()
+	inflight.Standing(func() { sess.pump() })
 
 	m.log.Info("daemon.login.open", "login terminal opened", dlog.Context{
 		"workspace":  string(ws),

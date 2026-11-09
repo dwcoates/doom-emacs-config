@@ -32,6 +32,7 @@ import (
 	"agent-repld/internal/health"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/imageorigin"
+	"agent-repld/internal/inflight"
 	"agent-repld/internal/login"
 	"agent-repld/internal/merge"
 	"agent-repld/internal/prompthandler"
@@ -53,6 +54,13 @@ import (
 // than a constructor argument list so a wave-2 agent adding a handler adds a
 // field here and nowhere else.
 type Deps struct {
+	// TestBarrier serves the test barrier (AwaitIdle): set only for a daemon
+	// a test harness started (AGENT_REPL_TEST_BARRIER=1), which every other
+	// daemon refuses.
+	TestBarrier bool
+	// InFlight is the work count the barrier waits on; nil is
+	// inflight.Default, the daemon's one tracker.
+	InFlight *inflight.Tracker
 	// Instance is this daemon process's identity, for serving ownership.
 	Instance ids.InstanceID
 	// Tests runs a workspace's test script for RunTests (scriptrunner).
@@ -289,6 +297,10 @@ type Server interface {
 type server struct {
 	deps Deps
 	log  dlog.Logger
+
+	// frames counts every accepted standing stream's written frames, for the
+	// test barrier (AwaitIdle).
+	frames streamFrames
 
 	mux http.Handler
 
@@ -654,11 +666,14 @@ func New(deps Deps) (Server, error) {
 	// view's other publish sites, so the server follows the feed's own stream
 	// of them for its whole life. Subscribed before New returns, so no move
 	// after construction is missed.
-	go s.followHostAsks(life, deps.Feed.WatchHostAsks(life))
+	hostAsks, ackHostAsk := deps.Feed.WatchHostAsks(life)
+	inflight.Standing(func() { s.followHostAsks(life, hostAsks, ackHostAsk) })
 	// WHAT THE COMPOSER'S ENTRIES ANSWER moves with a report, the selection
 	// and a response's tree, so one follower restates it on each, subscribed
 	// before New returns (composer_entries.go).
-	go s.followComposerEntries(life, s.composerChanges.Subscribe(life), deps.Feed.WatchLabelChanges(life))
+	composerChanges, ackComposer := s.composerChanges.SubscribeCounted(life)
+	labelChanges, ackLabel := deps.Feed.WatchLabelChanges(life)
+	inflight.Standing(func() { s.followComposerEntries(life, composerChanges, ackComposer, labelChanges, ackLabel) })
 
 	mux := http.NewServeMux()
 	path, handler := agentreplv1connect.NewAgentReplHandler(&requestLoggingServer{server: s})
@@ -669,7 +684,7 @@ func New(deps Deps) (Server, error) {
 	mux.Handle(imageorigin.Route, deps.ImageOrigin)
 	mux.Handle(chessboard.BundleRoute, deps.ChessWidgetBundle)
 	mux.Handle("/", s.assets())
-	s.mux = withAcceptWriter(mux)
+	s.mux = withAcceptWriter(mux, &s.frames)
 	return s, nil
 }
 

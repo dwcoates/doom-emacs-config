@@ -359,7 +359,7 @@ func TestNoMergeFactReachesAnyClientBeforeTheRequestingTurnEnds(t *testing.T) {
 	}
 
 	// Assert: nothing about the merge on the roster or the feed.
-	harness.ExpectNoPush(t, root, harness.ProbeWindow, "a merge row before the requesting turn ended")
+	harness.ExpectNoPush(t, root, "a merge row before the requesting turn ended")
 	r := awaitRoster(t, s.d, roster, "the roster", func(*frontendv1.WorkspaceRoster) bool { return true })
 	if row := rosterRow(r, s.f.ws.GetId()); row.GetMergeQueued() != nil || row.GetMerging() != nil {
 		t.Fatalf("the roster drew %v before the requesting turn ended", row.GetStatus())

@@ -124,7 +124,7 @@ func TestReselectingAWorkspaceProducesNoDuplicatePush(t *testing.T) {
 	f.selectWorkspace()
 
 	// Assert
-	harness.ExpectNoPush(t, roster, harness.ProbeWindow, "re-selecting the current workspace is a success that changes no view")
+	harness.ExpectNoPush(t, roster, "re-selecting the current workspace is a success that changes no view")
 }
 
 // TestSwitchingWorkspacesIsOneRosterPush pins that a switch reaches a roster
@@ -162,7 +162,7 @@ func TestSwitchingWorkspacesIsOneRosterPush(t *testing.T) {
 	if got.GetCurrent().GetWorkspace().GetId() != fb.ws.GetId() {
 		t.Fatalf("the switch's push names current %v, want B %s", got.GetCurrent(), fb.ws.GetId())
 	}
-	harness.ExpectNoPush(t, roster, harness.ProbeWindow, "a switch is exactly one roster push")
+	harness.ExpectNoPush(t, roster, "a switch is exactly one roster push")
 }
 
 // TestPerWorkspaceRpcRefusesAnUnknownWorkspace asserts the refusal IN BAND.

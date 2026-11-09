@@ -6,6 +6,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/inflight"
 )
 
 // ErrWatcherClosed is what a wait answers when the watcher was torn down under
@@ -377,8 +378,8 @@ func (w *watcher) freeEdgeLocked(workEnded bool) {
 		"state": "busy", "before": true, "after": false, "work_ended": workEnded,
 	})
 	w.dispatching.Add(1)
-	go func() {
+	inflight.Go(func() {
 		defer w.dispatching.Done()
 		w.sinks.Lifecycle.OnFree(w.ws, workEnded)
-	}()
+	})
 }

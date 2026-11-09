@@ -102,7 +102,12 @@ type store struct {
 	// keeper holds an in-memory handle's database for the handle's life
 	// (memory.go); nil for a file. Closed with the handle.
 	keeper io.Closer
-	path   string
+	// committed closes at the next commit a write of THIS handle makes, and
+	// is replaced by noteCommit: an in-memory database's Changes, which no
+	// other process can write (changes.go). Guarded by commitMu.
+	commitMu  sync.Mutex
+	committed chan struct{}
+	path      string
 	log    dlog.Logger
 	// canonicalDir is dirpath.Canonical, the spelling the open's directory
 	// reconciliation compares each row against (dirspelling.go). Injectable
@@ -567,6 +572,9 @@ func (s *store) write(ctx context.Context, op string, fields dlog.Context, fn fu
 		wrapped := fmt.Errorf("wsm: begin transaction: %w", err)
 		ctxend.Log(err, s.log.Info, s.log.Error, op, writeCancelledMessage, "could not begin the transaction", withError(fields, wrapped))
 		return wrapped
+	}
+	if err == nil {
+		s.noteCommit()
 	}
 	return err
 }

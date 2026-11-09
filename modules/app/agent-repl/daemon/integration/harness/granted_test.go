@@ -27,10 +27,8 @@ var suiteWallBound = regexp.MustCompile(`context\.WithTimeout\(|context\.WithDea
 // right clock for it.
 var wallBoundAllowed = map[string]map[string]string{
 	"harness/daemon.go": {
-		`AGENT_REPL_LOG_LEVEL_UNTIL=%d", time.Now().Add(5*time.Minute)`: "an instant handed to the daemon as configuration, not a bound on a wait",
-		`deadline := time.After(DefaultTimeout)`:                        "the coverage-only stand-down of strays, best effort and reporting nothing; a stray launchd has adopted is outside this binary's process tree",
-		`deadline := time.Now().Add(probe)`:                             "ExpectFileUnchanged's negative probe window: it is waited out, never a failure bound",
-		`for time.Now().Before(deadline) {`:                             "ExpectFileUnchanged's negative probe window: it is waited out, never a failure bound",
+		`AGENT_REPL_LOG_LEVEL_UNTIL=%d", time.Now().Add(5*time.Minute)`:            "an instant handed to the daemon as configuration, not a bound on a wait",
+		`ctx, cancel := context.WithTimeout(context.Background(), DefaultTimeout)`: "the coverage-only stand-down of strays, best effort and reporting nothing; a stray launchd has adopted is outside this binary's process tree",
 	},
 	"harness/procstate.go": {
 		`deadline := time.NewTimer(bound)`:     "awaitFrozen confirms a stray's SIGSTOP; a stray launchd has adopted is outside this binary's process tree",
@@ -38,15 +36,6 @@ var wallBoundAllowed = map[string]map[string]string{
 	},
 	"harness/proctable_darwin.go": {
 		`deadline := time.NewTimer(freezeBound)`: "procArgs reads the argv of any process this user owns, most of them outside this binary's process tree",
-	},
-	"footer_topbar_test.go": {
-		`probe := time.NewTimer(harness.ProbeWindow)`: "a negative probe window: it is waited out, never a failure bound",
-	},
-	"support_session_test.go": {
-		`for time.Now().Before(deadline) {`: "expectRPCCount's negative probe window: it is waited out, never a failure bound",
-	},
-	"harness/watch.go": {
-		`timer := time.NewTimer(probe)`: "firstPushMatching's negative probe window: it is waited out, never a failure bound",
 	},
 }
 

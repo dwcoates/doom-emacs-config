@@ -78,7 +78,8 @@ func (h *harness) rootPublications() (*frontendv1.FeedHeld, <-chan Publication) 
 	if err != nil {
 		h.t.Fatalf("Tail: %v", err)
 	}
-	return held, tail.Publications(ctx)
+	pubs, _ := tail.Publications(ctx)
+	return held, pubs
 }
 
 // next reads the next publication, failing when none arrives.

@@ -14,6 +14,7 @@ import (
 	"sync"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/inflight"
 	"agent-repld/internal/outputtext"
 )
 
@@ -157,7 +158,8 @@ func (b *backend) join() *readying {
 	defer b.mu.Unlock()
 	if b.inflight == nil {
 		b.inflight = &readying{done: make(chan struct{})}
-		go b.ready(b.life, b.inflight)
+		life, readying := b.life, b.inflight
+		inflight.Go(func() { b.ready(life, readying) })
 	}
 	return b.inflight
 }

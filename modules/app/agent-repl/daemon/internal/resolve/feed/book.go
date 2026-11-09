@@ -13,6 +13,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/inflight"
 )
 
 // FEED PAGING ON DEMAND (docs/protobuf-design/feed-paging-on-demand.md).
@@ -570,7 +571,7 @@ func (r *resolver) kickWaitingFeed(s *wsState, f *feedState, addr feedid.Feed, w
 	r.logger(s.id).Info("daemon.feed.history_kick", why,
 		dlog.Context{"feed": f.key, "agent": agent.GetValue()})
 	ws := s.id
-	go func() {
+	inflight.Go(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), historyKickBound)
 		defer cancel()
 		if _, err := r.loadPushed(ctx, ws, addr, true); err != nil {
@@ -578,7 +579,7 @@ func (r *resolver) kickWaitingFeed(s *wsState, f *feedState, addr feedid.Feed, w
 				"the newest page a waiting reader needed could not be loaded; its next open reads it again",
 				dlog.Context{"feed": f.key, "cause": err.Error()})
 		}
-	}()
+	})
 }
 
 // loadPushed loads ADDR's newest (NEWEST) or next older page for no reader's

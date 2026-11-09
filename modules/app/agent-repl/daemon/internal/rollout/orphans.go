@@ -9,6 +9,7 @@ import (
 	"agent-repld/internal/bringup"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/inflight"
 	"agent-repld/internal/sessionlock"
 	"agent-repld/internal/wsm"
 )
@@ -61,7 +62,7 @@ func (c *controller) recoverOrphans(fields dlog.Context) {
 	for ws := range c.joining {
 		handedOver[ws] = true
 	}
-	c.mu.Unlock()
+	c.unlock()
 
 	var orphans []ids.WorkspaceID
 	var sessionless []wsm.Workspace
@@ -109,10 +110,10 @@ func (c *controller) recoverOrphans(fields dlog.Context) {
 		dlog.Merge(fields, dlog.Context{"workspaces": len(orphans)}))
 	for _, ws := range orphans {
 		c.stragglerAdoptions.Add(1)
-		go func(ws ids.WorkspaceID) {
+		inflight.Go(func() {
 			defer c.stragglerAdoptions.Done()
 			c.recoverOrphan(lifetime, ws, dlog.Merge(fields, dlog.Context{"workspace": string(ws)}))
-		}(ws)
+		})
 	}
 }
 
@@ -155,10 +156,11 @@ func (c *controller) standDownWithheldInert(ctx context.Context, pending []wsm.W
 	}
 	for _, ws := range withheld {
 		c.stragglerAdoptions.Add(1)
-		go func(ws ids.WorkspaceID) {
+		inflight.Go(func() {
+			ws := ws.ID
 			defer c.stragglerAdoptions.Done()
 			c.standDownInert(ctx, ws, dlog.Merge(fields, dlog.Context{"workspace": string(ws)}))
-		}(ws.ID)
+		})
 	}
 }
 

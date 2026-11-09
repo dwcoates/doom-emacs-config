@@ -17,6 +17,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/inflight"
 	"agent-repld/internal/resolve/footer"
 	"agent-repld/internal/wsm"
 )
@@ -1104,7 +1105,7 @@ func (o *orchestrator) kick(repo wsm.RepoKey) {
 	o.mu.Unlock()
 	o.extendChainAsync(repo)
 	o.live.Add(1)
-	go func() {
+	inflight.Standing(func() {
 		defer o.live.Done()
 		// admitted counts what this burst ran, and the burst's own terminal
 		// record carries it. THE RECORD IS THE END OF THE WHOLE MERGE, not of
@@ -1147,7 +1148,7 @@ func (o *orchestrator) kick(repo wsm.RepoKey) {
 			}
 			admitted++
 		}
-	}()
+	})
 }
 
 // pumpOnce admits and runs at most one merge for a repository, and returns once

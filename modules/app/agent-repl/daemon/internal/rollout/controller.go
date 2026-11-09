@@ -47,7 +47,15 @@ type controller struct {
 	deps Deps
 	log  dlog.Logger
 
+	// mu guards every field below it. It is released ONLY through unlock,
+	// which is where a change of ServesIntake's answer is signaled, so no
+	// mutation can change the answer without its waiters being told.
 	mu sync.Mutex
+	// servesIntake is ServesIntake's answer as of the last unlock, and
+	// intakeChanged closes when the next unlock finds it changed
+	// (IntakeChanged).
+	servesIntake  bool
+	intakeChanged chan struct{}
 	// rendezvous is the per-workspace adopt ledger, armed either by this
 	// daemon's own announcement (the outgoing side, so ExpectedParticipants can
 	// answer) or by the intent manifest read at Join (the incoming side).
@@ -187,6 +195,10 @@ type entry struct {
 	// adopting this headless workspace, so a later read does not adopt it a
 	// second time.
 	adoptionClaimed bool
+	// retrying records that a failed adoption's retry (retryAdoption) owns
+	// the workspace: it, and nothing else, claims it again, so a look that
+	// claims every armed workspace (claimArmed) leaves it to the retry.
+	retrying bool
 	// adopted records that the workspace is owned, so a later call succeeds
 	// immediately rather than re-adopting.
 	adopted bool
@@ -222,6 +234,14 @@ func (e *entry) settle(err error) {
 	}
 	e.failed = err
 	close(e.done)
+}
+
+// claim takes the entry's adoption claim and begins its run, as ONE step: a
+// participant that finds the workspace claimed waits on this run's
+// completion, never on an earlier failed run's, whose outcome the run clears.
+func (e *entry) claim() {
+	e.adoptionClaimed = true
+	e.beginAdoption()
 }
 
 // beginAdoption latches the entry for ONE adoption run and, when an earlier
@@ -274,7 +294,7 @@ func (e *entry) satisfied() bool {
 // kernel lock alone.
 func (c *controller) ExpectedParticipants(ws ids.WorkspaceID) int {
 	c.mu.Lock()
-	defer c.mu.Unlock()
+	defer c.unlock()
 	e, ok := c.rendezvous[ws]
 	if !ok {
 		return 0

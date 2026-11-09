@@ -13,6 +13,8 @@ import (
 
 	"agent-repld/internal/atomicfile"
 	"agent-repld/internal/childproc"
+	"agent-repld/internal/inflight"
+	"agent-repld/internal/kernelevent"
 )
 
 // JoiningFlag is the successor's binding argv spelling. Go's flag package
@@ -103,11 +105,6 @@ type ProcessSpawner struct {
 	// daemon's own flag parse builds it (agent-repld's parseFlags), so a
 	// boot flag is excluded by where it is declared, not by a strip list.
 	Argv []string
-	// Poll is how often the report file is checked. It is a field so a test
-	// drives it, and it is a POLL rather than a watch because the report is a
-	// single file written once: a filesystem watch would be more machinery for
-	// the same answer.
-	Poll time.Duration
 	// Timeout bounds the wait. A successor that never reports is a failed
 	// handover, and nothing is announced.
 	Timeout time.Duration
@@ -121,9 +118,6 @@ type ProcessSpawner struct {
 	ReapBound time.Duration
 	// Probe asks a reported address for a health answer; see Successor.Ready.
 	Probe HealthProbe
-	// ProbeEvery and ProbeAttempt are the readiness wait's cadence and the
-	// bound on one probe.
-	ProbeEvery, ProbeAttempt time.Duration
 }
 
 // The production spawner's stop windows.
@@ -140,14 +134,10 @@ func NewProcessSpawner(exe, stateDir string, argv []string) *ProcessSpawner {
 		Exe:       exe,
 		StateDir:  stateDir,
 		Argv:      argv,
-		Poll:      50 * time.Millisecond,
 		Timeout:   30 * time.Second,
 		StopGrace: DefaultSuccessorStopGrace,
 		ReapBound: DefaultSuccessorReapBound,
-
-		Probe:        DaemonHealthProbe,
-		ProbeEvery:   readyProbeEvery,
-		ProbeAttempt: readyAttemptBound,
+		Probe:     DaemonHealthProbe,
 	}
 }
 
@@ -207,13 +197,11 @@ func (s *ProcessSpawner) Spawn(ctx context.Context, incumbentAddress string) (Su
 		return nil, fmt.Errorf("rollout: start the successor %s: %w", s.Exe, err)
 	}
 	child := &processSuccessor{
-		process:      cmd.Process,
-		exited:       make(chan struct{}),
-		stopGrace:    s.StopGrace,
-		reapBound:    s.ReapBound,
-		probe:        s.Probe,
-		probeEvery:   s.ProbeEvery,
-		probeAttempt: s.ProbeAttempt,
+		process:   cmd.Process,
+		exited:    make(chan struct{}),
+		stopGrace: s.StopGrace,
+		reapBound: s.ReapBound,
+		probe:     s.Probe,
 	}
 	// The successor OUTLIVES this process by design, so nothing blocks on its
 	// exit; this goroutine only reaps it and marks the reap, which is what a
@@ -223,15 +211,19 @@ func (s *ProcessSpawner) Spawn(ctx context.Context, incumbentAddress string) (Su
 	// it: a successor that ends before it proves it is serving is reported
 	// with it (Ready). It is written before exited closes, so every reader
 	// that has seen the close sees it.
-	go func() {
+	inflight.Standing(func() {
 		child.waitErr = cmd.Wait()
 		close(child.exited)
-	}()
+	})
 
 	deadline := time.NewTimer(s.Timeout)
 	defer deadline.Stop()
-	poll := time.NewTicker(s.Poll)
-	defer poll.Stop()
+	// THE REPORT IS WATCHED, NEVER LOOKED FOR ON A TIMER: the state root's
+	// change is the report renamed into place (atomicfile.Replace). The
+	// watch is taken before the first read, so a report written in between
+	// is seen.
+	reports, stopWatching := kernelevent.Follow(ctx, s.StateDir, JoiningAddrPath(s.StateDir))
+	defer stopWatching()
 	// reaped is set once the successor has exited. A REAPED successor has
 	// written everything it ever will, so the read that follows is the final
 	// answer, not a race: a report written before the exit is still its
@@ -259,7 +251,10 @@ func (s *ProcessSpawner) Spawn(ctx context.Context, incumbentAddress string) (Su
 			return child, fmt.Errorf("rollout: the successor did not report an address within %s", s.Timeout)
 		case <-child.exited:
 			reaped = true
-		case <-poll.C:
+		case err := <-reports:
+			if err != nil {
+				return child, fmt.Errorf("rollout: watch for the successor's address report: %w", err)
+			}
 		}
 	}
 }
@@ -284,7 +279,7 @@ func (s *ProcessSpawner) SpawnReplacement(_ context.Context) (int, error) {
 	}
 	// The wait status is the replacement's own exit, which its own run log
 	// records; this process has exited long before it could act on it.
-	go func() { _ = cmd.Wait() }()
+	inflight.Standing(func() { _ = cmd.Wait() })
 	return cmd.Process.Pid, nil
 }
 
@@ -299,8 +294,7 @@ type processSuccessor struct {
 	stopGrace time.Duration
 	reapBound time.Duration
 
-	probe                    HealthProbe
-	probeEvery, probeAttempt time.Duration
+	probe HealthProbe
 	// waitErr is the reap's answer, readable once exited has closed.
 	waitErr error
 }
@@ -317,7 +311,7 @@ func (p *processSuccessor) Ready(ctx context.Context) error {
 	if p.probe == nil {
 		return fmt.Errorf("rollout: the successor (pid %d) has no health probe to prove it is serving", p.process.Pid)
 	}
-	return awaitAnswer(ctx, p.probe, p.address, p.exited, p.exitError, p.probeEvery, p.probeAttempt)
+	return awaitAnswer(ctx, p.probe, p.address, p.exited, p.exitError)
 }
 
 // exitError renders the reaped exit. Called only after exited has closed.

@@ -13,6 +13,7 @@ import (
 
 	"agent-repld/internal/buildid"
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/kernelevent"
 	"agent-repld/internal/restarttiming"
 )
 
@@ -42,12 +43,11 @@ type Launchd interface {
 	Bootstrap(ctx context.Context, plist string) error
 }
 
-// ServiceWindows bound a service restart's waits. They are polls because the
-// facts they wait on — launchd's view of a label, a socket file appearing, a
-// log growing — are another process's and announce nothing.
+// ServiceWindows bound a service restart's waits. Each is a FAILURE BOUND,
+// never a cadence: every wait ends on the kernel's own report (a process's
+// exit, the socket's directory or the store's log changing), and a window
+// only says how long that report may take before the step is a failure.
 type ServiceWindows struct {
-	// Poll is how often a wait looks again.
-	Poll time.Duration
 	// Stall is how long the store may go without writing a byte to its log
 	// while its socket is still absent before it is called wedged. A boot that
 	// is visibly working resets it.
@@ -56,9 +56,9 @@ type ServiceWindows struct {
 	Max time.Duration
 }
 
-// DefaultServiceWindows are the ported deploy chain's bounds: a 1s look, a 15s
-// stall budget, a 180s ceiling.
-var DefaultServiceWindows = ServiceWindows{Poll: time.Second, Stall: 15 * time.Second, Max: 180 * time.Second}
+// DefaultServiceWindows are the ported deploy chain's bounds: a 15s stall
+// budget and a 180s ceiling.
+var DefaultServiceWindows = ServiceWindows{Stall: 15 * time.Second, Max: 180 * time.Second}
 
 // Restarter restarts the store and the sidecar in the RECORDED SAFE ORDER.
 //
@@ -96,6 +96,10 @@ type Restarter struct {
 	ReportDir string
 	// Alive reports whether a process is running; nil is the kernel's answer.
 	Alive func(pid int) bool
+	// ProcessExit waits for a process's exit, until ctx ends; nil is the
+	// kernel's own exit event (kernelevent.WaitExit). A process already gone
+	// answers at once.
+	ProcessExit func(ctx context.Context, pid int) error
 	// Restarts records how long each store and sidecar restart took
 	// (restarttiming.ServiceRestart). REQUIRED; runtimemetrics.Surface is
 	// the production one.
@@ -396,9 +400,11 @@ func (r *Restarter) restartSidecar(ctx context.Context) error {
 	return nil
 }
 
-// stopSidecar boots the sidecar out and waits until launchd no longer holds it.
+// stopSidecar boots the sidecar out and waits for its process's exit, the
+// kernel's report that it left; launchd, which removed the label in the
+// bootout, must then no longer hold it.
 func (r *Restarter) stopSidecar(ctx context.Context, fields dlog.Context) error {
-	loaded, _, err := r.Launchd.Print(ctx, SidecarLabel)
+	loaded, pid, err := r.Launchd.Print(ctx, SidecarLabel)
 	if err != nil {
 		r.failed("could not read the sidecar's launchd state; nothing was stopped", fields, err)
 		return fmt.Errorf("deploy: read %s: %w", SidecarLabel, err)
@@ -407,88 +413,147 @@ func (r *Restarter) stopSidecar(ctx context.Context, fields dlog.Context) error 
 		r.Log.Info(opServices, "the sidecar is already stopped", fields)
 		return nil
 	}
+	fields = dlog.Merge(fields, dlog.Context{"pid": pid})
 	r.Log.Info(opServices, "booting the sidecar out before the store restarts", fields)
 	if err := r.Launchd.Bootout(ctx, SidecarLabel); errors.Is(err, ErrServiceNotLoaded) {
 		// THE SIDECAR LEFT BETWEEN THE LOOK AND THE BOOTOUT: the domain no
 		// longer holds it, which is the state the bootout was asked to reach.
 		r.Log.Info(opServices, "the sidecar had already left the user domain when it was booted out", dlog.WithCause(fields, err))
 	} else if err != nil {
-		// A bootout that errs may still have taken effect; the wait below is
-		// the authority on whether it did.
-		r.Log.Warn(opServices, "the sidecar bootout answered an error; waiting on launchd's own view", dlog.WithCause(fields, err))
+		// A bootout that errs may still have taken effect; the exit and
+		// launchd's view below are the authority on whether it did.
+		r.Log.Warn(opServices, "the sidecar bootout answered an error; waiting on its process's exit", dlog.WithCause(fields, err))
 	}
-	deadline := r.Clock.Now().Add(r.Windows.Max)
-	for {
-		loaded, _, err := r.Launchd.Print(ctx, SidecarLabel)
-		if err != nil {
-			r.failed("could not read the sidecar's launchd state while stopping it", fields, err)
-			return fmt.Errorf("deploy: read %s: %w", SidecarLabel, err)
+	if pid != 0 {
+		if err := r.awaitExit(ctx, pid); err != nil {
+			if ctx.Err() == nil {
+				r.Log.Error(opServices, "the sidecar's process did not exit within the upper bound; the store was NOT kickstarted",
+					dlog.Merge(fields, dlog.Context{"max": r.Windows.Max.String(), "cause": err.Error()}))
+			} else {
+				r.failed("the sidecar's stop ended with its context", fields, ctx.Err())
+			}
+			return fmt.Errorf("deploy: %s (pid %d) did not exit: %w", SidecarLabel, pid, err)
 		}
-		if !loaded {
-			r.Log.Info(opServices, "the sidecar is stopped", fields)
-			return nil
-		}
-		if !r.Clock.Now().Before(deadline) {
-			r.Log.Error(opServices, "the sidecar did not leave the user domain within the upper bound; the store was NOT kickstarted",
-				dlog.Merge(fields, dlog.Context{"max": r.Windows.Max.String()}))
-			return fmt.Errorf("deploy: %s did not leave the user domain within %s", SidecarLabel, r.Windows.Max)
-		}
-		if err := r.wait(ctx); err != nil {
-			return err
-		}
+	}
+	loaded, _, err = r.Launchd.Print(ctx, SidecarLabel)
+	if err != nil {
+		r.failed("could not read the sidecar's launchd state once it stopped", fields, err)
+		return fmt.Errorf("deploy: read %s: %w", SidecarLabel, err)
+	}
+	if loaded {
+		r.Log.Error(opServices, "launchd still holds the sidecar after its bootout and its process's exit; the store was NOT kickstarted", fields)
+		return fmt.Errorf("deploy: launchd still holds %s after its bootout", SidecarLabel)
+	}
+	r.Log.Info(opServices, "the sidecar is stopped", fields)
+	return nil
+}
+
+// awaitExit waits for pid's exit, bounded by the upper bound.
+func (r *Restarter) awaitExit(ctx context.Context, pid int) error {
+	waitCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	exited := make(chan error, 1)
+	// inflight: joined: the function that starts it waits for it.
+	go func() { exited <- r.processExit()(waitCtx, pid) }()
+	select {
+	case err := <-exited:
+		return err
+	case <-r.Clock.After(r.Windows.Max):
+		cancel()
+		<-exited
+		return fmt.Errorf("no exit within %s", r.Windows.Max)
 	}
 }
 
-// awaitStoreSocket waits ON THE SERVICE, NOT ON A STOPWATCH: while the store
-// is alive and its log is advancing, a boot that is slower than any constant
-// (a nuked database being replaced) is still working. It ends on the socket,
-// or on one of three loud terminals — the store died (launchd reports no
-// pid), it is wedged (its log has not grown for the stall budget), or it is
-// past the upper bound.
+// processExit is ProcessExit, defaulting to the kernel's exit event.
+func (r *Restarter) processExit() func(ctx context.Context, pid int) error {
+	if r.ProcessExit != nil {
+		return r.ProcessExit
+	}
+	return kernelevent.WaitExit
+}
+
+// awaitStoreSocket waits ON THE SERVICE, NOT ON A STOPWATCH: it wakes on the
+// kernel's reports -- the socket's directory changing, the store's log
+// growing, the store's process exiting -- and a boot slower than any constant
+// (a nuked database being replaced) is still working while its log grows. It
+// ends on the socket, or on one of three loud terminals: the store died, it
+// is wedged (its log has not grown for the stall budget), or it is past the
+// upper bound. The two budgets are failure bounds; nothing here looks again
+// on a timer.
 func (r *Restarter) awaitStoreSocket(ctx context.Context, fields dlog.Context) error {
 	fields = dlog.Merge(fields, dlog.Context{"socket": r.StoreSocket, "store_log": r.StoreLog})
 	start := r.Clock.Now()
+	served := func() error {
+		r.Log.Info(opServices, "the store's socket is up", dlog.Merge(fields, dlog.Context{
+			"after": r.Clock.Now().Sub(start).String(),
+		}))
+		return nil
+	}
+	// THE WATCH IS TAKEN BEFORE THE FIRST LOOK, so a socket bound or a byte
+	// written in between is already reported: the socket's directory (the
+	// socket bound), the log's directory (the log made) and the log itself.
+	changed, stopWatching := kernelevent.Follow(ctx, filepath.Dir(r.StoreSocket), filepath.Dir(r.StoreLog), r.StoreLog)
+	defer stopWatching()
+	if socketExists(r.StoreSocket) {
+		return served()
+	}
+	_, pid, err := r.Launchd.Print(ctx, StoreLabel)
+	if err != nil {
+		r.failed("could not read the store's launchd state while it boots", fields, err)
+		return fmt.Errorf("deploy: read %s: %w", StoreLabel, err)
+	}
+	died := func() error {
+		// LOOK AGAIN BEFORE CALLING IT A DEATH: the socket can appear in the
+		// same instant the process is seen gone.
+		if socketExists(r.StoreSocket) {
+			return served()
+		}
+		r.Log.Error(opServices, "the store died before its socket appeared; the sidecar was NOT started again",
+			dlog.Merge(fields, dlog.Context{"last_words": r.storeLogTail()}))
+		return fmt.Errorf("deploy: %s died before %s appeared", StoreLabel, r.StoreSocket)
+	}
+	if pid == 0 {
+		return died()
+	}
+	waitCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	exited := make(chan error, 1)
+	// inflight: joined: the function that starts it waits for it.
+	go func() { exited <- r.processExit()(waitCtx, pid) }()
 	lastSize := r.storeLogSize()
-	progress := start
+	stall, max := r.Clock.After(r.Windows.Stall), r.Clock.After(r.Windows.Max)
 	for {
 		if socketExists(r.StoreSocket) {
-			r.Log.Info(opServices, "the store's socket is up", dlog.Merge(fields, dlog.Context{
-				"after": r.Clock.Now().Sub(start).String(),
-			}))
-			return nil
+			return served()
 		}
-		_, pid, err := r.Launchd.Print(ctx, StoreLabel)
-		if err != nil {
-			r.failed("could not read the store's launchd state while it boots", fields, err)
-			return fmt.Errorf("deploy: read %s: %w", StoreLabel, err)
-		}
-		if pid == 0 {
-			// LOOK AGAIN BEFORE CALLING IT A DEATH: the socket can appear in
-			// the same instant the pid is read.
-			if socketExists(r.StoreSocket) {
-				continue
+		select {
+		case <-ctx.Done():
+			r.failed("a service restart ended with its context", fields, ctx.Err())
+			return fmt.Errorf("deploy: service restart: %w", ctx.Err())
+		case err := <-exited:
+			if err != nil && ctx.Err() == nil {
+				r.Log.Error(opServices, "could not wait on the store's exit while it boots", dlog.WithCause(fields, err))
+				return fmt.Errorf("deploy: wait on %s (pid %d): %w", StoreLabel, pid, err)
 			}
-			r.Log.Error(opServices, "the store died before its socket appeared; the sidecar was NOT started again",
-				dlog.Merge(fields, dlog.Context{"last_words": r.storeLogTail()}))
-			return fmt.Errorf("deploy: %s died before %s appeared", StoreLabel, r.StoreSocket)
-		}
-		if size := r.storeLogSize(); size != lastSize {
-			lastSize = size
-			progress = r.Clock.Now()
-		}
-		now := r.Clock.Now()
-		if now.Sub(progress) >= r.Windows.Stall {
+			return died()
+		case err := <-changed:
+			if err != nil {
+				r.Log.Error(opServices, "the watch on the store's boot failed; the sidecar was NOT started again", dlog.WithCause(fields, err))
+				return fmt.Errorf("deploy: watch %s: %w", StoreLabel, err)
+			}
+			if size := r.storeLogSize(); size != lastSize {
+				lastSize = size
+				stall = r.Clock.After(r.Windows.Stall)
+			}
+		case <-stall:
 			r.Log.Error(opServices, "the store is wedged: no socket and nothing written for the stall budget; the sidecar was NOT started again",
 				dlog.Merge(fields, dlog.Context{"pid": pid, "stall": r.Windows.Stall.String(), "last_words": r.storeLogTail()}))
 			return fmt.Errorf("deploy: %s (pid %d) wrote nothing for %s and its socket never appeared", StoreLabel, pid, r.Windows.Stall)
-		}
-		if now.Sub(start) >= r.Windows.Max {
+		case <-max:
 			r.Log.Error(opServices, "the store's socket did not appear within the upper bound; the sidecar was NOT started again",
 				dlog.Merge(fields, dlog.Context{"pid": pid, "max": r.Windows.Max.String(), "last_words": r.storeLogTail()}))
 			return fmt.Errorf("deploy: %s did not appear within %s", r.StoreSocket, r.Windows.Max)
-		}
-		if err := r.wait(ctx); err != nil {
-			return err
 		}
 	}
 }
@@ -504,17 +569,6 @@ func (r *Restarter) failed(message string, fields dlog.Context, err error) {
 		return
 	}
 	r.Log.Error(opServices, message, dlog.WithCause(fields, err))
-}
-
-// wait is one poll interval on the injected clock, or the context's end.
-func (r *Restarter) wait(ctx context.Context) error {
-	select {
-	case <-ctx.Done():
-		r.failed("a service restart ended with its context", nil, ctx.Err())
-		return fmt.Errorf("deploy: service restart: %w", ctx.Err())
-	case <-r.Clock.After(r.Windows.Poll):
-		return nil
-	}
 }
 
 // storeLogSize is how much the store has written: a boot still emitting

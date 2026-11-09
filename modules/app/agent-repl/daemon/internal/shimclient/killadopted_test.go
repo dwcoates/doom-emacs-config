@@ -489,47 +489,6 @@ func TestKillOfAnAbsentAdoptedSocketKeepsTheAdoptedPid(t *testing.T) {
 	}
 }
 
-// TestProcessGoneReadsTheKernelsAnswer covers the observation both adopted
-// waits share, for a pid and for its group.
-func TestProcessGoneReadsTheKernelsAnswer(t *testing.T) {
-	// Arrange.
-	p := startPeer(t, 0)
-	tests := []struct {
-		name   string
-		target int
-		kill   bool
-		want   bool
-	}{
-		{name: "a running process", target: p.pid, want: false},
-		{name: "a running process group", target: -p.pid, want: false},
-		{name: "a process that has gone", target: p.pid, kill: true, want: true},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if tt.kill {
-				if err := syscall.Kill(-p.pid, syscall.SIGKILL); err != nil {
-					t.Fatalf("stop the peer: %v", err)
-				}
-				c := standingDownAdopted(p)
-				go c.awaitAdoptedExit(context.Background())
-				awaitExitInfo(t, c, 5*time.Second)
-				// THE EXIT IS PUBLISHED WHILE THE PEER MAY STILL BE A ZOMBIE:
-				// a group holding only its zombie is gone to the watch, and
-				// the reap is this test's own goroutine's (startPeer).
-				<-p.reaped
-			}
-
-			// Act.
-			got := processGone(tt.target)
-
-			// Assert.
-			if got != tt.want {
-				t.Fatalf("processGone(%d) = %v, want %v", tt.target, got, tt.want)
-			}
-		})
-	}
-}
-
 func TestAdoptedAlreadyGoneRecordsTheObservationAndAnInferredExit(t *testing.T) {
 	// Arrange
 	c := adoptedClientFor(filepath.Join(shortDir(t), "absent.sock"), 2*time.Second)
@@ -649,7 +608,7 @@ func TestKillOfAnAdoptedShimWhoseGroupHoldsOnlyItsZombieSucceeds(t *testing.T) {
 		signalled = append(signalled, sig)
 		return nil
 	}
-	c.groupGone = func(int) (bool, error) { return true, nil }
+	c.awaitGroup = func(context.Context, int) error { return nil }
 
 	// Act.
 	err := c.Kill(context.Background(), KillAttribution{Actor: "test", Reason: "merge teardown", Force: true})
@@ -691,7 +650,7 @@ func TestKillOfAnAdoptedShimWhoseGroupCannotBeProbedIsAnError(t *testing.T) {
 	p := startPeer(t, 0)
 	c := adoptedClientFor(p.uds, 2*time.Second)
 	c.signalGroupOf = func(int, syscall.Signal) error { return nil }
-	c.groupGone = func(int) (bool, error) { return false, errors.New("sysctl refused") }
+	c.awaitGroup = func(context.Context, int) error { return errors.New("sysctl refused") }
 
 	// Act.
 	err := c.Kill(context.Background(), KillAttribution{Actor: "test", Reason: "merge teardown", Force: true})
@@ -706,13 +665,18 @@ func TestKillOfAnAdoptedShimWhoseGroupCannotBeProbedIsAnError(t *testing.T) {
 }
 
 // TestAwaitAdoptedExitPublishesAGroupLeftWithOnlyItsZombie pins that the
-// exit watch reads a group the way the kill does (adoptedGroupGone): a group
+// exit watch reads a group the way the kill does (awaitAdoptedGroup): a group
 // holding only exited members is gone, without waiting on init's reap.
 func TestAwaitAdoptedExitPublishesAGroupLeftWithOnlyItsZombie(t *testing.T) {
 	// Arrange.
 	p := startPeer(t, 0)
 	c := standingDownAdopted(p)
-	c.groupGone = func(pgid int) (bool, error) { return pgid == p.pid, nil }
+	c.awaitGroup = func(_ context.Context, pgid int) error {
+		if pgid != p.pid {
+			return fmt.Errorf("awaited group %d, want the peer's %d", pgid, p.pid)
+		}
+		return nil
+	}
 
 	// Act.
 	go c.awaitAdoptedExit(context.Background())
@@ -730,7 +694,7 @@ func TestAwaitAdoptedExitRecordsAGroupItCannotRead(t *testing.T) {
 	// Arrange.
 	p := startPeer(t, 0)
 	c := standingDownAdopted(p)
-	c.groupGone = func(int) (bool, error) { return false, errors.New("sysctl refused") }
+	c.awaitGroup = func(context.Context, int) error { return errors.New("sysctl refused") }
 
 	// Act.
 	c.awaitAdoptedExit(context.Background())

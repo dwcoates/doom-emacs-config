@@ -219,6 +219,6 @@ func treeNeighbor(tree *frontendv1.ProseTree, label string, way NeighborWay) (ne
 // WatchLabelChanges yields every workspace whose root feed changed what an
 // entry can target: a response's tree drawn, changed or retired. It is the
 // server's cue to restate what the composer's entries target.
-func (r *resolver) WatchLabelChanges(ctx context.Context) <-chan ids.WorkspaceID {
-	return r.labelChanges.Subscribe(ctx)
+func (r *resolver) WatchLabelChanges(ctx context.Context) (<-chan ids.WorkspaceID, func()) {
+	return r.labelChanges.SubscribeCounted(ctx)
 }

@@ -11,6 +11,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/health"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/inflight"
 	"agent-repld/internal/restarttiming"
 	"agent-repld/internal/shimclient"
 	"agent-repld/internal/wsm"
@@ -598,7 +599,7 @@ func (c *controller) ShimReported(ws ids.WorkspaceID, build string) {
 	c.mu.Lock()
 	before, known := c.reported[ws]
 	c.reported[ws] = build
-	c.mu.Unlock()
+	c.unlock()
 	if known && before == build {
 		return
 	}
@@ -618,13 +619,13 @@ func (c *controller) ShimReported(ws ids.WorkspaceID, build string) {
 // joinable through staleChecks.
 func (c *controller) judgeStaleAsync(ws ids.WorkspaceID) {
 	c.staleChecks.Add(1)
-	go func() {
+	inflight.Go(func() {
 		defer c.staleChecks.Done()
 		ctx := c.lifetime(context.Background())
 		if _, err := c.checkStale(ctx, ws, c.takeoverForce(ws)); err != nil {
 			c.log.Error(opStaleness, "the reported shim build could not be judged", dlog.WithCause(dlog.Context{"workspace": string(ws)}, err))
 		}
-	}()
+	})
 }
 
 // forgetReported drops a workspace's reported shim build once the shim that
@@ -633,7 +634,7 @@ func (c *controller) forgetReported(ws ids.WorkspaceID) {
 	c.mu.Lock()
 	before, known := c.reported[ws]
 	delete(c.reported, ws)
-	c.mu.Unlock()
+	c.unlock()
 	if known {
 		c.logTransition(opStaleness, ws, "reported_shim_build", before, "", dlog.Context{"cause": "the reporting shim was stood down"})
 	}
@@ -643,7 +644,7 @@ func (c *controller) forgetReported(ws ids.WorkspaceID) {
 // once because the handover that brought it here was forced.
 func (c *controller) takeoverForce(ws ids.WorkspaceID) bool {
 	c.mu.Lock()
-	defer c.mu.Unlock()
+	defer c.unlock()
 	return c.forcedTakeover && c.joining[ws]
 }
 
@@ -672,7 +673,7 @@ func (c *controller) checkStale(ctx context.Context, ws ids.WorkspaceID, force b
 	}
 	c.mu.Lock()
 	reported, known := c.reported[ws]
-	c.mu.Unlock()
+	c.unlock()
 	if !known {
 		c.log.Debug(opStaleness, "the live shim has not reported its build yet; its report is judged when it arrives", fields)
 		return StaleCheck{}, nil
@@ -755,19 +756,19 @@ const (
 func (c *controller) claimStaleBounce(ws ids.WorkspaceID, reported string) staleClaim {
 	c.mu.Lock()
 	if c.staleInFlight[ws] {
-		c.mu.Unlock()
+		c.unlock()
 		return staleBounceInFlight
 	}
 	previous, seen := c.bouncedStamp[ws]
 	if seen && previous == reported {
-		c.mu.Unlock()
+		c.unlock()
 		c.logTransition(opStaleness, ws, "bounced_build_stamp", previous, previous,
 			dlog.Context{"changed": false})
 		return staleBounceAlreadyRan
 	}
 	c.bouncedStamp[ws] = reported
 	c.staleInFlight[ws] = true
-	c.mu.Unlock()
+	c.unlock()
 	c.logTransition(opStaleness, ws, "bounced_build_stamp", previous, reported,
 		dlog.Context{"changed": true})
 	return staleBounceClaimed
@@ -790,7 +791,7 @@ func (c *controller) settleStaleBounce(ws ids.WorkspaceID, err error) {
 	if err != nil {
 		delete(c.bouncedStamp, ws)
 	}
-	c.mu.Unlock()
+	c.unlock()
 	if err == nil {
 		c.judgeStaleAsync(ws)
 	}

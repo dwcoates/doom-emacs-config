@@ -18,6 +18,7 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/inflight"
 )
 
 // callTimeout bounds one CEE call: a widget resolution walks the whole game
@@ -128,10 +129,10 @@ func (b *Boards) Board(s Session) *frontendv1.FeedChessBoard {
 	if !e.resolving {
 		e.resolving = true
 		b.resolutions.Add(1)
-		go func() {
+		inflight.Go(func() {
 			defer b.resolutions.Done()
 			b.resolve(s)
-		}()
+		})
 	}
 	return bubble(headingFor(s), e.body)
 }

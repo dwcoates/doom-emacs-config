@@ -21,6 +21,8 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/inflight"
+	"agent-repld/internal/kernelevent"
 	"agent-repld/internal/procgroup"
 	"agent-repld/internal/shimsocket"
 )
@@ -121,11 +123,11 @@ type client struct {
 	// injects the answer a shim that exits between the peer read and the
 	// group read gives (killAdopted).
 	processGroup func(pid int) (int, error)
-	// signalGroupOf signals an adopted shim's process group and groupGone
-	// reads whether it holds no live process; nil is procgroup.Signal and
-	// procgroup.Gone. A test injects their failures (killAdopted).
+	// signalGroupOf signals an adopted shim's process group and awaitGroup
+	// waits for it to hold no live process; nil is procgroup.Signal and
+	// procgroup.AwaitGone. A test injects their failures (killAdopted).
 	signalGroupOf func(pgid int, sig syscall.Signal) error
-	groupGone     func(pgid int) (bool, error)
+	awaitGroup    func(ctx context.Context, pgid int) error
 
 	// lockProbe answers whether the workspace's kernel lock reads FREE. It is
 	// injected because sessionlock is shimclient's PEER, not its dependency;
@@ -546,13 +548,6 @@ func (c *client) awaitReap(ctx context.Context, pgid int, why string) error {
 	}
 }
 
-// adoptedGonePoll is how often an adopted process is re-checked for having
-// gone. It is a poll because the daemon is NOT its parent and therefore has no
-// wait(2) to block in; kill(pgid, 0) is the only observation available, and
-// 25ms is the same interval the rollout's adoption look uses for the same kind
-// of "somebody else's process changed state" question.
-const adoptedGonePoll = 25 * time.Millisecond
-
 // killAdopted stops a shim this daemon did not spawn: the successor's half of
 // a handover, and a crash boot's surviving process.
 //
@@ -718,53 +713,39 @@ func (c *client) signalAdoptedGroup(sig syscall.Signal, pgid int) error {
 	return nil
 }
 
-// awaitAdoptedGone polls until the process group holds nothing, or the bound
+// awaitAdoptedGone waits until the process group holds nothing, or the bound
 // expires, or the caller's context ends. It reports whether the group is gone.
 //
-// THE CALLER'S CONTEXT ENDS THE POLL, not the kill: whoever called has already
+// THE WAIT IS THE KERNEL'S EXIT EVENTS (procgroup.AwaitGone): the daemon is
+// not the shim's parent, so it has no wait(2) to block in, but it registers
+// for each member's exit.
+//
+// THE CALLER'S CONTEXT ENDS THE WAIT, not the kill: whoever called has already
 // sent the signal by the time this runs, so giving up here abandons an
 // OBSERVATION and never a process.
 func (c *client) awaitAdoptedGone(ctx context.Context, pgid int, bound time.Duration) bool {
-	deadline := time.Now().Add(bound)
-	poll := time.NewTicker(adoptedGonePoll)
-	defer poll.Stop()
-	for {
-		gone, err := c.adoptedGroupGone(pgid)
-		if err != nil {
-			c.log.Error("daemon.shimclient.kill", "could not read whether the adopted shim's process group is gone", dlog.Context{
-				"workspace_id": string(c.ws), "pgid": pgid, "error": err.Error(),
-			})
-			return false
-		}
-		if gone {
-			return true
-		}
-		if !time.Now().Before(deadline) {
-			return false
-		}
-		select {
-		case <-poll.C:
-		case <-ctx.Done():
-			return false
-		}
+	waitCtx, cancel := context.WithTimeout(ctx, bound)
+	defer cancel()
+	err := c.awaitAdoptedGroup()(waitCtx, pgid)
+	if err == nil {
+		return true
 	}
+	if waitCtx.Err() == nil {
+		c.log.Error("daemon.shimclient.kill", "could not read whether the adopted shim's process group is gone", dlog.Context{
+			"workspace_id": string(c.ws), "pgid": pgid, "error": err.Error(),
+		})
+	}
+	return false
 }
 
-// adoptedGroupGone is the one reading of whether an adopted shim's process
-// group holds no live process (procgroup.Gone): gone from the kernel, or left
-// with only exited members, whose reap is init's.
-func (c *client) adoptedGroupGone(pgid int) (bool, error) {
-	if c.groupGone != nil {
-		return c.groupGone(pgid)
+// awaitAdoptedGroup is the one wait on an adopted shim's process group
+// emptying (procgroup.AwaitGone): gone from the kernel, or left with only
+// exited members, whose reap is init's.
+func (c *client) awaitAdoptedGroup() func(context.Context, int) error {
+	if c.awaitGroup != nil {
+		return c.awaitGroup
 	}
-	return procgroup.Gone(pgid)
-}
-
-// processGone reports whether the kernel holds no process for target: a pid,
-// or a process group when negative. It is the one observation a daemon that is
-// not the process's parent has.
-func processGone(target int) bool {
-	return errors.Is(syscall.Kill(target, 0), syscall.ESRCH)
+	return procgroup.AwaitGone
 }
 
 // publishAdoptedKill records the death of a shim the daemon stopped but never
@@ -1009,6 +990,7 @@ func (c *client) killWithin(ctx context.Context, bound time.Duration, attr KillA
 	defer cancel()
 
 	done := make(chan error, 1)
+	// inflight: joined: the function that starts it waits for it.
 	go func() { done <- c.Kill(within, attr) }()
 
 	select {
@@ -1149,6 +1131,7 @@ func (c *client) openSupervisedSession(parent context.Context) (Stream[*shimv1.W
 	// A refused open on this ladder is an ORDINARY branch, not a warning: the
 	// shim's socket does not exist yet on the first attempt of every spawn.
 	streamCtx := context.WithValue(c.monitorCtx, quietOpenKey{}, true)
+	// inflight: joined: the function that starts it waits for it.
 	go func() {
 		stream, err := c.watchSession(streamCtx)
 		result <- opened{stream: stream, err: err}
@@ -1157,11 +1140,11 @@ func (c *client) openSupervisedSession(parent context.Context) (Stream[*shimv1.W
 	// An abandoned open still has to be closed when it eventually lands, or the
 	// stream it opened would outlive the supervisor that abandoned it.
 	abandon := func() {
-		go func() {
+		inflight.Go(func() {
 			if r := <-result; r.err == nil {
 				r.stream.Close()
 			}
-		}()
+		})
 	}
 
 	select {
@@ -1438,43 +1421,51 @@ func (c *client) awaitAdoptedExit(ctx context.Context) {
 		})
 		return
 	}
-	target := pid
+	group := false
 	if pgid, err := syscall.Getpgid(pid); err == nil && pgid == pid {
-		target = -pid
+		group = true
 	}
-	poll := time.NewTicker(adoptedGonePoll)
-	defer poll.Stop()
-	for {
-		gone := processGone(target)
-		if target < 0 {
-			var err error
-			if gone, err = c.adoptedGroupGone(pid); err != nil {
-				c.log.Error("daemon.shimclient.exit", "could not read whether the adopted shim's process group is gone; its exit is left to the socket or a kill", dlog.Context{
-					"workspace_id": string(c.ws), "pid": pid, "error": err.Error(),
-				})
-				return
-			}
-		}
-		if gone {
-			c.log.Debug("daemon.shimclient.exit", "the adopted shim's process is gone after the stand-down it was asked for", dlog.Context{
-				"workspace_id": string(c.ws), "pid": pid, "group": target < 0,
-			})
-			c.publishExit(ExitInfo{
-				PID:      pid,
-				Code:     -1,
-				Inferred: true,
-				Stderr:   "adopted shim: its process is gone; no wait status, the process was never this daemon's child",
-			})
-			return
-		}
+	// THE WAIT IS THE KERNEL'S EXIT EVENT for the pid, or for every member of
+	// the group it leads (procgroup.AwaitGone); it ends early when the client
+	// dies or ctx ends.
+	waitCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	// inflight: joined: the function that starts it waits for it.
+	go func() {
 		select {
-		case <-poll.C:
-		case <-ctx.Done():
-			return
 		case <-c.dead:
-			return
+			cancel()
+		case <-waitCtx.Done():
 		}
+	}()
+	var err error
+	if group {
+		err = c.awaitAdoptedGroup()(waitCtx, pid)
+	} else {
+		err = kernelevent.WaitExit(waitCtx, pid)
 	}
+	if waitCtx.Err() != nil {
+		return
+	}
+	if err != nil {
+		message := "could not wait on the adopted shim's exit; its exit is left to the socket or a kill"
+		if group {
+			message = "could not read whether the adopted shim's process group is gone; its exit is left to the socket or a kill"
+		}
+		c.log.Error("daemon.shimclient.exit", message, dlog.Context{
+			"workspace_id": string(c.ws), "pid": pid, "error": err.Error(),
+		})
+		return
+	}
+	c.log.Debug("daemon.shimclient.exit", "the adopted shim's process is gone after the stand-down it was asked for", dlog.Context{
+		"workspace_id": string(c.ws), "pid": pid, "group": group,
+	})
+	c.publishExit(ExitInfo{
+		PID:      pid,
+		Code:     -1,
+		Inferred: true,
+		Stderr:   "adopted shim: its process is gone; no wait status, the process was never this daemon's child",
+	})
 }
 
 // witnessAdoptedDeath reports whether a dial failure is EVIDENCE that an
@@ -1551,7 +1542,7 @@ func (c *client) deathError() error {
 func recvLoop[T any](stream Stream[T], done <-chan struct{}) (<-chan T, <-chan error) {
 	frames := make(chan T)
 	errs := make(chan error, 1)
-	go func() {
+	inflight.Standing(func() {
 		for {
 			frame, err := stream.Recv()
 			if err != nil {
@@ -1564,7 +1555,7 @@ func recvLoop[T any](stream Stream[T], done <-chan struct{}) (<-chan T, <-chan e
 				return
 			}
 		}
-	}()
+	})
 	return frames, errs
 }
 

@@ -35,28 +35,32 @@ func prelaunchControlSocket(d *harness.Daemon, ws *workspacev1.WorkspaceRef, gen
 	return base + ".n" + strconv.Itoa(gen) + ".sock.ctl"
 }
 
-// expectNoRPC asserts a shim received no request for `rpc` within the probe
-// window. It is a negative assertion, so it necessarily waits out a bound
-// rather than synchronizing on an event, mirroring harness.ExpectNoPush and
-// Daemon.ExpectFileUnchanged.
-func expectNoRPC(t *testing.T, s *harness.ShimControl, rpc string, probe time.Duration) {
+// expectNoRPC asserts a shim received no request for `rpc` from what the
+// test did (expectRPCCount).
+func expectNoRPC(t *testing.T, s *harness.ShimControl, rpc string) {
 	t.Helper()
-	expectRPCCount(t, s, rpc, 0, probe)
+	expectRPCCount(t, s, rpc, 0)
 }
 
-// expectRPCCount asserts a shim's total receipt count for rpc stays at want
-// throughout the probe window. Unlike expectNoRPC, it can observe that a
-// successor did not add a second stream to one the incumbent already opened.
-func expectRPCCount(t *testing.T, s *harness.ShimControl, rpc string, want int, probe time.Duration) {
+// expectRPCCount asserts a shim's total receipt count for rpc is want once
+// the daemon is idle: every call the daemon was going to make of the shim as a
+// consequence of what the test did has been answered (Daemon.AwaitIdle), so
+// the count can no longer move on its account. Unlike expectNoRPC, it can
+// observe that a successor did not add a second stream to one the incumbent
+// already opened.
+func expectRPCCount(t *testing.T, s *harness.ShimControl, rpc string, want int) {
 	t.Helper()
-	deadline := time.Now().Add(probe)
-	ticker := time.NewTicker(10 * time.Millisecond)
-	defer ticker.Stop()
-	for time.Now().Before(deadline) {
-		if got := s.Count(rpc); got != want {
-			t.Fatalf("%s count = %d, want %d throughout the probe window", rpc, got, want)
-		}
-		<-ticker.C
+	expectRPCCountAfter(t, s.Daemon().AwaitIdle, s, rpc, want)
+}
+
+// expectRPCCountAfter is expectRPCCount once BARRIER answers: the barrier of
+// whichever daemon serves the shim now, which after a handover is the
+// successor, not the daemon that spawned it.
+func expectRPCCountAfter(t *testing.T, barrier func() map[string]uint64, s *harness.ShimControl, rpc string, want int) {
+	t.Helper()
+	barrier()
+	if got := s.Count(rpc); got != want {
+		t.Fatalf("%s count = %d, want %d once the daemon is idle", rpc, got, want)
 	}
 }
 

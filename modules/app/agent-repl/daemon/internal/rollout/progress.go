@@ -45,7 +45,7 @@ func (c *controller) recordDeployTakeover(m Manifest) {
 	before := c.deployTakeover
 	c.deployTakeover = true
 	c.deployStartedAt, c.handoverStartedAt = m.DeployStartedAt, m.WrittenAt
-	c.mu.Unlock()
+	c.unlock()
 	if !before {
 		c.log.Info(opProgress, "the handover being joined is a deploy's; this daemon says updated once it has taken over", nil)
 	}
@@ -66,7 +66,7 @@ func (c *controller) finishDeployStory(deferred map[ids.WorkspaceID][]deployprog
 	deployStarted, handoverStarted := c.deployStartedAt, c.handoverStartedAt
 	c.deployTakeover = false
 	c.deployStartedAt, c.handoverStartedAt = time.Time{}, time.Time{}
-	c.mu.Unlock()
+	c.unlock()
 	if !deploy {
 		c.log.Debug(opProgress, "this takeover was no deploy's; there is no deploy story to finish", fields)
 		return

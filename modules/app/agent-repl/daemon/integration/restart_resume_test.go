@@ -50,7 +50,7 @@ func cutByCrashAndReopen(t *testing.T) (*fixture, *harness.ShimControl) {
 	if err := syscall.Kill(pid, syscall.SIGKILL); err != nil {
 		t.Fatalf("kill the fake shim %d: %v", pid, err)
 	}
-	harness.AwaitProcessGone(t, f.d.Ctx(), pid)
+	f.d.AwaitProcessExit(pid)
 	f.d = harness.StartDaemon(t, harness.Opts{StateDir: f.d.StateDir, ExpectWarnings: []string{"daemon.workspace.bring_up", "daemon.promptqueue.restore_holds"}})
 	resp, err := f.d.Client().OpenWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: f.ws}))
 	if err != nil || resp.Msg.GetSuccess() == nil {

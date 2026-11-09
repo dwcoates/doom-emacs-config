@@ -43,21 +43,12 @@ func DaemonHealthProbe(ctx context.Context, address string) error {
 	return nil
 }
 
-// The readiness wait's cadence.
-const (
-	// DefaultReadyBound bounds the whole wait for a successor to answer. A
-	// successor's boot is its reconciliation-free joining boot -- open the
-	// state read-only, bind the views, arm the join -- which the integration
-	// suite measures in tens of milliseconds; the bound is the spawner's own
-	// report timeout, so a successor gets as long to answer as it got to bind.
-	DefaultReadyBound = 30 * time.Second
-	// readyProbeEvery is the wait between two probes that found nothing
-	// answering yet.
-	readyProbeEvery = 25 * time.Millisecond
-	// readyAttemptBound bounds ONE probe, so a listener that accepts and never
-	// answers costs one attempt rather than the whole bound.
-	readyAttemptBound = time.Second
-)
+// DefaultReadyBound bounds the whole wait for a successor to answer. A
+// successor's boot is its reconciliation-free joining boot -- open the state
+// read-only, bind the views, arm the join -- which the integration suite
+// measures in tens of milliseconds; the bound is the spawner's own report
+// timeout, so a successor gets as long to answer as it got to bind.
+const DefaultReadyBound = 30 * time.Second
 
 // SuccessorExitedError is a successor whose process ended before it ever
 // proved it was serving.
@@ -74,30 +65,39 @@ func (e *SuccessorExitedError) Error() string {
 	return fmt.Sprintf("rollout: the successor (pid %d) exited before it answered a health probe: %s", e.PID, e.Exit)
 }
 
-// awaitAnswer probes address until it answers, the process behind it ends
-// (exited closes), or ctx ends. exitErr is read only after exited has closed.
-func awaitAnswer(ctx context.Context, probe HealthProbe, address string, exited <-chan struct{}, exitErr func() error, every, attempt time.Duration) error {
-	ticker := time.NewTicker(every)
-	defer ticker.Stop()
+// awaitAnswer asks address ONCE, and answers when it answers, the process
+// behind it ends (exited closes), or ctx ends. exitErr is read only after
+// exited has closed.
+//
+// ONE PROBE, NEVER A RETRY LOOP. The address is reported only once the
+// successor's listener is bound (boot step 5), so the kernel queues the
+// probe's connection on that listener until the successor reaches
+// `http.Server.Serve` and answers it: the listener's backlog is the
+// rendezvous, and nothing here waits on a timer for the successor to be
+// ready. A probe that fails while the process lives is a successor whose
+// listener went away without answering, which is a successor on its way
+// out: the wait goes on for its exit, the cause the handover names.
+func awaitAnswer(ctx context.Context, probe HealthProbe, address string, exited <-chan struct{}, exitErr func() error) error {
+	answered := make(chan error, 1)
+	probeCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	// inflight: joined: the function that starts it waits for it.
+	go func() { answered <- probe(probeCtx, address) }()
 	var last error
-	for {
-		select {
-		case <-exited:
-			return exitErr()
-		default:
-		}
-		one, cancel := context.WithTimeout(ctx, attempt)
-		last = probe(one, address)
-		cancel()
+	select {
+	case <-exited:
+		return exitErr()
+	case last = <-answered:
 		if last == nil {
 			return nil
 		}
-		select {
-		case <-exited:
-			return exitErr()
-		case <-ctx.Done():
-			return fmt.Errorf("rollout: the successor at %s never answered a health probe: %w", address, errors.Join(ctx.Err(), last))
-		case <-ticker.C:
-		}
+	case <-ctx.Done():
+		return fmt.Errorf("rollout: the successor at %s never answered a health probe: %w", address, ctx.Err())
+	}
+	select {
+	case <-exited:
+		return exitErr()
+	case <-ctx.Done():
+		return fmt.Errorf("rollout: the successor at %s never answered a health probe: %w", address, errors.Join(ctx.Err(), last))
 	}
 }

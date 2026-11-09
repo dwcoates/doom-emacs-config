@@ -530,6 +530,13 @@ func (s *requestLoggingServer) UpdateMergeQueue(
 	return serveUnary(s, ctx, "UpdateMergeQueue", req, s.server.UpdateMergeQueue)
 }
 
+func (s *requestLoggingServer) AwaitIdle(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.AwaitIdleRequest],
+) (*connect.Response[agentreplv1.AwaitIdleResponse], error) {
+	return serveUnary(s, ctx, "AwaitIdle", req, s.server.AwaitIdle)
+}
+
 func (s *requestLoggingServer) DaemonHealth(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.DaemonHealthRequest],

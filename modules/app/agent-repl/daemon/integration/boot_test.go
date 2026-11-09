@@ -99,7 +99,7 @@ func TestJoiningDaemonDoesNotClaimTheAddressFile(t *testing.T) {
 
 	// Act
 	joining := harness.StartDaemon(t, harness.Opts{StateDir: incumbent.StateDir, Joining: incumbent.Addr})
-	joining.ExpectFileUnchanged(incumbent.AddrFile(), string(before), harness.ProbeWindow)
+	joining.ExpectFileUnchanged(incumbent.AddrFile(), string(before))
 
 	// Assert
 	after, err := os.ReadFile(incumbent.AddrFile())

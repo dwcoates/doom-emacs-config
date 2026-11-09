@@ -44,6 +44,7 @@ import (
 	"agent-repld/internal/heldingress"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/imageorigin"
+	"agent-repld/internal/inflight"
 	"agent-repld/internal/lifecycleconfig"
 	"agent-repld/internal/lockwatch"
 	"agent-repld/internal/login"
@@ -63,6 +64,7 @@ import (
 	"agent-repld/internal/promptqueue"
 	"agent-repld/internal/prompts"
 	"agent-repld/internal/prwatch"
+	"agent-repld/internal/publish"
 	"agent-repld/internal/pullrefs"
 	"agent-repld/internal/repodivergence"
 	"agent-repld/internal/resolve/feed"
@@ -923,7 +925,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		ColdGateRaised: func(ws ids.WorkspaceID, judged bool) {
 			cacheKeeper.ColdGateRaised(ws, judged)
 			if eject := ejectCold; eject != nil {
-				go eject(ws)
+				inflight.Go(func() { eject(ws) })
 			}
 		},
 		SocketPath:   func(ws ids.WorkspaceID) string { return p.Layout.ShimSocket(string(ws)) },
@@ -1577,7 +1579,11 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Pending:        feedResolver,
 		PublishHost:    relay.PublishHostWorkspace,
 		Serves:         rolloutController.ServesIntake,
-		Log:            p.Surfaces,
+		IntakeChanged:  rolloutController.IntakeChanged,
+		FleetChanges: func(ctx context.Context) <-chan struct{} {
+			return publish.Changes(ctx, sidebarResolver.Topic())
+		},
+		Log: p.Surfaces,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("agent-repld: build the held-prompt ingress: %w", err)
@@ -1771,8 +1777,11 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 
 	return &graph{
 		Server: server.Deps{
-			Instance: p.Instance,
-			Tests:    scripts,
+			// THE TEST BARRIER IS SERVED ONLY TO A HARNESS'S DAEMON: the harness
+			// sets the environment, and no real client can come to rely on it.
+			TestBarrier: os.Getenv(testBarrierEnv) == "1",
+			Instance:    p.Instance,
+			Tests:       scripts,
 			SubagentMakers: subagentmaker.New(subagentmaker.Deps{
 				Workspaces: p.DB.ListWorkspaces,
 				Session:    p.DB.Session,

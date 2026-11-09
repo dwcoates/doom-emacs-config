@@ -148,9 +148,10 @@ func (s *server) PublishHostWorkspace(ctx context.Context, ws ids.WorkspaceID) {
 // ask moved, until ctx ends. It is the one consumer of the feed's ask stream,
 // so the recompositions it drives run one at a time, each after the move it
 // answers: the last move is always followed by a composition that reads it.
-func (s *server) followHostAsks(ctx context.Context, moves <-chan ids.WorkspaceID) {
+func (s *server) followHostAsks(ctx context.Context, moves <-chan ids.WorkspaceID, ack func()) {
 	for ws := range moves {
 		s.PublishHostWorkspace(ctx, ws)
+		ack()
 	}
 }
 

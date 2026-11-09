@@ -154,6 +154,7 @@ func Run(ctx context.Context, deps Deps, pending []wsm.Workspace) Report {
 	var wg sync.WaitGroup
 	for i, ws := range pending {
 		wg.Add(1)
+		// inflight: joined: the function that starts it waits for it.
 		go func() {
 			defer wg.Done()
 			var err error

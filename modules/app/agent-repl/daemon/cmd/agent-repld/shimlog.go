@@ -8,6 +8,7 @@ import (
 	"agent-repld/internal/bounce"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/inflight"
 	"agent-repld/internal/rollout"
 	"agent-repld/internal/wsm"
 )
@@ -43,10 +44,10 @@ func runShimLogRolls(
 				return fmt.Errorf("the shim-log roll request channel closed before the serving lifetime ended")
 			}
 			workers.Add(1)
-			go func(req dlog.ShimRollRequest) {
+			inflight.Go(func() {
 				defer workers.Done()
 				forceShimLogRoll(ctx, req, db, relauncher)
-			}(req)
+			})
 		}
 	}
 }

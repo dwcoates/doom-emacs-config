@@ -52,6 +52,37 @@ func (c *stepClock) After(d time.Duration) <-chan time.Time {
 	return ch
 }
 
+// boundClock is a clock whose failure bounds never elapse unless a test fires
+// them: a wait under it ends on its event, or on a bound the test fired.
+type boundClock struct {
+	mu    sync.Mutex
+	fired map[time.Duration]bool
+}
+
+func newBoundClock() *boundClock { return &boundClock{fired: map[time.Duration]bool{}} }
+
+func (c *boundClock) Now() time.Time { return instant }
+
+// After answers a channel that fires at once for a fired bound, and never
+// for any other.
+func (c *boundClock) After(d time.Duration) <-chan time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.fired[d] {
+		return nil
+	}
+	ch := make(chan time.Time, 1)
+	ch <- instant.Add(d)
+	return ch
+}
+
+// fire makes every wait on the bound d elapse at once.
+func (c *boundClock) fire(d time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.fired[d] = true
+}
+
 // records filters a test logger's records by operation.
 func records(log *dlog.TestSurfaces, operation string) []dlog.Record {
 	return dlog.FilterRecords(log.Records(), dlog.RecordQuery{Operation: operation})

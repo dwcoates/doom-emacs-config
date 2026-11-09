@@ -181,9 +181,10 @@ func validateFindEntryNeighborRequest(req *agentreplv1.FindEntryNeighborRequest)
 // followComposerEntries restates the composer's entries of every workspace a
 // report, a selection or a response's tree announces, until ctx ends: the one
 // consumer of both announcements, so restatements run one at a time.
-func (s *server) followComposerEntries(ctx context.Context, own, labels <-chan ids.WorkspaceID) {
+func (s *server) followComposerEntries(ctx context.Context, own <-chan ids.WorkspaceID, ackOwn func(), labels <-chan ids.WorkspaceID, ackLabels func()) {
 	for {
 		var ws ids.WorkspaceID
+		var ack func()
 		select {
 		case <-ctx.Done():
 			return
@@ -191,14 +192,15 @@ func (s *server) followComposerEntries(ctx context.Context, own, labels <-chan i
 			if !ok {
 				return
 			}
-			ws = w
+			ws, ack = w, ackOwn
 		case w, ok := <-labels:
 			if !ok {
 				return
 			}
-			ws = w
+			ws, ack = w, ackLabels
 		}
 		s.restateComposerEntries(ctx, ws)
+		ack()
 	}
 }
 

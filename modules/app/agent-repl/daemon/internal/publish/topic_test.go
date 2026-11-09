@@ -2,7 +2,9 @@ package publish_test
 
 import (
 	"context"
+	"errors"
 	"testing"
+	"time"
 
 	workspacev1 "agentrepl/proto/workspace/v1"
 
@@ -398,5 +400,79 @@ func TestLatestOnlySubscriberReceivesEveryValueItKeepsUpWith(t *testing.T) {
 		if got := <-ch; got != i {
 			t.Fatalf("delivery = %d, want %d", got, i)
 		}
+	}
+}
+
+func TestChangesReceivesOncePerValueAndClosesWithItsContext(t *testing.T) {
+	// Arrange: a topic with a latest value already published.
+	var topic publish.Topic[int]
+	topic.Publish(1)
+	ctx, cancel := context.WithCancel(context.Background())
+	changes := publish.Changes(ctx, &topic)
+
+	// Act
+	<-changes // the latest value
+	topic.Publish(2)
+	<-changes // the later one
+	cancel()
+	_, open := <-changes
+	for open {
+		_, open = <-changes
+	}
+
+	// Assert: reaching here means one receive per value, then the close.
+	if open {
+		t.Fatalf("Changes stayed open after its context ended")
+	}
+}
+
+func TestAwaitSubscribersWakesOnEachSubscriptionAddedOrEnded(t *testing.T) {
+	cases := []struct {
+		name string
+		want int
+		// change makes the subscription change the wait is for.
+		change func(topic *publish.Topic[int], end context.CancelFunc)
+	}{
+		{name: "a subscription added", want: 2, change: func(topic *publish.Topic[int], _ context.CancelFunc) {
+			topic.Subscribe(context.Background())
+		}},
+		{name: "a subscription ended", want: 0, change: func(_ *publish.Topic[int], end context.CancelFunc) { end() }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: one subscription already served.
+			var topic publish.Topic[int]
+			subCtx, end := context.WithCancel(context.Background())
+			defer end()
+			topic.Subscribe(subCtx)
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			done := make(chan error, 1)
+
+			// Act
+			go func() { done <- topic.AwaitSubscribers(ctx, tc.want) }()
+			tc.change(&topic, end)
+			err := <-done
+
+			// Assert
+			if err != nil {
+				t.Fatalf("AwaitSubscribers = %v, want %d subscriptions seen", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestAwaitSubscribersEndsWithItsContext(t *testing.T) {
+	// Arrange
+	var topic publish.Topic[int]
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// Act
+	err := topic.AwaitSubscribers(ctx, 1)
+
+	// Assert
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("AwaitSubscribers = %v, want context.Canceled", err)
 	}
 }

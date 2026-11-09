@@ -633,6 +633,7 @@ func (s *sequence) dialSurvivors(ctx context.Context, survivors []*survivor) {
 	var wg sync.WaitGroup
 	for _, sv := range survivors {
 		wg.Add(1)
+		// inflight: joined: the function that starts it waits for it.
 		go func(sv *survivor) {
 			defer wg.Done()
 			adoptCtx, cancelAdopt := context.WithTimeout(ctx, s.adoptBound)
@@ -977,8 +978,10 @@ func (s *sequence) BringUp(ctx context.Context, pending []wsm.Workspace) BringUp
 	// returns, under the same serving lifetime, so the exit cuts it as it
 	// cuts the step above.
 	sidecar := make(chan error, 1)
+	// inflight: joined: the function that starts it waits for it.
 	go func() { sidecar <- s.deps.EnsureSidecar(ctx) }()
 	zettel := make(chan error, 1)
+	// inflight: joined: the function that starts it waits for it.
 	go func() { zettel <- s.deps.EnsureZettel(ctx) }()
 	brought := bringup.Run(ctx, bringup.Deps{
 		DB:           s.deps.DB,

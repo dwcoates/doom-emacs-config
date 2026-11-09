@@ -10,6 +10,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/inflight"
 	"agent-repld/internal/wsm"
 )
 
@@ -483,10 +484,10 @@ func (o *orchestrator) awaitRequestingTurn(ws ids.WorkspaceID, repo wsm.RepoKey)
 	o.mu.Unlock()
 	if o.async {
 		o.live.Add(1)
-		go func() {
+		inflight.Standing(func() {
 			defer o.live.Done()
 			o.waitThenQueue(wait)
-		}()
+		})
 	}
 	return wait
 }

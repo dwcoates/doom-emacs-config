@@ -196,7 +196,7 @@ func TestCollapsingARepositoryNeverStandsDownAWorkspaceUnderItsTurn(t *testing.T
 
 	// Assert: nothing reaches the turn or the session while it runs.
 	for _, rpc := range []string{harness.RPCHibernate, harness.RPCKillSession, harness.RPCKillTurn} {
-		expectRPCCount(t, f.shim, rpc, 0, harness.ProbeWindow)
+		expectRPCCount(t, f.shim, rpc, 0)
 	}
 
 	// Act: the turn ends, the repository still collapsed.
@@ -225,7 +225,7 @@ func TestANewEmacsStreamStartsNoWorkspace(t *testing.T) {
 	})
 
 	// Assert: nothing is brought up; the editor asks with OpenTabs.
-	harness.ExpectNoPush(t, roster, harness.ProbeWindow, "a roster change from a bring-up nobody asked for")
+	harness.ExpectNoPush(t, roster, "a roster change from a bring-up nobody asked for")
 }
 
 func TestANetworkTheShimCannotReachIsANetworkFaultOnTheFooterAndTheRoster(t *testing.T) {

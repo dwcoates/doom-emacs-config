@@ -3,80 +3,92 @@ package main
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"sync"
-	"time"
 
 	"agent-repld/internal/daemonaddr"
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/kernelevent"
 )
 
-// stateRootCheckEvery is how often a serving daemon verifies that what it owns
-// on disk -- the state root, daemon.lock, daemon.addr -- is still there.
-//
 // A DAEMON WHOSE STATE ROOT IS DELETED MUST NOTICE. Nothing a booted daemon
 // runs looks at its root again, so one whose root was removed out from under
 // it (the integration harness's worlds, when a run died and its daemons were
 // orphaned) served, swept and retried against it until someone killed it --
 // and, worse, a second daemon booting on a recreated root takes a daemon.lock
-// inode this one's flock does not conflict with. A check is three stat(2)s
-// and one small read, so once a second costs nothing measurable, and it bounds
-// how long two daemons can believe they own one root.
-const stateRootCheckEvery = time.Second
-
-// stateRootCheckCeiling caps the backoff between checks that could not TELL.
-// An undecided check is reported at ERROR and retried, doubling from
-// stateRootCheckEvery, so a stat that keeps failing for a reason that is not
-// a loss does not write an ERROR a second forever.
-const stateRootCheckCeiling = time.Minute
+// inode this one's flock does not conflict with.
+//
+// THE CHECK RUNS ON THE KERNEL'S REPORT OF A CHANGE, never on a cadence: the
+// watch follows the root, its parent (the root renamed or removed), the lock
+// and the address file, and every change it reports is verified at once. So
+// a loss is seen the instant it happens, and a root nobody touches costs no
+// check at all.
 
 // rootWatch stands the daemon down when what it owns on disk vanishes.
 type rootWatch struct {
 	// verify is daemonaddr.Claim.Verify.
 	verify func() error
-	// every is the cadence of a healthy watch; zero means stateRootCheckEvery.
-	every time.Duration
-	// after is the watch's clock; nil means time.After.
-	after func(time.Duration) <-chan time.Time
-	log   dlog.Logger
+	// changes follows what verify reads (rootWatchPaths).
+	changes kernelevent.Source
+	log     dlog.Logger
 	// standDown ends the serving lifetime with the loss as its cause.
 	standDown func(cause error)
 }
 
-// run checks on its cadence until ctx ends or a loss is found. A loss is
-// recorded at ERROR naming what vanished, handed to standDown, and returned.
+// rootWatchPaths are what a serving daemon owns on disk and its root's
+// parent, whose change is the root renamed or removed.
+func rootWatchPaths(root, addrPath string) []string {
+	return []string{filepath.Dir(root), root, daemonaddr.LockPath(addrPath), addrPath}
+}
+
+// run verifies once the watch is taken, then at every change it reports,
+// until ctx ends or a loss is found. A loss is recorded at ERROR naming what
+// vanished, handed to standDown, and returned. A check that cannot tell is
+// an ERROR, and the next change checks again. A watch that fails is an ERROR
+// once the root still verifies, and the root goes unwatched from then on.
 func (w rootWatch) run(ctx context.Context) error {
-	every := w.every
-	if every <= 0 {
-		every = stateRootCheckEvery
-	}
-	after := w.after
-	if after == nil {
-		after = time.After
-	}
-	wait := every
+	changes, stop := w.changes(ctx)
+	defer stop()
 	for {
+		if lost := w.check(); lost != nil {
+			return lost
+		}
 		select {
 		case <-ctx.Done():
 			return nil
-		case <-after(wait):
-		}
-		err := w.verify()
-		switch {
-		case err == nil:
-			wait = every
-		case errors.Is(err, daemonaddr.ErrVanished):
-			w.log.Error("daemon.cmd.state_root", "what this daemon owns on disk vanished; standing down", dlog.Context{
+		case err := <-changes:
+			if err == nil {
+				continue
+			}
+			if lost := w.check(); lost != nil {
+				return lost
+			}
+			w.log.Error("daemon.cmd.state_root", "could not watch the state root; a loss is no longer noticed until the daemon restarts", dlog.Context{
 				"cause": err.Error(),
 			})
-			w.standDown(err)
-			return err
-		default:
-			w.log.Error("daemon.cmd.state_root", "could not tell whether the state root is intact; checking again", dlog.Context{
-				"cause":   err.Error(),
-				"next_in": min(2*wait, stateRootCheckCeiling).String(),
-			})
-			wait = min(2*wait, stateRootCheckCeiling)
+			<-ctx.Done()
+			return nil
 		}
+	}
+}
+
+// check verifies once, answering the loss it stood down on.
+func (w rootWatch) check() error {
+	err := w.verify()
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, daemonaddr.ErrVanished):
+		w.log.Error("daemon.cmd.state_root", "what this daemon owns on disk vanished; standing down", dlog.Context{
+			"cause": err.Error(),
+		})
+		w.standDown(err)
+		return err
+	default:
+		w.log.Error("daemon.cmd.state_root", "could not tell whether the state root is intact; checking again at its next change", dlog.Context{
+			"cause": err.Error(),
+		})
+		return nil
 	}
 }
 

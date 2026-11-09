@@ -275,6 +275,7 @@ func (o *opener) run(ctx context.Context, name string, args []string) error {
 	}
 
 	exited := make(chan error, 1)
+	// inflight: joined: the function that starts it waits for it.
 	go func() { exited <- cmd.Wait() }()
 
 	timer := time.NewTimer(o.launchWindow)

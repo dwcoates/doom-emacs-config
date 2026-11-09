@@ -40,6 +40,7 @@ import (
 	"agent-repld/internal/gitclient"
 	"agent-repld/internal/health"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/inflight"
 	"agent-repld/internal/restarttiming"
 	"agent-repld/internal/rollout"
 	"agent-repld/internal/sessionlock"
@@ -588,7 +589,7 @@ func (d *Deployer) deployLanding(ctx context.Context) {
 		lifetime = context.WithoutCancel(ctx)
 	}
 	d.landings.Add(1)
-	go func() {
+	inflight.Standing(func() {
 		defer d.landings.Done()
 		result, err := d.Deploy(lifetime, false)
 		if errors.Is(err, rollout.ErrJoining) {
@@ -606,7 +607,7 @@ func (d *Deployer) deployLanding(ctx context.Context) {
 		default:
 			d.log.Info(opLanding, "the landing is deployed", dlog.Context{"decisions": summarize(result)})
 		}
-	}()
+	})
 }
 
 // errLifetimeEnded is a landing's deploy abandoned because the daemon's
@@ -655,6 +656,7 @@ func (d *Deployer) WaitLandings() { d.landings.Wait() }
 // lifetime, which the exit has cancelled, so the wait is short.
 func (d *Deployer) DrainLandings(bound time.Duration) bool {
 	done := make(chan struct{})
+	// inflight: joined: the function that starts it waits for it.
 	go func() {
 		d.landings.Wait()
 		close(done)

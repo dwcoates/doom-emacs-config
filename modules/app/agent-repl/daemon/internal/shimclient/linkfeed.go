@@ -1,6 +1,9 @@
 package shimclient
 
-import "sync"
+import (
+	"agent-repld/internal/inflight"
+	"sync"
+)
 
 // linkFeed publishes LinkState transitions to one consumer IN ORDER and
 // without dropping any: a connectivity truth that skipped "dead" would leave
@@ -24,7 +27,7 @@ func newLinkFeed() *linkFeed {
 		out:  make(chan LinkState),
 		done: make(chan struct{}),
 	}
-	go f.pump()
+	inflight.Standing(func() { f.pump() })
 	return f
 }
 

@@ -575,16 +575,10 @@ func TestAttachingOneIdTwiceIsRefusedInTheRegistry(t *testing.T) {
 // hanging the suite.
 func awaitSubscribers[T any](t *testing.T, what string, topic *publish.Topic[T], want int) {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		got := topic.Subscribers()
-		if got == want {
-			return
-		}
-		if !time.Now().Before(deadline) {
-			t.Fatalf("the %s topic is serving %d subscriptions, want %d", what, got, want)
-		}
-		time.Sleep(time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := topic.AwaitSubscribers(ctx, want); err != nil {
+		t.Fatalf("the %s topic: %v", what, err)
 	}
 }
 
@@ -899,15 +893,15 @@ func TestAPageThatEndsReleasesEverySubscription(t *testing.T) {
 	awaitSubscribers(t, "roster", &h.Sidebar.topic, 0)
 	awaitSubscribers(t, "footer", &h.Footer.topic, 0)
 	awaitSubscribers(t, "topbar", &h.Topbar.topic, 0)
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		if _, held := surface.pageFor("page-1"); !held {
-			break
-		}
-		if !time.Now().Before(deadline) {
-			t.Fatal("the ended page still holds its id")
-		}
-		time.Sleep(time.Millisecond)
+	detached, endWait := context.WithTimeout(context.Background(), 2*time.Second)
+	defer endWait()
+	if _, err := h.OpenWorld.log.Await(detached, dlog.RecordQuery{
+		Operation: "daemon.opentabs.page", Message: "a page stream ended; its facts are forgotten",
+	}); err != nil {
+		t.Fatalf("the ended page was never detached: %v", err)
+	}
+	if _, held := surface.pageFor("page-1"); held {
+		t.Fatal("the ended page still holds its id")
 	}
 }
 

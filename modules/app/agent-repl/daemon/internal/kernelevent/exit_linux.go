@@ -1,4 +1,4 @@
-package harness
+package kernelevent
 
 import (
 	"context"
@@ -10,23 +10,23 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// unregisteredExitSeen is what an exit event that could not be taken says of
-// the exit (awaitExitEvent): pidfd_open(2) opens a zombie too, so its ESRCH is
-// a process already reaped, whose files are released.
-const unregisteredExitSeen = true
+// UnregisteredExitSeen is what an exit event that could not be taken says of
+// the exit (AwaitExit): pidfd_open(2) opens a zombie too, so its ESRCH is a
+// process already reaped, whose files are released.
+const UnregisteredExitSeen = true
 
-// exitEvent is one process's exit event on a pidfd, which turns readable at
-// the exit, held from takeExitEvent until close.
+// Exit is one process's exit event on a pidfd, which turns readable at the
+// exit, held from TakeExit until Close.
 //
 // The pidfd needs no close-on-exec mark of its own: pidfd_open(2) always sets
 // O_CLOEXEC on the descriptor it answers, so it never leaks into a child.
-type exitEvent struct {
+type Exit struct {
 	fd int
 }
 
-// takeExitEvent opens pid's pidfd, answering nil (and no error) for a process
+// TakeExit opens pid's pidfd, answering nil (and no error) for a process
 // already reaped.
-func takeExitEvent(pid int) (*exitEvent, error) {
+func TakeExit(pid int) (*Exit, error) {
 	fd, err := unix.PidfdOpen(pid, 0)
 	if err != nil {
 		if errors.Is(err, unix.ESRCH) {
@@ -34,33 +34,40 @@ func takeExitEvent(pid int) (*exitEvent, error) {
 		}
 		return nil, fmt.Errorf("pidfd_open: %w", err)
 	}
-	return &exitEvent{fd: fd}, nil
+	return &Exit{fd: fd}, nil
 }
 
-// await waits for the exit, until ctx ends.
+// TakeEnd is TakeExit for a child of this process; on linux every pidfd's
+// process can be asked how it ended (EndOf).
+func TakeEnd(pid int) (*Exit, error) { return TakeExit(pid) }
+
+// Await waits for the exit, until ctx ends.
+func (e *Exit) Await(ctx context.Context) error {
+	return awaitReadable(ctx, e.fd)
+}
+
+// awaitReadable blocks until FD is readable or ctx ends.
 //
-// THE WAIT ENDS WITH CTX, NOT AT A DEADLINE READ OFF IT. A context bounded on
-// the granted clock (grantedclock.WithBound) has no wall deadline to hand the
-// kernel, so the poll also watches an eventfd that ctx's end writes
-// (awakenOnEnd), and either descriptor ends the wait.
-func (e *exitEvent) await(ctx context.Context) error {
+// THE WAIT ENDS WITH CTX, NOT AT A DEADLINE READ OFF IT: the poll also watches
+// an eventfd that ctx's end writes (AwakenOnEnd).
+func awaitReadable(ctx context.Context, fd int) error {
 	ended, err := unix.Eventfd(0, unix.EFD_CLOEXEC)
 	if err != nil {
 		return fmt.Errorf("eventfd for the context's end: %w", err)
 	}
 	defer unix.Close(ended)
-	release := awakenOnEnd(ctx, func() {
+	release := AwakenOnEnd(ctx, func() {
 		_, _ = unix.Write(ended, []byte{1, 0, 0, 0, 0, 0, 0, 0})
 	})
 	defer release()
-	fds := []unix.PollFd{{Fd: int32(e.fd), Events: unix.POLLIN}, {Fd: int32(ended), Events: unix.POLLIN}}
+	fds := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}, {Fd: int32(ended), Events: unix.POLLIN}}
 	for {
 		_, err := unix.Poll(fds, -1)
 		if errors.Is(err, unix.EINTR) {
 			continue
 		}
 		if err != nil {
-			return fmt.Errorf("wait for the exit: %w", err)
+			return fmt.Errorf("wait on the descriptor: %w", err)
 		}
 		if fds[0].Revents == 0 {
 			return ctx.Err()
@@ -69,14 +76,9 @@ func (e *exitEvent) await(ctx context.Context) error {
 	}
 }
 
-// close releases the pidfd.
-// takeEndEvent is takeExitEvent for a child of this process; on linux every
-// pidfd's process can be asked how it ended (endOf).
-func takeEndEvent(pid int) (*exitEvent, error) { return takeExitEvent(pid) }
-
-// endOf answers how the exited process of the event ended, read with waitid's
+// EndOf answers how the exited process of the event ended, read with waitid's
 // WNOWAIT so the process stays unreaped for its owner's own reap.
-func (e *exitEvent) endOf(pid int) (ProcessEnd, error) {
+func (e *Exit) EndOf(pid int) (ProcessEnd, error) {
 	var info unix.Siginfo
 	if err := unix.Waitid(unix.P_PIDFD, e.fd, &info, unix.WEXITED|unix.WNOWAIT, nil); err != nil {
 		return ProcessEnd{}, fmt.Errorf("waitid %d: %w", pid, err)
@@ -101,6 +103,7 @@ const (
 	cldDumped = 3
 )
 
-func (e *exitEvent) close() {
+// Close releases the pidfd.
+func (e *Exit) Close() {
 	unix.Close(e.fd)
 }

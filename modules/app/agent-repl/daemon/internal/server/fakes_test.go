@@ -1627,8 +1627,8 @@ func (f *fakeFeed) HostAsk(ws ids.WorkspaceID) *agentreplv1.HostAsk {
 	return f.hostAsks[ws]
 }
 
-func (f *fakeFeed) WatchHostAsks(ctx context.Context) <-chan ids.WorkspaceID {
-	return f.askMoves.Subscribe(ctx)
+func (f *fakeFeed) WatchHostAsks(ctx context.Context) (<-chan ids.WorkspaceID, func()) {
+	return f.askMoves.SubscribeCounted(ctx)
 }
 
 // setHostAsk stands ASK (nil: none) for WS and announces the move, as the
@@ -1735,8 +1735,8 @@ func (f *fakeFeed) EntryNeighbor(_ ids.WorkspaceID, _ *frontendv1.FeedId, label 
 	return neighbor, ok
 }
 
-func (f *fakeFeed) WatchLabelChanges(ctx context.Context) <-chan ids.WorkspaceID {
-	return f.labelMoves.Subscribe(ctx)
+func (f *fakeFeed) WatchLabelChanges(ctx context.Context) (<-chan ids.WorkspaceID, func()) {
+	return f.labelMoves.SubscribeCounted(ctx)
 }
 
 func (f *fakeFeed) EntryTarget(_ ids.WorkspaceID, id *frontendv1.FeedId, label string) (*frontendv1.FeedId, bool) {
@@ -1830,7 +1830,9 @@ type fakeTail struct {
 	token *agentreplv1.FeedWatchToken
 }
 
-func (t *fakeTail) Publications(context.Context) <-chan feed.Publication { return t.pubs }
+func (t *fakeTail) Publications(context.Context) (<-chan feed.Publication, func()) {
+	return t.pubs, func() {}
+}
 
 func (t *fakeTail) Token() *agentreplv1.FeedWatchToken { return t.token }
 
@@ -2582,10 +2584,13 @@ func (f *fakeClassifierPrompt) Update(_ context.Context, req classifierupdate.Re
 type fakeOpenWorld struct {
 	mu      sync.Mutex
 	opening []string
+	// log is the coordinator's logger, whose records a test awaits (a page's
+	// stream ending is one).
+	log *dlog.TestLogger
 }
 
 func newFakeOpenWorld() *fakeOpenWorld {
-	return &fakeOpenWorld{}
+	return &fakeOpenWorld{log: dlog.NewTestLogger()}
 }
 
 func (f *fakeOpenWorld) deps() opentabs.Deps {
@@ -2606,7 +2611,7 @@ func (f *fakeOpenWorld) deps() opentabs.Deps {
 		// Every workspace has a row, so none is listed as a thread.
 		Thread: func(ids.WorkspaceID) (uint64, bool) { return 0, false },
 		Now:    time.Now,
-		Log:    dlog.NewTestLogger(),
+		Log:    f.log,
 	}
 }
 

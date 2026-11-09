@@ -1,6 +1,7 @@
 package harness
 
 import (
+	"agent-repld/internal/kernelevent"
 	"context"
 	"errors"
 	"fmt"
@@ -9,7 +10,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 )
 
 // A WAIT LEARNS OF ITS DAEMON'S FAILURE THE MOMENT IT HAPPENS, NOT WHEN ITS
@@ -30,11 +30,6 @@ import (
 // once and grantedclock.Explain names the daemon's own record or exit rather
 // than "never satisfied within 5s". The bounds stay as the fallback for a
 // daemon that hangs without writing anything.
-
-// recordFaultTick is how often a record latch reads the daemon's logs for new
-// records: a fault is reported within it, and an idle daemon's logs cost one
-// stat per file per tick.
-const recordFaultTick = 20 * time.Millisecond
 
 // processFault is the process latch.
 type processFault struct {
@@ -148,27 +143,44 @@ func (d *Daemon) watchRecords(t testing.TB, parent context.Context) context.Cont
 	ctx, cancelCause := context.WithCancelCause(parent)
 	stop := make(chan struct{})
 	done := make(chan struct{})
+	// THE LATCH READS AT EVERY CHANGE THE KERNEL REPORTS to the run log or a
+	// workspace target, never on a timer: a record that fails the sweep closes
+	// the latch the moment it is written. The watch is re-taken each round,
+	// so a target made since is followed, and each is taken before its read.
+	watched, endWatch := context.WithCancel(ctx)
+	go func() {
+		<-stop
+		endWatch()
+	}()
+	logs := filepath.Join(d.StateDir, "logs")
 	go func() {
 		defer close(done)
-		ticker := time.NewTicker(recordFaultTick)
-		defer ticker.Stop()
 		read := map[string]int{}
 		for {
-			select {
-			case <-stop:
-				return
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-			}
+			targets, _ := filepath.Glob(filepath.Join(logs, "agent-repl-*-daemon-*.log"))
+			changes, stopFollowing := kernelevent.Follow(watched, append([]string{filepath.Dir(logs), logs, d.RunLogPath()}, targets...)...)
 			cause, err := d.recordFault(read)
 			if err != nil {
 				cause = fmt.Errorf("harness: read the daemon's logs for faults: %w", err)
 			}
 			if cause != nil {
+				stopFollowing()
 				t.Logf("harness: fault latch closed: %v", cause)
 				cancelCause(cause)
 				return
+			}
+			select {
+			case <-watched.Done():
+				stopFollowing()
+				return
+			case err := <-changes:
+				stopFollowing()
+				if err != nil && watched.Err() == nil {
+					cause := fmt.Errorf("harness: watch the daemon's logs for faults: %w", err)
+					t.Logf("harness: fault latch closed: %v", cause)
+					cancelCause(cause)
+					return
+				}
 			}
 		}
 	}()

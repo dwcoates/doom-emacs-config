@@ -210,9 +210,24 @@ func listenUnix(path string) (net.Listener, error) {
 	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 		return nil, fmt.Errorf("fakeshim: clear socket %s: %w", path, err)
 	}
-	l, err := net.Listen("unix", path)
+	// THE NAME APPEARS ONLY ONCE THE SOCKET ACCEPTS, as the real shim's does:
+	// the listener binds a temporary name beside it, listens, and is renamed
+	// into place, so a harness woken by the socket's directory changing finds
+	// a socket that answers.
+	binding := filepath.Join(filepath.Dir(path), "."+filepath.Base(path)+".b")
+	if err := os.Remove(binding); err != nil && !os.IsNotExist(err) {
+		return nil, fmt.Errorf("fakeshim: clear binding name %s: %w", binding, err)
+	}
+	l, err := net.Listen("unix", binding)
 	if err != nil {
-		return nil, fmt.Errorf("fakeshim: listen %s: %w", path, err)
+		return nil, fmt.Errorf("fakeshim: listen %s: %w", binding, err)
+	}
+	// The listener must not unlink the binding name on Close: it is the
+	// socket's own name from here.
+	l.(*net.UnixListener).SetUnlinkOnClose(false)
+	if err := os.Rename(binding, path); err != nil {
+		_ = l.Close()
+		return nil, fmt.Errorf("fakeshim: rename %s into place: %w", path, err)
 	}
 	return l, nil
 }

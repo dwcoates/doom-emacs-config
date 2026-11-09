@@ -4,95 +4,75 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"testing"
-	"time"
 
 	"agent-repld/internal/daemonaddr"
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/kernelevent"
 )
 
-// fakeWatchClock hands the watch a channel per wait and reports each wait it
-// arms, so the test fires them one at a time without sleeping.
-type fakeWatchClock struct {
-	asked chan time.Duration
-	fire  chan chan time.Time
+// fakeChanges is the watch's change source in the test's hands: each send
+// is one change reported, an error one failed watch.
+type fakeChanges struct {
+	changes chan error
+	stopped chan struct{}
 }
 
-func newFakeWatchClock() *fakeWatchClock {
-	return &fakeWatchClock{asked: make(chan time.Duration), fire: make(chan chan time.Time, 1)}
+func newFakeChanges() *fakeChanges {
+	return &fakeChanges{changes: make(chan error), stopped: make(chan struct{})}
 }
 
-func (c *fakeWatchClock) after(d time.Duration) <-chan time.Time {
-	ch := make(chan time.Time, 1)
-	c.fire <- ch
-	c.asked <- d
-	return ch
+func (f *fakeChanges) source(context.Context) (<-chan error, func()) {
+	return f.changes, func() { close(f.stopped) }
 }
 
 func TestRootWatch(t *testing.T) {
 	errLoss := fmt.Errorf("%w: the state root %q is gone", daemonaddr.ErrVanished, "/tmp/gone")
 	errUndecided := errors.New("stat the state root: permission denied")
-	undecided := func(n int) []error {
-		out := make([]error, n)
-		for i := range out {
-			out[i] = errUndecided
-		}
-		return out
-	}
+	errWatch := errors.New("kqueue: too many open files")
 	cases := []struct {
 		name string
-		// script answers each verify in turn. A watch that is still running
-		// once the script is spent is cancelled at its next wait.
+		// script answers each verify in turn; reports are what the change
+		// source reports after the first verify, one per later verify. A
+		// watch still running once the script is spent is cancelled.
 		script        []error
-		wantWaits     []time.Duration
+		reports       []error
 		wantStoodDown bool
 		wantErrors    int
 	}{
-		{
-			name:      "a healthy root is watched on the cadence",
-			script:    []error{nil, nil},
-			wantWaits: []time.Duration{time.Second, time.Second, time.Second},
-		},
-		{
-			name:          "a loss stands the daemon down at ERROR",
-			script:        []error{nil, errLoss},
-			wantWaits:     []time.Duration{time.Second, time.Second},
-			wantStoodDown: true,
-			wantErrors:    1,
-		},
-		{
-			name:       "a check that cannot tell is an ERROR and backs off until one can",
-			script:     []error{errUndecided, errUndecided, nil},
-			wantWaits:  []time.Duration{time.Second, 2 * time.Second, 4 * time.Second, time.Second},
-			wantErrors: 2,
-		},
-		{
-			name:   "the backoff never passes its ceiling",
-			script: undecided(8),
-			wantWaits: []time.Duration{
-				time.Second, 2 * time.Second, 4 * time.Second, 8 * time.Second, 16 * time.Second,
-				32 * time.Second, stateRootCheckCeiling, stateRootCheckCeiling, stateRootCheckCeiling,
-			},
-			wantErrors: 8,
-		},
+		{name: "a healthy root is verified once the watch is taken and at each change",
+			script: []error{nil, nil, nil}, reports: []error{nil, nil}},
+		{name: "a loss found once the watch is taken stands the daemon down at ERROR",
+			script: []error{errLoss}, wantStoodDown: true, wantErrors: 1},
+		{name: "a loss at a change stands the daemon down at ERROR",
+			script: []error{nil, errLoss}, reports: []error{nil}, wantStoodDown: true, wantErrors: 1},
+		{name: "a check that cannot tell is an ERROR, and the next change checks again",
+			script: []error{errUndecided, nil}, reports: []error{nil}, wantErrors: 1},
+		{name: "a failed watch over an intact root is an ERROR, and the watch ends",
+			script: []error{nil, nil}, reports: []error{errWatch}, wantErrors: 1},
+		{name: "a failed watch over a lost root stands the daemon down",
+			script: []error{nil, errLoss}, reports: []error{kernelevent.ErrNothingToWatch}, wantStoodDown: true, wantErrors: 1},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange
-			clock := newFakeWatchClock()
+			src := newFakeChanges()
 			log := dlog.NewTestLogger()
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
+			verified := make(chan struct{}, len(tc.script))
 			calls := 0
 			var stoodDown error
 			w := rootWatch{
 				verify: func() error {
 					err := tc.script[calls]
 					calls++
+					verified <- struct{}{}
 					return err
 				},
-				after: clock.after,
-				log:   log,
+				changes: src.source,
+				log:     log,
 				standDown: func(cause error) {
 					stoodDown = cause
 				},
@@ -101,15 +81,12 @@ func TestRootWatch(t *testing.T) {
 
 			// Act
 			go func() { done <- w.run(ctx) }()
-			for i, want := range tc.wantWaits {
-				fire := <-clock.fire
-				if got := <-clock.asked; got != want {
-					t.Fatalf("wait %d = %s, want %s", i, got, want)
-				}
-				if i < len(tc.script) {
-					fire <- time.Time{}
-					continue
-				}
+			<-verified
+			for _, report := range tc.reports {
+				src.changes <- report
+				<-verified
+			}
+			if !tc.wantStoodDown {
 				cancel()
 			}
 			err := <-done
@@ -133,6 +110,11 @@ func TestRootWatch(t *testing.T) {
 			if errorRecords != tc.wantErrors {
 				t.Fatalf("ERROR records = %d, want %d", errorRecords, tc.wantErrors)
 			}
+			select {
+			case <-src.stopped:
+			default:
+				t.Fatalf("the watch's change source was not stopped")
+			}
 		})
 	}
 }
@@ -141,23 +123,17 @@ func TestRootWatch(t *testing.T) {
 // loss itself, so the log says WHICH of the root, the lock or the address went.
 func TestALostRootNamesWhatVanished(t *testing.T) {
 	// Arrange
-	clock := newFakeWatchClock()
 	log := dlog.NewTestLogger()
 	loss := fmt.Errorf("%w: daemon.lock %q is gone", daemonaddr.ErrVanished, "/tmp/root/daemon.lock")
 	w := rootWatch{
 		verify:    func() error { return loss },
-		after:     clock.after,
+		changes:   newFakeChanges().source,
 		log:       log,
 		standDown: func(error) {},
 	}
-	done := make(chan error, 1)
 
 	// Act
-	go func() { done <- w.run(context.Background()) }()
-	fire := <-clock.fire
-	<-clock.asked
-	fire <- time.Time{}
-	<-done
+	_ = w.run(context.Background())
 
 	// Assert
 	for _, r := range log.Records() {
@@ -166,4 +142,15 @@ func TestALostRootNamesWhatVanished(t *testing.T) {
 		}
 	}
 	t.Fatalf("records = %+v, want an ERROR whose cause is %q", log.Records(), loss.Error())
+}
+
+func TestRootWatchPathsNameTheRootItsParentTheLockAndTheAddress(t *testing.T) {
+	// Act
+	got := rootWatchPaths("/state/root", "/state/root/daemon.addr")
+
+	// Assert
+	want := []string{"/state", "/state/root", daemonaddr.LockPath("/state/root/daemon.addr"), "/state/root/daemon.addr"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("rootWatchPaths = %v, want %v", got, want)
+	}
 }

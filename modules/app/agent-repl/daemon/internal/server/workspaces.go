@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"agent-repld/internal/creategate"
+	"agent-repld/internal/inflight"
 	"agent-repld/internal/runtimemetrics"
 	"context"
 	"errors"
@@ -322,11 +323,11 @@ func (s *server) startBackgroundCreate(
 	reporter := s.CreateProgress(opID)
 	spec.Progress = reporter
 	ticket := s.deps.Verbs.EnterCreate(spec)
-	go func() {
+	inflight.Go(func() {
 		defer cancel()
 		defer release()
 		s.runBackgroundCreate(bgCtx, ticket, reporter)
-	}()
+	})
 	return ticket
 }
 
@@ -788,11 +789,11 @@ func (s *server) NukeWorkspace(
 func (s *server) runDetachedTeardown(ctx context.Context, log dlog.Logger, rpc, opID string, teardown workspace.Teardown, end func(error)) {
 	bgCtx, cancel := s.backgroundContext(ctx)
 	log.Info(opServerTeardown, "accepted the verb and detached its teardown", dlog.Context{"rpc": rpc, "op_id": opID})
-	go func() {
+	inflight.Go(func() {
 		// The goroutine OWNS the cancel, as runBackgroundCreate's does.
 		defer cancel()
 		end(teardown(bgCtx))
-	}()
+	})
 }
 
 // publishKillEnd pushes an accepted kill's one terminal event. A failure is

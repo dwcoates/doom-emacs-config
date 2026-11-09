@@ -38,7 +38,7 @@ func killShim(t *testing.T, f *fixture, shim *harness.ShimControl) {
 	if err := syscall.Kill(pid, syscall.SIGKILL); err != nil {
 		t.Fatalf("kill the fake shim %d: %v", pid, err)
 	}
-	harness.AwaitProcessGone(t, f.d.Ctx(), pid)
+	f.d.AwaitProcessExit(pid)
 }
 
 // concludeFirstTurn runs one turn to its end, so the session has a
@@ -168,7 +168,7 @@ func TestAPromptSentRightAfterAShimDiesIsDelivered(t *testing.T) {
 	if got := text(turn.GetSaid()); got != "the prompt sent into the gap" {
 		t.Fatalf("the delivered StartTurn said %q, want the prompt sent into the gap", got)
 	}
-	expectRPCCount(t, revived, harness.RPCStartTurn, 1, harness.ProbeWindow)
+	expectRPCCount(t, revived, harness.RPCStartTurn, 1)
 }
 
 // A SHIM THAT DIES UNDER A TURN CUT IT (owner ruling, 2026-10-30): the turn
@@ -299,7 +299,7 @@ func bootAfterADeadShim(t *testing.T, extraEnv ...string) (*fixture, *harness.Da
 	if err := syscall.Kill(pid, syscall.SIGKILL); err != nil {
 		t.Fatalf("kill the fake shim %d: %v", pid, err)
 	}
-	harness.AwaitProcessGone(t, f.d.Ctx(), pid)
+	f.d.AwaitProcessExit(pid)
 	opts := f.d.SuccessorOpts()
 	opts.ExtraEnv = extraEnv
 	successor := harness.StartDaemon(t, opts)
@@ -349,7 +349,7 @@ func TestAPromptSentRightAfterABootOverADeadShimIsDelivered(t *testing.T) {
 	if got := text(shim.ExpectStartTurn().GetSaid()); got != "the prompt sent at boot" {
 		t.Fatalf("the delivered StartTurn said %q, want the prompt sent at boot", got)
 	}
-	expectRPCCount(t, shim, harness.RPCStartTurn, 1, harness.ProbeWindow)
+	expectRPCCount(t, shim, harness.RPCStartTurn, 1)
 }
 
 // TestAPromptSentWhileABootsWatcherIsOpeningIsDelivered pins the window the
@@ -382,7 +382,7 @@ func TestAPromptSentWhileABootsWatcherIsOpeningIsDelivered(t *testing.T) {
 	if got := text(shim.ExpectStartTurn().GetSaid()); got != "the prompt sent before the watcher" {
 		t.Fatalf("the delivered StartTurn said %q, want the prompt sent before the watcher", got)
 	}
-	expectRPCCount(t, shim, harness.RPCStartTurn, 1, harness.ProbeWindow)
+	expectRPCCount(t, shim, harness.RPCStartTurn, 1)
 }
 
 // TestATurnCutBeforeABootReplaysAsEnded covers the replay half of the one
@@ -406,7 +406,7 @@ func TestATurnCutBeforeABootReplaysAsEnded(t *testing.T) {
 	if err := syscall.Kill(pid, syscall.SIGKILL); err != nil {
 		t.Fatalf("kill the fake shim %d: %v", pid, err)
 	}
-	harness.AwaitProcessGone(t, f.d.Ctx(), pid)
+	f.d.AwaitProcessExit(pid)
 	// The store's book as the resumed shim serves it: the cut turn's prompt,
 	// and no terminal, because none was ever written. The store holds it
 	// before the successor boots, as the real store does.

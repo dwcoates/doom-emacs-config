@@ -1,9 +1,11 @@
 package rollout
 
 import (
+	"strings"
 	"testing"
 
 	"agent-repld/internal/ids"
+	"agent-repld/internal/sourcescan"
 )
 
 // TestStandingIsOwnedBeforeAnyHandover covers the ordinary case: a daemon that
@@ -185,6 +187,104 @@ func TestServesIntakeOnlyWhileNeitherJoiningNorHandingOver(t *testing.T) {
 			// Assert
 			if got != tc.want {
 				t.Fatalf("ServesIntake = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestIntakeChangedClosesWhenServesIntakeChanges(t *testing.T) {
+	tests := []struct {
+		name string
+		// change makes the change under test on h.
+		change     func(t *testing.T, h *harness)
+		wantClosed bool
+	}{
+		{name: "a handover claimed stops intake and says so", wantClosed: true, change: func(t *testing.T, h *harness) {
+			if _, err := h.c.claimHandover(); err != nil {
+				t.Fatalf("claimHandover: %v", err)
+			}
+		}},
+		{name: "a lock taken and released without a change says nothing", change: func(_ *testing.T, h *harness) {
+			h.c.mu.Lock()
+			h.c.unlock()
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			changed := h.c.IntakeChanged()
+
+			// Act
+			tc.change(t, h)
+
+			// Assert
+			closed := false
+			select {
+			case <-changed:
+				closed = true
+			default:
+			}
+			if closed != tc.wantClosed {
+				t.Fatalf("IntakeChanged closed = %v, want %v", closed, tc.wantClosed)
+			}
+		})
+	}
+}
+
+func TestIntakeChangedAnswersAFreshChannelAfterEachChange(t *testing.T) {
+	// Arrange: a successor still joining, which owns its one workspace next.
+	ws := ids.WorkspaceID("ws-handed-over")
+	h := newHarness(t)
+	h.c.mu.Lock()
+	h.c.joiningMode, h.c.manifestSeen = true, true
+	h.c.joining = map[ids.WorkspaceID]bool{ws: true}
+	h.c.owned = map[ids.WorkspaceID]bool{}
+	h.c.unlock()
+	first := h.c.IntakeChanged()
+	h.c.mu.Lock()
+	h.c.owned[ws] = true
+	h.c.unlock()
+
+	// Act
+	second := h.c.IntakeChanged()
+
+	// Assert: the first change closed the first channel, and the second
+	// waits for the next change.
+	select {
+	case <-first:
+	default:
+		t.Fatalf("the channel answered before the successor took intake did not close")
+	}
+	select {
+	case <-second:
+		t.Fatalf("the channel answered after the change is already closed")
+	default:
+	}
+	if !h.c.ServesIntake() {
+		t.Fatalf("ServesIntake = false after the successor owned everything")
+	}
+}
+
+// TestControllerLockIsReleasedOnlyThroughUnlock pins that no production file
+// releases the controller's lock around unlock, which is the one place a
+// change of ServesIntake's answer is signaled.
+func TestControllerLockIsReleasedOnlyThroughUnlock(t *testing.T) {
+	// Arrange
+	files := sourcescan.Production(t)
+
+	for _, f := range files {
+		t.Run(f.Name, func(t *testing.T) {
+			// Act
+			got := strings.Count(string(f.Source), "c.mu.Unlock()")
+
+			// Assert: unlock itself holds the one direct release.
+			want := 0
+			if f.Name == "standing.go" {
+				want = 1
+			}
+			if got != want {
+				t.Fatalf("%s releases c.mu directly %d times, want %d; release it through c.unlock()", f.Name, got, want)
 			}
 		})
 	}

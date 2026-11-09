@@ -12,6 +12,7 @@ import (
 
 	"agent-repld/internal/deploy"
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/inflight"
 )
 
 // THE PAGE MUX: one stream per browser page, however many views it watches.
@@ -333,12 +334,12 @@ func (s *server) SubscribePage(
 	// subscription a second time and the two can never disagree about which
 	// frame the ending owes.
 	done := make(chan error, 1)
-	go func() {
+	inflight.Standing(func() {
 		defer page.running.Done()
 		err := watch.Run(subCtx)
 		s.endPageSubscription(page, req.Msg.GetSubscription(), err)
 		done <- err
-	}()
+	})
 
 	select {
 	case <-accepted:
@@ -630,6 +631,7 @@ func (s *server) drainPageForExit(rpc string, page *pageStream, ctx context.Cont
 	page.closing = true
 	page.mu.Unlock()
 	drained := make(chan struct{})
+	// inflight: joined: the function that starts it waits for it.
 	go func() {
 		page.running.Wait()
 		close(drained)

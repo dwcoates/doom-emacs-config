@@ -10,6 +10,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/drain"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/inflight"
 	"agent-repld/internal/promptorigin"
 	"agent-repld/internal/resolve/footer"
 	"agent-repld/internal/shimlife"
@@ -451,7 +452,7 @@ func (q *queue) reviveInBackground(ctx context.Context, ws ids.WorkspaceID, caus
 	}
 
 	q.reviving.Add(1)
-	go func() {
+	inflight.Go(func() {
 		defer q.reviving.Done()
 		defer func() {
 			if cause == revivalRelaunch {
@@ -518,7 +519,7 @@ func (q *queue) reviveInBackground(ctx context.Context, ws ids.WorkspaceID, caus
 			return
 		}
 		q.releaseReconnectHolds(ctx, ws, log)
-	}()
+	})
 }
 
 // keepReconnectHolds records, loudly, that a FAILED bring-up leaves every

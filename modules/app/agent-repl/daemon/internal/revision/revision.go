@@ -36,6 +36,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/inflight"
 	"agent-repld/internal/prompts"
 	"agent-repld/internal/resolve/feed"
 	"agent-repld/internal/shimclient"
@@ -136,7 +137,7 @@ func (r *Reviser) Revise(ws ids.WorkspaceID, ask Ask) error {
 		"workspace": string(ws), "row": ask.Row.GetValue(), "words": len(ask.Words), "queued_ahead": len(queued),
 	})
 	if start {
-		go r.drain(ws)
+		inflight.Go(func() { r.drain(ws) })
 	}
 	return nil
 }

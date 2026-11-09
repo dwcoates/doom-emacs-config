@@ -1,6 +1,7 @@
 package dlog
 
 import (
+	"context"
 	"crypto/md5"
 	"encoding/hex"
 	"fmt"
@@ -65,6 +66,8 @@ type TestLogger struct {
 	mu      sync.Mutex
 	records []Record
 	base    Context
+	// appended closes at the next append and is replaced by it (Await).
+	appended chan struct{}
 }
 
 // NewTestLogger returns a Logger that writes nowhere and remembers everything.
@@ -114,6 +117,36 @@ func (l *TestLogger) append(level, operation, message string, ctx Context) {
 		Message:   message,
 		Context:   merge(l.base, ctx),
 	})
+	if l.appended != nil {
+		close(l.appended)
+		l.appended = nil
+	}
+}
+
+// Await answers the first captured record Q matches, waiting for one to be
+// appended until ctx ends. It blocks on the logger's own append, never on a
+// timer: a test that waits for the code under test to reach a point it
+// records waits exactly as long as that takes.
+func (l *TestLogger) Await(ctx context.Context, q RecordQuery) (Record, error) {
+	for {
+		l.mu.Lock()
+		for _, r := range l.records {
+			if q.matches(r) {
+				l.mu.Unlock()
+				return r, nil
+			}
+		}
+		if l.appended == nil {
+			l.appended = make(chan struct{})
+		}
+		next := l.appended
+		l.mu.Unlock()
+		select {
+		case <-next:
+		case <-ctx.Done():
+			return Record{}, fmt.Errorf("no record matching %+v was captured: %w", q, ctx.Err())
+		}
+	}
 }
 
 // derivedTestLogger is a TestLogger view with extra base context. A view
@@ -362,6 +395,11 @@ func (s *TestSurfaces) Close() error { return nil }
 
 // Records returns every record captured through any logger this handed out.
 func (s *TestSurfaces) Records() []Record { return s.logger.Records() }
+
+// Await is TestLogger.Await over every surface's records.
+func (s *TestSurfaces) Await(ctx context.Context, q RecordQuery) (Record, error) {
+	return s.logger.Await(ctx, q)
+}
 
 // ClientRecords returns every ClientLog call, in order.
 func (s *TestSurfaces) ClientRecords() []ClientLogCall {

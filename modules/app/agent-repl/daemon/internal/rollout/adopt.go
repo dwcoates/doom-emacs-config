@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -13,6 +14,8 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/health"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/inflight"
+	"agent-repld/internal/kernelevent"
 	"agent-repld/internal/restarttiming"
 	"agent-repld/internal/sessionlock"
 	"agent-repld/internal/sessionwatcher"
@@ -37,7 +40,7 @@ func (c *controller) Join(ctx context.Context) error {
 	// than fall through to a read-only state handle.
 	c.mu.Lock()
 	c.enterJoiningLocked()
-	c.mu.Unlock()
+	c.unlock()
 
 	// THE TAKEOVER IS KEYED ON THE INCUMBENT'S EXIT, NOT ON EVERY RENDEZVOUS
 	// FINISHING. It used to be triggered only by an adoption that left every
@@ -49,13 +52,20 @@ func (c *controller) Join(ctx context.Context) error {
 	if lifetime == nil {
 		lifetime = context.WithoutCancel(ctx)
 	}
-	go c.awaitIncumbentExit(lifetime)
-	go c.followCarries(lifetime)
-
+	inflight.Standing(func() { c.awaitIncumbentExit(lifetime) })
+	// THE CARRY FOLLOWER'S WATCH IS TAKEN BEFORE THE MANIFEST IS READ below,
+	// so a transfer that re-states a workspace after that read is reported to
+	// it, and the read itself is the follower's first look. THE FOLLOWER
+	// STARTS ONLY ONCE THE READ HAS ADOPTED what it armed: started before, a
+	// change the read itself committed woke it to claim a headless workspace
+	// ahead of this read, and adopt it off this call.
+	carries, stopCarries := c.handoverChanges(lifetime)
 	found, err := c.joinFromManifest(ctx)
 	if err != nil {
+		stopCarries()
 		return err
 	}
+	inflight.Standing(func() { c.followCarries(lifetime, carries, stopCarries) })
 	if !found {
 		// THE MANIFEST ARRIVES LATE BY DESIGN: the incumbent writes it only
 		// after this daemon has reported its address, so a successor that
@@ -67,26 +77,32 @@ func (c *controller) Join(ctx context.Context) error {
 		// adopt on its behalf.
 		c.log.Debug(opJoin, "no intent manifest yet; watching for it",
 			dlog.Context{"path": c.deps.IntentManifest})
-		go c.awaitManifest(ctx)
+		inflight.Standing(func() { c.awaitManifest(ctx) })
 	}
 	return nil
 }
 
-// manifestPoll is how often a joining daemon looks for a manifest that has not
-// arrived yet.
-const manifestPoll = 25 * time.Millisecond
+// handoverChanges reports every change a handover's waits read: the intent
+// manifest written or removed, a carry or a refusal sealed or retired, and
+// every commit to the state database (serving ownership, the handed hold),
+// whichever daemon made it. Each wait checks its condition after this returns
+// and again at every report, so nothing a handover waits on is ever looked
+// for on a timer.
+//
+// The intent directory's parent, the state root, is followed too: before the
+// first handover neither the intent directory nor the carries exist, and the
+// root's change is the intent directory being made.
+func (c *controller) handoverChanges(ctx context.Context) (<-chan error, func()) {
+	intent := filepath.Dir(c.deps.IntentManifest)
+	return kernelevent.Merge(ctx, kernelevent.FollowPaths(filepath.Dir(intent), intent, c.carryDir()), c.deps.DB.Changes)
+}
 
-// awaitManifest keeps looking for the intent manifest until it lands or the
-// daemon stops.
+// awaitManifest waits for the intent manifest until it lands or the daemon
+// stops, joining from it at once.
 func (c *controller) awaitManifest(ctx context.Context) {
-	ticker := time.NewTicker(manifestPoll)
-	defer ticker.Stop()
+	changes, stop := c.handoverChanges(ctx)
+	defer stop()
 	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-		}
 		found, err := c.joinFromManifest(ctx)
 		if err != nil {
 			c.log.Error(opJoin, "the intent manifest could not be joined from",
@@ -95,6 +111,16 @@ func (c *controller) awaitManifest(ctx context.Context) {
 		}
 		if found {
 			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case err := <-changes:
+			if err != nil {
+				c.log.Error(opJoin, "could not watch for the intent manifest; this daemon does not join until it restarts",
+					dlog.WithCause(dlog.Context{"path": c.deps.IntentManifest}, err))
+				return
+			}
 		}
 	}
 }
@@ -177,7 +203,7 @@ func (c *controller) adoptClaimed(ctx context.Context, claimed []ids.WorkspaceID
 			inline = append(inline, ws)
 			continue
 		}
-		go c.adoptOne(ctx, ws)
+		inflight.Go(func() { c.adoptOne(ctx, ws) })
 	}
 	for _, ws := range inline {
 		c.adoptOne(ctx, ws)
@@ -201,6 +227,7 @@ func (c *controller) adoptOne(ctx context.Context, ws ids.WorkspaceID) {
 	// THE CLAIM IS RELEASED ON FAILURE so this workspace can be tried again;
 	// an adoption that never happened must not look like one that did.
 	c.releaseAdoption(ws)
+	c.setRetrying(ws, true)
 	// AND SOMETHING MUST ACTUALLY TRY AGAIN. Releasing the claim only makes a
 	// retry POSSIBLE: `awaitManifest` stops the moment a manifest is read and
 	// `armFromManifest` arms without adopting, so a single transient failure
@@ -208,7 +235,7 @@ func (c *controller) adoptOne(ctx context.Context, ws ids.WorkspaceID) {
 	// out its whole AdoptionWindow for it and delayed its exit
 	// (`TestEmacsHandoverTransfersAtFreeness' under load, promotion at 32s and
 	// 42s against ~2s healthy).
-	go c.retryAdoption(ctx, ws)
+	inflight.Standing(func() { c.retryAdoption(ctx, ws) })
 }
 
 // awaitParticipantsForTest is the Deps.AdoptAwaitsParticipants seam: with it
@@ -225,7 +252,7 @@ func (c *controller) awaitParticipantsForTest(ctx context.Context, ws ids.Worksp
 	if armed && e.expected.Count() > 0 {
 		called = e.called
 	}
-	c.mu.Unlock()
+	c.unlock()
 	if called == nil {
 		return true
 	}
@@ -252,13 +279,13 @@ func (c *controller) driveAdoption(ctx context.Context, ws ids.WorkspaceID, sour
 	c.mu.Lock()
 	e, armed := c.rendezvous[ws]
 	if armed && e.adopted {
-		c.mu.Unlock()
+		c.unlock()
 		return nil
 	}
 	if armed {
 		e.beginAdoption()
 	}
-	c.mu.Unlock()
+	c.unlock()
 	err := c.adopt(context.WithoutCancel(ctx), ws, source)
 	if armed {
 		c.mu.Lock()
@@ -267,7 +294,7 @@ func (c *controller) driveAdoption(ctx context.Context, ws ids.WorkspaceID, sour
 			// A FAILED ADOPTION MAY BE RUN AGAIN by the next claim holder.
 			e.adopting = false
 		}
-		c.mu.Unlock()
+		c.unlock()
 	}
 	return err
 }
@@ -292,6 +319,7 @@ const (
 // It is driven by the injected Clock, so a test drives the backoff rather than
 // waiting it out.
 func (c *controller) retryAdoption(ctx context.Context, ws ids.WorkspaceID) {
+	defer c.setRetrying(ws, false)
 	delay := adoptRetryInitial
 	for attempt := 1; ; attempt++ {
 		select {
@@ -325,11 +353,11 @@ func (c *controller) reclaimArmed(ws ids.WorkspaceID) bool {
 	c.mu.Lock()
 	e, ok := c.rendezvous[ws]
 	if !ok || e.adopted || e.adoptionClaimed {
-		c.mu.Unlock()
+		c.unlock()
 		return false
 	}
-	e.adoptionClaimed = true
-	c.mu.Unlock()
+	e.claim()
+	c.unlock()
 	c.logTransition(opJoin, ws, "adoption_claimed", false, true, nil)
 	return true
 }
@@ -370,7 +398,7 @@ func (c *controller) armSessions(outgoing ids.InstanceID, writtenAt time.Time, s
 		armed = append(armed, session)
 		added++
 	}
-	c.mu.Unlock()
+	c.unlock()
 	for _, session := range armed {
 		c.logTransition(opJoin, session.Workspace, "rendezvous", "unarmed", "armed", dlog.Context{
 			"expected_host": session.ExpectedHost,
@@ -397,13 +425,13 @@ func (c *controller) claimArmed() []ids.WorkspaceID {
 	c.mu.Lock()
 	claimed := make([]ids.WorkspaceID, 0, len(c.rendezvous))
 	for ws, e := range c.rendezvous {
-		if e.adopted || e.adoptionClaimed {
+		if e.adopted || e.adoptionClaimed || e.retrying {
 			continue
 		}
-		e.adoptionClaimed = true
+		e.claim()
 		claimed = append(claimed, ws)
 	}
-	c.mu.Unlock()
+	c.unlock()
 	for _, ws := range claimed {
 		c.logTransition(opJoin, ws, "adoption_claimed", false, true, nil)
 	}
@@ -413,7 +441,7 @@ func (c *controller) claimArmed() []ids.WorkspaceID {
 // rendezvousSize reports how many workspaces are armed in total.
 func (c *controller) rendezvousSize() int {
 	c.mu.Lock()
-	defer c.mu.Unlock()
+	defer c.unlock()
 	return len(c.rendezvous)
 }
 
@@ -477,7 +505,7 @@ func (c *controller) rendezvousCall(ctx context.Context, ws ids.WorkspaceID, ope
 	// daemon's address sat 10s in that entry, failed its boot, and the
 	// successor's rendezvous waited the same 10s for a page that never came.
 	if successor := c.transferred[ws]; successor != "" {
-		c.mu.Unlock()
+		c.unlock()
 		c.log.Info(operation, "this daemon handed the workspace to a successor; the caller is pointed there",
 			dlog.Merge(fields, dlog.Context{"successor": successor}))
 		return ErrTransferredAway
@@ -492,7 +520,7 @@ func (c *controller) rendezvousCall(ctx context.Context, ws ids.WorkspaceID, ope
 		// armed nothing at boot is the ordinary case, not a refusal: it
 		// re-reads here, when a participant actually calls, and WAITS for the
 		// manifest that has not landed.
-		c.mu.Unlock()
+		c.unlock()
 		if err := c.awaitArm(ctx, ws, operation, fields); err != nil {
 			return err
 		}
@@ -500,19 +528,19 @@ func (c *controller) rendezvousCall(ctx context.Context, ws ids.WorkspaceID, ope
 		e, armed = c.rendezvous[ws]
 	}
 	if !armed {
-		c.mu.Unlock()
+		c.unlock()
 		// INFO, not WARN: on the web side this is what a page boot looks like
 		// when nothing was handed over, which is almost every boot.
 		c.log.Info(operation, "no transfer was announced for this workspace", fields)
 		return ErrNoTransferAnnounced
 	}
 	if e.adopted {
-		c.mu.Unlock()
+		c.unlock()
 		c.log.Debug(operation, "the workspace is already adopted; the call succeeds at once", fields)
 		return nil
 	}
 	if !expects(e) {
-		c.mu.Unlock()
+		c.unlock()
 		// INFO, not WARN: a page Emacs loaded mid-handover is not part of
 		// the transfer, and it waits for the expected participants to
 		// complete the rendezvous before its adoption is answered at once.
@@ -531,10 +559,9 @@ func (c *controller) rendezvousCall(ctx context.Context, ws ids.WorkspaceID, ope
 	// caller's context.
 	claimNow := !e.adoptionClaimed
 	if claimNow {
-		e.adoptionClaimed = true
 		// A RE-RUN IS A NEW COMPLETION: an earlier failed run's closed done
 		// must not answer this caller with that run's failure.
-		e.beginAdoption()
+		e.claim()
 	}
 	done := e.done
 	state := dlog.Context{
@@ -542,11 +569,12 @@ func (c *controller) rendezvousCall(ctx context.Context, ws ids.WorkspaceID, ope
 		"host_called": e.hostCalled, "web_called": e.webCalled,
 		"adopting": e.adopting,
 	}
-	c.mu.Unlock()
+	c.unlock()
 	c.logTransition(operation, ws, "participants_called", before, after, nil)
 	if claimNow {
 		c.logTransition(operation, ws, "adoption_claimed", false, true, nil)
-		go c.adoptClaimed(c.lifetime(ctx), []ids.WorkspaceID{ws})
+		lifetime := c.lifetime(ctx)
+		inflight.Go(func() { c.adoptClaimed(lifetime, []ids.WorkspaceID{ws}) })
 	}
 	c.log.Info(operation, "a participant called; it waits for the daemon's adoption of the workspace",
 		dlog.Merge(fields, state))
@@ -566,7 +594,7 @@ func (c *controller) awaitRendezvous(ctx context.Context, e *entry, done <-chan 
 	case <-done:
 		c.mu.Lock()
 		failed := e.failed
-		c.mu.Unlock()
+		c.unlock()
 		if failed != nil {
 			return failed
 		}
@@ -580,7 +608,7 @@ func (c *controller) awaitRendezvous(ctx context.Context, e *entry, done <-chan 
 			"expected_host": e.expected.Host, "expected_web": e.expected.Web,
 			"host_called": e.hostCalled, "web_called": e.webCalled,
 		}
-		c.mu.Unlock()
+		c.unlock()
 		c.log.Info(operation, "the caller gave up before the rendezvous completed", dlog.Merge(fields, outstanding))
 		return ErrNotYetAdopted
 	}
@@ -604,11 +632,11 @@ func (c *controller) adopt(ctx context.Context, ws ids.WorkspaceID, source strin
 		c.adopting = map[ids.WorkspaceID]bool{}
 	}
 	c.adopting[ws] = true
-	c.mu.Unlock()
+	c.unlock()
 	defer func() {
 		c.mu.Lock()
 		delete(c.adopting, ws)
-		c.mu.Unlock()
+		c.unlock()
 	}()
 	outgoing, err := c.outgoingDaemon(ws)
 	if err != nil {
@@ -739,7 +767,7 @@ func (c *controller) adopt(ctx context.Context, ws ids.WorkspaceID, source strin
 	// workspace served, never refused not_yet_adopted.
 	c.mu.Lock()
 	c.beginClaimedLocked()
-	c.mu.Unlock()
+	c.unlock()
 	claimEnded := false
 	defer func() {
 		if claimEnded {
@@ -747,7 +775,7 @@ func (c *controller) adopt(ctx context.Context, ws ids.WorkspaceID, source strin
 		}
 		c.mu.Lock()
 		c.endClaimedLocked()
-		c.mu.Unlock()
+		c.unlock()
 	}()
 	// FROM THE CLAIM ON, THE HANDOVER HOLD IS THIS DAEMON'S TO DRAIN, and it
 	// is drained whether or not the shim answers: a workspace this daemon
@@ -852,7 +880,7 @@ func (c *controller) adopt(ctx context.Context, ws ids.WorkspaceID, source strin
 			break
 		}
 	}
-	c.mu.Unlock()
+	c.unlock()
 	c.logTransition(opAdopt, ws, "owned", wasOwned, true,
 		dlog.Context{"all_joining_owned": complete})
 
@@ -915,7 +943,7 @@ func (c *controller) recordForcedTakeover(forced bool) {
 	c.mu.Lock()
 	before := c.forcedTakeover
 	c.forcedTakeover = true
-	c.mu.Unlock()
+	c.unlock()
 	if !before {
 		c.log.Info(opJoin, "the handover being joined was forced; stale adopted shims are bounced at once", nil)
 	}
@@ -927,7 +955,7 @@ func (c *controller) recordManifestSeen() {
 	c.mu.Lock()
 	first := !c.manifestSeen
 	c.manifestSeen = true
-	c.mu.Unlock()
+	c.unlock()
 	if first {
 		c.log.Debug(opJoin, "rollout state changed", dlog.Context{
 			"state": "manifest_seen", "before": false, "after": true,
@@ -965,10 +993,12 @@ func (c *controller) recordManifestSeen() {
 // Returning nil does not mean armed: the caller re-reads the ledger and
 // answers the refusal itself, so the two arms keep one record between them.
 func (c *controller) awaitArm(ctx context.Context, ws ids.WorkspaceID, operation string, fields dlog.Context) error {
-	// THE BOUND IS ARMED ONLY IF THIS CALL ACTUALLY WAITS. The overwhelmingly
-	// common path — a manifest already in hand, or none because no handover is
-	// in flight — answers on the first read and must cost nothing.
+	// THE BOUND AND THE WATCH ARE TAKEN ONLY IF THIS CALL ACTUALLY WAITS. The
+	// overwhelmingly common path — a manifest already in hand, or none
+	// because no handover is in flight — answers on the first read and must
+	// cost nothing.
 	var bound <-chan time.Time
+	var changes <-chan error
 	waiting := false
 	for {
 		if err := c.armFromManifest(); err != nil {
@@ -978,7 +1008,7 @@ func (c *controller) awaitArm(ctx context.Context, ws ids.WorkspaceID, operation
 		c.mu.Lock()
 		_, armed := c.rendezvous[ws]
 		seen := c.manifestSeen
-		c.mu.Unlock()
+		c.unlock()
 		if armed {
 			if waiting {
 				c.log.Info(operation, "the intent manifest arrived and armed this workspace; the held adopt call resumes", fields)
@@ -991,12 +1021,15 @@ func (c *controller) awaitArm(ctx context.Context, ws ids.WorkspaceID, operation
 		}
 		if !waiting {
 			c.log.Info(operation, "no intent manifest yet; holding this adopt call until the incumbent writes one",
-				dlog.Merge(fields, dlog.Context{
-					"poll_interval": manifestPoll.String(),
-					"bound":         c.deps.AdoptionWindow.String(),
-				}))
+				dlog.Merge(fields, dlog.Context{"bound": c.deps.AdoptionWindow.String()}))
 			waiting = true
 			bound = c.deps.Clock.After(c.deps.AdoptionWindow)
+			// The watch is taken before the next read, so a manifest written
+			// in between is reported.
+			var stop func()
+			changes, stop = c.handoverChanges(ctx)
+			defer stop()
+			continue
 		}
 		select {
 		case <-ctx.Done():
@@ -1009,7 +1042,11 @@ func (c *controller) awaitArm(ctx context.Context, ws ids.WorkspaceID, operation
 			c.log.Info(operation, "no intent manifest arrived within the adoption window; nothing was announced for this workspace",
 				dlog.Merge(fields, dlog.Context{"bound": c.deps.AdoptionWindow.String()}))
 			return nil
-		case <-c.deps.Clock.After(manifestPoll):
+		case err := <-changes:
+			if err != nil {
+				c.log.Error(operation, "could not watch for the intent manifest", dlog.WithCause(fields, err))
+				return err
+			}
 		}
 	}
 }
@@ -1019,7 +1056,7 @@ func (c *controller) awaitArm(ctx context.Context, ws ids.WorkspaceID, operation
 // predecessor from an unrelated serving owner, so it is an invariant error.
 func (c *controller) outgoingDaemon(ws ids.WorkspaceID) (ids.InstanceID, error) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
+	defer c.unlock()
 	e, ok := c.rendezvous[ws]
 	if !ok {
 		return "", fmt.Errorf("rollout: adopt %q: no rendezvous is armed", ws)
@@ -1036,6 +1073,10 @@ func (c *controller) outgoingDaemon(ws ids.WorkspaceID) (ids.InstanceID, error) 
 // finish. Claiming before the serving row clears lets the successor race the
 // incumbent's release and can strand every transfer notice behind that error.
 func (c *controller) awaitServingRelease(ctx context.Context, ws ids.WorkspaceID, outgoing ids.InstanceID, fields dlog.Context) error {
+	// The watch is taken before the first read, so a release in between is
+	// reported.
+	changes, stop := c.handoverChanges(ctx)
+	defer stop()
 	waiting := false
 	for {
 		owner, err := c.deps.DB.Serving(ctx, ws)
@@ -1060,10 +1101,7 @@ func (c *controller) awaitServingRelease(ctx context.Context, ws ids.WorkspaceID
 		}
 		if !waiting {
 			c.log.Info(opAdopt, "waiting for the incumbent to release serving ownership at freeness",
-				dlog.Merge(fields, dlog.Context{
-					"serving_daemon": string(*owner),
-					"poll_interval":  manifestPoll.String(),
-				}))
+				dlog.Merge(fields, dlog.Context{"serving_daemon": string(*owner)}))
 			waiting = true
 		}
 		select {
@@ -1071,7 +1109,11 @@ func (c *controller) awaitServingRelease(ctx context.Context, ws ids.WorkspaceID
 			err := context.Cause(ctx)
 			c.log.Error(opAdopt, "the adoption lifetime ended before the incumbent released serving ownership", dlog.WithCause(fields, err))
 			return fmt.Errorf("rollout: adopt %q: wait for incumbent serving release: %w", ws, err)
-		case <-c.deps.Clock.After(manifestPoll):
+		case err := <-changes:
+			if err != nil {
+				c.log.Error(opAdopt, "could not watch the state database for the incumbent's release", dlog.WithCause(fields, err))
+				return fmt.Errorf("rollout: adopt %q: watch for incumbent serving release: %w", ws, err)
+			}
 		}
 	}
 }
@@ -1114,7 +1156,7 @@ func (c *controller) advertise(ctx context.Context, fields dlog.Context) {
 	if lifetime == nil {
 		lifetime = context.WithoutCancel(ctx)
 	}
-	go c.retryAdvertise(lifetime, fields)
+	inflight.Standing(func() { c.retryAdvertise(lifetime, fields) })
 }
 
 // becomeIncumbent ends this daemon's JOINING standing: it is now the only
@@ -1150,17 +1192,17 @@ func (c *controller) becomeIncumbent(fields dlog.Context) {
 		if !owned {
 			c.closeTookOverLocked()
 		}
-		c.mu.Unlock()
+		c.unlock()
 		c.log.Debug(opAdopt, "this daemon is already the incumbent; there is no takeover to run",
 			dlog.Merge(fields, dlog.Context{"takeover_owned": owned}))
 		return
 	}
 	c.takeoverOwned = true
-	c.mu.Unlock()
+	c.unlock()
 	defer func() {
 		c.mu.Lock()
 		c.closeTookOverLocked()
-		c.mu.Unlock()
+		c.unlock()
 	}()
 	c.log.Info(opAdopt, "the outgoing daemon is gone; this daemon now serves every workspace it was not handed",
 		dlog.Merge(fields, dlog.Context{"state": "joining_mode", "before": true, "after": false}))
@@ -1223,13 +1265,13 @@ func (c *controller) enterJoiningLocked() {
 func (c *controller) settleTakeover(fields dlog.Context) {
 	c.mu.Lock()
 	latch := c.settled
-	c.mu.Unlock()
-	go func() {
+	c.unlock()
+	inflight.Go(func() {
 		c.stragglerAdoptions.Wait()
 		c.bringUps.Wait()
 		c.log.Info(opAdopt, "the takeover settled: every adoption and session bring-up it started has finished", fields)
 		close(latch)
-	}()
+	})
 }
 
 // awaitTakeoverSettled waits for the takeover-settled latch, or for ctx. A
@@ -1238,7 +1280,7 @@ func (c *controller) settleTakeover(fields dlog.Context) {
 func (c *controller) awaitTakeoverSettled(ctx context.Context, fields dlog.Context) error {
 	c.mu.Lock()
 	latch := c.settled
-	c.mu.Unlock()
+	c.unlock()
 	select {
 	case <-latch:
 		return nil
@@ -1297,7 +1339,7 @@ func (c *controller) TookOver() <-chan struct{} {
 // tookOverSignal is tookOverSignalLocked for a caller that does not hold c.mu.
 func (c *controller) tookOverSignal() <-chan struct{} {
 	c.mu.Lock()
-	defer c.mu.Unlock()
+	defer c.unlock()
 	return c.tookOverSignalLocked()
 }
 
@@ -1333,7 +1375,7 @@ func (c *controller) adoptStragglers(fields dlog.Context) {
 		}
 		stragglers = append(stragglers, ws)
 	}
-	c.mu.Unlock()
+	c.unlock()
 	if midAdoption > 0 {
 		c.log.Info(opAdopt, "workspaces still mid-adoption at the takeover are owned from now; their own adoptions finish them",
 			dlog.Merge(fields, dlog.Context{"workspaces": midAdoption}))
@@ -1349,13 +1391,13 @@ func (c *controller) adoptStragglers(fields dlog.Context) {
 		dlog.Merge(fields, dlog.Context{"workspaces": len(stragglers)}))
 	for _, ws := range stragglers {
 		c.stragglerAdoptions.Add(1)
-		go func(ws ids.WorkspaceID) {
+		inflight.Go(func() {
 			defer c.stragglerAdoptions.Done()
 			if err := c.adopt(lifetime, ws, "straggler"); err != nil {
 				c.log.Error(opAdopt, "a workspace whose handover never finished could not have its session adopted; it is served without one",
 					dlog.WithCause(dlog.Merge(fields, dlog.Context{"workspace": string(ws)}), err))
 			}
-		}(ws)
+		})
 	}
 }
 
@@ -1429,6 +1471,7 @@ func (c *controller) judgeLiveShims(fields dlog.Context) (map[ids.WorkspaceID][]
 // wait goes on: the incumbent may yet exit.
 func (c *controller) retryAdvertise(ctx context.Context, fields dlog.Context) {
 	claimed := make(chan error, 1)
+	// inflight: joined: the function that starts it waits for it.
 	go func() { claimed <- c.deps.AwaitBootClaim(ctx) }()
 	select {
 	case err := <-claimed:
@@ -1516,7 +1559,7 @@ func (c *controller) endClaimedLocked() {
 func (c *controller) awaitClaimedOwned(ctx context.Context, fields dlog.Context) error {
 	c.mu.Lock()
 	n, idle := c.claimedAdoptions, c.claimedIdle
-	c.mu.Unlock()
+	c.unlock()
 	if n == 0 {
 		return nil
 	}
@@ -1530,6 +1573,16 @@ func (c *controller) awaitClaimedOwned(ctx context.Context, fields dlog.Context)
 	}
 }
 
+// setRetrying marks whether a failed adoption's retry owns the workspace
+// (entry.retrying).
+func (c *controller) setRetrying(ws ids.WorkspaceID, retrying bool) {
+	c.mu.Lock()
+	defer c.unlock()
+	if e, ok := c.rendezvous[ws]; ok {
+		e.retrying = retrying
+	}
+}
+
 // releaseAdoption undoes a headless claim whose adoption failed.
 func (c *controller) releaseAdoption(ws ids.WorkspaceID) {
 	c.mu.Lock()
@@ -1538,7 +1591,7 @@ func (c *controller) releaseAdoption(ws ids.WorkspaceID) {
 		changed = e.adoptionClaimed
 		e.adoptionClaimed = false
 	}
-	c.mu.Unlock()
+	c.unlock()
 	if changed {
 		c.logTransition(opJoin, ws, "adoption_claimed", true, false, nil)
 	}

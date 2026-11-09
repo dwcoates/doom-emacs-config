@@ -150,6 +150,7 @@ func (systemLid) Watch(ctx context.Context, heard func(Lid)) error {
 	finished := make(chan struct{})
 	var stopper sync.WaitGroup
 	stopper.Add(1)
+	// inflight: joined: the function that starts it waits for it.
 	go func() {
 		defer stopper.Done()
 		select {

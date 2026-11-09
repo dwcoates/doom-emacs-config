@@ -37,7 +37,7 @@ func TestRegisteringAWorkspaceDrawsOneRowWithStatusNone(t *testing.T) {
 	if row.GetNone() == nil {
 		t.Fatalf("a registered workspace's status = %T, want RosterRowStatusNone before any session", row.GetStatus())
 	}
-	harness.ExpectNoPush(t, roster, harness.ProbeWindow, "registering a workspace produces exactly one roster push")
+	harness.ExpectNoPush(t, roster, "registering a workspace produces exactly one roster push")
 }
 
 func TestRosterStatusFollowsTheSessionLifecycle(t *testing.T) {

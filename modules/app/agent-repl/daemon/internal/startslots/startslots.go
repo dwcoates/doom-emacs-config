@@ -30,6 +30,7 @@ import (
 	"sync"
 
 	"agent-repld/internal/ids"
+	"agent-repld/internal/inflight"
 )
 
 // DefaultSize is how many vendor starts run at once: a quarter of the
@@ -153,7 +154,7 @@ func (p *Pool) Notify(ws ids.WorkspaceID, fn func(Release)) bool {
 	// waiting on a release that is not coming.
 	if p.held < p.size && len(p.line) == 0 {
 		release := p.takeLocked(ws)
-		go fn(release)
+		inflight.Go(func() { fn(release) })
 		return true
 	}
 	p.line = append(p.line, &waiter{ws: ws, notify: fn})
@@ -209,7 +210,8 @@ func (p *Pool) release(ws ids.WorkspaceID) {
 	p.holders[next.ws]++
 	p.mu.Unlock()
 	if next.notify != nil {
-		go next.notify(p.releaser(next.ws))
+		release := p.releaser(next.ws)
+		inflight.Go(func() { next.notify(release) })
 		return
 	}
 	close(next.granted)
