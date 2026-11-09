@@ -29,6 +29,14 @@ const redactedName = "<redacted>"
 // sleepDisabled matches `pmset -g`'s system-wide line when sleep is disabled.
 var sleepDisabled = regexp.MustCompile(`(?m)^\s*SleepDisabled\s+(\d+)\s*$`)
 
+// energyModeLine matches `pmset -g`'s "Currently in use" line naming the energy
+// mode (1 Low Power, 2 High Power). Machines without an energy mode print none.
+var energyModeLine = regexp.MustCompile(`(?m)^\s*powermode\s+(\d+)\s*$`)
+
+// powerSourceLine matches `pmset -g ps`'s first line, naming what the machine
+// draws from.
+var powerSourceLine = regexp.MustCompile(`(?m)^Now drawing from '([^']*)'`)
+
 // run runs argv and folds every way it can fail into one error naming the
 // tool, the code and its output, for the probe and change sites alike.
 func run(ctx context.Context, r Runner, argv ...string) (string, error) {
@@ -50,6 +58,26 @@ func parseMode(out string) (on, ok bool) {
 		return false, false
 	}
 	return m[1] != "0", true
+}
+
+// parseEnergyMode reads the energy mode `pmset -g` says is in use; empty when
+// the output names none.
+func parseEnergyMode(out string) string {
+	if m := energyModeLine.FindStringSubmatch(out); m != nil {
+		return m[1]
+	}
+	return ""
+}
+
+// parsePowerSource reads `pmset -g ps`: onAC is whether the machine draws from
+// AC power, and ok is false when the output names no source, which it always
+// does.
+func parsePowerSource(out string) (onAC, ok bool) {
+	m := powerSourceLine.FindStringSubmatch(out)
+	if m == nil {
+		return false, false
+	}
+	return m[1] == "AC Power", true
 }
 
 // wifiInterface finds the Wi-Fi interface's device name in
@@ -116,6 +144,10 @@ type reading struct {
 	device string
 	// link is the interface's link; zero when device is empty.
 	link link
+	// energy is the energy mode in use (energyModeLowPower or
+	// energyModeHighPower); empty when the machine names none or it could not
+	// be read.
+	energy string
 	// wifiErr and modeErr are why a fact was left unassigned; nil when read.
 	wifiErr, modeErr error
 }
@@ -125,7 +157,9 @@ type reading struct {
 func probe(ctx context.Context, r Runner, tools Tools) reading {
 	rd := reading{state: &agentreplv1.PersistentWifiState{}}
 
-	if out, err := run(ctx, r, tools.Pmset, "-g"); err != nil {
+	out, err := run(ctx, r, tools.Pmset, "-g")
+	rd.energy = parseEnergyMode(out)
+	if err != nil {
 		rd.modeErr = err
 	} else if on, ok := parseMode(out); !ok {
 		rd.modeErr = fmt.Errorf("%s -g printed no SleepDisabled line", tools.Pmset)

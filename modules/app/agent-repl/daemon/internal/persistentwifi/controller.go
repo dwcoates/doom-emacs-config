@@ -81,6 +81,9 @@ type Controller struct {
 	// failoverCause is why the hotspot failover last could not take; empty
 	// while it has nothing standing against it (failoverLocked).
 	failoverCause string
+	// energyCause is why the energy mode last could not follow the lid and the
+	// power source; empty while nothing stands against it (reconcileEnergyLocked).
+	energyCause string
 	// failover is the hotspot failover's retry schedule since Wi-Fi was lost;
 	// the zero value while the failover stands down (failoverLocked).
 	failover failoverSchedule
@@ -427,6 +430,7 @@ func (c *Controller) lidHeard(ctx context.Context, lid lidFact) {
 		return
 	}
 	display := c.moveDisplayLocked(ctx, modeOf(rd.state), "lid_"+lid.name())
+	c.reconcileEnergyLocked(ctx, rd, "lid_"+lid.name())
 	if display.GetUnchanged() == nil {
 		c.republishLocked()
 	}

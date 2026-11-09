@@ -5,7 +5,8 @@
 // It is the daemon-side port of the owner's `laptop_keep_alive` script, and it
 // keeps that script's behavior and step order (hotspot, power settings,
 // display; see endpoint_update_persistent_wifi_mode.proto), with an energy
-// mode step (Low Power Mode on, High Power Mode off) before the display. The
+// mode step (Low Power Mode on, except High Power Mode under a closed lid on AC
+// power, which energy.go holds to; High Power Mode off) before the display. The
 // display FOLLOWS THE LID while the mode is on (display.go): a closed lid
 // dims it to 0 and opening it restores the level kept when it closed. The
 // lid is HEARD through IOKit's clamshell notification (lid_darwin.go), never

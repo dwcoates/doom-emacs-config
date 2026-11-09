@@ -116,7 +116,23 @@ const (
 	ports    = "Hardware Port: Ethernet\nDevice: en5\n\nHardware Port: Wi-Fi\nDevice: en0\nEthernet Address: aa\n"
 	noWifi   = "Hardware Port: Ethernet\nDevice: en5\n"
 	hotspot  = "Test Hotspot"
+	// onAC and onBattery are `pmset -g ps`'s answers.
+	onAC      = "Now drawing from 'AC Power'\n -InternalBattery-0 (id=1)\t100%; charged; 0:00 remaining present: true\n"
+	onBattery = "Now drawing from 'Battery Power'\n -InternalBattery-0 (id=1)\t80%; discharging; 4:00 remaining present: true\n"
 )
+
+// pmsetIn is `pmset -g` for a mode on or off and an energy mode in use (empty
+// names none).
+func pmsetIn(on bool, energy string) string {
+	out := pmsetOff
+	if on {
+		out = pmsetOn
+	}
+	if energy != "" {
+		out += " powermode            " + energy + "\n"
+	}
+	return out
+}
 
 // summary composes an `ipconfig getsummary` dictionary.
 func summary(active bool, ssid string) string {
@@ -133,14 +149,16 @@ func summary(active bool, ssid string) string {
 
 // Argv keys of every tool call.
 const (
-	argPmsetRead  = "/t/pmset -g"
-	argPorts      = "/t/networksetup -listallhardwareports"
-	argSummary    = "/t/ipconfig getsummary en0"
-	argJoin       = "/t/networksetup -setairportnetwork en0 " + hotspot
-	argPreferred  = "/t/networksetup -listpreferredwirelessnetworks en0"
-	argDisconnect = "/t/wifi-util disconnect"
-	argRadioOff   = "/t/networksetup -setairportpower en0 off"
-	argRadioOn    = "/t/networksetup -setairportpower en0 on"
+	argPmsetRead = "/t/pmset -g"
+	// argPowerSource reads what the machine draws from.
+	argPowerSource = "/t/pmset -g ps"
+	argPorts       = "/t/networksetup -listallhardwareports"
+	argSummary     = "/t/ipconfig getsummary en0"
+	argJoin        = "/t/networksetup -setairportnetwork en0 " + hotspot
+	argPreferred   = "/t/networksetup -listpreferredwirelessnetworks en0"
+	argDisconnect  = "/t/wifi-util disconnect"
+	argRadioOff    = "/t/networksetup -setairportpower en0 off"
+	argRadioOn     = "/t/networksetup -setairportpower en0 on"
 	// argBrightnessRead reads the display's level.
 	argBrightnessRead = "/t/mac-brightness"
 	// argLidDim sets the closed lid's level.

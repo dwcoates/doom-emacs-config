@@ -34,6 +34,11 @@ type harness struct {
 // finds.
 func (h *harness) withLid(kind lidKind) *harness {
 	h.c.lid = lidFact{kind: kind}
+	if kind == lidClosed {
+		// A closed lid asks the power source; unless a test scripts another, the
+		// machine is on battery, where the energy mode stays low.
+		h.r.on(argPowerSource, answer{out: onBattery})
+	}
 	return h
 }
 

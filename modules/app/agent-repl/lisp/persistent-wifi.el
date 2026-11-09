@@ -183,7 +183,8 @@ push of the same standing then reads as unchanged."
 (defun agent-repl-persistent-wifi-mode-toggle ()
   "Turn the machine's persistent wifi mode (lid-closed operation) over.
 On: join the phone hotspot, disable system sleep, switch to Low Power
-Mode; while on, the daemon rejoins the hotspot whenever Wi-Fi is lost,
+Mode (High Power Mode while the lid is closed on AC power, and back to Low
+Power Mode when the lid opens or the charger is unplugged); while on, the daemon rejoins the hotspot whenever Wi-Fi is lost,
 and the display follows the lid (dimmed while it is closed, restored when
 it opens).  Off: leave the hotspot, enable sleep, switch to High Power
 Mode, and restore the display if a lid-close dim is in force.  The daemon reads

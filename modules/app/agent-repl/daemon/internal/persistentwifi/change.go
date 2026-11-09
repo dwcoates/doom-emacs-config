@@ -12,8 +12,9 @@ import (
 )
 
 // Energy modes the energy mode step sets through `pmset -a powermode`: macOS's
-// Low Power Mode when the mode goes on, so a lid-closed machine draws as little
-// as it can, and High Power Mode when it goes off. The sudoers grant names both
+// Low Power Mode while the mode is on, so a lid-closed machine draws as little
+// as it can, except that a closed lid on AC power runs High Power Mode, and High
+// Power Mode when the mode is off (energy.go). The sudoers grant names both
 // invocations.
 const (
 	energyModeLowPower  = "1"
@@ -239,19 +240,20 @@ func (c *Controller) pmsetAll(ctx context.Context, setting, value string) error 
 }
 
 // setEnergyMode is the energy mode step. No outcome of it fails the request:
-// the machine stays awake whichever energy mode it runs in.
+// the machine stays awake whichever energy mode it runs in. The mode it sets is
+// energyModeFor's, which reads the power source when the lid is closed.
 func (c *Controller) setEnergyMode(ctx context.Context, on bool) *agentreplv1.UpdatePersistentWifiModeEnergyMode {
-	mode := energyModeHighPower
-	if on {
-		mode = energyModeLowPower
-	}
 	e := &agentreplv1.UpdatePersistentWifiModeEnergyMode{}
-	switch err := c.pmsetAll(ctx, "powermode", mode); {
+	mode, err := c.energyModeFor(ctx, on)
+	if err == nil {
+		err = c.pmsetAll(ctx, "powermode", mode)
+	}
+	switch {
 	case err != nil:
 		e.Outcome = &agentreplv1.UpdatePersistentWifiModeEnergyMode_Failed{
 			Failed: &agentreplv1.UpdatePersistentWifiModeEnergyModeFailed{Detail: err.Error()},
 		}
-	case on:
+	case mode == energyModeLowPower:
 		e.Outcome = &agentreplv1.UpdatePersistentWifiModeEnergyMode_LowPower{
 			LowPower: &agentreplv1.UpdatePersistentWifiModeEnergyModeLowPower{},
 		}
