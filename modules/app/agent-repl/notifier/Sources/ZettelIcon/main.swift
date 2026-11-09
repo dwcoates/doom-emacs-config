@@ -1,6 +1,8 @@
 // Renders Zettel.app's icon at one pixel size: a New York serif "Z" in the
 // canonical purple (AGENTS.md "The canonical purple", its fixed dark value
-// #7d4bcf) on a white rounded square of the macOS app-icon grid. The icon is
+// #7d4bcf) on a rounded square of the macOS app-icon grid filled with the
+// composer's background (the webapp's `--sidebar-ground` in the dark theme:
+// `--sidebar-base` #1a1a1a mixed 88% with black, #171717). The icon is
 // rendered from this source at build time, never committed as an image.
 //
 // Usage: ZettelIcon <pixels> <out.png>
@@ -20,7 +22,8 @@ NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
 // continuous curve approximated at 22.5% of its width.
 let inset = size * 0.0977
 let body = NSRect(x: inset, y: inset, width: size - 2 * inset, height: size - 2 * inset)
-NSColor.white.setFill()
+let composerBackground = NSColor(srgbRed: 0x17 / 255, green: 0x17 / 255, blue: 0x17 / 255, alpha: 1)
+composerBackground.setFill()
 NSBezierPath(roundedRect: body, xRadius: body.width * 0.225, yRadius: body.width * 0.225).fill()
 let descriptor = NSFont.systemFont(ofSize: body.height * 0.78, weight: .semibold).fontDescriptor.withDesign(.serif)!
 let font = NSFont(descriptor: descriptor, size: body.height * 0.78)!

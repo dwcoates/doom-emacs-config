@@ -53,8 +53,9 @@ and an unplanned one is an ERROR recovered by the next advertisement. A
 ## The icon
 
 A New York serif `Z` in the canonical purple (`AGENTS.md`, "The canonical
-purple": its fixed dark value `#7d4bcf`) on a white rounded square of the
-macOS app-icon grid. It is rendered from `Sources/ZettelIcon` at build time and
+purple": its fixed dark value `#7d4bcf`) on a rounded square of the macOS
+app-icon grid filled with the composer's background (the webapp's
+`--sidebar-ground` in the dark theme, `#171717`). It is rendered from `Sources/ZettelIcon` at build time and
 never committed as an image.
 
 ## Building and installing
