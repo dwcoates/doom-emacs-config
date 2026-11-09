@@ -1058,14 +1058,16 @@ body {
    row's when-column. */
 #ws-sidebar .sb-mq-head,
 #ws-sidebar .sb-mq-remediating,
-#ws-sidebar .sb-mq-waiting {
+#ws-sidebar .sb-mq-waiting,
+#ws-sidebar .sb-mq-github {
   padding: var(--row-pad-y) 0.7rem var(--row-pad-y) 0.9rem;
   cursor: pointer;
   min-width: 0;
 }
 #ws-sidebar .sb-mq-head { display: flex; flex-direction: column; gap: 0.15rem; }
 #ws-sidebar .sb-mq-head-line,
-#ws-sidebar .sb-mq-waiting { display: flex; align-items: center; gap: 0.45rem; }
+#ws-sidebar .sb-mq-waiting,
+#ws-sidebar .sb-mq-github { display: flex; align-items: center; gap: 0.45rem; }
 /* THE MERGE GLYPH'S WIDTH IS PINNED, so the names after it stand at one
    indent the queue's head name shares:
    the glyph's own width in the rail's font, measured in WebKit. */
@@ -1090,12 +1092,14 @@ body {
    2026-10-27): ever so slightly under the group header above it, and every
    waiting merge's name is the head's size (owner request, 2026-10-27). */
 #ws-sidebar .sb-mq-head .sb-mq-name,
-#ws-sidebar .sb-mq-waiting .sb-mq-name { font-size: var(--mq-name-font-size); }
+#ws-sidebar .sb-mq-waiting .sb-mq-name,
+#ws-sidebar .sb-mq-github .sb-mq-name { font-size: var(--mq-name-font-size); }
 /* A WAITING MERGE'S LINE AND A RECENTLY MERGED ROW START AT ONE INDENT
    (owner request, 2026-11-01): a merged row's name stands where a waiting
    merge's bullet does, so the two sections' lists read alike. */
 #ws-sidebar { --mq-list-indent: calc(0.9rem + var(--ws-mark-width) + 0.45rem); }
-#ws-sidebar .sb-mq-waiting {
+#ws-sidebar .sb-mq-waiting,
+#ws-sidebar .sb-mq-github {
   color: color-mix(in srgb, var(--repo-head-expanded) 55%, var(--repo-head-collapsed));
   font-size: 0.9em;
   line-height: var(--merged-row-line-h);
@@ -1134,6 +1138,8 @@ body {
 #ws-sidebar .sb-mq-reason { flex: 0 0 auto; color: var(--muted); white-space: nowrap; }
 /* A waiting merge's front mark. */
 #ws-sidebar .sb-mq-front { flex: 0 0 auto; color: var(--blocked); font-size: 0.65rem; }
+/* A GITHUB MERGE QUEUE STANDING'S PLACE, drawn as the front mark is. */
+#ws-sidebar .sb-mq-github-place { flex: 0 0 auto; color: var(--blocked); font-size: 0.65rem; }
 /* A folded open workspaces section folds away every grouping section it
    holds, headers included; only its own header stays. */
 #ws-sidebar .repo.open-section.folded > .sb-sections { display: none; }
@@ -1311,6 +1317,7 @@ html.dragging * { -webkit-user-select: none; user-select: none; }
 #ws-sidebar:not(.sb-hover-suspended) .sb-mq-head:hover,
 #ws-sidebar:not(.sb-hover-suspended) .sb-mq-remediating:hover,
 #ws-sidebar:not(.sb-hover-suspended) .sb-mq-waiting:hover,
+#ws-sidebar:not(.sb-hover-suspended) .sb-mq-github:hover,
 #ws-sidebar:not(.sb-hover-suspended) .sb-outline-row:hover { background: var(--row-highlight-tint); }
 
 /* THE STATUS MARK'S BOX. Every mark, a dot, the merge glyph or an emoji,
@@ -1583,7 +1590,8 @@ html.dragging * { -webkit-user-select: none; user-select: none; }
 #ws-sidebar .sb-mq-head { --mq-below-text: 4.25px; }
 #ws-sidebar .sb-mq-head:has(> .sb-mq-head-line:last-child),
 #ws-sidebar .sb-mq-remediating { --mq-below-text: 7.75px; }
-#ws-sidebar .sb-mq-waiting { --mq-below-text: 4.25px; }
+#ws-sidebar .sb-mq-waiting,
+#ws-sidebar .sb-mq-github { --mq-below-text: 4.25px; }
 #ws-sidebar .merged-group[data-group-section="merge-queue"]:not(.folded):has(+ .merged-group) > .rows > :last-child {
   margin-bottom: calc(6.25px - var(--mq-below-text));
 }

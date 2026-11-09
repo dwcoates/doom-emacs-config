@@ -62,6 +62,7 @@ const ELEVATED_STEP_WORDS: ReadonlyMap<string, string> = new Map([
   [statusStepKey("merging", "awaitingFree"), "waiting for"],
   [statusStepKey("merging", "preDeploy"), "pre-deploy"],
   [statusStepKey("merging", "postDeploy"), "post-deploy"],
+  [statusStepKey("merging", "githubMergeQueue"), "deploying"],
   [statusStepKey("mergeFailed", "conflicts"), "merge conflicts"],
   [statusStepKey("mergeFailed", "tests"), "tests failed"],
   [statusStepKey("mergeFailed", "hook"), "hook failed"],

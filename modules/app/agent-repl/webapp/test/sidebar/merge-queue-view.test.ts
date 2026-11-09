@@ -14,6 +14,7 @@ import {
   type UpdateMergeQueueRequest,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_merge_queue_pb";
 import {
+  RosterMergeQueueGithubEntrySchema,
   RosterMergeQueueHeadSchema,
   RosterMergeQueuePausedSchema,
   RosterMergeQueueRemediatingReasonSchema,
@@ -36,7 +37,9 @@ import {
   drawRosterMergeQueueStage,
   drawRosterMergeQueueWaiting,
   MERGE_QUEUE_CARD_LINE_CLASS,
+  githubPlaceText,
   MERGE_QUEUE_CLASS,
+  MERGE_QUEUE_GITHUB_CLASS,
   MERGE_QUEUE_HEAD_CLASS,
   MERGE_QUEUE_PAUSED_ATTRIBUTE,
   MERGE_QUEUE_REASON_CLASS,
@@ -67,6 +70,11 @@ import {
 } from "./harness.js";
 
 /** A sidebar context on a fake daemon. */
+/** A workspace standing in a GitHub merge queue at PLACE of TOTAL since QUEUED_AT_MS. */
+function githubStanding(id: string, place: number, total: number, queuedAtMs: number) {
+  return create(RosterMergeQueueGithubEntrySchema, { subject: queueSubject(id), place: { place, total }, queuedAtMs: BigInt(queuedAtMs) });
+}
+
 function daemon() {
   return { sc: sidebarContext(appContext({})) };
 }
@@ -130,6 +138,19 @@ describe("queueLine", () => {
 
   it("states an empty line for a queue drawing no merge", () => {
     expect(queueLine(create(RosterRepoMergeQueueSchema, {}))).toBe("");
+  });
+});
+
+describe("githubPlaceText", () => {
+  it("draws a place as its number of the queue's length", () => {
+    expect(githubPlaceText({ place: 3, total: 5 } as never)).toBe("#3 of 5");
+  });
+});
+
+describe("queueLine and queueCount with GitHub standings", () => {
+  it("lists and counts a GitHub standing after the merges agent-repl runs", () => {
+    const queue = create(RosterRepoMergeQueueSchema, { head: mergingHead("w1"), github: [githubStanding("w2", 3, 5, NOW)] });
+    expect([queueLine(queue), queueCount(queue)]).toEqual(["w1 w2", 2]);
   });
 });
 
@@ -300,6 +321,46 @@ describe("drawRosterMergeQueue", () => {
       "queue",
     );
     expect([body.querySelector(`.${MERGE_QUEUE_HEAD_CLASS}`), body.querySelectorAll(`.${MERGE_QUEUE_REMEDIATING_CLASS}`).length]).toEqual([null, 1]);
+  });
+
+  it("draws a queue holding only GitHub merge queue standings, with no head", () => {
+    const { sc } = daemon();
+    const body = drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { github: [githubStanding("w2", 3, 5, NOW)] }), sc, "queue");
+    expect([body.querySelector(`.${MERGE_QUEUE_HEAD_CLASS}`), body.querySelectorAll(`.${MERGE_QUEUE_GITHUB_CLASS}`).length]).toEqual([null, 1]);
+  });
+
+  it("draws GitHub merge queue standings after the merges agent-repl runs", () => {
+    const { sc } = daemon();
+    const body = drawRosterMergeQueue(
+      create(RosterRepoMergeQueueSchema, { head: mergingHead("w1"), waiting: [waitingMerge("w3")], github: [githubStanding("w2", 3, 5, NOW)] }),
+      sc,
+      "queue",
+    );
+    expect([...body.children].map((el) => el.classList[0])).toEqual([MERGE_QUEUE_HEAD_CLASS, MERGE_QUEUE_WAITING_CLASS, MERGE_QUEUE_GITHUB_CLASS]);
+  });
+
+  it("draws a GitHub merge queue standing with its name, its place and how long it has stood there", () => {
+    const ticker = fakeTicker(NOW);
+    const sc = sidebarContext(appContext({}, ticker));
+    const body = drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { github: [githubStanding("w2", 3, 5, NOW - 4_000)] }), sc, "queue");
+    const line = body.querySelector(`.${MERGE_QUEUE_GITHUB_CLASS}`);
+    expect([
+      line?.querySelector(".sb-mq-name")?.textContent,
+      line?.querySelector(".sb-mq-github-place")?.textContent,
+      line?.querySelector(".sb-mq-clock")?.textContent,
+    ]).toEqual(["w2", "#3 of 5", formatTickedElapsed(4_000)]);
+  });
+
+  it("refuses a GitHub merge queue standing with no place as a malformed view", () => {
+    const { sc } = daemon();
+    const placeless = create(RosterMergeQueueGithubEntrySchema, { subject: queueSubject("w2"), queuedAtMs: BigInt(NOW) });
+    expect(() => drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { github: [placeless] }), sc, "queue")).toThrow(MalformedView);
+  });
+
+  it("gives a GitHub merge queue standing no grip", () => {
+    const { sc } = daemon();
+    const body = drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { head: mergingHead("w1"), github: [githubStanding("w2", 2, 2, NOW)] }), sc, "queue");
+    expect(queueDrag(sc, body, body.querySelector(`.${MERGE_QUEUE_GITHUB_CLASS}`), new Map())).toBeNull();
   });
 
   it("draws a remediating merge on one line: its name, what it repairs, then its clock from when it stepped aside", () => {
