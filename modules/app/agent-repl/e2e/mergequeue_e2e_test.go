@@ -42,11 +42,11 @@
 package e2e
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -548,8 +548,8 @@ func testDisplacedTurnCapturedEndedThenResubmittedExactlyOnce(t *testing.T) {
 		t.Fatalf("root feed rows carrying the displaced turn's words after a second bounce = %d, want unchanged at %d (never resubmitted twice)", got, matches)
 	}
 
-	// A resubmission the boot sweep made would arrive as one more such row.
-	// Nothing else can end this wait, so it necessarily waits out the probe.
+	// A resubmission the boot sweep made would arrive as one more such row,
+	// pushed before the daemon is idle (harness.ExpectNoPushMatching).
 	//
 	// A NEW ROW, NOT A NEW PUSH. The replay draws each prompt row and then
 	// re-publishes it once its turn's end is replayed ("no longer working"),
@@ -563,22 +563,11 @@ func testDisplacedTurnCapturedEndedThenResubmittedExactlyOnce(t *testing.T) {
 			seen[row.GetId().GetValue()] = true
 		}
 	}
-	deadline := time.NewTimer(harness.ProbeWindow)
-	defer deadline.Stop()
-	for done := false; !done; {
-		select {
-		case row, ok := <-afterSecondBoot.stream.C:
-			if !ok {
-				done = true
-				break
-			}
-			if row.GetUserPrompt() != nil && mqFeedRowText(row) == displacedText && !seen[row.GetId().GetValue()] {
-				t.Fatalf("a further root feed row carries the displaced turn's words after a second bounce, want unchanged at %d (never resubmitted twice)", matches)
-			}
-		case <-deadline.C:
-			done = true
-		}
-	}
+	harness.ExpectNoPushMatching(t, afterSecondBoot.stream,
+		fmt.Sprintf("a further root feed row carrying the displaced turn's words after a second bounce, want unchanged at %d (never resubmitted twice)", matches),
+		func(row *frontendv1.FeedRow) bool {
+			return row.GetUserPrompt() != nil && mqFeedRowText(row) == displacedText && !seen[row.GetId().GetValue()]
+		})
 }
 
 // ---------------------------------------------------------------------------

@@ -49,7 +49,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
@@ -398,29 +397,22 @@ func testBashDetachExplicitPoll(t *testing.T) {
 	dbExpectNoUnmodeledWarning(t, topbarStream, "TaskOutput")
 }
 
-// dbExpectNoUnmodeledWarning drains the topbar stream for one probe window and
-// fails if any view carries an unmodeled-tool warning naming the given tool.
-// Other warnings (the detached work's open fault) are expected and ignored.
+// dbExpectNoUnmodeledWarning fails if any topbar view pushed once the daemon
+// is idle (harness.ExpectNoPushMatching) carries an unmodeled-tool warning
+// naming the given tool. Other warnings (the detached work's open fault) are
+// expected and ignored.
 func dbExpectNoUnmodeledWarning(t *testing.T, stream *harness.Stream[*frontendv1.TopbarView], tool string) {
 	t.Helper()
-	timer := time.NewTimer(harness.ProbeWindow)
-	defer timer.Stop()
-	for {
-		select {
-		case v, ok := <-stream.C:
-			if !ok {
-				return
-			}
+	harness.ExpectNoPushMatching(t, stream,
+		"the exempt set is dropped entirely, never filed as unmodeled",
+		func(v *frontendv1.TopbarView) bool {
 			for _, tw := range v.GetWarnings().GetWarnings() {
 				if tw.GetUnmodeledTool().GetToolName().GetText() == tool {
-					t.Fatalf("topbar carried an unmodeled-tool warning %q for the exempt tool %s, want none: the exempt set is dropped entirely, never filed as unmodeled",
-						tw.GetLine().GetText(), tool)
+					return true
 				}
 			}
-		case <-timer.C:
-			return
-		}
-	}
+			return false
+		})
 }
 
 // ===========================================================================
