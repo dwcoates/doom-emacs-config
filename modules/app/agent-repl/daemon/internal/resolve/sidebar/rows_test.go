@@ -16,6 +16,77 @@ import (
 	"agent-repld/internal/wsm"
 )
 
+func TestRowNamesItsRepository(t *testing.T) {
+	tests := []struct {
+		name string
+		reg  sidebar.Registry
+		rows func(*frontendv1.WorkspaceRoster) []*frontendv1.RosterRow
+		want []string
+	}{
+		{
+			name: "an open row names its section's repository",
+			reg:  registry(workspace("w1", "one")),
+			rows: func(roster *frontendv1.WorkspaceRoster) []*frontendv1.RosterRow {
+				return innerRows(rosterwalk.UnsectionedRows(roster.GetRepository().GetSections()[0]))
+			},
+			want: []string{"alpha"},
+		},
+		{
+			name: "an open child names its own repository, not its section's",
+			reg:  crossRepositoryFamily(),
+			rows: func(roster *frontendv1.WorkspaceRoster) []*frontendv1.RosterRow {
+				return innerRows(rosterwalk.UnsectionedRows(roster.GetRepository().GetSections()[0])[0].GetChildren())
+			},
+			want: []string{"beta", "beta", "alpha"},
+		},
+		{
+			name: "a hidden row, in no repository section, names its repository",
+			reg:  registry(hiddenWorkspace("w-hidden", "hidden")),
+			rows: hiddenRows,
+			want: []string{"alpha"},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			r, _ := newResolver(t)
+
+			// Act.
+			r.SetRegistry(tc.reg)
+
+			// Assert.
+			var got []string
+			for _, row := range tc.rows(latest(t, r)) {
+				got = append(got, row.GetRepository().GetName())
+			}
+			if !equal(got, tc.want) {
+				t.Fatalf("repositories = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestRowOfAnUnregisteredRepositoryNamesNoneAndIsRecorded(t *testing.T) {
+	// Arrange.
+	r, surfaces := newResolver(t)
+	stray := hiddenWorkspace("w-stray", "stray")
+	stray.Repo = ids.RepoID("repo-missing")
+
+	// Act.
+	r.SetRegistry(registry(stray))
+
+	// Assert: the row is still drawn, names no repository, and the violation
+	// is recorded with the repository it names.
+	rows := hiddenRows(latest(t, r))
+	if len(rows) != 1 || rows[0].Repository != nil {
+		t.Fatalf("hidden rows = %v, want the stray drawn with no repository", rows)
+	}
+	rec, ok := dlog.FindRecord(surfaces.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: "daemon.sidebar.row_repository"})
+	if !ok || rec.Context["repo_id"] != "repo-missing" || rec.Context["workspace_id"] != "w-stray" {
+		t.Fatalf("record = %v (found %v), want one naming repo-missing and w-stray", rec, ok)
+	}
+}
+
 func TestRowCarriesTheWorkspaceJoinKey(t *testing.T) {
 	// Arrange.
 	r, _ := newResolver(t)
