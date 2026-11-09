@@ -3364,7 +3364,7 @@ string, anything.  It is READ here and never returned: the sentence this
 produces is the only thing a caller may put in the echo area, and the raw
 text belongs in the `:detail' of `agent-repl--user-message'.
 
-VERB names the command that was attempted (\"prompt\", \"hibernate\",
+VERB names the command that was attempted (\"prompt\", \"compact\",
 \"merge\").  A nil or empty VERB degrades to \"the command\" rather than
 producing a sentence with a hole in it.
 

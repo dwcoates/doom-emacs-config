@@ -743,8 +743,9 @@ enqueuing arm.
 A surface that needs to diverge declares it in
 `agent-repl-status-tab-bar-color-overrides\='; none does today.
 
-THERE IS NO TEAL, and no RENDER_STATE_* enum: both left with
-hibernation.")
+THERE IS NO TEAL, and no RENDER_STATE_* enum: both left with the
+hibernated state, which is now the one park, drawn as the idle session
+it stands in for.")
 
 (defconst agent-repl-status-tab-bar-color-overrides
   '()

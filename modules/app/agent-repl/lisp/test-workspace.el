@@ -2544,13 +2544,20 @@ in the same shape (still leftmost, nil-name still at head)."
   (should (equal (alist-get :turn-failed agent-repl-ws-state-icons) "⚠")))
 
 (ert-deftest agent-repl-test-ws-severed-takes-a-glyph-of-its-own ()
-  "`:severed\=' gets its OWN glyph, never the sleep one.
-Color and glyph are the only two things a tab carries, so reusing 💤 for
-a broken substrate would undo half the split at the glance that matters."
+  "`:severed\=' gets its OWN glyph, never a sleep one.
+Color and glyph are the only two things a tab carries, so a nap glyph on
+a broken substrate would read as something deliberate."
   ;; Act / Assert
   (let ((severed (alist-get :severed agent-repl-ws-state-icons)))
     (should (stringp severed))
-    (should-not (equal severed (alist-get :hibernated agent-repl-ws-state-icons)))))
+    (should-not (equal severed "💤"))))
+
+(ert-deftest agent-repl-test-ws-state-icons-draw-no-hibernated-state ()
+  "No tab state is hibernated: a parked workspace draws as the idle
+session it stands in for (the one park)."
+  ;; Act / Assert
+  (should-not (assq :hibernated agent-repl-ws-state-icons))
+  (should-not (rassoc "💤" agent-repl-ws-state-icons)))
 
 ;;;; ---- Tests: log-scoped current-workspace resolution ----
 
