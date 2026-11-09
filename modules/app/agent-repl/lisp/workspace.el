@@ -2642,8 +2642,24 @@ stays most-recently-visited-first with no duplicates.  The one writer of a
 visit, for an activation (`agent-repl--record-workspace-history') and for
 the landing a walk ends on (`agent-repl--end-recency-walk') alike."
   (agent-repl--stamp-workspace-viewed name)
+  (agent-repl--history-push-front name))
+
+(defun agent-repl--history-push-front (name)
+  "Put NAME first in `agent-repl--workspace-history', dropping any prior occurrence.
+The one writer of the history's order, for a visit
+\(`agent-repl--note-workspace-visit') and a creation
+\(`agent-repl--note-workspace-created') alike."
   (setq agent-repl--workspace-history
         (cons name (cl-remove name agent-repl--workspace-history :test #'string=))))
+
+(defun agent-repl--note-workspace-created (name)
+  "Make the just-created workspace NAME the most recent in the history.
+A CREATION IS NOT A VISIT: NAME is not stamped `:last-viewed-at', since
+nobody has looked at it.  But it leads `agent-repl--workspace-history'
+at once, so `s-]' from the workspace shown steps to it and `s-[' from
+it comes back, without waiting for the user to switch there first."
+  (agent-repl--history-push-front name)
+  (agent-repl--info name "elisp.workspace.history-created ws=%s" name))
 
 (defun agent-repl--end-recency-walk (log-ws reason)
   "End the recency walk the frame stands in, if any, recording its landing as a visit.

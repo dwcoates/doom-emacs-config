@@ -4558,3 +4558,13 @@ A hand-rolled `log-ws'-or-global scope there would drift from it."
 
 (provide 'test-workspace)
 ;;; test-workspace.el ends here
+
+(ert-deftest agent-repl-test-workspace-note-created-moves-existing-name-to-front-once ()
+  "A created name leads the history with no duplicate."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl--workspace-history '("a" "b" "c")))
+      ;; Act
+      (agent-repl--note-workspace-created "c")
+      ;; Assert
+      (should (equal agent-repl--workspace-history '("c" "a" "b"))))))
