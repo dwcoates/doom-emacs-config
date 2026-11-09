@@ -54,7 +54,7 @@ func TestPairs(t *testing.T) {
 // through Pairs: a reader that splits its own pairs would drift from the
 // shared error and trimming rules.
 func TestPairsIsTheOnePairParser(t *testing.T) {
-	for _, path := range []string{"../pullrefs/pullrefs.go"} {
+	for _, path := range []string{"../pullrefs/pullrefs.go", "../externalbrowser/slack.go"} {
 		t.Run(path, func(t *testing.T) {
 			// Arrange.
 			src, err := os.ReadFile(path) //nolint:gosec // repository source

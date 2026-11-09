@@ -566,3 +566,102 @@ exec tail -f /dev/null`)
 		t.Fatalf("Open() = %v, want context.Canceled", err)
 	}
 }
+
+// slackOpener plants a Slack app launcher that records its argv beside a
+// browser launcher that records whether it ran, and answers the opener config
+// driving them, the Slack argv file, and the browser's marker.
+func slackOpener(t *testing.T, slackBody string) (externalbrowser.Config, string, string) {
+	t.Helper()
+	dir := t.TempDir()
+	record := filepath.Join(dir, "slack-argv")
+	marker := filepath.Join(dir, "browser-ran")
+	return externalbrowser.Config{
+		LauncherCmd:  writeScript(t, dir, "browser", "touch "+shellQuote(marker)),
+		SlackOpenBin: writeScript(t, dir, "open", `printf '%s\n' "$@" > `+shellQuote(record)+"\n"+slackBody),
+		SlackTeams:   externalbrowser.SlackTeams{"acme": "T0123ABCD"},
+	}, record, marker
+}
+
+// TestOpenHandsASlackPermalinkToTheSlackApp pins that a permalink on a
+// configured subdomain reaches the Slack app as its deep link, and that no
+// browser is handed anything, a launcher override included.
+func TestOpenHandsASlackPermalinkToTheSlackApp(t *testing.T) {
+	// Arrange.
+	cfg, record, marker := slackOpener(t, "exit 0")
+	o, logger := newOpenerLogged(t, cfg)
+
+	// Act.
+	err := o.Open(context.Background(), "https://acme.slack.com/archives/C04FPU3L4JG/p1792730535549649", "a@example.com")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Open() = %v, want nil", err)
+	}
+	if got := readFile(t, record); got != "slack://channel?team=T0123ABCD&id=C04FPU3L4JG&message=1792730535.549649\n" {
+		t.Fatalf("Slack launcher argv = %q, want the deep link alone", got)
+	}
+	if _, statErr := os.Stat(marker); statErr == nil {
+		t.Fatal("the browser ran for a Slack permalink")
+	}
+	if !loggedBranch(logger.Records(), dlog.LevelDebug, "slack") {
+		t.Fatalf("records = %+v, want a debug record on branch slack", logger.Records())
+	}
+}
+
+// TestOpenSurfacesAFailedSlackLaunch pins that a Slack app launch that fails
+// is an error recorded at ERROR, and is never retried in a browser.
+func TestOpenSurfacesAFailedSlackLaunch(t *testing.T) {
+	// Arrange.
+	cfg, _, marker := slackOpener(t, "exit 3")
+	o, logger := newOpenerLogged(t, cfg)
+
+	// Act.
+	err := o.Open(context.Background(), "https://acme.slack.com/archives/C04FPU3L4JG", "")
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "slack://channel?team=T0123ABCD&id=C04FPU3L4JG") {
+		t.Fatalf("Open() = %v, want the failed launch surfaced, naming the deep link", err)
+	}
+	if _, statErr := os.Stat(marker); statErr == nil {
+		t.Fatal("the browser ran after the Slack app launch failed")
+	}
+	if !loggedBranch(logger.Records(), dlog.LevelError, "slack-launch-failed") {
+		t.Fatalf("records = %+v, want an ERROR on branch slack-launch-failed", logger.Records())
+	}
+}
+
+// TestOpenSendsAnUnroutedSlackLinkToTheBrowser pins that a Slack link the app
+// cannot take goes to the browser like any other link, and the record says
+// why it was not routed.
+func TestOpenSendsAnUnroutedSlackLinkToTheBrowser(t *testing.T) {
+	// Arrange.
+	cfg, record, marker := slackOpener(t, "exit 0")
+	o, logger := newOpenerLogged(t, cfg)
+
+	// Act.
+	err := o.Open(context.Background(), "https://other.slack.com/archives/C04FPU3L4JG", "")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Open() = %v, want nil", err)
+	}
+	if _, statErr := os.Stat(marker); statErr != nil {
+		t.Fatal("the browser did not run for an unrouted Slack link")
+	}
+	if _, statErr := os.Stat(record); statErr == nil {
+		t.Fatal("the Slack app was launched for an unrouted Slack link")
+	}
+	if !loggedBranch(logger.Records(), dlog.LevelDebug, "slack-unrouted") {
+		t.Fatalf("records = %+v, want a debug record on branch slack-unrouted", logger.Records())
+	}
+}
+
+// loggedBranch reports whether a record at level carries branch.
+func loggedBranch(records []dlog.Record, level, branch string) bool {
+	for _, r := range records {
+		if r.Level == level && r.Context["branch"] == branch {
+			return true
+		}
+	}
+	return false
+}

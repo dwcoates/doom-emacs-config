@@ -31,6 +31,7 @@ import (
 	"agent-repld/internal/chessboard"
 	"agent-repld/internal/cpugov"
 	"agent-repld/internal/daemonaddr"
+	"agent-repld/internal/externalbrowser"
 	"agent-repld/internal/newsdigest"
 	"agent-repld/internal/procgroup"
 	"agent-repld/internal/stateroot"
@@ -234,6 +235,16 @@ func HostNeutralNamingEnv() []string {
 // board resolves to "no checkout" deterministically.
 func HostNeutralCheckoutEnv() []string {
 	return statedEmpty(chessboard.EngineDirEnv)
+}
+
+// HostNeutralSlackEnv clears the host's Slack teams for a test daemon
+// (externalbrowser.EnvSlackTeams). Inherited from a developer's shell, a Slack
+// permalink a test opens would be handed to the real Slack app through
+// `open`, past the harness's recording browser. It is stated EMPTY, which the
+// daemon reads as no teams, and a test of the routing sets its own through
+// ExtraEnv, which StartDaemon appends after this.
+func HostNeutralSlackEnv() []string {
+	return statedEmpty(externalbrowser.EnvSlackTeams)
 }
 
 // HostNeutralPowerEnv pins the power source a test daemon's gate governor
@@ -914,6 +925,7 @@ func StartDaemon(t testing.TB, opts Opts) *Daemon {
 	env = append(env, HostNeutralCheckoutEnv()...)
 	env = append(env, HostNeutralPowerEnv()...)
 	env = append(env, HostNeutralNewsDigestEnv()...)
+	env = append(env, HostNeutralSlackEnv()...)
 	env = append(env, TemporaryRegistrationEnv(t)...)
 	// THE VENDOR BINARY IS THE GUARD'S OTHER HALF. Left unset, the login pty
 	// falls back to the default `claude` and the guard refuses it; naming the

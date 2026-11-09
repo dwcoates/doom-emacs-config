@@ -8,6 +8,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/envc"
+	"agent-repld/internal/externalbrowser"
 	"agent-repld/internal/health"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/opentabs"
@@ -795,6 +796,74 @@ func TestResolveAdoptAwaitsParticipants(t *testing.T) {
 			}
 			if err != nil || got != tc.want {
 				t.Fatalf("resolveAdoptAwaitsParticipants = (%v, %v), want (%v, nil)", got, err, tc.want)
+			}
+		})
+	}
+}
+
+// TestBuildBrowser pins which daemons get an external browser opener, and that
+// a malformed Slack teams variable refuses the boot with an ERROR record.
+func TestBuildBrowser(t *testing.T) {
+	tests := []struct {
+		name           string
+		noBrowser      bool
+		env            map[string]string
+		defaultPresent bool
+		wantOpener     bool
+		wantErr        bool
+		wantRecord     dlog.Record
+	}{
+		{
+			name:       "--no-browser builds no opener",
+			noBrowser:  true,
+			wantRecord: dlog.Record{Level: dlog.LevelWarn, Operation: graphOperation},
+		},
+		{
+			name:       "no launcher on the host builds no opener",
+			wantRecord: dlog.Record{Level: dlog.LevelWarn, Operation: graphOperation},
+		},
+		{
+			name:           "the pinned launcher builds an opener and records the Slack teams",
+			env:            map[string]string{externalbrowser.EnvSlackTeams: "acme=T0123ABCD"},
+			defaultPresent: true,
+			wantOpener:     true,
+			wantRecord:     dlog.Record{Level: dlog.LevelInfo, Operation: opSlackTeams},
+		},
+		{
+			name:       "a launcher override builds an opener",
+			env:        map[string]string{externalbrowser.EnvBrowserCmd: "/bin/true"},
+			wantOpener: true,
+			wantRecord: dlog.Record{Level: dlog.LevelInfo, Operation: opSlackTeams},
+		},
+		{
+			name:           "a malformed Slack teams variable refuses the boot",
+			env:            map[string]string{externalbrowser.EnvSlackTeams: "acme"},
+			defaultPresent: true,
+			wantErr:        true,
+			wantRecord:     dlog.Record{Level: dlog.LevelError, Operation: opSlackTeams},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			log := dlog.NewTestLogger()
+			getenv := func(k string) string { return tc.env[k] }
+
+			// Act.
+			browser, err := buildBrowser(tc.noBrowser, getenv, tc.defaultPresent, log)
+
+			// Assert.
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("buildBrowser() error = %v, wantErr %v", err, tc.wantErr)
+			}
+			if (browser != nil) != tc.wantOpener {
+				t.Fatalf("buildBrowser() opener = %v, want one: %v", browser, tc.wantOpener)
+			}
+			found := slices.ContainsFunc(log.Records(), func(r dlog.Record) bool {
+				return r.Level == tc.wantRecord.Level && r.Operation == tc.wantRecord.Operation
+			})
+			if !found {
+				t.Fatalf("records = %+v, want a %s record under %s", log.Records(), tc.wantRecord.Level, tc.wantRecord.Operation)
 			}
 		})
 	}

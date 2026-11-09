@@ -79,7 +79,7 @@ func TestEveryHostNeutralEnvIsBuiltByStatedEmpty(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, fn := range []string{"HostNeutralNamingEnv", "HostNeutralCheckoutEnv"} {
+	for _, fn := range []string{"HostNeutralNamingEnv", "HostNeutralCheckoutEnv", "HostNeutralSlackEnv"} {
 		body := regexp.MustCompile(`func ` + fn + `\(\) \[\]string \{\n\treturn statedEmpty\(`)
 		if !body.Match(src) {
 			t.Fatalf("%s does not build its env with statedEmpty", fn)
