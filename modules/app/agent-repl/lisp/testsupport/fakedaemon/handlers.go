@@ -700,3 +700,7 @@ func (s *fakeServer) CommentOnPullRequest(ctx context.Context, req *connect.Requ
 func (s *fakeServer) NotifyWorkspace(ctx context.Context, req *connect.Request[v1.NotifyWorkspaceRequest]) (*connect.Response[v1.NotifyWorkspaceResponse], error) {
 	return handleUnary[v1.NotifyWorkspaceRequest, v1.NotifyWorkspaceResponse](ctx, s, "NotifyWorkspace", req.Msg)
 }
+
+func (s *fakeServer) AwaitIdle(ctx context.Context, req *connect.Request[v1.AwaitIdleRequest]) (*connect.Response[v1.AwaitIdleResponse], error) {
+	return handleUnary[v1.AwaitIdleRequest, v1.AwaitIdleResponse](ctx, s, "AwaitIdle", req.Msg)
+}
