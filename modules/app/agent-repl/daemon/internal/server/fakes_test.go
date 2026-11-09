@@ -1540,6 +1540,8 @@ type fakeFeed struct {
 	// keyed by label; a missing label targets nothing. targetReplies records
 	// the reply each ComposerTargets call was asked for, in order.
 	targets map[string]string
+	// cards is each card a question may name, keyed by row id (CardText).
+	cards map[string]feed.CardText
 	// revisable is each final response a highlight may name, keyed by row id.
 	revisable     map[string]feed.RevisableResponse
 	targetReplies []string
@@ -1785,6 +1787,12 @@ func (f *fakeFeed) SelectableText(_ ids.WorkspaceID, id *frontendv1.FeedId) (fee
 		return feed.RowText{Markdown: "text of " + id.GetValue(), Prompt: prompt}, true
 	}
 	return feed.RowText{}, false
+}
+
+// CardText answers the seeded card.
+func (f *fakeFeed) CardText(_ ids.WorkspaceID, row *frontendv1.FeedId) (feed.CardText, bool) {
+	card, ok := f.cards[row.GetValue()]
+	return card, ok
 }
 
 // BubbleText answers an unselectable row's text, and otherwise what

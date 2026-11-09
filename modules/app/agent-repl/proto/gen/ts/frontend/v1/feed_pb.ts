@@ -13264,8 +13264,8 @@ export const FeedMergeQueueWaitingSchema: GenMessage<FeedMergeQueueWaiting> = /*
   messageDesc(file_frontend_v1_feed, 424);
 
 /**
- * The workspace's question about a final response (agentrepl.v1
- * .AskAboutResponse): which response's question-mark control the webapp draws
+ * The workspace's question about a card of the feed (agentrepl.v1
+ * .AskAboutResponse): which card's question-mark control the webapp draws
  * pressed. STATE, not an event: the root feed's watch carries it whenever it
  * changes and the moment a root watch is accepted, so a page that opens while
  * a question stands draws it. The daemon is its only holder; the webapp never
@@ -13281,7 +13281,7 @@ export type FeedResponseQuestion = Message<"frontend.v1.FeedResponseQuestion"> &
    */
   state: {
     /**
-     * No question stands: every response's control is drawn at rest.
+     * No question stands: every card's control is drawn at rest.
      *
      * @generated from field: frontend.v1.FeedResponseQuestionNone none = 1;
      */
@@ -13289,7 +13289,7 @@ export type FeedResponseQuestion = Message<"frontend.v1.FeedResponseQuestion"> &
     case: "none";
   } | {
     /**
-     * A question about one response stands: that response's control is drawn
+     * A question about one card stands: that card's control is drawn
      * pressed, and every other one at rest.
      *
      * @generated from field: frontend.v1.FeedResponseQuestionAsking asking = 2;
@@ -13322,13 +13322,14 @@ export const FeedResponseQuestionNoneSchema: GenMessage<FeedResponseQuestionNone
   messageDesc(file_frontend_v1_feed, 426);
 
 /**
- * A question about this response stands.
+ * A question about this card stands.
  *
  * @generated from message frontend.v1.FeedResponseQuestionAsking
  */
 export type FeedResponseQuestionAsking = Message<"frontend.v1.FeedResponseQuestionAsking"> & {
   /**
-   * The final response's row on the root feed, as its bubble carries it.
+   * The card's row, on the root feed or one of its sub-feeds, as the card
+   * carries it.
    *
    * @generated from field: frontend.v1.FeedId row = 1;
    */

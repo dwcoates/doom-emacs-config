@@ -35,6 +35,12 @@ const (
 	// HeadingQuestion names a response of the agent's the person asks a
 	// question about, in the workspace forked to answer it.
 	HeadingQuestion = "⟢ A question about an earlier response of yours"
+	// HeadingQuestionPrompt names a PROMPT the person asks a question about.
+	HeadingQuestionPrompt = "⟢ A question about an earlier prompt in this conversation"
+	// HeadingQuestionCard names any other card of the feed the person asks a
+	// question about, quoted as the row the feed drew it from; the card's
+	// kind follows it in backticks.
+	HeadingQuestionCard = "⟢ A question about a card agent-repl drew in this conversation's feed, quoted as the JSON it was drawn from"
 	// LabelResponse is how a prompt bubble NAMES a quoted response of the
 	// agent's (owner request, 2026-10-20): shorter than HeadingResponse, which
 	// stays what the agent is told, so the bubble's label can change without
@@ -51,6 +57,8 @@ const (
 	openingHighlight = HeadingHighlight + ":\n\n"
 	// openingQuestion introduces a response asked about.
 	openingQuestion = HeadingQuestion + ":\n\n"
+	// openingQuestionPrompt introduces a prompt asked about.
+	openingQuestionPrompt = HeadingQuestionPrompt + ":\n\n"
 	// closing introduces the person's own words. It ENDS IN A NEWLINE because
 	// the blocks of a prompt are delivered joined by one, so the person's words
 	// follow it after a blank line.
@@ -89,7 +97,26 @@ func Fenced(text string) string {
 // about a response of the agent's: the preamble naming it, MARKDOWN inside its
 // code fence, the marker introducing the person's words, and WORDS.
 func QuestionText(markdown, words string) string {
-	return openingQuestion + Fenced(markdown) + closing + words
+	return questionText(openingQuestion, markdown, words)
+}
+
+// PromptQuestionText is QuestionText for a question about a PROMPT bubble.
+func PromptQuestionText(markdown, words string) string {
+	return questionText(openingQuestionPrompt, markdown, words)
+}
+
+// CardQuestionText is QuestionText for a question about any other card: the
+// preamble naming the card's KIND, the row the card was drawn from as JSON
+// inside its code fence, the marker introducing the person's words, and
+// WORDS.
+func CardQuestionText(kind, json, words string) string {
+	return questionText(HeadingQuestionCard+" (`"+kind+"`):\n\n", json, words)
+}
+
+// questionText is THE question prompt: OPENING, QUOTED inside its code fence,
+// the marker introducing the person's words, and WORDS.
+func questionText(opening, quoted, words string) string {
+	return opening + Fenced(quoted) + closing + words
 }
 
 // Block composes the quote of a selected bubble: the preamble naming what is

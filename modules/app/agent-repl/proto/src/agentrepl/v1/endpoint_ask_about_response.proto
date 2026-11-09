@@ -1,17 +1,24 @@
 // endpoint_ask_about_response.proto — AskAboutResponse: toggle a question
-// about one final response. FEED section.
+// about one card of the feed. FEED section.
 //
-// THE DAEMON IS THE ONLY HOLDER of a workspace's question. A final response's
-// bubble carries a question-mark control beside its copy control; a click on
-// it asks the daemon to toggle the question about that response. While a
-// question is held, the next prompt the user sends is NOT a turn of this
-// workspace: the daemon forks this workspace's conversation into a new CHILD
-// workspace whose first prompt is the response, quoted, followed by the
-// user's words, answers the submission `question_forked`, and ends the
-// question. The answer is read in that child workspace.
+// THE DAEMON IS THE ONLY HOLDER of a workspace's question. Every card the
+// feed draws carries a question-mark control (a final response's sits beside
+// its copy control; owner request, 2026-11-09, extended it from final
+// responses to every card); a click on it asks the daemon to toggle the
+// question about that card. While a question is held, the next prompt the
+// user sends is NOT a turn of this workspace: the daemon forks this
+// workspace's conversation into a new CHILD workspace whose first prompt is
+// the card, quoted, followed by the user's words, answers the submission
+// `question_forked`, and ends the question. The answer is read in that child
+// workspace.
+//
+// A CARD IS QUOTED BY ONE RULE: a bubble with text (a prompt, a landed
+// response) by its markdown, and every other card by the daemon-resolved row
+// the feed drew it from, as JSON. So a card kind added later is quotable with
+// no rule of its own.
 //
 // The question's state is pushed to the webapp on the root feed's watch
-// (frontend.v1.FeedResponseQuestion), which draws the asked response's
+// (frontend.v1.FeedResponseQuestion), which draws the asked card's
 // control pressed, and to Emacs on the host workspace watch
 // (HostWorkspaceResponseQuestion), which sets the composer's draft aside
 // while the question stands and puts it back when the question is withdrawn.
@@ -25,18 +32,19 @@ import "workspace/v1/workspace.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 
-// Toggle the workspace's question about one final response.
+// Toggle the workspace's question about one card.
 //
-// THE DAEMON COMPUTES THE TOGGLE, never the client: naming the response the
-// question is already about withdraws it, and naming any other final response
-// asks about that one instead (the question moves). A client therefore sends
+// THE DAEMON COMPUTES THE TOGGLE, never the client: naming the card the
+// question is already about withdraws it, and naming any other card asks
+// about that one instead (the question moves). A client therefore sends
 // the row it clicked and draws whatever the push says, so two clients clicking
 // at once can never leave the drawn state and the held state disagreeing.
 message AskAboutResponseRequest {
-  // The workspace the response is in.
+  // The workspace the card is in.
   workspace.v1.WorkspaceRef workspace = 1;
-  // The final response's row on the workspace's root feed, as the bubble the
-  // reader clicked carries it.
+  // The card's row, on the workspace's root feed or on any of its sub-feeds
+  // (a subagent's, a merge's, a shell's), as the card the reader clicked
+  // carries it.
   frontend.v1.FeedId row = 2;
 }
 
@@ -54,21 +62,21 @@ message AskAboutResponseSuccess {
   // What the workspace's question is now. The same fact is pushed to every
   // client on its own channel, so a caller needs this answer only for its log.
   oneof state {
-    // A question about the named response now stands: none stood before, or
-    // one about another response moved here.
+    // A question about the named card now stands: none stood before, or
+    // one about another card moved here.
     AskAboutResponseAsking asking = 1;
-    // The question about the named response was withdrawn; none stands now.
+    // The question about the named card was withdrawn; none stands now.
     AskAboutResponseWithdrawn withdrawn = 2;
   }
 }
 
-// A question about this response stands.
+// A question about this card stands.
 message AskAboutResponseAsking {
-  // The response the question is about, echoed from the request.
+  // The card the question is about, echoed from the request.
   frontend.v1.FeedId row = 1;
 }
 
-// No question stands: the click named the response the question was about.
+// No question stands: the click named the card the question was about.
 message AskAboutResponseWithdrawn {}
 
 // Why the request was refused. Validation failures (an unset field) are
@@ -84,10 +92,10 @@ message AskAboutResponseError {
     AskAboutResponseTransferringAway transferring_away = 3;
     // A joining daemon has not finished adopting this workspace yet.
     AskAboutResponseNotYetAdopted not_yet_adopted = 4;
-    // The row is not a settled final response of the workspace's root feed,
-    // so there is no response to ask about. The question held before the
-    // request, if any, is left as it was.
-    AskAboutResponseNotAFinalResponse not_a_final_response = 5;
+    // The row is no card on any of the workspace's feeds, so there is
+    // nothing to ask about. The question held before the request, if any, is
+    // left as it was.
+    AskAboutResponseNotACard not_a_card = 5;
   }
 }
 
@@ -117,5 +125,5 @@ message AskAboutResponseNotYetAdopted {
   optional string address = 1;
 }
 
-// The row is not a settled final response of the workspace's root feed.
-message AskAboutResponseNotAFinalResponse {}
+// The row is no card on any of the workspace's feeds.
+message AskAboutResponseNotACard {}

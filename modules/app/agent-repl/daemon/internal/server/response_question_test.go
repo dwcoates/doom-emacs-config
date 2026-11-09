@@ -14,18 +14,20 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/replyquote"
 	"agent-repld/internal/resolve/feed"
 	"agent-repld/internal/wsm"
 )
 
-// withAskable seeds row-1 and row-2 as final responses a question may name,
-// and as landed bubbles a question's prompt can quote.
+// withAskable seeds the cards a question may name and its prompt quotes:
+// row-1 and row-2 final responses, row-3 a prompt, row-4 a tool call card.
 func withAskable(h *harness) {
-	h.Feed.revisable = map[string]feed.RevisableResponse{
-		"row-1": {Unit: "msg_1:0", Markdown: "1 🔎 the answer"},
-		"row-2": {Unit: "msg_2:0", Markdown: "2 🔎 another answer"},
+	h.Feed.cards = map[string]feed.CardText{
+		"row-1": {Kind: feed.CardResponse, Arm: "activity.response", Text: "1 🔎 the answer"},
+		"row-2": {Kind: feed.CardResponse, Arm: "activity.response", Text: "2 🔎 another answer"},
+		"row-3": {Kind: feed.CardPrompt, Arm: "user_prompt", Text: "fix the footer"},
+		"row-4": {Kind: feed.CardRow, Arm: "activity.simple_tool_call", Text: `{"name": "Bash"}`},
 	}
-	h.Feed.unselectable = map[string]string{"row-1": "1 🔎 the answer", "row-2": "2 🔎 another answer"}
 }
 
 // withAskingRepository registers the test workspace's repository, which a
@@ -71,6 +73,9 @@ func TestAskAboutResponseToggles(t *testing.T) {
 		{name: "a first click asks", clicks: []string{"row-1"}, wantAsked: "row-1"},
 		{name: "a second click on the asked response withdraws", clicks: []string{"row-1", "row-1"}},
 		{name: "a click on another response moves the question", clicks: []string{"row-1", "row-2"}, wantAsked: "row-2"},
+		{name: "a click on a tool card asks about it", clicks: []string{"row-4"}, wantAsked: "row-4"},
+		{name: "a click on a tool card moves a question about a response", clicks: []string{"row-1", "row-4"}, wantAsked: "row-4"},
+		{name: "a second click on the asked tool card withdraws", clicks: []string{"row-4", "row-4"}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -98,7 +103,7 @@ func TestAskAboutResponseToggles(t *testing.T) {
 	}
 }
 
-func TestAskAboutResponseRefusesARowThatIsNoFinalResponse(t *testing.T) {
+func TestAskAboutResponseRefusesARowThatIsNoCard(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	withAskable(h)
@@ -110,8 +115,8 @@ func TestAskAboutResponseRefusesARowThatIsNoFinalResponse(t *testing.T) {
 	got := ask(t, h, "row-9")
 
 	// Assert.
-	if got.GetError().GetNotAFinalResponse() == nil {
-		t.Fatalf("AskAboutResponse = %v, want not_a_final_response", got)
+	if got.GetError().GetNotACard() == nil {
+		t.Fatalf("AskAboutResponse = %v, want not_a_card", got)
 	}
 	if _, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Operation: "AskAboutResponse"}); !ok {
 		t.Fatalf("no AskAboutResponse record names the refusal; records = %v", log.Records())
@@ -260,6 +265,37 @@ func TestAPromptSentWhileAQuestionStandsIsForkedIntoAChild(t *testing.T) {
 	}
 }
 
+func TestAQuestionPromptQuotesTheAskedCardByItsKind(t *testing.T) {
+	tests := []struct {
+		name string
+		row  string
+		want string
+	}{
+		{name: "a response under the response preamble", row: "row-1", want: replyquote.QuestionText("1 🔎 the answer", "hello")},
+		{name: "a prompt under the prompt preamble", row: "row-3", want: replyquote.PromptQuestionText("fix the footer", "hello")},
+		{name: "a tool card as its JSON under its kind", row: "row-4", want: replyquote.CardQuestionText("activity.simple_tool_call", `{"name": "Bash"}`, "hello")},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			withAskable(h)
+			withAskingRepository(h)
+			ask(t, h, tc.row)
+
+			// Act.
+			if _, err := h.Client.SubmitPrompt(context.Background(), connect.NewRequest(submitRequest())); err != nil {
+				t.Fatalf("SubmitPrompt: %v", err)
+			}
+
+			// Assert.
+			if len(h.Verbs.createSpecs) != 1 || h.Verbs.createSpecs[0].InitialPrompt != tc.want {
+				t.Fatalf("creates = %+v, want one whose first prompt is %q", h.Verbs.createSpecs, tc.want)
+			}
+		})
+	}
+}
+
 func TestAQuestionPromptMintsNoTurn(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
@@ -314,7 +350,7 @@ func TestAQuestionAboutAGoneResponseRefusesThePrompt(t *testing.T) {
 	withAskable(h)
 	withAskingRepository(h)
 	ask(t, h, "row-1")
-	delete(h.Feed.unselectable, "row-1")
+	delete(h.Feed.cards, "row-1")
 
 	// Act.
 	_, err := h.Client.SubmitPrompt(context.Background(), connect.NewRequest(submitRequest()))

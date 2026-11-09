@@ -907,7 +907,7 @@ func (*HostWorkspaceResponseTextHighlighted) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDescGZIP(), []int{10}
 }
 
-// One change of the workspace's question about a final response, the set arm
+// One change of the workspace's question about a card of the feed, the set arm
 // naming which. The arms are the four transitions a question makes, so Emacs
 // never compares a before and an after to learn which edit of the composer is
 // owed.
@@ -1011,7 +1011,7 @@ type HostWorkspaceResponseQuestion_Asked struct {
 }
 
 type HostWorkspaceResponseQuestion_Moved struct {
-	// A standing question moved to another response: the draft set aside
+	// A standing question moved to another card: the draft set aside
 	// stays set aside and whatever the composer holds stays, and the keyboard
 	// goes to the composer in insert state.
 	Moved *HostWorkspaceResponseQuestionMoved `protobuf:"bytes,2,opt,name=moved,proto3,oneof"`
@@ -1025,7 +1025,7 @@ type HostWorkspaceResponseQuestion_Withdrawn struct {
 
 type HostWorkspaceResponseQuestion_Taken struct {
 	// A sent prompt took the question (forked into its child workspace, or
-	// refused because the response could no longer be quoted): the draft the
+	// refused because the card could no longer be quoted): the draft the
 	// question set aside is let go, left in the composer's history where the
 	// question put it, and the composer is not touched.
 	Taken *HostWorkspaceResponseQuestionTaken `protobuf:"bytes,4,opt,name=taken,proto3,oneof"`

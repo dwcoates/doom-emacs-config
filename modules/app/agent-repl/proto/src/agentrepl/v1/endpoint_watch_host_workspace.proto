@@ -211,7 +211,7 @@ message HostWorkspaceChatTextHighlighted {}
 // of Emacs's obligation.
 message HostWorkspaceResponseTextHighlighted {}
 
-// One change of the workspace's question about a final response, the set arm
+// One change of the workspace's question about a card of the feed, the set arm
 // naming which. The arms are the four transitions a question makes, so Emacs
 // never compares a before and an after to learn which edit of the composer is
 // owed.
@@ -222,7 +222,7 @@ message HostWorkspaceResponseQuestion {
     // its history, cleared, and remembered as the draft the question set
     // aside, and the keyboard goes to the composer in insert state.
     HostWorkspaceResponseQuestionAsked asked = 1;
-    // A standing question moved to another response: the draft set aside
+    // A standing question moved to another card: the draft set aside
     // stays set aside and whatever the composer holds stays, and the keyboard
     // goes to the composer in insert state.
     HostWorkspaceResponseQuestionMoved moved = 2;
@@ -230,7 +230,7 @@ message HostWorkspaceResponseQuestion {
     // its history, and the draft the question set aside, if any, is put back.
     HostWorkspaceResponseQuestionWithdrawn withdrawn = 3;
     // A sent prompt took the question (forked into its child workspace, or
-    // refused because the response could no longer be quoted): the draft the
+    // refused because the card could no longer be quoted): the draft the
     // question set aside is let go, left in the composer's history where the
     // question put it, and the composer is not touched.
     HostWorkspaceResponseQuestionTaken taken = 4;

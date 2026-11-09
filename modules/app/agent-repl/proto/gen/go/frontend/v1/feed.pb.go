@@ -27454,8 +27454,8 @@ func (x *FeedMergeQueueWaiting) GetStageEnteredAtMs() int64 {
 	return 0
 }
 
-// The workspace's question about a final response (agentrepl.v1
-// .AskAboutResponse): which response's question-mark control the webapp draws
+// The workspace's question about a card of the feed (agentrepl.v1
+// .AskAboutResponse): which card's question-mark control the webapp draws
 // pressed. STATE, not an event: the root feed's watch carries it whenever it
 // changes and the moment a root watch is accepted, so a page that opens while
 // a question stands draws it. The daemon is its only holder; the webapp never
@@ -27533,12 +27533,12 @@ type isFeedResponseQuestion_State interface {
 }
 
 type FeedResponseQuestion_None struct {
-	// No question stands: every response's control is drawn at rest.
+	// No question stands: every card's control is drawn at rest.
 	None *FeedResponseQuestionNone `protobuf:"bytes,1,opt,name=none,proto3,oneof"`
 }
 
 type FeedResponseQuestion_Asking struct {
-	// A question about one response stands: that response's control is drawn
+	// A question about one card stands: that card's control is drawn
 	// pressed, and every other one at rest.
 	Asking *FeedResponseQuestionAsking `protobuf:"bytes,2,opt,name=asking,proto3,oneof"`
 }
@@ -27584,10 +27584,11 @@ func (*FeedResponseQuestionNone) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{426}
 }
 
-// A question about this response stands.
+// A question about this card stands.
 type FeedResponseQuestionAsking struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The final response's row on the root feed, as its bubble carries it.
+	// The card's row, on the root feed or one of its sub-feeds, as the card
+	// carries it.
 	Row           *FeedId `protobuf:"bytes,1,opt,name=row,proto3" json:"row,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
