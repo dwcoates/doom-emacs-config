@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"agent-repld/internal/dirpath"
+	"agent-repld/internal/inflight"
 	"agentrepl/logging"
 
 	"golang.org/x/sys/unix"
@@ -240,7 +241,7 @@ func openSurfacesWindow(runLogPath string, window *logging.Window, terminal inte
 		scanDone:    make(chan struct{}),
 		shimRolls:   make(chan ShimRollRequest, 128),
 	}
-	go s.scanLoop()
+	inflight.Standing(func() { s.scanLoop() })
 	return s, nil
 }
 

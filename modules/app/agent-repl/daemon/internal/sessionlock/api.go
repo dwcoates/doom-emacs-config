@@ -9,6 +9,7 @@
 package sessionlock
 
 import (
+	"context"
 	"crypto/md5"
 	"encoding/hex"
 	"errors"
@@ -20,6 +21,7 @@ import (
 
 	"agent-repld/internal/dirpath"
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/inflight"
 )
 
 // HolderBinary is the name of the binary the shim spawns to hold each kernel
@@ -173,6 +175,62 @@ func Probe(lockPath string) (State, error) {
 		return StateUnknown, fmt.Errorf("sessionlock: unlock %q: %w", lockPath, err)
 	}
 	return StateFree, nil
+}
+
+// AwaitFree waits until the lock at lockPath reads free, or ctx ends. The
+// wait is in the KERNEL: a blocking flock(LOCK_EX) that the holder's release
+// -- or its exit, which releases every lock it held -- answers, released
+// again at once, exactly as Probe's momentary acquire is. It answers
+// StateFree; StateHeld (and no error) once ctx ends first; or StateUnknown
+// with the error of a lock that cannot be read.
+//
+// A WAIT ctx ENDS LEAVES ITS ACQUIRE PENDING. A blocked flock cannot be
+// interrupted, so it finishes when the holder lets go, and releases at once;
+// its descriptor is closed then.
+func AwaitFree(ctx context.Context, lockPath string) (State, error) {
+	if strings.TrimSpace(lockPath) == "" {
+		return StateUnknown, errors.New("sessionlock: lock path is empty")
+	}
+	if err := os.MkdirAll(filepath.Dir(lockPath), 0o755); err != nil {
+		return StateUnknown, fmt.Errorf("sessionlock: create the run directory for %q: %w", lockPath, err)
+	}
+	f, err := os.OpenFile(lockPath, os.O_RDWR|os.O_CREATE, 0o600)
+	if err != nil {
+		return StateUnknown, fmt.Errorf("sessionlock: open %q: %w", lockPath, err)
+	}
+	freed := make(chan error, 1)
+	inflight.Standing(func() {
+		defer f.Close()
+		if err := flockRetryingEINTR(int(f.Fd()), syscall.LOCK_EX); err != nil {
+			freed <- fmt.Errorf("sessionlock: flock %q: %w", lockPath, err)
+			return
+		}
+		if err := syscall.Flock(int(f.Fd()), syscall.LOCK_UN); err != nil {
+			freed <- fmt.Errorf("sessionlock: unlock %q: %w", lockPath, err)
+			return
+		}
+		freed <- nil
+	})
+	select {
+	case err := <-freed:
+		if err != nil {
+			return StateUnknown, err
+		}
+		return StateFree, nil
+	case <-ctx.Done():
+		return StateHeld, nil
+	}
+}
+
+// flockRetryingEINTR is a blocking flock that a signal's interruption does
+// not end.
+func flockRetryingEINTR(fd, how int) error {
+	for {
+		err := syscall.Flock(fd, how)
+		if !errors.Is(err, syscall.EINTR) {
+			return err
+		}
+	}
 }
 
 // ProbeWithLog is Probe with the canonical record on every branch. Probe

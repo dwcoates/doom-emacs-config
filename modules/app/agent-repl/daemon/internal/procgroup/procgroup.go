@@ -10,9 +10,12 @@
 package procgroup
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"syscall"
+
+	"agent-repld/internal/kernelevent"
 )
 
 // State is the kernel's own account of whether a process can still run an
@@ -57,6 +60,41 @@ func Gone(pgid int) (bool, error) {
 		return false, err
 	}
 	return len(live) == 0, nil
+}
+
+// AwaitGone waits until process group pgid holds no live process (Gone), or
+// ctx ends. It waits on the kernel's own exit event for each live member,
+// never on a timer: the daemon is not the members' parent and has no wait(2)
+// to block in, but a process exit is reported to any process that registers
+// for it (kernelevent). It works in rounds, because a member may fork another
+// before it exits: each round lists the live members and waits for every
+// one, and the group is gone once a round finds none.
+func AwaitGone(ctx context.Context, pgid int) error {
+	return awaitGone(ctx, pgid, Gone, LiveMembers, kernelevent.WaitExit)
+}
+
+// awaitGone is AwaitGone over its kernel readings, so a test can stand in for
+// them.
+func awaitGone(ctx context.Context, pgid int, gone func(int) (bool, error), live func(int) ([]Member, error),
+	exit func(context.Context, int) error) error {
+	for {
+		done, err := gone(pgid)
+		if err != nil {
+			return err
+		}
+		if done {
+			return nil
+		}
+		members, err := live(pgid)
+		if err != nil {
+			return err
+		}
+		for _, m := range members {
+			if err := exit(ctx, m.Pid); err != nil {
+				return fmt.Errorf("await member %d of process group %d: %w", m.Pid, pgid, err)
+			}
+		}
+	}
 }
 
 // SignalMembers sends sig to process group pgid through kill, and on

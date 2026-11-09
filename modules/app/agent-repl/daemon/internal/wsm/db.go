@@ -27,6 +27,15 @@ type DB interface {
 	// incumbent is still the sole writer and becomes a writer at its first
 	// adoption. Promoting a handle that already writes is success.
 	Promote(ctx context.Context) error
+	// Changes reports every commit to the database, by this process or any
+	// other daemon on the same file, until ctx ends or the stop it answers is
+	// called: nil once per commit (commits that land before the reader takes
+	// one are coalesced into it), or an error once, after which nothing more
+	// is sent. It is what a wait on another daemon's write blocks on instead
+	// of reading the row again on a timer: the reader checks its condition
+	// after Changes returns and again after every receive. The stop returns
+	// once nothing more will be sent.
+	Changes(ctx context.Context) (<-chan error, func())
 
 	// RegisterWorkspace records a workspace, idempotent by normalized dir,
 	// minting a WorkspaceID and, when the workspace is its repository's main

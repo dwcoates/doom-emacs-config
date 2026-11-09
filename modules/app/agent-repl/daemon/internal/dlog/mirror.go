@@ -1,6 +1,7 @@
 package dlog
 
 import (
+	"agent-repld/internal/inflight"
 	"fmt"
 	"io"
 	"sync"
@@ -60,7 +61,7 @@ func newMirror(out io.Writer, depth int, errorsOnly bool) *mirror {
 		done:       make(chan struct{}),
 		finished:   make(chan struct{}),
 	}
-	go m.run()
+	inflight.Standing(func() { m.run() })
 	return m
 }
 

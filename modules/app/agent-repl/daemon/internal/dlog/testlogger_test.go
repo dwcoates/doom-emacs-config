@@ -1,6 +1,11 @@
 package dlog
 
-import "testing"
+import (
+	"context"
+	"errors"
+	"testing"
+	"time"
+)
 
 func TestTestLoggerCapturesEveryLevel(t *testing.T) {
 	// Arrange.
@@ -231,6 +236,64 @@ func TestFilterRecords(t *testing.T) {
 				if messages[i] != tc.want[i] {
 					t.Fatalf("messages = %v, want %v", messages, tc.want)
 				}
+			}
+		})
+	}
+}
+
+func TestTestLoggerAwait(t *testing.T) {
+	want := RecordQuery{Operation: "daemon.test.op", Message: "reached"}
+	cases := []struct {
+		name string
+		// before logs before Await is called; after, once it is waiting.
+		before, after func(l Logger)
+		wantErr       error
+	}{
+		{name: "a record already captured answers at once",
+			before: func(l Logger) { l.Info("daemon.test.op", "reached", nil) }},
+		{name: "a record appended while waiting answers then",
+			after: func(l Logger) { l.Info("daemon.test.op", "reached", nil) }},
+		{name: "a record appended through a derived logger answers",
+			after: func(l Logger) { l.With(Context{"k": "v"}).Info("daemon.test.op", "reached", nil) }},
+		{name: "only records that do not match leave it waiting until its context ends",
+			after:   func(l Logger) { l.Info("daemon.test.op", "elsewhere", nil) },
+			wantErr: context.DeadlineExceeded},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			l := NewTestLogger()
+			if tc.before != nil {
+				tc.before(l)
+			}
+			bound := 5 * time.Second
+			if tc.wantErr != nil {
+				bound = 50 * time.Millisecond
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), bound)
+			defer cancel()
+			type answer struct {
+				r   Record
+				err error
+			}
+			got := make(chan answer, 1)
+
+			// Act
+			go func() {
+				r, err := l.Await(ctx, want)
+				got <- answer{r, err}
+			}()
+			if tc.after != nil {
+				tc.after(l)
+			}
+			a := <-got
+
+			// Assert
+			if !errors.Is(a.err, tc.wantErr) {
+				t.Fatalf("Await = %v, want %v", a.err, tc.wantErr)
+			}
+			if tc.wantErr == nil && a.r.Message != "reached" {
+				t.Fatalf("Await answered %+v, want the matching record", a.r)
 			}
 		})
 	}
