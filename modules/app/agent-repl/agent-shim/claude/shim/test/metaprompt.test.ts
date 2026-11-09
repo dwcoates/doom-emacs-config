@@ -254,7 +254,8 @@ describe("the standing notice", () => {
     expect(section).toContain("one-shots (`-one-shot`) by preference");
     expect(section).toContain("(`-context fresh`) by default");
     expect(section).toContain("only when it truly needs that conversation");
-    expect(section).toContain("`-owner-notice`");
+    expect(section).toContain("Every child lands its own work, one-shot or not, whatever its context.");
+    expect(section).not.toContain("-owner-notice");
   });
 
   it("tells a linked worktree it is not the main workspace and lands its own work", () => {
