@@ -28,7 +28,7 @@ import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
 import type { SubsectionRef } from "./subsection_pb";
 import { file_agentrepl_v1_subsection } from "./subsection_pb";
-import type { RepositoryRef } from "../../workspace/v1/workspace_pb";
+import type { RepositoryRef, WorkspaceRef } from "../../workspace/v1/workspace_pb";
 import { file_workspace_v1_workspace } from "../../workspace/v1/workspace_pb";
 import type { Message } from "@bufbuild/protobuf";
 
@@ -36,7 +36,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_update_sidebar_view.proto.
  */
 export const file_agentrepl_v1_endpoint_update_sidebar_view: GenFile = /*@__PURE__*/
-  fileDesc("Ci9hZ2VudHJlcGwvdjEvZW5kcG9pbnRfdXBkYXRlX3NpZGViYXJfdmlldy5wcm90bxIMYWdlbnRyZXBsLnYxIogBChhVcGRhdGVTaWRlYmFyVmlld1JlcXVlc3QSPAoMZm9sZF9zZWN0aW9uGAEgASgLMiQuYWdlbnRyZXBsLnYxLlNpZGViYXJWaWV3Rm9sZFNlY3Rpb25IAEIICgZjaGFuZ2VKBAgCEANKBAgDEARSDXNob3dfZ3JvdXBpbmdSCXNob3dfb3BlbiKHBAoWU2lkZWJhclZpZXdGb2xkU2VjdGlvbhIxCgpyZXBvc2l0b3J5GAEgASgLMhsud29ya3NwYWNlLnYxLlJlcG9zaXRvcnlSZWZIABJCCg9yZWNlbnRseV9tZXJnZWQYAyABKAsyJy5hZ2VudHJlcGwudjEuU2lkZWJhclZpZXdSZWNlbnRseU1lcmdlZEgAEjoKC21lcmdlX3F1ZXVlGAsgASgLMiMuYWdlbnRyZXBsLnYxLlNpZGViYXJWaWV3TWVyZ2VRdWV1ZUgAEjEKBmhpZGRlbhgHIAEoCzIfLmFnZW50cmVwbC52MS5TaWRlYmFyVmlld0hpZGRlbkgAEi0KBG9wZW4YCSABKAsyHS5hZ2VudHJlcGwudjEuU2lkZWJhclZpZXdPcGVuSAASMQoKc3Vic2VjdGlvbhgKIAEoCzIbLmFnZW50cmVwbC52MS5TdWJzZWN0aW9uUmVmSAASMQoGZXhwYW5kGAQgASgLMh8uYWdlbnRyZXBsLnYxLlNpZGViYXJWaWV3RXhwYW5kSAESNQoIY29sbGFwc2UYBSABKAsyIS5hZ2VudHJlcGwudjEuU2lkZWJhclZpZXdDb2xsYXBzZUgBQgkKB3NlY3Rpb25CBgoEZm9sZEoECAIQA0oECAYQB0oECAgQCVIGdmlld2VkUgR0YXNrUghtYXR1cml0eSIbChlTaWRlYmFyVmlld1JlY2VudGx5TWVyZ2VkIhcKFVNpZGViYXJWaWV3TWVyZ2VRdWV1ZSITChFTaWRlYmFyVmlld0hpZGRlbiIRCg9TaWRlYmFyVmlld09wZW4iEwoRU2lkZWJhclZpZXdFeHBhbmQiFQoTU2lkZWJhclZpZXdDb2xsYXBzZSKXAQoZVXBkYXRlU2lkZWJhclZpZXdSZXNwb25zZRI5CgdzdWNjZXNzGAEgASgLMiYuYWdlbnRyZXBsLnYxLlVwZGF0ZVNpZGViYXJWaWV3U3VjY2Vzc0gAEjUKBWVycm9yGAIgASgLMiQuYWdlbnRyZXBsLnYxLlVwZGF0ZVNpZGViYXJWaWV3RXJyb3JIAEIICgZyZXN1bHQiGgoYVXBkYXRlU2lkZWJhclZpZXdTdWNjZXNzIpsCChZVcGRhdGVTaWRlYmFyVmlld0Vycm9yEk4KEnVua25vd25fcmVwb3NpdG9yeRgBIAEoCzIwLmFnZW50cmVwbC52MS5VcGRhdGVTaWRlYmFyVmlld1Vua25vd25SZXBvc2l0b3J5SAASTgoSdW5rbm93bl9zdWJzZWN0aW9uGAMgASgLMjAuYWdlbnRyZXBsLnYxLlVwZGF0ZVNpZGViYXJWaWV3VW5rbm93blN1YnNlY3Rpb25IABJECg1ob2xkc19jdXJyZW50GAQgASgLMisuYWdlbnRyZXBsLnYxLlVwZGF0ZVNpZGViYXJWaWV3SG9sZHNDdXJyZW50SABCBwoFY2F1c2VKBAgCEANSDHVua25vd25fdGFzayIkCiJVcGRhdGVTaWRlYmFyVmlld1Vua25vd25TdWJzZWN0aW9uIiQKIlVwZGF0ZVNpZGViYXJWaWV3VW5rbm93blJlcG9zaXRvcnkiHwodVXBkYXRlU2lkZWJhclZpZXdIb2xkc0N1cnJlbnRCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_agentrepl_v1_subsection, file_workspace_v1_workspace]);
+  fileDesc("Ci9hZ2VudHJlcGwvdjEvZW5kcG9pbnRfdXBkYXRlX3NpZGViYXJfdmlldy5wcm90bxIMYWdlbnRyZXBsLnYxIogBChhVcGRhdGVTaWRlYmFyVmlld1JlcXVlc3QSPAoMZm9sZF9zZWN0aW9uGAEgASgLMiQuYWdlbnRyZXBsLnYxLlNpZGViYXJWaWV3Rm9sZFNlY3Rpb25IAEIICgZjaGFuZ2VKBAgCEANKBAgDEARSDXNob3dfZ3JvdXBpbmdSCXNob3dfb3BlbiK4BAoWU2lkZWJhclZpZXdGb2xkU2VjdGlvbhIxCgpyZXBvc2l0b3J5GAEgASgLMhsud29ya3NwYWNlLnYxLlJlcG9zaXRvcnlSZWZIABJCCg9yZWNlbnRseV9tZXJnZWQYAyABKAsyJy5hZ2VudHJlcGwudjEuU2lkZWJhclZpZXdSZWNlbnRseU1lcmdlZEgAEjoKC21lcmdlX3F1ZXVlGAsgASgLMiMuYWdlbnRyZXBsLnYxLlNpZGViYXJWaWV3TWVyZ2VRdWV1ZUgAEjEKBmhpZGRlbhgHIAEoCzIfLmFnZW50cmVwbC52MS5TaWRlYmFyVmlld0hpZGRlbkgAEi0KBG9wZW4YCSABKAsyHS5hZ2VudHJlcGwudjEuU2lkZWJhclZpZXdPcGVuSAASMQoKc3Vic2VjdGlvbhgKIAEoCzIbLmFnZW50cmVwbC52MS5TdWJzZWN0aW9uUmVmSAASLwoJd29ya3NwYWNlGAwgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZkgAEjEKBmV4cGFuZBgEIAEoCzIfLmFnZW50cmVwbC52MS5TaWRlYmFyVmlld0V4cGFuZEgBEjUKCGNvbGxhcHNlGAUgASgLMiEuYWdlbnRyZXBsLnYxLlNpZGViYXJWaWV3Q29sbGFwc2VIAUIJCgdzZWN0aW9uQgYKBGZvbGRKBAgCEANKBAgGEAdKBAgIEAlSBnZpZXdlZFIEdGFza1IIbWF0dXJpdHkiGwoZU2lkZWJhclZpZXdSZWNlbnRseU1lcmdlZCIXChVTaWRlYmFyVmlld01lcmdlUXVldWUiEwoRU2lkZWJhclZpZXdIaWRkZW4iEQoPU2lkZWJhclZpZXdPcGVuIhMKEVNpZGViYXJWaWV3RXhwYW5kIhUKE1NpZGViYXJWaWV3Q29sbGFwc2UilwEKGVVwZGF0ZVNpZGViYXJWaWV3UmVzcG9uc2USOQoHc3VjY2VzcxgBIAEoCzImLmFnZW50cmVwbC52MS5VcGRhdGVTaWRlYmFyVmlld1N1Y2Nlc3NIABI1CgVlcnJvchgCIAEoCzIkLmFnZW50cmVwbC52MS5VcGRhdGVTaWRlYmFyVmlld0Vycm9ySABCCAoGcmVzdWx0IhoKGFVwZGF0ZVNpZGViYXJWaWV3U3VjY2VzcyLpAgoWVXBkYXRlU2lkZWJhclZpZXdFcnJvchJOChJ1bmtub3duX3JlcG9zaXRvcnkYASABKAsyMC5hZ2VudHJlcGwudjEuVXBkYXRlU2lkZWJhclZpZXdVbmtub3duUmVwb3NpdG9yeUgAEk4KEnVua25vd25fc3Vic2VjdGlvbhgDIAEoCzIwLmFnZW50cmVwbC52MS5VcGRhdGVTaWRlYmFyVmlld1Vua25vd25TdWJzZWN0aW9uSAASRAoNaG9sZHNfY3VycmVudBgEIAEoCzIrLmFnZW50cmVwbC52MS5VcGRhdGVTaWRlYmFyVmlld0hvbGRzQ3VycmVudEgAEkwKEXVua25vd25fd29ya3NwYWNlGAUgASgLMi8uYWdlbnRyZXBsLnYxLlVwZGF0ZVNpZGViYXJWaWV3VW5rbm93bldvcmtzcGFjZUgAQgcKBWNhdXNlSgQIAhADUgx1bmtub3duX3Rhc2siJAoiVXBkYXRlU2lkZWJhclZpZXdVbmtub3duU3Vic2VjdGlvbiIkCiJVcGRhdGVTaWRlYmFyVmlld1Vua25vd25SZXBvc2l0b3J5IiMKIVVwZGF0ZVNpZGViYXJWaWV3VW5rbm93bldvcmtzcGFjZSIfCh1VcGRhdGVTaWRlYmFyVmlld0hvbGRzQ3VycmVudEIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_agentrepl_v1_subsection, file_workspace_v1_workspace]);
 
 /**
  * @generated from message agentrepl.v1.UpdateSidebarViewRequest
@@ -152,6 +152,20 @@ export type SidebarViewFoldSection = Message<"agentrepl.v1.SidebarViewFoldSectio
      */
     value: SubsectionRef;
     case: "subsection";
+  } | {
+    /**
+     * One open workspace's CHILDREN, echoed from the workspace's own row. Its
+     * fold has a subsection fold's effects on the workspace's open
+     * descendants: the sidebar hides their rows, the Emacs tab bar folds
+     * their tabs, and COLLAPSING UNLOADS THEIR PAGES AT ONCE AND STANDS THEIR
+     * SESSIONS DOWN FIVE MINUTES LATER, sparing the ones a fold spares.
+     * EXPANDING starts nothing by itself. Selecting a descendant, or a
+     * descendant starting work, expands it.
+     *
+     * @generated from field: workspace.v1.WorkspaceRef workspace = 12;
+     */
+    value: WorkspaceRef;
+    case: "workspace";
   } | { case: undefined; value?: undefined };
 
   /**
@@ -357,6 +371,14 @@ export type UpdateSidebarViewError = Message<"agentrepl.v1.UpdateSidebarViewErro
      */
     value: UpdateSidebarViewHoldsCurrent;
     case: "holdsCurrent";
+  } | {
+    /**
+     * No workspace matches the ref: it was forgotten, or never existed.
+     *
+     * @generated from field: agentrepl.v1.UpdateSidebarViewUnknownWorkspace unknown_workspace = 5;
+     */
+    value: UpdateSidebarViewUnknownWorkspace;
+    case: "unknownWorkspace";
   } | { case: undefined; value?: undefined };
 };
 
@@ -400,8 +422,24 @@ export const UpdateSidebarViewUnknownRepositorySchema: GenMessage<UpdateSidebarV
   messageDesc(file_agentrepl_v1_endpoint_update_sidebar_view, 12);
 
 /**
- * A collapse asked of the repository or subsection the current workspace sits
- * in. Collapsing it would stand down the session the user is looking at and
+ * No workspace matches the ref. DELIBERATELY EMPTY: the arm is the cause, and
+ * the request names the workspace.
+ *
+ * @generated from message agentrepl.v1.UpdateSidebarViewUnknownWorkspace
+ */
+export type UpdateSidebarViewUnknownWorkspace = Message<"agentrepl.v1.UpdateSidebarViewUnknownWorkspace"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.UpdateSidebarViewUnknownWorkspace.
+ * Use `create(UpdateSidebarViewUnknownWorkspaceSchema)` to create a new message.
+ */
+export const UpdateSidebarViewUnknownWorkspaceSchema: GenMessage<UpdateSidebarViewUnknownWorkspace> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_update_sidebar_view, 13);
+
+/**
+ * A collapse asked of the repository, subsection or workspace's children the
+ * current workspace sits in. Collapsing it would stand down the session the user is looking at and
  * hide its tab, so nothing is recorded and the fold stands expanded. The
  * check and the selection are serialized in the daemon, so a switch racing
  * the ask is either wholly before it or wholly after it. The roster already
@@ -420,5 +458,5 @@ export type UpdateSidebarViewHoldsCurrent = Message<"agentrepl.v1.UpdateSidebarV
  * Use `create(UpdateSidebarViewHoldsCurrentSchema)` to create a new message.
  */
 export const UpdateSidebarViewHoldsCurrentSchema: GenMessage<UpdateSidebarViewHoldsCurrent> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_update_sidebar_view, 13);
+  messageDesc(file_agentrepl_v1_endpoint_update_sidebar_view, 14);
 
