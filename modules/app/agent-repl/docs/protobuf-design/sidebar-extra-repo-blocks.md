@@ -58,3 +58,18 @@ Mode: autonomous (pre-approved by the owner).
   persist a row outside its block. Moving a row out of its block (a tab move
   or swap onto another repository's sibling) stays refused by the existing
   `other_repository` arms of MoveWorkspace/SwapWorkspaces.
+
+## Implementation notes
+
+- The parent's own-repository children carry no divider. The previous
+  shape also headed them with the parent's repository once any foreign
+  child existed; under blocks they are always first and need no heading.
+- The webapp's step-back rule (a row under a divider indented 1rem less) is
+  removed: block rows and own-repository children share one indent rule, and
+  the divider starts at that indent (owner clarification: indentation is
+  depth alone).
+- A block is dragged by its divider (`webapp/src/sidebar/subsections.ts`
+  `repositoryBlockDrag`); a press on a block's row still lifts the family's
+  top row, as every nested row does (owner request 2026-10-20). Rows inside a
+  block are reordered by the tab-bar moves (`MoveWorkspace`, `SwapWorkspaces`),
+  which already refuse two repositories (`other_repository`).

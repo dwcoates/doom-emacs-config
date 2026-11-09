@@ -41,6 +41,10 @@ type Registry struct {
 	// and the tab bar's order (arrangement.go). Read in one snapshot with
 	// Workspaces and Repositories (wsm.ReadArrangement).
 	Subsections []wsm.Subsection
+	// RepositoryBlocks are every parent's arranged order of its
+	// other-repository blocks (wsm's repositoryblocks.go), read in the same
+	// snapshot.
+	RepositoryBlocks []wsm.RepositoryBlock
 	// Tasks are every task, for the task grouping.
 	Tasks []wsm.Task
 	// Sessions are the durable session records, one per workspace that has

@@ -18,6 +18,15 @@ func open(id string, children ...*frontendv1.RosterOpenRow) *frontendv1.RosterOp
 	return &frontendv1.RosterOpenRow{Row: row(id), Children: children}
 }
 
+// withBlocks is ROW with one repository block per entry of BLOCKS, each the
+// rows given, in order.
+func withBlocks(row *frontendv1.RosterOpenRow, blocks ...[]*frontendv1.RosterOpenRow) *frontendv1.RosterOpenRow {
+	for _, rows := range blocks {
+		row.RepositoryBlocks = append(row.RepositoryBlocks, &frontendv1.RosterOpenRowRepositoryBlock{Rows: rows})
+	}
+	return row
+}
+
 // hidden is a hidden row for id with children.
 func hidden(id string, children ...*frontendv1.RosterHiddenRow) *frontendv1.RosterHiddenRow {
 	return &frontendv1.RosterHiddenRow{Row: row(id), Children: children}
@@ -69,6 +78,13 @@ func TestFlattenOpen(t *testing.T) {
 			rows: []*frontendv1.RosterOpenRow{open("a", open("a1")), open("b")}, want: []string{"a", "a1", "b"}},
 		{name: "a grandchild is listed at its depth",
 			rows: []*frontendv1.RosterOpenRow{open("a", open("a1", open("a1x")), open("a2"))}, want: []string{"a", "a1", "a1x", "a2"}},
+		{name: "a block's rows follow the own-repository children, block by block",
+			rows: []*frontendv1.RosterOpenRow{withBlocks(open("a", open("a1")),
+				[]*frontendv1.RosterOpenRow{open("x1"), open("x2")}, []*frontendv1.RosterOpenRow{open("y1")}), open("b")},
+			want: []string{"a", "a1", "x1", "x2", "y1", "b"}},
+		{name: "a block row's own family is listed under it",
+			rows: []*frontendv1.RosterOpenRow{withBlocks(open("a"), []*frontendv1.RosterOpenRow{open("x1", open("x1c"))})},
+			want: []string{"a", "x1", "x1c"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -80,6 +96,19 @@ func TestFlattenOpen(t *testing.T) {
 				t.Fatalf("FlattenOpen = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestOpenFamilyListsChildrenThenEveryBlocksRows(t *testing.T) {
+	// Arrange.
+	parent := withBlocks(open("p", open("own")), []*frontendv1.RosterOpenRow{open("x")}, []*frontendv1.RosterOpenRow{open("y")})
+
+	// Act.
+	got := openIDs(OpenFamily(parent))
+
+	// Assert.
+	if want := []string{"own", "x", "y"}; !slices.Equal(got, want) {
+		t.Fatalf("OpenFamily = %v, want %v", got, want)
 	}
 }
 

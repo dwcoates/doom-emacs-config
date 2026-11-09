@@ -334,48 +334,48 @@ func (r *resolver) openRows(nodes []openNode, folded bool, numbers *tabNumberer,
 	return out
 }
 
-// openRow composes one open row, its tab, and its open family below it. A
-// child of another repository than the row drawn just before it in the
-// family (its parent, or its previous sibling) begins a repository divider
-// naming its repository (frontend.v1.RosterOpenRow.repository_divider).
-// Once any child is of another repository than its parent, the parent's own
-// repository is headed too: its children that come first get a divider as
-// well, so every run is grouped under a header. With no other-repository
-// child left, no divider is drawn.
+// openRow composes one open row, its tab, and its open family below it: its
+// own-repository children, then one repository block per other repository,
+// each headed by one divider naming its repository
+// (frontend.v1.RosterOpenRow.repository_blocks). Tabs are numbered in that
+// same order, so a block's rows take their tabs after the own-repository
+// children's.
 func (r *resolver) openRow(node openNode, folded bool, numbers *tabNumberer, rc rowContext, log dlog.Logger) *frontendv1.RosterOpenRow {
 	out := &frontendv1.RosterOpenRow{Row: r.row(node.ws, rc, log), Tab: numbers.tab(folded)}
-	if len(node.children) > 0 {
+	// THE CHILDREN FOLD COVERS EVERY CHILD, the own-repository ones and every
+	// repository block's rows alike (frontend.v1.RosterOpenRow.children_fold).
+	if len(node.children) > 0 || len(node.blocks) > 0 {
 		out.ChildrenFold = childrenFold(node.ws.ChildrenFolded,
 			wsm.DescendantMembers(r.state.reg.Workspaces, node.ws.ID).HoldsCurrent(r.selectedWorkspace()))
 	}
-	before := node.ws.Repo
+	kin := childrenFolded(node, folded)
 	for _, child := range node.children {
-		if child.ws.Repo != node.ws.Repo {
-			before = ""
-			break
-		}
+		out.Children = append(out.Children, r.openRow(child, kin, numbers, rc, log))
 	}
-	for _, child := range node.children {
-		row := r.openRow(child, childrenFolded(node, folded), numbers, rc, log)
-		if child.ws.Repo != before {
-			row.RepositoryDivider = r.repositoryDivider(child.ws, log)
+	for _, block := range node.blocks {
+		repo := r.blockRepository(node.ws, block.repo, log)
+		composed := &frontendv1.RosterOpenRowRepositoryBlock{
+			Repository: repoKey(repo).Repository,
+			Divider:    &frontendv1.RosterOpenRowRepositoryDivider{Name: repo.Name},
 		}
-		before = child.ws.Repo
-		out.Children = append(out.Children, row)
+		for _, child := range block.members {
+			composed.Rows = append(composed.Rows, r.openRow(child, kin, numbers, rc, log))
+		}
+		out.RepositoryBlocks = append(out.RepositoryBlocks, composed)
 	}
 	return out
 }
 
-// repositoryDivider names WS's repository as its section is headed. A
-// workspace whose repository the registry does not carry is an invariant
-// violation (assertRepositoryInvariant) and fails hard.
-func (r *resolver) repositoryDivider(ws wsm.Workspace, log dlog.Logger) *frontendv1.RosterOpenRowRepositoryDivider {
-	if repo, ok := r.repositoryOf(ws); ok {
-		return &frontendv1.RosterOpenRowRepositoryDivider{Name: repo.Name}
+// blockRepository answers repository ID of a block under PARENT. A block
+// whose repository the registry does not carry is an invariant violation
+// (assertRepositoryInvariant) and fails hard.
+func (r *resolver) blockRepository(parent wsm.Workspace, id ids.RepoID, log dlog.Logger) wsm.Repository {
+	if repo, ok := r.repositoryByID(id); ok {
+		return repo
 	}
-	log.Error("daemon.sidebar.repository_divider", "a nested workspace names a repository the registry does not carry",
-		dlog.Context{"workspace_id": string(ws.ID), "repo_id": string(ws.Repo), "invariant_violation": "workspace.Repo names no registered repository"})
-	panic(fmt.Sprintf("sidebar: workspace %s names repository %s, which the registry does not carry", ws.ID, ws.Repo))
+	log.Error("daemon.sidebar.repository_block", "a repository block names a repository the registry does not carry",
+		dlog.Context{"parent_id": string(parent.ID), "repo_id": string(id), "invariant_violation": "workspace.Repo names no registered repository"})
+	panic(fmt.Sprintf("sidebar: a block under workspace %s names repository %s, which the registry does not carry", parent.ID, id))
 }
 
 // repositoryOf returns the registered repository WS belongs to, and whether
@@ -383,8 +383,15 @@ func (r *resolver) repositoryDivider(ws wsm.Workspace, log dlog.Logger) *fronten
 // (the divider, RosterRow.repository) goes through; each caller decides how
 // a repository the registry does not carry fails.
 func (r *resolver) repositoryOf(ws wsm.Workspace) (wsm.Repository, bool) {
+	return r.repositoryByID(ws.Repo)
+}
+
+// repositoryByID returns the registered repository ID, and whether the
+// registry carries it: repositoryOf's lookup, for a repository named by id
+// rather than by a workspace (a repository block's).
+func (r *resolver) repositoryByID(id ids.RepoID) (wsm.Repository, bool) {
 	for _, repo := range r.state.reg.Repositories {
-		if repo.ID == ws.Repo {
+		if repo.ID == id {
 			return repo, true
 		}
 	}

@@ -69,10 +69,13 @@ func sidebarRegistry(log dlog.Logger, arrangement wsm.Arrangement, tasks []wsm.T
 		Workspaces:   workspaces,
 		Repositories: repositories,
 		Subsections:  subsections,
-		Tasks:        tasks,
-		Sessions:     sessions,
-		Current:      current,
-		View:         view,
+		// A block of a dropped repository is never present, since its
+		// workspaces are dropped with it, so its stored order is inert.
+		RepositoryBlocks: arrangement.RepositoryBlocks,
+		Tasks:            tasks,
+		Sessions:         sessions,
+		Current:          current,
+		View:             view,
 	}
 }
 

@@ -37,10 +37,13 @@ import (
 //     arising; a family that predates them is still drawn, its open members
 //     where the closed or hidden ancestor stood.
 
-// openNode is one open workspace of the Open section and its open family.
+// openNode is one open workspace of the Open section and its open family:
+// its children of its own repository, then one block per other repository
+// (blocks.go).
 type openNode struct {
 	ws       wsm.Workspace
 	children []openNode
+	blocks   []repoGroup[openNode]
 }
 
 // openRegion is one rows region of a repository's Open section: a run of its
@@ -101,12 +104,13 @@ func openTree(reg Registry, log dlog.Logger) ([]openRepo, map[ids.RepoID][]wsm.W
 		}
 	}
 	arranged, orphaned := arrange(reg, members)
+	order := newBlockOrder(reg)
 	var out []openRepo
 	for _, placedRepo := range arranged {
 		repo := openRepo{repo: placedRepo.repo}
 		for _, b := range placedRepo.buckets {
 			tree := nest(b.workspaces, log)
-			repo.regions = append(repo.regions, openRegion{subsection: b.subsection, rows: openNodes(tree, tree.roots)})
+			repo.regions = append(repo.regions, openRegion{subsection: b.subsection, rows: openNodes(tree, order, tree.roots)})
 		}
 		out = append(out, repo)
 	}
@@ -122,28 +126,33 @@ func openTree(reg Registry, log dlog.Logger) ([]openRepo, map[ids.RepoID][]wsm.W
 }
 
 // openNodes answers the open nodes of LIST and their families in TREE, each
-// not-open workspace replaced in place by its own open descendants.
-func openNodes(tree forest, list []wsm.Workspace) []openNode {
+// not-open workspace replaced in place by its own open descendants. An open
+// workspace's drawn children are grouped by repository under it (group, in
+// ORDER), so a descendant standing in for a not-open child joins the block
+// of its own repository.
+func openNodes(tree forest, order blockOrder, list []wsm.Workspace) []openNode {
 	var out []openNode
 	for _, ws := range list {
-		children := openNodes(tree, tree.children[ws.ID])
+		children := openNodes(tree, order, tree.children[ws.ID])
 		if !ws.ListedOpen() {
 			out = append(out, children...)
 			continue
 		}
-		out = append(out, openNode{ws: ws, children: children})
+		own, blocks := group(order, ws, children, func(n openNode) ids.RepoID { return n.ws.Repo })
+		out = append(out, openNode{ws: ws, children: own, blocks: blocks})
 	}
 	return out
 }
 
 // walkOpen visits every open workspace of NODES depth-first, in drawn order,
-// each before its family, saying whether the tab is FOLDED: FOLDED is the
-// region's own fold, and a workspace whose children are folded folds every
-// tab below it (childrenFolded).
+// each before its family (its own-repository children, then its blocks'),
+// saying whether the tab is FOLDED: FOLDED is the region's own fold, and a
+// workspace whose children are folded folds every tab below it, block rows
+// included (childrenFolded).
 func walkOpen(nodes []openNode, folded bool, visit func(ws wsm.Workspace, folded bool)) {
 	for _, node := range nodes {
 		visit(node.ws, folded)
-		walkOpen(node.children, childrenFolded(node, folded), visit)
+		walkOpen(flatten(node.children, node.blocks), childrenFolded(node, folded), visit)
 	}
 }
 
