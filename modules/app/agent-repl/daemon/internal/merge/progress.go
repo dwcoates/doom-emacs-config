@@ -458,10 +458,13 @@ func (r *run) restoreFrom(doc progressDoc) {
 		t := round.round()
 		r.openRounds[t.key()] = t
 	}
-	if queue, open := r.openRounds[roundKey(TabQueue, 1)]; open {
+	// THE QUEUE ROUND IS THE RECORD'S OWN: a merge put back in line opens a
+	// later queue round on its one ledger (openLedger), so it is not always
+	// the first.
+	if queue, open := r.openRounds[roundKey(TabQueue, doc.Rounds[TabQueue])]; open {
 		r.queueRound = queue
 	} else {
-		r.queueRound = tabRound{kind: TabQueue, n: 1, started: time.UnixMilli(doc.QueuedMS)}
+		r.queueRound = tabRound{kind: TabQueue, n: doc.Rounds[TabQueue], started: time.UnixMilli(doc.QueuedMS)}
 	}
 	r.facts = doc.footerFacts(r.o.deps.Now())
 	r.attempts = doc.TreeAttempts

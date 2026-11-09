@@ -1,6 +1,7 @@
 package merge
 
 import (
+	"agent-repld/internal/wsm"
 	"context"
 	"encoding/json"
 	"reflect"
@@ -152,5 +153,52 @@ func TestAResumedAsyncMergeKeepsItsLandingEffects(t *testing.T) {
 	// Assert
 	if resumed.closesAlso != "ws-maker" || resumed.cleanupDir != "/wt/pt-semver" {
 		t.Fatalf("resumed subject = %+v, want its close and cleanup kept", resumed)
+	}
+}
+
+// TestARestoredRunTakesBackItsOwnQueueRound covers restoreFrom's queue round:
+// a merge put back in line opens a later queue round on its one ledger
+// (openLedger), so a restore stands the record's queue round, open or
+// settled, never the first.
+func TestARestoredRunTakesBackItsOwnQueueRound(t *testing.T) {
+	tests := []struct {
+		name     string
+		settle   bool
+		wantOpen bool
+	}{
+		{name: "an open queue round is taken back open", wantOpen: true},
+		{name: "a settled queue round is taken back by its number", settle: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: the ledger already holds the merge's first queue round.
+			h := newHarness(t)
+			r := ledgeredRun(t, h)
+			h.db.mu.Lock()
+			h.db.ledger[theWorkspace][0].Intervals = []wsm.TabInterval{{Round: 1, Kind: TabQueue, StartedAt: h.clock()}}
+			h.db.mu.Unlock()
+			if err := r.openLedger(context.Background()); err != nil {
+				t.Fatalf("openLedger: %v", err)
+			}
+			queue := r.openTab(context.Background(), TabQueue)
+			if tc.settle {
+				r.closeTab(context.Background(), queue, "succeeded")
+			}
+			if err := r.checkpoint(context.Background(), TabQueue, nil); err != nil {
+				t.Fatalf("checkpoint: %v", err)
+			}
+			restored := ledgeredRun(t, h)
+
+			// Act.
+			restored.restoreFrom(r.prog)
+
+			// Assert.
+			if restored.queueRound.n != 2 {
+				t.Fatalf("queue round = %+v, want round 2", restored.queueRound)
+			}
+			if _, open := restored.openRounds[restored.queueRound.key()]; open != tc.wantOpen {
+				t.Fatalf("queue round open = %v, want %v", open, tc.wantOpen)
+			}
+		})
 	}
 }

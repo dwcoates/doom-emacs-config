@@ -2512,7 +2512,10 @@ export type RosterMergeQueueHead = Message<"frontend.v1.RosterMergeQueueHead"> &
    * merge's ledger: one per top-level tab of its bubble, the rebasing and
    * the tests tab each drawn once over all its rounds (a conflict resolution
    * is part of the rebasing stage and a fixing attempt part of the tests
-   * stage). Empty while the merge has not been admitted.
+   * stage). A rebase the merge had while it waited in line (a waiting
+   * member's rebase, after an earlier landing) is part of its rebasing stage
+   * too, so that stage can begin before the queue stage, which begins only at
+   * admission. Empty while the merge has not been admitted.
    *
    * @generated from field: repeated frontend.v1.RosterMergeQueueStage stages = 2;
    */

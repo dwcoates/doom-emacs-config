@@ -422,6 +422,106 @@ func TestOpenTabStampsTheRoundWithItsLedgerStart(t *testing.T) {
 	}
 }
 
+// TestARunOnALedgerEarlierRunsWroteNumbersItsRoundsPastTheirs covers the one
+// ledger a merge's runs share (openLedger): a run at the front, opening the
+// ledger its background rebases recorded under, numbers each round past every
+// round of its kind the ledger already holds, so no earlier interval is
+// overwritten (2026-11-09).
+func TestARunOnALedgerEarlierRunsWroteNumbersItsRoundsPastTheirs(t *testing.T) {
+	started := time.UnixMilli(1_000)
+	tests := []struct {
+		name      string
+		held      []wsm.TabInterval
+		other     []wsm.TabInterval
+		kind      string
+		wantRound int
+	}{
+		{name: "a fresh ledger opens round one", kind: TabRebasing, wantRound: 1},
+		{
+			name:      "a rebasing round after a waiting rebase's two rounds is the third",
+			held:      []wsm.TabInterval{{Round: 1, Kind: TabRebasing, StartedAt: started}, {Round: 1, Kind: TabConflicts, StartedAt: started}, {Round: 2, Kind: TabRebasing, StartedAt: started}},
+			kind:      TabRebasing,
+			wantRound: 3,
+		},
+		{
+			name:      "a kind the ledger does not hold opens round one",
+			held:      []wsm.TabInterval{{Round: 2, Kind: TabRebasing, StartedAt: started}},
+			kind:      TabQueue,
+			wantRound: 1,
+		},
+		{
+			name:      "another lease's rounds are not counted",
+			other:     []wsm.TabInterval{{Round: 4, Kind: TabRebasing, StartedAt: started}},
+			kind:      TabRebasing,
+			wantRound: 1,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			r := ledgeredRun(t, h)
+			h.db.mu.Lock()
+			entries := h.db.ledger[theWorkspace]
+			entries[0].Intervals = append(entries[0].Intervals, tc.held...)
+			h.db.ledger[theWorkspace] = append(entries, wsm.MergeLedgerEntry{Workspace: theWorkspace, Lease: "lease-other", Intervals: tc.other})
+			h.db.mu.Unlock()
+
+			// Act.
+			if err := r.openLedger(context.Background()); err != nil {
+				t.Fatalf("openLedger = %v, want nil", err)
+			}
+			round := r.openTab(context.Background(), tc.kind)
+
+			// Assert.
+			if round.n != tc.wantRound {
+				t.Fatalf("opened %s round %d, want %d", tc.kind, round.n, tc.wantRound)
+			}
+			for _, held := range tc.held {
+				if !slices.ContainsFunc(ledgerIntervals(h), func(got wsm.TabInterval) bool { return got == held }) {
+					t.Fatalf("the ledger lost %+v: %+v", held, ledgerIntervals(h))
+				}
+			}
+		})
+	}
+}
+
+// TestALedgerThatCannotBeOpenedOrReadAnswersItsCauseAndNumbersNothing covers
+// openLedger's failures: each is answered to the run, which ends on it, and
+// leaves the run's rounds as they stood.
+func TestALedgerThatCannotBeOpenedOrReadAnswersItsCauseAndNumbersNothing(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(f *fakeDB)
+		want    string
+	}{
+		{name: "the open fails", arrange: func(f *fakeDB) { f.ledgerOpenErr = errors.New("disk gone") }, want: "could not open the merge ledger: disk gone"},
+		{name: "the read fails", arrange: func(f *fakeDB) { f.ledgerReadErr = errors.New("disk gone") }, want: "could not read the merge ledger's rounds: disk gone"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			r := ledgeredRun(t, h)
+			h.db.mu.Lock()
+			h.db.ledger[theWorkspace][0].Intervals = []wsm.TabInterval{{Round: 2, Kind: TabRebasing, StartedAt: time.UnixMilli(1_000)}}
+			tc.arrange(h.db)
+			h.db.mu.Unlock()
+
+			// Act.
+			err := r.openLedger(context.Background())
+
+			// Assert.
+			if err == nil || err.Error() != tc.want {
+				t.Fatalf("openLedger = %v, want %q", err, tc.want)
+			}
+			if len(r.rounds) != 0 {
+				t.Fatalf("rounds = %v, want none numbered", r.rounds)
+			}
+		})
+	}
+}
+
 // TestATabRoundsLedgerWritesOutliveTheRunsCancellation covers a cancel that
 // lands between a round's exiting check and its ledger write (the daemon's
 // drain, an abandon): the interval the check decided on is still recorded,
