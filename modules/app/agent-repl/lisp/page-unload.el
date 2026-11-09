@@ -118,12 +118,10 @@
     seconds)
   "Seconds a finished workspace\='s page is held after its last turn ended.
 THE ONE HOLD (owner ruling, 2026-10-30): read from
-proto/vocab/page-hold.json, the file the sidebar\='s name fade reads its
-length from (webapp/src/sidebar/name-tint.ts), so the fade shows how near
-the page is to its unload.  Counted from the end of the last turn only:
+proto/vocab/page-hold.json.  The sidebar\='s name fade no longer follows it
+(owner request, 2026-11-08: proto/vocab/name-fade.json).  Counted from the end of the last turn only:
 showing or loading the page never restarts it (owner ruling, 2026-10-29).
-Not a user option, since a value set here alone would part the hold from
-the fade.")
+Not a user option, since it is read from the shared vocab file.")
 
 (defcustom agent-repl-page-unload-leave-grace 15
   "Seconds a page is kept after the user switches away from it.

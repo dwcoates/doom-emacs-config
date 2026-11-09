@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
-import pageHold from "../../../proto/vocab/page-hold.json";
 import {
   NAME_FADE_DELAY_PROPERTY,
   NAME_FADE_MS,
+  NAME_FADE_ONLY_MS,
+  NAME_HOLD_MS,
   NAME_FADE_PROPERTY,
   NAME_FADING_CLASS,
   NAME_STEADY_CLASS,
@@ -74,7 +75,7 @@ describe("applyNameTint", () => {
     expect([label.classList.contains(NAME_FADING_CLASS), label.style.getPropertyValue(NAME_FADE_DELAY_PROPERTY)]).toEqual([true, "-120000ms"]);
   });
 
-  it("fades a name over the page hold", () => {
+  it("spans the 20 minute hold and the 10 minute fade", () => {
     // Arrange
     const label = document.createElement("span");
 
@@ -83,9 +84,14 @@ describe("applyNameTint", () => {
 
     // Assert
     expect([NAME_FADE_MS, label.style.getPropertyValue(NAME_FADE_PROPERTY)]).toEqual([
-      pageHold.hold_seconds * 1000,
-      `${pageHold.hold_seconds * 1000}ms`,
+      1_800_000,
+      "1800000ms",
     ]);
+  });
+
+  it("holds 20 minutes and fades 10", () => {
+    // Arrange / Act / Assert
+    expect([NAME_HOLD_MS, NAME_FADE_ONLY_MS]).toEqual([1_200_000, 600_000]);
   });
 
   it("gives a steady name no fade length", () => {

@@ -4,12 +4,11 @@
  *
  * While a turn runs the name wears the status tone steadily. When a turn
  * ends the name starts at the tone and the stylesheet fades it to the name's
- * resting grey (`--name-rest`: unviewed, viewed or cold-gated) over
- * `--name-fade`, the page hold (`proto/vocab/page-hold.json`, ten minutes).
- * THE FADE IS THE UNLOAD'S INDICATOR (owner ruling, 2026-10-30): Emacs holds
- * a workspace's page for that same window after its last turn ends
- * (lisp/page-unload.el), so a name fully faded is a page that may be
- * unloaded. The fade is a finite CSS animation whose delay
+ * resting grey (`--name-rest`: unviewed, viewed or cold-gated). THE NAME HOLDS
+ * 20 MINUTES, THEN FADES OVER 10 (owner request, 2026-11-08): the animation
+ * `--name-fade` spans both (`proto/vocab/name-fade.json`), static first. This
+ * is independent of the page hold (lisp/page-unload.el), which the fade no
+ * longer indicates. The fade is a finite CSS animation whose delay
  * is minus the time since the turn ended, so a row redrawn by a roster push
  * rejoins the fade where the clock says it has got to, and a turn that ended
  * long ago draws at rest.
@@ -28,7 +27,7 @@
  * reaches that column (`frontend.v1.RosterRowAsyncMerging` leaves the row its
  * turn clock), so its name keeps its turn's tint.
  */
-import pageHold from "../../../proto/vocab/page-hold.json";
+import nameFade from "../../../proto/vocab/name-fade.json";
 import { rosterStatusColor, toneClass } from "../vocab.js";
 
 /** The class of a name held at its status tone (a turn is running). */
@@ -37,8 +36,12 @@ export const NAME_STEADY_CLASS = "tinted";
 export const NAME_FADING_CLASS = "fading";
 /** The custom property carrying the fade's length: the page hold. */
 export const NAME_FADE_PROPERTY = "--name-fade";
-/** How long a finished workspace's page is held, and its name fades over. */
-export const NAME_FADE_MS = pageHold.hold_seconds * 1000;
+/** How long a finished workspace's name holds its tone before fading. */
+export const NAME_HOLD_MS = nameFade.hold_seconds * 1000;
+/** How long the fade itself takes, once the hold has passed. */
+export const NAME_FADE_ONLY_MS = nameFade.fade_seconds * 1000;
+/** The fade animation's whole length: the hold, then the fade. */
+export const NAME_FADE_MS = NAME_HOLD_MS + NAME_FADE_ONLY_MS;
 /** The custom property carrying minus the time since the turn ended. */
 export const NAME_FADE_DELAY_PROPERTY = "--name-fade-delay";
 
