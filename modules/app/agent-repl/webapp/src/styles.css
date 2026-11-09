@@ -1609,17 +1609,14 @@ html.sb-dragging * { -webkit-user-select: none; user-select: none; }
   color: var(--name-rest);
   font-size: calc(var(--merged-group-head-font-size) * 0.96);
 }
-/* THE ARROW UNDER A GROUP shows its next ten older deploys
-   (src/sidebar/deploys-more.ts): small, muted, and only as tall as itself. */
+/* THE SPINNER UNDER A GROUP is the feed's loading spinner
+   (src/sidebar/deploys-more.ts, src/feed/walk-control.ts), standing while the
+   group has older merges still to load as the reader scrolls down to it. */
 #ws-sidebar .sb-deploys-more {
-  padding: 0 0 calc(var(--inside-rule-gap) * 0.5 + 4.5px) var(--mq-list-indent);
-  font-size: 0.7rem;
-  line-height: 1;
-  color: var(--muted);
-  opacity: 0.8;
-  cursor: pointer;
+  align-self: flex-start;
+  margin: 0 0 calc(var(--inside-rule-gap) * 0.5) var(--mq-list-indent);
 }
-#ws-sidebar:not(.sb-hover-suspended) .sb-deploys-more:hover { opacity: 1; }
+#ws-sidebar .sb-deploys-more[hidden] { display: none; }
 
 #ws-sidebar .row .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* WORKSPACE NAMES ARE GREYSCALE (owner request, 2026-10-29): the repository

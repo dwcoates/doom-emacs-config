@@ -279,7 +279,7 @@ function mountSidebarIn(
       rail.deploysMore.check();
     }),
     // EACH GROUP'S OLDER DEPLOYS (deploys-more.ts), fitted the same way.
-    deploysMore: createDeploysMore(body, deps.timers ?? WINDOW_TIMERS, () => bandFit.refit()),
+    deploysMore: createDeploysMore(body, () => bandFit.refit()),
   };
   // THE BAND FIT (band-fit.ts): the Open, Hidden Workspaces and Recently
   // Merged viewports, re-fitted after every draw, on every resize of the rail
@@ -291,7 +291,7 @@ function mountSidebarIn(
   });
   // Every viewport's scroll, the reader's or the rail's, notes whether the
   // selected row still shows, which decides whether a resize brings it back.
-  // A Deploys group's older deploys scrolled out of view start their linger.
+  // A Recently Merged group's end scrolled into view loads its next page; scrolled back above, it lets the page go.
   body.addEventListener(
     "scroll",
     () => {

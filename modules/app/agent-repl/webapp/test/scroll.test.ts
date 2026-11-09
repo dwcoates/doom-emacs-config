@@ -9,7 +9,6 @@ import selectionScrollSource from "../src/sidebar/selection-scroll.ts?raw";
 import scrollKeepSource from "../src/sidebar/scroll-keep.ts?raw";
 import bandFitSource from "../src/sidebar/band-fit.ts?raw";
 import sidebarPopupsSource from "../src/host/sidebar-popups.ts?raw";
-import deploysMoreSource from "../src/sidebar/deploys-more.ts?raw";
 import { chatEndTop, revealChatExchange } from "../src/scroll.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -4428,7 +4427,6 @@ describe("scrollKept", () => {
     ["sidebar/scroll-keep.ts", scrollKeepSource],
     ["sidebar/band-fit.ts", bandFitSource],
     ["host/sidebar-popups.ts", sidebarPopupsSource],
-    ["sidebar/deploys-more.ts", deploysMoreSource],
   ])("is how %s puts a redrawn scroller back", (_file, source) => {
     // Act
     const keeps = source.includes("scrollKept(");
