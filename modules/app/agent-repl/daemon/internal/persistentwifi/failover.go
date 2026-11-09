@@ -25,10 +25,23 @@ func (c *Controller) tick(ctx context.Context) {
 	c.failoverLocked(ctx, rd)
 }
 
+// failoverRetryIn answers how long until the hotspot failover's next join is
+// due, and whether one is waiting at all: only after a failed join, while the
+// last standing still wants the failover and it has not given up.
+func (c *Controller) failoverRetryIn() (time.Duration, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	s := c.failover
+	if s.lost.IsZero() || s.gaveUp || s.next.IsZero() || c.last == nil || !failoverWants(c.last) {
+		return 0, false
+	}
+	return max(s.next.Sub(c.clock.Now()), 0), true
+}
+
 // failoverLocked is THE HOTSPOT FAILOVER: while the mode is on, a Wi-Fi
 // interface that is joined to nothing is joined to the configured hotspot.
-// The first beat that reads the mode on and no network joins at once, so the
-// hotspot is rejoined within one cadence of the connection dropping. A join
+// The first read that finds the mode on and no network joins at once, so the
+// hotspot is rejoined as soon as the connection drops. A join
 // that does not take is an outcome, never an error: it is tried again on the
 // retry schedule (failoverBackoff), which backs off the longer Wi-Fi stays lost
 // and gives up after three hours. Each distinct cause of a failover that cannot

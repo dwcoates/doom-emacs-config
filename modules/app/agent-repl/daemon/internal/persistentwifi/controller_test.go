@@ -6,7 +6,6 @@ import (
 	"slices"
 	"strings"
 	"testing"
-	"time"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 
@@ -21,6 +20,11 @@ type harness struct {
 	log     *dlog.TestLogger
 	clock   *fakeClock
 	changes []*agentreplv1.PersistentWifiState
+	// published is told of every standing OnChange is handed, so a test
+	// driving Run knows a read finished.
+	published chan *agentreplv1.PersistentWifiState
+	network   *fakeNetwork
+	power     *fakePower
 	exists  map[string]bool
 	dims    *fakeLidDims
 	lid     *fakeLidWatcher
@@ -47,12 +51,18 @@ func newHarnessFor(t *testing.T, configured string) *harness {
 		r: newFakeRunner(t), log: dlog.NewTestLogger(), clock: newFakeClock(),
 		exists: map[string]bool{tools.WifiUtil: true, tools.Brightness: true},
 		dims:   &fakeLidDims{}, lid: newFakeLidWatcher(),
+		published: make(chan *agentreplv1.PersistentWifiState, 256),
+		network:   newFakeNetwork(), power: newFakePower(),
 	}
 	c, err := New(Deps{
 		Config: Config{Tools: tools, Hotspot: configured},
 		Runner: h.r, Clock: h.clock, Log: h.log, Lid: h.lid, LidDims: h.dims,
-		Exists:   func(p string) bool { return h.exists[p] },
-		OnChange: func(s *agentreplv1.PersistentWifiState) { h.changes = append(h.changes, s) },
+		NetworkChanged: h.network.changed, PowerChanges: h.power.source,
+		Exists: func(p string) bool { return h.exists[p] },
+		OnChange: func(s *agentreplv1.PersistentWifiState) {
+			h.changes = append(h.changes, s)
+			h.published <- s
+		},
 	})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -89,7 +99,8 @@ func update(action string) *agentreplv1.UpdatePersistentWifiModeRequest {
 func TestNewRefusesAnIncompleteDeps(t *testing.T) {
 	full := func() Deps {
 		return Deps{Config: Config{Tools: tools, Hotspot: hotspot}, Runner: newFakeRunner(t), Clock: newFakeClock(), Log: dlog.NewTestLogger(),
-			Lid: newFakeLidWatcher(), LidDims: &fakeLidDims{}}
+			Lid: newFakeLidWatcher(), LidDims: &fakeLidDims{},
+			NetworkChanged: newFakeNetwork().changed, PowerChanges: newFakePower().source}
 	}
 	cases := []struct {
 		name   string
@@ -100,7 +111,8 @@ func TestNewRefusesAnIncompleteDeps(t *testing.T) {
 		{name: "no logger", break_: func(d *Deps) { d.Log = nil }},
 		{name: "no lid watcher", break_: func(d *Deps) { d.Lid = nil }},
 		{name: "no store for the pre-close brightness", break_: func(d *Deps) { d.LidDims = nil }},
-		{name: "a negative cadence", break_: func(d *Deps) { d.Every = -time.Second }},
+		{name: "no network change signal", break_: func(d *Deps) { d.NetworkChanged = nil }},
+		{name: "no power change signal", break_: func(d *Deps) { d.PowerChanges = nil }},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -250,28 +262,101 @@ func TestRefreshRecordsARecoveredFactAtInfo(t *testing.T) {
 	}
 }
 
-func TestRunRereadsOnEveryTickAndEndsWithItsContext(t *testing.T) {
-	// Arrange: a network stays joined, so the hotspot failover has nothing to
-	// do once the mode turns on.
-	h := newHarness(t).standing(pmsetOff, summary(true, "Home"))
-	h.r.on(argPmsetRead, answer{out: pmsetOff}, answer{out: pmsetOn})
+// runController starts Run after Refresh and waits until its watches are
+// taken; the returned stop cancels Run and answers its error.
+func (h *harness) runController(t *testing.T) func() error {
+	t.Helper()
 	h.c.Refresh(context.Background())
+	drain(h.published)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- h.c.Run(ctx) }()
+	<-h.network.taken
+	return func() error {
+		cancel()
+		return <-done
+	}
+}
+
+// drain empties a buffered channel of what it holds now.
+func drain[T any](ch chan T) {
+	for {
+		select {
+		case <-ch:
+		default:
+			return
+		}
+	}
+}
+
+func TestRunReadsOnceAfterTakingItsWatches(t *testing.T) {
+	// Arrange: the mode turned on between Refresh and Run.
+	h := newHarness(t).standing(pmsetOff, summary(true, "Home"))
+	h.r.on(argPmsetRead, answer{out: pmsetOff}, answer{out: pmsetOn})
 
 	// Act.
-	(<-h.clock.afters) <- time.Unix(0, 0)
-	<-h.clock.afters // the second wait proves the tick's read finished
-	cancel()
+	stop := h.runController(t)
+	got := <-h.published
 
 	// Assert.
-	if err := <-done; err != nil {
+	if modeArm(got) != "on" {
+		t.Fatalf("mode after Run's opening read = %s, want on", modeArm(got))
+	}
+	if err := stop(); err != nil {
 		t.Fatalf("Run() = %v, want nil on cancellation", err)
 	}
-	got, _ := h.c.Topic().Latest()
+}
+
+func TestRunRereadsOnANetworkChange(t *testing.T) {
+	// Arrange.
+	h := newHarness(t).standing(pmsetOff, summary(true, "Home"))
+	h.r.on(argSummary, answer{out: summary(true, "Home")}, answer{out: summary(true, "Home")}, answer{out: summary(true, "Office")})
+	stop := h.runController(t)
+	defer stop()
+
+	// Act.
+	h.network.fire()
+	got := <-h.published
+
+	// Assert.
+	if got.GetJoined().GetNetworkName() != "Office" {
+		t.Fatalf("network after the change = %q, want Office", got.GetJoined().GetNetworkName())
+	}
+}
+
+func TestRunRereadsOnAPowerChange(t *testing.T) {
+	// Arrange.
+	h := newHarness(t).standing(pmsetOff, summary(true, "Home"))
+	h.r.on(argPmsetRead, answer{out: pmsetOff}, answer{out: pmsetOff}, answer{out: pmsetOn})
+	stop := h.runController(t)
+	defer stop()
+
+	// Act.
+	h.power.changes <- nil
+	got := <-h.published
+
+	// Assert.
 	if modeArm(got) != "on" {
-		t.Fatalf("mode after the tick = %s, want on", modeArm(got))
+		t.Fatalf("mode after the power change = %s, want on", modeArm(got))
+	}
+}
+
+func TestRunRecordsAFailedPowerWatchAtErrorAndKeepsHearingTheNetwork(t *testing.T) {
+	// Arrange.
+	h := newHarness(t).standing(pmsetOff, summary(true, "Home"))
+	h.r.on(argSummary, answer{out: summary(true, "Home")}, answer{out: summary(true, "Home")}, answer{out: summary(true, "Office")})
+	stop := h.runController(t)
+	defer stop()
+
+	// Act: the watch fails, then the network still changes.
+	h.power.changes <- errors.New("the preference directory was removed")
+	h.network.fire()
+	<-h.published
+
+	// Assert.
+	errs := h.records("error", opProbe)
+	if len(errs) != 1 || errs[0].Context["cause"] != "the preference directory was removed" {
+		t.Fatalf("ERROR records = %+v, want the failed power watch with its cause", errs)
 	}
 }
 

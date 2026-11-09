@@ -255,3 +255,48 @@ func (f *fakeLidWatcher) Watch(ctx context.Context, heard func(Lid)) error {
 		}
 	}
 }
+
+// fakeNetwork is a scripted network change signal (netwatch.Watcher.Changed).
+// taken is told each time the signal is taken, so a test knows Run holds the
+// channel a fire closes.
+type fakeNetwork struct {
+	mu    sync.Mutex
+	ch    chan struct{}
+	taken chan struct{}
+}
+
+func newFakeNetwork() *fakeNetwork {
+	return &fakeNetwork{ch: make(chan struct{}), taken: make(chan struct{}, 16)}
+}
+
+func (n *fakeNetwork) changed() <-chan struct{} {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.taken <- struct{}{}
+	return n.ch
+}
+
+// fire reports one network change.
+func (n *fakeNetwork) fire() {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	close(n.ch)
+	n.ch = make(chan struct{})
+}
+
+// fakePower is a scripted power-settings change source: a test sends on
+// changes, and watching is closed once the source is taken.
+type fakePower struct {
+	changes  chan error
+	watching chan struct{}
+	once     sync.Once
+}
+
+func newFakePower() *fakePower {
+	return &fakePower{changes: make(chan error), watching: make(chan struct{})}
+}
+
+func (p *fakePower) source(context.Context) (<-chan error, func()) {
+	p.once.Do(func() { close(p.watching) })
+	return p.changes, func() {}
+}
