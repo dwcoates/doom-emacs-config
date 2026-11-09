@@ -36,12 +36,12 @@ func TestLinkVerbsRecordAndRepublish(t *testing.T) {
 			act: func(v Verbs) ([]wsm.WorkspaceLink, error) {
 				return v.SetLink(context.Background(), "w1", docLink.URL, docLink.Label, false, "")
 			},
-			want: []wsm.WorkspaceLink{docLink}, wantTopbar: []topbar.Link{{Label: docLink.Label, URL: docLink.URL, Owned: true}}, wantLine: "set a link"},
+			want: []wsm.WorkspaceLink{docLink}, wantTopbar: []topbar.Link{{Label: docLink.Label, URL: docLink.URL}}, wantLine: "set a link"},
 		{name: "an owned set stores the link owned",
 			act: func(v Verbs) ([]wsm.WorkspaceLink, error) {
 				return v.SetLink(context.Background(), "w1", docLink.URL, docLink.Label, true, "")
 			},
-			want: []wsm.WorkspaceLink{{URL: docLink.URL, Label: docLink.Label, Shown: true, Owned: true}}, wantTopbar: []topbar.Link{{Label: docLink.Label, URL: docLink.URL}}, wantLine: "set a link"},
+			want: []wsm.WorkspaceLink{{URL: docLink.URL, Label: docLink.Label, Shown: true, Owned: true}}, wantTopbar: []topbar.Link{{Label: docLink.Label, URL: docLink.URL, Owned: true}}, wantLine: "set a link"},
 		{name: "a removal hands the title the rest", standing: []wsm.WorkspaceLink{ticketLink, docLink},
 			act: func(v Verbs) ([]wsm.WorkspaceLink, error) {
 				return v.RemoveLink(context.Background(), "w1", ticketLink.URL)
