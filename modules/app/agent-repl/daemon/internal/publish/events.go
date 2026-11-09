@@ -1,6 +1,7 @@
 package publish
 
 import (
+	"agent-repld/internal/inflight"
 	"context"
 	"sync"
 )
@@ -22,7 +23,7 @@ import (
 // never blocks Emit; a subscription closes only when its context is cancelled.
 type Events[T any] struct {
 	mu   sync.Mutex
-	subs map[*subscriber[T]]struct{}
+	subs map[*Mailbox[T]]struct{}
 }
 
 // Emit hands v to every live subscriber and answers how many it was handed
@@ -42,15 +43,26 @@ func (e *Events[T]) Emit(v T) int {
 // in order. The channel closes when ctx is cancelled, and only then. The
 // caller must cancel ctx or the subscriber leaks.
 func (e *Events[T]) Subscribe(ctx context.Context) <-chan T {
-	s := newSubscriber[T](false)
+	return e.register(ctx, newSubscriber[T](false, nil))
+}
+
+// SubscribeCounted is Topic.SubscribeCounted for events: each event counts on
+// the daemon's tracker from Emit until the consumer acks it.
+func (e *Events[T]) SubscribeCounted(ctx context.Context) (values <-chan T, ack func()) {
+	s := newSubscriber[T](false, inflight.Default)
+	return e.register(ctx, s), s.ack
+}
+
+// register adds S and starts its pump.
+func (e *Events[T]) register(ctx context.Context, s *Mailbox[T]) <-chan T {
 	e.mu.Lock()
 	if e.subs == nil {
-		e.subs = make(map[*subscriber[T]]struct{})
+		e.subs = make(map[*Mailbox[T]]struct{})
 	}
 	e.subs[s] = struct{}{}
 	e.mu.Unlock()
 
-	go pump(ctx, s, e.remove)
+	inflight.Standing(func() { pump(ctx, s, e.remove) })
 	return s.out
 }
 
@@ -62,7 +74,7 @@ func (e *Events[T]) Subscribers() int {
 }
 
 // remove unregisters a subscriber so Emit stops enqueuing to it.
-func (e *Events[T]) remove(s *subscriber[T]) {
+func (e *Events[T]) remove(s *Mailbox[T]) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	delete(e.subs, s)
