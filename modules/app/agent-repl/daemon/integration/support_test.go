@@ -7,6 +7,7 @@ package integration
 
 import (
 	"agentrepl/protohelpers/rosterwalk"
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -211,27 +212,40 @@ func (f *fixture) openFeed(feed *frontendv1.FeedId) (*frontendv1.FeedPage, *agen
 }
 
 // openFeedOnceCarrying answers the root feed's page and token once the page
-// satisfies the predicate. A fake shim push is fire-and-forget: nothing tells
-// a test when the daemon has finished routing a frame. Every change to the
-// feed's rows is published on its tail, so the page is opened again on each
-// row the tail delivers, never on a timer.
+// satisfies the predicate (openFeedUntil).
 func (f *fixture) openFeedOnceCarrying(what string, pred func(*frontendv1.FeedPage) bool) (*frontendv1.FeedPage, *agentreplv1.FeedWatchToken) {
 	f.t.Helper()
-	page, token := f.openFeed(nil)
+	return openFeedUntil(f.t, f.d, f.d.Client(), func() (*frontendv1.FeedPage, *agentreplv1.FeedWatchToken) { return f.openFeed(nil) }, what, pred)
+}
+
+// openFeedUntil opens a feed (open) until its page satisfies pred, and
+// answers that page and its token. A fake shim push is fire-and-forget:
+// nothing tells a test when the daemon has finished routing a frame. Every
+// change to a feed's rows is published on its tail, so the page is opened
+// again on each row the tail (client's WatchFeed of the first open's token)
+// delivers, never on a timer.
+func openFeedUntil(t *testing.T, d *harness.Daemon, client feedWatcher, open func() (*frontendv1.FeedPage, *agentreplv1.FeedWatchToken), what string, pred func(*frontendv1.FeedPage) bool) (*frontendv1.FeedPage, *agentreplv1.FeedWatchToken) {
+	t.Helper()
+	page, token := open()
 	if pred(page) {
 		return page, token
 	}
-	changes := f.d.WatchFeed(token)
+	changes := d.WatchFeedOn(client, token)
 	defer changes.Close()
-	wait, cancelWait := f.d.WaitCtx()
+	wait, cancelWait := d.WaitCtx()
 	defer cancelWait()
 	for {
-		harness.AwaitNext(f.t, wait, changes, "a feed change toward a page carrying "+what)
-		page, token = f.openFeed(nil)
+		harness.AwaitNext(t, wait, changes, "a feed change toward a page carrying "+what)
+		page, token = open()
 		if pred(page) {
 			return page, token
 		}
 	}
+}
+
+// feedWatcher is the one call openFeedUntil makes of a client.
+type feedWatcher interface {
+	WatchFeed(context.Context, *connect.Request[agentreplv1.WatchFeedRequest]) (*connect.ServerStreamForClient[agentreplv1.WatchFeedResponse], error)
 }
 
 // awaitRowInFeed answers a row of a feed that satisfies the predicate, looking
@@ -795,5 +809,37 @@ func TestEveryScriptedClaudeIsWrittenByOneHelper(t *testing.T) {
 				t.Fatalf("%s writes its fake claude by hand", file)
 			}
 		})
+	}
+}
+
+// TestEveryFeedReopenLoopIsOpenFeedUntil pins the one home of "re-open the
+// feed on each row its tail delivers until the page matches": a test that
+// hand-rolls the loop beside openFeedUntil fails here.
+func TestEveryFeedReopenLoopIsOpenFeedUntil(t *testing.T) {
+	// Arrange.
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Act.
+	var sites []string
+	for _, e := range entries {
+		if !strings.HasSuffix(e.Name(), "_test.go") {
+			continue
+		}
+		src, err := os.ReadFile(e.Name())
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Spelled in two parts so this test's own source is not a site.
+		for range strings.Count(string(src), `"a feed change`+` toward `) {
+			sites = append(sites, e.Name())
+		}
+	}
+
+	// Assert.
+	if strings.Join(sites, ",") != "support_test.go" {
+		t.Fatalf("feed re-open loops in %v, want only openFeedUntil's in support_test.go", sites)
 	}
 }

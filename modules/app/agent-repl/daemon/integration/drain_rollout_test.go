@@ -1263,22 +1263,7 @@ func TestASessionlessWorkspaceHandedOverDrawsItsFeedWithNoPrompt(t *testing.T) {
 		}
 		return resp.Msg.GetSuccess().GetPage(), resp.Msg.GetSuccess().GetWatch()
 	}
-	page, token := open()
-	if pageCarriesTheConversation(page) {
-		return
-	}
-	// EVERY CHANGE TO THE FEED'S ROWS IS PUBLISHED ON ITS TAIL, so the page is
-	// opened again on each row the tail delivers, never on a timer.
-	changes := f.d.WatchFeedOn(successor, token)
-	defer changes.Close()
-	wait, cancelWait := f.d.WaitCtx()
-	defer cancelWait()
-	for {
-		harness.AwaitNext(t, wait, changes, "a feed change toward the successor's page carrying the conversation")
-		if page, _ = open(); pageCarriesTheConversation(page) {
-			return
-		}
-	}
+	openFeedUntil(t, f.d, successor, open, "the conversation, on the successor", pageCarriesTheConversation)
 }
 
 // TestAdoptWebWorkspaceRefusesParticipantNotExpectedForAClientNotOpenAtAnnouncement
