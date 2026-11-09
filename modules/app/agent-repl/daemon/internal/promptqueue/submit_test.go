@@ -13,6 +13,8 @@ import (
 	"agent-repld/internal/promptorigin"
 	"agent-repld/internal/resolve/footer"
 	"agent-repld/internal/sessionwatcher"
+	"agent-repld/internal/shimlife"
+	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
 
@@ -1587,5 +1589,74 @@ func TestDeliveringAnswersFalseWithNothingDelivered(t *testing.T) {
 	// Assert
 	if got {
 		t.Fatal("Delivering = true, want false with no shim call standing")
+	}
+}
+
+func TestHoldAndRevive(t *testing.T) {
+	compact := footer.ActCompact
+	tests := []struct {
+		name       string
+		cause      revivalCause
+		act        footer.SessionAct
+		putHeldErr error
+		wantErr    bool
+		wantHeld   bool
+		wantCauses []shimlife.StartCause
+		wantTurn   *footer.SessionAct
+	}{
+		{name: "a load revival holds the entry and tells the status of its turn", cause: revivalLoad, act: footer.ActCompact,
+			wantHeld: true, wantCauses: []shimlife.StartCause{shimlife.StartPrompt}, wantTurn: &compact},
+		{name: "a settings revival holds the entry and takes no turn", cause: revivalSettings, act: footer.ActPrompt,
+			wantHeld: true, wantCauses: []shimlife.StartCause{shimlife.StartSettings}},
+		{name: "a hold that cannot be written starts nothing", cause: revivalLoad, act: footer.ActPrompt,
+			putHeldErr: errors.New("disk full"), wantErr: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.noSession = true
+			h.db.putHeldErr = tc.putHeldErr
+			log, err := h.q.logger(context.Background(), theWorkspace)
+			if err != nil {
+				t.Fatalf("logger: %v", err)
+			}
+
+			// Act
+			_, err = h.q.holdAndRevive(context.Background(), submission("t1", "wake up"), tc.cause, tc.act, log)
+			h.waitRevivals()
+
+			// Assert
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("holdAndRevive = %v, want an error %t", err, tc.wantErr)
+			}
+			held := h.db.held["t1"]
+			if gotHeld := held != nil && held.Hold != nil && *held.Hold == wsm.HoldReconnect; gotHeld != tc.wantHeld {
+				t.Fatalf("held = %+v, want the reconnect hold %t", held, tc.wantHeld)
+			}
+			if !reflect.DeepEqual(h.reviveCauses, tc.wantCauses) {
+				t.Fatalf("revival causes = %v, want %v", h.reviveCauses, tc.wantCauses)
+			}
+			var gotTurn *footer.SessionAct
+			if len(h.footer.turns) > 0 && h.footer.turns[0] != nil {
+				gotTurn = &h.footer.turns[0].Act
+			}
+			if !reflect.DeepEqual(gotTurn, tc.wantTurn) {
+				t.Fatalf("first footer turn act = %v, want %v", gotTurn, tc.wantTurn)
+			}
+		})
+	}
+}
+
+// TestEveryShimlessEntryWaitsThroughHoldAndRevive pins that a prompt and a
+// session act with no shim share holdAndRevive, so neither hand-rolls its own
+// hold-then-revive.
+func TestEveryShimlessEntryWaitsThroughHoldAndRevive(t *testing.T) {
+	// Act
+	sites := sourcescan.Sites(t, "q.holdAndRevive(")
+
+	// Assert
+	if want := []string{"acts.go", "submit.go"}; !reflect.DeepEqual(sites, want) {
+		t.Fatalf("holdAndRevive call sites = %v, want %v", sites, want)
 	}
 }

@@ -388,6 +388,16 @@ func holderName(h wsm.LeaseHolder) string {
 // the turn it minted, and the revival releases the hold when the session is
 // up, delivering it down the ordinary path.
 func (q *queue) holdForRevival(ctx context.Context, sub Submission, log dlog.Logger) (Disposition, error) {
+	return q.holdAndRevive(ctx, sub, revivalLoad, footer.ActPrompt, log)
+}
+
+// holdAndRevive is the ONE way an entry whose workspace has no shim waits for
+// its session: held under the reconnect hold, the status told of the turn
+// (ACT), and the session started for CAUSE off the request path. A prompt
+// (holdForRevival) and every session act (holdActForRevival) come through
+// here, so the two cannot drift. A settings revival takes no turn: a pick is
+// no turn, and the roster must not read `submitting` for it.
+func (q *queue) holdAndRevive(ctx context.Context, sub Submission, cause revivalCause, act footer.SessionAct, log dlog.Logger) (Disposition, error) {
 	disposition, err := q.hold(ctx, sub, "", &leaseHold{kind: wsm.HoldReconnect}, log)
 	if err != nil {
 		return Disposition{}, err
@@ -403,8 +413,10 @@ func (q *queue) holdForRevival(ctx context.Context, sub Submission, log dlog.Log
 	// `none` -> `init` -> `ready` -> `submitting`. The link arm still
 	// outranks this while the route is coming up, so the walk is now
 	// `none` -> `init` -> `submitting` -> `thinking`.
-	q.setTurn(sub.WS, &footer.TurnStarted{At: q.deps.Now(), Act: footer.ActPrompt})
-	q.reviveInBackground(context.WithoutCancel(ctx), sub.WS, revivalLoad, log)
+	if cause != revivalSettings {
+		q.setTurn(sub.WS, &footer.TurnStarted{At: q.deps.Now(), Act: act})
+	}
+	q.reviveInBackground(context.WithoutCancel(ctx), sub.WS, cause, log)
 	return disposition, nil
 }
 

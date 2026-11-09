@@ -142,20 +142,18 @@ func (q *queue) holdActForRevival(ctx context.Context, ws ids.WorkspaceID, act A
 		}
 	}
 	sub := heldActSubmission(ws, act)
-	if _, err := q.hold(ctx, sub, "", &leaseHold{kind: wsm.HoldReconnect}, log); err != nil {
-		return err
-	}
-	cause := revivalSettings
+	cause, status := revivalSettings, footer.ActPrompt
 	if cut {
-		cause = revivalLoad
-		// THE STATUS TAKES THE CUT THE MOMENT IT IS ACCEPTED, as a revived
-		// prompt's does (holdForRevival), spelled as the cut it carries.
+		// A CONTEXT CUT IS A TURN, and the status spells it as the cut it
+		// carries from the moment it is accepted.
 		command, _ := contextCutCommand(act.Kind)
-		q.setTurn(ws, &footer.TurnStarted{At: q.deps.Now(), Act: footerAct(command)})
+		cause, status = revivalLoad, footerAct(command)
+	}
+	if _, err := q.holdAndRevive(ctx, sub, cause, status, log); err != nil {
+		return err
 	}
 	log.Info(opAct, "the workspace has no shim; the act is held and the shim started for it",
 		dlog.Context{"held_turn": string(sub.Turn), "cut": cut})
-	q.reviveInBackground(context.WithoutCancel(ctx), ws, cause, log)
 	return nil
 }
 
