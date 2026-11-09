@@ -3,6 +3,7 @@ package promptqueue
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	shimv1 "agentrepl/proto/shim/v1"
@@ -39,9 +40,7 @@ func (q *queue) SubmitSessionAct(ctx context.Context, ws ids.WorkspaceID, act Ac
 	}
 	log = log.With(dlog.Context{"act": act.Kind, "value": act.Value})
 
-	switch act.Kind {
-	case ActClear, ActCompact, ActSetModel, ActSetPermissionMode:
-	default:
+	if !slices.Contains(actKinds, act.Kind) {
 		log.Error(opAct, "the act names a kind the one delivery path does not carry", nil)
 		return fmt.Errorf("session act %q on %q is not a kind the queue carries", act.Kind, ws)
 	}
@@ -63,41 +62,26 @@ func (q *queue) SubmitSessionAct(ctx context.Context, ws ids.WorkspaceID, act Ac
 	// a session whose start had timed out held the workspace's one shim call
 	// with no end, and every stop and restart after it waited behind it.
 	cut := act.Kind == ActClear || act.Kind == ActCompact
-	if cut && q.deps.ColdGate != nil {
-		if detail, gated := q.deps.ColdGate(ws); gated {
-			refusalLevel(ctx, log, log.Info)(opAct, "the session is parked at its cold gate, so the context cut is refused by the gate's own name",
-				dlog.Context{"detail": detail})
-			return &ColdGateRefusal{Detail: detail}
+	if cut {
+		if err := q.refuseAtColdGate(ctx, ws, opAct, "the context cut", log); err != nil {
+			return err
 		}
 	}
 
 	d := q.lockDelivery(ws)
 	defer d.unlock()
 
-	// A PICK WITH NO SHIM STARTS ONE (owner request, 2026-10-29): the topbar
-	// draws its remembered controls while the shim is down, so a model or
-	// permission-mode pick is held, as a prompt would be, and the shim started
-	// for it; the session coming up delivers it. A standing cold gate refuses
-	// it by the gate's own name: the gate's answer comes first.
-	if _, shim := q.deps.Client(ws); !cut && !shim && q.deps.Revive != nil {
-		if q.deps.ColdGate != nil {
-			if detail, gated := q.deps.ColdGate(ws); gated {
-				refusalLevel(ctx, log, log.Info)(opAct, "the session is parked at its cold gate, so the pick is refused by the gate's own name",
-					dlog.Context{"detail": detail})
-				return &ColdGateRefusal{Detail: detail}
-			}
-		}
-		sub := heldActSubmission(ws, act)
-		if _, err := q.hold(ctx, sub, "", &leaseHold{kind: wsm.HoldReconnect}, log); err != nil {
-			return err
-		}
-		log.Info(opAct, "the workspace has no shim; the pick is held and the shim started for it",
-			dlog.Context{"held_turn": string(sub.Turn)})
-		q.reviveInBackground(context.WithoutCancel(ctx), ws, revivalSettings, log)
-		return nil
+	// AN ACT WITH NO SHIM IS ITS SESSION'S REVIVAL, WHATEVER ITS KIND, exactly
+	// as a prompt is (Submit): a hibernated session is idle, not dead. It is
+	// held, as a prompt would be, and the shim started for it; the session
+	// coming up delivers it. Before 2026-11-09 only the picks took this path
+	// (owner request, 2026-10-29), and a /compact sent to a hibernated
+	// workspace was refused `no_session` and never woke it.
+	if _, shim := q.deps.Client(ws); !shim {
+		return q.holdActForRevival(ctx, ws, act, cut, log)
 	}
 
-	if _, shim := q.deps.Client(ws); cut && shim {
+	if cut {
 		if kind, why, waiting := q.sessionWait(ws); waiting {
 			sub := heldActSubmission(ws, act)
 			if _, err := q.hold(ctx, sub, "", &leaseHold{kind: kind}, log); err != nil {
@@ -131,6 +115,39 @@ func (q *queue) SubmitSessionAct(ctx context.Context, ws ids.WorkspaceID, act Ac
 	}
 	log.Info(opAct, "the act is held behind the work already in the path, in order with the prompts around it",
 		dlog.Context{"held_turn": string(sub.Turn), "running_turn": string(running)})
+	return nil
+}
+
+// holdActForRevival holds an act whose workspace has no shim under the
+// reconnect hold and starts the shim for it, off the request path
+// (reviveInBackground); the session coming up delivers it in order with the
+// prompts around it. A context cut starts the session as a prompt does, since
+// it IS a turn; a pick starts it as a settings start, stood down on the switch
+// away unless a turn runs meanwhile. A standing cold gate refuses the act by
+// the gate's own name, and a queue with no revival wired, a workspace that
+// cannot come back, refuses it as ErrNoSession. The caller holds the delivery
+// lock.
+func (q *queue) holdActForRevival(ctx context.Context, ws ids.WorkspaceID, act Act, cut bool, log dlog.Logger) error {
+	if q.deps.Revive == nil {
+		refusalLevel(ctx, log, log.Warn)(opAct, "the workspace has no session to act on and none can be started", nil)
+		return ErrNoSession
+	}
+	if err := q.refuseAtColdGate(ctx, ws, opAct, "the act", log); err != nil {
+		return err
+	}
+	sub := heldActSubmission(ws, act)
+	cause, status := revivalSettings, footer.ActPrompt
+	if cut {
+		// A CONTEXT CUT IS A TURN, and the status spells it as the cut it
+		// carries from the moment it is accepted.
+		command, _ := contextCutCommand(act.Kind)
+		cause, status = revivalLoad, footerAct(command)
+	}
+	if _, err := q.holdAndRevive(ctx, sub, cause, status, log); err != nil {
+		return err
+	}
+	log.Info(opAct, "the workspace has no shim; the act is held and the shim started for it",
+		dlog.Context{"held_turn": string(sub.Turn), "cut": cut})
 	return nil
 }
 

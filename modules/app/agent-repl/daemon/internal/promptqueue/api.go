@@ -142,6 +142,11 @@ const (
 	ActSetPermissionMode = "set_permission_mode"
 )
 
+// actKinds is every session-act kind the one delivery path carries, in one
+// list: SubmitSessionAct refuses a kind outside it, and the tests walk it, so
+// a kind added here meets every rule every other kind does (revival included).
+var actKinds = []string{ActClear, ActCompact, ActSetModel, ActSetPermissionMode}
+
 // Submission is one prompt entering the queue.
 type Submission struct {
 	// WS is the workspace it belongs to.

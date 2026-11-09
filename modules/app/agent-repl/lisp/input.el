@@ -2246,11 +2246,16 @@ answer yet to ask another question of.  Nothing was sent and the text
 stays in the composer, to be sent once the answer lands.")
 
 (defconst agent-repl--input-no-session-flash
-  "no session; the daemon is starting it"
+  "no session, and the daemon could not start one; nothing was sent"
   "The composer flash for `SubmitPromptError''s `no_session' arm.
-A workspace with NO SESSION AT ALL, which is the daemon's own to bring
-up.  Nothing is owed by the user and nothing is owed by this composer, so
-the sentence states the fact and the prompt is neither held nor lost.")
+A workspace whose session is merely down -- hibernated, or never
+started -- is NOT this arm: the daemon holds the prompt or act and starts
+the session for it, and the composer is answered with the hold.  This arm
+is a workspace with no session that the daemon could not bring back, so
+the sentence says exactly that: nothing was sent, and nothing is being
+started.  The text stays in the composer.  It used to read \"no session;
+the daemon is starting it\", which on 2026-11-09 was false for a
+/compact sent to a hibernated workspace.")
 
 (defun agent-repl--input-say-refusal (ws flash &optional detail)
   "Tell the user about a refused submission of WS: FLASH in the composer,
@@ -2358,11 +2363,12 @@ arms in `agent-repl--input-deferred-held-arms' rather than refused by them."
          (agent-repl--info ws "elisp.input.refused-thread-awaiting-first-answer ws=%s origin=%S arm=%S" ws origin arm)
          (agent-repl--input-say-refusal ws agent-repl--input-thread-awaiting-first-answer-flash))
         (:no-session
-         ;; The workspace has NO SESSION AT ALL, which is the daemon's own
-         ;; to bring up.  Like the cold gate this is an answer rather than a
-         ;; transport failure, so it is recorded at WARN and the prompt is
-         ;; not queued; the text stays so the user can resubmit once the
-         ;; session is up.
+         ;; The workspace has NO SESSION AND THE DAEMON COULD NOT BRING ONE
+         ;; BACK (a session that is merely down is held and revived, never
+         ;; refused).  Like the cold gate this is an answer rather than a
+         ;; transport failure, but a genuine refusal, so it is recorded at
+         ;; WARN and the prompt is not queued; the text stays so the user can
+         ;; resubmit once a session is up.
          (agent-repl--warn ws "elisp.input.refused-no-session ws=%s origin=%S arm=%S" ws origin arm)
          (agent-repl--input-say-refusal ws agent-repl--input-no-session-flash))
         (:bubble-refused

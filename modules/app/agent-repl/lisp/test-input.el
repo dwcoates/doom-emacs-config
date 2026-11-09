@@ -2619,8 +2619,10 @@ the words stay in front of the user rather than only in the ring."
     ;; Assert.
     (should (equal (agent-repl-test-input--composer-text) "hello"))))
 
-(ert-deftest agent-repl-input-no-session-flashes-the-bring-up-sentence ()
-  "The daemon owns the bring-up, so the flash says so rather than refusing."
+(ert-deftest agent-repl-input-no-session-flashes-that-nothing-was-started ()
+  "The arm is a session the daemon could not bring back, so the flash says so.
+A session that is merely down is held and revived, never refused, so the
+flash never claims a start is under way."
   (agent-repl-test-input--with
     ;; Arrange
     (setq agent-repl-test-input--answer agent-repl-test-input--no-session-answer)
@@ -2629,7 +2631,7 @@ the words stay in front of the user rather than only in the ring."
     (agent-repl--send :user-sent)
     ;; Assert
     (should (equal (agent-repl-test-input--notice)
-                   "no session; the daemon is starting it"))))
+                   "no session, and the daemon could not start one; nothing was sent"))))
 
 (ert-deftest agent-repl-input-no-session-echoes-the-sentence-plainly ()
   "The echo says the same thing the flash does, with nothing appended."
@@ -2640,11 +2642,11 @@ the words stay in front of the user rather than only in the ring."
     ;; Act
     (agent-repl--send :user-sent)
     ;; Assert
-    (should (member "agent-repl: no session; the daemon is starting it"
+    (should (member "agent-repl: no session, and the daemon could not start one; nothing was sent"
                     agent-repl-test-input--messages))))
 
 (ert-deftest agent-repl-input-no-session-records-at-warn ()
-  "A session the daemon is bringing up is a WARN, under its own token."
+  "A session the daemon could not bring back is a WARN, under its own token."
   (agent-repl-test-input--with
     ;; Arrange
     (setq agent-repl-test-input--answer agent-repl-test-input--no-session-answer)

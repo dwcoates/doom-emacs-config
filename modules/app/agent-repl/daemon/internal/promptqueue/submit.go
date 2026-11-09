@@ -70,11 +70,9 @@ func (q *queue) Submit(ctx context.Context, sub Submission) (Disposition, error)
 	// refused: it falls through to the session wait below, which holds it
 	// under wsm.HoldColdGate, and the gate's answer settles it as it settles
 	// every prompt held there (gatefate.go).
-	if q.deps.ColdGate != nil && !waitsOutColdGate(sub.Origin) {
-		if detail, gated := q.deps.ColdGate(sub.WS); gated {
-			refusalLevel(ctx, log, log.Info)(opSubmit, "the session is parked at its cold gate, so the submission is refused by the gate's own name",
-				dlog.Context{"detail": detail})
-			return Disposition{}, &ColdGateRefusal{Detail: detail}
+	if !waitsOutColdGate(sub.Origin) {
+		if err := q.refuseAtColdGate(ctx, sub.WS, opSubmit, "the submission", log); err != nil {
+			return Disposition{}, err
 		}
 	}
 
@@ -376,6 +374,23 @@ func holderName(h wsm.LeaseHolder) string {
 	}
 }
 
+// refuseAtColdGate answers the refusal a standing cold gate gives WHAT (the
+// submission, the act) on WS, recorded under OP at INFO (DEBUG for a
+// re-drive), or nil when no gate stands. It is the one cold-gate refusal, so
+// every entry names the gate the same way.
+func (q *queue) refuseAtColdGate(ctx context.Context, ws ids.WorkspaceID, op, what string, log dlog.Logger) error {
+	if q.deps.ColdGate == nil {
+		return nil
+	}
+	detail, gated := q.deps.ColdGate(ws)
+	if !gated {
+		return nil
+	}
+	refusalLevel(ctx, log, log.Info)(op, "the session is parked at its cold gate, so "+what+" is refused by the gate's own name",
+		dlog.Context{"detail": detail})
+	return &ColdGateRefusal{Detail: detail}
+}
+
 // holdForRevival parks a submission whose workspace has no live session and
 // brings that session up OUT OF BAND.
 //
@@ -388,6 +403,16 @@ func holderName(h wsm.LeaseHolder) string {
 // the turn it minted, and the revival releases the hold when the session is
 // up, delivering it down the ordinary path.
 func (q *queue) holdForRevival(ctx context.Context, sub Submission, log dlog.Logger) (Disposition, error) {
+	return q.holdAndRevive(ctx, sub, revivalLoad, footer.ActPrompt, log)
+}
+
+// holdAndRevive is the ONE way an entry whose workspace has no shim waits for
+// its session: held under the reconnect hold, the status told of the turn
+// (ACT), and the session started for CAUSE off the request path. A prompt
+// (holdForRevival) and every session act (holdActForRevival) come through
+// here, so the two cannot drift. A settings revival takes no turn: a pick is
+// no turn, and the roster must not read `submitting` for it.
+func (q *queue) holdAndRevive(ctx context.Context, sub Submission, cause revivalCause, act footer.SessionAct, log dlog.Logger) (Disposition, error) {
 	disposition, err := q.hold(ctx, sub, "", &leaseHold{kind: wsm.HoldReconnect}, log)
 	if err != nil {
 		return Disposition{}, err
@@ -403,8 +428,10 @@ func (q *queue) holdForRevival(ctx context.Context, sub Submission, log dlog.Log
 	// `none` -> `init` -> `ready` -> `submitting`. The link arm still
 	// outranks this while the route is coming up, so the walk is now
 	// `none` -> `init` -> `submitting` -> `thinking`.
-	q.setTurn(sub.WS, &footer.TurnStarted{At: q.deps.Now(), Act: footer.ActPrompt})
-	q.reviveInBackground(context.WithoutCancel(ctx), sub.WS, revivalLoad, log)
+	if cause != revivalSettings {
+		q.setTurn(sub.WS, &footer.TurnStarted{At: q.deps.Now(), Act: act})
+	}
+	q.reviveInBackground(context.WithoutCancel(ctx), sub.WS, cause, log)
 	return disposition, nil
 }
 
