@@ -80,6 +80,24 @@ func TestDefaultDaemonHealthIsHealthy(t *testing.T) {
 	}
 }
 
+func TestDefaultAwaitIdleIsIdle(t *testing.T) {
+	// Arrange.
+	_, baseURL := newTestServer(t)
+	client := newTestClient(t, baseURL)
+
+	// Act.
+	resp, err := client.AwaitIdle(context.Background(),
+		connect.NewRequest(&agentreplv1.AwaitIdleRequest{}))
+	if err != nil {
+		t.Fatalf("AwaitIdle: %v", err)
+	}
+
+	// Assert: the fake starts no work of its own, so it is always idle.
+	if resp.Msg.GetSuccess() == nil {
+		t.Fatalf("AwaitIdle default is %v, want success", resp.Msg)
+	}
+}
+
 func TestDefaultSelectWorkspaceIsSuccess(t *testing.T) {
 	// Arrange.
 	_, baseURL := newTestServer(t)

@@ -171,6 +171,8 @@ type fakeDB struct {
 	queueReadErr error
 	// ledgerReadErr, when set, fails every MergeLedger read.
 	ledgerReadErr error
+	// ledgerOpenErr, when set, fails every OpenMergeLedger.
+	ledgerOpenErr error
 	// openChildrenErr, when set, is what every RequireNoOpenChildren
 	// answers; openChildrenAsked records each workspace it was asked about.
 	openChildrenErr   error
@@ -591,6 +593,15 @@ func (f *fakeDB) ClaimDisplacedTurn(_ context.Context, turn wsm.TurnID, _ time.T
 func (f *fakeDB) OpenMergeLedger(_ context.Context, id ids.WorkspaceID, lease wsm.LeaseID) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.ledgerOpenErr != nil {
+		return f.ledgerOpenErr
+	}
+	// As the store does: reopening a lease's ledger is idempotent.
+	for _, entry := range f.ledger[id] {
+		if entry.Lease == lease {
+			return nil
+		}
+	}
 	f.ledger[id] = append(f.ledger[id], wsm.MergeLedgerEntry{Workspace: id, Lease: lease})
 	return nil
 }

@@ -176,8 +176,8 @@ func (r *run) rebaseInBackground(ctx context.Context, fields dlog.Context) backg
 	if err := r.takeSession(ctx); err != nil {
 		return backgroundEnd{err: err}
 	}
-	if err := o.deps.DB.OpenMergeLedger(ctx, r.ws, r.lease.ID); err != nil {
-		return backgroundEnd{err: fmt.Errorf("could not open the merge ledger: %w", err)}
+	if err := r.openLedger(ctx); err != nil {
+		return backgroundEnd{err: err}
 	}
 	targetBranch, err := r.git.CurrentBranch(ctx, subject.targetDir)
 	if err != nil {

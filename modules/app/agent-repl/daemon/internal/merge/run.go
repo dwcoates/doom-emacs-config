@@ -351,6 +351,37 @@ func (r *run) openTab(ctx context.Context, kind string) tabRound {
 	return round
 }
 
+// openLedger opens the run's merge ledger and continues its tab rounds from
+// the rounds the ledger already holds. ONE LEDGER OUTLIVES MANY RUNS: a
+// waiting merge's background rebases (rebasewaiting.go) and its run at the
+// front all record under the one ledger identity its bubble is drawn from
+// (mintLedger), and an interval is keyed by its round and kind. A run that
+// numbered its rounds from one again overwrote the earlier runs' intervals of
+// the same round (2026-11-09: a merge's rebase at the front replaced the
+// rebase it had while waiting), so every round a run opens numbers past every
+// round of its kind the ledger holds, and no interval is ever rewritten by
+// another run's.
+func (r *run) openLedger(ctx context.Context) error {
+	if err := r.o.deps.DB.OpenMergeLedger(ctx, r.ws, r.lease.ID); err != nil {
+		return fmt.Errorf("could not open the merge ledger: %w", err)
+	}
+	ledgers, err := r.o.deps.DB.MergeLedger(ctx, r.ws)
+	if err != nil {
+		return fmt.Errorf("could not read the merge ledger's rounds: %w", err)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, ledger := range ledgers {
+		if ledger.Lease != r.lease.ID {
+			continue
+		}
+		for _, interval := range ledger.Intervals {
+			r.rounds[interval.Kind] = max(r.rounds[interval.Kind], interval.Round)
+		}
+	}
+	return nil
+}
+
 // closeTab records a tab interval's end and its outcome. The ledger holds the
 // intervals and NOTHING of the content: step history is feed content the
 // daemon synthesizes, never a WSM column.
@@ -646,8 +677,8 @@ func (r *run) admit(ctx context.Context) error {
 	// the head's steps, but whether the queue races at all is the deploy
 	// config the head just read (racesIn).
 	o.extendChain(context.WithoutCancel(ctx), r.repo)
-	if err := o.deps.DB.OpenMergeLedger(ctx, ws, r.lease.ID); err != nil {
-		r.end(ctx, fmt.Errorf("could not open the merge ledger: %w", err))
+	if err := r.openLedger(ctx); err != nil {
+		r.end(ctx, err)
 		return err
 	}
 	// THE TURN IN FLIGHT IS DISPLACED ONLY FOR THE USER'S OWN ASK. An agent's

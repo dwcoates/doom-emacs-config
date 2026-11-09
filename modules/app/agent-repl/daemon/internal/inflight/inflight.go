@@ -66,12 +66,22 @@ func (t *Tracker) Begin() (end func()) {
 	return t.begin(2)
 }
 
+// callSite labels the frame SKIP frames above its caller as its directory
+// and file base name and its line ("server/streams.go:42"), "unknown" when
+// the stack is shorter. Only the base names are read, so the label is the
+// same whether or not the binary was built with -trimpath.
+func callSite(skip int) string {
+	var pc [1]uintptr
+	if runtime.Callers(skip+2, pc[:]) == 0 {
+		return "unknown"
+	}
+	frame, _ := runtime.CallersFrames(pc[:]).Next()
+	return filepath.Base(filepath.Dir(frame.File)) + "/" + filepath.Base(frame.File) + ":" + strconv.Itoa(frame.Line)
+}
+
 // begin counts one piece of work begun by the caller SKIP frames up.
 func (t *Tracker) begin(skip int) (end func()) {
-	site := "unknown"
-	if _, file, line, ok := runtime.Caller(skip); ok {
-		site = filepath.Base(filepath.Dir(file)) + "/" + filepath.Base(file) + ":" + strconv.Itoa(line)
-	}
+	site := callSite(skip)
 	t.mu.Lock()
 	t.n++
 	if t.sites == nil {

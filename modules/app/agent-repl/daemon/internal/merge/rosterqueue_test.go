@@ -508,29 +508,32 @@ func TestAFailedLineWriteTellsTheRosterNothing(t *testing.T) {
 	}
 }
 
-func TestTheRosterLineCreditsEachMergeAsTheRosterDoes(t *testing.T) {
+func TestTheRosterLineCreditsAndNamesEachMergeAsTheRosterDoes(t *testing.T) {
 	tests := []struct {
-		name         string
-		entry        wsm.MergeQueueEntry
-		wantCredited ids.WorkspaceID
-		wantAsync    bool
+		name          string
+		entry         wsm.MergeQueueEntry
+		wantCredited  ids.WorkspaceID
+		wantAsync     bool
+		wantAsyncName string
 	}{
 		{
-			name:         "a workspace landing its own branch is credited to itself",
+			name:         "a workspace landing its own branch is credited to itself, with no async name",
 			entry:        wsm.MergeQueueEntry{Workspace: "ws-own", State: wsm.MergeQueued, Source: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}},
 			wantCredited: "ws-own",
 		},
 		{
-			name:         "a merge workspace is credited to its requester",
-			entry:        wsm.MergeQueueEntry{Workspace: "ws-merge", State: wsm.MergeQueued, Source: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}},
-			wantCredited: "ws-requester",
-			wantAsync:    true,
+			name:          "a merge workspace is credited to its requester and named by its own name",
+			entry:         wsm.MergeQueueEntry{Workspace: "ws-merge", State: wsm.MergeQueued, Source: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}},
+			wantCredited:  "ws-requester",
+			wantAsync:     true,
+			wantAsyncName: "land-requester",
 		},
 		{
-			name:         "a detached request not yet handed off is credited to its own workspace",
-			entry:        wsm.MergeQueueEntry{Workspace: "ws-own", State: wsm.MergeQueued, Source: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch, Detach: "req-1"}},
-			wantCredited: "ws-own",
-			wantAsync:    true,
+			name:          "a detached request not yet handed off is credited to its own workspace and named by its reserved name",
+			entry:         wsm.MergeQueueEntry{Workspace: "ws-own", State: wsm.MergeQueued, Source: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch, Detach: "req-1", DetachName: "land-own"}},
+			wantCredited:  "ws-own",
+			wantAsync:     true,
+			wantAsyncName: "land-own",
 		},
 	}
 	for _, tc := range tests {
@@ -556,8 +559,8 @@ func TestTheRosterLineCreditsEachMergeAsTheRosterDoes(t *testing.T) {
 			if len(line) != 1 {
 				t.Fatalf("roster line = %v, want one merge", line)
 			}
-			if line[0].Workspace != tc.entry.Workspace || line[0].Credited != tc.wantCredited || line[0].Async != tc.wantAsync {
-				t.Fatalf("roster entry = %+v, want workspace %s credited to %s, async %v", line[0], tc.entry.Workspace, tc.wantCredited, tc.wantAsync)
+			if line[0].Workspace != tc.entry.Workspace || line[0].Credited != tc.wantCredited || line[0].Async != tc.wantAsync || line[0].AsyncName != tc.wantAsyncName {
+				t.Fatalf("roster entry = %+v, want workspace %s credited to %s, async %v named %q", line[0], tc.entry.Workspace, tc.wantCredited, tc.wantAsync, tc.wantAsyncName)
 			}
 		})
 	}

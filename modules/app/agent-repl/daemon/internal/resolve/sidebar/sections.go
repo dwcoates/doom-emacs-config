@@ -105,7 +105,8 @@ func (q repoQueue) listed() bool {
 // drawMergeQueue composes one repository's merge queue: the merge at the
 // front of the line as its head, every merge behind the front as waiting,
 // and the pause. EVERY MERGE IS CREDITED AS THE ROSTER CREDITS IT
-// (QueueEntry.Credited), so a hidden merge workspace is never named here.
+// (QueueEntry.Credited), so a hidden merge workspace is never selected here,
+// and an async merge is named by its own name (queueSubject).
 // Q is listed (repoQueue.listed), so its line holds a merge or a merge
 // remediates: the head is drawn only while the line holds one. The merges
 // remediating out of line are the second spot, under the head.
@@ -119,6 +120,12 @@ func (r *resolver) drawMergeQueue(q repoQueue, log dlog.Logger) *frontendv1.Rost
 			log.Error(op, "a merge in the queue is credited to a workspace the registry does not carry, so it is not drawn", dlog.Context{
 				"workspace_id": string(entry.Workspace), "credited": string(entry.Credited),
 				"invariant_violation": "a merge queue entry is credited to a registered workspace"})
+			return nil, false
+		}
+		if entry.Async != (entry.AsyncName != "") {
+			log.Error(op, "a merge in the queue is async without its own name, or named without being async, so it is not drawn", dlog.Context{
+				"workspace_id": string(entry.Workspace), "credited": string(entry.Credited), "async": entry.Async, "async_name": entry.AsyncName,
+				"invariant_violation": "a merge queue entry carries its own name iff it is async"})
 			return nil, false
 		}
 		return queueSubject(credited, entry), true
@@ -199,14 +206,20 @@ func drawMergeQueuePause(pause *wsm.MergeQueuePause) *frontendv1.RosterMergeQueu
 	return out
 }
 
-// queueSubject is the subject a merge in the queue is drawn as: the workspace
-// it is credited to, where a click on it goes, and how it runs.
+// queueSubject is the subject a merge in the queue is drawn as: the name it is
+// drawn under, the workspace it is credited to, where a click on it goes, and
+// how it runs. A sync merge is named by the workspace it is credited to and an
+// async merge by its own name (QueueEntry.AsyncName), so several async merges
+// one workspace asked for are drawn apart; a click on either selects the
+// credited workspace and reveals the merge's own bubble on its root feed.
 func queueSubject(credited wsm.Workspace, entry QueueEntry) *frontendv1.RosterMergeQueueSubject {
 	mode := &frontendv1.RosterMergeQueueMode{Mode: &frontendv1.RosterMergeQueueMode_Sync{Sync: &frontendv1.RosterMergeQueueModeSync{}}}
+	name := credited.Name
 	if entry.Async {
 		mode.Mode = &frontendv1.RosterMergeQueueMode_Async{Async: &frontendv1.RosterMergeQueueModeAsync{}}
+		name = entry.AsyncName
 	}
-	return &frontendv1.RosterMergeQueueSubject{Workspace: credited.Ref(), Name: credited.Name, Reveal: entry.Reveal, Mode: mode}
+	return &frontendv1.RosterMergeQueueSubject{Workspace: credited.Ref(), Name: name, Reveal: entry.Reveal, Mode: mode}
 }
 
 // workspacesByID indexes the registry's workspaces by id.
