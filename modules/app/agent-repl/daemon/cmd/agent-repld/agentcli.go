@@ -1628,7 +1628,7 @@ func workspaceList(c *cliCall, args []string) int {
 			c.failed("render workspace %s: %v", ws.GetName(), err)
 			return exitFailure
 		}
-		fmt.Fprintln(c.out, string(text))
+		say(c.out, "%s\n", text)
 	}
 	return exitSuccess
 }
