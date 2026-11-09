@@ -100,6 +100,23 @@ func newOpened(t *testing.T, opts harness.Opts) *fixture {
 	return f
 }
 
+// newOpenedOn is newOpened on a view of a daemon another fixture owns
+// (harness.Daemon.View): t's own failures, run budget and warning sweep, over
+// a fresh repository and workspace t registers and opens. It is for cases that
+// share one expensive daemon under AGENTS.md "A case may share an expensive
+// fixture, never a slice another case reads".
+func newOpenedOn(t *testing.T, owner *harness.Daemon) *fixture {
+	t.Helper()
+	d := owner.View(t)
+	repo := harness.NewRepo(t)
+	ws := harness.Register(t, d, repo.Dir)
+	f := &fixture{d: d, repo: repo, ws: ws, t: t}
+	f.open()
+	f.host = f.d.WatchHost(f.ws)
+	f.web = f.d.WatchWeb(f.ws)
+	return f
+}
+
 // newOpenedWithProfile is newOpened for a fake shim that must be born with a
 // profile in force — a condition the daemon can meet on its very first request
 // or its very first idle sweep, which a control-socket script filed after the

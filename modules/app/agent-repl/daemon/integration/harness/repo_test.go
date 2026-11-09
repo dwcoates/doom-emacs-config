@@ -181,3 +181,28 @@ func TestSetCommitAuthorScriptsTheCommitsAuthor(t *testing.T) {
 		t.Fatalf("commit = %+v, want the scripted author", c)
 	}
 }
+
+func TestRepoLettersNamesEveryIndexInLettersAlone(t *testing.T) {
+	tests := []struct {
+		i    int
+		want string
+	}{
+		{i: 0, want: "a"},
+		{i: 25, want: "z"},
+		{i: 26, want: "aa"},
+		{i: 27, want: "ab"},
+		{i: 701, want: "zz"},
+		{i: 702, want: "aaa"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.want, func(t *testing.T) {
+			// Act.
+			got := repoLetters(tt.i)
+
+			// Assert.
+			if got != tt.want {
+				t.Fatalf("repoLetters(%d) = %q, want %q", tt.i, got, tt.want)
+			}
+		})
+	}
+}
