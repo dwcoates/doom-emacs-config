@@ -29,6 +29,18 @@ message WatchDesktopBannersRequest {
   // The process holding the stream, for the daemon's record of which app
   // instance posts its banners. REQUIRED.
   DesktopNotifierProcess process = 1;
+  // The build the app runs. REQUIRED: every process reports its build when it
+  // connects, and a deploy restarts the app (com.agentrepl.notifier) when the
+  // build its standing stream reported is not the one it just installed.
+  DesktopNotifierBuild build = 2;
+}
+
+// The build a notifier app runs.
+message DesktopNotifierBuild {
+  // The lowercase hex SHA-256 of the executable the app was launched from
+  // (Zettel.app/Contents/MacOS/Zettel), the content hash every component's
+  // build is named by. Never empty.
+  string sha256 = 1;
 }
 
 // The operating-system process the notifier app runs as.

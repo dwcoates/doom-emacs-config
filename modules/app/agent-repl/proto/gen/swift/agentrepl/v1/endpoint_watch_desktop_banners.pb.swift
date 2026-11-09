@@ -54,11 +54,40 @@ public nonisolated struct Agentrepl_V1_WatchDesktopBannersRequest: Sendable {
   /// Clears the value of `process`. Subsequent reads from it will return its default value.
   public mutating func clearProcess() {self._process = nil}
 
+  /// The build the app runs. REQUIRED: every process reports its build when it
+  /// connects, and a deploy restarts the app (com.agentrepl.notifier) when the
+  /// build its standing stream reported is not the one it just installed.
+  public var build: Agentrepl_V1_DesktopNotifierBuild {
+    get {_build ?? Agentrepl_V1_DesktopNotifierBuild()}
+    set {_build = newValue}
+  }
+  /// Returns true if `build` has been explicitly set.
+  public var hasBuild: Bool {self._build != nil}
+  /// Clears the value of `build`. Subsequent reads from it will return its default value.
+  public mutating func clearBuild() {self._build = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
 
   fileprivate var _process: Agentrepl_V1_DesktopNotifierProcess? = nil
+  fileprivate var _build: Agentrepl_V1_DesktopNotifierBuild? = nil
+}
+
+/// The build a notifier app runs.
+public nonisolated struct Agentrepl_V1_DesktopNotifierBuild: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// The lowercase hex SHA-256 of the executable the app was launched from
+  /// (Zettel.app/Contents/MacOS/Zettel), the content hash every component's
+  /// build is named by. Never empty.
+  public var sha256: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
 }
 
 /// The operating-system process the notifier app runs as.
@@ -178,7 +207,7 @@ fileprivate nonisolated let _protobuf_package = "agentrepl.v1"
 
 nonisolated extension Agentrepl_V1_WatchDesktopBannersRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".WatchDesktopBannersRequest"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}process\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}process\0\u{1}build\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -187,6 +216,7 @@ nonisolated extension Agentrepl_V1_WatchDesktopBannersRequest: SwiftProtobuf.Mes
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularMessageField(value: &self._process) }()
+      case 2: try { try decoder.decodeSingularMessageField(value: &self._build) }()
       default: break
       }
     }
@@ -200,11 +230,45 @@ nonisolated extension Agentrepl_V1_WatchDesktopBannersRequest: SwiftProtobuf.Mes
     try { if let v = self._process {
       try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
     } }()
+    try { if let v = self._build {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: Agentrepl_V1_WatchDesktopBannersRequest, rhs: Agentrepl_V1_WatchDesktopBannersRequest) -> Bool {
     if lhs._process != rhs._process {return false}
+    if lhs._build != rhs._build {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Agentrepl_V1_DesktopNotifierBuild: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".DesktopNotifierBuild"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}sha256\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.sha256) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.sha256.isEmpty {
+      try visitor.visitSingularStringField(value: self.sha256, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Agentrepl_V1_DesktopNotifierBuild, rhs: Agentrepl_V1_DesktopNotifierBuild) -> Bool {
+    if lhs.sha256 != rhs.sha256 {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

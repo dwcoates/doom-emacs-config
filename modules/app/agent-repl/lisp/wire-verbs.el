@@ -3596,7 +3596,8 @@ and a forced one does not wait for in-flight work."
     ("DEPLOY_COMPONENT_SIDECAR" . :sidecar)
     ("DEPLOY_COMPONENT_ELISP" . :elisp)
     ("DEPLOY_COMPONENT_ZETTEL" . :zettel)
-    ("DEPLOY_COMPONENT_TESTS" . :tests))
+    ("DEPLOY_COMPONENT_TESTS" . :tests)
+    ("DEPLOY_COMPONENT_NOTIFIER" . :notifier))
   "The DeployComponent vocabulary, wire name to keyword.
 UNSPECIFIED is deliberately ABSENT: it is never sent, and an outcome
 carrying it is malformed.")

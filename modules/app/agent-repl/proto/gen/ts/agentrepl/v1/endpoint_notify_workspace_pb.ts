@@ -284,7 +284,8 @@ export const NotifyWorkspaceWorkspaceClosedSchema: GenMessage<NotifyWorkspaceWor
 
 /**
  * No desktop banner program could be resolved at the daemon's boot
- * (terminal-notifier on macOS, notify-send on Linux).
+ * (notify-send on Linux; macOS's banners are the Zettel app's, which always
+ * resolves, and an app that is not running is a per-banner error instead).
  *
  * @generated from message agentrepl.v1.NotifyWorkspaceNoBannerProgram
  */

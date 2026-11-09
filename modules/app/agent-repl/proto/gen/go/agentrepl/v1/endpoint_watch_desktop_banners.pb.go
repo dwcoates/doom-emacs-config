@@ -43,7 +43,11 @@ type WatchDesktopBannersRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The process holding the stream, for the daemon's record of which app
 	// instance posts its banners. REQUIRED.
-	Process       *DesktopNotifierProcess `protobuf:"bytes,1,opt,name=process,proto3" json:"process,omitempty"`
+	Process *DesktopNotifierProcess `protobuf:"bytes,1,opt,name=process,proto3" json:"process,omitempty"`
+	// The build the app runs. REQUIRED: every process reports its build when it
+	// connects, and a deploy restarts the app (com.agentrepl.notifier) when the
+	// build its standing stream reported is not the one it just installed.
+	Build         *DesktopNotifierBuild `protobuf:"bytes,2,opt,name=build,proto3" json:"build,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -85,6 +89,61 @@ func (x *WatchDesktopBannersRequest) GetProcess() *DesktopNotifierProcess {
 	return nil
 }
 
+func (x *WatchDesktopBannersRequest) GetBuild() *DesktopNotifierBuild {
+	if x != nil {
+		return x.Build
+	}
+	return nil
+}
+
+// The build a notifier app runs.
+type DesktopNotifierBuild struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The lowercase hex SHA-256 of the executable the app was launched from
+	// (Zettel.app/Contents/MacOS/Zettel), the content hash every component's
+	// build is named by. Never empty.
+	Sha256        string `protobuf:"bytes,1,opt,name=sha256,proto3" json:"sha256,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DesktopNotifierBuild) Reset() {
+	*x = DesktopNotifierBuild{}
+	mi := &file_agentrepl_v1_endpoint_watch_desktop_banners_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DesktopNotifierBuild) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DesktopNotifierBuild) ProtoMessage() {}
+
+func (x *DesktopNotifierBuild) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_watch_desktop_banners_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DesktopNotifierBuild.ProtoReflect.Descriptor instead.
+func (*DesktopNotifierBuild) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_watch_desktop_banners_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *DesktopNotifierBuild) GetSha256() string {
+	if x != nil {
+		return x.Sha256
+	}
+	return ""
+}
+
 // The operating-system process the notifier app runs as.
 type DesktopNotifierProcess struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -97,7 +156,7 @@ type DesktopNotifierProcess struct {
 
 func (x *DesktopNotifierProcess) Reset() {
 	*x = DesktopNotifierProcess{}
-	mi := &file_agentrepl_v1_endpoint_watch_desktop_banners_proto_msgTypes[1]
+	mi := &file_agentrepl_v1_endpoint_watch_desktop_banners_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -109,7 +168,7 @@ func (x *DesktopNotifierProcess) String() string {
 func (*DesktopNotifierProcess) ProtoMessage() {}
 
 func (x *DesktopNotifierProcess) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_watch_desktop_banners_proto_msgTypes[1]
+	mi := &file_agentrepl_v1_endpoint_watch_desktop_banners_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -122,7 +181,7 @@ func (x *DesktopNotifierProcess) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DesktopNotifierProcess.ProtoReflect.Descriptor instead.
 func (*DesktopNotifierProcess) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_watch_desktop_banners_proto_rawDescGZIP(), []int{1}
+	return file_agentrepl_v1_endpoint_watch_desktop_banners_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *DesktopNotifierProcess) GetPid() int32 {
@@ -150,7 +209,7 @@ type WatchDesktopBannersResponse struct {
 
 func (x *WatchDesktopBannersResponse) Reset() {
 	*x = WatchDesktopBannersResponse{}
-	mi := &file_agentrepl_v1_endpoint_watch_desktop_banners_proto_msgTypes[2]
+	mi := &file_agentrepl_v1_endpoint_watch_desktop_banners_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -162,7 +221,7 @@ func (x *WatchDesktopBannersResponse) String() string {
 func (*WatchDesktopBannersResponse) ProtoMessage() {}
 
 func (x *WatchDesktopBannersResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_watch_desktop_banners_proto_msgTypes[2]
+	mi := &file_agentrepl_v1_endpoint_watch_desktop_banners_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -175,7 +234,7 @@ func (x *WatchDesktopBannersResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WatchDesktopBannersResponse.ProtoReflect.Descriptor instead.
 func (*WatchDesktopBannersResponse) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_watch_desktop_banners_proto_rawDescGZIP(), []int{2}
+	return file_agentrepl_v1_endpoint_watch_desktop_banners_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *WatchDesktopBannersResponse) GetFrame() isWatchDesktopBannersResponse_Frame {
@@ -267,7 +326,7 @@ type WatchDesktopBannersAttached struct {
 
 func (x *WatchDesktopBannersAttached) Reset() {
 	*x = WatchDesktopBannersAttached{}
-	mi := &file_agentrepl_v1_endpoint_watch_desktop_banners_proto_msgTypes[3]
+	mi := &file_agentrepl_v1_endpoint_watch_desktop_banners_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -279,7 +338,7 @@ func (x *WatchDesktopBannersAttached) String() string {
 func (*WatchDesktopBannersAttached) ProtoMessage() {}
 
 func (x *WatchDesktopBannersAttached) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_watch_desktop_banners_proto_msgTypes[3]
+	mi := &file_agentrepl_v1_endpoint_watch_desktop_banners_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -292,7 +351,7 @@ func (x *WatchDesktopBannersAttached) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WatchDesktopBannersAttached.ProtoReflect.Descriptor instead.
 func (*WatchDesktopBannersAttached) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_watch_desktop_banners_proto_rawDescGZIP(), []int{3}
+	return file_agentrepl_v1_endpoint_watch_desktop_banners_proto_rawDescGZIP(), []int{4}
 }
 
 // Another app instance's stream took this one's place, so this stream ends
@@ -305,7 +364,7 @@ type WatchDesktopBannersSuperseded struct {
 
 func (x *WatchDesktopBannersSuperseded) Reset() {
 	*x = WatchDesktopBannersSuperseded{}
-	mi := &file_agentrepl_v1_endpoint_watch_desktop_banners_proto_msgTypes[4]
+	mi := &file_agentrepl_v1_endpoint_watch_desktop_banners_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -317,7 +376,7 @@ func (x *WatchDesktopBannersSuperseded) String() string {
 func (*WatchDesktopBannersSuperseded) ProtoMessage() {}
 
 func (x *WatchDesktopBannersSuperseded) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_watch_desktop_banners_proto_msgTypes[4]
+	mi := &file_agentrepl_v1_endpoint_watch_desktop_banners_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -330,16 +389,19 @@ func (x *WatchDesktopBannersSuperseded) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WatchDesktopBannersSuperseded.ProtoReflect.Descriptor instead.
 func (*WatchDesktopBannersSuperseded) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_watch_desktop_banners_proto_rawDescGZIP(), []int{4}
+	return file_agentrepl_v1_endpoint_watch_desktop_banners_proto_rawDescGZIP(), []int{5}
 }
 
 var File_agentrepl_v1_endpoint_watch_desktop_banners_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_watch_desktop_banners_proto_rawDesc = "" +
 	"\n" +
-	"1agentrepl/v1/endpoint_watch_desktop_banners.proto\x12\fagentrepl.v1\x1a'agentrepl/v1/daemon_stream_ending.proto\x1a!agentrepl/v1/desktop_banner.proto\"\\\n" +
+	"1agentrepl/v1/endpoint_watch_desktop_banners.proto\x12\fagentrepl.v1\x1a'agentrepl/v1/daemon_stream_ending.proto\x1a!agentrepl/v1/desktop_banner.proto\"\x96\x01\n" +
 	"\x1aWatchDesktopBannersRequest\x12>\n" +
-	"\aprocess\x18\x01 \x01(\v2$.agentrepl.v1.DesktopNotifierProcessR\aprocess\"*\n" +
+	"\aprocess\x18\x01 \x01(\v2$.agentrepl.v1.DesktopNotifierProcessR\aprocess\x128\n" +
+	"\x05build\x18\x02 \x01(\v2\".agentrepl.v1.DesktopNotifierBuildR\x05build\".\n" +
+	"\x14DesktopNotifierBuild\x12\x16\n" +
+	"\x06sha256\x18\x01 \x01(\tR\x06sha256\"*\n" +
 	"\x16DesktopNotifierProcess\x12\x10\n" +
 	"\x03pid\x18\x01 \x01(\x05R\x03pid\"\xb1\x02\n" +
 	"\x1bWatchDesktopBannersResponse\x12G\n" +
@@ -365,27 +427,29 @@ func file_agentrepl_v1_endpoint_watch_desktop_banners_proto_rawDescGZIP() []byte
 	return file_agentrepl_v1_endpoint_watch_desktop_banners_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_watch_desktop_banners_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
+var file_agentrepl_v1_endpoint_watch_desktop_banners_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
 var file_agentrepl_v1_endpoint_watch_desktop_banners_proto_goTypes = []any{
 	(*WatchDesktopBannersRequest)(nil),    // 0: agentrepl.v1.WatchDesktopBannersRequest
-	(*DesktopNotifierProcess)(nil),        // 1: agentrepl.v1.DesktopNotifierProcess
-	(*WatchDesktopBannersResponse)(nil),   // 2: agentrepl.v1.WatchDesktopBannersResponse
-	(*WatchDesktopBannersAttached)(nil),   // 3: agentrepl.v1.WatchDesktopBannersAttached
-	(*WatchDesktopBannersSuperseded)(nil), // 4: agentrepl.v1.WatchDesktopBannersSuperseded
-	(*DesktopBanner)(nil),                 // 5: agentrepl.v1.DesktopBanner
-	(*DaemonStreamEnding)(nil),            // 6: agentrepl.v1.DaemonStreamEnding
+	(*DesktopNotifierBuild)(nil),          // 1: agentrepl.v1.DesktopNotifierBuild
+	(*DesktopNotifierProcess)(nil),        // 2: agentrepl.v1.DesktopNotifierProcess
+	(*WatchDesktopBannersResponse)(nil),   // 3: agentrepl.v1.WatchDesktopBannersResponse
+	(*WatchDesktopBannersAttached)(nil),   // 4: agentrepl.v1.WatchDesktopBannersAttached
+	(*WatchDesktopBannersSuperseded)(nil), // 5: agentrepl.v1.WatchDesktopBannersSuperseded
+	(*DesktopBanner)(nil),                 // 6: agentrepl.v1.DesktopBanner
+	(*DaemonStreamEnding)(nil),            // 7: agentrepl.v1.DaemonStreamEnding
 }
 var file_agentrepl_v1_endpoint_watch_desktop_banners_proto_depIdxs = []int32{
-	1, // 0: agentrepl.v1.WatchDesktopBannersRequest.process:type_name -> agentrepl.v1.DesktopNotifierProcess
-	3, // 1: agentrepl.v1.WatchDesktopBannersResponse.attached:type_name -> agentrepl.v1.WatchDesktopBannersAttached
-	5, // 2: agentrepl.v1.WatchDesktopBannersResponse.banner:type_name -> agentrepl.v1.DesktopBanner
-	4, // 3: agentrepl.v1.WatchDesktopBannersResponse.superseded:type_name -> agentrepl.v1.WatchDesktopBannersSuperseded
-	6, // 4: agentrepl.v1.WatchDesktopBannersResponse.ending:type_name -> agentrepl.v1.DaemonStreamEnding
-	5, // [5:5] is the sub-list for method output_type
-	5, // [5:5] is the sub-list for method input_type
-	5, // [5:5] is the sub-list for extension type_name
-	5, // [5:5] is the sub-list for extension extendee
-	0, // [0:5] is the sub-list for field type_name
+	2, // 0: agentrepl.v1.WatchDesktopBannersRequest.process:type_name -> agentrepl.v1.DesktopNotifierProcess
+	1, // 1: agentrepl.v1.WatchDesktopBannersRequest.build:type_name -> agentrepl.v1.DesktopNotifierBuild
+	4, // 2: agentrepl.v1.WatchDesktopBannersResponse.attached:type_name -> agentrepl.v1.WatchDesktopBannersAttached
+	6, // 3: agentrepl.v1.WatchDesktopBannersResponse.banner:type_name -> agentrepl.v1.DesktopBanner
+	5, // 4: agentrepl.v1.WatchDesktopBannersResponse.superseded:type_name -> agentrepl.v1.WatchDesktopBannersSuperseded
+	7, // 5: agentrepl.v1.WatchDesktopBannersResponse.ending:type_name -> agentrepl.v1.DaemonStreamEnding
+	6, // [6:6] is the sub-list for method output_type
+	6, // [6:6] is the sub-list for method input_type
+	6, // [6:6] is the sub-list for extension type_name
+	6, // [6:6] is the sub-list for extension extendee
+	0, // [0:6] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_watch_desktop_banners_proto_init() }
@@ -395,7 +459,7 @@ func file_agentrepl_v1_endpoint_watch_desktop_banners_proto_init() {
 	}
 	file_agentrepl_v1_daemon_stream_ending_proto_init()
 	file_agentrepl_v1_desktop_banner_proto_init()
-	file_agentrepl_v1_endpoint_watch_desktop_banners_proto_msgTypes[2].OneofWrappers = []any{
+	file_agentrepl_v1_endpoint_watch_desktop_banners_proto_msgTypes[3].OneofWrappers = []any{
 		(*WatchDesktopBannersResponse_Attached)(nil),
 		(*WatchDesktopBannersResponse_Banner)(nil),
 		(*WatchDesktopBannersResponse_Superseded)(nil),
@@ -407,7 +471,7 @@ func file_agentrepl_v1_endpoint_watch_desktop_banners_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_watch_desktop_banners_proto_rawDesc), len(file_agentrepl_v1_endpoint_watch_desktop_banners_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   5,
+			NumMessages:   6,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

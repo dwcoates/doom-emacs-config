@@ -30,7 +30,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_watch_desktop_banners.proto.
  */
 export const file_agentrepl_v1_endpoint_watch_desktop_banners: GenFile = /*@__PURE__*/
-  fileDesc("CjFhZ2VudHJlcGwvdjEvZW5kcG9pbnRfd2F0Y2hfZGVza3RvcF9iYW5uZXJzLnByb3RvEgxhZ2VudHJlcGwudjEiUwoaV2F0Y2hEZXNrdG9wQmFubmVyc1JlcXVlc3QSNQoHcHJvY2VzcxgBIAEoCzIkLmFnZW50cmVwbC52MS5EZXNrdG9wTm90aWZpZXJQcm9jZXNzIiUKFkRlc2t0b3BOb3RpZmllclByb2Nlc3MSCwoDcGlkGAEgASgFIosCChtXYXRjaERlc2t0b3BCYW5uZXJzUmVzcG9uc2USPQoIYXR0YWNoZWQYASABKAsyKS5hZ2VudHJlcGwudjEuV2F0Y2hEZXNrdG9wQmFubmVyc0F0dGFjaGVkSAASLQoGYmFubmVyGAIgASgLMhsuYWdlbnRyZXBsLnYxLkRlc2t0b3BCYW5uZXJIABJBCgpzdXBlcnNlZGVkGAMgASgLMisuYWdlbnRyZXBsLnYxLldhdGNoRGVza3RvcEJhbm5lcnNTdXBlcnNlZGVkSAASMgoGZW5kaW5nGAQgASgLMiAuYWdlbnRyZXBsLnYxLkRhZW1vblN0cmVhbUVuZGluZ0gAQgcKBWZyYW1lIh0KG1dhdGNoRGVza3RvcEJhbm5lcnNBdHRhY2hlZCIfCh1XYXRjaERlc2t0b3BCYW5uZXJzU3VwZXJzZWRlZEIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_agentrepl_v1_daemon_stream_ending, file_agentrepl_v1_desktop_banner]);
+  fileDesc("CjFhZ2VudHJlcGwvdjEvZW5kcG9pbnRfd2F0Y2hfZGVza3RvcF9iYW5uZXJzLnByb3RvEgxhZ2VudHJlcGwudjEihgEKGldhdGNoRGVza3RvcEJhbm5lcnNSZXF1ZXN0EjUKB3Byb2Nlc3MYASABKAsyJC5hZ2VudHJlcGwudjEuRGVza3RvcE5vdGlmaWVyUHJvY2VzcxIxCgVidWlsZBgCIAEoCzIiLmFnZW50cmVwbC52MS5EZXNrdG9wTm90aWZpZXJCdWlsZCImChREZXNrdG9wTm90aWZpZXJCdWlsZBIOCgZzaGEyNTYYASABKAkiJQoWRGVza3RvcE5vdGlmaWVyUHJvY2VzcxILCgNwaWQYASABKAUiiwIKG1dhdGNoRGVza3RvcEJhbm5lcnNSZXNwb25zZRI9CghhdHRhY2hlZBgBIAEoCzIpLmFnZW50cmVwbC52MS5XYXRjaERlc2t0b3BCYW5uZXJzQXR0YWNoZWRIABItCgZiYW5uZXIYAiABKAsyGy5hZ2VudHJlcGwudjEuRGVza3RvcEJhbm5lckgAEkEKCnN1cGVyc2VkZWQYAyABKAsyKy5hZ2VudHJlcGwudjEuV2F0Y2hEZXNrdG9wQmFubmVyc1N1cGVyc2VkZWRIABIyCgZlbmRpbmcYBCABKAsyIC5hZ2VudHJlcGwudjEuRGFlbW9uU3RyZWFtRW5kaW5nSABCBwoFZnJhbWUiHQobV2F0Y2hEZXNrdG9wQmFubmVyc0F0dGFjaGVkIh8KHVdhdGNoRGVza3RvcEJhbm5lcnNTdXBlcnNlZGVkQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_agentrepl_v1_daemon_stream_ending, file_agentrepl_v1_desktop_banner]);
 
 /**
  * The app is connecting. The stream is daemon-scoped and the app is its only
@@ -46,6 +46,15 @@ export type WatchDesktopBannersRequest = Message<"agentrepl.v1.WatchDesktopBanne
    * @generated from field: agentrepl.v1.DesktopNotifierProcess process = 1;
    */
   process?: DesktopNotifierProcess | undefined;
+
+  /**
+   * The build the app runs. REQUIRED: every process reports its build when it
+   * connects, and a deploy restarts the app (com.agentrepl.notifier) when the
+   * build its standing stream reported is not the one it just installed.
+   *
+   * @generated from field: agentrepl.v1.DesktopNotifierBuild build = 2;
+   */
+  build?: DesktopNotifierBuild | undefined;
 };
 
 /**
@@ -54,6 +63,29 @@ export type WatchDesktopBannersRequest = Message<"agentrepl.v1.WatchDesktopBanne
  */
 export const WatchDesktopBannersRequestSchema: GenMessage<WatchDesktopBannersRequest> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_watch_desktop_banners, 0);
+
+/**
+ * The build a notifier app runs.
+ *
+ * @generated from message agentrepl.v1.DesktopNotifierBuild
+ */
+export type DesktopNotifierBuild = Message<"agentrepl.v1.DesktopNotifierBuild"> & {
+  /**
+   * The lowercase hex SHA-256 of the executable the app was launched from
+   * (Zettel.app/Contents/MacOS/Zettel), the content hash every component's
+   * build is named by. Never empty.
+   *
+   * @generated from field: string sha256 = 1;
+   */
+  sha256: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.DesktopNotifierBuild.
+ * Use `create(DesktopNotifierBuildSchema)` to create a new message.
+ */
+export const DesktopNotifierBuildSchema: GenMessage<DesktopNotifierBuild> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_watch_desktop_banners, 1);
 
 /**
  * The operating-system process the notifier app runs as.
@@ -75,7 +107,7 @@ export type DesktopNotifierProcess = Message<"agentrepl.v1.DesktopNotifierProces
  * Use `create(DesktopNotifierProcessSchema)` to create a new message.
  */
 export const DesktopNotifierProcessSchema: GenMessage<DesktopNotifierProcess> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_desktop_banners, 1);
+  messageDesc(file_agentrepl_v1_endpoint_watch_desktop_banners, 2);
 
 /**
  * One frame of the stream. THE ARM IS THE FRAME.
@@ -133,7 +165,7 @@ export type WatchDesktopBannersResponse = Message<"agentrepl.v1.WatchDesktopBann
  * Use `create(WatchDesktopBannersResponseSchema)` to create a new message.
  */
 export const WatchDesktopBannersResponseSchema: GenMessage<WatchDesktopBannersResponse> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_desktop_banners, 2);
+  messageDesc(file_agentrepl_v1_endpoint_watch_desktop_banners, 3);
 
 /**
  * The stream stands: the daemon will hand this app its banners.
@@ -148,7 +180,7 @@ export type WatchDesktopBannersAttached = Message<"agentrepl.v1.WatchDesktopBann
  * Use `create(WatchDesktopBannersAttachedSchema)` to create a new message.
  */
 export const WatchDesktopBannersAttachedSchema: GenMessage<WatchDesktopBannersAttached> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_desktop_banners, 3);
+  messageDesc(file_agentrepl_v1_endpoint_watch_desktop_banners, 4);
 
 /**
  * Another app instance's stream took this one's place, so this stream ends
@@ -164,5 +196,5 @@ export type WatchDesktopBannersSuperseded = Message<"agentrepl.v1.WatchDesktopBa
  * Use `create(WatchDesktopBannersSupersededSchema)` to create a new message.
  */
 export const WatchDesktopBannersSupersededSchema: GenMessage<WatchDesktopBannersSuperseded> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_desktop_banners, 4);
+  messageDesc(file_agentrepl_v1_endpoint_watch_desktop_banners, 5);
 

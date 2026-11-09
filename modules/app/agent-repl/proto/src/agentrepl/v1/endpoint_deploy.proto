@@ -79,6 +79,9 @@ enum DeployComponent {
   DEPLOY_COMPONENT_ELISP = 6;
   DEPLOY_COMPONENT_ZETTEL = 7;
   DEPLOY_COMPONENT_TESTS = 8;
+  // Zettel.app, the macOS desktop notifier (notifier/), installed at
+  // ~/Applications/Zettel.app and run by launchd as com.agentrepl.notifier.
+  DEPLOY_COMPONENT_NOTIFIER = 9;
 }
 
 // What the deploy decided for one component.

@@ -1655,6 +1655,8 @@ message FooterStatusActivityUpdateComponent {
     FooterStatusActivityUpdateComponentZettel zettel = 6;
     // The test service, which runs every merge gate.
     FooterStatusActivityUpdateComponentTests tests = 7;
+    // Zettel.app, the macOS desktop notifier.
+    FooterStatusActivityUpdateComponentNotifier notifier = 8;
   }
 }
 // The record store service.
@@ -1671,6 +1673,8 @@ message FooterStatusActivityUpdateComponentWebapp {}
 message FooterStatusActivityUpdateComponentZettel {}
 // The test service, which runs every merge gate.
 message FooterStatusActivityUpdateComponentTests {}
+// Zettel.app, the macOS desktop notifier.
+message FooterStatusActivityUpdateComponentNotifier {}
 // One thing the deploy deferred on this workspace.
 message FooterStatusActivityUpdateNote {
   oneof note {

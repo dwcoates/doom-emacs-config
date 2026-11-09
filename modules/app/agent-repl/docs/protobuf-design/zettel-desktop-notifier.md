@@ -74,3 +74,22 @@ answer any of the four; an arm the endpoint lacked would surface as an
 unlanded-arm transport error instead of a typed answer. A click lands at any
 moment, including mid-handover, so the app needs `transferring_away`'s address
 to report the click to the successor.
+
+### 3. The app reports its build; the notifier is a deploy component
+
+What: `WatchDesktopBannersRequest.build` (`DesktopNotifierBuild.sha256`, the
+hash of the app's executable); `DEPLOY_COMPONENT_NOTIFIER` in
+`agentrepl.v1.DeployComponent`; `FooterStatusActivityUpdateComponent.notifier`
+in `frontend.v1`.
+
+Why: every process reports its build when it connects (the standing rule the
+store and sidecar meet with build-report files only because they never
+connect). The app connects, so it reports on its stream, and a deploy judges
+it stale against the bundle it just installed exactly as it judges Emacs and
+the webviews. The deploy then names the component on its own wire
+(`Deploy`'s outcomes, Emacs's `agent-repl-wire-deploy-components`) and on the
+footer's update line, which renders arm names generically.
+
+Consequences: the notifier is built and installed only on macOS (`deploy.Deps.Notifier`
+nil elsewhere); the footer's arm and the deploy enum value exist on every
+platform but are never sent on Linux.
