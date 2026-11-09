@@ -123,39 +123,41 @@ Read `ARCHITECTURE.md` first: the package map, the seams, the conventions.
 
 ### An answer has left when the socket took it
 
-`server.WriteBarrier` (`internal/server/writebarrier.go`) is what both the
-daemon's orderly exit and the integration fake shim's stand-down wait on before
-ending the process. READ ITS DOC BEFORE REACHING FOR A SIMPLER SIGNAL: neither
+`server.WriteBarrier` (`internal/server/writebarrier.go`) is what the
+daemon's orderly exit waits on before ending the process. READ ITS DOC BEFORE REACHING FOR A SIMPLER SIGNAL: neither
 "the handler returned" nor "the request's context ended" means the answer has
 been written, because `golang.org/x/net/http2`'s `serverConn.runHandler` cancels
 that context in a defer that runs BEFORE the same defer produces the response's
 final frames. Both beliefs have been in this tree and both cost a run.
 
-| window | value | why |
-| --- | --- | --- |
-| `server.barrierSettle` | 1ms | how long the barrier lets pass with no write completing before it calls a connection quiet. NOT a delay: the loop ends on the condition and the ordinary case spends two of these. What it covers is one `write(2)` of a few dozen bytes onto a unix or loopback socket by an already-runnable goroutine — microseconds — so it is three orders of magnitude over the work |
-| `server.answerWriteBound` | 250ms | how long ONE answer has to reach the socket after its handler's goroutine has finished with it. A last resort, deliberately well under the exit's own 2s grace so a single stuck answer cannot spend all of it |
-| `fakeshim.killAnswerWriteBound` | 250ms | the same last resort on the fake's `KillSession` exit, far under the daemon's stand-down window so an overrun reads as a fake that took a moment rather than one that hung |
-| `writesQuietBound` (cmd/agent-repld/run.go) | 250ms | how long the exit gives the CONNECTIONS to stop writing once every counted call has been answered. `Serving.counted` skips `standingStreamPaths` on purpose, so `AwaitQuiet` sees nothing in flight while the daemon's LAST PUSH — `DaemonShutdownAnnounced`, sent on every WatchDaemon stream one line before `drain.fire` calls Exit — is still on its way to the socket. Same sizing and same last-resort role as `answerWriteBound`: the barrier ends on quiescence, so the ordinary exit spends about two `barrierSettle` ticks here |
-
-The barrier settles true on quiet OR on a connection that is still writing past
-the mark — one h2 connection multiplexes the standing pushes with the unary
-calls, and calling a busy link a lost answer would put an ERROR record, and a
-warning-sweep failure, against a healthy run. FALSE means one thing: nothing at
-all was written since the mark.
+The barrier waits on no clock and no quiet window. It reads the nine-byte
+header of every h2 frame on each counted connection: a client HEADERS frame
+opens a stream, and the server's DATA or HEADERS carrying END_STREAM (its
+header block complete), or a RST_STREAM from either side, ends it once the
+`Write` that carried it has returned. Frames on one stream are written in
+order, so a stream whose end is on the socket has its answer and every push
+before it there too. A connection that does not open with the h2 client
+preface is HTTP/1.1, which `http.Server.Shutdown` waits on exactly, and the
+h2c Upgrade route is refused (ERROR `daemon.server.h2c_upgrade_refused`), so
+no h2 stream is uncounted. Every push to a standing stream is counted from its
+enqueue until its stream sent it (`publish.StreamPushes`).
 
 ### Every exit ends each standing stream with its end frame
 
 No client stream ends without an end frame, on ANY exit path: a handover's
 last transfer, a layout restart's stand-down, a drain, a signal, a state-root
-loss. `serve` (cmd/agent-repld/run.go), once the owed answers
-(`AwaitQuiet`) and the last pushes (`AwaitWritesQuiet`) have left, calls
+loss. `serve` (cmd/agent-repld/run.go) takes ONE deadline, the exit's grace,
+and waits on events up to it: every unary handler returned (`AwaitQuiet`),
+every push owed to a standing stream sent (`AwaitPushesSent`), then
 `Serving.EndStreams` with the surface's `Close` (idempotent), which ends every
 `WatchHostWorkspace`, `WatchWorkspaceRoster`, `WatchDaemon`, `WatchPage` and
-every other standing stream, then `Serving.AwaitStreamsEnded(streamsEndBound)`:
-each stream the exit ended is counted until the socket has written past the
-moment its handler returned (its end frame; see `WriteBarrier`). A stream its
-client ended is uncounted at once. Only then does `http.Server.Shutdown` run.
+every other standing stream, then `Serving.AwaitStreamsEnded`: every standing
+handler returned and every h2 stream's end -- each answer and each end frame
+-- on the socket (`WriteBarrier`). An overrun is ERROR
+`daemon.server.await_streams_ended` (handlers, by procedure path) or
+`daemon.server.streams_unwritten` (ends not written, by connection). Only then
+does `http.Server.Shutdown` run, which waits for every HTTP/1.1 response to be
+flushed.
 
 Regression, 2026-09-27: the streams were left to `Shutdown`, which waits out
 its grace on an HTTP/1.1 stream that never goes idle and then closes the
@@ -166,9 +168,6 @@ transfer notice had reached and on its roster.
 `integration/exit_streams_test.go` holds all four stream kinds over HTTP/1.1
 and h2c through a real exit.
 
-| window | value | why |
-| --- | --- | --- |
-| `streamsEndBound` (cmd/agent-repld/run.go) | 500ms | contains one `server.answerWriteBound` (250ms, one end frame's write) plus as much again for the handlers to leave, each of which selects on the lifetime `Close` cancels. An overrun is ERROR `daemon.server.await_streams_ended` naming how many streams were left open and their procedure paths |
 
 The end frame is Connect's plain end-of-stream. `WatchHostWorkspace`,
 `WatchDaemon` and `WatchWorkspaceRoster` carry one more frame BEFORE it: the

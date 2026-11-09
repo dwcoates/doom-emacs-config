@@ -140,6 +140,20 @@ func (t *Topic[T]) SubscribeCounted(ctx context.Context) (values <-chan T, ack f
 	return t.subscribeCounted(ctx, inflight.Default)
 }
 
+// StreamPushes counts every value on its way to a client's stream: from the
+// instant it is enqueued until the stream handler has sent it (its ack). It is
+// a child of the daemon's tracker, so the test barrier still sees each push,
+// and it is what an orderly exit waits on before it ends the streams: every
+// push enqueued has been handed to its stream, so the end frame that follows
+// on the same stream follows it onto the socket.
+var StreamPushes = inflight.NewChild(inflight.Default)
+
+// SubscribeStream is SubscribeCounted for a stream handler: its values are
+// counted on StreamPushes.
+func (t *Topic[T]) SubscribeStream(ctx context.Context) (values <-chan T, ack func()) {
+	return t.subscribeCounted(ctx, StreamPushes)
+}
+
 // subscribeCounted is SubscribeCounted on TRACKER.
 func (t *Topic[T]) subscribeCounted(ctx context.Context, tracker *inflight.Tracker) (<-chan T, func()) {
 	s := newSubscriber[T](t.latestOnly, tracker)

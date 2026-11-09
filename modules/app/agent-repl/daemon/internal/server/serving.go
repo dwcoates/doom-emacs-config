@@ -1,10 +1,12 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"net/http"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -15,28 +17,29 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/inflight"
+	"agent-repld/internal/publish"
 )
 
 // RequestGate is what an orderly exit waits on before it stops serving: the
-// calls that are still being answered.
+// calls that are still being answered, and every stream's end on the socket.
 type RequestGate interface {
-	// AwaitQuiet waits, bounded, for every in-flight call to be answered and
-	// reports how many were still running when the bound expired.
+	// AwaitQuiet waits, bounded, for every in-flight call's handler to return
+	// and reports how many were still running when the bound expired.
 	AwaitQuiet(bound time.Duration) int
-	// Listener wraps the listener this handler serves, so a call counts as
-	// answered only once its bytes have left the socket.
+	// Listener wraps the listener this handler serves, so every h2 stream
+	// counts until its end is on the socket (WriteBarrier).
 	Listener(inner net.Listener) net.Listener
-	// AwaitWritesQuiet waits, bounded, for the connections to stop writing,
-	// and reports whether they did. It covers what AwaitQuiet cannot: the
-	// pushes on the STANDING streams, which are not counted calls.
-	AwaitWritesQuiet(bound time.Duration) bool
+	// AwaitPushesSent waits, up to deadline, until every push enqueued for a
+	// standing stream has been sent on it (publish.StreamPushes), and reports
+	// whether it was. It covers the daemon's last words: a push sent before
+	// its stream ends is written before the stream's end frame.
+	AwaitPushesSent(deadline time.Time) bool
 	// EndStreams runs end, which ends every standing stream the daemon
-	// serves, and from then on holds each one that ends until its END FRAME
-	// is on the socket or the exit's deadline has passed.
+	// serves.
 	EndStreams(deadline time.Time, end func())
-	// AwaitStreamsEnded waits for every standing stream to have ended and
-	// written its end frame, up to deadline, and reports how many had not
-	// when it passed.
+	// AwaitStreamsEnded waits, up to deadline, for every standing stream's
+	// handler to return AND every h2 stream's end -- each answer's and each
+	// end frame -- to be on the socket, and reports how many were not.
 	AwaitStreamsEnded(deadline time.Time) int
 }
 
@@ -64,6 +67,10 @@ type RequestGate interface {
 // AwaitStreamsEnded -- so every client reads its stream's end frame rather
 // than a connection cut under it.
 //
+// A HANDLER RETURNING IS NOT ITS ANSWER LEAVING. The counts here come down
+// when handlers return; what the sockets have written is the barrier's
+// (WriteBarrier), which the exit's last wait reads.
+//
 // Regression, 2026-09-27: the exit let `http.Server.Shutdown` "close" the
 // standing streams, which on a hijacked h2c connection closes nothing, and the
 // server's own close ran as a deferred call the process exit raced. Emacs read
@@ -72,17 +79,19 @@ type RequestGate interface {
 type Serving struct {
 	handler http.Handler
 	log     dlog.Logger
-	// barrier counts what the sockets have actually written, because a
+	// barrier knows which h2 streams' ends are on the socket, because a
 	// handler returning is not its answer leaving. See WriteBarrier.
 	barrier WriteBarrier
+	// pushes counts the values on their way to a standing stream
+	// (publish.StreamPushes in the daemon).
+	pushes *inflight.Tracker
 
 	mu       sync.Mutex
 	inFlight int
 	// quiet is closed when the count reaches zero. It exists only while
 	// somebody is waiting, so an ordinary call pays one comparison.
 	quiet chan struct{}
-	// streams counts the standing streams still open, or still writing the
-	// end frame the exit ended them with.
+	// streams counts the standing streams whose handler has not returned.
 	streams int
 	// streamPaths counts the same streams by procedure path, so an exit that
 	// leaves some open names which (`daemon.server.await_streams_ended`).
@@ -90,17 +99,10 @@ type Serving struct {
 	// streamsGone is closed when streams reaches zero, only while somebody is
 	// waiting.
 	streamsGone chan struct{}
-	// deadline is the exit's, set by EndStreams with ending: the one moment
-	// every end-frame wait gives up at, so a slow host spends more of the
-	// exit's grace rather than tripping a bound of its own.
-	deadline time.Time
-	// ending is set by EndStreams: from then on a standing stream that ends
-	// was ended by the exit, and is counted until its end frame has left.
-	ending bool
 }
 
-// Listener wraps the listener this handler serves, so the calls it counts are
-// held open until their bytes are on the wire and not merely produced.
+// Listener wraps the listener this handler serves, so every h2 stream counts
+// until its end is on the socket and not merely produced.
 func (s *Serving) Listener(inner net.Listener) net.Listener {
 	return s.barrier.Listener(inner)
 }
@@ -113,77 +115,48 @@ func (s *Serving) Listener(inner net.Listener) net.Listener {
 // The counting sits INSIDE the h2c handler, because outside it there is only
 // the single hijacked connection to see and never the streams carried on it.
 func H2C(h http.Handler, log dlog.Logger) *Serving {
-	s := &Serving{log: log}
+	s := &Serving{log: log, pushes: publish.StreamPushes}
 	s.handler = h2c.NewHandler(s.counted(h), &http2.Server{})
 	return s
 }
 
 // ServeHTTP serves one request through the h2c handler.
+//
+// THE h2c UPGRADE IS REFUSED: it is the one way an HTTP/1.1 connection turns
+// into h2 after its first bytes, which WriteBarrier reads to know a
+// connection's protocol, so an upgraded connection's streams would be
+// uncounted and an exit would cut them. Every client of this daemon dials h2
+// with prior knowledge; one that asks to upgrade is refused loudly.
 func (s *Serving) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if strings.EqualFold(r.Header.Get("Upgrade"), "h2c") {
+		if s.log != nil {
+			s.log.Error("daemon.server.h2c_upgrade_refused",
+				"a client asked to upgrade HTTP/1.1 to h2c, which this daemon refuses: dial h2 with prior knowledge",
+				dlog.Context{"path": r.URL.Path, "remote": r.RemoteAddr, "user_agent": r.UserAgent()})
+		}
+		http.Error(w, "h2c upgrade is not served; dial h2 with prior knowledge", http.StatusBadRequest)
+		return
+	}
 	s.handler.ServeHTTP(w, r)
 }
 
-// counted holds one call open for as long as its answer is still owed.
-//
-// THE COUNT COMES DOWN WHEN THE ANSWER IS ON THE SOCKET, NOT WHEN THE HANDLER
-// RETURNS, and the difference is the whole defect: a returning handler has
-// produced its answer, and http2 writes it from the CONNECTION's own goroutine
-// afterwards, so an exit that waited only for the return cut the answer off the
-// wire — "applied the shutdown schedule" and "every open stream was ended" 369
-// microseconds apart, with the caller reading `unexpected EOF`.
-//
-// THE REQUEST CONTEXT IS NOT THAT SIGNAL EITHER, though this gate used to say
-// it was. `serverConn.runHandler` cancels it in a defer that runs BEFORE the
-// same defer's `rw.handlerDone()` produces the answer's final frames, so a gate
-// on `r.Context().Done()` is a gate on a moment at which the answer does not
-// yet exist. It measured as `TestHostRequestedStopLeavesNoProcessBehind`
-// failing every run in the e2e sandbox on a stop the daemon had in fact
-// performed.
-//
-// So the call is held until the socket has written past the mark taken on the
-// way in and then gone quiet, which is what WriteBarrier is for. The context's
-// cancellation is still waited on first: it is an exact statement that the
-// handler's own goroutine has reached its teardown, and that is what makes the
-// barrier's "written since" question a question about THIS answer.
+// counted counts one call for as long as its handler runs: a standing stream
+// apart from the other calls (streams), so the exit can end the one and wait
+// for the other. What leaves the socket after a handler returns is the
+// barrier's (WriteBarrier).
 func (s *Serving) counted(inner http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if standingStreamPaths[r.URL.Path] {
 			s.enterStream(r.URL.Path)
-			defer s.leaveStreamOnceEnded(r)
+			defer s.leaveStream(r.URL.Path)
 			inner.ServeHTTP(w, r)
 			return
 		}
 		s.enter()
-		answered := r.Context()
-		mark := s.barrier.Mark()
-		path := r.URL.Path
-		defer func() {
-			if answered.Done() == nil {
-				s.leave()
-				return
-			}
-			inflight.Go(func() {
-				<-answered.Done()
-				if !s.barrier.AwaitWrittenSince(mark, answerWriteBound) && s.log != nil {
-					s.log.Error("daemon.server.answer_unwritten",
-						"an answer's own frames never reached the socket within the bound; its caller will read a cut connection rather than this answer",
-						dlog.Context{"path": path, "bound_ms": answerWriteBound.Milliseconds()})
-				}
-				s.leave()
-			})
-		}()
+		defer s.leave()
 		inner.ServeHTTP(w, r)
 	})
 }
-
-// answerWriteBound is how long ONE answer has to reach the socket after its
-// handler's goroutine has finished with it.
-//
-// A LAST RESORT, not the mechanism: the work it covers is the http2 serve
-// goroutine flushing a few dozen buffered bytes onto a loopback socket, and the
-// barrier ends on quiescence rather than on this clock. It is deliberately well
-// under the exit's own grace, so one stuck answer cannot spend the whole of it.
-const answerWriteBound = 250 * time.Millisecond
 
 func (s *Serving) enter() {
 	s.mu.Lock()
@@ -256,43 +229,10 @@ func (s *Serving) leaveStream(path string) {
 	s.mu.Unlock()
 }
 
-// leaveStreamOnceEnded uncounts a standing stream whose handler has returned.
-//
-// A STREAM ITS CLIENT ENDED LEAVES AT ONCE: nothing is owed to a client that
-// went away, and its connection may write nothing more at all. A stream the
-// EXIT ended is held until the socket has written past the moment its handler
-// returned -- its end frame, which http2 produces after the handler returns
-// (see WriteBarrier) -- so AwaitStreamsEnded means "every client has its end
-// frame", not "every handler has returned".
-func (s *Serving) leaveStreamOnceEnded(r *http.Request) {
-	s.mu.Lock()
-	ending, deadline := s.ending, s.deadline
-	s.mu.Unlock()
-	answered := r.Context()
-	if !ending || answered.Done() == nil {
-		s.leaveStream(r.URL.Path)
-		return
-	}
-	mark := s.barrier.Mark()
-	path := r.URL.Path
-	inflight.Go(func() {
-		<-answered.Done()
-		if !s.barrier.AwaitWrittenSince(mark, time.Until(deadline)) && s.log != nil {
-			s.log.Error("daemon.server.stream_end_unwritten",
-				"a standing stream the exit ended never had its end frame reach the socket before the exit's deadline; its client will read a cut connection",
-				dlog.Context{"path": path, "deadline": deadline.Format(time.RFC3339Nano)})
-		}
-		s.leaveStream(path)
-	})
-}
-
-// EndStreams marks the exit as ending the standing streams, then runs end,
-// which does it. The mark comes FIRST, so no stream end could be read as its
-// client's own. Every end-frame wait from here on ends at deadline.
+// EndStreams runs end, which ends every standing stream, recording what was
+// open.
 func (s *Serving) EndStreams(deadline time.Time, end func()) {
 	s.mu.Lock()
-	s.ending = true
-	s.deadline = deadline
 	open, paths := s.streams, s.openStreamPathsLocked()
 	s.mu.Unlock()
 	if s.log != nil {
@@ -301,11 +241,27 @@ func (s *Serving) EndStreams(deadline time.Time, end func()) {
 	end()
 }
 
-// AwaitStreamsEnded waits for every standing stream to have ended and written
-// its end frame, and says so loudly when the exit's deadline passes with some
-// still open: those clients will read a cut connection instead of an end
-// frame.
+// AwaitStreamsEnded waits for every standing stream's handler to return and
+// then for every h2 stream's end to be on the socket, and says so loudly when
+// the exit's deadline passes first: those clients will read a cut connection
+// instead of their answer or end frame.
 func (s *Serving) AwaitStreamsEnded(deadline time.Time) int {
+	if left := s.awaitStreamHandlers(deadline); left > 0 {
+		return left
+	}
+	left := s.barrier.AwaitStreamsWritten(deadline)
+	if left > 0 && s.log != nil {
+		_, byConn := s.barrier.Open()
+		s.log.Error("daemon.server.streams_unwritten",
+			"the exit's deadline passed with streams whose end never reached the socket; their clients will read a cut connection rather than an answer or an end frame",
+			dlog.Context{"open": left, "by_connection": byConn, "deadline": deadline.Format(time.RFC3339Nano)})
+	}
+	return left
+}
+
+// awaitStreamHandlers waits for every standing stream's handler to return,
+// and says so loudly when deadline passes first.
+func (s *Serving) awaitStreamHandlers(deadline time.Time) int {
 	s.mu.Lock()
 	if s.streams == 0 {
 		s.mu.Unlock()
@@ -345,21 +301,28 @@ func (s *Serving) openStreamPathsLocked() []string {
 	return paths
 }
 
-// AwaitWritesQuiet waits for the connections to fall silent, so the exit does
-// not close the standing streams over the daemon's own last push.
+// AwaitPushesSent waits for every push enqueued for a standing stream to
+// have been sent on it, so the exit does not end the streams over the
+// daemon's own last push.
 //
 // THE COUNTED CALLS ARE NOT THE WHOLE OF WHAT IS OWED. `counted` skips
 // standingStreamPaths deliberately, so `AwaitQuiet` reports zero in flight
 // while a `DaemonShutdownAnnounced` the drain pushed a moment earlier is still
-// on its way onto every WatchDaemon stream. See WriteBarrier.AwaitQuiescent.
-func (s *Serving) AwaitWritesQuiet(bound time.Duration) bool {
-	if s.barrier.AwaitQuiescent(bound) {
+// on its way onto every WatchDaemon stream. Each push is counted from its
+// enqueue until its stream sent it (publish.StreamPushes); a sent push is
+// ahead of its stream's end frame, which AwaitStreamsEnded waits onto the
+// socket.
+func (s *Serving) AwaitPushesSent(deadline time.Time) bool {
+	ctx, cancel := context.WithDeadline(context.Background(), deadline)
+	defer cancel()
+	err := s.pushes.AwaitIdle(ctx)
+	if err == nil {
 		return true
 	}
 	if s.log != nil {
-		s.log.Warn("daemon.server.await_writes_quiet",
-			"the connections were still writing when the exit's write-quiet bound expired; the standing streams are closed over whatever was still going out",
-			dlog.Context{"bound_ms": bound.Milliseconds()})
+		s.log.Warn("daemon.server.await_pushes_sent",
+			"the exit's deadline passed with pushes not yet sent on their streams; the streams are ended over them",
+			dlog.Context{"pending": s.pushes.InFlight(), "sites": s.pushes.InFlightSites(), "cause": err.Error()})
 	}
 	return false
 }
