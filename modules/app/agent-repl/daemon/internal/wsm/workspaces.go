@@ -1020,6 +1020,22 @@ func (s *store) SetCurrentKeepingLastSelected(ctx context.Context, id WorkspaceI
 // collapse that would hold it refused (holds_current), the current workspace
 // sitting in a collapsed section is a state the store cannot reach.
 func (s *store) setCurrent(ctx context.Context, op string, id WorkspaceID, stamp, walked *time.Time) error {
+	fields := selectionFields(id, stamp, walked)
+	var change currentChange
+	err := s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		change, err = setCurrentTx(ctx, tx, id, stamp, walked)
+		return err
+	})
+	if err != nil {
+		return err
+	}
+	s.logCurrentChange(op, fields, change)
+	return nil
+}
+
+// selectionFields is the record context every selection write carries.
+func selectionFields(id WorkspaceID, stamp, walked *time.Time) dlog.Context {
 	fields := dlog.Context{"workspace": string(id)}
 	if stamp != nil {
 		fields["at"] = *stamp
@@ -1027,52 +1043,218 @@ func (s *store) setCurrent(ctx context.Context, op string, id WorkspaceID, stamp
 	if walked != nil {
 		fields["walked_at"] = *walked
 	}
-	var expanded expandedFolds
-	var committed sql.NullString
-	err := s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
-		if stamp != nil {
-			var landedAt int64
-			err := tx.QueryRowContext(ctx, `SELECT id, walk_landed_at FROM workspaces WHERE is_current = 1 AND walk_landed_at IS NOT NULL AND id <> ?`, id).Scan(&committed, &landedAt)
-			switch {
-			case errors.Is(err, sql.ErrNoRows):
-			case err != nil:
-				return err
-			default:
-				if err := updateWorkspaceColumns(ctx, tx, WorkspaceID(committed.String),
-					workspaceColumn{name: "last_selected_at", value: landedAt}); err != nil {
-					return err
-				}
+	return fields
+}
+
+// currentChange is what setCurrentTx changed beyond the current flag: the
+// workspace that stopped being current, the walk landing it committed, and
+// the folds it expanded.
+type currentChange struct {
+	previous  sql.NullString
+	committed sql.NullString
+	expanded  expandedFolds
+}
+
+// setCurrentTx is the selection's one write, inside TX: setCurrent's and
+// Select's alike, so the two can never select differently.
+func setCurrentTx(ctx context.Context, tx *sql.Tx, id WorkspaceID, stamp, walked *time.Time) (currentChange, error) {
+	var change currentChange
+	err := tx.QueryRowContext(ctx, `SELECT id FROM workspaces WHERE is_current = 1`).Scan(&change.previous)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return change, err
+	}
+	if stamp != nil {
+		var landedAt int64
+		err := tx.QueryRowContext(ctx, `SELECT id, walk_landed_at FROM workspaces WHERE is_current = 1 AND walk_landed_at IS NOT NULL AND id <> ?`, id).Scan(&change.committed, &landedAt)
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+		case err != nil:
+			return change, err
+		default:
+			if err := updateWorkspaceColumns(ctx, tx, WorkspaceID(change.committed.String),
+				workspaceColumn{name: "last_selected_at", value: landedAt}); err != nil {
+				return change, err
 			}
 		}
-		// ONLY THE CURRENT ROW EVER CARRIES A WALK LANDING (it is set on the
-		// row made current below), so clearing the current row clears it.
-		if _, err := tx.ExecContext(ctx, `UPDATE workspaces SET is_current = 0, walk_landed_at = NULL WHERE is_current = 1`); err != nil {
-			return err
+	}
+	// ONLY THE CURRENT ROW EVER CARRIES A WALK LANDING (it is set on the
+	// row made current below), so clearing the current row clears it.
+	if _, err := tx.ExecContext(ctx, `UPDATE workspaces SET is_current = 0, walk_landed_at = NULL WHERE is_current = 1`); err != nil {
+		return change, err
+	}
+	res, err := tx.ExecContext(ctx, `UPDATE workspaces SET is_current = 1, last_selected_at = COALESCE(?, last_selected_at), walk_landed_at = ?, cache_lapses_at = CASE WHEN closed = 1 THEN cache_lapses_at END, cache_lapse_gated_tokens = CASE WHEN closed = 1 THEN cache_lapse_gated_tokens END WHERE id = ?`, nullNanos(stamp), nullNanos(walked), id)
+	if err != nil {
+		return change, err
+	}
+	if err := requireOneRow(res, fmt.Sprintf("wsm: workspace %s", id)); err != nil {
+		return change, err
+	}
+	change.expanded, err = expandFoldsHolding(ctx, tx, id)
+	return change, err
+}
+
+// logCurrentChange records what a selection write changed beyond the
+// current flag, after it committed.
+func (s *store) logCurrentChange(op string, fields dlog.Context, change currentChange) {
+	if change.committed.Valid {
+		s.log.Info(op, "the selection left a recency walk's landing; the landing's selection instant is the walk's", dlog.Merge(fields, dlog.Context{
+			"landing": change.committed.String,
+		}))
+	}
+	if change.expanded.repository || change.expanded.subsection || change.expanded.children {
+		s.log.Info(op, "the selection expanded the collapsed folds holding the workspace", dlog.Merge(fields, dlog.Context{
+			"expanded_repository": change.expanded.repository, "expanded_subsection": change.expanded.subsection, "expanded_children": change.expanded.children,
+		}))
+	}
+}
+
+// SelectionWrite says what a Select writes when the workspace is not
+// current already.
+type SelectionWrite int
+
+const (
+	// SelectRecording makes the workspace current and stamps its
+	// last-selected instant (SetCurrent).
+	SelectRecording SelectionWrite = iota
+	// SelectKeepingHistory makes the workspace current and keeps the instant
+	// as a recency walk's landing (SetCurrentKeepingLastSelected).
+	SelectKeepingHistory
+)
+
+// String names the write for the record.
+func (w SelectionWrite) String() string {
+	switch w {
+	case SelectRecording:
+		return "recording"
+	case SelectKeepingHistory:
+		return "keeping_history"
+	}
+	panic(fmt.Sprintf("wsm: unknown selection write %d", int(w)))
+}
+
+// Selection is what one Select changed, READ BACK INSIDE THE WRITE'S OWN
+// TRANSACTION: the rows as the write left them, so a caller that keeps the
+// registry in memory takes the selection from the same decision the store
+// recorded, and the two can never disagree.
+type Selection struct {
+	// Current is the workspace the select made current.
+	Current WorkspaceID
+	// Again is true when Current was current already: a RE-SELECTION, which
+	// changes no view, so the current flag and every instant stand and only
+	// the attention marker is cleared.
+	Again bool
+	// Previous is the workspace that stopped being current, nil when none
+	// was or on a re-selection.
+	Previous *WorkspaceID
+	// Workspaces are the rows of every workspace the write touched: the one
+	// made current first, then the one that stopped being current and a
+	// recency walk's landing it committed. Each appears once.
+	Workspaces []Workspace
+	// Repository is the repository holding Current, its section expanded.
+	Repository Repository
+	// Subsection is the subsection Current's family sits in, expanded; nil
+	// when it sits in none.
+	Subsection *Subsection
+}
+
+// Select records the user's selection of workspace ID at AT as WRITE says,
+// clears its attention marker, and answers the rows the write changed
+// (Selection), all in ONE transaction. A workspace already current is a
+// RE-SELECTION, decided in the same transaction: the current flag and every
+// instant stand.
+func (s *store) Select(ctx context.Context, id WorkspaceID, write SelectionWrite, at time.Time) (Selection, error) {
+	var stamp, walked *time.Time
+	switch write {
+	case SelectRecording:
+		stamp = &at
+	case SelectKeepingHistory:
+		walked = &at
+	default:
+		panic(fmt.Sprintf("wsm: unknown selection write %d", int(write)))
+	}
+	const op = "daemon.wsm.select"
+	fields := selectionFields(id, stamp, walked)
+	fields["write"] = write.String()
+	var (
+		out    Selection
+		change currentChange
+		again  bool
+	)
+	err := s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
+		err := tx.QueryRowContext(ctx, `SELECT is_current FROM workspaces WHERE id = ?`, id).Scan(&again)
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("wsm: workspace %s: %w", id, ErrNotFound)
 		}
-		res, err := tx.ExecContext(ctx, `UPDATE workspaces SET is_current = 1, last_selected_at = COALESCE(?, last_selected_at), walk_landed_at = ?, cache_lapses_at = CASE WHEN closed = 1 THEN cache_lapses_at END, cache_lapse_gated_tokens = CASE WHEN closed = 1 THEN cache_lapse_gated_tokens END WHERE id = ?`, nullNanos(stamp), nullNanos(walked), id)
 		if err != nil {
 			return err
 		}
-		if err := requireOneRow(res, fmt.Sprintf("wsm: workspace %s", id)); err != nil {
+		if !again {
+			if change, err = setCurrentTx(ctx, tx, id, stamp, walked); err != nil {
+				return err
+			}
+		}
+		if err := updateWorkspaceColumns(ctx, tx, id, workspaceColumn{name: "attention", value: false}); err != nil {
 			return err
 		}
-		expanded, err = expandFoldsHolding(ctx, tx, id)
+		out, err = readSelection(ctx, tx, id, change)
 		return err
 	})
 	if err != nil {
-		return err
+		return Selection{}, err
 	}
-	if committed.Valid {
-		s.log.Info(op, "the selection left a recency walk's landing; the landing's selection instant is the walk's", dlog.Merge(fields, dlog.Context{
-			"landing": committed.String,
-		}))
+	out.Again = again
+	s.logCurrentChange(op, fields, change)
+	return out, nil
+}
+
+// readSelection reads, inside TX, the rows a selection of ID changed: an
+// expanded children fold (expandChildrenFoldsHolding) is on ID's ancestors'
+// rows, so they are read back too.
+func readSelection(ctx context.Context, tx *sql.Tx, id WorkspaceID, change currentChange) (Selection, error) {
+	touched := []WorkspaceID{id}
+	others := []WorkspaceID{}
+	for _, other := range []sql.NullString{change.previous, change.committed} {
+		if other.Valid {
+			others = append(others, WorkspaceID(other.String))
+		}
 	}
-	if expanded.repository || expanded.subsection || expanded.children {
-		s.log.Info(op, "the selection expanded the collapsed folds holding the workspace", dlog.Merge(fields, dlog.Context{
-			"expanded_repository": expanded.repository, "expanded_subsection": expanded.subsection, "expanded_children": expanded.children,
-		}))
+	if change.expanded.children {
+		ancestors, err := ancestorsOf(ctx, tx, id)
+		if err != nil {
+			return Selection{}, err
+		}
+		others = append(others, ancestors...)
 	}
-	return nil
+	for _, other := range others {
+		if !slices.Contains(touched, other) {
+			touched = append(touched, other)
+		}
+	}
+	out := Selection{Current: id}
+	if change.previous.Valid {
+		previous := WorkspaceID(change.previous.String)
+		out.Previous = &previous
+	}
+	for _, ws := range touched {
+		row, err := scanWorkspace(tx.QueryRowContext(ctx, `SELECT `+workspaceColumns+` FROM workspaces WHERE id = ?`, ws))
+		if err != nil {
+			return Selection{}, fmt.Errorf("wsm: read back the selected row %s: %w", ws, err)
+		}
+		out.Workspaces = append(out.Workspaces, row)
+	}
+	repo, err := scanRepository(tx.QueryRowContext(ctx, `SELECT `+repositoryColumns+` FROM repositories WHERE id = ?`, out.Workspaces[0].Repo))
+	if err != nil {
+		return Selection{}, fmt.Errorf("wsm: read back the selected workspace's repository: %w", err)
+	}
+	out.Repository = repo
+	if sub := out.Workspaces[0].Subsection; sub != nil {
+		read, err := scanSubsection(tx.QueryRowContext(ctx, `SELECT `+subsectionColumns+` FROM subsections WHERE id = ?`, *sub))
+		if err != nil {
+			return Selection{}, fmt.Errorf("wsm: read back the selected workspace's subsection: %w", err)
+		}
+		out.Subsection = &read
+	}
+	return out, nil
 }
 
 // expandedFolds says which folds holding a just-selected workspace its

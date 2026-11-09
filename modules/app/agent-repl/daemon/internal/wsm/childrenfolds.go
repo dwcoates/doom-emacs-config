@@ -72,3 +72,31 @@ func (s *store) ExpandChildrenFoldsHolding(ctx context.Context, id WorkspaceID) 
 		})
 	return expanded, err
 }
+
+// ancestorsOf answers, within TX, every ancestor of workspace ID, nearest
+// first: the rows whose children folds expandChildrenFoldsHolding expands.
+func ancestorsOf(ctx context.Context, tx *sql.Tx, id WorkspaceID) ([]WorkspaceID, error) {
+	rows, err := tx.QueryContext(ctx, `
+WITH RECURSIVE up(id, parent_id, depth) AS (
+  SELECT own.id, own.parent_id, 0 FROM workspaces AS own WHERE own.id = ?
+  UNION
+  SELECT anc.id, anc.parent_id, up.depth + 1 FROM workspaces AS anc JOIN up ON anc.id = up.parent_id
+)
+SELECT id FROM up WHERE id <> ? ORDER BY depth`, id, id)
+	if err != nil {
+		return nil, fmt.Errorf("wsm: read the ancestors of %s: %w", id, err)
+	}
+	defer rows.Close()
+	var out []WorkspaceID
+	for rows.Next() {
+		var ancestor string
+		if err := rows.Scan(&ancestor); err != nil {
+			return nil, fmt.Errorf("wsm: read the ancestors of %s: %w", id, err)
+		}
+		out = append(out, WorkspaceID(ancestor))
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("wsm: read the ancestors of %s: %w", id, err)
+	}
+	return out, nil
+}

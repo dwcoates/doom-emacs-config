@@ -5,7 +5,9 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -2152,5 +2154,289 @@ func TestHideColumnsAreTheOneHideShape(t *testing.T) {
 	// Assert
 	if len(sites) != 1 || sites[0] != "workspaces.go" {
 		t.Fatalf("the hidden instant is written at %v, want only hideColumns in workspaces.go", sites)
+	}
+}
+
+// selectionReadBack reads, outside any write, what Select's answer claims:
+// each answered row, the repository and the subsection as the store holds
+// them now.
+func selectionReadBack(t *testing.T, s *store, sel Selection) Selection {
+	t.Helper()
+	ctx := context.Background()
+	arrangement, err := s.ReadArrangement(ctx)
+	if err != nil {
+		t.Fatalf("ReadArrangement: %v", err)
+	}
+	out := Selection{Current: sel.Current, Again: sel.Again, Previous: sel.Previous}
+	for _, answered := range sel.Workspaces {
+		row, err := s.Workspace(ctx, answered.ID)
+		if err != nil {
+			t.Fatalf("Workspace: %v", err)
+		}
+		out.Workspaces = append(out.Workspaces, row)
+	}
+	for _, repo := range arrangement.Repositories {
+		if repo.ID == sel.Repository.ID {
+			out.Repository = repo
+		}
+	}
+	if sel.Subsection != nil {
+		read := subsectionNow(t, s, sel.Subsection.ID)
+		out.Subsection = &read
+	}
+	return out
+}
+
+func TestSelectAnswersTheRowsItChangedAsTheStoreHoldsThem(t *testing.T) {
+	walked := instant.Add(time.Hour)
+	tests := []struct {
+		name string
+		// arrange readies the world and answers the workspace to select, the
+		// write, and the workspaces the answer must carry, in order.
+		arrange func(t *testing.T, s *store, w selectionFoldWorld) (WorkspaceID, SelectionWrite, []WorkspaceID)
+		// wantAgain and wantPrevious are the answer's re-selection facts.
+		wantAgain    bool
+		wantPrevious func(w selectionFoldWorld) *WorkspaceID
+	}{
+		{
+			name: "a recorded selection answers the new current and the one it left",
+			arrange: func(t *testing.T, s *store, w selectionFoldWorld) (WorkspaceID, SelectionWrite, []WorkspaceID) {
+				mustSetCurrent(t, s, w.other.ID, instant)
+				return w.root.ID, SelectRecording, []WorkspaceID{w.root.ID, w.other.ID}
+			},
+			wantPrevious: func(w selectionFoldWorld) *WorkspaceID { return &w.other.ID },
+		},
+		{
+			name: "a first selection answers only the new current",
+			arrange: func(t *testing.T, s *store, w selectionFoldWorld) (WorkspaceID, SelectionWrite, []WorkspaceID) {
+				return w.root.ID, SelectRecording, []WorkspaceID{w.root.ID}
+			},
+			wantPrevious: func(selectionFoldWorld) *WorkspaceID { return nil },
+		},
+		{
+			name: "a recency walk's step answers its rows with the instant kept",
+			arrange: func(t *testing.T, s *store, w selectionFoldWorld) (WorkspaceID, SelectionWrite, []WorkspaceID) {
+				mustSetCurrent(t, s, w.other.ID, instant)
+				return w.child.ID, SelectKeepingHistory, []WorkspaceID{w.child.ID, w.other.ID}
+			},
+			wantPrevious: func(w selectionFoldWorld) *WorkspaceID { return &w.other.ID },
+		},
+		{
+			name: "a recorded selection leaving a walk's landing answers the committed landing once",
+			arrange: func(t *testing.T, s *store, w selectionFoldWorld) (WorkspaceID, SelectionWrite, []WorkspaceID) {
+				mustSetCurrent(t, s, w.other.ID, instant)
+				if err := s.SetCurrentKeepingLastSelected(context.Background(), w.child.ID, walked); err != nil {
+					t.Fatalf("SetCurrentKeepingLastSelected: %v", err)
+				}
+				return w.root.ID, SelectRecording, []WorkspaceID{w.root.ID, w.child.ID}
+			},
+			wantPrevious: func(w selectionFoldWorld) *WorkspaceID { return &w.child.ID },
+		},
+		{
+			name: "a re-selection answers only the current row, flagged again",
+			arrange: func(t *testing.T, s *store, w selectionFoldWorld) (WorkspaceID, SelectionWrite, []WorkspaceID) {
+				mustSetCurrent(t, s, w.root.ID, instant)
+				return w.root.ID, SelectRecording, []WorkspaceID{w.root.ID}
+			},
+			wantAgain:    true,
+			wantPrevious: func(selectionFoldWorld) *WorkspaceID { return nil },
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			w := newSelectionFoldWorld(t, s)
+			id, write, wantRows := tt.arrange(t, s, w)
+			if err := s.SetAttention(context.Background(), id, true); err != nil {
+				t.Fatalf("SetAttention: %v", err)
+			}
+
+			// Act
+			got, err := s.Select(context.Background(), id, write, instant.Add(2*time.Hour))
+
+			// Assert
+			if err != nil {
+				t.Fatalf("Select: %v", err)
+			}
+			var rows []WorkspaceID
+			for _, row := range got.Workspaces {
+				rows = append(rows, row.ID)
+			}
+			if !slices.Equal(rows, wantRows) {
+				t.Fatalf("answered rows = %v, want %v", rows, wantRows)
+			}
+			if got.Again != tt.wantAgain {
+				t.Fatalf("Again = %v, want %v", got.Again, tt.wantAgain)
+			}
+			if want := tt.wantPrevious(w); (got.Previous == nil) != (want == nil) || (want != nil && *got.Previous != *want) {
+				t.Fatalf("Previous = %v, want %v", got.Previous, want)
+			}
+			if got.Workspaces[0].Attention || !got.Workspaces[0].Current {
+				t.Fatalf("the selected row = %+v, want it current with no attention", got.Workspaces[0])
+			}
+			if want := selectionReadBack(t, s, got); !reflect.DeepEqual(got, want) {
+				t.Fatalf("Select answered\n%+v\nthe store holds\n%+v", got, want)
+			}
+		})
+	}
+}
+
+func TestSelectAnswersTheFoldsItExpanded(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	w := newSelectionFoldWorld(t, s)
+
+	// Act
+	got, err := s.Select(context.Background(), w.child.ID, SelectRecording, instant)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Select: %v", err)
+	}
+	if got.Repository.ID != w.child.Repo || got.Repository.Folded {
+		t.Fatalf("Repository = %+v, want the child's repository expanded", got.Repository)
+	}
+	if got.Subsection == nil || got.Subsection.ID != w.sub.ID || got.Subsection.Folded {
+		t.Fatalf("Subsection = %+v, want the family's subsection %q expanded", got.Subsection, w.sub.ID)
+	}
+}
+
+func TestSelectAnswersTheParentWhoseChildrenFoldItExpanded(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	w := newSelectionFoldWorld(t, s)
+	if err := s.SetChildrenFolded(context.Background(), w.root.ID, true); err != nil {
+		t.Fatalf("SetChildrenFolded: %v", err)
+	}
+
+	// Act
+	got, err := s.Select(context.Background(), w.child.ID, SelectRecording, instant)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Select: %v", err)
+	}
+	var rows []WorkspaceID
+	for _, row := range got.Workspaces {
+		rows = append(rows, row.ID)
+		if row.ID == w.root.ID && row.ChildrenFolded {
+			t.Fatal("the parent's row was answered with its children still folded")
+		}
+	}
+	if !slices.Equal(rows, []WorkspaceID{w.child.ID, w.root.ID}) {
+		t.Fatalf("answered rows = %v, want the child and the parent whose fold it expanded", rows)
+	}
+	if want := selectionReadBack(t, s, got); !reflect.DeepEqual(got, want) {
+		t.Fatalf("Select answered\n%+v\nthe store holds\n%+v", got, want)
+	}
+}
+
+func TestSelectAnswersNoSubsectionForAWorkspaceInNone(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+
+	// Act
+	got, err := s.Select(context.Background(), ws.ID, SelectRecording, instant)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Select: %v", err)
+	}
+	if got.Subsection != nil {
+		t.Fatalf("Subsection = %+v, want none", got.Subsection)
+	}
+}
+
+func TestSelectRefusesAnUnknownWorkspace(t *testing.T) {
+	// Arrange
+	s, log := testStore(t)
+
+	// Act
+	_, err := s.Select(context.Background(), "nobody", SelectRecording, instant)
+
+	// Assert -- a refusal the caller answers, recorded as every write
+	// naming no record is.
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("Select err = %v, want ErrNotFound", err)
+	}
+	rec, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Operation: "daemon.wsm.select", Message: "the write named no such record"})
+	if !ok || rec.Context["workspace"] != "nobody" || rec.Context["write"] != "recording" {
+		t.Fatalf("the refusal's record = %+v (found %v), want it naming the workspace and the write", rec, ok)
+	}
+}
+
+func TestSelectIsAtomicWithItsAttentionClear(t *testing.T) {
+	// Arrange
+	s, log := testStore(t)
+	w := newSelectionFoldWorld(t, s)
+	mustSetCurrent(t, s, w.other.ID, instant)
+	corrupt(t, s, `CREATE TRIGGER fail_the_clear BEFORE UPDATE OF attention ON workspaces
+		BEGIN SELECT RAISE(ABORT, 'the clear failed'); END`)
+
+	// Act
+	_, err := s.Select(context.Background(), w.root.ID, SelectRecording, instant.Add(time.Hour))
+
+	// Assert -- the failed clear rolls the selection back with it.
+	if err == nil {
+		t.Fatal("Select succeeded through a failed attention clear")
+	}
+	got, err := s.Current(context.Background())
+	if err != nil {
+		t.Fatalf("Current: %v", err)
+	}
+	if got == nil || *got != w.other.ID {
+		t.Fatalf("current = %v after the failure, want %q", got, w.other.ID)
+	}
+	if !repositoryFolded(t, s, w.root.Repo) {
+		t.Fatal("a fold was expanded by a select that failed")
+	}
+	if !loggedOperation(log, "daemon.wsm.select", "error") {
+		t.Fatalf("the failed select was not logged at error: %v", log.Records())
+	}
+}
+
+func TestSelectionWriteNamesEachValue(t *testing.T) {
+	tests := []struct {
+		write SelectionWrite
+		want  string
+	}{
+		{SelectRecording, "recording"},
+		{SelectKeepingHistory, "keeping_history"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.want, func(t *testing.T) {
+			// Act
+			got := tt.write.String()
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("String = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSelectPanicsOnAnUnknownWrite(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	defer func() {
+		// Assert
+		if recover() == nil {
+			t.Fatal("Select took an unknown write")
+		}
+	}()
+
+	// Act
+	_, _ = s.Select(context.Background(), ws.ID, SelectionWrite(99), instant)
+}
+
+// mustSetCurrent makes ID current at AT.
+func mustSetCurrent(t *testing.T, s *store, id WorkspaceID, at time.Time) {
+	t.Helper()
+	if err := s.SetCurrent(context.Background(), id, at); err != nil {
+		t.Fatalf("SetCurrent: %v", err)
 	}
 }
