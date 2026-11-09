@@ -382,11 +382,20 @@ memory; under it the merge queue's overlapping runs, 13 slots each on a
   The run's summary names every such unit (`it is not pinned to its width`);
   the fix is pinning it or declaring its true width in the roster.
 - MEMORY IS SEATED, because `nice` does nothing for it and a RAM disk's memory
-  is wired. A run's RAM disk holds one of `ramdisk.MemorySeats` seats (an
-  eighth of the host's memory over the disk's size, at least one; a half until
-  2026-10-23, when three runs' disks held 24 GiB while the host swapped 20 GiB) from before it is
-  attached until it is released; a run that finds every seat held waits for
-  one on its flock and says so in the run log.
+  is wired. A run's RAM disk holds a seat from before it is attached until it
+  is released, under two rules (owner ruling 2026-11-09, "I'm fine with 20
+  gigs being used if we've got 30 free"; `testrun/internal/ramdisk/seats.go`
+  keeps the history): every run's disk together wires at most
+  `ramdisk.CeilingMiB`, five twelfths of the host's memory (20 GiB, five 4 GiB
+  disks, on a 48 GiB host), and a seat is granted only while
+  `ramdisk.FloorMiB` (10 GiB) stays available once every seated disk has
+  filled (`ramdisk.Admits`, reading the kernel's `kern.memorystatus_level`).
+  Seats go to waiting runs in rank order, the merge queue's head first, as
+  core seats do. A waiting run blocks on the held seats' locks, rereads the
+  memory every `ramdisk.MemoryRecheck`, and states every wait and grant in the
+  run log with the memory reading, the ceiling, the wired total and the
+  holders by workspace name (`testrun/seatwait`), which the merge bubble's
+  tests tab draws while the gate waits.
 
 Do NOT gate on the load average instead. It is a decaying mean, so it keeps
 climbing for a minute after the work stops, and every waiter reads the same
