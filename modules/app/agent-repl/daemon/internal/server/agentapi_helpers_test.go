@@ -50,14 +50,6 @@ func childRelationship(parent *workspacev1.WorkspaceRef) *agentreplv1.WorkspaceR
 	return &agentreplv1.WorkspaceRelationship{Kind: &agentreplv1.WorkspaceRelationship_Child{Child: &agentreplv1.WorkspaceRelationshipChild{Parent: parent}}}
 }
 
-// ownerNotice is the notice TEXT to an owner, nil when TEXT is empty.
-func ownerNotice(text string) *agentreplv1.WorkspaceOwnerNotice {
-	if text == "" {
-		return nil
-	}
-	return &agentreplv1.WorkspaceOwnerNotice{Text: text}
-}
-
 func backPlacement() *agentreplv1.MergeQueuePlacement {
 	return &agentreplv1.MergeQueuePlacement{Place: &agentreplv1.MergeQueuePlacement_Back{Back: &agentreplv1.MergeQueuePlacementBack{}}}
 }

@@ -441,7 +441,7 @@ INFO.
 
 ```go
 type Orchestrator interface {
-  Enqueue(ctx, req Request) (Enqueued, error)    // FinishWorkspace and the async-merge create; the repository's deploy config is read and refused when missing or unusable; the asker is checked (owner_lands, requester_may_not_land); refuses pre-state (no layout facts, deleted session, already queued/merging)
+  Enqueue(ctx, req Request) (Enqueued, error)    // FinishWorkspace and the async-merge create; the repository's deploy config is read and refused when missing or unusable; the asker is checked (requester_may_not_land); refuses pre-state (no layout facts, deleted session, already queued/merging)
   Pause(ctx, scope) error; Unpause(ctx, scope) error
   Evict(ctx, ws) error                           // a waiting merge leaves the queue; a RUNNING or PARKED one is abandoned
   AnswerQueueOffer(ctx, ws, answer) error        // AnswerMergeQueueOffer: evict | prioritize | cancel

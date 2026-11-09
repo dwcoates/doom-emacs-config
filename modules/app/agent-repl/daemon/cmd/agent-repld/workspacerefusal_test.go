@@ -41,8 +41,6 @@ var finishRefusalCases = []refusalCase{
 		want: "ws does not land on a versioned main branch; finish it again without -version-part or -changelog-line"},
 	{name: "has_open_children", err: &agentreplv1.FinishWorkspaceError{Cause: &agentreplv1.FinishWorkspaceError_HasOpenChildren{HasOpenChildren: &agentreplv1.WorkspaceHasOpenChildren{Children: []*workspacev1.WorkspaceRef{{Id: "c1"}, {Id: "c2"}}}}},
 		want: "ws has 2 open children; resolve and close each before finishing it"},
-	{name: "owner_lands", err: &agentreplv1.FinishWorkspaceError{Cause: &agentreplv1.FinishWorkspaceError_OwnerLands{OwnerLands: &agentreplv1.FinishWorkspaceOwnerLands{Owner: &workspacev1.WorkspaceRef{Id: "o1", Dir: "/w/owner"}}}},
-		want: "ws is landed by its owner /w/owner, not by itself"},
 	{name: "requester_may_not_land", err: &agentreplv1.FinishWorkspaceError{Cause: &agentreplv1.FinishWorkspaceError_RequesterMayNotLand{RequesterMayNotLand: &agentreplv1.FinishWorkspaceRequesterMayNotLand{}}},
 		want: "the requester is neither ws, nor its owner, nor the user, so it may not finish it"},
 	{name: "no_branch_checked_out", err: &agentreplv1.FinishWorkspaceError{Cause: &agentreplv1.FinishWorkspaceError_NoBranchCheckedOut{NoBranchCheckedOut: &agentreplv1.FinishWorkspaceNoBranchCheckedOut{Dir: "/w/ws"}}},
@@ -105,7 +103,9 @@ var workspaceRefusals = []struct {
 	describe func(proto.Message) (string, error)
 }{
 	{name: "finish", cases: finishRefusalCases, empty: &agentreplv1.FinishWorkspaceError{},
-		describe: func(e proto.Message) (string, error) { return describeFinishRefusal("ws", e.(*agentreplv1.FinishWorkspaceError)) }},
+		describe: func(e proto.Message) (string, error) {
+			return describeFinishRefusal("ws", e.(*agentreplv1.FinishWorkspaceError))
+		}},
 	{name: "one-shot", cases: oneShotRefusalCases, empty: &agentreplv1.SetWorkspaceOneShotError{},
 		describe: func(e proto.Message) (string, error) {
 			return describeOneShotRefusal("ws", e.(*agentreplv1.SetWorkspaceOneShotError))

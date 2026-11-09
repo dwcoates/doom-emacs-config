@@ -157,7 +157,7 @@ func forkOf(t *testing.T, f *fixture) *workspacev1.WorkspaceRef {
 		Repository:    createRepositoryRef(t, f.d, f.repo),
 		Requester:     harness.User(),
 		ContextOrigin: harness.Fork(f.ws),
-		Form:          &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{Relationship: harness.Child(f.ws), OwnerNotice: harness.Notice("")}},
+		Form:          &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{Relationship: harness.Child(f.ws)}},
 	}))
 	if err != nil || resp.Msg.GetSuccess() == nil {
 		t.Fatalf("CreateWorkspace(fork) = (%v, %v), want a success", resp, err)

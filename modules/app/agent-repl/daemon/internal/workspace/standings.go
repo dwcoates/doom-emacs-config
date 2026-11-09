@@ -56,8 +56,8 @@ const (
 // user), and answers the completion directive a marked workspace now follows
 // (empty when unmarked). The workspace itself, its owner, or the user may
 // ask (wsm.Workspace.MayAct). Any created workspace may be marked, a child
-// whose owner would otherwise land it included: a one-shot always lands
-// itself, so the mark moves who lands it (wsm.Workspace.OwnerLands).
+// included; the mark decides only whether it finishes unattended, since every
+// workspace may land itself.
 //
 // THE MARK NEVER MOVES THE WORKSPACE IN THE SIDEBAR (owner request,
 // 2026-11-03): a one-shot files itself into a subsection like any other

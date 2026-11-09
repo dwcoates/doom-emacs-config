@@ -57,10 +57,9 @@ func TestSetOneShotMarksAndAnswersTheDirective(t *testing.T) {
 	}
 }
 
-// TestSetOneShotMarksAChildItsOwnerWouldLand pins the owner ruling of
-// 2026-10-31: a one-shot always lands itself, so a fresh child its owner would
-// otherwise land is marked like any other workspace.
-func TestSetOneShotMarksAChildItsOwnerWouldLand(t *testing.T) {
+// TestSetOneShotMarksAChild pins that a child is marked like any other
+// workspace, asked by itself or by its owner.
+func TestSetOneShotMarksAChild(t *testing.T) {
 	tests := []struct {
 		name  string
 		asker *ids.WorkspaceID
@@ -72,9 +71,6 @@ func TestSetOneShotMarksAChildItsOwnerWouldLand(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
 			f := standingWorkspace(t)
-			ws := f.db.workspaces["w1"]
-			ws.OwnerLands = true
-			f.db.with(ws)
 
 			// Act
 			directive, err := f.verbs.SetOneShot(context.Background(), "w1", tt.asker, true)

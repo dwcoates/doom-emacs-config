@@ -94,7 +94,7 @@ func (v *verbs) create(ctx context.Context, spec CreateSpec) (_ wsm.Workspace, e
 		return wsm.Workspace{}, err
 	}
 	global = global.With(dlog.Context{"owner": ids.Optional(spec.Parent), "fork_from": ids.Optional(spec.ForkFrom),
-		"requester": ids.Optional(spec.Requester), "owner_lands": spec.OwnerLands()})
+		"requester": ids.Optional(spec.Requester)})
 
 	repoDir, err := normalizeDir(spec.RepoDir)
 	if err != nil {
@@ -420,18 +420,17 @@ func (v *verbs) create(ctx context.Context, spec CreateSpec) (_ wsm.Workspace, e
 	// the moment git is done.
 	reportCreateStage(spec, CreateStageStartingSession)
 	record, err := v.Register(ctx, worktreeDir, wsm.RegisterFacts{
-		Name:               branch,
-		Branch:             branch,
-		ParentBranch:       parentBranch,
-		Parent:             (*wsm.WorkspaceID)(parent),
-		RepoDir:            repoDir,
-		DefaultBranch:      defaultBranch,
-		MergeOf:            spec.MergeOf,
-		LacksParentContext: spec.lacksParentContext(),
-		OneShot:            spec.OneShot,
-		LandsInto:          landsIntoID(landsInto),
-		ContextFrom:        (*wsm.WorkspaceID)(spec.ForkFrom),
-		RequestedBy:        (*wsm.WorkspaceID)(spec.Requester),
+		Name:          branch,
+		Branch:        branch,
+		ParentBranch:  parentBranch,
+		Parent:        (*wsm.WorkspaceID)(parent),
+		RepoDir:       repoDir,
+		DefaultBranch: defaultBranch,
+		MergeOf:       spec.MergeOf,
+		OneShot:       spec.OneShot,
+		LandsInto:     landsIntoID(landsInto),
+		ContextFrom:   (*wsm.WorkspaceID)(spec.ForkFrom),
+		RequestedBy:   (*wsm.WorkspaceID)(spec.Requester),
 		// The priority rides the insert, because it decides the place the
 		// workspace lands on.
 		Priority: priority,
@@ -546,7 +545,7 @@ func (v *verbs) create(ctx context.Context, spec CreateSpec) (_ wsm.Workspace, e
 		"branch": branch, "dir": record.Dir, "one_shot": spec.OneShot,
 	})
 	v.republishRegistry(ctx, log, opCreate)
-	v.deps.Derived.ReportCreated(record, spec.OwnerNotice)
+	v.deps.Derived.ReportCreated(record)
 	return record, nil
 }
 
@@ -624,7 +623,6 @@ func (v *verbs) validateCreate(log dlog.Logger, spec CreateSpec) error {
 	// MERGE, so a spec that contradicts itself is a defect in that caller, not
 	// a request to refuse. It nests under its requester and forks its maker.
 	if spec.MergeOf != nil && (spec.ForkFrom == nil || spec.Parent == nil || *spec.Parent != spec.MergeOf.Requester || spec.MergeOf.ForkHead == "" ||
-		spec.OwnerNotice != "" ||
 		spec.OneShot || strings.TrimSpace(spec.InitialPrompt) != "" || strings.TrimSpace(spec.Name) != "") {
 		log.Error(opCreate, "a merge workspace's create spec contradicts itself", dlog.Context{
 			"requester": string(spec.MergeOf.Requester), "request": string(spec.MergeOf.Request), "fork_head": spec.MergeOf.ForkHead,
@@ -1009,20 +1007,6 @@ func (v *verbs) sharesRepository(ctx context.Context, log dlog.Logger, owner wsm
 // on, whichever workspace the fork names.
 func (s CreateSpec) forkRefusalArm() string {
 	return ArmForkSourceHasNoConversation
-}
-
-// lacksParentContext reports whether this create is a child whose context is
-// not forked from its owner (wsm.RegisterFacts.LacksParentContext). A merge
-// workspace never is: its landing is the queue's.
-func (s CreateSpec) lacksParentContext() bool {
-	return s.MergeOf == nil && s.Parent != nil && (s.ForkFrom == nil || *s.ForkFrom != *s.Parent)
-}
-
-// OwnerLands reports whether only the owner (or the user) lands this create:
-// a child lacking its owner's context that is not a one-shot. A one-shot
-// always lands itself, whatever its context (owner ruling, 2026-10-31).
-func (s CreateSpec) OwnerLands() bool {
-	return wsm.OwnerLands(s.lacksParentContext(), s.OneShot)
 }
 
 // forkedElsewhere reports whether the conversation is forked from a workspace
@@ -1513,33 +1497,6 @@ func (v *verbs) checkDerivation(ctx context.Context, log dlog.Logger, spec Creat
 		if source == nil {
 			return refuseNamingWorkspace(log, "CreateWorkspace", ArmUnknownForkSource,
 				fmt.Sprintf("no workspace %q is registered to hold a conversation to fork", *spec.ForkFrom), true, *spec.ForkFrom)
-		}
-	}
-	// WHO LANDS A CHILD: a child that is not a one-shot and does not carry its
-	// owner's context is the owner's to land, so it must tell the owner what
-	// is coming. A one-shot lands itself, so it never carries a notice.
-	if spec.OwnerLands() && strings.TrimSpace(spec.OwnerNotice) == "" {
-		return refuse(log, "CreateWorkspace", ArmOwnerNoticeRequired,
-			"a child that does not fork its owner's context must carry a notice to its owner", false)
-	}
-	if !spec.OwnerLands() && spec.OwnerNotice != "" {
-		return refuse(log, "CreateWorkspace", ArmOwnerNoticeUnexpected,
-			"only a child its owner lands carries a notice to its owner", false)
-	}
-	// THE OWNER IS REOPENED ONLY ONCE THE CREATE IS KNOWN TO BE BUILDABLE, so
-	// a refused create never opens anything.
-	if spec.OwnerLands() {
-		owner, err := v.deps.DB.Workspace(ctx, *spec.Parent)
-		if err != nil {
-			log.Error(opCreate, "could not read the owner that is to land the child", dlog.WithCause(dlog.Context{"owner": string(*spec.Parent)}, err))
-			return fmt.Errorf("create: owner %q: %w", *spec.Parent, err)
-		}
-		if owner.Closed {
-			log.Info(opCreate, "reopening the closed owner that is to land the child", dlog.Context{"owner": string(owner.ID)})
-			if err := v.Open(ctx, owner.ID, nil); err != nil {
-				log.Error(opCreate, "could not reopen the owner that is to land the child", dlog.WithCause(dlog.Context{"owner": string(owner.ID)}, err))
-				return fmt.Errorf("create: reopen the owner %q: %w", owner.ID, err)
-			}
 		}
 	}
 	return nil

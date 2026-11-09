@@ -271,16 +271,11 @@ func (o *orchestrator) Enqueue(ctx context.Context, req Request) (Enqueued, erro
 }
 
 // checkAsker refuses an in-place merge of WS asked by a workspace that may not
-// land it. The user (an empty ASKER) lands anything. WS itself lands itself,
-// unless it is a child its owner lands (owner_lands); its owner lands it; any
-// other workspace is refused (requester_may_not_land).
+// land it. The user (an empty ASKER) lands anything, WS always lands itself,
+// and so do its owner and the workspace it lands into (wsm.Workspace.MayAct);
+// any other workspace is refused (requester_may_not_land).
 func checkAsker(ws wsm.Workspace, asker ids.WorkspaceID) error {
-	switch {
-	case asker == ws.ID && ws.OwnerLands:
-		refusal := refuse(ArmOwnerLands, ws.ID, "the workspace's context was not forked from its owner %s, which lands it", *ws.Parent)
-		refusal.Fields = map[string]any{"owner": &workspacev1.WorkspaceRef{Id: string(*ws.Parent)}}
-		return refusal
-	case ws.MayAct(asker):
+	if ws.MayAct(asker) {
 		return nil
 	}
 	return refuse(ArmRequesterMayNotLand, ws.ID, "workspace %s is neither the workspace nor its owner", asker)

@@ -14,8 +14,6 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/wsm"
-
-	workspacev1 "agentrepl/proto/workspace/v1"
 )
 
 var ownBranch = wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}
@@ -505,19 +503,22 @@ func TestNewDetachedRunTrimsTheNameAndTheInstructionAndKeepsTheAsks(t *testing.T
 }
 
 func TestAnInPlaceMergeLandsOnlyOnTheAskOfWhoMayLandIt(t *testing.T) {
-	owner := ids.WorkspaceID("ws-owner")
+	owner, into := ids.WorkspaceID("ws-owner"), ids.WorkspaceID("ws-into")
 	tests := []struct {
-		name       string
-		ownerLands bool
-		by         Requester
-		asker      ids.WorkspaceID
-		arm        string
+		name string
+		// forkedFromOwner gives the child its owner's context; otherwise it
+		// starts fresh.
+		forkedFromOwner bool
+		by              Requester
+		asker           ids.WorkspaceID
+		arm             string
 	}{
-		{name: "the user lands any workspace", ownerLands: true, by: RequestedByUser},
-		{name: "a workspace lands itself", by: RequestedByAgent, asker: theWorkspace},
-		{name: "a child its owner lands may not land itself", ownerLands: true, by: RequestedByAgent, asker: theWorkspace, arm: ArmOwnerLands},
-		{name: "the owner lands its child", ownerLands: true, by: RequestedByAgent, asker: owner},
-		{name: "the owner lands a child that forked it", by: RequestedByAgent, asker: owner},
+		{name: "the user lands a fresh child", by: RequestedByUser},
+		{name: "a fresh child that is no one-shot lands itself", by: RequestedByAgent, asker: theWorkspace},
+		{name: "a child forked from its owner lands itself", forkedFromOwner: true, by: RequestedByAgent, asker: theWorkspace},
+		{name: "the owner lands its fresh child", by: RequestedByAgent, asker: owner},
+		{name: "the owner lands a child that forked it", forkedFromOwner: true, by: RequestedByAgent, asker: owner},
+		{name: "the workspace it lands into lands it", by: RequestedByAgent, asker: into},
 		{name: "any other workspace may not land it", by: RequestedByAgent, asker: "ws-stranger", arm: ArmRequesterMayNotLand},
 	}
 	for _, tt := range tests {
@@ -526,7 +527,10 @@ func TestAnInPlaceMergeLandsOnlyOnTheAskOfWhoMayLandIt(t *testing.T) {
 			h := newHarness(t)
 			h.db.mu.Lock()
 			w := h.db.workspaces[theWorkspace]
-			w.Parent, w.OwnerLands = &owner, tt.ownerLands
+			w.Parent, w.LandsInto, w.OneShot, w.ContextFrom = &owner, &into, false, nil
+			if tt.forkedFromOwner {
+				w.ContextFrom = &owner
+			}
 			h.db.workspaces[theWorkspace] = w
 			h.db.mu.Unlock()
 
@@ -548,10 +552,7 @@ func TestAnInPlaceMergeLandsOnlyOnTheAskOfWhoMayLandIt(t *testing.T) {
 				t.Error("a refused merge was recorded")
 			}
 			if record, found := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "info", Operation: "daemon.merge.enqueue", Message: "refused a merge its asker may not ask for"}); !found || record.Context["asker"] != string(tt.asker) {
-				t.Errorf("no warn record naming the asker: %+v", h.logs.Records())
-			}
-			if tt.arm == ArmOwnerLands && refusal.Fields["owner"].(*workspacev1.WorkspaceRef).GetId() != string(owner) {
-				t.Errorf("owner_lands fields = %+v, want the owner", refusal.Fields)
+				t.Errorf("no record naming the asker: %+v", h.logs.Records())
 			}
 		})
 	}

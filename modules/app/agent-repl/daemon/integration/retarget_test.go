@@ -45,7 +45,7 @@ func newRetargetFamily(t *testing.T, opts harness.Opts, repo *harness.Repo) *ret
 			Form:          &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{Relationship: harness.Peer()}},
 		}
 		if parent != nil {
-			req.GetStandard().Relationship, req.GetStandard().OwnerNotice = harness.Child(parent), harness.Notice("the child's work")
+			req.GetStandard().Relationship = harness.Child(parent)
 		}
 		resp, err := d.Client().CreateWorkspace(d.Ctx(), connect.NewRequest(req))
 		if err != nil || resp.Msg.GetSuccess() == nil {

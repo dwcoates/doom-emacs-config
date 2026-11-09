@@ -121,7 +121,7 @@ func (v *verbs) relationshipOf(ctx context.Context, record wsm.Workspace, out *a
 			return err
 		}
 		out.Relationship = &agentreplv1.WorkspaceStatusRelationship{Kind: &agentreplv1.WorkspaceStatusRelationship_Child{Child: &agentreplv1.WorkspaceStatusRelationshipChild{Parent: parent}}}
-		out.Owner = &agentreplv1.WorkspaceStatusOwner{Workspace: parent, OwnerLands: record.OwnerLands}
+		out.Owner = &agentreplv1.WorkspaceStatusOwner{Workspace: parent}
 	}
 	if record.RequestedBy != nil {
 		creator, err := v.refOf(ctx, *record.RequestedBy, "the workspace that asked for it")

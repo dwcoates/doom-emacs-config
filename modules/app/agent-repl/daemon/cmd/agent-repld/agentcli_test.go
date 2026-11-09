@@ -351,7 +351,7 @@ func TestCreateSendsEveryChoiceItNames(t *testing.T) {
 	f := newCLIFixture()
 
 	// Act
-	code := f.run(workspaceNoun, "create", "-repository", "here", "-relationship", "child", "-parent", "peer", "-owner-notice", "the fix",
+	code := f.run(workspaceNoun, "create", "-repository", "here", "-relationship", "child", "-parent", "peer",
 		"-context", "fork", "-fork", "here", "-prompt", "fix the parser")
 
 	// Assert
@@ -363,7 +363,7 @@ func TestCreateSendsEveryChoiceItNames(t *testing.T) {
 		t.Errorf("repository %v requester %v, want the caller's", req.GetRepository(), req.GetRequester())
 	}
 	child := req.GetStandard().GetRelationship().GetChild()
-	if child.GetParent().GetId() != "ws-peer" || req.GetStandard().GetOwnerNotice().GetText() != "the fix" || req.GetContextOrigin().GetFork().GetWorkspace().GetId() != "ws-caller" {
+	if child.GetParent().GetId() != "ws-peer" || req.GetContextOrigin().GetFork().GetWorkspace().GetId() != "ws-caller" {
 		t.Errorf("create = %v, want a child of peer forking the caller", req)
 	}
 	if req.GetStandard().LandingTarget != nil {
@@ -534,7 +534,7 @@ func TestCreateRefusesAnUnnamedChoice(t *testing.T) {
 		{name: "no relationship", args: []string{"-repository", "here", "-context", "fresh"}},
 		{name: "an unknown relationship", args: []string{"-repository", "here", "-relationship", "sibling", "-context", "fresh"}},
 		{name: "a peer with a parent", args: []string{"-repository", "here", "-relationship", "peer", "-parent", "peer", "-context", "fresh"}},
-		{name: "a one-shot with an owner notice", args: []string{"-repository", "here", "-relationship", "peer", "-context", "fresh", "-one-shot", "-prompt", "fix it", "-owner-notice", "the fix"}},
+		{name: "the retired owner notice", args: []string{"-repository", "here", "-relationship", "child", "-parent", "peer", "-context", "fresh", "-owner-notice", "the fix"}},
 		{name: "no context", args: []string{"-repository", "here", "-relationship", "peer"}},
 		{name: "a child with no parent", args: []string{"-repository", "here", "-relationship", "child", "-context", "fresh"}},
 		{name: "a one-shot with no prompt", args: []string{"-repository", "here", "-relationship", "peer", "-context", "fresh", "-one-shot"}},

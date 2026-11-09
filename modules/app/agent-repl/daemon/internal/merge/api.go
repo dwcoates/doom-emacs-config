@@ -292,8 +292,8 @@ type Request struct {
 	By Requester
 	// Asker is the workspace whose agent asked, set exactly when By is
 	// RequestedByAgent (agentrepl.v1.WorkspaceRequesterWorkspace). An
-	// in-place merge lands only on the ask of the workspace itself (unless
-	// its owner lands it), of its owner, or of the user (checkAsker).
+	// in-place merge lands only on the ask of the workspace itself, of its
+	// owner, of the workspace it lands into, or of the user (checkAsker).
 	Asker ids.WorkspaceID
 	// Detached runs a named branch's merge ASYNC, in a hidden MERGE WORKSPACE
 	// forked from the requester instead of in the requester

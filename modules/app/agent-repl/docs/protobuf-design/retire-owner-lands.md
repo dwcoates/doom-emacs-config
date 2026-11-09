@@ -80,6 +80,21 @@ because of it, file by file.
   finishes unattended; the finish endpoint's WHO MAY ASK paragraph says every
   workspace may finish itself.
 
+## Implementation consequences
+
+- A create no longer reopens a CLOSED owner (`daemon/internal/workspace/create.go`,
+  the former owner-lands block of its derivation checks). The reopen existed so
+  the owner could receive the owner notice and land the child; with neither
+  owed, a closed owner stays closed, exactly as it already did for a child
+  forked from its owner.
+- `promptqueue.waitsOutColdGate` drops `PROMPT_ORIGIN_OWNER_NOTICE`: no such
+  prompt is submitted any more.
+- An owner told of a fresh child's creation now gets the brief
+  derived-workspace notice (`prompts/derived-workspace-notice.md`), as every
+  other source does, unless it asked for the create itself.
+- A `workspace subscribe` status line no longer says "and is landed by its
+  owner" (`daemon/internal/workspacesubs`).
+
 ## Storage
 
 The `workspaces.owner_lands` column (`daemon/internal/wsm/derivation.go`) is

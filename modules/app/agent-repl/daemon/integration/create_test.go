@@ -149,7 +149,7 @@ func TestCreateWorkspaceWithAParentNestsTheChildAndTargetsTheParentsWorktreeOnMe
 		Repository:    repository,
 		Requester:     harness.User(),
 		ContextOrigin: harness.Fresh(),
-		Form:          &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{Relationship: harness.Child(parent), OwnerNotice: harness.Notice("the child's work")}},
+		Form:          &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{Relationship: harness.Child(parent)}},
 	}))
 	if err != nil || childResp.Msg.GetSuccess() == nil {
 		t.Fatalf("CreateWorkspace(parent=%s) = (%v, %v), want a success", parent.GetId(), childResp, err)
@@ -787,9 +787,9 @@ func TestCreateWorkspaceChildStandsInBothStatuses(t *testing.T) {
 	}
 	parent := parentResp.Msg.GetSuccess().GetWorkspace()
 
-	// Act: a child of it, which its parent lands.
+	// Act: a fresh child of it.
 	childResp, err := d.Client().CreateWorkspace(d.Ctx(), connect.NewRequest(harness.Create(repository, harness.Standard(func(s *agentreplv1.CreateWorkspaceStandard) {
-		s.Relationship, s.OwnerNotice = harness.Child(parent), harness.Notice("the child's work")
+		s.Relationship = harness.Child(parent)
 	}))))
 	if err != nil || childResp.Msg.GetSuccess() == nil {
 		t.Fatalf("CreateWorkspace(child) = (%v, %v), want a success", childResp, err)
@@ -799,9 +799,9 @@ func TestCreateWorkspaceChildStandsInBothStatuses(t *testing.T) {
 	// Assert: the child is the parent's, and lands into it.
 	childStatus := workspaceStatus(t, d, child)
 	if childStatus.GetRelationship().GetChild().GetParent().GetId() != parent.GetId() ||
-		childStatus.GetOwner().GetWorkspace().GetId() != parent.GetId() || !childStatus.GetOwner().GetOwnerLands() ||
+		childStatus.GetOwner().GetWorkspace().GetId() != parent.GetId() ||
 		childStatus.GetMergeTarget().GetWorkspace().GetWorkspace().GetId() != parent.GetId() {
-		t.Fatalf("child status = %v, want a child of %s, landed by it and landing into it", childStatus, parent.GetId())
+		t.Fatalf("child status = %v, want a child of %s, owned by it and landing into it", childStatus, parent.GetId())
 	}
 	// Assert: the parent is a peer and accounts for its open child.
 	parentStatus := workspaceStatus(t, d, parent)

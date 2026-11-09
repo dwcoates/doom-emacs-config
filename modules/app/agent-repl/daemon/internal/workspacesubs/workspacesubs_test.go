@@ -333,12 +333,12 @@ func TestStatusWordsStatesTheStatus(t *testing.T) {
 	}{
 		{name: "an open workspace on the primary branch", status: idleStatus,
 			want: "Its status now: `followed`, on branch `agent/followed`, lands on the primary branch; open, idle."},
-		{name: "a closed hidden child its owner lands", status: func() *agentreplv1.WorkspaceStatus {
+		{name: "a closed hidden child of its owner", status: func() *agentreplv1.WorkspaceStatus {
 			s := idleStatus()
 			s.MergeTarget, s.Standing, s.Hidden = into, closed, true
-			s.Owner = &agentreplv1.WorkspaceStatusOwner{Workspace: ownerRef, OwnerLands: true}
+			s.Owner = &agentreplv1.WorkspaceStatusOwner{Workspace: ownerRef}
 			return s
-		}, want: "Its status now: `followed`, on branch `agent/followed`, lands into the workspace at `/wt/owner` and is landed by its owner; closed, hidden."},
+		}, want: "Its status now: `followed`, on branch `agent/followed`, lands into the workspace at `/wt/owner`; closed, hidden."},
 		{name: "an open peer landing into another workspace, which lands itself", status: func() *agentreplv1.WorkspaceStatus {
 			s := idleStatus()
 			s.MergeTarget = into

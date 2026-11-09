@@ -97,11 +97,6 @@ const (
 	// worktree has a detached HEAD (MergeWorkspaceError.no_branch_checked_out).
 	// Its `dir` field names the worktree.
 	ArmNoBranchCheckedOut = "no_branch_checked_out"
-	// ArmOwnerLands refuses a workspace's own ask to land a child whose
-	// context was not forked from its owner: only the owner, or the user,
-	// lands it (MergeWorkspaceError.owner_lands). Its `owner` field names the
-	// owner.
-	ArmOwnerLands = "owner_lands"
 	// ArmRequesterMayNotLand refuses an ask from a workspace that is neither
 	// the workspace being landed nor its owner
 	// (MergeWorkspaceError.requester_may_not_land).

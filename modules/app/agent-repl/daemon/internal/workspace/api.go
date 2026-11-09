@@ -97,10 +97,6 @@ type CreateSpec struct {
 	// the user asked (agentrepl.v1.WorkspaceRequester). Recorded on the
 	// workspace; it is never told about its own act.
 	Requester *ids.WorkspaceID
-	// OwnerNotice is the requester's notice to the owner of a child that does
-	// not carry the owner's context (OwnerLands): set exactly then, delivered
-	// with the daemon's addendum.
-	OwnerNotice string
 	// ConsentedUngatedMode is the permission mode the user consented to at
 	// creation. An ungated mode with no consent recorded is REFUSED.
 	ConsentedUngatedMode string
@@ -743,7 +739,7 @@ type Banners interface {
 // (internal/workspacenotice); its landing and its close reach them as
 // lifecycle edges (internal/wsedges). It never blocks.
 type DerivedReporter interface {
-	ReportCreated(ws wsm.Workspace, ownerNotice string)
+	ReportCreated(ws wsm.Workspace)
 }
 
 // Deps are the verbs' collaborators.

@@ -314,10 +314,9 @@ func exemptFromLease(lease wsm.Lease, origin conversationv1.PromptOrigin) bool {
 //     what became of its merges. Refused, the handback was retried at every
 //     deploy and the notice was lost, each at ERROR (2026-10-17: the parked
 //     `doom` workspace, every landing for an hour).
-//   - A workspace subscription's notice, a derived workspace's notice and a
-//     child's notice to its owner tell a workspace what another workspace
-//     did, for the same reason: the daemon composed them, so nobody is there
-//     to send them again.
+//   - A workspace subscription's notice and a derived workspace's notice tell
+//     a workspace what another workspace did, for the same reason: the daemon
+//     composed them, so nobody is there to send them again.
 //   - The brief asking a workspace that left its one-shot state to file
 //     itself into a subsection, for the same reason.
 //   - A finish-stage prompt hook, which the daemon sends for the
@@ -332,7 +331,6 @@ func waitsOutColdGate(origin conversationv1.PromptOrigin) bool {
 		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_QUEUE_NOTICE,
 		conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_NOTICE,
 		conversationv1.PromptOrigin_PROMPT_ORIGIN_DERIVED_WORKSPACE_NOTICE,
-		conversationv1.PromptOrigin_PROMPT_ORIGIN_OWNER_NOTICE,
 		conversationv1.PromptOrigin_PROMPT_ORIGIN_PULL_REQUEST_NOTICE,
 		conversationv1.PromptOrigin_PROMPT_ORIGIN_GITHUB_MERGE_QUEUE_NOTICE,
 		conversationv1.PromptOrigin_PROMPT_ORIGIN_SUBSECTION_PLACEMENT,

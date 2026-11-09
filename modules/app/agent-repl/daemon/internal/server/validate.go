@@ -502,9 +502,6 @@ func validateCreateWorkspaceRequest(req *agentreplv1.CreateWorkspaceRequest) *co
 				return err
 			}
 		}
-		if notice := standard.OwnerNotice; notice != nil && strings.TrimSpace(notice.GetText()) == "" {
-			return invalid("standard.owner_notice.text", "a notice to the owner says what is coming")
-		}
 		if err := validateDeployHooks("standard.deploy_hooks", standard.GetDeployHooks()); err != nil {
 			return err
 		}

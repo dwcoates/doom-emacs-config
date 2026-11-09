@@ -10,12 +10,6 @@
 // The requester (wsm.Workspace.RequestedBy) is never told about its own act,
 // and a closed source is not told: it runs no session to tell.
 //
-// AN OWNER THAT LANDS ITS CHILD gets the OWNER NOTICE instead of the brief
-// created notice: the requester's own words and the daemon's addendum that
-// landing the child is the owner's responsibility (PROMPT_ORIGIN_OWNER_NOTICE,
-// drawn as an ordinary prompt). The create reopens such an owner before it
-// reports, so the owner always has a session to receive it.
-//
 // THE NOTICE TAKES THE PATH EVERY UNDER-THE-HOOD REPORT TO AN AGENT TAKES: a
 // deferred prompt submitted through the prompt handler, which waits behind a
 // running turn and wakes an idle agent. The brief notices ride
@@ -49,14 +43,11 @@ const (
 	// BriefDerived is the brief a source is told a derived workspace's event
 	// by. Its first line is the notice's headline.
 	BriefDerived = "derived-workspace-notice"
-	// BriefOwner is the brief an owner that lands its child is told by.
-	BriefOwner = "workspace-owner-notice"
 )
 
 // The notices' prompt origins.
 const (
 	OriginDerived = conversationv1.PromptOrigin_PROMPT_ORIGIN_DERIVED_WORKSPACE_NOTICE
-	OriginOwner   = conversationv1.PromptOrigin_PROMPT_ORIGIN_OWNER_NOTICE
 )
 
 // Kind is what happened to a derived workspace.
@@ -89,9 +80,6 @@ type Event struct {
 	Kind Kind
 	// Workspace is the derived workspace as it stood when the event happened.
 	Workspace wsm.Workspace
-	// OwnerNotice is the requester's notice to the owner, set only on the
-	// Created event of a workspace its owner lands.
-	OwnerNotice string
 	// unread marks an event whose Workspace carries only its ID (a landing,
 	// told by id): the delivery reads the rest from the registry.
 	unread bool
@@ -131,10 +119,9 @@ func New(deps Deps) *Service {
 // Report appends EVENT for the loop and never blocks.
 func (s *Service) Report(event Event) { s.loop.Report(event) }
 
-// ReportCreated implements workspace.DerivedReporter: WS was just created,
-// with OWNERNOTICE for an owner that lands it.
-func (s *Service) ReportCreated(ws wsm.Workspace, ownerNotice string) {
-	s.Report(Event{Kind: Created, Workspace: ws, OwnerNotice: ownerNotice})
+// ReportCreated implements workspace.DerivedReporter: WS was just created.
+func (s *Service) ReportCreated(ws wsm.Workspace) {
+	s.Report(Event{Kind: Created, Workspace: ws})
 }
 
 // TurnStarted implements wsedges.Observer: a turn is no derived event.
@@ -248,13 +235,8 @@ func (s *Service) notify(ctx context.Context, prompts prompthandler.Submitter, t
 		log.Info(op, "a derived workspace's source is closed; it runs no session to tell", fields)
 		return
 	}
-	ownerNotice := event.Kind == Created && told.Owner && event.Workspace.OwnerLands
-	brief, origin, values := BriefDerived, OriginDerived, DerivedValues(told, event)
-	if ownerNotice {
-		brief, origin, values = BriefOwner, OriginOwner, OwnerValues(event, s.requesterName(ctx, event.Workspace))
-	}
 	turn, err := briefprompt.Composer{Briefs: s.deps.Briefs, MintKey: s.deps.MintKey}.
-		Submit(ctx, prompts, told.Source, brief, values, "derived-workspace-notice", origin)
+		Submit(ctx, prompts, told.Source, BriefDerived, DerivedValues(told, event), "derived-workspace-notice", OriginDerived)
 	switch briefprompt.StepOf(err) {
 	case briefprompt.StepCompose:
 		log.Error(op, "could not compose a derived workspace notice; the source is not told", dlog.WithCause(fields, err))
@@ -266,22 +248,8 @@ func (s *Service) notify(ctx context.Context, prompts prompthandler.Submitter, t
 		log.Error(op, "could not submit a derived workspace notice to its source", dlog.WithCause(fields, err))
 		return
 	}
-	fields["turn"], fields["origin"] = string(turn), origin.String()
+	fields["turn"], fields["origin"] = string(turn), OriginDerived.String()
 	log.Info(op, "told a source workspace about a workspace derived from it", fields)
-}
-
-// requesterName is how the owner notice names who asked: the requesting
-// workspace's name, or the user.
-func (s *Service) requesterName(ctx context.Context, ws wsm.Workspace) string {
-	if ws.RequestedBy == nil {
-		return "the user"
-	}
-	requester, err := s.deps.Workspaces.Workspace(ctx, *ws.RequestedBy)
-	if err != nil {
-		s.deps.Log.Global().Error(op, "could not read an owner notice's requester; the notice names it by id", dlog.WithCause(eventFields(Event{Workspace: ws}), err))
-		return "the workspace `" + string(*ws.RequestedBy) + "`"
-	}
-	return "the workspace `" + requester.Name + "`"
 }
 
 // DerivedValues are the derived brief's placeholders.
@@ -292,15 +260,6 @@ func DerivedValues(told Recipient, event Event) map[string]string {
 		"derived":  name,
 		"relation": relationWords(told),
 		"event":    eventSentence(event),
-	}
-}
-
-// OwnerValues are the owner brief's placeholders.
-func OwnerValues(event Event, requester string) map[string]string {
-	return map[string]string{
-		"child":     event.Workspace.Name,
-		"requester": requester,
-		"notice":    event.OwnerNotice,
 	}
 }
 
@@ -351,5 +310,5 @@ func eventSentence(event Event) string {
 func eventFields(event Event) dlog.Context {
 	return dlog.Context{"workspace": string(event.Workspace.ID), "event": event.Kind.String(),
 		"owner": ids.Optional(event.Workspace.Parent), "context_from": ids.Optional(event.Workspace.ContextFrom),
-		"requested_by": ids.Optional(event.Workspace.RequestedBy), "owner_lands": event.Workspace.OwnerLands}
+		"requested_by": ids.Optional(event.Workspace.RequestedBy)}
 }
