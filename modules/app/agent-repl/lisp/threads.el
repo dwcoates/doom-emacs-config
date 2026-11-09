@@ -38,7 +38,7 @@
 (declare-function agent-repl--error "core" (ws fmt &rest args))
 (declare-function agent-repl--global-state-file "core" (relative))
 (declare-function agent-repl--when-minibuffer-free "workspace" (scope label key fn))
-(declare-function agent-repl-verbs--read-required-prompt "verbs" (prompt-text refusal &optional history-file unseeded))
+(declare-function agent-repl-verbs--read-required-prompt "verbs" (prompt-text refusal &optional history-file))
 (declare-function agent-repl--send "input" (origin &optional prompt ws force-metaprompt))
 (declare-function agent-repl--sidebar-app-last-thread "commands" ())
 (declare-function agent-repl-host-request-switch "host" (ws trigger))
@@ -70,7 +70,7 @@ frame follows once its workspace is open."
   (interactive)
   (let ((question (agent-repl-verbs--read-required-prompt
                    "New thread: " "a thread starts from a question"
-                   (agent-repl-threads--history-file) 'unseeded)))
+                   (agent-repl-threads--history-file))))
     (agent-repl-threads--create question)))
 
 (defun agent-repl-threads--create (question)
@@ -135,7 +135,7 @@ With no open thread the press is refused before the question is read."
       (user-error "agent-repl: there is no thread yet; SPC TAB t starts one"))
     (let ((question (agent-repl-verbs--read-required-prompt
                      (format "Ask %s: " thread) "a question to a thread must not be blank"
-                     (agent-repl-threads--history-file) 'unseeded)))
+                     (agent-repl-threads--history-file))))
       (agent-repl--info agent-repl-threads--log-scope
                         "elisp.threads.background-send thread=%s chars=%d" thread (length question))
       (agent-repl--send :command-thread-background question thread)

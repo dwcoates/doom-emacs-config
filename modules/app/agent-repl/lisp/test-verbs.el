@@ -254,23 +254,6 @@ answers a bare success, which is what almost every verb's success is."
 (defvar agent-repl-test-verbs--answers nil
   "The scripted answers for the rpc stubs, bound by the `--with' macro.")
 
-(ert-deftest agent-repl-test-verbs-read-prompt-without-a-workspace-uses-no-composer ()
-  "A creation prompt outside agent-repl does not read an unroutable composer."
-  ;; Arrange.
-  (let (read-workspace logged-workspace)
-    (cl-letf (((symbol-function 'agent-repl--ws-current-log-name) (lambda () nil))
-              ((symbol-function 'agent-repl--read-input-buffer)
-               (lambda (ws) (setq read-workspace ws)))
-              ((symbol-function 'agent-repl--log)
-               (lambda (ws &rest _args) (setq logged-workspace ws)))
-              ((symbol-function 'read-string)
-               (lambda (_prompt initial &rest _) initial)))
-      ;; Act.
-      (agent-repl-verbs--read-prompt "Commission: "))
-    ;; Assert.
-    (should-not read-workspace)
-    (should (agent-repl--central-log-scope-reason logged-workspace))))
-
 (defun agent-repl-test-verbs--stub (op)
   "Return an rpc stub for OP that records its request and answers it."
   (lambda (_conn request &rest keys)
@@ -3122,10 +3105,10 @@ directories need not exist."
       ;; Assert.
       (should (equal (cadr err) "agent-repl: it IS its prompt")))))
 
-;;;; ---- Create: which prompts the composer seeds ----
+;;;; ---- Create: no creation prompt is seeded from the composer ----
 
-(defun agent-repl-test-verbs--read-prompt-seeded-by (unseeded)
-  "Read a prompt with UNSEEDED from a workspace whose composer holds a draft.
+(defun agent-repl-test-verbs--read-prompt-with-a-draft ()
+  "Read a prompt from a workspace whose composer holds a draft.
 Return a plist of the `:initial' text the read was offered and whether the
 composer was `:read'."
   (let (offered composer-read)
@@ -3134,32 +3117,25 @@ composer was `:read'."
                (lambda (_ws) (setq composer-read t) "  the draft  "))
               ((symbol-function 'read-string)
                (lambda (_prompt initial &rest _) (setq offered initial) "typed")))
-      (agent-repl-verbs--read-prompt "Commission: " nil unseeded))
+      (agent-repl-verbs--read-prompt "Commission: "))
     (list :initial offered :read composer-read)))
 
-(ert-deftest agent-repl-verbs-read-prompt-seeds-from-the-composer-by-default ()
-  "A creation prompt offers the composer's trimmed draft as its initial text."
+(ert-deftest agent-repl-verbs-read-prompt-offers-no-initial-text ()
+  "A creation prompt starts empty though the composer holds a draft."
   ;; Act.
-  (let ((read (agent-repl-test-verbs--read-prompt-seeded-by nil)))
-    ;; Assert.
-    (should (equal (plist-get read :initial) "the draft"))))
-
-(ert-deftest agent-repl-verbs-read-prompt-unseeded-offers-no-initial-text ()
-  "An UNSEEDED creation prompt starts empty though the composer holds a draft."
-  ;; Act.
-  (let ((read (agent-repl-test-verbs--read-prompt-seeded-by t)))
+  (let ((read (agent-repl-test-verbs--read-prompt-with-a-draft)))
     ;; Assert.
     (should-not (plist-get read :initial))))
 
-(ert-deftest agent-repl-verbs-read-prompt-unseeded-never-reads-the-composer ()
-  "An UNSEEDED creation prompt leaves the composer unread."
+(ert-deftest agent-repl-verbs-read-prompt-never-reads-the-composer ()
+  "A creation prompt leaves the composer unread."
   ;; Act.
-  (let ((read (agent-repl-test-verbs--read-prompt-seeded-by t)))
+  (let ((read (agent-repl-test-verbs--read-prompt-with-a-draft)))
     ;; Assert.
     (should-not (plist-get read :read))))
 
-(ert-deftest agent-repl-verbs-read-prompt-unseeded-logs-no-missing-composer ()
-  "An UNSEEDED read outside a workspace records no missing composer: it never looked."
+(ert-deftest agent-repl-verbs-read-prompt-without-a-workspace-logs-no-missing-composer ()
+  "A read outside a workspace records no missing composer: it never looks."
   ;; Arrange.
   (let (logged)
     (cl-letf (((symbol-function 'agent-repl--ws-current-log-name) (lambda () nil))
@@ -3168,49 +3144,23 @@ composer was `:read'."
               ((symbol-function 'read-string)
                (lambda (_prompt initial &rest _) initial)))
       ;; Act.
-      (agent-repl-verbs--read-prompt "Commission: " nil t))
+      (agent-repl-verbs--read-prompt "Commission: "))
     ;; Assert.
     (should-not logged)))
 
-(ert-deftest agent-repl-verbs-read-required-prompt-passes-unseeded-through ()
-  "The required-prompt reader hands UNSEEDED to the prompt reader."
+(ert-deftest agent-repl-verbs-read-prompt-with-a-history-file-offers-no-initial-text ()
+  "A persisted-history prompt starts empty though the composer holds a draft."
   ;; Arrange.
-  (let (passed)
-    (cl-letf (((symbol-function 'agent-repl-verbs--read-prompt)
-               (lambda (_p &optional _history-file unseeded) (setq passed unseeded) "ask")))
+  (let (offered)
+    (cl-letf (((symbol-function 'agent-repl--ws-current-log-name) (lambda () "ws"))
+              ((symbol-function 'agent-repl--read-input-buffer)
+               (lambda (_ws) "  the draft  "))
+              ((symbol-function 'agent-repl-verbs--read-string-persisted)
+               (lambda (_prompt initial _file) (setq offered (list initial)) "typed")))
       ;; Act.
-      (agent-repl-verbs--read-required-prompt "Q: " "refused" nil t))
+      (agent-repl-verbs--read-prompt "Commission: " "/tmp/h.el"))
     ;; Assert.
-    (should passed)))
-
-(defun agent-repl-test-verbs--unseeded-by (command)
-  "Run creation COMMAND and return the UNSEEDED flag its prompt was read with."
-  (let ((agent-repl-roster-view
-         (agent-repl-test-verbs--roster (list (agent-repl-test-verbs--row)) nil
-                                        (agent-repl-test-verbs--agent-repl-sections)))
-        (unseeded 'never-read))
-    (agent-repl-test-verbs--with (agent-repl-test-verbs--created)
-      (agent-repl-test-verbs--with-agent-repl-repo "/tmp/agent-repl-test/doom/.git"
-        (cl-letf (((symbol-function 'agent-repl-verbs--read-repository)
-                   (lambda () (agent-repl-test-verbs--repo-ref)))
-                  ((symbol-function 'agent-repl-verbs--read-prompt)
-                   (lambda (_p &optional _history-file flag) (setq unseeded flag) "do a thing")))
-          (funcall command))))
-    unseeded))
-
-(ert-deftest agent-repl-verbs-oneshot-commission-is-unseeded ()
-  "The one-shot commission never starts from the composer's draft."
-  ;; Act / Assert.
-  (should (eq (agent-repl-test-verbs--unseeded-by #'agent-repl-create-oneshot) 'unseeded)))
-
-(ert-deftest agent-repl-verbs-other-prompted-creates-stay-seeded ()
-  "Every prompted create other than the one-shot still starts from the composer."
-  (dolist (command '(agent-repl-create-workspace
-                     agent-repl-fork-workspace
-                     agent-repl-fork-workspace-into-primary))
-    (ert-info ((symbol-name command))
-      ;; Act / Assert.
-      (should-not (agent-repl-test-verbs--unseeded-by command)))))
+    (should (equal offered '(nil)))))
 
 ;;;; ---- Create: C-r searches the prompt history ----
 
@@ -3243,7 +3193,7 @@ HISTORY-FILE is passed to `agent-repl-verbs--read-prompt'."
     (cl-letf (((symbol-function 'agent-repl--ws-current-log-name) (lambda () nil))
               ((symbol-function 'agent-repl--log) #'ignore)
               ((symbol-function 'read-string) (agent-repl-test-verbs--minibuffer-keys keys)))
-      (agent-repl-verbs--read-prompt "Commission: " history-file 'unseeded))
+      (agent-repl-verbs--read-prompt "Commission: " history-file))
     (car agent-repl-test-verbs--minibuffer-bindings)))
 
 (ert-deftest agent-repl-verbs-read-prompt-c-r-searches-history-backward ()

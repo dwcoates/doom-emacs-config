@@ -2397,14 +2397,10 @@ opened."
      :on-error
      (lambda (value) (agent-repl-verbs--register-repository-on-error path value)))))
 
-(defun agent-repl-verbs--read-prompt (prompt-text &optional history-file unseeded)
-  "Read the creation prompt, defaulting to the composer's current text.
-The composer is where the user was already writing, so its contents are
-the obvious default rather than something to retype.
-
-With UNSEEDED, the composer is neither read nor offered and the prompt
-starts empty.  The one-shot commission reads this way: its prompt is a
-fresh piece of work, not whatever the current workspace was drafting.
+(defun agent-repl-verbs--read-prompt (prompt-text &optional history-file)
+  "Read the creation prompt, starting empty.
+The composer's draft belongs to the current workspace rather than to the
+workspace being created, so it is never read or offered.
 
 With HISTORY-FILE, the prompt's history lives in that file and the text
 being typed is saved there on every edit
@@ -2413,17 +2409,10 @@ the ordinary minibuffer history.
 
 Either way `C-r' searches that history backward
 \(`agent-repl-verbs--prompt-history-map')."
-  (let* ((ws (unless unseeded (agent-repl--ws-current-log-name)))
-         (buffered (and ws (agent-repl--read-input-buffer ws)))
-         (initial (and buffered (not (string-empty-p (string-trim buffered)))
-                       (string-trim buffered))))
-    (unless (or ws unseeded)
-      (agent-repl--log '(:agent-repl-central "the current buffer has no workspace composer")
-                       "elisp.verbs.read-prompt prompt=%S composer=none" prompt-text))
-    (minibuffer-with-setup-hook #'agent-repl-verbs--install-prompt-history-map
-      (if history-file
-          (agent-repl-verbs--read-string-persisted prompt-text initial history-file)
-        (read-string prompt-text initial)))))
+  (minibuffer-with-setup-hook #'agent-repl-verbs--install-prompt-history-map
+    (if history-file
+        (agent-repl-verbs--read-string-persisted prompt-text nil history-file)
+      (read-string prompt-text nil))))
 
 (defvar agent-repl-verbs--prompt-history-map (make-sparse-keymap)
   "Keys a creation prompt's minibuffer adds over its own local map.
@@ -2444,12 +2433,12 @@ only the creation prompt's own minibuffer carries it."
   (use-local-map (make-composed-keymap agent-repl-verbs--prompt-history-map
                                        (current-local-map))))
 
-(defun agent-repl-verbs--read-required-prompt (prompt-text refusal &optional history-file unseeded)
+(defun agent-repl-verbs--read-required-prompt (prompt-text refusal &optional history-file)
   "Read a creation prompt with PROMPT-TEXT that must not be blank.
 The text is returned as read.  A blank or whitespace-only answer is
-refused with REFUSAL, before any request is built.  HISTORY-FILE and
-UNSEEDED are passed to `agent-repl-verbs--read-prompt'."
-  (let ((text (agent-repl-verbs--read-prompt prompt-text history-file unseeded)))
+refused with REFUSAL, before any request is built.  HISTORY-FILE is
+passed to `agent-repl-verbs--read-prompt'."
+  (let ((text (agent-repl-verbs--read-prompt prompt-text history-file)))
     (when (string-empty-p (string-trim text))
       (user-error "agent-repl: %s" refusal))
     text))
@@ -2674,8 +2663,8 @@ The daemon judges the name before the minibuffer closes
 (defun agent-repl-verbs--create-standard (command repository-fn pick-model)
   "Create a standard TOP-LEVEL workspace for COMMAND from a prompt.
 The repository is what REPOSITORY-FN answers, the model is asked for next
-only when PICK-MODEL, and the initial prompt is read last (seeded from the
-composer\=', the repository named in its question), so the prompt is
+only when PICK-MODEL, and the initial prompt is read last (the
+repository named in its question), so the prompt is
 written knowing where and by which model it runs.  A blank prompt sends
 none.
 
@@ -2931,7 +2920,7 @@ picker requires a match, so text naming any other model is refused in
 the minibuffer.  A blank answer is still accepted and asks the daemon
 to choose.
 
-The prompt opens BLANK: nothing is seeded, so a bare RET asks the daemon
+The prompt opens BLANK, so a bare RET asks the daemon
 to choose and every model is picked on purpose.
 
 When `agent-repl-verbs--model-default\=' names a model the catalog offers,
@@ -2970,9 +2959,7 @@ A one-shot asks for its commission and nothing else: the repository is
 ALWAYS agent-repl\='s own (`agent-repl-verbs--agent-repl-repository\='),
 whichever workspace (or none) this runs from, off its main branch, and the
 daemon mints the name.  `SPC TAB O\=' is the explanation-engine
-counterpart.  The commission prompt starts EMPTY: unlike every other
-creation prompt it is never seeded from the composer, whose draft belongs
-to the current workspace rather than to the new one-shot.
+counterpart.  The commission prompt starts EMPTY.
 
 There is no finish to choose.  The repository states, in one plain-English
 file of its own policy directory, what is to be done when the work is
@@ -3080,7 +3067,7 @@ the model is asked for too."
 (defun agent-repl-verbs--create-oneshot (command pick-model about-current repository-fn)
   "Create a one-shot for COMMAND, asking for the model when PICK-MODEL.
 The one composition every one-shot command shares: the repository is what
-REPOSITORY-FN answers, the commission is read UNSEEDED into the one-shot
+REPOSITORY-FN answers, the commission is read into the one-shot
 history, and the model is asked for only under a prefix argument, BEFORE
 the commission so the commission is written knowing which model reads it.
 
@@ -3111,7 +3098,7 @@ repository says so before the commission is typed."
                          (format "One-shot fix for %s (%s): " about repository-name)
                        (format "One-shot (%s): " repository-name))
                      "a one-shot IS its prompt"
-                     (agent-repl-verbs--oneshot-history-file) 'unseeded))))
+                     (agent-repl-verbs--oneshot-history-file)))))
          (context (and about (agent-repl-verbs--ref about))))
     (agent-repl--info agent-repl-verbs--create-log-scope
                       "elisp.verbs.create-one-shot mode=dynamic model=%S context=%S"
