@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"agent-repld/internal/atomicfile"
+	"agent-repld/internal/inflight"
 )
 
 // LoopbackHost is the only interface the daemon ever binds. The daemon serves
@@ -404,7 +405,8 @@ func (c *claim) AwaitBootClaim(ctx context.Context) error {
 			return fmt.Errorf("await the boot claim beside %q: %w", c.addrPath, err)
 		}
 		c.bootWait = make(chan struct{})
-		go c.waitForBootClaim(f, c.bootWait)
+		bootWait := c.bootWait
+		inflight.Standing(func() { c.waitForBootClaim(f, bootWait) })
 	}
 	settled, taken := c.bootWait, c.taken
 	c.mu.Unlock()

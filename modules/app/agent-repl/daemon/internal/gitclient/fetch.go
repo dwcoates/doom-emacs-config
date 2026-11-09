@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/inflight"
 	"agent-repld/internal/recordlock"
 )
 
@@ -89,6 +90,7 @@ func holdFetchLock(ctx context.Context, path string) (*recordlock.Record, error)
 		err error
 	}
 	wait := make(chan granted, 1)
+	// inflight: joined: the function that starts it waits for it.
 	go func() {
 		rec, err := recordlock.BlockExclusive(f, path)
 		wait <- granted{rec, err}
@@ -97,11 +99,11 @@ func holdFetchLock(ctx context.Context, path string) (*recordlock.Record, error)
 	case g := <-wait:
 		return g.rec, g.err
 	case <-ctx.Done():
-		go func() {
+		inflight.Standing(func() {
 			if g := <-wait; g.err == nil {
 				g.rec.Release()
 			}
-		}()
+		})
 		return nil, ctx.Err()
 	}
 }

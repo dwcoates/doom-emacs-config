@@ -13,6 +13,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/inflight"
 )
 
 // op is the operation every record of an open is written under.
@@ -578,10 +579,10 @@ func (c *Coordinator) startRead(work *openWork, sl *slot) {
 	}
 	sl.reading = true
 	ws := ids.WorkspaceID(sl.ws.Ref.GetId())
-	go func() {
+	inflight.Go(func() {
 		err := c.deps.ReadConversation(work.ctx, ws)
 		work.run.post(note{ws: ws, read: true, readErr: err})
-	}()
+	})
 }
 
 // answerIfOpen sends the workspace's `opened` once it is open: its

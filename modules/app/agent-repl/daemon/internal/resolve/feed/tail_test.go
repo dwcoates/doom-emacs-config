@@ -17,7 +17,7 @@ import (
 // row publication's row, and each row a held-section change moved. For the
 // tests about rows, which a held change carries only as the rows it moved.
 func tailRows(ctx context.Context, tail Tail) <-chan *frontendv1.FeedRow {
-	pubs := tail.Publications(ctx)
+	pubs, _ := tail.Publications(ctx)
 	out := make(chan *frontendv1.FeedRow)
 	go func() {
 		defer close(out)

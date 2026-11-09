@@ -7,6 +7,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/inflight"
 )
 
 // THE LIVE-WORK LEDGER.
@@ -166,7 +167,7 @@ func (w *watcher) dropAgentWatchLocked(key string, entry *agentWatch) string {
 	if entry.stream != nil {
 		stream := entry.stream
 		entry.stream = nil
-		go stream.Close()
+		inflight.Go(func() { stream.Close() })
 	}
 	w.log.Debug("daemon.sessionwatcher.reap", "a subagent watch was reaped", dlog.Context{"agent_id": key, "watch": state})
 	return state
@@ -181,7 +182,7 @@ func (w *watcher) dropShellWatchLocked(key string, entry *shellWatch) string {
 	if entry.stream != nil {
 		stream := entry.stream
 		entry.stream = nil
-		go stream.Close()
+		inflight.Go(func() { stream.Close() })
 	}
 	w.log.Debug("daemon.sessionwatcher.reap", "a shell watch was reaped", dlog.Context{"work_id": key, "watch": state})
 	return state

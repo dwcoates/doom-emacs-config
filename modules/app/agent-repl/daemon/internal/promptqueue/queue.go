@@ -443,6 +443,7 @@ func (q *queue) Drain(bound time.Duration) bool {
 	q.mu.Unlock()
 	q.endLife()
 	left := make(chan struct{})
+	// inflight: joined: the function that starts it waits for it.
 	go func() {
 		q.classifying.Wait()
 		q.reviving.Wait()

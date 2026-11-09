@@ -24,10 +24,12 @@ package startingshim
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"syscall"
 	"time"
 
 	"agent-repld/internal/clock"
+	"agent-repld/internal/kernelevent"
 	"agent-repld/internal/shimsocket"
 )
 
@@ -36,11 +38,6 @@ type Clock = clock.Clock
 
 // SystemClock is the production Clock.
 type SystemClock = clock.System
-
-// DefaultPoll is how often the wait re-probes the socket. The fact lives in
-// the KERNEL and cannot announce itself, so a poll is the floor under it; the
-// whole wait is bounded by the caller's adoption bound.
-const DefaultPoll = 20 * time.Millisecond
 
 // Outcome is what a probe of the recorded spawn concluded.
 type Outcome int
@@ -92,9 +89,15 @@ func Alive(pid int) bool {
 
 // Waiter waits for a recorded spawn to announce itself on its socket.
 //
+// THE WAIT IS THE KERNEL'S, NEVER A POLL. The socket is probed again at each
+// change of its directory -- the shim binds a temporary name, listens, and
+// links it into place, so the socket's name appears only once it accepts --
+// and the wait ends at once on the recorded process's exit event. The bound is
+// a failure bound on the whole wait.
+//
 // Probe and Alive are injected so the caller's OWN probe decides liveness --
 // one resolution cannot disagree with the probe the same caller then reports
-// -- and so a test drives the kernel's two answers directly.
+// -- and so a test drives the kernel's answers directly.
 type Waiter struct {
 	// Alive reports whether the recorded pid names a live process. Nil means
 	// this package's own kill(pid, 0).
@@ -102,10 +105,13 @@ type Waiter struct {
 	// Probe is the socket probe, handed to shimsocket.NewestLive so every
 	// generation on disk is considered.
 	Probe func(string) (shimsocket.State, error)
-	// Clock drives the poll. Nil means SystemClock.
+	// Clock times the bound. Nil means SystemClock.
 	Clock Clock
-	// Poll is the re-probe cadence. Zero means DefaultPoll.
-	Poll time.Duration
+	// Changes follows the socket's directory; nil means kernelevent.Follow.
+	Changes func(ctx context.Context, dir string) (<-chan error, func())
+	// Exit waits for the recorded process's exit; nil means
+	// kernelevent.WaitExit.
+	Exit func(ctx context.Context, pid int) error
 }
 
 // Await answers what became of the spawn recorded for a workspace whose lock
@@ -118,6 +124,7 @@ type Waiter struct {
 // A CANCELLED CONTEXT IS NOT A DEAD SPAWN. The caller's boot is being
 // abandoned, and answering OutcomeSpawnDead would send it off to spawn a
 // second shim on its way out; it answers undetermined, which spawns nothing.
+// Neither is a watch that fails: the process may still bind at any instant.
 func (w Waiter) Await(ctx context.Context, recorded *int, base string, bound time.Duration) (string, Outcome) {
 	if recorded == nil {
 		return base, OutcomeNoSpawn
@@ -133,29 +140,46 @@ func (w Waiter) Await(ctx context.Context, recorded *int, base string, bound tim
 	if clock == nil {
 		clock = SystemClock{}
 	}
-	poll := w.Poll
-	if poll <= 0 {
-		poll = DefaultPoll
+	follow := w.Changes
+	if follow == nil {
+		follow = func(ctx context.Context, dir string) (<-chan error, func()) { return kernelevent.Follow(ctx, dir) }
 	}
-	deadline := clock.Now().Add(bound)
+	exit := w.Exit
+	if exit == nil {
+		exit = kernelevent.WaitExit
+	}
+	// THE WATCHES ARE TAKEN BEFORE THE FIRST PROBE, so a bind or an exit in
+	// between is reported.
+	waitCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	changes, stop := follow(waitCtx, filepath.Dir(base))
+	defer stop()
+	exited := make(chan error, 1)
+	// inflight: joined: the function that starts it waits for it.
+	go func() { exited <- exit(waitCtx, *recorded) }()
+	expired := clock.After(bound)
 	for {
-		path, state, _ := shimsocket.NewestLive(w.Probe, base)
-		if state == shimsocket.StateLive {
+		if path, state, _ := shimsocket.NewestLive(w.Probe, base); state == shimsocket.StateLive {
 			return path, OutcomeAnnounced
 		}
-		// THE PROCESS IS RE-ASKED EVERY PASS. A spawn that dies mid-wait is
-		// the ordinary "the shim would not come up" case, and holding the boot
-		// to the full bound for a process that is already gone is a listener
-		// nobody accepts on.
-		if !alive(*recorded) {
-			return base, OutcomeSpawnDead
-		}
-		if !clock.Now().Before(deadline) {
-			return base, OutcomeUndetermined
-		}
 		select {
-		case <-clock.After(poll):
 		case <-ctx.Done():
+			return base, OutcomeUndetermined
+		case err := <-exited:
+			if err != nil {
+				return base, OutcomeUndetermined
+			}
+			// A SOCKET LINKED IN JUST BEFORE THE EXIT is still the
+			// survivor's last word: the probe above is asked once more.
+			if path, state, _ := shimsocket.NewestLive(w.Probe, base); state == shimsocket.StateLive {
+				return path, OutcomeAnnounced
+			}
+			return base, OutcomeSpawnDead
+		case err := <-changes:
+			if err != nil {
+				return base, OutcomeUndetermined
+			}
+		case <-expired:
 			return base, OutcomeUndetermined
 		}
 	}

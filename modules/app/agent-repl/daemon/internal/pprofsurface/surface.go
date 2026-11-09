@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/inflight"
 )
 
 // ErrNotLocal reports a refused bind: the profiling surface exposes goroutine
@@ -101,7 +102,7 @@ func open(ctx context.Context, addr string, log dlog.Logger) (Surface, error) {
 		Handler:     mux(),
 		BaseContext: func(net.Listener) context.Context { return ctx },
 	}
-	go func() {
+	inflight.Standing(func() {
 		// ErrServerClosed is the ordinary end of Close; nothing else can be
 		// reported from here, so the surface's failure is its listener's.
 		if err := s.srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -109,7 +110,7 @@ func open(ctx context.Context, addr string, log dlog.Logger) (Surface, error) {
 				"the profiling surface stopped serving",
 				dlog.Context{"network": s.network, "address": s.address, "cause": err.Error()})
 		}
-	}()
+	})
 	// WARN, not INFO: an open profiling surface is a deliberate, temporary,
 	// operator-visible state, and a daemon that still has one open tomorrow
 	// should say so loudly enough to be noticed.

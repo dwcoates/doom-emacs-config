@@ -12,6 +12,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/inflight"
 	"agent-repld/internal/wsm"
 )
 
@@ -249,10 +250,10 @@ func (o *orchestrator) stepAside(r *run, why AsideReason) {
 	fields["lease"] = string(r.lease.ID)
 	o.cutSuspended(o.deps.Log.Global(), r, aside, fields)
 	o.live.Add(1)
-	go func() {
+	inflight.Go(func() {
 		defer o.live.Done()
 		o.takeBackSteppedAside(r, aside, fields)
-	}()
+	})
 }
 
 // takeBackSteppedAside waits for R, cut by its step aside ASIDE, to let go,
@@ -291,10 +292,10 @@ func (o *orchestrator) awaitRemediation(ws ids.WorkspaceID, repo wsm.RepoKey, tu
 		return
 	}
 	o.live.Add(1)
-	go func() {
+	inflight.Standing(func() {
 		defer o.live.Done()
 		o.waitThenReturn(ctx, ws, repo, turn)
-	}()
+	})
 }
 
 // waitThenReturn waits for WS's repairing TURN to end, then returns the merge to

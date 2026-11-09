@@ -1,6 +1,7 @@
 package login
 
 import (
+	"agent-repld/internal/inflight"
 	"context"
 	"sync"
 )
@@ -59,7 +60,7 @@ func (s *subscriber) wake() {
 // pump stops, so the session can unregister a viewer whose context was
 // cancelled.
 func (s *subscriber) start(ctx context.Context, onDone func()) <-chan Output {
-	go func() {
+	inflight.Standing(func() {
 		defer onDone()
 		defer close(s.out)
 		for {
@@ -87,6 +88,6 @@ func (s *subscriber) start(ctx context.Context, onDone func()) <-chan Output {
 				return
 			}
 		}
-	}()
+	})
 	return s.out
 }

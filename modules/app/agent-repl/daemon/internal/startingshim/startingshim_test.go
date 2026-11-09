@@ -2,6 +2,8 @@ package startingshim
 
 import (
 	"context"
+	"errors"
+	"net"
 	"os"
 	"path/filepath"
 	"sync"
@@ -11,36 +13,45 @@ import (
 	"agent-repld/internal/shimsocket"
 )
 
-// stepClock is a Clock that never sleeps: every After fires at once and
-// ADVANCES the clock by the interval it was asked for, so a bounded poll loop
-// runs its real number of passes in no wall time at all.
-type stepClock struct {
-	mu  sync.Mutex
-	now time.Time
-	// steps counts the After calls, which is the number of polls the wait
-	// actually paid for.
-	steps int
+// boundClock is a Clock whose bound elapses only when the test fires it.
+type boundClock struct {
+	fired chan time.Time
 }
 
-func newStepClock() *stepClock {
-	return &stepClock{now: time.Date(2026, 9, 13, 23, 0, 0, 0, time.UTC)}
+func newBoundClock() *boundClock { return &boundClock{fired: make(chan time.Time, 1)} }
+
+func (c *boundClock) Now() time.Time { return time.Date(2026, 9, 13, 23, 0, 0, 0, time.UTC) }
+
+func (c *boundClock) After(time.Duration) <-chan time.Time { return c.fired }
+
+// fire elapses the bound.
+func (c *boundClock) fire() { c.fired <- time.Time{} }
+
+// kernel is the wait's two kernel reports in the test's hands: a change of
+// the socket's directory, and the recorded process's exit.
+type kernel struct {
+	changes chan error
+	exit    chan error
 }
 
-func (c *stepClock) Now() time.Time {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.now
+func newKernel() *kernel {
+	return &kernel{changes: make(chan error), exit: make(chan error, 1)}
 }
 
-func (c *stepClock) After(d time.Duration) <-chan time.Time {
-	c.mu.Lock()
-	c.now = c.now.Add(d)
-	c.steps++
-	fired := c.now
-	c.mu.Unlock()
-	ch := make(chan time.Time, 1)
-	ch <- fired
-	return ch
+func (k *kernel) follow(context.Context, string) (<-chan error, func()) { return k.changes, func() {} }
+
+func (k *kernel) awaitExit(ctx context.Context, _ int) error {
+	select {
+	case err := <-k.exit:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// waiter is a Waiter over K, CLOCK and PROBE.
+func waiter(alive func(int) bool, probe *scriptedProbe, clock *boundClock, k *kernel) Waiter {
+	return Waiter{Alive: alive, Probe: probe.probe, Clock: clock, Changes: k.follow, Exit: k.awaitExit}
 }
 
 // scriptedProbe answers a socket state per path, and switches one path to LIVE
@@ -88,87 +99,66 @@ func TestAwait(t *testing.T) {
 		recorded *int
 		alive    func(pid int) bool
 		probe    *scriptedProbe
-		cancel   bool
+		// during runs once the wait has begun.
+		during func(clock *boundClock, k *kernel, cancel func())
 		// assert
-		want      Outcome
-		wantPath  string
-		wantSteps int
+		want     Outcome
+		wantPath string
 	}{
-		{
-			name:     "no recorded spawn is no shim at all",
-			recorded: nil,
-			alive:    func(int) bool { return true },
-			probe:    &scriptedProbe{liveAfter: -1},
-			want:     OutcomeNoSpawn,
-			wantPath: base,
-		},
-		{
-			name:     "a recorded spawn whose process is gone is no shim either",
-			recorded: &alivePID,
-			alive:    func(int) bool { return false },
-			probe:    &scriptedProbe{liveAfter: -1},
-			want:     OutcomeSpawnDead,
-			wantPath: base,
-		},
-		{
-			name:     "a live process already listening is announced without a single poll",
-			recorded: &alivePID,
-			alive:    func(int) bool { return true },
-			probe:    &scriptedProbe{liveAfter: 0},
-			want:     OutcomeAnnounced,
-			wantPath: base,
-		},
-		{
-			name:     "a live process that binds partway through the wait is announced",
-			recorded: &alivePID,
-			alive:    func(int) bool { return true },
-			probe:    &scriptedProbe{liveAfter: 3},
-			want:     OutcomeAnnounced,
-			wantPath: base,
-			// three probes read absent, so three polls were paid for.
-			wantSteps: 3,
-		},
-		{
-			name:     "a live process that never binds leaves the answer undetermined",
-			recorded: &alivePID,
-			alive:    func(int) bool { return true },
-			probe:    &scriptedProbe{liveAfter: -1},
-			want:     OutcomeUndetermined,
-			wantPath: base,
-		},
-		{
-			name:     "a cancelled context is undetermined, never a dead spawn",
-			recorded: &alivePID,
-			alive:    func(int) bool { return true },
-			probe:    &scriptedProbe{liveAfter: -1},
-			cancel:   true,
-			want:     OutcomeUndetermined,
-			wantPath: base,
-		},
+		{name: "no recorded spawn is no shim at all", alive: func(int) bool { return true },
+			probe: &scriptedProbe{liveAfter: -1}, want: OutcomeNoSpawn, wantPath: base},
+		{name: "a recorded spawn whose process is gone is no shim either", recorded: &alivePID,
+			alive: func(int) bool { return false }, probe: &scriptedProbe{liveAfter: -1}, want: OutcomeSpawnDead, wantPath: base},
+		{name: "a live process already listening is announced at once", recorded: &alivePID,
+			alive: func(int) bool { return true }, probe: &scriptedProbe{liveAfter: 0}, want: OutcomeAnnounced, wantPath: base},
+		{name: "a live process that binds partway through the wait is announced at the change", recorded: &alivePID,
+			alive: func(int) bool { return true }, probe: &scriptedProbe{liveAfter: 1}, want: OutcomeAnnounced, wantPath: base,
+			during: func(_ *boundClock, k *kernel, _ func()) { k.changes <- nil }},
+		{name: "a live process that never binds leaves the answer undetermined at the bound", recorded: &alivePID,
+			alive: func(int) bool { return true }, probe: &scriptedProbe{liveAfter: -1}, want: OutcomeUndetermined, wantPath: base,
+			during: func(clock *boundClock, _ *kernel, _ func()) { clock.fire() }},
+		{name: "a spawn that exits mid-wait is dead at its exit", recorded: &alivePID,
+			alive: func(int) bool { return true }, probe: &scriptedProbe{liveAfter: -1}, want: OutcomeSpawnDead, wantPath: base,
+			during: func(_ *boundClock, k *kernel, _ func()) { k.exit <- nil }},
+		{name: "a spawn that bound just before it exited is announced", recorded: &alivePID,
+			alive: func(int) bool { return true }, probe: &scriptedProbe{liveAfter: 1}, want: OutcomeAnnounced, wantPath: base,
+			during: func(_ *boundClock, k *kernel, _ func()) { k.exit <- nil }},
+		{name: "a watch that fails is undetermined, never a dead spawn", recorded: &alivePID,
+			alive: func(int) bool { return true }, probe: &scriptedProbe{liveAfter: -1}, want: OutcomeUndetermined, wantPath: base,
+			during: func(_ *boundClock, k *kernel, _ func()) { k.changes <- errors.New("kqueue refused") }},
+		{name: "a cancelled context is undetermined, never a dead spawn", recorded: &alivePID,
+			alive: func(int) bool { return true }, probe: &scriptedProbe{liveAfter: -1}, want: OutcomeUndetermined, wantPath: base,
+			during: func(_ *boundClock, _ *kernel, cancel func()) { cancel() }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange.
-			clock := newStepClock()
-			w := Waiter{Alive: tt.alive, Probe: tt.probe.probe, Clock: clock, Poll: 20 * time.Millisecond}
+			clock, k := newBoundClock(), newKernel()
+			w := waiter(tt.alive, tt.probe, clock, k)
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
-			if tt.cancel {
-				cancel()
+			type answer struct {
+				path    string
+				outcome Outcome
 			}
+			got := make(chan answer, 1)
 
 			// Act.
-			path, outcome := w.Await(ctx, tt.recorded, base, 200*time.Millisecond)
+			go func() {
+				path, outcome := w.Await(ctx, tt.recorded, base, time.Minute)
+				got <- answer{path, outcome}
+			}()
+			if tt.during != nil {
+				tt.during(clock, k, cancel)
+			}
+			a := <-got
 
 			// Assert.
-			if outcome != tt.want {
-				t.Fatalf("Await outcome = %v, want %v", outcome, tt.want)
+			if a.outcome != tt.want {
+				t.Fatalf("Await outcome = %v, want %v", a.outcome, tt.want)
 			}
-			if path != tt.wantPath {
-				t.Fatalf("Await path = %q, want %q", path, tt.wantPath)
-			}
-			if tt.wantSteps > 0 && clock.steps != tt.wantSteps {
-				t.Fatalf("Await polled %d times, want %d", clock.steps, tt.wantSteps)
+			if a.path != tt.wantPath {
+				t.Fatalf("Await path = %q, want %q", a.path, tt.wantPath)
 			}
 		})
 	}
@@ -191,10 +181,10 @@ func TestAwaitReportsTheGenerationTheStartingShimBound(t *testing.T) {
 	}
 	pid := 4242
 	probe := &scriptedProbe{liveAfter: 0, livePath: generation}
-	w := Waiter{Alive: func(int) bool { return true }, Probe: probe.probe, Clock: newStepClock()}
+	w := waiter(func(int) bool { return true }, probe, newBoundClock(), newKernel())
 
 	// Act.
-	path, outcome := w.Await(context.Background(), &pid, base, 200*time.Millisecond)
+	path, outcome := w.Await(context.Background(), &pid, base, time.Minute)
 
 	// Assert.
 	if outcome != OutcomeAnnounced {
@@ -205,31 +195,42 @@ func TestAwaitReportsTheGenerationTheStartingShimBound(t *testing.T) {
 	}
 }
 
-// TestAwaitStopsWaitingForASpawnThatDiesMidWait pins the re-ask: a process that
-// goes away while the wait is running is the ordinary "the shim would not come
-// up" case, and holding a boot to the whole bound for it is a listener nobody
-// accepts on.
-func TestAwaitStopsWaitingForASpawnThatDiesMidWait(t *testing.T) {
-	// Arrange.
-	var asked int
-	alive := func(int) bool {
-		asked++
-		return asked <= 2
+func TestAwaitSeesARealSocketLinkedIntoItsDirectory(t *testing.T) {
+	// Arrange: the kernel's own reports, and a socket bound under a temporary
+	// name, listening, then linked into place as the shim does.
+	dir, err := os.MkdirTemp("", "ssr")
+	if err != nil {
+		t.Fatalf("temp dir: %v", err)
 	}
-	pid := 4242
-	probe := &scriptedProbe{liveAfter: -1}
-	clock := newStepClock()
-	w := Waiter{Alive: alive, Probe: probe.probe, Clock: clock, Poll: 20 * time.Millisecond}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	base := filepath.Join(dir, "ws.sock")
+	pid := os.Getpid()
+	w := Waiter{Alive: func(int) bool { return true }, Probe: shimsocket.Probe, Clock: newBoundClock()}
+	type answer struct {
+		path    string
+		outcome Outcome
+	}
+	got := make(chan answer, 1)
+	go func() {
+		path, outcome := w.Await(context.Background(), &pid, base, time.Minute)
+		got <- answer{path, outcome}
+	}()
 
 	// Act.
-	_, outcome := w.Await(context.Background(), &pid, "/tmp/startingshim-test/ws.sock", time.Hour)
+	tmp := filepath.Join(dir, ".ws.sock.tmp")
+	listener, err := net.Listen("unix", tmp)
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	t.Cleanup(func() { listener.Close() })
+	if err := os.Link(tmp, base); err != nil {
+		t.Fatalf("link the socket into place: %v", err)
+	}
+	a := <-got
 
 	// Assert.
-	if outcome != OutcomeSpawnDead {
-		t.Fatalf("Await outcome = %v, want %v once the recorded process is gone", outcome, OutcomeSpawnDead)
-	}
-	if clock.steps != 1 {
-		t.Fatalf("Await polled %d times after the process died, want 1", clock.steps)
+	if a.outcome != OutcomeAnnounced || a.path != base {
+		t.Fatalf("Await = (%q, %v), want (%q, announced)", a.path, a.outcome, base)
 	}
 }
 

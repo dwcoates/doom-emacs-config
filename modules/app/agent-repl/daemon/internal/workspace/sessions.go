@@ -27,6 +27,7 @@ import (
 	"agent-repld/internal/headless"
 	"agent-repld/internal/health"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/inflight"
 	"agent-repld/internal/opentabs"
 	"agent-repld/internal/resolve/feed"
 	"agent-repld/internal/resolve/footer"
@@ -102,6 +103,24 @@ func probeWorkspaceLock(log dlog.Logger) ProbeFunc {
 			return sessionlock.StateUnknown, fmt.Errorf("derive the workspace lock path: %w", err)
 		}
 		return sessionlock.ProbeWithLog(log, path)
+	}
+}
+
+// AwaitLockFunc waits for a workspace's lock to read free, until ctx ends,
+// answering StateHeld once ctx ends first.
+type AwaitLockFunc func(ctx context.Context, runDir, workspaceDir string) (sessionlock.State, error)
+
+// awaitWorkspaceLockFree is the production AwaitLockFunc.
+func awaitWorkspaceLockFree(log dlog.Logger) AwaitLockFunc {
+	log = log.With(dlog.Context{"component": "daemon.workspace.await_workspace_lock"})
+	return func(ctx context.Context, runDir, workspaceDir string) (sessionlock.State, error) {
+		path, err := sessionlock.WorkspaceLockPath(runDir, workspaceDir)
+		if err != nil {
+			log.Error("daemon.workspace.await_workspace_lock", "could not derive the workspace lock path",
+				dlog.Context{"run_dir": runDir, "workspace_dir": workspaceDir, "error": err.Error()})
+			return sessionlock.StateUnknown, fmt.Errorf("derive the workspace lock path: %w", err)
+		}
+		return sessionlock.AwaitFree(ctx, path)
 	}
 }
 
@@ -191,6 +210,10 @@ type FleetDeps struct {
 	LockDir string
 	// Probe probes the workspace lock; nil means sessionlock.Probe.
 	Probe ProbeFunc
+	// AwaitLockFree waits for the workspace lock to read free, until ctx
+	// ends; nil means sessionlock.AwaitFree, a blocking acquire the holder's
+	// release answers in the kernel.
+	AwaitLockFree AwaitLockFunc
 	// Deliveries holds a fork's PARENT's turn sequence while the fork is made
 	// (forking.go): the prompt queue's Exclusively.
 	Deliveries DeliveryExclusion
@@ -236,6 +259,11 @@ type FleetDeps struct {
 	// ShimAlive reports whether a recorded spawned pid names a live process.
 	// Nil means startingshim.Alive, which is kill(pid, 0).
 	ShimAlive func(pid int) bool
+	// ShimSocketChanges follows a shim socket's directory while a recorded
+	// spawn is awaited, and ShimExit waits for that spawn's exit; nil is the
+	// kernel's own report (startingshim.Waiter).
+	ShimSocketChanges func(ctx context.Context, dir string) (<-chan error, func())
+	ShimExit          func(ctx context.Context, pid int) error
 	// PublishHost recomposes and republishes one workspace's HOST view. The
 	// fleet owns the edges that move it and the server cannot see them: a
 	// session coming up, a session going away, a shim replaced. Nil means no
@@ -346,6 +374,7 @@ func (l *live) held() bool {
 type Fleet struct {
 	deps        FleetDeps
 	probe       ProbeFunc
+	awaitLock   AwaitLockFunc
 	socketProbe SocketProbeFunc
 	watch       WatcherStarter
 	now         func() time.Time
@@ -489,13 +518,13 @@ func (f *Fleet) Detach(run func(context.Context)) {
 
 func (f *Fleet) runDetached(run func(context.Context) error, done func(context.Context, error)) {
 	f.detached.Add(1)
-	go func() {
+	inflight.Go(func() {
 		defer f.detached.Done()
 		err := run(f.detachedCtx)
 		if done != nil {
 			done(f.detachedCtx, err)
 		}
-	}()
+	})
 }
 
 // DrainStarts ends every detached start and waits, bounded, for it to leave.
@@ -505,6 +534,7 @@ func (f *Fleet) runDetached(run func(context.Context) error, done func(context.C
 func (f *Fleet) DrainStarts(bound time.Duration) bool {
 	f.endDetached()
 	left := make(chan struct{})
+	// inflight: joined: the function that starts it waits for it.
 	go func() {
 		f.detached.Wait()
 		close(left)
@@ -580,6 +610,10 @@ func NewFleet(deps FleetDeps) (*Fleet, error) {
 	if probe == nil {
 		probe = probeWorkspaceLock(deps.Log.Global())
 	}
+	awaitLock := deps.AwaitLockFree
+	if awaitLock == nil {
+		awaitLock = awaitWorkspaceLockFree(deps.Log.Global())
+	}
 	socketProbe := deps.SocketProbe
 	if socketProbe == nil {
 		socketProbe = probeShimSocket(deps.Log.Global())
@@ -618,6 +652,7 @@ func NewFleet(deps FleetDeps) (*Fleet, error) {
 		endDetached:  endDetached,
 		deps:         deps,
 		probe:        probe,
+		awaitLock:    awaitLock,
 		socketProbe:  socketProbe,
 		watch:        watch,
 		now:          now,
@@ -625,9 +660,11 @@ func NewFleet(deps FleetDeps) (*Fleet, error) {
 		startBound:   startBound,
 
 		starting: startingshim.Waiter{
-			Alive: deps.ShimAlive,
-			Probe: socketProbe,
-			Clock: deps.Clock,
+			Alive:   deps.ShimAlive,
+			Probe:   socketProbe,
+			Clock:   deps.Clock,
+			Changes: deps.ShimSocketChanges,
+			Exit:    deps.ShimExit,
 		},
 
 		sessions:           map[ids.WorkspaceID]*live{},
@@ -1834,7 +1871,7 @@ func (f *Fleet) relayCompactionPhases(
 		return func() {}
 	}
 	done := make(chan struct{})
-	go func() {
+	inflight.Standing(func() {
 		defer close(done)
 		for {
 			frame, err := stream.Recv()
@@ -1860,7 +1897,7 @@ func (f *Fleet) relayCompactionPhases(
 			})
 			onPhase(progress)
 		}
-	}()
+	})
 	return func() {
 		// BOTH, IN THIS ORDER. The cancel ends the request the stream was
 		// opened under; the Close ends the stream from this side, which is
@@ -2304,42 +2341,27 @@ func (f *Fleet) bringUpClient(ctx context.Context, log dlog.Logger, ws ids.Works
 	}
 }
 
-// lockReleasePoll is how often a bring-up re-probes a workspace lock whose
-// owner is going away; lockReleaseBound bounds the whole wait. A dying shim's
-// lock holder exits within milliseconds of its stdin's EOF on a quiet host;
-// the bound is a generous multiple of that for a loaded one.
-const (
-	lockReleasePoll  = 20 * time.Millisecond
-	lockReleaseBound = 3 * time.Second
-)
+// lockReleaseBound bounds the wait for a workspace lock whose owner is going
+// away. A dying shim's lock holder exits within milliseconds of its stdin's
+// EOF on a quiet host; the bound is a generous multiple of that for a loaded
+// one.
+const lockReleaseBound = 3 * time.Second
 
 // awaitLockReleased waits, bounded, for the workspace lock to read free,
-// answering the last state read and the probe's error. Polled, because a
-// kernel lock cannot announce its release.
+// answering the state it ended on and the wait's error. The wait is the
+// kernel's (FleetDeps.AwaitLockFree): a blocking acquire the holder's release
+// or exit answers.
 func (f *Fleet) awaitLockReleased(ctx context.Context, log dlog.Logger, lockDir, dir string) (sessionlock.State, error) {
-	clk := f.deps.Clock
-	if clk == nil {
-		clk = startingshim.SystemClock{}
-	}
 	log.Info(opBringUp, "the workspace lock is held with no shim listening; waiting for its owner to finish going away", dlog.Context{
 		"lock_dir": lockDir, "bound_ms": lockReleaseBound.Milliseconds(),
 	})
-	deadline := clk.Now().Add(lockReleaseBound)
-	for {
-		state, err := f.probe(lockDir, dir)
-		if state != sessionlock.StateHeld {
-			log.Info(opBringUp, "the workspace lock's owner went away", dlog.Context{"lock_state": state.String(), "cause": errText(err)})
-			return state, err
-		}
-		if !clk.Now().Before(deadline) {
-			return state, err
-		}
-		select {
-		case <-clk.After(lockReleasePoll):
-		case <-ctx.Done():
-			return state, err
-		}
+	waitCtx, cancel := context.WithTimeout(ctx, lockReleaseBound)
+	defer cancel()
+	state, err := f.awaitLock(waitCtx, lockDir, dir)
+	if state != sessionlock.StateHeld {
+		log.Info(opBringUp, "the workspace lock's owner went away", dlog.Context{"lock_state": state.String(), "cause": errText(err)})
 	}
+	return state, err
 }
 
 // noteStartFailed records a bring-up death as the workspace's own fault and

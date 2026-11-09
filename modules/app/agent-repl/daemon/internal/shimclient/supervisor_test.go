@@ -17,6 +17,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/envc"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/kernelevent"
 )
 
 // TestSpawnArgvIsTheContractVerbatim asserts the shim's argv is exactly the
@@ -642,17 +643,14 @@ func TestAnAbandonedBringUpIsRecordedOnTheWorkspacesLogNotTheRunLog(t *testing.T
 	}
 }
 
-// waitForExit blocks until the pid is gone.
+// waitForExit blocks until the pid exits, on the kernel's own exit event.
 func waitForExit(t *testing.T, pid int) {
 	t.Helper()
-
-	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
-		if !alive(pid) {
-			return
-		}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := kernelevent.WaitExit(ctx, pid); err != nil {
+		t.Fatalf("pid %d did not exit; the abandoned shim was not stopped: %v", pid, err)
 	}
-	t.Fatalf("pid %d is still alive; the abandoned shim was not stopped", pid)
 }
 
 // TestStandDownEverySpawnKillsASpawnStillBringingUp is the leak's own case: a

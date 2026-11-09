@@ -41,8 +41,9 @@ type Ingress interface {
 	// aside.
 	Sweep(ctx context.Context) error
 	// Run sweeps the directory until ctx is cancelled: once at start, which is
-	// what ingests everything written while no daemon was serving, then on
-	// every interval.
+	// what ingests everything written while no daemon was serving, then at
+	// every change that can let an entry in (Deps.IntakeChanged,
+	// Deps.FleetChanges, and an entry written or removed).
 	Run(ctx context.Context) error
 }
 
@@ -73,16 +74,20 @@ type Deps struct {
 	// rollout.Controller.ServesIntake. A sweep while it answers false takes
 	// nothing. See internal/intakegate.
 	Serves func() bool
+	// IntakeChanged answers a channel that closes at the next change of
+	// Serves' answer: rollout.Controller.IntakeChanged. Run sweeps again on
+	// it, so a daemon that comes to serve takes what waited on disk at once.
+	IntakeChanged func() <-chan struct{}
+	// FleetChanges answers a channel that receives once per change of the
+	// fleet, until ctx ends: the sidebar roster's own topic. Every condition
+	// a refused entry waits on -- a workspace registered, a merge ended, a
+	// cold gate answered, a session started -- is drawn on the roster, so its
+	// change is what lets the entry in, and Run sweeps again on it while any
+	// entry waits.
+	FleetChanges func(ctx context.Context) <-chan struct{}
 	// Log is the ingress's logger.
 	Log dlog.Surfaces
 
-	// Interval is how often the directory is polled. Zero means
-	// DefaultInterval. It is also the first retry delay of an entry the queue
-	// refused.
-	Interval time.Duration
-	// RetryCeiling caps the doubling retry delay of an entry the queue keeps
-	// refusing. Zero means DefaultRetryCeiling.
-	RetryCeiling time.Duration
 	// SubmitBound bounds one entry's submission. Zero means
 	// DefaultSubmitBound.
 	SubmitBound time.Duration
@@ -96,20 +101,7 @@ type Deps struct {
 	// seam so a test can stand in for a crash between the acceptance and the
 	// removal.
 	Remove func(path string) error
-	// Now supplies the instant a retry is judged against; nil means time.Now.
-	Now func() time.Time
 }
-
-// DefaultInterval is the ingress's poll cadence: the same cadence the
-// command-file ingress polls at, for the same reason — a poll cannot miss a
-// file the way a dropped watch can.
-const DefaultInterval = 250 * time.Millisecond
-
-// DefaultRetryCeiling caps the retry delay of a refused entry. A refusal is a
-// standing condition (a merge in flight, a cold gate, a workspace not yet
-// registered); retrying it every poll would re-run the submission and its
-// records four times a second for as long as the condition stands.
-const DefaultRetryCeiling = 10 * time.Second
 
 // DefaultSubmitBound bounds one entry's submission: the bound the editor
 // gives the same SubmitPrompt (agent-repl-connect-unary-timeout-seconds),
@@ -143,14 +135,12 @@ func New(deps Deps) (Ingress, error) {
 		return nil, fmt.Errorf("heldingress: the host publisher is required")
 	case deps.Serves == nil:
 		return nil, fmt.Errorf("heldingress: the serving answer is required")
+	case deps.IntakeChanged == nil:
+		return nil, fmt.Errorf("heldingress: the intake's change signal is required")
+	case deps.FleetChanges == nil:
+		return nil, fmt.Errorf("heldingress: the fleet's change signal is required")
 	case deps.Log == nil:
 		return nil, fmt.Errorf("heldingress: log surfaces are required")
-	}
-	if deps.Interval <= 0 {
-		deps.Interval = DefaultInterval
-	}
-	if deps.RetryCeiling <= 0 {
-		deps.RetryCeiling = DefaultRetryCeiling
 	}
 	if deps.SubmitBound <= 0 {
 		deps.SubmitBound = DefaultSubmitBound
@@ -163,9 +153,6 @@ func New(deps Deps) (Ingress, error) {
 	}
 	if deps.Remove == nil {
 		deps.Remove = removeFile
-	}
-	if deps.Now == nil {
-		deps.Now = time.Now
 	}
 	return &ingress{
 		deps:    deps,

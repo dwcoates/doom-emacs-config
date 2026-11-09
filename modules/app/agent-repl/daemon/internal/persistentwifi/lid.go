@@ -147,6 +147,7 @@ func (s socketLid) Watch(ctx context.Context, heard func(Lid)) error {
 	stopped := make(chan struct{})
 	var closer sync.WaitGroup
 	closer.Add(1)
+	// inflight: joined: the function that starts it waits for it.
 	go func() {
 		defer closer.Done()
 		select {

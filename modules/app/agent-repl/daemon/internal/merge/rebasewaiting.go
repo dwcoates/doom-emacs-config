@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/inflight"
 	"agent-repld/internal/wsm"
 )
 
@@ -51,7 +52,7 @@ func (o *orchestrator) rebaseWaiting(repo wsm.RepoKey) {
 	o.waitingPass[repo] = true
 	o.mu.Unlock()
 	o.live.Add(1)
-	go func() {
+	inflight.Standing(func() {
 		defer o.live.Done()
 		ctx := context.Background()
 		for {
@@ -69,7 +70,7 @@ func (o *orchestrator) rebaseWaiting(repo wsm.RepoKey) {
 			}
 			o.mu.Unlock()
 		}
-	}()
+	})
 }
 
 // rebaseWaitingPass rebases each waiting member of repo in queue order, one

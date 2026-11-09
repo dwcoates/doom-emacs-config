@@ -64,6 +64,7 @@ func (k *Keeper) SendHiddenKeepalives(ctx context.Context) *agentreplv1.SendHidd
 	var wg sync.WaitGroup
 	for i, ws := range hidden {
 		wg.Add(1)
+		// inflight: joined: the function that starts it waits for it.
 		go func() {
 			defer wg.Done()
 			outcomes[i] = k.beat(ctx, ws)

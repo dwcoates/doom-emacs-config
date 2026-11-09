@@ -11,6 +11,7 @@ import (
 	"agent-repld/internal/bounce"
 	"agent-repld/internal/bringup"
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/inflight"
 	"agent-repld/internal/replyquote"
 	"agent-repld/internal/rollout"
 	"agent-repld/internal/shimclient"
@@ -75,10 +76,10 @@ func (v *verbs) reportCreateFailure(ctx context.Context, spec CreateSpec, cause 
 	}
 	detached := context.WithoutCancel(ctx)
 	v.createFailureReports.Add(1)
-	go func() {
+	inflight.Go(func() {
 		defer v.createFailureReports.Done()
 		v.deliverCreateFailure(detached, log, spec, cause)
-	}()
+	})
 }
 
 // createHandedOver answers whether a create's error is a HANDOVER rather than a

@@ -6,6 +6,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/inflight"
 )
 
 // A CHAT THREAD'S NAME IS ITS FIRST QUESTION'S ABBREVIATION (owner ruling,
@@ -75,13 +76,13 @@ func (v *verbs) OpenThreads(ctx context.Context) error {
 	global.Info(opThreadName, "opening every thread to name it and abbreviate its questions", dlog.Context{"threads": len(threads)})
 	detached := context.WithoutCancel(ctx)
 	v.threadOpens.Add(1)
-	go func() {
+	inflight.Go(func() {
 		defer v.threadOpens.Done()
 		for _, id := range threads {
 			// A THREAD THAT WILL NOT OPEN is recorded by the chat service,
 			// which owns the read; the next one still opens.
 			_ = v.deps.Threads.Open(detached, id)
 		}
-	}()
+	})
 	return nil
 }

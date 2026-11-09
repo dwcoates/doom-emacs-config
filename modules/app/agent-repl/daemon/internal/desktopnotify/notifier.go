@@ -7,6 +7,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/inflight"
 	"agent-repld/internal/standdown"
 )
 
@@ -191,10 +192,10 @@ func (n *Notifier) spawn(work func()) bool {
 		return false
 	}
 	n.wg.Add(1)
-	go func() {
+	inflight.Go(func() {
 		defer n.wg.Done()
 		work()
-	}()
+	})
 	return true
 }
 

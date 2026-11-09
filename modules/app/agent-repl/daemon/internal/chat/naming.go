@@ -5,6 +5,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/inflight"
 )
 
 // A THREAD'S NAME IS ITS FIRST QUESTION'S ABBREVIATION (owner ruling,
@@ -89,7 +90,7 @@ func (s *Service) wantName(t *thread) {
 	}
 	t.naming = true
 	s.drains.Add(1)
-	go s.drainNames(t)
+	inflight.Go(func() { s.drainNames(t) })
 }
 
 // drainNames applies the thread's wanted name until the applied one matches

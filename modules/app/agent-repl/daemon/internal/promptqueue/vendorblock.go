@@ -6,6 +6,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/inflight"
 	"agent-repld/internal/wsm"
 )
 
@@ -48,7 +49,7 @@ func (q *queue) OnVendorServes(ws ids.WorkspaceID) {
 	}
 	q.releasing.Add(1)
 	q.mu.Unlock()
-	go func() {
+	inflight.Go(func() {
 		defer q.releasing.Done()
 		// A SESSION THAT IS NOT UP IS NOT SERVED by the vendor that stopped
 		// refusing it: the session's coming up releases the holds instead.
@@ -57,7 +58,7 @@ func (q *queue) OnVendorServes(ws ids.WorkspaceID) {
 			return
 		}
 		q.releaseReconnectHolds(ctx, ws, log)
-	}()
+	})
 }
 
 // vendorBlocked answers the standing mid-session vendor block by name.

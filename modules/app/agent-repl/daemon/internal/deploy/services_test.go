@@ -33,15 +33,12 @@ type fakeLaunchd struct {
 	// or grows the log, or kills the process there).
 	onKickstart func()
 	// printsUntilGone is how many Prints of the sidecar still find it loaded
-	// after its bootout.
+	// after its bootout (launchd holding a label whose process exited).
 	printsUntilGone int
-	// onStorePrint runs on every Print of the store while it boots.
-	onStorePrint func(n int)
-	storePrints  int
-	kickErr      error
-	bootoutErr   error
-	bootstrapErr error
-	printErr     error
+	kickErr         error
+	bootoutErr      error
+	bootstrapErr    error
+	printErr        error
 	// onBootstrap runs when a plist is bootstrapped, with its file name.
 	onBootstrap func(plist string)
 }
@@ -75,13 +72,6 @@ func (l *fakeLaunchd) Print(_ context.Context, label string) (bool, int, error) 
 	if label == SidecarLabel && !l.loaded[label] && l.printsUntilGone > 0 {
 		l.printsUntilGone--
 		return true, 0, nil
-	}
-	if label == StoreLabel && l.onStorePrint != nil {
-		l.storePrints++
-		n := l.storePrints
-		l.mu.Unlock()
-		l.onStorePrint(n)
-		l.mu.Lock()
 	}
 	return l.loaded[label], l.pid[label], nil
 }
@@ -121,6 +111,41 @@ type restarterHarness struct {
 	log      *dlog.TestLogger
 	sock     string
 	alive    map[int]bool
+	clock    *boundClock
+	// exits holds each pid's exit: closed once the process exited. A pid
+	// with no entry has already exited.
+	exitsMu sync.Mutex
+	exits   map[int]chan struct{}
+	// awaiting receives each pid ProcessExit begins waiting on.
+	awaiting chan int
+}
+
+// processExit is the harness's ProcessExit: it waits on the pid's entry in
+// exits, or answers at once for a pid that has none.
+func (h *restarterHarness) processExit(ctx context.Context, pid int) error {
+	h.exitsMu.Lock()
+	exit, alive := h.exits[pid]
+	h.exitsMu.Unlock()
+	select {
+	case h.awaiting <- pid:
+	default:
+	}
+	if !alive {
+		return nil
+	}
+	select {
+	case <-exit:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// exit ends pid's process.
+func (h *restarterHarness) exit(pid int) {
+	h.exitsMu.Lock()
+	defer h.exitsMu.Unlock()
+	close(h.exits[pid])
 }
 
 func newRestarter(t *testing.T) *restarterHarness {
@@ -144,7 +169,9 @@ func newRestarter(t *testing.T) *restarterHarness {
 	writeFile(t, filepath.Join(plists, SidecarLabel+".plist"), "<plist/>")
 	log := dlog.NewTestLogger()
 	h := &restarterHarness{launchd: newFakeLaunchd(), log: log, sock: filepath.Join(sockDir, "store.sock"), alive: map[int]bool{},
-		restarts: &restarttimingtest.Recorder{}}
+		restarts: &restarttimingtest.Recorder{}, clock: newBoundClock(),
+		// The store runs until a test ends it; the sidecar's bootout ends it.
+		exits: map[int]chan struct{}{10: make(chan struct{})}, awaiting: make(chan int, 8)}
 	h.r = &Restarter{
 		CacheBin:    t.TempDir(),
 		ReportDir:   t.TempDir(),
@@ -154,9 +181,10 @@ func newRestarter(t *testing.T) *restarterHarness {
 		StoreSocket: h.sock,
 		StoreLog:    filepath.Join(t.TempDir(), "shim-store.err.log"),
 		Windows:     DefaultServiceWindows,
-		Clock:       newStepClock(),
+		Clock:       h.clock,
 		Log:         log,
 		Restarts:    h.restarts,
+		ProcessExit: h.processExit,
 	}
 	return h
 }
@@ -209,32 +237,71 @@ func TestRestartStoreTakesTheRecordedSafeOrder(t *testing.T) {
 	}
 }
 
-func TestRestartStoreWaitsForTheSidecarToLeave(t *testing.T) {
-	// Arrange: launchd still holds the sidecar for three looks after its bootout.
+func TestRestartStoreKickstartsTheStoreOnlyOnceTheSidecarExited(t *testing.T) {
+	// Arrange: the sidecar's process outlives its bootout until the test ends
+	// it.
 	h := newRestarter(t)
-	h.launchd.printsUntilGone = 3
+	h.exits[20] = make(chan struct{})
 	h.launchd.onKickstart = func() { h.bindSocket(t) }
+	done := make(chan error, 1)
 
 	// Act
-	err := h.r.RestartStore(context.Background())
+	go func() { done <- h.r.RestartStore(context.Background()) }()
+	for pid := range h.awaiting {
+		if pid == 20 {
+			break
+		}
+	}
+	before := h.launchd.Calls()
+	h.exit(20)
+	err := <-done
 
 	// Assert
 	if err != nil {
 		t.Fatalf("RestartStore: %v", err)
 	}
-	calls := h.launchd.Calls()
-	kick := -1
-	sidecarPrints := 0
-	for i, c := range calls {
-		if c == "print "+SidecarLabel && kick < 0 {
-			sidecarPrints++
-		}
-		if c == "kickstart "+StoreLabel {
-			kick = i
-		}
+	if slices.Contains(before, "kickstart "+StoreLabel) {
+		t.Fatalf("calls before the sidecar exited = %v, want no store kickstart yet", before)
 	}
-	if sidecarPrints < 5 {
-		t.Fatalf("calls = %v, want the store kickstarted only after the sidecar left", calls)
+	if !slices.Contains(h.launchd.Calls(), "kickstart "+StoreLabel) {
+		t.Fatalf("calls = %v, want the store kickstarted once the sidecar exited", h.launchd.Calls())
+	}
+}
+
+func TestRestartStoreRefusesASidecarThatWillNotLeave(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(h *restarterHarness)
+		want    string
+	}{
+		{name: "a sidecar whose process outlives the upper bound", want: "did not exit within the upper bound",
+			arrange: func(h *restarterHarness) {
+				h.exits[20] = make(chan struct{})
+				h.clock.fire(DefaultServiceWindows.Max)
+			}},
+		{name: "a sidecar launchd still holds once its process exited", want: "launchd still holds the sidecar",
+			arrange: func(h *restarterHarness) { h.launchd.printsUntilGone = 1 }},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newRestarter(t)
+			tc.arrange(h)
+
+			// Act
+			err := h.r.RestartStore(context.Background())
+
+			// Assert
+			if err == nil {
+				t.Fatalf("RestartStore succeeded with a sidecar that never left")
+			}
+			if slices.Contains(h.launchd.Calls(), "kickstart "+StoreLabel) {
+				t.Fatalf("calls = %v, want the store left alone", h.launchd.Calls())
+			}
+			if !loggedTo(h.log, "error", tc.want) {
+				t.Fatalf("records = %+v, want an ERROR naming %q", h.log.Records(), tc.want)
+			}
+		})
 	}
 }
 
@@ -267,7 +334,7 @@ func TestAStoreBootFailureNeverBringsTheSidecarBack(t *testing.T) {
 		want    string
 	}{
 		{
-			name: "the store dies before its socket appears",
+			name: "the store is gone before its socket appears",
 			arrange: func(h *restarterHarness) {
 				h.launchd.onKickstart = func() {
 					h.launchd.mu.Lock()
@@ -278,18 +345,23 @@ func TestAStoreBootFailureNeverBringsTheSidecarBack(t *testing.T) {
 			want: "died before its socket appeared",
 		},
 		{
+			name:    "the store exits before its socket appears",
+			arrange: func(h *restarterHarness) { h.launchd.onKickstart = func() { h.exit(10) } },
+			want:    "died before its socket appeared",
+		},
+		{
 			name:    "the store is wedged: alive, silent, no socket",
-			arrange: func(*restarterHarness) {},
+			arrange: func(h *restarterHarness) { h.clock.fire(DefaultServiceWindows.Stall) },
 			want:    "wedged",
 		},
 		{
-			name: "the store is still writing past the upper bound",
+			name: "the store is past the upper bound",
+			// Fired once the store is kickstarted: the sidecar's stop, before
+			// it, is bounded by the same upper bound.
 			arrange: func(h *restarterHarness) {
-				h.launchd.onStorePrint = func(n int) {
-					writeFile(t, h.r.StoreLog, strings.Repeat("x", n))
-				}
+				h.launchd.onKickstart = func() { h.clock.fire(DefaultServiceWindows.Max) }
 			},
-			want: "did not appear within the upper bound",
+			want:    "did not appear within the upper bound",
 		},
 	}
 	for _, tc := range tests {

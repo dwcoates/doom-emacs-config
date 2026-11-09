@@ -8,7 +8,7 @@ import { create } from "@bufbuild/protobuf";
 import { connect as netConnect, type Socket } from "node:net";
 import { request as httpRequest } from "node:http";
 import { connect as http2Connect } from "node:http2";
-import { chmodSync, mkdtempSync, unlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, unlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -17,6 +17,7 @@ import { shimv1 } from "../../src/proto.js";
 import { shimRoutes } from "../../src/service/routes.js";
 import {
   HTTP2_PREFACE,
+  bindingPathOf,
   flushStreamHead,
   isKillSessionPath,
   isStreamingContentType,
@@ -228,6 +229,31 @@ describe("serve", () => {
     expect(rejection?.code).toBe(Code.Unimplemented);
   });
 
+  it("leaves no binding name behind once its socket is linked into place", async () => {
+    // Arrange.
+    const sock = socketPath();
+
+    // Act.
+    await start(sock);
+
+    // Assert.
+    expect(existsSync(bindingPathOf(sock))).toBe(false);
+    await expect(probeSocket(sock)).resolves.toBe("live");
+  });
+
+  it("binds over a binding name an earlier start left behind", async () => {
+    // Arrange.
+    const sock = socketPath();
+    writeFileSync(bindingPathOf(sock), "");
+
+    // Act.
+    const server = await start(sock);
+
+    // Assert.
+    expect(server.socketPath).toBe(sock);
+    expect(existsSync(bindingPathOf(sock))).toBe(false);
+  });
+
   it("removes its socket file on close so a successor sees a free path", async () => {
     // Arrange.
     const sock = socketPath();
@@ -252,6 +278,17 @@ describe("serve", () => {
  * the early head the daemon's bring-up blocks on a WatchSession that is
  * perfectly fine and merely quiet.
  */
+describe("bindingPathOf", () => {
+  it("names a dot-name beside the socket, no longer than the socket's own name", () => {
+    // Act.
+    const binding = bindingPathOf("/state/sock/0123456789abcdef.n2.sock");
+
+    // Assert.
+    expect(binding).toBe("/state/sock/.0123456789abcdef.n2.b");
+    expect(path.basename(binding).length).toBeLessThanOrEqual("0123456789abcdef.n2.sock".length);
+  });
+});
+
 describe("standing streams", () => {
   /** An engine whose WatchSession accepts and then says nothing. */
   function silentEngine(): NotImplementedEngine {

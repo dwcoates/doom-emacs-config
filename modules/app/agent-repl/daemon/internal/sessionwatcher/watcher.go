@@ -16,6 +16,7 @@ import (
 	"agent-repld/internal/clock"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/inflight"
 	"agent-repld/internal/lockwatch"
 	"agent-repld/internal/shimclient"
 	"agent-repld/internal/wsm"
@@ -550,7 +551,7 @@ func start(ctx context.Context, ws ids.WorkspaceID, client shimclient.Client, se
 	// open; they are handed over now, off the lock, as every turn end is.
 	w.flushTurnEnds()
 
-	go w.runLink()
+	inflight.Standing(func() { w.runLink() })
 	return w, nil
 }
 
@@ -1537,7 +1538,8 @@ func (w *watcher) reopenLocked(reason string) {
 	// every caller of the watcher -- the prompt queue's freeness read included.
 	// The generation bump above is what makes the detached streams' goroutines
 	// stale, so nothing waits on the close completing.
-	go closeStreams(w.takeStreamsLocked())
+	streams := w.takeStreamsLocked()
+	inflight.Go(func() { closeStreams(streams) })
 	w.log.Warn("daemon.sessionwatcher.reopen", "re-opening the session's watches", dlog.Context{
 		"reason": reason, "agents": len(w.agents), "shells": len(w.shells),
 	})
@@ -1682,7 +1684,7 @@ func (w *watcher) openSessionLocked() {
 		return
 	}
 	w.sessionOpening = t
-	go w.openSession(t)
+	inflight.Go(func() { w.openSession(t) })
 }
 
 // openSession makes one decided WatchSession open OFF mu and installs it.
@@ -1710,7 +1712,8 @@ func (w *watcher) openSession(t *openTicket) {
 	installed := &ticketedStream[*shimv1.WatchSessionResponse]{Stream: stream, cancel: t.cancel}
 	w.sessionStream = installed
 	w.log.Debug("daemon.sessionwatcher.watch_session", "session watch opened", nil)
-	go w.runSession(t.gen, t.liveSeq, installed)
+	gen, liveSeq := t.gen, t.liveSeq
+	inflight.Standing(func() { w.runSession(gen, liveSeq, installed) })
 	w.mu.Unlock()
 	w.flushTurnEnds()
 }
@@ -1770,7 +1773,7 @@ func (w *watcher) openAgentStreamLocked(a *agentWatch) {
 		})
 	}
 	a.opening = t
-	go w.openAgent(t, a, req)
+	inflight.Go(func() { w.openAgent(t, a, req) })
 }
 
 // watchRequest is one watch's open: TARGET (nil for the main agent), opening
@@ -1836,7 +1839,8 @@ func (w *watcher) openAgent(t *openTicket, a *agentWatch, req *shimv1.WatchAgent
 	w.log.Debug("daemon.sessionwatcher.watch_agent", "agent watch opened", dlog.Context{
 		"agent_id": a.id.GetValue(), "opening": openingName(req),
 	})
-	go w.runAgent(t.gen, a, installed)
+	gen := t.gen
+	inflight.Standing(func() { w.runAgent(gen, a, installed) })
 	w.mu.Unlock()
 	w.flushTurnEnds()
 }
@@ -1857,7 +1861,7 @@ func (w *watcher) openShellStreamLocked(s *shellWatch) {
 		return
 	}
 	s.opening = t
-	go w.openShell(t, s)
+	inflight.Go(func() { w.openShell(t, s) })
 }
 
 // openShell makes one decided WatchBash open OFF mu and installs it.
@@ -1899,7 +1903,8 @@ func (w *watcher) openShell(t *openTicket, s *shellWatch) {
 	w.log.Debug("daemon.sessionwatcher.watch_bash", "shell watch opened", dlog.Context{
 		"work_id": key,
 	})
-	go w.runShell(t.gen, s, installed)
+	gen := t.gen
+	inflight.Standing(func() { w.runShell(gen, s, installed) })
 	w.mu.Unlock()
 	w.flushTurnEnds()
 }
@@ -2464,10 +2469,10 @@ func (w *watcher) flushTurnEnds() {
 // stream goroutine, which flushes inline the moment it drops mu.
 func (w *watcher) flushTurnEndsAsync() {
 	w.dispatching.Add(1)
-	go func() {
+	inflight.Go(func() {
 		defer w.dispatching.Done()
 		w.flushTurnEnds()
-	}()
+	})
 }
 
 // stale reports whether a goroutine's generation has been superseded, which

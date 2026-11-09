@@ -7,14 +7,18 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"agent-repld/internal/bounce"
-	"agent-repld/internal/dlog"
+	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/kernelevent"
+	"agent-repld/internal/prompthandler"
 	"agent-repld/internal/promptqueue"
 	"agent-repld/internal/recordlock"
 	"agent-repld/internal/resolve/holds"
@@ -271,7 +275,6 @@ func TestARefusalIsRecordedOnceAtInfoAndItsRetriesAtDebug(t *testing.T) {
 
 			// Act: the first refusal, then a retry once it is due.
 			w.sweep(in)
-			w.now = w.now.Add(time.Hour)
 			w.sweep(in)
 
 			// Assert
@@ -306,7 +309,6 @@ func TestEachRefusalKindAnEntryMeetsIsRecordedOnceAtInfo(t *testing.T) {
 			for _, refusal := range tc.refusals {
 				w.handler.refuse["k-1"] = refusal
 				w.sweep(in)
-				w.now = w.now.Add(time.Hour)
 			}
 
 			// Assert
@@ -317,7 +319,7 @@ func TestEachRefusalKindAnEntryMeetsIsRecordedOnceAtInfo(t *testing.T) {
 	}
 }
 
-func TestARefusedEntryIsRetriedOnlyOnceItsDelayHasPassed(t *testing.T) {
+func TestARefusedEntryIsSubmittedAgainAtTheNextSweep(t *testing.T) {
 	// Arrange
 	w := newWorld(t)
 	w.handler.refuse["k-1"] = promptqueue.ErrMerging
@@ -326,55 +328,13 @@ func TestARefusedEntryIsRetriedOnlyOnceItsDelayHasPassed(t *testing.T) {
 	w.sweep(in)
 	delete(w.handler.refuse, "k-1")
 
-	// Act: a sweep before the delay, then one after it.
-	w.sweep(in)
-	early := len(w.handler.calls)
-	w.now = w.now.Add(DefaultInterval)
+	// Act: the very next sweep, with no delay between.
 	w.sweep(in)
 
 	// Assert
-	if early != 1 {
-		t.Fatalf("submissions before the retry was due = %d, want only the first", early)
-	}
 	if got := w.handler.delivered("k-1"); got != 1 {
-		t.Fatalf("deliveries after the retry = %d, want 1", got)
+		t.Fatalf("deliveries at the next sweep = %d, want 1", got)
 	}
-}
-
-func TestTheRetryDelayDoublesUpToTheCeiling(t *testing.T) {
-	// Arrange
-	w := newWorld(t)
-	w.handler.refuse["k-1"] = promptqueue.ErrMerging
-	w.write("held_20260928T120001_a.json", "/work/one", "k-1", "first")
-	in := w.ingress()
-	var delays []int64
-
-	// Act: sweep exactly when each retry falls due.
-	for n := 0; n < 8; n++ {
-		w.sweep(in)
-		records := w.records("info", opDefer)
-		records = append(records, w.records("debug", opDefer)...)
-		last := latestRetry(records)
-		delays = append(delays, last)
-		w.now = w.now.Add(time.Duration(last) * time.Millisecond)
-	}
-
-	// Assert
-	want := []int64{250, 500, 1000, 2000, 4000, 8000, 10000, 10000}
-	if !reflect.DeepEqual(delays, want) {
-		t.Fatalf("retry delays = %v, want %v", delays, want)
-	}
-}
-
-// latestRetry is the retry_in_ms of the newest deferral that carries one.
-func latestRetry(records []dlog.Record) int64 {
-	var last int64
-	for _, r := range records {
-		if v, ok := r.Context["retry_in_ms"].(int64); ok {
-			last = v
-		}
-	}
-	return last
 }
 
 func TestAnEntryForAnUnregisteredDirectoryWaitsAndIsWarnedOnce(t *testing.T) {
@@ -385,7 +345,6 @@ func TestAnEntryForAnUnregisteredDirectoryWaitsAndIsWarnedOnce(t *testing.T) {
 
 	// Act
 	w.sweep(in)
-	w.now = w.now.Add(time.Hour)
 	w.sweep(in)
 
 	// Assert
@@ -409,7 +368,6 @@ func TestAnUnregisteredDirectoryIsIngestedOnceItIsRegistered(t *testing.T) {
 
 	// Act
 	w.byDir["/work/late"] = w.byDir["/work/one"]
-	w.now = w.now.Add(time.Hour)
 	w.sweep(in)
 
 	// Assert
@@ -493,38 +451,215 @@ func TestAFailedRemovalIsAnErrorAndTheNextSweepDedupesIt(t *testing.T) {
 	}
 }
 
-func TestRunSweepsAtStartBeforeTheFirstTick(t *testing.T) {
-	// Arrange: an interval no test would wait out.
-	w := newWorld(t)
-	w.write("held_20260928T120001_a.json", "/work/one", "k-1", "first")
-	published := make(chan ids.WorkspaceID, 1)
+// runWorld is a world whose ingress Run drives, with every signal Run waits
+// on in the test's hands.
+type runWorld struct {
+	*world
+	// dir is the ingress directory, which a case may leave unmade.
+	dir string
+	// calls receives every submission's key, and published every workspace
+	// whose host was republished, as they happen.
+	calls     chan string
+	published chan ids.WorkspaceID
+	// refusals is how many submissions of any key are refused before the
+	// next is accepted.
+	refusals atomic.Int32
+	serves   atomic.Bool
+	// intake is closed and replaced to say the serving answer changed.
+	intakeMu sync.Mutex
+	intake   chan struct{}
+	fleet    chan struct{}
+}
+
+// runHandler is a Submit safe to call from Run's goroutine while the test
+// reads: it refuses while refusals stand, then accepts.
+type runHandler struct {
+	prompthandler.Handler
+	w *runWorld
+}
+
+func (h runHandler) Submit(_ context.Context, _ ids.WorkspaceID, _ *conversationv1.UserSaid, key string, _ conversationv1.PromptOrigin, _ *ids.WorkspaceID, _ wsm.Delivery, _ *feedid.Ref) (prompthandler.Outcome, error) {
+	h.w.calls <- key
+	if h.w.refusals.Add(-1) >= 0 {
+		return prompthandler.Outcome{}, promptqueue.ErrMerging
+	}
+	return prompthandler.Outcome{Turn: ids.TurnID("turn-" + key)}, nil
+}
+
+func newRunWorld(t *testing.T, dir string) *runWorld {
+	t.Helper()
+	r := &runWorld{
+		world: newWorld(t), dir: dir,
+		calls: make(chan string, 16), published: make(chan ids.WorkspaceID, 16),
+		intake: make(chan struct{}), fleet: make(chan struct{}),
+	}
+	r.serves.Store(true)
+	return r
+}
+
+// openIntake makes the daemon serve and says so.
+func (r *runWorld) openIntake() {
+	r.serves.Store(true)
+	r.intakeMu.Lock()
+	defer r.intakeMu.Unlock()
+	close(r.intake)
+	r.intake = make(chan struct{})
+}
+
+// run starts Run, answering its end.
+func (r *runWorld) run(t *testing.T) (cancel func(), done <-chan error) {
+	t.Helper()
 	in, err := New(Deps{
-		Dir:            w.dir,
-		WorkspaceByDir: w.ingressLookup(),
-		Prompts:        w.handler,
-		Pending:        w.pending,
-		PublishHost:    func(ws ids.WorkspaceID) { published <- ws },
-		Serves:         func() bool { return true },
-		Log:            w.log,
-		Interval:       time.Hour,
+		Dir:            r.dir,
+		WorkspaceByDir: r.ingressLookup(),
+		Prompts:        runHandler{w: r},
+		Pending:        nopPending{},
+		PublishHost:    func(ws ids.WorkspaceID) { r.published <- ws },
+		Serves:         r.serves.Load,
+		IntakeChanged: func() <-chan struct{} {
+			r.intakeMu.Lock()
+			defer r.intakeMu.Unlock()
+			return r.intake
+		},
+		FleetChanges: func(context.Context) <-chan struct{} { return r.fleet },
+		Log:          r.log,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan error, 1)
+	ctx, stop := context.WithCancel(context.Background())
+	ended, finished := make(chan error, 1), make(chan struct{})
+	go func() {
+		ended <- in.Run(ctx)
+		close(finished)
+	}()
+	t.Cleanup(func() { stop(); <-finished })
+	return stop, ended
+}
+
+// writeIn drops one entry into DIR, made if it is missing.
+func (r *runWorld) writeIn(t *testing.T, name string) {
+	t.Helper()
+	if err := os.MkdirAll(r.dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	r.world.dir = r.dir
+	r.write(name, "/work/one", "k-1", "first")
+}
+
+// nopPending is a held section Run's goroutine may call freely.
+type nopPending struct{}
+
+func (nopPending) SetIngressPending(ids.WorkspaceID, []holds.IngressEntry) {}
+func (nopPending) ClaimIngress(ids.WorkspaceID, string, ids.TurnID)        {}
+func (nopPending) DropIngress(ids.WorkspaceID, string)                     {}
+
+func TestRunIngestsAnEntryOnTheChangeThatLetsItIn(t *testing.T) {
+	tests := []struct {
+		name string
+		// unmade leaves the ingress directory unmade until the entry.
+		unmade bool
+		// before runs before Run starts; after, once Run has started.
+		before, after func(t *testing.T, r *runWorld)
+	}{
+		{name: "an entry on disk before the start is taken by the start's sweep",
+			before: func(t *testing.T, r *runWorld) { r.writeIn(t, "held_20260928T120001_a.json") }},
+		{name: "an entry written while running is taken on the directory's change",
+			after: func(t *testing.T, r *runWorld) { r.writeIn(t, "held_20260928T120001_a.json") }},
+		{name: "an entry written into a directory made while running is taken", unmade: true,
+			after: func(t *testing.T, r *runWorld) { r.writeIn(t, "held_20260928T120001_a.json") }},
+		{name: "an entry left while the daemon did not serve is taken once it does",
+			before: func(t *testing.T, r *runWorld) {
+				r.serves.Store(false)
+				r.writeIn(t, "held_20260928T120001_a.json")
+			},
+			after: func(_ *testing.T, r *runWorld) { r.openIntake() }},
+		{name: "an entry the queue refused is taken at the next change of the fleet",
+			before: func(t *testing.T, r *runWorld) {
+				r.refusals.Store(1)
+				r.writeIn(t, "held_20260928T120001_a.json")
+			},
+			after: func(_ *testing.T, r *runWorld) {
+				<-r.calls // the refused submission
+				r.fleet <- struct{}{}
+			}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			root := t.TempDir()
+			dir := root
+			if tc.unmade {
+				dir = filepath.Join(root, "held-prompts")
+			}
+			r := newRunWorld(t, dir)
+			if tc.before != nil {
+				tc.before(t, r)
+			}
+
+			// Act
+			r.run(t)
+			if tc.after != nil {
+				tc.after(t, r)
+			}
+			got := <-r.published
+
+			// Assert
+			if got != "ws-one" {
+				t.Fatalf("published = %q, want ws-one once its entry was taken", got)
+			}
+		})
+	}
+}
+
+func TestRunTakesAFleetChangeWithNothingWaitingAsNoSweep(t *testing.T) {
+	// Arrange
+	r := newRunWorld(t, t.TempDir())
+	r.run(t)
+
+	// Act: a fleet change Run takes (the send completes only once Run has
+	// received it), then an entry written.
+	r.fleet <- struct{}{}
+	r.writeIn(t, "held_20260928T120001_a.json")
+	<-r.published
+
+	// Assert: every sweep after the start was woken by the directory.
+	for _, rec := range r.records("debug", opRun) {
+		if woke, _ := rec.Context["woke"].(string); woke != "" && woke != wokeByDir {
+			t.Fatalf("a sweep was woken by %q with nothing waiting, want only %q", woke, wokeByDir)
+		}
+	}
+}
+
+func TestRunEndsWithItsContext(t *testing.T) {
+	// Arrange
+	r := newRunWorld(t, t.TempDir())
+	cancel, done := r.run(t)
 
 	// Act
-	go func() { done <- in.Run(ctx) }()
-	got := <-published
 	cancel()
+	err := <-done
 
 	// Assert
-	if got != "ws-one" {
-		t.Fatalf("published = %q, want ws-one from the start-up sweep", got)
-	}
-	if err := <-done; !errors.Is(err, context.Canceled) {
+	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("Run = %v, want context.Canceled", err)
+	}
+}
+
+func TestRunRefusesAnIngressItCannotWatch(t *testing.T) {
+	// Arrange: neither the directory nor its parent exists.
+	r := newRunWorld(t, filepath.Join(t.TempDir(), "gone", "held-prompts"))
+	_, done := r.run(t)
+
+	// Act
+	err := <-done
+
+	// Assert
+	if !errors.Is(err, kernelevent.ErrNothingToWatch) {
+		t.Fatalf("Run = %v, want the missing parent refused", err)
+	}
+	if got := len(r.records("error", opRun)); got != 1 {
+		t.Fatalf("ERROR %s records = %d, want 1", opRun, got)
 	}
 }
 
@@ -722,7 +857,7 @@ func TestAnEntryBehindAWaitingOneIsStatedWaitingBehindIt(t *testing.T) {
 	}
 }
 
-func TestAnEntryWhoseRetryIsNotDueKeepsWhatItLastWaitedOn(t *testing.T) {
+func TestAnEntryRefusedAgainKeepsStatingWhatItWaitsOn(t *testing.T) {
 	// Arrange: the first sweep is refused for want of a session.
 	w := newWorld(t)
 	w.handler.refuse["k-1"] = promptqueue.ErrNoSession
@@ -730,12 +865,12 @@ func TestAnEntryWhoseRetryIsNotDueKeepsWhatItLastWaitedOn(t *testing.T) {
 	in := w.ingress()
 	w.sweep(in)
 
-	// Act: a second sweep before the retry is due.
+	// Act: the next sweep submits it again, and it is refused again.
 	w.sweep(in)
 
 	// Assert
-	if calls := len(w.handler.calls); calls != 1 {
-		t.Fatalf("submissions = %d, want the retry not yet made", calls)
+	if calls := len(w.handler.calls); calls != 2 {
+		t.Fatalf("submissions = %d, want the entry submitted again at the next sweep", calls)
 	}
 	got, _ := w.pending.lastSet("ws-one")
 	if want := []string{fmt.Sprintf("k-1:%d:", holds.IngressNoSession)}; !reflect.DeepEqual(keysAndWaits(got), want) {
@@ -778,7 +913,6 @@ func TestAWorkspaceWithNoEntriesLeftIsStatedEmptyOnce(t *testing.T) {
 	in := w.ingress()
 	w.sweep(in)
 	delete(w.handler.refuse, "k-1")
-	w.now = w.now.Add(time.Hour)
 
 	// Act: the sweep that accepts it, and one more with nothing left.
 	w.sweep(in)

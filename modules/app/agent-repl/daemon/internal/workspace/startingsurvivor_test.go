@@ -121,6 +121,16 @@ func TestABringUpWaitsForAShimAPredecessorSpawned(t *testing.T) {
 			f.probeState = sessionlock.StateFree
 			f.socketState = shimsocket.StateAbsent
 			f.shimAlive = func(int) bool { return tt.alive }
+			// Each bind the test models is a change of the socket's
+			// directory, which the wait probes again on.
+			if tt.bindsAfter >= 0 {
+				// The adoption bound is held, so the wait ends on the bind.
+				f.clock.held = map[time.Duration]bool{200 * time.Millisecond: true}
+				f.socketChanges = make(chan error, tt.bindsAfter+1)
+				for range tt.bindsAfter + 1 {
+					f.socketChanges <- nil
+				}
+			}
 			probes := 0
 			f.onSocketProbe = func(string) {
 				probes++

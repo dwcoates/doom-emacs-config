@@ -9,6 +9,7 @@ import (
 	"agent-repld/internal/bounce"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/inflight"
 	"agent-repld/internal/sessionwatcher"
 	"agent-repld/internal/startslots"
 	"agent-repld/internal/wsm"
@@ -482,10 +483,10 @@ func (q *queue) OnDeparted(ws ids.WorkspaceID, departed Watcher, departure sessi
 	}
 	q.departing.Add(1)
 	q.mu.Unlock()
-	go func() {
+	inflight.Go(func() {
 		defer q.departing.Done()
 		q.decideDeparture(ws, departed, departure)
-	}()
+	})
 }
 
 // decideDeparture is the ONE decision a departure owes a registered bounce,
@@ -786,13 +787,13 @@ func (q *queue) startBounceLocked(d *delivery, log dlog.Logger) bool {
 		"reason": reason, "state": "draining", "before": false, "after": true,
 	})
 	q.bouncing.Add(1)
-	go func() {
+	inflight.Go(func() {
 		defer q.bouncing.Done()
 		for stage := first; stage != nil; {
 			err := stage.req.Run(q.lifetime(), ws)
 			stage = q.finishStage(ws, stage, err, log)
 		}
-	}()
+	})
 	return true
 }
 

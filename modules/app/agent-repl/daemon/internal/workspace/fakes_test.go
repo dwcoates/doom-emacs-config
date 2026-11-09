@@ -2073,23 +2073,14 @@ func (r *fakeRollout) awaitRelaunch(t *testing.T) {
 //
 // It exists for the ASYNCHRONOUS verbs: their failures are recorded on a
 // goroutine the verb does not join, so the arrival of a record is an event to
-// wait for rather than a state to read. The capture buffer is mutex-guarded
-// and Records copies, so polling it races with nothing.
+// wait for rather than a state to read. The wait blocks on the logger's own
+// append (dlog.TestLogger.Await), never on a timer.
 func awaitRecord(t *testing.T, f *fixture, level, operation string) {
 	t.Helper()
-	deadline := time.After(recordDeadline)
-	ticker := time.NewTicker(time.Millisecond)
-	defer ticker.Stop()
-	for {
-		if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: level, Operation: operation}); ok {
-			return
-		}
-		select {
-		case <-ticker.C:
-		case <-deadline:
-			t.Fatalf("records = %+v, want a %s record for %s", f.log.logger.Records(), level, operation)
-			return
-		}
+	ctx, cancel := context.WithTimeout(context.Background(), recordDeadline)
+	defer cancel()
+	if _, err := f.log.logger.Await(ctx, dlog.RecordQuery{Level: level, Operation: operation}); err != nil {
+		t.Fatalf("records = %+v, want a %s record for %s: %v", f.log.logger.Records(), level, operation, err)
 	}
 }
 

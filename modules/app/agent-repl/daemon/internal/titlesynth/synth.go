@@ -14,6 +14,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/headless"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/inflight"
 	"agent-repld/internal/prompts"
 	"agent-repld/internal/runecap"
 	"agent-repld/internal/wsm"
@@ -247,7 +248,7 @@ func (s *Synthesizer) dispatch(ws ids.WorkspaceID) {
 	s.wg.Add(1)
 	s.mu.Unlock()
 
-	go s.run(ws)
+	inflight.Go(func() { s.run(ws) })
 }
 
 // run drains the workspace's synthesis, re-running once for each dirty flag a

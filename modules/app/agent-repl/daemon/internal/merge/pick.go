@@ -10,6 +10,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/inflight"
 	"agent-repld/internal/wsm"
 )
 
@@ -146,11 +147,11 @@ func (o *orchestrator) awaitPick(p *pick, resumed bool) {
 		return
 	}
 	o.live.Add(1)
-	go func() {
+	inflight.Standing(func() {
 		defer o.live.Done()
 		defer o.forgetWait(wait)
 		o.runPick(ctx, p, resumed)
-	}()
+	})
 }
 
 // runPick is the pick's wait and its judgement.

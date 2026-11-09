@@ -35,6 +35,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/health"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/inflight"
 )
 
 // op is the operation every record of this package carries.
@@ -233,7 +234,7 @@ func (m *Monitor) observe() {
 	m.probing = true
 	m.mu.Unlock()
 	if start {
-		go m.probeUntilReachable()
+		inflight.Standing(func() { m.probeUntilReachable() })
 	}
 }
 

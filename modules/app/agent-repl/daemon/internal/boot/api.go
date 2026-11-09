@@ -327,6 +327,11 @@ type Deps struct {
 	// ShimAlive reports whether a recorded spawned pid names a live process;
 	// nil means startingshim.Alive, which is kill(pid, 0).
 	ShimAlive func(pid int) bool
+	// ShimSocketChanges follows a shim socket's directory while a recorded
+	// spawn is awaited, and ShimExit waits for that spawn's exit; nil is the
+	// kernel's own report (startingshim.Waiter).
+	ShimSocketChanges func(ctx context.Context, dir string) (<-chan error, func())
+	ShimExit          func(ctx context.Context, pid int) error
 	// Restarts records how long each workspace's start in the bring-up took
 	// (restarttiming.WorkspaceStart). runtimemetrics.Surface is the
 	// production one.
@@ -442,6 +447,9 @@ func New(deps Deps) (Sequence, error) {
 	}
 	return &sequence{
 		deps: deps, probe: probe, socketProbe: socketProbe, now: now, adoptBound: adoptBound,
-		starting: startingshim.Waiter{Alive: deps.ShimAlive, Probe: socketProbe, Clock: deps.Clock},
+		starting: startingshim.Waiter{
+			Alive: deps.ShimAlive, Probe: socketProbe, Clock: deps.Clock,
+			Changes: deps.ShimSocketChanges, Exit: deps.ShimExit,
+		},
 	}, nil
 }

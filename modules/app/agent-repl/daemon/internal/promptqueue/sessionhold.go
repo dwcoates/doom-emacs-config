@@ -6,6 +6,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/inflight"
 	"agent-repld/internal/wsm"
 )
 
@@ -134,7 +135,7 @@ func (q *queue) factsPending(ws ids.WorkspaceID, what string, log dlog.Logger, a
 	q.releasing.Add(1)
 	q.mu.Unlock()
 	log.Info(opSubmit, "the session's facts are not in, so whether a turn runs is unknown; the step waits for them", dlog.Context{"step": what})
-	go func() {
+	inflight.Standing(func() {
 		defer q.releasing.Done()
 		if err := watcher.AwaitSessionFacts(q.life); err != nil {
 			log.Info(opSubmit, "the session's facts never came in; the step is left to the session's next edge", dlog.Context{
@@ -146,7 +147,7 @@ func (q *queue) factsPending(ws ids.WorkspaceID, what string, log dlog.Logger, a
 		defer d.unlock()
 		log.Debug(opSubmit, "the session's facts are in; the step waiting on them is taken", dlog.Context{"step": what})
 		again(context.Background(), d, log)
-	}()
+	})
 	return true
 }
 

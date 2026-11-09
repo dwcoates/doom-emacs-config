@@ -8,6 +8,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/inflight"
 	"agent-repld/internal/resolve/footer"
 	"agent-repld/internal/wsm"
 )
@@ -139,10 +140,10 @@ func (o *orchestrator) extendChainAsync(repo wsm.RepoKey) {
 		return
 	}
 	o.live.Add(1)
-	go func() {
+	inflight.Go(func() {
 		defer o.live.Done()
 		o.extendChain(context.Background(), repo)
-	}()
+	})
 }
 
 // extendChain starts the next merge of the repository's chain, as ONE
@@ -288,7 +289,7 @@ func (o *orchestrator) extendOnce(ctx context.Context, repo wsm.RepoKey) bool {
 	o.deps.Log.Global().Info(op, "a merge joined its queue's chain behind the merge ahead of it", dlog.Context{
 		"repo": string(repo), "workspace": string(r.ws), "behind": string(tail.ws), "rank": len(chain), "resumed": resuming})
 	o.live.Add(1)
-	go func() {
+	inflight.Standing(func() {
 		defer o.live.Done()
 		defer close(r.finished)
 		if resuming {
@@ -298,7 +299,7 @@ func (o *orchestrator) extendOnce(ctx context.Context, repo wsm.RepoKey) bool {
 			return
 		}
 		o.startSpeculative(r.ctx, r)
-	}()
+	})
 	return resuming
 }
 
@@ -722,7 +723,7 @@ func (r *run) watchBase(ctx context.Context, base string, cancel, promoted conte
 func (o *orchestrator) watch(ctx context.Context, cancel context.CancelCauseFunc, look func() (done bool, changed <-chan struct{})) func() {
 	ended := make(chan struct{})
 	o.live.Add(1)
-	go func() {
+	inflight.Standing(func() {
 		defer o.live.Done()
 		defer close(ended)
 		for {
@@ -736,7 +737,7 @@ func (o *orchestrator) watch(ctx context.Context, cancel context.CancelCauseFunc
 				return
 			}
 		}
-	}()
+	})
 	return func() {
 		cancel(nil)
 		<-ended

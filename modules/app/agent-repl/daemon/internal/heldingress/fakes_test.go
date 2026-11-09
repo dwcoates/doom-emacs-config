@@ -19,8 +19,6 @@ import (
 	"agent-repld/internal/wsm"
 )
 
-// fixedNow is the instant retries are judged against.
-var fixedNow = time.Date(2026, 9, 28, 12, 0, 0, 0, time.UTC)
 
 // submission is one recorded Submit call.
 type submission struct {
@@ -123,7 +121,6 @@ type world struct {
 	// publishedSaw records, at each publish, whether the entry files it
 	// followed were already gone.
 	publishedSaw []int
-	now          time.Time
 	remove       func(string) error
 	// serves is what the ingress's serving answer says.
 	serves bool
@@ -141,7 +138,6 @@ func newWorld(t *testing.T) *world {
 			"/work/one": {ID: "ws-one", Dir: "/work/one"},
 			"/work/two": {ID: "ws-two", Dir: "/work/two"},
 		},
-		now:    fixedNow,
 		serves: true,
 	}
 }
@@ -162,7 +158,8 @@ func (w *world) ingress() Ingress {
 		Serves:      func() bool { return w.serves },
 		Log:         w.log,
 		Remove:      w.remove,
-		Now:         func() time.Time { return w.now },
+		IntakeChanged: func() <-chan struct{} { return nil },
+		FleetChanges:  func(context.Context) <-chan struct{} { return nil },
 		SubmitBound: w.submitBound,
 	})
 	if err != nil {

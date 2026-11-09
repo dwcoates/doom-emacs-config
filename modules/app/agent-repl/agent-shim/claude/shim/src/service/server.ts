@@ -53,7 +53,8 @@
 import { connectNodeAdapter } from "@connectrpc/connect-node";
 import type { ConnectRouter } from "@connectrpc/connect";
 import { connect, createServer as createNetServer, type Socket } from "node:net";
-import { unlinkSync } from "node:fs";
+import { linkSync, unlinkSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
 import http from "node:http";
 import http2 from "node:http2";
 import { bindLog } from "../log.js";
@@ -289,6 +290,19 @@ export function probeSocket(socketPath: string): Promise<SocketProbe> {
   });
 }
 
+/**
+ * The temporary name a listener binds before it is linked into place at
+ * SOCKET_PATH: a dot-name beside it, so no glob for socket generations reads
+ * it as one, and NO LONGER than the socket's own name (`.<stem>.b` for
+ * `<stem>.sock`), so a socket path inside the state root's budget leaves its
+ * binding path inside it too.
+ */
+export function bindingPathOf(socketPath: string): string {
+  const name = basename(socketPath);
+  const stem = name.endsWith(".sock") ? name.slice(0, -".sock".length) : name;
+  return join(dirname(socketPath), `.${stem}.b`);
+}
+
 /** Remove a socket file left behind by a dead predecessor, or by ourselves. */
 function unlinkSocketFile(socketPath: string, why: string): void {
   try {
@@ -407,17 +421,38 @@ export async function serve(
     routeByPreface(socket, h1, h2);
   });
 
+  // THE SOCKET'S NAME APPEARS ONLY ONCE IT ACCEPTS. The listener binds a
+  // temporary name beside the socket, listens, and only then links the socket
+  // into place. A daemon waiting for a starting shim watches the directory,
+  // and the entry that wakes it is a socket already listening: bound under its
+  // final name, it would have existed a moment before `listen`, which no
+  // change of the file announces. The link refuses a name that already exists
+  // (EEXIST), so it is as exclusive as binding the name itself.
+  const bindingPath = bindingPathOf(socketPath);
+  unlinkSocketFile(bindingPath, "a binding name left by an earlier start");
   await new Promise<void>((resolve, reject) => {
     const onError = (err: Error): void => {
-      LOGGER.error({ socket_path: socketPath, cause: err }, "the shim listener failed to bind");
+      LOGGER.error({ socket_path: socketPath, binding_path: bindingPath, cause: err }, "the shim listener failed to bind");
       reject(err);
     };
     listener.once("error", onError);
-    listener.listen({ path: socketPath }, () => {
+    listener.listen({ path: bindingPath }, () => {
       listener.removeListener("error", onError);
       resolve();
     });
   });
+  try {
+    linkSync(bindingPath, socketPath);
+  } catch (err) {
+    LOGGER.error(
+      { socket_path: socketPath, binding_path: bindingPath, cause: err },
+      "the shim listener could not take its socket's name",
+    );
+    listener.close();
+    unlinkSocketFile(bindingPath, "the link into place failed");
+    throw err;
+  }
+  unlinkSocketFile(bindingPath, "linked into place");
 
   // A listener error AFTER bind is not a bind failure, and an unhandled 'error'
   // on a server is an uncaught exception that would kill the shim.

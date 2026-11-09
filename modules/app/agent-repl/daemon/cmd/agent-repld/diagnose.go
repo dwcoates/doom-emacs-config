@@ -7,6 +7,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/goroutinedump"
+	"agent-repld/internal/inflight"
 )
 
 // recordGoroutineDump puts a goroutine dump into the run log at ERROR.
@@ -38,7 +39,7 @@ func recordGoroutineDump(log dlog.Logger, operation, message string, context dlo
 func armGoroutineDump(log dlog.Logger) func() {
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGQUIT)
-	go func() {
+	inflight.Standing(func() {
 		if _, ok := <-quit; !ok {
 			return
 		}
@@ -46,7 +47,7 @@ func armGoroutineDump(log dlog.Logger) func() {
 			"pid": os.Getpid(),
 		})
 		os.Exit(exitFailure)
-	}()
+	})
 	return func() {
 		signal.Stop(quit)
 		close(quit)

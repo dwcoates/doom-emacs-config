@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/inflight"
 )
 
 // A REFUSED WATCH ON EXPECTED WORK IS RE-OPENED ON A TIMER (owner ruling,
@@ -70,7 +71,7 @@ func (w *watcher) scheduleReopenLocked(operation, handle string, refusals int, p
 	})
 	fired := w.clock.After(delay)
 	w.retries.Add(1)
-	go func() {
+	inflight.Standing(func() {
 		defer w.retries.Done()
 		select {
 		case <-fired:
@@ -89,7 +90,7 @@ func (w *watcher) scheduleReopenLocked(operation, handle string, refusals int, p
 		reopen()
 		w.mu.Unlock()
 		w.flushTurnEnds()
-	}()
+	})
 }
 
 // reopenRefusedShellLocked is the timer's decision for a shell watch: re-open

@@ -16,6 +16,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/inflight"
 	"agent-repld/internal/latestmodel"
 	"agent-repld/internal/lockwatch"
 	"agent-repld/internal/paint"
@@ -657,7 +658,7 @@ func newResolver(deps Deps) (*resolver, error) {
 		deps.TailRetention = DefaultTailRetention
 	}
 	if deps.Go == nil {
-		deps.Go = func(f func()) { go f() }
+		deps.Go = inflight.Go
 	}
 	r := &resolver{
 		deps:        deps,
@@ -1260,7 +1261,7 @@ func (r *resolver) push(s *wsState, f *feedState, pub Publication) {
 		return
 	}
 	for sub := range f.subs {
-		sub.enqueue(pub)
+		sub.Enqueue(pub)
 	}
 }
 

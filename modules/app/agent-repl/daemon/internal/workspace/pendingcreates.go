@@ -19,6 +19,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/inflight"
 	"agent-repld/internal/lifecycleconfig"
 	"agent-repld/internal/netstate"
 	"agent-repld/internal/wsm"
@@ -356,7 +357,7 @@ func (v *verbs) hold(ctx context.Context, log dlog.Logger, entry *pendingCreate,
 // again. It ends with the daemon, leaving the held row for the next one.
 func (v *verbs) resumeOnRestore(entry *pendingCreate, restored <-chan struct{}) {
 	life := v.deps.Lifetime
-	go func() {
+	inflight.Standing(func() {
 		log := v.deps.Log.Global().With(dlog.Context{"create_id": string(entry.id), "repo_dir": entry.spec.RepoDir})
 		select {
 		case <-restored:
@@ -386,7 +387,7 @@ func (v *verbs) resumeOnRestore(entry *pendingCreate, restored <-chan struct{}) 
 			return
 		}
 		v.settle(life, log, entry, created, err)
-	}()
+	})
 }
 
 // RecoverQueuedCreates takes up every create a previous daemon held for the

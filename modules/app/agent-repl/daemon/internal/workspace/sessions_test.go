@@ -709,6 +709,16 @@ type fleetFixture struct {
 	// probeState; probes counts every probe.
 	probeSequence []sessionlock.State
 	probes        int
+	// clock is the fleet's clock.
+	clock *fleetStepClock
+	// socketChanges is what a starting-shim wait reads as its socket
+	// directory's changes; nil reports none.
+	socketChanges chan error
+	// lockWaits counts every wait for the workspace lock to go free. The wait
+	// answers the first state of probeSequence that is not held, as a
+	// holder's release does, or else probeState: a held probeState is a lock
+	// that outlasted the wait's bound.
+	lockWaits int
 	// onStartWatcher, when set, runs as a watcher is started.
 	onStartWatcher func()
 	// onStartWatcherSinks, when set, is handed the sinks a watcher is started
@@ -811,6 +821,9 @@ type fleetFixture struct {
 type fleetStepClock struct {
 	mu  sync.Mutex
 	now time.Time
+	// held are the bounds that never elapse: a wait on one ends on its event
+	// alone.
+	held map[time.Duration]bool
 }
 
 func (c *fleetStepClock) Now() time.Time {
@@ -821,6 +834,10 @@ func (c *fleetStepClock) Now() time.Time {
 
 func (c *fleetStepClock) After(d time.Duration) <-chan time.Time {
 	c.mu.Lock()
+	if c.held[d] {
+		c.mu.Unlock()
+		return nil
+	}
 	c.now = c.now.Add(d)
 	fired := c.now
 	c.mu.Unlock()
@@ -891,6 +908,7 @@ func newFleetFixtureBoundedAt(t *testing.T, adoptBound time.Duration) *fleetFixt
 		watcher:      &fakeWatcher{standDown: order},
 		links:        &recordingLinkSink{},
 		probeState:   sessionlock.StateFree,
+		clock:        &fleetStepClock{now: fixedNow},
 		adoptBound:   adoptBound,
 
 		socketState: shimsocket.StateAbsent,
@@ -958,6 +976,17 @@ func newFleetFixtureBoundedAt(t *testing.T, adoptBound time.Duration) *fleetFixt
 			}
 			return f.probeState, f.probeErr
 		},
+		AwaitLockFree: func(context.Context, string, string) (sessionlock.State, error) {
+			f.lockWaits++
+			for len(f.probeSequence) > 0 {
+				next := f.probeSequence[0]
+				f.probeSequence = f.probeSequence[1:]
+				if next != sessionlock.StateHeld {
+					return next, nil
+				}
+			}
+			return f.probeState, f.probeErr
+		},
 		SocketProbe: func(path string) (shimsocket.State, error) {
 			if f.onSocketProbe != nil {
 				f.onSocketProbe(path)
@@ -985,7 +1014,7 @@ func newFleetFixtureBoundedAt(t *testing.T, adoptBound time.Duration) *fleetFixt
 		Restarts:   &f.restarts,
 		ShimLife:   &f.shimLife,
 		AdoptBound: f.adoptBound,
-		Clock:      &fleetStepClock{now: fixedNow},
+		Clock:      f.clock,
 		RetryAfter: func(d time.Duration) <-chan time.Time {
 			f.retryWaits = append(f.retryWaits, d)
 			if f.retryAfter != nil {
@@ -996,7 +1025,14 @@ func newFleetFixtureBoundedAt(t *testing.T, adoptBound time.Duration) *fleetFixt
 			fired <- f.now
 			return fired
 		},
-		ShimAlive:  func(pid int) bool { return f.shimAlive != nil && f.shimAlive(pid) },
+		ShimAlive: func(pid int) bool { return f.shimAlive != nil && f.shimAlive(pid) },
+		ShimSocketChanges: func(context.Context, string) (<-chan error, func()) {
+			return f.socketChanges, func() {}
+		},
+		ShimExit: func(ctx context.Context, _ int) error {
+			<-ctx.Done()
+			return ctx.Err()
+		},
 		Deliveries: &f.deliveries,
 		PublishHost: func(ws ids.WorkspaceID) {
 			f.hostPublished = append(f.hostPublished, ws)
@@ -3897,8 +3933,8 @@ func TestABringUpRefusesALockThatOutlastsTheBound(t *testing.T) {
 	err := f.fleet.Start(context.Background(), ws.ID)
 
 	// Assert.
-	if err == nil || len(f.supervisor.spawns) != 0 || f.probes < 2 {
-		t.Fatalf("Start = %v, spawns = %d, probes = %d; want a refusal after waiting", err, len(f.supervisor.spawns), f.probes)
+	if err == nil || len(f.supervisor.spawns) != 0 || f.lockWaits != 1 {
+		t.Fatalf("Start = %v, spawns = %d, lock waits = %d; want a refusal after one wait", err, len(f.supervisor.spawns), f.lockWaits)
 	}
 }
 

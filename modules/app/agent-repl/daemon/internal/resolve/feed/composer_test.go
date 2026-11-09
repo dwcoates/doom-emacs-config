@@ -212,7 +212,7 @@ func TestALabelChangeIsAnnouncedOnTheRootFeed(t *testing.T) {
 	h := answeredHarness(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	changes := h.resolver.WatchLabelChanges(ctx)
+	changes, _ := h.resolver.WatchLabelChanges(ctx)
 
 	// Act
 	h.deliverPrompt("turn-2", "and more")

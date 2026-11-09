@@ -69,8 +69,10 @@ var (
 type Tail interface {
 	// Publications yields every publication for this feed from the pinned
 	// start, in order — row upserts and removals, and on the root feed the held
-	// section's changes — closing only when ctx is cancelled.
-	Publications(ctx context.Context) <-chan Publication
+	// section's changes — closing only when ctx is cancelled. The reader acks
+	// each publication once it has written it: until then it counts as work
+	// in flight (internal/inflight).
+	Publications(ctx context.Context) (<-chan Publication, func())
 	// Token is the watch token this tail answers to.
 	Token() *agentreplv1.FeedWatchToken
 }
@@ -313,7 +315,7 @@ type Resolver interface {
 	// WatchHostAsks yields every workspace whose HostAsk moved, from this call
 	// on, until ctx is cancelled. Every emission follows the move it
 	// announces, so a reader that recomposes on it reads the moved value.
-	WatchHostAsks(ctx context.Context) <-chan ids.WorkspaceID
+	WatchHostAsks(ctx context.Context) (<-chan ids.WorkspaceID, func())
 
 	// FinalResponses answers the workspace's ordered selectable final-response
 	// rows — the ones drawn with the green final-answer border, oldest first —
@@ -409,7 +411,7 @@ type Resolver interface {
 	// WatchLabelChanges yields every workspace whose root feed changed what
 	// a composer's entry can target, from this call on, until ctx is
 	// cancelled. Every emission follows the change it announces.
-	WatchLabelChanges(ctx context.Context) <-chan ids.WorkspaceID
+	WatchLabelChanges(ctx context.Context) (<-chan ids.WorkspaceID, func())
 	// BubbleText answers the text of one landed root-feed bubble (a prompt or
 	// a landed response bubble, a thinking one included) as markdown, with
 	// whether it is a prompt, whether or not the reader can select it. A miss

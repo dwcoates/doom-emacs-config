@@ -39,6 +39,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/holdfold"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/inflight"
 	"agent-repld/internal/publish"
 	"agent-repld/internal/wsm"
 	"agent-repld/internal/zettelclient"
@@ -127,7 +128,7 @@ func New(deps Deps) *Service {
 		panic("chat: Zettel, Turns, Log, Context, Outline, Abbreviator and Name are required")
 	}
 	if deps.Go == nil {
-		deps.Go = func(f func()) { go f() }
+		deps.Go = inflight.Go
 	}
 	return &Service{deps: deps, threads: map[ids.WorkspaceID]*thread{}, slots: make(chan struct{}, AbbreviationSlots)}
 }

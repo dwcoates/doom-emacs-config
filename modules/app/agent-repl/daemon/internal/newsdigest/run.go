@@ -290,6 +290,7 @@ func (d *Digester) readAll(ctx context.Context, state wsm.NewsDigestState, since
 	var wg sync.WaitGroup
 	for i, src := range d.deps.Sources {
 		wg.Add(1)
+		// inflight: joined: the function that starts it waits for it.
 		go func() {
 			defer wg.Done()
 			results[i] = d.readOne(ctx, src, state, since, log)

@@ -206,7 +206,7 @@ func TestEveryHostAskMoveIsAnnouncedAndARestatementIsNot(t *testing.T) {
 	h := newHarness(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	moves := h.resolver.WatchHostAsks(ctx)
+	moves, _ := h.resolver.WatchHostAsks(ctx)
 
 	// Act: open, restate the same card unchanged, then settle.
 	openPermission(h, "perm-1")
