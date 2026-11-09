@@ -177,7 +177,7 @@ Agents work with agent-repl through the `agent-repld` command line and four skil
   - A held prompt from another workspace never folds into one of yours, or yours into it.
     - The held section offers no fold between them, and the classifier never folds them together.
   - Every create states where the new workspace is cut from and lands, and whether it starts fresh or forks a conversation.
-  - A child that does not fork its parent's conversation is announced to the parent, and only the parent lands it.
+  - Every workspace lands its own work, a child included; its parent and you may land it too.
   - An agent kills a workspace, or answers its cold gate, only when you asked for it or approved it.
 - `/agent-repl-merge-queue` lands work and controls the queue.
 - `/agent-repl-runtime` builds, deploys and checks the runtime, holds the queue's rollouts, evaluates elisp in this Emacs, and arranges the sidebar.
