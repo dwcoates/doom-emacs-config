@@ -70,11 +70,26 @@ export function repoSectionRegions(u: RosterRepoSection, path: string): PathedOp
   ];
 }
 
+/**
+ * ROW's open kin at ROW_PATH, in drawn order: its own-repository children,
+ * then each repository block's rows, block by block
+ * (frontend.v1.RosterOpenRow.repository_blocks). THE ONE STATEMENT of a row's
+ * nested rows every walker reads, so none misses a block's rows.
+ */
+export function openKin(row: RosterOpenRow, rowPath: string): PathedOpenRow[] {
+  return [
+    ...row.children.map((child, index) => ({ row: child, path: `${rowPath}.children[${index}]` })),
+    ...row.repositoryBlocks.flatMap((block, b) =>
+      block.rows.map((child, index) => ({ row: child, path: `${rowPath}.repositoryBlocks[${b}].rows[${index}]` })),
+    ),
+  ];
+}
+
 /** Every open row U draws, depth-first in drawn order: entry by entry, each row before its family. */
 export function sectionOpenRows(u: RosterRepoSection, path: string): PathedOpenRow[] {
   const flatten = (row: RosterOpenRow, rowPath: string): PathedOpenRow[] => [
     { row, path: rowPath },
-    ...row.children.flatMap((child, index) => flatten(child, `${rowPath}.children[${index}]`)),
+    ...openKin(row, rowPath).flatMap((kin) => flatten(kin.row, kin.path)),
   ];
   return repoEntries(u, path).flatMap((entry) =>
     entry.case === "row"

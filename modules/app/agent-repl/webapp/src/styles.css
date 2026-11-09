@@ -1716,42 +1716,40 @@ html.dragging * { -webkit-user-select: none; user-select: none; }
    where the generation's box once began, 1.55rem in from its parent's
    indent. */
 #ws-sidebar .kids { --row-indent-parent: var(--row-indent); position: relative; }
-/* A row whose children are folded draws none of them; the status mark of a
-   row that has children is the control that folds them (children-fold.ts). */
+/* A row whose children are folded draws none of them, its repository blocks
+   included; the status mark of a row that has children is the control that
+   folds them (children-fold.ts). */
 #ws-sidebar .ws.folded > .kids { display: none; }
 #ws-sidebar .row > .st[data-children-fold] { cursor: pointer; }
-#ws-sidebar .kids > .ws { --row-indent: calc(var(--row-indent-parent) + 1.2rem); }
-/* A REPOSITORY DIVIDER IN A FAMILY (owner request, 2026-10-29;
-   frontend.v1.RosterOpenRow.repository_divider): a child of another
-   repository than the row before it is drawn under a rule, its repository's
-   name, a rule, as the deploy queue heads a repository's group. It starts at
-   the child's indent and ends where the rows' durations begin. */
+#ws-sidebar .kids > .ws,
+#ws-sidebar .kids > .sb-repo-block > .ws { --row-indent: calc(var(--row-indent-parent) + 1.2rem); }
+/* A REPOSITORY BLOCK IN A FAMILY (owner ruling, 2026-11-09;
+   frontend.v1.RosterOpenRow.repository_blocks): a parent's children of one
+   other repository, drawn after its own-repository children under ONE
+   divider, a rule, the repository's name, a rule, as the deploy queue heads a
+   repository's group. INDENTATION IS DEPTH ALONE: a block's rows indent
+   exactly as the parent's own-repository children do (the rule above), and
+   neither the block nor its divider adds an indent or a guide of its own. The
+   divider starts at that same indent and ends where the rows' durations
+   begin. */
 #ws-sidebar { --when-col-w: 2.2rem; }
-#ws-sidebar .kids > .sb-repo-divider {
-  --row-indent: calc(var(--row-indent-parent) + 1.2rem);
+#ws-sidebar .kids > .sb-repo-block > .sb-repo-divider {
   display: flex;
   align-items: center;
   gap: 0.4rem;
-  margin: 0.15rem calc(0.7rem + var(--when-col-w)) 0.05rem calc(0.9rem + var(--row-indent));
+  margin: 0.15rem calc(0.7rem + var(--when-col-w)) 0.05rem calc(0.9rem + var(--row-indent-parent) + 1.2rem);
   color: var(--muted);
   font-size: 0.68rem;
 }
-/* A ROW UNDER A REPOSITORY DIVIDER (owner request, 2026-11-03): the divider
-   already marks the nesting, so every row after it in the family sits where
-   the divider starts. A row's mark begins 1rem right of its indent's padding
-   edge (the tab number's box, its margins and the gap), which the divider's
-   rule does not have, so the row is stepped back by that 1rem and its mark
-   lines up with the divider's rule. The family guide is unmoved. */
-#ws-sidebar .kids > .sb-repo-divider ~ .ws { --row-indent: calc(var(--row-indent-parent) + 1.2rem - 1rem); }
-#ws-sidebar .kids > .sb-repo-divider::before,
-#ws-sidebar .kids > .sb-repo-divider::after {
+#ws-sidebar .kids > .sb-repo-block > .sb-repo-divider::before,
+#ws-sidebar .kids > .sb-repo-block > .sb-repo-divider::after {
   content: "";
   height: 1px;
   background: var(--border);
 }
-#ws-sidebar .kids > .sb-repo-divider::before { flex: 0 0 0.65rem; }
-#ws-sidebar .kids > .sb-repo-divider::after { flex: 1 1 0; min-width: 0.65rem; }
-#ws-sidebar .kids > .sb-repo-divider > .sb-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#ws-sidebar .kids > .sb-repo-block > .sb-repo-divider::before { flex: 0 0 0.65rem; }
+#ws-sidebar .kids > .sb-repo-block > .sb-repo-divider::after { flex: 1 1 0; min-width: 0.65rem; }
+#ws-sidebar .kids > .sb-repo-block > .sb-repo-divider > .sb-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #ws-sidebar .kids::before {
   content: "";
   position: absolute;

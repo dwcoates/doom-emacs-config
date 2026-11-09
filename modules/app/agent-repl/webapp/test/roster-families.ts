@@ -12,6 +12,7 @@
 import { create } from "@bufbuild/protobuf";
 import {
   RosterHiddenRowSchema,
+  RosterOpenRowRepositoryBlockSchema,
   RosterOpenRowSchema,
   RosterOpenRowTabSchema,
   RosterRepoEntrySchema,
@@ -41,6 +42,31 @@ export function openRow(row: RosterRow): RosterOpenRow {
     tab: { tab: { case: "folded", value: {} } },
     children: (familyOf.get(row) ?? []).map(openRow),
   });
+}
+
+/** One repository block a test open row carries: its repository's id, its divider's name, its rows. */
+export interface TestRepositoryBlock {
+  repo: string;
+  name?: string;
+  rows: readonly RosterRow[];
+}
+
+/**
+ * OPEN with BLOCKS appended as its repository blocks, in order, each its
+ * rows as open rows (frontend.v1.RosterOpenRow.repository_blocks). Answers
+ * OPEN.
+ */
+export function withRepositoryBlocks(open: RosterOpenRow, blocks: readonly TestRepositoryBlock[]): RosterOpenRow {
+  for (const block of blocks) {
+    open.repositoryBlocks.push(
+      create(RosterOpenRowRepositoryBlockSchema, {
+        repository: { id: block.repo, dir: `/repo/${block.repo}` },
+        divider: { name: block.name ?? block.repo },
+        rows: block.rows.map(openRow),
+      }),
+    );
+  }
+  return open;
 }
 
 /** ROW as a hidden row, its family nested as hidden rows. */
@@ -89,6 +115,7 @@ export function numberTabs(repos: readonly TabRegions[], listed?: readonly strin
       at < 0 ? { tab: { case: "folded", value: {} } } : { tab: { case: "numbered", value: { number: at + 1 } } },
     );
     open.children.forEach((child) => visit(child, folded));
+    for (const block of open.repositoryBlocks) block.rows.forEach((child) => visit(child, folded));
   };
   for (const repo of repos) {
     for (const region of repo.regions) region?.rows.forEach((open) => visit(open, repo.folded));

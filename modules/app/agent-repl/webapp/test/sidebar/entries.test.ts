@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import { RosterRepoSectionSchema, type RosterRepoSection } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import {
+  openKin,
   repoEntries,
   repoSectionRegions,
   sectionOpenRows,
@@ -10,7 +11,8 @@ import {
   unsectionedRows,
 } from "../../src/sidebar/entries.js";
 import { MalformedView } from "../../src/rpc/malformed.js";
-import { repoSection, row } from "./harness.js";
+import { openRow, repoSection, row } from "./harness.js";
+import { withRepositoryBlocks } from "../roster-families.js";
 
 /** The owner's example: a, [foo: d e], b, c, with b nesting its child k. */
 function example(): RosterRepoSection {
@@ -72,5 +74,35 @@ describe("the section's lists", () => {
 
   it("reads every open row in drawn order, a subsection's where it stands and each family under its row", () => {
     expect(ids(sectionOpenRows(example(), "s"))).toEqual(["a", "d", "e", "b", "k", "c"]);
+  });
+});
+
+describe("openKin", () => {
+  /** P with own child o, then a repo-2 block of x and y and a repo-3 block of z. */
+  const kin = () =>
+    withRepositoryBlocks(openRow(row({ id: "p", children: [row({ id: "o" })] })), [
+      { repo: "repo-2", rows: [row({ id: "x" }), row({ id: "y" })] },
+      { repo: "repo-3", rows: [row({ id: "z" })] },
+    ]);
+
+  it("reads the own-repository children, then every block's rows in order", () => {
+    expect(ids(openKin(kin(), "r"))).toEqual(["o", "x", "y", "z"]);
+  });
+
+  it("paths each block row under its block", () => {
+    expect(openKin(kin(), "r").map((k) => k.path)).toEqual([
+      "r.children[0]",
+      "r.repositoryBlocks[0].rows[0]",
+      "r.repositoryBlocks[0].rows[1]",
+      "r.repositoryBlocks[1].rows[0]",
+    ]);
+  });
+
+  it("reads a section's block rows in drawn order, each under its parent", () => {
+    const section = repoSection({ id: "repo-1", rows: [row({ id: "p", children: [row({ id: "o" })] }), row({ id: "q" })] });
+    const entry = section.entries[0]?.entry;
+    if (entry?.case !== "row") throw new Error("test: a row entry");
+    withRepositoryBlocks(entry.value, [{ repo: "repo-2", rows: [row({ id: "x" })] }]);
+    expect(ids(sectionOpenRows(section, "s"))).toEqual(["p", "o", "x", "q"]);
   });
 });

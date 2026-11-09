@@ -19,7 +19,7 @@ import type { AttentionMarks, RailContext } from "./context.js";
 import { openScope, type DrawScope } from "./scope.js";
 import { drawRosterFamily, drawRosterRowWorkspace, type RowPlace } from "./row.js";
 import { requireMessage } from "../rpc/strict.js";
-import { pathedOpenRows, type PathedOpenRow } from "./entries.js";
+import { openKin, pathedOpenRows, type PathedOpenRow } from "./entries.js";
 
 /** One drawn row: the wire it was drawn from, its element, and its scope. */
 interface KeyedRow {
@@ -38,7 +38,7 @@ function withoutTabs(row: RosterOpenRow): RosterOpenRow {
   const out = clone(RosterOpenRowSchema, row);
   const strip = (r: RosterOpenRow): void => {
     r.tab = undefined;
-    r.children.forEach(strip);
+    for (const kin of openKin(r, "")) strip(kin.row);
   };
   strip(out);
   return out;

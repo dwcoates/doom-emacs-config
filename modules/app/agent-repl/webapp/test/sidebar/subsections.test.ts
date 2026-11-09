@@ -39,6 +39,9 @@ import {
   sidebarContext,
 } from "./harness.js";
 import { boxRect } from "../dom-rect.js";
+import { withRepositoryBlocks } from "../roster-families.js";
+import type { RosterOpenRow } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
+import { REPOSITORY_BLOCK_CLASS } from "../../src/sidebar/row.js";
 
 /** Every ArrangeSidebar request the daemon received, and a context over it. */
 function arranged(): { sc: RailContext & SidebarContext; sent: ArrangeSidebarRequest[] } {
@@ -643,6 +646,137 @@ describe("dragging a subsection or a repository", () => {
 
     const change = sent[0]?.change;
     expect(change?.case === "moveRepository" ? [change.value.repository?.id, change.value.to.case] : null).toEqual(["repo-1", "end"]);
+  });
+});
+
+describe("dragging a repository block", () => {
+  /**
+   * Repository repo-1's parents P (own child o, then a repo-2 block of b1 and
+   * a repo-3 block of g1) and, when TWO, Q (a repo-2 block of q1); repo-2 and
+   * repo-3 have sections of their own.
+   */
+  function blockRoster(two = false): ReturnType<typeof roster> {
+    const section = repoSection({
+      id: "repo-1",
+      rows: [row({ id: "p", children: [row({ id: "o" })] }), ...(two ? [row({ id: "q" })] : [])],
+    });
+    const top = (index: number): RosterOpenRow => {
+      const entry = section.entries[index]?.entry;
+      if (entry?.case !== "row") throw new Error("test: a top-level row entry");
+      return entry.value;
+    };
+    withRepositoryBlocks(top(0), [
+      { repo: "repo-2", rows: [row({ id: "b1" })] },
+      { repo: "repo-3", rows: [row({ id: "g1" })] },
+    ]);
+    if (two) withRepositoryBlocks(top(1), [{ repo: "repo-2", rows: [row({ id: "q1" })] }]);
+    return roster({ repos: [section, repoSection({ id: "repo-2" }), repoSection({ id: "repo-3" })] });
+  }
+
+  /** Give EL the box TOP..TOP+HEIGHT. */
+  function boxAt(el: Element, top: number, height: number): void {
+    Object.defineProperty(el, "getBoundingClientRect", { configurable: true, value: () => boxRect({ top, height, width: 200 }) });
+  }
+
+  /** P's family box and its two blocks, laid out: o at 20, the repo-2 block at 40, the repo-3 block at 70. */
+  function layOutP(pane: HTMLElement): { kids: HTMLElement; blocks: HTMLElement[] } {
+    const kids = pane.querySelector("[data-roster-row='p'] > .kids") as HTMLElement;
+    const blocks = [...kids.querySelectorAll<HTMLElement>(`:scope > .${REPOSITORY_BLOCK_CLASS}`)];
+    boxAt(kids, 20, 80);
+    boxAt(blocks[0]!, 40, 30);
+    boxAt(blocks[1]!, 70, 30);
+    return { kids, blocks };
+  }
+
+  /** KIDS' drawn items, in order: a row by its id, a block by its repository. */
+  function drawnKin(kids: HTMLElement): string[] {
+    return [...kids.children].map((el) =>
+      el.classList.contains(REPOSITORY_BLOCK_CLASS) ? `block:${el.getAttribute("data-repository-block")}` : (el.getAttribute("data-roster-row") ?? "?"),
+    );
+  }
+
+  /** The block move SENT asked for: parent, repository, and where. */
+  function blockMove(sent: ArrangeSidebarRequest[]): [string | undefined, string | undefined, string] | null {
+    const change = sent[0]?.change;
+    if (change?.case !== "moveRepositoryBlock") return null;
+    const to = change.value.to;
+    return [change.value.parent?.id, change.value.repository?.id, to.case === "before" ? `before:${to.value.id}` : String(to.case)];
+  }
+
+  it("moves a block before the block it was dropped above", async () => {
+    // Arrange
+    const { sc, sent } = arranged();
+    const pane = mount(blockRoster(), sc);
+    const { blocks } = layOutP(pane);
+
+    // Act: the repo-3 block's divider (at 75) above the repo-2 block's middle.
+    await drag(blocks[1]!.querySelector(".sb-repo-divider")!, 75, 45);
+
+    // Assert
+    expect(blockMove(sent)).toEqual(["p", "repo-3", "before:repo-2"]);
+  });
+
+  it("moves a block after every other when dropped below them", async () => {
+    // Arrange
+    const { sc, sent } = arranged();
+    const pane = mount(blockRoster(), sc);
+    const { blocks } = layOutP(pane);
+
+    // Act
+    await drag(blocks[0]!.querySelector(".sb-repo-divider")!, 45, 99);
+
+    // Assert
+    expect(blockMove(sent)).toEqual(["p", "repo-2", "end"]);
+  });
+
+  it("never stands a block among the parent's own-repository children", async () => {
+    // Arrange
+    const { sc, sent } = arranged();
+    const pane = mount(blockRoster(), sc);
+    const { kids, blocks } = layOutP(pane);
+
+    // Act: the repo-3 block dragged over o's line (20 to 40).
+    pointer("pointerdown", blocks[1]!.querySelector(".sb-repo-divider")!, 75);
+    pointer("pointermove", window, 74);
+    pointer("pointermove", window, 25);
+    const during = drawnKin(kids);
+    pointer("pointerup", window, 25);
+    await new Promise((resolve) => globalThis.setTimeout(resolve, 0));
+
+    // Assert: o stays first, and the block stands first among the blocks.
+    expect([during, blockMove(sent)]).toEqual([["o", "block:repo-3", "block:repo-2"], ["p", "repo-3", "before:repo-2"]]);
+  });
+
+  it("keeps a block under its own parent, whatever parent it is dragged over", async () => {
+    // Arrange: Q's family box sits below P's.
+    const { sc, sent } = arranged();
+    const pane = mount(blockRoster(true), sc);
+    layOutP(pane);
+    const other = pane.querySelector("[data-roster-row='q'] > .kids") as HTMLElement;
+    boxAt(other, 120, 30);
+    boxAt(other.querySelector(`.${REPOSITORY_BLOCK_CLASS}`)!, 120, 30);
+
+    // Act: P's repo-2 block dragged over Q's block.
+    await drag(pane.querySelector("[data-roster-row='p'] > .kids > .sb-repo-block .sb-repo-divider")!, 45, 125);
+
+    // Assert
+    expect([drawnKin(other), blockMove(sent)]).toEqual([["block:repo-2"], ["p", "repo-2", "end"]]);
+  });
+
+  it("drags a block row's whole top-level family, as any nested row", () => {
+    // Arrange
+    const { sc } = arranged();
+    const pane = mount(blockRoster(), sc);
+    layOut(sectionList(pane), 0);
+
+    // Act
+    pointer("pointerdown", rowLine(pane, "b1"), 5);
+    pointer("pointermove", window, 6);
+    pointer("pointermove", window, 15);
+
+    // Assert
+    expect(pane.querySelector(`.${DRAG_SLOT_CLASS}`)?.getAttribute("data-roster-row")).toBe("p");
+    pointer("pointerup", window, 15);
   });
 });
 

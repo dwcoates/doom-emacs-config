@@ -6,6 +6,7 @@ import {
   RosterRepositoryViewSchema,
   type RosterOpenRow,
   type RosterRepositoryView,
+  RosterOpenRowRepositoryBlockSchema,
 } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import {
@@ -24,6 +25,14 @@ function open(id: string, n: number | null, ...children: RosterOpenRow[]): Roste
     tab: { tab: n === null ? { case: "folded", value: {} } : { case: "numbered", value: { number: n } } },
     children,
   });
+}
+
+/** PARENT with one repository block per entry of BLOCKS, each holding its rows. */
+function withBlocks(parent: RosterOpenRow, ...blocks: RosterOpenRow[][]): RosterOpenRow {
+  parent.repositoryBlocks = blocks.map((rows, i) =>
+    create(RosterOpenRowRepositoryBlockSchema, { repository: { id: `repo-${i}` }, divider: { name: `r${i}` }, rows }),
+  );
+  return parent;
 }
 
 /** An Open section of one repository: OWN rows, then one subsection per SUBS. */
@@ -59,6 +68,11 @@ describe("tabNumbers", () => {
     { name: "reads a subsection's rows", view: view([open("a", 1)], [open("s", 2)]), want: [["a", 1], ["s", 2]] },
     { name: "gives a folded tab no number", view: view([open("a", 1), open("f", null), open("c", 2)]), want: [["a", 1], ["c", 2]] },
     { name: "numbers nothing in an empty section", view: view([]), want: [] },
+    {
+      name: "reads a block's rows after the own-repository children, block by block",
+      view: view([withBlocks(open("p", 1, open("o", 2)), [open("x", 3)], [open("y", 4, open("yk", 5))])]),
+      want: [["p", 1], ["o", 2], ["x", 3], ["y", 4], ["yk", 5]],
+    },
   ])("$name", ({ view: v, want }) => {
     // Act
     const numbers = tabNumbers(v, "WorkspaceRoster.repository");

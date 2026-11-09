@@ -63,6 +63,7 @@ describe("the arrangement request", () => {
     ["anchorElsewhere", "try again"],
     ["noOpenWorkspace", "open workspace"],
     ["mainWorkspaceNotSortable", "main workspace"],
+    ["noRepositoryBlock", "try again"],
   ])("says what the %s arm means", (arm, words) => {
     expect(arrangeSidebarRefusal({ case: arm, value: {} } as never)).toContain(words);
   });

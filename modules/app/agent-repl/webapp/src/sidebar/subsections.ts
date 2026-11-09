@@ -33,6 +33,9 @@
  *     which lights up (`DROP_TARGET_CLASS`) while it would;
  *   - a subsection, by its header, among its repository's rows and
  *     subsections: dropped onto a row's line it stands just above that row;
+ *   - a repository block (a parent's children of one other repository), by
+ *     its divider, among that parent's blocks only, always after the parent's
+ *     own-repository children; the rows inside it move with it;
  *   - a repository, by its header, among the repositories.
  *
  * ONE LISTENER FOR EVERY DRAG (`installArrangeDrag`). A push redraws only the
@@ -57,6 +60,7 @@ import { openNamePopup } from "./name-popup.js";
 import { subsectionFoldKey, type SidebarContext } from "./context.js";
 import { drawRosterSectionFold, foldOnClick, sectionFold, trackDaemonFold } from "./section-fold.js";
 import { pressToDrag, type DragSpec } from "../drag.js";
+import { REPOSITORY_BLOCK_ATTRIBUTE, REPOSITORY_BLOCK_CLASS, REPOSITORY_DIVIDER_CLASS } from "./row.js";
 
 /** The class of one subsection. */
 export const SUBSECTION_CLASS = "sb-subsection";
@@ -251,7 +255,11 @@ export function installArrangeDrag(sc: SidebarContext, root: HTMLElement, refs: 
     // delete button and a text field are not grips.
     if (target.closest(`${CONTROL_SELECTOR}, button, input, textarea, select, a`) !== null) return;
     if (target.closest(`.${OPEN_REGION_CLASS}`) === null) return;
-    const spec = subsectionDrag(sc, target, refs) ?? rowDrag(sc, target, refs) ?? repositoryDrag(sc, target, refs);
+    const spec =
+      subsectionDrag(sc, target, refs) ??
+      repositoryBlockDrag(sc, target, refs) ??
+      rowDrag(sc, target, refs) ??
+      repositoryDrag(sc, target, refs);
     if (spec !== null) pressToDrag(sc.arrange, spec, event);
   };
   root.addEventListener("pointerdown", press);
@@ -341,6 +349,58 @@ function rowDrag(sc: SidebarContext, target: Element, refs: ArrangeRefs): DragSp
       });
     },
   };
+}
+
+/**
+ * A press on a repository block's divider drags the block among its parent's
+ * blocks, as one unit (agentrepl.v1.ArrangeMoveRepositoryBlock). ITS ONE LIST
+ * IS THE PARENT'S `.kids` BOX, and its items are only the blocks there, so a
+ * block can stand before another block or after them all, and never among the
+ * parent's own-repository children, which always come first; nor can it land
+ * under another parent.
+ */
+function repositoryBlockDrag(sc: SidebarContext, target: Element, refs: ArrangeRefs): DragSpec | null {
+  const divider = target.closest<HTMLElement>(`.${REPOSITORY_DIVIDER_CLASS}`);
+  const block = divider?.parentElement ?? null;
+  if (block === null || !block.classList.contains(REPOSITORY_BLOCK_CLASS)) return null;
+  const kids = block.parentElement;
+  const parentRow = kids?.parentElement ?? null;
+  if (kids === null || parentRow === null || !parentRow.hasAttribute("data-roster-row")) {
+    throw new Error("invariant: a repository block sits in its parent row's family box");
+  }
+  const section = block.closest<HTMLElement>(`[${REPOSITORY_ATTRIBUTE}]`);
+  if (section === null) throw new Error("invariant: a repository block sits in its repository's section");
+  const parent = refs.workspace(rowId(parentRow));
+  const repository = refs.repository(blockRepositoryId(block));
+  return {
+    kind: "repository-block",
+    item: block,
+    box: section,
+    scroller: openRegion(section),
+    lists: () => [kids],
+    itemsOf: repositoryBlocks,
+    dropped: (_l, before) =>
+      void sendArrangement(sc, sc.arrange.status, {
+        case: "moveRepositoryBlock",
+        value: {
+          parent,
+          repository,
+          to: before === null ? { case: "end", value: {} } : { case: "before", value: refs.repository(blockRepositoryId(before)) },
+        },
+      }),
+  };
+}
+
+/** A family box's repository blocks, in order: the items a block drag moves among. */
+export function repositoryBlocks(kids: HTMLElement): HTMLElement[] {
+  return [...kids.children].filter((el): el is HTMLElement => el.classList.contains(REPOSITORY_BLOCK_CLASS));
+}
+
+/** The repository a drawn repository block is. */
+function blockRepositoryId(block: HTMLElement): string {
+  const id = block.getAttribute(REPOSITORY_BLOCK_ATTRIBUTE);
+  if (id === null) throw new Error("invariant: a repository block states its repository");
+  return id;
 }
 
 /**

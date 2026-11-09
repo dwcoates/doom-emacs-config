@@ -25,6 +25,7 @@ import { createControl, type Control } from "../control.js";
 import { childrenMatching, queryAll, SVG_NS } from "../dom.js";
 import { log } from "../log.js";
 import { escapeRegExp } from "../regexp.js";
+import { REPOSITORY_BLOCK_CLASS } from "./row.js";
 
 /** The class a row the query does not match wears. */
 export const SEARCH_MISS_CLASS = "sb-search-miss";
@@ -70,11 +71,22 @@ function rowName(ws: HTMLElement): string {
  */
 function markRow(ws: HTMLElement, pattern: RegExp | null): boolean {
   let kept = pattern === null || pattern.test(rowName(ws));
-  for (const kid of childrenMatching(ws, ".kids").flatMap((kids) => childrenMatching<HTMLElement>(kids, "[data-roster-row]"))) {
+  for (const kid of nestedRows(ws)) {
     if (markRow(kid, pattern)) kept = true;
   }
   ws.classList.toggle(SEARCH_MISS_CLASS, !kept);
   return kept;
+}
+
+/**
+ * WS's nested rows, one generation down: its `.kids` box's own-repository
+ * rows, then each repository block's rows (`row.ts`'s `appendRowKids`).
+ */
+function nestedRows(ws: HTMLElement): HTMLElement[] {
+  return childrenMatching(ws, ".kids").flatMap((kids) => [
+    ...childrenMatching<HTMLElement>(kids, "[data-roster-row]"),
+    ...childrenMatching(kids, `.${REPOSITORY_BLOCK_CLASS}`).flatMap((block) => childrenMatching<HTMLElement>(block, "[data-roster-row]")),
+  ]);
 }
 
 /** What one search pass left drawn. */

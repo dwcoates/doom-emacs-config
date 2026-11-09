@@ -15,7 +15,7 @@
  * drawn, kept sections included.
  */
 import type { RosterOpenRow, RosterRepositoryView } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
-import { repoEntries } from "./entries.js";
+import { openKin, repoEntries } from "./entries.js";
 import { queryAll } from "../dom.js";
 import { log } from "../log.js";
 import { MalformedView } from "../rpc/malformed.js";
@@ -52,7 +52,7 @@ export function tabNumbers(u: RosterRepositoryView, path: string): Map<string, n
         unreachableArm(`${rowPath}.tab.tab`, other.case);
       }
     }
-    row.children.forEach((child, index) => visit(child, `${rowPath}.children[${index}]`));
+    for (const kin of openKin(row, rowPath)) visit(kin.row, kin.path);
   };
   u.sections.forEach((section, s) => {
     for (const entry of repoEntries(section, `${path}.sections[${s}]`)) {

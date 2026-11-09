@@ -10,6 +10,7 @@ import {
   searchPattern,
 } from "../../src/sidebar/search.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
+import { withRepositoryBlocks } from "../roster-families.js";
 import {
   hiddenSection,
   mergedBand,
@@ -102,6 +103,17 @@ describe("applySearch", () => {
     });
     applySearch(root, "parent");
     expect(missed(root.querySelector(".sb-pane") as Element, "ws-c")).toEqual([true]);
+  });
+
+  it("keeps a parent whose block row matches, and hides the block's row that does not", () => {
+    const section = repoSection({ id: "repo-1", rows: [row({ id: "ws-p", name: "parent" })] });
+    const entry = section.entries[0]?.entry;
+    if (entry?.case !== "row") throw new Error("test: a row entry");
+    withRepositoryBlocks(entry.value, [{ repo: "repo-2", rows: [row({ id: "ws-x", name: "extra" }), row({ id: "ws-y", name: "other" })] }]);
+    const root = drawn({ repos: [section] });
+    applySearch(root, "extra");
+    const pane = root.querySelector(".sb-pane") as Element;
+    expect([missed(pane, "ws-p"), missed(pane, "ws-x"), missed(pane, "ws-y")]).toEqual([[false], [false], [true]]);
   });
 
   it("hides a section the query leaves no row in", () => {
