@@ -1389,10 +1389,15 @@ func TestTheDrainWaitsForAnAdmissionStepInFlight(t *testing.T) {
 	}()
 
 	// Assert: the drain holds while the step reads, and returns once it left.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if _, err := h.logs.Global().(*dlog.TestLogger).Await(ctx, dlog.RecordQuery{Operation: "daemon.merge.drain", Message: "the merge drain waits for the admission steps already in flight"}); err != nil {
+		t.Fatalf("the drain never began waiting for the admission step: %v", err)
+	}
 	select {
 	case <-drained:
 		t.Fatal("the drain returned while an admission step was still reading the store")
-	case <-time.After(50 * time.Millisecond):
+	default:
 	}
 	close(release)
 	<-drained

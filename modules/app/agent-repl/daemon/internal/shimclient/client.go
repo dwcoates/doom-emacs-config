@@ -24,6 +24,7 @@ import (
 	"agent-repld/internal/inflight"
 	"agent-repld/internal/kernelevent"
 	"agent-repld/internal/procgroup"
+	"agent-repld/internal/protoarm"
 	"agent-repld/internal/shimsocket"
 )
 
@@ -1215,6 +1216,9 @@ func (c *client) awaitDiagnostics(ctx context.Context, frames <-chan *shimv1.Wat
 		case frame := <-frames:
 			diagnostics := frame.GetUpdate().GetDiagnostics()
 			if diagnostics == nil {
+				c.log.Debug("daemon.shimclient.ready", "a session frame that is not the health verdict arrived during bring-up; still waiting for the diagnostics", dlog.Context{
+					"workspace_id": string(c.ws), "update": string(protoarm.Must(frame.GetUpdate().ProtoReflect(), "update", "shimclient.awaitDiagnostics")),
+				})
 				continue
 			}
 			if diagnostics.GetHealthy() != nil {

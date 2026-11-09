@@ -128,12 +128,30 @@ func (l *TestLogger) append(level, operation, message string, ctx Context) {
 // timer: a test that waits for the code under test to reach a point it
 // records waits exactly as long as that takes.
 func (l *TestLogger) Await(ctx context.Context, q RecordQuery) (Record, error) {
+	matched, err := l.AwaitCount(ctx, q, 1)
+	if err != nil {
+		return Record{}, err
+	}
+	return matched[0], nil
+}
+
+// AwaitCount answers the first n captured records Q matches, waiting for them
+// to be appended until ctx ends, on the logger's own append exactly as Await
+// does.
+func (l *TestLogger) AwaitCount(ctx context.Context, q RecordQuery, n int) ([]Record, error) {
+	if n <= 0 {
+		panic(fmt.Sprintf("dlog: AwaitCount needs a positive count, got %d", n))
+	}
 	for {
 		l.mu.Lock()
+		var matched []Record
 		for _, r := range l.records {
 			if q.matches(r) {
-				l.mu.Unlock()
-				return r, nil
+				matched = append(matched, r)
+				if len(matched) == n {
+					l.mu.Unlock()
+					return matched, nil
+				}
 			}
 		}
 		if l.appended == nil {
@@ -144,7 +162,7 @@ func (l *TestLogger) Await(ctx context.Context, q RecordQuery) (Record, error) {
 		select {
 		case <-next:
 		case <-ctx.Done():
-			return Record{}, fmt.Errorf("no record matching %+v was captured: %w", q, ctx.Err())
+			return nil, fmt.Errorf("%d of %d records matching %+v were captured: %w", len(matched), n, q, ctx.Err())
 		}
 	}
 }

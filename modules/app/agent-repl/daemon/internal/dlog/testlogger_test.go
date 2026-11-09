@@ -3,6 +3,7 @@ package dlog
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -256,8 +257,8 @@ func TestTestLoggerAwait(t *testing.T) {
 		{name: "a record appended through a derived logger answers",
 			after: func(l Logger) { l.With(Context{"k": "v"}).Info("daemon.test.op", "reached", nil) }},
 		{name: "only records that do not match leave it waiting until its context ends",
-			after:   func(l Logger) { l.Info("daemon.test.op", "elsewhere", nil) },
-			wantErr: context.DeadlineExceeded},
+			before:  func(l Logger) { l.Info("daemon.test.op", "elsewhere", nil) },
+			wantErr: context.Canceled},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -266,12 +267,13 @@ func TestTestLoggerAwait(t *testing.T) {
 			if tc.before != nil {
 				tc.before(l)
 			}
-			bound := 5 * time.Second
-			if tc.wantErr != nil {
-				bound = 50 * time.Millisecond
-			}
-			ctx, cancel := context.WithTimeout(context.Background(), bound)
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
+			if tc.wantErr != nil {
+				// NOTHING THAT MATCHES WILL COME: the context's end is the
+				// answer, given at once rather than after a window.
+				cancel()
+			}
 			type answer struct {
 				r   Record
 				err error
@@ -297,4 +299,52 @@ func TestTestLoggerAwait(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestTestLoggerAwaitCountAnswersOnceEnoughAreCaptured(t *testing.T) {
+	// Arrange
+	l := NewTestLogger()
+	l.Info("daemon.test.op", "reached", nil)
+	got := make(chan int, 1)
+	go func() {
+		records, _ := l.AwaitCount(context.Background(), RecordQuery{Message: "reached"}, 2)
+		got <- len(records)
+	}()
+
+	// Act
+	l.Info("daemon.test.op", "reached", nil)
+
+	// Assert
+	if n := <-got; n != 2 {
+		t.Fatalf("AwaitCount answered %d records, want 2", n)
+	}
+}
+
+func TestTestLoggerAwaitCountNamesHowManyWereCaptured(t *testing.T) {
+	// Arrange
+	l := NewTestLogger()
+	l.Info("daemon.test.op", "reached", nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// Act
+	_, err := l.AwaitCount(ctx, RecordQuery{Message: "reached"}, 2)
+
+	// Assert
+	if !errors.Is(err, context.Canceled) || !strings.Contains(err.Error(), "1 of 2") {
+		t.Fatalf("AwaitCount = %v, want the context's end naming 1 of 2 captured", err)
+	}
+}
+
+func TestTestLoggerAwaitCountRefusesANonPositiveCount(t *testing.T) {
+	// Arrange
+	defer func() {
+		// Assert
+		if recover() == nil {
+			t.Fatal("AwaitCount(0) did not panic")
+		}
+	}()
+
+	// Act
+	_, _ = NewTestLogger().AwaitCount(context.Background(), RecordQuery{}, 0)
 }

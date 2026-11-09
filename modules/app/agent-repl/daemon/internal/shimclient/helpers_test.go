@@ -371,12 +371,6 @@ func alive(pid int) bool { return syscall.Kill(pid, syscall.Signal(0)) == nil }
 // Evict satisfies dlog.Surfaces for the merged seam (the bootinfra agent added it).
 func (s testSurfaces) Evict(_ string) error { return nil }
 
-// bringUpProbeWindow is the NEGATIVE bound: how long a test waits to be
-// satisfied that bring-up has NOT returned. The fake shim is in-process and
-// every measured bring-up in this package answers in single-digit
-// milliseconds, so 200ms is a wide multiple of the behavior it rules out and
-// is paid in full on a green run at exactly one site.
-const bringUpProbeWindow = 200 * time.Millisecond
 
 // bringUpAnswerBound is the POSITIVE bound: how long a bring-up that the shim
 // has already answered may take to return. Same measured basis, and it is

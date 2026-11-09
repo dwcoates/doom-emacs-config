@@ -798,6 +798,8 @@ func (o *orchestrator) Drain(ctx context.Context) {
 	// before the drain are a few store reads, and the state client must
 	// outlive them.
 	if admitted != nil {
+		log.Debug(op, "the merge drain waits for the admission steps already in flight",
+			dlog.Context{"bound": bound.String(), "in_flight": inFlight})
 		select {
 		case <-admitted:
 		case <-expired.C:

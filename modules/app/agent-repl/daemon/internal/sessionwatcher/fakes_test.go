@@ -2146,16 +2146,10 @@ func (h *harness) collect(t *testing.T, n int) []event {
 // observes a branch that touches no sink.
 func (h *harness) awaitRecord(t *testing.T, level, operation string) {
 	t.Helper()
-	deadline := time.After(waitDeadline)
-	for {
-		if h.hasRecord(level, operation) {
-			return
-		}
-		select {
-		case <-deadline:
-			t.Fatalf("the record %s/%s was never logged", level, operation)
-		case <-time.After(time.Millisecond):
-		}
+	ctx, cancel := context.WithTimeout(context.Background(), waitDeadline)
+	defer cancel()
+	if _, err := h.log.Await(ctx, dlog.RecordQuery{Level: level, Operation: operation}); err != nil {
+		t.Fatalf("the record %s/%s was never logged: %v", level, operation, err)
 	}
 }
 
@@ -2163,17 +2157,10 @@ func (h *harness) awaitRecord(t *testing.T, level, operation string) {
 // way awaitRecord waits for one record of an operation.
 func (h *harness) awaitMessages(t *testing.T, level, message string, n int) {
 	t.Helper()
-	deadline := time.After(waitDeadline)
-	for {
-		count := len(dlog.FilterRecords(h.log.Records(), dlog.RecordQuery{Level: level, Message: message}))
-		if count >= n {
-			return
-		}
-		select {
-		case <-deadline:
-			t.Fatalf("%d records of %s/%q were logged, want %d", count, level, message, n)
-		case <-time.After(time.Millisecond):
-		}
+	ctx, cancel := context.WithTimeout(context.Background(), waitDeadline)
+	defer cancel()
+	if _, err := h.log.AwaitCount(ctx, dlog.RecordQuery{Level: level, Message: message}, n); err != nil {
+		t.Fatalf("records of %s/%q: %v", level, message, err)
 	}
 }
 
