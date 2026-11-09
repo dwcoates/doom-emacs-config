@@ -1014,6 +1014,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		ResolveImage:    resolveImage,
 		DB:              p.DB,
 		Judge:           judge,
+		Network:         network,
 		Feed:            feedResolver,
 		Footer:          footerResolver,
 		Sidebar:         sidebarResolver,

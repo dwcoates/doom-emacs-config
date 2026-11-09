@@ -2035,7 +2035,7 @@ func networkResumeWaitsUpdate() *conversationv1.SessionUpdate {
 func vendorErrorRetryUpdate() *conversationv1.SessionUpdate {
 	return &conversationv1.SessionUpdate{Update: &conversationv1.SessionUpdate_VendorErrorRetry{
 		VendorErrorRetry: &conversationv1.SessionVendorErrorRetry{
-			Scheduled: &conversationv1.SessionVendorErrorRetryScheduled{Attempt: 1, NextAttemptAtMs: 1700000030000, Status: "Overloaded"},
+			Stated: &conversationv1.SessionVendorErrorRetry_Scheduled{Scheduled: &conversationv1.SessionVendorErrorRetryScheduled{Attempt: 1, NextAttemptAtMs: 1700000030000, Status: "Overloaded"}},
 		},
 	}}
 }

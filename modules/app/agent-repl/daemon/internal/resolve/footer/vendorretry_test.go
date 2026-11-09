@@ -16,7 +16,7 @@ import (
 func vendorRetryScheduled(attempt uint32, at time.Time, status string) *conversationv1.SessionUpdate {
 	return &conversationv1.SessionUpdate{Update: &conversationv1.SessionUpdate_VendorErrorRetry{
 		VendorErrorRetry: &conversationv1.SessionVendorErrorRetry{
-			Scheduled: &conversationv1.SessionVendorErrorRetryScheduled{Attempt: attempt, NextAttemptAtMs: at.UnixMilli(), Status: status},
+			Stated: &conversationv1.SessionVendorErrorRetry_Scheduled{Scheduled: &conversationv1.SessionVendorErrorRetryScheduled{Attempt: attempt, NextAttemptAtMs: at.UnixMilli(), Status: status}},
 		},
 	}}
 }
@@ -26,7 +26,17 @@ func vendorRetryScheduled(attempt uint32, at time.Time, status string) *conversa
 func vendorRetryAttempting(attempt uint32, status string) *conversationv1.SessionUpdate {
 	return &conversationv1.SessionUpdate{Update: &conversationv1.SessionUpdate_VendorErrorRetry{
 		VendorErrorRetry: &conversationv1.SessionVendorErrorRetry{
-			Attempting: &conversationv1.SessionVendorErrorRetryAttempting{Attempt: attempt, Status: status},
+			Stated: &conversationv1.SessionVendorErrorRetry_Attempting{Attempting: &conversationv1.SessionVendorErrorRetryAttempting{Attempt: attempt, Status: status}},
+		},
+	}}
+}
+
+// vendorRetryAwaitingNetwork is the shim stating its ATTEMPT-th retry waits
+// for the network, retrying a failure worded STATUS.
+func vendorRetryAwaitingNetwork(attempt uint32, status string) *conversationv1.SessionUpdate {
+	return &conversationv1.SessionUpdate{Update: &conversationv1.SessionUpdate_VendorErrorRetry{
+		VendorErrorRetry: &conversationv1.SessionVendorErrorRetry{
+			Stated: &conversationv1.SessionVendorErrorRetry_AwaitingNetwork{AwaitingNetwork: &conversationv1.SessionVendorErrorRetryAwaitingNetwork{Attempt: attempt, Status: status}},
 		},
 	}}
 }
@@ -80,8 +90,76 @@ func TestARetryBeingMadeDrawsRetryingNowInPlaceOfTheCountdown(t *testing.T) {
 
 	// Assert
 	line := retryLine(t, h)
-	if !line.GetNow() || line.NextAttempt != nil || line.GetAttempt() != 2 || line.GetStatus() != "Overloaded" {
+	if line.GetRetryingNow() == nil || line.GetNextAttempt() != nil || line.GetAttempt() != 2 || line.GetStatus() != "Overloaded" {
 		t.Fatalf("retry line = %+v, want attempt 2 retrying now with no countdown", line)
+	}
+}
+
+func TestARetryWaitingForTheNetworkDrawsNoCountdown(t *testing.T) {
+	// Arrange: the countdown to the first retry stands.
+	h := newHarness(t)
+	connected(h)
+	overloadFailedTurn(h)
+	h.r.OnSessionUpdate(testWS, vendorRetryScheduled(1, instant.Add(30*time.Second), "Overloaded"))
+
+	// Act
+	h.r.OnSessionUpdate(testWS, vendorRetryAwaitingNetwork(1, "ENOTFOUND"))
+
+	// Assert
+	line := retryLine(t, h)
+	if line.GetAwaitingNetwork() == nil || line.GetNextAttempt() != nil || line.GetRetryingNow() != nil || line.GetAttempt() != 2 || line.GetStatus() != "ENOTFOUND" {
+		t.Fatalf("retry line = %+v, want attempt 2 waiting for the network with no countdown", line)
+	}
+}
+
+func TestARetryWaitingForTheNetworkHoldsNoPrompt(t *testing.T) {
+	// Arrange: the turn failed, which would hold prompts behind its block.
+	h := newHarness(t)
+	connected(h)
+	overloadFailedTurn(h)
+
+	// Act
+	h.r.OnSessionUpdate(testWS, vendorRetryAwaitingNetwork(1, "ENOTFOUND"))
+
+	// Assert: a prompt sent now is sent at once, and the shim's chain yields
+	// to it, so no prompt is stranded behind a retry that has not run.
+	if block, ok := h.r.VendorBlock(testWS); ok {
+		t.Fatalf("vendor block = %q, want none while agent-repl's retry waits for the network", block)
+	}
+}
+
+func TestARetryWaitingForTheNetworkNamingNoAttemptIsRefusedAndTheScheduleOnHandStands(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	overloadFailedTurn(h)
+	next := instant.Add(30 * time.Second)
+	h.r.OnSessionUpdate(testWS, vendorRetryScheduled(1, next, "Overloaded"))
+
+	// Act
+	h.r.OnSessionUpdate(testWS, vendorRetryAwaitingNetwork(0, "ENOTFOUND"))
+
+	// Assert
+	if line := retryLine(t, h); line.GetAwaitingNetwork() != nil || line.GetNextAttempt().GetAtMs() != next.UnixMilli() {
+		t.Fatalf("retry line = %+v, want the countdown on hand", line)
+	}
+	if got := countOf(h.log.Records(), dlog.LevelError, "daemon.footer.vendor_retry_refused"); got != 1 {
+		t.Fatalf("vendor_retry_refused ERROR records = %d, want 1", got)
+	}
+}
+
+func TestARetryWaitingForTheNetworkIsRecordedAtInfo(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	overloadFailedTurn(h)
+
+	// Act
+	h.r.OnSessionUpdate(testWS, vendorRetryAwaitingNetwork(3, "ENOTFOUND"))
+
+	// Assert
+	if got := countOf(h.log.Records(), dlog.LevelInfo, "daemon.footer.vendor_retry"); got != 1 {
+		t.Fatalf("vendor_retry INFO records = %d, want 1", got)
 	}
 }
 
@@ -97,7 +175,7 @@ func TestARetryBeingMadeNamingNoAttemptIsRefusedAndTheScheduleOnHandStands(t *te
 	h.r.OnSessionUpdate(testWS, vendorRetryAttempting(0, "Overloaded"))
 
 	// Assert
-	if line := retryLine(t, h); line.GetNow() || line.GetNextAttempt().GetAtMs() != next.UnixMilli() {
+	if line := retryLine(t, h); line.GetRetryingNow() != nil || line.GetNextAttempt().GetAtMs() != next.UnixMilli() {
 		t.Fatalf("retry line = %+v, want the countdown on hand", line)
 	}
 	if got := countOf(h.log.Records(), dlog.LevelError, "daemon.footer.vendor_retry_refused"); got != 1 {
@@ -194,7 +272,7 @@ func TestAScheduledRetryNamingNoInstantIsRefusedAndTheScheduleOnHandStands(t *te
 
 	// Act
 	h.r.OnSessionUpdate(testWS, &conversationv1.SessionUpdate{Update: &conversationv1.SessionUpdate_VendorErrorRetry{
-		VendorErrorRetry: &conversationv1.SessionVendorErrorRetry{Scheduled: &conversationv1.SessionVendorErrorRetryScheduled{Attempt: 2}},
+		VendorErrorRetry: &conversationv1.SessionVendorErrorRetry{Stated: &conversationv1.SessionVendorErrorRetry_Scheduled{Scheduled: &conversationv1.SessionVendorErrorRetryScheduled{Attempt: 2}}},
 	}})
 
 	// Assert
@@ -268,5 +346,19 @@ func TestNoFooterSourceConvertsARetryCountByHand(t *testing.T) {
 	// Assert.
 	if n != 0 {
 		t.Fatalf("hand-converted retry counts = %d, want every site through attemptOfRetry", n)
+	}
+}
+
+func TestEveryUntimedRetryArmGoesThroughObserveUntimedRetry(t *testing.T) {
+	// Arrange, Act: the one retryState built with a now or awaitingNetwork
+	// clause is observeUntimedRetry's.
+	nows := sourcescan.Count(t, "now:             u.now,")
+	awaits := sourcescan.Count(t, "awaitingNetwork: u.awaitingNetwork,")
+	handNows := sourcescan.Count(t, "now:     true,")
+	handAwaits := sourcescan.Count(t, "awaitingNetwork: true,\n\t\t}")
+
+	// Assert.
+	if nows != 1 || awaits != 1 || handNows != 0 || handAwaits != 0 {
+		t.Fatalf("untimed retry builds = %d/%d, hand-built = %d/%d, want every untimed arm through observeUntimedRetry", nows, awaits, handNows, handAwaits)
 	}
 }

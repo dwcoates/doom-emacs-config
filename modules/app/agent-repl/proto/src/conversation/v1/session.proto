@@ -403,21 +403,34 @@ message SessionSkillsChanged {
 // THE VENDOR-ERROR RETRY AGENT-REPL OWNS (owner ruling, 2026-10-20). The shim
 // runs the vendor with its own in-process API retries OFF, so a main turn
 // whose API call fails retryably ends at once, and the shim retries it on
-// agent-repl's cadence: every 30 seconds, or at the reset of an exhausted
-// usage window. Each retry asks the main agent to continue, as a turn the
-// shim opens on its own. shim.v1.RetryVendorErrorNow makes the scheduled
-// retry at once.
+// agent-repl's cadence: every 30 seconds, at the reset of an exhausted usage
+// window, or -- for a failure that never reached the API -- the moment the
+// network fault resolves. Each retry asks the main agent to continue, as a
+// turn the shim opens on its own. shim.v1.RetryVendorErrorNow makes the
+// pending retry at once.
 message SessionVendorErrorRetry {
-  // The retry the shim makes next. UNSET when none is scheduled: no failed
-  // turn is being retried, the latest retry is being made (attempting), or
-  // it is running as a turn.
-  optional SessionVendorErrorRetryScheduled scheduled = 1;
-  // The retry the shim is making NOW: stated at the code point that makes
-  // it, just before its prompt is delivered, so "retrying now" reflects the
-  // attempt itself and not a countdown reaching zero. At most one of
-  // `scheduled` and `attempting` is set; once the retry is running as a turn,
-  // or was refused, neither is.
-  optional SessionVendorErrorRetryAttempting attempting = 2;
+  // THE RETRY PENDING, by how it will be made. The arms are mutually
+  // exclusive because a chain has at most one retry pending, and it is
+  // either waiting for an instant, waiting for the network, or being made.
+  // UNSET when no retry is pending: no failed turn is being retried, or the
+  // latest retry is running as a turn or was refused.
+  oneof stated {
+    // The retry the shim makes at an instant: the cadence's next beat, or an
+    // exhausted usage window's reset.
+    SessionVendorErrorRetryScheduled scheduled = 1;
+    // The retry the shim is making NOW: stated at the code point that makes
+    // it, just before its prompt is delivered, so "retrying now" reflects the
+    // attempt itself and not a countdown reaching zero.
+    SessionVendorErrorRetryAttempting attempting = 2;
+    // The retry that waits for the network: the failed turn never reached the
+    // API, so no instant can be named. It is made the moment the session's
+    // network fault resolves (conversation.v1.SessionFaultNetworkUnreachable),
+    // whether the shim's reachability probe or a request reaching the vendor
+    // resolves it. PRODUCER OBLIGATION: stated only while the session's
+    // network fault stands, so a consumer draws the network fault's own line
+    // and no countdown.
+    SessionVendorErrorRetryAwaitingNetwork awaiting_network = 3;
+  }
 }
 
 // The retry being made now.
@@ -436,6 +449,16 @@ message SessionVendorErrorRetryScheduled {
   int64 next_attempt_at_ms = 2;
   // The failure being retried, in the vendor's own words.
   string status = 3;
+}
+
+// A retry waiting for the network to return. It carries no instant: the
+// moment it is made is the network fault's resolution, which nothing can
+// predict.
+message SessionVendorErrorRetryAwaitingNetwork {
+  // Which retry of the chain this is, 1 for the first after the failure.
+  uint32 attempt = 1;
+  // The failure being retried, in the vendor's own words.
+  string status = 2;
 }
 
 // HOW A ROLLBACK'S RESTART SETTLED. shim.v1.RollBackSession answers once the

@@ -504,6 +504,29 @@ live buffer instead of always missing one."
         (force-mode-line-update t))
       (agent-repl--log-verbose ws "prompt-summary: redisplay complete buffer=%S" buf)))))
 
+(defun agent-repl--prompt-summary-network-faulted-p (ws)
+  "Return non-nil when WS stands in its network fault.
+Read off the roster arm the daemon resolves (`--ws-render-status'), the
+one source of whether the network is down, so this module keeps no copy
+of what an outage sounds like.  A workspace this Emacs no longer knows
+is not faulted."
+  (and (agent-repl--ws-known-p ws)
+       (eq (agent-repl--ws-render-status ws) :network-fault)))
+
+(defun agent-repl--prompt-summary-log-rejected (ws ok output current-raw)
+  "Record the summary run for WS that was rejected, at the level it earns.
+OK and OUTPUT are the run's; CURRENT-RAW is the prompt it summarized.
+A RUN THE NETWORK FAILED, while WS stands in its network fault, is the
+expected consequence of an outage this machine is in (2026-11-08: the
+run answered the API's ENOTFOUND text during a DNS outage), so it is
+logged with the network fault as its cause rather than warned; any other
+rejection is a defect and warns."
+  (if (agent-repl--prompt-summary-network-faulted-p ws)
+      (agent-repl--log ws "prompt-summary: run rejected result while the network fault stands; clearing pending cause=network-fault ok=%s output=%S current-raw-len=%d"
+                       ok (string-trim output) (length current-raw))
+    (agent-repl--warn ws "prompt-summary: run rejected result; clearing pending ok=%s output=%S current-raw-len=%d"
+                      ok (string-trim output) (length current-raw))))
+
 (defun agent-repl--prompt-summary-make-callback (ws raw)
   "Build the completion callback that writes the summary for WS/RAW.
 Called as `agent-repl--async-command' calls it, with OK and the run's
@@ -521,8 +544,7 @@ OUTPUT; the runner owns the process and its buffer."
         (let ((current-raw (agent-repl--ws-get ws :last-prompt-text)))
           (if (equal current-raw raw)
               (progn
-                (agent-repl--warn ws "prompt-summary: run rejected result; clearing pending ok=%s output=%S current-raw-len=%d"
-                                  ok (string-trim output) (length current-raw))
+                (agent-repl--prompt-summary-log-rejected ws ok output current-raw)
                 (agent-repl--ws-put ws :last-prompt-summary-pending nil)
                 (agent-repl--prompt-summary-redisplay ws)
                 (agent-repl--log ws "prompt-summary: persist rejected result begin")

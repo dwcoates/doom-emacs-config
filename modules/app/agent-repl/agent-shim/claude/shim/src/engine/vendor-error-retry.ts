@@ -39,6 +39,29 @@
  *   retry is due or the latest is running as a turn.
  * - A RETRY CAN BE MADE AT ONCE ({@link VendorErrorRetry.retryNow}): the
  *   pending one is delivered now instead of at its instant.
+ * - A FAILURE THAT NEVER REACHED THE API WAITS FOR THE NETWORK, NOT A TIMER
+ *   (2026-11-08). An `unreachable` failure, or any retryable failure that
+ *   ends a turn while the session's network fault stands, is retried by no
+ *   timer: the retry waits on a LATCH, {@link VendorErrorRetry.networkRecovered},
+ *   which the session fires the moment the network fault resolves (the
+ *   reachability probe's answer, or a request reaching the vendor). During
+ *   the 14:00-14:16 DNS outage the 30s timer fired 32 retries per workspace,
+ *   each an adopted turn that failed at once, so every workspace read as a
+ *   running turn instead of its network fault, and held the user's prompts
+ *   behind a turn they could never join. Waiting on the latch makes that
+ *   impossible rather than rarer: while the fault stands no retry turn
+ *   exists at all. The latch is guaranteed to have a firer: a retry that
+ *   waits for the network stands the fault itself when it does not stand
+ *   yet ({@link VendorErrorRetryDeps.network}), and a standing fault is
+ *   probed until it resolves (engine/network-resume.ts). The wait counts
+ *   against no window: the fault has none, and the vendor-error window
+ *   restarts at the next failure that reached the API.
+ * - A PROMPT SUBMITTED DURING THE WAIT TAKES THE SESSION (as below), and is
+ *   sent at once: the daemon holds no prompt behind a retry agent-repl owns
+ *   (daemon resolve/footer/vendorblock.go). It fails the same way while the
+ *   network is down, which opens a fresh chain waiting on the same latch, so
+ *   the one retry made when the network returns continues the user's prompt.
+ *   No retry turn ever stands for the prompt to be held behind.
  * - THE API COMING BACK MAKES THE RETRY AT ONCE
  *   ({@link VendorErrorRetry.networkRecovered}): a vendor-error retry waiting
  *   out its interval is made the moment the network probe reaches the API
@@ -49,7 +72,7 @@
  *   interrupted, a failure neither rule retries), on a prompt someone else
  *   submits (the session is theirs again; a prompt of theirs that fails the
  *   same way opens a fresh chain), and at stand-down.
- * - ONE TIMER, and it exists only while a retry is due.
+ * - ONE TIMER, and it exists only while a retry is due at an instant.
  */
 import { create } from "@bufbuild/protobuf";
 import { bindLog } from "../log.js";
@@ -108,8 +131,17 @@ export interface AttemptingRetry {
   readonly status: string;
 }
 
-/** The retry as the session stream states it: scheduled, or being made. */
-export type StatedRetry = ScheduledRetry | AttemptingRetry;
+/** The retry that waits for the network to return: it has no instant. */
+export interface AwaitingNetworkRetry {
+  readonly awaitingNetwork: true;
+  /** Which retry of the chain it is, 1-based. */
+  readonly attempt: number;
+  /** The failure it retries, in the vendor's words. */
+  readonly status: string;
+}
+
+/** The retry as the session stream states it: scheduled, waiting for the network, or being made. */
+export type StatedRetry = ScheduledRetry | AwaitingNetworkRetry | AttemptingRetry;
 
 /** What asking for the retry now came to (shim.v1.RetryVendorErrorNow). */
 export type RetryNowOutcome =
@@ -130,6 +162,13 @@ export interface VendorErrorRetryDeps {
   readonly state: (stated: StatedRetry | undefined) => void;
   /** The newest rate-limit event the session has seen for each window. */
   readonly readLimits: () => readonly RateLimitReading[];
+  /** The session's network fault, which a retry waiting for the network waits on. */
+  readonly network: {
+    /** Whether the session's network fault stands. */
+    readonly faultStands: () => boolean;
+    /** Stand the network fault, so it is probed until it resolves and fires the latch. */
+    readonly standFault: (detail: string) => void;
+  };
   readonly nowMs: () => number;
   readonly scheduler: KeepaliveScheduler;
 }
@@ -176,7 +215,9 @@ type Mode =
   /** Every interval, until the window from the chain's first failure closes. */
   | { readonly kind: "vendor_error"; readonly sinceMs: number }
   /** At the exhausted window's reset, then every interval until the tail closes. */
-  | { readonly kind: "usage_limit"; readonly window: ExhaustedWindow; readonly untilMs: number };
+  | { readonly kind: "usage_limit"; readonly window: ExhaustedWindow; readonly untilMs: number }
+  /** When the session's network fault resolves: no timer, no window. */
+  | { readonly kind: "network" };
 
 /** One run of retries, from the first qualifying failure until it ends. */
 interface Chain {
@@ -198,6 +239,8 @@ interface Failure {
   readonly retryable: boolean;
   /** Whether the failure is a usage limit. */
   readonly usageLimit: boolean;
+  /** Whether the failure is a request that never reached the API. */
+  readonly unreachable: boolean;
   /** The failure, in the vendor's words. */
   readonly status: string;
 }
@@ -207,8 +250,10 @@ export class VendorErrorRetry {
   private chain: Chain | undefined;
   private nextChainId = 1;
   private handle: unknown;
-  /** The retry stated: the one the timer makes, or the one being made. */
+  /** The retry stated: the one the timer makes, the one the network's return makes, or the one being made. */
   private pending: StatedRetry | undefined;
+  /** Whether the pending retry waits on the network latch rather than a timer. */
+  private latched = false;
   private stopped = false;
 
   constructor(private readonly deps: VendorErrorRetryDeps) {}
@@ -218,9 +263,14 @@ export class VendorErrorRetry {
     return this.chain !== undefined;
   }
 
-  /** Whether a retry is scheduled. */
+  /** Whether a retry is scheduled at an instant. */
   scheduled(): boolean {
     return this.handle !== undefined;
+  }
+
+  /** Whether a retry waits for the network to return. */
+  awaitingNetwork(): boolean {
+    return this.latched;
   }
 
   /**
@@ -238,6 +288,7 @@ export class VendorErrorRetry {
       turnId,
       retryable: isRetryableApiFailure(frame),
       usageLimit: isUsageLimit(frame),
+      unreachable: isUnreachable(frame),
       status: failureStatus(frame),
     };
     if (!failure.retryable && !failure.usageLimit) {
@@ -253,6 +304,16 @@ export class VendorErrorRetry {
     retrying.status = failure.status;
     if (failure.usageLimit) {
       this.readAllowance(retrying, failure);
+      return;
+    }
+    // A FAILURE THE NETWORK CAUSED waits for the network: the turn's own
+    // `unreachable` kind, or a standing fault. The fault is read here, after
+    // the turn's every message was read for reach (engine/session.ts reads a
+    // message's reach before its terminal), so a fault standing now means the
+    // turn's last word was that the API could not be reached.
+    const faultStands = this.deps.network.faultStands();
+    if (failure.unreachable || faultStands) {
+      this.awaitNetwork(retrying, failure, faultStands);
       return;
     }
     this.retryVendorError(retrying, failure);
@@ -281,7 +342,7 @@ export class VendorErrorRetry {
    */
   async retryNow(): Promise<RetryNowOutcome> {
     const chain = this.chain;
-    if (this.stopped || chain === undefined || this.handle === undefined) {
+    if (this.stopped || chain === undefined || (this.handle === undefined && !this.latched)) {
       LOGGER.info(
         { chain: chain?.id ?? 0, standing: chain !== undefined, awaiting: chain?.awaiting ?? "" },
         "a retry was asked for now, and none is scheduled",
@@ -289,17 +350,20 @@ export class VendorErrorRetry {
       return { kind: "nothing_scheduled" };
     }
     this.cancelTimer();
+    this.latched = false;
     LOGGER.info({ chain: chain.id, attempt: chain.retries + 1 }, "a retry was asked for now; agent-repl makes it at once");
     return this.retry(chain);
   }
 
   /**
    * The network probe reached the API again (engine/network-resume.ts
-   * `recovered`). A vendor-error retry waiting out its interval is made now;
-   * a usage-limit retry keeps its instant, and with none pending there is
-   * nothing to make.
+   * `recovered`). A retry waiting for the network is made now (the latch,
+   * {@link networkFaultResolved}); a vendor-error retry waiting out its
+   * interval is made now too; a usage-limit retry keeps its instant, and with
+   * none pending there is nothing to make.
    */
   networkRecovered(): void {
+    if (this.fireLatch("the reachability probe answered")) return;
     const chain = this.chain;
     if (this.stopped || chain === undefined || this.handle === undefined) return;
     if (chain.mode?.kind !== "vendor_error") {
@@ -311,6 +375,33 @@ export class VendorErrorRetry {
     void this.retry(chain);
   }
 
+  /**
+   * THE LATCH: the session's network fault resolved because a request
+   * reached the vendor. Only a retry waiting for the network is made; a
+   * vendor-error retry on its interval keeps it, since a request getting
+   * through says nothing about the failure that interval waits out.
+   */
+  networkFaultResolved(): void {
+    this.fireLatch("a request reached the vendor");
+  }
+
+  /**
+   * Make the retry waiting for the network, EXACTLY ONCE: the latch is
+   * cleared before the retry is made, so a second resolution finds nothing
+   * waiting. Answers whether a retry was waiting.
+   */
+  private fireLatch(how: string): boolean {
+    const chain = this.chain;
+    if (this.stopped || chain === undefined || !this.latched) return false;
+    this.latched = false;
+    LOGGER.info(
+      { chain: chain.id, attempt: chain.retries + 1, how },
+      "the network fault resolved; agent-repl makes the retry that waited for the network",
+    );
+    void this.retry(chain);
+    return true;
+  }
+
   private open(failure: Failure): Chain {
     const opened: Chain = { id: this.nextChainId++, mode: undefined, retries: 0, status: failure.status };
     this.chain = opened;
@@ -319,6 +410,30 @@ export class VendorErrorRetry {
       "the turn ended on a failure agent-repl retries; a retry chain opened",
     );
     return opened;
+  }
+
+  /**
+   * Wait for the network: no timer, the latch. When the fault does not stand
+   * yet (the turn's `unreachable` kind decided first), stand it, so the probe
+   * loop runs and the latch is certain to be fired by its answer.
+   */
+  private awaitNetwork(chain: Chain, failure: Failure, faultStands: boolean): void {
+    if (!faultStands) {
+      LOGGER.info(
+        { chain: chain.id, turn_id: failure.turnId ?? "" },
+        "the turn failed to reach the API while no network fault stood; the retry stands it so the API is probed",
+      );
+      this.deps.network.standFault(failure.status);
+    }
+    this.cancelTimer();
+    chain.mode = { kind: "network" };
+    this.latched = true;
+    LOGGER.info(
+      { chain: chain.id, turn_id: failure.turnId ?? "", retries: chain.retries, unreachable: failure.unreachable, fault_stood: faultStands },
+      "the turn failed because the API could not be reached; agent-repl retries it when the network fault resolves, on no timer",
+    );
+    this.pending = { awaitingNetwork: true, attempt: chain.retries + 1, status: chain.status };
+    this.deps.state(this.pending);
   }
 
   /** The vendor-error cadence: every interval, inside the window. */
@@ -408,6 +523,7 @@ export class VendorErrorRetry {
 
   private async retry(chain: Chain): Promise<RetryNowOutcome> {
     if (this.chain !== chain) return { kind: "nothing_scheduled" };
+    this.latched = false;
     const attempt = chain.retries + 1;
     // THE ATTEMPT IS STATED HERE, where it is made: the footer's "retrying
     // now" is this statement, not its countdown reaching zero (owner ruling,
@@ -460,6 +576,7 @@ export class VendorErrorRetry {
   /** The chain ran out: ERROR, because the turn's work is left undone. CAUSE says what ran out. */
   private giveUp(chain: Chain, why: string, cause: string, fields: Record<string, unknown>): void {
     this.cancelTimer();
+    this.latched = false;
     this.unschedule();
     this.chain = undefined;
     LOGGER.error({ chain: chain.id, retries: chain.retries, mode: chain.mode?.kind ?? "", cause, ...fields }, why);
@@ -467,6 +584,7 @@ export class VendorErrorRetry {
 
   private end(chain: Chain, why: string, fields: Record<string, unknown>): void {
     this.cancelTimer();
+    this.latched = false;
     this.unschedule();
     this.chain = undefined;
     LOGGER.info({ chain: chain.id, retries: chain.retries, mode: chain.mode?.kind ?? "", ...fields }, why);
@@ -537,6 +655,13 @@ function failureStatus(frame: conversationv1.AgentFrame): string {
   return failure.errors[failure.errors.length - 1] ?? failure.failure.case ?? "";
 }
 
+/** Whether a terminal is an API request that never reached the API. */
+function isUnreachable(frame: conversationv1.AgentFrame): boolean {
+  if (frame.result.case !== "failure") return false;
+  const failure = frame.result.value.failure;
+  return failure.case === "apiRequestFailed" && failure.value.kind.case === "unreachable";
+}
+
 /**
  * Whether a terminal is a usage limit: the set the daemon's footer resolves
  * to `vendor_fault · usage_limit` (daemon resolve/footer/chips.go).
@@ -555,31 +680,39 @@ function isUsageLimit(frame: conversationv1.AgentFrame): boolean {
   }
 }
 
-/** The schedule as the session stream states it: the next retry, the one being made, or none. */
+/** The schedule as the session stream states it: the next retry, the one waiting for the network, the one being made, or none. */
 export function vendorErrorRetryUpdate(stated: StatedRetry | undefined): conversationv1.SessionUpdate {
   return create(conversationv1.SessionUpdateSchema, {
     update: {
       case: "vendorErrorRetry",
-      value: create(conversationv1.SessionVendorErrorRetrySchema, {
-        ...(stated === undefined
-          ? {}
-          : "attempting" in stated
-            ? {
-                attempting: create(conversationv1.SessionVendorErrorRetryAttemptingSchema, {
-                  attempt: stated.attempt,
-                  status: stated.status,
-                }),
-              }
-            : {
-                scheduled: create(conversationv1.SessionVendorErrorRetryScheduledSchema, {
-                  attempt: stated.attempt,
-                  nextAttemptAtMs: BigInt(stated.atMs),
-                  status: stated.status,
-                }),
-              }),
-      }),
+      value: create(conversationv1.SessionVendorErrorRetrySchema, { stated: statedArm(stated) }),
     },
   });
+}
+
+/** The `SessionVendorErrorRetry.stated` arm for STATED; unset when none is pending. */
+function statedArm(stated: StatedRetry | undefined): conversationv1.SessionVendorErrorRetry["stated"] {
+  if (stated === undefined) return { case: undefined };
+  if ("attempting" in stated) {
+    return {
+      case: "attempting",
+      value: create(conversationv1.SessionVendorErrorRetryAttemptingSchema, { attempt: stated.attempt, status: stated.status }),
+    };
+  }
+  if ("awaitingNetwork" in stated) {
+    return {
+      case: "awaitingNetwork",
+      value: create(conversationv1.SessionVendorErrorRetryAwaitingNetworkSchema, { attempt: stated.attempt, status: stated.status }),
+    };
+  }
+  return {
+    case: "scheduled",
+    value: create(conversationv1.SessionVendorErrorRetryScheduledSchema, {
+      attempt: stated.attempt,
+      nextAttemptAtMs: BigInt(stated.atMs),
+      status: stated.status,
+    }),
+  };
 }
 
 /** shim.v1.RetryVendorErrorNow's answer for OUTCOME. */

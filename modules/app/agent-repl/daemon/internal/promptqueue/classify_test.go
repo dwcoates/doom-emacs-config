@@ -16,6 +16,7 @@ import (
 	"agent-repld/internal/classifier"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/netstate"
 	"agent-repld/internal/resolve/footer"
 	"agent-repld/internal/resolve/holds"
 	"agent-repld/internal/wsm"
@@ -51,6 +52,61 @@ func TestJudgeLogsAFailedClassifierAtErrorWithItsCauseAndTheRunningTurn(t *testi
 		}
 	}
 	t.Fatalf("records = %+v, want one error carrying the classifier's cause and the running turn", h.log.Records())
+}
+
+func TestJudgeFailureIsRecordedAtTheLevelItsCauseEarns(t *testing.T) {
+	tests := []struct {
+		name     string
+		verdict  netstate.Verdict
+		level    string
+		message  string
+		evidence any
+	}{
+		{
+			name:     "a classifier the network failed is an expected condition",
+			verdict:  netstate.Verdict{Network: true, Evidence: netstate.EvidenceFaultOpen, Detail: "a network_unreachable fault stands"},
+			level:    "info",
+			message:  "the classifier failed because this machine cannot reach the network; the prompt waits for the running turn to end",
+			evidence: "network_fault_open",
+		},
+		{
+			name:     "a classifier that failed otherwise is a defect",
+			verdict:  netstate.Verdict{Detail: "the API answered"},
+			level:    "error",
+			message:  "the classifier failed; the prompt waits for the running turn to end",
+			evidence: nil,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			running(t, h, "running-turn", "the running work")
+			h.judge.err = errors.New("timeout: signal: killed")
+			h.network.verdict = tt.verdict
+
+			// Act
+			if _, err := h.q.Submit(context.Background(), submission("t1", "a follow-up")); err != nil {
+				t.Fatalf("Submit: %v", err)
+			}
+			h.q.waitForClassifications()
+
+			// Assert
+			var found []dlog.Record
+			for _, r := range h.log.Records() {
+				if r.Operation == opClassify && r.Message == tt.message {
+					found = append(found, r)
+				}
+			}
+			if len(found) != 1 || found[0].Level != tt.level || found[0].Context["cause"] != "timeout: signal: killed" ||
+				found[0].Context["running_turn"] != "running-turn" || found[0].Context["network_evidence"] != tt.evidence {
+				t.Fatalf("records = %+v, want one %s %q carrying the cause, the running turn and evidence %v", found, tt.level, tt.message, tt.evidence)
+			}
+			if got := h.network.asked; len(got) != 1 || got[0] != "timeout: signal: killed" {
+				t.Fatalf("network asked about %q, want the classifier's own failure", got)
+			}
+		})
+	}
 }
 
 func TestAPromptHeldByAFailedClassifierDeliversAtTheTurnsEnd(t *testing.T) {

@@ -247,6 +247,8 @@ func newQueue(deps Deps) (*queue, error) {
 		return nil, fmt.Errorf("the prompt queue needs the keep-alive keeper's cache clocks")
 	case deps.Footer == nil:
 		return nil, fmt.Errorf("the prompt queue needs the footer resolver")
+	case deps.Network == nil:
+		return nil, fmt.Errorf("the prompt queue needs the network's state")
 	case deps.Sidebar == nil:
 		return nil, fmt.Errorf("the prompt queue needs the roster resolver")
 	case deps.Leases == nil:

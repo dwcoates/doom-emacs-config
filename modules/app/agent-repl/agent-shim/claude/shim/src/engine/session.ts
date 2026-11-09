@@ -836,8 +836,9 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       pushes.push(update);
     },
     // THE SAME LOOP RESOLVES THE NETWORK FAULT once the API answers it, so an
-    // idle session whose last request failed is not faulted until its next,
-    // and a vendor-error retry waiting out its interval is made at once.
+    // idle session whose last request failed is not faulted until its next;
+    // the answer fires the retry that waited for the network (the latch), and
+    // a vendor-error retry waiting out its interval is made at once.
     recovered: () => {
       pushes.resolveComponent(NETWORK_COMPONENT, 0);
       vendorErrorRetry.networkRecovered();
@@ -863,6 +864,13 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       pushes.push(vendorErrorRetryUpdate(stated));
     },
     readLimits: () => [...rateLimitReadings.values()],
+    // A RETRY WAITING FOR THE NETWORK waits on the fault this session's one
+    // door stands and resolves (noteNetworkReach), so it is fired by the same
+    // resolution that clears the fault, whichever way it comes.
+    network: {
+      faultStands: () => networkResume.faultStands(),
+      standFault: (detail) => noteNetworkReach({ kind: "unreachable", detail }),
+    },
     nowMs: deps.nowMs,
     scheduler: deps.vendorErrorRetryScheduler ?? REAL_SCHEDULER,
   });
@@ -5943,6 +5951,10 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     }
     networkResume.faultResolved();
     pushes.resolveComponent(NETWORK_COMPONENT, 0);
+    // THE LATCH, AFTER THE FAULT RESOLVED: a request that reached the vendor
+    // ends the fault as surely as the probe's answer, so the retry that
+    // waited for the network is made now rather than never.
+    vendorErrorRetry.networkFaultResolved();
   }
 
   type Remedy =
