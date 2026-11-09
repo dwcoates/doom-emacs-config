@@ -318,13 +318,7 @@ export function drawRosterMergeQueueHead(
   const card = drawSubjectControl(subject, sc, MERGE_QUEUE_HEAD_CLASS, `${path}.subject`);
   card.setAttribute("data-standing", standing.case);
 
-  const line = document.createElement("div");
-  line.className = "sb-mq-head-line";
-  const glyph = document.createElement("span");
-  glyph.className = "sb-mq-glyph";
-  glyph.setAttribute("aria-hidden", "true");
-  glyph.textContent = MERGE_GLYPH;
-  line.append(glyph, drawSubjectName(subject, `${path}.subject`));
+  const line = drawCardLine(subject, `${path}.subject`);
   card.appendChild(line);
 
   if (u.stages.length > 0) {
@@ -408,13 +402,7 @@ export const MERGE_QUEUE_REASON_CLASS = "sb-mq-reason";
 export function drawRosterMergeQueueRemediating(u: RosterMergeQueueRemediating, sc: SidebarContext, path: string): HTMLElement {
   const subject = requireMessage(u.subject, `${path}.subject`);
   const card = drawSubjectControl(subject, sc, MERGE_QUEUE_REMEDIATING_CLASS, `${path}.subject`);
-  const line = document.createElement("div");
-  line.className = "sb-mq-head-line";
-  const glyph = document.createElement("span");
-  glyph.className = "sb-mq-glyph";
-  glyph.setAttribute("aria-hidden", "true");
-  glyph.textContent = MERGE_GLYPH;
-  line.append(glyph, drawSubjectName(subject, `${path}.subject`));
+  const line = drawCardLine(subject, `${path}.subject`);
   const words = remediatingWords(requireMessage(u.reason, `${path}.reason`));
   if (words !== null) {
     const reason = document.createElement("span");
@@ -473,6 +461,25 @@ export function drawRosterMergeQueueWaiting(
       ? msOf(u.queuedAtMs, `${path}.queued_at_ms`)
       : msOf(u.racing.sinceMs, `${path}.racing.since_ms`);
   line.appendChild(drawClock(sc, startedMs));
+  return line;
+}
+
+/** The class of a card's name line: the head's, and a remediating merge's. */
+export const MERGE_QUEUE_CARD_LINE_CLASS = "sb-mq-head-line";
+
+/**
+ * A card's name line, the head's and a remediating merge's alike: the merge
+ * glyph, then the name U is credited under. Each card appends what follows
+ * the name on its own line.
+ */
+export function drawCardLine(u: RosterMergeQueueSubject, path: string): HTMLElement {
+  const line = document.createElement("div");
+  line.className = MERGE_QUEUE_CARD_LINE_CLASS;
+  const glyph = document.createElement("span");
+  glyph.className = "sb-mq-glyph";
+  glyph.setAttribute("aria-hidden", "true");
+  glyph.textContent = MERGE_GLYPH;
+  line.append(glyph, drawSubjectName(u, path));
   return line;
 }
 

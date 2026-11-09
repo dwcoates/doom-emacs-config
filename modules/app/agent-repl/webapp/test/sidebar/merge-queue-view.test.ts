@@ -20,6 +20,7 @@ import {
   RosterMergeQueueRemediatingReasonSchema,
   RosterMergeQueueRemediatingSchema,
   RosterMergeQueueStageSchema,
+  RosterMergeQueueSubjectSchema,
   RosterRepoMergeQueueSchema,
 } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import { RepositoryRefSchema as WorkspaceRepositorySchema } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
@@ -28,12 +29,14 @@ import { roundSuffix, STATE_GLYPHS } from "../../src/feed/merge/tab-strip.js";
 import { MERGE_GLYPH } from "../../src/merge-glyph.js";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import {
+  drawCardLine,
   drawHeadClock,
   drawRosterMergeQueue,
   drawRosterMergeQueueHead,
   drawQueuedGroupHead,
   drawRosterMergeQueueStage,
   drawRosterMergeQueueWaiting,
+  MERGE_QUEUE_CARD_LINE_CLASS,
   MERGE_QUEUE_CLASS,
   MERGE_QUEUE_HEAD_CLASS,
   MERGE_QUEUE_PAUSED_ATTRIBUTE,
@@ -642,5 +645,37 @@ describe("a click on a merge in the queue", () => {
     drawRosterMergeQueueWaiting(waitingMerge("w2"), sc, "w").click();
     await settled();
     expect(asked.map((r) => [r.$typeName, r.workspace?.id])).toEqual([["agentrepl.v1.SelectInEditorRequest", "w2"]]);
+  });
+});
+
+describe("drawCardLine", () => {
+  it("draws the merge glyph, hidden from assistive tech, then the credited name", () => {
+    const line = drawCardLine(queueSubject("w1", { name: "one" }), "subject");
+    expect([line.className, [...line.children].map((el) => [el.className, el.textContent, el.getAttribute("aria-hidden")])]).toEqual([
+      MERGE_QUEUE_CARD_LINE_CLASS,
+      [
+        ["sb-mq-glyph", MERGE_GLYPH, "true"],
+        ["sb-mq-name", "one", null],
+      ],
+    ]);
+  });
+
+  it("refuses a subject that carries no mode as malformed", () => {
+    expect(() => drawCardLine(create(RosterMergeQueueSubjectSchema, { workspace: { id: "w1", dir: "/w/w1" }, name: "one" }), "subject")).toThrow(MalformedView);
+  });
+
+  it.each([
+    { name: "the head's card", card: () => drawRosterMergeQueueHead(mergingHead("w1"), undefined, daemon().sc, "head") },
+    {
+      name: "a remediating merge's card",
+      card: () =>
+        drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { remediating: [remediatingMerge("w1", NOW)] }), daemon().sc, "queue").querySelector(
+          `.${MERGE_QUEUE_REMEDIATING_CLASS}`,
+        ) as HTMLElement,
+    },
+  ])("opens $name with the shared card line", ({ card }) => {
+    const shared = drawCardLine(queueSubject("w1"), "subject");
+    const drawn = card().firstElementChild as HTMLElement;
+    expect([...drawn.children].slice(0, 2).map((el) => el.outerHTML)).toEqual([...shared.children].map((el) => el.outerHTML));
   });
 });
