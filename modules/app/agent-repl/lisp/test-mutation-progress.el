@@ -55,6 +55,21 @@ its creation arrives later on the same op."
     (should (equal got '(:create (:id "create-1"))))
     (should (gethash "op-w" agent-repl-mutation-progress--pending))))
 
+(ert-deftest agent-repl-test-mp-waiting-for-requester-turn-dispatches-and-keeps-the-op ()
+  "A create held for its requester's first turn is told to its callback and
+is NOT terminal: its creation arrives later on the same op."
+  ;; Arrange.
+  (agent-repl-test-mp--reset)
+  (let (got)
+    (agent-repl-mutation-progress-register
+     "op-t" :on-waiting-for-requester-turn (lambda (v) (setq got v)))
+    ;; Act.
+    (agent-repl-mutation-progress-handle
+     (agent-repl-test-mp--progress "op-t" :waiting-for-requester-turn '(:create (:id "create-1"))))
+    ;; Assert.
+    (should (equal got '(:create (:id "create-1"))))
+    (should (gethash "op-t" agent-repl-mutation-progress--pending))))
+
 (ert-deftest agent-repl-test-mp-create-words-the-wait-and-the-join ()
   "A held create and a joined one each have a sentence, and neither is FAILED."
   ;; Arrange / Act / Assert.

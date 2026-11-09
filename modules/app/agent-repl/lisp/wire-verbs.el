@@ -944,6 +944,16 @@ failure.  REF is the pending create's `PendingCreateRef'."
     (list :create (agent-repl-wire-decode-pending-create-ref
                    (agent-repl-wire-verbs--require message "create" (cdr (assq 'create json)))))))
 
+(defun agent-repl-wire-decode-create-workspace-waiting-for-requester-turn (json)
+  "Decode CreateWorkspaceWaitingForRequesterTurn from JSON into (:create REF).
+A workspace forked itself in its first turn, so the create is held until
+that turn ends: an answer, never a failure.  REF is the pending create's
+`PendingCreateRef'."
+  (let ((message "CreateWorkspaceWaitingForRequesterTurn"))
+    (agent-repl-wire-verbs--check-keys message json '(create))
+    (list :create (agent-repl-wire-decode-pending-create-ref
+                   (agent-repl-wire-verbs--require message "create" (cdr (assq 'create json)))))))
+
 (defun agent-repl-wire-decode-create-workspace-joined (json)
   "Decode CreateWorkspaceJoined from JSON into (:create REF).
 The request was identical to a pending create, which it joined."
