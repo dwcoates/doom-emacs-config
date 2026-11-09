@@ -425,9 +425,17 @@ func equalValues[T any](a, b T) bool {
 // Changes answers a channel that receives once per value T delivers to a
 // subscription (the latest first, if one exists), until ctx ends, when it
 // closes: for a caller that waits on the view MOVING rather than reading what
-// it moved to.
-func Changes[T any](ctx context.Context, t *Topic[T]) <-chan struct{} {
-	values := t.Subscribe(ctx)
+// it moved to. EACH CHANGE IS COUNTED as work in flight from the value's
+// publish until the caller's ack, which it calls once it has done what the
+// change woke it for: the test barrier then sees a change still being acted
+// on as work, not as a quiet daemon.
+func Changes[T any](ctx context.Context, t *Topic[T]) (changes <-chan struct{}, ack func()) {
+	return ChangesOn(ctx, t, inflight.Default)
+}
+
+// ChangesOn is Changes counting on TRACKER.
+func ChangesOn[T any](ctx context.Context, t *Topic[T], tracker *inflight.Tracker) (<-chan struct{}, func()) {
+	values, ackValue := t.subscribeCounted(ctx, tracker)
 	out := make(chan struct{})
 	inflight.Standing(func() {
 		defer close(out)
@@ -435,9 +443,11 @@ func Changes[T any](ctx context.Context, t *Topic[T]) <-chan struct{} {
 			select {
 			case out <- struct{}{}:
 			case <-ctx.Done():
+				// Never handed over: the subscription ends with ctx, and its
+				// end ends the count of every value it still holds.
 				return
 			}
 		}
 	})
-	return out
+	return out, ackValue
 }

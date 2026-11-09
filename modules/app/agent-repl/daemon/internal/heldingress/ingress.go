@@ -99,7 +99,9 @@ func (i *ingress) Run(ctx context.Context) error {
 	// being made, which is never done here (see Sweep).
 	changes, stop := kernelevent.Follow(ctx, filepath.Dir(i.deps.Dir), i.deps.Dir)
 	defer stop()
-	fleet := i.deps.FleetChanges(ctx)
+	fleet, ackFleet := i.deps.FleetChanges(ctx)
+	// sweptFleet ends the count of the fleet change that woke the last sweep.
+	sweptFleet := func() {}
 	log.Info(opRun, "watching the held-prompt ingress", dlog.Context{"glob": Glob})
 	for {
 		intake := i.deps.IntakeChanged()
@@ -108,7 +110,12 @@ func (i *ingress) Run(ctx context.Context) error {
 			// the same entries.
 			log.Error(opRun, "a sweep of the held-prompt ingress failed", dlog.Context{"cause": err.Error()})
 		}
-		woke, err := i.awaitWake(ctx, changes, intake, fleet)
+		sweptFleet()
+		sweptFleet = func() {}
+		woke, err := i.awaitWake(ctx, changes, intake, fleet, ackFleet)
+		if woke == wokeByFleet {
+			sweptFleet = ackFleet
+		}
 		if ctx.Err() != nil {
 			log.Info(opRun, "stopped watching the held-prompt ingress", nil)
 			return ctx.Err()
@@ -131,8 +138,9 @@ const (
 // awaitWake waits for the next change that can let an entry in, answering
 // which one woke it, the directory watch's error, or nothing once ctx ends. A
 // fleet change wakes a sweep only while an entry waits; one with nothing
-// waiting is taken and waited past.
-func (i *ingress) awaitWake(ctx context.Context, dir <-chan error, intake, fleet <-chan struct{}) (string, error) {
+// waiting is taken, acked and waited past. A fleet change that wakes a sweep
+// is acked by Run once that sweep has run.
+func (i *ingress) awaitWake(ctx context.Context, dir <-chan error, intake, fleet <-chan struct{}, ackFleet func()) (string, error) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -148,6 +156,7 @@ func (i *ingress) awaitWake(ctx context.Context, dir <-chan error, intake, fleet
 			if i.waiting() {
 				return wokeByFleet, nil
 			}
+			ackFleet()
 		}
 	}
 }

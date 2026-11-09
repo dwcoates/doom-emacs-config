@@ -614,7 +614,7 @@ func (s *server) watchDaemon(
 	events, ackEvent := s.daemonEventTopic.SubscribeStream(streamCtx)
 	ackFault, ackWifi, ackDigest := func() {}, func() {}, func() {}
 
-	w := &daemonWatcher{sent: make(chan struct{}), elisp: make(chan *agentreplv1.WatchDaemonResponse, 4)}
+	w := &daemonWatcher{sent: make(chan struct{}), elisp: make(chan addressedPush, 4)}
 	// THE STANDING LOUD FAULTS ARE AN EMACS STREAM'S ALONE: a webview draws
 	// them on the topbar and footer views it already holds. A nil channel is
 	// never ready, so a webview's select never takes that case.
@@ -700,7 +700,7 @@ func (s *server) watchDaemon(
 			}
 			push, fromState, ack = event, false, ackEvent
 		case addressed := <-w.elisp:
-			push, fromState = addressed, false
+			push, fromState, ack = addressed.push, false, addressed.sent
 		case standing, ok := <-faults:
 			wrapped, ended := standingPush(s.log, standing, ok, "fault set",
 				func(v *agentreplv1.DaemonFaultsStanding) *agentreplv1.WatchDaemonResponse {
@@ -750,6 +750,8 @@ func (s *server) watchDaemon(
 		if err := out.Send(push); err != nil {
 			s.log.Debug("WatchDaemon", "the standing stream's client went away",
 				dlog.Context{"cause": err.Error()})
+			// THE PUSH WILL NEVER BE WRITTEN, so its count ends here.
+			ack()
 			return nil
 		}
 		ack()

@@ -1584,7 +1584,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		PublishHost:    relay.PublishHostWorkspace,
 		Serves:         rolloutController.ServesIntake,
 		IntakeChanged:  rolloutController.IntakeChanged,
-		FleetChanges: func(ctx context.Context) <-chan struct{} {
+		FleetChanges: func(ctx context.Context) (<-chan struct{}, func()) {
 			return publish.Changes(ctx, sidebarResolver.Topic())
 		},
 		Log: p.Surfaces,

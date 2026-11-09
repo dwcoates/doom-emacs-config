@@ -469,7 +469,12 @@ type runWorld struct {
 	intakeMu sync.Mutex
 	intake   chan struct{}
 	fleet    chan struct{}
+	// fleetAcks receives once per fleet change Run acknowledged.
+	fleetAcks chan struct{}
 }
+
+// ackFleet is the fleet change's ack Run calls.
+func (r *runWorld) ackFleet() { r.fleetAcks <- struct{}{} }
 
 // runHandler is a Submit safe to call from Run's goroutine while the test
 // reads: it refuses while refusals stand, then accepts.
@@ -491,7 +496,7 @@ func newRunWorld(t *testing.T, dir string) *runWorld {
 	r := &runWorld{
 		world: newWorld(t), dir: dir,
 		calls: make(chan string, 16), published: make(chan ids.WorkspaceID, 16),
-		intake: make(chan struct{}), fleet: make(chan struct{}),
+		intake: make(chan struct{}), fleet: make(chan struct{}), fleetAcks: make(chan struct{}, 8),
 	}
 	r.serves.Store(true)
 	return r
@@ -521,7 +526,7 @@ func (r *runWorld) run(t *testing.T) (cancel func(), done <-chan error) {
 			defer r.intakeMu.Unlock()
 			return r.intake
 		},
-		FleetChanges: func(context.Context) <-chan struct{} { return r.fleet },
+		FleetChanges: func(context.Context) (<-chan struct{}, func()) { return r.fleet, r.ackFleet },
 		Log:          r.log,
 	})
 	if err != nil {
@@ -582,6 +587,7 @@ func TestRunIngestsAnEntryOnTheChangeThatLetsItIn(t *testing.T) {
 			after: func(_ *testing.T, r *runWorld) {
 				<-r.calls // the refused submission
 				r.fleet <- struct{}{}
+				<-r.calls // the accepted one
 			}},
 	}
 	for _, tc := range tests {
@@ -629,6 +635,35 @@ func TestRunTakesAFleetChangeWithNothingWaitingAsNoSweep(t *testing.T) {
 			t.Fatalf("a sweep was woken by %q with nothing waiting, want only %q", woke, wokeByDir)
 		}
 	}
+}
+
+func TestRunAcksAFleetChangeWithNothingWaitingAtOnce(t *testing.T) {
+	// Arrange
+	r := newRunWorld(t, t.TempDir())
+	r.run(t)
+
+	// Act
+	r.fleet <- struct{}{}
+
+	// Assert: the ack arrives, or the test's own bound fails it.
+	<-r.fleetAcks
+}
+
+func TestRunAcksAFleetChangeThatWokeASweepOnceTheSweepRan(t *testing.T) {
+	// Arrange: an entry the queue refused once.
+	r := newRunWorld(t, t.TempDir())
+	r.refusals.Store(1)
+	r.writeIn(t, "held_20260928T120001_a.json")
+	r.run(t)
+	<-r.calls // the refused submission
+
+	// Act
+	r.fleet <- struct{}{}
+	<-r.calls // the sweep the change woke
+	<-r.published
+
+	// Assert
+	<-r.fleetAcks
 }
 
 func TestRunEndsWithItsContext(t *testing.T) {
