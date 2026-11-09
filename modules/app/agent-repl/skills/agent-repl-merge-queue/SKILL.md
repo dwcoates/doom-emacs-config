@@ -160,8 +160,8 @@ Either kind:
   - Once its turn ends it goes back in line at the first waiting place, next
     after the merge being worked on, never evicting it. It then rebases onto
     the tip and reruns its whole suite when it heads the queue.
-  - A test step aside is its one fixing attempt: a second failing suite fails
-    it out. A conflict step aside spends no fixing attempt, and if its rebase
+  - A test step aside spends one of its fixing attempts: a failing suite
+    after its last one fails it out. A conflict step aside spends no fixing attempt, and if its rebase
     on return conflicts again it steps aside again.
   - A merge with nobody in line behind it repairs in place.
   - It survives a daemon restart.

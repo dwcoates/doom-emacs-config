@@ -1341,12 +1341,13 @@ like an improvement still needs that conversation. Code:
   line and resumed after a restart, since every one ends in `fixSettled`.
 - **After remediation, the selected suites run again**, selected afresh from
   the branch's whole diff, fixing commits included.
-- **One fixing attempt, five consecutive conflict failures, and
+- **Four fixing attempts, five consecutive conflict failures, and
   interruptions never count.**
-  - The tests cycle gives a failing gate one fixing attempt, and fails the
-    merge when the gate fails again (`MaxFixAttempts`; owner ruling
-    2026-10-26, down from five, so a merge that cannot get green leaves the
-    queue and the next one can work).
+  - The tests cycle gives a failing gate up to four fixing attempts, and
+    fails the merge when the gate fails a fifth time in a row
+    (`MaxFixAttempts`; owner ruling 2026-11-09, up from one, so a merge gets
+    room to get green while one that cannot still leaves the queue and the
+    next one can work).
   - The conflict cycle fails the merge when five resolution attempts in a row
     leave one commit's conflict unresolved (`MaxConflictAttempts`); one
     failure is a resolution turn that failed or left files conflicted.
