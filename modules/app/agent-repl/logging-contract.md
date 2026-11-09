@@ -234,7 +234,8 @@ records are forbidden.
 Required fields:
 
 - `timestamp`: RFC 3339 timestamp in the shared representation below
-- `runtime`: `emacs`, `daemon`, `shim`, `webapp`, `sidecar`, or `store`
+- `runtime`: `emacs`, `daemon`, `shim`, `webapp`, `sidecar`, `store`, or
+  `notifier`
 - `level`: `debug`, `info`, `warn`, or `error`
 - `verbosity`: `normal` or `verbose`
 - `operation`: stable machine-readable operation name
@@ -364,6 +365,12 @@ it to the local zone before persisting.
 - The sidecar writes only genuinely global service records directly. A
   file-specific diagnostic is forwarded with the Claude session identifier,
   source path, sidecar PID, operation, and structured error context.
+- The notifier app (Zettel.app, `notifier/`) writes its own global sink,
+  `~/.cache/agent-repl/log/notifier.log`, through its one logger
+  (`ZettelNotifier.FileLogger`): its stream to the daemon, every banner it
+  posted or the platform refused, and every click it reported. A banner's
+  refusal is ALSO recorded by the daemon against the banner's workspace, which
+  owns that failure; the app's line is its own side of it.
 - The store writes only genuinely global lifecycle, database, protocol, and
   sink failures. Successful replay, heartbeat, subscription, and ingestion are
   not store-owned narrative records. Session-specific failures are returned to

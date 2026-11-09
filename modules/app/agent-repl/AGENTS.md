@@ -17,6 +17,12 @@ it is the one word for its concept in code, protos and docs alike: see
 `zettel/AGENTS.md` "Glossary". The planning record is
 `docs/knowledge-graph/PLAN.md`.
 
+On macOS the desktop notifications are posted by Zettel.app, a Swift app of
+this module (`notifier/`), not by the daemon or any Homebrew tool: see
+`notifier/AGENTS.md`. "Zettel" there is the app's user-facing name, the
+coming name of agent-repl; the knowledge-graph service in `zettel/` is a
+different system.
+
 The repo-wide rules in the top-level `AGENTS.md` apply here in full; this file
 covers deploying and running THIS module, plus the color vocabulary every one
 of its surfaces shares.
