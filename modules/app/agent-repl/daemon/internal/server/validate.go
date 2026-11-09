@@ -1015,6 +1015,8 @@ func validateArrangeSidebarRequest(req *agentreplv1.ArrangeSidebarRequest) *conn
 		return validateArrangeMoveSubsection(change.MoveSubsection)
 	case *agentreplv1.ArrangeSidebarRequest_MoveRepository:
 		return validateArrangeMoveRepository(change.MoveRepository)
+	case *agentreplv1.ArrangeSidebarRequest_MoveRepositoryBlock:
+		return validateArrangeMoveRepositoryBlock(change.MoveRepositoryBlock)
 	case *agentreplv1.ArrangeSidebarRequest_PlaceWorkspace:
 		return validateArrangePlaceWorkspace(change.PlaceWorkspace)
 	case *agentreplv1.ArrangeSidebarRequest_PlaceWorkspaces:
@@ -1073,6 +1075,24 @@ func validateArrangeMoveSubsection(move *agentreplv1.ArrangeMoveSubsection) *con
 		}
 	case *agentreplv1.ArrangeMoveSubsection_BeforeWorkspace:
 		return validateWorkspaceRef("move_subsection.before_workspace", to.BeforeWorkspace)
+	}
+	return nil
+}
+
+// validateArrangeMoveRepositoryBlock is ArrangeMoveRepositoryBlock's base
+// function: a parent, a repository, and a place arm.
+func validateArrangeMoveRepositoryBlock(move *agentreplv1.ArrangeMoveRepositoryBlock) *connect.Error {
+	if err := validateWorkspaceRef("move_repository_block.parent", move.GetParent()); err != nil {
+		return err
+	}
+	if err := validateRepositoryRef("move_repository_block.repository", move.GetRepository()); err != nil {
+		return err
+	}
+	switch to := move.GetTo().(type) {
+	case nil:
+		return invalid("move_repository_block.to", "a place arm is required")
+	case *agentreplv1.ArrangeMoveRepositoryBlock_Before:
+		return validateRepositoryRef("move_repository_block.before", to.Before)
 	}
 	return nil
 }

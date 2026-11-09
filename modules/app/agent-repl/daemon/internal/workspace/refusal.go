@@ -78,6 +78,9 @@ const (
 	// repository's main workspace
 	// (ArrangeSidebarError.main_workspace_not_sortable).
 	ArmMainWorkspaceNotSortable = "main_workspace_not_sortable"
+	// ArmNoRepositoryBlock is a block move naming a block the parent does
+	// not have (ArrangeSidebarError.no_repository_block).
+	ArmNoRepositoryBlock = "no_repository_block"
 	// ArmNotSiblings is a move between two workspaces that are not siblings
 	// in the arrangement's walk (MoveWorkspaceError.not_siblings).
 	ArmNotSiblings = "not_siblings"

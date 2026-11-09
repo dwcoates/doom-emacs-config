@@ -592,6 +592,9 @@ type Verbs interface {
 	// MoveRepository moves one repository before another (nil: last) and
 	// republishes the roster.
 	MoveRepository(ctx context.Context, id ids.RepoID, before *ids.RepoID) error
+	// MoveRepositoryBlock moves a parent's block of one other repository
+	// before another of its blocks (nil: last) and republishes the roster.
+	MoveRepositoryBlock(ctx context.Context, parent ids.WorkspaceID, repo ids.RepoID, before *ids.RepoID) error
 	// PlaceWorkspaces puts root workspaces, with their families, into a
 	// subsection of their repository (nil: none) as one block at an anchor
 	// (before a root there, before a subsection when into none, or last), and
