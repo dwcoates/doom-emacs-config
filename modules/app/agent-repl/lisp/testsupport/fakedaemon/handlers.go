@@ -41,6 +41,10 @@ func (s *fakeServer) CloseFeedImage(ctx context.Context, req *connect.Request[v1
 	return handleUnary[v1.CloseFeedImageRequest, v1.CloseFeedImageResponse](ctx, s, "CloseFeedImage", req.Msg)
 }
 
+func (s *fakeServer) AwaitIdle(ctx context.Context, req *connect.Request[v1.AwaitIdleRequest]) (*connect.Response[v1.AwaitIdleResponse], error) {
+	return handleUnary[v1.AwaitIdleRequest, v1.AwaitIdleResponse](ctx, s, "AwaitIdle", req.Msg)
+}
+
 func (s *fakeServer) PlanRollback(ctx context.Context, req *connect.Request[v1.PlanRollbackRequest]) (*connect.Response[v1.PlanRollbackResponse], error) {
 	return handleUnary[v1.PlanRollbackRequest, v1.PlanRollbackResponse](ctx, s, "PlanRollback", req.Msg)
 }

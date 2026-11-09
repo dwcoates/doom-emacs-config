@@ -391,7 +391,7 @@ func testBashDetachExplicitPoll(t *testing.T) {
 
 	// The settled shell above is ordered AFTER both polls were converted, so
 	// every topbar view the exempt drop could ever have provoked has already
-	// been published or is in flight; the probe window covers the in-flight
+	// been published or is in flight; the barrier covers the in-flight
 	// tail. Every view seen — the initial one and any later push — must be
 	// free of a TaskOutput unmodeled warning.
 	dbExpectNoUnmodeledWarning(t, topbarStream, "TaskOutput")
