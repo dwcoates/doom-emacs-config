@@ -10,8 +10,8 @@
  *
  * THE GEOMETRY IS THE EXISTING ONE. The context arms keep the treatment the
  * `/clear` and `/compact` dividers already had — a 4px bar across the central
- * column with a centered muted label beneath it — and the worktree arms are the
- * same bar in BLUE. That is why the rule's own class is shared and only the
+ * column with a centered muted label beneath it — the worktree arms are the
+ * same bar in BLUE, and the fork point is the same bar in GREY. That is why the rule's own class is shared and only the
  * accent differs.
  *
  * A COMPACTION'S SUMMARY HAS NO FOLD: its bubble is always drawn under the
@@ -30,6 +30,7 @@ import type {
   FeedContextCutCompacted,
   FeedContextCutCompactionFailed,
   FeedContextCutTokens,
+  FeedContextForked,
   FeedSessionSeparation,
   FeedSessionSeparationLabel,
   FeedWorktreeEntered,
@@ -47,6 +48,7 @@ const ACCENTS = {
   compacted: "sep-accent-compacted",
   worktreeEntered: "sep-accent-worktree",
   worktreeLeft: "sep-accent-worktree",
+  forked: "sep-accent-forked",
 } as const satisfies Record<string, string>;
 
 /**
@@ -137,6 +139,8 @@ export function drawFeedSessionSeparation(
         return drawFeedContextCutCleared(kind.value);
       case "compacted":
         return drawFeedContextCutCompacted(kind.value);
+      case "forked":
+        return drawFeedContextForked(kind.value);
       case "worktreeEntered":
         return drawFeedWorktreeEntered(kind.value, rc);
       case "worktreeLeft":
@@ -180,6 +184,15 @@ export function drawFeedContextCutTokens(tokens: FeedContextCutTokens): HTMLElem
  * no summary standing in its place — so the divider is the whole of it.
  */
 export function drawFeedContextCutCleared(_cleared: FeedContextCutCleared): null {
+  return null;
+}
+
+/**
+ * The fork point has NOTHING to expand: it only parts the context a forked
+ * workspace inherited from the context it made itself, so the grey bar and its
+ * label are the whole of it.
+ */
+export function drawFeedContextForked(_forked: FeedContextForked): null {
   return null;
 }
 

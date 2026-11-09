@@ -172,6 +172,10 @@ type pageLoad struct {
 	// nil for a page of the feed's own book: its rows are drawn in the
 	// inherited plane, and its turns' records are its ancestor's.
 	inherited *LineageSegment
+	// segmentStart is set on the FIRST page read of an inherited generation
+	// (the newest, nothing after it): the page the fork-point divider stands
+	// under (forkdivider.go).
+	segmentStart bool
 }
 
 // noteDrawn records one row a load drew in its feed, and reports whether it is
@@ -386,6 +390,8 @@ func (r *resolver) load(ctx context.Context, plan loadPlan) (loaded, error) {
 		cutoff:    f.book.lowest(),
 		quiet:     map[string]bool{},
 		inherited: plan.inherited,
+		// A generation's first page is read after no pointer.
+		segmentStart: plan.inherited != nil && plan.after == nil,
 	}
 	if plan.pushAll {
 		l.cutoff = ""

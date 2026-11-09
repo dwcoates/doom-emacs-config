@@ -6292,6 +6292,9 @@ bubble-body.bubble-body { display: block; }
 .sep-accent-cleared { background: var(--clear-divider); }
 .sep-accent-compacted { background: var(--compact-rule); }
 .sep-accent-worktree { background: var(--init); }
+/* The fork point: grey, the one divider that cuts nothing, so it is neither
+   the red/orange of a context cut nor the blue of a worktree move. */
+.sep-accent-forked { background: var(--muted); }
 .sep-label {
   text-align: center;
   color: var(--muted);

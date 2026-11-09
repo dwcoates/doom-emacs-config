@@ -3143,6 +3143,11 @@ message FeedSessionSeparation {
     // is as it was (conversation.v1.ContextCompactionFailed relayed). `tokens`
     // is UNSET. (Landing 8, 2026-09-02, user-approved.)
     FeedContextCutCompactionFailed compaction_failed = 7;
+    // The line between the context a FORKED workspace inherited from its
+    // parent (above) and the context the workspace made itself (below). It
+    // cuts nothing: the inherited rows stay the conversation. `tokens` is
+    // UNSET.
+    FeedContextForked forked = 8;
   }
   // What the cut did to the context's size, drawn on the divider — SET ON
   // THE CONTEXT ARMS ONLY (every cut has one; even a clear reloads the
@@ -3165,6 +3170,11 @@ message FeedContextCutTokens {
   // Tokens in context immediately after the cut, formatted for display.
   string after_text = 2;
 }
+
+// The fork point: everything above this divider was inherited from the
+// workspace this one was forked from, everything below is this workspace's
+// own. The divider is drawn grey, never the red or orange of a context cut.
+message FeedContextForked {}
 
 // The history was discarded outright, with nothing left in its place — the
 // divider has nothing to expand.
