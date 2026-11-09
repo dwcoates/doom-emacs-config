@@ -298,8 +298,8 @@ func Run(ctx context.Context, d Deps, a Args) int {
 	}
 
 	printUnitSummary(log, results, d.Slots, start, end, p.Makespan)
-	passed, declined, failed := partition(suiteResults)
-	printSuiteSummaries(log, passed, declined, failed)
+	passed, failed := partition(suiteResults)
+	printSuiteSummaries(log, passed, failed)
 	if len(failed) > 0 {
 		return 1
 	}
@@ -327,7 +327,7 @@ func Run(ctx context.Context, d Deps, a Args) int {
 	} else {
 		log.Infof("timings were not recorded, pass --record only for a canonical history run")
 	}
-	printClosing(log, a, passed, declined)
+	printClosing(log, a)
 	if names := reuse.ReusedNames(verdicts); len(names) > 0 {
 		log.Infof("reused an earlier green run of their exact inputs, NOT run: %s (--no-reuse runs them)", strings.Join(names, " "))
 	}
@@ -368,7 +368,6 @@ var suiteOutcomes = map[run.Outcome]string{
 	run.Passed:    testtimes.Pass,
 	run.Failed:    testtimes.Fail,
 	run.Cancelled: testtimes.Fail,
-	run.Declined:  testtimes.Skip,
 }
 
 // unitOutcomes is the outcome a unit's resource use is labeled with.
@@ -406,13 +405,11 @@ func pushTimes(ctx context.Context, d Deps, results []run.Result, suiteResults [
 	return nil
 }
 
-func partition(rs []run.SuiteResult) (passed, declined, failed []run.SuiteResult) {
+func partition(rs []run.SuiteResult) (passed, failed []run.SuiteResult) {
 	for _, r := range rs {
 		switch r.Outcome {
 		case run.Passed:
 			passed = append(passed, r)
-		case run.Declined:
-			declined = append(declined, r)
 		default:
 			failed = append(failed, r)
 		}
@@ -465,19 +462,13 @@ func overCores(r run.Result) (string, bool) {
 		r.Spec.ID, r.Usage.CPU/w, r.Usage.CPU, w, width), true
 }
 
-func printSuiteSummaries(log *run.Log, passed, declined, failed []run.SuiteResult) {
+func printSuiteSummaries(log *run.Log, passed, failed []run.SuiteResult) {
 	if len(passed) > 0 {
 		log.Infof("timing summary, most unit time first (%s is what --record keeps; the span depends on the interleaving)", RecordedMeasure)
 		sorted := append([]run.SuiteResult(nil), passed...)
 		sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].UnitSeconds > sorted[j].UnitSeconds })
 		for _, s := range sorted {
 			log.Infof("timing: %s %.3fs of units over a %.3fs span", s.Name, s.UnitSeconds, s.Seconds())
-		}
-	}
-	if len(declined) > 0 {
-		log.Infof("declined summary, %d suite(s) could not run", len(declined))
-		for _, s := range declined {
-			log.Infof("declined: %s did not run (precondition unmet) after %.3fs", s.Name, s.Seconds())
 		}
 	}
 	if len(failed) > 0 {
@@ -569,34 +560,14 @@ func FinishRecord(d Deps, moduleRoot, recordOut string) int {
 	return 0
 }
 
-func names(rs []run.SuiteResult) string {
-	var n []string
-	for _, r := range rs {
-		n = append(n, r.Name)
-	}
-	if len(n) == 0 {
-		return "none"
-	}
-	return strings.Join(n, " ")
-}
-
-// printClosing names what ran and what declined separately: a DECLINED suite
-// did not pass, it did not run.
-func printClosing(log *run.Log, a Args, passed, declined []run.SuiteResult) {
+// printClosing names the suites that passed and, for a selected run, the
+// ones it did not select.
+func printClosing(log *run.Log, a Args) {
 	if len(a.Selected) == 0 {
-		if len(declined) == 0 {
-			log.Infof("all agent-repl test suites passed")
-		} else {
-			log.Infof("every agent-repl suite that could run passed; DECLINED: %s", names(declined))
-		}
+		log.Infof("all agent-repl test suites passed")
 		return
 	}
-	if len(declined) == 0 {
-		log.Infof("selected agent-repl suites passed: %s", strings.Join(a.Selected, " "))
-	} else {
-		log.Infof("selected agent-repl suites that ran passed: %s", names(passed))
-		log.Infof("selected but DECLINED, did NOT run: %s", names(declined))
-	}
+	log.Infof("selected agent-repl suites passed: %s", strings.Join(a.Selected, " "))
 	var skipped []string
 	for _, s := range roster.Suites {
 		if !a.Selects(s.Name) {

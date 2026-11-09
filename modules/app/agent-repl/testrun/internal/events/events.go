@@ -74,8 +74,6 @@ func UnitEndedOf(res run.Result, output []byte) *testrunv1.TestRunUnitEnded {
 		ended.Verdict = &testrunv1.TestRunUnitEnded_Passed{Passed: &testrunv1.TestRunUnitPassed{}}
 	case run.Failed:
 		ended.Verdict = &testrunv1.TestRunUnitEnded_Failed{Failed: &testrunv1.TestRunUnitFailed{ExitCode: int32(res.Exit), OutputTail: tail(output)}}
-	case run.Declined:
-		ended.Verdict = &testrunv1.TestRunUnitEnded_Declined{Declined: &testrunv1.TestRunUnitDeclined{}}
 	case run.Cancelled:
 		ended.WallMs = 0
 		ended.Verdict = &testrunv1.TestRunUnitEnded_Cancelled{Cancelled: &testrunv1.TestRunUnitCancelled{CancelledByUnitId: res.CancelledBy}}
@@ -121,13 +119,11 @@ func tail(output []byte) string {
 // Ended states how the run ended, from every unit's result and the suites
 // that could not even be planned.
 func (e *Emitter) Ended(results []run.Result, unplannable int) {
-	var passed, declined, failed, cancelled int32
+	var passed, failed, cancelled int32
 	for _, r := range results {
 		switch r.Outcome {
 		case run.Passed:
 			passed++
-		case run.Declined:
-			declined++
 		case run.Failed:
 			failed++
 		case run.Cancelled:
@@ -137,7 +133,7 @@ func (e *Emitter) Ended(results []run.Result, unplannable int) {
 	failed += int32(unplannable)
 	ended := &testrunv1.TestRunEnded{}
 	if failed+cancelled == 0 {
-		ended.Outcome = &testrunv1.TestRunEnded_Passed{Passed: &testrunv1.TestRunEndedPassed{PassedUnits: passed, DeclinedUnits: declined}}
+		ended.Outcome = &testrunv1.TestRunEnded_Passed{Passed: &testrunv1.TestRunEndedPassed{PassedUnits: passed}}
 	} else {
 		ended.Outcome = &testrunv1.TestRunEnded_Failed{Failed: &testrunv1.TestRunEndedFailed{FailedUnits: failed, CancelledUnits: cancelled, PassedUnits: passed}}
 	}

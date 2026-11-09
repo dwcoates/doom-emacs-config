@@ -170,20 +170,6 @@ func TestScriptUnits(t *testing.T) {
 	}
 }
 
-func TestScriptUnitsCarryTheDeclineRight(t *testing.T) {
-	// Arrange
-	repo := t.TempDir()
-	write(t, filepath.Join(repo, "bin", "e.sh"), "#!/bin/sh\n", 0o755)
-
-	// Act
-	u, err := scriptUnits(Layout{Repo: repo, Module: repo}, roster.Suite{Name: "e", Path: "bin/e.sh", MayDecline: true})
-
-	// Assert
-	if err != nil || !u.Atomic[0].MayDecline {
-		t.Fatalf("spec = %+v, %v; want MayDecline", u.Atomic, err)
-	}
-}
-
 func TestScriptUnitsCarryTheirWidth(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -259,7 +245,7 @@ func goTestsSuite(t *testing.T, repo, pattern string) roster.Suite {
 	write(t, filepath.Join(repo, "bin", "e.sh"), "#!/bin/sh\n", 0o755)
 	write(t, filepath.Join(repo, "pkg", "x_test.go"), "package pkg\n\nimport \"testing\"\n\n"+
 		"func TestEmacsA(t *testing.T) {}\nfunc TestDoomB(t *testing.T) {}\nfunc TestOther(t *testing.T) {}\nfunc TestWithinTestEmacs(t *testing.T) {}\n", 0o644)
-	return roster.Suite{Name: "e", Kind: roster.Script, Path: "bin/e.sh", MayDecline: true, Slots: 2, NeedsWebappDist: true,
+	return roster.Suite{Name: "e", Kind: roster.Script, Path: "bin/e.sh", Slots: 2, NeedsWebappDist: true,
 		GoTests: &roster.GoTests{Dir: "pkg", Pattern: pattern}}
 }
 

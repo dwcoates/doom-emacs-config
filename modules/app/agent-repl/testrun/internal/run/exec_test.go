@@ -211,7 +211,6 @@ func TestOSExecReportsTheExitStatusAndBothStreams(t *testing.T) {
 	}{
 		{"a passing unit", 0},
 		{"a failing unit", 3},
-		{"a declining unit", ExitDeclined},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

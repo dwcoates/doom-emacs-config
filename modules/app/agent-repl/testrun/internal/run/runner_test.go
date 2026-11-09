@@ -218,21 +218,12 @@ func TestRunReportsEachSuiteVerdict(t *testing.T) {
 			wantErrLine: "[agent-repl-tests] ERROR: a failed after ",
 		},
 		{
-			name:        "exit 77 from a unit that may decline declines the suite",
-			specs:       []Spec{{Unit: sched.Unit{ID: "e", Suite: "e"}, Argv: []string{"x"}, MayDecline: true}},
-			scripts:     map[string]script{"e": {exit: ExitDeclined}},
-			suite:       "e",
-			wantOutcome: Declined,
-			wantExit:    ExitDeclined,
-			wantLine:    "[agent-repl-tests] e: DECLINED after ",
-		},
-		{
-			name:        "exit 77 from a unit that may not decline is a failure",
+			name:        "exit 77, the retired decline status, is a failure",
 			specs:       []Spec{spec("e", "e")},
-			scripts:     map[string]script{"e": {exit: ExitDeclined}},
+			scripts:     map[string]script{"e": {exit: 77}},
 			suite:       "e",
 			wantOutcome: Failed,
-			wantExit:    ExitDeclined,
+			wantExit:    77,
 			wantErrLine: "e failed after ",
 		},
 		{
@@ -574,25 +565,6 @@ func TestRunRecordsAFailedUnitsUnreadableTestTimesAtInfo(t *testing.T) {
 	if !strings.Contains(out.String(), "unit go#00 (daemon) failed, and its test timings are unreadable: no tests file") ||
 		strings.Contains(errOut.String(), "test timings") {
 		t.Fatalf("want the unreadable timings at info only; out:\n%s\nerr:\n%s", out, errOut)
-	}
-}
-
-func TestRunReadsNoTestTimesOfADeclinedUnit(t *testing.T) {
-	// Arrange
-	s := spec("h#00", "harness")
-	s.MayDecline = true
-	called := false
-	s.Tests = func([]byte, bool) ([]testtimes.Test, error) { called = true; return nil, nil }
-	r, _, _ := newRunner(1, &fakeExec{scripts: map[string]script{"h#00": {exit: ExitDeclined}}})
-
-	// Act
-	if _, _, err := r.Run(context.Background(), []Spec{s}); err != nil {
-		t.Fatal(err)
-	}
-
-	// Assert
-	if called {
-		t.Fatalf("a declined unit's test times were read")
 	}
 }
 

@@ -30,7 +30,7 @@
 # The output contract: one "<suite>: starting" line followed by its
 # "<suite>: N units planned" line, one "unit <id> [<suite>] ok|FAILED|..." line
 # per unit, one "<suite>: passed in Ns" / "<suite> failed after Ns with exit
-# code N" / "<suite>: DECLINED after ..." line per suite, then the summaries.
+# code N" line per suite, then the summaries.
 # The merge gate (daemon/internal/merge/testgate.go) parses those lines, and
 # counts each suite's unit verdicts against its planned total.
 #
@@ -41,8 +41,8 @@
 #
 # A failing suite is reported loudly the moment it fails, the run continues
 # through everything else, and it ends with a summary of every failure plus a
-# non-zero exit status. A suite that exits 77 DECLINED (its precondition is
-# unmet) and is never called passed.
+# non-zero exit status. No suite may skip: one whose precondition is unmet
+# (the e2e sandbox, say) fails like any other.
 #
 # --record appends one row per passing suite to ../test_time.csv (its own
 # units' summed wall time, measure unit-wall-sum) and compares the run with

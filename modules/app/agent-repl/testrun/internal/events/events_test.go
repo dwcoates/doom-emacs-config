@@ -70,7 +70,6 @@ func TestUnitEndedOf(t *testing.T) {
 		{name: "a failure carries its exit and output", res: result("u", run.Failed), check: func(u *testrunv1.TestRunUnitEnded) bool {
 			return u.GetFailed().GetExitCode() == 3 && u.GetFailed().GetOutputTail() == "boom\n"
 		}},
-		{name: "a decline", res: result("u", run.Declined), check: func(u *testrunv1.TestRunUnitEnded) bool { return u.GetDeclined() != nil }},
 		{name: "a cancellation names its cause and took no time", res: result("u", run.Cancelled), check: func(u *testrunv1.TestRunUnitEnded) bool {
 			return u.GetCancelled().GetCancelledByUnitId() == "dep" && u.GetWallMs() == 0
 		}},
@@ -111,8 +110,8 @@ func TestEnded(t *testing.T) {
 		unplannable int
 		check       func(*testrunv1.TestRunEnded) bool
 	}{
-		{name: "passed and declined units pass", results: []run.Result{result("a", run.Passed), result("b", run.Declined)}, check: func(e *testrunv1.TestRunEnded) bool {
-			return e.GetPassed().GetPassedUnits() == 1 && e.GetPassed().GetDeclinedUnits() == 1
+		{name: "passed units pass", results: []run.Result{result("a", run.Passed), result("b", run.Passed)}, check: func(e *testrunv1.TestRunEnded) bool {
+			return e.GetPassed().GetPassedUnits() == 2
 		}},
 		{name: "a failure and a cancellation fail", results: []run.Result{result("a", run.Failed), result("b", run.Cancelled), result("c", run.Passed)}, check: func(e *testrunv1.TestRunEnded) bool {
 			f := e.GetFailed()

@@ -16,10 +16,6 @@ import (
 	"agentrepl/testrun/internal/testtimes"
 )
 
-// ExitDeclined is the exit status a suite uses to say "my precondition is not
-// met, I did not run" (autotools' "skipped"). It is never a pass.
-const ExitDeclined = 77
-
 // Spec is one unit and the process that runs it.
 type Spec struct {
 	sched.Unit
@@ -27,8 +23,6 @@ type Spec struct {
 	Dir  string
 	// Env is added to the runner's own environment.
 	Env []string
-	// MayDecline lets exit 77 mean "declined" rather than "failed".
-	MayDecline bool
 	// Items parses the unit's output into seconds per item, for the history.
 	// Nil for a unit that is not a chunk.
 	Items func(output []byte) (map[string]float64, error)
@@ -77,7 +71,6 @@ type Outcome int
 const (
 	Passed Outcome = iota
 	Failed
-	Declined
 	Cancelled
 )
 
@@ -221,8 +214,6 @@ func (r *Runner) Run(ctx context.Context, specs []Spec) ([]Result, []SuiteResult
 			sr.Outcome, sr.Exit = Failed, res.Exit
 		case res.Outcome == Cancelled && sr.Outcome != Failed:
 			sr.Outcome, sr.Exit = Failed, 1
-		case res.Outcome == Declined && sr.Outcome == Passed:
-			sr.Outcome, sr.Exit = Declined, ExitDeclined
 		}
 		remaining[res.Spec.Suite]--
 		if remaining[res.Spec.Suite] == 0 {
@@ -325,8 +316,6 @@ func (r *Runner) Run(ctx context.Context, specs []Spec) ([]Result, []SuiteResult
 			res.Outcome, res.Exit = Failed, -1
 		case c.exit == 0:
 			res.Outcome = Passed
-		case c.exit == ExitDeclined && spec.MayDecline:
-			res.Outcome = Declined
 		default:
 			res.Outcome = Failed
 		}
@@ -417,8 +406,6 @@ func (r *Runner) reportUnit(res Result) {
 	switch res.Outcome {
 	case Passed:
 		r.Log.Infof("unit %s [%s] ok, %.3fs wall, %.3fs cpu", id, suite, res.Wall(), res.Usage.CPU)
-	case Declined:
-		r.Log.Infof("unit %s [%s] declined (exit %d) after %.3fs", id, suite, ExitDeclined, res.Wall())
 	case Failed:
 		r.Log.Errorf("unit %s [%s] FAILED with exit code %d after %.3fs", id, suite, res.Exit, res.Wall())
 	case Cancelled:
@@ -431,8 +418,6 @@ func (r *Runner) reportSuite(sr SuiteResult) {
 	switch sr.Outcome {
 	case Passed:
 		r.Log.Infof("%s: passed in %.3fs", sr.Name, sr.Seconds())
-	case Declined:
-		r.Log.Infof("%s: DECLINED after %.3fs — its precondition is not met (exit %d); see its message above", sr.Name, sr.Seconds(), ExitDeclined)
 	default:
 		r.Log.Errorf("%s failed after %.3fs with exit code %d", sr.Name, sr.Seconds(), sr.Exit)
 	}

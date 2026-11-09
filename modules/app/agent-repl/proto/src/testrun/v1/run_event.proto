@@ -74,12 +74,13 @@ message TestRunUnitEnded {
     TestRunUnitPassed passed = 4;
     // The unit failed: a test failed, or the process did.
     TestRunUnitFailed failed = 5;
-    // The unit's precondition was unmet (an e2e sandbox with no container
-    // runtime, say), so it ran nothing; a decline fails no run.
-    TestRunUnitDeclined declined = 6;
     // A unit the unit depended on failed, so it never started.
     TestRunUnitCancelled cancelled = 7;
   }
+  // 6 was `declined`, a unit whose precondition was unmet. Retired 2026-11-09:
+  // no suite may skip a run, so a unit that cannot run fails (owner ruling).
+  reserved 6;
+  reserved "declined";
   // The tests the unit ran, each with its own outcome, where the unit's output
   // states them (Go, vitest and ERT do; a harness states its groups). Empty for
   // a unit that ran no test (a build) or never started.
@@ -97,9 +98,6 @@ message TestRunUnitFailed {
   // holds all of it.
   string output_tail = 2;
 }
-
-// The unit declined: its precondition was unmet.
-message TestRunUnitDeclined {}
 
 // The unit was cancelled before it started.
 message TestRunUnitCancelled {
@@ -137,7 +135,7 @@ message TestRunTestSkipped {}
 
 // How the run ended.
 message TestRunEnded {
-  // Whether every unit passed (or declined).
+  // Whether every unit passed.
   oneof outcome {
     // No unit failed.
     TestRunEndedPassed passed = 1;
@@ -150,8 +148,9 @@ message TestRunEnded {
 message TestRunEndedPassed {
   // How many units ran and passed.
   int32 passed_units = 1;
-  // How many units declined.
-  int32 declined_units = 2;
+  // 2 was `declined_units`, retired with TestRunUnitEnded's declined arm.
+  reserved 2;
+  reserved "declined_units";
 }
 
 // At least one unit failed or was cancelled.

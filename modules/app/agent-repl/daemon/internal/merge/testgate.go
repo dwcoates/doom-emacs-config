@@ -39,10 +39,6 @@ var suitePassed = regexp.MustCompile(`(?m)^.*?([A-Za-z0-9_-]+): passed in ([0-9]
 // suite's exit code.
 var suiteFailed = regexp.MustCompile(`(?m)^.*?([A-Za-z0-9_-]+) failed after ([0-9]+(?:\.[0-9]+)?)s with exit code (-?[0-9]+)\s*$`)
 
-// suiteDeclined matches a selected suite whose precondition was unmet. A
-// decline is terminal and non-failing: the gate continues and may pass.
-var suiteDeclined = regexp.MustCompile(`(?m)^.*?([A-Za-z0-9_-]+): DECLINED after ([0-9]+(?:\.[0-9]+)?)s\b.*$`)
-
 // suiteReused matches the runner's line for a suite it did not run because an
 // earlier run passed its exact inputs (testrun/internal/reuse). The second
 // group is the earlier run, as the runner names it ("passed <when> on <branch>
@@ -149,8 +145,6 @@ const (
 	suiteStatePassed
 	// suiteStateFailed is a suite the script reported failing.
 	suiteStateFailed
-	// suiteStateDeclined is a selected suite whose precondition was unmet.
-	suiteStateDeclined
 	// suiteStateSkipped is a suite --suites left out; it draws no row.
 	suiteStateSkipped
 	// suiteStateReused is a suite the runner did not run because an earlier
@@ -201,7 +195,7 @@ func reusedSuite(line string) (string, string, bool) {
 // The runner (testrun) runs many suites' units at once and prints each unit's
 // output whole, bracketed by a line naming its unit and suite ("unit ID
 // [SUITE] output:") and by the unit's own verdict line ("unit ID [SUITE]
-// ok|FAILED|declined ..."). So a line inside a bracket belongs to that
+// ok|FAILED ..."). So a line inside a bracket belongs to that
 // bracket's suite, and a line that names a suite -- its starting and verdict
 // lines, a unit cancelled before it ran -- belongs to the suite it names.
 //
@@ -265,7 +259,7 @@ var unitBegin = regexp.MustCompile(`^.*?unit (\S+) \[([A-Za-z0-9_-]+)\] output:\
 // unitVerdict is the runner's line settling one unit: it closes the unit's
 // block, or names a unit cancelled before it ran. The third group is the
 // verdict.
-var unitVerdict = regexp.MustCompile(`^.*?unit (\S+) \[([A-Za-z0-9_-]+)\] (ok|FAILED|declined|NOT RUN)\b`)
+var unitVerdict = regexp.MustCompile(`^.*?unit (\S+) \[([A-Za-z0-9_-]+)\] (ok|FAILED|NOT RUN)\b`)
 
 // tabSuite is one suite's tab row at a state, with its counts when known.
 //
@@ -281,9 +275,7 @@ func tabSuite(name string, state suiteState, counts *frontendv1.FeedMergeTestCou
 	case suiteStateReused:
 		suite.State = &frontendv1.FeedMergeTestSuite_Reused{Reused: &frontendv1.FeedMergeTestSuiteReused{
 			Source: &frontendv1.FeedMergeTestSuiteReusedSource{Text: source}}}
-	case suiteStatePassed, suiteStateDeclined:
-		// The wire has no declined arm. Preserve the explicit DECLINED line
-		// in Output and use the existing non-failure terminal glyph.
+	case suiteStatePassed:
 		suite.State = &frontendv1.FeedMergeTestSuite_Passed{Passed: &frontendv1.FeedMergeTestSuitePassed{}}
 	case suiteStateFailed:
 		suite.State = &frontendv1.FeedMergeTestSuite_Failed{Failed: &frontendv1.FeedMergeTestSuiteFailed{}}
@@ -304,8 +296,7 @@ func tabSuite(name string, state suiteState, counts *frontendv1.FeedMergeTestCou
 
 // suiteCounts are each suite's unit counts, read off the runner's lines: the
 // planned total from its "N units planned" line, a pass for each "ok" unit
-// verdict, a failure for each "FAILED" or "NOT RUN" one. A declined unit is
-// neither. A suite whose planned line has not been read has no counts.
+// verdict, a failure for each "FAILED" or "NOT RUN" one. A suite whose planned line has not been read has no counts.
 type suiteCounts struct {
 	planned map[string]int
 	passed  map[string]int
@@ -361,9 +352,6 @@ func settledSuite(line string) (string, suiteState, bool) {
 	}
 	if m := suiteFailed.FindStringSubmatch(line); m != nil {
 		return m[1], suiteStateFailed, true
-	}
-	if m := suiteDeclined.FindStringSubmatch(line); m != nil {
-		return m[1], suiteStateDeclined, true
 	}
 	if name, _, ok := reusedSuite(line); ok {
 		return name, suiteStateReused, true

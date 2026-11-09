@@ -58,8 +58,6 @@ type Suite struct {
 	// Runs is when the suite runs; the zero value is in every run that
 	// selects it.
 	Runs RunCondition
-	// MayDecline marks the suites allowed to exit 77 ("precondition unmet").
-	MayDecline bool
 	// Harness marks a suite that tests the module's own shell scripts in bin/,
 	// which is the blast radius the merge gate gives a change under bin/.
 	Harness bool
@@ -391,7 +389,7 @@ var Suites = []Suite{
 	// the same Doom in the same image, so it shares this suite's container
 	// rather than paying a second container start for tests of about three
 	// seconds each.
-	{Name: "e2e-emacs", Kind: Script, Path: "bin/test-e2e-emacs.sh", MayDecline: true, Slots: 2, NeedsWebappDist: true,
+	{Name: "e2e-emacs", Kind: Script, Path: "bin/test-e2e-emacs.sh", Slots: 2, NeedsWebappDist: true,
 		GoTests: &GoTests{Dir: "e2e", Pattern: "TestEmacs|TestDoom"}},
 }
 
