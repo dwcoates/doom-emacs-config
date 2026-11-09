@@ -3718,6 +3718,15 @@ Each element is (WS LINE)."
   (should-not (agent-repl-roster-row-merged-at
                '(:when (:arm :hidden :value (:at-ms 7 :cache nil))))))
 
+(ert-deftest agent-repl-test-roster-row-summary-reads-the-detail ()
+  "The summary accessor reads the detail's summary text."
+  (should (equal (agent-repl-roster-row-summary '(:detail (:summary (:text "fix it")))) "fix it")))
+
+(ert-deftest agent-repl-test-roster-row-summary-absent-is-nil ()
+  "A row whose detail states no summary, or a missing row, has none."
+  (should-not (agent-repl-roster-row-summary '(:detail (:summary nil))))
+  (should-not (agent-repl-roster-row-summary nil)))
+
 (ert-deftest agent-repl-test-roster-row-commit-count-reads-the-detail ()
   "The detail panel's count is the row's commit count, zero included."
   (should (equal (agent-repl-roster-row-commit-count '(:detail (:commits (:count 0)))) 0))
