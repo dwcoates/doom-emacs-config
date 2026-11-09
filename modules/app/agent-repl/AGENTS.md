@@ -1879,8 +1879,13 @@ manifest, and `bin/requirements.sh` is the one program that reads them.
   - `files`: config copied from the module into the cache (`from` module-relative, `to` cache-relative). A copy that differs reads as `outdated`, and install copies it again and restarts the service.
 - **The `emacs` entry pins zettel-emacs, a fork of Emacs carrying the patches agent-repl needs.**
   - `revision` is the fork's commit, and check compares it to the installed Emacs's `emacs-repository-version`; `configuration_features` must all appear in its `system-configuration-features`.
-  - `install.source` builds that commit: `brew_deps` first, then `autogen.sh`, `configure` with its arguments, `make` and `make install`, in a checkout under the cache (`src/<repo>`). The new app replaces `app` only once it is built, and the previous one is moved aside, never deleted.
-  - A `configure` argument names a Homebrew path as `{brew}` or `{brew:FORMULA}`, never a machine's literal prefix.
+  - `install.source` builds that commit with one build block per platform (`darwin`, `linux`): the block's `deps` for this machine's package manager first, then `autogen.sh`, `configure` with the block's arguments, `make` and `make install`, in a checkout under the cache (`src/<repo>`).
+    - On macOS the new app replaces the block's `app` only once it is built, and the previous one is moved aside, never deleted.
+    - On Linux `make install` installs into the configure prefix (`~/.local`) only once `make` has built everything; `~/.local/bin` must be on PATH ahead of any distribution Emacs.
+    - Each block's `configuration_features` add the platform's own (`NS`; `X11`, `GTK3`, `CAIRO`) to the shared ones.
+  - A `configure` argument or a dependency names a machine's path or version as a placeholder, never a literal: `{home}`, `{gcc-major}` (Debian's `libgccjit-N-dev` must match the gcc that builds), `{brew}` or `{brew:FORMULA}`.
+  - Linux builds the X11 GTK3 toolkit, which runs under XWayland too: pgtk's xwidgets show a blank first page (owner ruling 2026-11-09).
+  - The fork carries upstream `4e855f90` (Emacs 31.1) backported, which lifts configure's WebKitGTK ceiling (`< 2.41.92`) that every current distribution is above, and turns off the offscreen view's hardware acceleration that made newer WebKitGTK abort.
   - tree-sitter is linked statically (`TREE_SITTER_LIBS`), so a Homebrew upgrade of it cannot stop the app from starting.
   - A change to the fork's patches is a new commit there and a new `revision` here, in the same change.
   - The commit is pushed to the fork's `zettel-30.2` branch before the change that moves `revision` lands, because install fetches the pinned commit from the fork; a pin to a commit the fork lacks fails every install.

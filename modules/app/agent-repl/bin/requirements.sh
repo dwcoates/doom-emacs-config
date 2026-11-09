@@ -22,8 +22,9 @@
 #   program                  a command on PATH, optionally at a minimum version
 #   emacs                    the emacs on PATH at a minimum version, with features;
 #                            with `revision`, built from that commit of a source
-#                            repository (`install.source`) with its configuration
-#                            features (`configuration_features`)
+#                            repository (`install.source`, with one build block
+#                            per platform) with its configuration features
+#                            (`configuration_features`, and the platform block's)
 #   env                      an environment variable the user sets
 #   notification_permission  macOS lets a banner program notify
 #   skill_link               a Claude Code skill linked into the skills directory of
@@ -272,8 +273,15 @@ validate_entries() {
       (if $e.kind == "program" then need($e; ["command", "install", "platforms"])
        elif $e.kind == "emacs" then need($e; ["command", "min", "features", "install", "platforms"]),
          (select($e.install.source != null) | need($e; ["revision"]),
-           (("repo", "configure", "app") as $f | select($e.install.source[$f] == null)
-             | "\($e._file): \($e.id): an emacs install.source needs \"\($f)\""))
+           (select($e.install.source.repo == null)
+             | "\($e._file): \($e.id): an emacs install.source needs \"repo\""),
+           ($e.platforms // [] | .[] as $p
+             | (select($e.install.source[$p] == null)
+                 | "\($e._file): \($e.id): an emacs install.source needs a \"\($p)\" build block"),
+               (select($e.install.source[$p] != null and $e.install.source[$p].configure == null)
+                 | "\($e._file): \($e.id): an emacs install.source.\($p) needs \"configure\""),
+               (select($p == "darwin" and $e.install.source[$p] != null and $e.install.source[$p].app == null)
+                 | "\($e._file): \($e.id): an emacs install.source.darwin needs \"app\"")))
        elif $e.kind == "env" then need($e; ["name", "doc"])
        elif $e.kind == "notification_permission" then need($e; ["command", "platforms"])
        elif $e.kind == "skill_link" then need($e; ["name", "source"])
@@ -355,7 +363,7 @@ install_text() {
     if .brew then ((if .tap then "brew tap \(.tap) && " else "" end) + "brew install \(.brew)" + ((.options // []) | map(" " + .) | join("")))
     elif .brew_cask then "brew install --cask \(.brew_cask)"
     elif .go_install then "go install \(.go_install)"
-    elif .source then "build \(.source.repo) at the pinned revision and install it as \(.source.app)"
+    elif .source then "build \(.source.repo) at the pinned revision and install it as \(.source.darwin.app)"
     elif .manual then .manual
     else "no install step" end')"
   printf '%s\n' "$how"
@@ -417,7 +425,7 @@ check_emacs() {
   while IFS= read -r f; do
     [ -n "$f" ] || continue
     case "$configured" in *" $f "*) ;; *) missing="$missing $f" ;; esac
-  done < <(printf '%s\n' "$e" | jq -r '.configuration_features // [] | .[]')
+  done < <(printf '%s\n' "$e" | jq -r --arg p "$(platform)" '(.configuration_features // []) + (.install.source[$p].configuration_features // []) | .[]')
   if [ -n "$missing" ]; then
     STATUS=outdated; DETAIL="$path (Emacs $have) was configured without:$missing"
   else
@@ -747,11 +755,18 @@ install_emacs() {
   fi
 }
 
-# expand_brew_prefixes ARG: ARG with every `{brew}` replaced by Homebrew's
-# prefix and every `{brew:FORMULA}` by that formula's, so a manifest names a
-# Homebrew path without naming a machine's.
-expand_brew_prefixes() {
+# expand_placeholders ARG: ARG with its placeholders replaced, so a manifest
+# names a path or a version without naming a machine's: `{home}` is the home
+# directory, `{gcc-major}` the major version of the gcc on PATH, `{brew}`
+# Homebrew's prefix and `{brew:FORMULA}` that formula's.
+expand_placeholders() {
   local arg="$1" out="" name
+  if [[ "$arg" == *"{gcc-major}"* ]]; then
+    local major
+    major="$(gcc -dumpversion)" || { err "expand: $arg names {gcc-major}, and gcc -dumpversion failed"; return 1; }
+    arg="${arg//\{gcc-major\}/${major%%.*}}"
+  fi
+  arg="${arg//\{home\}/$HOME}"
   while [[ "$arg" == *"{brew"* ]]; do
     out="$out${arg%%\{brew*}"
     arg="${arg#*\{brew}"
@@ -767,28 +782,69 @@ expand_brew_prefixes() {
   printf '%s\n' "$out$arg"
 }
 
-# install_emacs_source ENTRY: build Emacs from the entry's source repository at
-# its pinned revision, with its configure arguments, and install the app it
-# makes in place of install.source.app. The app it replaces is moved aside,
-# never deleted, and only once the new one is built: a failed step leaves the
-# installed app as it was.
-install_emacs_source() {
-  local e="$1" id repo revision app dir dep built backup jobs
-  id="$(field "$e" .id)"
-  repo="$(field "$e" .install.source.repo)"
-  revision="$(field "$e" .revision)"
-  app="$(field "$e" .install.source.app)"
-  dir="$CACHE_ROOT/src/$(basename "$repo" .git)"
+# install_source_deps ENTRY ID: install the build dependencies the platform
+# block names for this machine's package manager. On macOS each Homebrew
+# formula not yet installed is installed; on Linux one install of them all
+# runs, the dependencies naming `{gcc-major}` after the rest, since gcc is
+# itself among the rest on a machine that has none yet.
+install_source_deps() {
+  local e="$1" id="$2" pm dep first=() later=()
+  pm="$(package_manager)"
+  if [ "$pm" = brew ]; then
+    while IFS= read -r dep; do
+      [ -n "$dep" ] || continue
+      if ! brew list --formula "$dep" >/dev/null 2>&1; then
+        brew install "$dep" || { err "install: $id: brew install $dep failed"; return 1; }
+      fi
+    done < <(printf '%s\n' "$e" | jq -r '.install.source.darwin.deps.brew // [] | .[]')
+    return
+  fi
+  [ -n "$pm" ] || { err "install: $id: no package manager install knows ($LINUX_PACKAGE_MANAGERS) is on PATH for its build dependencies"; return 1; }
+  if [ "$(printf '%s\n' "$e" | jq -r --arg pm "$pm" '.install.source.linux.deps[$pm] // empty | length')" = "" ]; then
+    err "install: $id: no $pm build dependencies are declared for it; add install.source.linux.deps.$pm to its manifest entry"
+    return 1
+  fi
   while IFS= read -r dep; do
     [ -n "$dep" ] || continue
-    if ! brew list --formula "$dep" >/dev/null 2>&1; then
-      brew install "$dep" || { err "install: $id: brew install $dep failed"; return 1; }
-    fi
-  done < <(printf '%s\n' "$e" | jq -r '.install.source.brew_deps // [] | .[]')
-  local args=() a
+    case "$dep" in
+      *"{gcc-major}"*) later+=("$dep") ;;
+      *) first+=("$dep") ;;
+    esac
+  done < <(printf '%s\n' "$e" | jq -r --arg pm "$pm" '.install.source.linux.deps[$pm] // [] | .[]')
+  if [ "${#first[@]}" -gt 0 ]; then
+    os_install "$pm" "${first[@]}" || return 1
+  fi
+  if [ "${#later[@]}" -gt 0 ]; then
+    local expanded=()
+    local x
+    for dep in "${later[@]}"; do
+      x="$(expand_placeholders "$dep")" || return 1
+      expanded+=("$x")
+    done
+    os_install "$pm" "${expanded[@]}" || return 1
+  fi
+}
+
+# install_emacs_source ENTRY: build Emacs from the entry's source repository at
+# its pinned revision, with the platform block's dependencies and configure
+# arguments. Nothing installed is touched until the build has succeeded: on
+# macOS the app it makes replaces install.source.darwin.app, the app it
+# replaces moved aside, never deleted; on Linux `make install` installs into
+# the configure prefix only once `make` has built everything.
+install_emacs_source() {
+  local e="$1" id repo revision dir built backup jobs plat app
+  id="$(field "$e" .id)"
+  plat="$(platform)"
+  repo="$(field "$e" .install.source.repo)"
+  revision="$(field "$e" .revision)"
+  app="$(field "$e" ".install.source.$plat.app")"
+  dir="$CACHE_ROOT/src/$(basename "$repo" .git)"
+  install_source_deps "$e" "$id" || return 1
+  local args=() a x
   while IFS= read -r a; do
-    args+=("$(expand_brew_prefixes "$a")")
-  done < <(printf '%s\n' "$e" | jq -r '.install.source.configure[]')
+    x="$(expand_placeholders "$a")" || return 1
+    args+=("$x")
+  done < <(printf '%s\n' "$e" | jq -r --arg p "$plat" '.install.source[$p].configure[]')
   mkdir -p "$dir"
   if [ ! -d "$dir/.git" ]; then
     git -C "$dir" init -q || { err "install: $id: git init in $dir failed"; return 1; }
@@ -800,6 +856,10 @@ install_emacs_source() {
   (cd "$dir" && ./configure ${args[@]+"${args[@]}"}) || { err "install: $id: configure in $dir failed; config.log there says why"; return 1; }
   (cd "$dir" && make -j"$jobs") || { err "install: $id: make in $dir failed"; return 1; }
   (cd "$dir" && make install) || { err "install: $id: make install in $dir failed"; return 1; }
+  if [ "$plat" != darwin ]; then
+    say "install: $id: installed Emacs built from $revision into its configure prefix; restart Emacs to run it"
+    return 0
+  fi
   built="$dir/nextstep/Emacs.app"
   [ -d "$built" ] || { err "install: $id: the build made no $built"; return 1; }
   if [ -e "$app" ]; then

@@ -550,9 +550,10 @@ test_an_old_emacs_is_outdated() {
 PINNED=cc023ace88da219c9e77740b9e180ea648fc4759
 
 # source_emacs_entry: an emacs entry built from a source repository at PINNED,
-# its app under the case's own Applications dir.
+# for macOS and Linux: its macOS app under the case's own Applications dir, its
+# Linux build installed under the case's home.
 source_emacs_entry() {
-  printf '%s' '{"id": "emacs", "kind": "emacs", "why": "w", "profile": "run", "platforms": ["darwin"], "command": "emacs", "min": "30.2", "features": ["xwidget-internal"], "revision": "'"$PINNED"'", "configuration_features": ["XWIDGETS", "NATIVE_COMP"], "install": {"source": {"repo": "https://example.test/fork/zettel-emacs.git", "brew_deps": ["autoconf", "tree-sitter"], "configure": ["--with-xwidgets", "LIBS={brew:tree-sitter}/lib/x.a", "CPPFLAGS=-I{brew}/include"], "app": "'"$CASE"'/Applications/Emacs.app"}}}'
+  printf '%s' '{"id": "emacs", "kind": "emacs", "why": "w", "profile": "run", "platforms": ["darwin", "linux"], "command": "emacs", "min": "30.2", "features": ["xwidget-internal"], "revision": "'"$PINNED"'", "configuration_features": ["XWIDGETS", "NATIVE_COMP"], "install": {"source": {"repo": "https://example.test/fork/zettel-emacs.git", "darwin": {"configuration_features": ["NS"], "deps": {"brew": ["autoconf", "tree-sitter"]}, "configure": ["--with-xwidgets", "LIBS={brew:tree-sitter}/lib/x.a", "CPPFLAGS=-I{brew}/include"], "app": "'"$CASE"'/Applications/Emacs.app"}, "linux": {"configuration_features": ["GTK3"], "deps": {"apt": ["autoconf", "libgccjit-{gcc-major}-dev", "libgtk-3-dev"], "dnf": ["autoconf", "libgccjit-devel"]}, "configure": ["--with-x-toolkit=gtk3", "--prefix={home}/.local"]}}}}'
 }
 
 # fake_source_build: git, make and the checkout's own autogen.sh and configure
@@ -590,25 +591,25 @@ test_an_emacs_at_its_pinned_revision_is_ok() {
 }
 
 test_an_emacs_built_from_another_revision_is_outdated() {
-  new_case; manifest "[$(source_emacs_entry)]"; fake_emacs 30.2 "" 636f166cfc86 "XWIDGETS NATIVE_COMP"
+  new_case; manifest "[$(source_emacs_entry)]"; fake_emacs 30.2 "" 636f166cfc86 "NS XWIDGETS NATIVE_COMP"
   run check
   if [ "$RC" -eq 1 ] && has "outdated    emacs: $CASE/stubs/emacs (Emacs 30.2) was built from 636f166cfc86, not the pinned $PINNED"; then pass "an emacs built from another revision is outdated, naming both"; else fail "other revision" "rc=$RC" "$OUT"; fi
 }
 
 test_an_emacs_with_no_recorded_revision_is_outdated() {
-  new_case; manifest "[$(source_emacs_entry)]"; fake_emacs 30.2 "" "" "XWIDGETS NATIVE_COMP"
+  new_case; manifest "[$(source_emacs_entry)]"; fake_emacs 30.2 "" "" "NS XWIDGETS NATIVE_COMP"
   run check
   if [ "$RC" -eq 1 ] && has "was built from no recorded commit, not the pinned $PINNED"; then pass "an emacs with no recorded commit is outdated"; else fail "no revision" "rc=$RC" "$OUT"; fi
 }
 
 test_an_emacs_configured_without_a_feature_is_outdated() {
-  new_case; manifest "[$(source_emacs_entry)]"; fake_emacs 30.2 "" "$PINNED" "XWIDGETS NATIVE_COMP_X"
+  new_case; manifest "[$(source_emacs_entry)]"; fake_emacs 30.2 "" "$PINNED" "NS XWIDGETS NATIVE_COMP_X"
   run check
   if [ "$RC" -eq 1 ] && has "outdated    emacs: $CASE/stubs/emacs (Emacs 30.2) was configured without: NATIVE_COMP"; then pass "an emacs configured without a feature is outdated, naming it"; else fail "configuration feature" "rc=$RC" "$OUT"; fi
 }
 
 test_an_emacs_source_fix_names_the_build() {
-  new_case; manifest "[$(source_emacs_entry)]"; fake_emacs 30.2 "" 636f166cfc86 "XWIDGETS NATIVE_COMP"
+  new_case; manifest "[$(source_emacs_entry)]"; fake_emacs 30.2 "" 636f166cfc86 "NS XWIDGETS NATIVE_COMP"
   run check
   if has "Fix: build https://example.test/fork/zettel-emacs.git at the pinned revision and install it as $CASE/Applications/Emacs.app"; then pass "a source emacs's fix names the build"; else fail "source fix" "$OUT"; fi
 }
@@ -620,13 +621,67 @@ test_an_emacs_source_without_a_revision_is_refused() {
 }
 
 test_an_emacs_source_lacking_a_field_is_refused() {
-  new_case; manifest "[$(source_emacs_entry | jq -c 'del(.install.source.app)')]"
-  run check
-  if [ "$RC" -eq 2 ] && has 'emacs: an emacs install.source needs "app"'; then pass "an emacs source lacking a field is refused, naming it"; else fail "source field" "rc=$RC" "$OUT"; fi
+  local path want
+  while IFS='|' read -r path want; do
+    new_case; manifest "[$(source_emacs_entry | jq -c "del($path)")]"
+    run check
+    if [ "$RC" -eq 2 ] && has "$want"; then pass "an emacs source lacking $path is refused, naming it"; else fail "source field $path" "rc=$RC" "$OUT"; fi
+  done <<'CASES'
+.install.source.repo|emacs: an emacs install.source needs "repo"
+.install.source.darwin.app|emacs: an emacs install.source.darwin needs "app"
+.install.source.linux.configure|emacs: an emacs install.source.linux needs "configure"
+.install.source.linux|emacs: an emacs install.source needs a "linux" build block
+CASES
+}
+
+test_an_emacs_without_its_platform_blocks_configuration_feature_is_outdated() {
+  new_case; manifest "[$(source_emacs_entry)]"; fake_emacs 30.2 "" "$PINNED" "XWIDGETS NATIVE_COMP NS"
+  PLATFORM=linux run check
+  if [ "$RC" -eq 1 ] && has "was configured without: GTK3"; then pass "a linux emacs lacking the linux block's configuration feature is outdated"; else fail "platform configuration feature" "rc=$RC" "$OUT"; fi
+}
+
+# fake_linux_source_build: fake_source_build, the linux package managers, and a
+# gcc whose major version is 14.
+fake_linux_source_build() {
+  fake_source_build
+  fake_linux_package_managers
+  write_stub gcc 'echo 14.2.0'
+}
+
+test_installing_a_linux_emacs_source_installs_deps_then_builds_into_the_prefix() {
+  new_case; manifest "[$(source_emacs_entry)]"; fake_emacs 30.2 "" 636f166cfc86 "GTK3 XWIDGETS NATIVE_COMP"; fake_linux_source_build
+  PLATFORM=linux run install
+  local src="$CASE/home/.cache/agent-repl/src/zettel-emacs" deps gccjit
+  deps="$(grep -n "apt-get install -y autoconf libgtk-3-dev" "$CASE/transcript" | head -1 | cut -d: -f1)"
+  gccjit="$(grep -n "apt-get install -y libgccjit-14-dev" "$CASE/transcript" | head -1 | cut -d: -f1)"
+  if [ "$RC" -eq 0 ] && ran "sudo -n apt-get update -q" && [ -n "$deps" ] && [ -n "$gccjit" ] && [ "$deps" -lt "$gccjit" ] \
+     && ran "git -C $src checkout -q --force $PINNED" \
+     && ran "configure --with-x-toolkit=gtk3 --prefix=$CASE/home/.local" && ran "make install" \
+     && ! ran "brew " && [ "$(cat "$CASE/Applications/Emacs.app/marker")" = old ] \
+     && has "installed Emacs built from $PINNED into its configure prefix" && has "ok          emacs:"; then
+    pass "installing a linux source emacs installs its deps (gccjit after gcc), then builds into the prefix"
+  else fail "linux source install" "rc=$RC" "$OUT" "$(cat "$CASE/transcript")"; fi
+}
+
+test_a_linux_emacs_source_without_this_managers_deps_builds_nothing() {
+  new_case; manifest "[$(source_emacs_entry)]"; fake_emacs 30.2 "" 636f166cfc86 "GTK3 XWIDGETS NATIVE_COMP"; fake_linux_source_build
+  EXTRA_ENV="AGENT_REPL_REQUIREMENTS_PACKAGE_MANAGER=pacman" PLATFORM=linux run install
+  if [ "$RC" -eq 1 ] && has "ERROR: install: emacs: no pacman build dependencies are declared for it; add install.source.linux.deps.pacman to its manifest entry" \
+     && ! ran "sudo" && ! ran "configure " && ! ran "make "; then
+    pass "a linux emacs source with no deps for the machine's manager builds nothing and says to add them"
+  else fail "linux source no deps" "rc=$RC" "$OUT" "$(cat "$CASE/transcript")"; fi
+}
+
+test_a_failed_linux_emacs_dependency_install_builds_nothing() {
+  new_case; manifest "[$(source_emacs_entry)]"; fake_emacs 30.2 "" 636f166cfc86 "GTK3 XWIDGETS NATIVE_COMP"; fake_linux_source_build
+  EXTRA_ENV="STUB_SUDO_EXIT=1 AGENT_REPL_REQUIREMENTS_PACKAGE_MANAGER=dnf" PLATFORM=linux run install
+  if [ "$RC" -eq 1 ] && has "ERROR: install: sudo dnf install -y autoconf libgccjit-devel failed" && ! ran "configure " && ! ran "make "; then
+    pass "a failed linux dependency install builds nothing"
+  else fail "linux deps failure" "rc=$RC" "$OUT" "$(cat "$CASE/transcript")"; fi
 }
 
 test_installing_an_emacs_source_builds_and_replaces_the_app() {
-  new_case; manifest "[$(source_emacs_entry)]"; fake_emacs 30.2 "" 636f166cfc86 "XWIDGETS NATIVE_COMP"; fake_source_build
+  new_case; manifest "[$(source_emacs_entry)]"; fake_emacs 30.2 "" 636f166cfc86 "NS XWIDGETS NATIVE_COMP"; fake_source_build
   : >"$CASE/stubs/.brew-has-autoconf"
   run install
   local src="$CASE/home/.cache/agent-repl/src/zettel-emacs" backup
@@ -643,7 +698,7 @@ test_installing_an_emacs_source_builds_and_replaces_the_app() {
 }
 
 test_a_failed_emacs_source_configure_leaves_the_app() {
-  new_case; manifest "[$(source_emacs_entry)]"; fake_emacs 30.2 "" 636f166cfc86 "XWIDGETS NATIVE_COMP"; fake_source_build
+  new_case; manifest "[$(source_emacs_entry)]"; fake_emacs 30.2 "" 636f166cfc86 "NS XWIDGETS NATIVE_COMP"; fake_source_build
   EXTRA_ENV="STUB_CONFIGURE_EXIT=1" run install
   if [ "$RC" -eq 1 ] && has "ERROR: install: emacs: configure in $CASE/home/.cache/agent-repl/src/zettel-emacs failed; config.log there says why" \
      && ! ran "make " && [ "$(cat "$CASE/Applications/Emacs.app/marker")" = old ] && no_backup; then
@@ -652,7 +707,7 @@ test_a_failed_emacs_source_configure_leaves_the_app() {
 }
 
 test_a_source_build_that_makes_no_app_leaves_the_app() {
-  new_case; manifest "[$(source_emacs_entry)]"; fake_emacs 30.2 "" 636f166cfc86 "XWIDGETS NATIVE_COMP"; fake_source_build
+  new_case; manifest "[$(source_emacs_entry)]"; fake_emacs 30.2 "" 636f166cfc86 "NS XWIDGETS NATIVE_COMP"; fake_source_build
   EXTRA_ENV="STUB_MAKE_NO_APP=1" run install
   if [ "$RC" -eq 1 ] && has "ERROR: install: emacs: the build made no $CASE/home/.cache/agent-repl/src/zettel-emacs/nextstep/Emacs.app" \
      && [ "$(cat "$CASE/Applications/Emacs.app/marker")" = old ] && no_backup; then
@@ -661,7 +716,7 @@ test_a_source_build_that_makes_no_app_leaves_the_app() {
 }
 
 test_a_failed_emacs_source_fetch_stops_the_build() {
-  new_case; manifest "[$(source_emacs_entry)]"; fake_emacs 30.2 "" 636f166cfc86 "XWIDGETS NATIVE_COMP"; fake_source_build
+  new_case; manifest "[$(source_emacs_entry)]"; fake_emacs 30.2 "" 636f166cfc86 "NS XWIDGETS NATIVE_COMP"; fake_source_build
   write_stub git '[ "$3" = fetch ] && exit 1; exit 0'
   run install
   if [ "$RC" -eq 1 ] && has "ERROR: install: emacs: fetching $PINNED from https://example.test/fork/zettel-emacs.git failed" \
@@ -670,22 +725,35 @@ test_a_failed_emacs_source_fetch_stops_the_build() {
   else fail "fetch failure" "rc=$RC" "$OUT"; fi
 }
 
-test_expand_brew_prefixes() {
+test_expand_placeholders() {
   local bad="" in want got
   # shellcheck source=/dev/null
   REQUIREMENTS_SH_LIB=1 source "$RUNNER"
   brew() { if [ -n "${2:-}" ]; then echo "/hb/opt/$2"; else echo /hb; fi; }
+  gcc() { echo 15.1.0; }
   while IFS='|' read -r in want; do
-    got="$(expand_brew_prefixes "$in")"
+    got="$(HOME=/h expand_placeholders "$in")"
     [ "$got" = "$want" ] || bad="$bad [$in -> $got, want $want]"
   done <<'CASES'
 --with-ns|--with-ns
 CPPFLAGS=-I{brew}/include|CPPFLAGS=-I/hb/include
 X={brew:tree-sitter}/lib/a.a|X=/hb/opt/tree-sitter/lib/a.a
 {brew}:{brew:gmp}|/hb:/hb/opt/gmp
+--prefix={home}/.local|--prefix=/h/.local
+libgccjit-{gcc-major}-dev|libgccjit-15-dev
 CASES
-  unset -f brew
-  if [ -z "$bad" ]; then pass "expand_brew_prefixes replaces every Homebrew prefix token"; else fail "expand_brew_prefixes:$bad"; fi
+  unset -f brew gcc
+  if [ -z "$bad" ]; then pass "expand_placeholders replaces every placeholder"; else fail "expand_placeholders:$bad"; fi
+}
+
+test_expand_placeholders_fails_when_gcc_cannot_say_its_version() {
+  local rc=0
+  # shellcheck source=/dev/null
+  REQUIREMENTS_SH_LIB=1 source "$RUNNER"
+  gcc() { return 1; }
+  expand_placeholders "libgccjit-{gcc-major}-dev" >/dev/null 2>&1 || rc=$?
+  unset -f gcc
+  if [ "$rc" -ne 0 ]; then pass "expand_placeholders fails when gcc cannot say its version"; else fail "gcc-major failure was expanded"; fi
 }
 
 # ---------------------------------------------------------------------------
