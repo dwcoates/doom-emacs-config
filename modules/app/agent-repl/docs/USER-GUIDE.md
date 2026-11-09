@@ -156,6 +156,9 @@ These clicks jump to an entry in the feed:
     - When a tab finishes, the strip goes back to the tab still running, such as the queue tab of a merge that is waiting in line again after rebasing.
     - With nothing running, the tab that finished last stays shown.
   - Each strip keeps the tab you clicked until a tab in it starts, waits on you, or finishes.
+  - In the queue tab, dragging a waiting merge to another place in its line moves it there, as in the sidebar's Merge Queue.
+    - The merge running cannot be dragged.
+    - A refused move is shown above the table, and the line goes back to the queue's order.
 - **If a subagent's feed cannot be opened, the jump still scrolls to its bubble.**
   - The failure is listed under the warning chip in the top bar.
 
