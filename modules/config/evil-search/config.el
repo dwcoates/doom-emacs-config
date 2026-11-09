@@ -2,9 +2,9 @@
 ;;
 ;; Evil's `/' and `?' search highlighting.
 ;;
-;; The match point is ON wears the `evil-ex-search' face, and every other
-;; match wears `evil-ex-lazy-highlight'.  Evil itself draws the current
-;; match only while the `/' prompt is open, and `n' / `N' re-highlight
+;; Only the match point is ON is highlighted, in the `evil-ex-search' face.
+;; Every other match's `evil-ex-lazy-highlight' face draws nothing.  Evil
+;; itself draws the current match only while the `/' prompt is open, and `n' / `N' re-highlight
 ;; every match but never the one they land on.  The current-match overlay
 ;; below marks the match `n', `N', `*' and `#' land on.
 ;;
@@ -60,8 +60,11 @@ render-colors.json by `agent-repl-status--color-value'."
 
 (with-eval-after-load 'evil
   (setq evil-ex-search-persistent-highlight nil)
+  ;; Other matches stay tracked (the current-match overlay needs Evil's
+  ;; highlight active) but wear no color.
   (set-face-attribute 'evil-ex-lazy-highlight nil
-                      :foreground "gray" :background "#a9a9a9")
+                      :inherit nil :foreground 'unspecified
+                      :background 'unspecified :weight 'unspecified)
   (advice-add 'evil-ex-start-search :after #'+dwc/evil-search-mark-current)
   (advice-add 'evil-ex-search :after #'+dwc/evil-search-mark-current)
   (advice-add 'evil-ex-delete-hl :after #'+dwc/evil-search-unmark-current)
