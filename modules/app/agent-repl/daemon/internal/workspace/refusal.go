@@ -274,6 +274,10 @@ const (
 	// ArmUnknownAnnouncedLink is a ChangeWorkspaceLinks set whose owned link
 	// announces a url the workspace does not hold. Its `url` field names it.
 	ArmUnknownAnnouncedLink = "unknown_announced_link"
+	// ArmPullRequestOwnedElsewhere is a ChangeWorkspaceLinks set owning a
+	// pull request another open workspace owns. Its `owner` and `owner_name`
+	// fields name that workspace.
+	ArmPullRequestOwnedElsewhere = "pull_request_owned_elsewhere"
 	// ArmNoBrowserConfigured is an OpenExternal on a daemon that resolved no
 	// external browser launcher at all.
 	ArmNoBrowserConfigured = "no_browser_configured"

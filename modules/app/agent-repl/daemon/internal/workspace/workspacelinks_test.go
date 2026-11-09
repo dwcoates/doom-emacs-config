@@ -9,6 +9,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
+	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
@@ -168,6 +169,54 @@ func TestLinkVerbsRefuse(t *testing.T) {
 			r, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: opRefusal})
 			if !ok || r.Context["arm"] != tt.arm || r.Context["rpc"] != rpcChangeWorkspaceLinks {
 				t.Errorf("refusal record = %+v, want an INFO refusal of %s naming %s", r, rpcChangeWorkspaceLinks, tt.arm)
+			}
+		})
+	}
+}
+
+func TestOwningAPullRequestAnotherWorkspaceOwnsIsRefusedNamingTheOwner(t *testing.T) {
+	const url = "https://github.com/o/r/pull/7"
+	tests := []struct {
+		name string
+		// ownerRegistered is whether the owner's row can be read.
+		ownerRegistered bool
+	}{
+		{name: "the refusal names the owner", ownerRegistered: true},
+		{name: "an owner whose row cannot be read fails loudly"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+			f.workspace("w1", t.TempDir())
+			if tt.ownerRegistered {
+				owner := f.workspace("w2", t.TempDir())
+				owner.Name = "owner"
+				f.db.with(owner)
+			}
+			f.db.linksErr = &wsm.PullRequestOwnedElsewhereError{PullRequest: wsm.PullRequestKey{Owner: "o", Repo: "r", Number: 7}, Owner: "w2", OwnerName: "owner"}
+
+			// Act
+			_, err := f.verbs.SetLink(context.Background(), "w1", url, "The pull request", false, "")
+
+			// Assert
+			if !tt.ownerRegistered {
+				if err == nil || !errors.Is(err, wsm.ErrNotFound) {
+					t.Fatalf("SetLink = %v, want the owner's read failure", err)
+				}
+				r, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: opChangeLinks})
+				if !ok || r.Context["owner"] != "w2" || r.Context["pull_request"] != "o/r#7" || r.Context["cause"] == nil {
+					t.Fatalf("record = %+v, want an ERROR naming the owner, the pull request and the cause", r)
+				}
+				return
+			}
+			refusal := asRefusal(t, err, ArmPullRequestOwnedElsewhere)
+			owner, _ := refusal.Fields["owner"].(*workspacev1.WorkspaceRef)
+			if refusal.Fields["url"] != url || refusal.Fields["owner_name"] != "owner" || owner.GetId() != "w2" {
+				t.Fatalf("refusal fields = %+v, want the url, and the owner by ref and name", refusal.Fields)
+			}
+			if len(f.topbarLinks) != 0 {
+				t.Fatalf("topbar links = %+v, want nothing published", f.topbarLinks)
 			}
 		})
 	}
