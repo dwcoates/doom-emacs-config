@@ -370,14 +370,25 @@ func (r *resolver) openRow(node openNode, folded bool, numbers *tabNumberer, rc 
 // workspace whose repository the registry does not carry is an invariant
 // violation (assertRepositoryInvariant) and fails hard.
 func (r *resolver) repositoryDivider(ws wsm.Workspace, log dlog.Logger) *frontendv1.RosterOpenRowRepositoryDivider {
-	for _, repo := range r.state.reg.Repositories {
-		if repo.ID == ws.Repo {
-			return &frontendv1.RosterOpenRowRepositoryDivider{Name: repo.Name}
-		}
+	if repo, ok := r.repositoryOf(ws); ok {
+		return &frontendv1.RosterOpenRowRepositoryDivider{Name: repo.Name}
 	}
 	log.Error("daemon.sidebar.repository_divider", "a nested workspace names a repository the registry does not carry",
 		dlog.Context{"workspace_id": string(ws.ID), "repo_id": string(ws.Repo), "invariant_violation": "workspace.Repo names no registered repository"})
 	panic(fmt.Sprintf("sidebar: workspace %s names repository %s, which the registry does not carry", ws.ID, ws.Repo))
+}
+
+// repositoryOf returns the registered repository WS belongs to, and whether
+// the registry carries it. The one lookup every row-level repository fact
+// (the divider, RosterRow.repository) goes through; each caller decides how
+// a repository the registry does not carry fails.
+func (r *resolver) repositoryOf(ws wsm.Workspace) (wsm.Repository, bool) {
+	for _, repo := range r.state.reg.Repositories {
+		if repo.ID == ws.Repo {
+			return repo, true
+		}
+	}
+	return wsm.Repository{}, false
 }
 
 // repoKey is a repository's join key, as its section and its merged group
