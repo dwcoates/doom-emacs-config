@@ -1797,16 +1797,24 @@ Order is the resolver's; clients do not re-sort."
   (agent-repl-wire-decode-workspace-ref value))
 
 (defun agent-repl-wire-decode-roster-current-workspace (value)
-  "Decode VALUE as `RosterCurrentWorkspace', a plist `(:workspace REF)'.
-Compared against a row's workspace by IDENTITY, never against a display
-name, which is not unique."
+  "Decode VALUE as `RosterCurrentWorkspace'.
+The plist is `(:workspace REF :selection-id ID :switch-started-at-ms MS)'.
+REF is compared against a row's workspace by IDENTITY, never against a
+display name, which is not unique.  ID (\"\" when unset) and MS (nil when
+unset) key and time the sidebar's paint of the selection; Emacs reads
+neither, and they are decoded because the codec refuses unknown fields."
   (let ((object (agent-repl-wire--object "RosterCurrentWorkspace" value)))
-    (agent-repl-wire--check-keys "RosterCurrentWorkspace" object '(workspace))
+    (agent-repl-wire--check-keys "RosterCurrentWorkspace" object
+                                 '(workspace selectionId switchStartedAtMs))
     (agent-repl-wire--decoded
      "RosterCurrentWorkspace"
      (list :workspace (agent-repl-wire--decode-message
                        "RosterCurrentWorkspace" 'workspace object
-                       #'agent-repl-wire-decode-roster-current-workspace-workspace)))))
+                       #'agent-repl-wire-decode-roster-current-workspace-workspace)
+           :selection-id (agent-repl-wire--decode-string
+                          "RosterCurrentWorkspace" 'selectionId object)
+           :switch-started-at-ms (agent-repl-wire--decode-optional-int64
+                                  "RosterCurrentWorkspace" 'switchStartedAtMs object)))))
 
 (defun agent-repl-wire-decode-roster-version (value)
   "Decode VALUE as `RosterVersion', a plist `(:text)'.

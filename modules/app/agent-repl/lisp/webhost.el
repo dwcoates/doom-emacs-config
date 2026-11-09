@@ -653,9 +653,11 @@ instant can never be charged to a later show it did not cause.")
 The page times the switch from this instant to its first shown frame, or to
 its conversation drawn on a first show (webapp/src/switch-latency.ts), and
 reports it to the daemon\='s metrics.  The instant is the host\='s wall
-clock in Unix milliseconds, the clock the page reads too."
-  (setq agent-repl--webhost-switch-started
-        (cons ws (agent-repl--now-unix-ms))))
+clock in Unix milliseconds, the clock the page reads too.  Answers the
+instant, which the switch\='s select carries to the sidebar."
+  (let ((started (agent-repl--now-unix-ms)))
+    (setq agent-repl--webhost-switch-started (cons ws started))
+    started))
 
 (defun agent-repl--webhost-take-switch-start (ws)
   "The noted switch start for WS in Unix milliseconds, or nil; always cleared."

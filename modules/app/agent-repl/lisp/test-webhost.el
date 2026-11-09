@@ -726,6 +726,17 @@ A DEBUG line (`agent-repl--log') is dropped."
 
 ;;;; ---- A switch's instant rides its show ----
 
+(ert-deftest agent-repl-test-wh-noting-a-switch-answers-its-instant ()
+  "The noted instant is answered, for the switch's select to carry."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (let ((agent-repl--webhost-switch-started nil))
+      (cl-letf (((symbol-function 'float-time) (lambda (&rest _) 1700000000.123)))
+        ;; Act
+        (let ((started (agent-repl-webhost-note-switch "alpha")))
+          ;; Assert
+          (should (equal started 1700000000123)))))))
+
 (ert-deftest agent-repl-test-wh-a-noted-switch-rides-its-show ()
   "The switch's wall-clock instant, in Unix ms, is the show's second argument."
   ;; Arrange
