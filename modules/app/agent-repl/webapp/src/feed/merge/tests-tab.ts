@@ -55,6 +55,7 @@ import { renderMergeTestLogLink } from "../../link.js";
 import type { AppContext } from "../../rpc/context.js";
 import type { Ticker } from "../../clock.js";
 import { liveElapsedClock } from "../../elapsed-clock.js";
+import { formatBytes } from "../../sidebar/memory.js";
 
 const PATH = "FeedMergeTestSuite";
 
@@ -144,11 +145,11 @@ export function seatWaitText(u: FeedMergeTestsRunSeatWait): string {
   };
   switch (u.reason.case) {
     case "ceiling":
-      return `waiting for a RAM disk seat${within(held, `all ${gib(u.reason.value.ceilingMib)} in use`)}`;
+      return `waiting for a RAM disk seat${within(held, `all ${memoryFigure(u.reason.value.ceilingMib)} in use`)}`;
     case "memory":
       return `waiting for memory for a RAM disk seat${within(
         held,
-        `${gib(u.reason.value.availableMib)} free, ${gib(u.reason.value.floorMib)} must stay free`,
+        `${memoryFigure(u.reason.value.availableMib)} free, ${memoryFigure(u.reason.value.floorMib)} must stay free`,
       )}`;
     case "outranked":
       return `waiting for a RAM disk seat behind a run that ranks above this one${within(held)}`;
@@ -169,9 +170,9 @@ function seatHolderName(h: FeedMergeTestsRunSeatHolder): string {
   }
 }
 
-/** MIB as GiB, one decimal place. */
-function gib(mib: bigint): string {
-  return `${(Number(mib) / 1024).toFixed(1)} GiB`;
+/** MIB as the page states a memory figure (`formatBytes`). */
+function memoryFigure(mib: bigint): string {
+  return formatBytes(mib * 1024n * 1024n);
 }
 
 /** The log line: "log:" and the link, whose text is the daemon's label. */

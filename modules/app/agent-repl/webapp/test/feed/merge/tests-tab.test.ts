@@ -650,7 +650,7 @@ describe("drawFeedMergeTestsRunSeatWait: a run waiting for a RAM disk seat says 
         holders: [workspace("fix-footer"), workspace("sidebar-counts")],
         reason: { case: "ceiling", value: { ceilingMib: 20480n } },
       }),
-      "waiting for a RAM disk seat (held by fix-footer, sidebar-counts; all 20.0 GiB in use) 1m 40s",
+      "waiting for a RAM disk seat (held by fix-footer, sidebar-counts; all 20.0 GB in use) 1m 40s",
     ],
     [
       "memory holding it back, behind a run started by hand",
@@ -659,7 +659,7 @@ describe("drawFeedMergeTestsRunSeatWait: a run waiting for a RAM disk seat says 
         holders: [outside(4242)],
         reason: { case: "memory", value: { availableMib: 17408n, floorMib: 10240n } },
       }),
-      "waiting for memory for a RAM disk seat (held by a run outside agent-repl (pid 4242); 17.0 GiB free, 10.0 GiB must stay free) 1m 40s",
+      "waiting for memory for a RAM disk seat (held by a run outside agent-repl (pid 4242); 17.0 GB free, 10.0 GB must stay free) 1m 40s",
     ],
     [
       "a better rank going first, with no seat held",
