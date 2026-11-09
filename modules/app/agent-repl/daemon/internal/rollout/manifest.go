@@ -282,7 +282,7 @@ func (c *controller) Reconcile(ctx context.Context, survivors Survivors) ([]Disp
 	// (TakeUpCarries), empty when there was no manifest.
 	c.mu.Lock()
 	c.bootOutgoing = outgoing
-	c.mu.Unlock()
+	c.unlock()
 	if landed {
 		c.retireManifest("every disposition it names is recorded")
 	}
@@ -542,7 +542,7 @@ func (c *controller) flushDispositions(ctx context.Context) {
 	c.mu.Lock()
 	pending := c.pendingDispositions
 	c.pendingDispositions = nil
-	c.mu.Unlock()
+	c.unlock()
 	for _, p := range pending {
 		c.logTransition(opReconcile, p.session.Workspace, "disposition_deferred", true, false,
 			dlog.Context{"disposition": string(p.d.Kind)})
@@ -578,7 +578,7 @@ func (c *controller) recordDisposition(ctx context.Context, session ManifestSess
 		before := len(c.pendingDispositions)
 		c.pendingDispositions = append(c.pendingDispositions, pendingDisposition{session: session, d: d})
 		after := len(c.pendingDispositions)
-		c.mu.Unlock()
+		c.unlock()
 		c.logTransition(opReconcile, ws, "pending_dispositions", before, after,
 			dlog.Context{"disposition": string(d.Kind)})
 		c.log.Debug(opReconcile, "deferred a bounce disposition until the state handle writes",

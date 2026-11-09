@@ -3,7 +3,6 @@ package rollout
 import (
 	"context"
 	"errors"
-	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -142,7 +141,7 @@ func TestAdoptionWaitsForTheIncumbentServingRelease(t *testing.T) {
 			// claim.
 			done := make(chan error, 1)
 			go func() { done <- h.c.AdoptHost(context.Background(), ws) }()
-			h.clock.awaitArmed(t, manifestPoll)
+			awaitRecord(t, h, opAdopt, "waiting for the incumbent to release serving ownership at freeness")
 
 			// Assert: no shim adoption starts on timing alone. It begins only
 			// after the serving row becomes the durable released latch and the
@@ -153,7 +152,6 @@ func TestAdoptionWaitsForTheIncumbentServingRelease(t *testing.T) {
 			if err := h.db.ReleaseServing(context.Background(), ws, test.outgoing); err != nil {
 				t.Fatalf("ReleaseServing(outgoing): %v", err)
 			}
-			h.clock.Fire(manifestPoll)
 			if err := <-done; err != nil {
 				t.Fatalf("AdoptHost after serving release: %v", err)
 			}
@@ -557,11 +555,10 @@ func TestDaemonAddrIsWrittenOnlyWhenEveryWorkspaceIsOwned(t *testing.T) {
 	h.mu.Lock()
 	afterFirst := h.addrWrites
 	h.mu.Unlock()
-	h.clock.awaitArmed(t, manifestPoll)
+	awaitRecord(t, h, opAdopt, "waiting for the incumbent to release serving ownership at freeness")
 	if err := h.db.ReleaseServing(context.Background(), second, outgoing); err != nil {
 		t.Fatalf("ReleaseServing(second): %v", err)
 	}
-	h.clock.Fire(manifestPoll)
 	if err := h.c.AdoptHost(context.Background(), second); err != nil {
 		t.Fatalf("AdoptHost(second): %v", err)
 	}
@@ -997,23 +994,22 @@ func TestAnAdoptCallThatArrivesBeforeTheManifestWaitsForTheArm(t *testing.T) {
 	if err := h.c.Join(context.Background()); err != nil {
 		t.Fatalf("Join: %v", err)
 	}
-	held := h.clock.armedSignal(manifestPoll)
 
 	// Act: the host participant adopts on the address it was just handed.
 	done := make(chan error, 1)
 	go func() { done <- h.c.AdoptHost(context.Background(), ws) }()
 
-	// Assert: the call is held on the arm poll rather than answered.
+	// Assert: the call is held for the arm rather than answered.
+	awaitRecord(t, h, opAdoptHost, "no intent manifest yet; holding this adopt call until the incumbent writes one")
 	select {
 	case err := <-done:
 		t.Fatalf("AdoptHost answered %v before the incumbent armed the rendezvous, want the call held for the arm", err)
-	case <-held:
+	default:
 	}
 
-	// Act: the incumbent's manifest lands and the successor's next poll comes
-	// round.
+	// Act: the incumbent's manifest lands, which the held call is watching
+	// for.
 	writeHandoverManifest(t, h, ws, Participants{Host: true})
-	h.clock.Fire(manifestPoll)
 
 	// Assert: the held call completes the rendezvous and adopts.
 	if err := <-done; err != nil {
@@ -1430,14 +1426,11 @@ func TestTheSuccessorChecksEveryLiveShimOnlyOnce(t *testing.T) {
 // decision, which is how a test knows a concurrent caller has reached it.
 func awaitRecord(t *testing.T, h *harness, operation, message string) {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		if _, ok := dlog.FindRecord(records(h.log, operation), dlog.RecordQuery{Message: message}); ok {
-			return
-		}
-		runtime.Gosched()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := h.log.Await(ctx, dlog.RecordQuery{Operation: operation, Message: message}); err != nil {
+		t.Fatalf("no %s record %q was written: %v", operation, message, err)
 	}
-	t.Fatalf("no %s record %q was written", operation, message)
 }
 
 // TestALateCallerOfASatisfiedRendezvousDoesNotAdoptASecondTime is the forced
@@ -1456,7 +1449,7 @@ func TestALateCallerOfASatisfiedRendezvousDoesNotAdoptASecondTime(t *testing.T) 
 	}
 	first := make(chan error, 1)
 	go func() { first <- h.c.AdoptWeb(context.Background(), ws) }()
-	h.clock.awaitArmed(t, manifestPoll)
+	awaitRecord(t, h, opAdopt, "waiting for the incumbent to release serving ownership at freeness")
 
 	// Act: a second web call arrives, then the incumbent lets go.
 	second := make(chan error, 1)
@@ -1465,7 +1458,6 @@ func TestALateCallerOfASatisfiedRendezvousDoesNotAdoptASecondTime(t *testing.T) 
 	if err := h.db.ReleaseServing(context.Background(), ws, outgoing); err != nil {
 		t.Fatalf("ReleaseServing(outgoing): %v", err)
 	}
-	h.clock.Fire(manifestPoll)
 
 	// Assert.
 	if err := <-first; err != nil {
@@ -1548,6 +1540,70 @@ func TestACallerBehindARerunAdoptionWaitsForTheRerunNotTheEarlierFailure(t *test
 	}
 	if err := <-behind; err != nil {
 		t.Fatalf("the AdoptHost behind the re-run = %v, want the re-run's success, not the earlier failure", err)
+	}
+}
+
+// TestAClaimAfterAFailedRunBeginsAFreshCompletion pins that claiming a
+// workspace and beginning its run are one step: a participant that finds the
+// workspace claimed must wait on THAT run, never on the earlier failed run's
+// closed completion, whose error the new run clears under it.
+func TestAClaimAfterAFailedRunBeginsAFreshCompletion(t *testing.T) {
+	// Arrange: an armed workspace whose earlier run failed and freed its
+	// claim, with no Join running to claim it meanwhile.
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	writeHandoverManifest(t, h, ws, Participants{Host: true})
+	if err := h.c.armFromManifest(); err != nil {
+		t.Fatalf("armFromManifest: %v", err)
+	}
+	h.c.mu.Lock()
+	e := h.c.rendezvous[ws]
+	e.beginAdoption()
+	e.settle(errFake)
+	e.adopting, e.adoptionClaimed = false, false
+	h.c.unlock()
+
+	// Act
+	claimed := h.c.claimArmed()
+
+	// Assert
+	h.c.mu.Lock()
+	done, failed := e.done, e.failed
+	h.c.unlock()
+	if len(claimed) != 1 || claimed[0] != ws {
+		t.Fatalf("claimed = %v, want %q", claimed, ws)
+	}
+	select {
+	case <-done:
+		t.Fatalf("the claimed run's completion is already closed: a participant would read the earlier failure")
+	default:
+	}
+	if failed != nil {
+		t.Fatalf("failed = %v right after the claim, want no outcome yet", failed)
+	}
+}
+
+func TestClaimArmedLeavesAWorkspaceItsRetryOwns(t *testing.T) {
+	// Arrange: an armed workspace whose failed adoption a retry owns.
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	writeHandoverManifest(t, h, ws, Participants{Host: true})
+	if err := h.c.armFromManifest(); err != nil {
+		t.Fatalf("armFromManifest: %v", err)
+	}
+	h.c.setRetrying(ws, true)
+
+	// Act
+	claimed := h.c.claimArmed()
+	h.c.setRetrying(ws, false)
+	after := h.c.claimArmed()
+
+	// Assert
+	if len(claimed) != 0 {
+		t.Fatalf("claimed = %v while the retry owns the workspace, want none", claimed)
+	}
+	if len(after) != 1 || after[0] != ws {
+		t.Fatalf("claimed = %v once the retry let go, want %q", after, ws)
 	}
 }
 

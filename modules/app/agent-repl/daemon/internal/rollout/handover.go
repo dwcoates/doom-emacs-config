@@ -8,7 +8,6 @@ import (
 	"sort"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 
@@ -16,15 +15,12 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/health"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/inflight"
 	"agent-repld/internal/wsm"
 )
 
 // FaultAdoptionExpired is the fault kind an expired adoption window records.
 const FaultAdoptionExpired = health.KindAdoptionWindowExpired
-
-// adoptionPoll is how often the outgoing daemon looks for serving ownership
-// having moved. It only ever shortens the adoption window.
-const adoptionPoll = 25 * time.Millisecond
 
 // handoverPlan is what the announcement settled and the transfers run on: the
 // successor's address, the two lists `served` split, and the participants each
@@ -102,7 +98,7 @@ func (e *ErrAlreadyRollingOut) Error() string {
 // workspaces it has not transferred yet.
 func (c *controller) RollingOut() ([]ids.WorkspaceID, bool) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
+	defer c.unlock()
 	if c.handover == nil {
 		return nil, false
 	}
@@ -145,7 +141,7 @@ type handoverSlot struct {
 // success: a handover that completes ends in this process's exit.
 func (c *controller) claimHandover() (*handoverSlot, error) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
+	defer c.unlock()
 	if c.handover == nil {
 		c.handover = &handoverSlot{}
 		return c.handover, nil
@@ -181,7 +177,7 @@ func (c *controller) abandonHandover(ctx context.Context, slot *handoverSlot, fi
 	if c.handover == slot {
 		c.handover = nil
 	}
-	c.mu.Unlock()
+	c.unlock()
 	for _, ws := range slot.armed {
 		c.logTransition(opHandover, ws, "rendezvous", "armed", "unarmed", dlog.Context{"abandoned": true})
 	}
@@ -202,7 +198,7 @@ func (c *controller) fixServed(slot *handoverSlot, successor string, workspaces,
 	}
 	c.mu.Lock()
 	slot.served, slot.servedSuccessor = served, successor
-	c.mu.Unlock()
+	c.unlock()
 	c.log.Info(opHandover, "fixed the handover's served set; any other workspace is the successor's", dlog.Merge(fields, dlog.Context{
 		"served": len(served),
 	}))
@@ -300,7 +296,7 @@ func (c *controller) beginHandover(ctx context.Context, ask Ask) (*handoverPlan,
 		c.rendezvous[ws.ID] = &entry{expected: p, done: make(chan struct{})}
 		slot.armed = append(slot.armed, ws.ID)
 	}
-	c.mu.Unlock()
+	c.unlock()
 	for _, ws := range workspaces {
 		p := snapshot[ws.ID]
 		c.logTransition(opHandover, ws.ID, "rendezvous", "unarmed", "armed", dlog.Context{
@@ -391,10 +387,10 @@ func (c *controller) completeHandover(ctx context.Context, plan *handoverPlan) {
 	}
 	refused := len(plan.workspaces) - requested
 	c.handoverDone.Add(1)
-	go func() {
+	inflight.Standing(func() {
 		defer c.handoverDone.Done()
 		c.followHandover(ctx, plan, outcomes, requested, refused, &windows)
-	}()
+	})
 }
 
 // transferOutcome is one transfer's end.
@@ -439,12 +435,13 @@ func (c *controller) followHandover(ctx context.Context, plan *handoverPlan, out
 				c.log.Error(opTransfer, "a workspace's transfer failed; it is served here whole and is offered to the successor again",
 					dlog.WithCause(wsFields, out.err))
 				windows.Add(1)
-				go func(ws wsm.Workspace) {
+				inflight.Standing(func() {
+					ws := byID[out.ws]
 					defer windows.Done()
 					if c.reoffer(ctx, ws, plan, windows, reofferAfterFailedTransfer, wsFields) {
 						plan.reclaimed.Add(1)
 					}
-				}(byID[out.ws])
+				})
 			default:
 				failed++
 				c.log.Error(opTransfer, "a workspace's transfer failed; it stays served by this daemon",
@@ -612,12 +609,12 @@ func (c *controller) transfer(ctx context.Context, ws wsm.Workspace, plan *hando
 		handedHold = ""
 	}
 	windows.Add(1)
-	go func() {
+	inflight.Standing(func() {
 		defer windows.Done()
 		if c.timeAdoption(ctx, ws, plan, lease, handedHold, handed, move, windows, fields) {
 			plan.reclaimed.Add(1)
 		}
-	}()
+	})
 	return nil
 }
 
@@ -1020,14 +1017,15 @@ func (c *controller) awaitAdoption(ctx context.Context, ws ids.WorkspaceID, leas
 	// Two things end the wait early: the rendezvous closing (the participants
 	// adopted through this daemon's own handlers) and serving ownership moving
 	// to the successor with the handed hold drained (the headless case,
-	// claimed inside the successor's Join, which this daemon can only observe
-	// by looking; see adopted for why the claim alone is not enough). The look is a real
-	// ticker rather than the injected clock: the clock times the WINDOW, which
-	// a test drives; the look only ever shortens the wait.
+	// claimed inside the successor's Join, which this daemon observes as the
+	// successor's commits to the shared state database; see adopted for why
+	// the claim alone is not enough). The successor's refusal of a mid-work
+	// adoption is a file it writes beside the carry. Both are reported by
+	// handoverChanges, so the look runs once per change, never on a timer.
 	expired := c.deps.Clock.After(c.deps.AdoptionWindow)
 	done := c.rendezvousDone(ws)
-	look := time.NewTicker(adoptionPoll)
-	defer look.Stop()
+	changes, stopChanges := c.handoverChanges(ctx)
+	defer stopChanges()
 	claimSeen := false
 	for waiting := true; waiting; {
 		select {
@@ -1040,7 +1038,12 @@ func (c *controller) awaitAdoption(ctx context.Context, ws ids.WorkspaceID, leas
 				c.log.Debug(opAdoption, "the rendezvous completed inside its window", fields)
 				return adoptionLanded
 			}
-		case <-look.C:
+		case err := <-changes:
+			if err != nil {
+				c.log.Error(opAdoption, "could not watch the successor's adoption; the window decides it", dlog.WithCause(fields, err))
+				changes = nil
+				continue
+			}
 			if move != nil && move.midWork && c.refusedMidWork(ws) {
 				return c.takeBackRefused(ctx, ws, lease, detached, move, fields)
 			}
@@ -1185,7 +1188,7 @@ func rendezvousClosed(done <-chan struct{}) bool {
 // rendezvous is armed for it.
 func (c *controller) rendezvousDone(ws ids.WorkspaceID) <-chan struct{} {
 	c.mu.Lock()
-	defer c.mu.Unlock()
+	defer c.unlock()
 	if e, ok := c.rendezvous[ws]; ok {
 		return e.done
 	}

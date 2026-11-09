@@ -1,6 +1,7 @@
 package rollout
 
 import (
+	"agent-repld/internal/kernelevent"
 	"context"
 	"errors"
 	"os"
@@ -133,7 +134,6 @@ func TestSpawnAnswersTheAddressTheSuccessorReports(t *testing.T) {
 		t.Fatalf("write the stand-in: %v", err)
 	}
 	spawner := NewProcessSpawner(script, state, nil)
-	spawner.Poll = time.Millisecond
 	spawner.Timeout = 10 * time.Second
 
 	// Act
@@ -169,7 +169,6 @@ func TestSpawnLeavesTheSuccessorRunningWhenTheIncumbentsContextEnds(t *testing.T
 		t.Fatalf("write the stand-in: %v", err)
 	}
 	spawner := NewProcessSpawner(script, state, nil)
-	spawner.Poll = time.Millisecond
 	spawner.Timeout = 10 * time.Second
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -178,22 +177,26 @@ func TestSpawnLeavesTheSuccessorRunningWhenTheIncumbentsContextEnds(t *testing.T
 		t.Fatalf("Spawn: %v", err)
 	}
 	reapSuccessor(t, pidFile)
-	before := spawnAliveLen(t, alive)
 	cancel()
+	before := spawnAliveLen(t, alive)
+	wait, stopWait := context.WithTimeout(context.Background(), 2*time.Second)
+	defer stopWait()
+	grew, stopFollowing := kernelevent.Follow(wait, state, alive)
+	defer stopFollowing()
 
-	// Assert: the successor is still writing after the cancellation. Polling
-	// for GROWTH is the liveness proof; a killed child's file never moves
-	// again, so the wait ends on the first larger read rather than on a sleep.
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		if spawnAliveLen(t, alive) > before {
-			return
-		}
-		if time.Now().After(deadline) {
+	// Assert: the successor is still writing after the cancellation. The
+	// liveness file GROWING is the proof, seen on its watch, taken after the
+	// cancellation; a killed child's file never moves again.
+	for spawnAliveLen(t, alive) <= before {
+		select {
+		case err := <-grew:
+			if err != nil {
+				t.Fatalf("watch the liveness file: %v", err)
+			}
+		case <-wait.Done():
 			t.Fatalf("the successor stopped writing after the incumbent's context was cancelled; "+
 				"it must outlive the daemon that spawned it (size stayed %d)", before)
 		}
-		time.Sleep(time.Millisecond)
 	}
 }
 
@@ -212,18 +215,24 @@ func reapSuccessor(t *testing.T, pidFile string) {
 		t.Fatalf("parse the successor's pid %q: %v", raw, err)
 	}
 	t.Cleanup(func() {
-		if err := syscall.Kill(pid, syscall.SIGKILL); err != nil && err != syscall.ESRCH {
-			t.Errorf("kill the successor %d: %v", pid, err)
+		// THE EXIT EVENT IS TAKEN BEFORE THE KILL, so the wait sees the exit
+		// itself (Spawn's own goroutine reaps the child).
+		exit, err := kernelevent.TakeExit(pid)
+		if err != nil {
+			t.Errorf("take the successor %d's exit: %v", pid, err)
 			return
 		}
-		// Spawn's own goroutine reaps the child; ESRCH is that reap.
-		deadline := time.Now().Add(2 * time.Second)
-		for syscall.Kill(pid, 0) == nil {
-			if time.Now().After(deadline) {
-				t.Errorf("the successor %d was not reaped after SIGKILL", pid)
-				return
-			}
-			time.Sleep(time.Millisecond)
+		if err := syscall.Kill(pid, syscall.SIGKILL); err != nil && err != syscall.ESRCH {
+			t.Errorf("kill the successor %d: %v", pid, err)
+		}
+		if exit == nil {
+			return
+		}
+		defer exit.Close()
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		if err := exit.Await(ctx); err != nil {
+			t.Errorf("the successor %d did not exit after SIGKILL: %v", pid, err)
 		}
 	})
 }
@@ -259,7 +268,6 @@ func TestSpawnPutsTheSuccessorInItsOwnSession(t *testing.T) {
 		t.Fatalf("write the stand-in: %v", err)
 	}
 	spawner := NewProcessSpawner(script, state, nil)
-	spawner.Poll = time.Millisecond
 	spawner.Timeout = 10 * time.Second
 
 	// Act
@@ -315,7 +323,6 @@ func TestSpawnFailsAtTheDeadlineWhenALiveSuccessorNeverReports(t *testing.T) {
 	// Arrange: a successor that stays up and never reports.
 	state := t.TempDir()
 	spawner := NewProcessSpawner(spawnScript(t, state, "exec sleep 60\n"), state, nil)
-	spawner.Poll = time.Millisecond
 	spawner.Timeout = 20 * time.Millisecond
 	spawner.StopGrace = 50 * time.Millisecond
 
@@ -340,7 +347,6 @@ func TestSpawnNamesTheExitOfASuccessorThatDiesBeforeReporting(t *testing.T) {
 	// Arrange: a deadline no test run reaches, so only the exit can answer.
 	state := t.TempDir()
 	spawner := NewProcessSpawner(spawnScript(t, state, "exit 2\n"), state, nil)
-	spawner.Poll = time.Hour
 	spawner.Timeout = time.Hour
 
 	// Act
@@ -360,7 +366,6 @@ func TestSpawnAnswersTheAddressASuccessorReportedBeforeItExited(t *testing.T) {
 	// Arrange: the report lands, then the process ends, before any poll.
 	state := t.TempDir()
 	spawner := NewProcessSpawner(spawnScript(t, state, reportingBody(state)+"exit 3\n"), state, nil)
-	spawner.Poll = time.Hour
 	spawner.Timeout = time.Hour
 
 	// Act
@@ -382,7 +387,6 @@ func TestSpawnClearsAStaleReportFromAnEarlierHandover(t *testing.T) {
 		t.Fatalf("ReportJoiningAddr: %v", err)
 	}
 	spawner := NewProcessSpawner("/usr/bin/true", state, nil)
-	spawner.Poll = time.Millisecond
 	spawner.Timeout = 20 * time.Millisecond
 
 	// Act
@@ -429,7 +433,6 @@ func TestSpawnAnswersTheHandleWhenTheSuccessorNeverReports(t *testing.T) {
 	// Arrange: a process that starts and exits without reporting.
 	state := t.TempDir()
 	spawner := NewProcessSpawner("/usr/bin/true", state, nil)
-	spawner.Poll = time.Millisecond
 	spawner.Timeout = 20 * time.Millisecond
 
 	// Act
@@ -491,7 +494,6 @@ func TestStopReapsTheSuccessor(t *testing.T) {
 				t.Fatalf("write the stand-in: %v", err)
 			}
 			spawner := NewProcessSpawner(script, state, nil)
-			spawner.Poll = time.Millisecond
 			spawner.Timeout = 10 * time.Second
 			spawner.StopGrace = 50 * time.Millisecond
 			successor, err := spawner.Spawn(context.Background(), "127.0.0.1:7777")
@@ -521,11 +523,9 @@ func spawnStandIn(t *testing.T, tail string, probe HealthProbe) Successor {
 	t.Helper()
 	state := t.TempDir()
 	spawner := NewProcessSpawner(spawnScript(t, state, reportingBody(state)+tail), state, nil)
-	spawner.Poll = time.Millisecond
 	spawner.Timeout = 10 * time.Second
 	spawner.StopGrace = 50 * time.Millisecond
 	spawner.Probe = probe
-	spawner.ProbeEvery = time.Millisecond
 	successor, err := spawner.Spawn(context.Background(), "127.0.0.1:7777")
 	if err != nil {
 		t.Fatalf("Spawn: %v", err)
@@ -538,26 +538,32 @@ func spawnStandIn(t *testing.T, tail string, probe HealthProbe) Successor {
 	return successor
 }
 
-func TestReadyAnswersOnceTheSuccessorAnswersItsHealthProbe(t *testing.T) {
-	// Arrange: the successor answers on the third probe, as one still
-	// finishing its boot does.
+func TestReadyAnswersOnceItsOneProbeIsAnswered(t *testing.T) {
+	// Arrange: the probe is held unanswered until the test lets it through,
+	// as the listener's backlog holds it while the successor finishes its
+	// boot.
 	var probes atomic.Int32
+	asked, serve := make(chan struct{}), make(chan struct{})
 	successor := spawnStandIn(t, "exec sleep 60\n", func(context.Context, string) error {
-		if probes.Add(1) < 3 {
-			return errors.New("connection refused")
-		}
+		probes.Add(1)
+		close(asked)
+		<-serve
 		return nil
 	})
+	done := make(chan error, 1)
 
 	// Act
-	err := successor.Ready(context.Background())
+	go func() { done <- successor.Ready(context.Background()) }()
+	<-asked
+	close(serve)
+	err := <-done
 
 	// Assert
 	if err != nil {
 		t.Fatalf("Ready = %v, want nil once the probe answered", err)
 	}
-	if got := probes.Load(); got != 3 {
-		t.Fatalf("probes = %d, want exactly the three it took to answer", got)
+	if got := probes.Load(); got != 1 {
+		t.Fatalf("probes = %d, want exactly one", got)
 	}
 }
 
@@ -680,7 +686,6 @@ func TestEverySpawnStartsItsProcessOnTheConfigurationArgv(t *testing.T) {
 			argv := filepath.Join(state, "argv")
 			body := reportingBody(state) + "printf '%s\\n' \"$@\" > " + argv + ".tmp\nmv " + argv + ".tmp " + argv + "\n"
 			spawner := NewProcessSpawner(spawnScript(t, state, body), state, config)
-			spawner.Poll = time.Millisecond
 
 			// Act
 			exited, err := tt.spawn(spawner)
@@ -716,26 +721,16 @@ func TestSpawnReplacementRefusesWithNoDaemonBinary(t *testing.T) {
 }
 
 // pidExited answers a channel closed once PID, a process this test started
-// and whose reap belongs to someone else, is gone. It polls the kernel on a
-// ticker: a process that is not this goroutine's child announces nothing.
+// and whose reap belongs to someone else, is gone: on the kernel's own exit
+// event, which reports a process that is not this goroutine's child too.
 func pidExited(t *testing.T, pid int) <-chan struct{} {
 	t.Helper()
 	gone := make(chan struct{})
-	stop := make(chan struct{})
-	t.Cleanup(func() { close(stop) })
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
 	go func() {
-		ticker := time.NewTicker(5 * time.Millisecond)
-		defer ticker.Stop()
-		for {
-			if err := syscall.Kill(pid, 0); err != nil {
-				close(gone)
-				return
-			}
-			select {
-			case <-ticker.C:
-			case <-stop:
-				return
-			}
+		if err := kernelevent.WaitExit(ctx, pid); err == nil {
+			close(gone)
 		}
 	}()
 	return gone

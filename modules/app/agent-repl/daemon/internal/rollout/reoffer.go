@@ -2,7 +2,6 @@ package rollout
 
 import (
 	"context"
-	"time"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
@@ -20,14 +19,9 @@ import (
 //
 // Each transfer's carry records the occupancy it was sealed with
 // (CarriedParticipants). The successor takes its expectations from the
-// newest carry: at a participant's own call, and on a look every
-// carryFollowPoll for a transfer nobody is left to call about.
-
-// carryFollowPoll is how often a joining successor looks for a transfer that
-// re-stated a workspace's participants. Like adoptionPoll it is a real ticker
-// rather than the injected clock: it only ever shortens a wait the
-// incumbent's adoption window bounds.
-const carryFollowPoll = 250 * time.Millisecond
+// newest carry: at a participant's own call, and, for a transfer nobody is
+// left to call about, at every change handoverChanges reports (a carry sealed
+// or retired, the serving row released).
 
 // carriedParticipants answers the occupancy the incumbent's newest transfer of
 // ws was sealed with, and the incumbent that sealed it. It answers false for a
@@ -66,10 +60,11 @@ func (c *controller) followCarriedLocked(ws ids.WorkspaceID, e *entry, carried P
 
 // followCarries keeps every armed, unadopted workspace's expectations on its
 // newest transfer's carry for as long as this daemon is joining, and adopts
-// any workspace a transfer left with no participant to call.
-func (c *controller) followCarries(ctx context.Context) {
-	look := time.NewTicker(carryFollowPoll)
-	defer look.Stop()
+// any workspace a transfer left with no participant to call. It looks at each
+// change CHANGES reports; the watch was taken before Join's own read of the
+// manifest, which is the first look.
+func (c *controller) followCarries(ctx context.Context, changes <-chan error, stop func()) {
+	defer stop()
 	tookOver := c.tookOverSignal()
 	for {
 		select {
@@ -78,7 +73,11 @@ func (c *controller) followCarries(ctx context.Context) {
 		case <-tookOver:
 			// adoptStragglers takes whatever is left at the takeover.
 			return
-		case <-look.C:
+		case err := <-changes:
+			if err != nil {
+				c.log.Error(opJoin, "could not watch the handover's carries; a workspace left with no participant is adopted at the takeover", dlog.WithCause(nil, err))
+				return
+			}
 		}
 		if headless := c.followCarriesOnce(); len(headless) > 0 {
 			c.log.Info(opJoin, "a transfer left workspaces with no participant to call; adopting them headless",
@@ -99,7 +98,7 @@ func (c *controller) followCarriesOnce() []ids.WorkspaceID {
 			candidates = append(candidates, ws)
 		}
 	}
-	c.mu.Unlock()
+	c.unlock()
 	for _, ws := range candidates {
 		carried, sealedBy, ok := c.carriedParticipants(ws)
 		if !ok {
@@ -117,7 +116,7 @@ func (c *controller) followCarriesOnce() []ids.WorkspaceID {
 		if e, armed := c.rendezvous[ws]; armed && !e.adoptionClaimed {
 			c.followCarriedLocked(ws, e, carried, sealedBy)
 		}
-		c.mu.Unlock()
+		c.unlock()
 	}
 	return c.claimArmed()
 }

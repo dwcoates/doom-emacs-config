@@ -64,7 +64,7 @@ func (c *controller) HandOver(ctx context.Context, ask Ask) (HandoverAcceptance,
 // Joining implements Controller.
 func (c *controller) Joining() bool {
 	c.mu.Lock()
-	defer c.mu.Unlock()
+	defer c.unlock()
 	return c.stillJoiningLocked()
 }
 

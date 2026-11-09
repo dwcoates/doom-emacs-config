@@ -5,6 +5,7 @@ import (
 
 	"agent-repld/internal/bringup"
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/inflight"
 	"agent-repld/internal/restarttiming"
 	"agent-repld/internal/wsm"
 )
@@ -84,7 +85,7 @@ func (c *controller) startSessionless(pending []wsm.Workspace, fields dlog.Conte
 		dlog.Merge(fields, dlog.Context{"workspaces": names}))
 	lifetime := c.lifetime(context.Background())
 	c.bringUps.Add(1)
-	go func() {
+	inflight.Go(func() {
 		defer c.bringUps.Done()
 		bringup.Run(lifetime, bringup.Deps{
 			DB:           c.deps.DB,
@@ -96,5 +97,5 @@ func (c *controller) startSessionless(pending []wsm.Workspace, fields dlog.Conte
 			Restarts:     c.deps.Restarts,
 			Now:          c.deps.Clock.Now,
 		}, pending)
-	}()
+	})
 }

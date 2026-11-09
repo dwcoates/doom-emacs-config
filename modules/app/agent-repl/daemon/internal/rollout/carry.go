@@ -341,7 +341,7 @@ func (c *controller) seal(ctx context.Context, ws ids.WorkspaceID, fields dlog.C
 	carry.MidWork = c.deps.Freeness == nil || !c.deps.Freeness.Free(ws)
 	c.mu.Lock()
 	carry.ShimBuild = c.reported[ws]
-	c.mu.Unlock()
+	c.unlock()
 	for _, req := range carried {
 		if RelaunchReason(req.Reason) == ReasonBuildStale {
 			move.rejudged = append(move.rejudged, req)
@@ -577,7 +577,7 @@ func carryWorkspace(name string) (ids.WorkspaceID, bool) {
 func (c *controller) TakeUpCarries(ctx context.Context, adopted []ids.WorkspaceID) error {
 	c.mu.Lock()
 	outgoing := c.bootOutgoing
-	c.mu.Unlock()
+	c.unlock()
 	fields := dlog.Context{"outgoing_daemon": string(outgoing), "adopted": len(adopted)}
 	entries, err := os.ReadDir(c.carryDir())
 	if errors.Is(err, os.ErrNotExist) {
@@ -627,7 +627,7 @@ func (c *controller) TakeUpCarries(ctx context.Context, adopted []ids.WorkspaceI
 	}
 	c.mu.Lock()
 	c.takenUp = takenUp
-	c.mu.Unlock()
+	c.unlock()
 	if err := errors.Join(failures...); err != nil {
 		return err
 	}
@@ -670,7 +670,7 @@ func (c *controller) FinishCarries(ctx context.Context) {
 	c.mu.Lock()
 	takenUp := c.takenUp
 	c.takenUp = nil
-	c.mu.Unlock()
+	c.unlock()
 	for ws, carry := range takenUp {
 		fields := dlog.Context{"workspace": string(ws), "outgoing_daemon": string(carry.Daemon)}
 		if err := c.deps.Bounces.RejudgeHeld(ctx, ws); err != nil {
