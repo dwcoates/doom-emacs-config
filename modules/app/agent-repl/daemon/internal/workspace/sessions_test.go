@@ -4143,7 +4143,7 @@ func TestStartTimesEachStepOfTheSessionsStart(t *testing.T) {
 			name: "a hibernated conversation woken",
 			arrange: func(f *fleetFixture, ws wsm.Workspace) {
 				f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1",
-					Terminal: &wsm.SessionTerminal{Kind: wsm.TerminalHibernated}}
+					Terminal: &wsm.SessionTerminal{Kind: wsm.TerminalParked}}
 			},
 			want: []string{"shim/wake/ok", "slot_wait/wake/ok", "vendor/wake/ok", "watch/wake/ok", "total/wake/ok"},
 		},

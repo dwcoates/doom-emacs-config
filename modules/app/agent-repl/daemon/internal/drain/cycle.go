@@ -21,8 +21,8 @@ const opCycle = "daemon.drain.keepalive_cycle"
 // next one, so the ~350MB its shim and vendor child hold is free while it
 // would only have waited. It is stood down exactly as the idle sweep stands
 // one down -- the same gate, the same hibernate directive and graceful
-// KillSession -- with the keep-alive cycle's own terminal, which every view
-// draws as the live idle session it stands in for (wsm.ParkKeepaliveCycle).
+// KillSession -- leaving the one park (wsm.TerminalParked), which every view draws as the
+// live idle session it stands in for, with its own detail on the record.
 //
 // THE SAME RULES AS EVERY STAND-DOWN, AND FOUR OF ITS OWN. It never
 // interrupts a turn or live detached work: a busy session stays PENDING and is
@@ -37,7 +37,7 @@ const opCycle = "daemon.drain.keepalive_cycle"
 // model, permission-mode or effort pick on a workspace with no shim starts
 // one (promptqueue's revivalSettings); the switch away stands it down again
 // through this path (VisitDown), under the same rules, unless a real turn has
-// run since the pick started it. It leaves the keep-alive cycle's park, so the
+// run since the pick started it. It leaves the one park, so the
 // workspace is drawn as the idle session it was.
 
 // opVisit is the operation a settings visit's stand-down records under.
@@ -48,7 +48,6 @@ var visitReason = standDownReason{
 	op:     opVisit,
 	detail: "stood down on the switch away from a settings pick; the transcript was left as it stood",
 	done:   "stood down the shim a settings pick started",
-	park:   wsm.ParkKeepaliveCycle,
 	life:   shimlife.StandDownSettingsVisit,
 }
 
@@ -70,7 +69,6 @@ var cycleReason = standDownReason{
 	op:     opCycle,
 	detail: "stood down between keep-alives with its cache warm; the transcript was left as it stood",
 	done:   "stood an idle session down until its next keep-alive",
-	park:   wsm.ParkKeepaliveCycle,
 	life:   shimlife.StandDownKeepaliveCycle,
 }
 
@@ -182,7 +180,7 @@ func (c *controller) cycleDown(ctx context.Context, ws ids.WorkspaceID, beat tim
 	// up, so neither a keep-alive's park nor a settings visit's stand-down is
 	// taken, and so no pre-beat restore is ever owed. The mode is read HERE,
 	// at the attempt, so one turned off since the ask parks at the next beat
-	// as usual. The idle sweep's hibernation is not this path and still
+	// as usual. The idle sweep is not this path and still
 	// stands it down.
 	remote, err := c.deps.DB.RemoteControl(ctx, ws)
 	if err != nil {
@@ -230,14 +228,14 @@ func (c *controller) cycleDown(ctx context.Context, ws ids.WorkspaceID, beat tim
 			dlog.Merge(fields, dlog.Context{"gate": gate.String(), "invariant_violation": "every gate value is handled"}))
 		return withheldSettled
 	}
-	switch c.hibernate(ctx, log, ws, fields, reason) {
-	case hibernateDone:
+	switch c.park(ctx, log, ws, fields, reason) {
+	case parkDone:
 		return withheldSettled
-	case hibernateDeferred:
+	case parkDeferred:
 		log.Info(op, "the stand-down was deferred; it is taken when the session falls free", fields)
 		return withheldPending
 	default:
-		// hibernate recorded the failure at its own level; the next beat asks
+		// park recorded the failure at its own level; the next beat asks
 		// afresh.
 		return withheldSettled
 	}

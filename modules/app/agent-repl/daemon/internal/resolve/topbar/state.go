@@ -1,6 +1,8 @@
 package topbar
 
 import (
+	"time"
+
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
@@ -217,17 +219,16 @@ type wsState struct {
 	link shimclient.LinkState
 	// linkSeen reports whether any link state has been observed.
 	linkSeen bool
-	// park is the daemon's deliberate stand-down, the same fact the footer
-	// and the roster key their idle arms on: the idle sweep's hibernation, or
-	// the keep-alive cycle's, which draws as the live idle session it stands
-	// in for. It is cleared by the next link state of any kind, which belongs
-	// to the revival's own spawn.
-	park wsm.Park
-	// parkedAtMs is when the park was installed, epoch ms. It is the
-	// hibernated view's only content: the strip ticks the age from it, so the
-	// wire carries the instant and never a duration that would be stale on
-	// arrival.
-	parkedAtMs int64
+	// parked is the daemon's deliberate stand-down of an idle session, the
+	// same fact the footer and the roster key their idle arms on. There is
+	// one park, drawn as the live idle session it stands in for. It is
+	// cleared by the next link state of any kind, which belongs to the
+	// revival's own spawn.
+	parked bool
+	// nextKeepalive is the cache keeper's next scheduled keep-alive for this
+	// workspace, the zero time for none. The keeper states it whether or not
+	// a park stands, so a park raised later carries the current one (park).
+	nextKeepalive time.Time
 	// coldGate reports that this workspace is STANDING AT THE COLD GATE: the
 	// shim answered `cold` to the session start, so no session was ever
 	// created and the feed is showing the gate card the reader has to answer.
@@ -237,7 +238,7 @@ type wsState struct {
 	coldGate bool
 	// coldGateAtMs is when the gate rose, epoch ms, and coldGateTokens is what
 	// the cold read would re-read. They are the cold-gate view's whole
-	// content, for the same reason parkedAtMs is the hibernated view's.
+	// content.
 	coldGateAtMs   int64
 	coldGateTokens int64
 	// sessionlessPublished is what the LAST published view said about the
@@ -337,9 +338,9 @@ func (s *wsState) nextSeq() int {
 	return s.seq
 }
 
-// sessionless reports whether this workspace HAS NO SESSION AT ALL — the idle
-// sweep stood it down, it is standing at the cold gate, or no session has
-// started yet. It is ONE predicate so a cell can never be drawn as live in one
+// sessionless reports whether this workspace HAS NO SESSION AT ALL — it is
+// standing at the cold gate, or no session has started yet. A PARKED session
+// is not session-less: it draws as the live idle session it stands in for. It is ONE predicate so a cell can never be drawn as live in one
 // of those states and dead in another.
 //
 // IT IS NOT A WHOLE-VIEW STATE. Under the FIXED SCHEMA ruling the strip has
@@ -347,7 +348,7 @@ func (s *wsState) nextSeq() int {
 // two named states additionally contribute their reason to the context chip's
 // hover and one line to the warning strip.
 func (s *wsState) sessionless() bool {
-	return s.park == wsm.ParkHibernated || s.coldGate || !s.started
+	return s.coldGate || !s.started
 }
 
 // controlsWithheld reports whether the three session controls (model,
@@ -366,8 +367,8 @@ func (s *wsState) controlsWithheld() bool {
 // NO SESSION FACT IS EVER A GATE. Every session-scoped cell states "I do not
 // know yet" in its own slot: the two controls by ABSENCE, which the client
 // draws as a dash, and the context chip and warning strip by their own
-// content. So a workspace with no session — hibernated, cold-gated, or simply
-// not started — publishes the same strip as every other workspace, and the
+// content. So a workspace with no session — cold-gated, or simply not
+// started — publishes the same strip as every other workspace, and the
 // facts fill in as they arrive. Gating on a session fact was how a strip that
 // would never get one stayed BLANK for as long as the state stood.
 func (s *wsState) ready() bool {
@@ -384,4 +385,13 @@ func (s *wsState) missing() []string {
 		out = append(out, "account")
 	}
 	return out
+}
+
+// park is the workspace's park as one fact: whether one stands, with the
+// session's next scheduled keep-alive (wsm.Park).
+func (s *wsState) park() wsm.Park {
+	if !s.parked {
+		return wsm.ParkNone
+	}
+	return wsm.Parked(s.nextKeepalive)
 }

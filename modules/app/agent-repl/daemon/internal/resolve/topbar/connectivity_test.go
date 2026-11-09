@@ -1,11 +1,12 @@
 package topbar
 
 import (
-	"agent-repld/internal/wsm"
 	"testing"
+	"time"
 
 	"agent-repld/internal/shimclient"
 	"agent-repld/internal/vocab"
+	"agent-repld/internal/wsm"
 )
 
 func TestAnUnobservedLinkIsNoSession(t *testing.T) {
@@ -257,14 +258,14 @@ func TestTheLastPeerHopComingUpDrawsTheServingTone(t *testing.T) {
 	}
 }
 
-func TestAParkedDeadLinkIsNoSession(t *testing.T) {
-	// Arrange, Act: the idle sweep's deliberate stand-down.
-	got := connectivityKey(true, shimclient.LinkDead, true, wsm.ParkHibernated, false)
+func TestAParkedDeadLinkIsTheLiveRouteItStandsInFor(t *testing.T) {
+	// Arrange, Act: the daemon's deliberate stand-down, whatever stood it down.
+	got := connectivityKey(true, shimclient.LinkDead, true, wsm.Parked(time.Time{}), false)
 
 	// Assert: `dead` hollows the indicator with "the session's process is
 	// gone", which reports a fault for a route the daemon put down itself.
-	if got != linkNoSession {
-		t.Fatalf("connectivityKey = %q, want %q for a parked session", got, linkNoSession)
+	if got != linkConnected {
+		t.Fatalf("connectivityKey = %q, want %q for a parked session", got, linkConnected)
 	}
 }
 
@@ -273,7 +274,7 @@ func TestARevivalLiftsTheParkFromTheIndicator(t *testing.T) {
 	h := newHarness(t)
 	h.ready(t)
 	h.r.OnLink(testWS, shimclient.LinkDead)
-	h.r.SetParked(testWS, wsm.ParkHibernated)
+	h.r.SetParked(testWS, true)
 	h.r.OnLink(testWS, shimclient.LinkConnected)
 
 	// Act: the revived shim dies for real.
@@ -293,9 +294,9 @@ func TestConnectivityKeyOfADeadLinkUnderAPark(t *testing.T) {
 		want  string
 	}{
 		{name: "no park: a dead link is dead", peers: true, park: wsm.ParkNone, want: linkDead},
-		{name: "hibernated: no session", peers: true, park: wsm.ParkHibernated, want: linkNoSession},
-		{name: "a keep-alive cycle with both hops held: connected", peers: true, park: wsm.ParkKeepaliveCycle, want: linkConnected},
-		{name: "a keep-alive cycle with a hop down: severed", peers: false, park: wsm.ParkKeepaliveCycle, want: linkSevered},
+		{name: "a park with both hops held: connected", peers: true, park: wsm.Parked(time.Time{}), want: linkConnected},
+		{name: "a park with a hop down: severed", peers: false, park: wsm.Parked(time.Time{}), want: linkSevered},
+		{name: "a park with a keep-alive scheduled draws alike", peers: true, park: wsm.Parked(instant), want: linkConnected},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

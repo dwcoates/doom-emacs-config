@@ -57,9 +57,9 @@ type Controller interface {
 	// suppressed count for the window just closed and the running total.
 	NoteRefusal(ws ids.WorkspaceID)
 	// Sweep runs one pass of the idle sweep: every session whose last
-	// engagement is older than the cutoff is HIBERNATED under a drain lease.
-	// Hibernation is the sweep's directive and belongs to no other flow — the
-	// relaunch engine deliberately does not use it.
+	// engagement is older than the cutoff is PARKED (wsm.TerminalParked) under
+	// the stand-down lease, as every other trigger of the one park parks it.
+	// The relaunch engine deliberately does not use it.
 	Sweep(ctx context.Context, now time.Time) ([]ids.WorkspaceID, error)
 	// Run drives the sweep on its own cadence, and fires the standing schedule
 	// when its deadline passes, until ctx is cancelled.
@@ -97,8 +97,9 @@ type Deps struct {
 	// DB holds the schedule and the last-engagement facts.
 	DB wsm.DB
 	// IdleCutoff is how long a session may go unengaged before the sweep
-	// hibernates it (the --idle-cutoff flag). AGENT_REPL_HIBERNATE_IDLE_CUTOFF_MS
-	// BEATS it; New applies that override itself so no wiring can forget to.
+	// parks it (the --idle-cutoff flag). AGENT_REPL_HIBERNATE_IDLE_CUTOFF_MS
+	// BEATS it (its name predates the one park and is kept so an existing
+	// setting still holds); New applies that override itself so no wiring can forget to.
 	IdleCutoff time.Duration
 	// FoldDelay is how long a session a collapse folded keeps running before
 	// its stand-down is asked for (the --fold-stand-down-delay flag); zero is
@@ -135,9 +136,9 @@ type Deps struct {
 	Reviving func(ws ids.WorkspaceID) bool
 	// Delivering reports whether the prompt queue has a delivery to the
 	// workspace's shim under way. REQUIRED: a stand-down asks it after taking
-	// its hibernation lease, and the queue reads the lease under the lock this
+	// its stand-down lease, and the queue reads the lease under the lock this
 	// answers under, so a prompt is never sent to the shim the stand-down
-	// hibernates (see hibernate).
+	// parks (see park).
 	Delivering func(ws ids.WorkspaceID) bool
 	// Announcer publishes the WatchDaemon pushes: the standing drain schedule,
 	// its cancellation, and the shutdown announcement.
@@ -146,15 +147,15 @@ type Deps struct {
 	Exit ExitFunc
 	// LeaseChanged tells the prompt queue that a workspace's lease set changed,
 	// so the holds taken against the departed lease are re-evaluated. Without
-	// it a prompt held during a hibernation stays held forever: the release
+	// it a prompt held during a stand-down stays held forever: the release
 	// changes a row the queue is not watching. Nil means nothing is told.
 	LeaseChanged func(ws ids.WorkspaceID)
 	// PublishHost recomposes and republishes one workspace's HOST view. The
 	// composer gate on that view is a function of the OCCUPANCY LEASE -- a
-	// held drain or hibernation lease composes the draining arm -- and the
+	// held drain or stand-down lease composes the draining arm -- and the
 	// server cannot see a lease released, so the last push a host client got
 	// during a stand-down was taken while the lease was still held. Without
-	// this the composer stays shut after the hibernation ends, and Emacs
+	// this the composer stays shut after the stand-down ends, and Emacs
 	// refuses the very prompt that is meant to revive the session. Nil means
 	// no host surface is wired.
 	PublishHost func(ws ids.WorkspaceID)
@@ -180,7 +181,7 @@ type Deps struct {
 	// (webapp/src/main.ts: a `disconnected` status closes the composer), so
 	// the parked workspace could not be handed the prompt that revives it.
 	// Nil means no session-scoped view is wired.
-	SetParked func(ws ids.WorkspaceID, park wsm.Park)
+	SetParked func(ws ids.WorkspaceID, parked bool)
 	// Detach runs a withheld workspace's stand-down off the caller's
 	// goroutine, on a lifetime the daemon's exit ends and joins
 	// (workspace.Fleet.Detach). Required.

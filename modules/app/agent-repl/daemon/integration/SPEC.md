@@ -239,8 +239,8 @@ the vendor (`AGENT_REPL_FORBID_VENDOR_CALLS=1` in every process).
   hold and drain after readiness; {force:true} interrupts first
 - build-staleness bounce: a fake shim reporting a different
   `shim_build_sha` than the daemon's stamp is relaunched at freeness
-- hibernation: with `-idle-cutoff 1s`, an idle session gets Hibernate then
-  KillSession; the roster shows the parked state per the sidebar arms; the
+- the idle sweep's park: with `-idle-cutoff 1s`, an idle session gets Hibernate
+  then KillSession; the roster shows the parked state per the sidebar arms; the
   next SubmitPrompt revives (StartSession(resume)) and delivers
 - crash-boot adoption: kill the daemon with SIGKILL while a fake shim
   holds its locks; a new daemon probes the workspace lock, adopts the
@@ -586,7 +586,7 @@ audit's charge can be reconciled against the files.
   (`WatchWorkspaceRoster`), not just unary verbs.
 - A REFUSED HIBERNATE DEFERS THE STAND-DOWN: both a transport failure and a
   typed `turn_in_flight` refusal leave `KillSession` uncalled.
-- SPAWN-ON-MOUNT REVIVAL: `OpenWorkspace` on a hibernated row sends
+- SPAWN-ON-MOUNT REVIVAL: `OpenWorkspace` on a parked row sends
   `StartSession(resume)`; on a terminally deleted record it answers
   `session_deleted`.
 - COLD-GATE AND INTERRUPT ARMS: `no_cold_gate` on a resolved gate, `no_session`

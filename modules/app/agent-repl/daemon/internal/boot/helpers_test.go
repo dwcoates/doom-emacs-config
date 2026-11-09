@@ -587,7 +587,7 @@ func (h *harness) hibernate(t *testing.T, ws wsm.Workspace) {
 		t.Fatalf("PutSession(%s): %v", ws.ID, err)
 	}
 	if err := h.db.SetSessionTerminal(ctx, ws.ID, wsm.SessionTerminal{
-		Kind: wsm.TerminalHibernated, Detail: "idle past the cutoff", At: instant,
+		Kind: wsm.TerminalParked, Detail: "idle past the cutoff", At: instant,
 	}); err != nil {
 		t.Fatalf("SetSessionTerminal(%s): %v", ws.ID, err)
 	}
@@ -603,7 +603,7 @@ func (h *harness) cycleParked(t *testing.T, ws wsm.Workspace) {
 		t.Fatalf("PutSession(%s): %v", ws.ID, err)
 	}
 	if err := h.db.SetSessionTerminal(ctx, ws.ID, wsm.SessionTerminal{
-		Kind: wsm.TerminalKeepaliveCycle, Detail: "stood down between keep-alives", At: instant,
+		Kind: wsm.TerminalParked, Detail: "stood down between keep-alives", At: instant,
 	}); err != nil {
 		t.Fatalf("SetSessionTerminal(%s): %v", ws.ID, err)
 	}

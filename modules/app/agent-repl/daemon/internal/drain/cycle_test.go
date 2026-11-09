@@ -47,8 +47,8 @@ func TestACycleStandDownRecordsTheKeepaliveCycleTerminal(t *testing.T) {
 	h.c.CycleDown(ws, beatAfter)
 
 	// Assert
-	if term := h.terminal(t, ws); term == nil || term.Kind != wsm.TerminalKeepaliveCycle {
-		t.Fatalf("terminal = %+v, want %s", term, wsm.TerminalKeepaliveCycle)
+	if term := h.terminal(t, ws); term == nil || term.Kind != wsm.TerminalParked {
+		t.Fatalf("terminal = %+v, want %s", term, wsm.TerminalParked)
 	}
 }
 
@@ -66,11 +66,11 @@ func TestACycleStandDownRecordsItsOwnReason(t *testing.T) {
 	}
 }
 
-func TestACycleStandDownParksTheViewsAsTheKeepaliveCycle(t *testing.T) {
+func TestACycleStandDownParksTheViews(t *testing.T) {
 	// Arrange
-	var parked []wsm.Park
+	var parked []bool
 	h := newHarness(t, func(d *Deps) {
-		d.SetParked = func(_ ids.WorkspaceID, park wsm.Park) { parked = append(parked, park) }
+		d.SetParked = func(_ ids.WorkspaceID, park bool) { parked = append(parked, park) }
 	})
 	ws := h.workspace(t, instant)
 
@@ -78,8 +78,8 @@ func TestACycleStandDownParksTheViewsAsTheKeepaliveCycle(t *testing.T) {
 	h.c.CycleDown(ws, beatAfter)
 
 	// Assert
-	if len(parked) != 1 || parked[0] != wsm.ParkKeepaliveCycle {
-		t.Fatalf("parks = %v, want one keep-alive cycle park", parked)
+	if len(parked) != 1 || !parked[0] {
+		t.Fatalf("parks = %v, want the one park raised once", parked)
 	}
 }
 
@@ -175,82 +175,52 @@ func TestADeferredCycleStandDownIsTakenWhenTheSessionFallsFree(t *testing.T) {
 func (h *harness) cycleParked(t *testing.T, engaged time.Time) ids.WorkspaceID {
 	t.Helper()
 	ws := h.workspace(t, engaged)
-	if err := h.db.SetSessionTerminal(context.Background(), ws, wsm.SessionTerminal{Kind: wsm.TerminalKeepaliveCycle, At: engaged}); err != nil {
+	if err := h.db.SetSessionTerminal(context.Background(), ws, wsm.SessionTerminal{Kind: wsm.TerminalParked, Detail: cycleReason.detail, At: engaged}); err != nil {
 		t.Fatalf("SetSessionTerminal: %v", err)
 	}
 	h.stand.standDown(ws)
 	return ws
 }
 
-func TestTheSweepHibernatesACycleParkPastTheCutoff(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	ws := h.cycleParked(t, instant.Add(-2*time.Hour))
-
-	// Act
-	hibernated, err := h.c.Sweep(context.Background(), instant)
-
-	// Assert
-	if err != nil {
-		t.Fatalf("Sweep: %v", err)
+func TestTheSweepLeavesAParkAsItStands(t *testing.T) {
+	tests := []struct {
+		name    string
+		engaged time.Duration
+		coming  bool
+	}{
+		{name: "a park inside the cutoff", engaged: -time.Minute},
+		{name: "a park past the cutoff is no deeper a park", engaged: -2 * time.Hour},
+		{name: "a park a restore is bringing back", engaged: -2 * time.Hour, coming: true},
 	}
-	if len(hibernated) != 1 || hibernated[0] != ws {
-		t.Fatalf("hibernated = %v, want the parked session", hibernated)
-	}
-	if term := h.terminal(t, ws); term == nil || term.Kind != TerminalHibernated {
-		t.Fatalf("terminal = %+v, want hibernated", term)
-	}
-}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			var told []bool
+			h := newHarness(t, func(d *Deps) {
+				d.SetParked = func(_ ids.WorkspaceID, park bool) { told = append(told, park) }
+			})
+			ws := h.cycleParked(t, instant.Add(tt.engaged))
+			if tt.coming {
+				h.stand.startUnderWay(ws)
+			}
 
-func TestTheSweepParksTheViewsHibernatedForADeepenedCyclePark(t *testing.T) {
-	// Arrange
-	var parked []wsm.Park
-	h := newHarness(t, func(d *Deps) {
-		d.SetParked = func(_ ids.WorkspaceID, park wsm.Park) { parked = append(parked, park) }
-	})
-	h.cycleParked(t, instant.Add(-2*time.Hour))
+			// Act
+			parked, err := h.c.Sweep(context.Background(), instant)
 
-	// Act
-	if _, err := h.c.Sweep(context.Background(), instant); err != nil {
-		t.Fatalf("Sweep: %v", err)
-	}
-
-	// Assert
-	if len(parked) != 1 || parked[0] != wsm.ParkHibernated {
-		t.Fatalf("parks = %v, want one hibernated park", parked)
-	}
-}
-
-func TestTheSweepLeavesACycleParkInsideTheCutoff(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	ws := h.cycleParked(t, instant.Add(-time.Minute))
-
-	// Act
-	if _, err := h.c.Sweep(context.Background(), instant); err != nil {
-		t.Fatalf("Sweep: %v", err)
-	}
-
-	// Assert
-	if term := h.terminal(t, ws); term == nil || term.Kind != wsm.TerminalKeepaliveCycle {
-		t.Fatalf("terminal = %+v, want the keep-alive cycle's park kept", term)
-	}
-}
-
-func TestTheSweepLeavesACycleParkThatIsComingBackUp(t *testing.T) {
-	// Arrange: a restore of it is under way.
-	h := newHarness(t)
-	ws := h.cycleParked(t, instant.Add(-2*time.Hour))
-	h.stand.startUnderWay(ws)
-
-	// Act
-	if _, err := h.c.Sweep(context.Background(), instant); err != nil {
-		t.Fatalf("Sweep: %v", err)
-	}
-
-	// Assert
-	if term := h.terminal(t, ws); term == nil || term.Kind != wsm.TerminalKeepaliveCycle {
-		t.Fatalf("terminal = %+v, want the park left to the restore", term)
+			// Assert
+			if err != nil {
+				t.Fatalf("Sweep: %v", err)
+			}
+			if len(parked) != 0 {
+				t.Errorf("parked = %v, want nothing parked again", parked)
+			}
+			if term := h.terminal(t, ws); term == nil || term.Kind != wsm.TerminalParked || term.Detail != cycleReason.detail {
+				t.Errorf("terminal = %+v, want the keep-alive cycle's park kept with its own detail", term)
+			}
+			if len(told) != 0 {
+				t.Errorf("SetParked calls = %v, want the views told nothing", told)
+			}
+		})
 	}
 }
 
@@ -364,7 +334,7 @@ func TestAModeTurnedOffSinceIsParkedAtTheNextKeepalive(t *testing.T) {
 	h.c.CycleDown(ws, beatAfter)
 
 	// Assert
-	if term := h.terminal(t, ws); term == nil || term.Kind != wsm.TerminalKeepaliveCycle {
+	if term := h.terminal(t, ws); term == nil || term.Kind != wsm.TerminalParked {
 		t.Fatalf("terminal = %+v, want the keep-alive cycle's park", term)
 	}
 }

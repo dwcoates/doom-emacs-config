@@ -608,7 +608,7 @@ func TestAnAdoptionOfAParkedWorkspaceStandsDownItsInertSurvivor(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	ws, dir := h.workspace(t)
-	if err := h.db.SetSessionTerminal(context.Background(), ws, wsm.SessionTerminal{Kind: wsm.TerminalKeepaliveCycle, At: time.Unix(1_700_000_000, 0)}); err != nil {
+	if err := h.db.SetSessionTerminal(context.Background(), ws, wsm.SessionTerminal{Kind: wsm.TerminalParked, At: time.Unix(1_700_000_000, 0)}); err != nil {
 		t.Fatalf("SetSessionTerminal: %v", err)
 	}
 	h.mu.Lock()
@@ -1796,7 +1796,7 @@ func TestAnAdoptionOfAParkedFreeLockStartsNoSession(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	ws := freeLockAdoption(t, h)
-	if err := h.db.SetSessionTerminal(context.Background(), ws, wsm.SessionTerminal{Kind: wsm.TerminalKeepaliveCycle, At: time.Unix(1_700_000_000, 0)}); err != nil {
+	if err := h.db.SetSessionTerminal(context.Background(), ws, wsm.SessionTerminal{Kind: wsm.TerminalParked, At: time.Unix(1_700_000_000, 0)}); err != nil {
 		t.Fatalf("SetSessionTerminal: %v", err)
 	}
 

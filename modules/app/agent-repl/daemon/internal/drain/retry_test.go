@@ -19,20 +19,20 @@ func TestHibernateRetryDelay(t *testing.T) {
 	}{
 		{name: "the first failure skips exactly one pass", every: 5 * time.Minute, failures: 1, want: 10 * time.Minute},
 		{name: "each further failure doubles the wait", every: 5 * time.Minute, failures: 3, want: 40 * time.Minute},
-		{name: "the wait never passes the ceiling", every: 5 * time.Minute, failures: 4, want: HibernateRetryCeiling},
+		{name: "the wait never passes the ceiling", every: 5 * time.Minute, failures: 4, want: ParkRetryCeiling},
 		{name: "a short cadence still grows from its own value", every: 50 * time.Millisecond, failures: 1, want: 100 * time.Millisecond},
-		{name: "a long run of failures cannot overflow past the ceiling", every: 50 * time.Millisecond, failures: 200, want: HibernateRetryCeiling},
+		{name: "a long run of failures cannot overflow past the ceiling", every: 50 * time.Millisecond, failures: 200, want: ParkRetryCeiling},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange: the table row.
 
 			// Act
-			got := hibernateRetryDelay(tc.every, tc.failures)
+			got := parkRetryDelay(tc.every, tc.failures)
 
 			// Assert
 			if got != tc.want {
-				t.Fatalf("hibernateRetryDelay(%s, %d) = %s, want %s", tc.every, tc.failures, got, tc.want)
+				t.Fatalf("parkRetryDelay(%s, %d) = %s, want %s", tc.every, tc.failures, got, tc.want)
 			}
 		})
 	}
@@ -161,7 +161,7 @@ func TestABackedOffPassIsRecordedAtDebug(t *testing.T) {
 		if r.Level == "error" {
 			errors++
 		}
-		if r.Level == "debug" && r.Message == "the workspace's last hibernation failed; backing off before the next attempt" {
+		if r.Level == "debug" && r.Message == "the workspace's last park failed; backing off before the next attempt" {
 			skipped++
 		}
 	}

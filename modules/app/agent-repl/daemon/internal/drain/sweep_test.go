@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -95,8 +96,8 @@ func TestSweepRecordsARehydratableSessionTerminal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Session: %v", err)
 	}
-	if session.Terminal == nil || session.Terminal.Kind != TerminalHibernated {
-		t.Fatalf("terminal = %+v, want the rehydratable %q kind", session.Terminal, TerminalHibernated)
+	if session.Terminal == nil || session.Terminal.Kind != wsm.TerminalParked {
+		t.Fatalf("terminal = %+v, want the rehydratable %q kind", session.Terminal, wsm.TerminalParked)
 	}
 }
 
@@ -254,7 +255,7 @@ func TestSweepDefersASessionAPromptIsBeingDeliveredTo(t *testing.T) {
 	var logged bool
 	for _, r := range h.log.Records() {
 		if r.Level == "info" && r.Operation == opSweep && r.Context["workspace"] == string(ws) &&
-			r.Message == "a prompt is being delivered to the shim; deferring the hibernation" {
+			r.Message == "a prompt is being delivered to the shim; deferring the park" {
 			logged = true
 		}
 	}
@@ -390,7 +391,7 @@ func TestSweepSkipsAnAlreadyTerminalSession(t *testing.T) {
 	h := newHarness(t)
 	ws := h.workspace(t, instant.Add(-2*time.Hour))
 	if err := h.db.SetSessionTerminal(context.Background(), ws, wsm.SessionTerminal{
-		Kind: TerminalHibernated, Detail: "already down", At: instant,
+		Kind: wsm.TerminalParked, Detail: "already down", At: instant,
 	}); err != nil {
 		t.Fatalf("SetSessionTerminal: %v", err)
 	}
@@ -592,7 +593,7 @@ func TestSweepRecordsTheShimThatNeverAnsweredAsAFailedDirective(t *testing.T) {
 	// Assert.
 	found := false
 	for _, r := range records(h.log, opSweep) {
-		if r.Level == "error" && r.Message == "the hibernate directive failed; deferring the hibernation" {
+		if r.Level == "error" && r.Message == "the hibernate directive failed; deferring the park" {
 			found = true
 		}
 	}
@@ -824,9 +825,9 @@ func TestTheHibernationRepublishFollowsTheTerminalRecord(t *testing.T) {
 	}
 
 	// Assert
-	if len(terminalsAtPublish) != 1 || terminalsAtPublish[0] != TerminalHibernated {
+	if len(terminalsAtPublish) != 1 || terminalsAtPublish[0] != wsm.TerminalParked {
 		t.Fatalf("session terminals seen at the republish = %q, want one %q: the republish must follow the record",
-			terminalsAtPublish, TerminalHibernated)
+			terminalsAtPublish, wsm.TerminalParked)
 	}
 }
 
@@ -885,7 +886,7 @@ func TestARosterRepublishFailureStillReportsTheHibernation(t *testing.T) {
 	found := false
 	for _, r := range h.log.Records() {
 		if r.Level == "error" && r.Operation == opSweep &&
-			r.Message == "could not republish the roster after the hibernation" {
+			r.Message == "could not republish the roster after the park" {
 			found = true
 		}
 	}
@@ -914,7 +915,7 @@ func TestAHibernationWithNoRosterSurfaceWiredIsTolerated(t *testing.T) {
 	}
 }
 
-// TestTheHibernationTellsTheSessionScopedViewsAfterTheTerminalRecord is the
+// TestTheSweepsParkTellsTheSessionScopedViewsAfterTheTerminalRecord is the
 // footer's and the indicator's half of the park, and it is one assertion
 // because the ordering IS the defect: both are in-memory accumulations fed by
 // events, so a park announced before the terminal record exists would be a
@@ -924,13 +925,13 @@ func TestAHibernationWithNoRosterSurfaceWiredIsTolerated(t *testing.T) {
 // handed during a stand-down is the shim link going dead, and the footer's
 // disconnected step reads that as `disconnected · dead` — the word the
 // webapp's composer gate closes on (webapp/src/main.ts).
-func TestTheHibernationTellsTheSessionScopedViewsAfterTheTerminalRecord(t *testing.T) {
+func TestTheSweepsParkTellsTheSessionScopedViewsAfterTheTerminalRecord(t *testing.T) {
 	// Arrange
 	var terminalsAtPark []string
-	var parked []wsm.Park
+	var parked []bool
 	h := newHarness(t)
 	var ws ids.WorkspaceID
-	h.c.deps.SetParked = func(told ids.WorkspaceID, park wsm.Park) {
+	h.c.deps.SetParked = func(told ids.WorkspaceID, park bool) {
 		parked = append(parked, park)
 		session, found, err := h.db.Session(context.Background(), told)
 		if err != nil || !found || session.Terminal == nil {
@@ -951,12 +952,12 @@ func TestTheHibernationTellsTheSessionScopedViewsAfterTheTerminalRecord(t *testi
 	if len(hibernated) != 1 || hibernated[0] != ws {
 		t.Fatalf("hibernated = %v, want the one idle session %q", hibernated, ws)
 	}
-	if len(parked) != 1 || parked[0] != wsm.ParkHibernated {
-		t.Fatalf("SetParked calls = %v, want exactly one hibernated park for the one hibernation", parked)
+	if len(parked) != 1 || !parked[0] {
+		t.Fatalf("SetParked calls = %v, want the one park raised once for the one stand-down", parked)
 	}
-	if terminalsAtPark[0] != TerminalHibernated {
+	if terminalsAtPark[0] != wsm.TerminalParked {
 		t.Fatalf("session terminal seen at the park = %q, want %q: the views must be told after the record",
-			terminalsAtPark[0], TerminalHibernated)
+			terminalsAtPark[0], wsm.TerminalParked)
 	}
 }
 
@@ -965,9 +966,9 @@ func TestTheHibernationTellsTheSessionScopedViewsAfterTheTerminalRecord(t *testi
 // treat the NEXT real link death as a deliberate stand-down.
 func TestARefusedHibernationDoesNotParkTheSessionScopedViews(t *testing.T) {
 	// Arrange
-	var parked []wsm.Park
+	var parked []bool
 	h := newHarness(t, func(d *Deps) {
-		d.SetParked = func(_ ids.WorkspaceID, park wsm.Park) { parked = append(parked, park) }
+		d.SetParked = func(_ ids.WorkspaceID, park bool) { parked = append(parked, park) }
 	})
 	ws := h.workspace(t, instant.Add(-2*time.Hour))
 	h.stand.answer[ws] = &shimv1.HibernateResponse{
@@ -1135,7 +1136,7 @@ func TestSweepRecordsTheSkippedWorkspaceAtDebug(t *testing.T) {
 		if r.Level == "error" {
 			t.Fatalf("the skipped workspace was recorded at error: %+v", r)
 		}
-		if r.Level == "debug" && r.Message == "the workspace has no shim to address; skipping its hibernation" {
+		if r.Level == "debug" && r.Message == "the workspace has no shim to address; skipping its park" {
 			found = true
 		}
 	}
@@ -1164,7 +1165,7 @@ func TestSweepRecordsALostSessionDirectiveAtDebug(t *testing.T) {
 		if r.Level == "error" {
 			t.Fatalf("a session lost before the directive was recorded at error: %+v", r)
 		}
-		if r.Level == "debug" && r.Message == "the session went away before the hibernate directive; deferring the hibernation" {
+		if r.Level == "debug" && r.Message == "the session went away before the hibernate directive; deferring the park" {
 			found = true
 		}
 	}
@@ -1190,7 +1191,7 @@ func TestSweepStillRecordsAGenuineDirectiveFailureAtError(t *testing.T) {
 	// Assert.
 	found := false
 	for _, r := range records(h.log, opSweep) {
-		if r.Level == "error" && r.Message == "the hibernate directive failed; deferring the hibernation" {
+		if r.Level == "error" && r.Message == "the hibernate directive failed; deferring the park" {
 			found = true
 		}
 	}
@@ -1267,7 +1268,7 @@ func TestAFailedDirectiveIsStillAnError(t *testing.T) {
 	// Assert
 	found := false
 	for _, r := range records(h.log, opSweep) {
-		if r.Level == "error" && r.Message == "the hibernate directive failed; deferring the hibernation" {
+		if r.Level == "error" && r.Message == "the hibernate directive failed; deferring the park" {
 			found = true
 		}
 	}
@@ -1316,7 +1317,7 @@ func TestAnArmItCannotReadIsRecordedAsAnError(t *testing.T) {
 	// Assert
 	found := false
 	for _, r := range records(h.log, opSweep) {
-		if r.Level == "error" && r.Message == "the shim answered the hibernate directive with an arm this daemon cannot read; deferring the hibernation" {
+		if r.Level == "error" && r.Message == "the shim answered the hibernate directive with an arm this daemon cannot read; deferring the park" {
 			found = true
 		}
 	}
@@ -1501,5 +1502,64 @@ func TestSweepHibernatesAnIdleSessionInRemoteControl(t *testing.T) {
 	// Assert
 	if err != nil || len(hibernated) != 1 || hibernated[0] != ws {
 		t.Fatalf("Sweep = %v, %v; want [%s] hibernated", hibernated, err, ws)
+	}
+}
+
+// TestEveryTriggerLeavesTheOnePark pins the single park (owner ruling,
+// 2026-11-09): whatever stands an idle session down records the same
+// terminal and raises the same park in the views, and only the terminal's
+// detail says which trigger it was.
+func TestEveryTriggerLeavesTheOnePark(t *testing.T) {
+	tests := []struct {
+		name       string
+		trigger    func(t *testing.T, h *harness) ids.WorkspaceID
+		wantDetail string
+	}{
+		{name: "the idle sweep", wantDetail: "idle past the", trigger: func(t *testing.T, h *harness) ids.WorkspaceID {
+			ws := h.workspace(t, instant.Add(-2*time.Hour))
+			if _, err := h.c.Sweep(context.Background(), instant); err != nil {
+				t.Fatalf("Sweep: %v", err)
+			}
+			return ws
+		}},
+		{name: "a withheld workspace's stand-down", wantDetail: "hidden, collapsed or closed", trigger: func(t *testing.T, h *harness) ids.WorkspaceID {
+			ws := h.hidden(t)
+			h.c.StandDownWithheld(ws)
+			return ws
+		}},
+		{name: "the keep-alive cycle", wantDetail: "between keep-alives", trigger: func(t *testing.T, h *harness) ids.WorkspaceID {
+			ws := h.workspace(t, instant)
+			h.c.CycleDown(ws, beatAfter)
+			return ws
+		}},
+		{name: "a settings visit", wantDetail: "settings pick", trigger: func(t *testing.T, h *harness) ids.WorkspaceID {
+			ws := h.workspace(t, instant)
+			h.c.VisitDown(ws, beatAfter)
+			return ws
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			var told []bool
+			h := newHarness(t, func(d *Deps) {
+				d.SetParked = func(_ ids.WorkspaceID, park bool) { told = append(told, park) }
+			})
+
+			// Act
+			ws := tt.trigger(t, h)
+
+			// Assert
+			term := h.terminal(t, ws)
+			if term == nil || term.Kind != wsm.TerminalParked {
+				t.Fatalf("terminal = %+v, want %q", term, wsm.TerminalParked)
+			}
+			if !strings.Contains(term.Detail, tt.wantDetail) {
+				t.Errorf("terminal detail = %q, want the trigger named by %q", term.Detail, tt.wantDetail)
+			}
+			if len(told) != 1 || !told[0] {
+				t.Errorf("SetParked calls = %v, want the one park raised once", told)
+			}
+		})
 	}
 }

@@ -2,8 +2,6 @@ package topbar
 
 import (
 	"testing"
-
-	"agent-repld/internal/wsm"
 )
 
 func TestAnEmptyStateIsNotReady(t *testing.T) {
@@ -107,7 +105,7 @@ func TestReadinessGatesAParkedWorkspaceOnTheWorkspaceFactsAlone(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange
 			s := newWSState()
-			s.park = wsm.ParkHibernated
+			s.parked = true
 			tc.state(s)
 
 			// Act
@@ -124,7 +122,7 @@ func TestReadinessGatesAParkedWorkspaceOnTheWorkspaceFactsAlone(t *testing.T) {
 func TestAParkedWorkspaceIsNeverReportedAsAwaitingASessionFact(t *testing.T) {
 	// Arrange
 	s := newWSState()
-	s.park = wsm.ParkHibernated
+	s.parked = true
 
 	// Act
 	got := s.missing()
@@ -202,20 +200,19 @@ func TestAColdGatedWorkspaceIsNeverReportedAsAwaitingASessionFact(t *testing.T) 
 
 func TestSessionlessUnderAPark(t *testing.T) {
 	tests := []struct {
-		name string
-		park wsm.Park
-		want bool
+		name   string
+		parked bool
+		want   bool
 	}{
-		{name: "a started session with no park", park: wsm.ParkNone, want: false},
-		{name: "a hibernated session", park: wsm.ParkHibernated, want: true},
-		{name: "a session stood down between keep-alives", park: wsm.ParkKeepaliveCycle, want: false},
+		{name: "a started session with no park", parked: false, want: false},
+		{name: "a parked session is drawn as the live idle session", parked: true, want: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
 			s := newWSState()
 			s.started = true
-			s.park = tt.park
+			s.parked = tt.parked
 
 			// Act
 			got := s.sessionless()

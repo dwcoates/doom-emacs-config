@@ -14,15 +14,16 @@ import (
 	"agent-repld/internal/wsm"
 )
 
-// TerminalHibernated is the session terminal the sweep records. The value has
-// ONE author (wsm), because the boot's bring-up and the open and select verbs
-// all read it back to tell a deliberate sleep from a death.
-const TerminalHibernated = wsm.TerminalHibernated
-
-// Sweep runs one pass of the idle sweep and reports what it hibernated.
+// Sweep runs one pass of the idle sweep and reports what it parked.
 //
-// A workspace is hibernated only when it is BOTH idle past the cutoff and
-// FREE: hibernation never interrupts, so a busy session is deferred to a later
+// THE IDLE SWEEP IS ONE TRIGGER OF THE ONE PARK (owner ruling, 2026-11-09).
+// It reaches the sessions no other stand-down does -- the workspace the user
+// is looking at, one whose remote control is on -- and parks them as the
+// keep-alive cycle parks the rest: the same gate, the same steps, the same
+// `parked` terminal (wsm.TerminalParked), with its own detail naming it.
+//
+// A workspace is parked only when it is BOTH idle past the cutoff and FREE:
+// a stand-down never interrupts, so a busy session is deferred to a later
 // pass rather than stood down under a running turn.
 func (c *controller) Sweep(ctx context.Context, now time.Time) ([]ids.WorkspaceID, error) {
 	workspaces, err := c.deps.DB.ListWorkspaces(ctx)
@@ -43,7 +44,7 @@ func (c *controller) Sweep(ctx context.Context, now time.Time) ([]ids.WorkspaceI
 			"the session read ended when the drain loop's context was cancelled", nil, err)
 		return nil, fmt.Errorf("drain: sweep: %w", err)
 	}
-	var hibernated []ids.WorkspaceID
+	var parked []ids.WorkspaceID
 	for _, ws := range workspaces {
 		fields := dlog.Context{"workspace": string(ws.ID), "cutoff": c.deps.IdleCutoff.String()}
 		// EVERY RECORD BELOW IS WORKSPACE-BOUND and goes to that workspace's
@@ -51,17 +52,17 @@ func (c *controller) Sweep(ctx context.Context, now time.Time) ([]ids.WorkspaceI
 		// directory is a scratch path or has been deleted still gets swept:
 		// resolution falls back to the central sink with the workspace named
 		// on the record. Deferring the sweep on it instead cost an ERROR per
-		// pass per workspace and left the session unhibernated forever.
+		// pass per workspace and left the session unparked forever.
 		log := c.workspaceLog(ws)
 		session, found := sessions[ws.ID]
 		if !found {
-			log.Debug(opSweep, "the workspace has no session to hibernate", fields)
+			log.Debug(opSweep, "the workspace has no session to park", fields)
 			continue
 		}
 		// A QUEUED MERGE KEEPS ITS SESSION WARM FOR AS LONG AS IT STANDS IN
 		// LINE (owner rulings, 2026-10-13 and 2026-10-26): the merge's prompts
 		// run on that session, and a long queue holds an entry for hours, so
-		// no idle cutoff hibernates it while its entry stands.
+		// no idle cutoff parks it while its entry stands.
 		if enqueued, ok := queued[ws.ID]; ok {
 			log.Debug(opSweep, "the workspace has a merge queued; its session is kept warm",
 				dlog.Merge(fields, dlog.Context{"queued_at": enqueued.Format(time.RFC3339)}))
@@ -69,17 +70,9 @@ func (c *controller) Sweep(ctx context.Context, now time.Time) ([]ids.WorkspaceI
 		}
 		idle := now.Sub(session.LastEngagementAt)
 		fields["idle"] = idle.String()
-		// A KEEP-ALIVE CYCLE'S PARK PAST THE CUTOFF IS A HIBERNATION. The
-		// cycle stood the shim down between beats with its cache warm, and the
-		// cache keeper sends no beat past the cutoff, so from here the session
-		// is asleep exactly as the sweep would have left it: its park deepens,
-		// and every view draws it hibernated.
-		if session.KeepaliveCycled() && idle >= c.deps.IdleCutoff {
-			if c.deepenCyclePark(ctx, log, ws.ID, fields) {
-				hibernated = append(hibernated, ws.ID)
-			}
-			continue
-		}
+		// A SESSION ALREADY PARKED STAYS AS IT IS. There is one park, so a park
+		// past the cutoff is no deeper than one inside it; the cache keeper owes
+		// it no keep-alive past the cutoff, so its park carries none.
 		if session.Terminal != nil {
 			log.Debug(opSweep, "the workspace's session is already terminal",
 				dlog.Merge(fields, dlog.Context{"terminal_kind": session.Terminal.Kind}))
@@ -92,73 +85,42 @@ func (c *controller) Sweep(ctx context.Context, now time.Time) ([]ids.WorkspaceI
 		switch gate := c.gate(ws.ID); gate {
 		case gateOpen:
 		case gateBusy:
-			log.Debug(opSweep, "the idle session is not free; deferring its hibernation", fields)
+			log.Debug(opSweep, "the idle session is not free; deferring its park", fields)
 			continue
 		case gateNotServing:
-			log.Debug(opSweep, "the workspace has no shim to address; skipping its hibernation", fields)
+			log.Debug(opSweep, "the workspace has no shim to address; skipping its park", fields)
 			continue
 		case gateStarting:
-			log.Debug(opSweep, "a start of the workspace's session is under way; skipping its hibernation", fields)
+			log.Debug(opSweep, "a start of the workspace's session is under way; skipping its park", fields)
 			continue
 		case gateReviving:
-			log.Debug(opSweep, "a prompt is reviving the session; deferring its hibernation", fields)
+			log.Debug(opSweep, "a prompt is reviving the session; deferring its park", fields)
 			continue
 		default:
-			log.Error(opSweep, "the stand-down gate answered a value the sweep cannot read; skipping the hibernation",
+			log.Error(opSweep, "the stand-down gate answered a value the sweep cannot read; skipping the park",
 				dlog.Merge(fields, dlog.Context{"gate": gate.String(), "invariant_violation": "every gate value is handled"}))
 			continue
 		}
 		if retry, backingOff := c.backingOff(ws.ID, now); backingOff {
-			log.Debug(opSweep, "the workspace's last hibernation failed; backing off before the next attempt",
+			log.Debug(opSweep, "the workspace's last park failed; backing off before the next attempt",
 				dlog.Merge(fields, dlog.Context{"failures": retry.failures, "next_attempt": retry.notBefore}))
 			continue
 		}
-		switch c.hibernate(ctx, log, ws.ID, fields, c.idleReason()) {
-		case hibernateDone:
+		switch c.park(ctx, log, ws.ID, fields, c.idleReason()) {
+		case parkDone:
 			c.clearRetry(ws.ID)
-			hibernated = append(hibernated, ws.ID)
-		case hibernateDeferred:
+			parked = append(parked, ws.ID)
+		case parkDeferred:
 			c.clearRetry(ws.ID)
-		case hibernateFailed:
+		case parkFailed:
 			retry := c.recordFailure(ws.ID, now)
-			log.Debug(opSweep, "backing off the failed hibernation",
+			log.Debug(opSweep, "backing off the failed park",
 				dlog.Merge(fields, dlog.Context{"failures": retry.failures, "next_attempt": retry.notBefore}))
 		}
 	}
 	c.log.Debug(opSweep, "one idle-sweep pass finished",
-		dlog.Context{"scanned": len(workspaces), "hibernated": ids.Strings(hibernated)})
-	return hibernated, nil
-}
-
-// deepenCyclePark turns a keep-alive cycle's park into the idle sweep's
-// hibernation: the shim is already down, so only the record and the views
-// change. A session a restore or a revival is bringing back is left to it.
-// It answers whether the park was deepened.
-func (c *controller) deepenCyclePark(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, fields dlog.Context) bool {
-	if c.deps.Stand.Serving(ws) || c.deps.Stand.StartUnderWay(ws) {
-		log.Debug(opSweep, "a keep-alive cycle's parked session is coming back up; it is not hibernated", fields)
-		return false
-	}
-	why := c.idleReason()
-	if err := c.deps.DB.SetSessionTerminal(ctx, ws, wsm.SessionTerminal{
-		Kind:   TerminalHibernated,
-		Detail: why.detail,
-		At:     c.deps.Clock.Now(),
-	}); err != nil {
-		log.Error(opSweep, "could not record the hibernation of a keep-alive cycle's parked session", dlog.WithCause(fields, err))
-		return false
-	}
-	if c.deps.SetParked != nil {
-		c.deps.SetParked(ws, wsm.ParkHibernated)
-	}
-	if c.deps.PublishRegistry != nil {
-		if err := c.deps.PublishRegistry(ctx); err != nil {
-			log.Error(opSweep, "could not republish the roster after hibernating a keep-alive cycle's parked session",
-				dlog.WithCause(fields, err))
-		}
-	}
-	log.Info(opSweep, "a keep-alive cycle's parked session went past the idle cutoff; it is hibernated", fields)
-	return true
+		dlog.Context{"scanned": len(workspaces), "parked": ids.Strings(parked)})
+	return parked, nil
 }
 
 // standGate is whether a session may be stood down right now, and if not,
@@ -203,7 +165,7 @@ func (c *controller) gate(ws ids.WorkspaceID) standGate {
 	if !c.deps.Freeness.Free(ws) {
 		return gateBusy
 	}
-	// A DURABLE SESSION ROW IS NOT A SHIM. Hibernation is a directive to a
+	// A DURABLE SESSION ROW IS NOT A SHIM. A stand-down is a directive to a
 	// running shim, so a workspace whose session this daemon cannot
 	// address has nothing to stand down: its bring-up is still in flight,
 	// its close already is, or the row outlived the process that served
@@ -225,8 +187,8 @@ func (c *controller) gate(ws ids.WorkspaceID) standGate {
 	// The revival's bring-up serves the session and retires its terminal
 	// before it records the session's facts, and delivers the prompt it
 	// holds only after that, so across that window the record reads live
-	// and idle since the engagement before the last hibernation. Standing
-	// it down there hibernated the shim the prompt was about to reach: the
+	// and idle since the engagement before the last park. Standing
+	// it down there parked the shim the prompt was about to reach: the
 	// hold then met `query_dead`, or no session at all, and was dropped.
 	//
 	// THE ORDER IS WHAT MAKES THIS TOTAL. Serving was read true above, so
@@ -239,48 +201,34 @@ func (c *controller) gate(ws ids.WorkspaceID) standGate {
 	return gateOpen
 }
 
-// hibernateOutcome is what one hibernation attempt came to.
-type hibernateOutcome int
+// parkOutcome is what one park attempt came to.
+type parkOutcome int
 
 const (
-	// hibernateDone: the session was stood down and recorded.
-	hibernateDone hibernateOutcome = iota
-	// hibernateDeferred: an ORDINARY deferral -- another lease holder, a
+	// parkDone: the session was stood down and recorded.
+	parkDone parkOutcome = iota
+	// parkDeferred: an ORDINARY deferral -- another lease holder, a
 	// session that went away, a turn in flight. The next pass asks again at
 	// the sweep's own cadence.
-	hibernateDeferred
-	// hibernateFailed: something that should have worked did not -- a failed
+	parkDeferred
+	// parkFailed: something that should have worked did not -- a failed
 	// or unreadable directive, a warned refusal, a failed stand-down or
-	// record. The workspace is BACKED OFF (see hibernateRetryDelay).
-	hibernateFailed
+	// record. The workspace is BACKED OFF (see parkRetryDelay).
+	parkFailed
 )
 
 // standDownReason is why a session is stood down: the records it is filed
 // under, the detail its terminal carries, and the sentence its success says.
-// The idle sweep and a withheld workspace's stand-down take the SAME steps
-// (hibernate); only these words differ.
+// Every trigger -- the idle sweep, a withheld workspace, the keep-alive cycle,
+// a settings visit -- takes the SAME steps (park) and leaves the SAME
+// park (wsm.TerminalParked); only these words differ, and the detail is where
+// the trigger stays on the record as evidence. No view reads it.
 type standDownReason struct {
 	op     string
 	detail string
 	done   string
-	// park is the park the stand-down leaves: the terminal it records and
-	// what the session-scoped views draw (wsm.Park). ParkNone is no reason's.
-	park wsm.Park
 	// life is the reason the shim lifecycle series counts it under.
 	life shimlife.StandDownReason
-}
-
-// terminal is the session terminal a stand-down for WHY records: the one
-// fact the views' park is derived from, so the two can never disagree.
-func (why standDownReason) terminal() (string, error) {
-	switch why.park {
-	case wsm.ParkHibernated:
-		return TerminalHibernated, nil
-	case wsm.ParkKeepaliveCycle:
-		return wsm.TerminalKeepaliveCycle, nil
-	default:
-		return "", fmt.Errorf("drain: the stand-down %q names no park (%s)", why.op, why.park)
-	}
 }
 
 // idleReason is the idle sweep's.
@@ -288,37 +236,31 @@ func (c *controller) idleReason() standDownReason {
 	return standDownReason{
 		op:     opSweep,
 		detail: fmt.Sprintf("idle past the %s cutoff; the transcript was left as it stood", c.deps.IdleCutoff),
-		done:   "hibernated an idle session",
-		park:   wsm.ParkHibernated,
+		done:   "parked a session idle past the cutoff",
 		life:   shimlife.StandDownHibernate,
 	}
 }
 
-// hibernate stands one session down: the Hibernate directive, then the ack,
+// park stands one session down: the Hibernate directive, then the ack,
 // then a GRACEFUL KillSession, then the durable stand-down record. It reports
 // what the attempt came to; every failure and every refusal DEFERS the
 // workspace rather than failing the whole pass, because one wedged session
 // must not stop the sweep reaching the rest.
-func (c *controller) hibernate(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, fields dlog.Context, why standDownReason) hibernateOutcome {
-	terminal, err := why.terminal()
-	if err != nil {
-		log.Error(why.op, "the stand-down names no park; nothing is stood down", dlog.WithCause(fields, err))
-		return hibernateFailed
-	}
+func (c *controller) park(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, fields dlog.Context, why standDownReason) parkOutcome {
 	lease, err := c.deps.DB.AcquireLease(ctx, ws, wsm.HolderHibernate, wsm.PolicyHold)
 	if err != nil {
-		log.Debug(why.op, "another holder has the lease; deferring the hibernation",
+		log.Debug(why.op, "another holder has the lease; deferring the park",
 			dlog.WithCause(fields, err))
-		return hibernateDeferred
+		return parkDeferred
 	}
 	defer func() {
 		if err := c.deps.DB.ReleaseLease(context.WithoutCancel(ctx), lease.ID); err != nil {
-			log.Warn(why.op, "could not release the hibernation lease",
+			log.Warn(why.op, "could not release the stand-down lease",
 				dlog.WithCause(dlog.Merge(fields, dlog.Context{"lease": string(lease.ID)}), err))
 			return
 		}
 		// TELLING THE QUEUE IS WHAT DRAINS THE INTAKE. A prompt that arrived
-		// inside the hibernation window is held against this lease, and the
+		// inside the stand-down window is held against this lease, and the
 		// release alone changes a row the queue is not watching — so without
 		// this the prompt that should have REVIVED the session waits forever.
 		if c.deps.LeaseChanged != nil {
@@ -327,9 +269,9 @@ func (c *controller) hibernate(ctx context.Context, log dlog.Logger, ws ids.Work
 		// AND THE HOST VIEW IS STALE UNTIL SOMETHING RECOMPOSES IT. The
 		// composer arm was `draining` for as long as this lease stood, the
 		// last push every host client received was taken while it was held,
-		// and no other flow republishes after a hibernation. Emacs refuses a
+		// and no other flow republishes after a park. Emacs refuses a
 		// submission while its gate reads draining, so the republish is what
-		// makes the hibernated workspace revivable by a prompt.
+		// makes the parked workspace revivable by a prompt.
 		c.publishHost(ws)
 	}()
 
@@ -340,8 +282,8 @@ func (c *controller) hibernate(ctx context.Context, log dlog.Logger, ws ids.Work
 	// a delivery not seen here is held against the lease, and one seen here
 	// defers the stand-down to the turn it starts.
 	if c.deps.Delivering(ws) {
-		log.Info(why.op, "a prompt is being delivered to the shim; deferring the hibernation", fields)
-		return hibernateDeferred
+		log.Info(why.op, "a prompt is being delivered to the shim; deferring the park", fields)
+		return parkDeferred
 	}
 
 	directive, cancelDirective := context.WithTimeout(ctx, c.deps.StandBound)
@@ -354,24 +296,24 @@ func (c *controller) hibernate(ctx context.Context, log dlog.Logger, ws ids.Work
 		// state it is and deferred; the ERROR below still covers every
 		// directive that failed against a shim that WAS there.
 		if errors.Is(err, ErrNoLiveSession) {
-			log.Debug(why.op, "the session went away before the hibernate directive; deferring the hibernation",
+			log.Debug(why.op, "the session went away before the hibernate directive; deferring the park",
 				dlog.WithCause(fields, err))
-			return hibernateDeferred
+			return parkDeferred
 		}
-		log.Error(why.op, "the hibernate directive failed; deferring the hibernation",
+		log.Error(why.op, "the hibernate directive failed; deferring the park",
 			dlog.WithCause(fields, err))
-		return hibernateFailed
+		return parkFailed
 	}
 	if refusal := answer.GetError(); refusal != nil {
 		// A REFUSAL IS AN ANSWER. turn_in_flight simply defers; the other
 		// arm is worth a warning, and defers just the same.
 		refused := dlog.Merge(fields, dlog.Context{"refusal": hibernateRefusal(refusal)})
 		if refusal.GetTurnInFlight() != nil {
-			log.Debug(why.op, "a turn is in flight; deferring the hibernation", refused)
-			return hibernateDeferred
+			log.Debug(why.op, "a turn is in flight; deferring the park", refused)
+			return parkDeferred
 		}
 		log.Warn(why.op, "the shim refused to hibernate; deferring", refused)
-		return hibernateFailed
+		return parkFailed
 	}
 	// AND EVERY OTHER ARM IS A DEFERRAL, NOT A STAND-DOWN. The arms above are
 	// the whole of what this daemon knows how to read; anything else is a shim
@@ -379,8 +321,8 @@ func (c *controller) hibernate(ctx context.Context, log dlog.Logger, ws ids.Work
 	// session down on an answer nobody here understood could kill a turn the
 	// shim was refusing to let go of.
 	if answer.GetSuccess() == nil {
-		log.Error(why.op, "the shim answered the hibernate directive with an arm this daemon cannot read; deferring the hibernation", fields)
-		return hibernateFailed
+		log.Error(why.op, "the shim answered the hibernate directive with an arm this daemon cannot read; deferring the park", fields)
+		return parkFailed
 	}
 
 	standDown, cancelStandDown := context.WithTimeout(shimlife.WithStandDown(ctx, why.life), c.deps.StandBound)
@@ -389,31 +331,31 @@ func (c *controller) hibernate(ctx context.Context, log dlog.Logger, ws ids.Work
 	if err != nil {
 		log.Error(why.op, "the graceful stand-down failed after the hibernate ack; deferring",
 			dlog.WithCause(fields, err))
-		return hibernateFailed
+		return parkFailed
 	}
 
 	if err := c.deps.DB.SetSessionTerminal(ctx, ws, wsm.SessionTerminal{
-		Kind:   terminal,
+		Kind:   wsm.TerminalParked,
 		Detail: why.detail,
 		At:     c.deps.Clock.Now(),
 	}); err != nil {
-		log.Error(why.op, "could not record the hibernation stand-down", dlog.WithCause(fields, err))
-		return hibernateFailed
+		log.Error(why.op, "could not record the park", dlog.WithCause(fields, err))
+		return parkFailed
 	}
 	// The shim is gone, so the pid the intent manifest would name is gone with
 	// it. A pid left behind would make the next reconciliation read a dead
 	// session as preserved.
 	if err := c.deps.DB.SetShimPID(ctx, ws, nil); err != nil {
-		log.Error(why.op, "could not clear the hibernated session's shim pid", dlog.WithCause(fields, err))
-		return hibernateFailed
+		log.Error(why.op, "could not clear the parked session's shim pid", dlog.WithCause(fields, err))
+		return parkFailed
 	}
 	// AND SO IS THE SPAWN THE REGISTRY RECORDS. That pid exists so a successor
 	// daemon waits for a shim that is still starting instead of spawning a
-	// second one; a hibernated workspace's shim is gone, and a pid left behind
+	// second one; a parked workspace's shim is gone, and a pid left behind
 	// would make the next boot wait out its whole adoption bound for it.
 	if err := c.deps.DB.SetSpawnedShimPID(ctx, ws, nil); err != nil {
-		log.Error(why.op, "could not clear the hibernated workspace's recorded spawn pid", dlog.WithCause(fields, err))
-		return hibernateFailed
+		log.Error(why.op, "could not clear the parked workspace's recorded spawn pid", dlog.WithCause(fields, err))
+		return parkFailed
 	}
 	// AND SO IS THE FOOTER'S, AND THE CONNECTIVITY INDICATOR'S. Both are
 	// in-memory accumulations fed by events, so unlike the roster they cannot
@@ -425,7 +367,7 @@ func (c *controller) hibernate(ctx context.Context, log dlog.Logger, ws ids.Work
 	// calling the deliberate stand-down a dead link, which is what reopens the
 	// webapp's composer for the prompt that revives the session.
 	if c.deps.SetParked != nil {
-		c.deps.SetParked(ws, why.park)
+		c.deps.SetParked(ws, true)
 	}
 	// THE ROSTER'S ARM FOR THIS ROW IS A FUNCTION OF THE RECORD ABOVE. The
 	// roster resolver reads the session terminal to know a park from a fault,
@@ -434,20 +376,20 @@ func (c *controller) hibernate(ctx context.Context, log dlog.Logger, ws ids.Work
 	// terminal existed. The row resolved on that event says `dead`, which
 	// Emacs paints as "something on this machine broke" for a session the
 	// daemon stood down on purpose. Nothing else republishes the roster after
-	// a hibernation, so this is the republish that makes the park READ as one.
+	// a park, so this is the republish that makes the park READ as one.
 	//
-	// A failure here is recorded and nothing more: the hibernation HAPPENED,
+	// A failure here is recorded and nothing more: the park HAPPENED,
 	// and reporting it as refused would leave the sweep retrying a session
 	// that is already stood down. The stale view is the defect, and the
 	// record is what names it.
 	if c.deps.PublishRegistry != nil {
 		if err := c.deps.PublishRegistry(ctx); err != nil {
-			log.Error(why.op, "could not republish the roster after the hibernation",
+			log.Error(why.op, "could not republish the roster after the park",
 				dlog.WithCause(fields, err))
 		}
 	}
 	log.Info(why.op, why.done, fields)
-	return hibernateDone
+	return parkDone
 }
 
 // workspaceLog resolves one workspace's own durable sink, or the central sink

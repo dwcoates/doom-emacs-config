@@ -79,7 +79,9 @@ func (k *Keeper) schedule(ctx context.Context, ws ids.WorkspaceID, why string) {
 }
 
 // beatDue answers when WS's next keep-alive is due and whether its session is
-// parked by the keep-alive cycle, false when it owes none. Every reason it
+// parked, false when it owes none. ONE PARK, WHATEVER STOOD IT DOWN: a session
+// the idle sweep parked owes none by the cutoff below, and a withheld one by
+// its withholding, so no reader here asks which stand-down it was. Every reason it
 // owes none is recorded at DEBUG: they are the ordinary states of a fleet.
 func (k *Keeper) beatDue(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID) (time.Time, bool, bool) {
 	record, err := k.deps.DB.Workspace(ctx, ws)
@@ -154,7 +156,7 @@ func (k *Keeper) beatDue(ctx context.Context, log dlog.Logger, ws ids.WorkspaceI
 	if !found {
 		return none("it has no session")
 	}
-	if session.Terminal != nil && !session.KeepaliveCycled() {
+	if session.Terminal != nil && !session.Parked() {
 		return none("its session is not live: " + session.Terminal.Kind)
 	}
 	due := clock.Add(k.deps.Interval)
@@ -165,7 +167,7 @@ func (k *Keeper) beatDue(ctx context.Context, log dlog.Logger, ws ids.WorkspaceI
 	if k.deps.IdleCutoff > 0 && !queued && engaged.Add(k.deps.IdleCutoff).Before(due) {
 		return none("it will be idle past the cutoff before the beat is due, and the idle sweep puts it to sleep")
 	}
-	return due, session.KeepaliveCycled(), true
+	return due, session.Parked(), true
 }
 
 // beatsDue sends every keep-alive that has come due.
@@ -357,8 +359,8 @@ func (k *Keeper) pump(ctx context.Context) {
 			}
 			continue
 		}
-		if !found || !session.KeepaliveCycled() {
-			log.Debug(opRestore, "the session is no longer parked by the keep-alive cycle; it is not restored", nil)
+		if !found || !session.Parked() {
+			log.Debug(opRestore, "the session is no longer parked; it is not restored", nil)
 			continue
 		}
 		k.restoring[next.ws] = true

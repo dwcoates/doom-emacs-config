@@ -202,6 +202,13 @@ type harness struct {
 	cycled []cycleCall
 	// restoring are the restores asked for, each with the done that ends it.
 	restoring []restoreCall
+	// nextKeepalives are the next keep-alives stated to the views, in order.
+	nextKeepalives []nextKeepaliveCall
+}
+
+type nextKeepaliveCall struct {
+	ws   ids.WorkspaceID
+	next time.Time
 }
 
 type cycleCall struct {
@@ -286,6 +293,9 @@ func newHarness(t *testing.T, rec wsm.Workspace) *harness {
 		Clock:     h.clock,
 		Log:       h.log,
 		Telemetry: h.telemetry,
+		NextKeepalive: func(ws ids.WorkspaceID, next time.Time) {
+			h.nextKeepalives = append(h.nextKeepalives, nextKeepaliveCall{ws: ws, next: next})
+		},
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -332,6 +342,7 @@ func TestNewRefusesAMissingCollaborator(t *testing.T) {
 			Clock:           clocktest.New(now),
 			Log:             dlog.NewTestSurfaces(),
 			Telemetry:       &fakeTelemetry{},
+			NextKeepalive:   func(ids.WorkspaceID, time.Time) {},
 		}
 	}
 	tests := []struct {
@@ -349,6 +360,7 @@ func TestNewRefusesAMissingCollaborator(t *testing.T) {
 		{name: "clock", strip: func(d *Deps) { d.Clock = nil }},
 		{name: "telemetry", strip: func(d *Deps) { d.Telemetry = nil }},
 		{name: "log", strip: func(d *Deps) { d.Log = nil }},
+		{name: "views' next keep-alive", strip: func(d *Deps) { d.NextKeepalive = nil }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

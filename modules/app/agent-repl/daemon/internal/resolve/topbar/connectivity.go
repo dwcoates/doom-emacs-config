@@ -37,20 +37,16 @@ const (
 // client hop down is `severed` and never `connected`: the route to the reader
 // is broken even though the route to the session is not.
 //
-// parked is the idle sweep's deliberate stand-down. A PARKED SESSION IS IDLE,
-// NOT BROKEN (resolve/sidebar/status.go), so the route being gone is not a
-// fault to draw: `no_session` — "there is no session to have a route to" — is
-// literally the state, and it is the only key the vocabulary already carries
-// for it. Drawing `dead` there hollowed the indicator ("the session's process
-// is gone") for a session the daemon parked on purpose.
-//
-// A KEEP-ALIVE CYCLE'S PARK DRAWS THE LIVE ROUTE IT STANDS IN FOR (owner
-// ruling, 2026-10-26): the shim is down only between beats, with its cache
-// warm, so the indicator reads the reader's hops exactly as a serving link's
-// would.
+// park is the daemon's deliberate stand-down of an idle session. THERE IS ONE
+// PARK (owner ruling, 2026-11-09), and it DRAWS THE LIVE ROUTE IT STANDS IN
+// FOR, whatever stood the session down: the shim is down only until the next
+// prompt, settings pick or keep-alive restore brings it back, so the
+// indicator reads the reader's hops exactly as a serving link's would.
+// Drawing `dead` there hollowed the indicator ("the session's process is
+// gone") for a session the daemon parked on purpose.
 //
 // A STANDING COLD GATE RUNS NO SHIM (owner ruling, 2026-10-27), so its route
-// being gone is `no_session` too, as a hibernation's is.
+// being gone is `no_session`: there is no session to have a route to.
 func connectivityKey(seen bool, link shimclient.LinkState, peers bool, park wsm.Park, coldGate bool) string {
 	if !seen {
 		return linkNoSession
@@ -58,16 +54,11 @@ func connectivityKey(seen bool, link shimclient.LinkState, peers bool, park wsm.
 	if link == shimclient.LinkDead && coldGate {
 		return linkNoSession
 	}
-	if link == shimclient.LinkDead {
-		switch park {
-		case wsm.ParkHibernated:
-			return linkNoSession
-		case wsm.ParkKeepaliveCycle:
-			if !peers {
-				return linkSevered
-			}
-			return linkConnected
+	if link == shimclient.LinkDead && park.Standing() {
+		if !peers {
+			return linkSevered
 		}
+		return linkConnected
 	}
 	switch link {
 	case shimclient.LinkDialing:

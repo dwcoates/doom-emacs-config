@@ -177,7 +177,7 @@ func TestBringUpSessionlessNeverMarksAShimThatWasNotUp(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	ws, _ := h.workspace(t)
-	if err := h.db.SetSessionTerminal(context.Background(), ws, wsm.SessionTerminal{Kind: wsm.TerminalKeepaliveCycle, At: time.Unix(1_700_000_000, 0)}); err != nil {
+	if err := h.db.SetSessionTerminal(context.Background(), ws, wsm.SessionTerminal{Kind: wsm.TerminalParked, At: time.Unix(1_700_000_000, 0)}); err != nil {
 		t.Fatalf("SetSessionTerminal: %v", err)
 	}
 
@@ -194,7 +194,7 @@ func TestBringUpSessionlessStatesTheWithheldWorkspacesAtInfo(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	ws, _ := h.workspace(t)
-	if err := h.db.SetSessionTerminal(context.Background(), ws, wsm.SessionTerminal{Kind: wsm.TerminalKeepaliveCycle, At: time.Unix(1_700_000_000, 0)}); err != nil {
+	if err := h.db.SetSessionTerminal(context.Background(), ws, wsm.SessionTerminal{Kind: wsm.TerminalParked, At: time.Unix(1_700_000_000, 0)}); err != nil {
 		t.Fatalf("SetSessionTerminal: %v", err)
 	}
 
@@ -213,8 +213,8 @@ func TestBringUpSessionlessDoesNotStartAShimThatWasNotUp(t *testing.T) {
 		name string
 		kind string
 	}{
-		{name: "parked between keep-alives", kind: wsm.TerminalKeepaliveCycle},
-		{name: "hibernated", kind: wsm.TerminalHibernated},
+		{name: "parked between keep-alives", kind: wsm.TerminalParked},
+		{name: "hibernated", kind: wsm.TerminalParked},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

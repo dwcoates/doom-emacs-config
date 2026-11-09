@@ -1,6 +1,9 @@
 package wsm
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func sessionWithTerminal(kind string) Session {
 	if kind == "" {
@@ -16,10 +19,11 @@ func TestSessionParked(t *testing.T) {
 		want     bool
 	}{
 		{name: "a live session", terminal: "", want: false},
-		{name: "a session the idle sweep hibernated", terminal: TerminalHibernated, want: true},
-		{name: "a session stood down between keep-alives", terminal: TerminalKeepaliveCycle, want: true},
+		{name: "a parked session", terminal: TerminalParked, want: true},
 		{name: "a deleted session", terminal: "deleted", want: false},
 		{name: "a session whose shim died", terminal: "shim_died", want: false},
+		{name: "a retired hibernated kind is not read as a park", terminal: "hibernated", want: false},
+		{name: "a retired keep-alive cycle kind is not read as a park", terminal: "keepalive_cycle", want: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -37,69 +41,45 @@ func TestSessionParked(t *testing.T) {
 	}
 }
 
-func TestSessionKeepaliveCycled(t *testing.T) {
+func TestParkNextKeepalive(t *testing.T) {
+	at := time.Date(2026, 11, 9, 14, 3, 0, 0, time.UTC)
 	tests := []struct {
-		name     string
-		terminal string
-		want     bool
+		name         string
+		park         Park
+		wantStanding bool
+		wantNext     time.Time
+		wantOK       bool
 	}{
-		{name: "a session stood down between keep-alives", terminal: TerminalKeepaliveCycle, want: true},
-		{name: "a session the idle sweep hibernated", terminal: TerminalHibernated, want: false},
-		{name: "a live session", terminal: "", want: false},
+		{name: "no park carries nothing", park: ParkNone},
+		{name: "a park with a scheduled keep-alive carries it", park: Parked(at), wantStanding: true, wantNext: at, wantOK: true},
+		{name: "a park with none scheduled carries none", park: Parked(time.Time{}), wantStanding: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Arrange
-			s := sessionWithTerminal(tt.terminal)
-
 			// Act
-			got := s.KeepaliveCycled()
+			next, ok := tt.park.NextKeepalive()
 
 			// Assert
-			if got != tt.want {
-				t.Fatalf("KeepaliveCycled() = %v, want %v", got, tt.want)
+			if tt.park.Standing() != tt.wantStanding {
+				t.Errorf("Standing() = %v, want %v", tt.park.Standing(), tt.wantStanding)
 			}
-		})
-	}
-}
-
-func TestParkOf(t *testing.T) {
-	tests := []struct {
-		name     string
-		terminal string
-		want     Park
-	}{
-		{name: "a live session draws no park", terminal: "", want: ParkNone},
-		{name: "a hibernated session draws hibernated", terminal: TerminalHibernated, want: ParkHibernated},
-		{name: "a session stood down between keep-alives draws the cycle", terminal: TerminalKeepaliveCycle, want: ParkKeepaliveCycle},
-		{name: "a killed session draws no park", terminal: "killed", want: ParkNone},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Arrange
-			s := sessionWithTerminal(tt.terminal)
-
-			// Act
-			got := ParkOf(s)
-
-			// Assert
-			if got != tt.want {
-				t.Fatalf("ParkOf() = %v, want %v", got, tt.want)
+			if ok != tt.wantOK || !next.Equal(tt.wantNext) {
+				t.Errorf("NextKeepalive() = %v, %v; want %v, %v", next, ok, tt.wantNext, tt.wantOK)
 			}
 		})
 	}
 }
 
 func TestParkString(t *testing.T) {
+	at := time.Date(2026, 11, 9, 14, 3, 0, 0, time.UTC)
 	tests := []struct {
 		name string
 		park Park
 		want string
 	}{
 		{name: "no park", park: ParkNone, want: "none"},
-		{name: "hibernated", park: ParkHibernated, want: "hibernated"},
-		{name: "the keep-alive cycle", park: ParkKeepaliveCycle, want: "keepalive_cycle"},
-		{name: "an unnamed park", park: Park(9), want: "park(9)"},
+		{name: "a park with none scheduled", park: Parked(time.Time{}), want: "parked"},
+		{name: "a park with a scheduled keep-alive", park: Parked(at), want: "parked until 2026-11-09T14:03:00Z"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

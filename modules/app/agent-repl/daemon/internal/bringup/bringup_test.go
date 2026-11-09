@@ -129,7 +129,7 @@ func TestRunClassifiesEachWorkspacesOutcome(t *testing.T) {
 		{
 			name: "a hibernated workspace's start is a wake",
 			arrange: func(f *fixture) {
-				f.sessions.records["a"] = wsm.Session{Workspace: "a", Terminal: &wsm.SessionTerminal{Kind: wsm.TerminalHibernated}}
+				f.sessions.records["a"] = wsm.Session{Workspace: "a", Terminal: &wsm.SessionTerminal{Kind: wsm.TerminalParked}}
 			},
 			want: func(r Report) []ids.WorkspaceID { return r.Woken },
 		},
@@ -422,7 +422,7 @@ func TestRunTimesEachStartedWorkspace(t *testing.T) {
 		{
 			"a wake is timed as a wake",
 			func(f *fixture) {
-				f.sessions.records["a"] = wsm.Session{Workspace: "a", Terminal: &wsm.SessionTerminal{Kind: wsm.TerminalHibernated}}
+				f.sessions.records["a"] = wsm.Session{Workspace: "a", Terminal: &wsm.SessionTerminal{Kind: wsm.TerminalParked}}
 			},
 			"wake", restarttiming.OK,
 		},

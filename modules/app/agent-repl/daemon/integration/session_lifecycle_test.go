@@ -1626,7 +1626,7 @@ func TestHibernateTransportFailureDefersTheStandDown(t *testing.T) {
 // TestOpenWorkspaceOnAHibernatedRowSendsStartSessionResume covers OpenWorkspace
 // re-mounting a hibernated session DIRECTLY (rather than through a revived
 // prompt, which TestHibernationParksAnIdleSessionAndRevivesOnPrompt already
-// covers): the row's session.Terminal.Kind is drain.TerminalHibernated
+// covers): the row's session.Terminal.Kind is wsm.TerminalParked
 // ("hibernated"), decideSource (internal/workspace/sessions.go) treats
 // anything but "deleted" as resumable, so the mount resumes the vendor
 // session exactly as a revival does.
@@ -1702,7 +1702,7 @@ func TestOpenWorkspaceOnAHibernatedRowSendsStartSessionResume(t *testing.T) {
 // OpenWorkspaceError.session_deleted (endpoint_open_workspace.proto). NOTHING
 // in production ever writes the "deleted" session terminal today (grepped
 // every internal/**/*.go call to wsm.SetSessionTerminal: teardown.go writes
-// "killed", drain/sweep.go writes drain.TerminalHibernated) — so this test
+// "killed", drain/sweep.go writes wsm.TerminalParked) — so this test
 // produces the row the way harness.WithDB's own doc prescribes: corrupt one
 // column of a real (killed) session row, stop, and restart, watching the
 // successor refuse it. See internal/workspace/sessions.go's decideSource,

@@ -2253,9 +2253,11 @@ func (f *fakeFooter) OpenFault(_ ids.WorkspaceID, fault footer.Fault) {
 	f.faults = append(f.faults, fault)
 }
 
-func (f *fakeFooter) SetParked(_ ids.WorkspaceID, park wsm.Park) {
-	f.parked = append(f.parked, park != wsm.ParkNone)
+func (f *fakeFooter) SetParked(_ ids.WorkspaceID, parked bool) {
+	f.parked = append(f.parked, parked)
 }
+
+func (f *fakeFooter) SetNextKeepalive(ids.WorkspaceID, time.Time) {}
 
 // Prime records the workspaces registration primed the footer for, in order,
 // which is what the register wiring test asserts.
@@ -3588,11 +3590,13 @@ func (s stubTopbar) ContextWindow(ids.WorkspaceID) int64 {
 	return *s.window
 }
 
-func (s stubTopbar) SetParked(_ ids.WorkspaceID, park wsm.Park) {
+func (s stubTopbar) SetParked(_ ids.WorkspaceID, parked bool) {
 	if s.parked != nil {
-		*s.parked = append(*s.parked, park != wsm.ParkNone)
+		*s.parked = append(*s.parked, parked)
 	}
 }
+
+func (s stubTopbar) SetNextKeepalive(ids.WorkspaceID, time.Time) {}
 
 // The three resolvers registration BINDS record the directory it bound, which
 // is all any verb test needs of them.
@@ -3747,7 +3751,7 @@ func (h *fakeHeadless) Run(_ context.Context, req headless.Request) (headless.Re
 func (f *fixture) hibernate(ws ids.WorkspaceID) {
 	f.db.sessions[ws] = wsm.Session{
 		Workspace: ws,
-		Terminal:  &wsm.SessionTerminal{Kind: wsm.TerminalHibernated, Detail: "idle past the cutoff", At: fixedNow},
+		Terminal:  &wsm.SessionTerminal{Kind: wsm.TerminalParked, Detail: "idle past the cutoff", At: fixedNow},
 	}
 }
 

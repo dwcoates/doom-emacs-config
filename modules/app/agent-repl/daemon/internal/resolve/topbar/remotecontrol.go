@@ -16,7 +16,7 @@ import (
 
 // The chip's hover text, one per mode, composed by the daemon.
 const (
-	remoteControlOnTooltip  = "Remote control on: this session is reachable from claude.ai, and its shim stays up between keep-alives until the workspace hibernates · click to turn off"
+	remoteControlOnTooltip  = "Remote control on: this session is reachable from claude.ai, and its shim stays up between keep-alives until it has been idle past the cutoff · click to turn off"
 	remoteControlOffTooltip = "Remote control off · click to make this session reachable from claude.ai (keeps its shim up between keep-alives)"
 )
 

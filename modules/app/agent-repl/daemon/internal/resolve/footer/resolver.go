@@ -18,7 +18,6 @@ import (
 	"agent-repld/internal/sessionwatcher"
 	"agent-repld/internal/shimclient"
 	"agent-repld/internal/vocab"
-	"agent-repld/internal/wsm"
 )
 
 // resolver is the footer resolver. One instance serves every workspace; each
@@ -813,11 +812,18 @@ func (r *resolver) SetUpdating(ws ids.WorkspaceID, updating bool) {
 		dlog.Context{"updating": updating}, func(s *wsState) { s.updating = updating })
 }
 
-// SetParked installs, or lifts with wsm.ParkNone, the daemon's park. Both
-// parks draw alike here: an idle status, never a dead link.
-func (r *resolver) SetParked(ws ids.WorkspaceID, park wsm.Park) {
+// SetParked installs, or lifts, the daemon's park. A park draws an idle
+// status, never a dead link.
+func (r *resolver) SetParked(ws ids.WorkspaceID, parked bool) {
 	r.mutate(ws, "daemon.footer.set_parked", "the footer took the daemon's park",
-		dlog.Context{"park": park.String()}, func(s *wsState) { s.parked = park != wsm.ParkNone })
+		dlog.Context{"parked": parked}, func(s *wsState) { s.parked = parked })
+}
+
+// SetNextKeepalive takes the cache keeper's next scheduled keep-alive, the
+// zero time for none. A standing park carries it (wsState.park).
+func (r *resolver) SetNextKeepalive(ws ids.WorkspaceID, next time.Time) {
+	r.mutate(ws, "daemon.footer.set_next_keepalive", "the footer took the next scheduled keep-alive",
+		dlog.Context{"next_keepalive": next}, func(s *wsState) { s.nextKeepalive = next })
 }
 
 // SetAwaiting installs, or lifts with an empty name, the workspace this one

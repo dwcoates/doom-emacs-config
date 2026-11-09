@@ -27,7 +27,7 @@ func (f *digestForwarder) bind(fleet *workspace.Fleet) {
 }
 
 // GatherTitleDigest asks the workspace's live shim for its title digest. A
-// workspace with no live shim (hibernated, cold-gated, or never started) has no
+// workspace with no live shim (parked, cold-gated, or never started) has no
 // transcript to read here, which is not a fault — the synthesizer keeps the
 // workspace name.
 func (f *digestForwarder) GatherTitleDigest(ctx context.Context, ws ids.WorkspaceID) (*shimv1.GatherTitleDigestResponse, error) {
