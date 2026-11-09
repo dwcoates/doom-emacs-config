@@ -89,21 +89,33 @@ func NewWorkspaceEvents(events ...WorkspaceEvent) WorkspaceEvents {
 	return set
 }
 
+// AllWorkspaceEvents is every declared event.
+func AllWorkspaceEvents() WorkspaceEvents { return NewWorkspaceEvents(workspaceEvents...) }
+
+// Members are the set's events, in declared order.
+func (s WorkspaceEvents) Members() []WorkspaceEvent {
+	var out []WorkspaceEvent
+	for _, e := range workspaceEvents {
+		if s.Has(e) {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
 // Has reports whether E is a member.
 func (s WorkspaceEvents) Has(e WorkspaceEvent) bool { return s&(1<<uint(e)) != 0 }
 
 // Valid reports whether the set is non-empty and holds only declared events.
 func (s WorkspaceEvents) Valid() bool {
-	return s != 0 && s&^NewWorkspaceEvents(workspaceEvents...) == 0
+	return s != 0 && s&^AllWorkspaceEvents() == 0
 }
 
 // String names the members in order, comma-separated.
 func (s WorkspaceEvents) String() string {
 	var names []string
-	for _, e := range workspaceEvents {
-		if s.Has(e) {
-			names = append(names, e.String())
-		}
+	for _, e := range s.Members() {
+		names = append(names, e.String())
 	}
 	return strings.Join(names, ",")
 }

@@ -116,7 +116,9 @@ func (s *Service) TurnStarted(ws ids.WorkspaceID) {
 }
 
 // TurnEnded implements wsedges.Observer.
-func (s *Service) TurnEnded(ws ids.WorkspaceID) { s.loop.Report(edge{ws: ws, event: wsm.WorkspaceEventTurnEnded}) }
+func (s *Service) TurnEnded(ws ids.WorkspaceID) {
+	s.loop.Report(edge{ws: ws, event: wsm.WorkspaceEventTurnEnded})
+}
 
 // TurnEndedUnobserved implements wsedges.Observer: an end no daemon watched
 // is never told as news.
@@ -128,7 +130,9 @@ func (s *Service) NeedsInput(ws ids.WorkspaceID) {
 }
 
 // Landed implements wsedges.Observer.
-func (s *Service) Landed(ws ids.WorkspaceID) { s.loop.Report(edge{ws: ws, event: wsm.WorkspaceEventLanded}) }
+func (s *Service) Landed(ws ids.WorkspaceID) {
+	s.loop.Report(edge{ws: ws, event: wsm.WorkspaceEventLanded})
+}
 
 // Closed implements wsedges.Observer.
 func (s *Service) Closed(before wsm.Workspace) {
@@ -332,3 +336,48 @@ func edgeFields(e edge) dlog.Context {
 	}
 	return fields
 }
+
+// EventProto is E's contract spelling (agentrepl.v1.WorkspaceNoticeEvent).
+// An event with none is a store event added without its contract arm, and
+// fails hard.
+func EventProto(e wsm.WorkspaceEvent) agentreplv1.WorkspaceNoticeEvent {
+	switch e {
+	case wsm.WorkspaceEventTurnStarted:
+		return agentreplv1.WorkspaceNoticeEvent_WORKSPACE_NOTICE_EVENT_TURN_STARTED
+	case wsm.WorkspaceEventTurnEnded:
+		return agentreplv1.WorkspaceNoticeEvent_WORKSPACE_NOTICE_EVENT_TURN_ENDED
+	case wsm.WorkspaceEventNeedsInput:
+		return agentreplv1.WorkspaceNoticeEvent_WORKSPACE_NOTICE_EVENT_NEEDS_INPUT
+	case wsm.WorkspaceEventLanded:
+		return agentreplv1.WorkspaceNoticeEvent_WORKSPACE_NOTICE_EVENT_LANDED
+	case wsm.WorkspaceEventClosed:
+		return agentreplv1.WorkspaceNoticeEvent_WORKSPACE_NOTICE_EVENT_CLOSED
+	case wsm.WorkspaceEventPullRequest:
+		return agentreplv1.WorkspaceNoticeEvent_WORKSPACE_NOTICE_EVENT_PULL_REQUEST
+	}
+	panic(fmt.Sprintf("workspacesubs: event %d has no contract spelling", int(e)))
+}
+
+// EventsOf reads a subscription's contract events as the store's. A request's
+// validation refused an unspecified or undeclared one, so an event with no
+// store event is a contract arm added without its mapping, and fails hard.
+func EventsOf(events []agentreplv1.WorkspaceNoticeEvent) wsm.WorkspaceEvents {
+	var out []wsm.WorkspaceEvent
+	for _, e := range events {
+		stored, ok := storeEvents[e]
+		if !ok {
+			panic(fmt.Sprintf("workspacesubs: workspace notice event %s has no store event", e))
+		}
+		out = append(out, stored)
+	}
+	return wsm.NewWorkspaceEvents(out...)
+}
+
+// storeEvents is EventProto inverted, so the two spellings have one mapping.
+var storeEvents = func() map[agentreplv1.WorkspaceNoticeEvent]wsm.WorkspaceEvent {
+	out := map[agentreplv1.WorkspaceNoticeEvent]wsm.WorkspaceEvent{}
+	for _, e := range wsm.AllWorkspaceEvents().Members() {
+		out[EventProto(e)] = e
+	}
+	return out
+}()

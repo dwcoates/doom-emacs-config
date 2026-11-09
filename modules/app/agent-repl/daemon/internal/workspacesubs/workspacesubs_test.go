@@ -506,3 +506,60 @@ func TestEventSentencePanicsOnAPullRequestMismatchedToItsEvent(t *testing.T) {
 		})
 	}
 }
+
+func TestEveryDeclaredWorkspaceNoticeEventHasItsStoreEvent(t *testing.T) {
+	want := map[agentreplv1.WorkspaceNoticeEvent]wsm.WorkspaceEvent{
+		agentreplv1.WorkspaceNoticeEvent_WORKSPACE_NOTICE_EVENT_TURN_STARTED: wsm.WorkspaceEventTurnStarted,
+		agentreplv1.WorkspaceNoticeEvent_WORKSPACE_NOTICE_EVENT_TURN_ENDED:   wsm.WorkspaceEventTurnEnded,
+		agentreplv1.WorkspaceNoticeEvent_WORKSPACE_NOTICE_EVENT_NEEDS_INPUT:  wsm.WorkspaceEventNeedsInput,
+		agentreplv1.WorkspaceNoticeEvent_WORKSPACE_NOTICE_EVENT_LANDED:       wsm.WorkspaceEventLanded,
+		agentreplv1.WorkspaceNoticeEvent_WORKSPACE_NOTICE_EVENT_CLOSED:       wsm.WorkspaceEventClosed,
+		agentreplv1.WorkspaceNoticeEvent_WORKSPACE_NOTICE_EVENT_PULL_REQUEST: wsm.WorkspaceEventPullRequest,
+	}
+	for number := range agentreplv1.WorkspaceNoticeEvent_name {
+		event := agentreplv1.WorkspaceNoticeEvent(number)
+		if event == agentreplv1.WorkspaceNoticeEvent_WORKSPACE_NOTICE_EVENT_UNSPECIFIED {
+			continue
+		}
+		t.Run(event.String(), func(t *testing.T) {
+			// Arrange
+			stored, ok := want[event]
+			if !ok {
+				t.Fatalf("event %s is declared and this test names no store event for it", event)
+			}
+
+			// Act
+			got := EventsOf([]agentreplv1.WorkspaceNoticeEvent{event})
+			back := EventProto(stored)
+
+			// Assert
+			if got != wsm.NewWorkspaceEvents(stored) || back != event {
+				t.Errorf("EventsOf(%s) = %s, EventProto(%s) = %s; want each the other's", event, got, stored, back)
+			}
+		})
+	}
+}
+
+func TestEventsOfPanicsOnAnEventWithNoStoreEvent(t *testing.T) {
+	defer func() {
+		// Assert
+		if recover() == nil {
+			t.Fatal("EventsOf did not panic on the unspecified event")
+		}
+	}()
+
+	// Act
+	EventsOf([]agentreplv1.WorkspaceNoticeEvent{agentreplv1.WorkspaceNoticeEvent_WORKSPACE_NOTICE_EVENT_UNSPECIFIED})
+}
+
+func TestEventProtoPanicsOnAnUndeclaredEvent(t *testing.T) {
+	defer func() {
+		// Assert
+		if recover() == nil {
+			t.Fatal("EventProto did not panic on an undeclared event")
+		}
+	}()
+
+	// Act
+	EventProto(wsm.WorkspaceEvent(31))
+}

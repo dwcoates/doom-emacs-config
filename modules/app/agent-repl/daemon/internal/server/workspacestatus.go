@@ -12,6 +12,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/workspace"
+	"agent-repld/internal/workspacesubs"
 	"agent-repld/internal/wsm"
 )
 
@@ -67,7 +68,7 @@ func (s *server) SubscribeWorkspace(
 	if subscriber.Record.ID == followed.Record.ID {
 		return answer(resp, s.refuse(log, rpc, resp, s.fill(refusal{Arm: "follows_itself", Reason: "a workspace does not subscribe to itself"})))
 	}
-	events := workspaceEventsOf(req.Msg.GetEvents())
+	events := workspacesubs.EventsOf(req.Msg.GetEvents())
 	replaced, err := s.deps.DB.SubscribeWorkspace(ctx, wsm.WorkspaceSubscription{
 		Subscriber: subscriber.Record.ID, Followed: followed.Record.ID, Events: events, SubscribedAt: time.Now(),
 	})
@@ -126,30 +127,4 @@ func (s *server) UnsubscribeWorkspace(
 		"subscriber": string(subscriber.Record.ID), "followed": string(followed), "ended": ended})
 	resp.Result = &agentreplv1.UnsubscribeWorkspaceResponse_Success{Success: success}
 	return connect.NewResponse(resp), nil
-}
-
-// workspaceEventsOf reads a subscription's events. The request's validation
-// refused an unspecified one, so an event this switch does not know is a
-// contract arm added without its mapping, and fails hard.
-func workspaceEventsOf(events []agentreplv1.WorkspaceNoticeEvent) wsm.WorkspaceEvents {
-	var out []wsm.WorkspaceEvent
-	for _, e := range events {
-		switch e {
-		case agentreplv1.WorkspaceNoticeEvent_WORKSPACE_NOTICE_EVENT_TURN_STARTED:
-			out = append(out, wsm.WorkspaceEventTurnStarted)
-		case agentreplv1.WorkspaceNoticeEvent_WORKSPACE_NOTICE_EVENT_TURN_ENDED:
-			out = append(out, wsm.WorkspaceEventTurnEnded)
-		case agentreplv1.WorkspaceNoticeEvent_WORKSPACE_NOTICE_EVENT_NEEDS_INPUT:
-			out = append(out, wsm.WorkspaceEventNeedsInput)
-		case agentreplv1.WorkspaceNoticeEvent_WORKSPACE_NOTICE_EVENT_LANDED:
-			out = append(out, wsm.WorkspaceEventLanded)
-		case agentreplv1.WorkspaceNoticeEvent_WORKSPACE_NOTICE_EVENT_CLOSED:
-			out = append(out, wsm.WorkspaceEventClosed)
-		case agentreplv1.WorkspaceNoticeEvent_WORKSPACE_NOTICE_EVENT_PULL_REQUEST:
-			out = append(out, wsm.WorkspaceEventPullRequest)
-		default:
-			panic(fmt.Sprintf("server: workspace notice event %s has no store event", e))
-		}
-	}
-	return wsm.NewWorkspaceEvents(out...)
 }

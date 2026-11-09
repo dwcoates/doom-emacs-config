@@ -34,6 +34,7 @@ import (
 	"agent-repld/internal/resolve/feed"
 	"agent-repld/internal/stateroot"
 	"agent-repld/internal/workspace"
+	"agent-repld/internal/workspacesubs"
 	"agent-repld/internal/wsm"
 )
 
@@ -163,7 +164,7 @@ var cliNouns = map[string]map[string]cliCommand{
 		"status":                 {usage: "status WS", run: workspaceStatus},
 		"list":                   {usage: "list", run: workspaceList},
 		"find":                   {usage: "find [-repository here|DIR] [-since WHEN] [-until WHEN] [-standing open|closed|landed] [-text TEXT] [-created-by WS] [-limit N|-all]", run: workspaceFind},
-		"subscribe":              {usage: "subscribe WS -events turn_started,turn_ended,needs_input,landed,closed,pull_request", run: workspaceSubscribe},
+		"subscribe":              {usage: "subscribe WS -events " + allNoticeEvents, run: workspaceSubscribe},
 		"unsubscribe":            {usage: "unsubscribe WS", run: workspaceUnsubscribe},
 		"pr-subscribe":           {usage: "pr-subscribe WS -pr URL|#N|OWNER/REPO#N [-events " + allPullRequestEvents + "]", run: workspacePullRequestSubscribe},
 		"pr-unsubscribe":         {usage: "pr-unsubscribe WS -pr URL|OWNER/REPO#N", run: workspacePullRequestUnsubscribe},
@@ -1648,19 +1649,23 @@ func workspaceList(c *cliCall, args []string) int {
 	return exitSuccess
 }
 
-// noticeEvents are the -events spellings.
-var noticeEvents = map[string]agentreplv1.WorkspaceNoticeEvent{
-	"turn_started": agentreplv1.WorkspaceNoticeEvent_WORKSPACE_NOTICE_EVENT_TURN_STARTED,
-	"turn_ended":   agentreplv1.WorkspaceNoticeEvent_WORKSPACE_NOTICE_EVENT_TURN_ENDED,
-	"needs_input":  agentreplv1.WorkspaceNoticeEvent_WORKSPACE_NOTICE_EVENT_NEEDS_INPUT,
-	"landed":       agentreplv1.WorkspaceNoticeEvent_WORKSPACE_NOTICE_EVENT_LANDED,
-	"closed":       agentreplv1.WorkspaceNoticeEvent_WORKSPACE_NOTICE_EVENT_CLOSED,
-	"pull_request": agentreplv1.WorkspaceNoticeEvent_WORKSPACE_NOTICE_EVENT_PULL_REQUEST,
-}
+// noticeEvents are the -events spellings of workspace subscribe: each event
+// the store declares, by the name it records it under, so a new event is
+// spelled here with no second list to keep in step.
+var noticeEvents = func() map[string]agentreplv1.WorkspaceNoticeEvent {
+	out := map[string]agentreplv1.WorkspaceNoticeEvent{}
+	for _, e := range wsm.AllWorkspaceEvents().Members() {
+		out[e.String()] = workspacesubs.EventProto(e)
+	}
+	return out
+}()
+
+// allNoticeEvents names every -events spelling, for the usage.
+var allNoticeEvents = wsm.AllWorkspaceEvents().String()
 
 func workspaceSubscribe(c *cliCall, args []string) int {
 	fs, stateDir := c.flags()
-	events := fs.String("events", "", "comma-separated: turn_started, turn_ended, needs_input, landed, closed, pull_request")
+	events := fs.String("events", "", "comma-separated: "+strings.ReplaceAll(allNoticeEvents, ",", ", "))
 	followed, rest, ok := c.workspaceArg(fs, stateDir, args)
 	if !ok || len(rest) != 0 {
 		return exitFailure
