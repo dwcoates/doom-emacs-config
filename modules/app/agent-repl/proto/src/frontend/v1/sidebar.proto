@@ -513,6 +513,12 @@ message RosterOpenRowRepositoryBlock {
 message RosterOpenRowRepositoryDivider {
   // The repository's name, as its section is headed. Never empty.
   string name = 1;
+  // The repository's MAIN WORKSPACE (the one on its main worktree), which a
+  // click on the name selects, exactly as a click on that workspace's own row
+  // does. SET when the repository's main workspace is registered and not
+  // closed; UNSET otherwise, and the name is then plain text that selects
+  // nothing.
+  optional workspace.v1.WorkspaceRef main_workspace = 2;
 }
 
 // An open row's tab. THE DAEMON NUMBERS EVERY TAB, so the number the sidebar

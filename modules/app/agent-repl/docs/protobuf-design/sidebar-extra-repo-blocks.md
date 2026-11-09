@@ -59,6 +59,17 @@ Mode: autonomous (pre-approved by the owner).
   or swap onto another repository's sibling) stays refused by the existing
   `other_repository` arms of MoveWorkspace/SwapWorkspaces.
 
+### 3. `frontend.v1.RosterOpenRowRepositoryDivider.main_workspace`
+
+- WHAT: an optional `workspace.v1.WorkspaceRef` naming the block repository's
+  main workspace (the workspace whose dir is the repository's dir,
+  `wsm.IsMainWorktree`), set when it is registered and not closed.
+- WHY: owner request (2026-11-09): clicking a separator's repository name
+  selects that repository's main workspace.
+- CONSEQUENCES: the daemon resolves which workspace is main; the webapp only
+  sends `SelectInEditor` for the ref it was handed, the same verb a row click
+  sends. An unset ref leaves the name unclickable rather than guessing.
+
 ## Implementation notes
 
 - The parent's own-repository children carry no divider. The previous
