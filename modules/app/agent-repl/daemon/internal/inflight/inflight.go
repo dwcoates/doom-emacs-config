@@ -42,6 +42,19 @@ type Tracker struct {
 	// idle closes when n reaches zero, and is replaced when work begins
 	// again.
 	idle chan struct{}
+	// parent, when set, counts every piece of work this tracker counts, so a
+	// narrower wait (a child's) and the daemon-wide one (the parent's) see
+	// the same work.
+	parent *Tracker
+}
+
+// NewChild answers a tracker whose every piece of work is also counted on
+// parent.
+func NewChild(parent *Tracker) *Tracker {
+	if parent == nil {
+		panic("inflight: a child tracker needs a parent")
+	}
+	return &Tracker{parent: parent}
 }
 
 // Default is the daemon's one tracker.
@@ -66,8 +79,19 @@ func (t *Tracker) begin(skip int) (end func()) {
 	}
 	t.sites[site]++
 	t.mu.Unlock()
+	var parentEnd func()
+	if t.parent != nil {
+		parentEnd = t.parent.begin(skip + 1)
+	}
 	var once sync.Once
-	return func() { once.Do(func() { t.end(site) }) }
+	return func() {
+		once.Do(func() {
+			t.end(site)
+			if parentEnd != nil {
+				parentEnd()
+			}
+		})
+	}
 }
 
 // end uncounts one piece of work, waking every AwaitIdle once none is left.
