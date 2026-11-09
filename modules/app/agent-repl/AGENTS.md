@@ -2658,6 +2658,18 @@ queue row (`daemon/internal/merge/asyncmerges.go`).
 | Blue | The workspace is unusable right now. | No: the composer is closed (except under `turn_died`, declared in `composer_open_substatuses`). | every AGENT-REPL FAULT: roster `severed`, `dead`, `start_failed`, `turn_died`, `daemon_impaired` / footer `agent_repl_fault · degraded`, `severed`, `dead`, `start_failed`, `daemon_impaired`, `turn_died` (the last turn's vendor query or agent process died, until the next turn starts); every NETWORK FAULT: roster `network_fault` / footer `network_fault · offline`; a refused close: roster and footer `closing` |
 | Grey (uncolored) | Nothing is wrong and nothing runs. | Yes | `none` (never had a session); `inactive`, incidentally inactive (no open perspective, or being opened, the row's `opening` marker, which takes no click); a booting session, roster `init` / footer `starting` (owner ruling 2026-10-13: an expected step, never a fault, so the composer stays open and a prompt is held until the session is up) |
 
+### The canonical purple
+
+"The canonical purple" (owner term, 2026-11-08) is the purple status color
+above: `render-colors.json#color_values.<theme>.purple`, the webapp's
+`--blocked` token (`src/vocab.ts`), `#7d4bcf` in the dark theme and `#a21caf`
+in the light one. It is the purple the sidebar draws its section titles in
+(OPEN, MERGE QUEUE, RECENTLY MERGED, BACKLOG; `styles.css`, `.open-section >
+.repo-head` and its siblings). The light theme's other purples (`--retry`,
+`--info-agents`, `--tool-title`) are NOT it. Anything that must carry one fixed
+purple outside a theme (an app icon, a desktop banner) takes the dark value,
+`#7d4bcf`, the one the owner's dark-mode sidebar shows.
+
 ### The three fault domains
 
 Owner ruling, 2026-10-02. Every fault a workspace can stand in belongs to
