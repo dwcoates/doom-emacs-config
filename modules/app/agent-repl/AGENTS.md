@@ -750,28 +750,21 @@ than one version.
 
 ### Every timeout is sized deliberately: never very long, never too short
 
-Owner ruling, 2026-10-13. Applies to every timeout, deadline, wait bound and
-poll limit in every test, harness and suite configuration, in every language.
+The sizing rule (two to three times the measured expected time, never an
+arbitrary number, no unbounded wait) is the metaprompt's "Every timeout is two
+to three times the measured expected time of what it bounds". What this module
+adds:
 
-- **Never set a very long timeout.** A timeout is paid in full every time the
-  thing it bounds fails: a 10-minute bound on a 2-second operation turns one
-  hung test into 10 minutes of a blocked run. Bounds 10-100x the healthy
-  latency have been found hanging runs, gates and the machine. A long bound is a
-  defect even when nothing has failed yet.
-- **Never set a too-short timeout.** A bound with no headroom over the healthy
-  latency under realistic load makes the test flaky, and a flake is fixed at
-  its source, never by rerunning.
-- **The size: just over 2x the healthy latency measured under realistic
-  concurrency** (a full run, a merge gate), stated at the site with its
-  measurement. No measurement yet: instrument the operation, then size the
-  bound from the data, rather than guessing generously.
-- **Think about what the timeout bounds.** Name the operation at the site. A
-  bound on a whole package or suite is a backstop; the waits inside it carry
-  their own tight bounds, so a hang is reported by the wait that hung, at its
-  own bound, not by the backstop.
-- **No unbounded wait.** A channel receive, a process wait or a poll loop
-  without a bound can hang a run forever; every blocking wait in a test has
-  one.
+- **Every test unit is bounded by the runner.** `testrun` kills a unit at
+  `run.BoundFactor` (3) times its expected time, its decaying peak passing time
+  in the host's test history (`testrun/internal/history`, `PeakDecay`), and a
+  unit never measured at three times the longest unit the host knows
+  (`testrun/internal/plan` `bound`). A unit that legitimately got slower is
+  re-measured with `agent-repld test run -remeasure`; it is never given a
+  hand-picked limit.
+- **Think about what the timeout bounds.** A bound on a whole package or suite
+  is a backstop; the waits inside it carry their own tight bounds, so a hang is
+  reported by the wait that hung, at its own bound, not by the backstop.
 - **Ask whether the healthy latency is itself too long.** Bounding a slow
   operation is not a fix for its slowness.
 

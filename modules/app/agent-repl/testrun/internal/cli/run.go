@@ -36,6 +36,8 @@ type Deps struct {
 	Events *events.Emitter
 	Exec   run.Executor
 	Clock  run.Clock
+	// After is what each unit's time limit waits on (run.Runner.After).
+	After func(d time.Duration) <-chan time.Time
 	// Slots is how many units run at once: the host's core budget.
 	Slots int
 	// Cores is the host's core pool every run on the host shares.
@@ -245,7 +247,7 @@ func Run(ctx context.Context, d Deps, a Args) int {
 		}
 	}
 
-	p, err := plan.Build(hist, planned, d.Slots)
+	p, err := plan.Build(hist, planned, d.Slots, a.Remeasure)
 	if err != nil {
 		log.Errorf("planning the run failed: %v", err)
 		return 1
@@ -267,7 +269,7 @@ func Run(ctx context.Context, d Deps, a Args) int {
 	}
 
 	ev.Planned(p.Specs, d.RunLog)
-	runner := &run.Runner{Slots: d.Slots, Cores: d.Cores, Exec: d.Exec, Clock: d.Clock, Log: log, Ended: ev.UnitEnded}
+	runner := &run.Runner{Slots: d.Slots, Cores: d.Cores, Exec: d.Exec, Clock: d.Clock, After: d.After, Log: log, Ended: ev.UnitEnded}
 	start := d.Clock.Now()
 	results, suiteResults, runErr := runner.Run(ctx, p.Specs)
 	end := d.Clock.Now()

@@ -3,19 +3,68 @@ package plan
 import (
 	"reflect"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
+	"agentrepl/testrun/internal/history"
 	"agentrepl/testrun/internal/run"
 	"agentrepl/testrun/internal/suites"
 )
 
+// estimates is a history of estimates alone, with no peaks: every unit is
+// bounded as one never measured.
 type estimates map[string]float64
 
 func (e estimates) Get(key string) (float64, bool) {
 	v, ok := e[key]
 	return v, ok
 }
+
+func (e estimates) Peak(string) (float64, bool) { return 0, false }
+
+func (e estimates) Longest(prefix string) (float64, bool) {
+	longest, known := 0.0, false
+	for k, v := range e {
+		if strings.HasPrefix(k, prefix) {
+			longest, known = max(longest, v), true
+		}
+	}
+	return longest, known
+}
+
+// peaked is a history whose keys also have peaks.
+type peaked struct {
+	estimates
+	peaks map[string]float64
+}
+
+func (e peaked) Peak(key string) (float64, bool) {
+	v, ok := e.peaks[key]
+	return v, ok
+}
+
+func (e peaked) Longest(prefix string) (float64, bool) {
+	longest, known := e.estimates.Longest(prefix)
+	for k, v := range e.peaks {
+		if strings.HasPrefix(k, prefix) {
+			longest, known = max(longest, v), true
+		}
+	}
+	return longest, known
+}
+
+// fromSamples is the history one run's measurements leave behind.
+func fromSamples(m map[string]history.Sample) peaked {
+	e := peaked{estimates: estimates{}, peaks: map[string]float64{}}
+	for k, v := range m {
+		e.estimates[k], e.peaks[k] = v.Seconds, v.Peak
+	}
+	return e
+}
+
+// secs is a whole number of seconds as a duration.
+func secs(v float64) time.Duration { return time.Duration(v * float64(time.Second)) }
 
 func atomic(id, suite string) run.Spec {
 	s := run.Spec{Argv: []string{id}}
@@ -55,7 +104,7 @@ func TestBuildEstimatesAtomicUnits(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Act
-			p, err := Build(tt.est, []suites.Units{{Atomic: []run.Spec{atomic("a", "s"), atomic("b", "s")}}}, 4)
+			p, err := Build(tt.est, []suites.Units{{Atomic: []run.Spec{atomic("a", "s"), atomic("b", "s")}}}, 4, false)
 
 			// Assert
 			if err != nil {
@@ -80,7 +129,7 @@ func TestBuildChunksASplitAndBuildsEachChunksSpec(t *testing.T) {
 	}
 
 	// Act
-	p, err := Build(est, []suites.Units{{Splits: []suites.Split{split("ert", "a", "b", "c", "d")}}}, 2)
+	p, err := Build(est, []suites.Units{{Splits: []suites.Split{split("ert", "a", "b", "c", "d")}}}, 2, false)
 
 	// Assert
 	if err != nil {
@@ -108,7 +157,7 @@ func TestBuildGivesEachChunkItsSplitsWidth(t *testing.T) {
 	sp.Slots = 2
 
 	// Act
-	p, err := Build(estimates{}, []suites.Units{{Splits: []suites.Split{sp}}}, 4)
+	p, err := Build(estimates{}, []suites.Units{{Splits: []suites.Split{sp}}}, 4, false)
 
 	// Assert
 	if err != nil {
@@ -132,7 +181,7 @@ func TestBuildCapsAProvenProcessOverhead(t *testing.T) {
 	}
 
 	// Act
-	p, err := Build(est, []suites.Units{{Splits: []suites.Split{sp}}}, 4)
+	p, err := Build(est, []suites.Units{{Splits: []suites.Split{sp}}}, 4, false)
 
 	// Assert
 	if err != nil {
@@ -154,7 +203,7 @@ func TestBuildEstimatesAnUnmeasuredItemAtItsGroupsMean(t *testing.T) {
 	est := estimates{ItemKey("g", "a"): 2, ItemKey("g", "b"): 4, OverheadKey("g"): 0}
 
 	// Act
-	p, err := Build(est, []suites.Units{{Splits: []suites.Split{split("g", "a", "b", "new")}}}, 1)
+	p, err := Build(est, []suites.Units{{Splits: []suites.Split{split("g", "a", "b", "new")}}}, 1, false)
 
 	// Assert
 	if err != nil {
@@ -173,7 +222,7 @@ func TestBuildEstimatesAnUnmeasuredGroupAtItsSuitesMean(t *testing.T) {
 	old.Suite, fresh.Suite = "s", "s"
 
 	// Act
-	p, err := Build(est, []suites.Units{{Splits: []suites.Split{old, fresh}}}, 1)
+	p, err := Build(est, []suites.Units{{Splits: []suites.Split{old, fresh}}}, 1, false)
 
 	// Assert
 	if err != nil {
@@ -186,7 +235,7 @@ func TestBuildEstimatesAnUnmeasuredGroupAtItsSuitesMean(t *testing.T) {
 
 func TestBuildWithNothingMeasuredUsesTheUnknownItemAndOverhead(t *testing.T) {
 	// Act
-	p, err := Build(estimates{}, []suites.Units{{Splits: []suites.Split{split("g", "a", "b")}}}, 1)
+	p, err := Build(estimates{}, []suites.Units{{Splits: []suites.Split{split("g", "a", "b")}}}, 1, false)
 
 	// Assert
 	if err != nil {
@@ -242,13 +291,13 @@ func TestMeasurements(t *testing.T) {
 	got := Measurements(results)
 
 	// Assert
-	want := map[string]float64{
-		UnitKey("daemon:x"):    5,
-		ItemKey("ert", "a.el"): 3,
-		ItemKey("ert", "b.el"): 5,
-		ItemKey("ert", "c.el"): 2,
-		// (10-8 + 6-2) / 2 chunks
-		OverheadKey("ert"): 3,
+	want := map[string]history.Sample{
+		UnitKey("daemon:x"):    {Seconds: 5, Peak: 5},
+		ItemKey("ert", "a.el"): {Seconds: 3, Peak: 3},
+		ItemKey("ert", "b.el"): {Seconds: 5, Peak: 5},
+		ItemKey("ert", "c.el"): {Seconds: 2, Peak: 2},
+		// (10-8 + 6-2) / 2 chunks, and the larger of the two
+		OverheadKey("ert"): {Seconds: 3, Peak: 4},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("Measurements = %v, want %v", got, want)
@@ -263,8 +312,8 @@ func TestMeasurementsNeverRecordANegativeOverhead(t *testing.T) {
 	got := Measurements(results)
 
 	// Assert
-	if got[OverheadKey("g")] != 0 {
-		t.Fatalf("overhead = %v, want 0", got[OverheadKey("g")])
+	if got[OverheadKey("g")] != (history.Sample{}) {
+		t.Fatalf("overhead = %+v, want 0", got[OverheadKey("g")])
 	}
 }
 
@@ -274,10 +323,10 @@ func TestMeasurementsAndEstimatesShareTheirKeys(t *testing.T) {
 		result("u", run.Passed, 7, nil),
 		result("g#00", run.Passed, 5, map[string]float64{"i": 4}),
 	}
-	est := estimates(Measurements(results))
+	est := fromSamples(Measurements(results))
 
 	// Act
-	p, err := Build(est, []suites.Units{{Atomic: []run.Spec{atomic("u", "s")}, Splits: []suites.Split{split("g", "i")}}}, 4)
+	p, err := Build(est, []suites.Units{{Atomic: []run.Spec{atomic("u", "s")}, Splits: []suites.Split{split("g", "i")}}}, 4, false)
 
 	// Assert
 	if err != nil {
@@ -286,5 +335,107 @@ func TestMeasurementsAndEstimatesShareTheirKeys(t *testing.T) {
 	got := specByID(p)
 	if got["u"].Est != 7 || got["g#00"].Est != 5 {
 		t.Fatalf("estimates = u:%v g#00:%v, want the measurements back", got["u"].Est, got["g#00"].Est)
+	}
+	if got["u"].Expected != secs(7) || got["g#00"].Expected != secs(5) {
+		t.Fatalf("expected = u:%v g#00:%v, want the measured peaks back", got["u"].Expected, got["g#00"].Expected)
+	}
+}
+
+func TestBuildBoundsEveryUnitAtBoundFactorTimesItsExpectedTime(t *testing.T) {
+	// Arrange: a's peak is measured; b's is not; the chunk's overhead and items are.
+	est := peaked{
+		estimates: estimates{UnitKey("a"): 3, UnitKey("b"): 2, OverheadKey("g"): 1, ItemKey("g", "i"): 2, ItemKey("g", "j"): 3},
+		peaks:     map[string]float64{UnitKey("a"): 5, OverheadKey("g"): 2, ItemKey("g", "i"): 4, ItemKey("g", "j"): 6},
+	}
+	tests := []struct {
+		name         string
+		id           string
+		wantExpected time.Duration
+	}{
+		{"a measured unit is expected to take its peak", "a", secs(5)},
+		{"an unmeasured unit is expected to take the longest unit's time", "b", secs(5)},
+		{"a chunk is expected to take its overhead peak plus its items' peaks", "g#00", secs(2 + 4 + 6)},
+	}
+	units := []suites.Units{{Atomic: []run.Spec{atomic("a", "s"), atomic("b", "s")}, Splits: []suites.Split{split("g", "i", "j")}}}
+
+	// Act
+	p, err := Build(est, units, 1, false)
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := specByID(p)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := got[tt.id]
+			if s.Expected != tt.wantExpected || s.Bound != run.BoundFactor*tt.wantExpected {
+				t.Fatalf("%s: expected %v, bound %v; want %v, %v", tt.id, s.Expected, s.Bound, tt.wantExpected, run.BoundFactor*tt.wantExpected)
+			}
+		})
+	}
+}
+
+func TestBuildBoundsAChunkWithAnUnmeasuredItemAsUnmeasured(t *testing.T) {
+	// Arrange: the chunk's new item has no peak; the longest unit takes 40s.
+	est := peaked{
+		estimates: estimates{UnitKey("long"): 40, OverheadKey("g"): 1, ItemKey("g", "i"): 2},
+		peaks:     map[string]float64{OverheadKey("g"): 2, ItemKey("g", "i"): 4},
+	}
+
+	// Act
+	p, err := Build(est, []suites.Units{{Splits: []suites.Split{split("g", "i", "new")}}}, 1, false)
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s := specByID(p)["g#00"]; s.Expected != secs(40) {
+		t.Fatalf("expected = %v, want the longest unit's 40s", s.Expected)
+	}
+}
+
+func TestBuildBoundsAnUnmeasuredUnitByItsOwnEstimateWhenLonger(t *testing.T) {
+	// Arrange: the chunk's estimate (overhead and items) passes every unit's.
+	est := estimates{UnitKey("short"): 1, OverheadKey("g"): 5, ItemKey("g", "i"): 30}
+
+	// Act
+	p, err := Build(est, []suites.Units{{Splits: []suites.Split{split("g", "i")}}}, 1, false)
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s := specByID(p)["g#00"]; s.Expected != secs(35) {
+		t.Fatalf("expected = %v, want its own 35s estimate", s.Expected)
+	}
+}
+
+func TestBuildBoundsOnAHostThatMeasuredNothingByUnknownUnit(t *testing.T) {
+	// Act
+	p, err := Build(estimates{}, []suites.Units{{Atomic: []run.Spec{atomic("a", "s")}}}, 1, false)
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s := specByID(p)["a"]; s.Expected != secs(UnknownUnit) {
+		t.Fatalf("expected = %v, want UnknownUnit", s.Expected)
+	}
+}
+
+func TestBuildRemeasureBoundsAMeasuredUnitAsUnmeasured(t *testing.T) {
+	// Arrange: a's peak is 1s; the longest unit takes 40s.
+	est := peaked{estimates: estimates{UnitKey("a"): 1, UnitKey("long"): 40}, peaks: map[string]float64{UnitKey("a"): 1}}
+
+	// Act
+	p, err := Build(est, []suites.Units{{Atomic: []run.Spec{atomic("a", "s")}}}, 1, true)
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s := specByID(p)["a"]; s.Expected != secs(40) {
+		t.Fatalf("expected = %v, want the longest unit's 40s, not a's own peak", s.Expected)
 	}
 }

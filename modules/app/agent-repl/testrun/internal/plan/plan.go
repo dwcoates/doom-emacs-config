@@ -19,6 +19,7 @@ package plan
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"agentrepl/testrun/internal/history"
 	"agentrepl/testrun/internal/run"
@@ -32,8 +33,11 @@ const (
 	UnknownOverhead = 1.0
 )
 
+// unitKeyPrefix starts every atomic unit's history key.
+const unitKeyPrefix = "unit:"
+
 // UnitKey is an atomic unit's history key.
-func UnitKey(id string) string { return "unit:" + id }
+func UnitKey(id string) string { return unitKeyPrefix + id }
 
 // ItemKey is a splittable item's history key.
 func ItemKey(group, item string) string { return "item:" + group + ":" + item }
@@ -44,6 +48,8 @@ func OverheadKey(group string) string { return "overhead:" + group }
 // Estimates is what the history answers.
 type Estimates interface {
 	Get(key string) (float64, bool)
+	Peak(key string) (float64, bool)
+	Longest(prefix string) (float64, bool)
 }
 
 var _ Estimates = (*history.Store)(nil)
@@ -57,8 +63,9 @@ type Planned struct {
 }
 
 // Build estimates every unit, chooses the chunking for slots, and returns the
-// concrete specs.
-func Build(est Estimates, all []suites.Units, slots int) (Planned, error) {
+// concrete specs, each bounded by its time limit (bound). With remeasure,
+// every unit is bounded as one never measured.
+func Build(est Estimates, all []suites.Units, slots int, remeasure bool) (Planned, error) {
 	var atomicSpecs []run.Spec
 	var splits []suites.Split
 	for _, u := range all {
@@ -149,6 +156,8 @@ func Build(est Estimates, all []suites.Units, slots int) (Planned, error) {
 	for _, u := range p.Units {
 		if s, ok := bySpec[u.ID]; ok {
 			s.Unit = u
+			peak, measured := est.Peak(UnitKey(s.ID))
+			bound(est, &s, peak, measured && !remeasure)
 			out.Specs = append(out.Specs, s)
 			continue
 		}
@@ -163,9 +172,54 @@ func Build(est Estimates, all []suites.Units, slots int) (Planned, error) {
 		}
 		s := sp.Chunk(u.ID, names)
 		s.Unit = u
+		peak, measured := chunkPeak(est, group, names)
+		bound(est, &s, peak, measured && !remeasure)
 		out.Specs = append(out.Specs, s)
 	}
 	return out, nil
+}
+
+// bound sets a spec's time limit: run.BoundFactor times its expected time.
+//
+// THE EXPECTED TIME IS THE UNIT'S PEAK, not its mean: a unit's healthy runs
+// vary by up to four times their median (cold builds, a loaded host), so a
+// limit three times the mean killed about one healthy run in 180 of the 8,807
+// recorded (2026-11-09). An atomic unit's peak is its own; a chunk's is its
+// group's overhead peak plus every item's.
+//
+// A UNIT NOT MEASURED (no peak for it or one of its items, or a remeasure)
+// is expected to take as long as the longest unit this host has measured, or
+// its own estimate if that is longer, or UnknownUnit on a host that has
+// measured nothing: the planner's own rule for what was never measured. Its
+// passing run records its peak, so its next run is held to its own.
+func bound(est Estimates, s *run.Spec, peak float64, measured bool) {
+	expected := peak
+	if !measured {
+		longest, known := est.Longest(unitKeyPrefix)
+		if !known {
+			longest = UnknownUnit
+		}
+		expected = max(longest, s.Est)
+	}
+	s.Expected = time.Duration(expected * float64(time.Second))
+	s.Bound = time.Duration(run.BoundFactor * expected * float64(time.Second))
+}
+
+// chunkPeak is a chunk's measured peak: its group's overhead peak plus each of
+// its items', and whether every one of them was measured.
+func chunkPeak(est Estimates, group string, items []string) (float64, bool) {
+	total, ok := est.Peak(OverheadKey(group))
+	if !ok {
+		return 0, false
+	}
+	for _, it := range items {
+		v, ok := est.Peak(ItemKey(group, it))
+		if !ok {
+			return 0, false
+		}
+		total += v
+	}
+	return total, true
 }
 
 // chunkOf splits a chunk ID into its group and index.
@@ -184,29 +238,32 @@ func chunkOf(id string) (string, int, bool) {
 // Measurements turns the passed units' results into history entries. A failed
 // unit's time says how long it took to fail, not how long it takes, so it is
 // never recorded.
-// A group's overhead is the mean over its chunks this run.
-func Measurements(results []run.Result) map[string]float64 {
-	m := map[string]float64{}
-	overheadSum, overheadN := map[string]float64{}, map[string]int{}
+// A group's overhead is the mean over its chunks this run, and its peak the
+// largest of them.
+func Measurements(results []run.Result) map[string]history.Sample {
+	m := map[string]history.Sample{}
+	overheadSum, overheadN, overheadMax := map[string]float64{}, map[string]int{}, map[string]float64{}
 	for _, r := range results {
 		if r.Outcome != run.Passed {
 			continue
 		}
 		group, _, isChunk := chunkOf(r.Spec.ID)
 		if !isChunk {
-			m[UnitKey(r.Spec.ID)] = r.Wall()
+			m[UnitKey(r.Spec.ID)] = history.Sample{Seconds: r.Wall(), Peak: r.Wall()}
 			continue
 		}
 		sum := 0.0
 		for item, secs := range r.Items {
-			m[ItemKey(group, item)] = secs
+			m[ItemKey(group, item)] = history.Sample{Seconds: secs, Peak: secs}
 			sum += secs
 		}
-		overheadSum[group] += max(0, r.Wall()-sum)
+		overhead := max(0, r.Wall()-sum)
+		overheadSum[group] += overhead
 		overheadN[group]++
+		overheadMax[group] = max(overheadMax[group], overhead)
 	}
 	for group, total := range overheadSum {
-		m[OverheadKey(group)] = total / float64(overheadN[group])
+		m[OverheadKey(group)] = history.Sample{Seconds: total / float64(overheadN[group]), Peak: overheadMax[group]}
 	}
 	return m
 }

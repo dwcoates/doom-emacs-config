@@ -217,6 +217,8 @@ func TestTestRunSendsItsOptions(t *testing.T) {
 			check: func(r *agentreplv1.RunTestsRequest) bool {
 				return r.GetRun().GetRecord() && r.GetRun().GetSelections()[0].GetEverySuite() != nil
 			}},
+		{name: "a remeasuring run", args: []string{"-go", "pkg=TestA", "-remeasure"},
+			check: func(r *agentreplv1.RunTestsRequest) bool { return r.GetRun().GetRemeasure() }},
 		{name: "a repeat stopping at the first failure", args: []string{"-go", "pkg=TestA", "-runs", "9", "-stop-at-first-failure"},
 			check: func(r *agentreplv1.RunTestsRequest) bool { return r.GetRuns() == 9 && r.GetStopAtFirstFailure() }},
 		{name: "the user's run under load", args: []string{"-go", "pkg", "-cpu-load", "8", "-as-user"},

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -173,11 +174,28 @@ func newRunner(slots int, e *fakeExec) (*Runner, *bytes.Buffer, *bytes.Buffer) {
 
 func newRunnerOn(slots int, c *fakeCores, e *fakeExec) (*Runner, *bytes.Buffer, *bytes.Buffer) {
 	out, errOut := &bytes.Buffer{}, &bytes.Buffer{}
-	return &Runner{Slots: slots, Cores: c, Exec: e, Clock: &tickClock{}, Log: &Log{Out: out, Err: errOut}}, out, errOut
+	return &Runner{Slots: slots, Cores: c, Exec: e, Clock: &tickClock{}, After: never, Log: &Log{Out: out, Err: errOut}}, out, errOut
 }
 
 func spec(id, suite string, deps ...string) Spec {
-	return Spec{Unit: sched.Unit{ID: id, Suite: suite, Deps: deps, Est: 1}, Argv: []string{"x"}}
+	return Spec{Unit: sched.Unit{ID: id, Suite: suite, Deps: deps, Est: 1}, Argv: []string{"x"}, Bound: time.Minute, Expected: 20 * time.Second}
+}
+
+// never is a timer that never fires: no unit reaches its time limit.
+func never(time.Duration) <-chan time.Time { return nil }
+
+// timers hands each unit's time limit a channel the test fires.
+type timers struct {
+	mu     sync.Mutex
+	asked  []time.Duration
+	expire chan time.Time
+}
+
+func (t *timers) After(d time.Duration) <-chan time.Time {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.asked = append(t.asked, d)
+	return t.expire
 }
 
 func suiteByName(suites []SuiteResult, name string) SuiteResult {
@@ -940,5 +958,96 @@ func TestRunTellsItsObserverEveryUnitThatEnded(t *testing.T) {
 	want := []told{{"build", Failed, "boom"}, {"e2e#00", Cancelled, ""}}
 	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
 		t.Fatalf("observer was told %+v, want %+v", got, want)
+	}
+}
+
+func TestRunKillsAUnitAtItsTimeLimitAndFailsIt(t *testing.T) {
+	// Arrange: a unit that runs until it is killed.
+	e := &fakeExec{scripts: map[string]script{"hang": {output: "started\n", hold: make(chan struct{})}}}
+	r, out, errOut := newRunner(1, e)
+	tm := &timers{expire: make(chan time.Time, 1)}
+	r.After = tm.After
+	tm.expire <- time.Time{}
+
+	// Act
+	results, suites, err := r.Run(context.Background(), []Spec{spec("hang", "s")})
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 || results[0].Outcome != Failed || !results[0].TimedOut {
+		t.Fatalf("results = %+v, want the unit failed as timed out", results)
+	}
+	if suiteByName(suites, "s").Outcome != Failed {
+		t.Fatalf("suite = %+v, want it failed", suiteByName(suites, "s"))
+	}
+	if len(tm.asked) != 1 || tm.asked[0] != time.Minute {
+		t.Fatalf("time limits asked = %v, want the unit's one-minute bound", tm.asked)
+	}
+	if !slices.Equal(e.killed, []string{"hang"}) {
+		t.Fatalf("killed = %v, want the unit killed", e.killed)
+	}
+	if want := "ERROR: unit hang (s) ran past its time limit of 1m0s (3 times its expected 20s) and is killed"; !strings.Contains(errOut.String(), want) {
+		t.Fatalf("error log = %q, want %q", errOut.String(), want)
+	}
+	if !strings.Contains(out.String(), "unit hang was KILLED: it ran past its time limit of 1m0s") {
+		t.Fatalf("unit output = %q, want the kill said where the unit's output is read", out.String())
+	}
+}
+
+func TestRunLetsAUnitThatEndsInTimePass(t *testing.T) {
+	// Arrange: the unit's time limit is asked for and never fires.
+	e := &fakeExec{scripts: map[string]script{"quick": {}}}
+	r, _, errOut := newRunner(1, e)
+	tm := &timers{}
+	r.After = tm.After
+
+	// Act
+	results, _, err := r.Run(context.Background(), []Spec{spec("quick", "s")})
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 || results[0].Outcome != Passed || results[0].TimedOut {
+		t.Fatalf("results = %+v, want the unit passed", results)
+	}
+	if len(tm.asked) != 1 || len(e.killed) != 0 || errOut.Len() != 0 {
+		t.Fatalf("asked %v, killed %v, errors %q; want one limit asked and nothing killed", tm.asked, e.killed, errOut.String())
+	}
+}
+
+func TestRunRefusesAUnitWithoutATimeLimit(t *testing.T) {
+	// Arrange
+	e := &fakeExec{scripts: map[string]script{"a": {}}}
+	r, _, _ := newRunner(1, e)
+	unbounded := spec("a", "s")
+	unbounded.Bound = 0
+
+	// Act
+	_, _, err := r.Run(context.Background(), []Spec{unbounded})
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "unit a (s) has no time limit") {
+		t.Fatalf("Run = %v, want the unbounded unit refused", err)
+	}
+	if len(e.started) != 0 {
+		t.Fatalf("started = %v, want nothing run", e.started)
+	}
+}
+
+func TestRunRefusesARunWithoutATimer(t *testing.T) {
+	// Arrange
+	e := &fakeExec{scripts: map[string]script{"a": {}}}
+	r, _, _ := newRunner(1, e)
+	r.After = nil
+
+	// Act
+	_, _, err := r.Run(context.Background(), []Spec{spec("a", "s")})
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "no timer") {
+		t.Fatalf("Run = %v, want the run refused", err)
 	}
 }

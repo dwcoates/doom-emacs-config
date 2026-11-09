@@ -307,6 +307,9 @@ type Manager struct {
 	Memory func() (uint64, error)
 	// Used answers the bytes in use on a mounted volume (MountUsed).
 	Used func(mount string) (uint64, error)
+	// Cut closes once the run is cut (its sentinel is gone): a wait for a
+	// memory seat ends then, and nothing is attached (seats.Pool.Take).
+	Cut <-chan struct{}
 }
 
 // Volume is one attached, mounted RAM disk owned by this run.

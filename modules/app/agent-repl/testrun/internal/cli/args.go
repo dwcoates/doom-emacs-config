@@ -48,6 +48,9 @@ type Args struct {
 	// EventsFD (--events-fd) is the file descriptor the run writes its
 	// testrun.v1.TestRunEvent stream to; zero writes none.
 	EventsFD int
+	// Remeasure bounds every unit as one never measured
+	// (testrun.v1.TestRunRequest.remeasure).
+	Remeasure bool
 }
 
 // ReuseMode is how the run treats pass records. A --record run measures and a
@@ -168,6 +171,7 @@ func (a Args) WithRequest(req *testrunv1.TestRunRequest) (Args, error) {
 	case req.GetRecord() && a.RecordOut == "":
 		return Args{}, errors.New("record needs --record-out: the path the run stages its timing rows at, for `testrun finish-record` to commit")
 	}
+	a.Remeasure = req.GetRemeasure()
 	if !whole {
 		return a, nil
 	}

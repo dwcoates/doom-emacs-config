@@ -55,6 +55,7 @@ Options:
 -record                  append the run's timings to test_time.csv; -every-suite alone, on master, only when the user asks
 -runs N                  repeat the run N times, each its own run with its own log (every frame names its run); for a flaky test, repeat just that test
 -stop-at-first-failure   stop repeating at the first failing run
+-remeasure               bound every selected unit as one never measured, so a unit that legitimately got slower passes and records its new peak; the runner otherwise kills each unit at three times its expected time
 -cpu-load N -as-user     hold N busy loops for the run's length; ONLY when the user asks for load (owner ruling 2026-10-06); the daemon refuses load from a workspace
 ```
 
@@ -207,8 +208,8 @@ to every harness, fake and fixture a test uses, in every language.
   a 4xx from a fake) fails with that error unless the test declared the
   error an expected intermediate state.
 - The bound stays, as the FALLBACK for a hang that writes nothing and does
-  not exit. It is sized by AGENTS.md "Every timeout is sized deliberately",
-  on the granted clock where the harness has one. A timeout is never the
+  not exit. Its size comes from the metaprompt, "Every timeout is two to three times
+  the measured expected time of what it bounds", on the granted clock where the harness has one. A timeout is never the
   main channel a failure has.
 - Shared wait primitives own this, so a test cannot forget it: the daemon
   integration harness's `Await*` family, the e2e `AwaitEval`/`AwaitView`
@@ -285,8 +286,8 @@ coverage impact (always none).
 
 5. **Wait bounds sized on an idle host.**
    - Evidence: wait-bound tests run 5-7x slower inside a full run than alone (ERT integration files 3.4s -> 28s; an e2e successor test 1.7s -> 10.5s, past its 5s bound) (docs/investigations/2026-10-11-test-speed.md).
-   - Fix: a bound is a small multiple of the healthy max OBSERVED UNDER REALISTIC CONCURRENCY (a full run), stated at the site with its measurement; a genuinely long wait gets its own explicit bound. Never fix a flaky wait by raising a timeout without that measurement.
-   - Owner ruling, 2026-10-13: never make a timeout very long, and think carefully about what a reasonable one is. A long timeout is extremely expensive when it fails, because every failure, and every hang, pays the whole bound, and bounds 10-100x the healthy latency have hung runs and gates. A too-short timeout causes flakiness. Size it just over 2x the healthy latency measured under realistic concurrency, name the operation it bounds at the site, and give every blocking wait a bound (no unbounded channel receives, process waits or polls). The full rule is in AGENTS.md, "Every timeout is sized deliberately".
+   - Fix: a bound is two to three times the healthy max OBSERVED UNDER REALISTIC CONCURRENCY (a full run), stated at the site with its measurement; a genuinely long wait gets its own explicit bound. Never fix a flaky wait by raising a timeout without that measurement.
+   - Sizing rule: the metaprompt, "Every timeout is two to three times the measured expected time of what it bounds".
 
 6. **The macOS RAM disk throttles low-priority I/O.**
    - Evidence: units run at `taskpolicy -d utility`; on the run's RAM disk a 4KB fsync is p50 0.1ms but p90 166ms, p99 330ms during a run, and 86ms per fsync whenever default-tier I/O touches the same volume (the SSD shows no such effect) (test-speed investigation, fourth round).

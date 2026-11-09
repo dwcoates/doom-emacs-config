@@ -477,6 +477,7 @@ func newHarness(t *testing.T, exits map[string]int, buildErr map[string]error) h
 		Log:         &run.Log{Out: out, Err: errOut},
 		Exec:        e,
 		Clock:       &tick{},
+		After:       func(time.Duration) <-chan time.Time { return nil },
 		Slots:       4,
 		Cores:       freeCores{},
 		HistoryPath: filepath.Join(root, "history.json"),
@@ -1362,6 +1363,10 @@ func TestWithRequestLowersWholeSuites(t *testing.T) {
 		{name: "named suites with coverage", req: &testrunv1.TestRunRequest{Selections: []*testrunv1.TestSelection{suiteSel("webapp")}, Coverage: true},
 			want: Args{Module: "/m", RecordOut: "/r", Selected: []string{"webapp"}, Coverage: true}},
 		{name: "a narrowed request stays targeted", req: harnessSelection(), want: targeted},
+		{name: "a remeasuring whole suite remeasures", req: &testrunv1.TestRunRequest{Selections: []*testrunv1.TestSelection{suiteSel("ert")}, Remeasure: true},
+			want: Args{Module: "/m", RecordOut: "/r", Selected: []string{"ert"}, Remeasure: true}},
+		{name: "a remeasuring narrowed request stays targeted and remeasures", req: remeasured(harnessSelection()),
+			want: Args{Module: "/m", Selection: "/s.pb", Targeted: true, RecordOut: "/r", Remeasure: true}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1374,6 +1379,12 @@ func TestWithRequestLowersWholeSuites(t *testing.T) {
 			}
 		})
 	}
+}
+
+// remeasured is req asking to remeasure.
+func remeasured(req *testrunv1.TestRunRequest) *testrunv1.TestRunRequest {
+	req.Remeasure = true
+	return req
 }
 
 func TestWithRequestRefuses(t *testing.T) {
