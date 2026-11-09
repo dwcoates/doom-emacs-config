@@ -505,6 +505,9 @@ type Daemon struct {
 	// Services is this platform's fake service manager
 	// (NewFakeServiceManager); PlatformServiceVerbs names its verbs.
 	Services *Recorder
+	// LSRegister records every app bundle a deploy registered with
+	// LaunchServices (AGENT_REPL_LSREGISTER): the notifier app, on macOS.
+	LSRegister *Recorder
 	// Notifier records every desktop banner the daemon posted through the
 	// platform's banner program (AGENT_REPL_NOTIFIER_CMD, Linux), so no test
 	// ever raises a real one.
@@ -742,6 +745,7 @@ func StartDaemon(t testing.TB, opts Opts) *Daemon {
 		StoreSocket:        opts.StoreSocket,
 		Browser:            NewFakeBrowser(t, filepath.Join(root, "bin")),
 		Services:           NewFakeServiceManager(t, filepath.Join(root, "bin")),
+		LSRegister:         NewRecorderExecutable(t, filepath.Join(root, "bin"), "lsregister"),
 		Notifier:           NewFakeNotifier(t, filepath.Join(root, "bin")),
 		Chime:              NewFakeChime(t, filepath.Join(root, "bin")),
 		Say:                NewFakeSay(t, filepath.Join(root, "bin")),
@@ -955,6 +959,10 @@ func StartDaemon(t testing.TB, opts Opts) *Daemon {
 		"AGENT_REPL_PERSISTENT_WIFI_POWER_SOURCE="+d.PowerSource.Path,
 		"AGENT_REPL_LAUNCH_AGENTS_DIR="+filepath.Join(root, "LaunchAgents"),
 		"AGENT_REPL_SYSTEMD_USER_DIR="+filepath.Join(root, "systemd-user"),
+		// The notifier app a macOS deploy installs and registers: a directory
+		// of the test's and a recorder, never ~/Applications or LaunchServices.
+		"AGENT_REPL_APPLICATIONS_DIR="+filepath.Join(root, "Applications"),
+		"AGENT_REPL_LSREGISTER="+d.LSRegister.Path,
 		fakegit.EnvStateFile+"="+d.Git.StateFile,
 		"FAKESHIM_PROFILE_DIR="+d.ProfileDir,
 		// HOME and PATH aside, the build identity is stated in one place only.

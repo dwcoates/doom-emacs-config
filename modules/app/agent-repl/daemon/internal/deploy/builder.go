@@ -48,6 +48,10 @@ type BuildObserver interface {
 	BuildStepEnded(step string, err error)
 }
 
+// NotifierTarget is build-frontend.sh's target for the notifier app, staged
+// after Targets on a platform that has one (ScriptBuilder.Notifier).
+const NotifierTarget = "notifier"
+
 // ScriptBuilder is the production Builder.
 //
 // THE ONE BUILD STEP IS bin/build-frontend.sh. It is kept — and not folded
@@ -78,6 +82,9 @@ type ScriptBuilder struct {
 	Restarts restarttiming.Recorder
 	// Observer is told every step as it begins and ends. REQUIRED.
 	Observer BuildObserver
+	// Notifier stages the notifier app too: macOS, where Zettel.app posts
+	// the desktop banners.
+	Notifier bool
 }
 
 // buildStep is one command of a build.
@@ -132,7 +139,11 @@ func (b *ScriptBuilder) steps(staging string) []buildStep {
 		return []buildStep{{name: "build", argv: []string{b.Override, "--out", staging}}}
 	}
 	steps := []buildStep{{name: "proto", argv: []string{"make", "-C", filepath.Join(b.ModuleRoot, "proto"), "all"}}}
-	for _, target := range Targets {
+	targets := Targets
+	if b.Notifier {
+		targets = append(append([]string(nil), Targets...), NotifierTarget)
+	}
+	for _, target := range targets {
 		steps = append(steps, buildStep{
 			name: target,
 			argv: []string{"bash", filepath.Join(b.ModuleRoot, "bin", "build-frontend.sh"), "--out", staging, target},

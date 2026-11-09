@@ -69,6 +69,8 @@ const (
 	Webapp  Component = "webapp"
 	Zettel  Component = "zettel"
 	Tests   Component = "tests"
+	// Notifier is Zettel.app, the macOS desktop notifier.
+	Notifier Component = "notifier"
 )
 
 // Note is one thing a deploy deferred on one workspace.

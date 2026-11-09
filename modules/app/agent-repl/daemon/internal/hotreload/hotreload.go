@@ -38,14 +38,15 @@ const opHotReload = "daemon.hotreload"
 
 // The services a deploy reloads, in the order the card lists them.
 const (
-	ServiceStore   = "store"
-	ServiceSidecar = "sidecar"
-	ServiceZettel  = "zettel"
-	ServiceTests   = "test service"
-	ServiceDaemon  = "daemon"
-	ServiceShim    = "shim"
-	ServiceWebapp  = "webapp"
-	ServiceElisp   = "elisp"
+	ServiceStore    = "store"
+	ServiceSidecar  = "sidecar"
+	ServiceZettel   = "zettel"
+	ServiceTests    = "test service"
+	ServiceNotifier = "notifier"
+	ServiceDaemon   = "daemon"
+	ServiceShim     = "shim"
+	ServiceWebapp   = "webapp"
+	ServiceElisp    = "elisp"
 )
 
 // The step every service shares, before any service's own.
@@ -84,6 +85,8 @@ var specs = []serviceSpec{
 		about: "Serves the zettel chats. A stale one is restarted at once; nothing else depends on it."},
 	{name: ServiceTests, reload: "restart", built: true, current: "already running the fresh build",
 		about: "Runs test suites for the merge queue and the workspaces. A stale one is restarted at once."},
+	{name: ServiceNotifier, reload: "restart", built: true, current: "already running the fresh build",
+		about: "Posts the desktop banners as Zettel.app, on macOS alone. A stale app, or none attached, is restarted at once."},
 	{name: ServiceDaemon, reload: "hand over", built: true, current: "already running the fresh build",
 		about: "Serves every workspace. A stale daemon starts its fresh build beside itself and hands each workspace over when it is free, so no turn is cut."},
 	{name: ServiceShim, reload: "replace", built: true, counted: "replaced", current: "every shim runs the fresh build",
@@ -97,15 +100,16 @@ var specs = []serviceSpec{
 // buildTargets map each build-frontend target to the service whose build it
 // is, and the step it draws as there.
 var buildTargets = map[string]struct{ service, step string }{
-	"shim":    {ServiceShim, stepBuild},
-	"lock":    {ServiceShim, "build shim-lock"},
-	"webapp":  {ServiceWebapp, stepBuild},
-	"daemon":  {ServiceDaemon, stepBuild},
-	"wifi":    {ServiceDaemon, "build Wi-Fi helper"},
-	"store":   {ServiceStore, stepBuild},
-	"sidecar": {ServiceSidecar, stepBuild},
-	"zettel":  {ServiceZettel, stepBuild},
-	"tests":   {ServiceTests, stepBuild},
+	"shim":     {ServiceShim, stepBuild},
+	"lock":     {ServiceShim, "build shim-lock"},
+	"webapp":   {ServiceWebapp, stepBuild},
+	"daemon":   {ServiceDaemon, stepBuild},
+	"wifi":     {ServiceDaemon, "build Wi-Fi helper"},
+	"store":    {ServiceStore, stepBuild},
+	"sidecar":  {ServiceSidecar, stepBuild},
+	"zettel":   {ServiceZettel, stepBuild},
+	"tests":    {ServiceTests, stepBuild},
+	"notifier": {ServiceNotifier, stepBuild},
 }
 
 // buildEverything is the one step a builder override runs in place of every
@@ -126,6 +130,9 @@ type Deps struct {
 	Mediator func(ctx context.Context) (ids.WorkspaceID, bool, error)
 	// WorkspaceName answers a workspace's name, which an instance is drawn as.
 	WorkspaceName func(ctx context.Context, ws ids.WorkspaceID) (string, error)
+	// Notifier reports whether the platform deploys the notifier app (macOS):
+	// a card lists the notifier only where a deploy reloads it.
+	Notifier bool
 	// Now is the tracker's clock.
 	Now func() time.Time
 	Log dlog.Logger
@@ -248,11 +255,15 @@ func spec(name string) serviceSpec {
 }
 
 // newCard is a fresh card for a deploy that began at STARTED, drawn for WS:
-// every step scheduled.
-func newCard(ws ids.WorkspaceID, started time.Time) *Card {
+// every step scheduled. NOTIFIER lists the notifier app, which only a
+// platform that deploys it reloads.
+func newCard(ws ids.WorkspaceID, started time.Time, notifier bool) *Card {
 	c := &Card{Workspace: ws, StartedMS: started.UnixMilli(),
 		Steps: []Step{{Name: stepProtobufs, State: State{Kind: KindScheduled, Words: "scheduled"}}}}
 	for _, s := range specs {
+		if s.name == ServiceNotifier && !notifier {
+			continue
+		}
 		svc := &Service{Name: s.name}
 		if s.built {
 			svc.Steps = append(svc.Steps,
@@ -321,7 +332,7 @@ func (t *Tracker) Begin(ctx context.Context, started time.Time) {
 		t.card = nil
 		return
 	}
-	t.card, t.publishing, t.settled = newCard(ws, started), true, false
+	t.card, t.publishing, t.settled = newCard(ws, started, t.deps.Notifier), true, false
 	t.deps.Log.Info(opHotReload, "drawing the deploy's hot reload in the deploy mediator's feed", dlog.Merge(fields, dlog.Context{"workspace": string(ws)}))
 	t.publishLocked()
 }

@@ -87,6 +87,10 @@
 #   zettel  -> DIR/cache-bin/zettel
 #   tests   -> DIR/cache-bin/agent-repl-tests
 #              (each + .<name>.built-sha, .<name>.source-tree in DIR/cache-bin/)
+#   notifier -> DIR/cache-bin/Zettel.app (macOS only; + .Zettel.app.built-sha,
+#              .Zettel.app.source-tree in DIR/cache-bin/). In place, the app
+#              is also installed in ~/Applications by bin/build-notifier.sh;
+#              staged, the deploy installs it.
 #
 # Every `go build` passes -buildvcs=false; see GO_BUILD_FLAGS below.
 #
@@ -217,7 +221,7 @@ while [ $# -gt 0 ]; do
             OUT_DIR="$2"
             shift
             ;;
-        shim|webapp|daemon|store|sidecar|lock|sockethold|zettel|tests|deps|gc) TARGETS+=("$1") ;;
+        shim|webapp|daemon|store|sidecar|lock|sockethold|zettel|tests|notifier|deps|gc) TARGETS+=("$1") ;;
         -h|--help)
             # The whole header comment, however long it grows.
             sed -n '2,/^set -euo pipefail/p' "${BASH_SOURCE[0]}" | sed '$d' | sed 's/^# \{0,1\}//'
@@ -274,6 +278,7 @@ LOCK_ARTIFACT="$CACHE_BIN/shim-lock"
 SOCKETHOLD_ARTIFACT="$CACHE_BIN/sockethold"
 ZETTEL_ARTIFACT="$CACHE_BIN/zettel"
 TESTS_ARTIFACT="$CACHE_BIN/agent-repl-tests"
+NOTIFIER_ARTIFACT="$CACHE_BIN/Zettel.app"
 
 # Built-sha stamps, written beside each artifact after a SUCCESSFUL build so
 # readiness-report.sh can say which source revision the deployed artifact is
@@ -296,6 +301,7 @@ LOCK_SHA_STAMP="$CACHE_BIN/.shim-lock.built-sha"
 SOCKETHOLD_SHA_STAMP="$CACHE_BIN/.sockethold.built-sha"
 ZETTEL_SHA_STAMP="$CACHE_BIN/.zettel.built-sha"
 TESTS_SHA_STAMP="$CACHE_BIN/.agent-repl-tests.built-sha"
+NOTIFIER_SHA_STAMP="$CACHE_BIN/.Zettel.app.built-sha"
 
 # Source-tree stamps, beside each artifact and shaped exactly like the built-sha
 # stamps. These are the staleness authority: what the artifact standing here was
@@ -311,6 +317,7 @@ LOCK_TREE_STAMP="$CACHE_BIN/.shim-lock.source-tree"
 SOCKETHOLD_TREE_STAMP="$CACHE_BIN/.sockethold.source-tree"
 ZETTEL_TREE_STAMP="$CACHE_BIN/.zettel.source-tree"
 TESTS_TREE_STAMP="$CACHE_BIN/.agent-repl-tests.source-tree"
+NOTIFIER_TREE_STAMP="$CACHE_BIN/.Zettel.app.source-tree"
 
 # Flags every `go build` here passes, in place and staged alike.
 #
@@ -691,6 +698,29 @@ build_service() {
     echo "[build-frontend] $name: done"
 }
 
+# build_notifier — Zettel.app, the macOS desktop notifier (notifier/, Swift),
+# by bin/build-notifier.sh. In place it installs the app too, as every in-place
+# artifact is the live one; staged (--out) it only builds, and the deploy
+# installs it.
+build_notifier() {
+    if [ "$(uname)" != Darwin ]; then
+        echo "build-frontend.sh: the notifier app is macOS's alone" >&2
+        exit 1
+    fi
+    if ! source_is_stale notifier "$NOTIFIER_ARTIFACT" "$NOTIFIER_TREE_STAMP"; then
+        echo "[build-frontend] notifier: fresh, skipping"
+        return 0
+    fi
+    require_bin swift "install Xcode or its command line tools"
+    echo "[build-frontend] notifier: building..."
+    local install=()
+    [ -z "$OUT_DIR" ] || install=(--no-install)
+    "$THIS_DIR/build-notifier.sh" --out "$NOTIFIER_ARTIFACT" "${install[@]}"
+    write_built_sha "$NOTIFIER_SHA_STAMP" "$ROOT"
+    stamp_source_tree notifier "$NOTIFIER_TREE_STAMP"
+    echo "[build-frontend] notifier: done"
+}
+
 EXPLICIT_GC=0
 for target in "${TARGETS[@]}"; do
     case "$target" in
@@ -704,6 +734,7 @@ for target in "${TARGETS[@]}"; do
         sockethold) build_service sockethold "$SOCKETHOLD_DIR" "$SOCKETHOLD_ARTIFACT" "$SOCKETHOLD_SHA_STAMP" "$SOCKETHOLD_TREE_STAMP" ;;
         zettel) build_service zettel "$ZETTEL_DIR" "$ZETTEL_ARTIFACT" "$ZETTEL_SHA_STAMP" "$ZETTEL_TREE_STAMP" ;;
         tests)  build_service agent-repl-tests "$TESTS_DIR" "$TESTS_ARTIFACT" "$TESTS_SHA_STAMP" "$TESTS_TREE_STAMP" ;;
+        notifier) build_notifier ;;
         gc)     EXPLICIT_GC=1 ;;
         # Unreachable: the argument parser allowlists these same names. It is
         # here so that adding a target THERE and forgetting it here fails

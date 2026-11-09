@@ -14,7 +14,7 @@
 # visible instead of leaving it to be rediscovered during a debugging session.
 #
 # Systems reported: daemon, shim, webapp, shim-store, shim-claude-sidecar, zettel, agent-repl-tests,
-# shim-lock. shim-lock has no long-lived process — it lives exactly as long as
+# shim-lock, and on macOS notifier (Zettel.app, installed in ~/Applications). shim-lock has no long-lived process — it lives exactly as long as
 # the claim it holds — so it reports staleness only, never a running build.
 #
 # ELISP IS DELIBERATELY NOT REPORTED. Every other system's deployed revision is
@@ -157,6 +157,9 @@ REL_ROOT="$(deploy_stamp_rel_root "$REPO_ROOT" "$ROOT")"
 CACHE_BIN="$HOME/.cache/agent-repl/bin"
 
 SYSTEMS=(daemon shim webapp shim-store shim-claude-sidecar shim-lock zettel agent-repl-tests)
+# The notifier app is macOS's alone: elsewhere a banner program posts.
+[ "$(uname)" != Darwin ] || SYSTEMS+=(notifier)
+APPLICATIONS_DIR="${AGENT_REPL_APPLICATIONS_DIR:-$HOME/Applications}"
 
 system_known() {
     local system
@@ -188,6 +191,7 @@ system_stamp() {
         shim-lock)           printf '%s' "$CACHE_BIN/.shim-lock.built-sha" ;;
         zettel)              printf '%s' "$CACHE_BIN/.zettel.built-sha" ;;
         agent-repl-tests)    printf '%s' "$CACHE_BIN/.agent-repl-tests.built-sha" ;;
+        notifier)            printf '%s' "$CACHE_BIN/.Zettel.app.built-sha" ;;
         *) return 1 ;;
     esac
 }
@@ -213,6 +217,7 @@ system_tree_stamp() {
         shim-lock)           printf '%s' "$CACHE_BIN/.shim-lock.source-tree" ;;
         zettel)              printf '%s' "$CACHE_BIN/.zettel.source-tree" ;;
         agent-repl-tests)    printf '%s' "$CACHE_BIN/.agent-repl-tests.source-tree" ;;
+        notifier)            printf '%s' "$CACHE_BIN/.Zettel.app.source-tree" ;;
         *) return 1 ;;
     esac
 }
@@ -232,6 +237,7 @@ system_process_match() {
         shim-claude-sidecar) printf '%s' "$CACHE_BIN/shim-claude-sidecar" ;;
         zettel)              printf '%s' "$CACHE_BIN/zettel" ;;
         agent-repl-tests)    printf '%s' "$CACHE_BIN/agent-repl-tests" ;;
+        notifier)            printf '%s' "$APPLICATIONS_DIR/Zettel.app/Contents/MacOS/Zettel" ;;
         *) printf '' ;;
     esac
 }

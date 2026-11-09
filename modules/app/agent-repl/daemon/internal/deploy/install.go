@@ -31,7 +31,22 @@ type Live struct {
 	// (persistentwifi.WifiAppIn); empty on a platform with no helper, where a
 	// deploy neither builds nor installs one.
 	WifiApp string
+	// Applications is the directory the notifier app is installed in
+	// (~/Applications, where Spotlight and Finder find it). Empty on a
+	// platform with no notifier app.
+	Applications string
 }
+
+// NotifierBundle is the notifier app's bundle name, staged in the cache bin
+// and installed in Live.Applications.
+const NotifierBundle = "Zettel.app"
+
+// NotifierExecutable is the notifier app's executable inside its bundle: the
+// file its build is named by.
+const NotifierExecutable = "Contents/MacOS/Zettel"
+
+// NotifierApp is the installed notifier app.
+func (l Live) NotifierApp() string { return filepath.Join(l.Applications, NotifierBundle) }
 
 // ShimMain is the installed shim bundle.
 func (l Live) ShimMain() string {

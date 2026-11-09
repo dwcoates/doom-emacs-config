@@ -173,7 +173,7 @@ func TestWireStateRefusesAKindItDoesNotName(t *testing.T) {
 
 func TestResolveNamesTheFirstFailureOnTheBadge(t *testing.T) {
 	// Arrange
-	c := newCard("mediator", start)
+	c := newCard("mediator", start, false)
 	c.Services[0].Steps[0].State = State{Kind: KindFailed, Words: "the build failed", StartedMS: 1, EndedMS: 2}
 	for _, svc := range c.Services[1:] {
 		for i := range svc.Steps {
@@ -210,7 +210,7 @@ func TestShortTrimsAHashToSevenCharacters(t *testing.T) {
 // Every service the card lists names what reloading it means.
 func TestEveryServiceSaysWhatReloadingItMeans(t *testing.T) {
 	// Arrange
-	c := newCard("mediator", start)
+	c := newCard("mediator", start, true)
 
 	// Act
 	card := Resolve(c)

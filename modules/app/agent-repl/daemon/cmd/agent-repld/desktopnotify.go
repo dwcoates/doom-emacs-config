@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"runtime"
 
+	"agent-repld/internal/deploy"
 	"agent-repld/internal/desktopnotify"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
@@ -134,4 +135,13 @@ func (f *clickForwarder) NotificationClicked(ws ids.WorkspaceID) {
 		panic("agent-repld: a banner click arrived before the server was bound")
 	}
 	target.NotificationClicked(ws)
+}
+
+// deployedNotifier is the notifier app a deploy builds, installs and restarts:
+// the app on macOS, where it posts the banners, and none elsewhere.
+func deployedNotifier(app *desktopnotify.App) deploy.Notifier {
+	if runtime.GOOS != "darwin" {
+		return nil
+	}
+	return app
 }

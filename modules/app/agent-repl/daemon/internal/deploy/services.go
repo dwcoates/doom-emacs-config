@@ -26,6 +26,8 @@ const (
 	SidecarLabel = "com.agentrepl.shim-claude-sidecar"
 	ZettelLabel  = "com.agentrepl.zettel"
 	TestsLabel   = "com.agentrepl.tests"
+	// NotifierLabel is the notifier app's launchd agent.
+	NotifierLabel = "com.agentrepl.notifier"
 )
 
 // Standalone is a service no other service's restart moves, and that moves
@@ -170,6 +172,11 @@ type Restarter struct {
 	// empty when no declared holder holds that socket, and then the store
 	// binds its own and no holder is ensured for it.
 	StoreHolder string
+	// NotifierApp is the installed notifier app (Live.NotifierApp), and
+	// RegisterApp registers a bundle with LaunchServices (lsregister -f);
+	// both are set on macOS only, where RestartNotifier runs.
+	NotifierApp string
+	RegisterApp func(ctx context.Context, bundle string) error
 }
 
 // serviceWindowBounds bound each service restart's resource window: about
@@ -288,6 +295,27 @@ func (r *Restarter) ensureBothLoaded(ctx context.Context) (storeBootstrapped, si
 	}
 	r.Log.Debug(opServices, "the service manager holds both services", fields)
 	return storeBootstrapped, sidecarBootstrapped, nil
+}
+
+// RestartNotifier registers the installed notifier app with LaunchServices,
+// so macOS attributes its banners to the bundle now standing, and restarts
+// its service onto it. A banner wanted while the app is out is recorded
+// unposted by the daemon's notifier; nothing else waits on it.
+func (r *Restarter) RestartNotifier(ctx context.Context) error {
+	fields := dlog.Context{"notifier": NotifierLabel, "app": r.NotifierApp}
+	if r.RegisterApp == nil || r.NotifierApp == "" {
+		panic("deploy: RestartNotifier on a restarter with no notifier app to register")
+	}
+	if err := r.RegisterApp(ctx, r.NotifierApp); err != nil {
+		r.failed("registering the notifier app with LaunchServices failed", fields, err)
+		return fmt.Errorf("deploy: register %s: %w", r.NotifierApp, err)
+	}
+	if err := r.Services.Restart(ctx, NotifierLabel); err != nil {
+		r.failed("the notifier app restart failed", fields, err)
+		return fmt.Errorf("deploy: restart %s: %w", NotifierLabel, err)
+	}
+	r.Log.Info(opServices, "registered and restarted the notifier app", fields)
+	return nil
 }
 
 // RestartStandalone restarts standalone service S alone. Nothing else

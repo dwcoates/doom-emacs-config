@@ -67,10 +67,12 @@ const (
 	ComponentSidecar Component = "sidecar"
 	ComponentZettel  Component = "zettel"
 	ComponentTests   Component = "tests"
-	ComponentElisp   Component = "elisp"
-	ComponentDaemon  Component = "daemon"
-	ComponentShim    Component = "shim"
-	ComponentWebapp  Component = "webapp"
+	// ComponentNotifier is Zettel.app, the macOS desktop notifier.
+	ComponentNotifier Component = "notifier"
+	ComponentElisp    Component = "elisp"
+	ComponentDaemon   Component = "daemon"
+	ComponentShim     Component = "shim"
+	ComponentWebapp   Component = "webapp"
 )
 
 // Arm names a component on the wire.
@@ -92,6 +94,8 @@ func (c Component) Arm() agentreplv1.DeployComponent {
 		return agentreplv1.DeployComponent_DEPLOY_COMPONENT_ZETTEL
 	case ComponentTests:
 		return agentreplv1.DeployComponent_DEPLOY_COMPONENT_TESTS
+	case ComponentNotifier:
+		return agentreplv1.DeployComponent_DEPLOY_COMPONENT_NOTIFIER
 	default:
 		return agentreplv1.DeployComponent_DEPLOY_COMPONENT_UNSPECIFIED
 	}
@@ -210,6 +214,17 @@ type Services interface {
 	RestartStore(ctx context.Context) error
 	RestartSidecar(ctx context.Context) error
 	RestartStandalone(ctx context.Context, s Standalone) error
+	// RestartNotifier registers the installed notifier app with
+	// LaunchServices and restarts its launchd agent onto it.
+	RestartNotifier(ctx context.Context) error
+}
+
+// Notifier is the notifier app as the deploy sees it: the build its standing
+// stream reported (desktopnotify.App).
+type Notifier interface {
+	// RunningBuild is the build the attached app reported; false when no app
+	// holds the banner stream.
+	RunningBuild() (string, bool)
 }
 
 // Clock is the deploy's view of time.
@@ -252,6 +267,8 @@ func hotReloadService(c Component) string {
 		return hotreload.ServiceZettel
 	case ComponentTests:
 		return hotreload.ServiceTests
+	case ComponentNotifier:
+		return hotreload.ServiceNotifier
 	case ComponentDaemon:
 		return hotreload.ServiceDaemon
 	case ComponentShim:
@@ -299,6 +316,9 @@ type Deps struct {
 	// build an install just replaced, and reports whether one was
 	// (persistentwifi.StopAsks). REQUIRED when Live names a helper.
 	StopWifiAsks func(ctx context.Context) (bool, error)
+	// Notifier is the notifier app, on a platform that has one (macOS); nil
+	// elsewhere, where no notifier is built, installed or restarted.
+	Notifier Notifier
 	// ReportDir is where the services write their build reports.
 	ReportDir string
 	// Alive reports whether a process is running; nil is the kernel's answer.
@@ -617,7 +637,7 @@ func (d *Deployer) timePhase(phase restarttiming.DeployPhase, since time.Time, e
 // on the building line. shim-lock rides with the shim (see Targets).
 var builtComponents = []deployprogress.Component{
 	deployprogress.Shim, deployprogress.Webapp, deployprogress.Daemon,
-	deployprogress.Store, deployprogress.Sidecar, deployprogress.Zettel,
+	deployprogress.Store, deployprogress.Sidecar, deployprogress.Zettel, deployprogress.Notifier,
 }
 
 // progress states one phase on the update line.
@@ -821,6 +841,8 @@ type builds struct {
 	// wifi is the Wi-Fi helper's source hash (wifiSourceHash); empty where
 	// the platform has no helper (Live.WifiApp).
 	wifi string
+	// notifier is empty on a platform with no notifier app.
+	notifier string
 }
 
 // byService answers each built service's fresh build, by the name the hot
@@ -833,6 +855,9 @@ func (b builds) byService() map[string]string {
 	for _, s := range Standalones {
 		out[hotReloadService(s.Component)] = b.standalone[s.Component]
 	}
+	if b.notifier != "" {
+		out[hotreload.ServiceNotifier] = b.notifier
+	}
 	return out
 }
 
@@ -840,7 +865,8 @@ func (b builds) fields() dlog.Context {
 	out := dlog.Context{
 		"shim": b.shim, "webapp": b.webapp, "daemon": b.daemon,
 		"store": b.store, "sidecar": b.sidecar, "lock": b.lock, "elisp": b.elisp,
-		"wifi": b.wifi,
+		"wifi":     b.wifi,
+		"notifier": b.notifier,
 	}
 	for _, s := range Standalones {
 		out[string(s.Component)] = b.standalone[s.Component]
@@ -879,6 +905,11 @@ func (d *Deployer) hashStaged(s Staged) (builds, error) {
 	step("elisp", &b.elisp, func() (string, error) { return buildid.Elisp(d.deps.Live.ModuleRoot) })
 	if d.deps.Live.WifiApp != "" {
 		step("wifi", &b.wifi, func() (string, error) { return wifiSourceHash(s.WifiApp()) })
+	}
+	if d.deps.Notifier != nil {
+		step("notifier", &b.notifier, func() (string, error) {
+			return buildid.File(filepath.Join(s.CacheBin(NotifierBundle), NotifierExecutable))
+		})
 	}
 	return b, err
 }
@@ -1001,6 +1032,17 @@ func (d *Deployer) install(ctx context.Context, s Staged, fresh builds, nonce st
 				return nil
 			}, writes: []string{live.WifiApp}, tree: true, rider: true})
 	}
+	// THE NOTIFIER APP IS A BUNDLE, installed whole into ~/Applications the
+	// way the webapp's tree is: swapped in by rename, so a banner's click
+	// never finds a half-copied app.
+	if d.deps.Notifier != nil {
+		artifacts = append(artifacts, artifact{component: ComponentNotifier, name: NotifierBundle, fresh: fresh.notifier,
+			installed: func() (string, error) {
+				return buildid.File(filepath.Join(live.NotifierApp(), NotifierExecutable))
+			}, install: func() error {
+				return in.dir(s.CacheBin(NotifierBundle), live.NotifierApp())
+			}, writes: []string{live.NotifierApp()}, tree: true})
+	}
 	for _, a := range artifacts {
 		fields := dlog.Context{"artifact": a.name, "fresh": a.fresh}
 		installed, err := a.installed()
@@ -1119,7 +1161,34 @@ func (d *Deployer) services(ctx context.Context, fresh builds, prev *previous) (
 		d.deps.HotReload.ServiceRestarted(hotReloadService(sv.Component))
 		d.log.Info(opDecide, "restarted "+sv.Display+" onto the fresh build", dlog.Context{string(sv.Component) + "_build": build})
 	}
-	return outcomes(), nil
+	if d.deps.Notifier == nil {
+		return outcomes(), nil
+	}
+	// THE NOTIFIER REPORTS ITS BUILD ON ITS STREAM, so it is stale when the
+	// app attached runs another build, or no app is attached at all: the
+	// restart starts it.
+	notifier := Outcome{Component: ComponentNotifier, Build: fresh.notifier, Kind: UpToDate}
+	withNotifier := func() []Outcome { return append(outcomes(), notifier) }
+	running, attached := d.deps.Notifier.RunningBuild()
+	if attached && running == fresh.notifier {
+		d.log.Debug(opDecide, "the attached notifier app runs the fresh build", dlog.Context{"notifier_build": fresh.notifier})
+		d.deps.HotReload.ServiceCurrent(hotreload.ServiceNotifier)
+		return withNotifier(), nil
+	}
+	d.progress(&deployprogress.Progress{Phase: deployprogress.RestartingServices,
+		Components: []deployprogress.Component{deployprogress.Notifier}})
+	prev.notifier = true
+	d.deps.HotReload.ServiceRestarting(hotreload.ServiceNotifier)
+	if err := d.deps.Services.RestartNotifier(ctx); err != nil {
+		d.log.Error(opDecide, "the notifier app restart failed", dlog.WithCause(dlog.Context{"component": string(ComponentNotifier)}, err))
+		return withNotifier(), &ServiceRestartFailed{Component: ComponentNotifier, Detail: err.Error()}
+	}
+	notifier.Kind = Restarted
+	d.deps.HotReload.ServiceRestarted(hotreload.ServiceNotifier)
+	d.log.Info(opDecide, "restarted the notifier app onto the fresh build", dlog.Context{
+		"notifier_build": fresh.notifier, "was_attached": attached, "running_build": running,
+	})
+	return withNotifier(), nil
 }
 
 // serviceStale reports whether the process launchd runs for a service is not

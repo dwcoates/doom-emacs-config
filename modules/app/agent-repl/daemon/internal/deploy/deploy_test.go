@@ -2330,7 +2330,7 @@ func TestNewRefusesAMissingHotReload(t *testing.T) {
 }
 
 func TestHotReloadServiceNamesEveryComponent(t *testing.T) {
-	for _, c := range []Component{ComponentStore, ComponentSidecar, ComponentZettel, ComponentTests, ComponentDaemon, ComponentShim, ComponentWebapp, ComponentElisp} {
+	for _, c := range []Component{ComponentStore, ComponentSidecar, ComponentZettel, ComponentTests, ComponentNotifier, ComponentDaemon, ComponentShim, ComponentWebapp, ComponentElisp} {
 		t.Run(string(c), func(t *testing.T) {
 			// Act
 			got := hotReloadService(c)

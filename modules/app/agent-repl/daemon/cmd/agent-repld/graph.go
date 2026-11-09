@@ -1303,7 +1303,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// A DEPLOY'S HOT RELOAD is drawn in the deploy mediator's feed of the
 	// repository this daemon is deployed from (hotreload.Tracker). The
 	// deploy, the rollout and the server each tell it what they did.
-	hotReload, err := newHotReloadTracker(git, p.DB, feedResolver, paths.Checkout, log)
+	hotReload, err := newHotReloadTracker(git, p.DB, feedResolver, paths.Checkout, deployedNotifier(notifierApp) != nil, log)
 	if err != nil {
 		return nil, err
 	}
@@ -1397,30 +1397,31 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// The metrics surface's version series and the rail's header state it.
 	deployedVersion := deployedversion.NewLoop(git, paths.Checkout, log, p.Metrics, sidebarResolver)
 	deployer, restarter, err := buildDeployer(ctx, deployerParams{
-		WifiTools:  wifiConfig.Tools,
-		Surfaces:   p.Surfaces,
-		Checkout:   paths.Checkout,
-		ShimMain:   paths.ShimMain,
-		WebappDist: paths.WebappDist,
-		StateDir:   p.Layout.Dir(),
-		SelfExe:    selfExe,
-		Bundle:     shimBundle,
-		Rollout:    rolloutController,
-		Reports:    detachedRef,
-		Clients:    clients,
-		Runner:     scripts,
-		Store:      p.Opts.storeSocket,
-		Workspace:  fleet.Workspaces,
-		Progress:   deployEdges,
-		Faults:     p.DB,
-		Joining:    p.Opts.joining != "",
-		Getenv:     os.Getenv,
-		Deployed:   deployedVersion.Kick,
-		Restarts:   p.Metrics,
-		Windows:    p.Metrics,
-		Reconnects: p.Reconnects,
-		HotReload:  hotReload,
-		FoldSweep:  foldSweepRef,
+		WifiTools:   wifiConfig.Tools,
+		Surfaces:    p.Surfaces,
+		Checkout:    paths.Checkout,
+		ShimMain:    paths.ShimMain,
+		WebappDist:  paths.WebappDist,
+		StateDir:    p.Layout.Dir(),
+		SelfExe:     selfExe,
+		Bundle:      shimBundle,
+		Rollout:     rolloutController,
+		Reports:     detachedRef,
+		Clients:     clients,
+		Runner:      scripts,
+		Store:       p.Opts.storeSocket,
+		Workspace:   fleet.Workspaces,
+		Progress:    deployEdges,
+		Faults:      p.DB,
+		Joining:     p.Opts.joining != "",
+		Getenv:      os.Getenv,
+		Deployed:    deployedVersion.Kick,
+		Restarts:    p.Metrics,
+		Windows:     p.Metrics,
+		Reconnects:  p.Reconnects,
+		HotReload:   hotReload,
+		FoldSweep:   foldSweepRef,
+		NotifierApp: deployedNotifier(notifierApp),
 	})
 	if err != nil {
 		return nil, err
