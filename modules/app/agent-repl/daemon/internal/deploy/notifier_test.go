@@ -193,26 +193,37 @@ func TestLSRegisterRegistersTheBundle(t *testing.T) {
 	}
 }
 
-func TestRestartNotifierRegistersThenRestarts(t *testing.T) {
+func TestRestartNotifierRegistersThenRestartsTheService(t *testing.T) {
 	cases := []struct {
-		name        string
-		registerErr error
-		restartErr  error
-		wantRestart bool
-		wantErr     string
-		wantRecord  string
+		name              string
+		registerErr       error
+		restartErr        error
+		notLoaded         bool
+		definitionWritten bool
+		wantRestart       bool
+		wantStart         bool
+		wantErr           string
+		wantRecord        string
 	}{
-		{name: "both succeed", wantRestart: true},
+		{name: "a loaded service is restarted", wantRestart: true},
 		{name: "a failed registration restarts nothing", registerErr: errors.New("lsregister died"),
 			wantErr: "lsregister died", wantRecord: "registering the notifier app with LaunchServices failed"},
 		{name: "a failed restart is its error", restartErr: errors.New("no such label"), wantRestart: true,
 			wantErr: "no such label", wantRecord: "the notifier app restart failed"},
+		{name: "an unloaded service whose definition is installed is started, not restarted",
+			notLoaded: true, definitionWritten: true, wantStart: true},
+		{name: "an unloaded service with no definition names the installer", notLoaded: true,
+			wantErr: "re-run .claude/install.sh", wantRecord: "a service is not loaded and its definition is missing"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange
 			log := dlog.NewTestLogger()
-			services := &restartRecorder{err: tc.restartErr}
+			dir := t.TempDir()
+			if tc.definitionWritten {
+				writeFile(t, filepath.Join(dir, NotifierLabel+".plist"), "<plist/>")
+			}
+			services := &restartRecorder{err: tc.restartErr, loaded: !tc.notLoaded, dir: dir}
 			var registered []string
 			r := &Restarter{Services: services, Log: log, NotifierApp: "/Apps/Zettel.app",
 				RegisterApp: func(_ context.Context, bundle string) error {
@@ -227,8 +238,8 @@ func TestRestartNotifierRegistersThenRestarts(t *testing.T) {
 			if !reflect.DeepEqual(registered, []string{"/Apps/Zettel.app"}) {
 				t.Fatalf("registered %v", registered)
 			}
-			if services.restarted != tc.wantRestart {
-				t.Fatalf("restarted = %v, want %v", services.restarted, tc.wantRestart)
+			if services.restarted != tc.wantRestart || services.started != tc.wantStart {
+				t.Fatalf("restarted = %v, started = %v; want restarted %v, started %v", services.restarted, services.started, tc.wantRestart, tc.wantStart)
 			}
 			if (tc.wantErr == "") != (err == nil) || (err != nil && !strings.Contains(err.Error(), tc.wantErr)) {
 				t.Fatalf("RestartNotifier = %v, want %q", err, tc.wantErr)
@@ -242,11 +253,34 @@ func TestRestartNotifierRegistersThenRestarts(t *testing.T) {
 	}
 }
 
-// restartRecorder is a ServiceManager that records a notifier restart.
+// restartRecorder is a ServiceManager holding the notifier's service loaded
+// or not, with its definition under dir, that records a restart and a start.
 type restartRecorder struct {
 	ServiceManager
+	loaded    bool
+	dir       string
 	restarted bool
+	started   bool
 	err       error
+}
+
+func (k *restartRecorder) Status(_ context.Context, label string) (bool, int, error) {
+	if label != NotifierLabel {
+		panic("restartRecorder: status of " + label)
+	}
+	return k.loaded, 0, nil
+}
+
+func (k *restartRecorder) Definition(label string) string {
+	return filepath.Join(k.dir, label+".plist")
+}
+
+func (k *restartRecorder) Start(_ context.Context, label string) error {
+	if label != NotifierLabel {
+		panic("restartRecorder: start of " + label)
+	}
+	k.started = true
+	return nil
 }
 
 func (k *restartRecorder) Restart(_ context.Context, label string) error {

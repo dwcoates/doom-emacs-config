@@ -316,6 +316,17 @@ func (r *Restarter) RestartNotifier(ctx context.Context) error {
 		r.failed("registering the notifier app with LaunchServices failed", fields, err)
 		return fmt.Errorf("deploy: register %s: %w", r.NotifierApp, err)
 	}
+	// A SERVICE THAT IS NOT LOADED IS STARTED from its installed definition,
+	// which starts the installed app; one whose definition the installer
+	// never wrote fails naming .claude/install.sh.
+	bootstrapped, err := r.ensureLoaded(ctx, NotifierLabel, fields)
+	if err != nil {
+		return err
+	}
+	if bootstrapped {
+		r.Log.Info(opServices, "registered the notifier app and started its service", fields)
+		return nil
+	}
 	if err := r.Services.Restart(ctx, NotifierLabel); err != nil {
 		r.failed("the notifier app restart failed", fields, err)
 		return fmt.Errorf("deploy: restart %s: %w", NotifierLabel, err)
