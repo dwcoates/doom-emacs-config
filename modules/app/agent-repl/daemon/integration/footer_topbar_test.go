@@ -641,7 +641,8 @@ func TestFooterShimExitFlipsToDeadAndStopsRedials(t *testing.T) {
 		"daemon.sessionwatcher.watch_session", "daemon.sessionwatcher.watch_agent",
 		"daemon.sessionwatcher.link_fault", "daemon.health.open_fault",
 		// The revival's start, held until its bound fails it.
-		"daemon.workspace.bring_up", "daemon.promptqueue.revive", "daemon.promptqueue.submit")
+		"daemon.workspace.bring_up", "daemon.promptqueue.revive", "daemon.promptqueue.submit",
+		"daemon.shimclient.start_session")
 	footer := f.d.WatchFooter(f.ws)
 	roster := f.d.WatchRoster()
 	awaitFooter(t, f, footer, "idle before the shim exits", func(v *frontendv1.FooterView) bool {
