@@ -332,11 +332,7 @@ in `completion-category-overrides', with the `substring' then `flex' styles."
 
 (defun agent-repl-test-command-completion--marked ()
   "Return the strings the current buffer marks as known commands, in order."
-  (mapcar (lambda (ov) (buffer-substring-no-properties (overlay-start ov) (overlay-end ov)))
-          (sort (cl-remove-if-not
-                 (lambda (ov) (overlay-get ov 'agent-repl-command-completion-known))
-                 (overlays-in (point-min) (point-max)))
-                (lambda (a b) (< (overlay-start a) (overlay-start b))))))
+  (agent-repl-test--composer-marked 'agent-repl-command-completion-known))
 
 (defmacro agent-repl-test-command-completion--marking (&rest body)
   "Run BODY in a buffer holding the fixture catalog and marking on change."
@@ -353,7 +349,7 @@ in `completion-category-overrides', with the `substring' then `flex' styles."
     (insert "please /merge-queue now")
     ;; Assert
     (should (equal (agent-repl-test-command-completion--marked) '("/merge-queue")))
-    (should (eq (get-char-property 9 'face) 'agent-repl-command-completion-known))))
+    (should (eq (get-char-property 9 'face) 'agent-repl-composer-known))))
 
 (ert-deftest agent-repl-test-command-completion-mark-an-alias ()
   "A slash word naming an alias is marked."

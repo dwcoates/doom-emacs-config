@@ -121,6 +121,7 @@
 (declare-function agent-repl-host-conn-or-primary "agent-repl-host" (ws))
 (declare-function agent-repl-command-completion-at-point "command-completion" ())
 (declare-function agent-repl--command-completion-on-change "command-completion" (beg end len))
+(declare-function agent-repl--workspace-completion-on-change "workspace-completion" (beg end len))
 (declare-function agent-repl-workspace-completion-at-point "workspace-completion" ())
 (declare-function agent-repl-host-composer-gate "agent-repl-host" (ws))
 (declare-function agent-repl-host-standing-ask "agent-repl-host" (ws))
@@ -450,9 +451,10 @@ nothing, since the transient it raised lapses on its own."
   ;; and a known one is marked purple (command-completion.el).
   (add-hook 'completion-at-point-functions #'agent-repl-command-completion-at-point nil t)
   (add-hook 'after-change-functions #'agent-repl--command-completion-on-change nil t)
-  ;; A WORD THAT BEGINS AN OPEN WORKSPACE'S NAME completes to it
-  ;; (workspace-completion.el).
+  ;; A WORD THAT BEGINS AN OPEN WORKSPACE'S NAME completes to it, and a
+  ;; whole one is marked purple like a known command (workspace-completion.el).
   (add-hook 'completion-at-point-functions #'agent-repl-workspace-completion-at-point nil t)
+  (add-hook 'after-change-functions #'agent-repl--workspace-completion-on-change nil t)
   ;; Only `TAB' takes a company completion (`agent-repl--input-use-company-map').
   (add-hook 'company-mode-hook #'agent-repl--input-use-company-map nil t)
 )

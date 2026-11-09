@@ -1382,6 +1382,15 @@ subsection's, exactly as the daemon numbers them.  Answers SECTIONS."
                     (visit open (or folded (collapsed-p sub))))))))))))
   sections)
 
+(defun agent-repl-test--composer-marked (tag)
+  "Return the text of every overlay carrying TAG in the current buffer, in order.
+The one reader of a composer mark kind's words (composer-mark.el), so every
+kind's suite reads its marks the same way."
+  (mapcar (lambda (ov) (buffer-substring-no-properties (overlay-start ov) (overlay-end ov)))
+          (sort (cl-remove-if-not (lambda (ov) (overlay-get ov tag))
+                                  (overlays-in (point-min) (point-max)))
+                (lambda (a b) (< (overlay-start a) (overlay-start b))))))
+
 (provide 'test-helpers)
 
 ;;; test-helpers.el ends here

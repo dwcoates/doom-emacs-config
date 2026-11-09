@@ -359,6 +359,10 @@ returning the SHA string (or the sentinel \"unknown\" when undetermined)."
 ;; (command-completion.el and workspace-completion.el, below) answer by: a
 ;; completion offers itself only when its own table's styles match.
 (agent-repl--load-module "completion-match")
+;; WHY: composer-mark.el owns the composer's one purple face for a known word
+;; and the shape every kind of mark takes; command-completion.el and
+;; workspace-completion.el, below, both mark through it.
+(agent-repl--load-module "composer-mark")
 ;; WHY: command-completion.el is the composer's slash-command completion
 ;; (`agent-repl-input-mode' installs its capf).  It asks the daemon through
 ;; rpc.el and resolves the workspace's ref and connection through host.el,
