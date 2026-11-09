@@ -613,6 +613,16 @@ next sibling below, as `M-k' does."
       (agent-repl-prompt-entries--step :next "%s is the last sibling to answer")
     (agent-repl-prompt-entries-open-sibling-below)))
 
+(defun agent-repl-prompt-entries-newline ()
+  "Insert a newline, first clearing point's line when it is an empty entry.
+The composer's `S-RET' on an entry line.  An entry with nothing after its
+label (`2.1 - ') is emptied, so the label is not left behind, and point
+moves to the new line below.  A filled entry keeps its text."
+  (interactive)
+  (when (agent-repl-prompt-entries--entry-empty-p)
+    (delete-region (line-beginning-position) (line-end-position)))
+  (newline))
+
 (defun agent-repl-prompt-entries--on-entry-filter (command)
   "COMMAND on an entry line, else nil, so the key off one keeps its own binding."
   (and (agent-repl-prompt-entries--label-at-point) command))
@@ -635,11 +645,13 @@ binding for it stands, so `TAB' keeps its own meaning.")
 (defconst agent-repl-prompt-entries--insert-entry-keys
   `((,(kbd "M-j") . ,(agent-repl-prompt-entries--on-entry-binding #'agent-repl-prompt-entries-open-sibling-above))
     (,(kbd "M-k") . ,(agent-repl-prompt-entries--on-entry-binding #'agent-repl-prompt-entries-open-sibling-below))
-    (,(kbd "C-SPC") . ,(agent-repl-prompt-entries--on-entry-binding #'agent-repl-prompt-entries-advance-or-open-sibling)))
+    (,(kbd "C-SPC") . ,(agent-repl-prompt-entries--on-entry-binding #'agent-repl-prompt-entries-advance-or-open-sibling))
+    (,(kbd "S-RET") . ,(agent-repl-prompt-entries--on-entry-binding #'agent-repl-prompt-entries-newline)))
   "The composer's entry-only keys in insert mode, as (KEY . BINDING).
 `M-j' opens the previous sibling above, `M-k' the next one below, and
 `C-SPC' advances an empty entry to its next sibling (else opens it below),
-on an entry line, and all fall through elsewhere.")
+on an entry line, and `S-RET' clears an empty entry as it opens the next line,
+and all fall through elsewhere.")
 
 (defun agent-repl-prompt-entries-bind-keys ()
   "Bind the composer's entry-aware keys.

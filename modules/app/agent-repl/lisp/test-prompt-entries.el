@@ -689,7 +689,9 @@ ANSWER is a response plist, or (:signal ERR) to signal it.  Binds
                          (list 'insert t (list (kbd "M-k") (agent-repl-prompt-entries--on-entry-binding
                                                           #'agent-repl-prompt-entries-open-sibling-below)))
                          (list 'insert t (list (kbd "C-SPC") (agent-repl-prompt-entries--on-entry-binding
-                                                            #'agent-repl-prompt-entries-advance-or-open-sibling))))))))
+                                                            #'agent-repl-prompt-entries-advance-or-open-sibling)))
+                         (list 'insert t (list (kbd "S-RET") (agent-repl-prompt-entries--on-entry-binding
+                                                            #'agent-repl-prompt-entries-newline))))))))
 
 ;;;; ---- Opening an entry's sibling ----
 
@@ -1015,6 +1017,34 @@ is recorded on `flashed'."
 (provide 'test-prompt-entries)
 
 ;;; test-prompt-entries.el ends here
+
+;;;; ---- S-RET clears an empty entry ----
+
+(ert-deftest agent-repl-test-prompt-entries-S-RET-on-an-empty-entry-clears-it-and-moves-to-the-new-line ()
+  "`S-RET' on `1.1 - ' empties that line and leaves point on a new line below."
+  (agent-repl-test-prompt-entries--stepping agent-repl-test-prompt-entries--none
+    ;; Arrange
+    (save-excursion (goto-char 7) (delete-char 3) (insert "   "))
+    (goto-char 10)
+    ;; Act
+    (agent-repl-prompt-entries-newline)
+    ;; Assert
+    (should (equal (list (buffer-substring-no-properties (line-beginning-position 0) (line-end-position 0))
+                         (agent-repl-test-prompt-entries--line))
+                   '("" "")))
+    (should (= (line-number-at-pos) 2))))
+
+(ert-deftest agent-repl-test-prompt-entries-S-RET-on-a-filled-entry-keeps-its-text ()
+  "`S-RET' on `1.1 - yes' is a plain newline."
+  (agent-repl-test-prompt-entries--stepping agent-repl-test-prompt-entries--none
+    ;; Arrange
+    (goto-char 10)
+    ;; Act
+    (agent-repl-prompt-entries-newline)
+    ;; Assert
+    (should (equal (buffer-substring-no-properties (line-beginning-position 0) (line-end-position 0))
+                   "1.1 - yes"))
+    (should (= (line-number-at-pos) 2))))
 
 ;;;; ---- C-SPC advances an empty entry ----
 
