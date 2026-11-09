@@ -20,7 +20,10 @@
 #
 # Kinds:
 #   program                  a command on PATH, optionally at a minimum version
-#   emacs                    the emacs on PATH at a minimum version, with features
+#   emacs                    the emacs on PATH at a minimum version, with features;
+#                            with `revision`, built from that commit of a source
+#                            repository (`install.source`) with its configuration
+#                            features (`configuration_features`)
 #   env                      an environment variable the user sets
 #   notification_permission  macOS lets a banner program notify
 #   skill_link               a Claude Code skill linked into the skills directory of
@@ -169,7 +172,10 @@ validate_entries() {
       (["id", "kind", "why", "profile"][] as $f | select($e[$f] == null) | "\($e._file): \($e.id // "?"): every entry needs \"\($f)\""),
       (select(($e.profile != "run") and ($e.profile != "dev")) | "\($e._file): \($e.id): profile must be run or dev, not \($e.profile)"),
       (if $e.kind == "program" then need($e; ["command", "install", "platforms"])
-       elif $e.kind == "emacs" then need($e; ["command", "min", "features", "install", "platforms"])
+       elif $e.kind == "emacs" then need($e; ["command", "min", "features", "install", "platforms"]),
+         (select($e.install.source != null) | need($e; ["revision"]),
+           (("repo", "configure", "app") as $f | select($e.install.source[$f] == null)
+             | "\($e._file): \($e.id): an emacs install.source needs \"\($f)\""))
        elif $e.kind == "env" then need($e; ["name", "doc"])
        elif $e.kind == "notification_permission" then need($e; ["command", "platforms"])
        elif $e.kind == "skill_link" then need($e; ["name", "source"])
@@ -238,6 +244,7 @@ install_text() {
     if .brew then ((if .tap then "brew tap \(.tap) && " else "" end) + "brew install \(.brew)" + ((.options // []) | map(" " + .) | join("")))
     elif .brew_cask then "brew install --cask \(.brew_cask)"
     elif .go_install then "go install \(.go_install)"
+    elif .source then "build \(.source.repo) at the pinned revision and install it as \(.source.app)"
     elif .manual then .manual
     else "no install step" end')"
   printf '%s\n' "$how"
@@ -283,11 +290,27 @@ check_emacs() {
   fi
   lacking="$("$path" --batch --eval "(princ (mapconcat #'symbol-name (seq-remove #'featurep '($(printf '%s\n' "$e" | jq -r '.features | join(" ")'))) \" \"))" 2>&1)"
   if ! version_ge "$(first_version "$have")" "$min"; then
-    STATUS=outdated; DETAIL="$path is Emacs $have, older than $min"
+    STATUS=outdated; DETAIL="$path is Emacs $have, older than $min"; return
   elif [ -n "$lacking" ]; then
-    STATUS=outdated; DETAIL="$path (Emacs $have) lacks: $lacking"
+    STATUS=outdated; DETAIL="$path (Emacs $have) lacks: $lacking"; return
+  fi
+  local revision built configured missing="" f
+  revision="$(field "$e" .revision)"
+  if [ -n "$revision" ]; then
+    built="$("$path" --batch --eval '(princ (or emacs-repository-version ""))' 2>&1)"
+    if [ "$built" != "$revision" ]; then
+      STATUS=outdated; DETAIL="$path (Emacs $have) was built from ${built:-no recorded commit}, not the pinned $revision"; return
+    fi
+  fi
+  configured=" $("$path" --batch --eval '(princ system-configuration-features)' 2>&1) "
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    case "$configured" in *" $f "*) ;; *) missing="$missing $f" ;; esac
+  done < <(printf '%s\n' "$e" | jq -r '.configuration_features // [] | .[]')
+  if [ -n "$missing" ]; then
+    STATUS=outdated; DETAIL="$path (Emacs $have) was configured without:$missing"
   else
-    STATUS=ok; DETAIL="$path Emacs $have"
+    STATUS=ok; DETAIL="$path Emacs $have${revision:+ at $revision}"
   fi
 }
 
@@ -592,7 +615,78 @@ install_program() {
   fi
 }
 
-install_emacs() { install_program "$1"; }
+install_emacs() {
+  if [ -n "$(field "$1" .install.source.repo)" ]; then
+    install_emacs_source "$1"
+  else
+    install_program "$1"
+  fi
+}
+
+# expand_brew_prefixes ARG: ARG with every `{brew}` replaced by Homebrew's
+# prefix and every `{brew:FORMULA}` by that formula's, so a manifest names a
+# Homebrew path without naming a machine's.
+expand_brew_prefixes() {
+  local arg="$1" out="" name
+  while [[ "$arg" == *"{brew"* ]]; do
+    out="$out${arg%%\{brew*}"
+    arg="${arg#*\{brew}"
+    if [ "${arg:0:1}" = ":" ]; then
+      name="${arg:1}"; name="${name%%\}*}"
+      out="$out$(brew --prefix "$name")"
+      arg="${arg#*\}}"
+    else
+      out="$out$(brew --prefix)"
+      arg="${arg#\}}"
+    fi
+  done
+  printf '%s\n' "$out$arg"
+}
+
+# install_emacs_source ENTRY: build Emacs from the entry's source repository at
+# its pinned revision, with its configure arguments, and install the app it
+# makes in place of install.source.app. The app it replaces is moved aside,
+# never deleted, and only once the new one is built: a failed step leaves the
+# installed app as it was.
+install_emacs_source() {
+  local e="$1" id repo revision app dir dep built backup jobs
+  id="$(field "$e" .id)"
+  repo="$(field "$e" .install.source.repo)"
+  revision="$(field "$e" .revision)"
+  app="$(field "$e" .install.source.app)"
+  dir="$CACHE_ROOT/src/$(basename "$repo" .git)"
+  while IFS= read -r dep; do
+    [ -n "$dep" ] || continue
+    if ! brew list --formula "$dep" >/dev/null 2>&1; then
+      brew install "$dep" || { err "install: $id: brew install $dep failed"; return 1; }
+    fi
+  done < <(printf '%s\n' "$e" | jq -r '.install.source.brew_deps // [] | .[]')
+  local args=() a
+  while IFS= read -r a; do
+    args+=("$(expand_brew_prefixes "$a")")
+  done < <(printf '%s\n' "$e" | jq -r '.install.source.configure[]')
+  mkdir -p "$dir"
+  if [ ! -d "$dir/.git" ]; then
+    git -C "$dir" init -q || { err "install: $id: git init in $dir failed"; return 1; }
+  fi
+  git -C "$dir" fetch -q --depth 1 "$repo" "$revision" || { err "install: $id: fetching $revision from $repo failed"; return 1; }
+  git -C "$dir" checkout -q --force "$revision" || { err "install: $id: checking out $revision in $dir failed"; return 1; }
+  jobs="$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)"
+  (cd "$dir" && ./autogen.sh) || { err "install: $id: autogen.sh in $dir failed"; return 1; }
+  (cd "$dir" && ./configure ${args[@]+"${args[@]}"}) || { err "install: $id: configure in $dir failed; config.log there says why"; return 1; }
+  (cd "$dir" && make -j"$jobs") || { err "install: $id: make in $dir failed"; return 1; }
+  (cd "$dir" && make install) || { err "install: $id: make install in $dir failed"; return 1; }
+  built="$dir/nextstep/Emacs.app"
+  [ -d "$built" ] || { err "install: $id: the build made no $built"; return 1; }
+  if [ -e "$app" ]; then
+    backup="${app%.app}-$(date +%Y%m%d-%H%M%S).app"
+    mv "$app" "$backup" || { err "install: $id: moving $app aside to $backup failed"; return 1; }
+    say "install: $id: moved the previous $app aside to $backup"
+  fi
+  mkdir -p "$(dirname "$app")"
+  cp -R "$built" "$app" || { err "install: $id: copying $built to $app failed"; return 1; }
+  say "install: $id: installed $app, built from $revision; restart Emacs to run it"
+}
 
 install_env() { return 1; }
 

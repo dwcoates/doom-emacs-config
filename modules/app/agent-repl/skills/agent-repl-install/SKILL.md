@@ -1,6 +1,6 @@
 ---
 name: agent-repl-install
-description: Set up everything agent-repl needs on a computer — check every requirement, install what is missing or outdated (Emacs with xwidgets, toolchains, terminal-notifier, the store, sidecar and metrics-store services, skills, the `agent-repld` command on PATH, the git hook), walk the user through what only they can provide, and fix the requirement manifests generically when a run finds them inadequate. Use when setting up or bootstrapping agent-repl on a new machine, when an error points at the installer or a missing dependency, when the user asks whether this machine has everything agent-repl needs, or when invoked as /agent-repl-install. Any change to what agent-repl or zettel needs to build, install or run (a new or changed toolchain, dependency, version pin, build flag, or patched program such as Emacs) updates this skill and its requirement manifests in the same change.
+description: Set up everything agent-repl needs on a computer — check every requirement, install what is missing or outdated (zettel-emacs, Emacs built from a pinned fork commit, toolchains, terminal-notifier, the store, sidecar and metrics-store services, skills, the `agent-repld` command on PATH, the git hook), walk the user through what only they can provide, and fix the requirement manifests generically when a run finds them inadequate. Use when setting up or bootstrapping agent-repl on a new machine, when an error points at the installer or a missing dependency, when the user asks whether this machine has everything agent-repl needs, or when invoked as /agent-repl-install. Any change to what agent-repl or zettel needs to build, install or run (a new or changed toolchain, dependency, version pin, build flag, or patched program such as Emacs) updates this skill and its requirement manifests in the same change.
 argument-hint: "[check]"
 allowed-tools: Bash(.claude/skills/agent-repl-install/run.sh:*), Bash(~/.claude/skills/agent-repl-install/run.sh:*)
 lineage_root: user.dodge.skills.agent-repl-install
@@ -47,6 +47,7 @@ Every skill agent-repl ships, and where agents can load it. A GLOBAL skill is li
 
 1. Get consent for changes outside the repository.
   - List every `missing` and `outdated` line from the step 0 report as a change install would make.
+  - When the `emacs` line is missing or outdated, tell the user install builds Emacs from source (a long build) and replaces /Applications/Emacs.app, moving the old app aside.
   - Ask the user to approve installing them.
     - a. On approval, continue to step 2.
     - b. On decline, STOP and leave the machine unchanged.
@@ -64,6 +65,7 @@ Every skill agent-repl ships, and where agents can load it. A GLOBAL skill is li
     - b. For an environment variable, have the user add it to their shell profile; it reaches Emacs at step 5.
     - c. For a notification permission, have the user allow the named program in System Settings → Notifications.
     - d. For a bin dir that is not on PATH, have the user add the printed `export PATH=...` line to their shell profile; it reaches Emacs at step 5.
+    - e. For Emacs, after install replaced the app, have the user restart Emacs so the new build runs.
   - For each `failed` line, and each line whose install ran but left it unmet, go to step 4 with that line as the failure.
   - After the user reports each one done, return to step 0.
 

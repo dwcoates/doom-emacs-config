@@ -753,8 +753,9 @@ body {
      resetCursorRects abstains over child views), so the UA's `auto`
      would I-beam every run of text in a GUI that is mostly text.
      Inherit `default` everywhere; interactive elements declare their
-     own (pointer, zoom-in, ns-resize), and the composer restores the
-     editable-field I-beam. */
+     own (pointer, zoom-in, ns-resize), the composer restores the
+     editable-field I-beam, and the feed's text blocks show it too
+     (see SELECTABLE FEED CONTENT SHOWS THE TEXT CURSOR). */
   cursor: default;
 }
 
@@ -2489,6 +2490,31 @@ pre {
    box's border and its padding, so this padding is the distance from the TEXT
    to the bar, never from the bar to the bubble. */
 .bubble-body { flex: 1; min-width: 0; padding-right: var(--bubble-content-inset); overflow-wrap: anywhere; }
+/* SELECTABLE FEED CONTENT SHOWS THE TEXT CURSOR (owner ruling, 2026-11-08).
+   The page inherits `default` (body), so every text block in the feed
+   (a paragraph, list item, heading, quote, table cell or code block) shows
+   the I-beam, while the box around it keeps its own cursor: a capped box's
+   `zoom-in` and an expanded one's `zoom-out` still show in the space between
+   blocks, and a click on the text still expands the box. `:where` leaves the
+   rule an element's specificity alone, so any element whose own rule names a cursor keeps
+   it, a capped `pre` box's `zoom-in` included. A tree line's words
+   (`.mp-content`) show the I-beam too, while its rails and label keep the
+   hovered line's pointer, which says a click answers the node. */
+:where(#feed) p,
+:where(#feed) li,
+:where(#feed) h1,
+:where(#feed) h2,
+:where(#feed) h3,
+:where(#feed) h4,
+:where(#feed) h5,
+:where(#feed) h6,
+:where(#feed) blockquote,
+:where(#feed) pre,
+:where(#feed) td,
+:where(#feed) th,
+:where(#feed) dt,
+:where(#feed) dd,
+:where(#feed) .mp-content { cursor: text; }
 /* THE TYPE-OUT HIDES WHAT IT HAS NOT REACHED (src/bubble/text-reveal.ts): an
    element none of whose text is revealed yet draws no box at all, so a bullet,
    a code block's frame or a table row never appears ahead of its text. */

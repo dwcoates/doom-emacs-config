@@ -59,22 +59,74 @@
     {
       "id": "emacs",
       "kind": "emacs",
-      "why": "agent-repl is a Doom Emacs module, and its panel is an xwidget-webkit webview",
+      "why": "agent-repl is a Doom Emacs module, and its panel is an xwidget-webkit webview; it runs on zettel-emacs, Emacs 30.2 with the patches its webviews need on macOS (each web view's own mouse cursor, and the keyboard handed back to Emacs when its window is left)",
       "profile": "run",
       "platforms": [
         "darwin"
       ],
       "command": "emacs",
-      "min": "30.1",
+      "min": "30.2",
       "features": [
         "xwidget-internal"
       ],
+      "revision": "cc023ace88da219c9e77740b9e180ea648fc4759",
+      "configuration_features": [
+        "NS",
+        "XWIDGETS",
+        "NATIVE_COMP",
+        "TREE_SITTER",
+        "MODULES",
+        "THREADS",
+        "GNUTLS",
+        "LIBXML2",
+        "SQLITE3",
+        "ZLIB",
+        "GMP",
+        "LCMS2",
+        "RSVG",
+        "WEBP",
+        "PDUMPER"
+      ],
       "install": {
-        "brew": "emacs-plus@30",
-        "tap": "d12frosted/emacs-plus",
-        "options": [
-          "--with-xwidgets"
-        ]
+        "source": {
+          "repo": "https://github.com/dwcoates/zettel-emacs.git",
+          "brew_deps": [
+            "autoconf",
+            "texinfo",
+            "pkgconf",
+            "libgccjit",
+            "tree-sitter",
+            "gnutls",
+            "librsvg",
+            "webp",
+            "little-cms2",
+            "gmp"
+          ],
+          "configure": [
+            "--with-ns",
+            "--with-xwidgets",
+            "--with-native-compilation=aot",
+            "--with-tree-sitter",
+            "--with-modules",
+            "--with-threads",
+            "--with-gnutls",
+            "--with-xml2",
+            "--with-sqlite3",
+            "--with-zlib",
+            "--with-libgmp",
+            "--with-lcms2",
+            "--with-rsvg",
+            "--with-webp",
+            "--without-dbus",
+            "--disable-gc-mark-trace",
+            "CFLAGS=-O3 -march=native -DFD_SETSIZE=10000 -DDARWIN_UNLIMITED_SELECT",
+            "CPPFLAGS=-I{brew}/include",
+            "LDFLAGS=-L{brew}/lib",
+            "TREE_SITTER_CFLAGS=-I{brew:tree-sitter}/include",
+            "TREE_SITTER_LIBS={brew:tree-sitter}/lib/libtree-sitter.a"
+          ],
+          "app": "/Applications/Emacs.app"
+        }
       }
     },
     {
