@@ -179,13 +179,10 @@ enum PromptOrigin {
   // prompt, like a merge-queue notice, and drawn as NO row: it is the daemon's
   // word to the agent. Never sent to the workspace that asked for the create.
   PROMPT_ORIGIN_DERIVED_WORKSPACE_NOTICE = 38;
-  // The requester's notice to a child's OWNER when the child does not carry
-  // the owner's context (agentrepl.v1.WorkspaceTopologyChild.owner_notice):
-  // the requester's own words, followed by the daemon's addendum that landing
-  // the child's work into the owner is the owner's responsibility and how to
-  // do it. Submitted as a deferred prompt once the child exists, and drawn as
-  // an ordinary prompt bubble, since the user follows the owner's arbitration
-  // from its feed.
+  // A notice to a child's OWNER that landing the child's work was the owner's
+  // responsibility. NO LONGER SENT: every workspace lands itself, so no owner
+  // is told so. The value stays because conversations recorded before then
+  // hold such prompts, which are still drawn as ordinary prompt bubbles.
   PROMPT_ORIGIN_OWNER_NOTICE = 39;
   // A notice that a workspace a subscriber follows changed
   // (agentrepl.v1.SubscribeWorkspaceRequest): the change, and the followed

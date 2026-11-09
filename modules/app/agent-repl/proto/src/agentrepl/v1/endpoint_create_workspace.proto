@@ -182,9 +182,11 @@ message CreateWorkspaceStandard {
   // relationship's default (WorkspaceLandingTarget). It is cut from the TIP of
   // its source branch, read when the create runs.
   optional WorkspaceLandingTarget landing_target = 8;
-  // The notice to the workspace's owner when the owner lands it
-  // (WorkspaceOwnerNotice): set exactly when one is owed.
-  optional WorkspaceOwnerNotice owner_notice = 9;
+  // Tag 9 (`owner_notice`) is RETIRED with WorkspaceOwnerNotice: every
+  // workspace lands itself, so no owner is owed a notice that landing a child
+  // is its responsibility.
+  reserved 9;
+  reserved "owner_notice";
   // Tag 5 (`topology`) is RETIRED: the one choice it made is now two, the
   // relationship and the landing target.
   reserved 5;
@@ -235,8 +237,7 @@ message CreateWorkspaceOneShot {
   // relationship's default (WorkspaceLandingTarget).
   optional WorkspaceLandingTarget landing_target = 7;
   // Tag 5 (`topology`) is RETIRED: the one choice it made is now two, the
-  // relationship and the landing target. A one-shot lands itself, so it never
-  // owes its owner a notice.
+  // relationship and the landing target.
   reserved 5;
   reserved "topology";
 
@@ -517,9 +518,11 @@ message CreateWorkspaceError {
   // source branch's tip.
   // Tag 24 (`one_shot_owner_lands`) is RETIRED: a one-shot always lands
   // itself, so a child one-shot whose context is fresh is created like any
-  // other.
-  reserved 3, 4, 5, 8, 9, 15, 24;
-  reserved "finish_required", "finish_not_one_shot", "fork_parent_has_no_conversation", "unknown_parent", "base_ref_unresolved", "base_ref_off_primary_branch", "one_shot_owner_lands";
+  // other. Tags 22 and 23 (`owner_notice_required`, `owner_notice_unexpected`)
+  // are RETIRED with the owner notice: every workspace lands itself, so no
+  // create owes its owner a notice.
+  reserved 3, 4, 5, 8, 9, 15, 22, 23, 24;
+  reserved "finish_required", "finish_not_one_shot", "fork_parent_has_no_conversation", "unknown_parent", "base_ref_unresolved", "base_ref_off_primary_branch", "one_shot_owner_lands", "owner_notice_required", "owner_notice_unexpected";
   oneof cause {
     // An ungated permission mode was asked for without the explicit consent.
     CreateWorkspaceUngatedWithoutConsent ungated_without_consent = 1;
@@ -585,12 +588,6 @@ message CreateWorkspaceError {
     WorkspaceParentNotOpen parent_not_open = 20;
     // The child's parent is not in the daemon's registry, in any repository.
     CreateWorkspaceUnknownOwner unknown_owner = 21;
-    // A workspace its owner lands carries no owner notice; its owner must be
-    // told what is coming before it arbitrates it.
-    CreateWorkspaceOwnerNoticeRequired owner_notice_required = 22;
-    // A workspace that lands itself (forked from its owner, or with no owner)
-    // carries an owner notice, so there is nothing for an owner to arbitrate.
-    CreateWorkspaceOwnerNoticeUnexpected owner_notice_unexpected = 23;
     // The workspace to land into (WorkspaceLandingTarget.workspace) is not in
     // the daemon's registry, or is of another repository than the create's:
     // no branch crosses repositories. Nothing was created.
@@ -818,12 +815,6 @@ message CreateWorkspaceUnknownLandingTarget {
   // The workspace as the request named it.
   workspace.v1.WorkspaceRef workspace = 1;
 }
-// The owner notice a workspace its owner lands must carry is missing.
-// DELIBERATELY EMPTY: the arm is the refusal.
-message CreateWorkspaceOwnerNoticeRequired {}
-// A workspace that lands itself carries a notice it may not carry.
-// DELIBERATELY EMPTY: the arm is the refusal.
-message CreateWorkspaceOwnerNoticeUnexpected {}
 // Names the requester the registry does not hold.
 message CreateWorkspaceUnknownRequester {
   // The requester as the request named it.

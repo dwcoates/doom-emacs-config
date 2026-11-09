@@ -29,7 +29,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/workspace_topology.proto.
  */
 export const file_agentrepl_v1_workspace_topology: GenFile = /*@__PURE__*/
-  fileDesc("CiVhZ2VudHJlcGwvdjEvd29ya3NwYWNlX3RvcG9sb2d5LnByb3RvEgxhZ2VudHJlcGwudjEikwEKEldvcmtzcGFjZVJlcXVlc3RlchI0CgR1c2VyGAEgASgLMiQuYWdlbnRyZXBsLnYxLldvcmtzcGFjZVJlcXVlc3RlclVzZXJIABI+Cgl3b3Jrc3BhY2UYAiABKAsyKS5hZ2VudHJlcGwudjEuV29ya3NwYWNlUmVxdWVzdGVyV29ya3NwYWNlSABCBwoFYXNrZXIiGAoWV29ya3NwYWNlUmVxdWVzdGVyVXNlciJMChtXb3Jrc3BhY2VSZXF1ZXN0ZXJXb3Jrc3BhY2USLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZiKYAQoWV29ya3NwYWNlQ29udGV4dE9yaWdpbhI6CgVmcmVzaBgBIAEoCzIpLmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VDb250ZXh0T3JpZ2luRnJlc2hIABI4CgRmb3JrGAIgASgLMiguYWdlbnRyZXBsLnYxLldvcmtzcGFjZUNvbnRleHRPcmlnaW5Gb3JrSABCCAoGb3JpZ2luIh0KG1dvcmtzcGFjZUNvbnRleHRPcmlnaW5GcmVzaCJLChpXb3Jrc3BhY2VDb250ZXh0T3JpZ2luRm9yaxItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmIpMBChVXb3Jrc3BhY2VSZWxhdGlvbnNoaXASOQoFY2hpbGQYASABKAsyKC5hZ2VudHJlcGwudjEuV29ya3NwYWNlUmVsYXRpb25zaGlwQ2hpbGRIABI3CgRwZWVyGAIgASgLMicuYWdlbnRyZXBsLnYxLldvcmtzcGFjZVJlbGF0aW9uc2hpcFBlZXJIAEIGCgRraW5kIkgKGldvcmtzcGFjZVJlbGF0aW9uc2hpcENoaWxkEioKBnBhcmVudBgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYiGwoZV29ya3NwYWNlUmVsYXRpb25zaGlwUGVlciKmAQoWV29ya3NwYWNlTGFuZGluZ1RhcmdldBI+CgdwcmltYXJ5GAEgASgLMisuYWdlbnRyZXBsLnYxLldvcmtzcGFjZUxhbmRpbmdUYXJnZXRQcmltYXJ5SAASQgoJd29ya3NwYWNlGAIgASgLMi0uYWdlbnRyZXBsLnYxLldvcmtzcGFjZUxhbmRpbmdUYXJnZXRXb3Jrc3BhY2VIAEIICgZ0YXJnZXQigAEKHVdvcmtzcGFjZUxhbmRpbmdUYXJnZXRQcmltYXJ5Ek8KC2Zyb21fb3JpZ2luGAEgASgLMjUuYWdlbnRyZXBsLnYxLldvcmtzcGFjZUxhbmRpbmdUYXJnZXRQcmltYXJ5RnJvbU9yaWdpbkgAiAEBQg4KDF9mcm9tX29yaWdpbiIpCidXb3Jrc3BhY2VMYW5kaW5nVGFyZ2V0UHJpbWFyeUZyb21PcmlnaW4iUAofV29ya3NwYWNlTGFuZGluZ1RhcmdldFdvcmtzcGFjZRItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmIiQKFFdvcmtzcGFjZU93bmVyTm90aWNlEgwKBHRleHQYASABKAkiyQEKE01lcmdlUXVldWVQbGFjZW1lbnQSNQoEYmFjaxgBIAEoCzIlLmFnZW50cmVwbC52MS5NZXJnZVF1ZXVlUGxhY2VtZW50QmFja0gAEjcKBWZyb250GAIgASgLMiYuYWdlbnRyZXBsLnYxLk1lcmdlUXVldWVQbGFjZW1lbnRGcm9udEgAEjkKBmJlaGluZBgDIAEoCzInLmFnZW50cmVwbC52MS5NZXJnZVF1ZXVlUGxhY2VtZW50QmVoaW5kSABCBwoFcGxhY2UiGQoXTWVyZ2VRdWV1ZVBsYWNlbWVudEJhY2siGgoYTWVyZ2VRdWV1ZVBsYWNlbWVudEZyb250IioKGU1lcmdlUXVldWVQbGFjZW1lbnRCZWhpbmQSDQoFbWVyZ2UYASABKAkiNAoiTWVyZ2VRdWV1ZVBsYWNlbWVudEJlaGluZE5vdEluTGluZRIOCgZiZWhpbmQYASABKAlCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_workspace_v1_workspace]);
+  fileDesc("CiVhZ2VudHJlcGwvdjEvd29ya3NwYWNlX3RvcG9sb2d5LnByb3RvEgxhZ2VudHJlcGwudjEikwEKEldvcmtzcGFjZVJlcXVlc3RlchI0CgR1c2VyGAEgASgLMiQuYWdlbnRyZXBsLnYxLldvcmtzcGFjZVJlcXVlc3RlclVzZXJIABI+Cgl3b3Jrc3BhY2UYAiABKAsyKS5hZ2VudHJlcGwudjEuV29ya3NwYWNlUmVxdWVzdGVyV29ya3NwYWNlSABCBwoFYXNrZXIiGAoWV29ya3NwYWNlUmVxdWVzdGVyVXNlciJMChtXb3Jrc3BhY2VSZXF1ZXN0ZXJXb3Jrc3BhY2USLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZiKYAQoWV29ya3NwYWNlQ29udGV4dE9yaWdpbhI6CgVmcmVzaBgBIAEoCzIpLmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VDb250ZXh0T3JpZ2luRnJlc2hIABI4CgRmb3JrGAIgASgLMiguYWdlbnRyZXBsLnYxLldvcmtzcGFjZUNvbnRleHRPcmlnaW5Gb3JrSABCCAoGb3JpZ2luIh0KG1dvcmtzcGFjZUNvbnRleHRPcmlnaW5GcmVzaCJLChpXb3Jrc3BhY2VDb250ZXh0T3JpZ2luRm9yaxItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmIpMBChVXb3Jrc3BhY2VSZWxhdGlvbnNoaXASOQoFY2hpbGQYASABKAsyKC5hZ2VudHJlcGwudjEuV29ya3NwYWNlUmVsYXRpb25zaGlwQ2hpbGRIABI3CgRwZWVyGAIgASgLMicuYWdlbnRyZXBsLnYxLldvcmtzcGFjZVJlbGF0aW9uc2hpcFBlZXJIAEIGCgRraW5kIkgKGldvcmtzcGFjZVJlbGF0aW9uc2hpcENoaWxkEioKBnBhcmVudBgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYiGwoZV29ya3NwYWNlUmVsYXRpb25zaGlwUGVlciKmAQoWV29ya3NwYWNlTGFuZGluZ1RhcmdldBI+CgdwcmltYXJ5GAEgASgLMisuYWdlbnRyZXBsLnYxLldvcmtzcGFjZUxhbmRpbmdUYXJnZXRQcmltYXJ5SAASQgoJd29ya3NwYWNlGAIgASgLMi0uYWdlbnRyZXBsLnYxLldvcmtzcGFjZUxhbmRpbmdUYXJnZXRXb3Jrc3BhY2VIAEIICgZ0YXJnZXQigAEKHVdvcmtzcGFjZUxhbmRpbmdUYXJnZXRQcmltYXJ5Ek8KC2Zyb21fb3JpZ2luGAEgASgLMjUuYWdlbnRyZXBsLnYxLldvcmtzcGFjZUxhbmRpbmdUYXJnZXRQcmltYXJ5RnJvbU9yaWdpbkgAiAEBQg4KDF9mcm9tX29yaWdpbiIpCidXb3Jrc3BhY2VMYW5kaW5nVGFyZ2V0UHJpbWFyeUZyb21PcmlnaW4iUAofV29ya3NwYWNlTGFuZGluZ1RhcmdldFdvcmtzcGFjZRItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmIskBChNNZXJnZVF1ZXVlUGxhY2VtZW50EjUKBGJhY2sYASABKAsyJS5hZ2VudHJlcGwudjEuTWVyZ2VRdWV1ZVBsYWNlbWVudEJhY2tIABI3CgVmcm9udBgCIAEoCzImLmFnZW50cmVwbC52MS5NZXJnZVF1ZXVlUGxhY2VtZW50RnJvbnRIABI5CgZiZWhpbmQYAyABKAsyJy5hZ2VudHJlcGwudjEuTWVyZ2VRdWV1ZVBsYWNlbWVudEJlaGluZEgAQgcKBXBsYWNlIhkKF01lcmdlUXVldWVQbGFjZW1lbnRCYWNrIhoKGE1lcmdlUXVldWVQbGFjZW1lbnRGcm9udCIqChlNZXJnZVF1ZXVlUGxhY2VtZW50QmVoaW5kEg0KBW1lcmdlGAEgASgJIjQKIk1lcmdlUXVldWVQbGFjZW1lbnRCZWhpbmROb3RJbkxpbmUSDgoGYmVoaW5kGAEgASgJQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_workspace_v1_workspace]);
 
 /**
  * Who asked. Workspace rpcs act differently for an agent asking from inside a
@@ -403,46 +403,6 @@ export const WorkspaceLandingTargetWorkspaceSchema: GenMessage<WorkspaceLandingT
   messageDesc(file_agentrepl_v1_workspace_topology, 12);
 
 /**
- * The requester's notice to a new workspace's OWNER when the owner, not the
- * workspace itself, lands its work.
- *
- * WHO OWNS A WORKSPACE: a child's parent. A peer has no owner and always lands
- * itself, wherever it lands. A ONE-SHOT ALWAYS LANDS ITSELF too, child or
- * peer, fresh or forked: it is commissioned to finish unattended, so a main
- * workspace can dispatch fresh one-shot children off the main branch. WHO
- * LANDS ANY OTHER CHILD depends on whose context it starts with: a child whose
- * context is forked FROM ITS OWNER carries the owner's whole context and lands
- * itself; one that starts fresh, or forked from any other workspace, does not
- * know why its owner's work is shaped as it is, so its OWNER arbitrates and
- * lands it. Such a create must carry the notice, and the workspace is refused
- * merging itself (MergeWorkspaceError.owner_lands); the owner lands it with
- * FinishWorkspace. A create that lands itself (forked from its owner, a
- * one-shot, or a peer) must not carry one (`owner_notice_unexpected`;
- * `owner_notice_required` when one is owed and absent).
- *
- * @generated from message agentrepl.v1.WorkspaceOwnerNotice
- */
-export type WorkspaceOwnerNotice = Message<"agentrepl.v1.WorkspaceOwnerNotice"> & {
-  /**
-   * Plain text, as the requesting agent or user wrote it: what the new
-   * workspace will do for the owner and why. The daemon delivers it to the
-   * owner's session with its own addendum stating that landing the new
-   * workspace's work is the owner's responsibility, and how to do it.
-   * REQUIRED: blank is refused as invalid.
-   *
-   * @generated from field: string text = 1;
-   */
-  text: string;
-};
-
-/**
- * Describes the message agentrepl.v1.WorkspaceOwnerNotice.
- * Use `create(WorkspaceOwnerNoticeSchema)` to create a new message.
- */
-export const WorkspaceOwnerNoticeSchema: GenMessage<WorkspaceOwnerNotice> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_workspace_topology, 13);
-
-/**
  * Where a merge joins its repository's queue once it is put in line.
  * REQUIRED wherever a merge is asked for: no placement is implied.
  *
@@ -493,7 +453,7 @@ export type MergeQueuePlacement = Message<"agentrepl.v1.MergeQueuePlacement"> & 
  * Use `create(MergeQueuePlacementSchema)` to create a new message.
  */
 export const MergeQueuePlacementSchema: GenMessage<MergeQueuePlacement> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_workspace_topology, 14);
+  messageDesc(file_agentrepl_v1_workspace_topology, 13);
 
 /**
  * The back of the queue. No fields.
@@ -508,7 +468,7 @@ export type MergeQueuePlacementBack = Message<"agentrepl.v1.MergeQueuePlacementB
  * Use `create(MergeQueuePlacementBackSchema)` to create a new message.
  */
 export const MergeQueuePlacementBackSchema: GenMessage<MergeQueuePlacementBack> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_workspace_topology, 15);
+  messageDesc(file_agentrepl_v1_workspace_topology, 14);
 
 /**
  * The front of the queue. No fields.
@@ -523,7 +483,7 @@ export type MergeQueuePlacementFront = Message<"agentrepl.v1.MergeQueuePlacement
  * Use `create(MergeQueuePlacementFrontSchema)` to create a new message.
  */
 export const MergeQueuePlacementFrontSchema: GenMessage<MergeQueuePlacementFront> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_workspace_topology, 16);
+  messageDesc(file_agentrepl_v1_workspace_topology, 15);
 
 /**
  * Directly behind a named merge.
@@ -544,7 +504,7 @@ export type MergeQueuePlacementBehind = Message<"agentrepl.v1.MergeQueuePlacemen
  * Use `create(MergeQueuePlacementBehindSchema)` to create a new message.
  */
 export const MergeQueuePlacementBehindSchema: GenMessage<MergeQueuePlacementBehind> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_workspace_topology, 17);
+  messageDesc(file_agentrepl_v1_workspace_topology, 16);
 
 /**
  * A merge asked to go behind a merge that does not stand in its queue.
@@ -566,5 +526,5 @@ export type MergeQueuePlacementBehindNotInLine = Message<"agentrepl.v1.MergeQueu
  * Use `create(MergeQueuePlacementBehindNotInLineSchema)` to create a new message.
  */
 export const MergeQueuePlacementBehindNotInLineSchema: GenMessage<MergeQueuePlacementBehindNotInLine> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_workspace_topology, 18);
+  messageDesc(file_agentrepl_v1_workspace_topology, 17);
 
