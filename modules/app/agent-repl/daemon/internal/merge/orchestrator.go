@@ -59,15 +59,16 @@ const (
 // decides the merge has failed its tests. Stated once so the two can never
 // disagree.
 //
-// THE INTENDED DESIGN, OWNER-RULED (2026-10-12, and 2026-10-26 for one):
+// THE INTENDED DESIGN, OWNER-RULED (2026-10-12; 2026-10-26 for one;
+// 2026-11-09 for four, so five failed runs fail the merge):
 // modules/app/agent-repl/AGENTS.md, "The merge queue's test gate and
-// remediation contract". A merge whose gate fails gets ONE fixing attempt;
-// if the gate fails again the merge fails and leaves the queue, so a merge
-// that cannot get green stops holding the next one up; a passing gate starts the count over, and an
-// attempt the daemon's own exit, a restart, a transfer or a speculative base
-// move cut never counts. Do not change it without a conversation with the
-// owner first.
-const MaxFixAttempts = 1
+// remediation contract". A merge whose gate fails gets up to FOUR fixing
+// attempts; if the gate fails a fifth time in a row the merge fails and
+// leaves the queue, so a merge that cannot get green stops holding the next
+// one up; a passing gate starts the count over, and an attempt the daemon's
+// own exit, a restart, a transfer or a speculative base move cut never
+// counts. Do not change it without a conversation with the owner first.
+const MaxFixAttempts = 4
 
 // holderMerge is the occupancy guard's holder name, matching the lease holder.
 const holderMerge = "merge"

@@ -1563,6 +1563,35 @@ func TestFixingAttemptsAreBoundedByTheOneBoundAndThenFailTheMergeInTests(t *test
 	}
 }
 
+func TestTheFifthFailingRunFailsTheMergeAfterFourFixingAttempts(t *testing.T) {
+	// Arrange: five gates fail in a row, and a sixth would pass if it ran.
+	h := newHarness(t)
+	landing(h, 1)
+	h.runner.runs = nil
+	for i := 0; i < 5; i++ {
+		h.gateFails("daemon")
+	}
+	h.gatePasses("daemon")
+
+	// Act.
+	admitted(t, h)
+
+	// Assert: the owner-ruled bound (2026-11-09), four fixing attempts and
+	// five gate runs, the fifth failing the merge in tests.
+	if MaxFixAttempts != 4 {
+		t.Fatalf("MaxFixAttempts = %d, want 4", MaxFixAttempts)
+	}
+	if got := h.queue.countOrigin(conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_TEST_REPAIR); got != 4 {
+		t.Fatalf("fixing briefs = %d, want 4", got)
+	}
+	if got := len(h.runner.runs); got != 1 {
+		t.Fatalf("unrun gates = %d, want only the sixth left: five gates ran", got)
+	}
+	if got := h.footer.last(); got.State != StateFailed || got.FailedArea != "tests" {
+		t.Fatalf("facts = %+v, want merge failed in tests", got)
+	}
+}
+
 func TestAFixingAttemptThatMakesTheGatePassLands(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
