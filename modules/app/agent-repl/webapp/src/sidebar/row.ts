@@ -686,7 +686,7 @@ export function drawRosterRowWhen(
       tickElapsed(when, sc, drawRosterRowWhenTurnRunning(shown.value, `${path}.turn_running`));
       return when;
     case "merged":
-      tickAge(when, sc, drawRosterRowWhenMerged(shown.value, `${path}.merged`));
+      tickAge(when, sc, drawRosterRowWhenMerged(shown.value, `${path}.merged`), " ago");
       return when;
     case "hidden":
       // THE COLUMN COUNTS DOWN TO THE CACHE'S LAPSE once the daemon knows it,
@@ -1284,11 +1284,12 @@ export function tickElapsed(el: HTMLElement, sc: SidebarContext, startedMs: numb
 /**
  * Paint an age now and on every tick, through the SHARED ticker. Every arm
  * draws the bare age (owner request, 2026-10-11: no "merged " prefix), so the
- * column's position in the band says what the age counts from.
+ * column's position in the band says what the age counts from. A merged row
+ * alone ends its age in " ago" (owner request, 2026-11-09): "34s ago".
  */
-function tickAge(host: HTMLElement, sc: SidebarContext, atMs: number): void {
+function tickAge(host: HTMLElement, sc: SidebarContext, atMs: number, suffix = ""): void {
   tickPaint(sc, (nowMs) => {
-    host.textContent = formatTickedAge(nowMs - atMs);
+    host.textContent = `${formatTickedAge(nowMs - atMs)}${suffix}`;
   });
 }
 
