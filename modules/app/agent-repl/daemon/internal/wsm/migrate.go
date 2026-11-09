@@ -214,6 +214,9 @@ var migrations = []migration{
 	{To: 109, Name: "workspace_context_usage", Kind: MigrationAdditive, DDL: workspaceContextUsageDDL},
 	{To: 110, Name: "workspace_summaries_drop_digest", Kind: MigrationBreaking, DDL: workspaceSummariesDropDigestDDL},
 	{To: 111, Name: "one_pull_request_owner", Kind: MigrationBreaking, DDL: onePullRequestOwnerDDL},
+	// IT IS ADDITIVE: the build before it reads a commit tab without the
+	// section as one no agent resolved, and draws it (retiredconflictsections.go).
+	{To: 112, Name: "durable_rows_retired_conflict_sections", Kind: MigrationAdditive, Rewrite: dropRetiredConflictSectionRows},
 }
 
 // mergeQueueLookupIndexesDDL keys the two lookups every workspace read makes

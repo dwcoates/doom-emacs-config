@@ -1,10 +1,10 @@
 /**
- * THE TESTS TAB'S RUN STRIP STAYS PUT WHILE ONLY THE RUN'S VIEW SCROLLS, IN
+ * THE TESTS TAB'S RUN STRIP STAYS PUT WHILE ONLY THE RUN'S SUITES SCROLL, IN
  * WEBKIT (owner request, 2026-10-14).
  *
  * jsdom lays nothing out, so this draws an expanded merge bubble in the merge
  * body's real nesting (feed-body > merge-tabs > tests panel > substrip > run
- * panel > merge-run > views), over a run view far taller than the bubble's
+ * panel > merge-run), over a run far taller than the bubble's
  * cap, in real headless WebKit over the real stylesheet, and measures which
  * box scrolls and whether the run strip moves.
  */
@@ -37,7 +37,7 @@ function bubble(top: string, body: string): string {
   </div>`;
 }
 
-/** The tests tab's body: its run strip over a run whose tests view is TALL. */
+/** The tests tab's body: its run strip over a run whose suites are TALL. */
 const TESTS_BODY = `
   <div class="merge-substrip">
     <div class="merge-strip is-nested" data-probe-runs>
@@ -46,11 +46,7 @@ const TESTS_BODY = `
     </div>
     <div class="merge-tab-summary" hidden></div>
     <div class="merge-tab-panel" data-merge-tab-body="testsRun">
-      <div class="merge-run" data-run-view="tests">
-        <div class="merge-run-views list-rows" role="menu" hidden></div>
-        <div class="merge-run-output merge-run-view" data-run-view="tests" data-probe-view>${TALL}</div>
-        <div class="merge-run-remediation merge-run-view" data-run-view="remediation" hidden></div>
-      </div>
+      <div class="merge-run merge-run-output" data-probe-view>${TALL}</div>
     </div>
   </div>`;
 

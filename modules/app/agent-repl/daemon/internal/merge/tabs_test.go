@@ -382,12 +382,24 @@ func TestEveryTabBuilderShipsTheBadgeItWasGiven(t *testing.T) {
 			v := rebaseView{Replay: 1, Commits: []commitView{{SHA: "a1b2c3d4e5", Subject: "x", Span: spanOf(s)}}}
 			return v.commitTab(0, false)
 		},
+		rowConflictResolution: func(s tabState) *frontendv1.FeedMergeTab {
+			v := rebaseView{Replay: 1, Commits: []commitView{{SHA: "a1b2c3d4e5", Subject: "x", Span: spanOf(s), Conflict: &conflictView{Span: spanOf(s)}}}}
+			return v.resolutionTab(0, false)
+		},
+		TabConflicts: func(s tabState) *frontendv1.FeedMergeTab {
+			v := parentView{Span: spanOf(s)}
+			return v.conflictsTab(false)
+		},
 		TabTests: func(s tabState) *frontendv1.FeedMergeTab {
-			v := testsView{Span: spanOf(s)}
+			v := parentView{Span: spanOf(s)}
 			return v.testsTab(false)
 		},
-		rowTestsRun:       func(s tabState) *frontendv1.FeedMergeTab { return runTab(1, s, &frontendv1.FeedMergeTestsRunOutput{}) },
-		rowTestsRunFixing: func(s tabState) *frontendv1.FeedMergeTab { return fixingTab(s, 1) },
+		rowTestsRun: func(s tabState) *frontendv1.FeedMergeTab { return runTab(1, s, &frontendv1.FeedMergeTestsRunOutput{}) },
+		TabFixes: func(s tabState) *frontendv1.FeedMergeTab {
+			v := parentView{Span: spanOf(s)}
+			return v.fixingTestsTab(false)
+		},
+		rowTestsRunFixing: func(s tabState) *frontendv1.FeedMergeTab { return fixingTab(1, s, 1) },
 		TabCommitting:     func(s tabState) *frontendv1.FeedMergeTab { return committingTab(s, "x") },
 		TabDeploy:         func(s tabState) *frontendv1.FeedMergeTab { return hookScriptTab(s, scriptView{path: "bin/deploy.sh"}) },
 		TabPostDeploy:     func(s tabState) *frontendv1.FeedMergeTab { return hookPromptTab(s) },

@@ -10,10 +10,9 @@
  *
  * STRIPS NEST BY THE ROW'S PARENT. A tab row with no parent is in the bubble's
  * own strip; a subtab names the tab row it is drawn in (a commit under the
- * rebasing tab, a run under the tests tab), so `childTabsOf` is the one way a
- * strip finds its tabs, at every level. A fixing attempt names its run too,
- * and is found the same way, but drawn as the run's remediation view rather
- * than as a badge.
+ * rebasing tab, a conflict resolution under the resolving-conflicts tab, a
+ * run under the tests tab, a fixing attempt under the fixing-tests tab), so
+ * `childTabsOf` is the one way a strip finds its tabs, at every level.
  *
  * EACH KIND OWNS ITS STATE ONEOF, and since nothing parks every one of them is
  * live or settled, conflict resolution and fixing also waiting on the user
@@ -58,31 +57,30 @@ export const RESOLVED_KINDS: readonly string[] = [
   "hookScript",
 ];
 
-/** The kinds whose content is the sub-feed rows parented to them. */
+/**
+ * The kinds whose content is the sub-feed rows parented to them: the only
+ * tabs an agent's conversation is drawn in (owner request, 2026-11-09).
+ */
 export const AGENTIC_KINDS: readonly string[] = [
   "resolving",
   "hookPrompt",
+  "conflictResolution",
   "testsRunFixing",
 ];
 
 /** The kinds whose content is a strip of their own: the tabs parented to them. */
 export const PARENT_KINDS: readonly string[] = [
   "rebasing",
+  "resolvingConflicts",
   "tests",
+  "fixingTests",
 ];
 
 /**
- * The kinds whose content is VIEWS of one panel rather than a strip: a run,
- * whose tests are its own row's and whose remediation is its child fixing tab,
- * which is therefore never drawn as a badge.
+ * The SUBTAB kinds that carry their content in their own row, with no agent
+ * rows: a commit (its replay's narration) and a run (its suites).
  */
-export const VIEWED_KINDS: readonly string[] = ["testsRun"];
-
-/**
- * The kinds that carry content of their own AND hold agent rows: a commit,
- * whose conflict resolution's rows are parented to it.
- */
-export const SECTIONED_KINDS: readonly string[] = ["rebaseCommit"];
+export const NARRATED_KINDS: readonly string[] = ["rebaseCommit", "testsRun"];
 
 /**
  * The glyph each tab state reports itself with. Glyphs, never emojis, with one

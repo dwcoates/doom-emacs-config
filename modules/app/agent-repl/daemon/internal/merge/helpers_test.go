@@ -2238,18 +2238,9 @@ func (f *fakeFeed) tabSequence() []string {
 	return out
 }
 
-// lastCommitWithConflict reports the last push of a commit subtab that carried
-// a conflict section.
-func (f *fakeFeed) lastCommitWithConflict() *frontendv1.FeedMergeTabRebaseCommit {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	var found *frontendv1.FeedMergeTabRebaseCommit
-	for _, row := range f.rows {
-		if commit := row.Row.GetMergeTab().GetRebaseCommit(); commit.GetConflict() != nil {
-			found = commit
-		}
-	}
-	return found
+// lastResolution reports the last push of a conflict resolution's subtab.
+func (f *fakeFeed) lastResolution() *frontendv1.FeedMergeTabConflictResolution {
+	return f.lastTabOfKind(rowConflictResolution).GetConflictResolution()
 }
 
 // lastTabOfKind reports the last push of one tab kind.
@@ -2349,10 +2340,16 @@ func tabKindOf(tab *frontendv1.FeedMergeTab) string {
 		return TabCommitting
 	case *frontendv1.FeedMergeTab_RebaseCommit:
 		return rowRebaseCommit
+	case *frontendv1.FeedMergeTab_ResolvingConflicts:
+		return TabConflicts
+	case *frontendv1.FeedMergeTab_ConflictResolution:
+		return rowConflictResolution
 	case *frontendv1.FeedMergeTab_Tests:
 		return TabTests
 	case *frontendv1.FeedMergeTab_TestsRun:
 		return rowTestsRun
+	case *frontendv1.FeedMergeTab_FixingTests:
+		return TabFixes
 	case *frontendv1.FeedMergeTab_TestsRunFixing:
 		return rowTestsRunFixing
 	}

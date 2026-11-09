@@ -3602,46 +3602,51 @@ message FeedMergeFoldByReader {}
 //   │ conflicted in 2 file(s)                                              │
 //   │ (the conflict resolution's own rows)                                 │
 //
-//   │ … │ tests ● │ committing │
-//   ├──────────────────────────┤
-//   │ run 1 ✗ │ run 2 ● │       │
-//   ├──────────────────────────┤
-//   │ output ✗ │ fixing ✓ │     │
-//   ├──────────────────────────┤
+//   │ … │ tests ✗ │ fixing tests ● │ committing │
+//   ├──────────────────────────────────────────┤
+//   │ run 1 ✗ │ run 2 ● │                       │
+//   ├──────────────────────────────────────────┤
 //   │ daemon unit ✓  webapp ✗ …  log: ~/…-tests-1.log │
+//
+// AGENTS DRAW ONLY IN THEIR OWN TABS (owner request, 2026-11-09). The work a
+// session does for a merge's mechanical steps -- resolving a replayed
+// commit's conflict, fixing the suites a run failed -- has a top-level tab of
+// its own beside the step it serves: `resolving_conflicts` beside rebasing,
+// `fixing_tests` beside tests. The rebasing tab's commits then carry only
+// their replay's narration, and the tests tab's runs only their suites.
 //
 // NESTING IS THE ROW'S PARENT. A row with no FeedRow.parent is a TOP-LEVEL
 // tab of the bubble's strip. A `rebase_commit` row is parented to the
-// rebasing tab's row, and a `tests_run` row to the tests tab's row: each is a
-// SUBTAB, drawn in its parent tab's own strip, in served order. A
-// `tests_run_fixing` row is parented to its run's row: a SUB-SUBTAB beside
-// that run's output. Ordinary rows parented to a `rebase_commit` row are its
-// conflict resolution's agent stream; ordinary rows parented to a
-// `tests_run_fixing` row are that fixing attempt's agent stream. The client
-// groups nothing itself: every subtab and every agent row names its
-// container.
+// rebasing tab's row, a `tests_run` row to the tests tab's row, a
+// `conflict_resolution` row to the resolving-conflicts tab's row, and a
+// `tests_run_fixing` row to the fixing-tests tab's row: each is a SUBTAB,
+// drawn in its parent tab's own strip, in served order. Ordinary rows
+// parented to a `conflict_resolution` row are that resolution's agent stream;
+// ordinary rows parented to a `tests_run_fixing` row are that fixing
+// attempt's agent stream. The client groups nothing itself: every subtab and
+// every agent row names its container.
 //
 // THREE TAB SHAPES. RESOLVED tabs (queue, committing, hook_script) carry
 // their content in the row, replaced whole per push. AGENTIC tabs
-// (resolving, hook_prompt) are containers: their content is the
-// sub-feed rows parented to them: the requesting workspace's own session for a
-// sync merge, routed by the daemon's output address, and the hidden merge
-// workspace's session for an async merge, mirrored here from that workspace's
-// feed. The same holds for a commit's conflict resolution and a run's fixing
-// attempt. PARENT tabs (rebasing, tests) carry their
-// own state and narration, and their content is the subtab rows parented to
-// them; a commit subtab carries its resolved content AND is the container of
-// its conflict resolution's agent rows, and a fixing attempt, its run's
-// remediation view, is the container of its attempt's agent rows.
+// (resolving, hook_prompt, conflict_resolution, tests_run_fixing) are
+// containers: their content is the sub-feed rows parented to them: the
+// requesting workspace's own session for a sync merge, routed by the daemon's
+// output address, and the hidden merge workspace's session for an async
+// merge, mirrored here from that workspace's feed. PARENT tabs (rebasing,
+// tests, resolving_conflicts, fixing_tests) carry their own state (and the
+// rebasing tab its narration), and their content is the subtab rows parented
+// to them.
 //
 // Top-level tabs are APPEND-ONLY and CONDITIONAL: a tab appears BECAUSE that
-// work began — an unconfigured prompt means no prompt tab — and a top-level
-// tab other than rebasing and tests never reopens: a second pass is a SECOND
-// TAB with the round in its label ("committing (2)"). The bubble has AT MOST
-// ONE rebasing tab and ONE tests tab: a merge that STARTS OVER because the
-// target moved replays again under the same rebasing tab (its commits'
-// subtabs carry the replay's round) and gates again under the same tests tab
-// (its runs keep counting), and each is drawn live again while it works.
+// work began — an unconfigured prompt means no prompt tab, a replay that never
+// conflicted no resolving-conflicts tab — and a top-level tab other than the
+// four parents never reopens: a second pass is a SECOND TAB with the round in
+// its label ("committing (2)"). The bubble has AT MOST ONE of each parent tab:
+// a merge that STARTS OVER because the target moved replays again under the
+// same rebasing tab (its commits' subtabs carry the replay's round), resolves
+// again under the same resolving-conflicts tab, gates again under the same
+// tests tab (its runs keep counting) and fixes again under the same
+// fixing-tests tab, and each is drawn live again while it works.
 //
 // A deploy's tabs follow its repository's config (repoconfig.v1.LifecycleConfig):
 // queue, then one hook tab per `pre_deploy` hook, then rebasing | tests |
@@ -3670,6 +3675,9 @@ message FeedMergeTab {
     FeedMergeTabTests tests = 6;
     FeedMergeTabTestsRun tests_run = 14;
     FeedMergeTabTestsRunFixing tests_run_fixing = 15;
+    FeedMergeTabResolvingConflicts resolving_conflicts = 18;
+    FeedMergeTabConflictResolution conflict_resolution = 19;
+    FeedMergeTabFixingTests fixing_tests = 20;
     FeedMergeTabCommitting committing = 10;
     FeedMergeTabResolving resolving = 12;
     // HISTORY ONLY: a branch already merged upstream, in a bubble recorded
@@ -3687,8 +3695,8 @@ message FeedMergeTab {
   // Tag 4 (`merge`, the no-FF merge made before the gate) is RETIRED: the
   // branch is rebased first and the merge commit is made only after the gate
   // passes, as the committing tab. Tags 5 (`conflicts`) and 7 (`fixes`) are
-  // RETIRED: a conflict resolution is part of its commit's subtab, and a
-  // fixing attempt is its run's remediation view.
+  // RETIRED: a conflict resolution is a subtab of the resolving-conflicts
+  // tab, and a fixing attempt a subtab of the fixing-tests tab.
   reserved 3, 4, 5, 7, 8;
   reserved "merge", "conflicts", "fixes", "pre_prompt", "post_prompt";
 }
@@ -3701,15 +3709,17 @@ message FeedMergeTabLabel {
     // The tab's words ("queue", "rebasing", "tests", "run 2"), drawn
     // verbatim.
     string text = 1;
-    // A `rebase_commit` subtab's commit: its short hash, drawn smaller and in
-    // a darker grey than the subject beside it, and its subject. Only a
-    // `rebase_commit` tab carries this arm, and it always does.
+    // A `rebase_commit` or `conflict_resolution` subtab's commit: its short
+    // hash, drawn smaller and in a darker grey than the subject beside it,
+    // and its subject. Only those two kinds carry this arm, and they always
+    // do.
     FeedMergeRebaseCommitIdentity commit = 3;
   }
   // The 1-based round; the client decorates rounds beyond the first
-  // ("committing (2)") and draws nothing for round 1. A commit's subtab
-  // carries the replay it belongs to (a merge that started over replays its
-  // commits again in round 2); a run's subtab carries its number in its text
+  // ("committing (2)") and draws nothing for round 1. A commit's subtab, and
+  // its conflict resolution's, carry the replay they belong to (a merge that
+  // started over replays its commits again in round 2); a run's subtab, and
+  // the fixing attempt that followed it, carry the run's number in their text
   // and round 1.
   uint32 round = 2;
 }
@@ -3788,7 +3798,8 @@ message FeedMergeTabResolving {
 // are one `rebase_commit` row per commit each replay replays, parented to
 // this row. Live while a replay is under way (drawn waiting on the user while
 // a commit's conflict resolution has an ask open), settled when the replay
-// ends; a merge that starts over draws it live again for the next replay.
+// ends; a merge that starts over draws it live again for the next replay. A
+// conflict's resolution is drawn in the resolving-conflicts tab, never here.
 message FeedMergeTabRebasing {
   // The rebase as a whole: running, held on the user, or ended.
   oneof state {
@@ -3865,11 +3876,12 @@ message FeedMergeRebaseTarget {
 
 // SUBTAB of the rebasing tab: one commit of one replay. Published for every
 // commit the moment its replay begins (pending until git reaches it), so the
-// subtab strip reads as the replay's whole plan. A commit whose replay
-// conflicted and was handed to the requesting workspace's session carries
-// `conflict`, and the sub-feed rows parented to THIS row are that
-// resolution's agent stream. If the resolution gives up, the merge FAILS and
-// the rebase is left in progress where it stopped.
+// subtab strip reads as the replay's whole plan. Its content is its replay's
+// narration alone: a commit whose replay conflicted and was handed to the
+// requesting workspace's session is resolved in its own
+// `conflict_resolution` subtab of the resolving-conflicts tab. If the
+// resolution gives up, the merge FAILS and the rebase is left in progress
+// where it stopped.
 message FeedMergeTabRebaseCommit {
   // The commit's place in its replay. Live from when git begins replaying it
   // until it is on the tip, its conflict resolution included.
@@ -3893,11 +3905,10 @@ message FeedMergeTabRebaseCommit {
   // ("conflicted in 2 file(s)", "conflicted in 1 file(s), resolved as
   // before", "replayed 3/5").
   repeated FeedMergeRebaseLine lines = 6;
-  // PRESENT once this commit's conflict was handed to the session to
-  // resolve; UNSET for a commit that replayed cleanly or whose conflict a
-  // recorded resolution settled with no agent. Its presence is the whole
-  // statement that an agent stream exists for this commit.
-  optional FeedMergeRebaseCommitConflict conflict = 7;
+  // Tag 7 (`conflict`) is RETIRED: a commit's conflict resolution is its own
+  // `conflict_resolution` subtab of the resolving-conflicts tab.
+  reserved 7;
+  reserved "conflict";
 }
 // A commit the replay has not reached yet. Drawn with no glyph and no clock.
 message FeedMergeRebaseCommitPending {}
@@ -3908,9 +3919,31 @@ message FeedMergeRebaseCommitIdentity {
   // The commit's subject line, drawn verbatim.
   string subject = 2;
 }
-// The section of a commit's subtab that holds its conflict resolution: the
-// files that conflicted above the session's own rows.
-message FeedMergeRebaseCommitConflict {
+// PARENT: every conflict resolution of the merge, one tab, beside the
+// rebasing tab. Present only once a replayed commit's conflict was handed to
+// the session; its subtabs are one `conflict_resolution` row per commit of a
+// replay whose conflict the session resolves, parented to this row. Live
+// while a resolution is under way (drawn waiting on the user while it has an
+// ask open), settled when it resolved (succeeded) or gave up (failed, and the
+// merge with it); the next conflict draws it live again.
+message FeedMergeTabResolvingConflicts {
+  oneof state {
+    // A resolution is under way.
+    FeedMergeTabLive live = 1;
+    // The latest resolution ended.
+    FeedMergeTabSettled settled = 2;
+    // The resolution is held on the user: its session has a permission ask
+    // or a question batch open.
+    FeedMergeTabWaitingOnUser waiting_on_user = 3;
+  }
+}
+
+// AGENTIC SUBTAB of the resolving-conflicts tab: the session resolving one
+// replayed commit's conflict, labelled with that commit
+// (FeedMergeTabLabel.commit) and its replay's round. Its content is the files
+// that conflicted, above the sub-feed rows parented to THIS row: the
+// resolution's agent stream, across every attempt it takes at the commit.
+message FeedMergeTabConflictResolution {
   // The resolution's own progress.
   oneof state {
     // The session is resolving the conflict.
@@ -3918,7 +3951,9 @@ message FeedMergeRebaseCommitConflict {
     // The session has a permission ask or a question batch open.
     FeedMergeTabWaitingOnUser waiting_on_user = 2;
     // The resolution ended: resolved (succeeded), or gave up (failed, and the
-    // merge with it).
+    // merge with it). An attempt that did not resolve, or that a restart cut
+    // short, settles failed with the line the merge tries again with, until
+    // the next attempt draws it live again.
     FeedMergeTabSettled settled = 3;
   }
   // The paths git reported as conflicted, in git's order, drawn verbatim.
@@ -3934,7 +3969,8 @@ message FeedMergeConflictFile {
 // subtabs are one `tests_run` row per run, parented to this row. Live while a
 // run or the fixing after it is under way (drawn waiting on the user while
 // that fixing has an ask open), settled when the gate passes or gives up; a
-// merge that starts over draws it live again for its next run.
+// merge that starts over draws it live again for its next run. The fixing
+// after a failed run is drawn in the fixing-tests tab, never here.
 message FeedMergeTabTests {
   // The gate as a whole: running, held on the user, or ended.
   oneof state {
@@ -3953,11 +3989,10 @@ message FeedMergeTabTests {
   reserved "suites", "log";
 }
 
-// SUBTAB of the tests tab: one full run of the suites. Its own content is two
-// VIEWS of one panel, never a strip: its tests, which are this row's own
-// `output`, and — once a fixing attempt follows the failed run — its
-// remediation, which is the `tests_run_fixing` row parented to THIS row. When
-// the last attempt fails, the merge FAILS and the workspace is handed back.
+// SUBTAB of the tests tab: one full run of the suites. Its content is this
+// row's own `output` and nothing else: the fixing attempt that follows a
+// failed run is the fixing-tests tab's subtab. When the last attempt fails,
+// the merge FAILS and the workspace is handed back.
 message FeedMergeTabTestsRun {
   // The run of the suites itself, NOT the fixing after it: waiting for its
   // repository's test turn, running, or ended. A run moves only forward
@@ -4095,12 +4130,31 @@ message FeedMergeTestsRunSeatHolderOutside {
   uint32 pid = 1;
 }
 
-// The REMEDIATION VIEW of a run: the requesting workspace's session fixing the
-// suites that run failed, parented to the run's row. Absent for a run that passed and
-// for a failed run the merge gave up on with no attempt left. Its content is
-// the sub-feed rows parented to THIS row, below the attempt it names. A fixing
-// attempt that succeeds is followed by the NEXT run's subtab, never by a
-// reopened run.
+// PARENT: every fixing attempt of the merge, one tab, beside the tests tab.
+// Present only once a failed run was handed to the session to fix; its
+// subtabs are one `tests_run_fixing` row per attempt, parented to this row.
+// Live while an attempt is under way (drawn waiting on the user while it has
+// an ask open), settled when the latest attempt's fix is committed
+// (succeeded) or it gave up (failed, and the merge with it); the next attempt
+// draws it live again.
+message FeedMergeTabFixingTests {
+  oneof state {
+    // An attempt is under way.
+    FeedMergeTabLive live = 1;
+    // The latest attempt ended.
+    FeedMergeTabSettled settled = 2;
+    // The attempt is held on the user: its session has a permission ask or a
+    // question batch open.
+    FeedMergeTabWaitingOnUser waiting_on_user = 3;
+  }
+}
+
+// AGENTIC SUBTAB of the fixing-tests tab: the requesting workspace's session
+// fixing the suites one run failed, labelled with that run ("run 2"). Absent
+// for a run that passed and for a failed run the merge gave up on with no
+// attempt left. Its content is the sub-feed rows parented to THIS row, below
+// the attempt it names. A fixing attempt that succeeds is followed by the
+// NEXT run's subtab in the tests tab, never by a reopened run.
 message FeedMergeTabTestsRunFixing {
   // The attempt's progress.
   oneof state {

@@ -1318,8 +1318,11 @@ export const MERGE_TAB_KINDS = [
   "hookPrompt",
   "rebasing",
   "rebaseCommit",
+  "resolvingConflicts",
+  "conflictResolution",
   "tests",
   "testsRun",
+  "fixingTests",
   "testsRunFixing",
   "committing",
   "updatingMain",
@@ -1330,10 +1333,21 @@ export type MergeTabKind = (typeof MERGE_TAB_KINDS)[number];
 /** The state arms every tab kind carries: nothing parks, so live or settled. */
 export const MERGE_TAB_STATES = ["live", "settled"] as const;
 /**
- * The kinds that can also wait on the user: the pick, a commit and a fixing
- * attempt, whose agent asks, and the rebasing and tests tabs they are drawn in.
+ * The kinds that can also wait on the user: the pick, a conflict resolution
+ * and a fixing attempt, whose agent asks, the resolving-conflicts and
+ * fixing-tests tabs they are drawn in, and the rebasing tab, its commit and
+ * the tests tab they serve.
  */
-export const MERGE_TAB_WAITING_KINDS = ["resolving", "rebasing", "rebaseCommit", "tests", "testsRunFixing"] as const;
+export const MERGE_TAB_WAITING_KINDS = [
+  "resolving",
+  "rebasing",
+  "rebaseCommit",
+  "resolvingConflicts",
+  "conflictResolution",
+  "tests",
+  "fixingTests",
+  "testsRunFixing",
+] as const;
 /** The kinds that can also be pending: a commit the replay has not reached. */
 export const MERGE_TAB_PENDING_KINDS = ["rebaseCommit"] as const;
 /** The kinds that can also wait for their repository's test turn: a test run. */
@@ -1460,12 +1474,17 @@ const mergeTabKindValue = (
         value: {
           state: state === "pending" ? { case: "pending" as const, value: {} } : agenticState(state),
           lines: [{ line: { case: "text", value: "conflicted in 2 file(s)" } }],
-          conflict: {
-            state: agenticState(state === "pending" ? "live" : state),
-            files: [{ path: "daemon/x.go" }, { path: "webapp/y.ts" }],
-          },
         },
       };
+    case "resolvingConflicts":
+      return { case: "resolvingConflicts", value: { state: agenticState(state) } };
+    case "conflictResolution":
+      return {
+        case: "conflictResolution",
+        value: { state: agenticState(state), files: [{ path: "daemon/x.go" }, { path: "webapp/y.ts" }] },
+      };
+    case "fixingTests":
+      return { case: "fixingTests", value: { state: agenticState(state) } };
     case "resolving":
       return { case: "resolving", value: { state: agenticState(state) } };
     case "tests":
@@ -1527,7 +1546,7 @@ export const mergeTabRow = (
       value: {
         label: {
           words:
-            kind === "rebaseCommit"
+            kind === "rebaseCommit" || kind === "conflictResolution"
               ? { case: "commit", value: { shortSha: "a1b2c3d4e5f6", subject: "fix the reconnect loop" } }
               : { case: "text", value: kind },
           round: kind === "committing" ? 2 : 1,

@@ -8453,10 +8453,9 @@ html.webhost-gate #feed [data-row-kind="coldGate"]:has(.cold-gate[data-state="st
   max-width: min(90vw, 32rem);
   overflow-y: auto;
 }
-/* THE ONE DROPDOWN LOOK: the topbar's reveals and the merge bubble's run view
-   menu (owner request, 2026-10-17) draw one panel. */
-.topbar-reveal,
-.merge-run-views {
+/* THE ONE DROPDOWN LOOK the topbar's reveals draw (owner request,
+   2026-10-17). */
+.topbar-reveal {
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -8471,8 +8470,7 @@ html.webhost-gate #feed [data-row-kind="coldGate"]:has(.cold-gate[data-state="st
 .topbar-effort-option,
 .topbar-mode-option,
 .topbar-warning-row,
-.topbar-title-link-option,
-.merge-run-view-item {
+.topbar-title-link-option {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
@@ -8491,9 +8489,7 @@ html.webhost-gate #feed [data-row-kind="coldGate"]:has(.cold-gate[data-state="st
 .topbar-effort-option:hover,
 .topbar-mode-option:hover,
 .topbar-warning-row:hover,
-.topbar-title-link-option:hover,
-.merge-run-view-item:hover,
-.merge-run-view-item.is-active {
+.topbar-title-link-option:hover {
   background: var(--border);
 }
 /* A link row's label is a menu row's title, not a link in prose (owner
@@ -8910,10 +8906,8 @@ html.webhost-gate #feed [data-row-kind="coldGate"]:has(.cold-gate[data-state="st
   color: var(--muted);
 }
 .merge-tab-panel { padding-top: 0.3rem; }
-/* A running agent stream's stop sits on its own line above its rows: a tab's,
-   or a conflicted commit's section's. */
-.merge-tab-panel > .merge-tab-stop,
-.merge-conflict > .merge-tab-stop { display: block; margin-bottom: 0.3rem; }
+/* A running agent stream's stop sits on its own line above its rows. */
+.merge-tab-panel > .merge-tab-stop { display: block; margin-bottom: 0.3rem; }
 /* A NESTED STRIP (a rebasing tab's commits, a tests tab's runs) scrolls with
    its panel: only the bubble's own strip is pinned, and a second sticky strip
    would stack over it. */
@@ -8922,74 +8916,48 @@ html.webhost-gate #feed [data-row-kind="coldGate"]:has(.cold-gate[data-state="st
   z-index: auto;
   background: none;
 }
-/* THE TESTS TAB'S RUN STRIP STAYS PUT; ONLY THE RUN'S VIEW SCROLLS (owner
+/* THE TESTS TAB'S RUN STRIP STAYS PUT; ONLY THE RUN'S SUITES SCROLL (owner
    request, 2026-10-14). While the tests tab is shown, the scroll box moves
-   from the sub-feed down to the run's tests or remediation view: every box
-   between them is a shrinkable flex column (`min-height: 0`), so the bubble's
-   cap squeezes the view and nothing above it. The strips are never scrolled
-   at all, so no sticky offset has to track the top strip's wrapped height,
-   and the run's view dropdown, positioned at the top of `.merge-run`, stays
-   under the run's badge however far the view has scrolled. */
+   from the sub-feed down to the run's suites: every box between them is a
+   shrinkable flex column (`min-height: 0`), so the bubble's cap squeezes the
+   suites and nothing above them. The strips are never scrolled at all, so no
+   sticky offset has to track the top strip's wrapped height. */
 .bubble-fold[data-merge-bubble][data-expanded="true"] .feed-body:has(> .merge-tabs > .merge-tab-panel[data-merge-tab-body="tests"]) {
   min-height: 0;
 }
 .merge-tabs:has(> .merge-tab-panel[data-merge-tab-body="tests"]),
 .merge-tab-panel[data-merge-tab-body="tests"],
 .merge-tab-panel[data-merge-tab-body="tests"] > .merge-substrip,
-.merge-tab-panel[data-merge-tab-body="tests"] > .merge-substrip > .merge-tab-panel,
-.merge-tab-panel[data-merge-tab-body="tests"] .merge-run {
+.merge-tab-panel[data-merge-tab-body="tests"] > .merge-substrip > .merge-tab-panel {
   display: flex;
   flex-direction: column;
   min-height: 0;
 }
-.merge-tab-panel[data-merge-tab-body="tests"] .merge-run > .merge-run-view {
+.merge-tab-panel[data-merge-tab-body="tests"] .merge-run {
   min-height: 0;
   overflow-y: auto;
 }
 /* AN OPEN MERGE BUBBLE NEVER CHAINS ITS SCROLL TO THE FEED (owner request,
    2026-10-24): a fast gesture through a merge agent's output stops at the
    output's own top and bottom edges rather than carrying on into the feed,
-   whichever box scrolls it (the sub-feed, or the tests tab's run view). The
+   whichever box scrolls it (the sub-feed, or the tests tab's run). The
    native half of the containment; installIntentScroll (scroll.ts) hands a
    wheel over a box nested inside the armed one to the armed box, never the
    feed. */
 .bubble-fold[data-merge-bubble][data-expanded="true"] > .bubble-subfeed,
-.bubble-fold[data-merge-bubble][data-expanded="true"] .merge-run-view {
+.bubble-fold[data-merge-bubble][data-expanded="true"] .merge-run {
   overscroll-behavior: contain;
 }
 /* A RUN'S BADGE IS ABOUT HALF A TAB (owner request, 2026-10-13): a run is a
-   view switch inside the tests tab, not a phase of the merge, and reads as the
-   smaller thing it is. */
+   pass of the tests tab, not a phase of the merge, and reads as the smaller
+   thing it is. */
 .merge-tab[data-merge-tab="testsRun"] {
   font-size: 0.7em;
   padding: 0.05rem 0.3rem;
 }
-/* A run's panel: its tests and its remediation, one shown at a time, with the
-   dropdown that switches them floating over the top of the panel, under the
-   run's badge (feed/merge/tab-panels.ts `runPanel`). */
-.merge-run { position: relative; }
-.merge-run-view[hidden],
-.merge-run-views[hidden] { display: none; }
-.merge-run-views {
-  position: absolute;
-  top: 0;
-  z-index: 2;
-  display: flex;
-  flex-direction: column;
-  min-width: 8em;
-}
-/* The remediation view's heading: the attempt, its clock and its glyph on one
-   line, the badge the fixing attempt no longer has. */
-.merge-remediation-line {
-  display: flex;
-  align-items: baseline;
-  gap: 0.3rem;
-}
-.merge-remediation-head { margin-bottom: 0.3rem; }
-/* A commit's conflict section: the conflicted files, then the resolution's
-   own rows. */
-.merge-conflict { padding-top: 0.3rem; }
-.merge-conflict-files { color: var(--muted); }
+/* A conflict resolution's heading: the files that conflicted, above the
+   resolution's own rows. */
+.merge-conflict-files { color: var(--muted); margin-bottom: 0.3rem; }
 
 /* The queue snapshot: a COLUMN TABLE (shared column tables, above) of
    workspace · stage · duration under a header row. Rows are delimited by the

@@ -76,8 +76,12 @@ func tabWord(kind string) string {
 		return "resolving"
 	case TabRebasing:
 		return "rebasing"
+	case TabConflicts:
+		return "resolving conflicts"
 	case TabTests:
 		return "tests"
+	case TabFixes:
+		return "fixing tests"
 	case TabCommitting:
 		return "committing"
 	case TabPreDeploy, TabDeploy, TabPostDeploy:
@@ -146,15 +150,13 @@ func tabRow(ws ids.WorkspaceID, lease ids.LeaseID, key tabKey, tab *frontendv1.F
 }
 
 // frontTabLabel is the label of the TOP-LEVEL tab a round is drawn under,
-// which the queue shows for the merge at its front: a conflict resolution is
-// drawn under the rebasing tab and a fixing attempt under the tests tab, so
-// those rounds read as the tab the reader would find them in.
+// which the queue shows for the merge at its front: every round of a parent
+// tab (rebasing, resolving conflicts, tests, fixing tests) is drawn under
+// that ONE tab, so its rounds read as the tab the reader would find them in.
 func frontTabLabel(round tabRound) *frontendv1.FeedMergeTabLabel {
 	switch round.kind {
-	case TabRebasing, TabConflicts:
-		return tabLabel(TabRebasing, 1)
-	case TabTests, TabFixes:
-		return tabLabel(TabTests, 1)
+	case TabRebasing, TabConflicts, TabTests, TabFixes:
+		return tabLabel(round.kind, 1)
 	}
 	return tabLabel(round.kind, round.n)
 }

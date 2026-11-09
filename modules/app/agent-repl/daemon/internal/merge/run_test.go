@@ -778,7 +778,7 @@ func TestDrawLiveStandsAnAgenticRoundLive(t *testing.T) {
 		func(f *footer.MergeFacts) { f.Attempt = 2 }, fixingKey(1), func(waiting bool) {
 			st := round.live()
 			st.waiting = waiting
-			r.publish(fixingKey(1), fixingTab(st, 2))
+			r.publish(fixingKey(1), fixingTab(1, st, 2))
 		})
 
 	// Assert: the turns are addressed, the footer is on the step with its

@@ -18,16 +18,16 @@ import (
 
 // agenticTabs are the row ids of the tabs whose content is a session's
 // turns: the rows a merge-tab interrupt may name. A conflict resolution is
-// drawn in its commit's subtab and a fixing attempt in its run's fixing
-// sub-subtab. Each row's tab is an agentic arm mergetab.Agentic names, which
-// interrupttab_test.go holds them to.
+// drawn in its subtab of the resolving-conflicts tab and a fixing attempt in
+// its subtab of the fixing-tests tab. Each row's tab is an agentic arm
+// mergetab.Agentic names, which interrupttab_test.go holds them to.
 var agenticTabs = map[string]bool{
-	TabPick:           true,
-	TabPreDeploy:      true,
-	rowRebaseCommit:   true,
-	rowTestsRunFixing: true,
-	TabDeploy:         true,
-	TabPostDeploy:     true,
+	TabPick:               true,
+	TabPreDeploy:          true,
+	rowConflictResolution: true,
+	rowTestsRunFixing:     true,
+	TabDeploy:             true,
+	TabPostDeploy:         true,
 }
 
 // InterruptTab stops the turn a live agentic tab of REQUESTER's feed draws
