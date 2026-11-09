@@ -1660,8 +1660,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	selectionFollower, err := selectionfollow.New(selectionfollow.Deps{
 		Versions: p.DB,
 		Follow:   verbs.FollowStoredSelection,
-		Clock:    clock.System{},
-		Every:    selectionfollow.DefaultEvery,
+		Changes:  p.DB.Changes,
 		Log:      log,
 	})
 	if err != nil {
