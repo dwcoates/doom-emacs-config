@@ -20,6 +20,11 @@ func TestParseCommandAcceptsWellFormedOps(t *testing.T) {
 			want: Command{Op: OpPushSessionUpdate, Payload: payload},
 		},
 		{
+			name: "push_session_update_when_subscribed carries a payload",
+			line: `{"op":"push_session_update_when_subscribed","payload":"` + payload + `"}`,
+			want: Command{Op: OpPushSessionUpdateWhenSubscribed, Payload: payload},
+		},
+		{
 			name: "push_agent_frame addresses an agent",
 			line: `{"op":"push_agent_frame","agent":"sub-1","payload":"` + payload + `"}`,
 			want: Command{Op: OpPushAgentFrame, Agent: "sub-1", Payload: payload},
@@ -153,6 +158,7 @@ func TestParseCommandRejectsMalformedOps(t *testing.T) {
 		{name: "unknown op", line: `{"op":"teleport"}`, wantSub: "unknown control op"},
 		{name: "unknown field", line: `{"op":"hang","nonsense":1}`, wantSub: "malformed control line"},
 		{name: "push_session_update without payload", line: `{"op":"push_session_update"}`, wantSub: "payload is required"},
+		{name: "push_session_update_when_subscribed without payload", line: `{"op":"push_session_update_when_subscribed"}`, wantSub: "payload is required"},
 		{name: "push_user_prompt without payload", line: `{"op":"push_user_prompt"}`, wantSub: "payload is required"},
 		{name: "push_retired without payload", line: `{"op":"push_retired"}`, wantSub: "payload is required"},
 		{name: "push_bash without work", line: `{"op":"push_bash","payload":"AA=="}`, wantSub: "work is required"},

@@ -56,6 +56,13 @@ const (
 	// TAIL-ONLY, so a frame pushed before its watch subscribes is never
 	// delivered; a test pushes after this answers.
 	OpAwaitAgentWatch = "await_agent_watch"
+	// OpPushSessionUpdateWhenSubscribed is push_session_update held until a
+	// WatchSession stream is subscribed to receive it: a push to a hub nobody
+	// subscribed to is dropped, and the daemon subscribes when its bring-up
+	// opens WatchSession, which a test cannot observe from the wire. The fake
+	// waits on its own subscriber latch, so the push is one the daemon is
+	// guaranteed to see.
+	OpPushSessionUpdateWhenSubscribed = "push_session_update_when_subscribed"
 )
 
 // Stream names accepted by drop_stream.
@@ -159,7 +166,7 @@ func ParseCommand(line []byte) (Command, error) {
 		return Command{}, fmt.Errorf("fakeshim: malformed control line: %w", err)
 	}
 	switch c.Op {
-	case OpPushSessionUpdate:
+	case OpPushSessionUpdate, OpPushSessionUpdateWhenSubscribed:
 		if c.Payload == "" {
 			return Command{}, fmt.Errorf("%s: payload is required", c.Op)
 		}
