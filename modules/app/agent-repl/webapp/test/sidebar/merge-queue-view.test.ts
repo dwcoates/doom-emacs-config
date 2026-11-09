@@ -46,14 +46,18 @@ import {
   placeBeside,
   queueDrag,
   queueHoverText,
+  queueCount,
   queueLine,
 } from "../../src/sidebar/merge-queue-view.js";
+import { drawRosterMergeQueueSection } from "../../src/sidebar/roster.js";
 import { BUCKET_ATTRIBUTE } from "../../src/sidebar/subsections.js";
 import {
   appContext,
   fakeTicker,
+  mergeQueueBand,
   mergingHead,
   NOW,
+  queueGroup,
   queueSubject,
   sidebarContext,
   waitingMerge,
@@ -123,6 +127,42 @@ describe("queueLine", () => {
 
   it("states an empty line for a queue drawing no merge", () => {
     expect(queueLine(create(RosterRepoMergeQueueSchema, {}))).toBe("");
+  });
+});
+
+describe("queueCount", () => {
+  it("counts the head, those remediating and those waiting", () => {
+    const queue = create(RosterRepoMergeQueueSchema, {
+      head: mergingHead("w1"),
+      remediating: [remediatingMerge("w2", NOW)],
+      waiting: [waitingMerge("w3"), waitingMerge("w4")],
+    });
+    expect(queueCount(queue)).toBe(4);
+  });
+
+  it("counts an empty queue as none", () => {
+    expect(queueCount(create(RosterRepoMergeQueueSchema, {}))).toBe(0);
+  });
+});
+
+describe("the Merge Queue section's counts", () => {
+  const countOf = (el: Element | null): string | undefined => el?.querySelector(".sb-open-count")?.textContent ?? undefined;
+
+  function drawn() {
+    const section = mergeQueueBand([
+      queueGroup({ id: "a", queue: { head: mergingHead("w1"), waiting: [waitingMerge("w2")] } }),
+      queueGroup({ id: "b", queue: { head: mergingHead("w3"), waiting: [waitingMerge("w4"), waitingMerge("w5")] } }),
+    ]);
+    return drawRosterMergeQueueSection(section, daemon().sc, "p");
+  }
+
+  it("shows the sum across repositories in the section header", () => {
+    expect(countOf(drawn().querySelector(".repo-head"))).toBe("(5)");
+  });
+
+  it("shows each repository's own count in its group header", () => {
+    const heads = [...drawn().querySelectorAll(".merged-group-head")];
+    expect(heads.map(countOf)).toEqual(["(2)", "(3)"]);
   });
 });
 

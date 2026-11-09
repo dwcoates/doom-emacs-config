@@ -103,7 +103,7 @@ import {
   type DeploysGroupSection,
 } from "./deploys-fold.js";
 import { DEPLOYS_PAGE_CLASS, DEPLOYS_PAGE_SIZE, drawDeploysMoreSpinner } from "./deploys-more.js";
-import { drawQueuedGroupHead, drawRosterMergeQueue, queueHoverText, queueLine } from "./merge-queue-view.js";
+import { drawQueuedGroupHead, drawRosterMergeQueue, queueCount, queueHoverText, queueLine } from "./merge-queue-view.js";
 import { foldViewKey } from "./view.js";
 import {
   drawRosterRowDetailCommits,
@@ -817,7 +817,8 @@ export { MERGE_QUEUE_SECTION_CLASS };
  * the Deploys section), drawn directly under the Open section: ONE GROUP PER
  * REPOSITORY whose queue is active, each its queue (`merge-queue-view.ts`).
  *
- * ITS HEADER COUNTS NOTHING, and its label is always the purple of a merge
+ * ITS HEADER COUNTS THE MERGES in every repository's queue, "(N)" like the
+ * Open section's (owner request, 2026-11-08), and its label is always the purple of a merge
  * in progress; a paused queue is drawn on its own group.
  *
  * A SECTION WITH NO GROUPS IS NOT DRAWN (frontend.v1.RosterMergeQueueSection).
@@ -828,11 +829,20 @@ export function drawRosterMergeQueueSection(
   path: string,
 ): HTMLElement {
   const groups = u.groups.map((group, index) => drawRosterMergeQueueRepoGroup(group, sc, `${path}.groups[${index}]`));
+  const total = u.groups.reduce(
+    (sum, group, index) => sum + queueCount(requireMessage(group.queue, `${path}.groups[${index}].queue`)),
+    0,
+  );
   return drawGroupedSection(
     u,
     sc,
     path,
-    { foldKey: MERGE_QUEUE_FOLD_KEY, className: MERGE_QUEUE_SECTION_CLASS, target: { case: "mergeQueue", value: {} } },
+    {
+      foldKey: MERGE_QUEUE_FOLD_KEY,
+      className: MERGE_QUEUE_SECTION_CLASS,
+      target: { case: "mergeQueue", value: {} },
+      decorateHeader: (header) => header.appendChild(drawQueueCount(total)),
+    },
     groups,
   );
 }
@@ -886,6 +896,14 @@ export function drawRepositoryGroup(
   return group;
 }
 
+/** A Merge Queue heading's "(N)": the merges queued, drawn as the Open section's count is. */
+export function drawQueueCount(count: number): HTMLElement {
+  const span = document.createElement("span");
+  span.className = OPEN_COUNT_CLASS;
+  span.textContent = `(${count})`;
+  return span;
+}
+
 /**
  * One repository's group inside the Merge Queue section: its header, then
  * its queue. The group states its queue's line (`DEPLOYS_LINE_ATTRIBUTE`),
@@ -900,6 +918,7 @@ export function drawRosterMergeQueueRepoGroup(u: RosterMergeQueueRepoGroup, sc: 
   const head = drawRosterMergedRepoGroupHeader(requireMessage(u.header, `${path}.header`), `${path}.header`);
   const group = drawRepositoryGroup("merge-queue", key, head, drawRosterMergeQueue(queue, sc, queuePath), sc);
   group.setAttribute(DEPLOYS_LINE_ATTRIBUTE, queueLine(queue));
+  head.appendChild(drawQueueCount(queueCount(queue)));
   drawQueuedGroupHead(group, head, queue, key, sc, queuePath);
   tickPaint(sc, (nowMs) => {
     head.title = queueHoverText(queue, nowMs, queuePath);

@@ -75,12 +75,22 @@ export const MERGE_QUEUE_CLASS = "sb-merge-queue";
  * is a change to the queue, which drops a fold chosen by hand.
  */
 export function queueLine(u: RosterRepoMergeQueue): string {
-  const subjects = [
+  return queueSubjects(u)
+    .map((subject) => subject?.workspace?.id ?? "")
+    .join(" ");
+}
+
+function queueSubjects(u: RosterRepoMergeQueue) {
+  return [
     ...(u.head === undefined ? [] : [u.head.subject]),
     ...u.remediating.map((r) => r.subject),
     ...u.waiting.map((w) => w.subject),
   ];
-  return subjects.map((subject) => subject?.workspace?.id ?? "").join(" ");
+}
+
+/** How many merges a queue holds: the one at its head, those remediating and those waiting. */
+export function queueCount(u: RosterRepoMergeQueue): number {
+  return queueSubjects(u).length;
 }
 
 /**

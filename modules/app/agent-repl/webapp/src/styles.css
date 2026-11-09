@@ -1041,7 +1041,8 @@ body {
      src/sidebar/roster.ts drawRosterOpenSection), and so does Hidden
      Workspaces' (owner request, 2026-10-19). */
 #ws-sidebar .repo-head .sb-count,
-#ws-sidebar .repo-head .sb-open-count { font-size: 0.85em; }
+#ws-sidebar .repo-head .sb-open-count,
+#ws-sidebar .merged-group-head .sb-open-count { font-size: 0.85em; }
 #ws-sidebar .repo-head .sb-count {
   display: none;
   color: inherit;
@@ -1050,6 +1051,7 @@ body {
 #ws-sidebar .repo.repo-section > .repo-head .sb-count,
 #ws-sidebar .repo.hidden-section > .repo-head .sb-count { display: inline; }
 #ws-sidebar .repo-head .sb-open-count,
+#ws-sidebar .merged-group-head .sb-open-count,
 #ws-sidebar .repo.hidden-section > .repo-head .sb-count { color: var(--muted); }
 /* THE MERGE QUEUES (owner requests, 2026-10-25 and 2026-10-26;
    src/sidebar/merge-queue-view.ts): the Merge Queue section draws each
