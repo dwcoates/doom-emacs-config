@@ -755,8 +755,8 @@ type isMergeQueueStatusEntryStageRemediatingReason_Reason interface {
 
 type MergeQueueStatusEntryStageRemediatingReason_Tests struct {
 	// Its whole test suite finished with failures; its fixing turn repairs
-	// them, and on its return it runs its suite again as its one fixing
-	// attempt.
+	// them, and on its return it runs its suite again, spending one of its
+	// fixing attempts.
 	Tests *MergeQueueStatusEntryStageRemediatingTests `protobuf:"bytes,1,opt,name=tests,proto3,oneof"`
 }
 

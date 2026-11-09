@@ -347,8 +347,8 @@ export type MergeQueueStatusEntryStageRemediatingReason = Message<"agentrepl.v1.
   reason: {
     /**
      * Its whole test suite finished with failures; its fixing turn repairs
-     * them, and on its return it runs its suite again as its one fixing
-     * attempt.
+     * them, and on its return it runs its suite again, spending one of its
+     * fixing attempts.
      *
      * @generated from field: agentrepl.v1.MergeQueueStatusEntryStageRemediatingTests tests = 1;
      */
