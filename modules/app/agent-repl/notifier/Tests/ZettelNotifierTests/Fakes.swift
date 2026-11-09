@@ -64,20 +64,22 @@ final class FakeDaemon: Daemon, @unchecked Sendable {
     }
 
     func reportPosted(_ request: Agentrepl_V1_ReportDesktopBannerPostedRequest) async throws -> Agentrepl_V1_ReportDesktopBannerPostedResponse {
-        lock.lock()
-        defer { lock.unlock() }
-        posted.append(request)
+        let answer = lock.withLock {
+            posted.append(request)
+            return postedAnswer
+        }
         Task { [signals] in await signals.raise("reported") }
-        return postedAnswer
+        return answer
     }
 
     func reportClicked(_ request: Agentrepl_V1_ReportDesktopBannerClickedRequest) async throws -> Agentrepl_V1_ReportDesktopBannerClickedResponse {
-        lock.lock()
-        defer { lock.unlock() }
-        clicked.append(request)
+        let (answer, failure) = lock.withLock {
+            clicked.append(request)
+            return (clickAnswer, clickError)
+        }
         Task { [signals, address] in await signals.raise("clicked \(address)") }
-        if let clickError { throw clickError }
-        return clickAnswer
+        if let failure { throw failure }
+        return answer
     }
 
     func send(_ frame: Agentrepl_V1_WatchDesktopBannersResponse) {
@@ -134,10 +136,10 @@ final class FakeCenter: BannerCenter, @unchecked Sendable {
     var result: PostResult = .posted
 
     func post(_ banner: Agentrepl_V1_DesktopBanner) async -> PostResult {
-        lock.lock()
-        defer { lock.unlock() }
-        taken.append(banner)
-        return result
+        lock.withLock {
+            taken.append(banner)
+            return result
+        }
     }
 
     var posted: [Agentrepl_V1_DesktopBanner] { lock.lock(); defer { lock.unlock() }; return taken }

@@ -55,3 +55,16 @@ public struct NotificationCenterPoster: BannerCenter {
         }
     }
 }
+
+/// One line naming a notification authorization, and whether it lets the
+/// app post: the answer of `--check-notifications`.
+public func authorizationReport(_ status: UNAuthorizationStatus) -> (line: String, allowed: Bool) {
+    switch status {
+    case .authorized: return ("Zettel may notify", true)
+    case .provisional: return ("Zettel may notify quietly (provisional)", true)
+    case .ephemeral: return ("Zettel may notify (ephemeral)", true)
+    case .denied: return ("Zettel may not notify: denied (System Settings → Notifications → Zettel)", false)
+    case .notDetermined: return ("Zettel may not notify: not asked yet (run Zettel --request-notifications)", false)
+    @unknown default: return ("Zettel may not notify: an authorization this app does not know (\(status.rawValue))", false)
+    }
+}

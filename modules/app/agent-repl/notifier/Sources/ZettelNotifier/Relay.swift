@@ -69,6 +69,7 @@ public actor Relay {
     private let center: BannerCenter
     private let log: Logger
     private let pid: Int32
+    private let build: String
     private let superseded: @Sendable () -> Void
 
     private var advertisement: DaemonAdvertisement?
@@ -76,11 +77,15 @@ public actor Relay {
 
     /// `superseded` is called when another app instance's stream took this
     /// one's place: the app exits rather than reconnecting.
-    public init(dial: @escaping DaemonDialer, center: BannerCenter, log: Logger, pid: Int32, superseded: @escaping @Sendable () -> Void) {
+    /// `build` is this app's build, the content hash of its executable
+    /// (executableBuild), reported on every stream it opens.
+    public init(dial: @escaping DaemonDialer, center: BannerCenter, log: Logger, pid: Int32, build: String,
+                superseded: @escaping @Sendable () -> Void) {
         self.dial = dial
         self.center = center
         self.log = log
         self.pid = pid
+        self.build = build
         self.superseded = superseded
     }
 
@@ -114,6 +119,7 @@ public actor Relay {
     private func serve(_ daemon: Daemon, address: String) async {
         var request = Agentrepl_V1_WatchDesktopBannersRequest()
         request.process.pid = pid
+        request.build.sha256 = build
         log.info(Op.stream, "opening the banner stream", ["address": address])
         var planned = false
         do {

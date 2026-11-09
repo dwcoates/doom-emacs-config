@@ -1,5 +1,18 @@
 import Foundation
 
+/// What one run of the app does.
+public enum Mode: Equatable {
+    /// Run as the notifier: post the daemon's banners until stopped.
+    case run
+    /// Report whether macOS lets Zettel notify, and exit: 0 when it may,
+    /// 1 when it may not (bin/requirements.sh's notification_permission
+    /// check).
+    case checkNotifications
+    /// Ask macOS for permission to notify (its prompt, the first time) and
+    /// exit as checkNotifications does.
+    case requestNotifications
+}
+
 /// The app's command line. launchd's com.agentrepl.notifier passes
 /// `--resident`; an open by hand (Spotlight, Finder) or by a banner's click
 /// passes nothing.
@@ -11,11 +24,14 @@ public struct Options: Equatable {
     /// Started by launchd to run in the background. An instance started any
     /// other way was opened by the user, so it brings Emacs forward.
     public var resident: Bool
+    /// What this run does.
+    public var mode: Mode
 
-    public init(stateDir: URL, logPath: URL, resident: Bool) {
+    public init(stateDir: URL, logPath: URL, resident: Bool, mode: Mode = .run) {
         self.stateDir = stateDir
         self.logPath = logPath
         self.resident = resident
+        self.mode = mode
     }
 }
 
@@ -40,6 +56,10 @@ public func parseOptions(_ arguments: [String], environment: [String: String], h
         switch argument {
         case "--resident":
             options.resident = true
+        case "--check-notifications":
+            options.mode = .checkNotifications
+        case "--request-notifications":
+            options.mode = .requestNotifications
         case "--state-dir", "--log":
             guard let value = rest.popFirst() else {
                 throw OptionsError(description: "\(argument) needs a path")

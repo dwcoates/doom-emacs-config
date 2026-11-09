@@ -41,8 +41,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 log.info(Op.app, "Zettel is allowed to notify", [:])
             }
         }
+        let build: String
+        do {
+            build = try executableBuild(at: Bundle.main.executableURL!)
+        } catch {
+            log.error(Op.app, "could not hash this app's own executable to report its build; Zettel exits", ["cause": "\(error)"])
+            NSApp.terminate(nil)
+            return
+        }
         relay = Relay(
-            dial: { ConnectDaemon(address: $0) }, center: NotificationCenterPoster(), log: log, pid: getpid(),
+            dial: { ConnectDaemon(address: $0) }, center: NotificationCenterPoster(), log: log, pid: getpid(), build: build,
             superseded: { DispatchQueue.main.async { NSApp.terminate(nil) } })
         watcher = AdvertisementWatcher(stateDir: options.stateDir) { [relay] advertisement in
             Task { await relay!.advertised(advertisement) }
@@ -110,6 +118,35 @@ do {
 } catch {
     FileHandle.standardError.write(Data("Zettel: \(error)\n".utf8))
     exit(2)
+}
+// THE PERMISSION MODES answer and exit before any app runs: they are the
+// installer's check and request (bin/requirements.sh), run as the bundle's
+// own executable so macOS answers for Zettel.app.
+func exitWithAuthorization() -> Never {
+    let settled = DispatchSemaphore(value: 0)
+    var status = UNAuthorizationStatus.notDetermined
+    UNUserNotificationCenter.current().getNotificationSettings { settings in
+        status = settings.authorizationStatus
+        settled.signal()
+    }
+    settled.wait()
+    let report = authorizationReport(status)
+    print(report.line)
+    exit(report.allowed ? 0 : 1)
+}
+switch options.mode {
+case .run:
+    break
+case .checkNotifications:
+    exitWithAuthorization()
+case .requestNotifications:
+    let asked = DispatchSemaphore(value: 0)
+    UNUserNotificationCenter.current().requestAuthorization(options: [.alert]) { _, error in
+        if let error { FileHandle.standardError.write(Data("Zettel: asking to notify failed: \(error)\n".utf8)) }
+        asked.signal()
+    }
+    asked.wait()
+    exitWithAuthorization()
 }
 let delegate = AppDelegate(options: options, log: FileLogger(path: options.logPath))
 let app = NSApplication.shared

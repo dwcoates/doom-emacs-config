@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 /// A record's severity, as the logging contract spells it.
@@ -150,4 +151,10 @@ public final class FileLogger: Logger, @unchecked Sendable {
     private func generation(_ n: Int) -> URL {
         URL(fileURLWithPath: path.path + ".\(n)")
     }
+}
+
+/// The content hash of the executable at `url`: lowercase hex SHA-256, the
+/// name every agent-repl component's build goes by (buildreport.HashFile).
+public func executableBuild(at url: URL) throws -> String {
+    SHA256.hash(data: try Data(contentsOf: url)).map { String(format: "%02x", $0) }.joined()
 }

@@ -23,7 +23,7 @@ final class RelayTests: XCTestCase {
         center = FakeCenter()
         log = RecordingLogger()
         supersededCalls = SupersededCounter()
-        relay = Relay(dial: dialer.dial, center: center, log: log, pid: 4242, superseded: { [supersededCalls] in supersededCalls!.call() })
+        relay = Relay(dial: dialer.dial, center: center, log: log, pid: 4242, build: "build-x", superseded: { [supersededCalls] in supersededCalls!.call() })
     }
 
     /// Advertises `address` and waits for its stream to open.
@@ -39,6 +39,7 @@ final class RelayTests: XCTestCase {
 
         // Assert
         XCTAssertEqual(daemon.opens.map(\.process.pid), [4242])
+        XCTAssertEqual(daemon.opens.map(\.build.sha256), ["build-x"])
         let serving = await relay.servingAddress
         XCTAssertEqual(serving, "127.0.0.1:1")
     }
@@ -62,7 +63,7 @@ final class RelayTests: XCTestCase {
 
     func testARefusedBannerIsAnsweredWithItsRefusalAndRecordedAsAnError() async {
         let cases: [(PostResult, (Agentrepl_V1_DesktopBannerPostOutcome) -> Bool, String)] = [
-            (.notAllowed, { $0.notAllowed != nil }, "macOS refused the banner: Zettel is not allowed to notify (System Settings → Notifications → Zettel)"),
+            (.notAllowed, { $0.outcome == .notAllowed(.init()) }, "macOS refused the banner: Zettel is not allowed to notify (System Settings → Notifications → Zettel)"),
             (.failed("boom"), { $0.failed.platformError == "boom" }, "macOS refused the banner"),
         ]
         for (result, check, message) in cases {

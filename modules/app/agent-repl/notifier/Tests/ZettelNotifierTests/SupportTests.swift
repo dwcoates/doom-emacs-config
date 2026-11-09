@@ -28,6 +28,18 @@ final class LogTests: XCTestCase {
         XCTAssertNotNil(pattern.firstMatch(in: local, range: NSRange(local.startIndex..., in: local)), "\(local) breaks the pattern")
     }
 
+    func testTheExecutablesBuildIsItsContentHash() throws {
+        // Arrange
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try Data("abc".utf8).write(to: file)
+
+        // Act
+        let build = try executableBuild(at: file)
+
+        // Assert: SHA-256("abc"), the value Go's buildreport.HashFile answers.
+        XCTAssertEqual(build, "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+    }
+
     func testANegativeOffsetIsSigned() {
         // Act
         let rendered = logTimestamp(Date(timeIntervalSince1970: 0), zone: TimeZone(secondsFromGMT: -5 * 3600)!)
@@ -209,6 +221,12 @@ final class OptionsTests: XCTestCase {
         XCTAssertEqual(options, Options(stateDir: URL(fileURLWithPath: "/s"), logPath: URL(fileURLWithPath: "/l"), resident: true))
     }
 
+    func testThePermissionModesAreRead() throws {
+        XCTAssertEqual(try parseOptions(["--check-notifications"], environment: [:], home: home).mode, .checkNotifications)
+        XCTAssertEqual(try parseOptions(["--request-notifications"], environment: [:], home: home).mode, .requestNotifications)
+        XCTAssertEqual(try parseOptions([], environment: [:], home: home).mode, .run)
+    }
+
     func testAFlagMissingItsValueIsRefused() {
         XCTAssertThrowsError(try parseOptions(["--log"], environment: [:], home: home)) {
             XCTAssertEqual($0 as? OptionsError, OptionsError(description: "--log needs a path"))
@@ -246,6 +264,14 @@ final class NotificationCenterTests: XCTestCase {
         XCTAssertNil(content.sound)
         let token = try XCTUnwrap(clickToken(from: content.userInfo))
         XCTAssertEqual(try Agentrepl_V1_DesktopBannerClickToken(serializedBytes: token), banner.click)
+    }
+
+    func testEachAuthorizationIsReported() {
+        XCTAssertTrue(authorizationReport(.authorized).allowed)
+        XCTAssertTrue(authorizationReport(.provisional).allowed)
+        XCTAssertFalse(authorizationReport(.denied).allowed)
+        XCTAssertTrue(authorizationReport(.denied).line.contains("System Settings"))
+        XCTAssertFalse(authorizationReport(.notDetermined).allowed)
     }
 
     func testANotificationWithNoTokenHasNone() {
