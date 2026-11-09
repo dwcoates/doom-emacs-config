@@ -1813,6 +1813,7 @@ export const FOOTER_SALIENT_KINDS: Record<string, object> = {
   queryDied: { text: "the vendor query died" },
   compaction: { text: "compacting · summarizing 412 messages" },
   retrying: { attempt: 3, status: "overloaded", nextAttempt: { atMs: 60_000n }, maxAttempt: 11 },
+  vendorSilence: { response: { case: "stalled", value: { lastHeard: { text: "thinking" } } } },
   wakeup: { wakeAtMs: 60_000n, reason: { text: "the cron fires" } },
   gatedCall: { text: "Bash npm test" },
   questionLead: { text: "How far should the port go?" },
@@ -1846,7 +1847,7 @@ export const FOOTER_STATUS_SALIENTS: Record<string, readonly string[]> = {
   idle: ["queryDied", "update", ...SHARED_SALIENTS],
   turnFailed: ["queryDied", "update", ...SHARED_SALIENTS],
   degraded: ["queryDied", "update", ...SHARED_SALIENTS],
-  working: ["compaction", "retrying", "update", ...SHARED_SALIENTS],
+  working: ["compaction", "retrying", "vendorSilence", "update", ...SHARED_SALIENTS],
   waiting: [
     "wakeup",
     "blockedOnUser",
