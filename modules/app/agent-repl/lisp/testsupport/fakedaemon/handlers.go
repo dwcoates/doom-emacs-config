@@ -257,6 +257,10 @@ func (s *fakeServer) DaemonHealth(ctx context.Context, req *connect.Request[v1.D
 	return handleUnary[v1.DaemonHealthRequest, v1.DaemonHealthResponse](ctx, s, "DaemonHealth", req.Msg)
 }
 
+func (s *fakeServer) AwaitIdle(ctx context.Context, req *connect.Request[v1.AwaitIdleRequest]) (*connect.Response[v1.AwaitIdleResponse], error) {
+	return handleUnary[v1.AwaitIdleRequest, v1.AwaitIdleResponse](ctx, s, "AwaitIdle", req.Msg)
+}
+
 func (s *fakeServer) ListSlashCommands(ctx context.Context, req *connect.Request[v1.ListSlashCommandsRequest]) (*connect.Response[v1.ListSlashCommandsResponse], error) {
 	return handleUnary[v1.ListSlashCommandsRequest, v1.ListSlashCommandsResponse](ctx, s, "ListSlashCommands", req.Msg)
 }
