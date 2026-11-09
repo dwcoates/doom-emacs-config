@@ -138,6 +138,8 @@ describe("rosterStatusColor", () => {
     // A NETWORK FAULT IS BLUE: nothing that needs the network can work.
     ["networkFault", "blue"],
     ["thinking", "red"],
+    // A SILENT VENDOR keeps the working red (owner ruling, 2026-11-08).
+    ["vendorSilent", "red"],
     ["idleAsync", "yellow"],
     ["ready", "green"],
     ["merging", "purple"],
@@ -240,6 +242,7 @@ describe("glyphInk", () => {
   it.each([
     ["mergeFailed", "red"],
     ["compacting", "orange"],
+    ["vendorSilent", "blue"],
   ])("inks %s's mark %s", (arm, ink) => {
     expect(glyphInk(arm)).toBe(ink);
   });

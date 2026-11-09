@@ -4,9 +4,12 @@ import (
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 
+	"agent-repld/internal/dlog"
 	"agent-repld/internal/health"
 	"agent-repld/internal/resolve/footer"
+	"agent-repld/internal/resolve/sidebar"
 )
 
 // footerOf answers the footer the fanned resolver projects, so a test can
@@ -166,5 +169,43 @@ func TestAProjectedRowRecordsNoClaimViolation(t *testing.T) {
 		if hasError(r.surfaces.Records(), op) {
 			t.Fatalf("the roster recorded %s", op)
 		}
+	}
+}
+
+// THE VENDOR-SILENT HYBRID (owner ruling, 2026-11-08): the footer's `working
+// · waiting` step, and only that step, projects onto `vendor_silent`; every
+// other working step keeps the arm it had.
+func TestEveryWorkingStepProjectsOntoItsRosterArm(t *testing.T) {
+	tests := []struct {
+		name    string
+		working *frontendv1.FooterStatusWorking
+		want    string
+	}{
+		{name: "the vendor silent past the threshold", want: "vendor_silent", working: &frontendv1.FooterStatusWorking{
+			Substatus: &frontendv1.FooterStatusWorking_Waiting{Waiting: &frontendv1.FooterSubStatusWorkingWaiting{}}}},
+		{name: "an inference call the vendor is answering", want: "thinking", working: &frontendv1.FooterStatusWorking{
+			Substatus: &frontendv1.FooterStatusWorking_Thinking{Thinking: &frontendv1.FooterSubStatusWorkingThinking{}}}},
+		{name: "a tool call running", want: "thinking", working: &frontendv1.FooterStatusWorking{
+			Substatus: &frontendv1.FooterStatusWorking_Reading{Reading: &frontendv1.FooterSubStatusWorkingReading{}}}},
+		{name: "no finer step known", want: "thinking", working: &frontendv1.FooterStatusWorking{}},
+		{name: "a prompt being delivered", want: "submitting", working: &frontendv1.FooterStatusWorking{
+			Substatus: &frontendv1.FooterStatusWorking_Submitting{Submitting: &frontendv1.FooterSubStatusWorkingSubmitting{}}}},
+		{name: "a compaction running", want: "compacting", working: &frontendv1.FooterStatusWorking{
+			Substatus: &frontendv1.FooterStatusWorking_Compacting{Compacting: &frontendv1.FooterSubStatusWorkingCompacting{}}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			status := &frontendv1.FooterStatus{Status: &frontendv1.FooterStatus_Working{Working: tt.working}}
+			logs := dlog.NewTestSurfaces()
+
+			// Act.
+			got := sidebar.ProjectArm(status, logs.Global())
+
+			// Assert.
+			if got != tt.want {
+				t.Fatalf("arm = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }

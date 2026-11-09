@@ -2804,6 +2804,16 @@ is the finish edge (owner ruling, 2026-10-06)."
   ;; Act / Assert
   (should (agent-repl-roster--finish-edge-p :thinking :turn-failed)))
 
+(ert-deftest agent-repl-test-roster-vendor-silent-to-done-is-a-finish-edge ()
+  "A turn whose vendor went silent still holds the turn: ending it is the finish edge."
+  ;; Act / Assert
+  (should (agent-repl-roster--finish-edge-p :vendor-silent :done)))
+
+(ert-deftest agent-repl-test-roster-thinking-to-vendor-silent-is-no-finish-edge ()
+  "The vendor going silent moves within the running set: no finish edge."
+  ;; Act / Assert
+  (should-not (agent-repl-roster--finish-edge-p :thinking :vendor-silent)))
+
 (ert-deftest agent-repl-test-roster-async-merging-is-no-settled-status ()
   "An async merge is a row marker, not a status: no status list names it."
   ;; Act / Assert

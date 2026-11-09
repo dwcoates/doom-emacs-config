@@ -33,6 +33,7 @@ var rosterArmClaims = map[string]Claim{
 	"cold_gate":       Waiting,
 	"submitting":      Thinking,
 	"thinking":        Thinking,
+	"vendor_silent":   Thinking,
 	"clearing":        Thinking,
 	"compacting":      Thinking,
 	"done":            Idle,

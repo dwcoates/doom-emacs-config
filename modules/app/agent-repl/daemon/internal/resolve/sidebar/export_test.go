@@ -11,3 +11,7 @@ var SortHiddenNewestFirst = sortHiddenNewestFirst
 // RunningTurnStart exports runningTurnStart, the one reading of "a turn is
 // running" off the footer clock.
 var RunningTurnStart = runningTurnStart
+
+// ProjectArm exports projectArm, the one projection of the footer's status
+// onto a roster arm.
+var ProjectArm = projectArm

@@ -1034,6 +1034,8 @@ Returns:
     ;; overstate.
     (:submitting     . "📤")
     (:thinking       . "⌛")
+    ;; A SILENT VENDOR: the turn still runs, but nothing has come back.
+    (:vendor-silent  . "🔇")
     (:clearing       . "🧹")
     (:compacting     . "🗜")
     (:done           . "✅")

@@ -3951,10 +3951,10 @@ arm: it paints only the tab's [N] run."
     (should (equal (cdr row) "merge"))))
 
 (ert-deftest agent-repl-test-status-red-is-the-agent-holding-the-turn ()
-  "Red is a turn in flight."
+  "Red is a turn in flight, a turn whose vendor went silent included."
   ;; Act / Assert
   (should (equal (sort (agent-repl-test-status--arms-taking "red") #'string<)
-                 (sort (list :submitting :thinking :clearing :compacting)
+                 (sort (list :submitting :thinking :vendor-silent :clearing :compacting)
                        #'string<))))
 
 (ert-deftest agent-repl-test-status-yellow-is-detached-work-alone ()
@@ -4031,6 +4031,21 @@ purple already says a merge is in flight, and a landed merge shows nothing
     (should (equal (list (agent-repl-status-tab-glyph "alpha" :compacting)
                          (agent-repl-status--glyph-ink-color :compacting))
                    (list agent-repl-status-dot-glyph agent-repl--color-compaction-orange)))))
+
+(ert-deftest agent-repl-test-status-a-vendor-silent-tab-draws-a-blue-dot ()
+  "A turn whose vendor went silent draws the dot inked blue (owner ruling, 2026-11-08)."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    ;; Act / Assert
+    (should (equal (list (agent-repl-status-tab-glyph "alpha" :vendor-silent)
+                         (agent-repl-status--glyph-ink-color :vendor-silent))
+                   (list agent-repl-status-dot-glyph agent-repl--color-init-blue)))))
+
+(ert-deftest agent-repl-test-status-a-vendor-silent-tab-keeps-thinkings-red ()
+  "A turn whose vendor went silent keeps thinking\='s red tab."
+  ;; Act / Assert
+  (should (equal (alist-get :vendor-silent agent-repl--tab-palette)
+                 (alist-get :thinking agent-repl--tab-palette))))
 
 (ert-deftest agent-repl-test-status-an-uninked-glyph-takes-no-foreground ()
   "A glyph on an arm with no ink keeps the tab\='s foreground."

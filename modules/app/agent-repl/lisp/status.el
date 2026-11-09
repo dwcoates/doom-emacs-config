@@ -674,6 +674,7 @@ sits flush on the bar with no ground of its own.  See
 
     (:submitting      . "red")
     (:thinking        . "red")
+    (:vendor-silent   . "red")
     (:clearing        . "red")
     (:compacting      . "red")
 
@@ -840,8 +841,9 @@ The tab bar draws it only where its ink differs from the tab\='s color
 red tab (owner ruling, 2026-10-13).")
 
 (defconst agent-repl-status-glyph-inks
-  '((:merge-failed . "red")
-    (:compacting   . "orange"))
+  '((:merge-failed  . "red")
+    (:compacting    . "orange")
+    (:vendor-silent . "blue"))
   "The ink a status arm\='s drawn mark takes where it differs from the arm\='s
 own color, keyed by roster status arm.
 
@@ -849,7 +851,8 @@ Emacs\='s corner of the fixture\='s `glyph_inks\=', asserted against it.
 The arm\='s color stays the WORKSPACE\='s status -- the tab\='s ground --
 while the mark before the name takes the ink: a failed merge is a green
 tab with a red merge glyph, a compacting turn a red tab with an orange
-dot (owner ruling, 2026-10-13).")
+dot (owner ruling, 2026-10-13), and a turn whose vendor has gone silent a
+red tab with a blue dot (owner ruling, 2026-11-08).")
 
 (defconst agent-repl-status-attention-glyph "dot"
   "The glyph NAME of the steady attention marker.
@@ -866,7 +869,8 @@ Its one value is render-colors.json\='s dark `orange\=' (owner ruling,
 
 (defconst agent-repl--ink-by-name
   `(("red"    . ,agent-repl--color-thinking-red)
-    ("orange" . ,agent-repl--color-compaction-orange))
+    ("orange" . ,agent-repl--color-compaction-orange)
+    ("blue"   . ,agent-repl--color-init-blue))
   "Map each glyph INK name (`agent-repl-status-glyph-inks\=') to its color.")
 
 (defconst agent-repl--color-by-name
@@ -962,6 +966,11 @@ text\='s ink."
     (:thinking . ,(agent-repl--tab-palette-row
                    'agent-repl-tab-thinking
                    agent-repl--color-thinking-red))
+    ;; A SILENT VENDOR keeps thinking's red (owner ruling, 2026-11-08): the
+    ;; turn is still trying; its dot, inked blue, says it may detach.
+    (:vendor-silent . ,(agent-repl--tab-palette-row
+                        'agent-repl-tab-thinking
+                        agent-repl--color-thinking-red))
     ;; :submitting borrows thinking's red for the same reason the context cuts
     ;; below do: the claim about what the user cannot do is identical, and only
     ;; the phase word says the shim has not taken the prompt yet.
