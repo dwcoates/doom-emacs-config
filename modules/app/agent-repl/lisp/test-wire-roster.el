@@ -78,11 +78,29 @@ status arm and whatever else the case is about."
                    :last-updated (:at-ms 1)
                    :availability (:arm :available :value nil)
                    :name (:text "fix-flaky")
+                   :repository nil
                    :status (:arm :ready :value nil)
                    :current (:current nil)
                    :when (:arm :no-turn-running :value (:last-turn-ended-at-ms nil))
                    :detail (:branch nil :parent-branch nil :summary nil :commits nil :children nil)
                    :closed (:closed nil)))))
+
+(ert-deftest agent-repl-test-wire-roster-row-decodes-its-repository ()
+  "A row carrying `repository' decodes the repository's name."
+  (should (equal (plist-get (agent-repl-test-wire-roster--decode
+                             #'agent-repl-wire-decode-roster-row
+                             (agent-repl-test-wire-roster--row
+                              "\"ready\":{}" "\"repository\":{\"name\":\"doom\"}"))
+                            :repository)
+                 '(:name "doom"))))
+
+(ert-deftest agent-repl-test-wire-roster-row-repository-refuses-an-extra-key ()
+  "An unknown field inside `RosterRowRepository' is a breach naming that message."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-row
+                  (agent-repl-test-wire-roster--row
+                   "\"ready\":{}" "\"repository\":{\"name\":\"doom\",\"dir\":\"/d\"}"))
+                 '("RosterRowRepository" dir "unknown field"))))
 
 (ert-deftest agent-repl-test-wire-roster-row-decodes-the-one-shot-mark ()
   "A row carrying `oneShot' decodes it as PRESENT."
