@@ -55,8 +55,17 @@
 # macOS 15 and later ship at /usr/bin/jq: a fresh machine can run it before
 # anything is installed.
 #
+# PACKAGES COME FROM THE PLATFORM'S OWN PACKAGE MANAGER: Homebrew on macOS, and
+# on Linux the distribution's, the first of apt, dnf, pacman and zypper on PATH
+# (package_manager). An entry names its package for each under `install`
+# (`brew`, `apt`, `dnf`, `pacman`, `zypper`). A Linux install runs as root
+# through sudo, which asks for a password only when it has a terminal to ask
+# on; without one it never prompts (`sudo -n`), and an install it cannot run
+# says so with the command for the user to run.
+#
 # Test seams (bin/test-requirements.sh): AGENT_REPL_REQUIREMENTS_ROOT (the
-# module dir), AGENT_REPL_REQUIREMENTS_PLATFORM, AGENT_REPL_REQUIREMENTS_BUILD
+# module dir), AGENT_REPL_REQUIREMENTS_PLATFORM,
+# AGENT_REPL_REQUIREMENTS_PACKAGE_MANAGER, AGENT_REPL_REQUIREMENTS_BUILD
 # (bin/build-frontend.sh), AGENT_REPL_LAUNCHCTL, and HOME / PATH.
 
 set -euo pipefail
@@ -117,6 +126,95 @@ platform() {
     Linux) echo linux ;;
     *) err "platform: $(uname -s) is not a platform the manifests describe"; exit 2 ;;
   esac
+}
+
+# The Linux package managers install knows, in the order package_manager
+# prefers them.
+LINUX_PACKAGE_MANAGERS="apt dnf pacman zypper"
+
+# PACKAGE_MANAGER is the package manager an entry's packages come from, resolved
+# once per run by resolve_package_manager, outside any subshell so a refused
+# override ends the run: brew on macOS; on Linux
+# AGENT_REPL_REQUIREMENTS_PACKAGE_MANAGER when it is set (one of
+# LINUX_PACKAGE_MANAGERS, else a usage error), otherwise the first of them
+# whose command is on PATH. Empty when a Linux machine has none of them.
+PACKAGE_MANAGER=""
+
+resolve_package_manager() {
+  if [ "$(platform)" = darwin ]; then
+    PACKAGE_MANAGER=brew
+    return
+  fi
+  local pm
+  if [ -n "${AGENT_REPL_REQUIREMENTS_PACKAGE_MANAGER:-}" ]; then
+    case " $LINUX_PACKAGE_MANAGERS " in
+      *" $AGENT_REPL_REQUIREMENTS_PACKAGE_MANAGER "*) PACKAGE_MANAGER="$AGENT_REPL_REQUIREMENTS_PACKAGE_MANAGER"; return ;;
+    esac
+    err "platform: AGENT_REPL_REQUIREMENTS_PACKAGE_MANAGER=$AGENT_REPL_REQUIREMENTS_PACKAGE_MANAGER is not one of: $LINUX_PACKAGE_MANAGERS"
+    exit 2
+  fi
+  for pm in $LINUX_PACKAGE_MANAGERS; do
+    if command -v "$(package_manager_command "$pm")" >/dev/null 2>&1; then
+      PACKAGE_MANAGER="$pm"
+      return
+    fi
+  done
+}
+
+# package_manager: this run's package manager (PACKAGE_MANAGER).
+package_manager() { printf '%s\n' "$PACKAGE_MANAGER"; }
+
+# package_manager_command PM: the command PM runs as.
+package_manager_command() {
+  case "$1" in
+    apt) echo apt-get ;;
+    *) echo "$1" ;;
+  esac
+}
+
+# package_install_argv PM: the words that install packages through Linux
+# package manager PM without asking anything, the packages following them.
+package_install_argv() {
+  case "$1" in
+    apt) echo "apt-get install -y" ;;
+    dnf) echo "dnf install -y" ;;
+    pacman) echo "pacman -S --needed --noconfirm" ;;
+    zypper) echo "zypper --non-interactive install" ;;
+  esac
+}
+
+# as_root ARGV...: ARGV run as root through sudo. With a terminal on stdin sudo
+# may ask for the password there; without one it must not ask at all.
+as_root() {
+  if [ -t 0 ]; then
+    sudo "$@"
+  else
+    sudo -n "$@"
+  fi
+}
+
+# APT_UPDATED is set once this run has refreshed apt's package lists: a fresh
+# machine's lists can be empty or stale, and every apt install after the first
+# reuses the refresh.
+APT_UPDATED=""
+
+# os_install PM PACKAGE...: install PACKAGEs through Linux package manager PM,
+# as root. A package already installed is left as it is.
+os_install() {
+  local pm="$1" argv
+  shift
+  if [ "$pm" = apt ] && [ -z "$APT_UPDATED" ]; then
+    as_root apt-get update -q || { err "install: apt-get update failed"; return 1; }
+    APT_UPDATED=1
+  fi
+  read -r -a argv <<<"$(package_install_argv "$pm")"
+  as_root "${argv[@]}" "$@" || { err "install: sudo ${argv[*]} $* failed"; return 1; }
+}
+
+# packages ENTRY PATH PM: the packages the object at jq PATH of ENTRY names
+# for PM (a string or a list), space-separated; empty when it names none.
+packages() {
+  printf '%s\n' "$1" | jq -r --arg pm "$3" "$2"' | .[$pm] // empty | if type == "array" then join(" ") else . end'
 }
 
 # shellcheck source=lib-worktrees.sh
@@ -237,9 +335,22 @@ STATUS=""
 DETAIL=""
 FIX=""
 
-# install_text ENTRY: the install action an entry's `install` names, as text.
+# install_text ENTRY: the install action an entry's `install` names for this
+# machine's package manager, as text.
 install_text() {
-  local e="$1" how
+  local e="$1" how pm
+  pm="$(package_manager)"
+  if [ "$pm" != brew ]; then
+    how="$(printf '%s\n' "$e" | jq -r --arg pm "$pm" --arg argv "$(package_install_argv "$pm")" --arg known "$LINUX_PACKAGE_MANAGERS" '.install |
+      if $pm != "" and .[$pm] then "sudo \($argv) \(.[$pm] | if type == "array" then join(" ") else . end)"
+      elif .go_install then "go install \(.go_install)"
+      elif .source then "build \(.source.repo) at the pinned revision and install it"
+      elif .manual then .manual
+      elif $pm == "" then "install it yourself: no package manager install knows (\($known)) is on PATH"
+      else "no \($pm) package is declared for it; add install.\($pm) to its manifest entry" end')"
+    printf '%s\n' "$how"
+    return
+  fi
   how="$(printf '%s\n' "$e" | jq -r '.install |
     if .brew then ((if .tap then "brew tap \(.tap) && " else "" end) + "brew install \(.brew)" + ((.options // []) | map(" " + .) | join("")))
     elif .brew_cask then "brew install --cask \(.brew_cask)"
@@ -592,11 +703,24 @@ check_entry() {
 # ---------------------------------------------------------------------------
 
 install_program() {
-  local e="$1" brew tap cask goi
+  local e="$1" brew tap cask goi pm pkgs
+  pm="$(package_manager)"
+  goi="$(field "$e" .install.go_install)"
+  if [ "$pm" != brew ]; then
+    pkgs="$(packages "$e" .install "$pm")"
+    if [ -n "$pm" ] && [ -n "$pkgs" ]; then
+      # shellcheck disable=SC2086 # the packages are one word each
+      os_install "$pm" $pkgs
+    elif [ -n "$goi" ]; then
+      go install "$goi"
+    else
+      return 1
+    fi
+    return
+  fi
   brew="$(field "$e" .install.brew)"
   tap="$(field "$e" .install.tap)"
   cask="$(field "$e" .install.brew_cask)"
-  goi="$(field "$e" .install.go_install)"
   if [ -n "$brew" ]; then
     local options=()
     while IFS= read -r o; do [ -n "$o" ] && options+=("$o"); done < <(printf '%s\n' "$e" | jq -r '.install.options // [] | .[]')
@@ -929,7 +1053,7 @@ cmd_install() {
       if "install_$kind" "$e"; then
         check_entry "$e"
       else
-        say "install: $(field "$e" .id) has no install step; it needs you: $FIX"
+        say "install: $(field "$e" .id) was not installed; it needs you: $FIX"
       fi
     fi
     report "$e"
@@ -1079,6 +1203,9 @@ main() {
       *) die_usage "unknown argument: $1" ;;
     esac
   done
+  case "$verb" in
+    check|install|uninstall|list) resolve_package_manager ;;
+  esac
   case "$verb" in
     check) load_manifests; cmd_check ;;
     install) [ "$JSON" -eq 0 ] || die_usage "--json is for check"; load_manifests; cmd_install ;;

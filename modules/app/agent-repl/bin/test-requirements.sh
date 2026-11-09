@@ -397,9 +397,85 @@ test_a_manual_program_needs_the_user() {
   new_case
   manifest '[{"id": "tool", "kind": "program", "why": "w", "profile": "run", "platforms": ["darwin"], "command": "tool", "install": {"manual": "Download it from example.com."}}]'
   run install
-  if [ "$RC" -eq 1 ] && has "tool has no install step; it needs you: Download it from example.com." && [ ! -s "$CASE/transcript" ]; then
+  if [ "$RC" -eq 1 ] && has "tool was not installed; it needs you: Download it from example.com." && [ ! -s "$CASE/transcript" ]; then
     pass "a manual program needs the user and fails the install"
   else fail "manual program" "rc=$RC" "$OUT"; fi
+}
+
+LINUX_PROGRAM='{"id": "tool", "kind": "program", "why": "the case needs it", "profile": "run", "platforms": ["linux"], "command": "tool", "install": {"apt": "tool-deb", "dnf": "tool-rpm", "pacman": ["tool-arch", "tool-extra"], "zypper": "tool-suse"}}'
+
+# fake_linux_package_managers: sudo, apt-get, dnf, pacman and zypper stubs. sudo
+# drops its -n and runs the rest, failing instead when STUB_SUDO_EXIT is set;
+# an install puts `tool` on PATH.
+fake_linux_package_managers() {
+  write_stub sudo '[ -n "${STUB_SUDO_EXIT:-}" ] && exit "$STUB_SUDO_EXIT"; [ "$1" = -n ] && shift; exec "$@"'
+  local pm
+  for pm in apt-get dnf pacman zypper; do
+    write_stub "$pm" 'case " $* " in *" install "*|*" -S "*) printf "#!/bin/sh\necho tool\n" >"$STUB_DIR/tool"; chmod +x "$STUB_DIR/tool" ;; esac'
+  done
+}
+
+test_install_apt_installs_a_missing_linux_program_after_refreshing_its_lists() {
+  new_case; manifest "[$LINUX_PROGRAM]"; fake_linux_package_managers
+  PLATFORM=linux run install
+  if [ "$RC" -eq 0 ] && ran "sudo -n apt-get update -q" && ran "sudo -n apt-get install -y tool-deb" \
+     && ! ran "dnf " && has "ok          tool:"; then
+    pass "install refreshes apt's lists, apt-installs a missing linux program without prompting, and re-checks it"
+  else fail "apt install" "rc=$RC" "$OUT" "$(cat "$CASE/transcript")"; fi
+}
+
+test_install_runs_each_linux_package_managers_own_install() {
+  local pm want
+  while IFS='|' read -r pm want; do
+    new_case; manifest "[$LINUX_PROGRAM]"; fake_linux_package_managers
+    EXTRA_ENV="AGENT_REPL_REQUIREMENTS_PACKAGE_MANAGER=$pm" PLATFORM=linux run install
+    if [ "$RC" -eq 0 ] && ran "sudo -n $want" && ! ran "apt-get update"; then
+      pass "install through $pm runs: $want"
+    else fail "$pm install" "rc=$RC" "$OUT" "$(cat "$CASE/transcript")"; fi
+  done <<'CASES'
+dnf|dnf install -y tool-rpm
+pacman|pacman -S --needed --noconfirm tool-arch tool-extra
+zypper|zypper --non-interactive install tool-suse
+CASES
+}
+
+test_the_linux_package_manager_is_apt_before_dnf() {
+  new_case; manifest "[$LINUX_PROGRAM]"; fake_linux_package_managers
+  PLATFORM=linux run check
+  if [ "$RC" -eq 1 ] && has "Fix: sudo apt-get install -y tool-deb"; then pass "with apt and dnf both on PATH, apt is the package manager"; else fail "manager order" "rc=$RC" "$OUT"; fi
+}
+
+test_a_failed_linux_install_names_the_command_to_run() {
+  new_case; manifest "[$LINUX_PROGRAM]"; fake_linux_package_managers
+  EXTRA_ENV="STUB_SUDO_EXIT=1 AGENT_REPL_REQUIREMENTS_PACKAGE_MANAGER=dnf" PLATFORM=linux run install
+  if [ "$RC" -eq 1 ] && has "ERROR: install: sudo dnf install -y tool-rpm failed" \
+     && has "install: tool was not installed; it needs you: sudo dnf install -y tool-rpm" && has "missing     tool:"; then
+    pass "a linux install sudo cannot run fails and names the command for the user"
+  else fail "sudo failure" "rc=$RC" "$OUT"; fi
+}
+
+test_a_linux_entry_without_this_managers_package_says_to_add_it() {
+  new_case; manifest "[$(jq -c 'del(.install.dnf)' <<<"$LINUX_PROGRAM")]"; fake_linux_package_managers
+  EXTRA_ENV="AGENT_REPL_REQUIREMENTS_PACKAGE_MANAGER=dnf" PLATFORM=linux run install
+  if [ "$RC" -eq 1 ] && has "Fix: no dnf package is declared for it; add install.dnf to its manifest entry" && ! ran "sudo"; then
+    pass "a linux entry with no package for the machine's manager installs nothing and says to add one"
+  else fail "no package" "rc=$RC" "$OUT" "$(cat "$CASE/transcript")"; fi
+}
+
+test_a_linux_entry_go_installs_without_a_package() {
+  new_case
+  manifest '[{"id": "tool", "kind": "program", "why": "w", "profile": "run", "platforms": ["linux"], "command": "tool", "install": {"go_install": "example.com/tool@v1"}}]'
+  fake_linux_package_managers
+  PLATFORM=linux run install
+  if ran "go install example.com/tool@v1" && ! ran "sudo"; then pass "a linux entry with no package go-installs"; else fail "linux go install" "rc=$RC" "$(cat "$CASE/transcript")"; fi
+}
+
+test_an_unknown_package_manager_override_is_refused() {
+  new_case; manifest "[$LINUX_PROGRAM]"
+  EXTRA_ENV="AGENT_REPL_REQUIREMENTS_PACKAGE_MANAGER=yum" PLATFORM=linux run check
+  if [ "$RC" -eq 2 ] && has "AGENT_REPL_REQUIREMENTS_PACKAGE_MANAGER=yum is not one of: apt dnf pacman zypper"; then
+    pass "an unknown package manager override is refused"
+  else fail "pm override" "rc=$RC" "$OUT"; fi
 }
 
 test_an_unmet_optional_entry_does_not_fail_the_run() {
