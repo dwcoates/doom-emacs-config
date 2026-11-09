@@ -173,6 +173,17 @@
       "reason": "the page the user is looking at is blank meanwhile; a reload should not be seen at all",
       "reported_as": "REPORTED_LATENCY_KIND_RELOAD_BLANK",
       "buckets_seconds": [0.05, 0.1, 0.2, 0.3, 0.5, 1, 2, 5, 10, 30]
+    },
+    {
+      "name": "switch_sidebar",
+      "description": "a switch as the sidebar shows it (keystroke to the sidebar's first frame painted with the selection)",
+      "start": "Emacs takes the switch keystroke (elisp.host.editor-switch); it rides the select and the roster's selection",
+      "end": "the sidebar's first frame painted with the selection (sidebar.selection-painted)",
+      "measured_by": "webapp",
+      "threshold_ms": 100,
+      "reason": "the same navigation; a sidebar trailing the page reads as the switch landing twice",
+      "reported_as": "REPORTED_LATENCY_KIND_SWITCH_SIDEBAR",
+      "buckets_seconds": [0.016, 0.033, 0.05, 0.1, 0.2, 0.3, 0.5, 1, 2, 5]
     }
   ]
 }

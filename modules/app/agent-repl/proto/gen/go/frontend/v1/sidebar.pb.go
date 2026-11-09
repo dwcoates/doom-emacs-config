@@ -3819,9 +3819,24 @@ type RosterCurrentWorkspace struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The selected workspace's identity, imported — the join key, never a
 	// display path (the row's own elements carry what is drawn).
-	Workspace     *v1.WorkspaceRef `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Workspace *v1.WorkspaceRef `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
+	// THE SELECT THAT MADE IT CURRENT, by an id the daemon mints per select
+	// (agentrepl.v1.SelectWorkspace), so a client keys what it does about a
+	// selection to that select: the sidebar records the first frame it paints
+	// a selection in (`sidebar.selection-painted`) under it, beside the
+	// daemon's own `selected the workspace` record. EMPTY when no select of
+	// this daemon's stated the current workspace: a registry read at boot, or
+	// a selection another daemon stored.
+	SelectionId string `protobuf:"bytes,2,opt,name=selection_id,json=selectionId,proto3" json:"selection_id,omitempty"`
+	// WHEN THE USER'S SWITCH BEGAN, in Unix milliseconds on the host's wall
+	// clock: the keystroke instant the select carried
+	// (agentrepl.v1.SelectWorkspaceRequest.switch_started_at_ms). The sidebar
+	// measures the switch to its paint of the selection from it
+	// (agentrepl.v1.ReportedLatencyKind.REPORTED_LATENCY_KIND_SWITCH_SIDEBAR).
+	// Unset when the select carried none.
+	SwitchStartedAtMs *int64 `protobuf:"varint,3,opt,name=switch_started_at_ms,json=switchStartedAtMs,proto3,oneof" json:"switch_started_at_ms,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *RosterCurrentWorkspace) Reset() {
@@ -3859,6 +3874,20 @@ func (x *RosterCurrentWorkspace) GetWorkspace() *v1.WorkspaceRef {
 		return x.Workspace
 	}
 	return nil
+}
+
+func (x *RosterCurrentWorkspace) GetSelectionId() string {
+	if x != nil {
+		return x.SelectionId
+	}
+	return ""
+}
+
+func (x *RosterCurrentWorkspace) GetSwitchStartedAtMs() int64 {
+	if x != nil && x.SwitchStartedAtMs != nil {
+		return *x.SwitchStartedAtMs
+	}
+	return 0
 }
 
 // The rail's one grouping: the open workspaces, one section per repository,
@@ -11985,9 +12014,12 @@ const file_frontend_v1_sidebar_proto_rawDesc = "" +
 	"\favailability\"\x1e\n" +
 	"\x1cRosterRowAvailabilityPending\" \n" +
 	"\x1eRosterRowAvailabilityAvailable\"\"\n" +
-	" RosterRowAvailabilityUnavailable\"R\n" +
+	" RosterRowAvailabilityUnavailable\"\xc4\x01\n" +
 	"\x16RosterCurrentWorkspace\x128\n" +
-	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\"\x8f\x01\n" +
+	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\x12!\n" +
+	"\fselection_id\x18\x02 \x01(\tR\vselectionId\x124\n" +
+	"\x14switch_started_at_ms\x18\x03 \x01(\x03H\x00R\x11switchStartedAtMs\x88\x01\x01B\x17\n" +
+	"\x15_switch_started_at_ms\"\x8f\x01\n" +
 	"\x14RosterRepositoryView\x12:\n" +
 	"\bsections\x18\x01 \x03(\v2\x1e.frontend.v1.RosterRepoSectionR\bsections\x12;\n" +
 	"\n" +
@@ -12903,6 +12935,7 @@ func file_frontend_v1_sidebar_proto_init() {
 		(*RosterRowAvailability_Available)(nil),
 		(*RosterRowAvailability_Unavailable)(nil),
 	}
+	file_frontend_v1_sidebar_proto_msgTypes[63].OneofWrappers = []any{}
 	file_frontend_v1_sidebar_proto_msgTypes[65].OneofWrappers = []any{
 		(*RosterOpenSection_Expanded)(nil),
 		(*RosterOpenSection_Collapsed)(nil),

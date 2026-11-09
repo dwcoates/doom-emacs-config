@@ -27,6 +27,13 @@ message SelectWorkspaceRequest {
   // the history it walks: each press lands one place further along the same
   // order (owner request, 2026-10-20).
   bool keep_selection_history = 3;
+  // WHEN THE USER'S SWITCH BEGAN, in Unix milliseconds on the host's wall
+  // clock: the instant Emacs took the switch keystroke
+  // (elisp.host.editor-switch). The daemon hands it on with the roster's
+  // selection (frontend.v1.RosterCurrentWorkspace.switch_started_at_ms), so
+  // the sidebar measures the switch to its paint. Unset for a select no
+  // keystroke of the user's began.
+  optional int64 switch_started_at_ms = 4;
 }
 
 // THE ARM IS THE OUTCOME.
