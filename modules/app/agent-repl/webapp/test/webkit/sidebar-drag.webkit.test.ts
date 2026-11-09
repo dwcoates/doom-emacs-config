@@ -4,7 +4,7 @@
  *
  * jsdom neither lays out nor turns a press-drag into a selection, so this
  * drags the real mouse in headless WebKit, the Emacs webview's engine, over
- * the real stylesheet and the real drag (src/sidebar/drag.ts). The press
+ * the real stylesheet and the real drag (src/drag.ts). The press
  * starts a selection before the threshold, as a hand's creep does, and the
  * carry holds the row at the list's bottom edge until the list has scrolled
  * to its end: WebKit extends a press's selection as the content scrolls under

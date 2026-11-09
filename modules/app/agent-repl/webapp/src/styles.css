@@ -1208,22 +1208,22 @@ body {
 #ws-sidebar .sb-subsection.folded > .rows { display: none; }
 #ws-sidebar .sb-subsection.folded > .sb-subsection-head { color: var(--repo-head-collapsed); }
 
-/* THE DRAG (src/sidebar/drag.ts): the item stays in its list as a dimmed
+/* THE DRAG (src/drag.ts): the item stays in its list as a dimmed
    slot that travels to where the drop would land, and a copy follows the
-   pointer above the rail. Every grip leaves the pointer's moves to the page
-   rather than to a touch scroll. */
+   pointer above the rail or the feed. Every grip leaves the pointer's moves
+   to the page rather than to a touch scroll. */
 #ws-sidebar .sb-sections > .repo-section > .repo-head,
 #ws-sidebar .sb-subsection-head,
 #ws-sidebar .rows[data-subsection] > [data-roster-row] > .row { touch-action: none; }
-#ws-sidebar .sb-drag-slot { opacity: 0.35; outline: 1px dashed var(--border); outline-offset: -1px; }
+.drag-slot { opacity: 0.35; outline: 1px dashed var(--border); outline-offset: -1px; }
 /* THE SUBSECTION A DRAGGED ROW WOULD JOIN lights up, subtly, while the row
    is over it (owner request, 2026-10-20): the rail's lifted grey, half
    strength, behind its header and rows. */
-#ws-sidebar .sb-subsection.sb-drop-target {
+#ws-sidebar .sb-subsection.drop-target {
   background-color: color-mix(in srgb, var(--card) 50%, transparent);
   border-radius: 4px;
 }
-#ws-sidebar .sb-drag-ghost {
+.drag-ghost {
   position: fixed;
   z-index: 1000;
   pointer-events: none;
@@ -1232,17 +1232,17 @@ body {
   border-radius: 6px;
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
 }
-html.sb-dragging, html.sb-dragging * { cursor: grabbing !important; }
+html.dragging, html.dragging * { cursor: grabbing !important; }
 /* A DRAG SELECTS NO TEXT (owner request, 2026-10-23: dragging an item in the
    rail highlighted every row between pickup and drop). WebKit extends a press's
    selection from more than the mouse's moves (a drag's edge scroll does it
    with no mousemove at all), so no event a drag could cancel covers it. A node
    that cannot be selected cannot be swept into one, on any path, so while a
    drag stands nothing is selectable; the lift clears what the press selected
-   before the threshold (src/sidebar/drag.ts). This is the one `user-select:
+   before the threshold (src/drag.ts). This is the one `user-select:
    none` the stylesheet test admits, since it lasts only while an item is
    carried and no text is read across. */
-html.sb-dragging * { -webkit-user-select: none; user-select: none; }
+html.dragging * { -webkit-user-select: none; user-select: none; }
 
 /* THE SUBSECTION NAME POPUP, under the control that asked for it. */
 /* THE NAME POPUP is quiet (owner request, 2026-10-20): one hairline box, a

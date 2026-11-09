@@ -12,7 +12,7 @@
  * page's DOM as it goes, so the drop already shows the new order. Every
  * roster push is a whole new drawing, though, and drawing one that predates
  * the change would put the moved item back for an instant. So the page HOLDS
- * its drawing (`ArrangeHold`) from the moment a drag starts until a push at or
+ * its drawing (`ArrangeHold`, the shared `hold.ts`) from the moment a drag starts until a push at or
  * above the revision the daemon answered with (`ArrangeSidebarSuccess
  * .roster_revision`) arrives. A refused or failed ask, a cancelled drag, or
  * the stream ending releases the hold at once, and the newest push held back
@@ -27,6 +27,7 @@ import {
   type ArrangeSidebarResponse,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_arrange_sidebar_pb";
 import type { WorkspaceRoster } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
+import { createDrawingHold, type DrawingHold } from "../hold.js";
 import { log } from "../log.js";
 import { unreachableArm } from "../rpc/strict.js";
 import type { SidebarContext } from "./context.js";
@@ -126,105 +127,13 @@ export async function sendHeld<Res extends VerbResponse>(
   return took;
 }
 
-/**
- * The page's hold on its own drawing while an arrangement is dragged or
- * asked for.
- *
- * A push offered while the hold stands is kept (the newest only, since a
- * roster is always whole) and drawn when the hold lets go: at once when the
- * hold is released, or when a push at or above the awaited revision arrives.
- */
-export interface ArrangeHold {
-  /** Draw ROSTER now, or keep it for when the hold lets go. */
-  offer(roster: WorkspaceRoster): void;
-  /** A drag started: hold every push until it ends. */
-  drag(): void;
-  /** A drag ended with nothing asked: let go. */
-  cancel(): void;
-  /** An ask is in flight: keep holding until it settles. */
-  await(): void;
-  /**
-   * The ask settled. REVISION is the roster revision the change arrived at,
-   * or null when the ask did not take (or there is nothing to wait for): the
-   * hold then lets go at once.
-   */
-  settle(revision: bigint | null): void;
-  /** The stream run ended: an awaited revision is no longer coming. */
-  reset(): void;
-  /** Whether the drawing is held right now. */
-  holding(): boolean;
-}
+/** The page's hold on its own roster drawing while an arrangement is dragged or asked for (`hold.ts`). */
+export type ArrangeHold = DrawingHold<WorkspaceRoster>;
 
 /**
- * The hold, drawing through DRAW.
- *
- * LETTING GO ALWAYS DRAWS, the newest roster held back or else the one last
- * drawn: a drag rearranged the page's own DOM, and a drawing the daemon did
- * not take (a refusal, a cancelled drag) must not outlive the hold. Drawing a
- * roster again is what every push does anyway.
+ * The hold, drawing through DRAW, letting go at the roster revision an
+ * arrangement answered (`ArrangeSidebarSuccess.roster_revision`).
  */
 export function createArrangeHold(draw: (roster: WorkspaceRoster) => void): ArrangeHold {
-  type State = { case: "free" } | { case: "held" } | { case: "awaiting"; revision: bigint };
-  let state: State = { case: "free" };
-  /** The newest roster offered while held, null when none was. */
-  let kept: WorkspaceRoster | null = null;
-  /** The roster last drawn, null before the first. */
-  let drawn: WorkspaceRoster | null = null;
-
-  const drawNow = (roster: WorkspaceRoster): void => {
-    drawn = roster;
-    draw(roster);
-  };
-
-  const letGo = (why: string): void => {
-    state = { case: "free" };
-    const roster = kept ?? drawn;
-    kept = null;
-    log.debug("the sidebar's arrangement hold let go", {
-      operation: "sidebar.arrange.hold-released",
-      context: { why, revision: roster === null ? null : String(roster.revision) },
-    });
-    if (roster !== null) drawNow(roster);
-  };
-
-  return {
-    offer(roster) {
-      if (state.case === "free") {
-        drawNow(roster);
-        return;
-      }
-      kept = roster;
-      if (state.case === "awaiting" && roster.revision >= state.revision) letGo("a push carried the arrangement");
-    },
-    drag() {
-      state = { case: "held" };
-    },
-    cancel() {
-      letGo("the drag was cancelled");
-    },
-    await() {
-      state = { case: "held" };
-    },
-    settle(revision) {
-      if (revision === null) {
-        letGo("the arrangement did not take");
-        return;
-      }
-      // A CHANGE THAT LEFT THE ROSTER AS IT WAS publishes no new push (the
-      // daemon drops a duplicate), so a revision already drawn or held is
-      // the arrangement arriving, not one still to come.
-      if ((drawn !== null && drawn.revision >= revision) || (kept !== null && kept.revision >= revision)) {
-        letGo("a push already carried the arrangement");
-        return;
-      }
-      state = { case: "awaiting", revision };
-    },
-    reset() {
-      // A DRAG IN PROGRESS KEEPS ITS HOLD: the dragged element is in the DOM
-      // the next push would throw away. An awaited revision belongs to the
-      // run that ended, and a successor daemon numbers its own.
-      if (state.case === "awaiting") letGo("the roster stream ended");
-    },
-    holding: () => state.case !== "free",
-  };
+  return createDrawingHold({ draw, revisionOf: (roster) => roster.revision, operation: "sidebar.arrange.hold-released" });
 }

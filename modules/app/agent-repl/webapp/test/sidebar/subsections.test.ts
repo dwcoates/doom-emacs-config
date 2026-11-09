@@ -16,7 +16,7 @@ import {
   SetWorkspaceOneShotResponseSchema,
   type SetWorkspaceOneShotRequest,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_workspace_one_shot_pb";
-import { DRAG_GHOST_CLASS, DRAG_SLOT_CLASS, DROP_TARGET_CLASS, REARRANGED_ATTRIBUTE } from "../../src/sidebar/drag.js";
+import { DRAG_GHOST_CLASS, DRAG_SLOT_CLASS, DROP_TARGET_CLASS, REARRANGED_ATTRIBUTE } from "../../src/drag.js";
 import type { RailContext, SidebarContext } from "../../src/sidebar/context.js";
 import { frameQueue } from "../frame-queue.js";
 import { queryAll } from "../../src/dom.js";

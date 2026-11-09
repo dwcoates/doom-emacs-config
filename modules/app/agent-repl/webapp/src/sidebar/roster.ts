@@ -71,7 +71,7 @@ import {
   type RailContext,
   type SidebarContext,
 } from "./context.js";
-import { REARRANGED_ATTRIBUTE } from "./drag.js";
+import { REARRANGED_ATTRIBUTE } from "../drag.js";
 import {
   drawCreateSubsectionControl,
   drawRosterSubsection,

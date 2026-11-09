@@ -18,8 +18,9 @@
  * of the roster credits it, so a hidden merge workspace is never named here,
  * and a click selects the credited workspace and opens the merge's bubble in
  * its feed. A WAITING MERGE IS DRAGGED to another place in its line
- * (`UpdateMergeQueueMoveTo`, owner request 2026-10-27), through the rail's one
- * drag gesture (`drag.ts`).
+ * (`UpdateMergeQueueMoveTo`, owner request 2026-10-27), through the webapp's
+ * one drag gesture (`drag.ts`), placed as the feed's queue tab places it
+ * (`merge-queue-move.ts`).
  */
 import { create } from "@bufbuild/protobuf";
 import type { RepositoryRef, WorkspaceRef } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
@@ -50,10 +51,11 @@ import { guardMalformed } from "../rpc/guard.js";
 import { updateMergeQueueRefusal } from "../rpc/merge-queue-refusal.js";
 import { userRequester } from "../rpc/requester.js";
 import { SELECT_WORKSPACE_EXPECTED_ARMS } from "../rpc/refusal.js";
+import { moveToAction, placeBeside } from "../merge-queue-move.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import type { SidebarContext } from "./context.js";
-import { pressToDrag, type DragSpec } from "./drag.js";
-import { selectWorkspace, tickElapsed, tickPaint } from "./row.js";
+import { pressToDrag, type DragSpec } from "../drag.js";
+import { selectWorkspace, tickElapsed } from "./row.js";
 import { sendHeld } from "./arrange.js";
 import { fireVerb, runVerb } from "./verbs.js";
 
@@ -250,29 +252,6 @@ export function queueDrag(
 }
 
 /**
- * Where a merge dropped just before BEFORE (null: after every waiting merge)
- * goes, named by the waiting merge it now stands beside: ahead of BEFORE, or
- * behind the last of WAITING when it was dropped at the end.
- */
-export function placeBeside(
-  waiting: readonly HTMLElement[],
-  item: HTMLElement,
-  before: HTMLElement | null,
-  refs: ReadonlyMap<HTMLElement, WorkspaceRef>,
-): UpdateMergeQueueMoveTo["place"] {
-  const anchorOf = (el: HTMLElement): WorkspaceRef => {
-    const ref = refs.get(el);
-    if (ref === undefined) throw new Error("invariant: a waiting merge's anchor names its workspace");
-    return ref;
-  };
-  if (before !== null) return { case: "aheadOf", value: anchorOf(before) };
-  const others = waiting.filter((el) => el !== item);
-  const last = others[others.length - 1];
-  if (last === undefined) throw new Error("invariant: a merge dropped elsewhere than it started has a waiting merge beside it");
-  return { case: "behind", value: anchorOf(last) };
-}
-
-/**
  * Ask the daemon to move WORKSPACE's waiting merge to PLACE. The drawing is
  * held until the answer (`sendHeld`), so the moved line stands where it was
  * dropped until the push draws the queue in its new order.
@@ -286,7 +265,7 @@ function moveInLine(sc: SidebarContext, workspace: WorkspaceRef, place: UpdateMe
     rpc: "UpdateMergeQueue",
     call: (client) =>
       client.updateMergeQueue({
-        action: { case: "moveTo", value: { workspace, place } },
+        action: moveToAction(workspace, place),
         requester: userRequester(),
       }),
     schema: UpdateMergeQueueResponseSchema,
