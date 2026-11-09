@@ -143,10 +143,10 @@ map's `[intercept-state] all'."
 
 (ert-deftest agent-repl-test-input-help-button-is-darker-than-the-selected-row ()
   "A button's fill sits between the composer's ground and the selected-row tint.
-The sidebar's selected row is #262626 in the dark theme, pinned by
+The sidebar's selected row is #303030 in the dark theme, pinned by
 webapp/test/styles.test.ts."
   (let ((button (agent-repl-test-input-help--rgb agent-repl-input-help-button-background)))
-    (should (cl-every #'< button (agent-repl-test-input-help--rgb "#262626")))
+    (should (cl-every #'< button (agent-repl-test-input-help--rgb "#303030")))
     (should (cl-every #'> button (agent-repl-test-input-help--rgb agent-repl-input-background)))))
 
 ;;;; ---- The button face ----
