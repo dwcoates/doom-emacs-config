@@ -9,7 +9,7 @@ import {
   type ReportedLatency,
   type ReportLatenciesResponse,
 } from "../../proto/gen/ts/agentrepl/v1/endpoint_report_latencies_pb";
-import { WorkspaceRefSchema } from "../../proto/gen/ts/workspace/v1/workspace_pb";
+import { WorkspaceRefSchema, type WorkspaceRef } from "../../proto/gen/ts/workspace/v1/workspace_pb";
 import { installLatencyReport, MAX_PENDING_LATENCIES, REPORT_DELAY_MS, type LatencyReporter } from "../src/latency-report.js";
 import { captureLogRecords, forwardedRecord } from "./log-capture.js";
 import { codeOf } from "./source-text.js";
@@ -38,9 +38,10 @@ class FakePage {
   private releases: (() => void)[] = [];
   reporter!: LatencyReporter;
 
-  install(): this {
+  /** Install the reporter for WORKSPACE, the page's own; null installs it for a page with none. */
+  install(workspace: WorkspaceRef | null = WORKSPACE): this {
     this.reporter = installLatencyReport({
-      workspace: WORKSPACE,
+      ...(workspace === null ? {} : { workspace }),
       send: (batch) => {
         this.sent.push(batch);
         const answer = this.answers.shift() ?? (() => Promise.resolve(recorded(batch.length)));
@@ -234,6 +235,43 @@ describe("installLatencyReport", () => {
   });
 });
 
+describe("a latency naming its own workspace", () => {
+  const OTHER = create(WorkspaceRefSchema, { id: "ws-2", dir: "/work/ws-2" });
+
+  it("is sent under the workspace it names, on a page with none of its own", async () => {
+    // Arrange
+    const page = new FakePage().install(null);
+
+    // Act
+    page.reporter.record(ReportedLatencyKind.SWITCH_SIDEBAR, 0.07, OTHER);
+    await page.elapse();
+
+    // Assert
+    expect(page.sent.map((batch) => batch.map((l) => l.workspace?.id))).toEqual([["ws-2"]]);
+  });
+
+  it("is sent under the workspace it names over the page's own", async () => {
+    // Arrange
+    const page = new FakePage().install();
+
+    // Act
+    page.reporter.record(ReportedLatencyKind.SWITCH_SIDEBAR, 0.07, OTHER);
+    await page.elapse();
+
+    // Assert
+    expect(page.sent.map((batch) => batch.map((l) => l.workspace?.id))).toEqual([["ws-2"]]);
+  });
+
+  it("throws when neither it nor the page names a workspace", () => {
+    // Arrange
+    const page = new FakePage().install(null);
+
+    // Act, Assert
+    expect(() => page.reporter.record(ReportedLatencyKind.SWITCH_SIDEBAR, 0.07)).toThrow(/names no workspace/);
+    expect(page.liveTimers()).toEqual([]);
+  });
+});
+
 describe("installDaemonLatencyReport", () => {
   it("is the one place a page installs its reporter", () => {
     // Arrange
@@ -249,5 +287,6 @@ describe("installDaemonLatencyReport", () => {
     // Assert
     expect(installers).toEqual([]);
     expect(codeOf(sources["../src/main.ts"] ?? "")).toMatch(/installDaemonLatencyReport\(ctx, ctx\.workspace\)/);
+    expect(codeOf(sources["../src/host/sidebar-page.ts"] ?? "")).toMatch(/installDaemonLatencyReport\)\(started\.ctx\)/);
   });
 });

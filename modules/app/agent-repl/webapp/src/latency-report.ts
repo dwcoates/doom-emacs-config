@@ -44,8 +44,12 @@ export const MAX_PENDING_LATENCIES = 512;
 
 /** What the reporter needs from the page. */
 export interface LatencyReportDeps {
-  /** The workspace every latency on this page happened in. */
-  readonly workspace: WorkspaceRef;
+  /**
+   * The workspace every latency on this page happened in. Absent on the
+   * sidebar page, which belongs to no workspace: each of its latencies names
+   * its own (`record`'s WORKSPACE).
+   */
+  readonly workspace?: WorkspaceRef;
   /** Send one batch; rejects when the call did not reach the daemon. */
   readonly send: (latencies: ReportedLatency[]) => Promise<ReportLatenciesResponse>;
   /** Run FN after MS; answers the cancel. */
@@ -56,8 +60,12 @@ export interface LatencyReportDeps {
 
 /** The installed reporter. */
 export interface LatencyReporter {
-  /** Record one finished interaction of KIND that took SECONDS. */
-  record(kind: ReportedLatencyKind, seconds: number): void;
+  /**
+   * Record one finished interaction of KIND that took SECONDS, in WORKSPACE,
+   * else the page's own. A latency that names neither is a defect, and
+   * throws.
+   */
+  record(kind: ReportedLatencyKind, seconds: number, workspace?: WorkspaceRef): void;
   /** Stop: cancels a scheduled send and the re-attach watch. */
   dispose(): void;
 }
@@ -133,8 +141,11 @@ export function installLatencyReport(deps: LatencyReportDeps): LatencyReporter {
   });
 
   return {
-    record(kind, seconds) {
-      pending.push(create(ReportedLatencySchema, { kind, workspace: deps.workspace, seconds }));
+    record(kind, seconds, workspace = deps.workspace) {
+      if (workspace === undefined) {
+        throw new Error(`latency-report: a ${String(kind)} latency names no workspace, and the page has none of its own`);
+      }
+      pending.push(create(ReportedLatencySchema, { kind, workspace, seconds }));
       trim();
       schedule();
     },
@@ -147,13 +158,14 @@ export function installLatencyReport(deps: LatencyReportDeps): LatencyReporter {
 }
 
 /**
- * Report WORKSPACE's page's latencies to the daemon CTX talks to. Every page
- * that reports latencies installs its reporter here, so each sends its
- * batch, waits before sending, and resends on a re-attach alike.
+ * Report this page's latencies to the daemon CTX talks to: as WORKSPACE's
+ * when given, else each naming its own (the sidebar page's). Every page that
+ * reports latencies installs its reporter here, so each sends its batch,
+ * waits before sending, and resends on a re-attach alike.
  */
-export function installDaemonLatencyReport(ctx: DaemonContext, workspace: WorkspaceRef): LatencyReporter {
+export function installDaemonLatencyReport(ctx: DaemonContext, workspace?: WorkspaceRef): LatencyReporter {
   return installLatencyReport({
-    workspace,
+    ...(workspace === undefined ? {} : { workspace }),
     send: (batch) =>
       callUnary(ctx, "ReportLatencies", (client) => client.reportLatencies(reportLatenciesRequest(batch)), REPORT_LATENCIES_RESPONSE),
     after: (ms, fn) => {
