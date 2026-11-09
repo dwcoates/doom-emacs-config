@@ -1097,6 +1097,7 @@ body {
 #ws-sidebar .sb-mq-waiting {
   color: color-mix(in srgb, var(--repo-head-expanded) 55%, var(--repo-head-collapsed));
   font-size: 0.9em;
+  line-height: var(--merged-row-line-h);
   padding-left: var(--mq-list-indent);
 }
 /* THE STAGES wear the bubble's tab glyphs, and their colours from the
@@ -1454,10 +1455,12 @@ html.dragging * { -webkit-user-select: none; user-select: none; }
 #ws-sidebar .repo:is(.merge-queue-section, .merged-section) {
   /* The row's line box, stated rather than left to the font: `normal`
      line-height varies with whatever font resolves, so the cap could not be
-     expressed in rows without pinning it. 1.15rem (18.4px) clears the 14px row
-     text and the 9px status disc with nothing left over — a merged row carries
-     no glyph (`glyphs: false`), so the 1.3rem spinner box cannot appear here. */
-  --merged-row-line-h: 1.15rem;
+     expressed in rows without pinning it. 0.75rem (12px) is the line a waiting
+     merge's name takes, so a merged row stands as tall as a waiting line
+     (owner request, 2026-11-09), and clears the 9px status disc — a merged
+     row carries no glyph (`glyphs: false`), so the 1.3rem spinner box cannot
+     appear here. */
+  --merged-row-line-h: 0.75rem;
   /* One row's drawn height. */
   --merged-row-h: calc(var(--row-pad-y) * 2 + var(--merged-row-line-h));
   /* One repository group's header line box, pinned for the same reason, so
@@ -1579,7 +1582,7 @@ html.dragging * { -webkit-user-select: none; user-select: none; }
 #ws-sidebar .sb-mq-head { --mq-below-text: 4.25px; }
 #ws-sidebar .sb-mq-head:has(> .sb-mq-head-line:last-child),
 #ws-sidebar .sb-mq-remediating { --mq-below-text: 7.75px; }
-#ws-sidebar .sb-mq-waiting { --mq-below-text: 4.75px; }
+#ws-sidebar .sb-mq-waiting { --mq-below-text: 4.25px; }
 #ws-sidebar .merged-group[data-group-section="merge-queue"]:not(.folded):has(+ .merged-group) > .rows > :last-child {
   margin-bottom: calc(6.25px - var(--mq-below-text));
 }
