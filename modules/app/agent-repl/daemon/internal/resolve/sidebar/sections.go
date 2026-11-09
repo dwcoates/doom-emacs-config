@@ -356,7 +356,7 @@ func (r *resolver) openRow(node openNode, folded bool, numbers *tabNumberer, rc 
 		repo := r.blockRepository(node.ws, block.repo, log)
 		composed := &frontendv1.RosterOpenRowRepositoryBlock{
 			Repository: repoKey(repo).Repository,
-			Divider:    &frontendv1.RosterOpenRowRepositoryDivider{Name: repo.Name},
+			Divider:    &frontendv1.RosterOpenRowRepositoryDivider{Name: repo.Name, MainWorkspace: r.mainWorkspace(repo)},
 		}
 		for _, child := range block.members {
 			composed.Rows = append(composed.Rows, r.openRow(child, kin, numbers, rc, log))
@@ -364,6 +364,18 @@ func (r *resolver) openRow(node openNode, folded bool, numbers *tabNumberer, rc 
 		out.RepositoryBlocks = append(out.RepositoryBlocks, composed)
 	}
 	return out
+}
+
+// mainWorkspace answers REPO's main workspace (wsm.IsMainWorktree) as the
+// ref a click on a block divider's name selects, nil when the registry holds
+// none for it or it is closed.
+func (r *resolver) mainWorkspace(repo wsm.Repository) *workspacev1.WorkspaceRef {
+	for _, ws := range r.state.reg.Workspaces {
+		if ws.Repo == repo.ID && wsm.IsMainWorktree(ws.Dir, repo.Dir) && !ws.Closed {
+			return ws.Ref()
+		}
+	}
+	return nil
 }
 
 // blockRepository answers repository ID of a block under PARENT. A block

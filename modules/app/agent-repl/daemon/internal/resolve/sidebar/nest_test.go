@@ -559,3 +559,38 @@ func TestARowWhoseOnlyChildrenAreInBlocksCarriesAChildrenFold(t *testing.T) {
 		t.Fatalf("children fold = %s, want collapsible", got)
 	}
 }
+
+func TestABlockDividerNamesItsRepositorysMainWorkspace(t *testing.T) {
+	tests := []struct {
+		name   string
+		main   bool
+		closed bool
+		want   string
+	}{
+		{name: "an open main workspace is named", main: true, want: "w-beta-main"},
+		{name: "a closed main workspace is not named", main: true, closed: true, want: ""},
+		{name: "a repository with no main workspace names none", want: ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			r, _ := newResolver(t)
+			reg := blockFamily()
+			if tc.main {
+				main := placed(workspace("w-beta-main", "main (beta)"), 9)
+				main.Repo, main.Dir, main.Closed = otherRepo.ID, otherRepo.Dir, tc.closed
+				reg.Workspaces = append(reg.Workspaces, main)
+			}
+
+			// Act
+			r.SetRegistry(reg)
+
+			// Assert
+			parent := rosterwalk.UnsectionedRows(latest(t, r).GetRepository().GetSections()[0])[0]
+			divider := parent.GetRepositoryBlocks()[0].GetDivider()
+			if got := divider.GetMainWorkspace().GetId(); got != tc.want || (tc.want == "") != (divider.MainWorkspace == nil) {
+				t.Fatalf("main workspace = %v, want %q", divider.GetMainWorkspace(), tc.want)
+			}
+		})
+	}
+}
