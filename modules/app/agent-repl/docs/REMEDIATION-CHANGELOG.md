@@ -1380,3 +1380,4 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 - 2026-11-10 merge-queue-stall-triage (landed in queue bypass mode): Workspaces act on each other's requests without asking the user; permission settings and config still need the user's direct approval
 - 2026-11-10 merge-queue-stall-triage (landed in queue bypass mode): A parent is given its child's one update, its conclusion, instead of every question, landing and close; it subscribes continually only when it drives the child
 - 2026-11-10 merge-queue-stall-triage (landed in queue bypass mode): Todo row: cancelled RegisterWorkspace calls logged at ERROR during handover
+- 2026-11-10 merge-queue-stall-triage (landed in queue bypass mode): agent-repld follows a handover: every call a handing-over daemon refuses is sent to its successor, so a workspace mid-turn during a deploy can still store links, prompt and finish
