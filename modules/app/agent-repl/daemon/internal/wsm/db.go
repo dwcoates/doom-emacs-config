@@ -660,6 +660,17 @@ type DB interface {
 	// SetRemoteControlBridgeSession records the claude.ai session a
 	// workspace's bridge answered, keeping its mode.
 	SetRemoteControlBridgeSession(ctx context.Context, id WorkspaceID, bridge string) error
+	// QueueBypass answers a workspace's standing toward its repository's
+	// queue bypass mode, and the conversation it is not running (queuebypass.go).
+	QueueBypass(ctx context.Context, id WorkspaceID) (QueueBypass, error)
+	// TakeQueueBypass records a workspace as its repository's queue bypass
+	// holder, refusing ErrQueueBypassHeld while another workspace holds it.
+	TakeQueueBypass(ctx context.Context, id WorkspaceID, at time.Time) error
+	// ReleaseQueueBypass clears a workspace's hold on the mode.
+	ReleaseQueueBypass(ctx context.Context, id WorkspaceID) error
+	// SetParkedConversation records the conversation a workspace is not
+	// running, kept for its next switch.
+	SetParkedConversation(ctx context.Context, id WorkspaceID, vendorSessionID string) error
 	// WorkspaceContextUsage answers a workspace's last-known context fact,
 	// false when none was recorded (contextusage.go).
 	WorkspaceContextUsage(ctx context.Context, id WorkspaceID) (ContextUsageRecord, bool, error)

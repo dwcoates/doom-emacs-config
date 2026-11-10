@@ -603,10 +603,17 @@ func (v *verbs) publishNaming(ctx context.Context, log dlog.Logger, record wsm.W
 		log.Error(opRegister, "could not read the workspace's remote-control mode for its topbar", dlog.WithCause(dlog.Context{"workspace": string(record.ID)}, err))
 		return fmt.Errorf("read the remote-control mode of %q: %w", record.ID, err)
 	}
+	// THE QUEUE-BYPASS CHIP RIDES THE NAMING TOO, for the same reason.
+	bypass, err := v.queueBypassChip(ctx, record)
+	if err != nil {
+		log.Error(opRegister, "could not read the workspace's queue bypass standing for its topbar", dlog.WithCause(dlog.Context{"workspace": string(record.ID)}, err))
+		return err
+	}
 	v.deps.Topbar.SetNaming(record.ID, topbar.Naming{
 		Name:          record.Name,
 		ConfigDir:     configDir,
 		RemoteControl: remote.On,
+		QueueBypass:   bypass,
 	})
 	// THE LINKS ARE DURABLE, so a restarted daemon's title opens the same
 	// links the workspace had.
