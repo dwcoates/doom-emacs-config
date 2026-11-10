@@ -304,9 +304,9 @@ describe("drawRosterMergeQueue", () => {
       sc,
       "queue",
     );
-    expect([...body.children].map((el) => el.className.split(" ")[0])).toEqual([
+    expect([...body.children].map((el) => el.className)).toEqual([
       MERGE_QUEUE_HEAD_CLASS,
-      MERGE_QUEUE_REMEDIATING_CLASS,
+      `${MERGE_QUEUE_WAITING_CLASS} ${MERGE_QUEUE_REMEDIATING_CLASS}`,
       MERGE_QUEUE_WAITING_CLASS,
     ]);
   });
@@ -374,20 +374,17 @@ describe("drawRosterMergeQueue", () => {
       sc,
       "queue",
     );
-    const card = body.querySelector(`.${MERGE_QUEUE_REMEDIATING_CLASS}`)!;
-    expect([...card.children].map((line) => [...line.children].map((el) => [el.className, el.textContent]))).toEqual([
-      [
-        ["sb-mq-glyph", MERGE_GLYPH],
-        ["sb-mq-name", "w2"],
-        [MERGE_QUEUE_REASON_CLASS, "(fixing tests)"],
-        ["sb-mq-clock", formatTickedElapsed(4_000)],
-      ],
+    const line = body.querySelector(`.${MERGE_QUEUE_REMEDIATING_CLASS}`)!;
+    expect([...line.children].map((el) => [el.className, el.textContent])).toEqual([
+      ["sb-mq-name", "w2"],
+      [`sb-mq-label ${MERGE_QUEUE_REASON_CLASS}`, "fixing tests"],
+      ["sb-mq-clock", formatTickedElapsed(4_000)],
     ]);
   });
 
   it.each([
-    ["its failing tests", testsReason(), "(fixing tests)"],
-    ["its rebase's conflicts", conflictsReason(), "(resolving conflicts)"],
+    ["its failing tests", testsReason(), "fixing tests"],
+    ["its rebase's conflicts", conflictsReason(), "resolving conflicts"],
     ["a reason this build does not name", create(RosterMergeQueueRemediatingReasonSchema, {}), undefined],
   ])("says what a remediating merge repairs after its name: %s", (_name, reason, want) => {
     const { sc } = daemon();
@@ -756,13 +753,6 @@ describe("drawCardLine", () => {
 
   it.each([
     { name: "the head's card", card: () => drawRosterMergeQueueHead(mergingHead("w1"), undefined, daemon().sc, "head") },
-    {
-      name: "a remediating merge's card",
-      card: () =>
-        drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { remediating: [remediatingMerge("w1", NOW)] }), daemon().sc, "queue").querySelector(
-          `.${MERGE_QUEUE_REMEDIATING_CLASS}`,
-        ) as HTMLElement,
-    },
   ])("opens $name with the shared card line", ({ card }) => {
     const shared = drawCardLine(queueSubject("w1"), "subject");
     const drawn = card().firstElementChild as HTMLElement;

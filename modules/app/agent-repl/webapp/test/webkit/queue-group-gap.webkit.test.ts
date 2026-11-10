@@ -19,10 +19,9 @@ import { pageStylesheet } from "./stylesheets";
 /** The head card's merge glyph, as the sidebar draws it. */
 const GLYPH = `<span class="sb-mq-glyph" aria-hidden="true">⑂</span>`;
 
-/** A head-line: the glyph, a merge's NAME, the parenthetical REASON when given, and its clock. */
-function headLine(name: string, reason?: string): string {
-  const why = reason === undefined ? "" : `<span class="sb-mq-reason">(${reason})</span>`;
-  return `<div class="sb-mq-head-line">${GLYPH}<span class="sb-mq-name">${name}</span>${why}<span class="sb-mq-clock">4m</span></div>`;
+/** A head-line: the glyph, a merge's NAME, and its clock. */
+function headLine(name: string): string {
+  return `<div class="sb-mq-head-line">${GLYPH}<span class="sb-mq-name">${name}</span><span class="sb-mq-clock">4m</span></div>`;
 }
 
 /** The head card, with a stage strip when STAGES, as `drawRosterMergeQueueHead` draws it. */
@@ -33,9 +32,9 @@ function head(name: string, stages: boolean): string {
   return `<div class="sb-mq-head" data-standing="merging">${headLine(name)}${strip}</div>`;
 }
 
-/** A remediating card, as `drawRosterMergeQueueRemediating` draws it. */
+/** A remediating merge's line, as `drawRosterMergeQueueRemediating` draws it: a waiting line with its label. */
 function remediating(name: string): string {
-  return `<div class="sb-mq-remediating">${headLine(name, "fixing tests")}</div>`;
+  return `<div class="sb-mq-waiting sb-mq-remediating"><span class="sb-mq-name">${name}</span><span class="sb-mq-label sb-mq-reason">fixing tests</span><span class="sb-mq-clock">4m</span></div>`;
 }
 
 /** A waiting merge's line, as `drawRosterMergeQueueWaiting` draws it. */
