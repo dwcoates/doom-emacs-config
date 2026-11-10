@@ -408,7 +408,14 @@ func (r *resolver) SetSelection(sel wsm.Selection, stamp SelectStamp) bool {
 				return false
 			}
 			r.state.reg = reg
-			r.installSelected(sel.Current, stamp)
+			// A RE-SELECTION CHANGES NO VIEW, so its stamp is not stated:
+			// the selection's standing one stays, and the roster renders
+			// as it did and is dropped as the duplicate it is.
+			if sel.Again {
+				r.installSelected(sel.Current, r.standingStamp(sel.Current))
+			} else {
+				r.installSelected(sel.Current, stamp)
+			}
 			applied = true
 			return true
 		})
@@ -461,6 +468,15 @@ func patchedRegistry(reg Registry, seen bool, sel wsm.Selection) (Registry, bool
 	current := sel.Current
 	reg.Workspaces, reg.Repositories, reg.Subsections, reg.Current = workspaces, repositories, subsections, &current
 	return reg, true
+}
+
+// standingStamp is the stamp the roster states for WS now, the zero stamp
+// when it states none; it runs under the lock.
+func (r *resolver) standingStamp(ws ids.WorkspaceID) SelectStamp {
+	if st := r.state.stamp; st != nil && st.ws == ws {
+		return st.stamp
+	}
+	return SelectStamp{}
 }
 
 // installSelected makes WS the selection under STAMP; it runs under the lock.

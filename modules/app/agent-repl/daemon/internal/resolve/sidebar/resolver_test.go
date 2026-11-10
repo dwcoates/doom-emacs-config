@@ -789,6 +789,15 @@ func TestTheSelectStampIsStatedOnlyWhileItsSelectionStands(t *testing.T) {
 			},
 		},
 		{
+			name: "a re-selection keeps it rather than its own",
+			then: func(r sidebar.Resolver) {
+				again := selectionOf(workspace("w2", "two"))
+				again.Again = true
+				r.SetSelection(again, sidebar.SelectStamp{ID: "sel-2"})
+			},
+			wantID: "sel-1",
+		},
+		{
 			name: "an unstamped selection of the same workspace drops it",
 			then: func(r sidebar.Resolver) {
 				r.SetRegistrySelected(registry(workspace("w1", "one"), workspace("w2", "two")), w2, sidebar.SelectStamp{})
@@ -852,5 +861,28 @@ func TestAPatchedRegistryTakesTheStoresRowsWhole(t *testing.T) {
 	}
 	if !reg.Workspaces[2].Current || !reg.Repositories[0].Folded || !reg.Subsections[0].Folded {
 		t.Fatal("PatchedRegistry wrote through to the registry it was handed")
+	}
+}
+
+func TestAReSelectionPublishesNoNewRoster(t *testing.T) {
+	// Arrange.
+	r, _ := newResolver(t)
+	r.SetRegistry(registry(workspace("w1", "one"), workspace("w2", "two")))
+	if !r.SetSelection(selectionOf(workspace("w2", "two")), sidebar.SelectStamp{ID: "sel-1"}) {
+		t.Fatal("SetSelection refused")
+	}
+	before := r.Revision()
+	again := selectionOf(workspace("w2", "two"))
+	again.Again = true
+
+	// Act.
+	ok := r.SetSelection(again, sidebar.SelectStamp{ID: "sel-2"})
+
+	// Assert.
+	if !ok {
+		t.Fatal("SetSelection refused a re-selection")
+	}
+	if got := r.Revision(); got != before {
+		t.Fatalf("revision = %d, want %d: a re-selection changes no view", got, before)
 	}
 }

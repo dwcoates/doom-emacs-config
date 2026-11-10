@@ -148,7 +148,7 @@ func TestAParentWhoseChildIsCurrentHoldsTheSelection(t *testing.T) {
 			r, _ := newResolver(t)
 
 			// Act.
-			r.SetRegistrySelected(numberingRegistry(), tt.selected)
+			r.SetRegistrySelected(numberingRegistry(), tt.selected, sidebar.SelectStamp{})
 
 			// Assert.
 			if got := childrenFoldArm(t, r, "p"); got != tt.want {

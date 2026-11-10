@@ -77,6 +77,9 @@ func TestRepublishRegistryCarriesEveryDurableHalf(t *testing.T) {
 	f := newFixture(t)
 	f.workspace("w1", t.TempDir())
 	f.db.tasks = []wsm.Task{{ID: "task-1", Title: "ship it"}}
+	// A roster that cannot take the select's own answer has the select
+	// install the whole registry, which is the read under test.
+	f.sidebar.refuseSelection = true
 
 	// Act.
 	if err := f.verbs.Select(context.Background(), "w1", Switch{History: RecordSelection}); err != nil {
@@ -164,9 +167,9 @@ func TestARepublishLevelsACancelledRosterReadAtInfo(t *testing.T) {
 			f.workspace("w1", t.TempDir())
 			f.db.listWorkspacesErr = tt.listErr
 
-			// Act.
-			if err := f.verbs.Select(context.Background(), "w1", Switch{History: RecordSelection}); err != nil {
-				t.Fatalf("Select: %v", err)
+			// Act: a priority change republishes the whole registry.
+			if err := f.verbs.SetPriority(context.Background(), "w1", nil); err != nil {
+				t.Fatalf("SetPriority: %v", err)
 			}
 
 			// Assert.
@@ -190,8 +193,8 @@ func TestRepublishRegistryLogsItsCompletionAtInfo(t *testing.T) {
 	f.workspace("w1", t.TempDir())
 
 	// Act.
-	if err := f.verbs.Select(context.Background(), "w1", Switch{History: RecordSelection}); err != nil {
-		t.Fatalf("Select: %v", err)
+	if err := f.verbs.SetPriority(context.Background(), "w1", nil); err != nil {
+		t.Fatalf("SetPriority: %v", err)
 	}
 
 	// Assert: a roster republish is a production-visible mutation, so its

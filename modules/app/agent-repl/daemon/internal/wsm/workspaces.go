@@ -1181,10 +1181,7 @@ func (s *store) Select(ctx context.Context, id WorkspaceID, write SelectionWrite
 		again  bool
 	)
 	err := s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
-		err := tx.QueryRowContext(ctx, `SELECT is_current FROM workspaces WHERE id = ?`, id).Scan(&again)
-		if errors.Is(err, sql.ErrNoRows) {
-			return fmt.Errorf("wsm: workspace %s: %w", id, ErrNotFound)
-		}
+		err := scanWorkspaceRow(ctx, tx, id, "is_current", &again)
 		if err != nil {
 			return err
 		}
