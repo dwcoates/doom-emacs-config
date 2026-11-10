@@ -11,8 +11,8 @@ import (
 
 const opFailover = "daemon.persistentwifi.failover"
 
-// tick is one beat of Run: read the standing, then hold the hotspot failover
-// to it. Both run under the one lock, so a beat never acts on a reading an
+// tick is one beat of Run: read the standing, then hold the energy mode
+// (reconcileEnergyLocked) and the hotspot failover to it. Both run under the one lock, so a beat never acts on a reading an
 // Update changed underneath it.
 func (c *Controller) tick(ctx context.Context) {
 	c.mu.Lock()
@@ -22,6 +22,7 @@ func (c *Controller) tick(ctx context.Context) {
 		// An abandoned read says nothing about either fact (readLocked).
 		return
 	}
+	c.reconcileEnergyLocked(ctx, rd, "beat")
 	c.failoverLocked(ctx, rd)
 }
 
