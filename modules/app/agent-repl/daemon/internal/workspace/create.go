@@ -470,7 +470,7 @@ func (v *verbs) create(ctx context.Context, spec CreateSpec) (_ wsm.Workspace, e
 		global.Error(opCreate, "could not resolve the workspace log sink", dlog.Context{"cause": err.Error()})
 		return wsm.Workspace{}, fmt.Errorf("create %q: resolve log sink: %w", branch, err)
 	}
-	log = log.With(dlog.Context{"workspace": string(record.ID), "originator": spec.Originator.String()})
+	log = log.With(dlog.Context{"workspace": string(record.ID), "originator": spec.originator.String()})
 
 	// WHO CREATED IT, AND FOR WHICH SLACK MESSAGE, are recorded before any
 	// hook runs: every later stage's hooks read them (lifecycle.go).
@@ -620,11 +620,11 @@ func mintedPermissionMode(requested string) string {
 func (v *verbs) validateCreate(log dlog.Logger, spec CreateSpec) error {
 	// EVERY CREATOR STATES WHO IT IS (lifecycleconfig.Originator): the zero
 	// value is no kind, so a spec that left it unset is its builder's defect.
-	if spec.Originator == 0 {
+	if spec.originator == 0 {
 		log.Error(opCreate, "a create spec names no originator", nil)
 		return errors.New("create: the spec names no originator; every creator states whether it is the emoji-ack system or the user or a workspace")
 	}
-	if spec.Originator == lifecycleconfig.OriginatorEmojiAck && spec.SlackThread == "" {
+	if spec.originator == lifecycleconfig.OriginatorEmojiAck && spec.SlackThread == "" {
 		log.Error(opCreate, "an emoji-ack create names no Slack message", nil)
 		return errors.New("create: an emoji-ack create names the Slack message it was dispatched for")
 	}
@@ -1212,17 +1212,11 @@ func (v *verbs) CreateMergeWorkspace(ctx context.Context, requester wsm.Workspac
 		return wsm.Workspace{}, fmt.Errorf("create the merge workspace of %s: its origin names no maker", requester.ID)
 	}
 	parent, maker := requester.ID, origin.Maker
-	return v.Create(ctx, CreateSpec{
-		// A MERGE WORKSPACE IS THE QUEUE'S, made for a workspace's request.
-		Originator: lifecycleconfig.OriginatorUserOrWorkspace,
-		RepoDir:    repoDir,
-		BaseRef:    base,
-		Parent:     &parent,
-		ForkFrom:   &maker,
-		Requester:  &parent,
-		MergeOf:    &origin,
-		MergeName:  name,
-	})
+	// A MERGE WORKSPACE IS THE QUEUE'S, made for a workspace's request.
+	spec := NewCreateSpec(lifecycleconfig.OriginatorUserOrWorkspace)
+	spec.RepoDir, spec.BaseRef, spec.MergeOf, spec.MergeName = repoDir, base, &origin, name
+	spec.Parent, spec.ForkFrom, spec.Requester = &parent, &maker, &parent
+	return v.Create(ctx, spec)
 }
 
 // StartMergeWorkspace brings up merge workspace WS's session when none is

@@ -361,7 +361,7 @@ func TestAnIdenticalRequestJoinsTheCreateInFlight(t *testing.T) {
 }
 
 func TestDistinctRequestsAreDistinctCreates(t *testing.T) {
-	base := CreateSpec{Originator: lifecycleconfig.OriginatorUserOrWorkspace, RepoDir: "/r", InitialPrompt: "fix the login bug"}
+	base := CreateSpec{originator: lifecycleconfig.OriginatorUserOrWorkspace, RepoDir: "/r", InitialPrompt: "fix the login bug"}
 	p1 := wsm.PriorityP1
 	tests := []struct {
 		name       string
@@ -412,7 +412,7 @@ func TestAHeldRequestSurvivesItsEncoding(t *testing.T) {
 	// Arrange
 	p2 := wsm.PriorityP2
 	spec := CreateSpec{
-		Originator: lifecycleconfig.OriginatorEmojiAck, SlackThread: "https://w.slack.com/archives/C1/p1730000000123456",
+		originator: lifecycleconfig.OriginatorEmojiAck, SlackThread: "https://w.slack.com/archives/C1/p1730000000123456",
 		RepoDir: "/r", InitialPrompt: "fix it", OneShot: true, FromOrigin: true, Landing: &wsm.LandingChoice{},
 		ContextWorkspace: ptr(ids.WorkspaceID("ctx")), Parent: ptr(ids.WorkspaceID("owner")),
 		ContextSelection: &ContextSelection{Kind: ContextSelectionBubble, Row: "row-1", Markdown: "the text"},
@@ -452,7 +452,7 @@ func TestAHeldRequestKeepsItsLandingTarget(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
-			spec := CreateSpec{Originator: lifecycleconfig.OriginatorUserOrWorkspace, RepoDir: "/r", InitialPrompt: "fix it", Landing: tt.landing}
+			spec := CreateSpec{originator: lifecycleconfig.OriginatorUserOrWorkspace, RepoDir: "/r", InitialPrompt: "fix it", Landing: tt.landing}
 
 			// Act
 			encoded, err := encodeHeldSpec(spec)
@@ -563,7 +563,7 @@ func TestAHeldRequestFromBeforeOriginatorsResumesAsAUserOrWorkspaceCreate(t *tes
 	spec, err := decodeHeldSpec(encoded)
 
 	// Assert
-	if err != nil || spec.Originator != lifecycleconfig.OriginatorUserOrWorkspace {
+	if err != nil || spec.originator != lifecycleconfig.OriginatorUserOrWorkspace {
 		t.Fatalf("decodeHeldSpec = %+v, %v; want a user_or_workspace create", spec, err)
 	}
 }
@@ -582,7 +582,7 @@ func TestAHeldRequestFromBeforeTheOwnerNoticeRetiredResumes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	want := CreateSpec{Originator: lifecycleconfig.OriginatorUserOrWorkspace, RepoDir: "/r", InitialPrompt: "fix it", Parent: ptr(ids.WorkspaceID("owner"))}
+	want := CreateSpec{originator: lifecycleconfig.OriginatorUserOrWorkspace, RepoDir: "/r", InitialPrompt: "fix it", Parent: ptr(ids.WorkspaceID("owner"))}
 	if createKey(decoded) != createKey(want) {
 		t.Fatalf("decoded %+v, want %+v", decoded, want)
 	}
@@ -879,7 +879,7 @@ func TestAHeldRequestKeepsItsHiddenAndPlacement(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
 			spec := CreateSpec{
-				Originator: lifecycleconfig.OriginatorUserOrWorkspace, RepoDir: "/r", InitialPrompt: "fix it",
+				originator: lifecycleconfig.OriginatorUserOrWorkspace, RepoDir: "/r", InitialPrompt: "fix it",
 				Requester: ptr(ids.WorkspaceID("asker")), Hidden: tt.hidden, Placement: tt.placement,
 			}
 
@@ -906,7 +906,7 @@ func TestAHeldRequestKeepsItsHiddenAndPlacement(t *testing.T) {
 
 func TestCreateKeyDistinguishesHiddenAndEveryPlacement(t *testing.T) {
 	base := func() CreateSpec {
-		return CreateSpec{Originator: lifecycleconfig.OriginatorUserOrWorkspace, RepoDir: "/r", InitialPrompt: "fix it"}
+		return CreateSpec{originator: lifecycleconfig.OriginatorUserOrWorkspace, RepoDir: "/r", InitialPrompt: "fix it"}
 	}
 	variants := map[string]func(*CreateSpec){
 		"plain":        func(*CreateSpec) {},

@@ -128,15 +128,13 @@ func (s *server) CreateWorkspace(
 		return s.createAsyncMerge(ctx, rpc, resp, repository, req.Msg)
 	}
 
-	spec := workspace.CreateSpec{
-		RepoDir:     repository.Dir,
-		Requester:   requesterID(req.Msg.GetRequester()),
-		ForkFrom:    forkSourceID(req.Msg.GetContextOrigin()),
-		SlackThread: req.Msg.GetSlackOrigin().GetThreadUrl(),
-		Originator:  originatorOf(req.Msg.GetOriginator()),
-		Hidden:      req.Msg.GetHidden(),
-		Placement:   createPlacementOf(req.Msg.GetPlacement()),
-	}
+	spec := workspace.NewCreateSpec(originatorOf(req.Msg.GetOriginator()))
+	spec.RepoDir = repository.Dir
+	spec.Requester = requesterID(req.Msg.GetRequester())
+	spec.ForkFrom = forkSourceID(req.Msg.GetContextOrigin())
+	spec.SlackThread = req.Msg.GetSlackOrigin().GetThreadUrl()
+	spec.Hidden = req.Msg.GetHidden()
+	spec.Placement = createPlacementOf(req.Msg.GetPlacement())
 	if standard := req.Msg.GetStandard(); standard != nil {
 		spec.InitialPrompt = s.saidText(s.log, "standard.initial_prompt", standard.GetInitialPrompt())
 		spec.Name = standard.GetName()

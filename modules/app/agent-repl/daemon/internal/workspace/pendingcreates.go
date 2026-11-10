@@ -712,7 +712,7 @@ func createKey(spec CreateSpec) string {
 		Hidden: spec.Hidden, Placement: heldPlacementOf(spec.Placement),
 		// THE KEY SPELLS THE KIND BY NUMBER, so a spec that names none still
 		// keys, and is refused by the create's validation rather than here.
-		SlackThread: spec.SlackThread, Originator: fmt.Sprint(int(spec.Originator)),
+		SlackThread: spec.SlackThread, Originator: fmt.Sprint(int(spec.originator)),
 		RepoDir: filepath.Clean(spec.RepoDir), Parent: ids.Optional(spec.Parent),
 		Landing:          landingKey(spec.Landing),
 		ContextWorkspace: ids.Optional(spec.ContextWorkspace), ForkFrom: ids.Optional(spec.ForkFrom),
@@ -866,7 +866,7 @@ func encodeHeldSpec(spec CreateSpec) (string, error) {
 		ForkFrom: ids.Optional(spec.ForkFrom), Requester: ids.Optional(spec.Requester),
 		ConsentedUngatedMode: spec.ConsentedUngatedMode, PreDeploy: hookBytes(spec.DeployHooks.PreDeploy),
 		PostDeploy: hookBytes(spec.DeployHooks.PostDeploy), Name: spec.Name, Model: spec.Model, PermissionMode: spec.PermissionMode,
-		SlackThread: spec.SlackThread, Originator: spec.Originator.String(),
+		SlackThread: spec.SlackThread, Originator: spec.originator.String(),
 		Hidden: spec.Hidden, Placement: heldPlacementOf(spec.Placement),
 	}
 	if spec.Priority != nil {
@@ -897,21 +897,20 @@ func decodeHeldSpec(encoded string) (CreateSpec, error) {
 	if err != nil {
 		return CreateSpec{}, err
 	}
-	spec := CreateSpec{
-		RepoDir: held.RepoDir, InitialPrompt: held.InitialPrompt, OneShot: held.OneShot, FromOrigin: held.FromOrigin,
-		ContextWorkspace: optionalID(held.ContextWorkspace), ContextSelection: contextSelectionOf(held.ContextSelection),
-		BaseRef: held.BaseRef, Parent: optionalID(held.Parent),
-		ForkFrom: optionalID(held.ForkFrom), Requester: optionalID(held.Requester),
-		ConsentedUngatedMode: held.ConsentedUngatedMode, DeployHooks: wsm.DeployHooks{PreDeploy: pre, PostDeploy: post},
-		Name: held.Name, Model: held.Model, PermissionMode: held.PermissionMode, SlackThread: held.SlackThread,
-		Originator: lifecycleconfig.OriginatorUserOrWorkspace,
-		Hidden:     held.Hidden, Placement: createPlacementOf(held.Placement),
-	}
+	originator := lifecycleconfig.OriginatorUserOrWorkspace
 	if held.Originator != "" {
-		if spec.Originator, err = lifecycleconfig.ParseOriginator(held.Originator); err != nil {
+		if originator, err = lifecycleconfig.ParseOriginator(held.Originator); err != nil {
 			return CreateSpec{}, fmt.Errorf("decode a held create's request: %w", err)
 		}
 	}
+	spec := NewCreateSpec(originator)
+	spec.RepoDir, spec.InitialPrompt, spec.OneShot, spec.FromOrigin = held.RepoDir, held.InitialPrompt, held.OneShot, held.FromOrigin
+	spec.ContextWorkspace, spec.ContextSelection = optionalID(held.ContextWorkspace), contextSelectionOf(held.ContextSelection)
+	spec.BaseRef, spec.Parent = held.BaseRef, optionalID(held.Parent)
+	spec.ForkFrom, spec.Requester = optionalID(held.ForkFrom), optionalID(held.Requester)
+	spec.ConsentedUngatedMode, spec.DeployHooks = held.ConsentedUngatedMode, wsm.DeployHooks{PreDeploy: pre, PostDeploy: post}
+	spec.Name, spec.Model, spec.PermissionMode, spec.SlackThread = held.Name, held.Model, held.PermissionMode, held.SlackThread
+	spec.Hidden, spec.Placement = held.Hidden, createPlacementOf(held.Placement)
 	if held.Priority != nil {
 		p := wsm.Priority(*held.Priority)
 		spec.Priority = &p

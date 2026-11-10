@@ -89,7 +89,7 @@ func (v *verbs) creationStageOf(cfg *repoconfigv1.LifecycleConfig, spec CreateSp
 		return creationStage{}
 	}
 	builtins := lifecycleconfig.Builtins{CheckoutRoot: v.deps.CheckoutRoot}
-	hooks := builtins.Hooks(cfg, lifecycleconfig.StageCreation, spec.Originator, dirpath.Same(targetDir, repoDir))
+	hooks := builtins.Hooks(cfg, lifecycleconfig.StageCreation, spec.originator, dirpath.Same(targetDir, repoDir))
 	return creationStage{repoRoot: repoDir, hooks: hooks}
 }
 
@@ -97,8 +97,8 @@ func (v *verbs) creationStageOf(cfg *repoconfigv1.LifecycleConfig, spec CreateSp
 // Slack message, the message, stored among its links as a reference. Every
 // later stage's hooks read both.
 func (v *verbs) recordOrigin(ctx context.Context, log dlog.Logger, record wsm.Workspace, spec CreateSpec) error {
-	if err := v.deps.DB.SetWorkspaceOriginator(ctx, record.ID, spec.Originator.String()); err != nil {
-		log.Error(opCreate, "could not record who created the workspace", dlog.Context{"originator": spec.Originator.String(), "cause": err.Error()})
+	if err := v.deps.DB.SetWorkspaceOriginator(ctx, record.ID, spec.originator.String()); err != nil {
+		log.Error(opCreate, "could not record who created the workspace", dlog.Context{"originator": spec.originator.String(), "cause": err.Error()})
 		return fmt.Errorf("create %q: record its originator: %w", record.Name, err)
 	}
 	if spec.SlackThread == "" {
@@ -128,7 +128,7 @@ func (v *verbs) runCreationScripts(ctx context.Context, log dlog.Logger, record 
 		}
 		logPath := merge.LifecycleLogPath(v.deps.StateDir, lifecycleconfig.StageCreation, v.now(), i)
 		fields := dlog.Context{"hook": i, "script": script.GetPath(), "log": logPath, "repo_root": stage.repoRoot,
-			"originator": spec.Originator.String(), "timeout_seconds": script.GetTimeoutSeconds()}
+			"originator": spec.originator.String(), "timeout_seconds": script.GetTimeoutSeconds()}
 		log.Info(opCreate, "a creation script hook started", fields)
 		ran := merge.RunKeptScript(ctx, v.deps.HookRunner, stage.repoRoot, script, env, logPath)
 		failure := ran.Failure(script)
@@ -162,7 +162,7 @@ func creationPrompts(log dlog.Logger, spec CreateSpec, stage creationStage) (str
 		text, err := lifecycleconfig.ExpandPrompt(prompt.GetText(), spec.SlackThread)
 		if err != nil {
 			log.Error(opCreate, "a creation prompt hook names the originating Slack thread of a workspace created for none; the create is undone", dlog.Context{
-				"hook": i, "originator": spec.Originator.String(), "cause": err.Error()})
+				"hook": i, "originator": spec.originator.String(), "cause": err.Error()})
 			return "", refuseWith(log, "CreateWorkspace", ArmCreationHookFailed,
 				fmt.Sprintf("creation prompt hook %d: %v", i, err), false,
 				map[string]any{"path": "", "detail": err.Error(), "log_path": ""})

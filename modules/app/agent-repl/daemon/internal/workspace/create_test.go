@@ -56,7 +56,7 @@ func mainWorktree(t *testing.T, f *fixture) string {
 // worktree.
 func standardSpec(t *testing.T, f *fixture) CreateSpec {
 	t.Helper()
-	return CreateSpec{Originator: lifecycleconfig.OriginatorUserOrWorkspace, RepoDir: mainWorktree(t, f), InitialPrompt: "fix the login bug"}
+	return CreateSpec{originator: lifecycleconfig.OriginatorUserOrWorkspace, RepoDir: mainWorktree(t, f), InitialPrompt: "fix the login bug"}
 }
 
 // oneShotBriefs arranges the two briefs the one-shot decoration reads.
@@ -461,7 +461,7 @@ func TestCreateSubmitsTheInitialPromptOnlyAfterTheSessionIsUp(t *testing.T) {
 func TestCreateWithoutAPromptSubmitsNothing(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
-	spec := CreateSpec{Originator: lifecycleconfig.OriginatorUserOrWorkspace, RepoDir: mainWorktree(t, f), Name: "promptless"}
+	spec := CreateSpec{originator: lifecycleconfig.OriginatorUserOrWorkspace, RepoDir: mainWorktree(t, f), Name: "promptless"}
 
 	// Act.
 	if _, err := f.verbs.Create(context.Background(), spec); err != nil {
@@ -1099,7 +1099,7 @@ func TestCreateReportsItsStageSequencePerForm(t *testing.T) {
 			name: "named without an initial prompt",
 			arrange: func(t *testing.T) (*fixture, CreateSpec) {
 				f := newFixture(t)
-				return f, CreateSpec{Originator: lifecycleconfig.OriginatorUserOrWorkspace, RepoDir: mainWorktree(t, f), Name: "promptless"}
+				return f, CreateSpec{originator: lifecycleconfig.OriginatorUserOrWorkspace, RepoDir: mainWorktree(t, f), Name: "promptless"}
 			},
 			want: []CreateStage{CreateStageCreatingWorktree, CreateStageStartingSession},
 		},
@@ -1107,7 +1107,7 @@ func TestCreateReportsItsStageSequencePerForm(t *testing.T) {
 			name: "unnamed without an initial prompt",
 			arrange: func(t *testing.T) (*fixture, CreateSpec) {
 				f := newFixture(t)
-				return f, CreateSpec{Originator: lifecycleconfig.OriginatorUserOrWorkspace, RepoDir: mainWorktree(t, f)}
+				return f, CreateSpec{originator: lifecycleconfig.OriginatorUserOrWorkspace, RepoDir: mainWorktree(t, f)}
 			},
 			want: []CreateStage{CreateStageCreatingWorktree, CreateStageStartingSession},
 		},
@@ -2924,7 +2924,7 @@ func TestCreateStartsAShimOnlyForAPrompt(t *testing.T) {
 		wantStarted bool
 	}{
 		{name: "no initial prompt starts nothing", spec: func(t *testing.T, f *fixture) CreateSpec {
-			return CreateSpec{Originator: lifecycleconfig.OriginatorUserOrWorkspace, RepoDir: mainWorktree(t, f), Name: "promptless"}
+			return CreateSpec{originator: lifecycleconfig.OriginatorUserOrWorkspace, RepoDir: mainWorktree(t, f), Name: "promptless"}
 		}},
 		{name: "an initial prompt starts the session", spec: standardSpec, wantStarted: true},
 	}

@@ -21,7 +21,7 @@ const creationThread = "https://acme.slack.com/archives/C1/p1730000000123456"
 // emojiAckSpec is the standard create as the emoji-ack system makes it.
 func emojiAckSpec(t *testing.T, f *fixture) CreateSpec {
 	spec := standardSpec(t, f)
-	spec.Originator, spec.SlackThread = lifecycleconfig.OriginatorEmojiAck, creationThread
+	spec.originator, spec.SlackThread = lifecycleconfig.OriginatorEmojiAck, creationThread
 	return spec
 }
 
@@ -100,8 +100,8 @@ func TestACreateSpecWithNoOriginatorIsRefused(t *testing.T) {
 		edit func(*CreateSpec)
 		want string
 	}{
-		{name: "no originator", edit: func(s *CreateSpec) { s.Originator = 0 }, want: "names no originator"},
-		{name: "emoji-ack with no Slack message", edit: func(s *CreateSpec) { s.Originator = lifecycleconfig.OriginatorEmojiAck }, want: "names the Slack message"},
+		{name: "no originator", edit: func(s *CreateSpec) { s.originator = 0 }, want: "names no originator"},
+		{name: "emoji-ack with no Slack message", edit: func(s *CreateSpec) { s.originator = lifecycleconfig.OriginatorEmojiAck }, want: "names the Slack message"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

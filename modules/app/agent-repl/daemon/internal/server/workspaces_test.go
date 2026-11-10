@@ -3443,7 +3443,7 @@ func TestCreateWorkspaceMapsTheOriginatorToTheSpec(t *testing.T) {
 			if err != nil || resp.Msg.GetSuccess() == nil {
 				t.Fatalf("CreateWorkspace = (%v, %v), want success", resp, err)
 			}
-			if got := h.Verbs.createSpecs[0].Originator; got != tt.want {
+			if got := h.Verbs.createSpecs[0].Originator(); got != tt.want {
 				t.Fatalf("spec originator = %v, want %v", got, tt.want)
 			}
 		})
