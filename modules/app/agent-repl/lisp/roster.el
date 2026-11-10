@@ -323,6 +323,12 @@ goes through."
 Nil when the daemon has no count to state; zero is a real count."
   (plist-get (plist-get (plist-get row :detail) :commits) :count))
 
+(defun agent-repl-roster-row-summary (row)
+  "Return ROW's summary text, or nil when the daemon states none.
+The workspace's generated summary (`RosterRowDetailSummary'), the same
+text the topbar draws over the workspace's name."
+  (plist-get (plist-get (plist-get row :detail) :summary) :text))
+
 (defun agent-repl-roster-row-attention-p (row)
   "Return non-nil when ROW carries the attention marker."
   (and (plist-get row :attention) t))
