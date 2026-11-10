@@ -461,3 +461,92 @@ func TestProbeForkPointAnswersWhetherAForkCouldBeMade(t *testing.T) {
 		})
 	}
 }
+
+// ownAccountRoot is the account root ownPendingFork's session records.
+const ownAccountRoot = "/accounts/own"
+
+// ownPendingFork arranges a workspace bound to a fork of its own queue
+// conversation, as the first switch into the queue bypass mode leaves it.
+func ownPendingFork(f *fleetFixture) wsm.Workspace {
+	ws := f.workspace("own")
+	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, HostSessionID: "host-own", ConfigDir: ownAccountRoot}
+	if f.db.pendingForks == nil {
+		f.db.pendingForks = map[ids.WorkspaceID]wsm.PendingFork{}
+	}
+	f.db.pendingForks[ws.ID] = wsm.PendingFork{Workspace: ws.ID, Parent: ws.ID, ParentVendorSessionID: "vendor-queue"}
+	return ws
+}
+
+func TestAnOwnForksBringUpForksTheWholeConversationUnderNoHold(t *testing.T) {
+	// Arrange
+	f := newFleetFixture(t)
+	ws := ownPendingFork(f)
+	f.client.response = startedResponse("forked-own")
+
+	// Act
+	err := f.fleet.Start(context.Background(), ws.ID)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if len(f.client.forkSessionAsked) != 1 {
+		t.Fatalf("ForkSession asked %d times, want once", len(f.client.forkSessionAsked))
+	}
+	asked := f.client.forkSessionAsked[0]
+	if asked.GetParentVendorSessionId() != "vendor-queue" || asked.GetParentWorkspaceDir() != ws.Dir || asked.GetParentAccountRoot() != ownAccountRoot || asked.GetPoint().GetWhole() == nil {
+		t.Fatalf("ForkSession asked %v, want the whole queue conversation under the workspace's own root", asked)
+	}
+	if len(f.deliveries.held) != 0 {
+		t.Fatalf("held = %v, want no deliveries held for a conversation nothing drives", f.deliveries.held)
+	}
+	if got := f.client.requests[len(f.client.requests)-1].GetResume().GetVendorSessionId(); got != "forked-own" {
+		t.Fatalf("StartSession resumed %q, want the fork", got)
+	}
+}
+
+func TestAnOwnForkRecordsTheWorkspaceAsItsOwnParent(t *testing.T) {
+	// Arrange
+	f := newFleetFixture(t)
+	ws := ownPendingFork(f)
+	f.client.response = startedResponse("forked-own")
+
+	// Act
+	err := f.fleet.Start(context.Background(), ws.ID)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if len(f.db.resolvedForks) != 1 {
+		t.Fatalf("resolved forks = %+v, want the fork recorded once", f.db.resolvedForks)
+	}
+	got := f.db.resolvedForks[0]
+	if got.vendorSessionID != "forked-own" || got.lineage.Workspace != ws.ID || got.lineage.Parent != ws.ID || got.lineage.ThroughMs != fixedNow.UnixMilli() {
+		t.Fatalf("resolved = %+v, want the fork of the workspace's own conversation bounded at now", got)
+	}
+	if _, owed := f.db.pendingForks[ws.ID]; owed {
+		t.Fatal("the own fork is still owed after it was made")
+	}
+}
+
+func TestAnOwnForkOfASessionRecordingNoAccountRootIsRefused(t *testing.T) {
+	// Arrange
+	f := newFleetFixture(t)
+	ws := ownPendingFork(f)
+	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, HostSessionID: "host-own"}
+
+	// Act
+	err := f.fleet.Start(context.Background(), ws.ID)
+
+	// Assert
+	if !errors.Is(err, ErrForkRefused) {
+		t.Fatalf("Start = %v, want ErrForkRefused", err)
+	}
+	if _, owed := f.db.pendingForks[ws.ID]; !owed || len(f.db.resolvedForks) != 0 || len(f.client.forkSessionAsked) != 0 {
+		t.Fatalf("pending %v resolved %+v asked %d, want the fork still owed and nothing made", owed, f.db.resolvedForks, len(f.client.forkSessionAsked))
+	}
+	if !fleetLogged(f, "error", opBringUp, "the workspace whose own conversation is forked records no account root") {
+		t.Fatalf("records = %+v, want the missing root at error", f.log.logger.Records())
+	}
+}

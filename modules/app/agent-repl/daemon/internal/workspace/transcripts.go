@@ -243,7 +243,7 @@ func (v *verbs) BindSession(ctx context.Context, ws ids.WorkspaceID, vendorSessi
 	// work itself finishes and the roster says so.
 	swap := context.WithoutCancel(ctx)
 
-	if err := v.swapConversation(swap, log, ws, vendorSessionID, true, progress,
+	if err := v.swapConversation(swap, log, ws, conversationBinding{vendorSessionID: vendorSessionID}, true, progress,
 		"the workspace was bound to a different vendor conversation",
 		func(step swapStep, err error) error {
 			if step == swapStopping {
@@ -273,9 +273,20 @@ const (
 	swapStarting
 )
 
+// conversationBinding is what a swap binds the workspace to: a conversation
+// to resume, none (a fresh start), or a fork of one of the workspace's own
+// conversations that the start makes first.
+type conversationBinding struct {
+	// vendorSessionID is the conversation resumed; empty for a fresh start
+	// and for an own fork, whose id the fork mints.
+	vendorSessionID string
+	// ownForkOf is the conversation an own fork copies; empty otherwise.
+	ownForkOf string
+}
+
 // swapConversation is the one session swap a bind and a queue-bypass switch
-// share: the current session is stopped, VENDORSESSIONID is recorded as the
-// workspace's binding (empty starts it fresh), the feed is emptied, and the
+// share: the current session is stopped, TO is recorded as the workspace's
+// binding, the feed is emptied, and the
 // session is started on the binding — through StartRebound when REBIND, the
 // one start that tells the shim to adopt the bound conversation's identity.
 // FAILED maps a stop or a start that failed onto the caller's refusal; a
@@ -293,7 +304,7 @@ func (v *verbs) swapConversation(
 	ctx context.Context,
 	log dlog.Logger,
 	ws ids.WorkspaceID,
-	vendorSessionID string,
+	to conversationBinding,
 	rebind bool,
 	progress BindProgress,
 	why string,
@@ -304,7 +315,7 @@ func (v *verbs) swapConversation(
 		return failed(swapStopping, err)
 	}
 	reportBindStage(progress, BindStageRecordingBinding)
-	if err := v.recordBinding(ctx, log, ws, vendorSessionID); err != nil {
+	if err := v.recordBinding(ctx, log, ws, to); err != nil {
 		return err
 	}
 	v.deps.Feed.ResetWorkspace(ws, why)
@@ -371,7 +382,7 @@ func (v *verbs) validateBind(
 // would erase the stop's account of itself. A workspace that has never
 // recorded a session gets a minted host identity, because a row with none is
 // refused at the write and the binding would have nowhere to live.
-func (v *verbs) recordBinding(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, vendorSessionID string) error {
+func (v *verbs) recordBinding(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, to conversationBinding) error {
 	session, found, err := v.deps.DB.Session(ctx, ws)
 	if err != nil {
 		log.Error(opBindSession, "could not read the session record to bind onto", dlog.Context{"cause": err.Error()})
@@ -387,14 +398,24 @@ func (v *verbs) recordBinding(ctx context.Context, log dlog.Logger, ws ids.Works
 		})
 	}
 	session.Workspace = ws
-	session.VendorSessionID = vendorSessionID
+	session.VendorSessionID = to.vendorSessionID
 	// THE BINDING FORGETS THE FORK: a workspace bound to another conversation
-	// no longer continues the one its lineage describes.
-	if err := v.deps.DB.BindSession(ctx, session); err != nil {
-		log.Error(opBindSession, "could not record the new binding", dlog.Context{"cause": err.Error()})
+	// no longer continues the one its lineage describes. An own fork is owed
+	// in the same write, so the start makes it rather than coming up fresh.
+	if to.ownForkOf != "" {
+		err = v.deps.DB.BindSessionToOwnFork(ctx, session, to.ownForkOf)
+	} else {
+		err = v.deps.DB.BindSession(ctx, session)
+	}
+	if err != nil {
+		log.Error(opBindSession, "could not record the new binding", dlog.Context{
+			"vendor_session_id": to.vendorSessionID, "own_fork_of": to.ownForkOf, "cause": err.Error(),
+		})
 		return fmt.Errorf("bind %q: record the binding: %w", ws, err)
 	}
-	log.Info(opBindSession, "recorded the workspace's new conversation binding", nil)
+	log.Info(opBindSession, "recorded the workspace's new conversation binding", dlog.Context{
+		"vendor_session_id": to.vendorSessionID, "own_fork_of": to.ownForkOf,
+	})
 	return nil
 }
 

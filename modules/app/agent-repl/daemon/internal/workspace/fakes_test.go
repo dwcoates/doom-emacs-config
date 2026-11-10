@@ -61,6 +61,9 @@ var errFake = errors.New("workspace test: arranged failure")
 type fakeDB struct {
 	wsm.DB
 
+	// parkedConversations are the conversations SetParkedConversation kept.
+	parkedConversations map[ids.WorkspaceID]string
+
 	// storedSummaries are the summaries WorkspaceSummaryOf answers;
 	// summaryErr fails that read.
 	storedSummaries map[ids.WorkspaceID]string
@@ -1406,6 +1409,29 @@ func (d *fakeDB) BindSession(ctx context.Context, s wsm.Session) error {
 	delete(d.pendingForks, s.Workspace)
 	delete(d.lineage, s.Workspace)
 	return d.PutSession(ctx, s)
+}
+
+// SetParkedConversation records the conversation a queue-bypass switch
+// stepped the workspace out of.
+func (d *fakeDB) SetParkedConversation(_ context.Context, id ids.WorkspaceID, vendorSessionID string) error {
+	if d.parkedConversations == nil {
+		d.parkedConversations = map[ids.WorkspaceID]string{}
+	}
+	d.parkedConversations[id] = vendorSessionID
+	return nil
+}
+
+// BindSessionToOwnFork binds the session with no conversation and records the
+// own fork it owes, as the store does in one transaction.
+func (d *fakeDB) BindSessionToOwnFork(ctx context.Context, s wsm.Session, parentVendorSessionID string) error {
+	if err := d.BindSession(ctx, s); err != nil {
+		return err
+	}
+	if d.pendingForks == nil {
+		d.pendingForks = map[ids.WorkspaceID]wsm.PendingFork{}
+	}
+	d.pendingForks[s.Workspace] = wsm.PendingFork{Workspace: s.Workspace, Parent: s.Workspace, ParentVendorSessionID: parentVendorSessionID}
+	return nil
 }
 
 func (d *fakeDB) HeldPrompts(_ context.Context, id ids.WorkspaceID) ([]wsm.HeldPrompt, error) {

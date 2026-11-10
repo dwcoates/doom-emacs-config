@@ -62,6 +62,9 @@ type madeFork struct {
 // records it, answering the vendor session id the bring-up resumes.
 func (f *Fleet) makeFork(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, client shimclient.Client, pending wsm.PendingFork) (string, error) {
 	log = log.With(dlog.Context{"parent": string(pending.Parent)})
+	if pending.Own() {
+		return f.makeOwnFork(ctx, log, ws, client, pending)
+	}
 	parentRecord, err := f.deps.DB.Workspace(ctx, pending.Parent)
 	if err != nil {
 		log.Error(opBringUp, "the fork's parent workspace could not be read", dlog.Context{"cause": err.Error()})
@@ -120,6 +123,58 @@ func (f *Fleet) makeFork(ctx context.Context, log dlog.Logger, ws ids.WorkspaceI
 	return made.vendorSessionID, nil
 }
 
+// makeOwnFork makes WS's fork of one of its own conversations, the one
+// PENDING names, through CLIENT (WS's held shim), and records it.
+//
+// THE WHOLE CONVERSATION IS FORKED, UNDER NO HOLD. The conversation copied is
+// the one the bind just stepped the workspace out of: its session was stopped
+// before the bind, and the shim being brought up is the only one the
+// workspace has, so nothing drives the copied conversation and no turn of it
+// can be in flight. Its transcript sits under the account root the
+// workspace's session records, which the bind kept.
+func (f *Fleet) makeOwnFork(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, client shimclient.Client, pending wsm.PendingFork) (string, error) {
+	log = log.With(dlog.Context{"parent_vendor_session_id": pending.ParentVendorSessionID})
+	record, err := f.deps.DB.Workspace(ctx, ws)
+	if err != nil {
+		log.Error(opBringUp, "the workspace whose own conversation is forked could not be read", dlog.Context{"cause": err.Error()})
+		return "", fmt.Errorf("%w: read the workspace %q: %w", ErrForkRefused, ws, err)
+	}
+	conv, err := readRecordedSession(ctx, f.deps.DB, ws)
+	if err != nil {
+		log.Error(opBringUp, "the session of the workspace whose own conversation is forked could not be read", dlog.Context{"cause": err.Error()})
+		return "", fmt.Errorf("%w: read the workspace's session: %w", ErrForkRefused, err)
+	}
+	root := conv.session.ConfigDir
+	if root == "" {
+		log.Error(opBringUp, "the workspace whose own conversation is forked records no account root", nil)
+		return "", fmt.Errorf("%w: workspace %q records no account root for its conversation", ErrForkRefused, ws)
+	}
+	point := wholeForkPoint(f.now().UnixMilli())
+	made, err := forkThrough(ctx, log, client, ws, ws, record.Dir, root, pending.ParentVendorSessionID, point)
+	if err != nil {
+		return "", err
+	}
+	if err := f.deps.DB.ResolveFork(ctx, made.vendorSessionID, made.lineage); err != nil {
+		log.Error(opBringUp, "the own fork was made but could not be recorded; the next bring-up forks again", dlog.Context{
+			"vendor_session_id": made.vendorSessionID, "cause": err.Error(),
+		})
+		return "", fmt.Errorf("record the own fork of %q: %w", pending.ParentVendorSessionID, err)
+	}
+	log.Info(opBringUp, "the workspace's own conversation was forked and recorded; the session resumes the fork", dlog.Context{
+		"vendor_session_id": made.vendorSessionID, "parent_book": made.lineage.ParentBook, "through_ms": made.lineage.ThroughMs,
+	})
+	return made.vendorSessionID, nil
+}
+
+// wholeForkPoint is the point of a fork that carries a whole conversation
+// nothing drives, bounded at AT.
+func wholeForkPoint(at int64) *shimv1.GetForkPointSuccess {
+	return &shimv1.GetForkPointSuccess{
+		Point:   &shimv1.ForkPoint{Extent: &shimv1.ForkPoint_Whole{Whole: &shimv1.ForkPointWhole{}}},
+		Through: &conversationv1.ConversationThrough{AtMs: at},
+	}
+}
+
 // forkPoint answers where a fork of PARENT ends: the parent's running shim's
 // answer, or the whole transcript bounded at now when no shim runs it — a
 // conversation nothing drives has no turn in flight.
@@ -127,10 +182,7 @@ func (f *Fleet) forkPoint(ctx context.Context, log dlog.Logger, parent ids.Works
 	client, live := f.Client(parent)
 	if !live {
 		log.Info(opBringUp, "the fork's parent has no running shim; the whole transcript is forked", nil)
-		return &shimv1.GetForkPointSuccess{
-			Point:   &shimv1.ForkPoint{Extent: &shimv1.ForkPoint_Whole{Whole: &shimv1.ForkPointWhole{}}},
-			Through: &conversationv1.ConversationThrough{AtMs: f.now().UnixMilli()},
-		}, nil
+		return wholeForkPoint(f.now().UnixMilli()), nil
 	}
 	resp, err := client.GetForkPoint(ctx, &shimv1.GetForkPointRequest{})
 	if err != nil {

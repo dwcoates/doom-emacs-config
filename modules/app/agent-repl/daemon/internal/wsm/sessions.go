@@ -83,16 +83,52 @@ func (s *store) BindSession(ctx context.Context, sess Session) error {
 	}
 	fields := dlog.Context{"workspace": string(sess.Workspace), "vendor_session": sess.VendorSessionID, "config_dir": sess.ConfigDir}
 	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
-		if err := putSessionTx(ctx, tx, sess); err != nil {
+		return bindSessionTx(ctx, tx, sess)
+	})
+}
+
+// BindSessionToOwnFork binds workspace SESS.Workspace to a fork of its own
+// conversation PARENTVENDORSESSIONID, made at the next bring-up: in ONE
+// transaction the session is bound with no vendor id, the fork the workspace
+// was is forgotten as BindSession forgets it, and the own fork is recorded as
+// owed. There is no moment at which the record names no conversation and owes
+// no fork, so no bring-up can come up fresh in between.
+func (s *store) BindSessionToOwnFork(ctx context.Context, sess Session, parentVendorSessionID string) error {
+	const op = "daemon.wsm.bind_session_to_own_fork"
+	fields := dlog.Context{"workspace": string(sess.Workspace), "parent_vendor_session_id": parentVendorSessionID, "config_dir": sess.ConfigDir}
+	if sess.HostSessionID == "" {
+		return fmt.Errorf("wsm: workspace %s: %w", sess.Workspace, ErrSessionIdentityMissing)
+	}
+	fork := PendingFork{Workspace: sess.Workspace, Parent: sess.Workspace, ParentVendorSessionID: parentVendorSessionID}
+	if err := validPendingFork(fork); err != nil {
+		s.log.Error(op, "refused an own fork that names no conversation to copy", withError(fields, err))
+		return err
+	}
+	if sess.VendorSessionID != "" {
+		err := fmt.Errorf("wsm: workspace %s: a session bound to a fork it owes names no conversation yet, got %q", sess.Workspace, sess.VendorSessionID)
+		s.log.Error(op, "refused an own fork bound onto a session that already names a conversation", withError(fields, err))
+		return err
+	}
+	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
+		if err := bindSessionTx(ctx, tx, sess); err != nil {
 			return err
 		}
-		for _, table := range []string{"pending_forks", "fork_lineage", "fork_uninherited_turns"} {
-			if _, err := tx.ExecContext(ctx, `DELETE FROM `+table+` WHERE workspace_id = ?`, sess.Workspace); err != nil {
-				return err
-			}
-		}
-		return nil
+		return insertPendingFork(ctx, tx, fork)
 	})
+}
+
+// bindSessionTx is the one bind, inside the caller's transaction: the session
+// upsert, then the forgetting of the fork the workspace was.
+func bindSessionTx(ctx context.Context, tx *sql.Tx, sess Session) error {
+	if err := putSessionTx(ctx, tx, sess); err != nil {
+		return err
+	}
+	for _, table := range []string{"pending_forks", "fork_lineage", "fork_uninherited_turns"} {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM `+table+` WHERE workspace_id = ?`, sess.Workspace); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // putSessionTx is the one session upsert, inside the caller's transaction:

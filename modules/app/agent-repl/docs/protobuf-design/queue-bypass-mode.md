@@ -16,6 +16,13 @@ switched off. Designed autonomously (owner request, 2026-11-10).
   which is bound (owner ruling on 2.1: a resumed session under a swapped
   system prompt re-reads the whole transcript uncached, so a second session is
   kept instead). The one not running is kept for the next switch (ruling 3.2).
+- The FIRST switch into the mode forks the queue conversation into the bypass
+  conversation (owner request, 2026-11-10): the bind records an owed fork of
+  the workspace's own conversation (`pending_forks.parent_vendor_session_id`,
+  layout 114) in the same write, and the bring-up makes it through
+  `shim.v1.ForkSession` and resumes it as a rebind. Later switches resume the
+  two parked conversations as they stand, so the bypass conversation does not
+  pick up queue turns taken after the fork.
 - The SDK's `skillOverrides` flag setting (`off`) hides a skill from the
   listing and the Skill tool; the shim checks the session's reported commands
   for its absence at start.

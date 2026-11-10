@@ -355,6 +355,10 @@ type DB interface {
 	// conversation and, in the same transaction, forgets the fork the
 	// workspace was: its lineage and any fork it still owed.
 	BindSession(ctx context.Context, sess Session) error
+	// BindSessionToOwnFork binds a workspace's session, with no vendor id, to
+	// a fork of its own conversation that the next bring-up makes, recording
+	// the owed fork in the same transaction.
+	BindSessionToOwnFork(ctx context.Context, sess Session, parentVendorSessionID string) error
 	// PutPendingFork records that a workspace is to be forked from its parent
 	// at its first bring-up.
 	PutPendingFork(ctx context.Context, fork PendingFork) error
