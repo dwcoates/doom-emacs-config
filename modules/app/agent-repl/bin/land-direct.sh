@@ -20,6 +20,9 @@
 #   2  usage or operational error
 set -uo pipefail
 
+# shellcheck source=lib-worktrees.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib-worktrees.sh"
+
 die() { echo "land-direct: $*" >&2; exit 2; }
 log() { echo "[land-direct] $*" >&2; }
 
@@ -30,7 +33,7 @@ shift 3 2>/dev/null || die "usage: land-direct.sh REPO PART LINE BRANCH..."
 (( $# > 0 )) || die "name at least one branch to land"
 [[ -n "$line" ]] || die "name the changelog line"
 
-main=$(git -C "$repo" worktree list --porcelain | awk '/^worktree /{print substr($0, 10); exit}')
+main=$(main_worktree "$repo")
 [[ -n "$main" ]] || die "could not find the main worktree of $repo"
 versioned=false
 grep -q 'version_tag:' "$main/.agent-repl/deploy.yaml" 2>/dev/null && versioned=true
@@ -54,7 +57,8 @@ for branch in "$@"; do
 done
 
 # THE CHANGELOG LINE: the repository's remediation changelog, when it keeps one.
-changelog=$(git -C "$main" ls-files '*REMEDIATION-CHANGELOG.md' | head -1)
+changelogs=$(git -C "$main" ls-files '*REMEDIATION-CHANGELOG.md') || die "could not list the changelogs of $main"
+changelog=$(sed -n 1p <<<"$changelogs")
 if [[ -n "$changelog" ]]; then
   printf -- '- %s %s (landed in queue bypass mode): %s\n' "$(date +%Y-%m-%d)" "$(IFS=,; echo "$*")" "$line" >>"$main/$changelog"
   git -C "$main" add -- "$changelog" || die "could not stage $changelog"

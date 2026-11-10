@@ -399,7 +399,7 @@ interface Endpoint {
  * to say which failures the page is showing.
  */
 export function chipFailureArms(): string[] {
-  const chip = document.querySelector<HTMLElement>("#topbar .topbar-warnings");
+  const chip = document.querySelector<HTMLElement>("#topbar .topbar-heading-warnings");
   return (chip?.dataset.localArms ?? "").split(" ").filter((arm) => arm !== "");
 }
 

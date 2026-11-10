@@ -439,8 +439,8 @@ Each result is `(RELATIVE-FILE OWNER FORM)'."
      "%s"
      "warns, in the minibuffer, that a second consecutive command-mode escape clears the feed selection")
     ("input.el" agent-repl--input-on-success
-     "[agent-repl] Asking in a new workspace…"
-     "tells the user their question about a response is being answered in a new child workspace")
+     "[agent-repl] Asked %s…"
+     "tells the user their question about a card was sent to the home main workspace")
     ("input.el" agent-repl--input-on-bubble-refusal
      "agent-repl: the prompt was refused for this agent (%S)"
      "reports a prompt refusal requiring user action")
@@ -503,6 +503,9 @@ Each result is `(RELATIVE-FILE OWNER FORM)'."
     ("roster.el" agent-repl-roster-echo-finished
      "Agent finished in workspace: %s"
      "is the configured user-facing completion notification")
+    ("spell.el" agent-repl--spell-guarded-word
+     "Spellcheck: %s did not answer for %S (%s); the spell process was reset"
+     "tells the user the spell checker stopped answering and was reset")
     ("status.el" agent-repl-tabbar-apply-row-count
      "agent-repl: tab-bar set to %d line%s on this frame"
      "confirms the interactive tab-bar layout command")

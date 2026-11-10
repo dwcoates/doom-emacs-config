@@ -744,21 +744,21 @@ describe("the warning strip", () => {
     // Arrange / Act
     await withTopbar({ warnings: [] });
     // Assert
-    expect(harness.$(".topbar-warnings")).toBeNull();
+    expect(harness.$(".topbar-heading-warnings")).toBeNull();
   });
 
   it("draws the strip once a warning arrives", async () => {
     // Arrange / Act
     await withTopbar({ warnings: [topbarWarning("accounting")] });
     // Assert
-    expect(harness.$(".topbar-warnings")).not.toBeNull();
+    expect(harness.$(".topbar-heading-warnings")).not.toBeNull();
   });
 
   it.each(TOPBAR_WARNING_ARMS)("draws the %s warning's line verbatim", async (arm) => {
     // Arrange / Act
     await withTopbar({ warnings: [topbarWarning(arm)] });
     // Act
-    await harness.click(".topbar-warnings");
+    await harness.click(".topbar-heading-warnings");
     // Assert
     expect(harness.text('.topbar-reveal[data-reveal="warnings"]')).toContain(`warning: ${arm}`);
   });
@@ -767,7 +767,7 @@ describe("the warning strip", () => {
     // Arrange
     await withTopbar({ warnings: [topbarWarning(arm)] });
     // Act
-    await harness.click(".topbar-warnings");
+    await harness.click(".topbar-heading-warnings");
     // Assert
     expect(harness.$(`.topbar-warning-row[data-arm="${arm}"]`)).not.toBeNull();
   });
@@ -776,7 +776,7 @@ describe("the warning strip", () => {
     // Arrange
     await withTopbar({ warnings: TOPBAR_WARNING_ARMS.map((arm) => topbarWarning(arm)) });
     // Act
-    await harness.click(".topbar-warnings");
+    await harness.click(".topbar-heading-warnings");
     // Assert
     expect(harness.$$(".topbar-warning-row")).toHaveLength(TOPBAR_WARNING_ARMS.length);
   });
@@ -785,7 +785,7 @@ describe("the warning strip", () => {
     // Arrange
     await withTopbar({ warnings: [topbarWarning("accounting")] });
     // Act
-    await harness.click(".topbar-warnings");
+    await harness.click(".topbar-heading-warnings");
     // Assert
     expect(harness.$('.topbar-reveal[data-reveal="warnings"]')).not.toBeNull();
   });
@@ -805,7 +805,7 @@ describe.each(WARNING_DETAILS)("the $arm warning's detail", ({ arm, expected }) 
   it("opens on the list row", async () => {
     // Arrange
     await withTopbar({ warnings: [topbarWarning(arm)] });
-    await harness.click(".topbar-warnings");
+    await harness.click(".topbar-heading-warnings");
     // Act
     await harness.click(`.topbar-warning-row[data-arm="${arm}"]`);
     // Assert
@@ -815,7 +815,7 @@ describe.each(WARNING_DETAILS)("the $arm warning's detail", ({ arm, expected }) 
   it("draws its own evidence verbatim", async () => {
     // Arrange
     await withTopbar({ warnings: [topbarWarning(arm)] });
-    await harness.click(".topbar-warnings");
+    await harness.click(".topbar-heading-warnings");
     // Act
     await harness.click(`.topbar-warning-row[data-arm="${arm}"]`);
     // Assert
@@ -828,7 +828,7 @@ describe("the session-fault detail", () => {
     // Arrange: the daemon projects a session fault into the PUSHED view; the
     // strip is its only home, and the component names who faulted.
     await withTopbar({ warnings: [topbarWarning("sessionFault")] });
-    await harness.click(".topbar-warnings");
+    await harness.click(".topbar-heading-warnings");
     // Act
     await harness.click('.topbar-warning-row[data-arm="sessionFault"]');
     // Assert
@@ -845,7 +845,7 @@ describe("the failed-deploy detail", () => {
   it("draws what became of the install beside the step", async () => {
     // Arrange
     await withTopbar({ warnings: [topbarWarning("deployFailed")] });
-    await harness.click(".topbar-warnings");
+    await harness.click(".topbar-heading-warnings");
     // Act
     await harness.click('.topbar-warning-row[data-arm="deployFailed"]');
     // Assert
@@ -874,7 +874,7 @@ describe("the unmodeled-tool detail", () => {
   it("draws every argument line verbatim", async () => {
     // Arrange
     await withTopbar({ warnings: [topbarWarning("unmodeledTool")] });
-    await harness.click(".topbar-warnings");
+    await harness.click(".topbar-heading-warnings");
     // Act
     await harness.click('.topbar-warning-row[data-arm="unmodeledTool"]');
     // Assert
@@ -886,7 +886,7 @@ describe("the degraded-window detail", () => {
   it("ticks while the window is open", async () => {
     // Arrange
     await withTopbar({ warnings: [topbarWarning("degradedWindow")] });
-    await harness.click(".topbar-warnings");
+    await harness.click(".topbar-heading-warnings");
     await harness.click('.topbar-warning-row[data-arm="degradedWindow"]');
     const before = harness.text('.topbar-reveal[data-reveal="warning-detail"]');
     // Act
@@ -898,7 +898,7 @@ describe("the degraded-window detail", () => {
   it("draws a settled extent rather than ticking once closed", async () => {
     // Arrange
     await withTopbar({ warnings: [degradedWindowClosedWarning()] });
-    await harness.click(".topbar-warnings");
+    await harness.click(".topbar-heading-warnings");
     await harness.click('.topbar-warning-row[data-arm="degradedWindow"]');
     const before = harness.text('.topbar-reveal[data-reveal="warning-detail"]');
     // Act
@@ -910,7 +910,7 @@ describe("the degraded-window detail", () => {
   it("draws the closed window's dropped count verbatim", async () => {
     // Arrange
     await withTopbar({ warnings: [degradedWindowClosedWarning()] });
-    await harness.click(".topbar-warnings");
+    await harness.click(".topbar-heading-warnings");
     // Act
     await harness.click('.topbar-warning-row[data-arm="degradedWindow"]');
     // Assert
@@ -1157,7 +1157,7 @@ describe("the warning strip's omission", () => {
     harness.fake.setTopbar(WORKSPACE_ID, topbarView({ warnings: [] }));
     await harness.settle();
     // Assert
-    expect(harness.$(".topbar-warnings")).toBeNull();
+    expect(harness.$(".topbar-heading-warnings")).toBeNull();
   });
 
   it("drops a warning the next push omits", async () => {
@@ -1168,7 +1168,7 @@ describe("the warning strip's omission", () => {
     // Act
     harness.fake.setTopbar(WORKSPACE_ID, topbarView({ warnings: [topbarWarning("accounting")] }));
     await harness.settle();
-    await harness.click(".topbar-warnings");
+    await harness.click(".topbar-heading-warnings");
     // Assert
     expect(harness.$$(".topbar-warning-row").map((el) => el.dataset.arm)).toEqual(["accounting"]);
   });
@@ -1176,7 +1176,7 @@ describe("the warning strip's omission", () => {
   it("closes the reveal along with the strip it belonged to", async () => {
     // Arrange
     await withTopbar({ warnings: [topbarWarning("accounting")] });
-    await harness.click(".topbar-warnings");
+    await harness.click(".topbar-heading-warnings");
     // Act
     harness.fake.setTopbar(WORKSPACE_ID, topbarView({ warnings: [] }));
     await harness.settle();
@@ -1192,7 +1192,7 @@ describe("the warning strip's omission", () => {
     // Act
     harness.fake.setTopbar(WORKSPACE_ID, topbarView({ warnings: [topbarWarning("sessionFault")] }));
     await harness.settle();
-    await harness.click(".topbar-warnings");
+    await harness.click(".topbar-heading-warnings");
     // Assert
     expect(harness.$('.topbar-warning-row[data-arm="sessionFault"]')).not.toBeNull();
   });
@@ -1317,7 +1317,7 @@ describe("the model selector with nothing selected", () => {
 describe("the detached-unmodeled detail", () => {
   const openDetail = async (): Promise<void> => {
     await withTopbar({ warnings: [topbarWarning("detachedUnmodeled")] });
-    await harness.click(".topbar-warnings");
+    await harness.click(".topbar-heading-warnings");
     await harness.click('.topbar-warning-row[data-arm="detachedUnmodeled"]');
   };
 
@@ -1470,13 +1470,14 @@ describe("the strip's spacing", () => {
   });
 
   // THE STATUS CHIPS RIDE THE LEFT (owner request, 2026-11-09), so the flank
-  // groups balance around the centered heading.
-  it("draws the status chips in the left group after the account cell", async () => {
+  // groups balance around the centered heading, and they open the strip, left
+  // of the login (2026-11-10).
+  it("draws the status chips in the left group before the account cell", async () => {
     const row = await mountedRow();
     const kinds = [...(row.querySelector(".topbar-left")?.querySelectorAll(":scope > *, .topbar-status > *") ?? [])].map(
       (el) => el.className.split(" ")[0],
     );
-    expect(kinds).toEqual(["topbar-account-cell", "topbar-status", "topbar-remote-control", "topbar-wifi", "topbar-warnings"]);
+    expect(kinds).toEqual(["topbar-status", "topbar-remote-control", "topbar-wifi", "topbar-account-cell"]);
   });
 
   it("leaves the model, effort, permission mode and context in the right group", async () => {

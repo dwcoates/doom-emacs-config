@@ -215,15 +215,25 @@ func contains(haystack []string, needle string) bool {
 // Splice substitutes values into the body's placeholders. A value for an
 // unknown placeholder, or a placeholder with no value, is an error: a brief is
 // never sent with a hole in it.
+//
+// Every check reads the TEMPLATE, never the spliced result, and the
+// substitution is one pass over the template: a value is caller text (a
+// prompt, a pull-request comment, a workflow file) that may itself hold
+// `{{...}}`, and that text ships verbatim rather than being taken for a hole
+// or substituted a second time.
 func (p Prompt) Splice(values map[string]string) (string, error) {
+	used, err := extractPlaceholders(p.Body)
+	if err != nil {
+		return "", fmt.Errorf("prompts: %s: the template: %w", p.Name, err)
+	}
 	var missing, unknown []string
-	for _, name := range p.Placeholders {
+	for _, name := range used {
 		if _, ok := values[name]; !ok {
 			missing = append(missing, name)
 		}
 	}
 	for name := range values {
-		if !contains(p.Placeholders, name) {
+		if !contains(used, name) {
 			unknown = append(unknown, name)
 		}
 	}
@@ -232,11 +242,7 @@ func (p Prompt) Splice(values map[string]string) (string, error) {
 		sort.Strings(unknown)
 		return "", fmt.Errorf("prompts: %s: values do not cover the placeholders: missing %v, unknown %v", p.Name, missing, unknown)
 	}
-	out := placeholderPattern.ReplaceAllStringFunc(p.Body, func(token string) string {
+	return placeholderPattern.ReplaceAllStringFunc(p.Body, func(token string) string {
 		return values[placeholderPattern.FindStringSubmatch(token)[1]]
-	})
-	if leftover := anyBracePattern.FindString(out); leftover != "" {
-		return "", fmt.Errorf("prompts: %s: %q survived the splice", p.Name, leftover)
-	}
-	return out, nil
+	}), nil
 }

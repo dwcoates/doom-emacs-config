@@ -18,7 +18,7 @@ import {
   type SpawnChild,
   type VendorChildExit,
 } from "../../src/sdk/real-query.js";
-import { LANDING_REL_PATHS, METAPROMPT_REL_PATH, DOOM_CHECKOUT_REL_PATH, standingSection, workspaceSection } from "../../src/metaprompt.js";
+import { LANDING_REL_PATHS, METAPROMPT_REL_PATH, DOOM_CHECKOUT_REL_PATH, readLandingSection, standingSection, workspaceSection } from "../../src/metaprompt.js";
 import { agentReplHooks } from "../../src/sdk/agent-repl-hooks.js";
 
 /** The servers argument of a test that is not about agent-repl's own MCP server. */
@@ -103,7 +103,7 @@ describe("realQueryOptions", () => {
     expect(options.systemPrompt).toEqual({
       type: "preset",
       preset: "claude_code",
-      append: `BE EXCELLENT\n\n${workspaceSection("parser-fix")}\n\n${standingSection("linked_workspace")}`,
+      append: `BE EXCELLENT\n\n${readLandingSection("through_queue", home)}\n\n${workspaceSection("parser-fix")}\n\n${standingSection("linked_workspace")}`,
     });
   });
 
