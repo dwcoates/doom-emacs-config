@@ -213,9 +213,11 @@ message HeldPrompt {
   //
   //   1. the edit, while `editing` is present (the user is acting on the
   //      prompt now);
-  //   2. the hold arm, while one is set (it decides whether the prompt can
+  //   2. the user's "Send now", while `sent_now` is present (the user asked
+  //      for it to go, and it goes once what keeps it clears);
+  //   3. the hold arm, while one is set (it decides whether the prompt can
   //      move at all);
-  //   3. the classification arm (when the prompt runs relative to the turn in
+  //   4. the classification arm (when the prompt runs relative to the turn in
   //      front of it). `daemon_held` never claims it: that arm is set only
   //      beside a hold arm, which outranks it.
   //
@@ -254,6 +256,19 @@ message HeldPrompt {
   // being edited. The running turn is never "ahead" here: a turn that has
   // started is joined by the classifier's after_tool_call verdict, not folded.
   optional HeldPromptFoldAbove fold_above = 18;
+  // PRESENT WHILE THE USER'S "Send now" WAITS on this prompt
+  // (agentrepl.v1.UpdateHeldPromptRequest.release): something kept it from
+  // going at once, and it goes the moment that clears, ahead of every other
+  // held prompt but an interjection under way. Absent otherwise. It claims
+  // the card's badge after the edit and before the hold (HeldPrompt.badge).
+  HeldPromptSentNow sent_now = 28;
+}
+
+// The user's "Send now" waiting on what keeps the prompt.
+message HeldPromptSentNow {
+  // What it waits for, daemon-worded ("the /compact running now to end").
+  // Free text for display; never parsed. REQUIRED AND NEVER EMPTY.
+  string waits_for = 1;
 }
 
 // The "fold above" button: folds this prompt into the entry directly ahead of
@@ -338,6 +353,8 @@ message HeldPromptBadge {
     HeldPromptBadgeAwaitingDelivery awaiting_delivery = 15;
     // Held after the cold gate's answer, until the user sends it.
     HeldPromptBadgeColdGateAnswered cold_gate_answered = 16;
+    // The user pressed "Send now"; it goes once what keeps it clears.
+    HeldPromptBadgeSentNow sent_now = 18;
   }
 }
 // The badge shows the classifier still deciding.
@@ -370,6 +387,8 @@ message HeldPromptBadgeColdGate {}
 message HeldPromptBadgeAwaitingDelivery {}
 // The badge shows the hold that keeps a prompt after the cold gate's answer.
 message HeldPromptBadgeColdGateAnswered {}
+// The badge shows the user's "Send now" waiting.
+message HeldPromptBadgeSentNow {}
 // One standing fact the card's badge does not show, said in full.
 message HeldPromptStatusNote {
   // The fact as one sentence ("held until the merge ends"), drawn verbatim

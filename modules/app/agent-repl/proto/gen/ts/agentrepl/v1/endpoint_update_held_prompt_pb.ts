@@ -23,7 +23,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_update_held_prompt.proto.
  */
 export const file_agentrepl_v1_endpoint_update_held_prompt: GenFile = /*@__PURE__*/
-  fileDesc("Ci5hZ2VudHJlcGwvdjEvZW5kcG9pbnRfdXBkYXRlX2hlbGRfcHJvbXB0LnByb3RvEgxhZ2VudHJlcGwudjEi9QEKF1VwZGF0ZUhlbGRQcm9tcHRSZXF1ZXN0Ei0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYSJQoEdHVybhgCIAEoCzIXLmNvbnZlcnNhdGlvbi52MS5UdXJuSWQSOAoHcmVsZWFzZRgDIAEoCzIlLmFnZW50cmVwbC52MS5VcGRhdGVIZWxkUHJvbXB0UmVsZWFzZUgAEjIKBGRyb3AYBCABKAsyIi5hZ2VudHJlcGwudjEuVXBkYXRlSGVsZFByb21wdERyb3BIAEIICgZhY3Rpb25KBAgFEAZSBmFjY2VwdCIZChdVcGRhdGVIZWxkUHJvbXB0UmVsZWFzZSIWChRVcGRhdGVIZWxkUHJvbXB0RHJvcCKUAQoYVXBkYXRlSGVsZFByb21wdFJlc3BvbnNlEjgKB3N1Y2Nlc3MYASABKAsyJS5hZ2VudHJlcGwudjEuVXBkYXRlSGVsZFByb21wdFN1Y2Nlc3NIABI0CgVlcnJvchgCIAEoCzIjLmFnZW50cmVwbC52MS5VcGRhdGVIZWxkUHJvbXB0RXJyb3JIAEIICgZyZXN1bHQiGQoXVXBkYXRlSGVsZFByb21wdFN1Y2Nlc3MilgUKFVVwZGF0ZUhlbGRQcm9tcHRFcnJvchJLChF1bmtub3duX3dvcmtzcGFjZRgBIAEoCzIuLmFnZW50cmVwbC52MS5VcGRhdGVIZWxkUHJvbXB0VW5rbm93bldvcmtzcGFjZUgAElQKFndvcmtzcGFjZV9yZWZfbWlzbWF0Y2gYAiABKAsyMi5hZ2VudHJlcGwudjEuVXBkYXRlSGVsZFByb21wdFdvcmtzcGFjZVJlZk1pc21hdGNoSAASSwoRdHJhbnNmZXJyaW5nX2F3YXkYAyABKAsyLi5hZ2VudHJlcGwudjEuVXBkYXRlSGVsZFByb21wdFRyYW5zZmVycmluZ0F3YXlIABJGCg9ub3RfeWV0X2Fkb3B0ZWQYBCABKAsyKy5hZ2VudHJlcGwudjEuVXBkYXRlSGVsZFByb21wdE5vdFlldEFkb3B0ZWRIABJACgxub19zdWNoX2hvbGQYBSABKAsyKC5hZ2VudHJlcGwudjEuVXBkYXRlSGVsZFByb21wdE5vU3VjaEhvbGRIABJLChFhbHJlYWR5X2RlbGl2ZXJlZBgGIAEoCzIuLmFnZW50cmVwbC52MS5VcGRhdGVIZWxkUHJvbXB0QWxyZWFkeURlbGl2ZXJlZEgAEkcKD3JlbGVhc2VfcmVmdXNlZBgIIAEoCzIsLmFnZW50cmVwbC52MS5VcGRhdGVIZWxkUHJvbXB0UmVsZWFzZVJlZnVzZWRIABJHCg9iZWluZ19kZWxpdmVyZWQYCSABKAsyLC5hZ2VudHJlcGwudjEuVXBkYXRlSGVsZFByb21wdEJlaW5nRGVsaXZlcmVkSABCBwoFY2F1c2VKBAgHEAhSFWFjY2VwdF9ub3RfYXBwbGljYWJsZSIiCiBVcGRhdGVIZWxkUHJvbXB0VW5rbm93bldvcmtzcGFjZSI8CiRVcGRhdGVIZWxkUHJvbXB0V29ya3NwYWNlUmVmTWlzbWF0Y2gSFAoMcmVnaXN0cnlfZGlyGAEgASgJIjMKIFVwZGF0ZUhlbGRQcm9tcHRUcmFuc2ZlcnJpbmdBd2F5Eg8KB2FkZHJlc3MYASABKAkiQQodVXBkYXRlSGVsZFByb21wdE5vdFlldEFkb3B0ZWQSFAoHYWRkcmVzcxgBIAEoCUgAiAEBQgoKCF9hZGRyZXNzIhwKGlVwZGF0ZUhlbGRQcm9tcHROb1N1Y2hIb2xkIiIKIFVwZGF0ZUhlbGRQcm9tcHRBbHJlYWR5RGVsaXZlcmVkIiAKHlVwZGF0ZUhlbGRQcm9tcHRSZWxlYXNlUmVmdXNlZCIgCh5VcGRhdGVIZWxkUHJvbXB0QmVpbmdEZWxpdmVyZWRCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_workspace_v1_workspace, file_conversation_v1_turn]);
+  fileDesc("Ci5hZ2VudHJlcGwvdjEvZW5kcG9pbnRfdXBkYXRlX2hlbGRfcHJvbXB0LnByb3RvEgxhZ2VudHJlcGwudjEi9QEKF1VwZGF0ZUhlbGRQcm9tcHRSZXF1ZXN0Ei0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYSJQoEdHVybhgCIAEoCzIXLmNvbnZlcnNhdGlvbi52MS5UdXJuSWQSOAoHcmVsZWFzZRgDIAEoCzIlLmFnZW50cmVwbC52MS5VcGRhdGVIZWxkUHJvbXB0UmVsZWFzZUgAEjIKBGRyb3AYBCABKAsyIi5hZ2VudHJlcGwudjEuVXBkYXRlSGVsZFByb21wdERyb3BIAEIICgZhY3Rpb25KBAgFEAZSBmFjY2VwdCIZChdVcGRhdGVIZWxkUHJvbXB0UmVsZWFzZSIWChRVcGRhdGVIZWxkUHJvbXB0RHJvcCKUAQoYVXBkYXRlSGVsZFByb21wdFJlc3BvbnNlEjgKB3N1Y2Nlc3MYASABKAsyJS5hZ2VudHJlcGwudjEuVXBkYXRlSGVsZFByb21wdFN1Y2Nlc3NIABI0CgVlcnJvchgCIAEoCzIjLmFnZW50cmVwbC52MS5VcGRhdGVIZWxkUHJvbXB0RXJyb3JIAEIICgZyZXN1bHQiGQoXVXBkYXRlSGVsZFByb21wdFN1Y2Nlc3MilgUKFVVwZGF0ZUhlbGRQcm9tcHRFcnJvchJLChF1bmtub3duX3dvcmtzcGFjZRgBIAEoCzIuLmFnZW50cmVwbC52MS5VcGRhdGVIZWxkUHJvbXB0VW5rbm93bldvcmtzcGFjZUgAElQKFndvcmtzcGFjZV9yZWZfbWlzbWF0Y2gYAiABKAsyMi5hZ2VudHJlcGwudjEuVXBkYXRlSGVsZFByb21wdFdvcmtzcGFjZVJlZk1pc21hdGNoSAASSwoRdHJhbnNmZXJyaW5nX2F3YXkYAyABKAsyLi5hZ2VudHJlcGwudjEuVXBkYXRlSGVsZFByb21wdFRyYW5zZmVycmluZ0F3YXlIABJGCg9ub3RfeWV0X2Fkb3B0ZWQYBCABKAsyKy5hZ2VudHJlcGwudjEuVXBkYXRlSGVsZFByb21wdE5vdFlldEFkb3B0ZWRIABJACgxub19zdWNoX2hvbGQYBSABKAsyKC5hZ2VudHJlcGwudjEuVXBkYXRlSGVsZFByb21wdE5vU3VjaEhvbGRIABJLChFhbHJlYWR5X2RlbGl2ZXJlZBgGIAEoCzIuLmFnZW50cmVwbC52MS5VcGRhdGVIZWxkUHJvbXB0QWxyZWFkeURlbGl2ZXJlZEgAEkcKD3JlbGVhc2VfcmVmdXNlZBgIIAEoCzIsLmFnZW50cmVwbC52MS5VcGRhdGVIZWxkUHJvbXB0UmVsZWFzZVJlZnVzZWRIABJHCg9iZWluZ19kZWxpdmVyZWQYCSABKAsyLC5hZ2VudHJlcGwudjEuVXBkYXRlSGVsZFByb21wdEJlaW5nRGVsaXZlcmVkSABCBwoFY2F1c2VKBAgHEAhSFWFjY2VwdF9ub3RfYXBwbGljYWJsZSIiCiBVcGRhdGVIZWxkUHJvbXB0VW5rbm93bldvcmtzcGFjZSI8CiRVcGRhdGVIZWxkUHJvbXB0V29ya3NwYWNlUmVmTWlzbWF0Y2gSFAoMcmVnaXN0cnlfZGlyGAEgASgJIjMKIFVwZGF0ZUhlbGRQcm9tcHRUcmFuc2ZlcnJpbmdBd2F5Eg8KB2FkZHJlc3MYASABKAkiQQodVXBkYXRlSGVsZFByb21wdE5vdFlldEFkb3B0ZWQSFAoHYWRkcmVzcxgBIAEoCUgAiAEBQgoKCF9hZGRyZXNzIhwKGlVwZGF0ZUhlbGRQcm9tcHROb1N1Y2hIb2xkIiIKIFVwZGF0ZUhlbGRQcm9tcHRBbHJlYWR5RGVsaXZlcmVkIusCCh5VcGRhdGVIZWxkUHJvbXB0UmVsZWFzZVJlZnVzZWQSTwoMYmVpbmdfZWRpdGVkGAEgASgLMjcuYWdlbnRyZXBsLnYxLlVwZGF0ZUhlbGRQcm9tcHRSZWxlYXNlUmVmdXNlZEJlaW5nRWRpdGVkSAASTQoLYmVoaW5kX2VkaXQYAiABKAsyNi5hZ2VudHJlcGwudjEuVXBkYXRlSGVsZFByb21wdFJlbGVhc2VSZWZ1c2VkQmVoaW5kRWRpdEgAEkkKCWNvbGRfZ2F0ZRgDIAEoCzI0LmFnZW50cmVwbC52MS5VcGRhdGVIZWxkUHJvbXB0UmVsZWFzZVJlZnVzZWRDb2xkR2F0ZUgAElUKD3Nlc3Npb25fcmVmdXNlZBgEIAEoCzI6LmFnZW50cmVwbC52MS5VcGRhdGVIZWxkUHJvbXB0UmVsZWFzZVJlZnVzZWRTZXNzaW9uUmVmdXNlZEgAQgcKBWNhdXNlIisKKVVwZGF0ZUhlbGRQcm9tcHRSZWxlYXNlUmVmdXNlZEJlaW5nRWRpdGVkIioKKFVwZGF0ZUhlbGRQcm9tcHRSZWxlYXNlUmVmdXNlZEJlaGluZEVkaXQiKAomVXBkYXRlSGVsZFByb21wdFJlbGVhc2VSZWZ1c2VkQ29sZEdhdGUiLgosVXBkYXRlSGVsZFByb21wdFJlbGVhc2VSZWZ1c2VkU2Vzc2lvblJlZnVzZWQiIAoeVXBkYXRlSGVsZFByb21wdEJlaW5nRGVsaXZlcmVkQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_workspace_v1_workspace, file_conversation_v1_turn]);
 
 /**
  * @generated from message agentrepl.v1.UpdateHeldPromptRequest
@@ -49,11 +49,19 @@ export type UpdateHeldPromptRequest = Message<"agentrepl.v1.UpdateHeldPromptRequ
    */
   action: {
     /**
-     * Deliver NOW — override the hold and send the prompt to the shim at
-     * once, as a prompt typed with nothing to hold it would be: while a turn
-     * runs, the prompt joins it (taken in after its current tool call, or run
-     * as the next turn), and nothing is interrupted. Only a held session act,
-     * which joins nothing, interrupts the running turn to run next.
+     * Deliver NOW ("Send now") — override the hold and send the prompt to the
+     * shim at once, as a prompt typed with nothing to hold it would be: while
+     * a turn runs, the prompt joins it (taken in after its current tool call,
+     * or run as the next turn), and nothing is interrupted. A running turn
+     * that cannot be joined (one the agent started on its own, or one an ask
+     * blocks) is INTERRUPTED instead, and its real end delivers the prompt, as
+     * a held session act, which joins nothing, always is.
+     *
+     * A RELEASE THAT CANNOT GO YET IS ACCEPTED AND WAITS (success): the prompt
+     * is marked sent now (frontend.v1.HeldPrompt.sent_now), its card says what
+     * it waits for, and it goes the moment that clears, ahead of every other
+     * held prompt but an interjection under way. Only the causes
+     * UpdateHeldPromptReleaseRefused names refuse.
      *
      * @generated from field: agentrepl.v1.UpdateHeldPromptRelease release = 3;
      */
@@ -209,14 +217,9 @@ export type UpdateHeldPromptError = Message<"agentrepl.v1.UpdateHeldPromptError"
     case: "alreadyDelivered";
   } | {
     /**
-     * A force-through on an uninterruptible or reconnect hold, or on
-     * a prompt that is being edited or queued after one that is
-     * (EditHeldPrompt): an edit keeps it and everything after it held. Also
-     * refused while the workspace drains for a bounce, a merge drives the
-     * session, the session is not up, a shim call that opens no turn is in
-     * flight (ask again once it settles), an interjection is interrupting the
-     * running turn (it goes first), or the running turn cannot be joined (one
-     * the agent started on its own).
+     * A release that would lose the user's work or answer a question only
+     * the user can, refused with its cause. Every other blocker accepts the
+     * release and waits (see `release`).
      *
      * @generated from field: agentrepl.v1.UpdateHeldPromptReleaseRefused release_refused = 8;
      */
@@ -345,9 +348,56 @@ export const UpdateHeldPromptAlreadyDeliveredSchema: GenMessage<UpdateHeldPrompt
   messageDesc(file_agentrepl_v1_endpoint_update_held_prompt, 11);
 
 /**
+ * THE ARM IS THE CAUSE. ALWAYS SET: a refusal with no cause is a malformed
+ * frame, rejected rather than drawn as a generic refusal.
+ *
  * @generated from message agentrepl.v1.UpdateHeldPromptReleaseRefused
  */
 export type UpdateHeldPromptReleaseRefused = Message<"agentrepl.v1.UpdateHeldPromptReleaseRefused"> & {
+  /**
+   * @generated from oneof agentrepl.v1.UpdateHeldPromptReleaseRefused.cause
+   */
+  cause: {
+    /**
+     * This prompt is open in the editor's input (EditHeldPrompt): sending it
+     * would discard the edit under way. Committing or cancelling the edit
+     * lets it be sent.
+     *
+     * @generated from field: agentrepl.v1.UpdateHeldPromptReleaseRefusedBeingEdited being_edited = 1;
+     */
+    value: UpdateHeldPromptReleaseRefusedBeingEdited;
+    case: "beingEdited";
+  } | {
+    /**
+     * A prompt queued AHEAD of this one is open in the editor's input: an
+     * edit keeps its prompt and every prompt after it in order, so this one
+     * cannot overtake it. Ending the edit lets it be sent.
+     *
+     * @generated from field: agentrepl.v1.UpdateHeldPromptReleaseRefusedBehindEdit behind_edit = 2;
+     */
+    value: UpdateHeldPromptReleaseRefusedBehindEdit;
+    case: "behindEdit";
+  } | {
+    /**
+     * The session is parked at its cold gate: sending would re-read the cold
+     * conversation, the very spend the gate asks the user about. Answering
+     * the gate decides it.
+     *
+     * @generated from field: agentrepl.v1.UpdateHeldPromptReleaseRefusedColdGate cold_gate = 3;
+     */
+    value: UpdateHeldPromptReleaseRefusedColdGate;
+    case: "coldGate";
+  } | {
+    /**
+     * The session refused the prompt into the running turn (the shim
+     * answered the join with an error, or its turn could not be recorded).
+     * The prompt stays held and goes when the running turn ends.
+     *
+     * @generated from field: agentrepl.v1.UpdateHeldPromptReleaseRefusedSessionRefused session_refused = 4;
+     */
+    value: UpdateHeldPromptReleaseRefusedSessionRefused;
+    case: "sessionRefused";
+  } | { case: undefined; value?: undefined };
 };
 
 /**
@@ -356,6 +406,58 @@ export type UpdateHeldPromptReleaseRefused = Message<"agentrepl.v1.UpdateHeldPro
  */
 export const UpdateHeldPromptReleaseRefusedSchema: GenMessage<UpdateHeldPromptReleaseRefused> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_update_held_prompt, 12);
+
+/**
+ * @generated from message agentrepl.v1.UpdateHeldPromptReleaseRefusedBeingEdited
+ */
+export type UpdateHeldPromptReleaseRefusedBeingEdited = Message<"agentrepl.v1.UpdateHeldPromptReleaseRefusedBeingEdited"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.UpdateHeldPromptReleaseRefusedBeingEdited.
+ * Use `create(UpdateHeldPromptReleaseRefusedBeingEditedSchema)` to create a new message.
+ */
+export const UpdateHeldPromptReleaseRefusedBeingEditedSchema: GenMessage<UpdateHeldPromptReleaseRefusedBeingEdited> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_update_held_prompt, 13);
+
+/**
+ * @generated from message agentrepl.v1.UpdateHeldPromptReleaseRefusedBehindEdit
+ */
+export type UpdateHeldPromptReleaseRefusedBehindEdit = Message<"agentrepl.v1.UpdateHeldPromptReleaseRefusedBehindEdit"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.UpdateHeldPromptReleaseRefusedBehindEdit.
+ * Use `create(UpdateHeldPromptReleaseRefusedBehindEditSchema)` to create a new message.
+ */
+export const UpdateHeldPromptReleaseRefusedBehindEditSchema: GenMessage<UpdateHeldPromptReleaseRefusedBehindEdit> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_update_held_prompt, 14);
+
+/**
+ * @generated from message agentrepl.v1.UpdateHeldPromptReleaseRefusedColdGate
+ */
+export type UpdateHeldPromptReleaseRefusedColdGate = Message<"agentrepl.v1.UpdateHeldPromptReleaseRefusedColdGate"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.UpdateHeldPromptReleaseRefusedColdGate.
+ * Use `create(UpdateHeldPromptReleaseRefusedColdGateSchema)` to create a new message.
+ */
+export const UpdateHeldPromptReleaseRefusedColdGateSchema: GenMessage<UpdateHeldPromptReleaseRefusedColdGate> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_update_held_prompt, 15);
+
+/**
+ * @generated from message agentrepl.v1.UpdateHeldPromptReleaseRefusedSessionRefused
+ */
+export type UpdateHeldPromptReleaseRefusedSessionRefused = Message<"agentrepl.v1.UpdateHeldPromptReleaseRefusedSessionRefused"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.UpdateHeldPromptReleaseRefusedSessionRefused.
+ * Use `create(UpdateHeldPromptReleaseRefusedSessionRefusedSchema)` to create a new message.
+ */
+export const UpdateHeldPromptReleaseRefusedSessionRefusedSchema: GenMessage<UpdateHeldPromptReleaseRefusedSessionRefused> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_update_held_prompt, 16);
 
 /**
  * The prompt's delivery call is in flight. See the `being_delivered` arm.
@@ -370,5 +472,5 @@ export type UpdateHeldPromptBeingDelivered = Message<"agentrepl.v1.UpdateHeldPro
  * Use `create(UpdateHeldPromptBeingDeliveredSchema)` to create a new message.
  */
 export const UpdateHeldPromptBeingDeliveredSchema: GenMessage<UpdateHeldPromptBeingDelivered> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_update_held_prompt, 13);
+  messageDesc(file_agentrepl_v1_endpoint_update_held_prompt, 17);
 

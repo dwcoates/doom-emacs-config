@@ -123,11 +123,19 @@ type isUpdateHeldPromptRequest_Action interface {
 }
 
 type UpdateHeldPromptRequest_Release struct {
-	// Deliver NOW — override the hold and send the prompt to the shim at
-	// once, as a prompt typed with nothing to hold it would be: while a turn
-	// runs, the prompt joins it (taken in after its current tool call, or run
-	// as the next turn), and nothing is interrupted. Only a held session act,
-	// which joins nothing, interrupts the running turn to run next.
+	// Deliver NOW ("Send now") — override the hold and send the prompt to the
+	// shim at once, as a prompt typed with nothing to hold it would be: while
+	// a turn runs, the prompt joins it (taken in after its current tool call,
+	// or run as the next turn), and nothing is interrupted. A running turn
+	// that cannot be joined (one the agent started on its own, or one an ask
+	// blocks) is INTERRUPTED instead, and its real end delivers the prompt, as
+	// a held session act, which joins nothing, always is.
+	//
+	// A RELEASE THAT CANNOT GO YET IS ACCEPTED AND WAITS (success): the prompt
+	// is marked sent now (frontend.v1.HeldPrompt.sent_now), its card says what
+	// it waits for, and it goes the moment that clears, ahead of every other
+	// held prompt but an interjection under way. Only the causes
+	// UpdateHeldPromptReleaseRefused names refuse.
 	Release *UpdateHeldPromptRelease `protobuf:"bytes,3,opt,name=release,proto3,oneof"`
 }
 
@@ -495,14 +503,9 @@ type UpdateHeldPromptError_AlreadyDelivered struct {
 }
 
 type UpdateHeldPromptError_ReleaseRefused struct {
-	// A force-through on an uninterruptible or reconnect hold, or on
-	// a prompt that is being edited or queued after one that is
-	// (EditHeldPrompt): an edit keeps it and everything after it held. Also
-	// refused while the workspace drains for a bounce, a merge drives the
-	// session, the session is not up, a shim call that opens no turn is in
-	// flight (ask again once it settles), an interjection is interrupting the
-	// running turn (it goes first), or the running turn cannot be joined (one
-	// the agent started on its own).
+	// A release that would lose the user's work or answer a question only
+	// the user can, refused with its cause. Every other blocker accepts the
+	// release and waits (see `release`).
 	ReleaseRefused *UpdateHeldPromptReleaseRefused `protobuf:"bytes,8,opt,name=release_refused,json=releaseRefused,proto3,oneof"`
 }
 
@@ -778,8 +781,17 @@ func (*UpdateHeldPromptAlreadyDelivered) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_update_held_prompt_proto_rawDescGZIP(), []int{11}
 }
 
+// THE ARM IS THE CAUSE. ALWAYS SET: a refusal with no cause is a malformed
+// frame, rejected rather than drawn as a generic refusal.
 type UpdateHeldPromptReleaseRefused struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Cause:
+	//
+	//	*UpdateHeldPromptReleaseRefused_BeingEdited
+	//	*UpdateHeldPromptReleaseRefused_BehindEdit
+	//	*UpdateHeldPromptReleaseRefused_ColdGate
+	//	*UpdateHeldPromptReleaseRefused_SessionRefused
+	Cause         isUpdateHeldPromptReleaseRefused_Cause `protobuf_oneof:"cause"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -814,6 +826,233 @@ func (*UpdateHeldPromptReleaseRefused) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_update_held_prompt_proto_rawDescGZIP(), []int{12}
 }
 
+func (x *UpdateHeldPromptReleaseRefused) GetCause() isUpdateHeldPromptReleaseRefused_Cause {
+	if x != nil {
+		return x.Cause
+	}
+	return nil
+}
+
+func (x *UpdateHeldPromptReleaseRefused) GetBeingEdited() *UpdateHeldPromptReleaseRefusedBeingEdited {
+	if x != nil {
+		if x, ok := x.Cause.(*UpdateHeldPromptReleaseRefused_BeingEdited); ok {
+			return x.BeingEdited
+		}
+	}
+	return nil
+}
+
+func (x *UpdateHeldPromptReleaseRefused) GetBehindEdit() *UpdateHeldPromptReleaseRefusedBehindEdit {
+	if x != nil {
+		if x, ok := x.Cause.(*UpdateHeldPromptReleaseRefused_BehindEdit); ok {
+			return x.BehindEdit
+		}
+	}
+	return nil
+}
+
+func (x *UpdateHeldPromptReleaseRefused) GetColdGate() *UpdateHeldPromptReleaseRefusedColdGate {
+	if x != nil {
+		if x, ok := x.Cause.(*UpdateHeldPromptReleaseRefused_ColdGate); ok {
+			return x.ColdGate
+		}
+	}
+	return nil
+}
+
+func (x *UpdateHeldPromptReleaseRefused) GetSessionRefused() *UpdateHeldPromptReleaseRefusedSessionRefused {
+	if x != nil {
+		if x, ok := x.Cause.(*UpdateHeldPromptReleaseRefused_SessionRefused); ok {
+			return x.SessionRefused
+		}
+	}
+	return nil
+}
+
+type isUpdateHeldPromptReleaseRefused_Cause interface {
+	isUpdateHeldPromptReleaseRefused_Cause()
+}
+
+type UpdateHeldPromptReleaseRefused_BeingEdited struct {
+	// This prompt is open in the editor's input (EditHeldPrompt): sending it
+	// would discard the edit under way. Committing or cancelling the edit
+	// lets it be sent.
+	BeingEdited *UpdateHeldPromptReleaseRefusedBeingEdited `protobuf:"bytes,1,opt,name=being_edited,json=beingEdited,proto3,oneof"`
+}
+
+type UpdateHeldPromptReleaseRefused_BehindEdit struct {
+	// A prompt queued AHEAD of this one is open in the editor's input: an
+	// edit keeps its prompt and every prompt after it in order, so this one
+	// cannot overtake it. Ending the edit lets it be sent.
+	BehindEdit *UpdateHeldPromptReleaseRefusedBehindEdit `protobuf:"bytes,2,opt,name=behind_edit,json=behindEdit,proto3,oneof"`
+}
+
+type UpdateHeldPromptReleaseRefused_ColdGate struct {
+	// The session is parked at its cold gate: sending would re-read the cold
+	// conversation, the very spend the gate asks the user about. Answering
+	// the gate decides it.
+	ColdGate *UpdateHeldPromptReleaseRefusedColdGate `protobuf:"bytes,3,opt,name=cold_gate,json=coldGate,proto3,oneof"`
+}
+
+type UpdateHeldPromptReleaseRefused_SessionRefused struct {
+	// The session refused the prompt into the running turn (the shim
+	// answered the join with an error, or its turn could not be recorded).
+	// The prompt stays held and goes when the running turn ends.
+	SessionRefused *UpdateHeldPromptReleaseRefusedSessionRefused `protobuf:"bytes,4,opt,name=session_refused,json=sessionRefused,proto3,oneof"`
+}
+
+func (*UpdateHeldPromptReleaseRefused_BeingEdited) isUpdateHeldPromptReleaseRefused_Cause() {}
+
+func (*UpdateHeldPromptReleaseRefused_BehindEdit) isUpdateHeldPromptReleaseRefused_Cause() {}
+
+func (*UpdateHeldPromptReleaseRefused_ColdGate) isUpdateHeldPromptReleaseRefused_Cause() {}
+
+func (*UpdateHeldPromptReleaseRefused_SessionRefused) isUpdateHeldPromptReleaseRefused_Cause() {}
+
+type UpdateHeldPromptReleaseRefusedBeingEdited struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UpdateHeldPromptReleaseRefusedBeingEdited) Reset() {
+	*x = UpdateHeldPromptReleaseRefusedBeingEdited{}
+	mi := &file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UpdateHeldPromptReleaseRefusedBeingEdited) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UpdateHeldPromptReleaseRefusedBeingEdited) ProtoMessage() {}
+
+func (x *UpdateHeldPromptReleaseRefusedBeingEdited) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UpdateHeldPromptReleaseRefusedBeingEdited.ProtoReflect.Descriptor instead.
+func (*UpdateHeldPromptReleaseRefusedBeingEdited) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_update_held_prompt_proto_rawDescGZIP(), []int{13}
+}
+
+type UpdateHeldPromptReleaseRefusedBehindEdit struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UpdateHeldPromptReleaseRefusedBehindEdit) Reset() {
+	*x = UpdateHeldPromptReleaseRefusedBehindEdit{}
+	mi := &file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UpdateHeldPromptReleaseRefusedBehindEdit) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UpdateHeldPromptReleaseRefusedBehindEdit) ProtoMessage() {}
+
+func (x *UpdateHeldPromptReleaseRefusedBehindEdit) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UpdateHeldPromptReleaseRefusedBehindEdit.ProtoReflect.Descriptor instead.
+func (*UpdateHeldPromptReleaseRefusedBehindEdit) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_update_held_prompt_proto_rawDescGZIP(), []int{14}
+}
+
+type UpdateHeldPromptReleaseRefusedColdGate struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UpdateHeldPromptReleaseRefusedColdGate) Reset() {
+	*x = UpdateHeldPromptReleaseRefusedColdGate{}
+	mi := &file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UpdateHeldPromptReleaseRefusedColdGate) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UpdateHeldPromptReleaseRefusedColdGate) ProtoMessage() {}
+
+func (x *UpdateHeldPromptReleaseRefusedColdGate) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UpdateHeldPromptReleaseRefusedColdGate.ProtoReflect.Descriptor instead.
+func (*UpdateHeldPromptReleaseRefusedColdGate) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_update_held_prompt_proto_rawDescGZIP(), []int{15}
+}
+
+type UpdateHeldPromptReleaseRefusedSessionRefused struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UpdateHeldPromptReleaseRefusedSessionRefused) Reset() {
+	*x = UpdateHeldPromptReleaseRefusedSessionRefused{}
+	mi := &file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UpdateHeldPromptReleaseRefusedSessionRefused) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UpdateHeldPromptReleaseRefusedSessionRefused) ProtoMessage() {}
+
+func (x *UpdateHeldPromptReleaseRefusedSessionRefused) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UpdateHeldPromptReleaseRefusedSessionRefused.ProtoReflect.Descriptor instead.
+func (*UpdateHeldPromptReleaseRefusedSessionRefused) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_update_held_prompt_proto_rawDescGZIP(), []int{16}
+}
+
 // The prompt's delivery call is in flight. See the `being_delivered` arm.
 type UpdateHeldPromptBeingDelivered struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -823,7 +1062,7 @@ type UpdateHeldPromptBeingDelivered struct {
 
 func (x *UpdateHeldPromptBeingDelivered) Reset() {
 	*x = UpdateHeldPromptBeingDelivered{}
-	mi := &file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes[13]
+	mi := &file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -835,7 +1074,7 @@ func (x *UpdateHeldPromptBeingDelivered) String() string {
 func (*UpdateHeldPromptBeingDelivered) ProtoMessage() {}
 
 func (x *UpdateHeldPromptBeingDelivered) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes[13]
+	mi := &file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -848,7 +1087,7 @@ func (x *UpdateHeldPromptBeingDelivered) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateHeldPromptBeingDelivered.ProtoReflect.Descriptor instead.
 func (*UpdateHeldPromptBeingDelivered) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_update_held_prompt_proto_rawDescGZIP(), []int{13}
+	return file_agentrepl_v1_endpoint_update_held_prompt_proto_rawDescGZIP(), []int{17}
 }
 
 var File_agentrepl_v1_endpoint_update_held_prompt_proto protoreflect.FileDescriptor
@@ -890,8 +1129,18 @@ const file_agentrepl_v1_endpoint_update_held_prompt_proto_rawDesc = "" +
 	"\n" +
 	"\b_address\"\x1c\n" +
 	"\x1aUpdateHeldPromptNoSuchHold\"\"\n" +
-	" UpdateHeldPromptAlreadyDelivered\" \n" +
-	"\x1eUpdateHeldPromptReleaseRefused\" \n" +
+	" UpdateHeldPromptAlreadyDelivered\"\x9e\x03\n" +
+	"\x1eUpdateHeldPromptReleaseRefused\x12\\\n" +
+	"\fbeing_edited\x18\x01 \x01(\v27.agentrepl.v1.UpdateHeldPromptReleaseRefusedBeingEditedH\x00R\vbeingEdited\x12Y\n" +
+	"\vbehind_edit\x18\x02 \x01(\v26.agentrepl.v1.UpdateHeldPromptReleaseRefusedBehindEditH\x00R\n" +
+	"behindEdit\x12S\n" +
+	"\tcold_gate\x18\x03 \x01(\v24.agentrepl.v1.UpdateHeldPromptReleaseRefusedColdGateH\x00R\bcoldGate\x12e\n" +
+	"\x0fsession_refused\x18\x04 \x01(\v2:.agentrepl.v1.UpdateHeldPromptReleaseRefusedSessionRefusedH\x00R\x0esessionRefusedB\a\n" +
+	"\x05cause\"+\n" +
+	")UpdateHeldPromptReleaseRefusedBeingEdited\"*\n" +
+	"(UpdateHeldPromptReleaseRefusedBehindEdit\"(\n" +
+	"&UpdateHeldPromptReleaseRefusedColdGate\".\n" +
+	",UpdateHeldPromptReleaseRefusedSessionRefused\" \n" +
 	"\x1eUpdateHeldPromptBeingDeliveredB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
@@ -906,28 +1155,32 @@ func file_agentrepl_v1_endpoint_update_held_prompt_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_update_held_prompt_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
+var file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes = make([]protoimpl.MessageInfo, 18)
 var file_agentrepl_v1_endpoint_update_held_prompt_proto_goTypes = []any{
-	(*UpdateHeldPromptRequest)(nil),              // 0: agentrepl.v1.UpdateHeldPromptRequest
-	(*UpdateHeldPromptRelease)(nil),              // 1: agentrepl.v1.UpdateHeldPromptRelease
-	(*UpdateHeldPromptDrop)(nil),                 // 2: agentrepl.v1.UpdateHeldPromptDrop
-	(*UpdateHeldPromptResponse)(nil),             // 3: agentrepl.v1.UpdateHeldPromptResponse
-	(*UpdateHeldPromptSuccess)(nil),              // 4: agentrepl.v1.UpdateHeldPromptSuccess
-	(*UpdateHeldPromptError)(nil),                // 5: agentrepl.v1.UpdateHeldPromptError
-	(*UpdateHeldPromptUnknownWorkspace)(nil),     // 6: agentrepl.v1.UpdateHeldPromptUnknownWorkspace
-	(*UpdateHeldPromptWorkspaceRefMismatch)(nil), // 7: agentrepl.v1.UpdateHeldPromptWorkspaceRefMismatch
-	(*UpdateHeldPromptTransferringAway)(nil),     // 8: agentrepl.v1.UpdateHeldPromptTransferringAway
-	(*UpdateHeldPromptNotYetAdopted)(nil),        // 9: agentrepl.v1.UpdateHeldPromptNotYetAdopted
-	(*UpdateHeldPromptNoSuchHold)(nil),           // 10: agentrepl.v1.UpdateHeldPromptNoSuchHold
-	(*UpdateHeldPromptAlreadyDelivered)(nil),     // 11: agentrepl.v1.UpdateHeldPromptAlreadyDelivered
-	(*UpdateHeldPromptReleaseRefused)(nil),       // 12: agentrepl.v1.UpdateHeldPromptReleaseRefused
-	(*UpdateHeldPromptBeingDelivered)(nil),       // 13: agentrepl.v1.UpdateHeldPromptBeingDelivered
-	(*v1.WorkspaceRef)(nil),                      // 14: workspace.v1.WorkspaceRef
-	(*v11.TurnId)(nil),                           // 15: conversation.v1.TurnId
+	(*UpdateHeldPromptRequest)(nil),                      // 0: agentrepl.v1.UpdateHeldPromptRequest
+	(*UpdateHeldPromptRelease)(nil),                      // 1: agentrepl.v1.UpdateHeldPromptRelease
+	(*UpdateHeldPromptDrop)(nil),                         // 2: agentrepl.v1.UpdateHeldPromptDrop
+	(*UpdateHeldPromptResponse)(nil),                     // 3: agentrepl.v1.UpdateHeldPromptResponse
+	(*UpdateHeldPromptSuccess)(nil),                      // 4: agentrepl.v1.UpdateHeldPromptSuccess
+	(*UpdateHeldPromptError)(nil),                        // 5: agentrepl.v1.UpdateHeldPromptError
+	(*UpdateHeldPromptUnknownWorkspace)(nil),             // 6: agentrepl.v1.UpdateHeldPromptUnknownWorkspace
+	(*UpdateHeldPromptWorkspaceRefMismatch)(nil),         // 7: agentrepl.v1.UpdateHeldPromptWorkspaceRefMismatch
+	(*UpdateHeldPromptTransferringAway)(nil),             // 8: agentrepl.v1.UpdateHeldPromptTransferringAway
+	(*UpdateHeldPromptNotYetAdopted)(nil),                // 9: agentrepl.v1.UpdateHeldPromptNotYetAdopted
+	(*UpdateHeldPromptNoSuchHold)(nil),                   // 10: agentrepl.v1.UpdateHeldPromptNoSuchHold
+	(*UpdateHeldPromptAlreadyDelivered)(nil),             // 11: agentrepl.v1.UpdateHeldPromptAlreadyDelivered
+	(*UpdateHeldPromptReleaseRefused)(nil),               // 12: agentrepl.v1.UpdateHeldPromptReleaseRefused
+	(*UpdateHeldPromptReleaseRefusedBeingEdited)(nil),    // 13: agentrepl.v1.UpdateHeldPromptReleaseRefusedBeingEdited
+	(*UpdateHeldPromptReleaseRefusedBehindEdit)(nil),     // 14: agentrepl.v1.UpdateHeldPromptReleaseRefusedBehindEdit
+	(*UpdateHeldPromptReleaseRefusedColdGate)(nil),       // 15: agentrepl.v1.UpdateHeldPromptReleaseRefusedColdGate
+	(*UpdateHeldPromptReleaseRefusedSessionRefused)(nil), // 16: agentrepl.v1.UpdateHeldPromptReleaseRefusedSessionRefused
+	(*UpdateHeldPromptBeingDelivered)(nil),               // 17: agentrepl.v1.UpdateHeldPromptBeingDelivered
+	(*v1.WorkspaceRef)(nil),                              // 18: workspace.v1.WorkspaceRef
+	(*v11.TurnId)(nil),                                   // 19: conversation.v1.TurnId
 }
 var file_agentrepl_v1_endpoint_update_held_prompt_proto_depIdxs = []int32{
-	14, // 0: agentrepl.v1.UpdateHeldPromptRequest.workspace:type_name -> workspace.v1.WorkspaceRef
-	15, // 1: agentrepl.v1.UpdateHeldPromptRequest.turn:type_name -> conversation.v1.TurnId
+	18, // 0: agentrepl.v1.UpdateHeldPromptRequest.workspace:type_name -> workspace.v1.WorkspaceRef
+	19, // 1: agentrepl.v1.UpdateHeldPromptRequest.turn:type_name -> conversation.v1.TurnId
 	1,  // 2: agentrepl.v1.UpdateHeldPromptRequest.release:type_name -> agentrepl.v1.UpdateHeldPromptRelease
 	2,  // 3: agentrepl.v1.UpdateHeldPromptRequest.drop:type_name -> agentrepl.v1.UpdateHeldPromptDrop
 	4,  // 4: agentrepl.v1.UpdateHeldPromptResponse.success:type_name -> agentrepl.v1.UpdateHeldPromptSuccess
@@ -939,12 +1192,16 @@ var file_agentrepl_v1_endpoint_update_held_prompt_proto_depIdxs = []int32{
 	10, // 10: agentrepl.v1.UpdateHeldPromptError.no_such_hold:type_name -> agentrepl.v1.UpdateHeldPromptNoSuchHold
 	11, // 11: agentrepl.v1.UpdateHeldPromptError.already_delivered:type_name -> agentrepl.v1.UpdateHeldPromptAlreadyDelivered
 	12, // 12: agentrepl.v1.UpdateHeldPromptError.release_refused:type_name -> agentrepl.v1.UpdateHeldPromptReleaseRefused
-	13, // 13: agentrepl.v1.UpdateHeldPromptError.being_delivered:type_name -> agentrepl.v1.UpdateHeldPromptBeingDelivered
-	14, // [14:14] is the sub-list for method output_type
-	14, // [14:14] is the sub-list for method input_type
-	14, // [14:14] is the sub-list for extension type_name
-	14, // [14:14] is the sub-list for extension extendee
-	0,  // [0:14] is the sub-list for field type_name
+	17, // 13: agentrepl.v1.UpdateHeldPromptError.being_delivered:type_name -> agentrepl.v1.UpdateHeldPromptBeingDelivered
+	13, // 14: agentrepl.v1.UpdateHeldPromptReleaseRefused.being_edited:type_name -> agentrepl.v1.UpdateHeldPromptReleaseRefusedBeingEdited
+	14, // 15: agentrepl.v1.UpdateHeldPromptReleaseRefused.behind_edit:type_name -> agentrepl.v1.UpdateHeldPromptReleaseRefusedBehindEdit
+	15, // 16: agentrepl.v1.UpdateHeldPromptReleaseRefused.cold_gate:type_name -> agentrepl.v1.UpdateHeldPromptReleaseRefusedColdGate
+	16, // 17: agentrepl.v1.UpdateHeldPromptReleaseRefused.session_refused:type_name -> agentrepl.v1.UpdateHeldPromptReleaseRefusedSessionRefused
+	18, // [18:18] is the sub-list for method output_type
+	18, // [18:18] is the sub-list for method input_type
+	18, // [18:18] is the sub-list for extension type_name
+	18, // [18:18] is the sub-list for extension extendee
+	0,  // [0:18] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_update_held_prompt_proto_init() }
@@ -971,13 +1228,19 @@ func file_agentrepl_v1_endpoint_update_held_prompt_proto_init() {
 		(*UpdateHeldPromptError_BeingDelivered)(nil),
 	}
 	file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes[9].OneofWrappers = []any{}
+	file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes[12].OneofWrappers = []any{
+		(*UpdateHeldPromptReleaseRefused_BeingEdited)(nil),
+		(*UpdateHeldPromptReleaseRefused_BehindEdit)(nil),
+		(*UpdateHeldPromptReleaseRefused_ColdGate)(nil),
+		(*UpdateHeldPromptReleaseRefused_SessionRefused)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_update_held_prompt_proto_rawDesc), len(file_agentrepl_v1_endpoint_update_held_prompt_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   14,
+			NumMessages:   18,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
