@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"testing"
+	"time"
 
 	"connectrpc.com/connect"
 
@@ -187,6 +188,38 @@ func TestSelectWorkspaceCarriesTheSelectionHistoryToTheVerb(t *testing.T) {
 			// Assert.
 			if got := workspace.SelectionHistory(h.Verbs.lastSelectHistory.Load()); got != tt.want {
 				t.Fatalf("history = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSelectWorkspaceCarriesTheSwitchInstantToTheVerb(t *testing.T) {
+	started := int64(1_762_700_000_123)
+	tests := []struct {
+		name    string
+		started *int64
+		want    *time.Time
+	}{
+		{name: "a request with an instant carries it", started: &started, want: func() *time.Time { at := time.UnixMilli(started); return &at }()},
+		{name: "a request with none carries none"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+
+			// Act.
+			if _, err := h.Client.SelectWorkspace(context.Background(),
+				connect.NewRequest(&agentreplv1.SelectWorkspaceRequest{Workspace: ref(), SwitchStartedAtMs: tt.started})); err != nil {
+				t.Fatalf("SelectWorkspace: %v", err)
+			}
+
+			// Assert.
+			h.Verbs.selectedMu.Lock()
+			got := h.Verbs.lastSelectStartedAt
+			h.Verbs.selectedMu.Unlock()
+			if (got == nil) != (tt.want == nil) || (got != nil && !got.Equal(*tt.want)) {
+				t.Fatalf("switch instant = %v, want %v", got, tt.want)
 			}
 		})
 	}

@@ -26,6 +26,7 @@ import type { PopupMirror } from "../host/sidebar-popups.js";
 import { WatchWorkspaceRosterResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_workspace_roster_pb";
 import { createDrawnStatusLog } from "../drawn-status.js";
 import { log } from "../log.js";
+import { createSelectionPaint, type RecordSidebarLatency } from "./selection-paint.js";
 import { drawTimingEnv, timeRosterDraw, type DrawTimingEnv, type MarkPhase } from "./draw-timing.js";
 import type { AppContext, DaemonContext } from "../rpc/context.js";
 import type { WorkspaceRef } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
@@ -188,6 +189,10 @@ export type WebhostSidebarDeps = Pick<SidebarDeps, "storage" | "timers" | "wallP
   notices?: { failures: LocalFailureView; notices: SidebarNotices };
   /** Where the open row panels are drawn over the feed (host/sidebar-popups.ts); beside the rows when absent. */
   popupMirror?: PopupMirror;
+  /** Where the switch's sidebar latency goes (selection-paint.ts); it is measured but not reported when absent. */
+  recordLatency?: RecordSidebarLatency;
+  /** Wall-clock Unix milliseconds for the selection's paint; the page's own clock when absent. */
+  wallNow?: () => number;
 };
 
 /** Where a sidebar is drawn, and what that placement needs. */
@@ -438,6 +443,9 @@ function mountSidebarIn(
   // last was ever seen. A push now replaces the one waiting, and the frame
   // draws whichever is newest.
   const frame = deps.frame ?? nextFrame;
+  // THE FIRST PAINT OF EACH SELECT'S SELECTION is recorded beside the page's
+  // own (selection-paint.ts), with the switch's sidebar latency.
+  const selectionPaint = createSelectionPaint({ wallNow: deps.wallNow ?? (() => Date.now()), frame }, deps.recordLatency);
   let waiting: WorkspaceRoster | null = null;
   let disposed = false;
 
@@ -511,6 +519,7 @@ function mountSidebarIn(
     rail.deploysMore.check();
     // Seeked once the draw is in the document, where its animations run.
     wallPhase.seek();
+    selectionPaint.drawn(roster.current);
     mark("hooks");
   }
 

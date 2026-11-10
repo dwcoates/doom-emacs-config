@@ -223,6 +223,11 @@ unary rpc can produce, which the contract never collapses into one."
           (reverse (cl-remove-if-not (lambda (call) (equal (car call) "SelectWorkspace"))
                                      agent-repl-test-host--calls))))
 
+(defun agent-repl-test-host--select-instants ()
+  "The switch instants SelectWorkspace was sent with, oldest first."
+  (mapcar (lambda (request) (plist-get request :switch-started-at-ms))
+          (agent-repl-test-host--select-requests)))
+
 (defun agent-repl-test-host--selected-ids ()
   "The ref ids SelectWorkspace was sent for, oldest first."
   (mapcar (lambda (request) (plist-get (plist-get request :workspace) :id))
@@ -1436,11 +1441,65 @@ an echo would race a newer request and take the frame back."
     (agent-repl-test-host--subscribe "ws-1")
     (let ((noted nil))
       (cl-letf (((symbol-function 'agent-repl-webhost-note-switch)
-                 (lambda (ws) (push ws noted))))
+                 (lambda (ws) (push ws noted) 1700000000123)))
         ;; Act
         (agent-repl-host-request-switch "ws-1" 'picker))
       ;; Assert
       (should (equal noted '("ws-1"))))))
+
+(ert-deftest agent-repl-test-host-a-counted-switch-sends-its-instant-with-the-select ()
+  "The instant noted for the page rides the switch's SelectWorkspace too."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    (cl-letf (((symbol-function 'agent-repl-webhost-note-switch)
+               (lambda (_ws) 1700000000123)))
+      ;; Act
+      (agent-repl-host-request-switch "ws-1" 'picker))
+    ;; Assert
+    (should (equal (agent-repl-test-host--select-instants)
+                   '(1700000000123)))))
+
+(ert-deftest agent-repl-test-host-the-startup-selection-sends-no-instant ()
+  "The startup's own selection began with no keystroke, so it carries none."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    ;; Act
+    (agent-repl-host-request-switch "ws-1" 'startup)
+    ;; Assert
+    (let ((requests (agent-repl-test-host--select-requests)))
+      (should (= (length requests) 1))
+      (should-not (plist-member (car requests) :switch-started-at-ms)))))
+
+(ert-deftest agent-repl-test-host-a-queued-select-keeps-its-instant ()
+  "A select waiting behind the one in flight is sent with its own instant."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe-three)
+    (setq agent-repl-host--select-in-flight "ws-1")
+    (agent-repl-host-select "ws-2" nil nil 1700000000456)
+    ;; Act
+    (agent-repl-host--select-settled "ws-1" #'ignore)
+    ;; Assert
+    (should (equal (agent-repl-test-host--select-instants)
+                   '(1700000000456)))))
+
+(ert-deftest agent-repl-test-host-an-activation-sends-its-instant-with-the-select ()
+  "A switch Emacs made on the user's behalf carries its noted instant."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    (setq agent-repl-test-host--current-ws "ws-1"
+          agent-repl-test-host--calls nil)
+    (cl-letf (((symbol-function 'agent-repl-webhost-note-switch)
+               (lambda (_ws) 1700000000789)))
+      ;; Act
+      (let ((agent-repl--eager-open-in-progress nil))
+        (agent-repl-host--on-workspace-activated)))
+    ;; Assert
+    (should (equal (agent-repl-test-host--select-instants)
+                   '(1700000000789)))))
 
 (ert-deftest agent-repl-test-host-the-startup-selection-notes-no-switch ()
   "The startup's own selection is no switch the user made, so nothing is noted."
@@ -1449,7 +1508,7 @@ an echo would race a newer request and take the frame back."
     (agent-repl-test-host--subscribe "ws-1")
     (let ((noted nil))
       (cl-letf (((symbol-function 'agent-repl-webhost-note-switch)
-                 (lambda (ws) (push ws noted))))
+                 (lambda (ws) (push ws noted) 1700000000123)))
         ;; Act
         (agent-repl-host-request-switch "ws-1" 'startup))
       ;; Assert

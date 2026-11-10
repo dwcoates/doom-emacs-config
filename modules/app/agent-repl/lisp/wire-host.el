@@ -1192,20 +1192,28 @@ failure arm, since every failure is one dir\='s."
 
 (defun agent-repl-wire-encode-select-workspace-request (value)
   "Encode the SelectWorkspaceRequest plist VALUE.
-VALUE is `(:workspace REF :keep-selection-history BOOL)'.  A true
-`keep_selection_history' marks a step of the recency walk; false is
-proto3's default and is omitted, so every other select is spelled as before."
+VALUE is `(:workspace REF :keep-selection-history BOOL
+:switch-started-at-ms MS)'.  A true `keep_selection_history' marks a step
+of the recency walk; false is proto3's default and is omitted.  MS, the
+Unix-millisecond instant the user's switch began, is omitted when nil: a
+select no keystroke began carries none."
   (unless (plist-member value :workspace)
     (agent-repl-wire--fail "SelectWorkspaceRequest" 'workspace
                            "required message field is absent"))
-  (agent-repl-wire--encoded
-   "SelectWorkspaceRequest"
-   (append
-    (list (cons 'workspace
-                (agent-repl-wire-encode-select-workspace-request-workspace
-                 (plist-get value :workspace))))
-    (when (plist-get value :keep-selection-history)
-      (list (cons 'keepSelectionHistory t))))))
+  (let ((started (plist-get value :switch-started-at-ms)))
+    (unless (or (null started) (integerp started))
+      (agent-repl-wire--fail "SelectWorkspaceRequest" 'switchStartedAtMs
+                             "not an integer"))
+    (agent-repl-wire--encoded
+     "SelectWorkspaceRequest"
+     (append
+      (list (cons 'workspace
+                  (agent-repl-wire-encode-select-workspace-request-workspace
+                   (plist-get value :workspace))))
+      (when (plist-get value :keep-selection-history)
+        (list (cons 'keepSelectionHistory t)))
+      (when started
+        (list (cons 'switchStartedAtMs started)))))))
 
 (defun agent-repl-wire-decode-select-workspace-success (value)
   "Decode VALUE as `SelectWorkspaceSuccess', `(:roster-revision N)'.

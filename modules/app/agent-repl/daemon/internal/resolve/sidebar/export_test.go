@@ -15,3 +15,7 @@ var RunningTurnStart = runningTurnStart
 // ProjectArm exports projectArm, the one projection of the footer's status
 // onto a roster arm.
 var ProjectArm = projectArm
+
+// PatchedRegistry exposes patchedRegistry, the registry a select's change
+// installs into.
+var PatchedRegistry = patchedRegistry

@@ -1,10 +1,15 @@
 // @vitest-environment jsdom
 // The sidebar page's start: the rail in a web view of its own, handed to Emacs
 // as `window.agentReplSidebar`. See src/host/sidebar-page.ts.
+import { create } from "@bufbuild/protobuf";
 import { afterEach, describe, expect, it } from "vitest";
+
+import { ReportedLatencyKind } from "../../../proto/gen/ts/agentrepl/v1/endpoint_report_latencies_pb";
+import { WorkspaceRefSchema } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 
 import { FOCUS_LEFT_EMACS, type FocusLeftSource } from "../../src/focus-left.js";
 import { SIDEBAR_ID, SIDEBAR_ROOT_CLASS, startSidebarPage, type StartSidebarPageDeps } from "../../src/host/sidebar-page.js";
+import type { LatencyReporter } from "../../src/latency-report.js";
 import { log, setLogger, type ForwardingLogger } from "../../src/log.js";
 import type { DaemonContext } from "../../src/rpc/context.js";
 import { createSidebarNotices } from "../../src/sidebar/notices.js";
@@ -38,6 +43,16 @@ function recordingRail() {
   return { mount, told };
 }
 
+/** A latency reporter that records what it was handed. */
+function recordingLatencies() {
+  const recorded: Array<[ReportedLatencyKind, number, string | undefined]> = [];
+  const reporter: LatencyReporter = {
+    record: (kind, seconds, workspace) => void recorded.push([kind, seconds, workspace?.id]),
+    dispose: () => undefined,
+  };
+  return { reporter, recorded };
+}
+
 /** Start the page with DEPS on RUNTIME, a quiet one when absent. */
 function start(deps: Omit<StartSidebarPageDeps, "runtime"> = {}, runtime: WebhostRuntime = quietWebhostRuntime("sidebar").runtime) {
   return startSidebarPage(document, window, {
@@ -46,6 +61,7 @@ function start(deps: Omit<StartSidebarPageDeps, "runtime"> = {}, runtime: Webhos
     webappBuild: () => "Web1",
     mount: recordingRail().mount,
     popupChannel: quietPopupChannel(),
+    latencies: () => recordingLatencies().reporter,
     ...deps,
   });
 }
@@ -119,6 +135,27 @@ describe("startSidebarPage", () => {
 
     // Assert
     expect((posted[0] as { kind: string }).kind).toBe("show");
+  });
+
+  it("hands the rail a recorder that reports each sidebar latency under its workspace, on the page's daemon", () => {
+    // Arrange
+    const { mount, told } = recordingRail();
+    const { reporter, recorded } = recordingLatencies();
+    let installedOn: DaemonContext | null = null;
+
+    // Act
+    start({
+      mount,
+      latencies: (ctx) => {
+        installedOn = ctx;
+        return reporter;
+      },
+    });
+    told.deps?.recordLatency?.(create(WorkspaceRefSchema, { id: "ws-a", dir: "/w/a" }), ReportedLatencyKind.SWITCH_SIDEBAR, 0.08);
+
+    // Assert
+    expect(installedOn).toBe(told.ctx);
+    expect(recorded).toEqual([[ReportedLatencyKind.SWITCH_SIDEBAR, 0.08, "ws-a"]]);
   });
 
   it("hands the page to Emacs", () => {

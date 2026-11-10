@@ -744,7 +744,13 @@ func (v *verbs) BindViews(ctx context.Context) error {
 // asked for nothing yet would leave `WatchWorkspaceRoster` with no value to
 // deliver, and the first client would wait for a workspace to change before it
 // saw the roster at all — including the EMPTY roster, which is a roster.
+//
+// IT HOLDS THE SELECTION LOCK FROM ITS READ TO ITS INSTALL, as every whole
+// registry install does (installRegistry), so the registry it read can never
+// be installed after a select's push that came later.
 func (v *verbs) PublishRegistry(ctx context.Context) error {
+	v.selection.Lock()
+	defer v.selection.Unlock()
 	log := v.deps.Log.Global()
 	arrangement, err := v.deps.DB.ReadArrangement(ctx)
 	if err != nil {

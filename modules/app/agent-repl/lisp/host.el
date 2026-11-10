@@ -679,7 +679,7 @@ in the order the user made them, and the last press is the last stamp.")
 
 (defvar agent-repl-host--select-queued nil
   "The newest selection waiting behind the one in flight, or nil.
-A list (WS ON-SETTLED KEEP-HISTORY), the arguments of the
+A list (WS ON-SETTLED KEEP-HISTORY SWITCH-STARTED-MS), the arguments of the
 `agent-repl-host-select' it will be sent as.  Only the newest is kept: a
 selection the user has already moved past is never sent, because the daemon
 would stamp it `current' only for the next one to overwrite it.  The one it
@@ -742,12 +742,16 @@ the selection pending forever."
                       (car agent-repl-host--confirming) (cdr agent-repl-host--confirming) reason)
     (setq agent-repl-host--confirming nil)))
 
-(defun agent-repl-host-select (ws &optional on-settled keep-history)
+(defun agent-repl-host-select (ws &optional on-settled keep-history switch-started-ms)
   "Tell the daemon the user switched to workspace WS.
 KEEP-HISTORY non-nil marks the switch as a step of the recency walk
 \(`agent-repl-switch-older'): the daemon stamps `current' and leaves the
 row's last-selected instant standing (agentrepl.v1
 SelectWorkspaceRequest.keep_selection_history).
+SWITCH-STARTED-MS, when given, is the Unix-millisecond instant the user's
+switch began (`agent-repl-host--count-editor-switch'); the daemon hands it
+to the sidebar with the selection, which measures its paint from it
+\(agentrepl.v1 SelectWorkspaceRequest.switch_started_at_ms).
 ON-SETTLED, when given, is called with `:success', `:error',
 `:standing-down' (the daemon is leaving or already gone: the next daemon
 is asked again) or `:failure' once the call has an outcome
@@ -775,17 +779,18 @@ walk is armed on (`agent-repl-host--register-settled')."
     (agent-repl-host--follow-live-daemon ws "select"))
   (if agent-repl-host--select-in-flight
       (let ((older agent-repl-host--select-queued))
-        (setq agent-repl-host--select-queued (list ws on-settled keep-history))
+        (setq agent-repl-host--select-queued (list ws on-settled keep-history switch-started-ms))
         (agent-repl--info ws "elisp.host.select-queued ws=%s behind=%s superseded=%s"
                           ws agent-repl-host--select-in-flight (or (car older) "none"))
         (when (and older (cadr older))
           (funcall (cadr older) :superseded))
         t)
-    (agent-repl-host--send-select ws on-settled keep-history)))
+    (agent-repl-host--send-select ws on-settled keep-history switch-started-ms)))
 
-(defun agent-repl-host--send-select (ws on-settled keep-history)
+(defun agent-repl-host--send-select (ws on-settled keep-history switch-started-ms)
   "Send WS\='s SelectWorkspace now, holding the in-flight slot until it answers.
-ON-SETTLED and KEEP-HISTORY are as `agent-repl-host-select' documents."
+ON-SETTLED, KEEP-HISTORY and SWITCH-STARTED-MS are as
+`agent-repl-host-select' documents."
   (let ((ref (agent-repl-host-ref ws))
         (conn (agent-repl-host-conn-or-primary ws)))
     (cond
@@ -808,13 +813,14 @@ ON-SETTLED and KEEP-HISTORY are as `agent-repl-host-select' documents."
       (when on-settled (funcall on-settled :standing-down))
       nil)
      (t
-      (agent-repl--info ws "elisp.host.select ws=%s id=%S keep-history=%s"
-                        ws (plist-get ref :id) (and keep-history t))
+      (agent-repl--info ws "elisp.host.select ws=%s id=%S keep-history=%s started-ms=%s"
+                        ws (plist-get ref :id) (and keep-history t) switch-started-ms)
       (setq agent-repl-host--select-in-flight ws)
       (condition-case err
           (agent-repl-rpc-select-workspace
            conn (append (list :workspace ref)
-                        (and keep-history (list :keep-selection-history t)))
+                        (and keep-history (list :keep-selection-history t))
+                        (and switch-started-ms (list :switch-started-at-ms switch-started-ms)))
            :on-response
            (lambda (response)
              (agent-repl-host--select-settled
@@ -957,14 +963,18 @@ See `agent-repl-host--editor-switches'."
 
 (defun agent-repl-host--count-editor-switch (ws origin)
   "Count a workspace switch to WS the user made in Emacs, through ORIGIN.
-ORIGIN is the request trigger or `activation', for the record."
+ORIGIN is the request trigger or `activation', for the record.  Answers
+the switch's instant in Unix milliseconds, nil when WS is nil: the
+caller hands it to the switch's select, so the sidebar measures the
+switch from the same instant the page does."
   (setq agent-repl-host--editor-switches (1+ agent-repl-host--editor-switches))
   ;; The switch's own instant rides the webhost's show, so the page measures
   ;; the switch the user felt (webhost.el).
-  (when ws (agent-repl-webhost-note-switch ws))
-  (agent-repl--info (or ws '(:agent-repl-central "a switch to a perspective without a workspace has no workspace sink"))
-                    "elisp.host.editor-switch ws=%s origin=%s count=%d"
-                    ws origin agent-repl-host--editor-switches))
+  (let ((started (and ws (agent-repl-webhost-note-switch ws))))
+    (agent-repl--info (or ws '(:agent-repl-central "a switch to a perspective without a workspace has no workspace sink"))
+                      "elisp.host.editor-switch ws=%s origin=%s count=%d started-ms=%s"
+                      ws origin agent-repl-host--editor-switches started)
+    started))
 
 (defun agent-repl-host-request-switch (ws trigger)
   "Ask the daemon to make WS the current workspace, and move the frame now.
@@ -993,10 +1003,10 @@ walk stopped on as a visit (`agent-repl--end-recency-walk').
 A request that cannot be sent is LOUD: a switch the user asked for that
 goes nowhere is reported in the echo area and at WARN, never dropped.
 Answers t when the request was sent or queued, nil otherwise."
-  (let ((shown (agent-repl--ws-current-name))
-        (walk (eq trigger 'recency-walk)))
-    (unless (eq trigger 'startup)
-      (agent-repl-host--count-editor-switch ws trigger))
+  (let* ((shown (agent-repl--ws-current-name))
+         (walk (eq trigger 'recency-walk))
+         (started (unless (eq trigger 'startup)
+                    (agent-repl-host--count-editor-switch ws trigger))))
     ;; Set BEFORE the frame moves: the move's own activation reads it.  A
     ;; choice ends the walk first, recording the landing the user stopped on
     ;; as the visit before this one (`agent-repl--end-recency-walk').
@@ -1024,7 +1034,7 @@ Answers t when the request was sent or queued, nil otherwise."
                 (unless (eq outcome :success)
                   (agent-repl--info ws "elisp.host.switch-request-settled ws=%s outcome=%S"
                                     ws outcome)))
-           walk)
+           walk started)
         (agent-repl-host--move-on-request ws shown))))))
 
 (defun agent-repl-host--move-on-request (ws shown)
@@ -1197,14 +1207,16 @@ docstring in `core.el\=')."
       ;; A switch Emacs made itself (a Doom command, a teardown landing, a
       ;; file placed in its workspace) is the user's, unless Emacs made it
       ;; on its own account.
-      (if agent-repl-host-automatic-switch
-          (agent-repl--log ws "elisp.host.editor-switch-uncounted ws=%s reason=automatic" ws)
-        (agent-repl-host--count-editor-switch ws 'activation))
-      ;; The daemon is told after the fact.
-      (when (and ws (agent-repl-host--entry ws))
-        (agent-repl--info ws "elisp.host.select-local-activation ws=%s command=%S"
-                          ws this-command)
-        (agent-repl-host-select ws))))))
+      (let ((started (if agent-repl-host-automatic-switch
+                         (progn
+                           (agent-repl--log ws "elisp.host.editor-switch-uncounted ws=%s reason=automatic" ws)
+                           nil)
+                       (agent-repl-host--count-editor-switch ws 'activation))))
+        ;; The daemon is told after the fact.
+        (when (and ws (agent-repl-host--entry ws))
+          (agent-repl--info ws "elisp.host.select-local-activation ws=%s command=%S"
+                            ws this-command)
+          (agent-repl-host-select ws nil nil started)))))))
 
 ;;;; ---- Subscribe ----
 

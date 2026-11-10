@@ -22,7 +22,9 @@
 import { parseWindowLevel, type AppliedLevel, type LevelWindow, type WindowLevel } from "../../../agent-shim/logging/ts/level-window.js";
 import { bootFailed } from "../failure/sink.js";
 import { FOCUS_LEFT_EMACS, pageFocusLeft, type FocusLeftSource } from "../focus-left.js";
+import { installDaemonLatencyReport, type LatencyReporter } from "../latency-report.js";
 import { log } from "../log.js";
+import type { DaemonContext } from "../rpc/context.js";
 import { isDaemonOrigin } from "../rpc/daemon-origin.js";
 import { mountWebhostSidebar } from "../sidebar/sidebar.js";
 import { createSidebarNotices, type SidebarNotices } from "../sidebar/notices.js";
@@ -88,6 +90,8 @@ export interface StartSidebarPageDeps extends WebhostDocumentDeps {
   focusLeft?: FocusLeftSource;
   /** The channel the open row panels are handed to the host on; the host origin's own when absent. */
   popupChannel?: PopupChannel;
+  /** Install the page's latency reporter; the daemon's own when absent. */
+  latencies?: (ctx: DaemonContext) => LatencyReporter;
 }
 
 /** Turn the page in DOC and WIN into the sidebar, and hand it to Emacs. */
@@ -120,7 +124,11 @@ export function startSidebarPage(doc: Document, win: Window, deps: StartSidebarP
     // THE OPEN ROW PANELS ARE DRAWN OVER THE FEED, by the host
     // (sidebar-popups.ts): this window ends at the feed's edge.
     const popupMirror = createPopupMirror({ channel: deps.popupChannel ?? openPopupChannel() });
+    // THE SWITCH'S SIDEBAR LATENCY goes to the daemon's always-on metrics,
+    // each naming the workspace switched to (sidebar/selection-paint.ts).
+    const latencies = (deps.latencies ?? installDaemonLatencyReport)(started.ctx);
     const rail = (deps.mount ?? mountWebhostSidebar)(nav, started.ctx, {
+      recordLatency: (workspace, kind, seconds) => latencies.record(kind, seconds, workspace),
       focusLeft,
       popupMirror,
       notices: { failures: started.failures, notices },

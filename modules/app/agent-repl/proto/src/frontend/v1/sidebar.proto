@@ -823,6 +823,21 @@ message RosterCurrentWorkspace {
   // The selected workspace's identity, imported — the join key, never a
   // display path (the row's own elements carry what is drawn).
   workspace.v1.WorkspaceRef workspace = 1;
+  // THE SELECT THAT MADE IT CURRENT, by an id the daemon mints per select
+  // (agentrepl.v1.SelectWorkspace), so a client keys what it does about a
+  // selection to that select: the sidebar records the first frame it paints
+  // a selection in (`sidebar.selection-painted`) under it, beside the
+  // daemon's own `selected the workspace` record. EMPTY when no select of
+  // this daemon's stated the current workspace: a registry read at boot, or
+  // a selection another daemon stored.
+  string selection_id = 2;
+  // WHEN THE USER'S SWITCH BEGAN, in Unix milliseconds on the host's wall
+  // clock: the keystroke instant the select carried
+  // (agentrepl.v1.SelectWorkspaceRequest.switch_started_at_ms). The sidebar
+  // measures the switch to its paint of the selection from it
+  // (agentrepl.v1.ReportedLatencyKind.REPORTED_LATENCY_KIND_SWITCH_SIDEBAR).
+  // Unset when the select carried none.
+  optional int64 switch_started_at_ms = 3;
 }
 
 

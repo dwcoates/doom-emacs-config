@@ -463,9 +463,10 @@ type Verbs interface {
 	// refused as unknown_workspace.
 	Status(ctx context.Context, ws ids.WorkspaceID) (*agentreplv1.WorkspaceStatus, error)
 	// Select records the user's switch to this workspace and clears its
-	// attention marker. Idempotent. HISTORY says whether the switch stamps
-	// the selection instant or, as a step of a recency walk, leaves it.
-	Select(ctx context.Context, ws ids.WorkspaceID, history SelectionHistory) error
+	// attention marker. Idempotent. SW says whether the switch stamps the
+	// selection instant or, as a step of a recency walk, leaves it, and when
+	// the user's switch began.
+	Select(ctx context.Context, ws ids.WorkspaceID, sw Switch) error
 	// FollowStoredSelection brings the roster's selection in line with the one
 	// WSM stores, when ANOTHER daemon sharing the state file stamped it (a
 	// handover's predecessor and successor each serve a roster, and a select
@@ -1300,7 +1301,7 @@ func New(deps Deps) (Verbs, error) {
 	if worktreeBound <= 0 {
 		worktreeBound = DefaultWorktreeBound
 	}
-	return &verbs{deps: deps, load: load, splice: splice, now: now, restartStopBound: stopBound, worktreeBound: worktreeBound}, nil
+	return &verbs{deps: deps, load: load, splice: splice, now: now, mintSelection: wsm.NewSelectionID, restartStopBound: stopBound, worktreeBound: worktreeBound}, nil
 }
 
 // ThreadGraphs is where the zettel chat threads' graphs live (the chat
@@ -1329,6 +1330,27 @@ const (
 	// the history it walks.
 	KeepSelectionHistory
 )
+
+// write is the store write the history asks for.
+func (h SelectionHistory) write() wsm.SelectionWrite {
+	switch h {
+	case RecordSelection:
+		return wsm.SelectRecording
+	case KeepSelectionHistory:
+		return wsm.SelectKeepingHistory
+	}
+	panic(fmt.Sprintf("workspace: unknown selection history %d", int(h)))
+}
+
+// Switch is what the user's switch states about one select.
+type Switch struct {
+	// History says what the select does to the selection history.
+	History SelectionHistory
+	// StartedAt is when the user's switch began (agentrepl.v1
+	// SelectWorkspaceRequest.switch_started_at_ms), nil when the request
+	// carried none.
+	StartedAt *time.Time
+}
 
 // String names the history for the log.
 func (h SelectionHistory) String() string {

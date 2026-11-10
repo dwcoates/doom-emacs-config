@@ -123,6 +123,10 @@ type fakeDB struct {
 	arrangeErr   error
 	// readArrangementErr fails ReadArrangement.
 	readArrangementErr error
+	// arrangementReads counts ReadArrangement calls, and onReadArrangement,
+	// when set, runs at the start of each.
+	arrangementReads  int
+	onReadArrangement func()
 
 	// rolledBack is each workspace's rolled-back turns; rolledBackErr fails
 	// the read.
@@ -302,7 +306,9 @@ type fakeDB struct {
 	keptHistoryAt []time.Time
 	// keepSelectedErr fails SetCurrentKeepingLastSelected.
 	keepSelectedErr error
-	forgotten       []ids.WorkspaceID
+	// selectErr fails Select.
+	selectErr error
+	forgotten []ids.WorkspaceID
 	// forgetReport is what Forget answers, and forgetErr makes it fail; the
 	// fake's own map cannot do either on its own.
 	forgetReport wsm.ForgetReport
@@ -708,6 +714,10 @@ func (d *fakeDB) Current(context.Context) (*ids.WorkspaceID, error) {
 }
 
 func (d *fakeDB) ReadArrangement(ctx context.Context) (wsm.Arrangement, error) {
+	d.arrangementReads++
+	if d.onReadArrangement != nil {
+		d.onReadArrangement()
+	}
 	if d.readArrangementErr != nil {
 		return wsm.Arrangement{}, d.readArrangementErr
 	}
@@ -1019,6 +1029,54 @@ func (d *fakeDB) SetCurrentKeepingLastSelected(_ context.Context, id ids.Workspa
 	d.keptHistorySelects = append(d.keptHistorySelects, id)
 	d.keptHistoryAt = append(d.keptHistoryAt, at)
 	return nil
+}
+
+// Select is WSM's one-transaction select over the fake's own selection
+// writes: a workspace already current is a re-selection, which clears only
+// its attention; any other is made current as WRITE says. It answers the
+// rows it changed as the fake holds them, the current one first.
+func (d *fakeDB) Select(ctx context.Context, id ids.WorkspaceID, write wsm.SelectionWrite, at time.Time) (wsm.Selection, error) {
+	if d.selectErr != nil {
+		return wsm.Selection{}, d.selectErr
+	}
+	if _, ok := d.workspaces[id]; !ok {
+		return wsm.Selection{}, fmt.Errorf("fake: no such workspace %s: %w", id, wsm.ErrNotFound)
+	}
+	out := wsm.Selection{Current: id, Again: d.current != nil && *d.current == id}
+	if !out.Again {
+		if d.current != nil {
+			previous := *d.current
+			out.Previous = &previous
+		}
+		switch write {
+		case wsm.SelectRecording:
+			if err := d.SetCurrent(ctx, id, at); err != nil {
+				return wsm.Selection{}, err
+			}
+		case wsm.SelectKeepingHistory:
+			if err := d.SetCurrentKeepingLastSelected(ctx, id, at); err != nil {
+				return wsm.Selection{}, err
+			}
+		}
+	}
+	if err := d.SetAttention(ctx, id, false); err != nil {
+		return wsm.Selection{}, err
+	}
+	row := d.workspaces[id]
+	row.Current, row.Attention = true, false
+	out.Workspaces = append(out.Workspaces, row)
+	if out.Previous != nil {
+		if left, ok := d.workspaces[*out.Previous]; ok {
+			left.Current = false
+			out.Workspaces = append(out.Workspaces, left)
+		}
+	}
+	for _, repo := range d.repositories {
+		if repo.ID == row.Repo {
+			out.Repository = repo
+		}
+	}
+	return out, nil
 }
 
 func (d *fakeDB) SetAttention(_ context.Context, id ids.WorkspaceID, on bool) error {
@@ -2353,6 +2411,12 @@ type fakeSidebar struct {
 	// calls records the ORDER the resolver was told things in, which is what
 	// decides whether a push carries a whole view or a half-refreshed one.
 	calls []string
+	// selections are the select changes SetSelection took, in order, and
+	// stamps every select stamp the roster was handed with a selection.
+	selections []wsm.Selection
+	stamps     []sidebar.SelectStamp
+	// refuseSelection makes SetSelection refuse every change.
+	refuseSelection bool
 }
 
 // revivingEdge is one SetReviving call.
@@ -2368,12 +2432,29 @@ func (s *fakeSidebar) SetRegistry(reg sidebar.Registry) {
 	s.calls = append(s.calls, "registry")
 }
 
-func (s *fakeSidebar) SetRegistrySelected(reg sidebar.Registry, ws ids.WorkspaceID) {
+func (s *fakeSidebar) SetRegistrySelected(reg sidebar.Registry, ws ids.WorkspaceID, stamp sidebar.SelectStamp) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.registries = append(s.registries, reg)
 	s.selected = append(s.selected, ws)
+	s.stamps = append(s.stamps, stamp)
 	s.calls = append(s.calls, "registry+selected")
+}
+
+// SetSelection takes the select's change, or refuses it when
+// refuseSelection is set, as a roster holding no registry would.
+func (s *fakeSidebar) SetSelection(sel wsm.Selection, stamp sidebar.SelectStamp) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.refuseSelection {
+		s.calls = append(s.calls, "selection-refused")
+		return false
+	}
+	s.selections = append(s.selections, sel)
+	s.selected = append(s.selected, sel.Current)
+	s.stamps = append(s.stamps, stamp)
+	s.calls = append(s.calls, "selection")
+	return true
 }
 
 func (s *fakeSidebar) SetSelected(ws ids.WorkspaceID) {
@@ -3800,7 +3881,7 @@ func (f *fixture) gateStarts(buffer int) (entered <-chan ids.WorkspaceID, releas
 // selectAsync runs Select on its own goroutine and answers its outcome.
 func (f *fixture) selectAsync(ctx context.Context, ws ids.WorkspaceID) <-chan error {
 	done := make(chan error, 1)
-	go func() { done <- f.verbs.Select(ctx, ws, RecordSelection) }()
+	go func() { done <- f.verbs.Select(ctx, ws, Switch{History: RecordSelection}) }()
 	return done
 }
 

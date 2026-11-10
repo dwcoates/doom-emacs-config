@@ -50,12 +50,13 @@ var (
 
 // ReportedKinds are the latencies Emacs and the webapp report.
 var ReportedKinds = map[agentreplv1.ReportedLatencyKind]LatencyKind{
-	agentreplv1.ReportedLatencyKind_REPORTED_LATENCY_KIND_SWITCH_REPEAT: {Name: "switch_repeat", Buckets: navigationBuckets},
-	agentreplv1.ReportedLatencyKind_REPORTED_LATENCY_KIND_SWITCH_FIRST:  {Name: "switch_first", Buckets: navigationBuckets},
-	agentreplv1.ReportedLatencyKind_REPORTED_LATENCY_KIND_PAGE_BOOT:     {Name: "page_boot", Buckets: pageBootBuckets},
-	agentreplv1.ReportedLatencyKind_REPORTED_LATENCY_KIND_PROMPT_ECHO:   {Name: "prompt_echo", Buckets: navigationBuckets},
-	agentreplv1.ReportedLatencyKind_REPORTED_LATENCY_KIND_PAGE_STALL:    {Name: "page_stall", Buckets: stallBuckets},
-	agentreplv1.ReportedLatencyKind_REPORTED_LATENCY_KIND_RELOAD_BLANK:  {Name: "reload_blank", Buckets: stallBuckets},
+	agentreplv1.ReportedLatencyKind_REPORTED_LATENCY_KIND_SWITCH_REPEAT:  {Name: "switch_repeat", Buckets: navigationBuckets},
+	agentreplv1.ReportedLatencyKind_REPORTED_LATENCY_KIND_SWITCH_FIRST:   {Name: "switch_first", Buckets: navigationBuckets},
+	agentreplv1.ReportedLatencyKind_REPORTED_LATENCY_KIND_PAGE_BOOT:      {Name: "page_boot", Buckets: pageBootBuckets},
+	agentreplv1.ReportedLatencyKind_REPORTED_LATENCY_KIND_PROMPT_ECHO:    {Name: "prompt_echo", Buckets: navigationBuckets},
+	agentreplv1.ReportedLatencyKind_REPORTED_LATENCY_KIND_PAGE_STALL:     {Name: "page_stall", Buckets: stallBuckets},
+	agentreplv1.ReportedLatencyKind_REPORTED_LATENCY_KIND_RELOAD_BLANK:   {Name: "reload_blank", Buckets: stallBuckets},
+	agentreplv1.ReportedLatencyKind_REPORTED_LATENCY_KIND_SWITCH_SIDEBAR: {Name: "switch_sidebar", Buckets: navigationBuckets},
 }
 
 // EditorKinds are the editor-wide latencies Emacs reports, which name no

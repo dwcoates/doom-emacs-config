@@ -108,6 +108,12 @@ type DB interface {
 	// instant when it moves off it. It expands the folds holding the
 	// workspace as SetCurrent does.
 	SetCurrentKeepingLastSelected(ctx context.Context, id WorkspaceID, at time.Time) error
+	// Select records the user's selection of a workspace at an instant as
+	// WRITE says, clears its attention marker, and answers the rows the
+	// write changed, read back in the same transaction (Selection). A
+	// workspace already current is a re-selection: only its attention
+	// marker is cleared.
+	Select(ctx context.Context, id WorkspaceID, write SelectionWrite, at time.Time) (Selection, error)
 	// Current reports the currently selected workspace, nil when none is.
 	Current(ctx context.Context) (*WorkspaceID, error)
 	// DataVersion answers SQLite's `PRAGMA data_version` on this handle's one

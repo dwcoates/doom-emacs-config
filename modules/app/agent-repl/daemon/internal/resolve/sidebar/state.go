@@ -419,6 +419,9 @@ type rosterState struct {
 	// selected is the user's selection, which the daemon stamps the moment
 	// SelectWorkspace arrives rather than waiting for WSM to echo it back.
 	selected *ids.WorkspaceID
+	// stamp is the select that made the selection current, nil when no
+	// select of this daemon's did (stampedSelection).
+	stamp *stampedSelection
 	// divergence is each repository's last ahead/behind measure
 	// (SetRepoDivergence). A repository with none is drawn pending.
 	divergence map[ids.RepoID]repodivergence.Measure
@@ -438,6 +441,13 @@ type rosterState struct {
 	// version is the agent-repl release the rail's header states
 	// (DeployedVersion), nil while none is resolved.
 	version *semver.Version
+}
+
+// stampedSelection is a select's stamp with the workspace it selected: the
+// roster states the stamp only while that workspace is the selection.
+type stampedSelection struct {
+	ws    ids.WorkspaceID
+	stamp SelectStamp
 }
 
 // coldGate is one workspace's shown cold gate: its feed row id and card.

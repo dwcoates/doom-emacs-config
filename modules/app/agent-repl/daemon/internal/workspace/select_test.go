@@ -23,7 +23,7 @@ func TestSelectRecordsTheSelectionInstant(t *testing.T) {
 	f.workspace("w1", t.TempDir())
 
 	// Act.
-	if err := f.verbs.Select(context.Background(), "w1", RecordSelection); err != nil {
+	if err := f.verbs.Select(context.Background(), "w1", Switch{History: RecordSelection}); err != nil {
 		t.Fatalf("Select: %v", err)
 	}
 
@@ -40,7 +40,7 @@ func TestSelectClearsTheAttentionMarker(t *testing.T) {
 	f.db.attention["w1"] = true
 
 	// Act.
-	if err := f.verbs.Select(context.Background(), "w1", RecordSelection); err != nil {
+	if err := f.verbs.Select(context.Background(), "w1", Switch{History: RecordSelection}); err != nil {
 		t.Fatalf("Select: %v", err)
 	}
 
@@ -56,7 +56,7 @@ func TestSelectTellsTheRoster(t *testing.T) {
 	f.workspace("w1", t.TempDir())
 
 	// Act.
-	if err := f.verbs.Select(context.Background(), "w1", RecordSelection); err != nil {
+	if err := f.verbs.Select(context.Background(), "w1", Switch{History: RecordSelection}); err != nil {
 		t.Fatalf("Select: %v", err)
 	}
 
@@ -88,7 +88,7 @@ func TestSelectRaisesTheCacheKeepersVisibilityEdges(t *testing.T) {
 			}
 
 			// Act.
-			if err := f.verbs.Select(context.Background(), "w2", RecordSelection); err != nil {
+			if err := f.verbs.Select(context.Background(), "w2", Switch{History: RecordSelection}); err != nil {
 				t.Fatalf("Select: %v", err)
 			}
 
@@ -106,10 +106,10 @@ func TestSelectIsIdempotent(t *testing.T) {
 	f.workspace("w1", t.TempDir())
 
 	// Act.
-	if err := f.verbs.Select(context.Background(), "w1", RecordSelection); err != nil {
+	if err := f.verbs.Select(context.Background(), "w1", Switch{History: RecordSelection}); err != nil {
 		t.Fatalf("first Select: %v", err)
 	}
-	if err := f.verbs.Select(context.Background(), "w1", RecordSelection); err != nil {
+	if err := f.verbs.Select(context.Background(), "w1", Switch{History: RecordSelection}); err != nil {
 		t.Fatalf("second Select: %v", err)
 	}
 
@@ -124,7 +124,7 @@ func TestSelectRefusesAnUnknownWorkspace(t *testing.T) {
 	f := newFixture(t)
 
 	// Act.
-	err := f.verbs.Select(context.Background(), "nope", RecordSelection)
+	err := f.verbs.Select(context.Background(), "nope", Switch{History: RecordSelection})
 
 	// Assert.
 	asRefusal(t, err, ArmUnknownWorkspace)
@@ -183,39 +183,108 @@ func TestSetPriorityRepublishesTheRoster(t *testing.T) {
 	}
 }
 
-// TestSelectTellsTheRosterAsOnePush pins that a select reaches the roster as
-// ONE mutation carrying both the refreshed registry and the selection, so
-// every client receives one roster per switch rather than two.
-func TestSelectTellsTheRosterAsOnePush(t *testing.T) {
+// TestSelectPublishesTheStoresAnswerWithoutARegistryRead pins the switch's
+// fast path: the roster takes the rows the store's write answered, as ONE
+// push, and nothing reads the whole registry.
+func TestSelectPublishesTheStoresAnswerWithoutARegistryRead(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
 	f.workspace("w1", t.TempDir())
 
 	// Act.
-	if err := f.verbs.Select(context.Background(), "w1", RecordSelection); err != nil {
+	if err := f.verbs.Select(context.Background(), "w1", Switch{History: RecordSelection}); err != nil {
 		t.Fatalf("Select: %v", err)
 	}
 
 	// Assert.
-	if want := []string{"registry+selected"}; !slices.Equal(f.sidebar.calls, want) {
+	if want := []string{"selection"}; !slices.Equal(f.sidebar.calls, want) {
 		t.Fatalf("roster calls = %v, want %v", f.sidebar.calls, want)
+	}
+	if f.db.arrangementReads != 0 {
+		t.Fatalf("registry reads = %d, want none", f.db.arrangementReads)
+	}
+	sel := f.sidebar.selections[0]
+	if sel.Current != "w1" || len(sel.Workspaces) == 0 || sel.Workspaces[0].LastSelectedAt == nil || !sel.Workspaces[0].LastSelectedAt.Equal(fixedNow) {
+		t.Fatalf("the roster took %+v, want w1's row stamped at %v", sel, fixedNow)
+	}
+}
+
+// TestSelectStampsTheRosterSelection pins that the select's own id and the
+// switch's instant reach the roster with the selection, for the sidebar's
+// paint record and its switch latency.
+func TestSelectStampsTheRosterSelection(t *testing.T) {
+	started := fixedNow.Add(-40 * time.Millisecond)
+	tests := []struct {
+		name    string
+		started *time.Time
+	}{
+		{name: "a switch with an instant carries it", started: &started},
+		{name: "a switch with none carries none"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			f.workspace("w1", t.TempDir())
+			f.verbs.(*verbs).mintSelection = func() string { return "sel-1" }
+
+			// Act.
+			if err := f.verbs.Select(context.Background(), "w1", Switch{History: RecordSelection, StartedAt: tt.started}); err != nil {
+				t.Fatalf("Select: %v", err)
+			}
+
+			// Assert.
+			want := sidebar.SelectStamp{ID: "sel-1", SwitchStartedAt: tt.started}
+			if len(f.sidebar.stamps) != 1 || f.sidebar.stamps[0] != want {
+				t.Fatalf("roster stamps = %+v, want %+v", f.sidebar.stamps, want)
+			}
+		})
+	}
+}
+
+// TestSelectWithARosterRefusingTheChangeInstallsAWholeRegistry pins the arm
+// for a roster that cannot take the store's answer: the whole registry is
+// read after the write and installed with the selection and its stamp.
+func TestSelectWithARosterRefusingTheChangeInstallsAWholeRegistry(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.sidebar.refuseSelection = true
+	f.verbs.(*verbs).mintSelection = func() string { return "sel-1" }
+
+	// Act.
+	if err := f.verbs.Select(context.Background(), "w1", Switch{History: RecordSelection}); err != nil {
+		t.Fatalf("Select: %v", err)
+	}
+
+	// Assert.
+	if want := []string{"selection-refused", "registry+selected"}; !slices.Equal(f.sidebar.calls, want) {
+		t.Fatalf("roster calls = %v, want %v", f.sidebar.calls, want)
+	}
+	if got := f.sidebar.registries[0].Current; got == nil || *got != "w1" {
+		t.Fatalf("the installed registry's current = %v, want w1", got)
+	}
+	if got := f.sidebar.stamps[0].ID; got != "sel-1" {
+		t.Fatalf("the installed stamp = %q, want sel-1", got)
 	}
 }
 
 // TestSelectWithAnUnreadableRegistryStillTellsTheRosterTheSelection pins the
-// failure arm: a registry read that fails is recorded at ERROR, and the
-// selection still reaches the roster on its own push.
+// failure arm: when the roster refuses the change and the registry read that
+// follows fails, the read is recorded at ERROR and the selection still
+// reaches the roster on its own push.
 func TestSelectWithAnUnreadableRegistryStillTellsTheRosterTheSelection(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
 	f.workspace("w1", t.TempDir())
+	f.sidebar.refuseSelection = true
 	f.db.listWorkspacesErr = errFake
 
 	// Act.
-	_ = f.verbs.Select(context.Background(), "w1", RecordSelection)
+	_ = f.verbs.Select(context.Background(), "w1", Switch{History: RecordSelection})
 
 	// Assert.
-	if want := []string{"selected"}; !slices.Equal(f.sidebar.calls, want) {
+	if want := []string{"selection-refused", "selected"}; !slices.Equal(f.sidebar.calls, want) {
 		t.Fatalf("roster calls = %v, want %v", f.sidebar.calls, want)
 	}
 	if got := recordLevel(f, "could not read the workspaces, repositories and subsections for the roster"); got != "error" {
@@ -223,55 +292,123 @@ func TestSelectWithAnUnreadableRegistryStillTellsTheRosterTheSelection(t *testin
 	}
 }
 
-// TestSelectPublishesARegistryCarryingTheSelection pins that the refreshed
-// registry is the one WSM holds AFTER the write, not before it.
-func TestSelectPublishesARegistryCarryingTheSelection(t *testing.T) {
+// TestSelectThatCannotRecordFailsLoudly pins the store failure: the select
+// answers the error, records it at ERROR with its select's id, and tells the
+// roster nothing.
+func TestSelectThatCannotRecordFailsLoudly(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
 	f.workspace("w1", t.TempDir())
+	f.db.selectErr = errFake
+	f.verbs.(*verbs).mintSelection = func() string { return "sel-1" }
 
 	// Act.
-	if err := f.verbs.Select(context.Background(), "w1", RecordSelection); err != nil {
-		t.Fatalf("Select: %v", err)
-	}
+	err := f.verbs.Select(context.Background(), "w1", Switch{History: RecordSelection})
 
 	// Assert.
-	if len(f.sidebar.registries) != 1 {
-		t.Fatalf("roster republications = %d, want exactly one", len(f.sidebar.registries))
+	if !errors.Is(err, errFake) {
+		t.Fatalf("Select error = %v, want it to wrap %v", err, errFake)
 	}
-	got := f.sidebar.registries[0].Current
-	if got == nil || *got != "w1" {
-		t.Fatalf("the published registry's current = %v, want w1", got)
+	rec, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Message: "could not record the selection"})
+	if !ok || rec.Level != "error" || rec.Operation != opSelect {
+		t.Fatalf("the failed write's record = %+v (found %v), want an error under %s", rec, ok, opSelect)
+	}
+	if rec.Context["selection_id"] != "sel-1" || rec.Context["cause"] == nil || rec.Context["history"] != "record" {
+		t.Fatalf("the failed write's context = %v, want its select's id, history and cause", rec.Context)
+	}
+	if len(f.sidebar.calls) != 0 {
+		t.Fatalf("roster calls = %v, want none", f.sidebar.calls)
 	}
 }
 
-// TestSelectPublishesARegistryCarryingTheSelectionInstant pins that the roster
-// push a selection makes carries the new durable last-selected instant, which
-// is what clients order most-recently-selected by.
-func TestSelectPublishesARegistryCarryingTheSelectionInstant(t *testing.T) {
+// TestSelectLogsItsPublishAtInfo pins the record a switch's push leaves,
+// keyed by the select's id, so a log reader joins it to the sidebar's paint.
+func TestSelectLogsItsPublishAtInfo(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
 	f.workspace("w1", t.TempDir())
+	f.verbs.(*verbs).mintSelection = func() string { return "sel-1" }
 
 	// Act.
-	if err := f.verbs.Select(context.Background(), "w1", RecordSelection); err != nil {
+	if err := f.verbs.Select(context.Background(), "w1", Switch{History: RecordSelection}); err != nil {
 		t.Fatalf("Select: %v", err)
 	}
 
 	// Assert.
-	if len(f.sidebar.registries) != 1 {
-		t.Fatalf("roster republications = %d, want exactly one", len(f.sidebar.registries))
-	}
-	for _, ws := range f.sidebar.registries[0].Workspaces {
-		if ws.ID != "w1" {
-			continue
+	for _, message := range []string{"selected the workspace", "published the selection to the roster from the store's answer"} {
+		rec, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Message: message})
+		if !ok || rec.Level != "info" || rec.Context["selection_id"] != "sel-1" {
+			t.Fatalf("%q = %+v (found %v), want an info record naming sel-1", message, rec, ok)
 		}
-		if ws.LastSelectedAt == nil || !ws.LastSelectedAt.Equal(fixedNow) {
-			t.Fatalf("the published last-selected instant = %v, want %v", ws.LastSelectedAt, fixedNow)
-		}
-		return
 	}
-	t.Fatalf("the published registry carries no w1")
+}
+
+// TestEveryWholeRegistryInstallHoldsTheSelectionLock pins the ordering that
+// keeps a stale registry from regressing a newer selection: each whole
+// registry read runs under the selection lock a select's write and push
+// take, so no select can land between a read and its install.
+func TestEveryWholeRegistryInstallHoldsTheSelectionLock(t *testing.T) {
+	stored := ids.WorkspaceID("w2")
+	tests := []struct {
+		name string
+		// arrange readies the fixture for the install.
+		arrange func(f *fixture)
+		install func(ctx context.Context, v *verbs) error
+	}{
+		{
+			name:    "a verb's republish",
+			install: func(ctx context.Context, v *verbs) error { return v.SetPriority(ctx, "w1", nil) },
+		},
+		{
+			name:    "the published registry",
+			install: func(ctx context.Context, v *verbs) error { return v.PublishRegistry(ctx) },
+		},
+		{
+			name: "a followed selection",
+			arrange: func(f *fixture) {
+				f.sidebar.selected = []ids.WorkspaceID{"w1"}
+				f.db.current = &stored
+			},
+			install: func(ctx context.Context, v *verbs) error { return v.FollowStoredSelection(ctx) },
+		},
+		{
+			name:    "a select whose change the roster refused",
+			arrange: func(f *fixture) { f.sidebar.refuseSelection = true },
+			install: func(ctx context.Context, v *verbs) error {
+				return v.Select(ctx, "w1", Switch{History: RecordSelection})
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			f.workspace("w1", t.TempDir())
+			f.workspace("w2", t.TempDir())
+			if tt.arrange != nil {
+				tt.arrange(f)
+			}
+			v := f.verbs.(*verbs)
+			var held []bool
+			f.db.onReadArrangement = func() {
+				free := v.selection.TryLock()
+				if free {
+					v.selection.Unlock()
+				}
+				held = append(held, !free)
+			}
+
+			// Act.
+			if err := tt.install(context.Background(), v); err != nil {
+				t.Fatalf("install: %v", err)
+			}
+
+			// Assert.
+			if len(held) == 0 || slices.Contains(held, false) {
+				t.Fatalf("selection lock held across each registry read = %v, want held at every read", held)
+			}
+		})
+	}
 }
 
 // TestReselectingDoesNotRestampTheSelectionInstant pins the idempotence the
@@ -282,13 +419,13 @@ func TestReselectingDoesNotRestampTheSelectionInstant(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
 	f.workspace("w1", t.TempDir())
-	if err := f.verbs.Select(context.Background(), "w1", RecordSelection); err != nil {
+	if err := f.verbs.Select(context.Background(), "w1", Switch{History: RecordSelection}); err != nil {
 		t.Fatalf("first Select: %v", err)
 	}
 	f.db.currentAt = fixedNow.Add(-time.Hour)
 
 	// Act.
-	if err := f.verbs.Select(context.Background(), "w1", RecordSelection); err != nil {
+	if err := f.verbs.Select(context.Background(), "w1", Switch{History: RecordSelection}); err != nil {
 		t.Fatalf("second Select: %v", err)
 	}
 
@@ -305,13 +442,13 @@ func TestReselectingStillClearsTheAttentionMarker(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
 	f.workspace("w1", t.TempDir())
-	if err := f.verbs.Select(context.Background(), "w1", RecordSelection); err != nil {
+	if err := f.verbs.Select(context.Background(), "w1", Switch{History: RecordSelection}); err != nil {
 		t.Fatalf("first Select: %v", err)
 	}
 	f.db.attention["w1"] = true
 
 	// Act.
-	if err := f.verbs.Select(context.Background(), "w1", RecordSelection); err != nil {
+	if err := f.verbs.Select(context.Background(), "w1", Switch{History: RecordSelection}); err != nil {
 		t.Fatalf("second Select: %v", err)
 	}
 
@@ -334,7 +471,7 @@ func TestSelectLogsTheSwitchReceiptAtInfo(t *testing.T) {
 	f.workspace("w1", t.TempDir())
 
 	// Act.
-	if err := f.verbs.Select(context.Background(), "w1", RecordSelection); err != nil {
+	if err := f.verbs.Select(context.Background(), "w1", Switch{History: RecordSelection}); err != nil {
 		t.Fatalf("Select: %v", err)
 	}
 
@@ -348,12 +485,12 @@ func TestSelectLogsTheReselectionReceiptAtInfo(t *testing.T) {
 	// Arrange: the workspace is already current, so the next select re-selects it.
 	f := newFixture(t)
 	f.workspace("w1", t.TempDir())
-	if err := f.verbs.Select(context.Background(), "w1", RecordSelection); err != nil {
+	if err := f.verbs.Select(context.Background(), "w1", Switch{History: RecordSelection}); err != nil {
 		t.Fatalf("first Select: %v", err)
 	}
 
 	// Act.
-	if err := f.verbs.Select(context.Background(), "w1", RecordSelection); err != nil {
+	if err := f.verbs.Select(context.Background(), "w1", Switch{History: RecordSelection}); err != nil {
 		t.Fatalf("second Select: %v", err)
 	}
 
@@ -550,12 +687,12 @@ func TestSelectReturnsTheFeedToItsTailOnASwitch(t *testing.T) {
 	f := newFixture(t)
 	f.workspace("w1", t.TempDir())
 	f.workspace("w2", t.TempDir())
-	if err := f.verbs.Select(context.Background(), "w1", RecordSelection); err != nil {
+	if err := f.verbs.Select(context.Background(), "w1", Switch{History: RecordSelection}); err != nil {
 		t.Fatalf("Select w1: %v", err)
 	}
 
 	// Act.
-	if err := f.verbs.Select(context.Background(), "w2", RecordSelection); err != nil {
+	if err := f.verbs.Select(context.Background(), "w2", Switch{History: RecordSelection}); err != nil {
 		t.Fatalf("Select w2: %v", err)
 	}
 
@@ -569,12 +706,12 @@ func TestReselectingLeavesTheFeedWhereItIs(t *testing.T) {
 	// Arrange: a re-selection is Emacs re-asserting, never a switch.
 	f := newFixture(t)
 	f.workspace("w1", t.TempDir())
-	if err := f.verbs.Select(context.Background(), "w1", RecordSelection); err != nil {
+	if err := f.verbs.Select(context.Background(), "w1", Switch{History: RecordSelection}); err != nil {
 		t.Fatalf("first Select: %v", err)
 	}
 
 	// Act.
-	if err := f.verbs.Select(context.Background(), "w1", RecordSelection); err != nil {
+	if err := f.verbs.Select(context.Background(), "w1", Switch{History: RecordSelection}); err != nil {
 		t.Fatalf("second Select: %v", err)
 	}
 
@@ -592,7 +729,7 @@ func TestSelectOnADaemonStandingDownLeavesTheSelectionStanding(t *testing.T) {
 	f.fleet.standingDown = true
 
 	// Act.
-	_ = f.verbs.Select(context.Background(), "w1", RecordSelection)
+	_ = f.verbs.Select(context.Background(), "w1", Switch{History: RecordSelection})
 
 	// Assert: the next daemon serves this selection.
 	if f.db.current == nil || *f.db.current != "w1" {
@@ -1254,7 +1391,7 @@ func TestAConditionalSelectStandsWhenTheUserMovedOff(t *testing.T) {
 	v := f.verbs.(*verbs)
 
 	// Act
-	applied, err := v.selectCurrent(context.Background(), f.log.logger, "w3", &from, RecordSelection)
+	applied, err := v.selectCurrent(context.Background(), f.log.logger, "w3", &from, Switch{History: RecordSelection})
 
 	// Assert
 	if err != nil || applied {
@@ -1390,7 +1527,7 @@ func TestSelectAsARecencyWalkStepLeavesTheSelectionInstant(t *testing.T) {
 	f.db.workspaces["w1"] = ws
 
 	// Act.
-	if err := f.verbs.Select(context.Background(), "w1", KeepSelectionHistory); err != nil {
+	if err := f.verbs.Select(context.Background(), "w1", Switch{History: KeepSelectionHistory}); err != nil {
 		t.Fatalf("Select: %v", err)
 	}
 
@@ -1412,7 +1549,7 @@ func TestSelectAsARecencyWalkStepKeepsItsInstantAsTheWalkLanding(t *testing.T) {
 	f.workspace("w1", t.TempDir())
 
 	// Act.
-	if err := f.verbs.Select(context.Background(), "w1", KeepSelectionHistory); err != nil {
+	if err := f.verbs.Select(context.Background(), "w1", Switch{History: KeepSelectionHistory}); err != nil {
 		t.Fatalf("Select: %v", err)
 	}
 
@@ -1428,7 +1565,7 @@ func TestSelectAsARecencyWalkStepStillTellsTheRoster(t *testing.T) {
 	f.workspace("w1", t.TempDir())
 
 	// Act.
-	if err := f.verbs.Select(context.Background(), "w1", KeepSelectionHistory); err != nil {
+	if err := f.verbs.Select(context.Background(), "w1", Switch{History: KeepSelectionHistory}); err != nil {
 		t.Fatalf("Select: %v", err)
 	}
 
@@ -1444,7 +1581,7 @@ func TestSelectAsARecencyWalkStepLogsItsReceiptAtInfo(t *testing.T) {
 	f.workspace("w1", t.TempDir())
 
 	// Act.
-	if err := f.verbs.Select(context.Background(), "w1", KeepSelectionHistory); err != nil {
+	if err := f.verbs.Select(context.Background(), "w1", Switch{History: KeepSelectionHistory}); err != nil {
 		t.Fatalf("Select: %v", err)
 	}
 
@@ -1463,14 +1600,14 @@ func TestSelectAsARecencyWalkStepThatCannotRecordFailsLoudly(t *testing.T) {
 	f.db.keepSelectedErr = errors.New("disk gone")
 
 	// Act.
-	err := f.verbs.Select(context.Background(), "w1", KeepSelectionHistory)
+	err := f.verbs.Select(context.Background(), "w1", Switch{History: KeepSelectionHistory})
 
 	// Assert: the error reaches the caller, is logged once with its cause,
 	// and the roster was told nothing.
 	if err == nil || !strings.Contains(err.Error(), "disk gone") {
 		t.Fatalf("Select = %v, want the store's failure", err)
 	}
-	r, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Message: "could not record the walk's selection"})
+	r, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Message: "could not record the selection"})
 	if !ok || r.Level != "error" || r.Context["cause"] != "disk gone" || r.Context["history"] != "keep" {
 		t.Fatalf("failure record = %+v (found %v), want error with cause and history", r, ok)
 	}
@@ -1533,7 +1670,7 @@ func TestSelectStartsNoShim(t *testing.T) {
 			tc.arrange(f)
 
 			// Act.
-			err := f.verbs.Select(context.Background(), "w1", RecordSelection)
+			err := f.verbs.Select(context.Background(), "w1", Switch{History: RecordSelection})
 
 			// Assert.
 			if err != nil || len(f.fleet.startCalls) != 0 || len(f.fleet.started) != 0 {
@@ -1550,7 +1687,7 @@ func TestSelectLeavesAParkedWorkspacesParkDrawn(t *testing.T) {
 	f.hibernate("w1")
 
 	// Act.
-	if err := f.verbs.Select(context.Background(), "w1", RecordSelection); err != nil {
+	if err := f.verbs.Select(context.Background(), "w1", Switch{History: RecordSelection}); err != nil {
 		t.Fatalf("Select: %v", err)
 	}
 

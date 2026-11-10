@@ -2482,13 +2482,26 @@ fix is that the record became accurate.
 Owner ruling, 2026-09-19. `Select` (internal/workspace/select.go) does its work
 in a fixed order, and the order is the contract:
 
-1. **The selection, at once.** `selectCurrent` reads the current workspace,
-   stamps `SetCurrent`, clears the attention marker, and hands the roster the
-   re-read registry and the selection in ONE mutation
-   (`Sidebar.SetRegistrySelected`), so a switch is ONE roster push; only a
-   registry read that fails leaves `Sidebar.SetSelected` pushing the selection
-   alone. All of it runs under the verbs' `selection` lock, so concurrent
-   selects land WHOLE in the order they took it. Nothing after this
+1. **The selection, at once.** `selectCurrent` records the selection and
+   clears the attention marker in ONE store write (`wsm.Store.Select`), which
+   answers the rows it changed, read back in its own transaction
+   (`wsm.Selection`), and hands the roster that answer with the selection and
+   its stamp in ONE mutation (`Sidebar.SetSelection`), so a switch is ONE
+   roster push and reads NO registry: the whole read cost 15-230ms with 86
+   tabs before the sidebar could draw a switch the page had already painted
+   (2026-11-08). A roster that cannot take the answer (no registry yet, or
+   one missing a row it names) takes a whole registry read with the selection
+   (`Sidebar.SetRegistrySelected`), and only a registry read that also fails
+   leaves `Sidebar.SetSelected` pushing the selection alone. All of it runs
+   under the verbs' `selection` lock, and so does every whole registry read
+   and its install (`installRegistry`, `PublishRegistry`,
+   `FollowStoredSelection`), so concurrent selects land WHOLE in the order
+   they took it and a registry read before a select's write can never be
+   installed after its push. The stamp (`sidebar.SelectStamp`) is the
+   select's own id and the switch's keystroke instant, which the roster
+   states on its selection (`frontend.v1.RosterCurrentWorkspace`) for the
+   sidebar's `sidebar.selection-painted` record and its `switch_sidebar`
+   latency. Nothing after this
    step touches `current`: **the stamped selection reflects REQUEST order, and
    a revival completing never re-stamps it.** Before this ruling the revival
    ran first, the sidebar lagged every switch by the bring-up (~0.75s each,

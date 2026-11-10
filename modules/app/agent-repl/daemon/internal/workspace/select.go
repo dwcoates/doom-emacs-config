@@ -28,108 +28,102 @@ import (
 // hibernated, at its cold gate, never started -- shows its conversation with
 // no shim behind it, and the next prompt, from the user or another
 // workspace, brings the shim up.
-func (v *verbs) Select(ctx context.Context, ws ids.WorkspaceID, history SelectionHistory) error {
+func (v *verbs) Select(ctx context.Context, ws ids.WorkspaceID, sw Switch) error {
 	_, log, err := v.owned(ctx, "SelectWorkspace", ws)
 	if err != nil {
 		return err
 	}
-	_, err = v.selectCurrent(ctx, log, ws, nil, history)
+	_, err = v.selectCurrent(ctx, log, ws, nil, sw)
 	return err
 }
 
-// selectCurrent is Select's selection section: stamp the selection, clear the
-// attention marker, push the roster ONCE, and — on a SWITCH, never a re-selection —
-// return the workspace's feed to its tail (HostRelay.ReturnFeedToTail).
+// selectCurrent is Select's selection section: record the selection and
+// clear the attention marker in ONE store write, push the roster ONCE, and —
+// on a SWITCH, never a re-selection — return the workspace's feed to its tail
+// (HostRelay.ReturnFeedToTail).
 //
 // A SWITCH RETURNS THE FEED TO ITS TAIL HERE, because every switch path —
 // Emacs's tab chords and pickers, a sidebar row click, a merge-queue entry —
 // is this one verb. A re-selection of the workspace already current changes
 // no view (Emacs re-asserts after a sidebar click, after a reconnect, after a
-// relink), so it ends no selection either. It holds the selection lock throughout,
-// so concurrent selects land WHOLE in the order they took it — a select's
-// read of the current workspace, its stamp and its roster push can never
-// interleave with another's, which would leave WSM naming one workspace and
-// the roster's selection another.
+// relink), so it ends no selection either. It holds the selection lock
+// throughout, so concurrent selects land WHOLE in the order they took it, and
+// so does every whole registry read and its install (installRegistry): a
+// registry read before this select's write can never be installed after its
+// roster push, which would put the selection it left back on the roster.
+//
+// THE ROSTER TAKES THE STORE'S OWN ANSWER, NOT A REGISTRY READ. The store's
+// write answers the rows it changed, read back in its own transaction
+// (wsm.Selection), and the roster installs them into the registry it holds
+// (Sidebar.SetSelection). Re-reading the whole registry after every switch
+// cost 15-230ms with 86 tabs before the sidebar could draw the switch, while
+// the page had already painted it (2026-11-08). A roster that cannot take the
+// change -- no registry yet, or one missing a row the change names -- takes a
+// whole registry read instead.
 //
 // FROM, when set, makes the select CONDITIONAL: it applies only while FROM is
 // still the current workspace, read under the same lock, so a select made on
 // the user's behalf (the landing after a hide) can never undo a switch the
 // user made meanwhile. It answers whether the select applied.
 //
-// HISTORY says whether the switch stamps the selection instant
-// (RecordSelection) or leaves it standing (KeepSelectionHistory, a step of
-// Emacs's recency walk).
-func (v *verbs) selectCurrent(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, from *ids.WorkspaceID, history SelectionHistory) (bool, error) {
+// SW says whether the switch stamps the selection instant (RecordSelection)
+// or leaves it standing (KeepSelectionHistory, a step of Emacs's recency
+// walk), and when the user's switch began, which the roster carries to the
+// sidebar with the select's own id (sidebar.SelectStamp).
+func (v *verbs) selectCurrent(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, from *ids.WorkspaceID, sw Switch) (bool, error) {
 	v.selection.Lock()
 	defer v.selection.Unlock()
 
-	current, err := v.deps.DB.Current(ctx)
-	if err != nil {
-		log.Error(opSelect, "could not read the current workspace", dlog.Context{"cause": err.Error()})
-		return false, fmt.Errorf("select %q: read the current workspace: %w", ws, err)
-	}
-	if from != nil && (current == nil || *current != *from) {
-		standing := ""
-		if current != nil {
-			standing = string(*current)
+	if from != nil {
+		current, err := v.deps.DB.Current(ctx)
+		if err != nil {
+			log.Error(opSelect, "could not read the current workspace", dlog.Context{"cause": err.Error()})
+			return false, fmt.Errorf("select %q: read the current workspace: %w", ws, err)
 		}
-		log.Info(opSelect, "the user moved off the workspace this select was conditional on; the selection stands",
-			dlog.Context{"from": string(*from), "current": standing})
-		return false, nil
+		if current == nil || *current != *from {
+			standing := ""
+			if current != nil {
+				standing = string(*current)
+			}
+			log.Info(opSelect, "the user moved off the workspace this select was conditional on; the selection stands",
+				dlog.Context{"from": string(*from), "current": standing})
+			return false, nil
+		}
 	}
+	stamp := sidebar.SelectStamp{ID: v.mintSelection(), SwitchStartedAt: sw.StartedAt}
+	fields := dlog.Context{"history": sw.History.String(), "selection_id": stamp.ID}
+	if sw.StartedAt != nil {
+		fields["switch_started_at"] = sw.StartedAt.UTC()
+	}
+	at := v.now()
+	sel, err := v.deps.DB.Select(ctx, ws, sw.History.write(), at)
+	if err != nil {
+		log.Error(opSelect, "could not record the selection", dlog.WithCause(fields, err))
+		return false, fmt.Errorf("select %q: %w", ws, err)
+	}
+
 	// RE-SELECTION CHANGES NO VIEW. The selection instant is a roster column,
 	// so re-stamping it on the workspace already being looked at would push a
 	// different roster for a switch that never happened. The instant answers
 	// "when did the user last switch to this", and the user did not switch.
-	reselected := current != nil && *current == ws
-
+	// The store decides it in the same transaction as the write.
 	switch {
-	case reselected:
-		log.Info(opSelect, "the workspace was already current; the selection instant stands", nil)
-	case history == KeepSelectionHistory:
+	case sel.Again:
+		log.Info(opSelect, "the workspace was already current; the selection instant stands", fields)
+	case sw.History == KeepSelectionHistory:
 		// A STEP OF A RECENCY WALK is not a choice: stamping the instant
 		// would move the workspace to the front of the history the walk is
 		// stepping along, and the next step would land somewhere else.
-		if err := v.deps.DB.SetCurrentKeepingLastSelected(ctx, ws, v.now()); err != nil {
-			log.Error(opSelect, "could not record the walk's selection", dlog.Context{"cause": err.Error(), "history": history.String()})
-			return false, fmt.Errorf("select %q: %w", ws, err)
-		}
-		log.Info(opSelect, "selected the workspace as a step of a recency walk; the selection instant stands", dlog.Context{"history": history.String()})
+		log.Info(opSelect, "selected the workspace as a step of a recency walk; the selection instant stands", fields)
 	default:
-		at := v.now()
-		if err := v.deps.DB.SetCurrent(ctx, ws, at); err != nil {
-			log.Error(opSelect, "could not record the selection", dlog.Context{"cause": err.Error(), "history": history.String()})
-			return false, fmt.Errorf("select %q: %w", ws, err)
-		}
 		// A WORKSPACE SWITCH IS A PRODUCTION-VISIBLE ACTION, so its receipt
 		// stands at info: an info-level log that carried no trace of a switch
 		// left the roster/tab-bar divergence bug with nothing to read.
-		log.Info(opSelect, "selected the workspace", dlog.Context{"at": at.UTC()})
-	}
-	if err := v.deps.DB.SetAttention(ctx, ws, false); err != nil {
-		log.Error(opSelect, "could not clear the attention marker", dlog.Context{"cause": err.Error()})
-		return false, fmt.Errorf("select %q: clear attention: %w", ws, err)
+		log.Info(opSelect, "selected the workspace", dlog.Merge(fields, dlog.Context{"at": at.UTC()}))
 	}
 
-	// THE REGISTRY AND THE SELECTION REACH THE ROSTER AS ONE PUSH. Both facts
-	// the selection changes — the current id and the selection instant — are
-	// WSM's, so the registry is re-read after the stamp, and the roster takes
-	// it together with the selection in ONE mutation
-	// (Sidebar.SetRegistrySelected). Told apart, the registry and then the
-	// selection were two whole-roster pushes per switch, which Emacs and every
-	// page decoded, applied and repainted twice (2026-10-08, the laggy-switch
-	// report).
-	//
-	// A REGISTRY THAT COULD NOT BE READ still leaves the selection pushed: the
-	// read already recorded its failure, and the roster takes the selection
-	// alone, so every client's highlight agrees with the switch anyway.
-	if reg, ok := v.readRegistry(ctx, log, opSelect); ok {
-		v.deps.Sidebar.SetRegistrySelected(reg, ws)
-		logRepublished(log, opSelect, reg)
-	} else {
-		v.deps.Sidebar.SetSelected(ws)
-	}
-	if !reselected {
+	v.publishSelection(ctx, log, sel, stamp, fields)
+	if !sel.Again {
 		v.deps.Host.ReturnFeedToTail(ws)
 		// THE SWITCH ENDS EVERY SETTINGS VISIT IT LEAVES: the shim a pick
 		// started is stood down unless a turn has run since (settingsvisits.go).
@@ -143,11 +137,31 @@ func (v *verbs) selectCurrent(ctx context.Context, log dlog.Logger, ws ids.Works
 		// is withheld again if it is. The row is written above, before either
 		// edge is queued, so the keeper reads the selection either way.
 		v.deps.CacheLapses.VisibilityChanged(ws)
-		if current != nil {
-			v.deps.CacheLapses.VisibilityChanged(*current)
+		if sel.Previous != nil {
+			v.deps.CacheLapses.VisibilityChanged(*sel.Previous)
 		}
 	}
 	return true, nil
+}
+
+// publishSelection hands the roster a select's change SEL under STAMP, in ONE
+// push: the store's own answer when the roster's registry can take it
+// (Sidebar.SetSelection), else a whole registry read with the selection
+// (Sidebar.SetRegistrySelected). A REGISTRY THAT COULD NOT BE READ still
+// leaves the selection pushed: the read already recorded its failure, and the
+// roster takes the selection alone, so every client's highlight agrees with
+// the switch anyway. It runs under the selection lock.
+func (v *verbs) publishSelection(ctx context.Context, log dlog.Logger, sel wsm.Selection, stamp sidebar.SelectStamp, fields dlog.Context) {
+	if v.deps.Sidebar.SetSelection(sel, stamp) {
+		log.Info(opSelect, "published the selection to the roster from the store's answer", fields)
+		return
+	}
+	if reg, ok := v.readRegistry(ctx, log, opSelect); ok {
+		v.deps.Sidebar.SetRegistrySelected(reg, sel.Current, stamp)
+		logRepublished(log, opSelect, reg)
+		return
+	}
+	v.deps.Sidebar.SetSelected(sel.Current)
 }
 
 // FollowStoredSelection is the roster's half of a selection ANOTHER daemon
@@ -196,7 +210,7 @@ func (v *verbs) FollowStoredSelection(ctx context.Context) error {
 		// until the next commit tries again.
 		return fmt.Errorf("follow the stored selection %q: the registry could not be read", *stored)
 	}
-	v.deps.Sidebar.SetRegistrySelected(reg, *stored)
+	v.deps.Sidebar.SetRegistrySelected(reg, *stored, sidebar.SelectStamp{})
 	previous := ""
 	if ok {
 		previous = string(shown)
@@ -342,7 +356,7 @@ func (v *verbs) landAfterHiding(ctx context.Context, log dlog.Logger, hidden ids
 		return err
 	}
 	targetLog = targetLog.With(dlog.Context{"hidden": string(hidden)})
-	applied, err := v.selectCurrent(ctx, targetLog, target.ID, &hidden, RecordSelection)
+	applied, err := v.selectCurrent(ctx, targetLog, target.ID, &hidden, Switch{History: RecordSelection})
 	if err != nil {
 		return fmt.Errorf("land after hiding %q: %w", hidden, err)
 	}

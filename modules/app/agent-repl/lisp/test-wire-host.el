@@ -168,6 +168,24 @@
                      '(:workspace (:id "ws-7" :dir "/w/fix") :keep-selection-history nil))))
                  "{\"workspace\":{\"id\":\"ws-7\",\"dir\":\"/w/fix\"}}")))
 
+(ert-deftest agent-repl-test-wire-host-select-request-carries-the-switch-instant ()
+  "A select a keystroke began spells its Unix-ms instant."
+  (should (equal (agent-repl-test-wire-host--quiet
+                   (json-serialize
+                    (agent-repl-wire-encode-select-workspace-request
+                     '(:workspace (:id "ws-7" :dir "/w/fix") :switch-started-at-ms 1700000000123))))
+                 "{\"workspace\":{\"id\":\"ws-7\",\"dir\":\"/w/fix\"},\"switchStartedAtMs\":1700000000123}")))
+
+(ert-deftest agent-repl-test-wire-host-select-request-refuses-a-non-integer-instant ()
+  "A switch instant that is not an integer errors before send."
+  (should (equal (agent-repl-test-wire-host--quiet
+                   (condition-case err
+                       (progn (agent-repl-wire-encode-select-workspace-request
+                               '(:workspace (:id "ws-7" :dir "/w/fix") :switch-started-at-ms "soon"))
+                              nil)
+                     (agent-repl-wire-error (cdr err))))
+                 '("SelectWorkspaceRequest" switchStartedAtMs "not an integer"))))
+
 (ert-deftest agent-repl-test-wire-host-select-request-without-a-ref-is-refused ()
   "An incomplete request errors before send, never on the wire."
   (should (equal (agent-repl-test-wire-host--quiet

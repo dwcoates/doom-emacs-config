@@ -101,7 +101,7 @@ func (s *server) CreateThread(
 	// THE NEW THREAD OPENS (owner ruling, 2026-10-24: "on Enter the new thread
 	// opens in the webapp"): it is selected, and the roster's `current' moves
 	// the editor onto it once its workspace is open there.
-	if err := s.deps.Verbs.Select(ctx, record.ID, workspace.RecordSelection); err != nil {
+	if err := s.deps.Verbs.Select(ctx, record.ID, workspace.Switch{History: workspace.RecordSelection}); err != nil {
 		return nil, fail(log, rpc, fmt.Errorf("the new thread %q was created but could not be selected: %w", record.ID, err))
 	}
 	log.Info(rpc, "created a thread, submitted its first question and selected it", dlog.Context{"thread": string(record.ID), "name": record.Name})
@@ -372,7 +372,7 @@ func (s *server) ShowSidebarApp(
 		})))
 	}
 	log := s.deps.Log.WorkspaceOrCentral(target.Dir).With(dlog.Context{"workspace": string(target.ID)})
-	if err := s.deps.Verbs.Select(ctx, target.ID, workspace.RecordSelection); err != nil {
+	if err := s.deps.Verbs.Select(ctx, target.ID, workspace.Switch{History: workspace.RecordSelection}); err != nil {
 		return answer(resp, s.answerRefusal(log, rpc, resp, err, nil))
 	}
 	s.deps.Banners.Forget("a sidebar app was shown")

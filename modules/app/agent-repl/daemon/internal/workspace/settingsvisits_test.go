@@ -76,13 +76,13 @@ func TestASwitchAwayStandsDownTheVisitItLeft(t *testing.T) {
 	f := newFixture(t)
 	f.workspace("w1", t.TempDir())
 	f.workspace("w2", t.TempDir())
-	if err := f.verbs.Select(context.Background(), "w1", RecordSelection); err != nil {
+	if err := f.verbs.Select(context.Background(), "w1", Switch{History: RecordSelection}); err != nil {
 		t.Fatalf("Select w1: %v", err)
 	}
 	f.visits.Note("w1", visitStart)
 
 	// Act
-	if err := f.verbs.Select(context.Background(), "w2", RecordSelection); err != nil {
+	if err := f.verbs.Select(context.Background(), "w2", Switch{History: RecordSelection}); err != nil {
 		t.Fatalf("Select w2: %v", err)
 	}
 
@@ -96,13 +96,13 @@ func TestAReselectStandsNothingDown(t *testing.T) {
 	// Arrange
 	f := newFixture(t)
 	f.workspace("w1", t.TempDir())
-	if err := f.verbs.Select(context.Background(), "w1", RecordSelection); err != nil {
+	if err := f.verbs.Select(context.Background(), "w1", Switch{History: RecordSelection}); err != nil {
 		t.Fatalf("Select: %v", err)
 	}
 	f.visits.Note("w1", visitStart)
 
 	// Act
-	if err := f.verbs.Select(context.Background(), "w1", RecordSelection); err != nil {
+	if err := f.verbs.Select(context.Background(), "w1", Switch{History: RecordSelection}); err != nil {
 		t.Fatalf("Select again: %v", err)
 	}
 

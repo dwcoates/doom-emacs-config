@@ -44,8 +44,15 @@ type SelectWorkspaceRequest struct {
 	// the history it walks: each press lands one place further along the same
 	// order (owner request, 2026-10-20).
 	KeepSelectionHistory bool `protobuf:"varint,3,opt,name=keep_selection_history,json=keepSelectionHistory,proto3" json:"keep_selection_history,omitempty"`
-	unknownFields        protoimpl.UnknownFields
-	sizeCache            protoimpl.SizeCache
+	// WHEN THE USER'S SWITCH BEGAN, in Unix milliseconds on the host's wall
+	// clock: the instant Emacs took the switch keystroke
+	// (elisp.host.editor-switch). The daemon hands it on with the roster's
+	// selection (frontend.v1.RosterCurrentWorkspace.switch_started_at_ms), so
+	// the sidebar measures the switch to its paint. Unset for a select no
+	// keystroke of the user's began.
+	SwitchStartedAtMs *int64 `protobuf:"varint,4,opt,name=switch_started_at_ms,json=switchStartedAtMs,proto3,oneof" json:"switch_started_at_ms,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *SelectWorkspaceRequest) Reset() {
@@ -97,6 +104,13 @@ func (x *SelectWorkspaceRequest) GetKeepSelectionHistory() bool {
 		return x.KeepSelectionHistory
 	}
 	return false
+}
+
+func (x *SelectWorkspaceRequest) GetSwitchStartedAtMs() int64 {
+	if x != nil && x.SwitchStartedAtMs != nil {
+		return *x.SwitchStartedAtMs
+	}
+	return 0
 }
 
 // THE ARM IS THE OUTCOME.
@@ -594,12 +608,14 @@ var File_agentrepl_v1_endpoint_select_workspace_proto protoreflect.FileDescripto
 
 const file_agentrepl_v1_endpoint_select_workspace_proto_rawDesc = "" +
 	"\n" +
-	",agentrepl/v1/endpoint_select_workspace.proto\x12\fagentrepl.v1\x1a\x16frontend/v1/feed.proto\x1a\x1cworkspace/v1/workspace.proto\"\xc5\x01\n" +
+	",agentrepl/v1/endpoint_select_workspace.proto\x12\fagentrepl.v1\x1a\x16frontend/v1/feed.proto\x1a\x1cworkspace/v1/workspace.proto\"\x94\x02\n" +
 	"\x16SelectWorkspaceRequest\x128\n" +
 	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\x120\n" +
 	"\x06reveal\x18\x02 \x01(\v2\x13.frontend.v1.FeedIdH\x00R\x06reveal\x88\x01\x01\x124\n" +
-	"\x16keep_selection_history\x18\x03 \x01(\bR\x14keepSelectionHistoryB\t\n" +
-	"\a_reveal\"\xa1\x01\n" +
+	"\x16keep_selection_history\x18\x03 \x01(\bR\x14keepSelectionHistory\x124\n" +
+	"\x14switch_started_at_ms\x18\x04 \x01(\x03H\x01R\x11switchStartedAtMs\x88\x01\x01B\t\n" +
+	"\a_revealB\x17\n" +
+	"\x15_switch_started_at_ms\"\xa1\x01\n" +
 	"\x17SelectWorkspaceResponse\x12@\n" +
 	"\asuccess\x18\x01 \x01(\v2$.agentrepl.v1.SelectWorkspaceSuccessH\x00R\asuccess\x12:\n" +
 	"\x05error\x18\x02 \x01(\v2\".agentrepl.v1.SelectWorkspaceErrorH\x00R\x05errorB\b\n" +

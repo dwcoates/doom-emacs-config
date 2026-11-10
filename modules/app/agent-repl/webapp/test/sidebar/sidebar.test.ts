@@ -23,7 +23,6 @@ import {
   type WebhostSidebarDeps,
 } from "../../src/sidebar/sidebar.js";
 import { RosterVersionSchema, type WorkspaceRoster } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
-import { WorkspaceRefSchema } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import { createRailSearch } from "../../src/sidebar/search.js";
 import { createAppSwitcher } from "../../src/sidebar/threads.js";
 import { createDropdowns } from "../../src/sidebar/dropdowns.js";
@@ -1140,6 +1139,30 @@ describe("the webhost's version notices", () => {
 
     // Assert
     expect([...(host.querySelector(".sb-version")?.classList ?? [])].some((c) => c.startsWith("notices-"))).toBe(false);
+  });
+});
+
+describe("the webhost's paint of a select's selection", () => {
+  it("records the switch's sidebar latency once the drawn selection has painted", async () => {
+    // Arrange
+    const host = document.createElement("nav");
+    const pushed = twoRows("ws-2");
+    if (pushed.current === undefined) throw new Error("the roster names no current workspace");
+    pushed.current.selectionId = "sel-1";
+    pushed.current.switchStartedAtMs = 1_700_000_000_000n;
+    const recorded: Array<[string, number]> = [];
+
+    // Act
+    mountWebhostSidebar(host, ctxFor([pushed]), {
+      storage: null,
+      timers: fakeTimers(),
+      wallNow: () => 1_700_000_000_090,
+      recordLatency: (workspace, _kind, seconds) => void recorded.push([workspace.id, seconds]),
+    });
+    await settle();
+
+    // Assert
+    expect(recorded).toEqual([["ws-2", 0.09]]);
   });
 });
 
