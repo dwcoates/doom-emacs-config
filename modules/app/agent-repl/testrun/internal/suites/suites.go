@@ -81,6 +81,10 @@ type Split struct {
 	Named func(id string, items []string, names []string) run.Spec
 	// Slots is every chunk's width; zero is one slot.
 	Slots int
+	// Package and Tags are a Go package split's package, relative to its
+	// module, and the build tags it runs under; Package is "" for every other
+	// split.
+	Package, Tags string
 }
 
 // Units is everything one suite contributes.
@@ -98,6 +102,9 @@ type Units struct {
 	// otherwise.
 	Tests []string
 	Only  func(names []string) []run.Spec
+	// GoBuilds are a Go suite's module builds, already placed in Atomic over
+	// the packages Atomic and Splits run (Finish).
+	GoBuilds []GoBuild
 }
 
 // Build turns one suite into units.
@@ -134,9 +141,25 @@ func PinnedEnv() []string {
 // A unit that needs flags of its own passes them here rather than setting
 // GOFLAGS itself, which would drop the pins.
 func GoFlagsEnv(extra ...string) string {
+	return goFlagsEnv(1, extra...)
+}
+
+func goFlagsEnv(packages int, extra ...string) string {
 	parts := append([]string{os.Getenv("GOFLAGS")}, extra...)
-	parts = append(parts, "-p=1", "-trimpath")
+	parts = append(parts, fmt.Sprintf("-p=%d", packages), "-trimpath")
 	return "GOFLAGS=" + strings.Join(strings.Fields(strings.Join(parts, " ")), " ")
+}
+
+// CoresPerSlot is the cores a slot gives a Go process: a one-slot unit's
+// GOMAXPROCS.
+const CoresPerSlot = 2
+
+// WidePinnedEnv is PinnedEnv for a go command holding slots slots: it builds
+// CoresPerSlot*slots packages at a time on as many cores, exactly the cores
+// its width gives it.
+func WidePinnedEnv(slots int) []string {
+	n := CoresPerSlot * slots
+	return []string{goFlagsEnv(n), fmt.Sprintf("GOMAXPROCS=%d", n)}
 }
 
 func spec(id, suite, dir string, argv []string, env ...string) run.Spec {

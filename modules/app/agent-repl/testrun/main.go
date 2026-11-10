@@ -15,14 +15,18 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -38,6 +42,7 @@ import (
 	"agentrepl/testrun/internal/cover"
 	"agentrepl/testrun/internal/events"
 	"agentrepl/testrun/internal/gitinfo"
+	"agentrepl/testrun/internal/gobuild"
 	"agentrepl/testrun/internal/history"
 	"agentrepl/testrun/internal/life"
 	"agentrepl/testrun/internal/protofile"
@@ -83,6 +88,14 @@ func main() {
 		os.Exit(planCmd(log, os.Args[2:]))
 	case "confine":
 		os.Exit(confineCmd(log, os.Args[2:]))
+	case "build-tests":
+		os.Exit(buildTestsCmd(log, os.Args[2:]))
+	case "stash-test":
+		os.Exit(stashTestCmd(log, os.Args[2:]))
+	case "exec-test":
+		os.Exit(execTestCmd(log, os.Args[2:]))
+	case "check-test":
+		os.Exit(checkTestCmd(log, os.Args[2:]))
 	case "redundancy":
 		os.Exit(redundancyCmd(log, os.Args[2:]))
 	case "coverage-baseline":
@@ -591,6 +604,95 @@ func confineCmd(log *run.Log, argv []string) int {
 	}
 	log.Errorf("%v", reuse.Exec(c, os.Environ()))
 	return 1
+}
+
+// buildTestsCmd is a Go module's one build unit (internal/gobuild): every
+// unit-test binary of the module, built by one `go test` command.
+func buildTestsCmd(log *run.Log, argv []string) int {
+	o, err := gobuild.ParseBuildArgs(argv)
+	if err != nil {
+		log.Errorf("build-tests: %v", err)
+		return 2
+	}
+	self, err := os.Executable()
+	if err != nil {
+		log.Errorf("build-tests: resolve the testrun binary: %v", err)
+		return 1
+	}
+	o.Self = self
+	res, err := gobuild.Build(o, execGoTest)
+	if err != nil {
+		log.Errorf("build-tests of %d packages in %s: %v", len(o.Packages), o.Module, err)
+		return 1
+	}
+	log.Infof("build-tests: built %d of %d test binaries in %s", len(res.Built), len(o.Packages), o.Module)
+	for _, rel := range slices.Sorted(maps.Keys(res.Failed)) {
+		log.Errorf("build-tests: %s did not compile; its test units fail with this output:\n%s", rel, res.Failed[rel])
+	}
+	return 0
+}
+
+// execGoTest is gobuild.GoTest over the real go command.
+func execGoTest(dir string, args, env []string) ([]byte, []byte, error) {
+	cmd := exec.Command("go", args...)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), env...)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	err := cmd.Run()
+	var exit *exec.ExitError
+	if errors.As(err, &exit) {
+		// A package that did not compile exits go test 1; the -json stream
+		// says which, and gobuild.Build judges the rest.
+		err = nil
+	}
+	return stdout.Bytes(), stderr.Bytes(), err
+}
+
+// stashTestCmd is the module build's -exec (gobuild.Stash): `testrun
+// stash-test -module DIR -bindir DIR BINARY ARGS...`, run in the package's
+// directory.
+func stashTestCmd(log *run.Log, argv []string) int {
+	if len(argv) < 5 || argv[0] != "-module" || argv[2] != "-bindir" {
+		log.Errorf("stash-test: usage: stash-test -module DIR -bindir DIR BINARY [ARGS...], got %q", argv)
+		return 2
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		log.Errorf("stash-test: read the working directory: %v", err)
+		return 1
+	}
+	if err := gobuild.Stash(argv[1], argv[3], cwd, argv[4]); err != nil {
+		log.Errorf("stash-test of %s in %s: %v", argv[4], cwd, err)
+		return 1
+	}
+	return 0
+}
+
+// execTestCmd is a Go test unit's command (gobuild.ExecTest): `testrun
+// exec-test BINARY ARGS...`.
+func execTestCmd(log *run.Log, argv []string) int {
+	if len(argv) < 1 {
+		log.Errorf("exec-test: usage: exec-test BINARY [ARGS...]")
+		return 2
+	}
+	err := gobuild.ExecTest(argv[0], argv[1:], os.Stdout, gobuild.SyscallExec)
+	log.Errorf("exec-test %s: %v", argv[0], err)
+	return 1
+}
+
+// checkTestCmd is the unit of a package whose test files hold no test
+// (gobuild.Check): compiling them is its whole check.
+func checkTestCmd(log *run.Log, argv []string) int {
+	if len(argv) != 1 {
+		log.Errorf("check-test: usage: check-test BINARY, got %q", argv)
+		return 2
+	}
+	if err := gobuild.Check(argv[0], os.Stdout); err != nil {
+		log.Errorf("check-test %s: %v", argv[0], err)
+		return 1
+	}
+	return 0
 }
 
 // planCmd prints what `run` with the same arguments would run and reuse,

@@ -682,27 +682,23 @@ func TestGoPkgUnits(t *testing.T) {
 		name      string
 		covDir    bool
 		parallel  roster.Parallel
-		wantBuild []string
 		wantChunk []string
 		wantSlots int
 	}{
 		{
-			name:      "a covered package compiles instrumented and writes counters",
+			name:      "a covered package's chunk writes counters",
 			covDir:    true,
-			wantBuild: []string{"go", "test", "-c", "-o", "BIN", "-cover", "-coverpkg=./...", "./p"},
-			wantChunk: []string{"BIN", "-test.count=1", "-test.v", "-test.parallel=1", "-test.timeout=10m", "-test.run=^(TestA)$", "-test.gocoverdir=COV"},
+			wantChunk: []string{"/testrun", "exec-test", "BIN", "-test.count=1", "-test.v", "-test.parallel=1", "-test.timeout=10m", "-test.run=^(TestA)$", "-test.gocoverdir=COV"},
 		},
 		{
-			name:      "an uncovered package compiles plain",
-			wantBuild: []string{"go", "test", "-c", "-o", "BIN", "./p"},
-			wantChunk: []string{"BIN", "-test.count=1", "-test.v", "-test.parallel=1", "-test.timeout=10m", "-test.run=^(TestA)$"},
+			name:      "an uncovered package's chunk runs its binary plain",
+			wantChunk: []string{"/testrun", "exec-test", "BIN", "-test.count=1", "-test.v", "-test.parallel=1", "-test.timeout=10m", "-test.run=^(TestA)$"},
 		},
 		{
 			name:      "a wait-bound package overlaps its tests in a chunk at its width",
 			parallel:  roster.Parallel{Tests: 4, Slots: 2},
 			wantSlots: 2,
-			wantBuild: []string{"go", "test", "-c", "-o", "BIN", "./p"},
-			wantChunk: []string{"BIN", "-test.count=1", "-test.v", "-test.parallel=4", "-test.timeout=10m", "-test.run=^(TestA)$"},
+			wantChunk: []string{"/testrun", "exec-test", "BIN", "-test.count=1", "-test.v", "-test.parallel=4", "-test.timeout=10m", "-test.run=^(TestA)$"},
 		},
 	}
 	for _, tt := range tests {
@@ -714,10 +710,10 @@ func TestGoPkgUnits(t *testing.T) {
 			if tt.covDir {
 				cov = filepath.Join(t.TempDir(), "cov")
 			}
-			p := goPkg{Suite: "m", Module: module, Rel: "p", Bin: bin, CovDir: cov, Parallel: tt.parallel}
+			p := goPkg{Suite: "m", Module: module, Rel: "p", Bin: bin, Self: "/testrun", After: "m:build", CovDir: cov, Parallel: tt.parallel}
 
 			// Act
-			build, split, err := p.units()
+			check, split, err := p.units()
 
 			// Assert
 			if err != nil {
@@ -734,10 +730,10 @@ func TestGoPkgUnits(t *testing.T) {
 				}
 				return out
 			}
-			if build.ID != "m:p:build" || !reflect.DeepEqual(subst(build.Argv), tt.wantBuild) {
-				t.Fatalf("build = %s %v, want m:p:build %v", build.ID, subst(build.Argv), tt.wantBuild)
+			if check != nil {
+				t.Fatalf("a package with tests got a compiled-check unit %s", check.ID)
 			}
-			if split == nil || split.Group != "m:p" || !reflect.DeepEqual(split.Items, []string{"TestA", "TestB"}) || !reflect.DeepEqual(split.Deps, []string{"m:p:build"}) {
+			if split == nil || split.Group != "m:p" || split.Package != "p" || !reflect.DeepEqual(split.Items, []string{"TestA", "TestB"}) || !reflect.DeepEqual(split.Deps, []string{"m:build"}) {
 				t.Fatalf("split = %+v", split)
 			}
 			chunk := split.Chunk("m:p#00", []string{"TestA"})
@@ -756,33 +752,33 @@ func TestGoPkgUnits(t *testing.T) {
 	}
 }
 
-func TestGoPkgUnitsOfAPackageWithoutTestsIsItsBuildAlone(t *testing.T) {
+func TestGoPkgUnitsOfAPackageWithoutTestsIsItsCompiledCheck(t *testing.T) {
 	// Arrange: test files with helpers only.
 	module := goPackageFixture(t, "func helper(t *testing.T) {}\n")
 
 	// Act
-	build, split, err := goPkg{Suite: "m", Module: module, Rel: "p", Bin: "/b"}.units()
+	check, split, err := goPkg{Suite: "m", Module: module, Rel: "p", Bin: "/b", Self: "/testrun", After: "m:build"}.units()
 
 	// Assert
-	if err != nil || split != nil || build.ID != "m:p:build" {
-		t.Fatalf("units = %s, %+v, %v; want the build alone", build.ID, split, err)
+	if err != nil || split != nil || check == nil {
+		t.Fatalf("units = %+v, %+v, %v; want the compiled check alone", check, split, err)
+	}
+	if check.ID != "m:p:compiled" || !reflect.DeepEqual(check.Argv, []string{"/testrun", "check-test", "/b"}) || !reflect.DeepEqual(check.Deps, []string{"m:build"}) {
+		t.Fatalf("check = %s %v after %v", check.ID, check.Argv, check.Deps)
 	}
 }
 
-func TestGoPkgUnitsUsesACustomBuild(t *testing.T) {
+func TestGoPkgChunkCarriesItsTimeoutAndEnv(t *testing.T) {
 	// Arrange
 	module := goPackageFixture(t, "func TestA(t *testing.T) {}\n")
-	p := goPkg{Suite: "e2e", Module: module, Rel: "p", Bin: "/b", Build: []string{"bash", "-c", "make it"}, ChunkEnv: []string{"K=V"}, Timeout: "45m"}
+	p := goPkg{Suite: "e2e", Module: module, Rel: "p", Bin: "/b", Self: "/testrun", After: "e2e:build", ChunkEnv: []string{"K=V"}, Timeout: "45m"}
 
 	// Act
-	build, split, err := p.units()
+	_, split, err := p.units()
 
 	// Assert
 	if err != nil {
 		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(build.Argv, []string{"bash", "-c", "make it"}) {
-		t.Fatalf("build argv = %v", build.Argv)
 	}
 	chunk := split.Chunk("e2e:p#00", []string{"TestA"})
 	if !strings.Contains(strings.Join(chunk.Argv, " "), "-test.timeout=45m") || chunk.Env[len(chunk.Env)-1] != "K=V" {
@@ -790,21 +786,21 @@ func TestGoPkgUnitsUsesACustomBuild(t *testing.T) {
 	}
 }
 
-func TestGoPkgSharedPrebuild(t *testing.T) {
+func TestGoPkgPrebuildRunsTestMainOnceAfterTheBuild(t *testing.T) {
 	// Arrange
-	p := goPkg{Module: "/module with space", Rel: "integration", Bin: "/work/pkg.test"}
+	p := goPkg{Suite: "e2e", Module: "/module with space", Rel: ".", Bin: "/work/pkg.test", Self: "/testrun", After: "e2e:build"}
 
 	// Act
-	p.sharePrebuilt("/work/shared", "prepare deps")
+	pre := p.prebuild("/work/shared", "prepare deps")
 
 	// Assert
-	wantScript := "set -euo pipefail\nprepare deps\ngo test -c -o \"/work/pkg.test\" \"./integration\"\n" +
-		"AGENT_REPL_TEST_PREBUILD=\"/work/shared\" \"/work/pkg.test\" -test.run '^$'"
-	if !reflect.DeepEqual(p.Build, []string{"bash", "-c", wantScript}) {
-		t.Fatalf("build = %q, want %q", p.Build, wantScript)
+	wantScript := "set -euo pipefail\nprepare deps\n" +
+		"AGENT_REPL_TEST_PREBUILD=\"/work/shared\" \"/testrun\" exec-test \"/work/pkg.test\" -test.run '^$'"
+	if pre.ID != "e2e:.:prebuild" || !reflect.DeepEqual(pre.Argv, []string{"bash", "-c", wantScript}) || !reflect.DeepEqual(pre.Deps, []string{"e2e:build"}) {
+		t.Fatalf("prebuild = %s %q after %v, want %q after e2e:build", pre.ID, pre.Argv, pre.Deps, wantScript)
 	}
-	if !reflect.DeepEqual(p.ChunkEnv, []string{"AGENT_REPL_TEST_PREBUILT=/work/shared"}) {
-		t.Fatalf("chunk env = %v", p.ChunkEnv)
+	if p.After != "e2e:.:prebuild" || !reflect.DeepEqual(p.ChunkEnv, []string{"AGENT_REPL_TEST_PREBUILT=/work/shared"}) {
+		t.Fatalf("after the prebuild the package's chunks wait on %s with env %v", p.After, p.ChunkEnv)
 	}
 }
 
@@ -825,7 +821,7 @@ func TestGoModuleCoverageModes(t *testing.T) {
 			}
 			var build, report bool
 			for _, unit := range u.Atomic {
-				build = build || unit.ID == "m:p:build" && strings.Contains(strings.Join(unit.Argv, " "), "-cover")
+				build = build || unit.ID == "m:build" && slices.Contains(unit.Argv, "-cover")
 				report = report || unit.ID == "m:coverage"
 			}
 			if build != coverage || report != coverage {

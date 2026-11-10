@@ -335,7 +335,9 @@ func (r Resolved) Narrow(s roster.Suite, u suites.Units) (suites.Units, error) {
 			out.Programs = append(out.Programs, p)
 		}
 	}
-	return out, nil
+	// A module build kept for the named packages builds only them.
+	out.GoBuilds = u.GoBuilds
+	return out.Finish(), nil
 }
 
 // narrowScript narrows a Script suite, which every one of targets selects,

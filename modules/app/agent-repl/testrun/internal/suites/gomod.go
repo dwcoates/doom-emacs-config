@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"agentrepl/testrun/internal/command"
+	"agentrepl/testrun/internal/gobuild"
 	"agentrepl/testrun/internal/run"
 	"agentrepl/testrun/roster"
 )
@@ -81,7 +82,8 @@ func goModuleUnits(l Layout, s roster.Suite) (Units, error) {
 	}
 	u.Atomic = append(u.Atomic, iu.Atomic...)
 	u.Splits = append(u.Splits, iu.Splits...)
-	return u, nil
+	u.GoBuilds = append(u.GoBuilds, iu.GoBuilds...)
+	return u.Finish(), nil
 }
 
 // GoSuitePackages is a Go suite's tested packages, relative to its module:
@@ -120,40 +122,71 @@ func goIntegrationUnitsForPackages(l Layout, s roster.Suite, dir string, pkgs []
 	tag := s.IntegrationTags
 	vet := goVetTagged(s.Name, dir, tag, s.IntegrationPackages)
 	u := Units{Atomic: []run.Spec{vet}}
+	b := moduleBuild(l, s.Name, dir, tag, false)
 	for i, rel := range pkgs {
 		p := goPkg{
 			Suite: s.Name, Module: dir, Rel: rel, Tags: tag, Parallel: s.TestParallel[rel],
-			Bin:      filepath.Join(l.Work, "bin", s.Name+"-"+tag, fmt.Sprintf("%03d.test", i)),
+			Bin: gobuild.BinPath(b.Options.BinDir, rel), Self: l.Self, After: b.ID,
 			Programs: s.Programs[rel], ProgramsDir: l.ProgramsDir(),
 		}
 		if l.Coverage && len(p.Programs) > 0 {
 			p.SpawnedCovDir = SpawnedCovDir(l, s.Name+"-"+tag, i)
 		}
 		u.Programs = append(u.Programs, p.Programs...)
-		build, split, err := p.units()
-		if err != nil {
+		if err := u.addPackage(&b, p); err != nil {
 			return Units{}, err
-		}
-		u.Atomic = append(u.Atomic, build)
-		if split != nil {
-			u.Splits = append(u.Splits, *split)
 		}
 	}
 	if len(u.Splits) == 0 {
 		return Units{}, fmt.Errorf("suites: %s has %s-tagged test files but no test to run under %s", s.Name, tag, dir)
 	}
-	return u, nil
+	u.GoBuilds = append(u.GoBuilds, b)
+	return u.Finish(), nil
+}
+
+// moduleBuild is the build of one pass (tags) over the module in dir, its
+// binaries under the run's scratch directory.
+func moduleBuild(l Layout, suite, dir, tags string, cover bool) GoBuild {
+	pass := suite
+	if tags != "" {
+		pass += "-" + tags
+	}
+	return GoBuild{
+		ID: ModuleBuildID(suite, tags), Suite: suite,
+		Options: gobuild.Options{Module: dir, BinDir: filepath.Join(l.Work, "bin", pass), Tags: tags, Cover: cover, Self: l.Self},
+	}
+}
+
+// addPackage adds p's units to u, each recorded as needing p's binary from b.
+func (u *Units) addPackage(b *GoBuild, p goPkg, extra ...run.Spec) error {
+	check, split, err := p.units()
+	if err != nil {
+		return err
+	}
+	for _, a := range extra {
+		b.need(a.ID, p.Rel)
+		u.Atomic = append(u.Atomic, a)
+	}
+	if check != nil {
+		b.need(check.ID, p.Rel)
+		u.Atomic = append(u.Atomic, *check)
+	}
+	if split != nil {
+		b.need(split.Group, p.Rel)
+		u.Splits = append(u.Splits, *split)
+	}
+	return nil
 }
 
 func goModuleUnitsForPackages(l Layout, s roster.Suite, dir string, pkgs []string) (Units, error) {
 	covRoot := filepath.Join(l.Work, "cover", s.Name)
 	u := Units{Atomic: goVets(s, dir)}
+	b := moduleBuild(l, s.Name, dir, "", l.Coverage)
 	var reportDeps []string
-	hasTests := false
 	for i, rel := range pkgs {
 		p := goPkg{
 			Suite: s.Name, Module: dir, Rel: rel, Parallel: s.TestParallel[rel],
-			Bin:      filepath.Join(l.Work, "bin", s.Name, fmt.Sprintf("%03d.test", i)),
+			Bin: gobuild.BinPath(b.Options.BinDir, rel), Self: l.Self, After: b.ID,
 			Programs: s.Programs[rel], ProgramsDir: l.ProgramsDir(),
 		}
 		u.Programs = append(u.Programs, p.Programs...)
@@ -163,21 +196,15 @@ func goModuleUnitsForPackages(l Layout, s roster.Suite, dir string, pkgs []strin
 				p.SpawnedCovDir = SpawnedCovDir(l, s.Name, i)
 			}
 		}
-		build, split, err := p.units()
-		if err != nil {
+		n := len(u.Splits)
+		if err := u.addPackage(&b, p); err != nil {
 			return Units{}, err
 		}
-		u.Atomic = append(u.Atomic, build)
-		if split == nil {
-			continue
-		}
-		u.Splits = append(u.Splits, *split)
-		hasTests = true
-		if l.Coverage {
-			reportDeps = append(reportDeps, split.Group)
+		if l.Coverage && len(u.Splits) > n {
+			reportDeps = append(reportDeps, u.Splits[n].Group)
 		}
 	}
-	if !hasTests {
+	if len(u.Splits) == 0 {
 		return Units{}, fmt.Errorf("suites: %s has test files but no test to run under %s", s.Name, dir)
 	}
 	if l.Coverage {
@@ -186,5 +213,6 @@ func goModuleUnitsForPackages(l Layout, s roster.Suite, dir string, pkgs []strin
 		report.Deps = reportDeps
 		u.Atomic = append(u.Atomic, report)
 	}
-	return u, nil
+	u.GoBuilds = append(u.GoBuilds, b)
+	return u.Finish(), nil
 }
