@@ -11,37 +11,6 @@
     - This includes rebase, pull, merge, reset, checkout, cherry-pick, force-push, and branch deletion.
     - Push with discretion per the rule below, but never wait for permission to run any git command.
 
-### When to run which tests
-
-- Tests are used actively throughout: written alongside the code and run often to drive the work.
-- Outside the merge queue, run only the tests your own work added or changed, named one by one.
-  - Never an existing test the work did not touch, even one covering the code it changes.
-  - Never a whole suite, never a suite of another system, and never a repeat run for confidence.
-  - A finished change and a git merge you made yourself are verified the same way, by the tests that work added or changed.
-- Every test beyond those runs only in the merge queue, which runs the full suite as the gate of every landing.
-  - The gate runs them anyway, so running them yourself duplicates its work and adds load the host's other workspaces contend with.
-  - A failure the gate finds is remediated in the merge's own test-failure turn, as a targeted loop over the cases it hands over.
-  - The rare exception is a change with systemic knock-on effects, and the run states that reason.
-- Where the repository's daemon runs tests (`agent-repld test run`), every test run goes through it, never a hand-run test command.
-  - The repository's tests skill says how to name the tests.
-
-### Master moves only through the merge queue
-
-- Merge into master only through the merge-queue skill (`/agent-repl-merge-queue`).
-  - This covers my own workspace's branch and every subagent's branch alike.
-  - Never merge, commit, cherry-pick, rebase, reset, or push onto master by hand.
-  - On a parked, failed, or refused merge, report the reason and stop rather than landing the work some other way.
-- Land every complete change as an async merge into master WITHOUT asking.
-  - A complete change is a full feature addition or change, a full fix, or a full addendum to an already-merged change, that is sensible and regresses nothing.
-  - Never ask whether to merge or whether to add work to the merge queue; merge it, then report the merge.
-  - Only incomplete work waits: a partial feature, or an addendum not yet finished.
-  - A fix or feature is often landed async and then tweaked in later changes, and each later complete change lands the same way.
-- Every offer to merge a workspace or branch MUST name which mode the merge would run in.
-  - An offer is made only where the merge is not already prescribed above, such as a one-shot that would close this workspace.
-  - A one-shot merge makes the workspace unavailable while the merge runs, and closes the workspace once it lands.
-  - An async merge keeps the workspace open and available, both while the merge runs and after it lands.
-  - Never offer a merge without its mode, because the two modes leave me with different workspaces afterwards.
-
 ### Before committing
 
 - Review the new or changed code for any similar pattern elsewhere in the codebase eligible for consolidation via helper extraction.
@@ -57,7 +26,7 @@
   - Report what was extracted afterwards, so the extraction is visible without having been gated on a reply.
 - Land the extraction as its own commit, separate from the functional change that revealed it.
   - The functional commit stays reviewable on its own terms.
-  - The extraction commit is behavior-preserving and says so, with the merge queue's gate passing the existing suite unchanged as the evidence.
+  - The extraction commit is behavior-preserving and says so, with the existing suite passing unchanged as the evidence.
 - Every extracted helper gets unit tests of its own, exactly as any other new function does.
   - Cover the invariant parts the helper now guarantees for all its callers.
   - Add a test asserting the call sites actually share the extracted shape, so a hand-rolled divergent site fails rather than passing silently.
@@ -91,7 +60,7 @@
 - Every failure in a unit or integration test tracked by the repository is assumed confidently to have been introduced by my work.
   - This applies wherever the tracked test runs: locally, in a commit hook, or in CICD.
   - I NEVER consider such a failure "pre-existing", investigate its provenance, compare it against an earlier revision, or use history to decide whether I own it.
-  - I fix the failing test or the production defect directly, and the merge queue's gate drives the entire tracked suite to green.
+  - I fix the failing test or the production defect directly, and the entire tracked suite is driven to green.
 - The ONLY permitted alternative to fixing a tracked test failure is surfacing it to the user when the correct fix genuinely depends on a decision that is the user's to make.
   - I state the failure and the decision explicitly; I do not perform provenance analysis or silently tolerate the failure.
 - This automatic attribution rule is specific to repository-tracked unit and integration tests.
@@ -205,7 +174,7 @@
 - I add the row proactively, without asking for permission and without waiting for the work to finish.
   - When `org/todo.md` or its table does not exist yet, I create it.
   - A deficiency already in the table gets its existing row updated rather than a second row.
-- The row is written in my workspace's own worktree copy and committed on its branch, so it reaches master through the merge queue with the rest of the work.
+- The row is written in my workspace's own worktree copy and committed on its branch, so it reaches master with the rest of the work.
   - Master's copy is `~/.config/doom/modules/app/agent-repl/org/todo.md`, and it is never edited directly.
   - The row commit is its own commit, separate from the functional change that revealed the deficiency.
 - Recording a deficiency never replaces fixing what the current work owns.
@@ -289,7 +258,7 @@
   - The brief is the request to change code, so the workspace does not stop to ask whether to fix it.
 - The diagnosis names the root cause, along with the log records that show it.
   - Diagnosis follows the evidence rules of the `/agent-repl-debug` skill.
-- The fix is implemented by a one-shot child of this workspace, which lands into its repository's main branch through the merge queue.
+- The fix is implemented by a one-shot child of this workspace, which lands into its repository's main branch.
   - The fix belongs in a repository, which for an agent-repl failure is agent-repl's own, even from an unrelated repository.
   - When that is this workspace's own repository, the child forks this workspace: `agent-repld workspace create -relationship child -parent here -lands-into main -context fork -fork here -one-shot -prompt <the fix>`.
   - When it is another repository, the child starts fresh, because a fork never crosses repositories: `agent-repld workspace create -repository <repository> -relationship child -parent here -lands-into main -context fresh -one-shot -prompt <the fix>`.
