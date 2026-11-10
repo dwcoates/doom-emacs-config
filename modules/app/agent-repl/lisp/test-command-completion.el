@@ -272,6 +272,21 @@ in `completion-category-overrides', with the `substring' then `flex' styles."
   (should-not (agent-repl-test-command-completion--all
                "/zzz" '("/agent-repl-profile"))))
 
+(ert-deftest agent-repl-test-command-completion-name-of-a-slashed-candidate ()
+  "A slashed candidate names the command without its slash."
+  (should (equal (agent-repl--command-completion-name "/merge-queue") "merge-queue")))
+
+(ert-deftest agent-repl-test-command-completion-name-of-a-bare-candidate ()
+  "A bare candidate, as a UI hands back past the slash, is its own name."
+  (should (equal (agent-repl--command-completion-name "merge-queue") "merge-queue")))
+
+(ert-deftest agent-repl-test-command-completion-entry-takes-either-form ()
+  "The catalog entry is found by the slashed word and the bare name alike."
+  (should (eq (agent-repl--command-completion-entry
+               agent-repl-test-command-completion--catalog "/cost")
+              (agent-repl--command-completion-entry
+               agent-repl-test-command-completion--catalog "cost"))))
+
 (ert-deftest agent-repl-test-command-completion-annotation-hint-and-description ()
   "The annotation is the argument hint, then the description."
   ;; Arrange: wide enough that the cut (tested below) plays no part.

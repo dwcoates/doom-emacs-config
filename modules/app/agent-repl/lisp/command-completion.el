@@ -200,7 +200,7 @@ word."
 
 (defun agent-repl--command-completion-entry (catalog candidate)
   "Return the CATALOG entry CANDIDATE names, as its name or an alias, or nil."
-  (let ((name (string-remove-prefix "/" candidate)))
+  (let ((name (agent-repl--command-completion-name candidate)))
     (cl-find-if (lambda (entry)
                   (or (equal (plist-get entry :name) name)
                       (member name (plist-get entry :aliases))))
