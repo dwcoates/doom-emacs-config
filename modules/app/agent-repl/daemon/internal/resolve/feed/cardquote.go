@@ -7,6 +7,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/protoarm"
 )
 
 // A CARD ASKED ABOUT. Every card the feed draws carries a question-mark
@@ -88,18 +89,12 @@ func cardTextOf(drawn *frontendv1.FeedRow) CardText {
 	return CardText{Kind: CardRow, Arm: arm, Text: string(text)}
 }
 
-// cardArm names DRAWN's FeedRow arm, with an activity's unit after a dot.
+// cardArm names DRAWN's FeedRow arm, with an activity's unit after a dot. A
+// published row always has its arm set, and an activity its unit.
 func cardArm(drawn *frontendv1.FeedRow) string {
-	which := drawn.ProtoReflect().WhichOneof(drawn.ProtoReflect().Descriptor().Oneofs().ByName("row"))
-	if which == nil {
-		return "unset"
-	}
-	arm := string(which.Name())
+	arm := string(protoarm.Must(drawn.ProtoReflect(), "row", "daemon.feed.card_text"))
 	if activity := drawn.GetActivity(); activity != nil {
-		unit := activity.ProtoReflect().WhichOneof(activity.ProtoReflect().Descriptor().Oneofs().ByName("unit"))
-		if unit != nil {
-			arm += "." + string(unit.Name())
-		}
+		arm += "." + string(protoarm.Must(activity.ProtoReflect(), "unit", "daemon.feed.card_text"))
 	}
 	return arm
 }

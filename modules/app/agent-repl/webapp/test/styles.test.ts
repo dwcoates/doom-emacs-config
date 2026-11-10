@@ -4237,20 +4237,14 @@ describe("inline code's lighter canonical orange (owner request, 2026-11-09)", (
     expect(declarations).toEqual(["--canonical-orange-light: color-mix(in srgb, var(--canonical-orange) 85%, #ffffff);"]);
   });
 
-  it.each([
-    ["light", () => declarationsOf(":root") ?? ""],
-    ["dark", darkThemeBlock],
-  ])("is lighter than the %s theme's canonical orange", (_theme, block) => {
+  it.each(THEME_BLOCKS)("is lighter than the %s theme's canonical orange", (_theme, block) => {
     // Arrange / Act
     const [orange, light] = [luminance(themeRgbOf(block(), "--canonical-orange")), luminance(lightOrange(block()))];
     // Assert
     expect(light).toBeGreaterThan(orange);
   });
 
-  it.each([
-    ["light", () => declarationsOf(":root") ?? ""],
-    ["dark", darkThemeBlock],
-  ])("carries ink that reads at WCAG AA on it in the %s theme", (_theme, block) => {
+  it.each(THEME_BLOCKS)("carries ink that reads at WCAG AA on it in the %s theme", (_theme, block) => {
     // Arrange / Act
     const ratio = contrast(lightOrange(block()), themeRgbOf(block(), "--canonical-orange-light-ink"));
     // Assert
