@@ -1,17 +1,24 @@
 // endpoint_ask_about_response.proto — AskAboutResponse: toggle a question
-// about one final response. FEED section.
+// about one card of the feed. FEED section.
 //
-// THE DAEMON IS THE ONLY HOLDER of a workspace's question. A final response's
-// bubble carries a question-mark control beside its copy control; a click on
-// it asks the daemon to toggle the question about that response. While a
-// question is held, the next prompt the user sends is NOT a turn of this
-// workspace: the daemon forks this workspace's conversation into a new CHILD
-// workspace whose first prompt is the response, quoted, followed by the
-// user's words, answers the submission `question_forked`, and ends the
-// question. The answer is read in that child workspace.
+// THE DAEMON IS THE ONLY HOLDER of a workspace's question. Every card the
+// feed draws carries a question-mark control (a final response's sits beside
+// its copy control; owner request, 2026-11-09, extended it from final
+// responses to every card); a click on it asks the daemon to toggle the
+// question about that card. While a question is held, the next prompt the
+// user sends is NOT a turn of this workspace: the daemon forks this
+// workspace's conversation into a new CHILD workspace whose first prompt is
+// the card, quoted, followed by the user's words, answers the submission
+// `question_forked`, and ends the question. The answer is read in that child
+// workspace.
+//
+// A CARD IS QUOTED BY ONE RULE: a bubble with text (a prompt, a landed
+// response) by its markdown, and every other card by the daemon-resolved row
+// the feed drew it from, as JSON. So a card kind added later is quotable with
+// no rule of its own.
 //
 // The question's state is pushed to the webapp on the root feed's watch
-// (frontend.v1.FeedResponseQuestion), which draws the asked response's
+// (frontend.v1.FeedResponseQuestion), which draws the asked card's
 // control pressed, and to Emacs on the host workspace watch
 // (HostWorkspaceResponseQuestion), which sets the composer's draft aside
 // while the question stands and puts it back when the question is withdrawn.
@@ -41,19 +48,20 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
-// Toggle the workspace's question about one final response.
+// Toggle the workspace's question about one card.
 //
-// THE DAEMON COMPUTES THE TOGGLE, never the client: naming the response the
-// question is already about withdraws it, and naming any other final response
-// asks about that one instead (the question moves). A client therefore sends
+// THE DAEMON COMPUTES THE TOGGLE, never the client: naming the card the
+// question is already about withdraws it, and naming any other card asks
+// about that one instead (the question moves). A client therefore sends
 // the row it clicked and draws whatever the push says, so two clients clicking
 // at once can never leave the drawn state and the held state disagreeing.
 type AskAboutResponseRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The workspace the response is in.
+	// The workspace the card is in.
 	Workspace *v1.WorkspaceRef `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
-	// The final response's row on the workspace's root feed, as the bubble the
-	// reader clicked carries it.
+	// The card's row, on the workspace's root feed or on any of its sub-feeds
+	// (a subagent's, a merge's, a shell's), as the card the reader clicked
+	// carries it.
 	Row           *v11.FeedId `protobuf:"bytes,2,opt,name=row,proto3" json:"row,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -263,13 +271,13 @@ type isAskAboutResponseSuccess_State interface {
 }
 
 type AskAboutResponseSuccess_Asking struct {
-	// A question about the named response now stands: none stood before, or
-	// one about another response moved here.
+	// A question about the named card now stands: none stood before, or
+	// one about another card moved here.
 	Asking *AskAboutResponseAsking `protobuf:"bytes,1,opt,name=asking,proto3,oneof"`
 }
 
 type AskAboutResponseSuccess_Withdrawn struct {
-	// The question about the named response was withdrawn; none stands now.
+	// The question about the named card was withdrawn; none stands now.
 	Withdrawn *AskAboutResponseWithdrawn `protobuf:"bytes,2,opt,name=withdrawn,proto3,oneof"`
 }
 
@@ -277,10 +285,10 @@ func (*AskAboutResponseSuccess_Asking) isAskAboutResponseSuccess_State() {}
 
 func (*AskAboutResponseSuccess_Withdrawn) isAskAboutResponseSuccess_State() {}
 
-// A question about this response stands.
+// A question about this card stands.
 type AskAboutResponseAsking struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The response the question is about, echoed from the request.
+	// The card the question is about, echoed from the request.
 	Row           *v11.FeedId `protobuf:"bytes,1,opt,name=row,proto3" json:"row,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -323,7 +331,7 @@ func (x *AskAboutResponseAsking) GetRow() *v11.FeedId {
 	return nil
 }
 
-// No question stands: the click named the response the question was about.
+// No question stands: the click named the card the question was about.
 type AskAboutResponseWithdrawn struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -372,7 +380,7 @@ type AskAboutResponseError struct {
 	//	*AskAboutResponseError_WorkspaceRefMismatch
 	//	*AskAboutResponseError_TransferringAway
 	//	*AskAboutResponseError_NotYetAdopted
-	//	*AskAboutResponseError_NotAFinalResponse
+	//	*AskAboutResponseError_NotACard
 	Cause         isAskAboutResponseError_Cause `protobuf_oneof:"cause"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -451,10 +459,10 @@ func (x *AskAboutResponseError) GetNotYetAdopted() *AskAboutResponseNotYetAdopte
 	return nil
 }
 
-func (x *AskAboutResponseError) GetNotAFinalResponse() *AskAboutResponseNotAFinalResponse {
+func (x *AskAboutResponseError) GetNotACard() *AskAboutResponseNotACard {
 	if x != nil {
-		if x, ok := x.Cause.(*AskAboutResponseError_NotAFinalResponse); ok {
-			return x.NotAFinalResponse
+		if x, ok := x.Cause.(*AskAboutResponseError_NotACard); ok {
+			return x.NotACard
 		}
 	}
 	return nil
@@ -484,11 +492,11 @@ type AskAboutResponseError_NotYetAdopted struct {
 	NotYetAdopted *AskAboutResponseNotYetAdopted `protobuf:"bytes,4,opt,name=not_yet_adopted,json=notYetAdopted,proto3,oneof"`
 }
 
-type AskAboutResponseError_NotAFinalResponse struct {
-	// The row is not a settled final response of the workspace's root feed,
-	// so there is no response to ask about. The question held before the
-	// request, if any, is left as it was.
-	NotAFinalResponse *AskAboutResponseNotAFinalResponse `protobuf:"bytes,5,opt,name=not_a_final_response,json=notAFinalResponse,proto3,oneof"`
+type AskAboutResponseError_NotACard struct {
+	// The row is no card on any of the workspace's feeds, so there is
+	// nothing to ask about. The question held before the request, if any, is
+	// left as it was.
+	NotACard *AskAboutResponseNotACard `protobuf:"bytes,5,opt,name=not_a_card,json=notACard,proto3,oneof"`
 }
 
 func (*AskAboutResponseError_UnknownWorkspace) isAskAboutResponseError_Cause() {}
@@ -499,7 +507,7 @@ func (*AskAboutResponseError_TransferringAway) isAskAboutResponseError_Cause() {
 
 func (*AskAboutResponseError_NotYetAdopted) isAskAboutResponseError_Cause() {}
 
-func (*AskAboutResponseError_NotAFinalResponse) isAskAboutResponseError_Cause() {}
+func (*AskAboutResponseError_NotACard) isAskAboutResponseError_Cause() {}
 
 // The workspace id is not in the daemon's registry.
 type AskAboutResponseUnknownWorkspace struct {
@@ -681,27 +689,27 @@ func (x *AskAboutResponseNotYetAdopted) GetAddress() string {
 	return ""
 }
 
-// The row is not a settled final response of the workspace's root feed.
-type AskAboutResponseNotAFinalResponse struct {
+// The row is no card on any of the workspace's feeds.
+type AskAboutResponseNotACard struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *AskAboutResponseNotAFinalResponse) Reset() {
-	*x = AskAboutResponseNotAFinalResponse{}
+func (x *AskAboutResponseNotACard) Reset() {
+	*x = AskAboutResponseNotACard{}
 	mi := &file_agentrepl_v1_endpoint_ask_about_response_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *AskAboutResponseNotAFinalResponse) String() string {
+func (x *AskAboutResponseNotACard) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*AskAboutResponseNotAFinalResponse) ProtoMessage() {}
+func (*AskAboutResponseNotACard) ProtoMessage() {}
 
-func (x *AskAboutResponseNotAFinalResponse) ProtoReflect() protoreflect.Message {
+func (x *AskAboutResponseNotACard) ProtoReflect() protoreflect.Message {
 	mi := &file_agentrepl_v1_endpoint_ask_about_response_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -713,8 +721,8 @@ func (x *AskAboutResponseNotAFinalResponse) ProtoReflect() protoreflect.Message 
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use AskAboutResponseNotAFinalResponse.ProtoReflect.Descriptor instead.
-func (*AskAboutResponseNotAFinalResponse) Descriptor() ([]byte, []int) {
+// Deprecated: Use AskAboutResponseNotACard.ProtoReflect.Descriptor instead.
+func (*AskAboutResponseNotACard) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_ask_about_response_proto_rawDescGZIP(), []int{10}
 }
 
@@ -736,13 +744,14 @@ const file_agentrepl_v1_endpoint_ask_about_response_proto_rawDesc = "" +
 	"\x05state\"?\n" +
 	"\x16AskAboutResponseAsking\x12%\n" +
 	"\x03row\x18\x01 \x01(\v2\x13.frontend.v1.FeedIdR\x03row\"\x1b\n" +
-	"\x19AskAboutResponseWithdrawn\"\x85\x04\n" +
+	"\x19AskAboutResponseWithdrawn\"\xe9\x03\n" +
 	"\x15AskAboutResponseError\x12]\n" +
 	"\x11unknown_workspace\x18\x01 \x01(\v2..agentrepl.v1.AskAboutResponseUnknownWorkspaceH\x00R\x10unknownWorkspace\x12j\n" +
 	"\x16workspace_ref_mismatch\x18\x02 \x01(\v22.agentrepl.v1.AskAboutResponseWorkspaceRefMismatchH\x00R\x14workspaceRefMismatch\x12]\n" +
 	"\x11transferring_away\x18\x03 \x01(\v2..agentrepl.v1.AskAboutResponseTransferringAwayH\x00R\x10transferringAway\x12U\n" +
-	"\x0fnot_yet_adopted\x18\x04 \x01(\v2+.agentrepl.v1.AskAboutResponseNotYetAdoptedH\x00R\rnotYetAdopted\x12b\n" +
-	"\x14not_a_final_response\x18\x05 \x01(\v2/.agentrepl.v1.AskAboutResponseNotAFinalResponseH\x00R\x11notAFinalResponseB\a\n" +
+	"\x0fnot_yet_adopted\x18\x04 \x01(\v2+.agentrepl.v1.AskAboutResponseNotYetAdoptedH\x00R\rnotYetAdopted\x12F\n" +
+	"\n" +
+	"not_a_card\x18\x05 \x01(\v2&.agentrepl.v1.AskAboutResponseNotACardH\x00R\bnotACardB\a\n" +
 	"\x05cause\"\"\n" +
 	" AskAboutResponseUnknownWorkspace\"I\n" +
 	"$AskAboutResponseWorkspaceRefMismatch\x12!\n" +
@@ -752,8 +761,8 @@ const file_agentrepl_v1_endpoint_ask_about_response_proto_rawDesc = "" +
 	"\x1dAskAboutResponseNotYetAdopted\x12\x1d\n" +
 	"\aaddress\x18\x01 \x01(\tH\x00R\aaddress\x88\x01\x01B\n" +
 	"\n" +
-	"\b_address\"#\n" +
-	"!AskAboutResponseNotAFinalResponseB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"\b_address\"\x1a\n" +
+	"\x18AskAboutResponseNotACardB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_endpoint_ask_about_response_proto_rawDescOnce sync.Once
@@ -779,7 +788,7 @@ var file_agentrepl_v1_endpoint_ask_about_response_proto_goTypes = []any{
 	(*AskAboutResponseWorkspaceRefMismatch)(nil), // 7: agentrepl.v1.AskAboutResponseWorkspaceRefMismatch
 	(*AskAboutResponseTransferringAway)(nil),     // 8: agentrepl.v1.AskAboutResponseTransferringAway
 	(*AskAboutResponseNotYetAdopted)(nil),        // 9: agentrepl.v1.AskAboutResponseNotYetAdopted
-	(*AskAboutResponseNotAFinalResponse)(nil),    // 10: agentrepl.v1.AskAboutResponseNotAFinalResponse
+	(*AskAboutResponseNotACard)(nil),             // 10: agentrepl.v1.AskAboutResponseNotACard
 	(*v1.WorkspaceRef)(nil),                      // 11: workspace.v1.WorkspaceRef
 	(*v11.FeedId)(nil),                           // 12: frontend.v1.FeedId
 }
@@ -795,7 +804,7 @@ var file_agentrepl_v1_endpoint_ask_about_response_proto_depIdxs = []int32{
 	7,  // 8: agentrepl.v1.AskAboutResponseError.workspace_ref_mismatch:type_name -> agentrepl.v1.AskAboutResponseWorkspaceRefMismatch
 	8,  // 9: agentrepl.v1.AskAboutResponseError.transferring_away:type_name -> agentrepl.v1.AskAboutResponseTransferringAway
 	9,  // 10: agentrepl.v1.AskAboutResponseError.not_yet_adopted:type_name -> agentrepl.v1.AskAboutResponseNotYetAdopted
-	10, // 11: agentrepl.v1.AskAboutResponseError.not_a_final_response:type_name -> agentrepl.v1.AskAboutResponseNotAFinalResponse
+	10, // 11: agentrepl.v1.AskAboutResponseError.not_a_card:type_name -> agentrepl.v1.AskAboutResponseNotACard
 	12, // [12:12] is the sub-list for method output_type
 	12, // [12:12] is the sub-list for method input_type
 	12, // [12:12] is the sub-list for extension type_name
@@ -821,7 +830,7 @@ func file_agentrepl_v1_endpoint_ask_about_response_proto_init() {
 		(*AskAboutResponseError_WorkspaceRefMismatch)(nil),
 		(*AskAboutResponseError_TransferringAway)(nil),
 		(*AskAboutResponseError_NotYetAdopted)(nil),
-		(*AskAboutResponseError_NotAFinalResponse)(nil),
+		(*AskAboutResponseError_NotACard)(nil),
 	}
 	file_agentrepl_v1_endpoint_ask_about_response_proto_msgTypes[9].OneofWrappers = []any{}
 	type x struct{}

@@ -4168,7 +4168,6 @@ describe("the one code wash (owner request, 2026-10-28)", () => {
   });
 
   it.each([
-    ["inline code", ".md code"],
     ["a fenced block", ".md pre.md-code"],
   ])("paints %s from the one wash", (_name, selector) => {
     // Arrange / Act
@@ -4207,6 +4206,60 @@ describe("the one code wash (owner request, 2026-10-28)", () => {
     // Assert
     expect(rule).toMatch(/background:\s*none/);
   });
+
+  it("leaves a code block's inner code in the block's own ink, not inline code's", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".md pre.md-code code") ?? "";
+    // Assert
+    expect(rule).toMatch(/(?:^|;)\s*color:\s*inherit;/);
+  });
+});
+
+describe("inline code's lighter canonical orange (owner request, 2026-11-09)", () => {
+  /** WCAG's contrast ratio between two colors. */
+  const contrast = (a: [number, number, number], b: [number, number, number]): number => {
+    const [high, low] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+    return (high + 0.05) / (low + 0.05);
+  };
+
+  /** The lighter canonical orange in the theme of BLOCK, mixed as its declaration says. */
+  const lightOrange = (block: string): [number, number, number] => {
+    const declared = themeValueOf(declarationsOf(":root") ?? "", "--canonical-orange-light") ?? "";
+    const share = /^color-mix\(in srgb, var\(--canonical-orange\) ([\d.]+)%, #ffffff\)$/.exec(declared)?.[1];
+    if (share === undefined) throw new Error(`--canonical-orange-light is not mixed from the canonical orange: ${declared}`);
+    return srgbMix(themeRgbOf(block, "--canonical-orange"), [0xff, 0xff, 0xff], Number(share) / 100) as [number, number, number];
+  };
+
+  it("is derived from the canonical orange, once, on :root", () => {
+    // Arrange / Act
+    const declarations = withoutBlockComments(stylesheet).match(/--canonical-orange-light\s*:[^;]+;/g) ?? [];
+    // Assert
+    expect(declarations).toEqual(["--canonical-orange-light: color-mix(in srgb, var(--canonical-orange) 85%, #ffffff);"]);
+  });
+
+  it.each(THEME_BLOCKS)("is lighter than the %s theme's canonical orange", (_theme, block) => {
+    // Arrange / Act
+    const [orange, light] = [luminance(themeRgbOf(block(), "--canonical-orange")), luminance(lightOrange(block()))];
+    // Assert
+    expect(light).toBeGreaterThan(orange);
+  });
+
+  it.each(THEME_BLOCKS)("carries ink that reads at WCAG AA on it in the %s theme", (_theme, block) => {
+    // Arrange / Act
+    const ratio = contrast(lightOrange(block()), themeRgbOf(block(), "--canonical-orange-light-ink"));
+    // Assert
+    expect(ratio).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it.each([["background", "var(--canonical-orange-light)"], ["color", "var(--canonical-orange-light-ink)"]])(
+    "paints inline code's %s from it",
+    (property, want) => {
+      // Arrange / Act
+      const rule = declarationsOf(".md code") ?? "";
+      // Assert
+      expect(new RegExp(`(?:^|;)\\s*${property}:\\s*([^;]+);`).exec(rule)?.[1]?.trim()).toBe(want);
+    },
+  );
 });
 
 // THE TWO COLORED MERGE GLYPHS (owner rulings, 2026-09-28). The merge glyph
@@ -6635,6 +6688,28 @@ describe("the workspace name's status tint (owner request, 2026-10-29)", () => {
   });
 });
 
+describe("a card's question control (owner request, 2026-11-09)", () => {
+  it("sits at the card's top right, out of flow", () => {
+    // Arrange / Act
+    const decls = ownDeclarationsOf(".card-question") ?? "";
+
+    // Assert
+    expect([/position:\s*absolute/.test(decls), /top:\s*2px/.test(decls), /right:\s*2px/.test(decls)]).toEqual([true, true, true]);
+  });
+
+  it.each([
+    [".card-question", "0"],
+    [":hover > .card-question", "var(--copy-control-rest, 0.7)"],
+    [".card-question[data-asking]", "1"],
+  ])("rests unseen, and %s shows it at %s", (selector, want) => {
+    // Arrange / Act
+    const decls = (selector === ".card-question" ? ownDeclarationsOf(selector) : declarationsOf(selector)) ?? "";
+
+    // Assert
+    expect(/(?:^|;)\s*opacity:\s*([^;]+);/.exec(decls)?.[1]?.trim()).toBe(want);
+  });
+});
+
 describe("the canonical orange (owner ruling, 2026-10-30)", () => {
   it("is what an answered branch's label reads", () => {
     // Arrange / Act
@@ -6642,6 +6717,25 @@ describe("the canonical orange (owner ruling, 2026-10-30)", () => {
 
     // Assert
     expect([decls.includes("--answer-label: var(--canonical-orange);"), darkThemeBlock().includes("--answer-label:")]).toEqual([true, false]);
+  });
+
+  // Owner request, 2026-11-09: a tree's citations wear the canonical orange.
+  it("is what a tree citation's orange reads, in both themes", () => {
+    // Arrange / Act
+    const decls = withoutBlockComments(declarationsOf(":root") ?? "");
+
+    // Assert
+    expect([decls.includes("--reference: var(--canonical-orange);"), darkThemeBlock().includes("--reference:")]).toEqual([true, false]);
+  });
+
+  // Owner request, 2026-11-09: the pressed question mark wears the citations' orange.
+  it.each([["color"], ["background"]])("is what a pressed question control's %s reads", (property) => {
+    // Arrange / Act
+    const decls = declarationsOf(".question-control[data-asking]") ?? "";
+    const value = new RegExp(`(?:^|;)\\s*${property}:\\s*([^;]+);`).exec(decls)?.[1] ?? "";
+
+    // Assert
+    expect([value.includes("var(--canonical-orange)"), value.includes("--accent")]).toEqual([true, false]);
   });
 });
 

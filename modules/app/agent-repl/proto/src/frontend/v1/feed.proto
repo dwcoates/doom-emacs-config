@@ -4472,10 +4472,10 @@ message FeedMergeQueueWaiting {
 // PENDING — old bodies, verbatim, judged one kind at a time.
 // ==========================================================================
 
-// ---- The question about a response ----------------------------------------
+// ---- The question about a card ---------------------------------------------
 
-// The workspace's question about a final response (agentrepl.v1
-// .AskAboutResponse): which response's question-mark control the webapp draws
+// The workspace's question about a card of the feed (agentrepl.v1
+// .AskAboutResponse): which card's question-mark control the webapp draws
 // pressed. STATE, not an event: the root feed's watch carries it whenever it
 // changes and the moment a root watch is accepted, so a page that opens while
 // a question stands draws it. The daemon is its only holder; the webapp never
@@ -4483,9 +4483,9 @@ message FeedMergeQueueWaiting {
 message FeedResponseQuestion {
   // THE ARM IS THE STATE.
   oneof state {
-    // No question stands: every response's control is drawn at rest.
+    // No question stands: every card's control is drawn at rest.
     FeedResponseQuestionNone none = 1;
-    // A question about one response stands: that response's control is drawn
+    // A question about one card stands: that card's control is drawn
     // pressed, and every other one at rest.
     FeedResponseQuestionAsking asking = 2;
   }
@@ -4494,9 +4494,10 @@ message FeedResponseQuestion {
 // No question stands.
 message FeedResponseQuestionNone {}
 
-// A question about this response stands.
+// A question about this card stands.
 message FeedResponseQuestionAsking {
-  // The final response's row on the root feed, as its bubble carries it.
+  // The card's row, on the root feed or one of its sub-feeds, as the card
+  // carries it.
   FeedId row = 1;
 }
 

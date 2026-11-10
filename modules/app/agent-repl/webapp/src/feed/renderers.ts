@@ -35,6 +35,8 @@ import { drawFeedPermission } from "./asks/permission.js";
 import { drawFeedQuestion } from "./asks/question.js";
 import { drawFeedMerge } from "./merge/merge.js";
 import { mergeBubbleBody } from "./merge/merge-body.js";
+import { drawFeedDetachedSubagent, drawFeedSubagent } from "./rows/subagent.js";
+import { withCardQuestion } from "./response-question.js";
 import type { Handle } from "../failure/local.js";
 import { log } from "../log.js";
 import { placeChildren, queryAll } from "../dom.js";
@@ -59,6 +61,7 @@ import type {
   FeedBreadcrumb,
   FeedColdGate,
   FeedCommandPanel,
+  FeedDetachedSubagent,
   FeedCommandRefused,
   FeedFindings,
   FeedHook,
@@ -72,6 +75,7 @@ import type {
   FeedShell,
   FeedSimpleToolCall,
   FeedSkill,
+  FeedSubagent,
   FeedSubagentResult,
 } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import type { FeedChessBoard } from "../../../proto/gen/ts/frontend/v1/chess_board_pb";
@@ -90,6 +94,10 @@ export type { RowArrival, RowContext };
  * Each returns the row's BODY element; the feed wraps it in the row chrome
  * (the `<article>` with the identity attributes and the nesting slot), so no
  * renderer draws chrome and none of them can disagree about it.
+ *
+ * EVERY KEY BUT `mergeBody` DRAWS A CARD, and every card carries the question
+ * control (response-question.ts), so `createRowRenderers` wraps each of them
+ * in `withCardQuestion` and the registry's test fails a card left unwrapped.
  */
 export interface RowRenderers {
   response(unit: FeedResponse, rc: RowContext): HTMLElement;
@@ -112,6 +120,10 @@ export interface RowRenderers {
   coldGate(unit: FeedColdGate, rc: RowContext): HTMLElement;
   /** The merge bubble's collapsed HEAD line; its body is `mergeBody`. */
   mergeHead(unit: FeedMerge, rc: RowContext): HTMLElement;
+  /** A synchronous subagent bubble's collapsed HEAD line. */
+  subagentHead(unit: FeedSubagent, rc: RowContext): HTMLElement;
+  /** A detached subagent bubble's collapsed HEAD line: the same head, placed detached. */
+  detachedSubagentHead(unit: FeedDetachedSubagent, rc: RowContext): HTMLElement;
   commandPanel(unit: FeedCommandPanel, rc: RowContext): HTMLElement;
   commandRefused(unit: FeedCommandRefused, rc: RowContext): HTMLElement;
   /** The merge bubble's body: the tab strip over its sub-feed's tab rows. */
@@ -172,23 +184,25 @@ export function createRowRenderers(_ctx: AppContext): RowRenderers {
     operation: "feed.renderers.assemble",
   });
   return {
-    response: drawFeedResponse,
-    simpleToolCall: drawFeedSimpleToolCall,
-    hook: drawFeedHook,
-    skill: drawFeedSkill,
-    artifact: drawFeedArtifact,
-    plan: drawFeedPlan,
-    findings: drawFeedFindings,
-    chessBoard: drawFeedChessBoard,
-    subagentResult: drawFeedSubagentResult,
-    shell: drawFeedShellBody,
-    shellHead: drawFeedShellHead,
-    permission: drawFeedPermission,
-    question: drawFeedQuestion,
-    coldGate: drawFeedColdGate,
-    mergeHead: drawFeedMerge,
-    commandPanel: drawFeedCommandPanel,
-    commandRefused: drawFeedCommandRefused,
+    response: withCardQuestion(drawFeedResponse),
+    simpleToolCall: withCardQuestion(drawFeedSimpleToolCall),
+    hook: withCardQuestion(drawFeedHook),
+    skill: withCardQuestion(drawFeedSkill),
+    artifact: withCardQuestion(drawFeedArtifact),
+    plan: withCardQuestion(drawFeedPlan),
+    findings: withCardQuestion(drawFeedFindings),
+    chessBoard: withCardQuestion(drawFeedChessBoard),
+    subagentResult: withCardQuestion(drawFeedSubagentResult),
+    shell: withCardQuestion(drawFeedShellBody),
+    shellHead: withCardQuestion(drawFeedShellHead),
+    permission: withCardQuestion(drawFeedPermission),
+    question: withCardQuestion(drawFeedQuestion),
+    coldGate: withCardQuestion(drawFeedColdGate),
+    mergeHead: withCardQuestion(drawFeedMerge),
+    subagentHead: withCardQuestion(drawFeedSubagent),
+    detachedSubagentHead: withCardQuestion(drawFeedDetachedSubagent),
+    commandPanel: withCardQuestion(drawFeedCommandPanel),
+    commandRefused: withCardQuestion(drawFeedCommandRefused),
     mergeBody: mergeBubbleBody,
   };
 }

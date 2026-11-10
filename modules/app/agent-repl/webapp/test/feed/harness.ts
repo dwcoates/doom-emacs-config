@@ -101,6 +101,7 @@ import { type AppContext } from "../../src/rpc/context.js";
 import { testAppContext } from "../rpc/app-context.js";
 import { orderFor } from "../feed-order.js";
 import type { RowContext, RowRenderers } from "../../src/feed/renderers.js";
+import { drawFeedDetachedSubagent, drawFeedSubagent } from "../../src/feed/rows/subagent.js";
 import { sentTo } from "./addresses.js";
 import { servedProse } from "../prose.js";
 
@@ -1006,6 +1007,10 @@ export function stubRenderers(overrides: Partial<RowRenderers> = {}): RowRendere
     question: stub("question"),
     coldGate: stub("coldGate"),
     mergeHead: stub("mergeHead"),
+    // THE SUBAGENT HEADS ARE THE REAL ONES: the feed drew them itself before
+    // they joined the registry, and its suites read what they draw.
+    subagentHead: drawFeedSubagent,
+    detachedSubagentHead: drawFeedDetachedSubagent,
     commandPanel: stub("commandPanel"),
     commandRefused: stub("commandRefused"),
     mergeBody: (mount) => {

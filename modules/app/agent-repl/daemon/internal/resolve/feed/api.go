@@ -417,6 +417,10 @@ type Resolver interface {
 	// whether it is a prompt, whether or not the reader can select it. A miss
 	// is a feedid that names no such bubble.
 	BubbleText(ws ids.WorkspaceID, id *frontendv1.FeedId) (RowText, bool)
+	// CardText answers the card a row of any of the workspace's feeds names,
+	// quoted as a question about it quotes it, and false for a row that names
+	// no card the resolver holds (cardquote.go).
+	CardText(ws ids.WorkspaceID, row *frontendv1.FeedId) (CardText, bool)
 	// RevisableFinalResponse answers the settled final response a row of the
 	// root feed names, with its unit and what it says now, and false for any
 	// other row (revision.go).

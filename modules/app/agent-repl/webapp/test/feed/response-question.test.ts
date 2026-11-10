@@ -10,18 +10,23 @@ import {
   AskAboutResponseResponseSchema,
   type AskAboutResponseRequest,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_ask_about_response_pb";
-import { FeedResponseQuestionSchema, type FeedResponseQuestion } from "../../../proto/gen/ts/frontend/v1/feed_pb";
+import { FeedResponseQuestionSchema, FeedRowSchema, type FeedResponseQuestion } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import type { FailureKind } from "../../../proto/gen/ts/frontend/v1/failure_pb";
 import { WorkspaceRefSchema } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import {
   ASKING_ATTRIBUTE,
   BUBBLE_QUESTION_CLASS,
+  CARD_QUESTION_CLASS,
   QUESTION_CONTROL_CLASS,
   QUESTION_ROW_ATTRIBUTE,
   applyResponseQuestion,
+  carriesCardQuestion,
   installResponseQuestion,
+  placeCardQuestion,
   questionControl,
+  withCardQuestion,
 } from "../../src/feed/response-question.js";
+import type { RowContext } from "../../src/feed/cards/context.js";
 import { scriptedAppContext } from "../rpc/app-context.js";
 import { recordingFailures } from "../failure-sink.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
@@ -134,7 +139,7 @@ describe("questionControl", () => {
 
   it("refuses a control naming no row", () => {
     // Act / Assert
-    expect(() => questionControl("")).toThrow(/names no response row/);
+    expect(() => questionControl("")).toThrow(/names no card row/);
   });
 });
 
@@ -167,7 +172,7 @@ describe("applyResponseQuestion", () => {
     // Act
     applyResponseQuestion(document, asking("r1"));
     // Assert
-    expect(controlOf(host, "r1").getAttribute("title")).toBe("Withdraw the question about this response");
+    expect(controlOf(host, "r1").getAttribute("title")).toBe("Withdraw the question about this card");
   });
 
   it("refuses a push with no state", () => {
@@ -212,7 +217,7 @@ describe("installResponseQuestion", () => {
     // Arrange
     const host = feedWith(["r1"]);
     const page = scripted(() =>
-      create(AskAboutResponseResponseSchema, { result: { case: "error", value: { cause: { case: "notAFinalResponse", value: {} } } } }),
+      create(AskAboutResponseResponseSchema, { result: { case: "error", value: { cause: { case: "notACard", value: {} } } } }),
     );
     page.install(host);
     const records = captureLogRecords();
@@ -222,7 +227,7 @@ describe("installResponseQuestion", () => {
     // Assert
     expect(page.reported).toHaveLength(1);
     const record = await forwardedRecord(records, "feed.response-question.refused");
-    expect([record.level.case, record.context?.arm, record.context?.row]).toEqual(["error", "notAFinalResponse", "r1"]);
+    expect([record.level.case, record.context?.arm, record.context?.row]).toEqual(["error", "notACard", "r1"]);
   });
 
   it("files a daemon it cannot reach on the chip", async () => {
@@ -263,5 +268,128 @@ describe("installResponseQuestion", () => {
     await answered();
     // Assert
     expect(page.calls).toEqual([]);
+  });
+});
+
+/** A row context for the card of row ROW ("" for a row with no id). */
+function cardContext(row: string): RowContext {
+  return {
+    row: create(FeedRowSchema, row === "" ? {} : { id: { value: row } }),
+  } as RowContext;
+}
+
+/** A card renderer drawing a bare card, recording the units it was given. */
+function bareCard(): { render: (unit: string, rc: RowContext) => HTMLElement; units: string[] } {
+  const units: string[] = [];
+  return {
+    units,
+    render: (unit) => {
+      units.push(unit);
+      const card = document.createElement("div");
+      card.className = "card";
+      return card;
+    },
+  };
+}
+
+/** Every question control CARD holds. */
+function controlsIn(card: HTMLElement): HTMLElement[] {
+  return [...card.querySelectorAll<HTMLElement>(`.${QUESTION_CONTROL_CLASS}`)];
+}
+
+describe("withCardQuestion", () => {
+  it("draws the card its renderer draws, given the unit", () => {
+    // Arrange
+    const card = bareCard();
+    // Act
+    const drawn = withCardQuestion(card.render)("unit-1", cardContext("r1"));
+    // Assert
+    expect([drawn.className, card.units]).toEqual(["card", ["unit-1"]]);
+  });
+
+  it("gives the card one question control for its row, at its top right", () => {
+    // Act
+    const drawn = withCardQuestion(bareCard().render)("unit-1", cardContext("r1"));
+    // Assert
+    expect(
+      controlsIn(drawn).map((c) => [c.parentElement === drawn, c.classList.contains(CARD_QUESTION_CLASS), c.getAttribute(QUESTION_ROW_ATTRIBUTE)]),
+    ).toEqual([[true, true, "r1"]]);
+  });
+
+  it("draws the card's control pressed while the question about its row stands", () => {
+    // Arrange
+    applyResponseQuestion(document, asking("r1"));
+    // Act
+    const drawn = withCardQuestion(bareCard().render)("unit-1", cardContext("r1"));
+    // Assert
+    expect(controlsIn(drawn)[0].hasAttribute(ASKING_ATTRIBUTE)).toBe(true);
+  });
+
+  it("refuses a card whose row names no id", () => {
+    // Act / Assert
+    expect(() => withCardQuestion(bareCard().render)("unit-1", cardContext(""))).toThrow(/names no id/);
+  });
+
+  it("marks what it made, and nothing else, as carrying the question", () => {
+    // Arrange
+    const render = bareCard().render;
+    // Act
+    const got = [carriesCardQuestion(withCardQuestion(render)), carriesCardQuestion(render)];
+    // Assert
+    expect(got).toEqual([true, false]);
+  });
+});
+
+describe("placeCardQuestion", () => {
+  it("keeps one control on a card its renderer redrew in place", () => {
+    // Arrange
+    const card = document.createElement("div");
+    placeCardQuestion(card, "r1");
+    // Act
+    placeCardQuestion(card, "r1");
+    // Assert
+    expect(controlsIn(card)).toHaveLength(1);
+  });
+
+  it("restates the pressed look on a card redrawn in place", () => {
+    // Arrange
+    const card = document.createElement("div");
+    placeCardQuestion(card, "r1");
+    applyResponseQuestion(document, asking("r2"));
+    // Act
+    placeCardQuestion(card, "r1");
+    // Assert
+    expect(controlsIn(card)[0].getAttribute("aria-pressed")).toBe("false");
+  });
+
+  it("leaves a card that placed its own control in its corner with that one alone", () => {
+    // Arrange
+    const card = document.createElement("div");
+    const corner = questionControl("r1");
+    card.append(corner);
+    // Act
+    placeCardQuestion(card, "r1");
+    // Assert
+    expect(controlsIn(card)).toEqual([corner]);
+  });
+
+  it("drops the top-right control once a redraw places one in the card's corner", () => {
+    // Arrange
+    const card = document.createElement("div");
+    placeCardQuestion(card, "r1");
+    const corner = questionControl("r1");
+    card.append(corner);
+    // Act
+    placeCardQuestion(card, "r1");
+    // Assert
+    expect(controlsIn(card)).toEqual([corner]);
+  });
+
+  it("refuses a card whose corner asks about another row", () => {
+    // Arrange
+    const card = document.createElement("div");
+    card.append(questionControl("r2"));
+    // Act / Assert
+    expect(() => placeCardQuestion(card, "r1")).toThrow(/asks about r2, not its own row r1/);
   });
 });

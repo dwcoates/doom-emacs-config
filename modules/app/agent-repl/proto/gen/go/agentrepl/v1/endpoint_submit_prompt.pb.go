@@ -500,10 +500,10 @@ type SubmitPromptSuccess_ResponseRevising struct {
 }
 
 type SubmitPromptSuccess_QuestionForked struct {
-	// It ASKED A QUESTION ABOUT A FINAL RESPONSE instead of minting a turn: a
+	// It ASKED A QUESTION ABOUT A CARD instead of minting a turn: a
 	// question stood as it was sent (AskAboutResponse), so the daemon began
 	// forking this workspace's conversation into a new CHILD workspace whose
-	// first prompt is the response, quoted, followed by these words, and
+	// first prompt is the card, quoted, followed by these words, and
 	// ended the question. Nothing appears in this workspace's feed: the
 	// answer is read in the child, whose tab arrives once it is created.
 	QuestionForked *SubmitPromptQuestionForked `protobuf:"bytes,7,opt,name=question_forked,json=questionForked,proto3,oneof"`
@@ -535,7 +535,7 @@ func (*SubmitPromptSuccess_QuestionForked) isSubmitPromptSuccess_Outcome() {}
 // progress event can outrun its registration.
 type SubmitPromptQuestionForked struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The response the question was about.
+	// The card the question was about.
 	Row *v12.FeedId `protobuf:"bytes,1,opt,name=row,proto3" json:"row,omitempty"`
 	// The op id the child's create reports its progress and outcome under:
 	// always the request's idempotency key.

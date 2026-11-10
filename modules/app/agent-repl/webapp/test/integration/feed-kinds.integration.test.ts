@@ -128,6 +128,7 @@ import {
 } from "./fixtures";
 import type { FeedRow } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import type { GetFeedPageRequest } from "../../../proto/gen/ts/agentrepl/v1/endpoint_get_feed_page_pb";
+import { QUESTION_CONTROL_CLASS } from "../../src/feed/response-question.js";
 
 let harness: Harness;
 
@@ -1535,11 +1536,11 @@ describe("an expired question", () => {
     expect(row.dataset.state).toBe("expired");
   });
 
-  it("offers no controls", async () => {
+  it("offers no controls but the question mark every card carries", async () => {
     // Arrange / Act
     const row = await drawRow(questionRow("expired"));
     // Assert
-    expect(row.querySelector("ar-button")).toBeNull();
+    expect(row.querySelector(`ar-button:not(.${QUESTION_CONTROL_CLASS})`)).toBeNull();
   });
 });
 

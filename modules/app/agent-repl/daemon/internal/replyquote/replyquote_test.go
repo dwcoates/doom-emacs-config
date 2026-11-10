@@ -439,3 +439,68 @@ func TestQuestionText(t *testing.T) {
 		})
 	}
 }
+
+func TestPromptQuestionText(t *testing.T) {
+	tests := []struct {
+		name     string
+		markdown string
+		words    string
+		want     string
+	}{
+		{
+			name:     "plain prompt",
+			markdown: "fix the footer",
+			words:    "what did I mean?",
+			want:     "⟢ A question about an earlier prompt in this conversation:\n\n```\nfix the footer\n```\n\n⟢ My message:\nwhat did I mean?",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act.
+			got := PromptQuestionText(tc.markdown, tc.words)
+
+			// Assert.
+			if got != tc.want {
+				t.Fatalf("PromptQuestionText = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestCardQuestionText(t *testing.T) {
+	tests := []struct {
+		name  string
+		kind  string
+		json  string
+		words string
+		want  string
+	}{
+		{
+			name:  "a tool call card",
+			kind:  "activity.simple_tool_call",
+			json:  "{\n  \"name\": \"Bash\"\n}",
+			words: "why did this fail?",
+			want: "⟢ A question about a card agent-repl drew in this conversation's feed, quoted as the JSON it was drawn from (`activity.simple_tool_call`):\n\n" +
+				"```\n{\n  \"name\": \"Bash\"\n}\n```\n\n⟢ My message:\nwhy did this fail?",
+		},
+		{
+			name:  "a fence inside the JSON is outrun",
+			kind:  "permission",
+			json:  "{\"text\": \"```\"}",
+			words: "ok?",
+			want: "⟢ A question about a card agent-repl drew in this conversation's feed, quoted as the JSON it was drawn from (`permission`):\n\n" +
+				"````\n{\"text\": \"```\"}\n````\n\n⟢ My message:\nok?",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act.
+			got := CardQuestionText(tc.kind, tc.json, tc.words)
+
+			// Assert.
+			if got != tc.want {
+				t.Fatalf("CardQuestionText = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

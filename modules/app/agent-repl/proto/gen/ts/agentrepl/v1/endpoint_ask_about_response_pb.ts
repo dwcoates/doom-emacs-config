@@ -1,17 +1,24 @@
 // endpoint_ask_about_response.proto — AskAboutResponse: toggle a question
-// about one final response. FEED section.
+// about one card of the feed. FEED section.
 //
-// THE DAEMON IS THE ONLY HOLDER of a workspace's question. A final response's
-// bubble carries a question-mark control beside its copy control; a click on
-// it asks the daemon to toggle the question about that response. While a
-// question is held, the next prompt the user sends is NOT a turn of this
-// workspace: the daemon forks this workspace's conversation into a new CHILD
-// workspace whose first prompt is the response, quoted, followed by the
-// user's words, answers the submission `question_forked`, and ends the
-// question. The answer is read in that child workspace.
+// THE DAEMON IS THE ONLY HOLDER of a workspace's question. Every card the
+// feed draws carries a question-mark control (a final response's sits beside
+// its copy control; owner request, 2026-11-09, extended it from final
+// responses to every card); a click on it asks the daemon to toggle the
+// question about that card. While a question is held, the next prompt the
+// user sends is NOT a turn of this workspace: the daemon forks this
+// workspace's conversation into a new CHILD workspace whose first prompt is
+// the card, quoted, followed by the user's words, answers the submission
+// `question_forked`, and ends the question. The answer is read in that child
+// workspace.
+//
+// A CARD IS QUOTED BY ONE RULE: a bubble with text (a prompt, a landed
+// response) by its markdown, and every other card by the daemon-resolved row
+// the feed drew it from, as JSON. So a card kind added later is quotable with
+// no rule of its own.
 //
 // The question's state is pushed to the webapp on the root feed's watch
-// (frontend.v1.FeedResponseQuestion), which draws the asked response's
+// (frontend.v1.FeedResponseQuestion), which draws the asked card's
 // control pressed, and to Emacs on the host workspace watch
 // (HostWorkspaceResponseQuestion), which sets the composer's draft aside
 // while the question stands and puts it back when the question is withdrawn.
@@ -32,14 +39,14 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_ask_about_response.proto.
  */
 export const file_agentrepl_v1_endpoint_ask_about_response: GenFile = /*@__PURE__*/
-  fileDesc("Ci5hZ2VudHJlcGwvdjEvZW5kcG9pbnRfYXNrX2Fib3V0X3Jlc3BvbnNlLnByb3RvEgxhZ2VudHJlcGwudjEiagoXQXNrQWJvdXRSZXNwb25zZVJlcXVlc3QSLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZhIgCgNyb3cYAiABKAsyEy5mcm9udGVuZC52MS5GZWVkSWQilAEKGEFza0Fib3V0UmVzcG9uc2VSZXNwb25zZRI4CgdzdWNjZXNzGAEgASgLMiUuYWdlbnRyZXBsLnYxLkFza0Fib3V0UmVzcG9uc2VTdWNjZXNzSAASNAoFZXJyb3IYAiABKAsyIy5hZ2VudHJlcGwudjEuQXNrQWJvdXRSZXNwb25zZUVycm9ySABCCAoGcmVzdWx0IpgBChdBc2tBYm91dFJlc3BvbnNlU3VjY2VzcxI2CgZhc2tpbmcYASABKAsyJC5hZ2VudHJlcGwudjEuQXNrQWJvdXRSZXNwb25zZUFza2luZ0gAEjwKCXdpdGhkcmF3bhgCIAEoCzInLmFnZW50cmVwbC52MS5Bc2tBYm91dFJlc3BvbnNlV2l0aGRyYXduSABCBwoFc3RhdGUiOgoWQXNrQWJvdXRSZXNwb25zZUFza2luZxIgCgNyb3cYASABKAsyEy5mcm9udGVuZC52MS5GZWVkSWQiGwoZQXNrQWJvdXRSZXNwb25zZVdpdGhkcmF3biKpAwoVQXNrQWJvdXRSZXNwb25zZUVycm9yEksKEXVua25vd25fd29ya3NwYWNlGAEgASgLMi4uYWdlbnRyZXBsLnYxLkFza0Fib3V0UmVzcG9uc2VVbmtub3duV29ya3NwYWNlSAASVAoWd29ya3NwYWNlX3JlZl9taXNtYXRjaBgCIAEoCzIyLmFnZW50cmVwbC52MS5Bc2tBYm91dFJlc3BvbnNlV29ya3NwYWNlUmVmTWlzbWF0Y2hIABJLChF0cmFuc2ZlcnJpbmdfYXdheRgDIAEoCzIuLmFnZW50cmVwbC52MS5Bc2tBYm91dFJlc3BvbnNlVHJhbnNmZXJyaW5nQXdheUgAEkYKD25vdF95ZXRfYWRvcHRlZBgEIAEoCzIrLmFnZW50cmVwbC52MS5Bc2tBYm91dFJlc3BvbnNlTm90WWV0QWRvcHRlZEgAEk8KFG5vdF9hX2ZpbmFsX3Jlc3BvbnNlGAUgASgLMi8uYWdlbnRyZXBsLnYxLkFza0Fib3V0UmVzcG9uc2VOb3RBRmluYWxSZXNwb25zZUgAQgcKBWNhdXNlIiIKIEFza0Fib3V0UmVzcG9uc2VVbmtub3duV29ya3NwYWNlIjwKJEFza0Fib3V0UmVzcG9uc2VXb3Jrc3BhY2VSZWZNaXNtYXRjaBIUCgxyZWdpc3RyeV9kaXIYASABKAkiMwogQXNrQWJvdXRSZXNwb25zZVRyYW5zZmVycmluZ0F3YXkSDwoHYWRkcmVzcxgBIAEoCSJBCh1Bc2tBYm91dFJlc3BvbnNlTm90WWV0QWRvcHRlZBIUCgdhZGRyZXNzGAEgASgJSACIAQFCCgoIX2FkZHJlc3MiIwohQXNrQWJvdXRSZXNwb25zZU5vdEFGaW5hbFJlc3BvbnNlQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_frontend_v1_feed, file_workspace_v1_workspace]);
+  fileDesc("Ci5hZ2VudHJlcGwvdjEvZW5kcG9pbnRfYXNrX2Fib3V0X3Jlc3BvbnNlLnByb3RvEgxhZ2VudHJlcGwudjEiagoXQXNrQWJvdXRSZXNwb25zZVJlcXVlc3QSLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZhIgCgNyb3cYAiABKAsyEy5mcm9udGVuZC52MS5GZWVkSWQilAEKGEFza0Fib3V0UmVzcG9uc2VSZXNwb25zZRI4CgdzdWNjZXNzGAEgASgLMiUuYWdlbnRyZXBsLnYxLkFza0Fib3V0UmVzcG9uc2VTdWNjZXNzSAASNAoFZXJyb3IYAiABKAsyIy5hZ2VudHJlcGwudjEuQXNrQWJvdXRSZXNwb25zZUVycm9ySABCCAoGcmVzdWx0IpgBChdBc2tBYm91dFJlc3BvbnNlU3VjY2VzcxI2CgZhc2tpbmcYASABKAsyJC5hZ2VudHJlcGwudjEuQXNrQWJvdXRSZXNwb25zZUFza2luZ0gAEjwKCXdpdGhkcmF3bhgCIAEoCzInLmFnZW50cmVwbC52MS5Bc2tBYm91dFJlc3BvbnNlV2l0aGRyYXduSABCBwoFc3RhdGUiOgoWQXNrQWJvdXRSZXNwb25zZUFza2luZxIgCgNyb3cYASABKAsyEy5mcm9udGVuZC52MS5GZWVkSWQiGwoZQXNrQWJvdXRSZXNwb25zZVdpdGhkcmF3biKWAwoVQXNrQWJvdXRSZXNwb25zZUVycm9yEksKEXVua25vd25fd29ya3NwYWNlGAEgASgLMi4uYWdlbnRyZXBsLnYxLkFza0Fib3V0UmVzcG9uc2VVbmtub3duV29ya3NwYWNlSAASVAoWd29ya3NwYWNlX3JlZl9taXNtYXRjaBgCIAEoCzIyLmFnZW50cmVwbC52MS5Bc2tBYm91dFJlc3BvbnNlV29ya3NwYWNlUmVmTWlzbWF0Y2hIABJLChF0cmFuc2ZlcnJpbmdfYXdheRgDIAEoCzIuLmFnZW50cmVwbC52MS5Bc2tBYm91dFJlc3BvbnNlVHJhbnNmZXJyaW5nQXdheUgAEkYKD25vdF95ZXRfYWRvcHRlZBgEIAEoCzIrLmFnZW50cmVwbC52MS5Bc2tBYm91dFJlc3BvbnNlTm90WWV0QWRvcHRlZEgAEjwKCm5vdF9hX2NhcmQYBSABKAsyJi5hZ2VudHJlcGwudjEuQXNrQWJvdXRSZXNwb25zZU5vdEFDYXJkSABCBwoFY2F1c2UiIgogQXNrQWJvdXRSZXNwb25zZVVua25vd25Xb3Jrc3BhY2UiPAokQXNrQWJvdXRSZXNwb25zZVdvcmtzcGFjZVJlZk1pc21hdGNoEhQKDHJlZ2lzdHJ5X2RpchgBIAEoCSIzCiBBc2tBYm91dFJlc3BvbnNlVHJhbnNmZXJyaW5nQXdheRIPCgdhZGRyZXNzGAEgASgJIkEKHUFza0Fib3V0UmVzcG9uc2VOb3RZZXRBZG9wdGVkEhQKB2FkZHJlc3MYASABKAlIAIgBAUIKCghfYWRkcmVzcyIaChhBc2tBYm91dFJlc3BvbnNlTm90QUNhcmRCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_frontend_v1_feed, file_workspace_v1_workspace]);
 
 /**
- * Toggle the workspace's question about one final response.
+ * Toggle the workspace's question about one card.
  *
- * THE DAEMON COMPUTES THE TOGGLE, never the client: naming the response the
- * question is already about withdraws it, and naming any other final response
- * asks about that one instead (the question moves). A client therefore sends
+ * THE DAEMON COMPUTES THE TOGGLE, never the client: naming the card the
+ * question is already about withdraws it, and naming any other card asks
+ * about that one instead (the question moves). A client therefore sends
  * the row it clicked and draws whatever the push says, so two clients clicking
  * at once can never leave the drawn state and the held state disagreeing.
  *
@@ -47,15 +54,16 @@ export const file_agentrepl_v1_endpoint_ask_about_response: GenFile = /*@__PURE_
  */
 export type AskAboutResponseRequest = Message<"agentrepl.v1.AskAboutResponseRequest"> & {
   /**
-   * The workspace the response is in.
+   * The workspace the card is in.
    *
    * @generated from field: workspace.v1.WorkspaceRef workspace = 1;
    */
   workspace?: WorkspaceRef | undefined;
 
   /**
-   * The final response's row on the workspace's root feed, as the bubble the
-   * reader clicked carries it.
+   * The card's row, on the workspace's root feed or on any of its sub-feeds
+   * (a subagent's, a merge's, a shell's), as the card the reader clicked
+   * carries it.
    *
    * @generated from field: frontend.v1.FeedId row = 2;
    */
@@ -116,8 +124,8 @@ export type AskAboutResponseSuccess = Message<"agentrepl.v1.AskAboutResponseSucc
    */
   state: {
     /**
-     * A question about the named response now stands: none stood before, or
-     * one about another response moved here.
+     * A question about the named card now stands: none stood before, or
+     * one about another card moved here.
      *
      * @generated from field: agentrepl.v1.AskAboutResponseAsking asking = 1;
      */
@@ -125,7 +133,7 @@ export type AskAboutResponseSuccess = Message<"agentrepl.v1.AskAboutResponseSucc
     case: "asking";
   } | {
     /**
-     * The question about the named response was withdrawn; none stands now.
+     * The question about the named card was withdrawn; none stands now.
      *
      * @generated from field: agentrepl.v1.AskAboutResponseWithdrawn withdrawn = 2;
      */
@@ -142,13 +150,13 @@ export const AskAboutResponseSuccessSchema: GenMessage<AskAboutResponseSuccess> 
   messageDesc(file_agentrepl_v1_endpoint_ask_about_response, 2);
 
 /**
- * A question about this response stands.
+ * A question about this card stands.
  *
  * @generated from message agentrepl.v1.AskAboutResponseAsking
  */
 export type AskAboutResponseAsking = Message<"agentrepl.v1.AskAboutResponseAsking"> & {
   /**
-   * The response the question is about, echoed from the request.
+   * The card the question is about, echoed from the request.
    *
    * @generated from field: frontend.v1.FeedId row = 1;
    */
@@ -163,7 +171,7 @@ export const AskAboutResponseAskingSchema: GenMessage<AskAboutResponseAsking> = 
   messageDesc(file_agentrepl_v1_endpoint_ask_about_response, 3);
 
 /**
- * No question stands: the click named the response the question was about.
+ * No question stands: the click named the card the question was about.
  *
  * @generated from message agentrepl.v1.AskAboutResponseWithdrawn
  */
@@ -223,14 +231,14 @@ export type AskAboutResponseError = Message<"agentrepl.v1.AskAboutResponseError"
     case: "notYetAdopted";
   } | {
     /**
-     * The row is not a settled final response of the workspace's root feed,
-     * so there is no response to ask about. The question held before the
-     * request, if any, is left as it was.
+     * The row is no card on any of the workspace's feeds, so there is
+     * nothing to ask about. The question held before the request, if any, is
+     * left as it was.
      *
-     * @generated from field: agentrepl.v1.AskAboutResponseNotAFinalResponse not_a_final_response = 5;
+     * @generated from field: agentrepl.v1.AskAboutResponseNotACard not_a_card = 5;
      */
-    value: AskAboutResponseNotAFinalResponse;
-    case: "notAFinalResponse";
+    value: AskAboutResponseNotACard;
+    case: "notACard";
   } | { case: undefined; value?: undefined };
 };
 
@@ -325,17 +333,17 @@ export const AskAboutResponseNotYetAdoptedSchema: GenMessage<AskAboutResponseNot
   messageDesc(file_agentrepl_v1_endpoint_ask_about_response, 9);
 
 /**
- * The row is not a settled final response of the workspace's root feed.
+ * The row is no card on any of the workspace's feeds.
  *
- * @generated from message agentrepl.v1.AskAboutResponseNotAFinalResponse
+ * @generated from message agentrepl.v1.AskAboutResponseNotACard
  */
-export type AskAboutResponseNotAFinalResponse = Message<"agentrepl.v1.AskAboutResponseNotAFinalResponse"> & {
+export type AskAboutResponseNotACard = Message<"agentrepl.v1.AskAboutResponseNotACard"> & {
 };
 
 /**
- * Describes the message agentrepl.v1.AskAboutResponseNotAFinalResponse.
- * Use `create(AskAboutResponseNotAFinalResponseSchema)` to create a new message.
+ * Describes the message agentrepl.v1.AskAboutResponseNotACard.
+ * Use `create(AskAboutResponseNotACardSchema)` to create a new message.
  */
-export const AskAboutResponseNotAFinalResponseSchema: GenMessage<AskAboutResponseNotAFinalResponse> = /*@__PURE__*/
+export const AskAboutResponseNotACardSchema: GenMessage<AskAboutResponseNotACard> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_ask_about_response, 10);
 

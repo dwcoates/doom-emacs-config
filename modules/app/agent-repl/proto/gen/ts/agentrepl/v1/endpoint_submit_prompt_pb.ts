@@ -264,10 +264,10 @@ export type SubmitPromptSuccess = Message<"agentrepl.v1.SubmitPromptSuccess"> & 
     case: "responseRevising";
   } | {
     /**
-     * It ASKED A QUESTION ABOUT A FINAL RESPONSE instead of minting a turn: a
+     * It ASKED A QUESTION ABOUT A CARD instead of minting a turn: a
      * question stood as it was sent (AskAboutResponse), so the daemon began
      * forking this workspace's conversation into a new CHILD workspace whose
-     * first prompt is the response, quoted, followed by these words, and
+     * first prompt is the card, quoted, followed by these words, and
      * ended the question. Nothing appears in this workspace's feed: the
      * answer is read in the child, whose tab arrives once it is created.
      *
@@ -301,7 +301,7 @@ export const SubmitPromptSuccessSchema: GenMessage<SubmitPromptSuccess> = /*@__P
  */
 export type SubmitPromptQuestionForked = Message<"agentrepl.v1.SubmitPromptQuestionForked"> & {
   /**
-   * The response the question was about.
+   * The card the question was about.
    *
    * @generated from field: frontend.v1.FeedId row = 1;
    */

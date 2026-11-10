@@ -108,7 +108,6 @@ import {
   type RowContext,
   type RowRenderers,
 } from "./renderers.js";
-import { drawFeedSubagent, drawFeedDetachedSubagent } from "./rows/subagent.js";
 import { FEED_GROUP_CLASS, activateGroupedMember } from "./tool-group.js";
 import type { EditorIngressView } from "../held/editor-ingress.js";
 import {
@@ -651,7 +650,7 @@ export function mountFeed(
    */
   function bubbleHead(current: FeedRow, context: RowContext): HTMLElement {
     if (current.row.case === "detachedSubagent") {
-      return drawFeedDetachedSubagent(detachedSubagentOf(current), context);
+      return deps.renderers.detachedSubagentHead(detachedSubagentOf(current), context);
     }
     if (current.row.case === "shellHead") {
       return deps.renderers.shellHead(shellHeadOf(current), context);
@@ -659,7 +658,7 @@ export function mountFeed(
     if (unitCase(current) === "merge") {
       return deps.renderers.mergeHead(mergeOf(current), context);
     }
-    return drawFeedSubagent(subagentOf(current), context);
+    return deps.renderers.subagentHead(subagentOf(current), context);
   }
 
   /**

@@ -42,6 +42,7 @@ import type { RowRenderers } from "../../src/feed/renderers.js";
 import { orderFor } from "../feed-order.js";
 import { filesUnder } from "../files-under.js";
 import renderersSource from "../../src/feed/renderers.ts?raw";
+import { carriesCardQuestion } from "../../src/feed/response-question.js";
 import { plainProse } from "../prose.js";
 
 beforeEach(() => {
@@ -804,10 +805,15 @@ const REGISTRY_KEYS: readonly (keyof RowRenderers)[] = [
   "question",
   "coldGate",
   "mergeHead",
+  "subagentHead",
+  "detachedSubagentHead",
   "commandPanel",
   "commandRefused",
   "mergeBody",
 ];
+
+/** The one seam that draws no card: a merge bubble's body lays out its sub-feed's rows. */
+const NOT_A_CARD: readonly (keyof RowRenderers)[] = ["mergeBody"];
 
 describe("createRowRenderers", () => {
   for (const key of REGISTRY_KEYS) {
@@ -820,6 +826,33 @@ describe("createRowRenderers", () => {
   it("fills no seam the interface does not declare", () => {
     const h = harness();
     expect(Object.keys(createRowRenderers(h.ctx)).sort()).toEqual([...REGISTRY_KEYS].sort());
+  });
+
+  // Owner request, 2026-11-09: every card carries the question control, through
+  // one helper, so a card kind added without it fails here.
+  it("draws every card through the question control's one helper", () => {
+    // Arrange
+    const h = harness();
+    const renderers = createRowRenderers(h.ctx);
+
+    // Act
+    const unwrapped = (Object.keys(renderers) as (keyof RowRenderers)[]).filter(
+      (key) => !NOT_A_CARD.includes(key) && !carriesCardQuestion(renderers[key]),
+    );
+
+    // Assert
+    expect(unwrapped).toEqual([]);
+  });
+
+  it("leaves the merge body, which draws no card, unwrapped", () => {
+    // Arrange
+    const h = harness();
+
+    // Act
+    const got = carriesCardQuestion(createRowRenderers(h.ctx).mergeBody);
+
+    // Assert
+    expect(got).toBe(false);
   });
 });
 

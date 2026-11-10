@@ -14,22 +14,23 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/publish"
+	"agent-repld/internal/resolve/feed"
 	"agent-repld/internal/replyquote"
 	"agent-repld/internal/workspace"
 )
 
 const opResponseQuestion = "daemon.server.response_question"
 
-// A QUESTION ABOUT A FINAL RESPONSE. The daemon is the only holder of each
-// workspace's question (endpoint_ask_about_response.proto): the webapp's
+// A QUESTION ABOUT A CARD of the feed (a final response's first, every card's
+// since 2026-11-09). The daemon is the only holder of each workspace's question (endpoint_ask_about_response.proto): the webapp's
 // question-mark control toggles it (AskAboutResponse), the root feed's watch
 // draws it (frontend.v1.FeedResponseQuestion), Emacs edits its composer on
 // each transition (HostWorkspaceResponseQuestion), and the prompt the user
 // sends while it stands is taken by it: forked into a new child workspace
-// whose first prompt quotes the response (submitQuestion).
+// whose first prompt quotes the card (submitQuestion).
 
-// responseQuestions is every workspace's held question: the asked final
-// response's row, ABSENT for none.
+// responseQuestions is every workspace's held question: the asked card's
+// row, ABSENT for none.
 type responseQuestions struct {
 	mu   sync.Mutex
 	held map[ids.WorkspaceID]*frontendv1.FeedId
@@ -75,7 +76,7 @@ func (q *responseQuestions) take(ws ids.WorkspaceID) (*frontendv1.FeedId, bool) 
 	return held, ok
 }
 
-// AskAboutResponse toggles the workspace's question about one final response.
+// AskAboutResponse toggles the workspace's question about one card.
 // See endpoint_ask_about_response.proto.
 func (s *server) AskAboutResponse(
 	ctx context.Context,
@@ -92,10 +93,10 @@ func (s *server) AskAboutResponse(
 	}
 	ws := subject.Record.ID
 	row := req.Msg.GetRow()
-	if _, ok := s.deps.Feed.RevisableFinalResponse(ws, row); !ok {
+	if _, ok := s.deps.Feed.CardText(ws, row); !ok {
 		return answer(resp, s.refuse(subject.Log, rpc, resp, refusal{
-			Arm:    "not_a_final_response",
-			Reason: fmt.Sprintf("the row %q is not a settled final response of this workspace's root feed", row.GetValue()),
+			Arm:    "not_a_card",
+			Reason: fmt.Sprintf("the row %q is no card on any of this workspace's feeds", row.GetValue()),
 		}))
 	}
 	change := s.questions.toggle(ws, row)
@@ -109,7 +110,7 @@ func (s *server) AskAboutResponse(
 		s.publishQuestion(ws, nil)
 	}
 	s.questionChanged(subject.Log, ws, hostQuestionChangeOf(change))
-	subject.Log.Info(opResponseQuestion, "the question about a final response was toggled", dlog.Context{
+	subject.Log.Info(opResponseQuestion, "the question about a card was toggled", dlog.Context{
 		"row": row.GetValue(), "change": hostQuestionChangeName(hostQuestionChangeOf(change)),
 	})
 	resp.Result = &agentreplv1.AskAboutResponseResponse_Success{Success: success}
@@ -202,7 +203,7 @@ func (s *server) responseQuestionTopic(ws ids.WorkspaceID) *publish.Topic[*front
 // submitQuestion is SubmitPrompt's body for a user prompt sent while a
 // question about ROW stood: the question has been taken, so it ends here
 // whatever happens, and the prompt is forked into a new child workspace whose
-// first prompt quotes the response. No turn is minted in this workspace.
+// first prompt quotes the card. No turn is minted in this workspace.
 //
 // THE CHILD IS CREATED IN THE BACKGROUND under the prompt's idempotency key as
 // its op id (SubmitPromptQuestionForked), exactly as an op-carrying
@@ -219,14 +220,14 @@ func (s *server) submitQuestion(
 	ws := subject.Record.ID
 	s.publishQuestion(ws, nil)
 	s.questionChanged(subject.Log, ws, hostQuestionTaken)
-	quoted, ok := s.deps.Feed.BubbleText(ws, row)
+	card, ok := s.deps.Feed.CardText(ws, row)
 	if !ok {
-		// THE ASKED RESPONSE IS GONE (a rollback took it): the prompt is
+		// THE ASKED CARD IS GONE (a rollback took it): the prompt is
 		// refused rather than asked unquoted, which would answer a question
 		// about nothing the person can see.
 		return answer(resp, s.refuse(subject.Log, rpc, resp, submitRefusal(s.fill(refusal{
 			Arm:      "reference_response_unresolvable",
-			Reason:   fmt.Sprintf("the asked row %q is no longer a landed bubble of this workspace's root feed", row.GetValue()),
+			Reason:   fmt.Sprintf("the asked row %q is no longer a card on any of this workspace's feeds", row.GetValue()),
 			NotFound: true,
 		}))))
 	}
@@ -247,15 +248,30 @@ func (s *server) submitQuestion(
 		RepoDir:       repository.Dir,
 		ForkFrom:      &ws,
 		Parent:        &ws,
-		InitialPrompt: replyquote.QuestionText(quoted.Markdown, s.saidText(subject.Log, "said", req.GetSaid())),
+		InitialPrompt: questionPrompt(card, s.saidText(subject.Log, "said", req.GetSaid())),
 	}
 	bgCtx, cancel := s.backgroundContext(admitted)
 	ticket := s.startBackgroundCreate(bgCtx, cancel, release, spec, opID)
-	subject.Log.Info(opResponseQuestion, "the prompt asks about a final response; forking it into a child workspace", dlog.Context{
-		"row": row.GetValue(), "op_id": opID, "create_id": string(ticket.ID()),
+	subject.Log.Info(opResponseQuestion, "the prompt asks about a card; forking it into a child workspace", dlog.Context{
+		"row": row.GetValue(), "card": card.Arm, "op_id": opID, "create_id": string(ticket.ID()),
 	})
 	resp.Result = &agentreplv1.SubmitPromptResponse_Success{Success: &agentreplv1.SubmitPromptSuccess{
 		Outcome: &agentreplv1.SubmitPromptSuccess_QuestionForked{QuestionForked: &agentreplv1.SubmitPromptQuestionForked{Row: row, OpId: opID}},
 	}}
 	return connect.NewResponse(resp), nil
+}
+
+// questionPrompt is the forked child's first prompt for a question about
+// CARD, asked in WORDS: a response's and a prompt's markdown under their own
+// preambles, and every other card's row as JSON under its kind's.
+func questionPrompt(card feed.CardText, words string) string {
+	switch card.Kind {
+	case feed.CardResponse:
+		return replyquote.QuestionText(card.Text, words)
+	case feed.CardPrompt:
+		return replyquote.PromptQuestionText(card.Text, words)
+	case feed.CardRow:
+		return replyquote.CardQuestionText(card.Arm, card.Text, words)
+	}
+	panic(fmt.Sprintf("questionPrompt: feed.CardKind %d is no card kind", card.Kind))
 }
