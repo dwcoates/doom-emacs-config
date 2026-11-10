@@ -1375,3 +1375,4 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 - 2026-11-10 intake-workspaces (landed in queue bypass mode): The intake helper's new tests arrange the login's model catalog and expect the records the store and the refusal write
 - 2026-11-10 merge-queue-stall-triage (landed in queue bypass mode): A cold gate dropped by a stop, a reaped shim or a replacement shim retires from the footer, sidebar and topbar, so a queue-bypass switch no longer leaves the new session drawn as cold
 - 2026-11-10 merge-queue-stall-triage (landed in queue bypass mode): A queue-bypass workspace keeps both its conversations warm in tandem: each is timed from its own cache clock, and the parked one is kept through a keep-alive on a query of its own
+- 2026-11-10 merge-queue-stall-triage (landed in queue bypass mode): Todo row: LayoutVersion is kept by hand beside the migration list
