@@ -348,24 +348,25 @@ func (w *Watcher) advance(ctx context.Context, sub wsm.PullRequestSubscription, 
 	}
 }
 
-// recordFailure records a failed read for every subscription to PR, and owes
-// the subscribers whose failing stretch it began one sentence saying so.
+// recordFailure records a failed read for every subscription to PR.
 func (w *Watcher) recordFailure(ctx context.Context, pr wsm.PullRequestKey, err error, fields dlog.Context) {
 	w.recordReadFailure(ctx, opPoll, "pull request", err, fields,
 		func(f wsm.PullRequestFailure) ([]ids.WorkspaceID, error) {
 			return w.deps.Store.RecordPullRequestReadFailure(ctx, pr, f)
-		},
-		func(subscriber ids.WorkspaceID, sentences []string) error {
-			return w.deps.Store.OwePullRequestNotice(ctx, subscriber, pr, sentences)
 		})
 }
 
 // recordReadFailure records a failed read of a SUBJECT (`pull request`,
-// `merge queue`) through RECORD for every subscription to it, and owes each
-// subscriber whose failing stretch the read began one sentence saying so,
-// through OWE.
+// `merge queue`) through RECORD for every subscription to it.
+//
+// A READ THE DAEMON COULD NOT MAKE IS TOLD TO NO WORKSPACE (owner ruling,
+// 2026-11-10). It is no change of the pull request or the queue, only of the
+// daemon's own reach, so it is the daemon's record and the subscription's
+// health, never a notice: telling it woke every subscriber on each outage
+// with nothing to act on, and the noise had subscribers end their
+// subscriptions (2026-11-05), which then missed a review that mattered.
 func (w *Watcher) recordReadFailure(ctx context.Context, op, subject string, err error, fields dlog.Context,
-	record func(wsm.PullRequestFailure) ([]ids.WorkspaceID, error), owe func(ids.WorkspaceID, []string) error) {
+	record func(wsm.PullRequestFailure) ([]ids.WorkspaceID, error)) {
 	f := failureOf(err, w.deps.Clock.Now())
 	began, rerr := record(f)
 	if rerr != nil {
@@ -373,12 +374,7 @@ func (w *Watcher) recordReadFailure(ctx context.Context, op, subject string, err
 		return
 	}
 	// The leaf recorded a GitHub failure itself; this records what it cost.
-	w.deps.Log.Info(op, "the "+subject+" could not be read; its subscriptions are failing", dlog.Merge(fields, dlog.Context{"kind": string(f.Kind), "began": len(began), "cause": err.Error()}))
-	for _, subscriber := range began {
-		if err := owe(subscriber, []string{failureSentence(f, subject)}); err != nil {
-			w.deps.Log.Error(op, "could not owe the subscriber the failure's notice", dlog.WithCause(dlog.Merge(fields, dlog.Context{"subscriber": string(subscriber)}), err))
-		}
-	}
+	w.deps.Log.Info(op, "the "+subject+" could not be read; its subscriptions are failing, and no subscriber is told", dlog.Merge(fields, dlog.Context{"kind": string(f.Kind), "began": len(began), "cause": err.Error()}))
 }
 
 // failureOf is a read's error as the store records it.

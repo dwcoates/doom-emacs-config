@@ -3,11 +3,8 @@ package prwatch
 import (
 	"strings"
 	"testing"
-	"time"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
-
-	"agent-repld/internal/wsm"
 )
 
 func check(name, conclusion string) *agentreplv1.PullRequestActivity {
@@ -69,29 +66,6 @@ func TestUntrustedTextCannotCloseItsFence(t *testing.T) {
 	// Assert
 	if !strings.HasPrefix(got, "~~~~~untrusted\n") || !strings.HasSuffix(got, "\n~~~~~") {
 		t.Fatalf("untrusted = %q, want a fence longer than any in the text", got)
-	}
-}
-
-func TestFailureSentenceSaysWhatTheUserCanDo(t *testing.T) {
-	tests := []struct {
-		f    wsm.PullRequestFailure
-		want string
-	}{
-		{f: wsm.PullRequestFailure{Kind: wsm.PullRequestFailureUnauthorized}, want: "`gh auth login`"},
-		{f: wsm.PullRequestFailure{Kind: wsm.PullRequestFailureNotFound}, want: "does not exist"},
-		{f: wsm.PullRequestFailure{Kind: wsm.PullRequestFailureRateLimited, ResetsAt: t0.Add(time.Hour)}, want: "2026-10-30T13:00:00Z"},
-		{f: wsm.PullRequestFailure{Kind: wsm.PullRequestFailureUnreachable, Detail: "dns"}, want: "failing: dns."},
-	}
-	for _, tt := range tests {
-		t.Run(string(tt.f.Kind), func(t *testing.T) {
-			// Act
-			got := failureSentence(tt.f, "merge queue")
-
-			// Assert
-			if !strings.Contains(got, tt.want) || !strings.Contains(got, "this merge queue") {
-				t.Fatalf("failureSentence = %q, want it to say %q of this merge queue", got, tt.want)
-			}
-		})
 	}
 }
 

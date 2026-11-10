@@ -164,7 +164,7 @@ func TestAnUnmovedQueueTellsNothing(t *testing.T) {
 	}
 }
 
-func TestAQueueThatCannotBeReadIsToldFailingOnce(t *testing.T) {
+func TestAQueueThatCannotBeReadIsToldToNobody(t *testing.T) {
 	// Arrange
 	r := newRig(t)
 	g := r.withGQL()
@@ -177,14 +177,13 @@ func TestAQueueThatCannotBeReadIsToldFailingOnce(t *testing.T) {
 	r.tick()
 
 	// Assert
-	told := r.told()
-	if len(told) != 1 || !strings.Contains(told[0], "can no longer read this merge queue") {
-		t.Fatalf("told = %v, want the failure once", told)
+	if told := r.told(); len(told) != 0 {
+		t.Fatalf("told = %v, want nothing: a failed read is no change of the queue", told)
 	}
 	if f := r.queueSub(t).Failing; f == nil || f.Kind != wsm.PullRequestFailureUnauthorized {
 		t.Fatalf("failing = %+v, want unauthorized", f)
 	}
-	if _, ok := dlog.FindRecord(r.log.Records(), dlog.RecordQuery{Level: "info", Operation: opQueuePoll, Message: "the merge queue could not be read; its subscriptions are failing"}); !ok {
+	if _, ok := dlog.FindRecord(r.log.Records(), dlog.RecordQuery{Level: "info", Operation: opQueuePoll, Message: "the merge queue could not be read; its subscriptions are failing, and no subscriber is told"}); !ok {
 		t.Fatalf("no failure record: %+v", r.log.Records())
 	}
 }
