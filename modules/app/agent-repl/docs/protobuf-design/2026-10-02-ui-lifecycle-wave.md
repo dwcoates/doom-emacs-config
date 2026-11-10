@@ -1,7 +1,6 @@
 # UI and lifecycle wave (2026-10-02)
 
-The protobuf decisions behind the owner's 2026-10-01 agent-repl feature list
-(`docs/session-instructions/astra-2026-10-01-verbatim.md` at the repo root).
+The protobuf decisions behind the owner's 2026-10-01 agent-repl feature list.
 The `.proto` files are the contract; this file records what changed, why, and
 what an implementer must know that the schema does not say.
 
