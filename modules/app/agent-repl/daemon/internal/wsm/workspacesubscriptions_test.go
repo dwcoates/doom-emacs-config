@@ -226,26 +226,26 @@ func TestForgettingEitherWorkspaceEndsTheSubscription(t *testing.T) {
 	}
 }
 
-func TestAParentsImplicitFollowingExcludesTurnEnds(t *testing.T) {
+func TestAParentsImplicitFollowingIsOneUpdate(t *testing.T) {
 	tests := []struct {
-		name  string
-		event WorkspaceEvent
-		want  bool
+		name    string
+		oneShot bool
+		updated bool
+		want    WorkspaceEvents
 	}{
-		{name: "turn ends are explicit only", event: WorkspaceEventTurnEnded, want: false},
-		{name: "turn starts are explicit only", event: WorkspaceEventTurnStarted, want: false},
-		{name: "questions are followed", event: WorkspaceEventNeedsInput, want: true},
-		{name: "a landing is followed", event: WorkspaceEventLanded, want: true},
-		{name: "a close is followed", event: WorkspaceEventClosed, want: true},
+		{name: "a child's conclusion is its first turn end", want: NewWorkspaceEvents(WorkspaceEventTurnEnded)},
+		{name: "a one-shot child's conclusion is its landing", oneShot: true, want: NewWorkspaceEvents(WorkspaceEventLanded)},
+		{name: "a spent update follows nothing", updated: true, want: 0},
+		{name: "a one-shot child's spent update follows nothing", oneShot: true, updated: true, want: 0},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Act
-			got := ParentFollowedEvents.Has(tt.event)
+			got := ParentFollowedEvents(tt.oneShot, tt.updated)
 
 			// Assert
 			if got != tt.want {
-				t.Errorf("ParentFollowedEvents.Has(%s) = %v, want %v", tt.event, got, tt.want)
+				t.Errorf("ParentFollowedEvents(%v, %v) = %b, want %b", tt.oneShot, tt.updated, got, tt.want)
 			}
 		})
 	}
@@ -258,32 +258,29 @@ func TestAChildsOpenParentFollowsItWithoutSubscribing(t *testing.T) {
 		arrange func(t *testing.T, s *store, f parentFamily)
 		want    func(f parentFamily) []WorkspaceSubscription
 	}{
-		{name: "an open parent follows its child",
+		{name: "an open parent is given its child's one update",
 			arrange: func(t *testing.T, s *store, f parentFamily) { f.retarget(t, s, "child", "parent") },
 			want: func(f parentFamily) []WorkspaceSubscription {
-				return []WorkspaceSubscription{{Subscriber: *f.id("parent"), Followed: *f.id("child"), Events: ParentFollowedEvents, ParentFollows: true}}
+				return []WorkspaceSubscription{{Subscriber: *f.id("parent"), Followed: *f.id("child"), Events: NewWorkspaceEvents(WorkspaceEventTurnEnded), ParentFollows: true}}
 			}},
-		{name: "a parent's explicit turn-end subscription widens its following",
+		{name: "a parent whose update is spent follows nothing",
 			arrange: func(t *testing.T, s *store, f parentFamily) {
 				f.retarget(t, s, "child", "parent")
-				if _, err := s.SubscribeWorkspace(context.Background(), following(*f.id("parent"), *f.id("child"), WorkspaceEventTurnEnded)); err != nil {
+				if err := s.MarkParentUpdated(context.Background(), *f.id("child"), instant); err != nil {
+					t.Fatalf("MarkParentUpdated: %v", err)
+				}
+			},
+			want: func(parentFamily) []WorkspaceSubscription { return nil }},
+		{name: "a parent's explicit subscription follows continually, in place of the one update",
+			arrange: func(t *testing.T, s *store, f parentFamily) {
+				f.retarget(t, s, "child", "parent")
+				if _, err := s.SubscribeWorkspace(context.Background(), following(*f.id("parent"), *f.id("child"), WorkspaceEventTurnEnded, WorkspaceEventNeedsInput)); err != nil {
 					t.Fatalf("SubscribeWorkspace: %v", err)
 				}
 			},
 			want: func(f parentFamily) []WorkspaceSubscription {
-				return []WorkspaceSubscription{{Subscriber: *f.id("parent"), Followed: *f.id("child"), SubscribedAt: instant, ParentFollows: true,
-					Events: ParentFollowedEvents | NewWorkspaceEvents(WorkspaceEventTurnEnded)}}
-			}},
-		{name: "a parent's own subscription is widened",
-			arrange: func(t *testing.T, s *store, f parentFamily) {
-				f.retarget(t, s, "child", "parent")
-				if _, err := s.SubscribeWorkspace(context.Background(), following(*f.id("parent"), *f.id("child"), WorkspaceEventTurnStarted)); err != nil {
-					t.Fatalf("SubscribeWorkspace: %v", err)
-				}
-			},
-			want: func(f parentFamily) []WorkspaceSubscription {
-				return []WorkspaceSubscription{{Subscriber: *f.id("parent"), Followed: *f.id("child"), SubscribedAt: instant, ParentFollows: true,
-					Events: ParentFollowedEvents | NewWorkspaceEvents(WorkspaceEventTurnStarted)}}
+				return []WorkspaceSubscription{{Subscriber: *f.id("parent"), Followed: *f.id("child"), SubscribedAt: instant,
+					Events: NewWorkspaceEvents(WorkspaceEventTurnEnded, WorkspaceEventNeedsInput)}}
 			}},
 		{name: "a closed parent follows nothing",
 			arrange: func(t *testing.T, s *store, f parentFamily) {

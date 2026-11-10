@@ -628,6 +628,9 @@ type DB interface {
 	// SetLastKeepalive records when a workspace's keep-alive was last sent
 	// (lastkeepalive.go).
 	SetLastKeepalive(ctx context.Context, id WorkspaceID, at time.Time) error
+	// MarkParentUpdated records that a child's open parent was given the
+	// child's one update (ParentFollowedEvents).
+	MarkParentUpdated(ctx context.Context, child WorkspaceID, at time.Time) error
 	// MarkCacheCold records a workspace's prompt cache as cold at its current
 	// turn clock, answering the clock it recorded (cachecold.go).
 	MarkCacheCold(ctx context.Context, id WorkspaceID) (*time.Time, error)

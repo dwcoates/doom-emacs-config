@@ -31,6 +31,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -59,6 +60,9 @@ const Origin = conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_NOTICE
 // Subscribers reads a followed workspace's subscriptions.
 type Subscribers interface {
 	WorkspaceSubscribers(ctx context.Context, followed wsm.WorkspaceID) ([]wsm.WorkspaceSubscription, error)
+	// MarkParentUpdated records a child's one update to its parent told, so
+	// the parent follows nothing of it after (wsm.ParentFollowedEvents).
+	MarkParentUpdated(ctx context.Context, child wsm.WorkspaceID, at time.Time) error
 }
 
 // Untold reads and records each subscriber's untold notice per followed
@@ -83,7 +87,9 @@ type Deps struct {
 	Briefs merge.BriefLoader
 	// MintKey mints an idempotency key for one submission.
 	MintKey func(prefix string) (string, error)
-	Log     dlog.Surfaces
+	// Now stamps a parent's one update told.
+	Now func() time.Time
+	Log dlog.Surfaces
 }
 
 // edge is one lifecycle edge of a followed workspace.
@@ -192,6 +198,14 @@ func (s *Service) notify(ctx context.Context, prompts prompthandler.Submitter, s
 		log.Error(op, failure, dlog.WithCause(fields, err))
 	} else {
 		log.Info(op, "told a subscriber about the followed workspace's edge", dlog.Merge(fields, dlog.Context{"turn": string(turn)}))
+		// A PARENT'S ONE UPDATE IS SPENT ONCE TOLD: it follows nothing of the
+		// child after this. A notice that failed is not spent, so the next
+		// conclusion is told instead.
+		if sub.ParentFollows {
+			if err := s.deps.Subscribers.MarkParentUpdated(ctx, e.ws, s.deps.Now()); err != nil {
+				log.Error(op, "the parent was told its child's one update but it could not be recorded as spent; the child's next conclusion is told too", dlog.WithCause(fields, err))
+			}
+		}
 	}
 	untold := wsm.UntoldWorkspaceNotice{Subscriber: subscriber, Followed: e.ws, Turn: turn, Sentences: sentences}
 	if err := s.deps.Untold.RecordUntoldWorkspaceNotice(ctx, untold); err != nil {
@@ -241,8 +255,8 @@ func NoticeValues(event wsm.WorkspaceEvent, sentences []string, status *agentrep
 	why := "A workspace you subscribed to changed."
 	stop := "Act on it only as far as the work you subscribed for calls for, and otherwise carry on with whatever you were doing. To stop these notices, unsubscribe through `agent-repld workspace unsubscribe`."
 	if parentFollows {
-		why = "Your child workspace `" + name + "` changed; as its parent you follow it without subscribing."
-		stop = "Coordinate the child as its work calls for (answer it with `agent-repld workspace prompt`, review and land or close it when it is done), and otherwise carry on with whatever you were doing. These notices end when the child closes or stops being this workspace's child."
+		why = "This is your child workspace `" + name + "`'s one update to you, its conclusion; its later turns, questions and answers are not reported to you."
+		stop = "Act on the conclusion as your own work calls for, and otherwise carry on with whatever you were doing. Only if you drive the child's work turn by turn, follow it continually with `agent-repld workspace subscribe " + name + " -events turn_ended,needs_input`."
 	}
 	return map[string]string{
 		"label":  "workspace `" + name + "`: " + strings.ReplaceAll(event.String(), "_", " "),
