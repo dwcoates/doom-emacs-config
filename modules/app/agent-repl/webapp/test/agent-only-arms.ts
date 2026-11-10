@@ -14,7 +14,6 @@
 export const AGENT_ONLY_REFUSAL_ARMS = {
   createWorkspace: new Set<string>([
     "asyncMergeUnknownBranch",
-    "asyncMergeBranchOwned",
     "asyncMergeUnknownSubagent",
     "asyncMergeUnknownMaker",
     "asyncMergeContextNotMaker",

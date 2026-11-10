@@ -317,8 +317,16 @@ func (o *orchestrator) checkSource(ctx context.Context, requester wsm.Workspace,
 // checkAsync refuses an async request the daemon cannot run as asked, and
 // answers its source carrying the request's landing effects:
 //
-//   - A BRANCH A REGISTERED WORKSPACE OWNS is that workspace's to land, the
-//     requester's own included (async_merge_branch_owned).
+//   - WHO OWNS THE BRANCH IS NEVER A GROUND FOR REFUSAL (owner ruling,
+//     2026-11-10: "a workspace should always be able to add itself to the
+//     merge queue regardless of who owns it"). Two merges can never work one
+//     git branch, and that needs no refusal: a queue entry is keyed by its
+//     workspace (merge_queue's primary key), every merge runs on its own
+//     workspace's branch, an async merge's being one its merge workspace
+//     claims afresh (ClaimMergeName), and git checks a branch out in at most
+//     one worktree. A branch landed twice is not
+//     corrupted: the second merge replays it onto a target that already
+//     carries its commits, as any rebase does.
 //   - THE MAKER must be registered in the requester's repository
 //     (async_merge_unknown_maker).
 //   - THE CLOSE-AFTER WORKSPACE must be registered, open, in the requester's
@@ -331,20 +339,6 @@ func (o *orchestrator) checkSource(ctx context.Context, requester wsm.Workspace,
 //     main worktree: those are never removed by a merge's cleanup.
 func (o *orchestrator) checkAsync(ctx context.Context, requester wsm.Workspace, source wsm.MergeSource, run *DetachedRun) (wsm.MergeSource, error) {
 	ws := requester.ID
-	// A BRANCH A WORKSPACE OWNS LANDS ONLY THROUGH THAT WORKSPACE, so a branch
-	// any registered workspace of the repository is on -- the requester's own
-	// included -- is refused here.
-	workspaces, err := o.deps.DB.ListWorkspaces(ctx)
-	if err != nil {
-		return wsm.MergeSource{}, fmt.Errorf("merge: reading the registry to find who owns branch %q: %w", source.Branch, err)
-	}
-	for _, other := range workspaces {
-		if other.Repo == requester.Repo && other.Branch == source.Branch {
-			refusal := refuse(ArmBranchOwned, ws, "branch %q is the workspace %s's own, which lands it itself", source.Branch, other.ID)
-			refusal.Fields = map[string]any{"branch": source.Branch, "owner": other.Ref()}
-			return wsm.MergeSource{}, refusal
-		}
-	}
 	maker, err := o.deps.DB.Workspace(ctx, run.Maker)
 	unknownMaker := func(format string) error {
 		refusal := refuse(ArmUnknownMaker, ws, format, run.Maker)

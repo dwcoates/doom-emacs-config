@@ -45,7 +45,10 @@ offered.
    anywhere else is that workspace's responsibility. A branch cut from main
    lands only on main. Consequences: the branch source must distinguish main,
    a workspace's branch, and a branch no workspace owns. Reopens: the async
-   merge's "any named branch onto the requester's target".
+   merge's "any named branch onto the requester's target". SUPERSEDED for the
+   async merge (owner ruling, 2026-11-10): its source is any named branch,
+   whichever workspace owns it, and ownership refuses no queueing
+   (`async_merge_branch_owned` is retired).
 4. WHOEVER HOLDS THE WORK'S CONTEXT LANDS IT. Forked from the branch's owner,
    the new workspace lands itself; otherwise the owner arbitrates and lands,
    told by a required notice (with a daemon addendum), reopened if closed.
@@ -117,7 +120,7 @@ All on branch `contract/agent-repld-api`, 2026-10-17.
    daemon notices to workspaces branched from or forked from, on create, land,
    and close without landing. No request field: the daemon derives them.
 6. ASYNC MERGE MOVES INTO CREATEWORKSPACE as a third form,
-   `CreateWorkspaceAsyncMerge`. Its source is a branch NO workspace owns plus
+   `CreateWorkspaceAsyncMerge`. Its source is a named branch (since 2026-11-10 any branch, whoever owns it) plus
    its maker (`subagent{agent_id}`, verified against the transcript on disk,
    or `workspace{ref}` for a branch an agent cut by hand), its target is
    `primary` or `maker`, and its context must fork the maker. Answered with a
@@ -417,7 +420,7 @@ invariant), how common it is, and example situations.
 | 1 | self | main | main | yes | common | tangential fix landed while work goes on; parallel subtask; trying a second approach; handing the work off with its context |
 | 2 | self | self | self | yes | common | splitting a feature still in progress into pieces that land back into it; addressing review findings on the feature before it lands on main |
 | 3 | self | self | main | NO: a workspace's branch lands only into that workspace (owner, 2026-10-16) | never | none |
-| 4 | self | a branch no workspace owns (e.g. a subagent's) | main | yes; a branch an open workspace owns may not be the source here, since it lands only into that workspace (owner, 2026-10-16) | common | landing a subagent's finished branch; combining several branches into one landing; rebasing an old branch onto main and landing only the fix; finishing a nearly done branch and landing it |
+| 4 | self | a branch no workspace owns (e.g. a subagent's) | main | yes; since 2026-11-10 (owner ruling) any branch may be the source, whichever workspace owns it, superseding the 2026-10-16 refusal of an owned branch | common | landing a subagent's finished branch; combining several branches into one landing; rebasing an old branch onto main and landing only the fix; finishing a nearly done branch and landing it |
 | 5 | self | other (X) | the same other (X) | yes, but never with "land when done": the request must carry a plain-English NOTICE, which the daemon forwards to X with a guaranteed addendum saying that landing the work into X is X's responsibility; X lands it (`workspace merge <child>`); a closed X is reopened automatically first; the created workspace is told to communicate with X (owner, 2026-10-16) | rare | sending a fix the requester found into X's unlanded branch; handing X a piece it needs; unblocking X on a problem the requester already understands |
 | 5b | self | other (B) | a different other (C) | NO: not for lack of any use, but its value is lower than the risk of encouraging workspaces to conflate their responsibilities through cross talk between unrelated workspaces (owner, 2026-10-16). A judgment for this cell only, not a general rule. | never | none |
 | O1 | other (Y) | main | main | yes: to use Y's context to fix a problem on main, fork Y and branch from main (owner, 2026-10-16) | uncommon | one workspace finds a problem another workspace is already looking at, and fires off a one-shot forked from that workspace, from main onto main |
@@ -438,7 +441,9 @@ today, and what it lacks:
 
 - Branch ownership: derivable from the workspace registry (each workspace row
   records its branch). A closed workspace still owns its branch (it is reopened
-  when needed); a forgotten one does not.
+  when needed); a forgotten one does not. Since 2026-11-10 ownership gates
+  no async merge: a merge runs on its own merge workspace's branch, and the
+  queue holds one entry per workspace, so no two merges work one branch.
 - An unowned branch: resolvable as a git ref; its worktree may or may not still
   exist, which does not matter since a create always cuts from the branch tip.
 - No subagent context is ever forked (owner, 2026-10-16): U1 forks the workspace

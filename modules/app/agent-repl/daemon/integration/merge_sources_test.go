@@ -126,13 +126,6 @@ func TestAnAsyncMergeIsRefusedWhatItCannotRunAsAsked(t *testing.T) {
 		want func(*agentreplv1.CreateWorkspaceError) bool
 	}{
 		{
-			name: "the branch the requester owns",
-			req: func(s *sourcedRepo) *agentreplv1.CreateWorkspaceRequest {
-				return s.asyncRequest("own-merge", mergeBranchOf(t, s.f.ws))
-			},
-			want: func(e *agentreplv1.CreateWorkspaceError) bool { return e.GetAsyncMergeBranchOwned() != nil },
-		},
-		{
 			name: "a close-after that names the requester",
 			req: func(s *sourcedRepo) *agentreplv1.CreateWorkspaceRequest {
 				s.repo.AddBranch("agent-fix")

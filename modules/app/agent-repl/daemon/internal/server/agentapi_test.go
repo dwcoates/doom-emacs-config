@@ -232,12 +232,6 @@ func TestAnAsyncMergeIsRefused(t *testing.T) {
 		{name: "a requester whose own merge runs", arrange: func(h *harness, _ *agentreplv1.CreateWorkspaceRequest) {
 			h.Merge.enqueueErr = &merge.RefusalError{Arm: merge.ArmAlreadyMerging, Reason: "merging"}
 		}, got: func(e *agentreplv1.CreateWorkspaceError) bool { return e.GetAsyncMergeRequesterMerging() != nil }},
-		{name: "a branch a workspace owns", arrange: func(h *harness, _ *agentreplv1.CreateWorkspaceRequest) {
-			h.Merge.enqueueErr = &merge.RefusalError{Arm: merge.ArmBranchOwned, Reason: "owned",
-				Fields: map[string]any{"branch": "agent-1/fix", "owner": &workspacev1.WorkspaceRef{Id: "ws-owner"}}}
-		}, got: func(e *agentreplv1.CreateWorkspaceError) bool {
-			return e.GetAsyncMergeBranchOwned().GetOwner().GetId() == "ws-owner"
-		}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
