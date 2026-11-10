@@ -501,13 +501,22 @@ describe("the when-column", () => {
     expect(() => drawRosterRow(bad, sidebarContext(), "R")).toThrow(MalformedView);
   });
 
-  it("draws a settled merge as a bare relative age", () => {
+  it("draws a settled merge as the time since it, ending in ago", () => {
     const drawn = drawRosterRow(
       row({ id: "ws-1", when: { case: "merged", value: { atMs: BigInt(NOW - 3_600_000) } } }),
       sidebarContext(),
       "R",
     );
-    expect(drawn.querySelector(".when")?.textContent).toBe("1h");
+    expect(drawn.querySelector(".when")?.textContent).toBe("1h ago");
+  });
+
+  it("draws a merge from 34 seconds ago as 34s ago", () => {
+    const drawn = drawRosterRow(
+      row({ id: "ws-1", when: { case: "merged", value: { atMs: BigInt(NOW - 34_000) } } }),
+      sidebarContext(),
+      "R",
+    );
+    expect(drawn.querySelector(".when")?.textContent).toBe("34s ago");
   });
 
   it("draws a hidden workspace's age from its hide", () => {

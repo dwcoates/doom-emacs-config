@@ -1858,7 +1858,7 @@ describe("the Merge Queue section's queues", () => {
     const name = queueRegion(drawn).querySelector<HTMLElement>(".sb-mq-head .sb-mq-name")!;
     const group = queueRegion(drawn).querySelector<HTMLElement>(".merged-group-head")!;
     expect(inRail(drawn, () => [cascadedValue(name, "font-size"), cascadedValue(group, "font-size")])).toEqual([
-      "calc(var(--merged-group-head-font-size) * 0.96)",
+      "var(--mq-name-font-size)",
       "var(--merged-group-head-font-size)",
     ]);
   });
@@ -1868,8 +1868,8 @@ describe("the Merge Queue section's queues", () => {
     const head = queueRegion(drawn).querySelector<HTMLElement>(".sb-mq-head .sb-mq-name")!;
     const waiting = queueRegion(drawn).querySelector<HTMLElement>(".sb-mq-waiting .sb-mq-name")!;
     expect(inRail(drawn, () => [cascadedValue(waiting, "font-size"), cascadedValue(head, "font-size")])).toEqual([
-      "calc(var(--merged-group-head-font-size) * 0.96)",
-      "calc(var(--merged-group-head-font-size) * 0.96)",
+      "var(--mq-name-font-size)",
+      "var(--mq-name-font-size)",
     ]);
   });
 
@@ -2614,7 +2614,7 @@ describe("the recently merged rows' stylesheet", () => {
     const waiting = drawn.querySelector<HTMLElement>(".sb-mq-waiting .sb-mq-name")!;
     expect(
       inRail(drawn, () => [cascadedValue(name, "font-size"), cascadedValue(waiting, "font-size"), cascadedValue(name, "color")]),
-    ).toEqual(["calc(var(--merged-group-head-font-size) * 0.96)", "calc(var(--merged-group-head-font-size) * 0.96)", "var(--name-rest)"]);
+    ).toEqual(["var(--mq-name-font-size)", "var(--mq-name-font-size)", "var(--name-rest)"]);
   });
 
   it("keeps the merged rows' grey as the name's rest ink", () => {
