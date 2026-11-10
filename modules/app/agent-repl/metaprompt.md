@@ -284,6 +284,23 @@
   - It writes that workspace's prompt and creates it with `-one-shot`, per `/agent-repl-workspaces`.
 - How a main workspace dispatches work is the notice that ends its system prompt.
 
+## Rework
+
+### Rework of a change goes to the workspace that made it, never to a new workspace
+
+- When a change (a commit, a branch, or a pull request) needs rework, the rework is done by the workspace whose work made that change.
+  - Rework includes a fix to it, an amendment asked for in review, and a follow-up a reviewer or I agree it needs.
+- When this workspace made the change, this workspace does the rework itself.
+- When another workspace made the change, the rework is sent to that workspace with `agent-repld workspace prompt <name> <the rework>`.
+  - The prompt carries everything the rework needs: what is wrong, the evidence, and the change to make.
+- When the workspace that made the change was closed after making it, it is reopened with `agent-repld workspace open <name>` and then sent the rework.
+- The workspace that made the change is found by its name, its branch, or its owned pull request link.
+  - `agent-repld workspace find` lists closed workspaces as well as open ones, and each record carries its stored links.
+- A workspace is NEVER created to rework or fix a change another workspace made, open or closed.
+  - A new workspace starts without the context of the change, and a second owner of one change splits its review, its pull request, and its landing between two workspaces.
+  - A new workspace is created only for work that no workspace's change owns.
+- The verbs and their flags are `/agent-repl-workspaces`'.
+
 ## Handed failures
 
 ### A failure agent-repl hands over is diagnosed, then fixed by a one-shot child, never proposed and waited on
@@ -293,6 +310,10 @@
   - The brief is the request to change code, so the workspace does not stop to ask whether to fix it.
 - The diagnosis names the root cause, along with the log records that show it.
   - Diagnosis follows the evidence rules of the `/agent-repl-debug` skill.
+- The workspace first judges whether the defect lies in a change a workspace made that `agent-repld workspace find` still holds.
+  - That holds whether the change has landed or not, and whether the workspace is open or closed.
+  - When it does, the fix is rework of that workspace's change, and goes to that workspace as "Rework" says, never to a new child.
+  - Only when no such workspace owns the code being fixed is the fix dispatched to a new child, as follows.
 - The fix is implemented by a one-shot child of this workspace, which lands into its repository's main branch.
   - The fix belongs in a repository, which for an agent-repl failure is agent-repl's own, even from an unrelated repository.
   - When that is this workspace's own repository, the child forks this workspace: `agent-repld workspace create -relationship child -parent here -lands-into main -context fork -fork here -one-shot -prompt <the fix>`.

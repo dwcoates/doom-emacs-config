@@ -113,12 +113,15 @@ one repository, except the move below):
 | a piece of another workspace W's work, landing into W, with W's whole context | `child -parent W` | W (default) | `fork -fork W` | common |
 | a fix on main that needs another workspace Y's context | `peer` | main | `fork -fork Y` | uncommon |
 | a truly tangential bug, or a review that must not be biased by this context | `peer` | main | `fresh` | situational |
-| a fix sent into another workspace X's unlanded branch | `child -parent here` | `-lands-into X` | `fork -fork here` | rare |
 | fresh work on W's unlanded branch | `child -parent W` | W (default) | `fresh` | situational |
 | a piece this workspace waits on and picks up from main | `child -parent here` | `-lands-into main` | `fork -fork here` or `fresh` | situational |
 | coordinated work in a different repository (`-repository DIR`) | `child -parent here` | its main (default) | `fresh` | situational |
 | separate work in a different repository | `peer` | its main | `fresh` | situational |
 
+- Rework or a fix to a change another workspace made is never a created
+  workspace; it is sent to that workspace with `workspace prompt`
+  (reopened with `workspace open` first if closed), per the metaprompt's
+  "Rework" section.
 - EVERY WORKSPACE LANDS ITSELF, whatever its relationship and context,
   one-shot or not: a child still nests under its parent and is followed by
   it, and its parent (or the user) may also land it with
@@ -765,7 +768,9 @@ creating workspaces there with `-repository DIR`.
   against yours. WS closes once its deploy succeeds.
   - A deploy remediation or escalation names no `-placement`: its finish
     lands directly, never in the queue, and its brief gives the command.
-- `workspace open WS` reopens a closed workspace.
+- `workspace open WS` reopens a closed workspace. Reopening is also how rework
+  reaches a closed workspace whose change needs it (the metaprompt's "Rework"
+  section).
 - `workspace close WS` closes a workspace whose work is done or abandoned; its
   worktree stays. `close here` closes this workspace once the current turn
   ends, answering `closesWhenTurnEnds`. A close that would be refused (held
