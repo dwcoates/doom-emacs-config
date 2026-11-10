@@ -35,7 +35,7 @@ is loaded."
 (defconst +dwc/vterm-popup-rule
   '("\\.*doom:vterm\\.*"
     :actions (agent-repl-sibling-popup-display-fn)
-    :size 0.4 :side bottom :select t :quit nil :ttl nil)
+    :size 0.2 :side bottom :select t :quit nil :ttl nil)
   "Arguments for `set-popup-rule!' placing the vterm popup at the bottom.
 `:actions' is the agent-repl sibling-popup display function, which opens
 the popup under the composer, never under the sidebar, when the agent

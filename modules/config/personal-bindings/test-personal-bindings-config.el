@@ -194,3 +194,10 @@ in order as (NAME . ARGS)."
     ;; Assert
     (should (equal (plist-get plist :actions)
                    '(agent-repl-sibling-popup-display-fn)))))
+
+(ert-deftest test-personal-bindings-vterm-popup-rule-takes-a-fifth-of-the-frame ()
+  "The vterm popup rule sizes the terminal at 0.2 of the frame height."
+  ;; Arrange / Act
+  (let ((plist (cdr +dwc/vterm-popup-rule)))
+    ;; Assert
+    (should (equal (plist-get plist :size) 0.2))))
