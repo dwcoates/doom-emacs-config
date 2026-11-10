@@ -57,8 +57,9 @@ const (
 // resumed last.
 //
 // THE SWITCH SWAPS TWO CONVERSATIONS. The one the workspace steps out of is
-// parked (wsm.SetParkedConversation) and the parked one is bound, through the
-// same stop, record, feed reset and start a BindWorkspaceSession runs. A
+// parked with its cache clock (wsm.SwapParkedConversation) and the parked one
+// is bound with its own, through the same stop, record, feed reset and start
+// a BindWorkspaceSession runs. A
 // workspace with nothing parked yet is taking the mode for the first time:
 // its bypass conversation is a FORK of the queue conversation it steps out of
 // (owner request, 2026-11-10), so the bypass session continues the
@@ -157,7 +158,7 @@ func (v *verbs) switchConversation(ctx context.Context, log dlog.Logger, rpc str
 	// THE CONVERSATION STEPPED OUT OF IS PARKED BEFORE THE SWAP STOPS IT: the
 	// record names it until the swap rewrites the binding.
 	if current != "" {
-		if err := v.deps.DB.SetParkedConversation(ctx, ws, current); err != nil {
+		if err := v.deps.DB.SwapParkedConversation(ctx, ws, current, v.now()); err != nil {
 			return refuseWith(log, rpc, ArmSwitchFailed, fmt.Sprintf("the conversation stepped out of could not be kept: %s", err.Error()), false,
 				map[string]any{"detail": "the conversation stepped out of could not be kept: " + err.Error()})
 		}
@@ -180,6 +181,9 @@ func (v *verbs) switchConversation(ctx context.Context, log dlog.Logger, rpc str
 		}); err != nil {
 		return err
 	}
+	// BOTH CONVERSATIONS ARE KEPT WARM IN TANDEM (owner request, 2026-11-10):
+	// the keeper times each one's beat from its own clock, swapped above.
+	v.deps.CacheLapses.ConversationSwitched(ws)
 	log.Info(opQueueBypass, "switched the workspace's conversation", dlog.Context{"parked": current, "bound": parked, "own_fork_of": to.ownForkOf})
 	return nil
 }

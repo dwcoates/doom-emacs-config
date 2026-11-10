@@ -365,6 +365,32 @@ describe("validateSendKeepaliveRequest", () => {
       codeOf(() => validate.validateSendKeepaliveRequest(requests.sendKeepaliveRequest())),
     ).toBeUndefined();
   });
+
+  const agentProfile = () =>
+    create(shimv1.SessionProfileSchema, {
+      kind: { case: "agent", value: { standing: { kind: { case: "linkedWorkspace", value: {} } }, landing: { landing: { case: "throughQueue", value: {} } } } },
+    });
+
+  it("accepts a parked conversation with its profile", () => {
+    // Arrange
+    const request = create(shimv1.SendKeepaliveRequestSchema, {
+      parked: { vendorSessionId: "parked-1", profile: agentProfile() },
+    });
+
+    // Act, Assert
+    expect(codeOf(() => validate.validateSendKeepaliveRequest(request))).toBeUndefined();
+  });
+
+  it.each([
+    { name: "no conversation", parked: () => ({ vendorSessionId: "", profile: agentProfile() }) },
+    { name: "no profile", parked: () => ({ vendorSessionId: "parked-1" }) },
+  ])("refuses a parked conversation with $name", ({ parked }) => {
+    // Arrange
+    const request = create(shimv1.SendKeepaliveRequestSchema, { parked: parked() });
+
+    // Act, Assert
+    expect(codeOf(() => validate.validateSendKeepaliveRequest(request))).toBe(Code.InvalidArgument);
+  });
 });
 
 describe("validateRetryVendorErrorNowRequest", () => {

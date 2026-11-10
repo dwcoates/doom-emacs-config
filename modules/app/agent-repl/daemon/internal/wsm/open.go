@@ -27,7 +27,7 @@ import (
 //
 // A NEW VERSION IS A NEW ENTRY IN `migrations`. Bumping this constant alone
 // makes the daemon refuse every database the previous build wrote.
-const LayoutVersion = 114
+const LayoutVersion = 116
 
 // Option configures an open. Options exist so the logger can be supplied
 // without changing the two open functions' shape for callers that do not care.
@@ -108,7 +108,7 @@ type store struct {
 	commitMu  sync.Mutex
 	committed chan struct{}
 	path      string
-	log    dlog.Logger
+	log       dlog.Logger
 	// canonicalDir is dirpath.Canonical, the spelling the open's directory
 	// reconciliation compares each row against (dirspelling.go). Injectable
 	// so a test can model a case-folding volume on any host.

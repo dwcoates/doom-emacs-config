@@ -2560,11 +2560,7 @@ func (f *Fleet) sessionProfile(ctx context.Context, log dlog.Logger, ws ids.Work
 			log.Error(opBringUp, "the workspace's queue bypass standing could not be read; the session was not started", dlog.Context{"cause": err.Error()})
 			return nil, fmt.Errorf("start session for %q: read the queue bypass standing: %w", ws, err)
 		}
-		landing := &shimv1.SessionProfileAgentLanding{Landing: &shimv1.SessionProfileAgentLanding_ThroughQueue{ThroughQueue: &shimv1.SessionProfileAgentLandingThroughQueue{}}}
-		if bypass.Holds {
-			landing = &shimv1.SessionProfileAgentLanding{Landing: &shimv1.SessionProfileAgentLanding_BypassingQueue{BypassingQueue: &shimv1.SessionProfileAgentLandingBypassingQueue{}}}
-		}
-		return &shimv1.SessionProfile{Kind: &shimv1.SessionProfile_Agent{Agent: &shimv1.SessionProfileAgent{Standing: standing, Landing: landing}}}, nil
+		return agentProfile(standing, bypass.Holds), nil
 	}
 	text, err := f.deps.ChatSystemPrompt()
 	if err == nil && strings.TrimSpace(text) == "" {
@@ -2578,6 +2574,44 @@ func (f *Fleet) sessionProfile(ctx context.Context, log dlog.Logger, ws ids.Work
 	return &shimv1.SessionProfile{Kind: &shimv1.SessionProfile_Chat{Chat: &shimv1.SessionProfileChat{
 		SystemPrompt: &shimv1.SessionProfileChatSystemPrompt{Text: text},
 	}}}, nil
+}
+
+// agentProfile is an agent session's profile: STANDING, landing through the
+// merge queue, or straight on the main branch when BYPASSING. The one builder
+// every agent profile is composed with, so a session's start and its parked
+// conversation's keep-alive agree on the system prompt the cache is keyed on.
+func agentProfile(standing *shimv1.SessionProfileAgentStanding, bypassing bool) *shimv1.SessionProfile {
+	landing := &shimv1.SessionProfileAgentLanding{Landing: &shimv1.SessionProfileAgentLanding_ThroughQueue{ThroughQueue: &shimv1.SessionProfileAgentLandingThroughQueue{}}}
+	if bypassing {
+		landing = &shimv1.SessionProfileAgentLanding{Landing: &shimv1.SessionProfileAgentLanding_BypassingQueue{BypassingQueue: &shimv1.SessionProfileAgentLandingBypassingQueue{}}}
+	}
+	return &shimv1.SessionProfile{Kind: &shimv1.SessionProfile_Agent{Agent: &shimv1.SessionProfileAgent{Standing: standing, Landing: landing}}}
+}
+
+// ParkedKeepalive answers the keep-alive request for WS's parked conversation
+// (shim.v1.SendKeepaliveParked), nil when it parks none. The parked
+// conversation lands the other way from the one WS runs: the queue one while
+// WS holds the bypass mode, the bypass one once it released it.
+func (f *Fleet) ParkedKeepalive(ctx context.Context, ws ids.WorkspaceID) (*shimv1.SendKeepaliveParked, error) {
+	log := f.logFor(ctx, ws)
+	bypass, err := f.deps.DB.QueueBypass(ctx, ws)
+	if err != nil {
+		log.Error(opQueueBypass, "the workspace's queue bypass standing could not be read; its parked conversation is not kept", dlog.Context{"cause": err.Error()})
+		return nil, fmt.Errorf("parked keep-alive for %q: read the queue bypass standing: %w", ws, err)
+	}
+	if bypass.ParkedVendorSessionID == "" {
+		return nil, nil
+	}
+	record, err := f.deps.DB.Workspace(ctx, ws)
+	if err != nil {
+		log.Error(opQueueBypass, "the workspace record could not be read; its parked conversation is not kept", dlog.Context{"cause": err.Error()})
+		return nil, fmt.Errorf("parked keep-alive for %q: read the workspace: %w", ws, err)
+	}
+	standing, err := f.agentStanding(ctx, log, ws, record)
+	if err != nil {
+		return nil, err
+	}
+	return &shimv1.SendKeepaliveParked{VendorSessionId: bypass.ParkedVendorSessionID, Profile: agentProfile(standing, !bypass.Holds)}, nil
 }
 
 // agentStanding is how an agent's workspace stands within its repository, as
@@ -3714,7 +3748,13 @@ func (a *shimAdapter) ReadTranscripts(ctx context.Context) (*shimv1.ReadTranscri
 // Beat asks the session for one keep-alive now (cachelapse.Keepalives). The shim's refusals are cachelapse.ErrNoSession and
 // a *cachelapse.BeatSubmitFailed; its judgment is the success, whole.
 func (a *shimAdapter) Beat(ctx context.Context) (*shimv1.SendKeepaliveSuccess, error) {
-	response, err := a.client.SendKeepalive(ctx, &shimv1.SendKeepaliveRequest{})
+	return keepaliveAnswer(a.client.SendKeepalive(ctx, &shimv1.SendKeepaliveRequest{}))
+}
+
+// keepaliveAnswer maps one SendKeepalive answer onto cachelapse's: the shim's
+// refusals are cachelapse.ErrNoSession and a *cachelapse.BeatSubmitFailed, and
+// its judgment is the success, whole. The one mapping both beats share.
+func keepaliveAnswer(response *shimv1.SendKeepaliveResponse, err error) (*shimv1.SendKeepaliveSuccess, error) {
 	if err != nil {
 		return nil, err
 	}
@@ -3733,6 +3773,12 @@ func (a *shimAdapter) Beat(ctx context.Context) (*shimv1.SendKeepaliveSuccess, e
 		return nil, fmt.Errorf("workspace: SendKeepalive answered no outcome")
 	}
 	return success, nil
+}
+
+// BeatParked asks the shim for one keep-alive of PARKED, a conversation of
+// the workspace no session runs (cachelapse.Keepalives), with Beat's arms.
+func (a *shimAdapter) BeatParked(ctx context.Context, parked *shimv1.SendKeepaliveParked) (*shimv1.SendKeepaliveSuccess, error) {
+	return keepaliveAnswer(a.client.SendKeepalive(ctx, &shimv1.SendKeepaliveRequest{Parked: parked}))
 }
 
 // StandDown arms the client's stand-down latch. See Shim.StandDown.

@@ -45,6 +45,7 @@ import { isAgentTaskType, taskKindOf } from "../convert/detached.js";
 import { appliedEffortOf, effortLevelOf, vendorEffortLevel } from "../convert/effort.js";
 import { boundaryChange } from "./boundary-change.js";
 import { PromptQueue } from "./prompt-queue.js";
+import { beatParkedConversation } from "./parked-keepalive.js";
 import { askSideQuery } from "./side-query.js";
 import { reviseResponse, type RevisionCut } from "./revise-response.js";
 import type { VendorBinding } from "../sdk/real-query.js";
@@ -7394,7 +7395,8 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    * re-anchors the cache, and a held cadence restates the projected lapse on
    * the session stream.
    */
-  async function sendKeepalive(): Promise<shimv1.SendKeepaliveResponse> {
+  async function sendKeepalive(request: shimv1.SendKeepaliveRequest): Promise<shimv1.SendKeepaliveResponse> {
+    if (request.parked !== undefined) return sendParkedKeepalive(request.parked);
     // A SESSION WHOSE VENDOR QUERY ENDED has nothing to send a keep-alive on,
     // and no cache this process can keep: it answers as no session.
     if (!started || identity === undefined || cadence === undefined || query === undefined) {
@@ -7438,6 +7440,54 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   }
 
   /** The skipped answer, recorded once at INFO with its reason. */
+  /**
+   * Keep a PARKED conversation of this workspace warm, on a query of its own
+   * beside the session (engine/parked-keepalive.ts). It needs the session
+   * started, for the workspace name every query's system prompt carries, and
+   * nothing else of it: the session's turn slot, anchor and identity are
+   * never touched.
+   */
+  /** How many parked keep-alives are out: a Hibernate waits for none. */
+  let parkedBeatsInFlight = 0;
+
+  async function sendParkedKeepalive(parked: shimv1.SendKeepaliveParked): Promise<shimv1.SendKeepaliveResponse> {
+    if (!started) {
+      LOGGER.info({ vendor_session_id: parked.vendorSessionId }, "refused a parked SendKeepalive: no session is open");
+      return sendKeepaliveNoSession();
+    }
+    parkedBeatsInFlight += 1;
+    const outcome = await beatParkedConversation(
+      {
+        configDir: deps.env.configDir,
+        cwd: deps.env.cwd,
+        nowMs: deps.nowMs,
+        createQuery: (spec) =>
+          deps.createQuery({
+            profile: spec.profile,
+            binding: { kind: "resume", resumeSessionId: spec.vendorSessionId },
+            workspaceName: requireWorkspaceName(),
+            ...(spec.resumeSessionAt === undefined ? {} : { resumeSessionAt: spec.resumeSessionAt }),
+            ...(spec.model === undefined ? {} : { model: spec.model }),
+            permissionMode: "plan",
+            canUseTool: () => Promise.resolve({ behavior: "deny", message: "a keep-alive takes no tools" }),
+            abortController: spec.abortController,
+            prompt: spec.prompt,
+          }),
+      },
+      parked,
+    ).finally(() => {
+      parkedBeatsInFlight -= 1;
+    });
+    switch (outcome.kind) {
+      case "sent":
+        return sendKeepaliveSent();
+      case "lapsed":
+        return sendKeepaliveSkipped({ kind: "cacheLapsed", lapsedAtMs: outcome.lapsedAtMs });
+      case "failed":
+        return sendKeepaliveSubmitFailed(outcome.detail);
+    }
+  }
+
   function skippedKeepalive(reason: AskedBeatRefusal | SendKeepaliveSkipReason): shimv1.SendKeepaliveResponse {
     const skip: SendKeepaliveSkipReason =
       reason.kind === "turnInFlight" ? { kind: "busy", detail: "a turn is in flight" } : reason;
@@ -7452,6 +7502,13 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // A keep-alive is not a turn in flight to the daemon (see servedOpenTurn):
     // standing the shim down under one ends housekeeping, never anyone's work.
     if (servedOpenTurn() !== undefined) {
+      return hibernateRefused({ kind: "turnInFlight" });
+    }
+    // NOR UNDER A PARKED CONVERSATION'S KEEP-ALIVE: its query is this
+    // process's child, and a stand-down now would cut the beat off before the
+    // vendor answers it, leaving the parked cache to lapse.
+    if (parkedBeatsInFlight > 0) {
+      LOGGER.info({ parked_beats_in_flight: parkedBeatsInFlight }, "refused Hibernate: a parked conversation's keep-alive is out");
       return hibernateRefused({ kind: "turnInFlight" });
     }
     LOGGER.info(

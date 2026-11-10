@@ -43,6 +43,34 @@ function refuse(rpc: string, err: unknown): never {
   throw err;
 }
 
+/**
+ * A `shim.v1.SessionProfile` at FIELD: THE PROFILE IS NEVER GUESSED, so an
+ * unset one is refused rather than read as an agent session. The one check
+ * every request carrying a profile makes.
+ */
+export function validateSessionProfile(profile: shimv1.SessionProfile | undefined, field: string): void {
+  switch (profile?.kind.case) {
+    case "agent":
+      // THE STANDING IS NEVER GUESSED either: the system prompt's last
+      // section states it, and an agent told the wrong one acts wrongly.
+      if (profile.kind.value.standing?.kind.case === undefined) {
+        throw unsetOneof(`${field}.agent.standing`);
+      }
+      // NOR IS THE LANDING: it picks the rules the agent lands its work by.
+      if (profile.kind.value.landing?.landing.case === undefined) {
+        throw unsetOneof(`${field}.agent.landing`);
+      }
+      return;
+    case "chat":
+      if ((profile.kind.value.systemPrompt?.text ?? "").trim() === "") {
+        throw unsetOneof(`${field}.chat.system_prompt`);
+      }
+      return;
+    default:
+      throw unsetOneof(field);
+  }
+}
+
 /** `shim.v1.StartSessionRequest` — fresh or resume, never neither. */
 export function validateStartSessionRequest(request: shimv1.StartSessionRequest): void {
   try {
@@ -51,28 +79,7 @@ export function validateStartSessionRequest(request: shimv1.StartSessionRequest)
     if (request.workspaceName === "") {
       throw invalidArgument("start_session.workspace_name is empty; the system prompt names the workspace the session runs in");
     }
-    // THE PROFILE IS NEVER GUESSED: an unset one is refused rather than read
-    // as an agent session.
-    switch (request.profile?.kind.case) {
-      case "agent":
-        // THE STANDING IS NEVER GUESSED either: the system prompt's last
-        // section states it, and an agent told the wrong one acts wrongly.
-        if (request.profile.kind.value.standing?.kind.case === undefined) {
-          throw unsetOneof("start_session.profile.agent.standing");
-        }
-        // NOR IS THE LANDING: it picks the rules the agent lands its work by.
-        if (request.profile.kind.value.landing?.landing.case === undefined) {
-          throw unsetOneof("start_session.profile.agent.landing");
-        }
-        break;
-      case "chat":
-        if ((request.profile.kind.value.systemPrompt?.text ?? "").trim() === "") {
-          throw unsetOneof("start_session.profile.chat.system_prompt");
-        }
-        break;
-      default:
-        throw unsetOneof("start_session.profile");
-    }
+    validateSessionProfile(request.profile, "start_session.profile");
     switch (request.source.case) {
       case "fresh": {
         const fresh = request.source.value;
@@ -229,9 +236,21 @@ export function validateNetworkChangedRequest(_request: shimv1.NetworkChangedReq
   // No fields. Nothing to refuse.
 }
 
-/** `shim.v1.SendKeepaliveRequest` — empty by design; the call is the request. */
-export function validateSendKeepaliveRequest(_request: shimv1.SendKeepaliveRequest): void {
-  // No fields. Nothing to refuse.
+/**
+ * `shim.v1.SendKeepaliveRequest` — unset targets the served session; a parked
+ * target names its conversation and the profile it runs under.
+ */
+export function validateSendKeepaliveRequest(request: shimv1.SendKeepaliveRequest): void {
+  const parked = request.parked;
+  if (parked === undefined) return;
+  try {
+    if (parked.vendorSessionId === "") {
+      throw invalidArgument("send_keepalive.parked.vendor_session_id is empty; a parked keep-alive names the conversation it keeps");
+    }
+    validateSessionProfile(parked.profile, "send_keepalive.parked.profile");
+  } catch (err) {
+    refuse("SendKeepalive", err);
+  }
 }
 
 /** `shim.v1.KillSessionRequest` — `force` is a primitive with a legal false. */

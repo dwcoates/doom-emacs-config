@@ -78,26 +78,54 @@ func (k *Keeper) schedule(ctx context.Context, ws ids.WorkspaceID, why string) {
 	log.Debug(opDrive, "armed the workspace's next keep-alive", dlog.Context{"due": due, "parked": parked})
 }
 
+// beatPlan is when a workspace's next beat is due, and what it beats.
+type beatPlan struct {
+	// due is the earlier of the two conversations' next beats.
+	due time.Time
+	// sessionParked reports the workspace's session parked, so its shim is
+	// restored before the beat.
+	sessionParked bool
+	// bound reports that the conversation the session runs owes beats.
+	bound bool
+	// parked reports that the workspace's parked conversation owes beats,
+	// and none of its keep-alives is out (parked.go).
+	parked bool
+}
+
 // beatDue answers when WS's next keep-alive is due and whether its session is
-// parked, false when it owes none. ONE PARK, WHATEVER STOOD IT DOWN: a session
-// the idle sweep parked owes none by the cutoff below, and a withheld one by
-// its withholding, so no reader here asks which stand-down it was. Every reason it
-// owes none is recorded at DEBUG: they are the ordinary states of a fleet.
+// parked, false when it owes none (beatPlanFor).
 func (k *Keeper) beatDue(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID) (time.Time, bool, bool) {
+	plan, ok := k.beatPlanFor(ctx, log, ws)
+	return plan.due, plan.sessionParked, ok
+}
+
+// beatPlanFor answers WS's next beat, false when it owes none. ONE PARK,
+// WHATEVER STOOD IT DOWN: a session the idle sweep parked owes none by the
+// cutoff below, and a withheld one by its withholding, so no reader here asks
+// which stand-down it was. Every reason it owes none is recorded at DEBUG:
+// they are the ordinary states of a fleet.
+//
+// BOTH CONVERSATIONS ARE KEPT WARM IN TANDEM (owner request, 2026-11-10). A
+// workspace that took the queue bypass mode parks the conversation it does
+// not run, with its own cache clock (wsm.QueueBypass.ParkedClockAt); the
+// beat is due at the earlier of the two conversations' next beats, and each
+// beat beats both. Everything that holds a workspace's beats (a hide, a
+// close, a cold gate, a withholding, the idle cutoff) holds both.
+func (k *Keeper) beatPlanFor(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID) (beatPlan, bool) {
 	record, err := k.deps.DB.Workspace(ctx, ws)
 	if err != nil {
 		if errors.Is(err, wsm.ErrNotFound) {
 			k.forget(ws)
-			return time.Time{}, false, false
+			return beatPlan{}, false
 		}
 		if !leaving(ctx, log, opDrive, "reading the workspace to time its keep-alive", err) {
 			log.Error(opDrive, "could not read the workspace; its keep-alive is not armed", dlog.Context{"cause": err.Error()})
 		}
-		return time.Time{}, false, false
+		return beatPlan{}, false
 	}
-	none := func(why string) (time.Time, bool, bool) {
+	none := func(why string) (beatPlan, bool) {
 		log.Debug(opDrive, "the workspace owes no keep-alive", dlog.Context{"why": why})
-		return time.Time{}, false, false
+		return beatPlan{}, false
 	}
 	// A WORKSPACE IN A MERGE QUEUE IS ALWAYS KEPT WARM (owner ruling,
 	// 2026-10-26): its entry can wait for hours, and the merge's prompts run
@@ -108,30 +136,10 @@ func (k *Keeper) beatDue(ctx context.Context, log dlog.Logger, ws ids.WorkspaceI
 		if !leaving(ctx, log, opDrive, "reading whether the workspace has a merge queued", err) {
 			log.Error(opDrive, "could not read whether the workspace has a merge queued; its keep-alive is not armed", dlog.Context{"cause": err.Error()})
 		}
-		return time.Time{}, false, false
+		return beatPlan{}, false
 	}
 	if record.KeepaliveHeld() && !queued {
 		return none("it is hidden and nobody is looking at it; its cache lapses on its own clock")
-	}
-	if record.LastTurnEndedAt == nil {
-		return none("no turn has ended, so there is no cache to keep")
-	}
-	// THE CACHE CLOCK, NOT THE TURNS': a keep-alive writes the cache as a
-	// turn does, and timed from the turns alone the beat after one was already
-	// overdue (2026-10-26).
-	clock := *record.CacheClock()
-	if sent, ok := k.sent[ws]; ok && sent.After(clock) {
-		clock = sent
-	}
-	if record.Closed && !queued && (record.Closure == nil || !clock.Before(record.Closure.At)) {
-		return none("it is closed and its last keep-alive is spent")
-	}
-	// A CACHE KNOWN COLD IS NEVER BEATEN (owner ruling, 2026-10-29): its cold
-	// gate was raised or answered, or its shim judged it lapsed, and no turn
-	// has closed since. Passing the gate makes no request of its own, so the
-	// first keep-alive is owed an interval after the next real turn's end.
-	if record.CacheKnownCold() {
-		return none("its cache is known cold and no turn has closed since; the next turn's end owes the next keep-alive")
 	}
 	if _, gated := k.deps.ColdGate(ws); gated {
 		return none("its session stands at the cold gate")
@@ -141,7 +149,7 @@ func (k *Keeper) beatDue(ctx context.Context, log dlog.Logger, ws ids.WorkspaceI
 		if !leaving(ctx, log, opDrive, "reading whether the workspace runs", err) {
 			log.Error(opDrive, "could not read whether the workspace runs; its keep-alive is not armed", dlog.Context{"cause": err.Error()})
 		}
-		return time.Time{}, false, false
+		return beatPlan{}, false
 	}
 	if len(runs) == 0 {
 		return none("it is withheld, so it runs no session")
@@ -151,7 +159,7 @@ func (k *Keeper) beatDue(ctx context.Context, log dlog.Logger, ws ids.WorkspaceI
 		if !leaving(ctx, log, opDrive, "reading the workspace's session to time its keep-alive", err) {
 			log.Error(opDrive, "could not read the workspace's session; its keep-alive is not armed", dlog.Context{"cause": err.Error()})
 		}
-		return time.Time{}, false, false
+		return beatPlan{}, false
 	}
 	if !found {
 		return none("it has no session")
@@ -159,15 +167,45 @@ func (k *Keeper) beatDue(ctx context.Context, log dlog.Logger, ws ids.WorkspaceI
 	if session.Terminal != nil && !session.Parked() {
 		return none("its session is not live: " + session.Terminal.Kind)
 	}
-	due := clock.Add(k.deps.Interval)
+	// A CLOSED WORKSPACE OWES EACH CONVERSATION ONE LAST BEAT: none once that
+	// conversation's clock has passed the close.
+	spent := func(clock time.Time) bool {
+		return record.Closed && !queued && (record.Closure == nil || !clock.Before(record.Closure.At))
+	}
+	plan := beatPlan{sessionParked: session.Parked()}
+	// THE BOUND CONVERSATION, timed from THE CACHE CLOCK, NOT THE TURNS': a
+	// keep-alive writes the cache as a turn does, and timed from the turns
+	// alone the beat after one was already overdue (2026-10-26). A CACHE
+	// KNOWN COLD IS NEVER BEATEN (owner ruling, 2026-10-29): its cold gate was
+	// raised or answered, or its shim judged it lapsed, and no turn has
+	// closed since. Passing the gate makes no request of its own, so the
+	// first keep-alive is owed an interval after the next real turn's end.
+	if clock := record.CacheClock(); clock != nil && !record.CacheKnownCold() {
+		at := *clock
+		if sent, ok := k.sent[ws]; ok && sent.After(at) {
+			at = sent
+		}
+		if !spent(at) {
+			plan.bound, plan.due = true, at.Add(k.deps.Interval)
+		}
+	}
+	if due, ok := k.parkedDue(ctx, log, ws, spent); ok {
+		plan.parked = true
+		if !plan.bound || due.Before(plan.due) {
+			plan.due = due
+		}
+	}
+	if !plan.bound && !plan.parked {
+		return none("neither of its conversations has a warm cache to keep, or each one's last keep-alive is spent")
+	}
 	engaged := session.LastEngagementAt
 	if engaged.IsZero() {
 		engaged = session.StartedAt
 	}
-	if k.deps.IdleCutoff > 0 && !queued && engaged.Add(k.deps.IdleCutoff).Before(due) {
+	if k.deps.IdleCutoff > 0 && !queued && engaged.Add(k.deps.IdleCutoff).Before(plan.due) {
 		return none("it will be idle past the cutoff before the beat is due, and the idle sweep puts it to sleep")
 	}
-	return due, session.Parked(), true
+	return plan, true
 }
 
 // beatsDue sends every keep-alive that has come due.
@@ -186,11 +224,12 @@ func (k *Keeper) beatsDue(ctx context.Context) {
 // the meantime re-arms it instead.
 func (k *Keeper) sendBeat(ctx context.Context, ws ids.WorkspaceID, now time.Time) {
 	log := k.deps.Log.Global().With(dlog.Context{"workspace": string(ws)})
-	due, parked, ok := k.beatDue(ctx, log, ws)
+	plan, ok := k.beatPlanFor(ctx, log, ws)
 	if !ok {
 		delete(k.restores, ws)
 		return
 	}
+	due, parked := plan.due, plan.sessionParked
 	if due.After(now) {
 		k.beats[ws] = due
 		if parked {
@@ -213,6 +252,15 @@ func (k *Keeper) sendBeat(ctx context.Context, ws ids.WorkspaceID, now time.Time
 		}
 		observe(BeatOutcomeNotServed)
 		log.Debug(opDrive, "the keep-alive is due and no session is served; the session's coming up sends it", fields)
+		return
+	}
+	// EACH BEAT BEATS BOTH CONVERSATIONS: the parked one's keep-alive goes
+	// out beside the session's, on a query of its own (parked.go).
+	if plan.parked {
+		k.beatParked(ctx, log, ws, shim)
+	}
+	if !plan.bound {
+		log.Info(opDrive, "the parked conversation's keep-alive is due and the running conversation owes none", fields)
 		return
 	}
 	answer, err := shim.Beat(ctx)

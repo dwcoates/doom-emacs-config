@@ -20,9 +20,34 @@ package shim.v1;
 
 option go_package = "agentrepl/proto/shim/v1;shimv1";
 
-// DELIBERATELY EMPTY: the call is the request. The keep-alive targets the one
-// session this shim serves.
-message SendKeepaliveRequest {}
+import "shim/v1/endpoint_start_session.proto";
+
+// Unset, the keep-alive targets the one session this shim serves. Set, it
+// targets ONLY a PARKED conversation of the same workspace instead.
+message SendKeepaliveRequest {
+  // A conversation of this shim's workspace that no session runs: the one a
+  // queue-bypass switch parked (owner request, 2026-11-10: a workspace's two
+  // conversations are kept warm in tandem). The shim sends the keep-alive in
+  // a short-lived query of its own, beside the session it serves, so the
+  // session's turn slot is never taken: SendKeepaliveSkippedMainAgentBusy
+  // and SendKeepaliveSkippedDetachedWorkLive are never its answer, and
+  // nothing of the query is stored. `sent` means the keep-alive was ANSWERED,
+  // because no session stream carries this conversation's lapse. The cache
+  // judgment is the shim's, read off the conversation's own transcript.
+  SendKeepaliveParked parked = 1;
+}
+
+// The parked conversation a keep-alive targets, and the profile it runs
+// under: the one its own session would start with, which differs from the
+// served session's (a parked queue conversation runs the merge-queue landing
+// while the served bypass one runs the bypass landing), because the prompt
+// cache is keyed on the system prompt.
+message SendKeepaliveParked {
+  // The parked conversation's vendor session id. REQUIRED.
+  string vendor_session_id = 1;
+  // The profile the conversation's own session runs under. REQUIRED.
+  SessionProfile profile = 2;
+}
 
 // THE ARM IS THE OUTCOME.
 message SendKeepaliveResponse {

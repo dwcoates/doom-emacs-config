@@ -932,6 +932,10 @@ type TurnEnds interface {
 type CacheLapses interface {
 	VisibilityChanged(ws ids.WorkspaceID)
 	ColdGateAnswered(ctx context.Context, ws ids.WorkspaceID) error
+	// ConversationSwitched is a queue-bypass switch of WS's conversations,
+	// its clocks already swapped on the record (wsm.SwapParkedConversation):
+	// both conversations' beats are timed afresh from their own clocks.
+	ConversationSwitched(ws ids.WorkspaceID)
 }
 
 // Summaries keeps every workspace's summary (wssummary.Keeper).

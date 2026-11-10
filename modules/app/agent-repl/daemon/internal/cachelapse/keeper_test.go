@@ -46,6 +46,40 @@ type fakeDB struct {
 	// coldErr fails MarkCacheCold; coldMarks counts every mark written.
 	coldErr   error
 	coldMarks int
+	// bypass is each workspace's queue-bypass standing; parkedKeepalives are
+	// the parked keep-alives recorded and parkedCold the parked caches marked
+	// cold, both in order.
+	bypass           map[ids.WorkspaceID]wsm.QueueBypass
+	parkedKeepalives []time.Time
+	parkedCold       []ids.WorkspaceID
+}
+
+func (f *fakeDB) QueueBypass(_ context.Context, id wsm.WorkspaceID) (wsm.QueueBypass, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.bypass[id], nil
+}
+
+// SetParkedKeepalive moves the parked clock, as the store's statement does.
+func (f *fakeDB) SetParkedKeepalive(_ context.Context, id wsm.WorkspaceID, at time.Time) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.parkedKeepalives = append(f.parkedKeepalives, at)
+	standing := f.bypass[id]
+	standing.ParkedClockAt, standing.ParkedCold = &at, false
+	f.bypass[id] = standing
+	return nil
+}
+
+// MarkParkedCold marks the parked cache cold, as the store's statement does.
+func (f *fakeDB) MarkParkedCold(_ context.Context, id wsm.WorkspaceID) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.parkedCold = append(f.parkedCold, id)
+	standing := f.bypass[id]
+	standing.ParkedCold = true
+	f.bypass[id] = standing
+	return nil
 }
 
 // MarkCacheCold marks the record cold at its last turn end, as the store's
@@ -164,6 +198,23 @@ type fakeShim struct {
 	beatErr error
 	beats   int
 	beaten  chan struct{}
+	// parkedAnswer and parkedErr are what BeatParked answers; parked records
+	// each request, and parkedBeaten, when set, is told of each one.
+	parkedAnswer *shimv1.SendKeepaliveSuccess
+	parkedErr    error
+	parked       []*shimv1.SendKeepaliveParked
+	parkedBeaten chan struct{}
+}
+
+func (f *fakeShim) BeatParked(_ context.Context, parked *shimv1.SendKeepaliveParked) (*shimv1.SendKeepaliveSuccess, error) {
+	f.mu.Lock()
+	f.parked = append(f.parked, parked)
+	answer, err, beaten := f.parkedAnswer, f.parkedErr, f.parkedBeaten
+	f.mu.Unlock()
+	if beaten != nil {
+		beaten <- struct{}{}
+	}
+	return answer, err
 }
 
 func (f *fakeShim) Beat(context.Context) (*shimv1.SendKeepaliveSuccess, error) {
@@ -204,6 +255,9 @@ type harness struct {
 	restoring []restoreCall
 	// nextKeepalives are the next keep-alives stated to the views, in order.
 	nextKeepalives []nextKeepaliveCall
+	// parkedRequests is each workspace's parked keep-alive request, nil for
+	// one that parks none.
+	parkedRequests map[ids.WorkspaceID]*shimv1.SendKeepaliveParked
 }
 
 type nextKeepaliveCall struct {
@@ -257,6 +311,7 @@ func newHarness(t *testing.T, rec wsm.Workspace) *harness {
 		db: &fakeDB{
 			records:  map[ids.WorkspaceID]wsm.Workspace{rec.ID: rec},
 			sessions: map[ids.WorkspaceID]wsm.Session{rec.ID: liveSession(rec.ID)},
+			bypass:   map[ids.WorkspaceID]wsm.QueueBypass{},
 		},
 		shim:       &fakeShim{},
 		serving:    true,
@@ -295,6 +350,9 @@ func newHarness(t *testing.T, rec wsm.Workspace) *harness {
 		Telemetry: h.telemetry,
 		NextKeepalive: func(ws ids.WorkspaceID, next time.Time) {
 			h.nextKeepalives = append(h.nextKeepalives, nextKeepaliveCall{ws: ws, next: next})
+		},
+		Parked: func(_ context.Context, ws ids.WorkspaceID) (*shimv1.SendKeepaliveParked, error) {
+			return h.parkedRequests[ws], nil
 		},
 	})
 	if err != nil {
@@ -343,6 +401,7 @@ func TestNewRefusesAMissingCollaborator(t *testing.T) {
 			Log:             dlog.NewTestSurfaces(),
 			Telemetry:       &fakeTelemetry{},
 			NextKeepalive:   func(ids.WorkspaceID, time.Time) {},
+			Parked:          func(context.Context, ids.WorkspaceID) (*shimv1.SendKeepaliveParked, error) { return nil, nil },
 		}
 	}
 	tests := []struct {
@@ -361,6 +420,7 @@ func TestNewRefusesAMissingCollaborator(t *testing.T) {
 		{name: "telemetry", strip: func(d *Deps) { d.Telemetry = nil }},
 		{name: "log", strip: func(d *Deps) { d.Log = nil }},
 		{name: "views' next keep-alive", strip: func(d *Deps) { d.NextKeepalive = nil }},
+		{name: "parked keep-alive requests", strip: func(d *Deps) { d.Parked = nil }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

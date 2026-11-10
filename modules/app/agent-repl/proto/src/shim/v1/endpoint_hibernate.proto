@@ -44,8 +44,9 @@ message HibernateError {
   reserved 2;
   reserved "compaction_failed";
 }
-// A turn is in flight; standing the shim down would kill it. The daemon
-// defers and asks again on its next sweep pass.
+// A turn is in flight, or a parked conversation's keep-alive is out
+// (SendKeepaliveRequest.parked); standing the shim down would kill it. The
+// daemon defers and asks again on its next sweep pass.
 message HibernateTurnInFlight {}
 // No session is open on this shim, so there is nothing to stand down.
 message HibernateNoSession {}

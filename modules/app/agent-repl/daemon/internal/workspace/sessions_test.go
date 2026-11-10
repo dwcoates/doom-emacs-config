@@ -4481,3 +4481,68 @@ func TestAStopOfAnUngatedWorkspaceTouchesNoGateView(t *testing.T) {
 		t.Fatalf("strip gates = %+v, want none stated for a workspace with no gate", f.topbarGates)
 	}
 }
+
+func TestParkedKeepaliveAnswersNoneForAWorkspaceThatParksNothing(t *testing.T) {
+	// Arrange
+	f := newFleetFixture(t)
+	ws := resumable(f)
+
+	// Act
+	got, err := f.fleet.ParkedKeepalive(context.Background(), ws)
+
+	// Assert
+	if err != nil || got != nil {
+		t.Fatalf("ParkedKeepalive = %v, %v; want none", got, err)
+	}
+}
+
+func TestParkedKeepaliveLandsTheParkedConversationTheOtherWay(t *testing.T) {
+	cases := []struct {
+		name          string
+		holds         bool
+		wantBypassing bool
+	}{
+		{name: "the queue conversation parked while the mode is held lands through the queue", holds: true, wantBypassing: false},
+		{name: "the bypass conversation parked once the mode is released lands bypassing it", holds: false, wantBypassing: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			f := newFleetFixture(t)
+			ws := resumable(f)
+			f.db.bypass = map[ids.WorkspaceID]wsm.QueueBypass{ws: {Holds: tc.holds, ParkedVendorSessionID: "vendor-parked"}}
+
+			// Act
+			got, err := f.fleet.ParkedKeepalive(context.Background(), ws)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("ParkedKeepalive: %v", err)
+			}
+			if got.GetVendorSessionId() != "vendor-parked" {
+				t.Fatalf("vendor session = %q, want the parked conversation", got.GetVendorSessionId())
+			}
+			if bypassing := got.GetProfile().GetAgent().GetLanding().GetBypassingQueue() != nil; bypassing != tc.wantBypassing {
+				t.Fatalf("bypassing = %v, want %v", bypassing, tc.wantBypassing)
+			}
+		})
+	}
+}
+
+func TestParkedKeepaliveSurfacesAnUnreadableStanding(t *testing.T) {
+	// Arrange
+	f := newFleetFixture(t)
+	ws := resumable(f)
+	f.db.bypassErr = errFake
+
+	// Act
+	_, err := f.fleet.ParkedKeepalive(context.Background(), ws)
+
+	// Assert
+	if !errors.Is(err, errFake) {
+		t.Fatalf("ParkedKeepalive = %v, want the read's failure", err)
+	}
+	if !fleetLogged(f, "error", opQueueBypass, "the workspace's queue bypass standing could not be read; its parked conversation is not kept") {
+		t.Fatalf("records = %+v, want the failure at error", f.log.logger.Records())
+	}
+}

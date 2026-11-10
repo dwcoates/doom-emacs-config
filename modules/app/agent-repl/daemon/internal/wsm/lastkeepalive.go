@@ -28,15 +28,25 @@ func (s *store) SetLastKeepalive(ctx context.Context, id WorkspaceID, at time.Ti
 		workspaceColumn{name: "last_keepalive_at", value: nanos(at)})
 }
 
-// CacheClock is when the workspace's prompt cache was last written: the later
-// of its last turn's end and its last keep-alive. Nil when neither happened.
+// CacheClock is when the prompt cache of the conversation the workspace runs
+// was last written: the later of its last turn's end and its last keep-alive.
+// Nil when neither happened.
+//
+// A TURN FROM BEFORE THE BINDING IS THE OTHER CONVERSATION'S. A queue-bypass
+// switch records the bound-in conversation's own clock as the keep-alive
+// half and stamps ConversationBoundAt, so a turn that closed before the stamp
+// times nothing.
 func (w Workspace) CacheClock() *time.Time {
+	turn := w.LastTurnEndedAt
+	if turn != nil && w.ConversationBoundAt != nil && !turn.After(*w.ConversationBoundAt) {
+		turn = nil
+	}
 	switch {
 	case w.LastKeepaliveAt == nil:
-		return w.LastTurnEndedAt
-	case w.LastTurnEndedAt == nil || w.LastKeepaliveAt.After(*w.LastTurnEndedAt):
+		return turn
+	case turn == nil || w.LastKeepaliveAt.After(*turn):
 		return w.LastKeepaliveAt
 	default:
-		return w.LastTurnEndedAt
+		return turn
 	}
 }

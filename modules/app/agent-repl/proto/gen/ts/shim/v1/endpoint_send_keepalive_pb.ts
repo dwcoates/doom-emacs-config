@@ -20,21 +20,37 @@
 
 import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
+import type { SessionProfile } from "./endpoint_start_session_pb";
+import { file_shim_v1_endpoint_start_session } from "./endpoint_start_session_pb";
 import type { Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file shim/v1/endpoint_send_keepalive.proto.
  */
 export const file_shim_v1_endpoint_send_keepalive: GenFile = /*@__PURE__*/
-  fileDesc("CiVzaGltL3YxL2VuZHBvaW50X3NlbmRfa2VlcGFsaXZlLnByb3RvEgdzaGltLnYxIhYKFFNlbmRLZWVwYWxpdmVSZXF1ZXN0IoEBChVTZW5kS2VlcGFsaXZlUmVzcG9uc2USMAoHc3VjY2VzcxgBIAEoCzIdLnNoaW0udjEuU2VuZEtlZXBhbGl2ZVN1Y2Nlc3NIABIsCgVlcnJvchgCIAEoCzIbLnNoaW0udjEuU2VuZEtlZXBhbGl2ZUVycm9ySABCCAoGcmVzdWx0In8KFFNlbmRLZWVwYWxpdmVTdWNjZXNzEioKBHNlbnQYASABKAsyGi5zaGltLnYxLlNlbmRLZWVwYWxpdmVTZW50SAASMAoHc2tpcHBlZBgCIAEoCzIdLnNoaW0udjEuU2VuZEtlZXBhbGl2ZVNraXBwZWRIAEIJCgdvdXRjb21lIhMKEVNlbmRLZWVwYWxpdmVTZW50IvYBChRTZW5kS2VlcGFsaXZlU2tpcHBlZBJFCg9tYWluX2FnZW50X2J1c3kYASABKAsyKi5zaGltLnYxLlNlbmRLZWVwYWxpdmVTa2lwcGVkTWFpbkFnZW50QnVzeUgAEksKEmRldGFjaGVkX3dvcmtfbGl2ZRgCIAEoCzItLnNoaW0udjEuU2VuZEtlZXBhbGl2ZVNraXBwZWREZXRhY2hlZFdvcmtMaXZlSAASQAoMY2FjaGVfbGFwc2VkGAMgASgLMiguc2hpbS52MS5TZW5kS2VlcGFsaXZlU2tpcHBlZENhY2hlTGFwc2VkSABCCAoGcmVhc29uIjMKIVNlbmRLZWVwYWxpdmVTa2lwcGVkTWFpbkFnZW50QnVzeRIOCgZkZXRhaWwYASABKAkiOgokU2VuZEtlZXBhbGl2ZVNraXBwZWREZXRhY2hlZFdvcmtMaXZlEhIKCmxpdmVfaXRlbXMYASABKA0iNwofU2VuZEtlZXBhbGl2ZVNraXBwZWRDYWNoZUxhcHNlZBIUCgxsYXBzZWRfYXRfbXMYASABKAMikAEKElNlbmRLZWVwYWxpdmVFcnJvchI1Cgpub19zZXNzaW9uGAEgASgLMh8uc2hpbS52MS5TZW5kS2VlcGFsaXZlTm9TZXNzaW9uSAASOwoNc3VibWl0X2ZhaWxlZBgCIAEoCzIiLnNoaW0udjEuU2VuZEtlZXBhbGl2ZVN1Ym1pdEZhaWxlZEgAQgYKBGtpbmQiGAoWU2VuZEtlZXBhbGl2ZU5vU2Vzc2lvbiIrChlTZW5kS2VlcGFsaXZlU3VibWl0RmFpbGVkEg4KBmRldGFpbBgBIAEoCUIgWh5hZ2VudHJlcGwvcHJvdG8vc2hpbS92MTtzaGltdjFiBnByb3RvMw");
+  fileDesc("CiVzaGltL3YxL2VuZHBvaW50X3NlbmRfa2VlcGFsaXZlLnByb3RvEgdzaGltLnYxIkQKFFNlbmRLZWVwYWxpdmVSZXF1ZXN0EiwKBnBhcmtlZBgBIAEoCzIcLnNoaW0udjEuU2VuZEtlZXBhbGl2ZVBhcmtlZCJaChNTZW5kS2VlcGFsaXZlUGFya2VkEhkKEXZlbmRvcl9zZXNzaW9uX2lkGAEgASgJEigKB3Byb2ZpbGUYAiABKAsyFy5zaGltLnYxLlNlc3Npb25Qcm9maWxlIoEBChVTZW5kS2VlcGFsaXZlUmVzcG9uc2USMAoHc3VjY2VzcxgBIAEoCzIdLnNoaW0udjEuU2VuZEtlZXBhbGl2ZVN1Y2Nlc3NIABIsCgVlcnJvchgCIAEoCzIbLnNoaW0udjEuU2VuZEtlZXBhbGl2ZUVycm9ySABCCAoGcmVzdWx0In8KFFNlbmRLZWVwYWxpdmVTdWNjZXNzEioKBHNlbnQYASABKAsyGi5zaGltLnYxLlNlbmRLZWVwYWxpdmVTZW50SAASMAoHc2tpcHBlZBgCIAEoCzIdLnNoaW0udjEuU2VuZEtlZXBhbGl2ZVNraXBwZWRIAEIJCgdvdXRjb21lIhMKEVNlbmRLZWVwYWxpdmVTZW50IvYBChRTZW5kS2VlcGFsaXZlU2tpcHBlZBJFCg9tYWluX2FnZW50X2J1c3kYASABKAsyKi5zaGltLnYxLlNlbmRLZWVwYWxpdmVTa2lwcGVkTWFpbkFnZW50QnVzeUgAEksKEmRldGFjaGVkX3dvcmtfbGl2ZRgCIAEoCzItLnNoaW0udjEuU2VuZEtlZXBhbGl2ZVNraXBwZWREZXRhY2hlZFdvcmtMaXZlSAASQAoMY2FjaGVfbGFwc2VkGAMgASgLMiguc2hpbS52MS5TZW5kS2VlcGFsaXZlU2tpcHBlZENhY2hlTGFwc2VkSABCCAoGcmVhc29uIjMKIVNlbmRLZWVwYWxpdmVTa2lwcGVkTWFpbkFnZW50QnVzeRIOCgZkZXRhaWwYASABKAkiOgokU2VuZEtlZXBhbGl2ZVNraXBwZWREZXRhY2hlZFdvcmtMaXZlEhIKCmxpdmVfaXRlbXMYASABKA0iNwofU2VuZEtlZXBhbGl2ZVNraXBwZWRDYWNoZUxhcHNlZBIUCgxsYXBzZWRfYXRfbXMYASABKAMikAEKElNlbmRLZWVwYWxpdmVFcnJvchI1Cgpub19zZXNzaW9uGAEgASgLMh8uc2hpbS52MS5TZW5kS2VlcGFsaXZlTm9TZXNzaW9uSAASOwoNc3VibWl0X2ZhaWxlZBgCIAEoCzIiLnNoaW0udjEuU2VuZEtlZXBhbGl2ZVN1Ym1pdEZhaWxlZEgAQgYKBGtpbmQiGAoWU2VuZEtlZXBhbGl2ZU5vU2Vzc2lvbiIrChlTZW5kS2VlcGFsaXZlU3VibWl0RmFpbGVkEg4KBmRldGFpbBgBIAEoCUIgWh5hZ2VudHJlcGwvcHJvdG8vc2hpbS92MTtzaGltdjFiBnByb3RvMw", [file_shim_v1_endpoint_start_session]);
 
 /**
- * DELIBERATELY EMPTY: the call is the request. The keep-alive targets the one
- * session this shim serves.
+ * Unset, the keep-alive targets the one session this shim serves. Set, it
+ * targets ONLY a PARKED conversation of the same workspace instead.
  *
  * @generated from message shim.v1.SendKeepaliveRequest
  */
 export type SendKeepaliveRequest = Message<"shim.v1.SendKeepaliveRequest"> & {
+  /**
+   * A conversation of this shim's workspace that no session runs: the one a
+   * queue-bypass switch parked (owner request, 2026-11-10: a workspace's two
+   * conversations are kept warm in tandem). The shim sends the keep-alive in
+   * a short-lived query of its own, beside the session it serves, so the
+   * session's turn slot is never taken: SendKeepaliveSkippedMainAgentBusy
+   * and SendKeepaliveSkippedDetachedWorkLive are never its answer, and
+   * nothing of the query is stored. `sent` means the keep-alive was ANSWERED,
+   * because no session stream carries this conversation's lapse. The cache
+   * judgment is the shim's, read off the conversation's own transcript.
+   *
+   * @generated from field: shim.v1.SendKeepaliveParked parked = 1;
+   */
+  parked?: SendKeepaliveParked | undefined;
 };
 
 /**
@@ -43,6 +59,38 @@ export type SendKeepaliveRequest = Message<"shim.v1.SendKeepaliveRequest"> & {
  */
 export const SendKeepaliveRequestSchema: GenMessage<SendKeepaliveRequest> = /*@__PURE__*/
   messageDesc(file_shim_v1_endpoint_send_keepalive, 0);
+
+/**
+ * The parked conversation a keep-alive targets, and the profile it runs
+ * under: the one its own session would start with, which differs from the
+ * served session's (a parked queue conversation runs the merge-queue landing
+ * while the served bypass one runs the bypass landing), because the prompt
+ * cache is keyed on the system prompt.
+ *
+ * @generated from message shim.v1.SendKeepaliveParked
+ */
+export type SendKeepaliveParked = Message<"shim.v1.SendKeepaliveParked"> & {
+  /**
+   * The parked conversation's vendor session id. REQUIRED.
+   *
+   * @generated from field: string vendor_session_id = 1;
+   */
+  vendorSessionId: string;
+
+  /**
+   * The profile the conversation's own session runs under. REQUIRED.
+   *
+   * @generated from field: shim.v1.SessionProfile profile = 2;
+   */
+  profile?: SessionProfile | undefined;
+};
+
+/**
+ * Describes the message shim.v1.SendKeepaliveParked.
+ * Use `create(SendKeepaliveParkedSchema)` to create a new message.
+ */
+export const SendKeepaliveParkedSchema: GenMessage<SendKeepaliveParked> = /*@__PURE__*/
+  messageDesc(file_shim_v1_endpoint_send_keepalive, 1);
 
 /**
  * THE ARM IS THE OUTCOME.
@@ -73,7 +121,7 @@ export type SendKeepaliveResponse = Message<"shim.v1.SendKeepaliveResponse"> & {
  * Use `create(SendKeepaliveResponseSchema)` to create a new message.
  */
 export const SendKeepaliveResponseSchema: GenMessage<SendKeepaliveResponse> = /*@__PURE__*/
-  messageDesc(file_shim_v1_endpoint_send_keepalive, 1);
+  messageDesc(file_shim_v1_endpoint_send_keepalive, 2);
 
 /**
  * The session answered. Whether a keep-alive actually went out is the
@@ -109,7 +157,7 @@ export type SendKeepaliveSuccess = Message<"shim.v1.SendKeepaliveSuccess"> & {
  * Use `create(SendKeepaliveSuccessSchema)` to create a new message.
  */
 export const SendKeepaliveSuccessSchema: GenMessage<SendKeepaliveSuccess> = /*@__PURE__*/
-  messageDesc(file_shim_v1_endpoint_send_keepalive, 2);
+  messageDesc(file_shim_v1_endpoint_send_keepalive, 3);
 
 /**
  * The keep-alive turn was submitted. Its answer re-anchors the cache, and the
@@ -125,7 +173,7 @@ export type SendKeepaliveSent = Message<"shim.v1.SendKeepaliveSent"> & {
  * Use `create(SendKeepaliveSentSchema)` to create a new message.
  */
 export const SendKeepaliveSentSchema: GenMessage<SendKeepaliveSent> = /*@__PURE__*/
-  messageDesc(file_shim_v1_endpoint_send_keepalive, 3);
+  messageDesc(file_shim_v1_endpoint_send_keepalive, 4);
 
 /**
  * No keep-alive went out. THE ARM IS WHY: the shim stays the judge of whether
@@ -163,7 +211,7 @@ export type SendKeepaliveSkipped = Message<"shim.v1.SendKeepaliveSkipped"> & {
  * Use `create(SendKeepaliveSkippedSchema)` to create a new message.
  */
 export const SendKeepaliveSkippedSchema: GenMessage<SendKeepaliveSkipped> = /*@__PURE__*/
-  messageDesc(file_shim_v1_endpoint_send_keepalive, 4);
+  messageDesc(file_shim_v1_endpoint_send_keepalive, 5);
 
 /**
  * The main agent's slot is taken: a turn is in flight (a keep-alive's
@@ -189,7 +237,7 @@ export type SendKeepaliveSkippedMainAgentBusy = Message<"shim.v1.SendKeepaliveSk
  * Use `create(SendKeepaliveSkippedMainAgentBusySchema)` to create a new message.
  */
 export const SendKeepaliveSkippedMainAgentBusySchema: GenMessage<SendKeepaliveSkippedMainAgentBusy> = /*@__PURE__*/
-  messageDesc(file_shim_v1_endpoint_send_keepalive, 5);
+  messageDesc(file_shim_v1_endpoint_send_keepalive, 6);
 
 /**
  * Detached work (a background shell or agent) is live in the session. A
@@ -212,7 +260,7 @@ export type SendKeepaliveSkippedDetachedWorkLive = Message<"shim.v1.SendKeepaliv
  * Use `create(SendKeepaliveSkippedDetachedWorkLiveSchema)` to create a new message.
  */
 export const SendKeepaliveSkippedDetachedWorkLiveSchema: GenMessage<SendKeepaliveSkippedDetachedWorkLive> = /*@__PURE__*/
-  messageDesc(file_shim_v1_endpoint_send_keepalive, 6);
+  messageDesc(file_shim_v1_endpoint_send_keepalive, 7);
 
 /**
  * The cache has already lapsed. A keep-alive now would buy the full-price
@@ -235,7 +283,7 @@ export type SendKeepaliveSkippedCacheLapsed = Message<"shim.v1.SendKeepaliveSkip
  * Use `create(SendKeepaliveSkippedCacheLapsedSchema)` to create a new message.
  */
 export const SendKeepaliveSkippedCacheLapsedSchema: GenMessage<SendKeepaliveSkippedCacheLapsed> = /*@__PURE__*/
-  messageDesc(file_shim_v1_endpoint_send_keepalive, 7);
+  messageDesc(file_shim_v1_endpoint_send_keepalive, 8);
 
 /**
  * No keep-alive went out, and not by the shim's judgment. THE ARM IS WHY.
@@ -270,7 +318,7 @@ export type SendKeepaliveError = Message<"shim.v1.SendKeepaliveError"> & {
  * Use `create(SendKeepaliveErrorSchema)` to create a new message.
  */
 export const SendKeepaliveErrorSchema: GenMessage<SendKeepaliveError> = /*@__PURE__*/
-  messageDesc(file_shim_v1_endpoint_send_keepalive, 8);
+  messageDesc(file_shim_v1_endpoint_send_keepalive, 9);
 
 /**
  * No session is open on this shim, or its vendor query has ended, so nothing
@@ -286,7 +334,7 @@ export type SendKeepaliveNoSession = Message<"shim.v1.SendKeepaliveNoSession"> &
  * Use `create(SendKeepaliveNoSessionSchema)` to create a new message.
  */
 export const SendKeepaliveNoSessionSchema: GenMessage<SendKeepaliveNoSession> = /*@__PURE__*/
-  messageDesc(file_shim_v1_endpoint_send_keepalive, 9);
+  messageDesc(file_shim_v1_endpoint_send_keepalive, 10);
 
 /**
  * The keep-alive's submission to the vendor failed. The shim also raises its
@@ -309,5 +357,5 @@ export type SendKeepaliveSubmitFailed = Message<"shim.v1.SendKeepaliveSubmitFail
  * Use `create(SendKeepaliveSubmitFailedSchema)` to create a new message.
  */
 export const SendKeepaliveSubmitFailedSchema: GenMessage<SendKeepaliveSubmitFailed> = /*@__PURE__*/
-  messageDesc(file_shim_v1_endpoint_send_keepalive, 10);
+  messageDesc(file_shim_v1_endpoint_send_keepalive, 11);
 
