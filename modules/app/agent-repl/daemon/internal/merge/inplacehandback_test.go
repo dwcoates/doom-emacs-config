@@ -11,7 +11,7 @@ func TestASyncMergeThatDidNotLandIsHandedBackToItsOwnWorkspace(t *testing.T) {
 		kind DetachedOutcomeKind
 	}{
 		{name: "a failure", kind: DetachedFailed},
-		{name: "an abandonment nobody asked for", kind: DetachedAbandoned},
+		{name: "an abandonment, an eviction included", kind: DetachedAbandoned},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -35,13 +35,12 @@ func TestASyncMergeThatDidNotLandIsHandedBackToItsOwnWorkspace(t *testing.T) {
 	}
 }
 
-func TestASyncMergeThatLandedOrWasTakenOffIsNotHandedBack(t *testing.T) {
+func TestASyncMergeThatLandedIsNotHandedBack(t *testing.T) {
 	tests := []struct {
 		name string
 		out  DetachedOutcome
 	}{
 		{name: "a landing, which closed the workspace", out: DetachedOutcome{Kind: DetachedLanded}},
-		{name: "an end somebody asked for", out: DetachedOutcome{Kind: DetachedAbandoned, Requested: true}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

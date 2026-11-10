@@ -404,10 +404,25 @@ func handbackText(mergeWS wsm.Workspace, out merge.DetachedOutcome) (string, str
 			// reaches it, never that it is shown.
 			fmt.Sprintf("It ran detached, in a merge workspace forked from this conversation. It failed: %s. Its merge workspace `%s` stays hidden at %s, exactly where the merge stopped, listed among the closed workspaces in the sidebar; the user can select it there to reveal it and finish the merge.", out.Summary, mergeWS.Name, mergeWS.Dir), nil
 	case merge.DetachedAbandoned:
-		return fmt.Sprintf("merge of %s did not run", out.Branch),
-			fmt.Sprintf("It did not run: %s.", out.Summary), nil
+		label, report := abandonedText(mergeWS, out)
+		return label, report, nil
 	}
 	return "", "", fmt.Errorf("mergeworkspace: undeclared detached merge outcome %s", out.Kind)
+}
+
+// abandonedText composes the badge label and the report of a detached merge
+// that ended without landing, an eviction among them. One never forked did
+// not run at all; one whose merge workspace exists left the queue before it
+// landed, and the report names that workspace's branch, which still holds the
+// merge's work and can be queued again.
+func abandonedText(mergeWS wsm.Workspace, out merge.DetachedOutcome) (string, string) {
+	if mergeWS.ID == "" {
+		return fmt.Sprintf("merge of %s did not run", out.Branch),
+			fmt.Sprintf("It did not run: %s.", out.Summary)
+	}
+	return fmt.Sprintf("merge of %s did not land", out.Branch),
+		fmt.Sprintf("It ended before it landed: %s. Nothing of it landed. Its merge workspace `%s` keeps its branch `%s` with the merge's work, so that work can be queued again with `agent-repld workspace async-merge -branch %s`.",
+			out.Summary, mergeWS.Name, mergeWS.Branch, mergeWS.Branch)
 }
 
 // Run sweeps for idle merge workspaces once this daemon owns the state, and

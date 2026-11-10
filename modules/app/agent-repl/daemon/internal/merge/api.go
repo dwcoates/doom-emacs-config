@@ -427,10 +427,6 @@ type DetachedOutcome struct {
 	// every end that merged nothing (a branch already on its target among
 	// them). The resolved banner says it in place of Summary.
 	MergedInto string
-	// Requested marks an abandonment somebody asked for (AbandonCause's
-	// releases): the requester's roster is told the merge ended, and its
-	// conversation is not handed the end back, since nothing failed.
-	Requested bool
 	// InPlace marks the end of a SYNC merge, which ran in the workspace it is
 	// handed back to rather than in a merge workspace.
 	InPlace bool
