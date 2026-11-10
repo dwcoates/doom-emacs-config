@@ -532,13 +532,13 @@
   --topbar-chips-gap: 0.15rem;
   --topbar-chips-inset: 0.225rem;
   /* THE PERSISTENT-WIFI CHIP'S PAINTS (owner request, 2026-10-02): the glyph
-     is black; the disc behind it is white when the mode is off and green when
+     is black; the disc behind it is light grey when the mode is off and green when
      it is on (green-500, a step brighter than `--ok`). The remote-control chip
      wears the same three paints (owner ruling, 2026-10-31: the same look and
      feel, another symbol). */
   --wifi-glyph: #000000;
   --wifi-mode-on-disc: #22c55e;
-  --wifi-mode-off-disc: #ffffff;
+  --wifi-mode-off-disc: #e5e7eb;
   font-family: ui-sans-serif, system-ui, sans-serif;
 }
 

@@ -31,6 +31,7 @@ import type {
 import { drawPromptBlockArm, drawPromptCopyControl } from "./blocks.js";
 import { reserveCopyRoom } from "../../bubble/copy-room.js";
 import { drawPeerArrow } from "./peer-arrow.js";
+import { MENTION_TEXT_CLASS, linkWorkspaceMentionsInText } from "../workspace-mentions.js";
 
 const PATH = "FeedAgentPrompt";
 
@@ -72,13 +73,19 @@ export function drawFeedAgentPrompt(msg: FeedAgentPrompt, previous?: HTMLElement
  * the direction names — after the name for a prompt that went out, before it
  * for one that came in. Which kind of agent the other end is changes nothing
  * drawn: the daemon resolved the name for it.
+ *
+ * A NAME THAT IS A WORKSPACE'S IS A MENTION (owner request, 2026-11-10): it
+ * wears the mention purple and switches to that workspace on a click, exactly
+ * as a workspace's name in a prompt's text does (workspace-mentions.ts), and
+ * it is re-linked with every push of the page's mention targets.
  */
 export function drawFeedAgentPromptAddress(address: FeedAgentPromptAddress): HTMLElement {
   const el = document.createElement("span");
   el.className = "prompt-author prompt-address";
   const name = document.createElement("span");
-  name.className = "peer-name";
+  name.className = `peer-name ${MENTION_TEXT_CLASS}`;
   name.textContent = requireMessage(address.name, `${PATH}.address.name`).text;
+  linkWorkspaceMentionsInText(name);
   switch (address.direction.case) {
     case "sent":
       el.append(name, drawPeerArrow("out"));
