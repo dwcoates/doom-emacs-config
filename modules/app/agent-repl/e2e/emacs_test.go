@@ -952,7 +952,7 @@ func (e *Emacs) writeSettings(opts EmacsOpts) {
 // and happens whether or not the JIT is armed.
 //
 // The image's `doom sync --aot' never produces these, because none of the
-// advice runs during a sync -- so EVERY scenario compiled all nine into its
+// advice runs during a sync -- so EVERY scenario compiled every one into its
 // own throwaway `~/.emacs.d' cache, forty-five times a run, concurrently.
 // On 2026-09-10 four scenarios died of it in one run: Doom's 3.5s boot bound
 // missed with the breadcrumb stopping at "init.el finished", `emacsclient'
@@ -969,19 +969,21 @@ func (e *Emacs) writeSettings(opts EmacsOpts) {
 // So they are compiled ONCE, ahead of every scenario, into a container-wide
 // directory that `EMACSNATIVELOADPATH' puts on `native-comp-eln-load-path'.
 // `comp-trampoline-search' consults that path BEFORE compiling, so every
-// scenario boot finds all nine already built and compiles nothing.
+// scenario boot finds every one already built and compiles nothing.
 const trampolineCacheDir = "/tmp/agent-repl-e2e-trampolines"
 
 // emacsAdvisedPrimitives is every primitive a scenario's Emacs redefines, as
 // OBSERVED: it is the key set of `comp-installed-trampolines-h' after a boot,
-// not a reading of the sources. Six come from this module (`status.el',
-// `close-panels-on-open.el', `find-file-workspace.el'), `define-key' from
+// not a reading of the sources. Seven come from this module (`status.el',
+// `close-panels-on-open.el', `find-file-workspace.el', and `spell.el''s
+// bound on `accept-process-output'), `define-key' from
 // Doom's `general-auto-unbind-keys', and `yes-or-no-p' from the unanswerable
 // -prompt guard the harness itself installs in e2e-settings.el.
 //
 // A NAME MISSING FROM THIS LIST CANNOT ROT SILENTLY: assertTrampolinesWerePrewarmed
 // fails the scenario that installs one from anywhere but this cache.
 var emacsAdvisedPrimitives = []string{
+	"accept-process-output",
 	"define-key",
 	"modify-frame-parameters",
 	"read-key-sequence",
