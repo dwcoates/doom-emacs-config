@@ -47,15 +47,6 @@ func Child(parent *workspacev1.WorkspaceRef) *agentreplv1.WorkspaceRelationship 
 	return &agentreplv1.WorkspaceRelationship{Kind: &agentreplv1.WorkspaceRelationship_Child{Child: &agentreplv1.WorkspaceRelationshipChild{Parent: parent}}}
 }
 
-// Notice is the owner notice TEXT, nil for none (a child that forks its
-// owner, or a peer).
-func Notice(text string) *agentreplv1.WorkspaceOwnerNotice {
-	if text == "" {
-		return nil
-	}
-	return &agentreplv1.WorkspaceOwnerNotice{Text: text}
-}
-
 // LandsInto is the landing target into WS's branch.
 func LandsInto(ws *workspacev1.WorkspaceRef) *agentreplv1.WorkspaceLandingTarget {
 	return &agentreplv1.WorkspaceLandingTarget{Target: &agentreplv1.WorkspaceLandingTarget_Workspace{Workspace: &agentreplv1.WorkspaceLandingTargetWorkspace{Workspace: ws}}}

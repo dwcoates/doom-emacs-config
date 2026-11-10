@@ -69,8 +69,9 @@ type WorkspaceStatus struct {
 	// How the workspace stands to other work: a child of a parent, or a peer
 	// (WorkspaceRelationship).
 	Relationship *WorkspaceStatusRelationship `protobuf:"bytes,12,opt,name=relationship,proto3" json:"relationship,omitempty"`
-	// The workspace's owner and whether the owner lands its work
-	// (WorkspaceOwnerNotice). UNSET for a peer, which nobody owns.
+	// The workspace's owner: a child's parent, which may land the child's work
+	// beside the child itself and the user. UNSET for a peer, which nobody
+	// owns.
 	Owner *WorkspaceStatusOwner `protobuf:"bytes,13,opt,name=owner,proto3,oneof" json:"owner,omitempty"`
 	// The workspace whose agent asked for this one's creation. UNSET when the
 	// user asked, or the workspace was registered rather than created. Recorded
@@ -397,12 +398,7 @@ func (*WorkspaceStatusRelationshipPeer) Descriptor() ([]byte, []int) {
 type WorkspaceStatusOwner struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The owning workspace: the child's parent.
-	Workspace *v1.WorkspaceRef `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
-	// TRUE when the owner arbitrates and lands this workspace's work, because
-	// it is not a one-shot and its context was not forked from the owner; FALSE
-	// when it lands itself. Marking or unmarking the workspace a one-shot
-	// changes it.
-	OwnerLands    bool `protobuf:"varint,2,opt,name=owner_lands,json=ownerLands,proto3" json:"owner_lands,omitempty"`
+	Workspace     *v1.WorkspaceRef `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -442,13 +438,6 @@ func (x *WorkspaceStatusOwner) GetWorkspace() *v1.WorkspaceRef {
 		return x.Workspace
 	}
 	return nil
-}
-
-func (x *WorkspaceStatusOwner) GetOwnerLands() bool {
-	if x != nil {
-		return x.OwnerLands
-	}
-	return false
 }
 
 // Where a workspace's branch lands.
@@ -1411,11 +1400,9 @@ const file_agentrepl_v1_workspace_status_proto_rawDesc = "" +
 	"\x04kind\"V\n" +
 	" WorkspaceStatusRelationshipChild\x122\n" +
 	"\x06parent\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\x06parent\"!\n" +
-	"\x1fWorkspaceStatusRelationshipPeer\"q\n" +
+	"\x1fWorkspaceStatusRelationshipPeer\"c\n" +
 	"\x14WorkspaceStatusOwner\x128\n" +
-	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\x12\x1f\n" +
-	"\vowner_lands\x18\x02 \x01(\bR\n" +
-	"ownerLands\"\xc6\x01\n" +
+	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspaceJ\x04\b\x02\x10\x03R\vowner_lands\"\xc6\x01\n" +
 	"\x1aWorkspaceStatusMergeTarget\x12K\n" +
 	"\aprimary\x18\x01 \x01(\v2/.agentrepl.v1.WorkspaceStatusMergeTargetPrimaryH\x00R\aprimary\x12Q\n" +
 	"\tworkspace\x18\x02 \x01(\v21.agentrepl.v1.WorkspaceStatusMergeTargetWorkspaceH\x00R\tworkspaceB\b\n" +

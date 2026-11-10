@@ -137,7 +137,6 @@ func (s *server) CreateWorkspace(
 		spec.DeployHooks = deployHooksOf(standard.GetDeployHooks())
 		spec.Parent = relationshipParent(standard.GetRelationship())
 		spec.Landing, spec.FromOrigin = landingChoice(standard.LandingTarget)
-		spec.OwnerNotice = standard.GetOwnerNotice().GetText()
 	}
 	if oneShot := req.Msg.GetOneShot(); oneShot != nil {
 		spec.OneShot = true

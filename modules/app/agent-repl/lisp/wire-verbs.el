@@ -456,17 +456,13 @@ commission with a note naming it."
   "Encode CreateWorkspaceStandard from plist VALUE.
 The RELATIONSHIP is required: a child of a parent, or a peer.  Every
 other field is optional: an absent initial prompt is an empty workspace,
-an absent name means the daemon mints one, and an absent OWNER-NOTICE is
-none, which is right for a peer and for a child that forks its parent.
-The editor names no landing target, so the relationship\='s default
+and an absent name means the daemon mints one.  The editor names no landing target, so the relationship\='s default
 applies, and no deploy hooks: a workspace it creates deploys by its
 repository\='s own config."
   (let ((out (list (cons 'relationship
                          (agent-repl-wire-encode-workspace-relationship
                           (agent-repl-wire-verbs--require "CreateWorkspaceStandard" "relationship"
                                                            (plist-get value :relationship)))))))
-    (when (plist-get value :owner-notice)
-      (push (cons 'ownerNotice (list (cons 'text (plist-get value :owner-notice)))) out))
     (when (plist-get value :initial-prompt)
       (push (cons 'initialPrompt
                   (agent-repl-wire-encode-create-workspace-standard-initial-prompt
@@ -826,16 +822,6 @@ The child\='s owner is not in the registry, or is in another repository."
   (agent-repl-wire-verbs--decode-ref-arm
    "CreateWorkspaceUnknownOwner" 'owner json))
 
-(defun agent-repl-wire-decode-create-workspace-error-owner-notice-required (json)
-  "Decode CreateWorkspaceError's `owner_notice_required' arm.  Empty: a
-child not forked from its owner carries no owner notice."
-  (agent-repl-wire-verbs--decode-empty "CreateWorkspaceOwnerNoticeRequired" json))
-
-(defun agent-repl-wire-decode-create-workspace-error-owner-notice-unexpected (json)
-  "Decode CreateWorkspaceError's `owner_notice_unexpected' arm.  Empty: a
-child forked from its owner carries a notice it may not carry."
-  (agent-repl-wire-verbs--decode-empty "CreateWorkspaceOwnerNoticeUnexpected" json))
-
 (defun agent-repl-wire-decode-create-workspace-error-unknown-requester (json)
   "Decode CreateWorkspaceError's `unknown_requester' arm into (:workspace REF).
 The requesting workspace is not in the daemon\='s registry."
@@ -891,7 +877,7 @@ not decoded: an async merge, a create cut from origin and a create naming
 a landing target are an agent\='s requests, never the editor\='s, so one
 answering an editor create is a breach."
   (let ((message "CreateWorkspaceError"))
-    (agent-repl-wire-verbs--check-keys message json '(ungatedWithoutConsent noSlug briefMissing unknownRepository worktreeCreationFailed spawnFailed oneShotPolicyMissing namingFailed insideTemporaryDirectory unknownForkSource forkSourceHasNoConversation forkSourceHasNoFinishedTurn nameReserved nameHeld nameBranchExists invalidName unknownContextWorkspace unknownOwner ownerNoticeRequired ownerNoticeUnexpected unknownRequester parentNotOpen transferringAway standingDown modelNotInCatalog modelCatalogUnknown lifecycleConfigInvalid creationHookFailed))
+    (agent-repl-wire-verbs--check-keys message json '(ungatedWithoutConsent noSlug briefMissing unknownRepository worktreeCreationFailed spawnFailed oneShotPolicyMissing namingFailed insideTemporaryDirectory unknownForkSource forkSourceHasNoConversation forkSourceHasNoFinishedTurn nameReserved nameHeld nameBranchExists invalidName unknownContextWorkspace unknownOwner unknownRequester parentNotOpen transferringAway standingDown modelNotInCatalog modelCatalogUnknown lifecycleConfigInvalid creationHookFailed))
     (list :cause
           (agent-repl-wire-verbs--decode-oneof
            message "cause" json
@@ -913,8 +899,6 @@ answering an editor create is a breach."
          (list 'invalidName :invalid-name #'agent-repl-wire-decode-create-workspace-error-invalid-name)
          (list 'unknownContextWorkspace :unknown-context-workspace #'agent-repl-wire-decode-create-workspace-error-unknown-context-workspace)
          (list 'unknownOwner :unknown-owner #'agent-repl-wire-decode-create-workspace-error-unknown-owner)
-         (list 'ownerNoticeRequired :owner-notice-required #'agent-repl-wire-decode-create-workspace-error-owner-notice-required)
-         (list 'ownerNoticeUnexpected :owner-notice-unexpected #'agent-repl-wire-decode-create-workspace-error-owner-notice-unexpected)
          (list 'unknownRequester :unknown-requester #'agent-repl-wire-decode-create-workspace-error-unknown-requester)
          (list 'transferringAway :transferring-away #'agent-repl-wire-decode-create-workspace-error-transferring-away)
          (list 'standingDown :standing-down #'agent-repl-wire-decode-create-workspace-error-standing-down)
@@ -2017,13 +2001,6 @@ on the deploy."
            (list (list 'unversionedRepository :unversioned-repository #'agent-repl-wire-decode-finish-workspace-version-increment-unexpected-unversioned-repository)
                  (list 'notDefaultBranch :not-default-branch #'agent-repl-wire-decode-finish-workspace-version-increment-unexpected-not-default-branch))))))
 
-(defun agent-repl-wire-decode-finish-workspace-error-owner-lands (json)
-  "Decode FinishWorkspaceError's `owner_lands' arm into (:owner REF).
-The workspace is a child whose context was not forked from its owner, so
-only that owner finishes it."
-  (agent-repl-wire-verbs--decode-ref-arm
-   "FinishWorkspaceOwnerLands" 'owner json))
-
 (defun agent-repl-wire-decode-finish-workspace-error-requester-may-not-land (json)
   "Decode FinishWorkspaceError's `requester_may_not_land' arm.  Empty: the
 requester is neither the workspace, its owner, nor the user."
@@ -2064,7 +2041,7 @@ The merge a placement asked to stand behind is in no queue."
 THE ARM IS THE REFUSAL, so an unset cause is a contract breach and an
 arm this codec does not know is refused as an unknown field."
   (let ((message "FinishWorkspaceError"))
-    (agent-repl-wire-verbs--check-keys message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted noLayoutFacts sessionDeleted alreadyQueued alreadyDeploying versionIncrementRequired versionIncrementUnexpected ownerLands requesterMayNotLand noBranchCheckedOut hasOpenChildren noDeployConfig deployConfigInvalid placementBehindNotInLine))
+    (agent-repl-wire-verbs--check-keys message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted noLayoutFacts sessionDeleted alreadyQueued alreadyDeploying versionIncrementRequired versionIncrementUnexpected requesterMayNotLand noBranchCheckedOut hasOpenChildren noDeployConfig deployConfigInvalid placementBehindNotInLine))
     (list :cause
           (agent-repl-wire-verbs--decode-oneof
            message "cause" json
@@ -2078,7 +2055,6 @@ arm this codec does not know is refused as an unknown field."
                  (list 'alreadyDeploying :already-deploying #'agent-repl-wire-decode-finish-workspace-already-deploying)
                  (list 'versionIncrementRequired :version-increment-required #'agent-repl-wire-decode-finish-workspace-version-increment-required)
                  (list 'versionIncrementUnexpected :version-increment-unexpected #'agent-repl-wire-decode-finish-workspace-version-increment-unexpected)
-                 (list 'ownerLands :owner-lands #'agent-repl-wire-decode-finish-workspace-error-owner-lands)
                  (list 'requesterMayNotLand :requester-may-not-land #'agent-repl-wire-decode-finish-workspace-error-requester-may-not-land)
                  (list 'noBranchCheckedOut :no-branch-checked-out #'agent-repl-wire-decode-finish-workspace-error-no-branch-checked-out)
                  agent-repl-wire-verbs--has-open-children-arm

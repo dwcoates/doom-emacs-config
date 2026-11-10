@@ -2,7 +2,6 @@ package wsm
 
 import (
 	"context"
-	"errors"
 	"path/filepath"
 	"testing"
 )
@@ -19,13 +18,12 @@ func registerDerived(t *testing.T, s *store, repoDir, name string, facts Registe
 func TestRegisterWorkspaceRecordsItsDerivation(t *testing.T) {
 	tests := []struct {
 		name            string
-		ownerLands      bool
 		withParent      bool
 		withContextFrom bool
 		withRequester   bool
 	}{
-		{name: "a child its owner lands, forked from a third workspace, asked for by the owner", ownerLands: true, withParent: true, withContextFrom: true, withRequester: true},
-		{name: "a child that lands itself, forked from its owner", withParent: true, withContextFrom: true},
+		{name: "a child forked from a third workspace, asked for by its owner", withParent: true, withContextFrom: true, withRequester: true},
+		{name: "a child forked from its owner", withParent: true, withContextFrom: true},
 		{name: "a top-level workspace with a fresh context the user asked for"},
 		{name: "a top-level fork asked for by a workspace", withContextFrom: true, withRequester: true},
 	}
@@ -34,7 +32,7 @@ func TestRegisterWorkspaceRecordsItsDerivation(t *testing.T) {
 			// Arrange
 			s, _ := testStore(t)
 			f := newParentFamily(t, s, "owner", "source", "asker")
-			facts := RegisterFacts{LacksParentContext: tc.ownerLands}
+			var facts RegisterFacts
 			if tc.withParent {
 				id := f.byName["owner"].ID
 				facts.Parent = &id
@@ -59,9 +57,6 @@ func TestRegisterWorkspaceRecordsItsDerivation(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Workspace: %v", err)
 			}
-			if got.OwnerLands != tc.ownerLands {
-				t.Errorf("OwnerLands = %v, want %v", got.OwnerLands, tc.ownerLands)
-			}
 			if (got.ContextFrom != nil) != tc.withContextFrom || (tc.withContextFrom && *got.ContextFrom != f.byName["source"].ID) {
 				t.Errorf("ContextFrom = %v, want source %v", got.ContextFrom, tc.withContextFrom)
 			}
@@ -72,132 +67,44 @@ func TestRegisterWorkspaceRecordsItsDerivation(t *testing.T) {
 	}
 }
 
-func TestRegisterWorkspaceRefusesAnOwnerLandedWorkspaceWithNoOwner(t *testing.T) {
-	// Arrange
-	s, _ := testStore(t)
-	f := newParentFamily(t, s, "other")
-
-	// Act
-	_, err := registerDerived(t, s, f.repoDir, "orphan", RegisterFacts{LacksParentContext: true})
-
-	// Assert
-	if err == nil {
-		t.Fatal("RegisterWorkspace accepted an owner-landed workspace with no owner")
-	}
-	if n := scalar[int](t, s, `SELECT COUNT(*) FROM workspaces WHERE name = 'orphan'`); n != 0 {
-		t.Errorf("rows named orphan = %d, want 0", n)
-	}
-}
-
-func TestRegisterWorkspaceAnswersAOneShotChildLandingItself(t *testing.T) {
+// TestScanWorkspaceReadsALegacyOwnerLandsRow pins that the inert owner_lands
+// column is read by nothing: a row an earlier build wrote with it set, even
+// with no parent, decodes like any other.
+func TestScanWorkspaceReadsALegacyOwnerLandsRow(t *testing.T) {
 	tests := []struct {
-		name    string
-		oneShot bool
-		want    bool
+		name       string
+		withParent bool
 	}{
-		{name: "a child lacking its owner's context that is no one-shot is its owner's to land", want: true},
-		{name: "a one-shot child lacking its owner's context lands itself", oneShot: true},
+		{name: "a legacy child row its owner once landed", withParent: true},
+		{name: "a legacy row set with no parent"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange
 			s, _ := testStore(t)
 			f := newParentFamily(t, s, "owner")
-			owner := f.byName["owner"].ID
-
-			// Act
-			ws, err := registerDerived(t, s, f.repoDir, "derived", RegisterFacts{Parent: &owner, LacksParentContext: true, OneShot: tc.oneShot})
-
-			// Assert
+			var facts RegisterFacts
+			if tc.withParent {
+				id := f.byName["owner"].ID
+				facts.Parent = &id
+			}
+			ws, err := registerDerived(t, s, f.repoDir, "derived", facts)
 			if err != nil {
 				t.Fatalf("RegisterWorkspace: %v", err)
 			}
-			if ws.OwnerLands != tc.want || ws.OneShot != tc.oneShot {
-				t.Errorf("answered OwnerLands = %v, OneShot = %v; want %v, %v", ws.OwnerLands, ws.OneShot, tc.want, tc.oneShot)
-			}
-		})
-	}
-}
+			corrupt(t, s, `UPDATE workspaces SET owner_lands = 1 WHERE id = ?`, ws.ID)
 
-// TestOwnerLandsFollowsTheOneShotMark pins that who lands a child lacking its
-// owner's context is read off the one-shot mark, so each write of the mark
-// moves it with nothing else written.
-func TestOwnerLandsFollowsTheOneShotMark(t *testing.T) {
-	// Arrange: one fresh child of its owner, with a creation job to mark.
-	s, _ := testStore(t)
-	f := newParentFamily(t, s, "owner")
-	owner := f.byName["owner"].ID
-	ws, err := registerDerived(t, s, f.repoDir, "derived", RegisterFacts{Parent: &owner, LacksParentContext: true})
-	if err != nil {
-		t.Fatalf("RegisterWorkspace: %v", err)
-	}
-	if err := s.PutCreationJob(context.Background(), CreationJob{Workspace: ws.ID, Layout: MergeLayout{SourceBranch: ws.Branch, SourceDir: ws.Dir, TargetDir: ws.Dir}}); err != nil {
-		t.Fatalf("PutCreationJob: %v", err)
-	}
-	steps := []struct {
-		name    string
-		oneShot bool
-		want    bool
-	}{
-		{name: "marked a one-shot, it lands itself", oneShot: true, want: false},
-		{name: "unmarked, its owner lands it again", oneShot: false, want: true},
-	}
-	for _, step := range steps {
-		t.Run(step.name, func(t *testing.T) {
 			// Act
-			if err := s.SetOneShot(context.Background(), ws.ID, step.oneShot); err != nil {
-				t.Fatalf("SetOneShot(%v): %v", step.oneShot, err)
-			}
 			got, err := s.Workspace(context.Background(), ws.ID)
 
 			// Assert
 			if err != nil {
 				t.Fatalf("Workspace: %v", err)
 			}
-			if got.OwnerLands != step.want {
-				t.Errorf("OwnerLands = %v, want %v", got.OwnerLands, step.want)
+			if got.ID != ws.ID || (got.Parent != nil) != tc.withParent {
+				t.Errorf("Workspace = %s parent %v, want %s with parent %v", got.ID, got.Parent, ws.ID, tc.withParent)
 			}
 		})
-	}
-}
-
-func TestOwnerLands(t *testing.T) {
-	tests := []struct {
-		name                        string
-		lacksParentContext, oneShot bool
-		want                        bool
-	}{
-		{name: "a child lacking its owner's context is its owner's to land", lacksParentContext: true, want: true},
-		{name: "a one-shot lacking its owner's context lands itself", lacksParentContext: true, oneShot: true},
-		{name: "a workspace carrying its owner's context lands itself"},
-		{name: "a one-shot carrying its owner's context lands itself", oneShot: true},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			// Act
-			got := OwnerLands(tc.lacksParentContext, tc.oneShot)
-
-			// Assert
-			if got != tc.want {
-				t.Errorf("OwnerLands(%v, %v) = %v, want %v", tc.lacksParentContext, tc.oneShot, got, tc.want)
-			}
-		})
-	}
-}
-
-func TestScanWorkspaceRefusesAStoredOwnerLandedRowWithNoOwner(t *testing.T) {
-	// Arrange
-	s, _ := testStore(t)
-	ws := testWorkspace(t, s)
-	corrupt(t, s, `UPDATE workspaces SET owner_lands = 1, parent_id = NULL WHERE id = ?`, ws.ID)
-
-	// Act
-	_, err := s.Workspace(context.Background(), ws.ID)
-
-	// Assert
-	var decode *DecodeError
-	if !errors.As(err, &decode) || decode.Field != "owner_lands" {
-		t.Fatalf("Workspace error = %v, want a DecodeError on owner_lands", err)
 	}
 }
 

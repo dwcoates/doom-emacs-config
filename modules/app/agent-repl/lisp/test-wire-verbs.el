@@ -312,18 +312,6 @@ the required relationship is all the form carries."
       (should (equal (json-serialize standard)
                      "{\"relationship\":{\"child\":{\"parent\":{\"id\":\"ws-1\",\"dir\":\"/w/one\"}}}}")))))
 
-(ert-deftest agent-repl-test-wire-verbs-create-standard-owner-notice ()
-  "A standard create's owner notice rides the form as `ownerNotice'."
-  (agent-repl-test-wire-verbs--with-common
-    (let* ((request (list :repository agent-repl-test-wire-verbs--repo
-                          :form (list :arm :standard
-                                      :value (list :relationship
-                                                   (list :arm :child
-                                                         :value (list :parent agent-repl-test-wire-verbs--ref))
-                                                   :owner-notice "coming your way"))))
-           (standard (cdr (assq 'standard (agent-repl-test-wire-verbs--encode-create request)))))
-      (should (equal (cdr (assq 'ownerNotice standard)) '((text . "coming your way")))))))
-
 (ert-deftest agent-repl-test-wire-verbs-create-child-without-parent-refused ()
   "A child relationship IS its parent's, so one without a parent never reaches the wire."
   (agent-repl-test-wire-verbs--with-common
@@ -2331,7 +2319,7 @@ and the temporary root it carries."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_create_workspace.pb.go" "CreateWorkspaceError")
                        #'string<)
-                 (sort (list "ungatedWithoutConsent" "noSlug" "briefMissing" "unknownRepository" "worktreeCreationFailed" "spawnFailed" "oneShotPolicyMissing" "namingFailed" "insideTemporaryDirectory" "unknownForkSource" "forkSourceHasNoConversation" "forkSourceHasNoFinishedTurn" "nameReserved" "nameHeld" "nameBranchExists" "invalidName" "unknownContextWorkspace" "unknownOwner" "ownerNoticeRequired" "ownerNoticeUnexpected" "unknownRequester" "asyncMergeUnknownBranch" "asyncMergeBranchOwned" "asyncMergeUnknownSubagent" "asyncMergeUnknownMaker" "asyncMergeContextNotMaker" "asyncMergeNameTaken" "asyncMergeUnknownCloseAfter" "opIdWithAsyncMerge" "versionIncrementRequired" "versionIncrementUnexpected" "asyncMergeRequesterQueued" "asyncMergeRequesterMerging" "asyncMergeRequesterSessionDeleted" "parentNotOpen" "originFetchFailed" "asyncMergeNoDeployConfig" "asyncMergeDeployConfigInvalid" "transferringAway" "standingDown" "placementBehindNotInLine" "unknownLandingTarget" "modelNotInCatalog" "modelCatalogUnknown" "lifecycleConfigInvalid" "creationHookFailed")
+                 (sort (list "ungatedWithoutConsent" "noSlug" "briefMissing" "unknownRepository" "worktreeCreationFailed" "spawnFailed" "oneShotPolicyMissing" "namingFailed" "insideTemporaryDirectory" "unknownForkSource" "forkSourceHasNoConversation" "forkSourceHasNoFinishedTurn" "nameReserved" "nameHeld" "nameBranchExists" "invalidName" "unknownContextWorkspace" "unknownOwner" "unknownRequester" "asyncMergeUnknownBranch" "asyncMergeBranchOwned" "asyncMergeUnknownSubagent" "asyncMergeUnknownMaker" "asyncMergeContextNotMaker" "asyncMergeNameTaken" "asyncMergeUnknownCloseAfter" "opIdWithAsyncMerge" "versionIncrementRequired" "versionIncrementUnexpected" "asyncMergeRequesterQueued" "asyncMergeRequesterMerging" "asyncMergeRequesterSessionDeleted" "parentNotOpen" "originFetchFailed" "asyncMergeNoDeployConfig" "asyncMergeDeployConfigInvalid" "transferringAway" "standingDown" "placementBehindNotInLine" "unknownLandingTarget" "modelNotInCatalog" "modelCatalogUnknown" "lifecycleConfigInvalid" "creationHookFailed")
                        #'string<))))
 
 (ert-deftest agent-repl-test-wire-verbs-create-error-model-not-in-catalog-arm ()
@@ -2399,19 +2387,13 @@ ref it names."
                      "{\"unknownOwner\":{\"owner\":{\"id\":\"ws-2\",\"dir\":\"/w/two\"}}}"))
                    '(:cause (:arm :unknown-owner :value (:owner (:id "ws-2" :dir "/w/two"))))))))
 
-(ert-deftest agent-repl-test-wire-verbs-create-error-owner-notice-required-arm ()
-  "CreateWorkspaceError's `owner_notice_required' arm is empty."
+(ert-deftest agent-repl-test-wire-verbs-create-error-retired-owner-notice-arms-refused ()
+  "CreateWorkspaceError's retired owner-notice arms are refused as unknown fields."
   (agent-repl-test-wire-verbs--with-common
-    (should (equal (agent-repl-wire-decode-create-workspace-error
-                    (agent-repl-test-wire-verbs--parse "{\"ownerNoticeRequired\":{}}"))
-                   '(:cause (:arm :owner-notice-required :value nil))))))
-
-(ert-deftest agent-repl-test-wire-verbs-create-error-owner-notice-unexpected-arm ()
-  "CreateWorkspaceError's `owner_notice_unexpected' arm is empty."
-  (agent-repl-test-wire-verbs--with-common
-    (should (equal (agent-repl-wire-decode-create-workspace-error
-                    (agent-repl-test-wire-verbs--parse "{\"ownerNoticeUnexpected\":{}}"))
-                   '(:cause (:arm :owner-notice-unexpected :value nil))))))
+    (dolist (arm '("ownerNoticeRequired" "ownerNoticeUnexpected"))
+      (should-error (agent-repl-wire-decode-create-workspace-error
+                     (agent-repl-test-wire-verbs--parse (format "{\"%s\":{}}" arm)))
+                    :type 'agent-repl-wire-error))))
 
 (ert-deftest agent-repl-test-wire-verbs-create-error-unknown-requester-arm ()
   "CreateWorkspaceError's `unknown_requester' arm decodes the requester it names."
@@ -3003,13 +2985,13 @@ carries."
                    '(:cause (:arm :deploy-config-invalid
                              :value (:path "/r/.agent-repl/lifecycle.yaml" :detail "pre_deploy is required")))))))
 
-(ert-deftest agent-repl-test-wire-verbs-finish-error-owner-lands-arm ()
-  "FinishWorkspaceError's `owner_lands' arm decodes the owner that lands."
+(ert-deftest agent-repl-test-wire-verbs-finish-error-retired-owner-lands-arm-refused ()
+  "FinishWorkspaceError's retired `owner_lands' arm is refused as an unknown field."
   (agent-repl-test-wire-verbs--with-common
-    (should (equal (agent-repl-wire-decode-finish-workspace-error
-                    (agent-repl-test-wire-verbs--parse
-                     "{\"ownerLands\":{\"owner\":{\"id\":\"ws-2\",\"dir\":\"/w/two\"}}}"))
-                   '(:cause (:arm :owner-lands :value (:owner (:id "ws-2" :dir "/w/two"))))))))
+    (should-error (agent-repl-wire-decode-finish-workspace-error
+                   (agent-repl-test-wire-verbs--parse
+                    "{\"ownerLands\":{\"owner\":{\"id\":\"ws-2\",\"dir\":\"/w/two\"}}}"))
+                  :type 'agent-repl-wire-error)))
 
 (ert-deftest agent-repl-test-wire-verbs-finish-error-requester-may-not-land-arm ()
   "FinishWorkspaceError's `requester_may_not_land' arm is empty."
@@ -3078,7 +3060,7 @@ at."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_finish_workspace.pb.go" "FinishWorkspaceError")
                        #'string<)
-                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "noLayoutFacts" "sessionDeleted" "alreadyQueued" "alreadyDeploying" "versionIncrementRequired" "versionIncrementUnexpected" "ownerLands" "requesterMayNotLand" "noBranchCheckedOut" "hasOpenChildren" "noDeployConfig" "deployConfigInvalid" "placementBehindNotInLine")
+                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "noLayoutFacts" "sessionDeleted" "alreadyQueued" "alreadyDeploying" "versionIncrementRequired" "versionIncrementUnexpected" "requesterMayNotLand" "noBranchCheckedOut" "hasOpenChildren" "noDeployConfig" "deployConfigInvalid" "placementBehindNotInLine")
                        #'string<))))
 
 (ert-deftest agent-repl-test-wire-verbs-finish-error-placement-behind-not-in-line-arm ()
@@ -6592,8 +6574,7 @@ instead diverges from it unseen."
                 agent-repl-wire-decode-create-workspace-fork-source-has-no-conversation
                 agent-repl-wire-decode-create-workspace-fork-source-has-no-finished-turn
                 agent-repl-wire-decode-create-workspace-error-unknown-owner
-                agent-repl-wire-decode-create-workspace-error-unknown-requester
-                agent-repl-wire-decode-finish-workspace-error-owner-lands))
+                agent-repl-wire-decode-create-workspace-error-unknown-requester))
     (should (string-match-p "agent-repl-wire-verbs--decode-ref-arm"
                             (prin1-to-string (symbol-function fn))))))
 

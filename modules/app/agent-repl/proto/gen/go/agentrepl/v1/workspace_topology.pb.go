@@ -823,71 +823,6 @@ func (x *WorkspaceLandingTargetWorkspace) GetWorkspace() *v1.WorkspaceRef {
 	return nil
 }
 
-// The requester's notice to a new workspace's OWNER when the owner, not the
-// workspace itself, lands its work.
-//
-// WHO OWNS A WORKSPACE: a child's parent. A peer has no owner and always lands
-// itself, wherever it lands. A ONE-SHOT ALWAYS LANDS ITSELF too, child or
-// peer, fresh or forked: it is commissioned to finish unattended, so a main
-// workspace can dispatch fresh one-shot children off the main branch. WHO
-// LANDS ANY OTHER CHILD depends on whose context it starts with: a child whose
-// context is forked FROM ITS OWNER carries the owner's whole context and lands
-// itself; one that starts fresh, or forked from any other workspace, does not
-// know why its owner's work is shaped as it is, so its OWNER arbitrates and
-// lands it. Such a create must carry the notice, and the workspace is refused
-// merging itself (MergeWorkspaceError.owner_lands); the owner lands it with
-// FinishWorkspace. A create that lands itself (forked from its owner, a
-// one-shot, or a peer) must not carry one (`owner_notice_unexpected`;
-// `owner_notice_required` when one is owed and absent).
-type WorkspaceOwnerNotice struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Plain text, as the requesting agent or user wrote it: what the new
-	// workspace will do for the owner and why. The daemon delivers it to the
-	// owner's session with its own addendum stating that landing the new
-	// workspace's work is the owner's responsibility, and how to do it.
-	// REQUIRED: blank is refused as invalid.
-	Text          string `protobuf:"bytes,1,opt,name=text,proto3" json:"text,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *WorkspaceOwnerNotice) Reset() {
-	*x = WorkspaceOwnerNotice{}
-	mi := &file_agentrepl_v1_workspace_topology_proto_msgTypes[13]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *WorkspaceOwnerNotice) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*WorkspaceOwnerNotice) ProtoMessage() {}
-
-func (x *WorkspaceOwnerNotice) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_workspace_topology_proto_msgTypes[13]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use WorkspaceOwnerNotice.ProtoReflect.Descriptor instead.
-func (*WorkspaceOwnerNotice) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_workspace_topology_proto_rawDescGZIP(), []int{13}
-}
-
-func (x *WorkspaceOwnerNotice) GetText() string {
-	if x != nil {
-		return x.Text
-	}
-	return ""
-}
-
 // Where a merge joins its repository's queue once it is put in line.
 // REQUIRED wherever a merge is asked for: no placement is implied.
 type MergeQueuePlacement struct {
@@ -906,7 +841,7 @@ type MergeQueuePlacement struct {
 
 func (x *MergeQueuePlacement) Reset() {
 	*x = MergeQueuePlacement{}
-	mi := &file_agentrepl_v1_workspace_topology_proto_msgTypes[14]
+	mi := &file_agentrepl_v1_workspace_topology_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -918,7 +853,7 @@ func (x *MergeQueuePlacement) String() string {
 func (*MergeQueuePlacement) ProtoMessage() {}
 
 func (x *MergeQueuePlacement) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_workspace_topology_proto_msgTypes[14]
+	mi := &file_agentrepl_v1_workspace_topology_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -931,7 +866,7 @@ func (x *MergeQueuePlacement) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MergeQueuePlacement.ProtoReflect.Descriptor instead.
 func (*MergeQueuePlacement) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_workspace_topology_proto_rawDescGZIP(), []int{14}
+	return file_agentrepl_v1_workspace_topology_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *MergeQueuePlacement) GetPlace() isMergeQueuePlacement_Place {
@@ -1009,7 +944,7 @@ type MergeQueuePlacementBack struct {
 
 func (x *MergeQueuePlacementBack) Reset() {
 	*x = MergeQueuePlacementBack{}
-	mi := &file_agentrepl_v1_workspace_topology_proto_msgTypes[15]
+	mi := &file_agentrepl_v1_workspace_topology_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1021,7 +956,7 @@ func (x *MergeQueuePlacementBack) String() string {
 func (*MergeQueuePlacementBack) ProtoMessage() {}
 
 func (x *MergeQueuePlacementBack) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_workspace_topology_proto_msgTypes[15]
+	mi := &file_agentrepl_v1_workspace_topology_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1034,7 +969,7 @@ func (x *MergeQueuePlacementBack) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MergeQueuePlacementBack.ProtoReflect.Descriptor instead.
 func (*MergeQueuePlacementBack) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_workspace_topology_proto_rawDescGZIP(), []int{15}
+	return file_agentrepl_v1_workspace_topology_proto_rawDescGZIP(), []int{14}
 }
 
 // The front of the queue. No fields.
@@ -1046,7 +981,7 @@ type MergeQueuePlacementFront struct {
 
 func (x *MergeQueuePlacementFront) Reset() {
 	*x = MergeQueuePlacementFront{}
-	mi := &file_agentrepl_v1_workspace_topology_proto_msgTypes[16]
+	mi := &file_agentrepl_v1_workspace_topology_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1058,7 +993,7 @@ func (x *MergeQueuePlacementFront) String() string {
 func (*MergeQueuePlacementFront) ProtoMessage() {}
 
 func (x *MergeQueuePlacementFront) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_workspace_topology_proto_msgTypes[16]
+	mi := &file_agentrepl_v1_workspace_topology_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1071,7 +1006,7 @@ func (x *MergeQueuePlacementFront) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MergeQueuePlacementFront.ProtoReflect.Descriptor instead.
 func (*MergeQueuePlacementFront) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_workspace_topology_proto_rawDescGZIP(), []int{16}
+	return file_agentrepl_v1_workspace_topology_proto_rawDescGZIP(), []int{15}
 }
 
 // Directly behind a named merge.
@@ -1085,7 +1020,7 @@ type MergeQueuePlacementBehind struct {
 
 func (x *MergeQueuePlacementBehind) Reset() {
 	*x = MergeQueuePlacementBehind{}
-	mi := &file_agentrepl_v1_workspace_topology_proto_msgTypes[17]
+	mi := &file_agentrepl_v1_workspace_topology_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1097,7 +1032,7 @@ func (x *MergeQueuePlacementBehind) String() string {
 func (*MergeQueuePlacementBehind) ProtoMessage() {}
 
 func (x *MergeQueuePlacementBehind) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_workspace_topology_proto_msgTypes[17]
+	mi := &file_agentrepl_v1_workspace_topology_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1110,7 +1045,7 @@ func (x *MergeQueuePlacementBehind) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MergeQueuePlacementBehind.ProtoReflect.Descriptor instead.
 func (*MergeQueuePlacementBehind) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_workspace_topology_proto_rawDescGZIP(), []int{17}
+	return file_agentrepl_v1_workspace_topology_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *MergeQueuePlacementBehind) GetMerge() string {
@@ -1132,7 +1067,7 @@ type MergeQueuePlacementBehindNotInLine struct {
 
 func (x *MergeQueuePlacementBehindNotInLine) Reset() {
 	*x = MergeQueuePlacementBehindNotInLine{}
-	mi := &file_agentrepl_v1_workspace_topology_proto_msgTypes[18]
+	mi := &file_agentrepl_v1_workspace_topology_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1144,7 +1079,7 @@ func (x *MergeQueuePlacementBehindNotInLine) String() string {
 func (*MergeQueuePlacementBehindNotInLine) ProtoMessage() {}
 
 func (x *MergeQueuePlacementBehindNotInLine) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_workspace_topology_proto_msgTypes[18]
+	mi := &file_agentrepl_v1_workspace_topology_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1157,7 +1092,7 @@ func (x *MergeQueuePlacementBehindNotInLine) ProtoReflect() protoreflect.Message
 
 // Deprecated: Use MergeQueuePlacementBehindNotInLine.ProtoReflect.Descriptor instead.
 func (*MergeQueuePlacementBehindNotInLine) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_workspace_topology_proto_rawDescGZIP(), []int{18}
+	return file_agentrepl_v1_workspace_topology_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *MergeQueuePlacementBehindNotInLine) GetBehind() string {
@@ -1203,9 +1138,7 @@ const file_agentrepl_v1_workspace_topology_proto_rawDesc = "" +
 	"\f_from_origin\")\n" +
 	"'WorkspaceLandingTargetPrimaryFromOrigin\"[\n" +
 	"\x1fWorkspaceLandingTargetWorkspace\x128\n" +
-	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\"*\n" +
-	"\x14WorkspaceOwnerNotice\x12\x12\n" +
-	"\x04text\x18\x01 \x01(\tR\x04text\"\xde\x01\n" +
+	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\"\xde\x01\n" +
 	"\x13MergeQueuePlacement\x12;\n" +
 	"\x04back\x18\x01 \x01(\v2%.agentrepl.v1.MergeQueuePlacementBackH\x00R\x04back\x12>\n" +
 	"\x05front\x18\x02 \x01(\v2&.agentrepl.v1.MergeQueuePlacementFrontH\x00R\x05front\x12A\n" +
@@ -1230,7 +1163,7 @@ func file_agentrepl_v1_workspace_topology_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_workspace_topology_proto_rawDescData
 }
 
-var file_agentrepl_v1_workspace_topology_proto_msgTypes = make([]protoimpl.MessageInfo, 19)
+var file_agentrepl_v1_workspace_topology_proto_msgTypes = make([]protoimpl.MessageInfo, 18)
 var file_agentrepl_v1_workspace_topology_proto_goTypes = []any{
 	(*WorkspaceRequester)(nil),                      // 0: agentrepl.v1.WorkspaceRequester
 	(*WorkspaceRequesterUser)(nil),                  // 1: agentrepl.v1.WorkspaceRequesterUser
@@ -1245,31 +1178,30 @@ var file_agentrepl_v1_workspace_topology_proto_goTypes = []any{
 	(*WorkspaceLandingTargetPrimary)(nil),           // 10: agentrepl.v1.WorkspaceLandingTargetPrimary
 	(*WorkspaceLandingTargetPrimaryFromOrigin)(nil), // 11: agentrepl.v1.WorkspaceLandingTargetPrimaryFromOrigin
 	(*WorkspaceLandingTargetWorkspace)(nil),         // 12: agentrepl.v1.WorkspaceLandingTargetWorkspace
-	(*WorkspaceOwnerNotice)(nil),                    // 13: agentrepl.v1.WorkspaceOwnerNotice
-	(*MergeQueuePlacement)(nil),                     // 14: agentrepl.v1.MergeQueuePlacement
-	(*MergeQueuePlacementBack)(nil),                 // 15: agentrepl.v1.MergeQueuePlacementBack
-	(*MergeQueuePlacementFront)(nil),                // 16: agentrepl.v1.MergeQueuePlacementFront
-	(*MergeQueuePlacementBehind)(nil),               // 17: agentrepl.v1.MergeQueuePlacementBehind
-	(*MergeQueuePlacementBehindNotInLine)(nil),      // 18: agentrepl.v1.MergeQueuePlacementBehindNotInLine
-	(*v1.WorkspaceRef)(nil),                         // 19: workspace.v1.WorkspaceRef
+	(*MergeQueuePlacement)(nil),                     // 13: agentrepl.v1.MergeQueuePlacement
+	(*MergeQueuePlacementBack)(nil),                 // 14: agentrepl.v1.MergeQueuePlacementBack
+	(*MergeQueuePlacementFront)(nil),                // 15: agentrepl.v1.MergeQueuePlacementFront
+	(*MergeQueuePlacementBehind)(nil),               // 16: agentrepl.v1.MergeQueuePlacementBehind
+	(*MergeQueuePlacementBehindNotInLine)(nil),      // 17: agentrepl.v1.MergeQueuePlacementBehindNotInLine
+	(*v1.WorkspaceRef)(nil),                         // 18: workspace.v1.WorkspaceRef
 }
 var file_agentrepl_v1_workspace_topology_proto_depIdxs = []int32{
 	1,  // 0: agentrepl.v1.WorkspaceRequester.user:type_name -> agentrepl.v1.WorkspaceRequesterUser
 	2,  // 1: agentrepl.v1.WorkspaceRequester.workspace:type_name -> agentrepl.v1.WorkspaceRequesterWorkspace
-	19, // 2: agentrepl.v1.WorkspaceRequesterWorkspace.workspace:type_name -> workspace.v1.WorkspaceRef
+	18, // 2: agentrepl.v1.WorkspaceRequesterWorkspace.workspace:type_name -> workspace.v1.WorkspaceRef
 	4,  // 3: agentrepl.v1.WorkspaceContextOrigin.fresh:type_name -> agentrepl.v1.WorkspaceContextOriginFresh
 	5,  // 4: agentrepl.v1.WorkspaceContextOrigin.fork:type_name -> agentrepl.v1.WorkspaceContextOriginFork
-	19, // 5: agentrepl.v1.WorkspaceContextOriginFork.workspace:type_name -> workspace.v1.WorkspaceRef
+	18, // 5: agentrepl.v1.WorkspaceContextOriginFork.workspace:type_name -> workspace.v1.WorkspaceRef
 	7,  // 6: agentrepl.v1.WorkspaceRelationship.child:type_name -> agentrepl.v1.WorkspaceRelationshipChild
 	8,  // 7: agentrepl.v1.WorkspaceRelationship.peer:type_name -> agentrepl.v1.WorkspaceRelationshipPeer
-	19, // 8: agentrepl.v1.WorkspaceRelationshipChild.parent:type_name -> workspace.v1.WorkspaceRef
+	18, // 8: agentrepl.v1.WorkspaceRelationshipChild.parent:type_name -> workspace.v1.WorkspaceRef
 	10, // 9: agentrepl.v1.WorkspaceLandingTarget.primary:type_name -> agentrepl.v1.WorkspaceLandingTargetPrimary
 	12, // 10: agentrepl.v1.WorkspaceLandingTarget.workspace:type_name -> agentrepl.v1.WorkspaceLandingTargetWorkspace
 	11, // 11: agentrepl.v1.WorkspaceLandingTargetPrimary.from_origin:type_name -> agentrepl.v1.WorkspaceLandingTargetPrimaryFromOrigin
-	19, // 12: agentrepl.v1.WorkspaceLandingTargetWorkspace.workspace:type_name -> workspace.v1.WorkspaceRef
-	15, // 13: agentrepl.v1.MergeQueuePlacement.back:type_name -> agentrepl.v1.MergeQueuePlacementBack
-	16, // 14: agentrepl.v1.MergeQueuePlacement.front:type_name -> agentrepl.v1.MergeQueuePlacementFront
-	17, // 15: agentrepl.v1.MergeQueuePlacement.behind:type_name -> agentrepl.v1.MergeQueuePlacementBehind
+	18, // 12: agentrepl.v1.WorkspaceLandingTargetWorkspace.workspace:type_name -> workspace.v1.WorkspaceRef
+	14, // 13: agentrepl.v1.MergeQueuePlacement.back:type_name -> agentrepl.v1.MergeQueuePlacementBack
+	15, // 14: agentrepl.v1.MergeQueuePlacement.front:type_name -> agentrepl.v1.MergeQueuePlacementFront
+	16, // 15: agentrepl.v1.MergeQueuePlacement.behind:type_name -> agentrepl.v1.MergeQueuePlacementBehind
 	16, // [16:16] is the sub-list for method output_type
 	16, // [16:16] is the sub-list for method input_type
 	16, // [16:16] is the sub-list for extension type_name
@@ -1299,7 +1231,7 @@ func file_agentrepl_v1_workspace_topology_proto_init() {
 		(*WorkspaceLandingTarget_Workspace)(nil),
 	}
 	file_agentrepl_v1_workspace_topology_proto_msgTypes[10].OneofWrappers = []any{}
-	file_agentrepl_v1_workspace_topology_proto_msgTypes[14].OneofWrappers = []any{
+	file_agentrepl_v1_workspace_topology_proto_msgTypes[13].OneofWrappers = []any{
 		(*MergeQueuePlacement_Back)(nil),
 		(*MergeQueuePlacement_Front)(nil),
 		(*MergeQueuePlacement_Behind)(nil),
@@ -1310,7 +1242,7 @@ func file_agentrepl_v1_workspace_topology_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_workspace_topology_proto_rawDesc), len(file_agentrepl_v1_workspace_topology_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   19,
+			NumMessages:   18,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

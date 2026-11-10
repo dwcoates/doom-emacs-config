@@ -1,6 +1,6 @@
 ---
 name: agent-repl-workspaces
-description: 'Work with agent-repl workspaces through the agent API: create a workspace (a child of this one or of another, or a peer, with its landing target (its parent''s branch or the main branch), a fresh context or one forked from a workspace''s conversation, as a one-shot or not), prompt another workspace, read a workspace''s status, list them all, or find workspaces open or closed by repository, time, standing or text with their summaries, mark this workspace a one-shot or as awaiting another workspace''s answer (which draws it in the background, yellow), store its links (owned or a reference; an owned pull request is followed for its comments, reviews and checks; the topbar summary''s menu), reply on a pull request it owns (`pr-comment`), send a desktop notification on behalf of a workspace whose click opens it in Emacs (`workspace notify`), set its topbar summary (`workspace summary`), rename a workspace, hide or show a workspace, set its priority, turn a workspace''s remote control on or off, retarget its parent, adopt an existing workspace as this one''s child, reorganize this workspace''s work across repositories (move to the repository the work principally belongs to and govern one workspace in each other repository it touches, proactively and without asking), read its repository''s sidebar subsections and file it into one, finish a workspace (deploy it as its repository''s `.agent-repl/lifecycle.yaml` says), open, close, kill, compact, restart (on its own, to unstick a workspace or refresh its harness), interrupt or select one, answer a cold gate, and subscribe this workspace to another''s turns, asks, landing and close, follow a GitHub merge queue, and register a repository with agent-repl (`repository register`). Use whenever work should be split off into another workspace, handed to one, or followed; whenever this workspace commits to finishing the rest of its work unattended, or is told to one-shot itself or to land its work when done (mark it a one-shot); whenever a one-shot is reopened or prompted for more work after it finished (take the mark back); whenever this workspace ends a turn to wait for another workspace (mark it awaiting) and when that answer arrives (clear the mark); whenever this workspace has no summary or its high-level task materially changed (set its summary); whenever this workspace''s task has clearly moved away from its name (rename it, without asking); whenever a child created with a note to its owner must be landed or closed by its owner; whenever a repository''s lifecycle config (`.agent-repl/lifecycle.yaml`) or one of its hooks is written or read; whenever work is in a repository agent-repl does not know yet (register it before creating workspaces there); whenever this workspace''s work principally belongs to another repository or touches several (reorganize it); and whenever a workspace must be closed, compacted, killed or have its gate answered. Replaces /create-or-update-workspace and the workspace command files.'
+description: 'Work with agent-repl workspaces through the agent API: create a workspace (a child of this one or of another, or a peer, with its landing target (its parent''s branch or the main branch), a fresh context or one forked from a workspace''s conversation, as a one-shot or not), prompt another workspace, read a workspace''s status, list them all, or find workspaces open or closed by repository, time, standing or text with their summaries, mark this workspace a one-shot or as awaiting another workspace''s answer (which draws it in the background, yellow), store its links (owned or a reference; an owned pull request is followed for its comments, reviews and checks; the topbar summary''s menu), reply on a pull request it owns (`pr-comment`), send a desktop notification on behalf of a workspace whose click opens it in Emacs (`workspace notify`), set its topbar summary (`workspace summary`), rename a workspace, hide or show a workspace, set its priority, turn a workspace''s remote control on or off, retarget its parent, adopt an existing workspace as this one''s child, reorganize this workspace''s work across repositories (move to the repository the work principally belongs to and govern one workspace in each other repository it touches, proactively and without asking), read its repository''s sidebar subsections and file it into one, finish a workspace (deploy it as its repository''s `.agent-repl/lifecycle.yaml` says), open, close, kill, compact, restart (on its own, to unstick a workspace or refresh its harness), interrupt or select one, answer a cold gate, and subscribe this workspace to another''s turns, asks, landing and close, follow a GitHub merge queue, and register a repository with agent-repl (`repository register`). Use whenever work should be split off into another workspace, handed to one, or followed; whenever this workspace commits to finishing the rest of its work unattended, or is told to one-shot itself or to land its work when done (mark it a one-shot); whenever a one-shot is reopened or prompted for more work after it finished (take the mark back); whenever this workspace ends a turn to wait for another workspace (mark it awaiting) and when that answer arrives (clear the mark); whenever this workspace has no summary or its high-level task materially changed (set its summary); whenever this workspace''s task has clearly moved away from its name (rename it, without asking); whenever a repository''s lifecycle config (`.agent-repl/lifecycle.yaml`) or one of its hooks is written or read; whenever work is in a repository agent-repl does not know yet (register it before creating workspaces there); whenever this workspace''s work principally belongs to another repository or touches several (reorganize it); and whenever a workspace must be closed, compacted, killed or have its gate answered. Replaces /create-or-update-workspace and the workspace command files.'
 argument-hint: "create | async-merge | prompt | status | list | find | set | summary | link | finished | open | close | kill | compact | restart | interrupt | select | gate | subscribe | unsubscribe | subsections | place | repository register"
 allowed-tools: Bash(~/.claude/skills/agent-repl-workspaces/agent-repld:*)
 ---
@@ -81,21 +81,21 @@ not the relationship's default, its landing target:
     by creating a workspace B as its child:
     `workspace create -repository <baz> -relationship child -parent here`.
     B nests under A in the sidebar, under a divider naming baz, and A owns
-    and lands it. A NEVER edits baz's checkout or cuts branches in it by
+    and coordinates it (B lands its own work). A NEVER edits baz's checkout or cuts branches in it by
     hand. Work in baz that is truly separate from A's is a `peer` instead.
   - If baz is not yet registered with agent-repl, A first registers it with
     `repository register` (see "Registering a repository" below), then
     creates B.
   - B is created `-context fresh` (per the cross-repository rule above),
-    with everything B needs carried in its `-prompt` and an `-owner-notice`
-    telling A what is coming.
+    with everything B needs carried in its `-prompt`.
   - A coordinates with B through `workspace prompt` and the awaiting mark
     (`workspace set -await`), e.g. integrating B's result; A follows B
     without subscribing. Example: baz owns the protobufs and foo holds the
     C++ implementation: A asks B for the protobuf change, marks itself
     awaiting, then builds A's C++ integration against B's protobufs.
-  - A lands B's change through baz's deploy (`workspace finished B`) once
-    it has reviewed it, and lands foo's own.
+  - B lands its own change through baz's deploy (`workspace finished here`)
+    when its work is done; A may also land it (`workspace finished B`), and
+    A lands foo's own.
 
 Choose the combination from what the work needs (every `fork` row is within
 one repository, except the move below):
@@ -113,17 +113,11 @@ one repository, except the move below):
 | coordinated work in a different repository (`-repository DIR`) | `child -parent here` | its main (default) | `fresh` | situational |
 | separate work in a different repository | `peer` | its main | `fresh` | situational |
 
-- A ONE-SHOT ALWAYS LANDS ITSELF, whatever its context: a one-shot child,
-  fresh or forked, still nests under its parent and is followed by it, and
-  lands its own work. It takes no notice.
-- A CHILD THAT IS NOT A ONE-SHOT AND WHOSE CONTEXT IS NOT FORKED FROM ITS
-  PARENT is its parent's to arbitrate and land: give `-owner-notice` a
-  plain-English note telling the parent what is coming and why. The parent
-  is told with the daemon's addendum, and only the parent (or the user)
-  finishes it (`workspace finished`). Marking it a one-shot later makes it
-  land itself; unmarking it hands its landing back to the parent.
-- A child forked from its parent has the parent's whole context and lands
-  itself; it takes no notice. A peer never takes a notice.
+- EVERY WORKSPACE LANDS ITSELF, whatever its relationship and context,
+  one-shot or not: a child still nests under its parent and is followed by
+  it, and its parent (or the user) may also land it with
+  `workspace finished CHILD`. Any other workspace is refused
+  (`requester_may_not_land`).
 - `-originator emoji-ack|user-or-workspace` states who is creating the
   workspace, which decides the kind of workspace it is (below, "Repository
   lifecycle"). The default is `user-or-workspace`. `emoji-ack` is only for
@@ -265,7 +259,7 @@ user in the same response what it reorganized and why.
   (`editorFocused`).
 - `workspace status WS` reads one workspace: its activity, its merge target
   (`primary` or `workspace{workspace}`), its repository, its `relationship`
-  (child{parent} or peer), its `owner` (the workspace and `ownerLands`; absent
+  (child{parent} or peer), its `owner` (the owning workspace; absent
   for a peer), `createdBy`, its open `children`, whether it is a one-shot,
   whether it awaits another workspace, and a cold gate it is parked at.
 - `workspace list` prints `workspace find`'s record, one compact JSON object a

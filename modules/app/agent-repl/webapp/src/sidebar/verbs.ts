@@ -804,8 +804,6 @@ export function finishWorkspaceRefusal(cause: CauseOf<FinishWorkspaceError>): st
       return "this workspace is already in the queue";
     case "alreadyDeploying":
       return "this workspace is already deploying";
-    case "ownerLands":
-      return `this child is its parent's to land: ${cause.value.owner?.dir ?? "the parent"} finishes it`;
     case "requesterMayNotLand":
       return "only this workspace, its parent or the user may land it";
     case "noBranchCheckedOut":

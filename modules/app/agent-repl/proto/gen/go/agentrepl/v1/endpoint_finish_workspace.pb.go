@@ -25,9 +25,8 @@
 // workspace's own record, so no request can deploy work anywhere else.
 //
 // WHO MAY ASK. The workspace itself, the user, its owner (a child's parent), or
-// the workspace it lands into. A workspace
-// whose context was not forked from its owner never finishes itself: its owner
-// arbitrates its work and finishes it (`owner_lands`).
+// the workspace it lands into. Every workspace may finish itself, whatever its
+// context; any other requester is refused (`requester_may_not_land`).
 //
 // A WORKSPACE OTHERS STILL WORK FOR IS NOT FINISHED. While a child of it, or a
 // workspace landing into its branch, is open, the deploy is refused
@@ -282,7 +281,6 @@ type FinishWorkspaceError struct {
 	//	*FinishWorkspaceError_VersionIncrementRequired
 	//	*FinishWorkspaceError_VersionIncrementUnexpected
 	//	*FinishWorkspaceError_HasOpenChildren
-	//	*FinishWorkspaceError_OwnerLands
 	//	*FinishWorkspaceError_RequesterMayNotLand
 	//	*FinishWorkspaceError_NoBranchCheckedOut
 	//	*FinishWorkspaceError_NoDeployConfig
@@ -429,15 +427,6 @@ func (x *FinishWorkspaceError) GetHasOpenChildren() *WorkspaceHasOpenChildren {
 	return nil
 }
 
-func (x *FinishWorkspaceError) GetOwnerLands() *FinishWorkspaceOwnerLands {
-	if x != nil {
-		if x, ok := x.Cause.(*FinishWorkspaceError_OwnerLands); ok {
-			return x.OwnerLands
-		}
-	}
-	return nil
-}
-
 func (x *FinishWorkspaceError) GetRequesterMayNotLand() *FinishWorkspaceRequesterMayNotLand {
 	if x != nil {
 		if x, ok := x.Cause.(*FinishWorkspaceError_RequesterMayNotLand); ok {
@@ -549,12 +538,6 @@ type FinishWorkspaceError_HasOpenChildren struct {
 	HasOpenChildren *WorkspaceHasOpenChildren `protobuf:"bytes,11,opt,name=has_open_children,json=hasOpenChildren,proto3,oneof"`
 }
 
-type FinishWorkspaceError_OwnerLands struct {
-	// The workspace is a child whose context was not forked from its owner,
-	// and only its owner (or the user) finishes it. Nothing was recorded.
-	OwnerLands *FinishWorkspaceOwnerLands `protobuf:"bytes,12,opt,name=owner_lands,json=ownerLands,proto3,oneof"`
-}
-
 type FinishWorkspaceError_RequesterMayNotLand struct {
 	// The requester is neither the workspace, nor its owner, nor the user.
 	// Nothing was recorded.
@@ -607,8 +590,6 @@ func (*FinishWorkspaceError_VersionIncrementRequired) isFinishWorkspaceError_Cau
 func (*FinishWorkspaceError_VersionIncrementUnexpected) isFinishWorkspaceError_Cause() {}
 
 func (*FinishWorkspaceError_HasOpenChildren) isFinishWorkspaceError_Cause() {}
-
-func (*FinishWorkspaceError_OwnerLands) isFinishWorkspaceError_Cause() {}
 
 func (*FinishWorkspaceError_RequesterMayNotLand) isFinishWorkspaceError_Cause() {}
 
@@ -948,53 +929,6 @@ func (*FinishWorkspaceAlreadyDeploying) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_finish_workspace_proto_rawDescGZIP(), []int{11}
 }
 
-// Names the owner that finishes this workspace.
-type FinishWorkspaceOwnerLands struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The workspace whose branch this child was cut from, which arbitrates its
-	// work and finishes it.
-	Owner         *v1.WorkspaceRef `protobuf:"bytes,1,opt,name=owner,proto3" json:"owner,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *FinishWorkspaceOwnerLands) Reset() {
-	*x = FinishWorkspaceOwnerLands{}
-	mi := &file_agentrepl_v1_endpoint_finish_workspace_proto_msgTypes[12]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *FinishWorkspaceOwnerLands) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*FinishWorkspaceOwnerLands) ProtoMessage() {}
-
-func (x *FinishWorkspaceOwnerLands) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_finish_workspace_proto_msgTypes[12]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use FinishWorkspaceOwnerLands.ProtoReflect.Descriptor instead.
-func (*FinishWorkspaceOwnerLands) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_finish_workspace_proto_rawDescGZIP(), []int{12}
-}
-
-func (x *FinishWorkspaceOwnerLands) GetOwner() *v1.WorkspaceRef {
-	if x != nil {
-		return x.Owner
-	}
-	return nil
-}
-
 // The requester may not finish this workspace. Empty: the request's own refs
 // are the identities involved.
 type FinishWorkspaceRequesterMayNotLand struct {
@@ -1005,7 +939,7 @@ type FinishWorkspaceRequesterMayNotLand struct {
 
 func (x *FinishWorkspaceRequesterMayNotLand) Reset() {
 	*x = FinishWorkspaceRequesterMayNotLand{}
-	mi := &file_agentrepl_v1_endpoint_finish_workspace_proto_msgTypes[13]
+	mi := &file_agentrepl_v1_endpoint_finish_workspace_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1017,7 +951,7 @@ func (x *FinishWorkspaceRequesterMayNotLand) String() string {
 func (*FinishWorkspaceRequesterMayNotLand) ProtoMessage() {}
 
 func (x *FinishWorkspaceRequesterMayNotLand) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_finish_workspace_proto_msgTypes[13]
+	mi := &file_agentrepl_v1_endpoint_finish_workspace_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1030,7 +964,7 @@ func (x *FinishWorkspaceRequesterMayNotLand) ProtoReflect() protoreflect.Message
 
 // Deprecated: Use FinishWorkspaceRequesterMayNotLand.ProtoReflect.Descriptor instead.
 func (*FinishWorkspaceRequesterMayNotLand) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_finish_workspace_proto_rawDescGZIP(), []int{13}
+	return file_agentrepl_v1_endpoint_finish_workspace_proto_rawDescGZIP(), []int{12}
 }
 
 // The worktree's HEAD is detached.
@@ -1044,7 +978,7 @@ type FinishWorkspaceNoBranchCheckedOut struct {
 
 func (x *FinishWorkspaceNoBranchCheckedOut) Reset() {
 	*x = FinishWorkspaceNoBranchCheckedOut{}
-	mi := &file_agentrepl_v1_endpoint_finish_workspace_proto_msgTypes[14]
+	mi := &file_agentrepl_v1_endpoint_finish_workspace_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1056,7 +990,7 @@ func (x *FinishWorkspaceNoBranchCheckedOut) String() string {
 func (*FinishWorkspaceNoBranchCheckedOut) ProtoMessage() {}
 
 func (x *FinishWorkspaceNoBranchCheckedOut) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_finish_workspace_proto_msgTypes[14]
+	mi := &file_agentrepl_v1_endpoint_finish_workspace_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1069,7 +1003,7 @@ func (x *FinishWorkspaceNoBranchCheckedOut) ProtoReflect() protoreflect.Message 
 
 // Deprecated: Use FinishWorkspaceNoBranchCheckedOut.ProtoReflect.Descriptor instead.
 func (*FinishWorkspaceNoBranchCheckedOut) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_finish_workspace_proto_rawDescGZIP(), []int{14}
+	return file_agentrepl_v1_endpoint_finish_workspace_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *FinishWorkspaceNoBranchCheckedOut) GetDir() string {
@@ -1094,7 +1028,7 @@ const file_agentrepl_v1_endpoint_finish_workspace_proto_rawDesc = "" +
 	"\asuccess\x18\x01 \x01(\v2$.agentrepl.v1.FinishWorkspaceSuccessH\x00R\asuccess\x12:\n" +
 	"\x05error\x18\x02 \x01(\v2\".agentrepl.v1.FinishWorkspaceErrorH\x00R\x05errorB\b\n" +
 	"\x06result\"\x18\n" +
-	"\x16FinishWorkspaceSuccess\"\x82\r\n" +
+	"\x16FinishWorkspaceSuccess\"\xc9\f\n" +
 	"\x14FinishWorkspaceError\x12\\\n" +
 	"\x11unknown_workspace\x18\x01 \x01(\v2-.agentrepl.v1.FinishWorkspaceUnknownWorkspaceH\x00R\x10unknownWorkspace\x12i\n" +
 	"\x16workspace_ref_mismatch\x18\x02 \x01(\v21.agentrepl.v1.FinishWorkspaceWorkspaceRefMismatchH\x00R\x14workspaceRefMismatch\x12\\\n" +
@@ -1107,15 +1041,13 @@ const file_agentrepl_v1_endpoint_finish_workspace_proto_rawDesc = "" +
 	"\x1aversion_increment_required\x18\t \x01(\v24.agentrepl.v1.MergeWorkspaceVersionIncrementRequiredH\x00R\x18versionIncrementRequired\x12z\n" +
 	"\x1cversion_increment_unexpected\x18\n" +
 	" \x01(\v26.agentrepl.v1.MergeWorkspaceVersionIncrementUnexpectedH\x00R\x1aversionIncrementUnexpected\x12T\n" +
-	"\x11has_open_children\x18\v \x01(\v2&.agentrepl.v1.WorkspaceHasOpenChildrenH\x00R\x0fhasOpenChildren\x12J\n" +
-	"\vowner_lands\x18\f \x01(\v2'.agentrepl.v1.FinishWorkspaceOwnerLandsH\x00R\n" +
-	"ownerLands\x12g\n" +
+	"\x11has_open_children\x18\v \x01(\v2&.agentrepl.v1.WorkspaceHasOpenChildrenH\x00R\x0fhasOpenChildren\x12g\n" +
 	"\x16requester_may_not_land\x18\r \x01(\v20.agentrepl.v1.FinishWorkspaceRequesterMayNotLandH\x00R\x13requesterMayNotLand\x12d\n" +
 	"\x15no_branch_checked_out\x18\x0e \x01(\v2/.agentrepl.v1.FinishWorkspaceNoBranchCheckedOutH\x00R\x12noBranchCheckedOut\x12P\n" +
 	"\x10no_deploy_config\x18\x0f \x01(\v2$.agentrepl.v1.LifecycleConfigMissingH\x00R\x0enoDeployConfig\x12Z\n" +
 	"\x15deploy_config_invalid\x18\x10 \x01(\v2$.agentrepl.v1.LifecycleConfigInvalidH\x00R\x13deployConfigInvalid\x12r\n" +
 	"\x1cplacement_behind_not_in_line\x18\x11 \x01(\v20.agentrepl.v1.MergeQueuePlacementBehindNotInLineH\x00R\x18placementBehindNotInLineB\a\n" +
-	"\x05cause\"!\n" +
+	"\x05causeJ\x04\b\f\x10\rR\vowner_lands\"!\n" +
 	"\x1fFinishWorkspaceUnknownWorkspace\"H\n" +
 	"#FinishWorkspaceWorkspaceRefMismatch\x12!\n" +
 	"\fregistry_dir\x18\x01 \x01(\tR\vregistryDir\";\n" +
@@ -1128,9 +1060,7 @@ const file_agentrepl_v1_endpoint_finish_workspace_proto_rawDesc = "" +
 	"\x1cFinishWorkspaceNoLayoutFacts\"\x1f\n" +
 	"\x1dFinishWorkspaceSessionDeleted\"\x1e\n" +
 	"\x1cFinishWorkspaceAlreadyQueued\"!\n" +
-	"\x1fFinishWorkspaceAlreadyDeploying\"M\n" +
-	"\x19FinishWorkspaceOwnerLands\x120\n" +
-	"\x05owner\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\x05owner\"$\n" +
+	"\x1fFinishWorkspaceAlreadyDeploying\"$\n" +
 	"\"FinishWorkspaceRequesterMayNotLand\"5\n" +
 	"!FinishWorkspaceNoBranchCheckedOut\x12\x10\n" +
 	"\x03dir\x18\x01 \x01(\tR\x03dirB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
@@ -1147,7 +1077,7 @@ func file_agentrepl_v1_endpoint_finish_workspace_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_finish_workspace_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_finish_workspace_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
+var file_agentrepl_v1_endpoint_finish_workspace_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
 var file_agentrepl_v1_endpoint_finish_workspace_proto_goTypes = []any{
 	(*FinishWorkspaceRequest)(nil),                   // 0: agentrepl.v1.FinishWorkspaceRequest
 	(*FinishWorkspaceResponse)(nil),                  // 1: agentrepl.v1.FinishWorkspaceResponse
@@ -1161,25 +1091,24 @@ var file_agentrepl_v1_endpoint_finish_workspace_proto_goTypes = []any{
 	(*FinishWorkspaceSessionDeleted)(nil),            // 9: agentrepl.v1.FinishWorkspaceSessionDeleted
 	(*FinishWorkspaceAlreadyQueued)(nil),             // 10: agentrepl.v1.FinishWorkspaceAlreadyQueued
 	(*FinishWorkspaceAlreadyDeploying)(nil),          // 11: agentrepl.v1.FinishWorkspaceAlreadyDeploying
-	(*FinishWorkspaceOwnerLands)(nil),                // 12: agentrepl.v1.FinishWorkspaceOwnerLands
-	(*FinishWorkspaceRequesterMayNotLand)(nil),       // 13: agentrepl.v1.FinishWorkspaceRequesterMayNotLand
-	(*FinishWorkspaceNoBranchCheckedOut)(nil),        // 14: agentrepl.v1.FinishWorkspaceNoBranchCheckedOut
-	(*v1.WorkspaceRef)(nil),                          // 15: workspace.v1.WorkspaceRef
-	(*WorkspaceRequester)(nil),                       // 16: agentrepl.v1.WorkspaceRequester
-	(*MergeWorkspaceVersionIncrement)(nil),           // 17: agentrepl.v1.MergeWorkspaceVersionIncrement
-	(*MergeQueuePlacement)(nil),                      // 18: agentrepl.v1.MergeQueuePlacement
-	(*MergeWorkspaceVersionIncrementRequired)(nil),   // 19: agentrepl.v1.MergeWorkspaceVersionIncrementRequired
-	(*MergeWorkspaceVersionIncrementUnexpected)(nil), // 20: agentrepl.v1.MergeWorkspaceVersionIncrementUnexpected
-	(*WorkspaceHasOpenChildren)(nil),                 // 21: agentrepl.v1.WorkspaceHasOpenChildren
-	(*LifecycleConfigMissing)(nil),                   // 22: agentrepl.v1.LifecycleConfigMissing
-	(*LifecycleConfigInvalid)(nil),                   // 23: agentrepl.v1.LifecycleConfigInvalid
-	(*MergeQueuePlacementBehindNotInLine)(nil),       // 24: agentrepl.v1.MergeQueuePlacementBehindNotInLine
+	(*FinishWorkspaceRequesterMayNotLand)(nil),       // 12: agentrepl.v1.FinishWorkspaceRequesterMayNotLand
+	(*FinishWorkspaceNoBranchCheckedOut)(nil),        // 13: agentrepl.v1.FinishWorkspaceNoBranchCheckedOut
+	(*v1.WorkspaceRef)(nil),                          // 14: workspace.v1.WorkspaceRef
+	(*WorkspaceRequester)(nil),                       // 15: agentrepl.v1.WorkspaceRequester
+	(*MergeWorkspaceVersionIncrement)(nil),           // 16: agentrepl.v1.MergeWorkspaceVersionIncrement
+	(*MergeQueuePlacement)(nil),                      // 17: agentrepl.v1.MergeQueuePlacement
+	(*MergeWorkspaceVersionIncrementRequired)(nil),   // 18: agentrepl.v1.MergeWorkspaceVersionIncrementRequired
+	(*MergeWorkspaceVersionIncrementUnexpected)(nil), // 19: agentrepl.v1.MergeWorkspaceVersionIncrementUnexpected
+	(*WorkspaceHasOpenChildren)(nil),                 // 20: agentrepl.v1.WorkspaceHasOpenChildren
+	(*LifecycleConfigMissing)(nil),                   // 21: agentrepl.v1.LifecycleConfigMissing
+	(*LifecycleConfigInvalid)(nil),                   // 22: agentrepl.v1.LifecycleConfigInvalid
+	(*MergeQueuePlacementBehindNotInLine)(nil),       // 23: agentrepl.v1.MergeQueuePlacementBehindNotInLine
 }
 var file_agentrepl_v1_endpoint_finish_workspace_proto_depIdxs = []int32{
-	15, // 0: agentrepl.v1.FinishWorkspaceRequest.workspace:type_name -> workspace.v1.WorkspaceRef
-	16, // 1: agentrepl.v1.FinishWorkspaceRequest.requester:type_name -> agentrepl.v1.WorkspaceRequester
-	17, // 2: agentrepl.v1.FinishWorkspaceRequest.version_increment:type_name -> agentrepl.v1.MergeWorkspaceVersionIncrement
-	18, // 3: agentrepl.v1.FinishWorkspaceRequest.placement:type_name -> agentrepl.v1.MergeQueuePlacement
+	14, // 0: agentrepl.v1.FinishWorkspaceRequest.workspace:type_name -> workspace.v1.WorkspaceRef
+	15, // 1: agentrepl.v1.FinishWorkspaceRequest.requester:type_name -> agentrepl.v1.WorkspaceRequester
+	16, // 2: agentrepl.v1.FinishWorkspaceRequest.version_increment:type_name -> agentrepl.v1.MergeWorkspaceVersionIncrement
+	17, // 3: agentrepl.v1.FinishWorkspaceRequest.placement:type_name -> agentrepl.v1.MergeQueuePlacement
 	2,  // 4: agentrepl.v1.FinishWorkspaceResponse.success:type_name -> agentrepl.v1.FinishWorkspaceSuccess
 	3,  // 5: agentrepl.v1.FinishWorkspaceResponse.error:type_name -> agentrepl.v1.FinishWorkspaceError
 	4,  // 6: agentrepl.v1.FinishWorkspaceError.unknown_workspace:type_name -> agentrepl.v1.FinishWorkspaceUnknownWorkspace
@@ -1190,21 +1119,19 @@ var file_agentrepl_v1_endpoint_finish_workspace_proto_depIdxs = []int32{
 	9,  // 11: agentrepl.v1.FinishWorkspaceError.session_deleted:type_name -> agentrepl.v1.FinishWorkspaceSessionDeleted
 	10, // 12: agentrepl.v1.FinishWorkspaceError.already_queued:type_name -> agentrepl.v1.FinishWorkspaceAlreadyQueued
 	11, // 13: agentrepl.v1.FinishWorkspaceError.already_deploying:type_name -> agentrepl.v1.FinishWorkspaceAlreadyDeploying
-	19, // 14: agentrepl.v1.FinishWorkspaceError.version_increment_required:type_name -> agentrepl.v1.MergeWorkspaceVersionIncrementRequired
-	20, // 15: agentrepl.v1.FinishWorkspaceError.version_increment_unexpected:type_name -> agentrepl.v1.MergeWorkspaceVersionIncrementUnexpected
-	21, // 16: agentrepl.v1.FinishWorkspaceError.has_open_children:type_name -> agentrepl.v1.WorkspaceHasOpenChildren
-	12, // 17: agentrepl.v1.FinishWorkspaceError.owner_lands:type_name -> agentrepl.v1.FinishWorkspaceOwnerLands
-	13, // 18: agentrepl.v1.FinishWorkspaceError.requester_may_not_land:type_name -> agentrepl.v1.FinishWorkspaceRequesterMayNotLand
-	14, // 19: agentrepl.v1.FinishWorkspaceError.no_branch_checked_out:type_name -> agentrepl.v1.FinishWorkspaceNoBranchCheckedOut
-	22, // 20: agentrepl.v1.FinishWorkspaceError.no_deploy_config:type_name -> agentrepl.v1.LifecycleConfigMissing
-	23, // 21: agentrepl.v1.FinishWorkspaceError.deploy_config_invalid:type_name -> agentrepl.v1.LifecycleConfigInvalid
-	24, // 22: agentrepl.v1.FinishWorkspaceError.placement_behind_not_in_line:type_name -> agentrepl.v1.MergeQueuePlacementBehindNotInLine
-	15, // 23: agentrepl.v1.FinishWorkspaceOwnerLands.owner:type_name -> workspace.v1.WorkspaceRef
-	24, // [24:24] is the sub-list for method output_type
-	24, // [24:24] is the sub-list for method input_type
-	24, // [24:24] is the sub-list for extension type_name
-	24, // [24:24] is the sub-list for extension extendee
-	0,  // [0:24] is the sub-list for field type_name
+	18, // 14: agentrepl.v1.FinishWorkspaceError.version_increment_required:type_name -> agentrepl.v1.MergeWorkspaceVersionIncrementRequired
+	19, // 15: agentrepl.v1.FinishWorkspaceError.version_increment_unexpected:type_name -> agentrepl.v1.MergeWorkspaceVersionIncrementUnexpected
+	20, // 16: agentrepl.v1.FinishWorkspaceError.has_open_children:type_name -> agentrepl.v1.WorkspaceHasOpenChildren
+	12, // 17: agentrepl.v1.FinishWorkspaceError.requester_may_not_land:type_name -> agentrepl.v1.FinishWorkspaceRequesterMayNotLand
+	13, // 18: agentrepl.v1.FinishWorkspaceError.no_branch_checked_out:type_name -> agentrepl.v1.FinishWorkspaceNoBranchCheckedOut
+	21, // 19: agentrepl.v1.FinishWorkspaceError.no_deploy_config:type_name -> agentrepl.v1.LifecycleConfigMissing
+	22, // 20: agentrepl.v1.FinishWorkspaceError.deploy_config_invalid:type_name -> agentrepl.v1.LifecycleConfigInvalid
+	23, // 21: agentrepl.v1.FinishWorkspaceError.placement_behind_not_in_line:type_name -> agentrepl.v1.MergeQueuePlacementBehindNotInLine
+	22, // [22:22] is the sub-list for method output_type
+	22, // [22:22] is the sub-list for method input_type
+	22, // [22:22] is the sub-list for extension type_name
+	22, // [22:22] is the sub-list for extension extendee
+	0,  // [0:22] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_finish_workspace_proto_init() }
@@ -1233,7 +1160,6 @@ func file_agentrepl_v1_endpoint_finish_workspace_proto_init() {
 		(*FinishWorkspaceError_VersionIncrementRequired)(nil),
 		(*FinishWorkspaceError_VersionIncrementUnexpected)(nil),
 		(*FinishWorkspaceError_HasOpenChildren)(nil),
-		(*FinishWorkspaceError_OwnerLands)(nil),
 		(*FinishWorkspaceError_RequesterMayNotLand)(nil),
 		(*FinishWorkspaceError_NoBranchCheckedOut)(nil),
 		(*FinishWorkspaceError_NoDeployConfig)(nil),
@@ -1247,7 +1173,7 @@ func file_agentrepl_v1_endpoint_finish_workspace_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_finish_workspace_proto_rawDesc), len(file_agentrepl_v1_endpoint_finish_workspace_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   15,
+			NumMessages:   14,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

@@ -166,33 +166,6 @@ message WorkspaceLandingTargetWorkspace {
   workspace.v1.WorkspaceRef workspace = 1;
 }
 
-// ---- Owner notice: what a workspace that lands another's work is told ----
-
-// The requester's notice to a new workspace's OWNER when the owner, not the
-// workspace itself, lands its work.
-//
-// WHO OWNS A WORKSPACE: a child's parent. A peer has no owner and always lands
-// itself, wherever it lands. A ONE-SHOT ALWAYS LANDS ITSELF too, child or
-// peer, fresh or forked: it is commissioned to finish unattended, so a main
-// workspace can dispatch fresh one-shot children off the main branch. WHO
-// LANDS ANY OTHER CHILD depends on whose context it starts with: a child whose
-// context is forked FROM ITS OWNER carries the owner's whole context and lands
-// itself; one that starts fresh, or forked from any other workspace, does not
-// know why its owner's work is shaped as it is, so its OWNER arbitrates and
-// lands it. Such a create must carry the notice, and the workspace is refused
-// merging itself (MergeWorkspaceError.owner_lands); the owner lands it with
-// FinishWorkspace. A create that lands itself (forked from its owner, a
-// one-shot, or a peer) must not carry one (`owner_notice_unexpected`;
-// `owner_notice_required` when one is owed and absent).
-message WorkspaceOwnerNotice {
-  // Plain text, as the requesting agent or user wrote it: what the new
-  // workspace will do for the owner and why. The daemon delivers it to the
-  // owner's session with its own addendum stating that landing the new
-  // workspace's work is the owner's responsibility, and how to do it.
-  // REQUIRED: blank is refused as invalid.
-  string text = 1;
-}
-
 // ---- Queue placement: where a merge joins its queue ----
 
 // Where a merge joins its repository's queue once it is put in line.

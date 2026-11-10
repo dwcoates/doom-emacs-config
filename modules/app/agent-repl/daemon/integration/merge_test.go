@@ -617,7 +617,7 @@ func TestALocalMergeIntoAParentWorktreeRunsNoDeployHook(t *testing.T) {
 		// its StartTurn and terminates it, and a promptless create opens no
 		// turn to wait for at all.
 		Form: &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{
-			Relationship: harness.Child(parent.ws), OwnerNotice: harness.Notice("the child's work"),
+			Relationship:  harness.Child(parent.ws),
 			InitialPrompt: said("the child work"),
 			Name:          strPtr("sibling7a-child"),
 		}},

@@ -1595,9 +1595,6 @@ func TestFinishWorkspaceAnswersWhoMayLandIt(t *testing.T) {
 		arm  string
 		got  func(*agentreplv1.FinishWorkspaceError) bool
 	}{
-		{name: "a child its owner lands", arm: merge.ArmOwnerLands, got: func(e *agentreplv1.FinishWorkspaceError) bool {
-			return e.GetOwnerLands().GetOwner().GetId() == "ws-owner"
-		}},
 		{name: "a stranger", arm: merge.ArmRequesterMayNotLand, got: func(e *agentreplv1.FinishWorkspaceError) bool { return e.GetRequesterMayNotLand() != nil }},
 		{name: "a detached head", arm: merge.ArmNoBranchCheckedOut, got: func(e *agentreplv1.FinishWorkspaceError) bool { return e.GetNoBranchCheckedOut().GetDir() == "/wt" }},
 	}
@@ -1606,7 +1603,7 @@ func TestFinishWorkspaceAnswersWhoMayLandIt(t *testing.T) {
 			// Arrange.
 			h := newHarness(t)
 			h.Merge.enqueueErr = &merge.RefusalError{Arm: tt.arm, Reason: "refused", Fields: map[string]any{
-				"owner": &workspacev1.WorkspaceRef{Id: "ws-owner"}, "dir": "/wt"}}
+				"dir": "/wt"}}
 
 			// Act.
 			resp, err := h.Client.FinishWorkspace(context.Background(), connect.NewRequest(ownFinish()))

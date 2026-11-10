@@ -416,7 +416,7 @@ func TestAHeldRequestSurvivesItsEncoding(t *testing.T) {
 		ContextWorkspace: ptr(ids.WorkspaceID("ctx")), Parent: ptr(ids.WorkspaceID("owner")),
 		ContextSelection: &ContextSelection{Kind: ContextSelectionBubble, Row: "row-1", Markdown: "the text"},
 		ForkFrom:         ptr(ids.WorkspaceID("source")), Requester: ptr(ids.WorkspaceID("asker")),
-		OwnerNotice: "land it", ConsentedUngatedMode: "bypassPermissions", Name: "n", Model: "opus",
+		ConsentedUngatedMode: "bypassPermissions", Name: "n", Model: "opus",
 		PermissionMode: "bypassPermissions", Priority: &p2,
 		DeployHooks: wsm.DeployHooks{PreDeploy: []*repoconfigv1.Hook{{}}},
 	}
@@ -564,6 +564,26 @@ func TestAHeldRequestFromBeforeOriginatorsResumesAsAUserOrWorkspaceCreate(t *tes
 	// Assert
 	if err != nil || spec.Originator != lifecycleconfig.OriginatorUserOrWorkspace {
 		t.Fatalf("decodeHeldSpec = %+v, %v; want a user_or_workspace create", spec, err)
+	}
+}
+
+// TestAHeldRequestFromBeforeTheOwnerNoticeRetiredResumes pins that a held
+// create recorded with an owner notice, which no create carries any more,
+// decodes as the same child create without it.
+func TestAHeldRequestFromBeforeTheOwnerNoticeRetiredResumes(t *testing.T) {
+	// Arrange
+	encoded := `{"repo_dir":"/r","initial_prompt":"fix it","parent":"owner","owner_notice":"land it"}`
+
+	// Act
+	decoded, err := decodeHeldSpec(encoded)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	want := CreateSpec{Originator: lifecycleconfig.OriginatorUserOrWorkspace, RepoDir: "/r", InitialPrompt: "fix it", Parent: ptr(ids.WorkspaceID("owner"))}
+	if createKey(decoded) != createKey(want) {
+		t.Fatalf("decoded %+v, want %+v", decoded, want)
 	}
 }
 

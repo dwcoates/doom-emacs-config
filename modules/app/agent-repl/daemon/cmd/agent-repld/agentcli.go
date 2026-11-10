@@ -145,7 +145,7 @@ type cliCommand struct {
 // cliNouns are every noun's subcommands.
 var cliNouns = map[string]map[string]cliCommand{
 	workspaceNoun: {
-		"create":                 {usage: "create -repository here|DIR -relationship child|peer [-parent WS] [-lands-into WS|main] [-origin-master] [-owner-notice TEXT] -context fresh|fork [-fork WS] [-one-shot] [-prompt TEXT] [-name NAME] [-model M] [-priority p05|p1|p2|p3] [-pre-deploy-prompt TEXT] [-pre-deploy-script PATH:SECONDS] [-post-deploy-prompt TEXT] [-post-deploy-script PATH:SECONDS] [-slack-thread URL] [-originator emoji-ack|user-or-workspace] [-as-user]", run: workspaceCreate},
+		"create":                 {usage: "create -repository here|DIR -relationship child|peer [-parent WS] [-lands-into WS|main] [-origin-master] -context fresh|fork [-fork WS] [-one-shot] [-prompt TEXT] [-name NAME] [-model M] [-priority p05|p1|p2|p3] [-pre-deploy-prompt TEXT] [-pre-deploy-script PATH:SECONDS] [-post-deploy-prompt TEXT] [-post-deploy-script PATH:SECONDS] [-slack-thread URL] [-originator emoji-ack|user-or-workspace] [-as-user]", run: workspaceCreate},
 		"async-merge":            {usage: "async-merge -name NAME -branch BRANCH (-maker WS | -maker-subagent ID) -context-fork WS -target primary|maker -placement back|front|behind=MERGE [-instruction TEXT] [-close-after WS] [-cleanup-worktree] [-compact-after] [-pre-deploy-prompt TEXT] [-pre-deploy-script PATH:SECONDS] [-post-deploy-prompt TEXT] [-post-deploy-script PATH:SECONDS] [-version-part minor|patch -changelog-line TEXT]", run: workspaceAsyncMerge},
 		"prompt":                 {usage: "prompt [-as-user] WS TEXT", run: workspacePrompt},
 		"set":                    {usage: "set WS [-hidden|-shown] [-priority p05|p1|p2|p3|none] [-parent WS|-top-level] [-lands-into WS|main] [-one-shot|-not-one-shot] [-await WS|-not-awaiting] [-name NAME] [-remote-control on|off] [-as-user]", run: workspaceSet},
@@ -612,7 +612,6 @@ func workspaceCreate(c *cliCall, args []string) int {
 	parent := fs.String("parent", "", "the parent that owns and coordinates a child")
 	landsInto := fs.String("lands-into", "", "main, or the workspace whose branch the work is cut from and lands into; unset is the relationship's default")
 	originMaster := fs.Bool("origin-master", false, "cut a workspace landing on main from origin's primary branch, fetched now")
-	ownerNotice := fs.String("owner-notice", "", "the notice to a parent that lands the child")
 	contextOrigin := fs.String("context", "", "fresh, or fork of -fork")
 	fork := fs.String("fork", "", "the workspace whose conversation is forked")
 	oneShot := fs.Bool("one-shot", false, "a one-shot, which lands itself when done")
@@ -685,9 +684,6 @@ func workspaceCreate(c *cliCall, args []string) int {
 		if *prompt == "" {
 			return c.usageFailed("a one-shot names its -prompt")
 		}
-		if *ownerNotice != "" {
-			return c.usageFailed("a one-shot lands itself, so it carries no -owner-notice")
-		}
 		form := &agentreplv1.CreateWorkspaceOneShot{Prompt: feed.SaidText(*prompt), Relationship: kind, LandingTarget: landing}
 		if *name != "" {
 			form.Name = name
@@ -695,9 +691,6 @@ func workspaceCreate(c *cliCall, args []string) int {
 		req.Form = &agentreplv1.CreateWorkspaceRequest_OneShot{OneShot: form}
 	} else {
 		standard := &agentreplv1.CreateWorkspaceStandard{InitialPrompt: optionalSaid(*prompt), Relationship: kind, LandingTarget: landing, DeployHooks: deployHooks(pre, post)}
-		if *ownerNotice != "" {
-			standard.OwnerNotice = &agentreplv1.WorkspaceOwnerNotice{Text: *ownerNotice}
-		}
 		if *name != "" {
 			standard.Name = name
 		}

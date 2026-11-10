@@ -534,7 +534,7 @@ func opIDsOf(rs []CreateProgress) []string {
 
 // createKey is a create's NORMALIZED REQUEST: two requests are the same create
 // exactly when every fact that shapes what is built is equal -- the
-// repository, the topology (owner, owner notice, cut from origin), the context
+// repository, the topology (owner, cut from origin), the context
 // and fork sources, one-shot, the name, the model, the priority, the
 // permission mode and its consent, the deploy hooks, and the initial prompt
 // after whitespace trimming. Who asked is not one of them.
@@ -544,17 +544,17 @@ func createKey(spec CreateSpec) string {
 		priority = fmt.Sprint(int(*spec.Priority))
 	}
 	key := struct {
-		RepoDir, Parent, OwnerNotice, ContextWorkspace, ForkFrom, Landing string
-		ContextSelection                                                  *heldSelection
-		FromOrigin, OneShot                                               bool
-		Name, Model, Priority, PermissionMode, Consent, Prompt            string
-		SlackThread, Originator                                           string
-		PreDeploy, PostDeploy                                             []string
+		RepoDir, Parent, ContextWorkspace, ForkFrom, Landing   string
+		ContextSelection                                       *heldSelection
+		FromOrigin, OneShot                                    bool
+		Name, Model, Priority, PermissionMode, Consent, Prompt string
+		SlackThread, Originator                                string
+		PreDeploy, PostDeploy                                  []string
 	}{
 		// THE KEY SPELLS THE KIND BY NUMBER, so a spec that names none still
 		// keys, and is refused by the create's validation rather than here.
 		SlackThread: spec.SlackThread, Originator: fmt.Sprint(int(spec.Originator)),
-		RepoDir: filepath.Clean(spec.RepoDir), Parent: ids.Optional(spec.Parent), OwnerNotice: strings.TrimSpace(spec.OwnerNotice),
+		RepoDir: filepath.Clean(spec.RepoDir), Parent: ids.Optional(spec.Parent),
 		Landing:          landingKey(spec.Landing),
 		ContextWorkspace: ids.Optional(spec.ContextWorkspace), ForkFrom: ids.Optional(spec.ForkFrom),
 		ContextSelection: heldSelectionOf(spec.ContextSelection),
@@ -601,7 +601,6 @@ type heldSpec struct {
 	Parent               string         `json:"parent,omitempty"`
 	ForkFrom             string         `json:"fork_from,omitempty"`
 	Requester            string         `json:"requester,omitempty"`
-	OwnerNotice          string         `json:"owner_notice,omitempty"`
 	ConsentedUngatedMode string         `json:"consented_ungated_mode,omitempty"`
 	PreDeploy            []string       `json:"pre_deploy,omitempty"`
 	PostDeploy           []string       `json:"post_deploy,omitempty"`
@@ -669,7 +668,7 @@ func encodeHeldSpec(spec CreateSpec) (string, error) {
 		RepoDir: spec.RepoDir, InitialPrompt: spec.InitialPrompt, OneShot: spec.OneShot, FromOrigin: spec.FromOrigin,
 		ContextWorkspace: ids.Optional(spec.ContextWorkspace), ContextSelection: heldSelectionOf(spec.ContextSelection),
 		BaseRef: spec.BaseRef, Parent: ids.Optional(spec.Parent),
-		ForkFrom: ids.Optional(spec.ForkFrom), Requester: ids.Optional(spec.Requester), OwnerNotice: spec.OwnerNotice,
+		ForkFrom: ids.Optional(spec.ForkFrom), Requester: ids.Optional(spec.Requester),
 		ConsentedUngatedMode: spec.ConsentedUngatedMode, PreDeploy: hookBytes(spec.DeployHooks.PreDeploy),
 		PostDeploy: hookBytes(spec.DeployHooks.PostDeploy), Name: spec.Name, Model: spec.Model, PermissionMode: spec.PermissionMode,
 		SlackThread: spec.SlackThread, Originator: spec.Originator.String(),
@@ -706,7 +705,7 @@ func decodeHeldSpec(encoded string) (CreateSpec, error) {
 		RepoDir: held.RepoDir, InitialPrompt: held.InitialPrompt, OneShot: held.OneShot, FromOrigin: held.FromOrigin,
 		ContextWorkspace: optionalID(held.ContextWorkspace), ContextSelection: contextSelectionOf(held.ContextSelection),
 		BaseRef: held.BaseRef, Parent: optionalID(held.Parent),
-		ForkFrom: optionalID(held.ForkFrom), Requester: optionalID(held.Requester), OwnerNotice: held.OwnerNotice,
+		ForkFrom: optionalID(held.ForkFrom), Requester: optionalID(held.Requester),
 		ConsentedUngatedMode: held.ConsentedUngatedMode, DeployHooks: wsm.DeployHooks{PreDeploy: pre, PostDeploy: post},
 		Name: held.Name, Model: held.Model, PermissionMode: held.PermissionMode, SlackThread: held.SlackThread,
 		Originator: lifecycleconfig.OriginatorUserOrWorkspace,

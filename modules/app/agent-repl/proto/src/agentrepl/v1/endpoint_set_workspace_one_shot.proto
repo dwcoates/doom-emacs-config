@@ -22,10 +22,9 @@
 // any other workspace, so marking or unmarking it leaves it where it is
 // arranged, and an unmark asks it to file nothing.
 //
-// A ONE-SHOT ALWAYS LANDS ITSELF, whatever its context: any created workspace
-// may be marked, a child included. Marking a child whose context is not forked
-// from its parent makes it land itself while it stays a one-shot; unmarking it
-// hands its landing back to its parent (WorkspaceStatusOwner.owner_lands).
+// ANY CREATED WORKSPACE MAY BE MARKED, a child included. The mark decides only
+// whether the workspace finishes unattended, never who may land it: every
+// workspace may land itself, marked or not.
 //
 // A REPOSITORY'S MAIN WORKSPACE IS NEVER A ONE-SHOT: the workspace on the
 // repository's main checkout sits on the main branch, lands nothing itself and

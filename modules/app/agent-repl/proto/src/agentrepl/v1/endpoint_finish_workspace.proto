@@ -25,9 +25,8 @@
 // workspace's own record, so no request can deploy work anywhere else.
 //
 // WHO MAY ASK. The workspace itself, the user, its owner (a child's parent), or
-// the workspace it lands into. A workspace
-// whose context was not forked from its owner never finishes itself: its owner
-// arbitrates its work and finishes it (`owner_lands`).
+// the workspace it lands into. Every workspace may finish itself, whatever its
+// context; any other requester is refused (`requester_may_not_land`).
 //
 // A WORKSPACE OTHERS STILL WORK FOR IS NOT FINISHED. While a child of it, or a
 // workspace landing into its branch, is open, the deploy is refused
@@ -86,6 +85,10 @@ message FinishWorkspaceSuccess {}
 // Why nothing was enqueued. Validation failures (unset field, blank string)
 // are Connect InvalidArgument, never an arm.
 message FinishWorkspaceError {
+  // Tag 12 (`owner_lands`) is RETIRED with FinishWorkspaceOwnerLands: every
+  // workspace may finish itself, so no child is refused its own finish.
+  reserved 12;
+  reserved "owner_lands";
   oneof cause {
     // The workspace id is not in the daemon's registry.
     FinishWorkspaceUnknownWorkspace unknown_workspace = 1;
@@ -116,9 +119,6 @@ message FinishWorkspaceError {
     // must be resolved and closed before the workspace that is their parent
     // finishes.
     WorkspaceHasOpenChildren has_open_children = 11;
-    // The workspace is a child whose context was not forked from its owner,
-    // and only its owner (or the user) finishes it. Nothing was recorded.
-    FinishWorkspaceOwnerLands owner_lands = 12;
     // The requester is neither the workspace, nor its owner, nor the user.
     // Nothing was recorded.
     FinishWorkspaceRequesterMayNotLand requester_may_not_land = 13;
@@ -167,12 +167,6 @@ message FinishWorkspaceSessionDeleted {}
 message FinishWorkspaceAlreadyQueued {}
 // A deploy of this workspace is already running. Empty.
 message FinishWorkspaceAlreadyDeploying {}
-// Names the owner that finishes this workspace.
-message FinishWorkspaceOwnerLands {
-  // The workspace whose branch this child was cut from, which arbitrates its
-  // work and finishes it.
-  workspace.v1.WorkspaceRef owner = 1;
-}
 // The requester may not finish this workspace. Empty: the request's own refs
 // are the identities involved.
 message FinishWorkspaceRequesterMayNotLand {}

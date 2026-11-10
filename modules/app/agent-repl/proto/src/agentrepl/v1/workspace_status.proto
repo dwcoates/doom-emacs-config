@@ -55,8 +55,9 @@ message WorkspaceStatus {
   // How the workspace stands to other work: a child of a parent, or a peer
   // (WorkspaceRelationship).
   WorkspaceStatusRelationship relationship = 12;
-  // The workspace's owner and whether the owner lands its work
-  // (WorkspaceOwnerNotice). UNSET for a peer, which nobody owns.
+  // The workspace's owner: a child's parent, which may land the child's work
+  // beside the child itself and the user. UNSET for a peer, which nobody
+  // owns.
   optional WorkspaceStatusOwner owner = 13;
   // The workspace whose agent asked for this one's creation. UNSET when the
   // user asked, or the workspace was registered rather than created. Recorded
@@ -94,11 +95,10 @@ message WorkspaceStatusRelationshipPeer {}
 message WorkspaceStatusOwner {
   // The owning workspace: the child's parent.
   workspace.v1.WorkspaceRef workspace = 1;
-  // TRUE when the owner arbitrates and lands this workspace's work, because
-  // it is not a one-shot and its context was not forked from the owner; FALSE
-  // when it lands itself. Marking or unmarking the workspace a one-shot
-  // changes it.
-  bool owner_lands = 2;
+  // Tag 2 (`owner_lands`) is RETIRED: every workspace may land itself, so no
+  // child's landing is reserved to its owner.
+  reserved 2;
+  reserved "owner_lands";
 }
 
 // Where a workspace's branch lands.

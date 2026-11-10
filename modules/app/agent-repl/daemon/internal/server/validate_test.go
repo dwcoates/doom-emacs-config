@@ -560,12 +560,6 @@ func TestEachRequestValidatorNamesTheFieldItRefusesWithTargetsAndSources(t *test
 				r.Form = &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{Relationship: childRelationship(&workspacev1.WorkspaceRef{})}}
 			}))
 		}, field: "standard.relationship.child.parent.id"},
-		{name: "create with a blank owner notice", check: func() *connect.Error {
-			return validateCreateWorkspaceRequest(validCreate(func(r *agentreplv1.CreateWorkspaceRequest) {
-				r.Form = &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{
-					Relationship: childRelationship(ref()), OwnerNotice: &agentreplv1.WorkspaceOwnerNotice{Text: " "}}}
-			}))
-		}, field: "standard.owner_notice.text"},
 		{name: "create with a landing target naming no arm", check: func() *connect.Error {
 			return validateCreateWorkspaceRequest(validCreate(func(r *agentreplv1.CreateWorkspaceRequest) {
 				r.Form = &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{
@@ -894,7 +888,7 @@ func TestEachRequestValidatorAcceptsAWellFormedRequestWithTargetsAndSources(t *t
 		{name: "create a standard workspace", check: func() *connect.Error { return validateCreateWorkspaceRequest(validCreate(nil)) }},
 		{name: "create a child that forks another workspace", check: func() *connect.Error {
 			return validateCreateWorkspaceRequest(validCreate(func(r *agentreplv1.CreateWorkspaceRequest) {
-				r.Form = &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{Relationship: childRelationship(ref()), OwnerNotice: ownerNotice("the parser fix")}}
+				r.Form = &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{Relationship: childRelationship(ref())}}
 				r.ContextOrigin = forkContext(&workspacev1.WorkspaceRef{Id: "ws-other"})
 			}))
 		}},

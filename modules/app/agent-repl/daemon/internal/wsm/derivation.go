@@ -3,12 +3,12 @@ package wsm
 // derivationDDL is the layout-60 addition: what a workspace was DERIVED FROM,
 // recorded at its creation (agentrepl.v1.CreateWorkspaceRequest).
 //
-//   - owner_lands: the workspace is a child whose context was not forked from
-//     its owner (parent_id). It is only the CONTEXT half of who lands the
-//     workspace: a one-shot always lands itself, so the owner -- or the user
-//     -- lands it only while it is not a one-shot (OwnerLands, applied where
-//     the row is read). The column keeps its name; it is not the effective
-//     rule.
+//   - owner_lands: INERT. It recorded a child whose context was not forked
+//     from its owner, which once reserved landing the child to its owner.
+//     Every workspace now lands itself (owner request, 2026-11-09), so
+//     nothing reads or writes it and new rows take its default. It stays
+//     because layout migrations are additive: a previous build still names it
+//     during a rolling restart.
 //   - context_from: the workspace whose conversation was forked into this one
 //     (agentrepl.v1.WorkspaceContextOrigin.fork), NULL for a fresh context.
 //   - requested_by: the workspace whose agent asked for the create
@@ -30,21 +30,11 @@ ALTER TABLE workspaces ADD COLUMN context_from TEXT REFERENCES workspaces(id) ON
 ALTER TABLE workspaces ADD COLUMN requested_by TEXT REFERENCES workspaces(id) ON DELETE SET NULL;
 `
 
-// OwnerLands is the ONE home of who lands a workspace (owner ruling,
-// 2026-10-31, agentrepl.v1.WorkspaceStatusOwner.owner_lands): its owner does
-// when the workspace is a child whose context was not forked from its owner
-// (LACKSPARENTCONTEXT, the stored owner_lands column) and it is not a ONESHOT;
-// a one-shot always lands itself. Deriving it on read rather than storing it
-// means no write of the one-shot mark can leave it stale.
-func OwnerLands(lacksParentContext, oneShot bool) bool {
-	return lacksParentContext && !oneShot
-}
-
 // MayAct reports whether ASKER may act on the workspace's own work -- land
 // it, or mark it a one-shot: the user (an empty ASKER), the workspace itself,
-// its owner (its parent), or the workspace its merge lands into. Whether the
-// workspace itself may land is narrowed further by OwnerLands, which the act
-// decides.
+// its owner (its parent), or the workspace its merge lands into. Every
+// workspace may land itself, whatever its context (owner request,
+// 2026-11-09).
 func (ws Workspace) MayAct(asker WorkspaceID) bool {
 	return asker == "" || asker == ws.ID || (ws.Parent != nil && asker == *ws.Parent) ||
 		(ws.LandsInto != nil && asker == *ws.LandsInto)

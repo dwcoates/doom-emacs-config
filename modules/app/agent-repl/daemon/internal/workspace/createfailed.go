@@ -128,8 +128,6 @@ var createRefusalArms = map[string]bool{
 	"unknown_context_workspace":             true,
 	"parent_not_open":                       true,
 	ArmUnknownOwner:                         true,
-	ArmOwnerNoticeRequired:                  true,
-	ArmOwnerNoticeUnexpected:                true,
 	ArmUnknownLandingTarget:                 true,
 	ArmUnknownRequester:                     true,
 	"async_merge_unknown_branch":            true,

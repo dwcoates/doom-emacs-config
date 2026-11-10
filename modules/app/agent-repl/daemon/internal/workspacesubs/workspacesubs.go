@@ -269,9 +269,6 @@ func StatusWords(status *agentreplv1.WorkspaceStatus) string {
 	} else {
 		b.WriteString("lands on the primary branch")
 	}
-	if status.GetOwner().GetOwnerLands() {
-		b.WriteString(" and is landed by its owner")
-	}
 	b.WriteString("; ")
 	if status.GetStanding().GetClosed() != nil {
 		b.WriteString("closed")

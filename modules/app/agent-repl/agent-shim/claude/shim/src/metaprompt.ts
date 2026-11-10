@@ -121,7 +121,7 @@ export function standingSection(standing: WorkspaceStanding): string {
         "(`-relationship child -parent here -lands-into main`), one-shots (`-one-shot`) by preference. " +
         "A child starts with a fresh context and a self-contained prompt carrying everything it needs (`-context fresh`) by default; " +
         "it forks this workspace's long conversation (`-context fork -fork here`) only when it truly needs that conversation. " +
-        "A fresh child that is not a one-shot is this workspace's to land (`agent-repld workspace finished CHILD`), so its create carries `-owner-notice`."
+        "Every child lands its own work, one-shot or not, whatever its context."
       );
     case "linked_workspace":
       return (

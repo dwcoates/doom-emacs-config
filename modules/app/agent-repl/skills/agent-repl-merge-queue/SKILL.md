@@ -38,8 +38,6 @@ Before finishing `here`:
   surface it. NEVER finish the workspace instead.
 - Every change is committed with its tests passing; work left uncommitted when
   the turn ends fails the merge.
-- A child whose owner lands it never finishes itself: its owner lands it (the
-  daemon refuses `here` with `owner_lands`).
 
 Before an async merge:
 
