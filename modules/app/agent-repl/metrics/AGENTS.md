@@ -1,7 +1,8 @@
 # metrics/
 
-The always-on metrics store: VictoriaMetrics, run by launchd
-(`launchd/com.agentrepl.victoriametrics.plist`), scraping the daemon, the
+The always-on metrics store: VictoriaMetrics, run by the platform's service
+manager (the `service-victoriametrics` entry of `metrics/requirements.json`,
+rendered per `services/AGENTS.md`), scraping the daemon, the
 store and the sidecar every 15 seconds and keeping 30 days. The plan is
 `docs/PLAN-runtime-metrics.md`; the calls made building it are
 `docs/METRICS-JUDGEMENT-CALLS.md`. How to query it, add a metric, and when to
@@ -15,7 +16,7 @@ offer one: the `agent-repl-metrics` skill (`skills/agent-repl-metrics/`).
   beside `scrape.yml`. Every runtime pushes its final values there when its
   surface closes, so what it recorded after its last scrape is kept (an
   outgoing daemon's handover transfers, judgement call 13). Its port and job
-  must match the plist's `-httpListenAddr` and `scrape.yml`'s `job_name`;
+  must match the service entry's `-httpListenAddr` and `scrape.yml`'s `job_name`;
   `daemon/reposcans` fails when they drift.
 - `requirements.json` installs VictoriaMetrics (Homebrew) and the service.
 - The store answers PromQL on `127.0.0.1:8428`. No test starts it: tests read

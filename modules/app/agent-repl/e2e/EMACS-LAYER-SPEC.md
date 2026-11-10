@@ -467,8 +467,10 @@ So the Go side does NOT call `harness.StartDaemon` for this layer:
 - The deploy's seams are exported into the Emacs process's environment so the
   daemon Emacs spawns inherits them: `AGENT_REPL_CHECKOUT` (the module root,
   whose elisp the real Emacs loads), `AGENT_REPL_DEPLOY_BUILDER` (the world's
-  `harness.DeployBuilder`, `EmacsWorld.Deploy`), `AGENT_REPL_LAUNCHCTL` (a
-  recording fake, `EmacsWorld.Launchctl`) and `AGENT_REPL_LAUNCH_AGENTS_DIR`.
+  `harness.DeployBuilder`, `EmacsWorld.Deploy`), the service manager's tool (a
+  recording fake, `EmacsWorld.Services`: `AGENT_REPL_LAUNCHCTL` on macOS,
+  `AGENT_REPL_SYSTEMCTL` on Linux) and where its definitions are installed
+  (`AGENT_REPL_LAUNCH_AGENTS_DIR`, `AGENT_REPL_SYSTEMD_USER_DIR`).
   The store and the sidecar report their builds into the world's lock dir and
   the fake build stages copies of their binaries, so `SPEC.md` §B's "A deploy
   judges what really runs" invariant holds here unchanged.

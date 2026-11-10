@@ -60,6 +60,16 @@ case "$1" in
   bootstrap) label="$(basename "$3" .plist)"; : >"$STUB_DIR/.loaded-$label" ;;
   bootout) rm -f "$STUB_DIR/.loaded-$(basename "$3" .plist)" ;;
 esac'
+  # systemctl --user VERB ...: a unit is active once restarted, until disabled;
+  # STUB_SYSTEMCTL_FAIL names one verb that fails.
+  write_stub systemctl '
+shift
+[ "$1" = "${STUB_SYSTEMCTL_FAIL:-}" ] && exit 1
+case "$1" in
+  is-active) [ -f "$STUB_DIR/.active-$3" ] ;;
+  restart) : >"$STUB_DIR/.active-$2" ;;
+  disable) rm -f "$STUB_DIR/.active-$3" ;;
+esac'
 }
 
 # write_stub NAME BODY: a stub on PATH that records its argv, then runs BODY.
@@ -89,6 +99,7 @@ run() {
   OUT="$(env -i HOME="$CASE/home" PATH="$CASE/stubs:/usr/bin:/bin" STUB_DIR="$CASE/stubs" \
     AGENT_REPL_REQUIREMENTS_ROOT="$CASE/module" AGENT_REPL_REQUIREMENTS_PLATFORM="${PLATFORM:-darwin}" \
     AGENT_REPL_REQUIREMENTS_BUILD="$CASE/stubs/build" AGENT_REPL_LAUNCHCTL="$CASE/stubs/launchctl" \
+    AGENT_REPL_SYSTEMCTL="$CASE/stubs/systemctl" \
     AGENT_REPL_BACKGROUND_PRIORITY=1 ${extra[@]+"${extra[@]}"} \
     /bin/bash "$RUNNER" "$@" 2>&1)"
   RC=$?
@@ -117,14 +128,6 @@ test_the_real_manifests_honor_the_contract() {
   fi
 }
 
-# launchd_service_plists: every launchd_service entry's plist template, one
-# module-relative path per line, across every real manifest. The cases that
-# hold every service to a launchd contract read their plists from here.
-launchd_service_plists() {
-  find "$MODULE" -name requirements.json -not -path '*/node_modules/*' -not -path '*/testdata/*' -print0 \
-    | xargs -0 jq -r '.requirements[]? | select(.kind == "launchd_service") | .plist'
-}
-
 test_every_linux_program_names_its_package_for_each_main_linux_package_manager() {
   # A Linux program comes from apt, dnf and pacman alike, so no distribution
   # family is left with "add install.<manager>"; only a program no package
@@ -141,40 +144,26 @@ test_every_linux_program_names_its_package_for_each_main_linux_package_manager()
   if [ -z "$missing" ]; then pass "every linux program names its apt, dnf and pacman packages"; else fail "linux programs missing a package:" "$missing"; fi
 }
 
-test_launchd_service_plists_names_every_service() {
-  local got
-  got="$(launchd_service_plists | sort | tr '\n' ' ')"
-  if [[ "$got" == *launchd/com.agentrepl.shim-store.plist* && "$got" == *launchd/com.agentrepl.shim-claude-sidecar.plist* \
-        && "$got" == *launchd/com.agentrepl.zettel.plist* && "$got" == *launchd/com.agentrepl.victoriametrics.plist* ]]; then
-    pass "launchd_service_plists names every service's plist"
+test_the_real_manifests_load_on_linux_with_every_service() {
+  set +e
+  OUT="$(env -i HOME="$TMP" PATH="/usr/bin:/bin" AGENT_REPL_REQUIREMENTS_PLATFORM=linux /bin/bash "$RUNNER" list 2>&1)"
+  RC=$?
+  set -e
+  if [ "$RC" -eq 0 ] && grep -q '^service-shim-store	' <<<"$OUT" && grep -q '^service-shim-claude-sidecar	' <<<"$OUT" \
+     && grep -q '^service-zettel	' <<<"$OUT" && grep -q '^service-victoriametrics	' <<<"$OUT" && grep -q '^emacs	' <<<"$OUT"; then
+    pass "the real manifests load on linux and list every service"
   else
-    fail "launchd_service_plists" "got: $got"
+    fail "the real manifests on linux" "rc=$RC" "$OUT"
   fi
 }
 
-# A live service the editor waits on must never rank below a test suite:
-# launchd's `Background` is darwinbg (efficiency cores, throttled disk I/O),
-# which loses every I/O contention to a `nice 19` suite.
-test_every_launchd_service_runs_at_standard_priority() {
-  local bad="" plist type
-  while IFS= read -r plist; do
-    type="$(plutil -extract ProcessType raw -o - "$MODULE/$plist" 2>/dev/null || echo "<unset>")"
-    [ "$type" = Standard ] || bad="$bad $plist=$type"
-  done < <(launchd_service_plists)
-  if [ -z "$bad" ]; then pass "every launchd service runs at Standard priority"; else fail "launchd services not at Standard priority:$bad"; fi
-}
-
-# macOS's background task manager names a login item by its program's code
-# signature. A program built here is only ad-hoc signed, so each rebuild reads
-# as a new login item and posts an "App Background Activity" notice; a service
-# whose first argument is Apple-signed /usr/bin/env keeps one identity forever.
-test_every_launchd_service_launches_through_env() {
-  local bad="" plist program
-  while IFS= read -r plist; do
-    program="$(plutil -extract ProgramArguments.0 raw -o - "$MODULE/$plist" 2>/dev/null || echo "<unset>")"
-    [ "$program" = /usr/bin/env ] || bad="$bad $plist=$program"
-  done < <(launchd_service_plists)
-  if [ -z "$bad" ]; then pass "every launchd service launches through /usr/bin/env"; else fail "launchd services not launched through /usr/bin/env:$bad"; fi
+# A service is one entry rendered for either service manager, so none may be
+# left to one platform.
+test_every_real_service_runs_on_macos_and_linux() {
+  local bad
+  bad="$(find "$MODULE" -name requirements.json -not -path '*/node_modules/*' -not -path '*/testdata/*' -print0 \
+    | xargs -0 jq -r '.requirements[]? | select(.kind == "service") | select((.platforms | index("darwin") and index("linux")) | not) | .id')"
+  if [ -z "$bad" ]; then pass "every real service runs on macOS and Linux"; else fail "services left to one platform:" "$bad"; fi
 }
 
 test_every_system_with_a_manifest_is_included() {
@@ -434,7 +423,7 @@ fake_linux_package_managers() {
 test_install_apt_installs_a_missing_linux_program_after_refreshing_its_lists() {
   new_case; manifest "[$LINUX_PROGRAM]"; fake_linux_package_managers
   PLATFORM=linux run install
-  if [ "$RC" -eq 0 ] && ran "sudo -n apt-get update -q" && ran "sudo -n apt-get install -y tool-deb" \
+  if [ "$RC" -eq 0 ] && ran "sudo -n apt-get update -q" && ran "sudo -n apt-get -o DPkg::Lock::Timeout=600 install -y tool-deb" \
      && ! ran "dnf " && has "ok          tool:"; then
     pass "install refreshes apt's lists, apt-installs a missing linux program without prompting, and re-checks it"
   else fail "apt install" "rc=$RC" "$OUT" "$(cat "$CASE/transcript")"; fi
@@ -458,7 +447,7 @@ CASES
 test_the_linux_package_manager_is_apt_before_dnf() {
   new_case; manifest "[$LINUX_PROGRAM]"; fake_linux_package_managers
   PLATFORM=linux run check
-  if [ "$RC" -eq 1 ] && has "Fix: sudo apt-get install -y tool-deb"; then pass "with apt and dnf both on PATH, apt is the package manager"; else fail "manager order" "rc=$RC" "$OUT"; fi
+  if [ "$RC" -eq 1 ] && has "Fix: sudo apt-get -o DPkg::Lock::Timeout=600 install -y tool-deb"; then pass "with apt and dnf both on PATH, apt is the package manager"; else fail "manager order" "rc=$RC" "$OUT"; fi
 }
 
 test_a_failed_linux_install_names_the_command_to_run() {
@@ -668,8 +657,8 @@ test_installing_a_linux_emacs_source_installs_deps_then_builds_into_the_prefix()
   new_case; manifest "[$(source_emacs_entry)]"; fake_emacs 30.2 "" 636f166cfc86 "GTK3 XWIDGETS NATIVE_COMP"; fake_linux_source_build
   PLATFORM=linux run install
   local src="$CASE/home/.cache/agent-repl/src/zettel-emacs" deps gccjit
-  deps="$(grep -n "apt-get install -y autoconf libgtk-3-dev" "$CASE/transcript" | sed -n 1p | cut -d: -f1)"
-  gccjit="$(grep -n "apt-get install -y libgccjit-14-dev" "$CASE/transcript" | sed -n 1p | cut -d: -f1)"
+  deps="$(grep -n "apt-get -o DPkg::Lock::Timeout=600 install -y autoconf libgtk-3-dev" "$CASE/transcript" | sed -n 1p | cut -d: -f1)"
+  gccjit="$(grep -n "apt-get -o DPkg::Lock::Timeout=600 install -y libgccjit-14-dev" "$CASE/transcript" | sed -n 1p | cut -d: -f1)"
   if [ "$RC" -eq 0 ] && ran "sudo -n apt-get update -q" && [ -n "$deps" ] && [ -n "$gccjit" ] && [ "$deps" -lt "$gccjit" ] \
      && ran "git -C $src checkout -q --force $PINNED" \
      && ran "configure --with-x-toolkit=gtk3 --prefix=$CASE/home/.local" && ran "make install" \
@@ -794,35 +783,117 @@ test_install_asks_for_an_unauthorized_notifiers_permission() {
 }
 
 # ---------------------------------------------------------------------------
-# launchd_service.
+# service.
 # ---------------------------------------------------------------------------
+
+SVC_ENTRY='{"id": "svc", "kind": "service", "why": "w", "profile": "run", "platforms": ["darwin", "linux"], "label": "com.example.svc", "args": ["--socket", "~/.cache/agent-repl/sock/svc.sock", "--roots", "~/a,~/b", "--say", "5% of $HOME & <more>"], "log": {"stdout": "svc.out.log", "stderr": "svc.err.log"}, "build_target": "svc", "binary": "svc"}'
 
 service_case() {
   new_case
-  mkdir -p "$CASE/module/launchd"
-  printf '<plist><string>~/.cache/agent-repl/bin/svc</string></plist>\n' >"$CASE/module/launchd/com.example.svc.plist"
-  manifest '[{"id": "svc", "kind": "launchd_service", "why": "w", "profile": "run", "platforms": ["darwin"], "label": "com.example.svc", "plist": "launchd/com.example.svc.plist", "build_target": "svc", "binary": "svc"}]'
+  manifest "[$SVC_ENTRY]"
   write_stub build 'mkdir -p "$HOME/.cache/agent-repl/bin" && printf "#!/bin/sh\n" >"$HOME/.cache/agent-repl/bin/svc" && chmod +x "$HOME/.cache/agent-repl/bin/svc"'
 }
 
-test_install_builds_installs_and_loads_a_service() {
+test_install_builds_renders_and_loads_a_launchd_service() {
   service_case
   run install
-  local plist="$CASE/home/Library/LaunchAgents/com.example.svc.plist"
-  if [ "$RC" -eq 0 ] && ran "build svc" && grep -qF "$CASE/home/.cache/agent-repl/bin/svc" "$plist" \
+  local plist="$CASE/home/Library/LaunchAgents/com.example.svc.plist" h="$CASE/home"
+  if [ "$RC" -eq 0 ] && ran "build svc" \
      && ran "launchctl bootstrap gui/$(id -u) $plist" && ran "launchctl kickstart -k gui/$(id -u)/com.example.svc" \
-     && ! ran "launchctl bootout" && has "ok          svc: com.example.svc loaded"; then
-    pass "install builds the service, installs its plist with \$HOME expanded, and loads it"
+     && ! ran "launchctl bootout" && ! ran "systemctl" && has "ok          svc: com.example.svc running from $plist"; then
+    pass "install builds the service, renders its plist, and loads it"
   else fail "service install" "rc=$RC" "$OUT" "$(cat "$CASE/transcript")"; fi
+  # The rendering: env first, then the built program and its arguments with
+  # every ~/ expanded and XML's own characters escaped; kept alive at
+  # Standard priority; its logs under the cache.
+  local want bad=""
+  while IFS= read -r want; do
+    grep -qF -- "$want" "$plist" || bad="$bad [$want]"
+  done <<EOF
+<string>com.example.svc</string>
+        <string>/usr/bin/env</string>
+        <string>$h/.cache/agent-repl/bin/svc</string>
+        <string>$h/.cache/agent-repl/sock/svc.sock</string>
+        <string>$h/a,$h/b</string>
+        <string>5% of \$HOME &amp; &lt;more&gt;</string>
+    <key>RunAtLoad</key>
+    <key>KeepAlive</key>
+    <integer>10</integer>
+    <integer>20</integer>
+    <string>Standard</string>
+    <string>$h/.cache/agent-repl/log/svc.out.log</string>
+    <string>$h/.cache/agent-repl/log/svc.err.log</string>
+EOF
+  if [ -z "$bad" ] && ! grep -q "EnvironmentVariables" "$plist" \
+     && [ "$(grep -n '<string>' "$plist" | sed -n 2p | grep -c '/usr/bin/env')" -eq 1 ]; then
+    pass "a rendered plist launches through /usr/bin/env at Standard priority with ~/ expanded and XML escaped"
+  else fail "rendered plist lacks:$bad" "$(cat "$plist")"; fi
 }
 
-test_install_boots_a_loaded_stale_service_out_first() {
+test_install_builds_renders_and_starts_a_systemd_service() {
+  service_case
+  PLATFORM=linux run install
+  local unit="$CASE/home/.config/systemd/user/com.example.svc.service" h="$CASE/home"
+  if [ "$RC" -eq 0 ] && ran "build svc" && ran "systemctl --user daemon-reload" && ran "systemctl --user enable com.example.svc.service" \
+     && ran "systemctl --user restart com.example.svc.service" && ! ran "launchctl" \
+     && has "ok          svc: com.example.svc running from $unit"; then
+    pass "install builds the service, renders its unit, and enables and starts it"
+  else fail "systemd service install" "rc=$RC" "$OUT" "$(cat "$CASE/transcript")"; fi
+  local want bad=""
+  while IFS= read -r want; do
+    grep -qxF -- "$want" "$unit" || bad="$bad [$want]"
+  done <<EOF
+ExecStart="/usr/bin/env" "$h/.cache/agent-repl/bin/svc" "--socket" "$h/.cache/agent-repl/sock/svc.sock" "--roots" "$h/a,$h/b" "--say" "5%% of \$\$HOME & <more>"
+Restart=always
+RestartSec=10
+TimeoutStopSec=20
+StandardOutput=append:$h/.cache/agent-repl/log/svc.out.log
+StandardError=append:$h/.cache/agent-repl/log/svc.err.log
+WantedBy=default.target
+EOF
+  if [ -z "$bad" ] && ! grep -q "^Environment=" "$unit"; then
+    pass "a rendered unit runs through /usr/bin/env, kept alive, with ~/ expanded and systemd's % and \$ escaped"
+  else fail "rendered unit lacks:$bad" "$(cat "$unit")"; fi
+}
+
+test_a_systemd_service_that_is_not_active_is_missing() {
+  service_case
+  PLATFORM=linux run install
+  rm -f "$CASE/stubs/.active-com.example.svc.service"
+  PLATFORM=linux run check
+  if [ "$RC" -eq 1 ] && has "missing     svc: com.example.svc is not running under the service manager"; then
+    pass "a systemd service that is not active is missing"
+  else fail "inactive unit" "rc=$RC" "$OUT"; fi
+}
+
+test_a_failed_systemctl_step_fails_the_install_naming_it() {
+  local verb
+  for verb in daemon-reload enable restart; do
+    service_case
+    EXTRA_ENV="STUB_SYSTEMCTL_FAIL=$verb" PLATFORM=linux run install
+    if [ "$RC" -eq 1 ] && has "ERROR: install: svc: systemctl --user $verb" && has "failed"; then
+      pass "a failed systemctl $verb fails the install and names the step"
+    else fail "systemctl $verb failure" "rc=$RC" "$OUT"; fi
+  done
+}
+
+test_install_reloads_a_stale_service_definition() {
   service_case
   run install
   printf 'stale\n' >"$CASE/home/Library/LaunchAgents/com.example.svc.plist"
   : >"$CASE/transcript"
   run install
-  if [ "$RC" -eq 0 ] && has "svc is outdated" && ran "launchctl bootout gui/$(id -u)"; then pass "a loaded service with a stale plist is booted out and reloaded"; else fail "service refresh" "rc=$RC" "$OUT" "$(cat "$CASE/transcript")"; fi
+  if [ "$RC" -eq 0 ] && has "svc is outdated" && has "differs from the svc entry's rendering" && ran "launchctl bootout gui/$(id -u)"; then
+    pass "a loaded launchd service with a stale plist is booted out and reloaded"
+  else fail "service refresh" "rc=$RC" "$OUT" "$(cat "$CASE/transcript")"; fi
+  service_case
+  PLATFORM=linux run install
+  printf 'stale\n' >"$CASE/home/.config/systemd/user/com.example.svc.service"
+  : >"$CASE/transcript"
+  PLATFORM=linux run install
+  if [ "$RC" -eq 0 ] && has "svc is outdated" && ran "systemctl --user daemon-reload" && ran "systemctl --user restart com.example.svc.service"; then
+    pass "a systemd service with a stale unit is rendered again, reloaded and restarted"
+  else fail "systemd service refresh" "rc=$RC" "$OUT" "$(cat "$CASE/transcript")"; fi
 }
 
 test_uninstall_removes_the_service() {
@@ -830,27 +901,48 @@ test_uninstall_removes_the_service() {
   run install
   run uninstall
   if [ "$RC" -eq 0 ] && [ ! -e "$CASE/home/Library/LaunchAgents/com.example.svc.plist" ] && [ ! -e "$CASE/home/.cache/agent-repl/bin/svc" ] \
-     && ran "launchctl bootout gui/$(id -u)"; then pass "uninstall boots the service out and removes its plist and binary"; else fail "service uninstall" "rc=$RC" "$OUT"; fi
+     && ran "launchctl bootout gui/$(id -u)"; then pass "uninstall boots the launchd service out and removes its plist and binary"; else fail "service uninstall" "rc=$RC" "$OUT"; fi
+  service_case
+  PLATFORM=linux run install
+  PLATFORM=linux run uninstall
+  if [ "$RC" -eq 0 ] && [ ! -e "$CASE/home/.config/systemd/user/com.example.svc.service" ] && [ ! -e "$CASE/home/.cache/agent-repl/bin/svc" ] \
+     && ran "systemctl --user disable --now com.example.svc.service" && [ "$(grep -c "systemctl --user daemon-reload" "$CASE/transcript")" -eq 2 ]; then
+    pass "uninstall stops and disables the systemd service, removes its unit and binary, and reloads systemd"
+  else fail "systemd service uninstall" "rc=$RC" "$OUT" "$(cat "$CASE/transcript")"; fi
 }
 
 # command_service_case: a service whose program is an installed command, with
-# one config file it copies into the cache.
+# one config file it copies into the cache and one environment variable.
 command_service_case() {
   new_case
-  mkdir -p "$CASE/module/launchd" "$CASE/module/cfg"
-  printf '<plist><string>/usr/bin/env</string><string>svcd</string></plist>\n' >"$CASE/module/launchd/com.example.svcd.plist"
+  mkdir -p "$CASE/module/cfg"
   printf 'scrape_interval: 15s\n' >"$CASE/module/cfg/scrape.yml"
-  manifest '[{"id": "svcd", "kind": "launchd_service", "why": "w", "profile": "run", "platforms": ["darwin"], "label": "com.example.svcd", "plist": "launchd/com.example.svcd.plist", "command": "svcd", "files": [{"from": "cfg/scrape.yml", "to": "metrics/scrape.yml"}]}]'
+  manifest '[{"id": "svcd", "kind": "service", "why": "w", "profile": "run", "platforms": ["darwin", "linux"], "label": "com.example.svcd", "args": ["-data=~/d"], "env": {"SVCD_ROOT": "~/r"}, "log": {"stdout": "svcd.log", "stderr": "svcd.log"}, "command": "svcd", "files": [{"from": "cfg/scrape.yml", "to": "metrics/scrape.yml"}]}]'
 }
 
 test_install_loads_a_command_service_without_building_and_copies_its_files() {
   command_service_case
   tool svcd ""
   run install
+  local plist="$CASE/home/Library/LaunchAgents/com.example.svcd.plist"
   if [ "$RC" -eq 0 ] && ! ran "build " && cmp -s "$CASE/module/cfg/scrape.yml" "$CASE/home/.cache/agent-repl/metrics/scrape.yml" \
-     && ran "launchctl bootstrap gui/$(id -u) $CASE/home/Library/LaunchAgents/com.example.svcd.plist" && has "ok          svcd: com.example.svcd loaded"; then
-    pass "install loads a command service without building it and copies its files into the cache"
-  else fail "command service install" "rc=$RC" "$OUT" "$(cat "$CASE/transcript")"; fi
+     && ran "launchctl bootstrap gui/$(id -u) $plist" && has "ok          svcd: com.example.svcd running" \
+     && grep -qF "<string>svcd</string>" "$plist" && grep -qF "<string>-data=$CASE/home/d</string>" "$plist" \
+     && grep -qF "<string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>" "$plist" && grep -qF "<string>$CASE/home/r</string>" "$plist"; then
+    pass "install loads a command service without building it, with Homebrew on its PATH and its env, and copies its files"
+  else fail "command service install" "rc=$RC" "$OUT" "$(cat "$CASE/transcript")" "$(cat "$plist" 2>&1)"; fi
+}
+
+test_a_systemd_command_service_finds_its_command_on_the_users_path() {
+  command_service_case
+  tool svcd ""
+  PLATFORM=linux run install
+  local unit="$CASE/home/.config/systemd/user/com.example.svcd.service"
+  if [ "$RC" -eq 0 ] && grep -qxF "ExecStart=\"/usr/bin/env\" \"svcd\" \"-data=$CASE/home/d\"" "$unit" \
+     && grep -qxF "Environment=\"PATH=$CASE/home/.local/bin:/usr/local/bin:/usr/bin:/bin\"" "$unit" \
+     && grep -qxF "Environment=\"SVCD_ROOT=$CASE/home/r\"" "$unit"; then
+    pass "a systemd command service runs its command by name, with the user's bin dir on its PATH and its env"
+  else fail "systemd command service" "rc=$RC" "$OUT" "$(cat "$unit" 2>&1)"; fi
 }
 
 test_a_command_service_whose_command_is_missing_is_missing_and_not_installed() {
@@ -887,23 +979,37 @@ test_uninstall_removes_a_command_services_files_and_leaves_its_command() {
 
 test_a_service_with_both_a_command_and_a_build_is_refused() {
   new_case
-  manifest '[{"id": "x", "kind": "launchd_service", "why": "w", "profile": "run", "platforms": ["darwin"], "label": "l", "plist": "p", "command": "c", "build_target": "b", "binary": "b"}]'
+  manifest '[{"id": "x", "kind": "service", "why": "w", "profile": "run", "platforms": ["darwin"], "label": "l", "args": [], "log": {"stdout": "o", "stderr": "e"}, "command": "c", "build_target": "b", "binary": "b"}]'
   run check
-  if [ "$RC" -eq 2 ] && has 'x: launchd_service needs either "command" or both "build_target" and "binary"'; then pass "a service naming both a command and a build is refused"; else fail "command and build" "rc=$RC" "$OUT"; fi
+  if [ "$RC" -eq 2 ] && has 'x: service needs either "command" or both "build_target" and "binary"'; then pass "a service naming both a command and a build is refused"; else fail "command and build" "rc=$RC" "$OUT"; fi
 }
 
 test_a_service_with_neither_a_command_nor_a_build_is_refused() {
   new_case
-  manifest '[{"id": "x", "kind": "launchd_service", "why": "w", "profile": "run", "platforms": ["darwin"], "label": "l", "plist": "p", "binary": "b"}]'
+  manifest '[{"id": "x", "kind": "service", "why": "w", "profile": "run", "platforms": ["darwin"], "label": "l", "args": [], "log": {"stdout": "o", "stderr": "e"}, "binary": "b"}]'
   run check
-  if [ "$RC" -eq 2 ] && has 'x: launchd_service needs either "command" or both "build_target" and "binary"'; then pass "a service naming neither a command nor a whole build is refused"; else fail "neither command nor build" "rc=$RC" "$OUT"; fi
+  if [ "$RC" -eq 2 ] && has 'x: service needs either "command" or both "build_target" and "binary"'; then pass "a service naming neither a command nor a whole build is refused"; else fail "neither command nor build" "rc=$RC" "$OUT"; fi
 }
 
 test_a_service_file_without_a_destination_is_refused() {
   new_case
-  manifest '[{"id": "x", "kind": "launchd_service", "why": "w", "profile": "run", "platforms": ["darwin"], "label": "l", "plist": "p", "command": "c", "files": [{"from": "a"}]}]'
+  manifest '[{"id": "x", "kind": "service", "why": "w", "profile": "run", "platforms": ["darwin"], "label": "l", "args": [], "log": {"stdout": "o", "stderr": "e"}, "command": "c", "files": [{"from": "a"}]}]'
   run check
-  if [ "$RC" -eq 2 ] && has 'x: every launchd_service file needs "from" and "to"'; then pass "a service file without a destination is refused"; else fail "file without to" "rc=$RC" "$OUT"; fi
+  if [ "$RC" -eq 2 ] && has 'x: every service file needs "from" and "to"'; then pass "a service file without a destination is refused"; else fail "file without to" "rc=$RC" "$OUT"; fi
+}
+
+test_a_service_lacking_its_arguments_or_a_log_is_refused() {
+  local path want
+  while IFS='|' read -r path want; do
+    new_case; manifest "[$(jq -c "del($path)" <<<"$SVC_ENTRY")]"
+    run check
+    if [ "$RC" -eq 2 ] && has "$want"; then pass "a service lacking $path is refused, naming it"; else fail "service field $path" "rc=$RC" "$OUT"; fi
+  done <<'CASES'
+.args|svc: service needs "args"
+.log|svc: service needs "log"
+.log.stderr|svc: a service log needs "stderr"
+.label|svc: service needs "label"
+CASES
 }
 
 # ---------------------------------------------------------------------------

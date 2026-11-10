@@ -3,14 +3,26 @@
   "requirements": [
     {
       "id": "service-zettel",
-      "kind": "launchd_service",
-      "why": "the knowledge-graph service the daemon records every chat thread's questions and answers in, kept running by launchd",
+      "kind": "service",
+      "why": "the knowledge-graph service the daemon records every chat thread's questions and answers in, kept running by the platform's service manager",
       "profile": "run",
       "platforms": [
-        "darwin"
+        "darwin",
+        "linux"
       ],
       "label": "com.agentrepl.zettel",
-      "plist": "launchd/com.agentrepl.zettel.plist",
+      "args": [
+        "--socket",
+        "~/.cache/agent-repl/sock/zettel.sock",
+        "--db",
+        "~/zettel/zettel.db",
+        "--log",
+        "~/.cache/agent-repl/log/zettel.log"
+      ],
+      "log": {
+        "stdout": "zettel.out.log",
+        "stderr": "zettel.err.log"
+      },
       "build_target": "zettel",
       "binary": "zettel"
     }

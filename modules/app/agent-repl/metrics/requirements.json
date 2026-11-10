@@ -17,14 +17,29 @@
     },
     {
       "id": "service-victoriametrics",
-      "kind": "launchd_service",
-      "why": "keeps VictoriaMetrics scraping every 15 seconds, kept running by launchd",
+      "kind": "service",
+      "why": "keeps VictoriaMetrics scraping every 15 seconds, kept running by the platform's service manager",
       "profile": "run",
       "platforms": [
-        "darwin"
+        "darwin",
+        "linux"
       ],
       "label": "com.agentrepl.victoriametrics",
-      "plist": "launchd/com.agentrepl.victoriametrics.plist",
+      "args": [
+        "-storageDataPath=~/.cache/agent-repl/metrics/data",
+        "-retentionPeriod=30d",
+        "-httpListenAddr=127.0.0.1:8428",
+        "-promscrape.config=~/.cache/agent-repl/metrics/scrape.yml",
+        "-promscrape.fileSDCheckInterval=15s",
+        "-search.latencyOffset=5s"
+      ],
+      "env": {
+        "AGENT_REPL_METRICS_ROOT": "~/.cache/agent-repl/metrics"
+      },
+      "log": {
+        "stdout": "victoriametrics.log",
+        "stderr": "victoriametrics.log"
+      },
       "command": "victoria-metrics",
       "files": [
         {
