@@ -185,6 +185,9 @@ type Deps struct {
 	// Asks takes a plain user send as the typed answer to a standing ask
 	// before it can become a turn.
 	Asks AskAnswerer
+	// Summaries answers the note a prompt to a workspace with no summary
+	// closes with (wssummary.Keeper).
+	Summaries OwedSummaries
 	// Panels resolves a recognized panel command. It is a FUNCTION because the
 	// four panels are assembled from facts this package does not own (the
 	// session's status, the tracker's checklist, the MCP roster, the context
@@ -203,6 +206,13 @@ type Deps struct {
 	MovedOn func(ctx context.Context, ws ids.WorkspaceID)
 	// Log is the handler's logger.
 	Log dlog.Surfaces
+}
+
+// OwedSummaries is the workspace summaries' keeper, seen from the handler.
+type OwedSummaries interface {
+	// OwedNote answers the meta-wrapped note asking the workspace's agent for
+	// a summary, and false while one stands.
+	OwedNote(ctx context.Context, ws ids.WorkspaceID) (string, bool, error)
 }
 
 // PanelFunc resolves one recognized panel command for a workspace.

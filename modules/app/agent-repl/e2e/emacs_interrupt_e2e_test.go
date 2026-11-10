@@ -85,7 +85,25 @@ func emGHIRegister(t *testing.T, e *Emacs, box sandbox, dirName string) (string,
 	name := emGHINewName(t, decodeStrings(raw), before)
 	e.AwaitTrue("the workspace to hold a daemon-minted ref",
 		`(and (agent-repl-host-ref `+elispString(name)+`) t)`)
+	emGHISetSummary(t, e, name)
 	return name, repo.Dir
+}
+
+// emGHISetSummary sets WS's topbar summary over Emacs's own daemon link, as
+// the workspace's agent does once it has stated its task. A WORKSPACE WITH NO
+// SUMMARY OWES ONE, and every prompt it is sent until then closes with the
+// note asking for it, so a prompt a scenario gates the fake on would never
+// match the gate's text.
+func emGHISetSummary(t *testing.T, e *Emacs, ws string) {
+	t.Helper()
+	form := fmt.Sprintf(`(and (assq 'success
+  (agent-repl-connect-unary-sync (agent-repl-host-conn %[1]s) "SetWorkspaceSummary"
+    (json-encode (list (cons 'workspace (agent-repl-wire-encode-workspace-ref (agent-repl-host-ref %[1]s)))
+                       (cons 'summary %[2]s)))))
+  t)`, elispString(ws), elispString(harness.SeededSummary))
+	if !e.EvalBool(form) {
+		t.Fatalf("SetWorkspaceSummary for %s answered no success", ws)
+	}
 }
 
 // emGHIWorkspaceNamesForm reads the workspace REGISTRY as data, which is

@@ -16,11 +16,11 @@ import (
 	"agent-repld/internal/headless"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/lifecycleconfig"
+	"agent-repld/internal/namingdigest"
 	"agent-repld/internal/prompts"
 	"agent-repld/internal/replyquote"
 	"agent-repld/internal/resolve/feed"
 	"agent-repld/internal/shimlife"
-	"agent-repld/internal/titlesynth"
 	"agent-repld/internal/wsm"
 )
 
@@ -863,9 +863,8 @@ func (v *verbs) refuseBranchExistsLocked(ctx context.Context, log dlog.Logger, r
 // parent's own turns and, through its fork lineage, the turns it inherited
 // (wsm.RecentConversationPrompts). It needs no live parent shim, so a
 // hibernated parent is named from as readily as a running one. It is composed
-// by the title synthesizer's one digest composition (the most recent requests,
-// each bounded), so "what this conversation is about" has one spelling. The
-// digest never quotes more than titlesynth.MaxPrompts requests, so only that
+// by namingdigest.Compose (the most recent requests, each bounded). The
+// digest never quotes more than namingdigest.MaxPrompts requests, so only that
 // bounded tail is read, however deep the lineage.
 //
 // A parent with no conversation is REFUSED HERE, before the naming call is
@@ -878,7 +877,7 @@ func (v *verbs) forkNamingConversation(ctx context.Context, log dlog.Logger, spe
 	if _, err := v.forkableParentSession(ctx, log, parent, spec.forkRefusalArm()); err != nil {
 		return "", err
 	}
-	rows, err := v.deps.DB.RecentConversationPrompts(ctx, parent, titlesynth.MaxPrompts)
+	rows, err := v.deps.DB.RecentConversationPrompts(ctx, parent, namingdigest.MaxPrompts)
 	if err != nil {
 		log.Error(opCreate, "could not read the parent conversation to name the fork", dlog.Context{
 			"parent": string(parent), "cause": err.Error(),
@@ -897,7 +896,7 @@ func (v *verbs) forkNamingConversation(ctx context.Context, log dlog.Logger, spe
 		})
 		return "", nil
 	}
-	return titlesynth.ComposeDigest("", said), nil
+	return namingdigest.Compose(said), nil
 }
 
 // forkableParentSession answers the parent's session when it holds a
@@ -1090,6 +1089,15 @@ func (v *verbs) submitInitialPrompt(ctx context.Context, log dlog.Logger, record
 			}
 			text = decorated
 		}
+	}
+	// A NEW WORKSPACE OWES ITS SUMMARY, so its first message asks its agent
+	// for one (wssummary).
+	note, owed, err := v.deps.Summaries.OwedNote(ctx, record.ID)
+	if err != nil {
+		return fmt.Errorf("create %q: %w", record.Name, err)
+	}
+	if owed {
+		text += note
 	}
 	// THE CREATION STAGE'S PROMPTS JOIN THE INITIAL PROMPT, after the
 	// commission and its notes and before a one-shot's completion directive,

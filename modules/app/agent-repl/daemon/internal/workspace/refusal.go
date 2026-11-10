@@ -266,6 +266,9 @@ const (
 	// ArmInvalidLabel is a ChangeWorkspaceLinks label the summary's menu does
 	// not draw: not two to eight words in one sentence.
 	ArmInvalidLabel = "invalid_label"
+	// ArmInvalidSummary is a SetWorkspaceSummary summary the title line does
+	// not draw: not one plain sentence of two to fifteen words.
+	ArmInvalidSummary = "invalid_summary"
 	// ArmUnknownLink is a ChangeWorkspaceLinks removal or show naming a url
 	// the workspace does not hold.
 	ArmUnknownLink = "unknown_link"

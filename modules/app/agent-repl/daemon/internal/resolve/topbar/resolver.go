@@ -256,9 +256,9 @@ func (r *resolver) render(ws ids.WorkspaceID, s *wsState) (*frontendv1.TopbarVie
 // none exists.
 //
 // THE TITLE IS THE SUMMARY AND NOTHING ELSE (owner ruling, 2026-10-17). The
-// daemon's own distillation of every prompt the user sent comes first; the
-// vendor's own ai-title stands in only until the first distillation lands
-// (owner rulings, 2026-09-13 and 2026-10-14). The workspace's name and its
+// summary the workspace's own agent set (agentrepl.v1.SetWorkspaceSummary)
+// comes first; the vendor's own ai-title stands in while none stands. The
+// workspace's name and its
 // branch are never composed into it, as a suffix or as a stand-in: the name is
 // its own element (TopbarWorkspaceName), drawn beneath the summary, and a
 // workspace with no summary yet draws no title line at all.
@@ -268,8 +268,8 @@ func (r *resolver) render(ws ids.WorkspaceID, s *wsState) (*frontendv1.TopbarVie
 func title(s *wsState) *frontendv1.TopbarTitle {
 	var out *frontendv1.TopbarTitle
 	switch {
-	case s.synthesizedTitle != "":
-		out = &frontendv1.TopbarTitle{Text: s.synthesizedTitle}
+	case s.summary != "":
+		out = &frontendv1.TopbarTitle{Text: s.summary}
 	case s.sessionTitle != "":
 		out = &frontendv1.TopbarTitle{Text: s.sessionTitle}
 	default:
@@ -584,15 +584,14 @@ func (r *resolver) SetName(ws ids.WorkspaceID, name string) {
 		})
 }
 
-// SetSynthesizedTitle installs the daemon's OWN one-line summary of the
-// conversation. It is the first precedence in the title, ahead of the vendor's
-// ai-title. An empty text retracts it (the title falls back to the vendor's
-// ai-title, else no title line), which is how the synthesizer drops a stale
-// title after a /clear.
-func (r *resolver) SetSynthesizedTitle(ws ids.WorkspaceID, title string) {
-	r.mutate(ws, "daemon.topbar.set_synthesized_title", "the topbar took a synthesized title",
-		dlog.Context{"present": title != ""},
-		func(s *wsState) { s.synthesizedTitle = title })
+// SetSummary installs the summary the workspace's agent set. It is the first
+// precedence in the title, ahead of the vendor's ai-title. An empty text
+// retracts it (the title falls back to the vendor's ai-title, else no title
+// line), which is how a /clear drops the summary of the conversation it ended.
+func (r *resolver) SetSummary(ws ids.WorkspaceID, summary string) {
+	r.mutate(ws, "daemon.topbar.set_summary", "the topbar took the workspace summary",
+		dlog.Context{"present": summary != ""},
+		func(s *wsState) { s.summary = summary })
 }
 
 // SetLinks installs the links the summary's menu shows, which the title

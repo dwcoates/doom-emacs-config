@@ -2045,3 +2045,34 @@ func TestAnAgentSentPromptIsDrawnInTheSendersFeedUnderTheRecipient(t *testing.T)
 		t.Fatalf("sent row body = %q, want the prompt's text", got)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// The owed summary
+// ---------------------------------------------------------------------------
+
+// A WORKSPACE WITH NO SUMMARY OWES ONE (wssummary): every prompt the user
+// sends it closes with the note asking its agent for one, as a text block of
+// its own after the user's words, until the agent sets its summary.
+func TestAWorkspaceOwingItsSummaryAsksForItUntilItsAgentSetsOne(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	f := newOpenedOwingSummary(t, harness.Opts{})
+	note := f.d.OwedSummaryNote(t)
+
+	// Act
+	f.submit("fix the flaky reconnect test", "k-owed", origin)
+	owed := f.shim.ExpectStartTurn()
+	pushConcludedTurn(f.shim, mainAgent, "owed-answer")
+	harness.SetSummary(t, f.d, f.ws, "Fix the flaky reconnect test")
+	f.submit("and the footer too", "k-set", origin)
+	set := f.shim.ExpectStartTurn()
+
+	// Assert
+	blocks := owed.GetSaid().GetContent().GetBlocks()
+	if len(blocks) != 2 || blocks[0].GetText().GetText() != "fix the flaky reconnect test" || blocks[1].GetText().GetText() != note {
+		t.Fatalf("the owing workspace's StartTurn.said blocks = %v, want the user's words then the owed-summary note %q", blocks, note)
+	}
+	if got := text(set.GetSaid()); got != "and the footer too" {
+		t.Fatalf("StartTurn.said once the summary is set = %q, want the user's words alone", got)
+	}
+}

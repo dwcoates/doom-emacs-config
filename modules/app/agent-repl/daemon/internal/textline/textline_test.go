@@ -137,3 +137,52 @@ func TestNoPackageHandRollsItsOwnLineSplit(t *testing.T) {
 		t.Fatalf("hand-rolled line split in %v, want textline.Lines", found)
 	}
 }
+
+func TestOneSentenceAcceptsOneLineOfOneSentence(t *testing.T) {
+	tests := []struct {
+		name string
+		text string
+	}{
+		{name: "at the fewest words", text: "Design doc"},
+		{name: "at the most words", text: "one two three four"},
+		{name: "a closing period", text: "The design doc."},
+		{name: "a dotted word inside", text: "The v1.2 notes"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange, Act
+			err := OneSentence("label", tt.text, 2, 4)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("OneSentence(%q) = %v, want nil", tt.text, err)
+			}
+		})
+	}
+}
+
+func TestOneSentenceNamesWhyATextIsRefused(t *testing.T) {
+	tests := []struct {
+		name string
+		text string
+		want string
+	}{
+		{name: "too few words", text: "Doc", want: "a label is 2 to 4 words, not 1"},
+		{name: "too many words", text: "one two three four five", want: "a label is 2 to 4 words, not 5"},
+		{name: "a line break", text: "Design\ndoc", want: "a label is one line"},
+		{name: "a carriage return", text: "Design\rdoc", want: "a label is one line"},
+		{name: "surrounding whitespace", text: "Design doc ", want: "a label carries no whitespace at either end"},
+		{name: "a second sentence", text: "Why? Because", want: `a label is one sentence, and "Why?" ends one before its last word`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange, Act
+			err := OneSentence("label", tt.text, 2, 4)
+
+			// Assert
+			if err == nil || err.Error() != tt.want {
+				t.Fatalf("OneSentence(%q) = %v, want %q", tt.text, err, tt.want)
+			}
+		})
+	}
+}

@@ -567,6 +567,10 @@ func (s *fakeServer) SetWorkspaceName(ctx context.Context, req *connect.Request[
 	return handleUnary[v1.SetWorkspaceNameRequest, v1.SetWorkspaceNameResponse](ctx, s, "SetWorkspaceName", req.Msg)
 }
 
+func (s *fakeServer) SetWorkspaceSummary(ctx context.Context, req *connect.Request[v1.SetWorkspaceSummaryRequest]) (*connect.Response[v1.SetWorkspaceSummaryResponse], error) {
+	return handleUnary[v1.SetWorkspaceSummaryRequest, v1.SetWorkspaceSummaryResponse](ctx, s, "SetWorkspaceSummary", req.Msg)
+}
+
 func (s *fakeServer) SetWorkspaceOneShot(ctx context.Context, req *connect.Request[v1.SetWorkspaceOneShotRequest]) (*connect.Response[v1.SetWorkspaceOneShotResponse], error) {
 	return handleUnary[v1.SetWorkspaceOneShotRequest, v1.SetWorkspaceOneShotResponse](ctx, s, "SetWorkspaceOneShot", req.Msg)
 }

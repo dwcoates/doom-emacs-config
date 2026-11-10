@@ -30,7 +30,6 @@
 import { create } from "@bufbuild/protobuf";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { conversationv1, shimv1 } from "../proto.js";
-import type { TitleDigest } from "../convert/title-digest.js";
 import { mainAgentId } from "../convert/ids.js";
 import type { ForkPointAnswer } from "../engine/fork-point.js";
 import type { ForkSessionOutcome } from "../engine/fork-session.js";
@@ -832,57 +831,6 @@ export function detachForegroundRefused(
 export function detachForegroundDetached(): shimv1.DetachForegroundResponse {
   return create(shimv1.DetachForegroundResponseSchema, {
     result: { case: "success", value: create(shimv1.DetachForegroundSuccessSchema, {}) },
-  });
-}
-
-// ---------------------------------------------------------------------------
-// GatherTitleDigest
-// ---------------------------------------------------------------------------
-
-/** Why a title digest could not be gathered. */
-type TitleDigestKind =
-  | { readonly kind: "noTranscript" }
-  | { readonly kind: "unreadable" };
-
-/** The proto boundary enum the digest's boundary maps to. */
-function titleDigestBoundary(boundary: TitleDigest["boundary"]): shimv1.TitleDigestBoundary {
-  switch (boundary) {
-    case "none":
-      return shimv1.TitleDigestBoundary.NONE;
-    case "clear":
-      return shimv1.TitleDigestBoundary.CLEAR;
-  }
-}
-
-/** The digest as the whole response the handler returns. */
-export function titleDigestGathered(digest: TitleDigest): shimv1.GatherTitleDigestResponse {
-  return create(shimv1.GatherTitleDigestResponseSchema, {
-    result: {
-      case: "success",
-      value: create(shimv1.GatherTitleDigestSuccessSchema, {
-        boundary: titleDigestBoundary(digest.boundary),
-        prompts: digest.prompts,
-      }),
-    },
-  });
-}
-
-/** The refusal as the whole response the handler returns. */
-export function titleDigestRefused(
-  cause: TitleDigestKind,
-  detail: string,
-): shimv1.GatherTitleDigestResponse {
-  return create(shimv1.GatherTitleDigestResponseSchema, {
-    result: {
-      case: "failure",
-      value: create(shimv1.GatherTitleDigestFailureSchema, {
-        detail,
-        kind:
-          cause.kind === "noTranscript"
-            ? { case: "noTranscript", value: create(shimv1.GatherTitleDigestNoTranscriptSchema, {}) }
-            : { case: "unreadable", value: create(shimv1.GatherTitleDigestUnreadableSchema, {}) },
-      }),
-    },
   });
 }
 

@@ -2672,6 +2672,65 @@ func TestCreateClosesARootsFirstMessageWithTheSubsectionPlacementNote(t *testing
 	}
 }
 
+// ---- A new workspace's summary note ----------------------------------------
+
+func TestCreateClosesTheFirstMessageWithTheSummaryNoteAfterThePlacementNote(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	placementBrief(f)
+	f.summaries.owedNote = prompts.Wrap("\n\nSUMMARIZE")
+	spec := standardSpec(t, f)
+	withSubsection(f)
+
+	// Act.
+	if _, err := f.verbs.Create(context.Background(), spec); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Assert.
+	if got, want := sentText(f), "fix the login bug"+prompts.Wrap("\n\nPLACE")+prompts.Wrap("\n\nSUMMARIZE"); got != want {
+		t.Fatalf("the first message = %q, want %q", got, want)
+	}
+}
+
+func TestCreateOwesNoSummaryNoteWhenOneStands(t *testing.T) {
+	// Arrange — the keeper answers that a summary stands.
+	f := newFixture(t)
+	spec := standardSpec(t, f)
+
+	// Act.
+	if _, err := f.verbs.Create(context.Background(), spec); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Assert.
+	if got := sentText(f); got != "fix the login bug" {
+		t.Fatalf("the first message = %q, want the prompt alone", got)
+	}
+	if len(f.summaries.owedAsked) != 1 {
+		t.Fatalf("the keeper was asked %d times, want once", len(f.summaries.owedAsked))
+	}
+}
+
+func TestCreateWhoseSummaryReadFailsSendsNoPrompt(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.summaries.owedErr = errors.New("the state database is locked")
+	spec := standardSpec(t, f)
+
+	// Act.
+	_, err := f.verbs.Create(context.Background(), spec)
+
+	// Assert: the keeper recorded the failure; the create surfaces it and
+	// sends no first message without the note it may owe.
+	if !errors.Is(err, f.summaries.owedErr) {
+		t.Fatalf("Create = %v, want the keeper's failure", err)
+	}
+	if len(f.queue.submissions) != 0 {
+		t.Fatalf("submitted %d prompts, want none", len(f.queue.submissions))
+	}
+}
+
 func TestCreateOwesNoPlacementNoteWhereNothingCanBePlaced(t *testing.T) {
 	tests := []struct {
 		name    string

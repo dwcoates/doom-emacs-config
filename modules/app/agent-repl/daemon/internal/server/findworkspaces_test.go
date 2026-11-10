@@ -66,7 +66,7 @@ func findHarness(t *testing.T, opts ...option) *harness {
 		"ws-open":   {ID: "ws-open", Repo: repo.ID, Dir: "/src/open", Name: "open-one", Branch: "open-one", CreatedAt: created, LastActivityAt: ptrTo(time.UnixMilli(9_000))},
 		"ws-landed": {ID: "ws-landed", Repo: repo.ID, Dir: "/src/landed", Name: "landed-one", Branch: "landed-one", CreatedAt: created, Closed: true, MergedAt: &merged},
 	}
-	h.DB.summaries = map[ids.WorkspaceID]wsm.WorkspaceSummary{"ws-open": {Title: "Fix the footer"}}
+	h.DB.summaries = map[ids.WorkspaceID]string{"ws-open": "Fix the footer"}
 	h.Sidebar.topic.Publish(findRoster(thinking))
 	return h
 }

@@ -168,6 +168,9 @@ const (
 	// AgentReplSetWorkspaceNameProcedure is the fully-qualified name of the AgentRepl's
 	// SetWorkspaceName RPC.
 	AgentReplSetWorkspaceNameProcedure = "/agentrepl.v1.AgentRepl/SetWorkspaceName"
+	// AgentReplSetWorkspaceSummaryProcedure is the fully-qualified name of the AgentRepl's
+	// SetWorkspaceSummary RPC.
+	AgentReplSetWorkspaceSummaryProcedure = "/agentrepl.v1.AgentRepl/SetWorkspaceSummary"
 	// AgentReplRestartWorkspaceProcedure is the fully-qualified name of the AgentRepl's
 	// RestartWorkspace RPC.
 	AgentReplRestartWorkspaceProcedure = "/agentrepl.v1.AgentRepl/RestartWorkspace"
@@ -480,6 +483,7 @@ var (
 	agentReplSetWorkspaceCorrespondenceMethodDescriptor        = agentReplServiceDescriptor.Methods().ByName("SetWorkspaceCorrespondence")
 	agentReplChangeWorkspaceLinksMethodDescriptor              = agentReplServiceDescriptor.Methods().ByName("ChangeWorkspaceLinks")
 	agentReplSetWorkspaceNameMethodDescriptor                  = agentReplServiceDescriptor.Methods().ByName("SetWorkspaceName")
+	agentReplSetWorkspaceSummaryMethodDescriptor               = agentReplServiceDescriptor.Methods().ByName("SetWorkspaceSummary")
 	agentReplRestartWorkspaceMethodDescriptor                  = agentReplServiceDescriptor.Methods().ByName("RestartWorkspace")
 	agentReplParkWorkspaceMethodDescriptor                     = agentReplServiceDescriptor.Methods().ByName("ParkWorkspace")
 	agentReplSetWorkspacePriorityMethodDescriptor              = agentReplServiceDescriptor.Methods().ByName("SetWorkspacePriority")
@@ -731,6 +735,9 @@ type AgentReplClient interface {
 	// Rename a workspace: its name only, never its branch or its worktree
 	// directory. See endpoint_set_workspace_name.proto.
 	SetWorkspaceName(context.Context, *connect.Request[v1.SetWorkspaceNameRequest]) (*connect.Response[v1.SetWorkspaceNameResponse], error)
+	// Set the one-sentence summary of a workspace's task that its topbar
+	// draws. See endpoint_set_workspace_summary.proto.
+	SetWorkspaceSummary(context.Context, *connect.Request[v1.SetWorkspaceSummaryRequest]) (*connect.Response[v1.SetWorkspaceSummaryResponse], error)
 	// Bounce the workspace's shim (rebuild if stale); graceful unless forced.
 	// See endpoint_restart_workspace.proto.
 	RestartWorkspace(context.Context, *connect.Request[v1.RestartWorkspaceRequest]) (*connect.Response[v1.RestartWorkspaceResponse], error)
@@ -1332,6 +1339,12 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			httpClient,
 			baseURL+AgentReplSetWorkspaceNameProcedure,
 			connect.WithSchema(agentReplSetWorkspaceNameMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
+		setWorkspaceSummary: connect.NewClient[v1.SetWorkspaceSummaryRequest, v1.SetWorkspaceSummaryResponse](
+			httpClient,
+			baseURL+AgentReplSetWorkspaceSummaryProcedure,
+			connect.WithSchema(agentReplSetWorkspaceSummaryMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
 		restartWorkspace: connect.NewClient[v1.RestartWorkspaceRequest, v1.RestartWorkspaceResponse](
@@ -1977,6 +1990,7 @@ type agentReplClient struct {
 	setWorkspaceCorrespondence        *connect.Client[v1.SetWorkspaceCorrespondenceRequest, v1.SetWorkspaceCorrespondenceResponse]
 	changeWorkspaceLinks              *connect.Client[v1.ChangeWorkspaceLinksRequest, v1.ChangeWorkspaceLinksResponse]
 	setWorkspaceName                  *connect.Client[v1.SetWorkspaceNameRequest, v1.SetWorkspaceNameResponse]
+	setWorkspaceSummary               *connect.Client[v1.SetWorkspaceSummaryRequest, v1.SetWorkspaceSummaryResponse]
 	restartWorkspace                  *connect.Client[v1.RestartWorkspaceRequest, v1.RestartWorkspaceResponse]
 	parkWorkspace                     *connect.Client[v1.ParkWorkspaceRequest, v1.ParkWorkspaceResponse]
 	setWorkspacePriority              *connect.Client[v1.SetWorkspacePriorityRequest, v1.SetWorkspacePriorityResponse]
@@ -2304,6 +2318,11 @@ func (c *agentReplClient) ChangeWorkspaceLinks(ctx context.Context, req *connect
 // SetWorkspaceName calls agentrepl.v1.AgentRepl.SetWorkspaceName.
 func (c *agentReplClient) SetWorkspaceName(ctx context.Context, req *connect.Request[v1.SetWorkspaceNameRequest]) (*connect.Response[v1.SetWorkspaceNameResponse], error) {
 	return c.setWorkspaceName.CallUnary(ctx, req)
+}
+
+// SetWorkspaceSummary calls agentrepl.v1.AgentRepl.SetWorkspaceSummary.
+func (c *agentReplClient) SetWorkspaceSummary(ctx context.Context, req *connect.Request[v1.SetWorkspaceSummaryRequest]) (*connect.Response[v1.SetWorkspaceSummaryResponse], error) {
+	return c.setWorkspaceSummary.CallUnary(ctx, req)
 }
 
 // RestartWorkspace calls agentrepl.v1.AgentRepl.RestartWorkspace.
@@ -2943,6 +2962,9 @@ type AgentReplHandler interface {
 	// Rename a workspace: its name only, never its branch or its worktree
 	// directory. See endpoint_set_workspace_name.proto.
 	SetWorkspaceName(context.Context, *connect.Request[v1.SetWorkspaceNameRequest]) (*connect.Response[v1.SetWorkspaceNameResponse], error)
+	// Set the one-sentence summary of a workspace's task that its topbar
+	// draws. See endpoint_set_workspace_summary.proto.
+	SetWorkspaceSummary(context.Context, *connect.Request[v1.SetWorkspaceSummaryRequest]) (*connect.Response[v1.SetWorkspaceSummaryResponse], error)
 	// Bounce the workspace's shim (rebuild if stale); graceful unless forced.
 	// See endpoint_restart_workspace.proto.
 	RestartWorkspace(context.Context, *connect.Request[v1.RestartWorkspaceRequest]) (*connect.Response[v1.RestartWorkspaceResponse], error)
@@ -3540,6 +3562,12 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		AgentReplSetWorkspaceNameProcedure,
 		svc.SetWorkspaceName,
 		connect.WithSchema(agentReplSetWorkspaceNameMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
+	agentReplSetWorkspaceSummaryHandler := connect.NewUnaryHandler(
+		AgentReplSetWorkspaceSummaryProcedure,
+		svc.SetWorkspaceSummary,
+		connect.WithSchema(agentReplSetWorkspaceSummaryMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
 	agentReplRestartWorkspaceHandler := connect.NewUnaryHandler(
@@ -4228,6 +4256,8 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplChangeWorkspaceLinksHandler.ServeHTTP(w, r)
 		case AgentReplSetWorkspaceNameProcedure:
 			agentReplSetWorkspaceNameHandler.ServeHTTP(w, r)
+		case AgentReplSetWorkspaceSummaryProcedure:
+			agentReplSetWorkspaceSummaryHandler.ServeHTTP(w, r)
 		case AgentReplRestartWorkspaceProcedure:
 			agentReplRestartWorkspaceHandler.ServeHTTP(w, r)
 		case AgentReplParkWorkspaceProcedure:
@@ -4613,6 +4643,10 @@ func (UnimplementedAgentReplHandler) ChangeWorkspaceLinks(context.Context, *conn
 
 func (UnimplementedAgentReplHandler) SetWorkspaceName(context.Context, *connect.Request[v1.SetWorkspaceNameRequest]) (*connect.Response[v1.SetWorkspaceNameResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.SetWorkspaceName is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) SetWorkspaceSummary(context.Context, *connect.Request[v1.SetWorkspaceSummaryRequest]) (*connect.Response[v1.SetWorkspaceSummaryResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.SetWorkspaceSummary is not implemented"))
 }
 
 func (UnimplementedAgentReplHandler) RestartWorkspace(context.Context, *connect.Request[v1.RestartWorkspaceRequest]) (*connect.Response[v1.RestartWorkspaceResponse], error) {

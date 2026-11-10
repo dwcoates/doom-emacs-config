@@ -249,6 +249,7 @@ type harness struct {
 	queue *fakeQueue
 	feed  *fakeFeed
 	asks  *fakeAsks
+	owed  *fakeOwed
 
 	// asked records every panel command the source was asked for.
 	askedMu  sync.Mutex
@@ -264,6 +265,25 @@ type harness struct {
 	// movedOn records every workspace the handler said moved on.
 	movedMu sync.Mutex
 	movedOn []ids.WorkspaceID
+}
+
+// fakeOwed is the summaries' keeper: it answers `note` as owed (empty answers
+// that a summary stands) or `err`, and records every workspace asked about.
+type fakeOwed struct {
+	mu    sync.Mutex
+	note  string
+	err   error
+	asked []ids.WorkspaceID
+}
+
+func (o *fakeOwed) OwedNote(_ context.Context, ws ids.WorkspaceID) (string, bool, error) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.asked = append(o.asked, ws)
+	if o.err != nil {
+		return "", false, o.err
+	}
+	return o.note, o.note != "", nil
 }
 
 // fakeAsks is the standing-ask answerer: it answers `answered` and `err`, and
@@ -310,6 +330,7 @@ func newHarness(t *testing.T) *harness {
 		queue:  &fakeQueue{},
 		feed:   &fakeFeed{},
 		asks:   &fakeAsks{},
+		owed:   &fakeOwed{},
 		minted: "minted-turn",
 		log:    dlog.NewTestSurfaces(),
 		panel: &agentreplv1.SubmitPromptCommandPanel{
@@ -317,10 +338,11 @@ func newHarness(t *testing.T) *harness {
 		},
 	}
 	built, err := newHandler(Deps{
-		DB:    h.db,
-		Queue: h.queue,
-		Feed:  h.feed,
-		Asks:  h.asks,
+		DB:        h.db,
+		Queue:     h.queue,
+		Feed:      h.feed,
+		Asks:      h.asks,
+		Summaries: h.owed,
 		Panels: func(_ context.Context, _ ids.WorkspaceID, command conversationv1.SessionCommand) (*agentreplv1.SubmitPromptCommandPanel, error) {
 			h.askedMu.Lock()
 			h.asked = append(h.asked, command)

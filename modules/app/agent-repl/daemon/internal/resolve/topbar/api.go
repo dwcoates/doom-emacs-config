@@ -173,11 +173,12 @@ type Resolver interface {
 	// draws (TopbarRemoteControl), leaving the rest of the naming as it is.
 	// Its sole producer is the fleet, on every UpdateRemoteControlMode.
 	SetRemoteControl(ws ids.WorkspaceID, on bool)
-	// SetSynthesizedTitle installs the daemon's OWN one-sentence workspace
-	// summary, shown in the title's FIRST precedence: above the vendor's
-	// ai-title and the workspace name. An empty text retracts it. Its sole
-	// producer is the title synthesizer.
-	SetSynthesizedTitle(ws ids.WorkspaceID, title string)
+	// SetSummary installs the one-sentence workspace summary its agent set
+	// (agentrepl.v1.SetWorkspaceSummary), shown in the title's FIRST
+	// precedence: above the vendor's ai-title and the workspace name. An empty
+	// text retracts it. Its sole producer is the summary keeper
+	// (wssummary.Keeper).
+	SetSummary(ws ids.WorkspaceID, summary string)
 	// SetLinks installs the links the summary's menu shows, most recently
 	// set first, which the title carries for a click to open
 	// (TopbarTitle.links). Empty clears them. They ride the title, so a

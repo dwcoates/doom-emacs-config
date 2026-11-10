@@ -1,22 +1,6 @@
 /**
- * convert/title-digest.ts — the material the workspace summary is made of,
- * computed from the transcript's own records.
- *
- * WHAT THE DIGEST IS. The daemon distills the user's PROMPTS since the last
- * /clear into the one-sentence workspace summary the topbar draws. ONLY A
- * /clear CUTS THE DIGEST (owner ruling, 2026-10-14: every prompt of the
- * session, including pre-compaction, but not pre-clear):
- *
- *   - a /clear — recognized by the `<command-name>/clear</command-name>`
- *     command envelope the vendor writes at the TOP of the NEW transcript a
- *     clear rotates to. Since a clear rotates the file, "the prompts in this
- *     transcript" is already "the prompts since the clear", so the envelope is
- *     reported as the boundary but does not change which prompts are collected;
- *   - nothing — the conversation has never been cleared, so every prompt counts.
- *
- * A /compact stays IN the same file and leaves the user's earlier prompt
- * records in it, so a compaction cuts nothing: the prompts before it are read
- * exactly as the prompts after it are, and its summary is not a prompt.
+ * convert/transcript-prompt.ts — which of a transcript's records are the
+ * person's own prompts, and which mark a context boundary.
  *
  * WHAT IS NOT A PROMPT. The transcript carries much under `type:"user"` that a
  * person never typed: the SDK writes tool results as user records (array
@@ -25,22 +9,14 @@
  * writes its summary (`isCompactSummary`), and a subagent's prompt rides
  * `isSidechain`. None of those is a prompt, and each is excluded.
  *
- * PURE, SO IT IS TESTABLE. This module does NO I/O: it takes already-parsed
- * records and returns the digest. `engine/title-digest.ts` owns reading and
- * parsing the transcript bytes — a converter reads none.
+ * ONE SPELLING OF THE RECORD SHAPES. ReadTranscripts (`engine/cold.ts`) and
+ * the rollback (`engine/rollback.ts`) both judge the same records, so the
+ * predicates are spelled here once.
+ *
+ * PURE, SO IT IS TESTABLE. This module does NO I/O: it judges already-parsed
+ * records, and its callers own reading the transcript bytes.
  */
 import { isKeepalivePrompt } from "../engine/keepalive.js";
-
-/** The kind of context boundary a digest is measured from. */
-export type TitleDigestBoundary = "none" | "clear";
-
-/** The material the workspace summary is made of. */
-export interface TitleDigest {
-  /** Which boundary the prompts are measured from. */
-  readonly boundary: TitleDigestBoundary;
-  /** The user's prompts since the last /clear, across every compaction, oldest first. */
-  readonly prompts: string[];
-}
 
 /** One content block of a `type:"user"` record's array content. */
 interface ContentBlock {
@@ -49,11 +25,11 @@ interface ContentBlock {
 }
 
 /**
- * One transcript record, in the slice this digest reads. The transcript is
+ * One transcript record, in the slice these predicates read. The transcript is
  * append-only JSONL and carries far more than this; every field here is
  * optional because a torn or foreign record must be judged, not assumed.
  */
-export interface TitleDigestRecord {
+export interface PromptRecord {
   readonly type?: unknown;
   readonly subtype?: unknown;
   readonly isMeta?: unknown;
@@ -72,20 +48,13 @@ const CLEAR_ENVELOPE = "<command-name>/clear</command-name>";
  */
 const COMMAND_ARTIFACT_PREFIXES = ["<command-name>", "<local-command-stdout>", "<local-command-caveat>"];
 
-/**
- * Whether a record is a compaction boundary (the marker, not the summary).
- *
- * The digest no longer cuts at a compaction, but `engine/cold.ts` decides this
- * question about the same records while reading a transcript for
- * ReadTranscripts, and the record shapes this module reads are spelled here
- * once, so the predicate stays beside its siblings.
- */
-export function isCompactBoundary(r: TitleDigestRecord): boolean {
+/** Whether a record is a compaction boundary (the marker, not the summary). */
+export function isCompactBoundary(r: PromptRecord): boolean {
   return r.type === "system" && r.subtype === "compact_boundary";
 }
 
 /** The string content of a `type:"user"` record, or undefined when it is not a bare string. */
-function userString(r: TitleDigestRecord): string | undefined {
+function userString(r: PromptRecord): string | undefined {
   if (r.type !== "user") return undefined;
   const content = r.message?.content;
   return typeof content === "string" ? content : undefined;
@@ -94,10 +63,9 @@ function userString(r: TitleDigestRecord): string | undefined {
 /**
  * Whether a user string is a /clear command envelope.
  *
- * EXPORTED because ReadTranscripts (`engine/cold.ts`) decides the same
- * question: one spelling of the boundary rule, shared by the digest and by it.
+ * A /clear rotates to a new transcript and writes this envelope at its head.
  */
-export function isClearEnvelope(r: TitleDigestRecord): boolean {
+export function isClearEnvelope(r: PromptRecord): boolean {
   const s = userString(r);
   return s !== undefined && s.includes(CLEAR_ENVELOPE);
 }
@@ -111,7 +79,7 @@ export function isClearEnvelope(r: TitleDigestRecord): boolean {
  * reduced to its text blocks alone, so a prompt that carried an image beside
  * its words still contributes the words.
  */
-export function promptText(r: TitleDigestRecord): string | undefined {
+export function promptText(r: PromptRecord): string | undefined {
   const trimmed = userRecordText(r);
   if (trimmed === undefined) return undefined;
   if (COMMAND_ARTIFACT_PREFIXES.some((prefix) => trimmed.startsWith(prefix))) return undefined;
@@ -133,7 +101,7 @@ export function promptText(r: TitleDigestRecord): string | undefined {
  * keep-alive on the file plane by this same text, which {@link promptText}
  * refuses to answer for a keep-alive.
  */
-export function userRecordText(r: TitleDigestRecord): string | undefined {
+export function userRecordText(r: PromptRecord): string | undefined {
   if (r.type !== "user") return undefined;
   if (r.isMeta === true || r.isSidechain === true || r.isCompactSummary === true) return undefined;
   if (r.message?.role !== "user") return undefined;
@@ -154,27 +122,4 @@ export function userRecordText(r: TitleDigestRecord): string | undefined {
 
   const trimmed = text.trim();
   return trimmed === "" ? undefined : trimmed;
-}
-
-/**
- * The digest the records state.
- *
- * The last /clear is found in ONE forward pass, last-writer-wins. The prompts
- * are then every prompt strictly after it (or every prompt at all when there
- * was none). A compaction boundary is passed over like any other non-prompt
- * record, so the prompts before it still count.
- */
-export function computeTitleDigest(records: readonly TitleDigestRecord[]): TitleDigest {
-  let boundaryIndex = -1;
-  for (let i = 0; i < records.length; i++) {
-    if (isClearEnvelope(records[i])) boundaryIndex = i;
-  }
-
-  const prompts: string[] = [];
-  for (let i = boundaryIndex + 1; i < records.length; i++) {
-    const text = promptText(records[i]);
-    if (text !== undefined) prompts.push(text);
-  }
-
-  return { boundary: boundaryIndex < 0 ? "none" : "clear", prompts };
 }

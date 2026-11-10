@@ -127,8 +127,8 @@ func (w *watcher) routeSessionUpdateArmLocked(update *conversationv1.SessionUpda
 		// conversation summary in place of the workspace name (owner ruling,
 		// 2026-09-13). The topbar resolver already handles the `title` arm; the
 		// gap was only that this route never delivered it. The daemon's own
-		// distilled summary outranks it there (owner ruling, 2026-10-14), so
-		// it stops nothing.
+		// summary, the one its agent set, outranks it there, so it stops
+		// nothing.
 		w.log.Debug("daemon.sessionwatcher.session_update", "session fact routed to the topbar", dlog.Context{
 			"arm": sessionArm(update),
 		})
@@ -818,13 +818,6 @@ func (w *watcher) routePromptLocked(a *agentWatch, prompt *conversationv1.AgentP
 		"agent_id": prompt.GetAgent().GetValue(), "turn_id": prompt.GetId().GetValue(),
 	})
 	w.sinks.Feed.OnPrompt(w.ws, prompt.GetAgent(), prompt, place)
-	// A MAIN-AGENT PROMPT HAS BEEN MADE, so the workspace summary is due now
-	// (the first prompt) or counted toward its next distillation. A
-	// subagent's commission is not the user's prompt. Non-blocking: the
-	// synthesizer dispatches its own goroutine and never calls back in.
-	if a.id == nil && w.sinks.Title != nil {
-		w.sinks.Title.OnPrompt(w.ws)
-	}
 }
 
 // adoptVendorTurnLocked opens the turn a VENDOR_STARTED prompt row announces.
@@ -1107,12 +1100,11 @@ func (w *watcher) routeContextCutLocked(agent *conversationv1.AgentId, cut *conv
 	}
 	w.sinks.Footer.OnContextCut(w.ws, agent, cut)
 	w.sinks.Topbar.OnContextCut(w.ws, agent, cut)
-	// A CLEAR moves the digest boundary, so the synthesizer resets its hash
-	// and re-synthesizes on the next trigger. A compaction cuts no prompt from
-	// the digest (owner ruling, 2026-10-14: the summary distills the prompts
-	// before a compaction too), so the synthesizer is left alone.
-	if w.sinks.Title != nil && cut.GetCleared() != nil {
-		w.sinks.Title.OnContextReset(w.ws)
+	// A CLEAR ends the conversation the workspace's summary described, so
+	// the summary is dropped and the workspace owes a new one. A compaction
+	// keeps the conversation, so the summary stands.
+	if w.sinks.Summary != nil && cut.GetCleared() != nil {
+		w.sinks.Summary.OnContextReset(w.ws)
 	}
 }
 

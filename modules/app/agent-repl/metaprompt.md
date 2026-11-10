@@ -299,6 +299,18 @@
 - A fix that genuinely turns on a decision that is mine to make is the one exception.
   - The workspace states that decision as a question and dispatches nothing until I answer it.
 
+## Workspace summary
+
+### The workspace keeps its own topbar summary current
+
+- The workspace's topbar summary is its own one-sentence statement of its high-level task, which its agent sets.
+  - The daemon derives no summary, so a workspace that sets none shows none.
+  - While none stands, the daemon closes each prompt with a note asking for one, and that note holds the format.
+- The workspace sets its summary again whenever its high-level task materially changes, without asking.
+  - A step within the task is never a reason to change it.
+  - A one-shot's task is fixed at its creation, so a one-shot rarely changes its summary.
+- The verb and its flags are `/agent-repl-workspaces`'.
+
 ## Workspace links
 
 ### Every link the workspace's task is about, or that its work creates, is stored as one of its links

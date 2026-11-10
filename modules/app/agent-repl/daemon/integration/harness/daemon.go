@@ -2,6 +2,7 @@ package harness
 
 import (
 	"agent-repld/internal/h2cclient"
+	"agent-repld/internal/wssummary"
 	"context"
 	"errors"
 	"fmt"
@@ -1994,8 +1995,50 @@ func (d *Daemon) Stderr() string {
 	return string(raw)
 }
 
-// Register registers a repository's worktree and answers the minted ref.
+// SeededSummary is the topbar summary Register states for every workspace it
+// registers.
+const SeededSummary = "Exercise the daemon under test"
+
+// Register registers a repository's worktree, states its summary
+// (SeededSummary), and answers the minted ref.
+//
+// A WORKSPACE WITH NO SUMMARY OWES ONE (wssummary): every prompt it is sent
+// carries the note asking its agent for one, and the fake vendor reads that
+// note as part of the prompt. Register therefore answers the steady state a
+// workspace reaches once its agent has stated its task, so a test sees only
+// the prompts it sends; a test about the owed summary itself registers with
+// RegisterOwingSummary.
 func Register(t testing.TB, d *Daemon, dir string) *workspacev1.WorkspaceRef {
+	t.Helper()
+	ref := RegisterOwingSummary(t, d, dir)
+	SetSummary(t, d, ref, SeededSummary)
+	return ref
+}
+
+// SetSummary sets ws's topbar summary, as its agent does with `agent-repld
+// workspace summary`, failing the test unless the daemon stores it.
+func SetSummary(t testing.TB, d *Daemon, ws *workspacev1.WorkspaceRef, summary string) {
+	t.Helper()
+	resp, err := d.Client().SetWorkspaceSummary(d.Ctx(), connect.NewRequest(&agentreplv1.SetWorkspaceSummaryRequest{Workspace: ws, Summary: summary}))
+	if err != nil || resp.Msg.GetSuccess() == nil {
+		t.Fatalf("SetWorkspaceSummary(%s, %q) = (%v, %v), want a success", ws.GetId(), summary, resp, err)
+	}
+}
+
+// OwedSummaryNote is the note the daemon closes a prompt with while the
+// prompt's workspace owes its summary, composed from this daemon's own briefs.
+func (d *Daemon) OwedSummaryNote(t testing.TB) string {
+	t.Helper()
+	note, err := wssummary.Note(d.PromptsDir)
+	if err != nil {
+		t.Fatalf("harness: compose the owed-summary note: %v", err)
+	}
+	return note
+}
+
+// RegisterOwingSummary registers a repository's worktree and answers the
+// minted ref, leaving the workspace with no summary: it owes one.
+func RegisterOwingSummary(t testing.TB, d *Daemon, dir string) *workspacev1.WorkspaceRef {
 	t.Helper()
 	resp, err := d.Client().RegisterWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.RegisterWorkspaceRequest{Dir: dir}))
 	if err != nil {

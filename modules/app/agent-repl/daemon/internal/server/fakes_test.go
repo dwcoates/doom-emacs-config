@@ -160,7 +160,7 @@ type fakeDB struct {
 	subsections []wsm.Subsection
 	// summaries are the stored workspace summaries ListWorkspaceSummaries
 	// answers; summariesErr fails that read.
-	summaries    map[ids.WorkspaceID]wsm.WorkspaceSummary
+	summaries    map[ids.WorkspaceID]string
 	summariesErr error
 	drainPut     []wsm.DrainSchedule
 	// feedScalePut records every persisted feed text zoom; feedScalePutErr
@@ -430,6 +430,10 @@ type fakeVerbs struct {
 	// answers, and a success answers the name it received.
 	names      []string
 	setNameErr error
+	// summaries records every summary SetSummary received; setSummaryErr is
+	// what it answers, and a success answers the summary it received.
+	summaries     []string
+	setSummaryErr error
 	// opens and selects count every Open and Select the handlers made: the
 	// two verbs that bring a workspace up.
 	opens, selects atomic.Int32
@@ -826,6 +830,14 @@ func (f *fakeVerbs) SetName(_ context.Context, _ ids.WorkspaceID, name string) (
 		return "", f.setNameErr
 	}
 	return name, nil
+}
+
+func (f *fakeVerbs) SetSummary(_ context.Context, _ ids.WorkspaceID, summary string) (string, error) {
+	f.summaries = append(f.summaries, summary)
+	if f.setSummaryErr != nil {
+		return "", f.setSummaryErr
+	}
+	return summary, nil
 }
 
 // RegisterAll answers registerAllAnswers, recording the dirs it was handed.
@@ -2895,7 +2907,7 @@ func (d *fakeDB) ListWorkspaces(context.Context) ([]wsm.Workspace, error) {
 }
 
 // ListWorkspaceSummaries answers the seeded summaries, or summariesErr.
-func (d *fakeDB) ListWorkspaceSummaries(context.Context) (map[ids.WorkspaceID]wsm.WorkspaceSummary, error) {
+func (d *fakeDB) ListWorkspaceSummaries(context.Context) (map[ids.WorkspaceID]string, error) {
 	if d.summariesErr != nil {
 		return nil, d.summariesErr
 	}

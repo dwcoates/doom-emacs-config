@@ -77,6 +77,37 @@ func TestStatusAnswersTheWorkspaceAndWhereItLands(t *testing.T) {
 	}
 }
 
+func TestStatusAnswersTheWorkspacesSummary(t *testing.T) {
+	tests := []struct {
+		name   string
+		stored map[ids.WorkspaceID]string
+		want   *string
+	}{
+		{name: "one stands", stored: map[ids.WorkspaceID]string{"ws-1": "Fix the footer"}, want: proto.String("Fix the footer")},
+		{name: "none stands, so one is owed", stored: nil, want: nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+			f.db.workspaces["ws-1"] = wsm.Workspace{ID: "ws-1", Name: "one"}
+			f.db.storedSummaries = tt.stored
+			f.footer.statuses = map[ids.WorkspaceID]*frontendv1.FooterStatus{"ws-1": footerIdle()}
+
+			// Act
+			got, err := f.verbs.Status(context.Background(), "ws-1")
+
+			// Assert
+			if err != nil {
+				t.Fatalf("Status: %v", err)
+			}
+			if (got.Summary == nil) != (tt.want == nil) || (tt.want != nil && got.GetSummary() != *tt.want) {
+				t.Errorf("summary = %v, want %v", got.Summary, tt.want)
+			}
+		})
+	}
+}
+
 func TestStatusAnswersTheRelationship(t *testing.T) {
 	parent := ids.WorkspaceID("ws-parent")
 	creator := ids.WorkspaceID("ws-creator")
@@ -289,6 +320,10 @@ func TestStatusFails(t *testing.T) {
 			message: "could not read the workspace whose status was asked"},
 		{name: "a footer with no status", arrange: func(f *fixture) { f.db.workspaces["ws-1"] = wsm.Workspace{ID: "ws-1"} },
 			message: "a workspace's footer status has no activity"},
+		{name: "an unreadable summary", arrange: func(f *fixture) {
+			f.db.workspaces["ws-1"] = wsm.Workspace{ID: "ws-1"}
+			f.db.summaryErr = errors.New("db gone")
+		}, message: "could not read the summary of the workspace whose status was asked"},
 		{name: "a merge workspace with no creation job", arrange: func(f *fixture) {
 			f.db.workspaces["ws-1"] = wsm.Workspace{ID: "ws-1", MergeOf: &wsm.MergeOrigin{Requester: "ws-0"}}
 		}, message: "a merge workspace has no creation job to say where it lands"},

@@ -13,6 +13,7 @@ import (
 	zettelv1 "agentrepl/proto/zettel/v1"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/feedid"
 	"agent-repld/internal/holdfold"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/promptqueue"
@@ -23,7 +24,7 @@ import (
 func TestNewRefusesEachMissingCollaborator(t *testing.T) {
 	full := func() Deps {
 		return Deps{
-			DB: newFakeDB(), Queue: &fakeQueue{}, Feed: &fakeFeed{}, Asks: &fakeAsks{},
+			DB: newFakeDB(), Queue: &fakeQueue{}, Feed: &fakeFeed{}, Asks: &fakeAsks{}, Summaries: &fakeOwed{},
 			Panels: func(context.Context, ids.WorkspaceID, conversationv1.SessionCommand) (*agentreplv1.SubmitPromptCommandPanel, error) {
 				return nil, nil
 			},
@@ -40,6 +41,7 @@ func TestNewRefusesEachMissingCollaborator(t *testing.T) {
 		{"feed resolver", func(d *Deps) { d.Feed = nil }},
 		{"panel source", func(d *Deps) { d.Panels = nil }},
 		{"standing-ask answerer", func(d *Deps) { d.Asks = nil }},
+		{"summaries' keeper", func(d *Deps) { d.Summaries = nil }},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1070,5 +1072,125 @@ func TestRecognitionReadsTheSaidTextThroughHoldfold(t *testing.T) {
 				t.Fatalf("saidText = %q, want holdfold's %q", got, want)
 			}
 		})
+	}
+}
+
+// owedNoteText is the note the fake keeper answers as owed.
+const owedNoteText = "<!--agent-repl:meta-->set your summary<!--/agent-repl:meta-->"
+
+// forwardedTexts answers the text of every block of the one forwarded
+// submission, failing the test unless exactly one was forwarded.
+func forwardedTexts(t *testing.T, h *harness) []string {
+	t.Helper()
+	forwarded := h.queue.forwarded()
+	if len(forwarded) != 1 {
+		t.Fatalf("forwarded %d submissions, want 1", len(forwarded))
+	}
+	var texts []string
+	for _, block := range forwarded[0].Said.GetContent().GetBlocks() {
+		texts = append(texts, block.GetText().GetText())
+	}
+	return texts
+}
+
+func TestAPromptToAWorkspaceThatOwesASummaryAsksForOne(t *testing.T) {
+	sender := ids.WorkspaceID("ws-sender")
+	tests := []struct {
+		name   string
+		origin conversationv1.PromptOrigin
+		sentBy *ids.WorkspaceID
+	}{
+		{name: "the user's own prompt", origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT},
+		{name: "a prompt typed in the webapp", origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT},
+		{name: "another workspace's agent's prompt", origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT, sentBy: &sender},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.owed.note = owedNoteText
+
+			// Act
+			_, err := h.h.Submit(context.Background(), theWorkspace, userSaid("fix the footer"), "key-1", tt.origin, tt.sentBy, wsm.DeliveryOrdinary, nil)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("Submit: %v", err)
+			}
+			if got, want := forwardedTexts(t, h), []string{"fix the footer", owedNoteText}; !reflect.DeepEqual(got, want) {
+				t.Fatalf("forwarded blocks = %q, want the user's words then the note as its own block %q", got, want)
+			}
+		})
+	}
+}
+
+func TestAPromptToAWorkspaceWithASummaryIsForwardedAsSaid(t *testing.T) {
+	// Arrange — the keeper answers that a summary stands.
+	h := newHarness(t)
+
+	// Act
+	if _, err := h.submit("fix the footer"); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+
+	// Assert
+	if got := forwardedTexts(t, h); !reflect.DeepEqual(got, []string{"fix the footer"}) {
+		t.Fatalf("forwarded blocks = %q, want the user's words alone", got)
+	}
+	if len(h.owed.asked) != 1 || h.owed.asked[0] != theWorkspace {
+		t.Fatalf("the keeper was asked about %v, want exactly the workspace", h.owed.asked)
+	}
+}
+
+func TestAPromptCarryingNoDirectiveNeverAsksForASummary(t *testing.T) {
+	tests := []struct {
+		name   string
+		said   string
+		origin conversationv1.PromptOrigin
+		target *feedid.Ref
+	}{
+		{name: "a daemon-born brief", said: "hello", origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_QUEUE_NOTICE},
+		{name: "a prompt to a subagent's bubble", said: "hello", origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, target: bubbleRef(theWorkspace)},
+		{name: "a slash command the vendor runs", said: "/review the diff", origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT},
+		{name: "a bare slash command the vendor runs", said: "/my-skill", origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.owed.note = owedNoteText
+
+			// Act
+			_, err := h.h.Submit(context.Background(), theWorkspace, userSaid(tt.said), "key-1", tt.origin, nil, wsm.DeliveryOrdinary, tt.target)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("Submit: %v", err)
+			}
+			if got := forwardedTexts(t, h); !reflect.DeepEqual(got, []string{tt.said}) {
+				t.Fatalf("forwarded blocks = %q, want the prompt alone", got)
+			}
+			if len(h.owed.asked) != 0 {
+				t.Fatalf("the keeper was asked about %v, want never", h.owed.asked)
+			}
+		})
+	}
+}
+
+func TestAFailedOwedSummaryReadForwardsNothing(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.owed.err = errors.New("the state database is locked")
+
+	// Act
+	_, err := h.submit("fix the footer")
+
+	// Assert — the keeper recorded the failure; the handler surfaces it and
+	// queues no prompt without the note it may owe.
+	if !errors.Is(err, h.owed.err) {
+		t.Fatalf("Submit = %v, want the keeper's failure", err)
+	}
+	if n := len(h.queue.forwarded()); n != 0 {
+		t.Fatalf("forwarded %d submissions, want none", n)
 	}
 }

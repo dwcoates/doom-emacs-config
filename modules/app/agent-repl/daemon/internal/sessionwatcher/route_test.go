@@ -1848,12 +1848,12 @@ func TestACutOnACatchUpPageReachesEveryViewOnce(t *testing.T) {
 	tests := []struct {
 		name string
 		cut  *conversationv1.ContextCut
-		// titleReset is whether the cut moved the digest boundary.
-		titleReset bool
+		// summaryReset is whether the cut ended the summarized conversation.
+		summaryReset bool
 	}{
-		{name: "a completed compaction", cut: compactedCut(), titleReset: false},
-		{name: "a clear", cut: clearedCut(), titleReset: true},
-		{name: "a failed compaction", cut: failedCompactionCut(), titleReset: false},
+		{name: "a completed compaction", cut: compactedCut(), summaryReset: false},
+		{name: "a clear", cut: clearedCut(), summaryReset: true},
+		{name: "a failed compaction", cut: failedCompactionCut(), summaryReset: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1862,15 +1862,15 @@ func TestACutOnACatchUpPageReachesEveryViewOnce(t *testing.T) {
 			h.quiet()
 			h.relink(t)
 			h.quiet()
-			ts := h.withTitle()
+			ts := h.withSummary()
 
 			// Act.
 			got := h.route(h.main, pageFrame(cutEntryAt("ptr-cut", tt.cut)))
 
 			// Assert.
 			assertNames(t, got, []string{"feed.OnHistoryPage", "footer.OnHistoryPage", "footer.OnContextCut", "topbar.OnContextCut"})
-			if ts.has("OnContextReset") != tt.titleReset {
-				t.Fatalf("title reset = %v, want %v", ts.has("OnContextReset"), tt.titleReset)
+			if ts.reset() != tt.summaryReset {
+				t.Fatalf("summary reset = %v, want %v", ts.reset(), tt.summaryReset)
 			}
 			ctx := h.recordContext(t, "info", "daemon.sessionwatcher.context_cut")
 			if ctx["source"] != "caught_up" || ctx["pointer"] != "ptr-cut" {

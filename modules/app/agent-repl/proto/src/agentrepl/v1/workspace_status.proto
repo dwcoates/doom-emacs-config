@@ -66,6 +66,10 @@ message WorkspaceStatus {
   // order: the workspaces this one coordinates and must account for before it
   // can be finished or closed. Empty for a workspace with no open child.
   repeated workspace.v1.WorkspaceRef children = 15;
+  // The one-sentence summary of the workspace's task its topbar draws
+  // (SetWorkspaceSummary). UNSET while none stands: the workspace owes one,
+  // and its agent sets it.
+  optional string summary = 16;
 }
 
 // How a workspace stands to other work.

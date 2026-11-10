@@ -39,7 +39,7 @@
  */
 import { closeSync, fstatSync, openSync, readSync } from "node:fs";
 import { bindLog } from "../log.js";
-import { promptText, userRecordText, type TitleDigestRecord } from "../convert/title-digest.js";
+import { promptText, userRecordText, type PromptRecord } from "../convert/transcript-prompt.js";
 import { isKeepalivePrompt } from "./keepalive.js";
 
 const LOGGER = bindLog({ component: "shim-engine-rollback", operation: "shim.engine.rollback" });
@@ -83,7 +83,7 @@ export function vendorCutRefusal(evidence: string, anchorUuid?: string): string 
 }
 
 /** One transcript record, in the slice the chain and the cut read. */
-export interface ChainRecord extends TitleDigestRecord {
+export interface ChainRecord extends PromptRecord {
   readonly uuid: string;
   readonly parentUuid?: unknown;
   readonly origin?: { readonly kind?: unknown };

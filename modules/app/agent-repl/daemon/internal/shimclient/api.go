@@ -209,9 +209,6 @@ type Client interface {
 	// own working directory, read from the transcripts' own lines. It starts
 	// no query and makes no model call.
 	ReadTranscripts(ctx context.Context, req *shimv1.ReadTranscriptsRequest) (*shimv1.ReadTranscriptsResponse, error)
-	// GatherTitleDigest reads the transcript for the material the daemon
-	// synthesizes a workspace title from when the vendor wrote no ai-title.
-	GatherTitleDigest(ctx context.Context, req *shimv1.GatherTitleDigestRequest) (*shimv1.GatherTitleDigestResponse, error)
 	// GetForkPoint asks a PARENT's shim where a fork of its conversation would
 	// end if taken now, and how the parent's stored rows are bounded to it.
 	GetForkPoint(ctx context.Context, req *shimv1.GetForkPointRequest) (*shimv1.GetForkPointResponse, error)

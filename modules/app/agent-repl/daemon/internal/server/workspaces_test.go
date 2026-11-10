@@ -2820,6 +2820,74 @@ func TestCreateWorkspaceCarriesTheModelRefusalsOnTheirArms(t *testing.T) {
 	}
 }
 
+// ---- SetWorkspaceSummary ---------------------------------------------------
+
+// TestSetWorkspaceSummaryHandsTheSummaryToTheVerb pins the summary reaching
+// the verb, and the verb's answer coming back as the success.
+func TestSetWorkspaceSummaryHandsTheSummaryToTheVerb(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	resp, err := h.Client.SetWorkspaceSummary(context.Background(),
+		connect.NewRequest(&agentreplv1.SetWorkspaceSummaryRequest{Workspace: ref(), Summary: "Fix the footer"}))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("SetWorkspaceSummary: %v", err)
+	}
+	if got := resp.Msg.GetSuccess().GetSummary(); got != "Fix the footer" {
+		t.Fatalf("result = %v, want success naming the summary", resp.Msg.GetResult())
+	}
+	if len(h.Verbs.summaries) != 1 || h.Verbs.summaries[0] != "Fix the footer" {
+		t.Fatalf("summaries = %q, want [Fix the footer]", h.Verbs.summaries)
+	}
+}
+
+// TestSetWorkspaceSummaryRefusesAnUnknownWorkspace pins the unknown_workspace
+// arm, with no verb reached.
+func TestSetWorkspaceSummaryRefusesAnUnknownWorkspace(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	resp, err := h.Client.SetWorkspaceSummary(context.Background(),
+		connect.NewRequest(&agentreplv1.SetWorkspaceSummaryRequest{Workspace: &workspacev1.WorkspaceRef{Id: "ws-nope"}, Summary: "Fix the footer"}))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("SetWorkspaceSummary: %v", err)
+	}
+	if resp.Msg.GetError().GetUnknownWorkspace() == nil {
+		t.Fatalf("result = %v, want unknown_workspace", resp.Msg.GetResult())
+	}
+	if len(h.Verbs.summaries) != 0 {
+		t.Fatalf("summaries = %q, want none for an unknown workspace", h.Verbs.summaries)
+	}
+}
+
+// TestSetWorkspaceSummaryMapsAnInvalidSummary pins the verb's invalid_summary
+// refusal reaching its arm with the summary and the reason.
+func TestSetWorkspaceSummaryMapsAnInvalidSummary(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.Verbs.setSummaryErr = &workspace.Refusal{Arm: workspace.ArmInvalidSummary, Reason: "two clauses",
+		Fields: map[string]any{"summary": "Fix it, then that", "reason": "a summary carries no comma"}}
+
+	// Act
+	resp, err := h.Client.SetWorkspaceSummary(context.Background(),
+		connect.NewRequest(&agentreplv1.SetWorkspaceSummaryRequest{Workspace: ref(), Summary: "Fix it, then that"}))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("SetWorkspaceSummary: %v", err)
+	}
+	got := resp.Msg.GetError().GetInvalidSummary()
+	if got.GetSummary() != "Fix it, then that" || got.GetReason() != "a summary carries no comma" {
+		t.Fatalf("result = %v, want invalid_summary with its evidence", resp.Msg.GetResult())
+	}
+}
+
 // ---- SetWorkspaceName ------------------------------------------------------
 
 // TestSetWorkspaceNameHandsTheNameToTheVerb pins the requested name reaching

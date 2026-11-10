@@ -106,7 +106,7 @@ func IsAgentWorkspace(ws wsm.Workspace) bool {
 // roster draws it from DRAWN (Placements). A workspace
 // whose repository REPOSITORIES does not hold is an invariant violation (the
 // registry's foreign key forbids it) and fails the find.
-func Find(workspaces []wsm.Workspace, repositories []wsm.Repository, summaries map[wsm.WorkspaceID]wsm.WorkspaceSummary, drawn map[wsm.WorkspaceID]Drawn, q Query) (Result, error) {
+func Find(workspaces []wsm.Workspace, repositories []wsm.Repository, summaries map[wsm.WorkspaceID]string, drawn map[wsm.WorkspaceID]Drawn, q Query) (Result, error) {
 	repos := make(map[wsm.RepoID]wsm.Repository, len(repositories))
 	for _, repo := range repositories {
 		repos[repo.ID] = repo
@@ -121,9 +121,8 @@ func Find(workspaces []wsm.Workspace, repositories []wsm.Repository, summaries m
 			return Result{}, fmt.Errorf("workspacefind: workspace %s names repository %s, which the registry does not hold", ws.ID, ws.Repo)
 		}
 		found := Found{Workspace: ws, Repository: repo, LastActiveAt: LastActiveAt(ws)}
-		if sum, ok := summaries[ws.ID]; ok {
-			title := sum.Title
-			found.Summary = &title
+		if summary, ok := summaries[ws.ID]; ok {
+			found.Summary = &summary
 		}
 		if d, ok := drawn[ws.ID]; ok {
 			found.Roster = &d

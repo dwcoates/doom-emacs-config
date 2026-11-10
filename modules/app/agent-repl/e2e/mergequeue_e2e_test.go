@@ -116,24 +116,7 @@ func mqFindRepoKey(r *frontendv1.WorkspaceRoster, dir string) *workspacev1.Repos
 // fixture itself queued.
 func mqCreateTopLevelChild(t *testing.T, w *World, repoRef *workspacev1.RepositoryRef, name string) *workspacev1.WorkspaceRef {
 	t.Helper()
-	resp, err := w.Client().CreateWorkspace(w.Ctx(), connect.NewRequest(&agentreplv1.CreateWorkspaceRequest{
-		Originator:    &agentreplv1.WorkspaceOriginator{Originator: &agentreplv1.WorkspaceOriginator_UserOrWorkspace{UserOrWorkspace: &agentreplv1.WorkspaceOriginatorUserOrWorkspace{}}},
-		Repository:    repoRef,
-		Requester:     harness.User(),
-		ContextOrigin: harness.Fresh(),
-		Form: &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{
-			Relationship: harness.Peer(),
-			Name:         mqStrPtr(name),
-		}},
-	}))
-	if err != nil {
-		t.Fatalf("CreateWorkspace(%s) = error %v, want a success", name, err)
-	}
-	ws := resp.Msg.GetSuccess().GetWorkspace()
-	if ws.GetId() == "" {
-		t.Fatalf("CreateWorkspace(%s) = %v, want a success carrying a workspace ref", name, resp.Msg)
-	}
-	return ws
+	return mqCreateChildWithHooks(t, w, repoRef, name, nil)
 }
 
 // mqBranchOf is the branch a mqCreateTopLevelChild workspace checked out —
@@ -722,6 +705,11 @@ func mqCreateChildWithHooks(t *testing.T, w *World, repoRef *workspacev1.Reposit
 	if ws.GetId() == "" {
 		t.Fatalf("CreateWorkspace(%s) = %v, want a success carrying a workspace ref", name, resp.Msg)
 	}
+	// A CREATED WORKSPACE OWES ITS SUMMARY until its agent states its task,
+	// and every prompt it is sent until then closes with the note asking for
+	// one; the agent's summary is set here, so the prompts a test sends carry
+	// only their own words.
+	harness.SetSummary(t, w.Daemon, ws, harness.SeededSummary)
 	return ws
 }
 

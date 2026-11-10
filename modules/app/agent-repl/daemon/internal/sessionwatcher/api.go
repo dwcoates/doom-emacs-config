@@ -562,12 +562,11 @@ type Sinks struct {
 	// (cachelapse.Keeper): every projected lapse a held shim states. REQUIRED:
 	// it is not a view, and the projection has no other reader.
 	CacheLapse CacheLapseSink
-	// Title is the synthesized-title trigger sink. OPTIONAL: nil disables title
-	// synthesis, which is what every test that does not exercise it leaves it.
-	// Production always wires it. Its calls are non-blocking (the synthesizer
-	// dispatches its own goroutine), so it rides the watcher's stream goroutine
-	// without holding it up.
-	Title TitleSink
+	// Summary is the workspace summary's keeper, told of every /clear.
+	// OPTIONAL: nil leaves the summary standing across a clear, which is what
+	// every test that does not exercise it leaves it. Production always wires
+	// it.
+	Summary SummarySink
 	// Merge is the merge queue's reading of the session's asks. OPTIONAL:
 	// nil routes the asks to the views alone, which is what every test that
 	// does not exercise a merge leaves it. Production always wires it, so a
@@ -628,25 +627,13 @@ type MergeSink interface {
 	OnQuestion(ws ids.WorkspaceID, agent *conversationv1.AgentId, q *conversationv1.AgentQuestion)
 }
 
-// TitleSink is the synthesized-title synthesizer, seen from the watcher: the
-// four occasions on which a workspace's own summary may need (re)making or
-// dropping. It is a SEPARATE sink from TopbarSink because it is not a view — it
-// is the daemon deciding, from these edges, whether to spend a cheap model call
-// on a title. Every method is keyed by workspace alone; the synthesizer
-// resolves the shim, the account and the digest itself.
-type TitleSink interface {
-	// OnSessionStarted is a session naming itself: a resumed or adopted
-	// conversation may already carry prompts.
-	OnSessionStarted(ws ids.WorkspaceID)
-	// OnPrompt is a MAIN-agent prompt row: a prompt has been made, so the
-	// first summary is due without waiting for the turn to end.
-	OnPrompt(ws ids.WorkspaceID)
-	// OnTurnEnded is a turn completing: the vendor has recorded the turn's
-	// prompt in the transcript the digest reads.
-	OnTurnEnded(ws ids.WorkspaceID)
-	// OnContextReset is a /clear: the boundary moved, so the last synthesis no
-	// longer describes the conversation. A /compact cuts no prompt from the
-	// digest, so it is not a reset.
+// SummarySink is the workspace summary's keeper (wssummary.Keeper), seen from
+// the watcher. It is a SEPARATE sink from TopbarSink because it is not a view:
+// a /clear ends the conversation the workspace's agent summarized, so the
+// keeper drops the summary, and the workspace owes a new one.
+type SummarySink interface {
+	// OnContextReset is a /clear. A /compact keeps the conversation it
+	// summarizes, so it is not a reset.
 	OnContextReset(ws ids.WorkspaceID)
 }
 

@@ -13,6 +13,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/resolve/topbar"
+	"agent-repld/internal/textline"
 	"agent-repld/internal/wsm"
 )
 
@@ -222,6 +223,21 @@ func TestValidLinkLabel(t *testing.T) {
 				t.Fatalf("validLinkLabel(%q) = %v, want ok=%v", tt.label, err, tt.ok)
 			}
 		})
+	}
+}
+
+func TestValidLinkLabelIsTheSharedOneSentenceRule(t *testing.T) {
+	// Arrange — a label breaking the shared rule.
+	label := "Read this! Then that"
+
+	// Act
+	got := validLinkLabel(label)
+
+	// Assert — the refusal is textline.OneSentence's own, never a second
+	// spelling of the rule.
+	want := textline.OneSentence("label", label, minLinkLabelWords, maxLinkLabelWords)
+	if got == nil || want == nil || got.Error() != want.Error() {
+		t.Fatalf("validLinkLabel = %v, want textline.OneSentence's %v", got, want)
 	}
 }
 

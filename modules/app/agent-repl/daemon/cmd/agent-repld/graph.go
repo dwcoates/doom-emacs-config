@@ -88,7 +88,6 @@ import (
 	"agent-repld/internal/startslots"
 	"agent-repld/internal/storereader"
 	"agent-repld/internal/subagentmaker"
-	"agent-repld/internal/titlesynth"
 	"agent-repld/internal/vocab"
 	"agent-repld/internal/webfootprint"
 	"agent-repld/internal/workspace"
@@ -96,6 +95,7 @@ import (
 	"agent-repld/internal/workspacesubs"
 	"agent-repld/internal/wsedges"
 	"agent-repld/internal/wsm"
+	"agent-repld/internal/wssummary"
 	"agent-repld/internal/zettelclient"
 )
 
@@ -177,11 +177,6 @@ type graph struct {
 	// raise another banner then) and BEFORE the state client closes: a banner
 	// reads that client for the workspace's name.
 	CloseBanners func()
-	// CloseTitleSynthesis refuses further title runs, cancels the ones in
-	// flight and joins them. `run` calls it AFTER the watchers close (their
-	// sinks are what dispatch a run) and BEFORE the state client closes: a
-	// run reads and writes the persisted workspace summary.
-	CloseTitleSynthesis func()
 	// DrainQueue is the BOUNDED wait for the prompt queue's own background
 	// goroutines — the asynchronous classification verdicts and the background
 	// revivals. `run` calls it BEFORE the state client closes, for the reason
@@ -723,23 +718,13 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// bundle is installed (every harness runs a fake shim with no bundle).
 	shimBundle := buildid.NewShimBundle(paths.ShimMain, os.Getenv(buildid.EnvShimBuild))
 
-	// The title synthesizer rides the fleet's OWN session-watch sinks, so it is
-	// built before the fleet and its digest call reaches back through a
-	// late-bound forwarder (like verbsRef/healthRef). It installs the daemon's
-	// synthesized title into the topbar, and its cheap headless call bills the
-	// workspace's own account via the daemon's one workspace-dir lookup.
-	digestRef := &digestForwarder{}
-	// ONE ACCOUNT RESOLUTION FOR THE DAEMON'S OWN HEADLESS CALLS: the title
-	// and the turn summary bill the workspace's own account the same way.
-	// THE LOOKUP RUNS ON THE CALLER'S CONTEXT, not the graph's: a banner or a
-	// title composed while the daemon stands down sees its own call's end, and
-	// can tell that stand-down apart from a workspace with no record.
-	titleSynth := titlesynth.New(titlesynth.Deps{
-		Digester:   digestRef,
-		Headless:   headlessClient,
-		ConfigDirs: configDirs,
-		Titles:     topbarResolver,
+	// THE WORKSPACE SUMMARIES' KEEPER rides the fleet's own session-watch
+	// sinks (a /clear drops the summary), so it is built before the fleet. It
+	// draws each summary in the topbar and reads the note asking a workspace
+	// for one from the prompt corpus.
+	summaries := wssummary.New(wssummary.Deps{
 		Store:      p.DB,
+		Topbar:     topbarResolver,
 		PromptsDir: paths.PromptsDir,
 		Log:        log,
 	})
@@ -883,7 +868,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			Sidebar:    sidebarResolver,
 			Holds:      feedResolver,
 			Lifecycle:  lifecycle,
-			Title:      titleSynth,
+			Summary:    summaries,
 			Merge:      mergeAsks,
 			Commands:   slashCommands,
 			CacheLapse: cacheKeeper,
@@ -944,7 +929,6 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	history.bind(fleet)
 	// The synthesizer's digest call reaches the shim through the fleet, now that
 	// it exists.
-	digestRef.bind(fleet)
 
 	// ---- the desktop notifier ----
 
@@ -1469,7 +1453,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Feed:              feedResolver,
 		Footer:            footerResolver,
 		Topbar:            topbarResolver,
-		Summaries:         titleSynth,
+		Summaries:         summaries,
 		Sidebar:           sidebarResolver,
 		Host:              relay,
 		Banners:           notifier,
@@ -1500,14 +1484,15 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// ---- the three ingresses ----
 
 	handler, err := prompthandler.New(prompthandler.Deps{
-		Queue:    queue,
-		Feed:     feedResolver,
-		DB:       p.DB,
-		Asks:     verbs,
-		Panels:   server.Panels(topbarResolver, deployStamp(paths.BuiltSHA), log),
-		MintTurn: wsm.NewTurnID,
-		MovedOn:  mergeOrchestrator.RetireConcluded,
-		Log:      p.Surfaces,
+		Queue:     queue,
+		Feed:      feedResolver,
+		DB:        p.DB,
+		Asks:      verbs,
+		Summaries: summaries,
+		Panels:    server.Panels(topbarResolver, deployStamp(paths.BuiltSHA), log),
+		MintTurn:  wsm.NewTurnID,
+		MovedOn:   mergeOrchestrator.RetireConcluded,
+		Log:       p.Surfaces,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("agent-repld: build the prompt handler: %w", err)
@@ -1914,14 +1899,13 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			clicks.bind(srv)
 			clients.bind(srv)
 		},
-		Background:          background,
-		CloseWatchers:       fleet.CloseWatchers,
-		CloseBanners:        notifier.Close,
-		CloseTitleSynthesis: titleSynth.Close,
-		DrainQueue:          queue.Drain,
-		DrainStarts:         fleet.DrainStarts,
-		DrainLandings:       deployer.DrainLandings,
-		DrainMerges:         mergeOrchestrator.Drain,
+		Background:    background,
+		CloseWatchers: fleet.CloseWatchers,
+		CloseBanners:  notifier.Close,
+		DrainQueue:    queue.Drain,
+		DrainStarts:   fleet.DrainStarts,
+		DrainLandings: deployer.DrainLandings,
+		DrainMerges:   mergeOrchestrator.Drain,
 		Notices: newNoticeLifetime(func(ctx context.Context) {
 			runNotifiers(ctx,
 				func(ctx context.Context) { queueNotices.Run(ctx, handler) },

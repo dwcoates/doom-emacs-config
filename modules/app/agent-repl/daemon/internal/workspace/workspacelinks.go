@@ -4,9 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
-	"unicode"
-	"unicode/utf8"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 
@@ -15,6 +12,7 @@ import (
 	"agent-repld/internal/ids"
 	"agent-repld/internal/prwatch"
 	"agent-repld/internal/resolve/topbar"
+	"agent-repld/internal/textline"
 	"agent-repld/internal/wsm"
 )
 
@@ -161,29 +159,9 @@ func (v *verbs) changeLinks(ctx context.Context, ws ids.WorkspaceID, fields dlog
 
 // validLinkLabel answers why LABEL is not one the summary's menu draws: not
 // two to eight words, more than one sentence, a line break, or whitespace at
-// either end. Nil for a label the menu draws.
+// either end (textline.OneSentence). Nil for a label the menu draws.
 func validLinkLabel(label string) error {
-	if strings.ContainsAny(label, "\r\n") {
-		return errors.New("a label is one line")
-	}
-	if strings.TrimSpace(label) != label {
-		return errors.New("a label carries no whitespace at either end")
-	}
-	words := strings.Fields(label)
-	if len(words) < minLinkLabelWords || len(words) > maxLinkLabelWords {
-		return fmt.Errorf("a label is %d to %d words, not %d", minLinkLabelWords, maxLinkLabelWords, len(words))
-	}
-	for _, word := range words[:len(words)-1] {
-		if last, _ := utf8.DecodeLastRuneInString(word); isSentenceEnd(last) {
-			return fmt.Errorf("a label is one sentence, and %q ends one before its last word", word)
-		}
-	}
-	return nil
-}
-
-// isSentenceEnd reports whether R ends a sentence.
-func isSentenceEnd(r rune) bool {
-	return r == '.' || r == '!' || r == '?' || unicode.Is(unicode.Sentence_Terminal, r)
+	return textline.OneSentence("label", label, minLinkLabelWords, maxLinkLabelWords)
 }
 
 // LinkOwnershipView renders whether a link is owned

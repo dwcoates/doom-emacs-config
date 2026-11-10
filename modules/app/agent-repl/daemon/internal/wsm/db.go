@@ -467,20 +467,18 @@ type DB interface {
 	// DropMergeProgress deletes one merge lease's progress record and
 	// reports whether one stood.
 	DropMergeProgress(ctx context.Context, lease LeaseID) (bool, error)
-	// PutWorkspaceSummary records a workspace's synthesized summary and the
-	// digest it was distilled from, replacing any it had (summaries.go).
-	PutWorkspaceSummary(ctx context.Context, id WorkspaceID, sum WorkspaceSummary) error
-	// ResetWorkspaceSummaryDigest forgets the digest a workspace's summary was
-	// distilled from, keeping the title.
-	ResetWorkspaceSummaryDigest(ctx context.Context, id WorkspaceID) error
-	// DropWorkspaceSummary deletes a workspace's summary.
-	DropWorkspaceSummary(ctx context.Context, id WorkspaceID) error
+	// PutWorkspaceSummary records a workspace's summary, the one sentence its
+	// agent set, replacing any it had (summaries.go).
+	PutWorkspaceSummary(ctx context.Context, id WorkspaceID, summary string) error
+	// DropWorkspaceSummary deletes a workspace's summary, reporting whether
+	// one stood.
+	DropWorkspaceSummary(ctx context.Context, id WorkspaceID) (bool, error)
 	// WorkspaceSummaryOf loads a workspace's summary; the bool is false when
 	// none stands.
-	WorkspaceSummaryOf(ctx context.Context, id WorkspaceID) (WorkspaceSummary, bool, error)
+	WorkspaceSummaryOf(ctx context.Context, id WorkspaceID) (string, bool, error)
 	// ListWorkspaceSummaries loads every stored summary by workspace; a
 	// workspace with none is absent.
-	ListWorkspaceSummaries(ctx context.Context) (map[WorkspaceID]WorkspaceSummary, error)
+	ListWorkspaceSummaries(ctx context.Context) (map[WorkspaceID]string, error)
 	// PutColdReadPayment records the cold read a workspace's user paid for,
 	// replacing any it had (coldreadpayments.go).
 	PutColdReadPayment(ctx context.Context, id WorkspaceID, p ColdReadPayment) error
