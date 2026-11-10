@@ -225,6 +225,15 @@ func (s *server) CreateWorkspace(
 		}
 		return connect.NewResponse(resp), nil
 	}
+	var turnWait *workspace.RequesterTurnWaitError
+	if errors.As(err, &turnWait) {
+		s.log.Info("daemon.server.create_workspace", "the create waits for its requester's turn to end; it completes once that turn has ended",
+			dlog.Context{"create_id": string(turnWait.ID), "requester": string(turnWait.Requester)})
+		resp.Result = &agentreplv1.CreateWorkspaceResponse_WaitingForRequesterTurn{
+			WaitingForRequesterTurn: &agentreplv1.CreateWorkspaceWaitingForRequesterTurn{Create: pendingCreateRef(turnWait.ID)},
+		}
+		return connect.NewResponse(resp), nil
+	}
 	if err != nil {
 		return answer(resp, s.answerRefusal(s.log, rpc, resp, err, nil))
 	}
@@ -343,6 +352,11 @@ func (s *server) runBackgroundCreate(ctx context.Context, ticket *workspace.Crea
 			dlog.Context{"op_id": reporter.OpID(), "create_id": string(ticket.ID())})
 		return
 	}
+	if workspace.IsRequesterTurnWait(err) {
+		s.log.Info("daemon.server.create_workspace", "the background create waits for its requester's turn to end; its outcome follows on its op",
+			dlog.Context{"op_id": reporter.OpID(), "create_id": string(ticket.ID())})
+		return
+	}
 	if err != nil {
 		reporter.Failed(err)
 		return
@@ -438,6 +452,16 @@ func (r createProgressReporter) WaitingForNetwork(id workspace.PendingCreateID) 
 	r.server.publishCreateStep(r.opID, &agentreplv1.WorkspaceCreateProgress{
 		Step: &agentreplv1.WorkspaceCreateProgress_WaitingForNetwork{
 			WaitingForNetwork: &agentreplv1.CreateWorkspaceWaitingForNetwork{Create: pendingCreateRef(id)},
+		},
+	})
+}
+
+// WaitingForRequesterTurn publishes that the create is held until its
+// requester's turn ends.
+func (r createProgressReporter) WaitingForRequesterTurn(id workspace.PendingCreateID) {
+	r.server.publishCreateStep(r.opID, &agentreplv1.WorkspaceCreateProgress{
+		Step: &agentreplv1.WorkspaceCreateProgress_WaitingForRequesterTurn{
+			WaitingForRequesterTurn: &agentreplv1.CreateWorkspaceWaitingForRequesterTurn{Create: pendingCreateRef(id)},
 		},
 	})
 }

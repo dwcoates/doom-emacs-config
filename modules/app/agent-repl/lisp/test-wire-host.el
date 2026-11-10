@@ -2328,6 +2328,13 @@ replaces it."
                   "{\"waitingForNetwork\":{\"create\":{\"id\":\"create-1\"}}}")
                  '(:arm :waiting-for-network :value (:create (:id "create-1"))))))
 
+(ert-deftest agent-repl-test-wire-host-mutation-progress-waiting-for-requester-turn ()
+  "A create held for its requester's first turn decodes to its pending ref, as a step."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-workspace-create-progress
+                  "{\"waitingForRequesterTurn\":{\"create\":{\"id\":\"create-1\"}}}")
+                 '(:arm :waiting-for-requester-turn :value (:create (:id "create-1"))))))
+
 (ert-deftest agent-repl-test-wire-host-mutation-progress-failed-internal ()
   "A failed push with an internal error decodes to the internal sentence."
   (should (equal (agent-repl-test-wire-host--decode

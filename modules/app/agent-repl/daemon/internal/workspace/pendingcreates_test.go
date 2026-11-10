@@ -3,6 +3,7 @@ package workspace
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"slices"
 	"strings"
@@ -23,10 +24,10 @@ import (
 // The records the pending-create set's edges are stated by.
 const (
 	saidHeld     = "the create waits for the network; it resumes from the naming call when the network is restored"
-	saidHeldMade = "the create held for the network was created"
-	saidHeldLost = "the create held for the network ended without a workspace"
+	saidHeldMade = "the held create was created"
+	saidHeldLost = "the held create ended without a workspace"
 	saidJoined   = "the request is identical to a pending create; it joined that create"
-	saidNoHold   = "the create held for the network could not be recorded; it fails instead"
+	saidNoHold   = "the held create could not be recorded; it fails instead"
 	saidNamingNo = "the workspace naming call could not reach the network; the create waits for it"
 )
 
@@ -45,8 +46,8 @@ func heldCreateFixture(t *testing.T) (*fixture, CreateSpec) {
 	f.network.down(netstate.EvidenceFaultOpen)
 	script(f, headlessAnswer{err: namingTimeout}, headlessAnswer{text: FixtureMintedName})
 	f.briefs[BriefCreateDequeued] = prompts.Prompt{
-		Name: BriefCreateDequeued, Body: "asked {{request}} then {{outcome}}",
-		Placeholders: []string{"request", "outcome"},
+		Name: BriefCreateDequeued, Body: "held {{why}}, asked {{request}} then {{outcome}}",
+		Placeholders: []string{"request", "outcome", "why"},
 	}
 	return f, spec
 }
@@ -544,7 +545,7 @@ func TestTheShippedDequeuedBriefSplices(t *testing.T) {
 	// Arrange
 	brief := loadShippedBrief(t, BriefCreateDequeued)
 	// Act
-	_, err := brief.Splice(map[string]string{"request": "r", "outcome": "o"})
+	_, err := brief.Splice(map[string]string{"request": "r", "outcome": "o", "why": "w"})
 	// Assert
 	if err != nil {
 		t.Fatalf("splice: %v", err)
@@ -594,5 +595,271 @@ func TestAHeldRequestNamingAnUnknownOriginatorIsRefused(t *testing.T) {
 	// Assert
 	if err == nil {
 		t.Fatal("decodeHeldSpec succeeded, want the unknown originator refused")
+	}
+}
+
+// ---- a requester forking itself in its first turn waits for that turn ----
+
+// The records a create held for its requester's turn is stated by.
+const (
+	saidTurnHeld   = "the create waits for its requester's turn to end; it resumes from the start once that turn has ended"
+	saidTurnEarly  = "the requester's first turn ended before the create was held; it resumes at once"
+	saidNotTold    = "the held create's requester has closed; it is not told how the create ended"
+	saidNotRead    = "the held create's requester could not be read; it is not told how the create ended"
+	saidResumedNow = "what the create was held for is over; the held create resumes from the start"
+)
+
+// errFirstTurn is the parent's shim answering that its turn in flight is its
+// conversation's first.
+var errFirstTurn = fmt.Errorf("%w: %w: the turn-opening record r1 is the parent's first", ErrForkRefused, ErrForkNothingFinished)
+
+// selfForkFixture arranges a workspace that forks its own conversation from
+// inside its first turn, with the dequeued notice's brief shipped. It answers
+// the requester and the spec.
+func selfForkFixture(t *testing.T) (*fixture, ids.WorkspaceID, CreateSpec) {
+	t.Helper()
+	f, parent, spec := forkFixture(t, nil)
+	spec.Requester = ptr(parent)
+	f.fleet.forkProbeErr = errFirstTurn
+	f.briefs[BriefCreateDequeued] = prompts.Prompt{
+		Name: BriefCreateDequeued, Body: "held {{why}}, asked {{request}} then {{outcome}}",
+		Placeholders: []string{"request", "outcome", "why"},
+	}
+	return f, parent, spec
+}
+
+// holdForTurn runs SPEC with a reporter of OP until it is held for its
+// requester's turn, failing the test unless it is.
+func holdForTurn(t *testing.T, f *fixture, spec CreateSpec, op string) (*RequesterTurnWaitError, *recordingProgress) {
+	t.Helper()
+	rec := &recordingProgress{op: op, ended: make(chan struct{})}
+	spec.Progress = rec
+	_, err := f.verbs.Create(context.Background(), spec)
+	var wait *RequesterTurnWaitError
+	if !errors.As(err, &wait) {
+		t.Fatalf("Create = %v, want it held for the requester's turn", err)
+	}
+	return wait, rec
+}
+
+// toldRequester answers the dequeued notices submitted to WS.
+func toldRequester(f *fixture, ws ids.WorkspaceID) []string {
+	var told []string
+	for _, sub := range f.queue.submissions {
+		if sub.WS == ws && sub.Origin == conversationv1.PromptOrigin_PROMPT_ORIGIN_DERIVED_WORKSPACE_NOTICE {
+			told = append(told, submittedText(sub.Said))
+		}
+	}
+	return told
+}
+
+func TestASelfForkInItsFirstTurnHoldsTheCreate(t *testing.T) {
+	// Arrange
+	f, parent, spec := selfForkFixture(t)
+
+	// Act
+	wait, rec := holdForTurn(t, f, spec, "op-1")
+
+	// Assert: held for the requester, told on the op, recorded durably, and
+	// nothing built, refused or reported.
+	if wait.Requester != parent {
+		t.Errorf("held for %s, want the requester %s", wait.Requester, parent)
+	}
+	rec.mu.Lock()
+	turnWaiting, waiting := slices.Clone(rec.turnWaiting), slices.Clone(rec.waiting)
+	rec.mu.Unlock()
+	if !slices.Equal(turnWaiting, []PendingCreateID{wait.ID}) || len(waiting) != 0 {
+		t.Errorf("op told turn-waiting %v and network-waiting %v, want only %s waiting for the turn", turnWaiting, waiting, wait.ID)
+	}
+	if held := f.db.heldCreates(); len(held) != 1 || held[0].ID != string(wait.ID) {
+		t.Errorf("held rows = %+v, want %s", held, wait.ID)
+	}
+	if len(f.git.created) != 0 || len(f.db.registered) != 0 || len(f.db.pendingForks) != 0 {
+		t.Errorf("worktrees %v registrations %v pending forks %v, want nothing made", f.git.created, f.db.registered, f.db.pendingForks)
+	}
+	if _, refused := AsRefusal(wait); refused {
+		t.Errorf("the hold is a refusal: %v", wait)
+	}
+	if reportsMade(f) != 0 {
+		t.Errorf("a held create was reported as failed: %+v", f.queue.submissions)
+	}
+	record, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: opPendingCreate, Message: saidTurnHeld})
+	if !ok || record.Context["cause"] != "requester_turn" || record.Context["requester"] != string(parent) {
+		t.Fatalf("hold record = %+v, want the requester's turn named", record)
+	}
+}
+
+func TestASelfForkHeldForItsTurnIsMadeWhenTheTurnEnds(t *testing.T) {
+	// Arrange: held, then the requester's turn ends with something finished.
+	f, parent, spec := selfForkFixture(t)
+	_, rec := holdForTurn(t, f, spec, "op-1")
+	f.fleet.forkProbeErr = nil
+
+	// Act
+	f.turnEnds.TurnEnded(parent)
+	<-rec.ended
+
+	// Assert: one workspace owing the fork of the requester, the row released,
+	// the requester told why it was held and what was made.
+	_, created, failed := rec.snapshot()
+	if len(created) != 1 || len(failed) != 0 {
+		t.Fatalf("op outcome created=%+v failed=%v, want one workspace", created, failed)
+	}
+	if got := f.db.pendingForks[created[0].ID]; got.Parent != parent {
+		t.Errorf("pending fork = %+v, want a fork of %s", got, parent)
+	}
+	if held := f.db.heldCreates(); len(held) != 0 {
+		t.Errorf("held rows after the create = %+v, want none", held)
+	}
+	told := toldRequester(f, parent)
+	if len(told) != 1 || !strings.Contains(told[0], "It has now been created") || !strings.Contains(told[0], "from inside its first turn") {
+		t.Fatalf("requester told %q, want the creation and why it waited", told)
+	}
+}
+
+func TestASelfForkHeldForItsTurnIsNotMadeBeforeTheTurnEnds(t *testing.T) {
+	// Arrange
+	f, parent, spec := selfForkFixture(t)
+	_, rec := holdForTurn(t, f, spec, "op-1")
+	other := f.workspaceInRepo(t, "other", spec.RepoDir)
+
+	// Act: another workspace's turn ends, and the requester's turn starts.
+	f.turnEnds.TurnEnded(other.ID)
+	f.turnEnds.TurnStarted(parent)
+
+	// Assert: the create still waits.
+	select {
+	case <-rec.ended:
+		t.Fatal("the create ended before its requester's turn did")
+	default:
+	}
+	if held := f.db.heldCreates(); len(held) != 1 {
+		t.Fatalf("held rows = %+v, want the create still held", held)
+	}
+}
+
+func TestASelfForkWhoseTurnEndedBeforeTheHoldResumesAtOnce(t *testing.T) {
+	// Arrange: the attempt meets the first turn; by the hold's second look the
+	// turn has ended, so no edge will come.
+	f, parent, spec := selfForkFixture(t)
+	f.fleet.forkProbeErr = nil
+	f.fleet.forkProbeAnswers = []error{errFirstTurn}
+
+	// Act
+	_, rec := holdForTurn(t, f, spec, "op-1")
+	<-rec.ended
+
+	// Assert
+	if _, created, _ := rec.snapshot(); len(created) != 1 {
+		t.Fatalf("created %+v, want one workspace with no turn end told", created)
+	}
+	record, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: opPendingCreate, Message: saidTurnEarly})
+	if !ok || record.Context["requester"] != string(parent) {
+		t.Fatalf("early-resume record = %+v, want the requester named", record)
+	}
+}
+
+func TestASelfForkWhoseTurnIsStillRunningAfterAnEndIsHeldAgain(t *testing.T) {
+	// Arrange: a turn end is told while the first turn still has nothing
+	// finished (an adoption's report), then the real end.
+	f, parent, spec := selfForkFixture(t)
+	rec := &recordingProgress{op: "op-1", ended: make(chan struct{}), held: make(chan PendingCreateID, 4)}
+	spec.Progress = rec
+	if _, err := f.verbs.Create(context.Background(), spec); !IsRequesterTurnWait(err) {
+		t.Fatalf("Create = %v, want it held for the requester's turn", err)
+	}
+	first := <-rec.held
+
+	// Act
+	f.turnEnds.TurnEndedUnobserved(parent)
+	again := <-rec.held
+	f.fleet.forkProbeErr = nil
+	f.turnEnds.TurnEnded(parent)
+	<-rec.ended
+
+	// Assert: the same create held twice, then one workspace.
+	if again != first {
+		t.Fatalf("held again as %s, want %s kept", again, first)
+	}
+	if _, created, _ := rec.snapshot(); len(created) != 1 {
+		t.Fatalf("created %+v, want one workspace", created)
+	}
+	if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: opPendingCreate, Message: saidResumedNow}); !ok {
+		t.Fatalf("no resume record: %+v", f.log.logger.Records())
+	}
+}
+
+func TestAnIdenticalRequestJoinsTheCreateHeldForItsTurn(t *testing.T) {
+	// Arrange
+	f, _, spec := selfForkFixture(t)
+	first, _ := holdForTurn(t, f, spec, "op-1")
+	again := spec
+	rec := &recordingProgress{op: "op-2"}
+	again.Progress = rec
+
+	// Act
+	ticket := f.verbs.EnterCreate(again)
+	_, err := f.verbs.RunCreate(context.Background(), ticket)
+
+	// Assert: joined and told it waits for the turn, not the network.
+	var wait *RequesterTurnWaitError
+	if !ticket.Joined() || !errors.As(err, &wait) || wait.ID != first.ID {
+		t.Fatalf("joined=%v err=%v, want the create held for the turn %s", ticket.Joined(), err, first.ID)
+	}
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	if !slices.Equal(rec.turnWaiting, []PendingCreateID{first.ID}) || len(rec.waiting) != 0 {
+		t.Fatalf("joined op told turn-waiting %v network-waiting %v, want %s waiting for the turn", rec.turnWaiting, rec.waiting, first.ID)
+	}
+}
+
+func TestAHeldCreatesRequesterIsToldOnlyWhileOpen(t *testing.T) {
+	tests := []struct {
+		name     string
+		arrange  func(f *fixture, requester ids.WorkspaceID)
+		wantTold int
+		level    string
+		said     string
+	}{
+		{name: "an open requester is told", arrange: func(*fixture, ids.WorkspaceID) {}, wantTold: 1},
+		{
+			name: "a closed requester is not told",
+			arrange: func(f *fixture, requester ids.WorkspaceID) {
+				ws := f.db.workspaces[requester]
+				ws.Closed = true
+				f.db.workspaces[requester] = ws
+			},
+			level: dlog.LevelInfo, said: saidNotTold,
+		},
+		{
+			name:    "a requester that cannot be read is not told",
+			arrange: func(f *fixture, _ ids.WorkspaceID) { f.db.workspaceErr = errFake },
+			level:   dlog.LevelError, said: saidNotRead,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: held for the turn, then the requester's state changes.
+			f, parent, spec := selfForkFixture(t)
+			_, rec := holdForTurn(t, f, spec, "op-1")
+			f.fleet.forkProbeErr = nil
+			tc.arrange(f, parent)
+
+			// Act
+			f.turnEnds.TurnEnded(parent)
+			<-rec.ended
+
+			// Assert
+			f.db.workspaceErr = nil
+			if told := toldRequester(f, parent); len(told) != tc.wantTold {
+				t.Fatalf("requester told %q, want %d notices", told, tc.wantTold)
+			}
+			if tc.said == "" {
+				return
+			}
+			if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: tc.level, Operation: opPendingCreate, Message: tc.said}); !ok {
+				t.Fatalf("no record %q: %+v", tc.said, f.log.logger.Records())
+			}
+		})
 	}
 }

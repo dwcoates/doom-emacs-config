@@ -178,6 +178,9 @@ type CreateProgress interface {
 	// WaitingForNetwork says the create is held until the network is
 	// restored (NetworkWaitError).
 	WaitingForNetwork(PendingCreateID)
+	// WaitingForRequesterTurn says the create is held until its requesting
+	// workspace's turn ends (RequesterTurnWaitError).
+	WaitingForRequesterTurn(PendingCreateID)
 	// Created is a held create's workspace.
 	Created(wsm.Workspace)
 	// Failed is a held create's failure.
@@ -874,6 +877,9 @@ type Deps struct {
 	// down, and answers the latch a held create resumes on (netstate).
 	// Required.
 	Network Network
+	// TurnEnds answers the latch a create held for its requester's turn
+	// resumes on (turnlatch). Required.
+	TurnEnds TurnEnds
 	// CreateProgressFor answers the reporter of a held create's op, for a
 	// create a previous daemon held. Required.
 	CreateProgressFor func(opID string) CreateProgress
@@ -890,6 +896,13 @@ type Network interface {
 	Classify(ctx context.Context, words string) netstate.Verdict
 	// Restored answers the latch closed when the network is next restored.
 	Restored() <-chan struct{}
+}
+
+// TurnEnds answers latches on workspaces' turn ends (turnlatch.Latches).
+type TurnEnds interface {
+	// Next answers a latch closed when a turn of WS next ends, or when WS
+	// closes.
+	Next(ws ids.WorkspaceID) <-chan struct{}
 }
 
 // CacheLapses is the hidden workspaces' cache keeper (cachelapse.Keeper),
@@ -1193,6 +1206,8 @@ func New(deps Deps) (Verbs, error) {
 		return nil, missing("the create gate")
 	case deps.Network == nil:
 		return nil, missing("the network state")
+	case deps.TurnEnds == nil:
+		return nil, missing("the turn-end latches")
 	case deps.CreateProgressFor == nil:
 		return nil, missing("a held create's progress reporters")
 	case deps.Lifetime == nil:

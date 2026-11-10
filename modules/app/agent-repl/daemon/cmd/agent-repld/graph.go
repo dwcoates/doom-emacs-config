@@ -88,6 +88,7 @@ import (
 	"agent-repld/internal/startslots"
 	"agent-repld/internal/storereader"
 	"agent-repld/internal/subagentmaker"
+	"agent-repld/internal/turnlatch"
 	"agent-repld/internal/vocab"
 	"agent-repld/internal/webfootprint"
 	"agent-repld/internal/workspace"
@@ -373,7 +374,10 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	})
 	selfCloses := workspace.NewSelfCloses(verbsRef.carryOutSelfClose, log)
 	subsectionUnfolds := workspace.NewSubsectionUnfolds(verbsRef.unfoldSubsectionForWork, log)
-	edges := wsedges.New(derivedNotices, followNotices, selfCloses, subsectionUnfolds)
+	// A CREATE HELD FOR ITS REQUESTER'S TURN resumes on these latches, which
+	// only the turn-end and close edges release.
+	turnEnds := turnlatch.New()
+	edges := wsedges.New(derivedNotices, followNotices, selfCloses, subsectionUnfolds, turnEnds)
 	p.DB = wsedges.ReportingEdges(p.DB, edges, log)
 
 	judge, err := buildJudge(p.Contracts, guard, headlessClient, paths.PromptsDir)
@@ -1441,6 +1445,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		// A CREATE THE NETWORK BLOCKS IS HELD and resumes on the network's
 		// restoration; its ops are answered through the server, bound below.
 		Network:           network,
+		TurnEnds:          turnEnds,
 		CreateProgressFor: createProgress.For,
 		Lifetime:          ctx,
 		Derived:           derivedNotices,

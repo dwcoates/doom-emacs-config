@@ -185,6 +185,12 @@ message WorkspaceCreateProgress {
     // possibly from a successor daemon. A client draws it as waiting for the
     // network, never as a failure, and keeps the op registered.
     CreateWorkspaceWaitingForNetwork waiting_for_network = 5;
+    // NOT TERMINAL: a workspace forks its own conversation from inside its
+    // conversation's first turn, so the daemon holds the create until that
+    // turn ends (CreateWorkspaceResponse.waiting_for_requester_turn). Later
+    // steps arrive on this same op_id. A client draws it as waiting, never
+    // as a failure, and keeps the op registered.
+    CreateWorkspaceWaitingForRequesterTurn waiting_for_requester_turn = 6;
   }
 }
 

@@ -110,12 +110,14 @@ names its requester and placement as well, so the request tests read
   ;; the usual two: CreateWorkspaceResponse carries the option-B `accepted' ack
   ;; beside success and error.
   ;; CreateWorkspaceResponse's `async_merge_accepted' answers only an async
-  ;; merge, which is an agent's request and never the editor's, and its
+  ;; merge, and its `waiting_for_requester_turn' answers only a workspace
+  ;; forking itself, both an agent's request and never the editor's, and its
   ;; `waiting_for_network' answers a synchronous create held for the network.
   ;; RestartWorkspaceResponse's `scheduled' answers only a `when_idle'
   ;; restart, which is an agent's request and never the editor's.
   '(("agentrepl/v1/endpoint_create_workspace.pb.go" "CreateWorkspaceResponse"
-     ("accepted" "asyncMergeAccepted" "error" "success" "waitingForNetwork"))
+     ("accepted" "asyncMergeAccepted" "error" "success" "waitingForNetwork"
+      "waitingForRequesterTurn"))
     ("agentrepl/v1/endpoint_open_workspace.pb.go" "OpenWorkspaceResponse")
     ("agentrepl/v1/endpoint_list_workspace_transcripts.pb.go" "ListWorkspaceTranscriptsResponse")
     ("agentrepl/v1/endpoint_bind_workspace_session.pb.go" "BindWorkspaceSessionResponse")
@@ -467,12 +469,54 @@ THE ARM IS THE REFUSAL, so a bare error says nothing the caller can act on."
                      "{\"waitingForNetwork\":{\"create\":{\"id\":\"create-2\"}}}"))
                    '(:arm :waiting-for-network :value (:create (:id "create-2")))))))
 
+(ert-deftest agent-repl-test-wire-verbs-create-waiting-for-requester-turn ()
+  "A create held for its requester's first turn names its pending create."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-create-workspace-waiting-for-requester-turn
+                    (agent-repl-test-wire-verbs--parse "{\"create\":{\"id\":\"create-3\"}}"))
+                   '(:create (:id "create-3"))))))
+
+(ert-deftest agent-repl-test-wire-verbs-create-waiting-for-requester-turn-without-a-create-is-a-breach ()
+  "A create held for its requester's turn with no pending ref is a breach."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-create-workspace-waiting-for-requester-turn
+                   (agent-repl-test-wire-verbs--parse "{}"))
+                  :type 'agent-repl-wire-error)))
+
 (ert-deftest agent-repl-test-wire-verbs-create-waiting-without-a-create-is-a-breach ()
   "A held create with no pending ref says nothing a caller can follow."
   (agent-repl-test-wire-verbs--with-common
     (should-error (agent-repl-wire-decode-create-workspace-response
                    (agent-repl-test-wire-verbs--parse "{\"waitingForNetwork\":{}}"))
                   :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-pending-create-arm-decodes-its-ref ()
+  "The shared pending-create arm decodes its one field into (:create REF)."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-verbs--decode-pending-create-arm
+                    "Held" (agent-repl-test-wire-verbs--parse "{\"create\":{\"id\":\"c\"}}"))
+                   '(:create (:id "c"))))))
+
+(ert-deftest agent-repl-test-wire-verbs-pending-create-arm-refuses-an-extra-key ()
+  "The shared pending-create arm refuses a field its message does not have."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-verbs--decode-pending-create-arm
+                   "Held" (agent-repl-test-wire-verbs--parse "{\"create\":{\"id\":\"c\"},\"x\":1}"))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-pending-create-arms-share-one-decoder ()
+  "Every create arm that answers a pending create decodes through the shared
+helper, so a hand-rolled divergent decoder fails here."
+  (agent-repl-test-wire-verbs--with-common
+    (dolist (decoder '(agent-repl-wire-decode-create-workspace-waiting-for-network
+                       agent-repl-wire-decode-create-workspace-waiting-for-requester-turn
+                       agent-repl-wire-decode-create-workspace-joined))
+      (let ((real (symbol-function 'agent-repl-wire-verbs--decode-pending-create-arm))
+            seen)
+        (cl-letf (((symbol-function 'agent-repl-wire-verbs--decode-pending-create-arm)
+                   (lambda (message json) (setq seen message) (funcall real message json))))
+          (funcall decoder (agent-repl-test-wire-verbs--parse "{\"create\":{\"id\":\"c\"}}")))
+        (should seen)))))
 
 (ert-deftest agent-repl-test-wire-verbs-pending-create-ref-without-an-id-is-a-breach ()
   "A pending ref with no id is no identity at all."

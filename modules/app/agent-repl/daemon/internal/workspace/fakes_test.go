@@ -44,6 +44,7 @@ import (
 	"agent-repld/internal/rollout"
 	"agent-repld/internal/scriptrunner"
 	"agent-repld/internal/shimlife"
+	"agent-repld/internal/turnlatch"
 	"agent-repld/internal/wsm"
 )
 
@@ -2510,6 +2511,9 @@ type fakeSessions struct {
 	// forkProbed the parents it was asked about, in order.
 	forkProbeErr error
 	forkProbed   []ids.WorkspaceID
+	// forkProbeAnswers, when set, are answered by ProbeForkPoint first, one
+	// per call in order, before forkProbeErr answers the rest.
+	forkProbeAnswers []error
 	// resumePhases are the compaction phases this fake relays back through
 	// ColdResume.OnPhase, in order, standing in for the shim's own stream.
 	resumePhases []*conversationv1.SessionCompactionProgress
@@ -2656,6 +2660,11 @@ func (s *fakeSessions) Held(ws ids.WorkspaceID) bool { return s.live[ws] || s.he
 
 func (s *fakeSessions) ProbeForkPoint(_ context.Context, _ dlog.Logger, parent ids.WorkspaceID) error {
 	s.forkProbed = append(s.forkProbed, parent)
+	if len(s.forkProbeAnswers) > 0 {
+		answer := s.forkProbeAnswers[0]
+		s.forkProbeAnswers = s.forkProbeAnswers[1:]
+		return answer
+	}
 	return s.forkProbeErr
 }
 
@@ -3194,6 +3203,9 @@ type fixture struct {
 	creates *creategate.Gate
 	// network is the network state a failed naming call is classified by.
 	network *fakeNetwork
+	// turnEnds are the turn-end latches a create held for its requester's
+	// turn resumes on.
+	turnEnds *turnlatch.Latches
 	// recovered are the reporters answered for a held create's ops, by op.
 	recovered map[string]*recordingProgress
 	// recoveredMu guards recovered.
@@ -3331,6 +3343,7 @@ func newFixture(t *testing.T) *fixture {
 		log:        newFakeSurfaces(),
 		headless:   &fakeHeadless{answers: []headlessAnswer{{text: FixtureMintedName}}},
 		network:    newFakeNetwork(),
+		turnEnds:   turnlatch.New(),
 		recovered:  map[string]*recordingProgress{},
 		briefs:     map[string]prompts.Prompt{},
 		derived:    &fakeDerived{},
@@ -3355,6 +3368,7 @@ func newFixture(t *testing.T) *fixture {
 	verbs, err := New(Deps{
 		Instance: fixtureInstance,
 		Network:  f.network,
+		TurnEnds: f.turnEnds,
 		Lifetime: life,
 		CreateProgressFor: func(opID string) CreateProgress {
 			f.recoveredMu.Lock()

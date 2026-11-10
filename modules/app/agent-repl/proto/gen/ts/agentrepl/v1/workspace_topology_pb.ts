@@ -140,6 +140,13 @@ export type WorkspaceContextOrigin = Message<"agentrepl.v1.WorkspaceContextOrigi
      * closed workspace of the same repository that holds a conversation; one
      * that holds none is refused (`fork_source_has_no_conversation`).
      *
+     * A REQUESTER FORKING ITSELF IN ITS FIRST TURN WAITS FOR THAT TURN. Its
+     * conversation has nothing finished to carry yet, so instead of being
+     * refused (`fork_source_has_no_finished_turn`, which stays the answer for
+     * a fork of ANOTHER workspace in its first turn) the create is held until
+     * the requesting turn ends, and the fork then carries that turn
+     * (CreateWorkspaceResponse.waiting_for_requester_turn).
+     *
      * @generated from field: agentrepl.v1.WorkspaceContextOriginFork fork = 2;
      */
     value: WorkspaceContextOriginFork;
