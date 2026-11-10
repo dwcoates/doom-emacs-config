@@ -369,32 +369,44 @@ export function drawRosterMergeQueueStage(u: RosterMergeQueueStage, path: string
   return el;
 }
 
-/** The class of a remediating merge's parenthetical: what it repairs, in grey after its name. */
+/** The class of a remediating merge's label: what it repairs, after its name. */
 export const MERGE_QUEUE_REASON_CLASS = "sb-mq-reason";
 
 /**
  * THE SECOND SPOT (owner rulings, 2026-10-31 and 2026-11-03): one merge that
  * stepped aside to repair out of line -- its failing tests, or its rebase's
- * conflicts. Drawn under the head as a smaller, quieter card than the head's
- * and above the merges waiting, on ONE LINE (owner request, 2026-11-09): the
- * merge glyph, its name, what it repairs as a grey parenthetical after the
- * name, and how long it has remediated. A click reveals its merge bubble, as
- * the head's does.
+ * conflicts. It stands above the merges waiting and is DRAWN AS ONE OF THEM
+ * (owner request, 2026-11-10): its name, what it repairs as a queue label
+ * (drawQueueLabel, the peer of a waiting merge's `front`), and how long it
+ * has remediated. A click reveals its merge bubble, as the head's does.
  */
 export function drawRosterMergeQueueRemediating(u: RosterMergeQueueRemediating, sc: SidebarContext, path: string): HTMLElement {
   const subject = requireMessage(u.subject, `${path}.subject`);
-  const card = drawSubjectControl(subject, sc, MERGE_QUEUE_REMEDIATING_CLASS, `${path}.subject`);
-  const line = drawCardLine(subject, `${path}.subject`);
+  const line = drawSubjectControl(subject, sc, `${MERGE_QUEUE_WAITING_CLASS} ${MERGE_QUEUE_REMEDIATING_CLASS}`, `${path}.subject`);
+  line.append(drawSubjectName(subject, `${path}.subject`));
   const words = remediatingWords(requireMessage(u.reason, `${path}.reason`));
   if (words !== null) {
-    const reason = document.createElement("span");
-    reason.className = MERGE_QUEUE_REASON_CLASS;
-    reason.textContent = `(${words})`;
-    line.appendChild(reason);
+    line.appendChild(drawQueueLabel(words, MERGE_QUEUE_REASON_CLASS, "repairing out of line"));
   }
   line.appendChild(drawClock(sc, msOf(u.sinceMs, `${path}.since_ms`)));
-  card.appendChild(line);
-  return card;
+  return line;
+}
+
+/** The class every queue label wears: `front`, what a remediating merge repairs, a GitHub place. */
+export const MERGE_QUEUE_LABEL_CLASS = "sb-mq-label";
+
+/**
+ * One queue label after a merge's name (owner request, 2026-11-10): `front`,
+ * `fixing tests`, `resolving conflicts` and a GitHub place are peers, drawn
+ * alike in the queue's purple. KIND is the label's own class beside
+ * MERGE_QUEUE_LABEL_CLASS; TITLE is its hover.
+ */
+function drawQueueLabel(text: string, kind: string, title: string): HTMLElement {
+  const label = document.createElement("span");
+  label.className = `${MERGE_QUEUE_LABEL_CLASS} ${kind}`;
+  label.textContent = text;
+  label.title = title;
+  return label;
 }
 
 /**
@@ -430,11 +442,7 @@ export function drawRosterMergeQueueWaiting(
   const line = drawSubjectControl(subject, sc, MERGE_QUEUE_WAITING_CLASS, `${path}.subject`);
   line.append(drawSubjectName(subject, `${path}.subject`));
   if (u.placedAtFront) {
-    const front = document.createElement("span");
-    front.className = "sb-mq-front";
-    front.textContent = "front";
-    front.title = "put in line at the front";
-    line.appendChild(front);
+    line.appendChild(drawQueueLabel("front", "sb-mq-front", "put in line at the front"));
   }
   // A MERGE RACING THE HEAD HOLDS AN ACTIVE SLOT: its clock reads how long it
   // has held that slot, never how long ago it was put in line.
@@ -446,13 +454,12 @@ export function drawRosterMergeQueueWaiting(
   return line;
 }
 
-/** The class of a card's name line: the head's, and a remediating merge's. */
+/** The class of the head card's name line. */
 export const MERGE_QUEUE_CARD_LINE_CLASS = "sb-mq-head-line";
 
 /**
- * A card's name line, the head's and a remediating merge's alike: the merge
- * glyph, then the name U is credited under. Each card appends what follows
- * the name on its own line.
+ * The head card's name line: the merge glyph, then the name U is credited
+ * under. The card appends what follows the name on its own line.
  */
 export function drawCardLine(u: RosterMergeQueueSubject, path: string): HTMLElement {
   const line = document.createElement("div");
@@ -475,10 +482,7 @@ export function drawRosterMergeQueueGithub(u: RosterMergeQueueGithubEntry, sc: S
   const subject = requireMessage(u.subject, `${path}.subject`);
   const place = requireMessage(u.place, `${path}.place`);
   const line = drawSubjectControl(subject, sc, MERGE_QUEUE_GITHUB_CLASS, `${path}.subject`);
-  const mark = document.createElement("span");
-  mark.className = "sb-mq-github-place";
-  mark.textContent = githubPlaceText(place);
-  mark.title = "its pull request's place in the GitHub merge queue";
+  const mark = drawQueueLabel(githubPlaceText(place), "sb-mq-github-place", "its pull request's place in the GitHub merge queue");
   line.append(drawSubjectName(subject, `${path}.subject`), mark, drawClock(sc, msOf(u.queuedAtMs, `${path}.queued_at_ms`)));
   return line;
 }

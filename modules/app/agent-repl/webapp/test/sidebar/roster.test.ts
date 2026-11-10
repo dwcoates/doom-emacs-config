@@ -2001,7 +2001,7 @@ describe("the Merge Queue section's queues", () => {
     { name: "indents a waiting merge's name under the head's", selector: ".sb-mq-waiting", property: "padding-left", want: "var(--mq-list-indent)" },
     { name: "draws the head's card in the foreground colour", selector: ".sb-mq-head", property: "color", want: "var(--fg)" },
     { name: "names the head's merge in the open repository names' ink", selector: ".sb-mq-head .sb-mq-name", property: "color", want: "var(--repo-head-expanded)" },
-    { name: "draws a remediating merge's reason in the rail's secondary grey", selector: ".sb-mq-remediating .sb-mq-reason", property: "color", want: "var(--muted)" },
+    { name: "draws a remediating merge's reason in the queue labels' purple", selector: ".sb-mq-remediating .sb-mq-reason", property: "color", want: "var(--blocked)" },
     { name: "never truncates a remediating merge's reason: its name gives way", selector: ".sb-mq-remediating .sb-mq-reason", property: "flex", want: "0 0 auto" },
   ])("$name", ({ selector, property, want }) => {
     const drawn = drawWorkspaceRoster(

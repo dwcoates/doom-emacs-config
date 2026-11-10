@@ -273,13 +273,14 @@
      orange and was taken darker and richer (owner request, 2026-10-30): in
      OKLCH, lightness -0.13, chroma x1.45, hue -3 degrees. */
   --canonical-orange: #cc4d00;
-  /* THE LIGHTER CANONICAL ORANGE (owner request, 2026-11-09): the ground of
-     an inline code span, a little lighter than the canonical orange and
-     derived from it, so each theme's own canonical orange carries through.
-     Its ink is black, which reads at WCAG AA on it in both themes (5.8:1
-     light, 6.4:1 dark). */
-  --canonical-orange-light: color-mix(in srgb, var(--canonical-orange) 85%, #ffffff);
-  --canonical-orange-light-ink: #000000;
+  /* THE INLINE CODE GROUND (owner requests, 2026-11-09 and 2026-11-10): a
+     wash of the canonical orange, a step more opaque than a response tree's
+     cited-node highlight (--reference-bg, 18%) and close to it in intensity,
+     so code reads as marked without standing out of the prose. Transparent,
+     so it sits on whatever bubble holds it, and its ink is the bubble's own
+     text color in both themes. */
+  --canonical-orange-light: color-mix(in srgb, var(--canonical-orange) 26%, transparent);
+  --canonical-orange-light-ink: inherit;
   /* AN ANSWERED BRANCH'S LABEL (owner request, 2026-10-26): a pastel orange
      on both ends of an answer, the prompt's entry labels and the response's
      linked labels alike (feed/entries.ts). An entry's implied ancestor wears
@@ -1064,7 +1065,6 @@ body {
    with the workspaces' rows, a row's hover, and a clock that reads as a
    row's when-column. */
 #ws-sidebar .sb-mq-head,
-#ws-sidebar .sb-mq-remediating,
 #ws-sidebar .sb-mq-waiting,
 #ws-sidebar .sb-mq-github {
   padding: var(--row-pad-y) 0.7rem var(--row-pad-y) 0.9rem;
@@ -1123,30 +1123,13 @@ body {
   color: var(--muted);
 }
 #ws-sidebar .sb-mq-stage { display: inline-flex; align-items: center; gap: 0.2rem; white-space: nowrap; }
-/* THE SECOND SPOT (owner ruling, 2026-10-31): a merge remediating its
-   failing tests out of line. It is a card like the head's, one step quieter
-   -- its name in regular weight, a step smaller, in the waiting merges' grey
-   lifted toward the head's ink, its glyph dimmed -- and it stands above the
-   merges waiting, indented like them, so it reads as below the head and
-   above the line. WHAT IT REPAIRS FOLLOWS ITS NAME ON THE SAME LINE (owner
-   request, 2026-11-09), a parenthetical in the rail's secondary grey
-   (--muted) that never truncates: the name gives way first. */
-#ws-sidebar .sb-mq-remediating {
-  display: flex;
-  flex-direction: column;
-  gap: 0.1rem;
-  padding-left: calc(0.9rem + var(--ws-mark-width) * 0.5);
-}
-#ws-sidebar .sb-mq-remediating .sb-mq-name {
-  font-size: calc(var(--merged-group-head-font-size) * 0.92);
-  color: color-mix(in srgb, var(--repo-head-expanded) 80%, var(--repo-head-collapsed));
-}
-#ws-sidebar .sb-mq-remediating .sb-mq-glyph { opacity: 0.6; }
-#ws-sidebar .sb-mq-reason { flex: 0 0 auto; color: var(--muted); white-space: nowrap; }
-/* A waiting merge's front mark. */
-#ws-sidebar .sb-mq-front { flex: 0 0 auto; color: var(--blocked); font-size: 0.65rem; }
-/* A GITHUB MERGE QUEUE STANDING'S PLACE, drawn as the front mark is. */
-#ws-sidebar .sb-mq-github-place { flex: 0 0 auto; color: var(--blocked); font-size: 0.65rem; }
+/* THE SECOND SPOT (owner ruling, 2026-10-31): a merge remediating out of
+   line stands above the merges waiting and is drawn as one of them (owner
+   request, 2026-11-10); only its label says what it repairs. */
+/* A QUEUE LABEL after a merge's name (owner request, 2026-11-10): `front`,
+   `fixing tests`, `resolving conflicts` and a GitHub place are peers, drawn
+   alike in the queue's purple. */
+#ws-sidebar .sb-mq-label { flex: 0 0 auto; color: var(--blocked); font-size: 0.65rem; white-space: nowrap; }
 /* A folded open workspaces section folds away every grouping section it
    holds, headers included; only its own header stays. */
 #ws-sidebar .repo.open-section.folded > .sb-sections { display: none; }
@@ -1595,8 +1578,7 @@ html.dragging * { -webkit-user-select: none; user-select: none; }
    what is left of the 6.25px a line must reach below its baseline for the
    next name to hang by that gap. */
 #ws-sidebar .sb-mq-head { --mq-below-text: 4.25px; }
-#ws-sidebar .sb-mq-head:has(> .sb-mq-head-line:last-child),
-#ws-sidebar .sb-mq-remediating { --mq-below-text: 7.75px; }
+#ws-sidebar .sb-mq-head:has(> .sb-mq-head-line:last-child) { --mq-below-text: 7.75px; }
 #ws-sidebar .sb-mq-waiting,
 #ws-sidebar .sb-mq-github { --mq-below-text: 4.25px; }
 #ws-sidebar .merged-group[data-group-section="merge-queue"]:not(.folded):has(+ .merged-group) > .rows > :last-child {

@@ -4215,40 +4215,12 @@ describe("the one code wash (owner request, 2026-10-28)", () => {
   });
 });
 
-describe("inline code's lighter canonical orange (owner request, 2026-11-09)", () => {
-  /** WCAG's contrast ratio between two colors. */
-  const contrast = (a: [number, number, number], b: [number, number, number]): number => {
-    const [high, low] = [luminance(a), luminance(b)].sort((x, y) => y - x);
-    return (high + 0.05) / (low + 0.05);
-  };
-
-  /** The lighter canonical orange in the theme of BLOCK, mixed as its declaration says. */
-  const lightOrange = (block: string): [number, number, number] => {
-    const declared = themeValueOf(declarationsOf(":root") ?? "", "--canonical-orange-light") ?? "";
-    const share = /^color-mix\(in srgb, var\(--canonical-orange\) ([\d.]+)%, #ffffff\)$/.exec(declared)?.[1];
-    if (share === undefined) throw new Error(`--canonical-orange-light is not mixed from the canonical orange: ${declared}`);
-    return srgbMix(themeRgbOf(block, "--canonical-orange"), [0xff, 0xff, 0xff], Number(share) / 100) as [number, number, number];
-  };
-
-  it("is derived from the canonical orange, once, on :root", () => {
+describe("inline code's canonical orange wash (owner requests, 2026-11-09 and 2026-11-10)", () => {
+  it("is a wash of the canonical orange a step over the tree highlight's, once, on :root", () => {
     // Arrange / Act
     const declarations = withoutBlockComments(stylesheet).match(/--canonical-orange-light\s*:[^;]+;/g) ?? [];
     // Assert
-    expect(declarations).toEqual(["--canonical-orange-light: color-mix(in srgb, var(--canonical-orange) 85%, #ffffff);"]);
-  });
-
-  it.each(THEME_BLOCKS)("is lighter than the %s theme's canonical orange", (_theme, block) => {
-    // Arrange / Act
-    const [orange, light] = [luminance(themeRgbOf(block(), "--canonical-orange")), luminance(lightOrange(block()))];
-    // Assert
-    expect(light).toBeGreaterThan(orange);
-  });
-
-  it.each(THEME_BLOCKS)("carries ink that reads at WCAG AA on it in the %s theme", (_theme, block) => {
-    // Arrange / Act
-    const ratio = contrast(lightOrange(block()), themeRgbOf(block(), "--canonical-orange-light-ink"));
-    // Assert
-    expect(ratio).toBeGreaterThanOrEqual(4.5);
+    expect(declarations).toEqual(["--canonical-orange-light: color-mix(in srgb, var(--canonical-orange) 26%, transparent);"]);
   });
 
   it.each([["background", "var(--canonical-orange-light)"], ["color", "var(--canonical-orange-light-ink)"]])(
