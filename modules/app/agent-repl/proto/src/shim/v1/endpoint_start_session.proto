@@ -79,7 +79,32 @@ message SessionProfileAgent {
   // changes which repository checkout it is, so it holds for the session's
   // life.
   SessionProfileAgentStanding standing = 1;
+  // How the workspace lands its work: through its repository's merge queue,
+  // or straight on the main branch while it holds the queue bypass mode.
+  // REQUIRED, like standing. It picks the system prompt's landing section (the
+  // merge-queue rules, or the bypass directive in their place), and a
+  // bypassing session is started with the merge-queue skill switched off, so
+  // the session never sees the rules it bypasses. A workspace's two
+  // conversations each keep one landing for their whole life: switching the
+  // mode switches the conversation, never a running session's landing.
+  SessionProfileAgentLanding landing = 2;
 }
+
+// How the agent's workspace lands its changes. The set arm IS the landing.
+message SessionProfileAgentLanding {
+  // Exactly one is set.
+  oneof landing {
+    SessionProfileAgentLandingThroughQueue through_queue = 1;
+    SessionProfileAgentLandingBypassingQueue bypassing_queue = 2;
+  }
+}
+// The ordinary landing: every change reaches the main branch through the
+// repository's merge queue.
+message SessionProfileAgentLandingThroughQueue {}
+// The bypass landing: the workspace holds its repository's queue bypass mode,
+// the queue is hard-stopped, and the agent lands each change on the main
+// branch itself.
+message SessionProfileAgentLandingBypassingQueue {}
 
 // How the agent's workspace stands within its repository. The set arm IS the
 // standing.

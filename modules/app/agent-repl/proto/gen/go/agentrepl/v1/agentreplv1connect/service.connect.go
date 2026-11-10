@@ -247,6 +247,9 @@ const (
 	// AgentReplUpdateRemoteControlModeProcedure is the fully-qualified name of the AgentRepl's
 	// UpdateRemoteControlMode RPC.
 	AgentReplUpdateRemoteControlModeProcedure = "/agentrepl.v1.AgentRepl/UpdateRemoteControlMode"
+	// AgentReplUpdateQueueBypassModeProcedure is the fully-qualified name of the AgentRepl's
+	// UpdateQueueBypassMode RPC.
+	AgentReplUpdateQueueBypassModeProcedure = "/agentrepl.v1.AgentRepl/UpdateQueueBypassMode"
 	// AgentReplSetPermissionModeProcedure is the fully-qualified name of the AgentRepl's
 	// SetPermissionMode RPC.
 	AgentReplSetPermissionModeProcedure = "/agentrepl.v1.AgentRepl/SetPermissionMode"
@@ -513,6 +516,7 @@ var (
 	agentReplSetDefaultModelMethodDescriptor                   = agentReplServiceDescriptor.Methods().ByName("SetDefaultModel")
 	agentReplSetEffortMethodDescriptor                         = agentReplServiceDescriptor.Methods().ByName("SetEffort")
 	agentReplUpdateRemoteControlModeMethodDescriptor           = agentReplServiceDescriptor.Methods().ByName("UpdateRemoteControlMode")
+	agentReplUpdateQueueBypassModeMethodDescriptor             = agentReplServiceDescriptor.Methods().ByName("UpdateQueueBypassMode")
 	agentReplSetPermissionModeMethodDescriptor                 = agentReplServiceDescriptor.Methods().ByName("SetPermissionMode")
 	agentReplSelectAccountMethodDescriptor                     = agentReplServiceDescriptor.Methods().ByName("SelectAccount")
 	agentReplWatchFooterMethodDescriptor                       = agentReplServiceDescriptor.Methods().ByName("WatchFooter")
@@ -817,6 +821,11 @@ type AgentReplClient interface {
 	// Turn a workspace's remote control (its session reachable from claude.ai)
 	// on, off, or over. See endpoint_update_remote_control_mode.proto.
 	UpdateRemoteControlMode(context.Context, *connect.Request[v1.UpdateRemoteControlModeRequest]) (*connect.Response[v1.UpdateRemoteControlModeResponse], error)
+	// Take or release the workspace's queue bypass mode: a personal-account
+	// workspace lands straight on its repository's main branch, with the
+	// repository's merge queue hard-stopped while the mode is held. The topbar's
+	// queue-bypass chip sends `toggle`.
+	UpdateQueueBypassMode(context.Context, *connect.Request[v1.UpdateQueueBypassModeRequest]) (*connect.Response[v1.UpdateQueueBypassModeResponse], error)
 	// The permission-mode switch, SetModel's sibling. See
 	// endpoint_set_permission_mode.proto.
 	SetPermissionMode(context.Context, *connect.Request[v1.SetPermissionModeRequest]) (*connect.Response[v1.SetPermissionModeResponse], error)
@@ -1522,6 +1531,12 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(agentReplUpdateRemoteControlModeMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
+		updateQueueBypassMode: connect.NewClient[v1.UpdateQueueBypassModeRequest, v1.UpdateQueueBypassModeResponse](
+			httpClient,
+			baseURL+AgentReplUpdateQueueBypassModeProcedure,
+			connect.WithSchema(agentReplUpdateQueueBypassModeMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
 		setPermissionMode: connect.NewClient[v1.SetPermissionModeRequest, v1.SetPermissionModeResponse](
 			httpClient,
 			baseURL+AgentReplSetPermissionModeProcedure,
@@ -2020,6 +2035,7 @@ type agentReplClient struct {
 	setDefaultModel                   *connect.Client[v1.SetDefaultModelRequest, v1.SetDefaultModelResponse]
 	setEffort                         *connect.Client[v1.SetEffortRequest, v1.SetEffortResponse]
 	updateRemoteControlMode           *connect.Client[v1.UpdateRemoteControlModeRequest, v1.UpdateRemoteControlModeResponse]
+	updateQueueBypassMode             *connect.Client[v1.UpdateQueueBypassModeRequest, v1.UpdateQueueBypassModeResponse]
 	setPermissionMode                 *connect.Client[v1.SetPermissionModeRequest, v1.SetPermissionModeResponse]
 	selectAccount                     *connect.Client[v1.SelectAccountRequest, v1.SelectAccountResponse]
 	watchFooter                       *connect.Client[v1.WatchFooterRequest, v1.WatchFooterResponse]
@@ -2468,6 +2484,11 @@ func (c *agentReplClient) SetEffort(ctx context.Context, req *connect.Request[v1
 // UpdateRemoteControlMode calls agentrepl.v1.AgentRepl.UpdateRemoteControlMode.
 func (c *agentReplClient) UpdateRemoteControlMode(ctx context.Context, req *connect.Request[v1.UpdateRemoteControlModeRequest]) (*connect.Response[v1.UpdateRemoteControlModeResponse], error) {
 	return c.updateRemoteControlMode.CallUnary(ctx, req)
+}
+
+// UpdateQueueBypassMode calls agentrepl.v1.AgentRepl.UpdateQueueBypassMode.
+func (c *agentReplClient) UpdateQueueBypassMode(ctx context.Context, req *connect.Request[v1.UpdateQueueBypassModeRequest]) (*connect.Response[v1.UpdateQueueBypassModeResponse], error) {
+	return c.updateQueueBypassMode.CallUnary(ctx, req)
 }
 
 // SetPermissionMode calls agentrepl.v1.AgentRepl.SetPermissionMode.
@@ -3044,6 +3065,11 @@ type AgentReplHandler interface {
 	// Turn a workspace's remote control (its session reachable from claude.ai)
 	// on, off, or over. See endpoint_update_remote_control_mode.proto.
 	UpdateRemoteControlMode(context.Context, *connect.Request[v1.UpdateRemoteControlModeRequest]) (*connect.Response[v1.UpdateRemoteControlModeResponse], error)
+	// Take or release the workspace's queue bypass mode: a personal-account
+	// workspace lands straight on its repository's main branch, with the
+	// repository's merge queue hard-stopped while the mode is held. The topbar's
+	// queue-bypass chip sends `toggle`.
+	UpdateQueueBypassMode(context.Context, *connect.Request[v1.UpdateQueueBypassModeRequest]) (*connect.Response[v1.UpdateQueueBypassModeResponse], error)
 	// The permission-mode switch, SetModel's sibling. See
 	// endpoint_set_permission_mode.proto.
 	SetPermissionMode(context.Context, *connect.Request[v1.SetPermissionModeRequest]) (*connect.Response[v1.SetPermissionModeResponse], error)
@@ -3745,6 +3771,12 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		connect.WithSchema(agentReplUpdateRemoteControlModeMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
+	agentReplUpdateQueueBypassModeHandler := connect.NewUnaryHandler(
+		AgentReplUpdateQueueBypassModeProcedure,
+		svc.UpdateQueueBypassMode,
+		connect.WithSchema(agentReplUpdateQueueBypassModeMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
 	agentReplSetPermissionModeHandler := connect.NewUnaryHandler(
 		AgentReplSetPermissionModeProcedure,
 		svc.SetPermissionMode,
@@ -4316,6 +4348,8 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplSetEffortHandler.ServeHTTP(w, r)
 		case AgentReplUpdateRemoteControlModeProcedure:
 			agentReplUpdateRemoteControlModeHandler.ServeHTTP(w, r)
+		case AgentReplUpdateQueueBypassModeProcedure:
+			agentReplUpdateQueueBypassModeHandler.ServeHTTP(w, r)
 		case AgentReplSetPermissionModeProcedure:
 			agentReplSetPermissionModeHandler.ServeHTTP(w, r)
 		case AgentReplSelectAccountProcedure:
@@ -4763,6 +4797,10 @@ func (UnimplementedAgentReplHandler) SetEffort(context.Context, *connect.Request
 
 func (UnimplementedAgentReplHandler) UpdateRemoteControlMode(context.Context, *connect.Request[v1.UpdateRemoteControlModeRequest]) (*connect.Response[v1.UpdateRemoteControlModeResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.UpdateRemoteControlMode is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) UpdateQueueBypassMode(context.Context, *connect.Request[v1.UpdateQueueBypassModeRequest]) (*connect.Response[v1.UpdateQueueBypassModeResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.UpdateQueueBypassMode is not implemented"))
 }
 
 func (UnimplementedAgentReplHandler) SetPermissionMode(context.Context, *connect.Request[v1.SetPermissionModeRequest]) (*connect.Response[v1.SetPermissionModeResponse], error) {

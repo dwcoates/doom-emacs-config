@@ -75,13 +75,13 @@ message TopbarView {
   optional TopbarModelSelector model_selector = 3;
   // The connectivity glyph.
   TopbarConnectivity connectivity = 4;
-  // The warning strip, last in the left group's status run, so its chip's
-  // arrival moves no other chip. ALWAYS SET, session or no session: a session-less
-  // workspace's state rides it as one warning line, so the fact the retired
-  // whole-view states used to carry is still stated. An EMPTY list remains
-  // the daemon saying nothing is wrong, and the client still draws no chip
-  // for one — "always set" is about the wire, not about a control over
-  // nothing.
+  // The warnings, drawn through the heading: while the list holds any, the
+  // heading's title is a control that opens it, in the strip's severity color
+  // (TopbarWarningStrip.severity). ALWAYS SET, session or no session: a
+  // session-less workspace's state rides it as one warning line, so the fact
+  // the retired whole-view states used to carry is still stated. An EMPTY
+  // list remains the daemon saying nothing is wrong, and the heading is then
+  // plain text.
   TopbarWarningStrip warnings = 5;
   // Tag 6 RETIRED (TokenBreakdownView token_breakdown): the breakdown now
   // rides the context chip's hover content.
@@ -126,6 +126,12 @@ message TopbarView {
   // the title is unset. ALWAYS SET: every workspace has a name, summarized or
   // not.
   TopbarWorkspaceName workspace_name = 15;
+  // The queue-bypass chip, first in the left group, left of the remote-control
+  // chip. OPTIONAL BY PRESENCE: SET only when the workspace's session spends
+  // as a PERSONAL account, the one kind of login that may land on its
+  // repository's main branch without the merge queue; UNSET on a work
+  // account's workspace, and the client then draws nothing in its place.
+  optional TopbarQueueBypass queue_bypass = 17;
   // The remote-control chip, first in the left group's status run,
   // immediately left of the persistent-wifi chip.
   // ALWAYS SET: every workspace has a remote-control mode, on or off.
@@ -147,6 +153,46 @@ message TopbarView {
 // repository's main worktree, off by default for every other workspace, and
 // whatever the user last set otherwise. A workspace whose mode is on keeps its
 // shim up between keep-alives, until the idle sweep parks it past its cutoff.
+// THE QUEUE-BYPASS CHIP: whether this workspace lands its changes straight on
+// its repository's main branch with the repository's merge queue hard-stopped.
+// While it is on, the workspace runs its BYPASS conversation, whose system
+// prompt carries the bypass directive in place of the merge-queue rules; while
+// it is off, its ordinary conversation. Each keeps its own transcript and its
+// own warm cache, and the one not running is kept for the next switch.
+//
+// A STATUS AND A CONTROL: clicking the chip sends UpdateQueueBypassMode's
+// `toggle` arm, except in the held_elsewhere arm, where the chip is a status
+// only. The chip draws nothing on success; it redraws from the next push.
+message TopbarQueueBypass {
+  // The workspace's standing toward the mode. Exactly one repository workspace
+  // may hold the mode at a time, so the third arm is a mode this workspace
+  // cannot take until the holder lets go.
+  oneof mode {
+    TopbarQueueBypassOn on = 1;
+    TopbarQueueBypassOff off = 2;
+    TopbarQueueBypassHeldElsewhere held_elsewhere = 3;
+  }
+  // The hover text, composed by the daemon.
+  TopbarQueueBypassTooltip tooltip = 4;
+}
+// This workspace holds the mode: its repository's queue is hard-stopped, and
+// the chip is drawn lit.
+message TopbarQueueBypassOn {}
+// The mode is free and this workspace does not hold it: the chip is drawn
+// unlit, and a click takes the mode.
+message TopbarQueueBypassOff {}
+// Another workspace of the same repository holds the mode: the chip is drawn
+// muted and does not respond to a click.
+message TopbarQueueBypassHeldElsewhere {
+  // The holding workspace's name, as the roster spells it.
+  string workspace_name = 1;
+}
+// The chip's hover text.
+message TopbarQueueBypassTooltip {
+  // Drawn verbatim.
+  string text = 1;
+}
+
 message TopbarRemoteControl {
   // Whether remote control is on for the workspace.
   oneof mode {
@@ -520,7 +566,25 @@ message TopbarWarningStrip {
   // The list, newest first. Empty = nothing is wrong; the strip draws
   // nothing.
   repeated TopbarWarning warnings = 1;
+  // The list's severity, resolved by the daemon: the color the heading's title
+  // is drawn in while the list is open to it. UNSET exactly when the list is
+  // empty. The client raises it to `errors` only for a failure of its own
+  // that no push can state.
+  optional TopbarWarningStripSeverity severity = 2;
 }
+// How bad the listed warnings are, taken together.
+message TopbarWarningStripSeverity {
+  // The worst of the list: any error makes the whole list an error.
+  oneof severity {
+    TopbarWarningStripErrors errors = 1;
+    TopbarWarningStripWarningsOnly warnings_only = 2;
+  }
+}
+// At least one listed warning is an error: a session fault the shim reported,
+// or a failed deploy. The title is drawn red.
+message TopbarWarningStripErrors {}
+// Every listed warning is a warning, not an error. The title is drawn yellow.
+message TopbarWarningStripWarningsOnly {}
 
 // One warning: its list line, and the overlay behind the click.
 message TopbarWarning {
