@@ -65,8 +65,6 @@ import {
   FAKE_AGENTS,
   FAKE_COMMANDS,
   FAKE_DEFAULT_MODEL,
-  FAKE_PLAN_USAGE_RESETS_IN_MS,
-  FAKE_PLAN_USAGE_SEVEN_DAY_PERCENT,
   fakePlanUsage,
   isFakePlanUsageWindowName,
   type FakePlanUsageWindow,
@@ -688,12 +686,13 @@ export function createFakeQuery(
   // always drifted would make a consumer's change detection untestable in the
   // steady case.
   let contextUsageDrift = false;
-  // The weekly windows the plan-usage verb answers. A rate-limit event the
-  // mock emits for one of them moves its figure, so the verb and the stream
-  // never disagree about the account (`emitWithUuid`).
-  const planUsageWindows = new Map<FakePlanUsageWindowName, FakePlanUsageWindow>([
-    ["seven_day", { utilizationPercent: FAKE_PLAN_USAGE_SEVEN_DAY_PERCENT, resetsAtMs: nowMs() + FAKE_PLAN_USAGE_RESETS_IN_MS }],
-  ]);
+  // The weekly windows the plan-usage verb answers: exactly the ones the mock's
+  // own rate-limit events figured, so the verb and the stream never disagree
+  // about the account (`emitWithUuid`). Before any such event every weekly
+  // window answers null. NO WINDOW IS ANCHORED TO "NOW": a figure the mock
+  // invented would need a clock read, and a drive whose clock advances on every
+  // read (the scenario goldens) would see every later instant shifted by it.
+  const planUsageWindows = new Map<FakePlanUsageWindowName, FakePlanUsageWindow>();
   // The session's fast-mode state, which `init` and every `result` report.
   let fastModeState: "on" | "off" | "cooldown" = "off";
   let fastModeDisabledReason: string | undefined = "preference";

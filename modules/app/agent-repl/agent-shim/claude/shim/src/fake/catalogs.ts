@@ -164,11 +164,6 @@ export function isFakePlanUsageWindowName(name: unknown): name is FakePlanUsageW
 /** The figures the plan-usage verb answers, by window. */
 export type FakePlanUsageWindows = ReadonlyMap<FakePlanUsageWindowName, FakePlanUsageWindow>;
 
-/** The account-wide weekly figure a session answers before any rate-limit event moves it. */
-export const FAKE_PLAN_USAGE_SEVEN_DAY_PERCENT = 8;
-/** How far ahead of the session's start the weekly window resets: five days. */
-export const FAKE_PLAN_USAGE_RESETS_IN_MS = 5 * 24 * 60 * 60 * 1000;
-
 /**
  * The plan-usage answer for a max account (FAKE_ACCOUNT_INFO), in the shape
  * the real verb answers it: utilization 0-100 and an ISO 8601 reset, and a

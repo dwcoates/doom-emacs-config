@@ -3,7 +3,6 @@
  * fast mode, compaction, and the two attachment kinds both planes drop.
  */
 import { describe, expect, it, vi } from "vitest";
-import { FAKE_PLAN_USAGE_RESETS_IN_MS, FAKE_PLAN_USAGE_SEVEN_DAY_PERCENT } from "../../../src/fake/catalogs.js";
 
 import { COLD_GATE_FLOOR_TOKENS, readTranscriptFacts } from "../../../src/engine/cold.js";
 import { HARNESS_NOW_MS, driveScenario, ofType, recordsOfType, theResult } from "../harness.js";
@@ -839,15 +838,12 @@ describe("the plan-usage verb", () => {
     return answered;
   }
 
-  it("answers the default weekly figure before any rate-limit event", async () => {
+  it("answers no weekly figure before any rate-limit event", async () => {
     // Arrange + Act
     const sevenDay = await sevenDayAfter("hello");
 
     // Assert
-    expect(sevenDay).toEqual({
-      utilization: FAKE_PLAN_USAGE_SEVEN_DAY_PERCENT,
-      resets_at: new Date(HARNESS_NOW_MS + FAKE_PLAN_USAGE_RESETS_IN_MS).toISOString(),
-    });
+    expect(sevenDay).toBeNull();
   });
 
   it("answers the figure a seven-day rate-limit event stated", async () => {
@@ -861,12 +857,12 @@ describe("the plan-usage verb", () => {
     });
   });
 
-  it("leaves the weekly figure alone on a five-hour event", async () => {
+  it("figures no weekly window from a five-hour event", async () => {
     // Arrange + Act
     const sevenDay = await sevenDayAfter("!rate-limit-five-hour");
 
     // Assert
-    expect((sevenDay as { utilization: number }).utilization).toBe(FAKE_PLAN_USAGE_SEVEN_DAY_PERCENT);
+    expect(sevenDay).toBeNull();
   });
 });
 
