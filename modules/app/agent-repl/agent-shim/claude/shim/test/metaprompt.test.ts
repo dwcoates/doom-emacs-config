@@ -132,6 +132,16 @@ describe("this repository's committed metaprompt", () => {
     expect(text).not.toContain("weaker tier than opus is a defect");
   });
 
+  it("names bypass queue mode as the mode a queue-bypass session runs in", () => {
+    // Arrange
+    const home = homeOnThisRepository();
+    // Act
+    const text = readLandingSection("bypassing_queue", home);
+    // Assert — the user names the mode "bypass queue mode", so the section
+    // must tie that name to this session.
+    expect(text).toContain("This session runs in bypass queue mode, which agent-repl also calls queue bypass mode.");
+  });
+
   it("requires a workspace to store its task's link and every pull request it creates, unasked", () => {
     // Arrange
     const home = homeOnThisRepository();
