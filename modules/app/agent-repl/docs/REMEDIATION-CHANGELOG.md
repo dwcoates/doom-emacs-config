@@ -1377,3 +1377,4 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 - 2026-11-10 merge-queue-stall-triage (landed in queue bypass mode): A queue-bypass workspace keeps both its conversations warm in tandem: each is timed from its own cache clock, and the parked one is kept through a keep-alive on a query of its own
 - 2026-11-10 merge-queue-stall-triage (landed in queue bypass mode): Todo row: LayoutVersion is kept by hand beside the migration list
 - 2026-11-10 merge-queue-stall-triage (landed in queue bypass mode): A restart just after /compact no longer meets a false cold gate, and a prompt held behind a context cut can be sent once the cut ends
+- 2026-11-10 merge-queue-stall-triage (landed in queue bypass mode): Workspaces act on each other's requests without asking the user; permission settings and config still need the user's direct approval
