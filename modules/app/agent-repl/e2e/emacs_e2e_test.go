@@ -40,9 +40,10 @@ type EmacsWorld struct {
 	// a scenario stages another build first (Deploy.Stage). No deploy in this
 	// layer ever builds for real.
 	Deploy *harness.DeployBuilder
-	// Launchctl is the launchctl a service restart would drive
-	// (AGENT_REPL_LAUNCHCTL), so no deploy here reaches a launchd.
-	Launchctl *harness.Recorder
+	// Services is the service manager's tool a service restart would drive
+	// (harness.NewFakeServiceManager: launchctl on macOS, systemctl on
+	// Linux), so no deploy here reaches a live service manager.
+	Services *harness.Recorder
 	// Zettel is the world's real zettel (WithZettel), or nil.
 	Zettel *Zettel
 }
@@ -151,7 +152,7 @@ func NewEmacsWorld(t *testing.T, box sandbox, options ...EmacsWorldOption) *Emac
 
 	// THE DEPLOY'S SEAMS. Emacs starts the daemon here, so nothing states
 	// them unless this layer does, and a daemon without them would run the
-	// REAL build and drive the REAL launchctl on any deploy — a landing on
+	// REAL build and drive the REAL service manager on any deploy — a landing on
 	// its own checkout or `agent-repl-deploy'. The fake build stages what
 	// this world runs: the bundle, the served dist, and copies of the very
 	// store and sidecar binaries whose own reports sit in lockDir.
@@ -164,7 +165,7 @@ func NewEmacsWorld(t *testing.T, box sandbox, options ...EmacsWorldOption) *Emac
 	// No world runs a real zettel: its staged placeholder's report is stated
 	// here, from this test's own (live) pid, so a deploy restarts no zettel.
 	deploy.StatePlaceholderBuilds(t, lockDir, os.Getpid())
-	launchctl := harness.NewFakeLaunchctl(t, deployBin)
+	services := harness.NewFakeServiceManager(t, deployBin)
 
 	extraEnv := []string{
 		"PATH=" + fakeBin + ":" + os.Getenv("PATH"),
@@ -193,8 +194,10 @@ func NewEmacsWorld(t *testing.T, box sandbox, options ...EmacsWorldOption) *Emac
 		// installs there touches nothing of the host's (see checkoutEnv).
 		checkoutEnv + "=" + repo.repoDir,
 		"AGENT_REPL_DEPLOY_BUILDER=" + deploy.Path,
-		"AGENT_REPL_LAUNCHCTL=" + launchctl.Path,
+		"AGENT_REPL_LAUNCHCTL=" + services.Path,
+		"AGENT_REPL_SYSTEMCTL=" + services.Path,
 		"AGENT_REPL_LAUNCH_AGENTS_DIR=" + filepath.Join(box.Scratch(), "LaunchAgents"),
+		"AGENT_REPL_SYSTEMD_USER_DIR=" + filepath.Join(box.Scratch(), "systemd-user"),
 		harness.UnservedZettelEnv(harness.ShortTempDir(t)),
 	}
 	var zettel *Zettel
@@ -275,7 +278,7 @@ func NewEmacsWorld(t *testing.T, box sandbox, options ...EmacsWorldOption) *Emac
 	// Workspace-owned records go to each repo's .claude/emacs, which a test
 	// adds once it has a repo.
 	e.ArtifactPaths = append(e.ArtifactPaths, git.StateFile, logsDir)
-	return &EmacsWorld{Emacs: e, Store: store, Sidecar: sidecar, Git: git, Deploy: deploy, Launchctl: launchctl, Zettel: zettel}
+	return &EmacsWorld{Emacs: e, Store: store, Sidecar: sidecar, Git: git, Deploy: deploy, Services: services, Zettel: zettel}
 }
 
 // webappDistOnce checks the staged webapp dist at most once per test binary.

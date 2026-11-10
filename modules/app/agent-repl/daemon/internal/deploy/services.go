@@ -17,7 +17,8 @@ import (
 	"agent-repld/internal/restarttiming"
 )
 
-// The launchd labels of the three services a deploy restarts.
+// The labels of the three services a deploy restarts: each is the launchd
+// label, and the systemd unit's name before its `.service`.
 const (
 	StoreLabel   = "com.agentrepl.shim-store"
 	SidecarLabel = "com.agentrepl.shim-claude-sidecar"
@@ -26,21 +27,29 @@ const (
 
 const opServices = "daemon.deploy.services"
 
-// Launchd is the slice of launchctl a service restart drives. The production
-// implementation shells out to launchctl in the user's GUI domain; a test
-// drives a scripted fake, and NO TEST EVER REACHES THE LIVE LAUNCHD.
-type Launchd interface {
-	// Print reports whether launchd holds the label and, when it does, the
-	// running pid (0 when loaded but not running).
-	Print(ctx context.Context, label string) (loaded bool, pid int, err error)
-	// Kickstart restarts a loaded service (kickstart -k).
-	Kickstart(ctx context.Context, label string) error
-	// Bootout removes a service from the user domain, which takes its
-	// KeepAlive relaunch with it. A service the domain no longer holds
-	// answers an error wrapping ErrServiceNotLoaded.
-	Bootout(ctx context.Context, label string) error
-	// Bootstrap loads a service from its plist; RunAtLoad starts it.
-	Bootstrap(ctx context.Context, plist string) error
+// ServiceManager is the slice of the host's service manager a service restart
+// drives: launchd on macOS (Launchctl), systemd's per-user manager on Linux
+// (SystemdUser). Every service is kept alive (launchd's KeepAlive, systemd's
+// Restart=always), so a service the manager HOLDS comes back on its own when
+// its process dies, and one it does not hold stays down until something starts
+// it. A test drives a scripted fake, and NO TEST EVER REACHES A LIVE SERVICE
+// MANAGER.
+type ServiceManager interface {
+	// Status reports whether the manager holds the label (keeps it running)
+	// and, when it does, the running pid (0 when held but not running).
+	Status(ctx context.Context, label string) (held bool, pid int, err error)
+	// Restart restarts a held service in place.
+	Restart(ctx context.Context, label string) error
+	// Stop takes the service out of the manager's keeping, so nothing
+	// relaunches it. A service the manager no longer holds may answer an
+	// error wrapping ErrServiceNotLoaded: it is already where Stop leads.
+	Stop(ctx context.Context, label string) error
+	// Start brings the service back from its installed definition and runs
+	// it.
+	Start(ctx context.Context, label string) error
+	// Definition is the installed definition Start brings label back from:
+	// a launchd plist, or a systemd unit file.
+	Definition(label string) string
 }
 
 // ServiceWindows bound a service restart's waits. Each is a FAILURE BOUND,
@@ -62,8 +71,8 @@ var DefaultServiceWindows = ServiceWindows{Stall: 15 * time.Second, Max: 180 * t
 
 // Restarter restarts the store and the sidecar in the RECORDED SAFE ORDER.
 //
-// WHY THE SIDECAR IS BOOTED OUT BEFORE THE STORE IS KICKSTARTED. A store
-// kickstart unlinks store.sock and does not rebind it until the new process is
+// WHY THE SIDECAR IS STOPPED BEFORE THE STORE IS RESTARTED. A store
+// restart unlinks store.sock and does not rebind it until the new process is
 // serving. The sidecar writes into that socket continuously, so a store
 // restart taken underneath a RUNNING sidecar is an error storm in the
 // sidecar's log for as long as the gap lasts (2026-09-13: `storeclient-write-
@@ -72,24 +81,22 @@ var DefaultServiceWindows = ServiceWindows{Stall: 15 * time.Second, Max: 180 * t
 // with none of that — sidecar down, store down, store up, sidecar up — is the
 // one bin/store-reset.sh records too.
 //
-// AND THE STOP IS `bootout`, NOT `kill`: both plists set KeepAlive, so launchd
-// answers a signalled process with a new pid within a second. Bootout removes
-// the service from the domain; bootstrap puts it back and RunAtLoad starts it.
+// AND THE STOP IS THE SERVICE MANAGER'S, NOT `kill`: every service is kept
+// alive, so the manager answers a signalled process with a new pid within a
+// second. Stop takes the service out of the manager's keeping (launchd's
+// bootout, systemd's stop); Start puts it back.
 type Restarter struct {
-	Launchd Launchd
-	// PlistDir is where the installed plists live (~/Library/LaunchAgents),
-	// named `<label>.plist`.
-	PlistDir string
+	Services ServiceManager
 	// StoreSocket is the store's socket, which the new process binds once it
 	// is serving.
 	StoreSocket string
-	// StoreLog is the store's launchd StandardErrorPath: the only view of a
+	// StoreLog is the store's standard error log: the only view of a
 	// boot in progress.
 	StoreLog string
 	Windows  ServiceWindows
 	Clock    Clock
 	Log      dlog.Logger
-	// CacheBin is where launchd runs the services from: the installed build a
+	// CacheBin is where the service manager runs the services from: the installed build a
 	// running service is judged against (EnsureCurrent).
 	CacheBin string
 	// ReportDir is where the services write their build reports.
@@ -122,39 +129,39 @@ func (r *Restarter) RestartStore(ctx context.Context) error {
 }
 
 func (r *Restarter) restartStore(ctx context.Context) error {
-	plist := filepath.Join(r.PlistDir, SidecarLabel+".plist")
-	fields := dlog.Context{"store": StoreLabel, "sidecar": SidecarLabel, "sidecar_plist": plist}
+	definition := r.Services.Definition(SidecarLabel)
+	fields := dlog.Context{"store": StoreLabel, "sidecar": SidecarLabel, "sidecar_definition": definition}
 
-	// THE PLIST IS PROVED BEFORE ANYTHING IS STOPPED. A bootout with no plist
+	// THE DEFINITION IS PROVED BEFORE ANYTHING IS STOPPED. A stop with no definition
 	// to bootstrap back from would leave the host with no sidecar and no way
 	// to return one.
-	if _, err := os.Stat(plist); err != nil {
-		r.Log.Error(opServices, "the sidecar's plist is missing; nothing was stopped", dlog.WithCause(fields, err))
+	if _, err := os.Stat(definition); err != nil {
+		r.Log.Error(opServices, "the sidecar's service definition is missing; nothing was stopped", dlog.WithCause(fields, err))
 		return fmt.Errorf("deploy: the store restart boots the sidecar out and needs %s to bring it back: %w "+
-			"(re-run .claude/install.sh)", plist, err)
+			"(re-run .claude/install.sh)", definition, err)
 	}
 	if err := r.stopSidecar(ctx, fields); err != nil {
 		return err
 	}
-	r.Log.Info(opServices, "kickstarting the store", fields)
-	if err := r.Launchd.Kickstart(ctx, StoreLabel); err != nil {
-		r.failed("the store kickstart failed; the sidecar is down and was NOT started again", fields, err)
-		return fmt.Errorf("deploy: kickstart %s: %w", StoreLabel, err)
+	r.Log.Info(opServices, "restarting the store", fields)
+	if err := r.Services.Restart(ctx, StoreLabel); err != nil {
+		r.failed("the store restart failed; the sidecar is down and was NOT started again", fields, err)
+		return fmt.Errorf("deploy: restart %s: %w", StoreLabel, err)
 	}
 	if err := r.awaitStoreSocket(ctx, fields); err != nil {
 		return err
 	}
-	r.Log.Info(opServices, "the store is serving; bootstrapping the sidecar", fields)
-	if err := r.Launchd.Bootstrap(ctx, plist); err != nil {
-		r.failed("the sidecar could not be bootstrapped back", fields, err)
-		return fmt.Errorf("deploy: bootstrap %s: %w", plist, err)
+	r.Log.Info(opServices, "the store is serving; starting the sidecar", fields)
+	if err := r.Services.Start(ctx, SidecarLabel); err != nil {
+		r.failed("the sidecar could not be started back", fields, err)
+		return fmt.Errorf("deploy: start %s: %w", SidecarLabel, err)
 	}
 	r.Log.Info(opServices, "restarted the store and the sidecar in the safe order", fields)
 	return nil
 }
 
-// EnsureLoaded makes sure launchd holds both services, BOOTSTRAPPING ONE THE
-// USER DOMAIN DOES NOT HOLD, so a daemon never brings shims up against a host
+// EnsureLoaded makes sure the service manager holds both services, STARTING
+// ONE IT DOES NOT HOLD, so a daemon never brings shims up against a host
 // whose store is gone for good. Both plists set KeepAlive, so a loaded service
 // that dies comes back on its own; an UNLOADED one (a `launchctl bootout`, a
 // deploy that ended between its bootout and its bootstrap) stays down until
@@ -188,7 +195,7 @@ func (r *Restarter) ensureBothLoaded(ctx context.Context) (storeBootstrapped, si
 	if err != nil {
 		return storeBootstrapped, false, err
 	}
-	r.Log.Debug(opServices, "launchd holds both services", fields)
+	r.Log.Debug(opServices, "the service manager holds both services", fields)
 	return storeBootstrapped, sidecarBootstrapped, nil
 }
 
@@ -196,15 +203,15 @@ func (r *Restarter) ensureBothLoaded(ctx context.Context) (storeBootstrapped, si
 // its socket but the daemon's chat calls, which fail loudly while it is out.
 func (r *Restarter) RestartZettel(ctx context.Context) error {
 	fields := dlog.Context{"zettel": ZettelLabel}
-	if err := r.Launchd.Kickstart(ctx, ZettelLabel); err != nil {
-		r.failed("the zettel kickstart failed", fields, err)
-		return fmt.Errorf("deploy: kickstart %s: %w", ZettelLabel, err)
+	if err := r.Services.Restart(ctx, ZettelLabel); err != nil {
+		r.failed("the zettel restart failed", fields, err)
+		return fmt.Errorf("deploy: restart %s: %w", ZettelLabel, err)
 	}
-	r.Log.Info(opServices, "kickstarted zettel", fields)
+	r.Log.Info(opServices, "restarted zettel", fields)
 	return nil
 }
 
-// EnsureZettelCurrent is the boot's zettel step: launchd holds the zettel
+// EnsureZettelCurrent is the boot's zettel step: the service manager holds the zettel
 // service, and it runs the installed build (restarted alone when it does not).
 // It is independent of the store and the sidecar -- no shim writes into it --
 // so the boot runs it beside the bring-ups, never before a shim starts.
@@ -216,7 +223,7 @@ func (r *Restarter) EnsureZettelCurrent(ctx context.Context) error {
 	return r.zettelCurrent(ctx, bootstrapped)
 }
 
-// EnsureZettelLoaded makes sure launchd holds the zettel service, and touches
+// EnsureZettelLoaded makes sure the service manager holds the zettel service, and touches
 // nothing that runs: a joining successor's zettel step, which must not
 // restart a service the incumbent is still serving through.
 func (r *Restarter) EnsureZettelLoaded(ctx context.Context) error {
@@ -238,7 +245,7 @@ func (r *Restarter) zettelCurrent(ctx context.Context, bootstrapped bool) error 
 	return nil
 }
 
-// EnsureCurrent is the BOOT's service step: launchd holds both services
+// EnsureCurrent is the BOOT's service step: the service manager holds both services
 // (EnsureLoaded), and neither RUNS an older build than the one installed in
 // CacheBin. A running service whose build report is not the installed build
 // is restarted in the recorded safe order (RestartStore, which takes the
@@ -274,7 +281,7 @@ func (r *Restarter) EnsureCurrent(ctx context.Context) error {
 }
 
 // EnsureStoreCurrent is EnsureCurrent's FIRST HALF, the one shims must wait
-// for: launchd holds both services, and the store runs the installed build
+// for: the service manager holds both services, and the store runs the installed build
 // (restarted, with the sidecar, when it did not). It answers the SECOND
 // HALF, the sidecar's own judgement and restart, for the caller to run once
 // shims may start.
@@ -327,22 +334,22 @@ func (r *Restarter) ensureSidecarCurrent(ctx context.Context, bootstrapped bool)
 	return nil
 }
 
-// runningStale answers whether the service launchd runs under label is
+// runningStale answers whether the service the manager runs under label is
 // running a build other than the one installed for it. BOOTSTRAPPED says this
 // boot just started it, from the installed build.
 func (r *Restarter) runningStale(ctx context.Context, bootstrapped bool, component Component, label, service string) (bool, error) {
 	fields := dlog.Context{"label": label, "service": service}
 	if bootstrapped {
-		r.Log.Debug(opServices, "the service was just bootstrapped from the installed build", fields)
+		r.Log.Debug(opServices, "the service was just started from the installed build", fields)
 		return false, nil
 	}
-	_, pid, err := r.Launchd.Print(ctx, label)
+	_, pid, err := r.Services.Status(ctx, label)
 	if err != nil {
-		r.failed("could not read a service's launchd state to judge its build", fields, err)
+		r.failed("could not read a service's service-manager state to judge its build", fields, err)
 		return false, fmt.Errorf("deploy: read %s: %w", label, err)
 	}
 	if pid == 0 {
-		r.Log.Debug(opServices, "launchd runs no process for the service; it starts from the installed build", fields)
+		r.Log.Debug(opServices, "the service manager runs no process for the service; it starts from the installed build", fields)
 		return false, nil
 	}
 	installed := filepath.Join(r.CacheBin, service)
@@ -358,28 +365,29 @@ func (r *Restarter) runningStale(ctx context.Context, bootstrapped bool, compone
 	return serviceStaleness{reportDir: r.ReportDir, alive: alive, log: r.Log, op: opServices}.stale(component, service, fresh), nil
 }
 
-// ensureLoaded bootstraps label from its plist when launchd does not hold it,
+// ensureLoaded starts label from its installed definition when the service
+// manager does not hold it,
 // and reports whether it did.
 func (r *Restarter) ensureLoaded(ctx context.Context, label string, fields dlog.Context) (bool, error) {
-	plist := filepath.Join(r.PlistDir, label+".plist")
-	fields = dlog.Merge(fields, dlog.Context{"label": label, "plist": plist})
-	loaded, _, err := r.Launchd.Print(ctx, label)
+	definition := r.Services.Definition(label)
+	fields = dlog.Merge(fields, dlog.Context{"label": label, "definition": definition})
+	loaded, _, err := r.Services.Status(ctx, label)
 	if err != nil {
-		r.failed("could not read a service's launchd state", fields, err)
+		r.failed("could not read a service's service-manager state", fields, err)
 		return false, fmt.Errorf("deploy: read %s: %w", label, err)
 	}
 	if loaded {
 		return false, nil
 	}
-	if _, err := os.Stat(plist); err != nil {
-		r.Log.Error(opServices, "a service is not loaded and its plist is missing", dlog.WithCause(fields, err))
+	if _, err := os.Stat(definition); err != nil {
+		r.Log.Error(opServices, "a service is not loaded and its definition is missing", dlog.WithCause(fields, err))
 		return false, fmt.Errorf("deploy: %s is not loaded and %s cannot bring it back: %w "+
-			"(re-run .claude/install.sh)", label, plist, err)
+			"(re-run .claude/install.sh)", label, definition, err)
 	}
-	r.Log.Info(opServices, "a service was not loaded; bootstrapping it", fields)
-	if err := r.Launchd.Bootstrap(ctx, plist); err != nil {
-		r.failed("a service could not be bootstrapped", fields, err)
-		return false, fmt.Errorf("deploy: bootstrap %s: %w", plist, err)
+	r.Log.Info(opServices, "a service was not loaded; starting it", fields)
+	if err := r.Services.Start(ctx, label); err != nil {
+		r.failed("a service could not be started", fields, err)
+		return false, fmt.Errorf("deploy: start %s: %w", label, err)
 	}
 	return true, nil
 }
@@ -392,21 +400,21 @@ func (r *Restarter) RestartSidecar(ctx context.Context) error {
 
 func (r *Restarter) restartSidecar(ctx context.Context) error {
 	fields := dlog.Context{"sidecar": SidecarLabel}
-	if err := r.Launchd.Kickstart(ctx, SidecarLabel); err != nil {
-		r.failed("the sidecar kickstart failed", fields, err)
-		return fmt.Errorf("deploy: kickstart %s: %w", SidecarLabel, err)
+	if err := r.Services.Restart(ctx, SidecarLabel); err != nil {
+		r.failed("the sidecar restart failed", fields, err)
+		return fmt.Errorf("deploy: restart %s: %w", SidecarLabel, err)
 	}
-	r.Log.Info(opServices, "kickstarted the sidecar", fields)
+	r.Log.Info(opServices, "restarted the sidecar", fields)
 	return nil
 }
 
-// stopSidecar boots the sidecar out and waits for its process's exit, the
-// kernel's report that it left; launchd, which removed the label in the
-// bootout, must then no longer hold it.
+// stopSidecar stops the sidecar and waits for its process's exit, the
+// kernel's report that it left; the service manager, which let go of the
+// label in the stop, must then no longer hold it.
 func (r *Restarter) stopSidecar(ctx context.Context, fields dlog.Context) error {
-	loaded, pid, err := r.Launchd.Print(ctx, SidecarLabel)
+	loaded, pid, err := r.Services.Status(ctx, SidecarLabel)
 	if err != nil {
-		r.failed("could not read the sidecar's launchd state; nothing was stopped", fields, err)
+		r.failed("could not read the sidecar's service-manager state; nothing was stopped", fields, err)
 		return fmt.Errorf("deploy: read %s: %w", SidecarLabel, err)
 	}
 	if !loaded {
@@ -414,20 +422,20 @@ func (r *Restarter) stopSidecar(ctx context.Context, fields dlog.Context) error 
 		return nil
 	}
 	fields = dlog.Merge(fields, dlog.Context{"pid": pid})
-	r.Log.Info(opServices, "booting the sidecar out before the store restarts", fields)
-	if err := r.Launchd.Bootout(ctx, SidecarLabel); errors.Is(err, ErrServiceNotLoaded) {
+	r.Log.Info(opServices, "stopping the sidecar before the store restarts", fields)
+	if err := r.Services.Stop(ctx, SidecarLabel); errors.Is(err, ErrServiceNotLoaded) {
 		// THE SIDECAR LEFT BETWEEN THE LOOK AND THE BOOTOUT: the domain no
-		// longer holds it, which is the state the bootout was asked to reach.
-		r.Log.Info(opServices, "the sidecar had already left the user domain when it was booted out", dlog.WithCause(fields, err))
+		// longer holds it, which is the state the stop was asked to reach.
+		r.Log.Info(opServices, "the sidecar had already stopped when it was stopped", dlog.WithCause(fields, err))
 	} else if err != nil {
-		// A bootout that errs may still have taken effect; the exit and
-		// launchd's view below are the authority on whether it did.
-		r.Log.Warn(opServices, "the sidecar bootout answered an error; waiting on its process's exit", dlog.WithCause(fields, err))
+		// A stop that errs may still have taken effect; the exit and the
+		// service manager's view below are the authority on whether it did.
+		r.Log.Warn(opServices, "the sidecar stop answered an error; waiting on its process's exit", dlog.WithCause(fields, err))
 	}
 	if pid != 0 {
 		if err := r.awaitExit(ctx, pid); err != nil {
 			if ctx.Err() == nil {
-				r.Log.Error(opServices, "the sidecar's process did not exit within the upper bound; the store was NOT kickstarted",
+				r.Log.Error(opServices, "the sidecar's process did not exit within the upper bound; the store was NOT restarted",
 					dlog.Merge(fields, dlog.Context{"max": r.Windows.Max.String(), "cause": err.Error()}))
 			} else {
 				r.failed("the sidecar's stop ended with its context", fields, ctx.Err())
@@ -435,14 +443,14 @@ func (r *Restarter) stopSidecar(ctx context.Context, fields dlog.Context) error 
 			return fmt.Errorf("deploy: %s (pid %d) did not exit: %w", SidecarLabel, pid, err)
 		}
 	}
-	loaded, _, err = r.Launchd.Print(ctx, SidecarLabel)
+	loaded, _, err = r.Services.Status(ctx, SidecarLabel)
 	if err != nil {
-		r.failed("could not read the sidecar's launchd state once it stopped", fields, err)
+		r.failed("could not read the sidecar's service-manager state once it stopped", fields, err)
 		return fmt.Errorf("deploy: read %s: %w", SidecarLabel, err)
 	}
 	if loaded {
-		r.Log.Error(opServices, "launchd still holds the sidecar after its bootout and its process's exit; the store was NOT kickstarted", fields)
-		return fmt.Errorf("deploy: launchd still holds %s after its bootout", SidecarLabel)
+		r.Log.Error(opServices, "the service manager still holds the sidecar after its stop and its process's exit; the store was NOT restarted", fields)
+		return fmt.Errorf("deploy: the service manager still holds %s after its stop", SidecarLabel)
 	}
 	r.Log.Info(opServices, "the sidecar is stopped", fields)
 	return nil
@@ -498,9 +506,9 @@ func (r *Restarter) awaitStoreSocket(ctx context.Context, fields dlog.Context) e
 	if socketExists(r.StoreSocket) {
 		return served()
 	}
-	_, pid, err := r.Launchd.Print(ctx, StoreLabel)
+	_, pid, err := r.Services.Status(ctx, StoreLabel)
 	if err != nil {
-		r.failed("could not read the store's launchd state while it boots", fields, err)
+		r.failed("could not read the store's service-manager state while it boots", fields, err)
 		return fmt.Errorf("deploy: read %s: %w", StoreLabel, err)
 	}
 	died := func() error {

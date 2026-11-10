@@ -67,8 +67,8 @@ func TestADeployOfWhatAlreadyRunsDecidesEveryComponentUpToDate(t *testing.T) {
 	if got := len(d.Deploy.Invocations()); got != 1 {
 		t.Fatalf("builds = %d, want one", got)
 	}
-	if got := len(d.Launchctl.InvocationsExcept("print")); got != 0 {
-		t.Fatalf("launchctl invocations = %d, want none: nothing was out of date", got)
+	if got := len(d.Services.InvocationsExcept(harness.PlatformServiceVerbs.Status)); got != 0 {
+		t.Fatalf("service manager invocations = %d, want none: nothing was out of date", got)
 	}
 }
 
@@ -384,7 +384,7 @@ func TestALaterDeployThatBuildsTakesTheFaultDown(t *testing.T) {
 var buildFailedTopbarLine = "deploy failed: build: " + harness.FakeDeployBuildRefusal
 
 // failSidecarRestart makes the next deploy judge the sidecar stale and its
-// launchd kickstart fail, before AND after the rollback: the cache bin under
+// service manager restart fail, before AND after the rollback: the cache bin under
 // the test's HOME is empty, so the deploy installs into it and then fails.
 func failSidecarRestart(t *testing.T, d *harness.Daemon) {
 	t.Helper()
@@ -392,8 +392,9 @@ func failSidecarRestart(t *testing.T, d *harness.Daemon) {
 	if err := buildreport.Write(d.LockDir, buildreport.ServiceSidecar, buildreport.Report{PID: d.PID(), Build: "an older sidecar"}); err != nil {
 		t.Fatalf("state the sidecar's stale build report: %v", err)
 	}
-	for _, verb := range []string{"kickstart", "bootout", "bootstrap"} {
-		d.Launchctl.SetExitCodeFor(verb, 1)
+	verbs := harness.PlatformServiceVerbs
+	for _, verb := range []string{verbs.Restart, verbs.Stop, verbs.Start} {
+		d.Services.SetExitCodeFor(verb, 1)
 	}
 	d.ExpectWarnings("daemon.scriptrunner.run", "daemon.deploy.services", "daemon.deploy.decide",
 		"daemon.deploy.rollback", "daemon.deploy.run")

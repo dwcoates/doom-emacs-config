@@ -58,6 +58,96 @@ func TestTheDeployPathsHonorTheOperatorOverrides(t *testing.T) {
 	}
 }
 
+func TestTheUnitDirectoryHonorsTheOperatorOverrides(t *testing.T) {
+	tests := []struct {
+		name string
+		env  map[string]string
+		want string
+	}{
+		{name: "the unit directory override", env: map[string]string{envSystemdUserDir: "/units", "AGENT_REPL_LOCK_DIR": "/run"}, want: "/units"},
+		{name: "XDG_CONFIG_HOME's systemd user directory", env: map[string]string{"XDG_CONFIG_HOME": "/xdg", "AGENT_REPL_LOCK_DIR": "/run"}, want: "/xdg/systemd/user"},
+		{name: "the default systemd user directory", env: map[string]string{"AGENT_REPL_LOCK_DIR": "/run"}, want: filepath.Join(".config", "systemd", "user")},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got, err := resolveDeployPaths(envOf(tc.env))
+
+			// Assert
+			if err != nil || !strings.HasSuffix(got.unitDir, tc.want) {
+				t.Fatalf("unit dir = %q, %v; want it to end %q", got.unitDir, err, tc.want)
+			}
+		})
+	}
+}
+
+func TestTheServiceManagerIsThePlatformsOwn(t *testing.T) {
+	where := deployPaths{plistDir: "/agents", unitDir: "/units"}
+	tests := []struct {
+		name           string
+		goos           string
+		env            map[string]string
+		wantDefinition string
+		wantErr        string
+	}{
+		{name: "launchd on darwin", goos: "darwin", wantDefinition: "/agents/x.plist"},
+		{name: "systemd's user manager on linux", goos: "linux", wantDefinition: "/units/x.service"},
+		{name: "no service manager anywhere else", goos: "plan9", wantErr: "plan9 has no service manager agent-repl knows"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			p := deployerParams{Getenv: envOf(tc.env)}
+
+			// Act
+			sm, err := serviceManagerFor(tc.goos, where, p)
+
+			// Assert
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("serviceManagerFor(%s) = %v, want %q", tc.goos, err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil || sm.Definition("x") != tc.wantDefinition {
+				t.Fatalf("serviceManagerFor(%s) = %+v, %v; want a definition at %s", tc.goos, sm, err, tc.wantDefinition)
+			}
+		})
+	}
+}
+
+func TestTheServiceManagersToolHonorsTheOperatorOverride(t *testing.T) {
+	tests := []struct {
+		name string
+		goos string
+		env  map[string]string
+		want string
+	}{
+		{name: "launchctl's override", goos: "darwin", env: map[string]string{envLaunchctl: "/fake/launchctl"}, want: "/fake/launchctl"},
+		{name: "launchctl off PATH", goos: "darwin", want: "launchctl"},
+		{name: "systemctl's override", goos: "linux", env: map[string]string{envSystemctl: "/fake/systemctl"}, want: "/fake/systemctl"},
+		{name: "systemctl off PATH", goos: "linux", want: "systemctl"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			sm, err := serviceManagerFor(tc.goos, deployPaths{}, deployerParams{Getenv: envOf(tc.env)})
+
+			// Assert
+			var got string
+			switch m := sm.(type) {
+			case *deploy.Launchctl:
+				got = m.Binary
+			case *deploy.SystemdUser:
+				got = m.Binary
+			}
+			if err != nil || got != tc.want {
+				t.Fatalf("tool = %q, %v; want %q", got, err, tc.want)
+			}
+		})
+	}
+}
+
 func deployerParamsFor(t *testing.T, selfExe string) deployerParams {
 	t.Helper()
 	return deployerParams{

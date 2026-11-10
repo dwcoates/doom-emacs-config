@@ -108,8 +108,8 @@ func testADeployThatFindsTheDaemonStaleHandsOverAFreeWorkspace(t *testing.T) {
 			t.Fatalf("%s = %v, want up to date: the world's real service runs the staged binary", service, o)
 		}
 	}
-	if got := len(w.Launchctl.InvocationsExcept("print")); got != 0 {
-		t.Fatalf("launchctl invocations = %d, want none: no service was out of date", got)
+	if got := len(w.Services.InvocationsExcept(harness.PlatformServiceVerbs.Status)); got != 0 {
+		t.Fatalf("service manager invocations = %d, want none: no service was out of date", got)
 	}
 
 	// Assert: the announcement carries the successor, and the incumbent exits

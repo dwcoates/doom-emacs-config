@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -277,12 +278,38 @@ func NewFakeChime(t testing.TB, dir string) *Recorder {
 // that deploys nothing.
 const FakeDeployBuildRefusal = "fake deploy build: a harness never builds"
 
-// NewFakeLaunchctl writes the launchctl a service restart would drive
-// (AGENT_REPL_LAUNCHCTL), so nothing the daemon runs can reach the live
-// launchd.
-func NewFakeLaunchctl(t testing.TB, dir string) *Recorder {
+// ServiceVerbs are the first words of the service manager's commands the
+// daemon runs, per verb of deploy.ServiceManager: a test scripts or sets aside
+// a verb by the word its platform's tool uses.
+type ServiceVerbs struct {
+	Status, Restart, Stop, Start string
+}
+
+// PlatformServiceVerbs are this platform's service manager's verbs.
+var PlatformServiceVerbs = map[string]ServiceVerbs{
+	"darwin": {Status: "print", Restart: "kickstart", Stop: "bootout", Start: "bootstrap"},
+	"linux":  {Status: "show", Restart: "restart", Stop: "stop", Start: "start"},
+}[runtime.GOOS]
+
+// NewFakeServiceManager writes the service manager's tool a service restart
+// would drive on this platform -- launchctl (AGENT_REPL_LAUNCHCTL) on macOS,
+// systemctl (AGENT_REPL_SYSTEMCTL) on Linux -- so nothing the daemon runs can
+// reach the live service manager. The fake systemctl's every answer says its
+// unit is active with no process, the reading the fake launchctl's empty
+// `print` gives: held, not running.
+func NewFakeServiceManager(t testing.TB, dir string) *Recorder {
 	t.Helper()
-	return NewRecorderExecutable(t, dir, "launchctl")
+	switch runtime.GOOS {
+	case "darwin":
+		return NewRecorderExecutable(t, dir, "launchctl")
+	case "linux":
+		r := NewRecorderExecutable(t, dir, "systemctl")
+		r.SetStdout("ActiveState=active\nMainPID=0\n")
+		return r
+	default:
+		t.Fatalf("harness: %s has no service manager the daemon drives", runtime.GOOS)
+		return nil
+	}
 }
 
 // NewFakeWebappDist writes a minimal webapp dist: an index.html entry point
