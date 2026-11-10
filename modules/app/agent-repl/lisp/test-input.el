@@ -5464,13 +5464,13 @@ ON-SUCCESS receives the success value; it defaults to ignoring it."
 
 (ert-deftest agent-repl-test-input-send-held-now-refusals-are-said-and-logged ()
   "Each refusal of the release is logged with its cause and worded in the echo area."
-  (dolist (case '((:no-such-hold "no longer held")
-                  (:already-delivered "already delivered")
-                  (:being-delivered "being delivered")
-                  (:release-refused "will not send")))
-    (pcase-let ((`(,arm ,text) case))
+  (dolist (case '((:no-such-hold nil "no longer held")
+                  (:already-delivered nil "already delivered")
+                  (:being-delivered nil "being delivered")
+                  (:release-refused (:cause (:arm :cold-gate :value nil)) "cold gate")))
+    (pcase-let ((`(,arm ,value ,text) case))
       (agent-repl-test-input--with
-        (agent-repl-test-input--with-release `(:error :cause (:arm ,arm :value nil))
+        (agent-repl-test-input--with-release `(:error :cause (:arm ,arm :value ,value))
           (with-current-buffer agent-repl-test-input--buffer
             (agent-repl--input-remember-sent-turn (agent-repl--ws-current-name) '(:value "t1"))
             (let ((said nil) (logged nil))
@@ -5479,6 +5479,20 @@ ON-SUCCESS receives the success value; it defaults to ignoring it."
                 (agent-repl-send-held-now))
               (should (cl-some (lambda (m) (string-match-p text m)) said))
               (should (cl-some (lambda (m) (string-match-p "send-held-now-refused .*t1" m)) logged)))))))))
+
+(ert-deftest agent-repl-test-input-release-refused-text-words-each-cause-apart ()
+  "Each cause of a refused release has a sentence of its own."
+  (let ((texts (mapcar (lambda (arm) (agent-repl--input-release-refused-text (list :arm arm :value nil)))
+                       '(:being-edited :behind-edit :cold-gate :session-refused))))
+    (should (= (length (delete-dups (copy-sequence texts))) 4))
+    (should-not (member "the daemon will not send that prompt now" texts))))
+
+(ert-deftest agent-repl-test-input-release-refused-text-fails-on-an-unknown-cause ()
+  "A cause the editor does not know is logged and signalled, never a generic sentence."
+  (let ((logged nil))
+    (cl-letf (((symbol-function 'agent-repl--error) (agent-repl-test--record-into logged)))
+      (should-error (agent-repl--input-release-refused-text (list :arm :mystery :value nil))))
+    (should (cl-some (lambda (m) (string-match-p "release-refused-unknown-cause .*mystery" m)) logged))))
 
 (ert-deftest agent-repl-test-input-send-held-now-leaves-handover-refusals-to-the-dispatcher ()
   "A handover arm is not claimed, so the verbs dispatcher routes it."

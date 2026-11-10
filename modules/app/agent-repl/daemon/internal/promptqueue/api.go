@@ -43,7 +43,7 @@ import (
 //	ErrColdGate          → SubmitPromptError.cold_gate
 //	ErrNoSuchHold        → UpdateHeldPromptError.no_such_hold
 //	ErrAlreadyDelivered  → UpdateHeldPromptError.already_delivered
-//	ErrReleaseRefused    → UpdateHeldPromptError.release_refused
+//	ReleaseRefusedError  → UpdateHeldPromptError.release_refused, its Cause the nested arm
 //	ErrNoSuchHold        → EditHeldPromptError.no_such_hold
 //	ErrNotHeld           → EditHeldPromptError.not_held
 //	ErrAlreadyDelivered  → EditHeldPromptError.already_delivered
@@ -108,8 +108,9 @@ var (
 	// shim is in flight (call.go): it is neither held nor delivered yet, and
 	// once the call settles it is either delivered or back in the tray.
 	ErrBeingDelivered = errors.New("promptqueue: that hold is being delivered to the shim")
-	// ErrReleaseRefused is a force-through on an uninterruptible verdict or a
-	// session_starting hold: there is nothing delivery could do yet.
+	// ErrReleaseRefused is a release refused because sending would lose the
+	// user's work or answer what only the user can. It is answered only as a
+	// ReleaseRefusedError, which carries the cause (sentnow.go).
 	ErrReleaseRefused = errors.New("promptqueue: this hold cannot be released through")
 	// ErrNotHeld is an edit of a prompt that WAS held and no longer is: it
 	// was dropped.

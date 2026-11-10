@@ -2565,13 +2565,14 @@ workspace (2026-10-02).
   (`deferToCall`): a submission is held behind it (judged against the turn
   it opens, or parked when it opens none), a pop or a bounce decision is
   re-taken at its settle (`redrive`, run by `delivery.unlock` of the entry
-  point that made the call). A release beside it is refused.
+  point that made the call). A release beside it waits for the settle
+  (promptqueue/sentnow.go).
 - **EXACTLY ONCE.** The holds a call delivers or retires (`shimCall.holds`)
   are refused to a release, a drop, an edit and a fold while it stands, with
   `being_delivered` (`promptqueue.ErrBeingDelivered`): the hold is neither
   held nor delivered yet, and a failed call returns it to the tray. A verdict
   never coalesces into one; it reads it as started. A release of ANOTHER hold
-  while a call stands is `release_refused`.
+  while a call stands is accepted and waits for the call to settle.
 - **INVARIANTS FAIL HARD.** A second call while one stands, or a bounce
   started beside one, is recorded at ERROR and panics.
 - The lock is taken only by `lockDelivery` and released only by
@@ -2584,7 +2585,7 @@ workspace (2026-10-02).
 `EditHeldPrompt` (owner spec, 2026-09-23; `internal/promptqueue/edit.go`).
 
 - **THE CLAIM IS WRITTEN AND READ UNDER `wsState.drain`**, the mutex every delivery of a standing hold is decided under: a turn end, a lease change, a revival's release, a Release, and a Submit that would go straight to the shim. So "delivered mid-edit" cannot be scheduled: a begin that lands during a delivery waits for it and then finds the prompt delivered.
-- **ONE CLAIM PER WORKSPACE.** While it stands the edited prompt and every prompt queued after it (the tray's order: queued_at, then the turn id) are withheld from `nextDeliverable`, the semantic head included; a Release of one is `release_refused`; a submission with nothing running is held behind it. `deliverHeld` refuses a withheld hold at ERROR as the backstop.
+- **ONE CLAIM PER WORKSPACE.** While it stands the edited prompt and every prompt queued after it (the tray's order: queued_at, then the turn id) are withheld from `nextDeliverable`, the semantic head included; a Release of one is `release_refused` with the `being_edited` or `behind_edit` cause; a submission with nothing running is held behind it. `deliverHeld` refuses a withheld hold at ERROR as the backstop.
 - **A COMMIT REPLACES IN PLACE** (`ReplaceHeldPromptSaid` keeps `queued_at`, clears the verdict and the acceptance), retires the claim and reclassifies through `classifyHeld`, so an interject then runs the ordinary interject. A content EPOCH bumped under `wsState.verdicts` makes a verdict judged about the replaced words settle as a discard; lock order is `drain`, then `verdicts`.
 - **THE CLAIM IS SCOPED TO THE EDITOR'S HOST STREAM, never a timer.** A begin with no `WatchHostWorkspace` stream is `no_editor`; the last one closing calls `Queue.EditorGone`, which retires the claim as a cancel would. The claim is in-memory, so a restart retires it with the stream.
 

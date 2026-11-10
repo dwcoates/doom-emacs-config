@@ -2828,8 +2828,23 @@ typed and never one a canned command or a queue re-drive composed.")
     (:no-such-hold "that prompt is no longer held")
     (:already-delivered "that prompt was already delivered")
     (:being-delivered "that prompt is being delivered right now")
-    (:release-refused "the daemon will not send that prompt now")
+    (:release-refused
+     (agent-repl--input-release-refused-text
+      (plist-get (plist-get (plist-get value :cause) :value) :cause)))
     (arm (format "refused (%s)" arm))))
+
+(defun agent-repl--input-release-refused-text (cause)
+  "Return the echo-area text for a release refused for CAUSE.
+CAUSE is the decoded UpdateHeldPromptReleaseRefused cause, (:arm ARM ...).
+Each cause says why and what happens next, never one sentence for all."
+  (pcase (plist-get cause :arm)
+    (:being-edited "that prompt is open in the editor; finish or cancel the edit, then send it")
+    (:behind-edit "a prompt ahead of that one is being edited; it goes in order once the edit ends")
+    (:cold-gate "the session is parked at its cold gate; answer the gate to decide when that prompt goes")
+    (:session-refused "the session refused that prompt into the running turn; it goes when that turn ends")
+    (arm
+     (agent-repl--error nil "elisp.input.release-refused-unknown-cause cause=%S" arm)
+     (error "agent-repl: a release refused for an unknown cause %S" arm))))
 
 (defconst agent-repl--input-not-held-arms '(:no-such-hold :already-delivered)
   "The release refusals that say the prompt is no longer held.

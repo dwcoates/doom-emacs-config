@@ -175,6 +175,13 @@ func (q *queue) joinLocked(ctx context.Context, d *delivery, sub Submission, run
 		return joinWaiting
 	}
 	if !watcher.OnTurnJoining(sub.WS, sub.Turn) {
+		// A RELEASE INTERRUPTS A TURN IT CANNOT JOIN (owner ruling,
+		// 2026-11-10: "Send now" means send now), so nothing is recorded
+		// waiting here: the caller interrupts the turn (releaseByInterrupt).
+		if cause == joinReleased {
+			log.Info(opJoin, "the running turn is one the vendor started, which is never joined; the released prompt interrupts it instead", nil)
+			return joinUnjoinable
+		}
 		log.Info(opJoin, "the running turn is one the vendor started, which is never joined; the prompt waits for it to end", nil)
 		q.recordWaiting(ctx, sub, "the running turn is one the agent started on its own, which is never joined, so the prompt waits for it to end", log)
 		return joinWaiting
@@ -186,7 +193,7 @@ func (q *queue) joinLocked(ctx context.Context, d *delivery, sub Submission, run
 		watcher.OnTurnOpenFailed(sub.WS, sub.Turn)
 		log.Error(opJoin, "could not record the turn before sending the prompt to join the running turn; it waits for it to end", dlog.Context{"cause": err.Error()})
 		q.recordWaiting(ctx, sub, "the prompt's turn could not be recorded, so it waits for the running turn to end", log)
-		return joinWaiting
+		return joinRefused
 	}
 	q.mirrorAccepted(sub)
 	// THE JOIN IS RECORDED BEFORE THE PROMPT IS SENT. The shim's answer and
@@ -212,13 +219,19 @@ func (q *queue) joinLocked(ctx context.Context, d *delivery, sub Submission, run
 		// held, so the tray draws it and the feed must not show it accepted.
 		q.retractAccepted(sub.WS, sub.Turn)
 		if errors.Is(err, ErrAskOpen) {
+			// A RELEASE INTERRUPTS THE TURN THE ASK BLOCKS, as it does a turn
+			// it cannot join: the user chose to send this prompt now.
+			if cause == joinReleased {
+				log.Info(opJoin, "an ask blocks the vendor, so the released prompt cannot join the running turn; it interrupts it instead", dlog.Context{"cause": err.Error()})
+				return joinAskOpen
+			}
 			log.Info(opJoin, "an ask blocks the vendor, so the prompt cannot join the running turn; it waits for it to end", dlog.Context{"cause": err.Error()})
 			q.recordWaiting(ctx, sub, askOpenReason, log)
 			return joinWaiting
 		}
 		log.Error(opJoin, "the shim refused the prompt sent to join the running turn; it waits for it to end", dlog.Context{"cause": err.Error()})
 		q.recordWaiting(ctx, sub, "the session would not take the prompt into the running turn, so it waits for it to end", log)
-		return joinWaiting
+		return joinRefused
 	}
 	q.deps.Footer.OnSubmission(sub.WS, footer.Submission{Stage: footer.StageAfterToolCall})
 	handOver(sub.WS, success, watcher)
@@ -242,6 +255,18 @@ const (
 	joinWaiting
 	// joinGone: it no longer stands; something else delivered or dropped it.
 	joinGone
+	// joinRefused: the session refused it (the shim answered the join with an
+	// error, or its turn could not be recorded), and it waits for the running
+	// turn's end with the reason on its verdict.
+	joinRefused
+	// joinUnjoinable: the running turn is one the vendor started, which is
+	// never joined. Answered for a release alone, which interrupts the turn
+	// instead, so nothing is recorded waiting; every other cause waits.
+	joinUnjoinable
+	// joinAskOpen: an ask blocks the vendor, so it cannot join. Answered for
+	// a release alone, which interrupts the turn instead; every other cause
+	// waits.
+	joinAskOpen
 )
 
 func (c joinCause) String() string {

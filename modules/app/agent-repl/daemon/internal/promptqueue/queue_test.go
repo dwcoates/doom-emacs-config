@@ -2,11 +2,14 @@ package promptqueue
 
 import (
 	"context"
+	"go/ast"
 	"reflect"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
@@ -293,5 +296,65 @@ func TestNoSiteHandRollsTheStandingSessionHoldTest(t *testing.T) {
 	}
 	if definitions != 1 {
 		t.Fatalf("found %d definitions of standingSessionHold's test, want exactly 1", definitions)
+	}
+}
+
+func TestInQueueOrderSortsOldestFirstKeepingTies(t *testing.T) {
+	// Arrange
+	later, earlier := instant.Add(time.Second), instant
+	held := []wsm.HeldPrompt{
+		{Turn: "late", QueuedAt: later},
+		{Turn: "tie-a", QueuedAt: earlier},
+		{Turn: "tie-b", QueuedAt: earlier},
+	}
+	// Act
+	got := inQueueOrder(held)
+	// Assert
+	var turns []ids.TurnID
+	for _, h := range got {
+		turns = append(turns, h.Turn)
+	}
+	if want := []ids.TurnID{"tie-a", "tie-b", "late"}; !slices.Equal(turns, want) {
+		t.Fatalf("order = %v, want %v", turns, want)
+	}
+	if &got[0] != &held[0] {
+		t.Fatal("inQueueOrder sorted a copy, want HELD sorted in place")
+	}
+}
+
+func TestInQueueOrderLeavesAnEmptyQueueEmpty(t *testing.T) {
+	// Arrange / Act
+	got := inQueueOrder(nil)
+	// Assert
+	if len(got) != 0 {
+		t.Fatalf("order = %v, want none", got)
+	}
+}
+
+// THE ONE SHAPE. Held prompts are put in queue order only by inQueueOrder, so
+// no hand-rolled sort can order them by another key.
+func TestEveryQueueOrderingGoesThroughInQueueOrder(t *testing.T) {
+	// Arrange
+	fset, funcs := productionFuncs(t)
+	var sites []string
+	// Act
+	for _, fn := range funcs {
+		if fn.Name.Name == "inQueueOrder" {
+			continue
+		}
+		ast.Inspect(fn, func(n ast.Node) bool {
+			call, ok := n.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			if sel, ok := call.Fun.(*ast.SelectorExpr); ok && (sel.Sel.Name == "SliceStable" || sel.Sel.Name == "Slice") {
+				sites = append(sites, fset.Position(call.Pos()).String()+" in "+fn.Name.Name)
+			}
+			return true
+		})
+	}
+	// Assert
+	if len(sites) != 0 {
+		t.Fatalf("held prompts sorted outside inQueueOrder: %v", sites)
 	}
 }

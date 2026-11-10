@@ -77,6 +77,12 @@ func heldPrompt(h wsm.HeldPrompt, editing bool, start ShimStart, draw DrawBody, 
 		log.Debug("daemon.holds.editing", "the hold is being edited", dlog.Context{"turn_id": string(h.Turn)})
 		out.Editing = &frontendv1.HeldPromptEditing{}
 	}
+	if h.SentNow != nil {
+		log.Debug("daemon.holds.sent_now", "the user's Send now waits on the hold", dlog.Context{
+			"turn_id": string(h.Turn), "waits_for": h.SentNow.WaitsFor,
+		})
+		out.SentNow = &frontendv1.HeldPromptSentNow{WaitsFor: h.SentNow.WaitsFor}
+	}
 	if h.Coalesced {
 		log.Debug("daemon.holds.coalesced", "later prompts were folded into the hold", dlog.Context{"turn_id": string(h.Turn)})
 		out.Coalesced = &frontendv1.HeldPromptCoalesced{}
@@ -273,8 +279,8 @@ const commandLabelMax = 24
 // heldStatus composes the card's ONE badge and the notes for every other
 // standing fact: THE ONE PLACE a held prompt's status words are decided, and
 // the one place its facts are ranked. The strongest standing fact claims the
-// badge, in the order feed_held.proto fixes — the edit, the hold, the
-// verdict — and the rest are notes, strongest first, then the verdict's
+// badge, in the order feed_held.proto fixes — the edit, the Send now, the
+// hold, the verdict — and the rest are notes, strongest first, then the verdict's
 // confirmation, then the coalescence.
 //
 // A fact it cannot name is recorded LOUDLY and contributes nothing: an entry
@@ -286,6 +292,11 @@ func heldStatus(p *frontendv1.HeldPrompt, log dlog.Logger) (*frontendv1.HeldProm
 	if p.GetEditing() != nil {
 		ranked = append(ranked, badge("editing", "editing", func(b *frontendv1.HeldPromptBadge) {
 			b.StandsFor = &frontendv1.HeldPromptBadge_Editing{Editing: &frontendv1.HeldPromptBadgeEditing{}}
+		}))
+	}
+	if sent := p.GetSentNow(); sent != nil {
+		ranked = append(ranked, badge("sending", "sent now: it goes once "+sent.GetWaitsFor(), func(b *frontendv1.HeldPromptBadge) {
+			b.StandsFor = &frontendv1.HeldPromptBadge_SentNow{SentNow: &frontendv1.HeldPromptBadgeSentNow{}}
 		}))
 	}
 	if hold := holdBadge(p, ctx, log); hold != nil {

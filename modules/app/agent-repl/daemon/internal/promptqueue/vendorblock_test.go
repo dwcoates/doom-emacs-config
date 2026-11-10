@@ -2,7 +2,6 @@ package promptqueue
 
 import (
 	"context"
-	"errors"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -320,7 +319,7 @@ func TestAnEditedHeldPromptIsDeliveredWithItsNewContentWhenTheVendorServes(t *te
 	}
 }
 
-func TestAForceReleaseOfAVendorBlockHoldIsRefused(t *testing.T) {
+func TestAForceReleaseOfAVendorBlockHoldWaitsForTheVendor(t *testing.T) {
 	// Arrange
 	h := newVendorBlockHarness(t)
 	h.footer.standVendorBlock("usage_limit")
@@ -330,9 +329,7 @@ func TestAForceReleaseOfAVendorBlockHoldIsRefused(t *testing.T) {
 	err := h.q.Release(context.Background(), theWorkspace, "t1")
 
 	// Assert
-	if !errors.Is(err, ErrReleaseRefused) {
-		t.Fatalf("Release = %v, want ErrReleaseRefused", err)
-	}
+	waitsOn(t, h, err, "t1", waitsForReconnect)
 }
 
 func TestTheVendorServingWhileNoSessionIsUpReleasesNothing(t *testing.T) {

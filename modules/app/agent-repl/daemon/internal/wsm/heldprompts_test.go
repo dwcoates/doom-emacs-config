@@ -440,6 +440,9 @@ func TestAnUpdateRacingARetirementIsATypedRefusalAtDebug(t *testing.T) {
 		{name: "a hold change", op: "daemon.wsm.update_held_prompt_hold", update: func(s DB, turn TurnID) error {
 			return s.UpdateHeldPromptHold(context.Background(), turn, &kind, "")
 		}},
+		{name: "a sent-now mark", op: "daemon.wsm.set_held_prompt_sent_now", update: func(s DB, turn TurnID) error {
+			return s.SetHeldPromptSentNow(context.Background(), turn, &SentNow{At: instant, WaitsFor: "the bounce"})
+		}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1510,5 +1513,120 @@ func TestTheMigrationRetiresVerdictsThatNameNoTurn(t *testing.T) {
 	}
 	if _, ok := dlog.FindRecord(logs.Records(), dlog.RecordQuery{Level: "info", Operation: "daemon.wsm.open", Message: "retired the uninterruptible verdicts stamped before they named their turn"}); !ok {
 		t.Fatalf("records = %+v, want the retirement recorded", logs.Records())
+	}
+}
+
+func TestSetHeldPromptSentNowRoundTripsTheMark(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	turn := standingHold(t, s, ws.ID)
+
+	// Act
+	err := s.SetHeldPromptSentNow(context.Background(), turn, &SentNow{At: instant, WaitsFor: "the session is still coming up"})
+
+	// Assert
+	if err != nil {
+		t.Fatalf("SetHeldPromptSentNow: %v", err)
+	}
+	got, err := s.HeldPrompts(context.Background(), ws.ID)
+	if err != nil {
+		t.Fatalf("HeldPrompts: %v", err)
+	}
+	mark := got[0].SentNow
+	if mark == nil || !mark.At.Equal(instant) || mark.WaitsFor != "the session is still coming up" {
+		t.Fatalf("SentNow = %+v, want the recorded mark", mark)
+	}
+}
+
+func TestSetHeldPromptSentNowClearsTheMark(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	turn := standingHold(t, s, ws.ID)
+	if err := s.SetHeldPromptSentNow(context.Background(), turn, &SentNow{At: instant, WaitsFor: "the bounce"}); err != nil {
+		t.Fatalf("SetHeldPromptSentNow: %v", err)
+	}
+
+	// Act
+	err := s.SetHeldPromptSentNow(context.Background(), turn, nil)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("SetHeldPromptSentNow(nil): %v", err)
+	}
+	got, err := s.HeldPrompts(context.Background(), ws.ID)
+	if err != nil {
+		t.Fatalf("HeldPrompts: %v", err)
+	}
+	if got[0].SentNow != nil {
+		t.Fatalf("SentNow = %+v, want it cleared", got[0].SentNow)
+	}
+}
+
+func TestSetHeldPromptSentNowRefusesAMarkThatWaitsForNothing(t *testing.T) {
+	// Arrange
+	s, log := testStore(t)
+	ws := testWorkspace(t, s)
+	turn := standingHold(t, s, ws.ID)
+
+	// Act
+	err := s.SetHeldPromptSentNow(context.Background(), turn, &SentNow{At: instant})
+
+	// Assert
+	if err == nil {
+		t.Fatalf("SetHeldPromptSentNow with no WaitsFor succeeded")
+	}
+	if !loggedOperation(log, "daemon.wsm.set_held_prompt_sent_now", "error") {
+		t.Fatalf("the refusal was not logged at error: %v", log.Records())
+	}
+	got, err := s.HeldPrompts(context.Background(), ws.ID)
+	if err != nil || got[0].SentNow != nil {
+		t.Fatalf("HeldPrompts = %+v, %v, want the hold unmarked", got, err)
+	}
+}
+
+func TestPutHeldPromptRoundTripsTheSentNowMark(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	turn := standingHold(t, s, ws.ID)
+	got, err := s.HeldPrompts(context.Background(), ws.ID)
+	if err != nil {
+		t.Fatalf("HeldPrompts: %v", err)
+	}
+	h := got[0]
+	h.SentNow = &SentNow{At: instant, WaitsFor: "a merge drives the session"}
+
+	// Act
+	err = s.PutHeldPrompt(context.Background(), h)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("PutHeldPrompt: %v", err)
+	}
+	again, err := s.HeldPrompts(context.Background(), ws.ID)
+	if err != nil {
+		t.Fatalf("HeldPrompts: %v", err)
+	}
+	if again[0].Turn != turn || again[0].SentNow == nil || again[0].SentNow.WaitsFor != "a merge drives the session" {
+		t.Fatalf("SentNow = %+v, want the mark PutHeldPrompt wrote", again[0].SentNow)
+	}
+}
+
+func TestHeldPromptsFailsWholeOnAHalfWrittenSentNowMark(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	broken := standingHold(t, s, ws.ID)
+	corrupt(t, s, `UPDATE held_prompts SET sent_now_at = 1 WHERE turn_id = ?`, broken)
+
+	// Act
+	_, err := s.HeldPrompts(context.Background(), ws.ID)
+
+	// Assert
+	var refusal *DecodeError
+	if !errors.As(err, &refusal) || refusal.Field != "sent_now" {
+		t.Fatalf("HeldPrompts = %v, want a *DecodeError naming held_prompts.sent_now", err)
 	}
 }

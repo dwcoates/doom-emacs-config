@@ -6690,11 +6690,28 @@ instead diverges from it unseen."
                          :arm)
               :success)))
 
+(ert-deftest agent-repl-test-wire-verbs-update-held-prompt-release-refused-causes-decode ()
+  "Each cause of a refused release decodes as its keyword under the arm."
+  (dolist (case '(("beingEdited" . :being-edited)
+                  ("behindEdit" . :behind-edit)
+                  ("coldGate" . :cold-gate)
+                  ("sessionRefused" . :session-refused)))
+    (should (equal (agent-repl-wire-decode-update-held-prompt-error
+                    (agent-repl-test-wire-verbs--parse
+                     (format "{\"releaseRefused\":{\"%s\":{}}}" (car case))))
+                   (list :cause (list :arm :release-refused
+                                      :value (list :cause (list :arm (cdr case) :value nil))))))))
+
+(ert-deftest agent-repl-test-wire-verbs-update-held-prompt-release-refused-without-a-cause-fails ()
+  "A refused release that names no cause is a contract breach, never a bare refusal."
+  (should-error (agent-repl-wire-decode-update-held-prompt-error
+                 (agent-repl-test-wire-verbs--parse "{\"releaseRefused\":{}}"))
+                :type 'agent-repl-wire-error))
+
 (ert-deftest agent-repl-test-wire-verbs-update-held-prompt-refusal-arms-decode ()
   "Each refusal arm decodes as its keyword."
   (dolist (case '(("noSuchHold" . :no-such-hold)
                   ("alreadyDelivered" . :already-delivered)
-                  ("releaseRefused" . :release-refused)
                   ("beingDelivered" . :being-delivered)))
     (should (equal (agent-repl-wire-decode-update-held-prompt-error
                     (agent-repl-test-wire-verbs--parse (format "{\"%s\":{}}" (car case))))

@@ -23,11 +23,19 @@ message UpdateHeldPromptRequest {
   conversation.v1.TurnId turn = 2;
   // THE ARM IS THE ACTION.
   oneof action {
-    // Deliver NOW — override the hold and send the prompt to the shim at
-    // once, as a prompt typed with nothing to hold it would be: while a turn
-    // runs, the prompt joins it (taken in after its current tool call, or run
-    // as the next turn), and nothing is interrupted. Only a held session act,
-    // which joins nothing, interrupts the running turn to run next.
+    // Deliver NOW ("Send now") — override the hold and send the prompt to the
+    // shim at once, as a prompt typed with nothing to hold it would be: while
+    // a turn runs, the prompt joins it (taken in after its current tool call,
+    // or run as the next turn), and nothing is interrupted. A running turn
+    // that cannot be joined (one the agent started on its own, or one an ask
+    // blocks) is INTERRUPTED instead, and its real end delivers the prompt, as
+    // a held session act, which joins nothing, always is.
+    //
+    // A RELEASE THAT CANNOT GO YET IS ACCEPTED AND WAITS (success): the prompt
+    // is marked sent now (frontend.v1.HeldPrompt.sent_now), its card says what
+    // it waits for, and it goes the moment that clears, ahead of every other
+    // held prompt but an interjection under way. Only the causes
+    // UpdateHeldPromptReleaseRefused names refuse.
     UpdateHeldPromptRelease release = 3;
     // Discard it, never delivered (the composer takes the text back).
     UpdateHeldPromptDrop drop = 4;
@@ -67,14 +75,9 @@ message UpdateHeldPromptError {
     UpdateHeldPromptNoSuchHold no_such_hold = 5;
     // The hold was already delivered.
     UpdateHeldPromptAlreadyDelivered already_delivered = 6;
-    // A force-through on an uninterruptible or reconnect hold, or on
-    // a prompt that is being edited or queued after one that is
-    // (EditHeldPrompt): an edit keeps it and everything after it held. Also
-    // refused while the workspace drains for a bounce, a merge drives the
-    // session, the session is not up, a shim call that opens no turn is in
-    // flight (ask again once it settles), an interjection is interrupting the
-    // running turn (it goes first), or the running turn cannot be joined (one
-    // the agent started on its own).
+    // A release that would lose the user's work or answer a question only
+    // the user can, refused with its cause. Every other blocker accepts the
+    // release and waits (see `release`).
     UpdateHeldPromptReleaseRefused release_refused = 8;
     // BEING DELIVERED: the prompt's delivery call to the agent is in flight
     // right now, so it is neither held nor delivered yet. Refused rather than
@@ -107,7 +110,32 @@ message UpdateHeldPromptNotYetAdopted {
 }
 message UpdateHeldPromptNoSuchHold {}
 message UpdateHeldPromptAlreadyDelivered {}
-message UpdateHeldPromptReleaseRefused {}
+// THE ARM IS THE CAUSE. ALWAYS SET: a refusal with no cause is a malformed
+// frame, rejected rather than drawn as a generic refusal.
+message UpdateHeldPromptReleaseRefused {
+  oneof cause {
+    // This prompt is open in the editor's input (EditHeldPrompt): sending it
+    // would discard the edit under way. Committing or cancelling the edit
+    // lets it be sent.
+    UpdateHeldPromptReleaseRefusedBeingEdited being_edited = 1;
+    // A prompt queued AHEAD of this one is open in the editor's input: an
+    // edit keeps its prompt and every prompt after it in order, so this one
+    // cannot overtake it. Ending the edit lets it be sent.
+    UpdateHeldPromptReleaseRefusedBehindEdit behind_edit = 2;
+    // The session is parked at its cold gate: sending would re-read the cold
+    // conversation, the very spend the gate asks the user about. Answering
+    // the gate decides it.
+    UpdateHeldPromptReleaseRefusedColdGate cold_gate = 3;
+    // The session refused the prompt into the running turn (the shim
+    // answered the join with an error, or its turn could not be recorded).
+    // The prompt stays held and goes when the running turn ends.
+    UpdateHeldPromptReleaseRefusedSessionRefused session_refused = 4;
+  }
+}
+message UpdateHeldPromptReleaseRefusedBeingEdited {}
+message UpdateHeldPromptReleaseRefusedBehindEdit {}
+message UpdateHeldPromptReleaseRefusedColdGate {}
+message UpdateHeldPromptReleaseRefusedSessionRefused {}
 
 // The prompt's delivery call is in flight. See the `being_delivered` arm.
 message UpdateHeldPromptBeingDelivered {}

@@ -68,6 +68,16 @@ type delivery struct {
 	q     *queue
 	ws    ids.WorkspaceID
 	state *wsState
+	// after are the calls a decision taken under the lock sends once it is
+	// released (afterUnlock), in the order they were registered.
+	after []func()
+}
+
+// afterUnlock registers FN to run once the lock is released: a call a
+// decision took under the lock, such as the interrupt a release registered,
+// whose effect (the running turn's end) takes the lock again.
+func (d *delivery) afterUnlock(fn func()) {
+	d.after = append(d.after, fn)
 }
 
 // lockDelivery takes ws's delivery lock.
@@ -80,11 +90,26 @@ func (q *queue) lockDelivery(ws ids.WorkspaceID) *delivery {
 // unlock runs every re-decision a settled call owes, then releases the lock.
 // A re-decision can make a call of its own, which can owe another; each is
 // run until none is owed.
+//
+// A "Send now" waiting on a blocker is taken again last (replaySentNow),
+// because every blocker a waiting press names clears under this lock: the
+// release goes the moment the decision that cleared it lets the lock go.
 func (d *delivery) unlock() {
-	for d.q.takeRedrive(d.state) {
-		d.q.redrive(d)
+	for {
+		for d.q.takeRedrive(d.state) {
+			d.q.redrive(d)
+		}
+		d.q.replaySentNow(d)
+		if !d.q.redriveOwed(d.state) {
+			break
+		}
 	}
 	d.state.drain.Unlock()
+	after := d.after
+	d.after = nil
+	for _, fn := range after {
+		fn()
+	}
 }
 
 // outside makes CALL with the delivery lock released. The caller holds the
@@ -205,6 +230,14 @@ func (q *queue) takeRedrive(state *wsState) bool {
 	owed := state.redrive
 	state.redrive = false
 	return owed
+}
+
+// redriveOwed reports whether a re-decision is owed and may run now, without
+// clearing it (takeRedrive takes it).
+func (q *queue) redriveOwed(state *wsState) bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return state.call == nil && state.redrive
 }
 
 // takeAll answers and clears the ledger at LEDGER, under q.mu: what a call's

@@ -3,7 +3,6 @@ package promptqueue
 import (
 	"context"
 	"fmt"
-	"sort"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
@@ -59,7 +58,7 @@ func (q *queue) FlushHeld(ctx context.Context, ws ids.WorkspaceID) error {
 		log.Debug(opFlush, "nothing is held; there is nothing to flush", nil)
 		return nil
 	}
-	sort.SliceStable(queued, func(i, j int) bool { return queued[i].QueuedAt.Before(queued[j].QueuedAt) })
+	inQueueOrder(queued)
 
 	why, kept, err := q.flushKept(ctx, ws, log)
 	if err != nil {
@@ -103,7 +102,7 @@ func (q *queue) FlushHeld(ctx context.Context, ws ids.WorkspaceID) error {
 		case joinDeferred:
 			deferred++
 		case joinGone:
-		case joinWaiting:
+		case joinWaiting, joinRefused:
 			log.Info(opFlush, "a held prompt could not join the running turn; it and every prompt behind it wait as they would have", dlog.Context{
 				"turn": string(held.Turn), "running_turn": string(running), "sent": sent, "deferred": deferred, "left": len(queued) - i,
 			})

@@ -6,10 +6,13 @@ import (
 	"strings"
 	"testing"
 
+	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/integration/harness"
+
+	"connectrpc.com/connect"
 )
 
 // TestTheOwnersWorkedExampleOfTheHeldQueue is the owner's worked example of
@@ -89,6 +92,62 @@ func TestTheOwnersWorkedExampleOfTheHeldQueue(t *testing.T) {
 	}
 	if kills := f.shim.Count(harness.RPCKillTurn); kills != 0 {
 		t.Fatalf("KillTurn calls = %d, want nothing interrupted", kills)
+	}
+}
+
+// TestSendNowOnAPromptHeldBehindAnAgentStartedTurnDeliversIt is the worked
+// example of 2026-11-10 (workspace torch-human-perf): the agent starts a turn
+// on its own, the user's prompt is held behind it, and the user presses Send
+// now. The turn is never joined, so the release interrupts it, and its real
+// end delivers the prompt, once, with no refusal answered.
+func TestSendNowOnAPromptHeldBehindAnAgentStartedTurnDeliversIt(t *testing.T) {
+	t.Parallel()
+
+	// Arrange: the vendor starts a turn; a prompt is held behind it.
+	f := newOpened(t, harness.Opts{})
+	const vendorTurn = "turn-vendor-started"
+	holds := f.d.WatchHolds(f.ws)
+	f.shim.PushUserPrompt(mainAgent, &conversationv1.AgentPrompt{
+		Id:     &conversationv1.TurnId{Value: vendorTurn},
+		Agent:  &conversationv1.AgentId{Value: mainAgent},
+		Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_VENDOR_STARTED,
+	})
+	f.d.AwaitWorkspaceLogRecord(f.repo.Dir, "the queue's INFO record of the adopted turn", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.promptqueue.turn_adopted" && r.Level == "info" && r.Context["turn"] == vendorTurn
+	})
+	held := f.submit("the held prompt", "k-send-now", origin).GetSuccess().GetTurn().GetTurn()
+	awaitView(t, f, holds, "the prompt held for the agent-started turn", func(tray *frontendv1.FeedHeld) bool {
+		return promptHeldEntry(tray, held).GetHoldForTurnEnd() != nil
+	})
+
+	// Act: Send now.
+	resp, err := f.d.Client().UpdateHeldPrompt(f.d.Ctx(), connect.NewRequest(&agentreplv1.UpdateHeldPromptRequest{
+		Workspace: f.ws,
+		Turn:      held,
+		Action:    &agentreplv1.UpdateHeldPromptRequest_Release{Release: &agentreplv1.UpdateHeldPromptRelease{}},
+	}))
+
+	// Assert: accepted, the agent's turn interrupted, the prompt delivered
+	// once at its end, and no refusal recorded.
+	if err != nil || resp.Msg.GetSuccess() == nil {
+		t.Fatalf("UpdateHeldPrompt{release} = (%v, %v), want success", resp, err)
+	}
+	if kill := f.shim.ExpectKillTurn(); kill.GetTurn().GetValue() != vendorTurn {
+		t.Fatalf("KillTurn = %v, want the agent-started turn interrupted", kill)
+	}
+	if start := f.shim.ExpectStartTurn(); start.GetTurn().GetValue() != held.GetValue() || start.GetJoinRunningTurn() {
+		t.Fatalf("StartTurn = %v, want the released prompt run as its own turn", start)
+	}
+	awaitView(t, f, holds, "the delivered prompt off the tray", func(tray *frontendv1.FeedHeld) bool {
+		return promptHeldEntry(tray, held) == nil
+	})
+	if n := f.shim.Count(harness.RPCStartTurn); n != 1 {
+		t.Fatalf("StartTurn count = %d, want the prompt delivered exactly once", n)
+	}
+	for _, r := range f.d.WorkspaceLog(f.repo.Dir, "daemon") {
+		if r.Operation == "daemon.promptqueue.release" && strings.Contains(r.Message, "refused") {
+			t.Fatalf("release record %q, want no refusal", r.Message)
+		}
 	}
 }
 

@@ -67,8 +67,10 @@ type fakeDB struct {
 	classificationErr error
 	// retireErr fails RetireVerdictsJudgedAgainst.
 	retireErr error
-	order     []ids.TurnID
-	turns     map[ids.TurnID]*wsm.Turn
+	// sentNowErr fails SetHeldPromptSentNow.
+	sentNowErr error
+	order      []ids.TurnID
+	turns      map[ids.TurnID]*wsm.Turn
 	// owed is the resumptions a stand-down owes, by workspace.
 	owed     map[ids.WorkspaceID]map[ids.TurnID]bool
 	schedule *wsm.DrainSchedule
@@ -268,6 +270,30 @@ func (d *fakeDB) RetireVerdictsJudgedAgainst(_ context.Context, ws ids.Workspace
 		}
 	}
 	return cleared, nil
+}
+
+// SetHeldPromptSentNow records or clears a hold's "Send now", refusing a
+// retired hold as the store does; sentNowErr fails it.
+func (d *fakeDB) SetHeldPromptSentNow(_ context.Context, turn ids.TurnID, mark *wsm.SentNow) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.sentNowErr != nil {
+		return d.sentNowErr
+	}
+	h, ok := d.held[turn]
+	if !ok {
+		return errors.New("no such hold")
+	}
+	if h.Tombstone != nil {
+		return wsm.ErrHoldRetired
+	}
+	if mark == nil {
+		h.SentNow = nil
+		return nil
+	}
+	copied := *mark
+	h.SentNow = &copied
+	return nil
 }
 
 func (d *fakeDB) UpdateHeldPromptHold(_ context.Context, turn ids.TurnID, kind *wsm.HoldKind, scheduleID string) error {

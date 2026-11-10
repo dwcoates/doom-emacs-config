@@ -22,7 +22,7 @@ import (
 const heldPromptColumns = `turn_id, workspace_id, said, origin, target, hold_kind, hold_schedule_id,
 	classification_arm, classification_reason, classification_command, classification_at,
 	tombstone_kind, tombstone_at, queued_at, delivery, act_kind, act_value, coalesced, sent_by, thread_parent,
-	classification_turn`
+	classification_turn, sent_now_at, sent_now_waits_for`
 
 // scanHeldPrompt decodes one held prompt all-or-nothing. This is the row the
 // all-or-nothing rule was written for: a corrupt hold must never restore as a
@@ -50,10 +50,12 @@ func scanHeldPrompt(row interface{ Scan(...any) error }) (HeldPrompt, error) {
 		sentBy   sql.NullString
 		parent   []byte
 		judged   sql.NullString
+		sentAt   sql.NullInt64
+		waitsFor sql.NullString
 	)
 	if err := row.Scan(&h.Turn, &h.Workspace, &said, &h.Origin, &target, &holdKind, &schedule,
 		&arm, &reason, &command, &classAt, &tombKind, &tombAt, &queued, &delivery,
-		&actKind, &actValue, &h.Coalesced, &sentBy, &parent, &judged); err != nil {
+		&actKind, &actValue, &h.Coalesced, &sentBy, &parent, &judged, &sentAt, &waitsFor); err != nil {
 		return HeldPrompt{}, err
 	}
 	id := string(h.Turn)
@@ -140,6 +142,13 @@ func scanHeldPrompt(row interface{ Scan(...any) error }) (HeldPrompt, error) {
 	default:
 		return HeldPrompt{}, &DecodeError{Table: "held_prompts", Row: id, Field: "act", Err: errors.New("an act is stored whole or not at all")}
 	}
+	switch {
+	case !sentAt.Valid && !waitsFor.Valid:
+	case sentAt.Valid && waitsFor.Valid && waitsFor.String != "":
+		h.SentNow = &SentNow{At: fromNanos(sentAt.Int64), WaitsFor: waitsFor.String}
+	default:
+		return HeldPrompt{}, &DecodeError{Table: "held_prompts", Row: id, Field: "sent_now", Err: errors.New("a sent-now mark is stored whole, with what it waits for, or not at all")}
+	}
 	h.QueuedAt = fromNanos(queued)
 	return h, nil
 }
@@ -196,6 +205,10 @@ func (s *store) PutHeldPrompt(ctx context.Context, h HeldPrompt) error {
 	if h.Hold != nil {
 		fields["hold_kind"] = h.Hold.String()
 	}
+	if err := validateSentNow(h.SentNow); err != nil {
+		s.log.Error(op, "refused a sent-now mark that names nothing it waits for", withError(fields, err))
+		return err
+	}
 	if h.Classification != nil {
 		fields["classification_arm"] = h.Classification.Arm.String()
 	}
@@ -227,12 +240,13 @@ func (s *store) PutHeldPrompt(ctx context.Context, h HeldPrompt) error {
 		if h.Act != nil {
 			actKind, actValue = h.Act.Kind, h.Act.Value
 		}
+		sentAt, waitsFor := sentNowColumns(h.SentNow)
 		_, err := tx.ExecContext(ctx,
 			`INSERT INTO held_prompts (turn_id, workspace_id, said, origin, target, hold_kind, hold_schedule_id,
 			   classification_arm, classification_reason, classification_command, classification_at,
 			   accepted, tombstone_kind, tombstone_at, queued_at, delivery, act_kind, act_value, coalesced, sent_by,
-			   thread_parent, classification_turn)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			   thread_parent, classification_turn, sent_now_at, sent_now_waits_for)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			 ON CONFLICT(turn_id) DO UPDATE SET
 			   workspace_id = excluded.workspace_id, said = excluded.said, origin = excluded.origin,
 			   target = excluded.target, hold_kind = excluded.hold_kind,
@@ -246,10 +260,11 @@ func (s *store) PutHeldPrompt(ctx context.Context, h HeldPrompt) error {
 			   tombstone_kind = excluded.tombstone_kind, tombstone_at = excluded.tombstone_at,
 			   queued_at = excluded.queued_at, delivery = excluded.delivery,
 			   act_kind = excluded.act_kind, act_value = excluded.act_value, coalesced = excluded.coalesced,
-			   sent_by = excluded.sent_by, thread_parent = excluded.thread_parent`,
+			   sent_by = excluded.sent_by, thread_parent = excluded.thread_parent,
+			   sent_now_at = excluded.sent_now_at, sent_now_waits_for = excluded.sent_now_waits_for`,
 			h.Turn, h.Workspace, said, h.Origin, target, holdKind, schedule,
 			arm, reason, command, classAt, tombKind, tombAt, nanos(h.QueuedAt), int(h.Delivery),
-			actKind, actValue, h.Coalesced, sentByColumn(h.SentBy), askParent, judged)
+			actKind, actValue, h.Coalesced, sentByColumn(h.SentBy), askParent, judged, sentAt, waitsFor)
 		return err
 	})
 }
@@ -637,4 +652,50 @@ func (s *store) loadHeldPrompts(ctx context.Context, op string, fields dlog.Cont
 		return nil, err
 	}
 	return out, nil
+}
+
+// heldSentNowDDL is the layout-121 addition: the user's "Send now" on a
+// prompt that could not go at once, and what it waits for. The mark is
+// DURABLE so a restart or a handover still sends the prompt the moment its
+// blocker clears, first among what is held (promptqueue sentnow.go).
+const heldSentNowDDL = `
+ALTER TABLE held_prompts ADD COLUMN sent_now_at INTEGER;
+ALTER TABLE held_prompts ADD COLUMN sent_now_waits_for TEXT;
+`
+
+// validateSentNow refuses a mark that does not say what it waits for: the
+// card draws that sentence, and a blank one would draw a wait with no cause.
+func validateSentNow(mark *SentNow) error {
+	if mark != nil && mark.WaitsFor == "" {
+		return errors.New("wsm: a sent-now mark says what it waits for")
+	}
+	return nil
+}
+
+// sentNowColumns is a sent-now mark as stored: both NULL when none stands.
+func sentNowColumns(mark *SentNow) (any, any) {
+	if mark == nil {
+		return nil, nil
+	}
+	return nanos(mark.At), mark.WaitsFor
+}
+
+// SetHeldPromptSentNow records MARK on the standing hold TURN, or clears the
+// mark when MARK is nil. A hold retired meanwhile answers ErrHoldRetired: a
+// delivery or a drop won the race, and there is nothing left to send.
+func (s *store) SetHeldPromptSentNow(ctx context.Context, turn TurnID, mark *SentNow) error {
+	const op = "daemon.wsm.set_held_prompt_sent_now"
+	fields := dlog.Context{"turn": string(turn), "sent_now": mark != nil}
+	if err := validateSentNow(mark); err != nil {
+		s.log.Error(op, "refused a sent-now mark that names nothing it waits for", withError(fields, err))
+		return err
+	}
+	sentAt, waitsFor := sentNowColumns(mark)
+	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
+		if err := requireStandingHold(ctx, tx, turn, ErrHoldRetired); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, `UPDATE held_prompts SET sent_now_at = ?, sent_now_waits_for = ? WHERE turn_id = ?`, sentAt, waitsFor, turn)
+		return err
+	})
 }

@@ -92,6 +92,7 @@ import type {
 import {
   UpdateHeldPromptResponseSchema,
   type UpdateHeldPromptError,
+  type UpdateHeldPromptReleaseRefused,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_held_prompt_pb";
 import {
   EditHeldPromptResponseSchema,
@@ -1139,13 +1140,51 @@ export function updateHeldPromptRefusal(
     case "alreadyDelivered":
       return "this prompt has already been delivered";
     case "releaseRefused":
-      return "the session would not take this prompt now";
+      return releaseRefusedSentence(cause.value, action);
     case "beingDelivered":
       return BEING_DELIVERED;
     default: {
       const other: { case: string } = cause;
       return unreachableArm(
         `UpdateHeldPromptError.cause (on a ${action})`,
+        other.case,
+      );
+    }
+  }
+}
+
+/** `UpdateHeldPromptReleaseRefused`'s cause union, narrowed to a SET arm. */
+type ReleaseRefusedCause = NonNullable<UpdateHeldPromptReleaseRefused["cause"]> & {
+  case: string;
+};
+
+/**
+ * What each cause of a refused "Send now" says: the cause and what happens
+ * next. ONE SENTENCE PER CAUSE, never one for every refusal: a single sentence
+ * read as a dead button (2026-11-10). A refusal with no cause is a malformed
+ * view, thrown rather than worded.
+ */
+export function releaseRefusedSentence(
+  refused: UpdateHeldPromptReleaseRefused,
+  action: HeldAction,
+): string {
+  const cause: ReleaseRefusedCause = requireCase(
+    refused.cause,
+    `UpdateHeldPromptReleaseRefused.cause (on a ${action})`,
+  );
+  switch (cause.case) {
+    case "beingEdited":
+      return "this prompt is open in the editor; finish or cancel the edit, then send it";
+    case "behindEdit":
+      return "a prompt ahead of this one is being edited; this one goes in order once the edit ends";
+    case "coldGate":
+      return "the session is parked at its cold gate; answer the gate to decide when this prompt goes";
+    case "sessionRefused":
+      return "the session refused this prompt into the running turn; it goes when that turn ends";
+    default: {
+      const other: { case: string } = cause;
+      return unreachableArm(
+        `UpdateHeldPromptReleaseRefused.cause (on a ${action})`,
         other.case,
       );
     }
@@ -1216,7 +1255,9 @@ export type HeldBadgeTone = "ok" | "err" | "run" | "muted" | "amber" | "teal";
  *   - kept at the cold gate's answer: nothing acts on it until the reader
  *     sends it, so muted too;
  *   - editing (EditHeldPrompt): the prompt is being worked on in the editor,
- *     the in-flight orange.
+ *     the in-flight orange;
+ *   - sent now (UpdateHeldPrompt's release, waiting on what keeps it): the
+ *     prompt is on its way, the same in-flight orange.
  */
 export const HELD_STATUS_BADGES = {
   classifying: "run",
@@ -1234,6 +1275,7 @@ export const HELD_STATUS_BADGES = {
   awaitingDelivery: "muted",
   coldGateAnswered: "muted",
   editing: "run",
+  sentNow: "run",
 } as const satisfies Record<HeldStatus, HeldBadgeTone>;
 
 /** The class every held badge wears beside the shared `.badge`. */

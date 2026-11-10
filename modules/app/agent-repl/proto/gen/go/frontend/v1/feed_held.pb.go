@@ -286,9 +286,11 @@ type HeldPrompt struct {
 	//
 	//  1. the edit, while `editing` is present (the user is acting on the
 	//     prompt now);
-	//  2. the hold arm, while one is set (it decides whether the prompt can
+	//  2. the user's "Send now", while `sent_now` is present (the user asked
+	//     for it to go, and it goes once what keeps it clears);
+	//  3. the hold arm, while one is set (it decides whether the prompt can
 	//     move at all);
-	//  3. the classification arm (when the prompt runs relative to the turn in
+	//  4. the classification arm (when the prompt runs relative to the turn in
 	//     front of it). `daemon_held` never claims it: that arm is set only
 	//     beside a hold arm, which outranks it.
 	//
@@ -326,7 +328,13 @@ type HeldPrompt struct {
 	// permission-mode change, /compact or /clear); and neither of the two is
 	// being edited. The running turn is never "ahead" here: a turn that has
 	// started is joined by the classifier's after_tool_call verdict, not folded.
-	FoldAbove     *HeldPromptFoldAbove `protobuf:"bytes,18,opt,name=fold_above,json=foldAbove,proto3,oneof" json:"fold_above,omitempty"`
+	FoldAbove *HeldPromptFoldAbove `protobuf:"bytes,18,opt,name=fold_above,json=foldAbove,proto3,oneof" json:"fold_above,omitempty"`
+	// PRESENT WHILE THE USER'S "Send now" WAITS on this prompt
+	// (agentrepl.v1.UpdateHeldPromptRequest.release): something kept it from
+	// going at once, and it goes the moment that clears, ahead of every other
+	// held prompt but an interjection under way. Absent otherwise. It claims
+	// the card's badge after the edit and before the hold (HeldPrompt.badge).
+	SentNow       *HeldPromptSentNow `protobuf:"bytes,28,opt,name=sent_now,json=sentNow,proto3" json:"sent_now,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -580,6 +588,13 @@ func (x *HeldPrompt) GetFoldAbove() *HeldPromptFoldAbove {
 	return nil
 }
 
+func (x *HeldPrompt) GetSentNow() *HeldPromptSentNow {
+	if x != nil {
+		return x.SentNow
+	}
+	return nil
+}
+
 type isHeldPrompt_Classification interface {
 	isHeldPrompt_Classification()
 }
@@ -729,6 +744,53 @@ func (*HeldPrompt_ColdGate) isHeldPrompt_Hold() {}
 
 func (*HeldPrompt_ColdGateAnswered) isHeldPrompt_Hold() {}
 
+// The user's "Send now" waiting on what keeps the prompt.
+type HeldPromptSentNow struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// What it waits for, daemon-worded ("the /compact running now to end").
+	// Free text for display; never parsed. REQUIRED AND NEVER EMPTY.
+	WaitsFor      string `protobuf:"bytes,1,opt,name=waits_for,json=waitsFor,proto3" json:"waits_for,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *HeldPromptSentNow) Reset() {
+	*x = HeldPromptSentNow{}
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HeldPromptSentNow) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HeldPromptSentNow) ProtoMessage() {}
+
+func (x *HeldPromptSentNow) ProtoReflect() protoreflect.Message {
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HeldPromptSentNow.ProtoReflect.Descriptor instead.
+func (*HeldPromptSentNow) Descriptor() ([]byte, []int) {
+	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *HeldPromptSentNow) GetWaitsFor() string {
+	if x != nil {
+		return x.WaitsFor
+	}
+	return ""
+}
+
 // The "fold above" button: folds this prompt into the entry directly ahead of
 // it, so the two are delivered together as that one entry.
 type HeldPromptFoldAbove struct {
@@ -745,7 +807,7 @@ type HeldPromptFoldAbove struct {
 
 func (x *HeldPromptFoldAbove) Reset() {
 	*x = HeldPromptFoldAbove{}
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[3]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -757,7 +819,7 @@ func (x *HeldPromptFoldAbove) String() string {
 func (*HeldPromptFoldAbove) ProtoMessage() {}
 
 func (x *HeldPromptFoldAbove) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[3]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -770,7 +832,7 @@ func (x *HeldPromptFoldAbove) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HeldPromptFoldAbove.ProtoReflect.Descriptor instead.
 func (*HeldPromptFoldAbove) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{3}
+	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *HeldPromptFoldAbove) GetAbove() *v1.TurnId {
@@ -790,7 +852,7 @@ type HeldPromptCoalesced struct {
 
 func (x *HeldPromptCoalesced) Reset() {
 	*x = HeldPromptCoalesced{}
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[4]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -802,7 +864,7 @@ func (x *HeldPromptCoalesced) String() string {
 func (*HeldPromptCoalesced) ProtoMessage() {}
 
 func (x *HeldPromptCoalesced) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[4]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -815,7 +877,7 @@ func (x *HeldPromptCoalesced) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HeldPromptCoalesced.ProtoReflect.Descriptor instead.
 func (*HeldPromptCoalesced) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{4}
+	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{5}
 }
 
 // A session act held in the queue. THE ARM IS THE ACT.
@@ -832,7 +894,7 @@ type HeldSessionAct struct {
 
 func (x *HeldSessionAct) Reset() {
 	*x = HeldSessionAct{}
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[5]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -844,7 +906,7 @@ func (x *HeldSessionAct) String() string {
 func (*HeldSessionAct) ProtoMessage() {}
 
 func (x *HeldSessionAct) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[5]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -857,7 +919,7 @@ func (x *HeldSessionAct) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HeldSessionAct.ProtoReflect.Descriptor instead.
 func (*HeldSessionAct) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{5}
+	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *HeldSessionAct) GetAct() isHeldSessionAct_Act {
@@ -914,7 +976,7 @@ type HeldSessionActModel struct {
 
 func (x *HeldSessionActModel) Reset() {
 	*x = HeldSessionActModel{}
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[6]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -926,7 +988,7 @@ func (x *HeldSessionActModel) String() string {
 func (*HeldSessionActModel) ProtoMessage() {}
 
 func (x *HeldSessionActModel) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[6]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -939,7 +1001,7 @@ func (x *HeldSessionActModel) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HeldSessionActModel.ProtoReflect.Descriptor instead.
 func (*HeldSessionActModel) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{6}
+	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *HeldSessionActModel) GetModel() string {
@@ -960,7 +1022,7 @@ type HeldSessionActPermissionMode struct {
 
 func (x *HeldSessionActPermissionMode) Reset() {
 	*x = HeldSessionActPermissionMode{}
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[7]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -972,7 +1034,7 @@ func (x *HeldSessionActPermissionMode) String() string {
 func (*HeldSessionActPermissionMode) ProtoMessage() {}
 
 func (x *HeldSessionActPermissionMode) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[7]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -985,7 +1047,7 @@ func (x *HeldSessionActPermissionMode) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HeldSessionActPermissionMode.ProtoReflect.Descriptor instead.
 func (*HeldSessionActPermissionMode) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{7}
+	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *HeldSessionActPermissionMode) GetMode() string {
@@ -1028,6 +1090,7 @@ type HeldPromptBadge struct {
 	//	*HeldPromptBadge_ColdGate
 	//	*HeldPromptBadge_AwaitingDelivery
 	//	*HeldPromptBadge_ColdGateAnswered
+	//	*HeldPromptBadge_SentNow
 	StandsFor     isHeldPromptBadge_StandsFor `protobuf_oneof:"stands_for"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1035,7 +1098,7 @@ type HeldPromptBadge struct {
 
 func (x *HeldPromptBadge) Reset() {
 	*x = HeldPromptBadge{}
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[8]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1047,7 +1110,7 @@ func (x *HeldPromptBadge) String() string {
 func (*HeldPromptBadge) ProtoMessage() {}
 
 func (x *HeldPromptBadge) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[8]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1060,7 +1123,7 @@ func (x *HeldPromptBadge) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HeldPromptBadge.ProtoReflect.Descriptor instead.
 func (*HeldPromptBadge) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{8}
+	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *HeldPromptBadge) GetLabel() string {
@@ -1219,6 +1282,15 @@ func (x *HeldPromptBadge) GetColdGateAnswered() *HeldPromptBadgeColdGateAnswered
 	return nil
 }
 
+func (x *HeldPromptBadge) GetSentNow() *HeldPromptBadgeSentNow {
+	if x != nil {
+		if x, ok := x.StandsFor.(*HeldPromptBadge_SentNow); ok {
+			return x.SentNow
+		}
+	}
+	return nil
+}
+
 type isHeldPromptBadge_StandsFor interface {
 	isHeldPromptBadge_StandsFor()
 }
@@ -1298,6 +1370,11 @@ type HeldPromptBadge_ColdGateAnswered struct {
 	ColdGateAnswered *HeldPromptBadgeColdGateAnswered `protobuf:"bytes,16,opt,name=cold_gate_answered,json=coldGateAnswered,proto3,oneof"`
 }
 
+type HeldPromptBadge_SentNow struct {
+	// The user pressed "Send now"; it goes once what keeps it clears.
+	SentNow *HeldPromptBadgeSentNow `protobuf:"bytes,18,opt,name=sent_now,json=sentNow,proto3,oneof"`
+}
+
 func (*HeldPromptBadge_Classifying) isHeldPromptBadge_StandsFor() {}
 
 func (*HeldPromptBadge_Interject) isHeldPromptBadge_StandsFor() {}
@@ -1328,6 +1405,8 @@ func (*HeldPromptBadge_AwaitingDelivery) isHeldPromptBadge_StandsFor() {}
 
 func (*HeldPromptBadge_ColdGateAnswered) isHeldPromptBadge_StandsFor() {}
 
+func (*HeldPromptBadge_SentNow) isHeldPromptBadge_StandsFor() {}
+
 // The badge shows the classifier still deciding.
 type HeldPromptBadgeClassifying struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -1337,7 +1416,7 @@ type HeldPromptBadgeClassifying struct {
 
 func (x *HeldPromptBadgeClassifying) Reset() {
 	*x = HeldPromptBadgeClassifying{}
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[9]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1349,7 +1428,7 @@ func (x *HeldPromptBadgeClassifying) String() string {
 func (*HeldPromptBadgeClassifying) ProtoMessage() {}
 
 func (x *HeldPromptBadgeClassifying) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[9]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1362,7 +1441,7 @@ func (x *HeldPromptBadgeClassifying) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HeldPromptBadgeClassifying.ProtoReflect.Descriptor instead.
 func (*HeldPromptBadgeClassifying) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{9}
+	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{10}
 }
 
 // The badge shows the interject verdict.
@@ -1374,7 +1453,7 @@ type HeldPromptBadgeInterject struct {
 
 func (x *HeldPromptBadgeInterject) Reset() {
 	*x = HeldPromptBadgeInterject{}
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[10]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1386,7 +1465,7 @@ func (x *HeldPromptBadgeInterject) String() string {
 func (*HeldPromptBadgeInterject) ProtoMessage() {}
 
 func (x *HeldPromptBadgeInterject) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[10]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1399,7 +1478,7 @@ func (x *HeldPromptBadgeInterject) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HeldPromptBadgeInterject.ProtoReflect.Descriptor instead.
 func (*HeldPromptBadgeInterject) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{10}
+	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{11}
 }
 
 // The badge shows the after-tool-call verdict.
@@ -1411,7 +1490,7 @@ type HeldPromptBadgeAfterToolCall struct {
 
 func (x *HeldPromptBadgeAfterToolCall) Reset() {
 	*x = HeldPromptBadgeAfterToolCall{}
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[11]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1423,7 +1502,7 @@ func (x *HeldPromptBadgeAfterToolCall) String() string {
 func (*HeldPromptBadgeAfterToolCall) ProtoMessage() {}
 
 func (x *HeldPromptBadgeAfterToolCall) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[11]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1436,7 +1515,7 @@ func (x *HeldPromptBadgeAfterToolCall) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HeldPromptBadgeAfterToolCall.ProtoReflect.Descriptor instead.
 func (*HeldPromptBadgeAfterToolCall) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{11}
+	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{12}
 }
 
 // The badge shows the hold-for-turn-end verdict.
@@ -1448,7 +1527,7 @@ type HeldPromptBadgeHoldForTurnEnd struct {
 
 func (x *HeldPromptBadgeHoldForTurnEnd) Reset() {
 	*x = HeldPromptBadgeHoldForTurnEnd{}
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[12]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1460,7 +1539,7 @@ func (x *HeldPromptBadgeHoldForTurnEnd) String() string {
 func (*HeldPromptBadgeHoldForTurnEnd) ProtoMessage() {}
 
 func (x *HeldPromptBadgeHoldForTurnEnd) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[12]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1473,7 +1552,7 @@ func (x *HeldPromptBadgeHoldForTurnEnd) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HeldPromptBadgeHoldForTurnEnd.ProtoReflect.Descriptor instead.
 func (*HeldPromptBadgeHoldForTurnEnd) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{12}
+	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{13}
 }
 
 // The badge shows the wait behind a context cut.
@@ -1485,7 +1564,7 @@ type HeldPromptBadgeUninterruptibleTurn struct {
 
 func (x *HeldPromptBadgeUninterruptibleTurn) Reset() {
 	*x = HeldPromptBadgeUninterruptibleTurn{}
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[13]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1497,7 +1576,7 @@ func (x *HeldPromptBadgeUninterruptibleTurn) String() string {
 func (*HeldPromptBadgeUninterruptibleTurn) ProtoMessage() {}
 
 func (x *HeldPromptBadgeUninterruptibleTurn) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[13]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1510,7 +1589,7 @@ func (x *HeldPromptBadgeUninterruptibleTurn) ProtoReflect() protoreflect.Message
 
 // Deprecated: Use HeldPromptBadgeUninterruptibleTurn.ProtoReflect.Descriptor instead.
 func (*HeldPromptBadgeUninterruptibleTurn) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{13}
+	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{14}
 }
 
 // The badge shows the classifier's failure.
@@ -1522,7 +1601,7 @@ type HeldPromptBadgeClassificationError struct {
 
 func (x *HeldPromptBadgeClassificationError) Reset() {
 	*x = HeldPromptBadgeClassificationError{}
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[14]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1534,7 +1613,7 @@ func (x *HeldPromptBadgeClassificationError) String() string {
 func (*HeldPromptBadgeClassificationError) ProtoMessage() {}
 
 func (x *HeldPromptBadgeClassificationError) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[14]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1547,7 +1626,7 @@ func (x *HeldPromptBadgeClassificationError) ProtoReflect() protoreflect.Message
 
 // Deprecated: Use HeldPromptBadgeClassificationError.ProtoReflect.Descriptor instead.
 func (*HeldPromptBadgeClassificationError) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{14}
+	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{15}
 }
 
 // The badge shows the edit in progress.
@@ -1559,7 +1638,7 @@ type HeldPromptBadgeEditing struct {
 
 func (x *HeldPromptBadgeEditing) Reset() {
 	*x = HeldPromptBadgeEditing{}
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[15]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1571,7 +1650,7 @@ func (x *HeldPromptBadgeEditing) String() string {
 func (*HeldPromptBadgeEditing) ProtoMessage() {}
 
 func (x *HeldPromptBadgeEditing) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[15]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1584,7 +1663,7 @@ func (x *HeldPromptBadgeEditing) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HeldPromptBadgeEditing.ProtoReflect.Descriptor instead.
 func (*HeldPromptBadgeEditing) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{15}
+	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{16}
 }
 
 // The badge shows the shutdown hold.
@@ -1596,7 +1675,7 @@ type HeldPromptBadgeShutdown struct {
 
 func (x *HeldPromptBadgeShutdown) Reset() {
 	*x = HeldPromptBadgeShutdown{}
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[16]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1608,7 +1687,7 @@ func (x *HeldPromptBadgeShutdown) String() string {
 func (*HeldPromptBadgeShutdown) ProtoMessage() {}
 
 func (x *HeldPromptBadgeShutdown) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[16]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1621,7 +1700,7 @@ func (x *HeldPromptBadgeShutdown) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HeldPromptBadgeShutdown.ProtoReflect.Descriptor instead.
 func (*HeldPromptBadgeShutdown) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{16}
+	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{17}
 }
 
 // The badge shows the build-refresh hold.
@@ -1633,7 +1712,7 @@ type HeldPromptBadgeBuildRefresh struct {
 
 func (x *HeldPromptBadgeBuildRefresh) Reset() {
 	*x = HeldPromptBadgeBuildRefresh{}
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[17]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1645,7 +1724,7 @@ func (x *HeldPromptBadgeBuildRefresh) String() string {
 func (*HeldPromptBadgeBuildRefresh) ProtoMessage() {}
 
 func (x *HeldPromptBadgeBuildRefresh) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[17]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1658,7 +1737,7 @@ func (x *HeldPromptBadgeBuildRefresh) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HeldPromptBadgeBuildRefresh.ProtoReflect.Descriptor instead.
 func (*HeldPromptBadgeBuildRefresh) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{17}
+	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{18}
 }
 
 // The badge shows the reconnect hold.
@@ -1670,7 +1749,7 @@ type HeldPromptBadgeReconnect struct {
 
 func (x *HeldPromptBadgeReconnect) Reset() {
 	*x = HeldPromptBadgeReconnect{}
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[18]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1682,7 +1761,7 @@ func (x *HeldPromptBadgeReconnect) String() string {
 func (*HeldPromptBadgeReconnect) ProtoMessage() {}
 
 func (x *HeldPromptBadgeReconnect) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[18]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1695,7 +1774,7 @@ func (x *HeldPromptBadgeReconnect) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HeldPromptBadgeReconnect.ProtoReflect.Descriptor instead.
 func (*HeldPromptBadgeReconnect) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{18}
+	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{19}
 }
 
 // The badge shows the loading hold.
@@ -1707,7 +1786,7 @@ type HeldPromptBadgeLoading struct {
 
 func (x *HeldPromptBadgeLoading) Reset() {
 	*x = HeldPromptBadgeLoading{}
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[19]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1719,7 +1798,7 @@ func (x *HeldPromptBadgeLoading) String() string {
 func (*HeldPromptBadgeLoading) ProtoMessage() {}
 
 func (x *HeldPromptBadgeLoading) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[19]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1732,7 +1811,7 @@ func (x *HeldPromptBadgeLoading) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HeldPromptBadgeLoading.ProtoReflect.Descriptor instead.
 func (*HeldPromptBadgeLoading) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{19}
+	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{20}
 }
 
 // The badge shows the merge hold.
@@ -1744,7 +1823,7 @@ type HeldPromptBadgeMerge struct {
 
 func (x *HeldPromptBadgeMerge) Reset() {
 	*x = HeldPromptBadgeMerge{}
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[20]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1756,7 +1835,7 @@ func (x *HeldPromptBadgeMerge) String() string {
 func (*HeldPromptBadgeMerge) ProtoMessage() {}
 
 func (x *HeldPromptBadgeMerge) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[20]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1769,7 +1848,7 @@ func (x *HeldPromptBadgeMerge) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HeldPromptBadgeMerge.ProtoReflect.Descriptor instead.
 func (*HeldPromptBadgeMerge) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{20}
+	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{21}
 }
 
 // The badge shows the cold-gate hold.
@@ -1781,7 +1860,7 @@ type HeldPromptBadgeColdGate struct {
 
 func (x *HeldPromptBadgeColdGate) Reset() {
 	*x = HeldPromptBadgeColdGate{}
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[21]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1793,7 +1872,7 @@ func (x *HeldPromptBadgeColdGate) String() string {
 func (*HeldPromptBadgeColdGate) ProtoMessage() {}
 
 func (x *HeldPromptBadgeColdGate) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[21]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1806,7 +1885,7 @@ func (x *HeldPromptBadgeColdGate) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HeldPromptBadgeColdGate.ProtoReflect.Descriptor instead.
 func (*HeldPromptBadgeColdGate) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{21}
+	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{22}
 }
 
 // The badge shows an entry waiting its place in the queue, unclassified.
@@ -1818,7 +1897,7 @@ type HeldPromptBadgeAwaitingDelivery struct {
 
 func (x *HeldPromptBadgeAwaitingDelivery) Reset() {
 	*x = HeldPromptBadgeAwaitingDelivery{}
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[22]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1830,7 +1909,7 @@ func (x *HeldPromptBadgeAwaitingDelivery) String() string {
 func (*HeldPromptBadgeAwaitingDelivery) ProtoMessage() {}
 
 func (x *HeldPromptBadgeAwaitingDelivery) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[22]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1843,7 +1922,7 @@ func (x *HeldPromptBadgeAwaitingDelivery) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HeldPromptBadgeAwaitingDelivery.ProtoReflect.Descriptor instead.
 func (*HeldPromptBadgeAwaitingDelivery) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{22}
+	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{23}
 }
 
 // The badge shows the hold that keeps a prompt after the cold gate's answer.
@@ -1855,7 +1934,7 @@ type HeldPromptBadgeColdGateAnswered struct {
 
 func (x *HeldPromptBadgeColdGateAnswered) Reset() {
 	*x = HeldPromptBadgeColdGateAnswered{}
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[23]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1867,7 +1946,7 @@ func (x *HeldPromptBadgeColdGateAnswered) String() string {
 func (*HeldPromptBadgeColdGateAnswered) ProtoMessage() {}
 
 func (x *HeldPromptBadgeColdGateAnswered) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[23]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1880,7 +1959,44 @@ func (x *HeldPromptBadgeColdGateAnswered) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HeldPromptBadgeColdGateAnswered.ProtoReflect.Descriptor instead.
 func (*HeldPromptBadgeColdGateAnswered) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{23}
+	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{24}
+}
+
+// The badge shows the user's "Send now" waiting.
+type HeldPromptBadgeSentNow struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *HeldPromptBadgeSentNow) Reset() {
+	*x = HeldPromptBadgeSentNow{}
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[25]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HeldPromptBadgeSentNow) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HeldPromptBadgeSentNow) ProtoMessage() {}
+
+func (x *HeldPromptBadgeSentNow) ProtoReflect() protoreflect.Message {
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[25]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HeldPromptBadgeSentNow.ProtoReflect.Descriptor instead.
+func (*HeldPromptBadgeSentNow) Descriptor() ([]byte, []int) {
+	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{25}
 }
 
 // One standing fact the card's badge does not show, said in full.
@@ -1895,7 +2011,7 @@ type HeldPromptStatusNote struct {
 
 func (x *HeldPromptStatusNote) Reset() {
 	*x = HeldPromptStatusNote{}
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[24]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1907,7 +2023,7 @@ func (x *HeldPromptStatusNote) String() string {
 func (*HeldPromptStatusNote) ProtoMessage() {}
 
 func (x *HeldPromptStatusNote) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[24]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1920,7 +2036,7 @@ func (x *HeldPromptStatusNote) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HeldPromptStatusNote.ProtoReflect.Descriptor instead.
 func (*HeldPromptStatusNote) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{24}
+	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *HeldPromptStatusNote) GetSentence() string {
@@ -1940,7 +2056,7 @@ type HeldPromptEditing struct {
 
 func (x *HeldPromptEditing) Reset() {
 	*x = HeldPromptEditing{}
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[25]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1952,7 +2068,7 @@ func (x *HeldPromptEditing) String() string {
 func (*HeldPromptEditing) ProtoMessage() {}
 
 func (x *HeldPromptEditing) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[25]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1965,7 +2081,7 @@ func (x *HeldPromptEditing) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HeldPromptEditing.ProtoReflect.Descriptor instead.
 func (*HeldPromptEditing) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{25}
+	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{27}
 }
 
 // When a held prompt was queued.
@@ -1979,7 +2095,7 @@ type HeldPromptQueuedAt struct {
 
 func (x *HeldPromptQueuedAt) Reset() {
 	*x = HeldPromptQueuedAt{}
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[26]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1991,7 +2107,7 @@ func (x *HeldPromptQueuedAt) String() string {
 func (*HeldPromptQueuedAt) ProtoMessage() {}
 
 func (x *HeldPromptQueuedAt) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[26]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2004,7 +2120,7 @@ func (x *HeldPromptQueuedAt) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HeldPromptQueuedAt.ProtoReflect.Descriptor instead.
 func (*HeldPromptQueuedAt) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{26}
+	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *HeldPromptQueuedAt) GetAtMs() int64 {
@@ -2023,7 +2139,7 @@ type HeldPromptClassifying struct {
 
 func (x *HeldPromptClassifying) Reset() {
 	*x = HeldPromptClassifying{}
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[27]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2035,7 +2151,7 @@ func (x *HeldPromptClassifying) String() string {
 func (*HeldPromptClassifying) ProtoMessage() {}
 
 func (x *HeldPromptClassifying) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[27]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2048,7 +2164,7 @@ func (x *HeldPromptClassifying) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HeldPromptClassifying.ProtoReflect.Descriptor instead.
 func (*HeldPromptClassifying) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{27}
+	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{29}
 }
 
 // Deliver NOW: interrupt the running turn and submit once it has ended.
@@ -2062,7 +2178,7 @@ type HeldPromptInterject struct {
 
 func (x *HeldPromptInterject) Reset() {
 	*x = HeldPromptInterject{}
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[28]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2074,7 +2190,7 @@ func (x *HeldPromptInterject) String() string {
 func (*HeldPromptInterject) ProtoMessage() {}
 
 func (x *HeldPromptInterject) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[28]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2087,7 +2203,7 @@ func (x *HeldPromptInterject) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HeldPromptInterject.ProtoReflect.Descriptor instead.
 func (*HeldPromptInterject) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{28}
+	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *HeldPromptInterject) GetRationale() string {
@@ -2109,7 +2225,7 @@ type HeldPromptAfterToolCall struct {
 
 func (x *HeldPromptAfterToolCall) Reset() {
 	*x = HeldPromptAfterToolCall{}
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[29]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2121,7 +2237,7 @@ func (x *HeldPromptAfterToolCall) String() string {
 func (*HeldPromptAfterToolCall) ProtoMessage() {}
 
 func (x *HeldPromptAfterToolCall) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[29]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2134,7 +2250,7 @@ func (x *HeldPromptAfterToolCall) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HeldPromptAfterToolCall.ProtoReflect.Descriptor instead.
 func (*HeldPromptAfterToolCall) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{29}
+	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *HeldPromptAfterToolCall) GetRationale() string {
@@ -2155,7 +2271,7 @@ type HeldPromptHoldForTurnEnd struct {
 
 func (x *HeldPromptHoldForTurnEnd) Reset() {
 	*x = HeldPromptHoldForTurnEnd{}
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[30]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2167,7 +2283,7 @@ func (x *HeldPromptHoldForTurnEnd) String() string {
 func (*HeldPromptHoldForTurnEnd) ProtoMessage() {}
 
 func (x *HeldPromptHoldForTurnEnd) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[30]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2180,7 +2296,7 @@ func (x *HeldPromptHoldForTurnEnd) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HeldPromptHoldForTurnEnd.ProtoReflect.Descriptor instead.
 func (*HeldPromptHoldForTurnEnd) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{30}
+	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *HeldPromptHoldForTurnEnd) GetRationale() string {
@@ -2218,7 +2334,7 @@ type HeldPromptUninterruptibleTurn struct {
 
 func (x *HeldPromptUninterruptibleTurn) Reset() {
 	*x = HeldPromptUninterruptibleTurn{}
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[31]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2230,7 +2346,7 @@ func (x *HeldPromptUninterruptibleTurn) String() string {
 func (*HeldPromptUninterruptibleTurn) ProtoMessage() {}
 
 func (x *HeldPromptUninterruptibleTurn) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[31]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2243,7 +2359,7 @@ func (x *HeldPromptUninterruptibleTurn) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HeldPromptUninterruptibleTurn.ProtoReflect.Descriptor instead.
 func (*HeldPromptUninterruptibleTurn) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{31}
+	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *HeldPromptUninterruptibleTurn) GetCommand() v1.SessionCommand {
@@ -2268,7 +2384,7 @@ type HeldPromptClassificationError struct {
 
 func (x *HeldPromptClassificationError) Reset() {
 	*x = HeldPromptClassificationError{}
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[32]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2280,7 +2396,7 @@ func (x *HeldPromptClassificationError) String() string {
 func (*HeldPromptClassificationError) ProtoMessage() {}
 
 func (x *HeldPromptClassificationError) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[32]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2293,7 +2409,7 @@ func (x *HeldPromptClassificationError) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HeldPromptClassificationError.ProtoReflect.Descriptor instead.
 func (*HeldPromptClassificationError) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{32}
+	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *HeldPromptClassificationError) GetDetail() string {
@@ -2319,7 +2435,7 @@ type HeldPromptShutdownHold struct {
 
 func (x *HeldPromptShutdownHold) Reset() {
 	*x = HeldPromptShutdownHold{}
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[33]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2331,7 +2447,7 @@ func (x *HeldPromptShutdownHold) String() string {
 func (*HeldPromptShutdownHold) ProtoMessage() {}
 
 func (x *HeldPromptShutdownHold) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[33]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2344,7 +2460,7 @@ func (x *HeldPromptShutdownHold) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HeldPromptShutdownHold.ProtoReflect.Descriptor instead.
 func (*HeldPromptShutdownHold) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{33}
+	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *HeldPromptShutdownHold) GetScheduleId() string {
@@ -2390,7 +2506,7 @@ type HeldPromptReconnectHold struct {
 
 func (x *HeldPromptReconnectHold) Reset() {
 	*x = HeldPromptReconnectHold{}
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[34]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2402,7 +2518,7 @@ func (x *HeldPromptReconnectHold) String() string {
 func (*HeldPromptReconnectHold) ProtoMessage() {}
 
 func (x *HeldPromptReconnectHold) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[34]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2415,7 +2531,7 @@ func (x *HeldPromptReconnectHold) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HeldPromptReconnectHold.ProtoReflect.Descriptor instead.
 func (*HeldPromptReconnectHold) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{34}
+	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{36}
 }
 
 // Held because the workspace's shim is loading: no session is up yet, and the
@@ -2428,7 +2544,7 @@ type HeldPromptLoadingHold struct {
 
 func (x *HeldPromptLoadingHold) Reset() {
 	*x = HeldPromptLoadingHold{}
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[35]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2440,7 +2556,7 @@ func (x *HeldPromptLoadingHold) String() string {
 func (*HeldPromptLoadingHold) ProtoMessage() {}
 
 func (x *HeldPromptLoadingHold) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[35]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2453,7 +2569,7 @@ func (x *HeldPromptLoadingHold) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HeldPromptLoadingHold.ProtoReflect.Descriptor instead.
 func (*HeldPromptLoadingHold) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{35}
+	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{37}
 }
 
 // Held because a merge of this workspace is in flight: the merge drives the
@@ -2472,7 +2588,7 @@ type HeldPromptMergeHold struct {
 
 func (x *HeldPromptMergeHold) Reset() {
 	*x = HeldPromptMergeHold{}
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[36]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2484,7 +2600,7 @@ func (x *HeldPromptMergeHold) String() string {
 func (*HeldPromptMergeHold) ProtoMessage() {}
 
 func (x *HeldPromptMergeHold) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[36]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2497,7 +2613,7 @@ func (x *HeldPromptMergeHold) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HeldPromptMergeHold.ProtoReflect.Descriptor instead.
 func (*HeldPromptMergeHold) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{36}
+	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{38}
 }
 
 // No classifier ran and none will: a daemon condition holds the entry (the
@@ -2510,7 +2626,7 @@ type HeldPromptDaemonHeld struct {
 
 func (x *HeldPromptDaemonHeld) Reset() {
 	*x = HeldPromptDaemonHeld{}
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[37]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2522,7 +2638,7 @@ func (x *HeldPromptDaemonHeld) String() string {
 func (*HeldPromptDaemonHeld) ProtoMessage() {}
 
 func (x *HeldPromptDaemonHeld) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[37]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2535,7 +2651,7 @@ func (x *HeldPromptDaemonHeld) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HeldPromptDaemonHeld.ProtoReflect.Descriptor instead.
 func (*HeldPromptDaemonHeld) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{37}
+	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{39}
 }
 
 // Held because the workspace's session is PARKED AT ITS COLD GATE: the shim
@@ -2569,7 +2685,7 @@ type HeldPromptColdGateHold struct {
 
 func (x *HeldPromptColdGateHold) Reset() {
 	*x = HeldPromptColdGateHold{}
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[38]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2581,7 +2697,7 @@ func (x *HeldPromptColdGateHold) String() string {
 func (*HeldPromptColdGateHold) ProtoMessage() {}
 
 func (x *HeldPromptColdGateHold) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[38]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2594,7 +2710,7 @@ func (x *HeldPromptColdGateHold) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HeldPromptColdGateHold.ProtoReflect.Descriptor instead.
 func (*HeldPromptColdGateHold) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{38}
+	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{40}
 }
 
 // Held because the workspace's cold gate was ANSWERED WITH PAY OR COMPACT
@@ -2618,7 +2734,7 @@ type HeldPromptColdGateAnsweredHold struct {
 
 func (x *HeldPromptColdGateAnsweredHold) Reset() {
 	*x = HeldPromptColdGateAnsweredHold{}
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[39]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2630,7 +2746,7 @@ func (x *HeldPromptColdGateAnsweredHold) String() string {
 func (*HeldPromptColdGateAnsweredHold) ProtoMessage() {}
 
 func (x *HeldPromptColdGateAnsweredHold) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[39]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2643,7 +2759,7 @@ func (x *HeldPromptColdGateAnsweredHold) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HeldPromptColdGateAnsweredHold.ProtoReflect.Descriptor instead.
 func (*HeldPromptColdGateAnsweredHold) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{39}
+	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{41}
 }
 
 // No classifier is running on this entry and no daemon condition holds it: it
@@ -2657,7 +2773,7 @@ type HeldPromptAwaitingDelivery struct {
 
 func (x *HeldPromptAwaitingDelivery) Reset() {
 	*x = HeldPromptAwaitingDelivery{}
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[40]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[42]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2669,7 +2785,7 @@ func (x *HeldPromptAwaitingDelivery) String() string {
 func (*HeldPromptAwaitingDelivery) ProtoMessage() {}
 
 func (x *HeldPromptAwaitingDelivery) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[40]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[42]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2682,7 +2798,7 @@ func (x *HeldPromptAwaitingDelivery) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HeldPromptAwaitingDelivery.ProtoReflect.Descriptor instead.
 func (*HeldPromptAwaitingDelivery) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{40}
+	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{42}
 }
 
 // Held because the session's shim is being restarted onto the current build
@@ -2697,7 +2813,7 @@ type HeldPromptBuildRefreshHold struct {
 
 func (x *HeldPromptBuildRefreshHold) Reset() {
 	*x = HeldPromptBuildRefreshHold{}
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[41]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[43]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2709,7 +2825,7 @@ func (x *HeldPromptBuildRefreshHold) String() string {
 func (*HeldPromptBuildRefreshHold) ProtoMessage() {}
 
 func (x *HeldPromptBuildRefreshHold) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[41]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[43]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2722,7 +2838,7 @@ func (x *HeldPromptBuildRefreshHold) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HeldPromptBuildRefreshHold.ProtoReflect.Descriptor instead.
 func (*HeldPromptBuildRefreshHold) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{41}
+	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{43}
 }
 
 // A prompt the editor wrote to the durable held-prompt ingress
@@ -2765,7 +2881,7 @@ type HeldIngressPrompt struct {
 
 func (x *HeldIngressPrompt) Reset() {
 	*x = HeldIngressPrompt{}
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[42]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[44]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2777,7 +2893,7 @@ func (x *HeldIngressPrompt) String() string {
 func (*HeldIngressPrompt) ProtoMessage() {}
 
 func (x *HeldIngressPrompt) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[42]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[44]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2790,7 +2906,7 @@ func (x *HeldIngressPrompt) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HeldIngressPrompt.ProtoReflect.Descriptor instead.
 func (*HeldIngressPrompt) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{42}
+	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{44}
 }
 
 func (x *HeldIngressPrompt) GetSaid() *v1.UserSaid {
@@ -2832,7 +2948,7 @@ type HeldIngressPromptQueuedAt struct {
 
 func (x *HeldIngressPromptQueuedAt) Reset() {
 	*x = HeldIngressPromptQueuedAt{}
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[43]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[45]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2844,7 +2960,7 @@ func (x *HeldIngressPromptQueuedAt) String() string {
 func (*HeldIngressPromptQueuedAt) ProtoMessage() {}
 
 func (x *HeldIngressPromptQueuedAt) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[43]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[45]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2857,7 +2973,7 @@ func (x *HeldIngressPromptQueuedAt) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HeldIngressPromptQueuedAt.ProtoReflect.Descriptor instead.
 func (*HeldIngressPromptQueuedAt) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{43}
+	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{45}
 }
 
 func (x *HeldIngressPromptQueuedAt) GetAtMs() int64 {
@@ -2895,7 +3011,7 @@ type HeldIngressPromptBadge struct {
 
 func (x *HeldIngressPromptBadge) Reset() {
 	*x = HeldIngressPromptBadge{}
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[44]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[46]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2907,7 +3023,7 @@ func (x *HeldIngressPromptBadge) String() string {
 func (*HeldIngressPromptBadge) ProtoMessage() {}
 
 func (x *HeldIngressPromptBadge) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[44]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[46]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2920,7 +3036,7 @@ func (x *HeldIngressPromptBadge) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HeldIngressPromptBadge.ProtoReflect.Descriptor instead.
 func (*HeldIngressPromptBadge) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{44}
+	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{46}
 }
 
 func (x *HeldIngressPromptBadge) GetLabel() string {
@@ -3056,7 +3172,7 @@ type HeldIngressPromptBadgeAwaitingIntake struct {
 
 func (x *HeldIngressPromptBadgeAwaitingIntake) Reset() {
 	*x = HeldIngressPromptBadgeAwaitingIntake{}
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[45]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[47]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3068,7 +3184,7 @@ func (x *HeldIngressPromptBadgeAwaitingIntake) String() string {
 func (*HeldIngressPromptBadgeAwaitingIntake) ProtoMessage() {}
 
 func (x *HeldIngressPromptBadgeAwaitingIntake) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[45]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[47]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3081,7 +3197,7 @@ func (x *HeldIngressPromptBadgeAwaitingIntake) ProtoReflect() protoreflect.Messa
 
 // Deprecated: Use HeldIngressPromptBadgeAwaitingIntake.ProtoReflect.Descriptor instead.
 func (*HeldIngressPromptBadgeAwaitingIntake) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{45}
+	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{47}
 }
 
 // The badge shows the workspace has no session to take the entry.
@@ -3093,7 +3209,7 @@ type HeldIngressPromptBadgeNoSession struct {
 
 func (x *HeldIngressPromptBadgeNoSession) Reset() {
 	*x = HeldIngressPromptBadgeNoSession{}
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[46]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[48]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3105,7 +3221,7 @@ func (x *HeldIngressPromptBadgeNoSession) String() string {
 func (*HeldIngressPromptBadgeNoSession) ProtoMessage() {}
 
 func (x *HeldIngressPromptBadgeNoSession) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[46]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[48]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3118,7 +3234,7 @@ func (x *HeldIngressPromptBadgeNoSession) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HeldIngressPromptBadgeNoSession.ProtoReflect.Descriptor instead.
 func (*HeldIngressPromptBadgeNoSession) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{46}
+	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{48}
 }
 
 // The badge shows a merge of the workspace holds the entry back.
@@ -3130,7 +3246,7 @@ type HeldIngressPromptBadgeMerge struct {
 
 func (x *HeldIngressPromptBadgeMerge) Reset() {
 	*x = HeldIngressPromptBadgeMerge{}
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[47]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[49]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3142,7 +3258,7 @@ func (x *HeldIngressPromptBadgeMerge) String() string {
 func (*HeldIngressPromptBadgeMerge) ProtoMessage() {}
 
 func (x *HeldIngressPromptBadgeMerge) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[47]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[49]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3155,7 +3271,7 @@ func (x *HeldIngressPromptBadgeMerge) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HeldIngressPromptBadgeMerge.ProtoReflect.Descriptor instead.
 func (*HeldIngressPromptBadgeMerge) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{47}
+	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{49}
 }
 
 // The badge shows the session's cold gate holds the entry back.
@@ -3167,7 +3283,7 @@ type HeldIngressPromptBadgeColdGate struct {
 
 func (x *HeldIngressPromptBadgeColdGate) Reset() {
 	*x = HeldIngressPromptBadgeColdGate{}
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[48]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[50]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3179,7 +3295,7 @@ func (x *HeldIngressPromptBadgeColdGate) String() string {
 func (*HeldIngressPromptBadgeColdGate) ProtoMessage() {}
 
 func (x *HeldIngressPromptBadgeColdGate) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[48]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[50]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3192,7 +3308,7 @@ func (x *HeldIngressPromptBadgeColdGate) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HeldIngressPromptBadgeColdGate.ProtoReflect.Descriptor instead.
 func (*HeldIngressPromptBadgeColdGate) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{48}
+	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{50}
 }
 
 // The badge shows the workspace moving to another daemon holds it back.
@@ -3204,7 +3320,7 @@ type HeldIngressPromptBadgeMovedAway struct {
 
 func (x *HeldIngressPromptBadgeMovedAway) Reset() {
 	*x = HeldIngressPromptBadgeMovedAway{}
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[49]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[51]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3216,7 +3332,7 @@ func (x *HeldIngressPromptBadgeMovedAway) String() string {
 func (*HeldIngressPromptBadgeMovedAway) ProtoMessage() {}
 
 func (x *HeldIngressPromptBadgeMovedAway) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[49]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[51]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3229,7 +3345,7 @@ func (x *HeldIngressPromptBadgeMovedAway) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HeldIngressPromptBadgeMovedAway.ProtoReflect.Descriptor instead.
 func (*HeldIngressPromptBadgeMovedAway) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{49}
+	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{51}
 }
 
 // The badge shows the queue refused the entry by a fault.
@@ -3241,7 +3357,7 @@ type HeldIngressPromptBadgeRefused struct {
 
 func (x *HeldIngressPromptBadgeRefused) Reset() {
 	*x = HeldIngressPromptBadgeRefused{}
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[50]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[52]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3253,7 +3369,7 @@ func (x *HeldIngressPromptBadgeRefused) String() string {
 func (*HeldIngressPromptBadgeRefused) ProtoMessage() {}
 
 func (x *HeldIngressPromptBadgeRefused) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_held_proto_msgTypes[50]
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[52]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3266,7 +3382,7 @@ func (x *HeldIngressPromptBadgeRefused) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HeldIngressPromptBadgeRefused.ProtoReflect.Descriptor instead.
 func (*HeldIngressPromptBadgeRefused) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{50}
+	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{52}
 }
 
 var File_frontend_v1_feed_held_proto protoreflect.FileDescriptor
@@ -3280,7 +3396,7 @@ const file_frontend_v1_feed_held_proto_rawDesc = "" +
 	"\x02id\x18\x01 \x01(\v2\x13.frontend.v1.FeedIdR\x02id\x121\n" +
 	"\x06prompt\x18\x03 \x01(\v2\x17.frontend.v1.HeldPromptH\x00R\x06prompt\x12:\n" +
 	"\aingress\x18\x05 \x01(\v2\x1e.frontend.v1.HeldIngressPromptH\x00R\aingressB\x06\n" +
-	"\x04itemJ\x04\b\x02\x10\x03J\x04\b\x04\x10\x05R\x05mergeR\x05offer\"\x82\x0e\n" +
+	"\x04itemJ\x04\b\x02\x10\x03J\x04\b\x04\x10\x05R\x05mergeR\x05offer\"\xbd\x0e\n" +
 	"\n" +
 	"HeldPrompt\x12+\n" +
 	"\x04turn\x18\x01 \x01(\v2\x17.conversation.v1.TurnIdR\x04turn\x12-\n" +
@@ -3309,12 +3425,15 @@ const file_frontend_v1_feed_held_proto_rawDesc = "" +
 	"\tcoalesced\x18\x0f \x01(\v2 .frontend.v1.HeldPromptCoalescedR\tcoalesced\x12-\n" +
 	"\x03act\x18\x10 \x01(\v2\x1b.frontend.v1.HeldSessionActR\x03act\x12D\n" +
 	"\n" +
-	"fold_above\x18\x12 \x01(\v2 .frontend.v1.HeldPromptFoldAboveH\x02R\tfoldAbove\x88\x01\x01B\x10\n" +
+	"fold_above\x18\x12 \x01(\v2 .frontend.v1.HeldPromptFoldAboveH\x02R\tfoldAbove\x88\x01\x01\x129\n" +
+	"\bsent_now\x18\x1c \x01(\v2\x1e.frontend.v1.HeldPromptSentNowR\asentNowB\x10\n" +
 	"\x0eclassificationB\x06\n" +
 	"\x04holdB\r\n" +
 	"\v_fold_aboveJ\x04\b\n" +
 	"\x10\vJ\x04\b\x0e\x10\x0fR\n" +
-	"keep_aliveR\x06badges\"D\n" +
+	"keep_aliveR\x06badges\"0\n" +
+	"\x11HeldPromptSentNow\x12\x1b\n" +
+	"\twaits_for\x18\x01 \x01(\tR\bwaitsFor\"D\n" +
 	"\x13HeldPromptFoldAbove\x12-\n" +
 	"\x05above\x18\x01 \x01(\v2\x17.conversation.v1.TurnIdR\x05above\"\x15\n" +
 	"\x13HeldPromptCoalesced\"\xa7\x01\n" +
@@ -3325,7 +3444,7 @@ const file_frontend_v1_feed_held_proto_rawDesc = "" +
 	"\x13HeldSessionActModel\x12\x14\n" +
 	"\x05model\x18\x01 \x01(\tR\x05model\"2\n" +
 	"\x1cHeldSessionActPermissionMode\x12\x12\n" +
-	"\x04mode\x18\x01 \x01(\tR\x04mode\"\x84\n" +
+	"\x04mode\x18\x01 \x01(\tR\x04mode\"\xc6\n" +
 	"\n" +
 	"\x0fHeldPromptBadge\x12\x14\n" +
 	"\x05label\x18\x01 \x01(\tR\x05label\x12\x1b\n" +
@@ -3345,7 +3464,8 @@ const file_frontend_v1_feed_held_proto_rawDesc = "" +
 	"\x05merge\x18\r \x01(\v2!.frontend.v1.HeldPromptBadgeMergeH\x00R\x05merge\x12C\n" +
 	"\tcold_gate\x18\x0e \x01(\v2$.frontend.v1.HeldPromptBadgeColdGateH\x00R\bcoldGate\x12[\n" +
 	"\x11awaiting_delivery\x18\x0f \x01(\v2,.frontend.v1.HeldPromptBadgeAwaitingDeliveryH\x00R\x10awaitingDelivery\x12\\\n" +
-	"\x12cold_gate_answered\x18\x10 \x01(\v2,.frontend.v1.HeldPromptBadgeColdGateAnsweredH\x00R\x10coldGateAnsweredB\f\n" +
+	"\x12cold_gate_answered\x18\x10 \x01(\v2,.frontend.v1.HeldPromptBadgeColdGateAnsweredH\x00R\x10coldGateAnswered\x12@\n" +
+	"\bsent_now\x18\x12 \x01(\v2#.frontend.v1.HeldPromptBadgeSentNowH\x00R\asentNowB\f\n" +
 	"\n" +
 	"stands_forB\t\n" +
 	"\a_detail\"\x1c\n" +
@@ -3363,7 +3483,8 @@ const file_frontend_v1_feed_held_proto_rawDesc = "" +
 	"\x14HeldPromptBadgeMerge\"\x19\n" +
 	"\x17HeldPromptBadgeColdGate\"!\n" +
 	"\x1fHeldPromptBadgeAwaitingDelivery\"!\n" +
-	"\x1fHeldPromptBadgeColdGateAnswered\"2\n" +
+	"\x1fHeldPromptBadgeColdGateAnswered\"\x18\n" +
+	"\x16HeldPromptBadgeSentNow\"2\n" +
 	"\x14HeldPromptStatusNote\x12\x1a\n" +
 	"\bsentence\x18\x01 \x01(\tR\bsentence\"\x13\n" +
 	"\x11HeldPromptEditing\")\n" +
@@ -3431,129 +3552,133 @@ func file_frontend_v1_feed_held_proto_rawDescGZIP() []byte {
 	return file_frontend_v1_feed_held_proto_rawDescData
 }
 
-var file_frontend_v1_feed_held_proto_msgTypes = make([]protoimpl.MessageInfo, 51)
+var file_frontend_v1_feed_held_proto_msgTypes = make([]protoimpl.MessageInfo, 53)
 var file_frontend_v1_feed_held_proto_goTypes = []any{
 	(*FeedHeld)(nil),                             // 0: frontend.v1.FeedHeld
 	(*FeedHeldItem)(nil),                         // 1: frontend.v1.FeedHeldItem
 	(*HeldPrompt)(nil),                           // 2: frontend.v1.HeldPrompt
-	(*HeldPromptFoldAbove)(nil),                  // 3: frontend.v1.HeldPromptFoldAbove
-	(*HeldPromptCoalesced)(nil),                  // 4: frontend.v1.HeldPromptCoalesced
-	(*HeldSessionAct)(nil),                       // 5: frontend.v1.HeldSessionAct
-	(*HeldSessionActModel)(nil),                  // 6: frontend.v1.HeldSessionActModel
-	(*HeldSessionActPermissionMode)(nil),         // 7: frontend.v1.HeldSessionActPermissionMode
-	(*HeldPromptBadge)(nil),                      // 8: frontend.v1.HeldPromptBadge
-	(*HeldPromptBadgeClassifying)(nil),           // 9: frontend.v1.HeldPromptBadgeClassifying
-	(*HeldPromptBadgeInterject)(nil),             // 10: frontend.v1.HeldPromptBadgeInterject
-	(*HeldPromptBadgeAfterToolCall)(nil),         // 11: frontend.v1.HeldPromptBadgeAfterToolCall
-	(*HeldPromptBadgeHoldForTurnEnd)(nil),        // 12: frontend.v1.HeldPromptBadgeHoldForTurnEnd
-	(*HeldPromptBadgeUninterruptibleTurn)(nil),   // 13: frontend.v1.HeldPromptBadgeUninterruptibleTurn
-	(*HeldPromptBadgeClassificationError)(nil),   // 14: frontend.v1.HeldPromptBadgeClassificationError
-	(*HeldPromptBadgeEditing)(nil),               // 15: frontend.v1.HeldPromptBadgeEditing
-	(*HeldPromptBadgeShutdown)(nil),              // 16: frontend.v1.HeldPromptBadgeShutdown
-	(*HeldPromptBadgeBuildRefresh)(nil),          // 17: frontend.v1.HeldPromptBadgeBuildRefresh
-	(*HeldPromptBadgeReconnect)(nil),             // 18: frontend.v1.HeldPromptBadgeReconnect
-	(*HeldPromptBadgeLoading)(nil),               // 19: frontend.v1.HeldPromptBadgeLoading
-	(*HeldPromptBadgeMerge)(nil),                 // 20: frontend.v1.HeldPromptBadgeMerge
-	(*HeldPromptBadgeColdGate)(nil),              // 21: frontend.v1.HeldPromptBadgeColdGate
-	(*HeldPromptBadgeAwaitingDelivery)(nil),      // 22: frontend.v1.HeldPromptBadgeAwaitingDelivery
-	(*HeldPromptBadgeColdGateAnswered)(nil),      // 23: frontend.v1.HeldPromptBadgeColdGateAnswered
-	(*HeldPromptStatusNote)(nil),                 // 24: frontend.v1.HeldPromptStatusNote
-	(*HeldPromptEditing)(nil),                    // 25: frontend.v1.HeldPromptEditing
-	(*HeldPromptQueuedAt)(nil),                   // 26: frontend.v1.HeldPromptQueuedAt
-	(*HeldPromptClassifying)(nil),                // 27: frontend.v1.HeldPromptClassifying
-	(*HeldPromptInterject)(nil),                  // 28: frontend.v1.HeldPromptInterject
-	(*HeldPromptAfterToolCall)(nil),              // 29: frontend.v1.HeldPromptAfterToolCall
-	(*HeldPromptHoldForTurnEnd)(nil),             // 30: frontend.v1.HeldPromptHoldForTurnEnd
-	(*HeldPromptUninterruptibleTurn)(nil),        // 31: frontend.v1.HeldPromptUninterruptibleTurn
-	(*HeldPromptClassificationError)(nil),        // 32: frontend.v1.HeldPromptClassificationError
-	(*HeldPromptShutdownHold)(nil),               // 33: frontend.v1.HeldPromptShutdownHold
-	(*HeldPromptReconnectHold)(nil),              // 34: frontend.v1.HeldPromptReconnectHold
-	(*HeldPromptLoadingHold)(nil),                // 35: frontend.v1.HeldPromptLoadingHold
-	(*HeldPromptMergeHold)(nil),                  // 36: frontend.v1.HeldPromptMergeHold
-	(*HeldPromptDaemonHeld)(nil),                 // 37: frontend.v1.HeldPromptDaemonHeld
-	(*HeldPromptColdGateHold)(nil),               // 38: frontend.v1.HeldPromptColdGateHold
-	(*HeldPromptColdGateAnsweredHold)(nil),       // 39: frontend.v1.HeldPromptColdGateAnsweredHold
-	(*HeldPromptAwaitingDelivery)(nil),           // 40: frontend.v1.HeldPromptAwaitingDelivery
-	(*HeldPromptBuildRefreshHold)(nil),           // 41: frontend.v1.HeldPromptBuildRefreshHold
-	(*HeldIngressPrompt)(nil),                    // 42: frontend.v1.HeldIngressPrompt
-	(*HeldIngressPromptQueuedAt)(nil),            // 43: frontend.v1.HeldIngressPromptQueuedAt
-	(*HeldIngressPromptBadge)(nil),               // 44: frontend.v1.HeldIngressPromptBadge
-	(*HeldIngressPromptBadgeAwaitingIntake)(nil), // 45: frontend.v1.HeldIngressPromptBadgeAwaitingIntake
-	(*HeldIngressPromptBadgeNoSession)(nil),      // 46: frontend.v1.HeldIngressPromptBadgeNoSession
-	(*HeldIngressPromptBadgeMerge)(nil),          // 47: frontend.v1.HeldIngressPromptBadgeMerge
-	(*HeldIngressPromptBadgeColdGate)(nil),       // 48: frontend.v1.HeldIngressPromptBadgeColdGate
-	(*HeldIngressPromptBadgeMovedAway)(nil),      // 49: frontend.v1.HeldIngressPromptBadgeMovedAway
-	(*HeldIngressPromptBadgeRefused)(nil),        // 50: frontend.v1.HeldIngressPromptBadgeRefused
-	(*FeedId)(nil),                               // 51: frontend.v1.FeedId
-	(*v1.TurnId)(nil),                            // 52: conversation.v1.TurnId
-	(*v1.UserSaid)(nil),                          // 53: conversation.v1.UserSaid
-	(*FeedUserPromptBody)(nil),                   // 54: frontend.v1.FeedUserPromptBody
-	(v1.SessionCommand)(0),                       // 55: conversation.v1.SessionCommand
+	(*HeldPromptSentNow)(nil),                    // 3: frontend.v1.HeldPromptSentNow
+	(*HeldPromptFoldAbove)(nil),                  // 4: frontend.v1.HeldPromptFoldAbove
+	(*HeldPromptCoalesced)(nil),                  // 5: frontend.v1.HeldPromptCoalesced
+	(*HeldSessionAct)(nil),                       // 6: frontend.v1.HeldSessionAct
+	(*HeldSessionActModel)(nil),                  // 7: frontend.v1.HeldSessionActModel
+	(*HeldSessionActPermissionMode)(nil),         // 8: frontend.v1.HeldSessionActPermissionMode
+	(*HeldPromptBadge)(nil),                      // 9: frontend.v1.HeldPromptBadge
+	(*HeldPromptBadgeClassifying)(nil),           // 10: frontend.v1.HeldPromptBadgeClassifying
+	(*HeldPromptBadgeInterject)(nil),             // 11: frontend.v1.HeldPromptBadgeInterject
+	(*HeldPromptBadgeAfterToolCall)(nil),         // 12: frontend.v1.HeldPromptBadgeAfterToolCall
+	(*HeldPromptBadgeHoldForTurnEnd)(nil),        // 13: frontend.v1.HeldPromptBadgeHoldForTurnEnd
+	(*HeldPromptBadgeUninterruptibleTurn)(nil),   // 14: frontend.v1.HeldPromptBadgeUninterruptibleTurn
+	(*HeldPromptBadgeClassificationError)(nil),   // 15: frontend.v1.HeldPromptBadgeClassificationError
+	(*HeldPromptBadgeEditing)(nil),               // 16: frontend.v1.HeldPromptBadgeEditing
+	(*HeldPromptBadgeShutdown)(nil),              // 17: frontend.v1.HeldPromptBadgeShutdown
+	(*HeldPromptBadgeBuildRefresh)(nil),          // 18: frontend.v1.HeldPromptBadgeBuildRefresh
+	(*HeldPromptBadgeReconnect)(nil),             // 19: frontend.v1.HeldPromptBadgeReconnect
+	(*HeldPromptBadgeLoading)(nil),               // 20: frontend.v1.HeldPromptBadgeLoading
+	(*HeldPromptBadgeMerge)(nil),                 // 21: frontend.v1.HeldPromptBadgeMerge
+	(*HeldPromptBadgeColdGate)(nil),              // 22: frontend.v1.HeldPromptBadgeColdGate
+	(*HeldPromptBadgeAwaitingDelivery)(nil),      // 23: frontend.v1.HeldPromptBadgeAwaitingDelivery
+	(*HeldPromptBadgeColdGateAnswered)(nil),      // 24: frontend.v1.HeldPromptBadgeColdGateAnswered
+	(*HeldPromptBadgeSentNow)(nil),               // 25: frontend.v1.HeldPromptBadgeSentNow
+	(*HeldPromptStatusNote)(nil),                 // 26: frontend.v1.HeldPromptStatusNote
+	(*HeldPromptEditing)(nil),                    // 27: frontend.v1.HeldPromptEditing
+	(*HeldPromptQueuedAt)(nil),                   // 28: frontend.v1.HeldPromptQueuedAt
+	(*HeldPromptClassifying)(nil),                // 29: frontend.v1.HeldPromptClassifying
+	(*HeldPromptInterject)(nil),                  // 30: frontend.v1.HeldPromptInterject
+	(*HeldPromptAfterToolCall)(nil),              // 31: frontend.v1.HeldPromptAfterToolCall
+	(*HeldPromptHoldForTurnEnd)(nil),             // 32: frontend.v1.HeldPromptHoldForTurnEnd
+	(*HeldPromptUninterruptibleTurn)(nil),        // 33: frontend.v1.HeldPromptUninterruptibleTurn
+	(*HeldPromptClassificationError)(nil),        // 34: frontend.v1.HeldPromptClassificationError
+	(*HeldPromptShutdownHold)(nil),               // 35: frontend.v1.HeldPromptShutdownHold
+	(*HeldPromptReconnectHold)(nil),              // 36: frontend.v1.HeldPromptReconnectHold
+	(*HeldPromptLoadingHold)(nil),                // 37: frontend.v1.HeldPromptLoadingHold
+	(*HeldPromptMergeHold)(nil),                  // 38: frontend.v1.HeldPromptMergeHold
+	(*HeldPromptDaemonHeld)(nil),                 // 39: frontend.v1.HeldPromptDaemonHeld
+	(*HeldPromptColdGateHold)(nil),               // 40: frontend.v1.HeldPromptColdGateHold
+	(*HeldPromptColdGateAnsweredHold)(nil),       // 41: frontend.v1.HeldPromptColdGateAnsweredHold
+	(*HeldPromptAwaitingDelivery)(nil),           // 42: frontend.v1.HeldPromptAwaitingDelivery
+	(*HeldPromptBuildRefreshHold)(nil),           // 43: frontend.v1.HeldPromptBuildRefreshHold
+	(*HeldIngressPrompt)(nil),                    // 44: frontend.v1.HeldIngressPrompt
+	(*HeldIngressPromptQueuedAt)(nil),            // 45: frontend.v1.HeldIngressPromptQueuedAt
+	(*HeldIngressPromptBadge)(nil),               // 46: frontend.v1.HeldIngressPromptBadge
+	(*HeldIngressPromptBadgeAwaitingIntake)(nil), // 47: frontend.v1.HeldIngressPromptBadgeAwaitingIntake
+	(*HeldIngressPromptBadgeNoSession)(nil),      // 48: frontend.v1.HeldIngressPromptBadgeNoSession
+	(*HeldIngressPromptBadgeMerge)(nil),          // 49: frontend.v1.HeldIngressPromptBadgeMerge
+	(*HeldIngressPromptBadgeColdGate)(nil),       // 50: frontend.v1.HeldIngressPromptBadgeColdGate
+	(*HeldIngressPromptBadgeMovedAway)(nil),      // 51: frontend.v1.HeldIngressPromptBadgeMovedAway
+	(*HeldIngressPromptBadgeRefused)(nil),        // 52: frontend.v1.HeldIngressPromptBadgeRefused
+	(*FeedId)(nil),                               // 53: frontend.v1.FeedId
+	(*v1.TurnId)(nil),                            // 54: conversation.v1.TurnId
+	(*v1.UserSaid)(nil),                          // 55: conversation.v1.UserSaid
+	(*FeedUserPromptBody)(nil),                   // 56: frontend.v1.FeedUserPromptBody
+	(v1.SessionCommand)(0),                       // 57: conversation.v1.SessionCommand
 }
 var file_frontend_v1_feed_held_proto_depIdxs = []int32{
 	1,  // 0: frontend.v1.FeedHeld.items:type_name -> frontend.v1.FeedHeldItem
-	51, // 1: frontend.v1.FeedHeldItem.id:type_name -> frontend.v1.FeedId
+	53, // 1: frontend.v1.FeedHeldItem.id:type_name -> frontend.v1.FeedId
 	2,  // 2: frontend.v1.FeedHeldItem.prompt:type_name -> frontend.v1.HeldPrompt
-	42, // 3: frontend.v1.FeedHeldItem.ingress:type_name -> frontend.v1.HeldIngressPrompt
-	52, // 4: frontend.v1.HeldPrompt.turn:type_name -> conversation.v1.TurnId
-	53, // 5: frontend.v1.HeldPrompt.said:type_name -> conversation.v1.UserSaid
-	54, // 6: frontend.v1.HeldPrompt.body:type_name -> frontend.v1.FeedUserPromptBody
-	26, // 7: frontend.v1.HeldPrompt.queued_at:type_name -> frontend.v1.HeldPromptQueuedAt
-	27, // 8: frontend.v1.HeldPrompt.classifying:type_name -> frontend.v1.HeldPromptClassifying
-	28, // 9: frontend.v1.HeldPrompt.interject:type_name -> frontend.v1.HeldPromptInterject
-	30, // 10: frontend.v1.HeldPrompt.hold_for_turn_end:type_name -> frontend.v1.HeldPromptHoldForTurnEnd
-	29, // 11: frontend.v1.HeldPrompt.after_tool_call:type_name -> frontend.v1.HeldPromptAfterToolCall
-	31, // 12: frontend.v1.HeldPrompt.uninterruptible_turn:type_name -> frontend.v1.HeldPromptUninterruptibleTurn
-	32, // 13: frontend.v1.HeldPrompt.classification_error:type_name -> frontend.v1.HeldPromptClassificationError
-	37, // 14: frontend.v1.HeldPrompt.daemon_held:type_name -> frontend.v1.HeldPromptDaemonHeld
-	40, // 15: frontend.v1.HeldPrompt.awaiting_delivery:type_name -> frontend.v1.HeldPromptAwaitingDelivery
-	33, // 16: frontend.v1.HeldPrompt.shutdown:type_name -> frontend.v1.HeldPromptShutdownHold
-	34, // 17: frontend.v1.HeldPrompt.reconnect:type_name -> frontend.v1.HeldPromptReconnectHold
-	35, // 18: frontend.v1.HeldPrompt.loading:type_name -> frontend.v1.HeldPromptLoadingHold
-	41, // 19: frontend.v1.HeldPrompt.build_refresh:type_name -> frontend.v1.HeldPromptBuildRefreshHold
-	36, // 20: frontend.v1.HeldPrompt.merge:type_name -> frontend.v1.HeldPromptMergeHold
-	38, // 21: frontend.v1.HeldPrompt.cold_gate:type_name -> frontend.v1.HeldPromptColdGateHold
-	39, // 22: frontend.v1.HeldPrompt.cold_gate_answered:type_name -> frontend.v1.HeldPromptColdGateAnsweredHold
-	25, // 23: frontend.v1.HeldPrompt.editing:type_name -> frontend.v1.HeldPromptEditing
-	8,  // 24: frontend.v1.HeldPrompt.badge:type_name -> frontend.v1.HeldPromptBadge
-	24, // 25: frontend.v1.HeldPrompt.notes:type_name -> frontend.v1.HeldPromptStatusNote
-	4,  // 26: frontend.v1.HeldPrompt.coalesced:type_name -> frontend.v1.HeldPromptCoalesced
-	5,  // 27: frontend.v1.HeldPrompt.act:type_name -> frontend.v1.HeldSessionAct
-	3,  // 28: frontend.v1.HeldPrompt.fold_above:type_name -> frontend.v1.HeldPromptFoldAbove
-	52, // 29: frontend.v1.HeldPromptFoldAbove.above:type_name -> conversation.v1.TurnId
-	6,  // 30: frontend.v1.HeldSessionAct.model:type_name -> frontend.v1.HeldSessionActModel
-	7,  // 31: frontend.v1.HeldSessionAct.permission_mode:type_name -> frontend.v1.HeldSessionActPermissionMode
-	9,  // 32: frontend.v1.HeldPromptBadge.classifying:type_name -> frontend.v1.HeldPromptBadgeClassifying
-	10, // 33: frontend.v1.HeldPromptBadge.interject:type_name -> frontend.v1.HeldPromptBadgeInterject
-	11, // 34: frontend.v1.HeldPromptBadge.after_tool_call:type_name -> frontend.v1.HeldPromptBadgeAfterToolCall
-	12, // 35: frontend.v1.HeldPromptBadge.hold_for_turn_end:type_name -> frontend.v1.HeldPromptBadgeHoldForTurnEnd
-	13, // 36: frontend.v1.HeldPromptBadge.uninterruptible_turn:type_name -> frontend.v1.HeldPromptBadgeUninterruptibleTurn
-	14, // 37: frontend.v1.HeldPromptBadge.classification_error:type_name -> frontend.v1.HeldPromptBadgeClassificationError
-	15, // 38: frontend.v1.HeldPromptBadge.editing:type_name -> frontend.v1.HeldPromptBadgeEditing
-	16, // 39: frontend.v1.HeldPromptBadge.shutdown:type_name -> frontend.v1.HeldPromptBadgeShutdown
-	17, // 40: frontend.v1.HeldPromptBadge.build_refresh:type_name -> frontend.v1.HeldPromptBadgeBuildRefresh
-	18, // 41: frontend.v1.HeldPromptBadge.reconnect:type_name -> frontend.v1.HeldPromptBadgeReconnect
-	19, // 42: frontend.v1.HeldPromptBadge.loading:type_name -> frontend.v1.HeldPromptBadgeLoading
-	20, // 43: frontend.v1.HeldPromptBadge.merge:type_name -> frontend.v1.HeldPromptBadgeMerge
-	21, // 44: frontend.v1.HeldPromptBadge.cold_gate:type_name -> frontend.v1.HeldPromptBadgeColdGate
-	22, // 45: frontend.v1.HeldPromptBadge.awaiting_delivery:type_name -> frontend.v1.HeldPromptBadgeAwaitingDelivery
-	23, // 46: frontend.v1.HeldPromptBadge.cold_gate_answered:type_name -> frontend.v1.HeldPromptBadgeColdGateAnswered
-	55, // 47: frontend.v1.HeldPromptUninterruptibleTurn.command:type_name -> conversation.v1.SessionCommand
-	53, // 48: frontend.v1.HeldIngressPrompt.said:type_name -> conversation.v1.UserSaid
-	54, // 49: frontend.v1.HeldIngressPrompt.body:type_name -> frontend.v1.FeedUserPromptBody
-	43, // 50: frontend.v1.HeldIngressPrompt.queued_at:type_name -> frontend.v1.HeldIngressPromptQueuedAt
-	44, // 51: frontend.v1.HeldIngressPrompt.badge:type_name -> frontend.v1.HeldIngressPromptBadge
-	45, // 52: frontend.v1.HeldIngressPromptBadge.awaiting_intake:type_name -> frontend.v1.HeldIngressPromptBadgeAwaitingIntake
-	46, // 53: frontend.v1.HeldIngressPromptBadge.no_session:type_name -> frontend.v1.HeldIngressPromptBadgeNoSession
-	47, // 54: frontend.v1.HeldIngressPromptBadge.merge:type_name -> frontend.v1.HeldIngressPromptBadgeMerge
-	48, // 55: frontend.v1.HeldIngressPromptBadge.cold_gate:type_name -> frontend.v1.HeldIngressPromptBadgeColdGate
-	49, // 56: frontend.v1.HeldIngressPromptBadge.moved_away:type_name -> frontend.v1.HeldIngressPromptBadgeMovedAway
-	50, // 57: frontend.v1.HeldIngressPromptBadge.refused:type_name -> frontend.v1.HeldIngressPromptBadgeRefused
-	58, // [58:58] is the sub-list for method output_type
-	58, // [58:58] is the sub-list for method input_type
-	58, // [58:58] is the sub-list for extension type_name
-	58, // [58:58] is the sub-list for extension extendee
-	0,  // [0:58] is the sub-list for field type_name
+	44, // 3: frontend.v1.FeedHeldItem.ingress:type_name -> frontend.v1.HeldIngressPrompt
+	54, // 4: frontend.v1.HeldPrompt.turn:type_name -> conversation.v1.TurnId
+	55, // 5: frontend.v1.HeldPrompt.said:type_name -> conversation.v1.UserSaid
+	56, // 6: frontend.v1.HeldPrompt.body:type_name -> frontend.v1.FeedUserPromptBody
+	28, // 7: frontend.v1.HeldPrompt.queued_at:type_name -> frontend.v1.HeldPromptQueuedAt
+	29, // 8: frontend.v1.HeldPrompt.classifying:type_name -> frontend.v1.HeldPromptClassifying
+	30, // 9: frontend.v1.HeldPrompt.interject:type_name -> frontend.v1.HeldPromptInterject
+	32, // 10: frontend.v1.HeldPrompt.hold_for_turn_end:type_name -> frontend.v1.HeldPromptHoldForTurnEnd
+	31, // 11: frontend.v1.HeldPrompt.after_tool_call:type_name -> frontend.v1.HeldPromptAfterToolCall
+	33, // 12: frontend.v1.HeldPrompt.uninterruptible_turn:type_name -> frontend.v1.HeldPromptUninterruptibleTurn
+	34, // 13: frontend.v1.HeldPrompt.classification_error:type_name -> frontend.v1.HeldPromptClassificationError
+	39, // 14: frontend.v1.HeldPrompt.daemon_held:type_name -> frontend.v1.HeldPromptDaemonHeld
+	42, // 15: frontend.v1.HeldPrompt.awaiting_delivery:type_name -> frontend.v1.HeldPromptAwaitingDelivery
+	35, // 16: frontend.v1.HeldPrompt.shutdown:type_name -> frontend.v1.HeldPromptShutdownHold
+	36, // 17: frontend.v1.HeldPrompt.reconnect:type_name -> frontend.v1.HeldPromptReconnectHold
+	37, // 18: frontend.v1.HeldPrompt.loading:type_name -> frontend.v1.HeldPromptLoadingHold
+	43, // 19: frontend.v1.HeldPrompt.build_refresh:type_name -> frontend.v1.HeldPromptBuildRefreshHold
+	38, // 20: frontend.v1.HeldPrompt.merge:type_name -> frontend.v1.HeldPromptMergeHold
+	40, // 21: frontend.v1.HeldPrompt.cold_gate:type_name -> frontend.v1.HeldPromptColdGateHold
+	41, // 22: frontend.v1.HeldPrompt.cold_gate_answered:type_name -> frontend.v1.HeldPromptColdGateAnsweredHold
+	27, // 23: frontend.v1.HeldPrompt.editing:type_name -> frontend.v1.HeldPromptEditing
+	9,  // 24: frontend.v1.HeldPrompt.badge:type_name -> frontend.v1.HeldPromptBadge
+	26, // 25: frontend.v1.HeldPrompt.notes:type_name -> frontend.v1.HeldPromptStatusNote
+	5,  // 26: frontend.v1.HeldPrompt.coalesced:type_name -> frontend.v1.HeldPromptCoalesced
+	6,  // 27: frontend.v1.HeldPrompt.act:type_name -> frontend.v1.HeldSessionAct
+	4,  // 28: frontend.v1.HeldPrompt.fold_above:type_name -> frontend.v1.HeldPromptFoldAbove
+	3,  // 29: frontend.v1.HeldPrompt.sent_now:type_name -> frontend.v1.HeldPromptSentNow
+	54, // 30: frontend.v1.HeldPromptFoldAbove.above:type_name -> conversation.v1.TurnId
+	7,  // 31: frontend.v1.HeldSessionAct.model:type_name -> frontend.v1.HeldSessionActModel
+	8,  // 32: frontend.v1.HeldSessionAct.permission_mode:type_name -> frontend.v1.HeldSessionActPermissionMode
+	10, // 33: frontend.v1.HeldPromptBadge.classifying:type_name -> frontend.v1.HeldPromptBadgeClassifying
+	11, // 34: frontend.v1.HeldPromptBadge.interject:type_name -> frontend.v1.HeldPromptBadgeInterject
+	12, // 35: frontend.v1.HeldPromptBadge.after_tool_call:type_name -> frontend.v1.HeldPromptBadgeAfterToolCall
+	13, // 36: frontend.v1.HeldPromptBadge.hold_for_turn_end:type_name -> frontend.v1.HeldPromptBadgeHoldForTurnEnd
+	14, // 37: frontend.v1.HeldPromptBadge.uninterruptible_turn:type_name -> frontend.v1.HeldPromptBadgeUninterruptibleTurn
+	15, // 38: frontend.v1.HeldPromptBadge.classification_error:type_name -> frontend.v1.HeldPromptBadgeClassificationError
+	16, // 39: frontend.v1.HeldPromptBadge.editing:type_name -> frontend.v1.HeldPromptBadgeEditing
+	17, // 40: frontend.v1.HeldPromptBadge.shutdown:type_name -> frontend.v1.HeldPromptBadgeShutdown
+	18, // 41: frontend.v1.HeldPromptBadge.build_refresh:type_name -> frontend.v1.HeldPromptBadgeBuildRefresh
+	19, // 42: frontend.v1.HeldPromptBadge.reconnect:type_name -> frontend.v1.HeldPromptBadgeReconnect
+	20, // 43: frontend.v1.HeldPromptBadge.loading:type_name -> frontend.v1.HeldPromptBadgeLoading
+	21, // 44: frontend.v1.HeldPromptBadge.merge:type_name -> frontend.v1.HeldPromptBadgeMerge
+	22, // 45: frontend.v1.HeldPromptBadge.cold_gate:type_name -> frontend.v1.HeldPromptBadgeColdGate
+	23, // 46: frontend.v1.HeldPromptBadge.awaiting_delivery:type_name -> frontend.v1.HeldPromptBadgeAwaitingDelivery
+	24, // 47: frontend.v1.HeldPromptBadge.cold_gate_answered:type_name -> frontend.v1.HeldPromptBadgeColdGateAnswered
+	25, // 48: frontend.v1.HeldPromptBadge.sent_now:type_name -> frontend.v1.HeldPromptBadgeSentNow
+	57, // 49: frontend.v1.HeldPromptUninterruptibleTurn.command:type_name -> conversation.v1.SessionCommand
+	55, // 50: frontend.v1.HeldIngressPrompt.said:type_name -> conversation.v1.UserSaid
+	56, // 51: frontend.v1.HeldIngressPrompt.body:type_name -> frontend.v1.FeedUserPromptBody
+	45, // 52: frontend.v1.HeldIngressPrompt.queued_at:type_name -> frontend.v1.HeldIngressPromptQueuedAt
+	46, // 53: frontend.v1.HeldIngressPrompt.badge:type_name -> frontend.v1.HeldIngressPromptBadge
+	47, // 54: frontend.v1.HeldIngressPromptBadge.awaiting_intake:type_name -> frontend.v1.HeldIngressPromptBadgeAwaitingIntake
+	48, // 55: frontend.v1.HeldIngressPromptBadge.no_session:type_name -> frontend.v1.HeldIngressPromptBadgeNoSession
+	49, // 56: frontend.v1.HeldIngressPromptBadge.merge:type_name -> frontend.v1.HeldIngressPromptBadgeMerge
+	50, // 57: frontend.v1.HeldIngressPromptBadge.cold_gate:type_name -> frontend.v1.HeldIngressPromptBadgeColdGate
+	51, // 58: frontend.v1.HeldIngressPromptBadge.moved_away:type_name -> frontend.v1.HeldIngressPromptBadgeMovedAway
+	52, // 59: frontend.v1.HeldIngressPromptBadge.refused:type_name -> frontend.v1.HeldIngressPromptBadgeRefused
+	60, // [60:60] is the sub-list for method output_type
+	60, // [60:60] is the sub-list for method input_type
+	60, // [60:60] is the sub-list for extension type_name
+	60, // [60:60] is the sub-list for extension extendee
+	0,  // [0:60] is the sub-list for field type_name
 }
 
 func init() { file_frontend_v1_feed_held_proto_init() }
@@ -3583,11 +3708,11 @@ func file_frontend_v1_feed_held_proto_init() {
 		(*HeldPrompt_ColdGate)(nil),
 		(*HeldPrompt_ColdGateAnswered)(nil),
 	}
-	file_frontend_v1_feed_held_proto_msgTypes[5].OneofWrappers = []any{
+	file_frontend_v1_feed_held_proto_msgTypes[6].OneofWrappers = []any{
 		(*HeldSessionAct_Model)(nil),
 		(*HeldSessionAct_PermissionMode)(nil),
 	}
-	file_frontend_v1_feed_held_proto_msgTypes[8].OneofWrappers = []any{
+	file_frontend_v1_feed_held_proto_msgTypes[9].OneofWrappers = []any{
 		(*HeldPromptBadge_Classifying)(nil),
 		(*HeldPromptBadge_Interject)(nil),
 		(*HeldPromptBadge_AfterToolCall)(nil),
@@ -3603,8 +3728,9 @@ func file_frontend_v1_feed_held_proto_init() {
 		(*HeldPromptBadge_ColdGate)(nil),
 		(*HeldPromptBadge_AwaitingDelivery)(nil),
 		(*HeldPromptBadge_ColdGateAnswered)(nil),
+		(*HeldPromptBadge_SentNow)(nil),
 	}
-	file_frontend_v1_feed_held_proto_msgTypes[44].OneofWrappers = []any{
+	file_frontend_v1_feed_held_proto_msgTypes[46].OneofWrappers = []any{
 		(*HeldIngressPromptBadge_AwaitingIntake)(nil),
 		(*HeldIngressPromptBadge_NoSession)(nil),
 		(*HeldIngressPromptBadge_Merge)(nil),
@@ -3618,7 +3744,7 @@ func file_frontend_v1_feed_held_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_frontend_v1_feed_held_proto_rawDesc), len(file_frontend_v1_feed_held_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   51,
+			NumMessages:   53,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

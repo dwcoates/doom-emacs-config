@@ -337,6 +337,17 @@ func (q *queue) publishEdit(ws ids.WorkspaceID, editing ids.TurnID) {
 	q.deps.PublishHost(ws)
 }
 
+// editing answers the turn the workspace's standing edit stands on, empty when
+// none stands.
+func (q *queue) editing(ws ids.WorkspaceID) ids.TurnID {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if state, ok := q.states[ws]; ok && state.edit != nil {
+		return state.edit.Turn
+	}
+	return ""
+}
+
 // withheldByEdit reports whether the workspace's standing edit withholds HELD
 // from delivery: it is the edited prompt, or it was queued after it. The
 // order is the tray's own — queued_at, then the turn id — so what the reader

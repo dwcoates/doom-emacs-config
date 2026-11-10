@@ -318,21 +318,21 @@ func TestHeldForTurnEndPromptsDeliverFifoAfterTheTurnEnds(t *testing.T) {
 // A prompt held behind an uninterruptible context cut
 // ---------------------------------------------------------------------------
 
-// TestAPromptHeldBehindAnUninterruptibleContextCutSkipsClassifyingAndRefusesRelease
+// TestAPromptHeldBehindAnUninterruptibleContextCutSkipsClassifyingAndItsReleaseWaits
 // covers audit-2 critique 2: a prompt arriving behind a running /clear or
 // /compact is classified before any model round trip
 // (internal/promptqueue/classify.go's judge checks state.uninterruptible
 // FIRST), so the tray's FIRST push for the entry already carries
 // uninterruptible_turn -- there is no transient classifying arm to observe,
 // unlike the ordinary-turn case TestAHeldPromptShowsClassifyingThenAVerdictFromTheFakeHeuristic
-// covers. A force-through is refused (there is no interrupt this entry could
-// ride), and delivery still happens FIFO once the cut's own turn concludes.
-func TestAPromptHeldBehindAnUninterruptibleContextCutSkipsClassifyingAndRefusesRelease(t *testing.T) {
+// covers. A force-through is accepted and waits for the cut (nothing interrupts
+// a context cut), its card says so, and it goes once the cut's own turn
+// concludes.
+func TestAPromptHeldBehindAnUninterruptibleContextCutSkipsClassifyingAndItsReleaseWaits(t *testing.T) {
 	t.Parallel()
 	// Arrange: /clear runs as the turn in front, marking it uninterruptible
 	// (internal/promptqueue/acts.go's runContextCut).
 	f := newOpened(t, harness.Opts{})
-	f.d.ExpectWarnings("daemon.promptqueue.release")
 	cutResp := f.submit("/clear", "k-clear-running", origin)
 	if cutResp.GetError() != nil {
 		t.Fatalf("SubmitPrompt(/clear) = %v, want a success", cutResp)
@@ -368,14 +368,14 @@ func TestAPromptHeldBehindAnUninterruptibleContextCutSkipsClassifyingAndRefusesR
 		Action:    &agentreplv1.UpdateHeldPromptRequest_Release{Release: &agentreplv1.UpdateHeldPromptRelease{}},
 	}))
 
-	// Assert: `release_refused` is a LANDED arm, so the refusal is typed, and
-	// no KillTurn is ever sent for this entry (there is nothing to interject).
-	if err != nil {
-		t.Fatalf("UpdateHeldPrompt{release} on an uninterruptible_turn entry = error %v, want the typed release_refused answer", err)
+	// Assert: the release is accepted, the card says it waits for the cut,
+	// and no KillTurn is ever sent for this entry (nothing interrupts a cut).
+	if err != nil || relResp.Msg.GetSuccess() == nil {
+		t.Fatalf("UpdateHeldPrompt{release} on an uninterruptible_turn entry = (%v, %v), want success", relResp, err)
 	}
-	if relResp.Msg.GetError().GetReleaseRefused() == nil {
-		t.Fatalf("UpdateHeldPrompt{release} on an uninterruptible_turn entry = %v, want error.release_refused", relResp.Msg)
-	}
+	awaitView(t, f, holds, "the card's Send now waiting for the /clear", func(tray *frontendv1.FeedHeld) bool {
+		return promptHeldEntry(tray, turn2).GetSentNow().GetWaitsFor() == "the /clear running now ends"
+	})
 	expectNoRPC(t, f.shim, harness.RPCKillTurn)
 
 	// Act: the cut's own turn ends naturally.
@@ -393,16 +393,16 @@ func TestAPromptHeldBehindAnUninterruptibleContextCutSkipsClassifyingAndRefusesR
 // A revival-time held prompt carries hold.reconnect
 // ---------------------------------------------------------------------------
 
-// TestARevivalTimeHeldPromptCarriesTheReconnectHoldAndRefusesRelease
+// TestARevivalTimeHeldPromptCarriesTheReconnectHoldAndItsReleaseWaits
 // covers audit-2 critique 3: the same revival state
 // TestCloseWorkspaceWithAHeldPromptRefuses (session_lifecycle_test.go) builds
 // to exercise CloseWorkspace's blocked answer is read here for the tray's own
-// hold arm and UpdateHeldPrompt's release refusal on it
+// hold arm and UpdateHeldPrompt's release on it
 // (internal/promptqueue/submit.go's holdForLease projects HoldReconnect
 // for a hibernate-holder lease; internal/promptqueue/holdactions.go's Release
-// refuses a force-through on it -- there is nothing live to send an interrupt
-// to yet).
-func TestARevivalTimeHeldPromptCarriesTheReconnectHoldAndRefusesRelease(t *testing.T) {
+// accepts a force-through on it and waits for the session to come up -- there
+// is nothing live to send to yet).
+func TestARevivalTimeHeldPromptCarriesTheReconnectHoldAndItsReleaseWaits(t *testing.T) {
 	t.Parallel()
 	// Arrange: hibernate an idle session, then submit a revival prompt while
 	// the revival's new shim withholds its diagnostics, so the lease is still
@@ -412,7 +412,7 @@ func TestARevivalTimeHeldPromptCarriesTheReconnectHoldAndRefusesRelease(t *testi
 	// ending, and the lost link is recorded as the session's own fault. Every
 	// one of these is that one stand-down, honestly recorded once per observer
 	// -- the same set TestCloseWorkspaceWithAHeldPromptRefuses declares.
-	f := newOpened(t, harness.Opts{IdleCutoffMS: 50, ExpectWarnings: []string{"daemon.sessionwatcher.reopen", "daemon.promptqueue.release", "daemon.shimclient.exit", "daemon.shimclient.kill_session", "daemon.shimclient.redial", "daemon.workspace.bring_up", "daemon.sessionwatcher.watch_session", "daemon.sessionwatcher.watch_agent", "daemon.sessionwatcher.link_fault", "daemon.health.open_fault"}})
+	f := newOpened(t, harness.Opts{IdleCutoffMS: 50, ExpectWarnings: []string{"daemon.sessionwatcher.reopen", "daemon.shimclient.exit", "daemon.shimclient.kill_session", "daemon.shimclient.redial", "daemon.workspace.bring_up", "daemon.sessionwatcher.watch_session", "daemon.sessionwatcher.watch_agent", "daemon.sessionwatcher.link_fault", "daemon.health.open_fault"}})
 	// THE START IS READ FROM THE SHIM'S DURABLE LOG, never popped live. At a
 	// 50ms cutoff the sweep can hibernate the shim, which then exits, before
 	// this line runs, and a live pop then met a closed control socket
@@ -447,13 +447,13 @@ func TestARevivalTimeHeldPromptCarriesTheReconnectHoldAndRefusesRelease(t *testi
 		Action:    &agentreplv1.UpdateHeldPromptRequest_Release{Release: &agentreplv1.UpdateHeldPromptRelease{}},
 	}))
 
-	// Assert: `release_refused` is a LANDED arm.
-	if err != nil {
-		t.Fatalf("UpdateHeldPrompt{release} on a reconnect hold = error %v, want the typed release_refused answer", err)
+	// Assert: the release is accepted and the card says it waits.
+	if err != nil || relResp.Msg.GetSuccess() == nil {
+		t.Fatalf("UpdateHeldPrompt{release} on a reconnect hold = (%v, %v), want success", relResp, err)
 	}
-	if relResp.Msg.GetError().GetReleaseRefused() == nil {
-		t.Fatalf("UpdateHeldPrompt{release} on a reconnect hold = %v, want error.release_refused", relResp.Msg)
-	}
+	awaitView(t, f, holds, "the card's Send now waiting for the session", func(tray *frontendv1.FeedHeld) bool {
+		return promptHeldEntry(tray, turn).GetSentNow() != nil
+	})
 }
 
 // ---------------------------------------------------------------------------

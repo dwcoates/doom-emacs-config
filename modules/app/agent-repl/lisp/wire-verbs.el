@@ -5662,6 +5662,24 @@ reaching the wire."
     (agent-repl-wire-verbs--check-keys message json '(address))
     (list :address (agent-repl-wire-verbs--decode-string message 'address json))))
 
+(defun agent-repl-wire-decode-update-held-prompt-release-refused (json)
+  "Decode UpdateHeldPromptReleaseRefused from JSON into (:cause (:arm ARM :value nil)).
+THE ARM IS THE CAUSE, so an unset cause is a contract breach."
+  (let ((message "UpdateHeldPromptReleaseRefused"))
+    (agent-repl-wire-verbs--check-keys
+     message json '(beingEdited behindEdit coldGate sessionRefused))
+    (list :cause
+          (agent-repl-wire-verbs--decode-oneof
+           message "cause" json
+           (list (list 'beingEdited :being-edited
+                       (agent-repl-wire-verbs--empty-arm "UpdateHeldPromptReleaseRefusedBeingEdited"))
+                 (list 'behindEdit :behind-edit
+                       (agent-repl-wire-verbs--empty-arm "UpdateHeldPromptReleaseRefusedBehindEdit"))
+                 (list 'coldGate :cold-gate
+                       (agent-repl-wire-verbs--empty-arm "UpdateHeldPromptReleaseRefusedColdGate"))
+                 (list 'sessionRefused :session-refused
+                       (agent-repl-wire-verbs--empty-arm "UpdateHeldPromptReleaseRefusedSessionRefused")))))))
+
 (defun agent-repl-wire-decode-update-held-prompt-error (json)
   "Decode UpdateHeldPromptError from JSON into (:cause (:arm ARM :value V)).
 THE ARM IS THE REFUSAL, so an unset cause is a contract breach."
@@ -5685,7 +5703,7 @@ THE ARM IS THE REFUSAL, so an unset cause is a contract breach."
                  (list 'alreadyDelivered :already-delivered
                        (agent-repl-wire-verbs--empty-arm "UpdateHeldPromptAlreadyDelivered"))
                  (list 'releaseRefused :release-refused
-                       (agent-repl-wire-verbs--empty-arm "UpdateHeldPromptReleaseRefused"))
+                       #'agent-repl-wire-decode-update-held-prompt-release-refused)
                  (list 'beingDelivered :being-delivered
                        (agent-repl-wire-verbs--empty-arm "UpdateHeldPromptBeingDelivered")))))))
 

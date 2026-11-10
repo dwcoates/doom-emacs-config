@@ -306,13 +306,17 @@ func TestADrainingWorkspaceDispatchesNothing(t *testing.T) {
 			},
 		},
 		{
-			name: "a release is refused",
+			name: "a release waits for the bounce",
 			act: func(t *testing.T, h *harness) {
-				if err := h.q.Release(context.Background(), theWorkspace, "queued"); !errors.Is(err, ErrReleaseRefused) {
-					t.Fatalf("Release = %v, want ErrReleaseRefused", err)
+				if err := h.q.Release(context.Background(), theWorkspace, "queued"); err != nil {
+					t.Fatalf("Release = %v, want it accepted to wait", err)
 				}
 			},
-			want: func(t *testing.T, h *harness) {},
+			want: func(t *testing.T, h *harness) {
+				if mark := h.db.hold("queued").SentNow; mark == nil || mark.WaitsFor != waitsForBounce {
+					t.Fatalf("sent_now = %+v, want it waiting for the bounce", mark)
+				}
+			},
 		},
 		{
 			name: "a lease change delivers nothing",

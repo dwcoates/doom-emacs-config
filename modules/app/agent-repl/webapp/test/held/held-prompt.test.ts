@@ -22,6 +22,7 @@ import {
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_fold_held_prompt_pb";
 import {
   UpdateHeldPromptErrorSchema,
+  UpdateHeldPromptReleaseRefusedSchema,
   UpdateHeldPromptResponseSchema,
   type UpdateHeldPromptRequest,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_held_prompt_pb";
@@ -31,6 +32,7 @@ import {
   HeldPromptBadgeSchema,
   HeldPromptStatusNoteSchema,
   HeldPromptEditingSchema,
+  HeldPromptSentNowSchema,
   HeldPromptCoalescedSchema,
   HeldPromptFoldAboveSchema,
   HeldPromptSchema,
@@ -54,6 +56,7 @@ import {
   HELD_STATUS_BADGES,
   HELD_NOTE_CLASS,
   drawHeldPrompt,
+  releaseRefusedSentence,
   drawImageBlock,
   drawUnsupportedBlock,
   heldBadgeClasses,
@@ -154,6 +157,7 @@ const successResponse = () =>
 const CAUSE_FILL: Readonly<Record<string, Record<string, unknown>>> = {
   workspaceRefMismatch: { registryDir: "/w/registry" },
   transferringAway: { address: "127.0.0.1:7777" },
+  releaseRefused: { cause: { case: "coldGate", value: {} } },
 };
 
 /** A refusal carrying ARM, with the payload that arm's sentence needs. */
@@ -225,6 +229,7 @@ const COALESCED_NOTE = "wire note coalesced";
 function rankedStatuses(prompt: HeldPrompt): HeldStatus[] {
   const ranked: HeldStatus[] = [];
   if (prompt.editing !== undefined) ranked.push("editing");
+  if (prompt.sentNow !== undefined) ranked.push("sentNow");
   if (prompt.hold.case !== undefined) ranked.push(prompt.hold.case);
   const arm = prompt.classification.case;
   // daemon_held claims nothing: the hold arm beside it is what holds it.
@@ -814,6 +819,50 @@ describe("drawHeldPrompt actions", () => {
       ]).toEqual([arm, false]);
     },
   );
+
+  /** A release refused for CAUSE. */
+  const releaseRefusedFor = (cause: string) => () =>
+    create(UpdateHeldPromptResponseSchema, {
+      result: {
+        case: "error",
+        value: { cause: { case: "releaseRefused", value: { cause: { case: cause, value: {} } } } },
+      },
+    } as never);
+  const releaseCauses = oneofArms(UpdateHeldPromptReleaseRefusedSchema, "cause");
+
+  /** The sentence a Send now refused for CAUSE draws at the row. */
+  async function refusedSendNow(cause: string): Promise<string | null | undefined> {
+    const { tc } = trayContext(releaseRefusedFor(cause));
+    const card = drawHeldPrompt(heldPrompt(), tc);
+    card.querySelector<Control>('[data-held-action="release"]')?.click();
+    await settle();
+    return card.querySelector(".queued-refusal")?.textContent;
+  }
+
+  it.each(releaseCauses)("says why a Send now refused for %s was refused", async (cause) => {
+    // Arrange / Act
+    const said = await refusedSendNow(cause);
+    // Assert
+    expect([said === releaseRefusedSentence(create(UpdateHeldPromptReleaseRefusedSchema, { cause: { case: cause, value: {} } } as never), "release"), said === ""]).toEqual([true, false]);
+  });
+
+  it("draws a sentence of its own for every cause of a refused Send now", () => {
+    // Arrange
+    const sentences = releaseCauses.map((cause) =>
+      releaseRefusedSentence(create(UpdateHeldPromptReleaseRefusedSchema, { cause: { case: cause, value: {} } } as never), "release"),
+    );
+    // Act
+    const distinct = new Set(sentences);
+    // Assert
+    expect([distinct.size, sentences.includes("the session would not take this prompt now")]).toEqual([releaseCauses.length, false]);
+  });
+
+  it("refuses to word a refused Send now that names no cause", () => {
+    // Arrange
+    const bare = create(UpdateHeldPromptReleaseRefusedSchema, {});
+    // Act / Assert
+    expect(() => releaseRefusedSentence(bare, "release")).toThrow();
+  });
 
   it("names the registry's directory on a mismatch, from the one shared wording", async () => {
     const { tc } = trayContext(refusalResponse("workspaceRefMismatch"));
@@ -1459,6 +1508,7 @@ const EXPECTED_BADGES: Readonly<Record<HeldStatus, string>> = {
   awaitingDelivery: "muted",
   coldGateAnswered: "muted",
   editing: "run",
+  sentNow: "run",
 };
 
 describe("the daemon's badge words", () => {
@@ -1555,6 +1605,15 @@ describe("the daemon's badge words", () => {
       () => {
         const u = heldPrompt();
         markEditing(u);
+        return u;
+      },
+    ],
+    [
+      "sentNow",
+      () => {
+        const u = heldPrompt({ hold: { case: "reconnect", value: {} } });
+        u.sentNow = create(HeldPromptSentNowSchema, { waitsFor: "the session reconnects" });
+        serveStatus(u);
         return u;
       },
     ],

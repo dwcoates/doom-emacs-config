@@ -757,6 +757,18 @@ type HeldPrompt struct {
 	// Ask is where a zettel thread prompt's question was asked from, carried
 	// until it is delivered (threads.go); nil for every other prompt.
 	Ask *ThreadAsk
+	// SentNow is the user's "Send now" on a prompt that could not go at once,
+	// nil when none stands: the prompt goes the moment what it waits for
+	// clears, ahead of every other held prompt but an interjection.
+	SentNow *SentNow
+}
+
+// SentNow is a "Send now" waiting on what keeps the prompt from going.
+type SentNow struct {
+	// At is when the user pressed it.
+	At time.Time
+	// WaitsFor says what keeps the prompt, as the held card draws it.
+	WaitsFor string
 }
 
 // HeldAct is a session act held in the queue.

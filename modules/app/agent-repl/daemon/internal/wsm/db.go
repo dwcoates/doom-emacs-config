@@ -281,6 +281,9 @@ type DB interface {
 	PutHeldPrompt(ctx context.Context, h HeldPrompt) error
 	// UpdateHeldPromptClassification records the classifier's verdict.
 	UpdateHeldPromptClassification(ctx context.Context, turn TurnID, c Classification) error
+	// SetHeldPromptSentNow records the user's "Send now" on a standing hold
+	// that could not go at once, or clears it (nil).
+	SetHeldPromptSentNow(ctx context.Context, turn TurnID, mark *SentNow) error
 	// RetireVerdictsJudgedAgainst clears every standing verdict of a
 	// workspace that judged a running turn now ended.
 	RetireVerdictsJudgedAgainst(ctx context.Context, ws WorkspaceID, turn TurnID) (int64, error)

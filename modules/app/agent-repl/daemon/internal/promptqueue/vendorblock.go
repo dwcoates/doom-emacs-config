@@ -2,7 +2,6 @@ package promptqueue
 
 import (
 	"context"
-	"sort"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
@@ -109,7 +108,7 @@ func (q *queue) releaseBeforeSubmit(ctx context.Context, d *delivery, log dlog.L
 // prompt behind it is judged against the turn it started. The caller holds the
 // delivery lock (d).
 func (q *queue) classifyReleased(ctx context.Context, d *delivery, released []wsm.HeldPrompt, log dlog.Logger) {
-	sort.SliceStable(released, func(i, j int) bool { return released[i].QueuedAt.Before(released[j].QueuedAt) })
+	inQueueOrder(released)
 	if _, running := q.runningTurn(d.ws); !running {
 		if _, err := q.popAndDeliver(ctx, d, log); err != nil {
 			log.Error(opSubmit, "a prompt released from the after-reconnect hold was not delivered", dlog.Context{"cause": err.Error()})

@@ -2,7 +2,6 @@ package promptqueue
 
 import (
 	"context"
-	"errors"
 	"slices"
 	"testing"
 
@@ -149,9 +148,10 @@ func TestOnLeaseChangedLeavesAStampTheReleaseOutranToTheRelease(t *testing.T) {
 	}
 }
 
-// TestReleaseRefusesAMergeHold covers Send now on a prompt the merge holds: the
-// merge drives the session, so the release is refused and the prompt waits.
-func TestReleaseRefusesAMergeHold(t *testing.T) {
+// TestReleaseOfAMergeHoldWaitsForTheMerge covers Send now on a prompt the
+// merge holds: the merge drives the session, so the release is accepted and
+// waits for the merge's end.
+func TestReleaseOfAMergeHoldWaitsForTheMerge(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	h.lease(wsm.HolderMerge, wsm.PolicyHold)
@@ -163,9 +163,7 @@ func TestReleaseRefusesAMergeHold(t *testing.T) {
 	err := h.q.Release(context.Background(), theWorkspace, "t1")
 
 	// Assert
-	if !errors.Is(err, ErrReleaseRefused) {
-		t.Fatalf("Release = %v, want ErrReleaseRefused", err)
-	}
+	waitsOn(t, h, err, "t1", waitsForMerge)
 	if len(h.sender.started()) != 0 {
 		t.Fatal("a released merge hold reached the shim")
 	}

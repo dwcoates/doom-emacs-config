@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sort"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
@@ -498,7 +497,14 @@ func (q *queue) nextDeliverable(ctx context.Context, ws ids.WorkspaceID, holding
 		}
 	}
 
-	sort.SliceStable(free, func(i, j int) bool { return free[i].QueuedAt.Before(free[j].QueuedAt) })
+	inQueueOrder(free)
+	// A "SEND NOW" WAITING GOES FIRST once what kept it clears, behind only
+	// the head an interjection installed (sentnow.go).
+	for _, h := range free {
+		if h.SentNow != nil {
+			return h, true, withheld, nil
+		}
+	}
 	return free[0], true, withheld, nil
 }
 
