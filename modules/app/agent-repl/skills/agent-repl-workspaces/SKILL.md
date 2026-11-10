@@ -1,7 +1,7 @@
 ---
 name: agent-repl-workspaces
-description: 'Work with agent-repl workspaces through the agent API: create a workspace (a child of this one or of another, or a peer, with its landing target (its parent''s branch or the main branch), a fresh context or one forked from a workspace''s conversation, as a one-shot or not), prompt another workspace, read a workspace''s status, list them all, or find workspaces open or closed by repository, time, standing or text with their summaries, mark this workspace a one-shot or as awaiting another workspace''s answer (which draws it in the background, yellow), store its links (owned or a reference; an owned pull request is followed for its comments, reviews and checks; the topbar summary''s menu), reply on a pull request it owns (`pr-comment`), send a desktop notification on behalf of a workspace whose click opens it in Emacs (`workspace notify`), set its topbar summary (`workspace summary`), rename a workspace, hide or show a workspace, set its priority, turn a workspace''s remote control on or off, retarget its parent, adopt an existing workspace as this one''s child, reorganize this workspace''s work across repositories (move to the repository the work principally belongs to and govern one workspace in each other repository it touches, proactively and without asking), read its repository''s sidebar subsections and file it into one, finish a workspace (deploy it as its repository''s `.agent-repl/lifecycle.yaml` says), open, close, kill, compact, restart (on its own, to unstick a workspace or refresh its harness), interrupt or select one, answer a cold gate, and subscribe this workspace to another''s turns, asks, landing and close, follow a pull request or a workspace''s pull requests in any repository, follow a GitHub merge queue, and register a repository with agent-repl (`repository register`). Use whenever work should be split off into another workspace, handed to one, or followed; whenever this workspace commits to finishing the rest of its work unattended, or is told to one-shot itself or to land its work when done (mark it a one-shot); whenever a one-shot is reopened or prompted for more work after it finished (take the mark back); whenever this workspace ends a turn to wait for another workspace (mark it awaiting) and when that answer arrives (clear the mark); whenever this workspace has no summary or its high-level task materially changed (set its summary); whenever this workspace''s task has clearly moved away from its name (rename it, without asking); whenever a repository''s lifecycle config (`.agent-repl/lifecycle.yaml`) or one of its hooks is written or read; whenever work is in a repository agent-repl does not know yet (register it before creating workspaces there); whenever this workspace''s work principally belongs to another repository or touches several (reorganize it); and whenever a workspace must be closed, compacted, killed or have its gate answered. Replaces /create-or-update-workspace and the workspace command files.'
-argument-hint: "create | async-merge | prompt | status | list | find | set | summary | link | finished | open | close | kill | compact | restart | interrupt | select | gate | subscribe | unsubscribe | subsections | place | repository register"
+description: 'Work with agent-repl workspaces through the agent API: create a workspace (a child of this one or of another, or a peer, with its landing target (its parent''s branch or the main branch), a fresh context or one forked from a workspace''s conversation, as a one-shot or not), prompt another workspace, ask many workspaces one question and get their answers back as one update (`workspace gather`), read a workspace''s status, list them all, or find workspaces open or closed by repository, time, standing or text with their summaries, mark this workspace a one-shot or as awaiting another workspace''s answer (which draws it in the background, yellow), store its links (owned or a reference; an owned pull request is followed for its comments, reviews and checks; the topbar summary''s menu), reply on a pull request it owns (`pr-comment`), send a desktop notification on behalf of a workspace whose click opens it in Emacs (`workspace notify`), set its topbar summary (`workspace summary`), rename a workspace, hide or show a workspace, set its priority, turn a workspace''s remote control on or off, retarget its parent, adopt an existing workspace as this one''s child, reorganize this workspace''s work across repositories (move to the repository the work principally belongs to and govern one workspace in each other repository it touches, proactively and without asking), read its repository''s sidebar subsections and file it into one, finish a workspace (deploy it as its repository''s `.agent-repl/lifecycle.yaml` says), open, close, kill, compact, restart (on its own, to unstick a workspace or refresh its harness), interrupt or select one, answer a cold gate, and subscribe this workspace to another''s turns, asks, landing and close, follow a pull request or a workspace''s pull requests in any repository, follow a GitHub merge queue, and register a repository with agent-repl (`repository register`). Use whenever work should be split off into another workspace, handed to one, or followed; whenever this workspace commits to finishing the rest of its work unattended, or is told to one-shot itself or to land its work when done (mark it a one-shot); whenever a one-shot is reopened or prompted for more work after it finished (take the mark back); whenever this workspace ends a turn to wait for another workspace (mark it awaiting) and when that answer arrives (clear the mark); whenever this workspace has no summary or its high-level task materially changed (set its summary); whenever this workspace''s task has clearly moved away from its name (rename it, without asking); whenever a repository''s lifecycle config (`.agent-repl/lifecycle.yaml`) or one of its hooks is written or read; whenever work is in a repository agent-repl does not know yet (register it before creating workspaces there); whenever this workspace''s work principally belongs to another repository or touches several (reorganize it); and whenever a workspace must be closed, compacted, killed or have its gate answered. Replaces /create-or-update-workspace and the workspace command files.'
+argument-hint: "create | async-merge | prompt | gather | gather-status | status | list | find | set | summary | link | finished | open | close | kill | compact | restart | interrupt | select | gate | subscribe | unsubscribe | subsections | place | repository register"
 allowed-tools: Bash(~/.claude/skills/agent-repl-workspaces/agent-repld:*)
 ---
 
@@ -247,6 +247,7 @@ user in the same response what it reorganized and why.
   (`fan_out_refused`); its family, its merge's requester and workspaces that
   prompted it do not count. `workspace prompt -as-user` lifts the cap ONLY
   when the user explicitly asked for that send.
+
 - A prompt another workspace sent reaches you as a message from another
   session, `from="agent-repl:NAME"`. That is the workspace NAME, and the
   host's messaging tool it points you at is `workspace prompt NAME TEXT`.
@@ -348,6 +349,48 @@ user in the same response what it reorganized and why.
   landing, close and questions already (a child) or by subscribing to
   `landed,closed` (anything else). Unsubscribe once the tight coordination
   ends.
+
+### Asking many workspaces one question (`workspace gather`)
+
+- `agent-repld workspace gather -workspaces A,B,C -prompt TEXT [-as-user]`
+  prompts every named workspace (by name) with TEXT on this workspace's
+  behalf, exactly as `workspace prompt` would, with the same refusals,
+  including the fan-out cap, which `-as-user` lifts (only when the user asked).
+  Use it whenever this workspace needs the same answer from several
+  workspaces (a standup, a status sweep) instead of a `workspace prompt` per
+  target that asks each to reply.
+- Targets never reply on purpose. A target's ANSWER is the final response of
+  the turn the gather's prompt went into, followed even when the prompt joins
+  a running turn, is held, or is resumed after a restart. Do not ask targets
+  to send a reply.
+- The answer prints the gather's ref (`success.gather.id`), the accepted
+  targets, and every refused target with its typed cause: an unknown or
+  closed name, a name several open workspaces share, this workspace itself, a
+  question or permission waiting on the user, a merge in progress, or the
+  submission's own `workspace prompt` refusal (a cold gate, the fan-out cap).
+  stderr says one sentence per refused target. A refused target is not part
+  of the gather. When every target is refused, nothing is made and the
+  command exits 6.
+- The answers come back to THIS workspace as notices (deferred prompts, like
+  subscription notices), never on the command's output:
+  - THE FIRST UPDATE, once: the moment every accepted target has answered,
+    or 5 minutes after the gather was made, whichever is first. It carries
+    every answer so far under its workspace name and every target still
+    outstanding with why (working, held, cold_gate, needs_input,
+    ended_without_response, faulted).
+  - After it, EACH LATER ANSWER as its own notice, naming the workspace and
+    how many are still outstanding.
+  - A target that closes before answering resolves as `closed`.
+  - Each notice carries an `agentrepl.v1.GatherNotice` as JSON in a fenced
+    block: `firstUpdate` (`trigger` allResolved|timedOut, `resolved[]` each
+    with `target.name` and `answered.text` or `closed`, `outstanding[]` each
+    with `target.name` and its reason arm) or `laterAnswer` (`resolved`,
+    `outstandingCount`). Read those fields; do not parse the sentences.
+- After `workspace gather` returns, end the turn to wait (mark this workspace
+  awaiting if "AWAITING CORRESPONDENCE" below applies); the first update
+  wakes it. Gathers survive daemon restarts and deploys.
+- `agent-repld workspace gather-status GATHER` reads a gather's answers and
+  outstanding targets at any time.
 
 ## Registering a repository (`repository register`)
 

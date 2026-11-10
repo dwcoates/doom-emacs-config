@@ -1955,6 +1955,30 @@ OPEN CONTRACT QUESTION: the announcement reuses `self_merge_rollout` with the
 address unset, whose comment describes a handover. It awaits the owner's
 ruling.
 
+## A prompt that moves to another turn records the move (`wsm` turn successions)
+
+Owner contract, 2026-11-10 (`docs/protobuf-design/workspace-gather.md`). A
+workspace gather (`internal/gather`, `agent-repld workspace gather`) takes a
+target's answer from the turn its prompt went into, so every path that moves
+a prompt off the turn it was minted as writes a turn succession
+(`wsm.RecordTurnSuccession`), and `wsm.SucceedingTurn` follows the chain.
+
+- The writers are: a re-hold (`promptqueue.heldAgain` sets
+  `wsm.HeldPrompt.ReheldFrom`, written with the hold), a folded prompt
+  resubmitted after its turn failed (`promptqueue.resubmitFolded`), a
+  resumption after a stand-down (`wsm.ClaimResumptions` takes the resumed
+  turn), a merge's displaced turn put back (`wsm.ClaimDisplacedTurn` takes the
+  resubmitted turn, `merge.displacedResubmission`), and a fold into the
+  running turn (told by the feed's `feed.AnswerSink.PromptFolded`, recorded by
+  the gather service).
+- Every succession is written BEFORE the new turn is delivered, and a fold is
+  told on the feed's ordered stream before the joined turn's answer, so the
+  answer is never seen before the move. A new path that mints a fresh turn for
+  an existing prompt writes its succession the same way, or a gathered prompt
+  on it is never answered.
+- A chain that returns to a turn it left is an invariant violation:
+  `SucceedingTurn` refuses it and records it at ERROR.
+
 ## Logging
 
 `internal/dlog` owns the daemon's logging function and exposes `Logger.Debug`,
