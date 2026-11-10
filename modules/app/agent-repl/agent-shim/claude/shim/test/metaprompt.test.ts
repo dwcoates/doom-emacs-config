@@ -8,6 +8,7 @@ import {
   METAPROMPT_REL_PATH,
   LANDING_REL_PATHS,
   metapromptPath,
+  readLandingSection,
   readMetaprompt,
   standingSection,
   systemPromptOption,
@@ -200,7 +201,7 @@ describe("systemPromptOption", () => {
     expect(option).toEqual({
       type: "preset",
       preset: "claude_code",
-      append: `Be terse.\n\n${workspaceSection("parser-fix")}\n\n${standingSection("linked_workspace")}`,
+      append: `Be terse.\n\n${readLandingSection("through_queue", home)}\n\n${workspaceSection("parser-fix")}\n\n${standingSection("linked_workspace")}`,
     });
   });
 
