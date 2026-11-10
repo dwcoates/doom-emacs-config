@@ -1393,3 +1393,4 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 - 2026-11-10 merge-queue-stall-triage (landed in queue bypass mode): todo rows: the CEE PR skill's blocked pickup wait, and the shim's undescribable live work
 - 2026-11-10 merge-queue-stall-triage (landed in queue bypass mode): todo rows: the CEE PR waits' clock, and the CEE skill's worktree cleanup
 - 2026-11-10 land-send-now (landed in queue bypass mode): Send now on a held prompt interrupts an agent-started turn and delivers at its real end; every other blocker waits visibly on the card; only an edit, a cold gate or a refused join refuses, with a typed cause
+- 2026-11-10 merge-queue-stall-triage (landed in queue bypass mode): todo row: storing an owned PR link waits on a GitHub read
