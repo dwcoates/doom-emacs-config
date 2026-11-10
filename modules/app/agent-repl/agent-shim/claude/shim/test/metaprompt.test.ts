@@ -142,6 +142,16 @@ describe("this repository's committed metaprompt", () => {
     expect(text).toContain("This session runs in bypass queue mode, which agent-repl also calls queue bypass mode.");
   });
 
+  it("names this session's transcript the bypass queue mode session, apart from an earlier non-bypass session", () => {
+    // Arrange
+    const home = homeOnThisRepository();
+    // Act
+    const text = readLandingSection("bypassing_queue", home);
+    // Assert
+    expect(text).toContain("This session's transcript is the bypass queue mode session.");
+    expect(text).toContain("Context loaded from a non-bypass session is carried out here under bypass queue mode");
+  });
+
   it("requires a workspace to store its task's link and every pull request it creates, unasked", () => {
     // Arrange
     const home = homeOnThisRepository();
