@@ -1370,3 +1370,4 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 - 2026-11-10 merge-queue-stall-triage (landed in queue bypass mode): Todo rows for the merge-queue stall triage's findings
 - 2026-11-10 merge-queue-stall-triage (landed in queue bypass mode): The queue-bypass section names the session's transcript the bypass queue mode session, apart from a non-bypass session
 - 2026-11-10 merge-queue-stall-triage (landed in queue bypass mode): A one-shot workspace that adds a todo row stops being a one-shot, lands its task as an async merge, and lands each row's fix as its own async merge that removes the row
+- 2026-11-10 merge-queue-stall-triage (landed in queue bypass mode): The first switch into queue bypass mode forks the queue conversation into the bypass session, so the bypass session carries the conversation's context
