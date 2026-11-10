@@ -48,12 +48,9 @@ func newKeeper(t *testing.T, store *fakeStore, open ...string) (*Keeper, *dlog.T
 	return k, log
 }
 
-func latest(t *testing.T, k *Keeper, w ids.WorkspaceID) *agentreplv1.HostWorkspaceMentions {
-	t.Helper()
-	v, ok := k.Topic(w).Latest()
-	if !ok {
-		t.Fatal("the topic holds no record")
-	}
+// latest answers W's record in force, nil when the topic holds none.
+func latest(k *Keeper, w ids.WorkspaceID) *agentreplv1.HostWorkspaceMentions {
+	v, _ := k.Topic(w).Latest()
 	return v
 }
 
@@ -71,7 +68,8 @@ func TestAnsweredOrdersTheRecord(t *testing.T) {
 		answers []answer
 		want    *agentreplv1.HostWorkspaceMentions
 	}{
-		{name: "a workspace that mentioned nothing has an empty record", want: mentions(nil, nil)},
+		{name: "a workspace that mentioned nothing holds no record"},
+		{name: "a response mentioning nothing holds no record", answers: []answer{{"plain prose", 10}}},
 		{
 			name:    "a response's commands and open workspaces are recorded",
 			answers: []answer{{"run /merge-queue, then ask `alpha` and closed-one", 10}},
@@ -109,7 +107,7 @@ func TestAnsweredOrdersTheRecord(t *testing.T) {
 			}
 
 			// Assert
-			if got := latest(t, k, ws); !proto.Equal(got, tt.want) {
+			if got := latest(k, ws); !proto.Equal(got, tt.want) {
 				t.Fatalf("record = %v, want %v", got, tt.want)
 			}
 		})
@@ -169,10 +167,10 @@ func TestNewHydratesEveryWorkspacesRecord(t *testing.T) {
 	k, _ := newKeeper(t, store)
 
 	// Assert
-	if got, want := latest(t, k, ws), mentions([]string{"new", "old"}, nil); !proto.Equal(got, want) {
+	if got, want := latest(k, ws), mentions([]string{"new", "old"}, nil); !proto.Equal(got, want) {
 		t.Fatalf("ws record = %v, want %v", got, want)
 	}
-	if got, want := latest(t, k, other), mentions(nil, []string{"alpha"}); !proto.Equal(got, want) {
+	if got, want := latest(k, other), mentions(nil, []string{"alpha"}); !proto.Equal(got, want) {
 		t.Fatalf("other record = %v, want %v", got, want)
 	}
 }
@@ -186,7 +184,7 @@ func TestAHydratedInstantHoldsAgainstAnOlderReplay(t *testing.T) {
 	k.Answered(ws, "/b /a", 10)
 
 	// Assert
-	if got, want := latest(t, k, ws), mentions([]string{"a", "b"}, nil); !proto.Equal(got, want) {
+	if got, want := latest(k, ws), mentions([]string{"a", "b"}, nil); !proto.Equal(got, want) {
 		t.Fatalf("record = %v, want %v", got, want)
 	}
 }
@@ -195,17 +193,17 @@ func TestAnsweredPublishesEachChange(t *testing.T) {
 	// Arrange
 	k, _ := newKeeper(t, &fakeStore{})
 	sub := k.Topic(ws).Subscribe(t.Context())
-	first := <-sub
 
 	// Act
 	k.Answered(ws, "/a", 10)
+	k.Answered(ws, "/b", 20)
 
 	// Assert
-	if !proto.Equal(first, mentions(nil, nil)) {
-		t.Fatalf("first push = %v, want the empty record", first)
-	}
 	if got := <-sub; !proto.Equal(got, mentions([]string{"a"}, nil)) {
-		t.Fatalf("second push = %v, want the changed record", got)
+		t.Fatalf("first push = %v, want the first change", got)
+	}
+	if got := <-sub; !proto.Equal(got, mentions([]string{"b", "a"}, nil)) {
+		t.Fatalf("second push = %v, want the second change", got)
 	}
 }
 
@@ -218,8 +216,8 @@ func TestAResponseWithNoSettleInstantIsRefused(t *testing.T) {
 	k.Answered(ws, "/a", 0)
 
 	// Assert
-	if len(store.puts) != 0 || !proto.Equal(latest(t, k, ws), mentions(nil, nil)) {
-		t.Fatalf("puts = %+v, record = %v; want nothing recorded", store.puts, latest(t, k, ws))
+	if len(store.puts) != 0 || latest(k, ws) != nil {
+		t.Fatalf("puts = %+v, record = %v; want nothing recorded", store.puts, latest(k, ws))
 	}
 	records := dlog.FilterRecords(log.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: opAnswered})
 	if len(records) != 1 || records[0].Context["workspace"] != string(ws) {
@@ -236,8 +234,8 @@ func TestAFailedWriteIsLoggedAndKeptInHand(t *testing.T) {
 	k.Answered(ws, "/a", 10)
 
 	// Assert
-	if !proto.Equal(latest(t, k, ws), mentions([]string{"a"}, nil)) {
-		t.Fatalf("record = %v, want the change kept in hand", latest(t, k, ws))
+	if !proto.Equal(latest(k, ws), mentions([]string{"a"}, nil)) {
+		t.Fatalf("record = %v, want the change kept in hand", latest(k, ws))
 	}
 	records := dlog.FilterRecords(log.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: opAnswered})
 	if len(records) != 1 || records[0].Context["changed"] != 1 || records[0].Context["cause"] == nil {

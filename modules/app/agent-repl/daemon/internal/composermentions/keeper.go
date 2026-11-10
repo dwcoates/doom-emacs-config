@@ -147,9 +147,10 @@ func (k *Keeper) Answered(ws ids.WorkspaceID, markdown string, settledAtMs int64
 	k.deps.Log.Debug(opAnswered, "recorded the final response's mentions", fields)
 }
 
-// Topic answers workspace WS's mentions topic, holding its record in force
-// (empty for a workspace that never mentioned anything), so every subscriber
-// is handed the record first.
+// Topic answers workspace WS's mentions topic, holding its record in force so
+// every subscriber is handed the record first. A workspace that never
+// mentioned anything holds none: a record only grows, so there is nothing an
+// empty one would tell a subscriber that its absence does not.
 func (k *Keeper) Topic(ws ids.WorkspaceID) *publish.Topic[*agentreplv1.HostWorkspaceMentions] {
 	k.mu.Lock()
 	defer k.mu.Unlock()
@@ -167,16 +168,28 @@ func (k *Keeper) recordLocked(ws ids.WorkspaceID) record {
 	return rec
 }
 
-// topicLocked answers WS's topic, creating it with WS's record published.
-// Called with k.mu held.
+// topicLocked answers WS's topic, creating it with WS's record published when
+// it holds a name. Called with k.mu held.
 func (k *Keeper) topicLocked(ws ids.WorkspaceID) *publish.Topic[*agentreplv1.HostWorkspaceMentions] {
 	topic, ok := k.topics[ws]
 	if !ok {
 		topic = &publish.Topic[*agentreplv1.HostWorkspaceMentions]{}
-		topic.Publish(k.recordLocked(ws).view())
+		if rec := k.recordLocked(ws); !rec.empty() {
+			topic.Publish(rec.view())
+		}
 		k.topics[ws] = topic
 	}
 	return topic
+}
+
+// empty reports whether the record holds no name.
+func (r record) empty() bool {
+	for _, names := range r {
+		if len(names) > 0 {
+			return false
+		}
+	}
+	return true
 }
 
 // put moves NAME's instant of KIND forward to AT, reporting whether it moved.
