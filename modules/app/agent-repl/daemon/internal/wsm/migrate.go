@@ -218,6 +218,7 @@ var migrations = []migration{
 	// section as one no agent resolved, and draws it (retiredconflictsections.go).
 	{To: 112, Name: "durable_rows_retired_conflict_sections", Kind: MigrationAdditive, Rewrite: dropRetiredConflictSectionRows},
 	{To: 113, Name: "queue_bypass", Kind: MigrationAdditive, DDL: queueBypassDDL},
+	{To: 114, Name: "own_fork", Kind: MigrationAdditive, DDL: ownForkDDL},
 }
 
 // mergeQueueLookupIndexesDDL keys the two lookups every workspace read makes

@@ -51,12 +51,57 @@ CREATE TABLE fork_uninherited_turns (
 );
 `
 
+// ownForkDDL is the layout-114 addition: the conversation a fork of the
+// workspace's OWN conversation copies (the first switch into the queue bypass
+// mode). A fork of another workspace leaves it NULL and forks whatever that
+// workspace runs at the bring-up; an own fork names the conversation because
+// the bind that owes it has just stepped the workspace out of it.
+const ownForkDDL = `
+ALTER TABLE pending_forks ADD COLUMN parent_vendor_session_id TEXT;
+`
+
 // PendingFork is a fork the create recorded and the bring-up has not made.
 type PendingFork struct {
 	// Workspace is the fork.
 	Workspace WorkspaceID
 	// Parent is the workspace whose conversation it forks.
 	Parent WorkspaceID
+	// ParentVendorSessionID is the conversation an OWN fork copies (Parent is
+	// Workspace), and empty for a fork of another workspace, which forks the
+	// conversation that workspace runs.
+	ParentVendorSessionID string
+}
+
+// Own reports whether FORK copies one of its workspace's own conversations.
+func (fork PendingFork) Own() bool {
+	return fork.ParentVendorSessionID != ""
+}
+
+// validPendingFork refuses a pending fork whose parts disagree: an own fork
+// names its workspace as its parent and the conversation it copies, and a fork
+// of another workspace names a different parent and no conversation.
+func validPendingFork(fork PendingFork) error {
+	switch {
+	case fork.Workspace == "" || fork.Parent == "":
+		return errors.New("wsm: a pending fork names a workspace and a parent")
+	case fork.Own() && fork.Workspace != fork.Parent:
+		return errors.New("wsm: a pending fork naming the conversation it copies is a fork of its own workspace")
+	case !fork.Own() && fork.Workspace == fork.Parent:
+		return errors.New("wsm: a pending fork of its own workspace names the conversation it copies")
+	}
+	return nil
+}
+
+// insertPendingFork writes FORK inside the caller's transaction.
+func insertPendingFork(ctx context.Context, tx *sql.Tx, fork PendingFork) error {
+	var parentVendor any
+	if fork.Own() {
+		parentVendor = fork.ParentVendorSessionID
+	}
+	_, err := tx.ExecContext(ctx,
+		`INSERT INTO pending_forks (workspace_id, parent_workspace_id, parent_vendor_session_id) VALUES (?, ?, ?)`,
+		fork.Workspace, fork.Parent, parentVendor)
+	return err
 }
 
 // ForkLineage is one made fork: where its inherited past is read from.
@@ -78,16 +123,13 @@ type ForkLineage struct {
 // PutPendingFork records that a workspace is to be forked from its parent.
 func (s *store) PutPendingFork(ctx context.Context, fork PendingFork) error {
 	const op = "daemon.wsm.put_pending_fork"
-	fields := dlog.Context{"workspace": string(fork.Workspace), "parent": string(fork.Parent)}
-	if fork.Workspace == "" || fork.Parent == "" || fork.Workspace == fork.Parent {
-		err := errors.New("wsm: a pending fork names a workspace and a different parent")
-		s.log.Error(op, "refused a pending fork with no workspace or parent, or forked from itself", withError(fields, err))
+	fields := dlog.Context{"workspace": string(fork.Workspace), "parent": string(fork.Parent), "parent_vendor_session_id": fork.ParentVendorSessionID}
+	if err := validPendingFork(fork); err != nil {
+		s.log.Error(op, "refused a pending fork whose workspace, parent and conversation disagree", withError(fields, err))
 		return err
 	}
 	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx,
-			`INSERT INTO pending_forks (workspace_id, parent_workspace_id) VALUES (?, ?)`, fork.Workspace, fork.Parent)
-		return err
+		return insertPendingFork(ctx, tx, fork)
 	})
 }
 
@@ -98,16 +140,19 @@ func (s *store) PendingFork(ctx context.Context, id WorkspaceID) (PendingFork, b
 		found bool
 	)
 	err := s.read(ctx, "daemon.wsm.pending_fork", dlog.Context{"workspace": string(id)}, func(ctx context.Context) error {
-		var parent string
+		var (
+			parent       string
+			parentVendor sql.NullString
+		)
 		err := s.q(ctx).QueryRowContext(ctx,
-			`SELECT parent_workspace_id FROM pending_forks WHERE workspace_id = ?`, id).Scan(&parent)
+			`SELECT parent_workspace_id, parent_vendor_session_id FROM pending_forks WHERE workspace_id = ?`, id).Scan(&parent, &parentVendor)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}
 		if err != nil {
 			return err
 		}
-		out, found = PendingFork{Workspace: id, Parent: WorkspaceID(parent)}, true
+		out, found = PendingFork{Workspace: id, Parent: WorkspaceID(parent), ParentVendorSessionID: parentVendor.String}, true
 		return nil
 	})
 	return out, found, err
@@ -173,6 +218,9 @@ const maxForkDepth = 256
 // Lineage answers where a workspace's inherited past is read from, nearest
 // first: its own fork, then its parent's, and so on to the first workspace that
 // was not forked. Empty for a workspace that was never forked.
+//
+// AN OWN FORK ENDS THE WALK. Its parent is the workspace itself, whose lineage
+// the bind that owed the fork forgot (BindSession), so nothing lies past it.
 func (s *store) Lineage(ctx context.Context, id WorkspaceID) ([]ForkLineage, error) {
 	var out []ForkLineage
 	err := s.read(ctx, "daemon.wsm.fork_lineage", dlog.Context{"workspace": string(id)}, func(ctx context.Context) error {
@@ -200,6 +248,9 @@ func (s *store) Lineage(ctx context.Context, id WorkspaceID) ([]ForkLineage, err
 				return err
 			}
 			out = append(out, link)
+			if link.Parent == at {
+				return nil
+			}
 			at = link.Parent
 		}
 	})

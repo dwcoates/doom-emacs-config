@@ -58,8 +58,12 @@ const (
 //
 // THE SWITCH SWAPS TWO CONVERSATIONS. The one the workspace steps out of is
 // parked (wsm.SetParkedConversation) and the parked one is bound, through the
-// same stop, record, feed reset and start a BindWorkspaceSession runs; a
-// workspace with nothing parked yet starts its other conversation fresh.
+// same stop, record, feed reset and start a BindWorkspaceSession runs. A
+// workspace with nothing parked yet is taking the mode for the first time:
+// its bypass conversation is a FORK of the queue conversation it steps out of
+// (owner request, 2026-11-10), so the bypass session continues the
+// conversation under its own system prompt. Later switches resume the two
+// parked conversations as they stand, so neither picks up the other's turns.
 func (v *verbs) UpdateQueueBypassMode(ctx context.Context, ws ids.WorkspaceID, change QueueBypassChange) (bool, error) {
 	const rpc = "UpdateQueueBypassMode"
 	record, log, err := v.owned(ctx, rpc, ws)
@@ -122,7 +126,7 @@ func (v *verbs) UpdateQueueBypassMode(ctx context.Context, ws ids.WorkspaceID, c
 			return true, fmt.Errorf("queue bypass for %q: release the hold: %w", ws, err)
 		}
 	}
-	if err := v.switchConversation(swap, log, rpc, ws, standing.ParkedVendorSessionID); err != nil {
+	if err := v.switchConversation(swap, log, rpc, ws, standing.ParkedVendorSessionID, want); err != nil {
 		v.restateQueueBypass(swap, log, standing.RepoID)
 		return want, err
 	}
@@ -141,8 +145,10 @@ func (v *verbs) UpdateQueueBypassMode(ctx context.Context, ws ids.WorkspaceID, c
 }
 
 // switchConversation parks the conversation workspace WS runs and binds
-// PARKED in its place, starting it fresh when PARKED is empty.
-func (v *verbs) switchConversation(ctx context.Context, log dlog.Logger, rpc string, ws ids.WorkspaceID, parked string) error {
+// PARKED in its place. With PARKED empty, a switch INTO the mode (TAKING)
+// binds a fork of the conversation parked, and any other switch, or one from a
+// workspace that ran no conversation, starts fresh.
+func (v *verbs) switchConversation(ctx context.Context, log dlog.Logger, rpc string, ws ids.WorkspaceID, parked string, taking bool) error {
 	current, err := v.boundConversation(ctx, ws)
 	if err != nil {
 		log.Error(opQueueBypass, "could not read the conversation the workspace runs", dlog.Context{"cause": err.Error()})
@@ -156,7 +162,13 @@ func (v *verbs) switchConversation(ctx context.Context, log dlog.Logger, rpc str
 				map[string]any{"detail": "the conversation stepped out of could not be kept: " + err.Error()})
 		}
 	}
-	if err := v.swapConversation(ctx, log, ws, parked, parked != "", nil,
+	to := conversationBinding{vendorSessionID: parked}
+	if parked == "" && taking {
+		to.ownForkOf = current
+	}
+	// AN OWN FORK STARTS AS A REBIND, so the shim adopts the fork's own id as
+	// the workspace's book rather than keeping the parked conversation's.
+	if err := v.swapConversation(ctx, log, ws, to, to.vendorSessionID != "" || to.ownForkOf != "", nil,
 		"the workspace switched between its queue and bypass conversations",
 		func(step swapStep, err error) error {
 			what := "the other conversation's session would not come up"
@@ -168,7 +180,7 @@ func (v *verbs) switchConversation(ctx context.Context, log dlog.Logger, rpc str
 		}); err != nil {
 		return err
 	}
-	log.Info(opQueueBypass, "switched the workspace's conversation", dlog.Context{"parked": current, "bound": parked})
+	log.Info(opQueueBypass, "switched the workspace's conversation", dlog.Context{"parked": current, "bound": parked, "own_fork_of": to.ownForkOf})
 	return nil
 }
 

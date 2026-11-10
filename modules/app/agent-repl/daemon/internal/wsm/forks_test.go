@@ -65,6 +65,9 @@ func TestPutPendingForkRefusesAnIncompleteOrSelfFork(t *testing.T) {
 		{name: "no workspace", fork: func(ws WorkspaceID) PendingFork { return PendingFork{Parent: ws} }},
 		{name: "no parent", fork: func(ws WorkspaceID) PendingFork { return PendingFork{Workspace: ws} }},
 		{name: "forked from itself", fork: func(ws WorkspaceID) PendingFork { return PendingFork{Workspace: ws, Parent: ws} }},
+		{name: "a copied conversation of another workspace", fork: func(ws WorkspaceID) PendingFork {
+			return PendingFork{Workspace: ws, Parent: "ws-other", ParentVendorSessionID: "vendor-queue"}
+		}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -309,5 +312,130 @@ func TestBindSessionRefusesASessionWithNoIdentityAndWritesNothing(t *testing.T) 
 	}
 	if _, found, _ := s.PendingFork(context.Background(), child.ID); !found {
 		t.Fatal("the refused bind forgot the pending fork")
+	}
+}
+
+// ownForkStore answers a store holding one workspace with a session row.
+func ownForkStore(t *testing.T) (*store, *dlog.TestLogger, Workspace) {
+	t.Helper()
+	s, logs := testStore(t)
+	ws := testWorkspace(t, s)
+	instant := time.Unix(1_700_000_000, 0)
+	if err := s.PutSession(context.Background(), Session{
+		Workspace: ws.ID, HostSessionID: "host-1", VendorSessionID: "vendor-queue", ConfigDir: "/root",
+		StartedAt: instant, LastEngagementAt: instant,
+	}); err != nil {
+		t.Fatalf("PutSession: %v", err)
+	}
+	return s, logs, ws
+}
+
+func TestBindSessionToOwnForkBindsNoConversationAndOwesTheFork(t *testing.T) {
+	// Arrange
+	s, _, ws := ownForkStore(t)
+	ctx := context.Background()
+	sess, _, _ := s.Session(ctx, ws.ID)
+	sess.VendorSessionID = ""
+
+	// Act
+	err := s.BindSessionToOwnFork(ctx, sess, "vendor-queue")
+
+	// Assert
+	if err != nil {
+		t.Fatalf("BindSessionToOwnFork: %v", err)
+	}
+	if got := scalar[string](t, s, `SELECT vendor_session_id FROM sessions WHERE workspace_id = ?`, ws.ID); got != "" {
+		t.Fatalf("the session names %q, want no conversation until the fork is made", got)
+	}
+	got, found, err := s.PendingFork(ctx, ws.ID)
+	want := PendingFork{Workspace: ws.ID, Parent: ws.ID, ParentVendorSessionID: "vendor-queue"}
+	if err != nil || !found || got != want {
+		t.Fatalf("PendingFork = (%+v, %v, %v), want %+v", got, found, err, want)
+	}
+}
+
+func TestBindSessionToOwnForkForgetsTheForkTheWorkspaceWas(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	parent, child := forkedPair(t, s)
+	ctx := context.Background()
+	if err := s.ResolveFork(ctx, "vendor-queue", ForkLineage{Workspace: child.ID, Parent: parent.ID, ParentBook: "book-p", ThroughMs: 1}); err != nil {
+		t.Fatalf("ResolveFork: %v", err)
+	}
+	sess, _, _ := s.Session(ctx, child.ID)
+	sess.VendorSessionID = ""
+
+	// Act
+	err := s.BindSessionToOwnFork(ctx, sess, "vendor-queue")
+
+	// Assert
+	if err != nil {
+		t.Fatalf("BindSessionToOwnFork: %v", err)
+	}
+	if n := scalar[int](t, s, `SELECT count(*) FROM fork_lineage WHERE workspace_id = ?`, child.ID); n != 0 {
+		t.Fatalf("fork_lineage holds %d rows for the workspace after the bind", n)
+	}
+}
+
+func TestBindSessionToOwnForkRefusesAndWritesNothing(t *testing.T) {
+	cases := []struct {
+		name   string
+		vendor string
+		parent string
+	}{
+		{name: "a session that already names a conversation", vendor: "vendor-other", parent: "vendor-queue"},
+		{name: "no conversation to copy", vendor: "", parent: ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			s, logs, ws := ownForkStore(t)
+			ctx := context.Background()
+			sess, _, _ := s.Session(ctx, ws.ID)
+			sess.VendorSessionID = tc.vendor
+
+			// Act
+			err := s.BindSessionToOwnFork(ctx, sess, tc.parent)
+
+			// Assert
+			if err == nil {
+				t.Fatal("BindSessionToOwnFork accepted it")
+			}
+			if got := scalar[string](t, s, `SELECT vendor_session_id FROM sessions WHERE workspace_id = ?`, ws.ID); got != "vendor-queue" {
+				t.Fatalf("the session names %q after a refusal, want it unchanged", got)
+			}
+			if n := scalar[int](t, s, `SELECT count(*) FROM pending_forks`); n != 0 {
+				t.Fatalf("pending_forks holds %d rows after a refusal", n)
+			}
+			if !loggedError(logs.Records(), "daemon.wsm.bind_session_to_own_fork") {
+				t.Fatalf("the refusal was not logged at error: %+v", logs.Records())
+			}
+		})
+	}
+}
+
+func TestLineageEndsAtAnOwnFork(t *testing.T) {
+	// Arrange
+	s, _, ws := ownForkStore(t)
+	ctx := context.Background()
+	sess, _, _ := s.Session(ctx, ws.ID)
+	sess.VendorSessionID = ""
+	if err := s.BindSessionToOwnFork(ctx, sess, "vendor-queue"); err != nil {
+		t.Fatalf("BindSessionToOwnFork: %v", err)
+	}
+	if err := s.ResolveFork(ctx, "vendor-bypass", ForkLineage{Workspace: ws.ID, Parent: ws.ID, ParentBook: "book-queue", ThroughMs: 5}); err != nil {
+		t.Fatalf("ResolveFork: %v", err)
+	}
+
+	// Act
+	got, err := s.Lineage(ctx, ws.ID)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Lineage: %v", err)
+	}
+	want := []ForkLineage{{Workspace: ws.ID, Parent: ws.ID, ParentBook: "book-queue", ThroughMs: 5}}
+	if len(got) != 1 || got[0].Workspace != want[0].Workspace || got[0].Parent != want[0].Parent || got[0].ParentBook != want[0].ParentBook || got[0].ThroughMs != want[0].ThroughMs {
+		t.Fatalf("Lineage = %+v, want %+v", got, want)
 	}
 }
