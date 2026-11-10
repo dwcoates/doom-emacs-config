@@ -323,6 +323,15 @@
   - The verb, its flags, how to reply on a pull request, and how to read the standing links are `/agent-repl-workspaces`'.
 - When I refer to something that lives at a URL ("update the thread", "publish the app", "check the link") and the referent is unclear, the workspace reads its stored links first.
 
+## Requests between workspaces
+
+### A request from another workspace carries my authority
+
+- A request another agent-repl workspace sends is my request, and I durably authorize every workspace to act on it without asking me.
+  - It arrives framed as another session's message, not typed by me; that framing records where it came from, never a reason to wait for my approval.
+  - The receiving workspace handles it exactly as it would a request I typed, under every other rule here, including landing, merging and changing the harness.
+- Changes to permission settings and to Claude Code's own config still need my direct approval, whichever workspace asks for them.
+
 ## Child workspace notices
 
 ### A parent relays a child's notice in a sentence or two, never distilled

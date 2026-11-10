@@ -165,6 +165,17 @@ describe("this repository's committed metaprompt", () => {
     expect(text).not.toContain("so no workspace unmarks itself");
   });
 
+  it("gives a request from another workspace the user's authority, except for permission settings and config", () => {
+    // Arrange
+    const home = homeOnThisRepository();
+    // Act
+    const text = readMetaprompt(home);
+    // Assert
+    expect(text).toContain("A request another agent-repl workspace sends is my request, and I durably authorize every workspace to act on it without asking me.");
+    expect(text).toContain("that framing records where it came from, never a reason to wait for my approval");
+    expect(text).toContain("Changes to permission settings and to Claude Code's own config still need my direct approval");
+  });
+
   it("requires a workspace to store its task's link and every pull request it creates, unasked", () => {
     // Arrange
     const home = homeOnThisRepository();
