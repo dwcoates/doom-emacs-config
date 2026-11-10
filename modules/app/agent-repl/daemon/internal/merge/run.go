@@ -1127,7 +1127,7 @@ func readEscalation(dir string) (string, bool) {
 
 // workspaceName is a workspace's name as drawn. A record that cannot be read
 // is recorded and the id stands in: a name must not stop the merge's waiting
-// state from being drawn. A read that failed because CTX ended is the merge
+// state from being drawn. A read cut by CTX ending (cutUnder) is the merge
 // winding down with its daemon (a handover or deploy cancels it), so it is
 // recorded at DEBUG; every other read failure is recorded at ERROR.
 func (o *orchestrator) workspaceName(ctx context.Context, ws ids.WorkspaceID) string {
@@ -1136,7 +1136,7 @@ func (o *orchestrator) workspaceName(ctx context.Context, ws ids.WorkspaceID) st
 		return record.Name
 	}
 	fields := dlog.Context{"workspace": string(ws), "error": err.Error()}
-	if ctx.Err() != nil {
+	if cutUnder(ctx, err) {
 		fields["cause"] = context.Cause(ctx).Error()
 		o.deps.Log.Global().Debug("daemon.merge.await_free", "the merge's context ended while reading the awaited workspace's name; the merge winds down with its daemon and its id is drawn", fields)
 		return string(ws)
