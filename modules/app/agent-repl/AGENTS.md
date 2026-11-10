@@ -2072,6 +2072,12 @@ NEVER opens in the xwidget.
 - Emacs's host takes back any navigation that still reaches it, recorded at
   ERROR (`elisp.webhost.navigated-away`, `lisp/webhost.el`). That record means
   a page drew an unrouted link: fix the page, never the take-back.
+- A Slack permalink is the one link that skips Chrome (owner ruling,
+  2026-11-09): on a subdomain `AGENT_REPL_SLACK_TEAMS` names, `OpenExternal`
+  hands it to the Slack app as a `slack://` deep link
+  (`daemon/internal/externalbrowser/slack.go`). Chrome would open a tab whose
+  page redirects to the app and stays behind, and landing on that tab later
+  sends the app back to the link.
 
 ## The topbar's warning chip is the webapp's one error surface
 

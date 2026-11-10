@@ -43,16 +43,12 @@ func OwnersFromEnv(getenv func(string) string, home, workRoot string) (Owners, e
 		return nil, fmt.Errorf("pullrefs: the work account root is required")
 	}
 	owners := Owners{filepath.Clean(workRoot): WorkOwner}
-	raw := strings.TrimSpace(getenv(EnvOwners))
-	if raw == "" {
-		return owners, nil
+	pairs, err := usersetup.Pairs("pullrefs", EnvOwners, "<config-dir>=<owner>", getenv(EnvOwners))
+	if err != nil {
+		return nil, err
 	}
-	for pair := range strings.SplitSeq(raw, ",") {
-		dir, owner, ok := strings.Cut(strings.TrimSpace(pair), "=")
-		dir, owner = strings.TrimSpace(dir), strings.TrimSpace(owner)
-		if !ok || dir == "" {
-			return nil, usersetup.Errorf("pullrefs: %s pair %q is not `<config-dir>=<owner>`", EnvOwners, pair)
-		}
+	for _, p := range pairs {
+		dir, owner, pair := p.Key, p.Value, p.Entry
 		if !ownerShape.MatchString(owner) {
 			return nil, usersetup.Errorf("pullrefs: %s pair %q names %q, which is not a GitHub login", EnvOwners, pair, owner)
 		}

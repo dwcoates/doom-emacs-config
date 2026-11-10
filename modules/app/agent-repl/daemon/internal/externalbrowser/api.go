@@ -58,7 +58,8 @@ type Opener interface {
 	// malformed url, and a launcher that will not run are all errors the
 	// caller surfaces; nothing is opened silently or in a guessed profile.
 	// A configured launcher override skips the routing entirely: it names the
-	// whole launch.
+	// whole launch. A Slack permalink on a configured subdomain is not a
+	// browser's at all: it opens in the Slack app, whatever the browser.
 	Open(ctx context.Context, url, accountEmail string) error
 }
 
@@ -88,6 +89,13 @@ type Config struct {
 	// launch runs the browser in the invoked process, which never exits).
 	// Empty takes DefaultLaunchWindow.
 	LaunchWindow time.Duration
+	// SlackTeams is the team ID of each Slack subdomain whose permalinks open
+	// in the Slack app rather than a browser (SlackTeamsFromEnv). Empty sends
+	// every Slack link to the browser.
+	SlackTeams SlackTeams
+	// SlackOpenBin is the program a Slack deep link is handed to. Empty takes
+	// SlackOpenBinary.
+	SlackOpenBin string
 	// Logger is required; every branch of a launch is recorded.
 	Logger dlog.Logger
 }

@@ -292,6 +292,15 @@
       "doc": "docs/USER-GUIDE.md#setup"
     },
     {
+      "id": "slack-teams",
+      "kind": "env",
+      "why": "names the team ID of each Slack workspace whose links open straight in the Slack app instead of leaving a browser tab behind",
+      "profile": "run",
+      "optional": true,
+      "name": "AGENT_REPL_SLACK_TEAMS",
+      "doc": "docs/USER-GUIDE.md#setup"
+    },
+    {
       "id": "persistent-wifi-hotspot",
       "kind": "env",
       "why": "names the phone hotspot persistent-wifi mode joins",

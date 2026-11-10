@@ -44,6 +44,8 @@ type opener struct {
 	defaultBin     string
 	activateBin    string
 	localStatePath string
+	slackTeams     SlackTeams
+	slackOpenBin   string
 	launchWindow   time.Duration
 	log            dlog.Logger
 }
@@ -55,6 +57,8 @@ func newOpener(cfg Config) *opener {
 		defaultBin:     cfg.DefaultLauncherBin,
 		activateBin:    cfg.ActivateBin,
 		localStatePath: cfg.LocalStatePath,
+		slackTeams:     cfg.SlackTeams,
+		slackOpenBin:   cfg.SlackOpenBin,
 		launchWindow:   cfg.LaunchWindow,
 		log:            cfg.Logger,
 	}
@@ -70,12 +74,16 @@ func newOpener(cfg Config) *opener {
 	if o.localStatePath == "" {
 		o.localStatePath = DefaultLocalStatePath()
 	}
+	if o.slackOpenBin == "" {
+		o.slackOpenBin = SlackOpenBinary
+	}
 	if o.launchWindow <= 0 {
 		o.launchWindow = DefaultLaunchWindow
 	}
 	o.log.Debug("daemon.externalbrowser.new", "external browser opener built", dlog.Context{
 		"launcher":      o.launcherName(),
 		"overridden":    o.launcherCmd != "",
+		"slack_teams":   map[string]string(o.slackTeams),
 		"launch_window": o.launchWindow.String(),
 	})
 	return o
@@ -134,6 +142,11 @@ func (o *opener) Open(ctx context.Context, url, accountEmail string) error {
 		})
 		return err
 	}
+	// THE SLACK APP BEFORE ANY BROWSER: a Slack permalink handed to a browser
+	// leaves a tab behind (slack.go), whichever browser it is.
+	if deep, ok := o.slackDeepLink(url); ok {
+		return o.openSlack(ctx, url, deep)
+	}
 	if o.launcherCmd != "" {
 		return o.openOverridden(ctx, url)
 	}
@@ -190,6 +203,42 @@ func (o *opener) profileFor(url, email string) (string, error) {
 		"branch":  "matched",
 	})
 	return profile, nil
+}
+
+// slackDeepLink answers url's Slack deep link when it has one, and records why
+// a slack.com link that has none goes to the browser instead.
+func (o *opener) slackDeepLink(url string) (string, bool) {
+	deep, ok, why := SlackDeepLink(url, o.slackTeams)
+	if !ok && why != "" {
+		o.log.Debug("daemon.externalbrowser.open", "Slack link goes to the browser, not the Slack app", dlog.Context{
+			"url":    url,
+			"branch": "slack-unrouted",
+			"reason": why,
+		})
+	}
+	return deep, ok
+}
+
+// openSlack hands a Slack permalink's deep link to the Slack app. No browser
+// is raised or handed anything.
+func (o *opener) openSlack(ctx context.Context, url, deep string) error {
+	if err := o.run(ctx, o.slackOpenBin, []string{deep}); err != nil {
+		wrapped := fmt.Errorf("externalbrowser: opening %s in the Slack app as %s: %w", url, deep, err)
+		o.log.Error("daemon.externalbrowser.open", "Slack link launch failed", dlog.Context{
+			"url":      url,
+			"deeplink": deep,
+			"launcher": o.slackOpenBin,
+			"branch":   "slack-launch-failed",
+			"error":    wrapped.Error(),
+		})
+		return wrapped
+	}
+	o.log.Debug("daemon.externalbrowser.open", "Slack link handed to the Slack app", dlog.Context{
+		"url":      url,
+		"deeplink": deep,
+		"branch":   "slack",
+	})
+	return nil
 }
 
 // openOverridden hands the url to the configured launcher and nothing else. An

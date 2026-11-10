@@ -136,6 +136,9 @@ const opHeadlessBinary = "daemon.headless.binary"
 // owner is recorded under.
 const opPullOwners = "daemon.pullrefs.owners"
 
+// opSlackTeams is the boot record of which Slack subdomains open in the app.
+const opSlackTeams = "daemon.externalbrowser.slack_teams"
+
 // unwired names every Deps field this composition root cannot supply. It is
 // EMPTY: every collaborator the wave-3 graph needs has a landed producer. The
 // list stays so that a future dependency with no producer is declared rather
@@ -381,28 +384,9 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	if err != nil {
 		return nil, fmt.Errorf("agent-repld: build the classifier: %w", err)
 	}
-	// THE BROWSER IS OPTIONAL, and its absence is a STATE THE CONTRACT SPELLS.
-	// A daemon with `--no-browser`, or one on a host with neither
-	// $AGENT_REPL_BROWSER_CMD nor the pinned default binary, has no launcher
-	// at all: the dependency is left nil and OpenExternal answers
-	// no_browser_configured rather than reporting a launch that never had
-	// anything to run.
-	var browser externalbrowser.Opener
-	switch {
-	case p.Opts.noBrowser:
-		log.Warn(graphOperation, "no external browser is configured for this daemon", dlog.Context{
-			"reason": "--no-browser",
-		})
-	case os.Getenv(externalbrowser.EnvBrowserCmd) == "" && !externalbrowser.DefaultLauncherConfigured():
-		log.Warn(graphOperation, "no external browser is configured for this daemon", dlog.Context{
-			"reason":  "neither $" + externalbrowser.EnvBrowserCmd + " nor the pinned default launcher is present",
-			"default": externalbrowser.DefaultBinary,
-		})
-	default:
-		browser, err = externalbrowser.New(externalbrowser.Config{Logger: log})
-		if err != nil {
-			return nil, fmt.Errorf("agent-repld: build the external browser: %w", err)
-		}
+	browser, err := buildBrowser(p.Opts.noBrowser, os.Getenv, externalbrowser.DefaultLauncherConfigured(), log)
+	if err != nil {
+		return nil, err
 	}
 	// THE ADOPTED-DEATH WITNESS. Without it an adopted shim whose socket is
 	// gone is redialed forever: no exit is ever published, so the workspace
@@ -2546,3 +2530,39 @@ func freshBootSettle(joining bool, controller rollout.Controller) func(ctx conte
 type silentOpenProgress struct{}
 
 func (silentOpenProgress) Stage(workspace.OpenStage) {}
+
+// buildBrowser builds the daemon's external browser opener.
+//
+// THE BROWSER IS OPTIONAL, and its absence is a STATE THE CONTRACT SPELLS.
+// A daemon with `--no-browser`, or one on a host with neither
+// $AGENT_REPL_BROWSER_CMD nor the pinned default binary (defaultPresent), has
+// no launcher at all: the opener is nil and OpenExternal answers
+// no_browser_configured rather than reporting a launch that never had
+// anything to run. A malformed $AGENT_REPL_SLACK_TEAMS is a boot refusal,
+// never a Slack team skipped.
+func buildBrowser(noBrowser bool, getenv func(string) string, defaultPresent bool, log dlog.Logger) (externalbrowser.Opener, error) {
+	switch {
+	case noBrowser:
+		log.Warn(graphOperation, "no external browser is configured for this daemon", dlog.Context{
+			"reason": "--no-browser",
+		})
+		return nil, nil
+	case getenv(externalbrowser.EnvBrowserCmd) == "" && !defaultPresent:
+		log.Warn(graphOperation, "no external browser is configured for this daemon", dlog.Context{
+			"reason":  "neither $" + externalbrowser.EnvBrowserCmd + " nor the pinned default launcher is present",
+			"default": externalbrowser.DefaultBinary,
+		})
+		return nil, nil
+	}
+	slackTeams, err := externalbrowser.SlackTeamsFromEnv(getenv)
+	if err != nil {
+		log.Error(opSlackTeams, "the Slack teams whose links open in the Slack app could not be read", dlog.Context{"cause": err.Error()})
+		return nil, fmt.Errorf("agent-repld: read the Slack teams whose links open in the Slack app: %w", err)
+	}
+	log.Info(opSlackTeams, "read the Slack teams whose links open in the Slack app", dlog.Context{"teams": map[string]string(slackTeams)})
+	browser, err := externalbrowser.New(externalbrowser.Config{Logger: log, SlackTeams: slackTeams})
+	if err != nil {
+		return nil, fmt.Errorf("agent-repld: build the external browser: %w", err)
+	}
+	return browser, nil
+}
