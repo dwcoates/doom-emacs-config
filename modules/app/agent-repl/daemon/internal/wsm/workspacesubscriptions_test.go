@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"slices"
 	"testing"
 
 	"agent-repld/internal/dlog"
@@ -35,6 +36,7 @@ func TestWorkspaceEventsAreASet(t *testing.T) {
 	}{
 		{name: "one event", events: []WorkspaceEvent{WorkspaceEventLanded}, wantValid: true, wantName: "landed"},
 		{name: "a repeat is one member", events: []WorkspaceEvent{WorkspaceEventClosed, WorkspaceEventClosed}, wantValid: true, wantName: "closed"},
+		{name: "the pull request event", events: []WorkspaceEvent{WorkspaceEventPullRequest}, wantValid: true, wantName: "pull_request"},
 		{name: "members name in order", events: []WorkspaceEvent{WorkspaceEventClosed, WorkspaceEventTurnStarted}, wantValid: true, wantName: "turn_started,closed"},
 		{name: "no event", wantValid: false},
 		{name: "an undeclared event", events: []WorkspaceEvent{9}, wantValid: false},
@@ -306,6 +308,31 @@ func TestAChildsOpenParentFollowsItWithoutSubscribing(t *testing.T) {
 			// Assert
 			if want := tt.want(f); !reflect.DeepEqual(got, want) {
 				t.Fatalf("subscribers = %+v, want %+v", got, want)
+			}
+		})
+	}
+}
+
+func TestWorkspaceEventsMembersAreInDeclaredOrder(t *testing.T) {
+	tests := []struct {
+		name string
+		set  WorkspaceEvents
+		want []WorkspaceEvent
+	}{
+		{name: "the empty set", set: 0},
+		{name: "every event", set: AllWorkspaceEvents(), want: []WorkspaceEvent{WorkspaceEventTurnStarted, WorkspaceEventTurnEnded,
+			WorkspaceEventNeedsInput, WorkspaceEventLanded, WorkspaceEventClosed, WorkspaceEventPullRequest}},
+		{name: "some events, given out of order", set: NewWorkspaceEvents(WorkspaceEventPullRequest, WorkspaceEventTurnStarted),
+			want: []WorkspaceEvent{WorkspaceEventTurnStarted, WorkspaceEventPullRequest}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := tt.set.Members()
+
+			// Assert
+			if !slices.Equal(got, tt.want) {
+				t.Errorf("Members() = %v, want %v", got, tt.want)
 			}
 		})
 	}

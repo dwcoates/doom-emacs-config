@@ -150,6 +150,10 @@ func (s *Service) Closed(before wsm.Workspace) {
 	}
 }
 
+// PullRequestOwned implements wsedges.Observer: a pull request is no derived
+// event.
+func (s *Service) PullRequestOwned(ids.WorkspaceID, wsm.PullRequestKey) {}
+
 // Run delivers every reported event, in order, until ctx ends, then delivers
 // every event still pending before it returns.
 func (s *Service) Run(ctx context.Context, prompts prompthandler.Submitter) {

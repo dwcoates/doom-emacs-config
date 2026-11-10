@@ -41,6 +41,7 @@ import (
 	"agent-repld/internal/merge"
 	"agent-repld/internal/noticeloop"
 	"agent-repld/internal/prompthandler"
+	"agent-repld/internal/prwatch"
 	"agent-repld/internal/untoldnotice"
 	"agent-repld/internal/wsm"
 )
@@ -89,6 +90,9 @@ type Deps struct {
 type edge struct {
 	ws    ids.WorkspaceID
 	event wsm.WorkspaceEvent
+	// pr is the pull request a WorkspaceEventPullRequest edge names; zero for
+	// every other event.
+	pr wsm.PullRequestKey
 }
 
 // Service is the notifier. It implements wsedges.Observer.
@@ -108,11 +112,13 @@ func New(deps Deps) *Service {
 
 // TurnStarted implements wsedges.Observer.
 func (s *Service) TurnStarted(ws ids.WorkspaceID) {
-	s.loop.Report(edge{ws, wsm.WorkspaceEventTurnStarted})
+	s.loop.Report(edge{ws: ws, event: wsm.WorkspaceEventTurnStarted})
 }
 
 // TurnEnded implements wsedges.Observer.
-func (s *Service) TurnEnded(ws ids.WorkspaceID) { s.loop.Report(edge{ws, wsm.WorkspaceEventTurnEnded}) }
+func (s *Service) TurnEnded(ws ids.WorkspaceID) {
+	s.loop.Report(edge{ws: ws, event: wsm.WorkspaceEventTurnEnded})
+}
 
 // TurnEndedUnobserved implements wsedges.Observer: an end no daemon watched
 // is never told as news.
@@ -120,15 +126,22 @@ func (s *Service) TurnEndedUnobserved(ids.WorkspaceID) {}
 
 // NeedsInput implements wsedges.Observer.
 func (s *Service) NeedsInput(ws ids.WorkspaceID) {
-	s.loop.Report(edge{ws, wsm.WorkspaceEventNeedsInput})
+	s.loop.Report(edge{ws: ws, event: wsm.WorkspaceEventNeedsInput})
 }
 
 // Landed implements wsedges.Observer.
-func (s *Service) Landed(ws ids.WorkspaceID) { s.loop.Report(edge{ws, wsm.WorkspaceEventLanded}) }
+func (s *Service) Landed(ws ids.WorkspaceID) {
+	s.loop.Report(edge{ws: ws, event: wsm.WorkspaceEventLanded})
+}
 
 // Closed implements wsedges.Observer.
 func (s *Service) Closed(before wsm.Workspace) {
-	s.loop.Report(edge{before.ID, wsm.WorkspaceEventClosed})
+	s.loop.Report(edge{ws: before.ID, event: wsm.WorkspaceEventClosed})
+}
+
+// PullRequestOwned implements wsedges.Observer.
+func (s *Service) PullRequestOwned(ws ids.WorkspaceID, pr wsm.PullRequestKey) {
+	s.loop.Report(edge{ws: ws, event: wsm.WorkspaceEventPullRequest, pr: pr})
 }
 
 // Run delivers every reported edge, in order, through PROMPTS until ctx ends,
@@ -172,7 +185,7 @@ func (s *Service) notify(ctx context.Context, prompts prompthandler.Submitter, s
 	log := s.deps.Log.Global()
 	subscriber := sub.Subscriber
 	fields := dlog.Merge(edgeFields, dlog.Context{"subscriber": string(subscriber), "parent_follows": sub.ParentFollows})
-	sentences := append(s.carried(ctx, subscriber, e.ws), EventSentence(status.GetName(), e.event))
+	sentences := append(s.carried(ctx, subscriber, e.ws), EventSentence(status.GetName(), e.event, e.pr))
 	fields["changes"] = len(sentences)
 	turn, failure, err := s.submit(ctx, prompts, sub, e.event, sentences, status)
 	if err != nil {
@@ -241,8 +254,16 @@ func NoticeValues(event wsm.WorkspaceEvent, sentences []string, status *agentrep
 }
 
 // EventSentence states EVENT of the workspace named NAME as a sentence that
-// stands alone in a list of changes.
-func EventSentence(name string, event wsm.WorkspaceEvent) string {
+// stands alone in a list of changes. PR is the pull request a
+// WorkspaceEventPullRequest names, and zero for every other event.
+//
+// A PULL REQUEST IS TOLD WITH HOW TO FOLLOW IT. The follower is usually in
+// another repository, waiting on the followed workspace's change to merge
+// there, and this sentence is the first it hears of the pull request.
+func EventSentence(name string, event wsm.WorkspaceEvent, pr wsm.PullRequestKey) string {
+	if (event == wsm.WorkspaceEventPullRequest) != pr.Valid() {
+		panic(fmt.Sprintf("workspacesubs: event %s told with pull request %q", event, pr))
+	}
 	subject := "`" + name + "` "
 	switch event {
 	case wsm.WorkspaceEventTurnStarted:
@@ -255,6 +276,9 @@ func EventSentence(name string, event wsm.WorkspaceEvent) string {
 		return subject + "landed its branch."
 	case wsm.WorkspaceEventClosed:
 		return subject + "closed."
+	case wsm.WorkspaceEventPullRequest:
+		url := prwatch.URLOf(pr)
+		return subject + "owns pull request " + url + "; to be told when it merges, follow it with `agent-repld workspace pr-subscribe here -pr " + url + "`."
 	}
 	panic(fmt.Sprintf("workspacesubs: undeclared event %d", int(event)))
 }
@@ -306,5 +330,54 @@ func activityWords(a *agentreplv1.WorkspaceStatusActivity) string {
 }
 
 func edgeFields(e edge) dlog.Context {
-	return dlog.Context{"workspace": string(e.ws), "event": e.event.String()}
+	fields := dlog.Context{"workspace": string(e.ws), "event": e.event.String()}
+	if e.pr.Valid() {
+		fields["pull_request"] = e.pr.String()
+	}
+	return fields
 }
+
+// EventProto is E's contract spelling (agentrepl.v1.WorkspaceNoticeEvent).
+// An event with none is a store event added without its contract arm, and
+// fails hard.
+func EventProto(e wsm.WorkspaceEvent) agentreplv1.WorkspaceNoticeEvent {
+	switch e {
+	case wsm.WorkspaceEventTurnStarted:
+		return agentreplv1.WorkspaceNoticeEvent_WORKSPACE_NOTICE_EVENT_TURN_STARTED
+	case wsm.WorkspaceEventTurnEnded:
+		return agentreplv1.WorkspaceNoticeEvent_WORKSPACE_NOTICE_EVENT_TURN_ENDED
+	case wsm.WorkspaceEventNeedsInput:
+		return agentreplv1.WorkspaceNoticeEvent_WORKSPACE_NOTICE_EVENT_NEEDS_INPUT
+	case wsm.WorkspaceEventLanded:
+		return agentreplv1.WorkspaceNoticeEvent_WORKSPACE_NOTICE_EVENT_LANDED
+	case wsm.WorkspaceEventClosed:
+		return agentreplv1.WorkspaceNoticeEvent_WORKSPACE_NOTICE_EVENT_CLOSED
+	case wsm.WorkspaceEventPullRequest:
+		return agentreplv1.WorkspaceNoticeEvent_WORKSPACE_NOTICE_EVENT_PULL_REQUEST
+	}
+	panic(fmt.Sprintf("workspacesubs: event %d has no contract spelling", int(e)))
+}
+
+// EventsOf reads a subscription's contract events as the store's. A request's
+// validation refused an unspecified or undeclared one, so an event with no
+// store event is a contract arm added without its mapping, and fails hard.
+func EventsOf(events []agentreplv1.WorkspaceNoticeEvent) wsm.WorkspaceEvents {
+	var out []wsm.WorkspaceEvent
+	for _, e := range events {
+		stored, ok := storeEvents[e]
+		if !ok {
+			panic(fmt.Sprintf("workspacesubs: workspace notice event %s has no store event", e))
+		}
+		out = append(out, stored)
+	}
+	return wsm.NewWorkspaceEvents(out...)
+}
+
+// storeEvents is EventProto inverted, so the two spellings have one mapping.
+var storeEvents = func() map[agentreplv1.WorkspaceNoticeEvent]wsm.WorkspaceEvent {
+	out := map[agentreplv1.WorkspaceNoticeEvent]wsm.WorkspaceEvent{}
+	for _, e := range wsm.AllWorkspaceEvents().Members() {
+		out[EventProto(e)] = e
+	}
+	return out
+}()

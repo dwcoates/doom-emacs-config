@@ -1,6 +1,7 @@
 // Package wsedges is the ONE fan-out of a workspace's lifecycle edges -- a
 // turn starting and ending, an ask opening, the workspace's branch landing,
-// the workspace closing -- to every party that tells agents about them (the
+// the workspace closing, the workspace taking a pull request as its own -- to
+// every party that tells agents about them (the
 // derived-workspace notices, workspace subscriptions).
 //
 // EACH EDGE HAS ONE ORIGIN, so no observer can miss one another sees:
@@ -13,7 +14,9 @@
 //     (merge.QueueChangeLanded), which covers a landing that keeps its
 //     workspace open as well as one that closes it;
 //   - a workspace closes in the registry's MarkClosed, which every close path
-//     goes through (ReportingCloses).
+//     goes through (ReportingEdges);
+//   - a workspace takes a pull request as its own in the registry's
+//     SetWorkspaceLink, the one write of an owned link (ReportingEdges).
 //
 // AN OBSERVER NEVER BLOCKS AN EDGE: every method only appends, and its
 // delivery runs elsewhere.
@@ -49,6 +52,9 @@ type Observer interface {
 	// Closed: an open workspace closed; BEFORE is it as it stood just before,
 	// so its MergedAt says whether its branch landed.
 	Closed(before wsm.Workspace)
+	// PullRequestOwned: WS stored an owned link to PR, a GitHub pull request
+	// it did not own before.
+	PullRequestOwned(ws ids.WorkspaceID, pr wsm.PullRequestKey)
 }
 
 // Hub fans every edge out to its observers, in the order they were given.
@@ -99,6 +105,13 @@ func (h *Hub) Closed(before wsm.Workspace) {
 	}
 }
 
+// PullRequestOwned implements Observer.
+func (h *Hub) PullRequestOwned(ws ids.WorkspaceID, pr wsm.PullRequestKey) {
+	for _, o := range h.observers {
+		o.PullRequestOwned(ws, pr)
+	}
+}
+
 // QueueChanged implements merge.QueueObserver: a landed change is its
 // subject's landing edge.
 func (h *Hub) QueueChanged(change merge.QueueChange) {
@@ -107,22 +120,30 @@ func (h *Hub) QueueChanged(change merge.QueueChange) {
 	}
 }
 
-// ReportingCloses answers DB with every close of an open workspace told to
-// HUB. Every close path -- the user's close and kill, a landing's close, the
-// daemon's boot housekeeping -- goes through MarkClosed, so wrapping it is
-// what makes a close that tells nobody unrepresentable, rather than a hook
-// each path must remember. Re-closing a closed row tells nothing.
-func ReportingCloses(db wsm.DB, hub *Hub, log dlog.Logger) wsm.DB {
-	return closingDB{DB: db, hub: hub, log: log}
+// ReportingEdges answers DB with the edges its writes make told to HUB.
+//
+// A CLOSE of an open workspace is told: every close path -- the user's close
+// and kill, a landing's close, the daemon's boot housekeeping -- goes through
+// MarkClosed, so wrapping it is what makes a close that tells nobody
+// unrepresentable, rather than a hook each path must remember. Re-closing a
+// closed row tells nothing.
+//
+// A PULL REQUEST TAKEN AS THE WORKSPACE'S OWN is told: an owned link is
+// stored only through SetWorkspaceLink, and a link that takes a new
+// subscription (wsm.LinkSet.Subscribe) is a pull request the workspace did not
+// own before. Storing it again, or relabeling it, takes none and tells
+// nothing.
+func ReportingEdges(db wsm.DB, hub *Hub, log dlog.Logger) wsm.DB {
+	return reportingDB{DB: db, hub: hub, log: log}
 }
 
-type closingDB struct {
+type reportingDB struct {
 	wsm.DB
 	hub *Hub
 	log dlog.Logger
 }
 
-func (d closingDB) MarkClosed(ctx context.Context, id wsm.WorkspaceID, closure wsm.Closure) error {
+func (d reportingDB) MarkClosed(ctx context.Context, id wsm.WorkspaceID, closure wsm.Closure) error {
 	before, err := d.DB.Workspace(ctx, id)
 	if err != nil {
 		d.log.Error(op, "could not read a workspace before closing it, so the close is refused rather than left untold",
@@ -136,4 +157,18 @@ func (d closingDB) MarkClosed(ctx context.Context, id wsm.WorkspaceID, closure w
 		d.hub.Closed(before)
 	}
 	return nil
+}
+
+func (d reportingDB) SetWorkspaceLink(ctx context.Context, id wsm.WorkspaceID, set wsm.LinkSet) ([]wsm.WorkspaceLink, error) {
+	links, err := d.DB.SetWorkspaceLink(ctx, id, set)
+	if err != nil {
+		return nil, err
+	}
+	if set.Owned && set.Subscribe != nil {
+		if set.PullRequest == nil {
+			panic(fmt.Sprintf("wsedges: workspace %s stored an owned link %q taking a pull-request subscription without naming the pull request", id, set.URL))
+		}
+		d.hub.PullRequestOwned(id, *set.PullRequest)
+	}
+	return links, nil
 }

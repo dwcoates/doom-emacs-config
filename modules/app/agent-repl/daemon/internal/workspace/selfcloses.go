@@ -53,6 +53,10 @@ func (s *SelfCloses) Landed(ids.WorkspaceID) {}
 // Closed implements wsedges.Observer: a close ends its own mark.
 func (s *SelfCloses) Closed(wsm.Workspace) {}
 
+// PullRequestOwned implements wsedges.Observer: no close waits on a pull
+// request.
+func (s *SelfCloses) PullRequestOwned(ids.WorkspaceID, wsm.PullRequestKey) {}
+
 // Run carries out every reported turn end's self-close, in order, until ctx
 // ends, then carries out every one still pending before it returns.
 func (s *SelfCloses) Run(ctx context.Context) {

@@ -24,6 +24,7 @@ import (
 	"agent-repld/internal/prwatch"
 	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/workspace"
+	"agent-repld/internal/workspacesubs"
 	"agent-repld/internal/wsm"
 )
 
@@ -1114,6 +1115,7 @@ func TestSubscribeReadsItsEvents(t *testing.T) {
 		code   int
 	}{
 		{name: "known events", events: "landed, closed", code: exitSuccess},
+		{name: "the pull request event", events: "pull_request,landed", code: exitSuccess},
 		{name: "an unknown event", events: "landed,exploded", code: exitFailure},
 	}
 	for _, tt := range tests {
@@ -1135,6 +1137,23 @@ func TestSubscribeReadsItsEvents(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestSubscribeSpellsEveryStoreEventByItsStoreName(t *testing.T) {
+	for _, e := range wsm.AllWorkspaceEvents().Members() {
+		t.Run(e.String(), func(t *testing.T) {
+			// Act
+			got, ok := noticeEvents[e.String()]
+
+			// Assert
+			if !ok || got != workspacesubs.EventProto(e) {
+				t.Errorf("-events %q = %v (%v), want %v", e, got, ok, workspacesubs.EventProto(e))
+			}
+		})
+	}
+	if len(noticeEvents) != len(wsm.AllWorkspaceEvents().Members()) {
+		t.Errorf("noticeEvents spells %d events, want exactly the store's %d", len(noticeEvents), len(wsm.AllWorkspaceEvents().Members()))
 	}
 }
 
