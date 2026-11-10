@@ -243,57 +243,84 @@ func (v *verbs) BindSession(ctx context.Context, ws ids.WorkspaceID, vendorSessi
 	// work itself finishes and the roster says so.
 	swap := context.WithoutCancel(ctx)
 
-	reportBindStage(progress, BindStageStoppingSession)
-	if err := v.deps.Sessions.Stop(shimlife.WithStandDown(swap, shimlife.StandDownRebind), ws, false); err != nil {
-		return refuseWith(log, rpc, ArmStopFailed,
-			fmt.Sprintf("the current session would not end: %s", err.Error()), false,
-			map[string]any{"detail": err.Error()})
-	}
-
-	reportBindStage(progress, BindStageRecordingBinding)
-	if err := v.recordBinding(swap, log, ws, vendorSessionID); err != nil {
+	if err := v.swapConversation(swap, log, ws, vendorSessionID, true, progress,
+		"the workspace was bound to a different vendor conversation",
+		func(step swapStep, err error) error {
+			if step == swapStopping {
+				return refuseWith(log, rpc, ArmStopFailed,
+					fmt.Sprintf("the current session would not end: %s", err.Error()), false,
+					map[string]any{"detail": err.Error()})
+			}
+			return refuseWith(log, rpc, ArmStartFailed,
+				fmt.Sprintf("the session on the bound conversation would not come up: %s", err.Error()), false,
+				map[string]any{"detail": err.Error()})
+		}); err != nil {
 		return err
-	}
-
-	// THE FEED IS EMPTIED BEFORE THE NEW SESSION COMES UP. The feed resolver
-	// keys its rows per WORKSPACE, so without this the previous
-	// conversation's rows stand and the chosen conversation's replay merely
-	// upserts alongside them — a successful bind that placed no new row drew
-	// nothing at all, and the user was left looking at the conversation they
-	// had just replaced. The reset runs HERE, after the old session is stopped
-	// (so nothing is still writing rows into the feed) and before the new one
-	// is started (so the resume's replay populates an empty feed and the
-	// chosen conversation is the only thing on screen — a cold gate included,
-	// since the gate is raised by the start below).
-	//
-	// IT CANNOT BE CUT IN HALF BY A CALLER THAT HUNG UP: like every step of
-	// this swap it is reached only from the cancel-free `swap` sequence, and
-	// the reset itself takes no context at all, because an emptied feed
-	// half-emptied is a feed showing two conversations.
-	v.deps.Feed.ResetWorkspace(ws, "the workspace was bound to a different vendor conversation")
-
-	// THE ORDINARY RESUME PATH, and one thing more. The source classifier
-	// reads the record this verb just wrote, so a cold conversation is refused
-	// with its cost and answered at the cold gate — the same refusal a revival
-	// meets — rather than paid for behind the user's back.
-	//
-	// WHAT THE ONE THING IS: the resume is marked a REBIND, and this is the
-	// only caller in the daemon that marks one. The shim keeps a persisted
-	// main AgentId per workspace — the book the daemon reads history under —
-	// and a plain resume keeps it, so that a rotated resume handle cannot
-	// orphan the records filed before the rotation. After a bind that rule
-	// replays the conversation the user just replaced and hides the chosen
-	// one's pages entirely, so the bind's own start tells the shim to adopt
-	// the chosen conversation's identity instead.
-	reportBindStage(progress, BindStageStartingSession)
-	if err := v.deps.Sessions.StartRebound(shimlife.WithStart(swap, shimlife.StartRebind), ws); err != nil {
-		return refuseWith(log, rpc, ArmStartFailed,
-			fmt.Sprintf("the session on the bound conversation would not come up: %s", err.Error()), false,
-			map[string]any{"detail": err.Error()})
 	}
 
 	log.Info(opBindSession, "bound the workspace to the chosen conversation", nil)
 	v.republishRegistry(swap, log, opBindSession)
+	return nil
+}
+
+// swapStep names the step of a conversation swap that failed.
+type swapStep int
+
+const (
+	// swapStopping is the current session's stop.
+	swapStopping swapStep = iota + 1
+	// swapStarting is the session's start on the newly bound conversation.
+	swapStarting
+)
+
+// swapConversation is the one session swap a bind and a queue-bypass switch
+// share: the current session is stopped, VENDORSESSIONID is recorded as the
+// workspace's binding (empty starts it fresh), the feed is emptied, and the
+// session is started on the binding — through StartRebound when REBIND, the
+// one start that tells the shim to adopt the bound conversation's identity.
+// FAILED maps a stop or a start that failed onto the caller's refusal; a
+// failed record write is returned as it is.
+//
+// THE FEED IS EMPTIED BETWEEN THE STOP AND THE START. The feed resolver keys
+// its rows per WORKSPACE, so without this the previous conversation's rows
+// stand and the next one's replay merely upserts alongside them. The reset
+// runs after the old session is stopped (so nothing is still writing rows)
+// and before the new one is started (so its replay populates an empty feed,
+// a cold gate included, since the gate is raised by the start). It takes no
+// context at all, because a feed half-emptied is a feed showing two
+// conversations.
+func (v *verbs) swapConversation(
+	ctx context.Context,
+	log dlog.Logger,
+	ws ids.WorkspaceID,
+	vendorSessionID string,
+	rebind bool,
+	progress BindProgress,
+	why string,
+	failed func(swapStep, error) error,
+) error {
+	reportBindStage(progress, BindStageStoppingSession)
+	if err := v.deps.Sessions.Stop(shimlife.WithStandDown(ctx, shimlife.StandDownRebind), ws, false); err != nil {
+		return failed(swapStopping, err)
+	}
+	reportBindStage(progress, BindStageRecordingBinding)
+	if err := v.recordBinding(ctx, log, ws, vendorSessionID); err != nil {
+		return err
+	}
+	v.deps.Feed.ResetWorkspace(ws, why)
+	reportBindStage(progress, BindStageStartingSession)
+	var err error
+	if rebind {
+		// THE ORDINARY RESUME PATH, marked a REBIND: the shim keeps a
+		// persisted main AgentId per workspace, and a plain resume keeps it,
+		// which after a swap would replay the conversation just replaced.
+		err = v.deps.Sessions.StartRebound(shimlife.WithStart(ctx, shimlife.StartRebind), ws)
+	} else {
+		err = v.deps.Sessions.Start(ctx, ws)
+	}
+	if err != nil {
+		return failed(swapStarting, err)
+	}
 	return nil
 }
 

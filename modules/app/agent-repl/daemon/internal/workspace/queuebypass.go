@@ -11,7 +11,6 @@ import (
 	"agent-repld/internal/ids"
 	"agent-repld/internal/merge"
 	"agent-repld/internal/resolve/topbar"
-	"agent-repld/internal/shimlife"
 	"agent-repld/internal/wsm"
 )
 
@@ -149,29 +148,25 @@ func (v *verbs) switchConversation(ctx context.Context, log dlog.Logger, rpc str
 		log.Error(opQueueBypass, "could not read the conversation the workspace runs", dlog.Context{"cause": err.Error()})
 		return fmt.Errorf("queue bypass for %q: %w", ws, err)
 	}
-	if err := v.deps.Sessions.Stop(shimlife.WithStandDown(ctx, shimlife.StandDownRebind), ws, false); err != nil {
-		return refuseWith(log, rpc, ArmSwitchFailed, fmt.Sprintf("the current session would not end: %s", err.Error()), false,
-			map[string]any{"detail": "the current session would not end: " + err.Error()})
-	}
+	// THE CONVERSATION STEPPED OUT OF IS PARKED BEFORE THE SWAP STOPS IT: the
+	// record names it until the swap rewrites the binding.
 	if current != "" {
 		if err := v.deps.DB.SetParkedConversation(ctx, ws, current); err != nil {
 			return refuseWith(log, rpc, ArmSwitchFailed, fmt.Sprintf("the conversation stepped out of could not be kept: %s", err.Error()), false,
 				map[string]any{"detail": "the conversation stepped out of could not be kept: " + err.Error()})
 		}
 	}
-	if err := v.recordBinding(ctx, log, ws, parked); err != nil {
+	if err := v.swapConversation(ctx, log, ws, parked, parked != "", nil,
+		"the workspace switched between its queue and bypass conversations",
+		func(step swapStep, err error) error {
+			what := "the other conversation's session would not come up"
+			if step == swapStopping {
+				what = "the current session would not end"
+			}
+			return refuseWith(log, rpc, ArmSwitchFailed, fmt.Sprintf("%s: %s", what, err.Error()), false,
+				map[string]any{"detail": what + ": " + err.Error()})
+		}); err != nil {
 		return err
-	}
-	v.deps.Feed.ResetWorkspace(ws, "the workspace switched between its queue and bypass conversations")
-	start := v.deps.Sessions.Start
-	if parked != "" {
-		start = func(ctx context.Context, ws ids.WorkspaceID) error {
-			return v.deps.Sessions.StartRebound(shimlife.WithStart(ctx, shimlife.StartRebind), ws)
-		}
-	}
-	if err := start(ctx, ws); err != nil {
-		return refuseWith(log, rpc, ArmSwitchFailed, fmt.Sprintf("the other conversation's session would not come up: %s", err.Error()), false,
-			map[string]any{"detail": "the other conversation's session would not come up: " + err.Error()})
 	}
 	log.Info(opQueueBypass, "switched the workspace's conversation", dlog.Context{"parked": current, "bound": parked})
 	return nil
