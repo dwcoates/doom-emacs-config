@@ -77,6 +77,7 @@
 (defvar agent-repl--global-log-scope)
 
 (require 'cl-lib)
+(require 'subr-x)
 
 ;; Forward declarations for symbols defined later in the load order (status.el).
 ;; Workspace.el loads before status.el; these calls fire only at runtime so
