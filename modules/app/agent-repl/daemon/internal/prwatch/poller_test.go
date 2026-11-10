@@ -119,9 +119,8 @@ func TestARecoveryWithNoActivityIsNotToldAsANotice(t *testing.T) {
 	r.tick()
 
 	// Assert
-	told := r.told()
-	if len(told) != 1 || !contains(told[0], "reads of this pull request are failing") {
-		t.Fatalf("told = %q, want only the failure: a recovery with no activity is no notice", told)
+	if told := r.told(); len(told) != 0 {
+		t.Fatalf("told = %q, want nothing: the failed read is told to no workspace, and a recovery with no activity is no notice", told)
 	}
 	if _, ok := dlog.FindRecord(r.log.Records(), dlog.RecordQuery{Level: "info", Operation: opPoll,
 		Message: "the pull request's reads work again and it did nothing meanwhile; its subscriber is told nothing"}); !ok {
@@ -382,8 +381,8 @@ func TestAPullRequestWhoseQueueCannotBeReadIsFailing(t *testing.T) {
 	if len(subs) != 1 || subs[0].Failing == nil || subs[0].Failing.Detail != "down" {
 		t.Fatalf("subscriptions = %+v, want one failing", subs)
 	}
-	if told := r.told(); len(told) != 1 || !strings.Contains(told[0], "reads of this pull request are failing: down") {
-		t.Fatalf("told = %v, want the failure", told)
+	if told := r.told(); len(told) != 0 {
+		t.Fatalf("told = %v, want nothing: a read the daemon could not make is told to no workspace", told)
 	}
 }
 
