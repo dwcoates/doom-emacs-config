@@ -856,10 +856,73 @@ in `completion-category-overrides', with the `substring' then `flex' styles."
         (should (equal (cons text (agent-repl-test-command-completion--marked))
                        (cons text marked)))))))
 
-(provide 'test-command-completion)
-;;; test-command-completion.el ends here
 
 (ert-deftest agent-repl-test-command-completion-known-face-is-the-shared-purple ()
   "The known-command face wears the shared dark purple of render-colors.json."
   (should (equal (face-attribute 'agent-repl-command-completion-known :foreground nil 'default)
                  "#7d4bcf")))
+
+;;;; ---- The order candidates are offered in ----
+
+(defun agent-repl-test-command-completion--ordered (capf)
+  "Every name CAPF offers for a bare slash, in its table's display order."
+  (let* ((table (nth 2 capf))
+         (sort (completion-metadata-get (completion-metadata "/" table nil)
+                                        'display-sort-function)))
+    (funcall sort (all-completions "/" table))))
+
+(defmacro agent-repl-test-command-completion--ordering (mentioned &rest body)
+  "Run BODY at a bare slash in a composer whose workspace MENTIONED those commands.
+No candidate is taken before BODY runs."
+  (declare (indent 1))
+  `(agent-repl-test-command-completion--with nil
+     (let ((agent-repl--completion-order-selected (make-hash-table :test 'equal))
+           (agent-repl--completion-order-clock 0))
+       (cl-letf (((symbol-function 'agent-repl-host-mentions)
+                  (lambda (ws kind)
+                    (should (equal ws "ws-1"))
+                    (should (eq kind 'command))
+                    ,mentioned)))
+         (setq agent-repl--command-completion-catalog agent-repl-test-command-completion--catalog)
+         (setq agent-repl--command-completion-asked-at '(1 . 0))
+         (agent-repl-test-command-completion--type "/")
+         ,@body))))
+
+(ert-deftest agent-repl-test-command-completion-capf-keeps-the-runtimes-order ()
+  "With nothing taken or mentioned, the runtime's order stands."
+  (agent-repl-test-command-completion--ordering nil
+    ;; Act / Assert
+    (should (equal (agent-repl-test-command-completion--ordered
+                    (agent-repl-command-completion-at-point))
+                   '("merge-queue" "usage" "cost" "stats" "clear")))))
+
+(ert-deftest agent-repl-test-command-completion-capf-offers-the-workspaces-mentions-first ()
+  "A command the composer's workspace mentioned is offered first."
+  (agent-repl-test-command-completion--ordering '("clear" "cost")
+    ;; Act / Assert
+    (should (equal (agent-repl-test-command-completion--ordered
+                    (agent-repl-command-completion-at-point))
+                   '("clear" "cost" "merge-queue" "usage" "stats")))))
+
+(ert-deftest agent-repl-test-command-completion-capf-offers-a-taken-command-first ()
+  "A command taken through the capf's exit function is then offered first."
+  (agent-repl-test-command-completion--ordering '("clear")
+    ;; Arrange
+    (funcall (plist-get (nthcdr 3 (agent-repl-command-completion-at-point)) :exit-function)
+             "usage" 'finished)
+    ;; Act / Assert
+    (should (equal (agent-repl-test-command-completion--ordered
+                    (agent-repl-command-completion-at-point))
+                   '("usage" "clear" "merge-queue" "cost" "stats")))))
+
+(ert-deftest agent-repl-test-command-completion-capf-takes-a-slashed-candidate-by-name ()
+  "A completion UI handing back the whole slashed word takes the command by name."
+  (agent-repl-test-command-completion--ordering nil
+    ;; Act
+    (funcall (plist-get (nthcdr 3 (agent-repl-command-completion-at-point)) :exit-function)
+             "/clear" 'sole)
+    ;; Assert
+    (should (gethash '(command . "clear") agent-repl--completion-order-selected))))
+
+(provide 'test-command-completion)
+;;; test-command-completion.el ends here

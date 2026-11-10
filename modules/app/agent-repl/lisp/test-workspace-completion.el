@@ -17,11 +17,12 @@
 (require 'cl-lib)
 
 (defmacro agent-repl-test-workspace-completion--with (text workspaces &rest body)
-  "Run BODY in a buffer holding TEXT, point at its end, with WORKSPACES open.
-Each of WORKSPACES is a name, open in no stated repository, or a
+  "Run BODY in a composer owned by \"ws-1\" holding TEXT, point at its end.
+WORKSPACES are open: each a name, open in no stated repository, or a
 \(NAME . REPOSITORIES) element as `agent-repl-roster-open-workspaces' answers."
   (declare (indent 2))
   `(with-temp-buffer
+     (setq-local agent-repl--owning-workspace "ws-1")
      (insert ,text)
      (cl-letf (((symbol-function 'agent-repl-roster-open-workspaces)
                 (lambda () (mapcar (lambda (ws) (if (consp ws) ws (list ws))) ,workspaces))))
@@ -305,6 +306,60 @@ Each of WORKSPACES is a name, open in no stated repository, or a
   "The re-mark runs on every roster push."
   (should (memq #'agent-repl--workspace-completion-mark-composers
                 (default-value 'agent-repl-roster-update-functions))))
+
+;;;; ---- The order names are offered in ----
+
+(defun agent-repl-test-workspace-completion--ordered (capf)
+  "Every name CAPF's table holds, in its display order."
+  (let* ((table (nth 2 capf))
+         (sort (completion-metadata-get (completion-metadata "" table nil)
+                                        'display-sort-function)))
+    (funcall sort (all-completions "" table))))
+
+(defmacro agent-repl-test-workspace-completion--ordering (mentioned &rest body)
+  "Run BODY completing `agent-' among open workspaces, MENTIONED by the composer's.
+No name is taken before BODY runs."
+  (declare (indent 1))
+  `(agent-repl-test-workspace-completion--with "agent-"
+       '("agent-a" "agent-b" "agent-c")
+     (let ((agent-repl--completion-order-selected (make-hash-table :test 'equal))
+           (agent-repl--completion-order-clock 0))
+       (cl-letf (((symbol-function 'agent-repl-host-mentions)
+                  (lambda (ws kind)
+                    (should (equal ws "ws-1"))
+                    (should (eq kind 'workspace))
+                    ,mentioned)))
+         ,@body))))
+
+(ert-deftest agent-repl-test-workspace-completion-offers-nothing-outside-a-composer ()
+  "A buffer no workspace owns is no composer, so it completes no name."
+  (with-temp-buffer
+    (insert "agent-")
+    (cl-letf (((symbol-function 'agent-repl-roster-open-workspaces)
+               (lambda () '(("agent-a")))))
+      ;; Act / Assert
+      (should-not (agent-repl-workspace-completion-at-point)))))
+
+(ert-deftest agent-repl-test-workspace-completion-offers-the-workspaces-mentions-first ()
+  "A name the composer's workspace mentioned is offered first, newest first."
+  (agent-repl-test-workspace-completion--ordering '("agent-c" "agent-b")
+    ;; Act
+    (let ((offered (agent-repl-test-workspace-completion--ordered
+                    (agent-repl-workspace-completion-at-point))))
+      ;; Assert
+      (should (equal (seq-take offered 2) '("agent-c" "agent-b"))))))
+
+(ert-deftest agent-repl-test-workspace-completion-offers-a-taken-name-first ()
+  "A name taken through the capf's exit function is then offered first."
+  (agent-repl-test-workspace-completion--ordering '("agent-c")
+    ;; Arrange
+    (funcall (plist-get (nthcdr 3 (agent-repl-workspace-completion-at-point)) :exit-function)
+             "agent-a" 'finished)
+    ;; Act
+    (let ((offered (agent-repl-test-workspace-completion--ordered
+                    (agent-repl-workspace-completion-at-point))))
+      ;; Assert
+      (should (equal (seq-take offered 2) '("agent-a" "agent-c"))))))
 
 (provide 'test-workspace-completion)
 ;;; test-workspace-completion.el ends here

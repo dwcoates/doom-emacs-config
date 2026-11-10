@@ -693,6 +693,20 @@ never empty."
      "HostWorkspaceComposeEntry"
      (list :label (agent-repl-wire--decode-required-string "HostWorkspaceComposeEntry" 'label object)))))
 
+;;;; ---- The mentions push ----
+
+(defun agent-repl-wire-decode-host-workspace-mentions (value)
+  "Decode VALUE as `HostWorkspaceMentions', a plist `(:commands :workspaces)'.
+Each is a list of names, the most recently mentioned first: COMMANDS
+without their slash, WORKSPACES as the roster names them."
+  (let* ((message "HostWorkspaceMentions")
+         (object (agent-repl-wire--object message value)))
+    (agent-repl-wire--check-keys message object '(commands workspaces))
+    (agent-repl-wire--decoded
+     message
+     (list :commands (agent-repl-wire--decode-repeated-string message 'commands object)
+           :workspaces (agent-repl-wire--decode-repeated-string message 'workspaces object)))))
+
 ;;;; ---- The selection push ----
 
 (defun agent-repl-wire-decode-host-workspace-selection (value)
@@ -978,6 +992,10 @@ VALUE is (:workspace REF :token TOKEN :outcome OUTCOME), all required."
   "Decode the `compose_entry' push arm VALUE."
   (agent-repl-wire-decode-host-workspace-compose-entry value))
 
+(defun agent-repl-wire-decode-watch-host-workspace-response-mentions (value)
+  "Decode the `mentions' push arm VALUE as its `(:commands :workspaces)' plist."
+  (agent-repl-wire-decode-host-workspace-mentions value))
+
 (defun agent-repl-wire-decode-watch-host-workspace-response-selection (value)
   "Decode the `selection' push arm VALUE as its `(:kind :markdown)' plist."
   (agent-repl-wire-decode-host-workspace-selection value))
@@ -1044,6 +1062,7 @@ Returns a plist (:command STRING)."
      (notificationClicked :notification-clicked
                           agent-repl-wire-decode-watch-host-workspace-response-notification-clicked)
      (selection :selection agent-repl-wire-decode-watch-host-workspace-response-selection)
+     (mentions :mentions agent-repl-wire-decode-watch-host-workspace-response-mentions)
      (evaluate :evaluate agent-repl-wire-decode-watch-host-workspace-response-evaluate)
      (finalResponseClicked :final-response-clicked
                            agent-repl-wire-decode-watch-host-workspace-response-final-response-clicked)
@@ -1067,7 +1086,7 @@ Returns a plist (:command STRING)."
      "WatchHostWorkspaceResponse" object
      '(host transferred reloadWebapp openInEditor openCommitLog runInTerminal ending notificationClicked selection evaluate
        finalResponseClicked selectRequested loadPageRequested composeEntry chatTextHighlighted
-       transferWithdrawn responseTextHighlighted responseQuestion))
+       transferWithdrawn responseTextHighlighted responseQuestion mentions))
     (agent-repl-wire--decoded
      "WatchHostWorkspaceResponse"
      (agent-repl-wire-decode-watch-host-workspace-response-push object))))

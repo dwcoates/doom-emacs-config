@@ -1554,6 +1554,7 @@ re-create bookkeeping for a workspace whose tab is gone (measured
     (:host (agent-repl-host--apply-state ws value))
     (:notification-clicked (agent-repl-host--notification-clicked ws))
     (:selection (agent-repl-host--apply-selection ws value))
+    (:mentions (agent-repl-host--apply-mentions ws value))
     (:final-response-clicked (agent-repl-host--reply-target-picked ws "final-response-clicked"))
     (:chat-text-highlighted (agent-repl-host--reply-target-picked ws "chat-text-highlighted"))
     (:response-text-highlighted (agent-repl-host--reply-target-picked ws "response-text-highlighted"))
@@ -1659,6 +1660,32 @@ nothing selected."
   "Return the text of the bubble WS's feed has selected, or nil.
 Nil exactly while nothing is selected (or no push has arrived yet)."
   (plist-get (agent-repl-host--entry ws) :selection-markdown))
+
+;;;; ---- The composer mentions ----
+
+(defun agent-repl-host--apply-mentions (ws mentions)
+  "Record MENTIONS as the names WS's own final responses mentioned.
+MENTIONS is the decoded `HostWorkspaceMentions' plist `(:commands
+:workspaces)', each a list of names, the most recently mentioned first.  It
+is the host watch's `mentions' push: state, whole-replaced, and sent first
+on every subscription, so Emacs's record is the daemon's after a restart of
+either side.  The composer orders its completions by it
+\(completion-order.el)."
+  (agent-repl-host--put ws :mentions mentions)
+  (agent-repl--log ws "elisp.host.mentions ws=%s commands=%d workspaces=%d"
+                   ws (length (plist-get mentions :commands))
+                   (length (plist-get mentions :workspaces))))
+
+(defun agent-repl-host-mentions (ws kind)
+  "Return the names of KIND WS's own final responses mentioned, newest first.
+KIND is `command' (names without their slash) or `workspace'.  Nil before
+the host watch's first `mentions' push, which is a workspace that has
+mentioned nothing."
+  (plist-get (plist-get (agent-repl-host--entry ws) :mentions)
+             (pcase kind
+               ('command :commands)
+               ('workspace :workspaces)
+               (_ (error "agent-repl: unknown mention kind %S" kind)))))
 
 ;;;; ---- The reply target picked in the webview ----
 

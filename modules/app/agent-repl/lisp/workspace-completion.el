@@ -24,6 +24,10 @@
 ;; (`agent-repl--workspace-completion-table') names its own category, given
 ;; the `substring' style, so a completion UI keeps every one of them.
 ;;
+;; THE ORDER IS THE READER'S, then the workspace's.  A name taken from this
+;; completion before is offered first, then one the composer's own workspace
+;; mentioned in its final responses, then the rest (completion-order.el).
+;;
 ;; EACH NAME IS ANNOTATED WITH ITS REPOSITORY, in a column aligned past the
 ;; longest name offered and drawn in a dimmer face
 ;; (`agent-repl-workspace-completion-repository'), read from the same push
@@ -54,7 +58,11 @@
 (declare-function agent-repl-roster-open-workspace-names "agent-repl-roster" ())
 (declare-function agent-repl-annotation-column "agent-repl-core" (names gap))
 (declare-function agent-repl-completion-match-capf "completion-match" (beg end table &rest props))
-(declare-function agent-repl-completion-match-table "completion-match" (category collection))
+(declare-function agent-repl-completion-match-table "completion-match" (category collection &optional sort))
+(declare-function agent-repl-completion-order-sorter "completion-order" (kind mentioned key))
+(declare-function agent-repl-completion-order-exit-function "completion-order" (kind key))
+(declare-function agent-repl-host-mentions "agent-repl-host" (ws kind))
+(declare-function agent-repl--buffer-owner "agent-repl-core" (buf))
 (declare-function agent-repl-composer-mark-lines "composer-mark" (beg end tag find))
 (declare-function agent-repl--input-composers "input" ())
 
@@ -104,9 +112,11 @@ style only keeps a completion UI from narrowing them again by prefix.")
 (add-to-list 'completion-category-defaults
              (list agent-repl--workspace-completion-category '(styles substring basic)))
 
-(defun agent-repl--workspace-completion-table (names)
-  "Return a completion table over NAMES, in this capf's own category."
-  (agent-repl-completion-match-table agent-repl--workspace-completion-category names))
+(defun agent-repl--workspace-completion-table (names &optional sort)
+  "Return a completion table over NAMES, in this capf's own category.
+SORT, when given, is the order a completion UI offers them in
+\(`agent-repl-completion-match-table')."
+  (agent-repl-completion-match-table agent-repl--workspace-completion-category names sort))
 
 (defun agent-repl--workspace-completion-annotation (workspaces)
   "Return the `:annotation-function' over WORKSPACES.
@@ -132,12 +142,18 @@ name.  Each name is annotated with its repository
 \(`agent-repl--workspace-completion-annotation').  Deliberately unlogged:
 completion runs per keystroke."
   (when-let* ((bounds (agent-repl--workspace-completion-bounds))
+              (ws (agent-repl--buffer-owner (current-buffer)))
               (word (buffer-substring-no-properties (car bounds) (cdr bounds)))
               (workspaces (agent-repl-roster-open-workspaces))
               (names (agent-repl--workspace-completion-matches
                       word (mapcar #'car workspaces))))
     (agent-repl-completion-match-capf
-     (car bounds) (cdr bounds) (agent-repl--workspace-completion-table names)
+     (car bounds) (cdr bounds)
+     (agent-repl--workspace-completion-table
+      names
+      (agent-repl-completion-order-sorter
+       'workspace (agent-repl-host-mentions ws 'workspace) #'identity))
+     :exit-function (agent-repl-completion-order-exit-function 'workspace #'identity)
      :annotation-function
      (agent-repl--workspace-completion-annotation
       (mapcar (lambda (name) (assoc name workspaces)) names)))))

@@ -476,6 +476,7 @@ A hand-rolled copy of either would drift from the shared shape and fail here."
                             :open-commit-log)
                       (list "{\"runInTerminal\":{\"command\":\"ls\"}}" :run-in-terminal)
                       (list "{\"selection\":{\"none\":{}}}" :selection)
+                      (list "{\"mentions\":{\"commands\":[\"merge-queue\"]}}" :mentions)
                       (list "{\"evaluate\":{\"token\":{\"value\":\"t-1\"},\"text\":\"(+ 1 2)\"}}" :evaluate)
                       (list "{\"finalResponseClicked\":{}}" :final-response-clicked)
                       (list "{\"selectRequested\":{}}" :select-requested)
@@ -507,6 +508,34 @@ A hand-rolled copy of either would drift from the shared shape and fail here."
   (should (equal (agent-repl-test-wire-host--decode
                   #'agent-repl-wire-decode-host-workspace-transferred "{}")
                  '(:reload-page :unset))))
+
+(ert-deftest agent-repl-test-wire-host-mentions-decode-both-lists ()
+  "The mentions push decodes its commands and workspaces, newest first, as sent."
+  (should (equal (plist-get (agent-repl-test-wire-host--decode
+                             #'agent-repl-wire-decode-watch-host-workspace-response
+                             "{\"mentions\":{\"commands\":[\"b\",\"a\"],\"workspaces\":[\"alpha\"]}}")
+                            :value)
+                 '(:commands ("b" "a") :workspaces ("alpha")))))
+
+(ert-deftest agent-repl-test-wire-host-mentions-absent-lists-are-empty ()
+  "An empty record decodes to two empty lists, protojson's omitted fields."
+  (should (equal (plist-get (agent-repl-test-wire-host--decode
+                             #'agent-repl-wire-decode-watch-host-workspace-response
+                             "{\"mentions\":{}}")
+                            :value)
+                 '(:commands nil :workspaces nil))))
+
+(ert-deftest agent-repl-test-wire-host-mentions-a-non-string-name-is-a-breach ()
+  "A mentioned name that is not a string is a contract breach."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-host-workspace-mentions "{\"commands\":[3]}")
+                 '("HostWorkspaceMentions" commands "expected a string"))))
+
+(ert-deftest agent-repl-test-wire-host-mentions-an-unknown-field-is-a-breach ()
+  "A field the record does not declare is a contract breach."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-host-workspace-mentions "{\"skills\":[]}")
+                 '("HostWorkspaceMentions" skills "unknown field"))))
 
 (ert-deftest agent-repl-test-wire-host-push-unset-is-a-breach ()
   "A push carrying no arm is a contract breach, not an empty update."

@@ -40,6 +40,11 @@
 ;; other completion in Emacs, including the user's own, still follows
 ;; whatever `completion-styles' they have set.
 ;;
+;; THE ORDER IS THE READER'S, then the workspace's.  A command taken from this
+;; completion before is offered first, then one the composer's own workspace
+;; mentioned in its final responses, then the runtime's order
+;; (completion-order.el).
+;;
 ;; A POPUP ROW STAYS NARROW.  Each candidate's annotation (argument hint,
 ;; then description) is cut to `agent-repl-command-completion-annotation-width'
 ;; columns; the full description is the candidate's doc signature.
@@ -71,7 +76,10 @@
 (declare-function agent-repl-host-conn-or-primary "agent-repl-host" (ws))
 (declare-function agent-repl-host-route-handover "agent-repl-host" (ws arm slug))
 (declare-function agent-repl-completion-match-capf "completion-match" (beg end table &rest props))
-(declare-function agent-repl-completion-match-table "completion-match" (category collection))
+(declare-function agent-repl-completion-match-table "completion-match" (category collection &optional sort))
+(declare-function agent-repl-completion-order-sorter "completion-order" (kind mentioned key))
+(declare-function agent-repl-completion-order-exit-function "completion-order" (kind key))
+(declare-function agent-repl-host-mentions "agent-repl-host" (ws kind))
 (declare-function agent-repl-composer-mark-lines "composer-mark" (beg end tag find))
 (declare-function agent-repl-rpc-list-slash-commands "agent-repl-rpc" (conn request &rest keys))
 
@@ -149,8 +157,16 @@ which is the user's to set.")
 (add-to-list 'completion-category-defaults
              (list agent-repl--command-completion-category '(styles substring flex basic)))
 
-(defun agent-repl--command-completion-table (candidates)
+(defun agent-repl--command-completion-name (candidate)
+  "Return the command name CANDIDATE completes: CANDIDATE less any leading `/'.
+A completion UI hands back the bare name the field after the slash holds,
+or the whole slashed word; both name the same command."
+  (string-remove-prefix "/" candidate))
+
+(defun agent-repl--command-completion-table (candidates &optional sort)
   "Return a completion table over CANDIDATES, in this capf's own category.
+SORT, when given, is the order a completion UI offers them in
+\(`agent-repl-completion-match-table').
 A plain collection function -- STRING PREDICATE ACTION, as
 `completion-at-point-functions' may return -- that answers a `metadata'
 ACTION with `agent-repl--command-completion-category' and otherwise
@@ -170,8 +186,7 @@ a completion UI expects of a field that starts after the `/' -- it keeps
 the typed `/' and replaces only what follows, so a slashed answer would
 insert a second `/' -- while try-completion answers the whole slashed
 word."
-  (let ((names (mapcar (lambda (candidate) (string-remove-prefix "/" candidate))
-                       candidates)))
+  (let ((names (mapcar #'agent-repl--command-completion-name candidates)))
     (agent-repl-completion-match-table
      agent-repl--command-completion-category
      (lambda (string predicate action)
@@ -180,7 +195,8 @@ word."
          (completion-table-with-context "/" names (substring string 1) predicate action))
         ((eq (car-safe action) 'boundaries)
          (cons 'boundaries (cons 0 (length (cdr action)))))
-        (t (complete-with-action action candidates string predicate)))))))
+        (t (complete-with-action action candidates string predicate))))
+     sort)))
 
 (defun agent-repl--command-completion-entry (catalog candidate)
   "Return the CATALOG entry CANDIDATE names, as its name or an alias, or nil."
@@ -326,7 +342,11 @@ completion runs per keystroke."
       (agent-repl-completion-match-capf
        (car bounds) (cdr bounds)
        (agent-repl--command-completion-table
-        (agent-repl--command-completion-candidates catalog))
+        (agent-repl--command-completion-candidates catalog)
+        (agent-repl-completion-order-sorter
+         'command (agent-repl-host-mentions ws 'command) #'agent-repl--command-completion-name))
+       :exit-function
+       (agent-repl-completion-order-exit-function 'command #'agent-repl--command-completion-name)
        :annotation-function
        (lambda (candidate) (agent-repl--command-completion-annotation catalog candidate))
        :company-docsig
