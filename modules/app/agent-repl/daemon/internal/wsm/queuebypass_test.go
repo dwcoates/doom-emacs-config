@@ -2,6 +2,7 @@ package wsm
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 )
@@ -212,5 +213,153 @@ func TestTheParkedClockRefusesAWorkspaceThatParksNothing(t *testing.T) {
 				t.Fatal("the write was accepted for a workspace that parks nothing")
 			}
 		})
+	}
+}
+
+func TestAQueueBypassHoldLiftsRemoteControl(t *testing.T) {
+	tests := []struct {
+		name       string
+		arrange    func(*testing.T, *store) Workspace
+		release    bool
+		wantOn     bool
+		wantLifted bool
+	}{
+		{name: "a take over remote control off lifts it", arrange: testLinkedWorktree, wantOn: true, wantLifted: true},
+		{name: "a take over remote control on lifts nothing", arrange: testWorkspace, wantOn: true},
+		{name: "a release after a lift falls back to off", arrange: testLinkedWorktree, release: true},
+		{name: "a release after no lift keeps remote control on", arrange: testWorkspace, release: true, wantOn: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			ws := tt.arrange(t, s)
+			ctx := context.Background()
+
+			// Act
+			if err := s.TakeQueueBypass(ctx, ws.ID, instant); err != nil {
+				t.Fatalf("TakeQueueBypass: %v", err)
+			}
+			if tt.release {
+				if err := s.ReleaseQueueBypass(ctx, ws.ID); err != nil {
+					t.Fatalf("ReleaseQueueBypass: %v", err)
+				}
+			}
+
+			// Assert
+			got, err := s.RemoteControl(ctx, ws.ID)
+			if err != nil || got.On != tt.wantOn || got.LiftedByQueueBypass != tt.wantLifted || got.Recorded {
+				t.Fatalf("RemoteControl = %+v, %v; want on %v, lifted %v, nothing recorded", got, err, tt.wantOn, tt.wantLifted)
+			}
+		})
+	}
+}
+
+func TestATakeOverAnExplicitOnLiftsNothing(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testLinkedWorktree(t, s)
+	ctx := context.Background()
+	if _, err := s.SetRemoteControlMode(ctx, ws.ID, RemoteControlOn); err != nil {
+		t.Fatalf("SetRemoteControlMode: %v", err)
+	}
+
+	// Act
+	if err := s.TakeQueueBypass(ctx, ws.ID, instant); err != nil {
+		t.Fatalf("TakeQueueBypass: %v", err)
+	}
+	if err := s.ReleaseQueueBypass(ctx, ws.ID); err != nil {
+		t.Fatalf("ReleaseQueueBypass: %v", err)
+	}
+
+	// Assert
+	got, err := s.RemoteControl(ctx, ws.ID)
+	if err != nil || !got.On || got.LiftedByQueueBypass {
+		t.Fatalf("RemoteControl = %+v, %v; want the explicit on kept past the release", got, err)
+	}
+}
+
+func TestARefusedTakeLiftsNothing(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	holder := testLinkedWorktree(t, s)
+	ctx := context.Background()
+	other, _, err := s.RegisterWorkspace(ctx, t.TempDir(), RegisterFacts{
+		Name: "other", Branch: "other", ParentBranch: "master", RepoDir: scalar[string](t, s, `SELECT r.dir FROM repositories AS r JOIN workspaces AS w ON w.repo_id = r.id WHERE w.id = ?`, holder.ID),
+	})
+	if err != nil {
+		t.Fatalf("RegisterWorkspace: %v", err)
+	}
+	if err := s.TakeQueueBypass(ctx, holder.ID, instant); err != nil {
+		t.Fatalf("TakeQueueBypass: %v", err)
+	}
+
+	// Act
+	err = s.TakeQueueBypass(ctx, other.ID, instant)
+
+	// Assert
+	if !errors.Is(err, ErrQueueBypassHeld) {
+		t.Fatalf("TakeQueueBypass = %v, want ErrQueueBypassHeld", err)
+	}
+	if got, err := s.RemoteControl(ctx, other.ID); err != nil || got.On || got.LiftedByQueueBypass {
+		t.Fatalf("RemoteControl = %+v, %v; want the refused workspace left off", got, err)
+	}
+}
+
+func TestALiftGoesWithTheWorkspace(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testLinkedWorktree(t, s)
+	if err := s.TakeQueueBypass(context.Background(), ws.ID, instant); err != nil {
+		t.Fatalf("TakeQueueBypass: %v", err)
+	}
+
+	// Act
+	corrupt(t, s, `DELETE FROM workspaces WHERE id = ?`, ws.ID)
+
+	// Assert
+	if rows := scalar[int](t, s, `SELECT COUNT(*) FROM queue_bypass_holders`); rows != 0 {
+		t.Fatalf("holder rows = %d, want the hold and its lift gone with the workspace", rows)
+	}
+}
+
+func TestClosingAHolderKeepsItsLift(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testLinkedWorktree(t, s)
+	ctx := context.Background()
+	if err := s.TakeQueueBypass(ctx, ws.ID, instant); err != nil {
+		t.Fatalf("TakeQueueBypass: %v", err)
+	}
+
+	// Act
+	if err := s.MarkClosed(ctx, ws.ID, Closure{At: instant, By: CloseByUser}); err != nil {
+		t.Fatalf("MarkClosed: %v", err)
+	}
+
+	// Assert
+	got, err := s.RemoteControl(ctx, ws.ID)
+	if err != nil || !got.On || !got.LiftedByQueueBypass {
+		t.Fatalf("RemoteControl = %+v, %v; want a closed holder still lifted, for its reopening", got, err)
+	}
+}
+
+// TestTheMigrationAddsTheLiftColumn pins the layout-137 step: a file written
+// before the lift was durable carries the column afterwards.
+func TestTheMigrationAddsTheLiftColumn(t *testing.T) {
+	// Arrange
+	path := layout3Fixture(t)
+
+	// Act
+	handle, err := Open(context.Background(), path, WithUnsyncedWrites())
+	if err != nil {
+		t.Fatalf("Open on a layout-3 database: %v", err)
+	}
+	defer handle.Close()
+
+	// Assert
+	s := handle.(*store)
+	if got := scalar[int](t, s, `SELECT count(*) FROM pragma_table_info('queue_bypass_holders') WHERE name = 'lifted_remote_control'`); got != 1 {
+		t.Fatalf("lifted_remote_control exists %d times after the migration, want 1", got)
 	}
 }

@@ -76,6 +76,11 @@ func (s *store) QueueBypass(ctx context.Context, id WorkspaceID) (QueueBypass, e
 // TakeQueueBypass records workspace ID as its repository's queue bypass
 // holder, refusing with ErrQueueBypassHeld while another workspace holds it.
 // A workspace that already holds it is left as it is.
+//
+// A HOLDER IS IN REMOTE CONTROL. The take reads the workspace's remote-control
+// mode in the SAME transaction and, when it is off, marks the hold as having
+// lifted it (readRemoteControl), so the mode a release falls back to is the
+// one the take found, and nothing between them can see the two apart.
 func (s *store) TakeQueueBypass(ctx context.Context, id WorkspaceID, at time.Time) error {
 	const op = "daemon.wsm.take_queue_bypass"
 	fields := dlog.Context{"workspace": string(id)}
@@ -90,15 +95,20 @@ func (s *store) TakeQueueBypass(ctx context.Context, id WorkspaceID, at time.Tim
 		case standing.HeldBy != "":
 			return fmt.Errorf("wsm: workspace %s holds repository %s's queue bypass mode: %w", standing.HeldBy, standing.RepoID, ErrQueueBypassHeld)
 		}
+		remote, err := readRemoteControl(ctx, tx, id)
+		if err != nil {
+			return err
+		}
 		_, err = tx.ExecContext(ctx,
-			`INSERT INTO queue_bypass_holders (repo_id, workspace_id, held_since) VALUES (?, ?, ?)`,
-			standing.RepoID, id, at.UnixNano())
+			`INSERT INTO queue_bypass_holders (repo_id, workspace_id, held_since, lifted_remote_control) VALUES (?, ?, ?, ?)`,
+			standing.RepoID, id, at.UnixNano(), !remote.On)
 		return err
 	})
 }
 
 // ReleaseQueueBypass clears workspace ID's hold on its repository's queue
-// bypass mode. A workspace that holds none is left as it is.
+// bypass mode. A workspace that holds none is left as it is. The hold's lift
+// of remote control goes with its row.
 func (s *store) ReleaseQueueBypass(ctx context.Context, id WorkspaceID) error {
 	const op = "daemon.wsm.release_queue_bypass"
 	return s.write(ctx, op, dlog.Context{"workspace": string(id)}, func(ctx context.Context, tx *sql.Tx) error {
@@ -106,6 +116,16 @@ func (s *store) ReleaseQueueBypass(ctx context.Context, id WorkspaceID) error {
 		return err
 	})
 }
+
+// liftedRemoteControlDDL is the layout-137 addition: whether a queue bypass
+// hold turned its workspace's remote control on (TakeQueueBypass). It rides
+// the holder row, so no release, close, restart or handover can leave a lift
+// standing without the hold it belongs to. IT IS ADDITIVE: the previous
+// build's insert names none of it and takes the default, a hold that lifted
+// nothing.
+const liftedRemoteControlDDL = `
+ALTER TABLE queue_bypass_holders ADD COLUMN lifted_remote_control INTEGER NOT NULL DEFAULT 0;
+`
 
 // parkedClockDDL is the layout-116 addition: each conversation of a
 // queue-bypass workspace keeps its OWN cache clock (owner request,

@@ -41,6 +41,12 @@ type RemoteControl struct {
 	// BridgeSessionID is the claude.ai session the workspace's last bridge
 	// answered, empty when none ever did.
 	BridgeSessionID string
+	// LiftedByQueueBypass reports that On is on only because the workspace
+	// holds its repository's queue bypass mode, whose take found the mode off
+	// (queue_bypass_holders.lifted_remote_control). The fact lives on the
+	// holder row, so it cannot outlive the hold: a release, by any path,
+	// takes it away and On falls back to the recorded mode or the default.
+	LiftedByQueueBypass bool
 }
 
 // RemoteControlChange is what UpdateRemoteControlMode asks of the mode.
@@ -86,6 +92,10 @@ func (s *store) RemoteControl(ctx context.Context, id WorkspaceID) (RemoteContro
 // records the new one, so two toggles racing each turn the mode over once and
 // never both read the same mode. The bridge session is kept: a later on
 // re-binds the claude.ai session the last bridge answered.
+//
+// AN EXPLICIT CHANGE OWNS THE MODE: it clears a queue bypass hold's lift in
+// the same transaction, so the mode the change leaves is the one the release
+// leaves too, and a workspace turned off while it bypasses stays off.
 func (s *store) SetRemoteControlMode(ctx context.Context, id WorkspaceID, change RemoteControlChange) (bool, error) {
 	const op = "daemon.wsm.set_remote_control_mode"
 	fields := dlog.Context{"workspace": string(id), "change": change.String()}
@@ -108,9 +118,13 @@ func (s *store) SetRemoteControlMode(ctx context.Context, id WorkspaceID, change
 		case RemoteControlToggle:
 			on = !current.On
 		}
-		_, err = tx.ExecContext(ctx,
+		if _, err := tx.ExecContext(ctx,
 			`INSERT INTO workspace_remote_control (workspace_id, enabled) VALUES (?, ?)
-			 ON CONFLICT(workspace_id) DO UPDATE SET enabled = excluded.enabled`, id, on)
+			 ON CONFLICT(workspace_id) DO UPDATE SET enabled = excluded.enabled`, id, on); err != nil {
+			return err
+		}
+		_, err = tx.ExecContext(ctx,
+			`UPDATE queue_bypass_holders SET lifted_remote_control = 0 WHERE workspace_id = ?`, id)
 		return err
 	})
 	return on, err
@@ -143,18 +157,22 @@ type remoteControlQuerier interface {
 
 // readRemoteControl reads workspace ID's standing on Q, resolving the default
 // from the workspace's own directory and its repository's: the ONE spelling
-// of the main-worktree rule (IsMainWorktree) decides it.
+// of the main-worktree rule (IsMainWorktree) decides it. A queue bypass hold
+// that lifted the mode turns it on over both: this read is the ONE place the
+// bypass mode and remote control are coupled.
 func readRemoteControl(ctx context.Context, q remoteControlQuerier, id WorkspaceID) (RemoteControl, error) {
 	var (
 		dir, repoDir string
 		enabled      sql.NullBool
 		bridge       sql.NullString
+		lifted       sql.NullBool
 	)
-	err := q.QueryRowContext(ctx, `SELECT w.dir, r.dir, rc.enabled, rc.bridge_session_id
+	err := q.QueryRowContext(ctx, `SELECT w.dir, r.dir, rc.enabled, rc.bridge_session_id, h.lifted_remote_control
 		FROM workspaces AS w
 		JOIN repositories AS r ON r.id = w.repo_id
 		LEFT JOIN workspace_remote_control AS rc ON rc.workspace_id = w.id
-		WHERE w.id = ?`, id).Scan(&dir, &repoDir, &enabled, &bridge)
+		LEFT JOIN queue_bypass_holders AS h ON h.workspace_id = w.id
+		WHERE w.id = ?`, id).Scan(&dir, &repoDir, &enabled, &bridge, &lifted)
 	if errors.Is(err, sql.ErrNoRows) {
 		return RemoteControl{}, fmt.Errorf("wsm: workspace %s: %w", id, ErrNotFound)
 	}
@@ -164,6 +182,9 @@ func readRemoteControl(ctx context.Context, q remoteControlQuerier, id Workspace
 	out := RemoteControl{On: IsMainWorktree(dir, repoDir), BridgeSessionID: bridge.String}
 	if enabled.Valid {
 		out.On, out.Recorded = enabled.Bool, true
+	}
+	if lifted.Valid && lifted.Bool {
+		out.On, out.LiftedByQueueBypass = true, true
 	}
 	return out, nil
 }
