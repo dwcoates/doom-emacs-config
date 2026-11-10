@@ -26,7 +26,7 @@ started on its own and is not rejected.
   session act already take (`promptqueue.registerInterjection`,
   `promptqueue.sendInterrupt`), now shared as `releaseByInterrupt`.
 - A3: A waiting press must survive a restart and a handover, so it is
-  durable on the held prompt row (`wsm.SentNow`, layout 120), not in the
+  durable on the held prompt row (`wsm.SentNow`, layout 121), not in the
   queue's memory.
 
 ## The choice per cause
