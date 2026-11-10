@@ -1612,12 +1612,32 @@ and loaded no page."
       (unwind-protect
           (progn
             (agent-repl--ws-put "alpha" :frontend-buffer buf)
-            (cl-letf (((symbol-function 'agent-repl-webhost-reload-page)
+            (cl-letf (((symbol-function 'agent-repl-webhost-has-page-p) (lambda (_ws) t))
+                      ((symbol-function 'agent-repl-webhost-reload-page)
                        (lambda (ws) (setq reloaded ws) "ws-1")))
               ;; Act
               (agent-repl-frontend-reload-webview "alpha")
               ;; Assert
               (should (equal reloaded "alpha"))))
+        (kill-buffer buf)))))
+
+(ert-deftest agent-repl-test-frontend-reload-of-an-unloaded-page-loads-nothing ()
+  "A slot standing with no page is not loaded by a reload: a handover re-points every slot."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((reloaded nil)
+          (buf (generate-new-buffer "*fake-webview*")))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put "alpha" :frontend-buffer buf)
+            (cl-letf (((symbol-function 'agent-repl-webhost-has-page-p) (lambda (_ws) nil))
+                      ((symbol-function 'agent-repl-webhost-reload-page)
+                       (lambda (ws) (setq reloaded ws) "ws-1")))
+              ;; Act
+              (let ((answer (agent-repl-frontend-reload-webview "alpha")))
+                ;; Assert
+                (should-not answer)
+                (should-not reloaded))))
         (kill-buffer buf)))))
 
 (ert-deftest agent-repl-test-frontend-reload-without-a-slot-reloads-nothing ()
@@ -1669,7 +1689,8 @@ and loaded no page."
           (progn
             (agent-repl--ws-put "alpha" :frontend-buffer buf)
             (agent-repl-test-frontend--with-ref '(:id "ws-1" :dir "/w") "127.0.0.1:9"
-              (cl-letf (((symbol-function 'agent-repl--frontend-webview-live-widget)
+              (cl-letf (((symbol-function 'agent-repl-webhost-has-page-p) (lambda (_ws) t))
+                        ((symbol-function 'agent-repl--frontend-webview-live-widget)
                          (lambda (_buf) 'widget))
                         ((symbol-function 'agent-repl--frontend-webview-navigate-widget)
                          #'ignore))

@@ -1413,6 +1413,13 @@ nothing to reload, and its next open mounts fresh."
      ((not (buffer-live-p buf))
       (agent-repl--log ws "elisp.frontend.reload-webview: skipped ws=%s reason=no-live-webview" ws)
       nil)
+     ;; AN UNLOADED PAGE IS NOT LOADED BY A RELOAD.  Its slot stands with no
+     ;; page, and its next load reads the URL then, so there is nothing to
+     ;; re-point.  Re-pointing it loaded it: a handover re-points every
+     ;; workspace, and on 2026-11-10 21:43 that loaded 77 pages in ten seconds.
+     ((not (agent-repl-webhost-has-page-p ws))
+      (agent-repl--log ws "elisp.frontend.reload-webview: skipped ws=%s reason=page-not-loaded" ws)
+      nil)
      (t
       (prog1 (agent-repl-webhost-reload-page ws)
         (agent-repl--info ws "elisp.frontend.reload-webview: reloaded ws=%s" ws))))))
