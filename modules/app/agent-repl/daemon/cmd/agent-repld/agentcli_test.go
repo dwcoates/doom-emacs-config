@@ -2139,49 +2139,6 @@ func transferringAway(address string) *agentreplv1.CreateWorkspaceResponse {
 	}}}
 }
 
-func TestCreateRefusedByAHandingOverDaemonIsSentToItsSuccessor(t *testing.T) {
-	// Arrange
-	f := newCLIFixture()
-	f.client.creates = []*agentreplv1.CreateWorkspaceResponse{transferringAway("127.0.0.1:2")}
-
-	// Act
-	code := f.run(workspaceNoun, "create", "-repository", "here", "-relationship", "peer", "-context", "fresh")
-
-	// Assert: the same create, sent again to the successor, which created it.
-	if code != exitSuccess {
-		t.Fatalf("exit %d, stderr %q", code, f.errOut.String())
-	}
-	if !slices.Equal(f.dialed, []string{"127.0.0.1:1", "127.0.0.1:2"}) {
-		t.Fatalf("dialed %v, want the daemon and then its successor", f.dialed)
-	}
-	var creates []*agentreplv1.CreateWorkspaceRequest
-	for _, req := range f.client.requests {
-		if typed, ok := req.(*agentreplv1.CreateWorkspaceRequest); ok {
-			creates = append(creates, typed)
-		}
-	}
-	if len(creates) != 2 || !proto.Equal(creates[0], creates[1]) {
-		t.Fatalf("creates sent = %v, want the same create twice", creates)
-	}
-	if !strings.Contains(f.errOut.String(), "sending the create to its successor at 127.0.0.1:2") {
-		t.Fatalf("stderr %q, want the resend named", f.errOut.String())
-	}
-}
-
-func TestCreateRefusedTwiceByHandingOverDaemonsIsRefused(t *testing.T) {
-	// Arrange: the successor is handing over too.
-	f := newCLIFixture()
-	f.client.creates = []*agentreplv1.CreateWorkspaceResponse{transferringAway("127.0.0.1:2"), transferringAway("127.0.0.1:3")}
-
-	// Act
-	code := f.run(workspaceNoun, "create", "-repository", "here", "-relationship", "peer", "-context", "fresh")
-
-	// Assert: sent once more, never chased further.
-	if code != exitRefused || len(f.dialed) != 2 {
-		t.Fatalf("exit %d after dialing %v, want refused after the one resend", code, f.dialed)
-	}
-}
-
 // TestCreateWhoseCallFailsAnswersTheErrorWithNoAnswerRead pins the create's
 // error path: a call that failed carries no answer, so the handover check
 // must not read one (a nil response panicked here on 2026-10-30).

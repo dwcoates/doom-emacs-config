@@ -6,12 +6,14 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"connectrpc.com/connect"
@@ -261,5 +263,127 @@ func TestEveryVerbOpensItsServerStreamsThroughOpenDaemonStream(t *testing.T) {
 	if len(direct) > 0 {
 		t.Fatalf("server streams opened by a direct call, so their Close can drain a standing stream; open them with openDaemonStream:\n%s",
 			strings.Join(direct, "\n"))
+	}
+}
+
+// createDaemon is a daemon at a test server that answers every create with
+// ANSWER, counting the creates it was sent.
+type createDaemon struct {
+	agentreplv1connect.UnimplementedAgentReplHandler
+	answer  *agentreplv1.CreateWorkspaceResponse
+	creates atomic.Int32
+}
+
+func (d *createDaemon) CreateWorkspace(context.Context, *connect.Request[agentreplv1.CreateWorkspaceRequest]) (*connect.Response[agentreplv1.CreateWorkspaceResponse], error) {
+	d.creates.Add(1)
+	return connect.NewResponse(d.answer), nil
+}
+
+// serveCreates runs D at a test server and answers its address.
+func serveCreates(t *testing.T, d *createDaemon) string {
+	t.Helper()
+	path, handler := agentreplv1connect.NewAgentReplHandler(d)
+	mux := http.NewServeMux()
+	mux.Handle(path, handler)
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+	return strings.TrimPrefix(server.URL, "http://")
+}
+
+func created() *agentreplv1.CreateWorkspaceResponse {
+	return &agentreplv1.CreateWorkspaceResponse{Result: &agentreplv1.CreateWorkspaceResponse_Success{Success: &agentreplv1.CreateWorkspaceSuccess{}}}
+}
+
+func TestACallRefusedByAHandingOverDaemonIsSentToItsSuccessor(t *testing.T) {
+	// Arrange
+	successor := &createDaemon{answer: created()}
+	successorAddr := serveCreates(t, successor)
+	incumbent := &createDaemon{answer: transferringAway(successorAddr)}
+	var note strings.Builder
+	client := newRedirectingClient(http.DefaultTransport, serveCreates(t, incumbent), &note)
+
+	// Act
+	resp, err := client.CreateWorkspace(context.Background(), connect.NewRequest(&agentreplv1.CreateWorkspaceRequest{}))
+
+	// Assert
+	if err != nil || resp.Msg.GetSuccess() == nil {
+		t.Fatalf("CreateWorkspace = %v, %v; want the successor's success", resp, err)
+	}
+	if incumbent.creates.Load() != 1 || successor.creates.Load() != 1 {
+		t.Fatalf("creates: incumbent %d, successor %d; want one each", incumbent.creates.Load(), successor.creates.Load())
+	}
+	if !strings.Contains(note.String(), "sending the call to its successor at "+successorAddr) {
+		t.Fatalf("note %q, want the resend named", note.String())
+	}
+}
+
+func TestACallAfterARedirectGoesStraightToTheSuccessor(t *testing.T) {
+	// Arrange
+	successor := &createDaemon{answer: created()}
+	successorAddr := serveCreates(t, successor)
+	incumbent := &createDaemon{answer: transferringAway(successorAddr)}
+	client := newRedirectingClient(http.DefaultTransport, serveCreates(t, incumbent), io.Discard)
+	if _, err := client.CreateWorkspace(context.Background(), connect.NewRequest(&agentreplv1.CreateWorkspaceRequest{})); err != nil {
+		t.Fatalf("first CreateWorkspace: %v", err)
+	}
+
+	// Act
+	_, err := client.CreateWorkspace(context.Background(), connect.NewRequest(&agentreplv1.CreateWorkspaceRequest{}))
+
+	// Assert
+	if err != nil || incumbent.creates.Load() != 1 || successor.creates.Load() != 2 {
+		t.Fatalf("err %v; creates: incumbent %d, successor %d; want the second call at the successor only", err, incumbent.creates.Load(), successor.creates.Load())
+	}
+}
+
+func TestASuccessorThatIsHandingOverTooIsNotChased(t *testing.T) {
+	// Arrange
+	beyond := &createDaemon{answer: created()}
+	successor := &createDaemon{answer: transferringAway(serveCreates(t, beyond))}
+	incumbent := &createDaemon{answer: transferringAway(serveCreates(t, successor))}
+	client := newRedirectingClient(http.DefaultTransport, serveCreates(t, incumbent), io.Discard)
+
+	// Act
+	resp, err := client.CreateWorkspace(context.Background(), connect.NewRequest(&agentreplv1.CreateWorkspaceRequest{}))
+
+	// Assert
+	if err != nil || resp.Msg.GetError().GetTransferringAway() == nil || beyond.creates.Load() != 0 {
+		t.Fatalf("CreateWorkspace = %v, %v; beyond %d; want the successor's refusal and nothing sent further", resp, err, beyond.creates.Load())
+	}
+}
+
+func TestAnAnswerThatIsNoHandoverIsNotResent(t *testing.T) {
+	// Arrange
+	daemon := &createDaemon{answer: created()}
+	client := newRedirectingClient(http.DefaultTransport, serveCreates(t, daemon), io.Discard)
+
+	// Act
+	_, err := client.CreateWorkspace(context.Background(), connect.NewRequest(&agentreplv1.CreateWorkspaceRequest{}))
+
+	// Assert
+	if err != nil || daemon.creates.Load() != 1 {
+		t.Fatalf("err %v, creates %d; want the one call", err, daemon.creates.Load())
+	}
+}
+
+func TestTransferredToFindsTheRefusalsSuccessor(t *testing.T) {
+	tests := []struct {
+		name   string
+		answer *agentreplv1.CreateWorkspaceResponse
+		want   string
+	}{
+		{name: "a handover refusal names its successor", answer: transferringAway("127.0.0.1:2"), want: "127.0.0.1:2"},
+		{name: "a success names none", answer: created(), want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := transferredTo(tt.answer.ProtoReflect(), 0)
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("transferredTo = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
