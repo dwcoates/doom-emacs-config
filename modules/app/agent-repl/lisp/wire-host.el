@@ -1989,9 +1989,10 @@ would answer, or an `internal' sentence it would fail the rpc with."
 THE ARM IS THE STEP: an intermediate `entered_stage' (whose value is the
 stage keyword), the create held for the network (`waiting_for_network',
 not terminal), the create held for its requester's first turn
-(`waiting_for_requester_turn', not terminal), or a terminal `succeeded' or `failed'.  The retired
-field-1 `stage' enum is not a key this codec holds, so a push in that
-shape is refused as an unknown field rather than misread."
+(`waiting_for_requester_turn', not terminal), or a terminal `succeeded'
+or `failed'.  The retired field-1 `stage' enum is not a key this codec
+holds, so a push in that shape is refused as an unknown field rather than
+misread."
   (let ((object (agent-repl-wire--object "WorkspaceCreateProgress" value)))
     (agent-repl-wire--check-keys "WorkspaceCreateProgress" object
                                  '(enteredStage succeeded failed waitingForNetwork
