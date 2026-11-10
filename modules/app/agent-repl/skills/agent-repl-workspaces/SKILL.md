@@ -476,9 +476,17 @@ creating workspaces there with `-repository DIR`.
   - `workspace pr-subscribe WS -pr URL|#N|OWNER/REPO#N [-events
     comment,review,review_comment,state,checks,merge_queue]` and
     `workspace pr-unsubscribe WS -pr URL|OWNER/REPO#N` follow a pull request
-    in any GitHub repository. An agent never subscribes to a pull request it
-    owns: its owned link already follows it, and the daemon unsubscribes it
-    when the pull request ends.
+    in any GitHub repository.
+  - An agent whose work waits on a pull request merging, owned or not,
+    follows it with `workspace pr-subscribe here -pr URL -events
+    state,merge_queue` and NEVER polls GitHub by hand: no `gh pr view` loops,
+    no background polling. The daemon ends the subscription on merge or
+    close.
+  - An owned pull request whose follow the user unsubscribed (its owned link
+    shows `ownership.owned.follow.unsubscribed`) is followed again only with
+    that narrowed event set, `workspace pr-subscribe here -pr URL -events
+    state,merge_queue`. NEVER set the link `-owned` again to do it: that
+    restores the full comment, review and checks stream the user turned off.
   - An agent DOES call `pr-subscribe` to follow a pull request it does not
     own whose merge its own work waits on, typically another workspace's,
     often in another repository, usually with `-events state,merge_queue`

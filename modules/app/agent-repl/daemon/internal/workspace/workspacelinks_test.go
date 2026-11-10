@@ -431,6 +431,8 @@ func TestLinksViewSaysHowAnOwnedLinkIsFollowed(t *testing.T) {
 		{name: "owned and ended", link: wsm.WorkspaceLink{URL: "u", Owned: true, PullRequest: pr,
 			Follow: &wsm.PullRequestSubscription{PullRequest: *pr, Ended: &wsm.PullRequestEnd{Merged: true}}}, arm: "ended"},
 		{name: "owned and unsubscribed", link: wsm.WorkspaceLink{URL: "u", Owned: true, PullRequest: pr}, arm: "unsubscribed"},
+		{name: "owned and followed again for its merge alone", link: wsm.WorkspaceLink{URL: "u", Owned: true, PullRequest: pr,
+			Follow: &wsm.PullRequestSubscription{PullRequest: *pr, Events: wsm.NewPullRequestEvents(wsm.PullRequestEventState, wsm.PullRequestEventMergeQueue), Origin: wsm.PullRequestOriginRequested}}, arm: "following"},
 		{name: "owned and no pull request", link: wsm.WorkspaceLink{URL: "u", Owned: true}, arm: "not_followable"},
 	}
 	for _, tt := range tests {
@@ -493,5 +495,20 @@ func TestAnAnnouncementOfAnUnheldLinkIsRefused(t *testing.T) {
 	}
 	if len(f.db.links["w1"]) != 0 {
 		t.Fatalf("links = %+v, want nothing stored", f.db.links["w1"])
+	}
+}
+
+func TestAnOwnedLinkFollowedForItsMergeAloneShowsItsNarrowedEvents(t *testing.T) {
+	// Arrange
+	pr := &wsm.PullRequestKey{Owner: "o", Repo: "r", Number: 1}
+	link := wsm.WorkspaceLink{URL: "u", Owned: true, PullRequest: pr,
+		Follow: &wsm.PullRequestSubscription{PullRequest: *pr, Events: wsm.NewPullRequestEvents(wsm.PullRequestEventState, wsm.PullRequestEventMergeQueue), Origin: wsm.PullRequestOriginRequested}}
+
+	// Act
+	sub := LinksView([]wsm.WorkspaceLink{link}).GetLinks()[0].GetOwnership().GetOwned().GetFollow().GetFollowing().GetSubscription()
+
+	// Assert
+	if sub == nil || len(sub.GetEvents()) != 2 {
+		t.Fatalf("subscription = %v, want the two narrowed events", sub)
 	}
 }
