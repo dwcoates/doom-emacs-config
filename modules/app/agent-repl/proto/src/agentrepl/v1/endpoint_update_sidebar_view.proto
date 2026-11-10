@@ -93,6 +93,14 @@ message SidebarViewFoldSection {
     // SESSIONS DOWN FIVE MINUTES LATER as a repository's collapse does.
     // EXPANDING starts nothing by itself.
     SubsectionRef subsection = 10;
+    // One open workspace's CHILDREN, echoed from the workspace's own row. Its
+    // fold has a subsection fold's effects on the workspace's open
+    // descendants: the sidebar hides their rows, the Emacs tab bar folds
+    // their tabs, and COLLAPSING UNLOADS THEIR PAGES AT ONCE AND STANDS THEIR
+    // SESSIONS DOWN FIVE MINUTES LATER, sparing the ones a fold spares.
+    // EXPANDING starts nothing by itself. Selecting a descendant, or a
+    // descendant starting work, expands it.
+    workspace.v1.WorkspaceRef workspace = 12;
   }
   // THE ARM IS THE FOLD ASKED FOR. Unset is malformed.
   oneof fold {
@@ -148,6 +156,8 @@ message UpdateSidebarViewError {
     // A collapse of a repository or subsection that holds the current
     // workspace.
     UpdateSidebarViewHoldsCurrent holds_current = 4;
+    // No workspace matches the ref: it was forgotten, or never existed.
+    UpdateSidebarViewUnknownWorkspace unknown_workspace = 5;
   }
 }
 
@@ -159,8 +169,12 @@ message UpdateSidebarViewUnknownSubsection {}
 // the cause.
 message UpdateSidebarViewUnknownRepository {}
 
-// A collapse asked of the repository or subsection the current workspace sits
-// in. Collapsing it would stand down the session the user is looking at and
+// No workspace matches the ref. DELIBERATELY EMPTY: the arm is the cause, and
+// the request names the workspace.
+message UpdateSidebarViewUnknownWorkspace {}
+
+// A collapse asked of the repository, subsection or workspace's children the
+// current workspace sits in. Collapsing it would stand down the session the user is looking at and
 // hide its tab, so nothing is recorded and the fold stands expanded. The
 // check and the selection are serialized in the daemon, so a switch racing
 // the ask is either wholly before it or wholly after it. The roster already

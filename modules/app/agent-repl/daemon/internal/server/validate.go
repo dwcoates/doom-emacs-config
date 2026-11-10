@@ -973,6 +973,10 @@ func validateSidebarViewFoldSection(fold *agentreplv1.SidebarViewFoldSection) *c
 		if err := validateSubsectionRef("fold_section.subsection", section.Subsection); err != nil {
 			return err
 		}
+	case *agentreplv1.SidebarViewFoldSection_Workspace:
+		if err := validateWorkspaceRef("fold_section.workspace", section.Workspace); err != nil {
+			return err
+		}
 	}
 	if fold.GetFold() == nil {
 		return invalid("fold_section.fold", "a fold arm is required")

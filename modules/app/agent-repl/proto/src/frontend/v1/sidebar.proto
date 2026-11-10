@@ -434,7 +434,46 @@ message RosterOpenRow {
   // other-repository siblings carries its parent's repository. UNSET on a
   // top-level row, and on a row of the same repository as the one before it.
   optional RosterOpenRowRepositoryDivider repository_divider = 4;
+  // WHETHER THE ROW'S CHILDREN ARE FOLDED. DAEMON-HELD (UpdateSidebarView),
+  // for the readers a subsection's fold has: the sidebar hides the children's
+  // rows, and each child's tab is folded (RosterOpenRowTabFolded). SET exactly
+  // when the row has children, collapsed or not; UNSET on a row with none.
+  optional RosterOpenRowChildrenFold children_fold = 5;
 }
+
+// A row's children's fold, as a subsection's is drawn
+// (RosterSubsectionExpanded).
+message RosterOpenRowChildrenFold {
+  // Exactly one arm is set; unset is malformed.
+  oneof fold {
+    // The children are listed; the row's click on its status mark may fold them.
+    RosterOpenRowChildrenExpanded expanded = 1;
+    // The children are listed but not drawn: their rows are hidden and their
+    // tabs are folded.
+    RosterOpenRowChildrenCollapsed collapsed = 2;
+  }
+}
+
+// Expanded children, and whether the fold gesture may collapse them.
+message RosterOpenRowChildrenExpanded {
+  // Exactly one arm is set; unset is malformed.
+  oneof collapse {
+    // The gesture may ask for the collapse.
+    RosterOpenRowChildrenCollapsible collapsible = 1;
+    // The current workspace is one of the children's family, so the gesture
+    // asks nothing: the daemon would refuse the collapse.
+    RosterOpenRowChildrenHoldsCurrent holds_current = 2;
+  }
+}
+
+// DELIBERATELY EMPTY: the arm is the fact.
+message RosterOpenRowChildrenCollapsible {}
+
+// DELIBERATELY EMPTY: the arm is the fact.
+message RosterOpenRowChildrenHoldsCurrent {}
+
+// DELIBERATELY EMPTY: the arm is the fact.
+message RosterOpenRowChildrenCollapsed {}
 
 // The repository a run of rows in a family begins, drawn as a divider above
 // its first row (RosterOpenRow.repository_divider).
@@ -450,9 +489,9 @@ message RosterOpenRowTab {
   oneof tab {
     // Drawn on the tab bar and numbered in the sidebar.
     RosterOpenRowTabNumbered numbered = 1;
-    // The workspace's repository is folded: it stays open, but neither the
-    // sidebar nor the tab bar draws it, and it takes no number. It returns
-    // when the repository unfolds.
+    // The workspace's repository, subsection or parent's children are
+    // folded: it stays open, but neither the sidebar nor the tab bar draws
+    // it, and it takes no number. It returns when the fold opens.
     RosterOpenRowTabFolded folded = 2;
   }
 }

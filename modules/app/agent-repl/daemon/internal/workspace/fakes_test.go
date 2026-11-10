@@ -3996,6 +3996,33 @@ func (d *fakeDB) ExpandSubsectionHolding(_ context.Context, id ids.WorkspaceID) 
 	return false, nil
 }
 
+// SetChildrenFolded records the fold on the fake's workspace, as WSM does; an
+// unknown workspace is WSM's ErrNotFound.
+func (d *fakeDB) SetChildrenFolded(_ context.Context, id ids.WorkspaceID, folded bool) error {
+	ws, ok := d.workspaces[id]
+	if !ok {
+		return fmt.Errorf("workspace %s: %w", id, wsm.ErrNotFound)
+	}
+	ws.ChildrenFolded = folded
+	d.workspaces[id] = ws
+	return nil
+}
+
+// ExpandChildrenFoldsHolding expands the collapsed children folds of the
+// fake workspace's ancestors, answering whether any was, as WSM does.
+func (d *fakeDB) ExpandChildrenFoldsHolding(_ context.Context, id ids.WorkspaceID) (bool, error) {
+	expanded := false
+	for parent := d.workspaces[id].Parent; parent != nil; parent = d.workspaces[*parent].Parent {
+		ancestor := d.workspaces[*parent]
+		if ancestor.ChildrenFolded {
+			ancestor.ChildrenFolded = false
+			d.workspaces[*parent] = ancestor
+			expanded = true
+		}
+	}
+	return expanded, nil
+}
+
 // fakeNetwork is the network state a failed naming call is classified by. It
 // answers VERDICT to every classification and records the words it was asked
 // about; restore closes the restored latch.

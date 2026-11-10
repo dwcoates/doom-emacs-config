@@ -340,7 +340,7 @@ func TestFoldTabs(t *testing.T) {
 					}
 					return tt.unknown
 				},
-				members: func(ws wsm.Workspace) bool { return ws.ID != "other" },
+				members: func([]wsm.Workspace) wsm.FoldMembers { return func(ws wsm.Workspace) bool { return ws.ID != "other" } },
 			})
 
 			// Assert
@@ -369,7 +369,7 @@ func TestEveryFoldThatHidesTabsGoesThroughFoldTabs(t *testing.T) {
 	byHand := sourcescan.Count(t, "v.deps.StandDowns.StandDownFolded(ws.ID)")
 
 	// Assert.
-	if shared != 2 || byHand != 1 {
+	if shared != 3 || byHand != 1 {
 		t.Fatalf("foldTabs calls = %d, stand-down loops = %d; want every tab-hiding fold through foldTabs", shared, byHand)
 	}
 }
@@ -421,13 +421,14 @@ func TestFoldSubsectionRefusesAnUnknownSubsection(t *testing.T) {
 // collapse stands down drift from the ones the roster and the refusal count.
 func TestFoldTabsMembershipIsTheSharedOne(t *testing.T) {
 	// Act
-	shared := sourcescan.Count(t, "members: wsm.")
+	shared := sourcescan.Count(t, "return wsm.RepositoryMembers(") +
+		sourcescan.Count(t, "return wsm.SubsectionMembers(") + sourcescan.Count(t, "return wsm.DescendantMembers(")
 	byHand := sourcescan.Count(t, "func(ws wsm.Workspace) bool { return ws.Repo ==") +
 		sourcescan.Count(t, "func(ws wsm.Workspace) bool { return ws.Subsection")
 
 	// Assert
-	if shared != 2 || byHand != 0 {
-		t.Fatalf("shared memberships = %d, hand-rolled = %d; want 2 and 0", shared, byHand)
+	if shared != 3 || byHand != 0 {
+		t.Fatalf("shared memberships = %d, hand-rolled = %d; want 3 and 0", shared, byHand)
 	}
 }
 
@@ -459,7 +460,7 @@ func TestACollapseIsWrittenUnderTheSelectionLock(t *testing.T) {
 					return nil
 				},
 				unknown: func(error) error { return nil },
-				members: wsm.RepositoryMembers("repo-1"),
+				members: func([]wsm.Workspace) wsm.FoldMembers { return wsm.RepositoryMembers("repo-1") },
 			})
 
 			// Assert
@@ -544,5 +545,110 @@ func TestCollapsingARepositoryRecordsWhoAskedAndWhatItHid(t *testing.T) {
 	}
 	if standing, _ := rec.Context["standing_down"].([]string); !slices.Equal(standing, []string{"idle"}) {
 		t.Fatalf("standing_down = %v, want the idle workspace", rec.Context["standing_down"])
+	}
+}
+
+// childFamily registers parent p1 with child c1 (whose own child is g1) and an
+// unrelated workspace other.
+func childFamily(t *testing.T, f *fixture) {
+	f.workspace("p1", t.TempDir())
+	f.workspace("c1", t.TempDir())
+	f.workspace("g1", t.TempDir())
+	f.workspace("other", t.TempDir())
+	for child, parent := range map[ids.WorkspaceID]ids.WorkspaceID{"c1": "p1", "g1": "c1"} {
+		record := f.db.workspaces[child]
+		parentID := parent
+		record.Parent = &parentID
+		f.db.workspaces[child] = record
+	}
+}
+
+func TestFoldChildrenCollapseRecordsTheFoldAndStandsDownOnlyTheDescendants(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	childFamily(t, f)
+
+	// Act
+	err := f.verbs.FoldChildren(context.Background(), "p1", true, testRequester)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("FoldChildren: %v", err)
+	}
+	if !f.db.workspaces["p1"].ChildrenFolded {
+		t.Fatal("the children's fold was not recorded")
+	}
+	got := slices.Clone(f.standDowns)
+	slices.Sort(got)
+	if !slices.Equal(got, []ids.WorkspaceID{"c1", "g1"}) {
+		t.Fatalf("stand-downs = %v, want the parent's descendants and neither the parent nor an unrelated workspace", got)
+	}
+	if len(f.sidebar.registries) != 1 {
+		t.Fatalf("roster republications = %d, want 1", len(f.sidebar.registries))
+	}
+}
+
+func TestFoldChildrenExpandRecordsTheFoldAndStandsNothingDown(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	childFamily(t, f)
+	p := f.db.workspaces["p1"]
+	p.ChildrenFolded = true
+	f.db.workspaces["p1"] = p
+
+	// Act
+	err := f.verbs.FoldChildren(context.Background(), "p1", false, testRequester)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("FoldChildren: %v", err)
+	}
+	if f.db.workspaces["p1"].ChildrenFolded || len(f.standDowns) != 0 {
+		t.Fatalf("folded = %v, stand-downs = %v; want the expand recorded and nothing stood down", f.db.workspaces["p1"].ChildrenFolded, f.standDowns)
+	}
+}
+
+func TestFoldChildrenCollapseOverTheCurrentDescendantIsRefused(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	childFamily(t, f)
+	current(f, "g1")
+
+	// Act
+	err := f.verbs.FoldChildren(context.Background(), "p1", true, testRequester)
+
+	// Assert
+	asRefusal(t, err, ArmHoldsCurrent)
+	if f.db.workspaces["p1"].ChildrenFolded || len(f.standDowns) != 0 {
+		t.Fatalf("folded = %v, stand-downs = %v; want nothing done for a refused collapse", f.db.workspaces["p1"].ChildrenFolded, f.standDowns)
+	}
+}
+
+func TestFoldChildrenCollapseOfTheCurrentWorkspacesOwnChildrenSucceeds(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	childFamily(t, f)
+	current(f, "p1")
+
+	// Act
+	err := f.verbs.FoldChildren(context.Background(), "p1", true, testRequester)
+
+	// Assert
+	if err != nil || !f.db.workspaces["p1"].ChildrenFolded {
+		t.Fatalf("FoldChildren = %v, folded = %v; want the current workspace's own children folded", err, f.db.workspaces["p1"].ChildrenFolded)
+	}
+}
+
+func TestFoldChildrenRefusesAnUnknownWorkspace(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+
+	// Act
+	err := f.verbs.FoldChildren(context.Background(), "absent", true, testRequester)
+
+	// Assert
+	asRefusal(t, err, ArmUnknownWorkspace)
+	if len(f.sidebar.registries) != 0 {
+		t.Fatalf("roster republications = %d, want none for a refused fold", len(f.sidebar.registries))
 	}
 }

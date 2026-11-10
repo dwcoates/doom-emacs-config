@@ -318,6 +318,10 @@ func (r *resolver) openRows(nodes []openNode, folded bool, numbers *tabNumberer,
 // child left, no divider is drawn.
 func (r *resolver) openRow(node openNode, folded bool, numbers *tabNumberer, rc rowContext, log dlog.Logger) *frontendv1.RosterOpenRow {
 	out := &frontendv1.RosterOpenRow{Row: r.row(node.ws, rc, log), Tab: numbers.tab(folded)}
+	if len(node.children) > 0 {
+		out.ChildrenFold = childrenFold(node.ws.ChildrenFolded,
+			wsm.DescendantMembers(r.state.reg.Workspaces, node.ws.ID).HoldsCurrent(r.selectedWorkspace()))
+	}
 	before := node.ws.Repo
 	for _, child := range node.children {
 		if child.ws.Repo != node.ws.Repo {
@@ -326,7 +330,7 @@ func (r *resolver) openRow(node openNode, folded bool, numbers *tabNumberer, rc 
 		}
 	}
 	for _, child := range node.children {
-		row := r.openRow(child, folded, numbers, rc, log)
+		row := r.openRow(child, childrenFolded(node, folded), numbers, rc, log)
 		if child.ws.Repo != before {
 			row.RepositoryDivider = r.repositoryDivider(child.ws, log)
 		}
@@ -390,6 +394,22 @@ func setSubsectionFold(sub *frontendv1.RosterSubsection, folded, holdsCurrent bo
 		expanded.Collapse = &frontendv1.RosterSubsectionExpanded_HoldsCurrent{HoldsCurrent: &frontendv1.RosterSubsectionHoldsCurrent{}}
 	}
 	sub.Fold = &frontendv1.RosterSubsection_Expanded{Expanded: expanded}
+}
+
+// childrenFold states a row's children's fold: the ONE arm the sidebar and the
+// Emacs tab bar both draw from. Expanded children say whether a collapse may
+// be asked, as a subsection's do (setSubsectionFold).
+func childrenFold(folded, holdsCurrent bool) *frontendv1.RosterOpenRowChildrenFold {
+	if folded {
+		return &frontendv1.RosterOpenRowChildrenFold{Fold: &frontendv1.RosterOpenRowChildrenFold_Collapsed{
+			Collapsed: &frontendv1.RosterOpenRowChildrenCollapsed{}}}
+	}
+	expanded := &frontendv1.RosterOpenRowChildrenExpanded{
+		Collapse: &frontendv1.RosterOpenRowChildrenExpanded_Collapsible{Collapsible: &frontendv1.RosterOpenRowChildrenCollapsible{}}}
+	if holdsCurrent {
+		expanded.Collapse = &frontendv1.RosterOpenRowChildrenExpanded_HoldsCurrent{HoldsCurrent: &frontendv1.RosterOpenRowChildrenHoldsCurrent{}}
+	}
+	return &frontendv1.RosterOpenRowChildrenFold{Fold: &frontendv1.RosterOpenRowChildrenFold_Expanded{Expanded: expanded}}
 }
 
 // repoDivergence projects a repository's measure onto its section's label

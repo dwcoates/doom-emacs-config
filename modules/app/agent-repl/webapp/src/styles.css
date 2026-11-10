@@ -1696,6 +1696,10 @@ html.dragging * { -webkit-user-select: none; user-select: none; }
    where the generation's box once began, 1.55rem in from its parent's
    indent. */
 #ws-sidebar .kids { --row-indent-parent: var(--row-indent); position: relative; }
+/* A row whose children are folded draws none of them; the status mark of a
+   row that has children is the control that folds them (children-fold.ts). */
+#ws-sidebar .ws.folded > .kids { display: none; }
+#ws-sidebar .row > .st[data-children-fold] { cursor: pointer; }
 #ws-sidebar .kids > .ws { --row-indent: calc(var(--row-indent-parent) + 1.2rem); }
 /* A REPOSITORY DIVIDER IN A FAMILY (owner request, 2026-10-29;
    frontend.v1.RosterOpenRow.repository_divider): a child of another

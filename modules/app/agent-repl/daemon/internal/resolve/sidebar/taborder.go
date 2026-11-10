@@ -137,12 +137,21 @@ func openNodes(tree forest, list []wsm.Workspace) []openNode {
 }
 
 // walkOpen visits every open workspace of NODES depth-first, in drawn order,
-// each before its family.
-func walkOpen(nodes []openNode, visit func(wsm.Workspace)) {
+// each before its family, saying whether the tab is FOLDED: FOLDED is the
+// region's own fold, and a workspace whose children are folded folds every
+// tab below it (childrenFolded).
+func walkOpen(nodes []openNode, folded bool, visit func(ws wsm.Workspace, folded bool)) {
 	for _, node := range nodes {
-		visit(node.ws)
-		walkOpen(node.children, visit)
+		visit(node.ws, folded)
+		walkOpen(node.children, childrenFolded(node, folded), visit)
 	}
+}
+
+// childrenFolded reports whether NODE's family is folded off the tab bar,
+// given whether NODE's own tab is FOLDED: a folded tab folds all below it, and
+// a workspace whose children are folded folds its children's.
+func childrenFolded(node openNode, folded bool) bool {
+	return folded || node.ws.ChildrenFolded
 }
 
 // Tab is one tab of the editor's tab bar: an open workspace, and whether its
@@ -161,11 +170,13 @@ func Tabs(reg Registry, log dlog.Logger) []Tab {
 	var out []Tab
 	for _, repo := range repos {
 		for _, region := range repo.regions {
-			withheld := wsm.Drawn
-			if region.folded(repo.repo) {
-				withheld = wsm.WithheldCollapsed
-			}
-			walkOpen(region.rows, func(ws wsm.Workspace) { out = append(out, Tab{Workspace: ws, Withheld: withheld}) })
+			walkOpen(region.rows, region.folded(repo.repo), func(ws wsm.Workspace, folded bool) {
+				withheld := wsm.Drawn
+				if folded {
+					withheld = wsm.WithheldCollapsed
+				}
+				out = append(out, Tab{Workspace: ws, Withheld: withheld})
+			})
 		}
 	}
 	return out

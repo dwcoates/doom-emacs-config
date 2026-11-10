@@ -960,6 +960,32 @@ message."
                   "{\"name\":\"beta\",\"color\":\"red\"}")
                  '("RosterOpenRowRepositoryDivider" color "unknown field"))))
 
+(ert-deftest agent-repl-test-wire-roster-open-row-decodes-its-children-fold ()
+  "An open row with children carries its children's fold on the arm it names."
+  (dolist (case '(("{\"collapsed\":{}}" (:fold (:arm :collapsed :value nil)))
+                  ("{\"expanded\":{\"collapsible\":{}}}"
+                   (:fold (:arm :expanded :value (:collapse (:arm :collapsible :value nil)))))
+                  ("{\"expanded\":{\"holdsCurrent\":{}}}"
+                   (:fold (:arm :expanded :value (:collapse (:arm :holds-current :value nil)))))))
+    (let ((decoded (agent-repl-test-wire-roster--decode
+                    #'agent-repl-wire-decode-roster-open-row
+                    (format "{\"row\":%s,\"tab\":{\"numbered\":{\"number\":1}},\"childrenFold\":%s}"
+                            (agent-repl-test-wire-roster--row "\"ready\":{}") (car case)))))
+      (should (equal (plist-get decoded :children-fold) (cadr case))))))
+
+(ert-deftest agent-repl-test-wire-roster-open-row-without-children-decodes-no-children-fold ()
+  "A childless open row carries no children fold."
+  (should-not (plist-get (agent-repl-test-wire-roster--decode
+                          #'agent-repl-wire-decode-roster-open-row
+                          (agent-repl-test-wire-roster--open-row "\"numbered\":{\"number\":1}"))
+                         :children-fold)))
+
+(ert-deftest agent-repl-test-wire-roster-an-unset-children-fold-is-a-breach ()
+  "A children fold with no arm is a breach."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-open-row-children-fold "{}")
+                 '("RosterOpenRowChildrenFold" fold "oneof is unset"))))
+
 (ert-deftest agent-repl-test-wire-roster-open-row-children-decode-recursively ()
   "An open family decodes as open rows, to any depth, in render order."
   (let* ((grandchild (agent-repl-test-wire-roster--open-row "\"numbered\":{\"number\":3}"))

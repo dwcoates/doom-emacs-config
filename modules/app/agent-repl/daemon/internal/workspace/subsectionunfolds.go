@@ -70,10 +70,15 @@ func (v *verbs) UnfoldSubsectionForWork(ctx context.Context, ws ids.WorkspaceID)
 	if err != nil {
 		return err
 	}
-	if !expanded {
+	expandedChildren, err := v.deps.DB.ExpandChildrenFoldsHolding(ctx, ws)
+	if err != nil {
+		return err
+	}
+	if !expanded && !expandedChildren {
 		return nil
 	}
-	log.Info(opUnfoldForWork, "a workspace's turn started, so the collapsed subsection holding it is expanded", nil)
+	log.Info(opUnfoldForWork, "a workspace's turn started, so the collapsed folds holding it are expanded",
+		dlog.Context{"expanded_subsection": expanded, "expanded_children": expandedChildren})
 	v.republishRegistry(ctx, log, opUnfoldForWork)
 	return nil
 }

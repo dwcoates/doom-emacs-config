@@ -20,6 +20,27 @@ func SubsectionMembers(sub SubsectionID) FoldMembers {
 	return func(ws Workspace) bool { return ws.Subsection != nil && *ws.Subsection == sub }
 }
 
+// DescendantMembers are the workspaces below ROOT in the family tree ALL
+// records by parent, ROOT itself not among them: the workspaces a fold of
+// ROOT's children folds. A parent chain that cycles ends the walk.
+func DescendantMembers(all []Workspace, root WorkspaceID) FoldMembers {
+	below := map[WorkspaceID]bool{}
+	for grew := true; grew; {
+		grew = false
+		for _, ws := range all {
+			if below[ws.ID] || ws.Parent == nil {
+				continue
+			}
+			if *ws.Parent == root || below[*ws.Parent] {
+				below[ws.ID] = true
+				grew = true
+			}
+		}
+	}
+	delete(below, root)
+	return func(ws Workspace) bool { return below[ws.ID] }
+}
+
 // StandsDown reports whether collapsing the section stands WS's session
 // down: WS is a member and still open.
 func (m FoldMembers) StandsDown(ws Workspace) bool {

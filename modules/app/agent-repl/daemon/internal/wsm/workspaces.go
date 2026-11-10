@@ -60,7 +60,7 @@ const workspaceColumns = `id, repo_id, dir, name, branch, parent_branch, parent_
 	`(SELECT MAX(turns.started_at) FROM turns WHERE turns.workspace_id = workspaces.id), ` +
 	`(SELECT MAX(turns.started_at) FROM turns WHERE turns.workspace_id = workspaces.id AND turns.thread_question IS NOT NULL), ` +
 	mergeTurnStartedColumn + `, ` +
-	landsIntoColumn
+	landsIntoColumn + `, children_folded`
 
 // mergeTurnStartedColumn derives MergeTurnStartedAt: the newest start of the
 // workspace's turns that began at or before its own merge-queue entry was
@@ -118,7 +118,7 @@ func scanWorkspace(row interface{ Scan(...any) error }) (Workspace, error) {
 		// of Workspace.OwnerLands (OwnerLands).
 		lacksContext bool
 	)
-	if err := row.Scan(&ws.ID, &ws.Repo, &ws.Dir, &ws.Name, &ws.Branch, &ws.ParentBranch, &parent, &ws.Closed, &ws.Attention, &priority, &task, &selected, &activity, &merged, &spawned, &created, &end, &read, &ws.Hidden, &hiddenAt, &mergeOf, &request, &forkHead, &compact, &closes, &cleanup, &cleanDir, &landHead, &landAt, &commits, &ws.Place, &ws.MergeRevealed, &lapsesAt, &gated, &closedAt, &closedBy, &statusChanged, &ws.Current, &subsection, &lacksContext, &contextFrom, &requestedBy, &selfClose, &awaiting, &kind, &lastKeepalive, &cacheCold, &backlogged, &ws.OneShot, &ws.MergePending, &ended, &started, &asked, &mergeTurn, &landsInto); err != nil {
+	if err := row.Scan(&ws.ID, &ws.Repo, &ws.Dir, &ws.Name, &ws.Branch, &ws.ParentBranch, &parent, &ws.Closed, &ws.Attention, &priority, &task, &selected, &activity, &merged, &spawned, &created, &end, &read, &ws.Hidden, &hiddenAt, &mergeOf, &request, &forkHead, &compact, &closes, &cleanup, &cleanDir, &landHead, &landAt, &commits, &ws.Place, &ws.MergeRevealed, &lapsesAt, &gated, &closedAt, &closedBy, &statusChanged, &ws.Current, &subsection, &lacksContext, &contextFrom, &requestedBy, &selfClose, &awaiting, &kind, &lastKeepalive, &cacheCold, &backlogged, &ws.OneShot, &ws.MergePending, &ended, &started, &asked, &mergeTurn, &landsInto, &ws.ChildrenFolded); err != nil {
 		return Workspace{}, err
 	}
 	switch WorkspaceKind(kind) {
@@ -1080,9 +1080,9 @@ func (s *store) setCurrent(ctx context.Context, op string, id WorkspaceID, stamp
 			"landing": committed.String,
 		}))
 	}
-	if expanded.repository || expanded.subsection {
+	if expanded.repository || expanded.subsection || expanded.children {
 		s.log.Info(op, "the selection expanded the collapsed folds holding the workspace", dlog.Merge(fields, dlog.Context{
-			"expanded_repository": expanded.repository, "expanded_subsection": expanded.subsection,
+			"expanded_repository": expanded.repository, "expanded_subsection": expanded.subsection, "expanded_children": expanded.children,
 		}))
 	}
 	return nil
@@ -1091,7 +1091,7 @@ func (s *store) setCurrent(ctx context.Context, op string, id WorkspaceID, stamp
 // expandedFolds says which folds holding a just-selected workspace its
 // selection expanded.
 type expandedFolds struct {
-	repository, subsection bool
+	repository, subsection, children bool
 }
 
 // expandFoldsHolding expands, within TX, workspace ID's repository section
@@ -1107,6 +1107,9 @@ func expandFoldsHolding(ctx context.Context, tx *sql.Tx, id WorkspaceID) (expand
 		return out, fmt.Errorf("wsm: expand the repository of %s: %w", id, err)
 	}
 	if out.subsection, err = expandSubsectionHolding(ctx, tx, id); err != nil {
+		return out, err
+	}
+	if out.children, err = expandChildrenFoldsHolding(ctx, tx, id); err != nil {
 		return out, err
 	}
 	return out, nil
