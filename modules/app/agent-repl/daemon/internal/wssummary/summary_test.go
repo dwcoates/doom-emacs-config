@@ -366,6 +366,39 @@ func TestAMissingBriefIsSurfacedAndLogged(t *testing.T) {
 	}
 }
 
+func TestNoteIsTheBriefMetaWrappedAsOwedNoteAppendsIt(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	owedNote, _, err := h.k.OwedNote(context.Background(), testWS)
+	if err != nil {
+		t.Fatalf("OwedNote: %v", err)
+	}
+
+	// Act
+	note, err := Note(h.dir)
+
+	// Assert
+	if err != nil || note != prompts.Wrap("\n\nset your summary") {
+		t.Fatalf("Note = (%q, %v), want the brief meta-wrapped", note, err)
+	}
+	if note != owedNote {
+		t.Fatalf("Note = %q, want exactly the note OwedNote appends %q", note, owedNote)
+	}
+}
+
+func TestNoteWithAMissingBriefIsTheBriefsFailure(t *testing.T) {
+	// Arrange
+	dir := t.TempDir()
+
+	// Act
+	note, err := Note(dir)
+
+	// Assert
+	if err == nil || note != "" || !strings.Contains(err.Error(), BriefOwed) {
+		t.Fatalf("Note = (%q, %v), want the brief named in the failure", note, err)
+	}
+}
+
 func TestTheShippedBriefLoadsAndNamesTheVerb(t *testing.T) {
 	// Arrange
 	dir := filepath.Join("..", "..", "..", "prompts")

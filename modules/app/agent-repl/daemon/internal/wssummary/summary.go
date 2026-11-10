@@ -168,18 +168,19 @@ func (k *Keeper) OwedNote(ctx context.Context, ws ids.WorkspaceID) (string, bool
 	if found {
 		return "", false, nil
 	}
-	note, err := k.note()
+	note, err := Note(k.deps.PromptsDir)
 	if err != nil {
 		k.deps.Log.Error(opOwed, "could not compose the note asking for a summary", dlog.WithCause(fields, err))
 		return "", false, err
 	}
 	k.deps.Log.Debug(opOwed, "the workspace owes a summary; the prompt asks for one", fields)
-	return prompts.Wrap("\n\n" + note), true, nil
+	return note, true, nil
 }
 
-// note reads and splices BriefOwed.
-func (k *Keeper) note() (string, error) {
-	brief, err := prompts.Load(k.deps.PromptsDir, BriefOwed)
+// Note composes the meta-wrapped note asking for a summary from the
+// BriefOwed brief in PROMPTSDIR, exactly as OwedNote appends it.
+func Note(promptsDir string) (string, error) {
+	brief, err := prompts.Load(promptsDir, BriefOwed)
 	if err != nil {
 		return "", fmt.Errorf("read the %s brief: %w", BriefOwed, err)
 	}
@@ -187,5 +188,5 @@ func (k *Keeper) note() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("splice the %s brief: %w", BriefOwed, err)
 	}
-	return note, nil
+	return prompts.Wrap("\n\n" + note), nil
 }
