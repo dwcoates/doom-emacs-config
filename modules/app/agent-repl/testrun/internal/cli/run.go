@@ -36,8 +36,11 @@ type Deps struct {
 	Events *events.Emitter
 	Exec   run.Executor
 	Clock  run.Clock
-	// After is what each unit's time limit waits on (run.Runner.After).
-	After func(d time.Duration) <-chan time.Time
+	// At is what each unit's time limit waits on (run.Runner.At).
+	At func(deadline time.Time) <-chan time.Time
+	// GoCache keeps the Go build cache's trim out of every unit's time limit
+	// (run.Runner.GoCache).
+	GoCache run.GoCache
 	// Slots is how many units run at once: the host's core budget.
 	Slots int
 	// Cores is the host's core pool every run on the host shares.
@@ -313,7 +316,7 @@ func Run(ctx context.Context, d Deps, a Args) int {
 		len(p.Specs), d.Slots, p.Makespan, strings.Join(chunkNote, " "))
 
 	ev.Planned(p.Specs, d.RunLog)
-	runner := &run.Runner{Slots: d.Slots, Cores: d.Cores, Exec: d.Exec, Clock: d.Clock, After: d.After, Log: log, Ended: ev.UnitEnded}
+	runner := &run.Runner{Slots: d.Slots, Cores: d.Cores, Exec: d.Exec, Clock: d.Clock, At: d.At, GoCache: d.GoCache, Log: log, Ended: ev.UnitEnded}
 	start := d.Clock.Now()
 	results, suiteResults, runErr := runner.Run(ctx, p.Specs)
 	end := d.Clock.Now()

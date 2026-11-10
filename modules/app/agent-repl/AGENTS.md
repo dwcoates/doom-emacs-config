@@ -819,6 +819,13 @@ adds:
   (`testrun/internal/plan` `bound`). A unit that legitimately got slower is
   re-measured with `agent-repld test run -remeasure`; it is never given a
   hand-picked limit.
+- **A unit's limit counts only the unit's own work.** Its deadline is fixed
+  once it holds its cores, and only after `testrun/internal/gocache` has made
+  sure cmd/go's daily trim of the shared Go build cache cannot fall due before
+  that deadline, trimming the cache first when it would. Every go command
+  trims at exit once the trim is due, and the walk of the host's cache takes
+  seconds, so without the guard every sub-second build unit was killed
+  (2026-11-10). A unit that sets its own `GOCACHE` is refused.
 - **Think about what the timeout bounds.** A bound on a whole package or suite
   is a backstop; the waits inside it carry their own tight bounds, so a hang is
   reported by the wait that hung, at its own bound, not by the backstop.
