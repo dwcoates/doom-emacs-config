@@ -4420,3 +4420,64 @@ func TestAStartSendsTheBuiltRequest(t *testing.T) {
 		t.Fatalf("StartSession requests = %v, want exactly %v", f.client.requests, want)
 	}
 }
+
+func TestAStopRetiresTheGateItDroppedFromEveryView(t *testing.T) {
+	cases := []struct {
+		name   string
+		assert func(t *testing.T, f *fleetFixture, ws ids.WorkspaceID)
+	}{
+		{name: "the footer draws no gate", assert: func(t *testing.T, f *fleetFixture, ws ids.WorkspaceID) {
+			if f.footer.coldGates[ws].Standing {
+				t.Fatal("the footer still draws the gate the stop dropped")
+			}
+		}},
+		{name: "the strip draws no gate", assert: func(t *testing.T, f *fleetFixture, ws ids.WorkspaceID) {
+			if n := len(f.topbarGates); n == 0 || f.topbarGates[n-1].Standing {
+				t.Fatalf("strip gates = %+v, want the last one retired", f.topbarGates)
+			}
+		}},
+		{name: "the retirement is logged with its reason", assert: func(t *testing.T, f *fleetFixture, ws ids.WorkspaceID) {
+			for _, r := range f.log.logger.Records() {
+				if r.Operation == "daemon.workspace.state_transition" && r.Context["state"] == "cold_gate_standing" && r.Context["reason"] == "session_stopped" {
+					return
+				}
+			}
+			t.Fatalf("records = %+v, want the gate's retirement with its reason", f.log.logger.Records())
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: a recorded gate raised by a start, with no shim behind it.
+			f := newFleetFixture(t)
+			ws := resumable(f)
+			f.db.gates[ws] = recordedGate()
+			if err := f.fleet.Start(context.Background(), ws); err != nil {
+				t.Fatalf("Start: %v", err)
+			}
+
+			// Act
+			if err := f.fleet.Stop(context.Background(), ws, false); err != nil {
+				t.Fatalf("Stop: %v", err)
+			}
+
+			// Assert
+			tc.assert(t, f, ws)
+		})
+	}
+}
+
+func TestAStopOfAnUngatedWorkspaceTouchesNoGateView(t *testing.T) {
+	// Arrange
+	f := newFleetFixture(t)
+	ws := resumable(f)
+
+	// Act
+	if err := f.fleet.Stop(context.Background(), ws, false); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+
+	// Assert
+	if len(f.topbarGates) != 0 {
+		t.Fatalf("strip gates = %+v, want none stated for a workspace with no gate", f.topbarGates)
+	}
+}

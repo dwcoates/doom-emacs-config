@@ -505,8 +505,7 @@ func (f *Fleet) Install(ctx context.Context, ws ids.WorkspaceID, c shimclient.Cl
 	f.logTransition(ws, "session_live", previous != nil, true,
 		dlog.Context{"shim_pid": c.PID(), "retired": previous != nil})
 	if gateStood {
-		f.logTransition(ws, "cold_gate_standing", true, false,
-			dlog.Context{"reason": "replacement_shim_installed"})
+		f.retireGateViews(ws, "replacement_shim_installed")
 	}
 
 	if previous != nil && previous.watcher != nil {

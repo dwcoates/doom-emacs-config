@@ -2927,6 +2927,20 @@ func (f *Fleet) raiseColdGate(ws ids.WorkspaceID, vendorSessionID string, cold *
 	f.publishHost(ws)
 }
 
+// retireGateViews retires a gate the fleet dropped from the views it raised
+// it on: the footer (and the sidebar row, which follows the footer's arm) and
+// the topbar's strip. It is the one retirement for every drop that is no
+// answer (a stop, a reaped shim, a replacement shim), so a gate the fleet no
+// longer holds is never drawn over the session that replaced it (2026-11-10:
+// a queue-bypass switch stopped the gated queue session, and the bypass
+// session ran under a cold gate the footer and topbar still drew). An answered
+// gate retires its views in coldGateSettled, ordered against its answer line.
+func (f *Fleet) retireGateViews(ws ids.WorkspaceID, reason string) {
+	f.deps.Footer.SetColdGate(ws, footer.ColdGate{Standing: false})
+	f.deps.Topbar.SetColdGate(ws, topbar.ColdGate{Standing: false})
+	f.logTransition(ws, "cold_gate_standing", true, false, dlog.Context{"reason": reason})
+}
+
 // publishColdGateRow publishes the standing gate's row: its facts as raised,
 // plus the compact-and-resume button while prompts are held at the gate and
 // the gate offers compaction. A gate an answer has taken publishes nothing:
@@ -3199,6 +3213,9 @@ func (f *Fleet) Stop(ctx context.Context, ws ids.WorkspaceID, force bool) error 
 	delete(f.coldGates, ws)
 	delete(f.lastCold, ws)
 	f.mu.Unlock()
+	if gated {
+		f.retireGateViews(ws, "session_stopped")
+	}
 	if !ok {
 		// A gate can stand with no session in the map; its retirement still
 		// moves the host view.
@@ -3370,12 +3387,16 @@ func (f *Fleet) retireReaped(ws ids.WorkspaceID) {
 	}
 	delete(f.sessions, ws)
 	f.movedLocked()
+	_, gated := f.coldGates[ws]
 	delete(f.coldGates, ws)
 	delete(f.lastCold, ws)
 	f.noteReapLocked(ws, session.client)
 	f.mu.Unlock()
 	f.logTransition(ws, "session_live", true, false,
 		dlog.Context{"reason": "shim_reaped", "shim_pid": session.client.PID()})
+	if gated {
+		f.retireGateViews(ws, "shim_reaped")
+	}
 
 	// The watcher is closed OUTSIDE the lock: closing joins whatever sink work
 	// it still had in flight, and those sinks read the fleet.
