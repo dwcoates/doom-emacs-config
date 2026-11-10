@@ -96,6 +96,35 @@ id).
   - Turning it off with no shim only records it.
   - When the vendor refuses, the mode is still recorded, and the refusal
     rides the warning strip.
+- **Queue bypass mode turns it on (owner request, 2026-11-10).** A workspace
+  holding its repository's queue bypass mode (`agentrepl.v1.UpdateQueueBypassMode`)
+  is in remote control.
+  - The coupling is derived in ONE place, the store read
+    (`agent-repld.internal.wsm.readRemoteControl()`). A take that finds the mode
+    off marks its holder row as having lifted it
+    (`queue_bypass_holders.lifted_remote_control`, written in the take's own
+    transaction), and a lifted hold reads as on
+    (`wsm.RemoteControl.LiftedByQueueBypass`).
+  - A release deletes the holder row, so the lift goes with it, and the mode
+    falls back to the one recorded, or the default. A workspace whose mode was
+    already on before the take keeps it on after the release.
+  - An explicit change while the workspace holds the mode clears the lift in
+    the same transaction, so it owns the mode: an off stays off for the rest of
+    the hold, and an on outlives the release.
+  - What is IMPOSSIBLE rather than unlikely: a lift standing without its hold,
+    or a hold whose lift disagrees with the mode every reader sees. Every
+    reader (the topbar naming at registration, every shim bring-up, the drain,
+    a parked gate's bridge) reads the same derived mode, so a daemon restart, a
+    handover, a close and reopen, and a workspace deleted with its hold all
+    leave the two in step with no code of their own. A close keeps the hold,
+    so a closed holder is still lifted when it reopens.
+  - What is pushed: right after the take or release is written, the verb asks
+    `agent-repld.internal.workspace.Fleet.RestateRemoteControl()` to state the
+    mode the store now reads to the topbar and the live shim. A failure there
+    is logged at ERROR under `daemon.workspace.remote_control` with the
+    `transition` (`entered` or `left`) and its cause, and rides the warning
+    strip. The transition stands either way: the stored mode is already right,
+    and the next bring-up puts it in force.
 - **Every shim start.** If the mode is on, the daemon sends
   `SetSessionRemoteControl` once the session is up, with the bridge session id
   the last shim answered (`reattach_bridge_session_id`). claude.ai then keeps

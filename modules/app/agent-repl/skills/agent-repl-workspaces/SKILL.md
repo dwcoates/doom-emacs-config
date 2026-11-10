@@ -658,8 +658,11 @@ creating workspaces there with `-repository DIR`.
   reachable, from claude.ai and its mobile app. WS may be this workspace or
   another, named as every verb names one.
   - Change it only when the user asks for it, since it exposes a session to
-    their phone and keeps its shim up. It is never a side effect of other
-    work.
+    their phone and keeps its shim up.
+  - A workspace holding its repository's queue bypass mode is in remote
+    control: the daemon turns it on at the take and off at the release
+    (unless it was on before). NEVER turn it on or off to follow bypass
+    mode yourself.
   - How the mode behaves is
     `modules/app/agent-repl/docs/developer/remote-control.md`.
 - **QUEUE BYPASS MODE.** `workspace set WS -queue-bypass on|off` takes or
