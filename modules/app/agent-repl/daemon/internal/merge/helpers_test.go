@@ -2635,6 +2635,8 @@ type harness struct {
 	// it; gateTrees records the tree each gate command was resolved for.
 	script    string
 	gateTrees []string
+	// gateWorkspaces records the workspace name each gate command named.
+	gateWorkspaces []string
 	// governor is the gate governor, sampling an idle host unless a test says
 	// otherwise (h.load).
 	governor *cpugov.Governor
@@ -3019,10 +3021,11 @@ func (h *harness) deps() Deps {
 		SelfAddress:  harnessSelfAddress,
 		Briefs:       h.loadBrief,
 		StateDir:     h.stateDir,
-		TestCommand: func(tree, _ string) []string {
+		TestCommand: func(tree, _, workspace string) []string {
 			h.mu.Lock()
 			defer h.mu.Unlock()
 			h.gateTrees = append(h.gateTrees, tree)
+			h.gateWorkspaces = append(h.gateWorkspaces, workspace)
 			return []string{"bash", h.script}
 		},
 		TestRunner: h.runner,

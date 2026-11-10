@@ -51,6 +51,7 @@ import (
 
 	"agentrepl/testrun/internal/command"
 	"agentrepl/testrun/internal/proctable"
+	"agentrepl/testrun/internal/seats"
 	"agentrepl/testrun/reap"
 )
 
@@ -302,9 +303,20 @@ type Manager struct {
 	Now func() time.Time
 	// LockBound is how long the registry lock is waited for (LockBound).
 	LockBound time.Duration
-	// Memory answers the host's physical memory, which sizes the memory
-	// seats (seats.go).
-	Memory func() (uint64, error)
+	// Memory reads the host's memory: its total sizes the memory seats'
+	// ceiling, and what is available admits a seat (seats.go).
+	Memory func() (Memory, error)
+	// Recheck answers a channel that fires when a run refused a seat for
+	// memory reads the memory again (MemoryRecheck).
+	Recheck func() <-chan time.Time
+	// Rank is the run's rank for a seat (cores.Rank: zero is the best). A
+	// Manager that never seats leaves it at NoRank, and a seat taken at NoRank
+	// is refused.
+	Rank int
+	// Workspace is the name of the workspace whose run this is
+	// (seatwait.EnvWorkspace), empty for a run started outside agent-repl; it
+	// names the run in the seat it holds.
+	Workspace string
 	// Used answers the bytes in use on a mounted volume (MountUsed).
 	Used func(mount string) (uint64, error)
 	// Cut closes once the run is cut (its sentinel is gone): a wait for a
@@ -329,7 +341,7 @@ type Volume struct {
 	use  *use
 	lock *os.File
 	// seat is the memory seat the disk holds until its release (seats.go).
-	seat *os.File
+	seat *seats.Seat
 }
 
 // Default is the Manager a real run uses.
@@ -339,8 +351,14 @@ func Default(log Logger) Manager {
 		Reap:  reap.OSReap(log),
 		Probe: RunBounded, Procs: proctable.List, Watch: RunWatched, Alive: ProcessAlive, Mounted: IsMountPoint, Log: log, Now: time.Now,
 		LockBound: LockBound, Memory: HostMemory, Used: MountUsed,
+		Recheck: func() <-chan time.Time { return time.After(MemoryRecheck) }, Rank: NoRank,
 	}
 }
+
+// NoRank is the Rank of a Manager that was never ranked: a seat taken at it
+// is refused (seats.Pool.Admit), so a run that forgot its rank never takes
+// the best one.
+const NoRank = -1
 
 // ProcessAlive answers whether a process of pid exists, the way kill(pid, 0)
 // says so: a process this user may not signal exists too.
@@ -393,7 +411,7 @@ func (m Manager) Acquire(sizeMiB int) (_ *Volume, err error) {
 	v, err := m.attach(sizeMiB)
 	if v == nil {
 		// Nothing was attached, so the seat goes back now.
-		if closeErr := seat.Close(); closeErr != nil {
+		if closeErr := seat.Release(); closeErr != nil {
 			err = errors.Join(err, fmt.Errorf("give back the RAM disk seat: %w", closeErr))
 		}
 		return nil, err
@@ -654,7 +672,7 @@ func (v *Volume) Release() error {
 		// THE SEAT GOES BACK WITH THE DISK. A disk kept for the next run's
 		// reclaim gives its seat back with this run's exit all the same, and
 		// that reclaim runs before the next run takes a seat of its own.
-		if err := v.seat.Close(); err != nil {
+		if err := v.seat.Release(); err != nil {
 			errs = append(errs, fmt.Errorf("give back the RAM disk seat: %w", err))
 		}
 		v.seat = nil

@@ -3999,6 +3999,90 @@ message FeedMergeTestsRunOutput {
   // The run's full test log, a link the tab draws in the link blue.
   // UNSET until the run has written it.
   optional FeedMergeTestLog log = 2;
+  // The test runner waiting, before it plans any suite, for a RAM disk seat.
+  // SET while the runner says it waits and has not yet taken a seat; UNSET
+  // once it has one, and for a run that never waited. The tab draws it in
+  // place of the still empty suite list, so a run held back by other runs'
+  // RAM disks never reads as an empty or stalled tab.
+  optional FeedMergeTestsRunSeatWait seat_wait = 3;
+}
+
+// ---- A run's wait for a RAM disk seat, before it plans ----
+
+// The runner of a run waiting for a RAM DISK SEAT. Every test run on the host
+// puts its temp root on a RAM disk whose memory is wired, so the runs share a
+// ceiling of seats and a seat is granted only while enough memory stays
+// available after the disk, in the order the runs rank (the merge queue's head
+// first). The daemon reads the wait off the runner's own lines and resolves
+// it here, holders named; the client composes the line from these props and
+// ticks the elapsed time itself.
+message FeedMergeTestsRunSeatWait {
+  // When the daemon first read the runner's wait, epoch ms. The tab ticks the
+  // wait's elapsed time from it; it stays fixed while the reason or the
+  // holders change within the one wait.
+  int64 started_at_ms = 1;
+  // Why no seat is granted yet. Exactly one arm is set: the three reasons
+  // exclude each other because the runner checks them in this order — a run
+  // ranking above waits first, then the ceiling, then the memory.
+  oneof reason {
+    // Every seat under the ceiling is held.
+    FeedMergeTestsRunSeatWaitCeiling ceiling = 2;
+    // A seat is free, but taking it would leave less memory available than
+    // must stay free.
+    FeedMergeTestsRunSeatWaitMemory memory = 3;
+    // A run ranking above this one waits for a seat, and is granted first.
+    FeedMergeTestsRunSeatWaitOutranked outranked = 4;
+  }
+  // The runs holding a seat now, in seat order; empty when none does (a wait
+  // for memory alone, or behind a higher-ranked run that holds nothing yet).
+  repeated FeedMergeTestsRunSeatHolder holders = 5;
+}
+
+// Every seat is held: the RAM disks of every run on the host together are at
+// the ceiling of wired memory.
+message FeedMergeTestsRunSeatWaitCeiling {
+  // The ceiling, in MiB: the most memory every run's RAM disk together may
+  // wire.
+  uint64 ceiling_mib = 1;
+}
+
+// A seat is free, but the memory available after this run's disk filled would
+// fall under the floor that must stay free.
+message FeedMergeTestsRunSeatWaitMemory {
+  // The memory the host had available at the runner's last reading, in MiB.
+  uint64 available_mib = 1;
+  // The memory that must stay available once every seated disk has filled,
+  // in MiB.
+  uint64 floor_mib = 2;
+}
+
+// A run of a better rank waits for a seat, and seats go to the best rank
+// first, so this run waits until that one has its seat.
+message FeedMergeTestsRunSeatWaitOutranked {}
+
+// One run holding a RAM disk seat, as the waiting run names it.
+message FeedMergeTestsRunSeatHolder {
+  // Who started the holding run. Set-but-unassigned is a holder this schema
+  // revision does not name.
+  oneof holder {
+    // A run an agent-repl workspace started: its own tests, or its merge's
+    // gate.
+    FeedMergeTestsRunSeatHolderWorkspace workspace = 1;
+    // A run started outside agent-repl, by hand: no workspace names it.
+    FeedMergeTestsRunSeatHolderOutside outside = 2;
+  }
+}
+
+// A holding run an agent-repl workspace started.
+message FeedMergeTestsRunSeatHolderWorkspace {
+  // The workspace's name, drawn verbatim.
+  string workspace_name = 1;
+}
+
+// A holding run started outside agent-repl.
+message FeedMergeTestsRunSeatHolderOutside {
+  // The holding runner's process id: the only name such a run has.
+  uint32 pid = 1;
 }
 
 // The REMEDIATION VIEW of a run: the requesting workspace's session fixing the

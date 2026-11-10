@@ -406,8 +406,8 @@ func (v *testsView) testsTab(waiting bool) *frontendv1.FeedMergeTab {
 }
 
 // runTab builds run n's subtab: the run's own badge and its output.
-func runTab(n int, st tabState, suites []*frontendv1.FeedMergeTestSuite, log *frontendv1.FeedMergeTestLog) *frontendv1.FeedMergeTab {
-	inner := &frontendv1.FeedMergeTabTestsRun{Output: &frontendv1.FeedMergeTestsRunOutput{Suites: suites, Log: log}}
+func runTab(n int, st tabState, output *frontendv1.FeedMergeTestsRunOutput) *frontendv1.FeedMergeTab {
+	inner := &frontendv1.FeedMergeTabTestsRun{Output: output}
 	if !st.settled && st.turnHolder != "" {
 		inner.State = &frontendv1.FeedMergeTabTestsRun_WaitingForTurn{WaitingForTurn: &frontendv1.FeedMergeTabTestsRunWaitingForTurn{
 			StartedAtMs: st.startedMS, Holder: &frontendv1.FeedMergeTestTurnHolder{WorkspaceName: st.turnHolder}}}
@@ -534,9 +534,16 @@ func (r *run) endRun(ctx context.Context, round tabRound, line string, suites []
 	r.closeTab(ctx, round, closed)
 }
 
-// publishRun publishes the run of tests round ROUND at ST.
+// publishRun publishes the run of tests round ROUND at ST, drawing SUITES
+// and LOG.
 func (r *run) publishRun(round tabRound, st tabState, suites []*frontendv1.FeedMergeTestSuite, log *frontendv1.FeedMergeTestLog) {
-	r.publish(runKey(round.n), runTab(round.n, st, suites, log))
+	r.publishRunOutput(round, st, &frontendv1.FeedMergeTestsRunOutput{Suites: suites, Log: log})
+}
+
+// publishRunOutput publishes the run of tests round ROUND at ST, drawing
+// OUTPUT whole: a live gate's suites, log and RAM disk seat wait.
+func (r *run) publishRunOutput(round tabRound, st tabState, output *frontendv1.FeedMergeTestsRunOutput) {
+	r.publish(runKey(round.n), runTab(round.n, st, output))
 }
 
 // testsRound is the number of the latest tests round: the run a fixing

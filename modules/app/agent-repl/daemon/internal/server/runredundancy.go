@@ -59,7 +59,7 @@ func (s *server) RunRedundancy(
 		return sendRedundancyRunnerFailed(stream, err.Error())
 	}
 	defer os.Remove(request) //nolint:errcheck // a temp file the run is done with
-	argv := append(merge.TestCommandFor(dir, script), "--redundancy", request)
+	argv := append(merge.TestCommandFor(dir, script, w.name), "--redundancy", request)
 	log.Info(opRunRedundancy, "running a workspace's measurement", dlog.Context{"dir": dir, "argv": strings.Join(argv, " ")})
 
 	runCtx, cancel := context.WithCancel(ctx)

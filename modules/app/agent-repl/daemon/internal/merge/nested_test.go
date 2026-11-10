@@ -274,7 +274,7 @@ func TestRunTabCarriesItsOutputAndNumber(t *testing.T) {
 	log := &frontendv1.FeedMergeTestLog{Label: &frontendv1.FeedMergeTestLogLabel{Text: "~/x.log"}}
 
 	// Act
-	tab := runTab(3, tabState{startedMS: 1}, suites, log)
+	tab := runTab(3, tabState{startedMS: 1}, &frontendv1.FeedMergeTestsRunOutput{Suites: suites, Log: log})
 
 	// Assert
 	if tab.GetLabel().GetText() != "run 3" || tab.GetLabel().GetRound() != 1 {

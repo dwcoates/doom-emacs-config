@@ -93,10 +93,10 @@ func TestTestCommandPrefersTheScriptOverride(t *testing.T) {
 	t.Setenv("AGENT_REPL_TEST_ALL_SCRIPT", "/fixtures/test-all.sh")
 
 	// Act.
-	got := TestCommandFor("/checkout", "bin/suites.sh")
+	got := TestCommandFor("/checkout", "bin/suites.sh", "fix-footer")
 
 	// Assert.
-	if want := []string{"env", TestRunMarkerEnv + "=1", "bash", "/fixtures/test-all.sh"}; !slices.Equal(got, want) {
+	if want := []string{"env", TestRunMarkerEnv + "=1", "AGENT_REPL_TEST_WORKSPACE=fix-footer", "bash", "/fixtures/test-all.sh"}; !slices.Equal(got, want) {
 		t.Fatalf("TestCommandFor answered %v, want %v", got, want)
 	}
 }
@@ -107,10 +107,11 @@ func TestTestCommandFallsBackToTheRepositoryEntrypoint(t *testing.T) {
 	t.Setenv("AGENT_REPL_TEST_ALL_SCRIPT", "")
 
 	// Act.
-	got := TestCommandFor("/checkout", "bin/suites.sh")
+	got := TestCommandFor("/checkout", "bin/suites.sh", "fix-footer")
 
-	// Assert: the config's script, under the tree being tested.
-	want := []string{"env", "AGENT_REPL_TEST_RUN_BY_DAEMON=1", "bash", "/checkout/bin/suites.sh"}
+	// Assert: the config's script, under the tree being tested, naming the
+	// workspace the run is for.
+	want := []string{"env", "AGENT_REPL_TEST_RUN_BY_DAEMON=1", "AGENT_REPL_TEST_WORKSPACE=fix-footer", "bash", "/checkout/bin/suites.sh"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("TestCommandFor answered %v, want %v", got, want)
 	}

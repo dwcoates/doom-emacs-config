@@ -9393,6 +9393,9 @@ html.webhost-gate #feed [data-row-kind="coldGate"]:has(.cold-gate[data-state="st
 .merge-updating-main { padding: 0.15rem 0; }
 /* The tests tab's log line sits under its suites. */
 .merge-test-log { padding-top: 0.3rem; color: var(--muted); }
+/* A run waiting for a RAM disk seat leads its tests view with the wait,
+   muted like the log line: it is the run's state, not a result. */
+.merge-seat-wait { padding: 0.15rem 0; color: var(--muted); }
 
 /* ---- image overlay (src/image-overlay/image-overlay.ts) ---- */
 
