@@ -369,7 +369,7 @@ func TestEveryFoldThatHidesTabsGoesThroughFoldTabs(t *testing.T) {
 	byHand := sourcescan.Count(t, "v.deps.StandDowns.StandDownFolded(ws.ID)")
 
 	// Assert.
-	if shared != 2 || byHand != 1 {
+	if shared != 3 || byHand != 1 {
 		t.Fatalf("foldTabs calls = %d, stand-down loops = %d; want every tab-hiding fold through foldTabs", shared, byHand)
 	}
 }

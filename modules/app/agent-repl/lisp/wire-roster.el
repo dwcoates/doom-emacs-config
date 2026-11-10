@@ -927,14 +927,51 @@ It is never unset: every open row has a tab."
      (list :name (agent-repl-wire--decode-string
                   "RosterOpenRowRepositoryDivider" 'name object)))))
 
+(defun agent-repl-wire-decode-roster-open-row-children-collapsible (value)
+  "Decode VALUE as the empty message `RosterOpenRowChildrenCollapsible'."
+  (agent-repl-wire--decode-empty "RosterOpenRowChildrenCollapsible" value))
+
+(defun agent-repl-wire-decode-roster-open-row-children-holds-current (value)
+  "Decode VALUE as the empty message `RosterOpenRowChildrenHoldsCurrent'."
+  (agent-repl-wire--decode-empty "RosterOpenRowChildrenHoldsCurrent" value))
+
+(defun agent-repl-wire-decode-roster-open-row-children-collapsed (value)
+  "Decode VALUE as the empty message `RosterOpenRowChildrenCollapsed'."
+  (agent-repl-wire--decode-empty "RosterOpenRowChildrenCollapsed" value))
+
+(defun agent-repl-wire-decode-roster-open-row-children-expanded (value)
+  "Decode VALUE as `RosterOpenRowChildrenExpanded', a plist `(:collapse ARM)'.
+`:collapsible' may be asked to collapse, `:holds-current' may not."
+  (let ((object (agent-repl-wire--object "RosterOpenRowChildrenExpanded" value)))
+    (agent-repl-wire--check-keys "RosterOpenRowChildrenExpanded" object '(collapsible holdsCurrent))
+    (agent-repl-wire--decoded
+     "RosterOpenRowChildrenExpanded"
+     (list :collapse (agent-repl-wire--decode-oneof
+                      "RosterOpenRowChildrenExpanded" 'collapse object
+                      '((collapsible :collapsible agent-repl-wire-decode-roster-open-row-children-collapsible)
+                        (holdsCurrent :holds-current agent-repl-wire-decode-roster-open-row-children-holds-current)))))))
+
+(defun agent-repl-wire-decode-roster-open-row-children-fold (value)
+  "Decode VALUE as `RosterOpenRowChildrenFold', a plist `(:fold ARM)'.
+`:collapsed' children have their tabs folded off the bar, `:expanded' are listed."
+  (let ((object (agent-repl-wire--object "RosterOpenRowChildrenFold" value)))
+    (agent-repl-wire--check-keys "RosterOpenRowChildrenFold" object '(expanded collapsed))
+    (agent-repl-wire--decoded
+     "RosterOpenRowChildrenFold"
+     (list :fold (agent-repl-wire--decode-oneof
+                  "RosterOpenRowChildrenFold" 'fold object
+                  '((expanded :expanded agent-repl-wire-decode-roster-open-row-children-expanded)
+                    (collapsed :collapsed agent-repl-wire-decode-roster-open-row-children-collapsed)))))))
+
 (defun agent-repl-wire-decode-roster-open-row (value)
   "Decode VALUE as `RosterOpenRow'.
-The plist is `(:row ROW :tab TAB :children ROWS :repository-divider DIVIDER)'.
+The plist is `(:row ROW :tab TAB :children ROWS :repository-divider DIVIDER
+:children-fold FOLD)'.  FOLD is set exactly when the row has children.
 CHILDREN are the row's open family, each itself an open row, in drawn order.
 DIVIDER names the repository the row begins within its family, nil when it
 is of the same repository as the row drawn before it."
   (let ((object (agent-repl-wire--object "RosterOpenRow" value)))
-    (agent-repl-wire--check-keys "RosterOpenRow" object '(row tab children repositoryDivider))
+    (agent-repl-wire--check-keys "RosterOpenRow" object '(row tab children repositoryDivider childrenFold))
     (agent-repl-wire--decoded
      "RosterOpenRow"
      (list :row (agent-repl-wire--decode-message
@@ -945,7 +982,10 @@ is of the same repository as the row drawn before it."
                       "RosterOpenRow" 'children object #'agent-repl-wire-decode-roster-open-row)
            :repository-divider (agent-repl-wire--decode-optional-message
                                 "RosterOpenRow" 'repositoryDivider object
-                                #'agent-repl-wire-decode-roster-open-row-repository-divider)))))
+                                #'agent-repl-wire-decode-roster-open-row-repository-divider)
+           :children-fold (agent-repl-wire--decode-optional-message
+                           "RosterOpenRow" 'childrenFold object
+                           #'agent-repl-wire-decode-roster-open-row-children-fold)))))
 
 (defun agent-repl-wire-decode-roster-open-rows (value)
   "Decode VALUE as `RosterOpenRows', a plist `(:rows OPEN-ROWS)'."
