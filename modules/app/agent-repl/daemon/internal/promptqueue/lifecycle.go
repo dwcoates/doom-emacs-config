@@ -90,6 +90,7 @@ func (q *queue) OnTurnEnded(ws ids.WorkspaceID, turn ids.TurnID, how sessionwatc
 	}
 	q.mu.Unlock()
 	q.deps.Footer.SetInterrupting(ws, false)
+	q.retireVerdictsAgainst(ctx, ws, turn, log)
 
 	// ANOTHER TURN ALREADY RUNS. A vendor-started turn adopted on the same
 	// flush (OnTurnAdopted is told before any end), or a turn delivered in the
@@ -786,4 +787,25 @@ func joinNotStood(log dlog.Logger, joined joiningPrompt) {
 		"joined_turn":         string(joined.into),
 		"invariant_violation": "the watcher stands a joining prompt in flight when the turn it joined ends",
 	})
+}
+
+// retireVerdictsAgainst clears every standing verdict of WS that judged TURN,
+// which has just ended (wsm.RetireVerdictsJudgedAgainst): a prompt held
+// behind a context cut waits behind it no longer, however the cut ended,
+// into a delivery, a bounce or a cold gate.
+func (q *queue) retireVerdictsAgainst(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID, log dlog.Logger) {
+	cleared, err := q.deps.DB.RetireVerdictsJudgedAgainst(ctx, ws, turn)
+	if err != nil {
+		log.Error(opTurnEnded, "could not retire the verdicts judged against the ended turn; the prompts held behind it still read as waiting for it", dlog.Context{
+			"cause": err.Error(),
+		})
+		return
+	}
+	if cleared == 0 {
+		return
+	}
+	log.Info(opTurnEnded, "retired the verdicts judged against the ended turn", dlog.Context{"cleared": cleared})
+	if err := q.pushTray(ctx, ws, log); err != nil {
+		log.Error(opTurnEnded, "the verdicts were retired but the tray was not republished", dlog.Context{"cause": err.Error()})
+	}
 }

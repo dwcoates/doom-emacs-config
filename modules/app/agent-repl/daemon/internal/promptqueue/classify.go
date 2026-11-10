@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
@@ -57,12 +58,7 @@ func (q *queue) hold(ctx context.Context, sub Submission, running ids.TurnID, le
 	var aheadHeld wsm.HeldPrompt
 	if running != "" {
 		if cut, underCut = q.runningCut(sub.WS); underCut {
-			held.Classification = &wsm.Classification{
-				Arm:     wsm.ArmUninterruptibleTurn,
-				Reason:  "the running turn is a context cut and cannot be interrupted",
-				Command: cut.command,
-				At:      q.deps.Now(),
-			}
+			held.Classification = uninterruptibleVerdict(cut, q.deps.Now())
 		} else if verdict, why, ok := q.neverJudged(sub); ok {
 			unjudged = why
 			held.Classification = &verdict
@@ -165,12 +161,7 @@ func (q *queue) classifyHeld(ctx context.Context, sub Submission, running ids.Tu
 	if cut, ok := q.runningCut(sub.WS); ok {
 		keptBehindSessionAct(log, opClassify, cut, sub.Turn,
 			"the running turn is a context cut; the prompt is stamped uninterruptible and no classifier runs")
-		q.record(ctx, sub, wsm.Classification{
-			Arm:     wsm.ArmUninterruptibleTurn,
-			Reason:  "the running turn is a context cut and cannot be interrupted",
-			Command: cut.command,
-			At:      q.deps.Now(),
-		}, log)
+		q.record(ctx, sub, *uninterruptibleVerdict(cut, q.deps.Now()), log)
 		return
 	}
 	if verdict, why, ok := q.neverJudged(sub); ok {
@@ -306,12 +297,7 @@ func (q *queue) verdictFor(ctx context.Context, sub Submission, running ids.Turn
 	if cut, ok := q.runningCut(sub.WS); ok {
 		keptBehindSessionAct(log, opClassify, cut, sub.Turn,
 			"a context cut began while the prompt waited for its verdict; it is stamped uninterruptible and the model is not asked")
-		return wsm.Classification{
-			Arm:     wsm.ArmUninterruptibleTurn,
-			Reason:  "the running turn is a context cut and cannot be interrupted",
-			Command: cut.command,
-			At:      q.deps.Now(),
-		}, classifier.RouteQueue
+		return *uninterruptibleVerdict(cut, q.deps.Now()), classifier.RouteQueue
 	}
 
 	// A PROMPT THAT IS ITSELF A SESSION ACT, OR IS DEFERRED, never reaches
@@ -620,12 +606,7 @@ func (q *queue) registerInterjection(ctx context.Context, sub Submission, runnin
 		q.mu.Unlock()
 		keptBehindSessionAct(log, opInterject, cut, sub.Turn,
 			"a session act is running; the held prompt is kept from interjecting and waits for the act to end")
-		q.record(ctx, sub, wsm.Classification{
-			Arm:     wsm.ArmUninterruptibleTurn,
-			Reason:  "the running turn is a context cut and cannot be interrupted",
-			Command: cut.command,
-			At:      q.deps.Now(),
-		}, log)
+		q.record(ctx, sub, *uninterruptibleVerdict(cut, q.deps.Now()), log)
 		return false
 	}
 	state.head = &head
@@ -745,4 +726,17 @@ func (state *wsState) verdictStaleLocked(turn ids.TurnID, epoch uint64, c wsm.Cl
 		"turn": string(turn), "arm": c.Arm.String(), "judged_epoch": epoch, "content_epoch": now,
 	})
 	return true
+}
+
+// uninterruptibleVerdict is the one verdict a prompt held behind the running
+// context cut CUT takes, judged AT. It names the cut's turn, so the verdict is
+// retired when that turn ends (OnTurnEnded) and never outlives it.
+func uninterruptibleVerdict(cut runningCut, at time.Time) *wsm.Classification {
+	return &wsm.Classification{
+		Arm:     wsm.ArmUninterruptibleTurn,
+		Reason:  "the running turn is a context cut and cannot be interrupted",
+		Command: cut.command,
+		At:      at,
+		Turn:    cut.turn,
+	}
 }

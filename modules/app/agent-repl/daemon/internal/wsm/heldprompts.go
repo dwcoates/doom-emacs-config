@@ -21,7 +21,8 @@ import (
 // refuse (see schema.go).
 const heldPromptColumns = `turn_id, workspace_id, said, origin, target, hold_kind, hold_schedule_id,
 	classification_arm, classification_reason, classification_command, classification_at,
-	tombstone_kind, tombstone_at, queued_at, delivery, act_kind, act_value, coalesced, sent_by, thread_parent`
+	tombstone_kind, tombstone_at, queued_at, delivery, act_kind, act_value, coalesced, sent_by, thread_parent,
+	classification_turn`
 
 // scanHeldPrompt decodes one held prompt all-or-nothing. This is the row the
 // all-or-nothing rule was written for: a corrupt hold must never restore as a
@@ -48,10 +49,11 @@ func scanHeldPrompt(row interface{ Scan(...any) error }) (HeldPrompt, error) {
 		actValue sql.NullString
 		sentBy   sql.NullString
 		parent   []byte
+		judged   sql.NullString
 	)
 	if err := row.Scan(&h.Turn, &h.Workspace, &said, &h.Origin, &target, &holdKind, &schedule,
 		&arm, &reason, &command, &classAt, &tombKind, &tombAt, &queued, &delivery,
-		&actKind, &actValue, &h.Coalesced, &sentBy, &parent); err != nil {
+		&actKind, &actValue, &h.Coalesced, &sentBy, &parent, &judged); err != nil {
 		return HeldPrompt{}, err
 	}
 	id := string(h.Turn)
@@ -116,7 +118,7 @@ func scanHeldPrompt(row interface{ Scan(...any) error }) (HeldPrompt, error) {
 		if _, ok := conversationv1.SessionCommand_name[int32(command.Int64)]; !ok {
 			return HeldPrompt{}, &DecodeError{Table: "held_prompts", Row: id, Field: "classification_command", Err: fmt.Errorf("unknown session command %d", command.Int64)}
 		}
-		h.Classification = &Classification{Arm: verdict, Reason: reason.String, Command: cmd, At: fromNanos(classAt.Int64)}
+		h.Classification = &Classification{Arm: verdict, Reason: reason.String, Command: cmd, At: fromNanos(classAt.Int64), Turn: TurnID(judged.String)}
 	default:
 		return HeldPrompt{}, &DecodeError{Table: "held_prompts", Row: id, Field: "classification", Err: errors.New("a classification is stored whole or not at all")}
 	}
@@ -211,10 +213,11 @@ func (s *store) PutHeldPrompt(ctx context.Context, h HeldPrompt) error {
 			holdKind = int(*h.Hold)
 			schedule = h.ScheduleID
 		}
-		var arm, reason, command, classAt any
+		var arm, reason, command, classAt, judged any
 		if h.Classification != nil {
 			arm, reason = int(h.Classification.Arm), h.Classification.Reason
 			command, classAt = int32(h.Classification.Command), nanos(h.Classification.At)
+			judged = judgedTurnColumn(h.Classification.Turn)
 		}
 		var tombKind, tombAt any
 		if h.Tombstone != nil {
@@ -228,8 +231,8 @@ func (s *store) PutHeldPrompt(ctx context.Context, h HeldPrompt) error {
 			`INSERT INTO held_prompts (turn_id, workspace_id, said, origin, target, hold_kind, hold_schedule_id,
 			   classification_arm, classification_reason, classification_command, classification_at,
 			   accepted, tombstone_kind, tombstone_at, queued_at, delivery, act_kind, act_value, coalesced, sent_by,
-			   thread_parent)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			   thread_parent, classification_turn)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			 ON CONFLICT(turn_id) DO UPDATE SET
 			   workspace_id = excluded.workspace_id, said = excluded.said, origin = excluded.origin,
 			   target = excluded.target, hold_kind = excluded.hold_kind,
@@ -238,6 +241,7 @@ func (s *store) PutHeldPrompt(ctx context.Context, h HeldPrompt) error {
 			   classification_reason = excluded.classification_reason,
 			   classification_command = excluded.classification_command,
 			   classification_at = excluded.classification_at,
+			   classification_turn = excluded.classification_turn,
 			   accepted = 0,
 			   tombstone_kind = excluded.tombstone_kind, tombstone_at = excluded.tombstone_at,
 			   queued_at = excluded.queued_at, delivery = excluded.delivery,
@@ -245,7 +249,7 @@ func (s *store) PutHeldPrompt(ctx context.Context, h HeldPrompt) error {
 			   sent_by = excluded.sent_by, thread_parent = excluded.thread_parent`,
 			h.Turn, h.Workspace, said, h.Origin, target, holdKind, schedule,
 			arm, reason, command, classAt, tombKind, tombAt, nanos(h.QueuedAt), int(h.Delivery),
-			actKind, actValue, h.Coalesced, sentByColumn(h.SentBy), askParent)
+			actKind, actValue, h.Coalesced, sentByColumn(h.SentBy), askParent, judged)
 		return err
 	})
 }
@@ -328,11 +332,70 @@ func (s *store) UpdateHeldPromptClassification(ctx context.Context, turn TurnID,
 		}
 		_, err := tx.ExecContext(ctx,
 			`UPDATE held_prompts SET classification_arm = ?, classification_reason = ?, classification_command = ?, classification_at = ?,
-			   accepted = 0
+			   classification_turn = ?, accepted = 0
 			 WHERE turn_id = ?`,
-			int(c.Arm), c.Reason, int32(c.Command), nanos(c.At), turn)
+			int(c.Arm), c.Reason, int32(c.Command), nanos(c.At), judgedTurnColumn(c.Turn), turn)
 		return err
 	})
+}
+
+// heldVerdictTurnDDL is the layout-117 addition: the running turn a verdict
+// judged, so the verdict ends with that turn (RetireVerdictsJudgedAgainst).
+const heldVerdictTurnDDL = `
+ALTER TABLE held_prompts ADD COLUMN classification_turn TEXT;
+`
+
+// retireUnjudgedVerdicts clears every standing uninterruptible verdict a build
+// before layout 117 stamped: such a verdict names no turn, so no turn's end
+// would ever retire it. A context cut still running is refused a release by
+// the queue's own running-cut check, so nothing it guards is let through.
+func retireUnjudgedVerdicts(ctx context.Context, tx *sql.Tx, log dlog.Logger) error {
+	res, err := tx.ExecContext(ctx,
+		`UPDATE held_prompts SET classification_arm = NULL, classification_reason = NULL, classification_command = NULL,
+		   classification_at = NULL, classification_turn = NULL
+		 WHERE classification_arm = ? AND tombstone_kind IS NULL`, int(ArmUninterruptibleTurn))
+	if err != nil {
+		return err
+	}
+	cleared, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	log.Info("daemon.wsm.open", "retired the uninterruptible verdicts stamped before they named their turn", dlog.Context{"cleared": cleared})
+	return nil
+}
+
+// judgedTurnColumn is a verdict's judged turn as stored: NULL for a verdict
+// that judged no particular turn.
+func judgedTurnColumn(turn TurnID) any {
+	if turn == "" {
+		return nil
+	}
+	return string(turn)
+}
+
+// RetireVerdictsJudgedAgainst clears the verdict of every standing held prompt
+// of workspace WS that judged TURN, the running turn that has just ended, and
+// answers how many it cleared. A verdict about a running turn says nothing
+// once that turn ends: kept, it refused the prompt's release for a turn
+// long gone (2026-11-10: a prompt stamped behind a /compact was refused as
+// "uninterruptible" seventeen minutes after the compaction ended).
+func (s *store) RetireVerdictsJudgedAgainst(ctx context.Context, ws WorkspaceID, turn TurnID) (int64, error) {
+	const op = "daemon.wsm.retire_verdicts_judged_against"
+	fields := dlog.Context{"workspace": string(ws), "turn": string(turn)}
+	var cleared int64
+	err := s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx,
+			`UPDATE held_prompts SET classification_arm = NULL, classification_reason = NULL, classification_command = NULL,
+			   classification_at = NULL, classification_turn = NULL
+			 WHERE workspace_id = ? AND classification_turn = ? AND tombstone_kind IS NULL`, ws, turn)
+		if err != nil {
+			return err
+		}
+		cleared, err = res.RowsAffected()
+		return err
+	})
+	return cleared, err
 }
 
 // UpdateHeldPromptHold changes or clears the daemon-side condition holding a

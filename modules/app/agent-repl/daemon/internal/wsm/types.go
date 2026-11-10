@@ -858,6 +858,10 @@ type Classification struct {
 	Command conversationv1.SessionCommand
 	// At is when the verdict landed.
 	At time.Time
+	// Turn is the running turn the verdict judged, when it judged one: an
+	// ArmUninterruptibleTurn verdict names the context cut it waits behind,
+	// and is retired when that turn ends (RetireVerdictsJudgedAgainst).
+	Turn TurnID
 }
 
 // Tombstone is why a held prompt was retired.

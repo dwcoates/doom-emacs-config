@@ -978,3 +978,72 @@ func TestAdoptedOrigin(t *testing.T) {
 		})
 	}
 }
+
+// heldBehind stores a standing prompt of theWorkspace whose verdict judged
+// JUDGED, as one held behind a context cut is stored.
+func heldBehind(h *harness, turn, judged ids.TurnID) {
+	h.db.mu.Lock()
+	defer h.db.mu.Unlock()
+	h.db.held[turn] = &wsm.HeldPrompt{Turn: turn, Workspace: theWorkspace, Classification: &wsm.Classification{
+		Arm: wsm.ArmUninterruptibleTurn, Command: conversationv1.SessionCommand_SESSION_COMMAND_COMPACT, Turn: judged,
+	}}
+}
+
+func TestAnEndedTurnRetiresTheVerdictsJudgedAgainstIt(t *testing.T) {
+	cases := []struct {
+		name     string
+		judged   ids.TurnID
+		wantKept bool
+	}{
+		{name: "a verdict judged against the ended cut is retired", judged: "cut-1", wantKept: false},
+		{name: "a verdict judged against another turn is kept", judged: "cut-2", wantKept: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			heldBehind(h, "t1", tc.judged)
+
+			// Act
+			h.q.retireVerdictsAgainst(context.Background(), theWorkspace, "cut-1", h.q.deps.Log.Global())
+
+			// Assert
+			h.db.mu.Lock()
+			kept := h.db.held["t1"].Classification != nil
+			h.db.mu.Unlock()
+			if kept != tc.wantKept {
+				t.Fatalf("verdict kept = %v, want %v", kept, tc.wantKept)
+			}
+		})
+	}
+}
+
+func TestARetiredVerdictRepublishesTheTray(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	heldBehind(h, "t1", "cut-1")
+	before := h.holds.pushCount()
+
+	// Act
+	h.q.retireVerdictsAgainst(context.Background(), theWorkspace, "cut-1", h.q.deps.Log.Global())
+
+	// Assert
+	if h.holds.pushCount() == before {
+		t.Fatal("the tray was not republished after the verdict was retired")
+	}
+}
+
+func TestAVerdictThatCannotBeRetiredIsLogged(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	heldBehind(h, "t1", "cut-1")
+	h.db.retireErr = errors.New("disk full")
+
+	// Act
+	h.q.retireVerdictsAgainst(context.Background(), theWorkspace, "cut-1", h.q.deps.Log.Global())
+
+	// Assert
+	if !logged(h.log.Records(), "error", opTurnEnded, "could not retire the verdicts judged against the ended turn; the prompts held behind it still read as waiting for it") {
+		t.Fatalf("records = %v, want the failure at error", h.log.Records())
+	}
+}
