@@ -74,6 +74,8 @@
 (declare-function flyspell-mode "flyspell" (&optional arg))
 (declare-function flyspell-highlight-incorrect-region "flyspell" (beg end poss))
 (declare-function flyspell-get-word "flyspell" (&optional following extra-otherchars))
+(declare-function ispell-kill-ispell "ispell" (&optional no-error clear))
+(declare-function agent-repl--error "agent-repl-core" (ws fmt &rest args))
 
 (defvar flyspell-mode)
 (defvar flyspell-mode-map)
@@ -357,6 +359,84 @@ stays unmarked as the as-you-type check leaves it."
                 (when (and at (equal (car at) word) (= (nth 1 at) wbeg)
                            (agent-repl--spell-prose-at-p wbeg))
                   (flyspell-highlight-incorrect-region wbeg wend nil))))))))))
+
+;;;; ---- flyspell's exchange with hunspell -----------------------------------
+
+;; FLYSPELL'S WAIT FOR HUNSPELL COULD BE RE-ENTERED, AND THEN IT NEVER ENDED
+;; (the main editor froze, 2026-11-10).  `flyspell-word' sends a word and loops
+;; on `accept-process-output' with no timeout until the shared `ispell-filter'
+;; ends in hunspell's blank line, from `post-command-hook', where C-g does not
+;; break it.  That wait runs timers and every other process's output, and one
+;; of them turning flyspell on in another buffer (a composer a daemon push
+;; creates) runs `ispell-init-process': a different dictionary kills hunspell
+;; and starts a new one, and the waiting loop then waits on a process that was
+;; never sent the word, forever (reproduced in batch with a timer that turns
+;; flyspell on in a buffer with the default dictionary).  With hunspell killed
+;; the same loop spun on the dead process instead.
+;;
+;; SO THE EXCHANGE IS ATOMIC, AND BOUNDED.  Inside `flyspell-word' each wait on
+;; `ispell-process' accepts output from that process only and runs no timer
+;; (an integer JUST-THIS-ONE), so nothing can re-enter the exchange; and it is
+;; bounded by `agent-repl--spell-reply-bound'.  A wait that trips, or a spell
+;; process that is not running, is a failure: the spell process is reset, the
+;; word and the process are named on the log at ERROR and in the echo area,
+;; and the word is left unchecked for the next command to check again.
+
+(defconst agent-repl--spell-reply-bound 0.1
+  "Seconds one flyspell exchange may wait for hunspell's reply.
+Measured 2026-11-10 over 3500 words against the composer's dictionary on a
+host at load 8.6: p50 18 ms, p99 30 ms, worst 35 ms.  About three times the
+worst.")
+
+(defvar agent-repl--spell-exchange-word nil
+  "The word `flyspell-word' is checking, while its exchange is in flight.")
+
+(define-error 'agent-repl-spell-no-reply "hunspell did not answer flyspell")
+
+(defun agent-repl--spell-bounded-accept (accept &optional process seconds millisec just-this-one)
+  "Around ACCEPT (`accept-process-output'): bound flyspell's wait on hunspell.
+Only a wait on `ispell-process' with no timeout, from inside `flyspell-word',
+is changed: it takes output from that process alone, runs no timer, and
+gives up after `agent-repl--spell-reply-bound', signalling
+`agent-repl-spell-no-reply'.  Every other call passes through untouched."
+  (if (not (and agent-repl--spell-exchange-word
+                process (eq process (bound-and-true-p ispell-process))
+                (null seconds) (null millisec)))
+      (funcall accept process seconds millisec just-this-one)
+    (unless (process-live-p process)
+      (signal 'agent-repl-spell-no-reply (list "the spell process is not running")))
+    (or (funcall accept process agent-repl--spell-reply-bound nil 0)
+        (signal 'agent-repl-spell-no-reply
+                (list (format "no reply within %.0f ms" (* 1000 agent-repl--spell-reply-bound)))))))
+
+(defun agent-repl--spell-word-of-point ()
+  "Return the word flyspell is about to check at point, or \='unknown."
+  (or (car-safe (flyspell-get-word)) 'unknown))
+
+(defun agent-repl--spell-guarded-word (flyspell-word &rest args)
+  "Around FLYSPELL-WORD: run its exchange atomically, and reset on no reply.
+A tripped wait is recorded at ERROR naming the word and the process, said
+in the echo area, and answered by resetting the spell process, so the next
+check starts on a fresh one; the word itself is left unchecked."
+  (let ((agent-repl--spell-exchange-word (agent-repl--spell-word-of-point)))
+    (condition-case err
+        (apply flyspell-word args)
+      (agent-repl-spell-no-reply
+       (let ((process (bound-and-true-p ispell-process))
+             (word agent-repl--spell-exchange-word))
+         (agent-repl--error agent-repl--spell-ws
+                            "elisp.spell.no-reply ws=%s buffer=%s word=%S process=%S pid=%s cause=%s outcome=reset"
+                            agent-repl--spell-ws (buffer-name) word
+                            (and process (process-name process))
+                            (and process (process-id process)) (cadr err))
+         (message "Spellcheck: %s did not answer for %S (%s); the spell process was reset"
+                  (or (and process (process-name process)) "hunspell") word (cadr err))
+         (ispell-kill-ispell t)
+         nil)))))
+
+(advice-add 'accept-process-output :around #'agent-repl--spell-bounded-accept)
+(with-eval-after-load 'flyspell
+  (advice-add 'flyspell-word :around #'agent-repl--spell-guarded-word))
 
 ;;;; ---- External boundary --------------------------------------------------
 

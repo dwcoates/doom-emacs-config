@@ -137,6 +137,26 @@ func TestDefaultUpdateRemoteControlModeIsSuccess(t *testing.T) {
 	}
 }
 
+func TestDefaultUpdateQueueBypassModeIsSuccess(t *testing.T) {
+	// Arrange.
+	_, baseURL := newTestServer(t)
+	client := newTestClient(t, baseURL)
+
+	// Act.
+	resp, err := client.UpdateQueueBypassMode(context.Background(),
+		connect.NewRequest(&agentreplv1.UpdateQueueBypassModeRequest{
+			Workspace: &workspaceRef,
+			Action:    &agentreplv1.UpdateQueueBypassModeRequest_Toggle{Toggle: &agentreplv1.UpdateQueueBypassModeToggle{}}}))
+	if err != nil {
+		t.Fatalf("UpdateQueueBypassMode: %v", err)
+	}
+
+	// Assert: the toggle's default is the success arm.
+	if resp.Msg.GetSuccess() == nil {
+		t.Fatalf("UpdateQueueBypassMode default is %v, want the success arm", resp.Msg)
+	}
+}
+
 func TestDefaultSubmitPromptCarriesATurnId(t *testing.T) {
 	// Arrange.
 	_, baseURL := newTestServer(t)
