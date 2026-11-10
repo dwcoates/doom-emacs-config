@@ -57,6 +57,13 @@ skill's flow, where every target replied on purpose with its own
   is open does it answer `closed` (some closed workspace has it) or
   `unknown_workspace` (none does).
 
+### `gather.proto`: the outstanding cold gate carries no detail
+
+- WHAT: `GatherOutstandingTargetColdGate` is empty.
+- WHY: the reason is read from the target's `WorkspaceStatus`, whose cold-gate
+  arm names the gate's card and carries no sentence. A detail field would have
+  had no producer.
+
 ### `endpoint_gather_workspaces.proto`
 
 - WHAT: the request names targets by workspace NAME, carries the prompt as a

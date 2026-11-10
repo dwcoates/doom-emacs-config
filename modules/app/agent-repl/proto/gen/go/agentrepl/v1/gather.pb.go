@@ -1039,11 +1039,10 @@ func (*GatherOutstandingTargetHeld) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_gather_proto_rawDescGZIP(), []int{15}
 }
 
-// The target is at its cold gate.
+// The target is at its cold gate. No fields: `workspace status` names the
+// gate, and the user answers it.
 type GatherOutstandingTargetColdGate struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The gate's own account of what was refused cold, verbatim.
-	Detail        string `protobuf:"bytes,1,opt,name=detail,proto3" json:"detail,omitempty"`
+	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1076,13 +1075,6 @@ func (x *GatherOutstandingTargetColdGate) ProtoReflect() protoreflect.Message {
 // Deprecated: Use GatherOutstandingTargetColdGate.ProtoReflect.Descriptor instead.
 func (*GatherOutstandingTargetColdGate) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_gather_proto_rawDescGZIP(), []int{16}
-}
-
-func (x *GatherOutstandingTargetColdGate) GetDetail() string {
-	if x != nil {
-		return x.Detail
-	}
-	return ""
 }
 
 // An ask waits on the user. No fields.
@@ -1925,9 +1917,8 @@ const file_agentrepl_v1_gather_proto_rawDesc = "" +
 	"\afaulted\x18\a \x01(\v2,.agentrepl.v1.GatherOutstandingTargetFaultedH\x00R\afaultedB\b\n" +
 	"\x06reason\" \n" +
 	"\x1eGatherOutstandingTargetWorking\"\x1d\n" +
-	"\x1bGatherOutstandingTargetHeld\"9\n" +
-	"\x1fGatherOutstandingTargetColdGate\x12\x16\n" +
-	"\x06detail\x18\x01 \x01(\tR\x06detail\"#\n" +
+	"\x1bGatherOutstandingTargetHeld\"!\n" +
+	"\x1fGatherOutstandingTargetColdGate\"#\n" +
 	"!GatherOutstandingTargetNeedsInput\"-\n" +
 	"+GatherOutstandingTargetEndedWithoutResponse\"B\n" +
 	"\x1eGatherOutstandingTargetFaulted\x12 \n" +

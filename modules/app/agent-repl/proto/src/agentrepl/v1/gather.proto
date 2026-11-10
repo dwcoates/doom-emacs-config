@@ -143,11 +143,9 @@ message GatherOutstandingTarget {
 message GatherOutstandingTargetWorking {}
 // The prompt is held. No fields.
 message GatherOutstandingTargetHeld {}
-// The target is at its cold gate.
-message GatherOutstandingTargetColdGate {
-  // The gate's own account of what was refused cold, verbatim.
-  string detail = 1;
-}
+// The target is at its cold gate. No fields: `workspace status` names the
+// gate, and the user answers it.
+message GatherOutstandingTargetColdGate {}
 // An ask waits on the user. No fields.
 message GatherOutstandingTargetNeedsInput {}
 // The prompt's turn ended without a response. No fields.
