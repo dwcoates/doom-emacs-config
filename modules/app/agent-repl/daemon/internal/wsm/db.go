@@ -847,6 +847,11 @@ type DB interface {
 	// PutWorkspaceContextCut records that a cut discarded a workspace's last
 	// context reading.
 	PutWorkspaceContextCut(ctx context.Context, id WorkspaceID) error
+	// PutComposerMentions records the names a workspace's final responses
+	// mentioned, each instant only moving forward (composermentions.go).
+	PutComposerMentions(ctx context.Context, mentions []ComposerMention) error
+	// ComposerMentions loads every workspace's recorded mentions.
+	ComposerMentions(ctx context.Context) ([]ComposerMention, error)
 	// AccountModelCatalog answers the catalog an account root last served.
 	AccountModelCatalog(ctx context.Context, configDir string) (*conversationv1.ModelCatalog, bool, error)
 	// PutAccountModelCatalog records the catalog an account root served.
