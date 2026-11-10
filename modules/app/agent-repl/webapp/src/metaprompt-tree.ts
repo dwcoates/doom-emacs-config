@@ -1268,6 +1268,17 @@ const CITED_LABEL = String.raw`\d+(?:\.\d+)*`;
 /** A citation: parentheses holding one or more labels, joined by commas or "and". */
 const CITATION_RE = new RegExp(String.raw`\(${CITED_LABEL}(?:\s*(?:,|and|&amp;)\s*${CITED_LABEL})*\)`, "gu");
 
+/**
+ * A dotted label written WITHOUT parentheses. It must hold a dot (a lone
+ * whole number in prose is a count, not an entry) and stand alone: not glued
+ * to a word, a longer dotted number, or an entity. A label closing a
+ * parenthesis is already inside one, so it is left alone.
+ */
+const BARE_LABEL_RE = new RegExp(String.raw`(?<![\w.#&/-])\d+(?:\.\d+)+(?![\w)]|\.\d|-)`, "gu");
+
+/** Either a parenthesized citation or a bare dotted label, the citation matched first. */
+const CITATION_OR_BARE_RE = new RegExp(`${CITATION_RE.source}|${BARE_LABEL_RE.source}`, "gu");
+
 /** Elements whose text is never read as a citation: code is literal, a link is already a link. */
 const UNCITED_TAG_RE = /^<(\/?)(code|a)\b/iu;
 
@@ -1277,7 +1288,11 @@ const UNCITED_TAG_RE = /^<(\/?)(code|a)\b/iu;
  * on the citation can box the node it cites (feed/branch-hover.ts). A tree
  * cites a node by its dotted label in parentheses (the metaprompt's
  * cross-reference rule), so only a parenthesized label that names a node of
- * this tree is marked. The mark is a tag, so it adds no width.
+ * this tree is marked. A bare dotted label naming a node of this tree is
+ * rewritten into the parenthesized form, so "check 2.1.3 here" reads
+ * "check (2.1.3) here". The mark is a tag, so it adds no width, but the
+ * added parentheses do, which is why this runs inside the width
+ * measurement.
  */
 export function markReferences(html: string, labels: ReadonlySet<string>): string {
   let uncited = 0;
@@ -1290,12 +1305,16 @@ export function markReferences(html: string, labels: ReadonlySet<string>): strin
         return part;
       }
       if (uncited > 0) return part;
-      return part.replace(CITATION_RE, (citation) =>
-        citation.replace(new RegExp(CITED_LABEL, "gu"), (label) =>
-          labels.has(label)
-            ? `<span class="${TREE_REFERENCE_CLASS}" ${TREE_REFERENCE_ATTRIBUTE}="${label}">${label}</span>`
-            : label,
-        ),
+      const mark = (label: string): string =>
+        labels.has(label)
+          ? `<span class="${TREE_REFERENCE_CLASS}" ${TREE_REFERENCE_ATTRIBUTE}="${label}">${label}</span>`
+          : label;
+      return part.replace(CITATION_OR_BARE_RE, (found) =>
+        found.startsWith("(")
+          ? found.replace(new RegExp(CITED_LABEL, "gu"), mark)
+          : labels.has(found)
+            ? `(${mark(found)})`
+            : found,
       );
     })
     .join("");

@@ -579,8 +579,20 @@ describe("markReferences", () => {
   });
 
   it.each([
+    ["a bare label of the tree, adding parentheses", "check out 1.3.1 entry", `check out (${cited("1.3.1")}) entry`],
+    ["a bare label before a sentence period", "see 1.2.", `see (${cited("1.2")}).`],
+    ["a bare label beside a parenthesized one", "1.2 and (1.3.1)", `(${cited("1.2")}) and (${cited("1.3.1")})`],
+  ])("marks %s", (_name, html, marked) => {
+    // Act + Assert
+    expect(markReferences(html, labels)).toBe(marked);
+  });
+
+  it.each([
     ["a label the tree does not hold", "(4.5)"],
-    ["a label outside parentheses", "1.2 is fine"],
+    ["a bare label the tree does not hold", "see 4.5 here"],
+    ["a bare whole number naming a root", "pick 1 of them"],
+    ["a bare label inside a longer dotted number", "version 1.2.9 ships"],
+    ["a bare label glued to a word", "x1.2 and 1.2x"],
     ["parentheses holding more than labels", "(see 1.2)"],
     ["a citation inside code", "<code>(1.2)</code>"],
     ["a citation inside a link", `<a href="x">(1.2)</a>`],
