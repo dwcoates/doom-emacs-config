@@ -86,6 +86,7 @@ var unaryResponseTypes = map[string]func() proto.Message{
 	"GetWorkspaceStatus":         func() proto.Message { return &v1.GetWorkspaceStatusResponse{} },
 	"SetWorkspaceCorrespondence": func() proto.Message { return &v1.SetWorkspaceCorrespondenceResponse{} },
 	"SetWorkspaceName":           func() proto.Message { return &v1.SetWorkspaceNameResponse{} },
+	"SetWorkspaceSummary":        func() proto.Message { return &v1.SetWorkspaceSummaryResponse{} },
 	"ValidateWorkspaceName":      func() proto.Message { return &v1.ValidateWorkspaceNameResponse{} },
 	"ListCreationModels":         func() proto.Message { return &v1.ListCreationModelsResponse{} },
 	"SetWorkspaceOneShot":        func() proto.Message { return &v1.SetWorkspaceOneShotResponse{} },
