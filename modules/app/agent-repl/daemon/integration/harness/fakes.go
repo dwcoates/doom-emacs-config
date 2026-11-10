@@ -387,7 +387,8 @@ exec "$@"
 	"pmset": `#!/bin/sh
 state="$(dirname "$0")/pmset.state"
 case "$1" in
-  -g) printf 'System-wide power settings:\n SleepDisabled\t\t%s\nCurrently in use:\n standby 1\n' "$(cat "$state" 2>/dev/null || echo 0)" ;;
+  -g) if [ "$2" = ps ]; then printf "Now drawing from 'Battery Power'\n"; exit 0; fi
+      printf 'System-wide power settings:\n SleepDisabled\t\t%s\nCurrently in use:\n standby 1\n' "$(cat "$state" 2>/dev/null || echo 0)" ;;
   -a) [ "$2" = disablesleep ] && printf '%s\n' "$3" > "$state" ;;
 esac
 exit 0
