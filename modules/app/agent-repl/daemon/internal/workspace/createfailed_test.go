@@ -100,11 +100,7 @@ func TestAFailedCreateIsReportedToTheMainWorktree(t *testing.T) {
 				t.Fatalf("report delivery = %v, want deferred", sub.Delivery)
 			}
 			text := submittedText(sub.Said)
-			for _, want := range []string{spec.RepoDir, "already exists", "fix the login bug", fixtureCheckoutRoot} {
-				if !strings.Contains(text, want) {
-					t.Fatalf("report = %q, want it to carry %q", text, want)
-				}
-			}
+			assertCarries(t, "report", text, spec.RepoDir, "already exists", "fix the login bug", fixtureCheckoutRoot)
 			if record, _ := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: opCreateFailedReport}); record.Message != createFailedMessage {
 				t.Fatalf("report record = %q, want %q", record.Message, createFailedMessage)
 			}
@@ -560,11 +556,7 @@ func TestTheShippedCreateFailedBriefSplices(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Splice: %v", err)
 	}
-	for _, want := range []string{"/repo", "- initial prompt: none", "```\nboom\n```", "/agent-repl"} {
-		if !strings.Contains(text, want) {
-			t.Fatalf("brief = %q, want it to carry %q", text, want)
-		}
-	}
+	assertCarries(t, "brief", text, "/repo", "- initial prompt: none", "```\nboom\n```", "/agent-repl")
 }
 
 func TestTheShippedCreateFailedBriefHandsTheFixToAChild(t *testing.T) {

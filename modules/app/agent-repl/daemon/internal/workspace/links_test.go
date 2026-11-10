@@ -623,16 +623,12 @@ func TestOpenFeedLinkComposesTheQuestionFromItsBrief(t *testing.T) {
 	if unresolved == nil {
 		t.Fatal("no question was composed")
 	}
-	for _, want := range []string{
+	assertCarries(t, "question", unresolved.Question,
 		"link nowhere.md",
 		filepath.Join(dir, "modules/app/agent-repl/nowhere.md"),
 		filepath.Join(dir, "nowhere.md"),
 		filepath.Join(fixtureCheckoutRoot, feedLinkResolverSite),
-	} {
-		if !strings.Contains(unresolved.Question, want) {
-			t.Fatalf("question = %q, want it to carry %q", unresolved.Question, want)
-		}
-	}
+	)
 }
 
 func TestOpenFeedLinkFailsLoudlyWhenItsBriefIsMissing(t *testing.T) {

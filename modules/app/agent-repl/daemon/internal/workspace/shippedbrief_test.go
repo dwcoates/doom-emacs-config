@@ -1,8 +1,10 @@
 package workspace
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -91,5 +93,87 @@ func assertBriefHandsTheFixToAChild(t *testing.T, body string) {
 		if strings.Contains(body, waiting) {
 			t.Fatalf("brief = %q, want no ask-and-wait wording, found %q", body, waiting)
 		}
+	}
+}
+
+// assertCarries fails unless text carries every one of wants, naming what
+// text is (a brief, a report, a question) and the first missing want.
+func assertCarries(t testing.TB, what, text string, wants ...string) {
+	t.Helper()
+	for _, want := range wants {
+		if !strings.Contains(text, want) {
+			t.Fatalf("%s = %q, want it to carry %q", what, text, want)
+		}
+	}
+}
+
+// carriesRecorder is a testing.TB whose Fatalf records the failure instead of
+// stopping, so assertCarries's own failure can be asserted on.
+type carriesRecorder struct {
+	testing.TB
+	failures []string
+}
+
+func (r *carriesRecorder) Helper() {}
+
+func (r *carriesRecorder) Fatalf(format string, args ...any) {
+	r.failures = append(r.failures, fmt.Sprintf(format, args...))
+}
+
+func TestAssertCarries(t *testing.T) {
+	tests := []struct {
+		name  string
+		text  string
+		wants []string
+		want  []string
+	}{
+		{name: "every want carried passes", text: "alpha beta", wants: []string{"alpha", "beta"}},
+		{name: "no wants passes", text: "alpha"},
+		{name: "a missing want fails naming what and the want", text: "alpha", wants: []string{"alpha", "gamma"},
+			want: []string{`brief = "alpha", want it to carry "gamma"`}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			rec := &carriesRecorder{TB: t}
+
+			// Act.
+			assertCarries(rec, "brief", tt.text, tt.wants...)
+
+			// Assert.
+			if !slices.Equal(rec.failures, tt.want) {
+				t.Fatalf("failures = %q, want %q", rec.failures, tt.want)
+			}
+		})
+	}
+}
+
+// TestEveryCarryCheckGoesThroughAssertCarries keeps the package's tests from
+// hand-rolling assertCarries's loop again.
+func TestEveryCarryCheckGoesThroughAssertCarries(t *testing.T) {
+	// Arrange.
+	files, err := filepath.Glob("*_test.go")
+	if err != nil {
+		t.Fatalf("Glob: %v", err)
+	}
+	handRolled := "want it to carry %q"
+
+	for _, file := range files {
+		t.Run(file, func(t *testing.T) {
+			// Act.
+			text, err := os.ReadFile(file)
+			if err != nil {
+				t.Fatalf("ReadFile: %v", err)
+			}
+
+			// Assert.
+			count := strings.Count(string(text), handRolled)
+			if file == "shippedbrief_test.go" {
+				count -= 2 // the helper's own Fatalf and this check
+			}
+			if count != 0 {
+				t.Fatalf("%s hand-rolls a carry check %d times, want assertCarries", file, count)
+			}
+		})
 	}
 }

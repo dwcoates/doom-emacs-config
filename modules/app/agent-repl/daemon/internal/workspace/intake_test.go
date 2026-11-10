@@ -610,13 +610,9 @@ func TestTheShippedQuestionIntakeBriefSendsReworkToTheWorkspaceThatMadeIt(t *tes
 	body := brief.Body
 
 	// Assert.
-	for _, want := range []string{
+	assertCarries(t, "brief", body,
 		`send the rework to the workspace that made it, as the metaprompt's "Rework" section says`,
 		"Create no workspace for it.",
 		"If it asks for any other change, create one async one-shot workspace",
-	} {
-		if !strings.Contains(body, want) {
-			t.Fatalf("brief = %q, want it to carry %q", body, want)
-		}
-	}
+	)
 }

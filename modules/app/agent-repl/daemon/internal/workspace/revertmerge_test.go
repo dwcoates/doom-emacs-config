@@ -83,11 +83,7 @@ func TestOpenToRevertMergeNamesTheBranchItsParentAndTheLandedCommit(t *testing.T
 
 	// Assert.
 	text := submittedText(f.queue.submissions[0].Said)
-	for _, want := range []string{"revert " + ws.Branch, "`master`", "sha-of-refs/heads/" + ws.Branch} {
-		if !strings.Contains(text, want) {
-			t.Fatalf("brief = %q, want it to carry %q", text, want)
-		}
-	}
+	assertCarries(t, "brief", text, "revert "+ws.Branch, "`master`", "sha-of-refs/heads/"+ws.Branch)
 }
 
 func TestOpenToRevertMergeNamesAnUnrecordedParentInWords(t *testing.T) {
