@@ -914,6 +914,48 @@ stubs every rung alike."
     ;; Assert
     (should-not hand-rolled)))
 
+(ert-deftest agent-repl-test-helpers-with-clock-answers-its-start ()
+  "Inside the settable clock `agent-repl--now' answers the START it was given."
+  ;; Act / Assert
+  (agent-repl-test--with-clock 100.0
+    (should (= (agent-repl--now) 100.0))))
+
+(ert-deftest agent-repl-test-helpers-with-clock-follows-a-step ()
+  "Setting `agent-repl-test--clock' moves what `agent-repl--now' answers."
+  (agent-repl-test--with-clock 100.0
+    ;; Act
+    (setq agent-repl-test--clock (+ agent-repl-test--clock 2.5))
+    ;; Assert
+    (should (= (agent-repl--now) 102.5))))
+
+(ert-deftest agent-repl-test-helpers-with-clock-restores-the-real-clock ()
+  "Leaving the settable clock leaves `agent-repl--now' and the clock as they were."
+  ;; Arrange
+  (let ((before (symbol-function 'agent-repl--now)))
+    ;; Act
+    (agent-repl-test--with-clock 100.0
+      (setq agent-repl-test--clock 200.0))
+    ;; Assert
+    (should (eq (symbol-function 'agent-repl--now) before))
+    (should (= agent-repl-test--clock 0.0))))
+
+(ert-deftest agent-repl-test-helpers-no-suite-hand-rolls-the-settable-clock ()
+  "Every suite steps `agent-repl--now' through `agent-repl-test--with-clock'."
+  ;; Arrange
+  (let ((dir agent-repl-test-helpers--dir)
+        (hand-rolled nil))
+    ;; Act
+    (dolist (file (directory-files dir t "\\`test-.*\\.el\\'"))
+      (unless (equal (file-name-nondirectory file) "test-helpers.el")
+        (with-temp-buffer
+          (insert-file-contents file)
+          (when (re-search-forward
+                 "(symbol-function 'agent-repl--now)[ \t\n]*(lambda ()[ \t\n]*[a-z-]+)"
+                 nil t)
+            (push (file-name-nondirectory file) hand-rolled)))))
+    ;; Assert
+    (should-not hand-rolled)))
+
 (ert-deftest agent-repl-test-helpers-record-leveled-into-records-level-and-text-newest-first ()
   "A rung stubbed with the leveled recorder keeps each record as (LEVEL . TEXT), newest first."
   ;; Arrange

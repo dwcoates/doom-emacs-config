@@ -1091,6 +1091,18 @@ every suite to it)."
   (delq nil (mapcar (lambda (spec) (and (listp spec) (plist-get spec :background)))
                     (cdr (assq face face-remapping-alist)))))
 
+(defvar agent-repl-test--clock 0.0
+  "The instant `agent-repl--now' answers inside `agent-repl-test--with-clock'.")
+
+(defmacro agent-repl-test--with-clock (start &rest body)
+  "Run BODY with `agent-repl--now' answering `agent-repl-test--clock', from START.
+BODY steps time by setting `agent-repl-test--clock'.  THE ONE settable
+clock every suite uses (test-test-helpers.el holds every suite to it)."
+  (declare (indent 1))
+  `(let ((agent-repl-test--clock ,start))
+     (cl-letf (((symbol-function 'agent-repl--now) (lambda () agent-repl-test--clock)))
+       ,@body)))
+
 (defmacro agent-repl-test--record-into (place)
   "A stand-in for a logging rung that records each record's text into PLACE.
 The lambda takes the rung's arguments (SCOPE FMT &rest ARGS), formats the
