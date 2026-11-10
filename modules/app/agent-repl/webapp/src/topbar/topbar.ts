@@ -2,15 +2,16 @@
  * The topbar: one thin strip, redrawn whole on every push.
  *
  * LEFT TIGHT, RIGHT TIGHT, AND THE TITLE IN WHAT IS BETWEEN THEM — the
- * account cell (its connectivity glyph, then its label) at the left edge, and
- * after it the status run: the remote-control chip, the persistent-wifi chip
- * and the warning chip. The model selector, the effort selector, the
+ * status run (the remote-control chip, then the persistent-wifi chip) at the
+ * left edge, then the account cell (its connectivity glyph, then its label),
+ * then the warning chip. The model selector, the effort selector, the
  * permission-mode picker and the context chip sit at the right edge.
  *
- * THE STATUS CHIPS RIDE THE LEFT (owner request, 2026-11-09): the right
- * group was crowded and the left nearly empty, so the centered heading read
- * as off-center. The warning chip ends the status run because it is the one
- * chip that comes and goes; at the run's end its arrival moves no other chip.
+ * THE STATUS CHIPS RIDE THE LEFT (owner requests, 2026-11-09 and
+ * 2026-11-10): the right group was crowded and the left nearly empty, so the
+ * centered heading read as off-center; the two status chips open the strip.
+ * The warning chip ends the left group because it is the one chip that comes
+ * and goes; at the group's end its arrival moves no other chip.
  *
  * THE RULE IS EQUAL CLEAR SPACE, NOT A SHARED MIDPOINT (owner ruling,
  * 2026-09-14, superseding the "true center" rule of 2026-09-13). The row is a
@@ -249,18 +250,19 @@ export function drawTopbarView(u: TopbarView, tc: TopbarContext): HTMLElement {
   // 2026-09-13). The session line rides the HEADING, which carries it whatever
   // the account state.
   bindAccountReveal(accountCell, accountView, tc);
-  // THE STATUS RUN FOLLOWS THE ACCOUNT (owner request, 2026-11-09): the
-  // remote-control chip, IMMEDIATELY LEFT of the persistent-wifi chip (owner
-  // ruling, 2026-10-31), then the warning chip, on every strip alike.
+  // THE STATUS RUN OPENS THE STRIP, LEFT OF THE ACCOUNT (owner request,
+  // 2026-11-10): the remote-control chip, IMMEDIATELY LEFT of the
+  // persistent-wifi chip (owner ruling, 2026-10-31), on every strip alike.
   const status = drawChipRun("topbar-status", [
     drawTopbarRemoteControl(requireMessage(u.remoteControl, "TopbarView.remoteControl"), tc),
     drawTopbarPersistentWifi(requireMessage(u.persistentWifi, "TopbarView.persistentWifi"), tc),
   ]);
-  // NOTHING IS DRAWN WHEN NOTHING IS WRONG: an empty warning list with no
-  // client-local failure standing yields no chip at all, not a quiet one.
+  left.append(status, accountCell);
+  // THE WARNING CHIP FOLLOWS THE ACCOUNT. NOTHING IS DRAWN WHEN NOTHING IS
+  // WRONG: an empty warning list with no client-local failure standing yields
+  // no chip at all, not a quiet one.
   const warnings = drawTopbarWarningStrip(requireMessage(u.warnings, "TopbarView.warnings"), tc);
-  if (warnings !== null) status.append(warnings);
-  left.append(accountCell, status);
+  if (warnings !== null) left.append(warnings);
 
   const center = drawTopbarHeading(
     u.title,
