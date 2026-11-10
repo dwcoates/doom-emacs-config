@@ -364,3 +364,25 @@ func hasRepeat(urls []string) bool {
 	}
 	return false
 }
+
+// OwnedPullRequestsMerged reports whether LINKS hold at least one canonical
+// owned pull request (an owned link naming a GitHub pull request) and every
+// such pull request has merged, by its subscription's recorded end. A pull
+// request still open, closed unmerged, or no longer followed (its merge
+// cannot be known) is not merged. The ONE rule both closes answer by: a
+// workspace whose owned pull requests have all merged is closed, and one
+// whose owned pull requests have not is never closed by its finish
+// (owner ruling, 2026-11-10).
+func OwnedPullRequestsMerged(links []WorkspaceLink) (owns, merged bool) {
+	merged = true
+	for _, link := range links {
+		if !link.Owned || link.PullRequest == nil {
+			continue
+		}
+		owns = true
+		if link.Follow == nil || link.Follow.Ended == nil || !link.Follow.Ended.Merged {
+			merged = false
+		}
+	}
+	return owns, owns && merged
+}

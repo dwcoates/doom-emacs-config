@@ -274,6 +274,18 @@ func (r *run) stampClosed(ctx context.Context, log dlog.Logger, op string, lande
 		if err := r.o.deps.DB.SetMergedAt(ctx, closes, r.o.deps.Now(), landed); err != nil {
 			log.Error(op, "could not stamp the merge's landing", dlog.Context{"workspace": string(closes), "error": err.Error()})
 		}
+		// A WORKSPACE IS CLOSED ONLY ONCE ITS OWNED PULL REQUESTS HAVE MERGED
+		// (owner ruling, 2026-11-10). A deploy that hands its work to a pull
+		// request ends before GitHub merges it, so the workspace stays open,
+		// and the pull request watcher closes it when the last one merges
+		// (CloseWhenOwnedPullRequestsMerged).
+		if open, err := r.awaitsOwnedPullRequests(ctx, closes); err != nil {
+			log.Error(op, "could not read whether the merged workspace's owned pull requests have merged; it is left open", dlog.Context{"workspace": string(closes), "error": err.Error()})
+			continue
+		} else if open {
+			log.Info(op, "the merged workspace owns pull requests not yet merged; it stays open until they merge", dlog.Context{"workspace": string(closes)})
+			continue
+		}
 		if err := r.o.deps.DB.MarkClosed(ctx, closes, wsm.Closure{At: r.o.deps.Now(), By: wsm.CloseByMerge}); err != nil {
 			log.Error(op, "could not close the merged workspace", dlog.Context{"workspace": string(closes), "error": err.Error()})
 		}
@@ -287,6 +299,17 @@ func (r *run) stampClosed(ctx context.Context, log dlog.Logger, op string, lande
 				dlog.Context{"workspace": string(closes), "error": err.Error()})
 		}
 	}
+}
+
+// awaitsOwnedPullRequests reports whether WS owns pull requests that have not
+// all merged (wsm.OwnedPullRequestsMerged).
+func (r *run) awaitsOwnedPullRequests(ctx context.Context, ws ids.WorkspaceID) (bool, error) {
+	links, err := r.o.deps.DB.WorkspaceLinks(ctx, ws)
+	if err != nil {
+		return false, err
+	}
+	owns, merged := wsm.OwnedPullRequestsMerged(links)
+	return owns && !merged, nil
 }
 
 // closings answers the workspaces a landing closes: the subject's own, then

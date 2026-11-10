@@ -1418,14 +1418,15 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		return nil, fmt.Errorf("agent-repld: build the GitHub leaf: %w", err)
 	}
 	pullRequests, err := prwatch.New(prwatch.Deps{
-		Store:   p.DB,
-		GH:      gh,
-		Holds:   queue,
-		Briefs:  merge.BriefsFrom(paths.PromptsDir),
-		MintKey: prompthandler.MintKey,
-		Serves:  rolloutController.ServesIntake,
-		Clock:   clock.System{},
-		Every:   prwatch.DefaultEvery,
+		OwnedMerged: verbsRef.closeWhenOwnedPullRequestsMerged,
+		Store:       p.DB,
+		GH:          gh,
+		Holds:       queue,
+		Briefs:      merge.BriefsFrom(paths.PromptsDir),
+		MintKey:     prompthandler.MintKey,
+		Serves:      rolloutController.ServesIntake,
+		Clock:       clock.System{},
+		Every:       prwatch.DefaultEvery,
 		// Every owned pull request standing in a GitHub merge queue is drawn
 		// by the merge orchestrator as its owner's deploying place.
 		Deployments: mergeOrchestrator,

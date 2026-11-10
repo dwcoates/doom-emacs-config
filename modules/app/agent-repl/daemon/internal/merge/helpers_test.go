@@ -50,6 +50,10 @@ import (
 // only what the orchestrator actually calls: anything else would panic loudly
 // rather than quietly answering a zero value.
 type fakeDB struct {
+	// links are each workspace's stored links, and linksErr fails their read.
+	links    map[ids.WorkspaceID][]wsm.WorkspaceLink
+	linksErr error
+
 	// progressHistory is every progress record written, in order.
 	progressHistory []wsm.MergeProgress
 
@@ -522,6 +526,15 @@ func (f *fakeDB) SetMergedAt(_ context.Context, id ids.WorkspaceID, at time.Time
 		f.landedCommits[id] = *commits
 	}
 	return nil
+}
+
+func (f *fakeDB) WorkspaceLinks(_ context.Context, id ids.WorkspaceID) ([]wsm.WorkspaceLink, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.linksErr != nil {
+		return nil, f.linksErr
+	}
+	return f.links[id], nil
 }
 
 func (f *fakeDB) MarkClosed(_ context.Context, id ids.WorkspaceID, closure wsm.Closure) error {

@@ -77,7 +77,7 @@ func TestAMergeIsToldAndEndsTheSubscription(t *testing.T) {
 	}
 }
 
-func TestAFailingReadIsToldOnceThenItsRecovery(t *testing.T) {
+func TestAFailingReadIsToldToNobodyAndWhatItMissedIsTold(t *testing.T) {
 	// Arrange
 	r := newRig(t)
 	r.subscribe(t, wsm.PullRequestEventComment)
@@ -92,13 +92,10 @@ func TestAFailingReadIsToldOnceThenItsRecovery(t *testing.T) {
 
 	// Assert
 	told := r.told()
-	if len(told) != 2 || !contains(told[0], "reads of this pull request are failing: no route to host") {
-		t.Fatalf("told = %q, want the failure once, then the recovery", told)
+	if len(told) != 1 || !contains(told[0], "@bob") || contains(told[0], "failing") || contains(told[0], "work again") {
+		t.Fatalf("told = %q, want only the comment it missed: no word of the failure or the recovery", told)
 	}
-	if !contains(told[1], "@bob") || contains(told[1], "work again") {
-		t.Fatalf("second notice = %q, want the comment it missed and no word of recovery", told[1])
-	}
-	if _, ok := dlog.FindRecord(r.log.Records(), dlog.RecordQuery{Level: "info", Operation: opPoll, Message: "the pull request could not be read; its subscriptions are failing"}); !ok {
+	if _, ok := dlog.FindRecord(r.log.Records(), dlog.RecordQuery{Level: "info", Operation: opPoll, Message: "the pull request could not be read; its subscriptions are failing, and no subscriber is told"}); !ok {
 		t.Fatalf("no record of the failed read: %+v", r.log.Records())
 	}
 }
@@ -413,33 +410,73 @@ func TestRecordReadFailureRecordsWhatItCouldNotDo(t *testing.T) {
 	tests := []struct {
 		name      string
 		recordErr error
-		oweErr    error
 		wantLog   string
-		wantOwed  int
 	}{
-		{name: "a failure it could not record owes nothing", recordErr: boom, wantLog: "could not record the merge queue's failed read"},
-		{name: "a notice it could not owe is recorded", oweErr: boom, wantLog: "could not owe the subscriber the failure's notice", wantOwed: 1},
-		{name: "a stretch it began owes its subscriber the failure", wantLog: "the merge queue could not be read; its subscriptions are failing", wantOwed: 1},
+		{name: "a failure it could not record is recorded at error", recordErr: boom, wantLog: "could not record the merge queue's failed read"},
+		{name: "a failure it recorded is told to no subscriber", wantLog: "the merge queue could not be read; its subscriptions are failing, and no subscriber is told"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
 			r := newRig(t)
-			var owed [][]string
 
 			// Act
 			r.w.recordReadFailure(context.Background(), opQueuePoll, "merge queue", errors.New("dns"), dlog.Context{"merge_queue": "o/r@main"},
-				func(wsm.PullRequestFailure) ([]ids.WorkspaceID, error) { return []ids.WorkspaceID{r.ws}, tt.recordErr },
-				func(_ ids.WorkspaceID, sentences []string) error { owed = append(owed, sentences); return tt.oweErr })
+				func(wsm.PullRequestFailure) ([]ids.WorkspaceID, error) { return []ids.WorkspaceID{r.ws}, tt.recordErr })
 
 			// Assert
-			if len(owed) != tt.wantOwed || (tt.wantOwed == 1 && !strings.Contains(owed[0][0], "this merge queue are failing: dns")) {
-				t.Fatalf("owed = %v, want %d", owed, tt.wantOwed)
+			if told := r.told(); len(told) != 0 {
+				t.Fatalf("told = %v, want nothing", told)
 			}
 			record, ok := dlog.FindRecord(r.log.Records(), dlog.RecordQuery{Operation: opQueuePoll, Message: tt.wantLog})
 			if !ok || record.Context["merge_queue"] != "o/r@main" {
 				t.Fatalf("no record %q naming the queue: %+v", tt.wantLog, r.log.Records())
 			}
 		})
+	}
+}
+
+func TestAnOwnedPullRequestsMergeTellsItsWorkspace(t *testing.T) {
+	tests := []struct {
+		name   string
+		origin wsm.PullRequestOrigin
+		merged bool
+		want   int
+	}{
+		{name: "an owned pull request's merge is told", origin: wsm.PullRequestOriginOwnedLink, merged: true, want: 1},
+		{name: "an owned pull request closed unmerged is not", origin: wsm.PullRequestOriginOwnedLink, merged: false, want: 0},
+		{name: "a requested subscription's merge is not", origin: wsm.PullRequestOriginRequested, merged: true, want: 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			r := newRig(t)
+			r.subscribeAs(t, tt.origin, wsm.PullRequestEventState)
+			r.gh.set(pathPull(), pullJSON("closed", false, tt.merged, "head1"))
+
+			// Act
+			r.tick()
+
+			// Assert
+			if len(r.ownedMerged) != tt.want {
+				t.Fatalf("told %v, want %d", r.ownedMerged, tt.want)
+			}
+		})
+	}
+}
+
+func TestAnOwnedMergeThatCannotBeActedOnIsRecorded(t *testing.T) {
+	// Arrange
+	r := newRig(t)
+	r.ownedMergedErr = errors.New("verbs not bound")
+	r.subscribeAs(t, wsm.PullRequestOriginOwnedLink, wsm.PullRequestEventState)
+	r.gh.set(pathPull(), pullJSON("closed", false, true, "head1"))
+
+	// Act
+	r.tick()
+
+	// Assert
+	if _, ok := dlog.FindRecord(r.log.Records(), dlog.RecordQuery{Level: "error", Operation: opPoll, Message: "could not judge closing the workspace one of whose owned pull requests merged"}); !ok {
+		t.Fatalf("records = %+v, want the failure at error", r.log.Records())
 	}
 }

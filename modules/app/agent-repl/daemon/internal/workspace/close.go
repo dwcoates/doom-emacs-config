@@ -164,3 +164,58 @@ func (v *verbs) turnRunning(ws ids.WorkspaceID) bool {
 	running, live := v.deps.Freeness(ws)
 	return live && running.Turn != nil
 }
+
+// CloseWhenOwnedPullRequestsMerged closes WS once every pull request it owns
+// has merged (owner ruling, 2026-11-10: a workspace is closed when all its
+// canonical owned pull requests have merged, and only then). A workspace
+// that owns none, owns one not yet merged, is already closed, is its
+// repository's main workspace or is a merge workspace is left as it is. A
+// turn still running (a deploy hook waiting on the merge) closes it when it
+// ends, through the self-close mark; anything else blocking the close (held
+// prompts, live detached work, open children) leaves it open, recorded.
+func (v *verbs) CloseWhenOwnedPullRequestsMerged(ctx context.Context, ws ids.WorkspaceID) error {
+	record, log, err := v.owned(ctx, "CloseWorkspace", ws)
+	if err != nil {
+		return err
+	}
+	if record.Closed || record.MergeOf != nil {
+		return nil
+	}
+	main, err := isMainWorkspace(ctx, v.deps.DB, record)
+	if err != nil {
+		log.Error(opClose, "could not read whether the workspace is its repository's main workspace; it is not closed for its merged pull requests", dlog.Context{"cause": err.Error()})
+		return fmt.Errorf("close %q for its merged pull requests: %w", ws, err)
+	}
+	if main {
+		return nil
+	}
+	links, err := v.deps.DB.WorkspaceLinks(ctx, ws)
+	if err != nil {
+		log.Error(opClose, "could not read the workspace's links; it is not closed for its merged pull requests", dlog.Context{"cause": err.Error()})
+		return fmt.Errorf("close %q for its merged pull requests: read the links: %w", ws, err)
+	}
+	if _, merged := wsm.OwnedPullRequestsMerged(links); !merged {
+		log.Info(opClose, "an owned pull request merged, and others the workspace owns have not; it stays open", nil)
+		return nil
+	}
+	if v.turnRunning(ws) {
+		if err := v.deps.DB.MarkCloseWhenTurnEnds(ctx, ws, v.now()); err != nil {
+			log.Error(opClose, "could not mark the workspace to close when its turn ends; its owned pull requests have all merged", dlog.Context{"cause": err.Error()})
+			return fmt.Errorf("close %q for its merged pull requests: mark: %w", ws, err)
+		}
+		log.Info(opClose, "every pull request the workspace owns has merged; it closes when its running turn ends", nil)
+		if v.turnRunning(ws) {
+			return nil
+		}
+		return v.takeSelfClose(ctx, log, ws)
+	}
+	err = v.Close(ctx, ws, wsm.CloseByMerge)
+	if _, refused := AsRefusal(err); refused {
+		log.Info(opClose, "every pull request the workspace owns has merged, but something else blocks its close; it stays open", dlog.Context{"cause": err.Error()})
+		return nil
+	}
+	if err == nil {
+		log.Info(opClose, "every pull request the workspace owns has merged; the workspace is closed", nil)
+	}
+	return err
+}

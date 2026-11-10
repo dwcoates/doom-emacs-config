@@ -3,11 +3,8 @@ package prwatch
 import (
 	"fmt"
 	"strings"
-	"time"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
-
-	"agent-repld/internal/wsm"
 )
 
 // The words a notice is written in. Each piece of activity is one sentence
@@ -259,20 +256,6 @@ func byWords(a *agentreplv1.PullRequestActivityAuthor) string {
 		return ""
 	}
 	return " by @" + a.GetLogin()
-}
-
-// failureSentence says that reads of a SUBJECT (`pull request`, `merge
-// queue`) began failing, and why.
-func failureSentence(f wsm.PullRequestFailure, subject string) string {
-	switch f.Kind {
-	case wsm.PullRequestFailureUnauthorized:
-		return "The daemon can no longer read this " + subject + ": GitHub refused the `gh` login's credentials. Ask the user to run `gh auth login`; reads resume on their own after."
-	case wsm.PullRequestFailureNotFound:
-		return "The daemon can no longer read this " + subject + ": GitHub answers that it does not exist, or is not visible to the `gh` login."
-	case wsm.PullRequestFailureRateLimited:
-		return "The daemon's reads of this " + subject + " are paused: GitHub's rate limit is spent until " + f.ResetsAt.Format(time.RFC3339) + "."
-	}
-	return "The daemon's reads of this " + subject + " are failing: " + f.Detail + ". It keeps reading on its schedule."
 }
 
 // endedSentence closes a subscription's last notice.

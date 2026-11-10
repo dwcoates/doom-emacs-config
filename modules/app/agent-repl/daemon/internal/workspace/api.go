@@ -426,6 +426,11 @@ type Verbs interface {
 	// CarryOutSelfClose carries out the close a workspace asked of itself,
 	// when one is marked (SelfCloses calls it at each turn's end).
 	CarryOutSelfClose(ctx context.Context, ws ids.WorkspaceID) error
+	// CloseWhenOwnedPullRequestsMerged closes WS once every pull request it
+	// owns has merged (wsm.OwnedPullRequestsMerged): at once when it is
+	// quiet, at its running turn's end otherwise. The pull request watcher
+	// calls it on each owned pull request's merge.
+	CloseWhenOwnedPullRequestsMerged(ctx context.Context, ws ids.WorkspaceID) error
 	// UnfoldSubsectionForWork expands the collapsed subsection a workspace
 	// sits in, when its turn starts (SubsectionUnfolds calls it).
 	UnfoldSubsectionForWork(ctx context.Context, ws ids.WorkspaceID) error

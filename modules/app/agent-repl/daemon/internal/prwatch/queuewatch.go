@@ -284,16 +284,11 @@ func (w *Watcher) advanceQueue(ctx context.Context, sub wsm.GithubMergeQueueSubs
 	}
 }
 
-// recordQueueFailure records a failed read for every subscription to KEY,
-// and owes the subscribers whose failing stretch it began one sentence
-// saying so.
+// recordQueueFailure records a failed read for every subscription to KEY.
 func (w *Watcher) recordQueueFailure(ctx context.Context, key wsm.GithubMergeQueueKey, err error, fields dlog.Context) {
 	w.recordReadFailure(ctx, opQueuePoll, "merge queue", err, fields,
 		func(f wsm.PullRequestFailure) ([]ids.WorkspaceID, error) {
 			return w.deps.Store.RecordGithubMergeQueueReadFailure(ctx, key, f)
-		},
-		func(subscriber ids.WorkspaceID, sentences []string) error {
-			return w.deps.Store.OweGithubMergeQueueNotice(ctx, subscriber, key, sentences)
 		})
 }
 
