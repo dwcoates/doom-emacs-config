@@ -550,3 +550,59 @@ describe("the held cache's projected lapse", () => {
     expect(lapse.afterLapse.case === "gated" ? lapse.afterLapse.value.contextTokens : undefined).toBe(150_000n);
   });
 });
+
+describe("reading a compaction as the latest request", () => {
+  const boundary = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
+    type: "system",
+    subtype: "compact_boundary",
+    timestamp: "2026-08-29T13:00:00.000Z",
+    compactMetadata: { trigger: "manual", preTokens: 230437, postTokens: 16048 },
+    ...overrides,
+  });
+
+  it("takes the context the compaction left", () => {
+    // Arrange
+    const file = transcript([assistant(), boundary()]);
+
+    // Act
+    const facts = readTranscriptFacts(file);
+
+    // Assert
+    expect(facts?.contextTokens).toBe(16048);
+  });
+
+  it("takes the compaction's instant as the last request", () => {
+    // Arrange
+    const file = transcript([assistant(), boundary()]);
+
+    // Act
+    const facts = readTranscriptFacts(file);
+
+    // Assert
+    expect(facts?.lastRequestAtMs).toBe(Date.parse("2026-08-29T13:00:00.000Z"));
+  });
+
+  it("is overtaken by an answer after the compaction", () => {
+    // Arrange
+    const file = transcript([assistant(), boundary(), assistant({ timestamp: "2026-08-29T14:00:00.000Z" })]);
+
+    // Act
+    const facts = readTranscriptFacts(file);
+
+    // Assert
+    expect(facts?.contextTokens).toBe(1102);
+    expect(facts?.lastRequestAtMs).toBe(Date.parse("2026-08-29T14:00:00.000Z"));
+  });
+
+  it("leaves the facts as they stood for a boundary that states no size", () => {
+    // Arrange
+    const file = transcript([assistant(), boundary({ compactMetadata: { trigger: "manual" } })]);
+
+    // Act
+    const facts = readTranscriptFacts(file);
+
+    // Assert
+    expect(facts?.contextTokens).toBe(1102);
+    expect(facts?.lastRequestAtMs).toBe(Date.parse("2026-08-29T12:00:00.000Z"));
+  });
+});
