@@ -143,6 +143,46 @@ before the unit starts; a harness bound that spans a whole run must allow
 for "waiting for CPU" (the run's events carry `waiting_for_cpu` and
 `cpu_wait_ended`).
 
+## A Go module's test binaries are built by one command
+
+- Every unit-test binary of a Go module pass (its ordinary pass, and its
+  tagged integration pass) is built by ONE build unit, `<suite>:build` or
+  `<suite>:build[<tags>]`: `testrun build-tests` runs one `go test -exec`
+  over every package (`testrun/internal/gobuild`), held to its width
+  (`suites.BuildSlots`, pinned by `-p` and `GOMAXPROCS`).
+- Never a build unit per package, and never a hand-written `go test -c` in a
+  unit. Each package's tests still run as their own units against its binary,
+  so per-package verdicts, bounds, failure output and reruns by path are
+  unchanged; a package that does not compile fails only its own units, with
+  its compiler output.
+- A step that drops units from a suite (a selection's narrowing, per-package
+  reuse) ends with `suites.Units.Finish`, so the build names only the packages
+  whose units remain.
+- Enforced by `TestEveryRosterGoSuitePlansOneBuildPerPass`
+  (`testrun/internal/suites/modulebuild_test.go`), which fails when a roster
+  suite plans any other build unit.
+
+## A unit's reuse inputs come from the tool's dependency listing
+
+- A reused unit's inputs are derived from the Go tool's own listing
+  (`go list -deps -test`), never from a hand-kept list of the files it builds
+  from: a package's key covers every package its test binary links, their
+  testdata and embedded files, go.mod, go.sum, the toolchain, the keyed
+  environment (the build tags among it) and the runner.
+- What a test reads beyond its build graph (a source scan, a golden, the
+  prompts, the vocabulary) is declared in the roster
+  (`Suite.Reuse.Inputs` for a suite, `Suite.PackageReuse.Inputs` for one
+  package). A package whose reads cannot be enumerated goes in
+  `PackageReuse.Never`, with why: it is never reused.
+- Enforced by the profile every keyed unit runs under, which refuses every
+  other read in the checkout, so a missing declaration fails the run rather
+  than letting a stale pass through; pinned by
+  `TestAPackagesProfileRefusesAFileItsInputsOmit` and
+  `TestEachInputMovesOnlyTheKeysOfThePackagesThatReadIt`
+  (`testrun/internal/reuse/packages_test.go`). Code and mechanics:
+  `modules/app/agent-repl/AGENTS.md`, "A run reuses an earlier pass of a
+  suite's exact inputs".
+
 ## E2E coverage is a step of a scenario
 
 - A new top-level e2e test is only for an entirely new, large feature, and it is itself a scenario (`scenario(t, steps...)` in `e2e/scenarios_test.go`).
