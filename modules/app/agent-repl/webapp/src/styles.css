@@ -1542,11 +1542,11 @@ html.dragging * { -webkit-user-select: none; user-select: none; }
 }
 /* A PAUSED QUEUE IS DRAWN ON ITS OWN REPOSITORY (owner request, 2026-10-27;
    frontend.v1.RosterRepoMergeQueue.paused): the repository's name in the
-   error red, a double click on it resuming the queue, and its merge glyphs
-   in the amber a paused merge bubble is framed in. The "Merge Queue" header
-   keeps its purple. */
+   canonical orange (owner request, 2026-11-10), a double click on it
+   resuming the queue, and its merge glyphs in the amber a paused merge
+   bubble is framed in. The "Merge Queue" header keeps its purple. */
 #ws-sidebar .merged-group[data-paused] > .merged-group-head,
-#ws-sidebar .merged-group[data-paused] > .merged-group-head > .sb-label { color: var(--err); }
+#ws-sidebar .merged-group[data-paused] > .merged-group-head > .sb-label { color: var(--canonical-orange); }
 #ws-sidebar .merged-group[data-paused] .sb-mq-glyph { color: var(--merge-paused); }
 /* A HEAD NOTHING OF WHOSE WORK RUNS draws its live stage as a still grey dot
    rather than the breathing purple one (owner request, 2026-10-27;
@@ -8178,10 +8178,10 @@ html.webhost-gate #feed [data-row-kind="coldGate"]:has(.cold-gate[data-state="st
   justify-self: end;
   min-width: 0;
 }
-/* THE LEFT GROUP'S STATUS RUN (owner request, 2026-11-09): the
-   remote-control, persistent-wifi and warning chips, after the account cell.
-   A run of its own rather than loose cells of the group, so the chip spacing
-   below reaches the chips and never the account cell. */
+/* THE LEFT GROUP'S STATUS RUN (owner request, 2026-11-10): the
+   remote-control and persistent-wifi chips, opening the strip left of the
+   account cell. A run of its own rather than loose cells of the group, so the
+   chip spacing below reaches the chips and never the account cell. */
 .topbar-status {
   display: flex;
   align-items: center;
@@ -8329,10 +8329,16 @@ html.webhost-gate #feed [data-row-kind="coldGate"]:has(.cold-gate[data-state="st
    two chips of the strip stand to each other — half the CHIP gap, since this
    distance lives inside a chip group — and the pair is what a session-line
    reveal hangs under. */
+/* THE LOGIN GLYPH HUGS THE LOGIN NAME (owner request, 2026-11-10): the two
+   stand closer than any two chips do, so the glyph reads as the name's own
+   mark. The label keeps its right inset; its left one shrinks to the hug. */
 .topbar-account-cell {
   display: inline-flex;
   align-items: center;
-  gap: calc(var(--topbar-chip-gap) / 2);
+  gap: 0;
+}
+.topbar-account-cell > .topbar-account {
+  padding-left: 0.15rem;
 }
 
 /* The connectivity glyph is a different CHARACTER per state and those
