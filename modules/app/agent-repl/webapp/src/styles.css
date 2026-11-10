@@ -1151,6 +1151,13 @@ body {
   padding-bottom: calc(var(--repo-head-pad-bottom) * 0.7);
 }
 #ws-sidebar .repo.repo-section.folded > .repo-head { color: var(--repo-head-collapsed); }
+/* FOLDED REPOSITORIES STAND HALF AS FAR APART (owner request, 2026-11-10): a
+   folded header's padding above and below is half an open one's, so the gap
+   between two folded repositories is half what it was. */
+#ws-sidebar .repo.repo-section.folded > .repo-head {
+  padding-top: calc(var(--repo-head-pad-top) * 0.35);
+  padding-bottom: calc(var(--repo-head-pad-bottom) * 0.35);
+}
 
 /* A REPOSITORY'S SUBSECTIONS (src/sidebar/subsections.ts) stand among its
    rows wherever they were arranged, each a small header over its rows, and
