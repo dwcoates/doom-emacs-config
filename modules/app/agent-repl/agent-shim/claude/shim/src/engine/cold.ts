@@ -240,6 +240,17 @@ export function readTranscriptFacts(file: string): TranscriptFacts | undefined {
     // clear means the conversation is no longer resuming empty.
     if (isCompactBoundary(record)) {
       clearedAtMs = undefined;
+      // A COMPACTION IS THE CONVERSATION'S LATEST REQUEST (2026-11-10): its
+      // boundary states the context the compaction left, and every request
+      // after it carries that context, not the one before. Read from the
+      // last answer before it, a conversation compacted moments ago was
+      // judged cold at its pre-compaction size by a shim restart.
+      const compacted = compactionOf(record);
+      if (compacted !== undefined) {
+        sawUsage = true;
+        contextTokens = compacted.postTokens;
+        lastRequestAtMs = compacted.atMs ?? lastRequestAtMs;
+      }
     } else if (isClearEnvelope(record)) {
       clearedAtMs = recordAtMs(record) ?? 0;
     }
@@ -281,6 +292,17 @@ export function readTranscriptFacts(file: string): TranscriptFacts | undefined {
   };
   LOGGER.debug({ file, ...facts }, "read the cold-gate facts from the transcript");
   return facts;
+}
+
+/**
+ * What a compaction boundary states: the context it left and when, or
+ * absence for a boundary that states no post-compaction size.
+ */
+function compactionOf(record: TranscriptRecord): { readonly postTokens: number; readonly atMs: number | undefined } | undefined {
+  const metadata = (record as { compactMetadata?: { postTokens?: unknown } }).compactMetadata;
+  const postTokens = metadata?.postTokens;
+  if (typeof postTokens !== "number" || !Number.isFinite(postTokens) || postTokens < 0) return undefined;
+  return { postTokens, atMs: recordAtMs(record) };
 }
 
 /** A record's own timestamp in epoch milliseconds, when it states a legible one. */

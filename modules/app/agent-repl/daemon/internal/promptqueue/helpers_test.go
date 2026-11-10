@@ -65,8 +65,10 @@ type fakeDB struct {
 	held       map[ids.TurnID]*wsm.HeldPrompt
 	// classificationErr, when set, is what every verdict write answers.
 	classificationErr error
-	order             []ids.TurnID
-	turns             map[ids.TurnID]*wsm.Turn
+	// retireErr fails RetireVerdictsJudgedAgainst.
+	retireErr error
+	order     []ids.TurnID
+	turns     map[ids.TurnID]*wsm.Turn
 	// owed is the resumptions a stand-down owes, by workspace.
 	owed     map[ids.WorkspaceID]map[ids.TurnID]bool
 	schedule *wsm.DrainSchedule
@@ -248,6 +250,24 @@ func (d *fakeDB) UpdateHeldPromptClassification(_ context.Context, turn ids.Turn
 	copied := c
 	h.Classification = &copied
 	return nil
+}
+
+// RetireVerdictsJudgedAgainst clears every standing verdict of WS that judged
+// TURN, as the store's one statement does; retireErr fails it.
+func (d *fakeDB) RetireVerdictsJudgedAgainst(_ context.Context, ws ids.WorkspaceID, turn ids.TurnID) (int64, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.retireErr != nil {
+		return 0, d.retireErr
+	}
+	var cleared int64
+	for _, h := range d.held {
+		if h.Workspace == ws && h.Tombstone == nil && h.Classification != nil && h.Classification.Turn == turn {
+			h.Classification = nil
+			cleared++
+		}
+	}
+	return cleared, nil
 }
 
 func (d *fakeDB) UpdateHeldPromptHold(_ context.Context, turn ids.TurnID, kind *wsm.HoldKind, scheduleID string) error {

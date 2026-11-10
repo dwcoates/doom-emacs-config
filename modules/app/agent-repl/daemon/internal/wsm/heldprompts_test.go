@@ -2,12 +2,14 @@ package wsm
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"testing"
 	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
+	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
 )
 
@@ -1399,5 +1401,114 @@ func TestHeldPromptsDecodesALegacyAcceptance(t *testing.T) {
 	// Assert
 	if err != nil || len(got) != 1 || got[0].Classification == nil || got[0].Classification.Arm != ArmInterject {
 		t.Fatalf("HeldPrompts = (%+v, %v), want the one hold with its interject verdict", got, err)
+	}
+}
+
+// heldWithVerdict stores a standing prompt of WS whose uninterruptible verdict
+// judged JUDGED ("" for one stamped before verdicts named their turn).
+func heldWithVerdict(t *testing.T, s *store, ws WorkspaceID, judged TurnID) TurnID {
+	t.Helper()
+	turn := NewTurnID()
+	if err := s.PutHeldPrompt(context.Background(), HeldPrompt{
+		Workspace: ws, Turn: turn, Said: said("a follow-up"), Origin: "webapp", QueuedAt: instant,
+		Classification: &Classification{
+			Arm: ArmUninterruptibleTurn, Reason: "behind a cut", At: instant, Turn: judged,
+			Command: conversationv1.SessionCommand_SESSION_COMMAND_COMPACT,
+		},
+	}); err != nil {
+		t.Fatalf("PutHeldPrompt: %v", err)
+	}
+	return turn
+}
+
+func verdictOf(t *testing.T, s *store, turn TurnID) *Classification {
+	t.Helper()
+	got, found, err := s.HeldPromptByTurn(context.Background(), turn)
+	if err != nil || !found {
+		t.Fatalf("HeldPromptByTurn = (%v, %v)", found, err)
+	}
+	return got.Classification
+}
+
+func TestAVerdictRoundTripsTheTurnItJudged(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+
+	// Act
+	turn := heldWithVerdict(t, s, ws.ID, "cut-1")
+
+	// Assert
+	if got := verdictOf(t, s, turn); got == nil || got.Turn != "cut-1" {
+		t.Fatalf("verdict = %+v, want the judged turn kept", got)
+	}
+}
+
+func TestRetireVerdictsJudgedAgainstTheEndedTurn(t *testing.T) {
+	cases := []struct {
+		name     string
+		judged   TurnID
+		wantKept bool
+	}{
+		{name: "a verdict that judged the ended turn is cleared", judged: "cut-1", wantKept: false},
+		{name: "a verdict that judged another turn is kept", judged: "cut-2", wantKept: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			ws := testWorkspace(t, s)
+			turn := heldWithVerdict(t, s, ws.ID, tc.judged)
+
+			// Act
+			_, err := s.RetireVerdictsJudgedAgainst(context.Background(), ws.ID, "cut-1")
+
+			// Assert
+			if err != nil {
+				t.Fatalf("RetireVerdictsJudgedAgainst: %v", err)
+			}
+			if kept := verdictOf(t, s, turn) != nil; kept != tc.wantKept {
+				t.Fatalf("verdict kept = %v, want %v", kept, tc.wantKept)
+			}
+		})
+	}
+}
+
+func TestRetireVerdictsJudgedAgainstAnswersHowManyItCleared(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	heldWithVerdict(t, s, ws.ID, "cut-1")
+	heldWithVerdict(t, s, ws.ID, "cut-1")
+
+	// Act
+	cleared, err := s.RetireVerdictsJudgedAgainst(context.Background(), ws.ID, "cut-1")
+
+	// Assert
+	if err != nil || cleared != 2 {
+		t.Fatalf("cleared = %d, %v; want 2", cleared, err)
+	}
+}
+
+func TestTheMigrationRetiresVerdictsThatNameNoTurn(t *testing.T) {
+	// Arrange
+	s, logs := testStore(t)
+	ws := testWorkspace(t, s)
+	turn := heldWithVerdict(t, s, ws.ID, "")
+
+	// Act
+	err := s.write(context.Background(), "test", nil, func(ctx context.Context, tx *sql.Tx) error {
+		return retireUnjudgedVerdicts(ctx, tx, s.log)
+	})
+
+	// Assert
+	if err != nil {
+		t.Fatalf("retireUnjudgedVerdicts: %v", err)
+	}
+	if got := verdictOf(t, s, turn); got != nil {
+		t.Fatalf("verdict = %+v, want it retired", got)
+	}
+	if _, ok := dlog.FindRecord(logs.Records(), dlog.RecordQuery{Level: "info", Operation: "daemon.wsm.open", Message: "retired the uninterruptible verdicts stamped before they named their turn"}); !ok {
+		t.Fatalf("records = %+v, want the retirement recorded", logs.Records())
 	}
 }

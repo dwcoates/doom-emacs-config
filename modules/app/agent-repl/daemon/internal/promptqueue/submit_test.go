@@ -852,6 +852,21 @@ func TestSubmitHoldsBehindACutTheWatcherHasNotYetSeenAsUninterruptible(t *testin
 	}
 }
 
+func TestSubmitHoldsBehindACutNamingTheCutsTurn(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	cutRecordedBeforeTheWatcherKnows(h)
+	// Act
+	got, err := h.q.Submit(context.Background(), submission("t1", "a follow-up"))
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	// Assert
+	if got.Classification == nil || got.Classification.Turn != "cut-1" {
+		t.Fatalf("classification = %+v, want the verdict to name the cut's turn", got.Classification)
+	}
+}
+
 // TestSubmitOfTheTurnAlreadyInFlightStartsNothing pins the re-drive of a claim
 // whose original DID reach the shim: the retry comes back under the same turn
 // id, finds that turn running, and is answered as the delivery the original
