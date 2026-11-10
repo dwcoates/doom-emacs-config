@@ -20,6 +20,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"agent-repld/internal/bounce"
+	"agent-repld/internal/dlog"
 	"agent-repld/internal/drain"
 	"agent-repld/internal/merge"
 	"agent-repld/internal/prompthandler"
@@ -973,5 +974,34 @@ func TestSetResponseErrorCarriesTheNameHeldArmsWorkspaceAndStanding(t *testing.T
 	}
 	if held.GetBranch() != "ramdisk-leak-investigation" || held.GetWorkspace().GetId() != "ws-inv" || !held.GetOpen() {
 		t.Fatalf("name_held = %v, want the branch, workspace ws-inv and open", held)
+	}
+}
+
+func TestAnUnlandedHandoverRefusalNamesItsSuccessorInItsMetadata(t *testing.T) {
+	tests := []struct {
+		name string
+		arm  string
+		want string
+	}{
+		{name: "a transferring_away refusal names its successor", arm: workspace.ArmTransferringAway, want: "127.0.0.1:2"},
+		{name: "any other unlanded refusal names none", arm: "duplicate_submission", want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s := &server{}
+			resp := &agentreplv1.EvaluateInEditorResponse{}
+
+			// Act
+			err := s.refuse(dlog.NewTestLogger(), "EvaluateInEditor", resp, refusal{Arm: tt.arm, Reason: "handed over", Fields: map[string]any{"address": "127.0.0.1:2"}})
+
+			// Assert
+			if err == nil {
+				t.Fatal("refuse answered no error for an arm the response does not carry")
+			}
+			if got := err.Meta().Get(SuccessorHeader); got != tt.want {
+				t.Fatalf("successor header = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }

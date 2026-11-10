@@ -254,8 +254,20 @@ func (s *server) refuse(log dlog.Logger, rpc string, resp proto.Message, r refus
 		}
 		return nil
 	}
-	return UnlandedArm(log, rpc, r.Arm, r.Reason, r.NotFound)
+	err := UnlandedArm(log, rpc, r.Arm, r.Reason, r.NotFound)
+	// A HANDOVER REFUSAL NAMES ITS SUCCESSOR WHATEVER ITS SHAPE: a verb whose
+	// contract carries no typed transferring_away arm answers it as an error,
+	// and the error's metadata carries the address its arm would have, so a
+	// client follows the handover the same way for every verb.
+	if address, ok := r.Fields["address"].(string); ok && address != "" && r.Arm == workspace.ArmTransferringAway {
+		err.Meta().Set(SuccessorHeader, address)
+	}
+	return err
 }
+
+// SuccessorHeader is the error metadata a transferring_away refusal answered
+// as an error names its successor's address under.
+const SuccessorHeader = "Agent-Repl-Successor"
 
 // setResponseError populates resp's `result.error` arm with the named
 // `<Rpc>Error` arm, reporting false when this rpc's error message carries no

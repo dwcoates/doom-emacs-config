@@ -26,6 +26,7 @@ import (
 	workspacev1 "agentrepl/proto/workspace/v1"
 	"agentrepl/protohelpers/rosterwalk"
 
+	"agent-repld/internal/server"
 	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/stateroot"
 )
@@ -385,5 +386,39 @@ func TestTransferredToFindsTheRefusalsSuccessor(t *testing.T) {
 				t.Fatalf("transferredTo = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+// erroringDaemon answers every create with a transferring_away refusal in its
+// error shape, naming SUCCESSOR in its metadata, as a verb with no typed arm
+// does.
+type erroringDaemon struct {
+	agentreplv1connect.UnimplementedAgentReplHandler
+	successor string
+}
+
+func (d *erroringDaemon) CreateWorkspace(context.Context, *connect.Request[agentreplv1.CreateWorkspaceRequest]) (*connect.Response[agentreplv1.CreateWorkspaceResponse], error) {
+	err := connect.NewError(connect.CodeFailedPrecondition, errors.New("intended arm: CreateWorkspaceError.transferring_away: handed over"))
+	err.Meta().Set(server.SuccessorHeader, d.successor)
+	return nil, err
+}
+
+func TestACallRefusedAsAnErrorByAHandingOverDaemonIsSentToItsSuccessor(t *testing.T) {
+	// Arrange
+	successor := &createDaemon{answer: created()}
+	incumbent := &erroringDaemon{successor: serveCreates(t, successor)}
+	path, handler := agentreplv1connect.NewAgentReplHandler(incumbent)
+	mux := http.NewServeMux()
+	mux.Handle(path, handler)
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	client := newRedirectingClient(http.DefaultTransport, strings.TrimPrefix(srv.URL, "http://"), io.Discard)
+
+	// Act
+	resp, err := client.CreateWorkspace(context.Background(), connect.NewRequest(&agentreplv1.CreateWorkspaceRequest{}))
+
+	// Assert
+	if err != nil || resp.Msg.GetSuccess() == nil || successor.creates.Load() != 1 {
+		t.Fatalf("CreateWorkspace = %v, %v; successor creates %d; want the successor's success", resp, err, successor.creates.Load())
 	}
 }
