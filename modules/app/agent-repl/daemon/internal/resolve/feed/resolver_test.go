@@ -316,7 +316,7 @@ func newDurableHarness(t *testing.T, stores durableStores) *harness {
 		PeerDeliveries: h.peerSource,
 		VendorTasks:    h.taskSource,
 		Go:             func(f func()) { h.spawned = append(h.spawned, f) },
-		Chat:           h.chat,
+		Answers:        h.chat,
 		EntryPlaced: func(_ ids.WorkspaceID, unit string, row *frontendv1.FeedId) {
 			h.placed = append(h.placed, placedEntry{unit: unit, row: row.GetValue()})
 		},

@@ -357,6 +357,10 @@ func (s *Service) AnswerProse(ws ids.WorkspaceID, turn ids.TurnID, markdown stri
 	}
 }
 
+// PromptFolded implements feed.AnswerSink: a thread question is never
+// folded (one turn is one question), so a fold concerns no thread.
+func (s *Service) PromptFolded(ids.WorkspaceID, ids.TurnID, ids.TurnID) {}
+
 // TurnAnswered records a turn's answer in zettel when the turn was a thread
 // question. It is told for every workspace and every plane, so the turn's own
 // record decides: a turn with no question records nothing.
