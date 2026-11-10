@@ -51,82 +51,74 @@ import { asAnchor } from "./strip.js";
 import { countNoun } from "../count-noun.js";
 
 /**
- * The chip, or NOTHING.
+ * Make the heading the warnings' control, or leave it as it is when nothing is
+ * wrong (owner request, 2026-11-10): the warning chip is retired, and while
+ * the served list holds anything, or a client-local failure stands, the
+ * heading's first line is drawn in the list's severity color and a click on
+ * it opens the list. No underline: the color says it can be clicked.
  *
- * Returns null when the served list is empty AND no client-local failure
- * stands, rather than an empty element, so the caller appends nothing at all
- * and the strip reserves no control.
+ * THE LINE IS THE TITLE, unless the title is itself a link or a links menu,
+ * whose click it keeps; the workspace's name beneath it is the control then,
+ * as it is when there is no title at all.
  */
-export function drawTopbarWarningStrip(
-  u: TopbarWarningStrip,
-  tc: TopbarContext,
-): HTMLElement | null {
-  return drawWarningChip(tc, u.warnings.length, () => drawWarningList(u, tc));
+export function bindHeadingWarnings(heading: HTMLElement, u: TopbarWarningStrip, tc: TopbarContext): void {
+  const errors = u.severity?.severity.case === "errors";
+  bindWarnings(heading, tc, u.warnings.length, errors, () => drawWarningList(u, tc));
 }
 
 /**
- * The chip before any topbar view has been drawn: the client-local failures
- * alone, or NOTHING.
- *
- * A page whose boot failed, or whose link dropped before the first push, has
- * no view to draw the chip inside — and those are exactly the moments these
- * failures exist to explain.
+ * The heading's warnings before any topbar view has been drawn: the
+ * client-local failures alone. A page whose boot failed, or whose link
+ * dropped before the first push, has no view to draw a title inside, and
+ * those are exactly the moments these failures exist to explain.
  */
-export function drawLocalWarningStrip(cc: WarningChipContext): HTMLElement | null {
-  return drawWarningChip(cc, 0, () => drawLocalWarningList(cc));
+export function bindLocalHeadingWarnings(heading: HTMLElement, cc: WarningChipContext): void {
+  bindWarnings(heading, cc, 0, false, () => drawLocalWarningList(cc));
 }
 
-/** The chip over PUSHED warnings plus whatever client-local failures stand. */
-function drawWarningChip(
+/** The heading over PUSHED warnings plus whatever client-local failures stand. */
+function bindWarnings(
+  heading: HTMLElement,
   cc: WarningChipContext,
   pushed: number,
+  pushedErrors: boolean,
   body: () => HTMLElement,
-): HTMLElement | null {
+): void {
   const local = cc.localFailures();
   if (pushed === 0 && local.length === 0) {
-    log.debug("nothing to warn about; drawing no chip", {
+    log.debug("nothing to warn about; the heading stays plain", {
       operation: "topbar.warnings-empty",
     });
-    return null;
+    return;
   }
-  log.debug("drawing the topbar warning chip", {
+  const line =
+    heading.querySelector<HTMLElement>(".topbar-title:not(.topbar-title-linked)") ??
+    heading.querySelector<HTMLElement>(".topbar-workspace-name");
+  if (line === null) {
+    throw new Error("topbar: the heading carries no line to draw its warnings on");
+  }
+  // A CLIENT-LOCAL FAILURE IS AN ERROR: it is this page failing, which no
+  // push can state.
+  const severity = pushedErrors || local.length > 0 ? "errors" : "warnings";
+  log.debug("drawing the heading as the warnings' control", {
     operation: "topbar.warnings",
-    context: { warnings: pushed, local_failures: local.length },
+    context: { warnings: pushed, local_failures: local.length, severity },
   });
-
-  const wrap = document.createElement("div");
-  wrap.className = "topbar-warnings";
+  line.classList.add("topbar-heading-warnings");
+  line.setAttribute("data-severity", severity);
+  line.title = `${line.title}\n${countNoun(pushed + local.length, "warning")} · click to view`;
   // The standing client-local arms, readable without opening the list: the
   // hook a harness or a probe reads to say which failures the page is showing.
   if (local.length > 0) {
-    wrap.setAttribute("data-local-arms", local.map((failure) => failure.arm).join(" "));
+    line.setAttribute("data-local-arms", local.map((failure) => failure.arm).join(" "));
   }
-
-  const button = createControl();
-  button.className = "topbar-warning-chip";
-
-  // A GLYPH, not an emoji: a triangle that inherits the chip's color.
-  const mark = document.createElement("span");
-  mark.className = "topbar-warning-mark";
-  mark.setAttribute("aria-hidden", "true");
-  mark.textContent = "⚠";
-
-  const badge = document.createElement("span");
-  badge.className = "topbar-warning-count";
-  // THE COUNT IS THE LIST'S LENGTH — the served warnings plus the standing
-  // client-local failures, never a tally this end keeps across pushes.
-  badge.textContent = String(pushed + local.length);
-
-  button.append(mark, badge);
-  wrap.append(button);
-
-  // The wrap is the control; see `drawTopbarModelSelector` for the reasoning.
-  asAnchor(wrap, "warnings");
+  asAnchor(line, "warnings");
   cc.reveals.register("warnings", "warnings", body);
-  wrap.addEventListener("click", () => {
+  line.addEventListener("click", (event) => {
+    // The heading's own click opens the session line; this one is the list's.
+    event.stopPropagation();
     cc.reveals.toggle("warnings", "warnings", body);
   });
-  return wrap;
 }
 
 /**

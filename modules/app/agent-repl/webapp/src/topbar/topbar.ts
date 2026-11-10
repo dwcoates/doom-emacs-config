@@ -63,6 +63,7 @@ import { drawTopbarModelSelector } from "./model.js";
 import { drawTopbarPermissionModePicker } from "./permission-mode.js";
 import { drawTopbarPersistentWifi } from "./persistent-wifi.js";
 import { drawTopbarRemoteControl } from "./remote-control.js";
+import { drawTopbarQueueBypass } from "./queue-bypass.js";
 import { bindAccountReveal } from "./account.js";
 import { mountRevealLayer, type RevealGeometry } from "./reveal.js";
 import { bindAgentReplSessionReveal } from "./session.js";
@@ -70,11 +71,12 @@ import {
   bindHeadingSessionReveal,
   drawTopbarAccount,
   drawTopbarConnectivity,
+  drawHeadingLine,
   drawTopbarHeading,
 } from "./strip.js";
 import {
-  drawLocalWarningStrip,
-  drawTopbarWarningStrip,
+  bindHeadingWarnings,
+  bindLocalHeadingWarnings,
   reportAppearedDeployFailures,
 } from "./warnings.js";
 
@@ -198,14 +200,15 @@ export function mountTopbar(host: HTMLElement, deps: TopbarDeps): TopbarHandle {
  * stands.
  */
 export function drawTopbarFailuresOnly(cc: WarningChipContext): HTMLElement | null {
-  const chip = drawLocalWarningStrip(cc);
-  if (chip === null) return null;
+  if (cc.localFailures().length === 0) return null;
   const row = document.createElement("div");
   row.className = "topbar-row";
   const left = document.createElement("div");
   left.className = "topbar-left";
-  left.append(drawChipRun("topbar-status", [chip]));
   const center = document.createElement("div");
+  center.className = "topbar-heading";
+  center.append(drawHeadingLine("topbar-workspace-name", "agent-repl"));
+  bindLocalHeadingWarnings(center, cc);
   const right = drawChipRun("topbar-right", []);
   row.append(left, center, right);
   return row;
@@ -254,15 +257,12 @@ export function drawTopbarView(u: TopbarView, tc: TopbarContext): HTMLElement {
   // 2026-11-10): the remote-control chip, IMMEDIATELY LEFT of the
   // persistent-wifi chip (owner ruling, 2026-10-31), on every strip alike.
   const status = drawChipRun("topbar-status", [
+    // THE QUEUE-BYPASS CHIP OPENS THE STRIP, on a personal account only.
+    ...(u.queueBypass !== undefined ? [drawTopbarQueueBypass(u.queueBypass, tc)] : []),
     drawTopbarRemoteControl(requireMessage(u.remoteControl, "TopbarView.remoteControl"), tc),
     drawTopbarPersistentWifi(requireMessage(u.persistentWifi, "TopbarView.persistentWifi"), tc),
   ]);
   left.append(status, accountCell);
-  // THE WARNING CHIP FOLLOWS THE ACCOUNT. NOTHING IS DRAWN WHEN NOTHING IS
-  // WRONG: an empty warning list with no client-local failure standing yields
-  // no chip at all, not a quiet one.
-  const warnings = drawTopbarWarningStrip(requireMessage(u.warnings, "TopbarView.warnings"), tc);
-  if (warnings !== null) left.append(warnings);
 
   const center = drawTopbarHeading(
     u.title,
@@ -271,6 +271,9 @@ export function drawTopbarView(u: TopbarView, tc: TopbarContext): HTMLElement {
   );
   // The heading opens the session line too, in every account state.
   bindHeadingSessionReveal(center, u.sessionLine, tc);
+  // THE WARNINGS RIDE THE HEADING (owner request, 2026-11-10): while anything
+  // is wrong, the heading's first line is their control, in their color.
+  bindHeadingWarnings(center, requireMessage(u.warnings, "TopbarView.warnings"), tc);
 
   // THE STRIP HAS ONE SHAPE AND ONLY ONE (topbar.proto, FIXED SCHEMA AND
   // ORGANIZATION; owner ruling 2026-09-13). There is no branch here: every

@@ -511,7 +511,7 @@
      around the center title section"). Chips inside one flank group are a run
      of one thing, so they sit TIGHTER than the frame measure above; every
      rem the chips give back falls to the title's own clear space. */
-  --topbar-chip-gap: 0.3rem;
+  --topbar-chip-gap: 0.225rem;
   /* EVERY CHIP RUN'S ONE SPACING (owner request, 2026-10-02: "30% closer and
      uniform"; since 2026-11-09 the left group's status run shares it). What a
      reader sees between two chips of a run is the space
@@ -522,9 +522,11 @@
      13 and 21 either side of the wifi glyph. Now EVERY cell of a run takes
      the same inset from one rule keyed on the run, not on the cell's name
      (see `.topbar-chips ar-button` below), so a cell added later inherits it:
-     0.2rem + 2 x (0.3rem + 1px) = 14.8px, 30% under the old 21.2px. */
-  --topbar-chips-gap: 0.2rem;
-  --topbar-chips-inset: 0.3rem;
+     0.2rem + 2 x (0.3rem + 1px) = 14.8px, 30% under the old 21.2px; and then
+     25% narrower again (owner request, 2026-11-10), every rem going to the
+     title's flanks: 0.15rem + 2 x (0.225rem + 1px). */
+  --topbar-chips-gap: 0.15rem;
+  --topbar-chips-inset: 0.225rem;
   /* THE PERSISTENT-WIFI CHIP'S PAINTS (owner request, 2026-10-02): the glyph
      is black; the disc behind it is white when the mode is off and green when
      it is on (green-500, a step brighter than `--ok`). The remote-control chip
@@ -2120,15 +2122,6 @@ html.dragging * { -webkit-user-select: none; user-select: none; }
   font-variant-numeric: tabular-nums;
 }
 .info-tokens:not(.token-heat) { color: var(--info-tokens); }
-/* Tabular figures and a reserved digit box, so a second warning arriving widens
-   nothing: the count is the strip's only number that changes on its own. */
-.topbar-warning-count {
-  display: inline-block;
-  min-width: 1ch;
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-  margin-left: 0.15rem;
-}
 .tokens-section {
   color: var(--tool-title);
   font-family: ui-monospace, monospace;
@@ -8362,9 +8355,9 @@ html.webhost-gate #feed [data-row-kind="coldGate"]:has(.cold-gate[data-state="st
 .topbar-effort-button,
 .topbar-mode-button,
 .topbar-context-figure,
+.topbar-queue-bypass-button,
 .topbar-remote-control-button,
-.topbar-wifi-button,
-.topbar-warning-chip {
+.topbar-wifi-button {
   background: transparent;
   border: 1px solid transparent;
   border-radius: 3px;
@@ -8387,17 +8380,16 @@ html.webhost-gate #feed [data-row-kind="coldGate"]:has(.cold-gate[data-state="st
    the tone it carries. */
 .topbar-model-button,
 .topbar-effort-button,
-.topbar-mode-button,
-.topbar-warning-chip {
+.topbar-mode-button {
   color: var(--muted);
 }
 .topbar-model-button:hover,
 .topbar-effort-button:hover,
 .topbar-mode-button:hover,
 .topbar-context-figure:hover,
+.topbar-queue-bypass:not([data-mode="held-elsewhere"]) .topbar-queue-bypass-button:hover,
 .topbar-remote-control-button:hover,
-.topbar-wifi-button:hover,
-.topbar-warning-chip:hover {
+.topbar-wifi-button:hover {
   border-color: var(--border);
 }
 /* Hover lifts the quiet controls to the ordinary foreground. THE FIGURE IS NOT
@@ -8405,8 +8397,7 @@ html.webhost-gate #feed [data-row-kind="coldGate"]:has(.cold-gate[data-state="st
    pointer is the same defect the rule above fixes, only intermittent. */
 .topbar-model-button:hover,
 .topbar-effort-button:hover,
-.topbar-mode-button:hover,
-.topbar-warning-chip:hover {
+.topbar-mode-button:hover {
   color: var(--fg);
 }
 /* An unset selection reads as an invitation, not as a value. */
@@ -8421,33 +8412,6 @@ html.webhost-gate #feed [data-row-kind="coldGate"]:has(.cold-gate[data-state="st
   font-variant-numeric: tabular-nums;
 }
 
-.topbar-warnings {
-  display: inline-flex;
-  /* THE SLOT'S SLACK FALLS AFTER THE CHIP, at the status run's end facing the
-     heading, not between chips. The chip
-     used to sit at the slot's right, so the slack stood between it and the
-     wifi chip and that gap read wider than every other (owner request,
-     2026-10-02: the wifi chip centered between its neighbors). */
-  justify-content: flex-start;
-  /* min-, not a hard width: a chip that outgrew its slot must overflow rather
-     than be clipped, because a half-drawn warning control is worse than a
-     shifted one. */
-  min-width: 3.2rem;
-}
-/* RED, the alarm `--err` (owner ruling, 2026-09-23): the chip is the ONE place
-   the webapp shows an error, the page's own client-local failures included. */
-.topbar-warning-chip {
-  color: var(--err);
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
-}
-.topbar-warning-mark {
-  font-size: 0.9em;
-}
-.topbar-warning-count {
-  font-variant-numeric: tabular-nums;
-}
 
 /* THE REVEAL LAYER. Absolutely positioned inside the topbar's box; `left`,
    `top` and `max-height` are set by the clamp, so this rule carries only what
@@ -9182,6 +9146,7 @@ html.webhost-gate #feed [data-row-kind="coldGate"]:has(.cold-gate[data-state="st
    The disc is a circle inside the glyph's own svg, whose viewBox is the disc's
    square (src/topbar/disc-glyph.ts), so the svg's 16px box IS the disc and the
    glyph inside it is centered by geometry rather than by layout. */
+.topbar-queue-bypass,
 .topbar-remote-control,
 .topbar-wifi {
   display: inline-flex;
@@ -9192,12 +9157,14 @@ html.webhost-gate #feed [data-row-kind="coldGate"]:has(.cold-gate[data-state="st
 /* THE GLYPH IS THE CONTROL (owner request, 2026-10-02): a click turns the
    mode over. It takes the chips' quiet button box like its siblings,
    but keeps the chip's color, which is the glyph's black. */
+.topbar-queue-bypass-button,
 .topbar-remote-control-button,
 .topbar-wifi-button {
   display: inline-flex;
   align-items: center;
   color: inherit;
 }
+.topbar-queue-bypass-glyph,
 .topbar-remote-control-glyph,
 .topbar-wifi-glyph {
   display: block;
@@ -9209,20 +9176,29 @@ html.webhost-gate #feed [data-row-kind="coldGate"]:has(.cold-gate[data-state="st
   stroke-linecap: round;
   stroke-linejoin: round;
 }
+.topbar-queue-bypass-disc,
 .topbar-remote-control-disc,
 .topbar-wifi-disc { stroke: none; fill: var(--wifi-mode-off-disc); }
 .topbar-remote-control[data-mode="on"] .topbar-remote-control-disc,
 .topbar-wifi[data-mode="on"] .topbar-wifi-disc { fill: var(--wifi-mode-on-disc); }
+/* THE QUEUE-BYPASS CHIP (owner request, 2026-11-10): lit in the canonical
+   orange while this workspace holds the mode, muted and inert while another
+   workspace of the repository holds it. */
+.topbar-queue-bypass[data-mode="on"] .topbar-queue-bypass-disc { fill: var(--canonical-orange); }
+.topbar-queue-bypass[data-mode="held-elsewhere"] { opacity: 0.45; }
+.topbar-queue-bypass[data-mode="held-elsewhere"] .topbar-queue-bypass-button { cursor: default; }
 /* A TOGGLE IN FLIGHT PULSES, subtly: turning the wifi mode on runs the whole
    change (hotspot, power settings, display), and turning remote control on may
    start a shim, before the daemon answers, which takes seconds. The attribute
    is set while the call stands and removed at its answer. */
+.topbar-queue-bypass[data-settling],
 .topbar-remote-control[data-settling],
 .topbar-wifi[data-settling] {
   animation: topbar-wifi-settling 1.4s ease-in-out infinite;
 }
 @keyframes topbar-wifi-settling { 50% { opacity: 0.55; } }
 @media (prefers-reduced-motion: reduce) {
+  .topbar-queue-bypass[data-settling],
   .topbar-remote-control[data-settling],
   .topbar-wifi[data-settling] { animation: none; opacity: 0.7; }
 }
@@ -9980,3 +9956,11 @@ html.webhost-gate #feed [data-row-kind="coldGate"]:has(.cold-gate[data-state="st
     animation: sb-deploy-pulse 2.6s ease-in-out infinite;
   }
 }
+
+/* THE HEADING CARRIES THE WARNINGS (owner request, 2026-11-10): while anything
+   is wrong, the heading's first line is the control that opens the list, in
+   red for an error and yellow for warnings alone. No underline: the color is
+   the whole signal. */
+.topbar-heading-warnings { cursor: pointer; text-decoration: none; }
+.topbar-heading-warnings[data-severity="errors"] { color: var(--err); }
+.topbar-heading-warnings[data-severity="warnings"] { color: var(--async); }
