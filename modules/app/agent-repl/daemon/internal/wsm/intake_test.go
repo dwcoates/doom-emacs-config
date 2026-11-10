@@ -49,9 +49,12 @@ func TestMarkIntakeFails(t *testing.T) {
 		name    string
 		arrange func(t *testing.T, s *store) WorkspaceID
 		wantErr error
+		// wantLogged is whether the store records the failure as an ERROR:
+		// an unknown workspace is an answer, which its caller records.
+		wantLogged bool
 	}{
 		{name: "an unregistered workspace", arrange: func(*testing.T, *store) WorkspaceID { return "ws-nobody" }, wantErr: ErrNotFound},
-		{name: "a workspace marked before", arrange: func(t *testing.T, s *store) WorkspaceID {
+		{name: "a workspace marked before", wantLogged: true, arrange: func(t *testing.T, s *store) WorkspaceID {
 			ws := testWorkspace(t, s)
 			if err := s.MarkIntake(context.Background(), ws.ID, instant); err != nil {
 				t.Fatalf("MarkIntake: %v", err)
@@ -72,8 +75,8 @@ func TestMarkIntakeFails(t *testing.T) {
 			if err == nil || (tt.wantErr != nil && !errors.Is(err, tt.wantErr)) {
 				t.Fatalf("MarkIntake = %v, want a failure of %v", err, tt.wantErr)
 			}
-			if _, ok := dlog.FindRecord(logs.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: "daemon.wsm.mark_intake"}); !ok {
-				t.Fatalf("want an ERROR daemon.wsm.mark_intake record, got %+v", logs.Records())
+			if _, ok := dlog.FindRecord(logs.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: "daemon.wsm.mark_intake"}); ok != tt.wantLogged {
+				t.Fatalf("ERROR daemon.wsm.mark_intake record found = %v, want %v; records %+v", ok, tt.wantLogged, logs.Records())
 			}
 		})
 	}

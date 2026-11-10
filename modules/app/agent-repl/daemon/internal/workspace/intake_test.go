@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	conversationv1 "agentrepl/proto/conversation/v1"
+
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/lifecycleconfig"
@@ -23,6 +25,7 @@ func intakeFixture(t *testing.T) (*fixture, string) {
 	t.Helper()
 	f := newFixture(t)
 	repo := mainWorktree(t, f)
+	f.db.modelCatalogs = map[string]*conversationv1.ModelCatalog{"/config": catalogOf("opus")}
 	f.briefs[intakeBrief] = prompts.Prompt{
 		Name:         intakeBrief,
 		Body:         "work out what {{who}} asked: {{what}}",
@@ -306,6 +309,7 @@ func questionFixture(t *testing.T) (*fixture, string) {
 	home := mainWorktree(t, f)
 	f.ownRepository(t, home)
 	f.git.mainOf = map[string]string{f.mutable(t).deps.CheckoutRoot: home}
+	f.db.modelCatalogs = map[string]*conversationv1.ModelCatalog{"/config": catalogOf(DefaultLaunchModel)}
 	asker := f.workspace("w1", t.TempDir())
 	asker.Name = "the asker (doom)"
 	f.db.with(asker)
@@ -353,7 +357,7 @@ func TestAskQuestionIntakeFails(t *testing.T) {
 		arrange   func(f *fixture)
 		operation string
 	}{
-		{name: "an unknown asker", asker: "w-nobody", arrange: func(*fixture) {}, operation: "SubmitPrompt"},
+		{name: "an unknown asker", asker: "w-nobody", arrange: func(*fixture) {}, operation: "daemon.refusal.typed"},
 		{name: "git cannot name the home repository", asker: "w1", arrange: func(f *fixture) {
 			f.git.commonDirErr = errors.New("fatal: not a git repository")
 		}, operation: opIntake},
