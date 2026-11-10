@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -339,11 +340,23 @@ func TestALateRecordTheViewDeclaredIsNotReported(t *testing.T) {
 	}
 }
 
-// registeringClient answers RegisterWorkspace with the given ref, as the
-// daemon would; every other call is unexpected.
+// registeringClient answers RegisterWorkspace with the given ref and
+// SetWorkspaceSummary with a success, as the daemon would, recording every
+// summary set into summaries when it is non-nil; every other call is
+// unexpected.
 type registeringClient struct {
 	agentreplv1connect.AgentReplClient
-	ref *workspacev1.WorkspaceRef
+	ref       *workspacev1.WorkspaceRef
+	summaries *[]*agentreplv1.SetWorkspaceSummaryRequest
+}
+
+func (c registeringClient) SetWorkspaceSummary(_ context.Context, req *connect.Request[agentreplv1.SetWorkspaceSummaryRequest]) (*connect.Response[agentreplv1.SetWorkspaceSummaryResponse], error) {
+	if c.summaries != nil {
+		*c.summaries = append(*c.summaries, req.Msg)
+	}
+	return connect.NewResponse(&agentreplv1.SetWorkspaceSummaryResponse{
+		Result: &agentreplv1.SetWorkspaceSummaryResponse_Success{Success: &agentreplv1.SetWorkspaceSummarySuccess{}},
+	}), nil
 }
 
 func (c registeringClient) RegisterWorkspace(context.Context, *connect.Request[agentreplv1.RegisterWorkspaceRequest]) (*connect.Response[agentreplv1.RegisterWorkspaceResponse], error) {
@@ -385,6 +398,41 @@ func TestRegisterThroughTheOwnerClaimsNothing(t *testing.T) {
 	// Assert
 	if got := owner.UnexpectedWarnings(); len(got) != 1 {
 		t.Fatalf("owner.UnexpectedWarnings = %v, want the record: nothing claimed it", got)
+	}
+}
+
+func TestRegisterStatesTheSeededSummary(t *testing.T) {
+	tests := []struct {
+		name     string
+		register func(testing.TB, *Daemon, string) *workspacev1.WorkspaceRef
+		want     []string
+	}{
+		{name: "Register", register: Register, want: []string{SeededSummary}},
+		{name: "RegisterOwingSummary", register: RegisterOwingSummary, want: nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			owner := newOwnerForViews(t, t)
+			dir := t.TempDir()
+			var set []*agentreplv1.SetWorkspaceSummaryRequest
+			owner.client = registeringClient{ref: &workspacev1.WorkspaceRef{Id: "w1", Dir: dir}, summaries: &set}
+
+			// Act
+			tt.register(t, owner, dir)
+
+			// Assert
+			var got []string
+			for _, req := range set {
+				if req.GetWorkspace().GetId() != "w1" {
+					t.Fatalf("SetWorkspaceSummary named workspace %q, want the registered w1", req.GetWorkspace().GetId())
+				}
+				got = append(got, req.GetSummary())
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("summaries set = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 
