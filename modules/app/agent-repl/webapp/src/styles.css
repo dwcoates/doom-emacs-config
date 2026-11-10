@@ -496,6 +496,10 @@
      NAME LINE below it (owner ruling, 2026-10-17: "the topbar should be
      slightly taller, with the extra space being downward"). */
   --topbar-band-h: 2.75rem;
+  /* THE HEADING'S WARNINGS YELLOW (owner request, 2026-11-10): a true yellow,
+     clear of the rail's amber --async, for a heading whose list holds
+     warnings alone. */
+  --topbar-warnings-yellow: #b89400;
   --topbar-name-h: 0.75rem;
   --topbar-h: calc(var(--topbar-band-h) + var(--topbar-name-h));
   /* THE STRIP'S FRAME MEASURE (owner ruling 1, 2026-09-13, narrowed
@@ -556,6 +560,7 @@
        2026-10-24): at full foreground it dominated the OPEN section, so it
        sits a little below it, still well above the collapsed grey. */
     --repo-head-expanded: #d2cfc8;
+    --topbar-warnings-yellow: #f5d000;
     --repo-head-collapsed: #898782;
     --border: #2a2a2a;
     /* Above the #1a1a1a sidebar, so its hover and detail washes still lift
@@ -8214,9 +8219,16 @@ html.webhost-gate #feed [data-row-kind="coldGate"]:has(.cold-gate[data-state="st
    `min-width: 0` and `max-width: 100%` are what let the heading shrink below
    its content instead of pushing a flank off the strip. */
 .topbar-heading {
-  display: grid;
-  grid-template-rows: var(--topbar-band-h) var(--topbar-name-h);
-  justify-items: center;
+  /* THE SUMMARY AND THE NAME ARE CENTERED TOGETHER (owner request,
+     2026-11-10): one column, stacked, its pair centered in the strip's full
+     height, so the summary stands as far from the top as the name from the
+     bottom. */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.15rem;
+  height: var(--topbar-h);
   justify-self: center;
   min-width: 0;
   max-width: 100%;
@@ -8236,8 +8248,6 @@ html.webhost-gate #feed [data-row-kind="coldGate"]:has(.cold-gate[data-state="st
 }
 /* THE SUMMARY: purple and italic, on the band (owner ruling, 2026-10-17). */
 .topbar-title {
-  grid-row: 1;
-  align-self: center;
   font-style: italic;
   color: var(--tool-title);
 }
@@ -8262,21 +8272,13 @@ html.webhost-gate #feed [data-row-kind="coldGate"]:has(.cold-gate[data-state="st
    just for the workspace name"). Under a summary it hangs from the name line's
    top, lifted a touch toward the summary so the two read as one heading. */
 .topbar-workspace-name {
-  grid-row: 2;
-  align-self: start;
-  margin-top: -0.5rem;
   font-size: 0.95rem;
   font-weight: 700;
   line-height: 1;
   color: var(--fg);
 }
-/* WITH NO SUMMARY THE NAME TAKES THE SUMMARY'S PLACE, centered on the band,
-   and the name line below stays empty. */
-.topbar-heading:not(:has(.topbar-title)) .topbar-workspace-name {
-  grid-row: 1;
-  align-self: center;
-  margin-top: 0;
-}
+/* WITH NO SUMMARY THE NAME STANDS ALONE, centered in the strip by the
+   heading's own column. */
 
 /* The account chip, ported from #account: quiet text that only shows its
    border on hover, so the topbar stays still during an ordinary turn. */
@@ -9970,4 +9972,4 @@ html.webhost-gate #feed [data-row-kind="coldGate"]:has(.cold-gate[data-state="st
    the whole signal. */
 .topbar-heading-warnings { cursor: pointer; text-decoration: none; }
 .topbar-heading-warnings[data-severity="errors"] { color: var(--err); }
-.topbar-heading-warnings[data-severity="warnings"] { color: var(--async); }
+.topbar-heading-warnings[data-severity="warnings"] { color: var(--topbar-warnings-yellow); }
