@@ -71,7 +71,8 @@ type fakeDB struct {
 	bypass    map[ids.WorkspaceID]wsm.QueueBypass
 	bypassErr error
 	// bypassSteps records every queue bypass hold written, as "take" or
-	// "release", beside the fleet's restates (the fixture's sharedSteps);
+	// "release", beside the fleet's restates when a test points both at one
+	// slice (fakeSessions.restateSteps);
 	// takeBypassErr and releaseBypassErr fail each.
 	bypassSteps      *[]string
 	takeBypassErr    error
