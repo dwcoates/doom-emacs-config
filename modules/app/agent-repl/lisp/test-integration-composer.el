@@ -448,6 +448,10 @@ the wrong value would silently mismark a stored turn's editor situation."
   :command-thread-background "PROMPT_ORIGIN_COMMAND_THREAD_BACKGROUND")
 
 (agent-repl-itest-composer--deftest-origin
+    agent-repl-itest-composer-command-terminal-output-site-sends-its-own-origin
+  :command-terminal-output "PROMPT_ORIGIN_COMMAND_TERMINAL_OUTPUT")
+
+(agent-repl-itest-composer--deftest-origin
     agent-repl-itest-composer-command-update-pr-site-sends-its-own-origin
   :command-update-pr "PROMPT_ORIGIN_COMMAND_UPDATE_PR")
 

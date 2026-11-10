@@ -267,6 +267,12 @@ const (
 	// were removed, and the new head, since the subscriber was last told.
 	// Submitted and drawn as a workspace notice is: no row, no held card.
 	PromptOrigin_PROMPT_ORIGIN_GITHUB_MERGE_QUEUE_NOTICE PromptOrigin = 50
+	// The outcome of a shell command a person ran from a bubble's code block
+	// run control, sent to that workspace's agent once the command exited
+	// (success or failure alike): the command's output when it is short, or the
+	// path of a file holding it, its size and the exit status when it is long.
+	// Its one Emacs send site is `agent-repl-terminal-finished`.
+	PromptOrigin_PROMPT_ORIGIN_COMMAND_TERMINAL_OUTPUT PromptOrigin = 51
 )
 
 // Enum value maps for PromptOrigin.
@@ -322,6 +328,7 @@ var (
 		48: "PROMPT_ORIGIN_COMMAND_THREAD_BACKGROUND",
 		49: "PROMPT_ORIGIN_FINISH_HOOK",
 		50: "PROMPT_ORIGIN_GITHUB_MERGE_QUEUE_NOTICE",
+		51: "PROMPT_ORIGIN_COMMAND_TERMINAL_OUTPUT",
 	}
 	PromptOrigin_value = map[string]int32{
 		"PROMPT_ORIGIN_UNSPECIFIED":                 0,
@@ -374,6 +381,7 @@ var (
 		"PROMPT_ORIGIN_COMMAND_THREAD_BACKGROUND":   48,
 		"PROMPT_ORIGIN_FINISH_HOOK":                 49,
 		"PROMPT_ORIGIN_GITHUB_MERGE_QUEUE_NOTICE":   50,
+		"PROMPT_ORIGIN_COMMAND_TERMINAL_OUTPUT":     51,
 	}
 )
 
@@ -408,7 +416,7 @@ var File_conversation_v1_prompt_origin_proto protoreflect.FileDescriptor
 
 const file_conversation_v1_prompt_origin_proto_rawDesc = "" +
 	"\n" +
-	"#conversation/v1/prompt_origin.proto\x12\x0fconversation.v1*\xeb\x0e\n" +
+	"#conversation/v1/prompt_origin.proto\x12\x0fconversation.v1*\x96\x0f\n" +
 	"\fPromptOrigin\x12\x1d\n" +
 	"\x19PROMPT_ORIGIN_UNSPECIFIED\x10\x00\x12\x1b\n" +
 	"\x17PROMPT_ORIGIN_USER_SENT\x10\x01\x12$\n" +
@@ -460,7 +468,8 @@ const file_conversation_v1_prompt_origin_proto_rawDesc = "" +
 	"!PROMPT_ORIGIN_PULL_REQUEST_NOTICE\x10/\x12+\n" +
 	"'PROMPT_ORIGIN_COMMAND_THREAD_BACKGROUND\x100\x12\x1d\n" +
 	"\x19PROMPT_ORIGIN_FINISH_HOOK\x101\x12+\n" +
-	"'PROMPT_ORIGIN_GITHUB_MERGE_QUEUE_NOTICE\x102B0Z.agentrepl/proto/conversation/v1;conversationv1b\x06proto3"
+	"'PROMPT_ORIGIN_GITHUB_MERGE_QUEUE_NOTICE\x102\x12)\n" +
+	"%PROMPT_ORIGIN_COMMAND_TERMINAL_OUTPUT\x103B0Z.agentrepl/proto/conversation/v1;conversationv1b\x06proto3"
 
 var (
 	file_conversation_v1_prompt_origin_proto_rawDescOnce sync.Once
