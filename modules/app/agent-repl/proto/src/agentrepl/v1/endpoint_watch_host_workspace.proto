@@ -147,6 +147,14 @@ message WatchHostWorkspaceResponse {
     // and replaying one would repeat the edit; the daemon's own question is
     // what a sent prompt reads.
     HostWorkspaceResponseQuestion response_question = 20;
+    // THE NAMES THIS WORKSPACE'S FINAL RESPONSES MENTIONED, whole-replaced on
+    // every change: Emacs's standing record of them, which orders the
+    // composer's completions so a command or workspace the workspace itself
+    // talked about is offered before one it never did. State, not an event: a
+    // late subscriber is sent the record in force first, which is how Emacs is
+    // hydrated after either side restarts. The daemon keeps the record durably,
+    // so it outlives the newest page a boot replays.
+    HostWorkspaceMentions mentions = 21;
   }
   // Retired: desktop notifications are posted by the daemon and never cross
   // this stream, and the tab blink is drawn from the roster's attention
@@ -656,6 +664,21 @@ message HostWorkspaceSelectionPrompt {
 message HostWorkspaceSelectionBubble {
   // The bubble's text.
   HostWorkspaceSelectionMarkdown markdown = 1;
+}
+// The commands and workspaces a workspace's own final responses mentioned,
+// each the most recently mentioned first. A mention's instant is the instant
+// the response that made it settled, so a replay of an older response never
+// makes its names newer. Every name is listed once.
+message HostWorkspaceMentions {
+  // The slash commands, by name WITHOUT the leading slash: every slash word a
+  // final response wrote whose name could name a command, by the rule
+  // proto/vocab/slash-word.json pins. Not narrowed to the session's catalog,
+  // since a boot replays responses before any session has stated one; the
+  // composer orders only the names its own catalog holds.
+  repeated string commands = 1;
+  // The workspaces, by name: every name word of a final response that named a
+  // workspace open when the response was read.
+  repeated string workspaces = 2;
 }
 // A selected bubble's text as markdown source, verbatim: a response's prose,
 // or a prompt's text blocks joined by blank lines. Empty for a prompt that
