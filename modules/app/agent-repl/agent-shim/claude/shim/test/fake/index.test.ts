@@ -896,6 +896,25 @@ describe("getContextUsage", () => {
   });
 });
 
+describe("the plan-usage verb's clock", () => {
+  it("reads no clock to answer", async () => {
+    // Arrange: a clock that advances one millisecond per read, as the goldens' does.
+    let reads = 0;
+    const query = createFakeQuery(emptyPrompt, ALLOW, {
+      sessionId: "s",
+      newUuid: () => "u",
+      nowMs: () => 1_800_000_000_000 + reads++,
+    });
+    const before = reads;
+
+    // Act
+    await query.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET({ skipBehaviors: true });
+
+    // Assert
+    expect(reads - before).toBe(0);
+  });
+});
+
 describe("stopTask", () => {
   it("accepts a task it never started as an idempotent no-op", async () => {
     // Arrange

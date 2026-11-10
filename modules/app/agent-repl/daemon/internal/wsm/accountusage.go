@@ -23,8 +23,8 @@ import (
 // whose window is half NULL is a corrupt record (DecodeError). The verdict's
 // own reset is NULL on its own when unknown.
 //
-// Every figure comes from a vendor rate-limit event: the account's usage is
-// never sampled, so there is no per-seat spend, no five-hour window and no
+// Every figure comes from a vendor rate-limit event or a plan-usage read of
+// the weekly windows: there is no per-seat spend, no five-hour window and no
 // sample stamp to keep. observed_at is when the daemon last filed evidence for
 // the account (unix nanos).
 //

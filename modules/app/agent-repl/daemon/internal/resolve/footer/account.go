@@ -22,8 +22,7 @@ import (
 // spoken.
 
 // accountUsage is ONE account root's usage evidence: the allowance windows
-// the vendor's rate-limit events figured. The account's usage is never
-// sampled, so the events are its only source.
+// the vendor's rate-limit events and the account's plan-usage reads figured.
 type accountUsage struct {
 	// rate is the drawn allowances.
 	rate rateState

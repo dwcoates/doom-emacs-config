@@ -35,12 +35,13 @@ type standing struct {
 }
 
 // allowanceWindow is ONE drawn allowance's evidence, read off the vendor's
-// rate-limit events (SessionUpdate.rate_limit_status), its only source: the
-// account's usage is never sampled.
+// rate-limit events (SessionUpdate.rate_limit_status) and the account's
+// plan-usage reads (SessionUpdate.plan_usage).
 //
-//   - the FIGURES (utilization, reset) are the event's when it states a
-//     utilization; the last event to state one is drawn
-//     (`observeEventFigures`);
+//   - the FIGURES (utilization, reset) are the newest of a rate-limit event
+//     that states a utilization and a plan-usage read (`observeFigures`); a
+//     plan-usage read that states none for the window retires them
+//     (`retireFigures`);
 //   - the VERDICT (the typed status arm) is the event's status, and stays
 //     UNSET until an event with a status for this window has been seen. An
 //     unset status oneof is legal and means "no vendor verdict observed
@@ -88,15 +89,23 @@ func (w *allowanceWindow) observeVerdict(verdict wsm.AllowanceVerdict, resetsAtM
 	}
 }
 
-// observeEventFigures files a figure sighting read off a rate-limit EVENT.
-// The event carries no instant to order it by, so the last to arrive is
-// drawn. The vendor reports utilization as a percentage and resets in millis;
+// observeFigures files a figure sighting read off a rate-limit event or
+// a plan-usage read. Neither carries an instant to order it by, so the last to
+// arrive is drawn. Both report utilization as a percentage and resets in millis;
 // the contract carries a 0..1 fraction and epoch seconds, so the conversion
 // is the daemon's and never the client's.
-func (w *allowanceWindow) observeEventFigures(utilizationPercent float64, resetsAtMs int64) {
+func (w *allowanceWindow) observeFigures(utilizationPercent float64, resetsAtMs int64) {
 	w.figured = true
 	w.utilization = utilizationPercent / 100
 	w.resetsAtS = resetsAtMs / 1000
+}
+
+// retireFigures drops the window's figure, leaving its verdict, which lapses
+// with the window instance it was about (liveVerdict).
+func (w *allowanceWindow) retireFigures() {
+	w.figured = false
+	w.utilization = 0
+	w.resetsAtS = 0
 }
 
 // rateState is the drawn allowances, ONE PER VENDOR WINDOW: the

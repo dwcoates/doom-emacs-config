@@ -13,6 +13,7 @@ import (
 	shimv1 "agentrepl/proto/shim/v1"
 
 	"agent-repld/internal/ids"
+	"agent-repld/internal/ratelimittest"
 	"agent-repld/internal/shimclient"
 	"agent-repld/internal/wsm"
 )
@@ -1179,6 +1180,11 @@ func TestRouteSessionUpdateArms(t *testing.T) {
 		{
 			name:   "the rate-limit status is the footer's",
 			update: rateLimitStatusUpdate(),
+			want:   []string{"footer.OnSessionUpdate"},
+		},
+		{
+			name:   "the account's plan usage is the footer's",
+			update: ratelimittest.PlanUsage(ratelimittest.PlanWindow(8, 1), nil, nil),
 			want:   []string{"footer.OnSessionUpdate"},
 		},
 		{

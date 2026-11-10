@@ -2,8 +2,8 @@
  * fake/catalogs.ts — the mocked vendor's answers to the shim's CONTROL verbs.
  *
  * These are not part of any turn: `supportedModels`, `supportedCommands`,
- * `supportedAgents`, `mcpServerStatus`, `getContextUsage`, `accountInfo` and
- * `initializationResult` are questions the shim asks out of band, and the
+ * `supportedAgents`, `mcpServerStatus`, `getContextUsage`, the plan-usage verb,
+ * `accountInfo` and `initializationResult` are questions the shim asks out of band, and the
  * answers feed `SessionStarted` and half the `SessionUpdate` arms. They live
  * here rather than inside a scenario because they are session facts, not turn
  * events — a scenario can SWITCH between prepared arms but never authors one.
@@ -20,6 +20,7 @@ import type {
   InitializationResultLike,
   McpServerStatusLike,
   ModelInfoLike,
+  PlanUsageLike,
   SlashCommandLike,
 } from "../sdk/types.js";
 
@@ -143,6 +144,50 @@ export const FAKE_ACCOUNT_INFO: AccountInfoLike = {
   apiKeySource: "none",
   apiProvider: "firstParty",
 };
+
+/** One weekly plan-usage window the mock answers: percent used and its reset. */
+export interface FakePlanUsageWindow {
+  readonly utilizationPercent: number;
+  readonly resetsAtMs: number;
+}
+
+/** The weekly windows the plan-usage verb answers, by the vendor's own names. */
+export const FAKE_PLAN_USAGE_WINDOW_NAMES = ["seven_day", "seven_day_opus", "seven_day_sonnet"] as const;
+/** One of FAKE_PLAN_USAGE_WINDOW_NAMES. */
+export type FakePlanUsageWindowName = (typeof FAKE_PLAN_USAGE_WINDOW_NAMES)[number];
+
+/** Whether NAME is a weekly window the plan-usage verb answers. */
+export function isFakePlanUsageWindowName(name: unknown): name is FakePlanUsageWindowName {
+  return FAKE_PLAN_USAGE_WINDOW_NAMES.some((known) => known === name);
+}
+
+/** The figures the plan-usage verb answers, by window. */
+export type FakePlanUsageWindows = ReadonlyMap<FakePlanUsageWindowName, FakePlanUsageWindow>;
+
+/**
+ * The plan-usage answer for a max account (FAKE_ACCOUNT_INFO), in the shape
+ * the real verb answers it: utilization 0-100 and an ISO 8601 reset, and a
+ * window the account is not metered on stated null.
+ */
+export function fakePlanUsage(windows: FakePlanUsageWindows): PlanUsageLike {
+  const window = (name: FakePlanUsageWindowName) => {
+    const figure = windows.get(name);
+    return figure === undefined
+      ? null
+      : { utilization: figure.utilizationPercent, resets_at: new Date(figure.resetsAtMs).toISOString() };
+  };
+  return {
+    subscription_type: FAKE_ACCOUNT_INFO.subscriptionType ?? null,
+    rate_limits_available: true,
+    rate_limits: {
+      five_hour: null,
+      seven_day: window("seven_day"),
+      seven_day_oauth_apps: null,
+      seven_day_opus: window("seven_day_opus"),
+      seven_day_sonnet: window("seven_day_sonnet"),
+    },
+  };
+}
 
 /** The cached first-connect initialize answer. */
 export const FAKE_INITIALIZATION_RESULT: InitializationResultLike = {

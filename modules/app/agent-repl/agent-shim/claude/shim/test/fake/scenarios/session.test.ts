@@ -2,7 +2,7 @@
  * The session-fact family: rotation, slash commands the vendor answers itself,
  * fast mode, compaction, and the two attachment kinds both planes drop.
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { COLD_GATE_FLOOR_TOKENS, readTranscriptFacts } from "../../../src/engine/cold.js";
 import { HARNESS_NOW_MS, driveScenario, ofType, recordsOfType, theResult } from "../harness.js";
@@ -821,6 +821,48 @@ describe("fast mode as a SESSION fact", () => {
 
     // Assert
     expect(states).toEqual(["cooldown", "cooldown"]);
+  });
+});
+
+describe("the plan-usage verb", () => {
+  /** What the plan-usage verb answers for seven_day once the drive's first turn has ended. */
+  async function sevenDayAfter(prompt: string): Promise<unknown> {
+    let answered: unknown;
+    await driveScenario([prompt], {
+      during: async (query, _feeder, messages) => {
+        await vi.waitFor(() => expect(messages.some((m) => m.type === "result")).toBe(true));
+        const usage = await query.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET({ skipBehaviors: true });
+        answered = usage.rate_limits?.seven_day;
+      },
+    });
+    return answered;
+  }
+
+  it("answers no weekly figure before any rate-limit event", async () => {
+    // Arrange + Act
+    const sevenDay = await sevenDayAfter("hello");
+
+    // Assert
+    expect(sevenDay).toBeNull();
+  });
+
+  it("answers the figure a seven-day rate-limit event stated", async () => {
+    // Arrange + Act
+    const sevenDay = await sevenDayAfter("!rate-limit-seven-day");
+
+    // Assert. The event's fraction is the verb's percent, its seconds the verb's ISO reset.
+    expect(sevenDay).toEqual({
+      utilization: 91,
+      resets_at: new Date((Math.floor(HARNESS_NOW_MS / 1000) + 259_200) * 1000).toISOString(),
+    });
+  });
+
+  it("figures no weekly window from a five-hour event", async () => {
+    // Arrange + Act
+    const sevenDay = await sevenDayAfter("!rate-limit-five-hour");
+
+    // Assert
+    expect(sevenDay).toBeNull();
   });
 });
 

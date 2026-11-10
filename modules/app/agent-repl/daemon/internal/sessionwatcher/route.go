@@ -145,6 +145,9 @@ func (w *watcher) routeSessionUpdateArmLocked(update *conversationv1.SessionUpda
 		w.sinks.Footer.OnSessionUpdate(w.ws, update)
 
 	case *conversationv1.SessionUpdate_RateLimitStatus,
+		// THE ACCOUNT'S PLAN USAGE feeds the footer's enduring usage line,
+		// the same windows the rate-limit events figure.
+		*conversationv1.SessionUpdate_PlanUsage,
 		*conversationv1.SessionUpdate_Compacting,
 		// A COMPACTION'S PHASES are the footer's: its salient line while the
 		// compaction runs, and the transient that announces how it concluded.
@@ -340,6 +343,8 @@ func sessionArm(update *conversationv1.SessionUpdate) string {
 		return "join_withdrawn"
 	case *conversationv1.SessionUpdate_VendorActivity:
 		return "vendor_activity"
+	case *conversationv1.SessionUpdate_PlanUsage:
+		return "plan_usage"
 	default:
 		return "unset"
 	}

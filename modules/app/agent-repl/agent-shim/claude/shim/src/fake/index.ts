@@ -51,6 +51,7 @@ import type {
   McpServerStatusLike,
   ModelInfoLike,
   PermissionModeLike,
+  PlanUsageLike,
   QueryLike,
   RemoteControlAnswerLike,
   RemoteControlOptionsLike,
@@ -64,6 +65,10 @@ import {
   FAKE_AGENTS,
   FAKE_COMMANDS,
   FAKE_DEFAULT_MODEL,
+  fakePlanUsage,
+  isFakePlanUsageWindowName,
+  type FakePlanUsageWindow,
+  type FakePlanUsageWindowName,
   fakeAppliedEffort,
   FAKE_INITIALIZATION_RESULT,
   FAKE_MCP_SERVERS,
@@ -681,6 +686,13 @@ export function createFakeQuery(
   // always drifted would make a consumer's change detection untestable in the
   // steady case.
   let contextUsageDrift = false;
+  // The weekly windows the plan-usage verb answers: exactly the ones the mock's
+  // own rate-limit events figured, so the verb and the stream never disagree
+  // about the account (`emitWithUuid`). Before any such event every weekly
+  // window answers null. NO WINDOW IS ANCHORED TO "NOW": a figure the mock
+  // invented would need a clock read, and a drive whose clock advances on every
+  // read (the scenario goldens) would see every later instant shifted by it.
+  const planUsageWindows = new Map<FakePlanUsageWindowName, FakePlanUsageWindow>();
   // The session's fast-mode state, which `init` and every `result` report.
   let fastModeState: "on" | "off" | "cooldown" = "off";
   let fastModeDisabledReason: string | undefined = "preference";
@@ -811,9 +823,18 @@ export function createFakeQuery(
 
   const emitWithUuid = (uuid: string, message: Record<string, unknown>): void => {
     if (out.isEnded) return;
+    if (message.type === "rate_limit_event") notePlanUsageEvent(message.rate_limit_info as Record<string, unknown>);
     out.push({ session_id: sessionUuid, ...message, uuid } as unknown as SdkMessage);
   };
   const emit = (message: Record<string, unknown>): void => emitWithUuid(opts.newUuid(), message);
+
+  /** A weekly rate-limit event's figure becomes the plan-usage verb's. */
+  function notePlanUsageEvent(info: Record<string, unknown>): void {
+    const name = info.rateLimitType;
+    if (!isFakePlanUsageWindowName(name)) return;
+    if (typeof info.utilization !== "number" || typeof info.resetsAt !== "number") return;
+    planUsageWindows.set(name, { utilizationPercent: info.utilization * 100, resetsAtMs: info.resetsAt * 1000 });
+  }
 
   /**
    * The call a subagent's stream events belong to, while one is being emitted.
@@ -2229,6 +2250,8 @@ export function createFakeQuery(
       contextUsageDrift
         ? fakeContextUsage(model, 30_000 + turn * 20_000, turn)
         : fakeContextUsage(model, 30_000 + turn * 1_000),
+    usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET: async (): Promise<PlanUsageLike> =>
+      fakePlanUsage(planUsageWindows),
     accountInfo: async (): Promise<AccountInfoLike> => FAKE_ACCOUNT_INFO,
     initializationResult: async (): Promise<InitializationResultLike> => FAKE_INITIALIZATION_RESULT,
 

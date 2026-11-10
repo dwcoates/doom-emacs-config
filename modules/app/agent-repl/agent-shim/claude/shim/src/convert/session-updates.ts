@@ -8,7 +8,8 @@
  * about a turn or a unit rides here — each of those has a stream of its own.
  *
  * SHIM-SYNTHESIZED FACTS ARE NEVER WRITTEN TO THE STORE. `diagnostics` and
- * `context_usage` are the shim's report ABOUT ITSELF at its own cadence; they
+ * `context_usage` are the shim's report ABOUT ITSELF at its own cadence, and
+ * `plan_usage` a vendor answer the engine reads the same way; they
  * are pushed on WatchSession and they are not vendor conversation, so they never
  * reach a row. They are also not produced here: the engine pushes them.
  *
@@ -433,8 +434,8 @@ function rateLimitOverage(
  * The vendor's rate-limit event, typed.
  *
  * STREAM-ONLY (landing 4): this is the live `rate_limit_event` the SDK pushes.
- * The account's usage is never sampled, so this event is the only source of a
- * window's figures and verdict.
+ * Beside the plan-usage read (convert/plan-usage.ts), this event is a source of a
+ * window's figures, and it is the only source of its verdict.
  *
  * EVERY OPTIONAL FIELD IS ABSENT WHEN THE VENDOR OMITTED IT. The conversions are
  * the two the proto names: seconds→millis, fraction→percent.

@@ -1127,6 +1127,11 @@ func (r *resolver) sessionArm(ws ids.WorkspaceID, update *conversationv1.Session
 				s.blocked = nil
 			}
 		}
+	case *conversationv1.SessionUpdate_PlanUsage:
+		return "plan_usage", func(s *wsState) {
+			r.logSessionArm(ws, s, "plan_usage")
+			r.observePlanUsage(s, u.PlanUsage)
+		}
 	case *conversationv1.SessionUpdate_Compacting:
 		return "compacting", func(s *wsState) {
 			r.logSessionArm(ws, s, "compacting")
@@ -1282,14 +1287,56 @@ func (r *resolver) observeRateLimitStatus(s *wsState, status *conversationv1.Ses
 			"resets_at_ms":         status.GetResetsAtMs(),
 			"previous_utilization": window.utilization,
 		}
-		// THE EVENT IS THE ONLY SOURCE OF A FIGURE: the account's usage is
-		// never sampled (2026-10-30), so the vendor states a window's
-		// utilization only on the events it sends near that window's limit.
-		window.observeEventFigures(status.GetUtilizationPercent(), status.GetResetsAtMs())
+		// The vendor states a window's utilization on its events only near
+		// that window's limit; the plan-usage read (observePlanUsage) figures
+		// it the rest of the time, and the last to arrive is drawn.
+		window.observeFigures(status.GetUtilizationPercent(), status.GetResetsAtMs())
 		r.logOf(s.id, s).Info("daemon.footer.account_usage_figure",
 			"a rate-limit event figured the window", fields)
 	}
 	window.observeVerdict(verdictOf(status), status.GetResetsAtMs())
+	account.touch(r.opts.clock.Now())
+}
+
+// observePlanUsage takes one plan-usage read and files each of its weekly
+// windows under its own allowance. THE READ IS THE WHOLE TRUTH about the three
+// windows it carries (conversation.v1.SessionPlanUsage), so a window it leaves
+// unset is retired: the vendor no longer meters it, or could not figure it,
+// and a figure nobody reported is never drawn. It carries no verdict, so each
+// window's verdict stays the rate-limit event's. The overage window is not
+// one it carries and is left as it stands.
+func (r *resolver) observePlanUsage(s *wsState, usage *conversationv1.SessionPlanUsage) {
+	if usage == nil {
+		return
+	}
+	account := s.usage
+	for _, w := range []struct {
+		name   string
+		window *allowanceWindow
+		read   *conversationv1.SessionPlanUsageWindow
+	}{
+		{"seven_day", &account.rate.weekly, usage.GetSevenDay()},
+		{"seven_day_opus", &account.rate.weeklyOpus, usage.GetSevenDayOpus()},
+		{"seven_day_sonnet", &account.rate.weeklySonnet, usage.GetSevenDaySonnet()},
+	} {
+		fields := dlog.Context{
+			"window":               w.name,
+			"source":               "plan_usage",
+			"previous_figured":     w.window.figured,
+			"previous_utilization": w.window.utilization,
+		}
+		if w.read == nil {
+			w.window.retireFigures()
+			r.logOf(s.id, s).Debug("daemon.footer.account_usage_figure",
+				"the plan-usage read stated no figure for the window; its figure is retired", fields)
+			continue
+		}
+		fields["utilization_percent"] = w.read.GetUtilizationPercent()
+		fields["resets_at_ms"] = w.read.GetResetsAtMs()
+		w.window.observeFigures(w.read.GetUtilizationPercent(), w.read.GetResetsAtMs())
+		r.logOf(s.id, s).Info("daemon.footer.account_usage_figure",
+			"a plan-usage read figured the window", fields)
+	}
 	account.touch(r.opts.clock.Now())
 }
 
