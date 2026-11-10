@@ -55,6 +55,9 @@ type fakeDB struct {
 
 	wsm.DB
 
+	// workspaceErr, when set, is what every Workspace read answers.
+	workspaceErr error
+
 	// originators and slackOrigins are what a create recorded of each
 	// workspace (setOriginator); none recorded is a user_or_workspace one.
 	originators  map[ids.WorkspaceID]string
@@ -402,6 +405,9 @@ func (f *fakeDB) HeldPromptByTurn(_ context.Context, turn wsm.TurnID) (wsm.HeldP
 func (f *fakeDB) Workspace(_ context.Context, id ids.WorkspaceID) (wsm.Workspace, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.workspaceErr != nil {
+		return wsm.Workspace{}, f.workspaceErr
+	}
 	ws, ok := f.workspaces[id]
 	if !ok {
 		return wsm.Workspace{}, fmt.Errorf("no workspace %s: %w", id, wsm.ErrNotFound)
