@@ -711,9 +711,7 @@ func TestQueueTabStateSpansTheWait(t *testing.T) {
 				registerRunning(h, r)
 			}
 			if tc.resuming {
-				h.o.mu.Lock()
-				h.o.resumes[theWorkspace] = progressDoc{StartedMS: 2000}
-				h.o.mu.Unlock()
+				recordTakeBack(h, theWorkspace, progressDoc{StartedMS: 2000})
 			}
 			entry := wsm.MergeQueueEntry{Workspace: theWorkspace, State: tc.state, Returned: tc.returned, EnqueuedAt: time.UnixMilli(1000)}
 
@@ -1096,9 +1094,7 @@ func TestHeadClockMSFollowsTheEntrysStanding(t *testing.T) {
 				registerRunning(h, r)
 			}
 			if tc.resuming {
-				h.o.mu.Lock()
-				h.o.resumes[theWorkspace] = progressDoc{StartedMS: 2000}
-				h.o.mu.Unlock()
+				recordTakeBack(h, theWorkspace, progressDoc{StartedMS: 2000})
 			}
 			entry := wsm.MergeQueueEntry{Workspace: theWorkspace, State: tc.state, Returned: tc.returned, EnqueuedAt: time.UnixMilli(1000)}
 
@@ -1151,9 +1147,7 @@ func TestQueueSpanOfFollowsTheEntrysStanding(t *testing.T) {
 				registerRunning(h, r)
 			}
 			if tc.resuming {
-				h.o.mu.Lock()
-				h.o.resumes[theWorkspace] = progressDoc{StartedMS: 2000}
-				h.o.mu.Unlock()
+				recordTakeBack(h, theWorkspace, progressDoc{StartedMS: 2000})
 			}
 			entry := wsm.MergeQueueEntry{Workspace: theWorkspace, State: tc.state, Returned: tc.returned, EnqueuedAt: time.UnixMilli(1000)}
 
@@ -1541,12 +1535,19 @@ func resumeWorld(t *testing.T, entries []wsm.MergeQueueEntry, resumed ...ids.Wor
 	h.db.mu.Lock()
 	h.db.queues[h.repoKey()] = entries
 	h.db.mu.Unlock()
-	h.o.mu.Lock()
 	for _, ws := range resumed {
-		h.o.resumes[ws] = progressDoc{Repo: string(h.repoKey()), Step: TabTests}
+		recordTakeBack(h, ws, progressDoc{Repo: string(h.repoKey()), Step: TabTests})
 	}
-	h.o.mu.Unlock()
 	return h
+}
+
+// recordTakeBack stands DOC as the progress record h's orchestrator took
+// back for WS (orchestrator.resumes), as a boot or a step aside's take-back
+// leaves it.
+func recordTakeBack(h *harness, ws ids.WorkspaceID, doc progressDoc) {
+	h.o.mu.Lock()
+	defer h.o.mu.Unlock()
+	h.o.resumes[ws] = doc
 }
 
 func admittedEntry(ws ids.WorkspaceID) wsm.MergeQueueEntry {
