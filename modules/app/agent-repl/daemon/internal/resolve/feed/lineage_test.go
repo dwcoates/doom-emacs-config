@@ -140,6 +140,15 @@ func TestAForksWalkReadsItsParentsBookOnceItsOwnBookEnds(t *testing.T) {
 	}
 }
 
+// withoutForkPointDividers leaves out the one row a fork draws that its parent
+// does not: the divider between the inherited past and the fork's own rows.
+func withoutForkPointDividers(rows []*frontendv1.FeedRow) []*frontendv1.FeedRow {
+	return slices.DeleteFunc(slices.Clone(rows), func(row *frontendv1.FeedRow) bool {
+		_, forked := row.GetSeparation().GetKind().(*frontendv1.FeedSessionSeparation_Forked)
+		return forked
+	})
+}
+
 func TestAForksInheritedAnswerIsDrawnAsItsParentDrawsIt(t *testing.T) {
 	// Arrange: the same finished turn, once as a workspace's own book and once
 	// as a fork's inherited past.
@@ -153,7 +162,7 @@ func TestAForksInheritedAnswerIsDrawnAsItsParentDrawsIt(t *testing.T) {
 
 	// Act
 	parentRows := plain.walkRows("reader-1")
-	forkRows := fork.walkRows("reader-1")
+	forkRows := withoutForkPointDividers(fork.walkRows("reader-1"))
 
 	// Assert: the answer is the green final answer in both, and the drawn
 	// prompt and answer are the same rows apart from where they are keyed.

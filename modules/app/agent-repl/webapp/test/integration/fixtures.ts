@@ -1118,6 +1118,7 @@ export const SEPARATION_ARMS = [
   "worktreeEntered",
   "worktreeLeft",
   "compactionFailed",
+  "forked",
 ] as const;
 export type SeparationArm = (typeof SEPARATION_ARMS)[number];
 
@@ -1152,6 +1153,8 @@ const separationKind = (arm: SeparationArm): SeparationKind => {
         case: "worktreeLeft",
         value: { outcome: { case: "kept", value: { path: { text: WORKTREE_PATH } } } },
       };
+    case "forked":
+      return { case: "forked", value: {} };
     case "compactionFailed":
       return {
         case: "compactionFailed",
