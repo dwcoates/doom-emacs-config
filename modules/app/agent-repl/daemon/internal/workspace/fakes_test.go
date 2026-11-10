@@ -4069,6 +4069,12 @@ func (f *fakeDB) OpenChildren(_ context.Context, parent ids.WorkspaceID) ([]wsm.
 	return refs, nil
 }
 
+// QueueBypass answers WS's queue bypass standing: no workspace in these
+// tests holds the mode, so every session lands through the queue.
+func (f *fakeDB) QueueBypass(_ context.Context, _ ids.WorkspaceID) (wsm.QueueBypass, error) {
+	return wsm.QueueBypass{}, nil
+}
+
 // RequireOpenParent answers openParentErr, recording the parent asked about.
 func (f *fakeDB) RequireOpenParent(_ context.Context, parent ids.WorkspaceID) error {
 	f.openParentAsked = append(f.openParentAsked, parent)
