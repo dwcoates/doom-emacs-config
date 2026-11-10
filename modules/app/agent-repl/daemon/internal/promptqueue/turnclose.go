@@ -91,9 +91,9 @@ func (q *queue) CloseOrphans(ctx context.Context, ws ids.WorkspaceID, at time.Ti
 // ClaimDisplacedTurn takes a displaced turn's mark exclusively and, when the
 // turn was still open, closes it as orphaned and draws that ending. See the
 // Queue interface.
-func (q *queue) ClaimDisplacedTurn(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID) (bool, error) {
+func (q *queue) ClaimDisplacedTurn(ctx context.Context, ws ids.WorkspaceID, turn, resubmittedAs ids.TurnID) (bool, error) {
 	at := q.deps.Now()
-	claim, err := q.deps.DB.ClaimDisplacedTurn(ctx, turn, at)
+	claim, err := q.deps.DB.ClaimDisplacedTurn(ctx, turn, resubmittedAs, at)
 	if err != nil {
 		return false, fmt.Errorf("claim the displaced turn %q on %q: %w", turn, ws, err)
 	}

@@ -587,7 +587,8 @@ func (o *orchestrator) recoverDisplaced(ctx context.Context) error {
 			o.deps.Log.Global().Debug(op, "a displaced turn waits for the resumed merge that displaced it", fields)
 			continue
 		}
-		claimed, err := o.deps.Queue.ClaimDisplacedTurn(ctx, t.Workspace, t.ID)
+		again := wsm.NewTurnID()
+		claimed, err := o.deps.Queue.ClaimDisplacedTurn(ctx, t.Workspace, t.ID, again)
 		if err != nil {
 			o.deps.Log.Global().Error(op, "a displaced turn could not be claimed", withField(fields, "error", err.Error()))
 			return fmt.Errorf("merge: claim the displaced turn %q: %w", t.ID, err)
@@ -596,10 +597,7 @@ func (o *orchestrator) recoverDisplaced(ctx context.Context) error {
 			o.deps.Log.Global().Debug(op, "a displaced turn was already put back by its merge", fields)
 			continue
 		}
-		if _, err := o.deps.Queue.Submit(ctx, promptqueue.Submission{
-			WS: t.Workspace, Turn: wsm.NewTurnID(), Said: saidText(t.Text),
-			Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME,
-		}); err != nil {
+		if _, err := o.deps.Queue.Submit(ctx, displacedResubmission(t.Workspace, again, t.Text)); err != nil {
 			o.log(ctx, t.Workspace).Error(op, "could not resubmit a turn a merge displaced", withField(fields, "error", err.Error()))
 			o.deps.Log.Global().Error(op, "could not resubmit a turn a merge displaced", withField(fields, "error", err.Error()))
 			continue
@@ -608,6 +606,17 @@ func (o *orchestrator) recoverDisplaced(ctx context.Context) error {
 		o.deps.Log.Global().Info(op, "resubmitted a turn a merge displaced and never put back", fields)
 	}
 	return nil
+}
+
+// displacedResubmission is the submission a displaced turn's text is put back
+// as, under AGAIN: the turn its claim recorded the prompt moving to. THE ONE
+// SHAPE both owners of the put-back (the merge's release and the boot sweep)
+// submit.
+func displacedResubmission(ws ids.WorkspaceID, again ids.TurnID, text string) promptqueue.Submission {
+	return promptqueue.Submission{
+		WS: ws, Turn: again, Said: saidText(text),
+		Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME,
+	}
 }
 
 // sweepOrphanedState drops what merges taken off their queues left behind (a

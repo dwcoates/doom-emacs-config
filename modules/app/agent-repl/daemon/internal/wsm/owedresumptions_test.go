@@ -18,7 +18,7 @@ func TestClaimResumptionsTakesWhatAStandDownOwed(t *testing.T) {
 	}
 
 	// Act
-	claimed, err := s.ClaimResumptions(ctx, ws)
+	claimed, err := s.ClaimResumptions(ctx, ws, NewTurnID(), time.Unix(0, 0))
 
 	// Assert
 	if err != nil || claimed != 2 {
@@ -34,12 +34,12 @@ func TestASecondClaimFindsNothingOwed(t *testing.T) {
 	if err := s.OweResumption(ctx, ws, "t-a", time.Unix(100, 0)); err != nil {
 		t.Fatalf("OweResumption: %v", err)
 	}
-	if _, err := s.ClaimResumptions(ctx, ws); err != nil {
+	if _, err := s.ClaimResumptions(ctx, ws, NewTurnID(), time.Unix(0, 0)); err != nil {
 		t.Fatalf("first ClaimResumptions: %v", err)
 	}
 
 	// Act
-	claimed, err := s.ClaimResumptions(ctx, ws)
+	claimed, err := s.ClaimResumptions(ctx, ws, NewTurnID(), time.Unix(0, 0))
 
 	// Assert
 	if err != nil || claimed != 0 {
@@ -59,7 +59,7 @@ func TestOwingTheSameTurnTwiceIsOneDebt(t *testing.T) {
 	}
 
 	// Act
-	claimed, err := s.ClaimResumptions(ctx, ws)
+	claimed, err := s.ClaimResumptions(ctx, ws, NewTurnID(), time.Unix(0, 0))
 
 	// Assert
 	if err != nil || claimed != 1 {
@@ -77,13 +77,13 @@ func TestClaimResumptionsTakesOnlyItsOwnWorkspaces(t *testing.T) {
 	}
 
 	// Act
-	claimed, err := s.ClaimResumptions(ctx, mine)
+	claimed, err := s.ClaimResumptions(ctx, mine, NewTurnID(), time.Unix(0, 0))
 
 	// Assert
 	if err != nil || claimed != 0 {
 		t.Fatalf("ClaimResumptions(mine) = %d, %v; want 0", claimed, err)
 	}
-	if n, err := s.ClaimResumptions(ctx, other); err != nil || n != 1 {
+	if n, err := s.ClaimResumptions(ctx, other, NewTurnID(), time.Unix(0, 0)); err != nil || n != 1 {
 		t.Fatalf("ClaimResumptions(other) = %d, %v; want its 1 left standing", n, err)
 	}
 }
@@ -104,7 +104,31 @@ func TestOwedTurnsAnswersWhatIsOwedWithoutClaimingIt(t *testing.T) {
 	if err != nil || len(owed) != 1 || owed[0] != "t-a" {
 		t.Fatalf("OwedTurns = %v, %v; want [t-a]", owed, err)
 	}
-	if n, err := s.ClaimResumptions(ctx, ws); err != nil || n != 1 {
+	if n, err := s.ClaimResumptions(ctx, ws, NewTurnID(), time.Unix(0, 0)); err != nil || n != 1 {
 		t.Fatalf("ClaimResumptions after the read = %d, %v; want the debt still standing", n, err)
+	}
+}
+
+func TestClaimResumptionsRecordsEachCutTurnSucceededByTheResumption(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s).ID
+	ctx := context.Background()
+	for _, turn := range []TurnID{"cut-a", "cut-b"} {
+		if err := s.OweResumption(ctx, ws, turn, instant); err != nil {
+			t.Fatalf("OweResumption: %v", err)
+		}
+	}
+
+	// Act
+	if _, err := s.ClaimResumptions(ctx, ws, "resumed", instant.Add(time.Minute)); err != nil {
+		t.Fatalf("ClaimResumptions: %v", err)
+	}
+
+	// Assert
+	for _, turn := range []TurnID{"cut-a", "cut-b"} {
+		if got, err := s.SucceedingTurn(ctx, turn); err != nil || got != "resumed" {
+			t.Fatalf("SucceedingTurn(%s) = %q, %v; want the resumption", turn, got, err)
+		}
 	}
 }

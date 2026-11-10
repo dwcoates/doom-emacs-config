@@ -129,7 +129,7 @@ func TestClaimingAnOpenDisplacedTurnDrawsItsEnding(t *testing.T) {
 	h.db.turns["turn-1"] = &wsm.Turn{ID: "turn-1", Workspace: theWorkspace, Displaced: true}
 
 	// Act
-	claimed, err := h.q.ClaimDisplacedTurn(context.Background(), theWorkspace, "turn-1")
+	claimed, err := h.q.ClaimDisplacedTurn(context.Background(), theWorkspace, "turn-1", "resubmitted-1")
 
 	// Assert
 	if err != nil || !claimed {
@@ -147,7 +147,7 @@ func TestClaimingAnAlreadyClosedDisplacedTurnDrawsNothing(t *testing.T) {
 	h.db.turns["turn-1"] = &wsm.Turn{ID: "turn-1", Workspace: theWorkspace, Displaced: true, Close: &how}
 
 	// Act
-	claimed, err := h.q.ClaimDisplacedTurn(context.Background(), theWorkspace, "turn-1")
+	claimed, err := h.q.ClaimDisplacedTurn(context.Background(), theWorkspace, "turn-1", "resubmitted-1")
 
 	// Assert
 	if err != nil || !claimed {
@@ -164,7 +164,7 @@ func TestAFailedDisplacedClaimIsHandedBack(t *testing.T) {
 	h.db.claimErr = errors.New("the store is down")
 
 	// Act
-	_, err := h.q.ClaimDisplacedTurn(context.Background(), theWorkspace, "turn-1")
+	_, err := h.q.ClaimDisplacedTurn(context.Background(), theWorkspace, "turn-1", "resubmitted-1")
 
 	// Assert
 	if err == nil {
@@ -185,7 +185,7 @@ func TestTheDoorRetiresARunningCutWhoseTurnItCloses(t *testing.T) {
 			return err
 		}},
 		{name: "a displaced claim", close: func(h *harness) error {
-			_, err := h.q.ClaimDisplacedTurn(context.Background(), theWorkspace, "cut-1")
+			_, err := h.q.ClaimDisplacedTurn(context.Background(), theWorkspace, "cut-1", "resubmitted-1")
 			return err
 		}},
 	}
@@ -213,7 +213,7 @@ func TestTheDoorLeavesARunningCutWhenAnotherTurnCloses(t *testing.T) {
 	h.db.turns["turn-1"] = &wsm.Turn{ID: "turn-1", Workspace: theWorkspace, Displaced: true}
 	h.beginCut("cut-1", conversationv1.SessionCommand_SESSION_COMMAND_COMPACT)
 	// Act
-	if _, err := h.q.ClaimDisplacedTurn(context.Background(), theWorkspace, "turn-1"); err != nil {
+	if _, err := h.q.ClaimDisplacedTurn(context.Background(), theWorkspace, "turn-1", "resubmitted-1"); err != nil {
 		t.Fatalf("ClaimDisplacedTurn: %v", err)
 	}
 	// Assert

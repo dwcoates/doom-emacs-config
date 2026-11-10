@@ -205,6 +205,13 @@ func (s *store) PutHeldPrompt(ctx context.Context, h HeldPrompt) error {
 	if h.Hold != nil {
 		fields["hold_kind"] = h.Hold.String()
 	}
+	if h.ReheldFrom != nil {
+		fields["reheld_from"] = string(*h.ReheldFrom)
+		if err := validateSuccession(TurnSuccession{Workspace: h.Workspace, Turn: *h.ReheldFrom, Kind: SuccessionReheld, Successor: h.Turn}); err != nil {
+			s.log.Error(op, "refused a hold that re-holds its own turn", withError(fields, err))
+			return err
+		}
+	}
 	if err := validateSentNow(h.SentNow); err != nil {
 		s.log.Error(op, "refused a sent-now mark that names nothing it waits for", withError(fields, err))
 		return err
@@ -265,7 +272,10 @@ func (s *store) PutHeldPrompt(ctx context.Context, h HeldPrompt) error {
 			h.Turn, h.Workspace, said, h.Origin, target, holdKind, schedule,
 			arm, reason, command, classAt, tombKind, tombAt, nanos(h.QueuedAt), int(h.Delivery),
 			actKind, actValue, h.Coalesced, sentByColumn(h.SentBy), askParent, judged, sentAt, waitsFor)
-		return err
+		if err != nil || h.ReheldFrom == nil {
+			return err
+		}
+		return insertSuccession(ctx, tx, TurnSuccession{Workspace: h.Workspace, Turn: *h.ReheldFrom, Kind: SuccessionReheld, Successor: h.Turn, At: h.QueuedAt})
 	})
 }
 

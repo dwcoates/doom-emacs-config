@@ -164,7 +164,10 @@ func (q *queue) redriveOwedLocked(ctx context.Context, d *delivery, log dlog.Log
 		q.reportResume(ws, ResumeNotNow, "a turn already runs on the serving session")
 		return false
 	}
-	owed, err := q.deps.DB.ClaimResumptions(ctx, ws)
+	// THE RESUMED TURN IS MINTED BEFORE THE CLAIM, which records every cut
+	// turn it pays as succeeded by it, so the moves stand before it runs.
+	resumed := wsm.NewTurnID()
+	owed, err := q.deps.DB.ClaimResumptions(ctx, ws, resumed, q.deps.Now())
 	if err != nil {
 		log.Error(opResume, "could not claim the resumptions the workspace is owed", dlog.Context{"cause": err.Error()})
 		q.reportResume(ws, ResumeFailed, "could not claim the resumption owed: "+err.Error())
@@ -187,7 +190,7 @@ func (q *queue) redriveOwedLocked(ctx context.Context, d *delivery, log dlog.Log
 		q.reportResume(ws, ResumeFailed, "the session serves but has no watcher")
 		return false
 	}
-	sub := Submission{WS: ws, Turn: wsm.NewTurnID(), Said: textSaid(resumptionInstruction),
+	sub := Submission{WS: ws, Turn: resumed, Said: textSaid(resumptionInstruction),
 		Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_RESUME_AFTER_RESTART}
 	disposition, err := q.deliver(ctx, d, sub, sender, watcher, log)
 	if err != nil {

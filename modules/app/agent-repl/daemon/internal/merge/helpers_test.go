@@ -588,7 +588,7 @@ func (f *fakeDB) AllDisplacedTurns(_ context.Context) ([]wsm.Turn, error) {
 
 // ClaimDisplacedTurn takes the record exclusively, exactly as the store's one
 // conditional statement does: only a turn still marked can be claimed.
-func (f *fakeDB) ClaimDisplacedTurn(_ context.Context, turn wsm.TurnID, _ time.Time) (wsm.DisplacedClaim, error) {
+func (f *fakeDB) ClaimDisplacedTurn(_ context.Context, turn, _ wsm.TurnID, _ time.Time) (wsm.DisplacedClaim, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	claimed := false
@@ -2042,8 +2042,8 @@ func (q *fakeQueue) Exclusively(context.Context, ids.WorkspaceID, string, func(c
 
 // ClaimDisplacedTurn is the queue's door claim, taken on the harness's store
 // exactly as the real queue takes it on the durable one.
-func (q *fakeQueue) ClaimDisplacedTurn(ctx context.Context, _ ids.WorkspaceID, turn ids.TurnID) (bool, error) {
-	claim, err := q.db.ClaimDisplacedTurn(ctx, turn, time.Time{})
+func (q *fakeQueue) ClaimDisplacedTurn(ctx context.Context, _ ids.WorkspaceID, turn, resubmittedAs ids.TurnID) (bool, error) {
+	claim, err := q.db.ClaimDisplacedTurn(ctx, turn, resubmittedAs, time.Time{})
 	return claim.Claimed, err
 }
 

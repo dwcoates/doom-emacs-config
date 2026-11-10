@@ -50,11 +50,20 @@ func (s *store) OweResumption(ctx context.Context, ws WorkspaceID, turn TurnID, 
 
 // ClaimResumptions takes every resumption ws is owed, in one transaction, and
 // answers how many it took. Zero means nothing is owed, or another claim took
-// it first: the caller resumes nothing.
-func (s *store) ClaimResumptions(ctx context.Context, ws WorkspaceID) (int, error) {
+// it first: the caller resumes nothing. RESUMEDAS is the turn the caller
+// resumes the work as, minted before the claim: every cut turn it pays is
+// recorded as succeeded by it (SuccessionResumed) in the same transaction, so
+// the resumed turn is never delivered before its moves stand.
+func (s *store) ClaimResumptions(ctx context.Context, ws WorkspaceID, resumedAs TurnID, at time.Time) (int, error) {
 	const op = "daemon.wsm.claim_resumptions"
 	var claimed int
-	err := s.write(ctx, op, dlog.Context{"workspace": string(ws)}, func(ctx context.Context, tx *sql.Tx) error {
+	err := s.write(ctx, op, dlog.Context{"workspace": string(ws), "resumed_as": string(resumedAs)}, func(ctx context.Context, tx *sql.Tx) error {
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO turn_successions (turn_id, kind, successor_id, workspace_id, at)
+			 SELECT turn_id, ?, ?, workspace_id, ? FROM owed_resumptions WHERE workspace_id = ?
+			 ON CONFLICT(turn_id, kind) DO NOTHING`, string(SuccessionResumed), resumedAs, nanos(at), ws); err != nil {
+			return err
+		}
 		res, err := tx.ExecContext(ctx, `DELETE FROM owed_resumptions WHERE workspace_id = ?`, ws)
 		if err != nil {
 			return err

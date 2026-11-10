@@ -362,8 +362,11 @@ type Queue interface {
 	// database arbitrates between the merge's release and the boot sweep) and
 	// reports whether this caller took it. A turn the claim closes — its
 	// capture's kill never produced a terminal — is closed as orphaned and its
-	// ending drawn, through the same door.
-	ClaimDisplacedTurn(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID) (bool, error)
+	// ending drawn, through the same door. RESUBMITTEDAS is the turn the
+	// caller puts the prompt back as, minted before the claim: a claim that
+	// takes the record records the move to it (wsm.SuccessionResubmitted) in
+	// the same transaction.
+	ClaimDisplacedTurn(ctx context.Context, ws ids.WorkspaceID, turn, resubmittedAs ids.TurnID) (bool, error)
 	// OnLeaseChanged re-evaluates every hold against the new lease policy.
 	OnLeaseChanged(ws ids.WorkspaceID)
 	// RequestBounce asks the per-workspace BOUNCE REGISTRY to replace what

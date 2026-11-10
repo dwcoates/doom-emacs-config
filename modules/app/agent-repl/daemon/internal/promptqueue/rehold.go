@@ -49,6 +49,10 @@ import (
 func heldAgain(held wsm.HeldPrompt, hold *wsm.HoldKind, verdict *wsm.Classification) wsm.HeldPrompt {
 	again := held
 	again.Turn = wsm.NewTurnID()
+	// THE MOVE IS RECORDED WITH THE HOLD (wsm.HeldPrompt.ReheldFrom), so what
+	// follows the prompt follows it to the new turn.
+	from := held.Turn
+	again.ReheldFrom = &from
 	again.Hold = hold
 	again.ScheduleID = ""
 	again.Classification = verdict

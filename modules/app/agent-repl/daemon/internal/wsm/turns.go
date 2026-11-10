@@ -663,13 +663,14 @@ func (s *store) AllDisplacedTurns(ctx context.Context) ([]Turn, error) {
 // A turn still open is closed as CloseOrphaned: its capture's kill never
 // produced a terminal anyone saw. The caller is the prompt queue's door, which
 // draws that ending in the feed.
-func (s *store) ClaimDisplacedTurn(ctx context.Context, turn TurnID, at time.Time) (DisplacedClaim, error) {
+func (s *store) ClaimDisplacedTurn(ctx context.Context, turn TurnID, resubmittedAs TurnID, at time.Time) (DisplacedClaim, error) {
 	const op = "daemon.wsm.claim_displaced_turn"
-	fields := dlog.Context{"turn": string(turn), "at": at}
+	fields := dlog.Context{"turn": string(turn), "resubmitted_as": string(resubmittedAs), "at": at}
 	var claim DisplacedClaim
 	err := s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
 		var closed sql.NullInt64
-		err := tx.QueryRowContext(ctx, `SELECT closed_at FROM turns WHERE id = ? AND displaced = 1`, turn).Scan(&closed)
+		var ws WorkspaceID
+		err := tx.QueryRowContext(ctx, `SELECT closed_at, workspace_id FROM turns WHERE id = ? AND displaced = 1`, turn).Scan(&closed, &ws)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}
@@ -688,7 +689,7 @@ func (s *store) ClaimDisplacedTurn(ctx context.Context, turn TurnID, at time.Tim
 			return err
 		}
 		claim = DisplacedClaim{Claimed: true, Closed: !closed.Valid}
-		return nil
+		return insertSuccession(ctx, tx, TurnSuccession{Workspace: ws, Turn: turn, Kind: SuccessionResubmitted, Successor: resubmittedAs, At: at})
 	})
 	if err != nil {
 		return DisplacedClaim{}, err

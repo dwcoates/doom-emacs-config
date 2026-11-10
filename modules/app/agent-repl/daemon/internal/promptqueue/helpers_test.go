@@ -100,8 +100,14 @@ type fakeDB struct {
 	// orphansErr fails CloseOrphans, and claimErr ClaimDisplacedTurn.
 	orphansErr error
 	claimErr   error
-	// resumeClaimErr fails ClaimResumptions.
+	// resumeClaimErr fails ClaimResumptions, and resumedAs is the turn each
+	// claim named the resumption by.
 	resumeClaimErr error
+	resumedAs      []ids.TurnID
+	// successions is every move recorded, in order, and successionErr fails
+	// RecordTurnSuccession.
+	successions   []wsm.TurnSuccession
+	successionErr error
 	// byTurnErr fails the one-hold read an edit resolves its prompt through,
 	// and replaceErr fails an edit's content replacement.
 	byTurnErr  error
@@ -484,13 +490,32 @@ func (d *fakeDB) OweResumption(_ context.Context, ws ids.WorkspaceID, turn ids.T
 	return nil
 }
 
+// RecordTurnSuccession records one move.
+func (d *fakeDB) RecordTurnSuccession(_ context.Context, m wsm.TurnSuccession) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.successionErr != nil {
+		return d.successionErr
+	}
+	d.successions = append(d.successions, m)
+	return nil
+}
+
+// recordedSuccessions answers every move recorded, in order.
+func (d *fakeDB) recordedSuccessions() []wsm.TurnSuccession {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return append([]wsm.TurnSuccession(nil), d.successions...)
+}
+
 // ClaimResumptions takes every debt ws is owed.
-func (d *fakeDB) ClaimResumptions(_ context.Context, ws ids.WorkspaceID) (int, error) {
+func (d *fakeDB) ClaimResumptions(_ context.Context, ws ids.WorkspaceID, resumedAs ids.TurnID, _ time.Time) (int, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if d.resumeClaimErr != nil {
 		return 0, d.resumeClaimErr
 	}
+	d.resumedAs = append(d.resumedAs, resumedAs)
 	n := len(d.owed[ws])
 	delete(d.owed, ws)
 	return n, nil
@@ -575,7 +600,7 @@ func (d *fakeDB) CloseOrphans(_ context.Context, id ids.WorkspaceID, at time.Tim
 
 // ClaimDisplacedTurn takes a marked turn, closing it as orphaned when it is
 // still open, as the store's one transaction does.
-func (d *fakeDB) ClaimDisplacedTurn(_ context.Context, turn ids.TurnID, _ time.Time) (wsm.DisplacedClaim, error) {
+func (d *fakeDB) ClaimDisplacedTurn(_ context.Context, turn, _ ids.TurnID, _ time.Time) (wsm.DisplacedClaim, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if d.claimErr != nil {

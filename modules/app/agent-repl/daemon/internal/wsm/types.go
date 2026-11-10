@@ -716,6 +716,12 @@ type HeldPrompt struct {
 	Workspace WorkspaceID
 	// Turn is the minted turn the prompt will run as when released.
 	Turn TurnID
+	// ReheldFrom, when set, is the turn this hold holds the prompt AGAIN in
+	// place of (a join the vendor gave back, a try it blocked). PutHeldPrompt
+	// records the move (SuccessionReheld) in the hold's own transaction, so no
+	// reader ever sees the new hold without the move. It is never read back:
+	// a hold read from the store carries nil.
+	ReheldFrom *TurnID
 	// Said is the WHOLE submission as the user composed it — text and any
 	// attached images — kept as the serialized proto blob. A text-only record
 	// would silently drop a pasted image, so there is no text column.

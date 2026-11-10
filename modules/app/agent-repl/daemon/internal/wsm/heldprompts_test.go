@@ -1630,3 +1630,49 @@ func TestHeldPromptsFailsWholeOnAHalfWrittenSentNowMark(t *testing.T) {
 		t.Fatalf("HeldPrompts = %v, want a *DecodeError naming held_prompts.sent_now", err)
 	}
 }
+
+func TestPutHeldPromptReheldRecordsTheMoveWithTheHold(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s).ID
+	ctx := context.Background()
+	from := TurnID("withdrawn")
+	hold := HeldPrompt{Workspace: ws, Turn: "again", Said: said("hello"), Origin: "PROMPT_ORIGIN_USER_SENT", QueuedAt: instant, ReheldFrom: &from}
+
+	// Act
+	err := s.PutHeldPrompt(ctx, hold)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("PutHeldPrompt: %v", err)
+	}
+	if got, _ := s.SucceedingTurn(ctx, from); got != "again" {
+		t.Fatalf("SucceedingTurn = %q, want the new hold's turn", got)
+	}
+	read, found, err := s.HeldPromptByTurn(ctx, "again")
+	if err != nil || !found || read.ReheldFrom != nil {
+		t.Fatalf("HeldPromptByTurn = %+v, %v, %v; want the hold read back without its move", read, found, err)
+	}
+}
+
+func TestPutHeldPromptRefusesAHoldReheldFromItsOwnTurn(t *testing.T) {
+	// Arrange
+	s, log := testStore(t)
+	ws := testWorkspace(t, s).ID
+	same := TurnID("t")
+	hold := HeldPrompt{Workspace: ws, Turn: same, Said: said("hello"), Origin: "PROMPT_ORIGIN_USER_SENT", QueuedAt: instant, ReheldFrom: &same}
+
+	// Act
+	err := s.PutHeldPrompt(context.Background(), hold)
+
+	// Assert
+	if err == nil {
+		t.Fatal("a hold re-held its own turn")
+	}
+	if !loggedOperation(log, "daemon.wsm.put_held_prompt", "error") {
+		t.Fatalf("the refusal was not recorded at ERROR: %v", log.Records())
+	}
+	if _, found, _ := s.HeldPromptByTurn(context.Background(), same); found {
+		t.Fatal("the refused hold was written")
+	}
+}

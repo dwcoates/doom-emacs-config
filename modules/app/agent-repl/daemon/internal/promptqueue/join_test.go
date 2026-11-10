@@ -504,6 +504,40 @@ func TestAPromptFoldedIntoATurnTheUserStoppedIsNotResubmitted(t *testing.T) {
 	}
 }
 
+func TestAResubmittedFoldedPromptRecordsItsMoveToItsNewTurn(t *testing.T) {
+	// Arrange, Act
+	h := newHarness(t)
+	foldedThenEnded(t, h, wsm.CloseFailed)
+
+	// Assert
+	turns := resubmitted(h)
+	if len(turns) != 1 {
+		t.Fatalf("resubmitted = %v, want one turn", turns)
+	}
+	want := wsm.TurnSuccession{Workspace: theWorkspace, Turn: "t1", Kind: wsm.SuccessionResubmitted, Successor: turns[0]}
+	got := h.db.recordedSuccessions()
+	if len(got) != 1 || got[0].Workspace != want.Workspace || got[0].Turn != want.Turn || got[0].Kind != want.Kind || got[0].Successor != want.Successor {
+		t.Fatalf("successions = %+v, want the folded prompt's own turn moved to %s", got, turns[0])
+	}
+}
+
+func TestAFoldedPromptWhoseMoveCannotBeRecordedIsNotResubmitted(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.db.successionErr = errors.New("disk full")
+
+	// Act
+	foldedThenEnded(t, h, wsm.CloseFailed)
+
+	// Assert
+	if turns := resubmitted(h); len(turns) != 0 {
+		t.Fatalf("resubmitted = %v, want nothing run that what follows the prompt could not find", turns)
+	}
+	if !logged(h.log.Records(), "error", opJoin, "could not record the move of a prompt folded into a turn that failed; it is not resubmitted and stays unanswered") {
+		t.Fatalf("no ERROR record of the unrecorded move: %v", h.log.Records())
+	}
+}
+
 func TestAResubmittedFoldedPromptKeepsItsOrigin(t *testing.T) {
 	// Arrange, Act
 	h := newHarness(t)
