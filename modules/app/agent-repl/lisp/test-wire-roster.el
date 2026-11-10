@@ -1950,10 +1950,10 @@ A hand-rolled list decoder would skip the shared helper and fail here."
 
 (ert-deftest agent-repl-test-wire-roster-an-empty-merge-queue-decodes-to-nothing ()
   "A queue with no head and nothing waiting decodes to no head, none waiting,
-not paused, nothing remediating."
+not paused, nothing remediating, nothing in a GitHub merge queue."
   (should (equal (agent-repl-test-wire-roster--decode
                   #'agent-repl-wire-decode-roster-repo-merge-queue "{}")
-                 '(:head nil :waiting nil :paused nil :remediating nil))))
+                 '(:head nil :waiting nil :paused nil :remediating nil :github nil))))
 
 (ert-deftest agent-repl-test-wire-roster-a-merge-queue-head-refuses-the-retired-failed-arm ()
   "The failed head is retired; its arm is refused as an unknown field."
@@ -1994,6 +1994,27 @@ stepped aside."
                                    agent-repl-test-wire-roster--subject))
                           :remediating))
                  '(9))))
+
+(ert-deftest agent-repl-test-wire-roster-a-merge-queue-decodes-its-github-standings ()
+  "A queue carries the workspaces standing in a GitHub merge queue, each at
+its place and since it joined."
+  (should (equal (mapcar (lambda (m) (list (plist-get (plist-get m :place) :place)
+                                           (plist-get (plist-get m :place) :total)
+                                           (plist-get m :queued-at-ms)))
+                         (plist-get
+                          (agent-repl-test-wire-roster--decode
+                           #'agent-repl-wire-decode-roster-repo-merge-queue
+                           (format "{\"github\":[{\"subject\":%s,\"place\":{\"place\":3,\"total\":5},\"queuedAtMs\":\"9\"}]}"
+                                   agent-repl-test-wire-roster--subject))
+                          :github))
+                 '((3 5 9)))))
+
+(ert-deftest agent-repl-test-wire-roster-a-github-standing-without-place-is-a-breach ()
+  "A GitHub merge queue standing's place is a required message."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-merge-queue-github-entry
+                  (format "{\"subject\":%s,\"queuedAtMs\":\"9\"}" agent-repl-test-wire-roster--subject))
+                 '("RosterMergeQueueGithubEntry" place "required message field is absent"))))
 
 (ert-deftest agent-repl-test-wire-roster-a-remediating-merge-decodes-what-it-repairs ()
   "A remediating merge's reason decodes as the arm it names: its tests or

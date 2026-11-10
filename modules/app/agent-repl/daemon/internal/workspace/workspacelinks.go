@@ -137,8 +137,11 @@ func (v *verbs) changeLinks(ctx context.Context, ws ids.WorkspaceID, fields dlog
 	links, err := change(log)
 	var unknown *wsm.UnknownLinkError
 	var unannounced *wsm.UnknownAnnouncedLinkError
+	var ownedElsewhere *wsm.PullRequestOwnedElsewhereError
 	_, refused := AsRefusal(err)
 	switch {
+	case errors.As(err, &ownedElsewhere):
+		return nil, v.refuseOwnedElsewhere(ctx, log, fields, ownedElsewhere)
 	case errors.As(err, &unknown):
 		return nil, refuseWith(log, rpcChangeWorkspaceLinks, ArmUnknownLink,
 			fmt.Sprintf("the workspace holds no link %q", unknown.URL), false, map[string]any{"url": unknown.URL})
@@ -155,6 +158,21 @@ func (v *verbs) changeLinks(ctx context.Context, ws ids.WorkspaceID, fields dlog
 	fields["links"], fields["shown"] = len(links), len(ShownLinks(links))
 	log.Info(opChangeLinks, done, fields)
 	return links, nil
+}
+
+// refuseOwnedElsewhere refuses a set owning a pull request another open
+// workspace owns (agentrepl.v1.ChangeWorkspaceLinksPullRequestOwnedElsewhere),
+// naming the owner. An owner whose row cannot be read is a store failure.
+func (v *verbs) refuseOwnedElsewhere(ctx context.Context, log dlog.Logger, fields dlog.Context, e *wsm.PullRequestOwnedElsewhereError) error {
+	owner, err := v.deps.DB.Workspace(ctx, e.Owner)
+	if err != nil {
+		log.Error(opChangeLinks, "could not read the workspace that owns the pull request, so the refusal cannot name it",
+			dlog.WithCause(dlog.Merge(fields, dlog.Context{"owner": string(e.Owner), "pull_request": e.PullRequest.String()}), err))
+		return fmt.Errorf("read the owner %q of %s: %w", e.Owner, e.PullRequest, err)
+	}
+	return refuseWith(log, rpcChangeWorkspaceLinks, ArmPullRequestOwnedElsewhere,
+		fmt.Sprintf("the pull request %s is owned by workspace %q; a pull request has one owning workspace", e.PullRequest, owner.Name), false,
+		map[string]any{"url": fields["url"], "owner": owner.Ref(), "owner_name": owner.Name})
 }
 
 // validLinkLabel answers why LABEL is not one the summary's menu draws: not

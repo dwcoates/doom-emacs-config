@@ -99,6 +99,7 @@ import { computedPx, queryAll } from "../dom.js";
 import { log } from "../log.js";
 import { scrollKept } from "../scroll.js";
 import {
+  MERGE_QUEUE_GITHUB_CLASS,
   MERGE_QUEUE_HEAD_CLASS,
   MERGE_QUEUE_REMEDIATING_CLASS,
   MERGE_QUEUE_WAITING_CLASS,
@@ -157,6 +158,7 @@ const LINE_SELECTOR = [
   `.${MERGE_QUEUE_HEAD_CLASS}`,
   `.${MERGE_QUEUE_REMEDIATING_CLASS}`,
   `.${MERGE_QUEUE_WAITING_CLASS}`,
+  `.${MERGE_QUEUE_GITHUB_CLASS}`,
   `.${DEPLOYS_GROUP_CLASS}.${DEPLOYS_GROUP_FOLDED_CLASS} > .merged-group-head`,
 ].join(", ");
 

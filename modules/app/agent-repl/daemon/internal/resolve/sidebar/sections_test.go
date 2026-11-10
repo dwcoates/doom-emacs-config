@@ -1786,6 +1786,66 @@ func TestAQueueWhoseOnlyMergeRemediatesIsListedWithNoHead(t *testing.T) {
 	}
 }
 
+func TestTheMergeQueueDrawsTheWorkspacesStandingInAGithubMergeQueue(t *testing.T) {
+	cases := []struct {
+		name     string
+		agentRun bool
+		wantHead string
+	}{
+		{name: "a queue holding only GitHub standings is listed with no head"},
+		{name: "GitHub standings are drawn beside the merge agent-repl runs", agentRun: true, wantHead: "three"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: w1 stands third and w2 fifth of five in GitHub's queue.
+			r, _ := newResolver(t)
+			if tc.agentRun {
+				r.SetMergeQueue(theRepo, sidebar.MergeQueue{Workspaces: []ids.WorkspaceID{"w3"}, Line: inLine("w3")})
+			}
+			r.SetGithubQueue([]sidebar.GithubQueueEntry{
+				{Workspace: "w1", Place: 3, Total: 5, QueuedAt: time.UnixMilli(1_700_000_000_000)},
+				{Workspace: "w2", Place: 5, Total: 5, QueuedAt: time.UnixMilli(1_700_000_000_001)},
+			})
+
+			// Act
+			r.SetRegistry(queueView(workspace("w1", "one"), workspace("w2", "two"), workspace("w3", "three")))
+
+			// Assert
+			groups := queuedGroups(latest(t, r))
+			if len(groups) != 1 {
+				t.Fatalf("queue groups = %d, want the repository's one", len(groups))
+			}
+			queue := groups[0].GetQueue()
+			if got := queue.GetHead().GetSubject().GetName(); got != tc.wantHead {
+				t.Fatalf("head = %q, want %q", got, tc.wantHead)
+			}
+			gh := queue.GetGithub()
+			if len(gh) != 2 || gh[0].GetSubject().GetName() != "one" || gh[0].GetPlace().GetPlace() != 3 || gh[0].GetPlace().GetTotal() != 5 ||
+				gh[0].GetQueuedAtMs() != 1_700_000_000_000 || gh[1].GetSubject().GetName() != "two" || gh[1].GetPlace().GetPlace() != 5 {
+				t.Fatalf("github = %v, want one at 3 of 5 then two at 5 of 5", gh)
+			}
+		})
+	}
+}
+
+func TestAGithubStandingOfAWorkspaceNotInTheRegistryIsRecordedAndNotDrawn(t *testing.T) {
+	// Arrange
+	r, log := newResolver(t)
+	r.SetGithubQueue([]sidebar.GithubQueueEntry{{Workspace: "gone", Place: 1, Total: 1, QueuedAt: time.UnixMilli(1)}})
+
+	// Act
+	r.SetRegistry(queueView(workspace("w1", "one")))
+
+	// Assert
+	if groups := queuedGroups(latest(t, r)); len(groups) != 0 {
+		t.Fatalf("queue groups = %v, want none", groups)
+	}
+	if _, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "error", Operation: "daemon.sidebar.queue_lines",
+		Message: "a workspace standing in a GitHub merge queue is not in the registry, so it is not drawn"}); !ok {
+		t.Fatalf("no error record of the unregistered standing")
+	}
+}
+
 func TestTheMergeQueueRacingMergeCarriesWhenItTookItsRacingSlot(t *testing.T) {
 	// Arrange: w2, admitted behind the head, races it.
 	r, _ := newResolver(t)

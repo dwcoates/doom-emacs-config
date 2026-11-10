@@ -1051,6 +1051,12 @@ func TestChangeWorkspaceLinksMapsTheVerbsRefusals(t *testing.T) {
 			check: func(e *agentreplv1.ChangeWorkspaceLinksError) bool {
 				return e.GetTooManyShown().GetNamed() == 6 && e.GetTooManyShown().GetLimit() == 5
 			}},
+		{name: "pull_request_owned_elsewhere", refusal: &workspace.Refusal{Arm: workspace.ArmPullRequestOwnedElsewhere,
+			Fields: map[string]any{"url": "https://github.com/o/r/pull/7", "owner": &workspacev1.WorkspaceRef{Id: "w2", Dir: "/w2"}, "owner_name": "owner"}},
+			check: func(e *agentreplv1.ChangeWorkspaceLinksError) bool {
+				got := e.GetPullRequestOwnedElsewhere()
+				return got.GetUrl() == "https://github.com/o/r/pull/7" && got.GetOwner().GetId() == "w2" && got.GetOwnerName() == "owner"
+			}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

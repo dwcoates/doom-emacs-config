@@ -276,6 +276,16 @@ describe("drawFooterStatus: a step is drawn as the status", () => {
     expect(row.querySelector(".footer-status")?.textContent).toBe("awaiting turn: 2 ahead");
   });
 
+  it("draws an owned pull request in a GitHub merge queue as deploying at its place", () => {
+    const { row } = drawStrip({ status: withSubStatus("merging", "githubMergeQueue", { place: 3, total: 5 }) });
+    expect(row.querySelector(".footer-status")?.textContent).toBe("deploying GitHub 3/5");
+  });
+
+  it("colours a GitHub merge queue place as a position", () => {
+    const { row } = drawStrip({ status: withSubStatus("merging", "githubMergeQueue", { place: 3, total: 5 }) });
+    expect(row.querySelector('.footer-status [data-datum="position"]')?.textContent).toBe("GitHub 3/5");
+  });
+
   it("colours the deploys ahead as a count", () => {
     const { row } = drawStrip({ status: withSubStatus("merging", "awaitingTurn", { ahead: 2 }) });
     expect(row.querySelector('.footer-status [data-datum="count"]')?.textContent).toBe("2 ahead");
@@ -297,6 +307,7 @@ describe("drawFooterStatus: a step is drawn as the status", () => {
     ["rebasing", { replayed: 3, total: 7 }],
     ["fixing", { attempt: 2, maxAttempts: 3 }],
     ["awaitingTurn", { ahead: 2 }],
+    ["githubMergeQueue", { place: 3, total: 5 }],
     ["awaitingFree", {}],
   ])("ends the %s status with a joiner and one figure", (arm, value) => {
     const { row } = drawStrip({ status: withSubStatus("merging", arm, value) });

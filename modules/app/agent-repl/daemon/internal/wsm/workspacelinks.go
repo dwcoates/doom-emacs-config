@@ -284,8 +284,12 @@ func (s *store) followLinkInTx(ctx context.Context, tx *sql.Tx, id WorkspaceID, 
 		_, err := deletePullRequestSubscription(ctx, tx, id, *set.PullRequest, PullRequestOriginOwnedLink)
 		return err
 	}
+	// ONE OWNER PER PULL REQUEST (pullrequestowner.go).
+	if err := refuseOtherOwnerInTx(ctx, tx, id, *set.PullRequest); err != nil {
+		return err
+	}
 	if set.Subscribe == nil {
-		return nil
+		return ownHeldSubscriptionInTx(ctx, tx, id, *set.PullRequest)
 	}
 	sub := *set.Subscribe
 	var ended, mergeSHA any

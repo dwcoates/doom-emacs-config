@@ -276,7 +276,8 @@ export function drawFooterStatus(u: FooterStatus, deps: StripDeps): HTMLElement[
  * THREE STEPS CARRY A FIGURE and the rest are empty messages whose NAME is the
  * whole fact: a merge's queue place ("enqueued 2/5"), its replay progress
  * ("rebasing 3/7") and its fixing attempt ("fixing attempt 2/3"), with the
- * deploys ahead and what a merge waits on beside them. The figure follows the
+ * deploys ahead, what a merge waits on, and an owned pull request's GitHub
+ * merge queue place ("deploying GitHub 3/5") beside them. The figure follows the
  * word inside the cell and never waves. The default branch is not a fallback:
  * drawing an empty step's name is exactly what footer.proto's rendering rule
  * prescribes, so a step this build has never heard of still draws correctly
@@ -306,6 +307,9 @@ export function drawFooterStatusWord(
       // How many deploys queued ahead still run their one-at-a-time stages
       // before this one, which has run its concurrent stages.
       return withStatusFigure(cell, ": ", "count", `${step.value.ahead} ahead`);
+    case "githubMergeQueue":
+      // The owned pull request's place in its GitHub merge queue.
+      return withStatusFigure(cell, " ", "position", `GitHub ${step.value.place}/${step.value.total}`);
     case "awaitingFree":
       // What the merge, which has not started, waits on: the awaited
       // workspace's turn and detached work, as the daemon counted them.

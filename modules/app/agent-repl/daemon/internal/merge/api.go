@@ -170,6 +170,11 @@ type Orchestrator interface {
 	// which gives back its lease, its queue entry, its ledger interval and its
 	// repository's slot, and the call returns once that is done.
 	Evict(ctx context.Context, ws ids.WorkspaceID) error
+	// SetGithubDeployments installs, WHOLE, every workspace whose owned pull
+	// request stands in a GitHub merge queue (githubdeploy.go): each is drawn
+	// as deploying, and at its GitHub place in its repository's merge queue.
+	// The pull-request watcher tells it after every poll.
+	SetGithubDeployments(ctx context.Context, deployments []GithubDeployment)
 	// Subscribe records SUBSCRIBER's subscription to the queue of the
 	// repository SCOPE names (every repository's for nil), standing in for
 	// the one it holds in that scope, and answers whether it replaced one. A

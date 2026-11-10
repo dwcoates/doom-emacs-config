@@ -1428,13 +1428,16 @@ them), and t for a hard stop."
 (defun agent-repl-wire-decode-roster-repo-merge-queue (value)
   "Decode VALUE as `RosterRepoMergeQueue'.
 A plist `(:head HEAD :waiting WAITING :paused PAUSED :remediating
-REMEDIATING)': the merge at the head (nil only while the line is empty and a
-merge remediates), the merges waiting behind it, the queue's pause
+REMEDIATING :github GITHUB)': the merge at the head (nil only while the line
+is empty and a merge remediates or a workspace stands in a GitHub merge
+queue), the merges waiting behind it, the queue's pause
 \(`agent-repl-wire-decode-roster-merge-queue-paused'), nil while it runs,
-and the merges remediating out of line
-\(`agent-repl-wire-decode-roster-merge-queue-remediating')."
+the merges remediating out of line
+\(`agent-repl-wire-decode-roster-merge-queue-remediating'), and the
+workspaces standing in a GitHub merge queue
+\(`agent-repl-wire-decode-roster-merge-queue-github-entry')."
   (let ((object (agent-repl-wire--object "RosterRepoMergeQueue" value)))
-    (agent-repl-wire--check-keys "RosterRepoMergeQueue" object '(head waiting paused remediating))
+    (agent-repl-wire--check-keys "RosterRepoMergeQueue" object '(head waiting paused remediating github))
     (agent-repl-wire--decoded
      "RosterRepoMergeQueue"
      (list :head (agent-repl-wire--decode-optional-message
@@ -1446,7 +1449,39 @@ and the merges remediating out of line
                     #'agent-repl-wire-decode-roster-merge-queue-paused)
            :remediating (agent-repl-wire--decode-repeated
                          "RosterRepoMergeQueue" 'remediating object
-                         #'agent-repl-wire-decode-roster-merge-queue-remediating)))))
+                         #'agent-repl-wire-decode-roster-merge-queue-remediating)
+           :github (agent-repl-wire--decode-repeated
+                    "RosterRepoMergeQueue" 'github object
+                    #'agent-repl-wire-decode-roster-merge-queue-github-entry)))))
+
+(defun agent-repl-wire-decode-roster-merge-queue-github-entry (value)
+  "Decode VALUE as `RosterMergeQueueGithubEntry'.
+A plist `(:subject SUBJECT :place PLACE :queued-at-ms MS)': a workspace
+whose owned pull request stands in a GitHub merge queue, its place there
+\(`agent-repl-wire-decode-roster-merge-queue-github-place'), and when the
+pull request joined the queue."
+  (let ((object (agent-repl-wire--object "RosterMergeQueueGithubEntry" value)))
+    (agent-repl-wire--check-keys "RosterMergeQueueGithubEntry" object '(subject place queuedAtMs))
+    (agent-repl-wire--decoded
+     "RosterMergeQueueGithubEntry"
+     (list :subject (agent-repl-wire--decode-message
+                     "RosterMergeQueueGithubEntry" 'subject object
+                     #'agent-repl-wire-decode-roster-merge-queue-subject)
+           :place (agent-repl-wire--decode-message
+                   "RosterMergeQueueGithubEntry" 'place object
+                   #'agent-repl-wire-decode-roster-merge-queue-github-place)
+           :queued-at-ms (agent-repl-wire--decode-int64 "RosterMergeQueueGithubEntry" 'queuedAtMs object)))))
+
+(defun agent-repl-wire-decode-roster-merge-queue-github-place (value)
+  "Decode VALUE as `RosterMergeQueueGithubPlace'.
+A plist `(:place N :total M)': the 1-based place in the GitHub merge queue,
+and how many entries the queue holds."
+  (let ((object (agent-repl-wire--object "RosterMergeQueueGithubPlace" value)))
+    (agent-repl-wire--check-keys "RosterMergeQueueGithubPlace" object '(place total))
+    (agent-repl-wire--decoded
+     "RosterMergeQueueGithubPlace"
+     (list :place (agent-repl-wire--decode-uint32 "RosterMergeQueueGithubPlace" 'place object)
+           :total (agent-repl-wire--decode-uint32 "RosterMergeQueueGithubPlace" 'total object)))))
 
 (defun agent-repl-wire-decode-roster-merge-queue-remediating (value)
   "Decode VALUE as `RosterMergeQueueRemediating'.

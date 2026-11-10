@@ -29,6 +29,8 @@ import {
   type UpdateMergeQueueMoveTo,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_merge_queue_pb";
 import type {
+  RosterMergeQueueGithubEntry,
+  RosterMergeQueueGithubPlace,
   RosterMergeQueueHead,
   RosterMergeQueuePaused,
   RosterMergeQueueStage,
@@ -86,10 +88,11 @@ function queueSubjects(u: RosterRepoMergeQueue) {
     ...(u.head === undefined ? [] : [u.head.subject]),
     ...u.remediating.map((r) => r.subject),
     ...u.waiting.map((w) => w.subject),
+    ...u.github.map((g) => g.subject),
   ];
 }
 
-/** How many merges a queue holds: the one at its head, those remediating and those waiting. */
+/** How many merges a queue holds: the one at its head, those remediating, those waiting and those in a GitHub merge queue. */
 export function queueCount(u: RosterRepoMergeQueue): number {
   return queueSubjects(u).length;
 }
@@ -181,6 +184,9 @@ export const MERGE_QUEUE_HEAD_CLASS = "sb-mq-head";
 /** The class of a waiting merge's line. Each is one line of the band fit. */
 export const MERGE_QUEUE_WAITING_CLASS = "sb-mq-waiting";
 
+/** The class of a GitHub merge queue standing's line. Each is one line of the band fit. */
+export const MERGE_QUEUE_GITHUB_CLASS = "sb-mq-github";
+
 /** The class of a remediating merge's card, the queue's second spot. Each is one line of the band fit. */
 export const MERGE_QUEUE_REMEDIATING_CLASS = "sb-mq-remediating";
 
@@ -193,9 +199,10 @@ export const MERGE_QUEUE_REMEDIATING_CLASS = "sb-mq-remediating";
 export function drawRosterMergeQueue(u: RosterRepoMergeQueue, sc: SidebarContext, path: string): HTMLElement {
   const body = document.createElement("div");
   body.className = `rows ${MERGE_QUEUE_CLASS}`;
-  // A HEAD IS ABSENT ONLY WHILE THE LINE IS EMPTY AND A MERGE REMEDIATES
+  // A HEAD IS ABSENT ONLY WHILE THE LINE IS EMPTY AND A MERGE REMEDIATES OR
+  // A WORKSPACE STANDS IN A GITHUB MERGE QUEUE
   // (frontend.v1.RosterRepoMergeQueue.head); anywhere else it is required.
-  if (u.head !== undefined || u.remediating.length === 0) {
+  if (u.head !== undefined || (u.remediating.length === 0 && u.github.length === 0)) {
     body.appendChild(drawRosterMergeQueueHead(requireMessage(u.head, `${path}.head`), u.paused, sc, `${path}.head`));
   }
   u.remediating.forEach((remediating, index) => {
@@ -207,6 +214,9 @@ export function drawRosterMergeQueue(u: RosterRepoMergeQueue, sc: SidebarContext
     const line = drawRosterMergeQueueWaiting(waiting, sc, waitingPath);
     refs.set(line, requireMessage(requireMessage(waiting.subject, `${waitingPath}.subject`).workspace, `${waitingPath}.subject.workspace`));
     body.appendChild(line);
+  });
+  u.github.forEach((github, index) => {
+    body.appendChild(drawRosterMergeQueueGithub(github, sc, `${path}.github[${index}]`));
   });
   body.addEventListener("pointerdown", (event) => {
     if (event.button !== 0 || !event.isPrimary) return;
@@ -453,6 +463,29 @@ export function drawCardLine(u: RosterMergeQueueSubject, path: string): HTMLElem
   glyph.textContent = MERGE_GLYPH;
   line.append(glyph, drawSubjectName(u, path));
   return line;
+}
+
+/**
+ * One workspace whose owned pull request stands in a GitHub merge queue,
+ * drawn as a waiting merge is, after the merges agent-repl runs: its name,
+ * its GitHub place ("#3 of 5"), and how long its pull request has stood in
+ * the queue. GitHub, not this queue, orders it, so it is no grip.
+ */
+export function drawRosterMergeQueueGithub(u: RosterMergeQueueGithubEntry, sc: SidebarContext, path: string): HTMLElement {
+  const subject = requireMessage(u.subject, `${path}.subject`);
+  const place = requireMessage(u.place, `${path}.place`);
+  const line = drawSubjectControl(subject, sc, MERGE_QUEUE_GITHUB_CLASS, `${path}.subject`);
+  const mark = document.createElement("span");
+  mark.className = "sb-mq-github-place";
+  mark.textContent = githubPlaceText(place);
+  mark.title = "its pull request's place in the GitHub merge queue";
+  line.append(drawSubjectName(subject, `${path}.subject`), mark, drawClock(sc, msOf(u.queuedAtMs, `${path}.queued_at_ms`)));
+  return line;
+}
+
+/** A GitHub merge queue place as drawn: "#3 of 5". */
+export function githubPlaceText(u: RosterMergeQueueGithubPlace): string {
+  return `#${u.place} of ${u.total}`;
 }
 
 /** A merge's name, with an async merge saying so on hover. */

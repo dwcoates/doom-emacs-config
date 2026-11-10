@@ -92,6 +92,9 @@ type repoQueue struct {
 	line        []QueueEntry
 	remediating []QueueEntry
 	pause       *wsm.MergeQueuePause
+	// github are the repository's workspaces standing in a GitHub merge
+	// queue, in queue order.
+	github []GithubQueueEntry
 }
 
 // listed reports whether the merge queue section lists Q: its line holds a
@@ -99,7 +102,7 @@ type repoQueue struct {
 // repository leaves the section as soon as its line empties and nothing
 // remediates). A paused queue holding nothing is not listed either.
 func (q repoQueue) listed() bool {
-	return len(q.line) > 0 || len(q.remediating) > 0
+	return len(q.line) > 0 || len(q.remediating) > 0 || len(q.github) > 0
 }
 
 // drawMergeQueue composes one repository's merge queue: the merge at the
@@ -137,6 +140,17 @@ func (r *resolver) drawMergeQueue(q repoQueue, log dlog.Logger) *frontendv1.Rost
 		}
 		out.Remediating = append(out.Remediating, &frontendv1.RosterMergeQueueRemediating{
 			Subject: sub, SinceMs: entry.SlotSince.UnixMilli(), Reason: entry.RemediatingFor})
+	}
+	for _, entry := range q.github {
+		sub, ok := subject(QueueEntry{Workspace: entry.Workspace, Credited: entry.Workspace})
+		if !ok {
+			continue
+		}
+		out.Github = append(out.Github, &frontendv1.RosterMergeQueueGithubEntry{
+			Subject:    sub,
+			Place:      &frontendv1.RosterMergeQueueGithubPlace{Place: uint32(entry.Place), Total: uint32(entry.Total)},
+			QueuedAtMs: entry.QueuedAt.UnixMilli(),
+		})
 	}
 	if len(q.line) == 0 {
 		return out
@@ -293,6 +307,18 @@ func (r *resolver) repoQueues(log dlog.Logger) map[ids.RepoID]repoQueue {
 			rq.pause = q.pause
 			out[ws.Repo] = rq
 		}
+	}
+	for _, entry := range r.state.github {
+		ws, ok := byID[entry.Workspace]
+		if !ok {
+			log.Error(op, "a workspace standing in a GitHub merge queue is not in the registry, so it is not drawn", dlog.Context{
+				"workspace_id":        string(entry.Workspace),
+				"invariant_violation": "a pull request's owner is a registered workspace"})
+			continue
+		}
+		rq := out[ws.Repo]
+		rq.github = append(rq.github, entry)
+		out[ws.Repo] = rq
 	}
 	return out
 }

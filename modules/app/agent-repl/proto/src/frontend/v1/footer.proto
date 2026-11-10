@@ -984,6 +984,11 @@ message FooterStatusMerging {
     // The merge holds the workspace but has not started: it waits for the
     // workspace it drives to fall free. The roster draws it `merge_queued`.
     FooterSubStatusMergingAwaitingFree awaiting_free = 22;
+    // The pull request this workspace owns stands in its repository's GitHub
+    // merge queue: GitHub, not agent-repl, lands it. The daemon follows the
+    // queue and restates the place on each read; nothing here is the
+    // workspace's own doing beyond owning the pull request.
+    FooterSubStatusMergingGithubMergeQueue github_merge_queue = 27;
   }
   // Tags 1-4, 6-9, 11 and 12 (enqueuing, queued, pre_prompt, merge, parked,
   // post_prompt, failed, merged, fixes, conflicts) are RETIRED: the steps
@@ -1073,6 +1078,16 @@ message FooterSubStatusMergingCommitting {}
 message FooterSubStatusMergingDeploying {}
 // A `post_deploy` hook is running, drawn "post-deploy".
 message FooterSubStatusMergingPostDeploy {}
+// The owned pull request's place in its GitHub merge queue, drawn
+// "deploying · GitHub queue 3/5".
+message FooterSubStatusMergingGithubMergeQueue {
+  // The pull request's 1-based place in the queue: 1 is the entry GitHub
+  // merges next. Counted from the order of the queue's entries.
+  uint32 place = 1;
+  // How many entries the queue holds, every repository's pull requests
+  // included, this one too. At least `place`.
+  uint32 total = 2;
+}
 // The merge's agent waits on the user, drawn "waiting on user". The activity
 // line names the ask: the gated call, or the question batch's lead.
 message FooterSubStatusMergingWaitingOnUser {}

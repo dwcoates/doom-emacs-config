@@ -429,6 +429,9 @@ type rosterState struct {
 	// (SetMergeQueue). Each repository's queue is replaced WHOLE, so a merge
 	// that left the queue, or a pause that was lifted, can never linger.
 	queues map[wsm.RepoKey]mergeQueue
+	// github is the GitHub merge queues' share (Resolver.SetGithubQueue), in
+	// queue order.
+	github []GithubQueueEntry
 	// gates are the shown cold gates by workspace (SetColdGate), each
 	// carried to the webhost's dock while its workspace is listed open.
 	gates map[ids.WorkspaceID]coldGate

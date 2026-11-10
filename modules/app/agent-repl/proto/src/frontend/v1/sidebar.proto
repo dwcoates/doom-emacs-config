@@ -961,7 +961,8 @@ message RosterRepoMergeQueue {
   // `remediating` is not; an unset head anywhere else is malformed. (A failed
   // merge no longer stands at the head of an empty line, owner request
   // 2026-10-27: a repository leaves the section as soon as its line empties
-  // and nothing remediates.)
+  // and nothing remediates.) A queue listed only for its `github` entries,
+  // with an empty line, carries no head either.
   optional RosterMergeQueueHead head = 2;
   // Every merge waiting behind the head, in the order it will run.
   repeated RosterMergeQueueWaiting waiting = 3;
@@ -975,6 +976,32 @@ message RosterRepoMergeQueue {
   // when it returns next after the merge being worked on. Drawn under the
   // head, less prominent than it and more than the merges waiting.
   repeated RosterMergeQueueRemediating remediating = 5;
+  // THE GITHUB MERGE QUEUE'S SHARE: every workspace of this repository whose
+  // owned pull request stands in a GitHub merge queue, in the order GitHub
+  // will merge them. The daemon follows each owned pull request's queue and
+  // keeps these in step; a workspace only owns the pull request. Each is
+  // drawn at its GitHub place, which may skip numbers held by pull requests
+  // no workspace here owns. A queue listing only these carries no head.
+  repeated RosterMergeQueueGithubEntry github = 6;
+}
+
+// One workspace whose owned pull request stands in a GitHub merge queue.
+message RosterMergeQueueGithubEntry {
+  RosterMergeQueueSubject subject = 1;
+  // Its place in the GitHub merge queue, drawn beside its name.
+  RosterMergeQueueGithubPlace place = 2;
+  // When the pull request entered the GitHub merge queue, epoch ms. The
+  // client ticks how long it has stood there from it. Never zero.
+  int64 queued_at_ms = 3;
+}
+
+// A pull request's place in its GitHub merge queue, drawn "#3 of 5".
+message RosterMergeQueueGithubPlace {
+  // 1-based: 1 is the entry GitHub merges next.
+  uint32 place = 1;
+  // How many entries the GitHub queue holds, every pull request included.
+  // At least `place`.
+  uint32 total = 2;
 }
 
 // One merge remediating out of line.

@@ -447,6 +447,19 @@ func (r *resolver) SetMergeQueue(repo wsm.RepoKey, queue MergeQueue) {
 		})
 }
 
+// SetGithubQueue replaces the GitHub merge queues' share as the roster draws
+// it.
+func (r *resolver) SetGithubQueue(entries []GithubQueueEntry) {
+	ws := make([]ids.WorkspaceID, 0, len(entries))
+	for _, e := range entries {
+		ws = append(ws, e.Workspace)
+	}
+	r.mutate("daemon.sidebar.set_github_queue", "the roster took the workspaces standing in GitHub merge queues",
+		dlog.Context{"workspaces": ids.Strings(ws)},
+		r.log.Global(),
+		func() { r.state.github = entries })
+}
+
 // SetColdGate installs, or with nil lifts, WS's shown cold gate.
 func (r *resolver) SetColdGate(ws ids.WorkspaceID, row *frontendv1.FeedId, gate *frontendv1.FeedColdGate) {
 	if (row == nil) != (gate == nil) {
