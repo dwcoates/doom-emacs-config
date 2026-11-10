@@ -25,6 +25,16 @@
 - Deploy it: `/agent-repl-runtime deploy` for agent-repl, or the repository's own deploy.
 - Report the landing: the version, and that the queue stays hard-stopped.
 
+### Dispatch no one-shot and no async merge
+
+- This workspace never creates a one-shot workspace, never marks one, and never queues an async merge.
+  - Each of those lands through the merge queue, which this mode hard-stops, so the work would wait there.
+  - The daemon refuses each one with `requester_bypassing_queue`, and its `detail` repeats this reminder.
+- Every rule that would dispatch one (a handed failure's fix, a todo row's fix, work a main workspace splits off) is carried out here instead.
+  - Either this workspace does the work itself, or it creates a child that is no one-shot.
+  - Such a child stops when its work is committed and tells this workspace its branch, never finishing or queueing anything.
+  - This workspace lands that branch with `land-direct.sh`, as it lands its own.
+
 ### Tests
 
 - Run no tests before landing: no gate runs while the queue is stopped, and the change lands on its own review.
