@@ -99,9 +99,9 @@
      below step off it in the same grey. */
   /* A KNOWN SLASH COMMAND in a user prompt (src/feed/rows/known-commands.ts):
      the purple the Emacs composer marks it in while it is typed
-     (`agent-repl-command-completion-known`), deepened so it reads on the
-     prompt blue. */
-  --known-command: #7e22ce;
+     (`agent-repl-command-completion-known`), THE CANONICAL PURPLE, the purple
+     status --blocked (owner request, 2026-11-10; it was a lighter purple). */
+  --known-command: var(--blocked);
   /* THE RESPONSE BUBBLE'S FILL IS THE TOOL CARD'S FILL (owner ruling,
      2026-10-11, "same color as the toolcard backgrounds"; the two drifted
      apart 2026-10-14 and 2026-10-24, and the owner asked on 2026-10-25 that
@@ -601,8 +601,6 @@
     /* The Claude desktop app's prompt bubble (owner request, 2026-10-28), a
        touch brighter (2026-10-29). */
     --user: #292929;
-    /* A light purple, so a known command reads on the dark prompt blue. */
-    --known-command: #ca9dd9;
     /* A held prompt wears the prompt's own fill (owner request, 2026-10-28):
        its glimmer, not its fill, tells it apart. */
     --held-prompt-bg: var(--user);

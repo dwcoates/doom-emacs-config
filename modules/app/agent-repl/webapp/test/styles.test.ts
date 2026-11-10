@@ -4135,6 +4135,22 @@ describe("the dark theme's iMessage fills (owner ruling, 2026-09-27)", () => {
   });
 });
 
+describe("a known command in a prompt bubble (owner request, 2026-11-10)", () => {
+  it("is the canonical purple, the purple status --blocked", () => {
+    // Arrange / Act
+    const root = declarationsOf(":root") ?? "";
+    // Assert
+    expect(root).toMatch(/--known-command:\s*var\(--blocked\)/);
+  });
+
+  it("is not overridden by the dark theme", () => {
+    // Arrange / Act
+    const block = darkThemeBlock();
+    // Assert
+    expect(block).not.toMatch(/--known-command:/);
+  });
+});
+
 describe("a link in a prompt bubble (owner request, 2026-10-19)", () => {
   it("is the known command's purple", () => {
     // Arrange / Act
