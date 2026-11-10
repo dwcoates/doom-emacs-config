@@ -101,36 +101,46 @@ func (f *Fleet) SetRemoteControl(ctx context.Context, log dlog.Logger, ws ids.Wo
 		log.Error(opRemoteControl, "could not record the workspace's remote-control mode", dlog.Context{"change": change.String(), "cause": err.Error()})
 		return false, fmt.Errorf("update remote control on %q: %w", ws, err)
 	}
-	f.deps.Topbar.SetRemoteControl(ws, on)
 	fields := dlog.Context{"change": change.String(), "remote_control": on}
 	log.Info(opRemoteControl, "recorded the workspace's remote-control mode", fields)
+	return on, f.putRemoteControlInForce(ctx, log, ws, on, fields)
+}
+
+// putRemoteControlInForce states mode ON to the topbar and puts it in force on
+// workspace WS's live shim, the caller holding the workspace's remote-control
+// gate. It is the ONE tail of every mode change. It answers the shim's no_session refusal when no shim holds a
+// session to bridge (the next bring-up puts the mode in force), and the
+// vendor's refusal, logged at ERROR under FIELDS and stated on the warning
+// strip.
+func (f *Fleet) putRemoteControlInForce(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, on bool, fields dlog.Context) error {
+	f.deps.Topbar.SetRemoteControl(ws, on)
 	// A PARKED WORKSPACE'S BRIDGE IS ITS GATE'S (parkedbridge.go): an on
 	// bridges the standing gate, an off stands the bridge's shim down, and no
 	// live session is asked anything.
 	if _, gated := f.StandingColdGate(ws); gated {
 		log.Info(opRemoteControl, "the workspace is parked at its cold gate; the gate's bridge follows the mode", fields)
 		f.Detach(func(ctx context.Context) { f.settleGateShim(ctx, ws) })
-		return on, nil
+		return nil
 	}
 	client, ok := f.Client(ws)
 	if !ok {
-		return on, &ShimRefusal{Verb: "SetSessionRemoteControl", Arm: ArmShimNoSession, Detail: "the workspace has no live shim"}
+		return &ShimRefusal{Verb: "SetSessionRemoteControl", Arm: ArmShimNoSession, Detail: "the workspace has no live shim"}
 	}
 	if err := f.applyRemoteControl(ctx, log, ws, client, on); err != nil {
 		if refusedNoSession(err) {
 			log.Info(opRemoteControl, "the shim holds no session yet; its session's start puts the mode in force", fields)
-			return on, err
+			return err
 		}
 		if shimGone(err) {
 			log.Info(opRemoteControl, "the shim went under the call; the next bring-up puts the mode in force", dlog.WithCause(fields, err))
-			return on, &ShimRefusal{Verb: "SetSessionRemoteControl", Arm: ArmShimNoSession, Detail: err.Error()}
+			return &ShimRefusal{Verb: "SetSessionRemoteControl", Arm: ArmShimNoSession, Detail: err.Error()}
 		}
 		log.Error(opRemoteControl, "the shim did not put the remote-control mode in force", dlog.WithCause(fields, err))
 		f.deps.Topbar.RaiseWarning(ws, remoteControlWarning, fmt.Sprintf("could not turn remote control %s: %v", onOff(on), err))
-		return on, err
+		return err
 	}
 	log.Info(opRemoteControl, "the shim put the remote-control mode in force", fields)
-	return on, nil
+	return nil
 }
 
 // reapplyRemoteControl puts a freshly started shim in remote control when the
