@@ -363,13 +363,13 @@
 
 ## Closing after the PR merged
 
-### A workspace whose owned canonical pull request merged may close itself, after telling its parent
+### agent-repl closes a workspace once every pull request it owns has merged
 
-- When the workspace's owned canonical pull request has merged into master and no work is pending, the workspace is free to close itself.
-  - Pending work is anything unfinished: an uncommitted change, an unanswered review comment, a running subagent, or a request from the user not yet met.
-  - The workspace first notifies its parent workspace that it is closing, then runs `agent-repld workspace close here`.
-- A workspace with no parent workspace never closes itself automatically.
-  - It reports that its pull request merged and leaves the closing to the user.
+- A workspace is closed when all of its owned pull requests have merged, and only then: agent-repl watches each owned pull request and closes the workspace itself, so the workspace never closes itself for a merge.
+  - A workspace mid-turn is closed when that turn ends.
+  - An owned pull request still open, closed unmerged, or no longer followed keeps the workspace open.
+  - A repository's main workspace is never closed this way.
+- This holds only for a pull request stored as an owned link, so the workspace stores every pull request it opens as owned the moment its URL is known.
 
 ## Tool rejections
 
