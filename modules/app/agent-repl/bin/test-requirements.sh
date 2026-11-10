@@ -668,8 +668,8 @@ test_installing_a_linux_emacs_source_installs_deps_then_builds_into_the_prefix()
   new_case; manifest "[$(source_emacs_entry)]"; fake_emacs 30.2 "" 636f166cfc86 "GTK3 XWIDGETS NATIVE_COMP"; fake_linux_source_build
   PLATFORM=linux run install
   local src="$CASE/home/.cache/agent-repl/src/zettel-emacs" deps gccjit
-  deps="$(grep -n "apt-get install -y autoconf libgtk-3-dev" "$CASE/transcript" | head -1 | cut -d: -f1)"
-  gccjit="$(grep -n "apt-get install -y libgccjit-14-dev" "$CASE/transcript" | head -1 | cut -d: -f1)"
+  deps="$(grep -n "apt-get install -y autoconf libgtk-3-dev" "$CASE/transcript" | sed -n 1p | cut -d: -f1)"
+  gccjit="$(grep -n "apt-get install -y libgccjit-14-dev" "$CASE/transcript" | sed -n 1p | cut -d: -f1)"
   if [ "$RC" -eq 0 ] && ran "sudo -n apt-get update -q" && [ -n "$deps" ] && [ -n "$gccjit" ] && [ "$deps" -lt "$gccjit" ] \
      && ran "git -C $src checkout -q --force $PINNED" \
      && ran "configure --with-x-toolkit=gtk3 --prefix=$CASE/home/.local" && ran "make install" \
