@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -16,7 +17,6 @@ import (
 	"agent-repld/internal/ids"
 	"agent-repld/internal/replyquote"
 	"agent-repld/internal/resolve/feed"
-	"agent-repld/internal/workspace"
 	"agent-repld/internal/wsm"
 )
 
@@ -31,10 +31,10 @@ func withAskable(h *harness) {
 	}
 }
 
-// withHomeMain has the fake verbs answer the home repository's main
-// workspace as every question's recipient.
-func withHomeMain(h *harness) {
-	h.Verbs.homeMain = wsm.Workspace{ID: "ws-main", Dir: "/tmp/agent-repl-test-repo", Name: "main (doom)"}
+// withQuestionIntake has the fake verbs answer one intake workspace as every
+// question's recipient.
+func withQuestionIntake(h *harness) {
+	h.Verbs.questionIntake = wsm.Workspace{ID: "ws-intake", Dir: "/tmp/agent-repl-test-repo-intake", Name: "question-intake-1"}
 }
 
 // ask toggles the workspace's question about ROW.
@@ -221,11 +221,11 @@ func TestALateRootWatchIsToldTheStandingQuestion(t *testing.T) {
 	}
 }
 
-func TestAPromptSentWhileAQuestionStandsIsSentToTheHomeMainWorkspace(t *testing.T) {
+func TestAPromptSentWhileAQuestionStandsIsHandedToAnIntakeWorkspace(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	withAskable(h)
-	withHomeMain(h)
+	withQuestionIntake(h)
 	ask(t, h, "row-1")
 
 	// Act.
@@ -236,12 +236,12 @@ func TestAPromptSentWhileAQuestionStandsIsSentToTheHomeMainWorkspace(t *testing.
 		t.Fatalf("SubmitPrompt: %v", err)
 	}
 	sent := resp.Msg.GetSuccess().GetQuestionSent()
-	if sent.GetRow().GetValue() != "row-1" || sent.GetRecipient() != "main (doom)" {
-		t.Fatalf("SubmitPrompt answered %v, want question_sent naming row-1 to main (doom)", resp.Msg)
+	if sent.GetRow().GetValue() != "row-1" || sent.GetRecipient() != "question-intake-1" {
+		t.Fatalf("SubmitPrompt answered %v, want question_sent naming row-1 to question-intake-1", resp.Msg)
 	}
-	asked := h.Verbs.homeQuestions
+	asked := h.Verbs.intakeQuestions
 	if len(asked) != 1 || asked[0].asker != testWorkspaceID {
-		t.Fatalf("home questions = %+v, want one from %s", asked, testWorkspaceID)
+		t.Fatalf("intake questions = %+v, want one from %s", asked, testWorkspaceID)
 	}
 	if !strings.Contains(asked[0].question, "1 🔎 the answer") || !strings.HasSuffix(asked[0].question, "hello") {
 		t.Fatalf("question = %q, want the quoted response then the words", asked[0].question)
@@ -263,7 +263,7 @@ func TestAQuestionPromptQuotesTheAskedCardByItsKind(t *testing.T) {
 			// Arrange.
 			h := newHarness(t)
 			withAskable(h)
-			withHomeMain(h)
+			withQuestionIntake(h)
 			ask(t, h, tc.row)
 
 			// Act.
@@ -272,8 +272,8 @@ func TestAQuestionPromptQuotesTheAskedCardByItsKind(t *testing.T) {
 			}
 
 			// Assert.
-			if len(h.Verbs.homeQuestions) != 1 || h.Verbs.homeQuestions[0].question != tc.want {
-				t.Fatalf("home questions = %+v, want one whose text is %q", h.Verbs.homeQuestions, tc.want)
+			if len(h.Verbs.intakeQuestions) != 1 || h.Verbs.intakeQuestions[0].question != tc.want {
+				t.Fatalf("intake questions = %+v, want one whose text is %q", h.Verbs.intakeQuestions, tc.want)
 			}
 		})
 	}
@@ -283,7 +283,7 @@ func TestAQuestionPromptMintsNoTurn(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	withAskable(h)
-	withHomeMain(h)
+	withQuestionIntake(h)
 	ask(t, h, "row-1")
 
 	// Act.
@@ -301,7 +301,7 @@ func TestTheQuestionPromptTakesTheQuestion(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	withAskable(h)
-	withHomeMain(h)
+	withQuestionIntake(h)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	feedStream := openRootWatch(t, h, ctx)
@@ -331,7 +331,7 @@ func TestAQuestionAboutAGoneResponseRefusesThePrompt(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	withAskable(h)
-	withHomeMain(h)
+	withQuestionIntake(h)
 	ask(t, h, "row-1")
 	delete(h.Feed.cards, "row-1")
 
@@ -342,19 +342,19 @@ func TestAQuestionAboutAGoneResponseRefusesThePrompt(t *testing.T) {
 	if connect.CodeOf(err) != connect.CodeNotFound {
 		t.Fatalf("SubmitPrompt = %v, want NotFound for the gone response", err)
 	}
-	if len(h.Verbs.homeQuestions) != 0 || h.Prompts.submits != 0 {
-		t.Fatalf("home questions=%d submits=%d, want nothing sent or delivered", len(h.Verbs.homeQuestions), h.Prompts.submits)
+	if len(h.Verbs.intakeQuestions) != 0 || h.Prompts.submits != 0 {
+		t.Fatalf("home questions=%d submits=%d, want nothing sent or delivered", len(h.Verbs.intakeQuestions), h.Prompts.submits)
 	}
 	if _, ok := h.Server.(*server).questions.take(testWorkspaceID); ok {
 		t.Fatalf("the refused prompt left the question standing")
 	}
 }
 
-func TestAQuestionPromptTheHomeMainWorkspaceCannotTakeFails(t *testing.T) {
+func TestAQuestionPromptWhoseIntakeWorkspaceCannotBeCreatedFails(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	withAskable(h)
-	h.Verbs.homeMainErr = workspace.ErrNoHomeMainWorkspace
+	h.Verbs.questionIntakeErr = errors.New("create the intake workspace: the worktree step failed")
 	ask(t, h, "row-1")
 
 	// Act.
@@ -373,7 +373,7 @@ func TestAnAgentsPromptLeavesTheQuestionStanding(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	withAskable(h)
-	withHomeMain(h)
+	withQuestionIntake(h)
 	sender := ids.WorkspaceID("ws-sender")
 	h.DB.workspaces[sender] = wsm.Workspace{ID: sender, Dir: "/tmp/ws-sender", Name: "sender"}
 	ask(t, h, "row-1")

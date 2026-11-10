@@ -2135,10 +2135,10 @@ it."
                        (length raw))
      (agent-repl--input-accepted ws raw :response-revising from-buffer))
     (:question-sent
-     ;; The send was the question about a card: the daemon sent it, quoting
-     ;; the card, to the home repository's main workspace as an
-     ;; agent-to-agent prompt, which acknowledges this workspace in its own
-     ;; time.  Nothing is awaited here.
+     ;; The send was the question about a card: the daemon handed it,
+     ;; quoting the card, to an ephemeral intake workspace it created for
+     ;; the question, which acknowledges this workspace in its own time.
+     ;; Nothing is awaited here.
      (let* ((value (plist-get success :value))
             (recipient (plist-get value :recipient)))
        (agent-repl--info ws "elisp.input.question-sent ws=%s origin=%S row=%S recipient=%S raw-len=%d"

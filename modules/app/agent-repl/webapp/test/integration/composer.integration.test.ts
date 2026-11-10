@@ -799,7 +799,7 @@ describe("a response-revising answer", () => {
 });
 
 describe("a question-sent answer", () => {
-  /** Submit words the daemon sent as a question about a card to the home main workspace. */
+  /** Submit words the daemon handed, as a question about a card, to an intake workspace. */
   const submitQuestion = async (): Promise<void> => {
     harness = await startHarness({ composer: true });
     harness.fake.answer(

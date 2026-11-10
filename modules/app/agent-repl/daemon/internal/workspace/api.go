@@ -142,6 +142,12 @@ type CreateSpec struct {
 	// unprefixed, set exactly when MergeOf is. It was checked and reserved when
 	// the request was recorded, so it is taken as it stands.
 	MergeName string
+	// Intake makes this create an EPHEMERAL INTAKE WORKSPACE (intake.go): it
+	// is recorded as one and hidden before its session starts, it runs no
+	// creation stage, and the daemon retires it when a turn of it ends. Only
+	// CreateIntake sets it, beside a name and an initial prompt, on a peer
+	// with a fresh context.
+	Intake bool
 }
 
 // CreateStage is one stage a Create passes through between acceptance and its
@@ -679,10 +685,14 @@ type Verbs interface {
 	// composed follow-up question, for the caller to submit. Unset is the
 	// `web_fallback` arm: the refusal alone, silently.
 	OpenFeedLink(ctx context.Context, ws ids.WorkspaceID, href string, report bool) (*UnresolvedLink, error)
-	// AskHomeMain sends QUESTION, a feed card's `?` question, from ASKER to
-	// the main workspace of the repository agent-repl's own checkout is in,
-	// as an agent-to-agent prompt from ASKER, and answers the recipient.
-	AskHomeMain(ctx context.Context, asker ids.WorkspaceID, question string) (wsm.Workspace, error)
+	// CreateIntake creates an ephemeral intake workspace: hidden, with a
+	// fresh context, handed one brief, and retired by the daemon when a turn
+	// of it ends (intake.go).
+	CreateIntake(ctx context.Context, spec IntakeSpec) (wsm.Workspace, error)
+	// AskQuestionIntake sends QUESTION, a feed card's `?` question, from ASKER
+	// to an intake workspace created for it in the repository agent-repl's own
+	// checkout is in, and answers that workspace (intake.go).
+	AskQuestionIntake(ctx context.Context, asker ids.WorkspaceID, question string) (wsm.Workspace, error)
 	// Notify raises one host notification: it raises the workspace's desktop
 	// banner (the daemon's own, decided on Emacs's focus) and sets the roster's
 	// attention marker, which SelectWorkspace and AsksSettled clear. It is the

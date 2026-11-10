@@ -499,9 +499,13 @@ Every card in the feed has a question-mark icon: responses, tool cards, merge bu
 - **Clicking the question mark sets your draft aside.** Whatever the input window held is saved to its history, so the up arrow brings it back, and the input window is cleared and takes the keyboard.
 - **The pressed question mark is tinted in the orange a response tree's citations wear** while the question stands. Only one card's question mark is pressed at a time: clicking another card's moves the question there.
 - **Clicking the pressed question mark again withdraws the question.** The draft it set aside comes back into the input window, and anything you had typed since is saved to history.
-- **Sending answers the question in a new child workspace.** It is forked from this workspace's conversation, so the agent knows everything that led to the card. Its first prompt is the card, quoted, then your words.
+- **Sending hands the question to a hidden intake workspace.** agent-repl creates it for the question in its own repository, with a fresh context, and hands it the card, quoted, then your words.
   - A response or a prompt is quoted as its text.
-  - Every other card is quoted as the data agent-repl drew it from, in JSON. Its tab arrives once it is created, and you stay where you are.
+  - Every other card is quoted as the data agent-repl drew it from, in JSON.
+  - The intake workspace first acknowledges this workspace with a message, which is the first thing you see.
+  - A question is answered in a second message to this workspace.
+  - A request for a change becomes a one-shot workspace, a child of this one, which lands the change, and the message names it.
+  - The intake workspace is removed once it has done that. It sits in the hidden section until then.
   - Nothing is added to this workspace's feed, and no turn runs here.
   - The question mark is released, and the draft it set aside stays in history.
 - **Limits:**
