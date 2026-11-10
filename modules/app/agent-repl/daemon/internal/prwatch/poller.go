@@ -344,9 +344,12 @@ func (w *Watcher) advance(ctx context.Context, sub wsm.PullRequestSubscription, 
 		w.deps.Log.Info(opPoll, "the subscription moved since it was read; the next poll reads again", fields)
 	case end != nil:
 		w.deps.Log.Info(opPoll, "the pull request ended; its subscription ended after telling it", fields)
-		// AN OWNED PULL REQUEST'S MERGE MAY BE ITS WORKSPACE'S LAST, which
-		// closes the workspace (owner ruling, 2026-11-10).
-		if end.Merged && sub.Origin == wsm.PullRequestOriginOwnedLink {
+		// A MERGE MAY BE THE LAST OF ITS WORKSPACE'S OWNED PULL REQUESTS, which
+		// closes the workspace (owner ruling, 2026-11-10). Whatever the
+		// subscription's origin: an owned pull request its workspace follows
+		// again with narrowed events is followed as `requested`, and the
+		// verb judges ownership from the workspace's links.
+		if end.Merged {
 			if err := w.deps.OwnedMerged(ctx, sub.Subscriber); err != nil {
 				w.deps.Log.Error(opPoll, "could not judge closing the workspace one of whose owned pull requests merged", dlog.WithCause(fields, err))
 			}

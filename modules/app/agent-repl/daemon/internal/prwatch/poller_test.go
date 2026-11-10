@@ -436,16 +436,16 @@ func TestRecordReadFailureRecordsWhatItCouldNotDo(t *testing.T) {
 	}
 }
 
-func TestAnOwnedPullRequestsMergeTellsItsWorkspace(t *testing.T) {
+func TestAPullRequestsMergeTellsItsWorkspace(t *testing.T) {
 	tests := []struct {
 		name   string
 		origin wsm.PullRequestOrigin
 		merged bool
 		want   int
 	}{
-		{name: "an owned pull request's merge is told", origin: wsm.PullRequestOriginOwnedLink, merged: true, want: 1},
-		{name: "an owned pull request closed unmerged is not", origin: wsm.PullRequestOriginOwnedLink, merged: false, want: 0},
-		{name: "a requested subscription's merge is not", origin: wsm.PullRequestOriginRequested, merged: true, want: 0},
+		{name: "an owned link's merge is told", origin: wsm.PullRequestOriginOwnedLink, merged: true, want: 1},
+		{name: "a pull request closed unmerged is not", origin: wsm.PullRequestOriginOwnedLink, merged: false, want: 0},
+		{name: "a requested subscription's merge is told too, for the verb to judge ownership", origin: wsm.PullRequestOriginRequested, merged: true, want: 1},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
