@@ -51,7 +51,7 @@
 (declare-function agent-repl--with-log-context "core"
                   (workspace request-id function))
 (defvar agent-repl--global-log-scope)
-(defvar agent-repl--workspace-history)
+(declare-function agent-repl--selection-history "workspace" ())
 (defvar agent-repl--panels-arrivals-armed)
 (declare-function agent-repl--note-workspace-created "workspace" (name))
 (defvar agent-repl--log-context-request-id)
@@ -1179,8 +1179,9 @@ THE ONE SELECTION-RECENCY ORDER: the landing after a close
 workspace (`agent-repl--roster-recent-names') both order by it, so the two
 can never disagree about which workspace came before.
 
-  1. Names in `agent-repl--workspace-history', in its order: this
-     session's own switches, exact and immediate.
+  1. Names in `agent-repl--selection-history', in its order: this
+     session's own visits, the one the frame stands in first, and only
+     those that lasted `agent-repl-visit-dwell-seconds' after it.
   2. Then names the history does not hold, by the roster's durable
      last-selected instant (`agent-repl-roster-last-selected-ms'),
      newest first: what a fresh Emacs knows of earlier sessions.
@@ -1188,7 +1189,7 @@ can never disagree about which workspace came before.
 
 NAMES is never filtered, only reordered."
   (let* ((history (cl-remove-if-not (lambda (n) (member n names))
-                                    agent-repl--workspace-history))
+                                    (agent-repl--selection-history)))
          (rest (cl-remove-if (lambda (n) (member n history)) names))
          (stamped (cl-remove-if-not #'agent-repl-roster-last-selected-ms rest))
          (never (cl-remove-if #'agent-repl-roster-last-selected-ms rest)))

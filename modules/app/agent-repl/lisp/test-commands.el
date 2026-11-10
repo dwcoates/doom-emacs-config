@@ -852,6 +852,7 @@ for, each landing as an activation."
   (declare (indent 3))
   `(let ((agent-repl--workspace-history ,history)
          (agent-repl--recency-walk-landing nil)
+         (agent-repl--current-visit nil)
          (shown nil) (requests nil))
      (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () shown))
                ((symbol-function 'agent-repl--ws-log-name) (lambda (ws) ws))
@@ -1359,7 +1360,8 @@ formatted `info' records, newest first."
 CURRENT is shown.  Binds `requests' to the (WS TRIGGER) pairs requested."
   (declare (indent 4))
   `(let ((requests nil)
-         (agent-repl--workspace-history ,history))
+         (agent-repl--workspace-history ,history)
+         (agent-repl--current-visit nil))
      (cl-letf (((symbol-function 'agent-repl-roster-drawn-tab-order)
                 (lambda () (cl-remove-if (lambda (name) (member name ,hidden)) ,tabs)))
                ((symbol-function 'agent-repl-roster-navigable-tab-order)

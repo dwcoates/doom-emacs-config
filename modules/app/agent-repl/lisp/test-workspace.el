@@ -148,6 +148,24 @@ the workspace selected after it still lands on it."
       ;; Assert
       (should (equal agent-repl--workspace-history '("current" "new" "first"))))))
 
+(ert-deftest agent-repl-test-ws-rename-state-renames-the-standing-visit ()
+  "A rename carries the visit the frame stands in, and its :ahead, to the new name."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "old" :project-dir "/old/path")
+    (let ((agent-repl--workspace-history nil)
+          (agent-repl--current-visit (list :name "old" :began 100.0 :ahead '("x"))))
+      ;; Act
+      (agent-repl--ws-rename-state "old" "new" "/new/path")
+      ;; Assert
+      (should (equal agent-repl--current-visit '(:name "new" :began 100.0 :ahead ("x")))))))
+
+(ert-deftest agent-repl-test-visit-renamed-renames-a-created-workspace-ahead ()
+  "A renamed workspace created during the visit keeps its place ahead of it."
+  ;; Act / Assert
+  (should (equal (agent-repl--visit-renamed '(:name "a" :began 1.0 :ahead ("old" "y")) "old" "new")
+                 '(:name "a" :began 1.0 :ahead ("new" "y")))))
+
 (ert-deftest agent-repl-test-ws-rename-state-rejected-leaves-the-selection-history ()
   "A rejected rename leaves the selection history untouched."
   ;; Arrange
@@ -1830,13 +1848,23 @@ registry and the roster kept carrying it -- and its TAB vanished."
 
 ;;;; ---- Tests: --record-workspace-history ----
 
-(ert-deftest agent-repl-test-record-workspace-history-pushes-current ()
-  "record-workspace-history pushes the current workspace to the front."
+(ert-deftest agent-repl-test-record-workspace-history-leads-with-the-current ()
+  "record-workspace-history puts the current workspace first in the selection history."
   (agent-repl-test--with-clean-state
     (let ((agent-repl--workspace-history nil))
       (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "a")))
         (agent-repl--record-workspace-history)
-        (should (equal agent-repl--workspace-history '("a")))))))
+        (should (equal (agent-repl--selection-history) '("a")))))))
+
+(ert-deftest agent-repl-test-record-workspace-history-records-no-visit-on-arrival ()
+  "An arrival only begins a visit: the recorded history waits for it to end."
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl--workspace-history '("b")))
+      (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "a"))
+                ((symbol-function 'agent-repl--now) (lambda () 100.0)))
+        (agent-repl--record-workspace-history)
+        (should (equal agent-repl--workspace-history '("b")))
+        (should (equal agent-repl--current-visit '(:name "a" :began 100.0 :ahead nil)))))))
 
 (ert-deftest agent-repl-test-record-workspace-history-dedups-and-fronts ()
   "record-workspace-history moves an already-present name to the front."
@@ -1844,7 +1872,7 @@ registry and the roster kept carrying it -- and its TAB vanished."
     (let ((agent-repl--workspace-history '("b" "a")))
       (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "a")))
         (agent-repl--record-workspace-history)
-        (should (equal agent-repl--workspace-history '("a" "b")))))))
+        (should (equal (agent-repl--selection-history) '("a" "b")))))))
 
 (ert-deftest agent-repl-test-record-workspace-history-noop-when-no-current ()
   "record-workspace-history leaves history unchanged when there is no current ws."
@@ -1871,7 +1899,7 @@ registry and the roster kept carrying it -- and its TAB vanished."
       (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "main")))
         (agent-repl--record-workspace-history)
         ;; History still records the name, but no hash entry was created.
-        (should (equal agent-repl--workspace-history '("main")))
+        (should (equal (agent-repl--selection-history) '("main")))
         (should-not (agent-repl--ws-known-p "main"))))))
 
 (ert-deftest agent-repl-test-record-workspace-history-suppressed-during-eager-open ()
@@ -1981,11 +2009,255 @@ transiently activated workspace while eager-open is in progress."
   "Activating any other workspace ends the walk: its landing, then the new visit, lead."
   (agent-repl-test--with-clean-state
     (let ((agent-repl--workspace-history '("a" "b" "c"))
-          (agent-repl--recency-walk-landing "b"))
-      (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "c")))
+          (agent-repl--recency-walk-landing "b")
+          (agent-repl--current-visit (list :name "b" :began 100.0 :ahead nil)))
+      (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "c"))
+                ((symbol-function 'agent-repl--now) (lambda () 110.0)))
         (agent-repl--record-workspace-history)
-        (should (equal agent-repl--workspace-history '("c" "b" "a")))
+        (should (equal (agent-repl--selection-history) '("c" "b" "a")))
         (should-not agent-repl--recency-walk-landing)))))
+
+;;;; ---- Tests: a visit lasts agent-repl-visit-dwell-seconds ----
+
+(defmacro agent-repl-test-workspace--with-visit-clock (&rest body)
+  "Run BODY with `agent-repl--now' reading `clock', which BODY may set."
+  (declare (indent 0))
+  `(let ((clock 0.0))
+     (cl-letf (((symbol-function 'agent-repl--now) (lambda () clock)))
+       ,@body)))
+
+(ert-deftest agent-repl-test-end-visit-records-a-visit-of-exactly-the-dwell ()
+  "A visit that lasted exactly `agent-repl-visit-dwell-seconds' is recorded first."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test-workspace--with-visit-clock
+      ;; Arrange
+      (let ((agent-repl--workspace-history '("b" "a"))
+            (agent-repl--current-visit (list :name "a" :began 100.0 :ahead nil)))
+        (setq clock (+ 100.0 agent-repl-visit-dwell-seconds))
+        ;; Act
+        (agent-repl--end-visit "c" "activation")
+        ;; Assert
+        (should (equal agent-repl--workspace-history '("a" "b")))
+        (should-not agent-repl--current-visit)))))
+
+(ert-deftest agent-repl-test-end-visit-drops-a-visit-shorter-than-the-dwell ()
+  "A visit shorter than the dwell leaves the workspace at its earlier place."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test-workspace--with-visit-clock
+      ;; Arrange
+      (let ((agent-repl--workspace-history '("b" "a"))
+            (agent-repl--current-visit (list :name "a" :began 100.0 :ahead nil)))
+        (setq clock (+ 100.0 agent-repl-visit-dwell-seconds -0.1))
+        ;; Act
+        (agent-repl--end-visit "c" "activation")
+        ;; Assert
+        (should (equal agent-repl--workspace-history '("b" "a")))
+        (should-not agent-repl--current-visit)))))
+
+(ert-deftest agent-repl-test-end-visit-drops-a-brief-first-visit-entirely ()
+  "A workspace whose only visit was brief never enters the history."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test-workspace--with-visit-clock
+      ;; Arrange
+      (let ((agent-repl--workspace-history '("b"))
+            (agent-repl--current-visit (list :name "a" :began 100.0 :ahead nil)))
+        (setq clock 101.0)
+        ;; Act
+        (agent-repl--end-visit "c" "activation")
+        ;; Assert
+        (should (equal agent-repl--workspace-history '("b")))))))
+
+(ert-deftest agent-repl-test-end-visit-logs-a-recorded-visit ()
+  "A recorded visit is logged with its dwell and what ended it, in LOG-WS's sink."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test-workspace--with-visit-clock
+      ;; Arrange
+      (let ((agent-repl--workspace-history nil)
+            (agent-repl--current-visit (list :name "a" :began 100.0 :ahead nil))
+            (records nil))
+        (setq clock 112.0)
+        (cl-letf (((symbol-function 'agent-repl--info)
+                   (lambda (ws fmt &rest args) (push (cons ws (apply #'format fmt args)) records))))
+          ;; Act
+          (agent-repl--end-visit "c" "activation"))
+        ;; Assert
+        (should (equal records
+                       '(("c" . "elisp.workspace.visit-recorded ws=a dwell=12.0s reason=activation"))))))))
+
+(ert-deftest agent-repl-test-end-visit-logs-a-dropped-visit ()
+  "A dropped visit is logged with its dwell, the minimum, and what ended it."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test-workspace--with-visit-clock
+      ;; Arrange
+      (let ((agent-repl--workspace-history nil)
+            (agent-repl--current-visit (list :name "a" :began 100.0 :ahead nil))
+            (records nil))
+        (setq clock 102.5)
+        (cl-letf (((symbol-function 'agent-repl--info)
+                   (lambda (ws fmt &rest args) (push (cons ws (apply #'format fmt args)) records))))
+          ;; Act
+          (agent-repl--end-visit "c" "picker"))
+        ;; Assert
+        (should (equal records
+                       '(("c" . "elisp.workspace.visit-dropped ws=a dwell=2.5s min=5s reason=picker"))))))))
+
+(ert-deftest agent-repl-test-end-visit-without-a-visit-changes-nothing ()
+  "With no visit standing, ending one records nothing and logs nothing."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((agent-repl--workspace-history '("a"))
+          (agent-repl--current-visit nil)
+          (records nil))
+      (cl-letf (((symbol-function 'agent-repl--info) (lambda (&rest args) (push args records))))
+        ;; Act
+        (agent-repl--end-visit "a" "activation"))
+      ;; Assert
+      (should (equal agent-repl--workspace-history '("a")))
+      (should-not records))))
+
+(ert-deftest agent-repl-test-move-visit-to-continues-the-same-workspaces-visit ()
+  "Re-activating the workspace the visit names keeps its start, so its dwell keeps counting."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test-workspace--with-visit-clock
+      ;; Arrange
+      (let ((agent-repl--workspace-history nil)
+            (agent-repl--current-visit (list :name "a" :began 100.0 :ahead nil)))
+        (setq clock 103.0)
+        ;; Act
+        (agent-repl--move-visit-to "a" "activation")
+        ;; Assert
+        (should (equal agent-repl--current-visit '(:name "a" :began 100.0 :ahead nil)))
+        (should-not agent-repl--workspace-history)))))
+
+(ert-deftest agent-repl-test-move-visit-to-ends-the-standing-visit-and-begins-the-next ()
+  "Moving to another workspace records the visit it leaves, then begins one at now."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test-workspace--with-visit-clock
+      ;; Arrange
+      (let ((agent-repl--workspace-history nil)
+            (agent-repl--current-visit (list :name "a" :began 100.0 :ahead nil)))
+        (setq clock 110.0)
+        ;; Act
+        (agent-repl--move-visit-to "b" "activation")
+        ;; Assert
+        (should (equal agent-repl--workspace-history '("a")))
+        (should (equal agent-repl--current-visit '(:name "b" :began 110.0 :ahead nil)))))))
+
+(ert-deftest agent-repl-test-record-workspace-history-passes-over-a-brief-selection ()
+  "A workspace selected for less than the dwell is not the one selected before."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test-workspace--with-visit-clock
+      ;; Arrange
+      (let ((agent-repl--workspace-history nil)
+            (shown nil))
+        (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () shown)))
+          ;; Act
+          (setq clock 0.0 shown "a")
+          (agent-repl--record-workspace-history)
+          (setq clock 60.0 shown "b")
+          (agent-repl--record-workspace-history)
+          (setq clock 62.0 shown "c")
+          (agent-repl--record-workspace-history))
+        ;; Assert
+        (should (equal agent-repl--workspace-history '("a")))
+        (should (equal (agent-repl--selection-history) '("c" "a")))))))
+
+(ert-deftest agent-repl-test-record-workspace-history-a-walk-step-ends-the-visit-it-leaves ()
+  "The first step of a walk records the visit it starts from when that one lasted."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test-workspace--with-visit-clock
+      ;; Arrange
+      (let ((agent-repl--workspace-history '("b"))
+            (agent-repl--recency-walk-landing "b")
+            (agent-repl--current-visit (list :name "a" :began 100.0 :ahead nil)))
+        (setq clock 110.0)
+        (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "b")))
+          ;; Act
+          (agent-repl--record-workspace-history))
+        ;; Assert
+        (should (equal agent-repl--workspace-history '("a" "b")))
+        (should (equal agent-repl--current-visit '(:name "b" :began 110.0 :ahead nil)))))))
+
+(ert-deftest agent-repl-test-selection-history-leaves-a-walk-landing-in-its-place ()
+  "A walk landing's visit leads nothing: its place in the history is the walk's position."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((agent-repl--workspace-history '("a" "b" "c"))
+          (agent-repl--recency-walk-landing "b")
+          (agent-repl--current-visit (list :name "b" :began 100.0 :ahead nil)))
+      ;; Act / Assert
+      (should (equal (agent-repl--selection-history) '("a" "b" "c"))))))
+
+(ert-deftest agent-repl-test-selection-history-is-the-history-without-a-visit ()
+  "With no visit standing the selection history is the recorded one."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((agent-repl--workspace-history '("a" "b"))
+          (agent-repl--current-visit nil))
+      ;; Act / Assert
+      (should (equal (agent-repl--selection-history) '("a" "b"))))))
+
+(ert-deftest agent-repl-test-history-with-visit-puts-it-behind-the-workspaces-created-ahead ()
+  "A visit's workspace goes first, behind only the workspaces created while it was shown."
+  ;; Act / Assert
+  (should (equal (agent-repl--history-with-visit '("n" "a" "b") '(:name "b" :began 1.0 :ahead ("n")))
+                 '("n" "b" "a"))))
+
+(ert-deftest agent-repl-test-history-with-visit-leaves-the-history-unchanged ()
+  "The history the visit is placed into is not modified."
+  ;; Arrange
+  (let ((history (list "a" "b")))
+    ;; Act
+    (agent-repl--history-with-visit history '(:name "b" :began 1.0 :ahead nil))
+    ;; Assert
+    (should (equal history '("a" "b")))))
+
+(ert-deftest agent-repl-test-note-workspace-created-goes-ahead-of-the-standing-visit ()
+  "A workspace created while another is shown leads it, and stays ahead once it is recorded."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test-workspace--with-visit-clock
+      ;; Arrange
+      (let ((agent-repl--workspace-history '("b"))
+            (agent-repl--current-visit (list :name "a" :began 100.0 :ahead nil)))
+        ;; Act
+        (agent-repl--note-workspace-created "n")
+        (setq clock 110.0)
+        (let ((pending (agent-repl--selection-history)))
+          (agent-repl--end-visit "a" "activation")
+          ;; Assert
+          (should (equal pending '("n" "a" "b")))
+          (should (equal agent-repl--workspace-history '("n" "a" "b"))))))))
+
+(ert-deftest agent-repl-test-end-recency-walk-drops-a-brief-landing ()
+  "A walk landing the frame stood on for less than the dwell is not recorded."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test-workspace--with-visit-clock
+      ;; Arrange
+      (let ((agent-repl--workspace-history '("a" "b" "c"))
+            (agent-repl--recency-walk-landing "c")
+            (agent-repl--current-visit (list :name "c" :began 100.0 :ahead nil)))
+        (agent-repl--ws-put "c" :project-dir "/tmp/c")
+        (setq clock 102.0)
+        (cl-letf (((symbol-function 'current-time) (lambda () '(25000 0))))
+          ;; Act
+          (agent-repl--end-recency-walk "d" 'picker))
+        ;; Assert
+        (should (equal agent-repl--workspace-history '("a" "b" "c")))
+        (should-not agent-repl--current-visit)
+        (should (equal (agent-repl--ws-get "c" :last-viewed-at) '(25000 0)))))))
+
+(ert-deftest agent-repl-test-end-recency-walk-leaves-a-visit-the-walk-never-reached ()
+  "A walk whose landing the frame has not reached leaves the standing visit running."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((agent-repl--workspace-history '("b"))
+          (agent-repl--recency-walk-landing "b")
+          (agent-repl--current-visit (list :name "a" :began 100.0 :ahead nil)))
+      ;; Act
+      (agent-repl--end-recency-walk "c" 'picker)
+      ;; Assert
+      (should (equal agent-repl--current-visit '(:name "a" :began 100.0 :ahead nil)))
+      (should (equal agent-repl--workspace-history '("b"))))))
 
 ;;;; ---- Tests: --end-recency-walk ----
 
@@ -1994,9 +2266,11 @@ transiently activated workspace while eager-open is in progress."
   (agent-repl-test--with-clean-state
     ;; Arrange
     (let ((agent-repl--workspace-history '("a" "b" "c"))
-          (agent-repl--recency-walk-landing "c"))
+          (agent-repl--recency-walk-landing "c")
+          (agent-repl--current-visit (list :name "c" :began 100.0 :ahead nil)))
       (agent-repl--ws-put "c" :project-dir "/tmp/c")
-      (cl-letf (((symbol-function 'current-time) (lambda () '(25000 0))))
+      (cl-letf (((symbol-function 'current-time) (lambda () '(25000 0)))
+                ((symbol-function 'agent-repl--now) (lambda () 110.0)))
         ;; Act
         (agent-repl--end-recency-walk "d" 'picker))
       ;; Assert

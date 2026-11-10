@@ -808,6 +808,9 @@ class: leaking a scratch frontend name makes later tests ERROR
 re-routes their frontend resolution instead."
   (declare (indent 0))
   `(let ((agent-repl--workspaces (make-hash-table :test 'equal))
+         ;; The visit the frame stands in (workspace.el): a visit one test
+         ;; began must not be ended, or recorded, by the next.
+         (agent-repl--current-visit nil)
          ;; Logging's per-directory canonical spellings: a directory a test
          ;; created and removed must not stay resolved into the next test.
          (agent-repl--log-dir-truenames (make-hash-table :test 'equal))

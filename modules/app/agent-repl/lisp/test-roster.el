@@ -825,6 +825,7 @@ it, not the first tab: one rule for every close (owner ruling, 2026-09-30)."
 last-selected instants and HISTORY as this session's switches."
   (declare (indent 2))
   `(let ((agent-repl--workspace-history ,history)
+         (agent-repl--current-visit nil)
          (instants ,instants))
      (cl-letf (((symbol-function 'agent-repl-roster-row-for-ws)
                 (lambda (ws)
@@ -837,6 +838,14 @@ last-selected instants and HISTORY as this session's switches."
   (agent-repl-test-roster--with-instants '(("a" . 100) ("b" . 900)) '("a")
     (should (equal (agent-repl-roster-selection-recency-order '("b" "a"))
                    '("a" "b")))))
+
+(ert-deftest agent-repl-test-roster-recency-order-leads-with-the-standing-visit ()
+  "The workspace the frame stands in leads the order before its visit is recorded."
+  (agent-repl-test-roster--with-instants nil '("a")
+    (let ((agent-repl--current-visit (list :name "c" :began 100.0 :ahead nil))
+          (agent-repl--recency-walk-landing nil))
+      (should (equal (agent-repl-roster-selection-recency-order '("a" "b" "c"))
+                     '("c" "a" "b"))))))
 
 (ert-deftest agent-repl-test-roster-recency-order-orders-the-rest-by-the-durable-instant ()
   "Workspaces the history does not hold order newest durable instant first."
