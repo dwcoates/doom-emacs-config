@@ -1,0 +1,78 @@
+// endpoint_gather_workspaces.proto — GatherWorkspaces: ask many workspaces
+// the same question on one workspace's behalf, and bring their answers back
+// as ONE update. AGENT API section. The gather's shapes and its lifecycle are
+// gather.proto's.
+//
+// EACH TARGET IS PROMPTED AS `workspace prompt` PROMPTS IT: an agent-sent
+// prompt (PROMPT_ORIGIN_AGENT_SENT) from the caller, under the same refusals,
+// including the fan-out cap `as_user` lifts. A refused target is answered with
+// its typed cause and is not part of the gather.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/gather.proto";
+import "conversation/v1/user.proto";
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message GatherWorkspacesRequest {
+  // The workspace the gather prompts on behalf of: the targets' feeds head
+  // the prompt with it, and every notice goes to it. Must be open.
+  workspace.v1.WorkspaceRef caller = 1;
+  // The targets, by workspace name. REQUIRED: at least one; a repeated name
+  // is one target.
+  repeated string target_names = 2;
+  // The prompt every target is sent, verbatim.
+  conversation.v1.UserSaid said = 3;
+  // The user asked for this gather: lifts the fan-out cap, exactly as
+  // SubmitPromptRequest.as_user does.
+  bool as_user = 4;
+  // Client-minted. A request repeating a key already accepted answers the
+  // gather that key made and prompts nobody again.
+  string idempotency_key = 5;
+}
+
+// THE ARM IS THE OUTCOME.
+message GatherWorkspacesResponse {
+  oneof result {
+    GatherWorkspacesSuccess success = 1;
+    GatherWorkspacesError error = 2;
+  }
+}
+// The gather was made.
+message GatherWorkspacesSuccess {
+  // The gather, for GetGatherStatus.
+  GatherRef gather = 1;
+  // Every target that took the prompt, in the order the caller named them.
+  // Never empty.
+  repeated GatherTarget accepted = 2;
+  // Every target the daemon refused, with why, in the order named.
+  repeated GatherRefusedTarget refused = 3;
+  // When the first update is told if a target is still outstanding then, in
+  // the host's wall-clock Unix milliseconds.
+  int64 deadline_at_unix_ms = 4;
+}
+// Validation failures (no target, a blank name, an empty prompt, a blank key)
+// are Connect InvalidArgument, never an arm.
+message GatherWorkspacesError {
+  oneof cause {
+    // The caller is not in the daemon's registry.
+    GatherWorkspacesUnknownCaller unknown_caller = 1;
+    // The caller is closed: it runs no agent to tell.
+    GatherWorkspacesCallerClosed caller_closed = 2;
+    // Every target was refused, so no gather was made.
+    GatherWorkspacesNoneAccepted none_accepted = 3;
+  }
+}
+// The caller is unknown. No fields.
+message GatherWorkspacesUnknownCaller {}
+// The caller is closed. No fields.
+message GatherWorkspacesCallerClosed {}
+// No target took the prompt.
+message GatherWorkspacesNoneAccepted {
+  // Every target, with why it was refused, in the order named.
+  repeated GatherRefusedTarget refused = 1;
+}
