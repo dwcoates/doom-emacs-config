@@ -37,10 +37,20 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
-// DELIBERATELY EMPTY: the call is the request. The keep-alive targets the one
-// session this shim serves.
+// Unset, the keep-alive targets the one session this shim serves. Set, it
+// targets ONLY a PARKED conversation of the same workspace instead.
 type SendKeepaliveRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// A conversation of this shim's workspace that no session runs: the one a
+	// queue-bypass switch parked (owner request, 2026-11-10: a workspace's two
+	// conversations are kept warm in tandem). The shim sends the keep-alive in
+	// a short-lived query of its own, beside the session it serves, so the
+	// session's turn slot is never taken: SendKeepaliveSkippedMainAgentBusy
+	// and SendKeepaliveSkippedDetachedWorkLive are never its answer, and
+	// nothing of the query is stored. `sent` means the keep-alive was ANSWERED,
+	// because no session stream carries this conversation's lapse. The cache
+	// judgment is the shim's, read off the conversation's own transcript.
+	Parked        *SendKeepaliveParked `protobuf:"bytes,1,opt,name=parked,proto3" json:"parked,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -75,6 +85,72 @@ func (*SendKeepaliveRequest) Descriptor() ([]byte, []int) {
 	return file_shim_v1_endpoint_send_keepalive_proto_rawDescGZIP(), []int{0}
 }
 
+func (x *SendKeepaliveRequest) GetParked() *SendKeepaliveParked {
+	if x != nil {
+		return x.Parked
+	}
+	return nil
+}
+
+// The parked conversation a keep-alive targets, and the profile it runs
+// under: the one its own session would start with, which differs from the
+// served session's (a parked queue conversation runs the merge-queue landing
+// while the served bypass one runs the bypass landing), because the prompt
+// cache is keyed on the system prompt.
+type SendKeepaliveParked struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The parked conversation's vendor session id. REQUIRED.
+	VendorSessionId string `protobuf:"bytes,1,opt,name=vendor_session_id,json=vendorSessionId,proto3" json:"vendor_session_id,omitempty"`
+	// The profile the conversation's own session runs under. REQUIRED.
+	Profile       *SessionProfile `protobuf:"bytes,2,opt,name=profile,proto3" json:"profile,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SendKeepaliveParked) Reset() {
+	*x = SendKeepaliveParked{}
+	mi := &file_shim_v1_endpoint_send_keepalive_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SendKeepaliveParked) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SendKeepaliveParked) ProtoMessage() {}
+
+func (x *SendKeepaliveParked) ProtoReflect() protoreflect.Message {
+	mi := &file_shim_v1_endpoint_send_keepalive_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SendKeepaliveParked.ProtoReflect.Descriptor instead.
+func (*SendKeepaliveParked) Descriptor() ([]byte, []int) {
+	return file_shim_v1_endpoint_send_keepalive_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *SendKeepaliveParked) GetVendorSessionId() string {
+	if x != nil {
+		return x.VendorSessionId
+	}
+	return ""
+}
+
+func (x *SendKeepaliveParked) GetProfile() *SessionProfile {
+	if x != nil {
+		return x.Profile
+	}
+	return nil
+}
+
 // THE ARM IS THE OUTCOME.
 type SendKeepaliveResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -89,7 +165,7 @@ type SendKeepaliveResponse struct {
 
 func (x *SendKeepaliveResponse) Reset() {
 	*x = SendKeepaliveResponse{}
-	mi := &file_shim_v1_endpoint_send_keepalive_proto_msgTypes[1]
+	mi := &file_shim_v1_endpoint_send_keepalive_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -101,7 +177,7 @@ func (x *SendKeepaliveResponse) String() string {
 func (*SendKeepaliveResponse) ProtoMessage() {}
 
 func (x *SendKeepaliveResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_shim_v1_endpoint_send_keepalive_proto_msgTypes[1]
+	mi := &file_shim_v1_endpoint_send_keepalive_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -114,7 +190,7 @@ func (x *SendKeepaliveResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SendKeepaliveResponse.ProtoReflect.Descriptor instead.
 func (*SendKeepaliveResponse) Descriptor() ([]byte, []int) {
-	return file_shim_v1_endpoint_send_keepalive_proto_rawDescGZIP(), []int{1}
+	return file_shim_v1_endpoint_send_keepalive_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *SendKeepaliveResponse) GetResult() isSendKeepaliveResponse_Result {
@@ -177,7 +253,7 @@ type SendKeepaliveSuccess struct {
 
 func (x *SendKeepaliveSuccess) Reset() {
 	*x = SendKeepaliveSuccess{}
-	mi := &file_shim_v1_endpoint_send_keepalive_proto_msgTypes[2]
+	mi := &file_shim_v1_endpoint_send_keepalive_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -189,7 +265,7 @@ func (x *SendKeepaliveSuccess) String() string {
 func (*SendKeepaliveSuccess) ProtoMessage() {}
 
 func (x *SendKeepaliveSuccess) ProtoReflect() protoreflect.Message {
-	mi := &file_shim_v1_endpoint_send_keepalive_proto_msgTypes[2]
+	mi := &file_shim_v1_endpoint_send_keepalive_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -202,7 +278,7 @@ func (x *SendKeepaliveSuccess) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SendKeepaliveSuccess.ProtoReflect.Descriptor instead.
 func (*SendKeepaliveSuccess) Descriptor() ([]byte, []int) {
-	return file_shim_v1_endpoint_send_keepalive_proto_rawDescGZIP(), []int{2}
+	return file_shim_v1_endpoint_send_keepalive_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *SendKeepaliveSuccess) GetOutcome() isSendKeepaliveSuccess_Outcome {
@@ -256,7 +332,7 @@ type SendKeepaliveSent struct {
 
 func (x *SendKeepaliveSent) Reset() {
 	*x = SendKeepaliveSent{}
-	mi := &file_shim_v1_endpoint_send_keepalive_proto_msgTypes[3]
+	mi := &file_shim_v1_endpoint_send_keepalive_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -268,7 +344,7 @@ func (x *SendKeepaliveSent) String() string {
 func (*SendKeepaliveSent) ProtoMessage() {}
 
 func (x *SendKeepaliveSent) ProtoReflect() protoreflect.Message {
-	mi := &file_shim_v1_endpoint_send_keepalive_proto_msgTypes[3]
+	mi := &file_shim_v1_endpoint_send_keepalive_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -281,7 +357,7 @@ func (x *SendKeepaliveSent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SendKeepaliveSent.ProtoReflect.Descriptor instead.
 func (*SendKeepaliveSent) Descriptor() ([]byte, []int) {
-	return file_shim_v1_endpoint_send_keepalive_proto_rawDescGZIP(), []int{3}
+	return file_shim_v1_endpoint_send_keepalive_proto_rawDescGZIP(), []int{4}
 }
 
 // No keep-alive went out. THE ARM IS WHY: the shim stays the judge of whether
@@ -300,7 +376,7 @@ type SendKeepaliveSkipped struct {
 
 func (x *SendKeepaliveSkipped) Reset() {
 	*x = SendKeepaliveSkipped{}
-	mi := &file_shim_v1_endpoint_send_keepalive_proto_msgTypes[4]
+	mi := &file_shim_v1_endpoint_send_keepalive_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -312,7 +388,7 @@ func (x *SendKeepaliveSkipped) String() string {
 func (*SendKeepaliveSkipped) ProtoMessage() {}
 
 func (x *SendKeepaliveSkipped) ProtoReflect() protoreflect.Message {
-	mi := &file_shim_v1_endpoint_send_keepalive_proto_msgTypes[4]
+	mi := &file_shim_v1_endpoint_send_keepalive_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -325,7 +401,7 @@ func (x *SendKeepaliveSkipped) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SendKeepaliveSkipped.ProtoReflect.Descriptor instead.
 func (*SendKeepaliveSkipped) Descriptor() ([]byte, []int) {
-	return file_shim_v1_endpoint_send_keepalive_proto_rawDescGZIP(), []int{4}
+	return file_shim_v1_endpoint_send_keepalive_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *SendKeepaliveSkipped) GetReason() isSendKeepaliveSkipped_Reason {
@@ -400,7 +476,7 @@ type SendKeepaliveSkippedMainAgentBusy struct {
 
 func (x *SendKeepaliveSkippedMainAgentBusy) Reset() {
 	*x = SendKeepaliveSkippedMainAgentBusy{}
-	mi := &file_shim_v1_endpoint_send_keepalive_proto_msgTypes[5]
+	mi := &file_shim_v1_endpoint_send_keepalive_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -412,7 +488,7 @@ func (x *SendKeepaliveSkippedMainAgentBusy) String() string {
 func (*SendKeepaliveSkippedMainAgentBusy) ProtoMessage() {}
 
 func (x *SendKeepaliveSkippedMainAgentBusy) ProtoReflect() protoreflect.Message {
-	mi := &file_shim_v1_endpoint_send_keepalive_proto_msgTypes[5]
+	mi := &file_shim_v1_endpoint_send_keepalive_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -425,7 +501,7 @@ func (x *SendKeepaliveSkippedMainAgentBusy) ProtoReflect() protoreflect.Message 
 
 // Deprecated: Use SendKeepaliveSkippedMainAgentBusy.ProtoReflect.Descriptor instead.
 func (*SendKeepaliveSkippedMainAgentBusy) Descriptor() ([]byte, []int) {
-	return file_shim_v1_endpoint_send_keepalive_proto_rawDescGZIP(), []int{5}
+	return file_shim_v1_endpoint_send_keepalive_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *SendKeepaliveSkippedMainAgentBusy) GetDetail() string {
@@ -448,7 +524,7 @@ type SendKeepaliveSkippedDetachedWorkLive struct {
 
 func (x *SendKeepaliveSkippedDetachedWorkLive) Reset() {
 	*x = SendKeepaliveSkippedDetachedWorkLive{}
-	mi := &file_shim_v1_endpoint_send_keepalive_proto_msgTypes[6]
+	mi := &file_shim_v1_endpoint_send_keepalive_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -460,7 +536,7 @@ func (x *SendKeepaliveSkippedDetachedWorkLive) String() string {
 func (*SendKeepaliveSkippedDetachedWorkLive) ProtoMessage() {}
 
 func (x *SendKeepaliveSkippedDetachedWorkLive) ProtoReflect() protoreflect.Message {
-	mi := &file_shim_v1_endpoint_send_keepalive_proto_msgTypes[6]
+	mi := &file_shim_v1_endpoint_send_keepalive_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -473,7 +549,7 @@ func (x *SendKeepaliveSkippedDetachedWorkLive) ProtoReflect() protoreflect.Messa
 
 // Deprecated: Use SendKeepaliveSkippedDetachedWorkLive.ProtoReflect.Descriptor instead.
 func (*SendKeepaliveSkippedDetachedWorkLive) Descriptor() ([]byte, []int) {
-	return file_shim_v1_endpoint_send_keepalive_proto_rawDescGZIP(), []int{6}
+	return file_shim_v1_endpoint_send_keepalive_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *SendKeepaliveSkippedDetachedWorkLive) GetLiveItems() uint32 {
@@ -496,7 +572,7 @@ type SendKeepaliveSkippedCacheLapsed struct {
 
 func (x *SendKeepaliveSkippedCacheLapsed) Reset() {
 	*x = SendKeepaliveSkippedCacheLapsed{}
-	mi := &file_shim_v1_endpoint_send_keepalive_proto_msgTypes[7]
+	mi := &file_shim_v1_endpoint_send_keepalive_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -508,7 +584,7 @@ func (x *SendKeepaliveSkippedCacheLapsed) String() string {
 func (*SendKeepaliveSkippedCacheLapsed) ProtoMessage() {}
 
 func (x *SendKeepaliveSkippedCacheLapsed) ProtoReflect() protoreflect.Message {
-	mi := &file_shim_v1_endpoint_send_keepalive_proto_msgTypes[7]
+	mi := &file_shim_v1_endpoint_send_keepalive_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -521,7 +597,7 @@ func (x *SendKeepaliveSkippedCacheLapsed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SendKeepaliveSkippedCacheLapsed.ProtoReflect.Descriptor instead.
 func (*SendKeepaliveSkippedCacheLapsed) Descriptor() ([]byte, []int) {
-	return file_shim_v1_endpoint_send_keepalive_proto_rawDescGZIP(), []int{7}
+	return file_shim_v1_endpoint_send_keepalive_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *SendKeepaliveSkippedCacheLapsed) GetLapsedAtMs() int64 {
@@ -545,7 +621,7 @@ type SendKeepaliveError struct {
 
 func (x *SendKeepaliveError) Reset() {
 	*x = SendKeepaliveError{}
-	mi := &file_shim_v1_endpoint_send_keepalive_proto_msgTypes[8]
+	mi := &file_shim_v1_endpoint_send_keepalive_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -557,7 +633,7 @@ func (x *SendKeepaliveError) String() string {
 func (*SendKeepaliveError) ProtoMessage() {}
 
 func (x *SendKeepaliveError) ProtoReflect() protoreflect.Message {
-	mi := &file_shim_v1_endpoint_send_keepalive_proto_msgTypes[8]
+	mi := &file_shim_v1_endpoint_send_keepalive_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -570,7 +646,7 @@ func (x *SendKeepaliveError) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SendKeepaliveError.ProtoReflect.Descriptor instead.
 func (*SendKeepaliveError) Descriptor() ([]byte, []int) {
-	return file_shim_v1_endpoint_send_keepalive_proto_rawDescGZIP(), []int{8}
+	return file_shim_v1_endpoint_send_keepalive_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *SendKeepaliveError) GetKind() isSendKeepaliveError_Kind {
@@ -626,7 +702,7 @@ type SendKeepaliveNoSession struct {
 
 func (x *SendKeepaliveNoSession) Reset() {
 	*x = SendKeepaliveNoSession{}
-	mi := &file_shim_v1_endpoint_send_keepalive_proto_msgTypes[9]
+	mi := &file_shim_v1_endpoint_send_keepalive_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -638,7 +714,7 @@ func (x *SendKeepaliveNoSession) String() string {
 func (*SendKeepaliveNoSession) ProtoMessage() {}
 
 func (x *SendKeepaliveNoSession) ProtoReflect() protoreflect.Message {
-	mi := &file_shim_v1_endpoint_send_keepalive_proto_msgTypes[9]
+	mi := &file_shim_v1_endpoint_send_keepalive_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -651,7 +727,7 @@ func (x *SendKeepaliveNoSession) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SendKeepaliveNoSession.ProtoReflect.Descriptor instead.
 func (*SendKeepaliveNoSession) Descriptor() ([]byte, []int) {
-	return file_shim_v1_endpoint_send_keepalive_proto_rawDescGZIP(), []int{9}
+	return file_shim_v1_endpoint_send_keepalive_proto_rawDescGZIP(), []int{10}
 }
 
 // The keep-alive's submission to the vendor failed. The shim also raises its
@@ -667,7 +743,7 @@ type SendKeepaliveSubmitFailed struct {
 
 func (x *SendKeepaliveSubmitFailed) Reset() {
 	*x = SendKeepaliveSubmitFailed{}
-	mi := &file_shim_v1_endpoint_send_keepalive_proto_msgTypes[10]
+	mi := &file_shim_v1_endpoint_send_keepalive_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -679,7 +755,7 @@ func (x *SendKeepaliveSubmitFailed) String() string {
 func (*SendKeepaliveSubmitFailed) ProtoMessage() {}
 
 func (x *SendKeepaliveSubmitFailed) ProtoReflect() protoreflect.Message {
-	mi := &file_shim_v1_endpoint_send_keepalive_proto_msgTypes[10]
+	mi := &file_shim_v1_endpoint_send_keepalive_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -692,7 +768,7 @@ func (x *SendKeepaliveSubmitFailed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SendKeepaliveSubmitFailed.ProtoReflect.Descriptor instead.
 func (*SendKeepaliveSubmitFailed) Descriptor() ([]byte, []int) {
-	return file_shim_v1_endpoint_send_keepalive_proto_rawDescGZIP(), []int{10}
+	return file_shim_v1_endpoint_send_keepalive_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *SendKeepaliveSubmitFailed) GetDetail() string {
@@ -706,8 +782,12 @@ var File_shim_v1_endpoint_send_keepalive_proto protoreflect.FileDescriptor
 
 const file_shim_v1_endpoint_send_keepalive_proto_rawDesc = "" +
 	"\n" +
-	"%shim/v1/endpoint_send_keepalive.proto\x12\ashim.v1\"\x16\n" +
-	"\x14SendKeepaliveRequest\"\x91\x01\n" +
+	"%shim/v1/endpoint_send_keepalive.proto\x12\ashim.v1\x1a$shim/v1/endpoint_start_session.proto\"L\n" +
+	"\x14SendKeepaliveRequest\x124\n" +
+	"\x06parked\x18\x01 \x01(\v2\x1c.shim.v1.SendKeepaliveParkedR\x06parked\"t\n" +
+	"\x13SendKeepaliveParked\x12*\n" +
+	"\x11vendor_session_id\x18\x01 \x01(\tR\x0fvendorSessionId\x121\n" +
+	"\aprofile\x18\x02 \x01(\v2\x17.shim.v1.SessionProfileR\aprofile\"\x91\x01\n" +
 	"\x15SendKeepaliveResponse\x129\n" +
 	"\asuccess\x18\x01 \x01(\v2\x1d.shim.v1.SendKeepaliveSuccessH\x00R\asuccess\x123\n" +
 	"\x05error\x18\x02 \x01(\v2\x1b.shim.v1.SendKeepaliveErrorH\x00R\x05errorB\b\n" +
@@ -751,35 +831,39 @@ func file_shim_v1_endpoint_send_keepalive_proto_rawDescGZIP() []byte {
 	return file_shim_v1_endpoint_send_keepalive_proto_rawDescData
 }
 
-var file_shim_v1_endpoint_send_keepalive_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
+var file_shim_v1_endpoint_send_keepalive_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
 var file_shim_v1_endpoint_send_keepalive_proto_goTypes = []any{
 	(*SendKeepaliveRequest)(nil),                 // 0: shim.v1.SendKeepaliveRequest
-	(*SendKeepaliveResponse)(nil),                // 1: shim.v1.SendKeepaliveResponse
-	(*SendKeepaliveSuccess)(nil),                 // 2: shim.v1.SendKeepaliveSuccess
-	(*SendKeepaliveSent)(nil),                    // 3: shim.v1.SendKeepaliveSent
-	(*SendKeepaliveSkipped)(nil),                 // 4: shim.v1.SendKeepaliveSkipped
-	(*SendKeepaliveSkippedMainAgentBusy)(nil),    // 5: shim.v1.SendKeepaliveSkippedMainAgentBusy
-	(*SendKeepaliveSkippedDetachedWorkLive)(nil), // 6: shim.v1.SendKeepaliveSkippedDetachedWorkLive
-	(*SendKeepaliveSkippedCacheLapsed)(nil),      // 7: shim.v1.SendKeepaliveSkippedCacheLapsed
-	(*SendKeepaliveError)(nil),                   // 8: shim.v1.SendKeepaliveError
-	(*SendKeepaliveNoSession)(nil),               // 9: shim.v1.SendKeepaliveNoSession
-	(*SendKeepaliveSubmitFailed)(nil),            // 10: shim.v1.SendKeepaliveSubmitFailed
+	(*SendKeepaliveParked)(nil),                  // 1: shim.v1.SendKeepaliveParked
+	(*SendKeepaliveResponse)(nil),                // 2: shim.v1.SendKeepaliveResponse
+	(*SendKeepaliveSuccess)(nil),                 // 3: shim.v1.SendKeepaliveSuccess
+	(*SendKeepaliveSent)(nil),                    // 4: shim.v1.SendKeepaliveSent
+	(*SendKeepaliveSkipped)(nil),                 // 5: shim.v1.SendKeepaliveSkipped
+	(*SendKeepaliveSkippedMainAgentBusy)(nil),    // 6: shim.v1.SendKeepaliveSkippedMainAgentBusy
+	(*SendKeepaliveSkippedDetachedWorkLive)(nil), // 7: shim.v1.SendKeepaliveSkippedDetachedWorkLive
+	(*SendKeepaliveSkippedCacheLapsed)(nil),      // 8: shim.v1.SendKeepaliveSkippedCacheLapsed
+	(*SendKeepaliveError)(nil),                   // 9: shim.v1.SendKeepaliveError
+	(*SendKeepaliveNoSession)(nil),               // 10: shim.v1.SendKeepaliveNoSession
+	(*SendKeepaliveSubmitFailed)(nil),            // 11: shim.v1.SendKeepaliveSubmitFailed
+	(*SessionProfile)(nil),                       // 12: shim.v1.SessionProfile
 }
 var file_shim_v1_endpoint_send_keepalive_proto_depIdxs = []int32{
-	2,  // 0: shim.v1.SendKeepaliveResponse.success:type_name -> shim.v1.SendKeepaliveSuccess
-	8,  // 1: shim.v1.SendKeepaliveResponse.error:type_name -> shim.v1.SendKeepaliveError
-	3,  // 2: shim.v1.SendKeepaliveSuccess.sent:type_name -> shim.v1.SendKeepaliveSent
-	4,  // 3: shim.v1.SendKeepaliveSuccess.skipped:type_name -> shim.v1.SendKeepaliveSkipped
-	5,  // 4: shim.v1.SendKeepaliveSkipped.main_agent_busy:type_name -> shim.v1.SendKeepaliveSkippedMainAgentBusy
-	6,  // 5: shim.v1.SendKeepaliveSkipped.detached_work_live:type_name -> shim.v1.SendKeepaliveSkippedDetachedWorkLive
-	7,  // 6: shim.v1.SendKeepaliveSkipped.cache_lapsed:type_name -> shim.v1.SendKeepaliveSkippedCacheLapsed
-	9,  // 7: shim.v1.SendKeepaliveError.no_session:type_name -> shim.v1.SendKeepaliveNoSession
-	10, // 8: shim.v1.SendKeepaliveError.submit_failed:type_name -> shim.v1.SendKeepaliveSubmitFailed
-	9,  // [9:9] is the sub-list for method output_type
-	9,  // [9:9] is the sub-list for method input_type
-	9,  // [9:9] is the sub-list for extension type_name
-	9,  // [9:9] is the sub-list for extension extendee
-	0,  // [0:9] is the sub-list for field type_name
+	1,  // 0: shim.v1.SendKeepaliveRequest.parked:type_name -> shim.v1.SendKeepaliveParked
+	12, // 1: shim.v1.SendKeepaliveParked.profile:type_name -> shim.v1.SessionProfile
+	3,  // 2: shim.v1.SendKeepaliveResponse.success:type_name -> shim.v1.SendKeepaliveSuccess
+	9,  // 3: shim.v1.SendKeepaliveResponse.error:type_name -> shim.v1.SendKeepaliveError
+	4,  // 4: shim.v1.SendKeepaliveSuccess.sent:type_name -> shim.v1.SendKeepaliveSent
+	5,  // 5: shim.v1.SendKeepaliveSuccess.skipped:type_name -> shim.v1.SendKeepaliveSkipped
+	6,  // 6: shim.v1.SendKeepaliveSkipped.main_agent_busy:type_name -> shim.v1.SendKeepaliveSkippedMainAgentBusy
+	7,  // 7: shim.v1.SendKeepaliveSkipped.detached_work_live:type_name -> shim.v1.SendKeepaliveSkippedDetachedWorkLive
+	8,  // 8: shim.v1.SendKeepaliveSkipped.cache_lapsed:type_name -> shim.v1.SendKeepaliveSkippedCacheLapsed
+	10, // 9: shim.v1.SendKeepaliveError.no_session:type_name -> shim.v1.SendKeepaliveNoSession
+	11, // 10: shim.v1.SendKeepaliveError.submit_failed:type_name -> shim.v1.SendKeepaliveSubmitFailed
+	11, // [11:11] is the sub-list for method output_type
+	11, // [11:11] is the sub-list for method input_type
+	11, // [11:11] is the sub-list for extension type_name
+	11, // [11:11] is the sub-list for extension extendee
+	0,  // [0:11] is the sub-list for field type_name
 }
 
 func init() { file_shim_v1_endpoint_send_keepalive_proto_init() }
@@ -787,20 +871,21 @@ func file_shim_v1_endpoint_send_keepalive_proto_init() {
 	if File_shim_v1_endpoint_send_keepalive_proto != nil {
 		return
 	}
-	file_shim_v1_endpoint_send_keepalive_proto_msgTypes[1].OneofWrappers = []any{
+	file_shim_v1_endpoint_start_session_proto_init()
+	file_shim_v1_endpoint_send_keepalive_proto_msgTypes[2].OneofWrappers = []any{
 		(*SendKeepaliveResponse_Success)(nil),
 		(*SendKeepaliveResponse_Error)(nil),
 	}
-	file_shim_v1_endpoint_send_keepalive_proto_msgTypes[2].OneofWrappers = []any{
+	file_shim_v1_endpoint_send_keepalive_proto_msgTypes[3].OneofWrappers = []any{
 		(*SendKeepaliveSuccess_Sent)(nil),
 		(*SendKeepaliveSuccess_Skipped)(nil),
 	}
-	file_shim_v1_endpoint_send_keepalive_proto_msgTypes[4].OneofWrappers = []any{
+	file_shim_v1_endpoint_send_keepalive_proto_msgTypes[5].OneofWrappers = []any{
 		(*SendKeepaliveSkipped_MainAgentBusy)(nil),
 		(*SendKeepaliveSkipped_DetachedWorkLive)(nil),
 		(*SendKeepaliveSkipped_CacheLapsed)(nil),
 	}
-	file_shim_v1_endpoint_send_keepalive_proto_msgTypes[8].OneofWrappers = []any{
+	file_shim_v1_endpoint_send_keepalive_proto_msgTypes[9].OneofWrappers = []any{
 		(*SendKeepaliveError_NoSession)(nil),
 		(*SendKeepaliveError_SubmitFailed)(nil),
 	}
@@ -810,7 +895,7 @@ func file_shim_v1_endpoint_send_keepalive_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_shim_v1_endpoint_send_keepalive_proto_rawDesc), len(file_shim_v1_endpoint_send_keepalive_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   11,
+			NumMessages:   12,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

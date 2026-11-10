@@ -74,3 +74,21 @@ func TestSwitchConversationParksTheConversationSteppedOutOf(t *testing.T) {
 		t.Fatalf("parked = %q, want the queue conversation kept for the release", got)
 	}
 }
+
+func TestSwitchConversationTellsTheKeeperBothClocksMoved(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	bindTo(f, "w1", "vendor-queue")
+
+	// Act
+	err := f.verbs.(*verbs).switchConversation(context.Background(), dlog.NewTestLogger(), "UpdateQueueBypassMode", "w1", "vendor-bypass", true)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("switchConversation: %v", err)
+	}
+	if !slices.Equal(f.switchedEdges, []ids.WorkspaceID{"w1"}) {
+		t.Fatalf("switched edges = %v, want the keeper told once", f.switchedEdges)
+	}
+}

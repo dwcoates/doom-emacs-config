@@ -778,6 +778,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	cacheKeeper, err := cachelapse.New(cachelapse.Deps{
 		DB:              p.DB,
 		Shim:            func(ws ids.WorkspaceID) (cachelapse.Keepalives, bool) { return fleet.Keepalives(ws) },
+		Parked:          fleet.ParkedKeepalive,
 		ColdGate:        func(ws ids.WorkspaceID) (*conversationv1.SessionCold, bool) { return fleet.StandingColdGate(ws) },
 		StandDowns:      standDownsFunc(func(ws ids.WorkspaceID) { drainController.StandDownWithheld(ws) }),
 		PublishRegistry: verbsRef.publishRegistry("a hidden workspace's cache lapse moved"),

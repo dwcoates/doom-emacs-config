@@ -23,6 +23,17 @@ switched off. Designed autonomously (owner request, 2026-11-10).
   `shim.v1.ForkSession` and resumes it as a rebind. Later switches resume the
   two parked conversations as they stand, so the bypass conversation does not
   pick up queue turns taken after the fork.
+- Both conversations are kept warm in tandem (owner request, 2026-11-10).
+  Each keeps its own cache clock: the parked row carries the parked one's
+  (`workspace_parked_conversations.clock_at`, `.cold`, layout 116), and a
+  switch swaps it with the workspace row's, stamping
+  `workspaces.conversation_bound_at` so turns from before the binding time
+  nothing. The keeper's beat is due at the earlier of the two clocks' next
+  beats and beats both; the parked one goes out through
+  `shim.v1.SendKeepaliveRequest.parked`, which the shim sends on a query of
+  its own under the parked conversation's profile, resuming before its
+  trailing keep-alive turns, and answers once the vendor has. The shim
+  refuses to hibernate (`turn_in_flight`) while a parked keep-alive is out.
 - The SDK's `skillOverrides` flag setting (`off`) hides a skill from the
   listing and the Skill tool; the shim checks the session's reported commands
   for its absence at start.

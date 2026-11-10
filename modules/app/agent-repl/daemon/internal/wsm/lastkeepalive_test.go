@@ -45,6 +45,7 @@ func TestCacheClock(t *testing.T) {
 		name      string
 		ended     *time.Time
 		keepalive *time.Time
+		bound     *time.Time
 		want      *time.Time
 	}{
 		{name: "neither", want: nil},
@@ -52,11 +53,14 @@ func TestCacheClock(t *testing.T) {
 		{name: "a keep-alive alone", keepalive: &early, want: &early},
 		{name: "a keep-alive after the turn", ended: &early, keepalive: &late, want: &late},
 		{name: "a turn after the keep-alive", ended: &late, keepalive: &early, want: &late},
+		{name: "a turn from before the binding", ended: &early, bound: &late, want: nil},
+		{name: "a turn from before the binding beside the bound conversation's clock", ended: &early, keepalive: &early, bound: &late, want: &early},
+		{name: "a turn after the binding", ended: &late, bound: &early, want: &late},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
-			w := Workspace{LastTurnEndedAt: tt.ended, LastKeepaliveAt: tt.keepalive}
+			w := Workspace{LastTurnEndedAt: tt.ended, LastKeepaliveAt: tt.keepalive, ConversationBoundAt: tt.bound}
 
 			// Act
 			got := w.CacheClock()

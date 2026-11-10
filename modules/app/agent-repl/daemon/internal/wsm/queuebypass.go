@@ -54,6 +54,11 @@ type QueueBypass struct {
 	// ParkedVendorSessionID is the conversation the workspace is not running,
 	// kept for the next switch; empty when it has none yet.
 	ParkedVendorSessionID string
+	// ParkedClockAt is when the parked conversation's cache was last written;
+	// nil when it never was or none is parked.
+	ParkedClockAt *time.Time
+	// ParkedCold reports the parked conversation's cache known lapsed.
+	ParkedCold bool
 }
 
 // QueueBypass answers workspace ID's standing toward its repository's queue
@@ -102,22 +107,110 @@ func (s *store) ReleaseQueueBypass(ctx context.Context, id WorkspaceID) error {
 	})
 }
 
-// SetParkedConversation records VENDORSESSIONID as the conversation workspace
-// ID is not running. A blank id is a bug in the caller, refused loudly: a
-// switch always parks the conversation it stepped out of.
-func (s *store) SetParkedConversation(ctx context.Context, id WorkspaceID, vendorSessionID string) error {
-	const op = "daemon.wsm.set_parked_conversation"
-	fields := dlog.Context{"workspace": string(id), "vendor_session_id": vendorSessionID}
-	if strings.TrimSpace(vendorSessionID) == "" {
+// parkedClockDDL is the layout-116 addition: each conversation of a
+// queue-bypass workspace keeps its OWN cache clock (owner request,
+// 2026-11-10: the two are kept warm in tandem). The parked row carries the
+// parked conversation's clock and whether its cache is known cold, and the
+// workspace row stamps when its running conversation was bound, so turns
+// from before the binding (the other conversation's) time nothing.
+const parkedClockDDL = `
+ALTER TABLE workspace_parked_conversations ADD COLUMN clock_at INTEGER;
+ALTER TABLE workspace_parked_conversations ADD COLUMN cold INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE workspaces ADD COLUMN conversation_bound_at INTEGER;
+`
+
+// SwapParkedConversation parks STEPPEDOUT, the conversation workspace ID is
+// stepping out of, and swaps the two conversations' cache clocks, in ONE
+// transaction, AT being the switch: the parked row takes STEPPEDOUT with the
+// clock and cold mark the workspace row held for it, and the workspace row
+// takes the clock and cold mark the parked row held for the conversation now
+// bound, stamped bound at AT. A conversation bound with no clock of its own
+// (the bypass conversation's first binding, a fork whose new system prompt
+// reads no cache) is timed from its first turn. A blank STEPPEDOUT is a bug
+// in the caller, refused loudly: a switch always parks the conversation it
+// stepped out of.
+func (s *store) SwapParkedConversation(ctx context.Context, id WorkspaceID, steppedOut string, at time.Time) error {
+	const op = "daemon.wsm.swap_parked_conversation"
+	fields := dlog.Context{"workspace": string(id), "vendor_session_id": steppedOut, "at": at}
+	if strings.TrimSpace(steppedOut) == "" {
 		err := fmt.Errorf("wsm: a parked conversation names its conversation (workspace %s)", id)
 		s.log.Error(op, "refused a blank parked conversation", withError(fields, err))
 		return err
 	}
 	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
+		var (
+			ended, keepalive, bound, coldTurn sql.NullInt64
+			parkedClock                       sql.NullInt64
+			parkedCold                        sql.NullBool
+		)
+		if err := tx.QueryRowContext(ctx, `SELECT
+			(SELECT MAX(turns.closed_at) FROM turns WHERE turns.workspace_id = w.id),
+			w.last_keepalive_at, w.conversation_bound_at, w.cache_cold_turn_at, p.clock_at, p.cold
+			FROM workspaces AS w
+			LEFT JOIN workspace_parked_conversations AS p ON p.workspace_id = w.id
+			WHERE w.id = ?`, id).Scan(&ended, &keepalive, &bound, &coldTurn, &parkedClock, &parkedCold); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return fmt.Errorf("wsm: workspace %s: %w", id, ErrNotFound)
+			}
+			return err
+		}
+		out := Workspace{LastTurnEndedAt: optTime(ended), LastKeepaliveAt: optTime(keepalive), ConversationBoundAt: optTime(bound), CacheColdTurnAt: optTime(coldTurn)}
+		var outClock any
+		if clock := out.CacheClock(); clock != nil {
+			outClock = nanos(*clock)
+		}
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO workspace_parked_conversations (workspace_id, vendor_session_id, clock_at, cold) VALUES (?, ?, ?, ?)
+			 ON CONFLICT(workspace_id) DO UPDATE SET vendor_session_id = excluded.vendor_session_id, clock_at = excluded.clock_at, cold = excluded.cold`,
+			id, steppedOut, outClock, out.CacheKnownCold()); err != nil {
+			return err
+		}
+		// THE BOUND-IN CONVERSATION'S CLOCK. Cold, it is timed from nothing
+		// and marked cold at the turn clock as it stands, so no beat goes out
+		// until a turn of its own closes.
+		var inClock, inColdTurn any
+		switch {
+		case parkedCold.Valid && parkedCold.Bool:
+			if ended.Valid {
+				inColdTurn = ended.Int64
+			}
+		case parkedClock.Valid:
+			inClock = parkedClock.Int64
+		}
 		_, err := tx.ExecContext(ctx,
-			`INSERT INTO workspace_parked_conversations (workspace_id, vendor_session_id) VALUES (?, ?)
-			 ON CONFLICT(workspace_id) DO UPDATE SET vendor_session_id = excluded.vendor_session_id`, id, vendorSessionID)
+			`UPDATE workspaces SET last_keepalive_at = ?, cache_cold_turn_at = ?, conversation_bound_at = ? WHERE id = ?`,
+			inClock, inColdTurn, nanos(at), id)
 		return err
+	})
+}
+
+// SetParkedKeepalive records AT as when workspace ID's parked conversation's
+// keep-alive was answered: its clock moves, and its cache is warm.
+func (s *store) SetParkedKeepalive(ctx context.Context, id WorkspaceID, at time.Time) error {
+	return s.setParkedClock(ctx, "daemon.wsm.set_parked_keepalive", id, `clock_at = ?, cold = 0`, nanos(at))
+}
+
+// MarkParkedCold records that workspace ID's parked conversation's cache has
+// lapsed: it is beaten no more until it runs again.
+func (s *store) MarkParkedCold(ctx context.Context, id WorkspaceID) error {
+	return s.setParkedClock(ctx, "daemon.wsm.mark_parked_cold", id, `cold = 1`)
+}
+
+// setParkedClock writes SET on workspace ID's parked row, which must stand:
+// a parked conversation's clock moves only for a conversation that is parked.
+func (s *store) setParkedClock(ctx context.Context, op string, id WorkspaceID, set string, args ...any) error {
+	fields := dlog.Context{"workspace": string(id)}
+	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx, `UPDATE workspace_parked_conversations SET `+set+` WHERE workspace_id = ?`, append(args, id)...)
+		if err != nil {
+			return err
+		}
+		if n, err := res.RowsAffected(); err != nil {
+			return err
+		} else if n != 1 {
+			return fmt.Errorf("wsm: workspace %s parks no conversation", id)
+		}
+		return nil
 	})
 }
 
@@ -127,19 +220,21 @@ func readQueueBypass(ctx context.Context, q remoteControlQuerier, id WorkspaceID
 		repo   string
 		holder sql.NullString
 		parked sql.NullString
+		clock  sql.NullInt64
+		cold   sql.NullBool
 	)
-	err := q.QueryRowContext(ctx, `SELECT w.repo_id, h.workspace_id, p.vendor_session_id
+	err := q.QueryRowContext(ctx, `SELECT w.repo_id, h.workspace_id, p.vendor_session_id, p.clock_at, p.cold
 		FROM workspaces AS w
 		LEFT JOIN queue_bypass_holders AS h ON h.repo_id = w.repo_id
 		LEFT JOIN workspace_parked_conversations AS p ON p.workspace_id = w.id
-		WHERE w.id = ?`, id).Scan(&repo, &holder, &parked)
+		WHERE w.id = ?`, id).Scan(&repo, &holder, &parked, &clock, &cold)
 	if errors.Is(err, sql.ErrNoRows) {
 		return QueueBypass{}, fmt.Errorf("wsm: workspace %s: %w", id, ErrNotFound)
 	}
 	if err != nil {
 		return QueueBypass{}, err
 	}
-	out := QueueBypass{RepoID: RepoID(repo), ParkedVendorSessionID: parked.String}
+	out := QueueBypass{RepoID: RepoID(repo), ParkedVendorSessionID: parked.String, ParkedClockAt: optTime(clock), ParkedCold: cold.Valid && cold.Bool}
 	if holder.Valid {
 		if WorkspaceID(holder.String) == id {
 			out.Holds = true

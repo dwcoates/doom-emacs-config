@@ -95,6 +95,14 @@ type DB interface {
 	// SetLastKeepalive records when a workspace's keep-alive was sent: the
 	// beat's half of the cache clock (wsm.Workspace.CacheClock).
 	SetLastKeepalive(ctx context.Context, id wsm.WorkspaceID, at time.Time) error
+	// QueueBypass reads a workspace's queue-bypass standing: its parked
+	// conversation, that conversation's own cache clock and whether its
+	// cache is known cold.
+	QueueBypass(ctx context.Context, id wsm.WorkspaceID) (wsm.QueueBypass, error)
+	// SetParkedKeepalive records a parked conversation's keep-alive answered.
+	SetParkedKeepalive(ctx context.Context, id wsm.WorkspaceID, at time.Time) error
+	// MarkParkedCold records a parked conversation's cache lapsed.
+	MarkParkedCold(ctx context.Context, id wsm.WorkspaceID) error
 	// MarkCacheCold records a workspace's cache as cold at its turn clock
 	// (wsm.Workspace.CacheKnownCold): no beat is owed until a turn closes
 	// after it.
@@ -110,6 +118,10 @@ type Keepalives interface {
 	// ErrNoSession when the shim holds no session; a *BeatSubmitFailed when
 	// the submission failed.
 	Beat(ctx context.Context) (*shimv1.SendKeepaliveSuccess, error)
+	// BeatParked sends one keep-alive to PARKED, a conversation of the
+	// workspace no session runs, and answers once it is answered, with
+	// Beat's arms (shim.v1.SendKeepaliveRequest.parked).
+	BeatParked(ctx context.Context, parked *shimv1.SendKeepaliveParked) (*shimv1.SendKeepaliveSuccess, error)
 }
 
 // ErrNoSession is a shim's answer that it holds no session, so there is no
@@ -155,6 +167,9 @@ type Deps struct {
 	Log     dlog.Surfaces
 	// Telemetry receives every beat, lapse and cold gate (telemetry.go).
 	Telemetry Telemetry
+	// Parked answers the keep-alive request for WS's parked conversation, nil
+	// when it parks none (workspace.Fleet.ParkedKeepalive).
+	Parked func(ctx context.Context, ws ids.WorkspaceID) (*shimv1.SendKeepaliveParked, error)
 	// NextKeepalive states WS's next scheduled keep-alive to the views, the
 	// zero time for none, each time it changes (nextkeepalive.go). A park
 	// the views hold carries it (wsm.Park).
@@ -174,6 +189,12 @@ const (
 	edgeFree
 	// edgeRestored is a parked session's restore ending.
 	edgeRestored
+	// edgeSwitched is a queue-bypass switch of the workspace's conversations,
+	// their clocks already swapped on the record.
+	edgeSwitched
+	// edgeParkedAnswered is a parked conversation's keep-alive answered, or
+	// failed.
+	edgeParkedAnswered
 )
 
 // edge is one queued event.
@@ -184,6 +205,9 @@ type edge struct {
 	lapse *conversationv1.SessionCacheLapse
 	// err is how a restore ended (edgeRestored).
 	err error
+	// parked is a parked keep-alive's answer (edgeParkedAnswered), with err
+	// when it failed.
+	parked *shimv1.SendKeepaliveSuccess
 	// workEnded is a free edge's (edgeFree): work ended, rather than an
 	// attach coming up free.
 	workEnded bool
@@ -227,6 +251,11 @@ type Keeper struct {
 	// stated is each workspace's next keep-alive as last stated to the views
 	// (nextkeepalive.go), owned by Run alone.
 	stated map[ids.WorkspaceID]time.Time
+	// parkedFlying is each workspace whose parked conversation's keep-alive
+	// is out and unanswered, and parkedRetry when a parked keep-alive that
+	// failed is asked again (parked.go); both owned by Run alone.
+	parkedFlying map[ids.WorkspaceID]bool
+	parkedRetry  map[ids.WorkspaceID]time.Time
 }
 
 // New builds a Keeper. A missing collaborator is a wiring defect.
@@ -256,6 +285,8 @@ func New(deps Deps) (*Keeper, error) {
 		return nil, errors.New("cachelapse: the keeper needs telemetry")
 	case deps.NextKeepalive == nil:
 		return nil, errors.New("cachelapse: the keeper needs the views' next keep-alive")
+	case deps.Parked == nil:
+		return nil, errors.New("cachelapse: the keeper needs the parked conversations' keep-alive requests")
 	}
 	return &Keeper{
 		deps: deps, wake: make(chan struct{}, 1),
@@ -268,6 +299,9 @@ func New(deps Deps) (*Keeper, error) {
 		answering: map[ids.WorkspaceID]time.Time{},
 		answerBy:  map[ids.WorkspaceID]time.Time{},
 		stated:    map[ids.WorkspaceID]time.Time{},
+
+		parkedFlying: map[ids.WorkspaceID]bool{},
+		parkedRetry:  map[ids.WorkspaceID]time.Time{},
 	}, nil
 }
 
@@ -460,6 +494,10 @@ func (k *Keeper) apply(ctx context.Context, e edge) {
 		k.schedule(ctx, e.ws, e.why)
 	case edgeRestored:
 		k.restored(ctx, e.ws, e.err)
+	case edgeSwitched:
+		k.switched(ctx, e.ws)
+	case edgeParkedAnswered:
+		k.parkedAnswered(ctx, e.ws, e.parked, e.err)
 	default:
 		k.reconcile(ctx, e.ws, e.why)
 	}
@@ -558,6 +596,7 @@ func (k *Keeper) forget(ws ids.WorkspaceID) {
 	delete(k.restores, ws)
 	delete(k.sent, ws)
 	delete(k.freeSince, ws)
+	delete(k.parkedRetry, ws)
 }
 
 // mergeEnded stands RECORD's session down when it is a hidden merge workspace

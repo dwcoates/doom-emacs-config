@@ -276,8 +276,9 @@ func (*HibernateError_TurnInFlight) isHibernateError_Kind() {}
 
 func (*HibernateError_NoSession) isHibernateError_Kind() {}
 
-// A turn is in flight; standing the shim down would kill it. The daemon
-// defers and asks again on its next sweep pass.
+// A turn is in flight, or a parked conversation's keep-alive is out
+// (SendKeepaliveRequest.parked); standing the shim down would kill it. The
+// daemon defers and asks again on its next sweep pass.
 type HibernateTurnInFlight struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields

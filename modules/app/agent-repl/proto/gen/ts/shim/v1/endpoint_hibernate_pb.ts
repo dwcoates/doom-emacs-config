@@ -122,8 +122,9 @@ export const HibernateErrorSchema: GenMessage<HibernateError> = /*@__PURE__*/
   messageDesc(file_shim_v1_endpoint_hibernate, 3);
 
 /**
- * A turn is in flight; standing the shim down would kill it. The daemon
- * defers and asks again on its next sweep pass.
+ * A turn is in flight, or a parked conversation's keep-alive is out
+ * (SendKeepaliveRequest.parked); standing the shim down would kill it. The
+ * daemon defers and asks again on its next sweep pass.
  *
  * @generated from message shim.v1.HibernateTurnInFlight
  */

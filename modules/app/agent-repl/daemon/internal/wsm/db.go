@@ -677,9 +677,13 @@ type DB interface {
 	TakeQueueBypass(ctx context.Context, id WorkspaceID, at time.Time) error
 	// ReleaseQueueBypass clears a workspace's hold on the mode.
 	ReleaseQueueBypass(ctx context.Context, id WorkspaceID) error
-	// SetParkedConversation records the conversation a workspace is not
-	// running, kept for its next switch.
-	SetParkedConversation(ctx context.Context, id WorkspaceID, vendorSessionID string) error
+	// SwapParkedConversation parks the conversation a workspace steps out of
+	// and swaps the two conversations' cache clocks, in one transaction.
+	SwapParkedConversation(ctx context.Context, id WorkspaceID, steppedOut string, at time.Time) error
+	// SetParkedKeepalive records the parked conversation's keep-alive answered.
+	SetParkedKeepalive(ctx context.Context, id WorkspaceID, at time.Time) error
+	// MarkParkedCold records the parked conversation's cache lapsed.
+	MarkParkedCold(ctx context.Context, id WorkspaceID) error
 	// WorkspaceContextUsage answers a workspace's last-known context fact,
 	// false when none was recorded (contextusage.go).
 	WorkspaceContextUsage(ctx context.Context, id WorkspaceID) (ContextUsageRecord, bool, error)

@@ -61,7 +61,10 @@ var errFake = errors.New("workspace test: arranged failure")
 type fakeDB struct {
 	wsm.DB
 
-	// parkedConversations are the conversations SetParkedConversation kept.
+	// bypass is each workspace's queue-bypass standing; bypassErr fails its read.
+	bypass    map[ids.WorkspaceID]wsm.QueueBypass
+	bypassErr error
+	// parkedConversations are the conversations SwapParkedConversation parked.
 	parkedConversations map[ids.WorkspaceID]string
 
 	// storedSummaries are the summaries WorkspaceSummaryOf answers;
@@ -1442,13 +1445,13 @@ func (d *fakeDB) BindSession(ctx context.Context, s wsm.Session) error {
 	return d.PutSession(ctx, s)
 }
 
-// SetParkedConversation records the conversation a queue-bypass switch
-// stepped the workspace out of.
-func (d *fakeDB) SetParkedConversation(_ context.Context, id ids.WorkspaceID, vendorSessionID string) error {
+// SwapParkedConversation records the conversation a queue-bypass switch
+// stepped the workspace out of, and when.
+func (d *fakeDB) SwapParkedConversation(_ context.Context, id ids.WorkspaceID, steppedOut string, _ time.Time) error {
 	if d.parkedConversations == nil {
 		d.parkedConversations = map[ids.WorkspaceID]string{}
 	}
-	d.parkedConversations[id] = vendorSessionID
+	d.parkedConversations[id] = steppedOut
 	return nil
 }
 
@@ -3387,6 +3390,8 @@ type fixture struct {
 	// visibilityEdges is every workspace whose hide or show the cache keeper
 	// was told of.
 	visibilityEdges []ids.WorkspaceID
+	// switchedEdges is every ConversationSwitched the keeper was told, in order.
+	switchedEdges []ids.WorkspaceID
 	// coldMarks is every workspace whose answered cold gate the cache keeper
 	// was told of (CacheLapses.ColdGateAnswered); coldMarkErr fails it.
 	coldMarks   []ids.WorkspaceID
@@ -3540,6 +3545,7 @@ func newFixture(t *testing.T) *fixture {
 		}),
 		CacheLapses: &fakeCacheLapses{
 			visibility: func(ws ids.WorkspaceID) { f.visibilityEdges = append(f.visibilityEdges, ws) },
+			switched:   func(ws ids.WorkspaceID) { f.switchedEdges = append(f.switchedEdges, ws) },
 			answered: func(ws ids.WorkspaceID) error {
 				f.coldMarks = append(f.coldMarks, ws)
 				return f.coldMarkErr
@@ -4098,9 +4104,12 @@ func (s *fakeSummaries) OwedNote(_ context.Context, ws ids.WorkspaceID) (string,
 type fakeCacheLapses struct {
 	visibility func(ws ids.WorkspaceID)
 	answered   func(ws ids.WorkspaceID) error
+	switched   func(ws ids.WorkspaceID)
 }
 
 func (f *fakeCacheLapses) VisibilityChanged(ws ids.WorkspaceID) { f.visibility(ws) }
+
+func (f *fakeCacheLapses) ConversationSwitched(ws ids.WorkspaceID) { f.switched(ws) }
 
 func (f *fakeCacheLapses) ColdGateAnswered(_ context.Context, ws ids.WorkspaceID) error {
 	return f.answered(ws)
@@ -4126,10 +4135,14 @@ func (f *fakeDB) OpenChildren(_ context.Context, parent ids.WorkspaceID) ([]wsm.
 	return refs, nil
 }
 
-// QueueBypass answers WS's queue bypass standing: no workspace in these
-// tests holds the mode, so every session lands through the queue.
-func (f *fakeDB) QueueBypass(_ context.Context, _ ids.WorkspaceID) (wsm.QueueBypass, error) {
-	return wsm.QueueBypass{}, nil
+// QueueBypass answers WS's queue bypass standing: the one a test set in
+// bypass, else none, so a session lands through the queue; bypassErr fails
+// the read.
+func (f *fakeDB) QueueBypass(_ context.Context, ws ids.WorkspaceID) (wsm.QueueBypass, error) {
+	if f.bypassErr != nil {
+		return wsm.QueueBypass{}, f.bypassErr
+	}
+	return f.bypass[ws], nil
 }
 
 // RequireOpenParent answers openParentErr, recording the parent asked about.
