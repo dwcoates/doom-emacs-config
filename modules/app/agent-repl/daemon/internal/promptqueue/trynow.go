@@ -2,7 +2,6 @@ package promptqueue
 
 import (
 	"context"
-	"sort"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/wsm"
@@ -65,7 +64,7 @@ func (q *queue) submitBehindHeld(ctx context.Context, d *delivery, sub Submissio
 // puts it back on the after-reconnect hold, in its place. The caller holds the
 // delivery lock (d).
 func (q *queue) tryOldestHeld(ctx context.Context, d *delivery, held []wsm.HeldPrompt, log dlog.Logger) {
-	sort.SliceStable(held, func(i, j int) bool { return held[i].QueuedAt.Before(held[j].QueuedAt) })
+	inQueueOrder(held)
 	oldest := held[0]
 	fields := dlog.Context{"oldest_turn": string(oldest.Turn)}
 	// AN EDIT WITHHOLDS ITS PROMPT AND EVERYTHING AFTER IT, and a call in

@@ -3,7 +3,6 @@ package promptqueue
 import (
 	"context"
 	"fmt"
-	"sort"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
@@ -59,7 +58,7 @@ func (q *queue) FlushHeld(ctx context.Context, ws ids.WorkspaceID) error {
 		log.Debug(opFlush, "nothing is held; there is nothing to flush", nil)
 		return nil
 	}
-	sort.SliceStable(queued, func(i, j int) bool { return queued[i].QueuedAt.Before(queued[j].QueuedAt) })
+	inQueueOrder(queued)
 
 	why, kept, err := q.flushKept(ctx, ws, log)
 	if err != nil {
