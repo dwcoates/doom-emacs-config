@@ -213,6 +213,7 @@ type GatherRefusal struct {
 	//	*GatherRefusal_NeedsInput
 	//	*GatherRefusal_Merging
 	//	*GatherRefusal_PromptRefused
+	//	*GatherRefusal_AmbiguousName
 	Cause         isGatherRefusal_Cause `protobuf_oneof:"cause"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -309,12 +310,23 @@ func (x *GatherRefusal) GetPromptRefused() *SubmitPromptError {
 	return nil
 }
 
+func (x *GatherRefusal) GetAmbiguousName() *GatherRefusalAmbiguousName {
+	if x != nil {
+		if x, ok := x.Cause.(*GatherRefusal_AmbiguousName); ok {
+			return x.AmbiguousName
+		}
+	}
+	return nil
+}
+
 type isGatherRefusal_Cause interface {
 	isGatherRefusal_Cause()
 }
 
 type GatherRefusal_UnknownWorkspace struct {
-	// No registered workspace has the name.
+	// No registered workspace has the name. A name only closed workspaces
+	// have is `closed` instead, and one several open workspaces have is
+	// `ambiguous_name`.
 	UnknownWorkspace *GatherRefusalUnknownWorkspace `protobuf:"bytes,1,opt,name=unknown_workspace,json=unknownWorkspace,proto3,oneof"`
 }
 
@@ -347,6 +359,11 @@ type GatherRefusal_PromptRefused struct {
 	PromptRefused *SubmitPromptError `protobuf:"bytes,6,opt,name=prompt_refused,json=promptRefused,proto3,oneof"`
 }
 
+type GatherRefusal_AmbiguousName struct {
+	// Several open workspaces have the name, so it names no one target.
+	AmbiguousName *GatherRefusalAmbiguousName `protobuf:"bytes,7,opt,name=ambiguous_name,json=ambiguousName,proto3,oneof"`
+}
+
 func (*GatherRefusal_UnknownWorkspace) isGatherRefusal_Cause() {}
 
 func (*GatherRefusal_Closed) isGatherRefusal_Cause() {}
@@ -358,6 +375,8 @@ func (*GatherRefusal_NeedsInput) isGatherRefusal_Cause() {}
 func (*GatherRefusal_Merging) isGatherRefusal_Cause() {}
 
 func (*GatherRefusal_PromptRefused) isGatherRefusal_Cause() {}
+
+func (*GatherRefusal_AmbiguousName) isGatherRefusal_Cause() {}
 
 // No workspace has the name. No fields.
 type GatherRefusalUnknownWorkspace struct {
@@ -396,6 +415,52 @@ func (*GatherRefusalUnknownWorkspace) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_gather_proto_rawDescGZIP(), []int{4}
 }
 
+// Several open workspaces have the name.
+type GatherRefusalAmbiguousName struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Each open workspace with the name, so the caller can tell them apart.
+	Workspaces    []*v1.WorkspaceRef `protobuf:"bytes,1,rep,name=workspaces,proto3" json:"workspaces,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GatherRefusalAmbiguousName) Reset() {
+	*x = GatherRefusalAmbiguousName{}
+	mi := &file_agentrepl_v1_gather_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GatherRefusalAmbiguousName) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GatherRefusalAmbiguousName) ProtoMessage() {}
+
+func (x *GatherRefusalAmbiguousName) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_gather_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GatherRefusalAmbiguousName.ProtoReflect.Descriptor instead.
+func (*GatherRefusalAmbiguousName) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_gather_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *GatherRefusalAmbiguousName) GetWorkspaces() []*v1.WorkspaceRef {
+	if x != nil {
+		return x.Workspaces
+	}
+	return nil
+}
+
 // The workspace is closed. No fields.
 type GatherRefusalClosed struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -405,7 +470,7 @@ type GatherRefusalClosed struct {
 
 func (x *GatherRefusalClosed) Reset() {
 	*x = GatherRefusalClosed{}
-	mi := &file_agentrepl_v1_gather_proto_msgTypes[5]
+	mi := &file_agentrepl_v1_gather_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -417,7 +482,7 @@ func (x *GatherRefusalClosed) String() string {
 func (*GatherRefusalClosed) ProtoMessage() {}
 
 func (x *GatherRefusalClosed) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_gather_proto_msgTypes[5]
+	mi := &file_agentrepl_v1_gather_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -430,7 +495,7 @@ func (x *GatherRefusalClosed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GatherRefusalClosed.ProtoReflect.Descriptor instead.
 func (*GatherRefusalClosed) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_gather_proto_rawDescGZIP(), []int{5}
+	return file_agentrepl_v1_gather_proto_rawDescGZIP(), []int{6}
 }
 
 // The target is the caller. No fields.
@@ -442,7 +507,7 @@ type GatherRefusalIsCaller struct {
 
 func (x *GatherRefusalIsCaller) Reset() {
 	*x = GatherRefusalIsCaller{}
-	mi := &file_agentrepl_v1_gather_proto_msgTypes[6]
+	mi := &file_agentrepl_v1_gather_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -454,7 +519,7 @@ func (x *GatherRefusalIsCaller) String() string {
 func (*GatherRefusalIsCaller) ProtoMessage() {}
 
 func (x *GatherRefusalIsCaller) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_gather_proto_msgTypes[6]
+	mi := &file_agentrepl_v1_gather_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -467,7 +532,7 @@ func (x *GatherRefusalIsCaller) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GatherRefusalIsCaller.ProtoReflect.Descriptor instead.
 func (*GatherRefusalIsCaller) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_gather_proto_rawDescGZIP(), []int{6}
+	return file_agentrepl_v1_gather_proto_rawDescGZIP(), []int{7}
 }
 
 // An ask waits on the user. No fields: `workspace status` names it.
@@ -479,7 +544,7 @@ type GatherRefusalNeedsInput struct {
 
 func (x *GatherRefusalNeedsInput) Reset() {
 	*x = GatherRefusalNeedsInput{}
-	mi := &file_agentrepl_v1_gather_proto_msgTypes[7]
+	mi := &file_agentrepl_v1_gather_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -491,7 +556,7 @@ func (x *GatherRefusalNeedsInput) String() string {
 func (*GatherRefusalNeedsInput) ProtoMessage() {}
 
 func (x *GatherRefusalNeedsInput) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_gather_proto_msgTypes[7]
+	mi := &file_agentrepl_v1_gather_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -504,7 +569,7 @@ func (x *GatherRefusalNeedsInput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GatherRefusalNeedsInput.ProtoReflect.Descriptor instead.
 func (*GatherRefusalNeedsInput) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_gather_proto_rawDescGZIP(), []int{7}
+	return file_agentrepl_v1_gather_proto_rawDescGZIP(), []int{8}
 }
 
 // A merge is in progress. No fields: the workspace's merge bubble names it.
@@ -516,7 +581,7 @@ type GatherRefusalMerging struct {
 
 func (x *GatherRefusalMerging) Reset() {
 	*x = GatherRefusalMerging{}
-	mi := &file_agentrepl_v1_gather_proto_msgTypes[8]
+	mi := &file_agentrepl_v1_gather_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -528,7 +593,7 @@ func (x *GatherRefusalMerging) String() string {
 func (*GatherRefusalMerging) ProtoMessage() {}
 
 func (x *GatherRefusalMerging) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_gather_proto_msgTypes[8]
+	mi := &file_agentrepl_v1_gather_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -541,7 +606,7 @@ func (x *GatherRefusalMerging) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GatherRefusalMerging.ProtoReflect.Descriptor instead.
 func (*GatherRefusalMerging) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_gather_proto_rawDescGZIP(), []int{8}
+	return file_agentrepl_v1_gather_proto_rawDescGZIP(), []int{9}
 }
 
 // A target that resolved: it answered, or it closed first.
@@ -564,7 +629,7 @@ type GatherResolvedTarget struct {
 
 func (x *GatherResolvedTarget) Reset() {
 	*x = GatherResolvedTarget{}
-	mi := &file_agentrepl_v1_gather_proto_msgTypes[9]
+	mi := &file_agentrepl_v1_gather_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -576,7 +641,7 @@ func (x *GatherResolvedTarget) String() string {
 func (*GatherResolvedTarget) ProtoMessage() {}
 
 func (x *GatherResolvedTarget) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_gather_proto_msgTypes[9]
+	mi := &file_agentrepl_v1_gather_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -589,7 +654,7 @@ func (x *GatherResolvedTarget) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GatherResolvedTarget.ProtoReflect.Descriptor instead.
 func (*GatherResolvedTarget) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_gather_proto_rawDescGZIP(), []int{9}
+	return file_agentrepl_v1_gather_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *GatherResolvedTarget) GetTarget() *GatherTarget {
@@ -661,7 +726,7 @@ type GatherResolvedTargetAnswered struct {
 
 func (x *GatherResolvedTargetAnswered) Reset() {
 	*x = GatherResolvedTargetAnswered{}
-	mi := &file_agentrepl_v1_gather_proto_msgTypes[10]
+	mi := &file_agentrepl_v1_gather_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -673,7 +738,7 @@ func (x *GatherResolvedTargetAnswered) String() string {
 func (*GatherResolvedTargetAnswered) ProtoMessage() {}
 
 func (x *GatherResolvedTargetAnswered) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_gather_proto_msgTypes[10]
+	mi := &file_agentrepl_v1_gather_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -686,7 +751,7 @@ func (x *GatherResolvedTargetAnswered) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GatherResolvedTargetAnswered.ProtoReflect.Descriptor instead.
 func (*GatherResolvedTargetAnswered) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_gather_proto_rawDescGZIP(), []int{10}
+	return file_agentrepl_v1_gather_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *GatherResolvedTargetAnswered) GetText() string {
@@ -705,7 +770,7 @@ type GatherResolvedTargetClosed struct {
 
 func (x *GatherResolvedTargetClosed) Reset() {
 	*x = GatherResolvedTargetClosed{}
-	mi := &file_agentrepl_v1_gather_proto_msgTypes[11]
+	mi := &file_agentrepl_v1_gather_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -717,7 +782,7 @@ func (x *GatherResolvedTargetClosed) String() string {
 func (*GatherResolvedTargetClosed) ProtoMessage() {}
 
 func (x *GatherResolvedTargetClosed) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_gather_proto_msgTypes[11]
+	mi := &file_agentrepl_v1_gather_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -730,7 +795,7 @@ func (x *GatherResolvedTargetClosed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GatherResolvedTargetClosed.ProtoReflect.Descriptor instead.
 func (*GatherResolvedTargetClosed) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_gather_proto_rawDescGZIP(), []int{11}
+	return file_agentrepl_v1_gather_proto_rawDescGZIP(), []int{12}
 }
 
 // A target that has not resolved, with why, as it stands when the notice or
@@ -756,7 +821,7 @@ type GatherOutstandingTarget struct {
 
 func (x *GatherOutstandingTarget) Reset() {
 	*x = GatherOutstandingTarget{}
-	mi := &file_agentrepl_v1_gather_proto_msgTypes[12]
+	mi := &file_agentrepl_v1_gather_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -768,7 +833,7 @@ func (x *GatherOutstandingTarget) String() string {
 func (*GatherOutstandingTarget) ProtoMessage() {}
 
 func (x *GatherOutstandingTarget) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_gather_proto_msgTypes[12]
+	mi := &file_agentrepl_v1_gather_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -781,7 +846,7 @@ func (x *GatherOutstandingTarget) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GatherOutstandingTarget.ProtoReflect.Descriptor instead.
 func (*GatherOutstandingTarget) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_gather_proto_rawDescGZIP(), []int{12}
+	return file_agentrepl_v1_gather_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *GatherOutstandingTarget) GetTarget() *GatherTarget {
@@ -909,7 +974,7 @@ type GatherOutstandingTargetWorking struct {
 
 func (x *GatherOutstandingTargetWorking) Reset() {
 	*x = GatherOutstandingTargetWorking{}
-	mi := &file_agentrepl_v1_gather_proto_msgTypes[13]
+	mi := &file_agentrepl_v1_gather_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -921,7 +986,7 @@ func (x *GatherOutstandingTargetWorking) String() string {
 func (*GatherOutstandingTargetWorking) ProtoMessage() {}
 
 func (x *GatherOutstandingTargetWorking) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_gather_proto_msgTypes[13]
+	mi := &file_agentrepl_v1_gather_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -934,7 +999,7 @@ func (x *GatherOutstandingTargetWorking) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GatherOutstandingTargetWorking.ProtoReflect.Descriptor instead.
 func (*GatherOutstandingTargetWorking) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_gather_proto_rawDescGZIP(), []int{13}
+	return file_agentrepl_v1_gather_proto_rawDescGZIP(), []int{14}
 }
 
 // The prompt is held. No fields.
@@ -946,7 +1011,7 @@ type GatherOutstandingTargetHeld struct {
 
 func (x *GatherOutstandingTargetHeld) Reset() {
 	*x = GatherOutstandingTargetHeld{}
-	mi := &file_agentrepl_v1_gather_proto_msgTypes[14]
+	mi := &file_agentrepl_v1_gather_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -958,7 +1023,7 @@ func (x *GatherOutstandingTargetHeld) String() string {
 func (*GatherOutstandingTargetHeld) ProtoMessage() {}
 
 func (x *GatherOutstandingTargetHeld) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_gather_proto_msgTypes[14]
+	mi := &file_agentrepl_v1_gather_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -971,7 +1036,7 @@ func (x *GatherOutstandingTargetHeld) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GatherOutstandingTargetHeld.ProtoReflect.Descriptor instead.
 func (*GatherOutstandingTargetHeld) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_gather_proto_rawDescGZIP(), []int{14}
+	return file_agentrepl_v1_gather_proto_rawDescGZIP(), []int{15}
 }
 
 // The target is at its cold gate.
@@ -985,7 +1050,7 @@ type GatherOutstandingTargetColdGate struct {
 
 func (x *GatherOutstandingTargetColdGate) Reset() {
 	*x = GatherOutstandingTargetColdGate{}
-	mi := &file_agentrepl_v1_gather_proto_msgTypes[15]
+	mi := &file_agentrepl_v1_gather_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -997,7 +1062,7 @@ func (x *GatherOutstandingTargetColdGate) String() string {
 func (*GatherOutstandingTargetColdGate) ProtoMessage() {}
 
 func (x *GatherOutstandingTargetColdGate) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_gather_proto_msgTypes[15]
+	mi := &file_agentrepl_v1_gather_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1010,7 +1075,7 @@ func (x *GatherOutstandingTargetColdGate) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GatherOutstandingTargetColdGate.ProtoReflect.Descriptor instead.
 func (*GatherOutstandingTargetColdGate) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_gather_proto_rawDescGZIP(), []int{15}
+	return file_agentrepl_v1_gather_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *GatherOutstandingTargetColdGate) GetDetail() string {
@@ -1029,7 +1094,7 @@ type GatherOutstandingTargetNeedsInput struct {
 
 func (x *GatherOutstandingTargetNeedsInput) Reset() {
 	*x = GatherOutstandingTargetNeedsInput{}
-	mi := &file_agentrepl_v1_gather_proto_msgTypes[16]
+	mi := &file_agentrepl_v1_gather_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1041,7 +1106,7 @@ func (x *GatherOutstandingTargetNeedsInput) String() string {
 func (*GatherOutstandingTargetNeedsInput) ProtoMessage() {}
 
 func (x *GatherOutstandingTargetNeedsInput) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_gather_proto_msgTypes[16]
+	mi := &file_agentrepl_v1_gather_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1054,7 +1119,7 @@ func (x *GatherOutstandingTargetNeedsInput) ProtoReflect() protoreflect.Message 
 
 // Deprecated: Use GatherOutstandingTargetNeedsInput.ProtoReflect.Descriptor instead.
 func (*GatherOutstandingTargetNeedsInput) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_gather_proto_rawDescGZIP(), []int{16}
+	return file_agentrepl_v1_gather_proto_rawDescGZIP(), []int{17}
 }
 
 // The prompt's turn ended without a response. No fields.
@@ -1066,7 +1131,7 @@ type GatherOutstandingTargetEndedWithoutResponse struct {
 
 func (x *GatherOutstandingTargetEndedWithoutResponse) Reset() {
 	*x = GatherOutstandingTargetEndedWithoutResponse{}
-	mi := &file_agentrepl_v1_gather_proto_msgTypes[17]
+	mi := &file_agentrepl_v1_gather_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1078,7 +1143,7 @@ func (x *GatherOutstandingTargetEndedWithoutResponse) String() string {
 func (*GatherOutstandingTargetEndedWithoutResponse) ProtoMessage() {}
 
 func (x *GatherOutstandingTargetEndedWithoutResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_gather_proto_msgTypes[17]
+	mi := &file_agentrepl_v1_gather_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1091,7 +1156,7 @@ func (x *GatherOutstandingTargetEndedWithoutResponse) ProtoReflect() protoreflec
 
 // Deprecated: Use GatherOutstandingTargetEndedWithoutResponse.ProtoReflect.Descriptor instead.
 func (*GatherOutstandingTargetEndedWithoutResponse) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_gather_proto_rawDescGZIP(), []int{17}
+	return file_agentrepl_v1_gather_proto_rawDescGZIP(), []int{18}
 }
 
 // The target is faulted.
@@ -1105,7 +1170,7 @@ type GatherOutstandingTargetFaulted struct {
 
 func (x *GatherOutstandingTargetFaulted) Reset() {
 	*x = GatherOutstandingTargetFaulted{}
-	mi := &file_agentrepl_v1_gather_proto_msgTypes[18]
+	mi := &file_agentrepl_v1_gather_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1117,7 +1182,7 @@ func (x *GatherOutstandingTargetFaulted) String() string {
 func (*GatherOutstandingTargetFaulted) ProtoMessage() {}
 
 func (x *GatherOutstandingTargetFaulted) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_gather_proto_msgTypes[18]
+	mi := &file_agentrepl_v1_gather_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1130,7 +1195,7 @@ func (x *GatherOutstandingTargetFaulted) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GatherOutstandingTargetFaulted.ProtoReflect.Descriptor instead.
 func (*GatherOutstandingTargetFaulted) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_gather_proto_rawDescGZIP(), []int{18}
+	return file_agentrepl_v1_gather_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *GatherOutstandingTargetFaulted) GetDescription() string {
@@ -1164,7 +1229,7 @@ type GatherStatus struct {
 
 func (x *GatherStatus) Reset() {
 	*x = GatherStatus{}
-	mi := &file_agentrepl_v1_gather_proto_msgTypes[19]
+	mi := &file_agentrepl_v1_gather_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1176,7 +1241,7 @@ func (x *GatherStatus) String() string {
 func (*GatherStatus) ProtoMessage() {}
 
 func (x *GatherStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_gather_proto_msgTypes[19]
+	mi := &file_agentrepl_v1_gather_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1189,7 +1254,7 @@ func (x *GatherStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GatherStatus.ProtoReflect.Descriptor instead.
 func (*GatherStatus) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_gather_proto_rawDescGZIP(), []int{19}
+	return file_agentrepl_v1_gather_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *GatherStatus) GetGather() *GatherRef {
@@ -1257,7 +1322,7 @@ type GatherFirstUpdateStanding struct {
 
 func (x *GatherFirstUpdateStanding) Reset() {
 	*x = GatherFirstUpdateStanding{}
-	mi := &file_agentrepl_v1_gather_proto_msgTypes[20]
+	mi := &file_agentrepl_v1_gather_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1269,7 +1334,7 @@ func (x *GatherFirstUpdateStanding) String() string {
 func (*GatherFirstUpdateStanding) ProtoMessage() {}
 
 func (x *GatherFirstUpdateStanding) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_gather_proto_msgTypes[20]
+	mi := &file_agentrepl_v1_gather_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1282,7 +1347,7 @@ func (x *GatherFirstUpdateStanding) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GatherFirstUpdateStanding.ProtoReflect.Descriptor instead.
 func (*GatherFirstUpdateStanding) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_gather_proto_rawDescGZIP(), []int{20}
+	return file_agentrepl_v1_gather_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *GatherFirstUpdateStanding) GetStanding() isGatherFirstUpdateStanding_Standing {
@@ -1340,7 +1405,7 @@ type GatherFirstUpdateStandingPending struct {
 
 func (x *GatherFirstUpdateStandingPending) Reset() {
 	*x = GatherFirstUpdateStandingPending{}
-	mi := &file_agentrepl_v1_gather_proto_msgTypes[21]
+	mi := &file_agentrepl_v1_gather_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1352,7 +1417,7 @@ func (x *GatherFirstUpdateStandingPending) String() string {
 func (*GatherFirstUpdateStandingPending) ProtoMessage() {}
 
 func (x *GatherFirstUpdateStandingPending) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_gather_proto_msgTypes[21]
+	mi := &file_agentrepl_v1_gather_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1365,7 +1430,7 @@ func (x *GatherFirstUpdateStandingPending) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GatherFirstUpdateStandingPending.ProtoReflect.Descriptor instead.
 func (*GatherFirstUpdateStandingPending) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_gather_proto_rawDescGZIP(), []int{21}
+	return file_agentrepl_v1_gather_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *GatherFirstUpdateStandingPending) GetDeadlineAtUnixMs() int64 {
@@ -1388,7 +1453,7 @@ type GatherFirstUpdateStandingTold struct {
 
 func (x *GatherFirstUpdateStandingTold) Reset() {
 	*x = GatherFirstUpdateStandingTold{}
-	mi := &file_agentrepl_v1_gather_proto_msgTypes[22]
+	mi := &file_agentrepl_v1_gather_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1400,7 +1465,7 @@ func (x *GatherFirstUpdateStandingTold) String() string {
 func (*GatherFirstUpdateStandingTold) ProtoMessage() {}
 
 func (x *GatherFirstUpdateStandingTold) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_gather_proto_msgTypes[22]
+	mi := &file_agentrepl_v1_gather_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1413,7 +1478,7 @@ func (x *GatherFirstUpdateStandingTold) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GatherFirstUpdateStandingTold.ProtoReflect.Descriptor instead.
 func (*GatherFirstUpdateStandingTold) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_gather_proto_rawDescGZIP(), []int{22}
+	return file_agentrepl_v1_gather_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *GatherFirstUpdateStandingTold) GetToldAtUnixMs() int64 {
@@ -1446,7 +1511,7 @@ type GatherFirstUpdateTrigger struct {
 
 func (x *GatherFirstUpdateTrigger) Reset() {
 	*x = GatherFirstUpdateTrigger{}
-	mi := &file_agentrepl_v1_gather_proto_msgTypes[23]
+	mi := &file_agentrepl_v1_gather_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1458,7 +1523,7 @@ func (x *GatherFirstUpdateTrigger) String() string {
 func (*GatherFirstUpdateTrigger) ProtoMessage() {}
 
 func (x *GatherFirstUpdateTrigger) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_gather_proto_msgTypes[23]
+	mi := &file_agentrepl_v1_gather_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1471,7 +1536,7 @@ func (x *GatherFirstUpdateTrigger) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GatherFirstUpdateTrigger.ProtoReflect.Descriptor instead.
 func (*GatherFirstUpdateTrigger) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_gather_proto_rawDescGZIP(), []int{23}
+	return file_agentrepl_v1_gather_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *GatherFirstUpdateTrigger) GetTrigger() isGatherFirstUpdateTrigger_Trigger {
@@ -1526,7 +1591,7 @@ type GatherFirstUpdateTriggerAllResolved struct {
 
 func (x *GatherFirstUpdateTriggerAllResolved) Reset() {
 	*x = GatherFirstUpdateTriggerAllResolved{}
-	mi := &file_agentrepl_v1_gather_proto_msgTypes[24]
+	mi := &file_agentrepl_v1_gather_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1538,7 +1603,7 @@ func (x *GatherFirstUpdateTriggerAllResolved) String() string {
 func (*GatherFirstUpdateTriggerAllResolved) ProtoMessage() {}
 
 func (x *GatherFirstUpdateTriggerAllResolved) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_gather_proto_msgTypes[24]
+	mi := &file_agentrepl_v1_gather_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1551,7 +1616,7 @@ func (x *GatherFirstUpdateTriggerAllResolved) ProtoReflect() protoreflect.Messag
 
 // Deprecated: Use GatherFirstUpdateTriggerAllResolved.ProtoReflect.Descriptor instead.
 func (*GatherFirstUpdateTriggerAllResolved) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_gather_proto_rawDescGZIP(), []int{24}
+	return file_agentrepl_v1_gather_proto_rawDescGZIP(), []int{25}
 }
 
 // The deadline passed. No fields.
@@ -1563,7 +1628,7 @@ type GatherFirstUpdateTriggerTimedOut struct {
 
 func (x *GatherFirstUpdateTriggerTimedOut) Reset() {
 	*x = GatherFirstUpdateTriggerTimedOut{}
-	mi := &file_agentrepl_v1_gather_proto_msgTypes[25]
+	mi := &file_agentrepl_v1_gather_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1575,7 +1640,7 @@ func (x *GatherFirstUpdateTriggerTimedOut) String() string {
 func (*GatherFirstUpdateTriggerTimedOut) ProtoMessage() {}
 
 func (x *GatherFirstUpdateTriggerTimedOut) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_gather_proto_msgTypes[25]
+	mi := &file_agentrepl_v1_gather_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1588,7 +1653,7 @@ func (x *GatherFirstUpdateTriggerTimedOut) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GatherFirstUpdateTriggerTimedOut.ProtoReflect.Descriptor instead.
 func (*GatherFirstUpdateTriggerTimedOut) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_gather_proto_rawDescGZIP(), []int{25}
+	return file_agentrepl_v1_gather_proto_rawDescGZIP(), []int{26}
 }
 
 // One notice a gather sends its caller. The notice's words carry this message
@@ -1610,7 +1675,7 @@ type GatherNotice struct {
 
 func (x *GatherNotice) Reset() {
 	*x = GatherNotice{}
-	mi := &file_agentrepl_v1_gather_proto_msgTypes[26]
+	mi := &file_agentrepl_v1_gather_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1622,7 +1687,7 @@ func (x *GatherNotice) String() string {
 func (*GatherNotice) ProtoMessage() {}
 
 func (x *GatherNotice) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_gather_proto_msgTypes[26]
+	mi := &file_agentrepl_v1_gather_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1635,7 +1700,7 @@ func (x *GatherNotice) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GatherNotice.ProtoReflect.Descriptor instead.
 func (*GatherNotice) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_gather_proto_rawDescGZIP(), []int{26}
+	return file_agentrepl_v1_gather_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *GatherNotice) GetGather() *GatherRef {
@@ -1703,7 +1768,7 @@ type GatherNoticeFirstUpdate struct {
 
 func (x *GatherNoticeFirstUpdate) Reset() {
 	*x = GatherNoticeFirstUpdate{}
-	mi := &file_agentrepl_v1_gather_proto_msgTypes[27]
+	mi := &file_agentrepl_v1_gather_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1715,7 +1780,7 @@ func (x *GatherNoticeFirstUpdate) String() string {
 func (*GatherNoticeFirstUpdate) ProtoMessage() {}
 
 func (x *GatherNoticeFirstUpdate) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_gather_proto_msgTypes[27]
+	mi := &file_agentrepl_v1_gather_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1728,7 +1793,7 @@ func (x *GatherNoticeFirstUpdate) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GatherNoticeFirstUpdate.ProtoReflect.Descriptor instead.
 func (*GatherNoticeFirstUpdate) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_gather_proto_rawDescGZIP(), []int{27}
+	return file_agentrepl_v1_gather_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *GatherNoticeFirstUpdate) GetTrigger() *GatherFirstUpdateTrigger {
@@ -1765,7 +1830,7 @@ type GatherNoticeLaterAnswer struct {
 
 func (x *GatherNoticeLaterAnswer) Reset() {
 	*x = GatherNoticeLaterAnswer{}
-	mi := &file_agentrepl_v1_gather_proto_msgTypes[28]
+	mi := &file_agentrepl_v1_gather_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1777,7 +1842,7 @@ func (x *GatherNoticeLaterAnswer) String() string {
 func (*GatherNoticeLaterAnswer) ProtoMessage() {}
 
 func (x *GatherNoticeLaterAnswer) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_gather_proto_msgTypes[28]
+	mi := &file_agentrepl_v1_gather_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1790,7 +1855,7 @@ func (x *GatherNoticeLaterAnswer) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GatherNoticeLaterAnswer.ProtoReflect.Descriptor instead.
 func (*GatherNoticeLaterAnswer) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_gather_proto_rawDescGZIP(), []int{28}
+	return file_agentrepl_v1_gather_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *GatherNoticeLaterAnswer) GetResolved() *GatherResolvedTarget {
@@ -1819,7 +1884,7 @@ const file_agentrepl_v1_gather_proto_rawDesc = "" +
 	"\tworkspace\x18\x02 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\"\\\n" +
 	"\x13GatherRefusedTarget\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x121\n" +
-	"\x05cause\x18\x02 \x01(\v2\x1b.agentrepl.v1.GatherRefusalR\x05cause\"\xc9\x03\n" +
+	"\x05cause\x18\x02 \x01(\v2\x1b.agentrepl.v1.GatherRefusalR\x05cause\"\x9c\x04\n" +
 	"\rGatherRefusal\x12Z\n" +
 	"\x11unknown_workspace\x18\x01 \x01(\v2+.agentrepl.v1.GatherRefusalUnknownWorkspaceH\x00R\x10unknownWorkspace\x12;\n" +
 	"\x06closed\x18\x02 \x01(\v2!.agentrepl.v1.GatherRefusalClosedH\x00R\x06closed\x12B\n" +
@@ -1827,9 +1892,14 @@ const file_agentrepl_v1_gather_proto_rawDesc = "" +
 	"\vneeds_input\x18\x04 \x01(\v2%.agentrepl.v1.GatherRefusalNeedsInputH\x00R\n" +
 	"needsInput\x12>\n" +
 	"\amerging\x18\x05 \x01(\v2\".agentrepl.v1.GatherRefusalMergingH\x00R\amerging\x12H\n" +
-	"\x0eprompt_refused\x18\x06 \x01(\v2\x1f.agentrepl.v1.SubmitPromptErrorH\x00R\rpromptRefusedB\a\n" +
+	"\x0eprompt_refused\x18\x06 \x01(\v2\x1f.agentrepl.v1.SubmitPromptErrorH\x00R\rpromptRefused\x12Q\n" +
+	"\x0eambiguous_name\x18\a \x01(\v2(.agentrepl.v1.GatherRefusalAmbiguousNameH\x00R\rambiguousNameB\a\n" +
 	"\x05cause\"\x1f\n" +
-	"\x1dGatherRefusalUnknownWorkspace\"\x15\n" +
+	"\x1dGatherRefusalUnknownWorkspace\"X\n" +
+	"\x1aGatherRefusalAmbiguousName\x12:\n" +
+	"\n" +
+	"workspaces\x18\x01 \x03(\v2\x1a.workspace.v1.WorkspaceRefR\n" +
+	"workspaces\"\x15\n" +
 	"\x13GatherRefusalClosed\"\x17\n" +
 	"\x15GatherRefusalIsCaller\"\x19\n" +
 	"\x17GatherRefusalNeedsInput\"\x16\n" +
@@ -1912,81 +1982,84 @@ func file_agentrepl_v1_gather_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_gather_proto_rawDescData
 }
 
-var file_agentrepl_v1_gather_proto_msgTypes = make([]protoimpl.MessageInfo, 29)
+var file_agentrepl_v1_gather_proto_msgTypes = make([]protoimpl.MessageInfo, 30)
 var file_agentrepl_v1_gather_proto_goTypes = []any{
 	(*GatherRef)(nil),                                   // 0: agentrepl.v1.GatherRef
 	(*GatherTarget)(nil),                                // 1: agentrepl.v1.GatherTarget
 	(*GatherRefusedTarget)(nil),                         // 2: agentrepl.v1.GatherRefusedTarget
 	(*GatherRefusal)(nil),                               // 3: agentrepl.v1.GatherRefusal
 	(*GatherRefusalUnknownWorkspace)(nil),               // 4: agentrepl.v1.GatherRefusalUnknownWorkspace
-	(*GatherRefusalClosed)(nil),                         // 5: agentrepl.v1.GatherRefusalClosed
-	(*GatherRefusalIsCaller)(nil),                       // 6: agentrepl.v1.GatherRefusalIsCaller
-	(*GatherRefusalNeedsInput)(nil),                     // 7: agentrepl.v1.GatherRefusalNeedsInput
-	(*GatherRefusalMerging)(nil),                        // 8: agentrepl.v1.GatherRefusalMerging
-	(*GatherResolvedTarget)(nil),                        // 9: agentrepl.v1.GatherResolvedTarget
-	(*GatherResolvedTargetAnswered)(nil),                // 10: agentrepl.v1.GatherResolvedTargetAnswered
-	(*GatherResolvedTargetClosed)(nil),                  // 11: agentrepl.v1.GatherResolvedTargetClosed
-	(*GatherOutstandingTarget)(nil),                     // 12: agentrepl.v1.GatherOutstandingTarget
-	(*GatherOutstandingTargetWorking)(nil),              // 13: agentrepl.v1.GatherOutstandingTargetWorking
-	(*GatherOutstandingTargetHeld)(nil),                 // 14: agentrepl.v1.GatherOutstandingTargetHeld
-	(*GatherOutstandingTargetColdGate)(nil),             // 15: agentrepl.v1.GatherOutstandingTargetColdGate
-	(*GatherOutstandingTargetNeedsInput)(nil),           // 16: agentrepl.v1.GatherOutstandingTargetNeedsInput
-	(*GatherOutstandingTargetEndedWithoutResponse)(nil), // 17: agentrepl.v1.GatherOutstandingTargetEndedWithoutResponse
-	(*GatherOutstandingTargetFaulted)(nil),              // 18: agentrepl.v1.GatherOutstandingTargetFaulted
-	(*GatherStatus)(nil),                                // 19: agentrepl.v1.GatherStatus
-	(*GatherFirstUpdateStanding)(nil),                   // 20: agentrepl.v1.GatherFirstUpdateStanding
-	(*GatherFirstUpdateStandingPending)(nil),            // 21: agentrepl.v1.GatherFirstUpdateStandingPending
-	(*GatherFirstUpdateStandingTold)(nil),               // 22: agentrepl.v1.GatherFirstUpdateStandingTold
-	(*GatherFirstUpdateTrigger)(nil),                    // 23: agentrepl.v1.GatherFirstUpdateTrigger
-	(*GatherFirstUpdateTriggerAllResolved)(nil),         // 24: agentrepl.v1.GatherFirstUpdateTriggerAllResolved
-	(*GatherFirstUpdateTriggerTimedOut)(nil),            // 25: agentrepl.v1.GatherFirstUpdateTriggerTimedOut
-	(*GatherNotice)(nil),                                // 26: agentrepl.v1.GatherNotice
-	(*GatherNoticeFirstUpdate)(nil),                     // 27: agentrepl.v1.GatherNoticeFirstUpdate
-	(*GatherNoticeLaterAnswer)(nil),                     // 28: agentrepl.v1.GatherNoticeLaterAnswer
-	(*v1.WorkspaceRef)(nil),                             // 29: workspace.v1.WorkspaceRef
-	(*SubmitPromptError)(nil),                           // 30: agentrepl.v1.SubmitPromptError
+	(*GatherRefusalAmbiguousName)(nil),                  // 5: agentrepl.v1.GatherRefusalAmbiguousName
+	(*GatherRefusalClosed)(nil),                         // 6: agentrepl.v1.GatherRefusalClosed
+	(*GatherRefusalIsCaller)(nil),                       // 7: agentrepl.v1.GatherRefusalIsCaller
+	(*GatherRefusalNeedsInput)(nil),                     // 8: agentrepl.v1.GatherRefusalNeedsInput
+	(*GatherRefusalMerging)(nil),                        // 9: agentrepl.v1.GatherRefusalMerging
+	(*GatherResolvedTarget)(nil),                        // 10: agentrepl.v1.GatherResolvedTarget
+	(*GatherResolvedTargetAnswered)(nil),                // 11: agentrepl.v1.GatherResolvedTargetAnswered
+	(*GatherResolvedTargetClosed)(nil),                  // 12: agentrepl.v1.GatherResolvedTargetClosed
+	(*GatherOutstandingTarget)(nil),                     // 13: agentrepl.v1.GatherOutstandingTarget
+	(*GatherOutstandingTargetWorking)(nil),              // 14: agentrepl.v1.GatherOutstandingTargetWorking
+	(*GatherOutstandingTargetHeld)(nil),                 // 15: agentrepl.v1.GatherOutstandingTargetHeld
+	(*GatherOutstandingTargetColdGate)(nil),             // 16: agentrepl.v1.GatherOutstandingTargetColdGate
+	(*GatherOutstandingTargetNeedsInput)(nil),           // 17: agentrepl.v1.GatherOutstandingTargetNeedsInput
+	(*GatherOutstandingTargetEndedWithoutResponse)(nil), // 18: agentrepl.v1.GatherOutstandingTargetEndedWithoutResponse
+	(*GatherOutstandingTargetFaulted)(nil),              // 19: agentrepl.v1.GatherOutstandingTargetFaulted
+	(*GatherStatus)(nil),                                // 20: agentrepl.v1.GatherStatus
+	(*GatherFirstUpdateStanding)(nil),                   // 21: agentrepl.v1.GatherFirstUpdateStanding
+	(*GatherFirstUpdateStandingPending)(nil),            // 22: agentrepl.v1.GatherFirstUpdateStandingPending
+	(*GatherFirstUpdateStandingTold)(nil),               // 23: agentrepl.v1.GatherFirstUpdateStandingTold
+	(*GatherFirstUpdateTrigger)(nil),                    // 24: agentrepl.v1.GatherFirstUpdateTrigger
+	(*GatherFirstUpdateTriggerAllResolved)(nil),         // 25: agentrepl.v1.GatherFirstUpdateTriggerAllResolved
+	(*GatherFirstUpdateTriggerTimedOut)(nil),            // 26: agentrepl.v1.GatherFirstUpdateTriggerTimedOut
+	(*GatherNotice)(nil),                                // 27: agentrepl.v1.GatherNotice
+	(*GatherNoticeFirstUpdate)(nil),                     // 28: agentrepl.v1.GatherNoticeFirstUpdate
+	(*GatherNoticeLaterAnswer)(nil),                     // 29: agentrepl.v1.GatherNoticeLaterAnswer
+	(*v1.WorkspaceRef)(nil),                             // 30: workspace.v1.WorkspaceRef
+	(*SubmitPromptError)(nil),                           // 31: agentrepl.v1.SubmitPromptError
 }
 var file_agentrepl_v1_gather_proto_depIdxs = []int32{
-	29, // 0: agentrepl.v1.GatherTarget.workspace:type_name -> workspace.v1.WorkspaceRef
+	30, // 0: agentrepl.v1.GatherTarget.workspace:type_name -> workspace.v1.WorkspaceRef
 	3,  // 1: agentrepl.v1.GatherRefusedTarget.cause:type_name -> agentrepl.v1.GatherRefusal
 	4,  // 2: agentrepl.v1.GatherRefusal.unknown_workspace:type_name -> agentrepl.v1.GatherRefusalUnknownWorkspace
-	5,  // 3: agentrepl.v1.GatherRefusal.closed:type_name -> agentrepl.v1.GatherRefusalClosed
-	6,  // 4: agentrepl.v1.GatherRefusal.is_caller:type_name -> agentrepl.v1.GatherRefusalIsCaller
-	7,  // 5: agentrepl.v1.GatherRefusal.needs_input:type_name -> agentrepl.v1.GatherRefusalNeedsInput
-	8,  // 6: agentrepl.v1.GatherRefusal.merging:type_name -> agentrepl.v1.GatherRefusalMerging
-	30, // 7: agentrepl.v1.GatherRefusal.prompt_refused:type_name -> agentrepl.v1.SubmitPromptError
-	1,  // 8: agentrepl.v1.GatherResolvedTarget.target:type_name -> agentrepl.v1.GatherTarget
-	10, // 9: agentrepl.v1.GatherResolvedTarget.answered:type_name -> agentrepl.v1.GatherResolvedTargetAnswered
-	11, // 10: agentrepl.v1.GatherResolvedTarget.closed:type_name -> agentrepl.v1.GatherResolvedTargetClosed
-	1,  // 11: agentrepl.v1.GatherOutstandingTarget.target:type_name -> agentrepl.v1.GatherTarget
-	13, // 12: agentrepl.v1.GatherOutstandingTarget.working:type_name -> agentrepl.v1.GatherOutstandingTargetWorking
-	14, // 13: agentrepl.v1.GatherOutstandingTarget.held:type_name -> agentrepl.v1.GatherOutstandingTargetHeld
-	15, // 14: agentrepl.v1.GatherOutstandingTarget.cold_gate:type_name -> agentrepl.v1.GatherOutstandingTargetColdGate
-	16, // 15: agentrepl.v1.GatherOutstandingTarget.needs_input:type_name -> agentrepl.v1.GatherOutstandingTargetNeedsInput
-	17, // 16: agentrepl.v1.GatherOutstandingTarget.ended_without_response:type_name -> agentrepl.v1.GatherOutstandingTargetEndedWithoutResponse
-	18, // 17: agentrepl.v1.GatherOutstandingTarget.faulted:type_name -> agentrepl.v1.GatherOutstandingTargetFaulted
-	0,  // 18: agentrepl.v1.GatherStatus.gather:type_name -> agentrepl.v1.GatherRef
-	1,  // 19: agentrepl.v1.GatherStatus.caller:type_name -> agentrepl.v1.GatherTarget
-	20, // 20: agentrepl.v1.GatherStatus.first_update:type_name -> agentrepl.v1.GatherFirstUpdateStanding
-	9,  // 21: agentrepl.v1.GatherStatus.resolved:type_name -> agentrepl.v1.GatherResolvedTarget
-	12, // 22: agentrepl.v1.GatherStatus.outstanding:type_name -> agentrepl.v1.GatherOutstandingTarget
-	21, // 23: agentrepl.v1.GatherFirstUpdateStanding.pending:type_name -> agentrepl.v1.GatherFirstUpdateStandingPending
-	22, // 24: agentrepl.v1.GatherFirstUpdateStanding.told:type_name -> agentrepl.v1.GatherFirstUpdateStandingTold
-	23, // 25: agentrepl.v1.GatherFirstUpdateStandingTold.trigger:type_name -> agentrepl.v1.GatherFirstUpdateTrigger
-	24, // 26: agentrepl.v1.GatherFirstUpdateTrigger.all_resolved:type_name -> agentrepl.v1.GatherFirstUpdateTriggerAllResolved
-	25, // 27: agentrepl.v1.GatherFirstUpdateTrigger.timed_out:type_name -> agentrepl.v1.GatherFirstUpdateTriggerTimedOut
-	0,  // 28: agentrepl.v1.GatherNotice.gather:type_name -> agentrepl.v1.GatherRef
-	27, // 29: agentrepl.v1.GatherNotice.first_update:type_name -> agentrepl.v1.GatherNoticeFirstUpdate
-	28, // 30: agentrepl.v1.GatherNotice.later_answer:type_name -> agentrepl.v1.GatherNoticeLaterAnswer
-	23, // 31: agentrepl.v1.GatherNoticeFirstUpdate.trigger:type_name -> agentrepl.v1.GatherFirstUpdateTrigger
-	9,  // 32: agentrepl.v1.GatherNoticeFirstUpdate.resolved:type_name -> agentrepl.v1.GatherResolvedTarget
-	12, // 33: agentrepl.v1.GatherNoticeFirstUpdate.outstanding:type_name -> agentrepl.v1.GatherOutstandingTarget
-	9,  // 34: agentrepl.v1.GatherNoticeLaterAnswer.resolved:type_name -> agentrepl.v1.GatherResolvedTarget
-	35, // [35:35] is the sub-list for method output_type
-	35, // [35:35] is the sub-list for method input_type
-	35, // [35:35] is the sub-list for extension type_name
-	35, // [35:35] is the sub-list for extension extendee
-	0,  // [0:35] is the sub-list for field type_name
+	6,  // 3: agentrepl.v1.GatherRefusal.closed:type_name -> agentrepl.v1.GatherRefusalClosed
+	7,  // 4: agentrepl.v1.GatherRefusal.is_caller:type_name -> agentrepl.v1.GatherRefusalIsCaller
+	8,  // 5: agentrepl.v1.GatherRefusal.needs_input:type_name -> agentrepl.v1.GatherRefusalNeedsInput
+	9,  // 6: agentrepl.v1.GatherRefusal.merging:type_name -> agentrepl.v1.GatherRefusalMerging
+	31, // 7: agentrepl.v1.GatherRefusal.prompt_refused:type_name -> agentrepl.v1.SubmitPromptError
+	5,  // 8: agentrepl.v1.GatherRefusal.ambiguous_name:type_name -> agentrepl.v1.GatherRefusalAmbiguousName
+	30, // 9: agentrepl.v1.GatherRefusalAmbiguousName.workspaces:type_name -> workspace.v1.WorkspaceRef
+	1,  // 10: agentrepl.v1.GatherResolvedTarget.target:type_name -> agentrepl.v1.GatherTarget
+	11, // 11: agentrepl.v1.GatherResolvedTarget.answered:type_name -> agentrepl.v1.GatherResolvedTargetAnswered
+	12, // 12: agentrepl.v1.GatherResolvedTarget.closed:type_name -> agentrepl.v1.GatherResolvedTargetClosed
+	1,  // 13: agentrepl.v1.GatherOutstandingTarget.target:type_name -> agentrepl.v1.GatherTarget
+	14, // 14: agentrepl.v1.GatherOutstandingTarget.working:type_name -> agentrepl.v1.GatherOutstandingTargetWorking
+	15, // 15: agentrepl.v1.GatherOutstandingTarget.held:type_name -> agentrepl.v1.GatherOutstandingTargetHeld
+	16, // 16: agentrepl.v1.GatherOutstandingTarget.cold_gate:type_name -> agentrepl.v1.GatherOutstandingTargetColdGate
+	17, // 17: agentrepl.v1.GatherOutstandingTarget.needs_input:type_name -> agentrepl.v1.GatherOutstandingTargetNeedsInput
+	18, // 18: agentrepl.v1.GatherOutstandingTarget.ended_without_response:type_name -> agentrepl.v1.GatherOutstandingTargetEndedWithoutResponse
+	19, // 19: agentrepl.v1.GatherOutstandingTarget.faulted:type_name -> agentrepl.v1.GatherOutstandingTargetFaulted
+	0,  // 20: agentrepl.v1.GatherStatus.gather:type_name -> agentrepl.v1.GatherRef
+	1,  // 21: agentrepl.v1.GatherStatus.caller:type_name -> agentrepl.v1.GatherTarget
+	21, // 22: agentrepl.v1.GatherStatus.first_update:type_name -> agentrepl.v1.GatherFirstUpdateStanding
+	10, // 23: agentrepl.v1.GatherStatus.resolved:type_name -> agentrepl.v1.GatherResolvedTarget
+	13, // 24: agentrepl.v1.GatherStatus.outstanding:type_name -> agentrepl.v1.GatherOutstandingTarget
+	22, // 25: agentrepl.v1.GatherFirstUpdateStanding.pending:type_name -> agentrepl.v1.GatherFirstUpdateStandingPending
+	23, // 26: agentrepl.v1.GatherFirstUpdateStanding.told:type_name -> agentrepl.v1.GatherFirstUpdateStandingTold
+	24, // 27: agentrepl.v1.GatherFirstUpdateStandingTold.trigger:type_name -> agentrepl.v1.GatherFirstUpdateTrigger
+	25, // 28: agentrepl.v1.GatherFirstUpdateTrigger.all_resolved:type_name -> agentrepl.v1.GatherFirstUpdateTriggerAllResolved
+	26, // 29: agentrepl.v1.GatherFirstUpdateTrigger.timed_out:type_name -> agentrepl.v1.GatherFirstUpdateTriggerTimedOut
+	0,  // 30: agentrepl.v1.GatherNotice.gather:type_name -> agentrepl.v1.GatherRef
+	28, // 31: agentrepl.v1.GatherNotice.first_update:type_name -> agentrepl.v1.GatherNoticeFirstUpdate
+	29, // 32: agentrepl.v1.GatherNotice.later_answer:type_name -> agentrepl.v1.GatherNoticeLaterAnswer
+	24, // 33: agentrepl.v1.GatherNoticeFirstUpdate.trigger:type_name -> agentrepl.v1.GatherFirstUpdateTrigger
+	10, // 34: agentrepl.v1.GatherNoticeFirstUpdate.resolved:type_name -> agentrepl.v1.GatherResolvedTarget
+	13, // 35: agentrepl.v1.GatherNoticeFirstUpdate.outstanding:type_name -> agentrepl.v1.GatherOutstandingTarget
+	10, // 36: agentrepl.v1.GatherNoticeLaterAnswer.resolved:type_name -> agentrepl.v1.GatherResolvedTarget
+	37, // [37:37] is the sub-list for method output_type
+	37, // [37:37] is the sub-list for method input_type
+	37, // [37:37] is the sub-list for extension type_name
+	37, // [37:37] is the sub-list for extension extendee
+	0,  // [0:37] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_gather_proto_init() }
@@ -2002,12 +2075,13 @@ func file_agentrepl_v1_gather_proto_init() {
 		(*GatherRefusal_NeedsInput)(nil),
 		(*GatherRefusal_Merging)(nil),
 		(*GatherRefusal_PromptRefused)(nil),
+		(*GatherRefusal_AmbiguousName)(nil),
 	}
-	file_agentrepl_v1_gather_proto_msgTypes[9].OneofWrappers = []any{
+	file_agentrepl_v1_gather_proto_msgTypes[10].OneofWrappers = []any{
 		(*GatherResolvedTarget_Answered)(nil),
 		(*GatherResolvedTarget_Closed)(nil),
 	}
-	file_agentrepl_v1_gather_proto_msgTypes[12].OneofWrappers = []any{
+	file_agentrepl_v1_gather_proto_msgTypes[13].OneofWrappers = []any{
 		(*GatherOutstandingTarget_Working)(nil),
 		(*GatherOutstandingTarget_Held)(nil),
 		(*GatherOutstandingTarget_ColdGate)(nil),
@@ -2015,15 +2089,15 @@ func file_agentrepl_v1_gather_proto_init() {
 		(*GatherOutstandingTarget_EndedWithoutResponse)(nil),
 		(*GatherOutstandingTarget_Faulted)(nil),
 	}
-	file_agentrepl_v1_gather_proto_msgTypes[20].OneofWrappers = []any{
+	file_agentrepl_v1_gather_proto_msgTypes[21].OneofWrappers = []any{
 		(*GatherFirstUpdateStanding_Pending)(nil),
 		(*GatherFirstUpdateStanding_Told)(nil),
 	}
-	file_agentrepl_v1_gather_proto_msgTypes[23].OneofWrappers = []any{
+	file_agentrepl_v1_gather_proto_msgTypes[24].OneofWrappers = []any{
 		(*GatherFirstUpdateTrigger_AllResolved)(nil),
 		(*GatherFirstUpdateTrigger_TimedOut)(nil),
 	}
-	file_agentrepl_v1_gather_proto_msgTypes[26].OneofWrappers = []any{
+	file_agentrepl_v1_gather_proto_msgTypes[27].OneofWrappers = []any{
 		(*GatherNotice_FirstUpdate)(nil),
 		(*GatherNotice_LaterAnswer)(nil),
 	}
@@ -2033,7 +2107,7 @@ func file_agentrepl_v1_gather_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_gather_proto_rawDesc), len(file_agentrepl_v1_gather_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   29,
+			NumMessages:   30,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

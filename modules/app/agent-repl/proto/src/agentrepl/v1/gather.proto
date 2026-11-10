@@ -55,7 +55,9 @@ message GatherRefusal {
   // What stopped the target taking the gather's prompt: a check the gather
   // made before submitting, or the submission's own refusal.
   oneof cause {
-    // No registered workspace has the name.
+    // No registered workspace has the name. A name only closed workspaces
+    // have is `closed` instead, and one several open workspaces have is
+    // `ambiguous_name`.
     GatherRefusalUnknownWorkspace unknown_workspace = 1;
     // The workspace is closed: it runs no session to answer.
     GatherRefusalClosed closed = 2;
@@ -71,10 +73,17 @@ message GatherRefusal {
     // refused: a cold gate, the fan-out cap `as_user` lifts, a missing
     // session, and every other arm of SubmitPromptError.
     SubmitPromptError prompt_refused = 6;
+    // Several open workspaces have the name, so it names no one target.
+    GatherRefusalAmbiguousName ambiguous_name = 7;
   }
 }
 // No workspace has the name. No fields.
 message GatherRefusalUnknownWorkspace {}
+// Several open workspaces have the name.
+message GatherRefusalAmbiguousName {
+  // Each open workspace with the name, so the caller can tell them apart.
+  repeated workspace.v1.WorkspaceRef workspaces = 1;
+}
 // The workspace is closed. No fields.
 message GatherRefusalClosed {}
 // The target is the caller. No fields.

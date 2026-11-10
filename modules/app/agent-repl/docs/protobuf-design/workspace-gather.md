@@ -47,6 +47,16 @@ skill's flow, where every target replied on purpose with its own
   - Outstanding reasons are read when a notice or status is made, from the
     target's durable state, so they never go stale in storage.
 
+### `gather.proto`: the `ambiguous_name` refusal
+
+- WHAT: `GatherRefusal.ambiguous_name`, carrying every open workspace with the
+  name.
+- WHY: the registry does not hold names unique, so a name can match several
+  open workspaces, and the daemon resolves targets by name.
+- CONSEQUENCES: a name is resolved among OPEN workspaces first; only when none
+  is open does it answer `closed` (some closed workspace has it) or
+  `unknown_workspace` (none does).
+
 ### `endpoint_gather_workspaces.proto`
 
 - WHAT: the request names targets by workspace NAME, carries the prompt as a

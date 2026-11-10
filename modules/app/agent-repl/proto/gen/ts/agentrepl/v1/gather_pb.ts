@@ -30,7 +30,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/gather.proto.
  */
 export const file_agentrepl_v1_gather: GenFile = /*@__PURE__*/
-  fileDesc("ChlhZ2VudHJlcGwvdjEvZ2F0aGVyLnByb3RvEgxhZ2VudHJlcGwudjEiFwoJR2F0aGVyUmVmEgoKAmlkGAEgASgJIksKDEdhdGhlclRhcmdldBIMCgRuYW1lGAEgASgJEi0KCXdvcmtzcGFjZRgCIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYiTwoTR2F0aGVyUmVmdXNlZFRhcmdldBIMCgRuYW1lGAEgASgJEioKBWNhdXNlGAIgASgLMhsuYWdlbnRyZXBsLnYxLkdhdGhlclJlZnVzYWwigQMKDUdhdGhlclJlZnVzYWwSSAoRdW5rbm93bl93b3Jrc3BhY2UYASABKAsyKy5hZ2VudHJlcGwudjEuR2F0aGVyUmVmdXNhbFVua25vd25Xb3Jrc3BhY2VIABIzCgZjbG9zZWQYAiABKAsyIS5hZ2VudHJlcGwudjEuR2F0aGVyUmVmdXNhbENsb3NlZEgAEjgKCWlzX2NhbGxlchgDIAEoCzIjLmFnZW50cmVwbC52MS5HYXRoZXJSZWZ1c2FsSXNDYWxsZXJIABI8CgtuZWVkc19pbnB1dBgEIAEoCzIlLmFnZW50cmVwbC52MS5HYXRoZXJSZWZ1c2FsTmVlZHNJbnB1dEgAEjUKB21lcmdpbmcYBSABKAsyIi5hZ2VudHJlcGwudjEuR2F0aGVyUmVmdXNhbE1lcmdpbmdIABI5Cg5wcm9tcHRfcmVmdXNlZBgGIAEoCzIfLmFnZW50cmVwbC52MS5TdWJtaXRQcm9tcHRFcnJvckgAQgcKBWNhdXNlIh8KHUdhdGhlclJlZnVzYWxVbmtub3duV29ya3NwYWNlIhUKE0dhdGhlclJlZnVzYWxDbG9zZWQiFwoVR2F0aGVyUmVmdXNhbElzQ2FsbGVyIhkKF0dhdGhlclJlZnVzYWxOZWVkc0lucHV0IhYKFEdhdGhlclJlZnVzYWxNZXJnaW5nIukBChRHYXRoZXJSZXNvbHZlZFRhcmdldBIqCgZ0YXJnZXQYASABKAsyGi5hZ2VudHJlcGwudjEuR2F0aGVyVGFyZ2V0EhsKE3Jlc29sdmVkX2F0X3VuaXhfbXMYAiABKAMSPgoIYW5zd2VyZWQYAyABKAsyKi5hZ2VudHJlcGwudjEuR2F0aGVyUmVzb2x2ZWRUYXJnZXRBbnN3ZXJlZEgAEjoKBmNsb3NlZBgEIAEoCzIoLmFnZW50cmVwbC52MS5HYXRoZXJSZXNvbHZlZFRhcmdldENsb3NlZEgAQgwKCnJlc29sdXRpb24iLAocR2F0aGVyUmVzb2x2ZWRUYXJnZXRBbnN3ZXJlZBIMCgR0ZXh0GAEgASgJIhwKGkdhdGhlclJlc29sdmVkVGFyZ2V0Q2xvc2VkIvUDChdHYXRoZXJPdXRzdGFuZGluZ1RhcmdldBIqCgZ0YXJnZXQYASABKAsyGi5hZ2VudHJlcGwudjEuR2F0aGVyVGFyZ2V0Ej8KB3dvcmtpbmcYAiABKAsyLC5hZ2VudHJlcGwudjEuR2F0aGVyT3V0c3RhbmRpbmdUYXJnZXRXb3JraW5nSAASOQoEaGVsZBgDIAEoCzIpLmFnZW50cmVwbC52MS5HYXRoZXJPdXRzdGFuZGluZ1RhcmdldEhlbGRIABJCCgljb2xkX2dhdGUYBCABKAsyLS5hZ2VudHJlcGwudjEuR2F0aGVyT3V0c3RhbmRpbmdUYXJnZXRDb2xkR2F0ZUgAEkYKC25lZWRzX2lucHV0GAUgASgLMi8uYWdlbnRyZXBsLnYxLkdhdGhlck91dHN0YW5kaW5nVGFyZ2V0TmVlZHNJbnB1dEgAElsKFmVuZGVkX3dpdGhvdXRfcmVzcG9uc2UYBiABKAsyOS5hZ2VudHJlcGwudjEuR2F0aGVyT3V0c3RhbmRpbmdUYXJnZXRFbmRlZFdpdGhvdXRSZXNwb25zZUgAEj8KB2ZhdWx0ZWQYByABKAsyLC5hZ2VudHJlcGwudjEuR2F0aGVyT3V0c3RhbmRpbmdUYXJnZXRGYXVsdGVkSABCCAoGcmVhc29uIiAKHkdhdGhlck91dHN0YW5kaW5nVGFyZ2V0V29ya2luZyIdChtHYXRoZXJPdXRzdGFuZGluZ1RhcmdldEhlbGQiMQofR2F0aGVyT3V0c3RhbmRpbmdUYXJnZXRDb2xkR2F0ZRIOCgZkZXRhaWwYASABKAkiIwohR2F0aGVyT3V0c3RhbmRpbmdUYXJnZXROZWVkc0lucHV0Ii0KK0dhdGhlck91dHN0YW5kaW5nVGFyZ2V0RW5kZWRXaXRob3V0UmVzcG9uc2UiNQoeR2F0aGVyT3V0c3RhbmRpbmdUYXJnZXRGYXVsdGVkEhMKC2Rlc2NyaXB0aW9uGAEgASgJIsUCCgxHYXRoZXJTdGF0dXMSJwoGZ2F0aGVyGAEgASgLMhcuYWdlbnRyZXBsLnYxLkdhdGhlclJlZhIqCgZjYWxsZXIYAiABKAsyGi5hZ2VudHJlcGwudjEuR2F0aGVyVGFyZ2V0EhMKC3Byb21wdF90ZXh0GAMgASgJEhoKEmNyZWF0ZWRfYXRfdW5peF9tcxgEIAEoAxI9CgxmaXJzdF91cGRhdGUYBSABKAsyJy5hZ2VudHJlcGwudjEuR2F0aGVyRmlyc3RVcGRhdGVTdGFuZGluZxI0CghyZXNvbHZlZBgGIAMoCzIiLmFnZW50cmVwbC52MS5HYXRoZXJSZXNvbHZlZFRhcmdldBI6CgtvdXRzdGFuZGluZxgHIAMoCzIlLmFnZW50cmVwbC52MS5HYXRoZXJPdXRzdGFuZGluZ1RhcmdldCKnAQoZR2F0aGVyRmlyc3RVcGRhdGVTdGFuZGluZxJBCgdwZW5kaW5nGAEgASgLMi4uYWdlbnRyZXBsLnYxLkdhdGhlckZpcnN0VXBkYXRlU3RhbmRpbmdQZW5kaW5nSAASOwoEdG9sZBgCIAEoCzIrLmFnZW50cmVwbC52MS5HYXRoZXJGaXJzdFVwZGF0ZVN0YW5kaW5nVG9sZEgAQgoKCHN0YW5kaW5nIj8KIEdhdGhlckZpcnN0VXBkYXRlU3RhbmRpbmdQZW5kaW5nEhsKE2RlYWRsaW5lX2F0X3VuaXhfbXMYASABKAMicQodR2F0aGVyRmlyc3RVcGRhdGVTdGFuZGluZ1RvbGQSFwoPdG9sZF9hdF91bml4X21zGAEgASgDEjcKB3RyaWdnZXIYAiABKAsyJi5hZ2VudHJlcGwudjEuR2F0aGVyRmlyc3RVcGRhdGVUcmlnZ2VyIrUBChhHYXRoZXJGaXJzdFVwZGF0ZVRyaWdnZXISSQoMYWxsX3Jlc29sdmVkGAEgASgLMjEuYWdlbnRyZXBsLnYxLkdhdGhlckZpcnN0VXBkYXRlVHJpZ2dlckFsbFJlc29sdmVkSAASQwoJdGltZWRfb3V0GAIgASgLMi4uYWdlbnRyZXBsLnYxLkdhdGhlckZpcnN0VXBkYXRlVHJpZ2dlclRpbWVkT3V0SABCCQoHdHJpZ2dlciIlCiNHYXRoZXJGaXJzdFVwZGF0ZVRyaWdnZXJBbGxSZXNvbHZlZCIiCiBHYXRoZXJGaXJzdFVwZGF0ZVRyaWdnZXJUaW1lZE91dCK/AQoMR2F0aGVyTm90aWNlEicKBmdhdGhlchgBIAEoCzIXLmFnZW50cmVwbC52MS5HYXRoZXJSZWYSPQoMZmlyc3RfdXBkYXRlGAIgASgLMiUuYWdlbnRyZXBsLnYxLkdhdGhlck5vdGljZUZpcnN0VXBkYXRlSAASPQoMbGF0ZXJfYW5zd2VyGAMgASgLMiUuYWdlbnRyZXBsLnYxLkdhdGhlck5vdGljZUxhdGVyQW5zd2VySABCCAoGbm90aWNlIsQBChdHYXRoZXJOb3RpY2VGaXJzdFVwZGF0ZRI3Cgd0cmlnZ2VyGAEgASgLMiYuYWdlbnRyZXBsLnYxLkdhdGhlckZpcnN0VXBkYXRlVHJpZ2dlchI0CghyZXNvbHZlZBgCIAMoCzIiLmFnZW50cmVwbC52MS5HYXRoZXJSZXNvbHZlZFRhcmdldBI6CgtvdXRzdGFuZGluZxgDIAMoCzIlLmFnZW50cmVwbC52MS5HYXRoZXJPdXRzdGFuZGluZ1RhcmdldCJqChdHYXRoZXJOb3RpY2VMYXRlckFuc3dlchI0CghyZXNvbHZlZBgBIAEoCzIiLmFnZW50cmVwbC52MS5HYXRoZXJSZXNvbHZlZFRhcmdldBIZChFvdXRzdGFuZGluZ19jb3VudBgCIAEoDUIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_agentrepl_v1_endpoint_submit_prompt, file_workspace_v1_workspace]);
+  fileDesc("ChlhZ2VudHJlcGwvdjEvZ2F0aGVyLnByb3RvEgxhZ2VudHJlcGwudjEiFwoJR2F0aGVyUmVmEgoKAmlkGAEgASgJIksKDEdhdGhlclRhcmdldBIMCgRuYW1lGAEgASgJEi0KCXdvcmtzcGFjZRgCIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYiTwoTR2F0aGVyUmVmdXNlZFRhcmdldBIMCgRuYW1lGAEgASgJEioKBWNhdXNlGAIgASgLMhsuYWdlbnRyZXBsLnYxLkdhdGhlclJlZnVzYWwixQMKDUdhdGhlclJlZnVzYWwSSAoRdW5rbm93bl93b3Jrc3BhY2UYASABKAsyKy5hZ2VudHJlcGwudjEuR2F0aGVyUmVmdXNhbFVua25vd25Xb3Jrc3BhY2VIABIzCgZjbG9zZWQYAiABKAsyIS5hZ2VudHJlcGwudjEuR2F0aGVyUmVmdXNhbENsb3NlZEgAEjgKCWlzX2NhbGxlchgDIAEoCzIjLmFnZW50cmVwbC52MS5HYXRoZXJSZWZ1c2FsSXNDYWxsZXJIABI8CgtuZWVkc19pbnB1dBgEIAEoCzIlLmFnZW50cmVwbC52MS5HYXRoZXJSZWZ1c2FsTmVlZHNJbnB1dEgAEjUKB21lcmdpbmcYBSABKAsyIi5hZ2VudHJlcGwudjEuR2F0aGVyUmVmdXNhbE1lcmdpbmdIABI5Cg5wcm9tcHRfcmVmdXNlZBgGIAEoCzIfLmFnZW50cmVwbC52MS5TdWJtaXRQcm9tcHRFcnJvckgAEkIKDmFtYmlndW91c19uYW1lGAcgASgLMiguYWdlbnRyZXBsLnYxLkdhdGhlclJlZnVzYWxBbWJpZ3VvdXNOYW1lSABCBwoFY2F1c2UiHwodR2F0aGVyUmVmdXNhbFVua25vd25Xb3Jrc3BhY2UiTAoaR2F0aGVyUmVmdXNhbEFtYmlndW91c05hbWUSLgoKd29ya3NwYWNlcxgBIAMoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYiFQoTR2F0aGVyUmVmdXNhbENsb3NlZCIXChVHYXRoZXJSZWZ1c2FsSXNDYWxsZXIiGQoXR2F0aGVyUmVmdXNhbE5lZWRzSW5wdXQiFgoUR2F0aGVyUmVmdXNhbE1lcmdpbmci6QEKFEdhdGhlclJlc29sdmVkVGFyZ2V0EioKBnRhcmdldBgBIAEoCzIaLmFnZW50cmVwbC52MS5HYXRoZXJUYXJnZXQSGwoTcmVzb2x2ZWRfYXRfdW5peF9tcxgCIAEoAxI+CghhbnN3ZXJlZBgDIAEoCzIqLmFnZW50cmVwbC52MS5HYXRoZXJSZXNvbHZlZFRhcmdldEFuc3dlcmVkSAASOgoGY2xvc2VkGAQgASgLMiguYWdlbnRyZXBsLnYxLkdhdGhlclJlc29sdmVkVGFyZ2V0Q2xvc2VkSABCDAoKcmVzb2x1dGlvbiIsChxHYXRoZXJSZXNvbHZlZFRhcmdldEFuc3dlcmVkEgwKBHRleHQYASABKAkiHAoaR2F0aGVyUmVzb2x2ZWRUYXJnZXRDbG9zZWQi9QMKF0dhdGhlck91dHN0YW5kaW5nVGFyZ2V0EioKBnRhcmdldBgBIAEoCzIaLmFnZW50cmVwbC52MS5HYXRoZXJUYXJnZXQSPwoHd29ya2luZxgCIAEoCzIsLmFnZW50cmVwbC52MS5HYXRoZXJPdXRzdGFuZGluZ1RhcmdldFdvcmtpbmdIABI5CgRoZWxkGAMgASgLMikuYWdlbnRyZXBsLnYxLkdhdGhlck91dHN0YW5kaW5nVGFyZ2V0SGVsZEgAEkIKCWNvbGRfZ2F0ZRgEIAEoCzItLmFnZW50cmVwbC52MS5HYXRoZXJPdXRzdGFuZGluZ1RhcmdldENvbGRHYXRlSAASRgoLbmVlZHNfaW5wdXQYBSABKAsyLy5hZ2VudHJlcGwudjEuR2F0aGVyT3V0c3RhbmRpbmdUYXJnZXROZWVkc0lucHV0SAASWwoWZW5kZWRfd2l0aG91dF9yZXNwb25zZRgGIAEoCzI5LmFnZW50cmVwbC52MS5HYXRoZXJPdXRzdGFuZGluZ1RhcmdldEVuZGVkV2l0aG91dFJlc3BvbnNlSAASPwoHZmF1bHRlZBgHIAEoCzIsLmFnZW50cmVwbC52MS5HYXRoZXJPdXRzdGFuZGluZ1RhcmdldEZhdWx0ZWRIAEIICgZyZWFzb24iIAoeR2F0aGVyT3V0c3RhbmRpbmdUYXJnZXRXb3JraW5nIh0KG0dhdGhlck91dHN0YW5kaW5nVGFyZ2V0SGVsZCIxCh9HYXRoZXJPdXRzdGFuZGluZ1RhcmdldENvbGRHYXRlEg4KBmRldGFpbBgBIAEoCSIjCiFHYXRoZXJPdXRzdGFuZGluZ1RhcmdldE5lZWRzSW5wdXQiLQorR2F0aGVyT3V0c3RhbmRpbmdUYXJnZXRFbmRlZFdpdGhvdXRSZXNwb25zZSI1Ch5HYXRoZXJPdXRzdGFuZGluZ1RhcmdldEZhdWx0ZWQSEwoLZGVzY3JpcHRpb24YASABKAkixQIKDEdhdGhlclN0YXR1cxInCgZnYXRoZXIYASABKAsyFy5hZ2VudHJlcGwudjEuR2F0aGVyUmVmEioKBmNhbGxlchgCIAEoCzIaLmFnZW50cmVwbC52MS5HYXRoZXJUYXJnZXQSEwoLcHJvbXB0X3RleHQYAyABKAkSGgoSY3JlYXRlZF9hdF91bml4X21zGAQgASgDEj0KDGZpcnN0X3VwZGF0ZRgFIAEoCzInLmFnZW50cmVwbC52MS5HYXRoZXJGaXJzdFVwZGF0ZVN0YW5kaW5nEjQKCHJlc29sdmVkGAYgAygLMiIuYWdlbnRyZXBsLnYxLkdhdGhlclJlc29sdmVkVGFyZ2V0EjoKC291dHN0YW5kaW5nGAcgAygLMiUuYWdlbnRyZXBsLnYxLkdhdGhlck91dHN0YW5kaW5nVGFyZ2V0IqcBChlHYXRoZXJGaXJzdFVwZGF0ZVN0YW5kaW5nEkEKB3BlbmRpbmcYASABKAsyLi5hZ2VudHJlcGwudjEuR2F0aGVyRmlyc3RVcGRhdGVTdGFuZGluZ1BlbmRpbmdIABI7CgR0b2xkGAIgASgLMisuYWdlbnRyZXBsLnYxLkdhdGhlckZpcnN0VXBkYXRlU3RhbmRpbmdUb2xkSABCCgoIc3RhbmRpbmciPwogR2F0aGVyRmlyc3RVcGRhdGVTdGFuZGluZ1BlbmRpbmcSGwoTZGVhZGxpbmVfYXRfdW5peF9tcxgBIAEoAyJxCh1HYXRoZXJGaXJzdFVwZGF0ZVN0YW5kaW5nVG9sZBIXCg90b2xkX2F0X3VuaXhfbXMYASABKAMSNwoHdHJpZ2dlchgCIAEoCzImLmFnZW50cmVwbC52MS5HYXRoZXJGaXJzdFVwZGF0ZVRyaWdnZXIitQEKGEdhdGhlckZpcnN0VXBkYXRlVHJpZ2dlchJJCgxhbGxfcmVzb2x2ZWQYASABKAsyMS5hZ2VudHJlcGwudjEuR2F0aGVyRmlyc3RVcGRhdGVUcmlnZ2VyQWxsUmVzb2x2ZWRIABJDCgl0aW1lZF9vdXQYAiABKAsyLi5hZ2VudHJlcGwudjEuR2F0aGVyRmlyc3RVcGRhdGVUcmlnZ2VyVGltZWRPdXRIAEIJCgd0cmlnZ2VyIiUKI0dhdGhlckZpcnN0VXBkYXRlVHJpZ2dlckFsbFJlc29sdmVkIiIKIEdhdGhlckZpcnN0VXBkYXRlVHJpZ2dlclRpbWVkT3V0Ir8BCgxHYXRoZXJOb3RpY2USJwoGZ2F0aGVyGAEgASgLMhcuYWdlbnRyZXBsLnYxLkdhdGhlclJlZhI9CgxmaXJzdF91cGRhdGUYAiABKAsyJS5hZ2VudHJlcGwudjEuR2F0aGVyTm90aWNlRmlyc3RVcGRhdGVIABI9CgxsYXRlcl9hbnN3ZXIYAyABKAsyJS5hZ2VudHJlcGwudjEuR2F0aGVyTm90aWNlTGF0ZXJBbnN3ZXJIAEIICgZub3RpY2UixAEKF0dhdGhlck5vdGljZUZpcnN0VXBkYXRlEjcKB3RyaWdnZXIYASABKAsyJi5hZ2VudHJlcGwudjEuR2F0aGVyRmlyc3RVcGRhdGVUcmlnZ2VyEjQKCHJlc29sdmVkGAIgAygLMiIuYWdlbnRyZXBsLnYxLkdhdGhlclJlc29sdmVkVGFyZ2V0EjoKC291dHN0YW5kaW5nGAMgAygLMiUuYWdlbnRyZXBsLnYxLkdhdGhlck91dHN0YW5kaW5nVGFyZ2V0ImoKF0dhdGhlck5vdGljZUxhdGVyQW5zd2VyEjQKCHJlc29sdmVkGAEgASgLMiIuYWdlbnRyZXBsLnYxLkdhdGhlclJlc29sdmVkVGFyZ2V0EhkKEW91dHN0YW5kaW5nX2NvdW50GAIgASgNQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_agentrepl_v1_endpoint_submit_prompt, file_workspace_v1_workspace]);
 
 /**
  * A gather's identity: daemon-minted, opaque, handed back unchanged to
@@ -128,7 +128,9 @@ export type GatherRefusal = Message<"agentrepl.v1.GatherRefusal"> & {
    */
   cause: {
     /**
-     * No registered workspace has the name.
+     * No registered workspace has the name. A name only closed workspaces
+     * have is `closed` instead, and one several open workspaces have is
+     * `ambiguous_name`.
      *
      * @generated from field: agentrepl.v1.GatherRefusalUnknownWorkspace unknown_workspace = 1;
      */
@@ -178,6 +180,14 @@ export type GatherRefusal = Message<"agentrepl.v1.GatherRefusal"> & {
      */
     value: SubmitPromptError;
     case: "promptRefused";
+  } | {
+    /**
+     * Several open workspaces have the name, so it names no one target.
+     *
+     * @generated from field: agentrepl.v1.GatherRefusalAmbiguousName ambiguous_name = 7;
+     */
+    value: GatherRefusalAmbiguousName;
+    case: "ambiguousName";
   } | { case: undefined; value?: undefined };
 };
 
@@ -204,6 +214,27 @@ export const GatherRefusalUnknownWorkspaceSchema: GenMessage<GatherRefusalUnknow
   messageDesc(file_agentrepl_v1_gather, 4);
 
 /**
+ * Several open workspaces have the name.
+ *
+ * @generated from message agentrepl.v1.GatherRefusalAmbiguousName
+ */
+export type GatherRefusalAmbiguousName = Message<"agentrepl.v1.GatherRefusalAmbiguousName"> & {
+  /**
+   * Each open workspace with the name, so the caller can tell them apart.
+   *
+   * @generated from field: repeated workspace.v1.WorkspaceRef workspaces = 1;
+   */
+  workspaces: WorkspaceRef[];
+};
+
+/**
+ * Describes the message agentrepl.v1.GatherRefusalAmbiguousName.
+ * Use `create(GatherRefusalAmbiguousNameSchema)` to create a new message.
+ */
+export const GatherRefusalAmbiguousNameSchema: GenMessage<GatherRefusalAmbiguousName> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_gather, 5);
+
+/**
  * The workspace is closed. No fields.
  *
  * @generated from message agentrepl.v1.GatherRefusalClosed
@@ -216,7 +247,7 @@ export type GatherRefusalClosed = Message<"agentrepl.v1.GatherRefusalClosed"> & 
  * Use `create(GatherRefusalClosedSchema)` to create a new message.
  */
 export const GatherRefusalClosedSchema: GenMessage<GatherRefusalClosed> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_gather, 5);
+  messageDesc(file_agentrepl_v1_gather, 6);
 
 /**
  * The target is the caller. No fields.
@@ -231,7 +262,7 @@ export type GatherRefusalIsCaller = Message<"agentrepl.v1.GatherRefusalIsCaller"
  * Use `create(GatherRefusalIsCallerSchema)` to create a new message.
  */
 export const GatherRefusalIsCallerSchema: GenMessage<GatherRefusalIsCaller> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_gather, 6);
+  messageDesc(file_agentrepl_v1_gather, 7);
 
 /**
  * An ask waits on the user. No fields: `workspace status` names it.
@@ -246,7 +277,7 @@ export type GatherRefusalNeedsInput = Message<"agentrepl.v1.GatherRefusalNeedsIn
  * Use `create(GatherRefusalNeedsInputSchema)` to create a new message.
  */
 export const GatherRefusalNeedsInputSchema: GenMessage<GatherRefusalNeedsInput> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_gather, 7);
+  messageDesc(file_agentrepl_v1_gather, 8);
 
 /**
  * A merge is in progress. No fields: the workspace's merge bubble names it.
@@ -261,7 +292,7 @@ export type GatherRefusalMerging = Message<"agentrepl.v1.GatherRefusalMerging"> 
  * Use `create(GatherRefusalMergingSchema)` to create a new message.
  */
 export const GatherRefusalMergingSchema: GenMessage<GatherRefusalMerging> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_gather, 8);
+  messageDesc(file_agentrepl_v1_gather, 9);
 
 /**
  * A target that resolved: it answered, or it closed first.
@@ -313,7 +344,7 @@ export type GatherResolvedTarget = Message<"agentrepl.v1.GatherResolvedTarget"> 
  * Use `create(GatherResolvedTargetSchema)` to create a new message.
  */
 export const GatherResolvedTargetSchema: GenMessage<GatherResolvedTarget> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_gather, 9);
+  messageDesc(file_agentrepl_v1_gather, 10);
 
 /**
  * The target's answer.
@@ -334,7 +365,7 @@ export type GatherResolvedTargetAnswered = Message<"agentrepl.v1.GatherResolvedT
  * Use `create(GatherResolvedTargetAnsweredSchema)` to create a new message.
  */
 export const GatherResolvedTargetAnsweredSchema: GenMessage<GatherResolvedTargetAnswered> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_gather, 10);
+  messageDesc(file_agentrepl_v1_gather, 11);
 
 /**
  * The target closed unanswered. No fields.
@@ -349,7 +380,7 @@ export type GatherResolvedTargetClosed = Message<"agentrepl.v1.GatherResolvedTar
  * Use `create(GatherResolvedTargetClosedSchema)` to create a new message.
  */
 export const GatherResolvedTargetClosedSchema: GenMessage<GatherResolvedTargetClosed> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_gather, 11);
+  messageDesc(file_agentrepl_v1_gather, 12);
 
 /**
  * A target that has not resolved, with why, as it stands when the notice or
@@ -428,7 +459,7 @@ export type GatherOutstandingTarget = Message<"agentrepl.v1.GatherOutstandingTar
  * Use `create(GatherOutstandingTargetSchema)` to create a new message.
  */
 export const GatherOutstandingTargetSchema: GenMessage<GatherOutstandingTarget> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_gather, 12);
+  messageDesc(file_agentrepl_v1_gather, 13);
 
 /**
  * The target's turn runs. No fields.
@@ -443,7 +474,7 @@ export type GatherOutstandingTargetWorking = Message<"agentrepl.v1.GatherOutstan
  * Use `create(GatherOutstandingTargetWorkingSchema)` to create a new message.
  */
 export const GatherOutstandingTargetWorkingSchema: GenMessage<GatherOutstandingTargetWorking> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_gather, 13);
+  messageDesc(file_agentrepl_v1_gather, 14);
 
 /**
  * The prompt is held. No fields.
@@ -458,7 +489,7 @@ export type GatherOutstandingTargetHeld = Message<"agentrepl.v1.GatherOutstandin
  * Use `create(GatherOutstandingTargetHeldSchema)` to create a new message.
  */
 export const GatherOutstandingTargetHeldSchema: GenMessage<GatherOutstandingTargetHeld> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_gather, 14);
+  messageDesc(file_agentrepl_v1_gather, 15);
 
 /**
  * The target is at its cold gate.
@@ -479,7 +510,7 @@ export type GatherOutstandingTargetColdGate = Message<"agentrepl.v1.GatherOutsta
  * Use `create(GatherOutstandingTargetColdGateSchema)` to create a new message.
  */
 export const GatherOutstandingTargetColdGateSchema: GenMessage<GatherOutstandingTargetColdGate> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_gather, 15);
+  messageDesc(file_agentrepl_v1_gather, 16);
 
 /**
  * An ask waits on the user. No fields.
@@ -494,7 +525,7 @@ export type GatherOutstandingTargetNeedsInput = Message<"agentrepl.v1.GatherOuts
  * Use `create(GatherOutstandingTargetNeedsInputSchema)` to create a new message.
  */
 export const GatherOutstandingTargetNeedsInputSchema: GenMessage<GatherOutstandingTargetNeedsInput> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_gather, 16);
+  messageDesc(file_agentrepl_v1_gather, 17);
 
 /**
  * The prompt's turn ended without a response. No fields.
@@ -509,7 +540,7 @@ export type GatherOutstandingTargetEndedWithoutResponse = Message<"agentrepl.v1.
  * Use `create(GatherOutstandingTargetEndedWithoutResponseSchema)` to create a new message.
  */
 export const GatherOutstandingTargetEndedWithoutResponseSchema: GenMessage<GatherOutstandingTargetEndedWithoutResponse> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_gather, 17);
+  messageDesc(file_agentrepl_v1_gather, 18);
 
 /**
  * The target is faulted.
@@ -530,7 +561,7 @@ export type GatherOutstandingTargetFaulted = Message<"agentrepl.v1.GatherOutstan
  * Use `create(GatherOutstandingTargetFaultedSchema)` to create a new message.
  */
 export const GatherOutstandingTargetFaultedSchema: GenMessage<GatherOutstandingTargetFaulted> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_gather, 18);
+  messageDesc(file_agentrepl_v1_gather, 19);
 
 /**
  * One gather, as it stands now.
@@ -594,7 +625,7 @@ export type GatherStatus = Message<"agentrepl.v1.GatherStatus"> & {
  * Use `create(GatherStatusSchema)` to create a new message.
  */
 export const GatherStatusSchema: GenMessage<GatherStatus> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_gather, 19);
+  messageDesc(file_agentrepl_v1_gather, 20);
 
 /**
  * Whether the first update was told. THE ARM IS THE STANDING.
@@ -631,7 +662,7 @@ export type GatherFirstUpdateStanding = Message<"agentrepl.v1.GatherFirstUpdateS
  * Use `create(GatherFirstUpdateStandingSchema)` to create a new message.
  */
 export const GatherFirstUpdateStandingSchema: GenMessage<GatherFirstUpdateStanding> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_gather, 20);
+  messageDesc(file_agentrepl_v1_gather, 21);
 
 /**
  * The first update waits.
@@ -653,7 +684,7 @@ export type GatherFirstUpdateStandingPending = Message<"agentrepl.v1.GatherFirst
  * Use `create(GatherFirstUpdateStandingPendingSchema)` to create a new message.
  */
 export const GatherFirstUpdateStandingPendingSchema: GenMessage<GatherFirstUpdateStandingPending> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_gather, 21);
+  messageDesc(file_agentrepl_v1_gather, 22);
 
 /**
  * The first update was told.
@@ -681,7 +712,7 @@ export type GatherFirstUpdateStandingTold = Message<"agentrepl.v1.GatherFirstUpd
  * Use `create(GatherFirstUpdateStandingToldSchema)` to create a new message.
  */
 export const GatherFirstUpdateStandingToldSchema: GenMessage<GatherFirstUpdateStandingTold> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_gather, 22);
+  messageDesc(file_agentrepl_v1_gather, 23);
 
 /**
  * What sent the first update. THE ARM IS WHICH.
@@ -718,7 +749,7 @@ export type GatherFirstUpdateTrigger = Message<"agentrepl.v1.GatherFirstUpdateTr
  * Use `create(GatherFirstUpdateTriggerSchema)` to create a new message.
  */
 export const GatherFirstUpdateTriggerSchema: GenMessage<GatherFirstUpdateTrigger> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_gather, 23);
+  messageDesc(file_agentrepl_v1_gather, 24);
 
 /**
  * Every target resolved. No fields.
@@ -733,7 +764,7 @@ export type GatherFirstUpdateTriggerAllResolved = Message<"agentrepl.v1.GatherFi
  * Use `create(GatherFirstUpdateTriggerAllResolvedSchema)` to create a new message.
  */
 export const GatherFirstUpdateTriggerAllResolvedSchema: GenMessage<GatherFirstUpdateTriggerAllResolved> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_gather, 24);
+  messageDesc(file_agentrepl_v1_gather, 25);
 
 /**
  * The deadline passed. No fields.
@@ -748,7 +779,7 @@ export type GatherFirstUpdateTriggerTimedOut = Message<"agentrepl.v1.GatherFirst
  * Use `create(GatherFirstUpdateTriggerTimedOutSchema)` to create a new message.
  */
 export const GatherFirstUpdateTriggerTimedOutSchema: GenMessage<GatherFirstUpdateTriggerTimedOut> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_gather, 25);
+  messageDesc(file_agentrepl_v1_gather, 26);
 
 /**
  * One notice a gather sends its caller. The notice's words carry this message
@@ -793,7 +824,7 @@ export type GatherNotice = Message<"agentrepl.v1.GatherNotice"> & {
  * Use `create(GatherNoticeSchema)` to create a new message.
  */
 export const GatherNoticeSchema: GenMessage<GatherNotice> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_gather, 26);
+  messageDesc(file_agentrepl_v1_gather, 27);
 
 /**
  * The first update: every answer so far, and every target still outstanding.
@@ -828,7 +859,7 @@ export type GatherNoticeFirstUpdate = Message<"agentrepl.v1.GatherNoticeFirstUpd
  * Use `create(GatherNoticeFirstUpdateSchema)` to create a new message.
  */
 export const GatherNoticeFirstUpdateSchema: GenMessage<GatherNoticeFirstUpdate> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_gather, 27);
+  messageDesc(file_agentrepl_v1_gather, 28);
 
 /**
  * One target resolved after the first update.
@@ -856,5 +887,5 @@ export type GatherNoticeLaterAnswer = Message<"agentrepl.v1.GatherNoticeLaterAns
  * Use `create(GatherNoticeLaterAnswerSchema)` to create a new message.
  */
 export const GatherNoticeLaterAnswerSchema: GenMessage<GatherNoticeLaterAnswer> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_gather, 28);
+  messageDesc(file_agentrepl_v1_gather, 29);
 
