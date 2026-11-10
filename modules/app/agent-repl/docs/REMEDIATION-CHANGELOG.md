@@ -1390,3 +1390,4 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 - 2026-11-10 merge-queue-stall-triage (landed in queue bypass mode): A workspace waits on a pull request's merge by following it for its merge alone, never by polling GitHub
 - 2026-11-10 merge-queue-stall-triage (landed in queue bypass mode): Todo row: the session watcher's lock is held across a topbar store write
 - 2026-11-10 merge-queue-stall-triage (landed in queue bypass mode): After a bounce, Emacs loads only the pages it held before: the daemon stores each page's residency and answers it on registration, and a handover no longer loads unloaded pages
+- 2026-11-10 merge-queue-stall-triage (landed in queue bypass mode): todo rows: the CEE PR skill's blocked pickup wait, and the shim's undescribable live work
