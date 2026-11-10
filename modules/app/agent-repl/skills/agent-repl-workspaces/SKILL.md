@@ -94,8 +94,9 @@ not the relationship's default, its landing target:
   - B is created `-context fresh` (per the cross-repository rule above),
     with everything B needs carried in its `-prompt`.
   - A coordinates with B through `workspace prompt` and the awaiting mark
-    (`workspace set -await`), e.g. integrating B's result; A follows B
-    without subscribing. Example: baz owns the protobufs and foo holds the
+    (`workspace set -await`), e.g. integrating B's result; A is given B's
+    one update (its conclusion) without subscribing, and subscribes
+    continually only if it drives B turn by turn. Example: baz owns the protobufs and foo holds the
     C++ implementation: A asks B for the protobuf change, marks itself
     awaiting, then builds A's C++ integration against B's protobufs.
   - B lands its own change through baz's deploy (`workspace finished here`)
@@ -324,8 +325,10 @@ user in the same response what it reorganized and why.
   it closes or it takes a GitHub pull request as its own (`pull_request`: it
   stores an owned link to one it did not own before; the notice names the pull
   request). WS may be in any repository. Subscribe instead of polling, to
-  follow a peer or an unrelated workspace (a parent already follows its children's questions, landing and
-  close); `workspace unsubscribe WS`
+  follow a peer or an unrelated workspace (a parent is given its child's one update, a one-shot's landing or
+  any other child's first turn end, without subscribing; it subscribes with
+  `-events turn_ended,needs_input` only when it drives the child's work turn
+  by turn); `workspace unsubscribe WS`
   ends it. A subscription ends with this workspace's close (re-opening does not
   restore it) and when WS is forgotten; WS closing is an event it tells, and
   it goes on following WS if WS is opened again. A notice that waited

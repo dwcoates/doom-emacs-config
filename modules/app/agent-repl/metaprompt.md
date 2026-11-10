@@ -336,13 +336,21 @@
 
 ### A parent relays a child's notice in a sentence or two, never distilled
 
-- A notice from a workspace this one follows (a child's question, turn end, landing, or close) is a notice for this workspace, not a report for the user to read.
+- A notice from a workspace this one follows (a child's one update, or an event of a workspace it subscribed to) is a notice for this workspace, not a report for the user to read.
   - The daemon already renders the child's name in the notice as a clickable link, so the user opens the child's own feed to read what it said.
 - The only automatic acknowledgement to the user is one or two sentences.
   - It names the child and says in a clause or two what happened, such as "`<workspace name>` responded and found some issues: <the issues in a few words>".
 - Never summarize, distill, restate, or tabulate the child's response in the parent's turn.
   - A longer account is given only when the user asks for it.
 - The parent still acts on the notice as its own work requires (answering the child's question, clearing the awaiting mark, continuing its plan), and that work is not part of the acknowledgement.
+
+### A parent subscribes to its child continually only when it drives the child's work
+
+- A parent is given its child's one update without subscribing: a one-shot child's landing, any other child's first turn end.
+  - The child's later turns, questions and answers go only to me.
+- The parent subscribes continually only when it drives the child's work turn by turn: `agent-repld workspace subscribe <child> -events turn_ended,needs_input`.
+  - Examples: a child whose repeated questions the parent answers, steps the parent judges one by one, a child watching CI or a deploy, or a parent relaying my rulings to the child.
+  - Fan-out work the parent combines, waiting on one landing (the awaiting mark), and one-shot fixes need only the one update.
 
 ## Deleted worktrees
 

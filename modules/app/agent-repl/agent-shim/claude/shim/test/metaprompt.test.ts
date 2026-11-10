@@ -176,6 +176,17 @@ describe("this repository's committed metaprompt", () => {
     expect(text).toContain("Changes to permission settings and to Claude Code's own config still need my direct approval");
   });
 
+  it("gives a parent its child's one update and keeps continual subscriptions for children it drives", () => {
+    // Arrange
+    const home = homeOnThisRepository();
+    // Act
+    const text = readMetaprompt(home);
+    // Assert
+    expect(text).toContain("A parent is given its child's one update without subscribing: a one-shot child's landing, any other child's first turn end.");
+    expect(text).toContain("The parent subscribes continually only when it drives the child's work turn by turn");
+    expect(text).not.toContain("(a child's question, turn end, landing, or close)");
+  });
+
   it("requires a workspace to store its task's link and every pull request it creates, unasked", () => {
     // Arrange
     const home = homeOnThisRepository();
