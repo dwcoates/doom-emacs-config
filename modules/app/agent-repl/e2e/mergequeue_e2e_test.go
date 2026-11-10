@@ -705,6 +705,11 @@ func mqCreateChildWithHooks(t *testing.T, w *World, repoRef *workspacev1.Reposit
 	if ws.GetId() == "" {
 		t.Fatalf("CreateWorkspace(%s) = %v, want a success carrying a workspace ref", name, resp.Msg)
 	}
+	// A CREATED WORKSPACE OWES ITS SUMMARY until its agent states its task,
+	// and every prompt it is sent until then closes with the note asking for
+	// one; the agent's summary is set here, so the prompts a test sends carry
+	// only their own words.
+	harness.SetSummary(t, w.Daemon, ws, harness.SeededSummary)
 	return ws
 }
 
