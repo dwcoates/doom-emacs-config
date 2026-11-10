@@ -3,6 +3,9 @@
  * body — the one bubble body: the custom element that knows when it joins the
  * document, the cap measurement a metaprompt tree wraps to, and its refusals.
  */
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { columnMeasure } from "../../src/metaprompt-tree.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -12,6 +15,7 @@ import {
   addSlotMark,
   isMarkdownSlot,
   offerShellRuns,
+  requireMarkdownSlot,
   TREE_WIDTH_UNMEASURABLE,
   createBubbleBody,
   firstLineBudgetPx,
@@ -1373,5 +1377,39 @@ describe("offerShellRuns", () => {
       "not-a-slot",
       "shell runs were offered in an element that is not a markdown slot",
     ]);
+  });
+});
+
+describe("requireMarkdownSlot", () => {
+  it("accepts a markdown slot", () => {
+    // Arrange
+    const slot = markdownSlot("prose", plainProse("x"));
+    // Act / Assert
+    expect(() => requireMarkdownSlot(slot, "a test touched")).not.toThrow();
+  });
+
+  it("refuses any other element, recording what was done to it through the canonical logger", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    const el = document.createElement("div");
+    el.className = "not-a-slot";
+    // Act
+    expect(() => requireMarkdownSlot(el, "a test touched")).toThrow(/bubble body invariant/);
+    // Assert
+    const record = await forwardedRecord(capture, BODY_INVARIANT);
+    expect([record.level.case, record.context?.slot, record.context?.reason]).toEqual([
+      "error",
+      "not-a-slot",
+      "a test touched an element that is not a markdown slot",
+    ]);
+  });
+
+  it("is the one guard every slot-only setting goes through", () => {
+    // Arrange
+    const source = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "../../src/bubble/body.ts"), "utf8");
+    // Act
+    const handRolled = source.match(/if \(!isMarkdownSlot\(/g) ?? [];
+    // Assert: only requireMarkdownSlot itself tests a slot this way.
+    expect(handRolled).toHaveLength(1);
   });
 });

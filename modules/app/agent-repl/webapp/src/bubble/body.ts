@@ -417,8 +417,7 @@ const slotRooms = new WeakMap<Element, FirstLineRoom>();
  * carried to the live slot by `paintBody`.
  */
 export function reserveSlotFirstLine(slot: HTMLElement, room: FirstLineRoom): void {
-  const name = slot.className;
-  if (!isMarkdownSlot(slot)) invariant("a first-line room was kept in an element that is not a markdown slot", { slot: name });
+  requireMarkdownSlot(slot, "a first-line room was kept in");
   slotRooms.set(slot, room);
 }
 
@@ -434,8 +433,7 @@ const shellRunSlots = new WeakSet<Element>();
  * carried to the live slot by `paintBody`.
  */
 export function offerShellRuns(slot: HTMLElement): void {
-  const name = slot.className;
-  if (!isMarkdownSlot(slot)) invariant("shell runs were offered in an element that is not a markdown slot", { slot: name });
+  requireMarkdownSlot(slot, "shell runs were offered in");
   shellRunSlots.add(slot);
 }
 
@@ -471,8 +469,7 @@ export function markdownSlot(className: string, prose: ParsedProse, mark?: SlotM
  * like the kind's own, is carried to the live slot by `paintBody`.
  */
 export function addSlotMark(slot: HTMLElement, mark: SlotMark): void {
-  const name = slot.className;
-  if (!isMarkdownSlot(slot)) invariant("a mark was added to an element that is not a markdown slot", { slot: name });
+  requireMarkdownSlot(slot, "a mark was added to");
   const own = slotMarks.get(slot);
   slotMarks.set(
     slot,
@@ -542,6 +539,16 @@ export function paintGeneration(body: BubbleBody): number {
 /** Whether NODE is a markdown slot this pipeline made. */
 export function isMarkdownSlot(node: ChildNode | undefined): node is HTMLElement {
   return node instanceof HTMLElement && slotSources.has(node);
+}
+
+/**
+ * SLOT is a markdown slot, or the pipeline broke an invariant: a slot-only
+ * setting (a mark, a first-line room, shell runs) given to any other element,
+ * recorded as WHAT was done to it.
+ */
+export function requireMarkdownSlot(slot: HTMLElement, what: string): void {
+  const name = slot.className;
+  if (!isMarkdownSlot(slot)) invariant(`${what} an element that is not a markdown slot`, { slot: name });
 }
 
 /** Whether EL is a bubble body this pipeline made (and so can repaint). */
