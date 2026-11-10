@@ -16,11 +16,25 @@ import type { shimv1 } from "../proto.js";
  */
 export type WorkspaceStanding = "main_workspace" | "linked_workspace";
 
+/**
+ * How the agent's workspace lands its changes (shim.v1.SessionProfileAgentLanding):
+ * through its repository's merge queue, or straight on the main branch while
+ * it holds the queue bypass mode. It picks the system prompt's landing section
+ * (metaprompt.ts) and whether the merge-queue skill is switched off
+ * (sdk/real-query.ts).
+ */
+export type WorkspaceLanding = "through_queue" | "bypassing_queue";
+
+/** The skill a bypassing session never loads: its rules are the ones bypassed. */
+export const MERGE_QUEUE_SKILL = "agent-repl-merge-queue";
+
 /** An agent working in a workspace. */
 export interface AgentProfile {
   readonly kind: "agent";
   /** Whether the workspace is its repository's main workspace. */
   readonly standing: WorkspaceStanding;
+  /** How the workspace lands its changes. */
+  readonly landing: WorkspaceLanding;
 }
 
 /** A chat answering questions under the daemon's system prompt. */
@@ -40,7 +54,11 @@ export type SessionProfile = AgentProfile | ChatProfile;
 export function profileFromProto(profile: shimv1.SessionProfile | undefined): SessionProfile {
   switch (profile?.kind.case) {
     case "agent":
-      return { kind: "agent", standing: standingFromProto(profile.kind.value.standing) };
+      return {
+        kind: "agent",
+        standing: standingFromProto(profile.kind.value.standing),
+        landing: landingFromProto(profile.kind.value.landing),
+      };
     case "chat":
       return { kind: "chat", systemPrompt: profile.kind.value.systemPrompt?.text ?? "" };
     default:
@@ -60,5 +78,20 @@ function standingFromProto(standing: shimv1.SessionProfileAgentStanding | undefi
       return "linked_workspace";
     default:
       throw new Error("shim session: StartSession reached the engine with an agent profile that names no workspace standing");
+  }
+}
+
+/**
+ * Translate a validated agent profile's landing. An unset landing here is an
+ * invariant violation: validateStartSessionRequest refuses it first.
+ */
+function landingFromProto(landing: shimv1.SessionProfileAgentLanding | undefined): WorkspaceLanding {
+  switch (landing?.landing.case) {
+    case "throughQueue":
+      return "through_queue";
+    case "bypassingQueue":
+      return "bypassing_queue";
+    default:
+      throw new Error("shim session: StartSession reached the engine with an agent profile that names no landing");
   }
 }

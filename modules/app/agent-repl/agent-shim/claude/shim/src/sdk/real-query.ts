@@ -44,6 +44,7 @@ import { spawn } from "node:child_process";
 import type { SessionProfile } from "../engine/profile.js";
 import type { McpServerConfig, Options, SpawnedProcess, SpawnOptions } from "@anthropic-ai/claude-agent-sdk";
 import { bindLog } from "../log.js";
+import { MERGE_QUEUE_SKILL } from "../engine/profile.js";
 import { systemPromptOption } from "../metaprompt.js";
 import { importRealSDK } from "../vendor-guard.js";
 import { agentReplHooks } from "./agent-repl-hooks.js";
@@ -435,17 +436,24 @@ export function asQueryLike(query: object): QueryLike {
 export function profileOptions(
   spec: RealQuerySpec,
   mcpServers: Record<string, McpServerConfig>,
-): Pick<Options, "systemPrompt" | "mcpServers" | "allowedTools" | "settingSources" | "tools" | "hooks"> {
+): Pick<Options, "systemPrompt" | "mcpServers" | "allowedTools" | "settingSources" | "tools" | "hooks" | "settings"> {
   switch (spec.profile.kind) {
     case "agent":
       return {
         // The system prompt is assembled in systemPromptOption alone, whose
         // standing notice must stay its last section (metaprompt.ts).
-        systemPrompt: systemPromptOption(spec.workspaceName, spec.profile.standing, spec.home),
+        systemPrompt: systemPromptOption(spec.workspaceName, spec.profile.standing, spec.profile.landing, spec.home),
         mcpServers,
         allowedTools: [...AGENT_REPL_AUTO_ALLOWED_TOOLS],
         settingSources: ["user", "project", "local"],
         hooks: agentReplHooks(),
+        // A BYPASSING SESSION NEVER LOADS THE MERGE-QUEUE SKILL: its rules are
+        // the ones the workspace bypasses, and `off` hides the skill from the
+        // listing and the Skill tool both. The session's own catalog is
+        // checked for it (engine/session.ts, pushCommandCatalog).
+        ...(spec.profile.landing === "bypassing_queue"
+          ? { settings: { skillOverrides: { [MERGE_QUEUE_SKILL]: "off" } } }
+          : {}),
       };
     case "chat":
       return {

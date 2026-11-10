@@ -60,6 +60,10 @@ export function validateStartSessionRequest(request: shimv1.StartSessionRequest)
         if (request.profile.kind.value.standing?.kind.case === undefined) {
           throw unsetOneof("start_session.profile.agent.standing");
         }
+        // NOR IS THE LANDING: it picks the rules the agent lands its work by.
+        if (request.profile.kind.value.landing?.landing.case === undefined) {
+          throw unsetOneof("start_session.profile.agent.landing");
+        }
         break;
       case "chat":
         if ((request.profile.kind.value.systemPrompt?.text ?? "").trim() === "") {

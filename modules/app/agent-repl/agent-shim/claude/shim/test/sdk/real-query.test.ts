@@ -18,7 +18,7 @@ import {
   type SpawnChild,
   type VendorChildExit,
 } from "../../src/sdk/real-query.js";
-import { METAPROMPT_REL_PATH, DOOM_CHECKOUT_REL_PATH, standingSection, workspaceSection } from "../../src/metaprompt.js";
+import { LANDING_REL_PATHS, METAPROMPT_REL_PATH, DOOM_CHECKOUT_REL_PATH, standingSection, workspaceSection } from "../../src/metaprompt.js";
 import { agentReplHooks } from "../../src/sdk/agent-repl-hooks.js";
 
 /** The servers argument of a test that is not about agent-repl's own MCP server. */
@@ -29,12 +29,16 @@ function homeWithMetaprompt(text: string): string {
   const file = path.join(home, DOOM_CHECKOUT_REL_PATH, METAPROMPT_REL_PATH);
   mkdirSync(path.dirname(file), { recursive: true });
   writeFileSync(file, text, "utf8");
+  // Every landing's section beside it, as a doom checkout carries.
+  for (const rel of Object.values(LANDING_REL_PATHS)) {
+    writeFileSync(path.join(home, DOOM_CHECKOUT_REL_PATH, rel), `landing section ${rel}`, "utf8");
+  }
   return home;
 }
 
 function spec(overrides: Partial<RealQuerySpec> = {}): RealQuerySpec {
   return {
-    profile: { kind: "agent", standing: "linked_workspace" },
+    profile: { kind: "agent", standing: "linked_workspace", landing: "through_queue" },
     cwd: "/ws",
     workspaceName: "parser-fix",
     claudeConfigDir: "/accounts/primary",
@@ -81,7 +85,7 @@ describe("realQueryOptions", () => {
 
   it("ends a main workspace's system prompt with the main-workspace notice", () => {
     // Arrange, Act.
-    const options = realQueryOptions(spec({ profile: { kind: "agent", standing: "main_workspace" } }), NO_SERVERS);
+    const options = realQueryOptions(spec({ profile: { kind: "agent", standing: "main_workspace", landing: "through_queue" } }), NO_SERVERS);
 
     // Assert.
     const append = (options.systemPrompt as { append?: string }).append ?? "";

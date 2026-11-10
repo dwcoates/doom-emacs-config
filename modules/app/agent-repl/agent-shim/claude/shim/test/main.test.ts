@@ -926,7 +926,7 @@ describe("queryFactory", () => {
 
   function spec(overrides: Partial<QuerySpec> = {}): QuerySpec {
     return {
-      profile: { kind: "agent", standing: "linked_workspace" },
+      profile: { kind: "agent", standing: "linked_workspace", landing: "through_queue" },
       binding: { kind: "fresh", sessionId: "session-1" },
       workspaceName: "parser-fix",
       permissionMode: "default",
@@ -1531,7 +1531,7 @@ describe("queryFactory forwards the whole spec to the real query", () => {
 
   function spec(overrides: Partial<QuerySpec> = {}): QuerySpec {
     return {
-      profile: { kind: "agent", standing: "linked_workspace" },
+      profile: { kind: "agent", standing: "linked_workspace", landing: "through_queue" },
       binding: { kind: "fresh", sessionId: "session-1" },
       workspaceName: "parser-fix",
       permissionMode: "default",
@@ -1674,7 +1674,7 @@ describe("queryFactory hands the mocked vendor the per-task stop declaration", (
     // Arrange: the describe block's mocked fake seam.
     // Act.
     await factory(true, env, cwd)({
-      profile: { kind: "agent", standing: "linked_workspace" },
+      profile: { kind: "agent", standing: "linked_workspace", landing: "through_queue" },
       binding,
       workspaceName: "parser-fix",
       permissionMode: "default",
@@ -1708,7 +1708,7 @@ describe("queryFactory hands the mocked vendor the per-task stop declaration", (
     // Arrange: the describe block's mocked fake seam.
     // Act.
     await factory(true, env, cwd)({
-      profile: { kind: "agent", standing: "linked_workspace" },
+      profile: { kind: "agent", standing: "linked_workspace", landing: "through_queue" },
       binding: { kind: "resume", resumeSessionId: "vendor-old" },
       workspaceName: "parser-fix",
       permissionMode: "default",
@@ -1727,7 +1727,7 @@ describe("queryFactory hands the mocked vendor the per-task stop declaration", (
     // Arrange: the describe block's mocked fake seam.
     // Act.
     await factory(true, env, cwd)({
-      profile: { kind: "agent", standing: "linked_workspace" },
+      profile: { kind: "agent", standing: "linked_workspace", landing: "through_queue" },
       binding: { kind: "fresh", sessionId: "session-1" },
       workspaceName: "parser-fix",
       permissionMode: "default",
@@ -1758,7 +1758,7 @@ describe("queryFactory under --fake", () => {
 
     // Act.
     const query = await create({
-      profile: { kind: "agent", standing: "linked_workspace" },
+      profile: { kind: "agent", standing: "linked_workspace", landing: "through_queue" },
       binding: { kind: "resume", resumeSessionId: "vendor-old" },
       workspaceName: "parser-fix",
       permissionMode: "plan",
