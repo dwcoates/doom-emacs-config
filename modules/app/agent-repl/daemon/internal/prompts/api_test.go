@@ -237,20 +237,80 @@ func TestSpliceAcceptsAnEmptyValue(t *testing.T) {
 	}
 }
 
-func TestSpliceRefusesAValueThatReintroducesAPlaceholder(t *testing.T) {
-	// Arrange.
-	dir := write(t, "b", "<!-- used by: x; placeholders: {{a}} -->\n{{a}}\n")
+func TestSpliceKeepsPlaceholderShapedTextInAValueVerbatim(t *testing.T) {
+	// Arrange: a caller's prompt that names another brief's placeholder
+	// (2026-11-10: a create whose prompt said `{{asker}}` was refused).
+	dir := write(t, "b", "<!-- used by: x; placeholders: {{a}} -->\n[{{a}}]\n")
+	p, err := Load(dir, "b")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	value := "mention {{asker}}, {{ matrix.part }} and {{}}"
+
+	// Act.
+	got, err := p.Splice(map[string]string{"a": value})
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Splice: %v", err)
+	}
+	if want := "[" + value + "]"; got != want {
+		t.Fatalf("Splice = %q, want %q", got, want)
+	}
+}
+
+func TestSpliceNeverSubstitutesAnotherKeyNamedInAValue(t *testing.T) {
+	// Arrange: a's value names b, a key the caller also supplies.
+	dir := write(t, "b", "<!-- used by: x; placeholders: {{a}}, {{b}} -->\n{{a}}|{{b}}\n")
 	p, err := Load(dir, "b")
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 
 	// Act.
-	_, err = p.Splice(map[string]string{"a": "{{b}}"})
+	got, err := p.Splice(map[string]string{"a": "{{b}}", "b": "{{a}}"})
 
 	// Assert.
+	if err != nil {
+		t.Fatalf("Splice: %v", err)
+	}
+	if got != "{{b}}|{{a}}" {
+		t.Fatalf("Splice = %q, want %q", got, "{{b}}|{{a}}")
+	}
+}
+
+func TestSpliceRefusesATemplatePlaceholderWithNoValue(t *testing.T) {
+	// Arrange: a Prompt whose Placeholders list misses a hole its body
+	// holds, so only a check of the template itself can catch it.
+	p := Prompt{Name: "b", Body: "{{a}} {{b}}", Placeholders: []string{"a"}}
+
+	// Act.
+	got, err := p.Splice(map[string]string{"a": "1"})
+
+	// Assert: the error, which the caller logs as its cause, names the brief
+	// and the unfilled placeholder, and no partial splice is answered.
 	if err == nil {
 		t.Fatal("Splice shipped a brief with a hole in it")
+	}
+	if want := "prompts: b: values do not cover the placeholders: missing [b], unknown []"; err.Error() != want {
+		t.Fatalf("Splice error = %q, want %q", err, want)
+	}
+	if got != "" {
+		t.Fatalf("Splice answered %q alongside its error", got)
+	}
+}
+
+func TestSpliceRefusesAMalformedTemplateToken(t *testing.T) {
+	// Arrange: a Prompt built without Parse, whose body holds a token that
+	// is not a well-formed placeholder.
+	p := Prompt{Name: "b", Body: "{{a}} {{Not One}}", Placeholders: []string{"a"}}
+
+	// Act.
+	_, err := p.Splice(map[string]string{"a": "1"})
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), `prompts: b: the template: "{{Not One}}"`) {
+		t.Fatalf("Splice error = %v, want the malformed template token named", err)
 	}
 }
 
