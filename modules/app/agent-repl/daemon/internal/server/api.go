@@ -117,6 +117,9 @@ type Deps struct {
 	// SlashCommands backs ListSlashCommands: every workspace's standing
 	// slash-command catalog, as its session last stated it.
 	SlashCommands SlashCommandCatalogs
+	// Mentions backs the host stream's `mentions` arm: each workspace's record
+	// of the names its own final responses mentioned (composermentions.go).
+	Mentions ComposerMentions
 	// Login backs the four login verbs; WatchLoginTerminal is a SERVER stream
 	// and SendLoginInput is unary.
 	Login login.Manager
@@ -646,6 +649,8 @@ func New(deps Deps) (Server, error) {
 		return nil, missing("a session-facts source")
 	case deps.SlashCommands == nil:
 		return nil, missing("the slash-command catalogs")
+	case deps.Mentions == nil:
+		return nil, missing("the composer mentions")
 	}
 
 	life, cancel := context.WithCancel(context.Background())

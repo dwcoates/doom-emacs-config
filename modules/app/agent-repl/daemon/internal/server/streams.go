@@ -368,7 +368,7 @@ func (s *server) WatchHostWorkspace(
 }
 
 // serveHost serves the host stream's sources onto one wire: the `host` state,
-// the `selection` state, the `transferred` notice and the three event arms.
+// the `selection` state, the `mentions` state, the `transferred` notice and the three event arms.
 // They are separate sources (see host.go) and this is the one place they are
 // merged, in publication order per source.
 func (s *server) serveHost(
@@ -390,6 +390,10 @@ func (s *server) serveHost(
 	// Emacs and the webapp see one sequence of selections. The topic replays
 	// the selection in force, so a late subscriber is handed it first.
 	selections, ackSelection := s.selectionTopic(ws).SubscribeStream(streamCtx)
+	// THE COMPOSER MENTIONS are state too: the topic holds the workspace's
+	// record in force, so every fresh subscription -- a reconnect, a restart
+	// on either side -- hydrates Emacs with it first.
+	mentions, ackMentions := s.deps.Mentions.Topic(ws).SubscribeStream(streamCtx)
 	s.acceptStream(ctx, rpc)
 	log.Debug(rpc, "accepted a standing stream", nil)
 
@@ -443,6 +447,14 @@ func (s *server) serveHost(
 			push, ack = &agentreplv1.WatchHostWorkspaceResponse{
 				Push: &agentreplv1.WatchHostWorkspaceResponse_Selection{Selection: hostSelectionOf(sel)},
 			}, ackSelection
+		case record, ok := <-mentions:
+			if !ok {
+				log.Debug(rpc, "the standing stream's subscription closed", nil)
+				return nil
+			}
+			push, ack = &agentreplv1.WatchHostWorkspaceResponse{
+				Push: &agentreplv1.WatchHostWorkspaceResponse_Mentions{Mentions: record},
+			}, ackMentions
 		}
 		if err := out.Send(push); err != nil {
 			log.Debug(rpc, "the standing stream's client went away",
