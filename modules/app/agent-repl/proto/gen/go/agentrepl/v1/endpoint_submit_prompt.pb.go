@@ -339,7 +339,7 @@ type SubmitPromptSuccess struct {
 	//	*SubmitPromptSuccess_CommandActed
 	//	*SubmitPromptSuccess_AskAnswered
 	//	*SubmitPromptSuccess_ResponseRevising
-	//	*SubmitPromptSuccess_QuestionForked
+	//	*SubmitPromptSuccess_QuestionSent
 	Outcome       isSubmitPromptSuccess_Outcome `protobuf_oneof:"outcome"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -436,10 +436,10 @@ func (x *SubmitPromptSuccess) GetResponseRevising() *SubmitPromptResponseRevisin
 	return nil
 }
 
-func (x *SubmitPromptSuccess) GetQuestionForked() *SubmitPromptQuestionForked {
+func (x *SubmitPromptSuccess) GetQuestionSent() *SubmitPromptQuestionSent {
 	if x != nil {
-		if x, ok := x.Outcome.(*SubmitPromptSuccess_QuestionForked); ok {
-			return x.QuestionForked
+		if x, ok := x.Outcome.(*SubmitPromptSuccess_QuestionSent); ok {
+			return x.QuestionSent
 		}
 	}
 	return nil
@@ -499,14 +499,17 @@ type SubmitPromptSuccess_ResponseRevising struct {
 	ResponseRevising *SubmitPromptResponseRevising `protobuf:"bytes,6,opt,name=response_revising,json=responseRevising,proto3,oneof"`
 }
 
-type SubmitPromptSuccess_QuestionForked struct {
+type SubmitPromptSuccess_QuestionSent struct {
 	// It ASKED A QUESTION ABOUT A CARD instead of minting a turn: a
-	// question stood as it was sent (AskAboutResponse), so the daemon began
-	// forking this workspace's conversation into a new CHILD workspace whose
-	// first prompt is the card, quoted, followed by these words, and
-	// ended the question. Nothing appears in this workspace's feed: the
-	// answer is read in the child, whose tab arrives once it is created.
-	QuestionForked *SubmitPromptQuestionForked `protobuf:"bytes,7,opt,name=question_forked,json=questionForked,proto3,oneof"`
+	// question stood as it was sent (AskAboutResponse), so the daemon sent
+	// the card, quoted, followed by these words, to the home repository's
+	// MAIN workspace as an agent-to-agent prompt from this workspace
+	// (conversation.v1.PromptOrigin.PROMPT_ORIGIN_AGENT_SENT), and ended the
+	// question. The main workspace answers an interrogative itself and
+	// dispatches an imperative to a one-shot child, acknowledging this
+	// workspace either way. Nothing appears in this workspace's feed until
+	// that acknowledgement arrives.
+	QuestionSent *SubmitPromptQuestionSent `protobuf:"bytes,8,opt,name=question_sent,json=questionSent,proto3,oneof"`
 }
 
 func (*SubmitPromptSuccess_Turn) isSubmitPromptSuccess_Outcome() {}
@@ -521,43 +524,34 @@ func (*SubmitPromptSuccess_AskAnswered) isSubmitPromptSuccess_Outcome() {}
 
 func (*SubmitPromptSuccess_ResponseRevising) isSubmitPromptSuccess_Outcome() {}
 
-func (*SubmitPromptSuccess_QuestionForked) isSubmitPromptSuccess_Outcome() {}
+func (*SubmitPromptSuccess_QuestionSent) isSubmitPromptSuccess_Outcome() {}
 
 // The asked-a-question answer.
-//
-// THE FORK IS CREATED IN THE BACKGROUND, like every create that carries an op
-// id (CreateWorkspaceRequest.op_id): naming the child and adding its worktree
-// are slow, so this answer returns at once and the create's stages and its
-// terminal outcome ride WatchDaemon's mutation progress keyed on `op_id`.
-// THE OP ID IS THE PROMPT'S OWN IDEMPOTENCY KEY (SubmitPromptRequest
-// .idempotency_key), so a client that sends while it knows a question stands
-// registers for the create's progress under the key BEFORE the send, and no
-// progress event can outrun its registration.
-type SubmitPromptQuestionForked struct {
+type SubmitPromptQuestionSent struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The card the question was about.
 	Row *v12.FeedId `protobuf:"bytes,1,opt,name=row,proto3" json:"row,omitempty"`
-	// The op id the child's create reports its progress and outcome under:
-	// always the request's idempotency key.
-	OpId          string `protobuf:"bytes,2,opt,name=op_id,json=opId,proto3" json:"op_id,omitempty"`
+	// The name of the workspace the question was sent to: the home
+	// repository's main workspace.
+	Recipient     string `protobuf:"bytes,2,opt,name=recipient,proto3" json:"recipient,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *SubmitPromptQuestionForked) Reset() {
-	*x = SubmitPromptQuestionForked{}
+func (x *SubmitPromptQuestionSent) Reset() {
+	*x = SubmitPromptQuestionSent{}
 	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *SubmitPromptQuestionForked) String() string {
+func (x *SubmitPromptQuestionSent) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*SubmitPromptQuestionForked) ProtoMessage() {}
+func (*SubmitPromptQuestionSent) ProtoMessage() {}
 
-func (x *SubmitPromptQuestionForked) ProtoReflect() protoreflect.Message {
+func (x *SubmitPromptQuestionSent) ProtoReflect() protoreflect.Message {
 	mi := &file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -569,21 +563,21 @@ func (x *SubmitPromptQuestionForked) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use SubmitPromptQuestionForked.ProtoReflect.Descriptor instead.
-func (*SubmitPromptQuestionForked) Descriptor() ([]byte, []int) {
+// Deprecated: Use SubmitPromptQuestionSent.ProtoReflect.Descriptor instead.
+func (*SubmitPromptQuestionSent) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescGZIP(), []int{3}
 }
 
-func (x *SubmitPromptQuestionForked) GetRow() *v12.FeedId {
+func (x *SubmitPromptQuestionSent) GetRow() *v12.FeedId {
 	if x != nil {
 		return x.Row
 	}
 	return nil
 }
 
-func (x *SubmitPromptQuestionForked) GetOpId() string {
+func (x *SubmitPromptQuestionSent) GetRecipient() string {
 	if x != nil {
-		return x.OpId
+		return x.Recipient
 	}
 	return ""
 }
@@ -2295,19 +2289,19 @@ const file_agentrepl_v1_endpoint_submit_prompt_proto_rawDesc = "" +
 	"\x14SubmitPromptResponse\x12=\n" +
 	"\asuccess\x18\x01 \x01(\v2!.agentrepl.v1.SubmitPromptSuccessH\x00R\asuccess\x127\n" +
 	"\x05error\x18\x02 \x01(\v2\x1f.agentrepl.v1.SubmitPromptErrorH\x00R\x05errorB\b\n" +
-	"\x06result\"\xc5\x04\n" +
+	"\x06result\"\xd6\x04\n" +
 	"\x13SubmitPromptSuccess\x124\n" +
 	"\x04turn\x18\x01 \x01(\v2\x1e.agentrepl.v1.SubmitPromptTurnH\x00R\x04turn\x12M\n" +
 	"\rcommand_panel\x18\x02 \x01(\v2&.agentrepl.v1.SubmitPromptCommandPanelH\x00R\fcommandPanel\x12S\n" +
 	"\x0fcommand_refused\x18\x03 \x01(\v2(.agentrepl.v1.SubmitPromptCommandRefusedH\x00R\x0ecommandRefused\x12M\n" +
 	"\rcommand_acted\x18\x04 \x01(\v2&.agentrepl.v1.SubmitPromptCommandActedH\x00R\fcommandActed\x12J\n" +
 	"\fask_answered\x18\x05 \x01(\v2%.agentrepl.v1.SubmitPromptAskAnsweredH\x00R\vaskAnswered\x12Y\n" +
-	"\x11response_revising\x18\x06 \x01(\v2*.agentrepl.v1.SubmitPromptResponseRevisingH\x00R\x10responseRevising\x12S\n" +
-	"\x0fquestion_forked\x18\a \x01(\v2(.agentrepl.v1.SubmitPromptQuestionForkedH\x00R\x0equestionForkedB\t\n" +
-	"\aoutcome\"X\n" +
-	"\x1aSubmitPromptQuestionForked\x12%\n" +
-	"\x03row\x18\x01 \x01(\v2\x13.frontend.v1.FeedIdR\x03row\x12\x13\n" +
-	"\x05op_id\x18\x02 \x01(\tR\x04opId\"E\n" +
+	"\x11response_revising\x18\x06 \x01(\v2*.agentrepl.v1.SubmitPromptResponseRevisingH\x00R\x10responseRevising\x12M\n" +
+	"\rquestion_sent\x18\b \x01(\v2&.agentrepl.v1.SubmitPromptQuestionSentH\x00R\fquestionSentB\t\n" +
+	"\aoutcomeJ\x04\b\a\x10\bR\x0fquestion_forked\"_\n" +
+	"\x18SubmitPromptQuestionSent\x12%\n" +
+	"\x03row\x18\x01 \x01(\v2\x13.frontend.v1.FeedIdR\x03row\x12\x1c\n" +
+	"\trecipient\x18\x02 \x01(\tR\trecipient\"E\n" +
 	"\x1cSubmitPromptResponseRevising\x12%\n" +
 	"\x03row\x18\x01 \x01(\v2\x13.frontend.v1.FeedIdR\x03row\"\x19\n" +
 	"\x17SubmitPromptAskAnswered\"\x1a\n" +
@@ -2407,7 +2401,7 @@ var file_agentrepl_v1_endpoint_submit_prompt_proto_goTypes = []any{
 	(*SubmitPromptRequest)(nil),                   // 1: agentrepl.v1.SubmitPromptRequest
 	(*SubmitPromptResponse)(nil),                  // 2: agentrepl.v1.SubmitPromptResponse
 	(*SubmitPromptSuccess)(nil),                   // 3: agentrepl.v1.SubmitPromptSuccess
-	(*SubmitPromptQuestionForked)(nil),            // 4: agentrepl.v1.SubmitPromptQuestionForked
+	(*SubmitPromptQuestionSent)(nil),              // 4: agentrepl.v1.SubmitPromptQuestionSent
 	(*SubmitPromptResponseRevising)(nil),          // 5: agentrepl.v1.SubmitPromptResponseRevising
 	(*SubmitPromptAskAnswered)(nil),               // 6: agentrepl.v1.SubmitPromptAskAnswered
 	(*SubmitPromptCommandActed)(nil),              // 7: agentrepl.v1.SubmitPromptCommandActed
@@ -2462,8 +2456,8 @@ var file_agentrepl_v1_endpoint_submit_prompt_proto_depIdxs = []int32{
 	7,  // 11: agentrepl.v1.SubmitPromptSuccess.command_acted:type_name -> agentrepl.v1.SubmitPromptCommandActed
 	6,  // 12: agentrepl.v1.SubmitPromptSuccess.ask_answered:type_name -> agentrepl.v1.SubmitPromptAskAnswered
 	5,  // 13: agentrepl.v1.SubmitPromptSuccess.response_revising:type_name -> agentrepl.v1.SubmitPromptResponseRevising
-	4,  // 14: agentrepl.v1.SubmitPromptSuccess.question_forked:type_name -> agentrepl.v1.SubmitPromptQuestionForked
-	34, // 15: agentrepl.v1.SubmitPromptQuestionForked.row:type_name -> frontend.v1.FeedId
+	4,  // 14: agentrepl.v1.SubmitPromptSuccess.question_sent:type_name -> agentrepl.v1.SubmitPromptQuestionSent
+	34, // 15: agentrepl.v1.SubmitPromptQuestionSent.row:type_name -> frontend.v1.FeedId
 	34, // 16: agentrepl.v1.SubmitPromptResponseRevising.row:type_name -> frontend.v1.FeedId
 	36, // 17: agentrepl.v1.SubmitPromptTurn.turn:type_name -> conversation.v1.TurnId
 	37, // 18: agentrepl.v1.SubmitPromptCommandPanel.status:type_name -> frontend.v1.StatusPanelView
@@ -2517,7 +2511,7 @@ func file_agentrepl_v1_endpoint_submit_prompt_proto_init() {
 		(*SubmitPromptSuccess_CommandActed)(nil),
 		(*SubmitPromptSuccess_AskAnswered)(nil),
 		(*SubmitPromptSuccess_ResponseRevising)(nil),
-		(*SubmitPromptSuccess_QuestionForked)(nil),
+		(*SubmitPromptSuccess_QuestionSent)(nil),
 	}
 	file_agentrepl_v1_endpoint_submit_prompt_proto_msgTypes[9].OneofWrappers = []any{
 		(*SubmitPromptCommandPanel_Status)(nil),

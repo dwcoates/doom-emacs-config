@@ -2831,21 +2831,20 @@ decoded FeedId; the revision itself arrives on the feed."
     (list :row (agent-repl-wire-verbs--decode-required-message
                 message 'row json #'agent-repl-wire-decode-feed-id))))
 
-(defun agent-repl-wire-decode-submit-prompt-question-forked (json)
-  "Decode SubmitPromptQuestionForked from JSON into a plist (`:row' `:op-id').
-A question about a final response stood as the prompt was sent, so the
-daemon began forking it into a child workspace that answers it.  ROW is
-the response's decoded FeedId; OP-ID is the op the child's create reports
-on, always the prompt's own idempotency key."
-  (let ((message "SubmitPromptQuestionForked"))
-    (agent-repl-wire-verbs--check-keys message json '(row opId))
+(defun agent-repl-wire-decode-submit-prompt-question-sent (json)
+  "Decode SubmitPromptQuestionSent from JSON into a plist (`:row' `:recipient').
+A question about a card stood as the prompt was sent, so the daemon sent
+it to the home repository's main workspace.  ROW is the card's decoded
+FeedId; RECIPIENT is that workspace's name."
+  (let ((message "SubmitPromptQuestionSent"))
+    (agent-repl-wire-verbs--check-keys message json '(row recipient))
     (list :row (agent-repl-wire-verbs--decode-required-message
                 message 'row json #'agent-repl-wire-decode-feed-id)
-          :op-id (agent-repl-wire-verbs--decode-required-string message 'opId json))))
+          :recipient (agent-repl-wire-verbs--decode-required-string message 'recipient json))))
 
-(defun agent-repl-wire-decode-submit-prompt-success-question-forked (json)
-  "Decode SubmitPromptSuccess's `question_forked' outcome arm from JSON."
-  (agent-repl-wire-decode-submit-prompt-question-forked json))
+(defun agent-repl-wire-decode-submit-prompt-success-question-sent (json)
+  "Decode SubmitPromptSuccess's `question_sent' outcome arm from JSON."
+  (agent-repl-wire-decode-submit-prompt-question-sent json))
 
 (defun agent-repl-wire-decode-submit-prompt-success-response-revising (json)
   "Decode SubmitPromptSuccess's `response_revising' outcome arm from JSON."
@@ -2876,11 +2875,11 @@ on, always the prompt's own idempotency key."
 All seven arms are ANSWERS: a minted turn, a resolved panel, a
 recognized-but-unsupported command, a session-acting command the daemon
 acted on, a typed answer to a standing ask, a revision of the final
-response whose words were highlighted, or a question about a final
-response forked into a child workspace.  Only the turn arm means there is
+response whose words were highlighted, or a question about a card sent
+to the home repository's main workspace.  Only the turn arm means there is
 anything to await."
   (let ((message "SubmitPromptSuccess"))
-    (agent-repl-wire-verbs--check-keys message json '(turn commandPanel commandRefused commandActed askAnswered responseRevising questionForked))
+    (agent-repl-wire-verbs--check-keys message json '(turn commandPanel commandRefused commandActed askAnswered responseRevising questionSent))
     (agent-repl-wire-verbs--decode-oneof
      message "outcome" json
      (list (list 'turn :turn #'agent-repl-wire-decode-submit-prompt-success-turn)
@@ -2894,8 +2893,8 @@ anything to await."
                  #'agent-repl-wire-decode-submit-prompt-success-ask-answered)
            (list 'responseRevising :response-revising
                  #'agent-repl-wire-decode-submit-prompt-success-response-revising)
-           (list 'questionForked :question-forked
-                 #'agent-repl-wire-decode-submit-prompt-success-question-forked)))))
+           (list 'questionSent :question-sent
+                 #'agent-repl-wire-decode-submit-prompt-success-question-sent)))))
 
 (defun agent-repl-wire-decode-submit-prompt-refused-merging (json)
   "Decode SubmitPromptRefusedMerging from JSON.  Empty: a merge is in flight

@@ -16,6 +16,7 @@ import (
 	"agent-repld/internal/ids"
 	"agent-repld/internal/replyquote"
 	"agent-repld/internal/resolve/feed"
+	"agent-repld/internal/workspace"
 	"agent-repld/internal/wsm"
 )
 
@@ -30,14 +31,10 @@ func withAskable(h *harness) {
 	}
 }
 
-// withAskingRepository registers the test workspace's repository, which a
-// question's fork is created in.
-func withAskingRepository(h *harness) {
-	repoRef := registeredRepoRef(h)
-	record := h.DB.workspaces[testWorkspaceID]
-	record.Repo = wsm.RepoID(repoRef.GetId())
-	h.DB.workspaces[testWorkspaceID] = record
-	h.Verbs.createRec = wsm.Workspace{ID: "ws-question", Dir: "/tmp/ws-question", Name: "question"}
+// withHomeMain has the fake verbs answer the home repository's main
+// workspace as every question's recipient.
+func withHomeMain(h *harness) {
+	h.Verbs.homeMain = wsm.Workspace{ID: "ws-main", Dir: "/tmp/agent-repl-test-repo", Name: "main (doom)"}
 }
 
 // ask toggles the workspace's question about ROW.
@@ -224,12 +221,11 @@ func TestALateRootWatchIsToldTheStandingQuestion(t *testing.T) {
 	}
 }
 
-func TestAPromptSentWhileAQuestionStandsIsForkedIntoAChild(t *testing.T) {
+func TestAPromptSentWhileAQuestionStandsIsSentToTheHomeMainWorkspace(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	withAskable(h)
-	withAskingRepository(h)
-	stream := proveDaemonSubscription(t, h)
+	withHomeMain(h)
 	ask(t, h, "row-1")
 
 	// Act.
@@ -239,29 +235,16 @@ func TestAPromptSentWhileAQuestionStandsIsForkedIntoAChild(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SubmitPrompt: %v", err)
 	}
-	forked := resp.Msg.GetSuccess().GetQuestionForked()
-	if forked.GetRow().GetValue() != "row-1" || forked.GetOpId() != "k1" {
-		t.Fatalf("SubmitPrompt answered %v, want question_forked naming row-1 under op k1", resp.Msg)
+	sent := resp.Msg.GetSuccess().GetQuestionSent()
+	if sent.GetRow().GetValue() != "row-1" || sent.GetRecipient() != "main (doom)" {
+		t.Fatalf("SubmitPrompt answered %v, want question_sent naming row-1 to main (doom)", resp.Msg)
 	}
-	if !stream.Receive() {
-		t.Fatalf("receive the create's outcome: %v", stream.Err())
+	asked := h.Verbs.homeQuestions
+	if len(asked) != 1 || asked[0].asker != testWorkspaceID {
+		t.Fatalf("home questions = %+v, want one from %s", asked, testWorkspaceID)
 	}
-	if prog := stream.Msg().GetMutationProgress(); prog.GetOpId() != "k1" || prog.GetCreate().GetSucceeded() == nil {
-		t.Fatalf("progress = %v, want the create succeeded on op k1", prog)
-	}
-	specs := h.Verbs.createSpecs
-	if len(specs) != 1 {
-		t.Fatalf("creates = %d, want one", len(specs))
-	}
-	spec := specs[0]
-	if spec.Parent == nil || *spec.Parent != testWorkspaceID || spec.ForkFrom == nil || *spec.ForkFrom != testWorkspaceID {
-		t.Fatalf("spec parent=%v fork=%v, want a child fork of %s", spec.Parent, spec.ForkFrom, testWorkspaceID)
-	}
-	if spec.RepoDir != "/tmp/agent-repl-test-repo" {
-		t.Fatalf("spec repo dir = %q, want the asking workspace's repository", spec.RepoDir)
-	}
-	if !strings.Contains(spec.InitialPrompt, "1 🔎 the answer") || !strings.HasSuffix(spec.InitialPrompt, "hello") {
-		t.Fatalf("initial prompt = %q, want the quoted response then the words", spec.InitialPrompt)
+	if !strings.Contains(asked[0].question, "1 🔎 the answer") || !strings.HasSuffix(asked[0].question, "hello") {
+		t.Fatalf("question = %q, want the quoted response then the words", asked[0].question)
 	}
 }
 
@@ -280,7 +263,7 @@ func TestAQuestionPromptQuotesTheAskedCardByItsKind(t *testing.T) {
 			// Arrange.
 			h := newHarness(t)
 			withAskable(h)
-			withAskingRepository(h)
+			withHomeMain(h)
 			ask(t, h, tc.row)
 
 			// Act.
@@ -289,8 +272,8 @@ func TestAQuestionPromptQuotesTheAskedCardByItsKind(t *testing.T) {
 			}
 
 			// Assert.
-			if len(h.Verbs.createSpecs) != 1 || h.Verbs.createSpecs[0].InitialPrompt != tc.want {
-				t.Fatalf("creates = %+v, want one whose first prompt is %q", h.Verbs.createSpecs, tc.want)
+			if len(h.Verbs.homeQuestions) != 1 || h.Verbs.homeQuestions[0].question != tc.want {
+				t.Fatalf("home questions = %+v, want one whose text is %q", h.Verbs.homeQuestions, tc.want)
 			}
 		})
 	}
@@ -300,7 +283,7 @@ func TestAQuestionPromptMintsNoTurn(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	withAskable(h)
-	withAskingRepository(h)
+	withHomeMain(h)
 	ask(t, h, "row-1")
 
 	// Act.
@@ -318,7 +301,7 @@ func TestTheQuestionPromptTakesTheQuestion(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	withAskable(h)
-	withAskingRepository(h)
+	withHomeMain(h)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	feedStream := openRootWatch(t, h, ctx)
@@ -348,7 +331,7 @@ func TestAQuestionAboutAGoneResponseRefusesThePrompt(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	withAskable(h)
-	withAskingRepository(h)
+	withHomeMain(h)
 	ask(t, h, "row-1")
 	delete(h.Feed.cards, "row-1")
 
@@ -359,23 +342,19 @@ func TestAQuestionAboutAGoneResponseRefusesThePrompt(t *testing.T) {
 	if connect.CodeOf(err) != connect.CodeNotFound {
 		t.Fatalf("SubmitPrompt = %v, want NotFound for the gone response", err)
 	}
-	if len(h.Verbs.createSpecs) != 0 || h.Prompts.submits != 0 {
-		t.Fatalf("creates=%d submits=%d, want nothing created or delivered", len(h.Verbs.createSpecs), h.Prompts.submits)
+	if len(h.Verbs.homeQuestions) != 0 || h.Prompts.submits != 0 {
+		t.Fatalf("home questions=%d submits=%d, want nothing sent or delivered", len(h.Verbs.homeQuestions), h.Prompts.submits)
 	}
 	if _, ok := h.Server.(*server).questions.take(testWorkspaceID); ok {
 		t.Fatalf("the refused prompt left the question standing")
 	}
 }
 
-func TestAQuestionPromptInAnUnregisteredRepositoryFails(t *testing.T) {
+func TestAQuestionPromptTheHomeMainWorkspaceCannotTakeFails(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	withAskable(h)
-	record := h.DB.workspaces[testWorkspaceID]
-	record.Repo = wsm.RepoID("repo-gone")
-	h.DB.workspaces[testWorkspaceID] = record
-	log := dlog.NewTestLogger()
-	h.Surfaces.workspace = log
+	h.Verbs.homeMainErr = workspace.ErrNoHomeMainWorkspace
 	ask(t, h, "row-1")
 
 	// Act.
@@ -385,11 +364,8 @@ func TestAQuestionPromptInAnUnregisteredRepositoryFails(t *testing.T) {
 	if connect.CodeOf(err) != connect.CodeInternal {
 		t.Fatalf("SubmitPrompt = %v, want Internal", err)
 	}
-	if _, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "error", Operation: opResponseQuestion}); !ok {
-		t.Fatalf("no error record names the unregistered repository; records = %v", log.Records())
-	}
-	if len(h.Verbs.createSpecs) != 0 {
-		t.Fatalf("creates = %d, want none", len(h.Verbs.createSpecs))
+	if _, ok := h.Server.(*server).questions.take(testWorkspaceID); ok {
+		t.Fatalf("the failed send left the question standing")
 	}
 }
 
@@ -397,7 +373,7 @@ func TestAnAgentsPromptLeavesTheQuestionStanding(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	withAskable(h)
-	withAskingRepository(h)
+	withHomeMain(h)
 	sender := ids.WorkspaceID("ws-sender")
 	h.DB.workspaces[sender] = wsm.Workspace{ID: sender, Dir: "/tmp/ws-sender", Name: "sender"}
 	ask(t, h, "row-1")
@@ -412,8 +388,8 @@ func TestAnAgentsPromptLeavesTheQuestionStanding(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SubmitPrompt: %v", err)
 	}
-	if resp.Msg.GetSuccess().GetQuestionForked() != nil {
-		t.Fatalf("an agent's prompt was forked as the user's question: %v", resp.Msg)
+	if resp.Msg.GetSuccess().GetQuestionSent() != nil {
+		t.Fatalf("an agent's prompt was sent as the user's question: %v", resp.Msg)
 	}
 	if _, ok := h.Server.(*server).questions.take(testWorkspaceID); !ok {
 		t.Fatalf("an agent's prompt took the user's question")

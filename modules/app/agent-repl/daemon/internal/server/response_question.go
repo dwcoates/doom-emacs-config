@@ -9,14 +9,12 @@ import (
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
-	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/publish"
-	"agent-repld/internal/resolve/feed"
 	"agent-repld/internal/replyquote"
-	"agent-repld/internal/workspace"
+	"agent-repld/internal/resolve/feed"
 )
 
 const opResponseQuestion = "daemon.server.response_question"
@@ -26,8 +24,8 @@ const opResponseQuestion = "daemon.server.response_question"
 // question-mark control toggles it (AskAboutResponse), the root feed's watch
 // draws it (frontend.v1.FeedResponseQuestion), Emacs edits its composer on
 // each transition (HostWorkspaceResponseQuestion), and the prompt the user
-// sends while it stands is taken by it: forked into a new child workspace
-// whose first prompt quotes the card (submitQuestion).
+// sends while it stands is taken by it: sent, quoting the card, to the home
+// repository's main workspace as an agent-to-agent prompt (submitQuestion).
 
 // responseQuestions is every workspace's held question: the asked card's
 // row, ABSENT for none.
@@ -202,13 +200,9 @@ func (s *server) responseQuestionTopic(ws ids.WorkspaceID) *publish.Topic[*front
 
 // submitQuestion is SubmitPrompt's body for a user prompt sent while a
 // question about ROW stood: the question has been taken, so it ends here
-// whatever happens, and the prompt is forked into a new child workspace whose
-// first prompt quotes the card. No turn is minted in this workspace.
-//
-// THE CHILD IS CREATED IN THE BACKGROUND under the prompt's idempotency key as
-// its op id (SubmitPromptQuestionForked), exactly as an op-carrying
-// CreateWorkspace is: the client that sent the prompt registered for that op
-// before sending, so the create's stages and outcome reach it.
+// whatever happens, and the prompt, quoting the card, is sent to the home
+// repository's main workspace as an agent-to-agent prompt from this one
+// (workspace.Verbs.AskHomeMain). No turn is minted in this workspace.
 func (s *server) submitQuestion(
 	ctx context.Context,
 	subject resolved,
@@ -231,37 +225,21 @@ func (s *server) submitQuestion(
 			NotFound: true,
 		}))))
 	}
-	repository, err, known := s.repositoryFor(ctx, &workspacev1.RepositoryRef{Id: string(subject.Record.Repo)})
+	question := questionPrompt(card, s.saidText(subject.Log, "said", req.GetSaid()))
+	recipient, err := s.deps.Verbs.AskHomeMain(ctx, ws, question)
 	if err != nil {
 		return nil, fail(subject.Log, rpc, err)
 	}
-	if !known {
-		subject.Log.Error(opResponseQuestion, "the asking workspace's repository is not registered", dlog.Context{"repository": string(subject.Record.Repo)})
-		return nil, fail(subject.Log, rpc, fmt.Errorf("the asking workspace's repository %q is not registered", subject.Record.Repo))
-	}
-	admitted, release, err := s.deps.Creates.Admit(ctx)
-	if err != nil {
-		return answer(resp, s.refuseUnadmitted(rpc, resp, err))
-	}
-	opID := req.GetIdempotencyKey()
-	spec := workspace.CreateSpec{
-		RepoDir:       repository.Dir,
-		ForkFrom:      &ws,
-		Parent:        &ws,
-		InitialPrompt: questionPrompt(card, s.saidText(subject.Log, "said", req.GetSaid())),
-	}
-	bgCtx, cancel := s.backgroundContext(admitted)
-	ticket := s.startBackgroundCreate(bgCtx, cancel, release, spec, opID)
-	subject.Log.Info(opResponseQuestion, "the prompt asks about a card; forking it into a child workspace", dlog.Context{
-		"row": row.GetValue(), "card": card.Arm, "op_id": opID, "create_id": string(ticket.ID()),
+	subject.Log.Info(opResponseQuestion, "the prompt asks about a card; sent it to the home main workspace", dlog.Context{
+		"row": row.GetValue(), "card": card.Arm, "recipient": string(recipient.ID), "recipient_name": recipient.Name,
 	})
 	resp.Result = &agentreplv1.SubmitPromptResponse_Success{Success: &agentreplv1.SubmitPromptSuccess{
-		Outcome: &agentreplv1.SubmitPromptSuccess_QuestionForked{QuestionForked: &agentreplv1.SubmitPromptQuestionForked{Row: row, OpId: opID}},
+		Outcome: &agentreplv1.SubmitPromptSuccess_QuestionSent{QuestionSent: &agentreplv1.SubmitPromptQuestionSent{Row: row, Recipient: recipient.Name}},
 	}}
 	return connect.NewResponse(resp), nil
 }
 
-// questionPrompt is the forked child's first prompt for a question about
+// questionPrompt is the question sent to the home main workspace for a question about
 // CARD, asked in WORDS: a response's and a prompt's markdown under their own
 // preambles, and every other card's row as JSON under its kind's.
 func questionPrompt(card feed.CardText, words string) string {

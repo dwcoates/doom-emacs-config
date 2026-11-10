@@ -679,6 +679,10 @@ type Verbs interface {
 	// composed follow-up question, for the caller to submit. Unset is the
 	// `web_fallback` arm: the refusal alone, silently.
 	OpenFeedLink(ctx context.Context, ws ids.WorkspaceID, href string, report bool) (*UnresolvedLink, error)
+	// AskHomeMain sends QUESTION, a feed card's `?` question, from ASKER to
+	// the main workspace of the repository agent-repl's own checkout is in,
+	// as an agent-to-agent prompt from ASKER, and answers the recipient.
+	AskHomeMain(ctx context.Context, asker ids.WorkspaceID, question string) (wsm.Workspace, error)
 	// Notify raises one host notification: it raises the workspace's desktop
 	// banner (the daemon's own, decided on Emacs's focus) and sets the roster's
 	// attention marker, which SelectWorkspace and AsksSettled clear. It is the
