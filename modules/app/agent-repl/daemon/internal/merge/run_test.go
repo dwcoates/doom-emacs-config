@@ -1265,7 +1265,8 @@ func TestEveryRunOpensItsLedgerThroughOpenLedger(t *testing.T) {
 // TestWorkspaceNameRecordsAReadFailureByWhetherItsContextEnded covers both
 // failure branches of workspaceName: a read cut by the merge's own context
 // ending is the merge winding down with its daemon (DEBUG, never ERROR), and
-// any other read failure is recorded at ERROR. Either way the id is drawn.
+// any other read failure, even one under an ended context, is recorded at
+// ERROR. Either way the id is drawn.
 func TestWorkspaceNameRecordsAReadFailureByWhetherItsContextEnded(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -1276,6 +1277,7 @@ func TestWorkspaceNameRecordsAReadFailureByWhetherItsContextEnded(t *testing.T) 
 	}{
 		{name: "canceled context", cancel: true, readErr: context.Canceled, wantLevel: dlog.LevelDebug, absent: dlog.LevelError},
 		{name: "store failure", readErr: errors.New("store unavailable"), wantLevel: dlog.LevelError, absent: dlog.LevelDebug},
+		{name: "store failure under an ended context", cancel: true, readErr: errors.New("store unavailable"), wantLevel: dlog.LevelError, absent: dlog.LevelDebug},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
