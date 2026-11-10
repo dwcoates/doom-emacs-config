@@ -967,6 +967,64 @@ func TestTheIncumbentDoesNotExitBeforeTheSuccessorDrainsTheHandedHold(t *testing
 	}
 }
 
+// TestAnAdoptionCommittedAsTheWindowFirstLooksStillEndsIt pins the order the
+// adoption window follows kernelevent.Follow's contract in: it subscribes to
+// the shared state's changes BEFORE its first look. Looking first, a successor
+// whose claim and drain committed between that look and the subscription was
+// never seen, so the window held the incumbent's exit for its whole length
+// (TestWebappLayer/WebappLayerRestartHandover, "daemon did not exit" under a
+// loaded merge gate, 2026-11-10).
+func TestAnAdoptionCommittedAsTheWindowFirstLooksStillEndsIt(t *testing.T) {
+	// Arrange: the successor's claim and drain commit inside the window's
+	// first look, after the look has read the row unclaimed.
+	probe := &adoptDuringLookDB{successor: ids.InstanceID("daemon-successor")}
+	h := newHarness(t, func(d *Deps) {
+		probe.DB = d.DB
+		d.DB = probe
+	})
+	h.workspace(t)
+
+	// Act
+	if _, err := h.c.HandOver(context.Background(), unforcedAsk); err != nil {
+		t.Fatalf("HandOver: %v", err)
+	}
+
+	// Assert: the commit ends the window, with no expiry fired.
+	awaitExit(t, h)
+	if !probe.adopted.Load() {
+		t.Fatalf("the incumbent exited before the successor adopted")
+	}
+}
+
+// adoptDuringLookDB commits the successor's adoption, its claim and the drain
+// of the handed hold, inside the first serving-ownership read that finds the
+// row released with the hold still standing: the adoption window's first
+// look. The read still answers what it found before the commit.
+type adoptDuringLookDB struct {
+	wsm.DB
+	successor wsm.InstanceID
+	adopted   atomic.Bool
+}
+
+func (d *adoptDuringLookDB) Serving(ctx context.Context, ws wsm.WorkspaceID) (*wsm.InstanceID, error) {
+	owner, err := d.DB.Serving(ctx, ws)
+	if err != nil || owner != nil || d.adopted.Load() {
+		return owner, err
+	}
+	hold, held, err := d.DB.Lease(ctx, ws)
+	if err != nil || !held {
+		return owner, err
+	}
+	if err := d.DB.ReleaseLease(ctx, hold.ID); err != nil {
+		return nil, err
+	}
+	if err := d.DB.ClaimServing(ctx, ws, d.successor); err != nil {
+		return nil, err
+	}
+	d.adopted.Store(true)
+	return owner, nil
+}
+
 // servingProbeDB signals every serving-ownership read once armed, so a test
 // knows the adoption window has looked at a claim it made.
 type servingProbeDB struct {
