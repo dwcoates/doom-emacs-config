@@ -339,7 +339,7 @@ func (c *controller) beginHandover(ctx context.Context, ask Ask) (*handoverPlan,
 // delivery is mid-flight, turn and detached work notwithstanding: the transfer
 // detaches the shim without stopping anything, and the successor adopts it
 // mid-turn. Only a transfer the successor REFUSED to adopt mid-work (an old
-// shim) is asked again at freeness (fallBackToFreeness).
+// shim) is asked again at freeness (offerAgain).
 //
 // THE LAYOUT RESTART ASKS FOR THE SAME GATE (owner ruling, 2026-09-30: a
 // restart moves each workspace the moment it is available, and only a shim
@@ -817,7 +817,7 @@ func (c *controller) releaseServing(ctx context.Context, ws ids.WorkspaceID, fie
 //
 // A MID-WORK ADOPTION THE SUCCESSOR REFUSED is taken back the same way, at
 // once, and the workspace is transferred again at freeness
-// (fallBackToFreeness); the fault is not opened, because nothing failed: an old
+// (offerAgain); the fault is not opened, because nothing failed: an old
 // shim is simply moved the old way.
 //
 // It answers whether the workspace ends this daemon's again.
@@ -827,7 +827,7 @@ func (c *controller) timeAdoption(ctx context.Context, ws wsm.Workspace, plan *h
 		handedAcross(move)
 		return false
 	case adoptionRefused:
-		return c.fallBackToFreeness(ctx, ws, plan, windows, fields)
+		return c.offerAgain(ctx, ws, plan, windows, bounce.GateFreeness, fields)
 	case adoptionExpired:
 		return c.reoffer(ctx, ws, plan, windows, reofferAfterExpiry, fields)
 	case adoptionTakenBack:
@@ -844,8 +844,8 @@ const (
 )
 
 // reoffer sends a workspace taken back whole -- its adoption window expired,
-// or its transfer failed (errServedWhole) -- back to the successor, at its
-// freeness, once its pacing delay has passed, and answers whether it ends
+// or its transfer failed (errServedWhole) -- back to the successor, at the
+// handover's own dispatch-quiet gate, once its pacing delay has passed, and answers whether it ends
 // this daemon's. why is the record's message.
 //
 // A TAKEN-BACK WORKSPACE IS OFFERED AGAIN, NOT KEPT. Keeping it was the
@@ -885,7 +885,14 @@ func (c *controller) reoffer(ctx context.Context, ws wsm.Workspace, plan *handov
 		return false
 	case <-c.deps.Clock.After(delay):
 	}
-	return c.fallBackToFreeness(ctx, ws, plan, windows, fields)
+	// THE NEXT OFFER TAKES THE HANDOVER'S OWN GATE. A workspace taken back
+	// whole was refused nothing: it moves the moment it is available, as it
+	// first did, its merge suspended by the transfer. Offered at freeness it
+	// waited for every lease to let go, and a merge held by a hard-stopped
+	// queue never does: on 2026-11-10 one such workspace held a handover open
+	// for over an hour, with the front door on the incumbent refusing every
+	// verb of each workspace it had already handed over.
+	return c.offerAgain(ctx, ws, plan, windows, bounce.GateDispatchQuiet, fields)
 }
 
 // openAdoptionFault opens the workspace's adoption_window_expired fault, the
@@ -1125,42 +1132,46 @@ func (c *controller) takeBackRefused(ctx context.Context, ws ids.WorkspaceID, le
 	return adoptionRefused
 }
 
-// fallBackToFreeness transfers a workspace whose mid-work adoption was
-// refused AGAIN, at its freeness: the old way, which is never unsafe. It waits
-// for that transfer to run, naming the workspace on the holdout cadence while
-// it waits, and answers whether the workspace ends this daemon's.
-func (c *controller) fallBackToFreeness(ctx context.Context, ws wsm.Workspace, plan *handoverPlan, windows *sync.WaitGroup, fields dlog.Context) bool {
+// offerAgain transfers a workspace taken back to the successor once more, at
+// GATE: at freeness for one whose mid-work adoption the successor refused
+// (the old way, which is never unsafe), and at the handover's own dispatch
+// quiet for one taken back whole (reoffer). It waits for that transfer to
+// run, naming the workspace on the holdout cadence while it waits, and
+// answers whether the workspace ends this daemon's.
+func (c *controller) offerAgain(ctx context.Context, ws wsm.Workspace, plan *handoverPlan, windows *sync.WaitGroup, gate bounce.Gate, fields dlog.Context) bool {
 	outcome := make(chan error, 1)
+	fields = dlog.Merge(fields, dlog.Context{"gate": gate.String()})
 	// NEVER FORCED, a forced handover's included: a forced transfer runs at
-	// once, mid-work again, and the successor would refuse it again.
+	// once, mid-work again, and a successor that refused it would refuse it
+	// again.
 	decision, err := c.deps.Bounces.RequestBounce(ctx, ws.ID, c.timeTransfer(ws.ID, bounce.Request{
 		Reason:       string(ReasonHandoverTransfer),
 		KeepDraining: true,
-		WaitFor:      bounce.GateFreeness,
+		WaitFor:      gate,
 		Run: func(runCtx context.Context, _ ids.WorkspaceID) error {
 			return c.transfer(runCtx, ws, plan, windows)
 		},
 		Done: func(err error) { outcome <- err },
 	}))
 	if err != nil {
-		c.log.Error(opTransfer, "the bounce registry refused the transfer at freeness; the workspace stays served here", dlog.WithCause(fields, err))
+		c.log.Error(opTransfer, "the bounce registry refused the workspace's next transfer; the workspace stays served here", dlog.WithCause(fields, err))
 		return true
 	}
-	c.log.Info(opTransfer, "asked the bounce registry to transfer the workspace again at its freeness", dlog.Merge(fields, dlog.Context{
+	c.log.Info(opTransfer, "asked the bounce registry to transfer the workspace again", dlog.Merge(fields, dlog.Context{
 		"now": decision.Now, "turn_in_flight": decision.TurnInFlight, "detached_work": decision.DetachedWork,
 	}))
 	for warnings := 0; ; {
 		select {
 		case <-ctx.Done():
-			c.log.Debug(opHandover, "the daemon's lifetime ended while a transfer at freeness was pending", fields)
+			c.log.Debug(opHandover, "the daemon's lifetime ended while the workspace's next transfer was pending", fields)
 			return false
 		case err := <-outcome:
 			if err != nil && errors.Is(err, errServedWhole) {
-				c.log.Error(opTransfer, "the transfer at freeness failed; the workspace is served here whole and is offered again", dlog.WithCause(fields, err))
+				c.log.Error(opTransfer, "the workspace's next transfer failed; the workspace is served here whole and is offered again", dlog.WithCause(fields, err))
 				return c.reoffer(ctx, ws, plan, windows, reofferAfterFailedTransfer, fields)
 			}
 			if err != nil {
-				c.log.Error(opTransfer, "the transfer at freeness failed; the workspace stays served here", dlog.WithCause(fields, err))
+				c.log.Error(opTransfer, "the workspace's next transfer failed; the workspace stays served here", dlog.WithCause(fields, err))
 				return true
 			}
 			// Its own adoption window, already counted in windows, decides
