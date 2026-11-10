@@ -1382,3 +1382,4 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 - 2026-11-10 merge-queue-stall-triage (landed in queue bypass mode): Todo row: cancelled RegisterWorkspace calls logged at ERROR during handover
 - 2026-11-10 merge-queue-stall-triage (landed in queue bypass mode): agent-repld follows a handover: every call a handing-over daemon refuses is sent to its successor, so a workspace mid-turn during a deploy can still store links, prompt and finish
 - 2026-11-10 merge-queue-stall-triage (landed in queue bypass mode): A handover never stalls on a workspace taken back whole: it is offered again the moment it is available, so a merge held by a stopped queue no longer holds a deploy open
+- 2026-11-10 merge-queue-stall-triage (landed in queue bypass mode): A handover refusal answered as an error names its successor too, so the CLI follows a handover on every verb
