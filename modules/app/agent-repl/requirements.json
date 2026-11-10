@@ -39,7 +39,11 @@
       ],
       "command": "jq",
       "install": {
-        "brew": "jq"
+        "brew": "jq",
+        "apt": "jq",
+        "dnf": "jq",
+        "pacman": "jq",
+        "zypper": "jq"
       }
     },
     {
@@ -53,25 +57,29 @@
       ],
       "command": "git",
       "install": {
-        "manual": "Install the Xcode Command Line Tools with `xcode-select --install`."
+        "manual": "Install the Xcode Command Line Tools with `xcode-select --install`.",
+        "apt": "git",
+        "dnf": "git",
+        "pacman": "git",
+        "zypper": "git"
       }
     },
     {
       "id": "emacs",
       "kind": "emacs",
-      "why": "agent-repl is a Doom Emacs module, and its panel is an xwidget-webkit webview; it runs on zettel-emacs, Emacs 30.2 with the patches its webviews need on macOS (each web view's own mouse cursor, and the keyboard handed back to Emacs when its window is left)",
+      "why": "agent-repl is a Doom Emacs module, and its panel is an xwidget-webkit webview; it runs on zettel-emacs, Emacs 30.2 with the patches its webviews need: on macOS each web view's own mouse cursor and the keyboard handed back to Emacs when its window is left, and on Linux the WebKitGTK of current distributions, backported from Emacs 31.1 (upstream 4e855f90)",
       "profile": "run",
       "platforms": [
-        "darwin"
+        "darwin",
+        "linux"
       ],
       "command": "emacs",
       "min": "30.2",
       "features": [
         "xwidget-internal"
       ],
-      "revision": "cc023ace88da219c9e77740b9e180ea648fc4759",
+      "revision": "749ddd7309050b80e7c458fea36a8137ebedb65b",
       "configuration_features": [
-        "NS",
         "XWIDGETS",
         "NATIVE_COMP",
         "TREE_SITTER",
@@ -90,42 +98,158 @@
       "install": {
         "source": {
           "repo": "https://github.com/dwcoates/zettel-emacs.git",
-          "brew_deps": [
-            "autoconf",
-            "texinfo",
-            "pkgconf",
-            "libgccjit",
-            "tree-sitter",
-            "gnutls",
-            "librsvg",
-            "webp",
-            "little-cms2",
-            "gmp"
-          ],
-          "configure": [
-            "--with-ns",
-            "--with-xwidgets",
-            "--with-native-compilation=aot",
-            "--with-tree-sitter",
-            "--with-modules",
-            "--with-threads",
-            "--with-gnutls",
-            "--with-xml2",
-            "--with-sqlite3",
-            "--with-zlib",
-            "--with-libgmp",
-            "--with-lcms2",
-            "--with-rsvg",
-            "--with-webp",
-            "--without-dbus",
-            "--disable-gc-mark-trace",
-            "CFLAGS=-O3 -march=native -DFD_SETSIZE=10000 -DDARWIN_UNLIMITED_SELECT",
-            "CPPFLAGS=-I{brew}/include",
-            "LDFLAGS=-L{brew}/lib",
-            "TREE_SITTER_CFLAGS=-I{brew:tree-sitter}/include",
-            "TREE_SITTER_LIBS={brew:tree-sitter}/lib/libtree-sitter.a"
-          ],
-          "app": "/Applications/Emacs.app"
+          "darwin": {
+            "configuration_features": [
+              "NS"
+            ],
+            "deps": {
+              "brew": [
+                "autoconf",
+                "texinfo",
+                "pkgconf",
+                "libgccjit",
+                "tree-sitter",
+                "gnutls",
+                "librsvg",
+                "webp",
+                "little-cms2",
+                "gmp"
+              ]
+            },
+            "configure": [
+              "--with-ns",
+              "--with-xwidgets",
+              "--with-native-compilation=aot",
+              "--with-tree-sitter",
+              "--with-modules",
+              "--with-threads",
+              "--with-gnutls",
+              "--with-xml2",
+              "--with-sqlite3",
+              "--with-zlib",
+              "--with-libgmp",
+              "--with-lcms2",
+              "--with-rsvg",
+              "--with-webp",
+              "--without-dbus",
+              "--disable-gc-mark-trace",
+              "CFLAGS=-O3 -march=native -DFD_SETSIZE=10000 -DDARWIN_UNLIMITED_SELECT",
+              "CPPFLAGS=-I{brew}/include",
+              "LDFLAGS=-L{brew}/lib",
+              "TREE_SITTER_CFLAGS=-I{brew:tree-sitter}/include",
+              "TREE_SITTER_LIBS={brew:tree-sitter}/lib/libtree-sitter.a"
+            ],
+            "app": "/Applications/Emacs.app"
+          },
+          "linux": {
+            "configuration_features": [
+              "X11",
+              "GTK3",
+              "CAIRO"
+            ],
+            "deps": {
+              "apt": [
+                "build-essential",
+                "autoconf",
+                "automake",
+                "texinfo",
+                "pkg-config",
+                "libgtk-3-dev",
+                "libwebkit2gtk-4.1-dev",
+                "libgccjit-{gcc-major}-dev",
+                "libtree-sitter-dev",
+                "libgnutls28-dev",
+                "librsvg2-dev",
+                "libwebp-dev",
+                "liblcms2-dev",
+                "libgmp-dev",
+                "libxml2-dev",
+                "libsqlite3-dev",
+                "zlib1g-dev",
+                "libxpm-dev",
+                "libgif-dev",
+                "libjpeg-dev",
+                "libtiff-dev",
+                "libncurses-dev",
+                "libharfbuzz-dev",
+                "libcairo2-dev"
+              ],
+              "dnf": [
+                "gcc",
+                "make",
+                "autoconf",
+                "automake",
+                "texinfo",
+                "pkgconf-pkg-config",
+                "gtk3-devel",
+                "webkit2gtk4.1-devel",
+                "libgccjit-devel",
+                "libtree-sitter-devel",
+                "gnutls-devel",
+                "librsvg2-devel",
+                "libwebp-devel",
+                "lcms2-devel",
+                "gmp-devel",
+                "libxml2-devel",
+                "sqlite-devel",
+                "zlib-devel",
+                "libXpm-devel",
+                "giflib-devel",
+                "libjpeg-turbo-devel",
+                "libtiff-devel",
+                "ncurses-devel",
+                "harfbuzz-devel",
+                "cairo-devel"
+              ],
+              "pacman": [
+                "base-devel",
+                "autoconf",
+                "automake",
+                "texinfo",
+                "pkgconf",
+                "gtk3",
+                "webkit2gtk-4.1",
+                "libgccjit",
+                "tree-sitter",
+                "gnutls",
+                "librsvg",
+                "libwebp",
+                "lcms2",
+                "gmp",
+                "libxml2",
+                "sqlite",
+                "zlib",
+                "libxpm",
+                "giflib",
+                "libjpeg-turbo",
+                "libtiff",
+                "ncurses",
+                "harfbuzz",
+                "cairo"
+              ]
+            },
+            "configure": [
+              "--with-x-toolkit=gtk3",
+              "--with-cairo",
+              "--with-xwidgets",
+              "--with-native-compilation=aot",
+              "--with-tree-sitter",
+              "--with-modules",
+              "--with-threads",
+              "--with-gnutls",
+              "--with-xml2",
+              "--with-sqlite3",
+              "--with-zlib",
+              "--with-libgmp",
+              "--with-lcms2",
+              "--with-rsvg",
+              "--with-webp",
+              "--without-dbus",
+              "--disable-gc-mark-trace",
+              "--prefix={home}/.local",
+              "CFLAGS=-O3 -march=native"
+            ]
+          }
         }
       }
     },
@@ -154,7 +278,11 @@
       ],
       "command": "curl",
       "install": {
-        "manual": "Install curl with your distribution's package manager."
+        "manual": "Install curl with your distribution's package manager.",
+        "apt": "curl",
+        "dnf": "curl",
+        "pacman": "curl",
+        "zypper": "curl"
       }
     },
     {
@@ -168,7 +296,11 @@
       ],
       "command": "unzip",
       "install": {
-        "manual": "Install unzip with your distribution's package manager."
+        "manual": "Install unzip with your distribution's package manager.",
+        "apt": "unzip",
+        "dnf": "unzip",
+        "pacman": "unzip",
+        "zypper": "unzip"
       }
     },
     {
@@ -182,7 +314,11 @@
       ],
       "command": "shasum",
       "install": {
-        "manual": "Install perl's shasum with your distribution's package manager."
+        "manual": "Install perl's shasum with your distribution's package manager.",
+        "apt": "perl",
+        "dnf": "perl-Digest-SHA",
+        "pacman": "perl",
+        "zypper": "perl"
       }
     },
     {
@@ -238,7 +374,11 @@
       ],
       "command": "notify-send",
       "install": {
-        "manual": "Install libnotify's notify-send with your distribution's package manager."
+        "manual": "Install libnotify's notify-send with your distribution's package manager.",
+        "apt": "libnotify-bin",
+        "dnf": "libnotify",
+        "pacman": "libnotify",
+        "zypper": "libnotify-tools"
       }
     },
     {
@@ -252,7 +392,11 @@
       ],
       "command": "sqlite3",
       "install": {
-        "brew": "sqlite"
+        "brew": "sqlite",
+        "apt": "sqlite3",
+        "dnf": "sqlite",
+        "pacman": "sqlite",
+        "zypper": "sqlite3"
       }
     },
     {
@@ -609,7 +753,11 @@
       ],
       "command": "shellcheck",
       "install": {
-        "brew": "shellcheck"
+        "brew": "shellcheck",
+        "apt": "shellcheck",
+        "dnf": "ShellCheck",
+        "pacman": "shellcheck",
+        "zypper": "ShellCheck"
       }
     },
     {
@@ -623,7 +771,11 @@
       ],
       "command": "rg",
       "install": {
-        "brew": "ripgrep"
+        "brew": "ripgrep",
+        "apt": "ripgrep",
+        "dnf": "ripgrep",
+        "pacman": "ripgrep",
+        "zypper": "ripgrep"
       }
     },
     {
@@ -637,7 +789,11 @@
       ],
       "command": "python3",
       "install": {
-        "manual": "Install the Xcode Command Line Tools with `xcode-select --install`."
+        "manual": "Install the Xcode Command Line Tools with `xcode-select --install`.",
+        "apt": "python3",
+        "dnf": "python3",
+        "pacman": "python",
+        "zypper": "python3"
       }
     },
     {
@@ -651,7 +807,11 @@
       ],
       "command": "perl",
       "install": {
-        "brew": "perl"
+        "brew": "perl",
+        "apt": "perl",
+        "dnf": "perl",
+        "pacman": "perl",
+        "zypper": "perl"
       }
     }
   ]

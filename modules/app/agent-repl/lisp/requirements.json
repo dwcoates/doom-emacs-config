@@ -13,7 +13,23 @@
       ],
       "command": "hunspell",
       "install": {
-        "brew": "hunspell"
+        "brew": "hunspell",
+        "apt": [
+          "hunspell",
+          "hunspell-en-us"
+        ],
+        "dnf": [
+          "hunspell",
+          "hunspell-en-US"
+        ],
+        "pacman": [
+          "hunspell",
+          "hunspell-en_us"
+        ],
+        "zypper": [
+          "hunspell",
+          "myspell-en_US"
+        ]
       }
     },
     {

@@ -18,7 +18,10 @@
         "min": "20.0"
       },
       "install": {
-        "brew": "node"
+        "brew": "node",
+        "apt": "nodejs",
+        "dnf": "nodejs",
+        "pacman": "nodejs"
       }
     },
     {
@@ -32,7 +35,10 @@
       ],
       "command": "npm",
       "install": {
-        "brew": "node"
+        "brew": "node",
+        "apt": "npm",
+        "dnf": "nodejs-npm",
+        "pacman": "npm"
       }
     },
     {
@@ -46,7 +52,11 @@
       ],
       "command": "protoc",
       "install": {
-        "brew": "protobuf"
+        "brew": "protobuf",
+        "apt": "protobuf-compiler",
+        "dnf": "protobuf-compiler",
+        "pacman": "protobuf",
+        "zypper": "protobuf-devel"
       }
     },
     {

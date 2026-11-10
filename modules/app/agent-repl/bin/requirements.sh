@@ -22,8 +22,9 @@
 #   program                  a command on PATH, optionally at a minimum version
 #   emacs                    the emacs on PATH at a minimum version, with features;
 #                            with `revision`, built from that commit of a source
-#                            repository (`install.source`) with its configuration
-#                            features (`configuration_features`)
+#                            repository (`install.source`, with one build block
+#                            per platform) with its configuration features
+#                            (`configuration_features`, and the platform block's)
 #   env                      an environment variable the user sets
 #   notification_permission  macOS lets a banner program notify
 #   skill_link               a Claude Code skill linked into the skills directory of
@@ -55,8 +56,17 @@
 # macOS 15 and later ship at /usr/bin/jq: a fresh machine can run it before
 # anything is installed.
 #
+# PACKAGES COME FROM THE PLATFORM'S OWN PACKAGE MANAGER: Homebrew on macOS, and
+# on Linux the distribution's, the first of apt, dnf, pacman and zypper on PATH
+# (package_manager). An entry names its package for each under `install`
+# (`brew`, `apt`, `dnf`, `pacman`, `zypper`). A Linux install runs as root
+# through sudo, which asks for a password only when it has a terminal to ask
+# on; without one it never prompts (`sudo -n`), and an install it cannot run
+# says so with the command for the user to run.
+#
 # Test seams (bin/test-requirements.sh): AGENT_REPL_REQUIREMENTS_ROOT (the
-# module dir), AGENT_REPL_REQUIREMENTS_PLATFORM, AGENT_REPL_REQUIREMENTS_BUILD
+# module dir), AGENT_REPL_REQUIREMENTS_PLATFORM,
+# AGENT_REPL_REQUIREMENTS_PACKAGE_MANAGER, AGENT_REPL_REQUIREMENTS_BUILD
 # (bin/build-frontend.sh), AGENT_REPL_LAUNCHCTL, and HOME / PATH.
 
 set -euo pipefail
@@ -119,6 +129,95 @@ platform() {
   esac
 }
 
+# The Linux package managers install knows, in the order package_manager
+# prefers them.
+LINUX_PACKAGE_MANAGERS="apt dnf pacman zypper"
+
+# PACKAGE_MANAGER is the package manager an entry's packages come from, resolved
+# once per run by resolve_package_manager, outside any subshell so a refused
+# override ends the run: brew on macOS; on Linux
+# AGENT_REPL_REQUIREMENTS_PACKAGE_MANAGER when it is set (one of
+# LINUX_PACKAGE_MANAGERS, else a usage error), otherwise the first of them
+# whose command is on PATH. Empty when a Linux machine has none of them.
+PACKAGE_MANAGER=""
+
+resolve_package_manager() {
+  if [ "$(platform)" = darwin ]; then
+    PACKAGE_MANAGER=brew
+    return
+  fi
+  local pm
+  if [ -n "${AGENT_REPL_REQUIREMENTS_PACKAGE_MANAGER:-}" ]; then
+    case " $LINUX_PACKAGE_MANAGERS " in
+      *" $AGENT_REPL_REQUIREMENTS_PACKAGE_MANAGER "*) PACKAGE_MANAGER="$AGENT_REPL_REQUIREMENTS_PACKAGE_MANAGER"; return ;;
+    esac
+    err "platform: AGENT_REPL_REQUIREMENTS_PACKAGE_MANAGER=$AGENT_REPL_REQUIREMENTS_PACKAGE_MANAGER is not one of: $LINUX_PACKAGE_MANAGERS"
+    exit 2
+  fi
+  for pm in $LINUX_PACKAGE_MANAGERS; do
+    if command -v "$(package_manager_command "$pm")" >/dev/null 2>&1; then
+      PACKAGE_MANAGER="$pm"
+      return
+    fi
+  done
+}
+
+# package_manager: this run's package manager (PACKAGE_MANAGER).
+package_manager() { printf '%s\n' "$PACKAGE_MANAGER"; }
+
+# package_manager_command PM: the command PM runs as.
+package_manager_command() {
+  case "$1" in
+    apt) echo apt-get ;;
+    *) echo "$1" ;;
+  esac
+}
+
+# package_install_argv PM: the words that install packages through Linux
+# package manager PM without asking anything, the packages following them.
+package_install_argv() {
+  case "$1" in
+    apt) echo "apt-get install -y" ;;
+    dnf) echo "dnf install -y" ;;
+    pacman) echo "pacman -S --needed --noconfirm" ;;
+    zypper) echo "zypper --non-interactive install" ;;
+  esac
+}
+
+# as_root ARGV...: ARGV run as root through sudo. With a terminal on stdin sudo
+# may ask for the password there; without one it must not ask at all.
+as_root() {
+  if [ -t 0 ]; then
+    sudo "$@"
+  else
+    sudo -n "$@"
+  fi
+}
+
+# APT_UPDATED is set once this run has refreshed apt's package lists: a fresh
+# machine's lists can be empty or stale, and every apt install after the first
+# reuses the refresh.
+APT_UPDATED=""
+
+# os_install PM PACKAGE...: install PACKAGEs through Linux package manager PM,
+# as root. A package already installed is left as it is.
+os_install() {
+  local pm="$1" argv
+  shift
+  if [ "$pm" = apt ] && [ -z "$APT_UPDATED" ]; then
+    as_root apt-get update -q || { err "install: apt-get update failed"; return 1; }
+    APT_UPDATED=1
+  fi
+  read -r -a argv <<<"$(package_install_argv "$pm")"
+  as_root "${argv[@]}" "$@" || { err "install: sudo ${argv[*]} $* failed"; return 1; }
+}
+
+# packages ENTRY PATH PM: the packages the object at jq PATH of ENTRY names
+# for PM (a string or a list), space-separated; empty when it names none.
+packages() {
+  printf '%s\n' "$1" | jq -r --arg pm "$3" "$2"' | .[$pm] // empty | if type == "array" then join(" ") else . end'
+}
+
 # shellcheck source=lib-worktrees.sh
 . "$THIS_DIR/lib-worktrees.sh"
 
@@ -174,8 +273,15 @@ validate_entries() {
       (if $e.kind == "program" then need($e; ["command", "install", "platforms"])
        elif $e.kind == "emacs" then need($e; ["command", "min", "features", "install", "platforms"]),
          (select($e.install.source != null) | need($e; ["revision"]),
-           (("repo", "configure", "app") as $f | select($e.install.source[$f] == null)
-             | "\($e._file): \($e.id): an emacs install.source needs \"\($f)\""))
+           (select($e.install.source.repo == null)
+             | "\($e._file): \($e.id): an emacs install.source needs \"repo\""),
+           ($e.platforms // [] | .[] as $p
+             | (select($e.install.source[$p] == null)
+                 | "\($e._file): \($e.id): an emacs install.source needs a \"\($p)\" build block"),
+               (select($e.install.source[$p] != null and $e.install.source[$p].configure == null)
+                 | "\($e._file): \($e.id): an emacs install.source.\($p) needs \"configure\""),
+               (select($p == "darwin" and $e.install.source[$p] != null and $e.install.source[$p].app == null)
+                 | "\($e._file): \($e.id): an emacs install.source.darwin needs \"app\"")))
        elif $e.kind == "env" then need($e; ["name", "doc"])
        elif $e.kind == "notification_permission" then need($e; ["command", "platforms"])
        elif $e.kind == "skill_link" then need($e; ["name", "source"])
@@ -237,14 +343,27 @@ STATUS=""
 DETAIL=""
 FIX=""
 
-# install_text ENTRY: the install action an entry's `install` names, as text.
+# install_text ENTRY: the install action an entry's `install` names for this
+# machine's package manager, as text.
 install_text() {
-  local e="$1" how
+  local e="$1" how pm
+  pm="$(package_manager)"
+  if [ "$pm" != brew ]; then
+    how="$(printf '%s\n' "$e" | jq -r --arg pm "$pm" --arg argv "$(package_install_argv "$pm")" --arg known "$LINUX_PACKAGE_MANAGERS" '.install |
+      if $pm != "" and .[$pm] then "sudo \($argv) \(.[$pm] | if type == "array" then join(" ") else . end)"
+      elif .go_install then "go install \(.go_install)"
+      elif .source then "build \(.source.repo) at the pinned revision and install it"
+      elif .manual then .manual
+      elif $pm == "" then "install it yourself: no package manager install knows (\($known)) is on PATH"
+      else "no \($pm) package is declared for it; add install.\($pm) to its manifest entry" end')"
+    printf '%s\n' "$how"
+    return
+  fi
   how="$(printf '%s\n' "$e" | jq -r '.install |
     if .brew then ((if .tap then "brew tap \(.tap) && " else "" end) + "brew install \(.brew)" + ((.options // []) | map(" " + .) | join("")))
     elif .brew_cask then "brew install --cask \(.brew_cask)"
     elif .go_install then "go install \(.go_install)"
-    elif .source then "build \(.source.repo) at the pinned revision and install it as \(.source.app)"
+    elif .source then "build \(.source.repo) at the pinned revision and install it as \(.source.darwin.app)"
     elif .manual then .manual
     else "no install step" end')"
   printf '%s\n' "$how"
@@ -306,7 +425,7 @@ check_emacs() {
   while IFS= read -r f; do
     [ -n "$f" ] || continue
     case "$configured" in *" $f "*) ;; *) missing="$missing $f" ;; esac
-  done < <(printf '%s\n' "$e" | jq -r '.configuration_features // [] | .[]')
+  done < <(printf '%s\n' "$e" | jq -r --arg p "$(platform)" '(.configuration_features // []) + (.install.source[$p].configuration_features // []) | .[]')
   if [ -n "$missing" ]; then
     STATUS=outdated; DETAIL="$path (Emacs $have) was configured without:$missing"
   else
@@ -592,11 +711,24 @@ check_entry() {
 # ---------------------------------------------------------------------------
 
 install_program() {
-  local e="$1" brew tap cask goi
+  local e="$1" brew tap cask goi pm pkgs
+  pm="$(package_manager)"
+  goi="$(field "$e" .install.go_install)"
+  if [ "$pm" != brew ]; then
+    pkgs="$(packages "$e" .install "$pm")"
+    if [ -n "$pm" ] && [ -n "$pkgs" ]; then
+      # shellcheck disable=SC2086 # the packages are one word each
+      os_install "$pm" $pkgs
+    elif [ -n "$goi" ]; then
+      go install "$goi"
+    else
+      return 1
+    fi
+    return
+  fi
   brew="$(field "$e" .install.brew)"
   tap="$(field "$e" .install.tap)"
   cask="$(field "$e" .install.brew_cask)"
-  goi="$(field "$e" .install.go_install)"
   if [ -n "$brew" ]; then
     local options=()
     while IFS= read -r o; do [ -n "$o" ] && options+=("$o"); done < <(printf '%s\n' "$e" | jq -r '.install.options // [] | .[]')
@@ -623,11 +755,18 @@ install_emacs() {
   fi
 }
 
-# expand_brew_prefixes ARG: ARG with every `{brew}` replaced by Homebrew's
-# prefix and every `{brew:FORMULA}` by that formula's, so a manifest names a
-# Homebrew path without naming a machine's.
-expand_brew_prefixes() {
+# expand_placeholders ARG: ARG with its placeholders replaced, so a manifest
+# names a path or a version without naming a machine's: `{home}` is the home
+# directory, `{gcc-major}` the major version of the gcc on PATH, `{brew}`
+# Homebrew's prefix and `{brew:FORMULA}` that formula's.
+expand_placeholders() {
   local arg="$1" out="" name
+  if [[ "$arg" == *"{gcc-major}"* ]]; then
+    local major
+    major="$(gcc -dumpversion)" || { err "expand: $arg names {gcc-major}, and gcc -dumpversion failed"; return 1; }
+    arg="${arg//\{gcc-major\}/${major%%.*}}"
+  fi
+  arg="${arg//\{home\}/$HOME}"
   while [[ "$arg" == *"{brew"* ]]; do
     out="$out${arg%%\{brew*}"
     arg="${arg#*\{brew}"
@@ -643,28 +782,69 @@ expand_brew_prefixes() {
   printf '%s\n' "$out$arg"
 }
 
-# install_emacs_source ENTRY: build Emacs from the entry's source repository at
-# its pinned revision, with its configure arguments, and install the app it
-# makes in place of install.source.app. The app it replaces is moved aside,
-# never deleted, and only once the new one is built: a failed step leaves the
-# installed app as it was.
-install_emacs_source() {
-  local e="$1" id repo revision app dir dep built backup jobs
-  id="$(field "$e" .id)"
-  repo="$(field "$e" .install.source.repo)"
-  revision="$(field "$e" .revision)"
-  app="$(field "$e" .install.source.app)"
-  dir="$CACHE_ROOT/src/$(basename "$repo" .git)"
+# install_source_deps ENTRY ID: install the build dependencies the platform
+# block names for this machine's package manager. On macOS each Homebrew
+# formula not yet installed is installed; on Linux one install of them all
+# runs, the dependencies naming `{gcc-major}` after the rest, since gcc is
+# itself among the rest on a machine that has none yet.
+install_source_deps() {
+  local e="$1" id="$2" pm dep first=() later=()
+  pm="$(package_manager)"
+  if [ "$pm" = brew ]; then
+    while IFS= read -r dep; do
+      [ -n "$dep" ] || continue
+      if ! brew list --formula "$dep" >/dev/null 2>&1; then
+        brew install "$dep" || { err "install: $id: brew install $dep failed"; return 1; }
+      fi
+    done < <(printf '%s\n' "$e" | jq -r '.install.source.darwin.deps.brew // [] | .[]')
+    return
+  fi
+  [ -n "$pm" ] || { err "install: $id: no package manager install knows ($LINUX_PACKAGE_MANAGERS) is on PATH for its build dependencies"; return 1; }
+  if [ "$(printf '%s\n' "$e" | jq -r --arg pm "$pm" '.install.source.linux.deps[$pm] // empty | length')" = "" ]; then
+    err "install: $id: no $pm build dependencies are declared for it; add install.source.linux.deps.$pm to its manifest entry"
+    return 1
+  fi
   while IFS= read -r dep; do
     [ -n "$dep" ] || continue
-    if ! brew list --formula "$dep" >/dev/null 2>&1; then
-      brew install "$dep" || { err "install: $id: brew install $dep failed"; return 1; }
-    fi
-  done < <(printf '%s\n' "$e" | jq -r '.install.source.brew_deps // [] | .[]')
-  local args=() a
+    case "$dep" in
+      *"{gcc-major}"*) later+=("$dep") ;;
+      *) first+=("$dep") ;;
+    esac
+  done < <(printf '%s\n' "$e" | jq -r --arg pm "$pm" '.install.source.linux.deps[$pm] // [] | .[]')
+  if [ "${#first[@]}" -gt 0 ]; then
+    os_install "$pm" "${first[@]}" || return 1
+  fi
+  if [ "${#later[@]}" -gt 0 ]; then
+    local expanded=()
+    local x
+    for dep in "${later[@]}"; do
+      x="$(expand_placeholders "$dep")" || return 1
+      expanded+=("$x")
+    done
+    os_install "$pm" "${expanded[@]}" || return 1
+  fi
+}
+
+# install_emacs_source ENTRY: build Emacs from the entry's source repository at
+# its pinned revision, with the platform block's dependencies and configure
+# arguments. Nothing installed is touched until the build has succeeded: on
+# macOS the app it makes replaces install.source.darwin.app, the app it
+# replaces moved aside, never deleted; on Linux `make install` installs into
+# the configure prefix only once `make` has built everything.
+install_emacs_source() {
+  local e="$1" id repo revision dir built backup jobs plat app
+  id="$(field "$e" .id)"
+  plat="$(platform)"
+  repo="$(field "$e" .install.source.repo)"
+  revision="$(field "$e" .revision)"
+  app="$(field "$e" ".install.source.$plat.app")"
+  dir="$CACHE_ROOT/src/$(basename "$repo" .git)"
+  install_source_deps "$e" "$id" || return 1
+  local args=() a x
   while IFS= read -r a; do
-    args+=("$(expand_brew_prefixes "$a")")
-  done < <(printf '%s\n' "$e" | jq -r '.install.source.configure[]')
+    x="$(expand_placeholders "$a")" || return 1
+    args+=("$x")
+  done < <(printf '%s\n' "$e" | jq -r --arg p "$plat" '.install.source[$p].configure[]')
   mkdir -p "$dir"
   if [ ! -d "$dir/.git" ]; then
     git -C "$dir" init -q || { err "install: $id: git init in $dir failed"; return 1; }
@@ -676,6 +856,10 @@ install_emacs_source() {
   (cd "$dir" && ./configure ${args[@]+"${args[@]}"}) || { err "install: $id: configure in $dir failed; config.log there says why"; return 1; }
   (cd "$dir" && make -j"$jobs") || { err "install: $id: make in $dir failed"; return 1; }
   (cd "$dir" && make install) || { err "install: $id: make install in $dir failed"; return 1; }
+  if [ "$plat" != darwin ]; then
+    say "install: $id: installed Emacs built from $revision into its configure prefix; restart Emacs to run it"
+    return 0
+  fi
   built="$dir/nextstep/Emacs.app"
   [ -d "$built" ] || { err "install: $id: the build made no $built"; return 1; }
   if [ -e "$app" ]; then
@@ -929,7 +1113,7 @@ cmd_install() {
       if "install_$kind" "$e"; then
         check_entry "$e"
       else
-        say "install: $(field "$e" .id) has no install step; it needs you: $FIX"
+        say "install: $(field "$e" .id) was not installed; it needs you: $FIX"
       fi
     fi
     report "$e"
@@ -1079,6 +1263,9 @@ main() {
       *) die_usage "unknown argument: $1" ;;
     esac
   done
+  case "$verb" in
+    check|install|uninstall|list) resolve_package_manager ;;
+  esac
   case "$verb" in
     check) load_manifests; cmd_check ;;
     install) [ "$JSON" -eq 0 ] || die_usage "--json is for check"; load_manifests; cmd_install ;;

@@ -125,6 +125,22 @@ launchd_service_plists() {
     | xargs -0 jq -r '.requirements[]? | select(.kind == "launchd_service") | .plist'
 }
 
+test_every_linux_program_names_its_package_for_each_main_linux_package_manager() {
+  # A Linux program comes from apt, dnf and pacman alike, so no distribution
+  # family is left with "add install.<manager>"; only a program no package
+  # manager carries (a go_install, or a manual step on every platform) names
+  # none of them.
+  local missing
+  missing="$(cd "$MODULE" && find . -name requirements.json -not -path '*/node_modules/*' -print0 \
+    | xargs -0 jq -r '.requirements[]
+        | select(.kind == "program" and ((.platforms // []) | index("linux")))
+        | select(.install.go_install == null)
+        | select((.install | keys | map(select(. == "apt" or . == "dnf" or . == "pacman" or . == "brew" or . == "brew_cask")) | length) > 0)
+        | select(.install.apt == null or .install.dnf == null or .install.pacman == null)
+        | .id' | sort -u)"
+  if [ -z "$missing" ]; then pass "every linux program names its apt, dnf and pacman packages"; else fail "linux programs missing a package:" "$missing"; fi
+}
+
 test_launchd_service_plists_names_every_service() {
   local got
   got="$(launchd_service_plists | sort | tr '\n' ' ')"
@@ -397,9 +413,85 @@ test_a_manual_program_needs_the_user() {
   new_case
   manifest '[{"id": "tool", "kind": "program", "why": "w", "profile": "run", "platforms": ["darwin"], "command": "tool", "install": {"manual": "Download it from example.com."}}]'
   run install
-  if [ "$RC" -eq 1 ] && has "tool has no install step; it needs you: Download it from example.com." && [ ! -s "$CASE/transcript" ]; then
+  if [ "$RC" -eq 1 ] && has "tool was not installed; it needs you: Download it from example.com." && [ ! -s "$CASE/transcript" ]; then
     pass "a manual program needs the user and fails the install"
   else fail "manual program" "rc=$RC" "$OUT"; fi
+}
+
+LINUX_PROGRAM='{"id": "tool", "kind": "program", "why": "the case needs it", "profile": "run", "platforms": ["linux"], "command": "tool", "install": {"apt": "tool-deb", "dnf": "tool-rpm", "pacman": ["tool-arch", "tool-extra"], "zypper": "tool-suse"}}'
+
+# fake_linux_package_managers: sudo, apt-get, dnf, pacman and zypper stubs. sudo
+# drops its -n and runs the rest, failing instead when STUB_SUDO_EXIT is set;
+# an install puts `tool` on PATH.
+fake_linux_package_managers() {
+  write_stub sudo '[ -n "${STUB_SUDO_EXIT:-}" ] && exit "$STUB_SUDO_EXIT"; [ "$1" = -n ] && shift; exec "$@"'
+  local pm
+  for pm in apt-get dnf pacman zypper; do
+    write_stub "$pm" 'case " $* " in *" install "*|*" -S "*) printf "#!/bin/sh\necho tool\n" >"$STUB_DIR/tool"; chmod +x "$STUB_DIR/tool" ;; esac'
+  done
+}
+
+test_install_apt_installs_a_missing_linux_program_after_refreshing_its_lists() {
+  new_case; manifest "[$LINUX_PROGRAM]"; fake_linux_package_managers
+  PLATFORM=linux run install
+  if [ "$RC" -eq 0 ] && ran "sudo -n apt-get update -q" && ran "sudo -n apt-get install -y tool-deb" \
+     && ! ran "dnf " && has "ok          tool:"; then
+    pass "install refreshes apt's lists, apt-installs a missing linux program without prompting, and re-checks it"
+  else fail "apt install" "rc=$RC" "$OUT" "$(cat "$CASE/transcript")"; fi
+}
+
+test_install_runs_each_linux_package_managers_own_install() {
+  local pm want
+  while IFS='|' read -r pm want; do
+    new_case; manifest "[$LINUX_PROGRAM]"; fake_linux_package_managers
+    EXTRA_ENV="AGENT_REPL_REQUIREMENTS_PACKAGE_MANAGER=$pm" PLATFORM=linux run install
+    if [ "$RC" -eq 0 ] && ran "sudo -n $want" && ! ran "apt-get update"; then
+      pass "install through $pm runs: $want"
+    else fail "$pm install" "rc=$RC" "$OUT" "$(cat "$CASE/transcript")"; fi
+  done <<'CASES'
+dnf|dnf install -y tool-rpm
+pacman|pacman -S --needed --noconfirm tool-arch tool-extra
+zypper|zypper --non-interactive install tool-suse
+CASES
+}
+
+test_the_linux_package_manager_is_apt_before_dnf() {
+  new_case; manifest "[$LINUX_PROGRAM]"; fake_linux_package_managers
+  PLATFORM=linux run check
+  if [ "$RC" -eq 1 ] && has "Fix: sudo apt-get install -y tool-deb"; then pass "with apt and dnf both on PATH, apt is the package manager"; else fail "manager order" "rc=$RC" "$OUT"; fi
+}
+
+test_a_failed_linux_install_names_the_command_to_run() {
+  new_case; manifest "[$LINUX_PROGRAM]"; fake_linux_package_managers
+  EXTRA_ENV="STUB_SUDO_EXIT=1 AGENT_REPL_REQUIREMENTS_PACKAGE_MANAGER=dnf" PLATFORM=linux run install
+  if [ "$RC" -eq 1 ] && has "ERROR: install: sudo dnf install -y tool-rpm failed" \
+     && has "install: tool was not installed; it needs you: sudo dnf install -y tool-rpm" && has "missing     tool:"; then
+    pass "a linux install sudo cannot run fails and names the command for the user"
+  else fail "sudo failure" "rc=$RC" "$OUT"; fi
+}
+
+test_a_linux_entry_without_this_managers_package_says_to_add_it() {
+  new_case; manifest "[$(jq -c 'del(.install.dnf)' <<<"$LINUX_PROGRAM")]"; fake_linux_package_managers
+  EXTRA_ENV="AGENT_REPL_REQUIREMENTS_PACKAGE_MANAGER=dnf" PLATFORM=linux run install
+  if [ "$RC" -eq 1 ] && has "Fix: no dnf package is declared for it; add install.dnf to its manifest entry" && ! ran "sudo"; then
+    pass "a linux entry with no package for the machine's manager installs nothing and says to add one"
+  else fail "no package" "rc=$RC" "$OUT" "$(cat "$CASE/transcript")"; fi
+}
+
+test_a_linux_entry_go_installs_without_a_package() {
+  new_case
+  manifest '[{"id": "tool", "kind": "program", "why": "w", "profile": "run", "platforms": ["linux"], "command": "tool", "install": {"go_install": "example.com/tool@v1"}}]'
+  fake_linux_package_managers
+  PLATFORM=linux run install
+  if ran "go install example.com/tool@v1" && ! ran "sudo"; then pass "a linux entry with no package go-installs"; else fail "linux go install" "rc=$RC" "$(cat "$CASE/transcript")"; fi
+}
+
+test_an_unknown_package_manager_override_is_refused() {
+  new_case; manifest "[$LINUX_PROGRAM]"
+  EXTRA_ENV="AGENT_REPL_REQUIREMENTS_PACKAGE_MANAGER=yum" PLATFORM=linux run check
+  if [ "$RC" -eq 2 ] && has "AGENT_REPL_REQUIREMENTS_PACKAGE_MANAGER=yum is not one of: apt dnf pacman zypper"; then
+    pass "an unknown package manager override is refused"
+  else fail "pm override" "rc=$RC" "$OUT"; fi
 }
 
 test_an_unmet_optional_entry_does_not_fail_the_run() {
@@ -474,9 +566,10 @@ test_an_old_emacs_is_outdated() {
 PINNED=cc023ace88da219c9e77740b9e180ea648fc4759
 
 # source_emacs_entry: an emacs entry built from a source repository at PINNED,
-# its app under the case's own Applications dir.
+# for macOS and Linux: its macOS app under the case's own Applications dir, its
+# Linux build installed under the case's home.
 source_emacs_entry() {
-  printf '%s' '{"id": "emacs", "kind": "emacs", "why": "w", "profile": "run", "platforms": ["darwin"], "command": "emacs", "min": "30.2", "features": ["xwidget-internal"], "revision": "'"$PINNED"'", "configuration_features": ["XWIDGETS", "NATIVE_COMP"], "install": {"source": {"repo": "https://example.test/fork/zettel-emacs.git", "brew_deps": ["autoconf", "tree-sitter"], "configure": ["--with-xwidgets", "LIBS={brew:tree-sitter}/lib/x.a", "CPPFLAGS=-I{brew}/include"], "app": "'"$CASE"'/Applications/Emacs.app"}}}'
+  printf '%s' '{"id": "emacs", "kind": "emacs", "why": "w", "profile": "run", "platforms": ["darwin", "linux"], "command": "emacs", "min": "30.2", "features": ["xwidget-internal"], "revision": "'"$PINNED"'", "configuration_features": ["XWIDGETS", "NATIVE_COMP"], "install": {"source": {"repo": "https://example.test/fork/zettel-emacs.git", "darwin": {"configuration_features": ["NS"], "deps": {"brew": ["autoconf", "tree-sitter"]}, "configure": ["--with-xwidgets", "LIBS={brew:tree-sitter}/lib/x.a", "CPPFLAGS=-I{brew}/include"], "app": "'"$CASE"'/Applications/Emacs.app"}, "linux": {"configuration_features": ["GTK3"], "deps": {"apt": ["autoconf", "libgccjit-{gcc-major}-dev", "libgtk-3-dev"], "dnf": ["autoconf", "libgccjit-devel"]}, "configure": ["--with-x-toolkit=gtk3", "--prefix={home}/.local"]}}}}'
 }
 
 # fake_source_build: git, make and the checkout's own autogen.sh and configure
@@ -514,25 +607,25 @@ test_an_emacs_at_its_pinned_revision_is_ok() {
 }
 
 test_an_emacs_built_from_another_revision_is_outdated() {
-  new_case; manifest "[$(source_emacs_entry)]"; fake_emacs 30.2 "" 636f166cfc86 "XWIDGETS NATIVE_COMP"
+  new_case; manifest "[$(source_emacs_entry)]"; fake_emacs 30.2 "" 636f166cfc86 "NS XWIDGETS NATIVE_COMP"
   run check
   if [ "$RC" -eq 1 ] && has "outdated    emacs: $CASE/stubs/emacs (Emacs 30.2) was built from 636f166cfc86, not the pinned $PINNED"; then pass "an emacs built from another revision is outdated, naming both"; else fail "other revision" "rc=$RC" "$OUT"; fi
 }
 
 test_an_emacs_with_no_recorded_revision_is_outdated() {
-  new_case; manifest "[$(source_emacs_entry)]"; fake_emacs 30.2 "" "" "XWIDGETS NATIVE_COMP"
+  new_case; manifest "[$(source_emacs_entry)]"; fake_emacs 30.2 "" "" "NS XWIDGETS NATIVE_COMP"
   run check
   if [ "$RC" -eq 1 ] && has "was built from no recorded commit, not the pinned $PINNED"; then pass "an emacs with no recorded commit is outdated"; else fail "no revision" "rc=$RC" "$OUT"; fi
 }
 
 test_an_emacs_configured_without_a_feature_is_outdated() {
-  new_case; manifest "[$(source_emacs_entry)]"; fake_emacs 30.2 "" "$PINNED" "XWIDGETS NATIVE_COMP_X"
+  new_case; manifest "[$(source_emacs_entry)]"; fake_emacs 30.2 "" "$PINNED" "NS XWIDGETS NATIVE_COMP_X"
   run check
   if [ "$RC" -eq 1 ] && has "outdated    emacs: $CASE/stubs/emacs (Emacs 30.2) was configured without: NATIVE_COMP"; then pass "an emacs configured without a feature is outdated, naming it"; else fail "configuration feature" "rc=$RC" "$OUT"; fi
 }
 
 test_an_emacs_source_fix_names_the_build() {
-  new_case; manifest "[$(source_emacs_entry)]"; fake_emacs 30.2 "" 636f166cfc86 "XWIDGETS NATIVE_COMP"
+  new_case; manifest "[$(source_emacs_entry)]"; fake_emacs 30.2 "" 636f166cfc86 "NS XWIDGETS NATIVE_COMP"
   run check
   if has "Fix: build https://example.test/fork/zettel-emacs.git at the pinned revision and install it as $CASE/Applications/Emacs.app"; then pass "a source emacs's fix names the build"; else fail "source fix" "$OUT"; fi
 }
@@ -544,13 +637,67 @@ test_an_emacs_source_without_a_revision_is_refused() {
 }
 
 test_an_emacs_source_lacking_a_field_is_refused() {
-  new_case; manifest "[$(source_emacs_entry | jq -c 'del(.install.source.app)')]"
-  run check
-  if [ "$RC" -eq 2 ] && has 'emacs: an emacs install.source needs "app"'; then pass "an emacs source lacking a field is refused, naming it"; else fail "source field" "rc=$RC" "$OUT"; fi
+  local path want
+  while IFS='|' read -r path want; do
+    new_case; manifest "[$(source_emacs_entry | jq -c "del($path)")]"
+    run check
+    if [ "$RC" -eq 2 ] && has "$want"; then pass "an emacs source lacking $path is refused, naming it"; else fail "source field $path" "rc=$RC" "$OUT"; fi
+  done <<'CASES'
+.install.source.repo|emacs: an emacs install.source needs "repo"
+.install.source.darwin.app|emacs: an emacs install.source.darwin needs "app"
+.install.source.linux.configure|emacs: an emacs install.source.linux needs "configure"
+.install.source.linux|emacs: an emacs install.source needs a "linux" build block
+CASES
+}
+
+test_an_emacs_without_its_platform_blocks_configuration_feature_is_outdated() {
+  new_case; manifest "[$(source_emacs_entry)]"; fake_emacs 30.2 "" "$PINNED" "XWIDGETS NATIVE_COMP NS"
+  PLATFORM=linux run check
+  if [ "$RC" -eq 1 ] && has "was configured without: GTK3"; then pass "a linux emacs lacking the linux block's configuration feature is outdated"; else fail "platform configuration feature" "rc=$RC" "$OUT"; fi
+}
+
+# fake_linux_source_build: fake_source_build, the linux package managers, and a
+# gcc whose major version is 14.
+fake_linux_source_build() {
+  fake_source_build
+  fake_linux_package_managers
+  write_stub gcc 'echo 14.2.0'
+}
+
+test_installing_a_linux_emacs_source_installs_deps_then_builds_into_the_prefix() {
+  new_case; manifest "[$(source_emacs_entry)]"; fake_emacs 30.2 "" 636f166cfc86 "GTK3 XWIDGETS NATIVE_COMP"; fake_linux_source_build
+  PLATFORM=linux run install
+  local src="$CASE/home/.cache/agent-repl/src/zettel-emacs" deps gccjit
+  deps="$(grep -n "apt-get install -y autoconf libgtk-3-dev" "$CASE/transcript" | sed -n 1p | cut -d: -f1)"
+  gccjit="$(grep -n "apt-get install -y libgccjit-14-dev" "$CASE/transcript" | sed -n 1p | cut -d: -f1)"
+  if [ "$RC" -eq 0 ] && ran "sudo -n apt-get update -q" && [ -n "$deps" ] && [ -n "$gccjit" ] && [ "$deps" -lt "$gccjit" ] \
+     && ran "git -C $src checkout -q --force $PINNED" \
+     && ran "configure --with-x-toolkit=gtk3 --prefix=$CASE/home/.local" && ran "make install" \
+     && ! ran "brew " && [ "$(cat "$CASE/Applications/Emacs.app/marker")" = old ] \
+     && has "installed Emacs built from $PINNED into its configure prefix" && has "ok          emacs:"; then
+    pass "installing a linux source emacs installs its deps (gccjit after gcc), then builds into the prefix"
+  else fail "linux source install" "rc=$RC" "$OUT" "$(cat "$CASE/transcript")"; fi
+}
+
+test_a_linux_emacs_source_without_this_managers_deps_builds_nothing() {
+  new_case; manifest "[$(source_emacs_entry)]"; fake_emacs 30.2 "" 636f166cfc86 "GTK3 XWIDGETS NATIVE_COMP"; fake_linux_source_build
+  EXTRA_ENV="AGENT_REPL_REQUIREMENTS_PACKAGE_MANAGER=pacman" PLATFORM=linux run install
+  if [ "$RC" -eq 1 ] && has "ERROR: install: emacs: no pacman build dependencies are declared for it; add install.source.linux.deps.pacman to its manifest entry" \
+     && ! ran "sudo" && ! ran "configure " && ! ran "make "; then
+    pass "a linux emacs source with no deps for the machine's manager builds nothing and says to add them"
+  else fail "linux source no deps" "rc=$RC" "$OUT" "$(cat "$CASE/transcript")"; fi
+}
+
+test_a_failed_linux_emacs_dependency_install_builds_nothing() {
+  new_case; manifest "[$(source_emacs_entry)]"; fake_emacs 30.2 "" 636f166cfc86 "GTK3 XWIDGETS NATIVE_COMP"; fake_linux_source_build
+  EXTRA_ENV="STUB_SUDO_EXIT=1 AGENT_REPL_REQUIREMENTS_PACKAGE_MANAGER=dnf" PLATFORM=linux run install
+  if [ "$RC" -eq 1 ] && has "ERROR: install: sudo dnf install -y autoconf libgccjit-devel failed" && ! ran "configure " && ! ran "make "; then
+    pass "a failed linux dependency install builds nothing"
+  else fail "linux deps failure" "rc=$RC" "$OUT" "$(cat "$CASE/transcript")"; fi
 }
 
 test_installing_an_emacs_source_builds_and_replaces_the_app() {
-  new_case; manifest "[$(source_emacs_entry)]"; fake_emacs 30.2 "" 636f166cfc86 "XWIDGETS NATIVE_COMP"; fake_source_build
+  new_case; manifest "[$(source_emacs_entry)]"; fake_emacs 30.2 "" 636f166cfc86 "NS XWIDGETS NATIVE_COMP"; fake_source_build
   : >"$CASE/stubs/.brew-has-autoconf"
   run install
   local src="$CASE/home/.cache/agent-repl/src/zettel-emacs" backup
@@ -567,7 +714,7 @@ test_installing_an_emacs_source_builds_and_replaces_the_app() {
 }
 
 test_a_failed_emacs_source_configure_leaves_the_app() {
-  new_case; manifest "[$(source_emacs_entry)]"; fake_emacs 30.2 "" 636f166cfc86 "XWIDGETS NATIVE_COMP"; fake_source_build
+  new_case; manifest "[$(source_emacs_entry)]"; fake_emacs 30.2 "" 636f166cfc86 "NS XWIDGETS NATIVE_COMP"; fake_source_build
   EXTRA_ENV="STUB_CONFIGURE_EXIT=1" run install
   if [ "$RC" -eq 1 ] && has "ERROR: install: emacs: configure in $CASE/home/.cache/agent-repl/src/zettel-emacs failed; config.log there says why" \
      && ! ran "make " && [ "$(cat "$CASE/Applications/Emacs.app/marker")" = old ] && no_backup; then
@@ -576,7 +723,7 @@ test_a_failed_emacs_source_configure_leaves_the_app() {
 }
 
 test_a_source_build_that_makes_no_app_leaves_the_app() {
-  new_case; manifest "[$(source_emacs_entry)]"; fake_emacs 30.2 "" 636f166cfc86 "XWIDGETS NATIVE_COMP"; fake_source_build
+  new_case; manifest "[$(source_emacs_entry)]"; fake_emacs 30.2 "" 636f166cfc86 "NS XWIDGETS NATIVE_COMP"; fake_source_build
   EXTRA_ENV="STUB_MAKE_NO_APP=1" run install
   if [ "$RC" -eq 1 ] && has "ERROR: install: emacs: the build made no $CASE/home/.cache/agent-repl/src/zettel-emacs/nextstep/Emacs.app" \
      && [ "$(cat "$CASE/Applications/Emacs.app/marker")" = old ] && no_backup; then
@@ -585,7 +732,7 @@ test_a_source_build_that_makes_no_app_leaves_the_app() {
 }
 
 test_a_failed_emacs_source_fetch_stops_the_build() {
-  new_case; manifest "[$(source_emacs_entry)]"; fake_emacs 30.2 "" 636f166cfc86 "XWIDGETS NATIVE_COMP"; fake_source_build
+  new_case; manifest "[$(source_emacs_entry)]"; fake_emacs 30.2 "" 636f166cfc86 "NS XWIDGETS NATIVE_COMP"; fake_source_build
   write_stub git '[ "$3" = fetch ] && exit 1; exit 0'
   run install
   if [ "$RC" -eq 1 ] && has "ERROR: install: emacs: fetching $PINNED from https://example.test/fork/zettel-emacs.git failed" \
@@ -594,22 +741,35 @@ test_a_failed_emacs_source_fetch_stops_the_build() {
   else fail "fetch failure" "rc=$RC" "$OUT"; fi
 }
 
-test_expand_brew_prefixes() {
+test_expand_placeholders() {
   local bad="" in want got
   # shellcheck source=/dev/null
   REQUIREMENTS_SH_LIB=1 source "$RUNNER"
   brew() { if [ -n "${2:-}" ]; then echo "/hb/opt/$2"; else echo /hb; fi; }
+  gcc() { echo 15.1.0; }
   while IFS='|' read -r in want; do
-    got="$(expand_brew_prefixes "$in")"
+    got="$(HOME=/h expand_placeholders "$in")"
     [ "$got" = "$want" ] || bad="$bad [$in -> $got, want $want]"
   done <<'CASES'
 --with-ns|--with-ns
 CPPFLAGS=-I{brew}/include|CPPFLAGS=-I/hb/include
 X={brew:tree-sitter}/lib/a.a|X=/hb/opt/tree-sitter/lib/a.a
 {brew}:{brew:gmp}|/hb:/hb/opt/gmp
+--prefix={home}/.local|--prefix=/h/.local
+libgccjit-{gcc-major}-dev|libgccjit-15-dev
 CASES
-  unset -f brew
-  if [ -z "$bad" ]; then pass "expand_brew_prefixes replaces every Homebrew prefix token"; else fail "expand_brew_prefixes:$bad"; fi
+  unset -f brew gcc
+  if [ -z "$bad" ]; then pass "expand_placeholders replaces every placeholder"; else fail "expand_placeholders:$bad"; fi
+}
+
+test_expand_placeholders_fails_when_gcc_cannot_say_its_version() {
+  local rc=0
+  # shellcheck source=/dev/null
+  REQUIREMENTS_SH_LIB=1 source "$RUNNER"
+  gcc() { return 1; }
+  expand_placeholders "libgccjit-{gcc-major}-dev" >/dev/null 2>&1 || rc=$?
+  unset -f gcc
+  if [ "$rc" -ne 0 ]; then pass "expand_placeholders fails when gcc cannot say its version"; else fail "gcc-major failure was expanded"; fi
 }
 
 # ---------------------------------------------------------------------------

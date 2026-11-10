@@ -47,11 +47,13 @@ Every skill agent-repl ships, and where agents can load it. A GLOBAL skill is li
 
 1. Get consent for changes outside the repository.
   - List every `missing` and `outdated` line from the step 0 report as a change install would make.
-  - When the `emacs` line is missing or outdated, tell the user install builds Emacs from source (a long build) and replaces /Applications/Emacs.app, moving the old app aside.
+  - When the `emacs` line is missing or outdated, tell the user what install does on this platform:
+    - a. On macOS, install builds Emacs from source (a long build) and replaces /Applications/Emacs.app, moving the old app aside.
+    - b. On Linux, install first installs the build dependencies through the distribution's package manager with sudo, then builds Emacs from source (a long build) into ~/.local, which needs ~/.local/bin on PATH ahead of any distribution Emacs.
   - Ask the user to approve installing them.
     - a. On approval, continue to step 2.
     - b. On decline, STOP and leave the machine unchanged.
-  - CRITICAL: NEVER run step 2 without this approval, because it installs packages, loads launchd services, and writes links under the home directory.
+  - CRITICAL: NEVER run step 2 without this approval, because it installs packages (through Homebrew, or through sudo and the distribution's package manager on Linux), loads services, and writes links under the home directory.
 
 2. Install.
   - Call `run.sh --install` from this skill's base directory.
@@ -66,6 +68,7 @@ Every skill agent-repl ships, and where agents can load it. A GLOBAL skill is li
     - c. For a notification permission, have the user allow the named program in System Settings → Notifications.
     - d. For a bin dir that is not on PATH, have the user add the printed `export PATH=...` line to their shell profile; it reaches Emacs at step 5.
     - e. For Emacs, after install replaced the app, have the user restart Emacs so the new build runs.
+    - f. For a Linux package install sudo could not run without a password, have the user run the printed sudo command in a terminal.
   - For each `failed` line, and each line whose install ran but left it unmet, go to step 4 with that line as the failure.
   - After the user reports each one done, return to step 0.
 
