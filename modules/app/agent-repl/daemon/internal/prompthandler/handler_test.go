@@ -1145,11 +1145,14 @@ func TestAPromptToAWorkspaceWithASummaryIsForwardedAsSaid(t *testing.T) {
 func TestAPromptCarryingNoDirectiveNeverAsksForASummary(t *testing.T) {
 	tests := []struct {
 		name   string
+		said   string
 		origin conversationv1.PromptOrigin
 		target *feedid.Ref
 	}{
-		{name: "a daemon-born brief", origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_QUEUE_NOTICE},
-		{name: "a prompt to a subagent's bubble", origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, target: bubbleRef(theWorkspace)},
+		{name: "a daemon-born brief", said: "hello", origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_QUEUE_NOTICE},
+		{name: "a prompt to a subagent's bubble", said: "hello", origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, target: bubbleRef(theWorkspace)},
+		{name: "a slash command the vendor runs", said: "/review the diff", origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT},
+		{name: "a bare slash command the vendor runs", said: "/my-skill", origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1158,13 +1161,13 @@ func TestAPromptCarryingNoDirectiveNeverAsksForASummary(t *testing.T) {
 			h.owed.note = owedNoteText
 
 			// Act
-			_, err := h.h.Submit(context.Background(), theWorkspace, userSaid("hello"), "key-1", tt.origin, nil, wsm.DeliveryOrdinary, tt.target)
+			_, err := h.h.Submit(context.Background(), theWorkspace, userSaid(tt.said), "key-1", tt.origin, nil, wsm.DeliveryOrdinary, tt.target)
 
 			// Assert
 			if err != nil {
 				t.Fatalf("Submit: %v", err)
 			}
-			if got := forwardedTexts(t, h); !reflect.DeepEqual(got, []string{"hello"}) {
+			if got := forwardedTexts(t, h); !reflect.DeepEqual(got, []string{tt.said}) {
 				t.Fatalf("forwarded blocks = %q, want the prompt alone", got)
 			}
 			if len(h.owed.asked) != 0 {
