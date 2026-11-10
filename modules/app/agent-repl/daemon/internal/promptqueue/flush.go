@@ -103,7 +103,7 @@ func (q *queue) FlushHeld(ctx context.Context, ws ids.WorkspaceID) error {
 		case joinDeferred:
 			deferred++
 		case joinGone:
-		case joinWaiting:
+		case joinWaiting, joinRefused:
 			log.Info(opFlush, "a held prompt could not join the running turn; it and every prompt behind it wait as they would have", dlog.Context{
 				"turn": string(held.Turn), "running_turn": string(running), "sent": sent, "deferred": deferred, "left": len(queued) - i,
 			})

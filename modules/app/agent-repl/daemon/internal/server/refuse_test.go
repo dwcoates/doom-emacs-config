@@ -132,7 +132,7 @@ func TestAsRefusalNormalizesEveryComponentSentinel(t *testing.T) {
 		{"no such hold", promptqueue.ErrNoSuchHold, "no_such_hold"},
 		{"already delivered", promptqueue.ErrAlreadyDelivered, "already_delivered"},
 		{"being delivered", promptqueue.ErrBeingDelivered, "being_delivered"},
-		{"release refused", promptqueue.ErrReleaseRefused, "release_refused"},
+		{"release refused", &promptqueue.ReleaseRefusedError{Cause: promptqueue.RefusedColdGate}, "release_refused"},
 		{"not held", promptqueue.ErrNotHeld, "not_held"},
 		{"not editing", promptqueue.ErrNotEditing, "not_editing"},
 		{"no editor", promptqueue.ErrNoEditor, "no_editor"},
@@ -156,6 +156,56 @@ func TestAsRefusalNormalizesEveryComponentSentinel(t *testing.T) {
 				t.Fatalf("arm = %q (ok=%v), want %q", got.Arm, ok, test.arm)
 			}
 		})
+	}
+}
+
+// TestAReleaseRefusalCarriesItsCause pins that every cause the prompt queue
+// refuses a release for rides release_refused as its own nested arm.
+func TestAReleaseRefusalCarriesItsCause(t *testing.T) {
+	tests := []struct {
+		cause promptqueue.ReleaseRefusal
+		got   func(*agentreplv1.UpdateHeldPromptReleaseRefused) bool
+	}{
+		{promptqueue.RefusedBeingEdited, func(r *agentreplv1.UpdateHeldPromptReleaseRefused) bool { return r.GetBeingEdited() != nil }},
+		{promptqueue.RefusedBehindEdit, func(r *agentreplv1.UpdateHeldPromptReleaseRefused) bool { return r.GetBehindEdit() != nil }},
+		{promptqueue.RefusedColdGate, func(r *agentreplv1.UpdateHeldPromptReleaseRefused) bool { return r.GetColdGate() != nil }},
+		{promptqueue.RefusedSessionRefused, func(r *agentreplv1.UpdateHeldPromptReleaseRefused) bool { return r.GetSessionRefused() != nil }},
+	}
+	for _, test := range tests {
+		t.Run(string(test.cause), func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			surface := h.Server.(*server)
+			resp := &agentreplv1.UpdateHeldPromptResponse{}
+			r, ok := surface.asRefusal(&promptqueue.ReleaseRefusedError{Cause: test.cause})
+			if !ok {
+				t.Fatal("a refused release was not a typed refusal")
+			}
+
+			// Act.
+			set := setResponseError(resp, r.Arm, r.Fields)
+
+			// Assert.
+			if !set || !test.got(resp.GetError().GetReleaseRefused()) {
+				t.Fatalf("response = %v, want release_refused carrying %q", resp, test.cause)
+			}
+		})
+	}
+}
+
+// TestABareReleaseRefusalIsNoTypedRefusal pins that a release refusal with no
+// cause is never answered as a release_refused the card could not word.
+func TestABareReleaseRefusalIsNoTypedRefusal(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	surface := h.Server.(*server)
+
+	// Act.
+	_, ok := surface.asRefusal(promptqueue.ErrReleaseRefused)
+
+	// Assert.
+	if ok {
+		t.Fatal("a release refusal with no cause was answered as a typed refusal")
 	}
 }
 

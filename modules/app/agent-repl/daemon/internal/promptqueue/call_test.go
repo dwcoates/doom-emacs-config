@@ -403,7 +403,7 @@ func TestAReleaseDuringAStartTurnJoinsTheTurnItOpensOnceItSettles(t *testing.T) 
 	}
 }
 
-func TestAReleaseDuringAShimCallThatOpensNoTurnIsRefused(t *testing.T) {
+func TestAReleaseDuringAShimCallThatOpensNoTurnWaitsForItToSettle(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	heldByDrainLease(t, h, "t2")
@@ -422,11 +422,14 @@ func TestAReleaseDuringAShimCallThatOpensNoTurnIsRefused(t *testing.T) {
 	}
 
 	// Assert
-	if !errors.Is(releaseErr, ErrReleaseRefused) {
-		t.Fatalf("Release during the call = %v, want ErrReleaseRefused", releaseErr)
+	if releaseErr != nil {
+		t.Fatalf("Release during the call = %v, want it accepted to wait", releaseErr)
 	}
-	if !logged(h.log.Records(), "info", opRelease, "a shim call that opens no turn is in flight; the release is refused") {
-		t.Fatalf("records = %+v, want the refusal on disk", h.log.Records())
+	if !logged(h.log.Records(), "info", opRelease, msgReleaseWaits) {
+		t.Fatalf("records = %+v, want the waiting release on disk", h.log.Records())
+	}
+	if started := h.sender.started(); len(started) != 1 || started[0] != "t2" {
+		t.Fatalf("started = %v, want t2 delivered once the call settled", started)
 	}
 }
 

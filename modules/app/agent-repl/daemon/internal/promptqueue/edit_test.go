@@ -172,9 +172,18 @@ func TestAReleaseOfAPromptBehindTheEditIsRefused(t *testing.T) {
 	// Act
 	err := h.q.Release(context.Background(), theWorkspace, "t2")
 	// Assert
-	if !errors.Is(err, ErrReleaseRefused) {
-		t.Fatalf("Release = %v, want ErrReleaseRefused", err)
-	}
+	refusedFor(t, h, err, RefusedBehindEdit)
+}
+
+func TestAReleaseOfThePromptBeingEditedIsRefused(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	queuedBehind(t, h, "t1", "t2")
+	beginEdit(t, h, "t1")
+	// Act
+	err := h.q.Release(context.Background(), theWorkspace, "t1")
+	// Assert
+	refusedFor(t, h, err, RefusedBeingEdited)
 }
 
 func TestAReleaseOfThePromptAheadOfTheEditIsAllowed(t *testing.T) {

@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
+
+	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
@@ -29,40 +32,33 @@ const (
 	tombstoneSuperseded = "superseded"
 )
 
-// Release delivers a held prompt NOW, overriding the hold: the prompt goes to
-// the shim at once, exactly as a prompt the user had just typed with nothing
-// to hold it would.
+// Release is the user's "Send now" on a held prompt: SEND NOW MEANS SEND NOW
+// (owner ruling, 2026-11-10). The prompt goes to the shim at once, exactly as
+// a prompt the user had just typed with nothing to hold it would, and what
+// keeps it from going at once never answers a bare refusal:
 //
-// A PROMPT RELEASED WHILE A TURN RUNS JOINS THAT TURN (owner request,
-// 2026-10-26). It is sent to the shim on the spot, as a flush sends each held
-// prompt (join.go): its row is drawn in the feed as accepted, its card leaves
-// the tray, and the vendor takes it in at the running turn's next tool call,
-// or runs it as the next turn once that one ends. A release used to interrupt
-// the running turn and deliver only at its end: the card stood unchanged until
-// then, a second click met the refusal of the delivery under way, and a
-// stale-shim refresh that the turn end let in held the prompt for the build
-// as well. Only a held session act still interrupts: an act runs as a turn of
-// its own and joins nothing.
-//
-// It REFUSES a hold nothing could deliver through: a context cut is never
-// interrupted or joined, a session that is still coming up has nothing to
-// send to, and a session a merge drives is the merge's.
+//   - A PROMPT RELEASED WHILE A TURN RUNS JOINS THAT TURN (owner request,
+//     2026-10-26): sent to the shim on the spot (join.go), its row drawn as
+//     accepted, taken in at the running turn's next tool call or run as the
+//     next turn once that one ends.
+//   - A TURN IT CANNOT JOIN IS INTERRUPTED (releaseByInterrupt): one the
+//     vendor started on its own, or one an ask blocks. The prompt becomes the
+//     semantic head and the turn's real end delivers it, exactly as an
+//     interjection and a released session act are.
+//   - A BLOCKER THAT CLEARS ON ITS OWN ACCEPTS THE PRESS AND WAITS: the
+//     prompt is marked sent now, durably (wsm.SentNow), its card says what
+//     it waits for, and it goes the moment that clears, ahead of every other
+//     held prompt but an interjection under way (sentnow.go).
+//   - ONLY A SEND THAT WOULD LOSE THE USER'S WORK OR ANSWER WHAT ONLY THE
+//     USER CAN IS REFUSED, with its typed cause (ReleaseRefusedError): an
+//     edit under way, a cold gate standing, a session that refused the
+//     prompt into its turn.
 func (q *queue) Release(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID) error {
 	log, err := q.logger(ctx, ws)
 	if err != nil {
 		return err
 	}
 	log = log.With(dlog.Context{"turn": string(turn)})
-
-	// THE INTERRUPT A RELEASED ACT TAKES IS SENT OFF THE DELIVERY LOCK, once
-	// the decision below has registered it: the running turn's end takes the
-	// lock to pop what the interrupt made the head.
-	var interrupt func()
-	defer func() {
-		if interrupt != nil {
-			interrupt()
-		}
-	}()
 
 	// A RELEASE IS A DELIVERY DECISION, so it is taken under the delivery
 	// lock: that is what lets a standing edit withhold it structurally.
@@ -77,148 +73,246 @@ func (q *queue) Release(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID
 	if err := q.unclaimed(ws, held, log, opRelease); err != nil {
 		return err
 	}
-	// A SHIM CALL THAT OPENS A TURN IS THE TURN THE RELEASE JOINS: the join
-	// is deferred to the call's settle (joinLocked), never refused. Any other
-	// call in flight (a revival, a session act, a rollback) opens nothing to
-	// join, and forcing the prompt through beside it would race it for the
-	// session, so the release is refused and may be sent again once it settles.
-	if call, ok := q.standingCall(ws); ok && !call.opensTurn {
-		log.Info(opRelease, "a shim call that opens no turn is in flight; the release is refused", dlog.Context{
-			"call": call.what, "call_turn": string(call.turn),
-		})
-		return ErrReleaseRefused
+	return q.settleRelease(ctx, d, held, q.decideRelease(ctx, d, held, log), false, log)
+}
+
+// releaseVerdict is what a release decided about its prompt.
+type releaseVerdict int
+
+const (
+	// releaseSent: the prompt went (delivered, or sent to join the running
+	// turn), so no mark stands on it.
+	releaseSent releaseVerdict = iota
+	// releaseWaits: something keeps the prompt that clears on its own; the
+	// press is accepted and the prompt goes the moment it clears.
+	releaseWaits
+	// releaseRefused: sending would lose the user's work or answer what only
+	// the user can; the press is refused with its cause.
+	releaseRefused
+	// releaseFailed: the decision itself failed (err).
+	releaseFailed
+)
+
+// releaseDecision is one release decision: the verdict and its evidence.
+type releaseDecision struct {
+	verdict releaseVerdict
+	// waitsFor completes "it goes once …" for a releaseWaits.
+	waitsFor string
+	// refusal is a releaseRefused's cause.
+	refusal ReleaseRefusal
+	// err is a releaseFailed's failure.
+	err error
+}
+
+func sent() releaseDecision { return releaseDecision{verdict: releaseSent} }
+func waits(waitsFor string) releaseDecision {
+	return releaseDecision{verdict: releaseWaits, waitsFor: waitsFor}
+}
+func refused(cause ReleaseRefusal) releaseDecision {
+	return releaseDecision{verdict: releaseRefused, refusal: cause}
+}
+func failed(err error) releaseDecision { return releaseDecision{verdict: releaseFailed, err: err} }
+func sentOrFailed(err error) releaseDecision {
+	if err != nil {
+		return failed(err)
 	}
+	return sent()
+}
+
+// The sentences a waiting release's card completes "it goes once …" with,
+// one per blocker that clears on its own.
+const (
+	waitsForInterruptedTurn = "the running turn it interrupted stops"
+	waitsForInterjection    = "the prompt interrupting the running turn has gone ahead of it"
+	waitsForReconnect       = "the session reconnects"
+	waitsForMerge           = "the merge driving the session ends"
+	waitsForBringUp         = "the session finishes coming up"
+	waitsForBounce          = "the bounce brings up the new session"
+	waitsForSessionTake     = "the session can take it"
+)
+
+// waitsForCall is the sentence for a shim call in flight that opens no turn.
+func waitsForCall(call shimCall) string {
+	return "the session finishes the " + strings.ReplaceAll(call.what, "_", " ") + " under way"
+}
+
+// waitsForCut is the sentence for a context cut running.
+func waitsForCut(command conversationv1.SessionCommand) string {
+	switch command {
+	case conversationv1.SessionCommand_SESSION_COMMAND_COMPACT:
+		return "the /compact running now ends"
+	case conversationv1.SessionCommand_SESSION_COMMAND_CLEAR:
+		return "the /clear running now ends"
+	default:
+		return "the session act running now ends"
+	}
+}
+
+// decideRelease decides what a release of HELD does now, and does it: sends
+// it, interrupts the running turn for it, or answers what keeps it. The caller
+// holds the delivery lock (d) and has refused a hold a shim call claims. The
+// decision is the same whether the user just pressed "Send now" or a waiting
+// press is replayed (sentnow.go), so a press waits on exactly what a fresh
+// one would.
+func (q *queue) decideRelease(ctx context.Context, d *delivery, held wsm.HeldPrompt, log dlog.Logger) releaseDecision {
+	ws := d.ws
+	q.mu.Lock()
+	interrupting, head := d.state.interrupting, d.state.head
+	q.mu.Unlock()
+	// A SECOND PRESS WHILE ITS INTERRUPT IS UNDER WAY IS ALREADY GOING: the
+	// interrupted turn's end delivers it.
+	if interrupting && head != nil && *head == held.Turn {
+		return waits(waitsForInterruptedTurn)
+	}
+	// A SHIM CALL THAT OPENS A TURN IS THE TURN THE RELEASE JOINS: the join
+	// is deferred to the call's settle (joinLocked). Any other call in flight
+	// (a revival, a session act, a rollback) opens nothing to join, and
+	// forcing the prompt through beside it would race it for the session, so
+	// the release waits for it to settle.
+	if call, ok := q.standingCall(ws); ok && !call.opensTurn {
+		return waits(waitsForCall(call))
+	}
+	// AN EDIT IS THE USER'S WORK UNDER WAY: sending the prompt it stands on
+	// would discard it, and sending one behind it would carry that prompt
+	// past an edit that keeps everything after it in order.
 	if q.withheldByEdit(ws, held) {
-		log.Info(opRelease, "the prompt is being edited or is queued after one that is; the release is refused", nil)
-		return ErrReleaseRefused
+		if q.editing(ws) == held.Turn {
+			return refused(RefusedBeingEdited)
+		}
+		return refused(RefusedBehindEdit)
 	}
 	if held.Classification != nil && held.Classification.Arm == wsm.ArmUninterruptibleTurn {
-		log.Warn(opRelease, "the running turn is uninterruptible; the release is refused", nil)
-		return ErrReleaseRefused
+		return waits(waitsForCut(held.Classification.Command))
 	}
 	if held.Hold != nil && *held.Hold == wsm.HoldReconnect {
-		log.Warn(opRelease, "the session is not up or its vendor does not serve it; the release is refused until it reconnects", nil)
-		return ErrReleaseRefused
+		return waits(waitsForReconnect)
 	}
 	// A PROMPT NEVER ANSWERS THE COLD GATE, a forced one included: sending it
 	// would re-read the cold conversation without the user's answer, which is
 	// the one spend the gate exists to ask about (judgement call 11).
 	if held.Hold != nil && *held.Hold == wsm.HoldColdGate {
-		log.Info(opRelease, "the session is parked at its cold gate; the release is refused until the gate is answered", nil)
-		return ErrReleaseRefused
+		return refused(RefusedColdGate)
 	}
 	// A PROMPT KEPT AT AN EARLIER ANSWER is sent by its release, but not into
 	// a session parked at a gate standing again: the gate's own answer decides
 	// it there, as it decides every prompt held at it.
-	if kind, why, waiting := q.sessionWait(ws); waiting && kind == wsm.HoldColdGate {
-		log.Info(opRelease, "the session is parked at its cold gate; the release is refused until the gate is answered", dlog.Context{"why": why})
-		return ErrReleaseRefused
+	if kind, _, waiting := q.sessionWait(ws); waiting && kind == wsm.HoldColdGate {
+		return refused(RefusedColdGate)
 	}
 	// A MERGE DRIVES THE SESSION: a prompt forced into it would run inside the
-	// merge's own turns. The merge's end delivers it.
+	// merge's own turns. The merge's end delivers it, first.
 	if held.Hold != nil && *held.Hold == wsm.HoldMerge {
-		log.Warn(opRelease, "a merge drives the session; the release is refused", nil)
-		return ErrReleaseRefused
+		return waits(waitsForMerge)
 	}
 	// THE HOLD STAMP IS NOT THE ONLY EVIDENCE THE SESSION IS STILL COMING UP.
 	// releaseReconnectHolds un-stamps every reconnect hold as soon as the
 	// bring-up reports a client, and only then delivers them; a release that
 	// lands inside that window finds no stamp but still has nothing live to
-	// send to. Answering "there is no session" there would be a lie about a
-	// workspace that is mid-revival, so the bring-up that stamped the hold is
-	// consulted directly and the domain-correct refusal stands.
+	// send to, so the bring-up that stamped the hold is consulted directly.
 	if q.isReviving(ws) {
-		log.Warn(opRelease, "the session's bring-up is still running; the release is refused", nil)
-		return ErrReleaseRefused
+		return waits(waitsForBringUp)
 	}
 	// A DRAINING WORKSPACE IS BETWEEN SHIMS: the bounce's own finish delivers
-	// every held prompt to the new one, so a release here has nothing to
-	// deliver through.
+	// every held prompt to the new one, this one first.
 	if q.isDraining(ws) {
-		log.Warn(opRelease, "the workspace is draining for a bounce; the release is refused and the prompt goes to the new shim", nil)
-		return ErrReleaseRefused
+		return waits(waitsForBounce)
 	}
-
 	if _, ok := q.deps.Watcher(ws); !ok {
 		log.Warn(opRelease, "the workspace has no session watcher", nil)
-		return ErrNoSession
+		return failed(ErrNoSession)
 	}
 	// A RECORDED CONTEXT CUT IS RUNNING whether or not the watcher has learned
 	// of it yet, and a force-through would deliver into it or interject it.
 	if cut, ok := q.runningCut(ws); ok {
-		keptBehindSessionAct(log, opRelease, cut, turn,
-			"a session act is running; the release is refused and the prompt waits for the act to end")
-		return ErrReleaseRefused
+		keptBehindSessionAct(log, opRelease, cut, held.Turn,
+			"a session act is running; the release waits for the act to end")
+		return waits(waitsForCut(cut.command))
 	}
 	// A PROMPT ADDRESSED TO AN AGENT IS NOT THE SESSION'S TURN: it goes now
 	// whatever the session is running.
 	if held.Target != nil {
-		_, err = q.deliverHeld(ctx, d, held, log)
-		return err
+		return q.releaseByDelivery(ctx, d, held, log)
 	}
 	// A verdict still being judged about this prompt is superseded: the
 	// prompt is on its way to the shim, and a verdict settling after it must
 	// not interject or re-hold it.
-	q.supersede(ws, turn)
+	q.supersede(ws, held.Turn)
 	running, ok := q.flushTarget(ws)
 	if !ok {
-		_, err = q.deliverHeld(ctx, d, held, log)
-		return err
+		return q.releaseByDelivery(ctx, d, held, log)
 	}
 	if held.Act != nil {
-		return q.releaseActByInterrupt(ctx, held, running, &interrupt, log)
+		return q.releaseByInterrupt(ctx, d, held, running, log)
 	}
 	return q.releaseByJoin(ctx, d, held, running, log)
 }
 
+// releaseByDelivery delivers HELD into a session running no turn of its own:
+// one the shim held no session for is held again for the session to
+// reconnect, and waits for it.
+func (q *queue) releaseByDelivery(ctx context.Context, d *delivery, held wsm.HeldPrompt, log dlog.Logger) releaseDecision {
+	delivered, err := q.deliverHeld(ctx, d, held, log)
+	if err != nil || delivered {
+		return sentOrFailed(err)
+	}
+	return waits(waitsForReconnect)
+}
+
 // releaseByJoin sends the released prompt HELD to join RUNNING (joinLocked).
 // An interjection under way goes first: the prompt that interjects is already
-// the next to go, and any other prompt joined now would run ahead of it.
-// The caller holds the delivery lock (d).
-func (q *queue) releaseByJoin(ctx context.Context, d *delivery, held wsm.HeldPrompt, running ids.TurnID, log dlog.Logger) error {
+// the next to go, so the release waits for it. A turn the prompt cannot join
+// is interrupted for it instead (releaseByInterrupt). The caller holds the
+// delivery lock (d).
+func (q *queue) releaseByJoin(ctx context.Context, d *delivery, held wsm.HeldPrompt, running ids.TurnID, log dlog.Logger) releaseDecision {
 	q.mu.Lock()
-	interrupting, head := d.state.interrupting, d.state.head
+	interrupting := d.state.interrupting
 	q.mu.Unlock()
 	if interrupting {
-		if head != nil && *head == held.Turn {
-			log.Info(opRelease, "the prompt is already interjecting; the interrupted turn's end delivers it", dlog.Context{"running_turn": string(running)})
-			return nil
-		}
-		log.Info(opRelease, "an interjection is interrupting the running turn and goes first; the release is refused", dlog.Context{
-			"running_turn": string(running), "interjecting_turn": string(*head),
-		})
-		return ErrReleaseRefused
+		return waits(waitsForInterjection)
 	}
 	switch outcome := q.joinLocked(ctx, d, submissionOf(held), running, joinReleased, log); outcome {
-	case joinSent, joinDeferred:
-		return nil
+	case joinSent:
+		return sent()
+	case joinDeferred:
+		// The call's settle sends it to join (redriveJoins); a join that
+		// cannot go then leaves the mark to be replayed.
+		return waits(waitsForSessionTake)
+	case joinUnjoinable, joinAskOpen:
+		return q.releaseByInterrupt(ctx, d, held, running, log)
 	case joinWaiting:
-		// joinLocked recorded why on the prompt's verdict, which the card says.
-		log.Info(opRelease, "the released prompt could not join the running turn; the release is refused", dlog.Context{"running_turn": string(running)})
-		return ErrReleaseRefused
+		// joinLocked recorded why on the prompt's verdict.
+		return waits(waitsForSessionTake)
+	case joinRefused:
+		return refused(RefusedSessionRefused)
 	case joinGone:
 		log.Error(opRelease, "a hold read standing under the delivery lock was gone when it was sent to join", dlog.Context{
 			"invariant_violation": "a standing hold changes only under the delivery lock",
 		})
-		return ErrAlreadyDelivered
+		return failed(ErrAlreadyDelivered)
 	default:
 		panic(fmt.Sprintf("promptqueue: unknown join outcome %d", outcome))
 	}
 }
 
-// releaseActByInterrupt releases a held session act while RUNNING runs: an act
-// runs as a turn of its own and joins nothing, so it becomes the semantic head
-// and an interrupt ends the running turn, whose real end delivers it, exactly
-// as an interjection does. The interrupt is set into INTERRUPT, which the
-// caller sends once the delivery lock is released. A running session act
-// refuses the interjection, and so the release.
-func (q *queue) releaseActByInterrupt(ctx context.Context, held wsm.HeldPrompt, running ids.TurnID, interrupt *func(), log dlog.Logger) error {
+// releaseByInterrupt releases HELD by interrupting RUNNING: the prompt becomes
+// the semantic head and the running turn's real end delivers it, the one path
+// an interjection takes (registerInterjection, sendInterrupt). It serves a
+// held session act, which runs as a turn of its own and joins nothing, and a
+// prompt whose running turn cannot be joined. The interrupt is sent once the
+// delivery lock is released (delivery.afterUnlock): the running turn's end
+// takes the lock to pop what the interrupt made the head. A running session
+// act refuses the interjection, and the release then waits for the act's end.
+func (q *queue) releaseByInterrupt(ctx context.Context, d *delivery, held wsm.HeldPrompt, running ids.TurnID, log dlog.Logger) releaseDecision {
 	sub := submissionOf(held)
 	if !q.registerInterjection(ctx, sub, running, log) {
-		return ErrReleaseRefused
+		cut, _ := q.runningCut(d.ws)
+		return waits(waitsForCut(cut.command))
 	}
-	*interrupt = func() { q.sendInterrupt(ctx, sub, running, log) }
-	return nil
+	d.afterUnlock(func() { q.sendInterrupt(ctx, sub, running, log) })
+	log.Info(opRelease, "the running turn cannot take the released prompt; it is interrupted, and its end delivers the prompt", dlog.Context{
+		"running_turn": string(running), "session_act": held.Act != nil,
+	})
+	return waits(waitsForInterruptedTurn)
 }
 
 // Drop discards a held prompt, DURABLY FIRST: the tombstone is written before

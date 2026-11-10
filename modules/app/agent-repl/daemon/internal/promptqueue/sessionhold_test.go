@@ -344,9 +344,7 @@ func TestReleaseRefusesAPromptHeldAtTheColdGate(t *testing.T) {
 	err := h.q.Release(context.Background(), theWorkspace, "t1")
 
 	// Assert
-	if !errors.Is(err, ErrReleaseRefused) {
-		t.Fatalf("Release = %v, want refused while the gate stands", err)
-	}
+	refusedFor(t, h, err, RefusedColdGate)
 }
 
 func TestALeaseEndingOverAParkedSessionHoldsItsPromptsAtTheGate(t *testing.T) {

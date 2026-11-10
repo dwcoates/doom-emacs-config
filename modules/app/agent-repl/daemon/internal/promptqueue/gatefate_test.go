@@ -172,7 +172,8 @@ func TestReleasingAKeptPromptAtAStandingGateIsRefused(t *testing.T) {
 	err := h.q.Release(context.Background(), theWorkspace, "t1")
 
 	// Assert
-	if !errors.Is(err, ErrReleaseRefused) || !heldUnder(h, "t1", wsm.HoldColdGateAnswered) {
+	refusedFor(t, h, err, RefusedColdGate)
+	if !heldUnder(h, "t1", wsm.HoldColdGateAnswered) {
 		t.Fatalf("Release = %v, t1 = %+v; want refused and t1 still kept", err, h.db.hold("t1"))
 	}
 }

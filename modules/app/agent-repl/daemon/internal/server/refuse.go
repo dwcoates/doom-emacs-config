@@ -111,6 +111,16 @@ func (s *server) asRefusal(err error) (refusal, bool) {
 			Fields: map[string]any{"editing_turn": &conversationv1.TurnId{Value: string(beingEdited.Turn)}},
 		}), true
 	}
+	// A REFUSED RELEASE RIDES ITS CAUSE, the nested arm of release_refused,
+	// so the card says why rather than one sentence for every cause.
+	var releaseRefused *promptqueue.ReleaseRefusedError
+	if errors.As(err, &releaseRefused) {
+		return s.fill(refusal{
+			Arm:    "release_refused",
+			Reason: err.Error(),
+			Fields: map[string]any{"cause": refusalarm.Nested(releaseRefused.Cause)},
+		}), true
+	}
 	// THE ENTRY THAT IS AHEAD NOW rides the above_moved arm, so the refusal
 	// names it; nothing ahead leaves the optional field unset.
 	var aboveMoved *promptqueue.AboveMovedError
@@ -147,8 +157,6 @@ func (s *server) asRefusal(err error) (refusal, bool) {
 		return s.fill(refusal{Arm: "being_delivered", Reason: err.Error()}), true
 	case errors.Is(err, promptqueue.ErrAlreadyDelivered):
 		return s.fill(refusal{Arm: "already_delivered", Reason: err.Error()}), true
-	case errors.Is(err, promptqueue.ErrReleaseRefused):
-		return s.fill(refusal{Arm: "release_refused", Reason: err.Error()}), true
 	case errors.Is(err, promptqueue.ErrNotHeld):
 		return s.fill(refusal{Arm: "not_held", Reason: err.Error()}), true
 	case errors.Is(err, promptqueue.ErrNotEditing):

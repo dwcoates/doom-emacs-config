@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sort"
 	"sync"
 	"time"
 
@@ -105,6 +106,11 @@ type wsState struct {
 
 	head         *ids.TurnID
 	interrupting bool
+	// sentNowNone records that the last replay found no "Send now" waiting
+	// on the workspace (sentnow.go), so the next unlock reads no holds for
+	// it. Zero (false) after a restart, so the durable marks are read once.
+	// Guarded by q.mu; cleared by every mark.
+	sentNowNone bool
 
 	// joins are the prompts the queue sent to join the running turn after
 	// its current tool call (join.go), oldest first, empty when none waits.
@@ -465,4 +471,12 @@ func (q *queue) Drain(bound time.Duration) bool {
 // record: holdfold.SaidText, the one reading the hold tray shares.
 func saidText(said *conversationv1.UserSaid) string {
 	return holdfold.SaidText(said)
+}
+
+// inQueueOrder sorts HELD in place into the order the prompts were queued,
+// oldest first, keeping the order of two queued in the same instant, and
+// answers it.
+func inQueueOrder(held []wsm.HeldPrompt) []wsm.HeldPrompt {
+	sort.SliceStable(held, func(i, j int) bool { return held[i].QueuedAt.Before(held[j].QueuedAt) })
+	return held
 }

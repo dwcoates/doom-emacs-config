@@ -545,6 +545,20 @@ func TestHeldStatusComposesEveryStatus(t *testing.T) {
 				notes: []string{"held until the session reloads onto the new build, then sent", "after this turn", "later prompts were folded into this one"}},
 		},
 		{
+			name: "a Send now outranks the hold, which says what it waits for as a note",
+			p: &frontendv1.HeldPrompt{Turn: turn, Classification: holdForTurnEnd(), Hold: merge,
+				SentNow: &frontendv1.HeldPromptSentNow{WaitsFor: "the merge driving the session ends"}},
+			want: wantStatus{badge: wantBadge{"sending", "sent now: it goes once the merge driving the session ends"}, fact: "sent_now",
+				notes: []string{"held until the merge ends; the workspace stays open for it", "after this turn"}},
+		},
+		{
+			name: "the edit outranks a Send now",
+			p: &frontendv1.HeldPrompt{Turn: turn, Classification: holdForTurnEnd(), Editing: &frontendv1.HeldPromptEditing{},
+				SentNow: &frontendv1.HeldPromptSentNow{WaitsFor: "the session reconnects"}},
+			want: wantStatus{badge: wantBadge{"editing", ""}, fact: "editing",
+				notes: []string{"sent now: it goes once the session reconnects", "after this turn"}},
+		},
+		{
 			name: "a hold outranks the verdict",
 			p:    &frontendv1.HeldPrompt{Classification: holdForTurnEnd(), Hold: &frontendv1.HeldPrompt_Shutdown{Shutdown: &frontendv1.HeldPromptShutdownHold{ScheduleId: "s-1"}}},
 			want: wantStatus{badge: wantBadge{"restart hold", "held for the scheduled restart (s-1)"}, fact: "shutdown", notes: []string{"after this turn"}},
@@ -633,6 +647,7 @@ func TestHeldStatusLabelsAreOneToThreeWords(t *testing.T) {
 		{Classification: &frontendv1.HeldPrompt_DaemonHeld{DaemonHeld: &frontendv1.HeldPromptDaemonHeld{}}, Hold: &frontendv1.HeldPrompt_ColdGate{ColdGate: &frontendv1.HeldPromptColdGateHold{}}},
 		{Classification: &frontendv1.HeldPrompt_DaemonHeld{DaemonHeld: &frontendv1.HeldPromptDaemonHeld{}}, Hold: &frontendv1.HeldPrompt_ColdGateAnswered{ColdGateAnswered: &frontendv1.HeldPromptColdGateAnsweredHold{}}},
 		{Classification: &frontendv1.HeldPrompt_AwaitingDelivery{AwaitingDelivery: &frontendv1.HeldPromptAwaitingDelivery{}}},
+		{Classification: holdForTurnEnd(), SentNow: &frontendv1.HeldPromptSentNow{WaitsFor: "the session reconnects"}},
 	}
 
 	for _, p := range all {
@@ -755,6 +770,40 @@ func TestTrayCarriesTheComposedBadge(t *testing.T) {
 	want := wantStatus{badge: wantBadge{"restart hold", "held for the scheduled restart (s-7)"}, fact: "shutdown", notes: []string{"after this turn"}}
 	if !equalStatus(got, want) {
 		t.Fatalf("status = %+v, want %+v", got, want)
+	}
+}
+
+func TestTrayCarriesTheSentNowMark(t *testing.T) {
+	// Arrange.
+	r, _ := newRenderer(t)
+	held := verdict(hold("t1", "then run the tests"), wsm.ArmHoldForTurnEnd, "no urgency")
+	held.SentNow = &wsm.SentNow{WaitsFor: "the bounce brings up the new session"}
+
+	// Act.
+	r.SetHeldPrompts(testWS, []wsm.HeldPrompt{held})
+
+	// Assert.
+	prompt := onlyPrompt(t, latest(t, r))
+	if got := prompt.GetSentNow().GetWaitsFor(); got != "the bounce brings up the new session" {
+		t.Fatalf("sent_now.waits_for = %q, want the mark's sentence", got)
+	}
+	got := promptStatus(prompt)
+	want := wantStatus{badge: wantBadge{"sending", "sent now: it goes once the bounce brings up the new session"}, fact: "sent_now", notes: []string{"after this turn"}}
+	if !equalStatus(got, want) {
+		t.Fatalf("status = %+v, want %+v", got, want)
+	}
+}
+
+func TestTrayCarriesNoSentNowWithoutAMark(t *testing.T) {
+	// Arrange.
+	r, _ := newRenderer(t)
+
+	// Act.
+	r.SetHeldPrompts(testWS, []wsm.HeldPrompt{verdict(hold("t1", "x"), wsm.ArmHoldForTurnEnd, "no urgency")})
+
+	// Assert.
+	if got := onlyPrompt(t, latest(t, r)).GetSentNow(); got != nil {
+		t.Fatalf("sent_now = %+v, want none", got)
 	}
 }
 
