@@ -3,6 +3,8 @@ package prose
 import (
 	"strings"
 	"unicode/utf8"
+
+	"agent-repld/internal/mdfence"
 )
 
 // placeholderLabel is the label repairUnlabeledRoots writes in front of a root
@@ -68,7 +70,7 @@ func nextNonBlank(items []item, from int) int {
 // repair.
 //
 // The wrapper's close is matched on column-0 delimiters only, by markdown's
-// length rule as the grammar's scanner reads it (is_fence_close): a run
+// length rule as the grammar's scanner reads it (mdfence): a run
 // shorter than the innermost open fence's is that fence's content, and a bare
 // run at least as long closes it. Where the length rule alone would read a
 // fence's content, a run at least as long that carries a language opens a
@@ -88,27 +90,27 @@ func repairFencedResponseTree(text string, stage Stage) []edit {
 	if open < 0 || !onlyHeader(text[:ls[open].start]) {
 		return nil
 	}
-	wrapper := fenceDelimiterOf(ls[open].text)
-	if !wrapper.opens() {
+	wrapper := mdfence.Parse(ls[open].text)
+	if !wrapper.Opens() || wrapper.Char != '`' {
 		return nil
 	}
-	closing, nested := -1, []int{wrapper.ticks}
+	closing, nested := -1, []mdfence.Delimiter{wrapper}
 	for j := open + 1; j < len(ls) && closing < 0; j++ {
 		l := ls[j]
 		if stage == Arriving && l.end == len(text) && !strings.HasSuffix(text, "\n") {
 			continue
 		}
-		d := fenceDelimiterOf(l.text)
+		d := mdfence.Parse(l.text)
 		innermost := nested[len(nested)-1]
 		switch {
-		case !d.opens() || d.ticks < innermost:
+		case !d.Opens() || d.Char != '`' || d.Run < innermost.Run:
 			// The innermost fence's content, by the length rule.
-		case d.closes(innermost) && len(nested) > 1:
+		case d.Closes(innermost) && len(nested) > 1:
 			nested = nested[:len(nested)-1]
-		case d.closes(innermost):
+		case d.Closes(innermost):
 			closing = j
 		default:
-			nested = append(nested, d.ticks)
+			nested = append(nested, d)
 		}
 	}
 	bodyEnd := len(text)
@@ -124,31 +126,6 @@ func repairFencedResponseTree(text string, stage Stage) []edit {
 	}
 	return edits
 }
-
-// fenceMin is the smallest backtick run that opens a fence, as in markdown
-// and the grammar's scanner (FENCE_MIN).
-const fenceMin = 3
-
-// fenceDelimiter is how a column-0 line reads as a fence delimiter: the
-// length of its leading backtick run, and whether nothing but whitespace
-// follows the run.
-type fenceDelimiter struct {
-	ticks int
-	bare  bool
-}
-
-// fenceDelimiterOf reads LINE, a line without its newline, as a delimiter.
-func fenceDelimiterOf(line string) fenceDelimiter {
-	ticks := len(line) - len(strings.TrimLeft(line, "`"))
-	return fenceDelimiter{ticks: ticks, bare: strings.TrimSpace(line[ticks:]) == ""}
-}
-
-// opens is whether the delimiter's run is long enough to open a fence.
-func (d fenceDelimiter) opens() bool { return d.ticks >= fenceMin }
-
-// closes is whether the delimiter closes a fence OPEN backticks opened:
-// markdown's length rule, a bare run at least that long.
-func (d fenceDelimiter) closes(open int) bool { return d.bare && d.ticks >= open }
 
 // holdsTree is whether BODY, a fence's body, reads as a metaprompt tree: the
 // one test of whether a fence wraps a tree rather than code.

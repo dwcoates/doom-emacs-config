@@ -4,6 +4,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"regexp"
 	"testing"
 
 	"agent-repld/internal/sourcescan"
@@ -149,84 +150,6 @@ func TestHoldsTree(t *testing.T) {
 	}
 }
 
-func TestFenceDelimiterOf(t *testing.T) {
-	tests := []struct {
-		name string
-		line string
-		want fenceDelimiter
-	}{
-		{name: "a bare run", line: "```", want: fenceDelimiter{ticks: 3, bare: true}},
-		{name: "a longer bare run", line: "`````", want: fenceDelimiter{ticks: 5, bare: true}},
-		{name: "a run with trailing whitespace is bare", line: "````  \t", want: fenceDelimiter{ticks: 4, bare: true}},
-		{name: "a run carrying a language", line: "```go", want: fenceDelimiter{ticks: 3, bare: false}},
-		{name: "a run with a spaced info string", line: "```` markdown x", want: fenceDelimiter{ticks: 4, bare: false}},
-		{name: "a short run", line: "``", want: fenceDelimiter{ticks: 2, bare: true}},
-		{name: "prose", line: "x := 1", want: fenceDelimiter{ticks: 0, bare: false}},
-		{name: "an indented run is no column-0 run", line: "  ```", want: fenceDelimiter{ticks: 0, bare: false}},
-		{name: "an empty line", line: "", want: fenceDelimiter{ticks: 0, bare: true}},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Act.
-			got := fenceDelimiterOf(tt.line)
-
-			// Assert.
-			if got != tt.want {
-				t.Errorf("fenceDelimiterOf(%q) = %+v, want %+v", tt.line, got, tt.want)
-			}
-		})
-	}
-}
-
-func TestFenceDelimiterOpens(t *testing.T) {
-	tests := []struct {
-		name string
-		d    fenceDelimiter
-		want bool
-	}{
-		{name: "three backticks open", d: fenceDelimiter{ticks: 3, bare: true}, want: true},
-		{name: "a language does not stop an open", d: fenceDelimiter{ticks: 4, bare: false}, want: true},
-		{name: "two backticks never open", d: fenceDelimiter{ticks: 2, bare: true}, want: false},
-		{name: "no backticks never open", d: fenceDelimiter{}, want: false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Act.
-			got := tt.d.opens()
-
-			// Assert.
-			if got != tt.want {
-				t.Errorf("%+v.opens() = %v, want %v", tt.d, got, tt.want)
-			}
-		})
-	}
-}
-
-func TestFenceDelimiterCloses(t *testing.T) {
-	tests := []struct {
-		name string
-		d    fenceDelimiter
-		open int
-		want bool
-	}{
-		{name: "an equal bare run closes", d: fenceDelimiter{ticks: 3, bare: true}, open: 3, want: true},
-		{name: "a longer bare run closes", d: fenceDelimiter{ticks: 5, bare: true}, open: 4, want: true},
-		{name: "a shorter bare run never closes", d: fenceDelimiter{ticks: 3, bare: true}, open: 4, want: false},
-		{name: "a run carrying a language never closes", d: fenceDelimiter{ticks: 4, bare: false}, open: 3, want: false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Act.
-			got := tt.d.closes(tt.open)
-
-			// Assert.
-			if got != tt.want {
-				t.Errorf("%+v.closes(%d) = %v, want %v", tt.d, tt.open, got, tt.want)
-			}
-		})
-	}
-}
-
 func TestRawLines(t *testing.T) {
 	tests := []struct {
 		name string
@@ -297,5 +220,18 @@ func TestEveryFencedTreeTestGoesThroughHoldsTree(t *testing.T) {
 		if caller != "holdsTree" {
 			t.Errorf("%s calls isMetapromptTree itself instead of holdsTree", caller)
 		}
+	}
+}
+
+// TestFenceDelimitersAreReadOnlyThroughMdfence holds every fence delimiter
+// prose reads to mdfence's length rule: a hand-rolled backtick check here
+// would read fences other than the grammar's scanner does.
+func TestFenceDelimitersAreReadOnlyThroughMdfence(t *testing.T) {
+	// Act.
+	sites := sourcescan.SitesMatching(t, regexp.MustCompile("\"`"))
+
+	// Assert.
+	if len(sites) != 0 {
+		t.Errorf("a backtick string literal in %v reads a fence by hand; read it through mdfence.Parse", sites)
 	}
 }

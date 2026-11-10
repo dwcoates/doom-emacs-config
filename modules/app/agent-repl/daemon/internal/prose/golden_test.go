@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"unicode/utf8"
+
+	"agent-repld/internal/mdfence"
 )
 
 // The old webapp line parser's own answers, recorded before the grammar
@@ -159,13 +161,13 @@ func railedTicks(line string) (ticks int, bare bool) {
 // language, where the scanner reads the whole run as the delimiter. The old
 // parser's answer for such a text is no longer the grammar's, and
 // the length rule's own cases hold the grammar's answer instead
-// (tree-sitter-tldr/tldr/test/corpus/fence.txt, TestFenceDelimiterOf).
+// (tree-sitter-tldr/tldr/test/corpus/fence.txt, mdfence's tests).
 func departsFromLengthRule(text string) bool {
 	oldOpen, open := false, 0
 	for _, line := range strings.Split(text, "\n") {
 		ticks, bare := railedTicks(line)
 		oldRole, role := fenceNone, fenceNone
-		if ticks >= fenceMin {
+		if ticks >= mdfence.Min {
 			oldRole = fenceOpens
 			if oldOpen {
 				oldRole = fenceCloses
@@ -175,10 +177,10 @@ func departsFromLengthRule(text string) bool {
 		switch {
 		case open > 0 && bare && ticks >= open:
 			role, open = fenceCloses, 0
-		case open == 0 && ticks >= fenceMin:
+		case open == 0 && ticks >= mdfence.Min:
 			role, open = fenceOpens, ticks
 		}
-		if role != oldRole || (role == fenceOpens && ticks > fenceMin) {
+		if role != oldRole || (role == fenceOpens && ticks > mdfence.Min) {
 			return true
 		}
 	}
