@@ -2445,6 +2445,25 @@ func TestMergeQueueEntryWorkedOn(t *testing.T) {
 	}
 }
 
+func TestReturnAdmittedMergeDropsTheReturnedMark(t *testing.T) {
+	// Arrange: a returned merge never taken up goes back to waiting.
+	s, repo, failed, _, _ := stepAsideFixture(t)
+	ctx := context.Background()
+	if err := s.ReturnRemediatedMerge(ctx, repo, failed, nil); err != nil {
+		t.Fatalf("ReturnRemediatedMerge: %v", err)
+	}
+
+	// Act
+	if err := s.ReturnAdmittedMerge(ctx, repo, failed, NewLeaseID()); err != nil {
+		t.Fatalf("ReturnAdmittedMerge: %v", err)
+	}
+
+	// Assert
+	if got := entryNamed(t, s, repo, failed); got.State != MergeQueued || got.Returned {
+		t.Fatalf("entry: state %s, returned %v; want waiting and unmarked", got.State, got.Returned)
+	}
+}
+
 // entryNamed reads ID's entry off REPO's queue.
 func entryNamed(t *testing.T, s *store, repo RepoKey, id WorkspaceID) MergeQueueEntry {
 	t.Helper()

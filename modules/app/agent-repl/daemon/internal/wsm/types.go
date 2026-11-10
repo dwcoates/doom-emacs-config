@@ -1472,7 +1472,9 @@ type MergeQueueEntry struct {
 	// Returned reports that the merge came back in line from repairing out of
 	// line (ReturnRemediatedMerge) and nothing has taken it up again yet
 	// (TakeUpReturnedMerge). It is kept apart from the user's front placement
-	// (MergeSource.Front), which the return never writes.
+	// (MergeSource.Front), which the return never writes. Only an admitted
+	// entry carries it: every write that moves an entry out of admitted
+	// clears it.
 	Returned bool
 }
 

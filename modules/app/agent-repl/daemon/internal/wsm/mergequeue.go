@@ -736,7 +736,8 @@ func (s *store) YieldMergeHead(ctx context.Context, repo RepoKey, loser, winner 
 // failures its test suite finished with (MergeRemediating): it goes to the
 // back of the sequence, where it passes nobody, and keeps its lease and its
 // progress record. Anything but an admitted entry is a refusal: only the
-// merge being worked on steps aside.
+// merge being worked on steps aside. Its returned mark, if a stale one stood,
+// goes: only an admitted entry carries one (MergeQueueEntry.Returned).
 func (s *store) StepAsideMerge(ctx context.Context, repo RepoKey, id WorkspaceID) error {
 	const op = "daemon.wsm.step_aside_merge"
 	key, err := normalizeRepoKey(repo)
@@ -757,7 +758,7 @@ func (s *store) StepAsideMerge(ctx context.Context, repo RepoKey, id WorkspaceID
 		if err != nil {
 			return err
 		}
-		_, err = tx.ExecContext(ctx, `UPDATE merge_queue SET state = ?, seq = ? WHERE repo_key = ? AND workspace_id = ?`,
+		_, err = tx.ExecContext(ctx, `UPDATE merge_queue SET state = ?, seq = ?, returned = 0 WHERE repo_key = ? AND workspace_id = ?`,
 			int(MergeRemediating), back, key, id)
 		return err
 	})
@@ -867,7 +868,9 @@ func (s *store) AdmitMerge(ctx context.Context, repo RepoKey, id WorkspaceID) er
 // ReturnAdmittedMerge puts an ADMITTED merge that has no run back in line AT
 // ITS OWN PLACE, waiting, under LEDGER: a merge a restart interrupted before it
 // took a step runs again from where it stood -- the head of the line -- never
-// from the back. Its source, its front mark and its place are kept. An entry
+// from the back. Its source, its front mark and its place are kept; a returned
+// mark is dropped, since only an admitted entry carries one
+// (MergeQueueEntry.Returned) and the merge is admitted afresh. An entry
 // that is not admitted is refused: the caller lost track of the queue.
 func (s *store) ReturnAdmittedMerge(ctx context.Context, repo RepoKey, id WorkspaceID, ledger LeaseID) error {
 	const op = "daemon.wsm.return_admitted_merge"
@@ -883,7 +886,7 @@ func (s *store) ReturnAdmittedMerge(ctx context.Context, repo RepoKey, id Worksp
 		return err
 	}
 	return s.writeQueue(ctx, op, fields, key, func(ctx context.Context, tx *sql.Tx) error {
-		res, err := tx.ExecContext(ctx, `UPDATE merge_queue SET state = ?, ledger_id = ? WHERE repo_key = ? AND workspace_id = ? AND state = ?`,
+		res, err := tx.ExecContext(ctx, `UPDATE merge_queue SET state = ?, ledger_id = ?, returned = 0 WHERE repo_key = ? AND workspace_id = ? AND state = ?`,
 			int(MergeQueued), ledger, key, id, int(MergeAdmitted))
 		if err != nil {
 			return err
