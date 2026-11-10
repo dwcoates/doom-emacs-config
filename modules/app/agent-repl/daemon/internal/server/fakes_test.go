@@ -131,6 +131,11 @@ func (f *fakeSurfaces) CentralClientLog(rec dlog.ClientRecord) error {
 
 // fakeDB answers the registry lookups the handlers make.
 type fakeDB struct {
+	// bypass is each workspace's queue-bypass standing, and bypassErr fails
+	// its read.
+	bypass    map[ids.WorkspaceID]wsm.QueueBypass
+	bypassErr error
+
 	// prSubs are the pull-request subscriptions recorded; prSubscribeErr
 	// and prReplaced answer SubscribePullRequest (pullrequests_test.go).
 	prSubs         []wsm.PullRequestSubscription
@@ -3027,4 +3032,12 @@ func (f *fakeVerbs) AskQuestionIntake(_ context.Context, asker ids.WorkspaceID, 
 func (f *fakeVerbs) CreateIntake(_ context.Context, spec workspace.IntakeSpec) (wsm.Workspace, error) {
 	f.intakeSpecs = append(f.intakeSpecs, spec)
 	return f.questionIntake, nil
+}
+
+// QueueBypass answers the standing the test set, none by default.
+func (d *fakeDB) QueueBypass(_ context.Context, ws ids.WorkspaceID) (wsm.QueueBypass, error) {
+	if d.bypassErr != nil {
+		return wsm.QueueBypass{}, d.bypassErr
+	}
+	return d.bypass[ws], nil
 }

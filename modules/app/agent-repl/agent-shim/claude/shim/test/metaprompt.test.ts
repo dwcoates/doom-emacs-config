@@ -142,6 +142,17 @@ describe("this repository's committed metaprompt", () => {
     expect(text).toContain("This session runs in bypass queue mode, which agent-repl also calls queue bypass mode.");
   });
 
+  it("forbids a queue-bypass session one-shots and async merges, and says what replaces them", () => {
+    // Arrange
+    const home = homeOnThisRepository();
+    // Act
+    const text = readLandingSection("bypassing_queue", home);
+    // Assert
+    expect(text).toContain("This workspace never creates a one-shot workspace, never marks one, and never queues an async merge.");
+    expect(text).toContain("`requester_bypassing_queue`");
+    expect(text).toContain("This workspace lands that branch with `land-direct.sh`, as it lands its own.");
+  });
+
   it("names this session's transcript the bypass queue mode session, apart from an earlier non-bypass session", () => {
     // Arrange
     const home = homeOnThisRepository();

@@ -25,6 +25,13 @@ func (s *server) SetWorkspaceOneShot(
 	if done {
 		return answer(resp, cerr)
 	}
+	if req.Msg.GetOneShot() {
+		if cerr, refused, err := s.refuseWhileBypassing(ctx, subject.Log, rpc, resp, subject.Record.ID, "marking the workspace a one-shot"); err != nil {
+			return nil, err
+		} else if refused {
+			return answer(resp, cerr)
+		}
+	}
 	directive, err := s.deps.Verbs.SetOneShot(ctx, subject.Record.ID, requesterID(req.Msg.GetRequester()), req.Msg.GetOneShot())
 	if err != nil {
 		return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))

@@ -690,7 +690,19 @@ message CreateWorkspaceError {
     // worktree, branch and registration removed), as every failed create is,
     // and the repository's main workspace was asked to find out why.
     CreateWorkspaceCreationHookFailed creation_hook_failed = 53;
+    // The requester holds its repository's queue bypass mode, and the create
+    // asked for a one-shot workspace or an async merge: either one lands
+    // through the merge queue, which the mode hard-stops (owner ruling,
+    // 2026-11-10). Nothing was created. The requester does the work itself,
+    // or creates a child that is no one-shot and lands its branch directly.
+    CreateWorkspaceRequesterBypassingQueue requester_bypassing_queue = 54;
   }
+}
+// The requester holds the queue bypass mode, so it dispatches no one-shot and
+// no async merge.
+message CreateWorkspaceRequesterBypassingQueue {
+  // What the requester is reminded to do instead, composed by the daemon.
+  string detail = 1;
 }
 // A requested model the creating login does not offer.
 message CreateWorkspaceModelNotInCatalog {
