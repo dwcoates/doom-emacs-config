@@ -136,6 +136,7 @@ import "agentrepl/v1/endpoint_update_held_prompt.proto";
 import "agentrepl/v1/endpoint_update_merge_queue.proto";
 import "agentrepl/v1/endpoint_update_persistent_wifi_mode.proto";
 import "agentrepl/v1/endpoint_update_remote_control_mode.proto";
+import "agentrepl/v1/endpoint_update_queue_bypass_mode.proto";
 import "agentrepl/v1/endpoint_update_question_draft.proto";
 import "agentrepl/v1/endpoint_update_shutdown_schedule.proto";
 import "agentrepl/v1/endpoint_update_sidebar_view.proto";
@@ -464,6 +465,11 @@ service AgentRepl {
   // Turn a workspace's remote control (its session reachable from claude.ai)
   // on, off, or over. See endpoint_update_remote_control_mode.proto.
   rpc UpdateRemoteControlMode(UpdateRemoteControlModeRequest) returns (UpdateRemoteControlModeResponse);
+  // Take or release the workspace's queue bypass mode: a personal-account
+  // workspace lands straight on its repository's main branch, with the
+  // repository's merge queue hard-stopped while the mode is held. The topbar's
+  // queue-bypass chip sends `toggle`.
+  rpc UpdateQueueBypassMode(UpdateQueueBypassModeRequest) returns (UpdateQueueBypassModeResponse);
 
   // The permission-mode switch, SetModel's sibling. See
   // endpoint_set_permission_mode.proto.

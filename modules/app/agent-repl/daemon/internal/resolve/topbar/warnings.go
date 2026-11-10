@@ -34,10 +34,34 @@ func (r *resolver) warningStrip(s *wsState) *frontendv1.TopbarWarningStrip {
 	}
 
 	out := &frontendv1.TopbarWarningStrip{}
+	errors := false
 	for _, w := range collected {
-		out.Warnings = append(out.Warnings, w.detail())
+		detail := w.detail()
+		out.Warnings = append(out.Warnings, detail)
+		errors = errors || isErrorWarning(w.kind, detail)
 	}
+	out.Severity = warningSeverity(len(out.Warnings), errors)
 	return out
+}
+
+// isErrorWarning reports whether one listed warning is an ERROR rather than
+// a warning: a session fault the shim reported, or a failed deploy. Every
+// other kind is a warning (owner request, 2026-11-10: the heading's title is
+// red for errors, yellow for warnings alone).
+func isErrorWarning(kind warningKind, detail *frontendv1.TopbarWarning) bool {
+	return kind == warnSessionFault || detail.GetDeployFailed() != nil
+}
+
+// warningSeverity resolves the strip's severity: unset for an empty list,
+// errors when any listed warning is one, else warnings_only.
+func warningSeverity(listed int, errors bool) *frontendv1.TopbarWarningStripSeverity {
+	switch {
+	case listed == 0:
+		return nil
+	case errors:
+		return &frontendv1.TopbarWarningStripSeverity{Severity: &frontendv1.TopbarWarningStripSeverity_Errors{Errors: &frontendv1.TopbarWarningStripErrors{}}}
+	}
+	return &frontendv1.TopbarWarningStripSeverity{Severity: &frontendv1.TopbarWarningStripSeverity_WarningsOnly{WarningsOnly: &frontendv1.TopbarWarningStripWarningsOnly{}}}
 }
 
 // sessionlessWarning is the workspace's session-less state, as a LINE.

@@ -239,7 +239,7 @@ describe("drawTopbarView", () => {
 
   it("draws no warning chip when the daemon reports nothing wrong", () => {
     const { tc } = topbarContext();
-    expect(drawTopbarView(view(), tc).querySelector(".topbar-warning-chip")).toBeNull();
+    expect(drawTopbarView(view(), tc).querySelector(".topbar-heading-warnings")).toBeNull();
   });
 
   it("draws the warning chip when the list is non-empty", () => {
@@ -254,7 +254,7 @@ describe("drawTopbarView", () => {
       }),
       tc,
     );
-    expect(drawn.querySelector(".topbar-warning-chip")).not.toBeNull();
+    expect(drawn.querySelector(".topbar-heading-warnings")).not.toBeNull();
   });
 
   // THE CELL'S CLICK IS THE LOGIN OPTIONS, in both arms (owner ruling,
@@ -482,7 +482,7 @@ describe("mountTopbar: the chip's client-local failures", () => {
   /** The arms of the client-local rows in the chip's opened list. */
   function listedArms(host: HTMLElement): string[] {
     host
-      .querySelector(".topbar-warning-chip")
+      .querySelector(".topbar-heading-warnings")
       ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     const arms = Array.from(openPanel(host)?.querySelectorAll<HTMLElement>("[data-local]") ?? []).map(
       (row) => row.dataset.arm ?? "",
@@ -520,7 +520,7 @@ describe("mountTopbar: the chip's client-local failures", () => {
       // ACT
       failures.retract(arm);
       // ASSERT
-      expect(host.querySelector(".topbar-warning-chip")).toBeNull();
+      expect(host.querySelector(".topbar-heading-warnings")).toBeNull();
       handle.dispose();
     });
   }
@@ -935,7 +935,7 @@ describe("the no-session cells", () => {
       declaration(".topbar-model[data-no-session],\n.topbar-effort[data-no-session],\n.topbar-effort[data-effort-unsupported],\n.topbar-mode[data-no-session]", "padding-block"),
     ).toBe(
       declaration(
-        ".topbar-model-button,\n.topbar-effort-button,\n.topbar-mode-button,\n.topbar-context-figure,\n.topbar-remote-control-button,\n.topbar-wifi-button,\n.topbar-warning-chip",
+        ".topbar-model-button,\n.topbar-effort-button,\n.topbar-mode-button,\n.topbar-context-figure,\n.topbar-remote-control-button,\n.topbar-wifi-button,\n.topbar-heading-warnings",
         "padding-block",
       ),
     );
@@ -945,7 +945,7 @@ describe("the no-session cells", () => {
   // `padding` shorthand would quietly win over it for that one cell.
   it.each([
     ".topbar-model[data-no-session],\n.topbar-effort[data-no-session],\n.topbar-effort[data-effort-unsupported],\n.topbar-mode[data-no-session]",
-    ".topbar-model-button,\n.topbar-effort-button,\n.topbar-mode-button,\n.topbar-context-figure,\n.topbar-remote-control-button,\n.topbar-wifi-button,\n.topbar-warning-chip",
+    ".topbar-model-button,\n.topbar-effort-button,\n.topbar-mode-button,\n.topbar-context-figure,\n.topbar-remote-control-button,\n.topbar-wifi-button,\n.topbar-heading-warnings",
   ])("leaves the inline inset of %s to the group", (selector) => {
     expect(withoutBlockComments(ruleBody(selector))).not.toMatch(/(?:^|[;\s])padding(?:-inline)?(?:-left|-right)?\s*:/);
   });

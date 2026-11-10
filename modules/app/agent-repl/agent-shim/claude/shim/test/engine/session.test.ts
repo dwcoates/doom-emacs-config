@@ -404,7 +404,7 @@ function harness(
 function freshRequest(): shimv1.StartSessionRequest {
   return create(shimv1.StartSessionRequestSchema, {
     workspaceName: "parser-fix",
-    profile: { kind: { case: "agent", value: { standing: { kind: { case: "linkedWorkspace", value: {} } } } } },
+    profile: { kind: { case: "agent", value: { standing: { kind: { case: "linkedWorkspace", value: {} } }, landing: { landing: { case: "throughQueue", value: {} } } } } },
     source: {
       case: "fresh",
       value: create(shimv1.StartSessionFreshSchema, {
@@ -421,7 +421,7 @@ function freshRequest(): shimv1.StartSessionRequest {
 function freshRequestNoFacts(): shimv1.StartSessionRequest {
   return create(shimv1.StartSessionRequestSchema, {
     workspaceName: "parser-fix",
-    profile: { kind: { case: "agent", value: { standing: { kind: { case: "linkedWorkspace", value: {} } } } } },
+    profile: { kind: { case: "agent", value: { standing: { kind: { case: "linkedWorkspace", value: {} } }, landing: { landing: { case: "throughQueue", value: {} } } } } },
     source: { case: "fresh", value: create(shimv1.StartSessionFreshSchema, {}) },
   });
 }
@@ -430,7 +430,7 @@ function freshRequestNoFacts(): shimv1.StartSessionRequest {
 function freshRequestNoModel(): shimv1.StartSessionRequest {
   return create(shimv1.StartSessionRequestSchema, {
     workspaceName: "parser-fix",
-    profile: { kind: { case: "agent", value: { standing: { kind: { case: "linkedWorkspace", value: {} } } } } },
+    profile: { kind: { case: "agent", value: { standing: { kind: { case: "linkedWorkspace", value: {} } }, landing: { landing: { case: "throughQueue", value: {} } } } } },
     source: {
       case: "fresh",
       value: create(shimv1.StartSessionFreshSchema, {
@@ -449,7 +449,7 @@ function resumeRequest(
 ): shimv1.StartSessionRequest {
   return create(shimv1.StartSessionRequestSchema, {
     workspaceName: "parser-fix",
-    profile: { kind: { case: "agent", value: { standing: { kind: { case: "linkedWorkspace", value: {} } } } } },
+    profile: { kind: { case: "agent", value: { standing: { kind: { case: "linkedWorkspace", value: {} } }, landing: { landing: { case: "throughQueue", value: {} } } } } },
     source: {
       case: "resume",
       value: create(shimv1.StartSessionResumeSchema, {
@@ -606,8 +606,8 @@ describe("StartSession's session profile", () => {
   it.each([
     {
       name: "an agent profile",
-      wire: (): shimv1.SessionProfile => create(shimv1.SessionProfileSchema, { kind: { case: "agent", value: { standing: { kind: { case: "linkedWorkspace", value: {} } } } } }),
-      want: { kind: "agent", standing: "linked_workspace" },
+      wire: (): shimv1.SessionProfile => create(shimv1.SessionProfileSchema, { kind: { case: "agent", value: { standing: { kind: { case: "linkedWorkspace", value: {} } }, landing: { landing: { case: "throughQueue", value: {} } } } } }),
+      want: { kind: "agent", standing: "linked_workspace", landing: "through_queue" },
     },
     {
       name: "a chat profile",

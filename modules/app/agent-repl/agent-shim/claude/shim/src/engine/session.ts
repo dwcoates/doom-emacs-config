@@ -135,7 +135,7 @@ import {
   type TranscriptIndex,
 } from "./rollback.js";
 import { settleable, type Settleable } from "./settleable.js";
-import { profileFromProto, type SessionProfile } from "./profile.js";
+import { MERGE_QUEUE_SKILL, profileFromProto, type SessionProfile } from "./profile.js";
 import type { EngineFold, FoldContext, LastChange } from "./fold-context.js";
 import { normalizeModel, SYNTHETIC_MODEL } from "../model.js";
 import { TRUST_KEY, VENDOR_CONFIG_FILE, trustRoot } from "../trust.js";
@@ -2286,6 +2286,16 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       call: "supportedCommands",
       read: (active) => active.supportedCommands(),
       take: (commands) => {
+        // A BYPASSING SESSION MUST NOT CARRY THE MERGE-QUEUE SKILL: its start
+        // switched the skill off, and a catalog still listing it means the
+        // switch did not take, so the agent can read the rules it bypasses.
+        const active = sessionProfile();
+        if (active.kind === "agent" && active.landing === "bypassing_queue" && commands.some((command) => command.name === MERGE_QUEUE_SKILL)) {
+          LOGGER.error(
+            { skill: MERGE_QUEUE_SKILL, landing: active.landing, commands: commands.length },
+            "a bypassing session lists the merge-queue skill its start switched off",
+          );
+        }
         const catalog = commandCatalogOf(commands);
         const changed = pushes.push(commandCatalogUpdate(catalog));
         LOGGER.debug({ commands: catalog.commands.length, changed }, "read the runtime's slash-command catalog");

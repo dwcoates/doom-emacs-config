@@ -88,6 +88,21 @@ type Naming struct {
 	// fact too, and riding the naming makes the chip as ready as the strip
 	// (remotecontrol.go).
 	RemoteControl bool
+	// QueueBypass is the workspace's queue-bypass chip standing, which the
+	// chip draws (queuebypass.go). The zero value is a chip not offered.
+	QueueBypass QueueBypass
+}
+
+// QueueBypass is one workspace's queue-bypass chip, resolved by the
+// workspace verbs.
+type QueueBypass struct {
+	// Offered reports that the workspace's session spends as a personal
+	// account, the only kind that draws the chip.
+	Offered bool
+	// Holds reports that this workspace holds its repository's mode.
+	Holds bool
+	// HeldBy names the sibling holding the mode, empty when none does.
+	HeldBy string
 }
 
 // DetachedUnmodeled is one live item of UNMODELED work running detached. It
@@ -175,6 +190,11 @@ type Resolver interface {
 	// draws (TopbarRemoteControl), leaving the rest of the naming as it is.
 	// Its sole producer is the fleet, on every UpdateRemoteControlMode.
 	SetRemoteControl(ws ids.WorkspaceID, on bool)
+	// SetQueueBypass replaces the workspace's queue-bypass chip standing,
+	// leaving the rest of the naming as it is. Its sole producer is the
+	// workspace verbs, on every UpdateQueueBypassMode, for every workspace of
+	// the repository.
+	SetQueueBypass(ws ids.WorkspaceID, chip QueueBypass)
 	// SetSummary installs the one-sentence workspace summary its agent set
 	// (agentrepl.v1.SetWorkspaceSummary), shown in the title's FIRST
 	// precedence: above the vendor's ai-title and the workspace name. An empty

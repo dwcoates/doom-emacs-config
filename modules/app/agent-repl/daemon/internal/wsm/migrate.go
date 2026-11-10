@@ -217,6 +217,7 @@ var migrations = []migration{
 	// IT IS ADDITIVE: the build before it reads a commit tab without the
 	// section as one no agent resolved, and draws it (retiredconflictsections.go).
 	{To: 112, Name: "durable_rows_retired_conflict_sections", Kind: MigrationAdditive, Rewrite: dropRetiredConflictSectionRows},
+	{To: 113, Name: "queue_bypass", Kind: MigrationAdditive, DDL: queueBypassDDL},
 }
 
 // mergeQueueLookupIndexesDDL keys the two lookups every workspace read makes

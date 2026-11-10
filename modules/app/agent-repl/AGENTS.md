@@ -197,7 +197,7 @@ does.
 
 Tests are not free: every suite here is sized to fill the machine, and runs
 from several agents multiply. How broad a run is, at every stage, is the
-metaprompt's rule ("When to run which tests"): only the tests the change
+metaprompt's rule (`metaprompt-merge-queue.md`, "When to run which tests"): only the tests the change
 added or changed; every other test runs only in the merge queue's gate. How an agent
 names those tests and runs them through the daemon is the `agent-repl-tests`
 skill's.
@@ -1236,7 +1236,9 @@ operation writes a command file; that ingress is retired.
 
 Owner plan, 2026-09-28 (`docs/investigations/2026-09-28-merge-queue-plan.md`,
 fixes 6-8). The rule that every agent lands only through the queue is the
-metaprompt's ("Master moves only through the merge queue"), and how an agent
+metaprompt's merge-queue landing section (`metaprompt-merge-queue.md`, "Master
+moves only through the merge queue"; a workspace holding the queue bypass mode
+reads `metaprompt-queue-bypass.md` in its place), and how an agent
 lands is `/agent-repl-merge-queue`'s. This section is the code that holds it.
 
 - A workspace's own merge lands in the target recorded at its creation: master
@@ -1307,8 +1309,9 @@ like an improvement still needs that conversation. Code:
     composes every merge and repair prompt from them and its suite pins their
     placeholders;
   - documentation runs nothing: the module's `docs/` and `plans/`, and every
-    Markdown file at the module root, except `metaprompt.md`, which the shim's
-    own suite reads back and so runs `shim`, `e2e` and `e2e-emacs`;
+    Markdown file at the module root, except `metaprompt.md` and its two
+    landing sections (`metaprompt-merge-queue.md`, `metaprompt-queue-bypass.md`),
+    which the shim's own suite reads back and so run `shim`, `e2e` and `e2e-emacs`;
   - outside the module, the paths a roster harness reads run exactly the
     suites that read them: the git hooks, the `.claude` scripts and the
     repository's `bin/` (each one's harness, plus `background-harness`,

@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import {
   DOOM_CHECKOUT_REL_PATH,
   METAPROMPT_REL_PATH,
+  LANDING_REL_PATHS,
   metapromptPath,
   readMetaprompt,
   standingSection,
@@ -30,6 +31,10 @@ function makeHome(body?: string): string {
     const file = metapromptPath(home);
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, body, "utf8");
+    // Every landing's section beside it, as a doom checkout carries.
+    for (const rel of Object.values(LANDING_REL_PATHS)) {
+      fs.writeFileSync(path.join(home, DOOM_CHECKOUT_REL_PATH, rel), `landing section ${rel}`, "utf8");
+    }
   }
   return home;
 }
@@ -190,7 +195,7 @@ describe("systemPromptOption", () => {
     // Arrange
     const home = makeHome("Be terse.\n");
     // Act
-    const option = systemPromptOption("parser-fix", "linked_workspace", home);
+    const option = systemPromptOption("parser-fix", "linked_workspace", "through_queue", home);
     // Assert
     expect(option).toEqual({
       type: "preset",
@@ -203,7 +208,7 @@ describe("systemPromptOption", () => {
     // Arrange
     const home = makeHome();
     // Act
-    const option = systemPromptOption("parser-fix", "linked_workspace", home);
+    const option = systemPromptOption("parser-fix", "linked_workspace", "through_queue", home);
     // Assert — the preset itself is never dropped: it carries the
     // environment block the model needs to resolve `~`.
     expect(option).toEqual({
@@ -217,7 +222,7 @@ describe("systemPromptOption", () => {
     // Arrange
     const home = makeHome("Be terse.\n");
     // Act, Assert
-    expect(() => systemPromptOption("", "linked_workspace", home)).toThrow("the workspace name is empty");
+    expect(() => systemPromptOption("", "linked_workspace", "through_queue", home)).toThrow("the workspace name is empty");
   });
 });
 
@@ -231,7 +236,7 @@ describe("the standing notice", () => {
     // Arrange
     const dir = makeHome(home);
     // Act
-    const append = systemPromptOption("parser-fix", standing, dir).append ?? "";
+    const append = systemPromptOption("parser-fix", standing, "through_queue", dir).append ?? "";
     // Assert — nothing may ever be appended after it.
     expect(append.endsWith(standingSection(standing))).toBe(true);
     expect(append.lastIndexOf(workspaceSection("parser-fix"))).toBeLessThan(append.lastIndexOf(standingSection(standing)));

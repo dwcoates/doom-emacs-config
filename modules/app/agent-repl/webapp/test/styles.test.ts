@@ -2461,12 +2461,12 @@ describe("the held prompt's collapse", () => {
  * overlay it replaced — cards drawn over the page — left no rule behind.
  */
 describe("the warning chip as the one error surface", () => {
-  it("paints the chip in the alarm red: the LAST color the cascade reaches it with is --err", () => {
-    // Arrange — every non-hover rule naming the chip that sets its color, in
+  it("paints the heading's errors in the alarm red: the LAST color the cascade reaches them with is --err", () => {
+    // Arrange — every rule naming the heading's errors that sets its color, in
     // file order; with equal specificity the last one is what paints it.
     const coloring = rulesOf(stylesheet).filter(
       (rule) =>
-        rule.selectors.includes(".topbar-warning-chip") &&
+        rule.selectors.includes('.topbar-heading-warnings[data-severity="errors"]') &&
         /(?:^|[\s;{])color\s*:/.test(rule.declarations),
     );
 

@@ -409,7 +409,7 @@ export function chipFailureArms(): string[] {
  * headline and the evidence, as the reader would see them.
  */
 export async function chipFailureText(app: MountedApp, arm: string): Promise<string> {
-  await app.click("#topbar .topbar-warning-chip");
+  await app.click("#topbar .topbar-heading-warnings");
   const row = app.$(`#topbar [data-reveal] [data-local][data-arm="${arm}"]`);
   if (row === null) throw new Error(`the warning chip lists no ${arm} failure`);
   const listed = row.textContent ?? "";

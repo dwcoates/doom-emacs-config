@@ -1,0 +1,116 @@
+// endpoint_update_queue_bypass_mode.proto — UpdateQueueBypassMode. TOPBAR
+// section. Take or release a workspace's queue bypass mode.
+//
+// THE MODE IS THE REPOSITORY'S, HELD BY ONE WORKSPACE. While a workspace holds
+// it, the repository's merge queue is HARD-STOPPED (whatever it was running
+// stops at once, and nothing advances), and the workspace lands each change on
+// the main branch itself. Releasing it resumes the queue. A second workspace
+// of the same repository cannot take the mode until the holder releases it.
+//
+// THE MODE SWITCHES THE WORKSPACE'S CONVERSATION. A workspace keeps two: its
+// ordinary one, whose system prompt carries the merge-queue rules, and its
+// bypass one, whose system prompt carries the bypass directive instead and
+// whose session never loads the merge-queue skill. Taking the mode ends the
+// ordinary session and resumes the bypass conversation (or starts it fresh,
+// the first time); releasing it does the reverse. Neither conversation's cache
+// is spent by the other, and the one not running is kept for the next switch.
+//
+// ONLY A PERSONAL ACCOUNT MAY HOLD IT: a work account's workspace is refused,
+// and its topbar draws no chip at all.
+//
+// A SWITCH IS NOT AN INTERRUPT: it is refused while a turn is in flight, as
+// every other session-level verb is.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message UpdateQueueBypassModeRequest {
+  // The workspace taking or releasing the mode.
+  workspace.v1.WorkspaceRef workspace = 1;
+  // What to do with the mode. Exactly one is set.
+  oneof action {
+    // Take the mode. A workspace already holding it is answered success,
+    // unchanged.
+    UpdateQueueBypassModeOn on = 2;
+    // Release the mode. A workspace not holding it is answered success,
+    // unchanged.
+    UpdateQueueBypassModeOff off = 3;
+    // Take the mode when this workspace does not hold it, release it when it
+    // does: the topbar chip's click.
+    UpdateQueueBypassModeToggle toggle = 4;
+  }
+}
+// Take the mode.
+message UpdateQueueBypassModeOn {}
+// Release the mode.
+message UpdateQueueBypassModeOff {}
+// Flip the mode.
+message UpdateQueueBypassModeToggle {}
+
+// THE ARM IS THE OUTCOME.
+message UpdateQueueBypassModeResponse {
+  oneof result {
+    UpdateQueueBypassModeSuccess success = 1;
+    UpdateQueueBypassModeError error = 2;
+  }
+}
+
+// The mode as it stands after the request; every visible effect — the new
+// feed, the topbar, the queue's pause — arrives on the streams.
+message UpdateQueueBypassModeSuccess {
+  // TRUE when this workspace holds the mode.
+  bool on = 1;
+}
+
+// Arms derived from the daemon's refusal sites. Validation failures (unset
+// field, unset action) are Connect InvalidArgument, never an arm.
+message UpdateQueueBypassModeError {
+  oneof cause {
+    // The workspace id is not in the daemon's registry.
+    UpdateQueueBypassModeUnknownWorkspace unknown_workspace = 1;
+    // The echoed dir disagrees with the registry's dir for this id.
+    UpdateQueueBypassModeWorkspaceRefMismatch workspace_ref_mismatch = 2;
+    // This daemon released the workspace to a successor; dial `address`.
+    UpdateQueueBypassModeTransferringAway transferring_away = 3;
+    // The workspace's session spends as a work account, which never holds
+    // the mode.
+    UpdateQueueBypassModeWorkAccount work_account = 4;
+    // Another workspace of the same repository holds the mode.
+    UpdateQueueBypassModeHeldElsewhere held_elsewhere = 5;
+    // A turn is in flight; end it or interrupt it first.
+    UpdateQueueBypassModeTurnInFlight turn_in_flight = 6;
+    // The conversation switch did not complete; the detail says which step.
+    UpdateQueueBypassModeSwitchFailed switch_failed = 7;
+  }
+}
+// The workspace id is not registered.
+message UpdateQueueBypassModeUnknownWorkspace {}
+// The echoed dir disagrees with the registry.
+message UpdateQueueBypassModeWorkspaceRefMismatch {
+  // The dir the registry holds for the id.
+  string registry_dir = 1;
+}
+// The workspace is being handed to a successor daemon.
+message UpdateQueueBypassModeTransferringAway {
+  // The successor's address, to retry the request against.
+  string address = 1;
+}
+// A work account's workspace never holds the mode.
+message UpdateQueueBypassModeWorkAccount {}
+// The mode is held by another workspace of the same repository.
+message UpdateQueueBypassModeHeldElsewhere {
+  // The holding workspace.
+  workspace.v1.WorkspaceRef workspace = 1;
+}
+// A turn is running in the workspace.
+message UpdateQueueBypassModeTurnInFlight {}
+// The switch between the two conversations failed.
+message UpdateQueueBypassModeSwitchFailed {
+  // What failed, verbatim from the daemon.
+  string detail = 1;
+}

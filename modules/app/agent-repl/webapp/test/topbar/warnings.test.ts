@@ -7,9 +7,9 @@ import {
 } from "../../../proto/gen/ts/frontend/v1/topbar_pb";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import {
+  bindHeadingWarnings,
+  bindLocalHeadingWarnings,
   clockTime,
-  drawLocalWarningStrip,
-  drawTopbarWarningStrip,
   drawWarningDetail,
   drawWarningList,
   reportAppearedDeployFailures,
@@ -19,6 +19,38 @@ import { createLocalFailures, type LocalFailures } from "../../src/failure/local
 import { daemonUnreachable, staleBundle, workspaceGone } from "../../src/failure/sink.js";
 import { oneofArms } from "../arms.js";
 import { NOW, appContext, openPanel, topbarContext } from "./fixtures.js";
+import type { WarningChipContext } from "../../src/topbar/context.js";
+
+/** A heading with a plain title line, as drawTopbarHeading draws one. */
+function heading(): HTMLElement {
+  const element = document.createElement("div");
+  element.className = "topbar-heading";
+  const title = document.createElement("div");
+  title.className = "topbar-title";
+  title.title = "the summary";
+  title.textContent = "the summary";
+  element.append(title);
+  return element;
+}
+
+/** The heading the served VIEW binds its warnings onto, or null when it stays plain. */
+function drawTopbarWarningStrip(view: ReturnType<typeof strip>, tc: Parameters<typeof bindHeadingWarnings>[2]): HTMLElement | null {
+  const element = heading();
+  bindHeadingWarnings(element, view, tc);
+  return element.querySelector(".topbar-heading-warnings") === null ? null : element;
+}
+
+/** The heading the client-local failures alone bind onto, or null when none stands. */
+function drawLocalWarningStrip(cc: WarningChipContext): HTMLElement | null {
+  const element = heading();
+  bindLocalHeadingWarnings(element, cc);
+  return element.querySelector(".topbar-heading-warnings") === null ? null : element;
+}
+
+/** The warning count the heading's hover states. */
+function hoverCount(element: HTMLElement | null): string | undefined {
+  return /\n(\d+) warnings?/.exec(element?.querySelector<HTMLElement>(".topbar-heading-warnings")?.title ?? "")?.[1];
+}
 
 const warning = (text: string, detail: unknown) =>
   create(TopbarWarningSchema, { line: { text }, detail: detail as never });
@@ -46,7 +78,7 @@ function openList(view: ReturnType<typeof strip>) {
   const chip = drawTopbarWarningStrip(view, tc);
   if (chip !== null) host.append(chip);
   host
-    .querySelector(".topbar-warning-chip")
+    .querySelector(".topbar-heading-warnings")
     ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
   return host;
 }
@@ -59,7 +91,7 @@ describe("drawTopbarWarningStrip", () => {
 
   it("badges the count of the served list", () => {
     const host = openList(strip(warning("a", ACCOUNTING), warning("b", ACCOUNTING)));
-    expect(host.querySelector(".topbar-warning-count")?.textContent).toBe("2");
+    expect(hoverCount(host)).toBe("2");
   });
 
   it("lists each warning's composed sentence verbatim, in the served order", () => {
@@ -387,7 +419,7 @@ describe("the chip's client-local failures", () => {
   function openChip(host: HTMLElement, chip: HTMLElement | null): HTMLElement | null {
     if (chip !== null) host.append(chip);
     host
-      .querySelector(".topbar-warning-chip")
+      .querySelector(".topbar-heading-warnings")
       ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     return openPanel(host);
   }
@@ -404,7 +436,7 @@ describe("the chip's client-local failures", () => {
     failures.report(staleBundle("drift"));
     const { tc } = withFailures(failures);
     const chip = drawTopbarWarningStrip(strip(warning("a", ACCOUNTING)), tc);
-    expect(chip?.querySelector(".topbar-warning-count")?.textContent).toBe("2");
+    expect(hoverCount(chip)).toBe("2");
   });
 
   it("lists the failures ahead of the served warnings", () => {
@@ -500,7 +532,7 @@ describe("the chip's client-local failures", () => {
     failures.report(staleBundle("drift"));
     failures.report(workspaceGone());
     const { tc } = withFailures(failures);
-    expect(drawLocalWarningStrip(tc)?.querySelector(".topbar-warning-count")?.textContent).toBe("2");
+    expect(hoverCount(drawLocalWarningStrip(tc))).toBe("2");
   });
 
   it("sets a failure's evidence as TEXT, so a hostile string cannot become markup", () => {

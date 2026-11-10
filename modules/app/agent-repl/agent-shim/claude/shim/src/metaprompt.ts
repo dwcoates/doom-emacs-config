@@ -26,7 +26,7 @@
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
-import type { WorkspaceStanding } from "./engine/profile.js";
+import type { WorkspaceLanding, WorkspaceStanding } from "./engine/profile.js";
 
 /** The doom config checkout's location, relative to the user's home. */
 export const DOOM_CHECKOUT_REL_PATH = ".config/doom";
@@ -38,6 +38,37 @@ export const DOOM_CHECKOUT_REL_PATH = ".config/doom";
  * resolves the same file inside the checkout Emacs itself was loaded from.
  */
 export const METAPROMPT_REL_PATH = "modules/app/agent-repl/metaprompt.md";
+
+/**
+ * In-repo location of each landing's section, relative to the doom checkout
+ * root. The core metaprompt holds everything that is not about how work
+ * reaches the main branch; each landing file holds the rest for its landing.
+ */
+export const LANDING_REL_PATHS: Readonly<Record<WorkspaceLanding, string>> = {
+  through_queue: "modules/app/agent-repl/metaprompt-merge-queue.md",
+  bypassing_queue: "modules/app/agent-repl/metaprompt-queue-bypass.md",
+};
+
+/**
+ * The text of LANDING's section. Read only when the core metaprompt exists: a
+ * checkout that carries the core but not a landing file is broken, and that is
+ * an error rather than a session run without its landing rules.
+ */
+export function readLandingSection(landing: WorkspaceLanding, home: string = homedir()): string {
+  const at = path.join(home, DOOM_CHECKOUT_REL_PATH, LANDING_REL_PATHS[landing]);
+  let raw: string;
+  try {
+    raw = readFileSync(at, "utf8");
+  } catch (err) {
+    throw new Error(
+      `shim: reading the ${landing} landing section at ${at} failed: ${err instanceof Error ? err.message : String(err)}`,
+      { cause: err },
+    );
+  }
+  const text = raw.trim();
+  if (text === "") throw new Error(`shim: the ${landing} landing section at ${at} is empty`);
+  return text;
+}
 
 /**
  * Absolute path of the canonical metaprompt.
@@ -110,9 +141,16 @@ export function workspaceSection(workspaceName: string): string {
  * work (children cut from the main branch, one-shots and fresh contexts by
  * preference); the metaprompt points here rather than restating it.
  */
-export function standingSection(standing: WorkspaceStanding): string {
+export function standingSection(standing: WorkspaceStanding, landing: WorkspaceLanding = "through_queue"): string {
   switch (standing) {
     case "main_workspace":
+      if (landing === "bypassing_queue") {
+        return (
+          "This workspace is its repository's MAIN workspace: it sits on the repository's main checkout, on the main branch. " +
+          "It holds the repository's queue bypass mode, so it lands its own changes directly on the main branch, " +
+          "as the landing section says. It is never a one-shot (`agent-repld workspace set here -one-shot` is refused)."
+        );
+      }
       return (
         "This workspace is its repository's MAIN workspace: it sits on the repository's main checkout, on the main branch. " +
         "It lands nothing itself and is never a one-shot (`agent-repld workspace set here -one-shot` is refused), " +
@@ -146,6 +184,7 @@ export function standingSection(standing: WorkspaceStanding): string {
 export function systemPromptOption(
   workspaceName: string,
   standing: WorkspaceStanding,
+  landing: WorkspaceLanding,
   home: string = homedir(),
 ): SystemPromptOption {
   if (workspaceName === "") {
@@ -158,10 +197,13 @@ export function systemPromptOption(
   // the last thing every agent reads before acting is whether its workspace is
   // its repository's main workspace. metaprompt.test.ts pins it last for both
   // standings.
+  // THE LANDING SECTION FOLLOWS THE CORE: the merge-queue rules for a
+  // session landing through the queue, the bypass directive for one holding
+  // the queue bypass mode. Neither session reads the other's.
   const sections = [
-    ...(metaprompt !== undefined ? [metaprompt] : []),
+    ...(metaprompt !== undefined ? [metaprompt, readLandingSection(landing, home)] : []),
     workspaceSection(workspaceName),
-    standingSection(standing),
+    standingSection(standing, landing),
   ];
   return {
     type: "preset",

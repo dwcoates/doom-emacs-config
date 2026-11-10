@@ -2552,7 +2552,19 @@ func (f *Fleet) sessionProfile(ctx context.Context, log dlog.Logger, ws ids.Work
 		if err != nil {
 			return nil, err
 		}
-		return &shimv1.SessionProfile{Kind: &shimv1.SessionProfile_Agent{Agent: &shimv1.SessionProfileAgent{Standing: standing}}}, nil
+		// THE LANDING IS THE HOLD'S: a workspace holding its repository's
+		// queue bypass mode runs its bypass conversation, whose system prompt
+		// lands straight on the main branch (queuebypass.go).
+		bypass, err := f.deps.DB.QueueBypass(ctx, ws)
+		if err != nil {
+			log.Error(opBringUp, "the workspace's queue bypass standing could not be read; the session was not started", dlog.Context{"cause": err.Error()})
+			return nil, fmt.Errorf("start session for %q: read the queue bypass standing: %w", ws, err)
+		}
+		landing := &shimv1.SessionProfileAgentLanding{Landing: &shimv1.SessionProfileAgentLanding_ThroughQueue{ThroughQueue: &shimv1.SessionProfileAgentLandingThroughQueue{}}}
+		if bypass.Holds {
+			landing = &shimv1.SessionProfileAgentLanding{Landing: &shimv1.SessionProfileAgentLanding_BypassingQueue{BypassingQueue: &shimv1.SessionProfileAgentLandingBypassingQueue{}}}
+		}
+		return &shimv1.SessionProfile{Kind: &shimv1.SessionProfile_Agent{Agent: &shimv1.SessionProfileAgent{Standing: standing, Landing: landing}}}, nil
 	}
 	text, err := f.deps.ChatSystemPrompt()
 	if err == nil && strings.TrimSpace(text) == "" {

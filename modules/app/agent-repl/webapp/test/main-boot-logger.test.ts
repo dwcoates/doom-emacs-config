@@ -105,7 +105,7 @@ async function awaitBootFailureChip(): Promise<string> {
       '#topbar .topbar-warnings[data-local-arms~="bootFailed"]',
     );
     if (chip !== null) {
-      chip.querySelector<HTMLElement>(".topbar-warning-chip")?.click();
+      chip.querySelector<HTMLElement>(".topbar-heading-warnings")?.click();
       document
         .querySelector<HTMLElement>('#topbar [data-reveal] [data-local][data-arm="bootFailed"]')
         ?.click();

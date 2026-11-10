@@ -7,15 +7,15 @@ describe("profileFromProto", () => {
   it.each([
     {
       name: "an agent profile",
-      wire: create(shimv1.SessionProfileSchema, { kind: { case: "agent", value: { standing: { kind: { case: "linkedWorkspace", value: {} } } } } }),
-      want: { kind: "agent", standing: "linked_workspace" },
+      wire: create(shimv1.SessionProfileSchema, { kind: { case: "agent", value: { standing: { kind: { case: "linkedWorkspace", value: {} } }, landing: { landing: { case: "throughQueue", value: {} } } } } }),
+      want: { kind: "agent", standing: "linked_workspace", landing: "through_queue" },
     },
     {
       name: "an agent profile in its repository's main workspace",
       wire: create(shimv1.SessionProfileSchema, {
-        kind: { case: "agent", value: { standing: { kind: { case: "mainWorkspace", value: {} } } } },
+        kind: { case: "agent", value: { standing: { kind: { case: "mainWorkspace", value: {} } }, landing: { landing: { case: "throughQueue", value: {} } } } },
       }),
-      want: { kind: "agent", standing: "main_workspace" },
+      want: { kind: "agent", standing: "main_workspace", landing: "through_queue" },
     },
     {
       name: "a chat profile with its prompt",

@@ -775,7 +775,7 @@ describe("the boot", { timeout: BOOT_TIMEOUT_MS }, () => {
 
 /** The evidence lines the topbar's warning chip shows for the client-local ARM. */
 function chipEvidence(arm: string): string[] {
-  document.querySelector<HTMLElement>("#topbar .topbar-warning-chip")?.click();
+  document.querySelector<HTMLElement>("#topbar .topbar-heading-warnings")?.click();
   document
     .querySelector<HTMLElement>(`#topbar [data-reveal] [data-local][data-arm="${arm}"]`)
     ?.click();
