@@ -6,7 +6,7 @@
 ;; COMPLETES TO IT: typing `agent-repl-ski', or `skill', or `skill-mig',
 ;; offers `agent-repl-skill-migration' while that workspace is open.  The
 ;; candidates are the names of every workspace the roster carries that is
-;; not closed (`agent-repl-roster-open-workspace-names'), read from the push
+;; not closed (`agent-repl-roster-open-workspaces'), read from the push
 ;; already in hand, so completion never waits on the daemon.
 ;;
 ;; A NAME WORD is a run of the characters workspace names are made of
@@ -23,6 +23,12 @@
 ;; `on'.  The candidates are narrowed so here, and their table
 ;; (`agent-repl--workspace-completion-table') names its own category, given
 ;; the `substring' style, so a completion UI keeps every one of them.
+;;
+;; EACH NAME IS ANNOTATED WITH ITS REPOSITORY, in a column aligned past the
+;; longest name offered and drawn in a dimmer face
+;; (`agent-repl-workspace-completion-repository'), read from the same push
+;; (`agent-repl-roster-open-workspaces').  Names collide across
+;; repositories, so a name open in several names each of them.
 ;;
 ;; A WORD MATCHING NO OPEN WORKSPACE'S NAME FALLS THROUGH: the capf answers
 ;; nil, so the next completion function answers it.  It decides that by its
@@ -44,13 +50,21 @@
 (require 'cl-lib)
 (require 'subr-x)
 
+(declare-function agent-repl-roster-open-workspaces "agent-repl-roster" ())
 (declare-function agent-repl-roster-open-workspace-names "agent-repl-roster" ())
+(declare-function agent-repl-annotation-column "agent-repl-core" (names gap))
 (declare-function agent-repl-completion-match-capf "completion-match" (beg end table &rest props))
 (declare-function agent-repl-completion-match-table "completion-match" (category collection))
 (declare-function agent-repl-composer-mark-lines "composer-mark" (beg end tag find))
 (declare-function agent-repl--input-composers "input" ())
 
 (defvar agent-repl-roster-update-functions)
+
+(defface agent-repl-workspace-completion-repository
+  '((t :inherit shadow))
+  "Face of the repository column beside each workspace name the composer offers.
+Dimmer than the name, so the name stays what the eye reads first."
+  :group 'agent-repl)
 
 (defconst agent-repl--workspace-completion-name-chars "-a-zA-Z0-9_."
   "The characters a workspace name word is made of, as a `skip-chars' set.")
@@ -94,18 +108,38 @@ style only keeps a completion UI from narrowing them again by prefix.")
   "Return a completion table over NAMES, in this capf's own category."
   (agent-repl-completion-match-table agent-repl--workspace-completion-category names))
 
+(defun agent-repl--workspace-completion-annotation (workspaces)
+  "Return the `:annotation-function' over WORKSPACES, a list of (NAME . REPOSITORIES).
+Each name's annotation is its repositories' names, comma-joined, in
+`agent-repl-workspace-completion-repository', padded so the column starts
+two spaces past the longest name in WORKSPACES.  Empty for a name whose
+repository the daemon did not state."
+  (let ((column (agent-repl-annotation-column (mapcar #'car workspaces) 2)))
+    (lambda (candidate)
+      (let ((repositories (cdr (assoc candidate workspaces))))
+        (if repositories
+            (concat (make-string (- column (string-width candidate)) ?\s)
+                    (propertize (string-join repositories ", ")
+                                'face 'agent-repl-workspace-completion-repository))
+          "")))))
+
 (defun agent-repl-workspace-completion-at-point ()
   "Complete the name word at point against the open workspaces' names.
 The composer's `completion-at-point-functions' entry.  Answers nil when
 point is in no name word, or the word begins a part of no open workspace's
-name.  Deliberately unlogged: completion runs per keystroke."
+name.  Each name is annotated with its repository
+\(`agent-repl--workspace-completion-annotation').  Deliberately unlogged:
+completion runs per keystroke."
   (when-let* ((bounds (agent-repl--workspace-completion-bounds))
               (word (buffer-substring-no-properties (car bounds) (cdr bounds)))
+              (workspaces (agent-repl-roster-open-workspaces))
               (names (agent-repl--workspace-completion-matches
-                      word (agent-repl-roster-open-workspace-names))))
+                      word (mapcar #'car workspaces))))
     (agent-repl-completion-match-capf
      (car bounds) (cdr bounds) (agent-repl--workspace-completion-table names)
-     :annotation-function (lambda (_candidate) " workspace"))))
+     :annotation-function
+     (agent-repl--workspace-completion-annotation
+      (mapcar (lambda (name) (assoc name workspaces)) names)))))
 
 ;;;; ---- Marking open workspaces' names ----
 

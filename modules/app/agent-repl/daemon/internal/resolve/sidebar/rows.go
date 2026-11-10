@@ -25,6 +25,24 @@ type rowContext struct {
 	children map[ids.WorkspaceID][]wsm.Workspace
 }
 
+// rowRepository names REC's repository as its section is headed
+// (`frontend.v1.RosterRow.repository`). A workspace whose repository the
+// registry does not carry is the invariant violation the sections already log
+// and leave out of their grouping (assertRepositoryInvariant); its row is
+// logged the same way and carries no repository.
+func (r *resolver) rowRepository(rec wsm.Workspace, log dlog.Logger) *frontendv1.RosterRowRepository {
+	if repo, ok := r.repositoryOf(rec); ok {
+		return &frontendv1.RosterRowRepository{Name: repo.Name}
+	}
+	log.Error("daemon.sidebar.row_repository", "a row's workspace names a repository the registry does not carry, so the row names no repository",
+		dlog.Context{
+			"repo_id":             string(rec.Repo),
+			"invariant_violation": "workspace.Repo names no registered repository",
+			"remediation":         "re-register the workspace's directory, which mints its repository row, or forget the workspace",
+		})
+	return nil
+}
+
 // row composes one workspace's row, as every list draws it. Its family is
 // its list's own row type's (openRow, hiddenRow).
 func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *frontendv1.RosterRow {
@@ -95,6 +113,7 @@ func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *front
 		// `pending`, so a row without it would never be opened.
 		Availability: availability(s),
 	}
+	out.Repository = r.rowRepository(rec, rowLog)
 	setStatus(out, armName, rowLog)
 	if badge := priorityBadge(rec.Priority); badge != nil {
 		out.Priority = badge

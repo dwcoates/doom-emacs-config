@@ -16,13 +16,22 @@
 
 (require 'cl-lib)
 
-(defmacro agent-repl-test-workspace-completion--with (text names &rest body)
-  "Run BODY in a buffer holding TEXT, point at its end, with NAMES open."
+(defmacro agent-repl-test-workspace-completion--with (text workspaces &rest body)
+  "Run BODY in a buffer holding TEXT, point at its end, with WORKSPACES open.
+Each of WORKSPACES is a name, open in no stated repository, or a
+\(NAME . REPOSITORIES) element as `agent-repl-roster-open-workspaces' answers."
   (declare (indent 2))
   `(with-temp-buffer
      (insert ,text)
-     (cl-letf (((symbol-function 'agent-repl-roster-open-workspace-names) (lambda () ,names)))
+     (cl-letf (((symbol-function 'agent-repl-roster-open-workspaces)
+                (lambda () (mapcar (lambda (ws) (if (consp ws) ws (list ws))) ,workspaces))))
        ,@body)))
+
+(defun agent-repl-test-workspace-completion--annotations (capf)
+  "Every name CAPF's table holds, paired with its annotation, in its order."
+  (let ((annotate (plist-get (nthcdr 3 capf) :annotation-function)))
+    (mapcar (lambda (name) (cons name (funcall annotate name)))
+            (agent-repl-test-workspace-completion--offered capf))))
 
 (defun agent-repl-test-workspace-completion--offered (capf)
   "Every name CAPF's table holds, in its order."
@@ -102,6 +111,49 @@
   (agent-repl-test-workspace-completion--with "(agent-repl" '("agent-repl-skill-migration")
     (let ((capf (agent-repl-workspace-completion-at-point)))
       (should (equal (buffer-substring (nth 0 capf) (nth 1 capf)) "agent-repl")))))
+
+(ert-deftest agent-repl-test-workspace-completion-annotates-each-name-with-its-repository ()
+  "Each offered name's annotation is its repository, in a column past the longest name."
+  (agent-repl-test-workspace-completion--with "fix"
+      '(("fix-a" "doom") ("fix-longer" "zettel"))
+    (should (equal (mapcar (lambda (pair) (cons (car pair) (substring-no-properties (cdr pair))))
+                           (agent-repl-test-workspace-completion--annotations
+                            (agent-repl-workspace-completion-at-point)))
+                   '(("fix-a" . "       doom") ("fix-longer" . "  zettel"))))))
+
+(ert-deftest agent-repl-test-workspace-completion-aligns-past-the-offered-names-only ()
+  "The column is measured over the names offered, not every open workspace."
+  (agent-repl-test-workspace-completion--with "fix"
+      '(("fix" "doom") ("a-much-longer-unoffered-name" "zettel"))
+    (should (equal (substring-no-properties
+                    (cdar (agent-repl-test-workspace-completion--annotations
+                           (agent-repl-workspace-completion-at-point))))
+                   "  doom"))))
+
+(ert-deftest agent-repl-test-workspace-completion-draws-the-repository-dimmer ()
+  "The repository is drawn in its own face, which inherits `shadow'."
+  (agent-repl-test-workspace-completion--with "fix" '(("fix" "doom"))
+    (let ((annotation (cdar (agent-repl-test-workspace-completion--annotations
+                             (agent-repl-workspace-completion-at-point)))))
+      (should (eq (get-text-property (string-search "doom" annotation) 'face annotation)
+                  'agent-repl-workspace-completion-repository))
+      (should (eq (face-attribute 'agent-repl-workspace-completion-repository :inherit)
+                  'shadow)))))
+
+(ert-deftest agent-repl-test-workspace-completion-joins-a-name-open-in-several-repositories ()
+  "A name open in two repositories names both."
+  (agent-repl-test-workspace-completion--with "fix" '(("fix" "doom" "zettel"))
+    (should (equal (substring-no-properties
+                    (cdar (agent-repl-test-workspace-completion--annotations
+                           (agent-repl-workspace-completion-at-point))))
+                   "  doom, zettel"))))
+
+(ert-deftest agent-repl-test-workspace-completion-annotates-nothing-for-an-unstated-repository ()
+  "A name whose repository the daemon did not state is annotated with nothing."
+  (agent-repl-test-workspace-completion--with "fix" '("fix")
+    (should (equal (agent-repl-test-workspace-completion--annotations
+                    (agent-repl-workspace-completion-at-point))
+                   '(("fix" . ""))))))
 
 (ert-deftest agent-repl-test-workspace-completion-is-a-composer-completion ()
   "The composer installs the completion beside the slash-command one."

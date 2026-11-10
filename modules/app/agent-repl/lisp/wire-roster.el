@@ -75,6 +75,22 @@ How many workspaces the section holds; the webview draws it while folded."
      (list :workspaces (agent-repl-wire--decode-uint32
                         "RosterSectionCount" 'workspaces object)))))
 
+(defun agent-repl-wire-roster--decode-repository-name (message value)
+  "Decode VALUE as MESSAGE, a repository message whose only field is `name'.
+Answers the plist `(:name NAME)'.  Every roster message naming a repository
+as its section is headed (a row's repository, an open row's divider)
+shares this one shape."
+  (let ((object (agent-repl-wire--object message value)))
+    (agent-repl-wire--check-keys message object '(name))
+    (agent-repl-wire--decoded
+     message
+     (list :name (agent-repl-wire--decode-string message 'name object)))))
+
+(defun agent-repl-wire-decode-roster-row-repository (value)
+  "Decode VALUE as `RosterRowRepository', a plist `(:name NAME)'.
+The repository the row's workspace belongs to, as its section is headed."
+  (agent-repl-wire-roster--decode-repository-name "RosterRowRepository" value))
+
 (defun agent-repl-wire-decode-roster-row-name (value)
   "Decode VALUE as `RosterRowName', a plist `(:text)'.
 Never an identity or a join key: names collide across repos."
@@ -767,7 +783,7 @@ unknown field by the row's key check."
    "RosterRow" 'status value agent-repl-wire-roster-row-status-arms))
 
 (defconst agent-repl-wire--roster-row-keys
-  (append '(workspace attention priority viewed idleAsyncUnread reviving detachedLive oneShot opening asyncMerging mergePaused lastSelected lastTurnEnded lastTurnBoundary lastTurnStarted closure lastUpdated availability name current when detail closed)
+  (append '(workspace attention priority viewed idleAsyncUnread reviving detachedLive oneShot opening asyncMerging mergePaused lastSelected lastTurnEnded lastTurnBoundary lastTurnStarted closure lastUpdated availability name repository current when detail closed)
           (mapcar #'car agent-repl-wire-roster-row-status-arms))
   "Every key `RosterRow' may carry: its own fields plus the 22 status arms.")
 
@@ -780,7 +796,7 @@ Returns `(:workspace W :attention A :priority P :viewed V
 :last-turn-boundary LB :last-turn-started LS :closure CL
 :last-updated LU
 :availability AV
-:name N :status
+:name N :repository REPO :status
 S :current C :when WHEN :detail D :closed CLOSED)', with the message tree
 preserved as the contract spells it.  A row carries no family: each list
 nests its rows in its own row type (`RosterOpenRow', `RosterHiddenRow')."
@@ -846,6 +862,9 @@ nests its rows in its own row type (`RosterOpenRow', `RosterHiddenRow')."
            :name (agent-repl-wire--decode-message
                   "RosterRow" 'name object
                   #'agent-repl-wire-decode-roster-row-name)
+           :repository (agent-repl-wire--decode-optional-message
+                        "RosterRow" 'repository object
+                        #'agent-repl-wire-decode-roster-row-repository)
            :status (agent-repl-wire-decode-roster-row-status object)
            :current (agent-repl-wire--decode-message
                      "RosterRow" 'current object
@@ -920,12 +939,7 @@ It is never unset: every open row has a tab."
 
 (defun agent-repl-wire-decode-roster-open-row-repository-divider (value)
   "Decode VALUE as `RosterOpenRowRepositoryDivider', a plist `(:name NAME)'."
-  (let ((object (agent-repl-wire--object "RosterOpenRowRepositoryDivider" value)))
-    (agent-repl-wire--check-keys "RosterOpenRowRepositoryDivider" object '(name))
-    (agent-repl-wire--decoded
-     "RosterOpenRowRepositoryDivider"
-     (list :name (agent-repl-wire--decode-string
-                  "RosterOpenRowRepositoryDivider" 'name object)))))
+  (agent-repl-wire-roster--decode-repository-name "RosterOpenRowRepositoryDivider" value))
 
 (defun agent-repl-wire-decode-roster-open-row-children-collapsible (value)
   "Decode VALUE as the empty message `RosterOpenRowChildrenCollapsible'."

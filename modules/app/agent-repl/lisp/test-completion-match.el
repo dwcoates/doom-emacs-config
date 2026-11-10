@@ -144,8 +144,8 @@
     (let ((callers nil))
       (cl-letf (((symbol-function 'agent-repl-completion-match-capf)
                  (lambda (&rest _) (push 'called callers) 'answer))
-                ((symbol-function 'agent-repl-roster-open-workspace-names)
-                 (lambda () '("agent-repl-workspaces"))))
+                ((symbol-function 'agent-repl-roster-open-workspaces)
+                 (lambda () '(("agent-repl-workspaces" "doom")))))
         ;; Act
         (insert "/work")
         (let ((command (agent-repl-command-completion-at-point)))

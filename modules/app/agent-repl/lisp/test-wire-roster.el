@@ -78,11 +78,29 @@ status arm and whatever else the case is about."
                    :last-updated (:at-ms 1)
                    :availability (:arm :available :value nil)
                    :name (:text "fix-flaky")
+                   :repository nil
                    :status (:arm :ready :value nil)
                    :current (:current nil)
                    :when (:arm :no-turn-running :value (:last-turn-ended-at-ms nil))
                    :detail (:branch nil :parent-branch nil :summary nil :commits nil :children nil)
                    :closed (:closed nil)))))
+
+(ert-deftest agent-repl-test-wire-roster-row-decodes-its-repository ()
+  "A row carrying `repository' decodes the repository's name."
+  (should (equal (plist-get (agent-repl-test-wire-roster--decode
+                             #'agent-repl-wire-decode-roster-row
+                             (agent-repl-test-wire-roster--row
+                              "\"ready\":{}" "\"repository\":{\"name\":\"doom\"}"))
+                            :repository)
+                 '(:name "doom"))))
+
+(ert-deftest agent-repl-test-wire-roster-row-repository-refuses-an-extra-key ()
+  "An unknown field inside `RosterRowRepository' is a breach naming that message."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-row
+                  (agent-repl-test-wire-roster--row
+                   "\"ready\":{}" "\"repository\":{\"name\":\"doom\",\"dir\":\"/d\"}"))
+                 '("RosterRowRepository" dir "unknown field"))))
 
 (ert-deftest agent-repl-test-wire-roster-row-decodes-the-one-shot-mark ()
   "A row carrying `oneShot' decodes it as PRESENT."
@@ -617,6 +635,34 @@ name: each one's breach names that message exactly as the helper's does."
       (should (equal (agent-repl-test-wire-roster--breach (car pair) json)
                      (agent-repl-test-wire-roster--breach
                       (lambda (v) (agent-repl-wire-roster--decode-instant (cdr pair) v))
+                      json))))))
+
+;;;; ---- The shared repository-name decoder ----
+
+(ert-deftest agent-repl-test-wire-roster-decode-repository-name-reads-the-name ()
+  "The repository-name decoder answers the plist `(:name)'."
+  (should (equal (agent-repl-test-wire-roster--decode
+                  (lambda (v) (agent-repl-wire-roster--decode-repository-name "Some" v))
+                  "{\"name\":\"doom\"}")
+                 '(:name "doom"))))
+
+(ert-deftest agent-repl-test-wire-roster-decode-repository-name-refuses-an-extra-key ()
+  "An unknown field is a breach naming the MESSAGE the caller passed."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  (lambda (v) (agent-repl-wire-roster--decode-repository-name "Some" v))
+                  "{\"name\":\"doom\",\"extra\":1}")
+                 '("Some" extra "unknown field"))))
+
+(ert-deftest agent-repl-test-wire-roster-repository-name-decoders-share-the-helper ()
+  "Every roster repository-name decoder is the shared helper under its own
+message name: each one's breach names that message exactly as the helper's does."
+  (dolist (pair '((agent-repl-wire-decode-roster-row-repository . "RosterRowRepository")
+                  (agent-repl-wire-decode-roster-open-row-repository-divider
+                   . "RosterOpenRowRepositoryDivider")))
+    (let ((json "{\"name\":\"doom\",\"extra\":1}"))
+      (should (equal (agent-repl-test-wire-roster--breach (car pair) json)
+                     (agent-repl-test-wire-roster--breach
+                      (lambda (v) (agent-repl-wire-roster--decode-repository-name (cdr pair) v))
                       json))))))
 
 ;;;; ---- The shared start decoder ----
