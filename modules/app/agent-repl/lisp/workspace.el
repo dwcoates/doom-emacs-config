@@ -1023,8 +1023,8 @@ Returns:
 
 (defcustom agent-repl-ws-state-icons
   '((:init           . "⏳")
-    ;; 💤 belongs to HIBERNATED: it is the glyph for asleep-on-purpose, and it
-    ;; was always the wrong glyph for the broken half of the old `:dormant'.
+    ;; No state is asleep: a parked workspace is drawn as the idle session it
+    ;; stands in for (the one park, 2026-11-09), so no glyph says "asleep".
     ;; SEVERED gets the unplugged cord.  The substrate between us and the shim
     ;; is gone, which is a different thing from a nap, and the glyph is the only
     ;; distinction the tab-bar carries once the color says "something is wrong".

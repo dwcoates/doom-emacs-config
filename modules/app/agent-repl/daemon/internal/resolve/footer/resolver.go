@@ -37,7 +37,10 @@ type resolver struct {
 	// on every strip. Nil when no deploy is in flight. See update.go.
 	deploy *deployState
 	states map[ids.WorkspaceID]*wsState
-	topics map[ids.WorkspaceID]*publish.Topic[*frontendv1.FooterView]
+	// keepalives is the cache keeper's next scheduled keep-alive per
+	// workspace (wsm.NextKeepalives), under mu.
+	keepalives wsm.NextKeepalives
+	topics     map[ids.WorkspaceID]*publish.Topic[*frontendv1.FooterView]
 	// accounts is every account root's usage evidence, keyed by the root's
 	// path and shared by the workspaces bound to it (account.go).
 	accounts map[string]*accountUsage
@@ -81,12 +84,13 @@ func newResolver(colors vocab.RenderColors, log dlog.Surfaces, opts ...Option) (
 		accounts[rec.ConfigDir] = usageFromRecord(rec)
 	}
 	return &resolver{
-		log:       log,
-		opts:      o,
-		states:    map[ids.WorkspaceID]*wsState{},
-		topics:    map[ids.WorkspaceID]*publish.Topic[*frontendv1.FooterView]{},
-		accounts:  accounts,
-		persisted: map[string]uint64{},
+		log:        log,
+		opts:       o,
+		states:     map[ids.WorkspaceID]*wsState{},
+		keepalives: wsm.NextKeepalives{},
+		topics:     map[ids.WorkspaceID]*publish.Topic[*frontendv1.FooterView]{},
+		accounts:   accounts,
+		persisted:  map[string]uint64{},
 	}, nil
 }
 
@@ -813,11 +817,28 @@ func (r *resolver) SetUpdating(ws ids.WorkspaceID, updating bool) {
 		dlog.Context{"updating": updating}, func(s *wsState) { s.updating = updating })
 }
 
-// SetParked installs, or lifts with wsm.ParkNone, the daemon's park. Both
-// parks draw alike here: an idle status, never a dead link.
-func (r *resolver) SetParked(ws ids.WorkspaceID, park wsm.Park) {
+// SetParked installs, or lifts, the daemon's park. A park draws an idle
+// status, never a dead link.
+func (r *resolver) SetParked(ws ids.WorkspaceID, parked bool) {
 	r.mutate(ws, "daemon.footer.set_parked", "the footer took the daemon's park",
-		dlog.Context{"park": park.String()}, func(s *wsState) { s.parked = park != wsm.ParkNone })
+		dlog.Context{"parked": parked}, func(s *wsState) { s.parked = parked })
+}
+
+// SetNextKeepalive takes the cache keeper's next scheduled keep-alive, the
+// zero time for none. It is the keeper's fact, stated for workspaces this
+// view may not have bound yet, so it is held in the resolver's own table
+// rather than a workspace's state, and it publishes nothing: no view draws
+// it. The keeper records each schedule itself (daemon.cachelapse.drive).
+func (r *resolver) SetNextKeepalive(ws ids.WorkspaceID, next time.Time) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.keepalives.Set(ws, next)
+}
+
+// parkLocked is WS's park as one fact: whether one stands, with the next
+// scheduled keep-alive held for it. r.mu is held.
+func (r *resolver) parkLocked(ws ids.WorkspaceID, s *wsState) wsm.Park {
+	return r.keepalives.Park(ws, s.parked)
 }
 
 // SetAwaiting installs, or lifts with an empty name, the workspace this one

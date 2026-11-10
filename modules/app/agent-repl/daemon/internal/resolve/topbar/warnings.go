@@ -43,7 +43,8 @@ func (r *resolver) warningStrip(s *wsState) *frontendv1.TopbarWarningStrip {
 // sessionlessWarning is the workspace's session-less state, as a LINE.
 //
 // THE FACT MUST NOT BE LOST. The whole-view `hibernated` and `cold_gate`
-// states were retired by the FIXED SCHEMA ruling (2026-09-13), and this is
+// states were retired (and the hibernated park itself retired into the one
+// park on 2026-11-09, which states no line at all) by the FIXED SCHEMA ruling (2026-09-13), and this is
 // where the fact they carried went: the strip is one shape, so a state that
 // used to replace it is now a sentence in the list of things a reader should
 // know. The same sentence heads the context chip's hover, because it is one

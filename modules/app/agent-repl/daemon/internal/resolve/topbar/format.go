@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"time"
 
 	"agent-repld/internal/figures"
 	"google.golang.org/protobuf/types/known/structpb"
@@ -20,16 +19,6 @@ func formatTokens(n int64) string {
 		n = 0
 	}
 	return figures.Tokens(uint64(n))
-}
-
-// clockTime renders an instant as the wall clock a reader reads it by.
-//
-// AN INSTANT, NEVER A DURATION. Ages tick CLIENT-SIDE everywhere here, because
-// the topbar is republished on facts and never on a clock: a duration composed
-// daemon-side would freeze at whatever it read when the fact landed. A wall
-// clock does not — "hibernated since 14:03" is as true an hour later.
-func clockTime(ms int64) string {
-	return time.UnixMilli(ms).Format("15:04")
 }
 
 // trimZero drops a trailing ".0" so "18.0k" draws as "18k".

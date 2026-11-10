@@ -762,7 +762,7 @@ func TestAHibernatedSessionStaysLiveWithTheShimUnattached(t *testing.T) {
 		Workspace:       testWorkspaceID,
 		HostSessionID:   "host-1",
 		VendorSessionID: "vendor-1",
-		Terminal:        &wsm.SessionTerminal{Kind: "hibernated"},
+		Terminal:        &wsm.SessionTerminal{Kind: wsm.TerminalParked},
 	}}
 
 	// Act.

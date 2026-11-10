@@ -500,7 +500,7 @@ func TestTheFooterAndTheRosterAlwaysMakeTheSameCoarseClaim(t *testing.T) {
 				session = &wsm.Session{Workspace: theWS}
 			}
 			if row.parked {
-				session.Terminal = &wsm.SessionTerminal{Kind: "hibernated", At: epoch}
+				session.Terminal = &wsm.SessionTerminal{Kind: wsm.TerminalParked, At: epoch}
 			}
 			s := newSurfaces(t, session)
 			lc.apply(s)
@@ -508,7 +508,7 @@ func TestTheFooterAndTheRosterAlwaysMakeTheSameCoarseClaim(t *testing.T) {
 			s.footer.SetMerge(theWS, mergeFacts)
 			s.roster.SetMerge(theWS, mergeFacts)
 			if row.parked {
-				s.footer.SetParked(theWS, wsm.ParkHibernated)
+				s.footer.SetParked(theWS, true)
 			}
 
 			// Act

@@ -608,7 +608,7 @@ func run(ctx context.Context, opts options, h hooks) error {
 	//
 	// AND THE EXIT JOINS THEM, for the same reason the watchers and the merge
 	// drain are joined above. A loop's iteration reads and writes the state
-	// client off its OWN goroutine: the drain sweep's hibernation releases the
+	// client off its OWN goroutine: the drain sweep's park releases the
 	// lease and then tells the prompt queue, and a SIGTERM landing inside that
 	// step left `daemon.promptqueue.lease_changed: could not read the standing
 	// holds — sql: database is closed` in the log of an ORDERLY exit

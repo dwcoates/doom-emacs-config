@@ -1159,7 +1159,7 @@ func TestAParkedSessionIsNeverDisconnectedWhateverItsLink(t *testing.T) {
 	h.r.OnLink(testWS, shimclient.LinkRedialing)
 
 	// Act
-	h.r.SetParked(testWS, wsm.ParkHibernated)
+	h.r.SetParked(testWS, true)
 
 	// Assert
 	if got := h.status(t); got != "idle" {
@@ -1167,14 +1167,14 @@ func TestAParkedSessionIsNeverDisconnectedWhateverItsLink(t *testing.T) {
 	}
 }
 
-func TestAKeepaliveCycleParkIsIdleOverADeadLink(t *testing.T) {
-	// Arrange: the shim was stood down between keep-alives, its link dead.
+func TestAParkIsIdleOverADeadLink(t *testing.T) {
+	// Arrange: the shim was stood down while idle, its link dead.
 	h := newHarness(t)
 	h.r.SetParticipants(testWS, true, true)
 	h.r.OnLink(testWS, shimclient.LinkDead)
 
 	// Act
-	h.r.SetParked(testWS, wsm.ParkKeepaliveCycle)
+	h.r.SetParked(testWS, true)
 
 	// Assert
 	if got := h.status(t); got != "idle" {
@@ -1186,11 +1186,11 @@ func TestAKeepaliveCycleParkIsIdleOverADeadLink(t *testing.T) {
 // every shim start shows, a keep-alive cycle's or a prompt's restore of a
 // parked session included.
 func TestAParkedSessionComingBackIsStarting(t *testing.T) {
-	// Arrange: parked between keep-alives, its link dead.
+	// Arrange: parked while idle, its link dead.
 	h := newHarness(t)
 	h.r.SetParticipants(testWS, true, true)
 	h.r.OnLink(testWS, shimclient.LinkDead)
-	h.r.SetParked(testWS, wsm.ParkKeepaliveCycle)
+	h.r.SetParked(testWS, true)
 
 	// Act: the restore dials the new shim.
 	h.r.OnLink(testWS, shimclient.LinkDialing)
@@ -1206,10 +1206,10 @@ func TestLiftingAParkDrawsTheDeadLinkAgain(t *testing.T) {
 	h := newHarness(t)
 	h.r.SetParticipants(testWS, true, true)
 	h.r.OnLink(testWS, shimclient.LinkDead)
-	h.r.SetParked(testWS, wsm.ParkKeepaliveCycle)
+	h.r.SetParked(testWS, true)
 
 	// Act
-	h.r.SetParked(testWS, wsm.ParkNone)
+	h.r.SetParked(testWS, false)
 
 	// Assert
 	if got := h.status(t); got == "idle" {
@@ -1444,7 +1444,7 @@ func TestAParkedSessionWithADeadLinkIsIdleAndNeverDisconnected(t *testing.T) {
 	h.r.OnLink(testWS, shimclient.LinkDead)
 
 	// Act
-	h.r.SetParked(testWS, wsm.ParkHibernated)
+	h.r.SetParked(testWS, true)
 
 	// Assert
 	if got := h.status(t); got != "idle" {
@@ -1462,7 +1462,7 @@ func TestAParkThatWasRevivedNoLongerMasksARealDeath(t *testing.T) {
 	h := newHarness(t)
 	connected(h)
 	h.r.OnLink(testWS, shimclient.LinkDead)
-	h.r.SetParked(testWS, wsm.ParkHibernated)
+	h.r.SetParked(testWS, true)
 	connected(h)
 
 	// Act: the revived shim dies for real.
@@ -1608,7 +1608,7 @@ func TestEveryWaitingLineStandsFromWhenItsConditionOpened(t *testing.T) {
 			h.clock.Advance(time.Minute)
 
 			// Act
-			h.r.SetParked(testWS, wsm.ParkNone)
+			h.r.SetParked(testWS, false)
 
 			// Assert
 			at := tt.at(h.view(t).GetStrip().GetStatus())
@@ -1644,7 +1644,7 @@ func TestTheCloseRefusalStandsFromWhenItWasRefused(t *testing.T) {
 	h.clock.Advance(time.Minute)
 
 	// Act
-	h.r.SetParked(testWS, wsm.ParkNone)
+	h.r.SetParked(testWS, false)
 
 	// Assert
 	at := h.view(t).GetStrip().GetStatus().GetClosing().GetActivity().GetSalient().GetAt()
@@ -2173,5 +2173,47 @@ func TestANewHopDownAfterServedWorkIsSeveredAgain(t *testing.T) {
 	// Assert
 	if got := h.status(t); got != "agent_repl_fault" {
 		t.Fatalf("status = %q, want severed: a new hop-down starts with no proof of work over it", got)
+	}
+}
+
+func TestTheFootersParkCarriesTheNextKeepalive(t *testing.T) {
+	next := instant.Add(52 * time.Minute)
+	tests := []struct {
+		name    string
+		arrange func(r *resolver)
+		want    wsm.Park
+	}{
+		{name: "a park raised after the schedule carries it", want: wsm.Parked(next), arrange: func(r *resolver) {
+			r.SetNextKeepalive(testWS, next)
+			r.SetParked(testWS, true)
+		}},
+		{name: "a park with no keep-alive scheduled carries none", want: wsm.Parked(time.Time{}), arrange: func(r *resolver) {
+			r.SetParked(testWS, true)
+		}},
+		{name: "a schedule alone raises no park", want: wsm.ParkNone, arrange: func(r *resolver) {
+			r.SetNextKeepalive(testWS, next)
+		}},
+		{name: "a revival's link lifts the park", want: wsm.ParkNone, arrange: func(r *resolver) {
+			r.SetNextKeepalive(testWS, next)
+			r.SetParked(testWS, true)
+			r.OnLink(testWS, shimclient.LinkDialing)
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+
+			// Act
+			tt.arrange(h.r)
+
+			// Assert
+			h.r.mu.Lock()
+			got := h.r.parkLocked(testWS, h.r.states[testWS])
+			h.r.mu.Unlock()
+			if got != tt.want {
+				t.Fatalf("park = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }

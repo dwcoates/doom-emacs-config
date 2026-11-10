@@ -106,7 +106,7 @@ function compactAndResumeButton(el: HTMLElement): Control | null {
 
 /** The submenu's send button, in whichever mode it stands. */
 function submenuSend(el: HTMLElement): Control | null {
-  return el.querySelector<Control>(".cold-gate-submenu > .hibernation-compact");
+  return el.querySelector<Control>(".cold-gate-submenu > .cold-gate-compact");
 }
 
 /** A gate row in one STATE. */
@@ -203,12 +203,12 @@ describe("scopeLabel", () => {
 describe("the standing gate", () => {
   it("draws the title from the one copy object", () => {
     const el = drawFeedColdGate(gate(standing()), askHarness().rc);
-    expect(el.querySelector(".hibernation-heading")?.textContent).toBe(COLD_GATE_COPY.title);
+    expect(el.querySelector(".cold-gate-heading")?.textContent).toBe(COLD_GATE_COPY.title);
   });
 
   it("formats the raw token count into the lead", () => {
     const el = drawFeedColdGate(gate(standing({ tokens: 182_000n })), askHarness().rc);
-    expect(el.querySelector(".hibernation-context")?.textContent).toContain("182k");
+    expect(el.querySelector(".cold-gate-context")?.textContent).toContain("182k");
   });
 
   it("colors the token figure by its window fill on the cold-gate gradient", () => {
@@ -241,20 +241,20 @@ describe("the standing gate", () => {
 
   it("names the session's model verbatim in the lead", () => {
     const el = drawFeedColdGate(gate(standing()), askHarness().rc);
-    expect(el.querySelector(".hibernation-context")?.textContent).toContain(MODEL);
+    expect(el.querySelector(".cold-gate-context")?.textContent).toContain(MODEL);
   });
 
   it("ticks the lapse from the last vendor request", () => {
     vi.setSystemTime(7_200_000);
     const el = drawFeedColdGate(gate(standing({ lastRequestMs: 0n })), askHarness().rc);
-    expect(el.querySelector(".hibernation-since")?.textContent).toBe("last vendor request 2h ago");
+    expect(el.querySelector(".cold-gate-since")?.textContent).toBe("last vendor request 2h ago");
   });
 
   it("keeps ticking the lapse as the gate stands", async () => {
     const el = drawFeedColdGate(gate(standing({ lastRequestMs: 0n })), askHarness().rc);
     document.body.append(el);
     await vi.advanceTimersByTimeAsync(65_000);
-    expect(el.querySelector(".hibernation-since")?.textContent).toBe("last vendor request 1m 5s ago");
+    expect(el.querySelector(".cold-gate-since")?.textContent).toBe("last vendor request 1m 5s ago");
   });
 
   it("keeps ticking the lapse after its turn's clocks are stopped", async () => {
@@ -262,7 +262,7 @@ describe("the standing gate", () => {
     document.body.append(el);
     stopClocks(el);
     await vi.advanceTimersByTimeAsync(65_000);
-    expect(el.querySelector(".hibernation-since")?.textContent).toBe("last vendor request 1m 5s ago");
+    expect(el.querySelector(".cold-gate-since")?.textContent).toBe("last vendor request 1m 5s ago");
   });
 
   it("reads the lapse's nearest second when a tick samples just short of one", () => {
@@ -270,7 +270,7 @@ describe("the standing gate", () => {
     vi.setSystemTime(4920);
     const el = drawFeedColdGate(gate(standing({ lastRequestMs: 0n })), askHarness().rc);
     // Assert: five real seconds of lapse reads 5s, not the lagging 4s.
-    expect(el.querySelector(".hibernation-since")?.textContent).toBe("last vendor request 5s ago");
+    expect(el.querySelector(".cold-gate-since")?.textContent).toBe("last vendor request 5s ago");
   });
 
   it("draws the pay and clear buttons", () => {
@@ -311,7 +311,7 @@ describe("the standing gate", () => {
 
   it("draws no explanatory sentence beside the buttons", () => {
     const el = drawFeedColdGate(gate(standing()), askHarness().rc);
-    expect(el.querySelector(".hibernation-option-text")).toBeNull();
+    expect(el.querySelector(".cold-gate-option-text")).toBeNull();
   });
 
   it("puts every button on the one row, compact first", () => {
@@ -326,16 +326,16 @@ describe("the standing gate", () => {
   });
 
   it("gives compact the pay button's fill and a green border", () => {
-    const rule = /\.cold-gate-buttons > ar-button\.hibernation-compact\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
+    const rule = /\.cold-gate-buttons > ar-button\.cold-gate-compact\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
     expect([rule.includes("background: var(--bg)"), rule.includes("border-color: var(--cold-gate-compact-border)")]).toEqual([true, true]);
   });
 
   it("draws clear's label in the shared colour, borders half again as thick", () => {
     expect([
-      css.includes(".cold-gate-buttons > ar-button.hibernation-clear { color: var(--fg); border-color: var(--info-tokens); }"),
+      css.includes(".cold-gate-buttons > ar-button.cold-gate-clear { color: var(--fg); border-color: var(--info-tokens); }"),
       css.includes(".cold-gate-buttons > ar-button { border-width: 1.5px; }"),
       css.includes("--cold-gate-compact-border: #128a3d;"),
-      css.includes(".cold-gate .hibernation-actions:has(> .cold-gate-buttons) { margin-bottom: 0.45rem; }"),
+      css.includes(".cold-gate .cold-gate-actions:has(> .cold-gate-buttons) { margin-bottom: 0.45rem; }"),
     ]).toEqual([true, true, true, true]);
   });
 
@@ -364,7 +364,7 @@ describe("the standing gate", () => {
   it("draws pay and resume with the red border", () => {
     // Arrange
     // Act
-    const rule = /\.cold-gate-buttons > ar-button\.hibernation-direct\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
+    const rule = /\.cold-gate-buttons > ar-button\.cold-gate-direct\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
     // Assert
     expect(rule.includes("border-color: var(--err)")).toBe(true);
   });
@@ -373,7 +373,7 @@ describe("the standing gate", () => {
     // Act
     const el = drawFeedColdGate(gate(standing()), askHarness().rc);
     // Assert
-    expect(el.querySelector(".cold-gate-buttons > .hibernation-clear")?.textContent).toBe("clear context");
+    expect(el.querySelector(".cold-gate-buttons > .cold-gate-clear")?.textContent).toBe("clear context");
   });
 
   it("sizes the buttons equal, to the widest label, centred", () => {
@@ -661,7 +661,7 @@ describe("answering the gate", () => {
     const el = drawFeedColdGate(gate(standing()), h.rc);
     el.querySelector<Control>('[data-cold-gate="pay"]')?.click();
     await settle();
-    expect(el.querySelector(".hibernation-actions .refusal")?.getAttribute("data-arm")).toBe(
+    expect(el.querySelector(".cold-gate-actions .refusal")?.getAttribute("data-arm")).toBe(
       "transport",
     );
   });
@@ -674,7 +674,7 @@ describe("answering the gate", () => {
     const el = drawFeedColdGate(gate(standing()), h.rc);
     el.querySelector<Control>('[data-cold-gate="pay"]')?.click();
     await settle();
-    expect(el.querySelector(".hibernation-actions .refusal")?.textContent).toContain(
+    expect(el.querySelector(".cold-gate-actions .refusal")?.textContent).toContain(
       REFUSED_START,
     );
   });
@@ -684,7 +684,7 @@ describe("answering the gate", () => {
     const el = drawFeedColdGate(gate(standing()), h.rc);
     el.querySelector<Control>('[data-cold-gate="pay"]')?.click();
     await settle();
-    expect(el.querySelector(".hibernation-actions .refusal")?.getAttribute("data-arm")).toBe(
+    expect(el.querySelector(".cold-gate-actions .refusal")?.getAttribute("data-arm")).toBe(
       "failed",
     );
   });
@@ -746,7 +746,7 @@ describe("a refused gate answer", () => {
       const el = drawFeedColdGate(gate(standing()), h.rc);
       el.querySelector<Control>('[data-cold-gate="pay"]')?.click();
       await settle();
-      const drawn = el.querySelector(".hibernation-actions .refusal");
+      const drawn = el.querySelector(".cold-gate-actions .refusal");
       expect([drawn?.getAttribute("data-arm"), drawn?.textContent]).toEqual([c.arm, c.text]);
     });
   }
@@ -759,7 +759,7 @@ describe("a refused gate answer", () => {
     const el = drawFeedColdGate(gate(standing()), h.rc);
     el.querySelector<Control>('[data-cold-gate="pay"]')?.click();
     await settle();
-    expect(el.querySelector(".hibernation-actions .refusal")?.textContent).toBe(
+    expect(el.querySelector(".cold-gate-actions .refusal")?.textContent).toBe(
       "the session did not come back from the re-open",
     );
   });
@@ -801,7 +801,7 @@ describe("a refused gate answer", () => {
     // An error with no cause set is a frame this build cannot read, not a
     // refusal with no words: it is reported through the failure sink, and no
     // sentence is invented at the control (src/rpc/refuse.ts).
-    expect(el.querySelector(".hibernation-actions .refusal")).toBeNull();
+    expect(el.querySelector(".cold-gate-actions .refusal")).toBeNull();
   });
 });
 
@@ -1333,7 +1333,7 @@ describe("the hide workspace button", () => {
     const el = drawFeedColdGate(gate(standing()), h.rc);
     hideButton(el)?.click();
     await settle();
-    const drawn = el.querySelector(".hibernation-actions .refusal");
+    const drawn = el.querySelector(".cold-gate-actions .refusal");
     expect([drawn?.getAttribute("data-arm"), drawn?.textContent]).toEqual([
       "unknownWorkspace",
       "the daemon does not know this workspace",
@@ -1353,7 +1353,7 @@ describe("the hide workspace button", () => {
     const el = drawFeedColdGate(gate(standing()), h.rc);
     hideButton(el)?.click();
     await settle();
-    expect(el.querySelector(".hibernation-actions .refusal")?.getAttribute("data-arm")).toBe("transport");
+    expect(el.querySelector(".cold-gate-actions .refusal")?.getAttribute("data-arm")).toBe("transport");
   });
 
   it("gives the buttons back after a hide that threw", async () => {
@@ -1371,7 +1371,7 @@ describe("the hide workspace button", () => {
     await settle();
     hideButton(el)?.click();
     await settle();
-    expect(el.querySelectorAll(".hibernation-actions .refusal").length).toBe(1);
+    expect(el.querySelectorAll(".cold-gate-actions .refusal").length).toBe(1);
   });
 
   it("states an unset cause as unreadable rather than as a cause", async () => {
@@ -1381,7 +1381,7 @@ describe("the hide workspace button", () => {
     const el = drawFeedColdGate(gate(standing()), h.rc);
     hideButton(el)?.click();
     await settle();
-    expect(el.querySelector(".hibernation-actions .refusal")).toBeNull();
+    expect(el.querySelector(".cold-gate-actions .refusal")).toBeNull();
   });
 
   it("logs the hide with the workspace it hides", async () => {
@@ -1472,7 +1472,7 @@ describe("the kill workspace button", () => {
     const el = drawFeedColdGate(gate(standing()), h.rc);
     killButton(el)?.click();
     await settle();
-    const drawn = el.querySelector(".hibernation-actions .refusal");
+    const drawn = el.querySelector(".cold-gate-actions .refusal");
     expect([drawn?.getAttribute("data-arm"), drawn?.textContent]).toEqual([
       "unknownWorkspace",
       "the daemon does not know this workspace",
@@ -1492,7 +1492,7 @@ describe("the kill workspace button", () => {
     const el = drawFeedColdGate(gate(standing()), h.rc);
     killButton(el)?.click();
     await settle();
-    expect(el.querySelector(".hibernation-actions .refusal")?.getAttribute("data-arm")).toBe("transport");
+    expect(el.querySelector(".cold-gate-actions .refusal")?.getAttribute("data-arm")).toBe("transport");
   });
 
   it("gives the buttons back after a kill that threw", async () => {
@@ -1510,7 +1510,7 @@ describe("the kill workspace button", () => {
     const el = drawFeedColdGate(gate(standing()), h.rc);
     killButton(el)?.click();
     await settle();
-    expect(el.querySelector(".hibernation-actions .refusal")).toBeNull();
+    expect(el.querySelector(".cold-gate-actions .refusal")).toBeNull();
   });
 
   it("logs the kill with the workspace it kills", async () => {
@@ -1535,7 +1535,7 @@ describe("workspaceVerbFromGate", () => {
   function gateRow(): { actions: HTMLElement; buttons: Control[] } {
     const el = drawFeedColdGate(gate(standing()), askHarness().rc);
     return {
-      actions: el.querySelector<HTMLElement>(".hibernation-actions") as HTMLElement,
+      actions: el.querySelector<HTMLElement>(".cold-gate-actions") as HTMLElement,
       buttons: [...el.querySelectorAll<Control>("ar-button")],
     };
   }

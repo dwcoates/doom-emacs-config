@@ -40,7 +40,7 @@ export type IngressStatus = NonNullable<HeldIngressPromptBadge["standsFor"]["cas
 /**
  * Each status's badge color, the held badges' palette (held-prompt.ts):
  * waiting on nothing in particular, muted; on a session or a daemon coming
- * up, the hibernation teal; on coordinated daemon work, amber; on a fault,
+ * up, the revival teal; on coordinated daemon work, amber; on a fault,
  * the error red.
  */
 export const INGRESS_STATUS_BADGES = {

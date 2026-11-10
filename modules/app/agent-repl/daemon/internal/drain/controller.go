@@ -89,9 +89,9 @@ type controller struct {
 	// scheduled are the drain holds taken when the schedule was put in force,
 	// by workspace.
 	scheduled map[ids.WorkspaceID]ids.LeaseID
-	// retries is the idle sweep's backoff for workspaces whose hibernation
-	// FAILED, by workspace. See hibernateRetryDelay.
-	retries map[ids.WorkspaceID]hibernateRetry
+	// retries is the idle sweep's backoff for workspaces whose park
+	// FAILED, by workspace. See parkRetryDelay.
+	retries map[ids.WorkspaceID]parkRetry
 	// withheld are the stand-downs of withheld workspaces, pending or
 	// running, by workspace (withheld.go).
 	withheld map[ids.WorkspaceID]*withheldState

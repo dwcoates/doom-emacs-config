@@ -816,8 +816,8 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Restore: func(ws ids.WorkspaceID, done func(error)) {
 			fleet.StartDetached(ws, shimlife.StartKeepalive, func(err error) {
 				if err == nil {
-					footerResolver.SetParked(ws, wsm.ParkNone)
-					topbarResolver.SetParked(ws, wsm.ParkNone)
+					footerResolver.SetParked(ws, false)
+					topbarResolver.SetParked(ws, false)
 				}
 				done(err)
 			})
@@ -826,6 +826,13 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Log:   p.Surfaces,
 		// Every beat, lapse and cold gate lands in the metrics surface.
 		Telemetry: p.Metrics,
+		// THE PARK'S NEXT KEEP-ALIVE: both session-scoped views hold it for
+		// every workspace, so a park raised at any moment carries the
+		// current one (wsm.Park).
+		NextKeepalive: func(ws ids.WorkspaceID, next time.Time) {
+			footerResolver.SetNextKeepalive(ws, next)
+			topbarResolver.SetNextKeepalive(ws, next)
+		},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("agent-repld: build the cache keeper: %w", err)
@@ -1273,15 +1280,15 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		// The verbs own the roster's durable half and are built AFTER this
 		// controller, so the republish reads them out of the forwarder --
 		// exactly as the merge orchestrator's own roster republish does.
-		PublishRegistry: verbsRef.publishRegistry("a session was hibernated"),
+		PublishRegistry: verbsRef.publishRegistry("a session was parked"),
 		// ONE PARK, ONE CALL, BOTH SESSION-SCOPED SURFACES. The footer's strip
 		// and the topbar's indicator each draw the shim link, and the roster
 		// promises they agree with it about the same link
 		// (resolve/sidebar/status.go's linkArm); telling them from one closure
 		// is what makes a park they could disagree about unrepresentable.
-		SetParked: func(ws ids.WorkspaceID, park wsm.Park) {
-			footerResolver.SetParked(ws, park)
-			topbarResolver.SetParked(ws, park)
+		SetParked: func(ws ids.WorkspaceID, parked bool) {
+			footerResolver.SetParked(ws, parked)
+			topbarResolver.SetParked(ws, parked)
 		},
 		Exit: orderlyExit(func() { p.Exit(standDownOrderly) }),
 		// A WITHHELD WORKSPACE'S STAND-DOWN runs on the fleet's detached

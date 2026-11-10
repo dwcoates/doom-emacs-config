@@ -340,7 +340,7 @@ func TestPublishRegistryCarriesEachWorkspacesSessionRecord(t *testing.T) {
 	}
 	f.db.sessions[record.ID] = wsm.Session{
 		Workspace: record.ID,
-		Terminal:  &wsm.SessionTerminal{Kind: "hibernated"},
+		Terminal:  &wsm.SessionTerminal{Kind: wsm.TerminalParked},
 	}
 
 	// Act
@@ -353,8 +353,8 @@ func TestPublishRegistryCarriesEachWorkspacesSessionRecord(t *testing.T) {
 	if len(published.Sessions) != 1 {
 		t.Fatalf("published sessions = %+v, want the one registered workspace's record", published.Sessions)
 	}
-	if got := published.Sessions[0].Terminal; got == nil || got.Kind != "hibernated" {
-		t.Fatalf("published session terminal = %+v, want the hibernated stand-down the roster reads", got)
+	if got := published.Sessions[0].Terminal; got == nil || got.Kind != wsm.TerminalParked {
+		t.Fatalf("published session terminal = %+v, want the park the roster reads", got)
 	}
 }
 
@@ -461,7 +461,7 @@ func TestRegisterStartsNoShim(t *testing.T) {
 		terminal *wsm.SessionTerminal
 	}{
 		{name: "a recorded conversation with no terminal"},
-		{name: "a hibernated session", terminal: &wsm.SessionTerminal{Kind: "hibernated", Detail: "idle past the cutoff"}},
+		{name: "a parked session", terminal: &wsm.SessionTerminal{Kind: wsm.TerminalParked, Detail: "idle past the cutoff"}},
 		{name: "a deleted session", terminal: &wsm.SessionTerminal{Kind: "deleted", Detail: "NukeWorkspace"}},
 	}
 	for _, tc := range cases {

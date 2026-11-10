@@ -99,7 +99,7 @@ type options struct {
 	// defaultConfigDir is the account config root for every other workspace.
 	defaultConfigDir string
 	// idleCutoff is how long a session may go unengaged before the idle sweep
-	// hibernates it.
+	// parks it.
 	idleCutoff time.Duration
 	// foldStandDownDelay is how long a session a collapse folded keeps
 	// running before it is stood down; zero is drain.FoldStandDownDelay.
@@ -279,7 +279,7 @@ func newFlagSets(program string, opts *options) (config, boot *flag.FlagSet) {
 	config.StringVar(&opts.promptsDir, "prompts-dir", "", "prompts directory the briefs are read from")
 	config.StringVar(&opts.multiRepoConfigDir, "multi-repo-config-dir", "", "account config root for workspaces under the multi-repo root")
 	config.StringVar(&opts.defaultConfigDir, "default-config-dir", "", "account config root for every other workspace")
-	config.DurationVar(&opts.idleCutoff, "idle-cutoff", 0, "how long a session may go unengaged before the idle sweep hibernates it")
+	config.DurationVar(&opts.idleCutoff, "idle-cutoff", 0, "how long a session may go unengaged before the idle sweep parks it")
 	config.DurationVar(&opts.foldStandDownDelay, "fold-stand-down-delay", 0, "how long a session in a collapsed section keeps running before it is stood down (default 5m)")
 	config.IntVar(&opts.feedTailRetention, "feed-tail-retention", 0, "how many published rows one feed retains for a tail's replay (0 uses the built-in default)")
 	config.DurationVar(&opts.footerMomentaryDwell, "footer-momentary-dwell", 0, "how long a momentary footer status stands before its successor push retires it (0 uses the built-in default)")

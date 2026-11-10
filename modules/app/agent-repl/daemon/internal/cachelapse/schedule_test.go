@@ -16,10 +16,10 @@ import (
 	"agent-repld/internal/wsm"
 )
 
-// parkedSession is a session the keep-alive cycle stood down.
+// parkedSession is a session stood down while idle: the one park.
 func parkedSession(ws ids.WorkspaceID) wsm.Session {
 	s := liveSession(ws)
-	s.Terminal = &wsm.SessionTerminal{Kind: wsm.TerminalKeepaliveCycle}
+	s.Terminal = &wsm.SessionTerminal{Kind: wsm.TerminalParked}
 	return s
 }
 
@@ -94,9 +94,9 @@ func TestScheduleArmsNoBeat(t *testing.T) {
 			s.Terminal = &wsm.SessionTerminal{Kind: "killed"}
 			h.db.sessions[theWorkspace] = s
 		}},
-		{name: "when the session is hibernated", arrange: func(h *harness) {
-			s := liveSession(theWorkspace)
-			s.Terminal = &wsm.SessionTerminal{Kind: wsm.TerminalHibernated}
+		{name: "when the session is parked past the cutoff by the beat", arrange: func(h *harness) {
+			s := parkedSession(theWorkspace)
+			s.LastEngagementAt = now.Add(-6 * time.Hour)
 			h.db.sessions[theWorkspace] = s
 		}},
 		{name: "when it will be idle past the cutoff by the beat", arrange: func(h *harness) {

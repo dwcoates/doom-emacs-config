@@ -33,12 +33,12 @@ function card(docked: boolean, submenu: boolean): string {
     .map((m) => `<label class="cold-gate-choice"><input type="radio" name="m"><span>${m}</span></label>`)
     .join("");
   return `<div class="cold-gate${docked ? ` ${DOCKED_CARD_CLASS}` : ""}" data-state="standing">
-    <div class="hibernation-head"><span class="hibernation-heading">Cold context</span><span class="hibernation-since">last request 2h ago</span></div>
-    <div class="hibernation-context">Resuming re-reads <span class="cold-gate-tokens">412k</span> tokens with claude-opus.</div>
-    <div class="hibernation-actions">
-      <div class="cold-gate-buttons"><ar-button class="hibernation-compact">Compact</ar-button><ar-button class="hibernation-clear">Clear</ar-button><ar-button class="hibernation-direct">Pay and resume</ar-button></div>
-      <div class="cold-gate-submenu"${submenu ? "" : " hidden"}><div class="cold-gate-submenu-label">Summarizer</div><div class="cold-gate-choices list-rows">${choices}</div><div class="cold-gate-submenu-label">Scope</div><div class="cold-gate-choices list-rows">${choices}</div><ar-button class="hibernation-compact">Compact</ar-button></div>
-      <div class="hibernation-pending" hidden></div>
+    <div class="cold-gate-head"><span class="cold-gate-heading">Cold context</span><span class="cold-gate-since">last request 2h ago</span></div>
+    <div class="cold-gate-context">Resuming re-reads <span class="cold-gate-tokens">412k</span> tokens with claude-opus.</div>
+    <div class="cold-gate-actions">
+      <div class="cold-gate-buttons"><ar-button class="cold-gate-compact">Compact</ar-button><ar-button class="cold-gate-clear">Clear</ar-button><ar-button class="cold-gate-direct">Pay and resume</ar-button></div>
+      <div class="cold-gate-submenu"${submenu ? "" : " hidden"}><div class="cold-gate-submenu-label">Summarizer</div><div class="cold-gate-choices list-rows">${choices}</div><div class="cold-gate-submenu-label">Scope</div><div class="cold-gate-choices list-rows">${choices}</div><ar-button class="cold-gate-compact">Compact</ar-button></div>
+      <div class="cold-gate-pending" hidden></div>
     </div>
   </div>`;
 }
@@ -92,8 +92,8 @@ async function drawIn(page: Page, dockId: string, docked: boolean, submenu: bool
         })(),
         dockTop: d.top,
         dockInnerHeight: dock.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom),
-        head: box(c.querySelector(".hibernation-head")!),
-        lead: box(c.querySelector(".hibernation-context")!),
+        head: box(c.querySelector(".cold-gate-head")!),
+        lead: box(c.querySelector(".cold-gate-context")!),
         buttons: box(c.querySelector(".cold-gate-buttons")!),
       };
     },

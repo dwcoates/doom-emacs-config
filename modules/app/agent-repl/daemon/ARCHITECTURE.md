@@ -85,7 +85,7 @@ daemon/
                    subscriber's agent once of a merge put in line, a merge leaving or a deploy's end, in one short
                    line, as a deferred prompt of origin MERGE_QUEUE_NOTICE
     promptorigin/  leaf: which prompt origins are drawn nowhere (no feed row, no held card)
-    drain/         shutdown schedule + idle sweep (hibernation policy incl. Hibernate directive);
+    drain/         shutdown schedule + every trigger of the one park (idle sweep, keep-alive cycle, settings visit, withheld; the shim's Hibernate directive);
                    the SAME stand-down for a workspace the user hid or collapsed (withheld.go),
                    deferred to its turn's end, never under it
     bringup/       the one session bring-up a boot, a takeover and an open share, and the ONE
@@ -598,7 +598,7 @@ through SetSessionRemoteControl, or a shim started for an on with none; every
 bring-up (`Fleet.sessionUp`, and `Fleet.Resume` for a relaunch) puts an on back
 in force re-binding the kept claude.ai bridge session, and an adopted shim is
 sent nothing. While the mode is on, `drain.CycleDown`/`VisitDown` stand nothing
-down; the idle sweep still hibernates. See `internal/workspace/remotecontrol.go`),
+down; the idle sweep still parks it. See `internal/workspace/remotecontrol.go`),
 `Interrupt` (turn → KillTurn{force:confirm} with the confirm_required
 challenge when detached agents are live; detached → decode FeedId →
 UpdateAgent.stop / StopBash; all_agents → fan-wide), `AnswerPermission`,
@@ -1139,7 +1139,7 @@ asks for the workspaces it wants open with the `OpenTabs` server stream.
 - **Collapse stands the session down** (`drain.StandDownWithheld`, called by
   `FoldRepository(collapse)`, which `UpdateSidebarView`'s repository fold
   reaches, and by the cache keeper at a hidden workspace's lapse): the
-  idle sweep's own gate and hibernation, on the fleet's detached lifetime. A
+  idle sweep's own gate and park, on the fleet's detached lifetime. A
   busy workspace stays pending and is retried on the daemon's own edges, the
   free edge a turn's end raises (`lifecycleSink.OnFree`) and a session coming
   up (`lifecycleSink.SessionUp`), never by polling; every attempt re-reads

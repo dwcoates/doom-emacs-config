@@ -34,14 +34,13 @@
 // SHAPE AND ONLY ONE. Every cell named by TopbarView is present in the strip
 // at all times and in the same slot; there is NO whole-view state that
 // replaces, suppresses or rearranges the strip, and none may ever be added.
-// A cell whose SESSION fact is unknown — the workspace is hibernated, or
-// standing at the cold gate, or its session has simply not stated the fact
-// yet — draws its OWN "no session" content in its OWN slot: the model
+// A cell whose SESSION fact is unknown — the workspace is standing at the
+// cold gate, or its session has simply not stated the fact yet — draws its OWN "no session" content in its OWN slot: the model
 // selector and the permission-mode picker are ABSENT (presence is
 // how "unknown" is said) and the client draws a dash in the slot rather than
 // omitting it, while the context chip and the warning strip are ALWAYS SET
 // and always drawn. The session-less FACTS are not lost: the chip carries the
-// hibernated or cold context size (0 when none is known) with the reason in
+// cold context size (0 when none is known) with the reason in
 // its hover content, and the warning strip carries the state as one warning
 // line. Two whole-view states, `hibernated` (tag 11) and `cold_gate` (tag
 // 12), were landed and then RETIRED the same day under this ruling; their
@@ -85,7 +84,7 @@ type TopbarView struct {
 	SessionLine *TopbarSessionLine `protobuf:"bytes,2,opt,name=session_line,json=sessionLine,proto3" json:"session_line,omitempty"`
 	// The model selector: current selection and the selectable list. OPTIONAL
 	// BY PRESENCE: absent means no session has stated a model for this
-	// workspace (hibernated, cold-gated, or not yet started), and the client
+	// workspace (cold-gated, or not yet started), and the client
 	// draws the cell's no-session dash IN ITS SLOT rather than omitting it.
 	ModelSelector *TopbarModelSelector `protobuf:"bytes,3,opt,name=model_selector,json=modelSelector,proto3,oneof" json:"model_selector,omitempty"`
 	// The connectivity glyph.
@@ -98,8 +97,8 @@ type TopbarView struct {
 	// nothing.
 	Warnings *TopbarWarningStrip `protobuf:"bytes,5,opt,name=warnings,proto3" json:"warnings,omitempty"`
 	// The context chip — a NUMBER, not an icon. ALWAYS SET. A session-less
-	// workspace's chip states the context the session HELD (the hibernated
-	// conversation's size, or what a cold read would re-read), 0 when none is
+	// workspace's chip states the context the session HELD (what a cold read
+	// would re-read), 0 when none is
 	// known, and the reason it is not live rides the chip's hover content.
 	Context *TopbarContextChip `protobuf:"bytes,7,opt,name=context,proto3" json:"context,omitempty"`
 	// Which account the session spends as.
@@ -258,7 +257,7 @@ func (x *TopbarView) GetRemoteControl() *TopbarRemoteControl {
 // THE MODE IS THE WORKSPACE'S, kept by the daemon: on by default for a
 // repository's main worktree, off by default for every other workspace, and
 // whatever the user last set otherwise. A workspace whose mode is on keeps its
-// shim up between keep-alives, until its idle cutoff hibernates it.
+// shim up between keep-alives, until the idle sweep parks it past its cutoff.
 type TopbarRemoteControl struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Whether remote control is on for the workspace.
@@ -2282,8 +2281,9 @@ func (x *TopbarEffortOption) GetDisplayName() string {
 type TopbarConnectivity struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Vocabulary color-class name: one of proto/vocab/render-colors.json's
-	// `topbar_tones` ("none" plus the five live colors; teal died with
-	// hibernation).
+	// `topbar_tones` ("none" plus the five live colors; teal died with the
+	// hibernated state, which is now the one park, drawn as the live idle
+	// session it stands in for).
 	Tone string `protobuf:"bytes,1,opt,name=tone,proto3" json:"tone,omitempty"`
 	// The literal glyph character(s) the indicator draws.
 	Glyph string `protobuf:"bytes,2,opt,name=glyph,proto3" json:"glyph,omitempty"`
@@ -2599,8 +2599,8 @@ type TopbarWarning struct {
 	//
 	// UNSET IS A WARNING WITH NO OVERLAY: the line is the whole warning, and
 	// the row is a statement rather than a control. That is what the FIXED
-	// SCHEMA ruling's session-less line is — "hibernated since …", "cold
-	// context, awaiting your answer" — a fact with nothing further to reveal
+	// SCHEMA ruling's session-less line is — "cold context, awaiting your
+	// answer", "no session yet" — a fact with nothing further to reveal
 	// and, for the cold gate, nothing to answer HERE (the feed's gate card is
 	// the one place a gate is answered).
 	//

@@ -116,7 +116,7 @@ func TestTheTakeoverOfAFreeLock(t *testing.T) {
 				t.Fatalf("Workspace: %v", err)
 			}
 			if tt.parked {
-				if err := h.db.SetSessionTerminal(context.Background(), ws, wsm.SessionTerminal{Kind: wsm.TerminalKeepaliveCycle, At: time.Now()}); err != nil {
+				if err := h.db.SetSessionTerminal(context.Background(), ws, wsm.SessionTerminal{Kind: wsm.TerminalParked, At: time.Now()}); err != nil {
 					t.Fatalf("SetSessionTerminal: %v", err)
 				}
 			}

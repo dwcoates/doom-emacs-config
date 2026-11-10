@@ -219,8 +219,8 @@ export function drawLocalFailureDetailOverlay(
  * One warning row: its composed line, and the detail behind the click.
  *
  * A WARNING WITH NO DETAIL IS A STATEMENT, NOT A CONTROL. `TopbarWarning.detail`
- * is unset for the workspace's own session-less state — "hibernated since
- * 14:03", "cold context, awaiting your answer" — which the FIXED SCHEMA ruling
+ * is unset for the workspace's own session-less state — "cold context, awaiting your
+ * answer", "no session yet" — which the FIXED SCHEMA ruling
  * put here when the whole-view states were retired. There is nothing further
  * to reveal and, for the cold gate, nothing to answer HERE: the feed's gate
  * card is the one place a gate is answered. So the row is drawn as text with

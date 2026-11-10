@@ -627,7 +627,7 @@ func TestAParkedSessionStillShowsItsMerge(t *testing.T) {
 		Repositories: []wsm.Repository{repo},
 		Sessions: []wsm.Session{{
 			Workspace: theWS,
-			Terminal:  &wsm.SessionTerminal{Kind: "hibernated"},
+			Terminal:  &wsm.SessionTerminal{Kind: wsm.TerminalParked},
 		}},
 	})
 
@@ -918,7 +918,7 @@ func TestAParkedSessionKeepsAnIdleArm(t *testing.T) {
 		Repositories: []wsm.Repository{repo},
 		Sessions: []wsm.Session{{
 			Workspace: theWS,
-			Terminal:  &wsm.SessionTerminal{Kind: "hibernated"},
+			Terminal:  &wsm.SessionTerminal{Kind: wsm.TerminalParked},
 		}},
 	})
 

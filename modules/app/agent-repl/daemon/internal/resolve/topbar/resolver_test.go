@@ -3,7 +3,6 @@ package topbar
 import (
 	"agent-repld/internal/wsm"
 	"fmt"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -71,6 +70,18 @@ func newHarness(t *testing.T, opts ...Option) *harness {
 		t.Fatalf("SetWorkspaceDir: %v", err)
 	}
 	return &harness{r: r, log: log}
+}
+
+// state reads the test workspace's accumulation under the resolver's lock.
+func (h *harness) state(t *testing.T) *wsState {
+	t.Helper()
+	h.r.mu.Lock()
+	defer h.r.mu.Unlock()
+	s, ok := h.r.states[testWS]
+	if !ok {
+		t.Fatalf("no state for %s", testWS)
+	}
+	return s
 }
 
 // ready installs the five facts readiness needs, so a test exercising anything
@@ -771,7 +782,7 @@ func TestAFastModeStatementChangesNoTopbarView(t *testing.T) {
 
 func TestTheTopbarPublishesOnTheWorkspaceFactsAloneWithNoSession(t *testing.T) {
 	// Arrange: the two workspace facts and NOT ONE session fact — exactly what
-	// a hibernated or cold-gated workspace has after a daemon boot.
+	// a parked or cold-gated workspace has after a daemon boot.
 	h := newHarness(t)
 	h.r.SetNaming(testWS, Naming{Name: "fix-flaky-reconnect", ConfigDir: "/root"})
 
@@ -792,7 +803,7 @@ func TestTheSessionLessStripDrawsEveryCellItAlwaysDraws(t *testing.T) {
 	h.r.SetAccount(testWS, testAccount("dev@example.com"))
 
 	// Act
-	h.r.SetParked(testWS, wsm.ParkHibernated)
+	h.r.SetColdGate(testWS, ColdGate{Standing: true, ContextTokens: 100_000})
 
 	// Assert: the strip has ONE shape, so the always-drawn cells are all here.
 	view := h.view(t)
@@ -820,7 +831,7 @@ func TestTheParkedStripKeepsItsTwoControls(t *testing.T) {
 	h.ready(t)
 
 	// Act
-	h.r.SetParked(testWS, wsm.ParkHibernated)
+	h.r.SetParked(testWS, true)
 
 	// Assert
 	view := h.view(t)
@@ -852,7 +863,7 @@ func TestTheParkedStripsChipStatesTheContextTheSessionHeld(t *testing.T) {
 	h.ready(t)
 
 	// Act
-	h.r.SetParked(testWS, wsm.ParkHibernated)
+	h.r.SetParked(testWS, true)
 
 	// Assert: what a revival would carry, not a blank.
 	if got, want := h.view(t).GetContext().GetText(), "142.3k"; got != want {
@@ -889,20 +900,21 @@ func TestTheColdGatedChipStatesWhatAColdReadWouldReread(t *testing.T) {
 	}
 }
 
-func TestTheParkedChipsHoverLeadsWithWhyTheFigureIsNotLive(t *testing.T) {
+func TestAParkedChipsHoverLeadsWithTheSessionsSpend(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	h.ready(t)
 
 	// Act
-	h.r.SetParked(testWS, wsm.ParkHibernated)
+	h.r.SetParked(testWS, true)
 
-	// Assert: the strip has no width for the sentence, so the hover carries it.
+	// Assert: a park is the live idle session it stands in for, so no reason
+	// section is invented for it.
 	sections := h.view(t).GetContext().GetBreakdown().GetSections()
 	if len(sections) == 0 {
 		t.Fatalf("the breakdown has no sections at all")
 	}
-	if got, want := sections[0].GetHeading().GetText(), parkedLine(); got != want {
+	if got, want := sections[0].GetHeading().GetText(), "session"; got != want {
 		t.Fatalf("heading = %q, want %q", got, want)
 	}
 }
@@ -936,17 +948,18 @@ func TestALiveSessionsHoverLeadsWithItsSpend(t *testing.T) {
 	}
 }
 
-func TestTheParkedStripStatesTheParkAsAWarningLine(t *testing.T) {
+func TestAParkedStripStatesNoLineOfItsOwn(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	h.ready(t)
+	before := h.view(t).GetWarnings()
 
 	// Act
-	h.r.SetParked(testWS, wsm.ParkHibernated)
+	h.r.SetParked(testWS, true)
 
-	// Assert: the retired whole-view state's fact is not lost.
-	if got, want := lastWarningLine(t, h), parkedLine(); got != want {
-		t.Fatalf("line = %q, want %q", got, want)
+	// Assert: there is no hibernated state left to state.
+	if after := h.view(t).GetWarnings(); !proto.Equal(before, after) {
+		t.Fatalf("warnings = %v, want the live strip's own %v", after, before)
 	}
 }
 
@@ -970,7 +983,7 @@ func TestTheSessionLessWarningCarriesNoOverlay(t *testing.T) {
 	h.ready(t)
 
 	// Act
-	h.r.SetParked(testWS, wsm.ParkHibernated)
+	h.r.SetColdGate(testWS, ColdGate{Standing: true, ContextTokens: 101_100})
 
 	// Assert: the line IS the warning; there is nothing further to reveal, and
 	// a gate is answered in the feed's card and nowhere else.
@@ -981,12 +994,12 @@ func TestTheSessionLessWarningCarriesNoOverlay(t *testing.T) {
 	}
 }
 
-func TestTheColdGateOutranksHibernationInTheStatedReason(t *testing.T) {
+func TestTheColdGateIsStatedOverAPark(t *testing.T) {
 	// Arrange: both signals stand at once. The gate is waiting on the reader
 	// and the park is waiting on nothing, so the strip names the gate.
 	h := newHarness(t)
 	h.ready(t)
-	h.r.SetParked(testWS, wsm.ParkHibernated)
+	h.r.SetParked(testWS, true)
 
 	// Act
 	h.r.SetColdGate(testWS, ColdGate{Standing: true, ContextTokens: 101_100})
@@ -997,20 +1010,21 @@ func TestTheColdGateOutranksHibernationInTheStatedReason(t *testing.T) {
 	}
 }
 
-func TestTheParkIsStillStatedOnceTheColdGateIsAnswered(t *testing.T) {
-	// Arrange: the park outlives the gate, so retiring the gate must not
-	// retire it — the workspace really is still stood down.
+func TestAParkStatesNoLineOnceTheColdGateIsAnswered(t *testing.T) {
+	// Arrange: the park outlives the gate, and is drawn as the live idle
+	// session it stands in for once the gate is answered.
 	h := newHarness(t)
 	h.ready(t)
-	h.r.SetParked(testWS, wsm.ParkHibernated)
+	before := h.view(t).GetWarnings()
+	h.r.SetParked(testWS, true)
 	h.r.SetColdGate(testWS, ColdGate{Standing: true, ContextTokens: 101_100})
 
 	// Act
 	h.r.SetColdGate(testWS, ColdGate{Standing: false})
 
 	// Assert
-	if got, want := lastWarningLine(t, h), parkedLine(); got != want {
-		t.Fatalf("line = %q, want %q", got, want)
+	if after := h.view(t).GetWarnings(); !proto.Equal(before, after) {
+		t.Fatalf("warnings = %v, want the live strip's own %v", after, before)
 	}
 }
 
@@ -1018,7 +1032,7 @@ func TestTheStripGetsItsControlsBackOnRevival(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	h.ready(t)
-	h.r.SetParked(testWS, wsm.ParkHibernated)
+	h.r.SetParked(testWS, true)
 
 	// Act: the reviving spawn's own link state is what lifts the park.
 	h.r.OnLink(testWS, shimclient.LinkConnected)
@@ -1395,12 +1409,6 @@ func TestSettingTheLinksRepublishesTheStrip(t *testing.T) {
 	}
 }
 
-// parkedLine is the park's sentence as a reader on this machine reads it: a
-// LOCAL wall clock, because the daemon and the reader share one.
-func parkedLine() string {
-	return "hibernated since " + instant.In(time.Local).Format("15:04")
-}
-
 // lastWarningLine is the sentence on the strip's LAST warning — where a
 // standing state sorts, because the dropdown draws the newest first and a
 // state was true before anything that is wrong right now went wrong.
@@ -1520,8 +1528,8 @@ func TestAFactForAnUnboundWorkspaceStatesTheViolationAtError(t *testing.T) {
 	}
 
 	// Act
-	r.SetParked("ws-unbound", wsm.ParkHibernated)
-	r.SetParked("ws-unbound", wsm.ParkNone)
+	r.SetParked("ws-unbound", true)
+	r.SetParked("ws-unbound", false)
 
 	// Assert
 	n := 0
@@ -1561,7 +1569,7 @@ func TestConcurrentChangesLeaveTheNewestViewPublished(t *testing.T) {
 
 	// Assert
 	h.r.mu.Lock()
-	want, err := h.r.render(h.r.stateLocked(testWS))
+	want, err := h.r.render(testWS, h.r.stateLocked(testWS))
 	h.r.mu.Unlock()
 	if err != nil || want == nil {
 		t.Fatalf("render = (%v, %v), want a complete view", want, err)
@@ -1572,17 +1580,18 @@ func TestConcurrentChangesLeaveTheNewestViewPublished(t *testing.T) {
 	}
 }
 
-// The keep-alive-cycle tests are the 2026-10-26 ruling: a shim stood down
-// between keep-alives has its cache warm and comes back on the next look,
-// prompt or beat, so the strip draws the live idle session it stands in for.
+// The park tests are the 2026-11-09 ruling: there is one park, whatever stood
+// the session down, and it comes back on the next prompt, settings pick or
+// keep-alive restore, so the strip draws the live idle session it stands in
+// for.
 
-func TestAKeepaliveCycleParkKeepsTheStripsControls(t *testing.T) {
+func TestAParkKeepsTheStripsControls(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	h.ready(t)
 
 	// Act
-	h.r.SetParked(testWS, wsm.ParkKeepaliveCycle)
+	h.r.SetParked(testWS, true)
 
 	// Assert
 	view := h.view(t)
@@ -1591,30 +1600,14 @@ func TestAKeepaliveCycleParkKeepsTheStripsControls(t *testing.T) {
 	}
 }
 
-func TestAKeepaliveCycleParkStatesNoHibernation(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	h.ready(t)
-
-	// Act
-	h.r.SetParked(testWS, wsm.ParkKeepaliveCycle)
-
-	// Assert
-	for _, w := range h.view(t).GetWarnings().GetWarnings() {
-		if strings.HasPrefix(w.GetLine().GetText(), "hibernated since") {
-			t.Fatalf("warning %q, want no hibernation stated for a keep-alive cycle", w.GetLine().GetText())
-		}
-	}
-}
-
-func TestAKeepaliveCycleParkDrawsTheDeadLinkAsConnected(t *testing.T) {
+func TestAParkDrawsTheDeadLinkAsConnected(t *testing.T) {
 	// Arrange: the reader's hops are held, and the stood-down shim's link is dead.
 	h := newHarness(t)
 	h.ready(t)
 	h.r.OnLink(testWS, shimclient.LinkDead)
 
 	// Act
-	h.r.SetParked(testWS, wsm.ParkKeepaliveCycle)
+	h.r.SetParked(testWS, true)
 
 	// Assert
 	if got, want := h.view(t).GetConnectivity().GetGlyph(), connectivityGlyph(linkConnected); got != want {
@@ -1686,5 +1679,55 @@ func TestAnAccountWithoutADefaultModelIsRefusedLoudly(t *testing.T) {
 	}
 	if refused == nil || !contains(fmt.Sprint(refused["cause"]), "/Users/dev/.claude") {
 		t.Fatalf("set_account ERROR = %v, want one naming the login with no default", refused)
+	}
+}
+
+func TestThePublishedParkCarriesTheNextKeepalive(t *testing.T) {
+	next := instant.Add(52 * time.Minute)
+	tests := []struct {
+		name    string
+		arrange func(r *resolver)
+		want    wsm.Park
+	}{
+		{name: "a park raised after the schedule carries it", want: wsm.Parked(next), arrange: func(r *resolver) {
+			r.SetNextKeepalive(testWS, next)
+			r.SetParked(testWS, true)
+		}},
+		{name: "a schedule moved under a standing park moves it", want: wsm.Parked(next), arrange: func(r *resolver) {
+			r.SetNextKeepalive(testWS, instant)
+			r.SetParked(testWS, true)
+			r.SetNextKeepalive(testWS, next)
+		}},
+		{name: "a park with no keep-alive scheduled carries none", want: wsm.Parked(time.Time{}), arrange: func(r *resolver) {
+			r.SetNextKeepalive(testWS, next)
+			r.SetNextKeepalive(testWS, time.Time{})
+			r.SetParked(testWS, true)
+		}},
+		{name: "a schedule alone raises no park", want: wsm.ParkNone, arrange: func(r *resolver) {
+			r.SetNextKeepalive(testWS, next)
+		}},
+		{name: "a revival lifts the park", want: wsm.ParkNone, arrange: func(r *resolver) {
+			r.SetNextKeepalive(testWS, next)
+			r.SetParked(testWS, true)
+			r.OnLink(testWS, shimclient.LinkConnected)
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.ready(t)
+
+			// Act
+			tt.arrange(h.r)
+
+			// Assert
+			h.r.mu.Lock()
+			got := h.r.parkLocked(testWS, h.r.states[testWS])
+			h.r.mu.Unlock()
+			if got != tt.want {
+				t.Fatalf("park = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }

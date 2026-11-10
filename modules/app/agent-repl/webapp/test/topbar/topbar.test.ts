@@ -158,7 +158,7 @@ describe("drawTopbarView", () => {
   // group here; the fixed-schema ruling retired both.
   it("draws every cell for a workspace with no session", () => {
     const { tc } = topbarContext();
-    const row = drawTopbarView(sessionlessView("hibernated since 14:03"), tc);
+    const row = drawTopbarView(sessionlessView("no session yet"), tc);
     expect([
       row.querySelector(".topbar-account") !== null,
       row.querySelector(".topbar-connectivity") !== null,
@@ -171,7 +171,7 @@ describe("drawTopbarView", () => {
 
   it("draws each absent control as a dash in its own slot", () => {
     const { tc } = topbarContext();
-    const row = drawTopbarView(sessionlessView("hibernated since 14:03"), tc);
+    const row = drawTopbarView(sessionlessView("no session yet"), tc);
     expect([...row.querySelectorAll("[data-no-session]")].map((el) => el.getAttribute("data-no-session")))
       .toEqual(["model", "effort", "mode"]);
   });
@@ -189,7 +189,7 @@ describe("drawTopbarView", () => {
         warnings: { warnings: [{ line: { text: "a" }, detail: { case: "accounting", value: { lines: [] } } }] },
       }).warnings,
     });
-    expect(classOf(sessionlessView("hibernated since 14:03"))).toEqual(classOf(warned));
+    expect(classOf(sessionlessView("no session yet"))).toEqual(classOf(warned));
   });
 
   it("draws the context figure for a workspace with no session", () => {

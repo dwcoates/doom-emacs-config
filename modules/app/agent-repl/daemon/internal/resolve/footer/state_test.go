@@ -1,6 +1,7 @@
 package footer
 
 import (
+	"reflect"
 	"testing"
 
 	"agent-repld/internal/wsm"
@@ -66,5 +67,24 @@ func TestAllowanceWindowObserveVerdict(t *testing.T) {
 				t.Fatalf("window = %+v, want rejected scoped to reset %d", w, tc.wantResetS)
 			}
 		})
+	}
+}
+
+// TestTheNextKeepaliveIsHeldInTheSharedTable pins that this view holds the
+// cache keeper's schedule in the shared wsm.NextKeepalives, so it composes a
+// park exactly as the other session-scoped view does rather than through a
+// field of its own on a workspace's state.
+func TestTheNextKeepaliveIsHeldInTheSharedTable(t *testing.T) {
+	// Act
+	field, ok := reflect.TypeOf(resolver{}).FieldByName("keepalives")
+
+	// Assert
+	if !ok || field.Type != reflect.TypeOf(wsm.NextKeepalives{}) {
+		t.Fatalf("resolver.keepalives = %v (found %v), want a wsm.NextKeepalives", field.Type, ok)
+	}
+	for _, own := range []string{"park", "nextKeepalive"} {
+		if _, ok := reflect.TypeOf(wsState{}).FieldByName(own); ok {
+			t.Errorf("wsState carries its own %q, want the schedule only in the resolver's wsm.NextKeepalives", own)
+		}
 	}
 }

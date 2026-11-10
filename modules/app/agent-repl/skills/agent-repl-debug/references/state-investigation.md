@@ -66,8 +66,8 @@ CREATE TABLE session_fault (
 
 Resolve two independent current facts:
 
-- Session connectivity: `hibernated`, `connecting`, `operational`,
-  `degraded`, or `unavailable`.
+- Session connectivity: `connecting`, `operational`, `degraded`, or
+  `unavailable`.
 - Session status: `ready`, `thinking`, `permission`, `done`, `interrupted`,
   `vendor-blocked`, or `monitoring`.
 
@@ -98,11 +98,15 @@ Merge states outrank the color ladder:
 
 The primary projection is:
 
-1. `hibernated`: teal, asleep.
-2. `connecting`: blue, starting.
-3. `degraded`: blue, impaired, with the active connectivity fault summary.
-4. `unavailable`: blue, unavailable.
-5. `operational`: the session-status presentation.
+1. `connecting`: blue, starting.
+2. `degraded`: blue, impaired, with the active connectivity fault summary.
+3. `unavailable`: blue, unavailable.
+4. `operational`: the session-status presentation.
+
+A parked session (terminal kind `parked`) is not its own state: it resolves
+as the idle session it stands in for, and the trigger that parked it is read
+from `terminal_detail`. Old `hibernated` and `keepalive_cycle` terminal rows
+were rewritten to `parked` by the `parked_terminal` migration.
 
 Read the current implementation in `daemon/internal/ssm/resolve.go` when the
 exact precedence is under investigation. The SQL query is authoritative.

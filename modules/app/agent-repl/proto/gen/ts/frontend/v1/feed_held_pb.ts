@@ -24,7 +24,7 @@
 // The section rides the ROOT feed's own connection — OpenFeed's answer for the
 // root feed and WatchFeed's held-section frames — and no sub-feed has one.
 //
-// NOT here: gates. A hibernated session REFUSES input, it holds nothing —
+// NOT here: gates. A cold-gated session REFUSES input, it holds nothing —
 // that is the footer's and the refusal arms'. A merge HOLDS what is submitted
 // while it runs (the prompt's `merge` hold arm). A context cut makes the
 // running turn uninterruptible — that is a classification below, not a hold.

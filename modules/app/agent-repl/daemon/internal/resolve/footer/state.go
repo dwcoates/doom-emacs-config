@@ -398,16 +398,18 @@ type wsState struct {
 	linkSeen bool
 	// everConnected distinguishes a shim that died from one that never started.
 	everConnected bool
-	// parked reports that the idle sweep stood this workspace's shim down on
-	// purpose and recorded the `hibernated` session terminal. It is the SAME
-	// fact the roster keys its idle arm on (resolve/sidebar/status.go's
-	// `parked`), handed to both surfaces from the one site that writes the
-	// terminal, so the dot and the strip cannot disagree about the same park.
+	// parked is the daemon's deliberate stand-down of this workspace's
+	// idle shim, recorded as the `parked` session terminal. It is the SAME fact
+	// the roster keys its idle arm on (resolve/sidebar/status.go's `parked`), handed to both
+	// surfaces from the one site that writes the terminal, so the dot and the
+	// strip cannot disagree about the same park.
 	//
 	// It is cleared by the next link state of ANY kind: the watcher latches a
 	// dead link and publishes nothing further on it, so the next OnLink this
 	// workspace sees belongs to the revival's own spawn, and a spawn that then
 	// FAILS must read `dead` like any other.
+	// The park it composes carries the cache keeper's next scheduled
+	// keep-alive from the resolver's own table (resolver.parkLocked).
 	parked bool
 	// awaiting is the name of the workspace this one awaits correspondence
 	// from (SetAwaiting), empty while it awaits none: it stands the

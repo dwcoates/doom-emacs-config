@@ -2328,10 +2328,12 @@ one.** Every cell `frontend.v1 TopbarView` names is present on every
 publication and in the same slot. There is no whole-view state that replaces,
 suppresses or rearranges the strip, and none may be added — two such states,
 `hibernated` and `cold_gate`, were landed and reversed the same day, and their
-tags are reserved in `topbar.proto` against a revival.
+tags are reserved in `topbar.proto` against a revival. A PARKED workspace has
+its session facts (the one park draws as the live idle session it stands in
+for), so it is not session-less.
 
-A cell whose SESSION fact is unknown — hibernated, standing at the cold gate,
-or simply not started yet — states that IN ITS OWN SLOT:
+A cell whose SESSION fact is unknown — standing at the cold gate, or simply
+not started yet — states that IN ITS OWN SLOT:
 
 - `model_selector`, `effort_selector`, `permission_mode_picker` and
   `fast_mode` are ABSENT. Absence is how "no session has stated this" is said,
@@ -2343,12 +2345,11 @@ or simply not started yet — states that IN ITS OWN SLOT:
   `settings.json` under `CLAUDE_CODE_EFFORT_LEVEL`. With none of them stating
   a level the selector is absent: a guessed level is never drawn.
 - `context` is ALWAYS SET. A session-less workspace's chip states the context
-  the session HELD — a hibernated conversation's size, or what a cold read
-  would re-read — and 0 when none is known, never a blank (a blank reads as
+  the session HELD — what a cold read would re-read — and 0 when none is known, never a blank (a blank reads as
   "loading", the one thing it is not). The reason the figure is not live is
   the FIRST section of the chip's hover breakdown.
 - `warnings` is ALWAYS SET, and it carries the state as one warning LINE:
-  "hibernated since 14:03", "cold context, awaiting your answer". That line is
+  "cold context, awaiting your answer", "no session yet". That line is
   the one warning with no overlay behind it — it is a statement, not a
   control, and a cold gate is answered in the feed's gate card and nowhere
   else. An EMPTY list still means nothing is wrong and still draws no chip.
@@ -3139,33 +3140,64 @@ must see until it ends is salient; a non-escalating fault announces as a
 transient, and its standing record lives elsewhere (the topbar's warning
 strip, the status panel), never as a line pinned over the session's feedback.
 
-## Hibernation is the memory knob, and it is gated on real elapsed quiet
+## One park: a session stood down while idle, whatever stood it down
 
-THE KEEP-ALIVE CYCLE IS THE OTHER ONE (owner ruling, 2026-10-26). The daemon
-drives every keep-alive (`internal/cachelapse`, `schedule.go`): a beat is due
-52 minutes after the workspace's cache clock, the later of its last turn end
-and its last keep-alive (`wsm.Workspace.CacheClock`; a keep-alive turn is
-never stored, so the beat is recorded as `last_keepalive_at`). The shim is
-asked for it (`shim.v1.SendKeepalive`), and once it has gone out an idle
-session is stood down (`drain.Controller.CycleDown`) with the
-`keepalive_cycle` terminal until a minute before its next beat, when it is
-restored, at most three at once, earliest beat first. A shim runs no timer of
-its own. It is stood down only once the session has been free (no turn, no
-live detached work, an idle vendor) a whole interval, so the user has about an hour after
-the work ends to prompt with no shim start; never under a turn or live
-detached work, nor for the selected workspace, nor once a real turn ran
-since the beat. A CACHE KNOWN COLD IS NEVER BEATEN (owner ruling,
-2026-10-29): passing the cold gate by any answer makes no LLM request of its
-own. A gate's raise and answer, and a shim judging a beat's cache lapsed,
-mark the row (`cache_cold_turn_at`, `wsm.Workspace.CacheKnownCold`), and no
-keep-alive is owed until a real turn closes after the mark. A parked
-session is drawn as the live idle session it stands in for (`wsm.Park`).
-ONLY A PROMPT, A KEEP-ALIVE, A COLD GATE'S ANSWER OR A RESTART BRINGS A SHIM UP
-(owner ruling, 2026-10-28): a look, an open, a history read, a boot and a
-deploy leave a parked session parked, because every conversation is read from
-the store. Past the idle cutoff the sweep deepens the park into a
-hibernation. `docs/developer/shim-lifecycle.md` is the reference for when a
-shim runs.
+THERE IS ONE PARKED STATE (owner ruling, 2026-11-09). A session the daemon
+stands down while idle records the one `parked` terminal
+(`wsm.TerminalParked`), whatever stood it down, and every view draws it as the
+live idle session it stands in for: the sidebar, the footer, the topbar and the
+editor's tabs alike. There is no hibernated state, color or word anywhere. What
+tells one park from another is only its NEXT KEEP-ALIVE (`wsm.Park`): the
+instant the cache keeper has scheduled the session's next beat, a minute
+before which it restores the session, or none (the keep-alives are exhausted,
+none was ever scheduled, or the workspace is outside the keeper). The keeper
+states that instant for every workspace (`cachelapse` `nextkeepalive.go`), the
+stand-down states whether a park stands, and each view composes the two. The
+trigger stays on the record as the terminal's detail, for diagnosis only: no
+view branches on it. Rows written before the one park (`hibernated`,
+`keepalive_cycle`) are rewritten to it by the `parked_terminal` migration.
+
+THE TRIGGERS, all taking the same steps (`drain` `park`: the gate, the shim's
+`Hibernate` directive, a graceful `KillSession`, the terminal, the cleared
+pids, the views told, the roster republished):
+
+- THE KEEP-ALIVE CYCLE (owner ruling, 2026-10-26). The daemon drives every
+  keep-alive (`internal/cachelapse`, `schedule.go`): a beat is due 52 minutes
+  after the workspace's cache clock, the later of its last turn end and its
+  last keep-alive (`wsm.Workspace.CacheClock`; a keep-alive turn is never
+  stored, so the beat is recorded as `last_keepalive_at`). The shim is asked
+  for it (`shim.v1.SendKeepalive`), and once it has gone out an idle session
+  is parked (`drain.Controller.CycleDown`) until a minute before its next
+  beat, when it is restored, at most three at once, earliest beat first. A
+  shim runs no timer of its own. It is parked only once the session has been
+  free (no turn, no live detached work, an idle vendor) a whole interval, so
+  the user has about an hour after the work ends to prompt with no shim
+  start; never under a turn or live detached work, nor for the selected
+  workspace, nor once a real turn ran since the beat. A CACHE KNOWN COLD IS
+  NEVER BEATEN (owner ruling, 2026-10-29): a gate's raise and answer, and a
+  shim judging a beat's cache lapsed, mark the row (`cache_cold_turn_at`,
+  `wsm.Workspace.CacheKnownCold`), and no keep-alive is owed until a real
+  turn closes after the mark.
+- A SETTINGS VISIT: the switch away from a model, permission-mode or effort
+  pick that started a shim (`drain.Controller.VisitDown`).
+- A WITHHELD WORKSPACE: hidden, collapsed or closed (`drain/withheld.go`).
+- THE IDLE SWEEP (`drain/sweep.go`): a session idle past the cutoff, for the
+  sessions no other trigger reaches (the workspace the user is looking at,
+  one whose remote control is on). The cutoff defaults to **24 hours** (owner
+  ruling, 2026-10-28; `--idle-cutoff`, `0` disables the sweep), and the cache
+  keeper owes no keep-alive past it, so a park past the cutoff carries none.
+  `AGENT_REPL_HIBERNATE_IDLE_CUTOFF_MS` overrides it for tests; its name
+  predates the one park and is kept so an existing setting still holds. The
+  cutoff is measured on the ENGAGEMENT clock (`wsm.Session.LastEngagementAt`),
+  which only a turn somebody asked for moves, never on the cache clock a
+  keep-alive moves: measured on the cache clock, a pinged session would never
+  have been idle at all.
+
+ONLY A PROMPT, A SETTINGS PICK, A KEEP-ALIVE RESTORE, A COLD GATE'S ANSWER OR
+A RESTART BRINGS A SHIM UP (owner rulings, 2026-10-28): a look, a select, an
+open, a history read, a boot and a deploy leave a parked session parked,
+because every conversation is read from the store.
+`docs/developer/shim-lifecycle.md` is the reference for when a shim runs.
 A WORKSPACE AT ITS COLD GATE RUNS NO SHIM until the user answers the gate: the
 gate is recorded and raised from the record, and only the answer spawns a shim
 (daemon/AGENTS.md "A workspace at its cold gate runs no shim"). The one
@@ -3177,119 +3209,6 @@ A BOOT OR A DEPLOY BRINGS BACK ONLY THE SHIMS THAT WERE UP when the last
 daemon stopped (`bringup.OnlyWasUp`), hidden or not: the session record states
 each workspace's shim at every park and unpark, and nothing else decides.
 Emacs's re-announcement starts nothing.
-
-A live session costs a node+CLI process pair of roughly 500MB, and dozens of
-workspaces will exhaust a machine. `-idle-timeout` is the mitigation: after a
-workspace has been left alone for that long, the sweeper SIGTERMs its shim and
-leaves the registry record rehydratable, so the next act pays one bring-up and
-gets everything back. It defaults to the keep-alive policy's own idle cutoff,
-**24 hours** (owner ruling, 2026-10-28), and `0` disables hibernation entirely.
-
-IT IS FLOORED AT THAT CUTOFF AND CANNOT GO BELOW IT. `-idle-timeout` and
-`AGENT_REPL_HIBERNATE_IDLE_CUTOFF_MS` answer the same question — how long has
-nobody touched this workspace — and while they disagreed, the shorter one reaped
-sessions the longer one was still keeping alive, with the longer one's own
-`idle_cutoff` cause attached to a threshold that was not its. Configuring a
-shorter value now raises it, loudly, at daemon construction.
-
-IT IS MEASURED ON THE ENGAGEMENT CLOCK, WHICH IS NOT THE CACHE CLOCK. Two
-durable instants live on the registry record and they answer different
-questions:
-
-- `last_turn_end_ms` is the CACHE clock. It moves on EVERY turn end, keep-alive
-  pings included, because a ping really does refresh the prompt cache and the
-  next one really is due a cache lifetime after it. The ping and warm-compaction
-  schedules measure from it.
-- `last_engagement_ms` is the ENGAGEMENT clock. It moves only for a turn somebody
-  asked for. The 6h idle cutoff measures from it and from nothing else.
-
-ONE FIELD ANSWERING BOTH IS A BUG IN BOTH DIRECTIONS. While the cutoff measured
-the cache clock, every successful ping reset it — so a session pinged every
-fifty-five minutes never reached six hours and NEVER HIBERNATED AT ALL, the
-exact inverse of the cold-cache defect below. The generic idle sweep had the same
-contamination through `ssm.LastActivityMs`, since a ping's own turn boundaries
-append `workspace_state` rows exactly as a real turn's do; it reads the
-engagement clock now, and the state log only to date a record that has none.
-
-WHICH TURNS COUNT IS DECLARED AT THE SUBMIT, NEVER RECOGNIZED AFTERWARDS.
-`submitter.engagement()` answers it at `forwardPrompt` — the one funnel every
-prompt path reaches — and the fact travels with the turn id to that turn's own
-end. Nothing reconstructs it from prompt text, duration, cost, or timing. The
-default is TRUE, so a submitter added later and forgotten delays a teardown
-rather than making real work invisible to the cutoff.
-
-THE IDLE CUTOFF IS THE ONLY TIME-BASED ROUTE INTO A SLEEP. Nothing hibernates
-before it. A prompt cache that goes cold first — an overslept window, a missed
-ping, a bounce — stops being PINGED (`keepalive.ActionLetCacheCool`, and the
-cold-ping verdict in `keepalivecold.go`) and is not slept: a dead cache is a
-reason to stop spending on it, not a reason to tear the session down. Both of
-those used to hibernate at roughly the one-hour cache TTL, which is why
-hibernation looked far more frequent than the six-hour rule permits. The
-`cache_expired` cause is still READ — records written by earlier daemons carry
-it and must still be revivable — and is written by nothing.
-
-For a record with NO engagement instant at all — one written before the second
-clock, or one the daemon has never seen a turn under — the window falls back to
-the newest row on the workspace's own state log (`ssm.LastActivityMs`), which is
-already an activity record: every row is appended by something that actually
-happened, and nothing appends on a timer. So a turn ending STARTS the clock
-rather than arming an immediate sweep. It is a FALLBACK and only that: the state
-log cannot tell a keep-alive ping's turn boundaries from a person's, which is
-why the engagement clock outranks it wherever one exists.
-
-AND THE SWEEPER IS NO LONGER THE ONLY GUARD.
-`sessioncontroller.hibernate()` itself refuses any workspace whose resolved
-state is not SETTLED — the red band (a turn in flight, either context cut) and
-purple (a vendor block the user has not seen through yet) — with the typed
-`sessioncontroller.ErrNotSettled`. The rule used to be "never call Hibernate
-mid-turn", left to each caller, so it held only for the callers that remembered
-it; inside the shared teardown it is mechanical, and the frontend command and
-every future caller hit it too.
-
-That also protects the vocabulary. `hibernated` is ranked in the blue band
-precisely so a stale agent row cannot mask it, which means a teal tab over a live
-turn would look exactly like a teal tab over a settled one — the user sees
-"asleep" while the agent works, with no color anywhere to correct it. The guard
-is what makes that combination unreachable by construction, and the resolver logs
-it as an INVARIANT VIOLATION wherever it can still detect it.
-
-Terminal lifecycle operations use `StopSession`, not hibernation. A delete or
-supersession may terminate an active turn because the exact registry record is
-already terminal and must not retain a process or turn claim. `StopSession`
-never publishes `HIBERNATED`; that benign state is reserved for a settled
-workspace admitted through the hibernation lease.
-
-Intentional process replacement uses `StopSessionForReplacement`. A controller
-generation holds an SSM-owned registration reservation from before shim
-startup through its durable operational edge, and hibernation cannot begin
-while that reservation exists. Replacement releases the reservation only after
-the exact process stop completes, then brings the same durable session back up.
-
-Both gates in `Server.sweepable` are load-bearing, and neither is redundant:
-
-- `!turn_active` alone is satisfied the instant a turn ends, so a sweeper gated
-  on it hibernated healthy sessions within one tick of them finishing work.
-  That was roughly every seven minutes in practice, since the tick is
-  `idleTimeout/4` and the timeout was never applied as a threshold at all.
-- Every unknown answers NO. A workspace with no resolved state, or none the log
-  can date, is one the sweeper knows nothing about, and reaping on absent
-  evidence is how a bring-up still in flight got hibernated before its first
-  event landed.
-
-Raise `-idle-timeout` when a machine has headroom and bring-up latency is the
-annoyance; lower it when memory is the constraint — though it cannot go below the
-policy's idle cutoff.
-
-A KNOWN DEFECT, STILL OPEN: `Manager.Hibernate` is also the teardown a merged
-workspace, a daemon bounce in stop-shims mode, a scheduled drain and an account
-switch all take, and it publishes `RENDER_STATE_HIBERNATED` for every one of
-them. So a bounced workspace SHOWS the user a sleep that never happened, and with
-this backend bouncing often that is very likely why hibernation looked far more
-frequent than the six-hour rule permits. The state row's cause kind now names the
-real initiator (`hibernated:merged_teardown`, `hibernated:idle_sweep`, …) so the
-two are countable apart in the log; the render state is unchanged, because fixing
-it needs a third connectivity token beside `hibernated` and `severed` — "stood
-down, and neither asleep nor broken" — which is a proto and webapp change.
 
 ## One canonical token shape, and the daemon owns every judgment taken from it
 

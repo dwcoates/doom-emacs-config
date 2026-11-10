@@ -18,8 +18,8 @@ const opWithheld = "daemon.drain.withheld"
 // docs/protobuf-design/open-tabs.md). Collapsing a repository's section, and a
 // hidden workspace's cache lapsing (cachelapse.Keeper), stands its session down
 // exactly as the idle sweep does — the same gate, the same hibernate directive, graceful
-// KillSession, hibernated terminal and cleared pids (hibernate) — with its own
-// reason on the records and the terminal.
+// KillSession, parked terminal and cleared pids (park) — with its own reason
+// on the records and the terminal's detail.
 //
 // A FOLD SPARES WHAT THE RECORD SPARES (owner ruling, 2026-10-25): a one-shot,
 // or a workspace with a merge pending (wsm.Workspace.FoldSpare), is never
@@ -122,7 +122,6 @@ var withheldReason = standDownReason{
 	op:     opWithheld,
 	detail: "hidden, collapsed or closed by the user; the transcript was left as it stood",
 	done:   "stood a withheld workspace's session down",
-	park:   wsm.ParkHibernated,
 	life:   shimlife.StandDownCacheLapse,
 }
 
@@ -199,14 +198,14 @@ func (c *controller) standDownWithheld(ctx context.Context, ws ids.WorkspaceID) 
 			dlog.Merge(fields, dlog.Context{"gate": gate.String(), "invariant_violation": "every gate value is handled"}))
 		return withheldSettled
 	}
-	switch c.hibernate(ctx, log, ws, fields, withheldReason) {
-	case hibernateDone:
+	switch c.park(ctx, log, ws, fields, withheldReason) {
+	case parkDone:
 		return withheldSettled
-	case hibernateDeferred:
+	case parkDeferred:
 		log.Info(opWithheld, "a withheld workspace's stand-down was deferred; it is taken on the next turn end", fields)
 		return withheldPending
 	default:
-		// hibernate recorded the failure at its own level; the idle sweep's
+		// park recorded the failure at its own level; the idle sweep's
 		// backoff is not this path's, and the next hide asks afresh.
 		return withheldSettled
 	}

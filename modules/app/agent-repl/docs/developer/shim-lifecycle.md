@@ -44,8 +44,8 @@ shim still draws its whole conversation.
 A boot or a handover brings back exactly the shims that were up, hidden or
 not, and nothing else decides. The state is recorded at every park and unpark,
 never only at shutdown, so a crash leaves it true too: the session record in
-wsm. Every stand-down the daemon makes on purpose writes a terminal (a
-keep-alive cycle's park, a hibernation, a cache lapse, a kill), and every
+wsm. Every stand-down the daemon makes on purpose writes a terminal (the one
+park, whatever stood it down, or a kill), and every
 session coming up clears it. The daemon's own shutdown, restart or hot reload
 writes nothing, so the record still says how each shim stood. A session on
 record with a vendor session and no terminal was up. A record with no vendor
@@ -151,11 +151,11 @@ timer of its own. The details live in `daemon/internal/cachelapse`:
   2026-10-31). A workspace whose remote-control mode is on still gets every
   beat, but no beat is followed by the park, and no settings visit stands it
   down: claude.ai must always find the session served. Since it is never
-  parked it never needs the restore. The cutoff below still hibernates it.
+  parked it never needs the restore. The idle sweep still parks it past the cutoff below.
   The mode is read when each stand-down is decided. See `remote-control.md`.
 - **Cutoff.** Beats stop once the workspace has been idle for
   `drain.DefaultIdleCutoff` (24 hours, owner ruling 2026-10-28). The idle sweep
-  then hibernates the session.
+  then parks the session, and its park carries no next keep-alive.
 - **Hidden workspaces** beat no more, and their cache lapses on its own clock.
   **Closed workspaces** get the one beat they were owed, then lapse.
 - A parked session is never brought back by a read or a look. Only its next

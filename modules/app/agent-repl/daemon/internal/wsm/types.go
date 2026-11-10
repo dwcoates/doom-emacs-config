@@ -525,87 +525,115 @@ type Session struct {
 	Terminal *SessionTerminal
 }
 
-// TerminalHibernated is the session terminal the idle sweep records. It is
-// REHYDRATABLE — unlike "deleted", which refuses resurrection — because the
-// next mount of the workspace revives the session from the compacted
-// transcript the Hibernate directive left behind.
+// TerminalParked is THE ONE session terminal a stand-down on purpose records
+// (owner ruling, 2026-11-09): a session stood down while idle, whatever stood
+// it down -- the keep-alive cycle between beats, the idle sweep past its
+// cutoff, a withheld workspace's stand-down, or the switch away from a
+// settings pick. It is REHYDRATABLE -- unlike "deleted", which refuses
+// resurrection -- because the next prompt, settings pick or keep-alive
+// restore brings the session back from the transcript the stand-down left.
 //
-// IT LIVES HERE BECAUSE IT IS READ FROM THREE PLACES, not only written from
-// one: the sweep writes it, the boot's bring-up reads it to leave a
-// hibernated workspace asleep, and the open and select verbs read it to know
-// a workspace they must revive. One authority, on the type that carries it.
-const TerminalHibernated = "hibernated"
+// WHAT STOOD IT DOWN IS EVIDENCE, NOT STATE. The terminal's Detail names the
+// trigger for diagnosis, and no reader branches on it: every view draws a
+// parked workspace as the idle session it stands in for. The two kinds this
+// one replaced ("hibernated", the idle sweep's, and "keepalive_cycle", the
+// cycle's) are rewritten to it by the parked_terminal migration
+// (parkterminal.go), so no stored row still carries either.
+//
+// IT LIVES HERE BECAUSE IT IS READ FROM SEVERAL PLACES, not only written from
+// one: the stand-downs write it, the boot's bring-up reads it to leave a
+// parked workspace down, and the open and select verbs and the cache keeper
+// read it to know a workspace they must bring back. One authority, on the
+// type that carries it.
+const TerminalParked = "parked"
 
-// Hibernated reports whether this session was stood down by the idle sweep.
-// The terminal is cleared by the next PutSession, so a revived session stops
+// Parked reports whether this session was stood down ON PURPOSE while idle
+// and comes back on the next prompt, settings pick or keep-alive restore. It
+// is THE ONE question every reader that tells a park from a death asks. The
+// terminal is cleared by the next PutSession, so a revived session stops
 // answering yes the moment its bring-up records its facts.
-func (s Session) Hibernated() bool {
-	return s.Terminal != nil && s.Terminal.Kind == TerminalHibernated
-}
-
-// TerminalKeepaliveCycle is the session terminal the keep-alive cycle records
-// (owner ruling, 2026-10-26): the daemon drives every keep-alive, and between
-// one beat and a minute before the next it stands an idle shim down so the
-// ~350MB it holds is free while nothing uses it (cachelapse.Keeper). It is a
-// PARK exactly as a hibernation is -- the next look, prompt or beat brings
-// the session back -- but its cache is still warm, so every view draws it as
-// the live idle session it stands in for, never as hibernated.
-const TerminalKeepaliveCycle = "keepalive_cycle"
-
-// KeepaliveCycled reports whether this session was stood down between
-// keep-alives. Like a hibernation, the next PutSession clears it.
-func (s Session) KeepaliveCycled() bool {
-	return s.Terminal != nil && s.Terminal.Kind == TerminalKeepaliveCycle
-}
-
-// Parked reports whether this session was stood down ON PURPOSE and comes
-// back on the next look, prompt or keep-alive: hibernated by the idle sweep,
-// or stood down between keep-alives. It is THE ONE question every reader
-// that tells a park from a death asks, so a park kind added later cannot be
-// read as a death by a reader that knew only the first.
 func (s Session) Parked() bool {
-	return s.Hibernated() || s.KeepaliveCycled()
+	return s.Terminal != nil && s.Terminal.Kind == TerminalParked
 }
 
-// Park is how a session-scoped view draws a workspace whose shim the daemon
-// stood down on purpose.
-type Park int
+// Park is how a session-scoped view holds a workspace whose shim the daemon
+// stood down on purpose while idle. There is ONE park: a view draws it as the
+// live idle session it stands in for, whatever stood the session down. What
+// a park carries beyond standing is its NEXT KEEP-ALIVE -- the instant the
+// cache keeper has scheduled the session's next beat, a minute before which
+// it restores the session -- or none: the keep-alives are exhausted, none was
+// ever scheduled, or the workspace is outside the keeper.
+//
+// ITS TWO HALVES HAVE TWO OWNERS, and a view composes them: whether a park
+// stands is the stand-down's (drain), and the scheduled keep-alive is the
+// cache keeper's (cachelapse.Keeper), which states it for every workspace
+// whether or not a park stands, so neither can be stale against the other
+// (NextKeepalives).
+//
+// The zero value is ParkNone.
+type Park struct {
+	// standing reports whether a park stands at all.
+	standing bool
+	// next is the scheduled keep-alive, the zero time for none.
+	next time.Time
+}
 
-const (
-	// ParkNone: no park stands; a dead link is a fault.
-	ParkNone Park = iota
-	// ParkHibernated: the idle sweep's park, drawn as hibernated.
-	ParkHibernated
-	// ParkKeepaliveCycle: stood down between keep-alives with its cache warm,
-	// drawn as the live idle session it stands in for.
-	ParkKeepaliveCycle
-)
+// ParkNone is no park: a dead link is a fault.
+var ParkNone = Park{}
+
+// Parked is a standing park whose next keep-alive is NEXT, or none when NEXT
+// is the zero time.
+func Parked(next time.Time) Park {
+	return Park{standing: true, next: next}
+}
+
+// Standing reports whether a park stands.
+func (p Park) Standing() bool { return p.standing }
+
+// NextKeepalive answers the park's scheduled keep-alive, false when none is
+// scheduled or no park stands.
+func (p Park) NextKeepalive() (time.Time, bool) {
+	if !p.standing || p.next.IsZero() {
+		return time.Time{}, false
+	}
+	return p.next, true
+}
+
+// NextKeepalives is a session-scoped view's table of the cache keeper's next
+// scheduled keep-alive per workspace (Park). It is the KEEPER'S fact, stated
+// for every workspace the keeper knows, bound to the view or not, so a view
+// holds it beside its workspaces' states rather than in them; nothing draws
+// it, so taking it publishes nothing. A view composes a park from its own
+// standing flag and this table, and the footer and the topbar compose alike.
+type NextKeepalives map[ids.WorkspaceID]time.Time
+
+// Set takes WS's next scheduled keep-alive, the zero time for none.
+func (k NextKeepalives) Set(ws ids.WorkspaceID, next time.Time) {
+	if next.IsZero() {
+		delete(k, ws)
+		return
+	}
+	k[ws] = next
+}
+
+// Park is WS's park: ParkNone unless PARKED, else a park carrying the next
+// keep-alive held for WS, or none.
+func (k NextKeepalives) Park(ws ids.WorkspaceID, parked bool) Park {
+	if !parked {
+		return ParkNone
+	}
+	return Parked(k[ws])
+}
 
 // String names the park for the records.
 func (p Park) String() string {
-	switch p {
-	case ParkNone:
+	if !p.standing {
 		return "none"
-	case ParkHibernated:
-		return "hibernated"
-	case ParkKeepaliveCycle:
-		return "keepalive_cycle"
-	default:
-		return fmt.Sprintf("park(%d)", int(p))
 	}
-}
-
-// ParkOf is the park a session record's terminal states: the park a view
-// draws for it.
-func ParkOf(s Session) Park {
-	switch {
-	case s.Hibernated():
-		return ParkHibernated
-	case s.KeepaliveCycled():
-		return ParkKeepaliveCycle
-	default:
-		return ParkNone
+	if next, ok := p.NextKeepalive(); ok {
+		return "parked until " + next.UTC().Format(time.RFC3339)
 	}
+	return "parked"
 }
 
 // SessionTerminal is a session's death with its cause.

@@ -76,7 +76,7 @@ func TestAHiddenFreeWorkspaceIsStoodDownAsTheSweepDoes(t *testing.T) {
 	if len(killed) != 1 || killed[0].WS != ws || killed[0].Force {
 		t.Fatalf("kills = %+v, want one graceful stand-down", killed)
 	}
-	if term := h.terminal(t, ws); term == nil || term.Kind != TerminalHibernated {
+	if term := h.terminal(t, ws); term == nil || term.Kind != wsm.TerminalParked {
 		t.Fatalf("terminal = %+v, want hibernated", term)
 	}
 }

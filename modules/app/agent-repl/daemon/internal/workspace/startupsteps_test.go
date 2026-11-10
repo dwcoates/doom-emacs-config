@@ -48,7 +48,7 @@ func TestTheFleetReportsEveryBringUpStep(t *testing.T) {
 		}, want: []string{"starting_session", "serving", "resuming", "up"}},
 		{name: "a hibernated workspace is woken", arrange: func(f *fleetFixture) {
 			f.db.sessions["w1"] = wsm.Session{Workspace: "w1", VendorSessionID: "vendor-1",
-				Terminal: &wsm.SessionTerminal{Kind: wsm.TerminalHibernated}}
+				Terminal: &wsm.SessionTerminal{Kind: wsm.TerminalParked}}
 		}, want: []string{"waking", "serving", "resuming", "up"}},
 		{name: "an adopted survivor", arrange: func(f *fleetFixture) {
 			f.probeState = sessionlock.StateHeld

@@ -4,7 +4,7 @@
 //
 // THE BINDING IS THE WORKSPACE'S, NOT THE SESSION'S. What changes is which
 // conversation the workspace's session record names, so the choice survives a
-// restart, a hibernation and a daemon handover exactly as the rest of that
+// restart, a park and a daemon handover exactly as the rest of that
 // record does.
 //
 // IT IS A SESSION SWAP, AND IT IS SAID SO. The daemon ends the current

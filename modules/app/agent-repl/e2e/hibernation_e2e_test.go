@@ -132,8 +132,8 @@ const (
 	// directive is sent (daemon/internal/drain/sweep.go:64-66). A session
 	// with live work never reaches the shim at all, so this — not the
 	// shim's own refusal — is the record a turn-in-flight deferral leaves.
-	hibernateNotFreeMsg   = "the idle session is not free; deferring its hibernation"
-	hibernateSucceededMsg = "hibernated an idle session"
+	hibernateNotFreeMsg   = "the idle session is not free; deferring its park"
+	hibernateSucceededMsg = "parked a session idle past the cutoff"
 )
 
 // sweepMark is a position in a workspace's own daemon sink: the number of
@@ -547,7 +547,7 @@ func testRevivalAfterHibernate(t *testing.T) {
 
 // TestSweepRecordSinceIgnoresARecordBeforeTheMark is the marking rule itself,
 // against the exact shape that made TestKeepAlive/RevivalAfterHibernate's pass depend on
-// how busy the box was: a "hibernated an idle session" record the daemon wrote
+// how busy the box was: a "parked a session idle past the cutoff" record the daemon wrote
 // BEFORE the test acted (the mount-spawned session's own stand-down) must not
 // satisfy a wait for the hibernation of the session the test then ran a turn
 // on. Against an unmarked scan of the same sink this is the record that was

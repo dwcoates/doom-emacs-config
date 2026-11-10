@@ -1,7 +1,7 @@
 // endpoint_park_workspace.proto — ParkWorkspace. HARNESS section.
 // Stands the workspace's session down exactly as the keep-alive cycle stands
 // one down after a beat (owner request, 2026-10-26): the shim and its vendor
-// child exit, the session keeps its `keepalive_cycle` park and is drawn as the
+// child exit, the session keeps the one `parked` park and is drawn as the
 // live idle session it stands in for, and the daemon restores it a minute
 // before its next keep-alive, or at once for a prompt, a look or a history
 // read.

@@ -115,7 +115,7 @@ Read `ARCHITECTURE.md` first: the package map, the seams, the conventions.
   | `workspace.DefaultStartSessionBound` | 60s | `AGENT_REPL_START_SESSION_BOUND` (malformed or non-positive is REFUSED, never ignored), the integration suite runs it short | ONE `StartSession` call, and the LAST step of the bring-up that had no bound at all: the dial ladder is bounded, an adoption is bounded by `boot.DefaultAdoptBound`, and then the rpc that actually starts the session could take forever -- holding the workspace's START GATE, and so every other route to starting that workspace, with it. MEASURED, realtest run 2026-09-13T16:20:34: workspace `2b81f45a724642ef`'s shim accepted the start, logged `shim.convert.hooks: a hook blocked the gated action` on `SessionStart:resume`, and never answered; three daemon generations sat in that call for 35s, 3m30s and 8m30s, each ended only by the NEXT deploy's SIGTERM. It is a PRODUCT window, not a bound on the daemon's own work -- what it covers is the shim's vendor resume plus whatever `SessionStart` hooks the user configured, which are arbitrary commands -- so it is sized the way the adopt bound is: every healthy bring-up in that same run (spawn, ready, StartSession and the watcher, end to end) ran 116ms, 245ms and 254ms, and 60s is ~240x the slowest of them. An overrun is ERROR naming the unanswered call, and the bring-up fails rather than waiting |
   | `workspace.DefaultWorktreeBound` | 2m | `workspace.Deps.WorktreeBound` (tests only) | ONE create's worktree step, the `git worktree add` that cuts the branch and checks it out. It runs the repository's hooks, which are arbitrary commands, and a hook that never returned held four creates for good on 2026-10-23. MEASURED from the editor's stage records over 102 creates (2026-10-20 to 2026-10-23): median 1.4s, p90 6.8s, p95 10.7s, slowest 48.5s and 51.4s, both healthy explanation-engine checkouts; 2m is just over twice the slowest. An overrun stops git, is ERROR `daemon.workspace.create` with `bound_ms`, and fails the create |
   | `server.acceptBackoffFloor` / `acceptBackoffCeiling` | 5ms doubling to 1s | none | how long `server.RetryAccept` waits between retries of a TRANSIENT accept failure (EMFILE, ENFILE, ENOBUFS, ENOMEM, ECONNABORTED, ECONNRESET, EINTR, EAGAIN — named explicitly, never read off the deprecated `net.Error.Temporary`). Nothing waits here unless Accept actually failed; what the ceiling covers is descriptor exhaustion, where retrying at full speed spins a core and writes a record per attempt without making a descriptor available. `net.ErrClosed` is the daemon's OWN shutdown closing the listener: DEBUG and returned, never an ERROR against a clean exit |
-| `drain.HibernateRetryCeiling` | one sweep cadence doubling per consecutive failure, capped at 1h | none | how long the idle sweep waits before asking a workspace whose hibernation FAILED (a failed or unreadable directive, a warned refusal, a failed stand-down or record) again. An ordinary deferral (lease held, turn in flight, session gone) is not backed off and resets it. Before it, a failure was retried on every pass forever, and the pass cadence is the idle cutoff when that is shorter than 5m: an orphaned integration daemon at a 50ms cutoff re-ran the directive, the lease round trip, the host republish and an ERROR twenty times a second |
+| `drain.ParkRetryCeiling` | one sweep cadence doubling per consecutive failure, capped at 1h | none | how long the idle sweep waits before asking a workspace whose park FAILED (a failed or unreadable directive, a warned refusal, a failed stand-down or record) again. An ordinary deferral (lease held, turn in flight, session gone) is not backed off and resets it. Before it, a failure was retried on every pass forever, and the pass cadence is the idle cutoff when that is shorter than 5m: an orphaned integration daemon at a 50ms cutoff re-ran the directive, the lease round trip, the host republish and an ERROR twenty times a second |
 | state-root watch (cmd/agent-repld/rootwatch.go `rootWatch`) | none: the kernel's report | none | a SERVING daemon verifies what it owns on disk (`daemonaddr.Claim.Verify`) once its watch is taken and at every change the kernel reports to the state root, its parent, `daemon.lock` and `daemon.addr` (`kernelevent.Follow`): the state root is the directory it bound in, `daemon.lock` is the inode its record lock holds, and `daemon.addr` (while published) names its address. A loss is ERROR `daemon.cmd.state_root` naming what vanished, the serving lifetime ends, and the process exits non-zero with `stood down: <loss>`. A check that cannot tell is ERROR and the next change checks again; a watch that fails is ERROR and the root goes unwatched. A daemon whose root is deleted otherwise serves on forever, and a second daemon booting on a recreated root takes a `daemon.lock` inode the first one's record lock does not conflict with |
 | `rootLossShimStopBound` (cmd/agent-repld/shimstop.go) | `drain.DefaultStandBound`, per forced stop | none | on a STATE-ROOT-LOSS stand-down ONLY (`standDownReason` `standDownStateRootLost`), the daemon force-stops every shim it supervises before exiting: each held session through `Fleet.KillSession(force)` (walked from `Fleet.Workspaces`, the in-memory map, never the store), then `Supervisor.StandDownEverySpawn` for spawns still in flight, the latch raised first; each stop gets this bound. Nothing can adopt a shim whose root is gone, because adoption goes through the store and state under that root. The outcome is INFO `daemon.cmd.state_root` with `stopped`, or ERROR naming every shim that would not stop. An orderly exit (`standDownOrderly`: drain deadline, signal) and a handover (`standDownHandover`) leave the shims for adoption, unchanged. The integration suite holds the fakeshim's kernel exit event inside 200ms of the daemon's exit |
 | `rollout.advertiseRefusedBound` | ERROR once after 30s | none | a SUCCESSOR waits for the boot claim in the KERNEL (`daemonaddr.Claim.AwaitBootClaim`, a blocking record lock), never on a poll, and writes `daemon.addr` the moment the incumbent's exit releases it; a claim still held after the bound is said once at ERROR and the wait goes on. A failed wait or a failed write under the held claim is ERROR and is not retried; the wait ends with the serving lifetime |
@@ -244,7 +244,7 @@ environment. Every flag is optional.
 | `--prompts-dir <dir>` | the prompts directory | `$AGENT_REPL_PROMPTS_DIR`, else `modules/app/agent-repl/prompts` in the checkout |
 | `--default-config-dir <dir>` | the default account root | the CLI's default (`~/.claude`) |
 | `--multi-repo-config-dir <dir>` | the account root for workspaces under `$MULTI_REPO_ROOT` | unset = the default root |
-| `--idle-cutoff <duration>` | hibernate a session idle this long | the keep-alive idle cutoff |
+| `--idle-cutoff <duration>` | park a session idle this long (the idle sweep) | the keep-alive idle cutoff |
 | `--pprof <unix path or 127.0.0.1:port>` | opt-in local profiling surface, opened BEFORE any dependency; a wildcard or routable bind is refused, not opened | off |
 | `--no-browser` | this daemon has NO external browser: `OpenExternal` answers `no_browser_configured` and nothing is launched. Without it the browser is still absent on a host where neither `$AGENT_REPL_BROWSER_CMD` nor the pinned default launcher exists | off |
 | `--feed-tail-retention <rows>` | how many published rows one feed retains for a tail's replay, which is what makes WatchFeed's `token_expired` refusal reachable | `$AGENT_REPL_FEED_TAIL_RETENTION`, else the resolver's `DefaultTailRetention` (4096) |
@@ -357,7 +357,7 @@ environment. Every flag is optional.
     is reported, never waited on), and then
     the state client and the log sinks are closed. The join is registered last
     so it runs FIRST of every teardown: a loop's iteration reads and writes the
-    state client off its own goroutine — the drain sweep's hibernation releases
+    state client off its own goroutine — the drain sweep's park releases
     the lease and then tells the prompt queue — and a SIGTERM landing inside one
     left `daemon.promptqueue.lease_changed: could not read the standing holds —
     sql: database is closed` in the log of an ORDERLY exit. The queue's
@@ -391,7 +391,7 @@ So the spawn itself is recorded:
   SESSION, and a registered workspace whose first shim is being forked has no
   session row to write at all.
 - It is CLEARED when this daemon knows the process is gone: a failed start's
-  stop (`workspace/failedstart.go`) and the drain sweep's hibernation.
+  stop (`workspace/failedstart.go`) and the drain sweep's park.
 - `boot.sequence.adopt` and the fleet's `bringUpClient`, on LOCK FREE + NO LIVE
   SOCKET, read it before concluding no shim survives. A pid that is dead or
   absent proceeds as before (the socket path is cleared and a shim is spawned).
@@ -459,7 +459,7 @@ it opens, never in registry order (`ARCHITECTURE.md`, "The editor opens
 workspaces with OpenTabs"). Every bring-up (the boot's, a takeover's, an
 open's) starts only workspaces `bringup.OnlyVisible` keeps: never one the user
 hid or whose repository section is collapsed. Collapsing stands the session
-down through the idle sweep's own gate and hibernation (`drain/withheld.go`);
+down through the idle sweep's own gate and park (`drain/withheld.go`);
 a turn in flight defers it to the free edge that turn's end raises, and a
 workspace expanded again meanwhile is not stood down. A fold never stands down
 a one-shot or a workspace with a merge pending (`wsm.Workspace.FoldSpare`):
@@ -523,7 +523,7 @@ ending row, live and on replay.
 | `AGENT_REPL_TEMPORARY_REGISTRATION_TEST_ROOT` | test only | the ONE directory beneath which a test-run daemon may register directories inside a temporary root, which the registry otherwise refuses (owner ruling 2026-10-06, `internal/tempdirs`: `os.TempDir()`, `/tmp`, `/var/tmp`, `/var/folders`, canonicalized). It must lie strictly beneath a temporary root and not be one. It is honored ONLY with `AGENT_REPL_FORBID_VENDOR_CALLS` set; set without it, it is a BOOT REFUSAL. The integration harness names its run root and moves the daemon's `TMPDIR` to `<run root>/daemon-tmp`; the e2e-emacs layer names each test's sandbox scratch (Emacs launches the daemon, so it rides Emacs's environment); unit-test binaries that open a real registry run through `tempdirstest.Main`. A test-run daemon that refuses a temporary folder with NO test root records ERROR `daemon.refusal.temporary_seam_missing`, so a launcher that forgot the seam fails its warning sweep instead of passing silently |
 | `AGENT_REPL_FAKE_SHIMS` | test only | forces every shim spawn into the shim's offline scripted SDK WITHOUT putting the whole stack in fake mode, so a suite can exercise a REAL vendor call site (the classifier's headless run) against a live session. It can only turn fake ON. It is NOT needed merely to get fake shims under the vendor guard -- the guard implies them |
 | `AGENT_REPL_TEST_HOLD_FIRST_WATCHER_START` | test only | an absolute unix socket path: the daemon dials it before starting its FIRST session watcher, after the bring-up marked the session started, and holds that start until the test closes the connection (`internal/workspace/watcherhold.go`). It pins open the window a prompt was once refused `no_session` in; the integration harness serves it as `harness.HoldFirstWatcherStart`. It is honored ONLY with `AGENT_REPL_FORBID_VENDOR_CALLS` set; set without it, or relative, it is a BOOT REFUSAL. An unreachable hold, or one that ends in anything but the test's close, fails that watcher start at ERROR `daemon.workspace.watcher_hold` |
-| `AGENT_REPL_HIBERNATE_IDLE_CUTOFF_MS` | test only | compresses the idle cutoff |
+| `AGENT_REPL_HIBERNATE_IDLE_CUTOFF_MS` | test only | compresses the idle cutoff (the name predates the one park and is kept so an existing setting still holds) |
 | `AGENT_REPL_FEED_TAIL_RETENTION` | test only | compresses the feed's tail retention (a whole number of rows). It BEATS `--feed-tail-retention`. A malformed or non-positive value is a BOOT REFUSAL, never a fall-through to the default |
 | `AGENT_REPL_HOLDOUT_WARN_EVERY` | test only | compresses the rollout's never-free holdout warning cadence (a Go duration; the default is ten minutes). A malformed or non-positive value is a BOOT REFUSAL, never a fall-through to the default |
 | `AGENT_REPL_HANDOVER_FACTS_BOUND` | test only | bounds a successor's wait, on a mid-work adoption, for the adopted shim to re-announce its session facts (a Go duration; the default is 10s). A malformed or non-positive value is a BOOT REFUSAL |
@@ -1594,7 +1594,7 @@ notice naming the new target is queued in the workspace's session.
 
 ## A lease dies with the process that took it
 
-A workspace's occupancy lease (`wsm.leases`: merge, restart, drain, hibernate)
+A workspace's occupancy lease (`wsm.leases`: merge, restart, drain, hibernate — the stand-down lease every park takes)
 is OWNED BY THE STATE HANDLE THAT TOOK IT, and a daemon holds exactly one
 handle for its whole life. So:
 
@@ -1612,7 +1612,7 @@ handle for its whole life. So:
   owner: its process died without the close (SIGKILL, SIGQUIT, a crash). A
   failed read or release fails the boot.
 - **Every operation's lease is scope-bound**: the relaunch's restart hold, a
-  drain fire's holds, the hibernation lease and a handover transfer's quiesce
+  drain fire's holds, the stand-down lease and a handover transfer's quiesce
   hold are released on every exit path (deferred), on a context the daemon's
   leaving cannot refuse -- never through the context whose cancellation ended
   the operation.
@@ -2494,7 +2494,7 @@ in a fixed order, and the order is the contract:
    serialized), and concurrent selects stamped current in the order their
    revivals finished, overwriting the user's last switch.
 2. **Then, for a workspace with no session behind it, the revival, NOT
-   WAITED ON** (`startRevival`, internal/workspace/revive.go). A hibernated
+   WAITED ON** (`startRevival`, internal/workspace/revive.go). A parked
    workspace's bring-up raises the roster row's `RosterRowReviving` marker for
    the duration of the start and lowers it however the start ended. The
    decision -- parked, live, closed -- is read synchronously and only the

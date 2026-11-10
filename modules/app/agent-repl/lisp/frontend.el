@@ -1506,7 +1506,7 @@ name directly.  Signals when the workspace has no webview open at all."
   "The gui frontend's show capability (registry `:show-fn').
 Displays the live webview, or opens fresh when it died.
 
-NOTHING IS WOKEN FIRST.  Hibernation does not exist on the wire: a
+NOTHING IS WOKEN FIRST.  A park does not exist on the wire: a
 parked workspace presents as live with `shim_attached' false, its
 composer stays open, and typing revives it under the hood — so there is
 no bring-up for a show to wait on, and the page connects and draws

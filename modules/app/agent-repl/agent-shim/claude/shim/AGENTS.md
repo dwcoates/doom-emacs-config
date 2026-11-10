@@ -1131,8 +1131,9 @@ response revision (`shim.v1.ReviseResponse`).
 
 ## The hibernate contract: a stand-down never compacts
 
-`Hibernate` is the daemon's pre-hibernation directive. Hibernation is a MEMORY
-measure: the daemon stands an idle shim down to free what it holds, and a
+`Hibernate` is the daemon's pre-park directive: every stand-down that leaves
+the one park (the keep-alive cycle, the idle sweep, a withheld workspace, a
+settings visit) sends it first. A park is a MEMORY measure: the daemon stands an idle shim down to free what it holds, and a
 session revived later pays for its own context through the cold gate. So the
 shim never compacts for it, and the transcript is left exactly as it stands.
 

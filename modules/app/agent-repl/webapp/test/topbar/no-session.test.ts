@@ -4,7 +4,7 @@
  *
  * WHAT THIS GUARDS: that a control the daemon left absent keeps its slot and
  * says why. The failure modes being excluded are a strip that rearranges
- * itself the moment a workspace hibernates, and a dash a reader cannot
+ * itself the moment a workspace loses its session, and a dash a reader cannot
  * interpret.
  */
 import { describe, expect, it } from "vitest";

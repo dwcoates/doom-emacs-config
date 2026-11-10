@@ -223,9 +223,9 @@ export function drawFeedColdGateStanding(
   card.setAttribute("data-state", "standing");
 
   const head = document.createElement("div");
-  head.className = "hibernation-head";
+  head.className = "cold-gate-head";
   const heading = document.createElement("span");
-  heading.className = "hibernation-heading";
+  heading.className = "cold-gate-heading";
   heading.textContent = COLD_GATE_COPY.title;
   head.append(heading, drawFeedColdGateLastRequest(lastRequest, rc, `${path}.last_request`));
   card.append(head);
@@ -255,7 +255,7 @@ export const COLD_GATE_HEAT_PROPERTY = "--cold-gate-heat";
  */
 function drawLead(figure: HTMLElement, model: string): HTMLElement {
   const lead = document.createElement("div");
-  lead.className = "hibernation-context";
+  lead.className = "cold-gate-context";
   const [before, rest] = COLD_GATE_COPY.lead.split("{tokens}");
   lead.append(
     document.createTextNode(before),
@@ -311,7 +311,7 @@ export function drawFeedColdGateLastRequest(
 ): HTMLElement {
   const at = msOf(u.atMs, `${path}.at_ms`);
   const el = document.createElement("span");
-  el.className = "hibernation-since";
+  el.className = "cold-gate-since";
   tickWhileShown(el, rc.ctx.ticker, (nowMs) => {
     el.textContent = COLD_GATE_COPY.lapse.replace("{age}", formatTickedAge(nowMs - at));
   });
@@ -418,18 +418,18 @@ function drawActions(
   path: string,
 ): HTMLElement {
   const actions = document.createElement("div");
-  actions.className = "hibernation-actions";
+  actions.className = "cold-gate-actions";
 
   // THE PROGRESS SLOT, empty until an answer is in flight. It is built here —
   // once, with the card — rather than appended when a click lands, so an answer
   // in flight changes the card's TEXT and its disabled buttons and nothing
-  // else. `hibernation-pending` is the gate's ancestor's own class for exactly
+  // else. `cold-gate-pending` is the gate's ancestor's own class for exactly
   // this line ("a decision in flight"), already in the sheet: no new style, no
   // new colour. It is HIDDEN while empty, because an empty element still
   // carries that class's margin and an always-on gap under the buttons would
   // be a layout change of this end's invention.
   const progress = document.createElement("div");
-  progress.className = "hibernation-pending";
+  progress.className = "cold-gate-pending";
   progress.setAttribute("data-cold-gate-progress", "");
   progress.hidden = true;
 
@@ -480,7 +480,7 @@ function drawActions(
   actions.append(submenu.el, progress);
   const opener = (mode: CompactMode, label: string, hint: string): Control => {
     // BOTH WEAR THE COMPACT BUTTON'S COLOR (owner ruling, 2026-10-13).
-    const button = gateButton("hibernation-compact", ["data-compact-open", mode], { label, hint }, buttons);
+    const button = gateButton("cold-gate-compact", ["data-compact-open", mode], { label, hint }, buttons);
     button.addEventListener("click", () => {
       const open = submenu.el.hidden || submenu.mode() !== mode;
       submenu.setMode(mode);
@@ -515,7 +515,7 @@ function actionButton(
   copy: { label: string; hint: string },
   buttons: Control[],
 ): Control {
-  return gateButton(arm === "clear" ? "hibernation-clear" : "hibernation-direct", ["data-cold-gate", arm], copy, buttons);
+  return gateButton(arm === "clear" ? "cold-gate-clear" : "cold-gate-direct", ["data-cold-gate", arm], copy, buttons);
 }
 
 /**
@@ -615,7 +615,7 @@ function drawCompactSubmenu(
 
   let mode: CompactMode = "compact";
   const send = createControl();
-  send.className = "hibernation-compact";
+  send.className = "cold-gate-compact";
   const setMode = (next: CompactMode): void => {
     mode = next;
     send.setAttribute("data-cold-gate", next);

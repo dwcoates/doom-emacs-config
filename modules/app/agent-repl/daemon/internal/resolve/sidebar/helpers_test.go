@@ -121,7 +121,7 @@ func (f *fanned) bindRegistry(reg sidebar.Registry) {
 	// footer in the same breath as it publishes the record.
 	for _, session := range reg.Sessions {
 		if session.Parked() {
-			f.footer.SetParked(session.Workspace, wsm.ParkOf(session))
+			f.footer.SetParked(session.Workspace, true)
 		}
 	}
 }

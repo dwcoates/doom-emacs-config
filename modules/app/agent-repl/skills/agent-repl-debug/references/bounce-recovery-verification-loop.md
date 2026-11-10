@@ -27,7 +27,7 @@ belongs to the daemon's own deploy (`daemon/internal/deploy`), the suite invocat
 Select this runbook when:
 
 - A change touches recovery, resync, reconnect, restart announcement,
-  hibernation, or the shim attach path, and the question is whether a bounce
+  a park (a session stood down while idle), or the shim attach path, and the question is whether a bounce
   survives it.
 - Workspaces come back after a restart looking alive — socket open, page
   mounted, spinner turning — and the doubt is whether anything real is

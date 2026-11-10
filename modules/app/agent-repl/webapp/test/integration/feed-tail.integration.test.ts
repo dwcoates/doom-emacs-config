@@ -124,7 +124,7 @@ describe("the docked footer and the feed's tail", () => {
    * lands LAST — after the footer settled and after the render that parked —
    * leaves the tail exactly as far below the fold as the footer once did. It
    * is the last thing to land precisely under load, where the fetch behind an
-   * unfolded bubble's own page is slowest, which is why the hibernated tab's
+   * unfolded bubble's own page is slowest, which is why the parked tab's
    * `awaitTailClearsFooter` failed there and nowhere else.
    */
   it("re-lands the tail when the content grows after the footer settled", async () => {
@@ -188,7 +188,7 @@ describe("the docked footer and the feed's tail", () => {
   /**
    * THE CLAMP, ON THE BOOTED APP. The feed shrinking under a parked box drags
    * `scrollTop` down with it, and the drag reads exactly like a gesture upward.
-   * Measured in the hibernated tab's playbook under load: the box sat at 52 --
+   * Measured in the parked tab's playbook under load: the box sat at 52 --
    * the reachable extent one turn earlier -- while 400px of new rows arrived
    * beneath it, because the reconcile that saw the movement arrived only after
    * the content had regrown. No input ever reached the box, so nothing that

@@ -1,6 +1,6 @@
 /**
  * reviving — the shimmer a roster row's NAME wears while the daemon brings its
- * parked (hibernated) session back up.
+ * parked session back up.
  *
  * THE WIRE DECIDES WHEN. `frontend.v1.RosterRowReviving` is present from the
  * instant the daemon decides to revive the workspace until that revival ends,

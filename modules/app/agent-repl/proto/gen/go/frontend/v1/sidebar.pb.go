@@ -3289,8 +3289,9 @@ func (*RosterRowOpening) Descriptor() ([]byte, []int) {
 // bring-up under way: the start failed, or the boot could not tell whether a
 // surviving shim owns the workspace and so served none.
 //
-// A hibernated workspace is never `available` merely by being registered:
-// the boot wakes it, and it is `pending` until the woken shim connects.
+// A parked workspace is `available` without a shim: a session stood down
+// while idle is drawn as the idle session it stands in for, and its next
+// prompt, settings pick or keep-alive restore brings the shim back.
 type RosterRowAvailability struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The availability. The set arm IS the availability; an unset oneof is

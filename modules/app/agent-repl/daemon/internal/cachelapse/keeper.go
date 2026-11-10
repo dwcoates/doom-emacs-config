@@ -155,6 +155,10 @@ type Deps struct {
 	Log     dlog.Surfaces
 	// Telemetry receives every beat, lapse and cold gate (telemetry.go).
 	Telemetry Telemetry
+	// NextKeepalive states WS's next scheduled keep-alive to the views, the
+	// zero time for none, each time it changes (nextkeepalive.go). A park
+	// the views hold carries it (wsm.Park).
+	NextKeepalive func(ws ids.WorkspaceID, next time.Time)
 }
 
 // edgeKind is what one queued event is.
@@ -220,6 +224,9 @@ type Keeper struct {
 	// stand-down is taken without one (answer.go); both owned by Run alone.
 	answering map[ids.WorkspaceID]time.Time
 	answerBy  map[ids.WorkspaceID]time.Time
+	// stated is each workspace's next keep-alive as last stated to the views
+	// (nextkeepalive.go), owned by Run alone.
+	stated map[ids.WorkspaceID]time.Time
 }
 
 // New builds a Keeper. A missing collaborator is a wiring defect.
@@ -247,6 +254,8 @@ func New(deps Deps) (*Keeper, error) {
 		return nil, errors.New("cachelapse: the keeper needs log surfaces")
 	case deps.Telemetry == nil:
 		return nil, errors.New("cachelapse: the keeper needs telemetry")
+	case deps.NextKeepalive == nil:
+		return nil, errors.New("cachelapse: the keeper needs the views' next keep-alive")
 	}
 	return &Keeper{
 		deps: deps, wake: make(chan struct{}, 1),
@@ -258,6 +267,7 @@ func New(deps Deps) (*Keeper, error) {
 		freeSince: map[ids.WorkspaceID]time.Time{},
 		answering: map[ids.WorkspaceID]time.Time{},
 		answerBy:  map[ids.WorkspaceID]time.Time{},
+		stated:    map[ids.WorkspaceID]time.Time{},
 	}, nil
 }
 
@@ -365,6 +375,7 @@ func (k *Keeper) Run(ctx context.Context) error {
 			k.beatsDue(ctx)
 			k.restoresDue(ctx)
 			k.answersDue()
+			k.stateNextKeepalives()
 			continue
 		}
 		var due <-chan time.Time
@@ -378,11 +389,13 @@ func (k *Keeper) Run(ctx context.Context) error {
 			for _, e := range k.take() {
 				k.apply(ctx, e)
 			}
+			k.stateNextKeepalives()
 		case <-due:
 			k.lapseDue(ctx)
 			k.beatsDue(ctx)
 			k.restoresDue(ctx)
 			k.answersDue()
+			k.stateNextKeepalives()
 		}
 	}
 }
@@ -408,6 +421,7 @@ func (k *Keeper) restore(ctx context.Context) error {
 		k.schedule(ctx, ws.ID, "the daemon started")
 	}
 	log.Info(opDrive, "armed every workspace's next keep-alive", dlog.Context{"beats": len(k.beats), "restores": len(k.restores)})
+	k.stateNextKeepalives()
 	return nil
 }
 

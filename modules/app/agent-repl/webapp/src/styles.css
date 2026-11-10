@@ -169,16 +169,11 @@
      (`agent-repl--color-init-blue'), so a starting workspace reads as one
      state across both renderers instead of red in one and blue in the other. */
   /* --init, the blue status: render-colors.json#color_values (src/vocab.ts). */
-  /* Hibernation: the same teal the Emacs tab-bar paints the hibernated state
-     (`agent-repl--color-hibernated-teal'), and the sixth color in the shared
-     vocabulary.
-     A single DORMANT state used to mean both "we put this session to sleep on
-     purpose to reclaim its ~500MB" and "the backend substrate is broken", so
-     the idle sweeper reclaiming memory from an untouched workspace rendered
-     exactly like a dead shim. A color that fires on both means neither, which
-     is why this is a hue of its own and not a shade of --init: the two states
-     WERE one, and a teal that reads as bluish re-merges them at a glance. */
-  --hibernated: #0d9488;
+  /* The revival teal: the cold gate's card and a held prompt's badge while
+     its session comes back up. It is no state's color of its own: the
+     hibernated state it once painted is retired into the one park, which is
+     drawn as the live idle session it stands in for (2026-11-09). */
+  --revival: #0d9488;
   /* TURQUOISE: something went wrong and wants the user's attention, but the
      workspace is USABLE — a failed turn, a failed merge, a degraded view
      (owner ruling, 2026-09-28). A cyan well clear of --init's blue and --ok's
@@ -652,7 +647,7 @@
        deep ground the same way the light one does on white. */
     --token-yellow: #ba8e07;
     /* Brighter teal for the dark theme, for the same reason --async lifts. */
-    --hibernated: #06ad9b;
+    --revival: #06ad9b;
     /* The gate stays a SOLID yellow card in the dark theme too, but a deep
        yellow rather than the light theme's bright one, so --fg still reads on
        it. The frame lifts to the brighter orange the dark theme already gives
@@ -5160,7 +5155,6 @@ html[data-page-unshown] {
 .pfooter-phase.ok { color: var(--ok); }
 /* TEAL, and pointedly not --err: a workspace asleep on purpose is not a fault,
    and the word beside it is not something to act on. */
-.pfooter-phase.hibernated { color: var(--hibernated); }
 .pfooter-phase.muted { color: var(--muted); }
 
 /* The interrupt chip (I1): the outcome of the stop the user asked for, sitting
@@ -5575,14 +5569,14 @@ html[data-page-unshown] {
 /* An idle lease pays no layout at all. */
 #drain-banner:empty { display: none; }
 
-/* --- The revival gate (hibernation.ts) -----------------------------------
-   The blocking card a hibernated session shows instead of a live composer,
+/* --- The revival gate (feed/asks/cold-gate.ts) ---------------------------
+   The blocking card a cold-gated session shows instead of a live composer,
    offering the compaction modes a revival can take.
 
    YELLOW fill inside an ORANGE frame, and both are SOLID colors rather than a
    wash mixed with the feed: this card is not an announcement to read past, it
    is the only interaction available until it is answered, so nothing of the
-   conversation shows through it. The hibernation TEAL still names the state
+   conversation shows through it. The revival TEAL still names the state
    inside the card — the heading, the badges and the buttons all keep it, per
    the module color contract — while the frame carries the decision the card
    is asking for rather than the state it reports. */
@@ -5597,26 +5591,26 @@ html[data-page-unshown] {
 }
 /* An awake session pays no layout for a gate it does not carry. */
 #revival-gate:empty { display: none; }
-.hibernation-head {
+.cold-gate-head {
   display: flex;
   align-items: baseline;
   gap: 0.5rem;
 }
-.hibernation-heading { font-weight: 700; color: var(--hibernated); }
-.hibernation-since {
+.cold-gate-heading { font-weight: 700; color: var(--revival); }
+.cold-gate-since {
   color: var(--muted);
   font-size: 0.8rem;
   font-variant-numeric: tabular-nums;
 }
 /* WHY it is asleep, in the daemon's own terms. It leads because it is the
    fact that decides which of the buttons below is the right one. */
-.hibernation-cause { margin-top: 0.25rem; }
+.cold-gate-cause { margin-top: 0.25rem; }
 /* HOW BIG the conversation is. It sits between the cause and the options
    because it is the size of the thing every button below trades against. The
    sentence is the ordinary foreground, the eggshell the sidebar's repository
    names wear; ONLY its token figure is colored, inline, on the cold-gate
    gradient (owner, 2026-10-06), so the color reads as the figure's own. */
-.hibernation-context {
+.cold-gate-context {
   margin-top: 0.35rem;
   color: var(--fg);
   font-variant-numeric: tabular-nums;
@@ -5628,13 +5622,13 @@ html[data-page-unshown] {
    keeps. Stacked rather than laid out side by side, because five buttons in a
    row with their explanations elsewhere would be paired up by position — and a
    mispairing here picks what the conversation loses. */
-.hibernation-actions {
+.cold-gate-actions {
   margin-top: 0.55rem;
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
 }
-.hibernation-option {
+.cold-gate-option {
   display: flex;
   align-items: baseline;
   gap: 0.6rem;
@@ -5643,42 +5637,42 @@ html[data-page-unshown] {
 }
 /* The button keeps its own width regardless of how long its sentence is, so
    the column of labels reads as one list. */
-.hibernation-option > ar-button { flex: 0 0 auto; }
-.hibernation-option-text { flex: 1 1 auto; }
+.cold-gate-option > ar-button { flex: 0 0 auto; }
+.cold-gate-option-text { flex: 1 1 auto; }
 /* The direct-resume row carries a COST, so it is not muted into the same
    grey as the compacting rows above it — the options must not read as
    equally weighted when one of them is paid for on every later turn. */
-.hibernation-option.warn { color: var(--info-tokens); }
-.hibernation-actions ar-button {
+.cold-gate-option.warn { color: var(--info-tokens); }
+.cold-gate-actions ar-button {
   font: inherit;
   padding: 0.25rem 0.7rem;
   border-radius: 6px;
   cursor: pointer;
-  border: 1px solid var(--hibernated);
+  border: 1px solid var(--revival);
   background: var(--bg);
   color: var(--fg);
 }
 /* The compacting paths are the filled ones. The costlier resume-as-is stays
    outlined rather than being disabled or hidden: it is a legitimate deliberate
    choice, and the UI's job is to make it deliberate, not unavailable. */
-.hibernation-actions ar-button.hibernation-compact {
-  background: var(--hibernated);
+.cold-gate-actions ar-button.cold-gate-compact {
+  background: var(--revival);
   color: var(--bg);
   font-weight: 700;
 }
-.hibernation-actions ar-button.hibernation-direct { border-color: var(--info-tokens); }
+.cold-gate-actions ar-button.cold-gate-direct { border-color: var(--info-tokens); }
 /* The one DESTRUCTIVE option, outlined in the error color and never filled: it
    must be reachable and must never be the button a stray click lands on. The
    color is not "clearing is a fault" — it is the only option on the card whose
    result cannot be undone, and it sits one click from four that keep a
    summary. */
-.hibernation-actions ar-button.hibernation-clear {
+.cold-gate-actions ar-button.cold-gate-clear {
   border-color: var(--err);
   color: var(--err);
 }
 /* A decision in flight REPLACES the buttons rather than greying them, so a
    second click on the other mode is not on offer while the first is pending. */
-.hibernation-pending {
+.cold-gate-pending {
   margin-top: 0.55rem;
   color: var(--muted);
   font-style: italic;
@@ -5689,16 +5683,16 @@ html[data-page-unshown] {
    answered, and a compact-first revival keeps it answered for the length of a
    whole compaction. A full-height card of options nobody may take any more,
    standing that long, reads as the click having missed. */
-.hibernation-progress {
+.cold-gate-progress {
   display: flex;
   align-items: baseline;
 }
-.hibernation-progress .hibernation-pending { margin-top: 0; }
+.cold-gate-progress .cold-gate-pending { margin-top: 0; }
 /* An ACCEPTED decision whose bring-up failed. Red, unlike everything else on
-   this card: a hibernated session is benign and deliberate, but a wake-up that
+   this card: a cold-gated session is benign and deliberate, but a wake-up that
    was taken and then did not happen is a fault, and the user has just watched
    their choice appear to do nothing. */
-.hibernation-failed {
+.cold-gate-failed {
   margin-top: 0.35rem;
   color: var(--err);
   font-weight: 600;
@@ -5744,8 +5738,8 @@ html[data-page-unshown] {
 .tool-card.bubble-fold[data-collapsible="false"] > .bubble-head { cursor: default; }
 
 /* The composer's own one-line reason, sharing the merge gate's slot and its
-   muted, non-alarming tone: a hibernated session is deliberate and benign. */
-#merge-gate-notice .hibernation-gate-text { display: block; }
+   muted, non-alarming tone: a session coming back up is deliberate and benign. */
+#merge-gate-notice .cold-gate-gate-text { display: block; }
 .drain-mark {
   flex: 0 0 auto;
   color: var(--merge-border);
@@ -6475,7 +6469,7 @@ bubble-body.bubble-body { display: block; }
    badge's own size and tone, so the status leads the strip. */
 .badge.held-badge { border: none; padding-left: 0; padding-right: 0; font-weight: 500; }
 .badge.held-badge.amber { color: var(--merge-border); }
-.badge.held-badge.teal { color: var(--hibernated); }
+.badge.held-badge.teal { color: var(--revival); }
 /* A classifier still deciding: a slow breath, which is how every other
    transient state in this app says "not settled". */
 .badge.held-badge.run { animation: hold-breathe 2.6s ease-in-out infinite; }
@@ -7906,7 +7900,7 @@ bubble-body.bubble-body { display: block; }
 /* ONE FILL FOR EVERY BUTTON (owner request, 2026-10-03): the pay button's
    page-coloured background; each keeps its own border, and compact -- first
    on the row -- takes a green one in place of its old fill. */
-.cold-gate-buttons > ar-button.hibernation-compact {
+.cold-gate-buttons > ar-button.cold-gate-compact {
   background: var(--bg);
   color: var(--fg);
   border-color: var(--cold-gate-compact-border);
@@ -7914,8 +7908,8 @@ bubble-body.bubble-body { display: block; }
 /* Every label in the one colour (owner request, 2026-10-03). The RED BORDER
    is pay's (owner request, 2026-10-06): pay and resume is the weightiest
    choice, so it is red and last on the row; clear takes the border pay had. */
-.cold-gate-buttons > ar-button.hibernation-clear { color: var(--fg); border-color: var(--info-tokens); }
-.cold-gate-buttons > ar-button.hibernation-direct { border-color: var(--err); }
+.cold-gate-buttons > ar-button.cold-gate-clear { color: var(--fg); border-color: var(--info-tokens); }
+.cold-gate-buttons > ar-button.cold-gate-direct { border-color: var(--err); }
 /* HIDE AND KILL WORKSPACE ARE GREY (owner requests, 2026-10-13 and
    2026-10-17): last on the row, and not remediations, so they wear grey
    rather than any remediation's color. Kill wears the muted grey; hide, a
@@ -7926,7 +7920,7 @@ bubble-body.bubble-body { display: block; }
 .cold-gate-buttons > ar-button { border-width: 1.5px; }
 /* A little more room under the buttons, so the gate stands a touch taller
    (owner request, 2026-10-03). */
-.cold-gate .hibernation-actions:has(> .cold-gate-buttons) { margin-bottom: 0.45rem; }
+.cold-gate .cold-gate-actions:has(> .cold-gate-buttons) { margin-bottom: 0.45rem; }
 .cold-gate-choice {
   display: block;
   padding: 0.1rem 0;

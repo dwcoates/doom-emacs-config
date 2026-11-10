@@ -19,8 +19,8 @@ func (f fakeSessionList) Sessions(context.Context) ([]wsm.Session, error) { retu
 func TestOnlyWasUp(t *testing.T) {
 	up := wsm.Session{Workspace: "ws-up", VendorSessionID: "vendor-up"}
 	created := wsm.Session{Workspace: "ws-created"}
-	parked := wsm.Session{Workspace: "ws-parked", Terminal: &wsm.SessionTerminal{Kind: wsm.TerminalKeepaliveCycle}}
-	hibernated := wsm.Session{Workspace: "ws-hibernated", Terminal: &wsm.SessionTerminal{Kind: wsm.TerminalHibernated}}
+	parked := wsm.Session{Workspace: "ws-parked", Terminal: &wsm.SessionTerminal{Kind: wsm.TerminalParked}}
+	hibernated := wsm.Session{Workspace: "ws-hibernated", Terminal: &wsm.SessionTerminal{Kind: wsm.TerminalParked}}
 	killed := wsm.Session{Workspace: "ws-killed", Terminal: &wsm.SessionTerminal{Kind: "killed"}}
 	pending := []wsm.Workspace{{ID: "ws-up"}, {ID: "ws-parked"}, {ID: "ws-hibernated"}, {ID: "ws-killed"}, {ID: "ws-created"}, {ID: "ws-never-started"}}
 
