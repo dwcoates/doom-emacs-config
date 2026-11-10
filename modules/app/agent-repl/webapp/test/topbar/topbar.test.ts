@@ -99,6 +99,24 @@ describe("drawChipRun", () => {
 });
 
 describe("drawTopbarView", () => {
+  // A QUEUE BYPASS HOLDER IS IN REMOTE CONTROL (owner request, 2026-11-10):
+  // the daemon serves its chip on, and the strip draws it beside the lit
+  // bypass chip as for any remote-controlled workspace.
+  it("draws remote control on for a workspace in queue bypass mode", () => {
+    const { tc } = topbarContext();
+    const row = drawTopbarView(
+      view({
+        queueBypass: { mode: { case: "on", value: {} }, tooltip: { text: "queue bypass on" } },
+        remoteControl: { mode: { case: "on", value: {} }, tooltip: { text: "remote control on" } },
+      }),
+      tc,
+    );
+    expect([
+      row.querySelector(".topbar-queue-bypass")?.getAttribute("data-mode"),
+      row.querySelector(".topbar-remote-control")?.getAttribute("data-mode"),
+    ]).toEqual(["on", "on"]);
+  });
+
   it("draws the three groups", () => {
     const { tc } = topbarContext();
     const row = drawTopbarView(view(), tc);
