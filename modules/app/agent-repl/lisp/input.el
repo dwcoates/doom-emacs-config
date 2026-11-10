@@ -161,9 +161,7 @@
 (declare-function evil-normalize-keymaps "evil-core" (&optional state))
 (declare-function evil-ex-search-forward "evil-commands" (&optional count))
 (declare-function evil-ex-search-backward "evil-commands" (&optional count))
-(declare-function markdown-mode "markdown-mode" ())
 (declare-function agent-repl-popup-show "popup" (buffer))
-(declare-function agent-repl-host-selection-markdown "agent-repl-host" (ws))
 (declare-function agent-repl-dividers-fix-fringes "dividers" (buf width))
 
 ;;;; ---- Metaprompt on-demand re-read -----------------------------------
@@ -733,13 +731,10 @@ buffer's own text, because the text is the only record of them."
 ;; A click in the webview selects too, and any landed bubble can be selected
 ;; that way (the `:bubble' kind); the host watch reports every change the
 ;; same way, whoever made it.  While anything is selected,
-;; `agent-repl-input-selection-mode' stands: `/' and `?' (command mode) and
-;; `C-s' (every state) open the selected bubble's markdown in a read-only
-;; popup and search it there (`agent-repl-response-search-forward'), and
-;; `RET' rolls back to a selected prompt, or sends the composer as a reply
-;; to any other selected bubble (`agent-repl-input-selection-return').  The
-;; webapp expands a bubble the moment it is selected, so the bubble searched
-;; is the one drawn open.
+;; `agent-repl-input-selection-mode' stands: `RET' rolls back to a selected
+;; prompt, or sends the composer as a reply to any other selected bubble
+;; (`agent-repl-input-selection-return').  Every other key, the composer's
+;; own searches included, keeps its ordinary meaning.
 
 (defconst agent-repl--input-selection-escape-warning
   "selection: press escape again to clear the selection"
@@ -762,14 +757,13 @@ clears the selection, so the user reads it before anything is cleared.")
 
 (defvar agent-repl-input-selection-mode-map (make-sparse-keymap)
   "Keymap of `agent-repl-input-selection-mode'.
-`RET' and `C-s' in every state, `/' and `?' in normal state.")
+`RET' in every state.")
 
 (defun agent-repl--input-fill-selection-map (map)
-  "Bind MAP's plain `RET' and `C-s', which emacs state reads.
+  "Bind MAP's plain `RET', which emacs state reads.
 The evil states read the auxiliary maps `agent-repl--input-selection-bind-keys'
 fills, which outrank the composer's own `RET'."
-  (define-key map (kbd "RET") #'agent-repl-input-selection-return)
-  (define-key map (kbd "C-s") #'agent-repl-response-search-buffer))
+  (define-key map (kbd "RET") #'agent-repl-input-selection-return))
 
 ;; Refilled on every load, BEFORE the evil binder below, so a reload drops a
 ;; removed binding and the evil auxiliary maps are rebuilt on top.
@@ -778,20 +772,16 @@ fills, which outrank the composer's own `RET'."
 
 (define-minor-mode agent-repl-input-selection-mode
   "The composer's behavior while a feed row is selected.
-`/' and `?' in command mode search the selected bubble's markdown instead of
-the composer.  Turned on and off by `agent-repl--input-selection-changed'
+`RET' acts on the selected row (`agent-repl-input-selection-return').
+Turned on and off by `agent-repl--input-selection-changed'
 alone, so it stands exactly while the daemon's selection does."
   :keymap agent-repl-input-selection-mode-map)
 
 (defun agent-repl--input-selection-bind-keys ()
-  "Bind the selection mode's keys in its Evil auxiliary maps.
-`/' and `?' in normal state; `RET' and `C-s' in normal and insert state."
-  (evil-define-key* 'normal agent-repl-input-selection-mode-map
-    "/" #'agent-repl-response-search-forward
-    "?" #'agent-repl-response-search-backward)
+  "Bind the selection mode's `RET' in its Evil auxiliary maps.
+Normal and insert state."
   (evil-define-key* '(normal insert) agent-repl-input-selection-mode-map
-    (kbd "RET") #'agent-repl-input-selection-return
-    (kbd "C-s") #'agent-repl-response-search-buffer))
+    (kbd "RET") #'agent-repl-input-selection-return))
 
 (defun agent-repl-input-selection-return ()
   "Act on the selected bubble with `RET'.
@@ -861,9 +851,8 @@ send, so `RET' only rolls back."
 
 (defun agent-repl--input-selection-changed (ws)
   "Follow WS's selection as the host watch last pushed it.
-Turns `agent-repl-input-selection-mode' on or off in WS's composer, and
-refills an open response view so it never shows a bubble that is no longer
-the selection.  A workspace with no composer has nothing to follow."
+Turns `agent-repl-input-selection-mode' on or off in WS's composer.
+A workspace with no composer has nothing to follow."
   (let ((buf (agent-repl--input-buffer ws))
         (active (agent-repl--input-selection-active-p ws)))
     (agent-repl--log ws "elisp.input.selection-changed ws=%s active=%s composer=%s"
@@ -871,9 +860,7 @@ the selection.  A workspace with no composer has nothing to follow."
     (when buf
       (with-current-buffer buf
         (agent-repl-input-selection-mode (if active 1 -1))
-        (when (fboundp 'evil-normalize-keymaps) (evil-normalize-keymaps))))
-    (when active
-      (agent-repl--response-view-refresh ws (agent-repl-host-selection-markdown ws)))))
+        (when (fboundp 'evil-normalize-keymaps) (evil-normalize-keymaps))))))
 
 (defun agent-repl-input-focus-for-reply (ws)
   "Select WS's composer window in insert state, to type a reply.
@@ -966,87 +953,6 @@ is a broken decoder, and is fatal."
         (let ((win (agent-repl-input-focus-for-reply ws)))
           (when win
             (set-window-point win (with-current-buffer buf (point-max)))))))))
-
-;;;; ---- The response view: the selected bubble, searched with real Evil ----
-
-(defun agent-repl--response-view-name (ws)
-  "The name of WS's response view buffer."
-  (format "*agent-repl response: %s*" ws))
-
-(defun agent-repl--response-view-fill (buffer markdown)
-  "Fill BUFFER with MARKDOWN as a read-only `markdown-mode' buffer, point at top."
-  (with-current-buffer buffer
-    (let ((inhibit-read-only t))
-      (erase-buffer)
-      (insert markdown))
-    (unless (derived-mode-p 'markdown-mode) (markdown-mode))
-    (setq buffer-read-only t)
-    (set-buffer-modified-p nil)
-    (goto-char (point-min))))
-
-(defun agent-repl--response-view-refresh (ws markdown)
-  "Refill WS's open response view with MARKDOWN; nothing when none is open."
-  (let ((view (get-buffer (agent-repl--response-view-name ws))))
-    (when (buffer-live-p view)
-      (agent-repl--log ws "elisp.input.response-view-refreshed ws=%s text-len=%d" ws (length markdown))
-      (agent-repl--response-view-fill view markdown))))
-
-(defun agent-repl--response-view-open (ws)
-  "Open WS's selected bubble's markdown in the shared popup; return its window.
-The text is the one the host watch's selection push delivered, so the view
-shows exactly the bubble the daemon has selected.  Called only while
-`agent-repl-input-selection-mode' stands, which is only while a selection
-does: a missing text is a broken invariant, and signals."
-  (let ((markdown (agent-repl-host-selection-markdown ws)))
-    (unless (stringp markdown)
-      (agent-repl--error ws "elisp.input.response-view-no-text ws=%s selection=%S"
-                         ws (agent-repl-host-selection ws))
-      (error "agent-repl: no selected bubble text to search in %s" ws))
-    (let ((view (get-buffer-create (agent-repl--response-view-name ws))))
-      (agent-repl--response-view-fill view markdown)
-      (agent-repl--info ws "elisp.input.response-view-opened ws=%s text-len=%d" ws (length markdown))
-      (agent-repl-popup-show view))))
-
-(defun agent-repl--response-search (search)
-  "Open the selected bubble's view, select it, and run Evil's SEARCH there."
-  (let ((window (agent-repl--response-view-open (agent-repl--ws-current-name))))
-    (select-window window)
-    (call-interactively search)))
-
-(defun agent-repl-response-search-forward ()
-  "Search the selected bubble's markdown FORWARD with Evil's `/'.
-Composer command mode, while a bubble is selected: the bubble opens
-read-only in the shared popup and the search runs there, so `n', `N',
-`RET' and every read-only Evil motion and yank work on it as in any buffer."
-  (interactive)
-  (agent-repl--response-search #'evil-ex-search-forward))
-
-(defun agent-repl--response-view-search-key ()
-  "Run what `C-s' runs in the response view, the current buffer.
-The view is an ordinary buffer, so `C-s' there is the user's own buffer
-search.  An unbound `C-s' is a broken invariant (Emacs binds it globally),
-so it signals rather than doing nothing."
-  (interactive)
-  (let ((command (key-binding (kbd "C-s"))))
-    (unless (commandp command)
-      (let ((ws (agent-repl--ws-current-name)))
-        (agent-repl--error ws "elisp.input.response-view-search-key-unbound ws=%s binding=%S"
-                           ws command)
-        (error "agent-repl: `C-s' runs no command in the response view")))
-    (call-interactively command)))
-
-(defun agent-repl-response-search-buffer ()
-  "Search the selected bubble's markdown with what `C-s' runs.
-The bubble opens read-only in the shared popup, as for `/', and the
-buffer search `C-s' runs anywhere else runs there."
-  (interactive)
-  (agent-repl--response-search #'agent-repl--response-view-search-key))
-
-(defun agent-repl-response-search-backward ()
-  "Search the selected bubble's markdown BACKWARD with Evil's `?'.
-The mirror of `agent-repl-response-search-forward'."
-  (interactive)
-  (agent-repl--response-search #'evil-ex-search-backward))
 
 (defun agent-repl--input-endpoints (ws op prefix detail-name detail)
   "Return WS's (REF . CONN) for the composer verb OP, or nil after saying why.
