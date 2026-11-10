@@ -381,6 +381,12 @@ type server struct {
 	// (participantHops). Scoped to the host stream: the last host close
 	// forgets it.
 	webSeen map[ids.WorkspaceID]bool
+	// hostSeen marks the workspaces whose host stream this daemon has held.
+	// Only an editor that was seen can be MISSING; one not seen yet -- a
+	// successor whose page arrived before Emacs re-attached -- is awaited,
+	// and an awaited host hop is never drawn as a fault (participantHops).
+	// Never forgotten: the last host close is the editor going away.
+	hostSeen map[ids.WorkspaceID]bool
 	// movedAway is every workspace whose transfer notice this daemon pushed
 	// and has not retracted. Its stream edges from then on are the move, not
 	// its connectivity: they are counted, never published (holdParticipant).
@@ -645,6 +651,7 @@ func New(deps Deps) (Server, error) {
 		evalDeadline:           evaluationDeadline,
 		webHeld:                make(map[ids.WorkspaceID]int),
 		webSeen:                make(map[ids.WorkspaceID]bool),
+		hostSeen:               make(map[ids.WorkspaceID]bool),
 		movedAway:              make(map[ids.WorkspaceID]bool),
 		watchTokens:            make(map[string]tokenTarget),
 		pages:                  make(map[string]*pageStream),
@@ -964,12 +971,12 @@ func (s *server) RetractTransferred(ws ids.WorkspaceID) {
 	// from before the notice.
 	s.mu.Lock()
 	delete(s.movedAway, ws)
-	hostLive, webLive, webHop := s.participantHopsLocked(ws)
+	hops := s.participantHopsLocked(ws)
 	s.mu.Unlock()
-	s.log.Info("daemon.server.transfer_retracted", "withdrew the workspace's transfer notice; it is served here again",
-		dlog.Context{"workspace": string(ws), "host_retracted": host, "web_retracted": web,
-			"host_stream": hostLive, "web_stream": webLive, "web_hop": webHop})
-	s.publishParticipants(ws, hostLive, webHop)
+	fields := hops.fields()
+	fields["workspace"], fields["host_retracted"], fields["web_retracted"] = string(ws), host, web
+	s.log.Info("daemon.server.transfer_retracted", "withdrew the workspace's transfer notice; it is served here again", fields)
+	s.publishParticipants(ws, hops)
 }
 
 // Participants reports which of a workspace's two per-workspace streams are
