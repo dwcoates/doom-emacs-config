@@ -75,9 +75,12 @@ typedef struct {
 } Step;
 
 typedef struct {
-  /* Inside a ``` fence: every delimiter toggles it (findTreeRegion's inFence,
-   * splitTreeSegments' pairing). */
-  bool in_fence;
+  /* The open fence's backtick count, 0 outside a fence. Markdown closes a
+   * fence only on a bare run at least this long (is_fence_close), so a
+   * shorter run, or one carrying an info string, is a line of the fence
+   * (2026-11-10: a ``` block nested in a ````markdown one closed it early,
+   * and every fence after it opened and closed out of step). */
+  uint32_t open_ticks;
   /* The open delimiter's rail width (fenceIndent), which dedents its body. */
   uint32_t open_indent;
   Step queue[QUEUE_CAPACITY];
@@ -202,10 +205,29 @@ static uint32_t fence_indent(Line l) {
   return i;
 }
 
-/* isFenceDelimiter: ``` after any leading rail. */
-static bool is_fence_delimiter(Line l) {
-  uint32_t i = fence_indent(l);
-  return at(l, i) == '`' && at(l, i + 1) == '`' && at(l, i + 2) == '`';
+/* The smallest backtick run that opens a fence, as in markdown. */
+#define FENCE_MIN 3
+
+/* The length of the backtick run after the line's leading rail. */
+static uint32_t fence_ticks(Line l) {
+  uint32_t i = fence_indent(l), n = 0;
+  while (at(l, i + n) == '`') n++;
+  return n;
+}
+
+/* isFenceDelimiter: at least FENCE_MIN backticks after any leading rail, the
+ * line that opens a fence. */
+static bool is_fence_delimiter(Line l) { return fence_ticks(l) >= FENCE_MIN; }
+
+/* The line that closes a fence OPEN backticks opened: a run at least that
+ * long after any leading rail, with nothing after it but whitespace. */
+static bool is_fence_close(Line l, uint32_t open) {
+  uint32_t ticks = fence_ticks(l);
+  if (ticks < open) return false;
+  for (uint32_t i = fence_indent(l) + ticks; i < l.n; i++) {
+    if (!is_js_space(l.cp[i])) return false;
+  }
+  return true;
 }
 
 /* ---- branch parsing (parsePrefix / matchLabel / parseBranch) ------------- */
@@ -356,8 +378,9 @@ static void plan_delimiter(Scanner *s, Line l, enum TokenType mark) {
   uint32_t rails = fence_indent(l);
   push(s, mark, 0);
   push_span(s, RAILS, 0, rails);
-  push(s, TICKS, 3);
-  uint32_t lead = rails + 3, word = lead, info = lead;
+  uint32_t ticks = fence_ticks(l);
+  push(s, TICKS, ticks);
+  uint32_t lead = rails + ticks, word = lead, info = lead;
   while (word < l.n && is_js_space(l.cp[word])) word++;
   info = word;
   while (info < l.n && !is_js_space(l.cp[info])) info++;
@@ -371,16 +394,14 @@ static void plan_line(Scanner *s, uint32_t n, bool newline) {
   Line l = {s->line, n};
   s->queued = 0;
   s->next = 0;
-  if (is_fence_delimiter(l)) {
-    if (s->in_fence) {
-      plan_delimiter(s, l, CLOSE_MARK);
-      s->in_fence = false;
-    } else {
-      plan_delimiter(s, l, OPEN_MARK);
-      s->in_fence = true;
-      s->open_indent = fence_indent(l);
-    }
-  } else if (s->in_fence) {
+  if (s->open_ticks > 0 && is_fence_close(l, s->open_ticks)) {
+    plan_delimiter(s, l, CLOSE_MARK);
+    s->open_ticks = 0;
+  } else if (s->open_ticks == 0 && is_fence_delimiter(l)) {
+    plan_delimiter(s, l, OPEN_MARK);
+    s->open_ticks = fence_ticks(l);
+    s->open_indent = fence_indent(l);
+  } else if (s->open_ticks > 0) {
     /* dedent: up to the open delimiter's rail width of this line's own rail. */
     uint32_t rail = fence_indent(l);
     uint32_t dedent = rail < s->open_indent ? rail : s->open_indent;
@@ -414,7 +435,8 @@ void tree_sitter_tldr_external_scanner_destroy(void *payload) {
 unsigned tree_sitter_tldr_external_scanner_serialize(void *payload, char *buffer) {
   Scanner *s = payload;
   unsigned size = 0;
-  buffer[size++] = (char)s->in_fence;
+  memcpy(buffer + size, &s->open_ticks, sizeof(s->open_ticks));
+  size += sizeof(s->open_ticks);
   memcpy(buffer + size, &s->open_indent, sizeof(s->open_indent));
   size += sizeof(s->open_indent);
   buffer[size++] = (char)(s->queued - s->next);
@@ -428,13 +450,14 @@ unsigned tree_sitter_tldr_external_scanner_serialize(void *payload, char *buffer
 
 void tree_sitter_tldr_external_scanner_deserialize(void *payload, const char *buffer, unsigned length) {
   Scanner *s = payload;
-  s->in_fence = false;
+  s->open_ticks = 0;
   s->open_indent = 0;
   s->queued = 0;
   s->next = 0;
   if (length == 0) return;
   unsigned size = 0;
-  s->in_fence = buffer[size++];
+  memcpy(&s->open_ticks, buffer + size, sizeof(s->open_ticks));
+  size += sizeof(s->open_ticks);
   memcpy(&s->open_indent, buffer + size, sizeof(s->open_indent));
   size += sizeof(s->open_indent);
   uint8_t remaining = (uint8_t)buffer[size++];
