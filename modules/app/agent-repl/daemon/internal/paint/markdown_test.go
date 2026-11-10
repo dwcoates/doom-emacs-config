@@ -1,6 +1,11 @@
 package paint
 
-import "testing"
+import (
+	"regexp"
+	"testing"
+
+	"agent-repld/internal/sourcescan"
+)
 
 func TestHighlightMarkdownConstructs(t *testing.T) {
 	tests := []struct {
@@ -87,5 +92,55 @@ func TestHighlightMarkdownLinkWithoutTargetStaysPlain(t *testing.T) {
 		if span.Class == "link" {
 			t.Fatalf("a bracket with no target painted as a link: %+v", spans)
 		}
+	}
+}
+
+func TestHighlightMarkdownFenceLengthRule(t *testing.T) {
+	tests := []struct {
+		name    string
+		code    string
+		content string
+	}{
+		{name: "a shorter bare fence inside a longer one is its content", code: "````markdown\n```\n# x\n```\n````\n", content: "\n```\n# x\n```\n"},
+		{name: "a delimiter carrying a language inside a fence is its content", code: "```\n```go\n# x\n```\n", content: "\n```go\n# x\n"},
+		{name: "a tilde run inside a backtick fence is its content", code: "```\n~~~\n# x\n```\n", content: "\n~~~\n# x\n"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act.
+			spans := highlight(t, "markdown", tc.code)
+
+			// Assert.
+			if got := classOf(t, spans, tc.content); got != "" {
+				t.Fatalf("class of %q = %q, want plain", tc.content, got)
+			}
+		})
+	}
+}
+
+func TestHighlightMarkdownLongerBareRunClosesTheFence(t *testing.T) {
+	// Arrange: the five-backtick run closes the three-backtick fence, so the
+	// heading after it is a heading again.
+	code := "```\nx\n`````\n# after\n"
+
+	// Act.
+	spans := highlight(t, "markdown", code)
+
+	// Assert.
+	if got := classOf(t, spans, "# after"); got != "heading" {
+		t.Fatalf("class of %q = %q, want heading", "# after", got)
+	}
+}
+
+// TestFenceDelimitersAreReadOnlyThroughMdfence holds every fence delimiter
+// the painter reads to mdfence's length rule, the one the tree grammar's
+// scanner and prose's repair read fences by.
+func TestFenceDelimitersAreReadOnlyThroughMdfence(t *testing.T) {
+	// Act.
+	sites := sourcescan.SitesMatching(t, regexp.MustCompile("\"(```|~~~)"))
+
+	// Assert.
+	if len(sites) != 0 {
+		t.Errorf("a fence string literal in %v reads a fence by hand; read it through mdfence.Parse", sites)
 	}
 }
