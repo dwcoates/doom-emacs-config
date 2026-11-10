@@ -1261,3 +1261,52 @@ func TestEveryRunOpensItsLedgerThroughOpenLedger(t *testing.T) {
 		t.Fatalf("DB.OpenMergeLedger is called from %v, want run.go's openLedger alone", callers)
 	}
 }
+
+// TestWorkspaceNameRecordsAReadFailureByWhetherItsContextEnded covers both
+// failure branches of workspaceName: a read cut by the merge's own context
+// ending is the merge winding down with its daemon (DEBUG, never ERROR), and
+// any other read failure, even one under an ended context, is recorded at
+// ERROR. Either way the id is drawn.
+func TestWorkspaceNameRecordsAReadFailureByWhetherItsContextEnded(t *testing.T) {
+	tests := []struct {
+		name      string
+		cancel    bool
+		readErr   error
+		wantLevel string
+		absent    string
+	}{
+		{name: "canceled context", cancel: true, readErr: context.Canceled, wantLevel: dlog.LevelDebug, absent: dlog.LevelError},
+		{name: "store failure", readErr: errors.New("store unavailable"), wantLevel: dlog.LevelError, absent: dlog.LevelDebug},
+		{name: "store failure under an ended context", cancel: true, readErr: errors.New("store unavailable"), wantLevel: dlog.LevelError, absent: dlog.LevelDebug},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.db.workspaceErr = tt.readErr
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			if tt.cancel {
+				cancel()
+			}
+
+			// Act
+			got := h.o.workspaceName(ctx, theWorkspace)
+
+			// Assert
+			if got != string(theWorkspace) {
+				t.Fatalf("workspaceName = %q, want the id %q drawn", got, theWorkspace)
+			}
+			record, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: tt.wantLevel, Operation: "daemon.merge.await_free"})
+			if !ok {
+				t.Fatalf("no %s daemon.merge.await_free record: %+v", tt.wantLevel, h.logs.Records())
+			}
+			if record.Context["workspace"] != string(theWorkspace) || record.Context["error"] != tt.readErr.Error() {
+				t.Fatalf("record context = %+v, want the workspace and the read's error", record.Context)
+			}
+			if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: tt.absent, Operation: "daemon.merge.await_free"}); ok {
+				t.Fatalf("a %s daemon.merge.await_free record was written: %+v", tt.absent, h.logs.Records())
+			}
+		})
+	}
+}
