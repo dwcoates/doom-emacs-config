@@ -114,9 +114,8 @@ describe("a row's children fold", () => {
 
     // Assert
     const change = asked[0]?.change;
-    expect(
-      change?.case === "foldSection" ? [change.value.section.case, change.value.section.value?.id, change.value.fold.case] : change?.case,
-    ).toEqual(["workspace", "ws-1", ask]);
+    const section = change?.case === "foldSection" ? change.value.section : undefined;
+    expect([section?.case, section?.case === "workspace" ? section.value.id : undefined, change?.case === "foldSection" ? change.value.fold.case : undefined]).toEqual(["workspace", "ws-1", ask]);
   });
 
   it("paints the collapse at once, before the daemon answers", () => {
