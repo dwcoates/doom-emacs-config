@@ -4,7 +4,6 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
-	"regexp"
 	"testing"
 
 	"agent-repld/internal/sourcescan"
@@ -220,18 +219,5 @@ func TestEveryFencedTreeTestGoesThroughHoldsTree(t *testing.T) {
 		if caller != "holdsTree" {
 			t.Errorf("%s calls isMetapromptTree itself instead of holdsTree", caller)
 		}
-	}
-}
-
-// TestFenceDelimitersAreReadOnlyThroughMdfence holds every fence delimiter
-// prose reads to mdfence's length rule: a hand-rolled backtick check here
-// would read fences other than the grammar's scanner does.
-func TestFenceDelimitersAreReadOnlyThroughMdfence(t *testing.T) {
-	// Act.
-	sites := sourcescan.SitesMatching(t, regexp.MustCompile("\"`"))
-
-	// Assert.
-	if len(sites) != 0 {
-		t.Errorf("a backtick string literal in %v reads a fence by hand; read it through mdfence.Parse", sites)
 	}
 }

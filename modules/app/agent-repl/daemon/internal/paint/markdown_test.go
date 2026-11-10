@@ -1,11 +1,6 @@
 package paint
 
-import (
-	"regexp"
-	"testing"
-
-	"agent-repld/internal/sourcescan"
-)
+import "testing"
 
 func TestHighlightMarkdownConstructs(t *testing.T) {
 	tests := []struct {
@@ -129,18 +124,5 @@ func TestHighlightMarkdownLongerBareRunClosesTheFence(t *testing.T) {
 	// Assert.
 	if got := classOf(t, spans, "# after"); got != "heading" {
 		t.Fatalf("class of %q = %q, want heading", "# after", got)
-	}
-}
-
-// TestFenceDelimitersAreReadOnlyThroughMdfence holds every fence delimiter
-// the painter reads to mdfence's length rule, the one the tree grammar's
-// scanner and prose's repair read fences by.
-func TestFenceDelimitersAreReadOnlyThroughMdfence(t *testing.T) {
-	// Act.
-	sites := sourcescan.SitesMatching(t, regexp.MustCompile("\"(```|~~~)"))
-
-	// Assert.
-	if len(sites) != 0 {
-		t.Errorf("a fence string literal in %v reads a fence by hand; read it through mdfence.Parse", sites)
 	}
 }

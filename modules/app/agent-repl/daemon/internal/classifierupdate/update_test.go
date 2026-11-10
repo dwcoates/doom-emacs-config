@@ -625,3 +625,29 @@ func TestNewRefusesAMissingDependency(t *testing.T) {
 		})
 	}
 }
+
+func TestOpensFence(t *testing.T) {
+	tests := []struct {
+		name string
+		text string
+		want bool
+	}{
+		{name: "a bare fence", text: "```\nbody\n```", want: true},
+		{name: "a fence with a language", text: "```markdown\nbody", want: true},
+		{name: "a longer fence", text: "````\nbody\n````", want: true},
+		{name: "a tilde fence", text: "~~~\nbody\n~~~", want: true},
+		{name: "a code span", text: "``x`` is the brief", want: false},
+		{name: "prose", text: "Answer always.\n```\n```", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act.
+			got := opensFence(tt.text)
+
+			// Assert.
+			if got != tt.want {
+				t.Errorf("opensFence(%q) = %v, want %v", tt.text, got, tt.want)
+			}
+		})
+	}
+}

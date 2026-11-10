@@ -35,6 +35,7 @@ import (
 	"agent-repld/internal/classifier"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/headless"
+	"agent-repld/internal/mdfence"
 	"agent-repld/internal/prompts"
 )
 
@@ -286,6 +287,12 @@ func splitBrief(path, content string) (header, body string, err error) {
 	return header, strings.TrimSuffix(body, "\n"), nil
 }
 
+// opensFence is whether TEXT's first line opens a markdown code fence.
+func opensFence(text string) bool {
+	first, _, _ := strings.Cut(text, "\n")
+	return mdfence.Parse(first).Opens()
+}
+
 // rebuild turns the model's answer back into a whole brief under HEADER, or
 // answers why it is not a usable one.
 func rebuild(header, answer string) (string, string) {
@@ -293,7 +300,7 @@ func rebuild(header, answer string) (string, string) {
 	switch {
 	case text == "":
 		return "", "the rewrite answered nothing"
-	case strings.HasPrefix(text, "```"):
+	case opensFence(text):
 		return "", "the rewrite answered inside a code fence rather than with the brief itself"
 	}
 	// A slot the model misspelled comes back as a malformed or undeclared
