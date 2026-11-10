@@ -35,7 +35,11 @@ type cliClient struct {
 	requests []proto.Message
 	err      error
 	status   *agentreplv1.GetWorkspaceStatusResponse
-	create   *agentreplv1.CreateWorkspaceResponse
+	// gathered and gatherStatus answer GatherWorkspaces and GetGatherStatus,
+	// an empty answer when nil.
+	gathered     *agentreplv1.GatherWorkspacesResponse
+	gatherStatus *agentreplv1.GetGatherStatusResponse
+	create       *agentreplv1.CreateWorkspaceResponse
 	// creates, when set, answers each CreateWorkspace in turn, before create.
 	creates []*agentreplv1.CreateWorkspaceResponse
 	// createErr, when set, fails CreateWorkspace alone, so the reads a
@@ -168,6 +172,20 @@ func (c *cliClient) SubmitPrompt(_ context.Context, req *connect.Request[agentre
 		return connect.NewResponse(c.prompted), c.record(req.Msg)
 	}
 	return connect.NewResponse(&agentreplv1.SubmitPromptResponse{}), c.record(req.Msg)
+}
+
+func (c *cliClient) GatherWorkspaces(_ context.Context, req *connect.Request[agentreplv1.GatherWorkspacesRequest]) (*connect.Response[agentreplv1.GatherWorkspacesResponse], error) {
+	if c.gathered != nil {
+		return connect.NewResponse(c.gathered), c.record(req.Msg)
+	}
+	return connect.NewResponse(&agentreplv1.GatherWorkspacesResponse{}), c.record(req.Msg)
+}
+
+func (c *cliClient) GetGatherStatus(_ context.Context, req *connect.Request[agentreplv1.GetGatherStatusRequest]) (*connect.Response[agentreplv1.GetGatherStatusResponse], error) {
+	if c.gatherStatus != nil {
+		return connect.NewResponse(c.gatherStatus), c.record(req.Msg)
+	}
+	return connect.NewResponse(&agentreplv1.GetGatherStatusResponse{}), c.record(req.Msg)
 }
 
 func (c *cliClient) KillWorkspace(_ context.Context, req *connect.Request[agentreplv1.KillWorkspaceRequest]) (*connect.Response[agentreplv1.KillWorkspaceResponse], error) {

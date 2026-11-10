@@ -909,6 +909,20 @@ func (s *requestLoggingServer) SubscribeMergeQueue(
 	return serveUnary(s, ctx, "SubscribeMergeQueue", req, s.server.SubscribeMergeQueue)
 }
 
+func (s *requestLoggingServer) GatherWorkspaces(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.GatherWorkspacesRequest],
+) (*connect.Response[agentreplv1.GatherWorkspacesResponse], error) {
+	return serveUnary(s, ctx, "GatherWorkspaces", req, s.server.GatherWorkspaces)
+}
+
+func (s *requestLoggingServer) GetGatherStatus(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.GetGatherStatusRequest],
+) (*connect.Response[agentreplv1.GetGatherStatusResponse], error) {
+	return serveUnary(s, ctx, "GetGatherStatus", req, s.server.GetGatherStatus)
+}
+
 func (s *requestLoggingServer) SubscribeWorkspace(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.SubscribeWorkspaceRequest],

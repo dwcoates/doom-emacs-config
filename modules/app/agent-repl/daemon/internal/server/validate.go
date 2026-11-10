@@ -1336,6 +1336,36 @@ func validateSubscribeWorkspaceRequest(req *agentreplv1.SubscribeWorkspaceReques
 	return nil
 }
 
+// validateGatherWorkspacesRequest is GatherWorkspacesRequest's base function.
+func validateGatherWorkspacesRequest(req *agentreplv1.GatherWorkspacesRequest) *connect.Error {
+	if err := validateWorkspaceRef("caller", req.GetCaller()); err != nil {
+		return err
+	}
+	if len(req.GetTargetNames()) == 0 {
+		return invalid("target_names", "a gather names at least one target")
+	}
+	for _, name := range req.GetTargetNames() {
+		if strings.TrimSpace(name) == "" {
+			return invalid("target_names", "a target's name is never blank")
+		}
+	}
+	if err := validateUserSaid("said", req.GetSaid()); err != nil {
+		return err
+	}
+	if req.GetIdempotencyKey() == "" {
+		return invalid("idempotency_key", "an idempotency key is required")
+	}
+	return nil
+}
+
+// validateGetGatherStatusRequest is GetGatherStatusRequest's base function.
+func validateGetGatherStatusRequest(req *agentreplv1.GetGatherStatusRequest) *connect.Error {
+	if req.GetGather().GetId() == "" {
+		return invalid("gather", "the gather's ref is required")
+	}
+	return nil
+}
+
 // validateUnsubscribeWorkspaceRequest is UnsubscribeWorkspaceRequest's base
 // function.
 func validateUnsubscribeWorkspaceRequest(req *agentreplv1.UnsubscribeWorkspaceRequest) *connect.Error {

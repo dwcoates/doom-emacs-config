@@ -2064,6 +2064,7 @@ type harness struct {
 	Retarget *fakeRetarget
 	Prompts  *fakePrompts
 	Chat     *fakeChat
+	Gathers  *fakeGathers
 	Queue    *fakeQueue
 	Merge    *fakeMerge
 	Makers   *fakeMakers
@@ -2231,6 +2232,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		Sidebar:    &fakeSidebar{},
 		Memory:     &fakeMemory{},
 		Chat:       &fakeChat{},
+		Gathers:    &fakeGathers{},
 		Surfaces:   &fakeSurfaces{},
 		Focus:      desktopnotify.NewFocus(dlog.NewTestLogger()),
 		Emacs:      &fakeEmacsMeasure{},
@@ -2292,6 +2294,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		Sidebar:           h.Sidebar,
 		Memory:            h.Memory,
 		Chat:              h.Chat,
+		Gathers:           h.Gathers,
 		LoudFaults:        &h.LoudFaults,
 		Focus:             h.Focus,
 		Emacs:             h.Emacs,

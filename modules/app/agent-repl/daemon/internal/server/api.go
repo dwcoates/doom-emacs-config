@@ -155,6 +155,8 @@ type Deps struct {
 	Memory MemoryPopups
 	// Chat backs the chat verbs and WatchChat (internal/chat).
 	Chat Chat
+	// Gathers backs GatherWorkspaces and GetGatherStatus (internal/gather).
+	Gathers Gathers
 	// Revisions revises a final response a highlighted prompt asks about
 	// (internal/revision).
 	Revisions Revisions
@@ -574,6 +576,8 @@ func New(deps Deps) (Server, error) {
 		return nil, missing("the memory popups")
 	case deps.Chat == nil:
 		return nil, missing("a chat service")
+	case deps.Gathers == nil:
+		return nil, missing("the gather service")
 	case deps.Revisions == nil:
 		return nil, missing("the response reviser")
 	case deps.LoudFaults == nil:
