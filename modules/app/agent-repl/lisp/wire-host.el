@@ -2571,12 +2571,6 @@ The composer asks for every slash command the workspace's runtime answers."
                (agent-repl-wire-encode-list-slash-commands-request-workspace
                 (plist-get value :workspace))))))
 
-(defun agent-repl-wire-decode-session-command-catalog-entry-alias (value)
-  "Decode one `SessionCommandCatalogEntry.aliases' element VALUE, a string."
-  (if (stringp value)
-      value
-    (agent-repl-wire--fail "SessionCommandCatalogEntry" 'aliases "expected a string")))
-
 (defun agent-repl-wire-decode-session-command-catalog-entry (value)
   "Decode VALUE as `SessionCommandCatalogEntry', a plist
 \(:name :description :argument-hint :aliases).
@@ -2593,9 +2587,7 @@ the runtime's own description and argument hint, nil when it states none."
        (list :name name
              :description (agent-repl-wire--decode-optional-string message 'description object)
              :argument-hint (agent-repl-wire--decode-optional-string message 'argumentHint object)
-             :aliases (agent-repl-wire--decode-repeated
-                       message 'aliases object
-                       #'agent-repl-wire-decode-session-command-catalog-entry-alias))))))
+             :aliases (agent-repl-wire--decode-repeated-string message 'aliases object))))))
 
 (defun agent-repl-wire-decode-session-command-catalog (value)
   "Decode VALUE as `SessionCommandCatalog', a plist (:commands LIST).

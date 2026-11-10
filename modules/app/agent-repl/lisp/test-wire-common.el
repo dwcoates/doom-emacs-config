@@ -95,6 +95,53 @@ does not write to the durable sink."
                                                hits)))
                      (list file (if (equal file "wire-common.el") 1 0)))))))
 
+;;;; ---- Repeated strings ----
+
+(defun agent-repl-test-wire-common--repeated-string (json)
+  "Decode JSON's `names' field of a message `M' as a repeated string."
+  (agent-repl-test-wire-common--decode
+   (lambda (object) (agent-repl-wire--decode-repeated-string "M" 'names object))
+   json))
+
+(ert-deftest agent-repl-test-wire-common-repeated-string-decodes-every-element ()
+  "A repeated string decodes to its elements, in order."
+  (should (equal (agent-repl-test-wire-common--repeated-string "{\"names\":[\"b\",\"a\"]}")
+                 '("b" "a"))))
+
+(ert-deftest agent-repl-test-wire-common-repeated-string-absent-is-empty ()
+  "An absent repeated string is the empty list, protojson's omitted default."
+  (should (equal (agent-repl-test-wire-common--repeated-string "{}") nil)))
+
+(ert-deftest agent-repl-test-wire-common-repeated-string-refuses-a-non-string-element ()
+  "An element that is not a string is a breach naming the message and field."
+  (should (equal (agent-repl-test-wire-common--breach
+                  (lambda () (agent-repl-test-wire-common--repeated-string "{\"names\":[\"a\",1]}")))
+                 '("M" names "expected a string"))))
+
+(ert-deftest agent-repl-test-wire-common-repeated-string-refuses-a-non-array ()
+  "A field that is not an array is a breach naming the message and field."
+  (should (equal (agent-repl-test-wire-common--breach
+                  (lambda () (agent-repl-test-wire-common--repeated-string "{\"names\":\"a\"}")))
+                 '("M" names "expected an array"))))
+
+(ert-deftest agent-repl-test-wire-common-every-repeated-string-in-wire-host-is-the-helpers ()
+  "Every repeated string field wire-host.el decodes goes through the one helper."
+  ;; Arrange
+  (let ((calls nil))
+    (cl-letf (((symbol-function 'agent-repl-wire--decode-repeated-string)
+               (lambda (message field _object) (push (list message field) calls) nil)))
+      ;; Act
+      (agent-repl-test-wire-common--quiet
+        (agent-repl-wire-decode-session-command-catalog-entry
+         (agent-repl-test-wire-common--parse "{\"name\":\"usage\",\"aliases\":[\"cost\"]}"))
+        (agent-repl-wire-decode-host-workspace-mentions
+         (agent-repl-test-wire-common--parse "{\"commands\":[\"a\"],\"workspaces\":[\"b\"]}"))))
+    ;; Assert
+    (should (equal (reverse calls)
+                   '(("SessionCommandCatalogEntry" aliases)
+                     ("HostWorkspaceMentions" commands)
+                     ("HostWorkspaceMentions" workspaces))))))
+
 ;;;; ---- WorkspaceRef ----
 
 (ert-deftest agent-repl-test-wire-common-inside-temporary-directory-decodes-both-fields ()
