@@ -11,6 +11,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/promptorigin"
+	"agent-repld/internal/sessioncommand"
 	"agent-repld/internal/wsm"
 )
 
@@ -136,16 +137,10 @@ func waitsForCall(call shimCall) string {
 	return "the session finishes the " + strings.ReplaceAll(call.what, "_", " ") + " under way"
 }
 
-// waitsForCut is the sentence for a context cut running.
+// waitsForCut is the sentence for a context cut running: its literal, as the
+// schema spells it (sessioncommand.Literal).
 func waitsForCut(command conversationv1.SessionCommand) string {
-	switch command {
-	case conversationv1.SessionCommand_SESSION_COMMAND_COMPACT:
-		return "the /compact running now ends"
-	case conversationv1.SessionCommand_SESSION_COMMAND_CLEAR:
-		return "the /clear running now ends"
-	default:
-		return "the session act running now ends"
-	}
+	return "the " + sessioncommand.Literal(command) + " running now ends"
 }
 
 // decideRelease decides what a release of HELD does now, and does it: sends
