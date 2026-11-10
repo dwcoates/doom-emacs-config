@@ -37,6 +37,8 @@
                 (lambda (&rest args) (push (cons 'log args) agent-repl-test-spell--logged)))
                ((symbol-function 'agent-repl--warn-once)
                 (lambda (&rest args) (push (cons 'warn-once args) agent-repl-test-spell--logged) t))
+               ((symbol-function 'agent-repl--error)
+                (lambda (&rest args) (push (cons 'error args) agent-repl-test-spell--logged)))
                ((symbol-function 'agent-repl--fatal)
                 (lambda (&rest args)
                   (push (cons 'fatal args) agent-repl-test-spell--logged)
@@ -716,6 +718,154 @@ Binds `answer' to the sent check's callback, `span' to its markers, and
 (ert-deftest agent-repl-test-spell-the-harness-starts-composers-unspellchecked ()
   "Every other suite's composers are born unspellchecked, so none reaches hunspell."
   (should-not (default-value 'agent-repl-input-spellcheck)))
+
+;;;; ---- flyspell's exchange with hunspell ----
+
+(defvar ispell-process)
+
+(defun agent-repl-test-spell--fake-process ()
+  "Return a live process that is never sent anything: a `cat' over a pipe."
+  (make-process :name "agent-repl-test-spell-fake" :command '("cat")
+                :connection-type 'pipe :noquery t))
+
+(defmacro agent-repl-test-spell--with-accept (calls answer &rest body)
+  "Run BODY with `accept-process-output''s primitive recording into CALLS.
+The advice wraps the stub as it wraps the real primitive; ANSWER is what the
+stub returns."
+  (declare (indent 2))
+  `(let ((,calls nil))
+     (cl-letf (((symbol-function 'agent-repl-test-spell--accept)
+                (lambda (&rest args) (push args ,calls) ,answer)))
+       ,@body)))
+
+(defun agent-repl-test-spell--bounded (process &optional seconds)
+  "Call the bounded wait on PROCESS (and SECONDS) over the recording stub."
+  (agent-repl--spell-bounded-accept #'agent-repl-test-spell--accept process seconds))
+
+(ert-deftest agent-repl-test-spell-a-wait-outside-flyspell-passes-through ()
+  ;; Arrange
+  (let* ((proc (agent-repl-test-spell--fake-process))
+         (ispell-process proc)
+         (agent-repl--spell-exchange-word nil))
+    (unwind-protect
+        (agent-repl-test-spell--with-accept calls t
+          ;; Act
+          (agent-repl-test-spell--bounded proc)
+          ;; Assert
+          (should (equal calls (list (list proc nil nil nil)))))
+      (delete-process proc))))
+
+(ert-deftest agent-repl-test-spell-flyspells-wait-takes-only-hunspell-and-runs-no-timer ()
+  ;; Arrange
+  (let* ((proc (agent-repl-test-spell--fake-process))
+         (ispell-process proc)
+         (agent-repl--spell-exchange-word "wrold"))
+    (unwind-protect
+        (agent-repl-test-spell--with-accept calls t
+          ;; Act
+          (agent-repl-test-spell--bounded proc)
+          ;; Assert: bounded, and JUST-THIS-ONE an integer (no timers, no other output)
+          (should (equal calls (list (list proc agent-repl--spell-reply-bound nil 0)))))
+      (delete-process proc))))
+
+(ert-deftest agent-repl-test-spell-a-wait-naming-its-own-timeout-passes-through ()
+  ;; Arrange
+  (let* ((proc (agent-repl-test-spell--fake-process))
+         (ispell-process proc)
+         (agent-repl--spell-exchange-word "wrold"))
+    (unwind-protect
+        (agent-repl-test-spell--with-accept calls t
+          ;; Act
+          (agent-repl-test-spell--bounded proc 5)
+          ;; Assert
+          (should (equal calls (list (list proc 5 nil nil)))))
+      (delete-process proc))))
+
+(ert-deftest agent-repl-test-spell-a-wait-with-no-reply-signals ()
+  ;; Arrange
+  (let* ((proc (agent-repl-test-spell--fake-process))
+         (ispell-process proc)
+         (agent-repl--spell-exchange-word "wrold"))
+    (unwind-protect
+        (agent-repl-test-spell--with-accept _calls nil
+          ;; Act / Assert
+          (should-error (agent-repl-test-spell--bounded proc) :type 'agent-repl-spell-no-reply))
+      (delete-process proc))))
+
+(ert-deftest agent-repl-test-spell-a-dead-spell-process-signals-without-waiting ()
+  ;; Arrange
+  (let* ((proc (agent-repl-test-spell--fake-process))
+         (ispell-process proc)
+         (agent-repl--spell-exchange-word "wrold"))
+    (delete-process proc)
+    (agent-repl-test-spell--with-accept calls t
+      ;; Act
+      (should-error (agent-repl-test-spell--bounded proc) :type 'agent-repl-spell-no-reply)
+      ;; Assert: the dead process is never waited on
+      (should-not calls))))
+
+(defmacro agent-repl-test-spell--with-word-guard (result-form &rest body)
+  "Run BODY at the word \"wrold\" with `flyspell-word' stubbed by RESULT-FORM.
+`flyspell-get-word' answers \"wrold\" (the real one needs a loaded
+dictionary), `ispell-kill-ispell' is stubbed to record into `killed', and the
+logging ladder records as the other cases' do."
+  (declare (indent 1))
+  `(agent-repl-test-spell--with-logging
+     (let ((killed 0))
+       (cl-letf (((symbol-function 'agent-repl-test-spell--flyspell-word)
+                  (lambda (&rest _) ,result-form))
+                 ((symbol-function 'flyspell-get-word)
+                  (lambda (&rest _) (list "wrold" 1 6)))
+                 ((symbol-function 'ispell-kill-ispell)
+                  (lambda (&rest _) (setq killed (1+ killed)))))
+         (with-temp-buffer
+           ,@body)))))
+
+(ert-deftest agent-repl-test-spell-a-word-flyspell-checks-returns-its-answer ()
+  (agent-repl-test-spell--with-word-guard 'checked
+    ;; Act
+    (let ((answer (agent-repl--spell-guarded-word #'agent-repl-test-spell--flyspell-word)))
+      ;; Assert
+      (should (eq answer 'checked))
+      (should (= killed 0)))))
+
+(ert-deftest agent-repl-test-spell-an-unanswered-word-resets-the-spell-process ()
+  (agent-repl-test-spell--with-word-guard (signal 'agent-repl-spell-no-reply '("no reply within 100 ms"))
+    ;; Act
+    (agent-repl--spell-guarded-word #'agent-repl-test-spell--flyspell-word)
+    ;; Assert
+    (should (= killed 1))))
+
+(ert-deftest agent-repl-test-spell-an-unanswered-word-is-recorded-at-error-naming-the-word ()
+  (agent-repl-test-spell--with-word-guard (signal 'agent-repl-spell-no-reply '("no reply within 100 ms"))
+    ;; Act
+    (agent-repl--spell-guarded-word #'agent-repl-test-spell--flyspell-word)
+    ;; Assert
+    (let ((record (car (agent-repl-test-spell--records 'error))))
+      (should (string-prefix-p "elisp.spell.no-reply" (nth 1 record)))
+      (should (member "wrold" record))
+      (should (member "no reply within 100 ms" record)))))
+
+(ert-deftest agent-repl-test-spell-an-unanswered-word-leaves-it-unchecked ()
+  (agent-repl-test-spell--with-word-guard (signal 'agent-repl-spell-no-reply '("no reply within 100 ms"))
+    ;; Act / Assert
+    (should-not (agent-repl--spell-guarded-word #'agent-repl-test-spell--flyspell-word))))
+
+(ert-deftest agent-repl-test-spell-the-guard-binds-the-word-for-the-exchange ()
+  (agent-repl-test-spell--with-word-guard agent-repl--spell-exchange-word
+    ;; Act / Assert
+    (should (equal (agent-repl--spell-guarded-word #'agent-repl-test-spell--flyspell-word) "wrold"))))
+
+(ert-deftest agent-repl-test-spell-no-word-at-point-is-named-unknown ()
+  ;; Arrange
+  (cl-letf (((symbol-function 'flyspell-get-word) (lambda (&rest _) nil)))
+    ;; Act / Assert
+    (should (eq (agent-repl--spell-word-of-point) 'unknown))))
+
+(ert-deftest agent-repl-test-spell-flyspell-word-and-the-wait-are-both-guarded ()
+  ;; Assert: the guards are installed on the two functions the exchange runs through
+  (should (advice-member-p #'agent-repl--spell-bounded-accept 'accept-process-output))
+  (should (advice-member-p #'agent-repl--spell-guarded-word 'flyspell-word)))
 
 (provide 'test-spell)
 
