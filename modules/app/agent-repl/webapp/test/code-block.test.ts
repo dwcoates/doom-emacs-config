@@ -79,7 +79,7 @@ describe("codeBlockHtml", () => {
 
   it("draws a shell block's run control right after its copy control, ahead of the code", () => {
     // Arrange
-    document.body.innerHTML = codeBlockHtml("ls -la", "bash");
+    document.body.innerHTML = codeBlockHtml("ls -la", "bash", { runControl: true });
     // Act
     const children = [...(document.querySelector("pre.md-code")?.children ?? [])];
     // Assert
@@ -92,14 +92,28 @@ describe("codeBlockHtml", () => {
 
   it("draws no run control for a block that is not a shell command", () => {
     // Arrange
-    document.body.innerHTML = codeBlockHtml("fmt.Println()", "go");
+    document.body.innerHTML = codeBlockHtml("fmt.Println()", "go", { runControl: true });
+    // Act / Assert
+    expect(document.querySelector(`.${CODE_RUN_CLASS}`)).toBeNull();
+  });
+
+  it("draws no run control for a shell block unless asked for one", () => {
+    // Arrange
+    document.body.innerHTML = codeBlockHtml("ls -la", "bash");
+    // Act / Assert
+    expect(document.querySelector(`.${CODE_RUN_CLASS}`)).toBeNull();
+  });
+
+  it("draws no run control for a shell block told not to carry one", () => {
+    // Arrange
+    document.body.innerHTML = codeBlockHtml("ls -la", "bash", { runControl: false });
     // Act / Assert
     expect(document.querySelector(`.${CODE_RUN_CLASS}`)).toBeNull();
   });
 
   it("adds no text to a shell block: its text is its command alone", () => {
     // Arrange
-    document.body.innerHTML = codeBlockHtml("ls -la", "bash");
+    document.body.innerHTML = codeBlockHtml("ls -la", "bash", { runControl: true });
     // Act / Assert
     expect(document.querySelector("pre.md-code")?.textContent).toBe("ls -la");
   });
@@ -123,6 +137,20 @@ describe("codeBlockHtml", () => {
     const html = renderMarkdown("```go\nfmt.Println()\n```");
     // Assert
     expect(html).toBe(codeBlockHtml("fmt.Println()", "go"));
+  });
+
+  it("is what a markdown shell fence draws with the run control it was asked for", () => {
+    // Act
+    const html = renderMarkdown("```bash\nls -la\n```", { runControl: true });
+    // Assert
+    expect(html).toBe(codeBlockHtml("ls -la", "bash", { runControl: true }));
+  });
+
+  it("is what a markdown shell fence draws without a run control when none was asked for", () => {
+    // Act
+    const html = renderMarkdown("```bash\nls -la\n```");
+    // Assert
+    expect(html).toBe(codeBlockHtml("ls -la", "bash"));
   });
 
   it("is the only place src writes the code block's shape", () => {

@@ -18,6 +18,7 @@ import { requireMessage } from "../rpc/strict.js";
 import { create } from "@bufbuild/protobuf";
 import { ParsedProseSchema, type ParsedProse } from "../../../proto/gen/ts/frontend/v1/prose_pb";
 import { inline, renderMarkdown } from "../markdown.js";
+import type { CodeBlockOptions } from "../code-block.js";
 import {
   TREE_CLASS,
   TREE_RAILS_CLASS,
@@ -52,16 +53,17 @@ const logTreeIssue: TreeIssue = (message, context) => {
  * own text, so the tree fills the bubble and re-flows when the bubble's width
  * changes. MEASURE is asked for only when a tree is actually drawn, and told
  * whether the tree is PROSE's first block, whose first line is the slot's.
+ * Every code block among the blocks is drawn as CODE says (code-block.ts).
  */
-export function proseHtml(prose: ParsedProse, measure: TreeMeasureOf): string {
+export function proseHtml(prose: ParsedProse, measure: TreeMeasureOf, code: CodeBlockOptions = {}): string {
   return prose.blocks
     .map((block, index) => {
       const opens = index === 0;
       switch (block.block.case) {
         case "plain":
-          return renderMarkdown(block.block.value.markdown);
+          return renderMarkdown(block.block.value.markdown, code);
         case "tree":
-          return `<div class="${TREE_CLASS}">${renderTreeHtml(block.block.value, inline, measure(opens), logTreeIssue)}</div>`;
+          return `<div class="${TREE_CLASS}">${renderTreeHtml(block.block.value, inline, measure(opens), logTreeIssue, { code })}</div>`;
         case "entries":
           return `<div class="${TREE_CLASS} mp-entry-tree">${entryTreeHtml(block.block.value, inline, measure(opens), logTreeIssue)}</div>`;
         default:
@@ -420,6 +422,23 @@ export function reserveSlotFirstLine(slot: HTMLElement, room: FirstLineRoom): vo
   slotRooms.set(slot, room);
 }
 
+/**
+ * THE SLOTS WHOSE SHELL BLOCKS CARRY A RUN CONTROL (run-control.ts): only a
+ * response bubble's prose (owner request, 2026-11-10), so a prompt's shell
+ * block, or any other slot's, draws its copy control alone.
+ */
+const shellRunSlots = new WeakSet<Element>();
+
+/**
+ * Draw a run control on every shell block SLOT paints. Like a mark, it is
+ * carried to the live slot by `paintBody`.
+ */
+export function offerShellRuns(slot: HTMLElement): void {
+  const name = slot.className;
+  if (!isMarkdownSlot(slot)) invariant("shell runs were offered in an element that is not a markdown slot", { slot: name });
+  shellRunSlots.add(slot);
+}
+
 /** A fresh bubble body, the custom element defined on first use, its painter armed. */
 export function createBubbleBody(): BubbleBody {
   const body = createConnectHookElement(BUBBLE_BODY_TAG);
@@ -492,6 +511,8 @@ export function paintBody(body: BubbleBody, content: readonly ChildNode[]): read
       const room = slotRooms.get(want);
       if (room === undefined) slotRooms.delete(have);
       else slotRooms.set(have, room);
+      if (shellRunSlots.has(want)) shellRunSlots.add(have);
+      else shellRunSlots.delete(have);
       return have;
     }
     return want;
@@ -652,7 +673,7 @@ function armPainter(body: BubbleBody): Painter {
   const draw = (targets: readonly HTMLElement[]): void => {
     for (const slot of targets) {
       const target = document.createElement("div");
-      target.innerHTML = proseHtml(sourceOf(slot), measureIn(slot));
+      target.innerHTML = proseHtml(sourceOf(slot), measureIn(slot), { runControl: shellRunSlots.has(slot) });
       slotMarks.get(slot)?.(target);
       // The reconcile compares whole text with whole text, so a revealing slot
       // is restored first and cut again after (`revealSlot`).

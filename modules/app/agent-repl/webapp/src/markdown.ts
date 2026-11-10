@@ -39,7 +39,7 @@ import katex from "katex";
 import MarkdownIt from "markdown-it";
 import taskLists from "markdown-it-task-lists";
 import texmath from "markdown-it-texmath";
-import { codeBlockHtml } from "./code-block.js";
+import { codeBlockHtml, type CodeBlockOptions } from "./code-block.js";
 import { escapeHtml } from "./highlight.js";
 import {
   codeSpanFileHref,
@@ -316,13 +316,19 @@ function fenceParts(token: { info: string; content: string }): { lang: string; b
 // Fenced code: the md-code + hljs shape. highlightCode escapes in both
 // branches (hljs escapes its own output), so the escape-first guarantee holds.
 // A ```math fence is a display formula, drawn as `$$…$$` is.
-md.renderer.rules.fence = (tokens, idx): string => {
+md.renderer.rules.fence = (tokens, idx, _options, env: RenderEnv): string => {
   const { lang, body } = fenceParts(tokens[idx]);
   if (lang === "math") return `<section><eqn>${texmath.render(body, true, { ...KATEX_OPTIONS })}</eqn></section>`;
-  return codeBlockHtml(body, lang);
+  return codeBlockHtml(body, lang, env.code);
 };
 
-/** Render markdown to HTML. */
-export function renderMarkdown(src: string): string {
-  return md.render(src);
+/** The env every render hands its rules: how its code blocks are drawn. */
+interface RenderEnv {
+  readonly code?: CodeBlockOptions;
+}
+
+/** Render markdown to HTML, its code blocks drawn as CODE says. */
+export function renderMarkdown(src: string, code: CodeBlockOptions = {}): string {
+  const env: RenderEnv = { code };
+  return md.render(src, env);
 }

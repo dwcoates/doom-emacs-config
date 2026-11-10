@@ -89,6 +89,7 @@ import {
 } from "../../bubble/draw.js";
 import {
   markdownSlot,
+  offerShellRuns,
   proseCharacters,
   proseSource,
   paintGeneration,
@@ -284,6 +285,8 @@ export function drawFeedResponse(u: FeedResponse, rc: RowContext): HTMLElement {
     markComposerEntry(rendered, rowId);
     markRevealedNode(rendered, rowId);
   });
+  // A RESPONSE'S SHELL BLOCK CAN BE RUN, and only a response's (run-control.ts).
+  offerShellRuns(prose);
   if (copy !== undefined) reserveCopyRoom([prose]);
 
   // A RE-PUSH UPDATES THE BUBBLE IN PLACE (owner rule, 2026-09-23: the user
