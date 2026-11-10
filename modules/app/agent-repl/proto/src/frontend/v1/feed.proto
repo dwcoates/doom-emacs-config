@@ -3760,6 +3760,18 @@ message FeedMergeTabWaitingOnUser {
   // time from it, as a live tab does.
   int64 started_at_ms = 1;
 }
+// An agentic round's work stands open while its merge WAITS IN LINE: the
+// merge stepped aside to repair out of line, its repairing turn ended, and it
+// is back in its queue behind the merge being worked on, not taken up yet.
+// Nothing of the tab runs, so it ticks no clock and is never the tab a bubble
+// shows of its own accord. The merge draws the tab live again the moment it
+// heads its queue and reads its repair's outcome; the tab never settles from
+// this state without passing through live.
+message FeedMergeTabHeld {
+  // When the tab's work began, epoch ms: the round's own start, the same
+  // instant its live badge carried.
+  int64 started_at_ms = 1;
+}
 message FeedMergeTabFailed {
   // The daemon-composed one-line account; the tab's own content carries
   // the detail.
@@ -3816,6 +3828,9 @@ message FeedMergeTabRebasing {
     // A commit's conflict resolution is held on the user: its session has a
     // permission ask or a question batch open.
     FeedMergeTabWaitingOnUser waiting_on_user = 5;
+    // The replay stands open while the merge waits in line to take it up
+    // again after repairing out of line.
+    FeedMergeTabHeld held = 6;
   }
   // How far the CURRENT (latest) replay has got.
   FeedMergeRebaseProgress progress = 3;
@@ -3901,6 +3916,9 @@ message FeedMergeTabRebaseCommit {
     // The commit is on the tip (succeeded), or its replay or its conflict
     // resolution failed and the merge with it (failed).
     FeedMergeTabSettled settled = 4;
+    // The commit's replay stands open while the merge waits in line to take
+    // it up again after resolving its conflict out of line.
+    FeedMergeTabHeld held = 8;
   }
   // Tag 5 (`commit`) is RETIRED: the commit's identity is the tab's label
   // (FeedMergeTabLabel.commit), drawn from its parts.
@@ -3940,6 +3958,9 @@ message FeedMergeTabResolvingConflicts {
     // The resolution is held on the user: its session has a permission ask
     // or a question batch open.
     FeedMergeTabWaitingOnUser waiting_on_user = 3;
+    // The resolution's turn ended out of line and the merge waits in line to
+    // read whether it resolved.
+    FeedMergeTabHeld held = 4;
   }
 }
 
@@ -3960,6 +3981,9 @@ message FeedMergeTabConflictResolution {
     // short, settles failed with the line the merge tries again with, until
     // the next attempt draws it live again.
     FeedMergeTabSettled settled = 3;
+    // The session's turn ended out of line and the merge waits in line to
+    // read whether it resolved.
+    FeedMergeTabHeld held = 5;
   }
   // The paths git reported as conflicted, in git's order, drawn verbatim.
   repeated FeedMergeConflictFile files = 4;
@@ -3987,6 +4011,9 @@ message FeedMergeTabTests {
     // The fixing after a failed run is held on the user: its session has a
     // permission ask or a question batch open.
     FeedMergeTabWaitingOnUser waiting_on_user = 5;
+    // The fixing after a failed run ended out of line and the merge waits in
+    // line to run the suites again.
+    FeedMergeTabHeld held = 6;
   }
   // Tags 3 (`suites`) and 4 (`log`) are RETIRED: a run's suites and its log
   // are its own subtab's output.
@@ -4151,6 +4178,9 @@ message FeedMergeTabFixingTests {
     // The attempt is held on the user: its session has a permission ask or a
     // question batch open.
     FeedMergeTabWaitingOnUser waiting_on_user = 3;
+    // The attempt's turn ended out of line and the merge waits in line to
+    // read and test what it committed.
+    FeedMergeTabHeld held = 4;
   }
 }
 
@@ -4170,6 +4200,9 @@ message FeedMergeTabTestsRunFixing {
     FeedMergeTabSettled settled = 2;
     // The session has a permission ask or a question batch open.
     FeedMergeTabWaitingOnUser waiting_on_user = 3;
+    // The session's turn ended out of line and the merge waits in line to
+    // read and test what it committed.
+    FeedMergeTabHeld held = 5;
   }
   // Which attempt this is, drawn "attempt 2/3".
   FeedMergeFixAttempt attempt = 4;
