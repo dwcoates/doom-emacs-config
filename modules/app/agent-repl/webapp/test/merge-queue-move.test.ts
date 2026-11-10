@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 // Where a dragged waiting merge goes. See src/merge-queue-move.ts.
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { moveToAction, placeBeside, waitingMergeDrag } from "../src/merge-queue-move.js";
+import { filesUnder } from "./files-under.js";
 
 /** Waiting merges named NAMES, each a line with its workspace ref. */
 function waitingLines(names: string[]) {
@@ -105,18 +106,11 @@ describe("waitingMergeDrag", () => {
 });
 
 describe("every queue a reader drags places its drop through this module", () => {
-  /** Every TypeScript source under src/. */
-  function sources(dir: string): string[] {
-    return readdirSync(dir).flatMap((name) => {
-      const at = path.join(dir, name);
-      return statSync(at).isDirectory() ? sources(at) : at.endsWith(".ts") ? [at] : [];
-    });
-  }
   const src = path.join(path.dirname(fileURLToPath(import.meta.url)), "../src");
 
   it("builds a moveTo action nowhere else", () => {
     // Act
-    const builders = sources(src).filter((file) => /case:\s*"moveTo"/.test(readFileSync(file, "utf8")));
+    const builders = filesUnder(src).filter((file) => /case:\s*"moveTo"/.test(readFileSync(file, "utf8")));
 
     // Assert
     expect(builders.map((file) => path.relative(src, file))).toEqual(["merge-queue-move.ts"]);
