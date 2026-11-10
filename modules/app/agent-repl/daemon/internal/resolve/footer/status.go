@@ -36,7 +36,7 @@ import (
 //     fallback the contract admits ONLY where the footer would otherwise read
 //     idle, then idle itself.
 func (r *resolver) status(s *wsState, log dlog.Logger) *frontendv1.FooterStatus {
-	claim, status := ladder.Resolve(s.merge.State, s.park.Park().Standing(),
+	claim, status := ladder.Resolve(s.merge.State, r.parkLocked(s.id, s).Standing(),
 		func(claim ladder.Claim) (*frontendv1.FooterStatus, bool) {
 			drawn := r.rung(claim, s, log)
 			return drawn, drawn != nil

@@ -1569,7 +1569,7 @@ func TestConcurrentChangesLeaveTheNewestViewPublished(t *testing.T) {
 
 	// Assert
 	h.r.mu.Lock()
-	want, err := h.r.render(h.r.stateLocked(testWS))
+	want, err := h.r.render(testWS, h.r.stateLocked(testWS))
 	h.r.mu.Unlock()
 	if err != nil || want == nil {
 		t.Fatalf("render = (%v, %v), want a complete view", want, err)
@@ -1722,7 +1722,10 @@ func TestThePublishedParkCarriesTheNextKeepalive(t *testing.T) {
 			tt.arrange(h.r)
 
 			// Assert
-			if got := h.state(t).park.Park(); got != tt.want {
+			h.r.mu.Lock()
+			got := h.r.parkLocked(testWS, h.r.states[testWS])
+			h.r.mu.Unlock()
+			if got != tt.want {
 				t.Fatalf("park = %v, want %v", got, tt.want)
 			}
 		})

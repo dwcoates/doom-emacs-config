@@ -28,7 +28,10 @@ type resolver struct {
 
 	mu     sync.Mutex
 	states map[ids.WorkspaceID]*wsState
-	topics map[ids.WorkspaceID]*publish.Topic[*frontendv1.TopbarView]
+	// keepalives is the cache keeper's next scheduled keep-alive per
+	// workspace (wsm.NextKeepalives), under mu.
+	keepalives wsm.NextKeepalives
+	topics     map[ids.WorkspaceID]*publish.Topic[*frontendv1.TopbarView]
 	// daemonRaised are the standing daemon-scoped warnings, by key. A
 	// workspace whose accumulation is made later takes them at once.
 	daemonRaised map[string]DaemonWarning
@@ -60,11 +63,12 @@ func newResolver(colors vocab.RenderColors, log dlog.Surfaces, opts ...Option) (
 		return nil, fmt.Errorf("topbar warning cap must be positive, got %d", o.warningCap)
 	}
 	return &resolver{
-		colors: colors,
-		log:    log,
-		opts:   o,
-		states: map[ids.WorkspaceID]*wsState{},
-		topics: map[ids.WorkspaceID]*publish.Topic[*frontendv1.TopbarView]{},
+		colors:     colors,
+		log:        log,
+		opts:       o,
+		states:     map[ids.WorkspaceID]*wsState{},
+		keepalives: wsm.NextKeepalives{},
+		topics:     map[ids.WorkspaceID]*publish.Topic[*frontendv1.TopbarView]{},
 
 		daemonRaised: map[string]DaemonWarning{},
 	}, nil
@@ -149,7 +153,7 @@ func (r *resolver) mutate(ws ids.WorkspaceID, operation, message string, ctx dlo
 	r.mu.Lock()
 	s := r.stateLocked(ws)
 	apply(s)
-	view, err := r.render(s)
+	view, err := r.render(ws, s)
 	missing := s.missing()
 	// THE SESSION-LESS EDGE IS READ UNDER THE SAME LOCK that built the view,
 	// so the record cannot disagree with what was published: a view drawn
@@ -161,7 +165,7 @@ func (r *resolver) mutate(ws ids.WorkspaceID, operation, message string, ctx dlo
 	}
 	log := r.logOf(ws, s)
 	edges := sourceEdges(s, view)
-	park, coldGate, started := s.park.Park(), s.coldGate, s.started
+	park, coldGate, started := r.parkLocked(ws, s), s.coldGate, s.started
 	// PUBLISHED UNDER THE LOCK THAT RENDERED IT, so views reach the topic in
 	// the order the changes were made. Published after the unlock, a change
 	// rendered first could be published second, and a stale view overwrote a
@@ -217,8 +221,8 @@ func (r *resolver) mutate(ws ids.WorkspaceID, operation, message string, ctx dlo
 // absence, which the client draws as a dash, and the context chip and warning
 // strip by their own content — the chip carrying the context the session held
 // with the reason in its hover, the strip carrying the state as one line.
-func (r *resolver) render(s *wsState) (*frontendv1.TopbarView, error) {
-	connectivity, err := r.connectivity(connectivityKey(s.linkSeen, s.link, s.hostStream && s.webStream, s.park.Park(), s.coldGate))
+func (r *resolver) render(ws ids.WorkspaceID, s *wsState) (*frontendv1.TopbarView, error) {
+	connectivity, err := r.connectivity(connectivityKey(s.linkSeen, s.link, s.hostStream && s.webStream, r.parkLocked(ws, s), s.coldGate))
 	if err != nil {
 		return nil, err
 	}
@@ -768,21 +772,31 @@ func (r *resolver) OnLink(ws ids.WorkspaceID, link sessionwatcher.LinkState) {
 			// more on it, so the next link state belongs to the shim the
 			// reviving prompt spawned, and a spawn that then dies must hollow
 			// the indicator like any other death.
-			s.park.SetParked(false)
+			s.parked = false
 		})
 }
 
 // SetParked installs, or lifts, the daemon's park.
 func (r *resolver) SetParked(ws ids.WorkspaceID, parked bool) {
 	r.mutate(ws, "daemon.topbar.set_parked", "the topbar took the daemon's park",
-		dlog.Context{"parked": parked}, func(s *wsState) { s.park.SetParked(parked) })
+		dlog.Context{"parked": parked}, func(s *wsState) { s.parked = parked })
 }
 
 // SetNextKeepalive takes the cache keeper's next scheduled keep-alive, the
-// zero time for none. A standing park carries it (wsState.park).
+// zero time for none. It is the keeper's fact, stated for workspaces this
+// view may not have bound yet, so it is held in the resolver's own table
+// rather than a workspace's state, and it publishes nothing: no view draws
+// it. The keeper records each schedule itself (daemon.cachelapse.drive).
 func (r *resolver) SetNextKeepalive(ws ids.WorkspaceID, next time.Time) {
-	r.mutate(ws, "daemon.topbar.set_next_keepalive", "the topbar took the next scheduled keep-alive",
-		dlog.Context{"next_keepalive": next}, func(s *wsState) { s.park.SetNextKeepalive(next) })
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.keepalives.Set(ws, next)
+}
+
+// parkLocked is WS's park as one fact: whether one stands, with the next
+// scheduled keep-alive held for it. r.mu is held.
+func (r *resolver) parkLocked(ws ids.WorkspaceID, s *wsState) wsm.Park {
+	return r.keepalives.Park(ws, s.parked)
 }
 
 // SetColdGate installs, or retires, the standing cold gate — the same fact,

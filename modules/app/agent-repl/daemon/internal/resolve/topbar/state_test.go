@@ -107,7 +107,7 @@ func TestReadinessGatesAParkedWorkspaceOnTheWorkspaceFactsAlone(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange
 			s := newWSState()
-			s.park.SetParked(true)
+			s.parked = true
 			tc.state(s)
 
 			// Act
@@ -124,7 +124,7 @@ func TestReadinessGatesAParkedWorkspaceOnTheWorkspaceFactsAlone(t *testing.T) {
 func TestAParkedWorkspaceIsNeverReportedAsAwaitingASessionFact(t *testing.T) {
 	// Arrange
 	s := newWSState()
-	s.park.SetParked(true)
+	s.parked = true
 
 	// Act
 	got := s.missing()
@@ -214,7 +214,7 @@ func TestSessionlessUnderAPark(t *testing.T) {
 			// Arrange
 			s := newWSState()
 			s.started = true
-			s.park.SetParked(tt.parked)
+			s.parked = tt.parked
 
 			// Act
 			got := s.sessionless()
@@ -227,20 +227,21 @@ func TestSessionlessUnderAPark(t *testing.T) {
 	}
 }
 
-// TestTheParkIsHeldInTheSharedState pins that this view holds its park in the
-// shared wsm.ParkState, so it composes a park exactly as the other
-// session-scoped view does rather than through fields of its own.
-func TestTheParkIsHeldInTheSharedState(t *testing.T) {
+// TestTheNextKeepaliveIsHeldInTheSharedTable pins that this view holds the
+// cache keeper's schedule in the shared wsm.NextKeepalives, so it composes a
+// park exactly as the other session-scoped view does rather than through a
+// field of its own on a workspace's state.
+func TestTheNextKeepaliveIsHeldInTheSharedTable(t *testing.T) {
 	// Act
-	field, ok := reflect.TypeOf(wsState{}).FieldByName("park")
+	field, ok := reflect.TypeOf(resolver{}).FieldByName("keepalives")
 
 	// Assert
-	if !ok || field.Type != reflect.TypeOf(wsm.ParkState{}) {
-		t.Fatalf("wsState.park = %v (found %v), want a wsm.ParkState", field.Type, ok)
+	if !ok || field.Type != reflect.TypeOf(wsm.NextKeepalives{}) {
+		t.Fatalf("resolver.keepalives = %v (found %v), want a wsm.NextKeepalives", field.Type, ok)
 	}
-	for _, retired := range []string{"parked", "nextKeepalive"} {
-		if _, ok := reflect.TypeOf(wsState{}).FieldByName(retired); ok {
-			t.Errorf("wsState carries its own %q, want the park only in wsm.ParkState", retired)
+	for _, own := range []string{"park", "nextKeepalive"} {
+		if _, ok := reflect.TypeOf(wsState{}).FieldByName(own); ok {
+			t.Errorf("wsState carries its own %q, want the schedule only in the resolver's wsm.NextKeepalives", own)
 		}
 	}
 }

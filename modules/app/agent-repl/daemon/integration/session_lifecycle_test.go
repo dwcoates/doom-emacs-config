@@ -1663,7 +1663,7 @@ func TestOpenWorkspaceOnAHibernatedRowSendsStartSessionResume(t *testing.T) {
 	// arriving in that window is answered as the idempotent no-op it looks like
 	// — success, no second mount, no StartSession at all.
 	f.d.AwaitWorkspaceLogRecord(f.repo.Dir, "the sweep's own hibernation record", func(r harness.LogRecord) bool {
-		return r.Operation == "daemon.drain.sweep" && strings.Contains(r.Message, "hibernated an idle session")
+		return r.Operation == "daemon.drain.sweep" && strings.Contains(r.Message, "parked a session idle past the cutoff")
 	})
 	f.d.Stop()
 
@@ -2054,7 +2054,7 @@ func TestAParkedRowIsIdleOnEveryRosterResolvedAfterTheHibernationRecord(t *testi
 	// THE RECORD IS THE PARK'S COMPLETION: the shim's exit is the sweep's
 	// means, and the session terminal the roster reads is written after it.
 	f.d.AwaitWorkspaceLogRecord(f.repo.Dir, "the sweep's own hibernation record", func(r harness.LogRecord) bool {
-		return r.Operation == "daemon.drain.sweep" && strings.Contains(r.Message, "hibernated an idle session")
+		return r.Operation == "daemon.drain.sweep" && strings.Contains(r.Message, "parked a session idle past the cutoff")
 	})
 	roster := f.d.WatchRoster()
 
@@ -2162,7 +2162,7 @@ func TestAParkedWorkspacesFooterIsIdleAndTheIndicatorReportsNoFault(t *testing.T
 	// THE RECORD IS THE PARK'S COMPLETION: the shim's exit is the sweep's
 	// means, and the terminal the park is derived from is written after it.
 	f.d.AwaitWorkspaceLogRecord(f.repo.Dir, "the sweep's own hibernation record", func(r harness.LogRecord) bool {
-		return r.Operation == "daemon.drain.sweep" && strings.Contains(r.Message, "hibernated an idle session")
+		return r.Operation == "daemon.drain.sweep" && strings.Contains(r.Message, "parked a session idle past the cutoff")
 	})
 	footer := f.d.WatchFooter(f.ws)
 	topbar := f.d.WatchTopbar(f.ws)
@@ -2176,11 +2176,13 @@ func TestAParkedWorkspacesFooterIsIdleAndTheIndicatorReportsNoFault(t *testing.T
 		t.Fatalf("the parked footer status = %v, want an idle status and never disconnected", settled.GetStrip().GetStatus())
 	}
 
-	// Assert: the indicator reports an ABSENT session rather than a broken
-	// one. `dead` ("the session's process is gone") is a fault; the daemon put
-	// this route down itself.
-	awaitTopbar(t, f, topbar, "the parked connectivity indicator reporting an absent session", func(v *frontendv1.TopbarView) bool {
-		return v.GetConnectivity().GetTitle() == "no session is running"
+	// Assert: the indicator draws the LIVE ROUTE the park stands in for (the
+	// one park, owner ruling 2026-11-09): connected while the reader's hops
+	// are held, severed while one is down, and never `dead` ("the session's
+	// process is gone"), a fault for a route the daemon put down itself.
+	awaitTopbar(t, f, topbar, "the parked connectivity indicator drawing the live route it stands in for", func(v *frontendv1.TopbarView) bool {
+		title := v.GetConnectivity().GetTitle()
+		return title == "connected to the session" || title == "the route to the session was severed and is being retried"
 	})
 
 	// Act: the prompt revives the session, and its turn runs to a conclusion.

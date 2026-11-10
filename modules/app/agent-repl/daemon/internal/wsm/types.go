@@ -567,7 +567,8 @@ func (s Session) Parked() bool {
 // ITS TWO HALVES HAVE TWO OWNERS, and a view composes them: whether a park
 // stands is the stand-down's (drain), and the scheduled keep-alive is the
 // cache keeper's (cachelapse.Keeper), which states it for every workspace
-// whether or not a park stands, so neither can be stale against the other.
+// whether or not a park stands, so neither can be stale against the other
+// (NextKeepalives).
 //
 // The zero value is ParkNone.
 type Park struct {
@@ -598,29 +599,30 @@ func (p Park) NextKeepalive() (time.Time, bool) {
 	return p.next, true
 }
 
-// ParkState is a session-scoped view's two halves of a park, each written by
-// its own owner (Park): whether a park stands, and the cache keeper's next
-// scheduled keep-alive, held whether or not one stands. The footer and the
-// topbar each keep one per workspace, so the two compose a park alike.
-type ParkState struct {
-	parked bool
-	next   time.Time
+// NextKeepalives is a session-scoped view's table of the cache keeper's next
+// scheduled keep-alive per workspace (Park). It is the KEEPER'S fact, stated
+// for every workspace the keeper knows, bound to the view or not, so a view
+// holds it beside its workspaces' states rather than in them; nothing draws
+// it, so taking it publishes nothing. A view composes a park from its own
+// standing flag and this table, and the footer and the topbar compose alike.
+type NextKeepalives map[ids.WorkspaceID]time.Time
+
+// Set takes WS's next scheduled keep-alive, the zero time for none.
+func (k NextKeepalives) Set(ws ids.WorkspaceID, next time.Time) {
+	if next.IsZero() {
+		delete(k, ws)
+		return
+	}
+	k[ws] = next
 }
 
-// SetParked raises, or lifts, the park.
-func (s *ParkState) SetParked(parked bool) { s.parked = parked }
-
-// SetNextKeepalive holds the keeper's next scheduled keep-alive, the zero
-// time for none.
-func (s *ParkState) SetNextKeepalive(next time.Time) { s.next = next }
-
-// Park is the park as one fact: ParkNone while none stands, else a park
-// carrying the next keep-alive held.
-func (s ParkState) Park() Park {
-	if !s.parked {
+// Park is WS's park: ParkNone unless PARKED, else a park carrying the next
+// keep-alive held for WS, or none.
+func (k NextKeepalives) Park(ws ids.WorkspaceID, parked bool) Park {
+	if !parked {
 		return ParkNone
 	}
-	return Parked(s.next)
+	return Parked(k[ws])
 }
 
 // String names the park for the records.

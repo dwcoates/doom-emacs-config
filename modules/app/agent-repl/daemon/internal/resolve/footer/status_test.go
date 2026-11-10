@@ -2209,7 +2209,7 @@ func TestTheFootersParkCarriesTheNextKeepalive(t *testing.T) {
 
 			// Assert
 			h.r.mu.Lock()
-			got := h.r.states[testWS].park.Park()
+			got := h.r.parkLocked(testWS, h.r.states[testWS])
 			h.r.mu.Unlock()
 			if got != tt.want {
 				t.Fatalf("park = %v, want %v", got, tt.want)

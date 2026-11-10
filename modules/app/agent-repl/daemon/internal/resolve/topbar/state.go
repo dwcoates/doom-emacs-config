@@ -8,7 +8,6 @@ import (
 	"agent-repld/internal/claudesettings"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/shimclient"
-	"agent-repld/internal/wsm"
 )
 
 // usageFingerprint is one unit's reported usage, kept so a re-report can be
@@ -217,15 +216,14 @@ type wsState struct {
 	link shimclient.LinkState
 	// linkSeen reports whether any link state has been observed.
 	linkSeen bool
-	// park holds the daemon's deliberate stand-down of an idle session, the
+	// parked is the daemon's deliberate stand-down of an idle session, the
 	// same fact the footer and the roster key their idle arms on. There is
 	// one park, drawn as the live idle session it stands in for. It is
 	// cleared by the next link state of any kind, which belongs to the
 	// revival's own spawn.
-	// It also holds the cache keeper's next scheduled keep-alive, stated
-	// whether or not a park stands, so a park raised later carries the
-	// current one (wsm.ParkState).
-	park wsm.ParkState
+	// The park it composes carries the cache keeper's next scheduled
+	// keep-alive from the resolver's own table (resolver.parkLocked).
+	parked bool
 	// coldGate reports that this workspace is STANDING AT THE COLD GATE: the
 	// shim answered `cold` to the session start, so no session was ever
 	// created and the feed is showing the gate card the reader has to answer.
