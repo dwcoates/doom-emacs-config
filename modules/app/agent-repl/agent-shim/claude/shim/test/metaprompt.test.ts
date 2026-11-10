@@ -152,6 +152,19 @@ describe("this repository's committed metaprompt", () => {
     expect(text).toContain("Context loaded from a non-bypass session is carried out here under bypass queue mode");
   });
 
+  it("turns a one-shot that adds a todo row into async merges of its task and of each row's fix", () => {
+    // Arrange
+    const home = homeOnThisRepository();
+    // Act
+    const text = readMetaprompt(home);
+    // Assert
+    expect(text).toContain("The moment a one-shot workspace adds a row to the todo table, it stops being a one-shot");
+    expect(text).toContain("When its task is complete, it lands that task as an async merge.");
+    expect(text).toContain("its `-instruction` names the fix, its tests, and the removal of its rows from `org/todo.md`");
+    expect(text).toContain("Each fix merge is placed `behind=` the task's merge");
+    expect(text).not.toContain("so no workspace unmarks itself");
+  });
+
   it("requires a workspace to store its task's link and every pull request it creates, unasked", () => {
     // Arrange
     const home = homeOnThisRepository();

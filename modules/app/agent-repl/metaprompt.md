@@ -180,6 +180,20 @@
 - Recording a deficiency never replaces fixing what the current work owns.
   - A defect inside the current work's scope, a consolidation candidate, or a failing tracked test is fixed per the rules above, never parked in the table.
 
+### A one-shot that adds a todo row lands its task and each row's fix as async merges
+
+- The moment a one-shot workspace adds a row to the todo table, it stops being a one-shot: `agent-repld workspace set here -not-one-shot`.
+  - It no longer follows the completion directive, so it never runs `workspace finished`.
+- When its task is complete, it lands that task as an async merge.
+  - It cuts a branch at its own branch's tip, named for the task, since an async merge lands a branch no workspace owns.
+  - The task's branch carries the row commit, so the row reaches the main branch with the task.
+- Right after dispatching that merge, it divides the rows it added into async merges that fix them.
+  - Rows that share one fix go into one merge, and every independent fix gets its own merge.
+  - Each fix merge's branch is cut at the main branch's tip, and its `-instruction` names the fix, its tests, and the removal of its rows from `org/todo.md`.
+  - Each fix merge is placed `behind=` the task's merge, so its rows are on the main branch before it removes them.
+- Every merge is its own `workspace async-merge`, with `-maker here -context-fork here`, per `/agent-repl-merge-queue`.
+- A row added after these merges are dispatched gets a fix merge of its own, placed behind the task's merge.
+
 ## Process execution
 
 ### Never background a process without a foreground process alongside it
@@ -238,7 +252,7 @@
 - When I tell a workspace to one-shot itself, to make itself a one-shot, or to land its work when done, it runs `agent-repld workspace set here -one-shot` at once, without asking.
   - The answer carries the daemon's completion directive, which the workspace follows when its work is done.
   - The verb and its flags are `/agent-repl-workspaces`'.
-- The daemon clears the mark itself when I take the workspace back, so no workspace unmarks itself.
+- The daemon clears the mark itself when I take the workspace back, so a workspace unmarks itself only when it adds a todo row (see "Noticed deficiencies").
 
 ### A repository's main workspace is never a one-shot
 
