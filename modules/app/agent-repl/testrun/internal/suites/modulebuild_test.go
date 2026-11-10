@@ -240,7 +240,7 @@ func TestWidePinnedEnvPinsTheCoresItsSlotsGive(t *testing.T) {
 	got := WidePinnedEnv(2)
 
 	// Assert
-	if want := []string{"GOFLAGS=-mod=mod -p=4 -trimpath", "GOMAXPROCS=4"}; !reflect.DeepEqual(got, want) {
+	if want := []string{"GOFLAGS=-mod=mod -p=2 -trimpath", "GOMAXPROCS=2"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("WidePinnedEnv(2) = %v, want %v", got, want)
 	}
 }

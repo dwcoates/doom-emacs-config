@@ -150,16 +150,13 @@ func goFlagsEnv(packages int, extra ...string) string {
 	return "GOFLAGS=" + strings.Join(strings.Fields(strings.Join(parts, " ")), " ")
 }
 
-// CoresPerSlot is the cores a slot gives a Go process: a one-slot unit's
-// GOMAXPROCS.
-const CoresPerSlot = 2
-
 // WidePinnedEnv is PinnedEnv for a go command holding slots slots: it builds
-// CoresPerSlot*slots packages at a time on as many cores, exactly the cores
-// its width gives it.
+// slots packages at a time, each of its processes held to the GOMAXPROCS
+// every unit's are. MEASURED 2026-11-10 on the daemon's 166 packages: -p=2
+// averaged 1.5 cores (74 CPU-seconds in 48s), within two slots; -p=4 with
+// GOMAXPROCS=4 averaged 2.6 under a full run, past them.
 func WidePinnedEnv(slots int) []string {
-	n := CoresPerSlot * slots
-	return []string{goFlagsEnv(n), fmt.Sprintf("GOMAXPROCS=%d", n)}
+	return []string{goFlagsEnv(slots), "GOMAXPROCS=2"}
 }
 
 func spec(id, suite, dir string, argv []string, env ...string) run.Spec {

@@ -8,12 +8,9 @@ import (
 	"agentrepl/testrun/internal/run"
 )
 
-// BuildSlots is a module build's width. A slot is the two cores a one-slot
-// Go unit is given (GOMAXPROCS=2), so the build's go command is pinned to
-// CoresPerSlot*BuildSlots: -p and GOMAXPROCS both 4. MEASURED 2026-11-10 on
-// the daemon's 166 packages, warm cache: -p=4 took 43s wall on 88 CPU-seconds
-// (2.0 cores on average), -p=8 22s on 87; two slots is the widest unit the
-// governor admits first (cores.FirstUnitSeats).
+// BuildSlots is a module build's width, the widest unit the governor admits
+// first (cores.FirstUnitSeats): the build's go command is pinned to it by
+// WidePinnedEnv.
 const BuildSlots = 2
 
 // GoBuild is one Go module pass's build unit (internal/gobuild): every
