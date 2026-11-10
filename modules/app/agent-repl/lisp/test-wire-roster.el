@@ -1995,6 +1995,27 @@ stepped aside."
                           :remediating))
                  '(9))))
 
+(ert-deftest agent-repl-test-wire-roster-a-merge-queue-decodes-its-github-standings ()
+  "A queue carries the workspaces standing in a GitHub merge queue, each at
+its place and since it joined."
+  (should (equal (mapcar (lambda (m) (list (plist-get (plist-get m :place) :place)
+                                           (plist-get (plist-get m :place) :total)
+                                           (plist-get m :queued-at-ms)))
+                         (plist-get
+                          (agent-repl-test-wire-roster--decode
+                           #'agent-repl-wire-decode-roster-repo-merge-queue
+                           (format "{\"github\":[{\"subject\":%s,\"place\":{\"place\":3,\"total\":5},\"queuedAtMs\":\"9\"}]}"
+                                   agent-repl-test-wire-roster--subject))
+                          :github))
+                 '((3 5 9)))))
+
+(ert-deftest agent-repl-test-wire-roster-a-github-standing-without-place-is-a-breach ()
+  "A GitHub merge queue standing's place is a required message."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-merge-queue-github-entry
+                  (format "{\"subject\":%s,\"queuedAtMs\":\"9\"}" agent-repl-test-wire-roster--subject))
+                 '("RosterMergeQueueGithubEntry" place "required message field is absent"))))
+
 (ert-deftest agent-repl-test-wire-roster-a-remediating-merge-decodes-what-it-repairs ()
   "A remediating merge's reason decodes as the arm it names: its tests or
 its conflicts."
