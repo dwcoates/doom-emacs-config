@@ -2491,3 +2491,74 @@ func TestAFailedMergeKeepsItsBranch(t *testing.T) {
 		t.Fatal("a failed merge's branch was deleted")
 	}
 }
+
+// ownedPR is an owned link to pull request NUMBER whose subscription ended as
+// END, nil for one still followed and open.
+func ownedPR(number uint32, end *wsm.PullRequestEnd) wsm.WorkspaceLink {
+	key := wsm.PullRequestKey{Owner: "o", Repo: "r", Number: number}
+	return wsm.WorkspaceLink{URL: key.String(), Owned: true, PullRequest: &key,
+		Follow: &wsm.PullRequestSubscription{PullRequest: key, Origin: wsm.PullRequestOriginOwnedLink, Ended: end}}
+}
+
+func TestALandingClosesTheWorkspaceOnlyWhenItsOwnedPullRequestsHaveMerged(t *testing.T) {
+	tests := []struct {
+		name       string
+		links      []wsm.WorkspaceLink
+		wantClosed bool
+	}{
+		{name: "a workspace that owns no pull request closes", wantClosed: true},
+		{name: "a workspace whose owned pull request is still open stays open", links: []wsm.WorkspaceLink{ownedPR(1, nil)}},
+		{name: "a workspace whose owned pull requests all merged closes", links: []wsm.WorkspaceLink{ownedPR(1, &wsm.PullRequestEnd{Merged: true})}, wantClosed: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.emacsRepo()
+			h.landsCleanly("abc123def4567")
+			h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
+			h.gatePasses("daemon")
+			h.db.links = map[ids.WorkspaceID][]wsm.WorkspaceLink{theWorkspace: tt.links}
+			enqueue(t, h)
+
+			// Act
+			if err := h.admit(context.Background()); err != nil {
+				t.Fatalf("the merge failed: %v", err)
+			}
+
+			// Assert
+			h.db.mu.Lock()
+			defer h.db.mu.Unlock()
+			if h.db.closed[theWorkspace] != tt.wantClosed {
+				t.Fatalf("closed = %v, want %v", h.db.closed[theWorkspace], tt.wantClosed)
+			}
+		})
+	}
+}
+
+func TestALandingWhoseOwnedPullRequestsCannotBeReadLeavesTheWorkspaceOpen(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.emacsRepo()
+	h.landsCleanly("abc123def4567")
+	h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
+	h.gatePasses("daemon")
+	h.db.linksErr = errors.New("store down")
+	enqueue(t, h)
+
+	// Act
+	if err := h.admit(context.Background()); err != nil {
+		t.Fatalf("the merge failed: %v", err)
+	}
+
+	// Assert
+	h.db.mu.Lock()
+	closed := h.db.closed[theWorkspace]
+	h.db.mu.Unlock()
+	if closed {
+		t.Fatal("the workspace was closed though its owned pull requests could not be read")
+	}
+	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Message: "could not read whether the merged workspace's owned pull requests have merged; it is left open"}); !ok {
+		t.Fatal("the failed read was not recorded at error")
+	}
+}

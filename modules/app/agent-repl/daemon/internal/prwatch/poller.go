@@ -76,6 +76,9 @@ type Deps struct {
 	// Deployments is told, after every poll, each owned pull request standing
 	// in a GitHub merge queue (deployments.go).
 	Deployments DeploymentSink
+	// OwnedMerged is told each workspace one of whose owned pull requests
+	// merged (workspace.Verbs.CloseWhenOwnedPullRequestsMerged).
+	OwnedMerged func(ctx context.Context, ws ids.WorkspaceID) error
 	// Log is the global logger: a pull request is no workspace's.
 	Log dlog.Logger
 }
@@ -94,7 +97,7 @@ type Watcher struct {
 // New builds the watcher, refusing a missing collaborator.
 func New(deps Deps) (*Watcher, error) {
 	switch {
-	case deps.Store == nil, deps.GH == nil, deps.Holds == nil, deps.Briefs == nil, deps.MintKey == nil, deps.Serves == nil, deps.Clock == nil, deps.Deployments == nil, deps.Log == nil:
+	case deps.Store == nil, deps.GH == nil, deps.Holds == nil, deps.Briefs == nil, deps.MintKey == nil, deps.Serves == nil, deps.Clock == nil, deps.Deployments == nil, deps.OwnedMerged == nil, deps.Log == nil:
 		return nil, errors.New("prwatch: every collaborator is required")
 	case deps.Every <= 0:
 		return nil, fmt.Errorf("prwatch: the cadence must be positive, not %v", deps.Every)
@@ -341,6 +344,13 @@ func (w *Watcher) advance(ctx context.Context, sub wsm.PullRequestSubscription, 
 		w.deps.Log.Info(opPoll, "the subscription moved since it was read; the next poll reads again", fields)
 	case end != nil:
 		w.deps.Log.Info(opPoll, "the pull request ended; its subscription ended after telling it", fields)
+		// AN OWNED PULL REQUEST'S MERGE MAY BE ITS WORKSPACE'S LAST, which
+		// closes the workspace (owner ruling, 2026-11-10).
+		if end.Merged && sub.Origin == wsm.PullRequestOriginOwnedLink {
+			if err := w.deps.OwnedMerged(ctx, sub.Subscriber); err != nil {
+				w.deps.Log.Error(opPoll, "could not judge closing the workspace one of whose owned pull requests merged", dlog.WithCause(fields, err))
+			}
+		}
 	case len(owed) > 0:
 		w.deps.Log.Info(opPoll, "the pull request's activity is owed to its subscriber", fields)
 	case recovered:

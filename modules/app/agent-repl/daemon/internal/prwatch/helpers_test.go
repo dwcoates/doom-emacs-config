@@ -200,6 +200,11 @@ func (h *fakeHolds) Supersede(context.Context, ids.WorkspaceID, ids.TurnID) (boo
 
 // rig is one watcher over a real store, a scripted GitHub, and a script clock.
 type rig struct {
+	// ownedMerged is every workspace told one of its owned pull requests
+	// merged, and ownedMergedErr what the telling answers.
+	ownedMerged    []ids.WorkspaceID
+	ownedMergedErr error
+
 	w       *Watcher
 	db      wsm.DB
 	gh      *fakeGH
@@ -246,7 +251,11 @@ func newRig(t *testing.T) *rig {
 	}
 	r := &rig{db: db, gh: newGH(), prompts: &fakePrompts{}, holds: &fakeHolds{}, clock: clocktest.New(t0), log: dlog.NewTestLogger(), ws: record.ID, serves: true, deploys: &fakeDeployments{}}
 	r.w, err = New(Deps{Store: db, GH: r.gh, Holds: r.holds, Briefs: briefs, MintKey: func(p string) (string, error) { return p + "-key", nil },
-		Serves: func() bool { return r.serves }, Clock: r.clock, Every: DefaultEvery, Deployments: r.deploys, Log: r.log})
+		Serves: func() bool { return r.serves }, Clock: r.clock, Every: DefaultEvery, Deployments: r.deploys, Log: r.log,
+		OwnedMerged: func(_ context.Context, ws ids.WorkspaceID) error {
+			r.ownedMerged = append(r.ownedMerged, ws)
+			return r.ownedMergedErr
+		}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -267,7 +276,13 @@ func briefs(name string, values map[string]string) (string, error) {
 // subscribe anchors and records a subscription of the rig's workspace to prK.
 func (r *rig) subscribe(t *testing.T, events ...wsm.PullRequestEvent) {
 	t.Helper()
-	sub, _, err := r.w.Anchor(context.Background(), r.ws, prK, wsm.NewPullRequestEvents(events...), wsm.PullRequestOriginRequested)
+	r.subscribeAs(t, wsm.PullRequestOriginRequested, events...)
+}
+
+// subscribeAs subscribes the rig's workspace to the pull request under ORIGIN.
+func (r *rig) subscribeAs(t *testing.T, origin wsm.PullRequestOrigin, events ...wsm.PullRequestEvent) {
+	t.Helper()
+	sub, _, err := r.w.Anchor(context.Background(), r.ws, prK, wsm.NewPullRequestEvents(events...), origin)
 	if err != nil {
 		t.Fatalf("Anchor: %v", err)
 	}

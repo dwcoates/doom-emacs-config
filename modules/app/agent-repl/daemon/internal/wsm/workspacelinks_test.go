@@ -245,3 +245,38 @@ func hasErrorRecord(records []dlog.Record, op, workspace string) bool {
 	}
 	return false
 }
+
+func TestOwnedPullRequestsMerged(t *testing.T) {
+	pr := func(n uint32, owned bool, sub *PullRequestSubscription) WorkspaceLink {
+		key := PullRequestKey{Owner: "o", Repo: "r", Number: n}
+		return WorkspaceLink{URL: key.String(), Owned: owned, PullRequest: &key, Follow: sub}
+	}
+	ended := func(merged bool) *PullRequestSubscription {
+		return &PullRequestSubscription{Ended: &PullRequestEnd{Merged: merged}}
+	}
+	tests := []struct {
+		name       string
+		links      []WorkspaceLink
+		wantOwns   bool
+		wantMerged bool
+	}{
+		{name: "no links own nothing", wantOwns: false, wantMerged: false},
+		{name: "a referenced pull request is not owned", links: []WorkspaceLink{pr(1, false, ended(true))}, wantOwns: false, wantMerged: false},
+		{name: "an owned link that is no pull request is not counted", links: []WorkspaceLink{{URL: "https://example.com", Owned: true}}, wantOwns: false, wantMerged: false},
+		{name: "every owned pull request merged", links: []WorkspaceLink{pr(1, true, ended(true)), pr(2, true, ended(true))}, wantOwns: true, wantMerged: true},
+		{name: "one still open", links: []WorkspaceLink{pr(1, true, ended(true)), pr(2, true, &PullRequestSubscription{})}, wantOwns: true, wantMerged: false},
+		{name: "one closed unmerged", links: []WorkspaceLink{pr(1, true, ended(false))}, wantOwns: true, wantMerged: false},
+		{name: "one no longer followed", links: []WorkspaceLink{pr(1, true, nil)}, wantOwns: true, wantMerged: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			owns, merged := OwnedPullRequestsMerged(tt.links)
+
+			// Assert
+			if owns != tt.wantOwns || merged != tt.wantMerged {
+				t.Fatalf("OwnedPullRequestsMerged = (%v, %v), want (%v, %v)", owns, merged, tt.wantOwns, tt.wantMerged)
+			}
+		})
+	}
+}

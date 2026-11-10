@@ -299,6 +299,16 @@ func (f *verbsForwarder) carryOutSelfClose(ctx context.Context, ws ids.Workspace
 	return verbs.CarryOutSelfClose(ctx, ws)
 }
 
+// closeWhenOwnedPullRequestsMerged is an owned pull request's merge
+// (prwatch.Deps.OwnedMerged), whose watcher records a failure.
+func (f *verbsForwarder) closeWhenOwnedPullRequestsMerged(ctx context.Context, ws ids.WorkspaceID) error {
+	verbs, err := f.bound("an owned pull request merged")
+	if err != nil {
+		return err
+	}
+	return verbs.CloseWhenOwnedPullRequestsMerged(ctx, ws)
+}
+
 // unfoldSubsectionForWork is the turn-start edge's unfold
 // (workspace.SubsectionUnfolds), read out of the verbs, which are built after
 // the edges.

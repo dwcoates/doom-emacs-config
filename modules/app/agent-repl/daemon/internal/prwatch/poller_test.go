@@ -77,7 +77,7 @@ func TestAMergeIsToldAndEndsTheSubscription(t *testing.T) {
 	}
 }
 
-func TestAFailingReadIsToldOnceThenItsRecovery(t *testing.T) {
+func TestAFailingReadIsToldToNobodyAndWhatItMissedIsTold(t *testing.T) {
 	// Arrange
 	r := newRig(t)
 	r.subscribe(t, wsm.PullRequestEventComment)
@@ -433,5 +433,50 @@ func TestRecordReadFailureRecordsWhatItCouldNotDo(t *testing.T) {
 				t.Fatalf("no record %q naming the queue: %+v", tt.wantLog, r.log.Records())
 			}
 		})
+	}
+}
+
+func TestAnOwnedPullRequestsMergeTellsItsWorkspace(t *testing.T) {
+	tests := []struct {
+		name   string
+		origin wsm.PullRequestOrigin
+		merged bool
+		want   int
+	}{
+		{name: "an owned pull request's merge is told", origin: wsm.PullRequestOriginOwnedLink, merged: true, want: 1},
+		{name: "an owned pull request closed unmerged is not", origin: wsm.PullRequestOriginOwnedLink, merged: false, want: 0},
+		{name: "a requested subscription's merge is not", origin: wsm.PullRequestOriginRequested, merged: true, want: 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			r := newRig(t)
+			r.subscribeAs(t, tt.origin, wsm.PullRequestEventState)
+			r.gh.set(pathPull(), pullJSON("closed", false, tt.merged, "head1"))
+
+			// Act
+			r.tick()
+
+			// Assert
+			if len(r.ownedMerged) != tt.want {
+				t.Fatalf("told %v, want %d", r.ownedMerged, tt.want)
+			}
+		})
+	}
+}
+
+func TestAnOwnedMergeThatCannotBeActedOnIsRecorded(t *testing.T) {
+	// Arrange
+	r := newRig(t)
+	r.ownedMergedErr = errors.New("verbs not bound")
+	r.subscribeAs(t, wsm.PullRequestOriginOwnedLink, wsm.PullRequestEventState)
+	r.gh.set(pathPull(), pullJSON("closed", false, true, "head1"))
+
+	// Act
+	r.tick()
+
+	// Assert
+	if _, ok := dlog.FindRecord(r.log.Records(), dlog.RecordQuery{Level: "error", Operation: opPoll, Message: "could not judge closing the workspace one of whose owned pull requests merged"}); !ok {
+		t.Fatalf("records = %+v, want the failure at error", r.log.Records())
 	}
 }
