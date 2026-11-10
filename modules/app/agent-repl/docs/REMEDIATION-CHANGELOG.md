@@ -1362,3 +1362,4 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 - 2026-11-10 sidebar-folded-gap (landed in queue bypass mode): Folded repositories in the sidebar stand half as far apart
 - 2026-11-10 topbar-heading-center (landed in queue bypass mode): The topbar's summary and name are centered together, and its warnings yellow is a true yellow
 - 2026-11-10 question-to-main (landed in queue bypass mode): The ? control sends its question to the home main workspace as an agent-to-agent prompt, which acks the asker and answers it or dispatches a one-shot.
+- 2026-11-10 agent-prompt-names-grey-discs (landed in queue bypass mode): An agent prompt's header name is a purple workspace mention that switches to it, and the topbar's off chips are light grey.
