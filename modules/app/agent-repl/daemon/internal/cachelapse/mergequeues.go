@@ -44,8 +44,8 @@ func (o *mergeQueueObservedDB) QueueMerge(ctx context.Context, repo wsm.RepoKey,
 }
 
 // RemoveMergeQueueEntry records the removal, then tells the sink.
-func (o *mergeQueueObservedDB) RemoveMergeQueueEntry(ctx context.Context, repo wsm.RepoKey, id wsm.WorkspaceID, cause string) error {
-	if err := o.DB.RemoveMergeQueueEntry(ctx, repo, id, cause); err != nil {
+func (o *mergeQueueObservedDB) RemoveMergeQueueEntry(ctx context.Context, repo wsm.RepoKey, id wsm.WorkspaceID, cause string, closes *wsm.Closure) error {
+	if err := o.DB.RemoveMergeQueueEntry(ctx, repo, id, cause, closes); err != nil {
 		return err
 	}
 	o.sink.MergeLeftQueue(id)
@@ -53,8 +53,8 @@ func (o *mergeQueueObservedDB) RemoveMergeQueueEntry(ctx context.Context, repo w
 }
 
 // DropAdmittedMerge records the drop, then tells the sink.
-func (o *mergeQueueObservedDB) DropAdmittedMerge(ctx context.Context, repo wsm.RepoKey, id wsm.WorkspaceID, lease wsm.LeaseID, cause string) error {
-	if err := o.DB.DropAdmittedMerge(ctx, repo, id, lease, cause); err != nil {
+func (o *mergeQueueObservedDB) DropAdmittedMerge(ctx context.Context, repo wsm.RepoKey, id wsm.WorkspaceID, lease wsm.LeaseID, cause string, closes *wsm.Closure) error {
+	if err := o.DB.DropAdmittedMerge(ctx, repo, id, lease, cause, closes); err != nil {
 		return err
 	}
 	o.sink.MergeLeftQueue(id)

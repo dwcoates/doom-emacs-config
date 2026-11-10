@@ -445,12 +445,22 @@ func (r *run) teardown(ctx context.Context, out outcome, terminal func()) {
 		log.Error(op, "could not settle the finished merge's queue tab", dlog.Context{
 			"workspace": string(r.ws), "repo": string(r.repo), "error": err.Error()})
 	}
+	// AN EVICTED ASYNC MERGE'S MERGE WORKSPACE CLOSES IN THE WRITE THAT TAKES
+	// ITS ENTRY OFF (exitClosure). One whose record cannot be read is left
+	// open, loudly: the teardown still gives back everything else.
+	closes, err := r.o.exitClosure(ctx, r.ws, out.abandoned)
+	if err != nil {
+		log.Error(op, "could not tell whether the abandoned merge closes its merge workspace; it is left open", dlog.Context{
+			"workspace": string(r.ws), "cause": string(out.abandoned), "error": err.Error()})
+	}
 	// THE RUN LEAVES ITS LINE BEFORE ITS CHAIN (leaveLine).
 	if err := r.o.leaveLine(r, func() error {
-		return r.o.deps.DB.RemoveMergeQueueEntry(ctx, r.repo, r.ws, terminalCause(out))
+		return r.o.deps.DB.RemoveMergeQueueEntry(ctx, r.repo, r.ws, terminalCause(out), closes)
 	}); err != nil {
 		log.Error(op, "could not drop the finished merge's queue entry", dlog.Context{
 			"workspace": string(r.ws), "repo": string(r.repo), "error": err.Error()})
+	} else {
+		r.o.closedOnExit(ctx, r.ws, out.abandoned, closes)
 	}
 	r.o.mu.Lock()
 	if r.o.running[r.repo] == r {

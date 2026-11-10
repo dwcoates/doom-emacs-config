@@ -181,7 +181,7 @@ func (o *orchestrator) recoverWaiting(ctx context.Context, repo wsm.RepoKey, ent
 		delete(o.repoOf, ws)
 		delete(o.ledgerOf, ws)
 		o.mu.Unlock()
-		if err := o.deps.DB.RemoveMergeQueueEntry(ctx, repo, ws, string(CauseDaemonShutdown)); err != nil {
+		if err := o.deps.DB.RemoveMergeQueueEntry(ctx, repo, ws, string(CauseDaemonShutdown), nil); err != nil {
 			return false, err
 		}
 		o.publishAbandoned(ctx, ws, ledger, entry, CauseDaemonShutdown)
@@ -320,7 +320,7 @@ func (o *orchestrator) recoverAdmitted(ctx context.Context, repo wsm.RepoKey, en
 		why := fmt.Sprintf("the workspace's merge geometry is gone: %v", jobErr)
 		log.Error(op, "failing a merge a restart left unfinished", dlog.Context{
 			"workspace": string(ws), "repo": string(repo), "reason": why})
-		if err := o.deps.DB.RemoveMergeQueueEntry(ctx, repo, ws, causeRestartFailed); err != nil {
+		if err := o.deps.DB.RemoveMergeQueueEntry(ctx, repo, ws, causeRestartFailed, nil); err != nil {
 			return err
 		}
 		o.mu.Lock()

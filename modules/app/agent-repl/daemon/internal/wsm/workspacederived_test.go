@@ -121,7 +121,7 @@ func TestWorkspaceReadsMergePendingOffTheMergeQueue(t *testing.T) {
 			arrange: func(t *testing.T, s *store, repo RepoKey, id WorkspaceID) {
 				forked := registerMergeWorkspace(t, s, id, NewDetachedMergeID())
 				queued(t, s, repo, forked.ID, instant)
-				if err := s.RemoveMergeQueueEntry(context.Background(), repo, forked.ID, "failed"); err != nil {
+				if err := s.RemoveMergeQueueEntry(context.Background(), repo, forked.ID, "failed", nil); err != nil {
 					t.Fatalf("RemoveMergeQueueEntry: %v", err)
 				}
 			},
@@ -139,7 +139,7 @@ func TestWorkspaceReadsMergePendingOffTheMergeQueue(t *testing.T) {
 			name: "a removed entry",
 			arrange: func(t *testing.T, s *store, repo RepoKey, id WorkspaceID) {
 				queued(t, s, repo, id, instant)
-				if err := s.RemoveMergeQueueEntry(context.Background(), repo, id, "failed"); err != nil {
+				if err := s.RemoveMergeQueueEntry(context.Background(), repo, id, "failed", nil); err != nil {
 					t.Fatalf("RemoveMergeQueueEntry: %v", err)
 				}
 			},

@@ -316,16 +316,16 @@ func (d queueEventsDB) AdmitMerge(ctx context.Context, repo wsm.RepoKey, id wsm.
 }
 
 // RemoveMergeQueueEntry drops an entry and reports the merge leaving.
-func (d queueEventsDB) RemoveMergeQueueEntry(ctx context.Context, repo wsm.RepoKey, id wsm.WorkspaceID, cause string) error {
+func (d queueEventsDB) RemoveMergeQueueEntry(ctx context.Context, repo wsm.RepoKey, id wsm.WorkspaceID, cause string, closes *wsm.Closure) error {
 	return d.reported(ctx, repo, true, func() (queueWrite, error) {
-		return d.leaving(id, cause), d.DB.RemoveMergeQueueEntry(ctx, repo, id, cause)
+		return d.leaving(id, cause), d.DB.RemoveMergeQueueEntry(ctx, repo, id, cause, closes)
 	})
 }
 
 // DropAdmittedMerge drops an admitted merge and reports it leaving.
-func (d queueEventsDB) DropAdmittedMerge(ctx context.Context, repo wsm.RepoKey, id wsm.WorkspaceID, lease wsm.LeaseID, cause string) error {
+func (d queueEventsDB) DropAdmittedMerge(ctx context.Context, repo wsm.RepoKey, id wsm.WorkspaceID, lease wsm.LeaseID, cause string, closes *wsm.Closure) error {
 	return d.reported(ctx, repo, true, func() (queueWrite, error) {
-		return d.leaving(id, cause), d.DB.DropAdmittedMerge(ctx, repo, id, lease, cause)
+		return d.leaving(id, cause), d.DB.DropAdmittedMerge(ctx, repo, id, lease, cause, closes)
 	})
 }
 

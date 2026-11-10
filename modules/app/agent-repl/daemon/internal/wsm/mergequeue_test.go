@@ -34,7 +34,7 @@ func TestRemoveMergeQueueEntryRefusesAnEntryNotInTheQueue(t *testing.T) {
 	ws := testWorkspace(t, s)
 
 	// Act
-	err := s.RemoveMergeQueueEntry(context.Background(), RepoKey(t.TempDir()), ws.ID, "gone")
+	err := s.RemoveMergeQueueEntry(context.Background(), RepoKey(t.TempDir()), ws.ID, "gone", nil)
 
 	// Assert
 	if !errors.Is(err, ErrNotFound) {
@@ -1232,7 +1232,7 @@ func TestYieldMergeHeadAnswersAHeadThatLeftTheQueue(t *testing.T) {
 			t.Fatalf("AdmitMerge: %v", err)
 		}
 	}
-	if err := s.RemoveMergeQueueEntry(ctx, repo, loser.ID, "failed"); err != nil {
+	if err := s.RemoveMergeQueueEntry(ctx, repo, loser.ID, "failed", nil); err != nil {
 		t.Fatalf("RemoveMergeQueueEntry: %v", err)
 	}
 
@@ -1287,7 +1287,7 @@ func TestRemoveMergeQueueEntryRenumbersTheRest(t *testing.T) {
 	queued(t, s, repo, second.ID, instant.Add(time.Minute))
 
 	// Act
-	if err := s.RemoveMergeQueueEntry(context.Background(), repo, first.ID, "evicted"); err != nil {
+	if err := s.RemoveMergeQueueEntry(context.Background(), repo, first.ID, "evicted", nil); err != nil {
 		t.Fatalf("RemoveMergeQueueEntry: %v", err)
 	}
 
@@ -1309,7 +1309,7 @@ func TestRemoveMergeQueueEntryLogsTheCause(t *testing.T) {
 	queued(t, s, repo, ws.ID, instant)
 
 	// Act
-	if err := s.RemoveMergeQueueEntry(context.Background(), repo, ws.ID, "dequeued by the user"); err != nil {
+	if err := s.RemoveMergeQueueEntry(context.Background(), repo, ws.ID, "dequeued by the user", nil); err != nil {
 		t.Fatalf("RemoveMergeQueueEntry: %v", err)
 	}
 
@@ -1902,7 +1902,7 @@ func TestDropAdmittedMergeTakesTheEntryTheLeaseAndTheProgressTogether(t *testing
 	lease := admittedWithLease(t, s, repo, ws.ID)
 
 	// Act.
-	err := s.DropAdmittedMerge(context.Background(), repo, ws.ID, lease.ID, "user_drop")
+	err := s.DropAdmittedMerge(context.Background(), repo, ws.ID, lease.ID, "user_drop", nil)
 
 	// Assert.
 	if err != nil {
@@ -1928,7 +1928,7 @@ func TestDropAdmittedMergeRefusesAMergeStillWaitingInLine(t *testing.T) {
 	}
 
 	// Act.
-	err = s.DropAdmittedMerge(context.Background(), repo, ws.ID, lease.ID, "user_drop")
+	err = s.DropAdmittedMerge(context.Background(), repo, ws.ID, lease.ID, "user_drop", nil)
 
 	// Assert.
 	if !errors.Is(err, ErrNotFound) {
@@ -1948,7 +1948,7 @@ func TestDropAdmittedMergeRefusesALeaseThatIsNotTheWorkspacesMergeLeaseAndKeepsT
 	admittedWithLease(t, s, repo, ws.ID)
 
 	// Act.
-	err := s.DropAdmittedMerge(context.Background(), repo, ws.ID, NewLeaseID(), "user_drop")
+	err := s.DropAdmittedMerge(context.Background(), repo, ws.ID, NewLeaseID(), "user_drop", nil)
 
 	// Assert: the transaction rolled back the entry's removal.
 	if !errors.Is(err, ErrNotFound) {
@@ -2110,7 +2110,7 @@ func TestQueueMergePutsABehindMergeDirectlyBehindItsNeighbor(t *testing.T) {
 				queued(t, s, repo, ws[0], instant)
 				queued(t, s, repo, ws[1], instant.Add(time.Minute))
 				queued(t, s, repo, ws[2], instant.Add(2*time.Minute))
-				if err := s.RemoveMergeQueueEntry(context.Background(), repo, ws[0], "merged"); err != nil {
+				if err := s.RemoveMergeQueueEntry(context.Background(), repo, ws[0], "merged", nil); err != nil {
 					t.Fatalf("RemoveMergeQueueEntry: %v", err)
 				}
 				return ws[0]
@@ -2336,5 +2336,177 @@ func TestReturnRemediatedMergeRefusesAMergeNotRemediating(t *testing.T) {
 	// Assert
 	if err == nil {
 		t.Fatal("ReturnRemediatedMerge of a waiting merge = nil, want a refusal")
+	}
+}
+
+// exitClose is the close an evicted merge workspace's queue exit asks for.
+var exitClose = Closure{At: instant, By: CloseByDaemon}
+
+func TestAQueueExitThatClosesTakesTheEntryAndClosesTheWorkspaceTogether(t *testing.T) {
+	tests := []struct {
+		name string
+		exit func(t *testing.T, s *store, repo RepoKey, ws WorkspaceID) error
+	}{
+		{name: "a waiting merge's removal", exit: func(t *testing.T, s *store, repo RepoKey, ws WorkspaceID) error {
+			queued(t, s, repo, ws, instant)
+			closes := exitClose
+			return s.RemoveMergeQueueEntry(context.Background(), repo, ws, "evicted", &closes)
+		}},
+		{name: "an admitted merge's drop", exit: func(t *testing.T, s *store, repo RepoKey, ws WorkspaceID) error {
+			lease := admittedWithLease(t, s, repo, ws)
+			closes := exitClose
+			return s.DropAdmittedMerge(context.Background(), repo, ws, lease.ID, "evicted", &closes)
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			s, log := testStore(t)
+			ws := testWorkspace(t, s)
+			repo := RepoKey(t.TempDir())
+
+			// Act.
+			err := tt.exit(t, s, repo, ws.ID)
+
+			// Assert: off the queue, closed with the exit's record, and the
+			// close recorded under the exit's own operation.
+			if err != nil {
+				t.Fatalf("the exit: %v", err)
+			}
+			if entries, _ := s.MergeQueue(context.Background(), repo); len(entries) != 0 {
+				t.Fatalf("after the exit the queue holds %+v, want nothing", entries)
+			}
+			got := workspaceNow(t, s, ws.ID)
+			if !got.Closed || got.Closure == nil || got.Closure.By != CloseByDaemon || !got.Closure.At.Equal(instant) {
+				t.Fatalf("after the exit the workspace is closed %v with %+v, want closed by the daemon at %v", got.Closed, got.Closure, instant)
+			}
+			if _, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Message: "the queue exit closed its workspace in the same transaction"}); !ok {
+				t.Fatalf("the exit's close was not recorded: %v", log.Records())
+			}
+		})
+	}
+}
+
+func TestAQueueExitThatClosesNothingLeavesTheWorkspaceOpen(t *testing.T) {
+	// Arrange.
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	repo := RepoKey(t.TempDir())
+	queued(t, s, repo, ws.ID, instant)
+
+	// Act.
+	err := s.RemoveMergeQueueEntry(context.Background(), repo, ws.ID, "merged", nil)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("RemoveMergeQueueEntry: %v", err)
+	}
+	if got := workspaceNow(t, s, ws.ID); got.Closed {
+		t.Fatal("an exit asking for no close closed the workspace")
+	}
+}
+
+func TestARefusedQueueExitClosesNothing(t *testing.T) {
+	tests := []struct {
+		name string
+		exit func(t *testing.T, s *store, repo RepoKey, ws WorkspaceID) error
+		op   string
+	}{
+		{name: "a removal of an entry not queued", exit: func(t *testing.T, s *store, repo RepoKey, ws WorkspaceID) error {
+			closes := exitClose
+			return s.RemoveMergeQueueEntry(context.Background(), repo, ws, "evicted", &closes)
+		}, op: "daemon.wsm.remove_merge_queue_entry"},
+		{name: "a drop naming another lease", exit: func(t *testing.T, s *store, repo RepoKey, ws WorkspaceID) error {
+			admittedWithLease(t, s, repo, ws)
+			closes := exitClose
+			return s.DropAdmittedMerge(context.Background(), repo, ws, NewLeaseID(), "evicted", &closes)
+		}, op: "daemon.wsm.drop_admitted_merge"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			s, log := testStore(t)
+			ws := testWorkspace(t, s)
+			repo := RepoKey(t.TempDir())
+
+			// Act.
+			err := tt.exit(t, s, repo, ws.ID)
+
+			// Assert: refused, recorded, and the close rolled back with it.
+			if !errors.Is(err, ErrNotFound) {
+				t.Fatalf("the exit = %v, want the refusal", err)
+			}
+			if got := workspaceNow(t, s, ws.ID); got.Closed {
+				t.Fatal("a refused exit closed its workspace")
+			}
+			if !loggedOperation(log, tt.op, "debug") {
+				t.Fatalf("the refusal was not recorded: %v", log.Records())
+			}
+		})
+	}
+}
+
+func TestAQueueExitWhoseCloseHasNoDeclaredCauseIsRefusedBeforeAnyWrite(t *testing.T) {
+	// Arrange.
+	s, log := testStore(t)
+	ws := testWorkspace(t, s)
+	repo := RepoKey(t.TempDir())
+	queued(t, s, repo, ws.ID, instant)
+
+	// Act.
+	err := s.RemoveMergeQueueEntry(context.Background(), repo, ws.ID, "evicted", &Closure{At: instant, By: "nobody"})
+
+	// Assert: refused at ERROR, the entry kept and the workspace open.
+	if err == nil {
+		t.Fatal("an exit closing with an undeclared cause was accepted")
+	}
+	if entries, _ := s.MergeQueue(context.Background(), repo); len(entries) != 1 {
+		t.Fatalf("after the refusal the queue holds %d entries, want the one kept", len(entries))
+	}
+	if workspaceNow(t, s, ws.ID).Closed {
+		t.Fatal("a refused exit closed its workspace")
+	}
+	if _, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: "daemon.wsm.remove_merge_queue_entry",
+		Message: "refused a queue exit whose close has no declared cause"}); !ok {
+		t.Fatalf("the refusal was not recorded at ERROR: %v", log.Records())
+	}
+}
+
+// TestAQueueExitClosesExactlyAsMarkClosedDoes pins that both closes are the
+// one write (markClosedInTx): a hand-rolled close in the exit would drift
+// from MarkClosed's, and this compares the two rows column by column.
+func TestAQueueExitClosesExactlyAsMarkClosedDoes(t *testing.T) {
+	// Arrange.
+	s, _ := testStore(t)
+	byExit := testWorkspace(t, s)
+	byMark := testWorkspace(t, s)
+	repo := RepoKey(t.TempDir())
+	queued(t, s, repo, byExit.ID, instant)
+
+	// Act.
+	closes := exitClose
+	if err := s.RemoveMergeQueueEntry(context.Background(), repo, byExit.ID, "evicted", &closes); err != nil {
+		t.Fatalf("RemoveMergeQueueEntry: %v", err)
+	}
+	if err := s.MarkClosed(context.Background(), byMark.ID, exitClose); err != nil {
+		t.Fatalf("MarkClosed: %v", err)
+	}
+
+	// Assert.
+	exited, marked := workspaceNow(t, s, byExit.ID), workspaceNow(t, s, byMark.ID)
+	if exited.Closed != marked.Closed || !reflect.DeepEqual(exited.Closure, marked.Closure) ||
+		!reflect.DeepEqual(exited.SpawnedShimPID, marked.SpawnedShimPID) {
+		t.Fatalf("the exit's close %+v differs from MarkClosed's %+v", exited, marked)
+	}
+	exitServing, err := s.Serving(context.Background(), byExit.ID)
+	if err != nil {
+		t.Fatalf("Serving: %v", err)
+	}
+	markServing, err := s.Serving(context.Background(), byMark.ID)
+	if err != nil {
+		t.Fatalf("Serving: %v", err)
+	}
+	if !reflect.DeepEqual(exitServing, markServing) {
+		t.Fatalf("the exit left serving ownership %v, MarkClosed left %v", exitServing, markServing)
 	}
 }

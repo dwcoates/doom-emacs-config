@@ -312,7 +312,7 @@ func TestRemovingAMergeOnlyRequestedReportsNothing(t *testing.T) {
 	}
 
 	// Act.
-	err := h.o.deps.DB.RemoveMergeQueueEntry(context.Background(), h.repoKey(), theWorkspace, string(CauseUserDrop))
+	err := h.o.deps.DB.RemoveMergeQueueEntry(context.Background(), h.repoKey(), theWorkspace, string(CauseUserDrop), nil)
 
 	// Assert.
 	if err != nil {
@@ -333,7 +333,7 @@ func TestAMergeARestartPutsBackInLineIsReportedRequeuedAndNeverLeft(t *testing.T
 	db := h.o.deps.DB
 
 	// Act.
-	if err := db.RemoveMergeQueueEntry(context.Background(), h.repoKey(), theWorkspace, causeRestartResume); err != nil {
+	if err := db.RemoveMergeQueueEntry(context.Background(), h.repoKey(), theWorkspace, causeRestartResume, nil); err != nil {
 		t.Fatalf("RemoveMergeQueueEntry: %v", err)
 	}
 	if err := db.RequestMerge(context.Background(), h.repoKey(), theWorkspace, ownBranch, h.clock()); err != nil {
@@ -456,7 +456,7 @@ func TestALeaveWhoseQueueCannotBeReadBeforehandIsRecordedAndTheWriteStands(t *te
 	h.db.queueReadErr = errors.New("the store is gone")
 
 	// Act.
-	err := h.o.deps.DB.RemoveMergeQueueEntry(context.Background(), h.repoKey(), theWorkspace, string(CauseUserDrop))
+	err := h.o.deps.DB.RemoveMergeQueueEntry(context.Background(), h.repoKey(), theWorkspace, string(CauseUserDrop), nil)
 
 	// Assert.
 	if err != nil {

@@ -211,7 +211,7 @@ func TestAFailedQueueWriteTellsTheRosterNothing(t *testing.T) {
 	h := newHarness(t)
 
 	// Act: removing a row the queue does not hold fails.
-	err := h.o.deps.DB.RemoveMergeQueueEntry(context.Background(), h.repoKey(), theWorkspace, "test")
+	err := h.o.deps.DB.RemoveMergeQueueEntry(context.Background(), h.repoKey(), theWorkspace, "test", nil)
 
 	// Assert
 	if err == nil {
@@ -416,7 +416,7 @@ func TestEveryWriteThatChangesTheLineRepublishesTheRosterQueue(t *testing.T) {
 			queue: []wsm.MergeQueueEntry{{Workspace: "ws-a", State: wsm.MergeAdmitted, Source: own}, {Workspace: "ws-b", State: wsm.MergeQueued, Source: own}},
 			lease: true,
 			write: func(h *harness, db wsm.DB) error {
-				return db.DropAdmittedMerge(context.Background(), h.repoKey(), "ws-a", "lease-a", "test")
+				return db.DropAdmittedMerge(context.Background(), h.repoKey(), "ws-a", "lease-a", "test", nil)
 			},
 			want: []ids.WorkspaceID{"ws-b"},
 		},
