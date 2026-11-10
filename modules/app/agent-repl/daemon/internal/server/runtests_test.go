@@ -386,7 +386,7 @@ func TestRunTestsHoldsTheUsersRunUnderCPULoad(t *testing.T) {
 
 	// Assert
 	bin := filepath.Join(ref.GetDir(), "bin")
-	want := "env AGENT_REPL_TEST_RUN_BY_DAEMON=1 bash " + filepath.Join(bin, "with-cpu-load.sh") + " 4 bash " + filepath.Join(bin, "test-all.sh") + " --selection "
+	want := "env AGENT_REPL_TEST_RUN_BY_DAEMON=1 AGENT_REPL_TEST_WORKSPACE=tests bash " + filepath.Join(bin, "with-cpu-load.sh") + " 4 bash " + filepath.Join(bin, "test-all.sh") + " --selection "
 	if got := strings.Join(h.Tests.argv, " "); !strings.HasPrefix(got, want) || frames[len(frames)-1].GetEvent().GetEnded().GetPassed() == nil {
 		t.Fatalf("argv = %s, frames %v; want the run wrapped in the load script: %s...", got, frames, want)
 	}

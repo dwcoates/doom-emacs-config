@@ -136,7 +136,7 @@ func invalidRunTests(msg *agentreplv1.RunTestsRequest) string {
 func runTestsArgv(command []string, loops uint32, selection string) []string {
 	argv := append([]string(nil), command...)
 	if loops > 0 {
-		// command is `env MARKER bash SCRIPT`: the load wraps `bash SCRIPT`.
+		// command is `env MARKER... bash SCRIPT`: the load wraps `bash SCRIPT`.
 		script := argv[len(argv)-1]
 		load := filepath.Join(filepath.Dir(script), "with-cpu-load.sh")
 		argv = append(append(argv[:len(argv)-2:len(argv)-2], "bash", load, fmt.Sprint(loops)), argv[len(argv)-2:]...)
