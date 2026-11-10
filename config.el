@@ -219,9 +219,9 @@
 
 (after! vterm
   ;; `:actions' points at the agent-repl sibling-popup display fn so
-  ;; the bottom vterm popup stops at the claude panel boundary when
-  ;; claude is open; when claude is closed the fn falls back to the
-  ;; standard `:side 'bottom' frame-wide popup.
+  ;; the bottom vterm popup opens under the composer, never under the
+  ;; sidebar, when the agent panels are open; when they are closed the
+  ;; fn falls back to the standard `:side 'bottom' frame-wide popup.
   (apply #'set-popup-rule! +dwc/vterm-popup-rule)
 
   ;; `evil-collection-vterm' plants `C-k' -> `vterm--self-insert' on the

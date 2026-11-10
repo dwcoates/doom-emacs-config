@@ -37,8 +37,9 @@ is loaded."
     :actions (agent-repl-sibling-popup-display-fn)
     :size 0.4 :side bottom :select t :quit nil :ttl nil)
   "Arguments for `set-popup-rule!' placing the vterm popup at the bottom.
-`:actions' is the agent-repl sibling-popup display function, which stops
-the popup at the agent panel boundary when the panels are open.")
+`:actions' is the agent-repl sibling-popup display function, which opens
+the popup under the composer, never under the sidebar, when the agent
+panels are open.")
 
 (defun +dwc/vterm-toggle (arg)
   "Toggle the project vterm popup, ready to type when it opens.
