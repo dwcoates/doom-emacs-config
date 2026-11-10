@@ -65,6 +65,11 @@ func (s *server) createAsyncMerge(
 			Reason: fmt.Sprintf("the requester %s is not a workspace of the repository %s", requester.Record.ID, repository.ID),
 			Fields: map[string]any{"workspace": requesterRef}})))
 	}
+	if cerr, refused, err := s.refuseWhileBypassing(ctx, log, rpc, resp, requester.Record.ID, "an async merge"); err != nil {
+		return nil, err
+	} else if refused {
+		return answer(resp, cerr)
+	}
 	maker, cerr, done := s.asyncMergeMaker(ctx, log, rpc, resp, repository, async.GetSource().GetMaker())
 	if done {
 		return answer(resp, cerr)

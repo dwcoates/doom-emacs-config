@@ -161,6 +161,13 @@ func (s *server) CreateWorkspace(
 				dlog.Context{"selected": spec.ContextSelection != nil})
 		}
 	}
+	if spec.OneShot && spec.Requester != nil {
+		if cerr, refused, err := s.refuseWhileBypassing(ctx, s.log, rpc, resp, *spec.Requester, "a one-shot workspace"); err != nil {
+			return nil, err
+		} else if refused {
+			return answer(resp, cerr)
+		}
+	}
 	if req.Msg.Model != nil {
 		spec.Model = req.Msg.GetModel()
 	}
