@@ -95,8 +95,7 @@ func (s *store) DropWorkspaceSummary(ctx context.Context, id WorkspaceID) (bool,
 		if err != nil {
 			return err
 		}
-		n, err := res.RowsAffected()
-		dropped = n > 0
+		dropped, err = touchedRow(res)
 		return err
 	})
 	return dropped, err
