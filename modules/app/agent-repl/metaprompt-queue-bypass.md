@@ -2,6 +2,9 @@
 
 ### This workspace holds its repository's queue bypass mode
 
+- This session runs in bypass queue mode, which agent-repl also calls queue bypass mode.
+  - The mode is what the user means by "bypass queue mode", "bypass mode", or "bypassing the queue".
+  - The mode belongs to this session, so a request to land work "directly" or "bypassing the queue" is carried out here, under the rules below.
 - The repository's merge queue is hard-stopped while this workspace holds the mode.
   - agent-repl stopped it when the mode was taken, and resumes it when the mode is released.
   - Never pause, resume, evict, or queue anything on it, and never ask about it.
