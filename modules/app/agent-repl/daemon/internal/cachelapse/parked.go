@@ -9,6 +9,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/inflight"
 )
 
 // A PARKED CONVERSATION IS KEPT WARM IN TANDEM WITH THE ONE THE SESSION RUNS
@@ -73,14 +74,14 @@ func (k *Keeper) beatParked(ctx context.Context, log dlog.Logger, ws ids.Workspa
 	log.Info(opDrive, "sent the parked conversation's keep-alive; its answer comes back on its own", dlog.Context{
 		"parked_vendor_session_id": parked.GetVendorSessionId(), "answer_bound": AnswerBound.String(),
 	})
-	go func() {
+	inflight.Go(func() {
 		// THE BOUND IS A KEEP-ALIVE'S ANSWER BOUND (AnswerBound, measured over
 		// 2,798 keep-alives): the parked beat is one keep-alive request.
 		beatCtx, cancel := context.WithTimeout(ctx, AnswerBound)
 		answer, err := shim.BeatParked(beatCtx, parked)
 		cancel()
 		k.enqueue(edge{ws: ws, kind: edgeParkedAnswered, parked: answer, err: err, why: "the parked conversation's keep-alive was answered"})
-	}()
+	})
 }
 
 // parkedAnswered records how WS's parked keep-alive ended and times its next
