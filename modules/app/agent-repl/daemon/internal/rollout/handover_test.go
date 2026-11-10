@@ -2189,3 +2189,30 @@ func TestOpenAdoptionFaultThatCannotBeWrittenSaysSoAtError(t *testing.T) {
 		t.Fatalf("records = %+v, want the failed write stated at ERROR", h.log.Records())
 	}
 }
+
+// A WORKSPACE TAKEN BACK WHOLE IS OFFERED AGAIN AT THE HANDOVER'S OWN GATE.
+// Offered at freeness it waited for every lease, and a merge held by a
+// hard-stopped queue never let go (2026-11-10: a handover held open for over
+// an hour by one such workspace).
+func TestATakenBackWorkspaceIsOfferedAgainAtDispatchQuiet(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	expireAdoption(t, h)
+
+	// Act
+	reofferOnce(t, h)
+
+	// Assert
+	h.registry.mu.Lock()
+	defer h.registry.mu.Unlock()
+	var offers []bounce.Gate
+	for _, call := range h.registry.requests {
+		if call.WS == ws && call.Req.Reason == string(ReasonHandoverTransfer) {
+			offers = append(offers, call.Req.WaitFor)
+		}
+	}
+	if len(offers) != 2 || offers[1] != bounce.GateDispatchQuiet {
+		t.Fatalf("offers = %v, want the first transfer and its re-offer, both at dispatch quiet", offers)
+	}
+}
