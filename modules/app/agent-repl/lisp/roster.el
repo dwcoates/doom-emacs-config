@@ -312,6 +312,13 @@ against it (workspace-completion.el)."
              by-name)
     out))
 
+(defun agent-repl-roster-open-workspace-names ()
+  "Return the name of every OPEN workspace the last accepted push carried.
+The names of `agent-repl-roster-open-workspaces', in no particular order.
+The composer marks the open workspaces' names it holds against it
+\(workspace-completion.el)."
+  (mapcar #'car (agent-repl-roster-open-workspaces)))
+
 (defun agent-repl-roster-row-closed-by-user-at (row)
   "Return the epoch-ms instant the USER closed ROW, or nil.
 Nil for an open row, for one the daemon, an agent or a merge closed, and

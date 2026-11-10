@@ -4028,6 +4028,14 @@ judged as any roster is."
   (agent-repl-test-roster--with-rows nil
     (should-not (agent-repl-roster-open-workspaces))))
 
+(ert-deftest agent-repl-test-roster-open-workspace-names-are-the-open-workspaces-names ()
+  "The names reader answers the name of each open workspace, closed ones left out."
+  (agent-repl-test-roster--with-rows
+      (list (agent-repl-test-roster--row "a" "alpha" :ready :repository "doom")
+            (agent-repl-test-roster--row "b" "beta" :ready :closed t :repository "doom")
+            (agent-repl-test-roster--row "c" "gamma" :ready))
+    (should (equal (sort (agent-repl-roster-open-workspace-names) #'string<) '("alpha" "gamma")))))
+
 (ert-deftest agent-repl-test-roster-row-repository-name-reads-the-row ()
   "The accessor answers the name the row's repository carries."
   (should (equal (agent-repl-roster-row-repository-name

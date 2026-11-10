@@ -51,6 +51,7 @@
 (require 'subr-x)
 
 (declare-function agent-repl-roster-open-workspaces "agent-repl-roster" ())
+(declare-function agent-repl-roster-open-workspace-names "agent-repl-roster" ())
 (declare-function agent-repl-annotation-column "agent-repl-core" (names gap))
 (declare-function agent-repl-completion-match-capf "completion-match" (beg end table &rest props))
 (declare-function agent-repl-completion-match-table "completion-match" (category collection))
