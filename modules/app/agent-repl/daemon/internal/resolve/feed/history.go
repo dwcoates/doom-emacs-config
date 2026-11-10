@@ -146,6 +146,9 @@ func (r *resolver) replayPage(ws ids.WorkspaceID, agent *conversationv1.AgentId,
 	// The page's last turn, when its terminal is not on the page and its
 	// durable row is closed, ends here, still in the history plane.
 	r.endReplayedTurn(s, "")
+	if load != nil && load.segmentStart {
+		r.drawForkPoint(s, agent, load.inherited)
+	}
 	s.replayCloses = nil
 	s.replayTurn = nil
 	s.plane = planeLive

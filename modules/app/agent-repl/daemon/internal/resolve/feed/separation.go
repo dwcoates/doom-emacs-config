@@ -327,6 +327,8 @@ func separationArm(separation *frontendv1.FeedSessionSeparation) string {
 		return "worktree_entered"
 	case *frontendv1.FeedSessionSeparation_WorktreeLeft:
 		return "worktree_left"
+	case *frontendv1.FeedSessionSeparation_Forked:
+		return "forked"
 	}
 	return "unset"
 }

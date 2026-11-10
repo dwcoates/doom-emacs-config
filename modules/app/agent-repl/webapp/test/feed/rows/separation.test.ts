@@ -83,6 +83,7 @@ const ARMS: ReadonlyArray<[string, SeparationInit["kind"]]> = [
       },
     },
   ],
+  ["forked", { case: "forked", value: {} }],
 ];
 
 /** Every arm that draws a DIVIDER: all but the failed compaction. */
@@ -114,6 +115,12 @@ describe("drawFeedSessionSeparation: ONE renderer for every arm", () => {
   it("gives the worktree arms the BLUE accent, as the schema requires", () => {
     const entered = drawFeedSessionSeparation(separation(ARMS[2][1]), ctxFor());
     expect(entered.querySelector(".sep-rule")?.className).toContain("sep-accent-worktree");
+  });
+
+  it("gives the fork point a GREY accent and no payload", () => {
+    const forked = drawFeedSessionSeparation(separation({ case: "forked", value: {} }), ctxFor());
+    expect(forked.querySelector(".sep-rule")?.className).toContain("sep-accent-forked");
+    expect(forked.querySelector(".sep-compacted, .sep-worktree")).toBeNull();
   });
 
   it("refuses an unset arm", () => {
