@@ -106,9 +106,39 @@ func (f *Fleet) SetRemoteControl(ctx context.Context, log dlog.Logger, ws ids.Wo
 	return on, f.putRemoteControlInForce(ctx, log, ws, on, fields)
 }
 
+// RestateRemoteControl puts workspace WS's remote-control mode, read at this
+// moment, in force after TRANSITION changed it underneath: a queue bypass
+// take or release, which lifts the mode or drops the lift in the store
+// (wsm.RemoteControl.LiftedByQueueBypass). The mode is derived in the store
+// alone, so this only states what the store now reads to the topbar and the
+// live shim. No shim holding a session is no failure: the next bring-up reads
+// the same mode (reapplyRemoteControl).
+//
+// A FAILURE IS LOGGED HERE, the one ownership point, with the transition and
+// its cause, stated on the warning strip, and answered to the caller.
+func (f *Fleet) RestateRemoteControl(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, transition string) error {
+	gate := f.remoteControlGate(ws)
+	gate.Lock()
+	defer gate.Unlock()
+	fields := dlog.Context{"transition": transition}
+	standing, err := f.deps.DB.RemoteControl(ctx, ws)
+	if err != nil {
+		log.Error(opRemoteControl, "could not read the remote-control mode a queue bypass transition left", dlog.WithCause(fields, err))
+		f.deps.Topbar.RaiseWarning(ws, remoteControlWarning, fmt.Sprintf("could not read whether this session should be reachable from claude.ai after its queue bypass %s: %v", transition, err))
+		return fmt.Errorf("restate remote control on %q after queue bypass %s: %w", ws, transition, err)
+	}
+	fields["remote_control"], fields["lifted_by_queue_bypass"] = standing.On, standing.LiftedByQueueBypass
+	log.Info(opRemoteControl, "stated the remote-control mode a queue bypass transition left", fields)
+	if err := f.putRemoteControlInForce(ctx, log, ws, standing.On, fields); err != nil && !refusedNoSession(err) {
+		return fmt.Errorf("restate remote control on %q after queue bypass %s: %w", ws, transition, err)
+	}
+	return nil
+}
+
 // putRemoteControlInForce states mode ON to the topbar and puts it in force on
 // workspace WS's live shim, the caller holding the workspace's remote-control
-// gate. It is the ONE tail of every mode change. It answers the shim's no_session refusal when no shim holds a
+// gate. It is the ONE tail of every mode change, explicit or a queue bypass
+// transition's. It answers the shim's no_session refusal when no shim holds a
 // session to bridge (the next bring-up puts the mode in force), and the
 // vendor's refusal, logged at ERROR under FIELDS and stated on the warning
 // strip.

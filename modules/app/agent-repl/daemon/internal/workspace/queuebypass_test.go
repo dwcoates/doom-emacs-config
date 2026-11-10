@@ -611,3 +611,101 @@ func TestReleasingTheMode(t *testing.T) {
 		})
 	}
 }
+
+// bypassFixture is the verb fixture with workspace w1 bound to its queue
+// conversation, standing in the queue bypass mode when HOLDS, and recording
+// the holds written and the fleet's restates in one order.
+func bypassFixture(t *testing.T, holds bool) (*fixture, *[]string) {
+	t.Helper()
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	bindTo(f, "w1", "vendor-queue")
+	f.db.setBypass("w1", wsm.QueueBypass{Holds: holds, RepoID: "r1"})
+	steps := &[]string{}
+	f.db.bypassSteps, f.fleet.restateSteps = steps, steps
+	return f, steps
+}
+
+func TestUpdateQueueBypassModeRestatesRemoteControlRightAfterEachHold(t *testing.T) {
+	cases := []struct {
+		name   string
+		holds  bool
+		change QueueBypassChange
+		want   []string
+	}{
+		{name: "entering restates remote control after the take", change: QueueBypassOn, want: []string{"take", "restate entered"}},
+		{name: "leaving restates remote control after the release", holds: true, change: QueueBypassOff, want: []string{"release", "restate left"}},
+		{name: "a change that changes nothing restates nothing", holds: true, change: QueueBypassOn, want: []string{}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			f, steps := bypassFixture(t, tc.holds)
+
+			// Act
+			_, err := f.verbs.UpdateQueueBypassMode(context.Background(), "w1", tc.change, QueueBypassContextFullMain)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("UpdateQueueBypassMode: %v", err)
+			}
+			if !slices.Equal(*steps, tc.want) {
+				t.Fatalf("steps = %v, want %v", *steps, tc.want)
+			}
+		})
+	}
+}
+
+func TestUpdateQueueBypassModeRestatesNothingWhenTheHoldCannotBeWritten(t *testing.T) {
+	cases := []struct {
+		name   string
+		holds  bool
+		change QueueBypassChange
+		break_ func(*fakeDB)
+	}{
+		{name: "a failed take", change: QueueBypassOn, break_: func(d *fakeDB) { d.takeBypassErr = errors.New("disk full") }},
+		{name: "a failed release", holds: true, change: QueueBypassOff, break_: func(d *fakeDB) { d.releaseBypassErr = errors.New("disk full") }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			f, _ := bypassFixture(t, tc.holds)
+			tc.break_(f.db)
+
+			// Act
+			holds, err := f.verbs.UpdateQueueBypassMode(context.Background(), "w1", tc.change, QueueBypassContextFullMain)
+
+			// Assert
+			if err == nil || holds != tc.holds {
+				t.Fatalf("UpdateQueueBypassMode = (%v, %v), want the failure with the standing unchanged", holds, err)
+			}
+			if len(f.fleet.restates) != 0 {
+				t.Fatalf("restates = %v, want none: the mode the store derives did not move", f.fleet.restates)
+			}
+			if !loggedAtError(f, opQueueBypass) {
+				t.Fatalf("the failed hold was not recorded at ERROR under %s", opQueueBypass)
+			}
+		})
+	}
+}
+
+func TestAFailedRemoteControlRestateLeavesTheTransitionStanding(t *testing.T) {
+	// Arrange
+	f, _ := bypassFixture(t, false)
+	f.fleet.restateErr = errors.New("the vendor refused the bridge")
+
+	// Act
+	holds, err := f.verbs.UpdateQueueBypassMode(context.Background(), "w1", QueueBypassOn, QueueBypassContextFullMain)
+
+	// Assert
+	if err != nil || !holds {
+		t.Fatalf("UpdateQueueBypassMode = (%v, %v), want the mode taken", holds, err)
+	}
+	if got := f.db.sessions["w1"].VendorSessionID; got == "vendor-queue" {
+		t.Fatalf("bound conversation = %q, want the switch to the bypass conversation done", got)
+	}
+	record, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: opQueueBypass, Message: "the queue bypass transition stands; the fleet surfaced its remote-control failure"})
+	if !ok || record.Context["transition"] != queueBypassEntered || record.Context["cause"] != "the vendor refused the bridge" {
+		t.Fatalf("record = %+v (%v), want the transition and its cause", record, ok)
+	}
+}

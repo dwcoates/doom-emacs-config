@@ -1264,6 +1264,10 @@ type Sessions interface {
 	// workspace, states it to the topbar, and puts it in force on the live
 	// shim; no shim holding a session is the no_session refusal.
 	SetRemoteControl(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, change wsm.RemoteControlChange) (bool, error)
+	// RestateRemoteControl states the remote-control mode the store reads
+	// after a queue bypass TRANSITION to the topbar and puts it in force on
+	// the live shim, logging and answering a failure.
+	RestateRemoteControl(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, transition string) error
 	// RetryVendorError asks the workspace's shim for its scheduled
 	// vendor-error retry now.
 	RetryVendorError(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID) (*shimv1.RetryVendorErrorNowResponse, error)

@@ -70,6 +70,12 @@ type fakeDB struct {
 	// bypass is each workspace's queue-bypass standing; bypassErr fails its read.
 	bypass    map[ids.WorkspaceID]wsm.QueueBypass
 	bypassErr error
+	// bypassSteps records every queue bypass hold written, as "take" or
+	// "release", beside the fleet's restates (the fixture's sharedSteps);
+	// takeBypassErr and releaseBypassErr fail each.
+	bypassSteps      *[]string
+	takeBypassErr    error
+	releaseBypassErr error
 	// parkedConversations are the conversations SwapParkedConversation parked.
 	parkedConversations map[ids.WorkspaceID]string
 	// swapResumedParked is each swap's resumesParked.
@@ -2836,6 +2842,11 @@ func (b *fakeBanners) Raise(ws ids.WorkspaceID, kind, text string) {
 
 // fakeSessions is a Sessions fleet.
 type fakeSessions struct {
+	// restates is every RestateRemoteControl's transition, also appended to
+	// restateSteps when set; restateErr answers each.
+	restates     []string
+	restateSteps *[]string
+	restateErr   error
 	// held marks a workspace whose shim is held with no session on it.
 	held     map[ids.WorkspaceID]bool
 	live     map[ids.WorkspaceID]bool
@@ -4371,19 +4382,29 @@ func (f *fakeDB) OpenChildren(_ context.Context, parent ids.WorkspaceID) ([]wsm.
 // QueueBypass answers WS's queue bypass standing: the one a test set in
 // bypass, else none, so a session lands through the queue; bypassErr fails
 // the read.
-// TakeQueueBypass marks WS the holder.
+// TakeQueueBypass marks WS the holder, recording "take" in bypassSteps and
+// answering takeBypassErr with nothing written.
 func (f *fakeDB) TakeQueueBypass(_ context.Context, ws ids.WorkspaceID, _ time.Time) error {
+	if f.takeBypassErr != nil {
+		return f.takeBypassErr
+	}
+	f.recordBypassStep("take")
 	standing := f.bypass[ws]
 	standing.Holds = true
-	f.bypass[ws] = standing
+	f.setBypass(ws, standing)
 	return nil
 }
 
-// ReleaseQueueBypass clears WS's hold.
+// ReleaseQueueBypass clears WS's hold, recording "release" in bypassSteps and
+// answering releaseBypassErr with nothing written.
 func (f *fakeDB) ReleaseQueueBypass(_ context.Context, ws ids.WorkspaceID) error {
+	if f.releaseBypassErr != nil {
+		return f.releaseBypassErr
+	}
+	f.recordBypassStep("release")
 	standing := f.bypass[ws]
 	standing.Holds = false
-	f.bypass[ws] = standing
+	f.setBypass(ws, standing)
 	return nil
 }
 
@@ -4395,6 +4416,24 @@ func (f *fakeDB) MediationRoleOf(_ context.Context, ws ids.WorkspaceID) (*wsm.Me
 	return f.roles[ws], nil
 }
 
+// setBypass scripts the workspace's queue bypass standing.
+func (f *fakeDB) setBypass(ws ids.WorkspaceID, standing wsm.QueueBypass) {
+	if f.bypass == nil {
+		f.bypass = map[ids.WorkspaceID]wsm.QueueBypass{}
+	}
+	f.bypass[ws] = standing
+}
+
+// recordBypassStep appends STEP to bypassSteps when a test asked for them.
+func (f *fakeDB) recordBypassStep(step string) {
+	if f.bypassSteps != nil {
+		*f.bypassSteps = append(*f.bypassSteps, step)
+	}
+}
+
+// QueueBypass answers WS's queue bypass standing: the one a test set in
+// bypass, else none, so a session lands through the queue; bypassErr fails
+// the read.
 func (f *fakeDB) QueueBypass(_ context.Context, ws ids.WorkspaceID) (wsm.QueueBypass, error) {
 	if f.bypassErr != nil {
 		return wsm.QueueBypass{}, f.bypassErr
@@ -4751,6 +4790,17 @@ func (d *fakeDB) remoteOf(id ids.WorkspaceID) wsm.RemoteControl {
 	d.remoteMu.Lock()
 	defer d.remoteMu.Unlock()
 	return d.remote[id]
+}
+
+// RestateRemoteControl records the transition asked of the fleet, also in
+// the DB's bypassSteps when a test asked for the order, and answers
+// restateErr.
+func (s *fakeSessions) RestateRemoteControl(_ context.Context, _ dlog.Logger, ws ids.WorkspaceID, transition string) error {
+	s.restates = append(s.restates, transition)
+	if s.restateSteps != nil {
+		*s.restateSteps = append(*s.restateSteps, "restate "+transition)
+	}
+	return s.restateErr
 }
 
 // SetRemoteControl records the change asked of the fleet and answers

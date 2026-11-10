@@ -11,6 +11,7 @@ import (
 
 	shimv1 "agentrepl/proto/shim/v1"
 
+	"agent-repld/internal/dlog"
 	"agent-repld/internal/shimclient"
 	"agent-repld/internal/wsm"
 )
@@ -708,5 +709,177 @@ func TestALiveBridgeIsAskedTheBuiltRequest(t *testing.T) {
 	// Assert.
 	if n := len(f.client.remoteControls); n == 0 || !proto.Equal(f.client.remoteControls[n-1], want) {
 		t.Fatalf("SetSessionRemoteControl asks = %v, want the last to be %v", f.client.remoteControls, want)
+	}
+}
+
+// ---- Fleet.RestateRemoteControl: a queue bypass transition ----
+
+// lifted is the standing the store reads for a holder whose take lifted
+// remote control.
+var lifted = wsm.RemoteControl{On: true, LiftedByQueueBypass: true}
+
+func TestFleetRestateRemoteControlPutsEachTransitionsModeInForce(t *testing.T) {
+	tests := []struct {
+		name       string
+		transition string
+		standing   wsm.RemoteControl
+		wantOn     bool
+	}{
+		{name: "entering with remote control off turns the bridge on", transition: queueBypassEntered, standing: lifted, wantOn: true},
+		{name: "entering with remote control already on keeps the bridge on", transition: queueBypassEntered, standing: wsm.RemoteControl{On: true, Recorded: true}, wantOn: true},
+		{name: "leaving a lift turns the bridge off", transition: queueBypassLeft, standing: wsm.RemoteControl{}},
+		{name: "leaving with remote control on before keeps the bridge on", transition: queueBypassLeft, standing: wsm.RemoteControl{On: true, Recorded: true}, wantOn: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f, ws := startedFleet(t)
+			f.db.setRemote(ws.ID, tt.standing)
+
+			// Act.
+			err := f.fleet.RestateRemoteControl(context.Background(), f.log.logger, ws.ID, tt.transition)
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("RestateRemoteControl: %v", err)
+			}
+			if len(f.client.remoteControls) != 1 || f.client.remoteControls[0].GetEnabled() != tt.wantOn {
+				t.Fatalf("SetSessionRemoteControl asks = %v, want one %s", f.client.remoteControls, onOff(tt.wantOn))
+			}
+			if len(f.topbarRemote) != 1 || f.topbarRemote[0] != tt.wantOn {
+				t.Fatalf("topbar modes = %v, want %s", f.topbarRemote, onOff(tt.wantOn))
+			}
+		})
+	}
+}
+
+func TestFleetRestateRemoteControlWithNoShimStatesTheModeAlone(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.db.setRemote(ws.ID, lifted)
+
+	// Act.
+	err := f.fleet.RestateRemoteControl(context.Background(), f.log.logger, ws.ID, queueBypassEntered)
+
+	// Assert.
+	if err != nil || len(f.topbarRemote) != 1 || !f.topbarRemote[0] || len(f.topbarWarnings) != 0 {
+		t.Fatalf("RestateRemoteControl = %v, topbar %v, warnings %v; want on stated, no failure", err, f.topbarRemote, f.topbarWarnings)
+	}
+}
+
+func TestFleetRestateRemoteControlSurfacesAnUnreadableMode(t *testing.T) {
+	// Arrange.
+	f, ws := startedFleet(t)
+	f.db.remoteErr = errors.New("database is locked")
+
+	// Act.
+	err := f.fleet.RestateRemoteControl(context.Background(), f.log.logger, ws.ID, queueBypassEntered)
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "database is locked") {
+		t.Fatalf("RestateRemoteControl = %v, want the read's failure", err)
+	}
+	if len(f.client.remoteControls) != 0 || len(f.topbarRemote) != 0 {
+		t.Fatalf("asks %v, topbar %v; want nothing sent or drawn", f.client.remoteControls, f.topbarRemote)
+	}
+	if len(f.topbarWarnings) != 1 || !strings.Contains(f.topbarWarnings[0], "database is locked") {
+		t.Errorf("warnings = %v, want one carrying the cause", f.topbarWarnings)
+	}
+	requireTransitionRecord(t, f, "could not read the remote-control mode a queue bypass transition left", queueBypassEntered, "database is locked")
+}
+
+func TestFleetRestateRemoteControlSurfacesTheVendorsRefusal(t *testing.T) {
+	// Arrange.
+	f, ws := startedFleet(t)
+	f.db.setRemote(ws.ID, lifted)
+	f.client.remoteControlResponse = vendorRefusedRemoteControl()
+
+	// Act.
+	err := f.fleet.RestateRemoteControl(context.Background(), f.log.logger, ws.ID, queueBypassEntered)
+
+	// Assert.
+	var refusal *ShimRefusal
+	if !errors.As(err, &refusal) || refusal.Arm != ArmShimVendorRefused {
+		t.Fatalf("RestateRemoteControl = %v, want the vendor's refusal", err)
+	}
+	if len(f.topbarWarnings) != 1 || !strings.Contains(f.topbarWarnings[0], "disabled by policy") {
+		t.Errorf("warnings = %v, want one carrying the vendor's detail", f.topbarWarnings)
+	}
+	requireTransitionRecord(t, f, "the shim did not put the remote-control mode in force", queueBypassEntered, "disabled by policy")
+}
+
+// requireTransitionRecord fails unless one ERROR record under opRemoteControl
+// carries MESSAGE, the TRANSITION and a cause containing CAUSE.
+func requireTransitionRecord(t *testing.T, f *fleetFixture, message, transition, cause string) {
+	t.Helper()
+	records := dlog.FilterRecords(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: opRemoteControl})
+	if len(records) != 1 || records[0].Message != message {
+		t.Fatalf("error records = %+v, want one: %q", records, message)
+	}
+	if got := records[0].Context["transition"]; got != transition {
+		t.Errorf("transition = %v, want %q", got, transition)
+	}
+	if got := fmt.Sprint(records[0].Context["cause"]); !strings.Contains(got, cause) {
+		t.Errorf("cause = %q, want it to carry %q", got, cause)
+	}
+}
+
+// TestEveryModeChangeSharesTheInForceTail pins the extraction: an explicit
+// change and a queue bypass transition to the same mode ask the shim and the
+// topbar exactly the same.
+func TestEveryModeChangeSharesTheInForceTail(t *testing.T) {
+	// Arrange.
+	explicit, ws := startedFleet(t)
+	transition, other := startedFleet(t)
+	transition.db.setRemote(other.ID, lifted)
+
+	// Act.
+	_, errExplicit := explicit.fleet.SetRemoteControl(context.Background(), explicit.log.logger, ws.ID, wsm.RemoteControlOn)
+	errTransition := transition.fleet.RestateRemoteControl(context.Background(), transition.log.logger, other.ID, queueBypassEntered)
+
+	// Assert.
+	if errExplicit != nil || errTransition != nil {
+		t.Fatalf("errors = %v, %v; want none", errExplicit, errTransition)
+	}
+	if len(explicit.client.remoteControls) != 1 || len(transition.client.remoteControls) != 1 ||
+		!proto.Equal(explicit.client.remoteControls[0], transition.client.remoteControls[0]) {
+		t.Fatalf("asks = %v and %v, want the same one ask", explicit.client.remoteControls, transition.client.remoteControls)
+	}
+	if fmt.Sprint(explicit.topbarRemote) != fmt.Sprint(transition.topbarRemote) {
+		t.Fatalf("topbar = %v and %v, want the same", explicit.topbarRemote, transition.topbarRemote)
+	}
+}
+
+func TestARestartedShimOfAHolderIsPutInRemoteControl(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.db.setRemote(ws.ID, lifted)
+
+	// Act.
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Assert.
+	if len(f.client.remoteControls) != 1 || !f.client.remoteControls[0].GetEnabled() {
+		t.Fatalf("SetSessionRemoteControl asks = %v, want one on for the lifted holder", f.client.remoteControls)
+	}
+}
+
+func TestARegisteredHolderStatesItsLiftOnTheNaming(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.db.remoteUnscripted = lifted
+
+	// Act.
+	if _, err := f.verbs.Register(context.Background(), f.git.mainWorktree, wsm.RegisterFacts{}); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	// Assert.
+	if n := len(f.topbarNamings); n == 0 || !f.topbarNamings[n-1].RemoteControl {
+		t.Fatalf("namings = %+v, want the last carrying the lifted remote control on", f.topbarNamings)
 	}
 }
