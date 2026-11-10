@@ -39,6 +39,26 @@ func TestRepairFencedResponseTree(t *testing.T) {
 			want: lines(header, "1 🔧 A", "├── 1.1 a", "```bash", "ls", "```", "├── 1.2 c", "├── 1.3 d", "└── 1.4 b", ""),
 		},
 		{
+			name: "a longer wrapper's shorter bare inner fence stays its content",
+			text: lines(header, "````markdown", "1 🔧 A", "├── 1.1 a", "```", "ls", "```", "├── 1.2 c", "├── 1.3 d", "└── 1.4 b", "````"),
+			want: lines(header, "1 🔧 A", "├── 1.1 a", "```", "ls", "```", "├── 1.2 c", "├── 1.3 d", "└── 1.4 b", ""),
+		},
+		{
+			name: "a run shorter than the wrapper's never closes it",
+			text: lines(header, "````text", tree, "```", "````", "after"),
+			want: lines(header, tree, "```", "after"),
+		},
+		{
+			name: "a bare run longer than the wrapper's closes it",
+			text: lines(header, "```text", tree, "`````", "after"),
+			want: lines(header, tree, "after"),
+		},
+		{
+			name: "a bare run with trailing whitespace closes the wrapper",
+			text: lines(header, "```text", tree, "```  ", "after"),
+			want: lines(header, tree, "after"),
+		},
+		{
 			name: "prose after the wrapper stays",
 			text: lines(header, "```text", tree, "```", "after"),
 			want: lines(header, tree, "after"),
@@ -124,6 +144,84 @@ func TestHoldsTree(t *testing.T) {
 			// Assert.
 			if got != tt.want {
 				t.Errorf("holdsTree(%q) = %v, want %v", tt.body, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestFenceDelimiterOf(t *testing.T) {
+	tests := []struct {
+		name string
+		line string
+		want fenceDelimiter
+	}{
+		{name: "a bare run", line: "```", want: fenceDelimiter{ticks: 3, bare: true}},
+		{name: "a longer bare run", line: "`````", want: fenceDelimiter{ticks: 5, bare: true}},
+		{name: "a run with trailing whitespace is bare", line: "````  \t", want: fenceDelimiter{ticks: 4, bare: true}},
+		{name: "a run carrying a language", line: "```go", want: fenceDelimiter{ticks: 3, bare: false}},
+		{name: "a run with a spaced info string", line: "```` markdown x", want: fenceDelimiter{ticks: 4, bare: false}},
+		{name: "a short run", line: "``", want: fenceDelimiter{ticks: 2, bare: true}},
+		{name: "prose", line: "x := 1", want: fenceDelimiter{ticks: 0, bare: false}},
+		{name: "an indented run is no column-0 run", line: "  ```", want: fenceDelimiter{ticks: 0, bare: false}},
+		{name: "an empty line", line: "", want: fenceDelimiter{ticks: 0, bare: true}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act.
+			got := fenceDelimiterOf(tt.line)
+
+			// Assert.
+			if got != tt.want {
+				t.Errorf("fenceDelimiterOf(%q) = %+v, want %+v", tt.line, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestFenceDelimiterOpens(t *testing.T) {
+	tests := []struct {
+		name string
+		d    fenceDelimiter
+		want bool
+	}{
+		{name: "three backticks open", d: fenceDelimiter{ticks: 3, bare: true}, want: true},
+		{name: "a language does not stop an open", d: fenceDelimiter{ticks: 4, bare: false}, want: true},
+		{name: "two backticks never open", d: fenceDelimiter{ticks: 2, bare: true}, want: false},
+		{name: "no backticks never open", d: fenceDelimiter{}, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act.
+			got := tt.d.opens()
+
+			// Assert.
+			if got != tt.want {
+				t.Errorf("%+v.opens() = %v, want %v", tt.d, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestFenceDelimiterCloses(t *testing.T) {
+	tests := []struct {
+		name string
+		d    fenceDelimiter
+		open int
+		want bool
+	}{
+		{name: "an equal bare run closes", d: fenceDelimiter{ticks: 3, bare: true}, open: 3, want: true},
+		{name: "a longer bare run closes", d: fenceDelimiter{ticks: 5, bare: true}, open: 4, want: true},
+		{name: "a shorter bare run never closes", d: fenceDelimiter{ticks: 3, bare: true}, open: 4, want: false},
+		{name: "a run carrying a language never closes", d: fenceDelimiter{ticks: 4, bare: false}, open: 3, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act.
+			got := tt.d.closes(tt.open)
+
+			// Assert.
+			if got != tt.want {
+				t.Errorf("%+v.closes(%d) = %v, want %v", tt.d, tt.open, got, tt.want)
 			}
 		})
 	}
