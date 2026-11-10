@@ -410,8 +410,12 @@ gives up after `agent-repl--spell-reply-bound', signalling
                 (list (format "no reply within %.0f ms" (* 1000 agent-repl--spell-reply-bound)))))))
 
 (defun agent-repl--spell-word-of-point ()
-  "Return the word flyspell is about to check at point, or \='unknown."
-  (or (car-safe (flyspell-get-word)) 'unknown))
+  "Return the word flyspell is about to check at point, or \='unknown.
+`flyspell-get-word' moves point to the word's start, so it runs inside
+`save-excursion': this runs before every flyspell check, and a moved point
+put each typed space before the word it followed."
+  (save-excursion
+    (or (car-safe (flyspell-get-word)) 'unknown)))
 
 (defun agent-repl--spell-guarded-word (flyspell-word &rest args)
   "Around FLYSPELL-WORD: run its exchange atomically, and reset on no reply.

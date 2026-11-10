@@ -862,6 +862,17 @@ logging ladder records as the other cases' do."
     ;; Act / Assert
     (should (eq (agent-repl--spell-word-of-point) 'unknown))))
 
+(ert-deftest agent-repl-test-spell-naming-the-word-leaves-point-where-it-was ()
+  ;; Arrange: the real `flyspell-get-word' leaves point at the word's start
+  (cl-letf (((symbol-function 'flyspell-get-word)
+             (lambda (&rest _) (goto-char 1) (list "hello" 1 6))))
+    (with-temp-buffer
+      (insert "hello ")
+      ;; Act
+      (agent-repl--spell-word-of-point)
+      ;; Assert
+      (should (= (point) 7)))))
+
 (ert-deftest agent-repl-test-spell-flyspell-word-and-the-wait-are-both-guarded ()
   ;; Assert: the guards are installed on the two functions the exchange runs through
   (should (advice-member-p #'agent-repl--spell-bounded-accept 'accept-process-output))
