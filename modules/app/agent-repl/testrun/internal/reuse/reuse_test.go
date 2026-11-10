@@ -291,8 +291,8 @@ func TestConfineWrapsOnlyAKeyedSuitesUnits(t *testing.T) {
 	}
 
 	// Act
-	keyed := Confine(f.d.Self, v, "lock", u)
-	other := Confine(f.d.Self, v, "background-harness", u)
+	keyed := Confine(f.d.Self, v, nil, "lock", u)
+	other := Confine(f.d.Self, v, nil, "background-harness", u)
 
 	// Assert
 	wantPrefix := []string{"/bin/testrun", "confine", "--profile", v[0].Profile, "--keep", "GOMAXPROCS", "--", "go", "test"}
@@ -330,6 +330,20 @@ func TestDescribeSpellsTheReuseDeclarationNotItsAddress(t *testing.T) {
 
 	// Assert
 	if !strings.Contains(got, `Inputs:[]string{"prompts/"}`) || strings.Contains(got, "0x") {
+		t.Fatalf("Describe = %s", got)
+	}
+}
+
+func TestDescribeSpellsThePackageReuseDeclarationNotItsAddress(t *testing.T) {
+	// Arrange
+	s := lockSuite
+	s.PackageReuse = &roster.PackageReuse{Inputs: map[string][]string{"p": {"prompts/"}}, Never: map[string]string{"q": "it walks the module"}}
+
+	// Act
+	got := Describe(s)
+
+	// Assert
+	if !strings.Contains(got, `"p":[]string{"prompts/"}`) || !strings.Contains(got, `"q":"it walks the module"`) || strings.Contains(got, "0x") {
 		t.Fatalf("Describe = %s", got)
 	}
 }

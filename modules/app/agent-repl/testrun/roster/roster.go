@@ -131,6 +131,31 @@ type Suite struct {
 	// end-to-end suites run every system for real, and a shell harness's
 	// inputs are a call graph no tool derives.
 	Reuse *Reuse
+	// PackageReuse marks a keyed GoModule suite whose unit-test packages are
+	// each reused on their own (agentrepl/testrun/internal/reuse,
+	// packages.go): a run that does not reuse the whole suite still skips
+	// every package whose own inputs are byte-identical to inputs an earlier
+	// run passed it on. Its integration pass is never reused per package.
+	PackageReuse *PackageReuse
+}
+
+// PackageReuse is what each unit-test package of a suite reads beyond its
+// build graph, which the Go tool's own listing derives (`go list -deps
+// -test`). Each package runs under a profile that refuses every read in the
+// checkout outside ITS input set, so an input missing here fails the package;
+// it never lets a stale pass through.
+//
+// Paths are spelled as Reuse's are, and packages are named by their path
+// relative to Suite.Path ("." the root).
+type PackageReuse struct {
+	// Inputs are the files and subtrees a package's tests read as data
+	// outside its build graph: the prompts, the vocabulary, the goldens, a
+	// tree a source scan walks.
+	Inputs map[string][]string
+	// Never names each package whose reads cannot be enumerated, with why:
+	// it runs whenever its suite runs, under the suite's own profile, and is
+	// never recorded.
+	Never map[string]string
 }
 
 // GoTests is the Go tests a Script suite's script runs.
@@ -304,7 +329,12 @@ var Suites = []Suite{
 			// parser's golden answers, and writes the webapp's parsed-prose
 			// fixture from its inputs, failing while it is stale.
 			"tree-sitter-tldr/tldr/test/golden/golden.json", "webapp/test/fixtures/",
-		}}},
+		}},
+		// EACH UNIT-TEST PACKAGE IS REUSED ON ITS OWN, keyed on the build
+		// graph `go list -deps -test` names for it; what its tests read
+		// beyond that graph is declared here, and every other read in the
+		// checkout is refused while it runs.
+		PackageReuse: daemonPackageReuse},
 	{Name: "sidecar", Kind: GoModule, Path: "agent-shim/claude/shim-sidecar", TestParallel: map[string]Parallel{"integration": {Tests: 8, Slots: 2}},
 		Programs: map[string][]string{"integration": {"shim-claude-sidecar"}},
 		Reuse: &Reuse{Inputs: []string{
@@ -392,6 +422,95 @@ var Suites = []Suite{
 	{Name: "e2e-emacs", Kind: Script, Path: "bin/test-e2e-emacs.sh", Slots: 2, NeedsWebappDist: true,
 		GoTests: &GoTests{Dir: "e2e", Pattern: "TestEmacs|TestDoom"}},
 }
+
+// daemonPackageReuse is what each daemon unit-test package reads beyond its
+// build graph, found by running every package confined to its build graph
+// alone (2026-11-10) and declaring each read it was refused.
+var daemonPackageReuse = &PackageReuse{Inputs: map[string][]string{
+	// The structural source scans: each walks the daemon's tree, or the part
+	// of it named, so any change there reruns it.
+	".":                                   {"daemon/"},
+	"internal/account":                    {"daemon/"},
+	"internal/bounce":                     {"daemon/"},
+	"internal/childproc":                  {"daemon/"},
+	"internal/clock":                      {"daemon/internal/"},
+	"internal/commandcatalog/catalogtest": {"daemon/internal/"},
+	"internal/creategate":                 {"daemon/"},
+	"internal/ctxend":                     {"daemon/"},
+	"internal/dirpath":                    {"daemon/internal/"},
+	"internal/effortlevel":                {"daemon/internal/"},
+	"internal/envc":                       {"daemon/"},
+	"internal/freshinput":                 {"daemon/internal/"},
+	"internal/h2cclient":                  {"daemon/"},
+	"internal/health":                     {"daemon/"},
+	"internal/ids":                        {"daemon/internal/"},
+	"internal/inflight":                   {"daemon/"},
+	"internal/latestmodel":                {"daemon/internal/resolve/"},
+	"internal/outputtext":                 {"daemon/"},
+	"internal/procgroup":                  {"daemon/"},
+	"internal/promptorigin":               {"daemon/"},
+	"internal/promptqueue":                {"daemon/"},
+	"internal/protoarm":                   {"daemon/"},
+	"internal/ratelimittest":              {"daemon/"},
+	"internal/recordlock":                 {"daemon/"},
+	"internal/runecap":                    {"daemon/internal/"},
+	"internal/shellword":                  {"daemon/"},
+	"internal/sourcescan":                 {"daemon/"},
+	"internal/sweepguard":                 {"daemon/internal/"},
+	"internal/textline":                   {"daemon/internal/"},
+	"internal/clock/clocktest": {"daemon/internal/clock/", "daemon/internal/newsdigest/", "daemon/internal/repodivergence/",
+		"daemon/internal/worktreereap/"},
+	// The scans pinning named call sites in other packages.
+	"internal/atomicfile": {"daemon/internal/classifierupdate/update.go", "daemon/internal/daemonaddr/claim.go",
+		"daemon/internal/rollout/carry.go", "daemon/internal/rollout/manifest.go", "daemon/internal/rollout/spawn.go"},
+	"internal/briefprompt": {"daemon/internal/mainsync/mainsync.go", "daemon/internal/mergenotice/mergenotice.go",
+		"daemon/internal/prwatch/poller.go", "daemon/internal/workspacenotice/workspacenotice.go",
+		"daemon/internal/workspacesubs/workspacesubs.go"},
+	"internal/standdown": {"daemon/internal/desktopnotify/notifier.go", "daemon/internal/desktopnotify/summary.go",
+		"daemon/internal/mergeworkspace/mergeworkspace.go"},
+	"internal/streamslot":    {"daemon/internal/desktopnotify/focus.go", "daemon/internal/procmetrics/emacs.go"},
+	"internal/usersetup":     {"daemon/internal/externalbrowser/slack.go", "daemon/internal/pullrefs/pullrefs.go"},
+	"internal/workspacesubs": {"daemon/internal/mergenotice/mergenotice.go"},
+	// The briefs, read as data.
+	"internal/classifierupdate": {"prompts/"},
+	"internal/desktopnotify":    {"prompts/"},
+	"internal/merge":            {"prompts/"},
+	"internal/mergenotice":      {"prompts/"},
+	"internal/namingdigest":     {"prompts/"},
+	"internal/newsdigest":       {"prompts/"},
+	"internal/prompts":          {"prompts/"},
+	"internal/retarget":         {"prompts/"},
+	"internal/revision":         {"prompts/"},
+	"internal/wssummary":        {"prompts/"},
+	"internal/resolve/feed":     {"prompts/", "daemon/internal/promptqueue/deliver.go"},
+	"internal/headless":         {"daemon/"},
+	"internal/workspace":        {"daemon/", "prompts/"},
+	"internal/wsm":              {"daemon/"},
+	// The vocabulary, read as data.
+	"internal/buildid":         {"proto/vocab/"},
+	"internal/dlog":            {"proto/vocab/"},
+	"internal/handover":        {"proto/vocab/"},
+	"internal/paint":           {"proto/vocab/"},
+	"internal/resolve/footer":  {"proto/vocab/"},
+	"internal/resolve/sidebar": {"proto/vocab/"},
+	"internal/runtimemetrics":  {"proto/vocab/"},
+	"internal/sessionwatcher":  {"proto/vocab/"},
+	"internal/vocab":           {"daemon/", "proto/vocab/"},
+	// The agent CLI's tests check every command a skill names, and that each
+	// API skill links the front door.
+	"cmd/agent-repld": {"skills/", "bin/agent-repld"},
+	// gitclient pins the markers the merge queue's hook spells.
+	"internal/gitclient": {"/.githooks/reference-transaction"},
+	// lifecycleconfig pins the repository's own lifecycle config to the
+	// pipeline its queue runs, and to the scripts it names.
+	"internal/lifecycleconfig": {"daemon/", "/.agent-repl/", "bin/test-all.sh", "bin/deploy-landing.sh", "bin/push-release.sh", "bin/hooks/"},
+	// The harness's deploy configuration reads the briefs and the landing
+	// script.
+	"integration/harness": {"prompts/", "bin/deploy-landing.sh"},
+	// prose holds the daemon's parse to the old webapp parser's golden
+	// answers, and to the webapp's parsed-prose fixture.
+	"internal/prose": {"tree-sitter-tldr/tldr/test/golden/golden.json", "webapp/test/fixtures/"},
+}}
 
 // AlwaysRunRegions are the parts of the repository that only suites which
 // ALWAYS run read: the end-to-end suites' tree and the scripts the harnesses

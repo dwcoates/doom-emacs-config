@@ -9,8 +9,10 @@ import (
 	"io/fs"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"strings"
+	"sync"
 )
 
 // GoPackage is the part of one `go list -json` record the input set needs.
@@ -23,6 +25,14 @@ type GoPackage struct {
 	// include headers by relative path from any subdirectory of the package
 	// (tree-sitter's "tree_sitter/parser.h"), which no listing names.
 	CgoFiles []string
+	// Deps are every package a build of this one imports, transitively, by
+	// import path: for a test main ("P.test"), every package its binary
+	// links, the test variants ("Q [P.test]") included.
+	Deps []string
+	// EmbedFiles, TestEmbedFiles and XTestEmbedFiles are the files the
+	// package's //go:embed patterns match, relative to Dir; a pattern may
+	// reach into a subdirectory no flat placement holds.
+	EmbedFiles, TestEmbedFiles, XTestEmbedFiles []string
 }
 
 // GoModule is a package's module, as `go list -json` reports it.
@@ -39,7 +49,7 @@ type GoLister func(dir, tags string, tests bool, patterns ...string) ([]GoPackag
 
 // ExecGoList is GoLister over the real `go list -deps -json`.
 func ExecGoList(dir, tags string, tests bool, patterns ...string) ([]GoPackage, error) {
-	args := []string{"list", "-deps", "-json=ImportPath,Dir,Standard,Module,CgoFiles"}
+	args := []string{"list", "-deps", "-json=ImportPath,Dir,Standard,Module,CgoFiles,Deps,EmbedFiles,TestEmbedFiles,XTestEmbedFiles"}
 	if tests {
 		args = append(args, "-test")
 	}
@@ -101,6 +111,9 @@ func AddGoPackages(set *InputSet, repo string, pkgs []GoPackage) error {
 		} else if err := addPackageDir(set, repo, rel); err != nil {
 			return fmt.Errorf("reuse: package %s: %w", p.ImportPath, err)
 		}
+		if err := addEmbedded(set, rel, p); err != nil {
+			return fmt.Errorf("reuse: package %s: %w", p.ImportPath, err)
+		}
 		if p.Module == nil || p.Module.GoMod == "" {
 			return fmt.Errorf("reuse: package %s in the checkout reports no go.mod", p.ImportPath)
 		}
@@ -121,6 +134,19 @@ func AddGoPackages(set *InputSet, repo string, pkgs []GoPackage) error {
 			}
 		} else if !errors.Is(err, fs.ErrNotExist) {
 			return fmt.Errorf("reuse: stat %s: %w", sum, err)
+		}
+	}
+	return nil
+}
+
+// addEmbedded places every file the package embeds, by its path under the
+// package's directory rel.
+func addEmbedded(set *InputSet, rel string, p GoPackage) error {
+	for _, files := range [][]string{p.EmbedFiles, p.TestEmbedFiles, p.XTestEmbedFiles} {
+		for _, f := range files {
+			if err := set.AddFile(path.Join(rel, filepath.ToSlash(f))); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -195,4 +221,31 @@ func AddPatternWalk(set *InputSet, repo, dir string) error {
 		}
 		return set.AddDir(filepath.ToSlash(rel))
 	})
+}
+
+// MemoGoList is l answering each distinct listing once per run: every keyed
+// suite lists the runner, and a suite's packages (DecidePackages) read the
+// same `go list -deps -test ./...` its input set did, so the run's planning
+// spends each listing's CPU, outside any unit, once. Callers must not change
+// the packages they are answered.
+func MemoGoList(l GoLister) GoLister {
+	type answer struct {
+		once sync.Once
+		pkgs []GoPackage
+		err  error
+	}
+	var mu sync.Mutex
+	answers := map[string]*answer{}
+	return func(dir, tags string, tests bool, patterns ...string) ([]GoPackage, error) {
+		key := fmt.Sprintf("%q %q %v %q", dir, tags, tests, patterns)
+		mu.Lock()
+		a := answers[key]
+		if a == nil {
+			a = &answer{}
+			answers[key] = a
+		}
+		mu.Unlock()
+		a.once.Do(func() { a.pkgs, a.err = l(dir, tags, tests, patterns...) })
+		return a.pkgs, a.err
+	}
 }

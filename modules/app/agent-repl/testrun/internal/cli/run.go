@@ -77,8 +77,11 @@ type Deps struct {
 type Reuser interface {
 	Decide(selected []roster.Suite, mode reuse.Mode) ([]reuse.Verdict, error)
 	Unplaced(verdicts []reuse.Verdict) ([]string, error)
-	Confine(verdicts []reuse.Verdict, name string, u suites.Units) suites.Units
-	Record(mode reuse.Mode, verdicts []reuse.Verdict, results []run.SuiteResult, units map[string]int) error
+	// DecidePackages decides which unit-test packages of the suite named
+	// name, built as u, an earlier pass of the package covers.
+	DecidePackages(verdicts []reuse.Verdict, mode reuse.Mode, name string, u suites.Units) ([]reuse.PackageVerdict, error)
+	Confine(verdicts []reuse.Verdict, packages []reuse.PackageVerdict, name string, u suites.Units) suites.Units
+	Record(mode reuse.Mode, verdicts []reuse.Verdict, packages []reuse.PackageVerdict, units []run.Result, results []run.SuiteResult, perSuite map[string]int) error
 }
 
 // RunConditions names what a run's units measure under, for the timing
@@ -191,6 +194,8 @@ func Run(ctx context.Context, d Deps, a Args) int {
 	built := make([]suites.Units, len(selected))
 	buildErrs := make([]error, len(selected))
 	narrowErrs := make([]error, len(selected))
+	packageVerdicts := make([][]reuse.PackageVerdict, len(selected))
+	packageErrs := make([]error, len(selected))
 	var wg sync.WaitGroup
 	for i, s := range selected {
 		wg.Add(1)
@@ -202,9 +207,18 @@ func Run(ctx context.Context, d Deps, a Args) int {
 			if buildErrs[i] == nil && a.Selection != "" {
 				built[i], narrowErrs[i] = resolved.Narrow(s, built[i])
 			}
-			if buildErrs[i] == nil && narrowErrs[i] == nil {
-				built[i] = d.Reuse.Confine(verdicts, s.Name, built[i])
+			if buildErrs[i] != nil || narrowErrs[i] != nil {
+				return
 			}
+			// Per-package reuse after the narrowing (a targeted run decides
+			// none) and before confinement, which wraps each unit in its
+			// package's own profile.
+			packageVerdicts[i], packageErrs[i] = d.Reuse.DecidePackages(verdicts, mode, s.Name, built[i])
+			if packageErrs[i] != nil {
+				return
+			}
+			built[i] = reuse.SkipReusedPackages(packageVerdicts[i], built[i])
+			built[i] = d.Reuse.Confine(verdicts, packageVerdicts[i], s.Name, built[i])
 		}()
 	}
 	wg.Wait()
@@ -213,6 +227,15 @@ func Run(ctx context.Context, d Deps, a Args) int {
 		ev.Refused(err.Error())
 		return 1
 	}
+	if err := errors.Join(packageErrs...); err != nil {
+		log.Errorf("deciding which packages an earlier run's pass covers failed: %v", err)
+		return 1
+	}
+	var packages []reuse.PackageVerdict
+	for _, pv := range packageVerdicts {
+		packages = append(packages, pv...)
+	}
+	reuse.ReportPackages(log, packages)
 	var planned []suites.Units
 	var unbuilt []run.SuiteResult
 	for i, s := range selected {
@@ -294,7 +317,7 @@ func Run(ctx context.Context, d Deps, a Args) int {
 	for _, r := range results {
 		unitsPerSuite[r.Spec.Suite]++
 	}
-	if err := d.Reuse.Record(mode, verdicts, suiteResults, unitsPerSuite); err != nil {
+	if err := d.Reuse.Record(mode, verdicts, packages, results, suiteResults, unitsPerSuite); err != nil {
 		log.Errorf("recording this run's passes failed: %v", err)
 		return 1
 	}
@@ -330,7 +353,7 @@ func Run(ctx context.Context, d Deps, a Args) int {
 		log.Infof("timings were not recorded, pass --record only for a canonical history run")
 	}
 	printClosing(log, a)
-	if names := reuse.ReusedNames(verdicts); len(names) > 0 {
+	if names := append(reuse.ReusedNames(verdicts), reuse.ReusedPackageNames(packages)...); len(names) > 0 {
 		log.Infof("reused an earlier green run of their exact inputs, NOT run: %s (--no-reuse runs them)", strings.Join(names, " "))
 	}
 	return 0

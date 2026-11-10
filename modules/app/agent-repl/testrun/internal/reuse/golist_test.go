@@ -1,6 +1,7 @@
 package reuse
 
 import (
+	"errors"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -135,5 +136,60 @@ func TestAddGoPackagesPlacesACgoPackagesWholeTree(t *testing.T) {
 	}
 	if got := set.FlatDirs(); len(got) != 0 {
 		t.Errorf("FlatDirs = %v, want none: the tree covers the package", got)
+	}
+}
+
+func TestMemoGoListAnswersEachListingOnce(t *testing.T) {
+	// Arrange
+	calls := map[string]int{}
+	l := MemoGoList(func(dir, tags string, tests bool, patterns ...string) ([]GoPackage, error) {
+		calls[dir+tags]++
+		if dir == "/bad" {
+			return nil, errors.New("go list exited 1")
+		}
+		return []GoPackage{{ImportPath: dir}}, nil
+	})
+
+	// Act
+	a1, _ := l("/a", "", true, "./...")
+	a2, _ := l("/a", "", true, "./...")
+	tagged, _ := l("/a", "integration", true, "./...")
+	_, err1 := l("/bad", "", true, "./...")
+	_, err2 := l("/bad", "", true, "./...")
+
+	// Assert
+	if calls["/a"] != 1 || calls["/aintegration"] != 1 || calls["/bad"] != 1 {
+		t.Fatalf("listings run %v, want each distinct one once", calls)
+	}
+	if a1[0].ImportPath != "/a" || a2[0].ImportPath != "/a" || tagged[0].ImportPath != "/a" {
+		t.Fatalf("answers %v %v %v", a1, a2, tagged)
+	}
+	if err1 == nil || err2 == nil || err1.Error() != "go list exited 1" {
+		t.Fatalf("a failed listing answered %v then %v, want its error both times", err1, err2)
+	}
+}
+
+func TestAddGoPackagesPlacesEveryEmbeddedFile(t *testing.T) {
+	// Arrange: embeds reaching into subdirectories no flat placement holds.
+	root := writeTree(t, map[string]string{
+		"mod/go.mod":             "module m",
+		"mod/pkg/a.go":           "package pkg",
+		"mod/pkg/assets/x.txt":   "x",
+		"mod/pkg/assets/t/y.txt": "y",
+		"mod/pkg/xt/z.txt":       "z",
+	})
+	pkgs := []GoPackage{{ImportPath: "m/pkg", Dir: filepath.Join(root, "mod", "pkg"), Module: &GoModule{GoMod: filepath.Join(root, "mod", "go.mod")},
+		EmbedFiles: []string{"assets/x.txt"}, TestEmbedFiles: []string{"assets/t/y.txt"}, XTestEmbedFiles: []string{"xt/z.txt"}}}
+	set := NewInputSet()
+
+	// Act
+	err := AddGoPackages(set, root, pkgs)
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := set.Files(), []string{"mod/go.mod", "mod/pkg/assets/t/y.txt", "mod/pkg/assets/x.txt", "mod/pkg/xt/z.txt"}; !slices.Equal(got, want) {
+		t.Errorf("Files = %v, want %v", got, want)
 	}
 }

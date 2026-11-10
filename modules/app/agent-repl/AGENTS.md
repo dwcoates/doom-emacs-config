@@ -323,6 +323,20 @@ Code: `testrun/internal/reuse`; the declarations: `testrun/roster` (`Suite.Reuse
   the shell harnesses, `repo-scans` (the tests that read the whole module,
   kept apart so no system's key covers the others' trees) and `testrun` (its
   tests start real sandboxes, which a confined test cannot).
+- **A package is reused on its own** in a suite that declares
+  `Suite.PackageReuse` (the `daemon` suite). A keyed suite that runs still
+  skips each unit-test package whose own key has a green record, and says so:
+  `<suite>: reused package <package>'s green run (inputs <key>, passed <when>
+  on <branch> <commit>)`. A package's key hashes the build graph its test
+  binary links (`go list -deps -test`: every package's directory, testdata and
+  embedded files, the go.mod and go.sum), the runner's code, its toolchain and
+  environment, its roster entry, and the files its `PackageReuse.Inputs`
+  declares; its units run under a profile refusing every other read, so an
+  undeclared read fails the package ("Operation not permitted"). A package
+  whose reads cannot be enumerated is named in `PackageReuse.Never` and runs
+  whenever its suite runs. Only the reused packages' binaries are left out of
+  the module's one build. The integration pass is never reused per package.
+  Code: `testrun/internal/reuse/packages.go`.
 - **`--no-reuse` runs everything** and still records. `--record` and
   `--coverage` imply it. A targeted run, narrowed below whole suites (a
   test-name filter), neither reuses nor records.

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"agentrepl/testrun/internal/events"
+	"agentrepl/testrun/internal/gobuild"
 	"agentrepl/testrun/internal/ramdisk"
 	"agentrepl/testrun/internal/reuse"
 	"agentrepl/testrun/internal/run"
@@ -410,6 +411,12 @@ type fakeReuser struct {
 	unplaced []string
 	mode     *reuse.Mode
 	recorded *[]string
+	// packages are each suite's package verdicts; packageErr fails every
+	// package decision.
+	packages   map[string][]reuse.PackageVerdict
+	packageErr error
+	// recordedUnits are the unit IDs Record was handed.
+	recordedUnits *[]string
 }
 
 func (f fakeReuser) Decide(selected []roster.Suite, mode reuse.Mode) ([]reuse.Verdict, error) {
@@ -428,9 +435,21 @@ func (f fakeReuser) Decide(selected []roster.Suite, mode reuse.Mode) ([]reuse.Ve
 
 func (f fakeReuser) Unplaced([]reuse.Verdict) ([]string, error) { return f.unplaced, nil }
 
-func (f fakeReuser) Confine(_ []reuse.Verdict, _ string, u suites.Units) suites.Units { return u }
+func (f fakeReuser) DecidePackages(_ []reuse.Verdict, _ reuse.Mode, name string, _ suites.Units) ([]reuse.PackageVerdict, error) {
+	if f.packageErr != nil {
+		return nil, f.packageErr
+	}
+	return f.packages[name], nil
+}
 
-func (f fakeReuser) Record(mode reuse.Mode, _ []reuse.Verdict, results []run.SuiteResult, _ map[string]int) error {
+func (f fakeReuser) Confine(_ []reuse.Verdict, _ []reuse.PackageVerdict, _ string, u suites.Units) suites.Units {
+	return u
+}
+
+func (f fakeReuser) Record(mode reuse.Mode, _ []reuse.Verdict, _ []reuse.PackageVerdict, units []run.Result, results []run.SuiteResult, _ map[string]int) error {
+	for _, u := range units {
+		*f.recordedUnits = append(*f.recordedUnits, u.Spec.ID)
+	}
 	for _, r := range results {
 		if r.Outcome == run.Passed {
 			*f.recorded = append(*f.recorded, r.Name)
@@ -502,7 +521,7 @@ func newHarness(t *testing.T, exits map[string]int, buildErr map[string]error) h
 		*prepared = append(*prepared, webappDistCall{module: m, unitsBefore: len(e.ran)})
 		return nil
 	}
-	fr := &fakeReuser{mode: new(reuse.Mode), recorded: &[]string{}}
+	fr := &fakeReuser{mode: new(reuse.Mode), recorded: &[]string{}, recordedUnits: &[]string{}}
 	d.Reuse = fr
 	return harness{deps: d, reuser: fr, exec: e, out: out, errOut: errOut, module: module, recordOut: filepath.Join(root, "pending-record.json"), git: gitCalls, prepared: prepared}
 }
@@ -1535,5 +1554,80 @@ func TestAFullRunWithoutCoverageSkipsTheSuitesItDoesNotRun(t *testing.T) {
 	if !strings.Contains(h.out.String(), "webapp-coverage-honesty: runs only in a coverage run, skipping") ||
 		!strings.Contains(h.out.String(), "e2e-perf: runs only when named, skipping") {
 		t.Fatalf("stdout lacks the skips:\n%s", h.out.String())
+	}
+}
+
+// packageBuild is a Build turning daemon into two packages' splits after one
+// module build, and every other suite into one unit named after it.
+func packageBuild(_ suites.Layout, s roster.Suite) (suites.Units, error) {
+	if s.Name != "daemon" {
+		sp := run.Spec{Argv: []string{s.Name}}
+		sp.ID, sp.Suite = s.Name, s.Name
+		return suites.Units{Atomic: []run.Spec{sp}}, nil
+	}
+	split := func(rel string) suites.Split {
+		return suites.Split{Group: "daemon:" + rel, Suite: "daemon", Items: []string{"TestA"}, Deps: []string{"daemon:build"}, Package: rel,
+			Chunk: func(id string, items []string) run.Spec {
+				sp := run.Spec{Argv: []string{id}}
+				sp.ID, sp.Suite = id, "daemon"
+				return sp
+			}}
+	}
+	b := suites.GoBuild{ID: "daemon:build", Suite: "daemon", Options: gobuild.Options{Module: "/d", BinDir: "/b", Self: "/testrun"},
+		Needs: map[string]string{"daemon:a": "a", "daemon:b": "b"}}
+	return suites.Units{Splits: []suites.Split{split("a"), split("b")}, GoBuilds: []suites.GoBuild{b}}.Finish(), nil
+}
+
+func TestRunSkipsAReusedPackageAndNamesIt(t *testing.T) {
+	// Arrange
+	h := newHarness(t, nil, nil)
+	h.deps.Build = packageBuild
+	passed := time.Date(2026, 11, 10, 9, 30, 0, 0, time.Local)
+	h.reuser.packages = map[string][]reuse.PackageVerdict{"daemon": {
+		{Suite: "daemon", Package: "a", Keyed: true, Key: reuse.Key{Digest: "abcdef0123456789"}, Reused: &reuse.Record{PassedAt: passed, Branch: "master", Commit: "0123456789abcdef"}},
+		{Suite: "daemon", Package: "b", Keyed: true, Why: "no record"},
+	}}
+
+	// Act
+	code := h.run(t, "--suites", "daemon")
+
+	// Assert
+	if code != 0 {
+		t.Fatalf("exit = %d, stderr:\n%s", code, h.errOut)
+	}
+	ran := strings.Join(h.exec.ran, " ")
+	if strings.Contains(ran, "daemon:a#") || !strings.Contains(ran, "daemon:b#") {
+		t.Fatalf("ran %v, want daemon:b's chunk and not the reused daemon:a's", h.exec.ran)
+	}
+	for _, want := range []string{
+		"daemon: reused package a's green run (inputs abcdef012345, passed 2026-11-10 09:30 on master 0123456789)",
+		"daemon: package b runs: no record",
+		"reused an earlier green run of their exact inputs, NOT run: daemon:a (--no-reuse runs them)",
+	} {
+		if !strings.Contains(h.out.String(), want) {
+			t.Errorf("output lacks %q:\n%s", want, h.out)
+		}
+	}
+	if !slices.Contains(*h.reuser.recordedUnits, "daemon:build") {
+		t.Fatalf("Record was handed units %v, want the run's unit results", *h.reuser.recordedUnits)
+	}
+}
+
+func TestRunWhosePackageDecisionFailsRunsNothing(t *testing.T) {
+	// Arrange
+	h := newHarness(t, nil, nil)
+	h.deps.Build = packageBuild
+	h.reuser.packageErr = errors.New("go list exited 1")
+
+	// Act
+	code := h.run(t, "--suites", "daemon")
+
+	// Assert
+	want := "ERROR: deciding which packages an earlier run's pass covers failed: go list exited 1"
+	if code != 1 || !strings.Contains(h.errOut.String(), want) {
+		t.Fatalf("exit = %d, stderr:\n%s", code, h.errOut)
+	}
+	if len(h.exec.ran) != 0 {
+		t.Fatalf("units ran after the failed decision: %v", h.exec.ran)
 	}
 }

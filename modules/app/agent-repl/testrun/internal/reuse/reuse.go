@@ -192,15 +192,19 @@ func suiteFacts(d Deps, s roster.Suite) (Facts, error) {
 }
 
 // Describe spells a roster entry for the key: every field that decides how
-// the suite is built and run, its reuse declaration's contents included
-// (never the pointer's address).
+// the suite is built and run, its reuse declarations' contents included
+// (never a pointer's address).
 func Describe(s roster.Suite) string {
-	r := s.Reuse
-	s.Reuse = nil
-	if r == nil {
-		return fmt.Sprintf("%#v", s)
+	r, pr := s.Reuse, s.PackageReuse
+	s.Reuse, s.PackageReuse = nil, nil
+	out := fmt.Sprintf("%#v", s)
+	if r != nil {
+		out += fmt.Sprintf(" reuse=%#v", *r)
 	}
-	return fmt.Sprintf("%#v reuse=%#v", s, *r)
+	if pr != nil {
+		out += fmt.Sprintf(" packages=%#v", *pr)
+	}
+	return out
 }
 
 // SuiteInputs is a keyed suite's input set: its build graph, the programs its
@@ -429,9 +433,13 @@ func Remaining(verdicts []Verdict) []roster.Suite {
 }
 
 // Confine starts every unit of each keyed suite under its profile and the
-// scrubbed environment (`testrun confine`). Units of other suites are left as
-// they are.
-func Confine(self string, verdicts []Verdict, name string, u suites.Units) suites.Units {
+// scrubbed environment (`testrun confine`): a keyed package's units
+// (DecidePackages) under the package's own profile, every other unit under
+// the suite's. Units of other suites are left as they are.
+//
+// CONFINE COMES LAST: its Units carry no GoBuilds, so no later Finish can
+// place an unconfined build.
+func Confine(self string, verdicts []Verdict, packages []PackageVerdict, name string, u suites.Units) suites.Units {
 	var v *Verdict
 	for i := range verdicts {
 		if verdicts[i].Suite.Name == name {
@@ -441,17 +449,27 @@ func Confine(self string, verdicts []Verdict, name string, u suites.Units) suite
 	if v == nil || !v.Keyed || v.Reused != nil {
 		return u
 	}
-	wrap := func(sp run.Spec) run.Spec {
-		sp.Argv = ConfineCommand(self, v.Profile, sp.Env, sp.Argv)
+	own := packageProfiles(packages)
+	wrap := func(profile string, sp run.Spec) run.Spec {
+		sp.Argv = ConfineCommand(self, profile, sp.Env, sp.Argv)
 		return sp
+	}
+	profileOf := func(unit string) string {
+		if p, ok := own[unit]; ok {
+			return p
+		}
+		return v.Profile
 	}
 	out := suites.Units{Programs: u.Programs}
 	for _, sp := range u.Atomic {
-		out.Atomic = append(out.Atomic, wrap(sp))
+		out.Atomic = append(out.Atomic, wrap(profileOf(sp.ID), sp))
 	}
 	for _, sp := range u.Splits {
-		chunk := sp.Chunk
-		sp.Chunk = func(id string, items []string) run.Spec { return wrap(chunk(id, items)) }
+		chunk, profile := sp.Chunk, profileOf(sp.Group)
+		sp.Chunk = func(id string, items []string) run.Spec { return wrap(profile, chunk(id, items)) }
+		if named := sp.Named; named != nil {
+			sp.Named = func(id string, items, names []string) run.Spec { return wrap(profile, named(id, items, names)) }
+		}
 		out.Splits = append(out.Splits, sp)
 	}
 	return out
@@ -562,13 +580,27 @@ func (r Runner) Unplaced(verdicts []Verdict) ([]string, error) {
 }
 
 // Confine is Confine with r's runner binary.
-func (r Runner) Confine(verdicts []Verdict, name string, u suites.Units) suites.Units {
-	return Confine(r.Deps.Self, verdicts, name, u)
+func (r Runner) Confine(verdicts []Verdict, packages []PackageVerdict, name string, u suites.Units) suites.Units {
+	return Confine(r.Deps.Self, verdicts, packages, name, u)
 }
 
-// Record is RecordPasses over r's Deps.
-func (r Runner) Record(mode Mode, verdicts []Verdict, results []run.SuiteResult, units map[string]int) error {
-	return RecordPasses(r.Deps, mode, verdicts, results, units)
+// DecidePackages is DecidePackages over r's Deps, for the suite's verdict
+// among verdicts and the unit-test packages u builds.
+func (r Runner) DecidePackages(verdicts []Verdict, mode Mode, name string, u suites.Units) ([]PackageVerdict, error) {
+	for _, v := range verdicts {
+		if v.Suite.Name == name {
+			return DecidePackages(r.Deps, v, mode, UnitPackages(name, u))
+		}
+	}
+	return nil, fmt.Errorf("reuse: %s has no verdict", name)
+}
+
+// Record is RecordPasses and RecordPackagePasses over r's Deps.
+func (r Runner) Record(mode Mode, verdicts []Verdict, packages []PackageVerdict, units []run.Result, results []run.SuiteResult, perSuite map[string]int) error {
+	if err := RecordPasses(r.Deps, mode, verdicts, results, perSuite); err != nil {
+		return err
+	}
+	return RecordPackagePasses(r.Deps, mode, packages, units)
 }
 
 // staleInstall names the first generated node_modules tree of set that was

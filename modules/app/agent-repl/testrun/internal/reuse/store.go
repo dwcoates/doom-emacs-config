@@ -65,7 +65,9 @@ func DefaultStoreDir() (string, error) {
 }
 
 var hexKey = regexp.MustCompile(`^[0-9a-f]{64}$`)
-var suiteName = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+
+// suiteName is a suite's record name, or one package's (PackageRecordName).
+var suiteName = regexp.MustCompile(`^[A-Za-z0-9_-]+(@[A-Za-z0-9_.%-]+)?$`)
 
 func (s Store) path(suite, key string) (string, error) {
 	if !suiteName.MatchString(suite) {
