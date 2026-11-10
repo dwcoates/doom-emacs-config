@@ -1361,3 +1361,4 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 - 2026-11-10 daemon-signal-not-poll (landed in queue bypass mode): Queue bypass mode: a personal-account workspace's topbar chip hard-stops its repository's merge queue and switches it to a bypass conversation that lands straight on master; the topbar's warnings ride the title in red or yellow, and its chip gaps narrow
 - 2026-11-10 sidebar-folded-gap (landed in queue bypass mode): Folded repositories in the sidebar stand half as far apart
 - 2026-11-10 topbar-heading-center (landed in queue bypass mode): The topbar's summary and name are centered together, and its warnings yellow is a true yellow
+- 2026-11-10 question-to-main (landed in queue bypass mode): The ? control sends its question to the home main workspace as an agent-to-agent prompt, which acks the asker and answers it or dispatches a one-shot.
