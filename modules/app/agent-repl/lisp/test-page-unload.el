@@ -80,6 +80,9 @@
 (defvar agent-repl-test-pu--events nil
   "Every report, dropped page and page put back, newest first, as (KIND WS).")
 
+(defvar agent-repl-test-pu--last-known nil
+  "Alist of workspace to the page residency the daemon last knew.")
+
 (defmacro agent-repl-test-pu--with (names &rest body)
   "Run BODY with live workspaces NAMES, each holding a page, on a hand clock."
   (declare (indent 1))
@@ -94,6 +97,7 @@
            (agent-repl-test-pu--opening nil)
            (agent-repl-test-pu--residencies nil)
            (agent-repl-test-pu--successor nil)
+           (agent-repl-test-pu--last-known nil)
            (agent-repl-test-pu--removals nil)
            (agent-repl-test-pu--scheduled nil)
            (agent-repl-page-unload--schedule
@@ -124,6 +128,8 @@
                         (lambda () agent-repl-test-pu--current))
                        ((symbol-function 'agent-repl--webhost-id) (lambda (ws) (concat "id-" ws)))
                        ((symbol-function 'agent-repl-link-successor) (lambda () agent-repl-test-pu--successor))
+                       ((symbol-function 'agent-repl-host-last-known-page)
+                        (lambda (ws) (cdr (assoc ws agent-repl-test-pu--last-known))))
                        ((symbol-function 'agent-repl-host-report-page-residency)
                         (lambda (ws residency on-reported)
                           (push (list ws residency) agent-repl-test-pu--residencies)
@@ -427,6 +433,52 @@ Answers the outcomes, newest first: (dropped) or (kept WHY)."
     (setq agent-repl-test-pu--status '(("alpha" . :thinking)))
     ;; Act / Assert
     (should (agent-repl-page-unload-wanted-p "alpha"))))
+
+(ert-deftest agent-repl-test-pu-a-page-last-known-loaded-is-wanted ()
+  "An idle page the daemon last knew loaded is wanted, so a restart loads it again."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha")
+    (setq agent-repl-test-pu--last-known '(("alpha" . :loaded)))
+    ;; Act / Assert
+    (should (agent-repl-page-unload-wanted-p "alpha"))))
+
+(ert-deftest agent-repl-test-pu-a-working-page-last-known-unloaded-is-not-wanted ()
+  "A working page the daemon last knew unloaded is not loaded by a restart."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha")
+    (setq agent-repl-test-pu--status '(("alpha" . :thinking))
+          agent-repl-test-pu--last-known '(("alpha" . :not-loaded)))
+    ;; Act / Assert
+    (should-not (agent-repl-page-unload-wanted-p "alpha"))))
+
+(ert-deftest agent-repl-test-pu-a-shown-page-last-known-unloaded-is-wanted ()
+  "The page on screen is wanted whatever the daemon last knew of it."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha")
+    (setq agent-repl-test-pu--last-known '(("alpha" . :not-loaded))
+          agent-repl-page-unload--shown "alpha")
+    ;; Act / Assert
+    (should (agent-repl-page-unload-wanted-p "alpha"))))
+
+(ert-deftest agent-repl-test-pu-a-hidden-page-last-known-loaded-is-not-wanted ()
+  "A hidden workspace holds no page off screen, whatever the daemon last knew."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha")
+    (setq agent-repl-test-pu--hidden '("alpha")
+          agent-repl-test-pu--last-known '(("alpha" . :loaded)))
+    ;; Act / Assert
+    (should-not (agent-repl-page-unload-wanted-p "alpha"))))
+
+(ert-deftest agent-repl-test-pu-an-unknown-last-known-page-fails-hard ()
+  "A last-known residency that is neither loaded nor not loaded is a bug."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha")
+    (setq agent-repl-test-pu--last-known '(("alpha" . :teleported)))
+    (let (fatals)
+      (cl-letf (((symbol-function 'agent-repl--fatal) (agent-repl-test--fatal-into fatals)))
+        ;; Act / Assert
+        (should-error (agent-repl-page-unload-wanted-p "alpha"))
+        (should (string-match-p "last-known-page-unknown" (car fatals)))))))
 
 (ert-deftest agent-repl-test-pu-a-shown-cold-gated-page-is-not-wanted ()
   "A cold-gated workspace's page is held back even on screen (owner request, 2026-10-30)."

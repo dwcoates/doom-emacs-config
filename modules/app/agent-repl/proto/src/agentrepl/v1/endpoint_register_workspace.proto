@@ -33,7 +33,26 @@ message RegisterWorkspaceSuccess {
   // The workspace's daemon-minted identity — what every later call and every
   // view uses; the path the host sent is never the identity.
   workspace.v1.WorkspaceRef workspace = 1;
+  // Whether Emacs last held the workspace's page, as Emacs last reported it
+  // (agentrepl.v1.ReportPageResidency). UNSET when Emacs never reported it.
+  // THE DAEMON KEEPS IT ACROSS RESTARTS, so an Emacs re-announcing its
+  // workspaces after a bounce loads only the pages it held before, rather
+  // than every page at once.
+  LastKnownPage last_known_page = 2;
 }
+// Whether the page was loaded when Emacs last reported it.
+message LastKnownPage {
+  oneof state {
+    // The page was loaded.
+    LastKnownPageLoaded loaded = 1;
+    // The page was not loaded.
+    LastKnownPageNotLoaded not_loaded = 2;
+  }
+}
+// Loaded. Empty: presence is the fact.
+message LastKnownPageLoaded {}
+// Not loaded. Empty: presence is the fact.
+message LastKnownPageNotLoaded {}
 // Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
 // Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
 message RegisterWorkspaceError {

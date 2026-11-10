@@ -6,9 +6,13 @@
 // serves that fact back on the rail's workspace hover
 // (frontend.v1.SidebarWorkspaceMemory.page), so Emacs states it here whenever
 // it changes: a load, an unload, or a change in when the page will be
-// unloaded. The daemon keeps the latest report per workspace in memory; a
-// daemon that took the workspace over holds none until Emacs reports again,
-// which it does for every workspace on every link-up.
+// unloaded. The daemon keeps the latest report per workspace in memory for
+// the hover; a daemon that took the workspace over holds none there until
+// Emacs reports again, which it does for every workspace on every link-up.
+// Whether the page is loaded is also STORED, and outlives the daemon: the
+// registration Emacs makes after a bounce answers it
+// (agentrepl.v1.RegisterWorkspaceSuccess.last_known_page), so Emacs loads
+// again only the pages it held.
 //
 // IDEMPOTENT: reporting the same residency again changes nothing.
 

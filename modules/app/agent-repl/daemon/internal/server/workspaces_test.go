@@ -3246,6 +3246,101 @@ func TestRegisterWorkspacesAnswersEachDirsOutcome(t *testing.T) {
 	}
 }
 
+// TestRegistrationAnswersTheLastKnownPage pins both registration verbs
+// answering the page residency Emacs last reported, and none when it never
+// reported one: they share one success (server.registered).
+func TestRegistrationAnswersTheLastKnownPage(t *testing.T) {
+	type verb func(t *testing.T, h *harness) *agentreplv1.RegisterWorkspaceSuccess
+	lone := func(t *testing.T, h *harness) *agentreplv1.RegisterWorkspaceSuccess {
+		h.Verbs.registerRecord = wsm.Workspace{ID: "ws-a", Dir: "/w/a"}
+		resp, err := h.Client.RegisterWorkspace(context.Background(),
+			connect.NewRequest(&agentreplv1.RegisterWorkspaceRequest{Dir: "/w/a"}))
+		if err != nil {
+			t.Fatalf("RegisterWorkspace: %v", err)
+		}
+		return resp.Msg.GetSuccess()
+	}
+	batch := func(t *testing.T, h *harness) *agentreplv1.RegisterWorkspaceSuccess {
+		h.Verbs.registerAllAnswers = []workspace.Registered{{Dir: "/w/a", Record: wsm.Workspace{ID: "ws-a", Dir: "/w/a"}}}
+		resp, err := h.Client.RegisterWorkspaces(context.Background(),
+			connect.NewRequest(&agentreplv1.RegisterWorkspacesRequest{Dirs: []string{"/w/a"}}))
+		if err != nil {
+			t.Fatalf("RegisterWorkspaces: %v", err)
+		}
+		return resp.Msg.GetOutcomes()[0].GetRegistered()
+	}
+	tests := []struct {
+		name   string
+		verb   verb
+		pages  map[ids.WorkspaceID]bool
+		loaded bool
+		unset  bool
+	}{
+		{"a lone registration answers a loaded page", lone, map[ids.WorkspaceID]bool{"ws-a": true}, true, false},
+		{"a lone registration answers an unloaded page", lone, map[ids.WorkspaceID]bool{"ws-a": false}, false, false},
+		{"a lone registration answers none never reported", lone, nil, false, true},
+		{"a batch answers a loaded page", batch, map[ids.WorkspaceID]bool{"ws-a": true}, true, false},
+		{"a batch answers an unloaded page", batch, map[ids.WorkspaceID]bool{"ws-a": false}, false, false},
+		{"a batch answers none never reported", batch, nil, false, true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			h.DB.pages = tc.pages
+
+			// Act.
+			success := tc.verb(t, h)
+
+			// Assert.
+			page := success.GetLastKnownPage()
+			switch {
+			case tc.unset && page != nil:
+				t.Fatalf("last_known_page = %v, want unset", page)
+			case !tc.unset && tc.loaded && page.GetLoaded() == nil:
+				t.Fatalf("last_known_page = %v, want loaded", page)
+			case !tc.unset && !tc.loaded && page.GetNotLoaded() == nil:
+				t.Fatalf("last_known_page = %v, want not_loaded", page)
+			}
+		})
+	}
+}
+
+// TestRegistrationWhoseLastKnownPageCannotBeReadFails pins a residency read
+// failure: a lone registration is Internal, a batch's dir is `failed`, and
+// each is recorded at ERROR.
+func TestRegistrationWhoseLastKnownPageCannotBeReadFails(t *testing.T) {
+	// Arrange.
+	log := &recordingLogger{}
+	h := newHarness(t, func(deps *Deps) { deps.Log = &fakeSurfaces{global: log, workspace: log} })
+	h.DB.pageReadErr = errors.New("locked")
+	h.Verbs.registerRecord = wsm.Workspace{ID: "ws-a", Dir: "/w/a"}
+	h.Verbs.registerAllAnswers = []workspace.Registered{{Dir: "/w/a", Record: wsm.Workspace{ID: "ws-a", Dir: "/w/a"}}}
+
+	// Act.
+	_, loneErr := h.Client.RegisterWorkspace(context.Background(),
+		connect.NewRequest(&agentreplv1.RegisterWorkspaceRequest{Dir: "/w/a"}))
+	resp, batchErr := h.Client.RegisterWorkspaces(context.Background(),
+		connect.NewRequest(&agentreplv1.RegisterWorkspacesRequest{Dirs: []string{"/w/a"}}))
+
+	// Assert.
+	if connect.CodeOf(loneErr) != connect.CodeInternal {
+		t.Fatalf("RegisterWorkspace err = %v, want Internal", loneErr)
+	}
+	if batchErr != nil || !strings.Contains(resp.Msg.GetOutcomes()[0].GetFailed().GetCause(), "locked") {
+		t.Fatalf("RegisterWorkspaces = (%v, %v), want the dir failed with the cause", resp, batchErr)
+	}
+	logged := 0
+	for _, rec := range log.at("ERROR") {
+		if rec.Context["cause"] == "locked" {
+			logged++
+		}
+	}
+	if logged != 2 {
+		t.Fatalf("ERROR records = %+v, want one per registration", log.at("ERROR"))
+	}
+}
+
 // TestRegisterWorkspacesHandsEveryDirToOneBatch pins that the request's dirs
 // reach the verb as ONE batch, in order: the whole point of the rpc.
 func TestRegisterWorkspacesHandsEveryDirToOneBatch(t *testing.T) {

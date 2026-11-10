@@ -36,6 +36,62 @@ func TestReportPageResidencyRecordsTheWorkspacesResidency(t *testing.T) {
 	}
 }
 
+func TestReportPageResidencyPersistsWhetherThePageIsLoaded(t *testing.T) {
+	loadedHeld := &agentreplv1.PageResidency{State: &agentreplv1.PageResidency_Loaded{Loaded: &agentreplv1.PageResidencyLoaded{
+		Release: &agentreplv1.PageResidencyRelease{When: &agentreplv1.PageResidencyRelease_Held{Held: &agentreplv1.PageResidencyReleaseHeld{}}},
+	}}}
+	tests := []struct {
+		name      string
+		residency *agentreplv1.PageResidency
+		want      bool
+	}{
+		{"a loaded page is stored loaded", loadedHeld, true},
+		{"an unloaded page is stored not loaded", residencyNotLoaded(), false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+
+			// Act
+			_, err := h.Client.ReportPageResidency(context.Background(), connect.NewRequest(&agentreplv1.ReportPageResidencyRequest{
+				Workspace: ref(), Residency: tc.residency,
+			}))
+
+			// Assert
+			if err != nil {
+				t.Fatalf("ReportPageResidency: %v", err)
+			}
+			if loaded, known := h.DB.pages[testWorkspaceID]; !known || loaded != tc.want {
+				t.Fatalf("stored = (%v, %v), want (%v, true)", loaded, known, tc.want)
+			}
+		})
+	}
+}
+
+func TestReportPageResidencyThatCannotBeStoredIsInternalAndLogged(t *testing.T) {
+	// Arrange
+	log := &recordingLogger{}
+	h := newHarness(t, func(deps *Deps) { deps.Log = &fakeSurfaces{global: log, workspace: log} })
+	h.DB.pageWriteErr = errors.New("disk full")
+
+	// Act
+	_, err := h.Client.ReportPageResidency(context.Background(), connect.NewRequest(&agentreplv1.ReportPageResidencyRequest{
+		Workspace: ref(), Residency: residencyNotLoaded(),
+	}))
+
+	// Assert
+	if connect.CodeOf(err) != connect.CodeInternal {
+		t.Fatalf("err = %v, want Internal", err)
+	}
+	for _, rec := range log.at("ERROR") {
+		if rec.Operation == opMemory && rec.Context["cause"] == "disk full" {
+			return
+		}
+	}
+	t.Fatalf("ERROR records = %+v, want the store's cause", log.at("ERROR"))
+}
+
 func TestReportPageResidencyRefusesAMalformedResidency(t *testing.T) {
 	tests := []struct {
 		name      string

@@ -84,6 +84,7 @@
 (declare-function agent-repl--log "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl-vocab-read "agent-repl-core" (file &rest keys))
 (declare-function agent-repl--info "agent-repl-core" (ws fmt &rest args))
+(declare-function agent-repl--fatal "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--ws-get "agent-repl-workspace" (ws key))
 (declare-function agent-repl--ws-put "agent-repl-workspace" (ws key value))
 (declare-function agent-repl--live-ws-names "agent-repl-workspace" ())
@@ -102,6 +103,7 @@
 (declare-function agent-repl--error "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl-roster-status-for-ws "roster" (ws))
 (declare-function agent-repl-host-report-page-residency "host" (ws residency on-reported))
+(declare-function agent-repl-host-last-known-page "host" (ws))
 (defvar agent-repl-host-reattached-functions)
 (declare-function agent-repl-roster-last-turn-ended-ms "roster" (ws))
 (defvar agent-repl-link-up-functions)
@@ -215,15 +217,29 @@ Either way WS holds no page off screen."
 
 (defun agent-repl-page-unload-wanted-p (ws)
   "Non-nil when WS's page should be loaded now, before anyone shows it.
-That is when it is on screen and not cold-gated, or working and neither
-hidden nor folded (`agent-repl-page-unload--withheld-p').  A slot made for
-a workspace that is not wanted is made with no page
-\(`agent-repl--frontend-ensure-webview-buffer'); its show loads it, or
-holds it back when WS is cold-gated (`agent-repl-page-unload-note-shown')."
+That is when it is on screen and not cold-gated, or, neither hidden nor
+folded (`agent-repl-page-unload--withheld-p'), when the daemon last knew
+the page loaded.  With no residency known to the daemon, a working page
+is wanted in its place.  A slot made for a workspace that is not wanted
+is made with no page (`agent-repl--frontend-ensure-webview-buffer'); its
+show loads it, or holds it back when WS is cold-gated
+\(`agent-repl-page-unload-note-shown').
+
+THE DAEMON'S LAST-KNOWN RESIDENCY DECIDES, NOT THE STATUS, because a
+restart makes every slot again at once: on 2026-11-10 an Emacs that had
+held a handful of pages loaded 77 of them in ten seconds after a bounce.
+The daemon keeps what Emacs last reported (`agent-repl-host-last-known-page'),
+so the pages loaded after a restart are the ones held before it, and the
+pass loads a working page later on its own (`agent-repl-page-unload-pass')."
   (or (and (agent-repl-page-unload--on-screen-p ws)
            (not (agent-repl-page-unload--gated-p ws)))
       (and (not (agent-repl-page-unload--withheld-p ws))
-           (eq (agent-repl-page-unload--ws-bucket ws) 'working))))
+           (pcase (agent-repl-host-last-known-page ws)
+             (:loaded t)
+             (:not-loaded nil)
+             ('nil (eq (agent-repl-page-unload--ws-bucket ws) 'working))
+             (other (agent-repl--fatal ws "elisp.page-unload.last-known-page-unknown ws=%s page=%S"
+                                       ws other))))))
 
 (defun agent-repl-page-unload-note-shown (ws)
   "Record that the host now shows WS's page.
@@ -471,8 +487,8 @@ before anyone switches to it (owner ruling, 2026-10-29)."
 Not loaded, or loaded with the rule that lets it go: held while working
 (or with no status yet), unloaded at the hold\='s end for a page within
 the hold after its last turn (`agent-repl-page-unload--hold-ends'), and
-unloaded on the switch away for everything else (`agent-repl-page-unload--reason').  The daemon
-serves it on the rail\='s workspace memory hover
+unloaded on the switch away for everything else
+\(`agent-repl-page-unload--reason').  The daemon serves it on the rail\='s workspace memory hover
 \(endpoint_report_page_residency.proto)."
   (if (not (agent-repl-webhost-has-page-p ws))
       (list :arm :not-loaded :value nil)

@@ -131,6 +131,12 @@ func (f *fakeSurfaces) CentralClientLog(rec dlog.ClientRecord) error {
 
 // fakeDB answers the registry lookups the handlers make.
 type fakeDB struct {
+	// pages is each workspace's last-known page residency; pageReadErr fails
+	// its read and pageWriteErr its write.
+	pages        map[ids.WorkspaceID]bool
+	pageReadErr  error
+	pageWriteErr error
+
 	// bypass is each workspace's queue-bypass standing, and bypassErr fails
 	// its read.
 	bypass    map[ids.WorkspaceID]wsm.QueueBypass
@@ -471,6 +477,8 @@ type fakeVerbs struct {
 	// registerAllAnswers is what it answers.
 	registerAllDirs    [][]string
 	registerAllAnswers []workspace.Registered
+	// registerRecord is what a lone Register answers.
+	registerRecord wsm.Workspace
 	// registeredPaths records every RegisterRepository path the verb received.
 	registeredPaths []string
 	// arrangements records every ArrangeSidebar verb call, spelled
@@ -865,6 +873,11 @@ func (f *fakeVerbs) SetSummary(_ context.Context, _ ids.WorkspaceID, summary str
 		return "", f.setSummaryErr
 	}
 	return summary, nil
+}
+
+// Register answers registerRecord.
+func (f *fakeVerbs) Register(context.Context, string, wsm.RegisterFacts) (wsm.Workspace, error) {
+	return f.registerRecord, nil
 }
 
 // RegisterAll answers registerAllAnswers, recording the dirs it was handed.
@@ -3040,4 +3053,23 @@ func (d *fakeDB) QueueBypass(_ context.Context, ws ids.WorkspaceID) (wsm.QueueBy
 		return wsm.QueueBypass{}, d.bypassErr
 	}
 	return d.bypass[ws], nil
+}
+
+func (f *fakeDB) PageLoaded(_ context.Context, id ids.WorkspaceID) (bool, bool, error) {
+	if f.pageReadErr != nil {
+		return false, false, f.pageReadErr
+	}
+	loaded, known := f.pages[id]
+	return loaded, known, nil
+}
+
+func (f *fakeDB) SetPageLoaded(_ context.Context, id ids.WorkspaceID, loaded bool, _ time.Time) error {
+	if f.pageWriteErr != nil {
+		return f.pageWriteErr
+	}
+	if f.pages == nil {
+		f.pages = map[ids.WorkspaceID]bool{}
+	}
+	f.pages[id] = loaded
+	return nil
 }
