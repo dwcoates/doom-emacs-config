@@ -21,93 +21,110 @@ import (
 	"agent-repld/internal/restarttiming/restarttimingtest"
 )
 
-// fakeLaunchd scripts launchd. NO TEST EVER REACHES THE LIVE LAUNCHD: this is
-// the whole of this package's contact with it.
-type fakeLaunchd struct {
+// fakeServiceManager scripts the service manager. NO TEST EVER REACHES A LIVE
+// SERVICE MANAGER: this is the whole of this package's contact with one.
+type fakeServiceManager struct {
 	mu    sync.Mutex
 	calls []string
-	// loaded is what Print answers per label.
+	// dir is where Definition says each service's definition is installed.
+	dir string
+	// loaded is what Status answers per label.
 	loaded map[string]bool
 	pid    map[string]int
-	// onKickstart runs when the store is kickstarted (a test binds the socket,
+	// onRestart runs when the store is restarted (a test binds the socket,
 	// or grows the log, or kills the process there).
-	onKickstart func()
-	// printsUntilGone is how many Prints of the sidecar still find it loaded
-	// after its bootout (launchd holding a label whose process exited).
-	printsUntilGone int
-	kickErr         error
-	bootoutErr      error
-	bootstrapErr    error
-	printErr        error
-	// onBootstrap runs when a plist is bootstrapped, with its file name.
-	onBootstrap func(plist string)
+	onRestart func()
+	// statusesUntilGone is how many Statuses of the sidecar still find it
+	// held after its stop.
+	statusesUntilGone int
+	// onStoreStatus runs on every Status of the store while it boots.
+	onStoreStatus func(n int)
+	storeStatuses int
+	restartErr    error
+	stopErr       error
+	startErr      error
+	statusErr     error
+	// onStart runs when a service is started, with its label.
+	onStart func(label string)
 }
 
-func newFakeLaunchd() *fakeLaunchd {
-	return &fakeLaunchd{
+func newFakeServiceManager(dir string) *fakeServiceManager {
+	return &fakeServiceManager{
+		dir:    dir,
 		loaded: map[string]bool{StoreLabel: true, SidecarLabel: true, ZettelLabel: true},
 		pid:    map[string]int{StoreLabel: 10, SidecarLabel: 20},
 	}
 }
 
-func (l *fakeLaunchd) record(call string) {
+func (l *fakeServiceManager) record(call string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.calls = append(l.calls, call)
 }
 
-func (l *fakeLaunchd) Calls() []string {
+func (l *fakeServiceManager) Calls() []string {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return append([]string(nil), l.calls...)
 }
 
-func (l *fakeLaunchd) Print(_ context.Context, label string) (bool, int, error) {
-	l.record("print " + label)
+func (l *fakeServiceManager) Status(_ context.Context, label string) (bool, int, error) {
+	l.record("status " + label)
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if l.printErr != nil {
-		return false, 0, l.printErr
+	if l.statusErr != nil {
+		return false, 0, l.statusErr
 	}
-	if label == SidecarLabel && !l.loaded[label] && l.printsUntilGone > 0 {
-		l.printsUntilGone--
+	if label == SidecarLabel && !l.loaded[label] && l.statusesUntilGone > 0 {
+		l.statusesUntilGone--
 		return true, 0, nil
+	}
+	if label == StoreLabel && l.onStoreStatus != nil {
+		l.storeStatuses++
+		n := l.storeStatuses
+		l.mu.Unlock()
+		l.onStoreStatus(n)
+		l.mu.Lock()
 	}
 	return l.loaded[label], l.pid[label], nil
 }
 
-func (l *fakeLaunchd) Kickstart(_ context.Context, label string) error {
-	l.record("kickstart " + label)
-	if l.kickErr != nil {
-		return l.kickErr
+func (l *fakeServiceManager) Restart(_ context.Context, label string) error {
+	l.record("restart " + label)
+	if l.restartErr != nil {
+		return l.restartErr
 	}
-	if label == StoreLabel && l.onKickstart != nil {
-		l.onKickstart()
+	if label == StoreLabel && l.onRestart != nil {
+		l.onRestart()
 	}
 	return nil
 }
 
-func (l *fakeLaunchd) Bootout(_ context.Context, label string) error {
-	l.record("bootout " + label)
+func (l *fakeServiceManager) Stop(_ context.Context, label string) error {
+	l.record("stop " + label)
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.loaded[label] = false
-	return l.bootoutErr
+	return l.stopErr
 }
 
-func (l *fakeLaunchd) Bootstrap(_ context.Context, plist string) error {
-	l.record("bootstrap " + filepath.Base(plist))
-	if l.bootstrapErr == nil && l.onBootstrap != nil {
-		l.onBootstrap(filepath.Base(plist))
+func (l *fakeServiceManager) Start(_ context.Context, label string) error {
+	l.record("start " + label)
+	if l.startErr == nil && l.onStart != nil {
+		l.onStart(label)
 	}
-	return l.bootstrapErr
+	return l.startErr
+}
+
+func (l *fakeServiceManager) Definition(label string) string {
+	return filepath.Join(l.dir, label+".plist")
 }
 
 // restarterHarness is one Restarter over a temp socket dir and plist dir.
 type restarterHarness struct {
 	restarts *restarttimingtest.Recorder
 	r        *Restarter
-	launchd  *fakeLaunchd
+	services *fakeServiceManager
 	log      *dlog.TestLogger
 	sock     string
 	alive    map[int]bool
@@ -168,7 +185,7 @@ func newRestarter(t *testing.T) *restarterHarness {
 	plists := t.TempDir()
 	writeFile(t, filepath.Join(plists, SidecarLabel+".plist"), "<plist/>")
 	log := dlog.NewTestLogger()
-	h := &restarterHarness{launchd: newFakeLaunchd(), log: log, sock: filepath.Join(sockDir, "store.sock"), alive: map[int]bool{},
+	h := &restarterHarness{services: newFakeServiceManager(plists), log: log, sock: filepath.Join(sockDir, "store.sock"), alive: map[int]bool{},
 		restarts: &restarttimingtest.Recorder{}, clock: newBoundClock(),
 		// The store runs until a test ends it; the sidecar's bootout ends it.
 		exits: map[int]chan struct{}{10: make(chan struct{})}, awaiting: make(chan int, 8)}
@@ -176,8 +193,7 @@ func newRestarter(t *testing.T) *restarterHarness {
 		CacheBin:    t.TempDir(),
 		ReportDir:   t.TempDir(),
 		Alive:       func(pid int) bool { return h.alive[pid] },
-		Launchd:     h.launchd,
-		PlistDir:    plists,
+		Services:    h.services,
 		StoreSocket: h.sock,
 		StoreLog:    filepath.Join(t.TempDir(), "shim-store.err.log"),
 		Windows:     DefaultServiceWindows,
@@ -216,7 +232,7 @@ func loggedTo(log *dlog.TestLogger, level, substr string) bool {
 func TestRestartStoreTakesTheRecordedSafeOrder(t *testing.T) {
 	// Arrange: the new store binds its socket as soon as it is kickstarted.
 	h := newRestarter(t)
-	h.launchd.onKickstart = func() { h.bindSocket(t) }
+	h.services.onRestart = func() { h.bindSocket(t) }
 
 	// Act
 	err := h.r.RestartStore(context.Background())
@@ -226,12 +242,12 @@ func TestRestartStoreTakesTheRecordedSafeOrder(t *testing.T) {
 		t.Fatalf("RestartStore: %v", err)
 	}
 	var acts []string
-	for _, c := range h.launchd.Calls() {
-		if !strings.HasPrefix(c, "print") {
+	for _, c := range h.services.Calls() {
+		if !strings.HasPrefix(c, "status") {
 			acts = append(acts, c)
 		}
 	}
-	want := []string{"bootout " + SidecarLabel, "kickstart " + StoreLabel, "bootstrap " + SidecarLabel + ".plist"}
+	want := []string{"stop " + SidecarLabel, "restart " + StoreLabel, "start " + SidecarLabel}
 	if strings.Join(acts, ",") != strings.Join(want, ",") {
 		t.Fatalf("launchd acts = %v, want %v", acts, want)
 	}
@@ -242,7 +258,7 @@ func TestRestartStoreKickstartsTheStoreOnlyOnceTheSidecarExited(t *testing.T) {
 	// it.
 	h := newRestarter(t)
 	h.exits[20] = make(chan struct{})
-	h.launchd.onKickstart = func() { h.bindSocket(t) }
+	h.services.onRestart = func() { h.bindSocket(t) }
 	done := make(chan error, 1)
 
 	// Act
@@ -252,7 +268,7 @@ func TestRestartStoreKickstartsTheStoreOnlyOnceTheSidecarExited(t *testing.T) {
 			break
 		}
 	}
-	before := h.launchd.Calls()
+	before := h.services.Calls()
 	h.exit(20)
 	err := <-done
 
@@ -260,11 +276,11 @@ func TestRestartStoreKickstartsTheStoreOnlyOnceTheSidecarExited(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RestartStore: %v", err)
 	}
-	if slices.Contains(before, "kickstart "+StoreLabel) {
+	if slices.Contains(before, "restart "+StoreLabel) {
 		t.Fatalf("calls before the sidecar exited = %v, want no store kickstart yet", before)
 	}
-	if !slices.Contains(h.launchd.Calls(), "kickstart "+StoreLabel) {
-		t.Fatalf("calls = %v, want the store kickstarted once the sidecar exited", h.launchd.Calls())
+	if !slices.Contains(h.services.Calls(), "restart "+StoreLabel) {
+		t.Fatalf("calls = %v, want the store kickstarted once the sidecar exited", h.services.Calls())
 	}
 }
 
@@ -279,8 +295,8 @@ func TestRestartStoreRefusesASidecarThatWillNotLeave(t *testing.T) {
 				h.exits[20] = make(chan struct{})
 				h.clock.fire(DefaultServiceWindows.Max)
 			}},
-		{name: "a sidecar launchd still holds once its process exited", want: "launchd still holds the sidecar",
-			arrange: func(h *restarterHarness) { h.launchd.printsUntilGone = 1 }},
+		{name: "a sidecar launchd still holds once its process exited", want: "the service manager still holds the sidecar",
+			arrange: func(h *restarterHarness) { h.services.statusesUntilGone = 1 }},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -295,8 +311,8 @@ func TestRestartStoreRefusesASidecarThatWillNotLeave(t *testing.T) {
 			if err == nil {
 				t.Fatalf("RestartStore succeeded with a sidecar that never left")
 			}
-			if slices.Contains(h.launchd.Calls(), "kickstart "+StoreLabel) {
-				t.Fatalf("calls = %v, want the store left alone", h.launchd.Calls())
+			if slices.Contains(h.services.Calls(), "restart "+StoreLabel) {
+				t.Fatalf("calls = %v, want the store left alone", h.services.Calls())
 			}
 			if !loggedTo(h.log, "error", tc.want) {
 				t.Fatalf("records = %+v, want an ERROR naming %q", h.log.Records(), tc.want)
@@ -308,7 +324,7 @@ func TestRestartStoreRefusesASidecarThatWillNotLeave(t *testing.T) {
 func TestRestartStoreRefusesWithoutTheSidecarPlist(t *testing.T) {
 	// Arrange
 	h := newRestarter(t)
-	if err := os.Remove(filepath.Join(h.r.PlistDir, SidecarLabel+".plist")); err != nil {
+	if err := os.Remove(filepath.Join(h.services.dir, SidecarLabel+".plist")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -319,10 +335,10 @@ func TestRestartStoreRefusesWithoutTheSidecarPlist(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "install.sh") {
 		t.Fatalf("RestartStore = %v, want the missing plist named with its remedy", err)
 	}
-	if calls := h.launchd.Calls(); len(calls) != 0 {
+	if calls := h.services.Calls(); len(calls) != 0 {
 		t.Fatalf("launchd calls = %v, want nothing touched", calls)
 	}
-	if !loggedTo(h.log, "error", "the sidecar's plist is missing") {
+	if !loggedTo(h.log, "error", "the sidecar's service definition is missing") {
 		t.Fatalf("records = %+v, want the refusal at ERROR", h.log.Records())
 	}
 }
@@ -336,17 +352,17 @@ func TestAStoreBootFailureNeverBringsTheSidecarBack(t *testing.T) {
 		{
 			name: "the store is gone before its socket appears",
 			arrange: func(h *restarterHarness) {
-				h.launchd.onKickstart = func() {
-					h.launchd.mu.Lock()
-					h.launchd.pid[StoreLabel] = 0
-					h.launchd.mu.Unlock()
+				h.services.onRestart = func() {
+					h.services.mu.Lock()
+					h.services.pid[StoreLabel] = 0
+					h.services.mu.Unlock()
 				}
 			},
 			want: "died before its socket appeared",
 		},
 		{
 			name:    "the store exits before its socket appears",
-			arrange: func(h *restarterHarness) { h.launchd.onKickstart = func() { h.exit(10) } },
+			arrange: func(h *restarterHarness) { h.services.onRestart = func() { h.exit(10) } },
 			want:    "died before its socket appeared",
 		},
 		{
@@ -359,9 +375,9 @@ func TestAStoreBootFailureNeverBringsTheSidecarBack(t *testing.T) {
 			// Fired once the store is kickstarted: the sidecar's stop, before
 			// it, is bounded by the same upper bound.
 			arrange: func(h *restarterHarness) {
-				h.launchd.onKickstart = func() { h.clock.fire(DefaultServiceWindows.Max) }
+				h.services.onRestart = func() { h.clock.fire(DefaultServiceWindows.Max) }
 			},
-			want:    "did not appear within the upper bound",
+			want: "did not appear within the upper bound",
 		},
 	}
 	for _, tc := range tests {
@@ -377,9 +393,9 @@ func TestAStoreBootFailureNeverBringsTheSidecarBack(t *testing.T) {
 			if err == nil {
 				t.Fatalf("RestartStore succeeded with a store that never served")
 			}
-			for _, c := range h.launchd.Calls() {
-				if strings.HasPrefix(c, "bootstrap") {
-					t.Fatalf("calls = %v, want the sidecar left down", h.launchd.Calls())
+			for _, c := range h.services.Calls() {
+				if strings.HasPrefix(c, "start") {
+					t.Fatalf("calls = %v, want the sidecar left down", h.services.Calls())
 				}
 			}
 			if !loggedTo(h.log, "error", tc.want) {
@@ -394,12 +410,12 @@ func TestRestartStoreSurfacesALaunchdFailure(t *testing.T) {
 		name    string
 		arrange func(h *restarterHarness)
 	}{
-		{name: "the store kickstart fails", arrange: func(h *restarterHarness) { h.launchd.kickErr = errors.New("kickstart refused") }},
+		{name: "the store kickstart fails", arrange: func(h *restarterHarness) { h.services.restartErr = errors.New("kickstart refused") }},
 		{name: "the sidecar bootstrap fails", arrange: func(h *restarterHarness) {
-			h.launchd.bootstrapErr = errors.New("bootstrap refused")
-			h.launchd.onKickstart = func() { h.bindSocket(t) }
+			h.services.startErr = errors.New("bootstrap refused")
+			h.services.onRestart = func() { h.bindSocket(t) }
 		}},
-		{name: "launchd cannot be read", arrange: func(h *restarterHarness) { h.launchd.printErr = errors.New("print refused") }},
+		{name: "launchd cannot be read", arrange: func(h *restarterHarness) { h.services.statusErr = errors.New("print refused") }},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -438,7 +454,7 @@ func TestRestartSidecarKickstartsItAlone(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RestartSidecar: %v", err)
 	}
-	if calls := h.launchd.Calls(); len(calls) != 1 || calls[0] != "kickstart "+SidecarLabel {
+	if calls := h.services.Calls(); len(calls) != 1 || calls[0] != "restart "+SidecarLabel {
 		t.Fatalf("calls = %v, want one sidecar kickstart", calls)
 	}
 }
@@ -446,13 +462,13 @@ func TestRestartSidecarKickstartsItAlone(t *testing.T) {
 func TestRestartSidecarSurfacesAFailedKickstart(t *testing.T) {
 	// Arrange
 	h := newRestarter(t)
-	h.launchd.kickErr = errors.New("kickstart refused")
+	h.services.restartErr = errors.New("kickstart refused")
 
 	// Act
 	err := h.r.RestartSidecar(context.Background())
 
 	// Assert
-	if err == nil || !loggedTo(h.log, "error", "the sidecar kickstart failed") {
+	if err == nil || !loggedTo(h.log, "error", "the sidecar restart failed") {
 		t.Fatalf("RestartSidecar = %v, records %+v; want the failure returned and at ERROR", err, h.log.Records())
 	}
 }
@@ -467,14 +483,14 @@ func TestEachServiceRestartIsTimedWithItsOutcome(t *testing.T) {
 	}{
 		{
 			name:        "a store restart that serves",
-			arrange:     func(t *testing.T, h *restarterHarness) { h.launchd.onKickstart = func() { h.bindSocket(t) } },
+			arrange:     func(t *testing.T, h *restarterHarness) { h.services.onRestart = func() { h.bindSocket(t) } },
 			restart:     func(h *restarterHarness) error { return h.r.RestartStore(context.Background()) },
 			wantService: "store", wantOutcome: restarttiming.OK,
 		},
 		{
 			name: "a store restart that fails",
 			arrange: func(t *testing.T, h *restarterHarness) {
-				if err := os.Remove(filepath.Join(h.r.PlistDir, SidecarLabel+".plist")); err != nil {
+				if err := os.Remove(filepath.Join(h.services.dir, SidecarLabel+".plist")); err != nil {
 					t.Fatal(err)
 				}
 			},
@@ -489,7 +505,7 @@ func TestEachServiceRestartIsTimedWithItsOutcome(t *testing.T) {
 		},
 		{
 			name:        "a sidecar restart that fails",
-			arrange:     func(_ *testing.T, h *restarterHarness) { h.launchd.kickErr = errors.New("kickstart refused") },
+			arrange:     func(_ *testing.T, h *restarterHarness) { h.services.restartErr = errors.New("kickstart refused") },
 			restart:     func(h *restarterHarness) error { return h.r.RestartSidecar(context.Background()) },
 			wantService: "sidecar", wantOutcome: restarttiming.Failed,
 		},
@@ -523,21 +539,21 @@ func TestRestartStoreBootoutAnswers(t *testing.T) {
 			name:      "a sidecar already gone at the bootout is recorded at INFO",
 			bootout:   fmt.Errorf("%w: launchctl bootout exited 113", ErrServiceNotLoaded),
 			wantLevel: "info",
-			wantMsg:   "had already left the user domain",
+			wantMsg:   "had already stopped when it was stopped",
 		},
 		{
 			name:      "any other bootout failure is a WARN while launchd's view decides",
 			bootout:   errors.New("deploy: launchctl bootout exited 5"),
 			wantLevel: "warn",
-			wantMsg:   "bootout answered an error",
+			wantMsg:   "stop answered an error",
 		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange
 			h := newRestarter(t)
-			h.launchd.bootoutErr = tc.bootout
-			h.launchd.onKickstart = func() { h.bindSocket(t) }
+			h.services.stopErr = tc.bootout
+			h.services.onRestart = func() { h.bindSocket(t) }
 
 			// Act
 			err := h.r.RestartStore(context.Background())
@@ -553,8 +569,8 @@ func TestRestartStoreBootoutAnswers(t *testing.T) {
 func TestRestartStoreRecordsNoWarningWhenTheSidecarWasAlreadyGone(t *testing.T) {
 	// Arrange
 	h := newRestarter(t)
-	h.launchd.bootoutErr = fmt.Errorf("%w: launchctl bootout exited 113", ErrServiceNotLoaded)
-	h.launchd.onKickstart = func() { h.bindSocket(t) }
+	h.services.stopErr = fmt.Errorf("%w: launchctl bootout exited 113", ErrServiceNotLoaded)
+	h.services.onRestart = func() { h.bindSocket(t) }
 
 	// Act
 	err := h.r.RestartStore(context.Background())
@@ -571,17 +587,17 @@ func TestRestartStoreRecordsNoWarningWhenTheSidecarWasAlreadyGone(t *testing.T) 
 // EnsureLoaded has something to bootstrap it from.
 func (h *restarterHarness) unload(t *testing.T, label string) {
 	t.Helper()
-	h.launchd.loaded[label] = false
-	h.launchd.pid[label] = 0
-	writeFile(t, filepath.Join(h.r.PlistDir, label+".plist"), "<plist/>")
+	h.services.loaded[label] = false
+	h.services.pid[label] = 0
+	writeFile(t, filepath.Join(h.services.dir, label+".plist"), "<plist/>")
 }
 
 // bootstraps answers the plists EnsureLoaded bootstrapped, in order.
 func (h *restarterHarness) bootstraps() []string {
 	var out []string
-	for _, c := range h.launchd.Calls() {
-		if strings.HasPrefix(c, "bootstrap ") {
-			out = append(out, strings.TrimPrefix(c, "bootstrap "))
+	for _, c := range h.services.Calls() {
+		if strings.HasPrefix(c, "start ") {
+			out = append(out, strings.TrimPrefix(c, "start "))
 		}
 	}
 	return out
@@ -607,10 +623,10 @@ func TestEnsureLoadedBootstrapsAnUnloadedStore(t *testing.T) {
 	// Arrange: the bootstrapped store starts and binds its socket.
 	h := newRestarter(t)
 	h.unload(t, StoreLabel)
-	h.launchd.onBootstrap = func(string) {
-		h.launchd.mu.Lock()
-		h.launchd.loaded[StoreLabel], h.launchd.pid[StoreLabel] = true, 10
-		h.launchd.mu.Unlock()
+	h.services.onStart = func(string) {
+		h.services.mu.Lock()
+		h.services.loaded[StoreLabel], h.services.pid[StoreLabel] = true, 10
+		h.services.mu.Unlock()
 		h.bindSocket(t)
 	}
 
@@ -621,7 +637,7 @@ func TestEnsureLoadedBootstrapsAnUnloadedStore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EnsureLoaded: %v", err)
 	}
-	if got, want := h.bootstraps(), []string{StoreLabel + ".plist"}; fmt.Sprint(got) != fmt.Sprint(want) {
+	if got, want := h.bootstraps(), []string{StoreLabel}; fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Fatalf("bootstrapped %v, want %v", got, want)
 	}
 }
@@ -633,14 +649,14 @@ func TestEnsureLoadedStartsTheSidecarOnlyOnceTheStoreServes(t *testing.T) {
 	h.unload(t, StoreLabel)
 	h.unload(t, SidecarLabel)
 	storeServedFirst := false
-	h.launchd.onBootstrap = func(plist string) {
-		switch plist {
-		case StoreLabel + ".plist":
-			h.launchd.mu.Lock()
-			h.launchd.loaded[StoreLabel], h.launchd.pid[StoreLabel] = true, 10
-			h.launchd.mu.Unlock()
+	h.services.onStart = func(label string) {
+		switch label {
+		case StoreLabel:
+			h.services.mu.Lock()
+			h.services.loaded[StoreLabel], h.services.pid[StoreLabel] = true, 10
+			h.services.mu.Unlock()
 			h.bindSocket(t)
-		case SidecarLabel + ".plist":
+		case SidecarLabel:
 			storeServedFirst = socketExists(h.sock)
 		}
 	}
@@ -669,7 +685,7 @@ func TestEnsureLoadedBootstrapsAnUnloadedSidecarWithoutTouchingTheStore(t *testi
 	if err != nil {
 		t.Fatalf("EnsureLoaded: %v", err)
 	}
-	if got, want := h.bootstraps(), []string{SidecarLabel + ".plist"}; fmt.Sprint(got) != fmt.Sprint(want) {
+	if got, want := h.bootstraps(), []string{SidecarLabel}; fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Fatalf("bootstrapped %v, want %v", got, want)
 	}
 }
@@ -677,7 +693,7 @@ func TestEnsureLoadedBootstrapsAnUnloadedSidecarWithoutTouchingTheStore(t *testi
 func TestEnsureLoadedRefusesAnUnloadedServiceWithNoPlist(t *testing.T) {
 	// Arrange.
 	h := newRestarter(t)
-	h.launchd.loaded[StoreLabel] = false
+	h.services.loaded[StoreLabel] = false
 
 	// Act.
 	err := h.r.EnsureLoaded(context.Background())
@@ -692,13 +708,13 @@ func TestEnsureLoadedSurfacesABootstrapFailure(t *testing.T) {
 	// Arrange.
 	h := newRestarter(t)
 	h.unload(t, StoreLabel)
-	h.launchd.bootstrapErr = errors.New("launchctl bootstrap exited 5")
+	h.services.startErr = errors.New("launchctl bootstrap exited 5")
 
 	// Act.
 	err := h.r.EnsureLoaded(context.Background())
 
 	// Assert.
-	if err == nil || !errors.Is(err, h.launchd.bootstrapErr) {
+	if err == nil || !errors.Is(err, h.services.startErr) {
 		t.Fatalf("EnsureLoaded = %v, want the bootstrap failure", err)
 	}
 }
@@ -706,13 +722,13 @@ func TestEnsureLoadedSurfacesABootstrapFailure(t *testing.T) {
 func TestEnsureLoadedSurfacesAnUnreadableLaunchdState(t *testing.T) {
 	// Arrange.
 	h := newRestarter(t)
-	h.launchd.printErr = errors.New("launchctl print exited 1")
+	h.services.statusErr = errors.New("launchctl print exited 1")
 
 	// Act.
 	err := h.r.EnsureLoaded(context.Background())
 
 	// Assert.
-	if err == nil || !errors.Is(err, h.launchd.printErr) {
+	if err == nil || !errors.Is(err, h.services.statusErr) {
 		t.Fatalf("EnsureLoaded = %v, want the print failure", err)
 	}
 }
@@ -726,14 +742,14 @@ func (h *restarterHarness) running(t *testing.T, label, service string, pid int,
 		t.Fatal(err)
 	}
 	h.alive[pid] = true
-	h.launchd.pid[label] = pid
+	h.services.pid[label] = pid
 }
 
 // acts answers every launchd call other than a look.
 func (h *restarterHarness) acts() []string {
 	var out []string
-	for _, c := range h.launchd.Calls() {
-		if !strings.HasPrefix(c, "print") {
+	for _, c := range h.services.Calls() {
+		if !strings.HasPrefix(c, "status") {
 			out = append(out, c)
 		}
 	}
@@ -745,13 +761,13 @@ func TestEnsureCurrentRestartsAStaleStoreAndItsSidecarInTheSafeOrder(t *testing.
 	h := newRestarter(t)
 	h.running(t, StoreLabel, buildreport.ServiceStore, 10, "old store", "new store")
 	h.running(t, SidecarLabel, buildreport.ServiceSidecar, 20, "new sidecar", "new sidecar")
-	h.launchd.onKickstart = func() { h.bindSocket(t) }
+	h.services.onRestart = func() { h.bindSocket(t) }
 
 	// Act
 	err := h.r.EnsureCurrent(context.Background())
 
 	// Assert
-	want := []string{"bootout " + SidecarLabel, "kickstart " + StoreLabel, "bootstrap " + SidecarLabel + ".plist"}
+	want := []string{"stop " + SidecarLabel, "restart " + StoreLabel, "start " + SidecarLabel}
 	if err != nil || fmt.Sprint(h.acts()) != fmt.Sprint(want) {
 		t.Fatalf("EnsureCurrent = %v, acts %v; want %v", err, h.acts(), want)
 	}
@@ -782,7 +798,7 @@ func TestEnsureCurrentRestartsAStaleSidecarAlone(t *testing.T) {
 	err := h.r.EnsureCurrent(context.Background())
 
 	// Assert
-	if want := []string{"kickstart " + SidecarLabel}; err != nil || fmt.Sprint(h.acts()) != fmt.Sprint(want) {
+	if want := []string{"restart " + SidecarLabel}; err != nil || fmt.Sprint(h.acts()) != fmt.Sprint(want) {
 		t.Fatalf("EnsureCurrent = %v, acts %v; want %v", err, h.acts(), want)
 	}
 }
@@ -790,7 +806,7 @@ func TestEnsureCurrentRestartsAStaleSidecarAlone(t *testing.T) {
 func TestEnsureCurrentLeavesAServiceLaunchdRunsNoProcessFor(t *testing.T) {
 	// Arrange: both loaded, neither running, no reports at all.
 	h := newRestarter(t)
-	h.launchd.pid[StoreLabel], h.launchd.pid[SidecarLabel] = 0, 0
+	h.services.pid[StoreLabel], h.services.pid[SidecarLabel] = 0, 0
 
 	// Act
 	err := h.r.EnsureCurrent(context.Background())
@@ -806,11 +822,11 @@ func TestEnsureCurrentDoesNotRestartAStoreItJustBootstrapped(t *testing.T) {
 	h := newRestarter(t)
 	h.unload(t, StoreLabel)
 	h.running(t, SidecarLabel, buildreport.ServiceSidecar, 20, "new sidecar", "new sidecar")
-	h.launchd.onBootstrap = func(plist string) {
-		if plist == StoreLabel+".plist" {
-			h.launchd.mu.Lock()
-			h.launchd.loaded[StoreLabel], h.launchd.pid[StoreLabel] = true, 10
-			h.launchd.mu.Unlock()
+	h.services.onStart = func(label string) {
+		if label == StoreLabel {
+			h.services.mu.Lock()
+			h.services.loaded[StoreLabel], h.services.pid[StoreLabel] = true, 10
+			h.services.mu.Unlock()
 			h.bindSocket(t)
 		}
 	}
@@ -819,7 +835,7 @@ func TestEnsureCurrentDoesNotRestartAStoreItJustBootstrapped(t *testing.T) {
 	err := h.r.EnsureCurrent(context.Background())
 
 	// Assert
-	if want := []string{"bootstrap " + StoreLabel + ".plist"}; err != nil || fmt.Sprint(h.acts()) != fmt.Sprint(want) {
+	if want := []string{"start " + StoreLabel}; err != nil || fmt.Sprint(h.acts()) != fmt.Sprint(want) {
 		t.Fatalf("EnsureCurrent = %v, acts %v; want %v", err, h.acts(), want)
 	}
 }
@@ -854,7 +870,7 @@ func levelsOf(log *dlog.TestLogger) []string {
 func TestEnsureCurrentCutShortByItsCallerRecordsNoError(t *testing.T) {
 	// Arrange: launchctl's print answers the cancellation its caller made.
 	h := newRestarter(t)
-	h.launchd.printErr = fmt.Errorf("deploy: run launchctl print: %w", context.Canceled)
+	h.services.statusErr = fmt.Errorf("deploy: run launchctl print: %w", context.Canceled)
 
 	// Act.
 	_ = h.r.EnsureCurrent(context.Background())
@@ -868,7 +884,7 @@ func TestEnsureCurrentCutShortByItsCallerRecordsNoError(t *testing.T) {
 func TestEnsureCurrentCutShortByItsCallerRecordsTheCutAtInfo(t *testing.T) {
 	// Arrange.
 	h := newRestarter(t)
-	h.launchd.printErr = fmt.Errorf("deploy: run launchctl print: %w", context.Canceled)
+	h.services.statusErr = fmt.Errorf("deploy: run launchctl print: %w", context.Canceled)
 
 	// Act.
 	_ = h.r.EnsureCurrent(context.Background())
@@ -882,7 +898,7 @@ func TestEnsureCurrentCutShortByItsCallerRecordsTheCutAtInfo(t *testing.T) {
 func TestEnsureCurrentCutShortByItsCallerAnswersTheCancellation(t *testing.T) {
 	// Arrange.
 	h := newRestarter(t)
-	h.launchd.printErr = fmt.Errorf("deploy: run launchctl print: %w", context.Canceled)
+	h.services.statusErr = fmt.Errorf("deploy: run launchctl print: %w", context.Canceled)
 
 	// Act.
 	err := h.r.EnsureCurrent(context.Background())
@@ -896,13 +912,13 @@ func TestEnsureCurrentCutShortByItsCallerAnswersTheCancellation(t *testing.T) {
 func TestAServiceStepPastItsDeadlineIsStillAnError(t *testing.T) {
 	// Arrange.
 	h := newRestarter(t)
-	h.launchd.printErr = fmt.Errorf("deploy: run launchctl print: %w", context.DeadlineExceeded)
+	h.services.statusErr = fmt.Errorf("deploy: run launchctl print: %w", context.DeadlineExceeded)
 
 	// Act.
 	_ = h.r.EnsureCurrent(context.Background())
 
 	// Assert.
-	if !loggedTo(h.log, "error", "could not read a service's launchd state") {
+	if !loggedTo(h.log, "error", "could not read a service's service-manager state") {
 		t.Fatalf("records = %+v, want the deadline recorded at error", h.log.Records())
 	}
 }
@@ -919,10 +935,10 @@ func TestAStoreSocketWaitItsCallerCancelsRecordsNoError(t *testing.T) {
 	// awaited under a context its caller has cancelled.
 	h := newRestarter(t)
 	h.unload(t, StoreLabel)
-	h.launchd.onBootstrap = func(string) {
-		h.launchd.mu.Lock()
-		h.launchd.loaded[StoreLabel], h.launchd.pid[StoreLabel] = true, 10
-		h.launchd.mu.Unlock()
+	h.services.onStart = func(string) {
+		h.services.mu.Lock()
+		h.services.loaded[StoreLabel], h.services.pid[StoreLabel] = true, 10
+		h.services.mu.Unlock()
 	}
 	h.r.Clock = stoppedClock{}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -966,7 +982,7 @@ func TestEnsureStoreCurrentsSecondHalfRestartsAStaleSidecar(t *testing.T) {
 	err = sidecar(context.Background())
 
 	// Assert
-	if want := []string{"kickstart " + SidecarLabel}; err != nil || fmt.Sprint(h.acts()) != fmt.Sprint(want) {
+	if want := []string{"restart " + SidecarLabel}; err != nil || fmt.Sprint(h.acts()) != fmt.Sprint(want) {
 		t.Fatalf("second half = %v, acts %v; want %v", err, h.acts(), want)
 	}
 }
@@ -976,7 +992,7 @@ func TestEnsureStoreCurrentsSecondHalfIsANoOpAfterAStoreRestart(t *testing.T) {
 	h := newRestarter(t)
 	h.running(t, StoreLabel, buildreport.ServiceStore, 10, "old store", "new store")
 	h.running(t, SidecarLabel, buildreport.ServiceSidecar, 20, "old sidecar", "new sidecar")
-	h.launchd.onKickstart = func() { h.bindSocket(t) }
+	h.services.onRestart = func() { h.bindSocket(t) }
 	sidecar, err := h.r.EnsureStoreCurrent(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -1016,29 +1032,29 @@ func TestEnsureStoreCurrentsSecondHalfLeavesASidecarTheFirstHalfBootstrapped(t *
 
 func TestRestartZettelKickstartsItAlone(t *testing.T) {
 	cases := []struct {
-		name    string
-		kickErr error
+		name       string
+		restartErr error
 	}{
 		{name: "kickstarted"},
-		{name: "a failed kickstart is surfaced", kickErr: errors.New("kickstart refused")},
+		{name: "a failed kickstart is surfaced", restartErr: errors.New("kickstart refused")},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange
 			h := newRestarter(t)
-			h.launchd.kickErr = tc.kickErr
+			h.services.restartErr = tc.restartErr
 
 			// Act
 			err := h.r.RestartZettel(context.Background())
 
 			// Assert
-			if tc.kickErr != nil {
-				if err == nil || !loggedTo(h.log, "error", "the zettel kickstart failed") {
+			if tc.restartErr != nil {
+				if err == nil || !loggedTo(h.log, "error", "the zettel restart failed") {
 					t.Fatalf("RestartZettel = %v, records %+v; want the failure returned and at ERROR", err, h.log.Records())
 				}
 				return
 			}
-			if calls := h.launchd.Calls(); err != nil || len(calls) != 1 || calls[0] != "kickstart "+ZettelLabel {
+			if calls := h.services.Calls(); err != nil || len(calls) != 1 || calls[0] != "restart "+ZettelLabel {
 				t.Fatalf("RestartZettel = %v, calls = %v, want one zettel kickstart", err, calls)
 			}
 		})
@@ -1053,14 +1069,14 @@ func TestEnsureCurrentKeepsZettelLoadedAndCurrent(t *testing.T) {
 	}{
 		{name: "a stale zettel is restarted alone", arrange: func(t *testing.T, h *restarterHarness) {
 			h.running(t, ZettelLabel, buildreport.ServiceZettel, 30, "old zettel", "new zettel")
-		}, want: []string{"kickstart " + ZettelLabel}},
+		}, want: []string{"restart " + ZettelLabel}},
 		{name: "a current zettel is left alone", arrange: func(t *testing.T, h *restarterHarness) {
 			h.running(t, ZettelLabel, buildreport.ServiceZettel, 30, "new zettel", "new zettel")
 		}},
 		{name: "an unloaded zettel is bootstrapped", arrange: func(t *testing.T, h *restarterHarness) {
-			writeFile(t, filepath.Join(h.r.PlistDir, ZettelLabel+".plist"), "<plist/>")
-			h.launchd.loaded[ZettelLabel] = false
-		}, want: []string{"bootstrap " + ZettelLabel + ".plist"}},
+			writeFile(t, filepath.Join(h.services.dir, ZettelLabel+".plist"), "<plist/>")
+			h.services.loaded[ZettelLabel] = false
+		}, want: []string{"start " + ZettelLabel}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1091,9 +1107,9 @@ func TestEnsureZettelLoadedNeverRestartsARunningZettel(t *testing.T) {
 			h.running(t, ZettelLabel, buildreport.ServiceZettel, 30, "old zettel", "new zettel")
 		}},
 		{name: "an unloaded zettel is bootstrapped", arrange: func(t *testing.T, h *restarterHarness) {
-			writeFile(t, filepath.Join(h.r.PlistDir, ZettelLabel+".plist"), "<plist/>")
-			h.launchd.loaded[ZettelLabel] = false
-		}, want: []string{"bootstrap " + ZettelLabel + ".plist"}},
+			writeFile(t, filepath.Join(h.services.dir, ZettelLabel+".plist"), "<plist/>")
+			h.services.loaded[ZettelLabel] = false
+		}, want: []string{"start " + ZettelLabel}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

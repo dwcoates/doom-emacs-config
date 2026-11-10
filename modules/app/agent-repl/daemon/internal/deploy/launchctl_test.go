@@ -41,10 +41,10 @@ func (r *scriptedRunner) Calls() [][]string {
 
 func newLaunchctl(answers map[string]runAnswer) (*Launchctl, *scriptedRunner) {
 	runner := &scriptedRunner{answers: answers}
-	return &Launchctl{Binary: "launchctl", UID: 501, Dir: "/", Runner: runner}, runner
+	return &Launchctl{Binary: "launchctl", UID: 501, PlistDir: "/p", Dir: "/", Runner: runner}, runner
 }
 
-func TestLaunchctlPrint(t *testing.T) {
+func TestLaunchctlStatus(t *testing.T) {
 	tests := []struct {
 		name       string
 		answer     runAnswer
@@ -65,17 +65,17 @@ func TestLaunchctlPrint(t *testing.T) {
 			l, _ := newLaunchctl(map[string]runAnswer{"launchctl print gui/501/x": tc.answer})
 
 			// Act
-			loaded, pid, err := l.Print(context.Background(), "x")
+			loaded, pid, err := l.Status(context.Background(), "x")
 
 			// Assert
 			if tc.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
-					t.Fatalf("Print error = %v, want %q", err, tc.wantErr)
+					t.Fatalf("Status error = %v, want %q", err, tc.wantErr)
 				}
 				return
 			}
 			if err != nil || loaded != tc.wantLoaded || pid != tc.wantPID {
-				t.Fatalf("Print = %v, %d, %v; want %v, %d", loaded, pid, err, tc.wantLoaded, tc.wantPID)
+				t.Fatalf("Status = %v, %d, %v; want %v, %d", loaded, pid, err, tc.wantLoaded, tc.wantPID)
 			}
 		})
 	}
@@ -87,9 +87,9 @@ func TestLaunchctlVerbs(t *testing.T) {
 		call func(l *Launchctl) error
 		argv string
 	}{
-		{name: "kickstart restarts in place", call: func(l *Launchctl) error { return l.Kickstart(context.Background(), "x") }, argv: "launchctl kickstart -k gui/501/x"},
-		{name: "bootout leaves the domain", call: func(l *Launchctl) error { return l.Bootout(context.Background(), "x") }, argv: "launchctl bootout gui/501/x"},
-		{name: "bootstrap loads the plist", call: func(l *Launchctl) error { return l.Bootstrap(context.Background(), "/p/x.plist") }, argv: "launchctl bootstrap gui/501 /p/x.plist"},
+		{name: "restart kickstarts in place", call: func(l *Launchctl) error { return l.Restart(context.Background(), "x") }, argv: "launchctl kickstart -k gui/501/x"},
+		{name: "stop boots out of the domain", call: func(l *Launchctl) error { return l.Stop(context.Background(), "x") }, argv: "launchctl bootout gui/501/x"},
+		{name: "start bootstraps the label's plist", call: func(l *Launchctl) error { return l.Start(context.Background(), "x") }, argv: "launchctl bootstrap gui/501 /p/x.plist"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -116,15 +116,15 @@ func TestALaunchctlVerbThatExitsNonZeroFails(t *testing.T) {
 	l, _ := newLaunchctl(map[string]runAnswer{"launchctl kickstart -k gui/501/x": {out: "no such service", code: 3}})
 
 	// Act
-	err := l.Kickstart(context.Background(), "x")
+	err := l.Restart(context.Background(), "x")
 
 	// Assert
 	if err == nil || !strings.Contains(err.Error(), "no such service") {
-		t.Fatalf("Kickstart = %v, want the exit and launchctl's words", err)
+		t.Fatalf("Restart = %v, want the exit and launchctl's words", err)
 	}
 }
 
-func TestLaunchctlBootoutAnswers(t *testing.T) {
+func TestLaunchctlStopAnswers(t *testing.T) {
 	tests := []struct {
 		name          string
 		answer        runAnswer
@@ -142,12 +142,25 @@ func TestLaunchctlBootoutAnswers(t *testing.T) {
 			l, _ := newLaunchctl(map[string]runAnswer{"launchctl bootout gui/501/x": tc.answer})
 
 			// Act
-			err := l.Bootout(context.Background(), "x")
+			err := l.Stop(context.Background(), "x")
 
 			// Assert
 			if (err != nil) != tc.wantErr || errors.Is(err, ErrServiceNotLoaded) != tc.wantNotLoaded {
-				t.Fatalf("Bootout = %v; want error %v, not-loaded %v", err, tc.wantErr, tc.wantNotLoaded)
+				t.Fatalf("Stop = %v; want error %v, not-loaded %v", err, tc.wantErr, tc.wantNotLoaded)
 			}
 		})
+	}
+}
+
+func TestLaunchctlDefinitionIsTheLabelsPlist(t *testing.T) {
+	// Arrange
+	l, _ := newLaunchctl(map[string]runAnswer{})
+
+	// Act
+	got := l.Definition("x")
+
+	// Assert
+	if got != "/p/x.plist" {
+		t.Fatalf("Definition = %q, want /p/x.plist", got)
 	}
 }

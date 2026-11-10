@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 
 	"agentrepl/logging/buildreport"
@@ -19,12 +20,13 @@ import (
 )
 
 // THE DAEMON'S OWN DEPLOY (internal/deploy), wired against the checkout this
-// binary was deployed from, the launchd services in the user's GUI domain, and
-// the connected clients the server holds.
+// binary was deployed from, the services in the user's own service manager
+// (launchd's GUI domain on macOS, systemd's user manager on Linux), and the
+// connected clients the server holds.
 
 // The deploy's operator contracts. Each exists so that a harness can keep a
-// deploy away from the host: no test ever builds for real or reaches the live
-// launchd.
+// deploy away from the host: no test ever builds for real or reaches a live
+// service manager.
 const (
 	// envDeployBuilder names ONE executable a deploy runs as
 	// `<exe> --out <staging>` in place of the real build.
@@ -35,6 +37,10 @@ const (
 	// envLaunchAgentsDir is where the services' plists are installed, the same
 	// contract bin/store-reset.sh honors.
 	envLaunchAgentsDir = "AGENT_REPL_LAUNCH_AGENTS_DIR"
+	// envSystemctl is the systemctl a service restart drives on Linux.
+	envSystemctl = "AGENT_REPL_SYSTEMCTL"
+	// envSystemdUserDir is where the services' units are installed on Linux.
+	envSystemdUserDir = "AGENT_REPL_SYSTEMD_USER_DIR"
 )
 
 // deployerParams are what buildDeployer needs from the composition root.
@@ -78,7 +84,7 @@ type deployerParams struct {
 
 // deployPaths are the host locations a deploy works against.
 type deployPaths struct {
-	cacheBin, plistDir, storeLog, reportDir string
+	cacheBin, plistDir, unitDir, storeLog, reportDir string
 }
 
 // resolveDeployPaths answers the host locations, the operator overrides first.
@@ -94,9 +100,35 @@ func resolveDeployPaths(getenv func(string) string) (deployPaths, error) {
 	return deployPaths{
 		cacheBin:  filepath.Join(home, ".cache", "agent-repl", "bin"),
 		plistDir:  firstNonEmpty(getenv(envLaunchAgentsDir), filepath.Join(home, "Library", "LaunchAgents")),
+		unitDir:   firstNonEmpty(getenv(envSystemdUserDir), filepath.Join(firstNonEmpty(getenv("XDG_CONFIG_HOME"), filepath.Join(home, ".config")), "systemd", "user")),
 		storeLog:  filepath.Join(home, ".cache", "agent-repl", "log", "shim-store.err.log"),
 		reportDir: reportDir,
 	}, nil
+}
+
+// serviceManagerFor is the service manager the services live in on goos:
+// launchd on macOS, systemd's user manager on Linux. Any other system has none
+// agent-repl knows, which the boot refuses loudly.
+func serviceManagerFor(goos string, where deployPaths, p deployerParams) (deploy.ServiceManager, error) {
+	switch goos {
+	case "darwin":
+		return &deploy.Launchctl{
+			Binary:   firstNonEmpty(p.Getenv(envLaunchctl), "launchctl"),
+			UID:      os.Getuid(),
+			PlistDir: where.plistDir,
+			Dir:      p.Checkout,
+			Runner:   p.Runner,
+		}, nil
+	case "linux":
+		return &deploy.SystemdUser{
+			Binary:  firstNonEmpty(p.Getenv(envSystemctl), "systemctl"),
+			UnitDir: where.unitDir,
+			Dir:     p.Checkout,
+			Runner:  p.Runner,
+		}, nil
+	default:
+		return nil, fmt.Errorf("agent-repld: %s has no service manager agent-repl knows (launchd on darwin, systemd on linux) to run the store, sidecar and zettel under", goos)
+	}
 }
 
 // buildDeployer builds the daemon's deploy. The daemon's own build is the
@@ -124,14 +156,12 @@ func buildDeployer(ctx context.Context, p deployerParams) (*deploy.Deployer, *de
 		Clock:      rollout.SystemClock{},
 		Log:        log,
 	}
+	services, err := serviceManagerFor(runtime.GOOS, where, p)
+	if err != nil {
+		return nil, nil, err
+	}
 	restarter := &deploy.Restarter{
-		Launchd: &deploy.Launchctl{
-			Binary: firstNonEmpty(p.Getenv(envLaunchctl), "launchctl"),
-			UID:    os.Getuid(),
-			Dir:    p.Checkout,
-			Runner: p.Runner,
-		},
-		PlistDir:    where.plistDir,
+		Services:    services,
 		StoreSocket: p.Store,
 		StoreLog:    where.storeLog,
 		Windows:     deploy.DefaultServiceWindows,

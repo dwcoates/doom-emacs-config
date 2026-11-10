@@ -475,12 +475,14 @@ type Daemon struct {
 	staleAddr string
 	// LockDir is the redirected kernel-lock directory.
 	LockDir string
-	// Browser, Deploy and Launchctl record what the daemon invoked. Deploy is
+	// Browser, Deploy and Services record what the daemon invoked. Deploy is
 	// the deploy's fake build, which stages what runs (DeployCurrent) unless
 	// a test stages another: a harness never builds.
-	Browser   *Recorder
-	Deploy    *DeployBuilder
-	Launchctl *Recorder
+	Browser *Recorder
+	Deploy  *DeployBuilder
+	// Services is this platform's fake service manager
+	// (NewFakeServiceManager); PlatformServiceVerbs names its verbs.
+	Services *Recorder
 	// Notifier records every desktop banner the daemon posted
 	// (AGENT_REPL_NOTIFIER_CMD), so no test ever raises a real one.
 	Notifier *Recorder
@@ -715,7 +717,7 @@ func StartDaemon(t testing.TB, opts Opts) *Daemon {
 		MultiRepoConfigDir: NewConfigRoot(t, filepath.Join(root, "config-multi"), accountEmail(opts.MultiRepoAccountEmail, "multi@example.invalid")),
 		StoreSocket:        opts.StoreSocket,
 		Browser:            NewFakeBrowser(t, filepath.Join(root, "bin")),
-		Launchctl:          NewFakeLaunchctl(t, filepath.Join(root, "bin")),
+		Services:           NewFakeServiceManager(t, filepath.Join(root, "bin")),
 		Notifier:           NewFakeNotifier(t, filepath.Join(root, "bin")),
 		Chime:              NewFakeChime(t, filepath.Join(root, "bin")),
 		HostToolsDir:       NewFakeHostTools(t, filepath.Join(root, "host-tools")),
@@ -901,13 +903,15 @@ func StartDaemon(t testing.TB, opts Opts) *Daemon {
 		"MULTI_REPO_ROOT="+multiRoot,
 		"AGENT_REPL_BROWSER_CMD="+d.Browser.Path,
 		"AGENT_REPL_DEPLOY_BUILDER="+d.Deploy.Path,
-		"AGENT_REPL_LAUNCHCTL="+d.Launchctl.Path,
+		"AGENT_REPL_LAUNCHCTL="+d.Services.Path,
+		"AGENT_REPL_SYSTEMCTL="+d.Services.Path,
 		"AGENT_REPL_NOTIFIER_CMD="+d.Notifier.Path,
 		"AGENT_REPL_CHIME_CMD="+d.Chime.Path,
 		"AGENT_REPL_PERSISTENT_WIFI_TOOLS_DIR="+d.HostToolsDir,
 		"AGENT_REPL_PERSISTENT_WIFI_HOTSPOT="+FakeHotspot,
 		"AGENT_REPL_PERSISTENT_WIFI_LID="+d.Lid.Path,
 		"AGENT_REPL_LAUNCH_AGENTS_DIR="+filepath.Join(root, "LaunchAgents"),
+		"AGENT_REPL_SYSTEMD_USER_DIR="+filepath.Join(root, "systemd-user"),
 		fakegit.EnvStateFile+"="+d.Git.StateFile,
 		"FAKESHIM_PROFILE_DIR="+d.ProfileDir,
 		// HOME and PATH aside, the build identity is stated in one place only.
