@@ -2,10 +2,15 @@
  * The topbar: one thin strip, redrawn whole on every push.
  *
  * LEFT TIGHT, RIGHT TIGHT, AND THE TITLE IN WHAT IS BETWEEN THEM — the
- * account cell (its connectivity glyph, then its label) at the left edge, then
- * the model selector, the permission-mode picker, the context chip, the
- * remote-control chip, the persistent-wifi chip and the warning chip at the
- * right edge.
+ * account cell (its connectivity glyph, then its label) at the left edge, and
+ * after it the status run: the remote-control chip, the persistent-wifi chip
+ * and the warning chip. The model selector, the effort selector, the
+ * permission-mode picker and the context chip sit at the right edge.
+ *
+ * THE STATUS CHIPS RIDE THE LEFT (owner request, 2026-11-09): the right
+ * group was crowded and the left nearly empty, so the centered heading read
+ * as off-center. The warning chip ends the status run because it is the one
+ * chip that comes and goes; at the run's end its arrival moves no other chip.
  *
  * THE RULE IS EQUAL CLEAR SPACE, NOT A SHARED MIDPOINT (owner ruling,
  * 2026-09-14, superseding the "true center" rule of 2026-09-13). The row is a
@@ -187,8 +192,9 @@ export function mountTopbar(host: HTMLElement, deps: TopbarDeps): TopbarHandle {
 }
 
 /**
- * The strip before any view: the warning chip alone, in the right-hand group
- * it always occupies, or NOTHING when no client-local failure stands.
+ * The strip before any view: the warning chip alone, in the left group's
+ * status run it always occupies, or NOTHING when no client-local failure
+ * stands.
  */
 export function drawTopbarFailuresOnly(cc: WarningChipContext): HTMLElement | null {
   const chip = drawLocalWarningStrip(cc);
@@ -197,12 +203,23 @@ export function drawTopbarFailuresOnly(cc: WarningChipContext): HTMLElement | nu
   row.className = "topbar-row";
   const left = document.createElement("div");
   left.className = "topbar-left";
+  left.append(drawChipRun("topbar-status", [chip]));
   const center = document.createElement("div");
-  const right = document.createElement("div");
-  right.className = "topbar-right";
-  right.append(chip);
+  const right = drawChipRun("topbar-right", []);
   row.append(left, center, right);
   return row;
+}
+
+/**
+ * One run of chips: the right group, or the left group's status run. Every
+ * run carries `topbar-chips`, the one class the stylesheet spaces chips by, so
+ * a chip stands the same distance from its neighbors whichever run holds it.
+ */
+export function drawChipRun(className: string, chips: readonly HTMLElement[]): HTMLElement {
+  const run = document.createElement("div");
+  run.className = `${className} topbar-chips`;
+  run.append(...chips);
+  return run;
 }
 
 /** The whole strip, in its three groups. */
@@ -232,7 +249,18 @@ export function drawTopbarView(u: TopbarView, tc: TopbarContext): HTMLElement {
   // 2026-09-13). The session line rides the HEADING, which carries it whatever
   // the account state.
   bindAccountReveal(accountCell, accountView, tc);
-  left.append(accountCell);
+  // THE STATUS RUN FOLLOWS THE ACCOUNT (owner request, 2026-11-09): the
+  // remote-control chip, IMMEDIATELY LEFT of the persistent-wifi chip (owner
+  // ruling, 2026-10-31), then the warning chip, on every strip alike.
+  const status = drawChipRun("topbar-status", [
+    drawTopbarRemoteControl(requireMessage(u.remoteControl, "TopbarView.remoteControl"), tc),
+    drawTopbarPersistentWifi(requireMessage(u.persistentWifi, "TopbarView.persistentWifi"), tc),
+  ]);
+  // NOTHING IS DRAWN WHEN NOTHING IS WRONG: an empty warning list with no
+  // client-local failure standing yields no chip at all, not a quiet one.
+  const warnings = drawTopbarWarningStrip(requireMessage(u.warnings, "TopbarView.warnings"), tc);
+  if (warnings !== null) status.append(warnings);
+  left.append(accountCell, status);
 
   const center = drawTopbarHeading(
     u.title,
@@ -242,9 +270,6 @@ export function drawTopbarView(u: TopbarView, tc: TopbarContext): HTMLElement {
   // The heading opens the session line too, in every account state.
   bindHeadingSessionReveal(center, u.sessionLine, tc);
 
-  const right = document.createElement("div");
-  right.className = "topbar-right";
-
   // THE STRIP HAS ONE SHAPE AND ONLY ONE (topbar.proto, FIXED SCHEMA AND
   // ORGANIZATION; owner ruling 2026-09-13). There is no branch here: every
   // cell is drawn on every push and in the same slot, whether or not the
@@ -253,22 +278,12 @@ export function drawTopbarView(u: TopbarView, tc: TopbarContext): HTMLElement {
   // and the context chip and the warning strip carry the session-less facts
   // themselves, the chip's hover leading with the reason and the strip
   // carrying it as a line.
-  right.append(
+  const right = drawChipRun("topbar-right", [
     drawTopbarModelSelector(u.modelSelector, tc),
     drawTopbarEffortSelector(u.effortSelector, tc),
     drawTopbarPermissionModePicker(u.permissionModePicker, tc),
     drawTopbarContextChip(requireMessage(u.context, "TopbarView.context"), tc),
-    // The workspace's remote-control chip sits IMMEDIATELY LEFT of the
-    // persistent-wifi chip (owner ruling, 2026-10-31), on every strip alike.
-    drawTopbarRemoteControl(requireMessage(u.remoteControl, "TopbarView.remoteControl"), tc),
-    // The machine's persistent-wifi chip sits between the remote-control chip
-    // and the warning chip, on every strip alike.
-    drawTopbarPersistentWifi(requireMessage(u.persistentWifi, "TopbarView.persistentWifi"), tc),
-  );
-  // NOTHING IS DRAWN WHEN NOTHING IS WRONG: an empty warning list with no
-  // client-local failure standing yields no chip at all, not a quiet one.
-  const warnings = drawTopbarWarningStrip(requireMessage(u.warnings, "TopbarView.warnings"), tc);
-  if (warnings !== null) right.append(warnings);
+  ]);
 
   row.append(left, center, right);
   return row;

@@ -32,7 +32,7 @@ export interface TopbarPage {
   records(): string[];
 }
 
-/** One right-hand cell: its class, and its visible box's content edges. */
+/** One chip: its class, and its visible box's content edges. */
 export interface CellMeasure {
   cell: string;
   left: number;
@@ -52,8 +52,10 @@ export interface BoxMeasure {
 export interface StripMeasure {
   /** The account label's computed font size. */
   accountFontSize: string;
-  /** The right group's cells, in order. */
+  /** The right group's chips, in order. */
   cells: CellMeasure[];
+  /** The left group's status run's chips, in order. */
+  status: CellMeasure[];
   /** The strip's row. */
   row: BoxMeasure;
   /** The two flank groups. */
@@ -101,7 +103,7 @@ function topbarContext(): TopbarContext {
   return { ctx: appContext(), reveals: mountRevealLayer(host()), openLogin: () => undefined, localFailures: () => [] };
 }
 
-/** The strip's view: one of every right-hand cell, warnings included. */
+/** The strip's view: one of every chip, warnings included. */
 function stripView(session: boolean, summary: boolean) {
   return create(TopbarViewSchema, {
     ...(summary ? { title: { text: "ABC/fix the flaky reconnect backoff" } } : {}),
@@ -131,7 +133,7 @@ function stripView(session: boolean, summary: boolean) {
 }
 
 /**
- * The box a reader sees for one right-hand cell: the button inside a
+ * The box a reader sees for one chip: the button inside a
  * control's wrap, or the cell itself when it holds none. Its CONTENT edges,
  * inside padding and border, are where the cell's text or glyph is drawn.
  */
@@ -192,10 +194,14 @@ window.topbarPage = {
     strip.append(drawTopbarView(stripView(session, summary), tc));
     const account = header.querySelector(".topbar-account");
     const right = header.querySelector(".topbar-right");
-    if (account === null || right === null) throw new Error("the strip drew no account or no right group");
+    const status = header.querySelector(".topbar-status");
+    if (account === null || right === null || status === null) {
+      throw new Error("the strip drew no account, no right group or no status run");
+    }
     return {
       accountFontSize: getComputedStyle(account).fontSize,
       cells: [...right.children].map(measureCell),
+      status: [...status.children].map(measureCell),
       row: requiredBox(header, ".topbar-row"),
       left: requiredBox(header, ".topbar-left"),
       right: requiredBox(header, ".topbar-right"),

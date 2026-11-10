@@ -503,18 +503,19 @@
      of one thing, so they sit TIGHTER than the frame measure above; every
      rem the chips give back falls to the title's own clear space. */
   --topbar-chip-gap: 0.3rem;
-  /* THE RIGHT GROUP'S ONE SPACING (owner request, 2026-10-02: "30% closer and
-     uniform"). What a reader sees between two right-hand chips is the space
+  /* EVERY CHIP RUN'S ONE SPACING (owner request, 2026-10-02: "30% closer and
+     uniform"; since 2026-11-09 the left group's status run shares it). What a
+     reader sees between two chips of a run is the space
      from one chip's text (or glyph) to the next one's: the flex gap plus each
      side's inline inset and 1px border. Before, every cell carried its own
      padding (0.45rem on the controls, none on the wifi chip, a reserved slot
      before the warning chip), so that space was 21.2px between most chips and
-     13 and 21 either side of the wifi glyph. Now EVERY right-hand cell takes
-     the same inset from one rule keyed on the group, not on the cell's name
-     (see `.topbar-right ar-button` below), so a cell added later inherits it:
+     13 and 21 either side of the wifi glyph. Now EVERY cell of a run takes
+     the same inset from one rule keyed on the run, not on the cell's name
+     (see `.topbar-chips ar-button` below), so a cell added later inherits it:
      0.2rem + 2 x (0.3rem + 1px) = 14.8px, 30% under the old 21.2px. */
-  --topbar-right-chip-gap: 0.2rem;
-  --topbar-right-chip-inset: 0.3rem;
+  --topbar-chips-gap: 0.2rem;
+  --topbar-chips-inset: 0.3rem;
   /* THE PERSISTENT-WIFI CHIP'S PAINTS (owner request, 2026-10-02): the glyph
      is black; the disc behind it is white when the mode is off and green when
      it is on (green-500, a step brighter than `--ok`). The remote-control chip
@@ -8128,7 +8129,8 @@ html.webhost-gate #feed [data-row-kind="coldGate"]:has(.cold-gate[data-state="st
      three TRACKS and the inset at the strip's edges are the same measure by
      definition, so a change to one is a change to both and they cannot drift
      apart. The gap between CHIPS is a separate, tighter token — see
-     `--topbar-chip-gap` on `.topbar-left` / `.topbar-right`. */
+     `--topbar-chip-gap` on `.topbar-left` and `--topbar-chips-gap` on
+     `.topbar-chips`. */
   gap: var(--topbar-cell-gap);
   height: var(--topbar-h);
   padding: 0 var(--topbar-cell-gap);
@@ -8154,20 +8156,32 @@ html.webhost-gate #feed [data-row-kind="coldGate"]:has(.cold-gate[data-state="st
 .topbar-right {
   display: flex;
   align-items: center;
-  gap: var(--topbar-right-chip-gap);
   justify-self: end;
   min-width: 0;
 }
-/* EVERY RIGHT-HAND CELL'S INLINE INSET, from the group (owner request,
-   2026-10-02). The box a reader sees is the button inside a control's wrap,
-   or the cell itself when it holds no button (a no-session dash). Keyed on the group's structure rather than on cell
-   names, so the spacing between any two right-hand chips is the one measure
-   in `--topbar-right-chip-gap` and `--topbar-right-chip-inset`, and a cell
-   added to the group later is spaced the same with no rule of its own. The
-   cells' own rules set only `padding-block`, so nothing competes with this. */
-.topbar-right ar-button,
-.topbar-right > :not(:has(ar-button)) {
-  padding-inline: var(--topbar-right-chip-inset);
+/* THE LEFT GROUP'S STATUS RUN (owner request, 2026-11-09): the
+   remote-control, persistent-wifi and warning chips, after the account cell.
+   A run of its own rather than loose cells of the group, so the chip spacing
+   below reaches the chips and never the account cell. */
+.topbar-status {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+/* EVERY CHIP RUN'S SPACING: the right group and the status run alike. */
+.topbar-chips {
+  gap: var(--topbar-chips-gap);
+}
+/* EVERY CHIP'S INLINE INSET, from its run (owner request, 2026-10-02). The
+   box a reader sees is the button inside a control's wrap, or the cell itself
+   when it holds no button (a no-session dash). Keyed on the run's structure
+   rather than on cell names, so the spacing between any two chips is the one
+   measure in `--topbar-chips-gap` and `--topbar-chips-inset`, and a cell added
+   to a run later is spaced the same with no rule of its own. The cells' own
+   rules set only `padding-block`, so nothing competes with this. */
+.topbar-chips ar-button,
+.topbar-chips > :not(:has(ar-button)) {
+  padding-inline: var(--topbar-chips-inset);
 }
 /* THE MIDDLE TRACK: THE SPACE BETWEEN THE FLANKS, AND THE HEADING CENTERED IN
    IT. The track is whatever the two `auto` flanks left over, and the heading
@@ -8316,7 +8330,7 @@ html.webhost-gate #feed [data-row-kind="coldGate"]:has(.cold-gate[data-state="st
   cursor: pointer;
 }
 
-/* The three right-hand controls share one quiet button treatment, so a reader
+/* The topbar's chips share one quiet button treatment, so a reader
    learns the affordance once. THE SHARED TREATMENT IS THE BOX AND NOT THE
    COLOR — see the muted rule just below it. */
 .topbar-model-button,
@@ -8329,8 +8343,8 @@ html.webhost-gate #feed [data-row-kind="coldGate"]:has(.cold-gate[data-state="st
   background: transparent;
   border: 1px solid transparent;
   border-radius: 3px;
-  /* Block only: the inline inset is the right group's (`.topbar-right
-     button`). */
+  /* Block only: the inline inset is the chip run's (`.topbar-chips
+     ar-button`). */
   padding-block: 0.15rem;
   font: inherit;
   cursor: pointer;
@@ -8384,7 +8398,8 @@ html.webhost-gate #feed [data-row-kind="coldGate"]:has(.cold-gate[data-state="st
 
 .topbar-warnings {
   display: inline-flex;
-  /* THE SLOT'S SLACK FALLS AT THE STRIP'S EDGE, not between chips. The chip
+  /* THE SLOT'S SLACK FALLS AFTER THE CHIP, at the status run's end facing the
+     heading, not between chips. The chip
      used to sit at the slot's right, so the slack stood between it and the
      wifi chip and that gap read wider than every other (owner request,
      2026-10-02: the wifi chip centered between its neighbors). */
@@ -9148,7 +9163,7 @@ html.webhost-gate #feed [data-row-kind="coldGate"]:has(.cold-gate[data-state="st
    slot of the control it replaces — the model selector's or the mode picker's
    — so the strip keeps ONE shape whether or not the workspace
    has a session (topbar.proto, FIXED SCHEMA AND ORGANIZATION). The box below
-   is the right group's treatment minus the two declarations that would
+   is the chips' treatment minus the two declarations that would
    promise a click, which is the one difference these cells are entitled to.
    (The whole-view `hibernated` and `cold-gate` cells this rule used to cover
    were retired with their proto fields on 2026-09-13.) */
@@ -9156,7 +9171,7 @@ html.webhost-gate #feed [data-row-kind="coldGate"]:has(.cold-gate[data-state="st
 .topbar-effort[data-no-session],
 .topbar-effort[data-effort-unsupported],
 .topbar-mode[data-no-session] {
-  /* Block only: the inline inset is the right group's. */
+  /* Block only: the inline inset is the chip run's. */
   padding-block: 0.15rem;
   border: 1px solid transparent;
   border-radius: 3px;
@@ -9182,7 +9197,7 @@ html.webhost-gate #feed [data-row-kind="coldGate"]:has(.cold-gate[data-state="st
   color: var(--wifi-glyph);
 }
 /* THE GLYPH IS THE CONTROL (owner request, 2026-10-02): a click turns the
-   mode over. It takes the right group's quiet button box like its siblings,
+   mode over. It takes the chips' quiet button box like its siblings,
    but keeps the chip's color, which is the glyph's black. */
 .topbar-remote-control-button,
 .topbar-wifi-button {
