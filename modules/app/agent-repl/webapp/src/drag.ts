@@ -1,7 +1,9 @@
 /**
- * drag — THE ONE drag-to-reorder gesture the rail has, shared by every kind of
- * item it moves: a workspace row among its repository's subsections, a
- * subsection among its repository's, a repository among the repositories.
+ * drag — THE ONE drag-to-reorder gesture the webapp has, shared by every kind
+ * of item it moves: in the rail, a workspace row among its repository's
+ * subsections, a subsection among its repository's, a repository among the
+ * repositories, and a waiting merge in its repository's Merge Queue; in the
+ * feed, a waiting merge in a merge bubble's queue tab.
  *
  * THE ITEM ITSELF MOVES. Pressing an item's handle and moving past a small
  * threshold lifts it: a translucent copy follows the pointer, and the item
@@ -9,8 +11,8 @@
  * land, so the items around it shift out of the way as the pointer passes
  * their middles. Releasing drops it where the slot stands; Escape (or a lost
  * pointer) puts it back where it started. Near the top or bottom edge of the
- * region the item scrolls in (`DragSpec.scroller`) the region follows the
- * pointer.
+ * region the item scrolls in (`DragSpec.scroller`), when it names one, the
+ * region follows the pointer.
  *
  * LISTS NEST. A list may stand inside another's items (a subsection's rows
  * inside its repository's list), so each list answers the ZONE it claims
@@ -20,11 +22,11 @@
  * `DROP_TARGET_CLASS` while the slot stands in it, so a row dragged over a
  * subsection lights the subsection it would join.
  *
- * THE PAGE'S DRAWING IS HELD FROM THE MOMENT THE ITEM LIFTS
- * (`arrange.ts`'s `ArrangeHold`), because a roster push redraws a section whose
- * wire changed, and the slot with it. A drop that changes nothing, or a
- * cancelled drag, lets the hold go; a drop that changes something hands the
- * hold to the request it sends.
+ * THE DRAWING IS HELD FROM THE MOMENT THE ITEM LIFTS (`DragHost.hold`, the
+ * shared `hold.ts`), because a push redraws what the item was drawn in, and
+ * the slot with it. A drop that changes nothing, or a cancelled drag, lets the
+ * hold go; a drop that changes something hands the hold to the request it
+ * sends.
  *
  * A LIFTED BOX IS NEVER KEPT BY THE NEXT DRAW. The drag moves elements inside
  * a drawn section, so that section's DOM no longer matches the wire it was
@@ -40,17 +42,18 @@
  * a selection on, so it is the stylesheet that stops it.
  *
  * A DRAG IS NOT A CLICK. The click a browser fires after the release would
- * select the row or fold the section under the pointer, so the first click
+ * select the row, fold the section or jump to the workspace under the
+ * pointer, so the first click
  * after a drag is swallowed. It is forgotten at the next press, so a release
  * that fires no click cannot swallow a later, real one. The guard belongs to
  * the WINDOW the drag happens in and stands only until it has done its one
  * job (`swallowTheNextClick`).
  */
-import { queryAll, windowOf } from "../dom.js";
-import { nextFrame } from "../frame.js";
-import { log } from "../log.js";
-import { dragEdgeScroll } from "../scroll.js";
-import type { ArrangeContext } from "./context.js";
+import { queryAll, windowOf } from "./dom.js";
+import { nextFrame } from "./frame.js";
+import type { DrawingHold } from "./hold.js";
+import { log } from "./log.js";
+import { dragEdgeScroll } from "./scroll.js";
 
 /** How far the pointer moves, in px, before a press becomes a drag. */
 export const DRAG_THRESHOLD_PX = 4;
@@ -59,19 +62,29 @@ export const DRAG_THRESHOLD_PX = 4;
 export const DRAG_SCROLL_EDGE_PX = 28;
 
 /** The class the lifted item's slot wears while it travels. */
-export const DRAG_SLOT_CLASS = "sb-drag-slot";
+export const DRAG_SLOT_CLASS = "drag-slot";
 
 /** The class of the copy that follows the pointer. */
-export const DRAG_GHOST_CLASS = "sb-drag-ghost";
+export const DRAG_GHOST_CLASS = "drag-ghost";
 
 /** The class the page's root wears while a drag is in progress. */
-export const DRAGGING_CLASS = "sb-dragging";
+export const DRAGGING_CLASS = "dragging";
 
 /** The class a list's target wears while the slot stands in that list; see the file comment. */
-export const DROP_TARGET_CLASS = "sb-drop-target";
+export const DROP_TARGET_CLASS = "drop-target";
 
 /** The attribute a drawn box wears once a drag has rearranged it; see the file comment. */
 export const REARRANGED_ATTRIBUTE = "data-rearranged";
+
+/**
+ * What a surface lends its drags: the hold on its drawing, and the layer the
+ * copy that follows the pointer is drawn in, outside whatever the item
+ * scrolls in. The sidebar's `ArrangeContext` is one.
+ */
+export interface DragHost {
+  hold: Pick<DrawingHold<never>, "drag" | "cancel">;
+  layer: HTMLElement;
+}
 
 /** One kind of draggable item, and what a drop of it asks for. */
 export interface DragSpec {
@@ -81,14 +94,19 @@ export interface DragSpec {
   item: HTMLElement;
   /** The drawn box the drag rearranges, which the next draw must not keep. */
   box: HTMLElement;
-  /** The region the item scrolls in, which follows the pointer near its edges. */
-  scroller: HTMLElement;
+  /** The region the item scrolls in, which follows the pointer near its edges; none follows when unsaid. */
+  scroller?: HTMLElement;
   /** The lists the item may be dropped into, read when it lifts. */
   lists: () => HTMLElement[];
   /** LIST's items, in order: the elements the slot moves among. */
   itemsOf: (list: HTMLElement) => HTMLElement[];
   /** The box LIST claims the pointer over; LIST itself when unsaid. */
   zoneOf?: (list: HTMLElement) => HTMLElement;
+  /**
+   * Dress GHOST, the copy of ITEM that follows the pointer, for a layout it
+   * no longer stands in (a table row's columns); left as cloned when unsaid.
+   */
+  dressGhost?: (ghost: HTMLElement, item: HTMLElement) => void;
   /** What lights up while the slot stands in LIST; nothing when unsaid or null. */
   targetOf?: (list: HTMLElement) => HTMLElement | null;
   /**
@@ -129,7 +147,7 @@ export function swallowTheNextClick(win: Window): void {
  * A press on SPEC's handle: watch the pointer until it lifts the item past
  * the threshold, or lets go first and the press stays an ordinary click.
  */
-export function pressToDrag(arrange: ArrangeContext, spec: DragSpec, down: PointerEvent): void {
+export function pressToDrag(arrange: DragHost, spec: DragSpec, down: PointerEvent): void {
   const win = windowOf(spec.item);
   const startX = down.clientX;
   const startY = down.clientY;
@@ -177,7 +195,7 @@ interface Lifted {
 }
 
 /** Lift SPEC's item: hold the drawing, mark its box, draw the copy, turn the item into its slot. */
-function lift(arrange: ArrangeContext, spec: DragSpec, down: PointerEvent): Lifted {
+function lift(arrange: DragHost, spec: DragSpec, down: PointerEvent): Lifted {
   const { item } = spec;
   const parent = item.parentElement;
   if (parent === null) throw new Error(`invariant: a ${spec.kind} item is lifted from a list`);
@@ -188,7 +206,7 @@ function lift(arrange: ArrangeContext, spec: DragSpec, down: PointerEvent): Lift
   spec.box.setAttribute(REARRANGED_ATTRIBUTE, "true");
   // WHAT THE PRESS SELECTED BEFORE THE THRESHOLD goes; DRAGGING_CLASS keeps more from coming (file comment).
   item.ownerDocument.getSelection()?.removeAllRanges();
-  log.debug("lifted a sidebar item to drag it", { operation: "sidebar.drag.lift", context: { kind: spec.kind } });
+  log.debug("lifted an item to drag it", { operation: "drag.lift", context: { kind: spec.kind } });
 
   const rect = item.getBoundingClientRect();
   const ghost = item.cloneNode(true) as HTMLElement;
@@ -196,6 +214,7 @@ function lift(arrange: ArrangeContext, spec: DragSpec, down: PointerEvent): Lift
   // THE COPY IS NO ROW: whatever finds rows by their hook finds the item once.
   for (const hooked of [ghost, ...queryAll(ghost, "[data-roster-row]")]) hooked.removeAttribute("data-roster-row");
   ghost.style.width = `${rect.width}px`;
+  spec.dressGhost?.(ghost, item);
   const grabX = down.clientX - rect.left;
   const grabY = down.clientY - rect.top;
   arrange.layer.appendChild(ghost);
@@ -209,7 +228,7 @@ function lift(arrange: ArrangeContext, spec: DragSpec, down: PointerEvent): Lift
   let lifting = true;
   const scroll = (): void => {
     scrolling = false;
-    if (!lifting) return;
+    if (!lifting || scroller === undefined) return;
     const box = scroller.getBoundingClientRect();
     const step =
       pointerY < box.top + DRAG_SCROLL_EDGE_PX ? -8 : pointerY > box.bottom - DRAG_SCROLL_EDGE_PX ? 8 : 0;
@@ -258,7 +277,7 @@ function lift(arrange: ArrangeContext, spec: DragSpec, down: PointerEvent): Lift
     ghost.style.left = `${x - grabX}px`;
     ghost.style.top = `${y - grabY}px`;
     place(y);
-    if (!scrolling) {
+    if (!scrolling && scroller !== undefined) {
       scrolling = true;
       nextFrame(scroll);
     }
@@ -273,18 +292,18 @@ function lift(arrange: ArrangeContext, spec: DragSpec, down: PointerEvent): Lift
       if (list === null) throw new Error(`invariant: a dropped ${spec.kind} item is still in a list`);
       const before = nextItem(spec, list, item);
       if (list === origin.list && before === nextItemFrom(spec, list, origin.next)) {
-        log.debug("a sidebar item was dropped where it started", { operation: "sidebar.drag.unmoved", context: { kind: spec.kind } });
+        log.debug("an item was dropped where it started", { operation: "drag.unmoved", context: { kind: spec.kind } });
         arrange.hold.cancel();
         return;
       }
-      log.info("dropped a sidebar item in a new place", { operation: "sidebar.drag.drop", context: { kind: spec.kind } });
+      log.info("dropped an item in a new place", { operation: "drag.drop", context: { kind: spec.kind } });
       spec.dropped(list, before);
     },
     cancel(why: string): void {
       finish();
       origin.list.insertBefore(item, origin.next);
-      log.info("a sidebar drag was cancelled; the item is back where it started", {
-        operation: "sidebar.drag.cancel",
+      log.info("a drag was cancelled; the item is back where it started", {
+        operation: "drag.cancel",
         context: { kind: spec.kind, why },
       });
       arrange.hold.cancel();

@@ -56,7 +56,7 @@ import { sendArrangement } from "./arrange.js";
 import { openNamePopup } from "./name-popup.js";
 import { subsectionFoldKey, type SidebarContext } from "./context.js";
 import { drawRosterSectionFold, foldOnClick, sectionFold, trackDaemonFold } from "./section-fold.js";
-import { pressToDrag, type DragSpec } from "./drag.js";
+import { pressToDrag, type DragSpec } from "../drag.js";
 
 /** The class of one subsection. */
 export const SUBSECTION_CLASS = "sb-subsection";

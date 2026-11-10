@@ -17,7 +17,7 @@
  * ONE EXCEPTION, AND IT HOLDS NO TEXT AWAY FROM A READER: while a sidebar drag
  * carries an item, the page's root wears the drag's class and nothing selects
  * (owner request, 2026-10-23: a drag highlighted every row between pickup and
- * drop; src/sidebar/drag.ts). The class comes off at the drop.
+ * drop; src/drag.ts). The class comes off at the drop.
  */
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -51,7 +51,7 @@ import { withoutBlockComments } from "./source-text.js";
 import { ENTRY_LABEL_CLASS, ENTRY_PATH_CLASS, LABEL_LINK_CLASS } from "../src/feed/entries.js";
 import { TREE_LABEL_CLASS } from "../src/metaprompt-tree.js";
 import { createControl } from "../src/control.js";
-import { DRAGGING_CLASS } from "../src/sidebar/drag.js";
+import { DRAGGING_CLASS } from "../src/drag.js";
 import { ELLIPSIS_TRIM_PROPERTY } from "../src/feed/ellipsis-trim.js";
 import { REVEAL_HIGHLIGHT_MS } from "../src/feed/feed.js";
 
@@ -6158,7 +6158,7 @@ describe("the bubble content's right inset", () => {
 
 /**
  * A REPOSITORY'S SUBSECTIONS and THE DRAG that arranges them
- * (src/sidebar/subsections.ts, src/sidebar/drag.ts).
+ * (src/sidebar/subsections.ts, src/drag.ts).
  */
 describe("the repository's subsections and the drag", () => {
   it("folds a repository's subsections away with it, their list being its rows", () => {
@@ -6176,7 +6176,7 @@ describe("the repository's subsections and the drag", () => {
   });
 
   it("lights the subsection a dragged row would join, subtly", () => {
-    expect(declarationsOf("#ws-sidebar .sb-subsection.sb-drop-target")).toMatch(
+    expect(declarationsOf("#ws-sidebar .sb-subsection.drop-target")).toMatch(
       /background-color:\s*color-mix\(in srgb, var\(--card\) 50%, transparent\)/,
     );
   });
@@ -6206,12 +6206,12 @@ describe("the repository's subsections and the drag", () => {
   });
 
   it("lifts the drag's copy above the rail and out of the pointer's way", () => {
-    const ghost = declarationsOf("#ws-sidebar .sb-drag-ghost") ?? "";
+    const ghost = declarationsOf(".drag-ghost") ?? "";
     expect([/position:\s*fixed/.test(ghost), /pointer-events:\s*none/.test(ghost)]).toEqual([true, true]);
   });
 
   it("dims the dragged item's slot", () => {
-    expect(declarationsOf("#ws-sidebar .sb-drag-slot")).toMatch(/opacity:\s*0\.35/);
+    expect(declarationsOf(".drag-slot")).toMatch(/opacity:\s*0\.35/);
   });
 
   it("floats the name popup over the rail", () => {

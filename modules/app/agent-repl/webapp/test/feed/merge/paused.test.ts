@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { FeedMergeQueueSchema } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import { drawFeedMerge } from "../../../src/feed/merge/merge.js";
 import { drawPausedMark, PAUSED_MARK_CLASS } from "../../../src/feed/merge/paused.js";
-import { drawFeedMergeQueue } from "../../../src/feed/merge/queue.js";
+import { createFeedMergeQueueTable } from "../../../src/feed/merge/queue.js";
 import { harness, mergeRow, rowContext } from "../harness.js";
 import { mergeHead, TAB_STARTED_AT_MS } from "./fixtures.js";
 
@@ -33,7 +33,8 @@ describe("drawPausedMark: the one paused mark", () => {
     const h = harness();
     const rc = rowContext(h.ctx, mergeRow("m1"));
     const head = drawFeedMerge(mergeHead({ case: "update", stage: "waiting", paused: true }), rc);
-    const queue = drawFeedMergeQueue(
+    const queue = createFeedMergeQueueTable(rc);
+    queue.offer(
       create(FeedMergeQueueSchema, {
         paused: {},
         current: {
@@ -43,12 +44,11 @@ describe("drawPausedMark: the one paused mark", () => {
           status: { case: "waiting", value: { stageEnteredAtMs: TAB_STARTED_AT_MS } },
         },
       }),
-      rc,
     );
     const want = shapeOf(drawPausedMark("x", "paused"));
     expect([
       shapeOf(head.querySelector(`.${PAUSED_MARK_CLASS}`)),
-      shapeOf(queue.querySelector(`.${PAUSED_MARK_CLASS}`)),
+      shapeOf(queue.element.querySelector(`.${PAUSED_MARK_CLASS}`)),
     ]).toEqual([want, want]);
   });
 });

@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
-// The drag's click guard. See src/sidebar/drag.ts.
+// The drag's click guard. See src/drag.ts.
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { listAt, swallowTheNextClick } from "../../src/sidebar/drag.js";
-import { settleOwedDragClick } from "./harness.js";
-import { boxRect } from "../dom-rect.js";
+import { listAt, swallowTheNextClick } from "../src/drag.js";
+import { settleOwedDragClick } from "./drag-pointer.js";
+import { boxRect } from "./dom-rect.js";
 
 /** A second window, in an iframe of this page. */
 function otherWindow(): Window {

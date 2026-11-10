@@ -47,7 +47,7 @@ import {
   mergedGroupFacts,
 } from "../../src/sidebar/roster.js";
 import { HOLDS_CURRENT_ATTRIBUTE } from "../../src/sidebar/section-fold.js";
-import { REARRANGED_ATTRIBUTE } from "../../src/sidebar/drag.js";
+import { REARRANGED_ATTRIBUTE } from "../../src/drag.js";
 import {
   MERGE_QUEUE_CLASS,
   MERGE_QUEUE_PAUSED_ATTRIBUTE,

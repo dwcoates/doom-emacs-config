@@ -1,7 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
 import { create } from "@bufbuild/protobuf";
-import { cascadedValue, inRail } from "../stylesheet.js";
 import {
   SelectWorkspaceResponseSchema,
   type SelectWorkspaceRequest,
@@ -45,7 +44,6 @@ import {
   MERGE_QUEUE_SUSPENDED_ATTRIBUTE,
   MERGE_QUEUE_WAITING_CLASS,
   pausedText,
-  placeBeside,
   queueDrag,
   queueHoverText,
   queueCount,
@@ -388,16 +386,6 @@ describe("dragging a waiting merge", () => {
     const { body, lines, refs, rows, section } = drawnQueue(sc, ["w1", "w2"]);
     const spec = queueDrag(sc, body, lines[1].querySelector(".sb-mq-name"), refs as never);
     expect([spec?.item, spec?.box, spec?.scroller, spec?.lists(), spec?.itemsOf(body)]).toEqual([lines[1], section, rows, [body], lines]);
-  });
-
-  it.each([
-    { name: "ahead of the merge it was dropped before", before: 0, want: { case: "aheadOf", id: "w1" } },
-    { name: "behind the last merge when dropped at the end", before: null, want: { case: "behind", id: "w3" } },
-  ])("places a dropped merge $name", ({ before, want }) => {
-    const { sc } = daemon();
-    const { lines, refs } = drawnQueue(sc, ["w1", "w2", "w3"]);
-    const place = placeBeside(lines, lines[1], before === null ? null : lines[before], refs as never);
-    expect([place.case, place.value?.id]).toEqual([want.case, want.id]);
   });
 
   it("asks the daemon to move a dropped merge to its place", async () => {

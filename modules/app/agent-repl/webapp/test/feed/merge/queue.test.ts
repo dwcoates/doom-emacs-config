@@ -28,15 +28,22 @@ import { createAgentReplClient } from "../../../src/rpc/client.js";
 import { type AppContext } from "../../../src/rpc/context.js";
 import { scriptedAppContext, testAppContext } from "../../rpc/app-context.js";
 import {
-  drawFeedMergeQueue,
+  createFeedMergeQueueTable,
+  dressQueueGhost,
   drawFeedMergeQueueEntry,
-  MOVE_LABELS,
+  QUEUE_DRAG_KIND,
   QUEUE_PAUSED_TEXT,
+  QUEUE_STATUS_CLASS,
+  queueEntryDrag,
   selectQueueEntryWorkspace,
   workspaceHeaderText,
+  type FeedMergeQueueTable,
 } from "../../../src/feed/merge/queue.js";
 import { PAUSED_MARK_CLASS } from "../../../src/feed/merge/paused.js";
-import type { Control } from "../../../src/control.js";
+import { DRAG_SLOT_CLASS } from "../../../src/drag.js";
+import type { RowContext } from "../../../src/feed/renderers.js";
+import { boxRect } from "../../dom-rect.js";
+import { primaryPointer, settleOwedDragClick } from "../../drag-pointer.js";
 import { RecordingSink, WORKSPACE, mergeRow, rowContext } from "../harness.js";
 import { oneofArms } from "../../arms.js";
 
@@ -46,6 +53,8 @@ beforeEach(() => {
 });
 afterEach(() => {
   vi.useRealTimers();
+  settleOwedDragClick();
+  document.body.replaceChildren();
 });
 
 /** Every SelectWorkspace this scripted daemon received. */
@@ -80,9 +89,6 @@ function refusedWith(cause: { case: string; value: unknown }): SelectWorkspaceRe
     result: { case: "error", value: { cause } as never },
   });
 }
-
-/** An entry with no waiting merge to pass on either side. */
-const NO_MOVES = { up: false, down: false };
 
 /** The instant the page's clock reads when a snapshot is drawn. */
 const NOW_MS = 1_000_000;
@@ -131,7 +137,21 @@ function draw(answer: SelectWorkspaceResponse = SELECTED, queue: FeedMergeQueue 
   s: Scripted;
 } {
   const s = scripted(answer);
-  return { el: drawFeedMergeQueue(queue, rowContext(s.ctx, mergeRow("m1"))), s };
+  return { el: drawnTable(queue, rowContext(s.ctx, mergeRow("m1"))).table, s };
+}
+
+/** QUEUE drawn as the queue tab draws it, over RC: its panel, and the table in it. */
+function drawnTable(queue: FeedMergeQueue, rc: RowContext): { panel: FeedMergeQueueTable; table: HTMLElement } {
+  const panel = createFeedMergeQueueTable(rc);
+  panel.offer(queue);
+  return { panel, table: tableOf(panel) };
+}
+
+/** The table PANEL draws now. */
+function tableOf(panel: FeedMergeQueueTable): HTMLElement {
+  const table = panel.element.querySelector<HTMLElement>(":scope > .merge-queue");
+  if (table === null) throw new Error("the queue panel draws no table");
+  return table;
 }
 
 /** One drawn entry's cells' text, in column order. */
@@ -280,7 +300,7 @@ describe("drawFeedMergeQueueEntry: the target and each entry's standing", () => 
     const bare = entry("x", { case: "waiting" });
     bare.target = undefined;
     expect(() =>
-      drawFeedMergeQueueEntry(bare, rowContext(s.ctx, mergeRow("m1")), "behind", NO_MOVES),
+      drawFeedMergeQueueEntry(bare, rowContext(s.ctx, mergeRow("m1")), "behind"),
     ).toThrow(MalformedView);
   });
 
@@ -291,7 +311,7 @@ describe("drawFeedMergeQueueEntry: the target and each entry's standing", () => 
       label: { text: "x" },
     });
     expect(() =>
-      drawFeedMergeQueueEntry(bare, rowContext(s.ctx, mergeRow("m1")), "behind", NO_MOVES),
+      drawFeedMergeQueueEntry(bare, rowContext(s.ctx, mergeRow("m1")), "behind"),
     ).toThrow(MalformedView);
   });
 
@@ -302,7 +322,7 @@ describe("drawFeedMergeQueueEntry: the target and each entry's standing", () => 
       status: { case: "waiting", value: {} },
     });
     expect(() =>
-      drawFeedMergeQueueEntry(bare, rowContext(s.ctx, mergeRow("m1")), "behind", NO_MOVES),
+      drawFeedMergeQueueEntry(bare, rowContext(s.ctx, mergeRow("m1")), "behind"),
     ).toThrow(MalformedView);
   });
 });
@@ -475,7 +495,7 @@ describe("an arm this build cannot draw is a refusal, never a default", () => {
 
     let thrown: unknown;
     try {
-      drawFeedMergeQueueEntry(newer, rowContext(s.ctx, mergeRow("m1")), "behind", NO_MOVES);
+      drawFeedMergeQueueEntry(newer, rowContext(s.ctx, mergeRow("m1")), "behind");
     } catch (err) {
       thrown = err;
     }
@@ -578,25 +598,23 @@ const NOTHING_QUEUED = create(UpdateMergeQueueResponseSchema, {
   result: { case: "error", value: { cause: { case: "noSuchQueuedMerge", value: {} } } },
 });
 
-/** Draw a snapshot against a move-scripted daemon. */
+/** Draw a snapshot against a move-scripted daemon, its panel in the page. */
 function drawMove(
   answer: () => UpdateMergeQueueResponse = () => MOVED,
-  queue: FeedMergeQueue = snapshot(),
-): { el: HTMLElement; s: MoveScripted } {
+  queue: FeedMergeQueue = longQueue(),
+): { panel: FeedMergeQueueTable; table: HTMLElement; rc: RowContext; s: MoveScripted } {
   const s = moveScripted(answer);
-  return { el: drawFeedMergeQueue(queue, rowContext(s.ctx, mergeRow("m1"))), s };
+  const rc = rowContext(s.ctx, mergeRow("m1"));
+  const { panel, table } = drawnTable(queue, rc);
+  document.body.append(panel.element);
+  return { panel, table, rc, s };
 }
 
-/** The move control pointing MOVE on the row at PLACE, if it has one. */
-function moveControl(el: HTMLElement, place: string, move: "up" | "down"): Control | null {
-  return el.querySelector<Control>(`[data-queue-place="${place}"] [data-merge-move="${move}"]`);
-}
-
-/** Each request's action arm and the ref it names. */
+/** Each request's action arm, the merge it moves and the merge it is placed beside. */
 function movesOf(s: MoveScripted): unknown[] {
   return s.moves.map((r) =>
-    r.action.case === "moveUp" || r.action.case === "moveDown"
-      ? [r.action.case, r.action.value.workspace?.id, r.action.value.workspace?.dir]
+    r.action.case === "moveTo"
+      ? [r.action.value.workspace?.id, r.action.value.workspace?.dir, r.action.value.place.case, r.action.value.place.value?.id]
       : r.action.case,
   );
 }
@@ -613,189 +631,329 @@ function longQueue(): FeedMergeQueue {
   });
 }
 
-describe("every waiting row carries up and down chevrons left of its name", () => {
-  it("draws both chevrons in the workspace cell, before the name", () => {
-    const { el } = drawMove();
-    const cell = el.querySelector('[data-queue-place="current"] .merge-queue-workspace');
-    expect([...(cell?.children ?? [])].map((c) => c.className)).toEqual(["merge-queue-moves", "merge-queue-label"]);
-    expect(
-      [...(cell?.querySelectorAll("[data-merge-move]") ?? [])].map((c) => c.getAttribute("data-merge-move")),
-    ).toEqual(["up", "down"]);
+/** The row of TABLE named NAME. */
+function rowNamed(table: HTMLElement, name: string): HTMLElement {
+  const row = [...table.querySelectorAll<HTMLElement>(".merge-queue-entry")].find(
+    (el) => el.querySelector(".merge-queue-label")?.textContent === name,
+  );
+  if (row === undefined) throw new Error(`no queue row is named ${name}`);
+  return row;
+}
+
+/** The names of TABLE's rows, in order. */
+function namesOf(table: HTMLElement): string[] {
+  return [...table.querySelectorAll(".merge-queue-entry .merge-queue-label")].map((el) => el.textContent ?? "");
+}
+
+/** Lay TABLE's rows out 20px tall, top to bottom, from 20px down (jsdom lays nothing out). */
+function layOut(table: HTMLElement): void {
+  for (const row of table.querySelectorAll<HTMLElement>(".merge-queue-entry")) {
+    Object.defineProperty(row, "getBoundingClientRect", {
+      configurable: true,
+      value: () => {
+        const index = [...table.querySelectorAll(".merge-queue-entry")].indexOf(row);
+        return boxRect({ top: 20 + index * 20, height: 20, width: 300 });
+      },
+    });
+  }
+}
+
+/** Press ROW of TABLE and carry it to height TO, leaving it lifted. */
+function carry(table: HTMLElement, row: HTMLElement, to: number): void {
+  layOut(table);
+  const from = row.getBoundingClientRect().top + 10;
+  primaryPointer("pointerdown", row.querySelector(".merge-queue-label") ?? row, from);
+  primaryPointer("pointermove", window, from + 6);
+  primaryPointer("pointermove", window, to);
+}
+
+/** Drag ROW of TABLE to height TO and drop it there. */
+function dragTo(table: HTMLElement, row: HTMLElement, to: number): void {
+  carry(table, row, to);
+  primaryPointer("pointerup", window, to);
+}
+
+describe("a waiting row carries no move controls", () => {
+  it("draws the workspace cell as the name alone", () => {
+    const { table } = drawMove();
+    const cell = rowNamed(table, "mine").querySelector(".merge-queue-workspace");
+    expect([...(cell?.children ?? [])].map((c) => c.className)).toEqual(["merge-queue-label"]);
   });
 
-  it("draws the chevrons on another workspace's waiting row too", () => {
-    const { el } = drawMove();
-    expect([moveControl(el, "behind", "up"), moveControl(el, "behind", "down")].every((c) => c !== null)).toBe(true);
+  it("draws no control inside any row's jump", () => {
+    const { table } = drawMove();
+    expect(table.querySelectorAll(".merge-queue-line ar-button, .merge-queue-line button")).toHaveLength(0);
+  });
+});
+
+describe("a press on a waiting row drags it among the waiting", () => {
+  it("has no grip on the merge running", () => {
+    const { table, rc, panel } = drawMove();
+    const refs = new Map<HTMLElement, never>();
+    expect(queueEntryDrag(rc, arrangeOf(panel), table, rowNamed(table, "front"), refs)).toBeNull();
   });
 
-  it("draws an empty chevron slot on the row of the merge running", () => {
-    const { el } = drawMove();
-    const slot = el.querySelector('[data-queue-place="ahead"] .merge-queue-moves');
-    expect([slot !== null, slot?.children.length]).toEqual([true, 0]);
+  it("has no grip on the header", () => {
+    const { table, rc, panel } = drawMove();
+    expect(queueEntryDrag(rc, arrangeOf(panel), table, table.querySelector(".merge-queue-header"), new Map())).toBeNull();
   });
 
-  it("names each chevron for screen readers and hover", () => {
-    const { el } = drawMove();
-    const up = moveControl(el, "current", "up");
-    const down = moveControl(el, "current", "down");
-    expect([up?.getAttribute("aria-label"), up?.title, down?.getAttribute("aria-label"), down?.title]).toEqual([
-      MOVE_LABELS.up,
-      MOVE_LABELS.up,
-      MOVE_LABELS.down,
-      MOVE_LABELS.down,
+  it("has no grip on a refusal drawn in a row", () => {
+    const { table, rc, panel } = drawMove();
+    const row = rowNamed(table, "mine");
+    const refusal = document.createElement("div");
+    refusal.className = "refusal";
+    row.append(refusal);
+    const refs = new Map([[row, { id: "mine", dir: "/w/mine" }]]);
+    expect(queueEntryDrag(rc, arrangeOf(panel), table, refusal, refs as never)).toBeNull();
+  });
+
+  it("lifts the pressed row among the waiting rows of its table", () => {
+    const { table, rc, panel } = drawMove();
+    const waiting = ["next", "mine", "after"].map((name) => rowNamed(table, name));
+    const refs = new Map(waiting.map((row, i) => [row, { id: ["next", "mine", "after"][i], dir: "" }]));
+    const spec = queueEntryDrag(rc, arrangeOf(panel), table, waiting[1].querySelector(".merge-queue-label"), refs as never);
+    expect([spec?.kind, spec?.item, spec?.box, spec?.lists(), spec?.itemsOf(table), spec?.scroller]).toEqual([
+      QUEUE_DRAG_KIND,
+      waiting[1],
+      table,
+      [table],
+      waiting,
+      undefined,
     ]);
   });
 
-  it("draws no text in a chevron, so the row's text is its name", () => {
-    const { el } = drawMove();
-    expect(el.querySelector('[data-queue-place="current"] .merge-queue-workspace')?.textContent).toBe("mine");
+  it("leaves the row's slot dimmed in the table while it is carried", () => {
+    const { table } = drawMove();
+    const row = rowNamed(table, "after");
+    carry(table, row, 45);
+    expect([row.classList.contains(DRAG_SLOT_CLASS), namesOf(table)]).toEqual([true, ["front", "after", "next", "mine"]]);
+  });
+
+  it("never carries the merge running", () => {
+    const { table, s } = drawMove();
+    dragTo(table, rowNamed(table, "front"), 90);
+    expect([namesOf(table), s.moves]).toEqual([["front", "next", "mine", "after"], []]);
   });
 });
 
-describe("a chevron with no waiting merge on its side is disabled", () => {
-  const cases: { place: string; move: "up" | "down"; disabled: boolean; why: string }[] = [
-    { place: "ahead", move: "up", disabled: true, why: "the first waiting row's neighbor above is the merge running" },
-    { place: "ahead", move: "down", disabled: false, why: "a waiting row sits below the first waiting row" },
-    { place: "current", move: "up", disabled: false, why: "a waiting row sits above the middle row" },
-    { place: "current", move: "down", disabled: false, why: "a waiting row sits below the middle row" },
-    { place: "behind", move: "up", disabled: false, why: "a waiting row sits above the last row" },
-    { place: "behind", move: "down", disabled: true, why: "nothing sits below the last row" },
-  ];
-
-  it.each(cases)("$place's $move chevron: $why", ({ place, move, disabled }) => {
-    const { el } = drawMove(() => MOVED, longQueue());
-    const control = [...el.querySelectorAll<Control>(`[data-queue-place="${place}"] [data-merge-move="${move}"]`)].at(-1);
-    expect(control?.disabled).toBe(disabled);
-  });
-
-  it("disables both chevrons of a lone waiting merge", () => {
-    const queue = create(FeedMergeQueueSchema, { ahead: [], current: entry("mine", { case: "waiting" }), behind: [] });
-    const { el } = drawMove(() => MOVED, queue);
-    expect([moveControl(el, "current", "up")?.disabled, moveControl(el, "current", "down")?.disabled]).toEqual([true, true]);
-  });
-
-  it("sends nothing when a disabled chevron is clicked", async () => {
-    const { el, s } = drawMove();
-    moveControl(el, "behind", "down")?.click();
+describe("a dropped row asks UpdateMergeQueue to move its merge beside its new neighbor", () => {
+  it("places it ahead of the waiting merge it was dropped before, by the refs the queue served", async () => {
+    const { table, s } = drawMove();
+    dragTo(table, rowNamed(table, "after"), 45);
     await settle();
-    expect(s.moves).toEqual([]);
+    expect(movesOf(s)).toEqual([["after", "/w/after", "aheadOf", "next"]]);
   });
-});
 
-describe("a chevron asks UpdateMergeQueue to move its row's merge one place", () => {
-  it("asks move_up for the ref the queue served, verbatim", async () => {
-    const { el, s } = drawMove();
-    moveControl(el, "behind", "up")?.click();
+  it("places it behind the last waiting merge when dropped at the end", async () => {
+    const { table, s } = drawMove();
+    dragTo(table, rowNamed(table, "next"), 95);
     await settle();
-    expect(movesOf(s)).toEqual([["moveUp", "after", "/w/after"]]);
+    expect(movesOf(s)).toEqual([["next", "/w/next", "behind", "after"]]);
   });
 
   it("names the user as who asked", async () => {
-    const { el, s } = drawMove();
-    moveControl(el, "behind", "up")?.click();
+    const { table, s } = drawMove();
+    dragTo(table, rowNamed(table, "after"), 45);
     await settle();
     expect(s.moves.map((m) => m.requester?.asker.case)).toEqual(["user"]);
   });
 
-  it("asks move_down for the ref the queue served, verbatim", async () => {
-    const { el, s } = drawMove();
-    moveControl(el, "current", "down")?.click();
+  it("asks nothing when the row is dropped where it started", async () => {
+    const { table, s } = drawMove();
+    dragTo(table, rowNamed(table, "mine"), 71);
     await settle();
-    expect(movesOf(s)).toEqual([["moveDown", "mine", "/w/mine"]]);
+    expect(s.moves).toEqual([]);
   });
 
   it("does not jump to the row's workspace", async () => {
-    const { el, s } = drawMove();
-    moveControl(el, "behind", "up")?.click();
+    const { table, s } = drawMove();
+    dragTo(table, rowNamed(table, "after"), 45);
+    rowNamed(table, "after").querySelector<HTMLElement>(".merge-queue-line")?.click();
     await settle();
     expect(s.selects).toEqual([]);
   });
 
-  it("disables the chevron while the call is out", () => {
-    const { el } = drawMove();
-    const control = moveControl(el, "behind", "up");
-    control?.click();
-    expect(control?.disabled).toBe(true);
-  });
-
-  it("draws NOTHING on success — the snapshot is republished in its new order", async () => {
-    const { el } = drawMove();
-    moveControl(el, "behind", "up")?.click();
-    await settle();
-    expect(el.querySelector(".refusal")).toBeNull();
-  });
-
-  it("records the move at INFO with its workspace and direction", async () => {
+  it("records the move at INFO with its workspace and where it goes", async () => {
     const capture = captureLogRecords();
-    const { el } = drawMove();
-    moveControl(el, "behind", "up")?.click();
+    const { table } = drawMove();
+    dragTo(table, rowNamed(table, "after"), 45);
     await settle();
     const record = await forwardedRecord(capture, "merge.queue-move");
-    expect([record.level.case, record.context?.workspace, record.context?.move]).toEqual(["info", "after", "up"]);
+    expect([record.level.case, record.context?.workspace, record.context?.side, record.context?.anchor]).toEqual([
+      "info",
+      "after",
+      "aheadOf",
+      "next",
+    ]);
   });
 });
 
-describe("a refused or failed move answers at its row", () => {
-  it("draws a refusal at the row when the merge is no longer queued", async () => {
-    const { el } = drawMove(() => NOTHING_QUEUED);
-    moveControl(el, "current", "down")?.click();
+describe("the table is held while a row is carried and its move asked about", () => {
+  /** LONG's order with AFTER moved ahead of NEXT, as the daemon republishes it. */
+  function reordered(): FeedMergeQueue {
+    return create(FeedMergeQueueSchema, {
+      ahead: [
+        entry("front", { case: "merging", activeTab: { text: "tests", round: 1 } }),
+        entry("after", { case: "waiting" }),
+        entry("next", { case: "waiting" }),
+      ],
+      current: entry("mine", { case: "waiting" }),
+      behind: [],
+    });
+  }
+
+  it("keeps a snapshot pushed while the row is carried out of the table", () => {
+    const { panel, table } = drawMove();
+    carry(table, rowNamed(table, "after"), 45);
+    panel.offer(reordered());
+    expect(tableOf(panel)).toBe(table);
+  });
+
+  it("draws the newest snapshot once the move is answered", async () => {
+    const { panel, table } = drawMove();
+    carry(table, rowNamed(table, "after"), 45);
+    panel.offer(reordered());
+    primaryPointer("pointerup", window, 45);
     await settle();
-    const refusal = el.querySelector('[data-queue-place="current"] .refusal');
+    expect([tableOf(panel) === table, namesOf(tableOf(panel))]).toEqual([false, ["front", "after", "next", "mine"]]);
+  });
+
+  it("draws the table it was drawn from again when the drag is cancelled", () => {
+    const { panel, table } = drawMove();
+    carry(table, rowNamed(table, "after"), 45);
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    expect([tableOf(panel) === table, namesOf(tableOf(panel))]).toEqual([false, ["front", "next", "mine", "after"]]);
+  });
+
+  it("draws a snapshot pushed while nothing is carried at once", () => {
+    const { panel } = drawMove();
+    panel.offer(reordered());
+    expect(namesOf(tableOf(panel))).toEqual(["front", "after", "next", "mine"]);
+  });
+});
+
+describe("a refused or failed move answers above the table", () => {
+  /** The refusal drawn in PANEL's status line, if any. */
+  function statusRefusal(panel: FeedMergeQueueTable): Element | null {
+    return panel.element.querySelector(`:scope > .${QUEUE_STATUS_CLASS} .refusal`);
+  }
+
+  it("draws a refusal above the table when the merge is no longer queued", async () => {
+    const { panel, table } = drawMove(() => NOTHING_QUEUED);
+    dragTo(table, rowNamed(table, "after"), 45);
+    await settle();
+    const refusal = statusRefusal(panel);
     expect([refusal?.getAttribute("data-arm"), refusal?.textContent]).toEqual([
       "noSuchQueuedMerge",
       "this merge is no longer waiting on the queue",
     ]);
   });
 
-  it("records the refusal at WARN with its arm, workspace and direction", async () => {
+  it("puts the refused row back where the snapshot has it", async () => {
+    const { panel, table } = drawMove(() => NOTHING_QUEUED);
+    dragTo(table, rowNamed(table, "after"), 45);
+    await settle();
+    expect(namesOf(tableOf(panel))).toEqual(["front", "next", "mine", "after"]);
+  });
+
+  it("records the refusal at WARN with its arm, workspace and place", async () => {
     const capture = captureLogRecords();
-    const { el } = drawMove(() => NOTHING_QUEUED);
-    moveControl(el, "current", "down")?.click();
+    const { table } = drawMove(() => NOTHING_QUEUED);
+    dragTo(table, rowNamed(table, "after"), 45);
     await settle();
     const record = await forwardedRecord(capture, "merge.queue-move-refused");
-    expect([record.level.case, record.context?.arm, record.context?.workspace, record.context?.move]).toEqual([
+    expect([record.level.case, record.context?.arm, record.context?.workspace, record.context?.side, record.context?.anchor]).toEqual([
       "warn",
       "noSuchQueuedMerge",
-      "mine",
-      "down",
+      "after",
+      "aheadOf",
+      "next",
     ]);
   });
 
-  it("gives the chevron back after a refusal", async () => {
-    const { el } = drawMove(() => NOTHING_QUEUED);
-    const control = moveControl(el, "current", "down");
-    control?.click();
-    await settle();
-    expect(control?.disabled).toBe(false);
-  });
-
-  it("draws the transport refusal at the row when the daemon cannot be reached", async () => {
-    const { el } = drawMove(() => {
+  it("draws the transport refusal above the table when the daemon cannot be reached", async () => {
+    const { panel, table } = drawMove(() => {
       throw new ConnectError("socket is gone", Code.Unavailable);
     });
-    moveControl(el, "behind", "up")?.click();
+    dragTo(table, rowNamed(table, "after"), 45);
     await settle();
-    expect(el.querySelector('[data-queue-place="behind"] .refusal')?.getAttribute("data-arm")).toBe("transport");
+    expect(statusRefusal(panel)?.getAttribute("data-arm")).toBe("transport");
   });
 
-  it("records the transport failure at ERROR with its workspace and direction", async () => {
+  it("records the transport failure at ERROR with its workspace and place", async () => {
     const capture = captureLogRecords();
-    const { el } = drawMove(() => {
+    const { table } = drawMove(() => {
       throw new ConnectError("socket is gone", Code.Unavailable);
     });
-    moveControl(el, "behind", "up")?.click();
+    dragTo(table, rowNamed(table, "after"), 45);
     await settle();
     const record = await forwardedRecord(capture, "merge.queue-move-failed");
-    expect([record.level.case, record.context?.workspace, record.context?.move]).toEqual(["error", "after", "up"]);
+    expect([record.level.case, record.context?.workspace, record.context?.side]).toEqual(["error", "after", "aheadOf"]);
   });
 
-  it("gives the chevron back after a transport failure", async () => {
-    const { el } = drawMove(() => {
+  it("lets the table go after a transport failure", async () => {
+    const { panel, table } = drawMove(() => {
       throw new ConnectError("socket is gone", Code.Unavailable);
     });
-    const control = moveControl(el, "behind", "up");
-    control?.click();
+    dragTo(table, rowNamed(table, "after"), 45);
     await settle();
-    expect(control?.disabled).toBe(false);
+    panel.offer(create(FeedMergeQueueSchema, { ahead: [], current: entry("mine", { case: "waiting" }), behind: [] }));
+    expect(namesOf(tableOf(panel))).toEqual(["mine"]);
+  });
+
+  it("clears an earlier refusal when a later move takes", async () => {
+    let answer = NOTHING_QUEUED;
+    const { panel, table } = drawMove(() => answer);
+    dragTo(table, rowNamed(table, "after"), 45);
+    await settle();
+    answer = MOVED;
+    const redrawn = tableOf(panel);
+    dragTo(redrawn, rowNamed(redrawn, "after"), 45);
+    await settle();
+    expect(statusRefusal(panel)).toBeNull();
   });
 });
+
+describe("dressQueueGhost", () => {
+  /** A row drawn in a table, its three cells WIDTHS wide. */
+  function rowWithCells(widths: number[]): { row: HTMLElement; table: HTMLElement } {
+    const { table } = drawMove();
+    const row = rowNamed(table, "mine");
+    const cells = [...(row.querySelector(".merge-queue-line")?.children ?? [])];
+    cells.forEach((cell, i) => {
+      Object.defineProperty(cell, "getBoundingClientRect", { value: () => boxRect({ width: widths[i] }) });
+    });
+    return { row, table };
+  }
+
+  it("lays the copy out at the widths the row's cells were drawn at", () => {
+    const { row, table } = rowWithCells([120, 40, 80]);
+    const ghost = row.cloneNode(true) as HTMLElement;
+    dressQueueGhost(ghost, row, table);
+    expect([ghost.style.display, ghost.style.gridTemplateColumns]).toEqual(["grid", "120px 40px 80px"]);
+  });
+
+  it("lets the copy's line take the copy's columns", () => {
+    const { row, table } = rowWithCells([120, 40, 80]);
+    const ghost = row.cloneNode(true) as HTMLElement;
+    dressQueueGhost(ghost, row, table);
+    const line = ghost.querySelector<HTMLElement>(".merge-queue-line");
+    expect([line?.style.display, line?.style.gridTemplateColumns]).toEqual(["grid", "subgrid"]);
+  });
+
+  it("refuses a row that draws no line", () => {
+    const { table } = drawMove();
+    const bare = document.createElement("div");
+    expect(() => dressQueueGhost(bare.cloneNode() as HTMLElement, bare, table)).toThrow(/invariant/);
+  });
+});
+
+/** PANEL's drag context, as its table's drags are handed it. */
+function arrangeOf(panel: FeedMergeQueueTable) {
+  return {
+    hold: { offer: () => {}, drag: () => {}, cancel: () => {}, await: () => {}, settle: () => {}, reset: () => {}, holding: () => false },
+    layer: document.body,
+    status: panel.element,
+  };
+}

@@ -3,10 +3,10 @@
  *
  * Bundled by that test into one script and run in headless WebKit over the
  * REAL stylesheet, it draws a scrolling list of text rows and hands a press
- * on any of them to the REAL drag (src/sidebar/drag.ts).
+ * on any of them to the REAL drag (src/drag.ts).
  */
 import { createArrangeHold } from "../../src/sidebar/arrange.js";
-import { pressToDrag } from "../../src/sidebar/drag.js";
+import { pressToDrag } from "../../src/drag.js";
 import { installPageLogger } from "./page-log";
 import { takePageSelection } from "./page-selection";
 

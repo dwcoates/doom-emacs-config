@@ -31,16 +31,10 @@ interface Row {
 /** One entry's markup. */
 function entry(r: Row): string {
   const status = r.merging === true ? "merging" : "waiting";
-  const moves =
-    r.merging !== true
-      ? `<ar-button role="button" class="merge-queue-move" data-merge-move="up" aria-label="move up the merge queue"></ar-button>` +
-        `<ar-button role="button" class="merge-queue-move" data-merge-move="down" aria-label="move down the merge queue"></ar-button>`
-      : "";
   return `
     <div class="merge-queue-entry footer-columns" data-queue-place="${r.place}" data-queue-status="${status}">
       <ar-button role="button" class="merge-queue-line footer-columns" data-select="">
         <span class="merge-queue-workspace">
-          <span class="merge-queue-moves">${moves}</span>
           <span class="merge-queue-label">${r.name}</span>
         </span>
         <span class="merge-queue-target" title="/src/${r.target ?? "doom"}">${r.target ?? "doom"}</span>
@@ -75,8 +69,6 @@ interface Measured {
   rows: Box[];
   /** Every row's name, as drawn. */
   names: Box[];
-  /** Every move chevron, in row order, up before down. */
-  moves: Box[];
   /** The width "5hr 30m 30s" takes in the duration cell's own font. */
   floor: number;
   /** Every entry row's target cell's size, font and color. */
@@ -119,7 +111,6 @@ async function measure(page: Page, rows: readonly Row[]): Promise<Measured> {
       target: boxes(".merge-queue-target, [data-column='target']"),
       rows: boxes(".merge-queue-entry"),
       names: boxes(".merge-queue-label"),
-      moves: boxes(".merge-queue-move"),
       floor,
       targetLooks: looks(".merge-queue-target"),
       durationLooks: looks(".merge-queue-duration"),
@@ -225,21 +216,9 @@ describe("the merge queue tab's columns in WebKit", () => {
     expect(offsets.every((o) => o <= 1)).toBe(true);
   });
 
-  it("starts every row's name at one left edge, the merge running's beside an empty chevron slot", async () => {
+  it("starts every row's name at one left edge", async () => {
     const m = await measure(page, QUEUE);
     expect(distinct(m.names.map((b) => b.left)).length).toBe(1);
-  });
-
-  it("draws a waiting row's chevrons left of its name, up before down", async () => {
-    const m = await measure(page, QUEUE);
-    const [up, down] = m.moves;
-    expect([up.left < down.left, down.left + down.width <= m.names[1].left]).toEqual([true, true]);
-  });
-
-  it("keeps the chevrons inside their row's height", async () => {
-    const m = await measure(page, QUEUE);
-    const row = m.rows[1];
-    expect(m.moves.slice(0, 2).every((b) => b.top >= row.top && b.top + b.height <= row.top + row.height)).toBe(true);
   });
 
   it("draws every waiting row's duration in its target's size, font and color", async () => {

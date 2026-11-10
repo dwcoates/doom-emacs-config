@@ -18,8 +18,9 @@
  * of the roster credits it, so a hidden merge workspace is never named here,
  * and a click selects the credited workspace and opens the merge's bubble in
  * its feed. A WAITING MERGE IS DRAGGED to another place in its line
- * (`UpdateMergeQueueMoveTo`, owner request 2026-10-27), through the rail's one
- * drag gesture (`drag.ts`).
+ * (`UpdateMergeQueueMoveTo`, owner request 2026-10-27), through the webapp's
+ * one drag gesture (`drag.ts`), placed as the feed's queue tab places it
+ * (`merge-queue-move.ts`).
  */
 import { create } from "@bufbuild/protobuf";
 import type { RepositoryRef, WorkspaceRef } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
@@ -50,10 +51,11 @@ import { guardMalformed } from "../rpc/guard.js";
 import { updateMergeQueueRefusal } from "../rpc/merge-queue-refusal.js";
 import { userRequester } from "../rpc/requester.js";
 import { SELECT_WORKSPACE_EXPECTED_ARMS } from "../rpc/refusal.js";
+import { moveToAction, waitingMergeDrag } from "../merge-queue-move.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import type { SidebarContext } from "./context.js";
-import { pressToDrag, type DragSpec } from "./drag.js";
-import { selectWorkspace, tickElapsed, tickPaint } from "./row.js";
+import { pressToDrag, type DragSpec } from "../drag.js";
+import { selectWorkspace, tickElapsed } from "./row.js";
 import { sendHeld } from "./arrange.js";
 import { fireVerb, runVerb } from "./verbs.js";
 
@@ -229,47 +231,18 @@ export function queueDrag(
 ): DragSpec | null {
   const item = target?.closest<HTMLElement>(`.${MERGE_QUEUE_WAITING_CLASS}`) ?? null;
   if (item === null || item.parentElement !== body) return null;
-  const workspace = refs.get(item);
-  if (workspace === undefined) throw new Error("invariant: every waiting merge drawn names its workspace");
   const section = body.closest<HTMLElement>(".repo");
   const scroller = section?.querySelector<HTMLElement>(":scope > .rows") ?? null;
   if (section === null || scroller === null) throw new Error("invariant: a queue is drawn inside the Deploys section's rows");
-  const waiting = (): HTMLElement[] => [...body.children].filter((el): el is HTMLElement => refs.has(el as HTMLElement));
-  return {
+  return waitingMergeDrag({
     kind: "merge",
     item,
+    list: body,
     box: section,
     scroller,
-    lists: () => [body],
-    itemsOf: waiting,
-    dropped: (_list, before) => {
-      const place = placeBeside(waiting(), item, before, refs);
-      void moveInLine(sc, workspace, place);
-    },
-  };
-}
-
-/**
- * Where a merge dropped just before BEFORE (null: after every waiting merge)
- * goes, named by the waiting merge it now stands beside: ahead of BEFORE, or
- * behind the last of WAITING when it was dropped at the end.
- */
-export function placeBeside(
-  waiting: readonly HTMLElement[],
-  item: HTMLElement,
-  before: HTMLElement | null,
-  refs: ReadonlyMap<HTMLElement, WorkspaceRef>,
-): UpdateMergeQueueMoveTo["place"] {
-  const anchorOf = (el: HTMLElement): WorkspaceRef => {
-    const ref = refs.get(el);
-    if (ref === undefined) throw new Error("invariant: a waiting merge's anchor names its workspace");
-    return ref;
-  };
-  if (before !== null) return { case: "aheadOf", value: anchorOf(before) };
-  const others = waiting.filter((el) => el !== item);
-  const last = others[others.length - 1];
-  if (last === undefined) throw new Error("invariant: a merge dropped elsewhere than it started has a waiting merge beside it");
-  return { case: "behind", value: anchorOf(last) };
+    refs,
+    move: (workspace, place) => void moveInLine(sc, workspace, place),
+  });
 }
 
 /**
@@ -286,7 +259,7 @@ function moveInLine(sc: SidebarContext, workspace: WorkspaceRef, place: UpdateMe
     rpc: "UpdateMergeQueue",
     call: (client) =>
       client.updateMergeQueue({
-        action: { case: "moveTo", value: { workspace, place } },
+        action: moveToAction(workspace, place),
         requester: userRequester(),
       }),
     schema: UpdateMergeQueueResponseSchema,
