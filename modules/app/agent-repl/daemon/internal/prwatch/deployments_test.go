@@ -62,6 +62,7 @@ func TestAnOwnedPullRequestInAGithubMergeQueueIsToldAsADeployment(t *testing.T) 
 			// Arrange
 			r := newRig(t)
 			g := r.withGQL()
+			g.setFacts(prK.Number, factsJSON("main", nil))
 			tt.arrange(t, r, g)
 
 			// Act
@@ -88,6 +89,7 @@ func TestAQueuedPullRequestWhoseTimelineNamesNoJoiningIsRecordedAndNotTold(t *te
 	// Arrange
 	r := newRig(t)
 	g := r.withGQL()
+	g.setFacts(prK.Number, factsJSON("main", nil))
 	r.own(t)
 	queuedPR(g, "QUEUED", "", []remoteQueueEntry{entry(prK.Number, "QUEUED")})
 
