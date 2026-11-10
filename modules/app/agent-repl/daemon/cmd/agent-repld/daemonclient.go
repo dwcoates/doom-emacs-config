@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 	"agentrepl/proto/agentrepl/v1/agentreplv1connect"
 
 	"agent-repld/internal/h2cclient"
+	"agent-repld/internal/server"
 
 	"agent-repld/internal/daemonaddr"
 	"agent-repld/internal/stateroot"
@@ -76,14 +78,7 @@ func (r *successorRedirect) interceptor() connect.UnaryInterceptorFunc {
 	return func(next connect.UnaryFunc) connect.UnaryFunc {
 		return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
 			resp, err := next(ctx, req)
-			if err != nil || resp == nil {
-				return resp, err
-			}
-			msg, ok := resp.Any().(proto.Message)
-			if !ok {
-				return resp, err
-			}
-			successor := transferredTo(msg.ProtoReflect(), 0)
+			successor := successorOf(resp, err)
 			if successor == "" {
 				return resp, err
 			}
@@ -100,6 +95,28 @@ func (r *successorRedirect) interceptor() connect.UnaryInterceptorFunc {
 			return next(ctx, req)
 		}
 	}
+}
+
+// successorOf answers the successor a call's answer names as refused
+// transferring away, in either of its shapes: the typed arm of the answer, or
+// the error a verb with no such arm answers, whose metadata names it
+// (server.SuccessorHeader). "" when the call was no handover refusal.
+func successorOf(resp connect.AnyResponse, err error) string {
+	if err != nil {
+		var refused *connect.Error
+		if errors.As(err, &refused) {
+			return refused.Meta().Get(server.SuccessorHeader)
+		}
+		return ""
+	}
+	if resp == nil {
+		return ""
+	}
+	msg, ok := resp.Any().(proto.Message)
+	if !ok {
+		return ""
+	}
+	return transferredTo(msg.ProtoReflect(), 0)
 }
 
 // maxRefusalDepth bounds the search for a refusal in an answer: an answer's
